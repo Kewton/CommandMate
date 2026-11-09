@@ -61,7 +61,17 @@ const base = (repositoryId: string) => `/api/repositories/${encodeURIComponent(r
 const post = <T>(url: string, body: unknown) =>
   call<T>(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...screenRequestHeaders() }, body: JSON.stringify(body) });
 
-type OperationBody = { ok: true; operation: PromoteOperationView; item: MemItemView | null };
+/**
+ * What a reconcile found of the operation's own mark that is not exactly what was written
+ * (design §3.4: `body_differs`・`block_altered`), shown beside what was meant (PM review P3-2).
+ */
+export interface PromoteFindingView {
+  reason: 'body_differs' | 'block_altered';
+  found: string | null;
+  intended: string;
+}
+
+type OperationBody = { ok: true; operation: PromoteOperationView; item: MemItemView | null; finding?: PromoteFindingView };
 
 export const promoteApi = {
   list: (repositoryId: string, branch: string) => call<PromoteListBody>(`${base(repositoryId)}?branch=${encodeURIComponent(branch)}`),
@@ -82,6 +92,9 @@ export const promoteApi = {
     post<{ ok: true }>(`${base(repositoryId)}/${encodeURIComponent(itemId)}/confirm-reflected`, { worktreeId, ifVersion }),
   reconcile: (repositoryId: string, operationId: string) =>
     post<OperationBody>(`${base(repositoryId)}/operations/${encodeURIComponent(operationId)}/reconcile`, {}),
+  /** P3-2: a person compared both and judged it written (`unknown → succeeded`, `decided_by='human'`). */
+  acceptFound: (repositoryId: string, operationId: string, reason: PromoteFindingView['reason']) =>
+    post<OperationBody>(`${base(repositoryId)}/operations/${encodeURIComponent(operationId)}/accept-found`, { ifState: 'unknown', ifReason: reason }),
   abandon: (repositoryId: string, operationId: string) =>
     post<OperationBody>(`${base(repositoryId)}/operations/${encodeURIComponent(operationId)}/abandon`, { ifState: 'unknown' }),
   settleTransition: (repositoryId: string, operationId: string, worktreeId: string, ifVersion: number, acknowledgeDiff: boolean) =>

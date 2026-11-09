@@ -244,3 +244,36 @@ export function reconcileDocBlock(
   }
   return findDocBlock(content, operationId, bodySha);
 }
+
+/** The most of a found block the screen is shown (design §3.4, PM review P3-2). */
+export const DOC_EXCERPT_MAX_CHARS = 64 * 1024;
+
+/**
+ * What the document holds around the operation's marks, for a person to compare with
+ * what was meant to be written (design §3.4: `block_altered` shows both). From the line
+ * of the first mark of the operation to the end of the line of its last mark (to the end
+ * of the content when no end mark follows), at most {@link DOC_EXCERPT_MAX_CHARS}. Null
+ * when the document cannot be read or holds no mark of the operation. Reads only.
+ */
+export function readDocBlockExcerpt(root: string, rel: string, operationId: string): string | null {
+  const checked = checkDocPath(root, rel);
+  if (!checked.ok) return null;
+  let content: string;
+  try {
+    content = readFileSync(checked.abs, 'utf8');
+  } catch {
+    return null;
+  }
+  const marks = [`<!-- ${BLOCK}:begin op=${operationId} `, endLine(operationId)];
+  const firsts = marks.map((mark) => content.indexOf(mark)).filter((at) => at >= 0);
+  if (firsts.length === 0) return null;
+  const first = Math.min(...firsts);
+  const start = content.lastIndexOf('\n', first - 1) + 1;
+  const lastEnd = content.lastIndexOf(endLine(operationId));
+  let end = content.length;
+  if (lastEnd >= first) {
+    const lineEnd = content.indexOf('\n', lastEnd);
+    if (lineEnd >= 0) end = lineEnd + 1;
+  }
+  return content.slice(start, end).slice(0, DOC_EXCERPT_MAX_CHARS);
+}

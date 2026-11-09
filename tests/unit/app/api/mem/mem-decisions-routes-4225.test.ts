@@ -49,6 +49,7 @@ import { POST as postApprove } from '@/app/api/repositories/[id]/mem/decisions/[
 import { POST as postConfirm } from '@/app/api/repositories/[id]/mem/decisions/[itemId]/confirm-reflected/route';
 import { POST as postReconcile } from '@/app/api/repositories/[id]/mem/decisions/operations/[opId]/reconcile/route';
 import { POST as postAbandon } from '@/app/api/repositories/[id]/mem/decisions/operations/[opId]/abandon/route';
+import { POST as postAcceptFound } from '@/app/api/repositories/[id]/mem/decisions/operations/[opId]/accept-found/route';
 import { POST as postSettle } from '@/app/api/repositories/[id]/mem/decisions/operations/[opId]/settle-transition/route';
 
 let db: Database.Database;
@@ -79,6 +80,7 @@ describe('the promote routes', () => {
     ['confirm-reflected', () => postConfirm(post({ worktreeId: 'w', ifVersion: 1 }), itemParams)],
     ['reconcile', () => postReconcile(post({}), opParams)],
     ['abandon', () => postAbandon(post({ ifState: 'unknown' }), opParams)],
+    ['accept-found', () => postAcceptFound(post({ ifState: 'unknown', ifReason: 'body_differs' }), opParams)],
     ['settle-transition', () => postSettle(post({ worktreeId: 'w', ifVersion: 1 }), opParams)],
   ])('%s without the screen mark → 403 screen_only, nothing written', async (_name, call) => {
     const response = await call();

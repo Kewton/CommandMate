@@ -60,10 +60,13 @@ const PREVIEW = {
 let calls: Array<{ method: string; url: string; headers: Record<string, string>; body: unknown }>;
 /** Added to the list's body (5-2b P2-2: the unsettled operations of a closed or purged item). */
 let listExtra: Record<string, unknown>;
+/** Answers a POST instead of the default (PM review): undefined → the default answer. */
+let postAnswer: ((url: string, body: unknown) => Promise<{ status: number; body: unknown } | undefined>) | undefined;
 
 beforeEach(() => {
   calls = [];
   listExtra = {};
+  postAnswer = undefined;
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -85,6 +88,8 @@ beforeEach(() => {
         }),
       } as Response;
     }
+    const answered = postAnswer ? await postAnswer(url, init?.body ? JSON.parse(String(init.body)) : null) : undefined;
+    if (answered) return { ok: answered.status < 300, status: answered.status, json: async () => answered.body } as Response;
     if (url.endsWith('/preview')) return { ok: true, status: 201, json: async () => ({ ok: true, preview: PREVIEW }) } as Response;
     return { ok: true, status: 200, json: async () => ({ ok: true, operation: { id: 'op1', state: 'succeeded' }, item: null }) } as Response;
   }) as unknown as typeof fetch;
@@ -241,5 +246,223 @@ describe('DecisionPromotePanel', () => {
       await waitFor(() => expect(posts()).toHaveLength(1));
       expect(posts()[0].url).toBe('/api/repositories/repo/mem/decisions/operations/op-unknown/reconcile');
     });
+  });
+});
+
+describe('PM review (2026-11-09): what is approved is what is shown', () => {
+  const WORKTREES = [
+    { id: 'wt', path: '/w', name: 'wt', branch: 'feature/x' },
+    { id: 'wt2', path: '/w2', name: 'wt2', branch: 'feature/x' },
+  ];
+  const DOC_PREVIEW = {
+    ...PREVIEW,
+    destination: {
+      kind: 'worktree_doc',
+      repositoryId: 'repo',
+      branch: 'feature/x',
+      worktreeId: 'wt',
+      worktreeIncarnation: 'inc',
+      path: 'docs/d.md',
+      head: { branch: 'feature/x', commonDir: '/c' },
+    },
+    poster: null,
+  };
+  const quoted = (id: string, quote: string) => ({ ...view(id, 'open'), quote, quoteAt: '2026-11-09T00:00:00.000Z' });
+  const posts = () => calls.filter((call) => call.method === 'POST');
+
+  /** Select the item and make its preview; returns the preview's area. */
+  async function openPreview(itemId = 'd-open'): Promise<HTMLElement> {
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    fireEvent.click(await screen.findByTestId(`decision-select-${itemId}`));
+    const card = screen.getByTestId(`decision-${itemId}`);
+    const buttons = await waitFor(() => {
+      const all = card.querySelectorAll('button');
+      expect(all.length).toBeGreaterThan(1);
+      return all;
+    });
+    fireEvent.click(buttons[buttons.length - 1]);
+    return screen.findByTestId(`decision-preview-${itemId}`);
+  }
+
+  it('P2: the preview shows the resolved repository and number, and the account that posts', async () => {
+    await openPreview();
+    expect(screen.getByTestId('decision-preview-destination-d-open')).toHaveTextContent('Issue github.com/o/r#1');
+    expect(screen.getByTestId('decision-preview-poster-d-open')).toHaveTextContent('a');
+  });
+
+  it('P2: a document’s preview shows the worktree, its branch and the path (no poster)', async () => {
+    postAnswer = async (url) => (url.endsWith('/preview') ? { status: 201, body: { ok: true, preview: DOC_PREVIEW } } : undefined);
+    await openPreview();
+    expect(screen.getByTestId('decision-preview-destination-d-open')).toHaveTextContent('wt (feature/x): docs/d.md');
+    expect(screen.queryByTestId('decision-preview-poster-d-open')).toBeNull();
+  });
+
+  it('P2: changing the worktree drops the preview; nothing can be approved from it', async () => {
+    listExtra = { worktrees: WORKTREES };
+    await openPreview();
+    fireEvent.change(screen.getByTestId('decision-worktree'), { target: { value: 'wt2' } });
+    await waitFor(() => expect(screen.queryByTestId('decision-preview-d-open')).toBeNull());
+    expect(screen.queryByRole('button', { name: '承認して書く' })).toBeNull();
+    expect(posts().filter((call) => call.url.endsWith('/approve'))).toHaveLength(0);
+  });
+
+  it('P2: changing the effect drops the preview', async () => {
+    await openPreview();
+    fireEvent.change(screen.getByDisplayValue('仕様を変える決定（書けたら記録済み・反映待ち）'), { target: { value: 'record_only' } });
+    await waitFor(() => expect(screen.queryByTestId('decision-preview-d-open')).toBeNull());
+  });
+
+  it('P2: ticking the quote’s check drops a preview made without it', async () => {
+    listExtra = { decisions: [{ item: quoted('d-open', '原文の一節'), unreflected: false, operations: [] }] };
+    await openPreview();
+    fireEvent.click(screen.getByRole('checkbox', { name: '引用を原文と照らして確かめた' }));
+    await waitFor(() => expect(screen.queryByTestId('decision-preview-d-open')).toBeNull());
+  });
+
+  it('P2: an answer of a preview asked before the worktree changed is not shown', async () => {
+    listExtra = { worktrees: WORKTREES };
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    postAnswer = async (url) => {
+      if (!url.endsWith('/preview')) return undefined;
+      await gate;
+      return { status: 201, body: { ok: true, preview: PREVIEW } };
+    };
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    fireEvent.click(await screen.findByTestId('decision-select-d-open'));
+    const buttons = screen.getByTestId('decision-d-open').querySelectorAll('button');
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(posts().filter((call) => call.url.endsWith('/preview'))).toHaveLength(1));
+    fireEvent.change(screen.getByTestId('decision-worktree'), { target: { value: 'wt2' } });
+    release();
+    // The answer came (the button is enabled again) and was not shown.
+    await waitFor(() => expect(buttons[buttons.length - 1]).not.toBeDisabled());
+    expect(screen.queryByTestId('decision-preview-d-open')).toBeNull();
+  });
+
+  it('P2 (control): nothing changed → the preview stays and is approved as shown', async () => {
+    listExtra = { worktrees: WORKTREES };
+    await openPreview();
+    fireEvent.click(screen.getByRole('button', { name: '承認して書く' }));
+    await waitFor(() => expect(posts().filter((call) => call.url.endsWith('/approve'))).toHaveLength(1));
+  });
+
+  it('P3-1: the quote is shown beside its check, and the check does not follow to another item', async () => {
+    listExtra = {
+      decisions: [
+        { item: quoted('d-a', '項目 A の引用'), unreflected: false, operations: [] },
+        { item: quoted('d-b', '項目 B の引用'), unreflected: false, operations: [] },
+      ],
+    };
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    fireEvent.click(await screen.findByTestId('decision-select-d-a'));
+    expect(screen.getByTestId('decision-quote-d-a')).toHaveTextContent('項目 A の引用');
+    fireEvent.click(screen.getByRole('checkbox', { name: '引用を原文と照らして確かめた' }));
+    fireEvent.click(screen.getByTestId('decision-select-d-b'));
+    expect(screen.getByTestId('decision-quote-d-b')).toHaveTextContent('項目 B の引用');
+    expect(screen.getByRole('checkbox', { name: '引用を原文と照らして確かめた' })).not.toBeChecked();
+    const buttons = screen.getByTestId('decision-d-b').querySelectorAll('button');
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(posts().filter((call) => call.url.endsWith('/preview'))).toHaveLength(1));
+    expect(posts()[0].body).toMatchObject({ quoteConfirmed: false });
+  });
+
+  it('P3-1 (control): the check ticked on the item itself is sent with its preview', async () => {
+    listExtra = { decisions: [{ item: quoted('d-a', '項目 A の引用'), unreflected: false, operations: [] }] };
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    fireEvent.click(await screen.findByTestId('decision-select-d-a'));
+    fireEvent.click(screen.getByRole('checkbox', { name: '引用を原文と照らして確かめた' }));
+    const buttons = screen.getByTestId('decision-d-a').querySelectorAll('button');
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(posts().filter((call) => call.url.endsWith('/preview'))).toHaveLength(1));
+    expect(posts()[0].body).toMatchObject({ quoteConfirmed: true });
+  });
+
+  const pendingOp = (id: string, itemId: string) => ({
+    id,
+    itemId,
+    state: 'succeeded',
+    destinationKind: 'issue_comment',
+    destination: PREVIEW.destination,
+    effect: 'spec',
+    resultRef: null,
+    transitionPending: true,
+    transitionReason: 'version_conflict',
+    concurrentEdit: false,
+    unknownReason: null,
+    decidedBy: null,
+    approvedAt: '2026-11-09T00:00:00.000Z',
+    settledAt: null,
+  });
+
+  it('P3-1: the difference checked for one operation is not sent with another’s "treat as recorded"', async () => {
+    listExtra = {
+      decisions: [
+        { item: view('d-a', 'open'), unreflected: false, operations: [pendingOp('op-a', 'd-a')] },
+        { item: view('d-b', 'open'), unreflected: false, operations: [pendingOp('op-b', 'd-b')] },
+      ],
+    };
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    const a = await screen.findByTestId('decision-operation-op-a');
+    fireEvent.click(a.querySelector('input[type="checkbox"]')!);
+    const b = screen.getByTestId('decision-operation-op-b');
+    expect(b.querySelector('input[type="checkbox"]')).not.toBeChecked();
+    fireEvent.click(b.querySelector('button')!);
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0].url).toContain('/operations/op-b/settle-transition');
+    expect(posts()[0].body).toMatchObject({ acknowledgeDiff: false });
+  });
+
+  it('P3-1 (control): the difference checked for the operation itself is sent with it', async () => {
+    listExtra = { decisions: [{ item: view('d-a', 'open'), unreflected: false, operations: [pendingOp('op-a', 'd-a')] }] };
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    const a = await screen.findByTestId('decision-operation-op-a');
+    fireEvent.click(a.querySelector('input[type="checkbox"]')!);
+    fireEvent.click(a.querySelector('button')!);
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0].body).toMatchObject({ acknowledgeDiff: true });
+  });
+
+  const unknownOp = (id: string, unknownReason: string) => ({ ...pendingOp(id, 'd-a'), state: 'unknown', transitionPending: false, transitionReason: null, unknownReason });
+
+  it('P3-2: body_differs → a warning; the reconcile shows what was found beside what was meant; "treat as written" sends the reason shown', async () => {
+    listExtra = { decisions: [{ item: view('d-a', 'open'), unreflected: false, operations: [unknownOp('op-u', 'body_differs')] }] };
+    postAnswer = async (url) =>
+      url.endsWith('/reconcile')
+        ? {
+            status: 200,
+            body: {
+              ok: true,
+              operation: unknownOp('op-u', 'body_differs'),
+              item: null,
+              finding: { reason: 'body_differs', found: '見つかった本文（編集後）', intended: '承認した本文' },
+            },
+          }
+        : undefined;
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    const line = await screen.findByTestId('decision-operation-op-u');
+    expect(screen.getByTestId('decision-mark-found-op-u')).toHaveTextContent('もう一度書かれます');
+    expect(screen.queryByRole('button', { name: '書かれていたとして扱う' })).toBeNull();
+    fireEvent.click(line.querySelector('button')!);
+    const finding = await screen.findByTestId('decision-finding-op-u');
+    expect(finding).toHaveTextContent('見つかった本文（編集後）');
+    expect(finding).toHaveTextContent('承認した本文');
+    fireEvent.click(screen.getByRole('button', { name: '書かれていたとして扱う' }));
+    await waitFor(() => expect(posts().filter((call) => call.url.endsWith('/accept-found'))).toHaveLength(1));
+    const accept = posts().find((call) => call.url.endsWith('/accept-found'))!;
+    expect(accept.url).toBe('/api/repositories/repo/mem/decisions/operations/op-u/accept-found');
+    expect(accept.body).toEqual({ ifState: 'unknown', ifReason: 'body_differs' });
+    expect(accept.headers[SCREEN_CLIENT_HEADER]).toBe('screen');
+  });
+
+  it('P3-2 (control): an unknown of another reason shows no warning and no "treat as written", even after the reconcile', async () => {
+    listExtra = { decisions: [{ item: view('d-a', 'open'), unreflected: false, operations: [unknownOp('op-u', 'not_found_yet')] }] };
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    const line = await screen.findByTestId('decision-operation-op-u');
+    expect(screen.queryByTestId('decision-mark-found-op-u')).toBeNull();
+    fireEvent.click(line.querySelector('button')!);
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(screen.queryByTestId('decision-finding-op-u')).toBeNull();
+    expect(screen.queryByRole('button', { name: '書かれていたとして扱う' })).toBeNull();
   });
 });
