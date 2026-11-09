@@ -394,6 +394,8 @@ export function abandonPromoteOperation(db: Database.Database, operationId: stri
 /**
  * An attempt of another boot, or `in_flight` past {@link PROMOTE_ATTEMPT_STALE_MS}, is
  * unknown (design §3.2's last row). Settled here, in a write's synchronous stretch.
+ * Returns how many operations this call made unknown (§11.1 I2: each CAS result is counted,
+ * not the attempts it read).
  */
 export function settleStalePromoteAttempts(db: Database.Database, bootId: string, now: number): number {
   const stale = db
@@ -401,8 +403,11 @@ export function settleStalePromoteAttempts(db: Database.Database, bootId: string
       `SELECT operation_id FROM mem_promote_attempts WHERE ended_at IS NULL AND (boot_id != ? OR started_at < ?)`
     )
     .all(bootId, now - PROMOTE_ATTEMPT_STALE_MS) as Array<{ operation_id: string }>;
-  for (const row of stale) settlePromoteOperation(db, row.operation_id, { state: 'unknown', reason: 'stale_attempt' }, now);
-  return stale.length;
+  let settled = 0;
+  for (const row of stale) {
+    if (settlePromoteOperation(db, row.operation_id, { state: 'unknown', reason: 'stale_attempt' }, now)) settled += 1;
+  }
+  return settled;
 }
 
 /**

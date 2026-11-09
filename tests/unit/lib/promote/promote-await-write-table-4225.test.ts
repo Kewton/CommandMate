@@ -12,7 +12,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import {
+  casRowsWithoutResult,
   conditionalWriteViolations,
+  discardedCasResults,
   countRows,
   diffCounts,
   documentedCounts,
@@ -67,6 +69,12 @@ describe('the table of the design is the service', () => {
   it('I2: every UPDATE of an operation is conditional on its state; the transition on the transition as read, its reason on the claim', () => {
     expect(conditionalWriteViolations(STORE)).toEqual([]);
   });
+
+  it('I2 (5-2e): no caller throws away the result of a CAS (service and store), and every CAS row of the table says the caller sees it', () => {
+    expect(discardedCasResults(SERVICE)).toEqual([]);
+    expect(discardedCasResults(STORE)).toEqual([]);
+    expect(casRowsWithoutResult(DESIGN)).toEqual([]);
+  });
 });
 
 describe('(self-test) the checks fail on what they forbid', () => {
@@ -115,10 +123,39 @@ describe('(self-test) the checks fail on what they forbid', () => {
     expect(conditionalWriteViolations(noState)).toEqual(['no state condition: id = ?']);
   });
 
+  it('I2 (5-2e): the settle’s result thrown away (the 5-2e P2 shape), a CAS under void or awaited alone → reported', () => {
+    const settleLine = SERVICE.split('\n').find((line) => line.includes('const own = settleOrUnknown(db, claimed.operationId, settle, now'))!;
+    const dropped = copyOf(SERVICE, settleLine, settleLine.replace('const own = ', '') + '\n    const own = true;');
+    expect(discardedCasResults(dropped)).toEqual(['promoteApprove|settleOrUnknown']);
+    const voided = copyOf(
+      SERVICE,
+      "if (!abandonPromoteOperation(db, operationId, deps.now?.() ?? Date.now())) return promoteError('state_forbids');",
+      'void abandonPromoteOperation(db, operationId, 0);\n  await (finishPromoteTransition(db, operationId, \'c\', { moved: true }, 0));',
+      'copy2.ts'
+    );
+    expect(discardedCasResults(voided)).toEqual(['promoteAbandon|abandonPromoteOperation', 'promoteAbandon|finishPromoteTransition']);
+    const store = copyOf(
+      STORE,
+      "if (settlePromoteOperation(db, row.operation_id, { state: 'unknown', reason: 'stale_attempt' }, now)) settled += 1;",
+      "settlePromoteOperation(db, row.operation_id, { state: 'unknown', reason: 'stale_attempt' }, now);",
+      'copy3.ts'
+    );
+    expect(discardedCasResults(store)).toEqual(['settleStalePromoteAttempts|settlePromoteOperation']);
+  });
+
+  it('I2 (5-2e): a CAS row of the table whose rule does not say the result is seen → reported', () => {
+    const row = DESIGN.split('\n').find((line) => line.startsWith('| `promoteAbandon` | write | `abandonPromoteOperation` |'))!;
+    const file = path.join(dir, 'design.md');
+    writeFileSync(file, DESIGN.replace(row, '| `promoteAbandon` | write | `abandonPromoteOperation` | 1 | I2：`unknown` のときだけ |'));
+    expect(casRowsWithoutResult(readFileSync(file, 'utf8'))).toEqual(['promoteAbandon|abandonPromoteOperation']);
+  });
+
   it('(control) the sources as they are, copied unchanged → nothing reported', () => {
     const service = copyOf(SERVICE, 'export', 'export');
     expect(tableDiff(service)).toEqual([]);
     expect(generationViolations(readService(service), generation())).toEqual([]);
     expect(conditionalWriteViolations(copyOf(STORE, 'export', 'export', 'copy2.ts'))).toEqual([]);
+    expect(discardedCasResults(service)).toEqual([]);
+    expect(discardedCasResults(copyOf(STORE, 'export', 'export', 'copy3.ts'))).toEqual([]);
   });
 });

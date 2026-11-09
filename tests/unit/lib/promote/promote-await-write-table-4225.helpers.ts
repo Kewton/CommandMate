@@ -251,3 +251,53 @@ export function conditionalWriteViolations(dbSource: string): string[] {
   }
   return out;
 }
+
+/**
+ * The conditional writes (CAS) whose result says whether the write held (§11.1 I2 as
+ * strengthened in 5-2e): the store's and the service's own wrapper. Their result goes back
+ * to the caller, and a caller starts no later write and no transition after a false.
+ */
+export const CAS_WRITES = new Set([
+  'claimPromoteOperation',
+  'settlePromoteOperation',
+  'beginPromoteTransition',
+  'finishPromoteTransition',
+  'acknowledgePromoteTransition',
+  'abandonPromoteOperation',
+  'settleOrUnknown',
+]);
+
+/**
+ * I2 (5-2e) against a source: a call of a CAS whose result is thrown away — the call as a
+ * statement of its own (awaited or not, in parentheses or not) or under `void`. Each is
+ * `function|callee` (the enclosing function's name, or `(top)`).
+ */
+export function discardedCasResults(source: string, name = 'source.ts'): string[] {
+  const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true);
+  const out: string[] = [];
+  const enclosing = (node: ts.Node): string => {
+    for (let at: ts.Node | undefined = node.parent; at; at = at.parent) {
+      if (ts.isFunctionDeclaration(at) && at.name) return at.name.text;
+      if (ts.isVariableDeclaration(at) && ts.isIdentifier(at.name)) return at.name.text;
+    }
+    return '(top)';
+  };
+  const walk = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && CAS_WRITES.has(node.expression.text)) {
+      let outer: ts.Node = node;
+      while (ts.isParenthesizedExpression(outer.parent) || ts.isAwaitExpression(outer.parent)) outer = outer.parent;
+      if (ts.isExpressionStatement(outer.parent) || ts.isVoidExpression(outer.parent)) out.push(`${enclosing(node)}|${node.expression.text}`);
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(file);
+  return out.sort();
+}
+
+/** The table's rows of a CAS whose rule does not say that the caller sees the result (`結果を見る`). */
+export function casRowsWithoutResult(markdown: string): string[] {
+  return tableOf(markdown, 'promote-await-write')
+    .filter(([, kind, callee, , rule]) => kind === 'write' && CAS_WRITES.has(callee) && !(rule ?? '').includes('結果を見る'))
+    .map(([fn, , callee]) => `${fn}|${callee}`)
+    .sort();
+}

@@ -1274,6 +1274,91 @@ describe('5-2d: the rules behind the edges (I1 the generation fixed before the f
   });
 });
 
+describe('5-2e: a late answer of the POST never starts a settled transition again (I2: the CAS result is the caller’s)', () => {
+  beforeEach(() => routeScreenCalls());
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** The POST is written outside at once; its answer reaches the approval only when released. */
+  function holdTheAnswer(): { deps: PromoteDeps; release: () => void } {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const run: NonNullable<PromoteDeps['gh']> = async (call) => {
+      const answer = await gh.run(call);
+      if (call.args.includes('--method')) await gate;
+      return answer;
+    };
+    return { deps: { ...deps(), gh: run }, release };
+  }
+
+  it('reconciled and moved while the answer was out → the answer does not put the pending back, no second POST', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const held = holdTheAnswer();
+    const pending = promoteApprove(db, SCREEN, repoA, made.id, approveBody(p), held.deps);
+    await until(() => gh.comments.length === 1);
+    boot = 'boot-2'; // the attempt is now stale: read as unknown
+    const opId = operationIdOfItem(made.id);
+    expect((await promoteApi.reconcile(repoA, opId)).ok).toBe(true);
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 0 });
+    const recorded = item(made.id);
+    expect(recorded.state).toBe('recorded');
+
+    held.release();
+    expect((await pending).status).toBe(200);
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 0, transition_reason: null });
+    expect(item(made.id)).toEqual(recorded);
+    expect((await screenList(repoA)).unresolved).toEqual([]);
+    expect(gh.posts()).toHaveLength(1);
+  });
+
+  it('closed, reconciled and acknowledged while the answer was out → the acknowledged operation does not come back', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const held = holdTheAnswer();
+    const pending = promoteApprove(db, SCREEN, repoA, made.id, approveBody(p), held.deps);
+    await until(() => gh.comments.length === 1);
+    expect((await memCloseItem(db, WT, made.id, { instanceId: 'claude' }, memDeps())).status).toBeLessThan(300);
+    boot = 'boot-2';
+    const opId = operationIdOfItem(made.id);
+    expect((await promoteApi.reconcile(repoA, opId)).ok).toBe(true);
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 1 });
+    expect((await promoteApi.acknowledgeItemClosed(repoA, opId)).ok).toBe(true);
+    expect(op(opId).transition_pending).toBe(0);
+
+    held.release();
+    await pending;
+    expect(op(opId)).toMatchObject({ state: 'succeeded', transition_pending: 0, transition_reason: null });
+    expect((await screenList(repoA)).unresolved).toEqual([]);
+  });
+
+  it('(control) stale but not reconciled when the answer comes → the true outcome wins over unknown and the item moves', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const held = holdTheAnswer();
+    const pending = promoteApprove(db, SCREEN, repoA, made.id, approveBody(p), held.deps);
+    await until(() => gh.comments.length === 1);
+    boot = 'boot-2';
+    const listed = await promoteList(db, repoA, 'feature/x', { mem: memDeps(), bootId: () => boot });
+    expect((listed.body as { decisions: Array<{ operations: PromoteOperationView[] }> }).decisions[0].operations[0].state).toBe('unknown');
+    held.release();
+    const answered = operationOf(await pending);
+    expect(answered).toMatchObject({ state: 'succeeded', transitionPending: false });
+    expect(item(made.id).state).toBe('recorded');
+  });
+
+  it('(control) nothing in between → written, recorded, nothing pending, as before', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const held = holdTheAnswer();
+    const pending = promoteApprove(db, SCREEN, repoA, made.id, approveBody(p), held.deps);
+    await until(() => gh.comments.length === 1);
+    held.release();
+    expect(operationOf(await pending)).toMatchObject({ state: 'succeeded', transitionPending: false });
+    expect(item(made.id).state).toBe('recorded');
+    expect(gh.posts()).toHaveLength(1);
+  });
+});
+
 function operationIdOfItem(itemId: string): string {
   return (db.prepare('SELECT id FROM mem_promote_operations WHERE item_id = ? ORDER BY approved_at DESC, rowid DESC').get(itemId) as { id: string }).id;
 }

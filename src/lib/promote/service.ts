@@ -340,7 +340,9 @@ async function settleTransition(
     outcome = { status: 500, body: { code: 'internal_error' } };
   }
   if (outcome.status < 300) {
-    finishPromoteTransition(db, operationId, claim, { moved: true }, now());
+    // §11.1 I2: the result is seen; the item moved whoever holds the claim now (A's success).
+    const lowered = finishPromoteTransition(db, operationId, claim, { moved: true }, now());
+    if (!lowered) logger.info('mem-promote-transition-already-settled', { operationId });
     return { ok: true };
   }
   const reason = transitionReasonOf(outcome);
@@ -362,17 +364,31 @@ function operationAnswer(db: Database.Database, operationId: string, deps: Promo
   };
 }
 
-/** Settle an outcome; if writing it fails, try once to leave it unknown (design §3.2: the DB update after the write failed). */
-function settleOrUnknown(db: Database.Database, operationId: string, settle: PromoteSettle, now: number, before?: () => void): void {
+/** The transition of an operation whose settle has just written `succeeded`: not begun, no claim (§11.1 I2). */
+const SETTLED_UNBEGUN: PromoteTransitionRead = { transition_pending: 0, transition_claim: null };
+
+/**
+ * Settle an outcome; if writing it fails, try once to leave it unknown (design §3.2: the DB update after the write failed).
+ *
+ * §11.1 I2 (5-2e): true only when this settle itself wrote `settle` (its CAS held). False
+ * when the operation was no longer as the approval left it — a staleness made it unknown
+ * and a person reconciled or abandoned it meanwhile — or when only the fallback to unknown
+ * was written. The caller starts nothing after a false (no transition).
+ */
+function settleOrUnknown(db: Database.Database, operationId: string, settle: PromoteSettle, now: number, before?: () => void): boolean {
   try {
     before?.();
-    settlePromoteOperation(db, operationId, settle, now);
+    const written = settlePromoteOperation(db, operationId, settle, now);
+    if (!written) logger.info('mem-promote-settle-superseded', { operationId, state: settle.state });
+    return written;
   } catch {
     try {
-      settlePromoteOperation(db, operationId, { state: 'unknown', reason: 'db_error' }, now);
+      const fellBack = settlePromoteOperation(db, operationId, { state: 'unknown', reason: 'db_error' }, now);
+      logger.info('mem-promote-settle-fell-back', { operationId, fellBack });
     } catch {
       // Left in_flight: read as unknown once stale (another boot, or 10 minutes).
     }
+    return false;
   }
 }
 
@@ -523,7 +539,8 @@ export async function promotePreview(
 type Claimed =
   | { kind: 'outcome'; outcome: MemOutcome }
   | { kind: 'comment'; operationId: string; env: Record<string, string>; dest: IssueCommentDestination; posterId: number }
-  | { kind: 'doc'; operationId: string };
+  // §11.1 I2 (5-2e): whether this approval's own settle wrote `succeeded` (its CAS held).
+  | { kind: 'doc'; operationId: string; succeededByThis: boolean };
 
 /** `POST …/decisions/:itemId/approve` — `{ previewId, itemVersion, baseFingerprint, bodySha256, acknowledgedOperationIds }`. */
 export async function promoteApprove(
@@ -644,23 +661,31 @@ export async function promoteApprove(
         deps.hooks?.doc
       );
       if (written.result === 'not_written') {
-        settleOrUnknown(db, claim.operationId, { state: 'failed', reason: written.reason }, now);
+        // §11.1 I2: the result is seen; nothing follows a failure whichever way it went.
+        if (!settleOrUnknown(db, claim.operationId, { state: 'failed', reason: written.reason }, now)) {
+          logger.info('mem-promote-failure-not-written', { operationId: claim.operationId });
+        }
         return outcome(written.refusal ? reapproval(written.reason === 'base_changed' ? 'base_changed' : 'destination_changed', {
           operationId: claim.operationId,
         }) : promoteError('invalid_destination', { reason: written.reason, operationId: claim.operationId }));
       }
       if (written.result === 'success') {
-        settleOrUnknown(db, claim.operationId, { state: 'succeeded', reason: null, resultRef: written.resultRef, concurrentEdit: written.concurrentEdit }, now);
-      } else {
-        settleOrUnknown(db, claim.operationId, { state: 'unknown', reason: written.reason }, now);
+        const own = settleOrUnknown(db, claim.operationId, { state: 'succeeded', reason: null, resultRef: written.resultRef, concurrentEdit: written.concurrentEdit }, now);
+        return { kind: 'doc', operationId: claim.operationId, succeededByThis: own };
+      }
+      if (!settleOrUnknown(db, claim.operationId, { state: 'unknown', reason: written.reason }, now)) {
+        logger.info('mem-promote-unknown-not-written', { operationId: claim.operationId });
       }
     } catch {
-      settleOrUnknown(db, claim.operationId, { state: 'unknown', reason: 'unreadable' }, now);
+      if (!settleOrUnknown(db, claim.operationId, { state: 'unknown', reason: 'unreadable' }, now)) {
+        logger.info('mem-promote-unknown-not-written', { operationId: claim.operationId });
+      }
     }
-    return { kind: 'doc', operationId: claim.operationId };
+    return { kind: 'doc', operationId: claim.operationId, succeededByThis: false };
   });
 
   if (claimed.kind === 'outcome') return claimed.outcome;
+  let succeededByThis: boolean;
   if (claimed.kind === 'comment') {
     const posted = await postGhComment(gh, claimed.dest, preview.body, claimed.env);
     const now = deps.now?.() ?? Date.now();
@@ -672,15 +697,23 @@ export async function promoteApprove(
         : posted.outcome === 'failure'
           ? { state: 'failed', reason: posted.reason }
           : { state: 'unknown', reason: posted.reason };
-    settleOrUnknown(db, claimed.operationId, settle, now, deps.hooks?.afterPost);
-    logger.info('mem-promote-posted', { operationId: claimed.operationId, outcome: posted.outcome });
+    const own = settleOrUnknown(db, claimed.operationId, settle, now, deps.hooks?.afterPost);
+    logger.info('mem-promote-posted', { operationId: claimed.operationId, outcome: posted.outcome, settled: own });
+    succeededByThis = own && settle.state === 'succeeded';
+  } else {
+    succeededByThis = claimed.succeededByThis;
   }
-  const row = getPromoteOperation(db, claimed.operationId)!;
-  if (row.state === 'succeeded') {
+  // §11.1 I2 (5-2e): the transition starts only from this approval's own settle. When its
+  // CAS did not hold (a staleness made the operation unknown and a person reconciled,
+  // moved, acknowledged or abandoned it while the answer was out), the row read again is
+  // someone else's settled state and the late answer starts nothing from it.
+  if (succeededByThis) {
+    const row = getPromoteOperation(db, claimed.operationId)!;
     await settleTransition(
       db,
       row.id,
-      row,
+      // The transition as this settle left it (never begun): a change since fails the CAS.
+      SETTLED_UNBEGUN,
       { worktreeId: row.context_worktree_id, incarnation: row.context_worktree_incarnation, version: row.item_version, transition: transitionOf(row.effect) },
       deps
     );
