@@ -269,6 +269,8 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 
 **Session brief (Issue #4274)**: on claude, codex and command-code, the first send after a conversation boundary (a new launch, a reset such as `/clear` or codex's `/new`, a resume to another conversation, a restart) carries the mem brief once, in front of the message — only when mem is `on` / `derived` for the branch and `injectOnStart` is enabled. Reconnecting to a running process is not a boundary. `--no-brief` skips it for that one send without changing any setting; `--with-brief` attaches it with no boundary. Giving both is exit 2 with nothing sent. When the brief and the message together would pass the length #2464 verified (48 KiB, 240 lines), the brief is left off and the message is never cut. The response's `brief` says what happened when one was attached or a flag was given. Other tools, relay delivery, Schedule, terminal commands and answers never carry it.
 
+**What the brief holds, and when it is left off (Issue #4224)**: the brief is built as [`commandmate brief`](#commandmate-brief) builds it (C, #4223), and only the "it ended" notices that are in the text typed are acknowledged, when the delivery is `sent` (an `unknown` delivery is not an acknowledgement). When the worktree is deleted, made again or renamed after the send was accepted and before it is typed, the old request's brief is not put into the new worktree (`brief.reason` is `worktree_changed`; a send whose lifetimes could not be fixed at its entrance says `lifetime_unpinned`). After a process ended in a way nobody planned, the brief's data starts with the line 「終わる前の更新を確認できない（この instance の最終更新は N 時間前）」 ("the update before the end cannot be confirmed; this instance's last update was N hours ago") — on an `on` branch, only when an earlier conversation is on record, and never as a verdict. When that line does not fit the budget the brief is left off (`over_limit`) and the message is never cut. When a briefed send is read back from the transcript into the history, its row keeps the message alone and no row is added. A message whose first word starts with `/` (`/model`, `/plugin:cmd`, `/mcp__srv__prompt`, `/prompts:name`, …) or that starts with `!` is a command to the tool: it is never briefed and the boundary is kept for the next send. When the instance is deleted and made again after the send was accepted, the old request does not use the new instance's launch boundary (the next request does). Nor does it settle a boundary a gone process left mid-send. A send accepted after the instance was made again, while the new launch boundary is not open yet and the earlier instance's launch boundary is still the current one, clears that boundary without a brief (`incarnation_changed`). A send whose worktree lifetime could not be confirmed when it was accepted (`lifetime_unpinned`), or whose worktree was made again (`worktree_changed`), writes nothing on the ledger — clearing a boundary included.
+
 `--auto-yes-answer-mode <m>` picks the answer mode `--auto-yes` arms with (`recommended` / `careful`;
 see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863)). Without `--auto-yes` it is
 an error (exit 2). Omitted, a new grant is `recommended` and a grant that is on keeps its mode (Issue #3863).
@@ -2641,6 +2643,7 @@ The summary a restart reads (Issue #4223, Epic #4220). The state CommandMate hol
 
 ```bash
 commandmate brief [--budget <bytes>] [--json] [--all] [--worktree <id> --instance <id>]
+commandmate brief --session-start     # from a SessionStart hook (Issue #4224)
 ```
 
 - The target is your own instance inside a CommandMate session (resolved like `whoami`). In an ordinary shell, give **both** `--worktree` and `--instance` (only one is exit 2)
@@ -2657,6 +2660,15 @@ commandmate brief [--budget <bytes>] [--json] [--all] [--worktree <id> --instanc
 - An instance's state is the value the ordinary monitoring last observed; the brief never captures the screen or detects a state for itself (`observed=none` when nothing was observed). Auto-yes is read per instance; a grant past its deadline reads `enabled=false stop=expired`, and the state is not rewritten
 - The conversation is a reference only: the time of the last transcript turn and the command that reads it (`commandmate reply <worktree-id> --instance <id>`), never its body
 - On a `derived` branch only the derived state is shown; hand-written items and notices are not read. On `on`, the close conditions are evaluated when read (as `mem list` does)
+
+### From a SessionStart hook (`--session-start`, Issue #4224)
+
+- On a branch with `injectOnStart` enabled, the send path (claude, codex, command-code) puts the brief in front of a conversation's first send, once. A `SessionStart` hook that prints the brief should **use `commandmate brief --session-start`, not the plain `commandmate brief`**
+- `--session-start` prints nothing to stdout and exits 0 (one line on stderr) when the branch is `derived` / `on` with `injectOnStart` enabled and the instance's tool is one the send path briefs. Otherwise it prints what the plain command prints (a tool the send path does not brief gets it from the hook)
+- It is decided from the membership, the mode, `injectOnStart` and the tool alone: the boundary ledger is neither read nor written, and nothing is reserved or acknowledged. Not with `--json` (exit 2)
+- No double brief is guaranteed for the hooks CommandMate installs and hooks that use `--session-start`. A hook of your own that prints the plain `commandmate brief`, or a hand-written handoff, at `SessionStart` cannot be stopped
+- It does not look at the hook's `source` (`startup`, `resume`, `clear`, `compact`, …) or at whether the conversation goes through CommandMate's send. When the conditions hold it prints nothing after a `compact` or in a conversation started outside CommandMate too, and such a conversation gets the brief from neither side (the send path briefs only what is sent with CommandMate's `send`)
+- When the worktree or the instance is deleted and made again while it decides, it prints no brief for the new one and evaluates no close condition (exit 52, `reason` is `lifetime_changed`)
 
 ### Exit codes
 

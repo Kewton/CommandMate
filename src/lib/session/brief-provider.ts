@@ -3,9 +3,11 @@
  *
  * D1 detects conversation boundaries and puts a brief in front of the first send
  * after one, once. What the brief SAYS is #4223's (C): it implements this port, and
- * D2 swaps it in. Until then {@link EMPTY_BRIEF_PROVIDER} answers an empty body, and
- * a send carries exactly the bytes it did before (design
- * `docs/design/session-boundary-brief-4274.md` §5).
+ * D2 (#4224) connects it: {@link getBriefProvider} answers C's `MEM_BRIEF_PORT`
+ * (design `docs/design/brief-injection-d2-4224.md` §4). With mode `off` (the default)
+ * or `injectOnStart` false nothing is asked of it. {@link EMPTY_BRIEF_PROVIDER} answers
+ * an empty body, and a send briefed by it carries exactly the bytes it did before
+ * (design `docs/design/session-boundary-brief-4274.md` §5).
  *
  * The send service never trusts the answer: the size, the line count and the mode
  * are checked again (`session-brief.ts`), and a failure leaves the brief off — the
@@ -16,6 +18,7 @@
 
 import type { MemMode } from '@/types/mem';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import { MEM_BRIEF_PORT } from '@/lib/brief/provider';
 
 export type BriefBoundaryKind = 'launch' | 'auto_restart' | 'reset' | 'resume' | 'explicit';
 
@@ -24,10 +27,14 @@ export interface BriefRequest {
   /** Whose boundary. */
   target: {
     worktreeId: string;
+    /** Issue #4224: the worktree's lifetime this request was read for (W1); the provider builds for it only. */
+    worktreeIncarnation: string;
     cliToolId: CLIToolType;
     /** `instanceId ?? cliToolId`. */
     instanceId: string;
     instanceIncarnation: string | null;
+    /** Issue #4224: whether the instance was on the roster when the request was read (its entrance). */
+    instanceOnRoster: boolean;
   };
   /** The membership `withMemTarget` settled (never asked for `off`). */
   membership: {
@@ -58,6 +65,11 @@ export interface BriefResult {
   includedNoticeIds: string[];
   /** The mode it built for; one that differs from the request's is not attached. */
   mode: Exclude<MemMode, 'off'>;
+  /**
+   * Issue #4224 (design §7.4): with an empty `body`, why nothing could be made. `over_limit`:
+   * a line the brief must carry does not fit the budget — the send records it and goes on.
+   */
+  skipReason?: 'over_limit';
 }
 
 /** How a claimed brief ended, as told to {@link BriefProvider.settle}. */
@@ -109,12 +121,12 @@ export const EMPTY_BRIEF_PROVIDER: BriefProvider = {
 
 let override: BriefProvider | null = null;
 
-/** The provider sends are briefed by. D1: {@link EMPTY_BRIEF_PROVIDER}. */
+/** The provider sends are briefed by: C's (#4223), connected by D2 (#4224, design §4.1). */
 export function getBriefProvider(): BriefProvider {
-  return override ?? EMPTY_BRIEF_PROVIDER;
+  return override ?? MEM_BRIEF_PORT;
 }
 
-/** Swap the provider in a test; null restores the default. */
+/** Swap the provider in a test; null restores the default (C's). */
 export function setBriefProviderForTest(provider: BriefProvider | null): void {
   override = provider;
 }
