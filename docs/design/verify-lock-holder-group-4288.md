@@ -1,11 +1,12 @@
 # verify-run.sh の保有者にゲートのグループを記録する（Issue #4288 の 1 番）
 
-- 状態: 設計 第 4 版（Codex〔codex-2〕の事前レビュー 1 回目 `review-4288.md`・2 回目 `review-4288b.md`・3 回目 `review-4288c.md` の処置を反映。実装は同じブランチの別の契約）
+- 状態: 設計 第 5 版（Codex〔codex-2〕の事前レビュー 1 回目 `review-4288.md`・2 回目 `review-4288b.md`・3 回目 `review-4288c.md`・4 回目 `review-4288d.md` の処置を反映。実装は同じブランチの別の契約）
 - 行番号は 2026-11-09 の `fix/4288-verify-lock-pgid`（`169f5f892`。コードは `a69510b91` から変わっていない）のもの。名前で引くこと
 - **事実**＝コード・記録で確かめたこと、**見立て**＝推したが試していないこと、**未確認**＝この段で確かめていないこと
 - 第 1 版からの主な変更: owner の公開で **token を新しくする**（§2.2）。G の確認・公開に失敗したら**ゲートを始めない**（§2.3）。**解放は G が空になってから**（§2.5）。取消しの責任と owner の保持を分けた（§2.6）。合図待ちに実時間の期限（§2.4）
 - 第 2 版からの主な変更: **読み手を変える**（§2.7。復元に失敗して残った `.gone-*` を「保有中」と読み、取得の `mkdir` をしない）。子は**合図を実際に見たときだけ**、受け取りの印 `ack` を作ってから exec する（§2.4。合図の作成の失敗を競合と取り違えない）。125／124 は `ack` の有無で決め、見張りの timeout は `ack` から数える（§2.4・§2.6）。公開の前に保持の変数（`LOCK_PENDING_TOKEN`）を立て、trap は owner の token を確かめて解放する（§2.6）。bash の読み手の試験は合成の対照と明記（§6）。破損 JSON の行を 2 つに分けた（§4）。末尾の「事前レビューの処置」に 2 回目を足した
 - 第 3 版からの主な変更: `.gone-*` は**退避名の形に一致するものだけ**を読む（§2.7 の「退避名の識別」。別の合法な mutex `a.lock.gone-b` の実ロックを取り込まない）。owner の読み取りを**記録・欠損・破損・不明**に分け、不明（EACCES・EIO など）は空きとしない（§2.7 の「owner の読み取りの分類」）。排水に失敗したら**未排水の項目 `LOCK_UNDRAINED` を run の終わりまで保ち**、bash の解放は**owner の pgid のグループが空であることを解放の直前に確かめる**（§2.5・§2.6）。復元の途中（`mkdir <lock>` の後・owner の移動の前、owner の rename の失敗、移動の後）を**次の先頭が完了か回収できる**手順にした（§2.7 の表の 2〜4・6 と「復元の途中の状態」）。§2.7 を「先頭の 1 周の手順」の 1 つの表にまとめた。閉じていない引用の token を「抽出できる不正な JSON」の側へ移した（§4）。末尾の「事前レビューの処置」に 3 回目を足した
+- 第 4 版からの主な変更: グループが**空**とは `kill -0 -- -<pgid>` が **ESRCH** のときだけとし（既存の `lock_group_is_empty`〔`verify-run.sh:695`〕と同じ）、EPERM などの他の失敗は「人が居る」と読む。`drain_group`・`lock_release` の解放の直前の確かめ・EXIT trap・未排水の項目の処理の後の解放が全てこの判定を通る（§2.5・§2.6）。bash の lock root の一覧の失敗（読み取り不可の root で glob が展開されない）を「対象なし」と読まない手順を書いた（§2.7）。§6 に EPERM の G（合成）と root の一覧の失敗の対照を足した。末尾の「事前レビューの処置」に 4 回目を足した
 
 ## 止める点
 
@@ -151,6 +152,8 @@ drain_group G:
   空なら 0、そうでなければ 1
 ```
 
+- **「空」の判定は 1 つ**（4 回目のレビューの P1）: この設計で「G が空」「グループに人が居ない」と書く所は全て、既存の `lock_group_is_empty <pgid>`（`verify-run.sh:695`）と同じ判定を使う。`kill -0 -- -<pgid>` が**失敗して**、その出力が `No such process`（ESRCH）のときだけ空。成功・EPERM・その他の失敗は「人が居る」（空でない）。`drain_group` の「空を見る」も、§2.5 の 2 の解放の直前の確かめも、§2.6 の trap も、この判定を呼ぶ（`kill -0` の成功だけを見て「失敗＝空」と読む形を新しく書かない）。権限の違う子が G に居ると `kill -TERM`／`-KILL` も EPERM で届かず、`drain_group` は 1 を返し、解放しない。TS・同期 JS の `groupAlive` は既に `err.code !== 'ESRCH'` を生きているとする（`machine-lock-sync.mjs:85`–92、`machine-lock.ts` の `defaultGroupAlive`〔`:258`–264〕）ので、3 実装の読みが揃う。
+
 | 経路 | 今 | 新 |
 |---|---|---|
 | 通常終了（長が終わった） | 見張りを KILL → 解放 | 見張りを KILL → `drain_group` → 空なら解放。**長が終わって背景の子が残る場合**も子を止めてから解放する。stderr に `verify-run: gate <id> left processes in group G; stopped them before releasing <mutex>` |
@@ -161,12 +164,12 @@ drain_group G:
 - `drain_group` が 1（KILL の後も空にならない: D 状態・権限の違う子）を返したら**解放しない**。owner（T1、pgid:G）は残り、本体が生きている間は誰も回収しない（pid が生きている）。本体が終われば、G が空になった時点で列の先頭が回収する。待つ側に倒す。
 - **排水の失敗を忘れない**（3 回目のレビューの P1）。第 3 版は「どの戻り口でも `LOCK_GATE_GROUP` を空にする」としつつ `LOCK_HELD_PATH`／`LOCK_HELD_TOKEN`（T1）を残したので、最後の EXIT trap が G を見ずに token の一致だけで消せた。第 4 版は次の 2 つを両方入れる（どちらか片方が漏れても、もう片方で解放しない）:
   1. **未排水の状態を保つ**: 排水が 1 を返したら、`<lock のパス> <T1> <G>` の 1 行を run のグローバル `LOCK_UNDRAINED`（改行区切り。run の終わりまで消さない）に足し、`LOCK_HELD_PATH`／`LOCK_HELD_TOKEN` はそのまま残す（空にしない）。`LOCK_GATE_GROUP` は試行の変数なので空にするが、G は `LOCK_UNDRAINED` に残る。
-  2. **解放の直前に owner の pgid で確かめる**: bash の `lock_release` は、消す前に owner の `pgid` を読み、1 より大きい整数で `kill -0 -- -<pgid>` が成功する（グループに人が居る）なら**消さずに戻る**（stderr に `verify-run: machine-lock-release-deferred <lock> pgid=<pgid>`）。この確かめは呼び手の変数を見ない（trap・通常終了・次のゲート・受け渡しの失敗の全てが `lock_release` を通る）。merge-pr の内側の記録（`machine-lock-sync.mjs` が書く `pgid`）を verify-run.sh が解放することは無い（token が違う）ので、影響は verify-run.sh 自身の T1 だけ。
+  2. **解放の直前に owner の pgid で確かめる**: bash の `lock_release` は、消す前に owner の `pgid` を読み、1 より大きい整数で `lock_group_is_empty <pgid>` が偽（グループに人が居る。`kill -0` の成功に加え、**EPERM など ESRCH 以外の失敗も含む**）なら**消さずに戻る**（stderr に `verify-run: machine-lock-release-deferred <lock> pgid=<pgid>`）。この確かめは呼び手の変数を見ない（trap・通常終了・次のゲート・受け渡しの失敗の全てが `lock_release` を通る）。merge-pr の内側の記録（`machine-lock-sync.mjs` が書く `pgid`）を verify-run.sh が解放することは無い（token が違う）ので、影響は verify-run.sh 自身の T1 だけ。
 - 未排水の項目の扱い（経路ごと）:
 
 | 経路 | 動き |
 |---|---|
-| この run の通常の終了（EXIT trap） | `LOCK_UNDRAINED` の各行について `drain_group <G>` をもう一度行い、`lock_release <path> <T1>`（2 の確かめつき）。空なら解放、空でなければ残す |
+| この run の通常の終了（EXIT trap） | `LOCK_UNDRAINED` の各行について `drain_group <G>` をもう一度行い、`lock_release <path> <T1>`（2 の確かめつき）。空（ESRCH）なら解放、空でなければ（EPERM を含む）残す |
 | 次のゲート（同じ mutex） | `lock_acquire` の前に、同じパスの行があれば排水し直す。空になれば解放して行を消し、通常の取得へ。空でなければ通常の取得へ進む（owner の pid＝自分が生きているので回収されず、予算切れで `SKIP reason=mutex-wait`。二重には走らない） |
 | 次のゲート（別の mutex） | 通常の取得。`LOCK_HELD_*` は新しいロックで上書きされるが、前のロックは `LOCK_UNDRAINED` に残り、trap が 1 行目の扱いをする |
 | 本体へ TERM | trap が 1 行目の扱い（`LOCK_GATE_GROUP` の排水の後、`LOCK_UNDRAINED` の各行） |
@@ -207,7 +210,7 @@ drain_group G:
 2. 合図に成功したら `LOCK_HELD_TOKEN=T1`、`rga_lock_token=T1`、それから `LOCK_PENDING_TOKEN=""`。
 3. 受け渡しの失敗・解放・trap の後は `LOCK_PENDING_TOKEN`・`LOCK_GATE_GROUP` を必ず空にする（`run_gate_attempt` のどの戻り口でも）。**ただし排水に失敗した G は、空にする前に `LOCK_UNDRAINED` へ移す**（§2.5）。`LOCK_UNDRAINED` は試行・ゲートをまたいで残り、空にするのは排水し直して解放できた行だけ。
 
-**trap の解放**（`lock_cleanup_on_exit`）: `LOCK_GATE_GROUP` があれば先に `drain_group`（失敗すれば `LOCK_UNDRAINED` へ移す）。次に `LOCK_UNDRAINED` の各行を §2.5 の表の 1 行目のとおり扱う。次に owner の token を読み、`LOCK_HELD_TOKEN` か `LOCK_PENDING_TOKEN` のどちらかと一致すればその token で `lock_release`。どちらとも違う（他人）・読めないなら解放しない（空の token の `lock_release` は消すので呼ばない）。owner が無く、自分の token の `.gone-*` があれば §2.7 の片付け。こうすると、公開の `mv` の前後どちらで TERM が来ても、その時点の owner（T0 か T1）が自分のものなら解放される。
+**trap の解放**（`lock_cleanup_on_exit`）: `LOCK_GATE_GROUP` があれば先に `drain_group`（失敗すれば `LOCK_UNDRAINED` へ移す）。次に `LOCK_UNDRAINED` の各行を §2.5 の表の 1 行目のとおり扱う。次に owner の token を読み、`LOCK_HELD_TOKEN` か `LOCK_PENDING_TOKEN` のどちらかと一致すればその token で `lock_release`。どちらとも違う（他人）・読めないなら解放しない（空の token の `lock_release` は消すので呼ばない）。`LOCK_UNDRAINED` の行の後の `lock_release` も、最後の `lock_release` も、§2.5 の 2 の確かめ（`lock_group_is_empty`。ESRCH のときだけ空）を通るので、再排水が失敗して最後のグループの確かめが EPERM を返す順序でも消さない（4 回目のレビューの P1）。owner が無く、自分の token の `.gone-*` があれば §2.7 の片付け。こうすると、公開の `mv` の前後どちらで TERM が来ても、その時点の owner（T0 か T1）が自分のものなら解放される。
 
 - **retry と次のゲートで前の token を使わない**: 2 回目の試行は `lock_acquire` で新しい `LOCK_TOKEN`（T0'）を作り（`:858`）、T1' はそこから作る。`rga_lock_token` は試行の始めに空にする（`:1019`、今のまま）。`LOCK_PENDING_TOKEN` は 3 で空にする。よって 2 回目の解放・trap は T0'／T1' しか見ない。§6 で固定する。
 - trap の解放も `lock_release` を通るので、§2.5 の 2（owner の pgid のグループが空でなければ消さない）が最後の守りになる。`LOCK_HELD_TOKEN` が T1 のまま残っていても、G に人が居れば消えない。
@@ -235,6 +238,7 @@ drain_group G:
 | 破損 | 読めたが記録の条件を満たさない | 塞がない。新しい書き手の T1 は `mv` の後に読み直して確かめる（§2.3 の 5）ので、破損した T1 の後でゲートが走ることは無い |
 | **不明** | 上のどれでもない: 読み取りのエラー（Node: `ENOENT` 以外の例外。EACCES・EIO・EISDIR・ELOOP など）。bash: `.gone-*` が探索できない（`[ ! -x "$g" ]`）、`owner` が在るのに読めない（`[ -e ] && [ ! -r ]`）、`awk` が 0 以外で終わる。lock root の一覧（`readdirSync`／glob の展開）が失敗した場合も、全体を不明とする | **空きとしない**: その周回は `mkdir` をせずに待つ（`heldBy` は `… (restore pending: <gone> unreadable)`、stderr／警告に `machine-lock-gone-unreadable <gone> <code>` を `.gone-*` ごとに 1 回）。回収も復元もしない。読み取りが回復した周回から、記録・欠損・破損として扱い直す |
 
+- **lock root の一覧の失敗**（4 回目のレビューの P2）: root が「書込み・探索可・読取り不可」（例 `0333`）だと、`mkdir <lock>` も札の `.queue/` も通るのに、root の一覧だけが取れない。TS・同期 JS は `readdirSync(root)` の例外（EACCES など。ENOENT は root が無い＝対象なし）を不明とする。bash の glob は読めない root では**何も展開せず、パターンをそのまま返す**（エラーにならない）ので、「未展開＝対象なし」と読むと不明を空きと取り違える。bash は glob の前に `[ -r "$LOCK_ROOT" ] && [ -x "$LOCK_ROOT" ]` を確かめ、偽なら全体を不明（表の 1、`machine-lock-gone-unreadable <root> EACCES`）とし、真のときだけ未展開のパターン（`[ ! -e ] && [ ! -L ]`）を「対象なし」と読む。root の権限が戻った周回から通常の手順に戻る。
 - 第 3 版の「T1 は原子的に書くので常に読める」は撤回する。原子的な書き込みは**中身**が欠けないことしか保証せず、権限・I/O のエラーで読めないことはある。今の TS・同期 JS は読み取りのエラーも null にする（`machine-lock.ts:220`、`machine-lock-sync.mjs:96`–108）ので、`.gone-*` の読みには例外の `code` を返す別の関数（`readGoneOwner`）を足し、`readOwner` は変えない。bash は `lock_json_field` の `[ -f ] || return 0` と `2>/dev/null` で同じく区別できないので、`.gone-*` の読みの前に上の `-x`／`-e`／`-r` を見て、`awk` の終了コードを捨てない。
 
 **先頭の 1 周の手順**（3 実装で同じ。#4277 のとおり、列の先頭だけが行う。既存の主のロックの回収〔`lock_recover`／`breakStale`／`recoverLock`〕の前に行う）:
@@ -281,7 +285,7 @@ owner の列は公開の状態、「取得者」は bash（`lock_acquire`）・T
 | 8 | `ack` の後・実行中 | T1（G） | ゲート | **拒否**（今回の穴を塞ぐ）。見張りが `ack` から timeoutSec で G を止め、空で取得 | trap が排水 → 解放 | 拒否 → G が空で取得 |
 | 9 | 長の終了・子が残る（排水中） | T1（G） | 子 | 拒否。子が終わるまで残る | trap が排水を続ける | 拒否 → 空で取得 |
 | 10 | timeout（見張りの TERM の後） | T1（G） | 長は終わり、子が TERM を無視 | 拒否 | 同上 | 拒否 → KILL の後に取得 |
-| 11 | 9・10 の排水が 1 を返した（KILL の後も空にならない） | T1（G） | 子 | 拒否。owner は残り、G が空になってから回収 | trap が `LOCK_UNDRAINED` の G を排水し直し、空でなければ `lock_release` が owner の pgid を見て消さない（§2.5） | 拒否 → 空で取得。同じ run の次のゲート（同じ mutex）も取れずに `mutex-wait` |
+| 11 | 9・10 の排水が 1 を返した（KILL の後も空にならない。権限の違う子で EPERM を含む） | T1（G） | 子 | 拒否。owner は残り、G が空になってから回収 | trap が `LOCK_UNDRAINED` の G を排水し直し、空でなければ（ESRCH 以外は空でない）`lock_release` が owner の pgid を見て消さない（§2.5） | 拒否 → 空で取得。同じ run の次のゲート（同じ mutex）も取れずに `mutex-wait` |
 | 12 | 6〜11 で T0 を読んだ取得者が T1 を退かし、**復元に失敗** | `.gone-*` に T1（G） | 6〜11 のまま | **拒否**（§2.7 の表の 2。同じ取得者も後続の先頭も `mkdir` しない）。次の先頭が戻せば 6〜11 に戻る。G が空になれば `.gone-*` を回収して取得 | trap が自分の `.gone-*` を片付ける（§2.7 の表の 7。G に人が居れば消さない） | 拒否 → 復元か G の終了の後に取得 |
 | 13 | 12 の復元の途中で復元した者が死ぬ（`mkdir <lock>` の後・owner の移動の前。§2.7 の A） | `<lock>` は空、`.gone-*` に T1（G） | 6〜11 のまま | 拒否。次の先頭が §2.7 の表の 3 で完了させる（以後 6〜11）。G が空なら 4 で `<lock>` を `rmdir` し `.gone-*` を回収して取得 | 本体の trap は 12 と同じ | 拒否 → G が空で取得 |
 | 14 | 12 の復元で owner の `rename` が失敗（§2.7 の B） | 本人が `rmdir <lock>` で 12 に戻す。戻す前に死ねば 13 | 6〜11 のまま | 12 か 13 と同じ | 同上 | 同上 |
@@ -327,7 +331,7 @@ pid の再利用は 3 実装とも「生きている」側に倒れる（待つ�
 
 共通: `fs.mkdtempSync(os.tmpdir())` に git repository・`holder.yaml`（`mutex: repro`）を置き、全 actor に `CM_VERIFY_LOCK_ROOT` と TS／同期 JS の `root` を渡す。`afterEach` で自分が起こしたグループだけを `kill(-pgid)` し、一時ディレクトリを消す（chmod した場合は戻してから）。新しいファイル `tests/unit/skills/cmate-verify/verify-run-holder-group-4288.test.ts` と、読み手の §2.7 は `tests/unit/verification/machine-lock-gone-4288.test.ts`（TS と同期 JS）。root で走らせると chmod の注入が効かないので、uid 0 では該当の対照を skip する。
 
-**止め所**（テスト専用。未設定なら何もしない）: `CM_VERIFY_TEST_HANDOFF_DIR` と `CM_VERIFY_TEST_HANDOFF=pause:<stage>,fault:<stage>`。`pause` は `<dir>/<stage>.reached` を作って `<dir>/<stage>.go` を待つ。stage は §3 の時点（`forked`・`group`・`watchdog`・`tmp`・`published`・`signalled`・`acked`・`leader-exited`）と、bash の読み手側の `recover-moved`（`lock_recover` の `mv` の後・token の読みの前）・`restore-mkdir`（復元の `mkdir <lock>` の後・owner の移動の前）・`restore-owner`（owner の移動の後・`.gone-*` の削除の前）。`fault` は §2.3 の失敗（`group`・`token`・`tmp`・`mv`・`verify`・`signal`〔本体の `go` の作成〕）と子の側の `child-go`（取り下げの `mkdir "$go"` を、`go` を作らずに失敗させる）・`child-ack`（`ack` の作成の失敗）・`drain`（`drain_group` を、signal を送らずに 1 を返させる。G はテストの子が生きたまま）を注入する。TS・同期 JS の読み手は既存の `__testHooks`／`hooks` の `pidAlive`（判定の最中）と `onRecover`（`moved` で退かした後）を使い、`onRecover` の stage に `restore-mkdir`・`restore-owner` を足す（hook が例外を投げると、その取得の呼び出しはそこで終わる＝復元した者の死の代わり）。代案の「SIGSTOP と owner のポーリングで窓を狙う」は時点を固定できないので採らない。
+**止め所**（テスト専用。未設定なら何もしない）: `CM_VERIFY_TEST_HANDOFF_DIR` と `CM_VERIFY_TEST_HANDOFF=pause:<stage>,fault:<stage>`。`pause` は `<dir>/<stage>.reached` を作って `<dir>/<stage>.go` を待つ。stage は §3 の時点（`forked`・`group`・`watchdog`・`tmp`・`published`・`signalled`・`acked`・`leader-exited`）と、bash の読み手側の `recover-moved`（`lock_recover` の `mv` の後・token の読みの前）・`restore-mkdir`（復元の `mkdir <lock>` の後・owner の移動の前）・`restore-owner`（owner の移動の後・`.gone-*` の削除の前）。`fault` は §2.3 の失敗（`group`・`token`・`tmp`・`mv`・`verify`・`signal`〔本体の `go` の作成〕）と子の側の `child-go`（取り下げの `mkdir "$go"` を、`go` を作らずに失敗させる）・`child-ack`（`ack` の作成の失敗）・`drain`（`drain_group` を、signal を送らずに 1 を返させる。G はテストの子が生きたまま）を注入する。**EPERM の合成**: `<dir>/eperm` が在る間、`lock_group_is_empty` の中の `kill -0 -- -<pgid>` の結果だけを「失敗・`Operation not permitted`」に置き換える（signal を送る `kill -TERM`／`-KILL` は置き換えない。判定の式は置き換えないので、直す前の形〔`kill -0` の成功だけを見る〕と新しい形の違いがそのまま出る）。権限の違う G を一般ユーザーのテストで実際に作れない（別 uid のプロセスを起こせない）ための合成と明記する。TS・同期 JS の読み手は既存の `__testHooks`／`hooks` の `pidAlive`（判定の最中）と `onRecover`（`moved` で退かした後）を使い、`onRecover` の stage に `restore-mkdir`・`restore-owner` を足す（hook が例外を投げると、その取得の呼び出しはそこで終わる＝復元した者の死の代わり）。代案の「SIGSTOP と owner のポーリングで窓を狙う」は時点を固定できないので採らない。
 
 | 対照 | 不正な同時実行の拒否（陽性） | 保護対象が消えた後に進む（陰性） |
 |---|---|---|
@@ -340,6 +344,8 @@ pid の再利用は 3 実装とも「生きている」側に倒れる（待つ�
 | §2.7 復元の途中（3 回目の P2。3 つを別々に） | A: `restore-mkdir`（bash は pause の後に取得者を SIGKILL、TS・同期 JS は hook が例外）。B: `.gone-*` を `chmod 0555` にして owner の `rename` を EACCES で落とす（`mkdir <lock>` は通る）。C: `restore-owner`（A と同じ止め方）。どれも G が生きている間は 3 実装とも取れない。A は次の先頭が完了させて `<lock>/owner`＝T1 になる。B は本人が `rmdir <lock>` で戻し `.gone-*` が残る。**今の実装では** A・B の後に G を KILL しても空の `<lock>` が残り、どの取得者も取れない（B の今の TS・同期 JS・bash は owner の `rename` の失敗を「owner がまだ無かった」と読んで owner ごと `.gone-*` を消し、空の `<lock>` だけが残る）（陽性） | 3 つとも、G を KILL した後に 3 実装のどれもが有限の周回（`timeoutMs` 内）で取れ、`<lock>.gone-*` と空の `<lock>` が残らない。A・B・C の形をファイルで直接作った合成の状態（死んだ G）でも同じ。owner の書かれた `<lock>`（空でない）は 4 の `rmdir` で消えない |
 | §2.7 の表の 7（自分の `.gone-*` の片付け） | 保有中の自分の記録を `.gone-*` へ退かして root を `0555` にし、root を戻してから `release`／trap → `.gone-*` が消え、次の取得者が取れる | 他人の記録の `.gone-*` は解放で消さない |
 | §2.5 排水の失敗（3 回目の P1-2） | `fault:drain`、ゲートは `trap '' TERM; sleep 30` の背景の子を残す → (i) 通常の run の終わり（trap）、(ii) 同じ mutex の次のゲート、(iii) 別の mutex の次のゲートの後の run の終わり、(iv) 排水中の本体へ TERM、のどれでも `<lock>` は残り（owner=T1）、G が生きている間 3 実装とも取れない。(ii) の次のゲートは副作用なしで `SKIP reason=mutex-wait`。stderr に `machine-lock-release-deferred`。**第 3 版の形**（排水の失敗の後に G を忘れ、trap が token だけで解放）を写した版では (i) の後に取れてしまう（陽性）。§2.5 の 1 と 2 を片方ずつ外した版でも、残る片方で取れないこと | G を KILL すると 3 実装とも取れる。`fault:drain` なしでは今の解放の時間のまま |
+| §2.5 EPERM の G（4 回目の P1。**合成の対照**） | `fault:drain` と `<dir>/eperm` を両方置き、ゲートは `trap '' TERM; sleep 30` の背景の子を残す → (i) 通常の run の終わり（trap の再排水も 1、最後の確かめは EPERM）、(ii) 同じ mutex の次のゲート（未排水の項目の処理の後の `lock_release`）、(iv) 排水中の本体へ TERM、のどれでも `<lock>` は残り（owner=T1）、stderr に `machine-lock-release-deferred`。**第 4 版の形**（`kill -0` の成功だけで抑止し、失敗＝空と読む）を写した版では (i) の後に `<lock>` が消える（陽性）。実 OS の文面の確かめとして、root が持つ既存のグループ（`ps -axo pgid=,uid=` で uid 0・pgid>1 のもの。signal 0 だけで何も届けない）に `lock_group_is_empty` が偽を返すことを 1 回見る（見つからない・uid 0 なら skip） | `<dir>/eperm` を消して G を KILL した後（ESRCH）の run の終わりでは、保有者自身の trap が解放して `<lock>` が消える。注入なしでは今の解放の時間のまま |
+| §2.7 lock root の一覧の失敗（4 回目の P2。3 実装） | 生きた G の T1 を持つ `.gone-*` を作ってから root を `chmod 0333`（書込み・探索可・読取り不可。`mkdir` と `.queue/` は通る）→ bash・TS・同期 JS とも `mkdir <lock>` をせず `acquired:false`／exit 22、`machine-lock-gone-unreadable`。`.gone-*` が**無い** root を `0333` にしても同じ（一覧できないので「無い」と言えない）。**glob の未展開を「対象なし」と読む読み手**（bash）・`readdirSync` の例外を空の一覧とする読み手（TS・同期 JS）を写した版では取れてしまう（陽性）。uid 0 では skip | root を `0755` に戻した周回から: `.gone-*` が無ければ取れ、生きた G の `.gone-*` があれば拒否、G を KILL すると回収して取れる。読める root で `.gone-*` が無いとき、bash の未展開のパターンは「対象なし」で待たない |
 | §2.3 の失敗 | `fault:group`・`token`・`tmp`・`mv`・`verify`・`signal` のそれぞれで、ゲートの副作用（pid ファイル）が**作られない**・`GATE … FAIL exit=125`・stderr の `machine-lock-handoff-failed stage=…`・retry されない・ロックは解放（`token` の注入では解放しない） | 注入なしでは副作用がちょうど 1 回 |
 | §2.4 の合図の作成の失敗（子の側） | `pause:published` で本体を止め、`HANDOFF_WAIT_SEC=1`・`fault:child-go` → 子は期限で取り下げを試み、`go` を作れず、**exec しない**（副作用なし・`ack` 無し）。本体を再開すると本体の `mkdir "$go"` は成功するが `ack` が無いので `stage=ack` の FAIL 125。**直す前の形**（`mkdir "$go" && exit 125; break`）を写したテスト用の子では exec してしまう（陽性） | 注入なしの競合（子の取り下げと本体の合図が同時）では、どちらか一方だけが勝ち、exec は 0 回か 1 回で本体の判定と一致する |
 | §2.4 の `ack` の失敗 | `fault:child-ack` → 副作用なし・`stage=ack` の FAIL 125・`$rga_mark` は無い | — |
@@ -408,3 +414,13 @@ pid の再利用は 3 実装とも「生きている」側に倒れる（待つ�
 | P2 復元途中の停止で、owner の無い `<lock>` が永久に残る | **採る** | 今の 3 実装は `mkdir <lock>` の後の死・owner の `rename` の失敗で空の `<lock>` を残し、owner の無い `<lock>` は回収しない（`verify-run.sh:917` の `-n`、`readOwner` の null で待つ）。`rename` の失敗では owner ごと `.gone-*` を消す（`machine-lock.ts:476`–481） | §2.7 に「先頭の 1 周の手順」の表（3 で途中の完了、4 で `<lock>` の `rmdir` を `.gone-*` の回収より先に、6 で空の `.gone-*` の片付け）と「復元の途中の状態」A・B・C の表。`rename` の失敗の「owner がまだ無かった」の読みは ENOENT に限り、それ以外は `rmdir <lock>` で戻す。§3 に 13〜15 行目、§6 に A・B・C を別々に固定する対照（G の終了の後に 3 実装とも取れ、空の `<lock>` も `.gone-*` も残らない） |
 | P3 「引用が閉じていない token は抽出できない」という例が誤っている | **採る** | `lock_json_field`（`verify-run.sh:654`–657）は閉じ引用が無ければ行の残りを返すことを確かめた | §4 の「抽出できない破損」の例から外し、「抽出できる不正な JSON」へ移した（`"token":123` も同じ側）。抽出できない側の例を、空・キー無し・`null`・`""`・`:` の後が型を決められない文字、に直した。正しい JSON でも `:` の後に空白があると bash は読めないことを別の行にした（本文に無い指摘）。§6 の表駆動でこれらを固定する |
 | （自分で見つけたもの）既存の復元の `rename` の失敗が owner ごと `.gone-*` を消す | **採る** | P2 の B を調べていて、今の 3 実装が失敗を全て「owner がまだ無かった」と読むことを確かめた | §2.7 の最後の注記と「復元の途中の状態」の B の行。本文に無い指摘にも書いた |
+
+### 4 回目
+
+レビュー: `workspace/orchestration/runs/2026-11-09/prereview/review-4288d.md`（codex-2、静的レビュー。前回の 5 件は 4 件が解消、排水の失敗の後の EXIT の解放は一部解消との判定）。
+
+| 指摘 | 処置 | 理由 | 設計のどこを変えたか |
+|---|---|---|---|
+| P1 EPERM のとき、未排水のロックを最後の trap が解放しうる | **採る** | 第 4 版の §2.5 の 2 は解放の抑止を `kill -0 -- -<pgid>` の**成功**だけで決めていたので、権限の違う子が残って再排水も失敗し、最後の確かめが EPERM を返すと抑止に入らず消す。§2.6 の「空を確かめられなければ残す」と矛盾する。既存の `lock_group_is_empty`（`verify-run.sh:695`–703）は ESRCH の文面のときだけ空とし、TS・同期 JS の `groupAlive` も `ESRCH` 以外を生きているとする（`machine-lock-sync.mjs:85`–92）ことを確かめた | §2.5 に「空の判定は 1 つ」（全ての空の判定を `lock_group_is_empty` に揃える。`drain_group` の「空を見る」を含む）。§2.5 の 2 の抑止の条件を「`lock_group_is_empty` が偽（EPERM を含む）」に、表の 1 行目と §2.6 の trap の解放（未排水の項目の処理の後と最後の `lock_release`）に同じ判定を明記。§3 の 11 行目に EPERM。§6 に EPERM の G の合成の対照（`<dir>/eperm` で `kill -0` の結果だけを置き換え、ESRCH になれば保有者自身が解放する陰性、第 4 版の形を写した陽性、実 OS の文面を root のグループで 1 回確かめる） |
+| P2 lock root の一覧の失敗を確かめるテストが無い | **採る** | root を `0333` にすると `mkdir` と `.queue/` は通るが一覧は取れず、bash の glob は未展開のパターンを返すだけでエラーにならない。「未展開＝対象なし」と書く実装を検出する対照が §6 に無かった | §2.7 の「lock root の一覧の失敗」（bash は glob の前に root の `-r`／`-x` を確かめ、未展開を対象なしと読むのは読める root のときだけ。TS・同期 JS は `readdirSync` の ENOENT 以外の例外を不明）。§6 に 3 実装の対照（拒否・権限の回復の後に進む・読める root の未展開は待たない。未展開を対象なしと読む版の陽性） |
+| 範囲を絞る案（§2.7 を別 Issue にする）についての意見 | **従う**（絞らない） | レビューのとおり、今回の P1 は解放側にあり §2.7 を外しても 0 にならず、外すと 2 回目の P1（復元の失敗の後の claim）が戻る | 変えない（止める点の記述のまま） |
