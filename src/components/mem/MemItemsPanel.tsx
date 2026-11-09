@@ -28,7 +28,13 @@
  *       (d) A unit holds everything its resend and its view need (the values read and shown, the
  *       destination, the key, every field sent; the comparisons are kept per item) and never reads
  *       the one-at-a-time screen state (`edit`, `closing`, the add's draft): opening or saving
- *       another item's edit or close leaves the unit and its view (Codex review-4227-pr1d P2);
+ *       another item's edit or close leaves the unit and its view (Codex review-4227-pr1d P2).
+ *       (e) While a unit is being sent or its result is unknown, nothing else is written: every
+ *       other write (add, edit, close, "save on top", "close again") cannot be pressed, the unit's
+ *       fields are read-only and the reason is shown; only the unit's own resend or drop is left.
+ *       Reading again and changing the selection stay (they only read). The combinations of a
+ *       unit with another write are gone, not handled one by one (the PM's rule after Codex
+ *       review-4227-pr1e P2, which also settles the PM review P3-3);
  *   (5) the buttons are read off the transition table (`memScreenActions`).
  * - Read again on focus and every 30 seconds; a row whose version moved is marked.
  * - The notices no session took, each with "take it".
@@ -223,6 +229,9 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
   const [pendings, setPendings] = useState<Readonly<Record<string, Pending>>>({});
   const [adding, setAdding] = useState({ kind: 'note' as Exclude<MemKind, 'now'>, text: '', closeWhen: '', evidence: '', promoteTo: '' });
   const [busy, setBusy] = useState(false);
+  /** The request being sent now (rule (4)(e)): its fields are read-only until it is answered. */
+  const [inflight, setInflight] = useState<Pending | null>(null);
+  const sendingRef = useRef(false);
   const [notice, setNotice] = useState<Notice>(null);
   const requestRef = useRef(0);
   const versionsRef = useRef<Map<string, number>>(new Map());
@@ -300,13 +309,34 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
   const pendingAdd = pendings[pendingSlot('add')] ?? null;
   const addPending = pendingAdd !== null;
   const sendable = (request: Pending | null) => request === null || pendingSendable(request, worktreeId, instanceId);
+  /**
+   * Rule (4)(e): while a unit is being sent or its result is unknown, no other write. `lock` says
+   * why (shown to the person); `otherPending(slot)` is true when a unit other than `slot` waits, so
+   * only that unit's own resend is left.
+   */
+  const lock: 'sending' | 'unknown' | null = inflight !== null ? 'sending' : Object.keys(pendings).length > 0 ? 'unknown' : null;
+  const otherPending = (slot: string) => Object.keys(pendings).some((key) => key !== slot);
+  /** The add's unit (unknown or being sent): the add's fields show it and are read-only. */
+  const addUnit = pendingAdd?.op === 'add' ? pendingAdd : inflight?.op === 'add' ? inflight : null;
+  const addShown = addUnit
+    ? {
+        kind: addUnit.input.kind as Exclude<MemKind, 'now'>,
+        text: addUnit.input.text,
+        closeWhen: addUnit.input.closeWhen ?? '',
+        evidence: (addUnit.input.evidence ?? []).join(', '),
+        promoteTo: addUnit.input.promoteTo ?? '',
+      }
+    : adding;
+  const changeAdding = (next: Partial<typeof adding>) => {
+    if (!addUnit) setAdding({ ...adding, ...next });
+  };
   const dropPending = useCallback((slot: string) => {
     setPendings((current) => without(current, slot));
   }, []);
   /** Ends this item's open edit or close only; another item's is left as it is. */
   const endEdit = useCallback((itemId: string) => setEdit((current) => (current?.itemId === itemId ? null : current)), []);
   const endClosing = useCallback((itemId: string) => setClosing((current) => (current?.itemId === itemId ? null : current)), []);
-  const closeWhenRequired = CLOSE_WHEN_REQUIRED_KINDS.has(adding.kind);
+  const closeWhenRequired = CLOSE_WHEN_REQUIRED_KINDS.has(addShown.kind);
 
   const refusalText = useCallback(
     (result: Extract<MemItemsResult<unknown>, { ok: false }>) => {
@@ -355,6 +385,29 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
     [dropPending, t]
   );
 
+  /**
+   * Sends one request as the one in flight (rule (4)(e)): one at a time, and none while a unit
+   * other than its own waits. Returns null when it was not sent.
+   */
+  const sendOne = useCallback(
+    async <R,>(request: Pending, run: () => Promise<R>): Promise<R | null> => {
+      if (sendingRef.current) return null;
+      if (Object.keys(pendings).some((key) => key !== slotOf(request))) return null;
+      sendingRef.current = true;
+      setInflight(request);
+      setBusy(true);
+      setNotice(null);
+      try {
+        return await run();
+      } finally {
+        sendingRef.current = false;
+        setInflight(null);
+        setBusy(false);
+      }
+    },
+    [pendings]
+  );
+
   const add = useCallback(async () => {
     if (!canWrite || !worktree) return;
     const unit = pendingAdd?.op === 'add' ? pendingAdd : null;
@@ -374,16 +427,13 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       key: newKey(),
       expectBranch: branch,
     };
-    setBusy(true);
-    setNotice(null);
-    try {
+    const request: Pending = { op: 'add', worktreeId: target, input };
+    await sendOne(request, async () => {
       const result = await memItemsApi.add(target, input);
-      if (settle(result, { op: 'add', worktreeId: target, input })) return;
+      if (settle(result, request)) return;
       if (await finish(result, t('mem.items.added'))) setAdding((current) => ({ ...current, text: '', closeWhen: '', evidence: '', promoteTo: '' }));
-    } finally {
-      setBusy(false);
-    }
-  }, [adding, branch, canWrite, finish, instanceId, pendingAdd, settle, t, worktree]);
+    });
+  }, [adding, branch, canWrite, finish, instanceId, pendingAdd, sendOne, settle, t, worktree]);
 
   const save = useCallback(
     async (draft: EditDraft) => {
@@ -395,11 +445,10 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       const input: MemScreenUpdateInput = again?.input ?? { instanceId, ifVersion: draft.ifVersion, ...editChanges(draft) };
       // The unit keeps the draft it was built from: its view does not read `edit` (rule (4)(d)).
       const shown = again?.draft ?? draft;
-      setBusy(true);
-      setNotice(null);
-      try {
+      const request: Pending = { op: 'update', worktreeId: target, itemId: draft.itemId, input, draft: shown };
+      await sendOne(request, async () => {
         const result = await memItemsApi.update(target, draft.itemId, input);
-        if (settle(result, { op: 'update', worktreeId: target, itemId: draft.itemId, input, draft: shown })) return;
+        if (settle(result, request)) return;
         if (!result.ok && result.code === 'version_conflict' && result.item) {
           // A conflict, also to a resend whose first try may have landed (rule (4)(c)): an edit has
           // no key the store could answer for, so the screen does not guess from the fields.
@@ -415,11 +464,9 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
           endEdit(draft.itemId);
           setConflicts((all) => without(all, draft.itemId));
         }
-      } finally {
-        setBusy(false);
-      }
+      });
     },
-    [endEdit, finish, instanceId, load, pendings, settle, t, worktree]
+    [endEdit, finish, instanceId, load, pendings, sendOne, settle, t, worktree]
   );
 
   const close = useCallback(
@@ -438,11 +485,10 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
         ...(target.reason.trim() ? { reason: target.reason.trim() } : {}),
         ...(confirmUnreflected ? { confirmUnreflected: true } : {}),
       };
-      setBusy(true);
-      setNotice(null);
-      try {
+      const request: Pending = { op: 'close', worktreeId: destination, itemId: target.itemId, input, closing: shown };
+      await sendOne(request, async () => {
         const result = await memItemsApi.close(destination, target.itemId, input);
-        if (settle(result, { op: 'close', worktreeId: destination, itemId: target.itemId, input, closing: shown })) return;
+        if (settle(result, request)) return;
         if (!result.ok && result.code === 'version_conflict' && result.item) {
           // A conflict, also to a resend whose first try may have closed it (rule (4)(c)): a close
           // has no key the store could answer for. Back to the comparison and an explicit
@@ -458,11 +504,9 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
           endClosing(target.itemId);
           setCloseConflicts((all) => without(all, target.itemId));
         }
-      } finally {
-        setBusy(false);
-      }
+      });
     },
-    [endClosing, finish, instanceId, load, pendings, settle, t, worktree]
+    [endClosing, finish, instanceId, load, pendings, sendOne, settle, t, worktree]
   );
 
   const acknowledge = useCallback(
@@ -523,8 +567,10 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
    */
   const renderEditor = (itemId: string, draft: EditDraft, unit: Extract<Pending, { op: 'update' }> | null) => {
     const shown = unit?.draft ?? draft;
+    // Rule (4)(e): the unit's fields, and those of the edit being sent, are read-only.
+    const held = unit !== null || (inflight?.op === 'update' && inflight.itemId === itemId);
     const change = (next: Partial<EditDraft>) => {
-      if (!unit) setEdit({ ...shown, ...next });
+      if (!held) setEdit({ ...shown, ...next });
     };
     return (
       <div className="space-y-1" data-testid={`mem-item-editor-${itemId}`}>
@@ -533,7 +579,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
           className={`${INPUT_CLASS} w-full`}
           rows={3}
           value={shown.text}
-          disabled={unit !== null}
+          disabled={held}
           data-testid={`mem-item-edit-text-${itemId}`}
           onChange={(e) => change({ text: e.target.value })}
         />
@@ -543,7 +589,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
           placeholder={shown.read.closeWhenType ? t('mem.items.closeWhenKeep', { type: shown.read.closeWhenType }) : t('mem.items.closeWhenInput')}
           className={`${INPUT_CLASS} w-full`}
           value={shown.closeWhen}
-          disabled={unit !== null}
+          disabled={held}
           data-testid={`mem-item-edit-close-when-${itemId}`}
           onChange={(e) => change({ closeWhen: e.target.value })}
         />
@@ -553,12 +599,17 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
           placeholder={t('mem.items.evidence')}
           className={`${INPUT_CLASS} w-full`}
           value={shown.evidence}
-          disabled={unit !== null}
+          disabled={held}
           data-testid={`mem-item-edit-evidence-${itemId}`}
           onChange={(e) => change({ evidence: e.target.value })}
         />
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" data-testid={`mem-item-save-${itemId}`} disabled={busy || !sendable(unit)} onClick={() => void save(shown)}>
+          <Button
+            size="sm"
+            data-testid={`mem-item-save-${itemId}`}
+            disabled={busy || (unit ? !sendable(unit) || otherPending(slotOf(unit)) : lock !== null || !canWrite)}
+            onClick={() => void save(shown)}
+          >
             {unit ? t('mem.items.resend') : t('mem.items.save')}
           </Button>
           {unit ? (
@@ -582,6 +633,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
    */
   const renderCloser = (itemId: string, open: Closing, unit: Extract<Pending, { op: 'close' }> | null) => {
     const shown = unit?.closing ?? open;
+    // Rule (4)(e): the unit's reason, and that of the close being sent, are read-only.
+    const held = unit !== null || (inflight?.op === 'close' && inflight.itemId === itemId);
     // The steps follow the item as read when "close" was opened, not the last read.
     const readActions = memScreenActions(shown.read.kind, shown.read.state);
     const twoStep = readActions.close?.transition === 'withdraw-recorded';
@@ -613,17 +666,17 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
               placeholder={t('mem.items.reason')}
               className={`${INPUT_CLASS} w-full`}
               value={shown.reason}
-              disabled={unit !== null}
+              disabled={held}
               data-testid={`mem-item-close-reason-${itemId}`}
               onChange={(e) => {
-                if (!unit) setClosing({ ...shown, reason: e.target.value });
+                if (!held) setClosing({ ...shown, reason: e.target.value });
               }}
             />
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 data-testid={`mem-item-close-confirm-${itemId}`}
-                disabled={busy || !sendable(unit)}
+                disabled={busy || (unit ? !sendable(unit) || otherPending(slotOf(unit)) : lock !== null || !canWrite)}
                 onClick={() => void close(shown, unit ? unit.input.confirmUnreflected === true : twoStep)}
               >
                 {unit ? t('mem.items.resend') : confirmLabel}
@@ -690,7 +743,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             <Button
               size="sm"
               data-testid={`mem-item-rebase-${itemId}`}
-              disabled={busy}
+              disabled={busy || lock !== null || !canWrite}
               onClick={() => void save({ ...conflict.draft, ifVersion: conflict.current.version })}
             >
               {t('mem.items.conflict.rebase')}
@@ -733,7 +786,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             <Button
               size="sm"
               data-testid={`mem-item-close-again-${itemId}`}
-              disabled={busy}
+              disabled={busy || lock !== null || !canWrite}
               onClick={() => {
                 // The person saw the current one: its version is the one read now, and the steps start again.
                 setEdit(null);
@@ -823,7 +876,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             </Link>
           )}
           {writable && !editingThis && (
-            <Button size="sm" variant="ghost" data-testid={`mem-item-edit-${item.id}`} disabled={busy} onClick={() => startEdit(item)}>
+            <Button size="sm" variant="ghost" data-testid={`mem-item-edit-${item.id}`} disabled={busy || lock !== null} onClick={() => startEdit(item)}>
               {t('mem.items.edit')}
             </Button>
           )}
@@ -832,7 +885,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
               size="sm"
               variant="ghost"
               data-testid={`mem-item-close-${item.id}`}
-              disabled={busy}
+              disabled={busy || lock !== null}
               onClick={() => startClose(item)}
             >
               {actions.close?.withdraw ? t('mem.items.withdraw') : t('mem.items.close')}
@@ -896,6 +949,11 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       {currentMode === 'on' && !canWrite && (
         <p className="text-xs text-muted-foreground" data-testid="mem-items-readonly">
           {worktree && !worktreeOnBranch ? t('mem.items.otherBranch') : t('mem.items.readOnly')}
+        </p>
+      )}
+      {lock && (
+        <p role="status" className="text-xs text-warning-foreground" data-testid="mem-items-write-locked">
+          {lock === 'sending' ? t('mem.items.lockedSending') : t('mem.items.lockedUnknown')}
         </p>
       )}
 
@@ -991,10 +1049,10 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             <select
               aria-label={t('mem.items.kind')}
               className={INPUT_CLASS}
-              value={adding.kind}
-              disabled={addPending}
+              value={addShown.kind}
+              disabled={addUnit !== null}
               data-testid="mem-items-add-kind"
-              onChange={(e) => setAdding({ ...adding, kind: e.target.value as Exclude<MemKind, 'now'> })}
+              onChange={(e) => changeAdding({ kind: e.target.value as Exclude<MemKind, 'now'> })}
             >
               {ADDABLE_KINDS.map((kind) => (
                 <option key={kind} value={kind}>
@@ -1008,10 +1066,10 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             placeholder={t('mem.items.text')}
             className={`${INPUT_CLASS} w-full`}
             rows={2}
-            value={adding.text}
-            disabled={addPending}
+            value={addShown.text}
+            disabled={addUnit !== null}
             data-testid="mem-items-add-text"
-            onChange={(e) => setAdding({ ...adding, text: e.target.value })}
+            onChange={(e) => changeAdding({ text: e.target.value })}
           />
           <input
             type="text"
@@ -1019,14 +1077,14 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             placeholder={closeWhenRequired ? t('mem.items.closeWhenRequired') : t('mem.items.closeWhenInput')}
             aria-required={closeWhenRequired}
             className={`${INPUT_CLASS} w-full`}
-            value={adding.closeWhen}
-            disabled={addPending}
+            value={addShown.closeWhen}
+            disabled={addUnit !== null}
             data-testid="mem-items-add-close-when"
-            onChange={(e) => setAdding({ ...adding, closeWhen: e.target.value })}
+            onChange={(e) => changeAdding({ closeWhen: e.target.value })}
           />
           {closeWhenRequired && (
             <p className="text-xs text-muted-foreground" data-testid="mem-items-add-close-when-required">
-              {t('mem.items.closeWhenRequiredHelp', { kind: t(`mem.items.kinds.${adding.kind}`) })}
+              {t('mem.items.closeWhenRequiredHelp', { kind: t(`mem.items.kinds.${addShown.kind}`) })}
             </p>
           )}
           <input
@@ -1034,27 +1092,27 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             aria-label={t('mem.items.evidence')}
             placeholder={t('mem.items.evidence')}
             className={`${INPUT_CLASS} w-full`}
-            value={adding.evidence}
-            disabled={addPending}
+            value={addShown.evidence}
+            disabled={addUnit !== null}
             data-testid="mem-items-add-evidence"
-            onChange={(e) => setAdding({ ...adding, evidence: e.target.value })}
+            onChange={(e) => changeAdding({ evidence: e.target.value })}
           />
-          {adding.kind === 'decision' && (
+          {addShown.kind === 'decision' && (
             <input
               type="text"
               aria-label={t('mem.items.promoteTo')}
               placeholder={t('mem.items.promoteTo')}
               className={`${INPUT_CLASS} w-full`}
-              value={adding.promoteTo}
-              disabled={addPending}
-              onChange={(e) => setAdding({ ...adding, promoteTo: e.target.value })}
+              value={addShown.promoteTo}
+              disabled={addUnit !== null}
+              onChange={(e) => changeAdding({ promoteTo: e.target.value })}
             />
           )}
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               data-testid="mem-items-add-submit"
-              disabled={busy || !sendable(pendingAdd) || (!addPending && adding.text.trim().length === 0)}
+              disabled={busy || (addPending ? !sendable(pendingAdd) || otherPending(pendingSlot('add')) : lock !== null || adding.text.trim().length === 0)}
               onClick={() => void add()}
             >
               {addPending ? t('mem.items.resend') : t('mem.items.add')}

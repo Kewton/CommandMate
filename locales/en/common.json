@@ -703,6 +703,8 @@
         "close": "close"
       },
       "pendingDiscard": "Do not send again (check the list for whether it was written)",
+      "lockedSending": "Sending. Until the answer comes back, no other write (add, edit, close) can be made and the fields sent cannot be changed.",
+      "lockedUnknown": "A request's result is unknown. Until you send it again or choose \"Do not send again\", no other write (add, edit, close, save on top, close again) can be made and that request's fields cannot be changed (so nothing is written twice or mixed up). Reading again and changing the worktree or instance still work.",
       "closeWhenKeep": "Close condition (empty keeps the current {type}; writing one replaces it)",
       "closeWhenRequired": "Close condition (required, e.g. issue:#123, pr:#45)",
       "closeWhenRequiredHelp": "{kind} needs a close condition (required for waiting, next and external; e.g. issue:#123, pr:#45, branch:feature/x?merged=develop).",

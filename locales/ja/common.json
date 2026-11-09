@@ -703,6 +703,8 @@
         "close": "close"
       },
       "pendingDiscard": "送り直さずにやめる（一覧で書けたかを確かめる）",
+      "lockedSending": "送信中です。答えが返るまで、ほかの書き込み（追加・編集・close）はできず、送った欄は変えられません。",
+      "lockedUnknown": "結果が分からない要求があります。その要求を「同じ内容で送り直す」か「送り直さずにやめる」まで、ほかの書き込み（追加・編集・close・載せ直し・閉じ直す）はできず、その要求の欄は変えられません（二重や取り違えを防ぐため）。読み直しと作業木・instance の選択の変更はできます。",
       "closeWhenKeep": "閉じる条件（空なら今の {type} のまま。書くと置き換え）",
       "closeWhenRequired": "閉じる条件（必須。例 issue:#123・pr:#45）",
       "closeWhenRequiredHelp": "{kind} には閉じる条件が要ります（waiting・next・external は必須。例 issue:#123・pr:#45・branch:feature/x?merged=develop）。",

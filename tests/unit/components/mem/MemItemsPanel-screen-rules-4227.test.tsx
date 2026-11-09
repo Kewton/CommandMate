@@ -346,21 +346,27 @@ describe('[#4227] rule (4)(a)(b)(c): one unit per operation, sent as it is (Code
   it('① add lost → another item is saved → the add sent again is still one item (another answer does not drop the unit)', async () => {
     renderPanel();
     await screen.findByTestId('mem-items-add');
+    // Another item's edit is open before the add (rule (4)(e) lets no other write start after it).
+    fireEvent.click(screen.getByTestId('mem-item-edit-n1'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'other save' } });
     fireEvent.change(screen.getByTestId('mem-items-add-text'), { target: { value: 'kept add' } });
     loseAnswer = 'add';
     fireEvent.click(screen.getByTestId('mem-items-add-submit'));
     await screen.findByTestId('mem-items-add-pending');
-    // Another operation completes.
-    fireEvent.click(screen.getByTestId('mem-item-edit-n1'));
-    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'other save' } });
+    // Rule (4)(e) (the PM's rule after Codex review-4227-pr1e): while the add is unknown the other
+    // save cannot be pressed. 538aa6cd9 saved it and dropped the add's key: a second item.
+    expect((screen.getByTestId('mem-item-save-n1') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('mem-item-save-n1'));
-    await waitFor(() => expect(find('n1').text).toBe('other save'));
-    // 538aa6cd9 dropped the add's key here and the next press made a second item.
+    expect(writesOf('update')).toHaveLength(0);
     expect(screen.getByTestId('mem-items-add-pending')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('mem-items-add-submit'));
     await waitFor(() => expect(screen.queryByTestId('mem-items-add-pending')).toBeNull());
     expect(writesOf('add')).toHaveLength(2);
     expect(writesOf('add')[1].body).toEqual(writesOf('add')[0].body);
+    expect(items.filter((entry) => entry.text === 'kept add')).toHaveLength(1);
+    // The unit settled: the other item is saved now, and the add is still one item.
+    fireEvent.click(screen.getByTestId('mem-item-save-n1'));
+    await waitFor(() => expect(find('n1').text).toBe('other save'));
     expect(items.filter((entry) => entry.text === 'kept add')).toHaveLength(1);
   });
 
@@ -519,17 +525,24 @@ describe('[#4227] rule (4)(d): a unit and its view never read the one open edit,
     await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
     await readAgain();
     await waitFor(() => expect(screen.queryByTestId('mem-item-n1')).toBeNull());
-    // Another item's edit, opened and saved: it replaced the one open `closing` in 364738a07 and the resend went with it.
+    // Another item's edit: in 364738a07 it replaced the one open `closing` and the resend went with it.
+    // Rule (4)(e): while the close is unknown it cannot even be opened, and nothing is sent.
+    expect((screen.getByTestId('mem-item-edit-d3') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('mem-item-edit-d3'));
-    fireEvent.change(screen.getByTestId('mem-item-edit-text-d3'), { target: { value: 'other item' } });
-    fireEvent.click(screen.getByTestId('mem-item-save-d3'));
-    await waitFor(() => expect(find('d3').text).toBe('other item'));
+    expect(screen.queryByTestId('mem-item-editor-d3')).toBeNull();
     expect(screen.getByTestId('mem-items-units')).toContainElement(screen.getByTestId('mem-item-close-confirm-n1'));
     fireEvent.click(screen.getByTestId('mem-item-close-confirm-n1'));
     await screen.findByTestId('mem-item-close-conflict-n1');
     expect(writesOf('close')).toHaveLength(2);
     expect(writesOf('close')[1].body).toEqual(writesOf('close')[0].body);
     expect(writesOf('close')[1].url).toBe(writesOf('close')[0].url);
+    // The unit settled (a comparison is not a unit): the other item is edited and saved, the comparison stays.
+    fireEvent.click(screen.getByTestId('mem-item-edit-d3'));
+    fireEvent.change(screen.getByTestId('mem-item-edit-text-d3'), { target: { value: 'other item' } });
+    fireEvent.click(screen.getByTestId('mem-item-save-d3'));
+    await waitFor(() => expect(find('d3').text).toBe('other item'));
+    expect(screen.getByTestId('mem-item-close-conflict-n1')).toBeInTheDocument();
+    expect(writesOf('close')).toHaveLength(2);
   });
 
   it('the view of a listed unit shows the unit’s own reason while another item’s edit and then its close are open', async () => {
@@ -540,11 +553,11 @@ describe('[#4227] rule (4)(d): a unit and its view never read the one open edit,
     loseAnswer = 'close';
     fireEvent.click(screen.getByTestId('mem-item-close-confirm-d3'));
     await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
-    // Another item's edit, then its close, replace the one open draft in turn.
+    // Another item's edit, then its close: rule (4)(e) lets neither open while d3's close is unknown.
     fireEvent.click(screen.getByTestId('mem-item-edit-n1'));
-    fireEvent.change(screen.getByTestId('mem-item-edit-text-n1'), { target: { value: 'typing' } });
+    expect(screen.queryByTestId('mem-item-editor-n1')).toBeNull();
     fireEvent.click(screen.getByTestId('mem-item-close-n1'));
-    expect(screen.getByTestId('mem-item-closer-n1')).toBeInTheDocument();
+    expect(screen.queryByTestId('mem-item-closer-n1')).toBeNull();
     // d3's unit is still shown, with its own reason and a resend.
     const reason = screen.getByTestId('mem-item-close-reason-d3') as HTMLInputElement;
     expect(reason.value).toBe('kept reason');
@@ -554,8 +567,10 @@ describe('[#4227] rule (4)(d): a unit and its view never read the one open edit,
     await screen.findByTestId('mem-item-close-conflict-d3');
     expect(writesOf('close')[1].body).toEqual(writesOf('close')[0].body);
     expect(writesOf('close')[0].body).toMatchObject({ reason: 'kept reason', ifVersion: 1 });
-    // The open close of n1 is not ended by d3's answer.
+    // d3's unit settled into a comparison (not a unit): n1's close opens again, and d3's comparison stays.
+    fireEvent.click(screen.getByTestId('mem-item-close-n1'));
     expect(screen.getByTestId('mem-item-closer-n1')).toBeInTheDocument();
+    expect(screen.getByTestId('mem-item-close-conflict-d3')).toBeInTheDocument();
   });
 
   it('an edit lost while another item’s close is opened: its editor stays with the draft sent', async () => {
@@ -565,11 +580,15 @@ describe('[#4227] rule (4)(d): a unit and its view never read the one open edit,
     dropRequest = 'update';
     fireEvent.click(screen.getByTestId('mem-item-save-n1'));
     await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('結果が分かりません'));
+    // Rule (4)(e): another item's close cannot be opened while the edit is unknown.
     fireEvent.click(screen.getByTestId('mem-item-close-d3'));
+    expect(screen.queryByTestId('mem-item-closer-d3')).toBeNull();
     expect((screen.getByTestId('mem-item-edit-text-n1') as HTMLTextAreaElement).value).toBe('sent draft');
     fireEvent.click(screen.getByTestId('mem-item-save-n1'));
     await waitFor(() => expect(find('n1').text).toBe('sent draft'));
     expect(writesOf('update')[1].body).toEqual(writesOf('update')[0].body);
+    // The unit settled: d3's close opens now.
+    fireEvent.click(screen.getByTestId('mem-item-close-d3'));
     expect(screen.getByTestId('mem-item-closer-d3')).toBeInTheDocument();
   });
 
