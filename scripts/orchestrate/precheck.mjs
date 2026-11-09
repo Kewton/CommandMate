@@ -508,7 +508,7 @@ export function optionsFromNote(note, fallbackBase = DEFAULT_BASE) {
  *
  * @param {string} name
  * @param {{ root: string, timeoutMs: number, pollMs?: number, sleep?: (ms: number) => void }} options
- * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void }}
+ * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, unknown?: { point: string, path: string, code: string }, release: () => void }}
  */
 export function acquireMachineLockSync(name, { root, timeoutMs, pollMs = LOCK_POLL_MS, sleep }) {
   return acquireTicketedLockSync(name, { root, timeoutMs, pollMs, ...(sleep ? { sleep } : {}) });
@@ -577,7 +577,7 @@ export function parseArgs(argv) {
  *   run?: typeof defaultRun,
  *   findTestsNaming?: typeof findTestsNaming,
  *   estimateRelatedTests?: typeof estimateRelatedTests,
- *   acquireHeavyLock?: (timeoutMs: number) => { acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void },
+ *   acquireHeavyLock?: (timeoutMs: number) => { acquired: boolean, waitedMs: number, heldBy: string | null, unknown?: { point: string, path: string, code: string }, release: () => void },
  *   now?: () => Date,
  *   home?: string,
  *   log?: (line: string) => void,
@@ -732,7 +732,9 @@ export function main(argv, deps = {}) {
       if (lock) {
         mutexMs += lock.waitedMs;
         if (!lock.acquired) {
-          heldBy = `held${lock.heldBy ? ` by ${lock.heldBy}` : ''} for ${(lock.waitedMs / 1000).toFixed(1)}s`;
+          // What the lock could not observe (#4288): point, path and errno — not an ordinary conflict.
+          const unknown = lock.unknown ? `; unknown point=${lock.unknown.point} path=${lock.unknown.path} errno=${lock.unknown.code}` : '';
+          heldBy = `held${lock.heldBy ? ` by ${lock.heldBy}` : ''} for ${(lock.waitedMs / 1000).toFixed(1)}s${unknown}`;
           results[step] = HELD;
           fs.appendFileSync(logFile, `\n## ${step}: not run — ${HEAVY_MUTEX} ${heldBy}\n`);
           log(`  ${step} ${HELD} (not run: ${HEAVY_MUTEX} ${heldBy})`);
