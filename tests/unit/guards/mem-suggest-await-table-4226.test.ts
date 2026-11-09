@@ -34,8 +34,16 @@
  *    higher-order functions (a function passed as a value and called elsewhere); dynamic calls
  *    (computed property names, `Function.prototype.call`/`apply`, lookups by string).
  * INV-A itself is fixed at run time by the table-driven injection test over W1〜W5
- * (`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`, I-F11: the state changes after each
- * await, and no prompt nor record is left). This guard is an aid that notices a new `await`
+ * (`tests/unit/lib/mem-suggest/suggest-invariants.test.ts`, I-F11, design §3.6). The expectation
+ * differs by the point of the change: W1 (before the fix) answers the state after the change
+ * (the `off` kinds: no prompt, no record); W2〜W4: a change after the await resolves leaves no
+ * prompt and no record; W5: a change during its wait (between the two `deps.observe`) leaves no
+ * prompt and no record, while a change after W5 resolved leaves the prompt and the record
+ * (INV-A's edge: the build has judged and recorded; the record is quiet's, `full` records
+ * none; a delete of the worktree takes the record with it as a child row). The injection covers only the awaits of the table's ids (`deps.step`,
+ * and W5's `deps.observe`); a wait outside the table (an `await` not through `step`, a timer)
+ * or a read/record outside the build by a synchronous helper is not detected by it
+ * automatically. This guard is an aid that notices a new `await`
  * (or a record outside the build) added in the shapes above; it is not the proof of INV-A.
  *
  * The files are `src/lib/mem-suggest/**` as listed on disk (and any file a control
