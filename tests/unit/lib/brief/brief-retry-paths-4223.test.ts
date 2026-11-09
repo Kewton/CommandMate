@@ -3,17 +3,26 @@
  * miss as #4221's purge: a generation not checked). A rebuild must never carry a request
  * read before the worktree / instance was deleted and made again to the one made later.
  *
- * The table is checked against `src/lib/brief/**` itself: every function that calls
- * `buildBrief(` is a row, and whether it calls it inside a loop (a rebuild) is the row's
- * `retries`. A new caller, or a new loop around an existing one, fails here until it has
- * a row that runs the re-creation through it. The reasons a build gives up
+ * The table is checked against `src/` itself (`brief-call-chain.ts`): every function in
+ * the chain of callers of `buildBrief` — arrow functions, methods, aliases and the API
+ * around `briefForRoute` included — is a row, and whether it calls the chain inside a
+ * loop (a rebuild) is the row's `retries`. A new caller, or a new loop around an existing
+ * one, fails here until it has a row that runs the re-creation through it. The reasons a build gives up
  * (`BRIEF_CHANGE_REASONS`) are each the route's decision to rebuild or not.
  *
  * @vitest-environment node
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-const hooks = vi.hoisted(() => ({ onInfo: null as null | ((event: string) => void) }));
+const hooks = vi.hoisted(() => ({ onInfo: null as null | ((event: string) => void), db: null as unknown }));
+vi.mock('@/lib/db/db-instance', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/db/db-instance')>()),
+  getDbInstance: () => hooks.db,
+}));
+vi.mock('@/lib/brief/service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/brief/service')>();
+  return { ...actual, briefForRoute: vi.fn(actual.briefForRoute) };
+});
 vi.mock('@/lib/logger', () => ({
   createLogger: () => {
     const quiet = () => undefined;
@@ -21,41 +30,18 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 
-import { readdirSync, readFileSync } from 'fs';
-import path from 'path';
+import { NextRequest } from 'next/server';
 import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
 import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
 import { getInstanceIncarnation } from '@/lib/mem/incarnation';
 import { BRIEF_CHANGE_REASONS, BriefMembershipChangedError } from '@/lib/brief/build';
 import { createMemBriefProvider } from '@/lib/brief/provider';
-import { BRIEF_ROUTE_RETRIES } from '@/lib/brief/service';
+import { BRIEF_ROUTE_RETRIES, briefForRoute } from '@/lib/brief/service';
+import { GET } from '@/app/api/worktrees/[id]/mem/brief/route';
+import { briefCallChain, chainSources } from './brief-call-chain';
 import type { BriefSourceReader } from '@/lib/brief/sources';
 import type { BriefRequest } from '@/lib/session/brief-provider';
 import { BriefWorld, resetBriefMemory } from './brief-4223-harness';
-
-const BRIEF_DIR = path.join(process.cwd(), 'src', 'lib', 'brief');
-
-/** `file:function` → whether it builds again in a loop. Found from the source below. */
-function buildCallers(sources: Record<string, string>): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  for (const [file, source] of Object.entries(sources)) {
-    const starts = [...source.matchAll(/^\s*(?:export )?(?:async )?function (\w+)/gm)];
-    starts.forEach((match, index) => {
-      const body = source.slice(match.index, starts[index + 1]?.index ?? source.length);
-      const call = body.search(/\bbuildBrief\(/);
-      if (match[1] === 'buildBrief' || call < 0) return;
-      out[`${file}:${match[1]}`] = /\b(for|while)\s*\(/.test(body.slice(0, call));
-    });
-  }
-  return out;
-}
-
-const briefSources = (): Record<string, string> =>
-  Object.fromEntries(
-    readdirSync(BRIEF_DIR)
-      .filter((name) => name.endsWith('.ts'))
-      .map((name) => [`src/lib/brief/${name}`, readFileSync(path.join(BRIEF_DIR, name), 'utf8')])
-  );
 
 const world = new BriefWorld();
 const recreate = () => {
@@ -87,6 +73,27 @@ interface RetryRow {
 }
 
 const ROWS: Record<string, RetryRow> = {
+  'src/app/api/worktrees/[id]/mem/brief/route.ts:GET': {
+    retries: false,
+    recreatedOnce: async () => {
+      // The route answers what briefForRoute answered, once: it adds no rebuild of its own.
+      hooks.db = world.db;
+      vi.mocked(briefForRoute).mockClear();
+      vi.mocked(briefForRoute).mockResolvedValueOnce({ status: 404, body: { ok: false, code: 'not_found', reason: 'lifetime_changed' } });
+      const response = await GET(new NextRequest('http://localhost/api/worktrees/wt-1/mem/brief?instance=claude'), { params: Promise.resolve({ id: 'wt-1' }) });
+      expect(response.status).toBe(404);
+      expect(vi.mocked(briefForRoute)).toHaveBeenCalledTimes(1);
+      expect(closedCount()).toBe(0);
+    },
+    untouched: async () => {
+      hooks.db = world.db;
+      vi.mocked(briefForRoute).mockClear();
+      vi.mocked(briefForRoute).mockResolvedValueOnce({ status: 200, body: { ok: true, format: 'text', mode: 'on', text: 'x', omitted: 0 } });
+      const response = await GET(new NextRequest('http://localhost/api/worktrees/wt-1/mem/brief?instance=claude'), { params: Promise.resolve({ id: 'wt-1' }) });
+      expect(response.status).toBe(200);
+      expect(vi.mocked(briefForRoute)).toHaveBeenCalledTimes(1);
+    },
+  },
   'src/lib/brief/service.ts:briefForRoute': {
     retries: true,
     recreatedOnce: async () => {
@@ -178,18 +185,60 @@ afterEach(() => {
 });
 
 describe('every rebuild of a brief keeps the request’s lifetime', () => {
-  it('the table names every caller of buildBrief in src/lib/brief/** and whether it rebuilds', () => {
-    const found = buildCallers(briefSources());
-    expect(found).toEqual(Object.fromEntries(Object.entries(ROWS).map(([key, row]) => [key, row.retries])));
+  const table = () => Object.fromEntries(Object.entries(ROWS).map(([key, row]) => [key, { retries: row.retries }]));
+
+  it('the table names every caller in the chain of buildBrief in src/ and whether it rebuilds', () => {
+    expect(briefCallChain(chainSources())).toEqual(table());
   });
 
-  it('(control) the scan catches a new caller and a new loop around one', () => {
-    const sources = briefSources();
-    const extra = {
-      ...sources,
-      'src/lib/brief/extra.ts': `export async function again(db: never) {\n  while (true) {\n    await buildBrief(db, db, db);\n  }\n}\nexport async function once(db: never) {\n  return buildBrief(db, db, db);\n}\n`,
-    };
-    expect(buildCallers(extra)).toMatchObject({ 'src/lib/brief/extra.ts:again': true, 'src/lib/brief/extra.ts:once': false });
+  it.each([
+    [
+      'an arrow function only file',
+      { 'src/lib/brief/extra.ts': `import { buildBrief } from './build';\nexport const again = async (db: never) => {\n  for (let i = 0; i < 2; i += 1) await buildBrief(db, db, db);\n};\n` },
+      'src/lib/brief/extra.ts:again',
+      true,
+    ],
+    [
+      'an import alias',
+      { 'src/lib/brief/extra.ts': `import { buildBrief as make } from './build';\nexport async function viaAlias(db: never) {\n  return make(db, db, db);\n}\n` },
+      'src/lib/brief/extra.ts:viaAlias',
+      false,
+    ],
+    [
+      'a local alias in a loop',
+      { 'src/lib/brief/extra.ts': `import { buildBrief } from './build';\nconst make = buildBrief;\nexport async function loop(db: never) {\n  while (db) await make(db, db, db);\n}\n` },
+      'src/lib/brief/extra.ts:loop',
+      true,
+    ],
+    [
+      'a class method',
+      { 'src/lib/brief/extra.ts': `import { buildBrief } from './build';\nexport class Again {\n  async run(db: never) {\n    do { await buildBrief(db, db, db); } while (db);\n  }\n}\n` },
+      'src/lib/brief/extra.ts:Again.run',
+      true,
+    ],
+    [
+      'an API that retries briefForRoute (outside)',
+      {
+        'src/app/api/worktrees/[id]/mem/brief2/route.ts': `import { briefForRoute } from '@/lib/brief/service';\nexport const POST = async (db: never) => {\n  for (const _ of [1, 2]) await briefForRoute(db, db, db);\n};\n`,
+      },
+      'src/app/api/worktrees/[id]/mem/brief2/route.ts:POST',
+      true,
+    ],
+    [
+      'a retry through a callback',
+      { 'src/lib/brief/extra.ts': `import { briefForRoute } from './service';\nexport function twice(db: never) {\n  return [1, 2].map(async () => { for (;;) await briefForRoute(db, db, db); });\n}\n` },
+      'src/lib/brief/extra.ts:twice',
+      true,
+    ],
+  ])('(control) %s is found and the table comparison fails on it', (_name, extra, key, retries) => {
+    const found = briefCallChain({ ...chainSources(), ...extra });
+    expect(found[key]).toEqual({ retries });
+    expect(found).not.toEqual(table());
+  });
+
+  it('(control) a file that only names buildBrief in a comment or a string is not a caller', () => {
+    const found = briefCallChain({ ...chainSources(), 'src/lib/brief/extra.ts': `// buildBrief(db) is called by the route\nexport const NOTE = 'buildBrief(';\n` });
+    expect(found).toEqual(table());
   });
 
   it('every reason a build gives up is the route’s decision; an ended lifetime is never rebuilt', () => {

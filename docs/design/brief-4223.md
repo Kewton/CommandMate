@@ -239,11 +239,16 @@ task・verify・run は記録の時刻、状態の行（S1・S2・S9）は insta
   - `too_long`：§2.5 の省略の形
 - 1 つの関数 `sanitizeBriefField` に置き、テキスト・`--json`・`--all`・provider の組み直し（行を外すだけなので、検査済みの行がそのまま残る）が同じ値を使う
 - 出所・作者・時刻の欄は検査で消さない（`withheld` の行にも残る）
-- **見えない文字は見える形に置き換える**（実装後の PM レビュー P2-1、2026-11-09）：A の検査を通った後の値と、構造化の欄の文字列のすべてで、
-  Unicode Tags（U+E0000〜U+E007F）・ゼロ幅（U+200B〜U+200D・U+2060〜U+2064・U+FEFF）・LRM/RLM（U+200E/U+200F）・U+061C・
-  方向の上書き（U+202A〜U+202E・U+2066〜U+2069）・U+2028/U+2029 を `[U+XXXX]` に置き換える（`revealInvisible`、`src/lib/brief/sanitize.ts`）。
-  **除かずに置き換える**のは、読み手（人）にも何かがあったことが見えるようにするため。例外は 2 つの絵文字の間の ZWJ（U+200D）だけで、
-  絵文字の並び（👩‍💻）を壊さないために残す（国旗の Tags の列は置き換わる）。A の規則には足さない（A のファイルは変えない。A に足すかは別の判断）
+- **見えない文字は許可リスト型で見える形に置き換える**（実装後の PM レビュー P2-1 とその再レビュー、2026-11-09。範囲を足す手当てを 2 回で止めた）：
+  A の検査を通った後の自由入力と、構造化の欄の文字列のすべてで、**Default_Ignorable_Code_Point・一般カテゴリ Cf・Zl・Zp・Co・異体字セレクタ
+  （U+FE00〜U+FE0F・U+E0100〜U+E01EF）のすべて**を `[U+XXXX]` に置き換える（`BRIEF_INVISIBLE`・`revealInvisible`、`src/lib/brief/sanitize.ts`）。
+  **除かずに置き換える**のは、読み手（人）にも何かがあったことが見えるようにするため。
+  例外は絵文字の列の中だけ（`keptInvisible`）：2 つの絵文字の間の ZWJ（前が Extended_Pictographic・肌色の修飾子・VS16、後が Extended_Pictographic）、
+  絵文字の文字の直後の VS15/VS16（キーキャップの数字を含む）、RGI の地域の旗（🏴＋`gbeng`・`gbsct`・`gbwls` の Tags＋CANCEL TAG）。
+  肌色の修飾子は見える文字（So）なので対象に入らない。`tests/unit/lib/brief/brief-invisible-4223.test.ts` が全コードポイント（U+0000〜U+10FFFF、サロゲートを除く）を
+  単独と例外の起こりうる文脈で走査し、該当するのに置き換わらないもの・例外の外で残るものが 0 であること、例外を広げた版が落ちることを確かめる
+- **方針の代償**（PM 再レビュー P3-1、受け入れ）：ペルシア語の ZWNJ（U+200C）、インド系文字の ZWJ・ZWNJ、絵文字でない文字の後の異体字セレクタ（漢字の異体字）、
+  RGI の 3 つ以外の Tags の旗は `[U+XXXX]` で出る（同じ試験に明記）。A の規則には足さない（A のファイルは変えない。A に足すかは別の判断）
 
 ---
 
@@ -584,6 +589,7 @@ memo の無い本文・配送中の試行がある境界には `null`（I12）�
 | U1 | ［解消］第 1 版の「何もしない引数で状態の検出を読む」は成り立たない（P1-1）。S1 は観測の値を読む | — |
 | U2 | provider の 1,700 ms の期限が実機で足りるか（所属の解決の git の所要時間） | D2 の実機の受入 |
 | U3 | 口に `minLines` を足すか（G3） | D2 で決める |
+| U13 | **D2 への申し送り**（PM 再レビュー P3-3）：provider の経路は worktree の世代を要求と照合しない（D1 の `BriefRequest` に worktree の世代が無い。instance の世代は照らす）。送り先も同じ ID の新しい worktree なので漏洩ではないが、route の `pinned` と同じ固定を provider でも持つには口に worktree の世代を足す | D2 で D1 の口を変えるかを決める |
 | U4 | 最小値（テキスト 1,024・`--json` 4,096）が §2.6 の最悪を覆うか | I14 で数えて固定する |
 | U5 | `off` の `--json` で stdout を空にする（`{}` も出さない）こと | レビュー |
 | U6 | 優先順位 6 の位置と、「入らない最初の項目で止める」こと | レビュー |
@@ -615,11 +621,11 @@ memo の無い本文・配送中の試行がある境界には `null`（I12）�
 |---|---|---|---|
 | 予算の数え方（UTF-8 の最終出力） | `src/types/brief.ts` の `BRIEF_BUDGET`・`parseBriefBudget`、`src/lib/brief/fit.ts`（`Buffer.byteLength`） | route（`service.ts`：既定値・範囲の検査・`fitText(trailingNewline: true)`／`fitJson`）・CLI（`brief.ts`：送る前の範囲の検査は同じ `parseBriefBudget`、出力は受けた本文＋改行 1 つ）・provider（`fitText(trailingNewline: false, maxLines)`、`minBytes`/`defaultBytes` も `BRIEF_BUDGET.text`） | 追従。数を写した場所は無い（CLI の help の数字も `BRIEF_BUDGET` から組む） |
 | 優先の順 | `src/lib/brief/rank.ts`（`compareBriefItems`）と各 reader の順位（`sources.ts`）、「取得できない」の行の順位 `BRIEF_STATUS_ROW_RANK` | テキスト・`--json`・`--all`・provider の本文はすべて `buildBrief` の `rankBriefItems` の結果を `fit*` で前から取る。provider の組み直し（`reserve`）は行を外すだけで並べ直さない | 追従 |
-| データの区画（境界・1 項目 1 行・自由入力の検査・見えない文字・省略の形） | `render.ts`（`drawText`・`entryLine`・`fenceTag`・`omittedFormOf`／`BRIEF_BODY_FIELDS`）、`sanitize.ts`（`sanitizeBriefField` → A の `validateItemText` → `revealInvisible`、`sanitizeBranch`） | 全 reader の自由入力は `applyText`／`recordedWord`（`sources.ts`）を通る。mem は A の `presentMemItem` の `withheld` の後に同じ検査。ブランチは `build.ts` の `sanitizeBranch`（置き換えで値が変わる名前は省略の形）。構造化の欄の文字列は、テキストは `fieldText`、`--json` は `fittedJsonEntry` で同じ `revealInvisible` を通る。省略の形はテキストも `--json` も `omittedFormOf`（本文と `refs`） | 追従。task の入口の検査（`contract-parser.ts:503`）は別の規則のまま（§10） |
+| データの区画（境界・1 項目 1 行・自由入力の検査・見えない文字・省略の形） | `render.ts`（`drawText`・`entryLine`・`fenceTag`・`omittedFormOf`／`BRIEF_BODY_FIELDS`）、`sanitize.ts`（`sanitizeBriefField` → A の `validateItemText` → `revealInvisible`、`sanitizeBranch`） | 全 reader の自由入力は `applyText`／`recordedWord`（`sources.ts`）を通る。mem は A の `presentMemItem` の `withheld` の後に同じ検査。ブランチは `build.ts` の `sanitizeBranch`（置き換えで値が変わる名前は省略の形）。構造化の欄の文字列は、テキストは `fieldText`、`--json` は `fittedJsonEntry` で同じ `revealInvisible`（許可リスト型、`BRIEF_INVISIBLE`・`keptInvisible`）を通る。省略の形はテキストも `--json` も `omittedFormOf`（本文と `refs`） | 追従。task の入口の検査（`contract-parser.ts:503`）は別の規則のまま（§10） |
 | mode の判定 | A の `withMemTarget`（`decideRootMode`）。再確認も同じ `decideRootMode` | `buildBrief` の初め（`withMemTarget`）と組み立ての前（`assertStillSame`）。`derived` で読まない情報源は `BRIEF_DERIVED_SOURCES` の 1 か所。CLI の `off` は route の `disabled` → `MEM_EXIT_BY_CODE`（exit 50） | 追従。D1 の claim の照合（`session-brief.ts` の `membershipKey`）は features も比べるが、C の `briefMembershipKey` は features を読まない（C の本文は features に依らないため）。D1 の照合の方が厳しく、C の本文が誤って付く向きの差ではない |
 | 知らせの予約 | B の `reserveMemNotices`・`settleMemNoticeAttempt`（`src/lib/mem/notices.ts`） | provider の `reserve`（予約）・`settleBriefAttempt`（受領・返却）だけ。build・CLI・route は `listMemNoticesFor`（書かない）だけで予約も受領もしない | 追従。`getBriefProvider()` に繋ぐのと D1 の `settle` を `settleBriefAttempt` に繋ぐのは D2 |
 | instance の寿命 | D1 の `isSameInstanceLifetime`・`readInstanceLifetime`（`src/lib/db/session-brief-db.ts`） | `buildBrief` の初め（request の世代・route の `pinned` と照らす）と `assertStillSame` | 追従（写さず呼ぶ） |
-| 再試行（組み直し） | `service.ts` の `BRIEF_ROUTE_ATTEMPTS`・`BRIEF_ROUTE_RETRIES`、`build.ts` の `pinBriefLifetime`・`BRIEF_CHANGE_REASONS` | route（`briefForRoute`、最大 2 回、寿命を固定して渡す）だけが組み直す。provider の `build` は組み直さない（例外は D1 が `provider_failed` で受ける）。CLI は組み直さない | 追従。`brief-retry-paths-4223` が `buildBrief(` の呼び出し元と繰り返しを列挙して表と比べる |
+| 再試行（組み直し） | `service.ts` の `BRIEF_ROUTE_ATTEMPTS`・`BRIEF_ROUTE_RETRIES`、`build.ts` の `pinBriefLifetime`・`BRIEF_CHANGE_REASONS` | route（`briefForRoute`、最大 2 回、寿命を固定して渡す）だけが組み直す。provider の `build` は組み直さない（例外は D1 が `provider_failed` で受ける）。API（route の `GET`）と CLI は組み直さない | 追従。`brief-retry-paths-4223` が `src/` の `buildBrief` の呼び出しの連鎖（アロー関数・メソッド・別名・外側の呼び出しを含む、`tests/unit/lib/brief/brief-call-chain.ts`）と繰り返しを列挙して表と比べる |
 
 ---
 
@@ -664,3 +670,15 @@ Codex（codex-2）の 5-2b（`workspace/orchestration/runs/2026-11-08/review-422
 | PM P3-3 | 一部だけ予約できたとき `omitted` がずれる | **採る** | §5.3。対照：一部の予約の本文の `omitted` が 1 増える |
 | PM P3-1・2・4・5 | 打ち切りで境界の brief が消える・CLI の build 中のブランチ切替・同期の reader に期限が効かない・試行が 10 分残る | **直さない**（設計どおり・追跡） | — |
 | PM P3-6 | `derived` で task の題を出すか | **人の判断事項** | §11 の U12 |
+
+### 12.4 実装後の再レビューの処置（2026-11-09）
+
+codex-2（`review-4223b.md`、P2 1）と PM の再レビュー（`pm-review-4223-claude.md` の「再レビュー」・「PM の処分方針」、P2 1・P3 4）。前回の 4 件は直っていると判定。
+
+| # | 指摘 | 処置 | 反映先・対照 |
+|---|---|---|---|
+| PM 再 P2-1 | 同じ種類の隠し経路（異体字セレクタ・U+00AD・U+180E・U+3164 ほか）が残る（2 回目） | **採る**（許可リスト型へ） | §3.3。全コードポイントの走査・例外を広げると落ちる陽性・🧑‍🦰 👨‍👩‍👧 ❤️‍🔥 🏳️‍⚧️ 🫱🏻‍🫲🏼 1️⃣ と日本語が保たれる陰性・brief のテキストと `--json` |
+| codex-2 P2 ＝ PM 再 P3-2 | 再試行の経路・呼び出し元の網羅が function 宣言と直接の呼び出ししか見ない | **採る** | `brief-call-chain.ts`：TypeScript の構文で `buildBrief` の呼び出しの連鎖を `src/` 全体から列挙（アロー関数・メソッド・import／ローカル／再 export の別名・`obj.name(…)`・コールバックの中の繰り返し・外側の API）。表に `route.ts:GET`（組み直さない）を足した。自己対照：アロー関数だけのファイル・別名・ローカルの別名の繰り返し・クラスのメソッド・外側の API の再試行・コールバックの中の繰り返しで表との比較が落ちる／コメント・文字列だけでは呼び出し元にならない |
+| PM 再 P3-1 | ペルシア語の ZWNJ・インド系文字の ZWJ・地域の旗が崩れる | **方針の代償として明記** | §3.3（RGI の 3 つの地域の旗は例外で保つ）。試験に明記 |
+| PM 再 P3-3 | provider の経路で worktree の世代を要求と照合しない | **D2 への申し送り** | §11 の U13 |
+| PM 再 P3-4 | 本文の無い長い構造化の行は省略できない | **直さない**（追跡） | — |
