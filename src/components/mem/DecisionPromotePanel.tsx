@@ -106,7 +106,7 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
   }
   if (!list) return <p className="text-xs text-muted-foreground">{t('mem.decisions.loading')}</p>;
 
-  const operationLine = (operation: PromoteOperationView, version: number) => (
+  const operationLine = (operation: PromoteOperationView, version: number | null) => (
     <li key={operation.id} className="space-y-1 text-xs" data-testid={`decision-operation-${operation.id}`}>
       <span className="text-foreground">{t(`mem.decisions.operation.${operation.state}`)}</span>
       {operation.transitionPending && (
@@ -124,7 +124,7 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
             </Button>
           </>
         )}
-        {operation.state === 'succeeded' && operation.transitionPending && (
+        {operation.state === 'succeeded' && operation.transitionPending && version !== null && (
           <>
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={acknowledgeDiff} onChange={(e) => setAcknowledgeDiff(e.target.checked)} />
@@ -252,6 +252,23 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
           </li>
         ))}
       </ul>
+      {(list.unresolved ?? []).length > 0 && (
+        <div className="space-y-2 rounded border border-border p-2" data-testid="decision-unresolved">
+          <h4 className="text-xs font-medium text-foreground">{t('mem.decisions.unresolved')}</h4>
+          <ul className="space-y-2">
+            {(list.unresolved ?? []).map(({ operation, item, itemVersion }) => (
+              <li key={operation.id} className="space-y-1">
+                <p className="break-all text-xs text-muted-foreground">
+                  {item === null
+                    ? t('mem.decisions.unresolvedItemGone', { itemId: operation.itemId })
+                    : t('mem.decisions.unresolvedItemClosed', { itemId: operation.itemId })}
+                </p>
+                <ul>{operationLine(operation, itemVersion)}</ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {notice && (
         <p role={notice.tone} className={`text-xs ${notice.tone === 'status' ? 'text-muted-foreground' : 'text-danger-foreground'}`} data-testid="decision-promote-notice">
           {notice.text}

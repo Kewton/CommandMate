@@ -36,7 +36,8 @@ vi.mock('@/lib/logger', () => ({
 import { createRepository } from '@/lib/db/db-repository';
 import { getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
 import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
-import { memAddItem, memUpdateItem, type MemServiceDeps } from '@/lib/mem/service';
+import { memAddItem, memCloseItem, memPurge, memUpdateItem, type MemServiceDeps } from '@/lib/mem/service';
+import { renameWorktreeIdPreservingChildren } from '@/lib/db/migrations/worktree-id-rename';
 import type { WorktreeHeadObservation } from '@/lib/mem/git-observe';
 import type { PromoteOperationView, PromotePreviewView } from '@/lib/promote/model';
 import {
@@ -755,5 +756,202 @@ describe('(f) nothing commits or pushes (T16)', () => {
     expect(operationOf(await approve(await preview(made.id))).state).toBe('succeeded');
     expect(git('rev-list', '--count', 'HEAD').trim()).toBe('1');
     expect(git('status', '--porcelain').trim()).toBe('M docs/d.md');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5-2b (2026-11-09): P1 1・P2 3
+// ---------------------------------------------------------------------------
+
+/** A second root of the same Git (`resolveCommonDir` answers one dir for every path). */
+function addRootB(rules: Array<{ match: 'glob'; pattern: string; mode: 'off' | 'derived' | 'on' }>): string {
+  const rootB = path.join(dir, 'root-b');
+  mkdirSync(rootB, { recursive: true });
+  const repoB = createRepository(db, { name: 'repo-b', path: rootB, cloneSource: 'local' }).id;
+  const current = getMemSettings(db, repoB);
+  saveMemSettings(db, repoB, { version: current.version, features: current.features, rules });
+  return repoB;
+}
+/** Root B: the worktree's current branch `main` on, the item's branch `feature/x` off. */
+const SPLIT = [
+  { match: 'glob' as const, pattern: 'main', mode: 'on' as const },
+  { match: 'glob' as const, pattern: '**', mode: 'off' as const },
+];
+const BOTH_ON = [{ match: 'glob' as const, pattern: '**', mode: 'on' as const }];
+const rename = (from: string, to: string) => db.transaction(() => renameWorktreeIdPreservingChildren(db, from, to))();
+
+describe('5-2b P1: the mode of the item’s branch at every root', () => {
+  it('preview: the current branch on at both roots, the item’s branch on at one and off at the other → disabled, no preview', async () => {
+    const made = await addDecision();
+    addRootB(SPLIT);
+    head = { ...head, branch: 'main' };
+    const outcome = await promotePreview(db, SCREEN, repoA, made.id, { worktreeId: WT }, deps());
+    expect(codeOf(outcome)).toMatchObject({ code: 'disabled', reason: 'ambiguous' });
+    expect(promoteRows()).toBe(0);
+  });
+
+  it('approve: root B turned the item’s branch off since the preview → back to approval, nothing sent', async () => {
+    const made = await addDecision();
+    const repoB = addRootB(BOTH_ON);
+    head = { ...head, branch: 'main' };
+    const p = await preview(made.id);
+    const current = getMemSettings(db, repoB);
+    saveMemSettings(db, repoB, { version: current.version, features: current.features, rules: SPLIT });
+    const outcome = await approve(p);
+    expect(codeOf(outcome)).toMatchObject({ code: 'reapproval_required', reason: 'mode_not_on' });
+    expect(gh.posts()).toHaveLength(0);
+    expect(count('SELECT COUNT(*) n FROM mem_promote_operations')).toBe(0);
+    expect(item(made.id).state).toBe('open');
+  });
+
+  it('A’s entrance (confirm-reflected): the item’s branch off at root B → disabled, the item stays recorded', async () => {
+    const made = await addDecision();
+    await approve(await preview(made.id));
+    expect(item(made.id).state).toBe('recorded');
+    addRootB(SPLIT);
+    head = { ...head, branch: 'main' };
+    const before = item(made.id);
+    const outcome = await promoteConfirmReflected(db, SCREEN, repoA, made.id, { worktreeId: WT, ifVersion: before.version }, deps());
+    expect(codeOf(outcome).code).toBe('disabled');
+    expect(item(made.id)).toEqual(before);
+  });
+
+  it('(control) a single root on, the worktree on another branch → written and recorded as before', async () => {
+    const made = await addDecision();
+    head = { ...head, branch: 'main' };
+    const operation = operationOf(await approve(await preview(made.id)));
+    expect(operation.state).toBe('succeeded');
+    expect(item(made.id).state).toBe('recorded');
+    const confirmed = await promoteConfirmReflected(db, SCREEN, repoA, made.id, { worktreeId: WT, ifVersion: item(made.id).version }, deps());
+    expect(confirmed.status).toBeLessThan(300);
+    expect(item(made.id).state).toBe('promoted');
+  });
+
+  it('(control) two roots both on for the item’s branch → written', async () => {
+    const made = await addDecision();
+    addRootB(BOTH_ON);
+    head = { ...head, branch: 'main' };
+    expect(operationOf(await approve(await preview(made.id))).state).toBe('succeeded');
+    expect(gh.comments).toHaveLength(1);
+  });
+});
+
+describe('5-2b P2-1: a rename keeps the worktree an operation named', () => {
+  const crashOnLink = () => {
+    promoteHooks = {
+      doc: {
+        afterLink: () => {
+          throw new Error('the process ended here');
+        },
+      },
+    };
+  };
+
+  it('an unknown document write reconciled after the worktree’s rename → found, the temporary name taken back, the item recorded', async () => {
+    const made = await addDecision('path:docs/new.md');
+    crashOnLink();
+    const crashed = operationOf(await approve(await preview(made.id)));
+    promoteHooks = undefined;
+    expect(crashed.state).toBe('unknown');
+    rename(WT, 'wt-renamed');
+    await promoteReconcile(db, SCREEN, repoA, crashed.id, deps());
+    expect(op(crashed.id)).toMatchObject({ state: 'succeeded', transition_pending: 0 });
+    expect(readdirSync(path.join(wtPath(), 'docs'))).toEqual(['new.md']);
+    expect(item(made.id).state).toBe('recorded');
+  });
+
+  it('a new approval after the rename takes back the temporary name the earlier operation left', async () => {
+    const first = await addDecision('path:docs/new.md');
+    const second = await addDecision('path:docs/new.md', '二つ目の決定');
+    crashOnLink();
+    const crashed = operationOf(await approve(await preview(first.id)));
+    promoteHooks = undefined;
+    expect(readdirSync(path.join(wtPath(), 'docs'))).toContain(tempNameOf(crashed.id));
+    rename(WT, 'wt-renamed');
+    const p = await preview(second.id, { worktreeId: 'wt-renamed' });
+    expect(operationOf(await approve(p)).state).toBe('succeeded');
+    expect(readdirSync(path.join(wtPath(), 'docs'))).toEqual(['new.md']);
+  });
+
+  it('an approval whose preview was made before the rename → written under the new id, the item recorded', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    rename(WT, 'wt-renamed');
+    expect(operationOf(await approve(p))).toMatchObject({ state: 'succeeded', transitionPending: false });
+    expect(item(made.id).state).toBe('recorded');
+  });
+
+  it('(control) deleted and made again under the same id (a new lifetime) → the reconcile does not read it', async () => {
+    const made = await addDecision('path:docs/new.md');
+    crashOnLink();
+    const crashed = operationOf(await approve(await preview(made.id)));
+    promoteHooks = undefined;
+    recreateWorktree();
+    await promoteReconcile(db, SCREEN, repoA, crashed.id, deps());
+    expect(op(crashed.id)).toMatchObject({ state: 'unknown', unknown_reason: 'unreadable' });
+  });
+});
+
+describe('5-2b P2-2: an unsettled operation stays on the list after its item was closed or purged', () => {
+  type Listed = {
+    decisions: Array<{ item: { id: string } }>;
+    unresolved: Array<{ operation: PromoteOperationView; item: { id: string; state: string } | null; itemVersion: number | null }>;
+  };
+  const listed = async () => (await promoteList(db, repoA, 'feature/x', { mem: memDeps(), bootId: () => boot })).body as Listed;
+  const holdPost = () => {
+    let release!: () => void;
+    gh.hold = { match: (call) => call.args.includes('--method'), wait: new Promise<void>((resolve) => (release = resolve)) };
+    return () => release();
+  };
+
+  it('closed while the POST waits → written, the transition pending, and the operation still listed with the closed item', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const release = holdPost();
+    const pending = approve(p);
+    await until(() => gh.posts().length === 1);
+    const closed = await memCloseItem(db, WT, made.id, { instanceId: 'claude' }, memDeps());
+    expect(closed.status).toBeLessThan(300);
+    release();
+    const operation = operationOf(await pending);
+    expect(operation).toMatchObject({ state: 'succeeded', transitionPending: true });
+    const list = await listed();
+    expect(list.decisions.map((entry) => entry.item.id)).not.toContain(made.id);
+    expect(list.unresolved).toHaveLength(1);
+    expect(list.unresolved[0]).toMatchObject({ operation: { id: operation.id, transitionPending: true }, item: { id: made.id, state: 'closed' } });
+  });
+
+  it('purged while the POST times out → unknown, still listed without its item, and the reconcile reaches it', async () => {
+    const made = await addDecision();
+    const p = await preview(made.id);
+    const release = holdPost();
+    gh.postAnswer = () => failed('', { code: null, timedOut: true });
+    const pending = approve(p);
+    await until(() => gh.posts().length === 1);
+    const purged = await memPurge(db, { via: 'repository', repositoryId: repoA, branch: 'feature/x' }, { confirm: true, includeDecisions: true }, memDeps());
+    expect(purged.status).toBe(200);
+    release();
+    const operation = operationOf(await pending);
+    gh.postAnswer = undefined;
+    expect(operation.state).toBe('unknown');
+    expect(db.prepare('SELECT COUNT(*) n FROM mem_items WHERE id = ?').get(made.id)).toEqual({ n: 0 });
+    const list = await listed();
+    expect(list.unresolved).toEqual([expect.objectContaining({ operation: expect.objectContaining({ id: operation.id, state: 'unknown' }), item: null, itemVersion: null })]);
+    await promoteReconcile(db, SCREEN, repoA, operation.id, deps());
+    expect(op(operation.id).state).toBe('succeeded');
+    expect((await listed()).unresolved).toHaveLength(1);
+    expect((await listed()).unresolved[0].operation.transitionPending).toBe(true);
+  });
+
+  it('(control) an open item’s operation is listed under its item only; a settled operation is not listed as unresolved', async () => {
+    const open = await addDecision();
+    const unknownId = await unknownComment(open.id);
+    const done = await addDecision('issue:#1', '書けて閉じた決定');
+    await approve(await preview(done.id, { effect: 'record_only' }));
+    expect(item(done.id).state).toBe('promoted');
+    const list = await listed();
+    expect(list.unresolved).toEqual([]);
+    const entry = (list.decisions as Array<{ item: { id: string }; operations?: PromoteOperationView[] }>).find((d) => d.item.id === open.id)!;
+    expect(entry.operations?.map((o) => o.id)).toEqual([unknownId]);
   });
 });

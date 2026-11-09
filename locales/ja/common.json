@@ -535,7 +535,7 @@
       "makePreview": "差分を作る",
       "preview": "書く本文（差分）",
       "expires": "期限：{time}",
-      "invisible": "見えない文字を [U+XXXX] に置き換えました",
+      "invisible": "見えない文字を [U+XXXX] に置き換えました（ブランチ・作成者に含まれるときも。ブランチは省略の形で書きます）",
       "approve": "承認して書く",
       "cancel": "やめる",
       "confirmReflected": "正本へ反映したことを確かめた",
@@ -551,6 +551,9 @@
         "unknown": "結果が不明：自動では送り直しません。照合してください",
         "abandoned": "無いことを確かめた（未送信とみなす）"
       },
+      "unresolved": "項目が閉じられたか削除された後も、結果の確定していない操作",
+      "unresolvedItemGone": "項目は削除されました（{itemId}）",
+      "unresolvedItemClosed": "項目は閉じられています（{itemId}）",
       "pending": "書けたが項目は進んでいません（{reason}）",
       "concurrent": "書いている間に他の変更がありました。文書を確かめてください",
       "reapproval": "承認の後に変わりました（{reason}）。差分を作り直してください",

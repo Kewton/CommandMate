@@ -510,6 +510,17 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 
 - §0.1 の受入基準の読みは PM の確認待ちのまま残す（3 回目でも判定の対象外）
 
+### 9.4 実装後のレビュー（5-2b、2026-11-09、`workspace/orchestration/runs/2026-11-09/review-4225.md`）
+
+指摘 4 件（P1 1・P2 3）。すべてこの PR で直した。
+
+| # | 指摘 | 処置 | 1 行の理由（守る条件・対照） |
+|---|---|---|---|
+| P1 | 項目のブランチの mode 判定が全 root に届かない：所属は作業木の現在ブランチで解決し、追加の mode 確認は項目の所有 root だけ | 採る | preview・approve・A の入口 `memSettleDecisionTransition` は、作業木の所属に**項目のブランチ**を名指しして `withMemTarget` を引く（`decideMemTarget` の `ambiguous` と同じ扱い）。`ambiguous` は preview が `disabled`（`reason: ambiguous`）、approve が `mode_not_on` の再承認、A の入口が `ambiguous`（E は遷移待ちの理由 `disabled` に読む）。加えて `target.mode === 'on'` を求める。対照：同じ Git の 2 root で現在ブランチは双方 on・項目のブランチは一方 on／他方 off なら書かない（陽性）、単一 root の on と 2 root とも on は今どおり書ける（陰性） |
+| P2-1 | 改名後に文書の照合先を失う：照合が保存した旧 ID を直接引き、`unreadable` になる | 採る | 保存した値（来歴）は書き換えない。`currentWorktreeIdOf` が alias（`resolveWorktreeIdWithAlias`）で今の ID を引き、保存した世代と同じときだけその作業木とする（改名は世代を引き継ぎ、作り直しは新しい世代）。照合・遷移（`settleTransition`）・approve の context・一時名の回収（`docOperationsFor` は保存 ID を alias で解いて照らす）に当てる。対照：改名後の照合で成功・一時名の回収・改名前の preview の承認（陽性）、同じ ID の作り直しは読まない（陰性） |
+| P2-2 | 既存の close／purge の後に未解決の操作が画面から消える：一覧が closed を除いた項目の ID でしか操作を引かない | 採る | 一覧に `unresolved` を足す：ブランチの未解決の操作（approved・in_flight・unknown・遷移待ちの succeeded）を項目の存否・closed から独立に引き（`listUnresolvedPromoteOperations`）、項目の行に出ないものを項目（無ければ null）と並べる。画面は照合・無いことを確かめた・記録済みとして扱う（項目があるときだけ）のボタンを出す。対照：POST 待ちの間の close（遷移待ちのまま一覧に残る）と purge（不明のまま残り、照合が届く）、開いた項目の操作と確定した操作は `unresolved` に出ない |
+| P2-3 | ブランチの値の見えない文字：本文がブランチをそのまま差し込み、`invisibleReplaced` は本文と引用だけで計算 | 採る | ブランチに C の出口の検査 `sanitizeBranch`（`brief/sanitize.ts`）を当て、通らないものは省略の形（`(省略 N bytes・理由)`）で書く。作成者のインスタンス ID は `revealInvisible`。metadata の見えない文字も `invisibleReplaced` に数える。対照：`feature/a\u200Bb` は本文に残らず true、普通のブランチ・作成者・detached はそのままで false |
+
 ---
 
 ## 10. 実装で実コードを正とした点（2026-11-09）
@@ -525,6 +536,9 @@ Codex の事前レビュー（2026-11-09、P1 2・P2 5。`workspace/orchestratio
 | I7 | v66 の試験 `migration-v66-mem-store-4221.test.ts` | v69 の `down` を先に呼ぶ 2 行を足した（期待値は変えない） | v66 より前へ戻す試験は上に積んだ版から順に戻す（v68 のときと同じ足し方）。`mem_promote_*` は `mem_` で始まるので戻さないと「`mem_%` の表が 0」の期待に当たる |
 | I8 | 文書の行き先の worktree は人が選ぶ（§2.2） | 画面で選んだ作業木を、文書の行き先と context の両方に使う。preview は HEAD のブランチが項目のブランチと同じことを求める | 1 画面で選ぶものを 1 つにした。別の作業木へ書く要求は無い |
 | I9 | approve で token が取り出せないとき `failure`（§3.2） | operation を作らずに 502 `gh_failed`（`token_unavailable`）。preview は有効のまま | 送る前の失敗で、operation の行を作る前に分かる。再試行は同じ preview でできる |
+| I10 | 項目の mode は `memModeOnFor(項目の root, 項目のブランチ)`（§2.3） | 作業木の所属に項目のブランチを名指しした `withMemTarget` の答え（全 root が同じ判定・`ambiguous` は断る）と、項目の root の `memModeOnFor` の両方 | 5-2b P1。所属の全 root で同じ判定を求める A の規則（`decideMemTarget`）に揃える。`MemTargetSpec.branch` は型が `string` だが `withMemTarget` は名指しの値（detached の null を含む）をそのまま `decideMemTarget` へ渡すので、null は型だけ合わせた（`target.ts` は scope 外） |
+| I11 | 操作が名指す作業木は保存した ID（§3.4・§3.5） | 保存した ID と世代は書き換えず、使うときに alias と世代で今の作業木へ解く（`currentWorktreeIdOf`） | 5-2b P2-1。改名は子の行（世代を含む）と alias を動かすが、E の表は `worktree_id` 列を持たない（v69：削除で消えないため）ので改名に追随しない |
+| I12 | 一覧は項目ごとの操作（§4.1） | 項目の行に加え、項目の無い／閉じた未解決の操作を `unresolved` に出す | 5-2b P2-2 |
 
 ## 11. 共通規則の全読者
 
@@ -533,8 +547,8 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | 共通規則 | 読む場所（ファイル・関数） | 固定している試験 |
 |---|---|---|
 | 画面の印（`isScreenRequest`）。無ければ 403 `screen_only`・何も書かない | `src/lib/promote/service.ts` の `promotePreview`・`promoteApprove`・`promoteConfirmReflected`・`promoteReconcile`・`promoteAbandon`・`promoteSettleTransition`（関数の最初の文）。route（`src/app/api/repositories/[id]/mem/decisions/**`）は要求を渡すだけ。画面の client `src/lib/promote/screen-client.ts` が `screenRequestHeaders()` を付ける | `promote-entrances-4225`（(e)）・`promote-write-chain-4225`（(4)）・`mem-decisions-routes-4225`・`DecisionPromotePanel-4225`・ガード `mem-promote-screen-only-4225` |
-| mode は項目の (repository, branch) で `on` のときだけ開始・遷移する（`memModeOnFor`） | `promotePreview`・`promoteApprove`（同期の区間）、`memSettleDecisionTransition`（`src/lib/mem/service.ts`、遷移の同期の区間）。`promoteReconcile`・`promoteAbandon` は結果の記録だけで mode を問わない（E1）、遷移は A の入口が断る | `promote-entrances-4225`（(b)・T17）・`write-entrances-recreate-4221`（decision-* の mode の `it.each`） |
-| 作業木の世代は要求の到着で固定し、比べるだけ（固定し直さない） | `promotePreview`（`getOrCreateWorktreeIncarnation` → preview の行）、`promoteApprove`（preview の値 → operation の行）、`settleTransition`（operation の値を A の入口へ）、`promoteConfirmReflected`・`promoteSettleTransition`（その要求の時点）、`memSettleDecisionTransition` → `transitionDecision` の `alive()` | `promote-entrances-4225`（(a)・T20）・`write-entrances-recreate-4221`（decision-* の作り直しの `it.each`） |
+| mode は項目の (repository, branch) で `on` のときだけ開始・遷移する。項目のブランチを名指しして所属の全 root で同じ判定（`ambiguous` は断る、5-2b P1）＋項目の root の `memModeOnFor` | `promotePreview`・`promoteApprove`（同期の区間、`itemBranchSpec`・`itemModeOn`）、`memSettleDecisionTransition`（`src/lib/mem/service.ts`、遷移の同期の区間、項目のブランチを名指し）。`promoteReconcile`・`promoteAbandon` は結果の記録だけで mode を問わない（E1）、遷移は A の入口が断る | `promote-entrances-4225`（(b)・T17・5-2b P1）・`write-entrances-recreate-4221`（decision-* の mode の `it.each`） |
+| 作業木の世代は要求の到着で固定し、比べるだけ（固定し直さない）。保存した作業木は alias と世代で今の ID へ解く（改名は同じ作業木、作り直しは別、5-2b P2-1） | `currentWorktreeIdOf`（`promoteApprove` の context・`settleTransition`・`promoteReconcile` の文書）、`docOperationsFor`（保存 ID を alias で解く）、`promotePreview`（`getOrCreateWorktreeIncarnation` → preview の行）、`promoteApprove`（preview の値 → operation の行）、`settleTransition`（operation の値を A の入口へ）、`promoteConfirmReflected`・`promoteSettleTransition`（その要求の時点）、`memSettleDecisionTransition` → `transitionDecision` の `alive()` | `promote-entrances-4225`（(a)・T20・5-2b P2-1）・`write-entrances-recreate-4221`（decision-* の作り直しの `it.each`） |
 | 版と指紋（`item_version`・`itemFingerprint`）が承認のときと同じ | `promotePreview`（同期の区間で読み直し）、`promoteApprove`、`transitionDecision`（`WHERE version = ?`）、`promoteSettleTransition`（`acknowledgeDiff`） | `promote-entrances-4225`（T3・T18 U7）・`write-entrances-recreate-4221`（版の `it.each`） |
 | 行き先と基準の指紋（文書：内容の SHA-256・HEAD のブランチと common-dir、コメント：Issue の指紋・投稿者の数値 ID） | `promoteApprove`（同期の区間）、`writeDocBlock`（書く直前にもう一度）、`destination.ts`（`checkDocPath`・`docBaseFingerprint`・`issueBaseFingerprint`） | `promote-entrances-4225`（T5・T6・poster_changed）・`promote-doc-write-4225` |
 | 進行中は項目ごとに 1 つ、既にある記録を見ていない承認は書かない（`hasActivePromoteOperation`・一意の部分索引・`acknowledged_operation_ids`） | `promoteApprove`、`claimPromoteOperation`（`mem-promote-db.ts`）、migration v69 の索引 | `promote-entrances-4225`（T7・T10・T18・T19）・`migration-v69-mem-promote-4225` |
@@ -543,5 +557,7 @@ E の入口が共有する規則と、それを読む（当てはめる）場所
 | 文書は追記だけ・新規は `link`・E の一時名の回収規則 | `doc-write.ts`（`writeDocBlock`・`reclaimDocLeftovers`・`reconcileDocBlock`）、`docOperationsFor`（`mem-promote-db.ts`：同じ行き先の E の操作） | `promote-doc-write-4225`（T5b〜T5e・T12・T21）・`promote-entrances-4225`（T21・T5e） |
 | git を書かない・`gh --method` は 1 か所・常駐を持たない | E の全ソース | ガード `mem-promote-no-git-write-4225`・`promote-entrances-4225`（T16） |
 | decision の状態の遷移は A の 1 つの入口だけ | `transitionDecision`（`mem-db.ts`）← `memSettleDecisionTransition`（`mem/service.ts`）← `settleTransition`・`promoteConfirmReflected`（`promote/service.ts`） | `promote-write-chain-4225`（(1)〜(3)）・`write-entrances-recreate-4221`・`close-entrances-4222`（例外の行） |
+| 未解決の操作は項目の存否・closed に依らず画面に出す（5-2b P2-2） | `promoteList`（`unresolved`、`listUnresolvedPromoteOperations`）、`DecisionPromotePanel`（`decision-unresolved`）、`screen-client.ts`（`PromoteListBody`） | `promote-entrances-4225`（5-2b P2-2）・`DecisionPromotePanel-4225` |
+| 外へ出す本文の見えない文字（自由入力・引用・ブランチ・作成者）は見える形にし、`invisibleReplaced` に数える。ブランチは C の `sanitizeBranch`（5-2b P2-3） | `render.ts`（`renderPromoteBody`・`branchShown`）、`promotePreview`（`invisibleReplaced` を画面へ） | `promote-render-4225`（T15・5-2b P2-3） |
 | 「未反映」の表示（`recorded`） | E の画面（`DecisionPromotePanel`）と E の一覧の API（`unreflected:true`）。CLI の一覧と brief の文言は G（#4227）へ送った（§0.1 S3） | `promote-entrances-4225`（T13）・`DecisionPromotePanel-4225` |
 

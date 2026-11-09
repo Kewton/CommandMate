@@ -58,9 +58,12 @@ const PREVIEW = {
 };
 
 let calls: Array<{ method: string; url: string; headers: Record<string, string>; body: unknown }>;
+/** Added to the list's body (5-2b P2-2: the unsettled operations of a closed or purged item). */
+let listExtra: Record<string, unknown>;
 
 beforeEach(() => {
   calls = [];
+  listExtra = {};
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -78,6 +81,7 @@ beforeEach(() => {
             { item: view('d-rec', 'recorded'), unreflected: true, operations: [] },
           ],
           worktrees: [{ id: 'wt', path: '/w', name: 'wt', branch: 'feature/x' }],
+          ...listExtra,
         }),
       } as Response;
     }
@@ -123,5 +127,44 @@ describe('DecisionPromotePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'やめる' }));
     expect(screen.queryByTestId('decision-preview-d-open')).toBeNull();
     expect(calls.filter((call) => call.url.endsWith('/approve'))).toHaveLength(0);
+  });
+
+  it('5-2b P2-2: an unknown write of a purged item and a pending one of a closed item stay on the screen with their buttons', async () => {
+    const operation = (id: string, itemId: string, state: string, transitionPending: boolean) => ({
+      id,
+      itemId,
+      state,
+      destinationKind: 'issue_comment',
+      destination: PREVIEW.destination,
+      effect: 'spec',
+      resultRef: null,
+      transitionPending,
+      transitionReason: transitionPending ? 'state_forbids' : null,
+      concurrentEdit: false,
+      unknownReason: transitionPending ? null : 'timeout',
+      decidedBy: null,
+      approvedAt: '2026-11-09T00:00:00.000Z',
+      settledAt: null,
+    });
+    listExtra = {
+      unresolved: [
+        { operation: operation('op-gone', 'd-gone', 'unknown', false), item: null, itemVersion: null },
+        { operation: operation('op-closed', 'd-closed', 'succeeded', true), item: view('d-closed', 'closed'), itemVersion: 2 },
+      ],
+    };
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    const section = await screen.findByTestId('decision-unresolved');
+    expect(section).toHaveTextContent('項目は削除されました（d-gone）');
+    expect(section).toHaveTextContent('項目は閉じられています（d-closed）');
+    const gone = screen.getByTestId('decision-operation-op-gone');
+    fireEvent.click(gone.querySelector('button')!);
+    await waitFor(() => expect(calls.filter((call) => call.url.endsWith('/operations/op-gone/reconcile'))).toHaveLength(1));
+    expect(screen.getByTestId('decision-operation-op-closed')).toHaveTextContent('記録済みとして扱う');
+  });
+
+  it('5-2b P2-2 (control): a list without unsettled operations of a gone item shows no such section', async () => {
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    await screen.findByTestId('decision-d-open');
+    expect(screen.queryByTestId('decision-unresolved')).toBeNull();
   });
 });

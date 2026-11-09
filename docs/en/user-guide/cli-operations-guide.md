@@ -2617,6 +2617,9 @@ A `decision` is written to an Issue / PR comment or a worktree document (`promot
 - **Comments**: the body starts with a mark naming the operation (`<!-- commandmate-promote:op=…; item=… -->`). The poster is fixed by the token read once with `gh auth token --hostname <host>`, given to both the check and the post (the token is never stored or shown)
 - **Unknown outcomes**: a lost answer, a timeout, a database update that failed after the write, a restart and the like are kept as "outcome unknown" and **never sent again by themselves**. "Reconcile" on the screen looks for the mark (for a comment: the poster and the body's fingerprint; for a document: the block). If it is not found, the outcome stays unknown until a person presses "I checked it is not there" (on GitHub or in the worktree)
 - When the write succeeded but the item did not move (the worktree was re-created, the version changed, the mode is not `on`), the screen says so, and "Treat as recorded" makes the transition only (nothing is written outside)
+- The mode is that of **the item's branch** (not the chosen worktree's current branch). With several roots of the same Git, it is written only when every root agrees the item's branch is `on` (roots whose settings differ write nothing)
+- An operation whose outcome is not settled stays on the screen under "Operations still unsettled after their item was closed or deleted" after the item was closed with `mem close` or deleted with `mem purge`, and can still be reconciled. A worktree whose id changed by a rename is reconciled as the same worktree (one deleted and made again is another)
+- Invisible characters in the branch or the author are warned about too. A branch is written in its omitted form (`(省略 N bytes・reason)`)
 
 ### What is not prevented
 

@@ -39,6 +39,7 @@ import {
   insertPromotePreview,
   invalidatePromotePreview,
   listPromoteOperations,
+  listUnresolvedPromoteOperations,
   prunePromoteRecords,
   recordedOperationIds,
   setPromoteTransitionPending,
@@ -50,6 +51,7 @@ import {
 } from '@/lib/db/mem-promote-db';
 import { getWorktreeById, getWorktreesByRepository } from '@/lib/db/worktree-db';
 import { getRepositoryById } from '@/lib/db/db-repository';
+import { resolveWorktreeIdWithAlias } from '@/lib/db/worktree-alias-db';
 import { createLogger } from '@/lib/logger';
 import { parseOriginUrl } from '@/lib/mem/close-when';
 import type { WorktreeHeadObservation } from '@/lib/mem/git-observe';
@@ -58,7 +60,7 @@ import { memServerBootId } from '@/lib/mem/process-boot';
 import { findWithheld, presentMemItem, type MemRecord } from '@/lib/mem/present';
 import { MEM_SECRET_RULES_VERSION } from '@/lib/mem/secret-scan';
 import { memSettleDecisionTransition, type MemOutcome, type MemServiceDeps } from '@/lib/mem/service';
-import { withMemTarget, type MemTarget } from '@/lib/mem/target';
+import { withMemTarget, type MemTarget, type MemTargetSpec } from '@/lib/mem/target';
 import { validatePromoteTo, validateQuote } from '@/lib/mem/validate';
 import { isScreenRequest } from '@/lib/security/screen-request';
 import type { MemDecisionTransition } from '@/lib/db/mem-db';
@@ -229,6 +231,34 @@ async function observeHead(path: string, deps: PromoteDeps): Promise<WorktreeHea
   return (await import('@/lib/mem/git-observe')).observeWorktreeHead(path);
 }
 
+/**
+ * The target of the item's branch, reached through the context worktree (5-2b P1): the
+ * membership is the worktree's, the mode is that of the item's branch at every root of
+ * it (the same judgement as `decideMemTarget`: roots that differ are `ambiguous`). The
+ * worktree's current branch is not the item's when the screen picks another worktree.
+ */
+function itemBranchSpec(worktreeId: string, branch: string | null): MemTargetSpec {
+  // A named branch reaches `decideMemTarget` as it is; null is a detached item's branch.
+  return { via: 'worktree', worktreeId, branch: branch as string };
+}
+
+/** Whether the item's branch is `on` at every root of the target (and at the item's own root). */
+function itemModeOn(db: Database.Database, target: MemTarget, record: MemRecord): boolean {
+  return target.ok && target.mode === 'on' && memModeOnFor(db, [record.owner.repositoryId], record.owner.branch);
+}
+
+/**
+ * The worktree an operation named, as it is now (5-2b P2-1). A rename moves the id
+ * (the old one becomes an alias) and keeps the lifetime with it, so the saved id is
+ * resolved through the alias and kept only while the lifetime is the saved one; a
+ * worktree deleted and made again (a new lifetime) is not it. The saved values are
+ * kept as they were written (the record of what was approved).
+ */
+export function currentWorktreeIdOf(db: Database.Database, savedId: string, savedIncarnation: string): string | null {
+  const id = resolveWorktreeIdWithAlias(db, savedId);
+  return id !== null && getWorktreeIncarnation(db, id) === savedIncarnation ? id : null;
+}
+
 /** In the target's synchronous stretch: the context worktree resolves to the item's repository. */
 function targetMatches(target: MemTarget, record: MemRecord, repositoryId: string): boolean {
   return target.ok && target.readRepositoryIds.includes(record.owner.repositoryId) && target.readRepositoryIds.includes(repositoryId);
@@ -244,6 +274,8 @@ function transitionReasonOf(outcome: MemOutcome): PromoteTransitionReason {
     case 'version_conflict':
       return 'version_conflict';
     case 'disabled':
+    case 'ambiguous':
+      // The item's branch is not `on` at every root (5-2b P1).
       return 'disabled';
     case 'state_forbids':
       return 'state_forbids';
@@ -274,7 +306,8 @@ async function settleTransition(
       (await memSettleDecisionTransition(
         db,
         {
-          worktreeId: fixed.worktreeId,
+          // A rename since: the same lifetime under its new id (5-2b P2-1).
+          worktreeId: currentWorktreeIdOf(db, fixed.worktreeId, fixed.incarnation) ?? fixed.worktreeId,
           expectedWorktreeIncarnation: fixed.incarnation,
           itemId: getPromoteOperation(db, operationId)?.item_id ?? '',
           expectedVersion: fixed.version,
@@ -401,13 +434,14 @@ export async function promotePreview(
     if (baseFingerprint === 'unreadable') return promoteError('invalid_destination', { reason: 'unreadable' });
   }
 
-  return withMemTarget(db, { via: 'worktree', worktreeId: contextId }, deps.mem ?? {}, (target): MemOutcome => {
+  return withMemTarget(db, itemBranchSpec(contextId, record.owner.branch), deps.mem ?? {}, (target): MemOutcome => {
+    if (!target.ok && target.code === 'ambiguous') return promoteError('disabled', { reason: 'ambiguous' });
     const current = getMemRecord(db, itemId);
     if (!current || !targetMatches(target, current, repositoryId)) return promoteError('not_found');
     if (current.version !== record.version || itemFingerprint(current) !== itemFingerprint(record) || current.state !== 'open') {
       return reapproval('item_changed');
     }
-    if (!memModeOnFor(db, [current.owner.repositoryId], current.owner.branch)) return promoteError('disabled');
+    if (!itemModeOn(db, target, current)) return promoteError('disabled');
     if (getWorktreeIncarnation(db, contextId) !== contextIncarnation) return promoteError('worktree_recreated');
     if (findWithheld(current)) return promoteError('withheld');
     const now = deps.now?.() ?? Date.now();
@@ -498,10 +532,13 @@ export async function promoteApprove(
   ) {
     return refuse('preview_mismatch');
   }
-  const contextId = preview.context_worktree_id;
-  const worktree = getWorktreeById(db, contextId);
   // Fixed here, before the awaits, and kept in the operation (design §3.5).
   const fixedIncarnation = preview.context_worktree_incarnation;
+  // A rename since the preview is the same worktree under a new id (5-2b P2-1).
+  const contextId = currentWorktreeIdOf(db, preview.context_worktree_id, fixedIncarnation) ?? preview.context_worktree_id;
+  const worktree = getWorktreeById(db, contextId);
+  const recordBefore = getMemRecord(db, itemId);
+  if (!recordBefore) return promoteError('not_found');
   if (!worktree || getWorktreeIncarnation(db, contextId) !== fixedIncarnation) return refuse('worktree_recreated');
   const destination = JSON.parse(preview.destination) as PromoteDestination;
   const gh = deps.gh ?? defaultGhRun;
@@ -521,10 +558,11 @@ export async function promoteApprove(
     issueFingerprint = issueBaseFingerprint(await readGhIssue(gh, destination, env));
   }
 
-  const claimed = await withMemTarget(db, { via: 'worktree', worktreeId: contextId }, deps.mem ?? {}, (target): Claimed => {
+  const claimed = await withMemTarget(db, itemBranchSpec(contextId, recordBefore.owner.branch), deps.mem ?? {}, (target): Claimed => {
     const outcome = (o: MemOutcome): Claimed => ({ kind: 'outcome', outcome: o });
     const now = deps.now?.() ?? Date.now();
     const bootId = deps.bootId?.() ?? memServerBootId();
+    if (!target.ok && target.code === 'ambiguous') return outcome(refuse('mode_not_on'));
     const current = getMemRecord(db, itemId);
     if (!current || !targetMatches(target, current, repositoryId)) return outcome(promoteError('not_found'));
     const fresh = getPromotePreview(db, preview.id);
@@ -533,7 +571,7 @@ export async function promoteApprove(
     if (current.version !== preview.item_version || itemFingerprint(current) !== preview.item_fingerprint || current.state !== 'open') {
       return outcome(refuse('item_changed'));
     }
-    if (!memModeOnFor(db, [current.owner.repositoryId], current.owner.branch)) return outcome(refuse('mode_not_on'));
+    if (!itemModeOn(db, target, current)) return outcome(refuse('mode_not_on'));
     if (preview.rules_version !== MEM_SECRET_RULES_VERSION) return outcome(refuse('rules_changed'));
     if (findWithheld(current)) return outcome(refuse('withheld'));
     if (getWorktreeIncarnation(db, contextId) !== fixedIncarnation || !worktreeIncarnationAlive(db, fixedIncarnation)) {
@@ -580,7 +618,7 @@ export async function promoteApprove(
           operationId: claim.operationId,
           body: preview.body,
           baseFingerprint: preview.base_fingerprint,
-          leftovers: docOperationsFor(db, destination.worktreeId, destination.path),
+          leftovers: docOperationsFor(db, contextId, destination.path),
         },
         deps.hooks?.doc
       );
@@ -716,11 +754,13 @@ export async function promoteReconcile(
         : { settle: { state: 'unknown', reason: ours.length > 0 ? 'body_differs' : 'not_found_yet' } };
     }
   } else {
-    const worktree = getWorktreeById(db, destination.worktreeId);
-    if (!worktree || getWorktreeIncarnation(db, destination.worktreeId) !== destination.worktreeIncarnation) {
+    // The worktree it was written in, renamed or not (5-2b P2-1); a new lifetime is not it.
+    const worktreeId = currentWorktreeIdOf(db, destination.worktreeId, destination.worktreeIncarnation);
+    const worktree = worktreeId !== null ? getWorktreeById(db, worktreeId) : null;
+    if (!worktree || worktreeId === null) {
       finding = { settle: { state: 'unknown', reason: 'unreadable' } };
     } else {
-      const found = reconcileDocBlock(worktree.path, destination.path, row.id, row.body_sha256, docOperationsFor(db, destination.worktreeId, destination.path));
+      const found = reconcileDocBlock(worktree.path, destination.path, row.id, row.body_sha256, docOperationsFor(db, worktreeId, destination.path));
       finding = {
         settle:
           found === 'found'
@@ -821,6 +861,19 @@ export async function promoteList(db: Database.Database, repositoryId: string, b
       db,
       decisions.map((item) => item.id)
     ).map((row) => operationView(row, readState(db, row, bootId, now)));
+    // 5-2b P2-2: an unsettled operation stays reachable after its item was closed or
+    // purged (the item's close does not wait for the write outside).
+    const shown = new Set(decisions.map((item) => item.id));
+    const unresolved = listUnresolvedPromoteOperations(db, target.readRepositoryIds, branch)
+      .filter((row) => !shown.has(row.item_id))
+      .map((row) => {
+        const record = getMemRecord(db, row.item_id);
+        return {
+          operation: operationView(row, readState(db, row, bootId, now)),
+          item: record ? presentMemItem(record, { now }) : null,
+          itemVersion: record ? record.version : null,
+        };
+      });
     const worktrees = target.members.flatMap((root) =>
       getWorktreesByRepository(db, root.path).map((entry) => {
         const full = getWorktreeById(db, entry.id);
@@ -838,6 +891,7 @@ export async function promoteList(db: Database.Database, repositoryId: string, b
           unreflected: item.state === 'recorded',
           operations: operations.filter((operation) => operation.itemId === item.id),
         })),
+        unresolved,
         worktrees,
       },
     };

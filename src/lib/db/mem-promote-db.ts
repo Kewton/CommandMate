@@ -18,6 +18,7 @@ import {
   type PromoteOperationState,
   type PromoteQuoteOrigin,
 } from '@/lib/promote/model';
+import { resolveWorktreeIdWithAlias } from './worktree-alias-db';
 
 export interface PromotePreviewRow {
   id: string;
@@ -119,6 +120,28 @@ export function listPromoteOperations(db: Database.Database, itemIds: readonly s
     .all(...itemIds) as PromoteOperationRow[];
 }
 
+/**
+ * The unsettled operations of a branch (approved, in flight, unknown, or written with
+ * the item's transition pending), whatever became of their item (5-2b P2-2): a close
+ * or a purge of the item does not settle a write outside, and the screen must still
+ * reach its reconcile.
+ */
+export function listUnresolvedPromoteOperations(
+  db: Database.Database,
+  repositoryIds: readonly string[],
+  branch: string | null
+): PromoteOperationRow[] {
+  if (repositoryIds.length === 0) return [];
+  return db
+    .prepare(
+      `SELECT * FROM mem_promote_operations
+        WHERE repository_id IN (${repositoryIds.map(() => '?').join(',')}) AND branch IS ?
+          AND (state IN ('approved','in_flight','unknown') OR (state = 'succeeded' AND transition_pending = 1))
+        ORDER BY approved_at, rowid`
+    )
+    .all(...repositoryIds, branch) as PromoteOperationRow[];
+}
+
 /** The records already outside for an item: the `succeeded` and `unknown` operations (design §1.2). */
 export function recordedOperationIds(db: Database.Database, itemId: string): string[] {
   return (
@@ -147,7 +170,9 @@ export function docOperationsFor(db: Database.Database, worktreeId: string, rel:
     .prepare("SELECT id, destination, block FROM mem_promote_operations WHERE destination_kind = 'worktree_doc'")
     .all() as Array<{ id: string; destination: string; block: string | null }>) {
     const dest = destinationOf(row);
-    if (dest.kind === 'worktree_doc' && dest.worktreeId === worktreeId && dest.path === rel) out.set(row.id, row.block);
+    if (dest.kind !== 'worktree_doc' || dest.path !== rel) continue;
+    // A rename since keeps the id written in the operation; its alias names the worktree now (5-2b P2-1).
+    if (dest.worktreeId === worktreeId || resolveWorktreeIdWithAlias(db, dest.worktreeId) === worktreeId) out.set(row.id, row.block);
   }
   return out;
 }

@@ -535,7 +535,7 @@
       "makePreview": "Make the diff",
       "preview": "Body to write (the diff)",
       "expires": "Expires: {time}",
-      "invisible": "Invisible characters were replaced with [U+XXXX]",
+      "invisible": "Invisible characters were replaced with [U+XXXX] (also in the branch or the author; a branch is written in its omitted form)",
       "approve": "Approve and write",
       "cancel": "Cancel",
       "confirmReflected": "I checked it is reflected in the canonical place",
@@ -551,6 +551,9 @@
         "unknown": "Outcome unknown: never sent again by itself. Reconcile it",
         "abandoned": "Checked as not there (treated as not sent)"
       },
+      "unresolved": "Operations still unsettled after their item was closed or deleted",
+      "unresolvedItemGone": "The item was deleted ({itemId})",
+      "unresolvedItemClosed": "The item is closed ({itemId})",
       "pending": "Written, but the item did not move ({reason})",
       "concurrent": "Something else changed the document while writing. Check the document",
       "reapproval": "Changed since the approval ({reason}). Make the diff again",

@@ -543,12 +543,16 @@ export async function memSettleDecisionTransition(
   if (!before || before.kind !== 'decision') return memError('item_not_found');
   const expectedIncarnation = input.expectedWorktreeIncarnation;
 
-  return resolveTarget(db, { via: 'worktree', worktreeId: input.worktreeId }, deps, (target) => {
+  // The mode is that of the item's branch at every root of the worktree's repository
+  // (5-2b P1): roots that differ answer `ambiguous`, as every other mem entrance does.
+  // A named branch reaches `decideMemTarget` as it is; null is a detached item's branch.
+  const spec: MemTargetSpec = { via: 'worktree', worktreeId: input.worktreeId, branch: before.owner.branch as string };
+  return resolveTarget(db, spec, deps, (target) => {
     if (!target.ok) return targetFailure(target);
     const current = getMemRecord(db, input.itemId);
     if (!current || current.kind !== 'decision') return memError('item_not_found');
     if (!target.readRepositoryIds.includes(current.owner.repositoryId)) return memError('not_found');
-    if (!memModeOnFor(db, [current.owner.repositoryId], current.owner.branch)) {
+    if (target.mode !== 'on' || !memModeOnFor(db, [current.owner.repositoryId], current.owner.branch)) {
       return memError('disabled', { mode: target.mode, source: target.source });
     }
     const alive = () => getWorktreeIncarnation(db, input.worktreeId) === expectedIncarnation;

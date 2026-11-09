@@ -18,11 +18,20 @@ export interface PromoteDecisionEntry {
   operations: PromoteOperationView[];
 }
 
+/** An unsettled operation whose item is closed or purged (5-2b P2-2): still reconciled from the screen. */
+export interface PromoteUnresolvedEntry {
+  operation: PromoteOperationView;
+  /** null: the item was purged. */
+  item: MemItemView | null;
+  itemVersion: number | null;
+}
+
 export interface PromoteListBody {
   ok: true;
   mode: string;
   branch: string;
   decisions: PromoteDecisionEntry[];
+  unresolved: PromoteUnresolvedEntry[];
   worktrees: Array<{ id: string; path: string; name: string; branch: string | null }>;
 }
 

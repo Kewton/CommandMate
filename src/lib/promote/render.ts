@@ -15,7 +15,7 @@
  */
 
 import { createHash } from 'crypto';
-import { revealInvisible } from '@/lib/brief/sanitize';
+import { revealInvisible, sanitizeBranch } from '@/lib/brief/sanitize';
 import { findSecretRule } from '@/lib/mem/secret-scan';
 import type { PromoteEffect, PromoteQuoteOrigin } from './model';
 
@@ -59,16 +59,34 @@ export type PromoteRenderResult =
 
 const iso = (epoch: number) => new Date(epoch).toISOString();
 
+/**
+ * The branch as the body shows it (5-2b P2-3): C's check of the same value at its
+ * exit (`sanitizeBranch`), so a branch with an invisible code point, a control or a
+ * secret-like run is replaced by its omitted form rather than written as it is.
+ * `replaced` says it had an invisible code point (counted in `invisibleReplaced`).
+ */
+function branchShown(branch: string | null): { text: string; replaced: boolean } {
+  if (branch === null) return { text: '(detached)', replaced: false };
+  const checked = sanitizeBranch(branch);
+  const replaced = revealInvisible(branch) !== branch;
+  if (checked.kind === 'ok') return { text: checked.value, replaced };
+  return { text: `(省略 ${checked.bytes} bytes・${checked.reason})`, replaced };
+}
+
 export function renderPromoteBody(input: PromoteRenderInput): PromoteRenderResult {
   const text = revealInvisible(input.text);
   const quote = input.quote ? revealInvisible(input.quote.text) : null;
-  const invisibleReplaced = text !== input.text || (input.quote !== null && quote !== input.quote.text);
+  const branch = branchShown(input.branch);
+  const author = revealInvisible(input.authorInstanceId);
+  // The metadata counts too (5-2b P2-3): an invisible code point in the branch or the author is said so.
+  const invisibleReplaced =
+    text !== input.text || (input.quote !== null && quote !== input.quote.text) || branch.replaced || author !== input.authorInstanceId;
   const effect = input.effect === 'spec' ? '仕様を変える決定・反映待ち' : '記録だけ';
   const lines = [
     commentMark(input.operationId, input.itemId),
     `**CommandMate: 決定の記録**（${effect}）`,
-    `- 項目: ${input.itemId} v${input.itemVersion}・ブランチ: ${input.branch ?? '(detached)'}・差分の作成: ${iso(input.createdAt)}（承認は人が画面で行う）`,
-    `- 書いたもの: Agent ${input.authorInstanceId}（${iso(input.authorCreatedAt)}）`,
+    `- 項目: ${input.itemId} v${input.itemVersion}・ブランチ: ${branch.text}・差分の作成: ${iso(input.createdAt)}（承認は人が画面で行う）`,
+    `- 書いたもの: Agent ${author}（${iso(input.authorCreatedAt)}）`,
     '',
     '決定（Agent の記録）:',
     fenced(text),

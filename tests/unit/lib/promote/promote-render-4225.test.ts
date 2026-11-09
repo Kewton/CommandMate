@@ -92,6 +92,33 @@ describe('the body of a promote (T22・T15)', () => {
     expect(plain.body).toContain('普通の文 plain');
   });
 
+  it('5-2b P2-3: an invisible code point in the branch is not written and is said so (C\'s exit check of the branch)', () => {
+    const rendered = renderPromoteBody({ ...base('普通の文'), branch: 'feature/a\u200Bb' });
+    if (!rendered.ok) throw new Error('refused');
+    expect(rendered.body).not.toContain('\u200B');
+    expect(rendered.body).not.toContain('feature/a\u200Bb');
+    expect(rendered.body).toMatch(/ブランチ: \(省略 \d+ bytes・control_char\)/);
+    expect(rendered.invisibleReplaced).toBe(true);
+  });
+
+  it('5-2b P2-3: an invisible code point in the author is shown as [U+XXXX] and counted', () => {
+    const rendered = renderPromoteBody({ ...base('普通の文'), authorInstanceId: 'cla\u200Bude' });
+    if (!rendered.ok) throw new Error('refused');
+    expect(rendered.body).toContain('Agent cla[U+200B]ude');
+    expect(rendered.invisibleReplaced).toBe(true);
+  });
+
+  it('5-2b P2-3 (control): an ordinary branch and author are written as they are and nothing is flagged', () => {
+    const rendered = renderPromoteBody(base('普通の文'));
+    if (!rendered.ok) throw new Error('refused');
+    expect(rendered.body).toContain('ブランチ: feature/x・');
+    expect(rendered.body).toContain('Agent claude（');
+    expect(rendered.invisibleReplaced).toBe(false);
+    const detached = renderPromoteBody({ ...base('普通の文'), branch: null });
+    if (!detached.ok) throw new Error('refused');
+    expect(detached.body).toContain('ブランチ: (detached)');
+  });
+
   it('T15: a secret-like body is refused, with the rule and not the text', () => {
     const rendered = renderPromoteBody(base(`token: ghp_${'a'.repeat(36)}`));
     expect(rendered).toEqual({ ok: false, code: 'secret_like', rule: expect.any(String) });
