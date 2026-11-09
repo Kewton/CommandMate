@@ -280,10 +280,11 @@ GATE e2e PASS exit=0 duration=190s waited=42s
 |---|---|
 | パス | `~/.commandmate/locks/<name>.lock`（環境変数 `CM_VERIFY_LOCK_ROOT` で差し替え可。**テストは必ずこれを使う**） |
 | 方式 | **`mkdir` によるアトミックな作成**（macOS に `flock(1)` が無いため） |
-| 保有者記録 | ロックディレクトリ内の `owner`。JSON `{"pid":N,"host":"…","token":"…","acquiredAt":ms}` |
+| 保有者記録 | ロックディレクトリ内の `owner`。JSON `{"pid":N,"host":"…","token":"…","acquiredAt":ms}`。mutex 付きのゲートは**起動の前に** `owner` を `{…,"token":"<T0>-g<G>","pgid":G}`（G はゲートのプロセスグループ。**token も新しくする**）へ tmp＋`mv` で書き直し、読み直して確かめてから合図を出す。書き直しに失敗したらゲートを始めない（`GATE <id> FAIL exit=125`、stderr に `machine-lock-handoff-failed <lock> stage=…`、retry しない）（#4288） |
 | 待ち | 空くまでポーリング（250ms 間隔）。上限は**そのゲートの `timeoutSec`** |
-| 解放 | `owner.token` が自分のものであるときだけ削除する |
-| 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しない（`owner` に `pgid` があればそのプロセスグループも空）ときのみ、**列の先頭の札の持ち主だけ**が回収してよい。回収は `<name>.lock.gone-<token>` へ退かしてから `owner` を読み、死んだと判定した token と同じときだけ消す（違えば戻す）。**他ホストの pid では判断しない** |
+| 解放 | `owner.token` が自分のものであるときだけ削除する。mutex 付きのゲートは**グループ G が空（`kill -0 -G` が ESRCH）になってから**解放し、`owner` の `pgid` のグループに人が居る（EPERM を含む）間は消さない（`machine-lock-release-deferred`）（#4288） |
+| 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しない（`owner` に `pgid` があればそのプロセスグループも空）ときのみ、**列の先頭の札の持ち主だけ**が回収してよい。回収は `<name>.lock.gone-<token>` へ退かしてから `owner` を読み、死んだと判定した token と同じときだけ消す（違えば戻す）。戻せずに残った `<name>.lock.gone-<token>-<serial>`（退避名の形のものだけ）は、記録が生きている・読めない間は**保有中**と読み、列の先頭が戻すか、記録が死んでから消す（#4288）。**他ホストの pid では判断しない** |
+| 観測の 3 値 | 取得・回収・解放の判断に使う観測（`kill -0`・`owner` の読み・一覧・`mkdir`・`mv`）は「生きている／いない／不明」。「いない」は ESRCH・ENOENT・成功した一覧だけ。EPERM・EACCES・EIO・一覧の失敗は**不明**で、不明は取らない・消さない・解放しない。待ちは `timeoutSec` で終わり、stderr に `machine-lock-unknown point=… path=… errno=…` を出す（#4288） |
 | 札（先着順） | 待つ側はまず `<name>.queue/<12 桁>` に札を取る（中身 `{"pid","host","token","createdAt","deadline"}` を一時ファイルに書き、最大の番号＋1 へ `ln`。既にあれば次の番号、後から大きい番号が見えたら自分の札を取り下げる）。`mkdir` を試すのは**生きている最小の札の持ち主だけ**。取れたら・期限で諦めたら・終了するときは自分の札を `{"done":true,…}` で置き換える。最大の番号の札は消さない |
 | 札を外してよい条件 | 同じ host で `pid` が存在しない（`pgid` があればグループも空）／`ps -o etime=` から求めた起動時刻が `createdAt` より 2 秒以上新しい（pid の再利用）／`deadline` を同じ host なら 60 秒、他 host なら 600 秒過ぎた。**年齢だけでは外さない**。読めない札は外さない（待つ側に倒す） |
 

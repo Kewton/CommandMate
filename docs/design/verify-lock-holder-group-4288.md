@@ -1,11 +1,12 @@
 # verify-run.sh の保有者にゲートのグループを記録する（Issue #4288 の 1 番）
 
-- 状態: 設計 第 5 版（Codex〔codex-2〕の事前レビュー 1 回目 `review-4288.md`・2 回目 `review-4288b.md`・3 回目 `review-4288c.md`・4 回目 `review-4288d.md` の処置を反映。実装は同じブランチの別の契約）
+- 状態: 設計 第 5 版＋実装（§2.8 と「実装での判断」は実装の契約で追記。Codex〔codex-2〕の事前レビュー 1 回目 `review-4288.md`・2 回目 `review-4288b.md`・3 回目 `review-4288c.md`・4 回目 `review-4288d.md` の処置を反映。実装は同じブランチの別の契約）
 - 行番号は 2026-11-09 の `fix/4288-verify-lock-pgid`（`169f5f892`。コードは `a69510b91` から変わっていない）のもの。名前で引くこと
 - **事実**＝コード・記録で確かめたこと、**見立て**＝推したが試していないこと、**未確認**＝この段で確かめていないこと
 - 第 1 版からの主な変更: owner の公開で **token を新しくする**（§2.2）。G の確認・公開に失敗したら**ゲートを始めない**（§2.3）。**解放は G が空になってから**（§2.5）。取消しの責任と owner の保持を分けた（§2.6）。合図待ちに実時間の期限（§2.4）
 - 第 2 版からの主な変更: **読み手を変える**（§2.7。復元に失敗して残った `.gone-*` を「保有中」と読み、取得の `mkdir` をしない）。子は**合図を実際に見たときだけ**、受け取りの印 `ack` を作ってから exec する（§2.4。合図の作成の失敗を競合と取り違えない）。125／124 は `ack` の有無で決め、見張りの timeout は `ack` から数える（§2.4・§2.6）。公開の前に保持の変数（`LOCK_PENDING_TOKEN`）を立て、trap は owner の token を確かめて解放する（§2.6）。bash の読み手の試験は合成の対照と明記（§6）。破損 JSON の行を 2 つに分けた（§4）。末尾の「事前レビューの処置」に 2 回目を足した
 - 第 3 版からの主な変更: `.gone-*` は**退避名の形に一致するものだけ**を読む（§2.7 の「退避名の識別」。別の合法な mutex `a.lock.gone-b` の実ロックを取り込まない）。owner の読み取りを**記録・欠損・破損・不明**に分け、不明（EACCES・EIO など）は空きとしない（§2.7 の「owner の読み取りの分類」）。排水に失敗したら**未排水の項目 `LOCK_UNDRAINED` を run の終わりまで保ち**、bash の解放は**owner の pgid のグループが空であることを解放の直前に確かめる**（§2.5・§2.6）。復元の途中（`mkdir <lock>` の後・owner の移動の前、owner の rename の失敗、移動の後）を**次の先頭が完了か回収できる**手順にした（§2.7 の表の 2〜4・6 と「復元の途中の状態」）。§2.7 を「先頭の 1 周の手順」の 1 つの表にまとめた。閉じていない引用の token を「抽出できる不正な JSON」の側へ移した（§4）。末尾の「事前レビューの処置」に 3 回目を足した
+- 第 5 版からの主な変更（実装の契約で追記。PM の決定 `pm-decision-4288-prereview.md` と 5 回目の再確認 `review-4288e.md`）: **観測の 3 値の不変条件**（§2.8）。取得・回収・解放の判断に使う全ての観測を「生きている／いない／不明」の 3 値の関数に通し、不明は取らない・消さない・解放しない。観測点の表（§2.8）をコードから機械で集めた点と突き合わせる。lock root の一覧は**終了コードの取れる方法**（bash は `ls -1A`、TS・同期 JS は `readdirSync`）にし、事前の権限の確かめは置かない（5 回目の P1。§2.7 の「lock root の一覧の失敗」を書き換えた）。EPERM の陽性の対照は旧判定と新判定に同じ `kill -0` の答えを渡す（5 回目の P2。§6）
 - 第 4 版からの主な変更: グループが**空**とは `kill -0 -- -<pgid>` が **ESRCH** のときだけとし（既存の `lock_group_is_empty`〔`verify-run.sh:695`〕と同じ）、EPERM などの他の失敗は「人が居る」と読む。`drain_group`・`lock_release` の解放の直前の確かめ・EXIT trap・未排水の項目の処理の後の解放が全てこの判定を通る（§2.5・§2.6）。bash の lock root の一覧の失敗（読み取り不可の root で glob が展開されない）を「対象なし」と読まない手順を書いた（§2.7）。§6 に EPERM の G（合成）と root の一覧の失敗の対照を足した。末尾の「事前レビューの処置」に 4 回目を足した
 
 ## 止める点
@@ -238,7 +239,7 @@ drain_group G:
 | 破損 | 読めたが記録の条件を満たさない | 塞がない。新しい書き手の T1 は `mv` の後に読み直して確かめる（§2.3 の 5）ので、破損した T1 の後でゲートが走ることは無い |
 | **不明** | 上のどれでもない: 読み取りのエラー（Node: `ENOENT` 以外の例外。EACCES・EIO・EISDIR・ELOOP など）。bash: `.gone-*` が探索できない（`[ ! -x "$g" ]`）、`owner` が在るのに読めない（`[ -e ] && [ ! -r ]`）、`awk` が 0 以外で終わる。lock root の一覧（`readdirSync`／glob の展開）が失敗した場合も、全体を不明とする | **空きとしない**: その周回は `mkdir` をせずに待つ（`heldBy` は `… (restore pending: <gone> unreadable)`、stderr／警告に `machine-lock-gone-unreadable <gone> <code>` を `.gone-*` ごとに 1 回）。回収も復元もしない。読み取りが回復した周回から、記録・欠損・破損として扱い直す |
 
-- **lock root の一覧の失敗**（4 回目のレビューの P2）: root が「書込み・探索可・読取り不可」（例 `0333`）だと、`mkdir <lock>` も札の `.queue/` も通るのに、root の一覧だけが取れない。TS・同期 JS は `readdirSync(root)` の例外（EACCES など。ENOENT は root が無い＝対象なし）を不明とする。bash の glob は読めない root では**何も展開せず、パターンをそのまま返す**（エラーにならない）ので、「未展開＝対象なし」と読むと不明を空きと取り違える。bash は glob の前に `[ -r "$LOCK_ROOT" ] && [ -x "$LOCK_ROOT" ]` を確かめ、偽なら全体を不明（表の 1、`machine-lock-gone-unreadable <root> EACCES`）とし、真のときだけ未展開のパターン（`[ ! -e ] && [ ! -L ]`）を「対象なし」と読む。root の権限が戻った周回から通常の手順に戻る。
+- **lock root の一覧の失敗**（4 回目のレビューの P2、5 回目の P1 で書き換え）: root が「書込み・探索可・読取り不可」（例 `0333`）だと、`mkdir <lock>` も札の `.queue/` も通るのに、root の一覧だけが取れない。一覧は**それ自身の成否が取れる方法**で行う: TS・同期 JS は `readdirSync(root)`（ENOENT は root が無い＝対象なし、それ以外の例外は不明）、bash は glob を使わず `LC_ALL=C ls -1A -- <root>` の終了コードと文面（ENOENT だけが「無い」）。bash の glob は読めない root では**何も展開せず、パターンをそのまま返す**（エラーにならない）ので使わない。第 5 版の「glob の前に `-r`／`-x` を確かめる」は、確かめた後の権限の変化と確かめで見えない I/O の失敗を区別できない（5 回目の P1）ので採らない。一覧の失敗は全体を不明（表の 1、`machine-lock-gone-unreadable <root> <errno>`）とし、一覧が成功した周回から通常の手順に戻る。
 - 第 3 版の「T1 は原子的に書くので常に読める」は撤回する。原子的な書き込みは**中身**が欠けないことしか保証せず、権限・I/O のエラーで読めないことはある。今の TS・同期 JS は読み取りのエラーも null にする（`machine-lock.ts:220`、`machine-lock-sync.mjs:96`–108）ので、`.gone-*` の読みには例外の `code` を返す別の関数（`readGoneOwner`）を足し、`readOwner` は変えない。bash は `lock_json_field` の `[ -f ] || return 0` と `2>/dev/null` で同じく区別できないので、`.gone-*` の読みの前に上の `-x`／`-e`／`-r` を見て、`awk` の終了コードを捨てない。
 
 **先頭の 1 周の手順**（3 実装で同じ。#4277 のとおり、列の先頭だけが行う。既存の主のロックの回収〔`lock_recover`／`breakStale`／`recoverLock`〕の前に行う）:
@@ -268,6 +269,62 @@ drain_group G:
 呼び手の変更: TS `breakStale` は戻り値（`'recovered'|'restored'|'restore-failed'|'gone'`）を返す（同期 JS と揃える）。3 実装とも、`'restore-failed'` の後の周回は上の表で止まる（呼び手が戻り値で分岐する必要は無い。`.gone-*` の存在で決まる）。同期 JS の `recoverLock` の呼び手（`:426`）も同じ。既存の復元（`lock_recover`／`breakStale`／`recoverLock` の中の 3 段）も表の 2 と同じ失敗の扱い（`rename` が ENOENT 以外で失敗したら `rmdir <lock>`）にそろえる。
 
 この規則は #4277 の札・回収・解放の規約を変えない（止める点の 3 つ目）。旧版（#4288 以前）の読み手は `.gone-*` を見ないので、復元の失敗と混在が重なると旧版が取りうる。#4277 の旧版との混在（4277 §0 B'）と同じ扱いで範囲外とし、§4 に書く。
+
+### 2.8 観測の 3 値の不変条件と観測点の表（PM の決定。実装の契約で追記）
+
+5 回の事前レビューの P1 は、毎回「足した観測（`kill -0`・owner の読み・`mkdir`・一覧）の失敗を、生きている／いないの 2 値のどちらかに読み替えた」所から出た（EPERM を死、EACCES を残骸、一覧の失敗を対象なし）。手当てを足す代わりに規則で塞ぐ。
+
+- **不変条件**: ロックの取得・回収・解放（と bash の書き手の受け渡し）の判断に使う**全ての観測**は、3 値を返す関数を通す。bash は `lock_obs_kill0`・`lock_obs_list`・`lock_obs_lstat`・`lock_obs_owner`・`lock_obs_mkdir`・`lock_obs_mv`・`lock_obs_pgid`（`verify-run.sh`）、TS・同期 JS は `makeObserver` の `pid`・`group`・`list`・`lstat`・`owner`・`mkdir`・`rename`。どれも第 1 引数に観測点の名前を取る。
+- **「いない」の条件**: 観測が成功して否定の証拠を返したときだけ。`kill -0` の ESRCH、`mkdir` の EEXIST（在る）、一覧・読み・`rename` の ENOENT、一覧が成功して 0 件。EPERM・EACCES・EIO・EISDIR・ELOOP・一覧の失敗・その他は**不明**。
+- **不明のとき**: 取らない・消さない・解放しない・（書き手は）ゲートを始めない。保有者の判定（`holderState`／`lock_holder_state`）は pid と pgid の両方が ESRCH のときだけ「いない」、どちらかが不明なら不明（回収しない）。
+- **止まったままにしない**: 不明で待つのは既存の待ちの予算（`timeoutSec`／`timeoutMs`）の内だけ。予算が尽きたら取得は「取れない」で終わり、何が不明だったかを出す: bash は stderr に `verify-run: machine-lock-unknown point=<点> path=<パス> errno=<errno>`、TS・同期 JS は戻り値の `unknown: { point, path, code }`（と警告 `machine-lock-unknown`）。TS・同期 JS の `mkdir <lock>` の不明（EEXIST 以外）は今のまま errno 付きで投げる（取らない）。
+- **試験の注入**: bash は `CM_VERIFY_TEST_OBS_FAULT`（と、待ちの途中で書き換えられる `CM_VERIFY_TEST_OBS_FAULT_FILE`）に `<点>=<ERRNO>`／`<点>@<対象の一部>=<ERRNO>`、TS・同期 JS は `__testHooks.fault`／`hooks.fault`（`(point, target) => errno`）。注入は観測の**生の結果**（`kill -0` の文面、例外の `code`）だけを置き換え、分類の式は本番と同じものを通る。§6 の `<dir>/eperm` は `CM_VERIFY_TEST_OBS_FAULT=group=EPERM` に置き換えた（`lock_kill0_raw` が旧判定と新判定の両方に同じ答えを渡す。5 回目の P2）。
+
+観測点の表（`tests/unit/verification/lock-observation-points-4288.ts` と同じ。`lock-observation-points-4288.test.ts` がこの表・コードから集めた観測点・生の呼び出しの許可の一覧を突き合わせ、行ごとに失敗を注入する）:
+
+| 観測点 | 実装 | 観測 | 不明のとき |
+|---|---|---|---|
+| `pid` | bash・TS・同期 JS | `kill -0 <pid>`（保有者・札の pid） | 死んだと読まない: 回収しない（取らない） |
+| `group` | bash・TS・同期 JS | `kill -0 -<pgid>`（記録のグループ） | 空と読まない: 回収しない・bash は解放しない |
+| `list-queue` | bash・TS・同期 JS | `<name>.queue` の一覧 | 札が無いと読まない: その周回は先頭にならない（取らない） |
+| `list-root` | bash・TS・同期 JS | lock root の一覧（退避名の探索） | 退避が無いと読まない: `mkdir` しない（取らない） |
+| `gone-lstat` | bash・TS・同期 JS | 退避名の項目の lstat | `mkdir` しない（取らない） |
+| `gone-owner` | bash・TS・同期 JS | `<name>.lock.gone-*/owner` の読み | 空きと読まない: `mkdir`・回収・復元をしない |
+| `lock-owner` | bash・TS・同期 JS | `<name>.lock/owner` の読み（取得・復元の途中の判定） | 回収しない・空の `<lock>` を消さない |
+| `lock-list` | bash・TS・同期 JS | `<name>.lock` の中身の一覧（復元の途中か） | 空と読まない: `<lock>` を消さない・owner を移さない |
+| `mkdir-lock` | bash・TS・同期 JS | `mkdir <name>.lock`（取得） | 取らない（TS・同期 JS は errno 付きで投げる、bash は待つ） |
+| `rename-aside` | bash・TS・同期 JS | `rename <lock> → <lock>.gone-*`（回収） | 何もしない（消さない） |
+| `recover-owner` | bash・TS・同期 JS | 退かした owner の読み（回収の確かめ） | 判定した記録と読まない: 消さずに戻す |
+| `restore-mkdir` | bash・TS・同期 JS | `mkdir <lock>`（戻し） | 退避を残す（それが保有中として塞ぐ） |
+| `restore-rename` | bash・TS・同期 JS | `rename 退避/owner → <lock>/owner`（戻し） | 空の `<lock>` を rmdir で戻し、退避を残す |
+| `reclaim-rename` | bash・TS・同期 JS | `rename 死んだ退避 → 自分の退避名` | 何もしない（消さない） |
+| `reclaim-owner` | bash・TS・同期 JS | 移した退避の owner の読み | 判定した記録と読まない: 消さない |
+| `release-owner` | bash・TS・同期 JS | 解放の前の `<lock>/owner` の読み | 解放しない |
+| `release-list` | bash・TS・同期 JS | 解放のときの lock root の一覧（自分の退避の片付け） | 片付けない（消さない） |
+| `handoff-group` | bash | `ps -o pgid=`（ゲートのグループ G の確かめ） | ゲートを始めない（stage=group） |
+| `handoff-token` | bash | 公開の前の owner の読み（T0 か） | ゲートを始めない・解放しない（stage=token） |
+| `handoff-publish` | bash | `mv .owner-T1 → owner`（公開） | ゲートを始めない（stage=mv） |
+| `handoff-verify` | bash | 公開の後の owner の読み直し（T1・G か） | ゲートを始めない（stage=verify） |
+| `handoff-signal` | bash | 本体の `mkdir go`（合図） | ゲートを始めない（stage=signal） |
+| `handoff-self` | bash | 子の `kill -0 <本体>` | 本体が生きていると読まない: 取り下げて exec しない |
+| `handoff-go` | bash | 子の取り下げの `mkdir go` | 合図と読まない: exec しない |
+| `handoff-ack` | bash | 子の `mkdir ack`（受け取りの印） | exec しない（stage=ack） |
+| `handoff-watch` | bash | 見張りの `kill -0 -G`（`ack` の前） | G が空と読まない: 見張りを続ける（signal は送らない） |
+
+- **網羅の検査**（D2・E の入口の網羅の検査と同じ形）: `tests/unit/verification/lock-observation-scan-4288.ts` が 3 実装のソースから (1) 名前の付いた観測点（`lock_obs_* <点>`・`obs.*('<点>'`・`goneCandidates(ctx, '<点>')`・`lock_gone_candidates <点>`）と (2) 観測の**生の呼び出し**（bash の `kill -0`・`mkdir`・`mv`・`ls`・`cat`・`ps -o`・`.gone-*` の glob・`lock_owner_field`、TS・同期 JS の `process.kill(`・`readdirSync(`・`lstatSync(`・`readFileSync(`・`mkdirSync(`・`renameSync(`・`readOwner(`）を、それを含む関数ごとに数える。(1) は上の表と一致、(2) は「観測の関数そのもの」か理由つきの許可（札の書き込み・置き場の `mkdir -p`・待ちの表示など、判断に使わないか既に fail-closed のもの）の一覧と件数まで一致しなければ落ちる。自己テストで、新しい関数の `kill -0`・glob・`readdirSync`、許可した関数の 2 つ目の呼び出し、表に無い観測点のそれぞれを足したソースで検査が落ちることを確かめる。
+- **行ごとの注入**: 読み手の 17 点 × 3 実装（51 行）は、行ごとに「注入あり → 取らない・消さない・解放しない（待ちは予算で終わり、点・パス・errno を出す）」と「同じ状態で注入なし → 逆の結果」の対で固定する（注入が結果を変えたことの対照）。書き手の 9 点は `verify-run-holder-group-4288.test.ts` で `FAIL exit=125`・`stage=…`・副作用 0 を固定する。実物の失敗（root の `chmod 0333`）でも 3 実装が取らないこと、直しを外した形（bash の glob で未展開を「無い」と読む読み手、同期 JS の一覧の失敗を空とする読み手、第 4 版の `kill -0` の成功だけを見るグループの判定）が同じ失敗の下で取る・解放することを陽性の対照にする。
+- **札（#4277）の観測**: 札の一覧も同じ規則に入れた（`list-queue`）。取得の周回で `.queue` が一覧できなければその周回は先頭にならず、札を取る `takeTicket`／`lock_take_ticket` も一覧の失敗では札を取らない（後から一覧して遅れの判定ができないので取り下げる）。札の形・番号・回収の規約は変えない。
+
+- **§6 の止め所との対応**: §6 の `fault:group|token|mv|verify|signal|child-go|child-ack` は、観測点 `handoff-group|handoff-token|handoff-publish|handoff-verify|handoff-signal|handoff-go|handoff-ack` への注入（`CM_VERIFY_TEST_OBS_FAULT`）に置き換えた。`CM_VERIFY_TEST_HANDOFF` の `fault:` に残したのは観測でない `tmp`（tmp の書き込み）と `drain`（`drain_group` を signal を送らずに 1 にする）だけ。`pause:` は §6 のとおり（`forked`・`group`・`watchdog`・`tmp`・`published`・`signalled`・`acked`〔子の側、`ack` の後・exec の前〕・`leader-exited`・`recover-moved`・`restore-mkdir`・`restore-owner`）。
+
+#### 実装での判断（設計からの差。理由つき）
+
+- **合図待ちの子の起こし方**: 既存の試験（`verify-run-background-stderr.test.ts`、Issue #3944）が「`set -m` はファイルに 1 つだけ」を固定しているので、mutex の有無で起こし方を分けず、`run_gate_attempt` の唯一の `{ set -m; ( … ) & }` の中で `rga_go` が空でないときだけ `lock_handoff_wait` を通す。mutex の無いゲートは `rga_go` が空で、今と同じく fork の直後に exec する。fork の後の受け渡しは `run_gate_handoff` に分けた。
+- **未排水の項目の再処理**（§2.5 の表の 1 行目）: 設計は「再排水の結果によらず `lock_release`（§2.5 の 2 の確かめつき）」だが、実装は**再排水が 0 のときだけ** `lock_release` を呼ぶ（より厳しい）。加えて trap の最後の解放は、`LOCK_UNDRAINED` に残ったパスでは呼ばない。こうして「§2.5 の 1（未排水の記録）と 2（解放の直前のグループの確かめ）のどちらか片方を外しても、残る片方で消さない」を試験で固定した（片方だけを外した版の対照）。
+- **EPERM の試験**: `fault:drain` を併せると、再排水の失敗だけで解放しなくなり、旧判定と新判定の差が出ない。試験は `fault:drain` を使わず、全てのグループの観測を EPERM にする（`drain_group` が KILL の後も空を示せず 1 → 未排水 → trap の再排水も 1 → 残る）。第 4 版の式（`kill -0` の失敗＝空）を写した版は同じ EPERM で `drain_group` が 0 を返し、解放する（陽性）。
+- **戻しの `mkdir` が通った後に owner が ENOENT**（§2.7 の表の 2）: 設計は「何もしない」だが、自分が作った空の `<lock>` を `rmdir` で戻す（owner の無い `<lock>` を残すと、今の規約では待ち続けるため）。
+- **TS・同期 JS の解放**: `owner` の読みが不明（`release-owner`）なら消さない（警告 `machine-lock-release-deferred`）。`owner` が自分でないとき（欠損を含む）は、自分の token の `.gone-*` を §2.7 の表の 7 で片付ける（TS・同期 JS は pgid の確かめをしない。設計どおり bash だけ）。
+- **札の観測**: §2.8 の `list-queue`（札の一覧の失敗を「札が無い」と読まない）は設計の §2.7 に無かったが、PM の不変条件（全ての観測）に従って足した。札の形・規約は変えない。
 
 ## 3. 経路表（受け渡しの各時点 × 本体の死・取消し × 取得者）
 
