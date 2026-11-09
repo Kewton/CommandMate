@@ -950,6 +950,60 @@ export function closeMemItem(
   })();
 }
 
+/** How the screen's close (Issue #4227, S-D) moves an item. */
+export type MemVersionedCloseTransition = 'close' | 'withdraw-recorded';
+
+export interface MemVersionedClose {
+  /** The version the person read (or approved); another is `version_conflict`. */
+  ifVersion: number;
+  reason: string | null;
+  transition: MemVersionedCloseTransition;
+}
+
+/**
+ * A close compared against a version, in one transaction (Issue #4227, S-D): the
+ * version, then who may change it (`ownedBy`), then the transition table, then the
+ * close. `withdraw-recorded` closes a recorded decision as `withdrawn` — the only way
+ * out of `recorded` short of `promoted`, asked for by a person on the screen alone.
+ * A `now` slot is not closed here (the #2427 note keeps its own path): `state_forbids`.
+ * {@link closeMemItem} is unchanged (the CLI and A's route call it).
+ */
+export function closeMemItemVersioned(
+  db: Database.Database,
+  actor: MemActor,
+  itemId: string,
+  close: MemVersionedClose,
+  now: number = Date.now()
+): { ok: true; record: MemRecord } | MemStoreFailure {
+  return db.transaction(() => {
+    const current = getMemRecord(db, itemId);
+    if (!current) return { ok: false as const, code: 'item_not_found' as const };
+    if (current.version !== close.ifVersion) return { ok: false as const, code: 'version_conflict' as const, current };
+    if (!ownedBy(db, current, actor)) return { ok: false as const, code: 'not_owner' as const, current };
+    if (findSlotByItem(db, itemId)) return { ok: false as const, code: 'state_forbids' as const, current };
+    const step = memTransition(current.kind, current.state, close.transition);
+    if (!step.ok) return { ok: false as const, code: 'state_forbids' as const, current };
+    const changed = db
+      .prepare(
+        `UPDATE mem_items SET state = 'closed', closed_at = ?, close_reason = ?, close_note = ?, updated_at = ?,
+           version = version + 1, updated_by = ?, updated_by_instance = ? WHERE id = ? AND version = ? AND state = ?`
+      )
+      .run(
+        now,
+        step.reason ?? 'manual',
+        close.reason,
+        now,
+        actor.by,
+        actor.by === 'agent' ? actor.instanceId : null,
+        itemId,
+        close.ifVersion,
+        current.state
+      );
+    if (changed.changes !== 1) return { ok: false as const, code: 'version_conflict' as const, current };
+    return { ok: true as const, record: recordFromItem(findItemRow(db, itemId)!) };
+  })();
+}
+
 /** Items of a branch (open only unless `all`), and the `now` of every slot on it. */
 export function listMem(
   db: Database.Database,

@@ -569,6 +569,118 @@
       "concurrent": "書いている間に他の変更がありました。文書を確かめてください",
       "reapproval": "承認の後に変わりました（{reason}）。差分を作り直してください",
       "failed": "できませんでした（{code}）"
+    },
+    "modeHelp": {
+      "off": "何も評価せず、書かず、差し込みもしません。項目は消えずに残ります。",
+      "derived": "導いた状態（待ち・relay など）だけを brief に出します。Agent の書き込みと条件の評価は止まり、項目は凍結して見せます。",
+      "on": "項目の追加・編集・条件の評価・差し込みをすべて行います。"
+    },
+    "featureHelp": {
+      "injectOnStart": "セッションの境界（起動・reset・resume）の最初の送信に、短い要約（brief）を付けます。",
+      "promptOnEvents": "操作（PR・マージなど）の後に、mem を更新するよう Agent に促します。",
+      "popup": "対話：開始・終了の確認を画面に出します。オフ（既定）は無人で、確認を出しません。auto-yes とは別の設定です。"
+    },
+    "items": {
+      "open": "項目を見る",
+      "title": "mem の項目（{branch}）",
+      "description": "このブランチの mem の項目を見て、人が追加・編集・close します。人が書いた項目の作成者・更新者は human になります。",
+      "limits": "防げないこと：同じ OS の権限で動くプロセスは画面の印を偽れ、DB を直接書き換えられます。Agent が CLI で同じ項目を書くことは止めません（版の照合で競合として見えます）。",
+      "modeLine": "このブランチの mode：{mode}（{source}）",
+      "source": {
+        "override": "ブランチの上書き",
+        "rule": "規則 {pattern}",
+        "fallback": "既定"
+      },
+      "derived": "凍結中：Agent の書き込みと条件の評価は止まっています。この画面からも書けません。",
+      "off": "off：項目は保持されていますが表示しません。",
+      "changeMode": "mode・機能を変える",
+      "worktree": "作業木",
+      "noWorktree": "（作業木を選ばない：読むだけ）",
+      "instance": "所有の instance",
+      "showClosed": "閉じた項目も出す",
+      "readOnly": "書くには、このブランチの作業木と、その roster の instance を選んでください（項目の所有は instance が持ちます）。",
+      "otherBranch": "選んだ作業木の今のブランチはこのブランチではありません。読むだけです。",
+      "loadError": "読み込めませんでした。",
+      "none": "項目はありません。",
+      "addTitle": "項目を追加",
+      "kind": "種類",
+      "kinds": {
+        "now": "now（セッションごとの今）",
+        "waiting": "waiting（待ち）",
+        "decision": "decision（決定）",
+        "next": "next（次にやること）",
+        "external": "external（外の状態）",
+        "note": "note（メモ）"
+      },
+      "text": "本文",
+      "closeWhenInput": "閉じる条件（例 issue:#123・pr:#45・manual）",
+      "evidence": "根拠のパス（カンマ区切り、リポジトリからの相対）",
+      "promoteTo": "反映先（例 issue:#123）",
+      "add": "追加",
+      "added": "追加しました。",
+      "edit": "編集",
+      "save": "保存",
+      "saved": "保存しました。",
+      "cancel": "やめる",
+      "close": "close",
+      "withdraw": "取り下げる",
+      "closed": "閉じました。",
+      "reason": "理由（任意）",
+      "state": {
+        "open": "open",
+        "recorded": "記録済み・反映待ち",
+        "promoted": "反映済み",
+        "closed": "閉じた"
+      },
+      "slot": "now（{instance}）",
+      "stale": "古い",
+      "frozen": "凍結",
+      "changed": "更新されました",
+      "withheld": "本文は表示しません（{field} が規則 {rule} に当たりました）",
+      "withheldShort": "（表示しません）",
+      "meta": "作成 {createdBy}（{instance}）・更新 {updatedBy}・{updatedAt}",
+      "closeWhen": "条件 {type}",
+      "nowNote": "now の枠は、セッションのメモ（作業木の画面）から編集します。",
+      "toDecisions": "記録・反映へ",
+      "conflict": {
+        "title": "他で変更されていました。自分の下書き・読んだときの値・今の値を見比べてください。",
+        "draft": "自分の下書き",
+        "read": "読んだときの値（v{version}）",
+        "current": "今の値（v{version}）",
+        "rebase": "今の値に自分の下書きを載せ直して保存",
+        "discard": "下書きを捨てる"
+      },
+      "recordedClose": {
+        "first": "この決定は記録済みですが、正本（Issue の本文など）へは反映されていません。",
+        "next": "反映しないことにして閉じる…",
+        "second": "この決定は記録済みですが、正本（Issue の本文など）へ反映しないことにして閉じます。コメントなどの記録は消えません。",
+        "confirm": "反映しないことにして閉じる"
+      },
+      "refusal": {
+        "disabled": "このブランチの mem は on ではありません。書けません。",
+        "version_conflict": "他で変更されていました（版が違います）。",
+        "state_forbids": "今の状態では、この操作はできません（閉じられたか、記録済みです）。",
+        "not_owner": "この項目は変えられません（作成した instance か人だけ）。",
+        "incarnation_changed": "作業木か instance が、読んだときと入れ替わりました。読み直してください。",
+        "membership_changed": "作業木の今のブランチが、この画面のブランチと違います。何も書いていません。",
+        "confirmation_required": "記録済みの決定を閉じるには、反映しないことの確認が要ります。",
+        "screen_only": "この変更は画面からだけできます。",
+        "item_not_found": "項目が見つかりません（削除されました）。",
+        "instance_not_found": "instance が見つかりません。",
+        "duplicate_key": "同じ要求が別の内容で送られています。",
+        "limit_exceeded": "この種類の開いた項目が多すぎます。",
+        "secret_like": "秘密らしい文字列が含まれています。",
+        "invalid_close_when": "閉じる条件が正しくありません。",
+        "other": "できませんでした（{code}）"
+      },
+      "notices": {
+        "title": "未配送の知らせ",
+        "none": "引き取られていない知らせはありません。",
+        "line": "項目 {item} が終わりました（{reason}・{outcome}）",
+        "uncertain": "前の配送を確かめられませんでした",
+        "take": "引き取る",
+        "taken": "引き取りました。"
+      }
     }
   }
 }

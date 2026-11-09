@@ -14,14 +14,21 @@ export type MemTransition =
   | 'condition'
   | 'record'
   | 'promote'
-  | 'promote-record-only';
+  | 'promote-record-only'
+  /**
+   * Issue #4227 (S-D): a person closes a recorded decision without reflecting it
+   * (`recorded → closed`, `withdrawn`). Only the screen's close with the person's
+   * explicit confirmation asks for it (`memWriteFromScreen`); `close` still refuses.
+   */
+  | 'withdraw-recorded';
 
 export type MemTransitionResult = { ok: true; next: MemState; reason?: MemCloseReason } | { ok: false };
 
 /**
  * What a transition leads to from a state, or refused.
  *
- * - `close` of an open decision is a withdrawal; of a recorded one, refused (the screen closes it).
+ * - `close` of an open decision is a withdrawal; of a recorded one, refused (the screen closes it
+ *   with `withdraw-recorded`, Issue #4227).
  * - `condition` never closes a decision before it is promoted (it stays as not yet reflected).
  */
 export function memTransition(kind: MemKind, state: MemState, transition: MemTransition): MemTransitionResult {
@@ -54,5 +61,7 @@ export function memTransition(kind: MemKind, state: MemState, transition: MemTra
       return state === 'recorded' ? { ok: true, next: 'promoted' } : { ok: false };
     case 'promote-record-only':
       return state === 'open' ? { ok: true, next: 'promoted' } : { ok: false };
+    case 'withdraw-recorded':
+      return state === 'recorded' ? { ok: true, next: 'closed', reason: 'withdrawn' } : { ok: false };
   }
 }

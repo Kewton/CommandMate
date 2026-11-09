@@ -35,6 +35,7 @@ import {
   memPurge,
   memSettleDecisionTransition,
   memUpdateItem,
+  memWriteFromScreen,
   memWriteNow,
   writeSessionNoteFromScreen,
   type MemServiceDeps,
@@ -149,6 +150,13 @@ const recordedDecision = async (text: string) => {
   const item = (outcome.body as MemWriteResponse).item;
   return { id: item.id, version: item.version };
 };
+/** Issue #4227 (S-A): a request that carries the screen's mark, as the screen's routes pass it on. */
+const screenRequest = () => ({
+  headers: new Headers({ 'X-CommandMate-Client': 'screen', origin: 'http://localhost', host: 'localhost' }),
+  url: 'http://localhost/api/worktrees/wt-r/mem/screen/items',
+});
+const screenWrite = (op: 'add' | 'update' | 'close', body: Record<string, unknown>, itemId?: string) =>
+  memWriteFromScreen(db, screenRequest(), WT, { op, author: 'human', ...(itemId ? { itemId } : {}), body: { instanceId: 'claude', ...body } }, deps());
 const decisionIs = (state: string) => (made: { id: string; version: number } | undefined) =>
   itemIs('id = ? AND state = ? AND version = ?', made!.id, state, made!.version + 1);
 
@@ -223,6 +231,35 @@ const ENTRANCES: Record<string, Entrance> = {
     before: () => addDecision('record only'),
     request: (made) => settleDecision(made!, 'promote-record-only'),
     landed: decisionIs('promoted'),
+  },
+  // Issue #4227 (S-A・S-D): a person's add / edit / close from the screen, and the close
+  // of a recorded decision a person confirmed is not reflected (`withdraw-recorded`).
+  'screen-add': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    request: () => screenWrite('add', { kind: 'note', text: 'screen add', key: 'screen-add-1', expectBranch: 'feature/x' }),
+    landed: () => itemIs("text = 'screen add' AND created_by = 'human'"),
+  },
+  'screen-update': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => addNote('to screen update'),
+    request: (made) => screenWrite('update', { ifVersion: made!.version, text: 'screen updated' }, made!.id),
+    landed: (made) => itemIs("id = ? AND text = 'screen updated' AND updated_by = 'human'", made!.id),
+  },
+  'screen-close': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => addNote('to screen close'),
+    request: (made) => screenWrite('close', { ifVersion: made!.version }, made!.id),
+    landed: (made) => itemIs("id = ? AND state = 'closed' AND updated_by = 'human'", made!.id),
+  },
+  'screen-close-recorded': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => recordedDecision('to withdraw'),
+    request: (made) => screenWrite('close', { ifVersion: made!.version, confirmUnreflected: true }, made!.id),
+    landed: (made) => itemIs("id = ? AND state = 'closed' AND close_reason = 'withdrawn'", made!.id),
   },
   'cli-purge': {
     fn: 'memPurge',

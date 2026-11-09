@@ -2627,12 +2627,27 @@ A `decision` is written to an Issue / PR comment or a worktree document (`promot
 - The screen of any root of the same Git reconciles and settles the operations of that Git's roots (a root of another Git does not reach them)
 - Invisible characters in the branch or the author are warned about too. A branch is written in its omitted form (`(省略 N bytes・reason)`)
 
+### Viewing and writing items on the screen (screen only, Issue #4227)
+
+A branch's items are shown under **the "mem" of each row of the Repositories screen → "View items"** (`/repositories/<id>/mem?branch=<name>[&worktree=<id>]`), where a person adds, edits and closes them. The PC and the phone share the screen (at a phone's width the rows only wrap). **The CLI has no way to do it** (the screen's writes accept requests with the mark only).
+
+- The top shows the branch's mode and what decided it (an override, a rule, the default). `derived` is "frozen", and this screen cannot write either. `off` lists nothing (the items are kept). "Change the mode and features" opens the mem settings in place, where an override for this branch can be added
+- The list has a section per kind; each row shows the author, the owning instance, who updated it, the version, the close condition and its answer (`{result:reason}`) and staleness. A recorded decision shows "Not reflected: recorded only, not yet reflected in the canonical place". Recording and reflecting a decision is done on the decisions screen above, through "Record and reflect" (this screen does not write it)
+- To write, choose a worktree of this branch and an instance of its roster (an item is owned by an instance). The author and updater are `human`. When the worktree's current branch is not the screen's branch, it is read only. An add makes one key per press, so a double press or a resend is still one item. If the worktree's HEAD moved to another branch, nothing is written and the add is refused
+- `now` (each session's current state) is not added or edited here; write it from the session note on the worktree screen as before
+- **Concurrent edits**: a save and a close send the version that was read. If it changed elsewhere (another page, an agent's `mem update`, a close by condition), nothing is written, and **your draft, the value you read and the current value** are shown side by side. Only pressing "Save my draft on top of the current value" sends it again with the new version (it is never laid on top by itself)
+- **Stale pages**: the screen reads the list again when it gets the focus back and every 30 seconds, and marks a row whose version moved as "Updated"
+- **Closing a recorded decision**: a `recorded` decision you decide not to reflect closes only after a two-step confirmation ("This decision is recorded; it will be closed without being reflected in the canonical place. Comments and other records stay"), with the reason `withdrawn`. `commandmate mem close` still refuses `recorded` (exit 55). Closing an open decision is a withdrawal (`withdrawn`)
+- **Undelivered notices**: the "it ended" notices no session took are listed, each with "Take it"
+- Of the mem settings' features, "Pop-ups" is the attended (ask on the screen when a session opens and closes) or unattended (the default, asks nothing) setting. It is separate from auto-yes; neither changes the other
+
 ### What is not prevented
 
 - Only the screen path changes the mode (the server checks a mark only the screen sends and a matching `Origin`). A process with the same OS rights (agents included) can still forge the mark with `curl`, or write the database file directly. CommandMate does not prevent or detect that
 - What is prevented: the mode changing through the CLI's regular commands, a CLI user changing it without knowing, and a page of another origin changing it through the user's browser
 - `--instance` can be claimed falsely too. The author check keeps a session from changing another's items by mistake; it does not stop a deliberate rewrite
 - Approving a decision's record (promote) is limited to the screen path by the same mark. A process with the same OS rights can forge it, and can rewrite the operation records in the database to read "succeeded". That agents do not approve rests on the CLI having no way to and on the skills' instructions, not on a guarantee
+- A person's item writes on the screen (Issue #4227) are limited to the screen path by the same mark. A person passes the author check (a person may change any item), so the worktree's and the instance's lifetimes, the branch, the mode and the version are checked right before the write. A process with the same OS rights that forges the mark writes as a person
 
 ---
 

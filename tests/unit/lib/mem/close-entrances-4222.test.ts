@@ -170,6 +170,8 @@ const EXCEPTIONS: Record<string, string> = {
   purgeMem: '#4221 の入口（同上。知らせは CASCADE で項目と一緒に消える）',
   transitionDecision:
     '#4225 の decision の遷移（write-entrances-recreate-4221 の decision-* の行が (a)〜(c) を固定。呼び手は memSettleDecisionTransition だけ、promote-write-chain-4225 が固定）',
+  closeMemItemVersioned:
+    '#4227 の画面の close（版つき・withdraw-recorded）。write-entrances-recreate-4221 の screen-close・screen-close-recorded の行と screen-write-entrances-4227 が (a)〜(c) を固定。呼び手は memWriteFromScreen だけ（mem-screen-write-4227 のガード）',
 };
 
 const world = new MemWorld();

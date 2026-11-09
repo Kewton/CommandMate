@@ -569,6 +569,118 @@
       "concurrent": "Something else changed the document while writing. Check the document",
       "reapproval": "Changed since the approval ({reason}). Make the diff again",
       "failed": "Could not do it ({code})"
+    },
+    "modeHelp": {
+      "off": "Nothing is evaluated, written or inserted. The items are kept.",
+      "derived": "Only derived state (waits, relays) goes into the brief. Agent writes and condition checks stop; the items are shown frozen.",
+      "on": "Items are added, edited, checked against their conditions and inserted."
+    },
+    "featureHelp": {
+      "injectOnStart": "Attach a short summary (brief) to the first send after a session boundary (start, reset, resume).",
+      "promptOnEvents": "After an action (a PR, a merge), prompt the agent to update mem.",
+      "popup": "Attended: ask on the screen when a session opens and closes. Off (the default) is unattended and asks nothing. Separate from auto-yes."
+    },
+    "items": {
+      "open": "View items",
+      "title": "mem items ({branch})",
+      "description": "View this branch's mem items; a person adds, edits and closes them. Items a person writes are created and updated by human.",
+      "limits": "What this cannot prevent: a process with the same OS rights can forge the screen's mark and write the DB directly. An agent writing the same item through the CLI is not stopped (the version check shows it as a conflict).",
+      "modeLine": "Mode of this branch: {mode} ({source})",
+      "source": {
+        "override": "branch override",
+        "rule": "rule {pattern}",
+        "fallback": "default"
+      },
+      "derived": "Frozen: agent writes and condition checks are stopped. This screen cannot write either.",
+      "off": "off: the items are kept but not shown.",
+      "changeMode": "Change the mode and features",
+      "worktree": "Worktree",
+      "noWorktree": "(no worktree: read only)",
+      "instance": "Owning instance",
+      "showClosed": "Show closed items",
+      "readOnly": "To write, choose a worktree of this branch and an instance of its roster (an item is owned by an instance).",
+      "otherBranch": "The chosen worktree is not on this branch now. Read only.",
+      "loadError": "Could not load.",
+      "none": "No items.",
+      "addTitle": "Add an item",
+      "kind": "Kind",
+      "kinds": {
+        "now": "now (per session)",
+        "waiting": "waiting",
+        "decision": "decision",
+        "next": "next",
+        "external": "external",
+        "note": "note"
+      },
+      "text": "Text",
+      "closeWhenInput": "Close condition (e.g. issue:#123, pr:#45, manual)",
+      "evidence": "Evidence paths (comma separated, relative to the repository)",
+      "promoteTo": "Promote to (e.g. issue:#123)",
+      "add": "Add",
+      "added": "Added.",
+      "edit": "Edit",
+      "save": "Save",
+      "saved": "Saved.",
+      "cancel": "Cancel",
+      "close": "Close",
+      "withdraw": "Withdraw",
+      "closed": "Closed.",
+      "reason": "Reason (optional)",
+      "state": {
+        "open": "open",
+        "recorded": "recorded, not reflected",
+        "promoted": "reflected",
+        "closed": "closed"
+      },
+      "slot": "now ({instance})",
+      "stale": "stale",
+      "frozen": "frozen",
+      "changed": "Updated",
+      "withheld": "The text is not shown ({field} matched rule {rule})",
+      "withheldShort": "(not shown)",
+      "meta": "created by {createdBy} ({instance}) · updated by {updatedBy} · {updatedAt}",
+      "closeWhen": "condition {type}",
+      "nowNote": "A now slot is edited from the session note (the worktree screen).",
+      "toDecisions": "Record and reflect",
+      "conflict": {
+        "title": "It was changed elsewhere. Compare your draft, the value you read and the current value.",
+        "draft": "Your draft",
+        "read": "When read (v{version})",
+        "current": "Now (v{version})",
+        "rebase": "Save my draft on top of the current value",
+        "discard": "Discard my draft"
+      },
+      "recordedClose": {
+        "first": "This decision is recorded but not reflected in the canonical place (such as the Issue body).",
+        "next": "Close without reflecting…",
+        "second": "This decision is recorded; it will be closed without being reflected in the canonical place (such as the Issue body). Comments and other records stay.",
+        "confirm": "Close without reflecting"
+      },
+      "refusal": {
+        "disabled": "mem is not on for this branch. Nothing can be written.",
+        "version_conflict": "It was changed elsewhere (the version differs).",
+        "state_forbids": "This cannot be done in the item's current state (closed, or recorded).",
+        "not_owner": "This item cannot be changed (only its author's instance or a person).",
+        "incarnation_changed": "The worktree or the instance was replaced since it was read. Read again.",
+        "membership_changed": "The worktree is on another branch than this screen's. Nothing was written.",
+        "confirmation_required": "Closing a recorded decision needs the confirmation that it is not reflected.",
+        "screen_only": "This change is made from the screen only.",
+        "item_not_found": "No such item (it was deleted).",
+        "instance_not_found": "No such instance.",
+        "duplicate_key": "The same request was sent with other content.",
+        "limit_exceeded": "Too many open items of this kind.",
+        "secret_like": "A field looks like it contains a secret.",
+        "invalid_close_when": "The close condition is not valid.",
+        "other": "Could not do it ({code})"
+      },
+      "notices": {
+        "title": "Undelivered notices",
+        "none": "No notice is waiting to be taken.",
+        "line": "Item {item} ended ({reason}, {outcome})",
+        "uncertain": "An earlier delivery could not be confirmed",
+        "take": "Take it",
+        "taken": "Taken."
+      }
     }
   }
 }
