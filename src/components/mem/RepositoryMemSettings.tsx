@@ -8,6 +8,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui';
 import { memSettingsApi, type MemSettingsResult } from '@/lib/mem/screen-client';
@@ -136,6 +137,14 @@ export function RepositoryMemSettings({ repositoryId }: { repositoryId: string }
     <div className="space-y-3" data-testid={`repository-mem-${repositoryId}`}>
       <p className="text-xs text-muted-foreground">{t('mem.description')}</p>
       <p className="text-xs text-muted-foreground">{t('mem.limits')}</p>
+      {/* Issue #4225: the one screen where a person approves a decision's record. */}
+      <Link
+        href={`/repositories/${encodeURIComponent(repositoryId)}/mem/decisions`}
+        className="inline-block text-xs text-foreground underline"
+        data-testid={`repository-mem-decisions-${repositoryId}`}
+      >
+        {t('mem.decisions.open')}
+      </Link>
 
       <section className="space-y-2">
         <h4 className="text-xs font-medium text-foreground">{t('mem.rules.title')}</h4>

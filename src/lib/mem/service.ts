@@ -33,15 +33,17 @@ import {
   purgeMem,
   readSessionSlot,
   replaceNowSlot,
+  transitionDecision,
   updateMemItem,
   writeScreenNote,
   type MemActor,
+  type MemDecisionTransition,
   type MemScope,
   type MemStoreFailure,
   type SessionSlotView,
 } from '@/lib/db/mem-db';
 import { createLogger } from '@/lib/logger';
-import { getMemNotice as getMemNoticeRow } from '@/lib/db/mem-close-db';
+import { getMemNotice as getMemNoticeRow, memModeOnFor } from '@/lib/db/mem-close-db';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import {
   isMemKind,
@@ -498,6 +500,65 @@ export async function memCloseItem(
     const result = closeMemItem(db, actor, itemId, reason, deps.now?.() ?? Date.now());
     if (!result.ok) return storeFailure(result);
     logger.info('mem-item-closed', { worktreeId, instanceId: actor.instanceId, itemId });
+    return writeOk(result.record, false, []);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// A decision recorded or promoted (Issue #4225, design `mem-promote-4225.md` §3.5・§6.3)
+// ---------------------------------------------------------------------------
+
+export interface MemDecisionTransitionInput {
+  /** The worktree the screen's request was read for (the context of the promote). */
+  worktreeId: string;
+  /**
+   * Its lifetime as the caller fixed it when the person's request arrived — before the
+   * external write and its awaits (§3.5). This entrance compares and never fixes it
+   * again; null is refused.
+   */
+  expectedWorktreeIncarnation: string | null;
+  itemId: string;
+  /** The item's version the person approved. */
+  expectedVersion: number;
+  transition: MemDecisionTransition;
+}
+
+/**
+ * The one way a decision becomes `recorded` / `promoted`. Called by the promote
+ * service of #4225 only (`src/lib/promote/service.ts`), after a person approved on
+ * the screen and the external write succeeded (or the person confirmed the
+ * reflection). The mode of the item's branch must be `on`, decided in the same
+ * synchronous stretch as the write; the version and the worktree's lifetime are the
+ * ones the caller fixed.
+ */
+export async function memSettleDecisionTransition(
+  db: Database.Database,
+  input: MemDecisionTransitionInput,
+  deps: MemServiceDeps = {}
+): Promise<MemOutcome> {
+  if (!getWorktreeById(db, input.worktreeId)) return memError('not_found');
+  if (input.expectedWorktreeIncarnation === null) return memError('instance_not_found', { reason: 'incarnation_changed' });
+  if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 0) return memError('invalid_request', { field: 'ifVersion' });
+  const before = getMemRecord(db, input.itemId);
+  if (!before || before.kind !== 'decision') return memError('item_not_found');
+  const expectedIncarnation = input.expectedWorktreeIncarnation;
+
+  // The mode is that of the item's branch at every root of the worktree's repository
+  // (5-2b P1): roots that differ answer `ambiguous`, as every other mem entrance does.
+  // A named branch reaches `decideMemTarget` as it is; null is a detached item's branch.
+  const spec: MemTargetSpec = { via: 'worktree', worktreeId: input.worktreeId, branch: before.owner.branch as string };
+  return resolveTarget(db, spec, deps, (target) => {
+    if (!target.ok) return targetFailure(target);
+    const current = getMemRecord(db, input.itemId);
+    if (!current || current.kind !== 'decision') return memError('item_not_found');
+    if (!target.readRepositoryIds.includes(current.owner.repositoryId)) return memError('not_found');
+    if (target.mode !== 'on' || !memModeOnFor(db, [current.owner.repositoryId], current.owner.branch)) {
+      return memError('disabled', { mode: target.mode, source: target.source });
+    }
+    const alive = () => getWorktreeIncarnation(db, input.worktreeId) === expectedIncarnation;
+    const result = transitionDecision(db, alive, input.itemId, { version: input.expectedVersion }, input.transition, deps.now?.() ?? Date.now());
+    if (!result.ok) return storeFailure(result);
+    logger.info('mem-decision-transitioned', { itemId: input.itemId, transition: input.transition, version: result.record.version });
     return writeOk(result.record, false, []);
   });
 }

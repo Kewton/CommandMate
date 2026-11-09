@@ -52,6 +52,8 @@ import { v66_migrations } from './v66-mem-store';
 import { v67_migrations } from './v67-mem-close-records';
 // Issue #4274: v68 — #4222 adds v67 in parallel (PM decision, 2026-11-08).
 import { v68_migrations } from './v68-session-brief-boundaries';
+// Issue #4225: the promote path of mem (previews, operations, attempts).
+import { v69_migrations } from './v69-mem-promote';
 
 /**
  * Complete ordered list of all migrations.
@@ -108,4 +110,5 @@ export const migrations: Migration[] = [
   ...v66_migrations,
   ...v67_migrations,
   ...v68_migrations,
+  ...v69_migrations,
 ];

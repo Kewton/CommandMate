@@ -1083,6 +1083,49 @@ export function closeMemItemByCondition(
 }
 
 // ===========================================================================
+// A decision recorded or promoted (Issue #4225, design `mem-promote-4225.md` §6.3)
+// ===========================================================================
+
+/** The transitions of a decision that only the screen's promote path (#4225) makes. */
+export type MemDecisionTransition = 'record' | 'promote' | 'promote-record-only';
+
+/**
+ * Move a decision `open → recorded`, `recorded → promoted` or `open → promoted`, if it
+ * is still the item the person approved: the same version, a state the transition
+ * leads from. Written as the person (`updated_by = 'human'`), never as an instance.
+ *
+ * @param alive - Whether the worktree the request was read for is still the same
+ *   lifetime; asked first in the transaction, so a request a delete and re-creation
+ *   (same id and path) overtook writes nothing (the invariant of every mem write)
+ */
+export function transitionDecision(
+  db: Database.Database,
+  alive: () => boolean,
+  itemId: string,
+  expected: { version: number },
+  transition: MemDecisionTransition,
+  now: number = Date.now()
+): { ok: true; record: MemRecord } | MemStoreFailure {
+  return db.transaction(() => {
+    if (!alive()) return { ok: false as const, code: 'instance_not_found' as const, reason: 'incarnation_changed' as const };
+    const row = findItemRow(db, itemId);
+    if (!row) return { ok: false as const, code: 'item_not_found' as const };
+    const current = recordFromItem(row);
+    if (current.version !== expected.version) return { ok: false as const, code: 'version_conflict' as const, current };
+    const step = memTransition(current.kind, current.state, transition);
+    if (current.kind !== 'decision' || !step.ok) return { ok: false as const, code: 'state_forbids' as const, current };
+    const changed = db
+      .prepare(
+        `UPDATE mem_items SET state = ?, version = version + 1, updated_by = 'human', updated_by_instance = NULL, updated_at = ?
+         WHERE id = ? AND version = ? AND state = ?`
+      )
+      .run(step.next, now, itemId, expected.version, current.state);
+    if (changed.changes !== 1) return { ok: false as const, code: 'version_conflict' as const, current };
+    return { ok: true as const, record: recordFromItem(findItemRow(db, itemId)!) };
+  })();
+}
+
+// ===========================================================================
 // The #2427 note written from the screen (§6.3・§10.2)
 // ===========================================================================
 

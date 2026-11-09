@@ -167,6 +167,8 @@ const EXCEPTIONS: Record<string, string> = {
   closeMemItem: '#4221 の入口（同上）',
   writeScreenNote: '#4221 の入口（同上）',
   purgeMem: '#4221 の入口（同上。知らせは CASCADE で項目と一緒に消える）',
+  transitionDecision:
+    '#4225 の decision の遷移（write-entrances-recreate-4221 の decision-* の行が (a)〜(c) を固定。呼び手は memSettleDecisionTransition だけ、promote-write-chain-4225 が固定）',
 };
 
 const world = new MemWorld();
