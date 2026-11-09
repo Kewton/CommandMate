@@ -54,6 +54,8 @@ import type {
   InstanceRoleSettingsResponse,
   RoleAssignmentInput,
 } from '../../types/agent-roles';
+import { MEM_EXIT_BY_CODE, type MemErrorCode, type MemWriteResponse } from '../../types/mem';
+import { resolveSessionIdentity, type SessionIdentity } from './whoami';
 
 // Issue #2464: the message length `send` is verified to deliver whole, stated in
 // `--help`. Issue #4274: the values moved to `src/config/send-verified-limits.ts`
@@ -568,6 +570,55 @@ async function reportTaskStatus(
   }
 }
 
+/**
+ * Issue #4226: `--note` is kept in mem as a `waiting` item of the sender, closed by the
+ * relay it opened (design `docs/design/mem-prompt-4226.md` §6). Only the note and the
+ * relay's id go in: not the other session, not the time, not the message (D2).
+ * Refused (mode not `on`, a check, the open limit, no answer): the caller undoes what
+ * this send took and sends nothing. Never repeats the note in an error.
+ *
+ * @returns The item's id
+ */
+async function writeSendNote(
+  client: ApiClient,
+  author: SessionIdentity,
+  relayId: string,
+  note: string,
+  undo: () => Promise<void>
+): Promise<string> {
+  try {
+    const written = await client.post<MemWriteResponse>(`/api/worktrees/${encodeURIComponent(author.worktreeId)}/mem/items`, {
+      instanceId: author.instanceId,
+      kind: 'waiting',
+      text: note,
+      closeWhen: `relay:${relayId}`,
+      evidence: [`relay:${relayId}`],
+      key: `send-note:${relayId}`,
+    });
+    console.error(`Note kept in mem: ${written.item.id}`);
+    return written.item.id;
+  } catch (error) {
+    await undo();
+    const payload = error instanceof ApiError ? ((error.payload ?? {}) as Record<string, unknown>) : {};
+    const code = typeof payload.code === 'string' && payload.code in MEM_EXIT_BY_CODE ? (payload.code as MemErrorCode) : null;
+    const detail = code ? `${code}${typeof payload.field === 'string' ? ` (field=${payload.field})` : ''}` : 'no answer from mem';
+    console.error(`Error: --note could not be kept in mem (${detail}), so nothing was sent.`);
+    process.exit(code ? MEM_EXIT_BY_CODE[code] : error instanceof ApiError && error.statusCode === undefined ? ExitCode.DEPENDENCY_ERROR : ExitCode.UNEXPECTED_ERROR);
+  }
+}
+
+/** Issue #4226: a message known not to have gone in leaves its note closed, best effort. */
+async function closeSendNote(client: ApiClient, author: SessionIdentity, itemId: string): Promise<void> {
+  try {
+    await client.post<MemWriteResponse>(`/api/worktrees/${encodeURIComponent(author.worktreeId)}/mem/items/${encodeURIComponent(itemId)}/close`, {
+      instanceId: author.instanceId,
+      reason: 'send_not_sent',
+    });
+  } catch {
+    console.error(`Warning: could not close the note ${itemId}; it closes once its relay is withdrawn.`);
+  }
+}
+
 /** Option checks before any side effect. Returns --duration in ms. A mocked `process.exit` returns, so nothing here stops early. */
 function validateSendArgs(worktreeId: string, message: string | undefined, options: SendOptions): number {
   // [SEC4-04] Validate worktree ID
@@ -584,6 +635,12 @@ function validateSendArgs(worktreeId: string, message: string | undefined, optio
   }
   if (!options.contract && message === undefined) {
     console.error('Error: a message argument is required unless --contract is given.');
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
+
+  // Issue #4226: a note is about the reply this send waits for, so it needs the relay.
+  if (options.note !== undefined && !options.replyTo) {
+    console.error('Error: --note needs --reply-to (the note is kept with the relay it waits on). Nothing was sent.');
     process.exit(ExitCode.CONFIG_ERROR);
   }
 
@@ -810,6 +867,7 @@ export function createSendCommand(): Command {
     .option('--ignore-structured-prompt', 'Send even if only the agent\'s hooks report an open dialog (Issue #1737). Use when the pane looks idle but sends are refused; a prompt visible in the terminal is still refused.')
     .option('--reply-to <target>', REPLY_TO_OPTION_DESCRIPTION)
     .option('--allow-relay-chain', ALLOW_RELAY_CHAIN_DESCRIPTION)
+    .option('--note <text>', 'With --reply-to: what you wait for, kept in mem as a waiting item closed by the relay (Issue #4226)')
     .option('--token <token>', TOKEN_WARNING)
     .addHelpText('after', `
 --reply-to registers a relay: when the target session finishes this turn,
@@ -817,6 +875,15 @@ CommandMate puts its answer into the named session's composer, prefixed with
 \`[from <alias> / <worktree>]\`. Nothing blocks — there is no wait to run and
 no pane to scrape. Watch it with \`commandmate relays\`, withdraw it with
 \`commandmate relays cancel <id>\`; it expires after 24h either way.
+
+--note "<text>" (Issue #4226) keeps the purpose of the reply in mem: a waiting item of
+your own session (whoami), closed when the relay ends. Only the note and the relay id
+are stored. It needs --reply-to and a session identity (exit 2 otherwise). When mem
+refuses it (mode not on: 50, a check: 2, too many open items: 56, ...) nothing is sent:
+the contract's task is failed, a grant this send armed is withdrawn and the relay is
+withdrawn, and send exits with mem's code. With --auto-yes, a state of Auto-Yes that
+cannot be read first stops the send before the grant (exit 99), and one with no
+--instance to read it for is refused before anything is done (exit 2).
 
 Exit 2 when the relay is refused: you are answering a relayed message already
 (pass --allow-relay-chain), the chain would exceed 3 hops, or an open relay
@@ -915,6 +982,16 @@ hold or the start was refused because of its role (nothing typed).
 
         validateSendModel(options, namedTarget.agent);
 
+        // Issue #4226: the note's author is this session; without one there is nobody to keep it for.
+        let noteAuthor: SessionIdentity | null = null;
+        if (options.note !== undefined) {
+          noteAuthor = await resolveSessionIdentity(client).catch(() => null);
+          if (!noteAuthor) {
+            console.error('Error: --note needs a session identity (run it inside a CommandMate session). Nothing was sent.');
+            process.exit(ExitCode.CONFIG_ERROR);
+          }
+        }
+
         // Issue #4116: fixed here, before any side effect, so a default that cannot be
         // read stops the command with nothing done. A send with no role or pin, or that
         // is one request, is left to the server's reading as it always was.
@@ -924,6 +1001,20 @@ hold or the start was refused because of its role (nothing typed).
           || (conditional && Boolean(options.autoYes || options.contract || options.replyTo));
         const commandTarget = pinsTarget ? await pinCommandTarget(client, worktreeId, namedTarget) : namedTarget;
         const { agent, instanceId } = commandTarget;
+        // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
+        //
+        // Issue #2771: claude is the exception to the exception. The deferral
+        // exists so Auto-Yes does not answer copilot's `/model` interaction; a
+        // claude model is a launch flag with no interaction to protect, and a
+        // contract send must have Auto-Yes on BEFORE the worker starts working.
+        const deferAutoYes = Boolean(options.model) && agent !== 'claude';
+        // Issue #4226 (P3-2): a --note send that arms Auto-Yes reads its state first, and
+        // the state is read for a named instance. With none (`--agent` alone, nothing
+        // pinned) there is nothing to read, ever: an input error, before any side effect.
+        if (options.note !== undefined && options.autoYes && !deferAutoYes && (!agent || !instanceId)) {
+          console.error('Error: --note with --auto-yes needs --instance <id> (the Auto-Yes state of that instance is read first). Nothing was sent.');
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
         if (options.newConversation) await assertNewConversationApplies(client, worktreeId, agent, instanceId);
 
         // Issue #4116: named before anything with a side effect, so a role that does
@@ -973,13 +1064,6 @@ hold or the start was refused because of its role (nothing typed).
           }
         };
 
-        // --auto-yes: enable auto-yes first (unless --model is specified, then after send) [DR2-02]
-        //
-        // Issue #2771: claude is the exception to the exception. The deferral
-        // exists so Auto-Yes does not answer copilot's `/model` interaction; a
-        // claude model is a launch flag with no interaction to protect, and a
-        // contract send must have Auto-Yes on BEFORE the worker starts working.
-        const deferAutoYes = Boolean(options.model) && agent !== 'claude';
         const registerRelay = async (onFailure: () => Promise<void>): Promise<RegisteredRelay> => {
           const registered = await registerRelayForMessage(client, {
             ...relayTarget,
@@ -1019,6 +1103,17 @@ hold or the start was refused because of its role (nothing typed).
         // since would make it this send's to withdraw.
         const onlyIfOff = conditional || (autoYesTarget !== null && priorAutoYes === false);
         let armedGrant: AutoYesSetResult | undefined;
+        // Issue #4226: a --note send undoes its grant when mem refuses the note, which needs
+        // the state before it. Not known, it stops here, before the grant (design §6.2).
+        if (options.note !== undefined && armsNow && priorAutoYes === null) {
+          await failTask();
+          if (relay) await cancelRelayQuietly(client, relay.id);
+          console.error(
+            'Error: the current Auto-Yes state could not be read, so this --note send was stopped before arming it. '
+              + 'Nothing was sent. Send it again later, or without --note.'
+          );
+          process.exit(ExitCode.UNEXPECTED_ERROR);
+        }
         if (armsNow && priorAutoYes !== true) {
           // Issue #3290: the server can refuse this — 409 when the session by
           // that name belongs to another CommandMate server — and the command
@@ -1072,6 +1167,18 @@ hold or the start was refused because of its role (nothing typed).
           });
         }
 
+        // Issue #4226: the note goes in right before the message, after every other side
+        // effect, so a refusal undoes all of them and sends nothing.
+        let noteItemId: string | undefined;
+        const noteRelay = relay;
+        if (options.note !== undefined && noteAuthor && noteRelay) {
+          noteItemId = await writeSendNote(client, noteAuthor, noteRelay.id, options.note, async () => {
+            await failTask();
+            await withdrawAutoYes(true);
+            await cancelRelayQuietly(client, noteRelay.id);
+          });
+        }
+
         const sendBody = buildSendBody(content, agent, instanceId, options, {
           assignment: roleAssignment,
           expected: expectedRole,
@@ -1084,6 +1191,8 @@ hold or the start was refused because of its role (nothing typed).
           onFailure: async (error, outcome) => {
             await failTask();
             await withdrawAutoYes(knownNotSent(error, outcome));
+            // Issue #4226: not sent for certain, so nothing is waited on. Unknown: the relay closes it.
+            if (noteItemId && noteAuthor && knownNotSent(error, outcome)) await closeSendNote(client, noteAuthor, noteItemId);
             // Issue #4116: no answer, so the send may have got as far as the save.
             // A 5xx with a body that says nothing of the setting is no better an answer.
             const saidNothing = error instanceof ApiError

@@ -315,6 +315,7 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--model <model>` | Model to use (copilot / antigravity / claude only). **copilot** switches inside the session. **antigravity and claude take it as a launch flag**: it applies only when this send starts the session, and a running session answers 400 (stop the session and resend to switch). For claude the value is an alias (`sonnet` / `opus` / `opus[1m]`) or a full id (`claude-sonnet-5`). The target must be named (`--instance` or `--agent`) | The tool's default |
 | `--auto-yes` | Enable auto-yes before sending. Applied after the message (a tool `--model` defers it for, or a grant already on with a role or pin), a failure is a warning and exit 0, because the message has gone out. Do not send it again: the warning's command enables it. A failure before the message is an error with nothing sent (Issue #4159) | - |
 | `--duration <d>` | Auto-yes duration (`1h`-`24h`, whole hours; e.g. `1h` / `3h` / `8h`). Out of range exits 2 with or without `--auto-yes` | 1h |
+| `--note "<text>"` | With `--reply-to`: what you wait for, kept in the sender's mem (your own session, `whoami`) as a `waiting` item (`close_when=relay:<id>`, `evidence=[relay:<id>]`; it closes when the relay ends). Only the note and the relay id are stored — not the other session, the time or the message. **The message is not changed.** Without `--reply-to` or a session identity: exit 2. When mem refuses it (mode not `on` 50, a check 2, the open limit 56, ...) **nothing is sent**: the contract's task is failed, the Auto-Yes grant this send armed and the relay are withdrawn, and send exits with mem's code. With `--auto-yes`, an Auto-Yes state that cannot be read first stops the send before arming (exit 99), and `--instance` is required (with `--agent` alone there is no instance to read the state for: exit 2, nothing done). A send known not to have gone in closes the item (Issue #4226) | - |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
 
 ### Input that overlaps a send (input lock (#3952))
@@ -2559,6 +2560,8 @@ commandmate mem update <id> --if-version <n> [--text … | --stdin] [--close-whe
 commandmate mem close <id> [--reason "<text>"]
 commandmate mem list [--all] [--branch <name>] [--json]
 commandmate mem check [--branch <name>] [--json]
+commandmate mem check --suggest [--instance <id>] [--json]
+commandmate mem check --suggest --quiet [--hook <event>]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
 ```
@@ -2588,6 +2591,31 @@ Conditions are **evaluated when read** (`mem list`, `mem check`, the brief); not
 - **Decisions**: a decision met before it is promoted stays open, marked `unreflected`
 - **The "it ended" notice**: the author's session (the same instance incarnation) gets it once, in its next brief. A `check`, another instance's brief or the screen's preview evaluating first does not use it up. If the author's incarnation has ended, the next session of the same branch gets it; if none, it stays in the screen's undelivered list (`GET /api/repositories/:id/mem/notices?branch=`) for a person to take
 
+### Prompts to update (`check --suggest`, Issue #4226)
+
+`mem check --suggest` applies the prompt rules to your own items and your own `now`. It runs no model, adds no watcher and changes no hook settings (no hook hands a line back to the agent's context; at a conversation boundary the brief does, and before a summary or at the end of a turn a skill's steps call this command).
+
+| code | When |
+|---|---|
+| `now_missing` | Your instance has no `now` (instances on the roster only) |
+| `now_stale` | Your `now` has not been updated for a day |
+| `now_condition_met` | Your `now` closed because its condition was met (not with `--quiet`) |
+| `decision_unreflected` | An `open` / `recorded` decision is stale (14 days), or met but not reflected |
+| `manual_stale` | A `next` / `external` / `note` closed by `manual` is stale |
+| `open_count` | The open items of the branch reached the warning count (the same formula as `mem list`'s warning) |
+| `ref_unknown` | A condition's reference is not found (`not_found` / `relay_not_found`; not with `--quiet`) |
+| `evidence_missing` | A `path:` of `evidence` is gone (a symbolic link counts as gone) |
+| `decision_no_destination` | An `open` decision has no destination (`promote_to`) |
+
+- It looks at items you wrote (the same incarnation of the instance; a rename of the worktree id keeps them) and items a person wrote on the screen. **It does not find an intention that should have been written and was not** (it sees the state of what is written, and an empty `now`)
+- What it prints is a fixed sentence per code with ids and versions; never an item's text or a branch name. `branch` in `--json` is replaced as the brief does (`null` for a branch with a secret-like value or invisible characters)
+- **Exit codes**: **57** when there is at least one prompt, 0 otherwise. Mode `off` / `derived`: nothing on stdout, exit 50. With `promptOnEvents` (the screen's mem settings) off, no prompt and exit 0 (`disabledBy: "promptOnEvents"` in `--json`). When the mode, the settings, the branch, the registration or the lifetime of the instance or worktree changed during the evaluation: nothing, exit 0 (`discarded` in `--json`, one line on stderr saying to run it again)
+- `--suggest` evaluates the conditions (like `mem list`, it may close what is met). It says whether a prompt was shown (`shown`) and prints everything every time
+- `--quiet` is what a skill's steps call. It **always exits 0**, prints only the prompts this instance has not been shown, in one line (280 bytes at most), and records them. It asks no condition. The record is in the database: **the same state is not prompted again, a server restart included** (going back to a branch, or to another registered root of the same Git, prompts nothing while their state is unchanged). A new conversation boundary, a new incarnation of the instance or a new state (an item's version, ...) prompts once. No identity, or an `--instance` that is not yours: nothing. `--json` loses to quiet. A flag error commander refuses (an unknown flag) is exit 1 as ever
+- Known limits: a prompt recorded by the server whose answer did not reach the CLI within its deadline (4 seconds) is recorded and never shown (the server's 3-second deadline counts from when it takes the request, not the time the CLI spent before that, such as resolving the session identity, so it does not close this gap). The records of an instance off the roster, a branch git no longer has, or a root whose registration was removed stay until the next `--quiet` in that worktree or until the worktree is deleted
+- `--hook <event>` (`session_start` / `pre_compact` / `turn_end` / `manual`) marks where it was called; it is logged and echoed in `--json` only
+- A process with the same OS rights can call the API (`POST /api/worktrees/<id>/mem/suggest`) directly and use up another instance's record. Like the author check, this stops mistakes, not intent
+
 ### Checks on the free fields
 
 Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checked on the server for its length limit, secret-like strings (tokens, keys, `password=`, …) and control characters. `path:` in `evidence` and `promote_to` takes repository-relative paths only, and refuses absolute paths, `..` leaving the repository, a symlink on the way and files like `.env`. A refusal shows only `code`, `field` and `rule` in the error, `--json` and the log — **never the refused text itself**.
@@ -2606,6 +2634,7 @@ Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checke
 | 54 | `duplicate_key`: the same `--key` with different content |
 | 55 | `not_owner` / `state_forbids`: not the author (another incarnation included), a state that does not allow it, or `purge` inside a session |
 | 56 | `limit_exceeded`: too many open items on the branch (30 for `waiting` / `next` / `external`, 50 for `note`; `decision` only warns) |
+| 57 | `check --suggest`: there is at least one prompt (Issue #4226; `--quiet` always exits 0) |
 
 ### Recording a decision in its canonical place (screen only, Issue #4225)
 
@@ -3293,7 +3322,7 @@ commandmate ls --token your-token
 | 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
 | 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
-| 50–56 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded); see the exit codes of [commandmate mem](#commandmate-mem) |
+| 50–57 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded), and a prompt from `mem check --suggest` (57); see the exit codes of [commandmate mem](#commandmate-mem). `send --note` refused by mem ends in 50–56 too |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |
 

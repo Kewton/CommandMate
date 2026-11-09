@@ -7,6 +7,7 @@
  *   commandmate mem close <id> [--reason "<text>"]
  *   commandmate mem list [--all] [--branch <name>] [--json]
  *   commandmate mem check [--branch <name>] [--json]          (Issue #4222)
+ *   commandmate mem check --suggest [--quiet] [--hook <event>] [--instance <id>] [--json]  (Issue #4226)
  *   commandmate mem mode [--json]
  *   commandmate mem purge --branch <name> [--closed-only] --confirm
  *
@@ -17,10 +18,13 @@
  * Errors print the server's code, field and rule, never what was refused (§7).
  */
 
+import { execFile } from 'child_process';
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { ExitCode, MemExitCode, type MemCommonOptions } from '../types';
-import { ApiClient, ApiError } from '../utils/api-client';
+import { ApiClient, ApiError, rethrowIfDeadlineExceeded } from '../utils/api-client';
+import type { WorktreeListResponse } from '../types/api-responses';
+import { parseSessionName } from '../../lib/cli-tools/session-name';
 import { TOKEN_WARNING } from '../utils/command-helpers';
 import { resolveSessionIdentity, type SessionIdentity } from './whoami';
 import {
@@ -35,6 +39,7 @@ import {
   type MemPurgeResponse,
   type MemWriteResponse,
 } from '../../types/mem';
+import { isMemSuggestHookEvent, MEM_SUGGEST_HOOK_EVENTS, type MemSuggestResponse } from '../../types/mem-suggest';
 
 const MEM_HELP = `
 Items are kept per registered repository and branch. Writing needs mode "on" for the
@@ -69,7 +74,18 @@ Exit codes:
   54  duplicate_key: the --key was used for another request
   55  not_owner / state_forbids (and purge from inside a session)
   56  limit_exceeded: too many open items of the kind on the branch
+  57  check --suggest: there is at least one prompt (Issue #4226)
   99  anything else
+
+check --suggest (Issue #4226) applies the prompt rules to your own items and your
+now: a stale now, a decision not reflected, a manual item gone stale, too many open
+items, an evidence path that is gone, a decision with no destination. It does not
+find what should have been written and was not. With promptOnEvents off (the screen)
+it prompts nothing. --quiet prints only the prompts this instance has not been shown
+for the same state (one line, exit 0 whatever happens) and records them; the record
+outlives a server restart. A prompt whose answer did not reach the CLI in time may
+not be shown. Records of a removed instance go at the next --quiet or with the
+worktree.
 
 What is not prevented: a process with your OS rights can write the database or
 call the API directly. The author check stops mistakes, not intent.
@@ -93,9 +109,9 @@ function usage(code: MemErrorCode, message: string, field?: string): MemCliError
   return new MemCliError(MEM_EXIT_BY_CODE[code], { ok: false, code, message, ...(field ? { field } : {}) });
 }
 
-async function identityOf(client: ApiClient): Promise<SessionIdentity | null> {
+async function identityOf(client: ApiClient, env?: Readonly<Record<string, string | undefined>>): Promise<SessionIdentity | null> {
   try {
-    return await resolveSessionIdentity(client);
+    return await resolveSessionIdentity(client, env);
   } catch {
     return null;
   }
@@ -176,16 +192,18 @@ function conditionText(condition: MemConditionView | undefined): string {
   return ` {${condition.result}:${condition.reason}${extra ? `,${extra}` : ''}}`;
 }
 
-async function run(options: MemCommonOptions, action: (client: ApiClient) => Promise<void>): Promise<void> {
+async function run(options: MemCommonOptions, action: (client: ApiClient) => Promise<void | number>): Promise<void> {
   let failure: MemCliError | null = null;
+  let returned: void | number = undefined;
   try {
     const client = new ApiClient({ token: options.token });
-    await action(client);
+    returned = await action(client);
   } catch (error) {
     failure = toCliError(error);
   }
   if (failure) report(failure, options.json);
-  process.exit(MemExitCode.SUCCESS);
+  // Issue #4226: `check --suggest` returns 57 when it prompts; every other action returns nothing.
+  process.exit(returned ?? MemExitCode.SUCCESS);
 }
 
 function printWrite(result: MemWriteResponse, json: boolean | undefined): void {
@@ -214,6 +232,161 @@ function withTargetOptions(command: Command, write: boolean): Command {
 function parseIfVersion(raw: string | undefined): number {
   if (raw === undefined || !/^[0-9]+$/.test(raw)) throw usage('invalid_request', '--if-version must be a whole number', 'ifVersion');
   return Number(raw);
+}
+
+/** The options only `check` has (Issue #4226). `instance` is in {@link MemCommonOptions}. */
+interface MemCheckSuggestOptions {
+  suggest?: boolean;
+  quiet?: boolean;
+  /** `--hook` with no value is `true`: refused in the action, so quiet can still exit 0. */
+  hook?: string | true;
+}
+
+/** The CLI's bound of a quiet call (design §3.6): the server's is 3 seconds. */
+const QUIET_DEADLINE_MS = 4000;
+
+const quietNote = (why: string): void => console.error(`commandmate mem check --suggest --quiet: ${why}`);
+
+/** Flags judged in the action, before anything is sent (design §3.1). null: fine. */
+function suggestFlagError(options: MemCommonOptions & MemCheckSuggestOptions): MemCliError | null {
+  if (!options.suggest) {
+    const flag = options.quiet ? 'quiet' : options.hook !== undefined ? 'hook' : 'instance';
+    return usage('invalid_request', `--${flag} needs --suggest`, flag);
+  }
+  if (options.branch !== undefined || options.repository !== undefined) {
+    return usage('target_required', '--suggest runs for your worktree and instance; it takes no --branch or --repository', options.branch !== undefined ? 'branch' : 'repository');
+  }
+  if (options.hook !== undefined && !isMemSuggestHookEvent(options.hook)) {
+    return usage('invalid_request', `--hook takes one of ${MEM_SUGGEST_HOOK_EVENTS.join(', ')}`, 'hook');
+  }
+  return null;
+}
+
+/**
+ * The tmux session name, if tmux gives it before `deadlineAt` (Codex P2-1). Run as a
+ * child process the event loop does not wait on, killed at the deadline, so a tmux
+ * that hangs costs quiet its bound and no more. null: no answer in time, or an empty one.
+ */
+function tmuxSessionNameBy(deadlineAt: number): Promise<string | null> {
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    execFile('tmux', ['display-message', '-p', '#{session_name}'], { timeout: remaining, killSignal: 'SIGKILL' }, (error, stdout) => {
+      const name = String(stdout ?? '').trim();
+      resolve(!error && name !== '' ? name : null);
+    });
+  });
+}
+
+/**
+ * The identity a CommandMate session name gives, read the way `resolveSessionIdentity`
+ * reads it (whoami.ts `splitRemainder`): `mcbd-[<ns>-]<tool>-<rest>`, and a `-<n>` at the
+ * end of `rest` is an instance suffix only when the server lists the worktree without it
+ * and not with it. The name is the one {@link tmuxSessionNameBy} got under the deadline,
+ * so tmux is never asked a second time (Codex 5-2c P2-1: an answer once is no proof the
+ * next one comes in time). The list is read with the quiet client, under the same deadline.
+ */
+async function identityFromSessionName(client: ApiClient, sessionName: string): Promise<SessionIdentity | null> {
+  const parsed = parseSessionName(sessionName);
+  if (!parsed) return null;
+  let known: Set<string> | null;
+  try {
+    const response = await client.get<WorktreeListResponse>('/api/worktrees');
+    known = new Set((response.worktrees ?? []).map((item) => item.id));
+  } catch (error) {
+    rethrowIfDeadlineExceeded(error);
+    known = null;
+  }
+  const { cliToolId, rest } = parsed;
+  const suffix = /^(.*)-(\d+)$/.exec(rest);
+  const split =
+    suffix && known && !known.has(rest) && suffix[1] !== '' && known.has(suffix[1])
+      ? { worktreeId: suffix[1], instanceId: `${cliToolId}-${suffix[2]}` }
+      : { worktreeId: rest, instanceId: cliToolId };
+  return { ...split, cliToolId, source: 'tmux-session', sessionName, knownWorktreeIds: known };
+}
+
+/**
+ * The identity of a quiet call, under its deadline (Codex P2-1). `resolveSessionIdentity`
+ * asks tmux first with a synchronous spawn that has no bound, before it reads even the
+ * environment. So the environment is read first with no tmux to ask; only when it
+ * names nobody is tmux asked, once, bounded by {@link tmuxSessionNameBy}, and the name
+ * it answered with is what the identity is made from ({@link identityFromSessionName}).
+ */
+async function quietIdentity(client: ApiClient, deadlineAt: number): Promise<SessionIdentity | null> {
+  const fromEnv = await identityOf(client, { ...process.env, TMUX: undefined });
+  if (fromEnv || !process.env.TMUX) return fromEnv;
+  const sessionName = await tmuxSessionNameBy(deadlineAt);
+  return sessionName ? identityFromSessionName(client, sessionName) : null;
+}
+
+/** `--suggest --quiet`: never stops the caller. Everything after the parser ends in exit 0. */
+async function runQuietSuggest(options: MemCommonOptions & MemCheckSuggestOptions): Promise<number> {
+  const flagError = suggestFlagError(options);
+  if (flagError) {
+    quietNote(`${String(flagError.body.code)} (${String(flagError.body.field ?? '')})`);
+    return MemExitCode.SUCCESS;
+  }
+  try {
+    const deadlineAt = Date.now() + QUIET_DEADLINE_MS;
+    const client = new ApiClient({ token: options.token }).withDeadline(deadlineAt);
+    const identity = await quietIdentity(client, deadlineAt);
+    // The record is this instance's: no identity, or another instance, is nothing to do (§4.4).
+    if (!identity) {
+      quietNote('no session identity; nothing to do');
+      return MemExitCode.SUCCESS;
+    }
+    if ((options.instance !== undefined && options.instance !== identity.instanceId) || (options.worktree !== undefined && options.worktree !== identity.worktreeId)) {
+      quietNote('not your own instance; nothing to do');
+      return MemExitCode.SUCCESS;
+    }
+    const result = await client.post<MemSuggestResponse>(`${wt(identity.worktreeId)}/suggest`, {
+      instanceId: identity.instanceId,
+      full: false,
+      ...(typeof options.hook === 'string' ? { hook: options.hook } : {}),
+    });
+    if (result.quietLine) console.log(result.quietLine);
+  } catch (error) {
+    const failure = toCliError(error);
+    quietNote(`${String(failure.body.code)}; nothing shown`);
+  }
+  return MemExitCode.SUCCESS;
+}
+
+function suggestionLine(suggestion: MemSuggestResponse['suggestions'][number]): string {
+  const items = suggestion.itemIds.map((id, index) => ` item=${id} v${suggestion.versions[index]}`).join('');
+  return `suggest ${suggestion.code}${items}  ${suggestion.message}${suggestion.command ? `: ${suggestion.command}` : ''}`;
+}
+
+/** `check --suggest [--quiet]` (Issue #4226, design §3.1). */
+async function runSuggest(options: MemCommonOptions & MemCheckSuggestOptions): Promise<void> {
+  if (options.quiet) process.exit(await runQuietSuggest(options));
+  await run(options, async (client) => {
+    const flagError = suggestFlagError(options);
+    if (flagError) throw flagError;
+    const identity = await identityOf(client);
+    const worktreeId = options.worktree ?? identity?.worktreeId;
+    if (!worktreeId) throw usage('target_required', 'Outside a session, name the target: --worktree <id> [--instance <id>]', 'target');
+    const instanceId = options.instance ?? (identity && identity.worktreeId === worktreeId ? identity.instanceId : undefined);
+    let result: MemSuggestResponse;
+    try {
+      result = await client.post<MemSuggestResponse>(`${wt(worktreeId)}/suggest`, {
+        ...(instanceId ? { instanceId } : {}),
+        full: true,
+        ...(typeof options.hook === 'string' ? { hook: options.hook } : {}),
+      });
+    } catch (error) {
+      const failure = toCliError(error);
+      // off / derived: nothing on stdout, one line on stderr, 50 (as `mem check`).
+      if (failure.body.code !== 'disabled') throw failure;
+      console.error(`mem is not enabled for this branch (mode ${String(failure.body.mode ?? 'off')}); nothing to suggest`);
+      return failure.exitCode;
+    }
+    if (result.discarded) console.error(`The state changed while this was read (${result.discarded}); run it again.`);
+    if (options.json) console.log(JSON.stringify(result, null, 2));
+    else for (const suggestion of result.suggestions) console.log(suggestionLine(suggestion));
+    return result.suggestions.length > 0 ? MemExitCode.SUGGESTED : MemExitCode.SUCCESS;
+  });
 }
 
 export function createMemCommand(): Command {
@@ -369,9 +542,17 @@ export function createMemCommand(): Command {
     mem
       .command('check')
       .description('Evaluate the close conditions of the branch now, and close what is met (mode on only)')
-      .option('--branch <name>', 'Another branch than the worktree’s'),
+      .option('--branch <name>', 'Another branch than the worktree’s')
+      .option('--suggest', 'Apply the prompt rules too (Issue #4226): exit 57 when there is a prompt')
+      .option('--quiet', 'With --suggest: one line of the prompts not shown yet, recorded; exit 0 always')
+      .option('--hook [event]', `With --suggest: where the call was made (${MEM_SUGGEST_HOOK_EVENTS.join(' | ')})`)
+      .option('--instance <id>', 'With --suggest: the instance the now rules are for (default: your own session)'),
     false
-  ).action(async (options: MemCommonOptions) => {
+  ).action(async (options: MemCommonOptions & MemCheckSuggestOptions) => {
+    if (options.suggest || options.quiet || options.hook !== undefined || options.instance !== undefined) {
+      await runSuggest(options);
+      return;
+    }
     await run(options, async (client) => {
       const target = await readTarget(client, options);
       if (target.via !== 'worktree') throw usage('target_required', 'check runs through a worktree: --worktree <id>', 'worktree');
