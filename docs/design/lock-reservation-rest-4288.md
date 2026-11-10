@@ -306,8 +306,10 @@ PR1a（§6・§7）で machine-lock の 3 実装と読み込み口 `scripts/lib/
 **D12 の不変条件（PR1a-c、codex-2 `review-4288-pr1ab.md` P2-1・P2-2、PM の処分 `pm-return-4288-pr1a-b.md`）**: 持ち主自身の解放（bash の `lock_release_held`、同期 JS の handle の `release`、TS の handle の `release`）がロックを**直接消してよいのは、記録の pid が呼び手自身で、かつ記録に `pgid` があればそのグループ G が空のときだけ**。それ以外は消さない。個別の分岐（引渡しの後か・初期の `ownerPid`／`LOCK_OWNER_PID` か・pid が生きているか）はこの表の行に過ぎない。
 
 - 「呼び手自身」: 同期 JS・TS は `process.pid`、bash は `$$`（読み込み口を source したシェル。サブシェルの中で呼んでも `$$` は同じ）
+- bash の自己は「`$$` が生きていること」（PR1a-d）: サブシェルの `$$` は親のもので、親が死んで子のサブシェルだけが残ると `$$` は死んだ pid。記録の pid が `$$` でも `kill -0 $$` が alive でなければ自己と見なさず、(c) の `needs-head` へ進む（先頭が回収して T2 を取った後の解放が T2 を消さない）。試験: `lock-release-invariant-4288.test.ts` の 5
 - 順: (a) G（記録に `pgid` があるとき）が空でない・空と示せない（EPERM など）→ `deferred`。(b) pid が呼び手自身 → 直接消す（`released`）。(c) それ以外の pid は、生きていても死んでいても `needs-head`（消さない。1 回きり）。呼び手は D5（`releaseAsHead`／`lock_release_as_head`）で、先頭として保護したうえで token と保有者（pid と G）を確かめてから消す。生きていると確かめた pid が削除までに死に、先頭が回収して取った後継（T2）を消す窓（P2-1）は、(c) で消さないことで無くなる。(c) の pid が観測できない（不明）ときは `deferred`（不明は何とも読まない。§2.8、PR1a-b の表の期待のまま）
 - 例外は 1 つ: 記録の pid と `pgid` が**どちらも呼び手自身**（呼び手が自分のグループの長。merge-pr の `pgid: process.pid`）のときは G を判定しない。呼び手は定義上 G に居るので G は空にならず、判定すると自分では二度と解放できない（merge-pr の列は同じプロセスで次の取得へ進む）。この pgid は「呼び手が死んだ後も子が動く間は回収させない」ための印で、呼び手自身の解放を止めるものではない
+- **例外の限界（PR1a-d、codex P2-1、PM の処分 `pm-return-4288-pr1a-c.md`）**: 例外は、解放の前に子をすべて待つ呼び手（今は merge-pr の `spawnSync` だけ）を前提にする。子が残っていても自己グループは判定しないので `released` になり、子はロックの保護から外れる（develop〔814d7cf39〕と a99c76c63 から同じ振る舞いで、今回の退行ではない）。背景の子を残す呼び手は、子を別のグループ G（D9）で持ち、自己グループの例外に頼らない（PR1b・PR1c の契約へ引き継ぐ）。例外を外すと merge-pr の `--queue` は自分のロックを解放できず次の実行が待つ。振る舞いは試験で固定（自己だけ・子が残る・観測不明はいずれも `released`: `lock-release-invariant-4288.test.ts` の 4・6、`merge-pr-queue-4277.test.ts` の「#4288 PR1a-d」）
 - 3 実装の表（`tests/unit/verification/lock-release-invariant-4288.test.ts`。行は列挙から作る）: {自己 pid, 非自己 alive, 非自己 dead, 非自己 unknown} × {pgid なし, G 空, G 生存} × {初期取得, 引渡し後}。引渡しは必ず G を名乗るので「pgid なし × 引渡し後」の 4 行は存在せず、**20 行**。bash と同期 JS は 20 行とも同じ結果。TS は `ownerPid`・`pgid`・引渡しを持たず（D9）、書く記録は「自己 pid・pgid なし・初期取得」の 1 行だけ（試験で固定）なので、その行（`released`）だけ
 
 | 記録の pid | G（記録の `pgid`） | 初期取得／引渡し後 | 結果 | D5 を呼んだ後 |
@@ -320,6 +322,7 @@ PR1a（§6・§7）で machine-lock の 3 実装と読み込み口 `scripts/lib/
 | 呼び手でない（どれも） | 生存 | 両方 | `deferred` | — |
 
 - **`needs-head` を受けた呼び手の扱い（PM Claude A P3-1。ここに 1 か所で書く）**: 今の呼び手は needs-head を受けない。precheck（`precheck.mjs` の `lock?.release()`）は `ownerPid`・`pgid`・引渡しを使わず記録の pid は自分、merge-pr（`merge-pr.mjs` の `takeMergeLock` → `lock.release()`）は pid も `pgid` も自分（上の例外）、gate-runner（TS）は自分だけ、`verify-run.sh` のゲートは `lock_release`（`LOCK_OWNER_PID` を使わず、`lock_hand_off` も pid は `$$`）。どれも戻り値を見ないが `released` か、G が空でないときの `deferred` だけ。**これから needs-head を受けうる呼び手（PR1b の `acquireRunLock` の `release`〔`ownerPid` に試験の偽の pid やサーバーの pid が入る〕・UAT の `run-server.sh`・PR1c の supervisor.lock）は、受けたら D5 を呼ぶ**（`releaseAsHead(lockPath, [T0, T1])`／`lock_release_as_head <lock> <queue> 10 T0 T1`）。呼ばずに放っておいても止まったままにはならない（記録の pid と G が死んだ後に次の先頭が回収する。PM Claude A の E1）が、pid が生きている間は誰も消さないので、呼び手の規約は「D5 を呼ぶ」に揃える。PR1b・PR1c の契約に引き継ぐ
+- **`deferred` を受けた後の再試行も D5（PR1a-d、PM Claude A P3-3）**: `deferred`（保有者が生きている・G が空でない・観測が不明）を受けた呼び手が後で再び解放を試みるときも、`lock_release_held`／`release` を呼び直さず D5（`releaseAsHead`／`lock_release_as_head`）を呼ぶ。直接消してよいのは最初の 1 回だけ
 
 **操作の終状態（review-4288h の P2-3・P3 のうち PR1a の操作で決まる部分。PR1b の `run-server.sh`・`daily.sh` はこれを呼ぶ）**:
 

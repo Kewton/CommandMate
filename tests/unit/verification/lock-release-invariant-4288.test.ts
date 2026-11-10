@@ -32,7 +32,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
-import { REPO, VERIFY_RUN, deadPid, killStarted, liveGroup, mutatedSync, removeRoot } from './lock-4288-harness';
+import { REPO, VERIFY_RUN, deadPid, killStarted, liveGroup, mutatedSync, removeRoot, waitSync } from './lock-4288-harness';
 
 const LOADER = path.join(REPO, 'scripts/lib/machine-lock.sh');
 
@@ -336,5 +336,90 @@ describe('4. the caller\'s own group (pid = pgid = the caller: merge-pr\'s pgid:
     const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$(( $$ + 1 ))"\n${ACQ}CM_VERIFY_TEST_OBS_FAULT=group=EPERM\nlock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=deferred']);
     expect(fs.existsSync(lock)).toBe(true);
+  });
+});
+
+describe('5. PR1a-d (codex P2-2, PM Claude A P2-1): a subshell\'s $$ is the parent\'s — a dead parent\'s $$ is not "the caller"', () => {
+  /**
+   * `$$` in a subshell is the parent shell's pid. When the parent dies and the subshell goes on, the
+   * recorded pid ($$) is a dead process, so "pid = $$" no longer says the caller is the holder: the
+   * head may recover the record and take T2 between the owner read and the delete. The subshell's
+   * release must then not remove T2 (D12: "bash's own is a $$ that is alive").
+   */
+  const SUCCESSOR = () => {
+    const file = path.join(root, 'successor.sh');
+    fs.writeFileSync(
+      file,
+      `set -u\n. "$1"; machine_lock_use_kv_codec; LOCK_WANT_TOKEN=T2\nlock_acquire_path "$LK" "$(machine_lock_queue_of "$LK")" 0 && echo successor-acquired\n`,
+    );
+    return file;
+  };
+
+  /** The parent acquires and exits; the detached subshell waits for its death, lets the head take T2 inside its release, then releases. */
+  function parentDies(loader = LOADER) {
+    const lock = lockIn();
+    const outFile = path.join(root, 'subshell.out');
+    const r = bash(
+      `machine_lock_use_kv_codec
+${ACQ}T0=$LOCK_TOKEN
+(
+  while kill -0 $$ 2>/dev/null; do sleep 0.05; done
+  eval "lgie_real() $(declare -f lock_group_is_empty | sed 1d)"
+  lock_group_is_empty() { bash '${SUCCESSOR()}' '${loader}' || true; lgie_real "$@"; }
+  lock_release_held "$LK"; echo "held=$LRH_RESULT"
+  if [ "$LRH_RESULT" = needs-head ]; then lock_release_as_head "$LK" "$(machine_lock_queue_of "$LK")" 10 "$T0"; echo "head=$LRAH_RESULT"; fi
+  echo done
+) >'${outFile}' 2>&1 </dev/null &
+echo parent-exits`,
+      { LK: lock, MACHINE_LOCK_VERIFY_RUN: loader === LOADER ? '' : VERIFY_RUN },
+      loader,
+    );
+    expect(r.out, r.err).toBe('acquired\nparent-exits');
+    expect(waitSync(() => fs.existsSync(outFile) && fs.readFileSync(outFile, 'utf8').includes('done\n'), 20000)).toBe(true);
+    return { lock, lines: fs.readFileSync(outFile, 'utf8').trim().split('\n') };
+  }
+
+  it('the parent dies, the head takes T2, the surviving subshell releases → needs-head, T2 stays; the head release keeps it', () => {
+    const { lock, lines } = parentDies();
+    expect(lines.filter((l) => !l.startsWith('verify-run:')), lines.join('\n')).toEqual(['successor-acquired', 'held=needs-head', 'head=kept', 'done']);
+    expect(ownerToken(lock)).toBe('T2');
+  });
+
+  it('positive control: before the $$-is-alive check (PR1a-c) the subshell removes T2', () => {
+    const loader = mutatedLoader((s) => s.replace('if [ "$LOB_PID" = "$$" ] && [ "$(lock_obs_kill0 pid "$$")" = alive ]; then', () => 'if [ "$LOB_PID" = "$$" ]; then'));
+    const { lock, lines } = parentDies(loader);
+    expect(lines.filter((l) => !l.startsWith('verify-run:')), lines.join('\n')).toEqual(['successor-acquired', 'held=released', 'done']);
+    expect(fs.existsSync(lock), 'T2 was removed under the head').toBe(false);
+  });
+
+  it('negative control: a subshell whose parent is alive releases its own record as before', () => {
+    const lock = lockIn();
+    const r = bash(`machine_lock_use_kv_codec\n${ACQ}( lock_release_held "$LK"; echo "held=$LRH_RESULT" )`, { LK: lock });
+    expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released']);
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+});
+
+describe('6. PR1a-d (codex P2-1): the own-group exception and its limit (design D12, "the limit of the exception")', () => {
+  /**
+   * pid = pgid = $$ is released without judging G. The exception holds for a caller that waits for all
+   * its children before releasing (merge-pr's spawnSync). A caller that leaves a background child
+   * behind is not protected by it: the lock goes while the child runs. That is the known limit, fixed
+   * here as the behavior — such a caller keeps its child in another group G (D9) and does not rely on
+   * the exception. See docs/design/lock-reservation-rest-4288.md, D12's "limit of the exception".
+   * (The unobservable-group row — released too — is section 4's "cannot be shown empty" test.)
+   */
+  it('the caller alone in its group → released', () => {
+    const lock = lockIn();
+    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
+    expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released']);
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it('a child still running in the group → released (the known limit of the exception, design D12)', () => {
+    const lock = lockIn();
+    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}sleep 30 &\nchild=$!\nlock_release_held "$LK"; echo "held=$LRH_RESULT child=$(kill -0 $child 2>/dev/null && echo alive || echo gone)"\nkill $child`, { LK: lock });
+    expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released child=alive']);
+    expect(fs.existsSync(lock)).toBe(false);
   });
 });

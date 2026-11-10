@@ -233,7 +233,9 @@ lock_release_held() { # <lock-path> [<token>…]
       return 1
     fi
   fi
-  if [ "$LOB_PID" = "$$" ]; then
+  # $$ is the pid of the shell that took the lock, also inside a subshell; once that shell is dead a
+  # surviving subshell is not the holder (D12: the caller is a $$ that is alive) and goes the pid way.
+  if [ "$LOB_PID" = "$$" ] && [ "$(lock_obs_kill0 pid "$$")" = alive ]; then
     rm -rf "$lrh_lock" 2>/dev/null || true
     for lrh_t in $lrh_tokens; do lock_release_own_gone "$lrh_lock" "$lrh_t"; done
     LRH_RESULT=released
