@@ -204,7 +204,7 @@ describe('dispatch: the ready wait after /clear is bounded by real time (#4288)'
       monotonic: true,
       sleep: async (ms) => {
         sleeps.push({ at: clock, ms });
-        clock += ms + 0.5;
+        clock += ms + 0.25;
       },
     });
     expect(code).toBe(2);
@@ -220,6 +220,8 @@ describe('dispatch: the ready wait after /clear is bounded by real time (#4288)'
     }
     // last window: less than 1 ms left still gets the floor of 1 (never 0)
     expect(Math.min(...lsCalls.map((c) => c.timeoutMs as number))).toBeGreaterThanOrEqual(1);
+    // the scene exists: the final window had under 1 ms left and was handed exactly 1 (not 0)
+    expect(lsCalls.at(-1)!.timeoutMs).toBe(1);
   });
 
   it('the timeout equals the floor of the time left (boundary: 84999.5 ms left -> 84999, not 85000)', async () => {

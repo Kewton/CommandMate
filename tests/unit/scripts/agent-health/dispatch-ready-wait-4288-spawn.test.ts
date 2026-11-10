@@ -61,7 +61,7 @@ describe('dispatch default exec: spawnSync gets a whole-ms timeout (#4288)', () 
     const lines: string[] = [];
     const code = await main(['--state-dir', path.join(root, 'state')], {
       sleep: async (ms) => {
-        clock += ms + 0.5;
+        clock += ms + 0.25;
       },
       now: () => new Date(Date.parse('2026-10-01T00:30:00Z')),
       monotonic: () => clock,
@@ -85,6 +85,8 @@ describe('dispatch default exec: spawnSync gets a whole-ms timeout (#4288)', () 
       expect(t).toBeLessThanOrEqual(READY_TIMEOUT_MS);
     }
     // negative control: the first state check (no explicit timeout) keeps the 300 s default
+    // the final window had under 1 ms left and was handed exactly 1 (not 0)
+    expect(waits.at(-1)).toBe(1);
     expect(calls.ls[0]).toBe(300_000);
   });
 });
