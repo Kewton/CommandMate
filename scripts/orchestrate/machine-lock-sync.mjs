@@ -762,7 +762,7 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
  * is the token to acquire under; `ownerPid` the pid written to the owner (the ticket keeps
  * process.pid); `hooks.kill` stands in for process.kill (D10).
  *
- * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, abandoned?: boolean, unknown?: { point: string, path: string, code: string }, release: () => ('released' | 'deferred' | 'kept' | 'none'), setOwnerFields: (fields: Record<string, unknown>) => boolean, handOff: (pid: number, pgid: number) => { ok: boolean, token?: string, stage?: string }, token?: string, path: string }}
+ * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, abandoned?: boolean, unknown?: { point: string, path: string, code: string }, release: () => ('released' | 'deferred' | 'needs-head' | 'kept' | 'none'), setOwnerFields: (fields: Record<string, unknown>) => boolean, handOff: (pid: number, pgid: number) => { ok: boolean, token?: string, stage?: string }, token?: string, path: string }}
  */
 export function acquireMachineLockSync(name, options) {
   const { timeoutMs, pollMs = LOCK_POLL_MS, sleep = sleepSync, hooks = {} } = options;
@@ -894,6 +894,11 @@ export function acquireMachineLockSync(name, options) {
                 // owner that cannot be read is not known to be ours, so it stays too (#4288). A record a
                 // handover published (D4) is released only once its group is empty (D9: the process it
                 // protects may still be working) — 'deferred', and the release may be called again.
+                // D12 (#4288 PR1a-b, the same rule as bash's lock_release_held): a record of ours whose
+                // recorded pid is not this process (a handover's T1, or an ownerPid not ours) is removed
+                // here only while that pid is alive. Gone: a head could be recovering it right now and
+                // take it between this read and the delete, so nothing is removed — 'needs-head', and
+                // the caller releases with releaseAsHead(lockPath, [token, T1]) (D5). Unknown: 'deferred'.
                 release: () => {
                   if (released) return 'none';
                   const current = obs.owner('release-owner', lockPath);
@@ -902,6 +907,18 @@ export function acquireMachineLockSync(name, options) {
                     const group = obs.group('group', current.owner.pgid);
                     if (group.state !== 'gone') {
                       warn(`machine-lock-release-deferred ${lockPath} pgid=${current.owner.pgid}`);
+                      return 'deferred';
+                    }
+                  }
+                  if (mine && current.owner.pid !== process.pid) {
+                    const holder = obs.pid('pid', current.owner.pid);
+                    if (holder.state === 'gone') {
+                      released = true;
+                      warn(`machine-lock-release-needs-head ${lockPath} (recorded pid ${current.owner.pid} is gone; release as the head)`);
+                      return 'needs-head';
+                    }
+                    if (holder.state === 'unknown') {
+                      warn(`machine-lock-release-deferred ${lockPath} (recorded pid ${current.owner.pid} is unknown: ${holder.code})`);
                       return 'deferred';
                     }
                   }
@@ -1126,22 +1143,29 @@ export function recoverIfDead(lockPath, options = {}) {
   const now = options.hooks?.now ?? (() => Date.now());
   return asHead(lockPath, options, (ctx) => {
     const settled = settleGone(ctx);
-    const extra = { ...(settled.block && settled.pending ? { pending: settled.pending } : {}) };
+    // The first unknown is the one returned, as bash's LRO_UNKNOWN (lock_note_unknown keeps the
+    // first): a settle whose observation failed (list-root, gone-owner …) is not dropped by a later
+    // answer such as 'absent' (Codex review-4288-pr1a P3).
+    const first = settled.block && settled.unknown ? settled.unknown : null;
+    const done = (result, unknown) => ({
+      result,
+      ...(first ?? unknown ? { unknown: first ?? unknown } : {}),
+      ...(settled.block && settled.pending ? { pending: settled.pending } : {}),
+    });
     const read = ctx.obs.owner('lock-owner', lockPath);
-    if (read.state === 'unknown') return { result: 'kept', unknown: { point: 'lock-owner', path: path.join(lockPath, 'owner'), code: read.code }, ...extra };
-    if (read.state === 'corrupt') return { result: 'kept', ...extra };
+    if (read.state === 'unknown') return done('kept', { point: 'lock-owner', path: path.join(lockPath, 'owner'), code: read.code });
+    if (read.state === 'corrupt') return done('kept');
     if (read.state === 'missing') {
       const expired = expireOwnerless(ctx, options.ownerlessGraceMs, now());
-      if (expired.state === 'removed') return { result: 'removed', ...extra };
-      if (expired.state === 'absent' || ownerlessEmptyLock(ctx).state === 'absent') return { result: 'absent', ...extra };
-      return { result: 'kept', ...(expired.unknown ? { unknown: expired.unknown } : {}), ...extra };
+      if (expired.state === 'removed') return done('removed');
+      if (expired.state === 'absent' || ownerlessEmptyLock(ctx).state === 'absent') return done('absent');
+      return done('kept', expired.unknown);
     }
     const holder = holderState(read.owner, ctx);
-    if (holder.state === 'unknown') return { result: 'kept', unknown: { point: holder.point, path: lockPath, code: holder.code }, ...extra };
-    if (holder.state !== 'gone') return { result: 'kept', ...extra };
+    if (holder.state === 'unknown') return done('kept', { point: holder.point, path: lockPath, code: holder.code });
+    if (holder.state !== 'gone') return done('kept');
     ctx.onRecover?.('recover-only-judged');
     const r = recoverLock(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
-    const result = r === 'recovered' ? 'removed' : r === 'restore-failed' ? 'restore-failed' : r === 'gone' ? 'absent' : 'kept';
-    return { result, ...extra };
+    return done(r === 'recovered' ? 'removed' : r === 'restore-failed' ? 'restore-failed' : r === 'gone' ? 'absent' : 'kept');
   });
 }

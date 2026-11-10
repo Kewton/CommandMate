@@ -377,7 +377,11 @@ describe('D4: handOff publishes the protected process and its group under a new 
     expect(sh(ACQ, { LK: lock }).out).toMatch(/^refused .*\(pgid \d+\)/);
     killStarted();
     expect(await until(() => !groupAlive(g))).toBe(true);
-    expect(r.release()).toBe('released');
+    // D12 (PR1a-b, as bash's lock_release_held): the recorded pid (g) is gone too, so the holder does
+    // not remove it itself — a head could be recovering it — and releases it as the head (D5).
+    expect(r.release()).toBe('needs-head');
+    expect(fs.existsSync(lock)).toBe(true);
+    expect(lockSync.releaseAsHead(lock, ['T0', `T0-g${g}`], { timeoutMs: 0 }).result).toBe('released');
     expect(fs.existsSync(lock)).toBe(false);
   });
 

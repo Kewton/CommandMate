@@ -228,7 +228,7 @@ node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$D
   `pos=` `attempt=` `exit=` `pr=`）。`queue` の行は HEAD を持たず進捗に数えない（docs/orchestrate/run-log.md）。`run-log.mjs status` が `queue:` に出す。
 
 `cpu.heavy` などの検証のロックも同じ札の規約で先着順になった（`machine-lock.ts` と `machine-lock-sync.mjs`。docs/design/verification-config.md §9.2）。
-standalone の `verify-run.sh`（`.claude` と `.agents`）も同じ札の規約に追従した。`commandmate-skills` の写しへの移植は未（別途。それまでその写しは札を知らない旧版）。
+standalone の `verify-run.sh`（`.claude` と `.agents`）も同じ札の規約に追従した。`commandmate-skills` の写しへは #4277 の札の規約を cmate-verify 0.7.0（skills PR #314）、#4288 の 1 番（pgid・退避の読み・観測の 3 値）を 0.8.0（skills PR #315）で移植済み。#4288 の 2 番 PR1a でロックの節に足した run-lock・supervisor.lock 用の関数（既定で働かない）と owner の排他作成は未移植で、それまで写しの 0.8.0 とはバイト一致しない（プロトコルは同じなので、混在しても取り合いの規則は変わらない）。
 
 ## 6-3 落ちたジョブの再実行と run の完走
 

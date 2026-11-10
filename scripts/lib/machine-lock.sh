@@ -32,7 +32,19 @@
 # marker missing or there twice — fails the source (return 1): the caller must treat that as "not
 # acquired", never run unlocked.
 #
+# Not under `set -e` (errexit): the section is written for `set -u` only. Its observations and
+# operations answer with non-zero statuses and command substitutions that fail on purpose (an owner
+# that is missing, a marker not found), so under errexit the caller's shell would end silently in the
+# middle of an acquisition or a recovery. Sourcing under `set -e` fails the source (return 1) with a
+# message; a caller must not turn errexit on after sourcing either (PM review of PR1a A P3-2 / B P3-1).
+#
 # bash 3.2 compatible (macOS /bin/bash).
+
+case $- in
+  *e*)
+    echo "machine-lock: not loaded under set -e (errexit): the lock operations answer with non-zero statuses; source this under set -u only" >&2
+    return 1 2>/dev/null || exit 1;;
+esac
 
 if [ -n "${MACHINE_LOCK_LOADED:-}" ]; then
   return 0 2>/dev/null || exit 0
