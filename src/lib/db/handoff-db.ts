@@ -600,20 +600,30 @@ export interface DirectItemChange {
   updatedAt: number;
 }
 
-/** Items of the branch an agent wrote after `since`, except those `excluded` (the proposals' own). */
+/**
+ * Items of the branch an agent wrote after `since`, except those `excluded` (the proposals' own).
+ * A detached HEAD (`branch` null) is one worktree's own, as in mem's lists (`mem-db.ts`
+ * `scopeClause`): the items of the request's worktree only, by `origin_worktree_id`
+ * (codex review-4227-pr2 P2-3) — another detached worktree of the repository is not this one.
+ */
 export function listDirectItemChanges(
   db: Database.Database,
   repositoryId: string,
   branch: string | null,
+  originWorktreeId: string,
   since: number,
   excluded: ReadonlySet<string>
 ): DirectItemChange[] {
+  const scope =
+    branch === null
+      ? { sql: 'repository_id = ? AND branch IS NULL AND origin_worktree_id = ?', params: [repositoryId, originWorktreeId] }
+      : { sql: 'repository_id = ? AND branch = ?', params: [repositoryId, branch] };
   const rows = db
     .prepare(
       `SELECT id, kind, state, version, updated_by, updated_by_instance, updated_at FROM mem_items
-         WHERE repository_id = ? AND branch IS ? AND updated_at >= ? AND updated_by = 'agent' ORDER BY updated_at DESC LIMIT 50`
+         WHERE ${scope.sql} AND updated_at >= ? AND updated_by = 'agent' ORDER BY updated_at DESC LIMIT 50`
     )
-    .all(repositoryId, branch, since) as Array<{
+    .all(...scope.params, since) as Array<{
     id: string;
     kind: string;
     state: string;

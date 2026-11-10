@@ -219,3 +219,86 @@ describe('[#4227 G-4] the stop is the existing stop, for the hand-off target onl
     expect(hook.server.kills).toEqual([]);
   });
 });
+
+/**
+ * Issue #4227 pr2c (review B P3-5): one mode read at a time, and one dialog. A press while the
+ * mode is read is ignored (before, each press read again and two answers that differed opened
+ * the plain confirmation and the hand-off together); whichever opens closes the other.
+ */
+describe('[#4227 G-4] B P3-5: "end" pressed again while the mode is read', () => {
+  const OTHER: SessionKillTarget = { cliToolId: 'claude', instanceId: 'claude', label: 'Claude' };
+
+  it('a second press during the read is ignored: one read, the hand-off only, no plain confirmation', async () => {
+    const hook = await opened('hold');
+    let first!: Promise<void>;
+    act(() => {
+      first = hook.result.current.openEnd(TARGET);
+    });
+    await waitFor(() => expect(hook.server.heldModes).toHaveLength(1));
+    // The second press would read a 500 (the plain confirmation) if it were read.
+    hook.server.mode = { status: 500, body: { ok: false } };
+    await act(async () => {
+      await hook.result.current.openEnd(OTHER);
+      await hook.result.current.openActiveEnd();
+    });
+    expect(hook.server.modeReads).toHaveLength(1);
+    expect(hook.result.current.killTarget).toBeNull();
+    await act(async () => {
+      hook.server.heldModes[0]();
+      await first;
+    });
+    expect(hook.result.current.handoffTarget).toEqual(TARGET);
+    expect(hook.result.current.killTarget).toBeNull();
+    expect(hook.server.kills).toEqual([]);
+  });
+
+  it('(negative control) after the read is answered, a press reads again', async () => {
+    const hook = await opened({ status: 500, body: { ok: false } });
+    await act(async () => {
+      await hook.result.current.openEnd(TARGET);
+    });
+    await act(async () => {
+      await hook.result.current.openEnd(OTHER);
+    });
+    expect(hook.server.modeReads).toHaveLength(2);
+    expect(hook.result.current.killTarget).toEqual(OTHER);
+  });
+
+  it('the plain confirmation and the hand-off are never both open: whichever opens closes the other', async () => {
+    const hook = await opened({ status: 500, body: { ok: false } });
+    await act(async () => {
+      await hook.result.current.openEnd(TARGET);
+    });
+    expect(hook.result.current.killTarget).toEqual(TARGET);
+    hook.server.mode = ATTENDED;
+    await act(async () => {
+      await hook.result.current.openEnd(OTHER);
+    });
+    expect(hook.result.current.handoffTarget).toEqual(OTHER);
+    expect(hook.result.current.killTarget).toBeNull();
+    hook.server.mode = { status: 500, body: { ok: false } };
+    await act(async () => {
+      await hook.result.current.openEnd(TARGET);
+    });
+    expect(hook.result.current.killTarget).toEqual(TARGET);
+    expect(hook.result.current.handoffTarget).toBeNull();
+    expect(hook.server.kills).toEqual([]);
+  });
+
+  it('a read held on another worktree does not hold the press on this one', async () => {
+    const hook = await opened('hold');
+    act(() => {
+      void hook.result.current.openEnd(TARGET);
+    });
+    await waitFor(() => expect(hook.server.heldModes).toHaveLength(1));
+    hook.rerender({ worktreeId: B });
+    hook.server.mode = { status: 500, body: { ok: false } };
+    await act(async () => {
+      await hook.result.current.openEnd(OTHER);
+    });
+    expect(hook.server.modeReads).toEqual([`/api/worktrees/${A}/mem/mode`, `/api/worktrees/${B}/mem/mode`]);
+    expect(hook.result.current.killTarget).toEqual(OTHER);
+    await act(async () => hook.server.heldModes[0]());
+    expect(hook.result.current.handoffTarget).toBeNull();
+  });
+});

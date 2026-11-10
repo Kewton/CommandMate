@@ -791,6 +791,23 @@
         "screen_only": "この操作は画面からだけできます。",
         "not_found": "依頼が見つかりません。",
         "other": "できませんでした（{code}）。"
+      },
+      "closeWhileStopping": "停止の途中です。終わるまで閉じられません（終了をやめることもできません）。",
+      "closeWhileUnknown": "確定の送信中か、結果が分からない確定があります。「同じ内容で送り直す」か「送り直さずにやめる」を選んでから閉じてください。",
+      "field": {
+        "label": {
+          "text": "本文",
+          "closeWhen": "終わる条件",
+          "evidence": "根拠",
+          "promoteTo": "昇格先",
+          "reason": "close の理由"
+        },
+        "current": "今",
+        "keep": "変えない（今の値のまま）",
+        "unset": "指定なし",
+        "cleared": "空にする",
+        "empty": "（空）",
+        "none": "なし"
       }
     }
   }

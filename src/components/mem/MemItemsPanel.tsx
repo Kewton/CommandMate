@@ -1177,7 +1177,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             <li key={entry.id} className="flex flex-wrap items-center gap-2 text-xs text-foreground" data-testid={`mem-notice-${entry.id}`}>
               <span>{t('mem.items.notices.line', { item: entry.itemId, reason: entry.endReason, outcome: entry.outcome })}</span>
               {entry.uncertain && <span className="text-warning-foreground">{t('mem.items.notices.uncertain')}</span>}
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void acknowledge(entry)}>
+              {/* Outside the lock (PM P3-3): taking a notice writes no item. */}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void acknowledge(entry)} data-testid={`mem-notice-take-${entry.id}`}>
                 {t('mem.items.notices.take')}
               </Button>
             </li>

@@ -791,6 +791,23 @@
         "screen_only": "This is done from the screen only.",
         "not_found": "No such request.",
         "other": "Could not do it ({code})."
+      },
+      "closeWhileStopping": "The stop is in progress. This cannot be closed (or the end cancelled) until it finishes.",
+      "closeWhileUnknown": "A confirmation is being sent or its result is unknown. Send it again or drop it before closing.",
+      "field": {
+        "label": {
+          "text": "Text",
+          "closeWhen": "Close when",
+          "evidence": "Evidence",
+          "promoteTo": "Promote to",
+          "reason": "Close reason"
+        },
+        "current": "Now",
+        "keep": "Unchanged (keeps the current value)",
+        "unset": "Not set",
+        "cleared": "Cleared",
+        "empty": "(empty)",
+        "none": "None"
       }
     }
   }

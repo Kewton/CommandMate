@@ -1922,7 +1922,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * fails, answers anything but `on` + `popup`, or takes longer than
    * {@link END_MODE_READ_TIMEOUT_MS} opens the plain confirmation, so "end" never hangs on it.
    */
+  /**
+   * Issue #4227 pr2c (review B P3-5): one read at a time. A press while the mode is being read
+   * is ignored, so two answers that differ (one past its deadline, one `on`) cannot open both
+   * the plain confirmation and the hand-off; and whichever opens closes the other.
+   */
+  const endReadingRef = useRef<object | null>(null);
+  useEffect(() => {
+    // Another worktree's read answers nothing here (`startedFor` below): it holds no press.
+    endReadingRef.current = null;
+  }, [worktreeId]);
   const openEnd = useCallback(async (target: SessionKillTarget): Promise<void> => {
+    if (endReadingRef.current !== null) return;
+    const reading = {};
+    endReadingRef.current = reading;
     const startedFor = worktreeId;
     let attended = false;
     const controller = new AbortController();
@@ -1935,10 +1948,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       attended = false;
     } finally {
       clearTimeout(timer);
+      if (endReadingRef.current === reading) endReadingRef.current = null;
     }
     if (startedFor !== worktreeIdRef.current) return;
-    if (attended) setHandoffTarget(target);
-    else setKillTarget(target);
+    if (attended) {
+      // A kill in flight keeps its confirmation (Issue #1171), as its cancel does.
+      if (!isKillPendingRef.current) setKillTarget(null);
+      setHandoffTarget(target);
+    } else {
+      setHandoffTarget(null);
+      setKillTarget(target);
+    }
   }, [worktreeId]);
   /** The DesktopHeader / mobile End: the active instance, snapshotted at press time. */
   const openActiveEnd = useCallback(async (): Promise<void> => {

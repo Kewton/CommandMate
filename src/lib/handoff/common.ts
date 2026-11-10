@@ -139,7 +139,7 @@ export function proposalView(
 export function readView(db: Database.Database, row: HandoffRequestRow, now: number): HandoffReadResponse {
   const proposals = listHandoffProposals(db, row.id);
   const applied = new Set(proposals.map((proposal) => proposal.appliedItemId).filter((id): id is string => id !== null));
-  const direct = listDirectItemChanges(db, row.repositoryId, row.branch, row.createdAt, applied).map((change) => ({
+  const direct = listDirectItemChanges(db, row.repositoryId, row.branch, row.targetWorktreeId, row.createdAt, applied).map((change) => ({
     id: change.id,
     kind: change.kind,
     state: change.state,

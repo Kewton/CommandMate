@@ -290,6 +290,18 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
   G はサーバから kill しない。期限・取り消し・古い依頼から kill に届く経路は無い（§4.6.1・§7.3）
 ```
 
+#### 4.1.1 ダイアログの閉じ方の規則（G-PR2 の pr2c、codex P2-1・B P3-3 を 1 つの規則に）
+
+ダイアログを閉じる入口は全部で、Esc・×・背景・「終了をやめる」・依頼が終わった後の「閉じる」・依頼を作れなかったときの「やめる」。どの入口も同じ 1 つの関数（`SessionHandoffDialog.tsx` の `handoffCloseBlock`）で判定し、閉じられないときは閉じず・取り消さず、理由を出す。
+
+| 状態 | 判定 | 理由 |
+|---|---|---|
+| 停止の途中（`end` の応答待ち → 既存の停止 → `end/observe`） | `stopping`：閉じない・取り消さない | 既存の確認と同じ（停止の要求中の取り消しは無視、Issue #1171）。閉じると停止の宣言の下で依頼を取り消す。`end` の応答の後に、閉じられた（ページが閉じた）なら既存の停止へ進まない |
+| 確定の送信中、または結果不明 | `unknown`：閉じない・取り消さない | 結果不明は人が「送り直す」か「送り直さずにやめる」を選ぶまで持つ（G-PR1 の規則）。送信中のものは結果不明で返りうるので同じに扱う |
+| それ以外 | 閉じる（「終了をやめる」・Esc・×・背景は開いた依頼を取り消してから） | — |
+
+ページの側がダイアログを閉じた（別の「終了」・作業木の切り替え）ときも、結果不明の確定は消さない。次に開いたときにも出し、同じ内容で送り直せる（ほかの作業木のものは出さない）。項目の画面の lock も持ち続ける。
+
 ### 4.2 依頼の文（Agent へ）
 
 固定のテンプレート（D1：モデルを呼ばない）。データの区切り（D12）は C の区画と同じ作法で、依頼の ID と期限だけを差し込む：
@@ -868,7 +880,26 @@ CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON
 | 6 | 依頼の文の送信 | `src/lib/handoff/screen-client.ts` の `handoffApi.sendText` が送信の route に `brief:'skip'` で送る（`api-client.ts` は G-PR3 の範囲なので変えない） |
 | 7 | G-4 の描画 | `SessionHandoffDialog.tsx` と hook の `openActiveEnd`・`handoffTarget`・`closeHandoff`・`stopForHandoff`（既存の停止の本体を `stopSession(target)` に出し、`handleKillConfirm` と同じものを呼ぶ）までを作った。描く `WorktreeDetailDesktop.tsx`・`WorktreeDetailRefactored.tsx` は契約の範囲の外なので、「終了」はまだ G-4 を開かない（今どおり）。繋ぐのは後の契約 |
 | 8 | S-C の読み口 | `pre-end.ts` は G-PR3（§7.1）。G-PR2 は記録（`outcome`・`outcome_reason`・`ended_at`）まで |
-| 9 | 画面の外の更新 | `GET` の `direct` は、依頼の作成の後に Agent がそのブランチで書いた項目（提案の確定で書いた項目を除く、最大 50）。読むだけ |
+| 9 | 画面の外の更新 | `GET` の `direct` は、依頼の作成の後に Agent がそのブランチで書いた項目（提案の確定で書いた項目を除く、最大 50）。読むだけ。detached の依頼は項目の一覧（`mem-db.ts` の `scopeClause`）と同じく依頼の作業木（`origin_worktree_id`）の項目だけ（pr2c、§11.13 (3)） |
+
+### 11.13 G-PR2 のレビュー（codex `review-4227-pr2.md`・A `pm-review-4227-pr2-claude.md`・B `pm-review-4227-pr2-claude-b.md`）と契約の補正（`pr2c-amend.md`）の処置
+
+前提：試験・vitest の前に必ず `export CM_DB_PATH=$PWD/data/test.db`。サーバ・tmux・Agent は起動しない。対照は、外すと落ちることを試験の中の変異（`vi.mock` で 1 つの照合だけを外す）か、作業後に手で入れた変異（入れて落ちることを見て戻した）で示した。
+
+| # | 指摘 | 処置 | 対照（外すと落ちる／陰性） |
+|---|---|---|---|
+| (1) | codex P2-1：停止の宣言の応答待ちに Esc・×・背景で取り消せ、遅れた応答から `onStop` へ進む | §4.1.1 の規則（`stopping`）で全入口を止める。`end` の await の後、閉じられていれば `onStop` へ進まない | `SessionHandoffDialog-4227.test.tsx` の「closing the dialog」の表（Esc・×・背景・「終了をやめる」× 停止中・送信中・結果不明 → 閉じない・取り消さない、陰性：何も無ければ閉じて取り消す）と「the dialog closed by the page while `end` is answered」。規則の判定と await 後の照合を外すと 14 本が落ちる |
+| (10) | B P3-3 後半（PM が P2 に）：閉じた後に開くと結果不明の確定が人の選択なしに消える | 開くときに消さない（`worktreeId` を単位に持ち、ほかの作業木のものだけ外す）。閉じる規則は (1) と同じ関数（`unknown`）。結果不明の欄は依頼の有無に関わらず出す | 「kept over a reopening」（開き直しても出て、lock を持ち、同じ内容で送り直す。陰性：捨てた後は出ない）。開くときに消す変異で落ちる |
+| (2) | codex P2-2：承認の画面が本文・close の理由しか見せない | 確定で書く欄（add：本文・closeWhen・evidence・promoteTo、update：本文・closeWhen・evidence、close：理由）を今の値と並べる。省略は「変えない」（add と理由は「指定なし」）、`[]` は「空にする」で、項目の画面の `editChanges` と同じ規則 | 「the approval shows every field it writes」の 4 本（条件だけの更新・`[]` と省略・add と close・伏せた提案と項目） |
+| (3) | codex P2-3：直接更新の一覧だけ detached の所属が広い | `listDirectItemChanges` に `origin_worktree_id` を足し、`readView` から依頼の作業木を渡す | `handoff-direct-scope-4227.test.ts`（detached の作業木 2 つ、陰性：ブランチは共有、`readView` の経路）。条件を外す変異で 2 本落ちる |
+| (4) | B P2-1：分割ペインの「終了」の配線に対照が無い | 実装は変えない（配線は正しい）。試験だけ | `WorktreeDetailRefactored-handoff-end-4227.test.tsx` の「a PC split pane’s own End」（アクティブでない `codex-2` で mode を 1 回読み・引き継ぎの target・popup off の確認がその session を止める・それまで kill 0） |
+| (5) | B P2-2：create の失敗で plain の停止へ降りる対照が無い | 実装は変えない。試験だけ | 「a create that fails for any reason」の it.each（status 0・500・disabled・unattended・未知の code → plain の停止、押すと onStop 1 回・end 0 回） |
+| (6) | B P3-5：mode を読む間の連打で 2 つのダイアログが開きうる | `openEnd` は読み中の押下を無視（作業木が変われば外す）し、片方を開くときにもう片方を閉じる（kill の要求中の確認は残す） | `useWorktreeDetailController-handoff-end-4227.test.tsx` の「pressed again while the mode is read」4 本。読み中の無視を外すと落ちる。codex P3（取り消し後の遅れた応答）は #4289 |
+| (8) | A P3-1：decide の fence の `sameConversation` を外しても落ちない | 試験だけ | `handoff-decide-fence-conversation-4227.test.ts`（確定の await 中に新しい境界 → `expired(session_changed)`・書かれない。陽性：fence の `sameConversation` を外すと書かれる。陰性：境界が無ければ書かれる） |
+| (9) | A P3-2：`approvalMarkHolds` の op・itemId／要求の state と token／作業木と instance の照合に対照が無い | 試験だけ | `write-entrances-recreate-4221.test.ts` の D6 の表に 6 行（fence を通さず `memWriteFromScreen` を直接呼び、それぞれ `not_approved`）と、照合を 1 つずつ外す変異 6 本（書かれる） |
+| (11) | B P3-4：「引き取る」が lock の外であることの対照が無い | 実装は testid を足すだけ | `MemItemsPanel-write-lock-4227.test.tsx` の「taking a notice stays outside the lock」（自分の単位が結果不明・handoff の lock の 2 通りで押せて acknowledge が送られる）。lock を足す変異で 2 本落ちる |
+
+- 作らない：B P3-1（create の応答待ちの plain の停止、補正で外した）。範囲の外：B P3-2・P3-3 前半・P3-6、A P3-3〜P3-5、codex P3（#4289）。
 
 ---
 

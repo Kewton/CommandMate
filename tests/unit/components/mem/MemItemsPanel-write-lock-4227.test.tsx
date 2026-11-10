@@ -71,6 +71,9 @@ let loseAnswer: Op | null;
 const byKey = new Map<string, MemItemView>();
 /** Issue #4227 G-PR2 (PM P3-3): the branch's mode on the server; a write while it is not `on` is refused. */
 let serverMode: 'on' | 'off' = 'on';
+/** Issue #4227 pr2c (B P3-4): the notices no session took, and the acknowledgements sent. */
+let notices: Array<Record<string, unknown>>;
+let acknowledged: Array<{ url: string; body: Record<string, unknown> }>;
 
 const json = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const find = (id: string) => items.find((entry) => entry.id === id)!;
@@ -84,6 +87,8 @@ beforeEach(() => {
   loseAnswer = null;
   byKey.clear();
   serverMode = 'on';
+  notices = [];
+  acknowledged = [];
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -98,7 +103,12 @@ beforeEach(() => {
       });
     }
     if (url.includes('/mem/mode')) return json(200, { ok: true, mode: serverMode, source: { level: 'fallback' } });
-    if (url.includes('/mem/notices')) return json(200, { ok: true, notices: [] });
+    if (method === 'POST' && /\/mem\/notices\/[^/]+\/acknowledge$/.test(url)) {
+      acknowledged.push({ url, body });
+      notices = [];
+      return json(200, { ok: true });
+    }
+    if (url.includes('/mem/notices')) return json(200, { ok: true, notices });
     if (method === 'GET' && url.includes('/mem?')) {
       return json(200, { ok: true, mode: 'on', branch: 'feat/x', items: items.filter((entry) => entry.state !== 'closed'), now: [], warnings: [] });
     }
@@ -401,5 +411,50 @@ describe('[#4227] rule (4)(e) across screens: the hand-off’s decide locks the 
     await waitFor(() => expect(writes).toHaveLength(2));
     await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('on ではありません'));
     expect(find('n1').state).toBe('closed');
+  });
+});
+
+/**
+ * Issue #4227 pr2c (review B P3-4): taking a notice ("引き取る") writes no item, so it stays
+ * outside the lock (PM P3-3) — pressable and sent while the panel's own unit is unknown and
+ * while the hand-off holds the lock. Positive control: the button disabled by the lock (B's
+ * M7, `lock !== null` added to it) fails both rows.
+ */
+describe('[#4227] B P3-4: taking a notice stays outside the lock', () => {
+  afterEach(() => publishMemWriteLock('handoff', null));
+  const NOTICE = {
+    id: 'notice-1',
+    itemId: 'n1',
+    repositoryId: 'repo-1',
+    branch: 'feat/x',
+    origin: { worktreeId: 'wt-1', instanceId: 'claude', cliToolId: 'claude', incarnation: 'ii', itemCreatedAt: '2026-11-09T00:00:00.000Z' },
+    state: 'pending',
+    audience: null,
+    uncertain: false,
+    uncertainCount: 0,
+    endReason: 'closed',
+    outcome: 'unconfirmed',
+    closedAt: '2026-11-09T00:00:00.000Z',
+    version: 4,
+  };
+
+  it.each(['the panel’s own unit unknown', 'the hand-off’s lock'] as const)('%s: “take it” is pressable and sends the acknowledgement', async (which) => {
+    notices = [NOTICE];
+    renderPanel();
+    await screen.findByTestId('mem-notice-take-notice-1');
+    await screen.findByTestId('mem-item-edit-d3');
+    if (which === 'the panel’s own unit unknown') {
+      await startUnit('close', 'unknown');
+    } else {
+      act(() => publishMemWriteLock('handoff', 'unknown'));
+      await screen.findByTestId('mem-items-write-locked');
+    }
+    expect(button('mem-notice-take-notice-1')?.disabled).toBe(false);
+    press('mem-notice-take-notice-1');
+    await waitFor(() => expect(acknowledged).toHaveLength(1));
+    expect(acknowledged[0].url).toBe('/api/repositories/repo-1/mem/notices/notice-1/acknowledge');
+    expect(acknowledged[0].body).toEqual({ ifVersion: 4 });
+    // Still locked: the acknowledgement is no write of items.
+    expect(screen.getByTestId('mem-items-write-locked')).toBeTruthy();
   });
 });
