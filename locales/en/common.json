@@ -738,6 +738,7 @@
       "sendFailed": "The request could not be sent. Send it again, stop without proposals, or don't end.",
       "resendText": "Send the request again",
       "agentTimeout": "The agent has not said it is done in time. Wait (+5 min), go on with what came, stop without proposals, or don't end.",
+      "doneEmpty": "The agent said it was done without any proposal. If it tried to propose, that proposal may have failed and not arrived (proposals are not taken after done). To ask again, choose \"Don't end\" and press \"End\" again.",
       "extend": "Wait (+5 min)",
       "goOn": "Go on with what came",
       "direct": "Updates made without a proposal (read only; not rolled back)",

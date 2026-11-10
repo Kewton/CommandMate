@@ -77,6 +77,26 @@ describe('[#4227] commandmate handoff', () => {
     expect(sentBody()).toEqual({ instanceId: 'claude', op: 'close', itemId: 'item-1', baseVersion: 4, reason: 'done with it' });
   });
 
+  it('G9: the request text’s form — --request before the operation — sends to the same route', async () => {
+    mockFetchResponse({ ok: true, proposal: { id: 'p4', state: 'proposed' } }, 201);
+    expect(await run('propose', '--request', 'r1', 'add', '--worktree', 'w', '--instance', 'claude', '--kind', 'note', '--text', 'a note')).toBe(0);
+    expect(sentUrl()).toContain('/api/worktrees/w/mem/handoff/requests/r1/proposals');
+    expect(sentBody()).toEqual({ instanceId: 'claude', op: 'add', kind: 'note', text: 'a note' });
+    restoreFetch();
+    mockFetchResponse({ ok: true, proposal: { id: 'p5', state: 'proposed' } }, 201);
+    expect(await run('propose', '--request', 'r1', 'close', 'item-1', '--worktree', 'w', '--instance', 'claude', '--base-version', '2')).toBe(0);
+    expect(sentUrl()).toContain('/requests/r1/proposals');
+    expect(sentBody()).toEqual({ instanceId: 'claude', op: 'close', itemId: 'item-1', baseVersion: 2 });
+  });
+
+  it('G9: a propose naming no request anywhere is 2 and sends nothing', async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    expect(await run('propose', 'add', '--worktree', 'w', '--instance', 'claude', '--kind', 'note', '--text', 'x')).toBe(2);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stderr.join('\n')).toContain('invalid_request');
+  });
+
   it('an update without a whole-number --base-version is 2 and sends nothing', async () => {
     const fetchMock = vi.fn();
     global.fetch = fetchMock as unknown as typeof fetch;

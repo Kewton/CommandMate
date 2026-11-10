@@ -3558,7 +3558,8 @@ commandmate handoff propose --request <id> close <itemId> --base-version <v> [--
 commandmate handoff done --request <id>
 ```
 
-- `--request` は依頼の文にある ID です。宛先はセッションの中なら自分（whoami）、普通のシェルでは `--worktree <id> --instance <id>` を付けます
+- `--request` は依頼の文にある ID です。`propose` では操作（`add`・`update`・`close`）の前に置いても後に置いても同じです。どちらにも無いと 2 で、何も送りません。宛先はセッションの中なら自分（whoami）、普通のシェルでは `--worktree <id> --instance <id>` を付けます
+- `propose` が失敗したら（終了コードが 0 以外）、`done` の前に直して出し直してください。`done` の後の提案は受けません。提案が 0 件のまま `done` が届くと、画面は「提案が失敗していたなら届いていない」と出し、人は「終了をやめる」→「終了する」で依頼し直せます
 - **承認・取り消し・終了の口はありません**（画面だけ、印つきの要求だけを受けます）
 - 提案は依頼された instance だけが出せます（他の instance は `not_requested`）。Agent の時間（5 分、画面で 2 回まで 5 分ずつ延ばせる）を過ぎた・`done` の後・強制終了の後・取り消しの後は受けません（`request_closed`）
 - 提案は `now` を扱いません。決定は追加（開いた決定）と、開いた決定の取り下げ（close）だけです。記録済みの決定の close は人が画面で行います（`state_forbids`）

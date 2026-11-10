@@ -2695,7 +2695,8 @@ commandmate handoff propose --request <id> close <itemId> --base-version <v> [--
 commandmate handoff done --request <id>
 ```
 
-- `--request` is the id in the request text. Inside a session the target is yourself (whoami); in an ordinary shell add `--worktree <id> --instance <id>`
+- `--request` is the id in the request text. For `propose` it may stand before the operation (`add`, `update`, `close`) or after it; with neither it is 2 and nothing is sent. Inside a session the target is yourself (whoami); in an ordinary shell add `--worktree <id> --instance <id>`
+- If a `propose` fails (an exit code other than 0), fix it and propose again before `done`: nothing is taken after `done`. When `done` arrives with no proposal, the screen says that a failed proposal did not arrive, and a person can ask again with "Don't end" and then "End"
 - **There is no way here to approve, cancel or end** (the screen's only, with its mark)
 - Only the instance asked can propose (another gets `not_requested`). Past the agent's time (5 minutes; the screen can add 5 minutes twice), after `done`, after a forced stop or a cancel, nothing is taken (`request_closed`)
 - A proposal never touches `now`. A decision is proposed as an add (open) or the withdrawal of an open one (close); closing a recorded decision is a person's, on the screen (`state_forbids`)

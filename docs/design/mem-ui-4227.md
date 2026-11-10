@@ -334,6 +334,10 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
 
 - 単位がある間も、この作業木の画面ではダイアログから既存の停止を押せる（閉じ込めない）。ほかの作業木の単位は表示し「送り直さずにやめる」だけ押せる（送り直しは無効、`handoff-pending-elsewhere`）。開き直しで単位を消さない。
 - 単位の寿命は store（pr2e）。ダイアログ部品の寿命と切り離したので、PC ↔ スマホの切り替え（`isMobile` の枝で別の位置に描かれ instance が替わる）・ページの Loading（作業木の切り替えで詳細を読み直す間、ダイアログが外れる。codex pr2c P2-1）・再 mount でも残り、`create` を繰り返さない。ページの再読み込みでは消える（module の store も消える）。ほかの作業木の単位が残っているときは、その作業木で引き継ぎを開くと出る。項目の画面の lock は描かれているダイアログが出す（Loading の間は外れるが、その間は項目の画面も外れている）。**G-PR3 で MemItemsPanel の単位も同じ store に載せた**（次の bullet）。
+- **ページが作り直されたときの開いた回の取り戻し（G10、G-PR1+G-PR2 の審判の UAT の差し戻し）**：
+  - **単体の模型と実画面の差**［事実］：単体の「path 6 — the dialog drawn again」はダイアログ部品だけを同じページの下で mount し直す。実画面では、PC ↔ スマホの切り替えで `AppShell`（`src/components/layout/AppShell.tsx`）が子を別の親の下に描くので、**ページそのもの（`WorktreeDetailRefactored` と `useWorktreeDetailController`）が mount し直される**。落ちるのはページの `handoffTarget`（React の state、`isOpen` の元）で、store の開いた回・単位・依頼は残る。だからダイアログは閉じて見え、「終了」の押し直しで同じ単位が出た（UAT の g10-01〜04）。作業木の切り替えも同じで、Next はページを `[id]` で鍵にするので切り替えのたびにページが作り直される（`node_modules/next/dist/client/components/layout-router.js` の `createRouterCacheKey`）。`AppShell-remount-children-4227.test.tsx` が前者を固定する。
+  - **直し**：ページの hook は mount のとき（と作業木が変わったとき）、store の開いた回を取り戻す。**この作業木の開いた回（閉じていない）は単位の有無によらず**、**ほかの作業木の開いた回はその作業木に確定の送信中・結果不明があるときだけ**（不変条件の単位。人の選択を待つ）。取り戻しは `openHandoff(target, 開いた回の token)` で、新しい開いた回を始めず（`create` も text も送らない）、`openHandoff` の前に `closeHandoffBy('page-end')` を聞く形はガードのまま（target が無いので必ず通る）。ほかの作業木のものは続けて `closeHandoffBy('worktree-switch')` を聞き、規則が foreign として残す。ほかの作業木の停止・取り消しの応答待ちは自分の応答で終わるので取り戻さない（その間に別のページが自分の開いた回を始めてよい、pr2f の表の行）。閉じた開いた回（人が閉じた）は取り戻さない。
+  - 試験：`useWorktreeDetailController-handoff-remount-4227.test.tsx`（hook の unmount → mount。直しを外すと 3 件赤）、e2e `mem-handoff-4227.spec.ts` の「G10」（実ブラウザで viewport を 1280 ↔ 390、作業木の切り替えの Loading → foreign → 戻って送り直せる）。
 - **項目の画面の単位（G-PR3、「画面全体で 1 つの規則」）**：MemItemsPanel の単位（送信中 `sending`・結果不明 `unknown`、操作の slot ごと）は `close-rule.ts` の store の `items` に、送った作業木の id を鍵にして持つ。書き手は `startMemItemsWrite`（単位を受け、`SentMemItemsWrite` を作る唯一の関数）・`settleMemItemsWrite`（その送信の答え：`unknown` なら残し、答えなら slot を消す）・`dropMemItemsUnit`（人の「送り直さずにやめる」）の 3 つだけ。読み手は `memItemsUnitsOf`・`memItemsUnitsAll`・`memItemsUnitsLock`。ダイアログの単位と同じく、部品の再 mount・ページを離れて戻っても残り（ページの再読み込みでは消える）、lock は 2 つの画面が同じ store から読む：ダイアログは `memItemsUnitsLock(store)`、パネルは `handoffUnitsLock(store)` を相手の lock に足す（`mem-write-lock.ts` の publish は今どおり併用）。store の側でも `startHandoffDecide` は項目の単位があれば、`startMemItemsWrite` はダイアログの単位があれば断る（(4)(e) の「ほかに何も書かない」を両向きに）。
   - **ガードの許可リストを変えた理由**（`handoff-close-paths-4227` の表）：パネルは store の書き手（自分の単位の 3 つ）を呼ぶので `STORE_IMPORTERS` に `src/components/mem/MemItemsPanel.tsx` を足した。保証を弱めないため、新しい表 `STORE_IMPORTER_VALUES` でパネルが取ってよい値を名前で固定した（`dropMemItemsUnit`・`settleMemItemsWrite`・`startMemItemsWrite`・`handoffStoreSnapshot`・`subscribeHandoffStore`・`handoffUnitsLock`・`memItemsUnitsAll`）：ダイアログの単位の書き手（`dropHandoffUnit` など）・表に無い読み手・名前空間・default の import はパネルからでも落ちる（陽性対照つき）。`STORE_WRITERS`・`STORE_EXPORTS` に 3 つの書き手（第 1 引数の型 `MemItemsUnit`・`SentMemItemsWrite`）と 3 つの読み手を足し、`SentMemItemsWrite` への cast を store の外で落とす（`checkBrandCasts`）。保証の範囲（store の外から書き手へ値で届かないこと、store のファイルの中は信頼境界）は変えない
 
@@ -348,11 +352,14 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
 - 更新:  commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
 - close: commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
 - 終わったら: commandmate handoff done --request <id>
+propose が失敗したら（終了コードが 0 以外）、done の前に直して出し直してください。done の後の提案は受け付けません。propose と done を 1 つのコマンドにつながないでください。
 今の項目は commandmate mem list で読めます。mem add / update / close で直接確定しないでください。
 ```
 
 - 送るのは画面（`worktreeApi` の送信、`brief:'skip'`）。サーバから `sendUserMessage` を呼ばない（§1 の送信の呼び出し元の表を変えない）。`skip` なので境界は動かない（終わる会話に brief を付けない）
 - Agent の端末にポップアップは出さない（Issue の「やらないこと」）。これは送信の本文で、端末の操作ではない
+- **雛形と CLI の一致（G9、G-PR1+G-PR2 の審判の UAT の差し戻し）**：46cbe7699 では雛形の `propose --request <id> add …` を CLI が `unknown option '--request'` で拒んだ（`--request` は操作のサブコマンドにしか無かった）。CLI を両方の形を受け付けるようにした（`propose` にも `--request` を置き、操作は自分のもの→`propose` のものの順に読む `handoffRequestOf`。どちらにも無ければ 2・何も送らない）。不変条件：**雛形（`handoffRequestText` の出力）と CLI の手引き（ja・en の `commandmate handoff` の行）の全コマンド行を、実際の `buildProgram()` が parse し、名指したコマンドと依頼の ID に届く**（`tests/unit/cli/commands/handoff-template-parse-4227.test.ts`。行は本文から抜き出すので、雛形に足した行も自動で対象になる）。
+- **propose の失敗の後の done（G9、1 行の決定）**：CLI の parse の誤りはサーバに届かないので、done の時点で失敗した propose があったかはサーバに分からない。そこで **提案 0 件で done が届いた依頼（`reviewing`・`agentDoneAt` あり・提案 0）は、ダイアログに「提案が失敗していたなら届いていない。依頼し直すには『終了をやめる』→『終了する』」を出す**（`handoff-done-empty`、`SessionHandoffDialog-done-empty-4227.test.tsx`）。雛形にも「失敗したら done の前に直して出し直す・propose と done を 1 つのコマンドにつながない」を書いた。done の後の提案は今どおり `request_closed`（受け付けない）。
 
 ### 4.3 提案の置き場（v71、`src/lib/db/migrations/v71-mem-handoff.ts`）
 
@@ -1050,6 +1057,8 @@ pr2i の最終形（名前と場所を表で固定し、意味は追わない）
 | 10 | pr2e P3-3 | `create` の 409 `request_open` は拾った依頼の文（`text`）も返し、ダイアログは `sendState` が `unsent`（自分が送っている最中を除く）でも「依頼の文を送り直す」を出す |
 | 11 | pr2e P3-2 | 自分の作業木に単位が無く、別の作業木の結果不明が store にあるとき、ダイアログはそれを「別の作業木の結果不明」として出し、捨てるだけ押せる（送り直しは無効）。捨てる押下は既存の 1 か所（`handoff-pending-drop`）のまま |
 | 12 | e2e の模型（#4289 B P3-6） | `tests/e2e/mem-handoff-4227.spec.ts` の模型の `end` は `applying` を `force` なしで 409 `state_forbids`、`create` は境界が無ければ 409 `session_unknown`（模型の `boundary`）、`request_open` は `text` つき。模型の `decide` は同期で `applying` が残らないので、既存の行の流れは変わらない。G-3 の e2e の行（§7.5 の「開くときの下書き」「開くときのポップアップ」）はサーバを起動しない契約なので足していない（部品の試験 H19・H21(h) と単体の H21・H22 で代替。UAT に回す） |
+| 13 | G9（審判の UAT の差し戻し） | §4.2 の「雛形と CLI の一致」「propose の失敗の後の done」。`propose` の `--request` は操作の前でも後でもよい。提案 0 件の done はダイアログが人に知らせる |
+| 14 | G10（審判の UAT の差し戻し） | §4.1.1 の「ページが作り直されたときの開いた回の取り戻し」。原因はページの作り直し（`AppShell` の枝・Next の `[id]`）で `handoffTarget` が落ちること。e2e は viewport の 1280 ↔ 390 と作業木の切り替え（サーバを起動しない契約なので、この契約では流していない） |
 
 ---
 

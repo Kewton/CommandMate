@@ -641,6 +641,14 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
               </div>
             )}
 
+            {/* G9 (design §4.2): the agent said done with no proposal. The server cannot tell whether a
+                propose failed (a CLI parse error never reaches it), so the person is told that one may
+                not have arrived, and how to ask again ("don't end", then "end" again). */}
+            {request.state === 'reviewing' && request.agentDoneAt !== null && proposals.length === 0 && (
+              <p className="rounded border border-warning-border bg-warning-subtle p-2 text-xs text-foreground" data-testid="handoff-done-empty">
+                {t('mem.handoff.doneEmpty')}
+              </p>
+            )}
             {proposals.length > 0 && (
               <ul className="space-y-2" data-testid="handoff-proposals">
                 {proposals.map((proposal) => (
