@@ -23,6 +23,7 @@ const BASH_DRIVER = `
 script=$1 root=$2 name=$3 budget=$4
 export CM_VERIFY_LOCK_ROOT="$root"
 eval "$(sed -n '/^# --- machine-wide gate lock/,/^# --- gate execution/p' "$script")"
+if [ -n "\${TAKE_OWNERLESS_GRACE_MS:-}" ]; then LOCK_OWNERLESS_GRACE_MS=$TAKE_OWNERLESS_GRACE_MS; fi
 if lock_acquire "$name" "$budget"; then
   printf 'acquired\\n'
   if [ -n "\${PRE_RELEASE:-}" ]; then eval "$PRE_RELEASE"; fi
@@ -59,7 +60,12 @@ export interface TakeOptions {
   bashScript?: string;
   syncModule?: typeof lockSync;
   env?: Record<string, string>;
+  /** #4288 PR1a D3: the head takes out an owner-less, empty <lock> older than this (bash and sync JS; TS has no such option). */
+  ownerlessGraceMs?: number;
 }
+
+/** Options every take() of a test applies unless it passes its own (a test resets what it set). */
+export const takeDefaults: Partial<TakeOptions> = {};
 
 function faultFn(spec?: string): ((point: string, target: string) => string | undefined) | undefined {
   if (!spec) return undefined;
@@ -71,7 +77,8 @@ function faultFn(spec?: string): ((point: string, target: string) => string | un
   return (point, target) => items.find((i) => i.point === point && (!i.sub || target.includes(i.sub)))?.code;
 }
 
-export async function take(impl: Impl, root: string, name: string, o: TakeOptions = {}): Promise<TakeResult> {
+export async function take(impl: Impl, root: string, name: string, given: TakeOptions = {}): Promise<TakeResult> {
+  const o: TakeOptions = { ...takeDefaults, ...given };
   const budgetSec = o.budgetSec ?? 0;
   if (impl === 'bash') {
     const r = spawnSync('bash', ['-c', BASH_DRIVER, 'bash', o.bashScript ?? VERIFY_RUN, root, name, String(budgetSec)], {
@@ -82,6 +89,7 @@ export async function take(impl: Impl, root: string, name: string, o: TakeOption
         CM_VERIFY_TEST_OBS_FAULT: o.fault ?? '',
         PRE_RELEASE: o.between?.sh ?? '',
         NO_RELEASE: o.keep ? '1' : '',
+        TAKE_OWNERLESS_GRACE_MS: o.ownerlessGraceMs === undefined ? '' : String(o.ownerlessGraceMs),
         ...(o.env ?? {}),
       },
     });
@@ -116,7 +124,14 @@ export async function take(impl: Impl, root: string, name: string, o: TakeOption
   const mod = o.syncModule ?? lockSync;
   const warnings: string[] = [];
   try {
-    const r = mod.acquireMachineLockSync(name, { root, timeoutMs: budgetSec * 1000, pollMs: 20, warn: (l: string) => warnings.push(l), hooks: fault ? { fault } : {} });
+    const r = mod.acquireMachineLockSync(name, {
+      root,
+      timeoutMs: budgetSec * 1000,
+      pollMs: 20,
+      warn: (l: string) => warnings.push(l),
+      hooks: fault ? { fault } : {},
+      ...(o.ownerlessGraceMs === undefined ? {} : { ownerlessGraceMs: o.ownerlessGraceMs }),
+    });
     if (!r.acquired) {
       const u = r.unknown ? `point=${r.unknown.point} path=${r.unknown.path} errno=${r.unknown.code}` : null;
       return { acquired: false, heldBy: r.heldBy, unknown: u, release: null, error: null, log: warnings.join('\n') };

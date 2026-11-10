@@ -283,6 +283,36 @@ machine-lock の 3 実装は `src/lib/verification/machine-lock.ts`（TS、非�
 2. UAT を起こす worktree に develop を取り込んでから起こす、の手順を `docs/orchestrate/` に足すか（§1.9。足さないなら、混在の間の保証の狭まりを受け入れる）
 3. PR を 3 本（PR1a → PR1b ∥ PR1c）に分けるか（§7）。skills の port の PR を PR1a の後に起こすこと
 
+### 1.14 PR1a の実装（実装の契約で追記）
+
+PR1a（§6・§7）で machine-lock の 3 実装と読み込み口 `scripts/lib/machine-lock.sh` に入れたもの・設計からの差・操作の終状態。試験は `tests/unit/verification/machine-lock-options-4288.test.ts`（新規）と、観測点の表（`verify-lock-holder-group-4288.md` §2.8）の 4 行。
+
+**入れたもの**: 同期 JS の `lockPath`（D2）・`ownerCodec`（D1）・`ownerlessGraceMs`（D3）・`token`・`ownerPid`・`hooks.kill`（D10）、handle の `handOff(pid, pgid)`（D4）、`releaseAsHead`（D5）・`recoverIfDead`（D6）。TS は owner の排他作成と読み直しだけ（D3）。bash（`verify-run.sh` の節）は `lock_acquire_path`（D2。`lock_acquire` はそれを呼ぶ 1 行）・`lock_parse_owner_text`／`lock_format_owner`（D1）・`LOCK_WANT_TOKEN`／`LOCK_OWNER_PID`・`LOCK_OWNERLESS_GRACE_MS` と `lock_expire_ownerless`（D3）・`lock_obs_create`（D3 の排他作成）・`lock_hand_off`（D4。`lock_publish_group` はそれを `$$` で呼ぶ）・`lock_release_as_head`（D5）・`lock_recover_only`（D6）・`lock_settle_gone` の判定を `lock_record_state` へ（D7）・`lock_child_wait`（D9。`lock_handoff_wait` はそれを `$LOCK_SELF_PID` で呼ぶ 1 行）・`lock_note_recovered`（文面）。読み込み口は 2 度読まれても 1 回、kv の codec（`machine_lock_use_kv_codec`）、D7 の `lstart` の包み、D12 の `lock_release_held`、`machine_lock_queue_of`。
+
+**設計からの差（理由つき）**:
+
+- **bash の codec（D1）**: 既定の JSON は今のまま `lock_obs_owner` の中で読む。#4288 の 1 番の試験が、観測の内側の段（欄の取り出し 4 つと pgid の検査）が `lock_obs_owner` にあることを走査と変異で固定している（`lock-extract-rmdir-4288.test.ts` の自己テスト・`lock-review-fixes-4288.test.ts` の変異）ので、取り出しを別の関数へ移さなかった。codec は `LOCK_OWNER_CODEC` が空でないときだけ `lock_parse_owner_text` を通る（同じ 1 回の読み。0／1＝不明 EUNKNOWN／2＝不明 EINVAL）。既定の `lock_parse_owner_text` は 1（使われない）
+- **bash の排他作成（D3）**: `lock_obs_create`（観測の関数）を owner の `printf` の pipeline の最後に置き、終了コードで答える（0 取れた・3 EEXIST・6 他の記録を読み直した・10+i 開けなかった・40+i 開いて書けなかった・70+i 読み直しが不明。i は errno の番号）。既存の陽性の対照（`lock-review-fixes-4288.test.ts` が `if ! lock_test_fault owner && printf` を `if lock_test_fault owner || printf` に替える）が、owner の書き込みが if の条件の 1 つの `printf …` であることを前提にしているため。読み直しは `lock_obs_create` の中（観測点 `owner-readback`）。`/dev/null` への symlink は `set -C` が書かせるが、読み直しが空（壊れた記録）なので 6 で落ちる（§1.4 の実測どおり）
+- **止め所の名前**: bash の引渡しの tmp の止め所・注入は既存の `tmp`（`lock_hand_off` はゲートの公開と共有。名前を変えると #4288 の 1 番の試験が変わる）。同期 JS は `hooks.onRecover('hand-off-tmp')`・`fault('handoff-tmp')`。`recover-only-moved` は既存の `recover-moved`（`lock_recover` の中）を使い、`recover-only-judged`・`release-head-read` を足した。D3 の後始末の注入は bash が `CM_VERIFY_TEST_HANDOFF=fault:owner-write|owner-unlink|lock-rmdir`、同期 JS・TS が `fault` の点 `owner-write`・`owner-unlink`・`lock-rmdir`、作成と読み直しは観測点 `owner-create`・`owner-readback`
+- **D12 に pid の確かめを足した**: `lock_release_held` は (3) で記録の G が空のうえ、**記録の pid が生きている**（呼び手自身）ときだけ消す。pid が `gone` なら消さずに 2（`LRH_RESULT=needs-head`）を返し、呼び手は D5 へ回す。保有者が死んだ記録は、読みと削除の間に先頭が回収して取りうる（P1-2 の形）ため。これで review-4288h の P3（pending の後・`mv` の前の失敗で T0 が残る）は「T0 の記録の pid は `up` 自身で生きているので、持ち主自身として消える」に揃った（下の表）
+- **P2-1（停止の猶予）**: `KILL_GRACE_SEC=5` を節の中へ移した（節の外の定義は消した。値は同じ）。読み込み口は節の外の設定を要しない。節が読む大域変数（`LOCK_PATH`・`LOCK_TOKEN`・`LOCK_WAITED`・`LOCK_HELD_BY`）も節の中で空に初期化した（`set -u` の下で取得の前に操作を呼べる）
+- **同期 JS の `release`**: `handOff` で公開した T1 の記録は、G が空になってから消す（`'deferred'` を返し、もう一度呼べる）。それ以外の経路は今のまま 1 回きり。戻り値を `'released' | 'deferred' | 'kept' | 'none'` にした（今の呼び手は戻り値を見ない）
+- **D7 の観測点 `lstart`**: 読み込み口だけにあるので §2.8 の表（3 実装のソースの走査と突き合わせる）の行にはせず、§2.8 の注記と注入（`CM_VERIFY_TEST_OBS_FAULT=lstart=<ERRNO>`）の試験で固定した
+- **held by の表示**: `lock_owner_field`（表示）は JSON のまま。kv の記録の表示は PR1b の `run_lock_holder`（文面は §1.6 の末尾）
+
+**操作の終状態（review-4288h の P2-3・P3 のうち PR1a の操作で決まる部分。PR1b の `run-server.sh`・`daily.sh` はこれを呼ぶ）**:
+
+| 経路 | owner の記録 | 操作 | 終状態 |
+|---|---|---|---|
+| 引渡しの前に失敗（`stage=token`: 記録が T0 でない・missing・不明） | 他者・不在・不明 | `lock_release_held <lock> T0` | 他の token・missing・壊れた → `kept`（canonical を消さない。自分の退避だけ片付ける）、不明 → `deferred` |
+| `tmp` の書き込みの失敗 | T0（pid＝取得したシェル自身） | `lock_release_held`（T0 と `LOCK_PENDING_TOKEN`＝T1） | `released`（`<lock>` が無い） |
+| `mv` の失敗 | T0 | 同上 | `released` |
+| `mv` の後の読み直しの失敗 | T1 | daily の形（pid＝`daily.sh` 自身）: G を空にして `lock_release_held` | `released` |
+| 同上 | T1 | UAT の形（pid＝サーバー＝G の長）: G を KILL して空にし `lock_release_held` | `needs-head`（消さない）→ `lock_release_as_head <lock> <queue> 10 T0 T1` で `released` |
+| G が空にならない | T1 | `lock_release_held` | `deferred`（印は 1 回きりで消える）。G が空になり記録の pid が死んだ後、次の先頭が回収する |
+| D5 で先頭になれない | 何でも | `lock_release_as_head` | `not-head`、何もしない（持ち主は死んでいるので次の先頭が回収） |
+| UAT の長だけが死に G の子が残る（P2-3） | T1（pid＝死んだ長、G 生存） | `lock_release_as_head`・他者の取得・`lock_recover_only` | 全て消さない・取らない（`deferred`／`refused`／`kept`）。ロックは G が空になるまで保護中で、G が空になれば次の先頭か `down` の再実行が消す。`down` の状態の表示と残った G の止め方は PR1b（UAT の `down`）で決める |
+
 ---
 
 ## 2. 3 番: `/clear` の後の ready 待ちの 90 秒
