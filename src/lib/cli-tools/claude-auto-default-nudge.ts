@@ -25,6 +25,7 @@
 import { capturePane, sendKeys, sendSpecialKeys } from '../tmux/tmux';
 import { isClaudeAutoDefaultNudgeOpen, resolveClaudeAutoDefaultNudgeKey, stripAnsi } from '../detection/cli-patterns';
 import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputLaunchReadMark } from '@/lib/session/instance-input-lock';
+import { assertAgentInForeground } from '@/lib/session/composer-clear';
 import { createLogger } from '@/lib/logger';
 import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 
@@ -79,6 +80,8 @@ export async function answerClaudeAutoDefaultNudgeUntil(sessionName: string, sta
  * One read and no key on any other screen. Inside a send that holds the input
  * lock the keys join it.
  *
+ * @throws Error (`agent-not-in-foreground`, Issue #4300) when the pane's shell holds the terminal:
+ *   no key is typed.
  * @throws Error (`prompt not ready`: `not-sent`, nothing typed) when the dialog
  *   stays open: its cursor cannot be read or it does not take the keys. Only the
  *   screen is named, nothing captured.
@@ -97,6 +100,9 @@ export async function answerClaudeAutoDefaultNudgeBeforeSend(sessionName: string
       return;
     }
     if (!isClaudeAutoDefaultNudgeOpen(screen)) return;
+    // Issue #4300: an exited claude's last frame can still show this dialog, and
+    // Down/Up/Enter would reach the pane's shell (Up recalls history, Enter runs it).
+    await assertAgentInForeground(sessionName, 'claude');
     const key = resolveClaudeAutoDefaultNudgeKey(screen);
     if (key !== null && keys < MAX_KEYS && (await sendNudgeKey(sessionName, readMark, key, skips))) keys++;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));

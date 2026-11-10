@@ -23,6 +23,8 @@
  * @vitest-environment node
  */
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface Foreground {
@@ -103,11 +105,13 @@ import { VibeLocalTool } from '@/lib/cli-tools/vibe-local';
 import { OpenCodeTool } from '@/lib/cli-tools/opencode';
 import { CopilotTool } from '@/lib/cli-tools/copilot';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
+import { answerClaudeAutoDefaultNudgeBeforeSend } from '@/lib/cli-tools/claude-auto-default-nudge';
 import { CommandCodeTool } from '@/lib/cli-tools/command-code';
 import { OpenCodeV2Tool } from '@/lib/cli-tools/opencode-v2';
 import {
   sendKeys,
   sendSpecialKeys,
+  sendSpecialKey,
   clearInputLine,
   clearComposerLine,
   clearComposerPasteToken,
@@ -188,6 +192,7 @@ function anyKeys(): number {
   return (
     bodyKeysSent() +
     vi.mocked(sendSpecialKeys).mock.calls.length +
+    vi.mocked(sendSpecialKey).mock.calls.length +
     vi.mocked(clearInputLine).mock.calls.length +
     vi.mocked(clearComposerLine).mock.calls.length +
     vi.mocked(clearComposerPasteToken).mock.calls.length +
@@ -263,5 +268,105 @@ describe('[#4300] negative: a foreground that is not the shell, or is not known,
     h.foreground = UNREADABLE;
     await send(id, SHORT_BODY);
     expect(bodyKeysSent()).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Claude's launch dialog ("Make auto mode your default permission mode?") left on
+ * the screen of an exited claude: the answer's Down/Up/Enter would reach the shell.
+ * Added with the review of PR1 (P3-3). Also copilot's not-ready paths keep the reason.
+ */
+const NUDGE_SCREEN = readFileSync(
+  join(process.cwd(), 'tests/fixtures/claude-auto-default-nudge-4134', 'cursor-yes.txt'),
+  'utf8'
+);
+
+describe('[#4300] the nudge answer before a send types nothing into a shell', () => {
+  async function nudge(): Promise<unknown> {
+    return answerClaudeAutoDefaultNudgeBeforeSend('wt-4300-nudge').then(
+      () => null,
+      (error: unknown) => error
+    );
+  }
+
+  it('shell in the foreground: no key, not-sent / agent-not-in-foreground', async () => {
+    h.frame = NUDGE_SCREEN;
+    h.foreground = SHELL;
+    const error = await nudge();
+    expect(error).toBeInstanceOf(Error);
+    expect(anyKeys()).toBe(0);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'agent-not-in-foreground' });
+  });
+
+  it('positive control: with the check bypassed the same screen gets a key', async () => {
+    h.frame = NUDGE_SCREEN;
+    h.foreground = SHELL;
+    h.bypassCheck = true;
+    vi.useFakeTimers();
+    try {
+      const pending = nudge();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(vi.mocked(sendSpecialKey).mock.calls.length + vi.mocked(sendSpecialKeys).mock.calls.length + bodyKeysSent()).toBeGreaterThan(0);
+  });
+
+  it('negative: node in the foreground answers the dialog as before', async () => {
+    h.frame = NUDGE_SCREEN;
+    h.foreground = NODE;
+    vi.useFakeTimers();
+    try {
+      const pending = nudge();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(vi.mocked(sendSpecialKey).mock.calls.length + vi.mocked(sendSpecialKeys).mock.calls.length + bodyKeysSent()).toBeGreaterThan(0);
+  });
+});
+
+describe('[#4300] copilot: an exited agent keeps agent-not-in-foreground on its not-ready paths', () => {
+  function notReadyCopilot(): CopilotTool {
+    const tool = new CopilotTool();
+    stubPreSend(tool);
+    (tool as unknown as Record<string, unknown>).waitForPrompt = vi.fn(async () => ({
+      ready: false,
+      dialog: false,
+      output: EXITED_SCREEN,
+    }));
+    return tool;
+  }
+
+  it('the /model switch whose idle wait ends not-ready', async () => {
+    h.foreground = SHELL;
+    const error = await notReadyCopilot()
+      .sendModelCommand('wt-4300-copilot', 'gpt-5')
+      .then(() => null, (e: unknown) => e);
+    expect(anyKeys()).toBe(0);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'agent-not-in-foreground' });
+  });
+
+  it('the message whose prompt wait ends not-ready', async () => {
+    h.foreground = SHELL;
+    const error = await notReadyCopilot()
+      .sendMessage('wt-4300-copilot', SHORT_BODY)
+      .then(() => null, (e: unknown) => e);
+    expect(anyKeys()).toBe(0);
+    expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'agent-not-in-foreground' });
+  });
+
+  it('negative: with the agent in the foreground the not-ready reasons stay their own', async () => {
+    h.foreground = NODE;
+    const message = await notReadyCopilot()
+      .sendMessage('wt-4300-copilot', SHORT_BODY)
+      .then(() => null, (e: unknown) => e);
+    expect(classifySendFailure(message).reason).toBe('prompt-not-ready');
+    const model = await notReadyCopilot()
+      .sendModelCommand('wt-4300-copilot', 'gpt-5')
+      .then(() => null, (e: unknown) => e);
+    expect(classifySendFailure(model).reason).not.toBe('agent-not-in-foreground');
   });
 });
