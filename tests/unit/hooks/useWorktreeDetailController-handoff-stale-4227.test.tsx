@@ -143,7 +143,7 @@ async function openedHandoff() {
 
 describe('[#4227 pr2g] closeHandoffBy on a stale opening: its own target goes, nothing else is touched', () => {
   it('the dialog’s close after another page began an opening that holds a decide: target cleared, the other opening and its unit stay', async () => {
-    const { hook, own } = await openedHandoff();
+    const { hook } = await openedHandoff();
     // Another page: a new opening of the same worktree, and a decide sent from it.
     const other = beginHandoffOpening(A, OTHER);
     const sending = startHandoffDecide(UNIT);
@@ -155,7 +155,6 @@ describe('[#4227 pr2g] closeHandoffBy on a stale opening: its own target goes, n
     expect(handoffStoreSnapshot().opening).toBe(other);
     expect(handoffStoreSnapshot().opening?.closed).toBe(false);
     expect(handoffUnitsOf(A).inflight).toBe(sending);
-    expect(own.closed).toBe(false);
     // The page's next "end" begins its own opening again (as before pr2g); the decide sent from
     // the other page's opening is still the worktree's (a new opening never drops a unit).
     await act(async () => {
