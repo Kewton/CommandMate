@@ -796,6 +796,7 @@
       "closeWhileUnknown": "A confirmation is being sent or its result is unknown. Send it again or drop it before closing.",
       "closeWhileCancelling": "The end is being cancelled. This cannot be closed, and no confirmation is sent, until it is answered.",
       "pendingElsewhere": "This confirmation is for worktree {worktree}. To send it again, open this on that worktree (here it can only be dropped).",
+      "pendingOtherWorktree": "Another worktree ({worktree}) has a confirmation whose result is unknown (from before the page was opened again). Here you can only drop it without sending it again; open that worktree to send it again.",
       "foreign": "This dialog is the hand-off before ending on worktree {worktree}. Nothing can be stopped or confirmed on this worktree; go back to that worktree to go on.",
       "plainStopped": "Stopped. Send the confirmation whose result is unknown again, or drop it, before closing.",
       "plainStopFailed": "Could not stop it. The session is still running; press stop again.",
@@ -815,6 +816,23 @@
         "empty": "(empty)",
         "none": "None"
       }
+    },
+    "startBrief": {
+      "title": "Read the previous hand-off",
+      "open": "Open items: {count} ({unreflected} unreflected decisions)",
+      "questionsNone": "Questions for a person: none",
+      "questions": "Questions for a person: {count}",
+      "questionsUnknown": "Questions for a person: {count} (unknown: could not read {sources})",
+      "updated": "Last updated: {at}",
+      "updatedNone": "Last updated: no record",
+      "previewFailed": "Could not read the preview.",
+      "short": "Read the short brief",
+      "full": "Read it all",
+      "decline": "Don't read this time",
+      "declineNote": "Without it, the note about how the last session ended is not delivered either. Closing sends nothing and returns to the composer.",
+      "askAgain": "The hand-off boundary changed ({reason}). Nothing was sent. Choose again.",
+      "claimed": "Another send is delivering the hand-off.",
+      "consumed": "Another send already delivered the hand-off. Only your message was sent."
     }
   }
 }

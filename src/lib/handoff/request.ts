@@ -94,7 +94,9 @@ export async function handoffCreate(
     for (const entry of live) {
       const judged = judgeRequest(db, entry, now);
       if (HANDOFF_OPEN_STATES.includes(judged.state) || (judged.state === 'ending' && sameConversation(db, judged))) {
-        return handoffError('request_open', { ...readView(db, judged, now) });
+        // pr2e P3-3 (G-PR3): a request picked up again carries its text, so the screen can send
+        // it again when it never went (`unsent`: the screen closed while `create` was answered).
+        return handoffError('request_open', { ...readView(db, judged, now), text: handoffRequestText(judged.id, new Date(judged.agentDeadlineAt)) });
       }
     }
     const boundary = getCurrentBoundary(db, worktreeId, instanceId);

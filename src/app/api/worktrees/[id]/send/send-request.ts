@@ -52,8 +52,50 @@ export interface SendMessageRequest extends SendRoleRequest {
    * no setting changes. `force` (`send --with-brief`): this send carries it, even
    * with no boundary detected. Omitted, the first send after a boundary carries it
    * once. Anything else is 400 with nothing recorded.
+   *
+   * Issue #4227 (S-B, design §3.2): `decline` (the screen's G-3 "don't read") uses up the
+   * boundary named by `briefBoundary` as `skipped(declined)` once the body went in.
    */
-  brief?: 'skip' | 'force';
+  brief?: 'skip' | 'force' | 'decline';
+  /**
+   * Issue #4227 (S-B): with no `brief` (`auto`) only. `full` asks the whole brief (C's per-entry
+   * cap lifted, S-F); `short` (or absent) is as before. `full` needs `briefBoundary`.
+   */
+  briefDetail?: 'short' | 'full';
+  /**
+   * Issue #4227 (S-B): the boundary id the screen's preview showed. A `full` / `decline` send
+   * acts on it only while it is the instance's current `pending` row; otherwise 409
+   * `boundary_changed` and nothing is typed.
+   */
+  briefBoundary?: string;
+}
+
+/** Issue #4227: the longest boundary id accepted (ids are UUIDs). */
+const BRIEF_BOUNDARY_MAX_CHARS = 128;
+
+/**
+ * Issue #4227 (S-B): the brief fields' 400, or null. `briefDetail` only with `auto`;
+ * `full` and `decline` name the boundary they were chosen for.
+ */
+export function validateBriefChoice(body: Pick<SendMessageRequest, 'brief' | 'briefDetail' | 'briefBoundary'>): string | null {
+  if (body.brief !== undefined && body.brief !== 'skip' && body.brief !== 'force' && body.brief !== 'decline') {
+    // The words #4274 answered (its test pins them): `decline` is the screen's, not the CLI's.
+    return "brief must be 'skip' or 'force'";
+  }
+  if (body.briefDetail !== undefined) {
+    if (body.briefDetail !== 'short' && body.briefDetail !== 'full') return "briefDetail must be 'short' or 'full'";
+    if (body.brief !== undefined) return 'briefDetail is only for a send without brief';
+  }
+  if (body.briefBoundary !== undefined) {
+    if (typeof body.briefBoundary !== 'string' || body.briefBoundary === '' || body.briefBoundary.length > BRIEF_BOUNDARY_MAX_CHARS) {
+      return 'briefBoundary must be a boundary id';
+    }
+    if (body.brief === 'skip' || body.brief === 'force') return "briefBoundary is not for brief 'skip' or 'force'";
+  }
+  if ((body.brief === 'decline' || body.briefDetail === 'full') && body.briefBoundary === undefined) {
+    return "brief 'decline' and briefDetail 'full' need briefBoundary";
+  }
+  return null;
 }
 
 /**
@@ -98,11 +140,13 @@ export function validateSendRequest(
   }
 
   // Issue #4274: the brief flag, before anything is resolved (nothing recorded).
-  if (body.brief !== undefined && body.brief !== 'skip' && body.brief !== 'force') {
+  // Issue #4227 (S-B): with the screen's choice (`decline`, `briefDetail`, `briefBoundary`).
+  const briefRefusal = validateBriefChoice(body);
+  if (briefRefusal !== null) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "brief must be 'skip' or 'force'" },
+        { error: briefRefusal },
         { status: 400 }
       ),
     };

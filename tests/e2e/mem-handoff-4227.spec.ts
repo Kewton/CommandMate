@@ -66,6 +66,11 @@ interface Server {
   running: boolean;
   /** Which conversation runs now; a launch after a stop starts another. */
   conversation: number;
+  /**
+   * G-PR3 (#4289 B P3-6): whether D1 knows the instance's conversation (a boundary row). Without
+   * one, `create` is 409 `session_unknown` as the real route answers (`request.ts`).
+   */
+  boundary: boolean;
   request: HandoffRequest | null;
   proposals: Proposal[];
   items: Item[];
@@ -207,7 +212,10 @@ function handoffRoute(server: Server, route: Route, path: string, method: string
   if (path === '' && method === 'POST') {
     if (server.mode !== 'on') return json(route, 409, { ok: false, code: 'disabled' });
     if (!server.popup) return json(route, 409, { ok: false, code: 'unattended' });
-    if (server.request && OPEN.includes(server.request.state)) return json(route, 409, { ...view(server), ok: false, code: 'request_open' });
+    // G-PR3: the request picked up carries its text, as the real route answers (pr2e P3-3).
+    if (server.request && OPEN.includes(server.request.state)) return json(route, 409, { ...view(server), ok: false, code: 'request_open', text: HANDOFF_TEXT });
+    // G-PR3 (#4289 B P3-6): no boundary, no request (the real route's order: after the open one).
+    if (!server.boundary) return json(route, 409, { ok: false, code: 'session_unknown' });
     server.proposals = [];
     server.request = {
       id: RID,
@@ -306,6 +314,8 @@ function handoffRoute(server: Server, route: Route, path: string, method: string
     if (!['awaiting_agent', 'reviewing', 'applying'].includes(request.state)) return refuse('request_closed');
     if (!versionOk()) return refuse('version_conflict');
     const force = body.force === true;
+    // G-PR3 (#4289 B P3-6): as the real route (`end.ts`): a confirmation running is stopped only by force.
+    if (request.state === 'applying' && !force) return json(route, 409, { ok: false, code: 'state_forbids', request: view(server).request });
     server.tokens += 1;
     request.state = 'ending';
     request.endToken = `end-${server.tokens}`;
@@ -372,6 +382,7 @@ async function stubServer(context: BrowserContext): Promise<Server> {
     popup: true,
     running: true,
     conversation: 1,
+    boundary: true,
     request: null,
     proposals: [],
     items: [{ id: 'note-1', kind: 'note', text: 'first note', version: 1 }],

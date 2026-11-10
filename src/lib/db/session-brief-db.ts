@@ -32,7 +32,9 @@ export type BoundarySkipReason =
   | 'empty'
   | 'over_limit'
   | 'provider_failed'
-  | 'incarnation_changed';
+  | 'incarnation_changed'
+  /** Issue #4227 (S-B): the operator chose "don't read" for this boundary on the screen (G-3). */
+  | 'declined';
 
 /** Rows kept per (worktree, instance); older ones go in the transaction that opens a row. */
 export const BOUNDARY_RETAINED_ROWS = 20;
@@ -418,6 +420,23 @@ export function settleBoundaryClaim(
  * A claim left by a process that is gone (a server restart mid-send): whether it was
  * typed cannot be told, so it is `unknown` — never sent twice (design §3.5).
  */
+/**
+ * Issue #4227 (S-B, design §3.2): a `decline` claim whose body was typed (`sent`) or may have
+ * been (`unknown`) uses the boundary up as `skipped(declined)` — only the claim this send
+ * holds (`claimed` with the same token). A body that never went in (`not_sent`) is
+ * {@link settleBoundaryClaim}'s, which puts the row back to `pending`.
+ */
+export function settleDeclinedClaim(db: Database.Database, id: string, claimToken: string, now: number): boolean {
+  return (
+    db
+      .prepare(
+        `UPDATE session_brief_boundaries SET state = 'skipped', skip_reason = 'declined', settled_at = ?, claim_token = NULL
+         WHERE id = ? AND state = 'claimed' AND claim_token = ?`
+      )
+      .run(now, id, claimToken).changes === 1
+  );
+}
+
 export function settleStaleClaim(db: Database.Database, id: string, claimToken: string, now: number): boolean {
   return (
     db
