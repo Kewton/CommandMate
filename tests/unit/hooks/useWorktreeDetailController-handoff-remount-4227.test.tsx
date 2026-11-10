@@ -57,6 +57,7 @@ import {
   resetHandoffStoreForTests,
   settleHandoffDecide,
   startHandoffCancel,
+  listenHandoffRefusal,
   startHandoffDecide,
 } from '@/lib/handoff/close-rule';
 
@@ -86,8 +87,8 @@ function install(): void {
   }) as unknown as typeof fetch;
 }
 
-async function mount(worktreeId: string) {
-  const hook = renderHook(({ id }) => useWorktreeDetailController({ worktreeId: id }), { initialProps: { id: worktreeId } });
+async function mount(worktreeId: string, reactStrictMode = false) {
+  const hook = renderHook(({ id }) => useWorktreeDetailController({ worktreeId: id }), { initialProps: { id: worktreeId }, reactStrictMode });
   await waitFor(() => expect(hook.result.current.loading).toBe(false));
   await act(async () => {
     await new Promise((done) => setTimeout(done, 0));
@@ -197,5 +198,103 @@ describe('[#4227 G10] the page made again (PC ↔ phone, Loading) draws the hand
     });
     expect(onB.result.current.handoffTarget).toEqual(TARGET);
     expect(handoffStoreSnapshot().opening?.worktreeId).toBe(B);
+  });
+});
+
+/**
+ * pr3c (review B P2-1, PM return 1): `next.config.js` sets `reactStrictMode: true`, so in dev (the
+ * e2e's `npm run dev`) React runs a new mount's effects twice. The second run of the taking back
+ * must not close what the first took back, nor ask a switch nobody made (the refusal's alert).
+ * Positive control: before pr3c, the second run fell to `closeHandoffBy('worktree-switch')` and the
+ * opening without a unit was closed (the case "no unit" fails).
+ */
+describe('[#4227 G10 pr3c] the same under React StrictMode (effects run twice on mount)', () => {
+  function refusals(): Array<[string, string]> {
+    const told: Array<[string, string]> = [];
+    const stop = listenHandoffRefusal((path, block) => told.push([path, block]));
+    afterEachStops.push(stop);
+    return told;
+  }
+  const afterEachStops: Array<() => void> = [];
+  afterEach(() => {
+    for (const stop of afterEachStops.splice(0)) stop();
+  });
+
+  it('no unit yet (waiting for the agent): taken back and left open', async () => {
+    resetHandoffStoreForTests();
+    install();
+    const first = await mount(A, true);
+    await act(async () => {
+      await first.result.current.openEnd(TARGET);
+    });
+    const own = handoffStoreSnapshot().opening!;
+    first.unmount();
+    const again = await mount(A, true);
+    expect(again.result.current.handoffTarget).toEqual(TARGET);
+    expect(handoffStoreSnapshot().opening).toBe(own);
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+  });
+
+  it('an unknown unit: taken back, kept, and no refusal is told (nobody pressed anything)', async () => {
+    resetHandoffStoreForTests();
+    install();
+    const first = await mount(A, true);
+    await act(async () => {
+      await first.result.current.openEnd(TARGET);
+    });
+    const own = handoffStoreSnapshot().opening!;
+    const pending = unknownDecide(A);
+    first.unmount();
+    const told = refusals();
+    const again = await mount(A, true);
+    expect(again.result.current.handoffTarget).toEqual(TARGET);
+    expect(handoffStoreSnapshot().opening).toBe(own);
+    expect(handoffUnitsOf(A).pending).toBe(pending);
+    expect(told).toEqual([]);
+  });
+
+  it('another worktree’s unknown unit (the page made again on B): shown as A’s, kept, no refusal told', async () => {
+    resetHandoffStoreForTests();
+    install();
+    const own = beginHandoffOpening(A, TARGET);
+    unknownDecide(A);
+    const told = refusals();
+    const onB = await mount(B, true);
+    expect(onB.result.current.handoffTarget).toEqual(TARGET);
+    expect(handoffStoreSnapshot().opening).toBe(own);
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+    expect(told).toEqual([]);
+  });
+
+  it('(negative control) a real switch of worktree on the same page still asks the rule: nothing held → closed', async () => {
+    resetHandoffStoreForTests();
+    install();
+    const hook = await mount(A, true);
+    await act(async () => {
+      await hook.result.current.openEnd(TARGET);
+    });
+    const own = handoffStoreSnapshot().opening!;
+    hook.rerender({ id: B });
+    await waitFor(() => expect(hook.result.current.handoffTarget).toBeNull());
+    expect(handoffStoreSnapshot().opening?.token).toBe(own.token);
+    expect(handoffStoreSnapshot().opening?.closed).toBe(true);
+  });
+
+  it('(negative control) a real switch with A’s unknown unit: kept by the rule, the refusal told', async () => {
+    resetHandoffStoreForTests();
+    install();
+    const hook = await mount(A, true);
+    await act(async () => {
+      await hook.result.current.openEnd(TARGET);
+    });
+    unknownDecide(A);
+    const told = refusals();
+    hook.rerender({ id: B });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(hook.result.current.handoffTarget).toEqual(TARGET);
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+    expect(told).toContainEqual(['worktree-switch', 'unknown']);
   });
 });

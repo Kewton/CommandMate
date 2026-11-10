@@ -727,10 +727,13 @@ test.describe('G10: the hand-off dialog stays over the layout switch and the Loa
     await readAgain(page);
     await page.getByTestId('handoff-approve-p-1').click();
     // Page routes come before the context's: the decide is cut on the way (the UAT's disconnect).
-    await page.route((url) => url.pathname === decidePath, (route) => route.abort('connectionreset'));
+    // pr3c (codex P2-3): `unroute` matches the very function `route` was given (compared by
+    // identity), so the same reference goes to both — two arrows would leave the cut in place.
+    const isDecide = (url: URL) => url.pathname === decidePath;
+    await page.route(isDecide, (route) => route.abort('connectionreset'));
     await page.getByTestId('handoff-confirm').click();
     await expect(page.getByTestId('handoff-pending')).toBeVisible();
-    await page.unroute((url) => url.pathname === decidePath);
+    await page.unroute(isDecide);
   }
 
   test('an unknown result: 1280 → 390 → 1280 → 390 draws the dialog open with the unit each time; no second request', async ({ context, page }) => {
@@ -759,6 +762,8 @@ test.describe('G10: the hand-off dialog stays over the layout switch and the Loa
     for (const size of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
       await page.setViewportSize(size);
       await expect(page.getByTestId('handoff-dialog')).toBeVisible();
+      // pr3c (review B P3-1): drawn under the new layout, not the dialog from before the remount.
+      await expect(page.getByTestId('handoff-dialog')).toHaveAttribute('data-layout', layoutOf(size.width));
       await expect(page.getByTestId('handoff-state')).toBeVisible();
     }
     expect(server.writes.filter((write) => write.path === '')).toHaveLength(1);

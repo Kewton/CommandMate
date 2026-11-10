@@ -337,6 +337,7 @@ describe('H21 (j) the abort is read by its type, never by its words', () => {
   it('auto, a body quoting the abort’s message, tmux fails quoting it → send-error (indeterminate), not brief_choice', async () => {
     fakeProvider();
     launch('claude');
+    const a = shown();
     const words = new BriefChoiceAbortedError('superseded', null).message;
     const body = `please read: ${words}`;
     world.tools.claude.sendMessage.mockImplementationOnce(async () => {
@@ -348,6 +349,8 @@ describe('H21 (j) the abort is read by its type, never by its words', () => {
     const attempt = getLastSendAttempt({ worktreeId: WT, cliToolId: 'claude', instanceId: 'claude' });
     expect(attempt?.state).toBe('indeterminate');
     expect(attempt?.reason).toBe('send-error');
+    // A P3-5: the boundary's claim settles `unknown` as D1 does (not put back to `not_sent`).
+    expect(stateOf(a)).toBe('unknown');
   });
 
   it('the abort records no send attempt (nothing was typed)', async () => {
@@ -357,5 +360,92 @@ describe('H21 (j) the abort is read by its type, never by its words', () => {
     launch('claude');
     await send('claude', 'x', { brief: 'decline', briefBoundary: a });
     expect(getLastSendAttempt({ worktreeId: WT, cliToolId: 'claude', instanceId: 'claude' })).toBeNull();
+  });
+});
+
+/**
+ * pr3c (codex P2-1, PM return 2): the plan saw the shown row A used up (body only), and while
+ * the send waited for the input lock, the send holding it typed a reset that opened B. The final
+ * stretch (under the lock) is the one that counts (design §3.2): a `full` / `decline` body is not
+ * typed into B's new conversation.
+ */
+describe('H21 (b2) used up at the plan, A → B while waiting for the input lock', () => {
+  /** A send holding the input lock while its tool types `body` (a `/clear` opens B when it lands). */
+  async function holdTheLock(body: string): Promise<{ release: () => void; holder: Promise<unknown> }> {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    world.tools.claude.sendMessage.mockImplementationOnce(async () => {
+      await gate;
+    });
+    const before = world.tools.claude.sendMessage.mock.calls.length;
+    const holder = send('claude', body);
+    for (let i = 0; i < 200 && world.tools.claude.sendMessage.mock.calls.length === before; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(world.tools.claude.sendMessage.mock.calls.length).toBe(before + 1);
+    return { release, holder };
+  }
+
+  it.each(CHOICES)('%s: 409 superseded under the lock, the body not typed, B pending', async (_name, choice) => {
+    fakeProvider();
+    launch('claude');
+    const a = shown();
+    await send('claude', 'first');
+    expect(stateOf(a)).toBe('sent');
+    const { release, holder } = await holdTheLock('/clear');
+    const choosing = send('claude', 'x', { ...choice, briefBoundary: a });
+    // The choosing send plans (it reads A used up, the current row) and queues behind the lock.
+    for (let i = 0; i < 200; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(shown()).toBe(a);
+    release();
+    await holder;
+    const b = shown();
+    expect(b).not.toBe(a);
+    const { result } = await choosing;
+    expectAborted(result, 'superseded');
+    expect(typed(world, 'claude')).not.toContain('x');
+    expect(stateOf(b)).toBe('pending');
+  });
+
+  it.each(CHOICES)('negative %s: A still the current row under the lock → the body alone, reported consumed', async (_name, choice) => {
+    fakeProvider();
+    launch('claude');
+    const a = shown();
+    await send('claude', 'first');
+    const { release, holder } = await holdTheLock('hold');
+    const choosing = send('claude', 'x', { ...choice, briefBoundary: a });
+    for (let i = 0; i < 200; i++) await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await holder;
+    const { result, report } = await choosing;
+    expect(result.ok).toBe(true);
+    expect(typed(world, 'claude').at(-1)).toBe('x');
+    expect(report).toEqual({ state: 'consumed', boundaryId: a });
+    expect(stateOf(a)).toBe('sent');
+  });
+
+  it('(A P3-1) both planned A pending, the other send used it up first in the lock → 409 claimed, the body not typed (design §11.22)', async () => {
+    fakeProvider();
+    launch('claude');
+    const a = shown();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    world.tools.claude.sendMessage.mockImplementationOnce(async () => {
+      await gate;
+    });
+    // The lock's holder takes no brief: A stays pending for both sends planned behind it.
+    const holder = send('claude', 'hold', { brief: 'skip' });
+    for (let i = 0; i < 200 && world.tools.claude.sendMessage.mock.calls.length === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+    const first = send('claude', 'first');
+    for (let i = 0; i < 200; i++) await new Promise((resolve) => setImmediate(resolve));
+    const declining = send('claude', 'x', { brief: 'decline', briefBoundary: a });
+    for (let i = 0; i < 200; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(stateOf(a)).toBe('pending');
+    release();
+    await holder;
+    await first;
+    expect(stateOf(a)).toBe('sent');
+    const { result } = await declining;
+    expectAborted(result, 'claimed');
+    expect(typed(world, 'claude')).not.toContain('x');
+    expect(stateOf(a)).toBe('sent');
   });
 });

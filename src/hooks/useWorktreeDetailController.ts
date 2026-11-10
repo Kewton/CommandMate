@@ -1963,6 +1963,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handoffTargetRef.current = target;
     setHandoffTarget(target);
   }, [worktreeId]);
+  /**
+   * pr3c (review B P2-1): the worktree the effect below last ran for. A new mount starts at null,
+   * so only a change of `worktreeId` on a mounted page is a switch — not the page made again, nor
+   * React's StrictMode running a new mount's effects twice (dev, the e2e's `npm run dev`).
+   */
+  const handoffEffectWorktreeRef = useRef<string | null>(null);
   useEffect(() => {
     // G10 (design §4.1.1, the UAT of G-PR1+G-PR2): the page itself is made again when the layout
     // switches (AppShell draws its children under another parent for PC and phone) and when the
@@ -1973,7 +1979,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // for the person's choice) — asked as a switch below, the rule keeps it (foreign). Another
     // worktree's stop or cancel ends by its own answer and is not taken back (its page may begin
     // its own opening meanwhile, pr2f).
+    const switched = handoffEffectWorktreeRef.current !== null && handoffEffectWorktreeRef.current !== worktreeId;
+    handoffEffectWorktreeRef.current = worktreeId;
     const live = handoffStoreSnapshot().opening;
+    // pr3c: this worktree's live opening, already taken back by this page (StrictMode's second
+    // run, or back on the opening's own worktree): nothing to do — never closed by the rerun.
+    if (live !== null && !live.closed && live.worktreeId === worktreeId && handoffTargetRef.current !== null && handoffOpeningRef.current === live.token) return;
     const liveTool = live?.target.cliToolId;
     const liveUnits = live === null ? null : handoffUnitsOf(live.worktreeId);
     const takeBack =
@@ -1986,8 +1997,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (live.worktreeId === worktreeId) return;
     }
     // pr2d: a switch of worktree asks the rule too. Kept, the dialog shows that it is another
-    // worktree's and runs nothing of it here but the unit's drop and closing.
-    closeHandoffBy('worktree-switch');
+    // worktree's and runs nothing of it here but the unit's drop and closing. pr3c: asked only
+    // when the worktree did change on this page (a page made again starts with no target).
+    if (switched) closeHandoffBy('worktree-switch');
   }, [worktreeId, closeHandoffBy, openHandoff]);
   /**
    * The hand-off's "end" for an explicit target snapshot: the PC split's own End (and its

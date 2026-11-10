@@ -40,7 +40,25 @@ function fill(line: string): string {
     .replace(/[[\]]/g, '');
 }
 
-/** Every `commandmate …` command in `text`: from the word to the first non-ASCII character. */
+/**
+ * Every `commandmate …` command in `text`: from the word to the end of its line, or to where the
+ * prose takes over — outside double quotes, a backtick, `。`/`、`, or a space before a non-ASCII
+ * word (`… で`). pr3c (review B P3-2): a quoted argument in another script (`--text "日本語"`) stays
+ * whole — the command is no longer cut at its first non-ASCII character.
+ */
+function commandEnd(rest: string): number {
+  let quoted = false;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    if (c === '"') quoted = !quoted;
+    if (quoted) continue;
+    if (c === '`' || c === '。' || c === '、') return i;
+    // eslint-disable-next-line no-control-regex
+    if (/\s/.test(c) && i + 1 < rest.length && /[^\x00-\x7f]/.test(rest[i + 1])) return i;
+  }
+  return rest.length;
+}
+
 function commandsIn(text: string): string[] {
   const found: string[] = [];
   for (const raw of text.split('\n')) {
@@ -48,9 +66,7 @@ function commandsIn(text: string): string[] {
     let at = line.indexOf('commandmate ');
     while (at !== -1) {
       const rest = line.slice(at);
-      // eslint-disable-next-line no-control-regex
-      const end = rest.search(/[^\x00-\x7f]/);
-      found.push((end === -1 ? rest : rest.slice(0, end)).replace(/[`。、]+$/, '').trim());
+      found.push(rest.slice(0, commandEnd(rest)).trim());
       at = line.indexOf('commandmate ', at + 1);
     }
   }
@@ -136,6 +152,14 @@ describe('[#4227 G9] every command line of the request text and the guide parses
     expect(TEXT_LINES.filter((line) => line.startsWith('commandmate handoff propose --request '))).toHaveLength(3);
     expect(TEXT_LINES).toContain(`commandmate handoff done --request ${REQUEST}`);
     expect(GUIDE_LINES).toHaveLength(8);
+  });
+
+  it('pr3c (B P3-2): a line is taken to its end, a quoted argument in another script kept whole', () => {
+    expect(commandsIn('- 追加: commandmate handoff propose --request R add --kind note --text "日本語の例、です" で出す')).toEqual([
+      'commandmate handoff propose --request R add --kind note --text "日本語の例、です"',
+    ]);
+    expect(commandsIn('`commandmate mem list --all` を読む。')).toEqual(['commandmate mem list --all']);
+    expect(commandsIn('- 終わったら: commandmate handoff done --request R')).toEqual(['commandmate handoff done --request R']);
   });
 
   it.each([...TEXT_LINES.map((line) => ['text', line]), ...GUIDE_LINES.map((line) => ['guide', line])])(

@@ -18,6 +18,7 @@
 
 import type Database from 'better-sqlite3';
 import { getInstanceIncarnationRow } from '@/lib/mem/incarnation';
+import { readHandoffPreEndUpdate } from '@/lib/handoff/pre-end';
 import type { BriefBoundaryKind } from '@/lib/session/brief-provider';
 
 /** The kinds of boundary a process ended at (X2): reset and resume are conversation steps. */
@@ -69,14 +70,15 @@ export function readPreviousEnd(
 }
 
 /**
- * Whether an earlier lifetime recorded its update before it ended (X4). G (#4227) and F
- * (#4226) are its writers; until they come nothing is recorded, so it is never confirmed.
+ * Whether an earlier lifetime recorded its update before it ended (X4). Issue #4227 (S-C): the
+ * hand-off's record is read here (`recorded` only for a `confirmed` end right before `before`);
+ * F (#4226) is the other writer to come. Anything it cannot tell is `not_recorded`.
  */
 export function readPreEndUpdate(
-  _db: Database.Database,
-  _query: { worktreeId: string; instanceId: string; before: number }
+  db: Database.Database,
+  query: { worktreeId: string; instanceId: string; before: number }
 ): 'recorded' | 'not_recorded' {
-  return 'not_recorded';
+  return readHandoffPreEndUpdate(db, query);
 }
 
 /** The line (design §7.1). `now` and `lastUpdateAt` in epoch ms. */

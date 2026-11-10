@@ -421,6 +421,11 @@ export class SendBrief {
   private report: BriefReport | null = null;
   /** Issue #4227 (S-B): why a `full` / `decline` send stops before any key; thrown by {@link claim}. */
   private aborted: BriefChoiceAbortedError | null = null;
+  /**
+   * Issue #4227 (S-B, pr3c): the shown row a strict choice found used up at the plan. Not the
+   * answer yet — the claim reads it again under the input lock (a reset may open B meanwhile).
+   */
+  private usedUp: string | null = null;
   readonly isReset: boolean;
 
   constructor(private readonly input: SendBriefInput) {
@@ -525,7 +530,7 @@ export class SendBrief {
 
   /** Whether the delivery must run under the outer input lock (a claim to make, or a reset to record). */
   needsOuterLock(): boolean {
-    return this.planned !== null || this.isReset;
+    return this.planned !== null || this.isReset || this.usedUp !== null;
   }
 
   /** Whether the pinned worktree is still the one found (`unknown` without a pin's evidence). */
@@ -624,7 +629,9 @@ export class SendBrief {
           return;
         }
         if (current.state !== 'pending') {
-          this.report = { state: 'consumed', boundaryId: current.id };
+          // pr3c (codex P2-1): not decided here — the claim's stretch under the input lock reads
+          // the instance's current row again before the body alone is typed.
+          this.usedUp = current.id;
           return;
         }
       }
@@ -797,6 +804,11 @@ export class SendBrief {
     if (this.aborted) throw this.aborted;
     const plan = this.planned;
     const db = this.db;
+    if (this.usedUp !== null && db) {
+      this.recheckUsedUp(db, this.usedUp);
+      if (this.aborted) throw this.aborted;
+      return this.input.content;
+    }
     if (!plan || !db) return this.input.content;
     let body: string | null;
     try {
@@ -815,6 +827,28 @@ export class SendBrief {
     if (this.aborted) throw this.aborted;
     if (body === null || plan.decline) return this.input.content;
     return body + BRIEF_SEPARATOR + this.input.content;
+  }
+
+  /**
+   * Issue #4227 (S-B, design §3.2, pr3c): the final reading for a strict choice whose shown row
+   * the plan found used up. Under the input lock, right before the body: still the instance's
+   * current row and used up → the body alone (`consumed`); another current row (a reset or a
+   * relaunch while the lock was waited for) → `superseded`, nothing typed. Writes nothing.
+   */
+  private recheckUsedUp(db: Database.Database, shownId: string): void {
+    try {
+      const current = getCurrentBoundary(db, this.input.worktreeId, this.input.instanceId);
+      if (!current || current.id !== shownId || current.state === 'superseded' || current.state === 'pending') {
+        this.refuse('superseded');
+      } else if (current.state === 'claimed') {
+        this.refuse('claimed');
+      } else {
+        this.report = { state: 'consumed', boundaryId: current.id };
+      }
+    } catch (error) {
+      this.warn('session-brief-claim-failed', error);
+      this.refuse('claim_failed');
+    }
   }
 
   /** Issue #4227: a claim this send made but will not type under goes back (`not_sent`). */

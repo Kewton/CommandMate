@@ -24,7 +24,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemItemsPanel } from '@/components/mem/MemItemsPanel';
 import { publishMemWriteLock } from '@/components/mem/mem-write-lock';
 import type { MemItemView } from '@/types/mem';
-import { memItemsUnitsLock, resetHandoffStoreForTests, settleHandoffDecide, startHandoffDecide } from '@/lib/handoff/close-rule';
+import { memItemsUnitsAll, memItemsUnitsLock, resetHandoffStoreForTests, settleHandoffDecide, startHandoffDecide } from '@/lib/handoff/close-rule';
+import { memItemsApi } from '@/lib/mem/screen-client';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -515,5 +516,31 @@ describe('[#4227 G-PR3] the panel’s units are the store’s', () => {
     press('mem-item-save-n1');
     await waitFor(() => expect(find('n1').text).toBe('plain'));
     expect(memItemsUnitsLock()).toBeNull();
+  });
+});
+
+/**
+ * pr3c (review A P3-3): a write whose `run` throws before its answer is settled is unknown, as the
+ * dialog's decide is (its finally settles `unknown`): the slot's unit stays for the person's resend
+ * or drop. Positive control: before pr3c the finally settled it `answered`, dropping the slot's
+ * earlier unknown with no choice of the person (the lock went null).
+ */
+describe('[#4227 pr3c] a throw is unknown, never answered', () => {
+  it('an unknown close resent and the client throws: still unknown, still locked, resent as it was', async () => {
+    renderPanel();
+    await screen.findByTestId('mem-item-edit-d3');
+    await startUnit('close', 'unknown');
+    const sent = writesOf('close')[0];
+    const spy = vi.spyOn(memItemsApi, 'close').mockRejectedValueOnce(new Error('thrown before an answer'));
+    press(UNIT.close.resend);
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(button(UNIT.close.resend)?.disabled).toBe(false));
+    expect(memItemsUnitsLock()).toBe('unknown');
+    expect(memItemsUnitsAll().unknown.map((unit) => unit.slot)).toEqual(['close:n1']);
+    expect(screen.getByTestId('mem-items-write-locked').textContent).toContain('結果が分からない要求');
+    press(UNIT.close.resend);
+    await waitFor(() => expect(writesOf('close')).toHaveLength(2));
+    expect(writesOf('close')[1]).toEqual(sent);
+    await waitFor(() => expect(memItemsUnitsLock()).toBeNull());
   });
 });

@@ -449,14 +449,22 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       setNotice(null);
       try {
         return await run();
+      } catch {
+        // pr3c (review A P3-3): a throw before the answer was settled says nothing of whether the
+        // write went in — unknown, as the dialog's decide (its finally): the unit is kept for the
+        // person's resend or drop, and an earlier unknown of its slot is not dropped as answered.
+        if (sendingRef.current === sending) {
+          settleMemItemsWrite(sending, 'unknown');
+          setNotice({ tone: 'alert', text: t(request.op === 'add' ? 'mem.items.unknown' : 'mem.items.unknownVersioned') });
+        }
+        return null;
       } finally {
-        // An answer that was not settled (a throw) ends the sending as answered: nothing is kept.
-        if (sendingRef.current === sending) settleMemItemsWrite(sending, 'answered');
+        if (sendingRef.current === sending) settleMemItemsWrite(sending, 'unknown');
         sendingRef.current = null;
         setBusy(false);
       }
     },
-    [pendings]
+    [pendings, t]
   );
 
   const add = useCallback(async () => {

@@ -21,7 +21,7 @@ vi.mock('next-intl', async () => {
 });
 
 import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
-import { resetHandoffStoreForTests, settleHandoffDecide, startHandoffDecide } from '@/lib/handoff/close-rule';
+import { dropMemItemsUnit, resetHandoffStoreForTests, settleHandoffDecide, settleMemItemsWrite, startHandoffDecide, startMemItemsWrite } from '@/lib/handoff/close-rule';
 import type { HandoffReadResponse, HandoffRequestView } from '@/lib/handoff/types';
 
 type Call = { method: string; path: string; body: Record<string, unknown> };
@@ -154,5 +154,22 @@ describe('pr2e P3-2: another worktree’s unknown unit, left by a page made agai
     await screen.findByTestId('handoff-pending');
     expect(screen.queryByTestId('handoff-pending-other-worktree')).toBeNull();
     expect(screen.queryByTestId('handoff-pending-elsewhere')).toBeNull();
+  });
+});
+
+/**
+ * pr3c (review A P3-4, G7): an items write whose result is unknown, with no items panel drawn,
+ * locks the dialog's writes — read from the store (`memItemsUnitsLock`), not only from the panel's
+ * published lock. Positive control: without the store's lock the row is not shown.
+ */
+describe('[#4227 pr3c] the items panel’s unknown unit in the store locks the dialog', () => {
+  it('shown as locked with no panel drawn; dropped, the lock is gone', async () => {
+    const write = startMemItemsWrite({ worktreeId: 'wt-1', slot: 'add', request: {} })!;
+    settleMemItemsWrite(write, 'unknown');
+    renderDialog();
+    await screen.findByTestId('handoff-dialog');
+    expect(screen.getByTestId('handoff-write-locked')).toBeInTheDocument();
+    act(() => dropMemItemsUnit(write));
+    await waitFor(() => expect(screen.queryByTestId('handoff-write-locked')).toBeNull());
   });
 });

@@ -14,13 +14,17 @@ import {
   beginHandoffOpening,
   closeHandoffOpening,
   dropHandoffUnit,
+  dropMemItemsUnit,
   handoffStoreSnapshot,
   handoffUnitsOf,
+  memItemsUnitsOf,
   noteHandoffHidden,
   patchHandoffOpening,
   resetHandoffStoreForTests,
   settleHandoffDecide,
+  settleMemItemsWrite,
   startHandoffDecide,
+  startMemItemsWrite,
   type HandoffDecideUnit,
 } from '@/lib/handoff/close-rule';
 
@@ -108,5 +112,55 @@ describe('[#4227 pr2f] a close, a hide and a patch name their opening', () => {
     const next = beginHandoffOpening(A, TARGET);
     noteHandoffHidden(next.token);
     expect(handoffStoreSnapshot().opening?.closed).toBe(true);
+  });
+});
+
+/**
+ * pr3c (review A P3-4): the store alone keeps the items units' rule (4)(e) and their identities —
+ * not only the screens' own locks in front of it. Each row fails when its check in the store is
+ * taken away (G2: the start not reading the hand-off's lock; G5: the settle not naming its sending;
+ * G3: the drop not naming its unit).
+ */
+describe('[#4227 pr3c] the items units in the store', () => {
+  const items = (slot: string) => ({ worktreeId: A, slot, request: { slot } });
+
+  it('G2: a decide of the hand-off unknown → an items write is not started; (negative) none → started', () => {
+    const decide = startHandoffDecide(unit(1))!;
+    settleHandoffDecide(decide, 'unknown');
+    expect(startMemItemsWrite(items('add'))).toBeNull();
+    expect(memItemsUnitsOf(A).sending).toBeNull();
+    dropHandoffUnit(decide);
+    expect(startMemItemsWrite(items('add'))).not.toBeNull();
+  });
+
+  it('G2: a decide being sent → an items write is not started', () => {
+    startHandoffDecide(unit(1));
+    expect(startMemItemsWrite(items('add'))).toBeNull();
+  });
+
+  it('G5: an old sending’s settle × the next sending in flight: the next stays, nothing kept unknown', () => {
+    const first = startMemItemsWrite(items('add'))!;
+    settleMemItemsWrite(first, 'answered');
+    const next = startMemItemsWrite(items('add'))!;
+    settleMemItemsWrite(first, 'unknown');
+    expect(memItemsUnitsOf(A).sending).toBe(next);
+    expect(memItemsUnitsOf(A).unknown).toEqual({});
+    // Negative control: its own settle applies.
+    settleMemItemsWrite(next, 'unknown');
+    expect(memItemsUnitsOf(A).sending).toBeNull();
+    expect(memItemsUnitsOf(A).unknown.add).toBe(next);
+  });
+
+  it('G3: a drop of an older unit of the slot leaves the newer unknown one', () => {
+    const older = startMemItemsWrite(items('close:n1'))!;
+    settleMemItemsWrite(older, 'unknown');
+    const newer = startMemItemsWrite(items('close:n1'))!;
+    settleMemItemsWrite(newer, 'unknown');
+    expect(memItemsUnitsOf(A).unknown['close:n1']).toBe(newer);
+    dropMemItemsUnit(older);
+    expect(memItemsUnitsOf(A).unknown['close:n1']).toBe(newer);
+    // Negative control: the unit shown is dropped.
+    dropMemItemsUnit(newer);
+    expect(memItemsUnitsOf(A).unknown).toEqual({});
   });
 });
