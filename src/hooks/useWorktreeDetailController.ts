@@ -98,6 +98,7 @@ import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
+import { askHandoffClose, type HandoffClosePath } from '@/lib/handoff/close-rule';
 import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
@@ -1913,9 +1914,30 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * button runs {@link stopForHandoff}, the existing stop, from its handler only.
    */
   const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(null);
-  useEffect(() => {
+  /** Mirrors `handoffTarget` for the paths below, read in the same tick. */
+  const handoffTargetRef = useRef<SessionKillTarget | null>(null);
+  /**
+   * Issue #4227 pr2d (design §4.1.1): the page's only way of closing the hand-off. It asks the
+   * one rule (`askHandoffClose`) with the path's name: while the dialog stops, sends or holds an
+   * unknown decide, or waits for its cancel's answer, it stays (and says why). The guard
+   * `handoff-close-paths-4227` keeps `setHandoffTarget(null)` here only.
+   */
+  const closeHandoffBy = useCallback((path: HandoffClosePath): boolean => {
+    if (handoffTargetRef.current === null) return true;
+    if (askHandoffClose(path) !== null) return false;
+    handoffTargetRef.current = null;
     setHandoffTarget(null);
-  }, [worktreeId]);
+    return true;
+  }, []);
+  const openHandoff = useCallback((target: SessionKillTarget): void => {
+    handoffTargetRef.current = target;
+    setHandoffTarget(target);
+  }, []);
+  useEffect(() => {
+    // pr2d: a switch of worktree asks the rule too. Kept, the dialog shows that it is another
+    // worktree's and runs nothing of it here but the unit's drop and closing.
+    closeHandoffBy('worktree-switch');
+  }, [worktreeId, closeHandoffBy]);
   /**
    * The hand-off's "end" for an explicit target snapshot: the PC split's own End (and its
    * restart), like {@link openKillConfirm}. The mode is read once per press; a read that
@@ -1934,6 +1956,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   }, [worktreeId]);
   const openEnd = useCallback(async (target: SessionKillTarget): Promise<void> => {
     if (endReadingRef.current !== null) return;
+    // pr2d (PM Claude pr2c P3-2): a hand-off that holds something is not replaced by another
+    // "end" (asked again after the read, which may take seconds).
+    if (handoffTargetRef.current !== null && askHandoffClose('page-end') !== null) return;
     const reading = {};
     endReadingRef.current = reading;
     const startedFor = worktreeId;
@@ -1952,14 +1977,17 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     }
     if (startedFor !== worktreeIdRef.current) return;
     if (attended) {
-      // A kill in flight keeps its confirmation (Issue #1171), as its cancel does.
-      if (!isKillPendingRef.current) setKillTarget(null);
-      setHandoffTarget(target);
+      // pr2d (PM Claude pr2c P3-2 (b)): a kill in flight keeps its confirmation (Issue #1171),
+      // and the hand-off does not open over it (before, both were open).
+      if (isKillPendingRef.current) return;
+      if (!closeHandoffBy('page-end')) return;
+      setKillTarget(null);
+      openHandoff(target);
     } else {
-      setHandoffTarget(null);
+      if (!closeHandoffBy('page-end')) return;
       setKillTarget(target);
     }
-  }, [worktreeId]);
+  }, [worktreeId, closeHandoffBy, openHandoff]);
   /** The DesktopHeader / mobile End: the active instance, snapshotted at press time. */
   const openActiveEnd = useCallback(async (): Promise<void> => {
     const instanceId = activeInstanceIdRef.current;
@@ -1967,7 +1995,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const label = getActiveInstanceLabel(agentInstancesRef.current, instanceId, cliToolId);
     await openEnd({ cliToolId, instanceId, label });
   }, [openEnd]);
-  const closeHandoff = useCallback((): void => setHandoffTarget(null), []);
+  /** The dialog's `onClose`: the dialog asked the rule already; the page asks again. */
+  const closeHandoff = useCallback((): void => {
+    closeHandoffBy('dialog');
+  }, [closeHandoffBy]);
   /** The existing stop for the hand-off's target (G-4's stop button). */
   const stopForHandoff = useCallback(async (): Promise<void> => {
     await stopSession(handoffTarget);

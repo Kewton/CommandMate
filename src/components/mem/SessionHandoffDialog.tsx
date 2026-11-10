@@ -16,6 +16,11 @@
  * or unknown no other write of items (rule (4)(e)) — here and in the items panel (the
  * shared lock, PM P3-3). Cancelling and stopping are not writes of items and stay.
  *
+ * Going away (pr2d, design §4.1.1): every path — the person's, the cancel's answer, the plain
+ * stop's end, and the page's switch of worktree and other "end" — asks the one rule in
+ * `@/lib/handoff/close-rule`; a decide being sent or unknown is never dropped without the
+ * person's choice, and once a cancel has started no decide is sent.
+ *
  * @module components/mem/SessionHandoffDialog
  */
 'use client';
@@ -26,6 +31,13 @@ import { Button, Modal } from '@/components/ui';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useMemWriteLock } from '@/components/mem/mem-write-lock';
 import { handoffApi, type HandoffDecision, type HandoffResult } from '@/lib/handoff/screen-client';
+import {
+  askHandoffClose,
+  registerHandoffHold,
+  type HandoffCloseBlock,
+  type HandoffClosePath,
+  type HandoffHold,
+} from '@/lib/handoff/close-rule';
 import type { HandoffProposalView, HandoffReadResponse } from '@/lib/handoff/types';
 import type { MemCloseWhen, MemItemView } from '@/types/mem';
 
@@ -77,24 +89,17 @@ interface DecideUnit {
 type Notice = { tone: 'status' | 'alert'; text: string } | null;
 
 /**
- * Why the dialog may not be closed now (Issue #4227 pr2c, design §4.1 "closing the dialog"):
- * every way of closing it — Esc, ×, the backdrop, "cancel the end", "close", the plain
- * "keep the session" — asks this one rule.
- *
- * - `stopping`: the stop is being declared or run (`end` → the existing stop → `end/observe`).
- *   Closing would cancel the request under a stop in flight (codex review P2-1); the
- *   existing confirmation ignores its cancel while its kill is in flight (Issue #1171) too.
- * - `unknown`: a decide is being sent, or its result is unknown. Closing would drop it with no
- *   choice of the person's (review B P3-3, the rule of G-PR1: an unknown result is kept until
- *   the person sends it again or drops it). One being sent may come back unknown, so it holds too.
- * - `null`: it may be closed.
+ * The rule for closing lives in `@/lib/handoff/close-rule` (pr2d): every path that makes this
+ * dialog go away — the person's, the cancel's answer, the plain stop's end, the page's switch
+ * of worktree and its other "end" — asks it. Re-exported for the screens that read it here.
  */
-export type HandoffCloseBlock = 'stopping' | 'unknown' | null;
-export function handoffCloseBlock(state: { stopping: boolean; sending: boolean; unknown: boolean }): HandoffCloseBlock {
-  if (state.stopping) return 'stopping';
-  if (state.sending || state.unknown) return 'unknown';
-  return null;
-}
+export { handoffCloseBlock, type HandoffCloseBlock } from '@/lib/handoff/close-rule';
+
+const CLOSE_NOTICE: Record<Exclude<HandoffCloseBlock, null>, string> = {
+  stopping: 'mem.handoff.closeWhileStopping',
+  unknown: 'mem.handoff.closeWhileUnknown',
+  cancelling: 'mem.handoff.closeWhileCancelling',
+};
 
 export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onStop }: SessionHandoffDialogProps) {
   const t = useTranslations('common');
@@ -108,9 +113,23 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const [pending, setPending] = useState<DecideUnit | null>(null);
   const [busy, setBusy] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  /** The plain stop ran but a decide is unknown, so the dialog stayed (pr2d, codex P2 2). */
+  const [plainStopped, setPlainStopped] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  /**
+   * The worktree the dialog was opened for (pr2d). The page keeps the dialog over a switch of
+   * worktree while it holds something; on another worktree's page it is "foreign": its request
+   * is still addressed to this worktree, and no stop nor write of this dialog's runs there
+   * (the page's stop is the other worktree's).
+   */
+  const [openedFor, setOpenedFor] = useState<string | null>(null);
+  const forWorktree = openedFor ?? worktreeId;
+  const foreign = openedFor !== null && openedFor !== worktreeId;
   const sendingRef = useRef(false);
   const stoppingRef = useRef(false);
+  /** Set from a cancel being sent until it is answered: no new decide is sent (pr2d, condition 4). */
+  const cancellingRef = useRef(false);
   /** Mirrors `pending` for the close rule, read in the same tick as the press. */
   const pendingRef = useRef<DecideUnit | null>(null);
   /**
@@ -122,6 +141,25 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     pendingRef.current = unit;
     setPending(unit);
   }, []);
+
+  /** What this dialog holds now, read in the same tick as a press or the page's path. */
+  const readHold = useCallback(
+    (): HandoffHold => ({
+      stopping: stoppingRef.current,
+      sending: sendingRef.current,
+      unknown: pendingRef.current !== null,
+      cancelling: cancellingRef.current,
+    }),
+    []
+  );
+  useEffect(
+    () =>
+      registerHandoffHold({
+        read: readHold,
+        refused: (_path, block) => setNotice({ tone: 'alert', text: t(CLOSE_NOTICE[block]) }),
+      }),
+    [readHold, t]
+  );
 
   const ownLock = inflight !== null ? 'sending' : pending !== null ? 'unknown' : null;
   const otherLock = useMemWriteLock(HANDOFF_LOCK_OWNER, ownLock);
@@ -144,9 +182,9 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
 
   const reload = useCallback(async () => {
     if (!requestId) return;
-    const result = await handoffApi.read(worktreeId, requestId);
+    const result = await handoffApi.read(forWorktree, requestId);
     if (result.ok) adopt(result.body);
-  }, [adopt, requestId, worktreeId]);
+  }, [adopt, requestId, forWorktree]);
 
   /** ①②: make the request and send its text to the agent. */
   const sendText = useCallback(
@@ -167,13 +205,14 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     }
     closedRef.current = false;
     let live = true;
+    setOpenedFor(worktreeId);
     setView(null);
     setText(null);
     setPlainOnly(null);
+    setPlainStopped(false);
     setChoices({});
-    // pr2c (10): a decide whose result is unknown is not dropped by a reopening (the person
-    // sends it again or drops it); one of another worktree's is not this dialog's.
-    if (pendingRef.current && pendingRef.current.worktreeId !== worktreeId) keepPending(null);
+    // pr2c (10)・pr2d: a decide whose result is unknown is never dropped by an opening, of
+    // this worktree's or another's: the person sends it again (on its own worktree) or drops it.
     setNotice(null);
     void (async () => {
       const created = await handoffApi.create(worktreeId, target.instanceId);
@@ -194,21 +233,25 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     return () => {
       live = false;
     };
-    // The request is made once per opening of the dialog for its target.
+    // The request is made once per opening of the dialog for its target. A switch of worktree
+    // while it is open (the page keeps it only while it holds something) makes no request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, target?.instanceId, worktreeId]);
+  }, [isOpen, target?.instanceId]);
 
   // The screen reads again while the agent works (the server keeps no timer; §4.3).
   useEffect(() => {
-    if (!isOpen || state !== 'awaiting_agent') return;
+    if (!isOpen || state !== 'awaiting_agent' || foreign) return;
     const timer = setInterval(() => void reload(), HANDOFF_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [isOpen, reload, state]);
+  }, [foreign, isOpen, reload, state]);
 
-  /** Sends one decide as the one in flight: one at a time, none while another screen's item write is open. */
+  /**
+   * Sends one decide as the one in flight: one at a time, none while another screen's item
+   * write is open, and none once a cancel has started or the dialog closed (pr2d, condition 4).
+   */
   const decide = useCallback(
     async (unit: DecideUnit) => {
-      if (sendingRef.current || otherLock !== null) return;
+      if (sendingRef.current || cancellingRef.current || closedRef.current || otherLock !== null) return;
       sendingRef.current = true;
       setInflight(unit);
       setBusy(true);
@@ -245,23 +288,24 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   );
 
   const confirm = useCallback(() => {
-    if (!view || lock !== null) return;
+    if (!view || lock !== null || foreign) return;
     // Rule (2): only what the person chose is sent, with the fingerprint of what was shown.
     const decisions: HandoffDecision[] = Object.entries(choices).map(([proposalId, entry]) => ({
       proposalId,
       fingerprint: entry.fingerprint,
       action: entry.choice,
     }));
-    void decide({ worktreeId, requestId: view.request.id, ifVersion: view.request.version, decisions });
-  }, [choices, decide, lock, view, worktreeId]);
+    void decide({ worktreeId: forWorktree, requestId: view.request.id, ifVersion: view.request.version, decisions });
+  }, [choices, decide, foreign, forWorktree, lock, view]);
 
   const goOn = useCallback(() => {
-    if (!view || lock !== null) return;
-    void decide({ worktreeId, requestId: view.request.id, ifVersion: view.request.version, decisions: [] });
-  }, [decide, lock, view, worktreeId]);
+    if (!view || lock !== null || foreign) return;
+    void decide({ worktreeId: forWorktree, requestId: view.request.id, ifVersion: view.request.version, decisions: [] });
+  }, [decide, foreign, forWorktree, lock, view]);
 
   const simpleWrite = useCallback(
     async (run: () => Promise<HandoffResult<HandoffReadResponse>>, success?: string) => {
+      if (cancellingRef.current || closedRef.current) return;
       setBusy(true);
       try {
         const result = await run();
@@ -280,39 +324,71 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   );
 
   const extend = useCallback(() => {
-    if (!view || lock !== null) return;
-    void simpleWrite(() => handoffApi.extend(worktreeId, view.request.id, view.request.version), t('mem.handoff.extended'));
-  }, [lock, simpleWrite, t, view, worktreeId]);
+    if (!view || lock !== null || foreign) return;
+    void simpleWrite(() => handoffApi.extend(forWorktree, view.request.id, view.request.version), t('mem.handoff.extended'));
+  }, [foreign, forWorktree, lock, simpleWrite, t, view]);
 
   const rebase = useCallback(
     (proposal: HandoffProposalView) => {
-      if (!view || lock !== null) return;
+      if (!view || lock !== null || foreign) return;
       void simpleWrite(() =>
-        handoffApi.rebase(worktreeId, view.request.id, proposal.id, { ifVersion: view.request.version, fingerprint: proposal.fingerprint })
+        handoffApi.rebase(forWorktree, view.request.id, proposal.id, { ifVersion: view.request.version, fingerprint: proposal.fingerprint })
       );
     },
-    [lock, simpleWrite, view, worktreeId]
+    [foreign, forWorktree, lock, simpleWrite, view]
   );
 
   /**
-   * Every way of closing the dialog comes here (pr2c (1)・(10), {@link handoffCloseBlock}):
-   * refused with a notice while the stop is in flight or a decide is sent or unknown;
-   * otherwise the open request is cancelled (`cancel`) or the dialog just closed (`close`).
+   * The dialog's only call of `onClose` (pr2d): asks the rule ({@link askHandoffClose}) for
+   * `path`; refused, it stays and says why. The guard `handoff-close-paths-4227` keeps it the only one.
+   */
+  const closeBy = useCallback(
+    (path: HandoffClosePath): boolean => {
+      const block = askHandoffClose(path, readHold());
+      if (block !== null) {
+        setNotice({ tone: 'alert', text: t(CLOSE_NOTICE[block]) });
+        return false;
+      }
+      closedRef.current = true;
+      onClose();
+      return true;
+    },
+    [onClose, readHold, t]
+  );
+
+  /**
+   * The person's ways of closing (Esc, ×, the backdrop, "cancel the end", "close", "keep the
+   * session"): refused while the rule says so; otherwise the open request is cancelled
+   * (`cancel`) or the dialog just closed (`close`). While the cancel is answered no decide is
+   * sent and nothing else closes it; its answer asks the rule again (`cancel-answer`).
    */
   const requestClose = useCallback(
     async (how: 'cancel' | 'close') => {
-      const block = handoffCloseBlock({ stopping: stoppingRef.current, sending: sendingRef.current, unknown: pendingRef.current !== null });
+      if (how === 'close' || !view || !['awaiting_agent', 'reviewing', 'applying', 'ending'].includes(view.request.state)) {
+        closeBy('person');
+        return;
+      }
+      const block = askHandoffClose('person', readHold());
       if (block !== null) {
-        setNotice({ tone: 'alert', text: t(block === 'stopping' ? 'mem.handoff.closeWhileStopping' : 'mem.handoff.closeWhileUnknown') });
+        setNotice({ tone: 'alert', text: t(CLOSE_NOTICE[block]) });
         return;
       }
       closedRef.current = true;
-      if (how === 'cancel' && view && ['awaiting_agent', 'reviewing', 'applying', 'ending'].includes(view.request.state)) {
-        await handoffApi.cancel(worktreeId, view.request.id);
+      cancellingRef.current = true;
+      setCancelling(true);
+      try {
+        await handoffApi.cancel(forWorktree, view.request.id);
+      } finally {
+        cancellingRef.current = false;
+        setCancelling(false);
       }
-      onClose();
+      if (!closeBy('cancel-answer')) {
+        // Not reached while no decide can start after the cancel; kept for the rule's sake.
+        closedRef.current = false;
+        await reload();
+      }
     },
-    [onClose, t, view, worktreeId]
+    [closeBy, forWorktree, readHold, reload, t, view]
   );
 
   const resendText = useCallback(() => {
@@ -325,14 +401,15 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
    */
   const stop = useCallback(
     async (force: boolean) => {
-      if (stoppingRef.current || closedRef.current || !view) return;
+      // Not from another worktree's page: the page's stop is that worktree's (pr2d).
+      if (stoppingRef.current || closedRef.current || !view || foreign) return;
       stoppingRef.current = true;
       setStopping(true);
       setNotice(null);
       try {
         let endToken = view.request.state === 'ending' ? view.request.endToken : null;
         if (!endToken) {
-          const ended = await handoffApi.end(worktreeId, view.request.id, { ifVersion: view.request.version, ...(force ? { force: true } : {}) });
+          const ended = await handoffApi.end(forWorktree, view.request.id, { ifVersion: view.request.version, ...(force ? { force: true } : {}) });
           if (!ended.ok) {
             if (ended.code === 'session_changed') {
               setPlainOnly(t('mem.handoff.sessionChanged'));
@@ -348,7 +425,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         // pr2c (1): the dialog closed (or its request cancelled) while `end` was answered — no stop.
         if (closedRef.current) return;
         await onStop();
-        const observed = await handoffApi.observe(worktreeId, view.request.id, endToken);
+        const observed = await handoffApi.observe(forWorktree, view.request.id, endToken);
         if (observed.ok) {
           adopt(observed.body);
         } else {
@@ -360,23 +437,26 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         setStopping(false);
       }
     },
-    [adopt, onStop, refusal, reload, t, view, worktreeId]
+    [adopt, foreign, forWorktree, onStop, refusal, reload, t, view]
   );
 
-  /** No request: the existing stop only (no `end`, nothing recorded, §4.1 ①・H15(g)). */
+  /**
+   * No request: the existing stop only (no `end`, nothing recorded, §4.1 ①・H15(g)). Its end
+   * closes the dialog through the rule (`plain-stop-done`): a decide still unknown keeps it
+   * open for the person's choice (pr2d, codex P2 2).
+   */
   const plainStop = useCallback(async () => {
-    if (stoppingRef.current || closedRef.current) return;
+    if (stoppingRef.current || closedRef.current || foreign) return;
     stoppingRef.current = true;
     setStopping(true);
     try {
       await onStop();
-      closedRef.current = true;
-      onClose();
     } finally {
       stoppingRef.current = false;
       setStopping(false);
     }
-  }, [onClose, onStop]);
+    if (!closeBy('plain-stop-done')) setPlainStopped(true);
+  }, [closeBy, foreign, onStop]);
 
   if (!isOpen || !target) return null;
 
@@ -387,9 +467,11 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const beforeConfirm = proposals.every((proposal) => proposal.state !== 'applied');
   const canStop = request !== null && ['awaiting_agent', 'reviewing', 'ending'].includes(request.state);
   const canForce = request !== null && ['awaiting_agent', 'reviewing', 'applying', 'ending'].includes(request.state);
+  /** pr2d (condition 2): another worktree's unit (or this one's on another worktree's page) is dropped only. */
+  const pendingSendable = pending !== null && !foreign && pending.worktreeId === worktreeId;
 
   return (
-    <Modal isOpen={isOpen} onClose={() => void requestClose('cancel')} title={t('mem.handoff.title', { label: target.label })} size={isMobile ? 'full' : 'lg'}>
+    <Modal isOpen={isOpen} onClose={() => void requestClose(foreign ? 'close' : 'cancel')} title={t('mem.handoff.title', { label: target.label })} size={isMobile ? 'full' : 'lg'}>
       <div className="space-y-3 text-sm" data-testid="handoff-dialog" data-layout={isMobile ? 'mobile' : 'desktop'}>
         {notice && (
           <p role={notice.tone} className={notice.tone === 'alert' ? 'text-danger-foreground' : 'text-success-foreground'} data-testid="handoff-notice">
@@ -406,8 +488,20 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         {pending && (
           <div className="space-y-1 rounded border border-warning-border bg-warning-subtle p-2" data-testid="handoff-pending">
             <p className="text-xs text-foreground">{t('mem.handoff.unknown')}</p>
+            {!pendingSendable && (
+              <p className="text-xs text-muted-foreground" data-testid="handoff-pending-elsewhere">
+                {t('mem.handoff.pendingElsewhere', { worktree: pending.worktreeId })}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => void decide(pending)} disabled={busy} data-testid="handoff-pending-resend">
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (pendingSendable) void decide(pending);
+                }}
+                disabled={busy || cancelling || !pendingSendable}
+                data-testid="handoff-pending-resend"
+              >
                 {t('mem.handoff.resend')}
               </Button>
               <Button
@@ -427,16 +521,29 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
           </div>
         )}
 
-        {plainOnly !== null ? (
+        {foreign ? (
+          // pr2d: kept over a switch of worktree while it held something. Nothing of this
+          // dialog runs on another worktree's page but the unit's drop and closing.
+          <div className="space-y-2" data-testid="handoff-foreign">
+            <p className="text-foreground">{t('mem.handoff.foreign', { worktree: forWorktree })}</p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="ghost" onClick={() => void requestClose('close')} data-testid="handoff-foreign-close">
+                {t('mem.handoff.close')}
+              </Button>
+            </div>
+          </div>
+        ) : plainOnly !== null ? (
           <div className="space-y-2" data-testid="handoff-plain">
-            <p className="text-foreground">{plainOnly}</p>
+            <p className="text-foreground">{plainStopped ? t('mem.handoff.plainStopped') : plainOnly}</p>
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="ghost" onClick={() => void requestClose('close')} data-testid="handoff-plain-cancel">
-                {t('mem.handoff.keepSession')}
+                {plainStopped ? t('mem.handoff.close') : t('mem.handoff.keepSession')}
               </Button>
-              <Button variant="danger" disabled={stopping} onClick={() => void plainStop()} data-testid="handoff-plain-stop">
-                {t('mem.handoff.stop')}
-              </Button>
+              {!plainStopped && (
+                <Button variant="danger" disabled={stopping} onClick={() => void plainStop()} data-testid="handoff-plain-stop">
+                  {t('mem.handoff.stop')}
+                </Button>
+              )}
             </div>
           </div>
         ) : request === null ? (
@@ -482,7 +589,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
                     key={proposal.id}
                     proposal={proposal}
                     choice={choices[proposal.id]?.choice ?? null}
-                    disabled={busy || lock !== null || request.state !== 'reviewing'}
+                    disabled={busy || cancelling || lock !== null || request.state !== 'reviewing'}
                     onChoose={(choice) =>
                       setChoices((current) => {
                         if (current[proposal.id]?.choice === choice) {
@@ -526,24 +633,24 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
               {request.state === 'reviewing' && (
                 <Button
                   onClick={confirm}
-                  disabled={busy || lock !== null || Object.keys(choices).length === 0}
+                  disabled={busy || cancelling || lock !== null || Object.keys(choices).length === 0}
                   data-testid="handoff-confirm"
                 >
                   {t('mem.handoff.confirm')}
                 </Button>
               )}
               {!over && (
-                <Button variant="ghost" onClick={() => void requestClose('cancel')} disabled={stopping} data-testid="handoff-cancel">
+                <Button variant="ghost" onClick={() => void requestClose('cancel')} disabled={stopping || cancelling} data-testid="handoff-cancel">
                   {t('mem.handoff.cancel')}
                 </Button>
               )}
               {canStop && (
-                <Button variant="danger" onClick={() => void stop(request.endForced)} disabled={stopping} data-testid="handoff-stop">
+                <Button variant="danger" onClick={() => void stop(request.endForced)} disabled={stopping || cancelling} data-testid="handoff-stop">
                   {t('mem.handoff.stop')}
                 </Button>
               )}
               {canForce && beforeConfirm && !request.endForced && (
-                <Button variant="danger" onClick={() => void stop(true)} disabled={stopping} data-testid="handoff-stop-now">
+                <Button variant="danger" onClick={() => void stop(true)} disabled={stopping || cancelling} data-testid="handoff-stop-now">
                   {t('mem.handoff.stopNow')}
                 </Button>
               )}

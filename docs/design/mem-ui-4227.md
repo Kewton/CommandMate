@@ -290,17 +290,32 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
   G はサーバから kill しない。期限・取り消し・古い依頼から kill に届く経路は無い（§4.6.1・§7.3）
 ```
 
-#### 4.1.1 ダイアログの閉じ方の規則（G-PR2 の pr2c、codex P2-1・B P3-3 を 1 つの規則に）
+#### 4.1.1 ダイアログの閉じ方の規則（G-PR2 の pr2c で入れ、pr2d で全経路の規則にした。PM の決定 `pm-return-4227-pr2c-codex.md`）
 
-ダイアログを閉じる入口は全部で、Esc・×・背景・「終了をやめる」・依頼が終わった後の「閉じる」・依頼を作れなかったときの「やめる」。どの入口も同じ 1 つの関数（`SessionHandoffDialog.tsx` の `handoffCloseBlock`）で判定し、閉じられないときは閉じず・取り消さず、理由を出す。
+**不変条件**：確定の送信中・結果不明の単位は、ダイアログを消すどの経路でも、人の選択（「同じ内容で送り直す」／「送り直さずにやめる」）なしに消えない。単位がある間はダイアログを閉じない。取り消しを始めた後は新しい確定を送らない。
 
-| 状態 | 判定 | 理由 |
+**規則は 1 つの関数**：`src/lib/handoff/close-rule.ts` の `handoffCloseBlock`（ダイアログが持つもの → 閉じられない理由）と、全経路が経路の名前を付けて呼ぶ `askHandoffClose(path)`。ダイアログは自分の持つもの（`stopping`・`sending`・`unknown`・`cancelling`）を `registerHandoffHold` で登録し、ページ（`useWorktreeDetailController.ts`）は同じ関数で読む。どちらにも規則の写しは無い。
+
+| 持つもの | 判定 | 理由 |
 |---|---|---|
-| 停止の途中（`end` の応答待ち → 既存の停止 → `end/observe`） | `stopping`：閉じない・取り消さない | 既存の確認と同じ（停止の要求中の取り消しは無視、Issue #1171）。閉じると停止の宣言の下で依頼を取り消す。`end` の応答の後に、閉じられた（ページが閉じた）なら既存の停止へ進まない |
-| 確定の送信中、または結果不明 | `unknown`：閉じない・取り消さない | 結果不明は人が「送り直す」か「送り直さずにやめる」を選ぶまで持つ（G-PR1 の規則）。送信中のものは結果不明で返りうるので同じに扱う |
-| それ以外 | 閉じる（「終了をやめる」・Esc・×・背景は開いた依頼を取り消してから） | — |
+| 停止の途中（`end` の応答待ち → 既存の停止 → `end/observe`） | `stopping` | 既存の確認と同じ（停止の要求中の取り消しは無視、Issue #1171）。`end` の応答の後に閉じられていたら既存の停止へ進まない |
+| 確定の送信中、または結果不明（この作業木のものも、ほかの作業木のものも） | `unknown` | 人が選ぶまで持つ（G-PR1 の規則）。送信中のものは結果不明で返りうるので同じに扱う |
+| 取り消しの応答待ち | `cancelling` | 応答で閉じる。その間に別の閉じ方を受けず、確定・停止・延長・載せ替えを送らない（`decide`・`simpleWrite`・`stop` が `cancellingRef`／`closedRef` を見る。ボタンも無効） |
+| 無し | 閉じる | — |
 
-ページの側がダイアログを閉じた（別の「終了」・作業木の切り替え）ときも、結果不明の確定は消さない。次に開いたときにも出し、同じ内容で送り直せる（ほかの作業木のものは出さない）。項目の画面の lock も持ち続ける。
+**経路**（`HANDOFF_CLOSE_PATHS`。ガード `tests/unit/guards/handoff-close-paths-4227.test.ts` が、ダイアログの `onClose` の呼び出しが `closeBy` の 1 か所だけ・ページの `setHandoffTarget(null)` が `closeHandoffBy` の 1 か所だけ・どちらも `askHandoffClose` を呼ぶ・`openHandoff` の前に `closeHandoffBy('page-end')`・単位を消す `keepPending(null)` は確定の応答と「やめる」の 2 か所だけ・呼び出しの経路名と宣言が一致、を確かめる。新しい経路を足して規則を通さないと落ちる）：
+
+| 経路 | どこ | 拒まれたとき |
+|---|---|---|
+| `person`：Esc・×・背景・「終了をやめる」・「閉じる」・「やめる」（plain） | ダイアログの `requestClose`／`closeBy` | 閉じず・取り消さず、理由を出す |
+| `cancel-answer`：取り消しの応答 | `requestClose` の await の後 | 閉じない（取り消しの後は確定を送らないので、通常は起きない） |
+| `plain-stop-done`：plain の停止が終わった後 | `plainStop` | 閉じず、「停止しました。選んでから閉じて」を出し、単位の欄を残す（codex pr2b P2 2） |
+| `worktree-switch`：作業木の切り替え | hook の `[worktreeId]` の effect | ダイアログは残り、**ほかの作業木の画面のもの**（`foreign`）として出す：依頼は元の作業木のまま、新しい依頼を作らず、停止・確定・延長・載せ替えは出さない（ページの停止はその作業木のため）。単位は「やめる」だけ押せる。元の作業木に戻ると送り直せる（A→B→A。codex pr2b P2 3・PM Claude pr2c P3-1） |
+| `page-end`：ページの別の「終了」 | hook の `openEnd` | 何も開かない（引き継ぎを差し替えず、plain の確認も出さない）。ダイアログに理由を出す。kill の要求中は引き継ぎを開かない（PM Claude pr2c P3-2 (b)） |
+| `dialog`：ダイアログが聞いた後に閉じる | hook の `closeHandoff` | ダイアログが既に聞いた後なので拒まれない（ページ側でもう一度聞く） |
+
+- 単位がある間も、この作業木の画面ではダイアログから既存の停止を押せる（閉じ込めない）。ほかの作業木の単位は表示し「送り直さずにやめる」だけ押せる（送り直しは無効、`handoff-pending-elsewhere`）。開き直しで単位を消さない。
+- 単位の寿命はダイアログ部品の状態（ページの部品は作業木の切り替えで作り直されない）。ページを離れる（部品が外れる）と単位も項目の画面の lock も外れるのは G-PR1 の項目の画面と同じ。MemItemsPanel 側の規則の文言・表と揃えるのは G-PR3。
 
 ### 4.2 依頼の文（Agent へ）
 
@@ -901,6 +916,22 @@ CREATE TRIGGER mem_handoff_requests_forced_sticky BEFORE UPDATE OF end_forced ON
 
 - 作らない：B P3-1（create の応答待ちの plain の停止、補正で外した）。範囲の外：B P3-2・P3-3 前半・P3-6、A P3-3〜P3-5、codex P3（#4289）。
 
+
+### 11.14 G-PR2 pr2c の再レビュー（codex `review-4227-pr2b.md` の P2 3 件・PM Claude `pm-review-4227-pr2c-claude.md` の P3-1・P3-2）と PM の決定（`pm-return-4227-pr2c-codex.md` の (a)）の処置
+
+同じ種類（結果不明 × 閉じ方・別の操作）が 2 回目なので、端ではなく §4.1.1 の不変条件と 1 つの関数にした。表の試験は `tests/unit/components/mem/SessionHandoffDialog-close-table-4227.test.tsx`（実の hook とダイアログを pages と同じに配線。経路 5 × 状態（送信中・結果不明・取り消し待ち）× 作業木（この作業木の画面・切り替えた後のほかの作業木の画面））。
+
+| 指摘 | 規則のどこで消えるか | 表の行（陽性：規則を外す `rule.off` か手の変異で落ちる／陰性） |
+|---|---|---|
+| codex P2 1：取り消しの応答待ちに確定を押せ、結果不明のまま閉じる | `cancelling` と、取り消しの開始後は `decide` を送らない（条件 4） | 経路 2「cancelling × being sent cannot arise」（確定・停止が送られない）。`decide` の照合とボタンの無効を外す変異で落ちる。陰性：確定の後の取り消しは送られて閉じる |
+| codex P2 2：plain の停止の後の自動 close が規則を迂回 | `plain-stop-done` が規則を通る | 経路 3 の sending・unknown（停止は走り、単位が残り、やめてから閉じる）。`rule.off` の行で閉じる。陰性：何も無ければ閉じる |
+| codex P2 3・PM Claude P3-1：別の作業木で開くと結果不明を消す | 開くときに消さない・`worktree-switch` が規則を通る・ほかの作業木の単位は「やめる」だけ | 経路 4 の 3 状態と「A → B → A」（B で送り直し無効・やめるは有効、A に戻ると同じ内容で送り直す）。`rule.off` の行で閉じる。ガードの「開くときに消す」変異。陰性：何も無ければ切り替えで閉じる |
+| PM Claude P3-2 (a)：ページ側の閉じ（別の「終了」・切り替え）が規則を通らない | `page-end`・`worktree-switch` | 経路 5 の 3 状態（差し替えず plain も出さず mode も読まない）・ほかの作業木の画面の行。`rule.off` の行で差し替わる |
+| PM Claude P3-2 (b)：kill の要求中に引き継ぎが開き 2 つ同時に | `openEnd` は kill の要求中に引き継ぎを開かない | 経路 5「a kill in flight」。照合を外す変異で落ちる |
+
+- 経路 1（人の閉じ方）は 3 状態とほかの作業木の画面の行、陰性つき。既存の pr2c の表（`SessionHandoffDialog-4227.test.tsx` の Esc・×・背景・「終了をやめる」× 停止中・送信中・結果不明）はそのまま通る。
+- MemItemsPanel 側は変えない（G-PR3 で規則の文言・表を揃える）。
+
 ---
 
 ## 12. 共通規則の全読者（G-PR1 の実装の後、5-2b の前に書いた）
@@ -915,6 +946,7 @@ G が使う共通の規則ごとに、規則を持つ 1 か所と、それを読
 | 遷移の表（`withdraw-recorded` を含む） | `src/lib/mem/transitions.ts` の `memTransition` | `mem-db.ts` の `updateMemItem`・`closeMemItem`・`closeMemItemByCondition`・`transitionDecision`・**`closeMemItemVersioned`**、`mem/evaluate.ts`。`withdraw-recorded` を渡すのは `memWriteFromScreen`（人・`confirmUnreflected:true`・`recorded` の決定）だけ（ガードで固定、CLI と提案の側に文字列が無い） | G-PR2［事実］：`src/lib/handoff/proposals.ts` の `checkProposal`・`handoffRebase` が `memTransition(kind, state, 'update'\|'close')` を読み、決定の `close` は `open` だけ（`recorded` は 409 `state_forbids`）。`withdraw-recorded` の文字列を持たない（ガード `mem-screen-write-4227`）。`memWriteFromScreen` は `withdraw-recorded` を `author:'human'` のときだけ選ぶ（承認の印で人として書く提案の確定でも選ばない） |
 | 版の照合（`ifVersion`） | store の各関数の transaction の中（`updateMemItem`・**`closeMemItemVersioned`**・`transitionDecision`） | 画面：`MemItemsPanel.tsx` が読んだ版を送り、409 で 3 つの値を並べる。試験：H3・H16(a) の行・部品の試験・e2e | G-PR2［事実］：`decide` は提案の `base_version` を `ifVersion` に渡し（項目の版）、依頼の版は `decide`・`rebase`・`extend`・`end` の `ifVersion`（`changeHandoffRequest` の版の条件）。試験：`handoff-entrances-4227.test.ts` の H3 の行・`handoff-flow-4227.test.ts` の H13(a)(b)・H18(a) |
 | 画面の 5 つの規則（§2.4.1） | `MemItemsPanel.tsx`（`editChanges`・`readSnapshot`・`pendings`（操作ごとの単位・`pendingSendable`）・`Closing.read`・比較と一覧に無い送り直しを出す単位の側 `mem-items-units`・単位が持つ表示（`draft`・`closing`）と項目ごとの比較（`conflicts`・`closeConflicts`）、規則 (4d)・送信中の `inflight` と書き込みを止める `lock`・`sendOne`、規則 (4e)）と `transitions.ts` の `memScreenActions` | 試験：`MemItemsPanel-screen-rules-4227.test.tsx`・`MemItemsPanel-write-lock-4227.test.tsx`（(4e) の表）・`MemItemsPanel-4227.test.tsx`・e2e `mem-ui-4227.spec.ts`。文書：`docs/user-guide/cli-operations-guide.md`・`docs/en/…` の「同時編集」「送り直し」「ボタン」 | G-PR2［事実］：`SessionHandoffDialog.tsx`（`decide` の単位：送信中 `inflight`・結果不明 `pending` を同じ要求のまま送り直す (4)、送るのは人が選んだ提案だけ (2)、版は読んだ依頼の版 (3)、送り直しの 409 は成功と読まず今の状態を出す (4c)）と、画面をまたぐ (4e) の共有の lock `src/components/mem/mem-write-lock.ts`（`MemItemsPanel.tsx` と `SessionHandoffDialog.tsx` の承認・捨てる・載せ替え・延長が同じ lock。知らせの引き取り・mode の設定・取り消し・停止は外、PM P3-3）。試験：`SessionHandoffDialog-4227.test.tsx`・`MemItemsPanel-write-lock-4227.test.tsx` の画面をまたぐ表と mode を off にした行 |
+| 引き継ぎのダイアログの閉じ方（§4.1.1、pr2d） | `src/lib/handoff/close-rule.ts` の `handoffCloseBlock`・`askHandoffClose`・`HANDOFF_CLOSE_PATHS`・`registerHandoffHold` | G-PR1 には読者が無い | G-PR2［事実］：`SessionHandoffDialog.tsx` の `closeBy`・`requestClose`・`plainStop`（`person`・`cancel-answer`・`plain-stop-done`）と登録、`useWorktreeDetailController.ts` の `closeHandoffBy`（`worktree-switch`・`page-end`・`dialog`）と `openEnd`。試験：`SessionHandoffDialog-close-table-4227.test.tsx`（経路 × 状態 × 作業木）・`SessionHandoffDialog-4227.test.tsx` の pr2c の表・ガード `handoff-close-paths-4227`。文書：ja/en の `cli-operations-guide.md` の「引き継ぎの終わり方」。G-PR3：MemItemsPanel の (4e) の文言・表と揃える |
 | 人が書いた項目は人だけが変える・閉じる（D6） | `mem-db.ts` の `ownedBy`（`createdBy='human'` かつ `now` でない項目は `actor.by='agent'` に偽） | 書き手：`updateMemItem`・`closeMemItem`・`closeMemItemVersioned`（Agent の入口 `memUpdateItem`・`memCloseItem`、`memWriteFromScreen` の `author:'agent'`）。条件の close（`closeMemItemByCondition`）は読まない（誰の項目も閉じる）。試験：`write-entrances-recreate-4221.test.ts` の D6 の表。文書：ja/en の「人が書いた項目」・画面の `limits`・`refusal.not_owner` | G-PR2［事実］（PM P3-a）：`memWriteFromScreen` の `approval`（`decide` だけが渡す印）。印は `handoff-db.ts` の `approvalMarkHolds` がサーバーの行だけで判定する（提案が同じ `apply_token` で `approved`・承認した指紋 `approved_fingerprint` が今の列から計算し直した指紋と同じ・同じ op と項目・依頼が `applying`・同じ作業木と instance）。通れば `update`・`close` の書き手は `human`（人の項目も変えられる）、`add` は Agent のまま（U6）。書き込みと同じ transaction で `consumeApprovalMark` が `applied` にする（1 回だけ）。印が通らなければ 409 `not_approved`。印の無い proposer は Agent として書く（人の項目は `not_owner`）。試験：`write-entrances-recreate-4221.test.ts` の D6 の表の 4 行（承認済みの確定・承認の無い proposer・承認の後に内容が変わった提案・使用済みの承認での 2 回目）と印の照合を外す変異の対照、1 回だけの対照 |
 | 本番 DB を守る（試験・vitest・verify） | 各契約の前提（`export CM_DB_PATH=$PWD/data/test.db` を先に） | G の試験はすべて `os.tmpdir()` の一時 DB（`openMigratedFileDb`）を開き、本番の DB を開かない。e2e は API を stub し、サーバを起動しない | G-PR2［事実］：`tests/unit/lib/handoff/handoff-harness.ts` が `os.tmpdir()` の一時 DB を開く。observe の route の試験は `:memory:`。G-PR3 も同じ |
 | 古さ（`stale`） | `src/lib/mem/staleness.ts` の `memItemStaleness`（`present.ts` が一覧の `stale` に入れる） | 画面は一覧の `stale` を出すだけで計算しない（`MemItemsPanel.tsx`） | F（#4226）の促し・G-PR3 の preview |

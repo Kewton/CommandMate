@@ -794,6 +794,10 @@
       },
       "closeWhileStopping": "The stop is in progress. This cannot be closed (or the end cancelled) until it finishes.",
       "closeWhileUnknown": "A confirmation is being sent or its result is unknown. Send it again or drop it before closing.",
+      "closeWhileCancelling": "The end is being cancelled. This cannot be closed, and no confirmation is sent, until it is answered.",
+      "pendingElsewhere": "This confirmation is for worktree {worktree}. To send it again, open this on that worktree (here it can only be dropped).",
+      "foreign": "This dialog is the hand-off before ending on worktree {worktree}. Nothing can be stopped or confirmed on this worktree; go back to that worktree to go on.",
+      "plainStopped": "Stopped. Send the confirmation whose result is unknown again, or drop it, before closing.",
       "field": {
         "label": {
           "text": "Text",
