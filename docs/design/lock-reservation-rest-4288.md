@@ -164,7 +164,7 @@ for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {   //
 | 案 | 中身 | 評価 |
 |---|---|---|
 | 3A 開始時刻からの実時間の期限だけ | `deps.now()` で `/clear` の後の時刻を取り、期限を過ぎたら止める | 1 回の `ls` が長いと、最後の 1 回のぶん（最大 300 秒）超える |
-| **3B 3A＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る（採用）** | 期限 `deadline = start + READY_TIMEOUT_MS`。各周回で `sleep(min(READY_POLL_MS, 残り))` → 残りが 0 なら止める → `ls` は `timeout = max(1 秒, 残り)` で実行。回数の上限 `READY_TIMEOUT_MS / READY_POLL_MS`（18 回）も残す | 実時間の上限が「90 秒＋1 秒程度」になる。回数の上限は、時計を固定した既存の試験（`tests/unit/scripts/agent-health/dispatch.test.ts:243-249`、`now` が固定）が止まるために要る |
+| **3B 3A＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る（採用）** | 期限 `deadline = start + READY_TIMEOUT_MS` は**単調増加の時計**（`deps.monotonic`、既定 `performance.now()`）で数え、記録用の壁時計 `deps.now` と分ける（壁時計が戻っても上限が外れない）。各周回で `sleep(min(READY_POLL_MS, 残り))` → **sleep の後にも**残りを照合し 0 以下なら `ls` へ進まず止める → `ls` は `timeout = max(1 秒, 残り)`（残りは 90 秒以下）で実行。回数の上限 `READY_TIMEOUT_MS / READY_POLL_MS`（18 回）も残す | 実時間の上限が「90 秒＋1 秒程度」になる。回数の上限は、時計を固定した既存の試験（`tests/unit/scripts/agent-health/dispatch.test.ts:243-249`、`now` が固定）が止まるために要る |
 | 3C 直さず文面だけ「19 回」に | — | 不採用。実時間の上限が無いままになる |
 
 `Exec` の型（`dispatch-main.ts:69`）に省略できる第 3 引数 `{ timeoutMs?: number }` を足し、`defaultExec` は `spawnSync` の `timeout` に使う（無ければ今の 300 秒）。既存の試験の stub は第 3 引数を無視するので変わらない。`readState` は ready 待ちの中だけ timeout 付きで呼ぶ（`checkState` など他の `ls` は今のまま）。timeout で切れた `ls` は `status: null` → `judgeAgentState(undefined)` → `unknown` で、ready ではないので待ちを続ける（今の `unknown` の扱いと同じ）。
@@ -207,17 +207,17 @@ for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {   //
 | 案 | 中身 | 評価 |
 |---|---|---|
 | 4A `reserve --no-state-check`（状態確認を省くだけ） | 誰でも省ける | 不採用。PM が claude-3 の busy を無視して予約できてしまい、#4243 の「処理中の claude-3 を予約しない」が崩れる |
-| **4B `reserve --self`（採用）** | `commandmate whoami --json` の `worktreeId`／`instanceId` が予約の送り先（`RESERVATION_TARGET`、`claude3-reservation.ts:50-54`）と一致するときだけ通す。状態確認（`claude3Free`）は省く（呼び手が claude-3 なので busy なのは自分）。持ち主は新しい値 `leader`、token は `leader-<時刻>-<乱数>` | claude-3 の中からしか通らない。予約が `held` なら今どおり exit 3（dispatch の run の中の claude-3 は自分では取れない＝取る必要が無い） |
+| **4B `reserve --self`（採用）** | `commandmate whoami --json` の `worktreeId`／`instanceId`／`cliToolId` が予約の送り先（`RESERVATION_TARGET`、`claude3-reservation.ts:50-54`）と一致するときだけ通す。状態確認（`claude3Free`）は省く（呼び手が claude-3 なので busy なのは自分）。持ち主は新しい値 `leader`、token は `leader-<時刻>-<乱数>` | claude-3 の中からしか通らない。予約が `held` なら今どおり exit 3（dispatch の run の中の claude-3 は自分では取れない＝取る必要が無い） |
 | 4C PM が代わりに取る（今の手順のまま。直さない） | — | 不採用。PM を通さない run が守られない |
 
-`whoami` は認証ではない（環境変数で偽れる）。予約の token も秘密ではない（#4243 §3.4）。4B の確認は「PM が誤って `--self` を使う」事故を止めるためのもの（見立て）。
+`whoami` は認証ではない（環境変数で偽れる）。予約の token も秘密ではない（#4243 §3.4）。4B の確認は「PM が誤って `--self` を使う」事故を止めるためのもの（見立て）。判定は dispatch の `judgeAgentState` と同じ 3 つ（worktree・インスタンス・cliTool＝`claude`）で、roster で claude-3 が別の tool のときは取れない（exit 2）。
 
 ### 3.4 規則
 
 | 操作 | 通る条件 | 作る世代 |
 |---|---|---|
 | `reserve --self --label <s> [--hours 1-24]` | whoami が `mycodebranchdesk`／`claude-3`（exit 0 かつ JSON が読める）・予約が `released` | `held`・`holder: 'leader'`・新しい token（標準出力） |
-| whoami が別のインスタンス・失敗（セッション外の exit 3 を含む） | — | 何も作らず **exit 2**（「--self は claude-3 の中からだけ使える」） |
+| whoami が別のインスタンス・別の tool（roster で claude-3 が codex 等）・失敗（セッション外の exit 3 を含む） | — | 何も作らず **exit 2**（「--self は claude-3 の中からだけ使える」） |
 | `send --token <leader の token>` | — | 今どおり exit 3（`beginSend(…, 'pm')`、`claude3-reservation.ts:477-487`。claude-3 は自分へ送らない） |
 | `renew`／`release --token` | token の一致（今のまま） | 今のまま |
 | `takeover --reason restart` | `holder: 'pm'` だけ（今のまま） | claude-3 は `/clear` の後も `status` で token を読み `release --token` で外せるので、引継ぎは足さない |

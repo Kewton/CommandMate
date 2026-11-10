@@ -9,7 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { main, READY_TIMEOUT_MS, type Exec } from '../../../../scripts/agent-health/dispatch-main';
+import { main, READY_POLL_MS, READY_TIMEOUT_MS, type Exec } from '../../../../scripts/agent-health/dispatch-main';
 
 let root: string;
 let lines: string[];
@@ -17,6 +17,7 @@ let clock: number;
 let clearAt: number | null;
 let lsCalls: Array<{ at: number; timeoutMs: number | undefined }>;
 let sent: string[][];
+let sleeps: Array<{ at: number; ms: number }>;
 
 const READY = { isRunning: true, isProcessing: false, isWaitingForResponse: false };
 const BUSY = { isRunning: true, isProcessing: true, isWaitingForResponse: false, sessionStatusReason: 'thinking_indicator' };
@@ -29,6 +30,7 @@ beforeEach(() => {
   clearAt = null;
   lsCalls = [];
   sent = [];
+  sleeps = [];
 });
 
 afterEach(() => {
@@ -74,13 +76,28 @@ function world(opts: { lsMs: number; after: (n: number) => Record<string, unknow
   };
 }
 
-async function run(exec: Exec, virtual = true): Promise<number> {
+interface RunOptions {
+  virtual?: boolean;
+  /** Replaces the default virtual sleep (which adds `ms` to the clock). */
+  sleep?: (ms: number) => Promise<void>;
+  /** The record's wall clock; default is the virtual clock. The deadline must not follow it. */
+  wall?: () => number;
+  /** Inject a monotonic clock (the virtual clock). Default: only `now` is injected. */
+  monotonic?: boolean;
+}
+
+async function run(exec: Exec, opts: RunOptions = {}): Promise<number> {
+  const virtual = opts.virtual ?? true;
   return main(['--state-dir', path.join(root, 'state')], {
     exec,
-    sleep: async (ms) => {
-      if (virtual) clock += ms;
-    },
-    now: () => new Date(clock),
+    sleep:
+      opts.sleep ??
+      (async (ms) => {
+        sleeps.push({ at: clock, ms });
+        if (virtual) clock += ms;
+      }),
+    now: () => new Date(opts.wall ? opts.wall() : clock),
+    ...(opts.monotonic ? { monotonic: () => clock } : {}),
     env: {} as NodeJS.ProcessEnv,
     homedir: path.join(root, 'home'),
     repoRoot: path.join(root, 'repo'),
@@ -112,10 +129,10 @@ describe('dispatch: the ready wait after /clear is bounded by real time (#4288)'
   });
 
   it('with a frozen clock still stops by the count cap, with the same exit and message', async () => {
-    const code = await run(world({ lsMs: 0, after: () => BUSY }), false);
+    const code = await run(world({ lsMs: 0, after: () => BUSY }), { virtual: false });
     expect(code).toBe(2);
-    expect(lsCalls.length).toBeLessThanOrEqual(19);
-    expect(lsCalls.length).toBeGreaterThan(0);
+    // READY_TIMEOUT_MS / READY_POLL_MS polls, not one more (pins `<` against `<=`)
+    expect(lsCalls.length).toBe(READY_TIMEOUT_MS / READY_POLL_MS);
     expect(lines.join('\n')).toContain('/clear の後 90 秒で Claude 3 が入力待ちに戻らなかった');
   });
 
@@ -124,5 +141,59 @@ describe('dispatch: the ready wait after /clear is bounded by real time (#4288)'
     expect(code).toBe(0);
     expect(sent.map((a) => a[2])).toEqual(['/clear', expect.stringContaining('dispatch-terms')]);
     expect(lsCalls.length).toBe(2);
+  });
+
+  it('never sleeps for zero or a negative time, and never past the deadline (ls 10s and ls 3s)', async () => {
+    for (const lsMs of [10_000, 3_000, 7_000]) {
+      sleeps = [];
+      lsCalls = [];
+      clock = START;
+      await run(world({ lsMs, after: () => BUSY }));
+      expect(sleeps.length).toBeGreaterThan(1);
+      for (const s of sleeps) {
+        expect(s.ms).toBeGreaterThan(0);
+        expect(s.ms).toBeLessThanOrEqual(5_000);
+        expect(s.at + s.ms).toBeLessThanOrEqual((clearAt as number) + READY_TIMEOUT_MS);
+      }
+      expect(clock - (clearAt as number)).toBeLessThanOrEqual(READY_TIMEOUT_MS + 1_000);
+    }
+  });
+
+  it('with a monotonic clock, a wall clock that jumps back an hour does not stretch the wait (positive control)', async () => {
+    const code = await run(world({ lsMs: 300_000, after: () => BUSY }), {
+      monotonic: true,
+      wall: () => (clearAt === null ? clock : clock - 3_600_000),
+    });
+    expect(code).toBe(2);
+    expect(lsCalls.length).toBeGreaterThan(0);
+    for (const call of lsCalls) {
+      expect(call.timeoutMs as number).toBeLessThanOrEqual(READY_TIMEOUT_MS);
+    }
+    expect(clock - (clearAt as number)).toBeLessThanOrEqual(READY_TIMEOUT_MS + 1_000);
+    expect(sent.map((a) => a[2])).toEqual(['/clear']);
+  });
+
+  it('a wall clock that jumps forward does not cut the wait short either (negative control)', async () => {
+    const code = await run(world({ lsMs: 0, after: (n) => (n >= 4 ? READY : BUSY) }), {
+      monotonic: true,
+      wall: () => (clearAt === null ? clock : clock + 3_600_000),
+    });
+    expect(code).toBe(0);
+    expect(sent.map((a) => a[2])).toEqual(['/clear', expect.stringContaining('dispatch-terms')]);
+  });
+
+  it('a sleep that returns after the deadline stops the wait: no ls, no request even though claude-3 is ready (positive control)', async () => {
+    let late = false;
+    const code = await run(world({ lsMs: 0, after: () => READY }), {
+      monotonic: true,
+      sleep: async (ms) => {
+        // the first sleep after /clear returns 200 s late (a suspended process)
+        clock += clearAt !== null && !late ? ((late = true), 200_000) : ms;
+      },
+    });
+    expect(code).toBe(2);
+    expect(lines.join('\n')).toContain('/clear の後 90 秒で Claude 3 が入力待ちに戻らなかった');
+    expect(lsCalls).toEqual([]);
+    expect(sent.map((a) => a[2])).toEqual(['/clear']);
   });
 });

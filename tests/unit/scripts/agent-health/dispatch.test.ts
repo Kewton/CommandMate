@@ -465,7 +465,7 @@ describe('dispatch main under the claude-3 reservation (#4243)', () => {
     expect(current().state).toBe('released');
   });
 
-  it('positive: a slow state check (300 s each, over 30 min in total) does not end the reservation', async () => {
+  it('positive: a slow first state check (31 min) does not end the reservation', async () => {
     let pmCode: boolean | null = null;
     // Issue #4288: the ready wait after /clear is now bounded to 90 s of real time, so the slow
     // part is the first state check (31 min); the later ones are instant.

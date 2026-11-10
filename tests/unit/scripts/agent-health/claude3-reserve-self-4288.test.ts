@@ -122,6 +122,8 @@ describe('reserve --self (#4288)', () => {
 
   it.each([
     ['PM (claude)', { status: 0, stdout: JSON.stringify({ worktreeId: 'mycodebranchdesk', instanceId: 'claude', cliToolId: 'claude' }) }],
+    ['claude-3 slot running another tool (codex)', { status: 0, stdout: JSON.stringify({ worktreeId: 'mycodebranchdesk', instanceId: 'claude-3', cliToolId: 'codex' }) }],
+    ['claude-3 without a cliToolId', { status: 0, stdout: JSON.stringify({ worktreeId: 'mycodebranchdesk', instanceId: 'claude-3' }) }],
     ['another worktree', { status: 0, stdout: JSON.stringify({ worktreeId: 'other', instanceId: 'claude-3', cliToolId: 'claude' }) }],
     ['outside a session (exit 3)', { status: 3, stdout: '' }],
     ['unreadable JSON', { status: 0, stdout: 'not json' }],
@@ -136,6 +138,14 @@ describe('reserve --self (#4288)', () => {
     expect(held.ok).toBe(true);
     expect(await run(['reserve', '--self', '--label', 'x'])).toBe(3);
     expect(current()).toMatchObject({ holder: 'dispatch' });
+  });
+
+  it('exits 3 and keeps the generation when PM already holds it', async () => {
+    const held = acquireReservation({ dir: resDir(), now: () => new Date(NOW), pid: 7, isAlive: () => true }, { holder: 'pm', label: 'p' });
+    expect(held.ok).toBe(true);
+    const before = current();
+    expect(await run(['reserve', '--self', '--label', 'x'])).toBe(3);
+    expect(current()).toMatchObject({ holder: 'pm', token: before.token, generation: before.generation });
   });
 
   it('send --token <leader token> exits 3 and sends nothing (claude-3 does not send to itself)', async () => {

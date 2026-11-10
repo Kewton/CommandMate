@@ -272,8 +272,13 @@ function callerIsClaude3(deps: ReserveDeps): boolean {
   const result = deps.exec('commandmate', ['whoami', '--json']);
   if (result.status !== 0) return false;
   try {
-    const who = JSON.parse(result.stdout) as { worktreeId?: unknown; instanceId?: unknown };
-    return who.worktreeId === RESERVATION_TARGET.worktreeId && who.instanceId === RESERVATION_TARGET.instanceId;
+    const who = JSON.parse(result.stdout) as { worktreeId?: unknown; instanceId?: unknown; cliToolId?: unknown };
+    // The same three-way match as dispatch's judge: a claude-3 slot that holds another tool is not the leader.
+    return (
+      who.worktreeId === RESERVATION_TARGET.worktreeId &&
+      who.instanceId === RESERVATION_TARGET.instanceId &&
+      who.cliToolId === RESERVATION_TARGET.cliTool
+    );
   } catch {
     return false;
   }

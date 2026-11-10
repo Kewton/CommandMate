@@ -72,6 +72,12 @@ export interface DispatchDeps {
   exec: Exec;
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
+  /**
+   * Monotonic milliseconds for deadlines (Issue #4288). `now` is the record's wall
+   * clock and may jump back; deadlines are counted here. Default: `performance.now()`
+   * — or, when only `now` is injected (a test), `now` itself.
+   */
+  monotonic?: () => number;
   env: NodeJS.ProcessEnv;
   homedir: string;
   /** The repository this runs in; the terms file goes under its `workspace/`. */
@@ -120,6 +126,7 @@ function defaultDeps(): DispatchDeps {
     exec: defaultExec,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => new Date(),
+    monotonic: () => performance.now(),
     env: process.env,
     homedir: os.homedir(),
     repoRoot: path.resolve(__dirname, '..', '..'),
@@ -209,6 +216,8 @@ function json(deps: DispatchDeps, command: string, args: string[], options?: { t
 
 export async function main(argv: readonly string[], overrides: Partial<DispatchDeps> = {}): Promise<number> {
   const deps: DispatchDeps = { ...defaultDeps(), ...overrides };
+  // A test that injects only `now` (a virtual clock) counts deadlines on it too.
+  if (overrides.now && !overrides.monotonic) deps.monotonic = () => overrides.now!().getTime();
   const parsed = parseDispatchArgs(argv);
   if (!parsed.ok) {
     if (parsed.help) {
@@ -440,13 +449,16 @@ async function dispatch(
     // Issue #4288: the limit is real time from here (not the sum of the sleeps), the
     // count is capped (a frozen clock still stops), and one `ls` may not outlive the deadline.
     let ready = false;
-    const deadline = deps.now().getTime() + READY_TIMEOUT_MS;
+    const mono = deps.monotonic ?? (() => deps.now().getTime());
+    const deadline = mono() + READY_TIMEOUT_MS;
     for (let polls = 0; polls < READY_TIMEOUT_MS / READY_POLL_MS; polls++) {
-      const untilDeadline = deadline - deps.now().getTime();
+      const untilDeadline = deadline - mono();
       if (untilDeadline <= 0) break;
       await deps.sleep(Math.min(READY_POLL_MS, untilDeadline));
-      const timeoutMs = Math.max(1_000, deadline - deps.now().getTime());
-      if (readState({ timeoutMs }).kind === 'ready') {
+      // A sleep that returned late may have crossed the deadline: no more `ls`.
+      const left = deadline - mono();
+      if (left <= 0) break;
+      if (readState({ timeoutMs: Math.max(1_000, left) }).kind === 'ready') {
         ready = true;
         break;
       }
