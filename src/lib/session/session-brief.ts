@@ -105,8 +105,9 @@ export class BriefChoiceAbortedError extends Error {
 /**
  * Issue #4227 (S-B, design §3.2 — the final reading's invariant, pr3d): what the plan left a
  * strict choice (`full` / `decline`) with. None of these decides the shown row: whichever it is,
- * {@link SendBrief.claim} reads the instance's current row again first, under the input lock right
- * before the body, and only then acts on it. A new outcome is added here and in the claim's
+ * {@link SendBrief.claim} holds the instance's current row to one predicate first (pr3e: the same
+ * conditions for every outcome — identity, state, worktree / instance, settings), under the input
+ * lock right before the body, and only then acts on it. A new outcome is added here and in the claim's
  * exhaustive switch (the table test `session-brief-final-reading-4227` builds its rows from this list).
  *
  *  - `planned` — the brief (`full`) or the reservation (`decline`) is ready to be claimed;
@@ -391,6 +392,14 @@ interface Plan {
   decline: boolean;
 }
 
+/** Issue #4227 (pr3e): what a strict plan read, for the final reading's one predicate. */
+interface StrictSeen {
+  /** The shown row as the plan read it: still `pending`, or used up (`sent`・`skipped`・`unknown`). */
+  state: 'pending' | 'used_up';
+  membershipKey: string;
+  worktreeIncarnation: string;
+}
+
 /** What the plan's synchronous stretch decided: a target to build for, and the worktree incarnation. */
 interface PlanDecision {
   target: Extract<MemTarget, { ok: true }> & { mode: Exclude<MemMode, 'off'> };
@@ -443,6 +452,13 @@ export class SendBrief {
    * the claim reads the current row again first, whatever this is (design §3.2).
    */
   private strictPlan: Extract<StrictPlanOutcome, 'used_up' | 'empty' | 'slash_command'> | null = null;
+  /**
+   * Issue #4227 (S-B, pr3e): what the plan of a strict choice read — the shown row's state (still
+   * `pending`, or used up), the membership and settings it was read under, and the worktree
+   * incarnation — for every outcome but `refused`. The final reading ({@link finalReading}) holds
+   * the instance's current row to all of it, whichever the outcome.
+   */
+  private strictSeen: StrictSeen | null = null;
 
   /**
    * Issue #4227 (pr3d): the plan's outcome for a strict choice — decided by none of it. A way out of
@@ -607,8 +623,8 @@ export class SendBrief {
       return;
     }
     // A command with words in front of it is no command (a reset still opens its row, step 3).
-    if (isSlashCommandBody(content)) {
-      if (this.strict) this.strictPlan = 'slash_command';
+    const slash = isSlashCommandBody(content);
+    if (slash && !this.strict) {
       if (mode !== 'auto') this.report = { state: 'skipped', reason: 'slash_command' };
       return;
     }
@@ -625,6 +641,8 @@ export class SendBrief {
     }
     let boundary: PlannedBoundary;
     let lifetime: InstanceLifetime;
+    // pr3e: the shown row's state as a strict plan read it (the final reading's condition).
+    let seenState: StrictSeen['state'] = 'pending';
     try {
       // Before any read a write follows (D2 design §2.4 W3): not for a worktree made again.
       if (this.continuity(db) === 'changed') return this.worktreeChanged(null);
@@ -661,11 +679,14 @@ export class SendBrief {
           this.refuse('claimed');
           return;
         }
-        if (current.state !== 'pending') {
-          // pr3c (codex P2-1): not decided here — the claim's final reading decides (pr3d).
-          this.strictPlan = 'used_up';
+        // pr3e: whatever the outcome (a command, used up, to be briefed), the plan reads what the
+        // final reading holds the row to — the row's instance, the membership and the settings.
+        if (!this.rowOfPinnedIncarnation(current)) {
+          this.refuse('incarnation_changed');
           return;
         }
+        // pr3c (codex P2-1): used up is not decided here — the claim's final reading decides (pr3d).
+        seenState = current.state === 'pending' ? 'pending' : 'used_up';
       }
       const usable =
         current !== null &&
@@ -677,7 +698,9 @@ export class SendBrief {
         this.skip(current.id, 'incarnation_changed', 'plan.dead-row');
         return;
       }
-      if (usable && current) {
+      if (this.strict && current) {
+        boundary = { id: current.id, kind: current.kind, late: current.late, openedAt: current.openedAt, existing: true };
+      } else if (usable && current) {
         boundary = { id: current.id, kind: current.kind, late: current.late, openedAt: current.openedAt, existing: true };
       } else if (mode === 'force') {
         boundary = { id: randomUUID(), kind: 'explicit', late: false, openedAt: Date.now(), existing: false };
@@ -707,6 +730,19 @@ export class SendBrief {
     }
     if (!decided) return;
     const { target, worktreeIncarnation } = decided;
+    if (this.strict) {
+      // pr3e: the plan's reading, for the one predicate of the final reading (design §3.2).
+      this.strictSeen = { state: seenState, membershipKey: membershipKey(target), worktreeIncarnation };
+      if (slash) {
+        this.strictPlan = 'slash_command';
+        if (mode !== 'auto') this.report = { state: 'skipped', reason: 'slash_command' };
+        return;
+      }
+      if (seenState === 'used_up') {
+        this.strictPlan = 'used_up';
+        return;
+      }
+    }
 
     const provider = getBriefProvider();
     if (mode === 'decline') {
@@ -840,36 +876,9 @@ export class SendBrief {
    * Answers the text to type — the brief in front of the body, or the body alone.
    */
   async claim(): Promise<string> {
-    // Issue #4227 (S-B, design §3.2, pr3d — the invariant): a strict choice reads the instance's
-    // current row again first, whatever the plan found; only then does the plan's outcome count.
-    if (this.strict) {
-      const current = this.finalReading();
-      if (this.aborted) throw this.aborted;
-      const outcome: StrictPlanOutcome = this.strictOutcome() ?? 'refused';
-      switch (outcome) {
-        case 'refused':
-          this.refuse('claim_failed');
-          throw this.aborted!;
-        case 'slash_command':
-          return this.input.content;
-        case 'used_up':
-          this.usedUpInFinalReading(current!);
-          if (this.aborted) throw this.aborted;
-          return this.input.content;
-        case 'empty':
-          this.emptyInFinalReading(current!);
-          if (this.aborted) throw this.aborted;
-          return this.input.content;
-        case 'planned':
-          break;
-        default: {
-          const unknownOutcome: never = outcome;
-          throw new Error(`unknown plan outcome: ${String(unknownOutcome)}`);
-        }
-      }
-    }
-    // Issue #4227 (S-B): a strict choice the plan stopped is thrown before anything is typed.
-    if (this.aborted) throw this.aborted;
+    // Issue #4227 (S-B, design §3.2, pr3d/pr3e — the invariant): a strict choice is read again by
+    // the one predicate first, whatever the plan found; only then does the plan's outcome count.
+    if (this.strict) return this.claimStrict();
     const plan = this.planned;
     const db = this.db;
     if (!plan || !db) return this.input.content;
@@ -880,66 +889,121 @@ export class SendBrief {
       );
     } catch (error) {
       this.warn('session-brief-claim-failed', error);
-      if (!this.strict) return this.input.content;
-      // Issue #4227 (S-B, design §3.2 (2)): the stretch threw. A row already claimed goes back
-      // to `pending` (not used up), and the send stops before any key.
-      this.unclaim(db, plan);
-      this.refuse('claim_failed');
-      throw this.aborted!;
+      return this.input.content;
     }
-    if (this.aborted) throw this.aborted;
-    if (body === null || plan.decline) return this.input.content;
+    if (body === null) return this.input.content;
     return body + BRIEF_SEPARATOR + this.input.content;
   }
 
   /**
-   * Issue #4227 (S-B, design §3.2, pr3d — the invariant): a strict choice's final reading, the
-   * first thing its claim does whatever the plan found. Under the input lock, right before the
-   * body: the shown row must still be the instance's current one — another current row (a reset or
-   * a relaunch while the lock was waited for) is `superseded`, a read that throws `claim_failed`;
-   * nothing typed. Answers the current row for the plan's outcome to act on. Reads only.
+   * Issue #4227 (S-B, design §3.2 — the final reading, pr3e): a strict choice's claim. Under the
+   * input lock, right before the body, in one synchronous stretch of `withMemTarget`: the one
+   * predicate ({@link finalReading}) first, for every plan outcome; the outcomes differ only in
+   * what they type once it holds. Answers the text to type, or throws the abort (nothing typed).
    */
-  private finalReading(): { id: string; state: BoundaryState } | null {
+  private async claimStrict(): Promise<string> {
     const db = this.db;
     if (!db) {
       this.refuse('claim_failed');
-      return null;
+      throw this.aborted!;
     }
+    const outcome: StrictPlanOutcome = this.strictOutcome() ?? 'refused';
+    let typedText: string | null;
     try {
-      const current = getCurrentBoundary(db, this.input.worktreeId, this.input.instanceId);
-      if (!current || current.id !== this.input.boundaryId || current.state === 'superseded') {
-        this.refuse('superseded');
-        return null;
-      }
-      return { id: current.id, state: current.state };
+      typedText = await withMemTarget(db, { via: 'worktree', worktreeId: this.input.worktreeId }, memTargetDepsOverride ?? {}, (target) => {
+        const current = this.finalReading(db, target);
+        if (!current) return null;
+        switch (outcome) {
+          case 'refused':
+            this.refuse('claim_failed');
+            return null;
+          case 'slash_command':
+            return this.input.content;
+          case 'used_up':
+            this.report = { state: 'consumed', boundaryId: current.id };
+            return this.input.content;
+          case 'empty':
+            // Nothing to attach: the shown row is used up as `empty` here (as `auto` does at its plan).
+            this.skip(current.id, 'empty', 'claim.consume');
+            return this.input.content;
+          case 'planned': {
+            const plan = this.planned!;
+            const brief = this.claimInStretch(db, plan, target);
+            if (brief === null || plan.decline) return this.input.content;
+            return brief + BRIEF_SEPARATOR + this.input.content;
+          }
+          default: {
+            const unknownOutcome: never = outcome;
+            throw new Error(`unknown plan outcome: ${String(unknownOutcome)}`);
+          }
+        }
+      });
     } catch (error) {
       this.warn('session-brief-claim-failed', error);
+      // Issue #4227 (S-B, design §3.2 (2)): the stretch threw. A row already claimed goes back
+      // to `pending` (not used up), and the send stops before any key.
+      if (this.planned) this.unclaim(db, this.planned);
+      this.refuse('claim_failed');
+      throw this.aborted!;
+    }
+    if (this.aborted) throw this.aborted;
+    return typedText ?? this.input.content;
+  }
+
+  /**
+   * Issue #4227 (S-B, design §3.2 — the final reading's one predicate, pr3e). Every plan outcome of
+   * a strict choice is held to all of it; the first condition that fails is the abort's reason:
+   *  1. the worktree it belongs to: the pinned worktree is still the one found, with the incarnation
+   *     the plan read (`worktree_changed`);
+   *  2. the settings: the membership resolves, and its mode, `injectOnStart` and membership are what
+   *     the plan read (`off`, `disabled`, otherwise `settings_changed`);
+   *  3. the identity: the shown row is the instance's current row and not `superseded` (`superseded`);
+   *  4. the instance it belongs to: the instance is the lifetime the entrance pinned, and the row is
+   *     that lifetime's (`incarnation_changed`);
+   *  5. the state: as the plan read it — `pending` still `pending`, used up still used up; held by
+   *     another send's claim, or taken meanwhile: `claimed`; back to `pending`: `superseded`.
+   * A plan's abort is kept (the first reason wins). Reads only; answers the current row, or null.
+   */
+  private finalReading(db: Database.Database, target: MemTarget): { id: string; state: BoundaryState } | null {
+    if (this.aborted) return null;
+    const seen = this.strictSeen;
+    const pin = this.pin;
+    if (!seen || !pin) {
       this.refuse('claim_failed');
       return null;
     }
-  }
-
-  /**
-   * pr3c: the plan found the shown row used up. Still used up → the body alone (`consumed`);
-   * held by another send's claim → `claimed`. Writes nothing.
-   */
-  private usedUpInFinalReading(current: { id: string; state: BoundaryState }): void {
-    if (current.state === 'pending') this.refuse('superseded');
-    else if (current.state === 'claimed') this.refuse('claimed');
-    else this.report = { state: 'consumed', boundaryId: current.id };
-  }
-
-  /**
-   * pr3d (codex P2): `full`'s brief came out empty. The shown row still `pending` → used up as
-   * `empty` here (as `auto` does at its plan) and the body alone; taken by another send meanwhile
-   * (claimed or used up) → `claimed`, the safe side of §11.22 #15.
-   */
-  private emptyInFinalReading(current: { id: string; state: BoundaryState }): void {
-    if (current.state !== 'pending') {
-      this.refuse('claimed');
-      return;
+    const { worktreeId, instanceId, cliToolId } = this.input;
+    if (this.continuity(db) !== 'same' || getWorktreeIncarnation(db, worktreeId) !== seen.worktreeIncarnation) {
+      this.refuse('worktree_changed');
+      return null;
     }
-    this.skip(current.id, 'empty', 'claim.consume');
+    if (!target.ok || membershipKey(target) !== seen.membershipKey) {
+      this.refuse(target.ok && target.mode === 'off' ? 'off' : target.ok && !target.features.injectOnStart ? 'disabled' : 'settings_changed');
+      return null;
+    }
+    const current = getCurrentBoundary(db, worktreeId, instanceId);
+    if (!current || current.id !== this.input.boundaryId || current.state === 'superseded') {
+      this.refuse('superseded');
+      return null;
+    }
+    const now = readInstanceLifetime(db, worktreeId, instanceId);
+    if (
+      !sameInstanceLifetime(pin.instance, now, cliToolId) ||
+      !sameInstanceLifetime({ incarnation: current.instanceIncarnation, onRoster: current.onRoster }, now, cliToolId)
+    ) {
+      this.refuse('incarnation_changed');
+      return null;
+    }
+    const usedUp = current.state !== 'pending';
+    if (current.state === 'claimed' || (seen.state === 'pending' && usedUp)) {
+      this.refuse('claimed');
+      return null;
+    }
+    if (seen.state === 'used_up' && !usedUp) {
+      this.refuse('superseded');
+      return null;
+    }
+    return { id: current.id, state: current.state };
   }
 
   /** Issue #4227: a claim this send made but will not type under goes back (`not_sent`). */

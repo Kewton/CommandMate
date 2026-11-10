@@ -359,3 +359,259 @@ describe('H21 (b2) command-code: used up at the plan, A → B while waiting for 
     expect(report).toEqual({ state: 'consumed', boundaryId: a });
   });
 });
+
+// ---------------------------------------------------------------------------
+// pr3e (PM `pm-return-4227-pr3d.md`): the final reading is one predicate. Every plan outcome is
+// read against the same conditions — the shown row's identity and state, the worktree / instance
+// it belongs to, and the settings (mode, `injectOnStart`, the membership) `full` reads — and the
+// outcomes differ only in what is typed once it holds.
+//
+// The table: plan outcome × what changed while the send waited for the input lock × {full,
+// decline} × tool {claude, command-code}. command-code is outside `SUPPORTED_COMPOSER_TOOLS`: it
+// waits for the outer lock only because `needsOuterLock()` says so (PM Claude P3-1).
+//
+// Positive controls (recorded in the commit, before pr3e): codex P2 "empty × mode off × full"
+// typed the body; PM Claude P3-2 "empty × another send takes A × full" — with the state check of
+// the empty branch removed — typed the body; PM Claude P3-1 "command-code × empty / slash × A → B"
+// typed the body into B's conversation once `needsOuterLock` was narrowed to `used_up`.
+// Negative controls: the rows with no change (and `used_up` × another send, which finds nothing
+// to take) send as the design's table (b) says, for both tools.
+// ---------------------------------------------------------------------------
+
+type Change = 'none' | 'a_to_b' | 'other_takes_a' | 'mode_off' | 'inject_off' | 'membership';
+const CHANGES: Change[] = ['none', 'a_to_b', 'other_takes_a', 'mode_off', 'inject_off', 'membership'];
+type Tool = Extract<BoundaryTool, 'claude' | 'command-code'>;
+const TOOLS: Tool[] = ['claude', 'command-code'];
+
+/** What the choosing send answers: typed as the design's table (b) says, or a 409 with a reason. */
+type Expected = { kind: 'as_shown' } | { kind: 'aborted'; reason: string };
+
+interface ToolScenario {
+  body: string;
+  arrange: (tool: Tool) => Promise<void> | void;
+  same: (sent: Sent, a: string, tool: Tool) => void;
+}
+
+/** `full`'s brief comes out empty; any other send (the one that takes A) gets the brief. */
+const emptyForFull = (): void =>
+  void fakeProvider({
+    build: vi.fn((request: BriefRequest) => ({
+      body: request.detail === 'full' ? '' : FAKE_BRIEF,
+      includedNoticeIds: [],
+      mode: request.membership.mode,
+    })),
+  });
+
+const usedUpFirst = async (tool: Tool): Promise<void> => {
+  fakeProvider();
+  await send(tool, 'first');
+};
+const disabledAtPlan = (): void => {
+  fakeProvider();
+  setMem(world, 'on', false);
+};
+
+const TOOL_SCENARIOS = {
+  planned: {
+    full: {
+      body: 'x',
+      arrange: () => void fakeProvider(),
+      same: ({ result, report }, a, tool) => {
+        expect(result.ok).toBe(true);
+        expect(typed(world, tool).at(-1)).toBe(`${FAKE_BRIEF}\n\nx`);
+        expect(report).toEqual({ state: 'attached', boundaryId: a });
+        expect(stateOf(a)).toBe('sent');
+      },
+    },
+    decline: {
+      body: 'x',
+      arrange: () => void fakeProvider(),
+      same: ({ result, report }, a, tool) => {
+        expect(result.ok).toBe(true);
+        expect(typed(world, tool).at(-1)).toBe('x');
+        expect(report).toEqual({ state: 'skipped', reason: 'declined', boundaryId: a });
+        expect(skipReasonOf(a)).toBe('declined');
+      },
+    },
+  },
+  used_up: {
+    full: {
+      body: 'x',
+      arrange: usedUpFirst,
+      same: ({ result, report }, a, tool) => {
+        expect(result.ok).toBe(true);
+        expect(typed(world, tool).at(-1)).toBe('x');
+        expect(report).toEqual({ state: 'consumed', boundaryId: a });
+        expect(stateOf(a)).toBe('sent');
+      },
+    },
+    decline: {
+      body: 'x',
+      arrange: usedUpFirst,
+      same: ({ result, report }, a, tool) => {
+        expect(result.ok).toBe(true);
+        expect(typed(world, tool).at(-1)).toBe('x');
+        expect(report).toEqual({ state: 'consumed', boundaryId: a });
+        expect(stateOf(a)).toBe('sent');
+      },
+    },
+  },
+  empty: {
+    full: {
+      body: 'x',
+      arrange: emptyForFull,
+      same: ({ result, report }, a, tool) => {
+        expect(result.ok).toBe(true);
+        expect(typed(world, tool).at(-1)).toBe('x');
+        expect(report).toEqual({ state: 'skipped', reason: 'empty', boundaryId: a });
+        expect(skipReasonOf(a)).toBe('empty');
+      },
+    },
+    decline: NOT_REACHABLE,
+  },
+  refused: {
+    full: {
+      body: 'x',
+      arrange: disabledAtPlan,
+      same: ({ result }, a, tool) => {
+        expectAborted(result, 'disabled');
+        expect(typed(world, tool)).not.toContain('x');
+        expect(stateOf(a)).toBe('pending');
+      },
+    },
+    decline: {
+      body: 'x',
+      arrange: disabledAtPlan,
+      same: ({ result }, a, tool) => {
+        expectAborted(result, 'disabled');
+        expect(typed(world, tool)).not.toContain('x');
+        expect(stateOf(a)).toBe('pending');
+      },
+    },
+  },
+  slash_command: {
+    full: {
+      body: '/model',
+      arrange: () => void fakeProvider(),
+      same: ({ result }, a, tool) => {
+        expect(result.ok).toBe(true);
+        expect(typed(world, tool).at(-1)).toBe('/model');
+        expect(stateOf(a)).toBe('pending');
+      },
+    },
+    decline: {
+      body: '/model',
+      arrange: () => void fakeProvider(),
+      same: ({ result, report }, a, tool) => {
+        expect(result.ok).toBe(true);
+        expect(typed(world, tool).at(-1)).toBe('/model');
+        expect(report).toEqual({ state: 'skipped', reason: 'slash_command' });
+        expect(stateOf(a)).toBe('pending');
+      },
+    },
+  },
+} satisfies Record<StrictPlanOutcome, Record<Choice, ToolScenario | typeof NOT_REACHABLE>>;
+
+/**
+ * The expected answer, from the predicate's conditions: the plan's own abort keeps its reason (the
+ * first reason wins); otherwise the first condition the change breaks. A used-up row another send
+ * cannot take: nothing changed.
+ */
+function expectedOf(outcome: StrictPlanOutcome, change: Change): Expected {
+  if (outcome === 'refused') return { kind: 'aborted', reason: 'disabled' };
+  switch (change) {
+    case 'none':
+      return { kind: 'as_shown' };
+    case 'a_to_b':
+      return { kind: 'aborted', reason: 'superseded' };
+    case 'other_takes_a':
+      return outcome === 'used_up' ? { kind: 'as_shown' } : { kind: 'aborted', reason: 'claimed' };
+    case 'mode_off':
+      return { kind: 'aborted', reason: 'off' };
+    case 'inject_off':
+      return { kind: 'aborted', reason: 'disabled' };
+    case 'membership':
+      return { kind: 'aborted', reason: 'settings_changed' };
+    default: {
+      const unknownChange: never = change;
+      throw new Error(`unknown change: ${String(unknownChange)}`);
+    }
+  }
+}
+
+interface ToolRow {
+  outcome: StrictPlanOutcome;
+  change: Change;
+  choice: Choice;
+  tool: Tool;
+  scenario: ToolScenario;
+  expected: Expected;
+}
+const TOOL_ROWS: ToolRow[] = STRICT_PLAN_OUTCOMES.flatMap((outcome) =>
+  CHANGES.flatMap((change) =>
+    CHOICES.flatMap((choice) => {
+      const scenario: ToolScenario | typeof NOT_REACHABLE = TOOL_SCENARIOS[outcome][choice];
+      if (scenario === NOT_REACHABLE) return [];
+      return TOOLS.map((tool) => ({ outcome, change, choice, tool, scenario, expected: expectedOf(outcome, change) }));
+    })
+  )
+);
+
+/** The holder: a send that keeps the input lock (the outer one for command-code too) while it types. */
+function holderOf(row: ToolRow, a: string): { body: string; options: SendOptions } {
+  // A `/clear` opens B when it lands.
+  if (row.change === 'a_to_b') return { body: '/clear', options: {} };
+  // A plan that refused takes no lock of its own: any holder will do.
+  if (row.outcome === 'refused') return { body: 'hold', options: { brief: 'skip' } };
+  // A strict command takes the outer lock and leaves A as it is (the scenario's own command is `/model`).
+  return { body: '/status', options: { briefDetail: 'full', briefBoundary: a } };
+}
+
+describe('H21 (pr3e) the final reading is one predicate: plan outcome × change while waiting × {full, decline} × {claude, command-code}', () => {
+  it('the table covers every reachable cell (9 scenarios × 6 changes × 2 tools)', () => {
+    expect(TOOL_ROWS).toHaveLength(9 * CHANGES.length * TOOLS.length);
+  });
+
+  it.each(TOOL_ROWS.map((row) => [`${row.tool}: ${row.outcome} × ${row.change} × ${row.choice}`, row] as const))('%s', async (_name, row) => {
+    const { tool } = row;
+    if (tool !== 'claude') addAgentInstance(world.db, WT, { id: tool, cliTool: tool, alias: '', order: 1 });
+    launch(tool);
+    const a = shown(tool);
+    await row.scenario.arrange(tool);
+    const holding = holderOf(row, a);
+    const { release, holder } = await holdTheLock(tool, holding.body, holding.options);
+    // Another send that plans A while it is pending and queues before the choosing send. With
+    // `injectOnStart` off (`refused`) its plan uses A up at once (D1's `disabled`): it goes after
+    // the choosing send has planned, so that the choosing send still plans its refusal.
+    const otherFirst = row.change === 'other_takes_a' && row.outcome !== 'refused';
+    let other = otherFirst ? send(tool, 'y') : null;
+    if (other) await ticks(200);
+    const choosing = send(tool, row.scenario.body, { ...CHOICE_OPTIONS[row.choice], briefBoundary: a });
+    // The choosing send plans (A is still the current row) and queues behind the lock.
+    await ticks(200);
+    if (row.change === 'other_takes_a' && !otherFirst) {
+      other = send(tool, 'y');
+      await ticks(200);
+    }
+    expect(shown(tool)).toBe(a);
+    if (row.change === 'mode_off') setMem(world, 'off', true);
+    if (row.change === 'inject_off') setMem(world, 'on', false);
+    if (row.change === 'membership') world.branch = 'feature/b';
+    release();
+    await holder;
+    if (other) expect((await other).result.ok).toBe(true);
+    const sent = await choosing;
+    if (row.expected.kind === 'as_shown') {
+      expect(shown(tool)).toBe(a);
+      row.scenario.same(sent, a, tool);
+      return;
+    }
+    expectAborted(sent.result, row.expected.reason);
+    expect(typed(world, tool)).not.toContain(row.scenario.body);
+    // The choosing send used nothing up.
+    expect(skipReasonOf(a)).not.toBe('empty');
+    expect(skipReasonOf(a)).not.toBe('declined');
+    if (row.change === 'a_to_b') expect(stateOf(shown(tool))).toBe('pending');
+    if (row.change === 'other_takes_a' && row.outcome !== 'refused') expect(stateOf(a)).toBe('sent');
+  });
+});
