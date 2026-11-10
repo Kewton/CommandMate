@@ -67,7 +67,11 @@ import {
   readRoleLaunchRefusal,
   SESSION_LAUNCH_ROLE_MISMATCH_CODE,
 } from '@/lib/agent-roles/launch-errors';
-import { PASTE_NOT_STARTED_CODE, PLAN_REVIEW_SEND_REFUSED_CODE } from './send-attempt-types';
+import {
+  AGENT_NOT_IN_FOREGROUND_CODE,
+  PASTE_NOT_STARTED_CODE,
+  PLAN_REVIEW_SEND_REFUSED_CODE,
+} from './send-attempt-types';
 import type { LastSendAttempt, SendAttemptReason, SendAttemptState } from './send-attempt-types';
 
 const logger = createLogger('session/send-attempt-state');
@@ -345,6 +349,12 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   // whose body may be on the pane, shares the transport wording below).
   if (carriesCode(error, PASTE_NOT_STARTED_CODE)) {
     return { state: 'not-sent', reason: 'paste-not-started' };
+  }
+  // Issue #4300: the pane's shell, not the agent, held the terminal, so the
+  // re-check refused before any key. By code through the tools' wraps: the
+  // wording names the pane's command, which is not the sender's to steer.
+  if (carriesCode(error, AGENT_NOT_IN_FOREGROUND_CODE)) {
+    return { state: 'not-sent', reason: 'agent-not-in-foreground' };
   }
   const message = error instanceof Error ? error.message : String(error);
   // Issue #3880: the "after the body was typed" wordings are matched FIRST. A
