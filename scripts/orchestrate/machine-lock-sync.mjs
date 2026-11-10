@@ -891,19 +891,24 @@ export function acquireMachineLockSync(name, options) {
                 token,
                 // Never moves a lock that is not this acquisition's: a second call, or a call after the
                 // lock was taken by someone else, leaves it where it is (Codex review 2, finding 1). An
-                // owner that cannot be read is not known to be ours, so it stays too (#4288). A record a
-                // handover published (D4) is released only once its group is empty (D9: the process it
-                // protects may still be working) — 'deferred', and the release may be called again.
-                // D12 (#4288 PR1a-b, the same rule as bash's lock_release_held): a record of ours whose
-                // recorded pid is not this process (a handover's T1, or an ownerPid not ours) is removed
-                // here only while that pid is alive. Gone: a head could be recovering it right now and
-                // take it between this read and the delete, so nothing is removed — 'needs-head', and
-                // the caller releases with releaseAsHead(lockPath, [token, T1]) (D5). Unknown: 'deferred'.
+                // owner that cannot be read is not known to be ours, so it stays too (#4288).
+                // D12 (#4288 PR1a-c, docs/design/lock-reservation-rest-4288.md — the invariant of the
+                // three implementations, the same as bash's lock_release_held): a record of ours is
+                // removed here only when its recorded pid is this process and, when it names a pgid,
+                // that group is empty. A group with a member, or one that cannot be shown empty, keeps
+                // it ('deferred', the release may be called again). Any other recorded pid — after a
+                // handOff or the initial ownerPid alike, alive, gone or unknown — is not removed: a pid
+                // read alive can die before the delete, and a head recover it and take the lock in
+                // between, so the caller releases with releaseAsHead(lockPath, [token, T1]) (D5) —
+                // 'needs-head', once. A pid that cannot be observed is 'deferred'. The group of a record
+                // whose pid and pgid are both this process (merge-pr's pgid: process.pid) is not judged:
+                // this process is a member of it by definition.
                 release: () => {
                   if (released) return 'none';
                   const current = obs.owner('release-owner', lockPath);
                   const mine = current.state === 'record' && (current.owner.token === token || (handed !== null && current.owner.token === handed));
-                  if (mine && current.owner.token === handed && validPgid(current.owner.pgid)) {
+                  const ownGroup = mine && current.owner.pid === process.pid && current.owner.pgid === process.pid;
+                  if (mine && validPgid(current.owner.pgid) && !ownGroup) {
                     const group = obs.group('group', current.owner.pgid);
                     if (group.state !== 'gone') {
                       warn(`machine-lock-release-deferred ${lockPath} pgid=${current.owner.pgid}`);
@@ -912,15 +917,13 @@ export function acquireMachineLockSync(name, options) {
                   }
                   if (mine && current.owner.pid !== process.pid) {
                     const holder = obs.pid('pid', current.owner.pid);
-                    if (holder.state === 'gone') {
-                      released = true;
-                      warn(`machine-lock-release-needs-head ${lockPath} (recorded pid ${current.owner.pid} is gone; release as the head)`);
-                      return 'needs-head';
-                    }
                     if (holder.state === 'unknown') {
                       warn(`machine-lock-release-deferred ${lockPath} (recorded pid ${current.owner.pid} is unknown: ${holder.code})`);
                       return 'deferred';
                     }
+                    released = true;
+                    warn(`machine-lock-release-needs-head ${lockPath} (recorded pid ${current.owner.pid} is not this process; release as the head)`);
+                    return 'needs-head';
                   }
                   released = true;
                   if (mine) {

@@ -142,7 +142,7 @@ const ageDir = (dir: string, ageMs: number) => {
 };
 
 describe('D2 / D1 / token / ownerPid: a lock named by its path, in key=value, under the caller\'s token', () => {
-  it('sync JS: the lock, its queue and its records live beside the path; the bash loader excludes it and takes it after', () => {
+  it('sync JS: the lock, its queue and its records live beside the path; the bash loader excludes it and takes it after', async () => {
     const lock = lockIn();
     const holder = liveGroup();
     const r = lockSync.acquireMachineLockSync('ignored', { lockPath: lock, timeoutMs: 0, token: 'run-T0', ownerPid: holder, ownerCodec: kvCodec });
@@ -155,7 +155,15 @@ describe('D2 / D1 / token / ownerPid: a lock named by its path, in key=value, un
     expect(lockSync.queueDirOfPath(path.join(root, 'x', 'held'))).toBe(path.join(root, 'x', 'held.queue'));
     // The bash loader, the same path and codec: the holder (ownerPid) is alive → refused.
     expect(sh(KV + ACQ, { LK: lock }).out).toMatch(/^refused/);
-    expect(r.release()).toBe('released');
+    // D12's invariant (PR1a-c, codex-2 review-4288-pr1ab P2-1): the recorded pid (ownerPid) is not
+    // this process, so the holder does not remove it itself — it could die between the kill -0 and the
+    // delete — and releases as the head (D5), which keeps it while the holder lives.
+    expect(r.release()).toBe('needs-head');
+    expect(sh(KV + ACQ, { LK: lock }).out).toMatch(/^refused/);
+    expect(lockSync.releaseAsHead(lock, ['run-T0'], { timeoutMs: 0, ownerCodec: kvCodec }).result).toBe('deferred');
+    killStarted();
+    expect(await until(() => !groupAlive(holder))).toBe(true);
+    expect(lockSync.releaseAsHead(lock, ['run-T0'], { timeoutMs: 0, ownerCodec: kvCodec }).result).toBe('released');
     expect(sh(KV + ACQ, { LK: lock }).out).toBe('acquired');
   });
 

@@ -183,11 +183,16 @@ machine_lock_iso() { # <ms>
 #      canonical lock is NOT removed (it may be another taker's mkdir, or an owner being written);
 #      only this holder's own moved-aside records are cleaned.
 #   3. A record under one of this holder's tokens — the ones given, LOCK_HELD_TOKEN, and
-#      LOCK_PENDING_TOKEN after a handover was tried — is removed when its group is empty (no pgid=,
-#      or ESRCH) and its pid is alive (this holder: daily.sh, the supervisor, UAT's `up` with T0).
-#      A group that still has a member keeps it (release-deferred). A pid that is gone (UAT's T1: the
-#      server, stopped) is not this shell's to remove — a head could be recovering it right now —
-#      so it returns 2 (LRH_RESULT=needs-head) and the caller releases with lock_release_as_head (D5).
+#      LOCK_PENDING_TOKEN after a handover was tried — follows D12's invariant (the same table as the
+#      sync JS's release, docs/design/lock-reservation-rest-4288.md D12): it is removed here only when
+#      its recorded pid is this shell ($$: daily.sh, the supervisor, UAT's `up` with T0) and its
+#      group is empty (no pgid=, or ESRCH; a record whose pid and pgid are both $$ names this shell's
+#      own group and is not judged by it). A group that still has a member, or cannot be shown empty,
+#      keeps it (release-deferred). Any other recorded pid — alive or gone, after a handover or the
+#      initial LOCK_OWNER_PID alike (UAT's T1: the server) — is not this shell's to remove: a pid read
+#      alive can die before the delete and a head recover it and take the lock in between, so it
+#      returns 2 (LRH_RESULT=needs-head) and the caller releases with lock_release_as_head (D5). A pid
+#      that cannot be observed: release-deferred.
 #   4. Another token: only this holder's own moved-aside records are cleaned.
 # LRH_RESULT: none | released | kept | deferred | needs-head. 0 for none / released / kept.
 lock_release_held() { # <lock-path> [<token>…]
@@ -219,21 +224,26 @@ lock_release_held() { # <lock-path> [<token>…]
     for lrh_t in $lrh_tokens; do lock_release_own_gone "$lrh_lock" "$lrh_t"; done
     return 0
   fi
-  if ! lock_group_is_empty "$LOB_PGID"; then
-    LRH_RESULT=deferred
-    echo "verify-run: machine-lock-release-deferred $lrh_lock pgid=$LOB_PGID" >&2
-    return 1
+  # D12's invariant (PR1a-c): the group first — unless pid = pgid = this shell ($$ leads it and is in
+  # it by definition) — then the pid: only this shell's own is removed here.
+  if [ "$LOB_PID" != "$$" ] || [ "$LOB_PGID" != "$$" ]; then
+    if ! lock_group_is_empty "$LOB_PGID"; then
+      LRH_RESULT=deferred
+      echo "verify-run: machine-lock-release-deferred $lrh_lock pgid=$LOB_PGID" >&2
+      return 1
+    fi
+  fi
+  if [ "$LOB_PID" = "$$" ]; then
+    rm -rf "$lrh_lock" 2>/dev/null || true
+    for lrh_t in $lrh_tokens; do lock_release_own_gone "$lrh_lock" "$lrh_t"; done
+    LRH_RESULT=released
+    return 0
   fi
   lrh_pid=$(lock_obs_kill0 pid "$LOB_PID")
   case "$lrh_pid" in
-    alive)
-      rm -rf "$lrh_lock" 2>/dev/null || true
-      for lrh_t in $lrh_tokens; do lock_release_own_gone "$lrh_lock" "$lrh_t"; done
-      LRH_RESULT=released
-      return 0;;
-    gone)
+    alive|gone)
       LRH_RESULT=needs-head
-      echo "verify-run: machine-lock-release-needs-head $lrh_lock (recorded pid $LOB_PID is gone; release as the head)" >&2
+      echo "verify-run: machine-lock-release-needs-head $lrh_lock (recorded pid $LOB_PID is not this shell; release as the head)" >&2
       return 2;;
     *)
       LRH_RESULT=deferred
