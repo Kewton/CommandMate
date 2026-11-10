@@ -798,6 +798,8 @@
       "pendingElsewhere": "This confirmation is for worktree {worktree}. To send it again, open this on that worktree (here it can only be dropped).",
       "foreign": "This dialog is the hand-off before ending on worktree {worktree}. Nothing can be stopped or confirmed on this worktree; go back to that worktree to go on.",
       "plainStopped": "Stopped. Send the confirmation whose result is unknown again, or drop it, before closing.",
+      "plainStopFailed": "Could not stop it. The session is still running; press stop again.",
+      "plainStopUnknown": "Not known whether it stopped. Press stop again (nothing happens if it has stopped).",
       "field": {
         "label": {
           "text": "Text",

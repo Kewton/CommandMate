@@ -98,7 +98,7 @@ import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
-import { askHandoffClose, type HandoffClosePath } from '@/lib/handoff/close-rule';
+import { askHandoffClose, beginHandoffOpening, closeHandoffOpening, type HandoffClosePath, type SessionStopResult } from '@/lib/handoff/close-rule';
 import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
@@ -1829,10 +1829,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /**
    * Issue #1171: execute the kill for the snapshotted target only. Issue #4227: the body is
    * the existing stop as it was, taken out as `stopSession(target)` so the hand-off's stop
-   * button (G-4) runs the same one — not a copy — for the target it snapshotted.
+   * button (G-4) runs the same one — not a copy — for the target it snapshotted. pr2e (codex
+   * P2-2): it says how it ended, so the hand-off's plain stop says "stopped" only when it did.
    */
-  const stopSession = useCallback(async (target: SessionKillTarget | null): Promise<void> => {
-    if (!target || isKillPendingRef.current) return;
+  const stopSession = useCallback(async (target: SessionKillTarget | null): Promise<SessionStopResult> => {
+    if (!target || isKillPendingRef.current) return 'unknown';
     isKillPendingRef.current = true;
     setIsKillPending(true);
 
@@ -1869,15 +1870,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // name); alias instances terminate only that instance's session.
       await worktreeApi.killSession(worktreeId, target.cliToolId, target.instanceId);
       await finishEnded();
+      return 'stopped';
     } catch (err) {
       // Issue #1171: a 404 means the session already ended (natural-termination
       // race). The goal is achieved, so re-sync and close rather than error.
       const failure = classifyKillFailure(err);
       if (failure === 'ended') {
         await finishEnded();
+        return 'stopped';
       } else if (failure === 'refused') {
         // Keep the target so the user can retry; surface a failure toast.
         showToast(tWorktree('session.failedToKill'), 'error');
+        return 'refused';
       } else {
         // Issue #4160: this answer says nothing about the session, so what is running
         // now decides. Another worktree is on screen after a switch and this one's
@@ -1885,15 +1889,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         const running = isStillOnScreen() ? await readRunningInstances(worktreeId) : null;
         if (running === null) {
           showToast(tCommon('sessionKill.outcomeUnknown', { label: target.label }), 'warning');
+          return 'unknown';
         } else if (running[target.instanceId] !== true) {
           await finishEnded();
+          return 'stopped';
         } else if (failure === 'errored') {
           showToast(tWorktree('session.failedToKill'), 'error');
+          return 'failed';
         } else {
           // Issue #4160: past the deadline the kill may still be working (a tool's
           // graceful exit takes seconds), so this is not called a failure. Pressing
           // again is safe: a session that has gone by then answers 404.
           showToast(tCommon('sessionKill.inProgress', { label: target.label }), 'warning');
+          return 'unknown';
         }
       }
     } finally {
@@ -1918,21 +1926,26 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const handoffTargetRef = useRef<SessionKillTarget | null>(null);
   /**
    * Issue #4227 pr2d (design §4.1.1): the page's only way of closing the hand-off. It asks the
-   * one rule (`askHandoffClose`) with the path's name: while the dialog stops, sends or holds an
-   * unknown decide, or waits for its cancel's answer, it stays (and says why). The guard
+   * one rule (`closeHandoffOpening`, which asks `askHandoffClose`) with the path's name: while the
+   * dialog stops, sends or holds an unknown decide, or waits for its cancel's answer, it stays
+   * (and says why). The rule reads the store of `@/lib/handoff/close-rule` (pr2e), so a dialog
+   * not drawn at the moment (the page's Loading) holds as much as one drawn. The guard
    * `handoff-close-paths-4227` keeps `setHandoffTarget(null)` here only.
    */
   const closeHandoffBy = useCallback((path: HandoffClosePath): boolean => {
     if (handoffTargetRef.current === null) return true;
-    if (askHandoffClose(path) !== null) return false;
+    if (closeHandoffOpening(path) !== null) return false;
     handoffTargetRef.current = null;
     setHandoffTarget(null);
     return true;
   }, []);
   const openHandoff = useCallback((target: SessionKillTarget): void => {
+    // pr2e: a new opening in the store (the request is made by the dialog for it); the units of
+    // the worktree are not touched.
+    beginHandoffOpening(worktreeId, target);
     handoffTargetRef.current = target;
     setHandoffTarget(target);
-  }, []);
+  }, [worktreeId]);
   useEffect(() => {
     // pr2d: a switch of worktree asks the rule too. Kept, the dialog shows that it is another
     // worktree's and runs nothing of it here but the unit's drop and closing.
@@ -1999,10 +2012,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const closeHandoff = useCallback((): void => {
     closeHandoffBy('dialog');
   }, [closeHandoffBy]);
-  /** The existing stop for the hand-off's target (G-4's stop button). */
-  const stopForHandoff = useCallback(async (): Promise<void> => {
-    await stopSession(handoffTarget);
-  }, [handoffTarget, stopSession]);
+  /** The existing stop for the hand-off's target (G-4's stop button), and how it ended. */
+  const stopForHandoff = useCallback(async (): Promise<SessionStopResult> => stopSession(handoffTarget), [handoffTarget, stopSession]);
 
   /** Issue #1171: cancel — a no-op while a kill POST is in flight (keeps target). */
   const handleKillCancel = useCallback((): void => {

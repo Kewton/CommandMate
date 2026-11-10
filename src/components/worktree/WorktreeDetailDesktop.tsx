@@ -74,6 +74,7 @@ import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
+import type { SessionStopResult } from '@/lib/handoff/close-rule';
 import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { Worktree, FileContent } from '@/types/models';
@@ -259,7 +260,7 @@ export interface WorktreeDetailDesktopProps {
   handoffTarget?: SessionKillTarget | null;
   onHandoffClose?: () => void;
   /** The existing stop for the hand-off's target (the same stop `onKillConfirm` runs). */
-  onHandoffStop?: () => Promise<void>;
+  onHandoffStop?: () => Promise<SessionStopResult>;
 
   // Move dialog
   moveTarget: MoveTarget | null;

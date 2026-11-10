@@ -26,12 +26,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 
-const rule = vi.hoisted(() => ({ off: false }));
+const rule = vi.hoisted(() => ({ off: false, perInstance: false }));
 vi.mock('@/lib/handoff/close-rule', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/handoff/close-rule')>();
   return {
     ...actual,
     askHandoffClose: (...args: Parameters<typeof actual.askHandoffClose>) => (rule.off ? null : actual.askHandoffClose(...args)),
+    // pr2e: the page and the dialog close through `closeHandoffOpening` (it asks the rule inside
+    // the module, which the mock above does not reach): off, it closes without asking.
+    closeHandoffOpening: (path: Parameters<typeof actual.closeHandoffOpening>[0]) => {
+      if (!rule.off) return actual.closeHandoffOpening(path);
+      actual.noteHandoffHidden();
+      return null;
+    },
+    // pr2e positive control: `rule.perInstance` puts the units back in the component's life — the
+    // store is emptied when the dialog that read it is taken out (as its state was, before pr2e).
+    subscribeHandoffStore: (listener: () => void) => {
+      const unsubscribe = actual.subscribeHandoffStore(listener);
+      return () => {
+        unsubscribe();
+        if (rule.perInstance) actual.resetHandoffStoreForTests();
+      };
+    },
   };
 });
 vi.mock('next-intl', async () => {
@@ -62,6 +78,7 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
 import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
 import { memWriteLockOfOthers, publishMemWriteLock } from '@/components/mem/mem-write-lock';
+import { resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
 import type { HandoffProposalView, HandoffReadResponse, HandoffRequestView } from '@/lib/handoff/types';
 
 const A = 'wt-a';
@@ -82,12 +99,23 @@ let releaseDecide: (() => void) | null;
 let cancelMode: 'ok' | 'hold';
 let releaseCancel: (() => void) | null;
 let endAnswer: 'ok' | 'session_changed';
+let killMode: 'ok' | 'hold' | 'refused' | 'errored';
+let releaseKill: (() => void) | null;
+let runningAnswer: 'none' | 'running' | 'broken';
+let createMode: 'ok' | 'hold';
+let releaseCreate: (() => void) | null;
 
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const view = (): HandoffReadResponse => ({ ok: true, request: { ...request }, proposals: proposals.map((p) => ({ ...p })), direct: [] });
 
 beforeEach(() => {
   rule.off = false;
+  rule.perInstance = false;
+  killMode = 'ok';
+  releaseKill = null;
+  runningAnswer = 'none';
+  createMode = 'ok';
+  releaseCreate = null;
   posts = [];
   kills = [];
   modeReads = [];
@@ -149,11 +177,15 @@ beforeEach(() => {
     }
     if (rest.startsWith('/kill-session')) {
       kills.push(url);
+      if (killMode === 'hold') await new Promise<void>((resolve) => (releaseKill = resolve));
+      if (killMode === 'refused') return reply(409, { error: 'refused' });
+      if (killMode === 'errored') return reply(500, { error: 'boom' });
       return reply(200, { success: true, message: 'ok' });
     }
     if (rest === '/send') return reply(201, { id: 'm1' });
     if (rest === '/mem/handoff/requests' && method === 'POST') {
       if (worktree !== A) return reply(409, { ok: false, code: 'session_unknown' });
+      if (createMode === 'hold') await new Promise<void>((resolve) => (releaseCreate = resolve));
       return reply(201, { ...view(), text: 'the request text' });
     }
     const step = /^\/mem\/handoff\/requests\/r1(\/.*)?$/.exec(rest);
@@ -193,7 +225,9 @@ beforeEach(() => {
     if (rest.startsWith('/messages')) return reply(200, []);
     if (rest.startsWith('/auto-yes')) return reply(200, { instances: {} });
     if (match && rest === '') {
-      return reply(200, { id: worktree, name: worktree, path: '/p', repositoryPath: '/r', repositoryName: 'R', sessionStatusByInstance: {} });
+      if (runningAnswer === 'broken') return reply(500, { error: 'boom' });
+      const sessionStatusByInstance = runningAnswer === 'running' ? { claude: { isRunning: true } } : {};
+      return reply(200, { id: worktree, name: worktree, path: '/p', repositoryPath: '/r', repositoryName: 'R', sessionStatusByInstance });
     }
     return reply(404, {});
   }) as unknown as typeof fetch;
@@ -201,16 +235,26 @@ beforeEach(() => {
 afterEach(() => {
   releaseDecide?.();
   releaseCancel?.();
+  releaseKill?.();
+  releaseCreate?.();
   publishMemWriteLock('mem-items', null);
+  resetHandoffStoreForTests();
   vi.restoreAllMocks();
   window.localStorage.clear();
 });
 
 let page: ReturnType<typeof useWorktreeDetailController>;
-/** The page as `WorktreeDetailRefactored` wires it (the phone's dialog; the PC's is the same props). */
-function Page({ worktreeId }: { worktreeId: string }) {
+type Drawing = { layout?: 'pc' | 'phone'; drawn?: boolean };
+/**
+ * The page as `WorktreeDetailRefactored` wires it (the phone's dialog; the PC's is the same props).
+ * pr2e: `layout` draws the dialog under another parent (PC ↔ phone: the real page draws it in
+ * `WorktreeDetailDesktop` or in its phone branch, so it is a new instance), and `drawn: false`
+ * takes it out while the page stays (the real page's Loading between two worktrees).
+ */
+function Page({ worktreeId, layout = 'pc', drawn = true }: { worktreeId: string } & Drawing) {
   page = useWorktreeDetailController({ worktreeId });
-  return (
+  if (!drawn) return null;
+  const dialog = (
     <SessionHandoffDialog
       isOpen={page.handoffTarget !== null}
       worktreeId={worktreeId}
@@ -219,6 +263,7 @@ function Page({ worktreeId }: { worktreeId: string }) {
       onStop={page.stopForHandoff}
     />
   );
+  return layout === 'pc' ? <div data-testid="page-pc">{dialog}</div> : <section data-testid="page-phone">{dialog}</section>;
 }
 
 const press = (testId: string) => fireEvent.click(screen.getByTestId(testId));
@@ -236,7 +281,8 @@ async function opened() {
   });
   await screen.findByTestId('handoff-approve-p1');
   const switchTo = (worktreeId: string) => view.rerender(<Page worktreeId={worktreeId} />);
-  return { switchTo };
+  const redraw = (drawing: Drawing, worktreeId: string = A) => view.rerender(<Page worktreeId={worktreeId} {...drawing} />);
+  return { switchTo, redraw };
 }
 
 type State = 'sending' | 'unknown' | 'cancelling' | 'none';
@@ -552,5 +598,201 @@ describe('[#4227 pr2d] (positive controls) without the rule the rows above go ba
     rule.off = true;
     esc();
     await waitFor(() => expect(page.handoffTarget).toBeNull());
+  });
+});
+
+/**
+ * pr2e (PM Claude pr2d P2-1, codex review-4227-pr2c P2-1): the units live in the store, keyed by
+ * the worktree id, not in the dialog. Drawn again — PC ↔ phone (a turn of the device, a change of
+ * width), or taken out and drawn again (a remount: the page's Loading) — the dialog keeps the
+ * unit, makes no second request, and the rule still holds it. Positive control: `rule.perInstance`
+ * empties the store when the dialog is taken out (the units back in the component's life).
+ */
+type Held = 'sending' | 'unknown' | 'cancelling' | 'stopping';
+const HELD_ALL: Held[] = ['sending', 'unknown', 'cancelling', 'stopping'];
+const NOTICE_ALL = { ...NOTICE, stopping: '停止の途中です' } as const;
+const REDRAWS = {
+  layout: (redraw: (d: Drawing) => void) => redraw({ layout: 'phone' }),
+  remount: (redraw: (d: Drawing) => void) => {
+    redraw({ drawn: false });
+    redraw({ drawn: true });
+  },
+} as const;
+
+async function reachAll(state: Held): Promise<void> {
+  if (state !== 'stopping') return reach(state);
+  killMode = 'hold';
+  press('handoff-stop');
+  await waitFor(() => expect(releaseKill).not.toBeNull());
+}
+
+describe('[#4227 pr2e] path 6 — the dialog drawn again (layout switch / remount) × state', () => {
+  for (const route of ['layout', 'remount'] as const) {
+    it.each(HELD_ALL)(`${route}, while %s: the unit stays, no second request, the rule still holds it`, async (state) => {
+      const { redraw } = await opened();
+      await reachAll(state);
+      const before = screen.getByTestId('handoff-dialog');
+      REDRAWS[route](redraw);
+      const after = await screen.findByTestId('handoff-dialog');
+      expect(after).not.toBe(before);
+      expect(page.handoffTarget).toEqual(TARGET);
+      if (state === 'unknown') expect(screen.getByTestId('handoff-pending')).toBeTruthy();
+      esc();
+      await waitFor(() => expect(screen.getByTestId('handoff-notice').textContent).toContain(NOTICE_ALL[state]));
+      expect(page.handoffTarget).toEqual(TARGET);
+      if (state === 'sending') {
+        await act(async () => releaseDecide?.());
+        expect(await screen.findByTestId('handoff-pending')).toBeTruthy();
+      }
+      if (state === 'cancelling') {
+        await act(async () => releaseCancel?.());
+        await waitFor(() => expect(page.handoffTarget).toBeNull());
+        expect(sent('/cancel')).toHaveLength(1);
+      }
+      if (state === 'stopping') {
+        await act(async () => releaseKill?.());
+        await screen.findByTestId('handoff-outcome');
+        expect(kills).toHaveLength(1);
+        expect(sent('/end/observe')).toHaveLength(1);
+      }
+      expect(sent('/mem/handoff/requests')).toHaveLength(1);
+    });
+  }
+
+  it('(negative control) nothing held, drawn again: the same request is shown, none is made again', async () => {
+    const { redraw } = await opened();
+    redraw({ layout: 'phone' });
+    await screen.findByTestId('handoff-approve-p1');
+    redraw({ drawn: false });
+    redraw({ drawn: true });
+    await screen.findByTestId('handoff-approve-p1');
+    expect(sent('/mem/handoff/requests')).toHaveLength(1);
+    expect(sent('/send')).toHaveLength(1);
+  });
+
+  it.each(['layout', 'remount'] as const)('(positive control) the units in the component’s life: %s while unknown loses the unit and makes a second request', async (route) => {
+    const { redraw } = await opened();
+    await reach('unknown');
+    rule.perInstance = true;
+    REDRAWS[route](redraw);
+    await waitFor(() => expect(sent('/mem/handoff/requests')).toHaveLength(2));
+    await settle();
+    expect(screen.queryByTestId('handoff-pending')).toBeNull();
+  });
+});
+
+/**
+ * pr2e (codex review-4227-pr2c P2-2): the plain stop says "stopped" only when the existing stop
+ * stopped. Refused, failed or not known: it says so, the stop stays, and pressing it again runs
+ * the existing stop again — from the same screen. Negative control: stopped (path 3 above).
+ */
+describe('[#4227 pr2e] the plain stop’s answer: stopped / refused / failed / unknown', () => {
+  async function toPlain() {
+    endAnswer = 'session_changed';
+    press('handoff-stop');
+    await screen.findByTestId('handoff-plain');
+  }
+  const CASES = [
+    ['refused', () => (killMode = 'refused'), '停止できませんでした'],
+    ['failed', () => ((killMode = 'errored'), (runningAnswer = 'running')), '停止できませんでした'],
+    ['unknown', () => ((killMode = 'errored'), (runningAnswer = 'broken')), '停止できたかどうか分かりません'],
+  ] as const;
+
+  it.each(CASES)('%s: not called stopped; the stop stays and runs again from here', async (_name, arrange, wording) => {
+    await opened();
+    await toPlain();
+    arrange();
+    press('handoff-plain-stop');
+    await waitFor(() => expect(screen.getByTestId('handoff-notice').textContent).toContain(wording));
+    expect(kills).toHaveLength(1);
+    expect(page.handoffTarget).toEqual(TARGET);
+    expect(screen.getByTestId('handoff-plain').textContent).not.toContain('停止しました');
+    expect(button('handoff-plain-stop')?.disabled).toBe(false);
+    killMode = 'ok';
+    runningAnswer = 'none';
+    press('handoff-plain-stop');
+    await waitFor(() => expect(page.handoffTarget).toBeNull());
+    expect(kills).toHaveLength(2);
+  });
+
+  it.each(CASES)('%s with an unknown decide: not “stopped” either; the unit and the stop both stay', async (_name, arrange) => {
+    await opened();
+    await reach('unknown');
+    await toPlain();
+    arrange();
+    press('handoff-plain-stop');
+    await waitFor(() => expect(kills).toHaveLength(1));
+    await settle();
+    expect(screen.getByTestId('handoff-plain').textContent).not.toContain('停止しました');
+    expect(button('handoff-plain-stop')).not.toBeNull();
+    expect(screen.getByTestId('handoff-pending')).toBeTruthy();
+  });
+
+  it('(negative control) stopped with an unknown decide: “stopped”, the stop gone, the unit to choose', async () => {
+    await opened();
+    await reach('unknown');
+    await toPlain();
+    press('handoff-plain-stop');
+    await waitFor(() => expect(screen.getByTestId('handoff-plain').textContent).toContain('停止しました'));
+    expect(button('handoff-plain-stop')).toBeNull();
+  });
+});
+
+/**
+ * pr2e (PM Claude pr2d P3-2): condition 4 widened — once a cancel has started (or the dialog
+ * closed), the request's text is not sent either: neither "send the request again" nor the text
+ * that follows the opening's create. Negative controls: no cancel, the text goes.
+ */
+describe('[#4227 pr2e] condition 4: no text after the cancel starts', () => {
+  beforeEach(() => {
+    request = { ...request, state: 'awaiting_agent', sendState: 'failed' };
+    proposals = [];
+  });
+
+  async function openedAwaiting() {
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-resend-text');
+  }
+
+  it('cancelling: “send the request again” is not sent (disabled, and its handler sends nothing)', async () => {
+    await openedAwaiting();
+    const texts = sent('/send').length;
+    await reach('cancelling');
+    expect(button('handoff-resend-text')?.disabled).toBe(true);
+    press('handoff-resend-text');
+    await settle();
+    expect(sent('/send')).toHaveLength(texts);
+  });
+
+  it('(negative control) no cancel: “send the request again” sends the text once more', async () => {
+    await openedAwaiting();
+    const texts = sent('/send').length;
+    press('handoff-resend-text');
+    await waitFor(() => expect(sent('/send')).toHaveLength(texts + 1));
+  });
+
+  it('closed while the create is answered: the text that follows it is not sent', async () => {
+    createMode = 'hold';
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-loading');
+    await waitFor(() => expect(releaseCreate).not.toBeNull());
+    esc();
+    await waitFor(() => expect(page.handoffTarget).toBeNull());
+    await act(async () => releaseCreate?.());
+    await settle();
+    expect(sent('/send')).toHaveLength(0);
+  });
+
+  it('(negative control) the create answered with the dialog open: the text is sent once', async () => {
+    await openedAwaiting();
+    expect(sent('/send')).toHaveLength(1);
   });
 });

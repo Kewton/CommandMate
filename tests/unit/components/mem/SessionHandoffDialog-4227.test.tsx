@@ -28,6 +28,7 @@ vi.mock('next-intl', async () => {
 
 import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
 import { memWriteLockOfOthers, publishMemWriteLock } from '@/components/mem/mem-write-lock';
+import { resetHandoffStoreForTests, type SessionStopResult } from '@/lib/handoff/close-rule';
 import type { HandoffProposalView, HandoffReadResponse, HandoffRequestView } from '@/lib/handoff/types';
 import type { MemItemView } from '@/types/mem';
 
@@ -155,13 +156,16 @@ afterEach(() => {
   releaseDecide?.();
   releaseEnd?.();
   publishMemWriteLock('mem-items', null);
+  // pr2e: the units live in the module's store, not in the dialog; each test starts with none.
+  resetHandoffStoreForTests();
   vi.restoreAllMocks();
 });
 
 function renderDialog(options: { stopHeld?: Promise<void> } = {}) {
-  const onStop = vi.fn(async () => {
+  const onStop = vi.fn(async (): Promise<SessionStopResult> => {
     order.push('kill');
     if (options.stopHeld) await options.stopHeld;
+    return 'stopped';
   });
   const onClose = vi.fn();
   const tree = (isOpen: boolean) => (
