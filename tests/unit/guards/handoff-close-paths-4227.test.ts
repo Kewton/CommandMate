@@ -21,6 +21,14 @@
  *    (`@/lib/handoff/close-rule`) the decide's units (`pending`, `inflight`) are written by
  *    `startHandoffDecide`, `settleHandoffDecide` and `dropHandoffUnit` only. No other source in
  *    `src/` references a clear.
+ * 6. pr2f (codex review-4227-pr2d P2-3, the PM's decision: forbid, not resolve): the store's
+ *    functions are imported by name only. In `src/` an import of the store with an alias
+ *    (`import { dropHandoffUnit as forget }`), a namespace (`import * as rule`, `export * as`), a
+ *    re-export of all (`export *`) or with an alias, a dynamic `import()` or a `require()` fails —
+ *    whatever its specifier (`@/lib/handoff/close-rule`, a relative path). The store's settle,
+ *    drop, close, hide and patch take the sending / the opening they are for (`SentHandoffDecide`,
+ *    `HandoffOpeningToken`) as their first parameter; no other exported function writes the store
+ *    but its starts and the flags' ends; and no source but the store casts to those types.
  * 3. The paths named at the call sites are exactly `HANDOFF_CLOSE_PATHS` (no path declared and
  *    unused, none used and undeclared).
  * 4. The pages hand the dialog the hook's `closeHandoff` (directly, or as `onHandoffClose`).
@@ -299,11 +307,100 @@ function checkOthers(files: ReadonlyArray<{ file: string; source: string }>): st
   return problems;
 }
 
+/** `specifier` (in `file`) names the store: `@/lib/handoff/close-rule` or a relative path to it. */
+function namesStore(file: string, specifier: string): boolean {
+  const target = STORE.replace(/\.ts$/, '');
+  let resolved: string | null = null;
+  if (specifier.startsWith('@/')) resolved = path.posix.join('src', specifier.slice(2));
+  else if (specifier.startsWith('.')) resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file.split(path.sep).join('/')), specifier));
+  if (resolved === null) return false;
+  resolved = resolved.replace(/\.(?:ts|tsx|js)$/, '').replace(/\/index$/, '');
+  return resolved === target;
+}
+
+/** pr2f: the ways of reaching the store's functions under another name, in `src/` (empty: none). */
+function checkImportForms(files: ReadonlyArray<{ file: string; source: string }>): string[] {
+  const problems: string[] = [];
+  for (const { file, source } of files) {
+    if (!/close-rule/.test(source)) continue;
+    const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && namesStore(file, node.moduleSpecifier.text)) {
+        const bindings = node.importClause?.namedBindings;
+        if (node.importClause?.name) problems.push(`${file}: a default import of the store (${node.importClause.name.text})`);
+        if (bindings && ts.isNamespaceImport(bindings)) problems.push(`${file}: a namespace import of the store (* as ${bindings.name.text})`);
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) if (element.propertyName) problems.push(`${file}: ${element.propertyName.text} imported as ${element.name.text}`);
+        }
+      }
+      if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && namesStore(file, node.moduleSpecifier.text)) {
+        const clause = node.exportClause;
+        if (!clause) problems.push(`${file}: export * from the store`);
+        else if (ts.isNamespaceExport(clause)) problems.push(`${file}: export * as ${clause.name.text} from the store`);
+        else for (const element of clause.elements) if (element.propertyName) problems.push(`${file}: ${element.propertyName.text} re-exported as ${element.name.text}`);
+      }
+      if (ts.isCallExpression(node) && node.arguments.length > 0 && ts.isStringLiteral(node.arguments[0]) && namesStore(file, node.arguments[0].text)) {
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword) problems.push(`${file}: a dynamic import() of the store`);
+        if (ts.isIdentifier(node.expression) && node.expression.text === 'require') problems.push(`${file}: a require() of the store`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return problems;
+}
+
+/**
+ * pr2f: the store's exported functions that write it, and the type of the first parameter each
+ * must take (`null`: none, it starts something; `string`: a flag's worktree id).
+ */
+const STORE_WRITERS: Record<string, string | null> = {
+  startHandoffDecide: 'HandoffDecideUnit',
+  settleHandoffDecide: 'SentHandoffDecide',
+  dropHandoffUnit: 'SentHandoffDecide',
+  startHandoffStop: 'string',
+  endHandoffStop: 'string',
+  startHandoffCancel: 'string',
+  endHandoffCancel: 'string',
+  beginHandoffOpening: 'string',
+  patchHandoffOpening: 'HandoffOpeningToken',
+  noteHandoffHidden: 'HandoffOpeningToken',
+  closeHandoffOpening: 'HandoffOpeningToken',
+  resetHandoffStoreForTests: null,
+};
+
+function checkStoreSignatures(source: string): string[] {
+  const problems: string[] = [];
+  const sf = ts.createSourceFile('store.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  for (const statement of sf.statements) {
+    if (!ts.isFunctionDeclaration(statement) || !statement.name || !statement.body) continue;
+    if (!statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
+    const name = statement.name.text;
+    const writes = /\b(?:commit|markClosed|writeFlags)\(/.test(statement.body.getText(sf));
+    if (!(name in STORE_WRITERS)) {
+      if (writes) problems.push(`${name} writes the store but is not one of its writers (a settle, close or patch without its sending / opening)`);
+      continue;
+    }
+    const expected = STORE_WRITERS[name];
+    const first = statement.parameters[0]?.type?.getText(sf) ?? null;
+    if (first !== expected) problems.push(`${name} takes ${first ?? 'nothing'} first, not ${expected ?? 'nothing'}`);
+  }
+  return problems;
+}
+
+/** pr2f: no source but the store makes a sending or an opening's identity (a cast to the brand). */
+function checkBrandCasts(files: ReadonlyArray<{ file: string; source: string }>): string[] {
+  return files
+    .filter(({ file, source }) => file !== STORE && /\bas\s+(?:SentHandoffDecide|HandoffOpeningToken)\b|<(?:SentHandoffDecide|HandoffOpeningToken)>/.test(source))
+    .map(({ file }) => `${file} casts to SentHandoffDecide / HandoffOpeningToken (only the store makes them)`);
+}
+
 /** The path names used at the call sites of the two sources. */
 function usedPaths(...sources: string[]): Set<string> {
   const used = new Set<string>();
   for (const source of sources) {
-    for (const match of source.matchAll(/\b(?:closeBy|closeHandoffBy|askHandoffClose|closeHandoffOpening)\('([a-z-]+)'/g)) used.add(match[1]);
+    // pr2f: `closeBy(of, 'person')` — the opening named first.
+    for (const match of source.matchAll(/\b(?:closeBy|closeHandoffBy|askHandoffClose|closeHandoffOpening)\((?:[\w.]+,\s*)?'([a-z-]+)'/g)) used.add(match[1]);
   }
   return used;
 }
@@ -329,6 +426,13 @@ describe('[#4227 pr2d] every path that closes the hand-off asks the one rule', (
 
   it('the page: the target cleared only in closeHandoffBy (which asks the rule), set only in openHandoff after it', () => {
     expect(checkHook(read(HOOK))).toEqual([]);
+  });
+
+  it('pr2f: the store is imported by name only; its settle, drop, close, hide and patch take their sending / opening', () => {
+    const sources = sourcesUnder('src').map((file) => ({ file, source: read(file) }));
+    expect(checkImportForms(sources)).toEqual([]);
+    expect(checkStoreSignatures(read(STORE))).toEqual([]);
+    expect(checkBrandCasts(sources)).toEqual([]);
   });
 
   it('the paths named at the call sites are exactly HANDOFF_CLOSE_PATHS', () => {
@@ -368,7 +472,7 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
     expect(checkDialog(dialog)).toEqual([]);
     expect(checkHook(hook)).toEqual([]);
     expect(checkPaths(dialog, hook)).toEqual([]);
-    expect(checkStore(mutated(STORE, 'function markClosed(): void {', 'function markClosed(): void  {'))).toEqual([]);
+    expect(checkStore(mutated(STORE, 'function markClosed(token: HandoffOpeningToken): void {', 'function markClosed(token: HandoffOpeningToken): void  {'))).toEqual([]);
   });
 
   it('a worktree switch that clears the target directly (the code before pr2d) fails', () => {
@@ -390,7 +494,7 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
   });
 
   it('a plain stop that closes without the rule (the code before pr2d) fails', () => {
-    const dialog = mutated(DIALOG, "if (!closeBy('plain-stop-done')) patchHandoffOpening(token, { plainStopped: true });", 'onClose();');
+    const dialog = mutated(DIALOG, "if (closeBy(of, 'plain-stop-done') === 'refused') patchHandoffOpening(of, { plainStopped: true });", 'onClose();');
     expect(checkDialog(dialog).join('\n')).toMatch(/onClose called in plainStop/);
   });
 
@@ -411,8 +515,8 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
   it('pr2e G1: an alias of onClose that closes after the plain stop without the rule fails', () => {
     const dialog = mutated(
       DIALOG,
-      "if (!closeBy('plain-stop-done')) patchHandoffOpening(token, { plainStopped: true });",
-      "const closeNow = onClose;\n    if (!closeBy('plain-stop-done')) closeNow();"
+      "if (closeBy(of, 'plain-stop-done') === 'refused') patchHandoffOpening(of, { plainStopped: true });",
+      "const closeNow = onClose;\n    if (closeBy(of, 'plain-stop-done') === 'refused') closeNow();"
     );
     expect(checkDialog(dialog).join('\n')).toMatch(/onClose is referenced in closeNow without being called/);
   });
@@ -429,7 +533,7 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
   it('pr2e: an alias of the drop used elsewhere, or a clear from the hook, fails', () => {
     const alias = mutated(DIALOG, 'current = beginHandoffOpening(worktreeId, target);', 'current = beginHandoffOpening(worktreeId, target);\n      const forget = dropHandoffUnit;\n      forget(worktreeId);');
     expect(checkDialog(alias).join('\n')).toMatch(/dropHandoffUnit in forget: an alias or a value/);
-    const settle = mutated(DIALOG, 'endHandoffStop(forWorktree);\n    }\n    if (result', "endHandoffStop(forWorktree);\n      settleHandoffDecide(forWorktree, 'answered');\n    }\n    if (result");
+    const settle = mutated(DIALOG, 'endHandoffStop(forWorktree);\n    }\n    // pr2f', "endHandoffStop(forWorktree);\n      settleHandoffDecide(forWorktree, 'answered');\n    }\n    // pr2f");
     expect(checkDialog(settle).join('\n')).toMatch(/settleHandoffDecide in plainStop: not where it is allowed/);
     const hook = mutated(HOOK, "closeHandoffBy('worktree-switch');", "closeHandoffBy('worktree-switch');\n    dropHandoffUnit(worktreeId);");
     expect(checkHook(hook).join('\n')).toMatch(/dropHandoffUnit in the hook/);
@@ -447,12 +551,56 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
       'export function forgetHandoffUnits(worktreeId: string): void {\n  commit({ ...state, units: { ...state.units, [worktreeId]: { ...handoffUnitsOf(worktreeId), pending: null } } });\n}\n\n/** Starts the stop: refused while one runs or a cancel waits. */'
     );
     expect(checkStore(write).join('\n')).toMatch(/the store writes pending in forgetHandoffUnits/);
-    const empty = mutated(STORE, 'function markClosed(): void {', 'export function forgetAll(): void {\n  commit(EMPTY);\n}\n\nfunction markClosed(): void {');
+    const empty = mutated(STORE, 'function markClosed(token: HandoffOpeningToken): void {', 'export function forgetAll(): void {\n  commit(EMPTY);\n}\n\nfunction markClosed(token: HandoffOpeningToken): void {');
     expect(checkStore(empty).join('\n')).toMatch(/emptied outside resetHandoffStoreForTests/);
   });
 
   it('pr2e: another source of src/ that clears a unit fails', () => {
     const panel = mutated('src/components/mem/MemItemsPanel.tsx', /^/, "import { dropHandoffUnit } from '@/lib/handoff/close-rule';\nexport const forget = (id: string) => dropHandoffUnit(id);\n");
     expect(checkOthers([{ file: 'src/components/mem/MemItemsPanel.tsx', source: panel }]).join('\n')).toMatch(/dropHandoffUnit in src\/components\/mem\/MemItemsPanel.tsx/);
+  });
+
+  // pr2f (codex review-4227-pr2d P2-3): another file clearing a unit under an alias or a namespace.
+  it('pr2f: another file of src/ that reaches a clear through an import alias or a namespace fails', () => {
+    const file = 'src/components/mem/MemItemsPanel.tsx';
+    const alias = mutated(file, /^/, "import { dropHandoffUnit as forget } from '@/lib/handoff/close-rule';\nexport const drop = (u: Parameters<typeof forget>[0]) => forget(u);\n");
+    expect(checkImportForms([{ file, source: alias }]).join('\n')).toMatch(/dropHandoffUnit imported as forget/);
+    // The guard of pr2e did not see it: the alias is not the clear's name.
+    expect(checkOthers([{ file, source: alias }])).toEqual([]);
+    const namespace = mutated(file, /^/, "import * as rule from '../../lib/handoff/close-rule';\nexport const drop = (u: never) => rule.dropHandoffUnit(u);\n");
+    expect(checkImportForms([{ file, source: namespace }]).join('\n')).toMatch(/namespace import of the store \(\* as rule\)/);
+    expect(checkOthers([{ file, source: namespace }])).toEqual([]);
+    const reexport = mutated(file, /^/, "export { settleHandoffDecide as settle } from '@/lib/handoff/close-rule';\nexport * as everything from '@/lib/handoff/close-rule';\n");
+    const problems = checkImportForms([{ file, source: reexport }]).join('\n');
+    expect(problems).toMatch(/settleHandoffDecide re-exported as settle/);
+    expect(problems).toMatch(/export \* as everything/);
+    const dynamic = mutated(file, /^/, "export const later = () => import('@/lib/handoff/close-rule').then((m) => m.dropHandoffUnit);\n");
+    expect(checkImportForms([{ file, source: dynamic }]).join('\n')).toMatch(/dynamic import\(\) of the store/);
+    const local = mutated('src/lib/handoff/screen-client.ts', /^/, "import * as rule from './close-rule';\n");
+    expect(checkImportForms([{ file: 'src/lib/handoff/screen-client.ts', source: local }]).join('\n')).toMatch(/namespace import/);
+  });
+
+  it('pr2f (negative control) a named import, a type import and a plain re-export of the store pass', () => {
+    const file = 'src/components/mem/MemItemsPanel.tsx';
+    const named = mutated(
+      file,
+      /^/,
+      "import { handoffUnitsLock, type HandoffHold } from '@/lib/handoff/close-rule';\nexport { handoffCloseBlock } from '@/lib/handoff/close-rule';\nimport * as other from '@/lib/handoff/types';\n"
+    );
+    expect(checkImportForms([{ file, source: named }])).toEqual([]);
+  });
+
+  it('pr2f: a store function that closes, settles or patches without its opening / sending fails', () => {
+    const tokenless = mutated(
+      STORE,
+      '/** Tests only: the store as at load. */',
+      "export function closeCurrentHandoff(path: HandoffClosePath): void {\n  if (askHandoffClose(path) === null && state.opening) markClosed(state.opening.token);\n}\n\n/** Tests only: the store as at load. */"
+    );
+    expect(checkStoreSignatures(tokenless).join('\n')).toMatch(/closeCurrentHandoff writes the store but is not one of its writers/);
+    const byWorktree = mutated(STORE, 'export function settleHandoffDecide(sending: SentHandoffDecide,', 'export function settleHandoffDecide(sending: string,');
+    expect(checkStoreSignatures(byWorktree).join('\n')).toMatch(/settleHandoffDecide takes string first, not SentHandoffDecide/);
+    const cast = mutated(DIALOG, 'const of = token;', 'const of = {} as HandoffOpeningToken;');
+    expect(checkBrandCasts([{ file: DIALOG, source: cast }]).join('\n')).toMatch(/casts to/);
+    expect(checkStoreSignatures(mutated(STORE, 'function markClosed(', 'function  markClosed('))).toEqual([]);
   });
 });

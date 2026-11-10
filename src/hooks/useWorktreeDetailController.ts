@@ -98,7 +98,14 @@ import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
-import { askHandoffClose, beginHandoffOpening, closeHandoffOpening, type HandoffClosePath, type SessionStopResult } from '@/lib/handoff/close-rule';
+import {
+  askHandoffClose,
+  beginHandoffOpening,
+  closeHandoffOpening,
+  type HandoffClosePath,
+  type HandoffOpeningToken,
+  type SessionStopResult,
+} from '@/lib/handoff/close-rule';
 import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
@@ -1924,17 +1931,24 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(null);
   /** Mirrors `handoffTarget` for the paths below, read in the same tick. */
   const handoffTargetRef = useRef<SessionKillTarget | null>(null);
+  /** pr2f: the opening {@link openHandoff} began; the page's closes name it (never a newer one). */
+  const handoffOpeningRef = useRef<HandoffOpeningToken | null>(null);
   /**
    * Issue #4227 pr2d (design §4.1.1): the page's only way of closing the hand-off. It asks the
    * one rule (`closeHandoffOpening`, which asks `askHandoffClose`) with the path's name: while the
    * dialog stops, sends or holds an unknown decide, or waits for its cancel's answer, it stays
    * (and says why). The rule reads the store of `@/lib/handoff/close-rule` (pr2e), so a dialog
    * not drawn at the moment (the page's Loading) holds as much as one drawn. The guard
-   * `handoff-close-paths-4227` keeps `setHandoffTarget(null)` here only.
+   * `handoff-close-paths-4227` keeps `setHandoffTarget(null)` here only. pr2f: it names the
+   * opening it began; `stale` (another opening began since, e.g. another page's) means its own is
+   * over already — its target goes, and the other opening is not touched (its units stay in the store).
    */
   const closeHandoffBy = useCallback((path: HandoffClosePath): boolean => {
     if (handoffTargetRef.current === null) return true;
-    if (closeHandoffOpening(path) !== null) return false;
+    const opening = handoffOpeningRef.current;
+    const answer = opening === null ? null : closeHandoffOpening(opening, path);
+    if (answer !== null && answer !== 'stale') return false;
+    handoffOpeningRef.current = null;
     handoffTargetRef.current = null;
     setHandoffTarget(null);
     return true;
@@ -1942,7 +1956,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const openHandoff = useCallback((target: SessionKillTarget): void => {
     // pr2e: a new opening in the store (the request is made by the dialog for it); the units of
     // the worktree are not touched.
-    beginHandoffOpening(worktreeId, target);
+    handoffOpeningRef.current = beginHandoffOpening(worktreeId, target).token;
     handoffTargetRef.current = target;
     setHandoffTarget(target);
   }, [worktreeId]);

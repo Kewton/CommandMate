@@ -21,6 +21,16 @@
  * clears one, and on any path that does not ask the rule. G-PR3 puts the items panel's units
  * in the same store.
  *
+ * pr2f (PM decision in `pm-return-4227-pr2e-codex.md`; codex review-4227-pr2d P2-1・P2-2, PM
+ * Claude pr2e P3-1): what runs after an await (a decide's settle, a close, a patch of the
+ * opening) carries the unit it started (a {@link SentHandoffDecide}, made by
+ * {@link startHandoffDecide} only) and the opening it was for (a {@link HandoffOpeningToken},
+ * made by {@link beginHandoffOpening} only), and does nothing when they are not the current
+ * ones. The store has no settle, close nor patch without them: they are required by the types.
+ * A stop's and a cancel's flags carry their worktree id, their unit's id (a start is refused
+ * while one is set, so an end is always its own start's). Other sources import this module's
+ * functions by name only: no alias (`as`) nor namespace (`* as`) — the guard fails on them.
+ *
  * @module lib/handoff/close-rule
  */
 import type { HandoffDecision } from './screen-client';
@@ -73,6 +83,9 @@ export type SessionStopResult = 'stopped' | 'refused' | 'failed' | 'unknown';
 // The store
 // ---------------------------------------------------------------------------------------------
 
+declare const SENT_BRAND: unique symbol;
+declare const OPENING_BRAND: unique symbol;
+
 /** A decide whose result is unknown (status 0) is sent again as it was (rule (4)). */
 export interface HandoffDecideUnit {
   /** The worktree it was sent for: it is sent again there only. */
@@ -82,10 +95,19 @@ export interface HandoffDecideUnit {
   decisions: HandoffDecision[];
 }
 
+/**
+ * One sending of a decide (pr2f): made by {@link startHandoffDecide} only, a new identity per
+ * sending. Its settle and its drop name it, so an old sending's settle never reaches the next one.
+ */
+export type SentHandoffDecide = HandoffDecideUnit & { readonly [SENT_BRAND]: true };
+
+/** The identity of one opening (pr2f): made by {@link beginHandoffOpening} only. */
+export type HandoffOpeningToken = { readonly [OPENING_BRAND]: true };
+
 /** The units of one worktree: what may not be dropped without the person's choice. */
 export interface HandoffUnits {
-  readonly inflight: HandoffDecideUnit | null;
-  readonly pending: HandoffDecideUnit | null;
+  readonly inflight: SentHandoffDecide | null;
+  readonly pending: SentHandoffDecide | null;
   readonly stopping: boolean;
   readonly cancelling: boolean;
 }
@@ -99,7 +121,7 @@ export interface HandoffOpeningTarget {
 /** One opening of the dialog: its request as read, its text, whether it was closed. */
 export interface HandoffOpening {
   /** The identity of this opening; work started for it answers nothing to another. */
-  readonly token: object;
+  readonly token: HandoffOpeningToken;
   /** The worktree it was opened for (kept over a switch of worktree: "foreign" on another's page). */
   readonly worktreeId: string;
   readonly target: HandoffOpeningTarget;
@@ -155,33 +177,39 @@ function writeFlags(worktreeId: string, flags: Partial<Pick<HandoffUnits, 'stopp
   commit({ ...state, units: { ...state.units, [worktreeId]: { ...handoffUnitsOf(worktreeId), ...flags } } });
 }
 
-/** Starts sending `unit` for its worktree: refused while one is sent or a cancel waits (condition 4). */
-export function startHandoffDecide(unit: HandoffDecideUnit): boolean {
+/**
+ * Starts sending `unit` for its worktree: refused (null) while one is sent or a cancel waits
+ * (condition 4). The sending it returns — a new identity, also when `unit` is the pending one
+ * sent again — is what its settle names.
+ */
+export function startHandoffDecide(unit: HandoffDecideUnit): SentHandoffDecide | null {
   const units = handoffUnitsOf(unit.worktreeId);
-  if (units.inflight !== null || units.cancelling) return false;
-  commit({ ...state, units: { ...state.units, [unit.worktreeId]: { ...units, inflight: unit } } });
-  return true;
+  if (units.inflight !== null || units.cancelling) return null;
+  const sending = { worktreeId: unit.worktreeId, requestId: unit.requestId, ifVersion: unit.ifVersion, decisions: unit.decisions } as SentHandoffDecide;
+  commit({ ...state, units: { ...state.units, [unit.worktreeId]: { ...units, inflight: sending } } });
+  return sending;
 }
 
 /**
- * A decide's answer (the only clear but the person's drop): `unknown` keeps the unit that was
- * sent to be sent again; `answered` (applied, or refused and shown) clears it. Nothing in flight:
- * nothing changes.
+ * A decide's answer (the only clear but the person's drop): `unknown` keeps the sending to be sent
+ * again; `answered` (applied, or refused and shown) clears it. Only for `sending` while it is the
+ * one in flight (pr2f, codex P2-1): an old sending's settle (its `finally` after a reload) leaves
+ * the next sending, and anything else, as it is.
  */
-export function settleHandoffDecide(worktreeId: string, outcome: 'unknown' | 'answered'): void {
-  const units = handoffUnitsOf(worktreeId);
-  if (units.inflight === null) return;
+export function settleHandoffDecide(sending: SentHandoffDecide, outcome: 'unknown' | 'answered'): void {
+  const units = handoffUnitsOf(sending.worktreeId);
+  if (units.inflight !== sending) return;
   commit({
     ...state,
-    units: { ...state.units, [worktreeId]: { ...units, inflight: null, pending: outcome === 'unknown' ? units.inflight : null } },
+    units: { ...state.units, [sending.worktreeId]: { ...units, inflight: null, pending: outcome === 'unknown' ? sending : null } },
   });
 }
 
-/** The person's drop of the unknown decide ("do not send it again"). */
-export function dropHandoffUnit(worktreeId: string): void {
-  const units = handoffUnitsOf(worktreeId);
-  if (units.pending === null) return;
-  commit({ ...state, units: { ...state.units, [worktreeId]: { ...units, pending: null } } });
+/** The person's drop of the unknown decide shown (`unit`, "do not send it again"); another is kept. */
+export function dropHandoffUnit(unit: SentHandoffDecide): void {
+  const units = handoffUnitsOf(unit.worktreeId);
+  if (units.pending !== unit) return;
+  commit({ ...state, units: { ...state.units, [unit.worktreeId]: { ...units, pending: null } } });
 }
 
 /** Starts the stop: refused while one runs or a cancel waits. */
@@ -208,7 +236,7 @@ export function endHandoffCancel(worktreeId: string): void {
 }
 
 function freshOpening(worktreeId: string, target: HandoffOpeningTarget): HandoffOpening {
-  return { token: {}, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false };
+  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false };
 }
 
 /**
@@ -232,7 +260,7 @@ export function liveHandoffOpeningFor(instanceId: string): HandoffOpening | null
 
 /** Writes what the opening `token` learnt (nothing once another opening started). */
 export function patchHandoffOpening(
-  token: object,
+  token: HandoffOpeningToken,
   patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped'>>
 ): void {
   if (state.opening?.token !== token) return;
@@ -240,7 +268,7 @@ export function patchHandoffOpening(
 }
 
 /** The opening `token` is the dialog's and has not been closed. */
-export function isLiveHandoffOpening(token: object | null): boolean {
+export function isLiveHandoffOpening(token: HandoffOpeningToken | null): boolean {
   return token !== null && state.opening?.token === token && !state.opening.closed;
 }
 
@@ -249,20 +277,21 @@ export function isLiveHandoffOpening(token: object | null): boolean {
  * of its worktree has started (the text after a cancel would ask the agent to propose to a
  * request that is over).
  */
-export function handoffTextSendable(token: object | null): boolean {
+export function handoffTextSendable(token: HandoffOpeningToken | null): boolean {
   return isLiveHandoffOpening(token) && !handoffUnitsOf(state.opening!.worktreeId).cancelling;
 }
 
-function markClosed(): void {
-  if (state.opening && !state.opening.closed) commit({ ...state, opening: { ...state.opening, closed: true } });
+function markClosed(token: HandoffOpeningToken): void {
+  if (state.opening?.token === token && !state.opening.closed) commit({ ...state, opening: { ...state.opening, closed: true } });
 }
 
 /**
- * The page hid the dialog (its `isOpen` went false): the opening is over. Work started for it
- * (a stop whose `end` answers later) goes no further. The units stay.
+ * The page hid the dialog that showed the opening `token` (its `isOpen` went false): that opening
+ * is over. Work started for it (a stop whose `end` answers later) goes no further. The units stay.
+ * Another opening (begun since) is not touched.
  */
-export function noteHandoffHidden(): void {
-  markClosed();
+export function noteHandoffHidden(token: HandoffOpeningToken): void {
+  markClosed(token);
 }
 
 /** What the open dialog holds now: the units of the worktree it was opened for. */
@@ -301,10 +330,21 @@ export function askHandoffClose(path: HandoffClosePath, hold: HandoffHold = curr
   return block;
 }
 
-/** Asks the rule for `path`; allowed, the opening is closed (the units are not touched). */
-export function closeHandoffOpening(path: HandoffClosePath): HandoffCloseBlock {
+/**
+ * What {@link closeHandoffOpening} answers: the rule's block, or `stale` — the opening asked for
+ * is not the current one (another began since), so nothing was asked nor closed.
+ */
+export type HandoffCloseAnswer = HandoffCloseBlock | 'stale';
+
+/**
+ * Asks the rule for `path` on behalf of the opening `token`; allowed, that opening is closed (the
+ * units are not touched). pr2f (codex P2-2): the close after an await (the cancel's answer, the
+ * plain stop's end) names the opening it was started for, so it never closes a newer one.
+ */
+export function closeHandoffOpening(token: HandoffOpeningToken, path: HandoffClosePath): HandoffCloseAnswer {
+  if (state.opening?.token !== token) return 'stale';
   const block = askHandoffClose(path);
-  if (block === null) markClosed();
+  if (block === null) markClosed(token);
   return block;
 }
 

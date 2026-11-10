@@ -26,7 +26,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 
-const rule = vi.hoisted(() => ({ off: false, perInstance: false }));
+const rule = vi.hoisted(() => ({ off: false, perInstance: false, tokenless: false }));
 vi.mock('@/lib/handoff/close-rule', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/handoff/close-rule')>();
   return {
@@ -34,11 +34,24 @@ vi.mock('@/lib/handoff/close-rule', async (importOriginal) => {
     askHandoffClose: (...args: Parameters<typeof actual.askHandoffClose>) => (rule.off ? null : actual.askHandoffClose(...args)),
     // pr2e: the page and the dialog close through `closeHandoffOpening` (it asks the rule inside
     // the module, which the mock above does not reach): off, it closes without asking.
-    closeHandoffOpening: (path: Parameters<typeof actual.closeHandoffOpening>[0]) => {
-      if (!rule.off) return actual.closeHandoffOpening(path);
-      actual.noteHandoffHidden();
+    // pr2f: the opening named by the caller; `rule.tokenless` (positive control) names the current
+    // one instead — the code before pr2f, whose closes and patches did not carry their opening.
+    closeHandoffOpening: (...[token, path]: Parameters<typeof actual.closeHandoffOpening>) => {
+      const of = rule.tokenless ? (actual.handoffStoreSnapshot().opening?.token ?? token) : token;
+      if (!rule.off) return actual.closeHandoffOpening(of, path);
+      actual.noteHandoffHidden(of);
       return null;
     },
+    patchHandoffOpening: (...[token, patch]: Parameters<typeof actual.patchHandoffOpening>) =>
+      actual.patchHandoffOpening(rule.tokenless ? (actual.handoffStoreSnapshot().opening?.token ?? token) : token, patch),
+    isLiveHandoffOpening: (token: Parameters<typeof actual.isLiveHandoffOpening>[0]) => {
+      if (!rule.tokenless) return actual.isLiveHandoffOpening(token);
+      const opening = actual.handoffStoreSnapshot().opening;
+      return token !== null && opening !== null && !opening.closed;
+    },
+    // `rule.tokenless`: a settle reaches whatever is in flight for the worktree (before pr2f).
+    settleHandoffDecide: (...[sending, outcome]: Parameters<typeof actual.settleHandoffDecide>) =>
+      actual.settleHandoffDecide(rule.tokenless ? (actual.handoffUnitsOf(sending.worktreeId).inflight ?? sending) : sending, outcome),
     // pr2e positive control: `rule.perInstance` puts the units back in the component's life — the
     // store is emptied when the dialog that read it is taken out (as its state was, before pr2e).
     subscribeHandoffStore: (listener: () => void) => {
@@ -78,7 +91,7 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
 import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
 import { memWriteLockOfOthers, publishMemWriteLock } from '@/components/mem/mem-write-lock';
-import { resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
+import { handoffStoreSnapshot, resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
 import type { HandoffProposalView, HandoffReadResponse, HandoffRequestView } from '@/lib/handoff/types';
 
 const A = 'wt-a';
@@ -94,7 +107,9 @@ let modeReads: string[];
 let modeAnswer: { status: number; body: unknown };
 let request: HandoffRequestView;
 let proposals: HandoffProposalView[];
-let decideMode: 'ok' | 'lose' | 'hold';
+let decideMode: 'ok' | 'lose' | 'hold' | 'error500';
+let readMode: 'ok' | 'hold';
+let releaseRead: (() => void) | null;
 let releaseDecide: (() => void) | null;
 let cancelMode: 'ok' | 'hold';
 let releaseCancel: (() => void) | null;
@@ -111,6 +126,9 @@ const view = (): HandoffReadResponse => ({ ok: true, request: { ...request }, pr
 beforeEach(() => {
   rule.off = false;
   rule.perInstance = false;
+  rule.tokenless = false;
+  readMode = 'ok';
+  releaseRead = null;
   killMode = 'ok';
   releaseKill = null;
   runningAnswer = 'none';
@@ -192,10 +210,13 @@ beforeEach(() => {
     if (step && worktree === A) {
       switch (step[1]) {
         case undefined:
+          if (readMode === 'hold') await new Promise<void>((resolve) => (releaseRead = resolve));
+          return reply(200, view());
         case '/sent':
         case '/send-failed':
           return reply(200, view());
         case '/decide': {
+          if (decideMode === 'error500') return reply(500, { error: 'boom' });
           if (body.ifVersion !== request.version) return reply(409, { ...view(), ok: false, code: 'version_conflict' });
           proposals = proposals.map((p) => ({ ...p, state: 'applied' as const }));
           request = { ...request, version: request.version + 2 };
@@ -233,6 +254,7 @@ beforeEach(() => {
   }) as unknown as typeof fetch;
 });
 afterEach(() => {
+  releaseRead?.();
   releaseDecide?.();
   releaseCancel?.();
   releaseKill?.();
@@ -794,5 +816,179 @@ describe('[#4227 pr2e] condition 4: no text after the cancel starts', () => {
   it('(negative control) the create answered with the dialog open: the text is sent once', async () => {
     await openedAwaiting();
     expect(sent('/send')).toHaveLength(1);
+  });
+});
+
+/**
+ * pr2f (PM decision in `pm-return-4227-pr2e-codex.md`; codex review-4227-pr2d P2-1・P2-2, PM
+ * Claude pr2e P3-1): an old continuation — a decide's `finally`, the cancel's answer, the plain
+ * stop's end, the create's answer — × a new sending / a new opening changes nothing. Each row runs
+ * twice: as the code is (nothing changes), and with `rule.tokenless` (the store's settle, close and
+ * patch reach the current sending / opening instead of their own: the code before pr2f), which
+ * brings back the review's finding. Negative controls: the same continuations on their own
+ * sending / opening (path 2・3 above, the create's row of condition 4, and the row below).
+ */
+describe('[#4227 pr2f] an old continuation × a new sending / a new opening', () => {
+  /** codex P2-1: a refused decide's reload is answered after a second confirm was sent. */
+  async function oldFinallyOverNextSending() {
+    await opened();
+    decideMode = 'error500';
+    readMode = 'hold';
+    press('handoff-approve-p1');
+    press('handoff-confirm');
+    await waitFor(() => expect(releaseRead).not.toBeNull());
+    decideMode = 'hold';
+    press('handoff-approve-p1');
+    press('handoff-confirm');
+    await waitFor(() => expect(releaseDecide).not.toBeNull());
+    readMode = 'ok';
+    await act(async () => releaseRead?.());
+    await settle();
+    return {
+      pendingShown: screen.queryByTestId('handoff-pending') !== null,
+      stillSending: screen.queryByTestId('handoff-write-locked')?.textContent?.includes('送信中') ?? false,
+    };
+  }
+
+  /** The page A left while `waitFor` holds A's work; B's page opens its own hand-off. */
+  async function leaveToB(first: { unmount: () => void }) {
+    first.unmount();
+    render(<Page worktreeId={B} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-plain');
+  }
+  const bStillOpen = () => ({
+    plainShown: screen.queryByTestId('handoff-plain') !== null,
+    open: handoffStoreSnapshot().opening?.worktreeId === B && handoffStoreSnapshot().opening?.closed === false,
+    target: page.handoffTarget,
+  });
+
+  /** codex P2-2: A's cancel waits, the person goes to B's page and opens B's hand-off, A's cancel is answered. */
+  async function oldCancelAnswerOverNewOpening() {
+    const first = render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-approve-p1');
+    await reach('cancelling');
+    await leaveToB(first);
+    await act(async () => releaseCancel?.());
+    await settle();
+    return bStillOpen();
+  }
+
+  /** codex P2-2: A's plain stop runs, the person goes to B's page and opens B's hand-off, A's stop ends. */
+  async function oldPlainStopOverNewOpening() {
+    const first = render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-approve-p1');
+    endAnswer = 'session_changed';
+    press('handoff-stop');
+    await screen.findByTestId('handoff-plain');
+    killMode = 'hold';
+    press('handoff-plain-stop');
+    await waitFor(() => expect(releaseKill).not.toBeNull());
+    await leaveToB(first);
+    killMode = 'ok';
+    await act(async () => releaseKill?.());
+    await settle();
+    return { ...bStillOpen(), stoppedShown: screen.queryByTestId('handoff-plain')?.textContent?.includes('停止しました') ?? false };
+  }
+
+  /** PM Claude pr2e P3-1: closed while the create is answered, opened again; the first create answers last. */
+  async function oldCreateOverNewOpening() {
+    createMode = 'hold';
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-loading');
+    await waitFor(() => expect(releaseCreate).not.toBeNull());
+    const firstCreate = releaseCreate!;
+    releaseCreate = null;
+    esc();
+    await waitFor(() => expect(page.handoffTarget).toBeNull());
+    createMode = 'ok';
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-approve-p1');
+    // What the first create answers now differs from what the second showed.
+    request = { ...request, state: 'awaiting_agent', version: 9 };
+    proposals = [];
+    await act(async () => firstCreate());
+    await settle();
+    return {
+      approveShown: screen.queryByTestId('handoff-approve-p1') !== null,
+      version: handoffStoreSnapshot().opening?.view?.request.version ?? null,
+      texts: sent('/send').length,
+    };
+  }
+
+  it('a decide’s finally (after its reload) × the next sending: the next stays in flight, nothing is unknown', async () => {
+    expect(await oldFinallyOverNextSending()).toEqual({ pendingShown: false, stillSending: true });
+    // The next sending's own end still says how it ended (lost: kept as unknown, to send again).
+    await act(async () => releaseDecide?.());
+    expect(await screen.findByTestId('handoff-pending')).toBeTruthy();
+    expect(button('handoff-pending-resend')?.disabled).toBe(false);
+  });
+
+  it('the cancel’s answer × a new opening on another page: B’s hand-off stays open as it was', async () => {
+    expect(await oldCancelAnswerOverNewOpening()).toEqual({ plainShown: true, open: true, target: TARGET });
+  });
+
+  it('the plain stop’s end × a new opening on another page: B’s hand-off stays, not called stopped', async () => {
+    expect(await oldPlainStopOverNewOpening()).toEqual({ plainShown: true, open: true, target: TARGET, stoppedShown: false });
+    expect(kills).toHaveLength(1);
+  });
+
+  it('the create’s answer × a new opening: the new opening’s request is shown as it was, its text sent once', async () => {
+    expect(await oldCreateOverNewOpening()).toEqual({ approveShown: true, version: 3, texts: 1 });
+  });
+
+  it('(negative control) a refused decide’s finally on its own sending, no next one: nothing kept as unknown', async () => {
+    await opened();
+    decideMode = 'error500';
+    press('handoff-approve-p1');
+    press('handoff-confirm');
+    await screen.findByTestId('handoff-notice');
+    await settle();
+    expect(screen.queryByTestId('handoff-pending')).toBeNull();
+    expect(screen.queryByTestId('handoff-write-locked')).toBeNull();
+    expect(sent('/decide')).toHaveLength(1);
+  });
+
+  describe('(positive controls) without the opening’s token and the sending’s identity the findings come back', () => {
+    beforeEach(() => {
+      rule.tokenless = true;
+    });
+
+    it('codex P2-1: the old finally makes the next sending unknown while it is still in flight', async () => {
+      expect((await oldFinallyOverNextSending()).pendingShown).toBe(true);
+    });
+
+    it('codex P2-2: A’s cancel answer closes B’s opening', async () => {
+      const after = await oldCancelAnswerOverNewOpening();
+      expect(after.open).toBe(false);
+      expect(after.plainShown).toBe(false);
+    });
+
+    it('codex P2-2: A’s plain stop end closes B’s opening', async () => {
+      const after = await oldPlainStopOverNewOpening();
+      expect(after.open).toBe(false);
+      expect(after.plainShown).toBe(false);
+    });
+
+    it('PM Claude P3-1: the old create’s answer rewrites the new opening’s request', async () => {
+      expect((await oldCreateOverNewOpening()).version).toBe(9);
+    });
   });
 });

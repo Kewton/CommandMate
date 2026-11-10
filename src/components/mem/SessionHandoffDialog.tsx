@@ -26,6 +26,10 @@
  * the dialog drawn again (PC ↔ phone, the page's Loading between worktrees, a remount) keeps
  * them and makes no second request. Only the person's choices and the notice are local.
  *
+ * After an await (pr2f, design §4.1.1): every continuation — a decide's settle, a close, a patch
+ * of the opening, a notice — carries the sending it started and the opening it was for, and does
+ * nothing once they are not the current ones (the store's API requires them).
+ *
  * @module components/mem/SessionHandoffDialog
  */
 'use client';
@@ -61,6 +65,7 @@ import {
   type HandoffClosePath,
   type HandoffDecideUnit,
   type HandoffOpening,
+  type HandoffOpeningToken,
   type SessionStopResult,
 } from '@/lib/handoff/close-rule';
 import type { HandoffProposalView, HandoffReadResponse } from '@/lib/handoff/types';
@@ -197,17 +202,20 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       const sent = await handoffApi.sendText(of.worktreeId, body, { cliToolId: of.target.cliToolId, instanceId: of.target.instanceId });
       const marked = sent.ok ? await handoffApi.sent(of.worktreeId, requestIdToSend) : await handoffApi.sendFailed(of.worktreeId, requestIdToSend);
       if (marked.ok && marked.body?.request) patchHandoffOpening(of.token, { view: marked.body });
-      setNotice(sent.ok ? null : { tone: 'alert', text: t('mem.handoff.sendFailed') });
+      if (isLiveHandoffOpening(of.token)) setNotice(sent.ok ? null : { tone: 'alert', text: t('mem.handoff.sendFailed') });
     },
     [t]
   );
 
-  /** This instance has handled the opening it shows (set on showing, cleared on hiding). */
-  const shownRef = useRef(false);
+  /**
+   * The opening this instance shows (set on showing, cleared on hiding). pr2f: hidden, it closes
+   * that opening only — never one begun since (another page's, or this page's next).
+   */
+  const shownRef = useRef<HandoffOpeningToken | null>(null);
   useEffect(() => {
     if (!isOpen || !target) {
-      shownRef.current = false;
-      noteHandoffHidden();
+      if (shownRef.current !== null) noteHandoffHidden(shownRef.current);
+      shownRef.current = null;
       return;
     }
     // pr2e: drawn again (PC ↔ phone, the page's Loading, a remount), the opening is found in the
@@ -216,10 +224,10 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     // opening never drops a unit (pr2c (10)・pr2d).
     let current = liveHandoffOpeningFor(target.instanceId);
     if (!current) {
-      if (shownRef.current) return;
+      if (shownRef.current !== null) return;
       current = beginHandoffOpening(worktreeId, target);
     }
-    shownRef.current = true;
+    shownRef.current = current.token;
     if (current.created !== 'no') return;
     const of = current;
     setChoices({});
@@ -262,18 +270,23 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
    */
   const decide = useCallback(
     async (unit: HandoffDecideUnit) => {
-      if (!isLiveHandoffOpening(token) || otherLock !== null) return;
-      if (!startHandoffDecide(unit)) return;
+      const of = token;
+      if (of === null || !isLiveHandoffOpening(of) || otherLock !== null) return;
+      // pr2f (codex P2-1): this sending — its settle, its `finally` included, names it.
+      const sending = startHandoffDecide(unit);
+      if (sending === null) return;
       setNotice(null);
       try {
-        const result = await handoffApi.decide(unit.worktreeId, unit.requestId, { ifVersion: unit.ifVersion, decisions: unit.decisions });
+        const result = await handoffApi.decide(sending.worktreeId, sending.requestId, { ifVersion: sending.ifVersion, decisions: sending.decisions });
         if (!result.ok && result.status === 0) {
           // Rule (4): not known whether it was written. Kept as it was, to send again.
-          settleHandoffDecide(unit.worktreeId, 'unknown');
-          setNotice({ tone: 'alert', text: t('mem.handoff.unknown') });
+          settleHandoffDecide(sending, 'unknown');
+          if (isLiveHandoffOpening(of)) setNotice({ tone: 'alert', text: t('mem.handoff.unknown') });
           return;
         }
-        settleHandoffDecide(unit.worktreeId, 'answered');
+        settleHandoffDecide(sending, 'answered');
+        // Another opening began meanwhile: what this answer says is not shown on it.
+        if (!isLiveHandoffOpening(of)) return;
         if (result.ok) {
           adopt(result.body);
           setChoices({});
@@ -288,8 +301,9 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         setNotice({ tone: 'alert', text: refusal(result) });
         if (!result.body?.request) await reload();
       } finally {
-        // Whatever went wrong, a decide that did not say how it ended is kept as unknown.
-        settleHandoffDecide(unit.worktreeId, 'unknown');
+        // Whatever went wrong, a decide that did not say how it ended is kept as unknown — this
+        // sending only: settled already (or another sending in flight since), nothing changes.
+        settleHandoffDecide(sending, 'unknown');
       }
     },
     [adopt, otherLock, refusal, reload, t, token]
@@ -313,10 +327,12 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
 
   const simpleWrite = useCallback(
     async (run: () => Promise<HandoffResult<HandoffReadResponse>>, success?: string) => {
-      if (!isLiveHandoffOpening(token) || handoffUnitsOf(forWorktree).cancelling) return;
+      const of = token;
+      if (of === null || !isLiveHandoffOpening(of) || handoffUnitsOf(forWorktree).cancelling) return;
       setWriting(true);
       try {
         const result = await run();
+        if (!isLiveHandoffOpening(of)) return;
         if (result.ok) {
           adopt(result.body);
           setNotice(success ? { tone: 'status', text: success } : null);
@@ -348,17 +364,21 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
 
   /**
    * The dialog's only call of `onClose` (pr2d): asks the rule ({@link closeHandoffOpening}) for
-   * `path`; refused, it stays and says why. The guard `handoff-close-paths-4227` keeps it the only one.
+   * `path` on behalf of the opening `of`; refused, it stays and says why. pr2f (codex P2-2): `of`
+   * is the opening the work was started for — after an await another may have begun, and then
+   * nothing is closed (`stale`). No opening yet (`null`, before the store has one for the target):
+   * the page closes it, asking the rule itself. The guard `handoff-close-paths-4227` keeps it the only one.
    */
   const closeBy = useCallback(
-    (path: HandoffClosePath): boolean => {
-      const block = closeHandoffOpening(path);
-      if (block !== null) {
-        setNotice({ tone: 'alert', text: t(CLOSE_NOTICE[block]) });
-        return false;
+    (of: HandoffOpeningToken | null, path: HandoffClosePath): 'closed' | 'refused' | 'stale' => {
+      const answer = of === null ? null : closeHandoffOpening(of, path);
+      if (answer === 'stale') return 'stale';
+      if (answer !== null) {
+        setNotice({ tone: 'alert', text: t(CLOSE_NOTICE[answer]) });
+        return 'refused';
       }
       onClose();
-      return true;
+      return 'closed';
     },
     [onClose, t]
   );
@@ -371,8 +391,9 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
    */
   const requestClose = useCallback(
     async (how: 'cancel' | 'close') => {
+      const of = token;
       if (how === 'close' || !view || !['awaiting_agent', 'reviewing', 'applying', 'ending'].includes(view.request.state)) {
-        closeBy('person');
+        closeBy(of, 'person');
         return;
       }
       const block = askHandoffClose('person');
@@ -386,10 +407,11 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       } finally {
         endHandoffCancel(forWorktree);
       }
-      // Not refused while no decide can start after the cancel; kept for the rule's sake.
-      if (!closeBy('cancel-answer')) await reload();
+      // Not refused while no decide can start after the cancel; kept for the rule's sake. pr2f:
+      // the opening the cancel was sent for — another begun meanwhile is neither closed nor read.
+      if (closeBy(of, 'cancel-answer') === 'refused') await reload();
     },
-    [closeBy, forWorktree, reload, t, view]
+    [closeBy, forWorktree, reload, t, token, view]
   );
 
   const resendText = useCallback(() => {
@@ -449,7 +471,8 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
    * codex P2-2): it says so and the stop stays, to be pressed again here.
    */
   const plainStop = useCallback(async () => {
-    if (stopped() || foreign || !token) return;
+    const of = token;
+    if (stopped() || foreign || of === null) return;
     if (!startHandoffStop(forWorktree)) return;
     setNotice(null);
     let result: SessionStopResult = 'unknown';
@@ -458,11 +481,13 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     } finally {
       endHandoffStop(forWorktree);
     }
+    // pr2f (codex P2-2): the opening this stop was pressed in is over — nothing more of it here.
+    if (!isLiveHandoffOpening(of)) return;
     if (result !== 'stopped') {
       setNotice({ tone: 'alert', text: t(result === 'unknown' ? 'mem.handoff.plainStopUnknown' : 'mem.handoff.plainStopFailed') });
       return;
     }
-    if (!closeBy('plain-stop-done')) patchHandoffOpening(token, { plainStopped: true });
+    if (closeBy(of, 'plain-stop-done') === 'refused') patchHandoffOpening(of, { plainStopped: true });
   }, [closeBy, foreign, forWorktree, onStop, stopped, t, token]);
 
   if (!isOpen || !target) return null;
@@ -516,7 +541,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
                 variant="ghost"
                 disabled={busy}
                 onClick={() => {
-                  dropHandoffUnit(forWorktree);
+                  dropHandoffUnit(pending);
                   setNotice(null);
                   void reload();
                 }}
