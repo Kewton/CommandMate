@@ -45,6 +45,15 @@
  *    `createRequire` result) takes a string only — the one exception is `src/i18n.ts`'s
  *    `../locales/${identifier}/<name>.json` — and `require` is never taken as a value. Type-only
  *    imports / exports and `typeof` pass.
+ * 9. pr2i (the PM's decision in `pm-return-4227-pr2h.md`: the guard's last form — names and places
+ *    fixed by tables, the meaning not followed). The store's export surface is `STORE_EXPORTS` (each
+ *    value and whether it writes; declarations only, no `export { … }` / default; in the store a
+ *    writer is called by a writer of the table only, never held as a value); the store's values are
+ *    re-exported per `STORE_REEXPORTS` only (the dialog's `handoffCloseBlock`); a value of `module` /
+ *    `node:module` is taken in `NODE_MODULE_IMPORTERS` only (qr-terminal.ts's
+ *    `import { createRequire } from 'node:module'`); a writer is referenced as a call's callee only
+ *    (a list of dependencies, an argument, a JSX attribute fail — no exception by a callee's name);
+ *    a reader is a file that takes a value (type-only imports are no readers).
  * 3. The paths named at the call sites are exactly `HANDOFF_CLOSE_PATHS` (no path declared and
  *    unused, none used and undeclared).
  * 4. The pages hand the dialog the hook's `closeHandoff` (directly, or as `onHandoffClose`).
@@ -161,7 +170,7 @@ interface Reference {
  * Every reference to one of `names` (pr2e, P3-1): not a declaration, an import, a property's name
  * nor a JSX attribute's name — a use, whether called, aliased, handed on or written.
  */
-function references(source: string, fileName: string, names: ReadonlySet<string>): Reference[] {
+function references(source: string, fileName: string, names: ReadonlySet<string>, dependencyLists: 'exempt' | 'count' = 'exempt'): Reference[] {
   const sf = parse(fileName, source);
   const found: Reference[] = [];
   const isDeclarationName = (node: ts.Identifier): boolean => {
@@ -174,8 +183,10 @@ function references(source: string, fileName: string, names: ReadonlySet<string>
     if (ts.isJsxAttribute(parent) && parent.name === node) return true;
     // pr2h (PM Claude pr2g P3-4): a type's position (`typeof x`) hands nothing on at run time.
     if (inTypePosition(node)) return true;
-    // A hook's list of dependencies names it without using it.
-    if (ts.isArrayLiteralExpression(parent) && ts.isCallExpression(parent.parent) && /^use(?:Callback|Effect|Memo)$/.test(parent.parent.expression.getText(sf))) return true;
+    // A hook's list of dependencies names it without using it (`onClose`, `setHandoffTarget`).
+    // pr2i (codex review-4227-pr2g P2-2): not for the store's writers — the exception goes by a
+    // callee's name (`useMemo`), and a list is a value handed to a function like any argument.
+    if (dependencyLists === 'exempt' && ts.isArrayLiteralExpression(parent) && ts.isCallExpression(parent.parent) && /^use(?:Callback|Effect|Memo)$/.test(parent.parent.expression.getText(sf))) return true;
     return false;
   };
   const visit = (node: ts.Node): void => {
@@ -488,10 +499,13 @@ function isPropertyName(node: ts.Identifier): boolean {
 
 /**
  * pr2h (the PM's decision in `pm-return-4227-pr2g.md`, PM Claude pr2g P3-3): the files that may
- * take a value from the store — the dialog, the page's hook and the PC page (a type only today).
- * Fixed here: a new reader (a wrapper of a writer, a bridge, an alias) fails until it is named.
+ * take a value from the store — the dialog and the page's hook. Fixed here: a new reader (a wrapper
+ * of a writer, a bridge, an alias) fails until it is named. pr2i (PM Claude pr2h P3-1, codex
+ * review-4227-pr2g P2-3): a reader is a file that takes a value; the PC page
+ * (`WorktreeDetailDesktop.tsx`) takes a type only (`import type { SessionStopResult }`), so it is
+ * not one, and a value import there fails.
  */
-const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK, 'src/components/worktree/WorktreeDetailDesktop.tsx']);
+const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK]);
 
 /**
  * pr2h: the invariant's first half. In `src/` but the store and {@link STORE_IMPORTERS}, nothing
@@ -564,6 +578,154 @@ function checkCreatedRequires(files: ReadonlyArray<{ file: string; source: strin
   return problems;
 }
 
+/** pr2i: `module` / `node:module` (where `createRequire` comes from), by the parsed specifier. */
+const NODE_MODULE = new Set(['module', 'node:module']);
+
+/**
+ * pr2i (the PM's decision in `pm-return-4227-pr2h.md` 3, PM Claude pr2h P2-2, codex
+ * review-4227-pr2g P2-1): the one file that may take a value from `module` / `node:module` — the
+ * real one today (`src/cli/utils/qr-terminal.ts`), with the one form it uses
+ * (`import { createRequire } from 'node:module'`, no alias). The guard does not follow what the
+ * loader is made from (its base, its arguments): a loader is made in this file only.
+ */
+const NODE_MODULE_IMPORTERS: Readonly<Record<string, string>> = { 'src/cli/utils/qr-terminal.ts': "import { createRequire } from 'node:module'" };
+
+/**
+ * pr2i: in `src/`, a value of `module` / `node:module` is taken in {@link NODE_MODULE_IMPORTERS}
+ * only, in its one form. Elsewhere any value import (named, aliased, default, namespace, side
+ * effect), a re-export, `import x = require(…)`, `require(…)` or `import(…)` of it fails, whatever
+ * it names. Type-only imports pass.
+ */
+function checkNodeModuleImports(files: ReadonlyArray<{ file: string; source: string }>): string[] {
+  const problems: string[] = [];
+  for (const { file, source } of files) {
+    const rel = posix(file);
+    const allowed = NODE_MODULE_IMPORTERS[rel];
+    const sf = parse(file, source);
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && NODE_MODULE.has(node.moduleSpecifier.text) && !node.importClause?.isTypeOnly) {
+        const clause = node.importClause;
+        const bindings = clause?.namedBindings;
+        const values = bindings && ts.isNamedImports(bindings) ? bindings.elements.filter((e) => !e.isTypeOnly) : [];
+        const theOneForm =
+          clause !== undefined &&
+          !clause.name &&
+          bindings !== undefined &&
+          ts.isNamedImports(bindings) &&
+          values.length === 1 &&
+          values[0].name.text === 'createRequire' &&
+          !values[0].propertyName &&
+          node.moduleSpecifier.text === 'node:module';
+        const takesValue = !clause || !!clause.name || (bindings !== undefined && (ts.isNamespaceImport(bindings) || values.length > 0));
+        if (takesValue && !(allowed && theOneForm)) {
+          problems.push(`${rel}: a value import of ${node.moduleSpecifier.text} (${node.getText(sf)}) — only ${Object.entries(NODE_MODULE_IMPORTERS).map(([f, form]) => `${f} (${form})`).join(', ')} may`);
+        }
+      }
+      if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier) && NODE_MODULE.has(node.moduleSpecifier.text) && !node.isTypeOnly) {
+        problems.push(`${rel}: re-exports from ${node.moduleSpecifier.text}`);
+      }
+      if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly && ts.isExternalModuleReference(node.moduleReference) && ts.isStringLiteral(node.moduleReference.expression) && NODE_MODULE.has(node.moduleReference.expression.text)) {
+        problems.push(`${rel}: import = require() of ${node.moduleReference.expression.text}`);
+      }
+      if (ts.isCallExpression(node) && node.arguments.length > 0 && (ts.isStringLiteral(node.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(node.arguments[0])) && NODE_MODULE.has(node.arguments[0].text)) {
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require')) problems.push(`${rel}: loads ${node.arguments[0].text} (${node.getText(sf)})`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return problems;
+}
+
+/** pr2i: the files that take a value from `module` / `node:module` (for the table's equality). */
+function nodeModuleImporters(files: ReadonlyArray<{ file: string; source: string }>): string[] {
+  return files
+    .filter(({ file, source }) =>
+      parse(file, source).statements.some((s) => ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier) && NODE_MODULE.has(s.moduleSpecifier.text) && !s.importClause?.isTypeOnly)
+    )
+    .map(({ file }) => posix(file));
+}
+
+/** pr2i: a value import / re-export of the store (not type-only): its file is a reader. */
+function takesStoreValue(file: string, statement: ts.Statement): boolean {
+  if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && namesStore(file, statement.moduleSpecifier.text)) {
+    const clause = statement.importClause;
+    if (!clause) return true;
+    if (clause.isTypeOnly) return false;
+    const bindings = clause.namedBindings;
+    return !!clause.name || (bindings !== undefined && (ts.isNamespaceImport(bindings) || bindings.elements.some((e) => !e.isTypeOnly)));
+  }
+  if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier) && namesStore(file, statement.moduleSpecifier.text) && !statement.isTypeOnly) {
+    const clause = statement.exportClause;
+    return !clause || ts.isNamespaceExport(clause) || clause.elements.some((e) => !e.isTypeOnly);
+  }
+  return false;
+}
+
+/** pr2i (PM Claude pr2h P3-1, codex review-4227-pr2g P2-3): the files that take a value from the store. */
+function storeReaders(files: ReadonlyArray<{ file: string; source: string }>): string[] {
+  return files.filter(({ file, source }) => posix(file) !== STORE && parse(file, source).statements.some((s) => takesStoreValue(file, s))).map(({ file }) => posix(file));
+}
+
+/**
+ * pr2i (the PM's decision 2, PM Claude pr2h P2-1): the names a file may re-export from the store —
+ * today the dialog's `handoffCloseBlock` (`export { handoffCloseBlock, type HandoffCloseBlock }`),
+ * a reader of the rule, not a writer. Fixed here, like {@link STORE_IMPORTERS}.
+ */
+const STORE_REEXPORTS: Readonly<Record<string, readonly string[]>> = { [DIALOG]: ['handoffCloseBlock'] };
+
+/**
+ * pr2i: the values a file hands on from the store, as `name` or `name as alias` — `export { … }
+ * from` the store, `export *`, and `export { x }` / `export default x` / `export = x` of a value
+ * imported from it. Type-only ones are not counted.
+ */
+function storeReexportsOf(file: string, source: string): string[] {
+  const sf = parse(file, source);
+  const imported = new Map<string, string>();
+  for (const s of sf.statements) {
+    if (!ts.isImportDeclaration(s) || !ts.isStringLiteral(s.moduleSpecifier) || !namesStore(file, s.moduleSpecifier.text) || s.importClause?.isTypeOnly) continue;
+    const clause = s.importClause;
+    if (clause?.name) imported.set(clause.name.text, 'default');
+    const bindings = clause?.namedBindings;
+    if (bindings && ts.isNamespaceImport(bindings)) imported.set(bindings.name.text, '*');
+    if (bindings && ts.isNamedImports(bindings)) for (const e of bindings.elements) if (!e.isTypeOnly) imported.set(e.name.text, (e.propertyName ?? e.name).text);
+  }
+  const out: string[] = [];
+  const named = (original: string, exportedAs: string): string => (original === exportedAs ? original : `${original} as ${exportedAs}`);
+  for (const s of sf.statements) {
+    if (ts.isExportDeclaration(s) && !s.isTypeOnly) {
+      const fromStore = !!s.moduleSpecifier && ts.isStringLiteral(s.moduleSpecifier) && namesStore(file, s.moduleSpecifier.text);
+      const clause = s.exportClause;
+      if (fromStore && !clause) out.push('*');
+      else if (fromStore && clause && ts.isNamespaceExport(clause)) out.push(`* as ${clause.name.text}`);
+      else if (clause && ts.isNamedExports(clause)) {
+        for (const e of clause.elements) {
+          if (e.isTypeOnly) continue;
+          const local = (e.propertyName ?? e.name).text;
+          if (fromStore) out.push(named(local, e.name.text));
+          else if (!s.moduleSpecifier && imported.has(local)) out.push(named(imported.get(local)!, e.name.text));
+        }
+      }
+    }
+    if (ts.isExportAssignment(s) && ts.isIdentifier(s.expression) && imported.has(s.expression.text)) out.push(named(imported.get(s.expression.text)!, 'default'));
+  }
+  return out;
+}
+
+/** pr2i: in `src/`, the store's values are re-exported by {@link STORE_REEXPORTS} only, under their own names. */
+function checkStoreReexports(files: ReadonlyArray<{ file: string; source: string }>): string[] {
+  const problems: string[] = [];
+  for (const { file, source } of files) {
+    const rel = posix(file);
+    if (rel === STORE) continue;
+    const allowed = STORE_REEXPORTS[rel] ?? [];
+    for (const name of storeReexportsOf(file, source)) {
+      if (!allowed.includes(name)) problems.push(`${rel}: re-exports ${name} from the store (only ${Object.entries(STORE_REEXPORTS).map(([f, names]) => `${f}: ${names.join(', ')}`).join('; ')} may)`);
+    }
+  }
+  return problems;
+}
+
 /**
  * pr2f: the store's exported functions that write it, and the type of the first parameter each
  * must take (`null`: none, it starts something; `string`: a flag's worktree id).
@@ -582,6 +744,86 @@ const STORE_WRITERS: Record<string, string | null> = {
   closeHandoffOpening: 'HandoffOpeningToken',
   resetHandoffStoreForTests: null,
 };
+
+/**
+ * pr2i (the PM's decision 1 in `pm-return-4227-pr2h.md`, PM Claude pr2h P2-1): the store's export
+ * surface — every value it exports, and whether it is a writer ({@link STORE_WRITERS}). The real
+ * list today; a value that is not here, or a name here that is not exported, fails.
+ */
+const STORE_EXPORTS: Readonly<Record<string, 'writer' | 'reader'>> = {
+  handoffCloseBlock: 'reader',
+  HANDOFF_CLOSE_PATHS: 'reader',
+  subscribeHandoffStore: 'reader',
+  handoffStoreSnapshot: 'reader',
+  handoffUnitsOf: 'reader',
+  startHandoffDecide: 'writer',
+  settleHandoffDecide: 'writer',
+  dropHandoffUnit: 'writer',
+  startHandoffStop: 'writer',
+  endHandoffStop: 'writer',
+  startHandoffCancel: 'writer',
+  endHandoffCancel: 'writer',
+  beginHandoffOpening: 'writer',
+  liveHandoffOpeningFor: 'reader',
+  patchHandoffOpening: 'writer',
+  isLiveHandoffOpening: 'reader',
+  handoffTextSendable: 'reader',
+  noteHandoffHidden: 'writer',
+  currentHandoffHold: 'reader',
+  handoffUnitsLock: 'reader',
+  listenHandoffRefusal: 'reader',
+  askHandoffClose: 'reader',
+  closeHandoffOpening: 'writer',
+  resetHandoffStoreForTests: 'writer',
+};
+
+/**
+ * pr2i: the store exports its values by their declarations only (`export function` / `export
+ * const`), each named in {@link STORE_EXPORTS} — no `export { … }` (an alias or not), no `export
+ * default` / `export =`, no export that is not in the table. In the store a writer is referenced by
+ * its declaration and as a call's callee only, and called by a writer of the table only: a value
+ * that holds one (an object, an array) or a wrapper of one (a function that is not a writer) fails.
+ */
+function checkStoreSurface(source: string): string[] {
+  const problems: string[] = [];
+  const sf = parse(STORE, source);
+  const exported = new Set<string>();
+  for (const statement of sf.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.isTypeOnly) continue;
+      const clause = statement.exportClause;
+      if (!clause || ts.isNamespaceExport(clause)) problems.push(`the store re-exports ${statement.getText(sf)}`);
+      else for (const e of clause.elements) if (!e.isTypeOnly) problems.push(`the store exports ${e.getText(sf)} by \`export { … }\` (its values are exported by their declarations only)`);
+      continue;
+    }
+    if (ts.isExportAssignment(statement)) {
+      problems.push(`the store has \`${statement.getText(sf)}\``);
+      continue;
+    }
+    const modifiers = ts.canHaveModifiers(statement) ? ts.getModifiers(statement) : undefined;
+    if (!modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
+    if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) continue;
+    if (modifiers.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+      problems.push('the store has an `export default` declaration');
+      continue;
+    }
+    if (ts.isFunctionDeclaration(statement) && statement.name) exported.add(statement.name.text);
+    else if (ts.isVariableStatement(statement)) {
+      for (const d of statement.declarationList.declarations) {
+        if (ts.isIdentifier(d.name)) exported.add(d.name.text);
+        else problems.push(`the store exports a destructured ${d.name.getText(sf)}`);
+      }
+    } else if ((ts.isClassDeclaration(statement) || ts.isEnumDeclaration(statement)) && statement.name) exported.add(statement.name.text);
+    else problems.push(`the store exports ${statement.getText(sf).slice(0, 60)} (not a function, a const or a type)`);
+  }
+  for (const name of exported) if (!(name in STORE_EXPORTS)) problems.push(`the store exports ${name}, not in STORE_EXPORTS`);
+  for (const name of Object.keys(STORE_EXPORTS)) if (!exported.has(name)) problems.push(`${name} is in STORE_EXPORTS but the store does not export it`);
+  for (const ref of references(source, STORE, new Set(Object.keys(STORE_WRITERS)), 'count')) {
+    if (ref.callArgs === null) problems.push(`the store references ${ref.name} in ${ref.owner ?? 'the top level'} without calling it (a writer held as a value)`);
+    else if (ref.owner === null || STORE_EXPORTS[ref.owner] !== 'writer') problems.push(`the store calls ${ref.name} in ${ref.owner ?? 'the top level'}, not a writer of STORE_EXPORTS (a wrapper of a writer)`);
+  }
+  return problems;
+}
 
 function checkStoreSignatures(source: string): string[] {
   const problems: string[] = [];
@@ -636,7 +878,8 @@ function checkWriterHandOn(files: ReadonlyArray<{ file: string; source: string }
       ts.forEachChild(node, visit);
     };
     visit(sf);
-    for (const ref of references(source, file, writers)) {
+    // pr2i: a writer is referenced only as a call's callee — no exception (a list of dependencies included).
+    for (const ref of references(source, file, writers, 'count')) {
       if (ref.callArgs === null) problems.push(`${file}: ${ref.name} referenced in ${ref.owner ?? 'the top level'} without being called (handed on)`);
     }
   }
@@ -677,7 +920,17 @@ function checkBrandCasts(files: ReadonlyArray<{ file: string; source: string }>)
  * another name. Type-only references pass.
  */
 function checkStoreReach(files: ReadonlyArray<{ file: string; source: string }>): string[] {
-  return [...checkStoreImporters(files), ...checkImportForms(files), ...checkWriterHandOn(files), ...checkCreatedRequires(files)];
+  const store = files.filter(({ file }) => posix(file) === STORE);
+  return [
+    ...checkStoreImporters(files),
+    ...checkImportForms(files),
+    ...checkWriterHandOn(files),
+    ...checkCreatedRequires(files),
+    // pr2i: the names and the places fixed by tables (the PM's decision in `pm-return-4227-pr2h.md`).
+    ...store.flatMap(({ source }) => checkStoreSurface(source)),
+    ...checkStoreReexports(files),
+    ...checkNodeModuleImports(files),
+  ];
 }
 
 /** The path names used at the call sites of the two sources. */
@@ -729,11 +982,20 @@ describe('[#4227 pr2d] every path that closes the hand-off asks the one rule', (
     expect(sources.some(({ file }) => posix(file) === I18N)).toBe(true);
     expect(checkStoreReach(sources)).toEqual([]);
     // The allowed files are the real readers of the store today (a name left over fails too).
-    const readers = sources.filter(({ file, source }) => {
-      const sf = parse(file, source);
-      return sf.statements.some((s) => ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier) && namesStore(file, s.moduleSpecifier.text));
-    });
-    expect(readers.map(({ file }) => posix(file)).sort()).toEqual([...STORE_IMPORTERS].sort());
+    // pr2i: a reader takes a value (type-only imports are not counted).
+    expect(storeReaders(sources).sort()).toEqual([...STORE_IMPORTERS].sort());
+  });
+
+  it('pr2i: the tables are the real sources today — the store’s exports, its re-exports, the importers of node:module', { timeout: 60_000 }, () => {
+    const sources = sourcesUnder('src').map((file) => ({ file, source: read(file) }));
+    expect(checkStoreSurface(read(STORE))).toEqual([]);
+    // The table's writers are STORE_WRITERS (one list of what writes the store).
+    expect(Object.keys(STORE_EXPORTS).filter((name) => STORE_EXPORTS[name] === 'writer').sort()).toEqual(Object.keys(STORE_WRITERS).sort());
+    const reexports = sources.flatMap(({ file, source }) => (posix(file) === STORE ? [] : storeReexportsOf(file, source).map((name) => `${posix(file)}: ${name}`)));
+    expect(reexports.sort()).toEqual(Object.entries(STORE_REEXPORTS).flatMap(([file, names]) => names.map((name) => `${file}: ${name}`)).sort());
+    expect(checkStoreReexports(sources)).toEqual([]);
+    expect(nodeModuleImporters(sources).sort()).toEqual(Object.keys(NODE_MODULE_IMPORTERS).sort());
+    expect(checkNodeModuleImports(sources)).toEqual([]);
   });
 
   it('the paths named at the call sites are exactly HANDOFF_CLOSE_PATHS', () => {
@@ -1090,5 +1352,159 @@ describe('[#4227 pr2h] the invariant: a writer is reached only by a static impor
     // In an allowed file, `typeof` of a writer is not a hand-on (PM Claude pr2g P3-4).
     const dialog = withHead(DIALOG, 'type CloseOf = typeof closeHandoffOpening;\nexport type { CloseOf };');
     expect(checkStoreReach([dialog])).toEqual([]);
+  });
+});
+
+// pr2i (the PM's decision in `pm-return-4227-pr2h.md`: the guard's last form — names and places fixed
+// by tables, the meaning (bases, arguments, data flow) not followed). One case per form, on a copy
+// under `os.tmpdir()`; the real sources, a new type-only file, qr-terminal.ts and src/i18n.ts pass.
+describe('[#4227 pr2i] names and places fixed by tables: the store’s exports, its re-exports, node:module, callees only', () => {
+  let dir: string | null = null;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = null;
+  });
+  const write = (file: string, source: string): { file: string; source: string } => {
+    dir = dir ?? mkdtempSync(path.join(tmpdir(), 'handoff-close-paths-pr2i-'));
+    const copy = path.join(dir, path.basename(file));
+    writeFileSync(copy, source);
+    return { file, source: readFileSync(copy, 'utf8') };
+  };
+  /** `file`'s real source with `from` replaced (it must be there) and `tail` put last. */
+  const changed = (file: string, from: string, to: string, tail = ''): { file: string; source: string } => {
+    const source = read(file);
+    expect(source.includes(from)).toBe(true);
+    return write(file, `${source.replace(from, to)}${tail ? `\n${tail}\n` : ''}`);
+  };
+  const withTail = (file: string, tail: string): { file: string; source: string } => write(file, `${read(file)}\n${tail}\n`);
+  const withHead = (file: string, head: string): { file: string; source: string } => write(file, `${head}\n${read(file)}`);
+  const PANEL = 'src/components/mem/MemItemsPanel.tsx';
+  const DESKTOP = 'src/components/worktree/WorktreeDetailDesktop.tsx';
+  const QR = 'src/cli/utils/qr-terminal.ts';
+
+  // 1. The store's export surface (PM Claude pr2h P2-1).
+  it.each([
+    ['an aliased export of a writer', "export { closeHandoffOpening as closeIt };", /exports closeHandoffOpening as closeIt by `export \{ … \}`/],
+    ['a same-name `export { … }` of a writer', 'export { dropHandoffUnit };', /exports dropHandoffUnit by `export \{ … \}`/],
+    ['an object holding a writer', 'export const handoffApi = { close: closeHandoffOpening };', /references closeHandoffOpening in handoffApi without calling it/],
+    ['an array holding a writer (not exported)', 'const writers = [dropHandoffUnit];\nexport const writersCount = writers.length;', /references dropHandoffUnit in writers without calling it/],
+    ['a wrapper function of a writer', "export function closeWrap(t: HandoffOpeningToken): HandoffCloseAnswer {\n  return closeHandoffOpening(t, 'dialog');\n}", /calls closeHandoffOpening in closeWrap, not a writer of STORE_EXPORTS/],
+    ['`export default` of a writer', 'export default closeHandoffOpening;', /the store has `export default closeHandoffOpening;`/],
+    ['a value not in the table', 'export const extra = 1;', /the store exports extra, not in STORE_EXPORTS/],
+  ])('the store: %s fails', (_label, tail, expected) => {
+    const store = withTail(STORE, tail);
+    expect(checkStoreSurface(store.source).join('\n')).toMatch(expected);
+    expect(checkStoreReach([store]).join('\n')).toMatch(expected);
+  });
+
+  it('the store: a reader of the table that wraps a writer fails (the name is in the table, the call is not a writer’s)', () => {
+    const store = changed(STORE, 'export function handoffStoreSnapshot(): HandoffStoreState {\n', "export function handoffStoreSnapshot(): HandoffStoreState {\n  if (state.opening) closeHandoffOpening(state.opening.token, 'dialog');\n");
+    // checkStoreSignatures saw nothing: the body calls no commit / markClosed / writeFlags itself.
+    expect(checkStoreSignatures(store.source)).toEqual([]);
+    expect(checkStoreSurface(store.source).join('\n')).toMatch(/calls closeHandoffOpening in handoffStoreSnapshot, not a writer/);
+  });
+
+  it('the store: a name of the table that is no longer exported fails (the table is the whole surface)', () => {
+    const store = changed(STORE, 'export function handoffUnitsLock(', 'function handoffUnitsLock(');
+    expect(checkStoreSurface(store.source).join('\n')).toMatch(/handoffUnitsLock is in STORE_EXPORTS but the store does not export it/);
+  });
+
+  it('PM Claude pr2h P2-1: the chain store → dialog → a file outside fails at the store and at the dialog', () => {
+    const store = withTail(STORE, "export { closeHandoffOpening as closeIt };\nexport const handoffApi2 = { close: closeHandoffOpening };");
+    const dialog = changed(DIALOG, 'export { handoffCloseBlock, type HandoffCloseBlock }', 'export { handoffCloseBlock, closeIt, handoffApi2, type HandoffCloseBlock }');
+    const panel = withHead(PANEL, "import { closeIt } from '@/components/mem/SessionHandoffDialog';\nexport const f = closeIt;");
+    const problems = checkStoreReach([store, dialog, panel]).join('\n');
+    expect(problems).toMatch(/the store exports closeHandoffOpening as closeIt/);
+    expect(problems).toMatch(/SessionHandoffDialog.tsx: re-exports closeIt from the store/);
+    expect(problems).toMatch(/SessionHandoffDialog.tsx: re-exports handoffApi2 from the store/);
+  });
+
+  // 2. The re-exports of the store (fixed names).
+  it.each([
+    ['the dialog re-exports a name not in the table', () => changed(DIALOG, 'export { handoffCloseBlock, type HandoffCloseBlock }', 'export { handoffCloseBlock, handoffUnitsOf, type HandoffCloseBlock }'), /SessionHandoffDialog.tsx: re-exports handoffUnitsOf from the store/],
+    ['the dialog re-exports the allowed name under an alias', () => changed(DIALOG, 'export { handoffCloseBlock, type HandoffCloseBlock }', 'export { handoffCloseBlock as closeBlock, type HandoffCloseBlock }'), /re-exports handoffCloseBlock as closeBlock from the store/],
+    ['the dialog re-exports an imported value locally (`export { x }`)', () => withTail(DIALOG, 'export { handoffUnitsLock };'), /SessionHandoffDialog.tsx: re-exports handoffUnitsLock from the store/],
+    ['the hook re-exports the allowed name (another file than the table’s)', () => withHead(HOOK, "export { handoffCloseBlock } from '@/lib/handoff/close-rule';"), /useWorktreeDetailController.ts: re-exports handoffCloseBlock from the store/],
+  ])('re-exports: %s fails', (_label, make, expected) => {
+    expect(checkStoreReach([make()]).join('\n')).toMatch(expected);
+  });
+
+  // 3. `module` / `node:module` by file (PM Claude pr2h P2-2, codex review-4227-pr2g P2-1).
+  it('PM Claude pr2h P2-2 (C1): createRequire imported under an alias, its loader reading the store, fails', () => {
+    const one = write('src/zz/new.ts', "import { createRequire as cr } from 'node:module';\nconst load = cr(__filename);\nexport const g = load('../lib/handoff/close-rule').closeHandoffOpening;\n");
+    // What pr2h's guard saw: nothing (the loader is found by the name `createRequire`).
+    expect([...checkStoreImporters([one]), ...checkImportForms([one]), ...checkWriterHandOn([one]), ...checkCreatedRequires([one])]).toEqual([]);
+    expect(checkStoreReach([one]).join('\n')).toMatch(/src\/zz\/new.ts: a value import of node:module/);
+  });
+
+  it.each([
+    ['a namespace import (C2)', "import * as nm from 'node:module';\nexport const r = nm.createRequire(__filename);", /a value import of node:module/],
+    ['a default import (C3)', "import Module from 'module';\nexport const r = Module.createRequire(__filename);", /a value import of module/],
+    ['createRequire under its own name in another file (codex: the base by `new URL`)', "import { createRequire } from 'node:module';\nconst r = createRequire(new URL('./lib/handoff/close-rule.ts', import.meta.url));\nexport const g = () => r('./close-rule.ts');", /src\/zz\/new.ts: a value import of node:module/],
+    ['another name of module', "import { builtinModules } from 'module';\nexport const all = builtinModules;", /a value import of module/],
+    ['a side-effect import', "import 'node:module';", /a value import of node:module/],
+    ['require() of module', "const m = require('node:module');\nexport const r = m.createRequire(__filename);", /loads node:module/],
+    ['import() of module', "export const later = () => import('module');", /loads module/],
+    ['a re-export from module', "export { createRequire } from 'node:module';", /re-exports from node:module/],
+  ])('node:module: %s fails', (_label, source, expected) => {
+    expect(checkStoreReach([write('src/zz/new.ts', `${source}\n`)]).join('\n')).toMatch(expected);
+  });
+
+  it('node:module: the allowed file with another form (an alias) fails', () => {
+    const qr = changed(QR, "import { createRequire } from 'node:module';", "import { createRequire as make } from 'node:module';");
+    expect(checkStoreReach([qr]).join('\n')).toMatch(/src\/cli\/utils\/qr-terminal.ts: a value import of node:module/);
+  });
+
+  // 4. A writer is referenced only as a call's callee (codex review-4227-pr2g P2-2).
+  it.each([
+    ['codex: a list of dependencies handed to a function named useMemo', HOOK, 'export const useLeak = (useMemo: (f: () => null, d: unknown[]) => unknown) => useMemo(() => null, [closeHandoffOpening]);', /closeHandoffOpening referenced in useLeak without being called/],
+    ['a list of dependencies of React’s useCallback', HOOK, 'export const useKeep = () => useCallback(() => null, [dropHandoffUnit]);', /dropHandoffUnit referenced in useKeep without being called/],
+    ['an argument', DIALOG, 'export const register = (f: unknown): unknown => f;\nexport const leaked = register(patchHandoffOpening);', /patchHandoffOpening referenced in leaked without being called/],
+    ['a JSX attribute', DIALOG, 'export const Leak = () => <button type="button" onClick={endHandoffStop as never} />;', /endHandoffStop referenced in Leak without being called/],
+  ])('callees only: %s fails', (_label, file, tail, expected) => {
+    const one = withTail(file, tail);
+    expect(checkStoreReach([one]).join('\n')).toMatch(expected);
+  });
+
+  it('callees only: pr2h’s exception by the callee’s name saw the lists of dependencies', () => {
+    const one = withTail(HOOK, 'export const useLeak = (useMemo: (f: () => null, d: unknown[]) => unknown) => useMemo(() => null, [closeHandoffOpening]);');
+    const writers = new Set(Object.keys(STORE_WRITERS));
+    expect(references(one.source, HOOK, writers, 'exempt').filter((ref) => ref.callArgs === null)).toEqual([]);
+    expect(references(one.source, HOOK, writers, 'count').filter((ref) => ref.callArgs === null)).not.toEqual([]);
+  });
+
+  // 5. Readers are the files that take a value (PM Claude pr2h P3-1, codex review-4227-pr2g P2-3).
+  it('readers: a value import in the PC page (a type-only reader today, not in the table) fails', () => {
+    const desktop = withHead(DESKTOP, "import { handoffUnitsLock } from '@/lib/handoff/close-rule';");
+    expect(checkStoreReach([desktop]).join('\n')).toMatch(/WorktreeDetailDesktop.tsx: imports handoffUnitsLock from the store/);
+    expect(storeReaders([desktop])).toEqual([DESKTOP]);
+  });
+
+  it('(negative control) a new file that imports types only is no reader and passes; the PC page as it is too', () => {
+    const one = write(
+      'src/zz/types-only.ts',
+      "import type { SessionStopResult } from '@/lib/handoff/close-rule';\nimport { type HandoffHold } from '@/lib/handoff/close-rule';\nexport type { HandoffOpeningToken } from '@/lib/handoff/close-rule';\nexport type R = SessionStopResult | HandoffHold;\n"
+    );
+    expect(storeReaders([one])).toEqual([]);
+    expect(checkStoreReach([one])).toEqual([]);
+    const desktop = { file: DESKTOP, source: read(DESKTOP) };
+    expect(storeReaders([desktop])).toEqual([]);
+    expect(checkStoreReach([desktop])).toEqual([]);
+  });
+
+  // 6. The locales' substitution is one identifier (PM Claude pr2h P3-3).
+  it('the locales’ template with a substitution that is not an identifier (a call) fails', () => {
+    // The tail is the allowed one: only the identifier's condition makes it red.
+    expect(/^\/[A-Za-z0-9_-]+\.json$/.test('/common.json')).toBe(true);
+    const one = withTail(I18N, 'export const f = (l: string) => import(`../locales/${String(l)}/common.json`);');
+    expect(checkStoreReach([one]).join('\n')).toMatch(/src\/i18n.ts: import\(\) with a template specifier/);
+  });
+
+  // 7. Negative controls of the tables.
+  it('(negative control) the store, the dialog, the hook, qr-terminal.ts and src/i18n.ts as they are pass', () => {
+    const files = [STORE, DIALOG, HOOK, QR, I18N].map((file) => ({ file, source: read(file) }));
+    expect(checkStoreReach(files)).toEqual([]);
+    // An unchanged copy of the store passes the surface (the table is the real list).
+    expect(checkStoreSurface(withTail(STORE, '// unchanged').source)).toEqual([]);
   });
 });
