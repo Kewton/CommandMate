@@ -31,6 +31,14 @@
  * while one is set, so an end is always its own start's). Other sources import this module's
  * functions by name only: no alias (`as`) nor namespace (`* as`) — the guard fails on them.
  *
+ * pr2g (codex review-4227-pr2e P2, PM Claude pr2f P3-3): the store's writers (its starts, settle,
+ * drop, close, hide, patch and the flags' ends) are called where they are imported and handed on
+ * nowhere — no re-export of one (same name or not, from here or from a bridge), no import of one
+ * under an alias from any module, no reference that is not a call — and `import()` / `require()`
+ * take a plain string. The store still hands the current opening and units to the dialog's render
+ * (`handoffStoreSnapshot`, `handoffUnitsOf`, `liveHandoffOpeningFor`): a dialog drawn again and the
+ * person's drop / resend of the unit shown need them (PM Claude pr2f P3-1, tracked in #4289).
+ *
  * @module lib/handoff/close-rule
  */
 import type { HandoffDecision } from './screen-client';

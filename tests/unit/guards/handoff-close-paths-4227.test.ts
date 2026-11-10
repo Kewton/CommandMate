@@ -29,6 +29,12 @@
  *    drop, close, hide and patch take the sending / the opening they are for (`SentHandoffDecide`,
  *    `HandoffOpeningToken`) as their first parameter; no other exported function writes the store
  *    but its starts and the flags' ends; and no source but the store casts to those types.
+ * 7. pr2g (codex review-4227-pr2e P2, PM Claude pr2f P3-3, the PM's decision (a) in
+ *    `pm-return-4227-pr2f-codex.md`): the store's writers (`STORE_WRITERS`) are handed on nowhere in
+ *    `src/` — no re-export (same name or aliased, of the store's or a bridge's, `export { x }` of an
+ *    import), no `export default`, no import of one under an alias from any module (a bridge's
+ *    user), no reference but a call — and `import()` / `require()` take a plain string (a template
+ *    with a substitution or a computed specifier fails, but for a fixed head the store is not under).
  * 3. The paths named at the call sites are exactly `HANDOFF_CLOSE_PATHS` (no path declared and
  *    unused, none used and undeclared).
  * 4. The pages hand the dialog the hook's `closeHandoff` (directly, or as `onHandoffClose`).
@@ -318,11 +324,35 @@ function namesStore(file: string, specifier: string): boolean {
   return resolved === target;
 }
 
+/**
+ * pr2g (codex review-4227-pr2e P2, PM Claude pr2f P3-3): a specifier that is not a plain string —
+ * a template with a substitution, or computed — may name the store without the guard seeing it.
+ * It is allowed only when its fixed head is a directory the store is not under (the locales'
+ * `../locales/${locale}/…` of `src/i18n.ts`); a template without substitution is read as a string.
+ */
+function computedSpecifierProblem(file: string, arg: ts.Expression, sf: ts.SourceFile): string | null {
+  if (ts.isStringLiteral(arg)) return null;
+  if (ts.isNoSubstitutionTemplateLiteral(arg)) return namesStore(file, arg.text) ? 'names the store' : null;
+  if (ts.isTemplateExpression(arg)) {
+    const head = arg.head.text;
+    const dir = head.endsWith('/') ? head : null;
+    if (dir !== null && (dir.startsWith('.') || dir.startsWith('@/'))) {
+      const resolved = dir.startsWith('@/')
+        ? path.posix.join('src', dir.slice(2))
+        : path.posix.normalize(path.posix.join(path.posix.dirname(file.split(path.sep).join('/')), dir));
+      const under = resolved.endsWith('/') ? resolved : `${resolved}/`;
+      if (!STORE.startsWith(under)) return null;
+    }
+    return `a template specifier (${arg.getText(sf)})`;
+  }
+  return `a computed specifier (${arg.getText(sf)})`;
+}
+
 /** pr2f: the ways of reaching the store's functions under another name, in `src/` (empty: none). */
 function checkImportForms(files: ReadonlyArray<{ file: string; source: string }>): string[] {
   const problems: string[] = [];
   for (const { file, source } of files) {
-    if (!/close-rule/.test(source)) continue;
+    if (!/close-rule|\bimport\s*\(|\brequire\s*\(/.test(source)) continue;
     const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const visit = (node: ts.Node): void => {
       if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && namesStore(file, node.moduleSpecifier.text)) {
@@ -342,6 +372,18 @@ function checkImportForms(files: ReadonlyArray<{ file: string; source: string }>
       if (ts.isCallExpression(node) && node.arguments.length > 0 && ts.isStringLiteral(node.arguments[0]) && namesStore(file, node.arguments[0].text)) {
         if (node.expression.kind === ts.SyntaxKind.ImportKeyword) problems.push(`${file}: a dynamic import() of the store`);
         if (ts.isIdentifier(node.expression) && node.expression.text === 'require') problems.push(`${file}: a require() of the store`);
+      }
+      // pr2g: import() / require() with a template or a computed specifier.
+      const loader = ts.isCallExpression(node)
+        ? node.expression.kind === ts.SyntaxKind.ImportKeyword
+          ? 'import()'
+          : ts.isIdentifier(node.expression) && node.expression.text === 'require'
+            ? 'require()'
+            : null
+        : null;
+      if (loader && ts.isCallExpression(node)) {
+        const problem = node.arguments.length === 0 ? 'no specifier' : computedSpecifierProblem(file, node.arguments[0], sf);
+        if (problem) problems.push(`${file}: ${loader} with ${problem}`);
       }
       ts.forEachChild(node, visit);
     };
@@ -384,6 +426,47 @@ function checkStoreSignatures(source: string): string[] {
     const expected = STORE_WRITERS[name];
     const first = statement.parameters[0]?.type?.getText(sf) ?? null;
     if (first !== expected) problems.push(`${name} takes ${first ?? 'nothing'} first, not ${expected ?? 'nothing'}`);
+  }
+  return problems;
+}
+
+/**
+ * pr2g (codex review-4227-pr2e P2, PM Claude pr2f P3-3, the PM's decision (a)): the store's writers
+ * ({@link STORE_WRITERS}: its starts, settle, drop, close, hide, patch and the flags' ends) are
+ * called where they are imported, and handed on nowhere. In `src/` but the store: no re-export of
+ * one (`export { dropHandoffUnit } from …`, with or without an alias, from the store or not, nor
+ * `export { x }` of an import), no `export default` / `export =` of one, no import of one under an
+ * alias from any module (the second step of a bridge), and no reference that is not a call (a
+ * value, an object's property, an argument). A chain of re-exports is cut at its first link.
+ */
+function checkWriterHandOn(files: ReadonlyArray<{ file: string; source: string }>): string[] {
+  const writers = new Set(Object.keys(STORE_WRITERS));
+  const mention = new RegExp(`\\b(?:${[...writers].join('|')})\\b`);
+  const problems: string[] = [];
+  for (const { file, source } of files) {
+    if (file === STORE || !mention.test(source)) continue;
+    const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+    const visit = (node: ts.Node): void => {
+      if (ts.isExportDeclaration(node) && node.exportClause && ts.isNamedExports(node.exportClause)) {
+        for (const element of node.exportClause.elements) {
+          const original = (element.propertyName ?? element.name).text;
+          if (writers.has(original)) problems.push(`${file}: ${original} re-exported (the store's writers are handed on nowhere)`);
+        }
+      }
+      if (ts.isExportAssignment(node) && ts.isIdentifier(node.expression) && writers.has(node.expression.text)) {
+        problems.push(`${file}: ${node.expression.text} exported as default`);
+      }
+      if (ts.isImportDeclaration(node) && node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
+        for (const element of node.importClause.namedBindings.elements) {
+          if (element.propertyName && writers.has(element.propertyName.text)) problems.push(`${file}: ${element.propertyName.text} imported as ${element.name.text}`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    for (const ref of references(source, file, writers)) {
+      if (ref.callArgs === null) problems.push(`${file}: ${ref.name} referenced in ${ref.owner ?? 'the top level'} without being called (handed on)`);
+    }
   }
   return problems;
 }
@@ -431,6 +514,7 @@ describe('[#4227 pr2d] every path that closes the hand-off asks the one rule', (
   it('pr2f: the store is imported by name only; its settle, drop, close, hide and patch take their sending / opening', () => {
     const sources = sourcesUnder('src').map((file) => ({ file, source: read(file) }));
     expect(checkImportForms(sources)).toEqual([]);
+    expect(checkWriterHandOn(sources)).toEqual([]);
     expect(checkStoreSignatures(read(STORE))).toEqual([]);
     expect(checkBrandCasts(sources)).toEqual([]);
   });
@@ -588,6 +672,67 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
       "import { handoffUnitsLock, type HandoffHold } from '@/lib/handoff/close-rule';\nexport { handoffCloseBlock } from '@/lib/handoff/close-rule';\nimport * as other from '@/lib/handoff/types';\n"
     );
     expect(checkImportForms([{ file, source: named }])).toEqual([]);
+  });
+
+  // pr2g (codex review-4227-pr2e P2): a bridge re-exports a writer under its own name and another
+  // file imports it from the bridge under an alias — two files, neither aliasing the store itself.
+  it('pr2g: a writer re-exported by a bridge and imported from it under an alias fails (both files)', () => {
+    const bridgeFile = 'src/lib/handoff/bridge.ts';
+    const userFile = 'src/components/mem/MemItemsPanel.tsx';
+    const bridge = mutated('src/lib/handoff/template.ts', /^/, "export { dropHandoffUnit } from './close-rule';\n");
+    const user = mutated(userFile, /^/, "import { dropHandoffUnit as forget } from '@/lib/handoff/bridge';\nexport const drop = (u: Parameters<typeof forget>[0]) => forget(u);\n");
+    const files = [
+      { file: bridgeFile, source: bridge },
+      { file: userFile, source: user },
+    ];
+    // What pr2f's guard saw: nothing (a same-name re-export, an alias of another module).
+    expect(checkImportForms(files)).toEqual([]);
+    expect(checkOthers(files)).toEqual([]);
+    const problems = checkWriterHandOn(files).join('\n');
+    expect(problems).toMatch(/src\/lib\/handoff\/bridge.ts: dropHandoffUnit re-exported/);
+    expect(problems).toMatch(/MemItemsPanel.tsx: dropHandoffUnit imported as forget/);
+    // Each file alone fails too (the chain is cut at either link).
+    expect(checkWriterHandOn([files[0]])).not.toEqual([]);
+    expect(checkWriterHandOn([files[1]])).not.toEqual([]);
+  });
+
+  it('pr2g: two steps of re-exports, a local re-export, a default export and a writer handed on as a value fail', () => {
+    const file = 'src/lib/handoff/template.ts';
+    const twoSteps = mutated(file, /^/, "export { closeHandoffOpening as close } from './bridge';\nexport { patchHandoffOpening } from './bridge';\n");
+    const two = checkWriterHandOn([{ file, source: twoSteps }]).join('\n');
+    expect(two).toMatch(/closeHandoffOpening re-exported/);
+    expect(two).toMatch(/patchHandoffOpening re-exported/);
+    const local = mutated(file, /^/, "import { noteHandoffHidden, settleHandoffDecide } from './close-rule';\nexport { noteHandoffHidden };\nexport default settleHandoffDecide;\n");
+    const loc = checkWriterHandOn([{ file, source: local }]).join('\n');
+    expect(loc).toMatch(/noteHandoffHidden re-exported/);
+    expect(loc).toMatch(/settleHandoffDecide exported as default/);
+    const value = mutated(file, /^/, "import { dropHandoffUnit, endHandoffStop } from './close-rule';\nexport const api = { dropHandoffUnit, stop: endHandoffStop };\n");
+    const val = checkWriterHandOn([{ file, source: value }]).join('\n');
+    expect(val).toMatch(/dropHandoffUnit referenced in api without being called/);
+    expect(val).toMatch(/endHandoffStop referenced in api without being called/);
+  });
+
+  it('pr2g: import() / require() with a template or a computed specifier fails; the locales’ template passes', () => {
+    const file = 'src/components/mem/MemItemsPanel.tsx';
+    const plain = mutated(file, /^/, 'export const later = () => import(`@/lib/handoff/close-rule`);\n');
+    expect(checkImportForms([{ file, source: plain }]).join('\n')).toMatch(/import\(\) with names the store/);
+    const template = mutated(file, /^/, "const leaf = 'close-rule';\nexport const later = () => import(`@/lib/handoff/${leaf}`);\n");
+    expect(checkImportForms([{ file, source: template }]).join('\n')).toMatch(/import\(\) with a template specifier/);
+    const computed = mutated(file, /^/, "const where = '@/lib/handoff/' + 'close-rule';\nexport const later = () => import(where);\nexport const now = () => require(where);\n");
+    const comp = checkImportForms([{ file, source: computed }]).join('\n');
+    expect(comp).toMatch(/import\(\) with a computed specifier \(where\)/);
+    expect(comp).toMatch(/require\(\) with a computed specifier \(where\)/);
+    const above = mutated(file, /^/, 'export const later = (leaf: string) => import(`../../lib/${leaf}`);\n');
+    expect(checkImportForms([{ file, source: above }]).join('\n')).toMatch(/template specifier/);
+    // Negative control: the locales' template of src/i18n.ts (a directory the store is not under).
+    expect(checkImportForms([{ file: 'src/i18n.ts', source: read('src/i18n.ts') }])).toEqual([]);
+  });
+
+  it('pr2g (negative control) a named import of the writers, called where imported, passes', () => {
+    expect(checkWriterHandOn([{ file: DIALOG, source: read(DIALOG) }, { file: HOOK, source: read(HOOK) }])).toEqual([]);
+    const file = 'src/components/mem/MemItemsPanel.tsx';
+    const named = mutated(file, /^/, "import { handoffUnitsLock } from '@/lib/handoff/close-rule';\nexport { handoffCloseBlock } from '@/lib/handoff/close-rule';\n");
+    expect(checkWriterHandOn([{ file, source: named }])).toEqual([]);
   });
 
   it('pr2f: a store function that closes, settles or patches without its opening / sending fails', () => {
