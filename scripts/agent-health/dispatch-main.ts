@@ -116,7 +116,8 @@ const defaultExec: Exec = (command, args, options) => {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: options?.timeoutMs ?? 300_000,
+    // spawnSync throws ERR_OUT_OF_RANGE on a fractional timeout (Issue #4288).
+    timeout: Math.max(1, Math.floor(options?.timeoutMs ?? 300_000)),
   });
   return { status: result.error ? null : result.status, stdout: result.stdout ?? '' };
 };
@@ -454,11 +455,12 @@ async function dispatch(
     for (let polls = 0; polls < READY_TIMEOUT_MS / READY_POLL_MS; polls++) {
       const untilDeadline = deadline - mono();
       if (untilDeadline <= 0) break;
-      await deps.sleep(Math.min(READY_POLL_MS, untilDeadline));
+      // Whole milliseconds, at least 1: a monotonic difference is fractional.
+      await deps.sleep(Math.max(1, Math.floor(Math.min(READY_POLL_MS, untilDeadline))));
       // A sleep that returned late may have crossed the deadline: no more `ls`.
       const left = deadline - mono();
       if (left <= 0) break;
-      if (readState({ timeoutMs: Math.max(1_000, left) }).kind === 'ready') {
+      if (readState({ timeoutMs: Math.max(1, Math.floor(left)) }).kind === 'ready') {
         ready = true;
         break;
       }

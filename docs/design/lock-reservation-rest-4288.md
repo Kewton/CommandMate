@@ -164,7 +164,7 @@ for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {   //
 | 案 | 中身 | 評価 |
 |---|---|---|
 | 3A 開始時刻からの実時間の期限だけ | `deps.now()` で `/clear` の後の時刻を取り、期限を過ぎたら止める | 1 回の `ls` が長いと、最後の 1 回のぶん（最大 300 秒）超える |
-| **3B 3A＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る（採用）** | 期限 `deadline = start + READY_TIMEOUT_MS` は**単調増加の時計**（`deps.monotonic`、既定 `performance.now()`）で数え、記録用の壁時計 `deps.now` と分ける（壁時計が戻っても上限が外れない）。各周回で `sleep(min(READY_POLL_MS, 残り))` → **sleep の後にも**残りを照合し 0 以下なら `ls` へ進まず止める → `ls` は `timeout = max(1 秒, 残り)`（残りは 90 秒以下）で実行。回数の上限 `READY_TIMEOUT_MS / READY_POLL_MS`（18 回）も残す | 実時間の上限が「90 秒＋1 秒程度」になる。回数の上限は、時計を固定した既存の試験（`tests/unit/scripts/agent-health/dispatch.test.ts:243-249`、`now` が固定）が止まるために要る |
+| **3B 3A＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る（採用）** | 期限 `deadline = start + READY_TIMEOUT_MS` は**単調増加の時計**（`deps.monotonic`、既定 `performance.now()`）で数え、記録用の壁時計 `deps.now` と分ける（壁時計が戻っても上限が外れない）。各周回で `sleep(min(READY_POLL_MS, 残り))` → **sleep の後にも**残りを照合し 0 以下なら `ls` へ進まず止める → `ls` は `timeout = max(1, floor(残り))` ミリ秒（残りは 90 秒以下。単調時計の差は小数になり、`spawnSync` は小数の timeout を `ERR_OUT_OF_RANGE` で投げるため整数に切り下げる。`sleep` も同じ）で実行。回数の上限 `READY_TIMEOUT_MS / READY_POLL_MS`（18 回）も残す | 実時間の上限が「90 秒＋1 秒程度」になる。回数の上限は、時計を固定した既存の試験（`tests/unit/scripts/agent-health/dispatch.test.ts:243-249`、`now` が固定）が止まるために要る |
 | 3C 直さず文面だけ「19 回」に | — | 不採用。実時間の上限が無いままになる |
 
 `Exec` の型（`dispatch-main.ts:69`）に省略できる第 3 引数 `{ timeoutMs?: number }` を足し、`defaultExec` は `spawnSync` の `timeout` に使う（無ければ今の 300 秒）。既存の試験の stub は第 3 引数を無視するので変わらない。`readState` は ready 待ちの中だけ timeout 付きで呼ぶ（`checkState` など他の `ls` は今のまま）。timeout で切れた `ls` は `status: null` → `judgeAgentState(undefined)` → `unknown` で、ready ではないので待ちを続ける（今の `unknown` の扱いと同じ）。

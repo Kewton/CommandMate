@@ -196,4 +196,73 @@ describe('dispatch: the ready wait after /clear is bounded by real time (#4288)'
     expect(lsCalls).toEqual([]);
     expect(sent.map((a) => a[2])).toEqual(['/clear']);
   });
+  // --- review P1/P2 of the first PR2 (Issue #4288): whole-ms timeouts; the wall clock moves AFTER the deadline exists
+  it('hands whole-millisecond timeouts and sleeps to exec/sleep even when the monotonic difference is fractional (positive control)', async () => {
+    // 84999.5 ms left on the third ls: a fractional timeout would make spawnSync throw ERR_OUT_OF_RANGE
+    clock = START + 0.5;
+    const code = await run(world({ lsMs: 0, after: () => BUSY }), {
+      monotonic: true,
+      sleep: async (ms) => {
+        sleeps.push({ at: clock, ms });
+        clock += ms + 0.5;
+      },
+    });
+    expect(code).toBe(2);
+    expect(lsCalls.length).toBeGreaterThan(3);
+    for (const call of lsCalls) {
+      expect(Number.isInteger(call.timeoutMs)).toBe(true);
+      expect(call.timeoutMs as number).toBeGreaterThanOrEqual(1);
+      expect(call.timeoutMs as number).toBeLessThanOrEqual(READY_TIMEOUT_MS);
+    }
+    for (const s of sleeps) {
+      expect(Number.isInteger(s.ms)).toBe(true);
+      expect(s.ms).toBeGreaterThanOrEqual(1);
+    }
+    // last window: less than 1 ms left still gets the floor of 1 (never 0)
+    expect(Math.min(...lsCalls.map((c) => c.timeoutMs as number))).toBeGreaterThanOrEqual(1);
+  });
+
+  it('the timeout equals the floor of the time left (boundary: 84999.5 ms left -> 84999, not 85000)', async () => {
+    // /clear at START; the deadline is taken right after. First sleep (5000) + 0.5 extra -> 84999.5 left at the first ls.
+    const code = await run(world({ lsMs: 0, after: () => READY }), {
+      monotonic: true,
+      sleep: async (ms) => {
+        sleeps.push({ at: clock, ms });
+        clock += ms + 0.5;
+      },
+    });
+    expect(code).toBe(0);
+    expect(lsCalls[0].timeoutMs).toBe(READY_TIMEOUT_MS - READY_POLL_MS - 1);
+  });
+
+  it('a wall clock set back AFTER the deadline is taken (during the first sleep) does not stretch the wait (positive control)', async () => {
+    let slept = false;
+    const code = await run(world({ lsMs: 10_000, after: () => BUSY }), {
+      monotonic: true,
+      wall: () => (slept ? clock - 3_600_000 : clock),
+      sleep: async (ms) => {
+        sleeps.push({ at: clock, ms });
+        clock += ms;
+        slept = true;
+      },
+    });
+    expect(code).toBe(2);
+    expect(lsCalls.length).toBeGreaterThan(0);
+    expect(clock - (clearAt as number)).toBeLessThanOrEqual(READY_TIMEOUT_MS + 1_000);
+    expect(sent.map((a) => a[2])).toEqual(['/clear']);
+  });
+
+  it('a wall clock set forward AFTER the deadline is taken does not cut the wait short (negative control)', async () => {
+    let slept = false;
+    const code = await run(world({ lsMs: 0, after: (n) => (n >= 4 ? READY : BUSY) }), {
+      monotonic: true,
+      wall: () => (slept ? clock + 3_600_000 : clock),
+      sleep: async (ms) => {
+        clock += ms;
+        slept = true;
+      },
+    });
+    expect(code).toBe(0);
+    expect(sent.map((a) => a[2])).toEqual(['/clear', expect.stringContaining('dispatch-terms')]);
+  });
 });
