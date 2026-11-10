@@ -1,6 +1,6 @@
 # Issue #4288 の 2〜5 番の設計（run-lock の回収・ready 待ちの実時間・claude-3 の自己予約・素の send）
 
-- 状態: 設計 第 1 版（設計の段。コードは変えない。実装は PM の確認の後、別の契約で行う）
+- 状態: 設計 第 1 版（設計の段。コードは変えない。実装は PM の確認の後、別の契約で行う）。**5 番は PM の決定で採らない**（§4 の冒頭）。3・4 番は PR2 で実装済み
 - 対象: Issue #4288 の対象 2〜5（1 番は PR #4295 でマージ済み。設計は [verify-lock-holder-group-4288.md](./verify-lock-holder-group-4288.md)）
 - 行番号は `fix/4288-lock-rest` の `ed9b89eac` のもの。名前で引くこと
 - 表記: **事実**＝コード・実行で確かめたこと、**見立て**＝事実からの推論で試していないこと、**未確認**＝この段で確かめていないこと
@@ -13,7 +13,7 @@
 | 2 run-lock の rename の回収 | **直す**（TS・bash の両方で再現した） | 案 2C: ディレクトリを動かさず、`owner` ファイルだけを回収する（取り戻しと公開は `link` の排他作成） | 中〜難 |
 | 3 ready 待ちの 90 秒 | **直す**（再現した。95 秒〜最大 5795 秒） | 案 3B: 開始時刻からの実時間の期限＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る | 易 |
 | 4 claude-3 の自己予約 | **直す** | 案 4B: `reserve --self`。`commandmate whoami --json` で呼び手が claude-3 のときだけ、状態確認を省いて持ち主 `leader` で取る | 易 |
-| 5 素の `commandmate send` | **一部直す**（事故の防止だけ。完全な排他は直さない） | 案 5C: Claude Code の PreToolUse フック（リポジトリの `.claude/settings.json`）で、Bash の `commandmate send mycodebranchdesk … --instance claude-3` を止める。製品の send は変えない | 易〜中 |
+| 5 素の `commandmate send` | **採らない（PM の決定）** | 案 5C（PreToolUse フック）は作らない。リポジトリの共有の設定（`.claude/settings.json`）を足すと、clone した利用者を含む全 Claude セッションに効くため。`team.md` に理由と送り方（claude-3 へは `claude3-reserve.ts send` だけ）を書く | — |
 
 PR は 2 本（§7）。
 
@@ -250,6 +250,8 @@ for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {   //
 ---
 
 ## 4. 5 番: 素の `commandmate send` で claude-3 へ送る経路が予約を通らない
+
+> **採らない（PM の決定）。** 以下の案 5C（`.claude/settings.json` の PreToolUse フックと `claude3-send-guard.mjs`）は作らない。理由: リポジトリの共有の設定を足すと、clone した利用者を含む全 Claude セッションに効くため。代わりに `docs/orchestrate/team.md` §4 に、理由と送り方（claude-3 へは `npx tsx scripts/agent-health/claude3-reserve.ts send` だけ）を書く。`dev-team-doc-4239.test.ts` が固定する「未対応（追跡）」の語は残す。以降の 4.2〜4.6 は検討の記録で、実装しない。
 
 ### 4.1 今の振る舞い（事実）
 

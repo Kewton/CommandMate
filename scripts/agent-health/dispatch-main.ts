@@ -66,7 +66,7 @@ export interface ExecResult {
 }
 
 /** Runs a command without a shell; never throws (a missing binary is status null). */
-export type Exec = (command: string, args: readonly string[]) => ExecResult;
+export type Exec = (command: string, args: readonly string[], options?: { timeoutMs?: number }) => ExecResult;
 
 export interface DispatchDeps {
   exec: Exec;
@@ -105,12 +105,12 @@ export const COLD_START_EXIT = 99;
 export const READY_TIMEOUT_MS = 90_000;
 export const READY_POLL_MS = 5_000;
 
-const defaultExec: Exec = (command, args) => {
+const defaultExec: Exec = (command, args, options) => {
   const result = spawnSync(command, [...args], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: 300_000,
+    timeout: options?.timeoutMs ?? 300_000,
   });
   return { status: result.error ? null : result.status, stdout: result.stdout ?? '' };
 };
@@ -197,8 +197,8 @@ export function writeNotSent(
   return null;
 }
 
-function json(deps: DispatchDeps, command: string, args: string[]): unknown {
-  const result = deps.exec(command, args);
+function json(deps: DispatchDeps, command: string, args: string[], options?: { timeoutMs?: number }): unknown {
+  const result = options ? deps.exec(command, args, options) : deps.exec(command, args);
   if (result.status !== 0) return undefined;
   try {
     return JSON.parse(result.stdout);
@@ -344,7 +344,8 @@ async function dispatch(
   };
 
   // --- Claude 3
-  const readState = (): AgentState => judgeAgentState(json(deps, 'commandmate', ['ls', '--json']));
+  const readState = (options?: { timeoutMs?: number }): AgentState =>
+    judgeAgentState(json(deps, 'commandmate', ['ls', '--json'], options));
   /** Claude 3's state when it may be sent to; else the exit code of the stop (record written). */
   const checkState = (): { stop: number } | { kind: AgentState['kind'] } => {
     const state = readState();
@@ -436,10 +437,16 @@ async function dispatch(
     const cleared = await send('/clear', false);
     if (cleared.kind === 'refused') return refused(cleared);
     if (cleared.kind === 'failed') return fail('/clear を送れなかった', issues, deferred);
+    // Issue #4288: the limit is real time from here (not the sum of the sleeps), the
+    // count is capped (a frozen clock still stops), and one `ls` may not outlive the deadline.
     let ready = false;
-    for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {
-      await deps.sleep(READY_POLL_MS);
-      if (readState().kind === 'ready') {
+    const deadline = deps.now().getTime() + READY_TIMEOUT_MS;
+    for (let polls = 0; polls < READY_TIMEOUT_MS / READY_POLL_MS; polls++) {
+      const untilDeadline = deadline - deps.now().getTime();
+      if (untilDeadline <= 0) break;
+      await deps.sleep(Math.min(READY_POLL_MS, untilDeadline));
+      const timeoutMs = Math.max(1_000, deadline - deps.now().getTime());
+      if (readState({ timeoutMs }).kind === 'ready') {
         ready = true;
         break;
       }
