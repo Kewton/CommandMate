@@ -359,3 +359,48 @@ PM の決定: `pm-return-4300-design-rev1.md` の (a)（exec 起動で根の原�
 | P2-10 relaunched | `replaced` のとき | 同じ。PR2a に移した（N7） |
 
 PM の設計の決定 (a)〜(e)（`pm-return-4300-design.md`）: (a) relaunched と stderr の 1 行 → §6。(b) wait の変化を受け入れる → §3.2。(c) 回答経路は直さない → §0.3・§3.3・§10。(d) G-PR3 との重なり → §8.2（重ならない）。(e) 事前レビューは codex-2 → この改訂の後、差分だけ再確認を受ける。
+
+## 12. #4303 の経路（回答の送信、src/lib/prompt-answer-sender.ts）への効き目
+
+#4303（`respond`・`prompt-response`・auto-yes の回答が、CLI の終わったペインへキーを打ち込みうる）が、改訂 2 の exec 起動（§2）で同時に塞がるかを経路ごとに見る。この Issue（#4300）では回答経路を直さない（PM の決定 (c)）。ここは #4303 の設計の入力。
+
+### 12.1 経路とキーを出す所（事実、`ed9b89eac`）
+
+| 経路 | 入口と前の確認 | 回答を送る所 |
+|---|---|---|
+| `respond`（CLI・UI） | `src/app/api/worktrees/[id]/respond/route.ts:315`。前に `screenAtSend`（`:312`）で画面を読む。`isRunning` は読まない | `sendPromptAnswer`（`src/lib/prompt-answer-sender.ts:959`） |
+| `prompt-response`（UI のカード） | `src/app/api/worktrees/[id]/prompt-response/route.ts:117` の `cliTool.isRunning`（claude は画面の健康、ほかは `hasSession`）→ `frame-verification.ts:83` の画面の再読 → `answer-delivery.ts:179` | 同じ |
+| auto-yes | `src/lib/auto-yes-poller.ts:1029` の `captureObservedFrame`（画面を直接読む）→ `:919` | 同じ |
+
+`sendPromptAnswer` の中でキーを出す所: Command Code の複数選択（`sendCommandCodeMultiSelectAnswer`, `:517`）、claude・antigravity の矢印の選択（`sendSpecialKeysWhileCurrent`, `:1111` → `:842`・`:856`。AskUserQuestion で既定の選択肢なら `['Down', 'Up', 'Enter']`, `:1100-1102`）、文字の答え（`sendKeys(sessionName, answer, false)`, `:1118`）と Enter（`:1153`）、Enter を抑える答え（`:1129`、入力ロックの外）。ロックの中の再読は `answerTargetStillOnScreen`（`:657`）で、画面にダイアログが残っていれば通る。前面のプロセス・`pane_dead` を読む所は無い（strict respond の `agentExitedToShell`, `src/lib/prompt-observation/strict-respond.ts:318` は送った後の indeterminate の判定だけ）。
+
+### 12.2 実測（隔離した tmux、2026-11-10）
+
+手順は §9 と同じ（`tmux -L c4303x -f /dev/null`、`env -i`、仮 HOME、本番と同じ順でセッションを作る）。後始末は各セッションを `kill-session -t '=<name>:'`、`-L c4303x kill-server`、dir とソケットを消した。既定のサーバー・`mcbd-*` には触れていない。本物の CLI は起動していない。
+
+| 記号 | 状況 | 結果 |
+|---|---|---|
+| p | 旧方式のペイン（シェルのプロンプト）で `touch <f>` を実行し、外から `<f>` を消してから、回答のキー `Down Up Enter` | **`<f>` がまた作られた**（`Up` が直前のコマンドを呼び出し、`Enter` で実行）。続けて `1`＋`Enter` → `zsh: command not found: 1`（シェルが実行した） |
+| r | 新方式の dead pane へ `Down Up Enter` と `y` | どちらも exit 0、何も起きない（入力は捨てられる） |
+| q | 新方式で、CLI の代わりが子（`sleep &`）を残して終わる | `pane_dead=1`（子が端末を持っていても、ペインのプロセスが終われば dead）。子は後始末の前に消えていた（見立て: ペインが閉じた端末の SIGHUP） |
+| q3 | 同じく、端末を読む子（`(sleep 1; exec cat) &`）を残して終わる | `pane_dead=1`。`y`＋`Enter` は子に届かず（画面に出ない）捨てられた |
+
+### 12.3 塞がる経路・塞がらない経路
+
+| 状況 | 新方式で | 理由 | #4303 で要るもの |
+|---|---|---|---|
+| 新方式のペインで CLI が終わった（dead pane）。残った画面にダイアログ | **塞がる**（安全） | 答えのキー（数字・`y`・矢印・自由記述・Enter）はどれも捨てられる（r）。3 経路とも同じ `sendKeys`／`sendSpecialKeys` を通る | 届いたと誤らないこと: 最初のキーの前に `readPaneState` が dead なら未送信（`PromptAnswerNotDeliveredError`）、auto-yes は答えずに記録する。`prompt-response` は PR2a で `isRunning`＝`agentAlive` になり `:117` で 400 になる（`respond`・auto-yes は自前の確認が要る） |
+| 新方式でセッションが消えた（absent） | **塞がる** | tmux が `can't find session` で失敗し、何も打たれない | 未送信として返ること（`transportDeliveryOf`, `:783` の分類）をテストで固定するだけ |
+| 新方式で CLI が終わり、端末を持つ子が残る | **塞がる** | ペインは dead になり、子にもキーは届かない（q・q3） | なし（上の dead の確認に含まれる） |
+| 新方式で CLI は生きていて、古い画面のダイアログの検出に当たり、CLI の中で別のプロセス（エディタ・ページャ・ツールの子）が端末を読んでいる | **塞がらない**（ただしシェルではない） | exec はシェルを消すだけで、生きた CLI とその子への誤った答えは変えない。答えはその子に届く | 今の `answerTargetStillOnScreen`（`:657`）の再読と `stillCurrent` を保つ。子が対話シェル（CLI の「シェルに入る」機能）なら実行されうる — 各 CLI にその機能があるか**未確認**。あれば前面が CLI 自身かを見る判定を回答の前に足す |
+| 新方式で Ctrl-Z | **塞がる**（起きない） | CLI は止まらない（§9 表 3 の e・f） | なし |
+| 新方式の起動の途中（respawn の後、`exec` の前はシェルが前面）に、前の画面のダイアログを読む | **塞がらない**（窓は短い） | respawn は履歴を残す（§9 表 3 の a）。起動行の `clear; printf '\033[3J'` までは前の画面が見えうる（respawn 直後に見える画面に前のダイアログが残るかは**未確認**）。gemini・copilot・antigravity の起動の窓（`launch-window.ts`・`antigravity-startup-trust.ts`）以外では auto-yes は起動中を避けない | 回答の前に、起動の印（`session-launch-flight` の起動中）と印 `@cm_launch` の無いペインでは答えない（`readPaneState` と同じ 1 回の `display-message` で読める） |
+| 移行期間の旧方式のペインで CLI が終わった（シェルのプロンプト、画面にダイアログが残る） | **塞がらない** | シェルが残る。`Down Up Enter` で直前のコマンドが再実行され（p）、数字・`y`＋Enter はコマンドとして実行される | 回答の最初のキーの前（矢印の束・文字・Enter の各 `sendKeys`／`sendSpecialKeys` の前）に PR1 の判定（D: シェルなら未送信）を通す。矢印の答えは本文より危ない（履歴の再実行）ので、表駆動で claude・antigravity の矢印の経路を陽性対照に入れる |
+| 移行期間の旧方式のペインで Ctrl-Z で止まった CLI（シェルが前面） | **塞がらない** | 上と同じくシェルが受け取る | 同じ PR1 の判定（D は `shell` と読む、§9 表 1 の i）。止まった CLI を kill・作り直ししない |
+| 移行期間の旧方式で、判定の後に CLI が終わる競合 | **塞がらない** | PR1 の残り（N3 と同じ系統） | 受け入れる（新方式に移るまで）。#4303 の changelog に残りとして書く |
+
+### 12.4 まとめ
+
+- 新方式のペインでは、#4303 の安全の穴（答えのキーがシェルで実行される）は exec 起動で同時に塞がる。#4303 の中身は「dead・absent・起動中を未送信として返し、auto-yes が答えたと記録しないこと」の確認とテストになる（#4303 の本文の見込みどおり）。
+- 塞がらないのは、(i) 移行期間の旧方式のペイン（PR1 の判定を回答経路にも通すことが要る。矢印の答えは履歴を再実行するので優先）、(ii) 起動の途中の短い窓、(iii) 生きた CLI の子への誤った答え（シェルではない。CLI の「シェルに入る」機能の有無は未確認）。
+- 本文に無い指摘（#4303 の範囲で見るもの）: 文字の答えは `sendKeys(sessionName, answer, false)`（`:1118`）で `literal` を付けていない。答えが `Enter`・`C-c` などキー名と同じ文字列なら tmux がキーとして解釈しうる（`SendKeysOptions.literal` の説明、`tmux.ts` の #1933）。
