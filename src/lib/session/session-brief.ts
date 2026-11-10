@@ -102,6 +102,22 @@ export class BriefChoiceAbortedError extends Error {
   }
 }
 
+/**
+ * Issue #4227 (S-B, design §3.2 — the final reading's invariant, pr3d): what the plan left a
+ * strict choice (`full` / `decline`) with. None of these decides the shown row: whichever it is,
+ * {@link SendBrief.claim} reads the instance's current row again first, under the input lock right
+ * before the body, and only then acts on it. A new outcome is added here and in the claim's
+ * exhaustive switch (the table test `session-brief-final-reading-4227` builds its rows from this list).
+ *
+ *  - `planned` — the brief (`full`) or the reservation (`decline`) is ready to be claimed;
+ *  - `used_up` — the shown row was used up by another send (the body alone, `consumed`);
+ *  - `empty` — `full`'s brief came out empty (the body alone, the row skipped as `empty`);
+ *  - `refused` — the plan stopped the send (an abort is held; nothing is typed);
+ *  - `slash_command` — the body is a command: nothing is attached or taken.
+ */
+export const STRICT_PLAN_OUTCOMES = ['planned', 'used_up', 'empty', 'refused', 'slash_command'] as const;
+export type StrictPlanOutcome = (typeof STRICT_PLAN_OUTCOMES)[number];
+
 /** Between the brief and the operator's body (D12: the brief's own framing is C's). */
 export const BRIEF_SEPARATOR = '\n\n';
 
@@ -422,10 +438,22 @@ export class SendBrief {
   /** Issue #4227 (S-B): why a `full` / `decline` send stops before any key; thrown by {@link claim}. */
   private aborted: BriefChoiceAbortedError | null = null;
   /**
-   * Issue #4227 (S-B, pr3c): the shown row a strict choice found used up at the plan. Not the
-   * answer yet — the claim reads it again under the input lock (a reset may open B meanwhile).
+   * Issue #4227 (S-B, pr3d): the plan's named ways out for a strict choice that hold no abort and
+   * no plan (`planned` / `refused` are read from those, {@link strictOutcome}). Never the answer:
+   * the claim reads the current row again first, whatever this is (design §3.2).
    */
-  private usedUp: string | null = null;
+  private strictPlan: Extract<StrictPlanOutcome, 'used_up' | 'empty' | 'slash_command'> | null = null;
+
+  /**
+   * Issue #4227 (pr3d): the plan's outcome for a strict choice — decided by none of it. A way out of
+   * the plan that named nothing is `refused` (fail-closed: the claim types nothing). Null otherwise.
+   */
+  private strictOutcome(): StrictPlanOutcome | null {
+    if (!this.strict) return null;
+    if (this.aborted) return 'refused';
+    if (this.planned) return 'planned';
+    return this.strictPlan ?? 'refused';
+  }
   readonly isReset: boolean;
 
   constructor(private readonly input: SendBriefInput) {
@@ -510,7 +538,8 @@ export class SendBrief {
    */
   private skip(rowId: string | null, reason: BoundarySkipReason | 'no_brief' | 'settings_changed' | 'reservation_conflict', site: BriefWriteSite): void {
     // Issue #4227 (S-B): a strict choice consumes nothing it was not asked to — only `full`'s
-    // `empty` (nothing to attach) is used up and the body sent, as `auto` does.
+    // `empty` (nothing to attach) is used up and the body sent, as `auto` does — by the claim's
+    // final reading only (pr3d), never by the plan.
     if (this.strict && reason !== 'empty') return this.refuse(reason);
     if (rowId !== null && this.db) {
       const db = this.db;
@@ -528,9 +557,12 @@ export class SendBrief {
     this.report = { state: 'skipped', reason, ...(rowId ? { boundaryId: rowId } : {}) };
   }
 
-  /** Whether the delivery must run under the outer input lock (a claim to make, or a reset to record). */
+  /**
+   * Whether the delivery must run under the outer input lock (a claim to make, a reset to record,
+   * or — pr3d — a strict choice's final reading, which counts only right before the body).
+   */
   needsOuterLock(): boolean {
-    return this.planned !== null || this.isReset || this.usedUp !== null;
+    return this.planned !== null || this.isReset || (this.strictOutcome() ?? 'refused') !== 'refused';
   }
 
   /** Whether the pinned worktree is still the one found (`unknown` without a pin's evidence). */
@@ -576,6 +608,7 @@ export class SendBrief {
     }
     // A command with words in front of it is no command (a reset still opens its row, step 3).
     if (isSlashCommandBody(content)) {
+      if (this.strict) this.strictPlan = 'slash_command';
       if (mode !== 'auto') this.report = { state: 'skipped', reason: 'slash_command' };
       return;
     }
@@ -629,9 +662,8 @@ export class SendBrief {
           return;
         }
         if (current.state !== 'pending') {
-          // pr3c (codex P2-1): not decided here — the claim's stretch under the input lock reads
-          // the instance's current row again before the body alone is typed.
-          this.usedUp = current.id;
+          // pr3c (codex P2-1): not decided here — the claim's final reading decides (pr3d).
+          this.strictPlan = 'used_up';
           return;
         }
       }
@@ -730,7 +762,15 @@ export class SendBrief {
     }
     // D2 design §7.4: a line the brief must carry did not fit — recorded, the body is sent.
     if (built.body === '' && built.skipReason === 'over_limit') return this.skip(rowId, 'over_limit', 'plan.consume');
-    if (built.body === '') return this.skip(rowId, 'empty', 'plan.consume');
+    if (built.body === '') {
+      // pr3d (codex P2, review-4227-pr3b): a strict `full` does not use the row up here — the
+      // claim's final reading does, once the shown row is found still the current one.
+      if (this.strict) {
+        this.strictPlan = 'empty';
+        return;
+      }
+      return this.skip(rowId, 'empty', 'plan.consume');
+    }
     if (bytesOf(built.body) > budget.maxBytes || linesOf(built.body) > budget.maxLines) {
       return this.skip(rowId, 'over_limit', 'plan.consume');
     }
@@ -800,15 +840,38 @@ export class SendBrief {
    * Answers the text to type — the brief in front of the body, or the body alone.
    */
   async claim(): Promise<string> {
+    // Issue #4227 (S-B, design §3.2, pr3d — the invariant): a strict choice reads the instance's
+    // current row again first, whatever the plan found; only then does the plan's outcome count.
+    if (this.strict) {
+      const current = this.finalReading();
+      if (this.aborted) throw this.aborted;
+      const outcome: StrictPlanOutcome = this.strictOutcome() ?? 'refused';
+      switch (outcome) {
+        case 'refused':
+          this.refuse('claim_failed');
+          throw this.aborted!;
+        case 'slash_command':
+          return this.input.content;
+        case 'used_up':
+          this.usedUpInFinalReading(current!);
+          if (this.aborted) throw this.aborted;
+          return this.input.content;
+        case 'empty':
+          this.emptyInFinalReading(current!);
+          if (this.aborted) throw this.aborted;
+          return this.input.content;
+        case 'planned':
+          break;
+        default: {
+          const unknownOutcome: never = outcome;
+          throw new Error(`unknown plan outcome: ${String(unknownOutcome)}`);
+        }
+      }
+    }
     // Issue #4227 (S-B): a strict choice the plan stopped is thrown before anything is typed.
     if (this.aborted) throw this.aborted;
     const plan = this.planned;
     const db = this.db;
-    if (this.usedUp !== null && db) {
-      this.recheckUsedUp(db, this.usedUp);
-      if (this.aborted) throw this.aborted;
-      return this.input.content;
-    }
     if (!plan || !db) return this.input.content;
     let body: string | null;
     try {
@@ -830,25 +893,53 @@ export class SendBrief {
   }
 
   /**
-   * Issue #4227 (S-B, design §3.2, pr3c): the final reading for a strict choice whose shown row
-   * the plan found used up. Under the input lock, right before the body: still the instance's
-   * current row and used up → the body alone (`consumed`); another current row (a reset or a
-   * relaunch while the lock was waited for) → `superseded`, nothing typed. Writes nothing.
+   * Issue #4227 (S-B, design §3.2, pr3d — the invariant): a strict choice's final reading, the
+   * first thing its claim does whatever the plan found. Under the input lock, right before the
+   * body: the shown row must still be the instance's current one — another current row (a reset or
+   * a relaunch while the lock was waited for) is `superseded`, a read that throws `claim_failed`;
+   * nothing typed. Answers the current row for the plan's outcome to act on. Reads only.
    */
-  private recheckUsedUp(db: Database.Database, shownId: string): void {
+  private finalReading(): { id: string; state: BoundaryState } | null {
+    const db = this.db;
+    if (!db) {
+      this.refuse('claim_failed');
+      return null;
+    }
     try {
       const current = getCurrentBoundary(db, this.input.worktreeId, this.input.instanceId);
-      if (!current || current.id !== shownId || current.state === 'superseded' || current.state === 'pending') {
+      if (!current || current.id !== this.input.boundaryId || current.state === 'superseded') {
         this.refuse('superseded');
-      } else if (current.state === 'claimed') {
-        this.refuse('claimed');
-      } else {
-        this.report = { state: 'consumed', boundaryId: current.id };
+        return null;
       }
+      return { id: current.id, state: current.state };
     } catch (error) {
       this.warn('session-brief-claim-failed', error);
       this.refuse('claim_failed');
+      return null;
     }
+  }
+
+  /**
+   * pr3c: the plan found the shown row used up. Still used up → the body alone (`consumed`);
+   * held by another send's claim → `claimed`. Writes nothing.
+   */
+  private usedUpInFinalReading(current: { id: string; state: BoundaryState }): void {
+    if (current.state === 'pending') this.refuse('superseded');
+    else if (current.state === 'claimed') this.refuse('claimed');
+    else this.report = { state: 'consumed', boundaryId: current.id };
+  }
+
+  /**
+   * pr3d (codex P2): `full`'s brief came out empty. The shown row still `pending` → used up as
+   * `empty` here (as `auto` does at its plan) and the body alone; taken by another send meanwhile
+   * (claimed or used up) → `claimed`, the safe side of §11.22 #15.
+   */
+  private emptyInFinalReading(current: { id: string; state: BoundaryState }): void {
+    if (current.state !== 'pending') {
+      this.refuse('claimed');
+      return;
+    }
+    this.skip(current.id, 'empty', 'claim.consume');
   }
 
   /** Issue #4227: a claim this send made but will not type under goes back (`not_sent`). */

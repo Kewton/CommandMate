@@ -297,4 +297,36 @@ describe('[#4227 G10 pr3c] the same under React StrictMode (effects run twice on
     expect(handoffStoreSnapshot().opening?.closed).toBe(false);
     expect(told).toContainEqual(['worktree-switch', 'unknown']);
   });
+
+  /**
+   * pr3d (PM Claude P3-1): the early return for "this worktree's live opening, already taken back
+   * by this page" is the only guard when the same page goes back to the opening's own worktree
+   * (A → B → A, a rerender — no new mount). Without it the return to A asks `worktree-switch`
+   * again: A's own unknown unit refuses, and a refusal nobody pressed for is told.
+   */
+  it('back on the opening’s own worktree on the same page (A → B → A): left open, no new refusal told', async () => {
+    resetHandoffStoreForTests();
+    install();
+    const hook = await mount(A, true);
+    await act(async () => {
+      await hook.result.current.openEnd(TARGET);
+    });
+    const own = handoffStoreSnapshot().opening!;
+    const pending = unknownDecide(A);
+    const told = refusals();
+    hook.rerender({ id: B });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(told).toEqual([['worktree-switch', 'unknown']]);
+    hook.rerender({ id: A });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 0));
+    });
+    expect(hook.result.current.handoffTarget).toEqual(TARGET);
+    expect(handoffStoreSnapshot().opening).toBe(own);
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+    expect(handoffUnitsOf(A).pending).toBe(pending);
+    expect(told).toEqual([['worktree-switch', 'unknown']]);
+  });
 });
