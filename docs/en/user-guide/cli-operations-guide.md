@@ -71,6 +71,7 @@ node bin/commandmate.js ls
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
 | [`commandmate roles`](#commandmate-roles) | Define roles and set the defaults per tool and repository |
 | [`commandmate mem`](#commandmate-mem) | Read and write the items that carry work across sessions (now, waiting, decisions, …); the mode is read-only |
+| [`commandmate handoff`](#commandmate-handoff) | The hand-off before a session ends: the agent proposes its mem updates (a person confirms on the screen) |
 | [`commandmate brief`](#commandmate-brief) | The summary a restart reads (derived state and mem items) within a UTF-8 byte budget |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
 | [`commandmate skill`](#commandmate-skill) | Browse the Skill catalog; plan, install, update, uninstall, and inspect Skills |
@@ -2670,7 +2671,7 @@ A branch's items are shown under **the "mem" of each row of the Repositories scr
 - **Stale pages**: the screen reads the list again when it gets the focus back and every 30 seconds, and marks a row whose version moved as "Updated"
 - **Closing a recorded decision**: a `recorded` decision you decide not to reflect closes only after a two-step confirmation ("This decision is recorded; it will be closed without being reflected in the canonical place. Comments and other records stay"), with the reason `withdrawn`. `commandmate mem close` still refuses `recorded` (exit 55). Closing an open decision is a withdrawal (`withdrawn`)
 - **Undelivered notices**: the "it ended" notices no session took are listed, each with "Take it"
-- Of the mem settings' features, "Pop-ups" is the attended or unattended (the default) setting. In this version the setting is only saved; the screens that ask when a session opens and closes do not appear yet. It is separate from auto-yes; neither changes the other
+- Of the mem settings' features, "Pop-ups" is the attended or unattended (the default) setting. On a branch with it on and mode `on`, "end" shows the hand-off screen ("commandmate handoff" below); the screen that asks when a session opens does not appear yet. It is separate from auto-yes; neither changes the other
 
 ### What is not prevented
 
@@ -2679,6 +2680,33 @@ A branch's items are shown under **the "mem" of each row of the Repositories scr
 - `--instance` can be claimed falsely too. The author check keeps a session from changing another's items by mistake; it does not stop a deliberate rewrite
 - Approving a decision's record (promote) is limited to the screen path by the same mark. A process with the same OS rights can forge it, and can rewrite the operation records in the database to read "succeeded". That agents do not approve rests on the CLI having no way to and on the skills' instructions, not on a guarantee
 - A person's item writes on the screen (Issue #4227) are limited to the screen path by the same mark. A person passes the author check (a person may change any item; conversely, an item a person wrote is not changed through an agent's entrance), so the worktree's and the instance's lifetimes, the branch, the mode and the version are checked right before the write. A process with the same OS rights that forges the mark writes as a person
+
+---
+
+## commandmate handoff
+
+The **agent's side** of the hand-off before a session ends (Issue #4227). When a person starts the hand-off from the screen's "end" (only on a branch set to be attended, `popup` on, with mode `on`), the screen sends the agent a request, and the agent puts its mem updates up as **proposals** with this command. A proposal is not an update: only what a person approves on the screen, after seeing the difference, is confirmed against the item's version.
+
+```bash
+commandmate handoff propose --request <id> add --kind <kind> --text "…" [--close-when …] [--evidence …]
+commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
+commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
+commandmate handoff done --request <id>
+```
+
+- `--request` is the id in the request text. Inside a session the target is yourself (whoami); in an ordinary shell add `--worktree <id> --instance <id>`
+- **There is no way here to approve, cancel or end** (the screen's only, with its mark)
+- Only the instance asked can propose (another gets `not_requested`). Past the agent's time (5 minutes; the screen can add 5 minutes twice), after `done`, after a forced stop or a cancel, nothing is taken (`request_closed`)
+- A proposal never touches `now`. A decision is proposed as an add (open) or the withdrawal of an open one (close); closing a recorded decision is a person's, on the screen (`state_forbids`)
+- If the session is started again after the request (a restart, reset or resume: a new D1 boundary), proposals to the old request are refused with `session_changed` and the request expires
+
+### How a hand-off ends and what is recorded (a person stops it)
+
+- The hand-off **never stops a session**. Only the existing stop a person presses does. The screen's "Stop" declares the stop, runs the existing stop, then asks the server to observe it; the server checks with `isRunning` and records it. Nothing stops anything from a deadline, a cancel, a confirmation or a read
+- The record is `confirmed` (the agent's `done`, every proposal decided, every confirmation in, and the stop observed after the person's press — all of them) or `unconfirmed` with a reason: `forced`, `agent_timeout`, `request_failed`, `undecided_left`, `conflict_left`, `apply_failed`, `session_changed`. "Stop now" before confirming is always `unconfirmed(forced)`. When the stop cannot be confirmed nothing is recorded and the screen asks to press Stop again
+- The screen's "end" (the PC header's and each split's, the phone's "…" → End) reads the mode when pressed: with attended on and mode `on` it opens this hand-off; otherwise (unattended, mode not `on`, the mode not readable or not answered in 5 seconds) the usual confirmation as before. Opening either stops nothing. "Don't end" keeps the session
+- The hand-off screen **does not close while a confirmation is being sent, a confirmation's result is unknown, a cancel waits for its answer, or the stop is in progress** — by Esc, ×, the backdrop, a button, another "end" or a switch of worktree (it says why). A confirmation whose result is unknown stays until you send it again or drop it; the stop can still be pressed meanwhile. Switching worktree keeps the screen: on the other worktree nothing can be stopped or confirmed and the confirmation can only be dropped; back on its own worktree it can be sent again. These stay, and no request is made again, when the screen switches between PC and phone (a turn of the device, a change of width) or disappears for a moment while a switch of worktree loads. After cancelling, neither a confirmation nor the request's text is sent. An earlier confirmation, cancel, stop or request whose answer comes back late does nothing to a confirmation sent since, nor to a hand-off screen opened again (or opened on another page): it does not close it, mark it unknown or rewrite what it shows. Where no request could be made and only the existing stop is offered, it says "stopped" only when the session stopped; when it could not be stopped, or it is not known, it says why and the stop button stays (press it again)
+- The exit codes are mem's: 0 done, 2 invalid input, 50 mode not on, 51 version conflict, 52 not found, 55 `not_requested` / `request_closed` / `session_changed` / `state_forbids`
 
 ---
 

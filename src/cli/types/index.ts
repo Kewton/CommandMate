@@ -913,6 +913,19 @@ export const MemExitCode = {
 } as const;
 export type MemExitCode = typeof MemExitCode[keyof typeof MemExitCode];
 
+/**
+ * Shared by `handoff propose` and `handoff done` (Issue #4227, design `mem-ui-4227.md` §4.3).
+ * The exit codes are mem's ({@link MemExitCode}); the hand-off's own refusals map onto
+ * them (`not_requested` / `request_closed` / `session_changed` → 55, `not_found` → 52).
+ */
+export interface HandoffCommonOptions {
+  request?: string;
+  worktree?: string;
+  instance?: string;
+  json?: boolean;
+  token?: string;
+}
+
 /** Shared by every `mem` subcommand (Issue #4221). */
 export interface MemCommonOptions {
   json?: boolean;

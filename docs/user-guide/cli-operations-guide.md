@@ -80,6 +80,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate roles`](#commandmate-roles) | ロールの定義と、ツール・リポジトリごとの既定の設定 |
 | [`commandmate mem`](#commandmate-mem) | セッションをまたぐ作業の項目（now・待ち・決定など）の読み書き。mode は読むだけ |
+| [`commandmate handoff`](#commandmate-handoff) | セッションを終える前の引き継ぎで、Agent が mem の更新を提案として出す（確定は人が画面で） |
 | [`commandmate brief`](#commandmate-brief) | 再開のときに読む要約（導いた状態と mem の項目）を UTF-8 のバイト数の予算の内で出す |
 | [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
@@ -3533,7 +3534,7 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - **古い差分**：画面はフォーカスを取り戻したときと 30 秒ごとに一覧を読み直し、版が進んだ行に「更新されました」を付けます
 - **記録済みの決定を閉じる**：反映しないと決めた `recorded` の決定は、2 段の確認（「この決定は記録済みですが、正本へ反映しないことにして閉じます。コメントなどの記録は消えません」）の後でだけ閉じられ、理由は `withdrawn` になります。`commandmate mem close` は今までどおり `recorded` を断ります（exit 55）。開いた決定の close は「取り下げ」（`withdrawn`）です
 - **未配送の知らせ**：どのセッションも引き取らなかった「終わった」知らせの一覧と「引き取る」があります
-- mem の設定の機能のうち「ポップアップ」は、対話か無人（既定）かの設定です。この版では設定を保存するだけで、開始・終了の確認の画面はまだ出ません。auto-yes とは別の設定で、互いに変えません
+- mem の設定の機能のうち「ポップアップ」は、対話か無人（既定）かの設定です。オンで mode が `on` のブランチでは、「終了」が引き継ぎの画面を出します（下の「commandmate handoff」）。開始の確認の画面はまだ出ません。auto-yes とは別の設定で、互いに変えません
 
 ### 防げないこと（検査の限界）
 
@@ -3542,6 +3543,33 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - `--instance` の名乗りも偽れる。作成者の検査は別のセッションの項目を誤って書き換えないためのもので、悪意の書き換えを防ぐものではない
 - 決定の記録（promote）の承認も同じ印で画面の経路に限っている。同じ OS 権限のプロセスは印を偽れ、DB の操作の記録を書き換えて「成功」にもできる。Agent に承認させないのは CLI に口が無いことと skill の指示であって、保証ではない
 - 画面の項目の書き込み（Issue #4227）も同じ印で画面の経路に限っている。人の書き込みは作成者の検査を通らない（人はどの項目も変えられる。逆に人が書いた項目は Agent の入口からは変えられない）ので、作業木・instance の寿命・ブランチ・mode・版を書き込みの直前に照合する。同じ OS 権限のプロセスが印を偽れば、人として書ける
+
+---
+
+## commandmate handoff
+
+セッションを終える前の引き継ぎ（Issue #4227）で、**Agent が使う口**です。人が画面の「終了」から引き継ぎを始めると（対話の設定 `popup` がオンで mode が `on` のブランチだけ）、画面が Agent に依頼の文を送り、Agent はこのコマンドで mem の更新を **提案** として出します。提案は更新ではありません。人が画面で差分を見て承認したものだけが、項目の版を照合して確定します。
+
+```bash
+commandmate handoff propose --request <id> add --kind <kind> --text "…" [--close-when …] [--evidence …]
+commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
+commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
+commandmate handoff done --request <id>
+```
+
+- `--request` は依頼の文にある ID です。宛先はセッションの中なら自分（whoami）、普通のシェルでは `--worktree <id> --instance <id>` を付けます
+- **承認・取り消し・終了の口はありません**（画面だけ、印つきの要求だけを受けます）
+- 提案は依頼された instance だけが出せます（他の instance は `not_requested`）。Agent の時間（5 分、画面で 2 回まで 5 分ずつ延ばせる）を過ぎた・`done` の後・強制終了の後・取り消しの後は受けません（`request_closed`）
+- 提案は `now` を扱いません。決定は追加（開いた決定）と、開いた決定の取り下げ（close）だけです。記録済みの決定の close は人が画面で行います（`state_forbids`）
+- 依頼の後にセッションを起動し直した（再起動・reset・resume など、D1 の境界が新しくなった）ら、古い依頼への提案は `session_changed` で断られ、依頼は期限切れになります
+
+### 引き継ぎの終わり方と記録（停止は人が押す）
+
+- 引き継ぎは **セッションを止めません**。止めるのは、人がその場で押す既存の停止だけです。画面の「停止する」は、停止の宣言 → 既存の停止 → 止まったことの観測 の順に行い、サーバは止まったかを `isRunning` で確かめて記録します。期限・取り消し・確定・読みからは何も止めません
+- 記録は `confirmed`（Agent の `done`・全提案への判断・確定の全成功・人の停止の後に止まったことを観測、の全部）か `unconfirmed`（理由つき：`forced`・`agent_timeout`・`request_failed`・`undecided_left`・`conflict_left`・`apply_failed`・`session_changed`）です。確定の前に「今すぐ停止」を押した強制終了は、必ず `unconfirmed(forced)` です。止まったことを確かめられないときは記録せず、もう一度停止を押すよう画面が出します
+- 画面の「終了」（PC のヘッダーと各分割の「終了」・スマホの「…」の「終了」）は、押したときに mode を読み、対話の設定がオンで mode が `on` ならこの引き継ぎの画面を、それ以外（無人・mode が `on` でない・読めない・5 秒で答えない）は今までどおりの確認を出します。どちらも開いただけでは止めません。「終了をやめる」はセッションを続けます
+- 引き継ぎの画面は、**確定の送信中・結果が分からない確定・取り消しの応答待ち・停止の途中の間は閉じません**（Esc・×・背景・ボタン・別の「終了」・作業木の切り替えのどれでも。理由が出ます）。結果が分からない確定は「同じ内容で送り直す」か「送り直さずにやめる」を選ぶまで残ります。その間も停止は押せます。作業木を切り替えても画面は残り、その作業木では停止も確定もできず「送り直さずにやめる」だけ押せます。元の作業木に戻ると送り直せます。PC とスマホの表示が切り替わっても（向き・幅の変更）、切り替えの読み込み中に画面が一度消えても、これらは残り、依頼も作り直しません。取り消しを押した後は確定も依頼の文も送りません。前の確定・取り消し・停止・依頼の作成の応答が遅れて返っても、その後に始めた確定や、開き直した（または別のページで開いた）引き継ぎの画面には何もしません（閉じたり、結果が分からない扱いにしたり、表示を書き換えたりしません）。依頼を作れず既存の停止だけを出す画面では、止まったときだけ「停止しました」と出し、止められなかった・分からないときは理由を出して停止ボタンを残します（もう一度押せます）
+- 終了コードは mem と同じです：0 成功・2 入力の誤り・50 mode が on でない・51 版の競合・52 見つからない・55 `not_requested`／`request_closed`／`session_changed`／`state_forbids`
 
 ---
 

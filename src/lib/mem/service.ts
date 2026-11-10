@@ -45,6 +45,7 @@ import {
   type SessionSlotView,
 } from '@/lib/db/mem-db';
 import { isSameInstanceLifetime, readInstanceLifetime, type InstanceLifetime } from '@/lib/db/session-brief-db';
+import { approvalMarkHolds, consumeApprovalMark, type HandoffApprovalMark } from '@/lib/db/handoff-db';
 import { isScreenRequest } from '@/lib/security/screen-request';
 import { createLogger } from '@/lib/logger';
 import { getMemNotice as getMemNoticeRow, memModeOnFor } from '@/lib/db/mem-close-db';
@@ -515,7 +516,7 @@ export async function memCloseItem(
 type ScreenRequest = Parameters<typeof isScreenRequest>[0];
 
 /** The refusals only the screen's entrance answers with (all 409; nothing is written). */
-export const MEM_SCREEN_REFUSALS = ['incarnation_changed', 'membership_changed', 'confirmation_required', 'fenced'] as const;
+export const MEM_SCREEN_REFUSALS = ['incarnation_changed', 'membership_changed', 'confirmation_required', 'fenced', 'not_approved'] as const;
 export type MemScreenRefusal = (typeof MEM_SCREEN_REFUSALS)[number];
 
 const SCREEN_MESSAGES: Record<MemScreenRefusal, string> = {
@@ -523,6 +524,7 @@ const SCREEN_MESSAGES: Record<MemScreenRefusal, string> = {
   membership_changed: 'The branch is not the one the request was made for',
   confirmation_required: 'Closing a recorded decision needs the confirmation that it is not reflected',
   fenced: 'The request was withdrawn before the write',
+  not_approved: 'No approval a person gave stands for this proposal now',
 };
 
 function screenRefusal(code: MemScreenRefusal, extra: Record<string, unknown> = {}): MemOutcome {
@@ -558,6 +560,18 @@ export interface MemScreenWriteInput {
   pin?: MemScreenPin;
   /** Asked in the same transaction just before the write; false writes nothing (`fenced`). */
   fence?: () => boolean;
+  /**
+   * Issue #4227 G-PR2 (PM P3-a): the mark of a person's approval of a hand-off proposal,
+   * passed by the hand-off's `decide` only (never from a request body). With
+   * `author: 'proposer'` it is judged in the final stretch by the stored rows alone
+   * (`approvalMarkHolds`: the proposal approved under this decide, the content the
+   * person approved unchanged, not used yet) and used in the same transaction
+   * (`consumeApprovalMark`), so it confirms once. While it holds, the update or close of
+   * a person's item is a person's (D6): the writer is `human`. An add stays the agent's
+   * (the proposal's author, U6). A mark that does not hold refuses the write
+   * (409 `not_approved`); without a mark a proposer writes as the agent it is.
+   */
+  approval?: HandoffApprovalMark;
 }
 
 type ScreenPrepared =
@@ -709,6 +723,24 @@ export async function memWriteFromScreen(
   const draft = plan.op === 'close' ? null : plan.draft;
   const answers = draft ? await askConditionGit(draft, worktree.path, deps) : { origin: null, tip: null };
 
+  // PM P3-a: the mark is the proposer's only, judged by the stored rows in the final stretch.
+  const approval = input.author === 'proposer' ? input.approval : undefined;
+  let approved = false;
+  const approvalHolds = (op: MemScreenWriteOp, itemId: string | null): boolean => {
+    if (!approval) return true;
+    approved = approvalMarkHolds(db, approval, { op, itemId, worktreeId, instanceId: actor.instanceId });
+    return approved;
+  };
+  /** A person's approval makes the update or close of an item a person's (D6); otherwise the actor as looked up. */
+  const writerFor = (): MemActor => (approved ? { ...actor, by: 'human' } : actor);
+  const spendApproval = (record: MemRecord): void => {
+    if (!approval) return;
+    // In the write's transaction: a mark that cannot be used rolls the write back with it.
+    if (!consumeApprovalMark(db, approval, { itemId: record.id, version: record.version }, deps.now?.() ?? Date.now())) {
+      throw new Error('mem-screen-approval-not-consumed');
+    }
+  };
+
   const write = (target: MemTarget): MemOutcome => {
     if (!target.ok) return targetFailure(target);
     if (target.mode !== 'on') return memError('disabled', { mode: target.mode, source: target.source });
@@ -735,6 +767,7 @@ export async function memWriteFromScreen(
       const condition = bindCondition(db, plan.draft, answers, target.storageRepositoryId, now);
       if (!condition.ok) return memError('invalid_close_when', { field: 'closeWhen' });
       if (input.fence && !input.fence()) return screenRefusal('fenced');
+      if (!approvalHolds('add', null)) return screenRefusal('not_approved');
       const scope = scopeOf(target);
       const result = createMemItem(
         db,
@@ -754,6 +787,7 @@ export async function memWriteFromScreen(
         now
       );
       if (!result.ok) return screenStoreFailure(result);
+      spendApproval(result.record);
       logger.info('mem-screen-written', { worktreeId, instanceId: actor.instanceId, op: 'add', by: actor.by, itemId: result.record.id, replayed: result.replayed });
       return writeOk(result.record, result.replayed, openWarnings(db, scope, [plan.kind]));
     }
@@ -771,21 +805,25 @@ export async function memWriteFromScreen(
         patch.closeWhen = condition.json;
       }
       if (input.fence && !input.fence()) return screenRefusal('fenced');
-      const result = updateMemItem(db, actor, plan.itemId, plan.ifVersion, patch, now);
+      if (!approvalHolds('update', plan.itemId)) return screenRefusal('not_approved');
+      const result = updateMemItem(db, writerFor(), plan.itemId, plan.ifVersion, patch, now);
       if (!result.ok) return screenStoreFailure(result);
+      spendApproval(result.record);
       logger.info('mem-screen-written', { worktreeId, instanceId: actor.instanceId, op: 'update', by: actor.by, itemId: plan.itemId, version: result.record.version });
       return writeOk(result.record, false, []);
     }
 
     let transition: MemVersionedCloseTransition = 'close';
-    if (current.kind === 'decision' && current.state === 'recorded' && actor.by === 'human' && current.version === plan.ifVersion) {
+    if (current.kind === 'decision' && current.state === 'recorded' && input.author === 'human' && current.version === plan.ifVersion) {
       // S-D: only a person who said it is not reflected closes a recorded decision.
       if (!plan.confirmUnreflected) return screenRefusal('confirmation_required', { itemId: current.id });
       transition = 'withdraw-recorded';
     }
     if (input.fence && !input.fence()) return screenRefusal('fenced');
-    const result = closeMemItemVersioned(db, actor, plan.itemId, { ifVersion: plan.ifVersion, reason: plan.reason, transition }, now);
+    if (!approvalHolds('close', plan.itemId)) return screenRefusal('not_approved');
+    const result = closeMemItemVersioned(db, writerFor(), plan.itemId, { ifVersion: plan.ifVersion, reason: plan.reason, transition }, now);
     if (!result.ok) return screenStoreFailure(result);
+    spendApproval(result.record);
     logger.info('mem-screen-written', { worktreeId, instanceId: actor.instanceId, op: 'close', by: actor.by, itemId: plan.itemId, transition });
     return writeOk(result.record, false, []);
   };
