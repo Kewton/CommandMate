@@ -1,43 +1,48 @@
 # 終わった CLI のペインへ打ち込まない（Issue #4300）設計
 
-- 段: 設計（この文書だけ）。改訂 2（2026-11-10）: codex-2 の再確認（N1〜N7）と PM の決定（`pm-return-4300-design-rev1.md` の (a)）を反映し、**主筋を「前面の推測」から「CLI を exec で起動してシェルを残さない」へ替えた**。改訂 1 の案 E は比較の表に「採らない」として残す。指摘ごとの処置は §11
-- 基準: develop `7901c149e`（src は `ed9b89eac` と同じ）。行番号はこの時点のもの。「事実」は file:line、「見立て」「未確認」は明記する
-- 実装は 2 段: **PR1**（確かな証拠のときだけ止める小さな直し。別の worktree で実装中。この文書は書かない）、**PR2**（この文書の本体。PR1 のマージ後、develop から別の契約で。§8 で 2 本に分ける）
+- 段: 設計（この文書だけ）。改訂 3（2026-11-10）: codex-2 の再確認（`review-4300c.md`: N1〜N7 の判定と新 P1 1・P2 7）と PM の決定（`pm-return-4300-design-rev2.md` の (a)）を反映し、**起動（new-window）も復旧（respawn-pane）も、ペインのコマンドとして CLI を直接起動し、端末を読むシェルを一度も出さない**形に替えた。起動行を打つ経路・入力ロックの起動の番・起動の印 `@cm_launch` は外した（§2.5）。指摘ごとの処置は §11.0
+- 改訂 2 の主筋（起動行に `exec` を足して打つ）は §2.1 に「採らない（新 P1）」として残す。改訂 1 の案 E も同じ表に残す
+- 基準: develop `ed9b89eac`（この worktree の src。develop の先頭 `46cbe7699` との差は mem・handoff だけで、この設計が触る所は同じ）。行番号はこの時点のもの。「事実」は file:line、「見立て」「未確認」は明記する
+- 実装は 2 段: **PR1**（確かな証拠のときだけ止める小さな直し。別の worktree で実装中、`0ca482d3d`、未マージ。この文書は書かない）、**PR2**（この文書の本体。PR1 のマージ後、develop から別の契約で。§8 で 2 本に分ける）
 
-## 0. 改訂 2 の要約と PR1 との関係
+## 0. 改訂 3 の要約と PR1 との関係
 
-### 0.1 要約（改訂 2 で決めたこと）
+### 0.1 要約（改訂 3 で決めたこと）
 
 | # | 決めること | 決定 | 節 |
 |---|---|---|---|
-| (1) | exec 起動の形 | **起動行を `… exec env <cli> …` にする**（ログインシェルの対話シェルに打つ今の流れのまま、最後の `exec` でシェルを CLI に置き換える）。new-window の pane command にする案は採らない（rc が読まれず PATH を失う、§9 表 3 の m） | §2 |
-| (2) | remain-on-exit | **起動の直前にペインへ `remain-on-exit on` を付ける**。CLI が終わるとペインは dead pane（`#{pane_dead}=1`）で残り、最後の画面（`Resume this session with:` を含む）と `Pane is dead (status N, …)` が見える。セッションは消えない | §2.3、§3 |
-| (3) | 読み手 | ペインを 3 つに分ける: **alive（`pane_dead=0`）／dead（`pane_dead=1`）／absent（セッション無し）**。`agentAlive`=alive、`paneExists`=alive または dead。停止・片付けは `paneExists`、送信・状態・relay は `agentAlive`（N6） | §3 |
-| (4) | Ctrl-Z | exec したペインでは CLI が端末のセッションリーダーで、そのグループは孤立している（親が tmux）ため、**端末からの SIGTSTP は捨てられ CLI は止まらない**（実測 e・f）。`suspended` は起きない。表示は `^Z` が出るだけ | §4 |
-| (5) | 既存の復旧 | 復旧の判断（#2070 `relaunchIfToolExited`、`resolveLaunchPane` の再利用 `base.ts:897`、opencode V1/V2 の再利用、claude の `ensureHealthySession`、codex の #2068）は、**まず `pane_dead` を読む**（画面は読まない）。dead なら `respawn-pane`（`-k` なし。生きたペインには tmux が断る、実測 c）してから同じ起動行を打つ。claude は今の不健康の経路（kill して作り直す） | §5 |
-| (6) | relaunched | 起動の結果 `replaced`（dead／旧方式の exited から作り直した）を起動の印に残し、ルートが送信の後に読む（`takeOpencodeResumeNotice` と同じ形）。**復旧の変更と同じ PR（PR2a）で**、成功・失敗の両方の答えに載せる（N7） | §6 |
-| (7) | `Resume this session with:` | dead pane に残るので capture で見える（今と同じ）。作り直しの後は、non-claude は respawn で履歴に残る（実測 a）、claude は消える。代わりに **relaunched の 1 行に、前の画面から読めた `claude --resume <id>` を添える**。ペインで自分で `claude --resume` を打つ使い方はできなくなる | §6.1 |
-| (8) | 既存のセッションの移行 | 強制の再起動はしない。旧方式のペイン（印 `@cm_launch` が無い）は PR1 の判定が守る。旧方式の CLI が終わり、次の送信で復旧（#2070）すると、そのときの起動行が exec なので**その場で新方式に移る**。claude は kill して作り直すので同じく移る | §8.4 |
-| (9) | N3（改行を含む本文） | 新方式のペインには、端末から行を読んでコマンドとして実行するシェルが**どの時点にもいない**（CLI がいる間は CLI が読む、終わった後は tmux が入力を捨てる）。実測 e2（改行入りの本文が実行されない）・b（dead pane への send-keys は exit 0 で何も起きない） | §4、§11 |
-
-前面の推測（案 E）・lease・各段の判定（改訂 1 の §3.1）は **PR2 の主筋から外す**。exec 起動で、判定と打鍵の間の競合が起きても届く先がシェルでなくなるので、各段で前面を推し量る必要が消える（§11 の N1〜N4）。
+| (1) | 起動の形 | **ペインのコマンドとして起動する**: `new-window -k -c <cwd> <shell> -l -i -c '<代入> exec <cli> <引数>'`。復旧は `respawn-pane -c <cwd>`（`-k` なし）に同じコマンド。起動行は**打たない**。`<shell>` は tmux の `default-shell`（今の `respawnLoginShell` と同じ読み方） | §2.1、§2.2 |
+| (2) | なぜ `sh -c` でなくログインシェルの `-l -i -c` か | **実測で `sh -c` は今の起動と同じ環境にならない**（表 4 の s2: rc の PATH と rc が export する変数が CLI に届かず、PATH にしか無い CLI は `not found` で 127）。`<shell> -l -i -c` は今の起動と PATH・rc の変数・`CM_*`・秘密の代入まで同じ（s1 と s3 が一致）。`-c` のシェルはコマンドを文字列からだけ読み、端末からは読まない（プロンプトも出さない）。起動中（rc を読んでいる間）に届いたキーは端末のバッファに溜まり CLI が読む（s6: 改行入りでも実行されない） | §2.1、§9 表 4 |
+| (3) | `env` | **外す**。`exec env` の `env` は「bash の対話シェルは exec に失敗しても残る」穴のためだった。`-c` のシェルは exec に失敗すると終わり、ペインは dead（127）になる（s9: zsh・bash・sh とも）。P2-2 の「`env` が PATH に無い」心配も消える | §2.2 |
+| (4) | remain-on-exit | `new-window`／`respawn-pane` と**同じ tmux の呼び出しに `;` でつなぐ**（`… \; set-option -p -t <pane> remain-on-exit on`）。別の呼び出しにすると、すぐ終わる CLI（起動の失敗）ではセッションごと消える（s10: 別呼び出し 0/20 残る、つなぐと 20/20 残る） | §2.4 |
+| (5) | 方式の区別（P2: 印と世代） | 印 `@cm_launch` は**外す**。代わりに tmux 自身が作成と respawn の時に入れる `#{pane_start_command}` を読む（s4: 旧方式は空か `<shell> -l`、新方式は `<shell> -l -i -c "…"`、respawn で入れ替わる）。ペインとその世代に tmux が原子的に結び付けるので、印の保存の前のサーバー終了・保存の失敗・古い起動が後継に印を付ける、が構造的に無い | §2.4、§3.1 |
+| (6) | 読み手 | ペインを alive／dead／absent／unknown に分け、方式（exec／legacy）を同じ 1 回の `display-message` で読む。`paneExists`＝alive または dead、`agentAlive`＝alive かつ（新方式、または旧方式で今の判定が alive） | §3 |
+| (7) | 送信中の復旧（新 P1） | 復旧は respawn で**CLI を直接起動**するので、送信中の古いキーが届きうる先は「dead pane（捨てられる）」「起動中の `-c` のシェル（読まない。端末のバッファに溜まる）」「新しい CLI」だけ。**シェルが端末を読む区間は無い**（s5・s6）。新しい CLI に届いた場合は Enter の後の確認が `pane_pid` の変化で indeterminate にする（正しさの面、§4.5） | §4.5 |
+| (8) | 旧方式の Ctrl-Z（P2） | 旧方式のペインを作り直す前に、前面がペインのシェル（PR1 の D）**かつ**そのペインの端末にシェル以外のプロセスが無いことを確かめる（s11: Ctrl-Z で止まった CLI は `ps -t <tty>` に `T` で残る）。止まったジョブがあれば起動も kill もせず not-sent（`detail: 'suspended'`）。`fg` で同じ CLI に戻れる | §5.2 |
+| (9) | unknown（P2） | 不明では**置換しない**。最初のキーの前の不明は not-sent、キーが届きうる段より後の不明・absent は indeterminate | §4.2、§5.1 |
+| (10) | terminal ルート（P2） | **send と同じ「復旧して送る」に揃える**。absent は今どおり 404（自動で作らない）。dead は send と同じ `startSessionForSend` で起動し直してから送り、答えに `relaunched` を載せる。unknown は 409 で何もしない | §3.2、§3.3 |
+| (11) | 応答の poll（P2） | dead への遷移では、**その世代（`pane_pid`）の最後の画面を 1 回回収して保存してから**止める。答えのキーは出さない。後継の世代（`pane_pid` が違う）には書かない | §3.2 |
+| (12) | relaunched（P2） | 「置換した事実」と「会話を引き継いだか」を分ける: `relaunched: { replaced: true, conversation: 'resumed' \| 'new' }`。opencode V1 の `-s <id>` の再開は `resumed`、ほかは `new` | §6 |
+| (13) | §12（P2） | 回答の入口と配送を分けた: 通常キー（`sendPromptAnswer`）・strict キー（`strict-prompt-answer-io.ts`）・API 回答（`respondByDecisionId`／`respondToSolePendingDecision` → エージェントの API）。それぞれの dead／absent／起動中／世代交代の扱い | §12 |
+| (14) | PR の分け方と G-PR3 | PR2a（読み手・復旧・通知・terminal・poll）→ PR2b（起動の形）。**PR2a は G-PR3 の契約の scope（`src/app/api/worktrees/[id]/send/**`・`src/cli/types/**`）と重なるので G-PR3 のマージ後に直列**。`send-user-message.ts` はどちらの PR も触らない | §8 |
 
 ### 0.2 PR1 が入れるもの（PR2 の土台）
 
+PR1 の実装（`../commandmate-issue-4300` の `0ca482d3d`）を読んで確かめた。改訂 2 の §0.2 にあった「`sendUserMessage` の早い拒否」は **PR1 には入っていない**（PR1 のコミットの本文: claude 以外の driver は `requireSession({relaunch:true})` で終わったツールを起動し直してから送るので、その前で断ると #2070 の復旧を止める、という理由）。この改訂で表を実装に合わせた。
+
 | PR1 が入れるもの | 中身 | PR2 での扱い |
 |---|---|---|
-| `readPaneForeground(sessionName): 'shell' \| 'other' \| 'unknown'`（`src/lib/tmux/tmux.ts`） | 案 D（§2.1）。名前がシェル かつ `tpgid == pane_pid` なら `shell` | **旧方式のペイン（印なし）にだけ使う**（§8.4）。新方式のペインに当てると、exec した非 exec ラッパー（`bash` スクリプト → CLI）を `shell` と誤って全部断る（実測 h） |
-| `recheckComposerBeforeInput`（`composer-clear.ts:263`）で `shell` なら `AGENT_NOT_IN_FOREGROUND_CODE` | 全 driver が本文の最初のキーの前に通る点 | 同じ点に「`pane_dead=1` なら断る」を足す（§4.2）。旧方式のペインでは PR1 の判定のまま |
-| `sendUserMessage` の早い拒否（`send-user-message.ts`、所有権の確認の後） | 同じ判定を 1 回 | **PR2 は触らない**（§8.2。G-PR3 と重ならない） |
-| `SendAttemptReason` の `'agent-not-in-foreground'`、`classifySendFailure` | 500＋`not_sent` → exit 99 | 新方式の dead pane も同じ理由で返す（理由を 2 つ足す: `agent-foreground-unknown`・`agent-left-mid-send`。§4.3） |
-| 表駆動テスト（`CLI_TOOL_IDS` の全員）と陽性対照 | 前面がシェルで send-keys 0 回 | 残す（旧方式の守り）。新方式の行を足す（§7） |
+| `readPaneForeground(sessionName): 'shell' \| 'other' \| 'unknown'`（`src/lib/tmux/tmux.ts`） | 案 D。`display-message '#{pane_current_command}\t#{pane_pid}'`、名前がシェルのときだけ `ps -o tpgid= -p <pane_pid>`。shell は `tpgid == pane_pid` のとき | **旧方式のペイン（`pane_start_command` が新方式の形でない）にだけ使う**（§8.4）。新方式のペインに当てると、起動中（rc を読む `-c` のシェルが `pane_pid`、s6）と exec した非 exec ラッパー（表 3 の h）を `shell` と誤る |
+| `recheckComposerBeforeInput`（`composer-clear.ts:263`）で `shell` なら `AGENT_NOT_IN_FOREGROUND_CODE` | 全 driver が本文の最初のキーの前に通る点 | 同じ点で `readPaneState` を読む（§4.2）。旧方式のペインでは PR1 の判定のまま |
+| `SendAttemptReason` の `'agent-not-in-foreground'`、`classifySendFailure` | 500＋`not_sent` → exit 99 | 新方式の dead も同じ理由で返す。理由を 2 つ足す（`agent-foreground-unknown`・`agent-left-mid-send`、§4.3） |
+| 表駆動テスト（`tests/unit/cli-tools/send-foreground-gate-4300.test.ts`、9 ツール）と陽性対照 | 前面がシェルで send-keys 0 回 | 残す（旧方式の守り）。新方式の行を足す（§7） |
 
-PR1 の残りのリスク（判定の後に CLI が終わる競合、改行を含む本文の先頭行が本文の送信だけで実行されうる＝N3）は、PM の決定どおり PR1 の `changelog.d/4300.md` と PR 本文に明記する（この契約では changelog.d を書かない）。新方式に移ったペインではこの残りが消える（§11）。
+PR1 の残りのリスク（判定の後に CLI が終わる競合、改行を含む本文の先頭行が本文の送信だけで実行されうる＝N3、#2070 の relaunch が旧方式のシェルへ起動行を打つ経路）は、PR1 の `changelog.d/4300.md` と PR 本文に明記する（PM の決定。この契約では changelog.d を書かない）。新方式に移ったペインではこの残りが消える（§11）。
 
 ### 0.3 止める点
 
-- PR2 は起動（`src/lib/session/launch-screen.ts`・`src/lib/hooks/sources/launch-command.ts`・`src/lib/tmux/tmux.ts`・各 driver の起動）、復旧（`base.ts`・`claude-session.ts`・`opencode*.ts`・`codex.ts`・`session-launch-flight.ts`）、読み手（§3 の表）、送信の最初の判定（`composer-clear.ts`）、CLI の表示（`message-dispatch.ts`）で収まる。`src/lib/session/send-user-message.ts`・`src/lib/handoff`・`src/components/mem` には触らない。
-- `src/lib/prompt-answer-sender.ts`（`respond`・auto-yes の回答経路）は直さない（PM の決定 (c)）。ただし新方式のペインでは答えのキーもシェルに届かなくなる（§3.3）。
+- PR2 は起動（`src/lib/tmux/tmux.ts`・`src/lib/hooks/sources/launch-command.ts`・各 driver の起動）、復旧（`base.ts`・`claude-session.ts`・`opencode*.ts`・`codex.ts`）、読み手（§3 の表）、送信の最初の判定と Enter の後の確認（`composer-clear.ts`・`submit-verified-sender.ts`）、ルートと CLI の表示（`send/route.ts`・`terminal/route.ts`・`message-dispatch.ts`）で収まる。`src/lib/session/send-user-message.ts`・`src/lib/handoff`・`src/components/mem` には触らない。
+- `src/lib/prompt-answer-sender.ts`・`strict-prompt-answer-io.ts`・`respond/structured-decision.ts`（回答の経路）は直さない（PM の決定 (c)。#4303 の範囲）。新方式のペインでは答えのキーもシェルに届かなくなる（§12）。
 
 ## 1. 今の経路と、claude だけがシェルへ打ち込む理由
 
@@ -55,214 +60,321 @@ claude 以外の driver は送る前に `requireSession(..., { relaunch: true })
 
 claude は終了時に最後の画面（入力欄の `❯ ` 行と罫線）を残し、その下に `Resume this session with:`・`claude --resume <id>`・シェルのプロンプトを出す。`CLAUDE_PROMPT_PATTERN`（`src/lib/detection/tools/claude/patterns.ts:166`）が残った `❯ ` 行に当たり、liveness は画面全体に alive の型を当てる（`liveness-spec.ts:167-168`、`tool-liveness.ts:249-253`）ので、`isClaudeRunning`・`ensureHealthySession`・準備待ちが全部通る。codex・command-code が断ったのは偶然（表示が変われば打ち込みうる、見立て）。
 
-## 2. exec 起動（決定 (1)(2)）
+
+## 2. ペインのコマンドとして起動する（決定 (1)〜(5)）
 
 ### 2.1 案の比較
 
 | 案 | 中身 | 判定 | 理由 |
 |---|---|---|---|
-| D（PR1） | 名前がシェル かつ `tpgid == pane_pid` なら断る | 旧方式のペインの守りとして残す | 対話サブシェル・ジョブ制御無効で誤る（§9 表 1 の d・f）。exec した非 exec ラッパーを誤って断る（表 3 の h） |
-| E（改訂 1） | 前面のグループにシェル名でないプロセスがいれば送る。lease＝`tpgid`、打鍵の各段で再判定 | **採らない（理由: N1〜N4）** | N1: 「シェル名でないプロセス」は対象 CLI の証拠にならない（補助プロセスが残る・サブシェル内の Ctrl-Z）。N2: `tpgid` は同じ CLI の寿命を識別しない（非 exec ラッパーの再起動）。N3: 改行を含む本文は本文の送信だけで実行されうる。N4: キーを出す内部の経路（空けの反復・撤回・copilot の一括送信）を全部覆う必要がある。どれも「推測と打鍵の間にシェルがいる」ことが根で、端を足しても出続ける系統 |
-| F-1 pane command | `new-window -k … '<起動行>'`（tmux が `default-shell -c` で起動） | 採らない | 非対話シェルなので `.zshrc` を読まず、nvm・pyenv・Homebrew の PATH を失う（表 3 の m、`RC_LOADED` が来ない）。`-lic` を付けると shell ごとの差（fish）と引用の層が増え、起動行を入力ロックの中で打つ今の流れ（#3975・#3981）、codex の #2068、opencode-v2 の cwd の再確認（#4233）を全部作り直すことになる |
-| **F-2 起動行に `exec`（採用）** | 今の流れのまま、起動行を `clear…; printf…; <代入> exec env <cli> <引数>` にする | **採用** | rc・cwd・入力ロック・画面の消去がそのまま。シェルは最後に CLI へ置き換わり、CLI の終了でペインが dead になる（表 3 の a） |
+| D（PR1） | 名前がシェル かつ `tpgid == pane_pid` なら断る | 旧方式のペインの守りとして残す | 対話サブシェル・ジョブ制御無効で誤る（§9 表 1 の d・f）。exec した非 exec ラッパーと、新方式の起動中（rc を読む `-c` のシェル）を誤って断る（表 3 の h、表 4 の s6） |
+| E（改訂 1） | 前面のグループにシェル名でないプロセスがいれば送る。lease＝`tpgid`、打鍵の各段で再判定 | 採らない（N1〜N4） | 「推測と打鍵の間にシェルがいる」ことが根で、端を足しても出続ける系統（改訂 2 の §2.1 と同じ） |
+| F-2（改訂 2） | ログインシェルの対話シェルに起動行 `… exec env <cli>` を打つ | **採らない（新 P1）** | 起動と復旧のたびに、起動行を打つまでの間は**端末を読むシェルが前面にいる**。復旧の `respawn-pane` が出したシェルへ、送信中の古い本文・Enter が届きうる（`review-4300c.md` の 1）。印 `@cm_launch` を付けるまでの区間の誤分類（同 2）もこの形から来る |
+| F-1a `sh -c`（PM の決定の形） | `new-window -k … /bin/sh -c '<代入> exec env <cli>'` | 形（ペインのコマンド・1 本・exec）は採る。**`sh` は採らない** | 実測で今の起動と環境が違う（表 4 の s2）。tmux のペインは tmux サーバーの大域の環境（その tmux サーバーを最初に起こした端末の環境）をそのまま受け取り、rc（`.zprofile`・`.zshrc`）を読まない。PATH にしか無い CLI（nvm・Homebrew・`~/.local/bin`）は `not found`、rc が export する API キー類も届かない |
+| **F-1b ログインシェルの `-l -i -c`（採用）** | `new-window -k -c <cwd> <default-shell> -l -i -c '<代入> exec <cli> <引数>'`。復旧は `respawn-pane -c <cwd>`（`-k` なし）に同じ | **採用** | 今の起動（ログインシェルの対話シェルが rc を読んだ後に起動行を実行）と同じ rc を同じ順で読むので、PATH・rc の変数・代入（`CM_*`・秘密）が同じになる（表 4 の s1 と s3 が一致）。`-c` のシェルは文字列のコマンドだけを実行し、端末からコマンドを読まず、プロンプトも出さない。最後の `exec` で CLI に置き換わり、終わればペインは dead |
 
-### 2.2 起動行の形
+- 「対話のシェルを一度も出さない」の意味: 端末から行を読んでコマンドとして実行するシェルが、ペインのどの時点にもいないこと。`-i` は rc を読ませるため（zsh は対話のときだけ `.zshrc` を読む。bash の `.bashrc` も多くは `$-` に `i` が無いと戻る）で、`-c` があるのでシェルは端末を読まない。表 4 の s6: rc が 1 秒眠っている間に `touch <f>`＋Enter を送ると、文字は端末の echo で画面に出たが**実行されず**、起動した CLI（`cat`）がそのまま読んだ。
+- `default-command`（利用者が tmux.conf で設定した場合）は、今は `new-window` にコマンドが無いので使われる。新方式は使わない（見立て: 使う利用者は少ない。`reattach-to-user-namespace -l zsh` のような古い macOS の設定。§10）。
+- fish をログインシェルにした利用者: 今も同じ起動行（`NAME='v' cli`）を fish に打っているので、構文の前提は変わらない。`NAME='v' exec cli` を fish が受け付けるかは**未確認**（手元に fish が無い）。受け付けなければ起動は 127 で dead になり、失敗として返る（シェルは残らない、§5.3）。
 
-今: `clear 2>/dev/null; printf '\033[3J'; NAME='v' … <cli> <引数>`（`launch-screen.ts:44` の接頭辞＋`renderAgentLaunchCommand`, `src/lib/hooks/sources/launch-command.ts:276`）。
-新: `clear 2>/dev/null; printf '\033[3J'; NAME='v' … exec env <cli> <引数>`。
+### 2.2 起動のコマンドの形
 
-- `exec` の前に代入を置く（`NAME='v' exec env cmd`）。zsh・bash・sh で代入が CLI に渡ることを実測（表 3 の n）。秘密を含む代入（ロールの `OPENCODE_CONFIG_CONTENT="$(cat '<file>')"`、`src/lib/agent-roles/adapters.ts:245`）も今どおり環境に入り、`env` の argv には載らない（`exec env NAME=… cmd` の形にすると argv に載るので採らない）。
-- `env` を挟む理由: **bash の対話シェルは `exec` に失敗してもシェルが残る**（表 3 の c3。zsh は終わる c）。`exec env` なら `env` は必ずあるので exec は成功し、CLI が見つからなければ `env` が 127 で終わってペインが dead になる（c2・c4）。起動の失敗でシェルが残る穴を塞ぐ。
-- 入れる場所は `renderAgentLaunchCommand`（計画を行にする唯一の関数）で `${代入} exec env ${plan.command}`。後ろに足すフラグ（claude・antigravity の `--model`、command-code の起動フラグ、opencode の `-s <id>`）は今どおり行末に付くので影響しない。計画を通らない vibe-local（`'vibe-local -y'`、`vibe-local.ts:143`）は同じ補助関数で `exec env vibe-local -y`。
-- ガード（§7.4）: `typeLaunchLines` に渡る文字列の段のうち起動行は、全部 `exec env ` を含むこと。例外は claude の `unset CLAUDECODE`（起動の前の行、下表）だけ。
+今: シェルに打つ `clear 2>/dev/null; printf '\033[3J'; NAME='v' … <cli> <引数>`（`launch-screen.ts:44` の接頭辞＋`renderAgentLaunchCommand`, `src/lib/hooks/sources/launch-command.ts:276`）。
+新: tmux の argv で `[<default-shell>, '-l', '-i', '-c', "NAME='v' … exec <cli> <引数>"]`。
 
-### 2.3 全 CLI の起動行と、起動の前に同じシェルで要るもの
+- `-c` の文字列は `renderAgentLaunchCommand` の今の出力に `exec ` を挟んだもの（`${代入} exec ${plan.command}`）。後ろに足すフラグ（claude・antigravity の `--model`、command-code の起動フラグ、opencode の `-s <id>`）は今どおり行末に付く。計画を通らない vibe-local（`'vibe-local -y'`, `vibe-local.ts:143`）も同じ補助関数で `exec vibe-local -y`。
+- 代入を `exec` の前に置く（`NAME='v' exec cmd`）。zsh・bash・sh で代入が CLI の環境に入る（表 3 の n、表 4 の s9 の bash）。秘密を含む代入（ロールの `OPENCODE_CONFIG_CONTENT="$(cat '<file>')"`、`src/lib/agent-roles/adapters.ts:245`）も今どおり。`#{pane_start_command}` と `ps` に見えるのは `$(cat '<file>')` の文字列で、秘密の値ではない（表 4 の s1・s4: `SECRET` は CLI に届き、start_command には `$(cat …)` だけ）。
+- `exec` の後ろに `env` を置かない（決定 (3)）。`-c` のシェルは exec に失敗すると終わる（s9）。
+- claude: 今は起動行の前に同じシェルで `unset CLAUDECODE` を打つ（`claude-session.ts:975`）。新方式は `-c` の文字列の先頭に `unset CLAUDECODE; ` を置く（同じシェルで先に走る。打たない）。`tmux set-environment -g -u CLAUDECODE`（`:974`）は今どおり（tmux の大域の環境に `CLAUDECODE` が残っているとペインに届くことを s1・s3 で確かめた）。
+- 起動のコマンドの echo（#3180）: 打たないので echo が無い。`clear; printf '\033[3J'` の接頭辞は外す。respawn では前の CLI の画面を履歴に残したい（#2070 の「pane holds the transcript」）ので、消さないほうが今の non-claude の振る舞いに近い（表 4 の s6: respawn の後も前の出力が残った）。
+- ガード（§7.4）: `new-window`／`respawn-pane` に起動のコマンドを渡す所は 1 つの関数（`spawnAgentPane`, `tmux.ts`、新設）だけで、その argv の最後の要素が `exec ` を含む。`typeLaunchLines` は残らない。
 
-| CLI | 起動行を作る所 | 打つ所 | 起動の前に要るもの | 扱い |
+### 2.3 全 CLI の起動と、起動の前に要るもの
+
+| CLI | 起動のコマンドを作る所 | 今の打つ所 → 新 | 起動の前に要るもの | 扱い |
 |---|---|---|---|---|
-| claude | `buildAgentLaunchCommandLine`（`claude-session.ts:938`）＋`--model`（`:948`） | `typeLaunchLines(sessionName, ['unset CLAUDECODE', …])`（`claude-session.ts:975`）。前に `tmux set-environment -g -u CLAUDECODE`（`:974`） | `unset CLAUDECODE`（同じシェルで先に走る別の行） | そのまま。2 行目だけ `exec env`。2 行は同じシェルの入力に順に積まれるので `unset` が先に効く（今と同じ） |
-| codex | `buildAgentLaunchCommandLine`（`codex.ts:313`）。`plan.command` は `'<path>' -c features.daemon_auto_start=false [--no-daemon] [trust]`（`hooks/sources/codex/hooks-config.ts:918`） | `codex.ts:343`、#2068 の打ち直し `:337` | なし | `exec env`。#2068 の打ち直しは §5 |
-| command-code | `buildCommandCodeLaunchCommand`（`command-code.ts:127`、フラグを後ろに） | `command-code.ts:303` | なし | `exec env` |
-| copilot | `buildAgentLaunchCommandLine`（`copilot.ts:513`） | `copilot.ts:533` | なし | `exec env` |
-| antigravity | `buildAgentLaunchCommandLine`＋`--model`（`antigravity.ts:303-308`） | `antigravity.ts:331` | なし | `exec env` |
-| opencode | `buildAgentLaunchCommandLine`＋`-s <id>`（`opencode.ts:470-490`、`opencode-session-store.ts:312`） | `opencode.ts:504` | なし | `exec env` |
-| opencode-v2 | `buildAgentLaunchCommandLine`（`opencode-v2.ts:300`） | `opencode-v2.ts:304`（前の段は cwd の再確認の関数 `launchCwdRecheck`、打たない） | なし（ポート・パスワードは代入で渡る） | `exec env` |
-| gemini | `buildAgentLaunchCommandLine`（`gemini.ts:164`） | `gemini.ts:178` | なし | `exec env` |
-| vibe-local | 文字列 `'vibe-local -y'`＋`-m`・`--context-window`（`vibe-local.ts:143-157`） | `vibe-local.ts:164` | なし | `exec env`。vibe-local 自体は bash スクリプトで最後に `exec python3`（手元の `~/.local/bin/vibe-local:305`） |
+| claude | `buildAgentLaunchCommandLine`（`claude-session.ts:938`）＋`--model`（`:948`） | `typeLaunchLines`（`:975`）→ `createLaunchPane`／respawn にコマンドを渡す | `unset CLAUDECODE` | `-c` の文字列の先頭に置く |
+| codex | `buildAgentLaunchCommandLine`（`codex.ts:313`） | `codex.ts:343`、#2068 の打ち直し `:337` → 同上。#2068 は dead を読んで respawn（§5.1） | なし | |
+| command-code | `buildCommandCodeLaunchCommand`（`command-code.ts:127`） | `command-code.ts:303` → 同上 | なし | |
+| copilot | `buildAgentLaunchCommandLine`（`copilot.ts:513`） | `copilot.ts:533` → 同上 | なし | |
+| antigravity | `buildAgentLaunchCommandLine`＋`--model`（`antigravity.ts:303-308`） | `antigravity.ts:331` → 同上 | なし | |
+| opencode | `buildAgentLaunchCommandLine`＋`-s <id>`（`opencode.ts:470-490`） | `opencode.ts:504` → 同上 | なし | respawn のたびに `-s <id>` を読み直して新しいコマンドを作る（`respawn-pane` をコマンド無しで撃つと前の start_command を再実行するので必ず渡す） |
+| opencode-v2 | `buildAgentLaunchCommandLine`（`opencode-v2.ts:300`） | `opencode-v2.ts:304`（前の段が cwd の再確認 `launchCwdRecheck`, `role-launch.ts:478`）→ 同上 | cwd の再確認 | 確認は `-c` に渡す直前の cwd（`new-window`／`respawn-pane` の `-c`）に当てる。今はペインの cwd を読む（打つ直前）。新方式ではペインがまだ無い（new-window）か dead（respawn）なので、渡す値そのものを確かめる |
+| gemini | `buildAgentLaunchCommandLine`（`gemini.ts:164`） | `gemini.ts:178` → 同上 | なし | |
+| vibe-local | 文字列 `'vibe-local -y'`＋`-m`・`--context-window`（`vibe-local.ts:143-157`） | `vibe-local.ts:164` → 同上 | なし | vibe-local 自体は bash スクリプトで最後に `exec python3` |
 
-- `cd`: どの起動行にも無い。作業ディレクトリは `createSession` の `new-window -c`（`tmux.ts:523`）で決まる（今と同じ）。
-- `export`・nvm・pyenv・Homebrew の PATH: 起動行には無く、ログインシェルが rc を読んで整える。F-2 は rc を読んだ後に exec するので今と同じ PATH で CLI が起動する（表 3 の a: 仮の `.zshrc` の PATH と変数が CLI に届いた）。
-- 秘密の代入（ロール）: 上の §2.2。
-- 起動行の echo: `clear` と `ESC[3J` で消す今の仕組み（#3180）は変えない。
+- 順序の変化: 今は `createLaunchPane`（`base.ts:926`、`createSession` の後に 0.x 秒待つ）→ 起動行を作る → 打つ。新方式は**起動のコマンドを先に作り**、`createSession` に渡す（`CreateSessionOptions.command`、無ければ今どおりログインシェル。`createSession` の起動以外の呼び手 `tmux.ts:1059`・transport はそのまま）。ロールの `gateLaunchRole`（`role-launch.ts:503`、「ペインを作る前に準備する」）は今どおり先に走る。
+- 作り直しの失敗の予備（`respawnLoginShell`, `tmux.ts:382`）: `new-window -k` が失敗したとき、コマンドがあれば `respawn-pane -k`（仮置きの `sleep` を殺す。仮置きなので `-k` でよい）に同じコマンドと remain-on-exit をつなぐ。
 
-### 2.4 remain-on-exit と印（決定 (2)）
+### 2.4 remain-on-exit と方式の区別（決定 (4)(5)）
 
-- 起動行を打つ**同じ入力ロックの番の中で、打つ直前に** `set-option -p -t <pane> remain-on-exit on` を撃つ（ペインの選択肢。サーバ全体・既定のサーバの `-g` には撃たない）。`createSession` には入れない（`createSession` は起動以外の呼び手もある、`tmux.ts:1059` ほか）。
-- CLI が終わった後: ペインは dead で残る（`pane_dead=1`、`pane_dead_status` に終了の状態、表 3 の a・b2）。セッションは消えない。remain-on-exit が無いと、ペインが閉じて 1 窓のセッションごと消える（表 3 の b）。
-- remain-on-exit を付ける理由: (i) 最後の画面（`Resume this session with:`、起動の失敗の文面）が capture で読める。消えると失敗の理由が残らない。(ii) dead pane への復旧は `respawn-pane`（`-k` なし）で、**tmux 自身が「生きているペインには断る」**（表 3 の c）。生きた CLI を誤って置き換える経路が構造的に無くなる。(iii) 復旧で同じペインを使うので、non-claude は前の画面が履歴に残る（#2070 の「pane holds the transcript」と同じ、表 3 の a）。
-- 印: 起動が準備の確認まで通ったら `set-option -p @cm_launch exec`（ペインの利用者の選択肢、`#{@cm_launch}` で読める、表 3 の l）。`respawn-pane` の直前に外し、次の起動の準備の確認の後にまた付ける。印は「このペインのシェルはもう CLI に置き換わった」ことを表し、§8.4 の旧方式との分岐に使う。準備の確認の前に付けないのは、起動行が打てなかったペインに印が付くと、シェルがいるのに PR1 の守りを外してしまうため。
-- tmux の版: `-p`（ペインの選択肢）は tmux 3.0 以降（見立て。リポジトリに tmux の最低版の宣言は無い）。実測は 3.5a。
+- remain-on-exit: `new-window -k -t <s>:0 -c <cwd> <argv…> \; set-option -p -t <s>:0 remain-on-exit on` を **1 回の tmux の呼び出し**で撃つ（`;` は tmux のコマンドの区切り。execFile の argv に `';'` を 1 要素で入れる）。respawn も同じ形（respawn は remain-on-exit を保つことを表 3 の a で確かめたが、同じ形にそろえる）。サーバ全体・`-g` には撃たない。
+  - 理由（実測 s10）: すぐ終わるコマンド（`sh -c 'exit 3'`、起動の失敗の代わり）で、つなぐと 20/20 回 dead で残り（status 3）、別の呼び出しにすると 20/20 回セッションごと消えた。起動の失敗の画面と終了の状態を残すにはつなぐ必要がある。
+  - CLI が終わった後: ペインは dead（`pane_dead=1`、`pane_dead_status`）で残り、最後の画面と `Pane is dead (status N, …)` が見える（表 3 の b2）。セッションは消えない。
+- 方式の区別: `#{pane_start_command}` を読む（実測 s4）。
+  - 旧方式（今の `createSession` の `new-window` にコマンド無し）: 空。予備の `respawnLoginShell`: `<shell> -l`。
+  - 新方式: tmux が描く `<shell> -l -i -c "…"`。`respawn-pane` にコマンドを渡すと入れ替わる（s6 の後の値）。
+  - 判定は 1 つの関数 `isExecLaunchStartCommand(startCommand)`（`<絶対パス> -l -i -c ` で始まる）。読めない・形違いは unknown。
+- 印 `@cm_launch` を外した理由（P2: 印と世代）: 改訂 2 の印は CommandMate が「準備の確認の後」に書くので、書く前のサーバー終了・書く失敗・古い起動処理が後継のペインに書く、の 3 つの隙間があった。`pane_start_command` は tmux がペインを作る（respawn する）その時に入れるので、ペインと世代に結び付き、CommandMate が書く段が無い。
+- 状態ごとの読み方（P2: 旧方式・起動途中・exec 済み・起動失敗の区別）:
 
-## 3. 読み手（決定 (3)、N6）
+| 状態 | `pane_dead` | start_command | 前面の名前 | 送信 |
+|---|---|---|---|---|
+| 旧方式 | 0 | 空か `<shell> -l` | 何でも | PR1 の D（§8.4） |
+| 新方式・起動途中（rc を読んでいる） | 0 | 新方式 | シェルの名前（s6） | 端末を読むシェルはいない。準備の確認（入力欄）が通るまで送らない（今の準備待ち）。D は当てない |
+| 新方式・exec 済み | 0 | 新方式 | CLI | 送る |
+| 新方式・起動失敗 | 1 | 新方式 | シェルの名前（dead の `pane_current_command` は exec 前の名前が残る、s5・Q） | not-sent（§4.2）。起動の準備待ちは dead を読んだら待たずに失敗にし、最後の画面と状態を載せる（§5.3） |
+| 新方式・CLI が終わった | 1 | 新方式 | 同上 | not-sent。次の send は復旧（§5） |
+| absent | — | — | — | 今の「セッションが無い」 |
+| unknown | — | — | — | not-sent（キーの前）／indeterminate（キーの後） |
 
-### 3.1 3 つの状態と 2 つの述語
+- tmux の版: `set-option -p`・`pane_start_command`・`respawn-pane -c` は tmux 3.0 以降の見立て（リポジトリに最低版の宣言は無い）。実測は 3.5a。
 
-`readPaneState(sessionName): 'alive' | 'dead' | 'absent' | 'unknown'`（`src/lib/tmux/tmux.ts`、新設）: `display-message -p -t <exact> '#{pane_dead}\t#{pane_pid}\t#{@cm_launch}'` を 1 回。セッションが無い → `absent`。`pane_dead=1` → `dead`。`0` → `alive`。tmux の時間切れ・形違い → `unknown`。
+### 2.5 外したもの（PM の決定）
 
-- `paneExists` = alive／dead（`unknown` は今の `hasSession` に落とす）。停止・片付け・terminal の 404 が読む。
-- `agentAlive` = alive かつ（新方式の印あり、または旧方式で今の判定が alive）。`isRunning` がこれを返す。送信・状態・relay・wait が読む。
-- 一括: `listSessions` の `-F`（`tmux.ts:341`）に `#{pane_dead}`・`#{@cm_launch}` を足す（表 3 の l: `list-sessions -F` で 1 回に読めた）。ps は使わない。
-- 注意（実測）: dead pane の `pane_current_command` は終わる前の値ではなく `zsh` などが残り、`pane_tty` は別のペインが使い回す（表 3 の a・l）。dead の判定に名前と tty を使わない。
+| 外したもの | 改訂 2 での役目 | 改訂 3 で要らない理由 | 残るテスト・文書への影響 |
+|---|---|---|---|
+| 起動行を打つ経路 `typeLaunchLines`（`launch-keys.ts:39`、全 9 か所の呼び出し、`base.ts:914` の包み） | ログインシェルに起動行を打つ | 起動はペインのコマンドの argv。打つ先（端末を読むシェル）が無い | `launch-keys.ts` を消す。`tests/unit/session/launch-keys-input-lock-3975.test.ts`・`tests/unit/cli-tools/launch-lines-input-lock-3981.test.ts`・ガード `tests/unit/guards/pane-key-writers.test.ts` の `typeLaunchLines` の行（`:104-119`）の期待を変える（PR2b の契約で許す、§8.3） |
+| 入力ロックの起動の番（#3975・#3981 の `exclusive` の番、`session-launch-flight.ts` の R2「起動のキーは起動元が持つロックに合流する」） | 送信のキーと起動行のキーが入力欄で混ざらない | 起動にキーが無い。送信のキーが起動中のペインに届いても、読むのは端末のバッファ→CLI で、シェルは実行しない（s6） | R1（ロックを持つ側は他の起動を待たない）は残す。R2 の説明と `session-launch-single-flight-3981.test.ts` の該当の期待を変える |
+| 起動の印 `@cm_launch` の付け外し | 方式の区別 | `pane_start_command`（§2.4） | 無し（未実装） |
+| 起動行の `clear; printf '\033[3J'` 接頭辞（#3180、`launch-screen.ts`） | 起動行の echo を消す | 打たないので echo が無い | `launch-screen.ts` を消す。起動行の文字列を固定するテスト（`git grep -l 'clear 2>/dev/null\|withLaunchScreenCleared\|LAUNCH_SCREEN_CLEAR_PREFIX' -- tests` で 14 ファイル）の期待を変える |
+| `exec env` の `env` | bash の対話シェルの exec の失敗でシェルが残る | `-c` のシェルは失敗で終わる（s9） | 無し |
+| codex #2068 の「同じペインに起動行を打ち直す」（`relaunchIntoSamePane`, `codex.ts:334`） | `Update now` の後にシェルへ打ち直す | codex が更新して終わるとペインは dead。dead を読んで respawn する（§5.1） | `codex.ts` の待ちの中で dead を読む |
+| copilot・antigravity の「同じペインに打ち直す」（`copilot.ts:519`・`antigravity.ts:314` のコメント） | 同上 | 同上 | |
+
+外さなかったもの: `beginAgentSession`（`agent-session-lifecycle.ts:77`）による入力の ticket の失効（`:114`）は残す。respawn の前に呼ぶので、古い送信の**まだ出していない**キーは出なくなる（既に出したキーは §4.5）。新しい仕組みは足していない。
+
+## 3. 読み手（決定 (6)、N6）
+
+### 3.1 状態と 2 つの述語
+
+`readPaneState(sessionName): { state: 'alive' | 'dead' | 'absent' | 'unknown', launch: 'exec' | 'legacy' | null, panePid: number | null, deadStatus: number | null }`（`src/lib/tmux/tmux.ts`、新設）: `display-message -p -t <exact> '#{pane_dead}\t#{pane_pid}\t#{pane_dead_status}\t#{pane_start_command}'` を 1 回。セッションが無い → absent。`pane_dead=1` → dead。`0` → alive。tmux の時間切れ・形違い → unknown（`launch` も null）。
+
+- `paneExists` = alive／dead（unknown は今の `hasSession` に落とす）。停止・片付けが読む。
+- `agentAlive` = alive かつ（`launch === 'exec'`、または legacy で今の判定が alive）。`isRunning` がこれを返す。送信・状態・relay・wait が読む。
+- 一括: `listSessions` の `-F`（`tmux.ts:341`）に `#{pane_dead}`・`#{pane_start_command}` を足す（s4: `list-sessions -F` で 1 回に読めた。start_command はタブを含みうるので最後の欄に置く）。ps は使わない。
+- 注意（実測）: dead pane の `pane_current_command` は終わる前の値ではなくシェルの名前（`zsh`・`sh`）が残り、`pane_tty` は別のペインが使い回す（表 3 の a・l、表 4 の s5・Q）。dead の判定に名前と tty を使わない。
 
 ### 3.2 読み手の表
 
 | 読み手 | 今 | 新方式 |
 |---|---|---|
-| 一覧・状態の poll（`worktree-status-helper.ts:868` → `probeToolSessionLiveness` → `probeSessionLiveness`） | 画面の liveness | 先に `pane_dead`（一括）。dead → `sessionStatusReason: 'exited'`（`:808` の語）。dead pane の画面には `❯` が残るので、**画面より先に読むことが必須**（claude の誤りの再発を防ぐ）。起動中（`startingSince`）は今どおり飛ばす |
+| 一覧・状態の poll（`worktree-status-helper.ts:868` → `probeToolSessionLiveness` → `probeSessionLiveness`） | 画面の liveness | 先に `pane_dead`（一括）。dead → `sessionStatusReason: 'exited'`（`:808` の語）。dead pane の画面には `❯` が残るので、**画面より先に読むことが必須**。起動中（`startingSince`）は今どおり飛ばす |
 | `capture --json`（`current-output-builder.ts:925` の `isRunning`、`:958` の `session_not_running`） | claude 以外は `hasSession` | `isRunning`＝`agentAlive`。停止理由は dead → `exited`、absent → `session_not_running`。本文（最後の画面）は dead でも返す |
-| `wait`（`wait.ts:635-645`、`:642` の `basis=session_gone`） | capture を読む | 一度動いて `isRunning=false` → `Completed (basis=session_gone)` exit 0（PM の決定 (b)、受け入れ）。一度も動いていない → NOT_STARTED |
-| `kill-session`（`kill-session/route.ts:136-138`） | `isRunning` が false ならスキップ | `paneExists` で読む。dead pane も kill する。dead のときは各 driver の `requestExit`（終了のキー）を飛ばし、すぐ `kill-session` |
+| `wait`（`wait.ts:635-645`、`:642` の `basis=session_gone`） | capture を読む | 一度動いて `isRunning=false` → `Completed (basis=session_gone)` exit 0（PM の決定 (b)）。一度も動いていない → NOT_STARTED |
+| `kill-session`（`kill-session/route.ts:136-138`） | `isRunning` が false ならスキップ | `paneExists`。dead pane も kill する。dead のときは各 driver の `requestExit`（終了のキー）を飛ばし、すぐ `kill-session` |
 | `session-cleanup`（`session-cleanup.ts:264`） | 同じ | `paneExists` |
-| `terminal` ルート（`terminal/route.ts:170`） | `isRunning` が false で 404 | 404 は absent のときだけ。dead pane への送信は §4 で not_sent |
-| relay（`relay-readiness.ts:84`） | `isRunning` | `agentAlive`（自動で変わる）。dead → `session_stopped` で保留（作り直さない、今どおり） |
-| 送信ルート（`send/route.ts:259`・`:305`） | `isRunning` | dead → `isRunning=false` → `startSessionForSend` → driver が respawn して起動（§5）。`refuseModelOnRunningSession`（`:259`）は `agentAlive` |
-| auto-yes の poller（`auto-yes-poller.ts:1029` の `captureObservedFrame`） | 画面を直接読む | tick の最初に `pane_dead` を読み、dead なら答えない・数えない。読まなくても答えのキーは tmux が捨てる（表 3 の b）ので安全の穴ではないが、「答えた」と記録する誤りを防ぐ |
-| 応答の poll（`cli-session.ts:101` の `isSessionRunning` = `sessionExists`） | セッションの有無 | dead → 走らせ続けない（`agentAlive` を読む） |
-| UI の端末の生の入力（`direct-input`・`special-keys`・WebSocket の `terminal_input`, `ws-server.ts:1151`） | 生のキー | 変えない。dead pane へのキーは tmux が捨てる。UI は状態 `exited` を表示する（一覧の語） |
+| `terminal` ルート（`terminal/route.ts:170` の `isRunning` → 404、`:220` の `driver.sendMessage`） | `isRunning` が false で 404。claude 以外は driver の中で #2070 の relaunch が走りうる | **send と同じ「復旧して送る」に揃える（§3.3）** |
+| relay（`relay-readiness.ts:84`） | `isRunning` | `agentAlive`。dead → `session_stopped` で保留（作り直さない、今どおり） |
+| 送信ルート（`send/route.ts:259`・`:305`） | `isRunning` | dead → `isRunning=false` → `startSessionForSend`（`send-session-start.ts:93`）→ driver が respawn（§5）。`refuseModelOnRunningSession`（`:259`）は `agentAlive` |
+| auto-yes の poller（`auto-yes-poller.ts:1029` の `captureObservedFrame`） | 画面を直接読む | tick の最初に `readPaneState`。dead・unknown なら答えない・数えない。読まなくても答えのキーは dead pane に捨てられる（表 3 の b）ので安全の穴ではないが、「答えた」の記録の誤りを防ぐ |
+| 応答の poll（`response-checker.ts:1687` の `isSessionRunning` → false なら `stopPolling` して戻る、`cli-session.ts:101` は `sessionExists`） | セッションの有無 | **dead への遷移では、その世代の最後の画面を 1 回回収してから止める**（P2）。tick の最初に `readPaneState`: alive → 今どおり。dead かつ `panePid` が poll を始めた世代と同じ → 画面を 1 回 capture して保存の経路（`recordCompletedResponse`）に通し、`stopPolling`。dead で `panePid` が違う（既に後継が起動して死んだ）、または absent → 何も書かずに `stopPolling`。答えのキーは出さない（auto-yes は上の行で飛ぶ）。世代は poll の開始時に控えた `panePid` で見る |
+| UI の端末の生の入力（`direct-input`・`special-keys`・WebSocket の `terminal_input`, `ws-server.ts:1151`） | 生のキー | 変えない。dead pane へのキーは tmux が捨てる。UI は状態 `exited` を表示する |
 
-### 3.3 回答経路（参考）
+### 3.3 terminal ルートの契約（P2）
 
-`prompt-answer-sender.ts`（`respond`・`prompt-response`・auto-yes）は PM の決定 (c) で直さない。ただし新方式のペインでは、終わった後の残った画面にダイアログの型が当たっても、答えのキーは dead pane に捨てられ**シェルでは実行されない**（改訂 1 §5.3 の残りのうち、安全の部分は新方式で消える）。残るのは旧方式のペインと、「答えた」と誤る表示だけ（§10）。
+入口の契約を send に揃える: **「セッションが無ければ断る。CLI が終わっていれば起動し直してから送る」**。
 
-## 4. 送信と Ctrl-Z（決定 (4)(9)）
+| 状態 | 今 | 新 |
+|---|---|---|
+| absent | 404（自動で作らない、`:168` のコメント） | 404（同じ） |
+| dead | `isRunning=false` で 404（claude 以外も） | `startSessionForSend`（send と同じ関数、モデルの指定なし）→ `driver.sendMessage`。答えに `relaunched`（§6）。起動の失敗は send と同じ `answerSessionStartFailure` |
+| alive | `driver.sendMessage`（claude 以外は中の #2070 で relaunch しうる） | 同じ。中の relaunch は `readPaneState` が alive なら何もしない（§5.1） |
+| unknown | — | 409（`code: 'agent_state_unknown'`）。起動も打鍵もしない |
+| 旧方式・画面が終了 | claude 以外は driver の中で同じシェルへ起動行を打つ | §5.2 の旧方式の作り直し（止まったジョブがあれば断る） |
+
+理由: terminal ルートは driver の `sendMessage` を呼ぶので、claude 以外は今も driver の中で起動し直している（`base.ts:833`）。「dead なら断る」にすると、ルートの確認の後に CLI が終わった場合に driver が起動し直すので守れない（`review-4300c.md` の 5）。起動し直しを入口で明示し、send と同じ関数・同じ通知を通す。
+
+## 4. 送信と Ctrl-Z（決定 (7)(9)）
 
 ### 4.1 なぜ各段の判定が要らなくなるか
 
-新方式のペインで端末の入力を読むのは、CLI が生きている間は CLI（またはその exec の先）だけで、終わった後は tmux が入力を捨てる。判定と打鍵の間に CLI が終わっても、本文・改行・Enter はどれも**実行されない**（表 3 の b・e2）。だから改訂 1 の「打鍵の各段の直前に前面を確かめ、lease で同じ CLI を確かめる」（N2・N4 の対象）は安全のためには要らない。残るのは「届いたか」の正しさだけ（§4.2）。
+新方式のペインで端末の入力を読むのは、起動中は**誰も読まない**（`-c` のシェルは文字列のコマンドだけを実行する。キーは端末のバッファに溜まる）、CLI が生きている間は CLI（またはその exec の先）、終わった後は tmux が入力を捨てる（dead pane）。復旧の respawn も CLI を直接起動するので、この 3 つ以外の区間が無い。判定と打鍵の間に CLI が終わっても、復旧が挟まっても、本文・改行・Enter は**シェルでは実行されない**（表 3 の b・e2、表 4 の s5・s6）。だから改訂 1 の「打鍵の各段の直前に前面を確かめる」は安全のためには要らない。残るのは「届いたか」の正しさだけ（§4.2・§4.5）。
 
 ### 4.2 送信の判定（新方式のペイン）
 
-- 最初のキーの前（PR1 と同じ `recheckComposerBeforeInput`）: `readPaneState` が `dead` → not-sent（`agent-not-in-foreground`、PR1 と同じ理由、`detail: 'exited'`）。`absent` → 今の「セッションが無い」。`unknown` → not-sent（`agent-foreground-unknown`、新）。`alive` → `pane_pid` を控える。
-- Enter（と再送）の後の読み戻しで `submitted` と言う前に、もう一度 `readPaneState`: `dead`、または `pane_pid` が控えと違う（respawn された）→ **indeterminate**（`agent-left-mid-send`、新）。dead pane では読み戻しの画面が変わらず、claude の読み戻しが「本文が入力欄に無い」＝`submitted` と誤るため（実測 b: send-keys は exit 0）。not_sent には戻さない（CLI が本文を読んだ後に終わった可能性がある）。
-- 費用: 1 回の送信で `display-message` が 2 回。ps は使わない。
-- 旧方式のペイン（印なし）: PR1 の判定（D）をそのまま使う（§8.4）。
+- 最初のキーの前（PR1 と同じ `recheckComposerBeforeInput`）: `readPaneState` が
+  - `dead` → not-sent（`agent-not-in-foreground`、PR1 と同じ理由、`detail: 'exited'`）。
+  - `absent` → 今の「セッションが無い」。
+  - `unknown` → not-sent（`agent-foreground-unknown`、新）。**キーはまだ 1 つも出ていない**ので not-sent と言える。
+  - `alive` → `panePid` を控える。旧方式（`launch === 'legacy'`）なら PR1 の D をそのまま当てる。
+- Enter（と再送）の後の読み戻しで `submitted` と言う前に、もう一度 `readPaneState`（P2: unknown／absent の扱い）:
+  - `alive` かつ `panePid` が控えと同じ → 今どおり読み戻しの結果。
+  - `dead`、`panePid` が控えと違う（respawn された）、`absent`、`unknown` → **indeterminate**（`agent-left-mid-send`、新。unknown のときは `detail: 'unreadable'`）。キーが届きうる段より後なので not-sent には戻さない（CLI が本文を読んだ後に終わった・読めない、を区別できない）。同じ CLI だと確かめられないので `submitted` とも言わない。
+- 本文の途中（空けの反復・撤回・copilot の一括送信）では読まない（N4。安全のためには要らない §4.1。正しさは最後の確認が拾う）。
+- 費用: 1 回の送信で `display-message` が 2 回。ps は使わない（旧方式のペインだけ PR1 の ps が 1 回）。
 
 ### 4.3 理由と exit code
 
 | 状態・段 | state | reason | 答え |
 |---|---|---|---|
 | dead（最初のキーの前） | not-sent | `agent-not-in-foreground`（PR1）、detail `exited` | 500＋`not_sent` → exit 99 |
-| unknown（tmux が読めない） | not-sent | `agent-foreground-unknown`（新） | 同じ |
-| Enter の後に dead・respawn | indeterminate | `agent-left-mid-send`（新） | 500＋`unknown`。再送してよいとは言わない。案内: 「本文の後に CLI が終わった。届いたかは capture の最後の画面で確かめる」 |
+| unknown（最初のキーの前） | not-sent | `agent-foreground-unknown`（新） | 同じ |
+| 旧方式で止まったジョブ（§5.2、復旧の判断で） | not-sent | `agent-not-in-foreground`、detail `suspended` | 同じ。案内: 「ペインで `fg` するか、`commandmate instances <id> kill <instance>` してから送り直す」 |
+| Enter の後に dead・respawn・absent・unknown | indeterminate | `agent-left-mid-send`（新） | 500＋`unknown`。再送してよいとは言わない。案内: 「本文の後に CLI が終わった／入れ替わった。届いたかは capture の最後の画面で確かめる」 |
 
-新しい exit 番号は作らない。`suspended`・`background`・`subshell`（改訂 1）は新方式のペインでは起きないので理由を足さない（旧方式は PR1 の 1 理由で断る）。
+新しい exit 番号は作らない。
 
-### 4.4 Ctrl-Z（実測 e・f・g）
+### 4.4 Ctrl-Z（実測 e・f・g・s8）
 
-- exec したペインでは CLI がペインのプロセス（`pane_pid`）で、端末のセッションリーダー・前面のグループのリーダー（`Ss+`）。親は tmux なので、そのグループは**孤立したプロセスグループ**で、端末からの SIGTSTP（Ctrl-Z）は捨てられる（POSIX の規定。実測 e: `cat` は `S` のまま、ペインに `^Z` が出ただけ。f: 自分に `kill -TSTP` しても止まらず次の行へ進んだ）。
-- よって新方式では「Ctrl-Z で止まった CLI に送る／作り直す」状況（改訂 1 の `suspended`、P2-6）が起きない。利用者が Ctrl-Z を押しても CLI は止まらず、そのまま使える。CLI が Ctrl-Z を自分の機能（中断など）に使うなら、それは今どおり CLI の中で効く（本物の CLI では未確認）。
-- 外から SIGSTOP で止めた場合（通常の操作ではない）: 止まっている間に打ったキーは端末の入力に溜まり、続きで CLI が読む。シェルには届かない。実測 g では macOS で `kill -STOP` の後も `ps` の状態が `T` にならず、`cat` がそのまま読んだ（理由は未解明、**未確認**）。止まっていれば準備の確認が通り読み戻しが誤りうるが、安全の穴ではない（§10）。
-- 表示: 状態は alive（一覧・capture は今どおり）。止まっていることを表示する仕組みは足さない。
+- 新方式では CLI がペインのプロセス（`pane_pid`）で、端末のセッションリーダー・前面のグループのリーダー（`Ss+`、s3 の ps: pid = pgid = tpgid = pane_pid）。親は tmux なので、そのグループは**孤立したプロセスグループ**で、端末からの SIGTSTP は捨てられる（表 3 の e・f、表 4 の s8: ペインのコマンドとして起動した `cat` も `Ss+` のまま、`^Z` が出ただけで次の行を読んだ）。
+- よって新方式では「Ctrl-Z で止まった CLI に送る／作り直す」状況は起きない。利用者が Ctrl-Z を押しても CLI は止まらない。CLI が生のモードで Ctrl-Z を自分の機能に使う（自分に SIGTSTP を送る）場合も、孤立したグループでは止まらない（表 3 の f の自分への `kill -TSTP`）。**本物の CLI では未確認**（§10）。CLI が自分でジョブ制御をして子を別のグループで前面に出す場合、その子は止まりうるが、CLI 自身は生きていてペインは alive で、届く先はシェルではない（§10）。
+- 外から SIGSTOP（通常の操作ではない）: 表 3 の g は未解明（未確認）。安全の穴ではない。
 
-## 5. 既存の復旧（決定 (5)、N5）
+### 4.5 送信中の復旧（新 P1）
 
-すべての「再利用か起動か」の判断は、**最初と最後で同じ `readPaneState` を読む**（画面で終了を判定しない）。新方式のペインでは、ペインが alive なら CLI（またはその exec の先）がいる、dead なら終わった、が tmux の事実で決まる。
+`review-4300c.md` の反例: 「A が alive を確かめて送信中 → CLI 終了 → B が復旧で respawn → A の本文・Enter が新しいシェルへ到着」。
+
+- 新方式では B の respawn が出すのは `-c` のシェルで、そのシェルは端末を読まず、rc の後に exec で CLI になる。A のキーが届く先は時刻によって次のどれかで、**どれもシェルの実行ではない**:
+
+| A のキーが着く時刻 | 届く先 | 実測 |
+|---|---|---|
+| CLI が終わってから B の respawn まで | dead pane。tmux が捨てる（exit 0） | 表 3 の b、表 4 の s5 |
+| respawn の後、rc を読んでいる間 | 端末のバッファ。画面に echo され、起動した CLI が読む | s6（改行入りの `touch <f>`＋Enter でファイルは作られない） |
+| CLI の起動の後 | 新しい CLI の入力欄 | s6 の続き（`cat` が読んだ） |
+
+- 正しさの面: A の本文が新しい CLI の入力欄に入り、A の Enter が新しい会話へ送りうる。A は Enter の後の確認（§4.2）で `panePid` の変化を読み indeterminate を返す。B は respawn の前に `beginAgentSession` で ticket を失効させるので、A の**まだ出していない**キー（本文の後半・Enter）は出ない（送信側が本文・Enter の前に ticket を確かめる今の流れ、`submit-verified-sender.ts:775`・`:808` の `assertInputOwner`）。B 自身の本文は入力ロック（A の後）で入り、最初に入力欄を空ける（`clearComposerBeforeSend`）ので A の残りは B の本文と混ざらない。
+- 復旧を入力ロックの中で行う形（改訂 2）は採らない（PM の決定: 起動の番を外す）。上の残り（A の一部のキーが新しい CLI に着く）は安全の穴ではなく、A は indeterminate で返るので「送った」とは言わない。
+- テスト（§7.2）: A を「本文の直前」「本文の後」「Enter の直前」で止め、B の復旧（dead → respawn）を差す。陽性対照: 改訂 2 の形（ログインシェルの対話シェルに起動行を打つ）では、本文に改行があるとファイルが作られる。陰性: 新方式では 3 つとも作られず、A は indeterminate、B は 1 回だけ起動。回答の矢印・文字・Enter（§12）も同じ順序で 1 本ずつ。
+
+## 5. 既存の復旧（N5、P2 の Ctrl-Z・unknown）
+
+### 5.1 新方式のペイン
+
+すべての「再利用か起動か」の判断は、**最初と最後で同じ `readPaneState` を読む**（画面で終了を判定しない）。
 
 | 復旧 | 場所 | 新方式 |
 |---|---|---|
-| #2070 の send 前の relaunch | `relaunchIfToolExited`（`base.ts:780`）が `isToolLive`（画面）を読む | `readPaneState` が alive → 何もしない（画面を読まない）。dead → `startSession` へ。旧方式のペイン → 今の画面の判定 |
-| 起動の再利用の判断 | `resolveLaunchPane` の `isToolLive(…, { confirm: true })`（`base.ts:897`） | 同じ `readPaneState`。alive → 再利用、dead → `respawn-pane -t <pane> -c <cwd>`（`-k` なし）→ 起動行。dead から alive に変わっていた（別の要求が先に起動した）なら tmux が respawn を断るので、再読して再利用（起動の印 `session-launch-flight` が普通は先に止める） |
-| opencode V1 の再利用 | `opencode.ts:393` | 同じ。dead → respawn して `-s <id>` で再開（今の再開の仕組み） |
+| #2070 の send 前の relaunch | `relaunchIfToolExited`（`base.ts:780`）が `isToolLive`（画面）を読む、`requireSession`（`:814`、relaunch は `:833`） | alive → 何もしない（画面を読まない）。dead → `startSession` へ。**unknown → 何もしない**（置換しない。続く最初のキーの前の判定が not-sent で返す）。absent → 今どおり「セッションが無い」 |
+| 起動の再利用の判断 | `resolveLaunchPane` の `isToolLive(…, { confirm: true })`（`base.ts:897`） | 同じ `readPaneState`。alive → 再利用、dead → `beginAgentSession` → `respawn-pane -t <pane> -c <cwd> <起動のコマンド> \; set-option -p … remain-on-exit on`（`-k` なし）。dead から alive に変わっていた（別の要求が先に起動した）なら tmux が respawn を断るので（s7）、再読して再利用。unknown → 起動を断る（`SessionStartUnavailableError` と同じ扱いで not-sent） |
+| opencode V1 の再利用 | `opencode.ts:393` | 同じ。dead → respawn。`-s <id>` を読み直して新しいコマンドで（§2.3） |
 | opencode V2 の再利用 | `opencode-v2.ts:266`（dead のときは `releaseOpencodeV2Server` してから） | 同じ |
-| codex の #2068（`Update now` の後の打ち直し） | `relaunchIntoSamePane`（`codex.ts:334-339`） | codex が更新して終わるとペインは dead になる（今はシェルに戻る）。打ち直しの前に respawn する。待ちの間に dead を読めば待たずに打ち直しへ |
-| copilot・antigravity の「同じペインに打ち直す」（#2070 のコメント `copilot.ts:519`・`antigravity.ts:314`） | `createLaunchPane` を飛ばして打つ | dead なら respawn してから打つ（共通の `resolveLaunchPane` の結果に `respawn` を持たせ、driver は呼ぶだけ） |
-| claude の `ensureHealthySession` | `claude-session.ts:708`。不健康なら kill して作り直す（`:884-893`） | dead → 不健康と同じ経路（kill して作り直す）。alive → 今の画面の健康の判定（終了の判定には使わない） |
-| ルートの `startSessionForSend` | `send/route.ts`、`send-session-start.ts:93` | dead で `isRunning=false` → 今どおり呼ぶ。中で上の driver の経路 |
-| タイマー・relay | `timer-manager.ts:110`・`relay-delivery.ts:611` | タイマー: non-claude は driver の relaunch で復旧（今どおり）、claude は断る（今どおり）。relay は保留（今どおり） |
+| codex の #2068（`Update now` の後） | `relaunchIntoSamePane`（`codex.ts:334-339`） | codex が更新して終わるとペインは dead。準備待ちの中で dead を読んだら `beginAgentSession` → respawn（打ち直さない） |
+| copilot・antigravity の同じペインへの起動し直し | `createLaunchPane` を飛ばして打つ（`copilot.ts:519`・`antigravity.ts:314`） | `resolveLaunchPane` の結果に `respawn` を持たせ、driver は共通の `spawnAgentPane` を呼ぶだけ |
+| claude の `ensureHealthySession` | `claude-session.ts:708`。不健康なら kill（`:712`）して作り直す（`:884-893`） | dead → 不健康と同じ経路（kill して作り直す。claude は今も作り直すので形を変えない）。alive → 今の画面の健康の判定（終了の判定には使わない）。unknown → 作り直さない（起動を断る） |
+| ルートの `startSessionForSend` | `send/route.ts:305`、`send-session-start.ts:93` | dead で `isRunning=false` → 今どおり呼ぶ。中で上の driver の経路 |
+| タイマー・relay | `timer-manager.ts:110`・`relay-delivery.ts:611` | タイマー: non-claude は driver の relaunch（今どおり）、claude は断る（今どおり）。relay は保留（今どおり） |
 
-- 起動の途中で CLI が終わった（認証の失敗・PATH に無い）: 各 driver の準備待ちが `pane_dead=1` を読めたら時間切れを待たずに失敗にし、最後の画面の数行と `pane_dead_status` をエラーに載せる（今は 60 秒ほど待って exit 99）。
-- `respawn-pane` は履歴を消さない（表 3 の a: 前の CLI の出力が履歴に残った）。履歴の上限（#1624）は同じペインなので保たれる。#2958（rc の途中でシェルを殺す）は、dead pane にはシェルがいないので当たらない。
+- respawn は履歴を消さない（表 3 の a、表 4 の s6）。#1624 の履歴の上限は同じペインなので保たれる。#2958（rc の途中でシェルを殺す）は、dead pane にはシェルがいないので当たらない。新規作成の仮置き（`sleep`）も今どおり。
 
-## 6. relaunched の通知（決定 (6)、N7）
+### 5.2 旧方式のペイン（P2: Ctrl-Z と requireSession の順）
 
-- 起動の結果 `LaunchOutcome = 'created' | 'reused' | 'replaced' | 'joined'` を起動の印（`session-launch-flight.ts`）に残す。`replaced` は「入る前のペインが dead（新方式）、または旧方式で終了と判定されて起動し直した（#2070・claude の作り直し）」とき。
-- ルートは送信の後（成功・失敗とも）に `takeLaunchReplacedNotice({ worktreeId, instanceId })` で読む（`send/route.ts:462` の `takeOpencodeResumeNotice` と同じ形。「driver が送信の中で起動し直しうるので最後に読む」）。だから **`send-user-message.ts` を変えずに**、ルートの起動（`startSessionForSend`）と driver の中の relaunch の両方を拾える。
-- 答え: `relaunched: true`。成功（201）にも失敗（500、not_sent／indeterminate）にも載せる。並行の送信が同じ起動に合流した（`joined`）ときは合流先の結果を見る。
-- CLI（`message-dispatch.ts`）は exit の前に stderr に 1 行: `Note: the previous <tool> session in <session> had exited (status <n>); a new session was started and the previous conversation was not carried over (Issue #4300).`。claude で前の画面から `claude --resume <id>` が読めたら、続けて `Previous conversation: claude --resume <id>` を出す（§6.1）。
-- **復旧の変更（§5）と同じ PR（PR2a）に入れる**。PR2a 単体で、置換して成功・置換後に失敗（not_sent／indeterminate）・並行の 2 本・初回起動（false）・再利用（false）を検証する（§7.3）。旧方式の #2070 の relaunch にも PR2a から通知が付く（N7: driver の再起動は今もあるので、通知を後回しにしない）。
+旧方式のペイン（今 CommandMate で動いているセッション全部）は、PR2b の後も強制の再起動をしないので残る（§8.4）。旧方式で #2070 の relaunch が起動行を打つ経路は、`typeLaunchLines` を外すので**同じシェルに打つことはしない**。代わりに次の順で判断する。
 
-### 6.1 `Resume this session with:` と利用者への影響（決定 (7)）
+1. 画面が終了と読める（今の `isToolLive` が false）。そうでなければ今どおり何もしない。
+2. PR1 の `readPaneForeground` が `shell`（ペインのシェルが前面）。`other` → 置換しない（画面の判定より前面の事実を取る。CLI が前面にいる）。`unknown` → 置換しない、not-sent（`agent-foreground-unknown`）。
+3. **そのペインの端末にシェル以外のプロセスが無い**: `ps -o pid=,stat= -t <pane_tty>`（PR1 と同じ ps の 1 回）で `pane_pid` 以外の行が無いこと。実測 s11: Ctrl-Z で止めた `sleep` は `T` で残り、前面の名前は `zsh`、`tpgid = pane_pid`（D は `shell` と読む）。ここで止まったジョブ・背景のジョブがあれば、**起動も kill もせず** not-sent（`agent-not-in-foreground`、`detail: 'suspended'`）。利用者は `fg` で同じ CLI に戻れる（s11 の `fg` で前面が `sleep` に戻った）。
+4. 1〜3 が全部通ったら（PR2b から。PR2a の間は今どおり同じシェルに起動行を打つ、§8.3）`beginAgentSession` → `respawn-pane -k -t <pane> -c <cwd> <起動のコマンド> \; set-option -p … remain-on-exit on`（`-k` は「何も動いていない旧方式のシェル」を消すためだけ。3 で確かめた）。ペインは同じなので前の画面は履歴に残る（今の #2070 と同じ）。この時点で新方式に移る。
+
+- claude の旧方式: `ensureHealthySession` が kill する前に 2・3 を同じく確かめる（止まった claude の会話を kill しない）。
+- 2 と 3 の間、3 と 4 の間に利用者がシェルで何かを起動する競合は残る（旧方式の残り、§10）。`-k` で消えるのはそのとき起動されたもの。
+- 旧方式の通常の終了（止まったジョブなし）は今どおり復旧する（陽性対照）。止まったジョブありは断る（陰性対照）。
+
+### 5.3 起動の失敗
+
+- 起動の途中で CLI が終わった（認証の失敗・PATH に無い・rc の失敗）: ペインは dead で残る（s9・s10）。各 driver の準備待ちが `pane_dead=1` を読めたら時間切れを待たずに失敗にし、最後の画面の数行と `pane_dead_status` をエラーに載せる（今は 60 秒ほど待って exit 99）。
+- 準備待ちが時間切れで失敗し、ペインが alive のまま（CLI が入力欄を出さない・rc が別の対話シェルを `exec` した、§10）: 新方式のペインは kill して失敗を返す（端末を読むシェルが残っている可能性を残さない。最後の画面はエラーに載せる）。
+
+## 6. relaunched の通知（N7、P2: 置換と会話の継続を分ける）
+
+- 起動の結果 `LaunchOutcome = { kind: 'created' | 'reused' | 'replaced' | 'joined', conversation: 'new' | 'resumed' | null }` を起動の印（`session-launch-flight.ts`）に残す。`replaced` は「入る前のペインが dead（新方式）、または旧方式で終了と判定されて作り直した（§5.2・claude の作り直し）」とき。`conversation` は `replaced`／`created` のときに driver が入れる: opencode V1 が `-s <id>` で起動した（`opencode.ts:486-497`、`resumeSessionId !== null`）→ `resumed`、ほか → `new`。ほかの CLI に CommandMate からの再開は無い（`--resume` を起動のコマンドに付ける所は無い、`git grep` で確かめた）。
+- ルートは送信の後（成功・失敗とも）に `takeLaunchReplacedNotice({ worktreeId, instanceId })` で読む（`send/route.ts:462` の `takeOpencodeResumeNotice` と同じ形）。`send-user-message.ts` は変えない。terminal ルート（§3.3）も同じ関数で読む。
+- 答え: `relaunched: { replaced: true, conversation: 'new' | 'resumed', exitStatus: number | null }`（置換が無ければ `relaunched` を載せない）。成功（201）にも失敗（500、not_sent／indeterminate）にも載せる。`joined` は合流先の結果を見る。opencode V1 の再開は今の `opencodeResume`（セッション id）とも一致させる（両方があるときは同じ id）。
+- CLI（`message-dispatch.ts`）は exit の前に stderr に 2 行まで:
+  - 1 行目（置換の事実）: `Note: the previous <tool> process in <session> had exited (status <n>); a new process was started (Issue #4300).`
+  - 2 行目（会話）: `resumed` → `The conversation was resumed (opencode session <id>).`、`new` → `The previous conversation was not carried over.`。claude で前の画面から `claude --resume <id>` が読めたら `Previous conversation: claude --resume <id>` を続ける（§6.1）。
+- **復旧の変更（§5）と同じ PR（PR2a）に入れる**。PR2a 単体で、置換して成功・置換後に失敗（not_sent／indeterminate）・並行の 2 本・初回起動（なし）・再利用（なし）と、`conversation` の 3 つの対照（opencode V1 の同じ id の再開 → `resumed`、opencode V1 で id が無い → `new`、claude の作り直し → `new`）を検証する（§7.3）。
+
+### 6.1 `Resume this session with:` と利用者への影響
 
 | 場面 | 今 | 新方式 |
 |---|---|---|
 | CLI が終わった直後の capture・UI の端末 | 最後の画面と Resume の行、シェルのプロンプト | 最後の画面と Resume の行、その下に `Pane is dead (status 0, <時刻>)`（表 3 の b2）。シェルのプロンプトは無い |
-| ペインで続きを打つ | シェルで `claude --resume <id>` を打てる | **できない**（dead pane は入力を捨てる）。`commandmate send` で新しい会話として起動し直すか、`commandmate stop` してから起動する |
-| 次の送信で起動し直した後 | claude は kill して作り直す（Resume の行は消える）。non-claude は同じペインに打つ（履歴に残る） | 同じ（non-claude は respawn で履歴に残る）。claude は relaunched の 1 行に `claude --resume <id>` を添える（§6） |
+| ペインで続きを打つ | シェルで `claude --resume <id>` を打てる | **できない**（dead pane は入力を捨てる）。`commandmate send` で新しいプロセスとして起動し直すか、`commandmate stop` してから起動する |
+| 次の送信で起動し直した後 | claude は kill して作り直す（Resume の行は消える）。non-claude は同じペインに打つ（履歴に残る） | claude は同じ（relaunched の 2 行目に `claude --resume <id>` を添える）。non-claude は respawn で履歴に残る |
 | 運用の手当て（`pane-ok.sh`） | 末尾の Resume・シェルのプロンプトを見る | dead pane は `Pane is dead` の行で分かる。手当ての版を足す（運用、この設計の外） |
 
-続きの会話を CommandMate から再開する（`--resume` を起動行に付ける）機能はこの Issue では作らない（§10）。
+続きの会話を CommandMate から再開する（`--resume` を起動のコマンドに付ける）機能はこの Issue では作らない（§10）。
 
 ## 7. テストの設計
 
 ### 7.1 状態の単体（`tests/unit/tmux/pane-state-4300.test.ts`）
 
-`execFile` の mock に `display-message` の出力を与える: `0\t<pid>\texec` → alive／`1\t…` → dead／`can't find session` → absent／時間切れ・形違い → unknown。一括（`listSessions`）の `#{pane_dead}`・`#{@cm_launch}` の読み取り。
+`execFile` の mock に `display-message` の出力を与える: `0\t<pid>\t\t/bin/zsh -l -i -c "…"` → alive・exec／`0\t<pid>\t\t` → alive・legacy／`0\t<pid>\t\t/bin/zsh -l` → alive・legacy／`1\t<pid>\t127\t…` → dead・status 127／`can't find session` → absent／時間切れ・形違い → unknown。`isExecLaunchStartCommand` は表 4 の s4 の実際の文字列で。一括（`listSessions`）の読み取り。
 
 ### 7.2 送信（PR1 の表駆動に足す）
 
-- `CLI_TOOL_IDS` の全員で、各 CLI の準備条件を満たした同じ画面（入力欄が空いている）に対し、状態だけを変える: alive＋印 → 送る（陽性対照: 判定を外すと dead でも各 CLI で send-keys が 1 回以上出て、claude は `submitted` と誤る）／dead → send-keys・paste-buffer・load-buffer が 0 回、`agent-not-in-foreground`（detail `exited`）／unknown → 0 回、`agent-foreground-unknown`。
-- Enter の後の確認: 読み戻しの直前に dead、または `pane_pid` が変わる → indeterminate（`agent-left-mid-send`）、not_sent に戻らない。対照: alive のまま → `submitted`。
-- 印の無いペイン（旧方式）: PR1 の判定がそのまま効く（PR1 のテストを変えない）。印のあるペインでは D を呼ばない（表 3 の h の fixture: `bash` が pane_pid で tpgid と同じでも送る）。
-- 実 tmux（`-L` の私設ソケット、`process.env.TMUX` を私設サーバへ向け、向いていることを assert）の結合テスト: exec 起動の代わりのプロセス（`exec env cat`）を終わらせた dead pane へ送り、改行入りの本文でファイルが作られないこと（表 3 の b・e2 の再現）。
+- `CLI_TOOL_IDS` の全員で、準備条件を満たした同じ画面に対し状態だけを変える: alive・exec → 送る（陽性対照: 判定を外すと dead でも各 CLI で send-keys が出て、claude は `submitted` と誤る）／dead → send-keys・paste-buffer・load-buffer 0 回、`agent-not-in-foreground`（`exited`）／unknown → 0 回、`agent-foreground-unknown`。
+- Enter の後の確認（P2: unknown／absent）: 読み戻しの直前に dead／`panePid` の変化／absent／unknown を注入 → indeterminate（`agent-left-mid-send`）、not_sent に戻らない。対照: alive のまま → `submitted`。
+- 起動中（alive・exec、前面の名前が `zsh`）: D を呼ばない（PR1 の ps が 0 回）。旧方式（legacy）: PR1 の判定がそのまま効く（PR1 のテストを変えない）。
+- 実 tmux（`-L` の私設ソケット、`process.env.TMUX` を私設サーバへ向け、向いていることを assert）の結合テスト（`tests/integration/send-exec-launch-4300.test.ts`）:
+  - dead pane へ改行入りの本文を送り、ファイルが作られないこと（表 3 の b・e2）。
+  - **新 P1**: 代わりの CLI（`exec cat`）を `-l -i -c` で起動し、送信 A を本文の直前・本文の後・Enter の直前で止め（sender の hook で待たせる）、CLI を kill → B の復旧（`respawn-pane` にコマンド）を差してから A を続ける。3 つとも改行入りの本文でファイルが作られず、A は indeterminate、B の起動は 1 回。陽性対照: 同じ順序を「ログインシェル＋起動行を打つ」形で行うとファイルが作られる。
 
 ### 7.3 復旧と relaunched（PR2a）
 
-- `base.ts`: alive → 画面を読まず再利用／dead → `respawn-pane`（`-k` なし）→ 起動行（1 回）／旧方式で画面が終了 → 今どおり（`session-relaunch-2070.test.ts` の期待は変えない）。
-- 最初の判定と最後の再利用が同じ `readPaneState` を読むこと（N5）: 終了の画面なのに alive → 再利用（画面を見ない）、`❯` が残る画面なのに dead → respawn（claude の誤りの再現の陽性対照）。
-- opencode V1/V2・codex #2068・claude の `ensureHealthySession`: dead → それぞれの起動し直し、alive → 再利用。
-- `relaunched`: 初回起動 → false／再利用 → false／置換して成功 → true／置換後に失敗 → true と not_sent・indeterminate／並行 send の 2 本 → 両方 true で起動は 1 回。stderr の 1 行は `message-dispatch` のテストで成功と exit 99 の両方、claude の `--resume` の行は画面に id があるときだけ。
+- `base.ts`: alive → 画面を読まず再利用／dead → `respawn-pane`（`-k` なし）にコマンドと remain-on-exit が 1 回の呼び出しで渡る／unknown → 置換しない（`startSession` 0 回）・最初のキーの前で not-sent／absent → 「セッションが無い」。
+- 最初の判定と最後の再利用が同じ `readPaneState` を読むこと（N5）: 終了の画面なのに alive・exec → 再利用、`❯` が残る画面なのに dead → respawn（claude の誤りの再現の陽性対照）。
+- 旧方式（P2: Ctrl-Z の順）: 画面が終了・D が shell・端末に他のプロセス無し → `respawn-pane -k` で置換（陽性）／止まったジョブあり（ps の fixture に `T` の行）→ 起動 0 回・kill 0 回・not-sent（`suspended`）／D が other → 置換しない／D が unknown → 置換しない。claude の `ensureHealthySession` も同じ 4 本。実 tmux の結合テストで、止めた `sleep` が送信の後も `T` で残り、`fg` で前面に戻ること。
+- opencode V1/V2・codex #2068・claude: dead → それぞれの起動し直し、alive → 再利用。opencode V1 の respawn が新しい `-s <id>` のコマンドを渡す（コマンド無しの `respawn-pane` を撃たない）。
+- `relaunched`: 初回起動 → なし／再利用 → なし／置換して成功 → `replaced`／置換後に失敗 → `replaced` と not_sent・indeterminate／並行 send の 2 本 → 両方 `replaced` で起動は 1 回／`conversation`: opencode V1 の同じ id の再開 → `resumed`（id が `opencodeResume` と同じ）、opencode V1 で id 無し → `new`、claude の作り直し → `new`。stderr の行は `message-dispatch` のテストで成功と exit 99 の両方、claude の `--resume` の行は画面に id があるときだけ。
 
 ### 7.4 読み手とガード
 
 - 状態: `worktree-status-helper` と `current-output-builder` の実際の応答を全 CLI で: dead → `isRunning=false`・`exited`／absent → `session_not_running`／alive → 今どおり。
-- 停止・片付け（N6 の対照）: 旧方式のシェルのペイン（今どおり）、dead pane（kill する、終了のキーを打たない）、セッション無し（スキップ）。terminal ルート: dead → 404 にしない、absent → 404。
+- 停止・片付け（N6 の対照）: 旧方式のシェルのペイン（今どおり）、dead pane（kill する、終了のキーを打たない）、セッション無し（スキップ）。
+- terminal ルート（P2）: dead → `startSessionForSend` 1 回・本文の打鍵 1 回・200 と `relaunched`／absent → 404・起動 0 回・打鍵 0 回／alive → 起動 0 回・打鍵 1 回・`relaunched` なし／unknown → 409・起動 0 回・打鍵 0 回。
+- 応答の poll（P2）: tick の間に「最後の出力を描いてから終わる」を差す（fixture: 前の tick は応答の途中、次の tick で dead・同じ `panePid`）→ 保存 1 回、答えのキー 0 回、`stopPolling`。対照: dead で `panePid` が違う → 保存 0 回／absent → 保存 0 回／alive → 今どおり。
 - `wait`: 動いた後の dead → `session_gone` exit 0、一度も動いていない → NOT_STARTED。
 - auto-yes: dead pane の画面にダイアログがあっても答えない。
-- ガード（`tests/unit/guards/`）: (i) `typeLaunchLines` に渡る起動行の文字列が全部 `exec env ` を含む（例外は `unset CLAUDECODE`）、(ii) 起動行を打つ番の中で `remain-on-exit on` が起動行より先、(iii) `isRunning(` を読むファイルの一覧を固定し、`hasSession` を「動いている」と読む所が増えたら見直しを強いる、(iv) `respawn-pane` に `-k` を付ける呼び出しが `src/lib` に増えない（今の `respawnLoginShell`, `tmux.ts:397` だけ許す）。
-- 既存のテスト: tmux を部分的に mock したテストが `readPaneState` の unknown で断るようになって落ちる場合は、共通の mock（`tests/helpers`）に alive を返す既定を足す。起動行を固定するテストの期待の変更は PR2b の契約で許す（§8.3）。
+- ガード（`tests/unit/guards/`）: (i) `new-window`／`respawn-pane` に起動のコマンドを渡す所は `spawnAgentPane` だけで、argv の最後が `exec ` を含み、同じ呼び出しに `remain-on-exit on` が続く、(ii) `src/lib` に `typeLaunchLines`・起動行の `sendKeys` が残らない、(iii) `isRunning(` を読むファイルの一覧を固定し、`hasSession` を「動いている」と読む所が増えたら見直しを強いる、(iv) `respawn-pane -k` は `respawnLoginShell`（`tmux.ts:397`）・仮置きの予備・§5.2 の旧方式の置換（端末のプロセスの確認の後）の 3 か所だけ。
+- 既存のテスト: tmux を部分的に mock したテストが `readPaneState` の unknown で断るようになって落ちる場合は、共通の mock（`tests/helpers`）に alive・exec を返す既定を足す。起動行を固定するテスト・`typeLaunchLines` と入力ロックの起動の番を固定するテスト（§2.5）の期待の変更は PR2b の契約で許す（§8.3）。
 
 ## 8. PR2 の範囲
 
 ### 8.1 書くファイル（予定）
 
-- 起動行: `src/lib/hooks/sources/launch-command.ts`（`renderAgentLaunchCommand` に `exec env`）、`src/lib/session/launch-screen.ts`（コメントの「the shell stays the agent's parent」を改める）、`src/lib/cli-tools/vibe-local.ts`（手組みの行）、`src/lib/cli-tools/launch-keys.ts`（remain-on-exit を同じ番で撃つ）
-- tmux: `src/lib/tmux/tmux.ts`（`readPaneState`・`respawnLaunchPane`・`setPaneLaunchMarker`・`listSessions` の `-F`）
-- 復旧: `src/lib/cli-tools/base.ts`（`relaunchIfToolExited`・`resolveLaunchPane`・`createLaunchPane` の隣に respawn）、`src/lib/session/claude-session.ts`（`isClaudeRunning`・`ensureHealthySession`）、`src/lib/cli-tools/opencode.ts`・`opencode-v2.ts`（再利用）、`codex.ts`（#2068）、`copilot.ts`・`antigravity.ts`（コメントと respawn の呼び出し）、`src/lib/session/session-launch-flight.ts`（`LaunchOutcome`）
+- 起動: `src/lib/tmux/tmux.ts`（`createSession` の `command`、`spawnAgentPane`（new-window／respawn-pane＋remain-on-exit を 1 回の呼び出しで）、`readPaneState`、`isExecLaunchStartCommand`、`listSessions` の `-F`）、`src/lib/hooks/sources/launch-command.ts`（`renderAgentLaunchCommand` に `exec`、argv を作る補助）、各 driver の起動（`claude-session.ts`・`codex.ts`・`command-code.ts`・`copilot.ts`・`antigravity.ts`・`opencode.ts`・`opencode-v2.ts`・`gemini.ts`・`vibe-local.ts`）、`src/lib/session/role-launch.ts`（cwd の再確認を渡す値に当てる）、`src/lib/session/session-launch-flight.ts`（R2 の説明、`LaunchOutcome`）
+- 消す: `src/lib/cli-tools/launch-keys.ts`、`src/lib/session/launch-screen.ts`、`base.ts:914` の `typeLaunchLines`
+- 復旧: `src/lib/cli-tools/base.ts`（`relaunchIfToolExited`・`resolveLaunchPane`・`createLaunchPane`・旧方式の置換）、`claude-session.ts`（`isClaudeRunning`・`ensureHealthySession`）、`opencode.ts`・`opencode-v2.ts`・`codex.ts`
 - 送信: `src/lib/session/composer-clear.ts`（最初の判定）、`src/lib/cli-tools/submit-verified-sender.ts`（Enter の後の確認）、`src/lib/session/send-attempt-types.ts`・`send-attempt-state.ts`（理由 2 つ）
-- 読み手: `src/lib/session/worktree-status-helper.ts`、`src/lib/cli-tools/session-liveness.ts`、`src/lib/session/current-output-builder.ts`、`src/app/api/worktrees/[id]/kill-session/route.ts`、`src/lib/session-cleanup.ts`、`src/app/api/worktrees/[id]/terminal/route.ts`、`src/lib/auto-yes-poller.ts`、`src/lib/session/cli-session.ts`
-- ルートと CLI: `src/app/api/worktrees/[id]/send/route.ts`（`relaunched`）、`send-failure.ts`、`src/cli/commands/message-dispatch.ts`（stderr の 1 行）、`src/cli/types/`（答えの型）
-- 文書: `docs/user-guide/cli-operations-guide.md`（dead pane・relaunched・wait の `session_gone`。ja/en があれば両方）、`changelog.d/4300.md`（PR1 の断片に追記）、module-reference の断片
-- テスト: §7 の各ファイル、PR1 の表駆動・ガード
+- 読み手: `src/lib/session/worktree-status-helper.ts`、`src/lib/cli-tools/session-liveness.ts`、`src/lib/session/current-output-builder.ts`、`src/app/api/worktrees/[id]/kill-session/route.ts`、`src/lib/session-cleanup.ts`、`src/lib/auto-yes-poller.ts`、`src/lib/session/cli-session.ts`、`src/lib/polling/response-checker.ts`（最後の画面の回収）
+- ルートと CLI: `src/app/api/worktrees/[id]/send/route.ts`（`relaunched`）、`send-failure.ts`、`src/app/api/worktrees/[id]/terminal/route.ts`（§3.3）、`src/cli/commands/message-dispatch.ts`（stderr の行）、`src/cli/types/`（答えの型）
+- 文書: `docs/user-guide/cli-operations-guide.md` と `docs/en/user-guide/cli-operations-guide.md`（dead pane・relaunched・wait の `session_gone`・terminal の dead）、`changelog.d/4300.md`（PR1 の断片に追記）、module-reference の断片
+- テスト: §7 の各ファイル、PR1 の表駆動・ガード、§2.5 の期待を変えるテスト
 
-### 8.2 G-PR3（`send-user-message.ts` の S-B）との重なり
+### 8.2 G-PR3 との重なり
 
-**重ならない**。PR2 は `src/lib/session/send-user-message.ts` を変えない: relaunched はルートが送信の後に起動の印から読み（§6）、送信の判定は `composer-clear.ts`・`submit-verified-sender.ts` の中（§4.2）。PR1 の早い拒否（send-user-message.ts）はそのまま残る。順序の制約は「PR1 → PR2」だけで、G-PR3 とは並行してよい。PR2 の契約に「`send-user-message.ts` は変えない」を書く。
+G-PR3 の契約（`workspace/orchestration/runs/2026-11-09/contract-4227-pr3.yaml`・`contract-4227-pr3b.yaml`）の scope を読んで比べた。
+
+| ファイル | PR1 | PR2a | PR2b | G-PR3 の scope |
+|---|---|---|---|---|
+| `src/lib/session/send-user-message.ts` | 触らない（§0.2） | 触らない | 触らない | **含む** |
+| `src/app/api/worktrees/[id]/send/**`（`route.ts`・`send-failure.ts`・`send-session-start.ts`） | 触らない | **書く**（`relaunched`） | 触らない | **含む** |
+| `src/cli/types/**` | 触らない | **書く**（答えの型） | 触らない | **含む**（pr3b） |
+| `src/types/**`・`src/hooks/**`・`src/components/worktree/**`・`src/lib/handoff/**` | 触らない | 触らない | 触らない | 含む |
+| ほか（`src/lib/tmux`・`src/lib/cli-tools`・`src/lib/session` の上以外・`terminal/route.ts`・`message-dispatch.ts`） | `composer-clear.ts`・`send-attempt-*`・`tmux.ts` | 書く | 書く | 含まない |
+
+- **`send-user-message.ts` は重ならない**（改訂 2 と同じ）。
+- **PR2a は scope で重なる**（`send/**`・`src/cli/types/**`）。G-PR3 が実際にこれらを書くかは契約の scope だけでは分からないので、**PR2a は G-PR3 のマージ後に直列**にする（PM の指示「重なるなら直列」）。`relaunched` を `send/route.ts` の外で答えに載せる道は無い（送信の後に読む所がルート）ので、PR2a から外せない（N7 で通知と復旧は同じ PR）。
+- PR2b は G-PR3 と重ならない。ただし PR2a の後なので、結果として G-PR3 の後。
+- PR1 は G-PR3 と重ならない（並行でよい、今の進め方どおり）。
 
 ### 8.3 PR の分け方（推奨）
 
 | PR | 中身 | 単体での振る舞い | 依存 |
 |---|---|---|---|
-| **PR2a 読み手と復旧と通知** | `readPaneState`・`paneExists`／`agentAlive`、§3 の読み手全部、§5 の復旧（dead なら respawn）、§6 の `relaunched` と stderr、§4.2 の dead・unknown・Enter の後の確認、`LaunchOutcome` | dead pane はまだ通常の起動では生まれない（remain-on-exit を付けていない）。テストでは隔離 tmux で作った dead pane と fixture で確かめる。旧方式の #2070 relaunch と claude の作り直しに **relaunched の通知がここで付く**（N7） | PR1 のマージ後 |
-| **PR2b exec 起動** | 起動行の `exec env`（§2.2）、remain-on-exit と印（§2.4）、印のあるペインで PR1 の判定を外す（§8.4）、起動の途中の dead を早く失敗にする、起動行を固定するテストの期待の更新、文書 | これで新しいセッションは全部新方式。読み手と復旧は PR2a で dead pane を読めるので、読み違いの期間が無い | PR2a のマージ後 |
+| **PR2a 読み手・復旧・通知** | `readPaneState`（方式の区別を含む）・`paneExists`／`agentAlive`、§3 の読み手全部（terminal・応答の poll を含む）、§5 の復旧（dead なら respawn、旧方式の置換の順、unknown で置換しない）、§6 の `relaunched`、§4.2 の判定と Enter の後の確認、`LaunchOutcome` | dead pane はまだ通常の起動では生まれない（PR2b まで起動の形は今のまま）。PR2a の respawn は dead pane（テストで作るもの）だけに効く。**旧方式の #2070 の relaunch は PR2a から §5.2 の 1〜3 の確認を通る**（止まったジョブ・不明では置換しない）。確認の後の起動は PR2a では今どおり同じシェルに起動行を打ち、PR2b で §5.2 の 4（`respawn-pane -k` にコマンド）に替える。通知もここで付く（N7） | PR1 のマージ後、**G-PR3 のマージ後** |
+| **PR2b 起動の形** | 新規の起動を `createSession` の `command` へ（§2.2・§2.3）、remain-on-exit をつなぐ（§2.4）、`typeLaunchLines`・`launch-screen.ts`・起動の番の R2 を外す（§2.5）、起動の途中の dead を早く失敗にする（§5.3）、起動行を固定するテストの期待の更新、文書 | これで新しいセッションは全部新方式 | PR2a のマージ後 |
 
-分ける理由: (i) どの時点でも「dead pane を読めない読み手」が無い（PR2a が先に読めるようにし、PR2b が初めて dead pane を生む）。(ii) 復旧の変更と通知が同じ PR（N7）。(iii) PR2b は起動行の形を変えるので、起動行を固定している既存のテスト（`git grep -l 'clear 2>/dev/null\|withLaunchScreenCleared' -- tests` で 14 ファイル、`renderAgentLaunchCommand\|buildAgentLaunchCommandLine` で 28 ファイル）の期待を変える。**期待を変えることを PR2b の契約で許す**（作業ルールの「既存の期待を変えない」の例外。PM の決定が要る）。1 本で出すなら §8.1 の全部。
+分ける理由: (i) どの時点でも「dead pane を読めない読み手」が無い（PR2a が先に読めるようにし、PR2b が初めて新規の起動で dead pane を生む）。(ii) 復旧の変更と通知が同じ PR（N7）。(iii) PR2b は起動の形を変えるので、起動行を固定している既存のテスト（`git grep -l 'clear 2>/dev/null\|withLaunchScreenCleared\|LAUNCH_SCREEN_CLEAR_PREFIX' -- tests` で 14 ファイル、`renderAgentLaunchCommand\|buildAgentLaunchCommandLine` で 28 ファイル、`typeLaunchLines\|launch-keys` で 5 ファイル）の期待を変える。**期待を変えることを PR2b の契約で許す**（作業ルールの「既存の期待を変えない」の例外。PM の決定が要る）。`session-relaunch-2070` の「同じシェルに起動行を打つ」期待は PR2a では変えず（確認を足すだけ）、PR2b の契約で変える。
 
-### 8.4 既存のセッションの移行（決定 (8)）
+### 8.4 既存のセッションの移行
 
-- 強制の再起動はしない（稼働中の会話を捨てない）。旧方式のペインは印 `@cm_launch` が無いことで分かる（表 3 の l。一括の `list-sessions -F` でも読める）。
-- 旧方式のペイン: 送信は PR1 の判定（D）、読み手は今の画面の判定に PR2a の `pane_dead` を重ねる（旧方式のペインは remain-on-exit が無いので dead にならず、シェルの `exit` ならセッションごと消える＝absent）。**旧方式の間の残りのリスク（判定の後に終わる競合、N3）は PR1 の残りとして続く**。
-- 新方式へ移る点: (i) 利用者の stop → start、(ii) 旧方式の CLI が終わって次の送信で #2070 の relaunch が起動行を打つとき（その起動行は exec で、直前に remain-on-exit を付けるので、そのペインはその場で新方式になる。シェルは残らない）、(iii) claude の作り直し（kill して新しいセッション）、(iv) サーバーの再起動では移らない（tmux のセッションは残る）。
-- 新方式のペイン（印あり）: PR1 の判定（D）は**当てない**（表 3 の h: exec した非 exec ラッパーを `shell` と誤る）。判定は §4.2。
+- 強制の再起動はしない（稼働中の会話を捨てない）。旧方式のペインは `pane_start_command` が新方式の形でないことで分かる（s4。一括の `list-sessions -F` でも読める）。
+- 旧方式のペイン: 送信は PR1 の判定（D）、読み手は今の画面の判定に `pane_dead` を重ねる（旧方式のペインは remain-on-exit が無いので dead にならず、シェルの `exit` ならセッションごと消える＝absent）。**旧方式の間の残りのリスク（判定の後に終わる競合、N3）は PR1 の残りとして続く**。
+- 新方式へ移る点: (i) 利用者の stop → start、(ii) 旧方式の CLI が終わり、次の送信で §5.2 の順を通って `respawn-pane -k` で置換したとき（止まったジョブがあれば移らずに断る）、(iii) claude の作り直し（同じ確認の後に kill して新しいセッション）、(iv) サーバーの再起動では移らない（tmux のセッションは残る）。
+- 新方式のペイン: PR1 の判定（D）は**当てない**（表 3 の h、表 4 の s6）。判定は §4.2。
 - 混在の期間の表示: 一覧・capture は両方式とも同じ語（`exited`・`session_not_running`）を出す。
 
 ## 9. 実機で決まること（隔離した tmux で確かめた）
@@ -313,19 +425,66 @@ claude は終了時に最後の画面（入力欄の `❯ ` 行と罫線）を�
 
 表 2: `node -e`・`npx --no-install node -e`・exec する bash ラッパーは、どれも `tpgid ≠ pane_pid`（D は other）。
 
+
+### 表 4（改訂 3、2026-11-10、tmux 3.5a、macOS、ログインシェル zsh）
+
+手順: `mktemp -d "$TMPDIR/c4300r3.XXXX"` の中に仮の HOME（`.zprofile` に `export PATH="$HOME/brewbin:$PATH"; export ZPROFILE_LOADED=yes`、`.zshrc` に `export PATH="$HOME/fakebin:$PATH"; export RC_LOADED=yes; export FAKE_API_KEY=k123`、必要なら `sleep`。`fakebin/fakecli` は環境を 2 行出して `exec cat` する sh スクリプト）と作業 dir を作り、`env -i HOME=<仮> PATH=/usr/bin:/bin TERM=xterm-256color SHELL=/bin/zsh LANG=… CLAUDECODE=1 tmux -L c4300r3x -f /dev/null …`（ソケットは `c4300r3x`・`c4300r3y`・`c4300r3z` を使い分けた）。tmux サーバーの大域の環境はこの `env -i` の値になる（=本番で tmux サーバーを起こした環境の代わり）。セッションは本番と同じ順（`new-session … sleep 2147483647` → `set-option history-limit` → `new-window -k -c <dir> [コマンド]`）で作った。後始末は各セッションを `kill-session -t '=<name>:'`、`-L <socket> kill-server`、dir を消した（`ls` で無いことを確認）。既定の tmux サーバーのセッション数は実測の前後とも 39 で、`mcbd-*`・CommandMate のサーバーには触れていない。本物の CLI は起動していない（代わりのプロセス: `fakecli`（`cat`）・`sleep`・`sh -c`）。
+
+| 記号 | 状況 | 結果 |
+|---|---|---|
+| s1 | **今の形**: `new-window -k`（コマンド無し、ログインシェル）に `CM_PORT='3000' CM_HOOK_URL='…' SECRET="$(cat '<file>')" fakecli` を打つ | CLI の環境: PATH は `/etc/zprofile` の path_helper が足した値＋`brewbin`＋`fakebin`、`RC=yes`・`ZP=yes`・`KEY=k123`、`CM_PORT`・`CM_HOOK_URL`・`SECRET=s3cr`（秘密の値）、`TMUX_PANE`・`TMUX` あり、`CLAUDECODE=1`（tmux の大域の環境から）、PWD は作業 dir |
+| s2 | **`sh -c`（PM の決定の形）**: `new-window -k -c <dir> /bin/sh -c "<同じ代入> exec fakecli" \; set-option -p remain-on-exit on` | `/bin/sh: line 0: exec: fakecli: not found`、dead（status 127）。絶対パスで起動すると動くが、PATH は `/usr/bin:/bin`（tmux の大域の環境のまま）、`RC`・`ZP`・`KEY` は**空**。`CM_*`・`SECRET`・`TMUX_PANE`・PWD は届いた |
+| s3 | **採用の形**: `/bin/zsh -l -i -c "<同じ代入> exec fakecli"` を同じくペインのコマンドに | **s1 と同じ**（PATH の全体・`RC`・`ZP`・`KEY`・`CM_*`・`SECRET`・`TMUX_PANE`・`CLAUDECODE=1`・PWD。違いは `SHLVL` が 1 か 2 か だけ）。ps: `cat` の pid = pgid = tpgid = pane_pid、`Ss+` |
+| s4 | `#{pane_start_command}` | 旧方式（`new-window` にコマンド無し）: 空。`respawn-pane -k … /bin/zsh -l`（今の予備）: `/bin/zsh -l`。新方式: `/bin/zsh -l -i -c "CM_PORT='3000' … SECRET=\"$(cat '<file>')\" exec fakecli"`（秘密は `$(cat …)` の文字列のまま）。`list-sessions -F '#{session_name}\|#{pane_dead}\|#{pane_start_command}'` で全セッションを 1 回に読めた |
+| s5 | 新方式で CLI を kill → dead。dead pane へ `send-keys -l 'touch <f>'` と `Enter` | dead: `pane_dead=1`、`pane_current_command=zsh`（exec 前のシェルの名前が残る）。send-keys・Enter とも exit 0、ファイルは作られない |
+| s6 | dead pane へ `respawn-pane -t … -c <dir> /bin/zsh -l -i -c "…exec fakecli"`（`-k` なし）。rc は 1 秒眠る。respawn の**直後**に `send-keys -l 'touch <f>'`＋`Enter` | respawn rc=0。直後は `pane_current_command=zsh`（rc を読む `-c` のシェル）、1 秒後に `cat`。**ファイルは作られない**。画面には打った行が 2 回（端末の echo と `cat` の出力）＝ CLI が読んだ。前の CLI の出力（`FAKECLI-START …`）は履歴に残った。`pane_start_command` は新しいコマンド |
+| s7 | 生きているペインへ同じ `respawn-pane`（`-k` なし） | `respawn pane failed: pane R:0.0 still active`、rc=1 |
+| s8 | ペインのコマンドとして起動した `cat` に Ctrl-Z（`send-keys C-z`） | `Ss+` のまま。画面に `^Z`、続けて打った行を `cat` が読んだ |
+| s9 | `-l -i -c "CM_PORT='3000' exec nosuchcli4300"` を zsh・bash・sh で | 3 つとも dead、status 127（シェルは残らない）。zsh で `PATH=/nonexistent; … exec env fakecli` → `command not found: env`、dead 127。bash で `CM_PORT='3000' FOO='a b' exec sh -c 'echo …'`（`env` なし）→ `FOO=a b CM_PORT=3000`（代入が届く） |
+| s10 | すぐ終わるコマンド（`sh -c 'exit 3'`）で remain-on-exit の付け方を比べる、各 20 回 | `new-window … \; set-option -p … remain-on-exit on`（1 回の呼び出し）: 20/20 回 dead で残った（status 3）。`new-window` と `set-option` を別の呼び出し: 0/20（20 回ともセッションごと消えた） |
+| Q | `/bin/sh -c "exec sleep 1"` が終わった dead pane | `pane_current_command=sh` |
+| s11 | **旧方式**のペイン（ログインシェル）で `sleep 300` を Ctrl-Z | 前面の名前 `zsh`、`ps -o pid,pgid,tpgid,stat,comm -t <pane_tty>`: `-zsh`（pid = pgid = tpgid = pane_pid、`Ss+`）と `sleep`（別の pgid、`T`）。`fg` で前面の名前が `sleep` に戻った |
+
+未確認（本物の CLI で確かめる、PR2b の UAT）: 各 CLI を `-l -i -c` で起動したときの起動の時間・認証・hook の届き方（`--settings` のファイル・`CODEX_HOME`・`COPILOT_HOME` は起動のコマンドに載るので s1/s3 と同じく届く見立て）、終わったときの dead pane の画面と終了の状態、claude の Ctrl-Z（生のモードで自分に SIGTSTP を送る）、codex の `Update now`（#2068）の後に dead になること、fish・bash をログインシェルにした利用者の rc、Linux の tmux、tmux の大域の環境に PATH が無いほど小さい場合（launchd から起動した tmux サーバー）。
+
 ## 10. 未確認・残り
 
-- 本物の CLI での表 3 の再確認（§9 の未確認）。PR2b の UAT で、各 CLI を exec 起動 → 終わらせる → capture・一覧・send（not_sent）・次の send（relaunched）・stop を確かめる。
-- 旧方式のペインの間の残り（PR1 の残り）: 判定の後に CLI が終わる競合、改行を含む本文の先頭行の実行（N3）。新方式に移るまで続く（§8.4）。
-- 回答経路（`prompt-answer-sender.ts`）: 旧方式のペインでは改訂 1 §5.3 のとおり残る。新方式では安全の穴は消え、dead pane への「答えた」の誤りだけ（auto-yes の poller は §3.2 で dead を飛ばす。`respond` は直さない）。
+- 本物の CLI での表 3・表 4 の再確認（§9 の未確認）。PR2b の UAT で、各 CLI を新方式で起動 → 終わらせる → capture・一覧・send（not_sent）・次の send（relaunched）・terminal・stop を確かめる。
+- 旧方式のペインの間の残り（PR1 の残り）: 判定の後に CLI が終わる競合、改行を含む本文の先頭行の実行（N3）、§5.2 の確認と `respawn-pane -k` の間に利用者がシェルで何かを起動する競合。新方式に移るまで続く（§8.4）。
+- 送信中の復旧（§4.5）: A の一部のキーが新しい CLI の入力欄に着き、A の Enter が新しい会話へ送りうる。シェルでは実行されない。A は indeterminate で返る。
+- rc が別の対話シェルを `exec` する利用者（`.zshrc` の最後に `exec fish` など）: `-c` の文字列が実行されず、端末を読むシェルが前面に出る。準備待ちが時間切れになり、§5.3 で新方式のペインを kill して失敗を返す。その間（準備待ちの最大 60 秒ほど）の送信は、起動の途中なので準備の確認（入力欄）で待つか断る（見立て）。rc が端末から読む（oh-my-zsh の更新の問い合わせ）場合、送信のキーは rc に読まれうる（実行はされない、見立て）。
+- tmux の `default-command` を設定した利用者: 新方式では使われない（§2.1）。
+- tmux の大域の環境: 新方式でも今と同じく、ペインの環境の土台は tmux サーバーの大域の環境で、その上に rc が載る（s1＝s3）。tmux サーバーを CommandMate 以外が先に起こした場合の差も今と同じ。
+- 回答経路（`prompt-answer-sender.ts` ほか）: §12。旧方式のペインでは改訂 1 §5.3 のとおり残る。
 - CLI 自身が対話シェルを子として開く機能（CLI の中の「シェルに入る」操作）があれば、その間の送信はそのシェルに届く。CommandMate の起動の問題ではなく CLI の中の操作なので対象外（見立て、各 CLI の機能は未確認）。
-- 非 exec のラッパーが CLI を中で起動し直す場合（N2 の例）、本文は新しい CLI に届く（シェルではない）。安全の穴ではない。会話が変わったことは通知されない（`pane_pid` が変わらない）。
+- 非 exec のラッパーが CLI を中で起動し直す場合（N2 の例）、本文は新しい CLI に届く（シェルではない）。会話が変わったことは通知されない（`pane_pid` が変わらない）。
 - 外から SIGSTOP で止まった CLI（§4.4、実測 g が未解明）: 読み戻しが `submitted` と誤りうる。通常の操作では起きない。
-- CommandMate から続きの会話を再開する機能（`claude --resume` を起動行に付ける）は作らない。必要なら別 Issue。
+- CommandMate から続きの会話を再開する機能（`claude --resume` を起動のコマンドに付ける）は作らない。必要なら別 Issue。
 - `wait` の `session_gone` に終了の状態（`pane_dead_status`）を載せるかは PR2b の契約で決める（今は載せない）。
-- tmux の最低版（`set-option -p` は 3.0 以降の見立て）。古い tmux では `-w`（窓の選択肢、1 窓 1 ペインなので同じ効果の見立て、未確認）。
+- tmux の最低版（`set-option -p`・`pane_start_command`・`respawn-pane -c` は 3.0 以降の見立て）。
 
 ## 11. 指摘ごとの処置
+
+### 11.0 再確認（`review-4300c.md`、codex-2、改訂 2 の再確認）の新 P1・P2 7 件
+
+PM の決定: `pm-return-4300-design-rev2.md` の (a)（起動も復旧もペインのコマンドとして CLI を直接起動、対話のシェルを一度も出さない。起動行を打つ経路・入力ロックの起動の番・印の付け外しは外す。新しい仕組みは足さない。再確認でまだ「シェルが現れる区間」の P1 が出たら (b)）。
+
+N1〜N7 の判定（解消 4・一部解消 3）のうち一部解消の 3 件（N2・N3・N4）は、どれも「復旧の respawn がシェルを出す区間」（新 P1）が理由だったので、下の 1 行目の処置で同じく閉じる。N2 の「ラッパーの中の CLI の交代は検出できない」は §10 の残り（シェルではない）。
+
+| # | 指摘 | 処置 | 理由（実測） | 入れた節 |
+|---|---|---|---|---|
+| 新 P1 | respawn が送信中の入力先をシェルへ戻す（A の本文・Enter が新しいシェルへ） | **採る（形を替えた）**: respawn も新規の起動も、ペインのコマンドとして CLI を直接起動する（`<shell> -l -i -c '… exec <cli>'`）。端末を読むシェルが出る区間が無い | A のキーの届く先は dead pane（捨てる、s5）・起動中の端末のバッファ（実行されず CLI が読む、s6）・新しい CLI の 3 つだけ。新しい CLI に着いた分は Enter の後の `panePid` の確認で indeterminate。対照のテスト（本文の直前・後・Enter の直前で止めて復旧を差す、回答の矢印・文字・Enter も）を §7.2 に | §2、§4.5、§7.2 |
+| P2-a（2） | 印なしを旧方式とみなすと、起動途中・失敗後を誤分類。`env` が PATH に無い環境 | **採る**: 印を外し、tmux の `pane_start_command` で方式を読む。`env` を外した | `pane_start_command` は tmux がペインの作成・respawn の時に入れる（s4）ので、印の保存前のサーバー終了・保存の失敗・古い起動が後継に付ける、が無い。起動途中（alive・新方式・前面の名前がシェル）、起動失敗（dead・status）の読み方を表にした。`-c` のシェルは exec の失敗で終わる（s9、`env` が無い場合も dead 127） | §2.2、§2.4 |
+| P2-b（3） | 旧方式の Ctrl-Z で、PR1 の拒否より先に requireSession の relaunch が走る | **採る**: 旧方式の置換の前に「D が shell」かつ「端末にシェル以外のプロセスが無い」を確かめ、止まったジョブがあれば起動も kill もせず not-sent（`suspended`） | s11: 止まった CLI は `ps -t <tty>` に `T` で残り、D は `shell` と読む（D だけでは区別できない）。`fg` で同じ CLI に戻れる。新方式の Ctrl-Z は s8 で止まらないことを確かめたが、本物の CLI とジョブ制御するラッパーは未確認と明記 | §5.2、§4.4、§10 |
+| P2-c（4） | unknown・absent の扱いが復旧時と送信後で未完 | **採る**: 不明では置換しない（復旧の判断で unknown → 何もしない／起動を断る）。最初のキーの前の unknown は not-sent、キーの後の unknown・absent・dead・世代交代は indeterminate | キーが届きうる段より後は not-sent に戻せず、同じ CLI と確かめられないので submitted とも言えない。注入のテスト（入力前・Enter の後・復旧判断中）を §7.2・§7.3 に | §4.2、§5.1 |
+| P2-d（5） | terminal ルートの「dead なら not_sent」と driver の自動復旧が両立しない | **採る**: terminal を send と同じ「復旧して送る」に揃えた（absent は 404 のまま、dead は `startSessionForSend` → 送信、unknown は 409） | terminal は `driver.sendMessage` を呼び、claude 以外は中で起動し直す（`base.ts:833`）ので「断る」は守れない。復旧の回数・打鍵・結果を検証する（§7.4） | §3.3 |
+| P2-e（6） | 応答の poll を dead で直ちに止めると終了直前の出力を保存できない | **採る**: dead への遷移では、その世代（`panePid`）の最後の画面を 1 回回収して保存してから止める。答えのキー 0、後継の世代へは書かない | 今の `response-checker.ts:1687` は生存が false なら画面を読む前に戻る。dead pane は最後の画面を残す（表 3 の b2）ので回収できる | §3.2、§7.4 |
+| P2-f（7） | relaunched の案内が、再開した会話を「引き継がなかった」と言う | **採る**: `relaunched` を「置換の事実」と「会話（`resumed`／`new`）」に分けた。stderr も 2 行に分けた | opencode V1 は `-s <id>` で再開する（`opencode.ts:486-497`）。ほかの CLI に CommandMate からの再開は無い | §6 |
+| P2-g（8） | §12 に strict 回答と構造化回答（API 回答）が抜けている | **採る**: 入口と配送を分け、通常キー・strict キー・API 回答のそれぞれで dead／absent／起動中／世代交代を書いた。「回答の確認の後に CLI 終了 → respawn → 残りのキーが着く」を §4.5 と同じ扱いにした | strict は `strict-prompt-answer-io.ts:100` の `sendKey`（ticket の確認つき）で別にキーを出す。API 回答は端末を使わない | §12 |
+
+PM の (b) の条件（再確認でまだ「シェルが現れる区間」の P1 が出たら PR2 を止める）に備えて、シェルが出うる区間を全部書き出した: 旧方式のペイン（PR1 が守る、§8.4）、rc が別の対話シェルを `exec` する利用者（§10、§5.3 で kill）。新方式の起動・復旧そのものには無い。
+
+以下の 11.1・11.2 は改訂 2 の処置の記録（節の番号は改訂 2 のもの）。改訂 3 で変わったものは 11.0。
 
 ### 11.1 再確認（`review-4300b.md`、codex-2）の N1〜N7
 
@@ -360,23 +519,25 @@ PM の決定: `pm-return-4300-design-rev1.md` の (a)（exec 起動で根の原�
 
 PM の設計の決定 (a)〜(e)（`pm-return-4300-design.md`）: (a) relaunched と stderr の 1 行 → §6。(b) wait の変化を受け入れる → §3.2。(c) 回答経路は直さない → §0.3・§3.3・§10。(d) G-PR3 との重なり → §8.2（重ならない）。(e) 事前レビューは codex-2 → この改訂の後、差分だけ再確認を受ける。
 
-## 12. #4303 の経路（回答の送信、src/lib/prompt-answer-sender.ts）への効き目
+## 12. #4303 の経路（回答の送信）への効き目
 
-#4303（`respond`・`prompt-response`・auto-yes の回答が、CLI の終わったペインへキーを打ち込みうる）が、改訂 2 の exec 起動（§2）で同時に塞がるかを経路ごとに見る。この Issue（#4300）では回答経路を直さない（PM の決定 (c)）。ここは #4303 の設計の入力。
+#4303（`respond`・`prompt-response`・auto-yes の回答が、CLI の終わったペインへキーを打ち込みうる）が、新方式の起動（§2）で同時に塞がるかを経路ごとに見る。この Issue（#4300）では回答経路を直さない（PM の決定 (c)）。ここは #4303 の設計の入力。改訂 3 で、入口と配送を分けた（`review-4300c.md` の 8）。
 
-### 12.1 経路とキーを出す所（事実、`ed9b89eac`）
+### 12.1 入口と配送（事実、`ed9b89eac`）
 
-| 経路 | 入口と前の確認 | 回答を送る所 |
+| 入口 | 前の確認 | 配送 |
 |---|---|---|
-| `respond`（CLI・UI） | `src/app/api/worktrees/[id]/respond/route.ts:315`。前に `screenAtSend`（`:312`）で画面を読む。`isRunning` は読まない | `sendPromptAnswer`（`src/lib/prompt-answer-sender.ts:959`） |
-| `prompt-response`（UI のカード） | `src/app/api/worktrees/[id]/prompt-response/route.ts:117` の `cliTool.isRunning`（claude は画面の健康、ほかは `hasSession`）→ `frame-verification.ts:83` の画面の再読 → `answer-delivery.ts:179` | 同じ |
-| auto-yes | `src/lib/auto-yes-poller.ts:1029` の `captureObservedFrame`（画面を直接読む）→ `:919` | 同じ |
+| `respond`（CLI・UI）で `messageId` あり | `src/app/api/worktrees/[id]/respond/route.ts:315`。前に `screenAtSend`（`:312`）で画面を読む。`isRunning` は読まない | **通常キー**: `sendPromptAnswer`（`src/lib/prompt-answer-sender.ts:959`） |
+| `respond` の strict（観測つきの回答） | `src/lib/prompt-observation/strict-respond.ts`、I/O は `src/lib/session/strict-prompt-answer-io.ts` | **strict キー**: `sendKey`（`strict-prompt-answer-io.ts:100`）が入力の ticket を確かめて（`:101`）`sendSessionAnswerKey`。Enter の後に `paneCommand`（`:110`、`readSessionPaneCommand`, `cli-session.ts:276`）で前面がシェルか読む（`agentExitedToShell`, `strict-respond.ts:318`、indeterminate の判定だけ） |
+| `respond` で `messageId` なし（`decisionId` あり／なし） | `respond/route.ts:107-127` → `respondByDecisionId`／`respondToSolePendingDecision`（`respond/structured-decision.ts:455`・`:519`）。この instance の `listPending()` にその決定があること | **API 回答**: `answerPendingDecisionWithReceipt`（`structured-decision.ts:726`）でエージェント自身の API（opencode の REST）へ。**端末にキーを出さない**。届いたかは source の受領（`delivered`）で決まり、届かなければ `decision_not_delivered` |
+| `prompt-response`（UI のカード） | `prompt-response/route.ts:117` の `cliTool.isRunning`（claude は画面の健康、ほかは `hasSession`）→ `frame-verification.ts:83` の画面の再読 → `answer-delivery.ts:179` | 通常キー（同じ `sendPromptAnswer`） |
+| auto-yes | `src/lib/auto-yes-poller.ts:1029` の `captureObservedFrame`（画面を直接読む）→ `:919` | 通常キー |
 
-`sendPromptAnswer` の中でキーを出す所: Command Code の複数選択（`sendCommandCodeMultiSelectAnswer`, `:517`）、claude・antigravity の矢印の選択（`sendSpecialKeysWhileCurrent`, `:1111` → `:842`・`:856`。AskUserQuestion で既定の選択肢なら `['Down', 'Up', 'Enter']`, `:1100-1102`）、文字の答え（`sendKeys(sessionName, answer, false)`, `:1118`）と Enter（`:1153`）、Enter を抑える答え（`:1129`、入力ロックの外）。ロックの中の再読は `answerTargetStillOnScreen`（`:657`）で、画面にダイアログが残っていれば通る。前面のプロセス・`pane_dead` を読む所は無い（strict respond の `agentExitedToShell`, `src/lib/prompt-observation/strict-respond.ts:318` は送った後の indeterminate の判定だけ）。
+`sendPromptAnswer` の中でキーを出す所: Command Code の複数選択（`sendCommandCodeMultiSelectAnswer`, `:517`）、claude・antigravity の矢印の選択（`sendSpecialKeysWhileCurrent`, `:1111` → `:842`・`:856`。AskUserQuestion で既定の選択肢なら `['Down', 'Up', 'Enter']`, `:1100-1102`）、文字の答え（`sendKeys(sessionName, answer, false)`, `:1118`）と Enter（`:1153`）、Enter を抑える答え（`:1129`、入力ロックの外）。ロックの中の再読は `answerTargetStillOnScreen`（`:657`）で、画面にダイアログが残っていれば通る。前面のプロセス・`pane_dead` を読む所は無い。
 
 ### 12.2 実測（隔離した tmux、2026-11-10）
 
-手順は §9 と同じ（`tmux -L c4303x -f /dev/null`、`env -i`、仮 HOME、本番と同じ順でセッションを作る）。後始末は各セッションを `kill-session -t '=<name>:'`、`-L c4303x kill-server`、dir とソケットを消した。既定のサーバー・`mcbd-*` には触れていない。本物の CLI は起動していない。
+手順は §9 と同じ（`tmux -L c4303x -f /dev/null`、`env -i`、仮 HOME）。後始末は各セッションを `kill-session -t '=<name>:'`、`-L c4303x kill-server`、dir とソケットを消した。既定のサーバー・`mcbd-*` には触れていない。本物の CLI は起動していない。改訂 3 の起動の形（ペインのコマンド）での届く先は表 4 の s5・s6 を使う。
 
 | 記号 | 状況 | 結果 |
 |---|---|---|
@@ -385,22 +546,23 @@ PM の設計の決定 (a)〜(e)（`pm-return-4300-design.md`）: (a) relaunched 
 | q | 新方式で、CLI の代わりが子（`sleep &`）を残して終わる | `pane_dead=1`（子が端末を持っていても、ペインのプロセスが終われば dead）。子は後始末の前に消えていた（見立て: ペインが閉じた端末の SIGHUP） |
 | q3 | 同じく、端末を読む子（`(sleep 1; exec cat) &`）を残して終わる | `pane_dead=1`。`y`＋`Enter` は子に届かず（画面に出ない）捨てられた |
 
-### 12.3 塞がる経路・塞がらない経路
+### 12.3 配送ごとの扱い
 
-| 状況 | 新方式で | 理由 | #4303 で要るもの |
+| 状況 | 通常キー（`sendPromptAnswer`） | strict キー | API 回答 |
 |---|---|---|---|
-| 新方式のペインで CLI が終わった（dead pane）。残った画面にダイアログ | **塞がる**（安全） | 答えのキー（数字・`y`・矢印・自由記述・Enter）はどれも捨てられる（r）。3 経路とも同じ `sendKeys`／`sendSpecialKeys` を通る | 届いたと誤らないこと: 最初のキーの前に `readPaneState` が dead なら未送信（`PromptAnswerNotDeliveredError`）、auto-yes は答えずに記録する。`prompt-response` は PR2a で `isRunning`＝`agentAlive` になり `:117` で 400 になる（`respond`・auto-yes は自前の確認が要る） |
-| 新方式でセッションが消えた（absent） | **塞がる** | tmux が `can't find session` で失敗し、何も打たれない | 未送信として返ること（`transportDeliveryOf`, `:783` の分類）をテストで固定するだけ |
-| 新方式で CLI が終わり、端末を持つ子が残る | **塞がる** | ペインは dead になり、子にもキーは届かない（q・q3） | なし（上の dead の確認に含まれる） |
-| 新方式で CLI は生きていて、古い画面のダイアログの検出に当たり、CLI の中で別のプロセス（エディタ・ページャ・ツールの子）が端末を読んでいる | **塞がらない**（ただしシェルではない） | exec はシェルを消すだけで、生きた CLI とその子への誤った答えは変えない。答えはその子に届く | 今の `answerTargetStillOnScreen`（`:657`）の再読と `stillCurrent` を保つ。子が対話シェル（CLI の「シェルに入る」機能）なら実行されうる — 各 CLI にその機能があるか**未確認**。あれば前面が CLI 自身かを見る判定を回答の前に足す |
-| 新方式で Ctrl-Z | **塞がる**（起きない） | CLI は止まらない（§9 表 3 の e・f） | なし |
-| 新方式の起動の途中（respawn の後、`exec` の前はシェルが前面）に、前の画面のダイアログを読む | **塞がらない**（窓は短い） | respawn は履歴を残す（§9 表 3 の a）。起動行の `clear; printf '\033[3J'` までは前の画面が見えうる（respawn 直後に見える画面に前のダイアログが残るかは**未確認**）。gemini・copilot・antigravity の起動の窓（`launch-window.ts`・`antigravity-startup-trust.ts`）以外では auto-yes は起動中を避けない | 回答の前に、起動の印（`session-launch-flight` の起動中）と印 `@cm_launch` の無いペインでは答えない（`readPaneState` と同じ 1 回の `display-message` で読める） |
-| 移行期間の旧方式のペインで CLI が終わった（シェルのプロンプト、画面にダイアログが残る） | **塞がらない** | シェルが残る。`Down Up Enter` で直前のコマンドが再実行され（p）、数字・`y`＋Enter はコマンドとして実行される | 回答の最初のキーの前（矢印の束・文字・Enter の各 `sendKeys`／`sendSpecialKeys` の前）に PR1 の判定（D: シェルなら未送信）を通す。矢印の答えは本文より危ない（履歴の再実行）ので、表駆動で claude・antigravity の矢印の経路を陽性対照に入れる |
-| 移行期間の旧方式のペインで Ctrl-Z で止まった CLI（シェルが前面） | **塞がらない** | 上と同じくシェルが受け取る | 同じ PR1 の判定（D は `shell` と読む、§9 表 1 の i）。止まった CLI を kill・作り直ししない |
-| 移行期間の旧方式で、判定の後に CLI が終わる競合 | **塞がらない** | PR1 の残り（N3 と同じ系統） | 受け入れる（新方式に移るまで）。#4303 の changelog に残りとして書く |
+| 新方式・dead pane（画面にダイアログが残る） | **塞がる**（安全）。キーは捨てられる（r）。要るもの: 最初のキーの前に `readPaneState` が dead なら未送信（`PromptAnswerNotDeliveredError`）、auto-yes は答えずに記録。`prompt-response` は PR2a で `isRunning`＝`agentAlive` になり `:117` で 400 | **塞がる**（安全）。キーは捨てられる。要るもの: 同じく最初のキーの前の dead で未送信。Enter の後の `agentExitedToShell` は dead pane の `pane_current_command` がシェルの名前（s5・Q）なので「シェルへ戻った」と読み indeterminate になる。#4303 では `readPaneState` の dead に読み替える（名前に頼らない） | 端末を使わないので exec の起動は効かない（安全の穴もない）。opencode V1 は API を TUI の同じプロセスが出す見立てで、dead なら届かず `decision_not_delivered`。opencode V2 はサーバーが TUI と別（`releaseOpencodeV2Server`）なので、TUI の dead の後もサーバーが受けうる（**未確認**）。どちらもシェルには届かない |
+| absent | **塞がる**。tmux が `can't find session` で失敗。未送信として返ること（`transportDeliveryOf`, `:783`）をテストで固定 | 同じ | 端末と無関係。`listPending()` が空なら 404 |
+| 新方式・起動中（respawn の後、rc を読んでいる） | シェルでは実行されない（s6: 端末のバッファ → 新しい CLI が読む）。ただし respawn は前の画面を履歴に残す（s6）ので、前のダイアログを読んで答えると、**新しい CLI の入力欄に答えが着く**（正しさ）。要るもの: `readPaneState` の `panePid` を回答の前と後で比べ、変わっていれば indeterminate。起動中（`session-launch-flight` の起動の印）は答えない | 同じ（ticket は respawn の前の `beginAgentSession` で失効するので、まだ出していないキーは出ない） | 影響なし |
+| 新方式・回答の確認の後に CLI 終了 → respawn → 残りのキーが着く（世代交代） | §4.5 と同じ。キーの届く先は dead pane・端末のバッファ・新しい CLI で、シェルではない。`Down Up Enter` が新しい CLI に着くと、CLI の中の履歴の呼び出し・空の送信になりうる（正しさ）。要るもの: 回答の後の `panePid` の確認で indeterminate | 同じ | 影響なし |
+| 新方式・生きた CLI の中で別のプロセス（エディタ・ページャ・ツールの子）が端末を読み、古い画面のダイアログに当たる | **塞がらない**（シェルではない）。今の `answerTargetStillOnScreen` の再読を保つ。子が対話シェル（CLI の「シェルに入る」機能）なら実行されうる（**未確認**） | 同じ | 影響なし |
+| 新方式・Ctrl-Z | **塞がる**（起きない、s8） | 同じ | 影響なし |
+| 移行期間の旧方式で CLI が終わった（シェルのプロンプト、画面にダイアログが残る） | **塞がらない**。`Down Up Enter` で直前のコマンドが再実行され（p）、数字・`y`＋Enter はコマンドとして実行される。要るもの: 最初のキーの前（矢印の束・文字・Enter の各 `sendKeys`／`sendSpecialKeys` の前）に PR1 の判定（D）を通す。矢印は本文より危ない（履歴の再実行）ので、表駆動で claude・antigravity の矢印の経路を陽性対照に | **塞がらない**。同じく最初のキーの前に D を通す | 影響なし |
+| 移行期間の旧方式で Ctrl-Z で止まった CLI | **塞がらない**。D は `shell` と読む（§9 表 1 の i）。止まった CLI を kill・作り直ししない（§5.2 の端末のプロセスの確認と同じ） | 同じ | 影響なし |
+| 移行期間の旧方式で、判定の後に CLI が終わる競合 | **塞がらない**（PR1 の残り）。受け入れる（新方式に移るまで） | 同じ | 影響なし |
 
 ### 12.4 まとめ
 
-- 新方式のペインでは、#4303 の安全の穴（答えのキーがシェルで実行される）は exec 起動で同時に塞がる。#4303 の中身は「dead・absent・起動中を未送信として返し、auto-yes が答えたと記録しないこと」の確認とテストになる（#4303 の本文の見込みどおり）。
-- 塞がらないのは、(i) 移行期間の旧方式のペイン（PR1 の判定を回答経路にも通すことが要る。矢印の答えは履歴を再実行するので優先）、(ii) 起動の途中の短い窓、(iii) 生きた CLI の子への誤った答え（シェルではない。CLI の「シェルに入る」機能の有無は未確認）。
+- 新方式のペインでは、#4303 の安全の穴（答えのキーがシェルで実行される）は起動の形（§2）で同時に塞がる。通常キー・strict キーとも、#4303 の中身は「dead・absent・起動中を未送信として返し、回答の後に `panePid` の変化を indeterminate にし、auto-yes が答えたと記録しないこと」の確認とテストになる。API 回答は端末を使わないので、この Issue の起動の形とは独立（opencode V2 の TUI の dead の後の受領は未確認）。
+- 塞がらないのは、(i) 移行期間の旧方式のペイン（PR1 の判定を通常キー・strict キーの両方に通す。矢印の答えを優先）、(ii) 新方式の起動中・世代交代で答えが新しい CLI に着く（正しさ。シェルではない）、(iii) 生きた CLI の子への誤った答え（シェルではない）。
+- テスト（#4303 の契約に渡す）: dead／absent／起動中／世代交代の 4 つを、通常キー（矢印・文字・Enter）・strict キー・API 回答の 3 つの配送それぞれで。
 - 本文に無い指摘（#4303 の範囲で見るもの）: 文字の答えは `sendKeys(sessionName, answer, false)`（`:1118`）で `literal` を付けていない。答えが `Enter`・`C-c` などキー名と同じ文字列なら tmux がキーとして解釈しうる（`SendKeysOptions.literal` の説明、`tmux.ts` の #1933）。
