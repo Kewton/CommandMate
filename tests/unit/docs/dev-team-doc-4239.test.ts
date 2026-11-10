@@ -43,3 +43,19 @@ describe('docs/orchestrate/team.md (#4239)', () => {
     expect(loop).toContain('docs/orchestrate/team.md#5-uat-の結果の返し方phase-7');
   });
 });
+
+describe('convergence rules section (#4239)', () => {
+  const team = read('docs/orchestrate/team.md');
+  it('has the section, all 7 rules and the Antigravity fallback in the roles table', () => {
+    expect(team).toContain('## 6. 直しとレビューを収束させる規則');
+    for (const w of ['狭めて塞ぐ', '呼び手と同じ PR', '同じ種類の穴が 2 回出たら止める', '--instance antigravity', '全組み合わせの表']) {
+      expect(team).toContain(w);
+    }
+    expect(team.split('\n').find((l) => l.startsWith('| イネーブラー'))).toContain('Antigravity');
+  });
+  it('is referenced from orchestrate.md within the size limit', () => {
+    const o = read('.claude/commands/orchestrate.md');
+    expect(o).toContain('docs/orchestrate/team.md#6-直しとレビューを収束させる規則');
+    expect(Buffer.byteLength(o)).toBeLessThanOrEqual(118000);
+  });
+});
