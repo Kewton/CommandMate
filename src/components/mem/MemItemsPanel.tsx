@@ -47,6 +47,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui';
 import { RepositoryMemSettings } from '@/components/mem/RepositoryMemSettings';
+import { memWriteLockOfOthers, useMemWriteLock } from '@/components/mem/mem-write-lock';
 import {
   memItemsApi,
   type MemItemsResult,
@@ -68,6 +69,9 @@ const ADDABLE_KINDS: ReadonlyArray<Exclude<MemKind, 'now'>> = ['waiting', 'decis
 const SECTION_KINDS: ReadonlyArray<Exclude<MemKind, 'now'>> = ['waiting', 'decision', 'next', 'external', 'note'];
 
 /** The refusals the screen names; anything else is shown with its code. */
+/** This panel's name in the screens' shared write lock (`mem-write-lock.ts`). */
+const MEM_ITEMS_LOCK_OWNER = 'mem-items';
+
 const KNOWN_CODES = new Set([
   'disabled',
   'version_conflict',
@@ -314,7 +318,13 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
    * why (shown to the person); `otherPending(slot)` is true when a unit other than `slot` waits, so
    * only that unit's own resend is left.
    */
-  const lock: 'sending' | 'unknown' | null = inflight !== null ? 'sending' : Object.keys(pendings).length > 0 ? 'unknown' : null;
+  const ownLock: 'sending' | 'unknown' | null = inflight !== null ? 'sending' : Object.keys(pendings).length > 0 ? 'unknown' : null;
+  /**
+   * Issue #4227 G-PR2 (PM P3-3): the hand-off's approval writes items too, so its unit (being
+   * sent, or unknown) locks this panel as this panel's own does, and the other way round.
+   */
+  const otherLock = useMemWriteLock(MEM_ITEMS_LOCK_OWNER, ownLock);
+  const lock = ownLock ?? otherLock;
   const otherPending = (slot: string) => Object.keys(pendings).some((key) => key !== slot);
   /** The add's unit (unknown or being sent): the add's fields show it and are read-only. */
   const addUnit = pendingAdd?.op === 'add' ? pendingAdd : inflight?.op === 'add' ? inflight : null;
@@ -393,6 +403,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
     async <R,>(request: Pending, run: () => Promise<R>): Promise<R | null> => {
       if (sendingRef.current) return null;
       if (Object.keys(pendings).some((key) => key !== slotOf(request))) return null;
+      // Another screen's write of items is sent or unknown (rule (4)(e) across screens, PM P3-3).
+      if (memWriteLockOfOthers(MEM_ITEMS_LOCK_OWNER) !== null) return null;
       sendingRef.current = true;
       setInflight(request);
       setBusy(true);
@@ -953,7 +965,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       )}
       {lock && (
         <p role="status" className="text-xs text-warning-foreground" data-testid="mem-items-write-locked">
-          {lock === 'sending' ? t('mem.items.lockedSending') : t('mem.items.lockedUnknown')}
+          {ownLock === null ? t('mem.items.lockedElsewhere') : lock === 'sending' ? t('mem.items.lockedSending') : t('mem.items.lockedUnknown')}
         </p>
       )}
 
@@ -1165,7 +1177,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             <li key={entry.id} className="flex flex-wrap items-center gap-2 text-xs text-foreground" data-testid={`mem-notice-${entry.id}`}>
               <span>{t('mem.items.notices.line', { item: entry.itemId, reason: entry.endReason, outcome: entry.outcome })}</span>
               {entry.uncertain && <span className="text-warning-foreground">{t('mem.items.notices.uncertain')}</span>}
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void acknowledge(entry)}>
+              {/* Outside the lock (PM P3-3): taking a notice writes no item. */}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void acknowledge(entry)} data-testid={`mem-notice-take-${entry.id}`}>
                 {t('mem.items.notices.take')}
               </Button>
             </li>
