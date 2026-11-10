@@ -292,9 +292,20 @@ describe('[#4300] the nudge answer before a send types nothing into a shell', ()
   it('shell in the foreground: no key, not-sent / agent-not-in-foreground', async () => {
     h.frame = NUDGE_SCREEN;
     h.foreground = SHELL;
-    const error = await nudge();
-    expect(error).toBeInstanceOf(Error);
+    // Fake timers: if the gate were removed the answer loop would keep waiting; advancing
+    // the clock lets it type, so the failure shows up as the key-count assert below
+    // (not as a test timeout).
+    vi.useFakeTimers();
+    let error: unknown;
+    try {
+      const pending = nudge();
+      await vi.advanceTimersByTimeAsync(20_000);
+      error = await pending;
+    } finally {
+      vi.useRealTimers();
+    }
     expect(anyKeys()).toBe(0);
+    expect(error).toBeInstanceOf(Error);
     expect(classifySendFailure(error)).toEqual({ state: 'not-sent', reason: 'agent-not-in-foreground' });
   });
 
