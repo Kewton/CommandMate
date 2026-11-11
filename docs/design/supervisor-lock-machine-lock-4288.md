@@ -2,7 +2,7 @@
 
 - 状態: 上流の段の 3 回目（設計の 4 つと試験の表の雛形）。コードは変えない。実装は、この表がレビューで P2 0 になった後に「表を赤から緑にする」別の契約で行う（PM の依頼 `pm-brief-claude3-upstream-1111.md` の段 1・2）
 - 2 回目の入力: Claude 5 `prereview/review-4288-pr1c-upstream.md`（P2 5・P3 5）、PM Claude `pm-review-4288-pr1c-upstream-claude.md`（P2 4・P3 9）、PM の処分 `pm-return-4288-upstream.md`（共通の決定 1〜5 と PR1c の個別の決定）。不変条件は全員一致で正しいので変えず、表と既存の試験との契約を直した（§9 に指摘ごとの処分）
-- 3 回目の入力: PM Claude `pm-review-4288-pr1c-upstream2-claude.md`（P2 2・P3 6）、Claude 5 `prereview/review-4288-pr1c-upstream2.md`、PM の処分 `pm-return-4288-pr1c-upstream2.md` の 1・2・4。直したのは文と期待値だけで、規則・不変条件・表の形は変えない（§10）。処分の 3（TZ を PR1a-f の比較に寄せる）は PR1a-f の上流のレビューで関数の名前と契約が決まってから別に直すので、この回では §2.1 の tz の包みと F8・F9・前提 P3 に触れていない
+- 3 回目の入力: PM Claude `pm-review-4288-pr1c-upstream2-claude.md`（P2 2・P3 6）、Claude 5 `prereview/review-4288-pr1c-upstream2.md`、PM の処分 `pm-return-4288-pr1c-upstream2.md` の 1・2・4。直したのは文と期待値だけで、規則・不変条件・表の形は変えない（§10）。処分の 3（TZ を PR1a-f の比較に寄せる）は、PR1a-f の上流 2 回目で関数の名前と契約が決まった後の追加の指示（`reinstruct-4288-pr1c-tz.md`）で直した: 独自の tz の包みを消し、生死の判定の時刻の比較を PR1a-f の関数に寄せた（S3・§2.1・F8・F9・前提 P3、形 `other-tz` → `other-eperm`、文面 `tz` を外して 10 種類。§10）
 - 土台: [lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) の §1（2 番、D1〜D12）・§1.11（PR1c の書くファイル）・§1.14（PR1a の実装と D12 の不変条件）・§7。PR1a は develop に入っている（`c3387cbe7`、この文書の行番号は `b57c2aba6`）
 - 対象: `scripts/agent-health/product/lib.sh` の `product_lock_*` と `scripts/agent-health/product/deadline-guard.sh` の回収を、PR1a の読み込み口 `scripts/lib/machine-lock.sh` の上に載せる部分だけ。run-lock（PR1b）は対象外
 - 試験の表の雛形: `tests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts`。表は型つきの列挙（足し忘れ・答えられない結果は `satisfies` で typecheck が落とす）。雛形は次の数をこの行から読み、自分の表の数と比べる（別々に作ったオブジェクトの比較）:
@@ -14,8 +14,8 @@
 | 箇所 | 今（`b57c2aba6`） | 載せた後（PR1c） |
 |---|---|---|
 | 読み込み | `lib.sh:26-27` が `scripts/uat/run-lock.sh` を source（`run_lock_field`・`run_lock_pid_alive` を使う） | 今の source を残し（表示と `proc_running` が使う。`lib.sh:76`）、**加えて** `scripts/lib/machine-lock.sh` を直に source し、その戻り値を `PRODUCT_MACHINE_LOCK_OK` に持つ（§5.2 の契約）。読み込みは 1 回だけ（`machine-lock.sh:49-51`） |
-| 取得 | `product_lock_acquire`（`lib.sh:167-197`）: 札なしの `mkdir` を 5 回まで、owner は tmp→`mv -f`。失敗の後始末は `rm -rf "$dir"`（`:179`） | `lock_acquire_path <base>/supervisor.lock <base>/supervisor.queue 0`（`verify-run.sh:1544`）を kv の codec（`machine-lock.sh:135-171`）＋ lib.sh の tz の包み（§2.1）・`LOCK_OWNERLESS_GRACE_MS=60000`・`LOCK_OWNER_EXTRA="label=…\nlstart=…\ntz=…"` で呼ぶ |
-| 保有者の判定 | `product_lock_owner_alive`（`lib.sh:132-137`）: pid と `lstart` を**欄ごとに別々の読み**で取り、`proc_matches`（`:84-86`）。`lstart` が空なら死と読む（`[ -n "$2" ]`） | owner の 1 回の読み（`lock_obs_owner` `verify-run.sh:905`）→ `lock_record_state`（`:1119`）を D7 で包んだもの（`machine-lock.sh:83-96`）。D7 が `lstart` を比べるのは、記録の `tz=` が読み手の `${TZ-}` と同じときだけ（lib.sh の codec の包みが、違う・無いときは `lstart` を落とす。§2.1） |
+| 取得 | `product_lock_acquire`（`lib.sh:167-197`）: 札なしの `mkdir` を 5 回まで、owner は tmp→`mv -f`。失敗の後始末は `rm -rf "$dir"`（`:179`） | `lock_acquire_path <base>/supervisor.lock <base>/supervisor.queue 0`（`verify-run.sh:1544`）を kv の codec（`machine-lock.sh:135-171`）・`LOCK_OWNERLESS_GRACE_MS=60000`・`LOCK_OWNER_EXTRA="label=…\nlstart=…"` で呼ぶ（`tz=` は書かない。§2.1） |
+| 保有者の判定 | `product_lock_owner_alive`（`lib.sh:132-137`）: pid と `lstart` を**欄ごとに別々の読み**で取り、`proc_matches`（`:84-86`）。`lstart` が空なら死と読む（`[ -n "$2" ]`） | owner の 1 回の読み（`lock_obs_owner` `verify-run.sh:905`）→ `lock_record_state`（`:1119`）を D7 で包んだもの（`machine-lock.sh:83-96`）。D7 の時刻の比較は PR1a-f の `machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>`（PR1a-f の設計 `docs/design/machine-lock-owner-atomic-4288.md` §4.1・§4.2、`be8275def`） が受け持つ（PR1a-f が D7 の包みの中で呼ぶ。lib.sh は包みを足さない。§2.1） |
 | owner の無いディレクトリ | `find -mmin +1`（`lib.sh:143-145`） | `lock_expire_ownerless`（`verify-run.sh:1501`、ms で比べる。先頭だけ。中が空のときだけ） |
 | 回収 | 誰でも `mv "$dir" "$dir.stale.$$.$RANDOM"`（`lib.sh:153-164`）。戻せなければ退避のまま | 先頭だけが `lock_recover`（`verify-run.sh:1459`）。退避は `<lock>.gone-*`、戻せなければ保有中と読む（`lock_settle_gone` `:1382`） |
 | 解放 | `product_lock_release`（`lib.sh:200-205`）: token を読んで `rm -rf` | `lock_release_held`（`machine-lock.sh:198-257`、D12）。`needs-head` を受けても D5 は呼ばない（S5）。サブシェルからは拒む（§5） |
@@ -37,14 +37,14 @@ supervisor.lock だけの性質（事実）:
 |---|---|---|
 | S1 | **異なる token の保有区間は重ならない**（新しい実装どうし・前提 P1〜P3 の下。旧版との混在は §4 の範囲に狭める） | §1.8 の (1)〜(5)。`mkdir`・回収の `mv`・owner の無い `<lock>` の `rmdir` をするのは札の先頭 1 人だけ（`verify-run.sh:1607-1609`・`:2034-2039`） |
 | S2 | **取ったと言えるのは、先頭が `mkdir` した `<lock>` に owner を排他作成し、読み直しで自分の token を見たときだけ**。取得の予算は常に 0（1 回で断る） | `lock_obs_create`（`verify-run.sh:1010-1033`）。予算 0 は `la_deadline = start`（`:1559`）で 1 周 |
-| S3 | **回収（退かす・`rmdir`）は札の先頭だけ**（取得の先頭か D6 のガードの先頭）。判定は owner の **1 回の読み**から。死んだと読むのは、pid が ESRCH のとき、または pid が生きていて記録に空でない `lstart=` と読み手と同じ `tz=` があり、`ps` が読めて記録と**違う**ときだけ（D7）。それ以外（EPERM・EIO・`ps` の失敗・別 host・tz の違い・tz の無い記録の pid 再利用）は生きている／不明で、**不明は取らない・消さない・解放しない** | `lock_obs_kill0`（`:848-856`。EPERM は `unknown:pid:EPERM`）、`machine_lock_lstart_state`（`machine-lock.sh:111-127`）、`lock_holder_state`（`verify-run.sh:1107-1112`）、§2.1 の tz の包み |
+| S3 | **回収（退かす・`rmdir`）は札の先頭だけ**（取得の先頭か D6 のガードの先頭）。判定は owner の **1 回の読み**から。死んだと読むのは、pid が ESRCH のとき、または記録に空でない `lstart=` があり、`kill -0` の pid の観測が alive か EPERM で、PR1a-f の `machine_lock_pid_identity` が `reused` と答えたときだけ（D7。TZ の違いだけなら関数が `alive` と答える）。それ以外（EIO・関数の `unknown:lstart|etime:…`・関数が `reused` と言わない EPERM・別 host）は生きている／不明で、**不明は取らない・消さない・解放しない** | `lock_obs_kill0`（`:848-856`。EPERM は `unknown:pid:EPERM`）、`lock_holder_state`（`verify-run.sh:1107-1112`）、PR1a-f の `machine_lock_pid_identity`（PR1a-f の設計 §4.1。今の `machine_lock_lstart_state` `machine-lock.sh:111-127` を置き換える） |
 | S4 | **解放が直接消すのは、記録の token が自分の token で、記録の pid が呼び手自身（main シェル〔`BASH_SUBSHELL=0`〕の `$$` で、`kill -0 $$` が alive）のときだけ**。supervisor.lock の記録は `pgid=` を持たないので G の判定は「空」に倒れる。それ以外の自分の token の記録は `needs-head`（消さない）、pid が観測できなければ `deferred`。missing・corrupt・他の token は canonical を消さない。解放は 1 回きり（2 回目は `none`） | `machine-lock.sh:198-257`（§1.14 の表） |
 | S5 | **`product_lock_*` は D5（`lock_release_as_head`）を呼ばない**（狭めた。決定 2）。`needs-head`・`deferred` を受けた解放は記録を残し（消さない側）、記録の pid＝監督役の `$$` が死んだ後に次の先頭（取得かガードの D6）が回収する。supervisor の EXIT は終わる途中なので再試行しない。D5 の行は表で「不可能」 | `needs-head` に至るのは `kill -0 $$` が 2 回の読みで食い違うときだけ（F3）。本番の呼び手は main シェルの EXIT だけ（§0） |
 | S6 | **bash の呼び手は main シェル**。`product_lock_release`・`product_lock_recover_only` はサブシェル（`BASH_SUBSHELL≠0`）からの呼び出しを**拒む**（exit 2、何も触らない。狭めた。決定 2）。サブシェルからの**取得**は拒まない: 本番には無いが、既存の 8 者の試験（`3312.test.ts:629-637`）が依り、拒むと期待（GOT がちょうど 1）が 0 になる。その形は `acquire-head` と同じ判定を通り、記録の pid が親の `$$` になるだけ（表の呼び手にしない理由。§2.1） | `machine-lock.sh:240`。8 者の試験の期待は「GOT が 1」だけ。勝者の解放は拒まれ、ロックは `bash -c` の終了後に次の先頭が回収する（試験はそれを見ない） |
 | S7 | **自己グループの例外（pid＝pgid＝自分なら G を判定しない）は supervisor.lock では起きない**。記録に `pgid=` を書かない（決定）。supervisor は**背景の子を残す呼び手**（runner は `&` と `setsid`、サーバーは `up` が起こす。INT・TERM の経路では子が生きたまま EXIT が直接消す）だが、自己グループの例外の前提「解放の前に子をすべて待つ」に頼らない。それでも D9 の別グループが要らないのは、(1) 次の取得者の最初の段が台帳の RECLAIM（`supervisor.sh:124-148`）で、残った runner・サーバーを止めてから SAFETY・RUN に進む、(2) ガードはロックを取らず作業もしない、(3) runner が `planned` のまま残った窓も marker で見つかる、の 3 つで子が守られるから（親 §1.14「背景の子を残す呼び手は D9 の別グループ」への答え: supervisor.lock は台帳が代わる） | `machine-lock.sh:229`、§1.14 の「例外の限界」、`supervisor.sh:124-148`・`:233-238` |
 | S8 | **ガード（D6）は `mkdir` しない**。札は全ての経路で `done`。回収の結果はガードの exit code に効かせない（今どおり） | `lock_recover_only`（`verify-run.sh:2011-2063`） |
 | S9 | **読み込みに失敗したら取らない**: `product_lock_acquire` は 1 を返し（監督役は exit 75、文面 `loader` で「他の監督役が持っている」と区別する）、ガードはロックの回収だけを飛ばし（結果 `unloaded`、文面 `loader`）、台帳の回収と確定は今どおり行う。判定は lib.sh 自身が持つ `PRODUCT_MACHINE_LOCK_OK` で、run-lock.sh 経由で読まれたかに依らない（§5.2） | 決定（`machine-lock.sh:32-33`「the caller must treat that as "not acquired", never run unlocked」） |
-| S10 | **1 つのシェルが持つ machine-lock は 1 つ**。`product_lock_*` は**呼ぶたびに**、大域変数（`LOCK_OWNER_CODEC`・`LOCK_OWNERLESS_GRACE_MS`・`LOCK_OWNER_EXTRA`）を自分の値にし、`LOCK_WANT_TOKEN`・`LOCK_OWNER_PID`・`LOCK_PENDING_TOKEN` を空にし、**関数の差し替え**（`machine_lock_use_kv_codec` が定義する `lock_parse_owner_text`・`lock_format_owner` と、その上に置く lib.sh の tz の包み）も置き直してから machine-lock の操作を呼ぶ（source の時点で設定しない。PR1b の run-lock が同じシェルで別の値・別の関数を置いても混ざらない。PR1b の側の同じ約束は PR1b の設計 §4.3 の「あわせて」〔`run-lock.sh` は source の時点で大域の状態を変えず、`lock_note_recovered` などの差し替えは `run_lock_*` を呼ぶたびにそのロックのパスに限る〕） | 決定（`verify-run.sh:661-670` の大域変数は 1 組。`machine-lock.sh:135-171` は変数でなく関数を差し替える〔Claude 5 P3〕） |
+| S10 | **1 つのシェルが持つ machine-lock は 1 つ**。`product_lock_*` は**呼ぶたびに**、大域変数（`LOCK_OWNER_CODEC`・`LOCK_OWNERLESS_GRACE_MS`・`LOCK_OWNER_EXTRA`）を自分の値にし、`LOCK_WANT_TOKEN`・`LOCK_OWNER_PID`・`LOCK_PENDING_TOKEN` を空にし、**関数の差し替え**（`machine_lock_use_kv_codec` が定義する `lock_parse_owner_text`・`lock_format_owner`）も置き直してから machine-lock の操作を呼ぶ（source の時点で設定しない。PR1b の run-lock が同じシェルで別の値・別の関数を置いても混ざらない。PR1b の側の同じ約束は PR1b の設計 §4.3 の「あわせて」〔`run-lock.sh` は source の時点で大域の状態を変えず、`lock_note_recovered` などの差し替えは `run_lock_*` を呼ぶたびにそのロックのパスに限る〕） | 決定（`verify-run.sh:661-670` の大域変数は 1 組。`machine-lock.sh:135-171` は変数でなく関数を差し替える〔Claude 5 P3〕） |
 | S11 | **取得が生きた記録に対して断るとき、`lib.sh` は stderr に何も書かない**（文面は `PRODUCT_LOCK_ERROR` に入れ、呼び手が出す）。不明・札の取り下げ・戻しなど machine-lock 自身の `verify-run:` の行は出てよい | 既存の試験 `product-supervisor-3312.test.ts:625`（`expect(res.stderr).toBe('')`）。**未確認**: 生きた記録・予算 0 の 1 周で `lock_acquire_path` が何も書かないこと（目で見た範囲では `:1610-1720` が書くのは unknown・`owner-exists`・`owner-not-ours`・`write-failed` だけ）。実装の契約の最初の赤の候補 |
 | S12 | **どの呼び手も、どの結果でも自分の札を残さない**。予算 0 の取得が札の後ろに並んだら、判定もせず札を取り下げて（`done`）抜け、文面 `queue`（「前の札 <t>〔pid N〕が先頭にいた。この監督役は札を取り下げ、ロックを判定していない」）で exit 75 の「他の監督役が持っている」と区別する（個別の決定。`mark-done` 自体の失敗は F31） | `lock_acquire_path` の期限の枝（`verify-run.sh:1697-1704` の `lock_retire_own_ticket`）。`lock_recover_only`・`lock_release_as_head` も全経路で `lock_retire_own_ticket` |
 
@@ -52,13 +52,13 @@ supervisor.lock だけの性質（事実）:
 
 - **P1** 書き手と読み手は同じ machine（`<base>` はローカル）。`host=` の違いは「別の machine」と読み、回収しない（F10）
 - **P2** 新旧の混在は「同期の前の朝」の 1 回（§4）。同期のタイミングは**未確認**（監督役が動いている間に同期されると §4 の 3 行目が当たる）
-- **P3** TZ の違いは §2.1 の tz の包みで「比べない」に倒す。包みの無い旧い記録（`tz=` が無い）は pid だけで判定する（F9）。TZ に依らない照合（`etime`／`started_at`）は PR1a-f で入れる
+- **P3** 生死の判定の時刻の比較は PR1a-f の `machine_lock_pid_identity` を呼ぶ（§2.1）。PR1c はその関数を持つ PR1a-f に依存し、マージの順は **PR1a-f → PR1c**。PR1c 単独の版（PR1a-f の前に入る版）は作らない
 
 ## 2. (b) 状態と遷移の表（記録の形 × 呼び手 × 観測 → 結果）
 
 ### 2.1 列挙
 
-**記録の形（11）**: 操作が読む時点の supervisor.lock の状態。1 回目の 7 形に、人が消すまで残る形を区別するための 4 形（`stale-old`・`ownerless-tmp`・`other-tz`・`other-host`）を足した（共通の決定 1・3）。
+**記録の形（11）**: 操作が読む時点の supervisor.lock の状態。1 回目の 7 形に、人が消すまで残る形を区別するための 4 形（`stale-old`・`ownerless-tmp`・`other-eperm`・`other-host`）を足した（共通の決定 1・3。`other-eperm` は 2 回目までの `other-tz` を、TZ を PR1a-f の関数に寄せた 3 回目で置き換えた）。
 
 | 形 | 中身 |
 |---|---|
@@ -67,16 +67,16 @@ supervisor.lock だけの性質（事実）:
 | `ownerless` | `<lock>` はあるが owner が無く、中が空 |
 | `ownerless-tmp` | `<lock>` に owner が無く、旧版の `owner.tmp.<pid>` だけがある（旧版が `mkdir` と `mv` の間で死んだ。`lib.sh:173-176`）。`lock_ownerless_empty` は `no`（`verify-run.sh:1305`）で誰も取らない。**PR1a-f で塞ぐ**。それまでは文面 `tmp` で人に知らせ、消さない |
 | `corrupt` | owner はあるが `pid=` か `token=` が無い。生じ方は 2 つ: 取得中の SIGKILL（`lock_obs_create` が `: >` で作ってから `cat >>` で書く間。`verify-run.sh:1014-1020`。F17）と、後始末の `rm -f owner` の失敗（F15）。**PR1a-f で塞ぐ**（tmp→`mv` に戻す）。それまでは文面 `corrupt` で人に知らせ、消さない |
-| `own` | 呼び手の token の記録（pid＝取得した main シェルの `$$`、`lstart=`・`tz=` あり、`pgid=` 無し） |
-| `other-plain` | 他の token の記録で `lstart=` が無いか空、または `tz=` が無い（旧版の記録）。pid だけで判定 |
-| `other-lstart` | 他の token の記録で `lstart=` があり、`tz=` が読み手の `${TZ-}` と同じ |
-| `other-tz` | 他の token の記録で `tz=` が読み手と違う。lib.sh の包みが `lstart` を落とし、pid だけで判定（生きた pid は再利用でも生きていると読む。文面 `tz`） |
+| `own` | 呼び手の token の記録（pid＝取得した main シェルの `$$`、`lstart=`・`started_at=` あり、`pgid=` 無し） |
+| `other-plain` | 他の token の記録で `lstart=` が無いか空（F7）。D7 の関数を呼ばず pid だけで判定 |
+| `other-lstart` | 他の token の記録で `lstart=` があり、`kill -0` の pid の観測が alive・ESRCH・EPERM 以外の失敗のどれか。alive のとき D7 が `machine_lock_pid_identity` を呼ぶ（TZ の違いもここ。旧版の記録で `started_at=` が無ければ関数は owner の mtime を使う、PR1a-f I5） |
+| `other-eperm` | 他の token の記録で `lstart=` があり、`kill -0` が EPERM（別の利用者のプロセス）。D7 が `machine_lock_pid_identity` を呼び、`reused` なら死、それ以外は EPERM のまま（PR1a-f §4.1 の写像。文面 `eperm`） |
 | `other-host` | 他の token の記録で `host=` が `LOCK_HOST` と違う（`hostname` の変化を含む。Claude 5 P2-5・PM Claude P3-5）。`lock_holder_state` が `kill -0` を呼ばずに alive と答える（`verify-run.sh:1108`）。文面 `host` で人に知らせ、消さない |
 | `aside` | canonical の `<lock>` が無く、他の token の退避 `<lock>.gone-*` がある（戻しが途中で止まった） |
 
-自分の token の退避は列挙しない: 自分の記録は自分が生きている間は回収されない（S3: pid が生きていて、`tz=` が同じなら `lstart` も同じ。`tz=` が違えば `lstart` を比べない）ので、自分の退避が生じるのは自分が死んだ後で、そのとき自分は解放を呼べない。1 回目の「TZ が同じ」という暗黙の前提は、tz の包みで前提でなくなった（PM Claude P2-3）。
+自分の token の退避は列挙しない: 自分の記録は自分が生きている間は回収されない（S3: pid が生きていれば、`machine_lock_pid_identity` は TZ の違いでも `alive` と答える）ので、自分の退避が生じるのは自分が死んだ後で、そのとき自分は解放を呼べない。1 回目の「TZ が同じ」という暗黙の前提は、PR1a-f の関数で前提でなくなった（PM Claude P2-3）。
 
-**tz の包み（決定、共通の決定 1 の「それまでは」の形）**: lib.sh は書くときに `tz=${TZ-}`（環境変数の値。未設定なら空）を `LOCK_OWNER_EXTRA` に足し、読むときは `machine_lock_use_kv_codec` の `lock_parse_owner_text` の上に包みを置く: 同じ 1 回の読みの本文に `tz=` の行が無いか、値が読み手の `${TZ-}` と違えば `LPO_LSTART` を空にする（D7 は `lstart=` が空なら pid だけで判定する、`machine-lock.sh:85`）。2 度目の読みは足さない（S3 の 1 回の読み）。これで TZ の違いは「消す側」（1 回目の PM Claude P2-3）から「消さない側」（生きた pid は再利用でも生きている）に移る。pid の再利用を TZ に依らず見分けるのは PR1a-f。旧い読み手は `tz=` を読まない（`sed` で欄を拾うだけ）ので混在に影響しない（§4）。
+**生死の判定の時刻の比較（決定、PM の処分 3・案 A）**: PR1c は独自の tz の包み（記録の `tz=` と読み手の `${TZ-}` の比較）を持たず、PR1a-f の `machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>`（PR1a-f の設計 `docs/design/machine-lock-owner-atomic-4288.md` §4.1・§4.2、`be8275def`） を呼ぶ（読み込み口の D7 の包み `lock_record_state` が呼ぶので、lib.sh は関数を足さず、記録に `tz=` も書かない）。契約: 標準出力に 1 行 `alive | reused | unknown:<point>:<errno>`（`<point>` は `lstart` か `etime`）、終了コードは常に 0、呼ぶのは `kill -0` の pid の観測が alive か EPERM のときだけ。写像（PR1a-f §4.1）: 元が alive → `alive` は生、`reused` は死（G を見る。supervisor.lock は `pgid=` を書かないので死）、`unknown:…` は不明。元が `unknown:pid:EPERM` → `reused` は死、それ以外は EPERM のまま。`<started-at-ms>` は `started_at=`、無ければ owner の mtime（PR1a-f I5）。2 回目にあった「`tz=` の値に改行が入ると行を差し込める」件（PM Claude P3-3）は、PR1c が `tz=` を書かなくなったので PR1c には無く、記録の欄の検査は PR1a-f の側に寄せた。依存: PR1c は PR1a-f の後にマージし（PR1a-f → PR1c）、PR1c 単独の版は作らない。
 
 **呼び手（9）**: 本番の呼び手が無い経路は表に残し、セルを「拒否」か「不可能」にする（共通の決定 2）。
 
@@ -104,11 +104,12 @@ supervisor.lock だけの性質（事実）:
 | `ownerless` | `<lock>` の mtime の年齢（`lock_obs_mtime` `:1039`） | 60 秒以下（作りかけ） | 60 秒より古い | `stat`・一覧の失敗 |
 | `ownerless-tmp`・`corrupt`・`other-host` | 観測しない（判定に使われないことを見る） | — | — | — |
 | `own` | 解放: `kill -0 $$` | 生きている | ESRCH（不可能） | 2 回とも失敗（注入） |
-| `other-plain`・`other-tz` | `kill -0` の記録の pid | 生きている | ESRCH | EIO など（ESRCH・EPERM 以外。EPERM は F1） |
-| `other-lstart` | `kill -0` の後、生きた pid の `ps -o lstart=`（D7） | 生きていて `lstart` が記録と同じ | ESRCH、または `lstart` が違う（pid の再利用） | `kill -0` の EIO など（ESRCH・EPERM 以外。EPERM は F1）、`ps` の失敗・空（F6） |
+| `other-plain` | `kill -0` の記録の pid | 生きている | ESRCH | EIO など（ESRCH・EPERM 以外。EPERM は F1） |
+| `other-lstart` | `kill -0` の後、生きた pid の `machine_lock_pid_identity`（D7） | 生きていて関数が `alive`（TZ の違いだけのときも） | ESRCH、または関数が `reused` | `kill -0` の EIO など（ESRCH・EPERM 以外）、または関数が `unknown:lstart|etime:…`（F6） |
+| `other-eperm` | `kill -0` が EPERM の後の `machine_lock_pid_identity`（D7） | 関数が `alive`（EPERM のまま） | 関数が `reused`（死んだ監督役の pid を別の利用者が再利用） | 関数が `unknown:…`（EPERM のまま） |
 | `aside` | 退避の記録の `lock_record_state` | 生きている | ESRCH | EIO など（ESRCH・EPERM 以外。EPERM は F1） |
 
-`other-lstart` の pid が死んでいる場合は `kill -0` が先に ESRCH を返し、`ps` を呼ばない（`machine-lock.sh:85`）。既存の `:647` の試験の割込み（`ps` の stub）が新しい形で働かない理由（§5.1）。
+`other-lstart` の pid が死んでいる場合は `kill -0` が先に ESRCH を返し、関数（`ps`）を呼ばない（PR1a-f §4.1 の「alive か EPERM のときだけ呼ぶ」）。既存の `:647` の試験の割込み（`ps` の stub）が新しい形で働かない理由（§5.1）。
 
 ### 2.2 表
 
@@ -127,7 +128,6 @@ supervisor.lock だけの性質（事実）:
 | `corrupt` | `busy: <dir>/owner is not a lock record (pid= or token= missing: an acquisition died while writing it) — not taken; remove <dir> by hand when no supervisor runs (#4288 PR1a-f)` | 5 |
 | `tmp` | `busy: <dir> has no owner but holds <names> (an older supervisor died while taking it) — not taken; remove <dir> by hand (#4288 PR1a-f)` | 5 |
 | `host` | `busy: <dir> held by pid N on host <H>, not this host <h> — not judged; if the host name changed, remove <dir> by hand (#4288 PR1a-f)` | 5 |
-| `tz` | `busy: <label> pid N holds <dir> (recorded under TZ '<a>', this reader '<b>': its start time is not compared — if pid N is not a supervisor, remove <dir> by hand) (#4288 PR1a-f)` | 5 |
 | `aside` | `busy: <dir> is held by a record moved aside (<gone>) that could not be put back` | 5 |
 | `rec` | `busy: <label> pid N holds <dir>`（今の文面、`lib.sh:188`） | 6 |
 | `taking` | `busy: <dir> is being taken by another supervisor right now`（今の文面、`:190`） | 7 |
@@ -142,15 +142,14 @@ supervisor.lock だけの性質（事実）:
 | `eperm` | 取得: `LOCK_UNKNOWN`（`lock_note_unknown` が 1 周の最初の不明だけを `point=… path=… errno=…` で記す `verify-run.sh:1075-1077`。周の頭で空にする `:1563`。予算 0 は 1 周なので返った後も残る）。ガード: `LRO_UNKNOWN`（`:2018`・`:2053`） | `point=pid` で `errno=EPERM`（記録の pid の `kill -0`。`lock_holder_state` `:1109`） |
 | `unk` | 同上 | 空でなく、`eperm` でない |
 | `queue` | `la_blocker`（`lock_acquire_path` が周の頭で空にし `:1583`、前の生きた札を入れる `:1601`。関数は `local` を使わないので返った後も 1 周目の値が残る）。取得だけ（ガードは先頭になれなければ `not-head` で文面を出さない） | 空でない |
-| `corrupt` | 文面のための owner の 1 回の読み（`<lock>/owner` を `lock_parse_owner_text` に通す。lib.sh の tz の包みを含む） | owner があり、`pid=` か `token=` が空 |
+| `corrupt` | 文面のための owner の 1 回の読み（`<lock>/owner` を `lock_parse_owner_text` に通す） | owner があり、`pid=` か `token=` が空 |
 | `tmp` | 文面のための `<lock>` の一覧 | owner が無く、`owner.tmp.*` がある |
 | `host` | 文面のための owner の読み（`corrupt` と同じ 1 回） | 記録の `host=` が `LOCK_HOST` と違う |
-| `tz` | 同上 | 記録に `tz=` の行があり、読み手の `${TZ-}` と違う |
 | `aside` | `LOCK_GONE_PENDING`（`lock_settle_gone` が記す `:1381-1421`。周の頭で空にする `:1564`）と、文面のための owner の読み | 空でなく、canonical の `<lock>` に記録が無い（戻しが失敗した。戻せた `aside` × `alive` は記録があるので `rec`） |
 | `rec` | 文面のための owner の読み | `pid=` と `token=` がある記録（上のどれにも当たらない） |
 | `taking` | 上のどれにも当たらない | owner が無い。札の `ln` の失敗（F29）もここ: `lock_acquire_path` は stderr に 1 行出して 1 を返すだけで不明を記さず（`:1576-1579`）、自分の札も残らない（`LOCK_TICKET` は空）ので、今の大域変数からは `unk` を導けない（`unk` に揃える読みは足さない。小さい方を選んだ） |
 
-ガードが stderr に 1 行出すのは、`unloaded` の `loader`、`LRO_UNKNOWN` が空でないときの `unk`・`eperm`（`kept` と、F30 の `not-head`）、`kept` の `corrupt`・`tmp`・`host`・`tz` だけ（exit code は変えない。S8）。それ以外の種類（`rec`・`taking`・`aside`）はガードでは出さない（表の `kept` の行が文面を持たない）。
+ガードが stderr に 1 行出すのは、`unloaded` の `loader`、`LRO_UNKNOWN` が空でないときの `unk`・`eperm`（`kept` と、F30 の `not-head`）、`kept` の `corrupt`・`tmp`・`host` だけ（exit code は変えない。S8）。それ以外の種類（`rec`・`taking`・`aside`）はガードでは出さない（表の `kept` の行が文面を持たない）。
 
 | 形 / 観測 | acquire-head | acquire-behind | release-main | release-subshell | release-unheld | guard-head | guard-behind | d5-head・d5-behind |
 |---|---|---|---|---|---|---|---|---|
@@ -168,9 +167,9 @@ supervisor.lock だけの性質（事実）:
 | other-plain・other-lstart / alive | refused(rec) / unchanged | refused(queue) | kept | 拒否 | none | kept / unchanged | not-head | 不可能 |
 | other-plain・other-lstart / gone | **acquired / mine** | refused(queue) | kept | 拒否 | none | **removed / absent** | not-head | 不可能 |
 | other-plain・other-lstart / unknown | refused(unk) / unchanged | refused(queue) | kept | 拒否 | none | kept(unk) / unchanged | not-head | 不可能 |
-| other-tz / alive | refused(tz) / unchanged | refused(queue) | kept | 拒否 | none | kept(tz) / unchanged | not-head | 不可能 |
-| other-tz / gone | **acquired / mine** | refused(queue) | kept | 拒否 | none | **removed / absent** | not-head | 不可能 |
-| other-tz / unknown | refused(unk) / unchanged | refused(queue) | kept | 拒否 | none | kept(unk) / unchanged | not-head | 不可能 |
+| other-eperm / alive | refused(eperm) / unchanged | refused(queue) | kept | 拒否 | none | kept(eperm) / unchanged | not-head | 不可能 |
+| other-eperm / gone | **acquired / mine** | refused(queue) | kept | 拒否 | none | **removed / absent** | not-head | 不可能 |
+| other-eperm / unknown | refused(eperm) / unchanged | refused(queue) | kept | 拒否 | none | kept(eperm) / unchanged | not-head | 不可能 |
 | other-host / 3 値とも | refused(host) / unchanged | refused(queue) | kept | 拒否 | none | kept(host) / unchanged | not-head | 不可能 |
 | aside / alive | refused(rec) / restored | refused(queue) | kept | 拒否 | none | kept / restored | not-head | 不可能 |
 | aside / gone | **acquired / mine** | refused(queue) | kept | 拒否 | none | absent / absent | not-head | 不可能 |
@@ -223,15 +222,15 @@ supervisor.lock だけの性質（事実）:
 
 | # | 点（場所） | 失敗 | 向き | acquire-head | guard-head | release-main・他 |
 |---|---|---|---|---|---|---|
-| F1 | `pid`（`lock_obs_kill0` `verify-run.sh:848`） | EPERM（死んだ監督役の pid を別の利用者が再利用、または別の利用者の保有者） | 消さない | refused(eperm) / unchanged | kept(eperm) | — |
+| F1 | `pid`（`lock_obs_kill0` `verify-run.sh:848`） | EPERM のまま（`lstart=` の無い記録、または `machine_lock_pid_identity` が `reused` と言わない。`lstart=` のある記録では `other-eperm` × `alive`・`unknown` と同じ答え。`reused` なら `other-eperm` × `gone`） | 消さない | refused(eperm) / unchanged | kept(eperm) | — |
 | F2 | 同上 | EIO など | 消さない | refused(unk) | kept(unk) | release-main: deferred |
 | F3 | `$$` の `kill -0`（`lock_release_held` の自己の確かめが不明、次の読みが alive） | EIO が 1 回 | 消さない | — | — | release-main: needs-head / unchanged（D5 は呼ばない。S5） |
 | F4 | `kill -0` がゾンビを alive と読む | ガードの KILL の直後で launchd が刈り取る前 | 消さない | refused(rec) | kept | —（刈り取りの後の先頭が回収。旧版の `proc_running` はゾンビを死と読んだ。PM Claude P3-4） |
 | F5 | 監督役が `stop_and_wait` の KILL で死に EXIT が走らない（`lib.sh:88-109`） | — | 消さない | acquired / mine（翌朝） | removed / absent | —（Claude 5 P3 の「D6 と EXIT の順序」の行） |
-| F6 | `lstart`（`machine_lock_lstart_state` `machine-lock.sh:117`） | `ps` の失敗・空 | 消さない | refused(unk) | kept(unk) | — |
+| F6 | `machine_lock_pid_identity` の `unknown:lstart:…`・`unknown:etime:…`（`ps -o lstart=`・`ps -o etime=`・`date` の失敗・空。PR1a-f §4.1 の 2・4・6） | 失敗 | 消さない | refused(unk)（元が EPERM なら refused(eperm)＝`other-eperm` × `unknown`） | kept(unk)（同じく kept(eperm)） | — |
 | F7 | 書く時の `proc_lstart $$`（`lib.sh:66-68`） | 失敗して `lstart=` が空 | 消さない（新しい読み手は pid だけ） | refused(rec) | kept | —（旧い読み手は空を不一致と読む＝§4・§8 の判断 1） |
-| F8 | lib.sh の codec の包み（`tz=` と読み手の `${TZ-}`） | 違う | 消さない | refused(tz) | kept(tz) | —（PR1a-f で TZ に依らない照合） |
-| F9 | 同上 | `tz=` が無い（旧版の記録） | 消さない（pid だけ） | refused(rec) | kept | — |
+| F8 | `machine_lock_pid_identity` の 5（`lstart` の差が 900 秒の倍数かつ 26 時間以下） | 書き手と読み手の TZ が違う（生きた保有者） | 消さない | refused(rec)（関数が `alive`。`other-lstart` × `alive` と同じ） | kept | —（2 回目の文面 `tz` は外した） |
+| F9 | `machine_lock_pid_identity` の `<started-at-ms>` | 記録に `started_at=` が無い（旧版の記録）: owner の mtime を使う（PR1a-f I5）。生きた保有者 | 消さない | refused(rec)（関数が `alive`） | kept | — |
 | F10 | `LOCK_HOST`（`hostname`、`verify-run.sh:612`）と記録の `host=` | host 名が変わった | 消さない | refused(host) | kept(host) | —（**未確認**: 実機の `scutil --get HostName` が固定されているか） |
 | F11 | `mkdir-lock`（`:976`） | EEXIST 以外 | 消さない | refused(unk) | — | — |
 | F12 | `owner-create`（`:1010`） | EEXIST・他の記録を読み直した | 消さない | refused(rec) | — | — |
@@ -262,7 +261,7 @@ supervisor.lock だけの性質（事実）:
 
 流用する既存の部品の倒れ方（事実）:
 
-- `proc_lstart`（`lib.sh:66`）: 書く側だけに使う（記録の `lstart=` の値。旧い読み手と同じ形に揃えるため squeeze しない）。判定は `machine_lock_lstart_state`。失敗は F7
+- `proc_lstart`（`lib.sh:66`）: 書く側だけに使う（記録の `lstart=` の値。旧い読み手と同じ形に揃えるため squeeze しない）。判定は PR1a-f の `machine_lock_pid_identity`。失敗は F7
 - `run_lock_field`（`run-lock.sh:44-47`）: 取得が断ったときの文面だけに使う。判定には使わない。失敗は空の文字列（文面が欠けるだけ）
 - `run_lock_pid_alive`（`run-lock.sh:50-56`、2 値）: 0＝`kill -0` か `ps -p` が成功（EPERM の生きた pid を含む）、1＝`kill -0` も `ps -p` も失敗（ESRCH に限らない。`ps` の失敗も 1 になる）、または pid が数字でない。ロックの判定には使わない（`proc_running` が台帳の回収に使う）。2 値のまま（§5.2）
 
@@ -272,15 +271,15 @@ supervisor.lock だけの性質（事実）:
 
 | 読み手・取得者 | 新しい記録（生きている） | 新しい記録（死んでいる） | `.gone-*` | `supervisor.queue/` | 空 `lstart=` の新しい記録 |
 |---|---|---|---|---|---|
-| 旧い取得者・旧いガード（`lib.sh` の旧版） | `pid=` と `lstart=` を `sed` で読める（`label=` もある。`tz=` は読まない）ので断る | 退かして回収（旧い穴） | 見えない（2 者が持ちうる） | 見えない（札を抜かす） | **死んだと読んで奪う**（F7） |
+| 旧い取得者・旧いガード（`lib.sh` の旧版） | `pid=` と `lstart=` を `sed` で読める（`label=` もある）ので断る | 退かして回収（旧い穴） | 見えない（2 者が持ちうる） | 見えない（札を抜かす） | **死んだと読んで奪う**（F7） |
 | 新しい取得者・ガード | — | 先頭が回収 | 先頭が片付け・戻し | 札の順 | pid だけで判定 |
-| 新しい読み手 × 旧い記録（`host=`・`tz=` 無し、`lstart=` あり） | 「この host」と読む（`machine-lock.sh:157`）、`tz=` が無いので pid だけ（F9。pid の再利用は生きていると読む＝消さない側） | 回収 | — | — | — |
+| 新しい読み手 × 旧い記録（`host=`・`started_at=` 無し、`lstart=` あり） | 「この host」と読む（`machine-lock.sh:157`）、`machine_lock_pid_identity` は owner の mtime を `<started-at-ms>` に使う（F9、PR1a-f I5） | 回収 | — | — | — |
 
 旧い `<lock>.stale.*`（旧版の退避）は新しい読み手が読まない（形 `stale-old`。`verify-run.sh:1277-1278`）。生きた記録がそこに残っていても守れない（§1.9 の (c) と同じ）。旧い `owner.tmp.<pid>` だけの `<lock>` は形 `ownerless-tmp`（文面 `tmp`、PR1a-f）。
 
 ## 5. (d) PR の切り方
 
-- **PR1c は 1 本**: `scripts/agent-health/product/lib.sh`、`scripts/agent-health/product/deadline-guard.sh`、`tests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts`（この雛形を赤から緑に）、`tests/unit/scripts/agent-health/product-supervisor-3312.test.ts:647` の割込みの口、`changelog.d/4288.md` への統合（2 本目の work item の規則）、`dev-reports/module-reference/issue-4288-pr1c.md`（PR ごとの名前。PR1b は `-pr1b.md`）。依存は PR1a だけ（develop に入っている）。PR1b（run-lock）・PR1a-f と並行してよい（書くファイルが重ならない）。`changelog.d/4288.md` のマージは直列
+- **PR1c は 1 本**（PR1a-f に依存。マージの順は PR1a-f → PR1c、PR1c 単独の版は作らない）: `scripts/agent-health/product/lib.sh`、`scripts/agent-health/product/deadline-guard.sh`、`tests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts`（この雛形を赤から緑に）、`tests/unit/scripts/agent-health/product-supervisor-3312.test.ts:647` の割込みの口、`changelog.d/4288.md` への統合（2 本目の work item の規則）、`dev-reports/module-reference/issue-4288-pr1c.md`（PR ごとの名前。PR1b は `-pr1b.md`）。依存は PR1a（develop に入っている）と PR1a-f（`machine_lock_pid_identity`）。PR1b（run-lock）と並行してよい（書くファイルが重ならない）。PR1a-f とは実装を並行してよいが、マージは PR1a-f が先。`changelog.d/4288.md` のマージは直列
 - **API は呼び手と同じ PR**: `product_lock_recover_only`（D6 の包み）は呼び手 `deadline-guard.sh` と同じ PR で入れる。PR1a で入った `lock_recover_only`・`lock_release_held` は、PR1c で初めて本番の呼び手を持つ。`lock_release_as_head`（D5）は PR1c でも本番の呼び手を持たない（S5。1 回目の「初めて本番の呼び手を持つ」は誤り、Claude 5 P2-1）。消すもの: `product_lock_owner_alive`・`product_lock_is_stale`・`product_lock_take_stale`（呼び手は `lib.sh` 自身と `deadline-guard.sh:86-87` だけ）
 - **呼び手の無い組み合わせは引数・文脈で拒む**（決定。拒んだら 2 を返し、`PRODUCT_LOCK_ERROR` に理由。何も触らない）。雛形の `REJECTIONS`（9）:
   - `product_lock_acquire`: 引数がちょうど 1 つ（ラベル）でない、ラベルが空・改行を含む（ラベルは `LOCK_OWNER_EXTRA` の 1 行になる。改行で `pgid=` などを差し込むと codec の「最初の行が勝つ」で書式の後ろの `pgid=` より先に読まれる。`machine-lock.sh:150`・`:168-169`）、このシェルが既に保持している
@@ -289,7 +288,7 @@ supervisor.lock だけの性質（事実）:
   - 3 つとも `PRODUCT_BASE` が空
   - 引渡し（`lock_hand_off`）・`LOCK_OWNER_PID`・`LOCK_WANT_TOKEN`・`pgid=`・D5 は `product_lock_*` から出さない（呼び手が無い）
 - **`product-supervisor-3312.test.ts:647` の書き換え**: PM の決定（`pm-return-4288-design-rev2.md` の (1)、`pm-return-4288-upstream.md` の PR1c の個別の決定で認められた）どおり PR1c で行う。期待（assert）は 1 行も変えず、割込みの口を `ps` の stub から `CM_VERIFY_TEST_HANDOFF=pause:recover-only-judged`（`verify-run.sh:2038`）に替える。書き換えた試験が、守る振る舞いを壊す変異（例: `lock_recover` の token の確かめ `:1471` を外す）で赤になることを PR1c の中で示し、変異の内容と赤の件数をコミット本文に書く。期待を変える必要が出たら止めて返す
-- **既存の試験との対**: `3312.test.ts` の supervisor.lock の 5 本と guard の 2 本は期待を変えない。`:612` の死んだ owner（`pid=999999 lstart=x`、`tz=` 無し）は pid だけで ESRCH→取る。`:618-626` の生きた owner（`tz=` 無し）は pid だけで alive→断る、stderr 空（S11 の未確認の点）。`:629-637` の 8 者はサブシェルの取得（拒まない）で GOT が 1、勝者の解放は拒まれる（試験は見ない）。`:641` は main シェルの保持の印の無い解放で `none`
+- **既存の試験との対**: `3312.test.ts` の supervisor.lock の 5 本と guard の 2 本は期待を変えない。`:612` の死んだ owner（`pid=999999 lstart=x`）は `kill -0` の ESRCH→取る（関数を呼ばない）。`:618-626` の生きた owner は `kill -0` alive→関数（`started_at=` 無しなので mtime）→ `alive` で断る（**未確認**: 試験の `lstart=` の値が `ps` と同じか。違えば関数の 4〜7 で決まる。実装の契約で確かめる）、stderr 空（S11 の未確認の点）。`:629-637` の 8 者はサブシェルの取得（拒まない）で GOT が 1、勝者の解放は拒まれる（試験は見ない）。`:641` は main シェルの保持の印の無い解放で `none`
 - **ガードの札の列**: ガードは `<lock>` が無くても D6 を呼ぶので、毎回 `<base>/supervisor.queue/` を作る（`lock_wait_head` の `mkdir -p`）。base の中身を数える既存の試験・`finalize.ts` の出力に影響しないかは**未確認**（実装の契約で `git grep` して確かめる。PM Claude P3-9 (c)）
 - 難易度: 上流の 2 回目で表が閉じたら実装は sonnet、閉じなければ opus（PM の処分）。親 §7 の「中（opus）」はこの処分で読み替える
 
@@ -338,9 +337,9 @@ PR1c の側の行（雛形の `LOADER_ROWS`、実装の契約で赤から緑に�
 
 ## 8. 決めたこと・残る判断
 
-決めたこと（この文書）: 記録に `pgid=` を書かない（S7）、ガードの予算は 10 秒、読み込みの失敗はガードの exit code に効かせない（S9）、大域変数と関数の差し替えは呼ぶたびに置く（S10）、D5 を呼ばない（S5）・サブシェルの解放とガードを拒む（S6）、予算 0 で札の後ろは札を取り下げて `queue` で抜ける（S12）、tz の包み（§2.1）、引数・文脈での拒否（§5）、文面の 11 種類と優先と出どころ（§2.2）。
+決めたこと（この文書）: 記録に `pgid=` を書かない（S7）、ガードの予算は 10 秒、読み込みの失敗はガードの exit code に効かせない（S9）、大域変数と関数の差し替えは呼ぶたびに置く（S10）、D5 を呼ばない（S5）・サブシェルの解放とガードを拒む（S6）、予算 0 で札の後ろは札を取り下げて `queue` で抜ける（S12）、時刻の比較は PR1a-f の `machine_lock_pid_identity` に寄せる（§2.1、マージの順 PR1a-f → PR1c）、引数・文脈での拒否（§5）、文面の 10 種類と優先と出どころ（§2.2）。
 
-PR1a-f へ（共通の決定 1。PR1c では形を区別して文面で人に知らせ、消さない）: 取得中の SIGKILL の空の owner（`corrupt`、F17）、旧版の `owner.tmp.*` だけの `<lock>`（`ownerless-tmp`、F18）、D7 の TZ 依存（`etime`／`started_at` の照合へ。F8・F9）、EPERM の再利用 pid（F1。同じ照合で解く）。
+PR1a-f へ（共通の決定 1。PR1c では形を区別して文面で人に知らせ、消さない）: 取得中の SIGKILL の空の owner（`corrupt`、F17）、旧版の `owner.tmp.*` だけの `<lock>`（`ownerless-tmp`、F18）、D7 の TZ 依存と EPERM の再利用 pid は PR1a-f の `machine_lock_pid_identity` で解き、PR1c はそれを呼ぶ（§2.1。F1・F8・F9・`other-eperm`）。
 
 残る判断（PM へ。止める条件ではない）:
 
@@ -357,7 +356,7 @@ PR1a-f へ（共通の決定 1。PR1c では形を区別して文面で人に知
 | Claude 5 P2-4・PM Claude P2-2（`corrupt`・`owner.tmp` だけが永久に止まる） | 決定 1: 形 `corrupt`・`ownerless-tmp` と文面、F15・F17・F18。塞ぐのは PR1a-f |
 | Claude 5 P2-5・PM Claude P3-5（host 名の変化） | 形 `other-host`・文面 `host`・F10。§8 の判断 2 |
 | PM Claude P2-1（F が呼び手の次元を持たない・`RESULTS` がコードと合わない） | 決定 3: F を呼び手ごとの型つきの表に（34 行）、`RESULTS` をコードの集合から組み、雛形がスクリプトから読んだ集合と比べる。owner の読み・退避の一覧・札の done・2 つの `restore-mkdir` を足した |
-| PM Claude P2-3（TZ） | tz の包み（§2.1）で消さない側に移し、F8・F9。照合は PR1a-f |
+| PM Claude P2-3（TZ） | 2 回目は tz の包みで消さない側に移した。3 回目で包みを消し PR1a-f の `machine_lock_pid_identity` に寄せた（§2.1・§10） |
 | PM Claude P2-4（PR1b との契約） | 決定 4: §5.2 の文と `LOADER_ROWS` |
 | PM Claude P3-1（S7 の理由） | S7 に書いた |
 | PM Claude P3-2（サブシェルの取得） | 拒まず、呼び手から除外（S6・§2.1） |
@@ -379,4 +378,4 @@ PR1a-f へ（共通の決定 1。PR1c では形を区別して文面で人に知
 | PM Claude P3-4（`RESULTS` の読み出しが注釈を拾う） | 雛形の `codeResultSet` は行頭が `#` の行を読まない。陽性の対照（コードから `needs-head` を消し注釈だけ残した写しで欠けを捉える）と陰性の対照（注釈だけの代入は集合を変えない）を足した |
 | PM Claude P3-5（影響のある呼び手の書き忘れが型で落ちない） | F ごとに到達する 6 呼び手を `callers` か `excluded`（1 語の理由）のちょうど一方に書き、`failure()` の型で書き忘れ・二重を落とす（`@ts-expect-error` の対照と実行時の検査）。列挙で F31 の後ろの 2 呼び手（札が期限まで残る）と F33 の `guard-behind` を書き足した |
 | PM Claude P3-6（`lib-load-failed` の作り方） | §5.2 の行と `LOADER_ROWS` を「旧い `run-lock.sh` の写し＋印が 2 つある `verify-run.sh` の写し（`MACHINE_LOCK_VERIFY_RUN`）」に狭めた |
-| PM Claude P3-1・P3-3、Claude 5 P2-A（TZ） | この回では触らない（PM の処分 3。PR1a-f の比較の関数の名前と契約が決まってから別に直す）。§2.1 の tz の包み・F8・F9・前提 P3 はそのまま |
+| PM Claude P3-1・P3-3、Claude 5 P2-A（TZ）＝PM の処分 3 | 追加の指示 `reinstruct-4288-pr1c-tz.md` で直した: 独自の tz の包みを消し、PR1a-f の `machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>`（PR1a-f の設計 `docs/design/machine-lock-owner-atomic-4288.md` §4.1・§4.2、`be8275def`） を呼ぶ形に（S3・§2.1・F6・F8・F9・前提 P3）。形 `other-tz` を関数の 3 値を受ける `other-eperm`（EPERM の記録）に置き換え、`other-lstart` の観測を関数の 3 値にした。文面 `tz` を外した（10 種類）。`tz=` の改行の件は PR1c が `tz=` を書かなくなったので PR1a-f の側の検査に寄せた。マージの順 PR1a-f → PR1c（§5） |

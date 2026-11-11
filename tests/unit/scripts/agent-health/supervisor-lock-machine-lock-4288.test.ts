@@ -27,7 +27,7 @@
  *     nothing under ~/.commandmate, no server, no tmux;
  *   - the form is written in the base (`supervisor.lock/owner` as key=value lines, `.gone-*`, `.stale.*`,
  *     `owner.tmp.<pid>`, an empty dir with `touch -t`), the observation made real (a live `sleep`, a dead
- *     pid, the test's own lstart, TZ=… on the reader) or injected (CM_VERIFY_TEST_KILL0_CMD,
+ *     pid, the test's own lstart, a reader under another TZ for F8) or injected (CM_VERIFY_TEST_KILL0_CMD,
  *     CM_VERIFY_TEST_OBS_FAULT=<point>=<ERRNO>, a `ps` shim on PATH, CM_VERIFY_TEST_HANDOFF=fault:… / pause:…);
  *   - `*-behind`: a live ticket of another pid placed ahead in `<base>/supervisor.queue/`;
  *   - `release-subshell`: `( product_lock_release )` after an acquisition in the main shell.
@@ -55,7 +55,7 @@ const FORMS = [
   'own',
   'other-plain',
   'other-lstart',
-  'other-tz',
+  'other-eperm',
   'other-host',
   'aside',
 ] as const;
@@ -77,9 +77,26 @@ type Caller = (typeof CALLERS)[number];
 type UnreachedCaller = 'release-subshell' | 'd5-head' | 'd5-behind';
 type ReachableCaller = Exclude<Caller, UnreachedCaller>;
 
-/** The pid axis: kill -0 of the recorded pid (with D7's lstart where the form says so). */
+/**
+ * The pid axis: kill -0 of the recorded pid, and for a record with lstart= whose kill -0 is alive or EPERM, the answer
+ * of PR1a-f's machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms> (D7; design §2.1). PR1c keeps no tz
+ * wrapper of its own and merges after PR1a-f.
+ */
 const OBS = ['alive', 'gone', 'unknown'] as const;
 type Obs = (typeof OBS)[number];
+
+/**
+ * The contract of PR1a-f's machine_lock_pid_identity (its design machine-lock-owner-atomic-4288.md §4.1): one line on
+ * stdout, exit code always 0, called only when kill -0 of the pid is alive or EPERM. The column of the table each answer
+ * lands in, per what kill -0 said first: reused is gone (supervisor.lock has no pgid=, so G does not hold it); from
+ * EPERM anything but reused stays EPERM (message eperm), from alive an unknown is unknown (message unk).
+ */
+const PID_IDENTITY = ['alive', 'reused', 'unknown'] as const;
+type PidIdentity = (typeof PID_IDENTITY)[number];
+const IDENTITY_ROWS = {
+  'other-lstart': { kill0: 'alive', column: { alive: 'alive', reused: 'gone', unknown: 'unknown' }, heldMessage: 'rec', unknownMessage: 'unk' },
+  'other-eperm': { kill0: 'EPERM', column: { alive: 'alive', reused: 'gone', unknown: 'unknown' }, heldMessage: 'eperm', unknownMessage: 'eperm' },
+} as const satisfies Partial<Record<string, { kill0: string; column: Record<PidIdentity, Obs>; heldMessage: string; unknownMessage: string }>>;
 
 /** The group axis, apart from the pid axis (common decision 3): supervisor.lock never records pgid= (S7). */
 const GROUP_AXIS = {
@@ -140,14 +157,14 @@ type TicketEnd = (typeof TICKET_END)[number];
 
 /**
  * The message (PRODUCT_LOCK_ERROR of a refused acquisition; the guard's stderr line when it keeps a lock a
- * person has to look at). Precedence on a refusal: loader > eperm > unk > queue > corrupt/tmp/host/tz/aside > rec > taking.
+ * person has to look at). Precedence on a refusal: loader > eperm > unk > queue > corrupt/tmp/host/aside > rec > taking.
  * eperm and unk come from the same noted unknown and never both: eperm is point=pid with errno=EPERM, unk any other
  * (design §2.2, the sources of the messages: MESSAGE_SOURCES below).
  */
-const MESSAGES = ['rec', 'taking', 'queue', 'unk', 'eperm', 'corrupt', 'tmp', 'host', 'tz', 'aside', 'loader'] as const;
+const MESSAGES = ['rec', 'taking', 'queue', 'unk', 'eperm', 'corrupt', 'tmp', 'host', 'aside', 'loader'] as const;
 type Message = (typeof MESSAGES)[number];
 /** Messages that ask a person to look (decision 1: the form is told apart, nothing is removed). */
-const PERSON_MESSAGES = ['eperm', 'corrupt', 'tmp', 'host', 'tz'] as const satisfies readonly Message[];
+const PERSON_MESSAGES = ['eperm', 'corrupt', 'tmp', 'host'] as const satisfies readonly Message[];
 
 /**
  * Where lib.sh reads the kind of a message from (design §2.2): a global the machine-lock operation left, or a
@@ -162,7 +179,6 @@ const MESSAGE_SOURCES = {
   corrupt: { rank: 5, from: 'the read of <lock>/owner for the message', when: 'an owner with pid= or token= empty' },
   tmp: { rank: 5, from: 'the listing of <lock> for the message', when: 'no owner, and owner.tmp.* in it' },
   host: { rank: 5, from: 'the read of <lock>/owner for the message', when: 'a record whose host= is not LOCK_HOST' },
-  tz: { rank: 5, from: 'the read of <lock>/owner for the message', when: "a record with a tz= line not equal to the reader's ${TZ-}" },
   aside: { rank: 5, from: 'LOCK_GONE_PENDING (lock_settle_gone) and the read of <lock>/owner', when: 'not empty, and no record in <lock> (the put-back failed)' },
   rec: { rank: 6, from: 'the read of <lock>/owner for the message', when: 'a record with pid= and token= (none of the above)' },
   taking: { rank: 7, from: 'none of the above (no owner; a failed ticket ln, F29, too)', when: 'otherwise' },
@@ -272,19 +288,19 @@ const OBS_MEANING = {
     unknown: 'kill -0 $$ fails twice (CM_VERIFY_TEST_KILL0_CMD)',
   },
   'other-plain': {
-    alive: 'kill -0 of the recorded pid alive (no lstart= line, or an empty one, or no tz= line)',
+    alive: 'kill -0 of the recorded pid alive (no lstart= line, or an empty one: machine_lock_pid_identity is not called)',
     gone: 'ESRCH',
     unknown: 'kill -0 fails other than ESRCH and EPERM (EIO and the like); EPERM is F1 (message eperm)',
   },
   'other-lstart': {
-    alive: 'the pid alive, the tz= of the record equal to the reader\'s TZ, and ps -o lstart= equal to the record',
-    gone: 'ESRCH, or the pid alive and ps -o lstart= different (the pid was reused, D7)',
-    unknown: 'kill -0 fails other than ESRCH and EPERM (EPERM is F1), or ps fails or prints nothing (CM_VERIFY_TEST_OBS_FAULT=lstart=EIO)',
+    alive: 'kill -0 alive and machine_lock_pid_identity answers alive (also when only the TZ of writer and reader differ, F8)',
+    gone: 'ESRCH (the function is not called), or kill -0 alive and the function answers reused (D7)',
+    unknown: 'kill -0 fails other than ESRCH and EPERM (EPERM is F1 / other-eperm), or the function answers unknown:lstart|etime:… (F6; CM_VERIFY_TEST_OBS_FAULT=lstart=EIO / etime=EIO)',
   },
-  'other-tz': {
-    alive: 'tz= differs from the reader\'s TZ: lstart is dropped by lib.sh\'s codec, the pid alive',
-    gone: 'ESRCH (TZ does not matter to kill -0)',
-    unknown: 'kill -0 fails other than ESRCH and EPERM (EPERM is F1)',
+  'other-eperm': {
+    alive: 'kill -0 EPERM and machine_lock_pid_identity answers alive: EPERM stays (message eperm)',
+    gone: 'kill -0 EPERM and the function answers reused: the holder died and another user reused its pid',
+    unknown: 'kill -0 EPERM and the function answers unknown:…: EPERM stays (message eperm)',
   },
   'other-host': {
     alive: 'not observed: a record of another host= is alive (lock_holder_state); kill -0 is not called',
@@ -389,10 +405,10 @@ const TABLE = {
   },
   'other-plain': OTHER,
   'other-lstart': OTHER,
-  'other-tz': {
+  'other-eperm': {
     ...OTHER,
-    'acquire-head': { alive: refused('tz'), gone: ACQUIRED, unknown: refused('unk') },
-    'guard-head': { alive: gKept('tz'), gone: G_REMOVED, unknown: gKept('unk') },
+    'acquire-head': { alive: refused('eperm'), gone: ACQUIRED, unknown: refused('eperm') },
+    'guard-head': { alive: gKept('eperm'), gone: G_REMOVED, unknown: gKept('eperm') },
   },
   'other-host': personOnly('host'),
   aside: {
@@ -439,7 +455,7 @@ const EXCLUSIONS = {
   behind: 'behind a live ticket: the acquisition withdraws its ticket (queue), the guard answers not-head, before this point',
   'pre-queue': 'at the queue stage or before it (the loader): head or behind is not known yet, the head column answers for both',
   unheld: 'no hold mark: the release answers none before it reads anything',
-  'own-pid-only': "the release observes only its own record and $$, never another holder's pid, lstart, tz or host",
+  'own-pid-only': "the release observes only its own record and $$, never another holder's pid, lstart or host",
   'not-on-path': "this caller's function never passes the point (an acquisition-only, release-only or guard-only point)",
   'no-effect': "the release passes it (lock_release_own_gone) but no own moved-aside record exists for supervisor.lock: nothing changes",
 } as const;
@@ -477,7 +493,7 @@ const RELEASE_SELF = { 'release-main': 'own-pid-only', 'release-unheld': 'unheld
 const FAILURE_TABLE = {
   'F1-kill0-eperm': failure({
     point: 'pid (lock_obs_kill0)',
-    errno: 'EPERM — the recorded pid reused by another user\'s process, or a holder of another user',
+    errno: 'EPERM that stays EPERM: a record with no lstart=, or machine_lock_pid_identity not answering reused (with lstart= the same answer as other-eperm × alive / unknown)',
     direction: 'keep',
     callers: { 'acquire-head': refused('eperm'), 'guard-head': gKept('eperm') },
     excluded: { ...BEHIND, ...RELEASE_SELF },
@@ -511,8 +527,8 @@ const FAILURE_TABLE = {
     excluded: { ...BEHIND, ...NO_RELEASE },
   }),
   'F6-ps-lstart-judge': failure({
-    point: 'lstart (machine_lock_lstart_state)',
-    errno: 'ps fails or prints nothing',
+    point: 'machine_lock_pid_identity (PR1a-f): unknown:lstart / unknown:etime',
+    errno: 'ps -o lstart= / ps -o etime= / date fails or prints nothing, after kill -0 alive (after EPERM it is other-eperm × unknown)',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
     excluded: { ...BEHIND, ...RELEASE_SELF },
@@ -525,15 +541,15 @@ const FAILURE_TABLE = {
     excluded: { ...BEHIND, ...NO_RELEASE },
   }),
   'F8-tz-differs': failure({
-    point: "lib.sh's codec: tz= of the record against the reader's ${TZ-}",
-    errno: '— (writer and reader under different TZ values)',
+    point: 'machine_lock_pid_identity step 5: the lstart texts differ by a multiple of 900 s within 26 h',
+    errno: '— (writer and reader under different TZ values, the holder alive): the function answers alive',
     direction: 'keep',
-    callers: { 'acquire-head': refused('tz'), 'guard-head': gKept('tz') },
+    callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
     excluded: { ...BEHIND, ...RELEASE_SELF },
   }),
-  'F9-tz-missing': failure({
-    point: "lib.sh's codec: a record with no tz= line (the old version's)",
-    errno: '— (judged by the pid alone)',
+  'F9-started-at-missing': failure({
+    point: "machine_lock_pid_identity's <started-at-ms>: a record with no started_at= line (the old version's)",
+    errno: "— (the owner's mtime is used, PR1a-f I5; the holder alive): the function answers alive",
     direction: 'keep',
     callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
     excluded: { ...BEHIND, ...RELEASE_SELF },
@@ -836,12 +852,29 @@ describe('Issue #4288 PR1c table (design §2): shape', () => {
     expect(MESSAGE_SOURCES.unk.when).toContain('not eperm');
     // The unknown of the pid axis is EIO and the like (§2.1); EPERM of the same pid is F1, the only eperm.
     const epermCells = ROWS.filter((e) => e.cell.message === 'eperm');
-    expect(epermCells).toEqual([]);
+    expect(new Set(epermCells.map((e) => e.form))).toEqual(new Set(['other-eperm']));
     const epermFailures = FAILURE_OUTCOMES.filter((o) => !('asForm' in o.outcome) && o.outcome.message === 'eperm').map((o) => o.failure);
     expect([...new Set(epermFailures)]).toEqual(['F1-kill0-eperm']);
-    for (const form of ['other-plain', 'other-lstart', 'other-tz', 'aside'] as const) {
+    for (const form of ['other-plain', 'other-lstart', 'aside'] as const) {
       expect(OBS_MEANING[form].unknown, form).toContain('EPERM is F1');
     }
+  });
+
+  it('the answers of machine_lock_pid_identity (PR1a-f) land in the columns of its contract; no tz form or message is left (PM decision 3)', () => {
+    for (const [form, row] of Object.entries(IDENTITY_ROWS) as [Form, (typeof IDENTITY_ROWS)[keyof typeof IDENTITY_ROWS]][]) {
+      expect(Object.keys(row.column).sort()).toEqual([...PID_IDENTITY].sort());
+      const t = (TABLE as Table)[form];
+      expect(t['acquire-head'][row.column.reused]).toEqual(ACQUIRED);
+      expect(t['guard-head'][row.column.reused]).toEqual(G_REMOVED);
+      expect(t['acquire-head'][row.column.alive]).toEqual(refused(row.heldMessage));
+      expect(t['acquire-head'][row.column.unknown]).toEqual(refused(row.unknownMessage));
+      expect(t['guard-head'][row.column.unknown]).toEqual(gKept(row.unknownMessage));
+    }
+    expect((FORMS as readonly string[]).includes('other-tz')).toBe(false);
+    expect((MESSAGES as readonly string[]).includes('tz')).toBe(false);
+    const design = fs.readFileSync(DESIGN_MD, 'utf8');
+    expect(design).toContain('machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>');
+    expect(design).toContain('PR1a-f → PR1c');
   });
 
   it('every observation of every form is defined', () => {
