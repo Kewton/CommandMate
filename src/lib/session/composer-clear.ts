@@ -29,7 +29,7 @@
  * frame back to the browser.
  */
 
-import { capturePane, clearComposerLine, clearComposerPasteToken } from '@/lib/tmux/tmux';
+import { capturePane, clearComposerLine, clearComposerPasteToken, readPaneForeground } from '@/lib/tmux/tmux';
 import { invalidateCache } from '@/lib/tmux/tmux-capture-cache';
 import {
   codexDialogBelow,
@@ -42,7 +42,11 @@ import {
 import { detectSessionStatus } from '@/lib/detection/status-detector';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
-import { INPUT_RECHECK_FAILED_CODE, INPUT_RECHECK_PROMPT_WAITING_CODE } from '@/lib/session/send-attempt-types';
+import {
+  AGENT_NOT_IN_FOREGROUND_CODE,
+  INPUT_RECHECK_FAILED_CODE,
+  INPUT_RECHECK_PROMPT_WAITING_CODE,
+} from '@/lib/session/send-attempt-types';
 
 const logger = createLogger('composer-clear');
 
@@ -249,6 +253,11 @@ export async function clearComposer(
  *     with the prompt guard's reason (`prompt-waiting`);
  *   - unreadable (the capture or the detector threw) — refused, `not-sent`:
  *     typing into a pane nobody could read is the failure this exists for;
+ *   - the pane's own shell in the foreground (Issue #4300, `readPaneForeground`
+ *     answers `shell`) — refused, `not-sent` (`agent-not-in-foreground`): the
+ *     agent exited and whatever is typed would run as a shell command. Read
+ *     before the dialog check, since an exited agent's last frame can still
+ *     show one. A foreground that cannot be read is NOT refused here;
  *   - anything else — returned, for the pre-send clear to take as its first read.
  *
  * Also taken by copilot's selection-list keys right before they are typed
@@ -258,7 +267,8 @@ export async function clearComposer(
  * guard's, consulted before the lock.
  *
  * @throws Error worded for `classifySendFailure` (`prompt-waiting` / `recheck-failed`), with
- *   `code` {@link INPUT_RECHECK_PROMPT_WAITING_CODE} / {@link INPUT_RECHECK_FAILED_CODE} (Issue #3952)
+ *   `code` {@link INPUT_RECHECK_PROMPT_WAITING_CODE} / {@link INPUT_RECHECK_FAILED_CODE} (Issue #3952),
+ *   or with `code` {@link AGENT_NOT_IN_FOREGROUND_CODE} (Issue #4300)
  */
 export async function recheckComposerBeforeInput(sessionName: string, cliToolId: CLIToolType): Promise<string> {
   let frame: string;
@@ -274,6 +284,7 @@ export async function recheckComposerBeforeInput(sessionName: string, cliToolId:
       { code: INPUT_RECHECK_FAILED_CODE }
     );
   }
+  await assertAgentInForeground(sessionName, cliToolId);
   if (dialog) {
     logger.warn('input-recheck-prompt-waiting', { sessionName, cliToolId });
     throw Object.assign(
@@ -285,4 +296,38 @@ export async function recheckComposerBeforeInput(sessionName: string, cliToolId:
     );
   }
   return frame;
+}
+
+/**
+ * Refuse, before any key, when the pane's own shell holds its terminal
+ * (Issue #4300): the agent has exited, and a body typed now would be run by the
+ * shell as a command. Every tool's send passes here under the input lock
+ * ({@link recheckComposerBeforeInput}), so the rule is one place, not one per
+ * driver.
+ *
+ * Only certain evidence refuses (`readPaneForeground` answers `shell`: tmux
+ * names a shell AND that shell's process group owns the terminal). A
+ * foreground that cannot be read (`unknown`, or the reader itself failing)
+ * goes on as before — this change does not make sends less available.
+ *
+ * @throws Error with `code` {@link AGENT_NOT_IN_FOREGROUND_CODE}
+ */
+export async function assertAgentInForeground(sessionName: string, cliToolId: CLIToolType): Promise<void> {
+  let foreground: string;
+  try {
+    foreground = await readPaneForeground(sessionName);
+  } catch {
+    // A reader that failed is no evidence (and a test's tmux mock may not have it).
+    return;
+  }
+  if (foreground !== 'shell') return;
+  logger.warn('input-recheck-agent-not-in-foreground', { sessionName, cliToolId });
+  throw Object.assign(
+    new Error(
+      `The agent in session ${sessionName} is not running: the pane is back at its shell, ` +
+        'so nothing was typed (Issue #4300). To recover, stop the instance\'s session ' +
+        '(`commandmate instances <worktree-id> kill <instance-id>`) and send again: the next send starts a new session.'
+    ),
+    { code: AGENT_NOT_IN_FOREGROUND_CODE }
+  );
 }
