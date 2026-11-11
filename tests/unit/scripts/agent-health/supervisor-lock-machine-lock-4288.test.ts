@@ -1,34 +1,64 @@
 /**
  * Issue #4288 PR1c — supervisor.lock on the machine-wide lock (scripts/lib/machine-lock.sh, PR1a).
- * Design: docs/design/supervisor-lock-machine-lock-4288.md.
+ * Design: docs/design/supervisor-lock-machine-lock-4288.md (upstream stage, 2nd round).
  *
- * UPSTREAM SKELETON (the design stage). This file holds the table of §2 — record form × caller ×
- * three-valued observation → result — and the failure directions of §3, built from enumerations so
- * that a cell left out (or one too many) fails the typecheck (`satisfies`). Nothing here calls the
- * implementation yet: every behaviour row is an `it.todo`, and the implementation contract of PR1c
- * turns them red → green (scripts/agent-health/product/lib.sh, deadline-guard.sh). What runs now is
- * the table checking itself against the invariants of §1 (a) — a table edited into a contradiction
- * fails here before anything is implemented.
+ * UPSTREAM SKELETON (the design stage). This file holds the tables of the design as typed enumerations,
+ * so that a cell, a result or a failure outcome left out (or one the caller cannot answer) fails the
+ * typecheck (`satisfies`):
+ *   - §2 the state table: record form × caller × observation of the pid → a Row (result / where the
+ *     record ends / the caller's ticket / the message), a Rejected cell (the argument or context check of
+ *     lib.sh refuses the call, exit 2) or an Impossible cell (no product caller reaches it);
+ *   - §2.1 the group axis (pgid=) apart from the pid axis: only `none` is reachable for supervisor.lock;
+ *   - §3 the failure outcomes, typed per caller: (caller × failure → result, record, ticket, message);
+ *   - §5 the rejections of lib.sh and the loader rows (the PR1b ↔ PR1c contract).
+ * RESULTS is composed from the result sets of the code (LRH_RESULT / LRAH_RESULT / LRO_RESULT); a test
+ * below reads those sets out of machine-lock.sh and verify-run.sh and compares the two objects, made
+ * apart, so a result value added to the code and not to the table (or the other way) fails here.
  *
- * Counts (written in the design): 7 forms × 9 callers × 3 observations = 189 cells, 13 unreachable,
- * 176 rows; 22 failure rows.
+ * Nothing here calls the implementation: every behaviour row is an `it.todo`, and the implementation
+ * contract of PR1c turns them red → green (scripts/agent-health/product/lib.sh, deadline-guard.sh).
+ * What runs now is the tables checking themselves against the invariants of §1, the code's result sets,
+ * and the counts written in the design.
  *
  * How the implementation will drive a row (for the implementation contract, not run here):
- *   - bash under `set -u`, `PRODUCT_BASE=<mkdtemp under os.tmpdir()>`, `. scripts/agent-health/product/lib.sh`;
- *     nothing under ~/.commandmate, no server, no tmux.
- *   - the form is written in the base (`supervisor.lock/owner` as key=value lines, `.gone-*`, an empty dir
- *     with `touch -t`), the observation made real (a live `sleep`, a dead pid, the test's own lstart) or
- *     injected (CM_VERIFY_TEST_KILL0_CMD, CM_VERIFY_TEST_OBS_FAULT=<point>=<ERRNO>, a `ps` shim on PATH,
- *     CM_VERIFY_TEST_HANDOFF=fault:… / pause:…);
- *   - `*-behind`: a live ticket of another pid placed ahead in `<base>/supervisor.queue/`.
+ *   - bash under `set -u`, `PRODUCT_BASE=<mkdtemp under os.tmpdir()>`, `. scripts/agent-health/product/lib.sh`,
+ *     the product functions only (product_lock_acquire / product_lock_release / product_lock_recover_only):
+ *     never lock_release_as_head or lock_recover_only directly (they are PR1a's; the rows are about lib.sh);
+ *     nothing under ~/.commandmate, no server, no tmux;
+ *   - the form is written in the base (`supervisor.lock/owner` as key=value lines, `.gone-*`, `.stale.*`,
+ *     `owner.tmp.<pid>`, an empty dir with `touch -t`), the observation made real (a live `sleep`, a dead
+ *     pid, the test's own lstart, TZ=… on the reader) or injected (CM_VERIFY_TEST_KILL0_CMD,
+ *     CM_VERIFY_TEST_OBS_FAULT=<point>=<ERRNO>, a `ps` shim on PATH, CM_VERIFY_TEST_HANDOFF=fault:… / pause:…);
+ *   - `*-behind`: a live ticket of another pid placed ahead in `<base>/supervisor.queue/`;
+ *   - `release-subshell`: `( product_lock_release )` after an acquisition in the main shell.
  *
  * @vitest-environment node
  */
-import { describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
+const MACHINE_LOCK_SH = path.join(REPO_ROOT, 'scripts/lib/machine-lock.sh');
+const VERIFY_RUN_SH = path.join(REPO_ROOT, '.claude/skills/cmate-verify/scripts/verify-run.sh');
+const DESIGN_MD = path.join(REPO_ROOT, 'docs/design/supervisor-lock-machine-lock-4288.md');
 
 // ------------------------------------------------------------------ enumerations (§2.1)
 
-const FORMS = ['absent', 'ownerless', 'corrupt', 'own', 'other-plain', 'other-lstart', 'aside'] as const;
+const FORMS = [
+  'absent',
+  'stale-old',
+  'ownerless',
+  'ownerless-tmp',
+  'corrupt',
+  'own',
+  'other-plain',
+  'other-lstart',
+  'other-tz',
+  'other-host',
+  'aside',
+] as const;
 type Form = (typeof FORMS)[number];
 
 const CALLERS = [
@@ -37,48 +67,154 @@ const CALLERS = [
   'release-main',
   'release-subshell',
   'release-unheld',
-  'release-as-head',
-  'release-as-head-behind',
   'guard-head',
   'guard-behind',
+  'd5-head',
+  'd5-behind',
 ] as const;
 type Caller = (typeof CALLERS)[number];
+/** Callers no product path reaches: a subshell's release is rejected, D5 has no product wrapper. */
+type UnreachedCaller = 'release-subshell' | 'd5-head' | 'd5-behind';
+type ReachableCaller = Exclude<Caller, UnreachedCaller>;
 
+/** The pid axis: kill -0 of the recorded pid (with D7's lstart where the form says so). */
 const OBS = ['alive', 'gone', 'unknown'] as const;
 type Obs = (typeof OBS)[number];
 
-/** The results each caller can answer (product_lock_* over LRH_RESULT / LRAH_RESULT / LRO_RESULT). */
+/** The group axis, apart from the pid axis (common decision 3): supervisor.lock never records pgid= (S7). */
+const GROUP_AXIS = {
+  none: { reach: 'the record has no pgid= line: judged by the pid axis alone' },
+  alive: { impossible: 'no writer puts pgid= in supervisor.lock (S7; a label with a newline is rejected, §5)' },
+  gone: { impossible: 'as alive' },
+  unknown: { impossible: 'as alive' },
+} as const satisfies Record<'none' | Obs, { reach: string } | { impossible: string }>;
+
+/** The result sets of the code, written by hand (compared below with the sets read out of the scripts). */
+const CODE_RESULTS = {
+  LRH: ['none', 'released', 'kept', 'deferred', 'needs-head'],
+  LRAH: ['released', 'missing', 'deferred', 'kept', 'unknown', 'not-head'],
+  LRO: ['removed', 'kept', 'restore-failed', 'absent', 'not-head'],
+} as const;
+/** lock_acquire_path answers 0 / 1 (no result variable). */
+const ACQUIRE_CODE = ['acquired', 'refused'] as const;
+/** What lib.sh adds of its own: rejected (exit 2, §5), unloaded (the loader failed: S9). */
+const LIB_ONLY = { acquire: ['rejected'], release: ['rejected'], guard: ['rejected', 'unloaded'] } as const;
+
 const RESULTS = {
-  'acquire-head': ['acquired', 'refused'],
-  'acquire-behind': ['refused'],
-  'release-main': ['released', 'kept', 'deferred'],
-  'release-subshell': ['kept', 'deferred', 'needs-head→released', 'needs-head→deferred'],
-  'release-unheld': ['none'],
-  'release-as-head': ['released', 'missing', 'deferred', 'kept'],
-  'release-as-head-behind': ['not-head'],
-  'guard-head': ['removed', 'kept', 'absent'],
-  'guard-behind': ['not-head'],
+  'acquire-head': [...ACQUIRE_CODE, ...LIB_ONLY.acquire],
+  'acquire-behind': [...ACQUIRE_CODE, ...LIB_ONLY.acquire],
+  'release-main': [...CODE_RESULTS.LRH, ...LIB_ONLY.release],
+  'release-subshell': [...CODE_RESULTS.LRH, ...LIB_ONLY.release],
+  'release-unheld': [...CODE_RESULTS.LRH, ...LIB_ONLY.release],
+  'guard-head': [...CODE_RESULTS.LRO, ...LIB_ONLY.guard],
+  'guard-behind': [...CODE_RESULTS.LRO, ...LIB_ONLY.guard],
+  'd5-head': CODE_RESULTS.LRAH,
+  'd5-behind': CODE_RESULTS.LRAH,
 } as const satisfies Record<Caller, readonly string[]>;
 type ResultOf<C extends Caller> = (typeof RESULTS)[C][number];
 
-/** Where the record of the form ends: stays, is removed, is replaced by the caller's, is put back. */
-const LOCK_AFTER = ['unchanged', 'absent', 'mine', 'restored'] as const;
+type LibFn = 'product_lock_acquire' | 'product_lock_release' | 'product_lock_recover_only' | 'lock_release_as_head';
+const FN_OF = {
+  'acquire-head': 'product_lock_acquire',
+  'acquire-behind': 'product_lock_acquire',
+  'release-main': 'product_lock_release',
+  'release-subshell': 'product_lock_release',
+  'release-unheld': 'product_lock_release',
+  'guard-head': 'product_lock_recover_only',
+  'guard-behind': 'product_lock_recover_only',
+  'd5-head': 'lock_release_as_head',
+  'd5-behind': 'lock_release_as_head',
+} as const satisfies Record<Caller, LibFn>;
+
+/**
+ * Where the record of the form ends: stays, is removed, the caller's becomes canonical, the moved-aside
+ * one is put back, or (failure rows only) the moved-aside one is kept aside and goes on holding, or this
+ * acquisition's own half-made <lock> (with its owner / empty) is left.
+ */
+const LOCK_AFTER = ['unchanged', 'absent', 'mine', 'restored', 'aside', 'own-half-left', 'own-empty-left'] as const;
 type LockAfter = (typeof LOCK_AFTER)[number];
 
-/** PRODUCT_LOCK_ERROR of a refused acquisition (precedence: unk > rec > queue > taking). */
-const MESSAGES = ['rec', 'taking', 'queue', 'unk'] as const;
+/** The caller's own ticket: taken and retired (done), never taken, or (failure rows only) left until retirable. */
+const TICKET_END = ['retired', 'none-taken', 'left-until-retirable'] as const;
+type TicketEnd = (typeof TICKET_END)[number];
+
+/**
+ * The message (PRODUCT_LOCK_ERROR of a refused acquisition; the guard's stderr line when it keeps a lock a
+ * person has to look at). Precedence on a refusal: loader > unk/eperm > queue > corrupt/tmp/host/tz/aside > rec > taking.
+ */
+const MESSAGES = ['rec', 'taking', 'queue', 'unk', 'eperm', 'corrupt', 'tmp', 'host', 'tz', 'aside', 'loader'] as const;
 type Message = (typeof MESSAGES)[number];
+/** Messages that ask a person to look (decision 1: the form is told apart, nothing is removed). */
+const PERSON_MESSAGES = ['eperm', 'corrupt', 'tmp', 'host', 'tz'] as const satisfies readonly Message[];
 
 interface Row<C extends Caller> {
   readonly result: ResultOf<C>;
   readonly lock: LockAfter;
+  readonly ticket: TicketEnd;
   readonly message?: Message;
 }
-interface Unreachable {
-  readonly unreachable: string;
+
+// ------------------------------------------------------------------ rejections (§5) and loader rows (§5.2)
+
+/** The argument and context checks of lib.sh: each answers rejected (exit 2) with PRODUCT_LOCK_ERROR, touching nothing. */
+const REJECTIONS = {
+  'acquire-arity': { fn: 'product_lock_acquire', check: 'not exactly one argument (the label)' },
+  'acquire-label': { fn: 'product_lock_acquire', check: 'an empty label, or one with a newline (it would inject pgid= / token= lines)' },
+  'acquire-while-holding': { fn: 'product_lock_acquire', check: 'this shell already holds (LOCK_HELD_PATH not empty)' },
+  'release-args': { fn: 'product_lock_release', check: 'any argument' },
+  'release-in-subshell': { fn: 'product_lock_release', check: 'BASH_SUBSHELL is not 0 (no product caller releases from a subshell)' },
+  'recover-args': { fn: 'product_lock_recover_only', check: 'any argument' },
+  'recover-while-holding': { fn: 'product_lock_recover_only', check: 'this shell holds the lock (the guard never acquires)' },
+  'recover-in-subshell': { fn: 'product_lock_recover_only', check: 'BASH_SUBSHELL is not 0' },
+  'base-empty': { fn: 'any', check: 'PRODUCT_BASE empty (all three)' },
+} as const satisfies Record<string, { fn: LibFn | 'any'; check: string }>;
+type RejectionKey = keyof typeof REJECTIONS;
+
+interface Rejected {
+  readonly rejected: RejectionKey;
 }
-type Cell<C extends Caller> = Row<C> | Unreachable;
+interface Impossible {
+  readonly impossible: string;
+}
+type Cell<C extends Caller> = Row<C> | Rejected | Impossible;
 type Table = { readonly [F in Form]: { readonly [C in Caller]: { readonly [O in Obs]: Cell<C> } } };
+
+/** The PR1b ↔ PR1c contract (common decision 4), as rows the implementation drives. */
+const LOADER_ROWS = {
+  'load-once': {
+    setup: 'a fake run-lock.sh that sources machine-lock.sh, then lib.sh sources it again',
+    loads: 1,
+    acquire: 'as-table',
+    guard: 'as-table',
+  },
+  'run-lock-load-failed': {
+    setup: 'run-lock.sh sources machine-lock.sh, which fails (markers twice in a copy of verify-run.sh): run-lock.sh still defines run_lock_field / run_lock_pid_alive and its source returns 0',
+    loads: 0,
+    acquire: 'refused(loader)',
+    guard: 'unloaded, the ledger reclaimed as today',
+  },
+  'old-run-lock-copy': {
+    setup: "today's run-lock.sh (no machine-lock source) copied into a tmp tree with lib.sh",
+    loads: 1,
+    acquire: 'as-table',
+    guard: 'as-table',
+  },
+  'lib-load-failed': {
+    setup: "lib.sh's own source of machine-lock.sh fails: PRODUCT_MACHINE_LOCK_OK=0, whatever run-lock.sh did",
+    loads: 0,
+    acquire: 'refused(loader)',
+    guard: 'unloaded, the ledger reclaimed as today',
+  },
+  'pid-alive-two-valued': {
+    setup: 'run_lock_pid_alive on a live / an ESRCH / an EPERM pid: 0 / 1 / 0 (two values, as today; proc_running relies on it)',
+    loads: 1,
+    acquire: 'as-table',
+    guard: 'as-table',
+  },
+} as const satisfies Record<
+  string,
+  { setup: string; loads: 0 | 1; acquire: 'as-table' | 'refused(loader)'; guard: 'as-table' | 'unloaded, the ledger reclaimed as today' }
+>;
 
 /** What the decisive observation of each form is, per value (§2.1). */
 const OBS_MEANING = {
@@ -87,30 +223,50 @@ const OBS_MEANING = {
     gone: 'acquire: mkdir created / guard: ENOENT',
     unknown: 'mkdir or the listing fails with another errno (CM_VERIFY_TEST_OBS_FAULT=mkdir-lock|lock-list=EIO)',
   },
+  'stale-old': {
+    alive: 'as absent: the old version\'s <lock>.stale.* is not read by the new readers (verify-run.sh lock_gone_candidates)',
+    gone: 'as absent',
+    unknown: 'as absent',
+  },
   ownerless: {
     alive: 'the empty <lock> is 60 s old or younger (being made)',
     gone: 'older than 60 s (touch -t)',
     unknown: 'its mtime or listing cannot be read (CM_VERIFY_TEST_OBS_FAULT=ownerless-mtime=EIO)',
   },
+  'ownerless-tmp': {
+    alive: 'not observed: <lock> has no owner and holds owner.tmp.<pid> of the old version (never taken; a person removes it)',
+    gone: 'not observed (the pid in the tmp name is not read)',
+    unknown: 'not observed',
+  },
   corrupt: {
     alive: 'the pid left in the record is alive (must not matter)',
-    gone: 'that pid is ESRCH (must not matter: a corrupt record is never recovered)',
-    unknown: 'kill -0 of that pid fails (EPERM / EIO)',
+    gone: 'that pid is ESRCH (must not matter: a corrupt record is never recovered until PR1a-f)',
+    unknown: 'kill -0 of that pid fails (must not matter)',
   },
   own: {
-    alive: 'kill -0 of the recorded pid ($$, or the parent $$ in a subshell) alive, lstart the same',
-    gone: 'ESRCH (a subshell whose parent died; D5 after it)',
-    unknown: 'kill -0 fails with EIO (CM_VERIFY_TEST_KILL0_CMD), or ps lstart fails for D5',
+    alive: 'kill -0 $$ of the main shell alive',
+    gone: 'ESRCH: impossible for the main shell that calls',
+    unknown: 'kill -0 $$ fails twice (CM_VERIFY_TEST_KILL0_CMD)',
   },
   'other-plain': {
-    alive: 'kill -0 of the recorded pid alive (no lstart= line, or an empty one)',
+    alive: 'kill -0 of the recorded pid alive (no lstart= line, or an empty one, or no tz= line)',
     gone: 'ESRCH',
-    unknown: 'EPERM is alive; EIO and the like are unknown',
+    unknown: 'kill -0 fails other than ESRCH: EPERM (another user\'s process) and EIO are unknown',
   },
   'other-lstart': {
-    alive: 'the pid alive and ps -o lstart= equal to the record',
-    gone: 'the pid alive and ps -o lstart= different (the pid was reused, D7)',
-    unknown: 'ps fails or prints nothing (CM_VERIFY_TEST_OBS_FAULT=lstart=EIO)',
+    alive: 'the pid alive, the tz= of the record equal to the reader\'s TZ, and ps -o lstart= equal to the record',
+    gone: 'ESRCH, or the pid alive and ps -o lstart= different (the pid was reused, D7)',
+    unknown: 'kill -0 fails other than ESRCH, or ps fails or prints nothing (CM_VERIFY_TEST_OBS_FAULT=lstart=EIO)',
+  },
+  'other-tz': {
+    alive: 'tz= differs from the reader\'s TZ: lstart is dropped by lib.sh\'s codec, the pid alive',
+    gone: 'ESRCH (TZ does not matter to kill -0)',
+    unknown: 'kill -0 fails other than ESRCH',
+  },
+  'other-host': {
+    alive: 'not observed: a record of another host= is alive (lock_holder_state); kill -0 is not called',
+    gone: 'not observed',
+    unknown: 'not observed',
   },
   aside: {
     alive: "the moved-aside record's holder alive",
@@ -123,99 +279,108 @@ const OBS_MEANING = {
 
 const same = <const T,>(cell: T): Readonly<Record<Obs, T>> => ({ alive: cell, gone: cell, unknown: cell });
 
-const NO_OWN_ACQUIRE = 'the supervisor takes once per shell under a new token (supervisor.sh:78); a second acquire is refused by its arguments (§5)';
-const NO_OWN_GUARD = 'the guard never acquires (D6): no record carries its token';
-const NO_SELF_ESRCH = 'the main shell is the caller: kill -0 $$ cannot be ESRCH';
+const NO_SELF_ESRCH: Impossible = { impossible: 'the main shell is the caller: kill -0 $$ cannot be ESRCH' };
+const NO_GUARD_TOKEN: Impossible = { impossible: 'the guard never acquires (D6): no record carries its token' };
+const NO_D5: Impossible = {
+  impossible: 'no product_lock_* calls D5: needs-head is kept and recovered after the shell exits (S5)',
+};
+const SUBSHELL: Rejected = { rejected: 'release-in-subshell' };
+const HOLDING: Rejected = { rejected: 'acquire-while-holding' };
 
-const KEPT = { result: 'kept', lock: 'unchanged' } as const;
-const NONE = { result: 'none', lock: 'unchanged' } as const;
-const NOT_HEAD = { result: 'not-head', lock: 'unchanged' } as const;
-const MISSING = { result: 'missing', lock: 'unchanged' } as const;
-const refused = <const M extends Message>(message: M, lock: LockAfter = 'unchanged') => ({ result: 'refused', lock, message }) as const;
-const ACQUIRED = { result: 'acquired', lock: 'mine' } as const;
+const r = <const R extends string, const L extends LockAfter, const T extends TicketEnd, const M extends Message | undefined = undefined>(
+  result: R,
+  lock: L,
+  ticket: T,
+  message?: M,
+) => (message === undefined ? { result, lock, ticket } : { result, lock, ticket, message }) as { result: R; lock: L; ticket: T; message?: M };
 
-/** A record of another token, judged by its observation (other-plain and other-lstart alike). */
-const OTHER = {
-  'acquire-head': { alive: refused('rec'), gone: ACQUIRED, unknown: refused('unk') },
-  'acquire-behind': same(refused('rec')),
-  'release-main': same(KEPT),
-  'release-subshell': same(KEPT),
+const ACQUIRED = r('acquired', 'mine', 'retired');
+const refused = <const M extends Message>(message: M, lock: LockAfter = 'unchanged') => r('refused', lock, 'retired', message);
+const QUEUE = same(refused('queue'));
+const KEPT_REL = r('kept', 'unchanged', 'none-taken');
+const NONE = r('none', 'unchanged', 'none-taken');
+const G_KEPT = r('kept', 'unchanged', 'retired');
+const gKept = <const M extends Message>(message: M) => r('kept', 'unchanged', 'retired', message);
+const G_REMOVED = r('removed', 'absent', 'retired');
+const NOT_HEAD = r('not-head', 'unchanged', 'retired');
+
+/** The callers that read nothing of a record that is not theirs. */
+const NOT_OURS = {
+  'release-main': same(KEPT_REL),
+  'release-subshell': same(SUBSHELL),
   'release-unheld': same(NONE),
-  'release-as-head': same(KEPT),
-  'release-as-head-behind': same(NOT_HEAD),
-  'guard-head': { alive: KEPT, gone: { result: 'removed', lock: 'absent' }, unknown: KEPT },
   'guard-behind': same(NOT_HEAD),
+  'd5-head': same(NO_D5),
+  'd5-behind': same(NO_D5),
+} as const;
+
+/** A record of another token judged by the pid axis (other-plain, other-lstart). */
+const OTHER = {
+  ...NOT_OURS,
+  'acquire-head': { alive: refused('rec'), gone: ACQUIRED, unknown: refused('unk') },
+  'acquire-behind': QUEUE,
+  'guard-head': { alive: G_KEPT, gone: G_REMOVED, unknown: gKept('unk') },
+} as const;
+
+/** A form only a person clears until PR1a-f (decision 1): never taken, never removed, told apart. */
+const personOnly = <const M extends Message>(message: M) =>
+  ({
+    ...NOT_OURS,
+    'acquire-head': same(refused(message)),
+    'acquire-behind': QUEUE,
+    'guard-head': same(gKept(message)),
+  }) as const;
+
+const ABSENT = {
+  ...NOT_OURS,
+  'acquire-head': { alive: refused('taking'), gone: ACQUIRED, unknown: refused('unk') },
+  'acquire-behind': QUEUE,
+  'guard-head': { alive: G_KEPT, gone: r('absent', 'unchanged', 'retired'), unknown: gKept('unk') },
 } as const;
 
 const TABLE = {
-  absent: {
-    'acquire-head': { alive: refused('taking'), gone: ACQUIRED, unknown: refused('unk') },
-    'acquire-behind': same(refused('queue')),
-    'release-main': same(KEPT),
-    'release-subshell': same(KEPT),
-    'release-unheld': same(NONE),
-    'release-as-head': same(MISSING),
-    'release-as-head-behind': same(NOT_HEAD),
-    'guard-head': { alive: KEPT, gone: { result: 'absent', lock: 'unchanged' }, unknown: KEPT },
-    'guard-behind': same(NOT_HEAD),
-  },
+  absent: ABSENT,
+  'stale-old': ABSENT,
   ownerless: {
+    ...NOT_OURS,
     'acquire-head': { alive: refused('taking'), gone: ACQUIRED, unknown: refused('unk') },
-    'acquire-behind': same(refused('queue')),
-    'release-main': same(KEPT),
-    'release-subshell': same(KEPT),
-    'release-unheld': same(NONE),
-    'release-as-head': same(MISSING),
-    'release-as-head-behind': same(NOT_HEAD),
-    'guard-head': { alive: KEPT, gone: { result: 'removed', lock: 'absent' }, unknown: KEPT },
-    'guard-behind': same(NOT_HEAD),
+    'acquire-behind': QUEUE,
+    'guard-head': { alive: G_KEPT, gone: G_REMOVED, unknown: gKept('unk') },
   },
-  corrupt: {
-    'acquire-head': same(refused('rec')),
-    'acquire-behind': same(refused('rec')),
-    'release-main': same(KEPT),
-    'release-subshell': same(KEPT),
-    'release-unheld': same(NONE),
-    'release-as-head': same(KEPT),
-    'release-as-head-behind': same(NOT_HEAD),
-    'guard-head': same(KEPT),
-    'guard-behind': same(NOT_HEAD),
-  },
+  'ownerless-tmp': personOnly('tmp'),
+  corrupt: personOnly('corrupt'),
   own: {
-    'acquire-head': same({ unreachable: NO_OWN_ACQUIRE }),
-    'acquire-behind': same({ unreachable: NO_OWN_ACQUIRE }),
+    'acquire-head': same(HOLDING),
+    'acquire-behind': same(HOLDING),
     'release-main': {
-      alive: { result: 'released', lock: 'absent' },
-      gone: { unreachable: NO_SELF_ESRCH },
-      unknown: { result: 'deferred', lock: 'unchanged' },
+      alive: r('released', 'absent', 'none-taken'),
+      gone: NO_SELF_ESRCH,
+      unknown: r('deferred', 'unchanged', 'none-taken'),
     },
-    'release-subshell': {
-      alive: { result: 'needs-head→deferred', lock: 'unchanged' },
-      gone: { result: 'needs-head→released', lock: 'absent' },
-      unknown: { result: 'deferred', lock: 'unchanged' },
-    },
+    'release-subshell': same(SUBSHELL),
     'release-unheld': same(NONE),
-    'release-as-head': {
-      alive: { result: 'deferred', lock: 'unchanged' },
-      gone: { result: 'released', lock: 'absent' },
-      unknown: { result: 'deferred', lock: 'unchanged' },
-    },
-    'release-as-head-behind': same(NOT_HEAD),
-    'guard-head': same({ unreachable: NO_OWN_GUARD }),
-    'guard-behind': same({ unreachable: NO_OWN_GUARD }),
+    'guard-head': same(NO_GUARD_TOKEN),
+    'guard-behind': same(NO_GUARD_TOKEN),
+    'd5-head': same(NO_D5),
+    'd5-behind': same(NO_D5),
   },
   'other-plain': OTHER,
   'other-lstart': OTHER,
+  'other-tz': {
+    ...OTHER,
+    'acquire-head': { alive: refused('tz'), gone: ACQUIRED, unknown: refused('unk') },
+    'guard-head': { alive: gKept('tz'), gone: G_REMOVED, unknown: gKept('unk') },
+  },
+  'other-host': personOnly('host'),
   aside: {
+    ...NOT_OURS,
     'acquire-head': { alive: refused('rec', 'restored'), gone: ACQUIRED, unknown: refused('unk', 'restored') },
-    'acquire-behind': same(refused('queue')),
-    'release-main': same(KEPT),
-    'release-subshell': same(KEPT),
-    'release-unheld': same(NONE),
-    'release-as-head': same(MISSING),
-    'release-as-head-behind': same(NOT_HEAD),
-    'guard-head': { alive: { result: 'kept', lock: 'restored' }, gone: { result: 'absent', lock: 'absent' }, unknown: { result: 'kept', lock: 'restored' } },
-    'guard-behind': same(NOT_HEAD),
+    'acquire-behind': QUEUE,
+    'guard-head': {
+      alive: r('kept', 'restored', 'retired'),
+      gone: r('absent', 'absent', 'retired'),
+      unknown: r('kept', 'restored', 'retired', 'unk'),
+    },
   },
 } as const satisfies Table;
 
@@ -228,109 +393,387 @@ interface Entry {
 const CELLS: Entry[] = FORMS.flatMap((form) =>
   CALLERS.flatMap((caller) => OBS.map((obs) => ({ form, caller, obs, cell: (TABLE as Table)[form][caller][obs] as Cell<Caller> }))),
 );
-type ReachableEntry = Entry & { cell: Row<Caller> };
-const isRow = (cell: Cell<Caller>): cell is Row<Caller> => !('unreachable' in cell);
-const ROWS: ReachableEntry[] = CELLS.filter((e): e is ReachableEntry => isRow(e.cell));
-const UNREACHABLE = CELLS.filter((e) => !isRow(e.cell));
+type RowEntry = Entry & { cell: Row<Caller> };
+const isRejected = (cell: Cell<Caller>): cell is Rejected => 'rejected' in cell;
+const isImpossible = (cell: Cell<Caller>): cell is Impossible => 'impossible' in cell;
+const isRow = (cell: Cell<Caller>): cell is Row<Caller> => !isRejected(cell) && !isImpossible(cell);
+const ROWS: RowEntry[] = CELLS.filter((e): e is RowEntry => isRow(e.cell));
+const REJECTED = CELLS.filter((e) => isRejected(e.cell));
+const IMPOSSIBLE = CELLS.filter((e) => isImpossible(e.cell));
 
-// ------------------------------------------------------------------ failure directions (§3)
+// ------------------------------------------------------------------ failure outcomes (§3), typed per caller
 
-const FAILURES = [
-  'F1-kill0-eperm',
-  'F2-kill0-other',
-  'F3-ps-lstart-judge',
-  'F4-ps-lstart-at-write',
-  'F5-mkdir-lock',
-  'F6-owner-create-exists',
-  'F7-owner-create-open',
-  'F8-owner-write-or-readback',
-  'F9-owner-unlink',
-  'F10-lock-rmdir',
-  'F11-mv-aside-enoent',
-  'F12-mv-aside-other',
-  'F13-restore-mkdir',
-  'F14-restore-rename',
-  'F15-rm-gone',
-  'F16-rm-release-held',
-  'F17-rm-release-as-head',
-  'F18-ticket-ln',
-  'F19-queue-list',
-  'F20-ps-etime',
-  'F21-loader',
-  'F22-hostname',
-] as const;
-type Failure = (typeof FAILURES)[number];
-
-/** keep: nothing removed or taken; own-only: only what this caller itself created is undone. */
+/** keep: the failure removes nothing not shown gone; own-only: only what this acquisition itself made is undone. */
 type Direction = 'keep' | 'own-only';
-interface FailureRow {
-  readonly direction: Direction;
-  readonly end: string;
+/** The outcome is the §2 cell of the form the caller meets (the failure does not change it). */
+interface AsForm {
+  readonly asForm: true;
 }
+type Outcome<C extends Caller> = Row<C> | AsForm;
+interface FailureRow {
+  readonly point: string;
+  readonly errno: string;
+  readonly direction: Direction;
+  readonly callers: { readonly [C in ReachableCaller]?: Outcome<C> };
+}
+const AS_FORM: AsForm = { asForm: true };
 
 const FAILURE_TABLE = {
-  'F1-kill0-eperm': { direction: 'keep', end: 'read alive: not taken, not recovered; own → deferred' },
-  'F2-kill0-other': { direction: 'keep', end: 'unknown: refused(unk) / guard kept with LRO_UNKNOWN' },
-  'F3-ps-lstart-judge': { direction: 'keep', end: 'unknown: refused(unk) / guard kept' },
-  'F4-ps-lstart-at-write': { direction: 'keep', end: 'an empty lstart= is judged by the pid alone (an older reader would take it: §4)' },
-  'F5-mkdir-lock': { direction: 'keep', end: 'refused(unk), nothing made' },
-  'F6-owner-create-exists': { direction: 'keep', end: 'not acquired, nothing removed' },
-  'F7-owner-create-open': { direction: 'own-only', end: 'rmdir of the <lock> this mkdir made (only when empty)' },
-  'F8-owner-write-or-readback': { direction: 'own-only', end: 'rm -f of the owner this create opened, then rmdir <lock>' },
-  'F9-owner-unlink': { direction: 'keep', end: '<lock> and the half owner left ("could not be taken out again")' },
-  'F10-lock-rmdir': { direction: 'keep', end: 'an empty <lock> left; the head takes it out after 60 s' },
-  'F11-mv-aside-enoent': { direction: 'keep', end: 'absent: someone removed it first' },
-  'F12-mv-aside-other': { direction: 'keep', end: 'not recovered; the same token is not broken twice; refused / kept' },
-  'F13-restore-mkdir': { direction: 'keep', end: 'restore-failed: the moved-aside record kept and read as held while alive' },
-  'F14-restore-rename': { direction: 'keep', end: 'the empty <lock> taken out, the moved-aside record kept' },
-  'F15-rm-gone': { direction: 'keep', end: "a dead record's moved-aside directory left; the next head settles it" },
-  'F16-rm-release-held': { direction: 'keep', end: "answers released; the supervisor's own record left, recovered after it exits" },
-  'F17-rm-release-as-head': { direction: 'keep', end: 'answers released; the dead record left, recovered by the next head' },
-  'F18-ticket-ln': { direction: 'keep', end: 'refused (cannot publish a ticket) / not-head' },
-  'F19-queue-list': { direction: 'keep', end: 'refused without a mkdir / not-head after the budget' },
-  'F20-ps-etime': { direction: 'keep', end: 'a ticket ahead is not read as reused: waited for' },
-  'F21-loader': { direction: 'keep', end: 'acquire refused (exit 75); the guard skips only the lock recovery' },
-  'F22-hostname': { direction: 'keep', end: 'a record of another host= is alive: never recovered' },
-} as const satisfies Record<Failure, FailureRow>;
+  'F1-kill0-eperm': {
+    point: 'pid (lock_obs_kill0)',
+    errno: 'EPERM — the recorded pid reused by another user\'s process, or a holder of another user',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('eperm'), 'guard-head': gKept('eperm') },
+  },
+  'F2-kill0-other': {
+    point: 'pid (lock_obs_kill0)',
+    errno: 'EIO and the like (not ESRCH, not EPERM)',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk'), 'release-main': r('deferred', 'unchanged', 'none-taken') },
+  },
+  'F3-kill0-self-flips': {
+    point: 'pid of $$ (lock_release_held: the self check unknown, the next read alive)',
+    errno: 'EIO once',
+    direction: 'keep',
+    callers: { 'release-main': r('needs-head', 'unchanged', 'none-taken') },
+  },
+  'F4-zombie-holder': {
+    point: 'pid (kill -0 of a zombie answers alive)',
+    errno: '— (the holder KILLed, not yet reaped)',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
+  },
+  'F5-holder-killed': {
+    point: 'the supervisor KILLed by stop_and_wait (lib.sh): EXIT never runs',
+    errno: '— (SIGKILL)',
+    direction: 'keep',
+    callers: { 'guard-head': G_REMOVED, 'acquire-head': ACQUIRED },
+  },
+  'F6-ps-lstart-judge': {
+    point: 'lstart (machine_lock_lstart_state)',
+    errno: 'ps fails or prints nothing',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
+  },
+  'F7-ps-lstart-at-write': {
+    point: 'proc_lstart $$ when the owner is written',
+    errno: 'ps fails: lstart= written empty',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
+  },
+  'F8-tz-differs': {
+    point: "lib.sh's codec: tz= of the record against the reader's ${TZ-}",
+    errno: '— (writer and reader under different TZ values)',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('tz'), 'guard-head': gKept('tz') },
+  },
+  'F9-tz-missing': {
+    point: "lib.sh's codec: a record with no tz= line (the old version's)",
+    errno: '— (judged by the pid alone)',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
+  },
+  'F10-hostname-changed': {
+    point: 'LOCK_HOST (hostname) against the record\'s host=',
+    errno: '— (the host name changed since the record was written)',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('host'), 'guard-head': gKept('host') },
+  },
+  'F11-mkdir-lock': {
+    point: 'mkdir-lock',
+    errno: 'other than EEXIST',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk') },
+  },
+  'F12-owner-create-exists': {
+    point: 'owner-create (O_EXCL)',
+    errno: 'EEXIST, or another record read back',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('rec') },
+  },
+  'F13-owner-create-open': {
+    point: 'owner-create',
+    errno: 'cannot open (ENOSPC, EACCES …)',
+    direction: 'own-only',
+    callers: { 'acquire-head': refused('unk') },
+  },
+  'F14-owner-write-or-readback': {
+    point: 'owner-create (write) / owner-readback',
+    errno: 'the write fails after the open, or the read back is unknown',
+    direction: 'own-only',
+    callers: { 'acquire-head': refused('unk') },
+  },
+  'F15-owner-unlink': {
+    point: 'rm -f <lock>/owner after F13/F14 (fault:owner-unlink)',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk', 'own-half-left') },
+  },
+  'F16-lock-rmdir': {
+    point: 'rmdir <lock> after F13/F14 (fault:lock-rmdir)',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk', 'own-empty-left') },
+  },
+  'F17-killed-mid-owner': {
+    point: 'the acquirer dies between `: >owner` and `cat >>owner` (lock_obs_create)',
+    errno: '— (SIGKILL, power loss): an empty or half owner is left — a corrupt form',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('corrupt'), 'guard-head': gKept('corrupt') },
+  },
+  'F18-old-tmp-left': {
+    point: 'the old version died between its mkdir and mv: <lock>/owner.tmp.<pid> only',
+    errno: '— (ownerless-tmp form)',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('tmp'), 'guard-head': gKept('tmp') },
+  },
+  'F19-owner-read': {
+    point: 'lock-owner / release-owner / recover-owner / gone-owner / reclaim-owner (lock_obs_owner)',
+    errno: 'EACCES, EIO',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk'), 'release-main': r('deferred', 'unchanged', 'none-taken') },
+  },
+  'F20-gone-listing': {
+    point: 'list-root / gone-lstat (lock_gone_candidates)',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk'), 'guard-head': AS_FORM },
+  },
+  'F21-ownerless-rmdir': {
+    point: 'ownerless-rmdir (lock_expire_ownerless)',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
+  },
+  'F22-rename-aside-enoent': {
+    point: 'rename-aside (lock_recover)',
+    errno: 'ENOENT — someone removed it first',
+    direction: 'keep',
+    callers: { 'acquire-head': ACQUIRED, 'guard-head': r('absent', 'absent', 'retired') },
+  },
+  'F23-rename-aside-other': {
+    point: 'rename-aside (lock_recover)',
+    errno: 'other — lock_recover does not note it unknown, so the message is rec',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
+  },
+  'F24-recover-restore-mkdir': {
+    point: 'restore-mkdir in lock_recover (the token differed; put back)',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('aside', 'aside'), 'guard-head': r('restore-failed', 'aside', 'retired') },
+  },
+  'F25-settle-restore-mkdir': {
+    point: 'restore-mkdir in lock_restore_from_gone (settling a moved-aside record)',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('aside', 'aside'), 'guard-head': r('kept', 'aside', 'retired') },
+  },
+  'F26-restore-rename': {
+    point: 'restore-rename (mv <gone>/owner <lock>/owner)',
+    errno: 'any — the empty <lock> is taken out again, the moved-aside record kept',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('aside', 'aside'), 'guard-head': r('kept', 'aside', 'retired') },
+  },
+  'F27-rm-gone': {
+    point: 'rm -rf <gone> after a recovery (|| true)',
+    errno: 'any — a dead record moved aside is left; the next head settles it',
+    direction: 'keep',
+    callers: { 'acquire-head': ACQUIRED, 'guard-head': G_REMOVED },
+  },
+  'F28-rm-release-held': {
+    point: 'rm -rf <lock> in lock_release_held (|| true)',
+    errno: 'any — answers released, the own record left (recovered after the shell exits)',
+    direction: 'keep',
+    callers: { 'release-main': r('released', 'unchanged', 'none-taken') },
+  },
+  'F29-ticket-ln': {
+    point: 'lock_take_ticket (ln)',
+    errno: 'other than EEXIST',
+    direction: 'keep',
+    callers: { 'acquire-head': r('refused', 'unchanged', 'none-taken', 'unk'), 'guard-head': r('not-head', 'unchanged', 'none-taken') },
+  },
+  'F30-queue-list': {
+    point: 'list-queue',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk'), 'guard-head': r('not-head', 'unchanged', 'retired', 'unk') },
+  },
+  'F31-mark-done': {
+    point: 'lock_mark_done of the own ticket',
+    errno: 'any — the ticket stays until its pid dies or its deadline + 60 s',
+    direction: 'keep',
+    callers: { 'acquire-head': r('acquired', 'mine', 'left-until-retirable'), 'guard-head': AS_FORM },
+  },
+  'F32-ps-etime': {
+    point: 'lock_pid_start_ms (ps -o etime=) of a ticket ahead',
+    errno: 'any — the ticket is not read as reused: waited for',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('queue'), 'guard-head': NOT_HEAD },
+  },
+  'F33-loader': {
+    point: 'machine_lock_load (lib.sh keeps the return in PRODUCT_MACHINE_LOCK_OK)',
+    errno: 'verify-run.sh missing, markers not 1 / 1, set -e',
+    direction: 'keep',
+    callers: {
+      'acquire-head': refused('loader'),
+      'acquire-behind': refused('loader'),
+      'guard-head': r('unloaded', 'unchanged', 'none-taken', 'loader'),
+      'release-main': NONE,
+    },
+  },
+  'F34-reclaim-rename-or-rmdir': {
+    point: 'reclaim-rename / reclaim-rmdir (an empty <lock> while a put-back is unknown)',
+    errno: 'any',
+    direction: 'keep',
+    callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
+  },
+} as const satisfies Record<string, FailureRow>;
+type Failure = keyof typeof FAILURE_TABLE;
+const FAILURES = Object.keys(FAILURE_TABLE) as Failure[];
+const FAILURE_OUTCOMES = FAILURES.flatMap((f) =>
+  Object.entries(FAILURE_TABLE[f].callers as Record<string, Outcome<Caller>>).map(([caller, outcome]) => ({
+    failure: f,
+    caller: caller as ReachableCaller,
+    outcome,
+  })),
+);
 
-// ------------------------------------------------------------------ the table checks itself
+// ------------------------------------------------------------------ counts written in the design
+
+const COUNTS = {
+  cells: 297,
+  rows: 185,
+  rejected: 39,
+  impossible: 73,
+  failures: 34,
+  rejections: 9,
+  loaderRows: 5,
+} as const;
+
+// ------------------------------------------------------------------ the result sets of the code
+
+/** Every `<VAR>=<value>` assignment of a result variable in the given sources (empty resets dropped). */
+function codeResultSet(variable: string, sources: readonly string[]): string[] {
+  const re = new RegExp(`\\b${variable}=([a-z][a-z-]*)`, 'g');
+  const found = new Set<string>();
+  for (const src of sources) for (const m of fs.readFileSync(src, 'utf8').matchAll(re)) found.add(m[1]);
+  return [...found].sort();
+}
+const sorted = (xs: readonly string[]) => [...xs].sort();
+
+// ------------------------------------------------------------------ the tables check themselves
 
 describe('Issue #4288 PR1c table (design §2): shape', () => {
-  it('has every combination: 7 forms × 9 callers × 3 observations = 189 cells, 13 unreachable, 176 rows', () => {
-    expect(FORMS).toHaveLength(7);
+  it('has every combination: 11 forms × 9 callers × 3 observations = 297 cells (185 rows, 39 rejected, 73 impossible)', () => {
+    expect(FORMS).toHaveLength(11);
     expect(CALLERS).toHaveLength(9);
-    expect(CELLS).toHaveLength(189);
-    expect(UNREACHABLE).toHaveLength(13);
-    expect(ROWS).toHaveLength(176);
+    expect(CELLS).toHaveLength(COUNTS.cells);
+    expect(ROWS).toHaveLength(COUNTS.rows);
+    expect(REJECTED).toHaveLength(COUNTS.rejected);
+    expect(IMPOSSIBLE).toHaveLength(COUNTS.impossible);
+    expect(FAILURES).toHaveLength(COUNTS.failures);
+    expect(Object.keys(REJECTIONS)).toHaveLength(COUNTS.rejections);
+    expect(Object.keys(LOADER_ROWS)).toHaveLength(COUNTS.loaderRows);
   });
 
-  it('the unreachable cells are only own × acquire / guard and own × release-main × gone', () => {
-    expect(UNREACHABLE.every((e) => e.form === 'own')).toBe(true);
-    expect(
-      UNREACHABLE.filter((e) => e.caller === 'release-main').map((e) => e.obs),
-    ).toEqual(['gone']);
-    expect(new Set(UNREACHABLE.map((e) => e.caller))).toEqual(
+  it('the counts written in the design are the counts of these tables (two objects made apart)', () => {
+    const text = fs.readFileSync(DESIGN_MD, 'utf8');
+    const m = text.match(
+      /表の数: セル (\d+)・行 (\d+)・拒否 (\d+)・不可能 (\d+)・失敗 (\d+)・拒否の検査 (\d+)・読み込み (\d+)/,
+    );
+    expect(m, 'the counts line of the design').not.toBeNull();
+    const [, cells, rows, rejected, impossible, failures, rejections, loaderRows] = (m as RegExpMatchArray).map(Number);
+    expect({ cells, rows, rejected, impossible, failures, rejections, loaderRows }).toEqual({ ...COUNTS });
+  });
+
+  it('the cells no product path reaches are exactly: the subshell release (rejected), D5 (impossible), own × acquire (rejected), own × guard and own × release-main × gone (impossible)', () => {
+    for (const e of CELLS.filter((c) => c.caller === 'release-subshell')) expect(e.cell).toEqual(SUBSHELL);
+    for (const e of CELLS.filter((c) => c.caller.startsWith('d5-'))) expect(e.cell).toEqual(NO_D5);
+    const others = [...REJECTED, ...IMPOSSIBLE].filter((e) => e.caller !== 'release-subshell' && !e.caller.startsWith('d5-'));
+    expect(others.every((e) => e.form === 'own')).toBe(true);
+    expect(new Set(others.map((e) => e.caller))).toEqual(
       new Set(['acquire-head', 'acquire-behind', 'guard-head', 'guard-behind', 'release-main']),
     );
+    expect(others.filter((e) => e.caller === 'release-main').map((e) => e.obs)).toEqual(['gone']);
   });
 
-  it('every observation of every form is defined, and the failure table has 22 rows', () => {
+  it('every rejected cell names a rejection of the function of its caller', () => {
+    for (const e of REJECTED) {
+      const fn = REJECTIONS[(e.cell as Rejected).rejected].fn;
+      expect([FN_OF[e.caller], 'any']).toContain(fn);
+    }
+  });
+
+  it('the group axis: only `none` is reachable for supervisor.lock (S7)', () => {
+    expect(Object.entries(GROUP_AXIS).filter(([, v]) => 'reach' in v).map(([k]) => k)).toEqual(['none']);
+  });
+
+  it('every observation of every form is defined', () => {
     for (const form of FORMS) for (const obs of OBS) expect(OBS_MEANING[form][obs].length).toBeGreaterThan(0);
-    expect(Object.keys(FAILURE_TABLE)).toEqual([...FAILURES]);
-    expect(FAILURES).toHaveLength(22);
   });
 
-  it.each(ROWS)('row $caller × $form × $obs: a result the caller can answer, a known lock end', ({ caller, cell }) => {
+  it.each(ROWS)('row $caller × $form × $obs: a result the caller can answer, known ends', ({ caller, cell }) => {
     expect((RESULTS[caller] as readonly string[]).includes(cell.result)).toBe(true);
     expect((LOCK_AFTER as readonly string[]).includes(cell.lock)).toBe(true);
-    // A refused acquisition names its message; nothing else does.
-    expect(cell.message !== undefined).toBe(cell.result === 'refused');
+    expect((TICKET_END as readonly string[]).includes(cell.ticket)).toBe(true);
     if (cell.message !== undefined) expect((MESSAGES as readonly string[]).includes(cell.message)).toBe(true);
   });
 });
 
+describe('Issue #4288 PR1c table: RESULTS come from the code (machine-lock.sh, verify-run.sh)', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it('LRH_RESULT / LRAH_RESULT / LRO_RESULT read out of the scripts equal CODE_RESULTS written here', () => {
+    const sources = [MACHINE_LOCK_SH, VERIFY_RUN_SH];
+    expect(codeResultSet('LRH_RESULT', sources)).toEqual(sorted(CODE_RESULTS.LRH));
+    expect(codeResultSet('LRAH_RESULT', sources)).toEqual(sorted(CODE_RESULTS.LRAH));
+    expect(codeResultSet('LRO_RESULT', sources)).toEqual(sorted(CODE_RESULTS.LRO));
+  });
+
+  it('positive control: a result value added to a copy of the code is caught (the copies under os.tmpdir())', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr1c-results-'));
+    tmpDirs.push(dir);
+    const copy = path.join(dir, 'verify-run.sh');
+    fs.writeFileSync(copy, `${fs.readFileSync(VERIFY_RUN_SH, 'utf8')}\nLRO_RESULT=handed-over\n`);
+    expect(codeResultSet('LRO_RESULT', [MACHINE_LOCK_SH, copy])).not.toEqual(sorted(CODE_RESULTS.LRO));
+  });
+
+  it('negative control: an unchanged copy reads the same sets', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr1c-results-'));
+    tmpDirs.push(dir);
+    const copy = path.join(dir, 'verify-run.sh');
+    fs.copyFileSync(VERIFY_RUN_SH, copy);
+    expect(codeResultSet('LRO_RESULT', [MACHINE_LOCK_SH, copy])).toEqual(sorted(CODE_RESULTS.LRO));
+    expect(codeResultSet('LRAH_RESULT', [MACHINE_LOCK_SH, copy])).toEqual(sorted(CODE_RESULTS.LRAH));
+  });
+
+  it('every result a product function can answer is answered by some row: §2, a failure (§3), a rejection or the loader', () => {
+    const answered = new Map<LibFn | 'any', Set<string>>();
+    const add = (fn: LibFn | 'any', result: string) => {
+      if (!answered.has(fn)) answered.set(fn, new Set());
+      answered.get(fn)!.add(result);
+    };
+    for (const e of ROWS) add(FN_OF[e.caller], e.cell.result);
+    for (const o of FAILURE_OUTCOMES) if (!('asForm' in o.outcome)) add(FN_OF[o.caller], o.outcome.result);
+    for (const k of Object.keys(REJECTIONS) as RejectionKey[]) add(REJECTIONS[k].fn, 'rejected');
+    const anyRejected = answered.get('any')?.has('rejected') ?? false;
+    const reachable = CALLERS.filter((c) => !['release-subshell', 'd5-head', 'd5-behind'].includes(c));
+    for (const caller of reachable) {
+      const fn = FN_OF[caller];
+      for (const result of RESULTS[caller]) {
+        const ok = answered.get(fn)?.has(result) || (result === 'rejected' && anyRejected);
+        expect(ok, `${fn} answers ${result}`).toBe(true);
+      }
+    }
+  });
+});
+
 describe('Issue #4288 PR1c table: the table keeps the invariants (a) (design §1, §2.3)', () => {
-  const removes = (e: ReachableEntry) => e.cell.lock === 'absent' || e.cell.lock === 'mine';
+  const removes = (e: RowEntry) => e.cell.lock === 'absent' || e.cell.lock === 'mine';
 
   it('1 (S2): acquired only by acquire-head, and then the lock is mine; mine only when acquired', () => {
     for (const e of ROWS) {
@@ -339,32 +782,35 @@ describe('Issue #4288 PR1c table: the table keeps the invariants (a) (design §1
     }
   });
 
-  it('2 (S1, S3): a caller that is not the head moves nothing', () => {
+  it('2 (S1, S3): a caller that is not the head moves nothing, and an acquisition behind a ticket withdraws it (S12)', () => {
     for (const e of ROWS.filter((r) => r.caller.endsWith('-behind'))) expect(e.cell.lock).toBe('unchanged');
+    for (const e of ROWS.filter((r) => r.caller === 'acquire-behind')) expect(e.cell).toEqual(refused('queue'));
   });
 
   it('3 (S3): an unknown observation never takes, removes or releases', () => {
     for (const e of ROWS.filter((r) => r.obs === 'unknown')) {
       expect(['unchanged', 'restored'], `${e.caller} × ${e.form}`).toContain(e.cell.lock);
-      expect(['acquired', 'released', 'removed', 'needs-head→released']).not.toContain(e.cell.result);
+      expect(['acquired', 'released', 'removed']).not.toContain(e.cell.result);
     }
   });
 
-  it("4 (S3): another token's record is removed only by a head on gone; a corrupt one by nobody", () => {
-    for (const e of ROWS.filter((r) => r.form !== 'own' && removes(r) && r.form !== 'absent')) {
+  it("4 (S3): another token's record is removed only by a head on gone; corrupt / ownerless-tmp / other-host by nobody", () => {
+    for (const e of ROWS.filter((r) => r.form !== 'own' && removes(r) && r.form !== 'absent' && r.form !== 'stale-old')) {
       expect(['acquire-head', 'guard-head'], `${e.caller} × ${e.form} × ${e.obs}`).toContain(e.caller);
       expect(e.obs).toBe('gone');
     }
-    expect(ROWS.filter((r) => r.form === 'corrupt' && r.cell.lock !== 'unchanged')).toEqual([]);
+    for (const form of ['corrupt', 'ownerless-tmp', 'other-host'] as const) {
+      expect(ROWS.filter((r) => r.form === form && r.cell.lock !== 'unchanged')).toEqual([]);
+    }
   });
 
-  it('5 (S4, S5): the own record is removed only by the main shell, or through D5 on gone', () => {
+  it('5 (S4): the own record is removed only by the main shell on alive', () => {
     const removing = ROWS.filter((r) => r.form === 'own' && r.cell.lock === 'absent').map((r) => `${r.caller}/${r.obs}`);
-    expect(removing.sort()).toEqual(['release-as-head/gone', 'release-main/alive', 'release-subshell/gone']);
+    expect(removing).toEqual(['release-main/alive']);
   });
 
-  it('6 (S6): a subshell never removes directly — only through needs-head → D5', () => {
-    for (const e of ROWS.filter((r) => r.caller === 'release-subshell')) expect(e.cell.result).not.toBe('released');
+  it('6 (S5, S6): no row reaches D5 or a release from a subshell', () => {
+    expect(ROWS.filter((r) => r.caller === 'release-subshell' || r.caller.startsWith('d5-'))).toEqual([]);
   });
 
   it('7 (S4): a release with no hold mark does nothing (once only)', () => {
@@ -375,21 +821,88 @@ describe('Issue #4288 PR1c table: the table keeps the invariants (a) (design §1
     for (const e of ROWS.filter((r) => r.caller.startsWith('release') && r.form !== 'own')) expect(e.cell.lock).toBe('unchanged');
   });
 
-  it('9 (§3): only what the caller itself created is undone on a failure', () => {
+  it('9 (§3): only what the caller itself made is undone on a failure', () => {
     const ownOnly = FAILURES.filter((f) => FAILURE_TABLE[f].direction === 'own-only');
-    expect(ownOnly).toEqual(['F7-owner-create-open', 'F8-owner-write-or-readback']);
+    expect(ownOnly).toEqual(['F13-owner-create-open', 'F14-owner-write-or-readback']);
+  });
+
+  it('10 (S11, decision 1): a refused acquisition names its message; only refusals and the guard carry one', () => {
+    for (const e of ROWS) {
+      if (e.cell.result === 'refused') expect(e.cell.message, `${e.caller} × ${e.form} × ${e.obs}`).toBeDefined();
+      if (e.cell.message !== undefined) expect(['refused', 'kept']).toContain(e.cell.result);
+      if (e.cell.message !== undefined && e.cell.result === 'kept') expect(e.caller).toBe('guard-head');
+    }
+  });
+
+  it('11 (decision 1): a form only a person clears is told apart to the acquirer and the guard in every observation', () => {
+    const want = { corrupt: 'corrupt', 'ownerless-tmp': 'tmp', 'other-host': 'host' } as const;
+    for (const [form, message] of Object.entries(want)) {
+      for (const caller of ['acquire-head', 'guard-head'] as const) {
+        for (const obs of OBS) expect((TABLE as Table)[form as Form][caller][obs]).toMatchObject({ message });
+      }
+    }
+    for (const f of FAILURES) {
+      for (const o of Object.values(FAILURE_TABLE[f].callers as Record<string, Outcome<Caller>>)) {
+        if ('asForm' in o || o.message === undefined) continue;
+        if ((PERSON_MESSAGES as readonly string[]).includes(o.message)) expect(o.lock, f).not.toBe('absent');
+      }
+    }
+  });
+
+  it('12 (P3-7): restored only on the aside form; the guard never makes the lock its own (S8)', () => {
+    for (const e of ROWS.filter((r) => r.cell.lock === 'restored')) expect(e.form).toBe('aside');
+    for (const e of ROWS.filter((r) => r.caller.startsWith('guard'))) expect(e.cell.lock).not.toBe('mine');
+  });
+
+  it('13 (S8, S12): every §2 row retires the ticket it took, or took none; none is left', () => {
+    for (const e of ROWS) {
+      const takes = e.caller.startsWith('acquire') || e.caller.startsWith('guard');
+      expect(e.cell.ticket, `${e.caller} × ${e.form} × ${e.obs}`).toBe(takes ? 'retired' : 'none-taken');
+    }
+  });
+
+  it('14 (§4): the old version\'s .stale.* changes nothing: stale-old reads as absent', () => {
+    expect(TABLE['stale-old']).toEqual(TABLE.absent);
+  });
+
+  it('15 (§3): no failure removes a record of another holder not shown gone', () => {
+    const removing = FAILURE_OUTCOMES.filter(
+      (o) => !('asForm' in o.outcome) && (o.outcome.lock === 'absent' || o.outcome.lock === 'mine'),
+    ).map((o) => o.failure);
+    // F5: the holder is dead (KILL); F22: already removed by someone; F27: recovered, only its aside left.
+    expect([...new Set(removing)].sort()).toEqual(['F22-rename-aside-enoent', 'F27-rm-gone', 'F31-mark-done', 'F5-holder-killed'].sort());
   });
 });
 
 // ------------------------------------------------------------------ behaviour (the implementation contract)
 
 describe.each(CALLERS)('Issue #4288 PR1c behaviour: %s (to implement: lib.sh / deadline-guard.sh)', (caller) => {
-  for (const e of ROWS.filter((r) => r.caller === caller)) {
+  const rows = ROWS.filter((r) => r.caller === caller);
+  for (const e of rows) {
     const msg = e.cell.message ? ` (${e.cell.message})` : '';
-    it.todo(`${e.form} × ${e.obs} → ${e.cell.result}${msg} / ${e.cell.lock}`);
+    it.todo(`${e.form} × ${e.obs} → ${e.cell.result}${msg} / ${e.cell.lock} / ticket ${e.cell.ticket}`);
+  }
+  if (rows.length === 0) {
+    // release-subshell: one rejection row (§5); d5-*: no product path calls D5 (S5).
+    it.todo(caller === 'release-subshell' ? 'rejected (release-in-subshell): nothing removed, exit 2' : 'not reached by any product_lock_* (S5)');
   }
 });
 
-describe('Issue #4288 PR1c failure directions (design §3, to implement)', () => {
-  for (const f of FAILURES) it.todo(`${f}: ${FAILURE_TABLE[f].direction} — ${FAILURE_TABLE[f].end}`);
+describe('Issue #4288 PR1c rejections (design §5, to implement)', () => {
+  for (const k of Object.keys(REJECTIONS) as RejectionKey[]) {
+    it.todo(`${k}: ${REJECTIONS[k].fn} with ${REJECTIONS[k].check} → rejected (exit 2), nothing touched`);
+  }
+});
+
+describe('Issue #4288 PR1c loader rows: the PR1b ↔ PR1c contract (design §5.2, to implement)', () => {
+  for (const [k, v] of Object.entries(LOADER_ROWS)) {
+    it.todo(`${k}: ${v.setup} → loads ${v.loads}, acquire ${v.acquire}, guard ${v.guard}`);
+  }
+});
+
+describe('Issue #4288 PR1c failure outcomes (design §3, to implement)', () => {
+  for (const o of FAILURE_OUTCOMES) {
+    const out = 'asForm' in o.outcome ? 'as the §2 cell' : `${o.outcome.result}${o.outcome.message ? ` (${o.outcome.message})` : ''} / ${o.outcome.lock} / ticket ${o.outcome.ticket}`;
+    it.todo(`${o.failure} × ${o.caller}: ${FAILURE_TABLE[o.failure].direction} → ${out}`);
+  }
 });
