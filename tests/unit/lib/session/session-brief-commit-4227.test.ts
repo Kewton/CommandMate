@@ -59,6 +59,8 @@ const failing = vi.hoisted(() => ({
   writers: {} as Record<string, 'throws' | 'changes0' | undefined>,
   /** `settleBoundaryClaim(…, 'not_sent', …)` — the putting back — throws. */
   putBack: false,
+  /** pr3g (N3): the putting back changes no row (answers false, writes nothing). */
+  putBackChanges0: false,
 }));
 vi.mock('@/lib/db/session-brief-db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/db/session-brief-db')>();
@@ -78,6 +80,7 @@ vi.mock('@/lib/db/session-brief-db', async (importOriginal) => {
     settleDeclinedClaim: armed('settleDeclinedClaim', actual.settleDeclinedClaim, false),
     settleBoundaryClaim: (...args: Parameters<typeof actual.settleBoundaryClaim>) => {
       if (failing.putBack && args[3] === 'not_sent') throw new Error('SQLITE_IOERR: putting back (injected)');
+      if (failing.putBackChanges0 && args[3] === 'not_sent') return false;
       return actual.settleBoundaryClaim(...args);
     },
   };
@@ -100,7 +103,7 @@ import {
   type World,
 } from './session-brief-4274-harness';
 import { addAgentInstance } from '@/lib/db/agent-instances-db';
-import { getBoundaryById, getCurrentBoundary } from '@/lib/db/session-brief-db';
+import { getBoundaryById, getCurrentBoundary, readInstanceLifetime } from '@/lib/db/session-brief-db';
 import {
   STRICT_COMMIT_RULES,
   resetLiveBriefClaimsForTest,
@@ -124,10 +127,12 @@ beforeEach(() => {
   addAgentInstance(world.db, WT, { id: 'claude', cliTool: 'claude', alias: '', order: 0 });
   failing.writers = {};
   failing.putBack = false;
+  failing.putBackChanges0 = false;
 });
 afterEach(() => {
   failing.writers = {};
   failing.putBack = false;
+  failing.putBackChanges0 = false;
   setBriefWriteVerdictForTest?.(undefined);
   closeWorld(world);
 });
@@ -300,7 +305,7 @@ const nameOf = (failure: Failure): string =>
 
 function failuresOf(kind: StrictKind): Failure[] {
   const writers: readonly Writer[] = COMMIT_WRITERS[kind];
-  const claims = STRICT_COMMIT_RULES[kind].settle !== null;
+  const claims = STRICT_COMMIT_RULES[kind].claims;
   return [
     { kind: 'none' },
     ...writers.flatMap((writer): Failure[] => [
@@ -444,6 +449,72 @@ describe('H23 (pr3f) table 2: kind × the commit’s failure × {claude, command
       }
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// Table 2, added rows (pr3g, PM Claude P3-4): M06・M10・N3 — each red under its mutation
+// ---------------------------------------------------------------------------
+
+describe('H23 (pr3g) table 2 added rows: the transaction, the reservation told back, the putting back that changes no row', () => {
+  const CLAIMING: Extract<StrictKind, 'brief' | 'decline'>[] = ['brief', 'decline'];
+
+  it.each(CLAIMING.flatMap((kind) => TOOLS.map((tool) => [`${tool}: ${kind}`, kind, tool] as const)))(
+    'M06 %s × A with no incarnation × claimBoundary changes no row → the incarnation filled in the same transaction is rolled back',
+    async (_name, kind, tool) => {
+      const a = setUp(tool);
+      const options = await arrange(kind, tool);
+      // A opened before the instance had an incarnation; the one it has now was issued late (`lazy`) for this tool.
+      world.db.prepare('UPDATE session_brief_boundaries SET instance_incarnation = NULL WHERE id = ?').run(a);
+      world.db.prepare(`UPDATE mem_instance_incarnations SET issued_by = 'lazy' WHERE worktree_id = ? AND instance_id = ?`).run(WT, tool);
+      expect(rowOf(a)?.instanceIncarnation).toBeNull();
+      expect(readInstanceLifetime(world.db, WT, tool).incarnation).not.toBeNull();
+      failing.writers.claimBoundary = 'changes0';
+      const sent = await send(tool, 'x', { ...options, briefBoundary: a });
+      failing.writers = {};
+      expectAborted(sent.result, 'claim_failed');
+      expect(delivered(world, tool)).toEqual([]);
+      expect(rowOf(a)?.state).toBe('pending');
+      // The fill ran (the instance has an incarnation) and went back with the claim: one transaction.
+      expect(rowOf(a)?.instanceIncarnation).toBeNull();
+    }
+  );
+
+  it.each((['throws', 'changes0'] as const).flatMap((how) => TOOLS.map((tool) => [`${tool}: brief × claimBoundary ${how}`, how, tool] as const)))(
+    'M10 %s after the reservation → the provider is told `discarded` with what it reserved',
+    async (_name, how, tool) => {
+      const a = setUp(tool);
+      const reserve = vi.fn((request: BriefReservation) => ({ body: request.body, includedNoticeIds: [...request.includedNoticeIds] }));
+      const provider = fakeProvider({ reserve });
+      failing.writers.claimBoundary = how;
+      const sent = await send(tool, 'x', { briefDetail: 'full', briefBoundary: a });
+      failing.writers = {};
+      expectAborted(sent.result, 'claim_failed');
+      expect(delivered(world, tool)).toEqual([]);
+      expect(reserve).toHaveBeenCalledTimes(1);
+      expect(provider.settle).toHaveBeenCalledTimes(1);
+      expect(provider.settle).toHaveBeenCalledWith({ boundaryId: a, outcome: 'discarded', includedNoticeIds: ['n1'] });
+    }
+  );
+
+  it.each((['brief', 'decline', 'empty'] as const).flatMap((kind) => TOOLS.map((tool) => [`${tool}: ${kind}`, kind, tool] as const)))(
+    'N3 %s × not sent × the putting back changes no row → the claim is held (claim_held), the next strict send is 409 claimed',
+    async (_name, kind, tool) => {
+      const a = setUp(tool);
+      const options = await arrange(kind, tool);
+      failNextSend(world, tool, 'not-sent');
+      failing.putBackChanges0 = true;
+      const sent = await send(tool, 'x', { ...options, briefBoundary: a });
+      failing.putBackChanges0 = false;
+      expect(delivered(world, tool)).toEqual([]);
+      expect(rowOf(a)?.state).toBe('claimed');
+      expect(sent.report).toEqual({ state: 'not_sent', reason: 'claim_held', boundaryId: a });
+      expectReportMatchesLedger(sent.report, a, false);
+      const again = await send(tool, 'x', { ...options, briefBoundary: a });
+      expectAborted(again.result, 'claimed');
+      expect(delivered(world, tool)).toEqual([]);
+      expect(rowOf(a)?.state).toBe('claimed');
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------

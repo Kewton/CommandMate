@@ -145,19 +145,20 @@ export interface StrictCommitRule {
   /** What is typed: the brief in front of the body, or the body alone. */
   typed: 'brief_and_body' | 'body';
   /**
-   * How the claim is settled once the delivery answered (`settleInLock`): `delivery` — the outcome as
-   * it is (`sent` / `unknown` / `not_sent`); `declined` / `empty` — `sent` or `unknown` use the row up
-   * as `skipped(<this>)`. `not_sent` always puts it back to `pending`. null: nothing claimed, nothing
-   * settled (the report is the commit's: `consumed`).
+   * Whether the commit claims the shown row (false: `used_up` — nothing claimed, nothing settled, the
+   * report is the commit's: `consumed`). pr3g (PM Claude P3-3): how a claim is settled is not here —
+   * the plan's `skipAs` is its one source (`settleInLock`: null settles the delivery's outcome as it
+   * is; `declined` / `empty` use the row up as `skipped(<it>)` on `sent` / `unknown`; `not_sent`
+   * always puts it back to `pending`).
    */
-  settle: 'delivery' | 'declined' | 'empty' | null;
+  claims: boolean;
 }
 
 export const STRICT_COMMIT_RULES = {
-  brief: { writes: ['claim.reserve', 'claim.row'], typed: 'brief_and_body', settle: 'delivery' },
-  decline: { writes: ['claim.row'], typed: 'body', settle: 'declined' },
-  empty: { writes: ['claim.row'], typed: 'body', settle: 'empty' },
-  used_up: { writes: [], typed: 'body', settle: null },
+  brief: { writes: ['claim.reserve', 'claim.row'], typed: 'brief_and_body', claims: true },
+  decline: { writes: ['claim.row'], typed: 'body', claims: true },
+  empty: { writes: ['claim.row'], typed: 'body', claims: true },
+  used_up: { writes: [], typed: 'body', claims: false },
 } as const satisfies Record<StrictKind, StrictCommitRule>;
 
 const abort = (reason: string): StrictAbort => ({ type: 'abort', reason });
@@ -1107,7 +1108,7 @@ export class SendBrief {
   private commitStrict(db: Database.Database, kind: StrictKind, row: BoundaryRow): StrictCommit {
     const rule: StrictCommitRule = STRICT_COMMIT_RULES[kind];
     const content = this.input.content;
-    if (rule.settle === null) {
+    if (!rule.claims) {
       // Used up by another send: nothing written, the body alone, said `consumed`.
       this.report = { state: 'consumed', boundaryId: row.id };
       return { type: 'type', text: content };

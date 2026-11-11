@@ -833,7 +833,7 @@
       "declineNote": "Without it, the note about how the last session ended is not delivered either. Closing sends nothing and returns to the composer.",
       "askAgain": "The hand-off boundary changed ({reason}). Nothing was sent. Choose again.",
       "claimed": "Another send is delivering the hand-off.",
-      "consumed": "Another send already delivered the hand-off. Only your message was sent."
+      "consumed": "This boundary's hand-off was already used (another send delivered it, or a send before a server restart ended without a known result). Only your message was sent."
     }
   }
 }
