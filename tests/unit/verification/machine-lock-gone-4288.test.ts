@@ -28,6 +28,7 @@ import {
   VERIFY_RUN,
   deadPid,
   goneEntries,
+  groupAlive,
   isRoot,
   killStarted,
   liveGroup,
@@ -37,6 +38,7 @@ import {
   readOwnerToken,
   removeRoot,
   take,
+  until,
   writeOwner,
 } from './lock-4288-harness';
 import type { Impl } from './lock-observation-scan-4288';
@@ -87,7 +89,7 @@ async function recoverIntoFailedPutBack(
   impl: Impl,
   name: string,
   g: number,
-  opts: { syncModule?: typeof lockSync; bashScript?: string; injected?: boolean } = {},
+  opts: { syncModule?: typeof lockSync; bashScript?: string; injected?: boolean; budgetSec?: number } = {},
 ) {
   writeOwner(lockOf(root, name), { pid: deadPid(), host: HOST, token: 'T0', acquiredAt: 0 });
   const t1 = { pid: deadPid(), host: HOST, token: 'T0-g1', acquiredAt: 0, pgid: g };
@@ -137,13 +139,17 @@ async function recoverIntoFailedPutBack(
     if (r.acquired) r.release();
     return r.acquired;
   }
-  // bash: stopped right after its move (pause:recover-moved), the record rewritten, then let go.
+  // bash: stopped right after its move (pause:recover-moved), the record rewritten, then let go. #4288 PR1a-f
+  // impl-10 (A8): the root is given back once the reader has said its put-back failed (its stderr), not 400 ms
+  // after go — and the budget is the caller's (a positive control that must take the lock after the give-back
+  // has 30 s, not 2 s that a loaded machine spent before the give-back; the row that expects "not taken" keeps
+  // 2 s: a slower machine only waits longer for the same answer).
   const dir = path.join(root, '.handoff');
   fs.mkdirSync(dir);
   const driver = `
 eval "$(sed -n '/^# --- machine-wide gate lock/,/^# --- gate execution/p' "$1")"
-if lock_acquire "$2" 2; then echo acquired; lock_release "$LOCK_PATH" "$LOCK_TOKEN"; else echo not-acquired; fi`;
-  const child = spawn('bash', ['-c', driver, 'bash', opts.bashScript ?? VERIFY_RUN, name], {
+if lock_acquire "$2" "$3"; then echo acquired; lock_release "$LOCK_PATH" "$LOCK_TOKEN"; else echo not-acquired; fi`;
+  const child = spawn('bash', ['-c', driver, 'bash', opts.bashScript ?? VERIFY_RUN, name, String(opts.budgetSec ?? 2)], {
     env: {
       ...process.env,
       CM_VERIFY_LOCK_ROOT: root,
@@ -151,20 +157,26 @@ if lock_acquire "$2" 2; then echo acquired; lock_release "$LOCK_PATH" "$LOCK_TOK
       CM_VERIFY_TEST_HANDOFF: 'pause:recover-moved',
       CM_VERIFY_TEST_OBS_FAULT: opts.injected ? 'restore-mkdir=EACCES' : '',
     },
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
+  let err = '';
   child.stdout.on('data', (d) => (out += d));
-  const until = Date.now() + 10000;
+  child.stderr.on('data', (d) => (err += d));
+  let done = false;
+  const exited = new Promise<void>((resolve) => child.on('exit', () => resolve())).then(() => {
+    done = true;
+  });
+  const reachBy = Date.now() + 10000;
   while (!fs.existsSync(path.join(dir, 'recover-moved.reached'))) {
-    if (Date.now() > until) throw new Error('bash never reached recover-moved');
+    if (Date.now() > reachBy) throw new Error('LIMIT: bash never reached recover-moved within 10000 ms — the limit, not the row\'s result');
     await new Promise((r) => setTimeout(r, 10));
   }
   onMoved();
   fs.writeFileSync(path.join(dir, 'recover-moved.go'), '');
-  await new Promise((r) => setTimeout(r, 400));
+  await until(() => done || /machine-lock-restore-failed /.test(err), 30000, 'the reader\'s put-back to fail');
   giveBack();
-  await new Promise<void>((resolve) => child.on('exit', () => resolve()));
+  await exited;
   fs.rmSync(dir, { recursive: true, force: true });
   return out.trim() === 'acquired';
 }
@@ -178,7 +190,9 @@ describe.skipIf(isRoot)('§2.7: a put-back that failed is read as held while its
     for (const other of IMPLS) expect((await take(other, root, name)).acquired, `${other} after ${impl}`).toBe(false);
     expect(readOwnerToken(lockOf(root, name)) ?? readOwnerToken(path.join(root, goneEntries(root, name)[0] ?? 'none'))).toBe('T0-g1');
     process.kill(-g, 'SIGKILL');
-    await new Promise((r) => setTimeout(r, 100));
+    // #4288 PR1a-f impl-10 (A7): wait until the group is seen gone (node reaps between turns of the loop),
+    // not a fixed 100 ms — under load the zombie answered kill -0 and the take below read the group alive.
+    await until(() => !groupAlive(g), 10000, `group ${g} gone`);
     expect((await take(impl, root, name)).acquired).toBe(true);
     expect(goneEntries(root, name)).toEqual([]);
     expect(fs.existsSync(lockOf(root, name))).toBe(false);
@@ -200,7 +214,7 @@ describe.skipIf(isRoot)('§2.7: a put-back that failed is read as held while its
   it('positive control (bash): with §2.7 taken out, the same reader takes the lock once the root is writable again', async () => {
     const legacy = mutatedBash(root, (s) => s.replace('if [ -z "$la_blocker" ] && [ -z "$LOCK_UNKNOWN" ] && lock_settle_gone "$LOCK_PATH"; then', 'if [ -z "$la_blocker" ] && [ -z "$LOCK_UNKNOWN" ]; then'));
     const g = liveGroup();
-    expect(await recoverIntoFailedPutBack('bash', 'putback-legacy', g, { bashScript: legacy })).toBe(true);
+    expect(await recoverIntoFailedPutBack('bash', 'putback-legacy', g, { bashScript: legacy, budgetSec: 30 })).toBe(true);
   }, 30000);
 });
 
@@ -218,7 +232,7 @@ describe('§2.7 退避名の識別: only names of the evacuation form are read',
     expect((await take(impl, root, 'a.lock.gone-b')).acquired).toBe(false);
     // The other way round: `a` held by a live holder, `a.lock.gone-b` taken and released beside it.
     process.kill(-g, 'SIGKILL');
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => !groupAlive(g), 10000, `group ${g} gone`); // A7, as above
     writeOwner(lockOf(root, 'a'), { pid: process.pid, host: HOST, token: 'A', acquiredAt: 0 });
     expect((await take(impl, root, 'a.lock.gone-b')).acquired).toBe(true);
     expect(readOwnerToken(lockOf(root, 'a'))).toBe('A');
@@ -256,7 +270,7 @@ describe.skipIf(isRoot)('§2.7 owners that cannot be read are not free; owners t
     expect(fs.existsSync(lockOf(root, name))).toBe(false);
     expect((await take(impl, root, name)).acquired).toBe(false);
     process.kill(-g, 'SIGKILL');
-    await new Promise((r2) => setTimeout(r2, 100));
+    await until(() => !groupAlive(g), 10000, `group ${g} gone`); // A7, as above
     expect((await take(impl, root, name)).acquired).toBe(true);
     expect(goneEntries(root, name)).toEqual([]);
   }, 30000);

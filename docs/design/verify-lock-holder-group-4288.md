@@ -279,6 +279,7 @@ drain_group G:
 - **不明のとき**: 取らない・消さない・解放しない・（書き手は）ゲートを始めない。保有者の判定（`holderState`／`lock_holder_state`）は pid と pgid の両方が ESRCH のときだけ「いない」、どちらかが不明なら不明（回収しない）。
 - **止まったままにしない**: 不明で待つのは既存の待ちの予算（`timeoutSec`／`timeoutMs`）の内だけ。予算が尽きたら取得は「取れない」で終わり、何が不明だったかを出す: bash は stderr に `verify-run: machine-lock-unknown point=<点> path=<パス> errno=<errno>`、TS・同期 JS は戻り値の `unknown: { point, path, code }`（と警告 `machine-lock-unknown`）。TS・同期 JS の `mkdir <lock>` の不明（EEXIST 以外）は今のまま errno 付きで投げる（取らない）。
 - **試験の注入**: bash は `CM_VERIFY_TEST_OBS_FAULT`（と、待ちの途中で書き換えられる `CM_VERIFY_TEST_OBS_FAULT_FILE`）に `<点>=<ERRNO>`／`<点>@<対象の一部>=<ERRNO>`、TS・同期 JS は `__testHooks.fault`／`hooks.fault`（`(point, target) => errno`）。注入は観測の**生の結果**（`kill -0` の文面、例外の `code`）だけを置き換え、分類の式は本番と同じものを通る。§6 の `<dir>/eperm` は `CM_VERIFY_TEST_OBS_FAULT=group=EPERM` に置き換えた（`lock_kill0_raw` が旧判定と新判定の両方に同じ答えを渡す。5 回目の P2）。
+- **試験の口（#4288 PR1a-f impl-10、既定では何もしない）**: `<点>@@<対象の全体>=<ERRNO>`（対象と完全一致のときだけ。`@` は従来どおり部分一致）、`CM_VERIFY_TEST_KILL_GRACE_SEC`（KILL_GRACE_SEC の上書き。数字のときだけ）・`CM_VERIFY_TEST_KILL_WAIT_SEC`（`lock_drain_group` の KILL の後の待ち `LOCK_KILL_WAIT_SEC`、既定 2）・`CM_VERIFY_TEST_DRAIN_LOG`（drain の段 `empty`／`term`／`term-sent`／`kill`／`drained`／`left` を 1 行ずつ）・drain の時計 `lock_now_sec`（既定は `date +%s`。読み込みの後に試験が再定義できる）・`CM_VERIFY_TEST_HANDOFF=mark:<stage>`（待たない印。`lock_child_wait` が取り下げる直前に `child-withdrew` を書く）。どれも未設定なら判定・時間・出力は変わらない。
 
 観測点の表（`tests/unit/verification/lock-observation-points-4288.ts` と同じ。`lock-observation-points-4288.test.ts` がこの表・コードから集めた観測点・生の呼び出しの許可の一覧を突き合わせ、行ごとに失敗を注入する）:
 
