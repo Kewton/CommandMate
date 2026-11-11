@@ -1,6 +1,6 @@
 # Issue #4288 PR1b: run-lock を machine-lock に載せる（上流の段: 設計の 4 つと試験の表）
 
-- 状態: **上流の 3 回目**（設計と試験の表だけ。`src/`・`scripts/`・既存の試験は変えない）。3 回目は 2 回目（`24a437a47`）への上流のレビュー（PM Claude `pm-review-4288-pr1b-upstream2-claude.md`・Claude 5 `prereview/review-4288-pr1b-upstream2.md`）と PM の処分 `pm-return-4288-pr1b-upstream2.md` の直す 1〜6 を、設計の文と表のセルだけで反映した（表の作りは変えない。§8.2）。2 回目は 1 回目（`ee92499cd`）への上流のレビュー（Claude 5 `prereview/review-4288-pr1b-upstream.md`・PM Claude `pm-review-4288-pr1b-upstream-claude.md`）と PM の処分（`pm-return-4288-upstream.md` の共通の決定 1〜5・PR1b の個別の決定）を反映した。**不変条件 I-1〜I-11 の文は変えていない**（全員一致で正しい）。直したのは表（型つきの列挙に組み直した）と、既存の試験との契約（§4.4）。実装は、この表が上流のレビューで P2 0 になった後の「赤から緑にする」契約で行う
+- 状態: **上流の 4 回目**（設計と試験の表だけ。`src/`・`scripts/`・既存の試験は変えない）。4 回目は 3 回目（`743b83e39`）への PM Claude のレビュー `pm-review-4288-pr1b-upstream3-claude.md`（P2 1・P3 5）と PM の処分 `pm-return-4288-pr1b-upstream3.md` の直す 1・2 を、設計の文と表のセルで反映した（表 D の列挙に `token`・`abort-acked` の 2 値を足した。§8.3）。3 回目は 2 回目（`24a437a47`）への上流のレビュー（PM Claude `pm-review-4288-pr1b-upstream2-claude.md`・Claude 5 `prereview/review-4288-pr1b-upstream2.md`）と PM の処分 `pm-return-4288-pr1b-upstream2.md` の直す 1〜6 を、設計の文と表のセルだけで反映した（表の作りは変えない。§8.2）。2 回目は 1 回目（`ee92499cd`）への上流のレビュー（Claude 5 `prereview/review-4288-pr1b-upstream.md`・PM Claude `pm-review-4288-pr1b-upstream-claude.md`）と PM の処分（`pm-return-4288-upstream.md` の共通の決定 1〜5・PR1b の個別の決定）を反映した。**不変条件 I-1〜I-11 の文は変えていない**（全員一致で正しい）。直したのは表（型つきの列挙に組み直した）と、既存の試験との契約（§4.4）。実装は、この表が上流のレビューで P2 0 になった後の「赤から緑にする」契約で行う
 - 対象: run-lock（`src/lib/agent-health/run-lock.ts`・`scripts/uat/run-lock.sh`・`scripts/uat/run-server.sh`・`scripts/agent-health/daily.sh`）を、PR1a（#4309、develop `b57c2aba6`）でマージ済みの machine-lock（`scripts/lib/machine-lock.sh`・`scripts/orchestrate/machine-lock-sync.mjs`・`.claude/skills/cmate-verify/scripts/verify-run.sh` のロックの節）に載せる部分だけ。supervisor.lock は PR1c（別の上流の段）。owner の書き込みの原子性・旧版の `owner.tmp.*` だけの `<lock>`・lstart の TZ は PR1a-f（PM 共通の決定 1）
 - 土台: [lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) の §1（D1〜D12）・§1.8・§1.9・§1.11・§1.14（D12 の不変条件）・§7。本書はそれを**置き換えない**。D 番号・§1.14 の表はそのまま引く
 - 行番号は develop `b57c2aba6` のもの。名前で引くこと
@@ -12,9 +12,9 @@
 | 段 | 中身 | 節 |
 |---|---|---|
 | (a) 不変条件 | 11 本（I-1〜I-11、文は 1 回目のまま）。消すのは 3 つの経路だけ・不明は空きと読まない・needs-head は D5・bash は main シェル・自己グループの例外は使わない・引渡しは自分の T0 から・子は合図の後だけ・token と欄の字・down は確かめた G だけに送る ほか | §1 |
-| (b) 状態と遷移の表 | 行は 3 種: **到達**（本番の呼び手がある）・**拒否**（本番の呼び手が無く、包みの引数・文脈の検査が `<lock>` に触る前に断る。表 E を指す）・**到達しない**（起きない、理由つき）。表 A（記録の形 18 × 呼び手 10 × 観測〔pid と G を別の軸に〕= **900 行**）、表 B（D9 の段 = **24 行**）、表 C（UAT `down`: 記録 6 × 長 5 × G の残り 4 = 120 行 ＋ `t1` × D5 の結果 25 行 = **145 行**）と C′（D5 の結果 → 状態 **6 行**）、表 D（引渡しの段の失敗 × 流れ = **20 行**）、表 D2（ゾンビ・host の変化・EPERM・空にならない G × 呼び手 = **20 行**）、表 E（引数・文脈の検査 × 実装 = **20 行**）。**計 1135 行**（到達 734・拒否 90・到達しない 311） | §2 |
+| (b) 状態と遷移の表 | 行は 3 種: **到達**（本番の呼び手がある）・**拒否**（本番の呼び手が無く、包みの引数・文脈の検査が `<lock>` に触る前に断る。表 E を指す）・**到達しない**（起きない、理由つき）。表 A（記録の形 18 × 呼び手 10 × 観測〔pid と G を別の軸に〕= **900 行**）、表 B（D9 の段 = **24 行**）、表 C（UAT `down`: 記録 6 × 長 5 × G の残り 4 = 120 行 ＋ `t1` × D5 の結果 25 行 = **145 行**）と C′（D5 の結果 → 状態 **6 行**）、表 D（引渡しの段の失敗 × 流れ = **24 行**）、表 D2（ゾンビ・host の変化・EPERM・空にならない G × 呼び手 = **20 行**）、表 E（引数・文脈の検査 × 実装 = **20 行**）。**計 1139 行**（到達 738・拒否 90・到達しない 311） | §2 |
 | (c) 失敗の倒れ方 | 1 回目の表に、合図の `mkdir go`・子の `mkdir ack`・状態ファイルの書き込み・ゾンビ・host の変化を足し、`lsof` の行を「送る側」に直した。消す側に倒れるのは 2 か所（rm の部分失敗・TS の `rmSync` の例外）のままで、どちらも他者のロックを消さない | §3 |
-| (d) PR の切り方 | PR1b を 1 本。引数・文脈で拒否する検査 10 種（表 E）。PR1b と PR1c の契約（§4.3、PR1c の設計と同じ文にする）。子の起動と `go`・EXIT の形（§4.5、表 D の各行がどの行で起きるか）。既存の試験の**意図した変更** 2 本と台の変更 2 本、形を変えない 1 本（§4.4） | §4 |
+| (d) PR の切り方 | PR1b を 1 本。引数・文脈で拒否する検査 10 種（表 E）。PR1b と PR1c の契約（§4.3、PR1c の設計と同じ文にする）。子の起動と `go`・EXIT の形（§4.5、表 D の各行がどの行で起きるか。UAT の `go`／`ack` は run ごとの名前で、fork の前に消して無いことを確かめる）。既存の試験の**意図した変更** 2 本と台の変更 2 本、形を変えない 1 本（§4.4） | §4 |
 
 ---
 
@@ -64,7 +64,7 @@
 | **I-7 子は合図の後だけ働く** | 保護する実作業は、自分のグループ G の長として起こされ、`go` を見て `ack` を作るまで exec しない。親が死んだ・期限を過ぎたら自分で `go` を作って取り下げる。`go` は T1 の読み直しが通った後にだけ親が作る | `lock_child_wait`（F21）。表 B・表 D |
 | **I-8 token と欄の字** | token は `[A-Za-z0-9-]+`。`label`・`run_dir` は改行を含まない。外れたら取得しない | 表 E `token-chars`・`field-newline` |
 | **I-9 保有区間は重ならない** | 異なる token の保有区間は重ならない（土台 §1.8 の条件 (1)〜(6) をそのまま受け継ぐ） | 取得・回収・`rmdir` は札の先頭 1 人 |
-| **I-10 down は確かめた G だけに送る** | `down` が G に信号を送るのは、(1) 長が生きていて、今の確かめ（`CM_DB_PATH`・port・`ps -o pgid=` が G）を通ったとき、または (2) 長が死んでいて、G の残りの**全員**の `CM_DB_PATH` が run dir の下のときだけ。どちらでもなければ何も送らず、ロックを残し、「停止完了」と書かない | 根拠の範囲（Claude 5 P3 で狭めた）: (1) は**長が生きている間**だけ「G の番号は再利用されない」が成り立つ。長を TERM して `wait`（up の trap）／ESRCH を見た（down）後に G へ送るのは (2) と同じく、送る直前に一覧し直して全員を確かめる。G が `unknown`（EPERM）のときは長だけに送る（1 回目の表の `leader+group` は誤り。Claude 5 P2-4）。引渡しの段の失敗（表 D。上流の 3 回目で「`go` の前」を表 D の「公開の前」に揃えた、PM Claude P3-3）: **公開の前**（記録が T0: `state-write`・`group`・`tmp`・`mv`、表 E の `stage=arg`）は待っている子の **pid だけ**に送る。**公開の後で `go` の前**（`verify`・`verify-unreadable`・`signal`）は、**どの行も**長が生きていて `ps -o pgid=` が G のときだけ `-G` に送り、確かめられなければ pid だけ。`abort` は送らない。長を `wait` で回収した後（daily の通常の終わり）は `lock_drain_group`（空なら何も送らない）で、`lock_stop_gate`（無条件に `-G` へ TERM）は長をまだ回収していない経路だけ（§4.5、Claude 5 P2-C） |
+| **I-10 down は確かめた G だけに送る** | `down` が G に信号を送るのは、(1) 長が生きていて、今の確かめ（`CM_DB_PATH`・port・`ps -o pgid=` が G）を通ったとき、または (2) 長が死んでいて、G の残りの**全員**の `CM_DB_PATH` が run dir の下のときだけ。どちらでもなければ何も送らず、ロックを残し、「停止完了」と書かない | 根拠の範囲（Claude 5 P3 で狭めた）: (1) は**長が生きている間**だけ「G の番号は再利用されない」が成り立つ。長を TERM して `wait`（up の trap）／ESRCH を見た（down）後に G へ送るのは (2) と同じく、送る直前に一覧し直して全員を確かめる。G が `unknown`（EPERM）のときは長だけに送る（1 回目の表の `leader+group` は誤り。Claude 5 P2-4）。引渡しの段の失敗（表 D。上流の 3 回目で「`go` の前」を表 D の「公開の前」に揃えた、PM Claude P3-3）: **公開の前**（記録が T0: `state-write`・`group`・`tmp`・`mv`、表 E の `stage=arg`。`token` は記録が読めない）は待っている子の **pid だけ**に送る。**公開の後で `go` の前**（`verify`・`verify-unreadable`・`signal`）は、**どの行も**長が生きていて `ps -o pgid=` が G のときだけ `-G` に送り、確かめられなければ pid だけで、**pid だけに送った枝は後で G を排水しない**（`lock_drain_group` も `-G` に送るので。上流の 4 回目、PM Claude P3-4）。`abort` は送らない。`abort` で `ack` が在る（子は始まっている、`abort-acked`）は `go` の後と同じ扱い（UAT は表 C の手続き）。長を `wait` で回収した後（daily の通常の終わり）は `lock_drain_group`（空なら何も送らない）で、`lock_stop_gate`（無条件に `-G` へ TERM）は長をまだ回収していない経路だけ（§4.5、Claude 5 P2-C） |
 | **I-11 1 つの run-lock に 1 つの実装** | TS と bash は同じ `<lock>`・`.queue`・`.gone-*` を同じ規則で扱う。表 A の取得と継承の列は TS と bash で同じセル | 試験: TS と bash の取得・継承の表を**別々に書いたオブジェクト**にして比べる（1 回目は同じオブジェクトを比べていて常に通った。PM Claude P3-1）。違うのは `own-self-selfg` の「なぜ到達しないか」だけ（TS は pgid を書かない、bash は拒否）。実装の一致は `it.todo`（両方を同じ行で走らせて比べる） |
 
 全経路で成り立つ理由（経路 → 効く不変条件）:
@@ -203,10 +203,10 @@
 | `t0-up-alive` | token が `run_id`、pid が `server_pid` でない（＝`up` の `$$`）、`kill -0` が alive |
 | `t0-up-dead` | 同じで pid が ESRCH（`up` が公開の前に死んだ） |
 | `old` | 状態に `lock_token` が無く、記録に `pgid=` が無く、pid が `server_pid`（旧い `up`。PM 共通の決定 2: 今の pid だけの停止） |
-
-**旧い形かどうかは状態ファイルの形で決める**（上流の 3 回目、PM Claude P3-4）: 長の確かめに `ps -o pgid=`＝G を求めるか・G を観測するかは、記録の軸と別に、状態に `lock_token` があるか（新しい `up` が書いた）で決める。`lock_token` が無ければ（旧い `up`）、記録が `absent`・`other` でも pgid を条件にせず、G は観測しない（`none` と読む）。この読みの行は表 C の `absent`・`other` の `alive-verified × none`・`dead × none` にすでにあり、セルは変わらない（旧い生きたサーバーは `alive-unverified` に落ちず、今の pid だけの停止で止まる）
 | `other` | token がこの run のどれでもない（我々の記録が回収され、別の run が取った） |
 | `absent` | `<lock>` が無い |
+
+**旧い形かどうかは状態ファイルの形で決める**（上流の 3 回目、PM Claude P3-4。4 回目で表の後ろへ移した、PM Claude P3-1）: 長の確かめに `ps -o pgid=`＝G を求めるか・G を観測するかは、記録の軸と別に、状態に `lock_token` があるか（新しい `up` が書いた）で決める。`lock_token` が無ければ（旧い `up`）、記録が `absent`・`other` でも pgid を条件にせず、G は観測しない（`none` と読む）。この読みの行は表 C の `absent`・`other` の `alive-verified × none`・`dead × none` にすでにあり、セルは変わらない（旧い生きたサーバーは `alive-unverified` に落ちず、今の pid だけの停止で止まる）
 
 長（`server_pid`）: `alive-verified`（`kill -0` が alive・ゾンビでない・`CM_DB_PATH` が run dir の下・port の LISTEN が長だけ・`ps -o pgid=` が G。状態に `lock_token` が無ければ pgid を条件にしない）、`alive-unverified`（どれかが通らない・確かめられない。再利用された pid の EPERM を含む）、`zombie`（`kill -0` は alive だが `ps -o stat=` が `Z`）、`dead`（ESRCH）、`unrecorded`（`server_pid` が無い）。G の残り: `none`（ESRCH。`old` では「観測しない」）・`verified`（全員の `CM_DB_PATH` が run dir の下）・`unverified`（1 人でも違う・読めない・ゾンビ）・`unknown`（`kill -0 -G`・`ps` が言えない）。
 
@@ -242,28 +242,30 @@
 
 **PM 個別の決定（P1-1）の行**: `run-server.sh down <run>` が生きた G の自分の T1 を確実に片付けるのは、`t1 × alive-verified × none／verified` と `t1 × dead × none／verified`（試験で `released`・`stopped` を固定）。`up` が断るときの文面はこの `down` を名指す（§4.6）。
 
-**`up` の失敗の trap**（1 回目は 1 文だけだった。PM Claude P2-1）: `go` の前は表 D の行。`go` の後は `down` と**同じ手続き**（記録 `t1`）を呼ぶ。サーバーは `up` の子なので、**手続きに入る前に**長が自分で終わっていないかを見る: `kill -0` が ESRCH でなく `ps -o stat=` が `Z`（`up` が回収していないゾンビ）なら `wait "$server_pid"` で回収し（すぐ返る）、長を `dead` と読む。送ったときは送った後に `wait` する。こうして長は trap の中で `zombie` にならない（表 C の `zombie` の行に来るのは `down` だけ）。**送らずに長が自分で終わる経路**（表 D の `ack`＝子が exec せずに終わる・`child-exits`＝exec の後すぐ終わる）もこの回収を通り、表 C の `t1 × dead × none` → D5 `released` → `failed` になる（上流の 3 回目、Claude 5 P2-B）。`up` の中の「すぐ終わった」「LISTEN の前に終わった」の判定（今の `run-server.sh:479`・`:497` の `run_lock_pid_alive`）も同じ規則で、ゾンビを生と読まない（`Z` か ESRCH なら `wait` してから「終わった」とする）。状態は `stopped`→`failed`、それ以外→`failed-server-left`（今の値のまま）。今の `stop_recorded`（2 値の `run_lock_pid_alive`）で「長だけ死に G が残る」を `failed` と書く穴は、この手続きで閉じる。
+**`up` の失敗の trap**（1 回目は 1 文だけだった。PM Claude P2-1）: `go` の前は表 D の行。`go` の後は `down` と**同じ手続き**（記録 `t1`）を呼ぶ。表 D の `abort-acked`（`go` が既にあったが `ack` が在る＝子は始まっている）も `go` の後と同じに扱う（上流の 4 回目、PM Claude P2-1。§4.5 の `up_on_exit`）。サーバーは `up` の子なので、**手続きに入る前に**長が自分で終わっていないかを見る: `kill -0` が ESRCH でなく `ps -o stat=` が `Z`（`up` が回収していないゾンビ）なら `wait "$server_pid"` で回収し（すぐ返る）、長を `dead` と読む。送ったときは送った後に `wait` する。こうして長は trap の中で `zombie` にならない（表 C の `zombie` の行に来るのは `down` だけ）。**送らずに長が自分で終わる経路**（表 D の `ack`＝子が exec せずに終わる・`child-exits`＝exec の後すぐ終わる）もこの回収を通り、表 C の `t1 × dead × none` → D5 `released` → `failed` になる（上流の 3 回目、Claude 5 P2-B）。`up` の中の「すぐ終わった」「LISTEN の前に終わった」の判定（今の `run-server.sh:479`・`:497` の `run_lock_pid_alive`）も同じ規則で、ゾンビを生と読まない（`Z` か ESRCH なら `wait` してから「終わった」とする）。状態は `stopped`→`failed`、それ以外→`failed-server-left`（今の値のまま）。今の `stop_recorded`（2 値の `run_lock_pid_alive`）で「長だけ死に G が残る」を `failed` と書く穴は、この手続きで閉じる。
 
 `stop-refused-group`・`stop-refused-lock` の後の扱い: ロックは保護中のまま（I-9）。G が空になった後（人が止めた後）に `down` をもう一度呼ぶか、次の取得者の先頭が回収する。`cleanup` は G が生きている間は取得を断るので、生きた子を止めない。
 
-### 2.5 表 D: 親が生きたまま引渡しの段が失敗する（20 行、PM Claude P2-3）
+### 2.5 表 D: 親が生きたまま引渡しの段が失敗する（24 行、PM Claude P2-3。4 回目で `token`・`abort-acked` を足した）
 
 型（PM 共通の決定 3）: 流れ × 失敗 → 記録・信号・子・解放の経路・後のロック・状態・exit・文面。
 
 | 失敗 | UAT（`up`） | daily |
 |---|---|---|
 | `state-write`（`state_set server_pid` の失敗） | 記録 T0。待っている子の **pid だけ**に KILL して `wait`。子は始まらない。D12 `released`。状態 `failed`、exit 1、`state-write-failed` | 到達しない（daily は状態ファイルを書かない） |
+| `token`（`lock_hand_off` の最初の読みが T0 でない・読めない。I-6 の下では読めないときだけ。上流の 4 回目、PM Claude P3-2） | 記録不明（公開の前）。待っている子の **pid だけ**に KILL・`wait`。子は始まらない。D12 `deferred`、**ロックは残る**。状態 `failed-lock-left`、1、`handoff-failed stage=token` | 同じ。D12 `deferred`、ロックは残る。sync の失敗、exit 2（`verify-unreadable` と同じ扱い） |
 | `group`・`tmp`・`mv` | 記録 T0。pid だけに KILL・`wait`。子は始まらない。D12 `released`。`failed`、1、`handoff-failed stage=<段>` | 記録 T0。同じ。D12 `released`。sync の失敗、exit 2、同じ文面 |
 | `verify`（読み直しが T1 でない） | 記録 T1。長が生きていて `ps -o pgid=` が G のときだけ `-G` に KILL（確かめられなければ pid だけ）・`wait`。子は始まらない。D12 needs-head → D5 `released`。`failed`、1 | 記録 T1。同じ確かめで `-G` に KILL・`wait`。D12 `released`（G が空の後）。exit 2 |
 | `verify-unreadable`（読み直せない） | 記録不明。同じ確かめで `-G` に KILL・`wait`。D12 `deferred`、**ロックは残る**。状態 `failed-lock-left`（新しい値）、1 | 同じで D12 `deferred`、ロックは残る。exit 2 |
 | `signal`（`mkdir go` の失敗で `go` が無い） | 記録 T1。同じ確かめで `-G` に KILL・`wait`。子は始まらない。D12 needs-head → D5 `released`。`failed`、1 | 記録 T1。同じ。D12 `released`。exit 2 |
-| `abort`（`go` が既にある＝子が期限で取り下げた） | 記録 T1。送らない（子は自分で終わる）・`wait`。D12 needs-head → D5 `released`。`failed`、1 | 同じ。D12 `released`。exit 2 |
+| `abort`（`go` が既にあり、`ack` が現れない＝子が期限で取り下げた） | 記録 T1。送らない（子は自分で終わる）・`wait`。D12 needs-head → D5 `released`。`failed`、1 | 同じ。D12 `released`（G は長 1 人で回収済み。排水しない）。exit 2 |
+| `abort-acked`（`go` が既にあったが `ack` が在る＝子は始まっている。上流の 4 回目、PM Claude P2-1） | 記録 T1。**`abort` の `wait` に入らない**（始まったサーバーを待ち続けない）。`go` の後と同じに trap が表 C の手続き（記録 `t1`。長を確かめて TERM・G を排水）→ D5 `released`。`failed`、1、`handoff-failed stage=abort` | 記録 T1。子は T1 の下で働いているので (D) と同じく `wait "$child"`（子の終わりまで）→ (E) の排水 → D12 `released`。exit 2、`handoff-failed stage=abort` |
 | `ack`（子の `mkdir ack` の失敗） | 子は exec せず終わる（`up` のゾンビ）。送らない。`go` の後なので trap は**まず `wait` で回収**し（§2.4）、`down` と同じ手続き（表 C `t1 × dead × none`）→ D5 `released`。`failed`、1、`server-exited` | 子が終わる → daily の `wait "$child"` が回収し、その直後の `lock_drain_group`（空なら送らない）→ EXIT で D12 `released`。exit 2、`handoff-failed stage=ack` |
 | `child-exits`（exec の後すぐ終わる） | 同上（今の「the server exited at once」`run-server.sh:479`。ゾンビを生と読まず `wait` で回収してから） | `run.ts` の終了。`wait` で回収 → `lock_drain_group` → EXIT で D12 `released`。exit は子の exit |
 
 表 D の各行が §4.5 のどの行で起きるかは §4.5 の注（(A)〜(F)）。表 D の `it.todo` は §4.5 の形のまま、止め所（`CM_VERIFY_TEST_HANDOFF=pause:<stage>`・`fault:<stage>`）と偽の子で駆動できる（UAT は §4.5 の試験の口の渡し方で `env -i` を越える）。
 
-試験が固定する規則: 公開の前（`state-write`・`group`・`tmp`・`mv`）は記録が T0 で、送るのは pid だけ（PM Claude P3-6）。`-G` に送るのは公開の後だけで、その全ての行（`verify`・`verify-unreadable`・`signal`）が「長が生きていて `ps -o pgid=` が G」の確かめを持つ（I-10。試験の型 `FailCell.signals` の注に書いた）。KILL の後の `wait` はすぐ返るので、どの失敗でも子の取り下げの期限（30 秒）を待たない。`go` の前の失敗では子は始まらない（I-7）。ロックが残るのは owner が読めないときだけで、状態にそう書く。UAT の T1 は needs-head → D5、daily の T1 は G が空になってから D12。
+試験が固定する規則: 公開の前（`state-write`・`token`・`group`・`tmp`・`mv`）は送るのは pid だけで、記録は T0（`token` だけは読めない記録で、D12 は `deferred`）（PM Claude P3-6）。`-G` に送るのは公開の後だけで、その全ての行（`verify`・`verify-unreadable`・`signal`、UAT の `abort-acked` は表 C の手続きの確かめ）が「長が生きていて `ps -o pgid=` が G」の確かめを持ち、確かめられず pid だけに送った枝は G を排水しない（I-10。試験の型 `FailCell.signals` の注に書いた）。`abort-acked` は子が始まっている（`child: ran`）ので、UAT は表 C の手続き、daily は子の終わりまで待つ。KILL の後の `wait` はすぐ返るので、どの失敗でも子の取り下げの期限（30 秒）を待たない。`go` の前の失敗では子は始まらない（I-7）。ロックが残るのは owner が読めないときだけで、状態にそう書く。UAT の T1 は needs-head → D5、daily の T1 は G が空になってから D12。
 
 ### 2.6 表 D2: ゾンビ・host の変化・EPERM・空にならない G（20 行、PM 共通の決定 3）
 
@@ -289,14 +291,14 @@
 | B | 段 6 × 流れ 2 × 事象 2 | 24 | 14 | 0 | 10 |
 | C | 記録 6 × 長 5 × 残り 4 ＋ `t1` × D5 を呼ぶ 5 × D5 の結果 5 | 145 | 77 | 0 | 68 |
 | C′ | D5 の結果 6 | 6 | 6 | 0 | 0 |
-| D | 流れ 2 × 失敗 10 | 20 | 19 | 0 | 1 |
+| D | 流れ 2 × 失敗 12 | 24 | 23 | 0 | 1 |
 | D2 | 事象 5 × 呼び手 4 | 20 | 16 | 0 | 4 |
 | E | 検査 10 × 実装 2 | 20 | 12 | 0 | 8 |
-| 計 | — | **1135** | **734** | **90** | **311** |
+| 計 | — | **1139** | **738** | **90** | **311** |
 
 表 A の呼び手ごとの到達: `ts-acquire` 45・`ts-inherit` 57・`ts-release` 46・`ts-release-inherited` 81・`sh-acquire` 45・`sh-inherit` 57・`sh-release-held` 65・`sh-release-unheld` 81・`sh-hand-off` 46・`sh-release-as-head` 67。
 
-試験のファイルはこの数を固定する。陽性の対照（この段で実行して確かめた）: (1) 表 A の D5 の `aside-foreign-g` を消すと `tsc` が型の誤り（`satisfies CallerTable`）。(2) D5 の `own-other-g × pid gone × G unknown` を `released(removed)` にすると I-1・I-2 の検査が赤。(3) C′ の `deferred` を `stopped`・0 にすると C′ の検査が赤。上流の 3 回目（os.tmpdir() の写しで実行）: (4) TS の継承の `own-other` を 2 回目の「到達しない」に戻すと、行数と I-11（TS と bash の一致）が赤。(5) `t1` × D5 の `deferred` を `stopped`・0 にすると表 C の検査が赤。(6) `t1` × D5 から `dead × verified` を抜くと、D5 を呼ぶ `t1` の行とちょうど一致する検査と行数が赤。
+試験のファイルはこの数を固定する。陽性の対照（この段で実行して確かめた）: (1) 表 A の D5 の `aside-foreign-g` を消すと `tsc` が型の誤り（`satisfies CallerTable`）。(2) D5 の `own-other-g × pid gone × G unknown` を `released(removed)` にすると I-1・I-2 の検査が赤。(3) C′ の `deferred` を `stopped`・0 にすると C′ の検査が赤。上流の 3 回目（os.tmpdir() の写しで実行）: (4) TS の継承の `own-other` を 2 回目の「到達しない」に戻すと、行数と I-11（TS と bash の一致）が赤。(5) `t1` × D5 の `deferred` を `stopped`・0 にすると表 C の検査が赤。(6) `t1` × D5 から `dead × verified` を抜くと、D5 を呼ぶ `t1` の行とちょうど一致する検査と行数が赤。上流の 4 回目（同じく写しで）: (7) 表 D の UAT から `token` を抜くと `tsc` が型の誤り（`satisfies Record<Flow, Record<HandoffFailure, FailCell>>`）。(8) `abort-acked` の子を `never-starts` にすると表 D の検査が赤。(9) `token` の解放を `D12-released` にすると表 D の検査が赤（読めない記録を消す形）。
 
 ---
 
@@ -318,7 +320,8 @@
 | `mv`（回収の退かし・戻し・引渡しの公開） | `lock_obs_mv`・`lock_recover`・`lock_hand_off` | 各失敗 | 消さない | 1 回目のとおり。引渡しの公開の失敗は表 D `mv` |
 | `printf > tmp`（引渡しの tmp） | `lock_hand_off` | 失敗 | 消さない | 表 D `tmp` |
 | **owner の読み直し（引渡し）** | `lock_hand_off` の verify | 違う記録・読めない | 消さない | 表 D `verify`・`verify-unreadable`（読めなければロックを残し、状態にそう書く） |
-| **合図の `mkdir go`** | `lock_obs_mkdir handoff-signal` | `exists`／それ以外 | 消さない | `abort`（子が取り下げた）／`signal`（作れない）。どちらも子は始まらない（表 D） |
+| **合図の `mkdir go`** | `lock_obs_mkdir handoff-signal` | `exists`／それ以外 | 消さない | `abort`（子が取り下げた）／`signal`（作れない）。どちらも子は始まらない（表 D）。`go` が在っても `ack` が在れば子は始まっている（`abort-acked`、`go` の後の扱い。`run_lock_abort_settle` で決めてから） |
+| **UAT の `go`／`ack` の名前**（上流の 4 回目） | `$RUN_DIR/handoff-$run_id.*` の fork の前の `rm -rf` | 消せない・残る | 消さない（起こさない） | `stage=arg` で子を起こさず、trap が T0 を D12。前の run の名前には当たらない（§4.5） |
 | **子の `mkdir ack`** | `lock_child_wait` | 失敗 | 消さない | 子は exec しない（表 D `ack`） |
 | **状態ファイルの書き込み** | `state_set` `run-server.sh` | 失敗 | 消さない | 引き渡さずに exit 1（表 D `state-write`、I-6） |
 | owner の排他作成 | `lock_obs_create`・sync `claim` | 書き込みの途中の SIGKILL | **消さない側（取れなくなる）** | 空の owner＝`corrupt` が残り、誰も回収しない。**PR1a-f で tmp→mv に戻して塞ぐ**（PM 共通の決定 1）。それまでは `corrupt` の文面で人に知らせる（§4.6） |
@@ -339,8 +342,8 @@
 | 中身 | ファイル |
 |---|---|
 | TS の包み（D8・D10・D11、F6 の例外の捕まえ、I-8、pid≠`process.pid` の拒否） | `src/lib/agent-health/run-lock.ts` |
-| bash の包み（D1 の kv・D2・D3・D8・D12 の包み〔needs-head なら中で D5〕・D5 の包み・I-6 の `run_lock_set_pid <T0> <pid> <pgid> <go>`〔G の確かめ・T0 の `label=`・`run_dir=` の引き継ぎ・公開・合図の `mkdir go` まで。§4.5〕・表 E の検査・§4.3 の読み込み・§4.6 の文面） | `scripts/uat/run-lock.sh` |
-| UAT の呼び手（§4.5 の起動と試験の口の渡し方、`server_pid` の書き込みの確かめ、`lock_token`、表 C の `down`、表 D の trap〔自分で終わった長の `wait` の回収〕、`CM_RUN_LOCK_TOKEN` を消す） | `scripts/uat/run-server.sh` |
+| bash の包み（D1 の kv・D2・D3・D8・D12 の包み〔needs-head なら中で D5〕・D5 の包み・I-6 の `run_lock_set_pid <T0> <pid> <pgid> <go>`〔G の確かめ・T0 の `label=`・`run_dir=` の引き継ぎ・公開・合図の `mkdir go` まで。§4.5〕・表 E の検査・§4.3 の読み込み・§4.6 の文面・`abort` の枝の `run_lock_abort_settle`〔`ack` が在れば `acked`。§4.5〕） | `scripts/uat/run-lock.sh` |
+| UAT の呼び手（§4.5 の起動と試験の口の渡し方、run ごとの `go`／`ack` と fork の前の消去・確かめ、`up_handoff_fail`・`fail_up`・`up_on_exit`、`server_pid` の書き込みの確かめ、`lock_token`、表 C の `down`、表 D の trap〔自分で終わった長の `wait` の回収〕、`CM_RUN_LOCK_TOKEN` を消す） | `scripts/uat/run-server.sh` |
 | daily の呼び手（§4.5 の子〔exec の前に T1〕・`go`・失敗の枝、取得の後の `export`、回収の後の `lock_drain_group`・回収していない経路の `lock_stop_gate`、D12） | `scripts/agent-health/daily.sh` |
 | 試験（この雛形を実装に当てる・台・凍結した旧版） | `tests/unit/lib/agent-health/run-lock-machine-lock-4288.test.ts` ほか |
 | **既存の試験**（§4.4） | `tests/unit/scripts/uat/run-server-3359.test.ts`（期待の変更 2 か所）・`tests/unit/scripts/agent-health/daily-sh.test.ts`・`metrics-sh.test.ts`（台） |
@@ -385,7 +388,8 @@
 
 | 試験 | 今の期待 | 新しい期待 | 根拠の行 |
 |---|---|---|---|
-| `run-server-3359.test.ts:357-378`「the next up cleans what a killed run left…」 | owner の `pid=` を死んだ pid に書き換え、サーバーは生かしたまま、2 回目の `up` が status 0・前のサーバーを止める・状態 `cleaned` | 2 回目の `up` は **status 1** で断り、文面に `another run holds <dir> (` と **`run-server.sh down --run-dir <1 回目の run dir>`**（§4.6）。その `down` が status 0・前のサーバーが止まる・socket dir が消える・状態 `stopped`。続く 3 回目の `up` が status 0（名前の「次の up が片付ける」は「`down` の後の次の up」として残る） | 記録は T1（`pgid=G`）。pid を死んだ pid にしても G（サーバー）が生きているので保有中（表 A `sh-acquire × foreign-g × pid gone × G alive` → ✕held-group）。`down` は表 C `t1 × alive-verified × none` → D5 `released`・`stopped` |
+| `run-server-3359.test.ts:357-378`「the next up cleans what a killed run left…」 | owner の `pid=` を死んだ pid に書き換え、サーバーは生かしたまま、2 回目の `up` が status 0・前のサーバーを止める・状態 `cleaned` | 2 回目の `up` は **status 1** で断り、文面に `another run holds <dir> (` と **`run-server.sh down --run-dir <1 回目の run dir>`**（§4.6）。その `down` が status 0・前のサーバーが止まる・socket dir が消える・状態 `stopped`。続く 3 回目の `up` が **1 回目と同じ run dir** で status 0（下の行。名前の「次の up が片付ける」は「`down` の後の次の up」として残る） | 記録は T1（`pgid=G`）。pid を死んだ pid にしても G（サーバー）が生きているので保有中（表 A `sh-acquire × foreign-g × pid gone × G alive` → ✕held-group）。`down` は表 C `t1 × alive-verified × none` → D5 `released`・`stopped` |
+| `run-server-3359.test.ts:357-378` の続き（足す期待。上流の 4 回目、PM Claude P2-1） | 無い（2 回目の `up` は別の `run2`） | `down` の後の 3 回目の `up` は **1 回目と同じ `--run-dir`** で status 0・状態 `up`・ロックは 3 回目の T1。試験は 3 回目の前に、1 回目の `run_id` の `handoff-<run_id>.go`／`.ack` を run dir に置く（`up` が消し損ねた形）。3 回目の子は 3 回目の `go` の後にだけ始まり（前の `go` で公開の前に始まらない＝I-7）、`up` は返る（`abort` の `wait` で止まらない） | §4.5 の UAT: `go`／`ack` は `handoff-<run_id>.go`／`.ack`（`run_id` は `up` ごとに新しい）で、fork の前に消して無いことを確かめる。同じ run dir の `down` → `up` は PM 個別の決定の断る文面が案内する手順そのもの |
 | `run-server-3359.test.ts:430-437`「…and release touches only its own token」の最後の 2 行 | 新しいシェルの `run_lock_release parent` で `<lock>` が消える | 新しいシェルの `run_lock_release parent` は**何もしない**（`<lock>` は残る）。持ち主の記録を消すのは持ち主のシェルの D12 と、保有者が死んだ後の D5（同じ試験の中で、owner の pid を死んだ pid にしてから `run_lock_release_as_head parent` が消すことを示す） | 表 A `sh-release-unheld × own-other × alive` → `none`（F16）。D5 は `own-other × gone` → `rel` |
 
 **台の変更**（期待は変えない）: `daily-sh.test.ts:95`・`metrics-sh.test.ts:42` の種のリポジトリに `scripts/lib/machine-lock.sh` と `.claude/skills/cmate-verify/scripts/verify-run.sh` を写して追跡させる（写さないと読み込みが失敗し、§4.3 の契約で `run_lock_acquire` が 1 → `reason=run-locked:` の期待が `machine-lock not loaded` に変わる）。
@@ -402,34 +406,88 @@
 
 1. 表 E の検査（`handoff-pid-not-self`・`handoff-pgid-self`〔pgid＝`$$`・pgid＝このシェルの pgid〕・`handoff-twice`・`handoff-subshell`）。外れたら `RUN_LOCK_STAGE=arg`・1（何も書かない）
 2. `ps -o pgid= -p <pgid>` が `<pgid>`（子が自分のグループの長）でなければ・言えなければ `RUN_LOCK_STAGE=group`・1（`lock_obs_pgid`。何も書かない）
-3. owner を 1 回読み（I-6）、そのテキストの `label=`・`run_dir=` を `LOCK_OWNER_EXTRA` にして `lock_hand_off <lock> <T0> <pid> <pgid>`（§4.2。T1 は T0 の欄を引き継ぐ）。`LHO_STAGE` が `tmp`・`mv` なら `RUN_LOCK_STAGE` にそれ・1。`mv` が通ったら（その後の `verify` の失敗でも）**`RUN_LOCK_G=<pgid>`**（公開した印。EXIT と失敗の枝が `-G` に送ってよいかの前提。公開の前は空）。`LHO_STAGE=token`（最初の読みが T0 でない・読めない）は I-6 の下では owner が読めないときだけ起き、表 D に行が無い（§7）。公開の前なので `RUN_LOCK_STAGE=token` で `group` と同じ枝（pid だけ）に入り、D12 は読めなければ `deferred`（ロックは残る）。`verify` は読み直しが読めたかで `verify`／`verify-unreadable` に分ける（文面はどちらも `stage=verify`）
-4. 通ったら親が合図を作る: `lock_obs_mkdir handoff-signal <go>` を F22 と同じに分ける — `created` → 0（`LOCK_HELD_TOKEN`＝T1）、`exists` → `RUN_LOCK_STAGE=abort`・1、それ以外で `<go>` が無い → `signal`・1（在れば `abort`）
+3. owner を 1 回読み（I-6）、そのテキストの `label=`・`run_dir=` を `LOCK_OWNER_EXTRA` にして `lock_hand_off <lock> <T0> <pid> <pgid>`（§4.2。T1 は T0 の欄を引き継ぐ）。`LHO_STAGE` が `tmp`・`mv` なら `RUN_LOCK_STAGE` にそれ・1。`mv` が通ったら（その後の `verify` の失敗でも）**`RUN_LOCK_G=<pgid>`**（公開した印。EXIT と失敗の枝が `-G` に送ってよいかの前提。公開の前は空）。`LHO_STAGE=token`（最初の読みが T0 でない・読めない）は I-6 の下では owner が読めないときだけ起き、表 D の `token` の行（上流の 4 回目で足した、PM Claude P3-2）。公開の前なので `RUN_LOCK_STAGE=token` で `group` と同じ枝（pid だけ）に入り、D12 は読めなければ `deferred`（ロックは残る。UAT `failed-lock-left`・1、daily sync の失敗・2）。`verify` は読み直しが読めたかで `verify`／`verify-unreadable` に分ける（文面はどちらも `stage=verify`）
+4. 通ったら親が合図を作る: `lock_obs_mkdir handoff-signal <go>` を F22 と同じに分ける — `created` → 0（`LOCK_HELD_TOKEN`＝T1）、`exists` → `RUN_LOCK_STAGE=abort`・1、それ以外で `<go>` が無い → `signal`・1（在れば `abort`）。`abort` の呼び手は `run_lock_abort_settle` で、子が始まった（`ack` が在る＝`abort-acked`）か取り下げたかを決めてから枝に入る（下の UAT の注）
 
 `go` を作るのは**この 1 か所だけ**（`lock_child_wait` が期限・親の死で作るのは取り下げ）。だから子は `go` の後にしか始まらず（I-7）、親が生きて引渡しが通れば子は期限（`HANDOFF_WAIT_SEC=30`）を待たずに始まる。
 
 **UAT**（`env -i ` で始まる論理行・代入は `env -i` と最初の `nohup` の間、を保つ。F18）:
 
 ```bash
-go="$RUN_DIR/handoff.go"; ack="$RUN_DIR/handoff.ack"; deadline=$(( $(date +%s) + HANDOFF_WAIT_SEC ))
+# go／ack は up ごとの名前（run_id は up ごとに新しい: 日時＋乱数）。同じ run dir で down → up し直しても前の run の go／ack に当たらない。
+go="$RUN_DIR/handoff-$run_id.go"; ack="$RUN_DIR/handoff-$run_id.ack"
+rm -rf "$go" "$ack" 2>/dev/null                                                # fork の前に消して、
+[ ! -e "$go" ] && [ ! -e "$ack" ] && [ ! -L "$go" ] && [ ! -L "$ack" ] \
+  || fail_up "handoff-failed stage=arg"                                         # 無いと確かめられなければ起こさない（子は居ない → trap が T0 を D12）
+deadline=$(( $(date +%s) + HANDOFF_WAIT_SEC ))
 test_seams=()   # 試験の口だけを env -i の向こうへ（本番では空。PM Claude P3-5）
 for v in CM_VERIFY_TEST_HANDOFF CM_VERIFY_TEST_HANDOFF_DIR CM_VERIFY_TEST_OBS_FAULT CM_VERIFY_TEST_OBS_FAULT_FILE; do
-    [ -z "${!v+x}" ] || test_seams+=("$v=${!v}")
+    [ -z "${!v+x}" ] || test_seams+=("$v=${!v}")                              # bash 3.2.57・set -u で確かめた形（§9）
 done
 set -m
 env -i HOME="$HOME" PATH="$PATH" … CM_OPENCODE_PORT_FILE="$RUN_DIR/opencode-ports.json" \
     ${test_seams[@]+"${test_seams[@]}"} \
     nohup /bin/bash -c '. "$1" || exit 75; lock_child_wait "$2" "$3" "$4" "$5" || exit 75; unset CM_VERIFY_TEST_HANDOFF CM_VERIFY_TEST_HANDOFF_DIR CM_VERIFY_TEST_OBS_FAULT CM_VERIFY_TEST_OBS_FAULT_FILE; shift 6; exec "$@"' \
     cm-uat-child "$MACHINE_LOCK_SH" "$go" "$ack" "$deadline" "$$" -- node "$SERVER_ENTRY" >"$RUN_DIR/server.log" 2>&1 </dev/null &
-server_pid=$!                                                                   # (A) forked
+server_pid=$!; child_reaped=0                                                   # (A) forked
 set +m
 state_set "$UP_STATE" server_pid "$server_pid" \
-  || { kill -s KILL "$server_pid"; wait "$server_pid"; fail_up state-write-failed; }   # (B) 表 D state-write: pid だけ → exit 1 → trap が D12
+  || { kill -s KILL "$server_pid"; wait "$server_pid"; child_reaped=1; fail_up state-write-failed; }   # (B) 表 D state-write: pid だけ → exit 1 → trap が D12
 run_lock_set_pid "$run_id" "$server_pid" "$server_pid" "$go" \
-  || up_handoff_fail "$RUN_LOCK_STAGE"                                          # (C) arg|group|tmp|mv|verify|verify-unreadable|signal|abort
-# (D) ここから go の後: 子の ack の失敗・exec の後すぐ終わる は、下の生死の判定と trap の回収（§2.4）
+  || up_handoff_fail "$RUN_LOCK_STAGE"                                          # (C) arg|token|group|tmp|mv|verify|verify-unreadable|signal|abort
+UP_PHASE=after-go                                                               # (D) ここから go の後: 子の ack の失敗・exec の後すぐ終わる は、下の生死の判定と trap の回収（§2.4）
+
+fail_up() { # <msg>  — 文面を出して exit 1。状態と解放は EXIT の trap（up_on_exit）がまとめて書く
+    log "up: $1"; exit 1
+}
+
+up_handoff_fail() { # <stage>  — go の前の失敗の枝。daily_handoff_fail と同じ分け方。どれも 30 秒待たない
+    local stage=$1
+    if [ "$stage" = abort ]; then                                               # go が既にあった: 子が始まったか取り下げたかを決めてから
+        case "$(run_lock_abort_settle "$server_pid" "$ack")" in
+            acked) stage=abort-acked ;;                                         # 子は始まっている
+            stuck) kill -s KILL "$server_pid" 2>/dev/null ;;                    # 決まらない（止められた子など）: pid だけ
+        esac
+    fi
+    case "$stage" in
+        arg|token|group|tmp|mv)                                                 # 公開の前: pid だけ（G は無いか、子 1 人）
+            kill -s KILL "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null; child_reaped=1 ;;
+        verify|verify-unreadable|signal)                                        # 公開の後で go の前: 確かめた -G、でなければ pid だけ
+            if [ "$(lock_obs_kill0 pid "$server_pid")" = alive ] && [ "$(lock_obs_pgid handoff-group "$server_pid")" = "$server_pid" ]; then
+                kill -s KILL -- "-$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null; child_reaped=1
+                lock_drain_group "$server_pid" 1                                # 長を確かめた後の G だけ排水する
+            else
+                kill -s KILL "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null; child_reaped=1   # pid だけ。G は排水しない（I-10。D12／D5 は G が空でなければ deferred）
+            fi ;;
+        abort) wait "$server_pid" 2>/dev/null; child_reaped=1 ;;                # 子は ack を作らずに取り下げて終わった（すぐ返る）。排水しない（G は長 1 人）
+        abort-acked) UP_PHASE=after-go ;;                                       # 子は始まっている: wait しない。trap が表 C の手続き（記録 t1）
+    esac
+    fail_up "handoff-failed stage=${stage%%-*}"                                # verify-unreadable → verify、abort-acked → abort（表 D の文面）
+}
+
+up_on_exit() {                                                                  # EXIT（fail_up の exit 1・INT／TERM の exit 130／143 を含む）
+    [ "$UP_OK" = 1 ] && return 0                                                # 成功（status up）の後は何もしない（今のまま）
+    if [ "$UP_PHASE" = after-go ]; then                                         # go の後と abort-acked: down と同じ手続き（表 C、記録 t1）
+        up_reap_if_ended "$server_pid"                                          # Z・ESRCH の長を wait で回収して dead と読む（§2.4）
+        down_procedure "$UP_STATE" t1                                           # 送ったら wait。D5 の結果は C′
+        [ "$DOWN_STATUS" = stopped ] && st=failed || st=failed-server-left
+    else                                                                        # go の前
+        if [ -n "$server_pid" ] && [ "$child_reaped" != 1 ]; then              # 枝に来ずに終わる（INT／TERM）: 長は回収していない
+            if [ -n "$RUN_LOCK_G" ]; then lock_stop_gate "$RUN_LOCK_G" "$server_pid"   # 公開の後: -G に TERM → 長を wait → 排水
+            else kill -s KILL "$server_pid" 2>/dev/null; wait "$server_pid" 2>/dev/null; fi   # 公開の前: pid だけ
+        fi
+        run_lock_release "$run_id"                                              # D12 を 1 回（T0 は released、T1 は needs-head → 中で D5、読めなければ deferred）
+        case "$RUN_LOCK_RESULT" in released|missing|none) st=failed ;; *) st=failed-lock-left ;; esac
+    fi
+    state_set "$UP_STATE" status "$st"                                          # 状態ファイルが無い（run dir を作る前の失敗）なら今のまま書かない
+    remove_socket_dir …                                                         # 今の up_on_exit と同じ（failed-server-left は tmux だけ）
+    rm -rf "$go" "$ack" 2>/dev/null                                             # 自分の go／ack だけ（子は回収済みか、go の後で exec 済み）
+}
 ```
 
-`env` → `nohup` → `bash` → `node` は同じ pid のまま exec するので、`server_pid`＝G の長＝記録の pid。`MACHINE_LOCK_SH` は絶対パスで渡す（`env -i` の後に環境から引かない）。試験の口は `env -i` と `nohup` の間の代入として渡り（`uat-yaml-2590` の「代入は `env -i` と最初の `nohup` の間」の検査に触れない位置）、子の `lock_child_wait`（止め所 `acked`・観測の注入）に届き、exec の前に `unset` するのでサーバーには残らない。本番では配列は空で、論理行の形は今と同じ。
+`run_lock_abort_settle <child> <ack>`（`run-lock.sh`。UAT と daily の `abort` の枝が呼ぶ）: `go` が既に在るので、子は次の確かめ（50ms）で `go` を見て `ack` を作って始まるか、自分で `go` を作った後の取り下げ（`ack` を作らず exit 75）で既に終わっているかのどちらか（`lock_child_wait`、F21）。そこで「`ack` が在る」→ `acked`、「子が ESRCH か `ps -o stat=` が `Z`」で `ack` が無い → `withdrew` を、短い期限（`HANDOFF_SETTLE_SEC`、数秒）まで 50ms ごとに見て返し、期限までにどちらにもならなければ `stuck`（呼び手は pid だけに KILL して `wait`）。`ack` を 1 回だけ見るのでは、子が `go` を見てから `ack` を作るまでの間に親が見た場合に `abort` と読み、始まったサーバーを `wait` し続ける（P2-1 の事象と同じ形）。`abort-acked` に来るのは、子が取り下げていないのに `go` が在った場合で、名前を run ごとにして fork の前に消した後は、親自身の `mkdir go` が `go` を作ってから失敗を返した場合（F22 の「それ以外で `go` が在る → `abort`」）だけ。`RUN_LOCK_RESULT` は `run_lock_release` が D12（needs-head の後は D5）の結果を置く変数（名前は実装で決めてよい。表 D の `release` と一致すること）。`UP_OK`・`UP_PHASE`・`child_reaped` は `cmd_up` の冒頭で空・`before-go`・`0` にする。
+
+`go`／`ack` の名前に `run_id` を入れ、fork の前に消して無いことを確かめるのは、同じ run dir で `down` → `up` し直したとき（§4.4 の `:357-378` の新しい期待、PM 個別の決定の断る文面の手順）に前の `go` で子が公開の前に始まり（I-7 が破れる）、`up` が `abort` の `wait` で返らなくなるのを塞ぐため（上流の 4 回目、PM Claude P2-1）。daily は `mktemp -d` の新しいディレクトリなので当たらない。`env` → `nohup` → `bash` → `node` は同じ pid のまま exec するので、`server_pid`＝G の長＝記録の pid。`MACHINE_LOCK_SH` は絶対パスで渡す（`env -i` の後に環境から引かない）。試験の口は `env -i` と `nohup` の間の代入として渡り（`uat-yaml-2590` の「代入は `env -i` と最初の `nohup` の間」の検査に触れない位置）、子の `lock_child_wait`（止め所 `acked`・観測の注入）に届き、exec の前に `unset` するのでサーバーには残らない。本番では配列は空で、論理行の形は今と同じ。
 
 **daily**（`npx tsx run.ts` の行を置き換える。pull と `npm install` の後。取得の後に `export CM_RUN_LOCK_TOKEN="$T0"` 済み）:
 
@@ -446,20 +504,32 @@ run_lock_set_pid "$T0" "$$" "$child" "$go" || daily_handoff_fail "$RUN_LOCK_STAG
 wait "$child"; code=$?; child_reaped=1                                           # (D) 通常の終わり・ack・child-exits
 [ -z "$RUN_LOCK_G" ] || lock_drain_group "$RUN_LOCK_G" 0                         # (E) 回収の直後。空なら何も送らない
 
-daily_handoff_fail() { # <stage>  — 失敗の枝。どれも 30 秒待たない（KILL の後の wait はすぐ返る）
-    case "$1" in
-        arg|token|group|tmp|mv) kill -s KILL "$child" 2>/dev/null ;;              # 公開の前: pid だけ（G は無いか、子 1 人）
+daily_handoff_fail() { # <stage>  — 失敗の枝。どれも取り下げの期限（30 秒）を待たない（KILL の後の wait はすぐ返る）
+    local stage=$1
+    if [ "$stage" = abort ]; then                                                 # go が既にあった: 子が始まったか取り下げたかを決めてから
+        case "$(run_lock_abort_settle "$child" "$ack")" in
+            acked) stage=abort-acked ;;
+            stuck) kill -s KILL "$child" 2>/dev/null ;;                           # 決まらない: pid だけ
+        esac
+    fi
+    case "$stage" in
+        arg|token|group|tmp|mv)                                                   # 公開の前: pid だけ（G は無いか、子 1 人）
+            kill -s KILL "$child" 2>/dev/null; wait "$child" 2>/dev/null; child_reaped=1 ;;
         verify|verify-unreadable|signal)                                          # 公開の後で go の前: 確かめた -G、でなければ pid だけ
             if [ "$(lock_obs_kill0 pid "$child")" = alive ] && [ "$(lock_obs_pgid handoff-group "$child")" = "$child" ]; then
-                kill -s KILL -- "-$child" 2>/dev/null
+                kill -s KILL -- "-$child" 2>/dev/null; wait "$child" 2>/dev/null; child_reaped=1
+                lock_drain_group "$RUN_LOCK_G" 1                                  # 長を確かめた G だけ排水する
             else
-                kill -s KILL "$child" 2>/dev/null
+                kill -s KILL "$child" 2>/dev/null; wait "$child" 2>/dev/null; child_reaped=1
+                # pid だけ: 確かめていない -G には lock_drain_group でも送らない（I-10、上流の 4 回目 PM Claude P3-4）。
+                # G が空でなければ (F) の D12 が deferred でロックを残す（安全側）
             fi ;;
-        abort) : ;;                                                               # 子は自分で取り下げて終わる
+        abort) wait "$child" 2>/dev/null; child_reaped=1 ;;                       # 子は ack を作らずに取り下げて終わった。G は長 1 人で、回収の後は排水しない
+        abort-acked)                                                              # 子は T1 の下で始まっている: (D)・(E) と同じに終わりまで待って排水
+            wait "$child" 2>/dev/null; child_reaped=1
+            lock_drain_group "$RUN_LOCK_G" 0 ;;
     esac
-    wait "$child" 2>/dev/null; child_reaped=1
-    [ -z "$RUN_LOCK_G" ] || lock_drain_group "$RUN_LOCK_G" 1
-    fail_sync "handoff-failed stage=$1"                                           # exit 2 → EXIT
+    fail_sync "handoff-failed stage=${stage%%-*}"                                 # exit 2 → EXIT。verify-unreadable → verify、abort-acked → abort
 }
 
 daily_on_exit() {                                                                 # (F) EXIT（INT／TERM は exit 130／143 でここへ）
@@ -479,9 +549,11 @@ daily_on_exit() {                                                               
 | 表 D | daily | UAT |
 |---|---|---|
 | `state-write` | 到達しない | (B) |
-| `group`・`tmp`・`mv`（と表 E の `arg`） | (C) → `daily_handoff_fail`: pid だけ → `wait` → `fail_sync` → (F) で D12 `released` | (C) → `up_handoff_fail`: 同じ分け方 → exit 1 → trap が D12 `released` |
-| `verify`・`verify-unreadable`・`signal` | (C) → 確かめた `-G`（でなければ pid）→ `wait` → `lock_drain_group` → (F) で D12 | (C) → 同じ → trap が D12 needs-head → D5 |
-| `abort` | (C) → 送らない → `wait` → (F) | (C) → 同じ |
+| `group`・`tmp`・`mv`（と表 E の `arg`。UAT は fork の前の `go`／`ack` の確かめの失敗も `arg` で、子は居ない） | (C) → `daily_handoff_fail`: pid だけ → `wait` → `fail_sync` → (F) で D12 `released` | (C) → `up_handoff_fail`: 同じ分け方 → `fail_up` の exit 1 → `up_on_exit` の go の前の枝が D12 `released` → `failed` |
+| `token` | (C) → pid だけ → `wait` → (F) で D12 `deferred`（ロックは残る） | (C) → 同じ → D12 `deferred` → `failed-lock-left` |
+| `verify`・`verify-unreadable`・`signal` | (C) → 確かめた `-G` → `wait` → `lock_drain_group`、確かめられなければ pid だけ → `wait`（排水しない）→ (F) で D12 | (C) → 同じ → `up_on_exit` が D12 needs-head → D5（`verify-unreadable` は `deferred` → `failed-lock-left`） |
+| `abort` | (C) → `run_lock_abort_settle` が `withdrew` → 送らない → `wait`（排水しない）→ (F) | (C) → 同じ → `up_on_exit` が D12 needs-head → D5 |
+| `abort-acked` | (C) → `run_lock_abort_settle` が `acked` → 子の終わりまで `wait` → `lock_drain_group` → (F) で D12 `released` | (C) → `UP_PHASE=after-go` → `fail_up` → `up_on_exit` の go の後の枝（表 C の手続き、記録 `t1`） |
 | `ack`・`child-exits` | (D) の `wait` が回収 → (E) → (F) で D12 `released` | go の後の生死の判定・trap が `Z`・ESRCH の長を `wait` で回収 → 表 C `t1 × dead × none`（§2.4） |
 
 子は pull の**後**の `machine-lock.sh` を読み、親は pull の**前**に読んだ版を使う。`go`・`ack`・期限・親の pid の約束は PR1a で決めた名前と意味で、版を跨いでも同じ（変えるときは版の跨ぎを設計する）。子の exit 75 は「取り下げた」で、daily は `handoff-failed stage=abort|ack` として扱う（表 D）。
@@ -501,7 +573,7 @@ daily_on_exit() {                                                               
 ### 4.8 実装の契約への引継ぎ
 
 - 表は閉じている（§2.8。行の追加は列挙の追加で、型が落ちる）。PM の決定（上流の 2 回目で表が閉じたら実装は sonnet、閉じなければ opus）の判断材料
-- 実装の試験は `it.todo`（表 A の呼び手ごと 10 本と I-11 の 1 本・表 B の流れごと 2 本・表 C の 4 本〔`down`・`up` の trap・自分で終わった長の回収・`t1` × D5 の結果〕・表 D の流れごと 2 本・表 D2 の 1 本・表 E の 1 本）を `it.each` に置き換える。行の期待は変えない（変えるときは上流に戻す）。pid と G は別々に作る（生きた pid／ESRCH の pid に生きた G のメンバー、など。PM Claude P2-4）
+- 実装の試験は `it.todo`（表 A の呼び手ごと 10 本と I-11 の 1 本・表 B の流れごと 2 本・表 C の 4 本〔`down`・`up` の trap・自分で終わった長の回収・`t1` × D5 の結果〕・表 D の流れごと 2 本と同じ run dir の `down` → `up` の 1 本（§4.4）・表 D2 の 1 本・表 E の 1 本）を `it.each` に置き換える。行の期待は変えない（変えるときは上流に戻す）。pid と G は別々に作る（生きた pid／ESRCH の pid に生きた G のメンバー、など。PM Claude P2-4）
 - 表 B・C・D は実プロセスの試験で、#4288 の 1 番の台（`lock-4288-harness.ts`）と止め所（`CM_VERIFY_TEST_HANDOFF=pause:<stage>`）を流用できる。UAT の子へは §4.5 の試験の口の配列で `env -i` を越えて渡す（PM Claude P3-5）
 - **混在の試験**（Claude 5 P3、土台 §1.9・§1.10）: 凍結した旧版の `run-lock.sh` の `up` と新しい `down`（表 C の `old` の行）、旧版の取得者と新しい取得者の 3 者の割込み
 - 陽性の対照: 凍結した旧版で §1.2 の 3 者の割込みが 2 者を通す・今の `run-server.sh:470-473` で `set_pid` の前に `up` を `kill -9` するとサーバーが動いたまま取れる・今の `stop_recorded` で長だけが死ぬと `down` が `stopped` を書く
@@ -535,9 +607,9 @@ daily_on_exit() {                                                               
 - `scripts/lib/machine-lock.sh:168-169` の kv の codec は呼び手の欄を `pgid=` の前に書く（F10）
 - `verify-run.sh:1680-1685` の `LOCK_HELD_BY` は JSON の読みで、kv の記録では空になる（F3）
 - `scripts/uat/run-server.sh:472` は `state_set server_pid` の失敗を見ない（F12。PR1b で直す側だが、今の develop の穴として記録）
+- daily の通常の終わり (E) とゲート本体（`verify-run.sh:2406`）の `lock_drain_group` は、長を `wait` で回収した**後**に G へ送る。G に長以外のメンバーが残っていれば番号は再利用されないので正しいが、長しか居なかった G は回収の時点で空で、`kill -0 -G` までの間に番号が再利用されると他者のグループを非空と読んで送りうる（窓は小さい。上流の 4 回目で P3-4 を直すときに見つけた。PR1b は (E) の形を変えず、`abort` の枝では排水しないようにした。ゲート本体は PR1a の部品なので直さない）
 - `scripts/uat/run-server.sh:479`・`:497` の「すぐ終わった」「LISTEN の前に終わった」の判定は 2 値の `run_lock_pid_alive` で、`up` の子のゾンビ（`kill -0` が通る）を生と読む（PR1b で §2.4 の規則に直す側。今の develop の穴として記録）
 - PR1c の設計 `docs/design/supervisor-lock-machine-lock-4288.md:283`（`495872a60`）の §5.2 の契約の文は、§4.3 の引用と一字一句同じでない（`run_lock_pid_alive` の定義が今の実装とずれる）。PR1c の worktree は本書の契約の範囲外なので直さず、§4.3 の引用に差し替えるよう PM に渡す
-- 表 D に `lock_hand_off` の `token` の段（引渡しの最初の読みが T0 でない・読めない）の行が無い。I-6 の下では owner が読めないときだけ起き、§4.5 は公開の前の枝（pid だけ、D12 は読めなければ `deferred`）に入れたが、表の列挙（`HANDOFF_FAILURES`）には無い。表の作りを変えない回なので足さず、実装の契約の前に PM の判断に渡す
 
 ---
 
@@ -574,6 +646,19 @@ daily_on_exit() {                                                               
 | 5 | 表 C の `t1` × D5 の `deferred`・`not-head`・`unknown` が C′ の対応表にしか無い（PM Claude 前回 P2-1 の残り・Claude 5 P3-A） | 表 C の行として持った: D5 を呼ぶ `t1` の 5 セル × D5 の結果 5（`deferred`・`not-head`・`unknown`・`kept`・`missing`）＝ 25 行。状態は C′ のとおり | §2.4、試験 `TABLE_C_T1_D5` |
 | 6 | P3（PM Claude P3-1・P3-4〜P3-7、Claude 5 P3-C） | T1 は T0 の `label=`・`run_dir=` を引き継ぐ（§4.2）／旧い形かは状態ファイルの `lock_token` の有無で決める（§2.4）／試験の口は `env -i` と `nohup` の間の配列で渡し、子が exec の前に `unset`（§4.5）／`supervisor.sh:269` の `down` の exit 1 が増える（§4.4）／PR1c との契約の文を今の実装に合わせ、PR1c の §5.2 を同じ文に差し替える（§4.3・§7）／daily の子の stdin を `/dev/null`（§4.5） | 各節 |
 
+### 8.3 上流の 4 回目（`pm-return-4288-pr1b-upstream3.md` の直す 1・2）
+
+PM Claude `pm-review-4288-pr1b-upstream3-claude.md`（P1 0・P2 1・P3 5）。直したのは設計の文と表のセルで、表 D の列挙（`HANDOFF_FAILURES`）に `token`・`abort-acked` の 2 値を足した（型が落ちるので抜けない）。行数は 1135／734 → 1139／738（表 D 20 → 24）。
+
+| # | 指摘 | 処置 | 場所 |
+|---|---|---|---|
+| 1 | P2-1 UAT の `go`／`ack` が run dir の固定の名前で、同じ run dir の `down` → `up` で前の `go` により子が公開の前に始まり（I-7）、`up` が `abort` の `wait` で返らない | 名前を `handoff-<run_id>.go`／`.ack`（`up` ごと）にし、**かつ** fork の前に `rm -rf` して無いこと（symlink も）を確かめ、確かめられなければ `stage=arg` で起こさない。表 D に `abort-acked`（`ack` が在る＝子は始まっている → `go` の後の扱い。UAT は表 C の手続き、daily は子の終わりまで待つ）。`abort` は `run_lock_abort_settle` で `ack` を待ってから決める（1 回だけ見ると `ack` を作る直前を取り逃す）。§4.4 に `:357-378` の続き（同じ run dir の 3 回目の `up`、前の run の `go`／`ack` を置いた形）の行 | §4.5、表 D、§4.4、§3、I-10 |
+| 2-1 | P3-1 §2.4 の段落で表が切れた | 段落を記録の軸の表の後ろへ移した | §2.4 |
+| 2-2 | P3-2 `token` の段が `HANDOFF_FAILURES` に無い | 足した: 公開の前・pid だけ・D12 `deferred`・ロックは残る。UAT `failed-lock-left`・1、daily sync の失敗・2（`verify-unreadable` と同じ扱い）。§7 の該当の行は閉じたので消した | 表 D、§4.5 手順 3、試験 |
+| 2-3 | P3-3 `up_handoff_fail`・`fail_up` が名前だけ | daily と同じ粒度で本文を書き、状態の値を決める `up_on_exit`（go の前は D12 の結果、go の後は表 C の手続き）も書いた | §4.5 |
+| 2-4 | P3-4 daily の pid だけの枝の後の `lock_drain_group` が確かめていない `-G` に送る | pid だけの枝では排水しない（D12 は G が空でなければ `deferred`）。`abort`（取り下げ）も回収の後に排水しない。UAT の `up_handoff_fail` も同じ。I-10 の「守る場所」と試験の型の注に書いた。(E) とゲート本体の同じ形の窓は §7 | §4.5、I-10、§7 |
+| 2-5 | P3-5 `${!v+x}` が bash 3.2 で動くか | macOS の `/bin/bash` 3.2.57 で `set -u` の下でも、未設定・空・値ありを分けることを実行して確かめた（§9）。形は変えない | §4.5、§9 |
+
 ---
 
 ## 9. 確かめたこと・探した対
@@ -583,4 +668,5 @@ daily_on_exit() {                                                               
 - 探した対: `run_lock_*`・`acquireRunLock`・`CM_RUN_LOCK_*` の呼び手と、run-lock を固定する試験（`git grep`）は §4.4 の 5 本と `product/lib.sh`（PR1c）・`supervisor.sh:73` だけ。`docs/en` に run-lock の写しは無い。`src/cli/types/` にロックの型の写しは無い
 - 未確認: `set -m` の下の `env -i … nohup … &` が macOS の bash 3.2 で子を新しいグループに置くこと（失敗しても表 D `group` で子は始まらない）、スケジューラ・launchd が daily を止めるときにグループへ送るか（PM Claude P3-12）、サーバーが環境を置き換えて起こした子が G に残るか（Claude 5 P3）
 - 上流の 3 回目で読み直したもの: `verify-run.sh` の `lock_stop_gate`・`lock_drain_group`・`rga_handoff_fail`・`run_gate_handoff` の合図と失敗の枝・`lock_child_wait`・`lock_hand_off`・`lock_obs_pgid`、`machine-lock.sh` の `lock_format_owner`（呼び手の欄は `LOCK_OWNER_EXTRA` から）、`run-lock.sh` の `run_lock_pid_alive`（`:50-56`）・今の `run_lock_set_pid`（T0 の `label`・`run_dir` を書き直している）、`run-server.sh` の `cmd_up` のサーバーの起動（`own_home_env` の配列が `env -i` と `nohup` の間にある）と `:479`・`:497`、`daily.sh:88-141`、`supervisor.sh:262-270`、`uat-yaml-2590.test.ts:65-71`・`:187-193`、PR1c の §5.2（`495872a60` の `:283`）。実行したもの: この試験のファイルだけの `npx vitest run`・陽性の対照 3 つ（§2.8 の (4)〜(6)、os.tmpdir() の写しで）・`npm run lint`・`npx tsc --noEmit`
+- 上流の 4 回目で確かめたもの（実行）: `/bin/bash` 3.2.57（`bash --version`）で `set -u; v=NAME; [ -z "${!v+x}" ]` が未設定で真・空の値で偽・値ありで偽、`a=(); "${a[@]+"${a[@]}"}"` が空で通る（§4.5 の試験の口の形）。`run_id` は `cmd_up` で `date -u +%y%m%d%H%M%S` と `$RANDOM` から作られ `up` ごとに新しい（`run-server.sh` の `cmd_up`）。`run-server-3359.test.ts` の「the next up cleans …」の 2 回目の `up` は別の `run2` で、3 回目は今は無い（§4.4 の足す行）。`lock_child_wait`（`verify-run.sh:2065-2078`）は `go` が在れば次の確かめで `ack` を作り、期限・親の死では自分で `go` を作って `ack` を作らずに 1 を返す（`run_lock_abort_settle` の前提）。実行したもの: この試験のファイルと `tests/unit/guards`・`tests/unit/docs` の `npx vitest run`、陽性の対照 (7)〜(9)（os.tmpdir() の写しで）、`npm run lint`・`npx tsc --noEmit`・`node scripts/changelog-fragments.mjs check`
 - 探した対（上流の 3 回目）: 継承の行を固定する既存の試験（`git grep -n 'CM_RUN_LOCK_TOKEN' -- tests`）は `run-lock-3359.test.ts:89-97` と `run-server-3359.test.ts:430-433`で、どれも本書の表と一致する（`daily-sh.test.ts`・`metrics-sh.test.ts`・`uat-opencode-v1-files-4149.test.ts`・`run-server-3359.test.ts:72` は環境から消すか空にするだけ）。`down` の失敗を固定する試験は無い（`git grep 'stage down fail' -- tests` は 0 件）。`docs/en` に run-lock の写しは無い

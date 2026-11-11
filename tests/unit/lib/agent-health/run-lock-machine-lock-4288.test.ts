@@ -5,6 +5,10 @@
  * Third upstream round (pm-return-4288-pr1b-upstream2.md 1–6): the inheritance of own-other / aside-own is
  * reachable again (the cells of the first round), table C holds t1 by every result of D5, and the UAT
  * trap reaps a leader that ended by itself before it runs down's procedure.
+ * Fourth upstream round (pm-return-4288-pr1b-upstream3.md 1–2): table D holds the token stage of
+ * lock_hand_off (the first read is not T0 / unreadable) and abort-acked (go was there but ack is too:
+ * the child started — the parent does not wait on it as if it had withdrawn); the UAT go / ack carry the
+ * run id and are removed and seen absent before the fork (§4.5).
  *
  * What this file is now: the tables of §2 as typed data built from enumerations, so that a cell left
  * out is a type error (`satisfies`), and the invariants of §1 checked over every row (pure table
@@ -721,13 +725,15 @@ const ROWS_C: RowC[] = [
 /** A handover step that fails while the parent (UAT up / daily.sh) is alive. */
 const HANDOFF_FAILURES = [
   'state-write', // state_set server_pid fails (UAT only, before the handover — I-6)
+  'token', // lock_hand_off's first read is not T0 / cannot be read (stage=token; under I-6 only the latter) — before the publish, pid only, D12 keeps an unreadable owner
   'group', // ps -o pgid= of the child is not its pid, or unknown (stage=group)
   'tmp', // the .owner-T1 tmp cannot be written (stage=tmp)
   'mv', // the mv of the tmp over owner fails (stage=mv)
   'verify', // the owner read back after the mv is not T1 with pgid=G (stage=verify)
   'verify-unreadable', // the owner cannot be read back after the mv (stage=verify, owner unknown)
   'signal', // mkdir go fails and go is not there (stage=signal)
-  'abort', // go already exists: the child withdrew first, past its deadline (stage=abort)
+  'abort', // go already exists and no ack appears: the child withdrew first, past its deadline (stage=abort)
+  'abort-acked', // go already exists but ack appears: the child started (e.g. the parent's own mkdir go made go and still failed) — after go (§4.5)
   'ack', // the child's mkdir ack fails: it exits without exec
   'child-exits', // the child exec'd and exits at once (UAT: the server cannot start; daily: run.ts fails)
 ] as const;
@@ -747,9 +753,10 @@ type FailCell =
       kind: 'reach';
       record: 'T0' | 'T1' | 'unknown';
       /**
-       * what the parent sends before it releases: pid only before the publish (state-write / group / tmp / mv);
+       * what the parent sends before it releases: pid only before the publish (state-write / token / group / tmp / mv);
        * 'group' after it — on every such row (verify, verify-unreadable, signal) -G only when the leader is alive
-       * and ps -o pgid= says G, else the pid only (I-10). 'none': the child ends by itself and is reaped by wait.
+       * and ps -o pgid= says G, else the pid only — and a pid-only branch does not drain G either (I-10; UAT abort-acked: down's procedure,
+       * table C t1, which verifies the leader the same way). 'none': the child ends by itself and is reaped by wait.
        */
       signals: 'pid' | 'group' | 'none';
       child: 'never-starts' | 'exits' | 'ran';
@@ -768,6 +775,7 @@ const dailyPre = (stage: string): FailCell => ({ kind: 'reach', record: 'T0', si
 const TABLE_D = {
   uat: {
     'state-write': { kind: 'reach', record: 'T0', signals: 'pid', child: 'never-starts', release: 'D12-released', lockAfter: 'removed', status: 'failed', exit: 1, msg: 'state-write-failed' },
+    token: { kind: 'reach', record: 'unknown', signals: 'pid', child: 'never-starts', release: 'D12-deferred', lockAfter: 'kept', status: 'failed-lock-left', exit: 1, msg: 'handoff-failed stage=token' },
     group: uatPre('group'),
     tmp: uatPre('tmp'),
     mv: uatPre('mv'),
@@ -775,11 +783,14 @@ const TABLE_D = {
     'verify-unreadable': { kind: 'reach', record: 'unknown', signals: 'group', child: 'never-starts', release: 'D12-deferred', lockAfter: 'kept', status: 'failed-lock-left', exit: 1, msg: 'handoff-failed stage=verify' },
     signal: { kind: 'reach', record: 'T1', signals: 'group', child: 'never-starts', release: 'D12-needs-head-D5-released', lockAfter: 'removed', status: 'failed', exit: 1, msg: 'handoff-failed stage=signal' },
     abort: { kind: 'reach', record: 'T1', signals: 'none', child: 'never-starts', release: 'D12-needs-head-D5-released', lockAfter: 'removed', status: 'failed', exit: 1, msg: 'handoff-failed stage=abort' },
+    // The child started: up does not wait on it; the trap runs down's procedure (record t1, the leader verified → TERM, G drained).
+    'abort-acked': { kind: 'reach', record: 'T1', signals: 'group', child: 'ran', release: 'stop-then-D5', lockAfter: 'removed', status: 'failed', exit: 1, msg: 'handoff-failed stage=abort' },
     ack: { kind: 'reach', record: 'T1', signals: 'none', child: 'exits', release: 'stop-then-D5', lockAfter: 'removed', status: 'failed', exit: 1, msg: 'server-exited' },
     'child-exits': { kind: 'reach', record: 'T1', signals: 'none', child: 'ran', release: 'stop-then-D5', lockAfter: 'removed', status: 'failed', exit: 1, msg: 'server-exited' },
   },
   daily: {
     'state-write': { kind: 'never', why: 'daily は状態ファイルを書かない（記録の pid は daily.sh 自身の $$）' },
+    token: { kind: 'reach', record: 'unknown', signals: 'pid', child: 'never-starts', release: 'D12-deferred', lockAfter: 'kept', status: 'sync-failed', exit: 2, msg: 'handoff-failed stage=token' },
     group: dailyPre('group'),
     tmp: dailyPre('tmp'),
     mv: dailyPre('mv'),
@@ -787,6 +798,8 @@ const TABLE_D = {
     'verify-unreadable': { kind: 'reach', record: 'unknown', signals: 'group', child: 'never-starts', release: 'D12-deferred', lockAfter: 'kept', status: 'sync-failed', exit: 2, msg: 'handoff-failed stage=verify' },
     signal: { kind: 'reach', record: 'T1', signals: 'group', child: 'never-starts', release: 'D12-released-after-drain', lockAfter: 'removed', status: 'sync-failed', exit: 2, msg: 'handoff-failed stage=signal' },
     abort: { kind: 'reach', record: 'T1', signals: 'none', child: 'never-starts', release: 'D12-released-after-drain', lockAfter: 'removed', status: 'sync-failed', exit: 2, msg: 'handoff-failed stage=abort' },
+    // The child started under T1: daily waits for it as on (D), drains the reaped G as on (E), then reports the abort.
+    'abort-acked': { kind: 'reach', record: 'T1', signals: 'none', child: 'ran', release: 'D12-released-after-drain', lockAfter: 'removed', status: 'sync-failed', exit: 2, msg: 'handoff-failed stage=abort' },
     ack: { kind: 'reach', record: 'T1', signals: 'none', child: 'exits', release: 'D12-released-after-drain', lockAfter: 'removed', status: 'sync-failed', exit: 2, msg: 'handoff-failed stage=ack' },
     'child-exits': { kind: 'reach', record: 'T1', signals: 'none', child: 'ran', release: 'D12-released-after-drain', lockAfter: 'removed', status: 'run-exit', exit: 'child', msg: 'run-exited' },
   },
@@ -1112,22 +1125,29 @@ describe('#4288 PR1b table C: UAT down — record × leader × the rest of its g
 });
 
 describe('#4288 PR1b table D: a handover step fails while the parent lives (§2.5, PM Claude P2-3)', () => {
-  it('has every combination, 20 rows (1 never, 19 reachable)', () => {
+  it('has every combination, 24 rows (1 never, 23 reachable)', () => {
     expect(ROWS_D).toHaveLength(FLOWS.length * HANDOFF_FAILURES.length);
     expect(count(ROWS_D, 'never')).toBe(1);
-    expect(count(ROWS_D, 'reach')).toBe(19);
+    expect(count(ROWS_D, 'reach')).toBe(23);
   });
 
   it.each(reachRows(ROWS_D))('$id: the child never works unsignalled, -G only after the publish, and a kept lock is said', (row) => {
     if (row.cell.kind !== 'reach') throw new Error('filtered');
     const cell = row.cell;
-    const beforePublish = ['state-write', 'group', 'tmp', 'mv'].includes(row.failure);
+    const beforePublish = ['state-write', 'token', 'group', 'tmp', 'mv'].includes(row.failure);
     // Before the publish the record is T0 (the parent's own), only the waiting child's pid is signalled (P3-6).
-    expect(cell.record === 'T0').toBe(beforePublish);
-    if (beforePublish) expect([cell.signals, cell.release]).toEqual(['pid', 'D12-released']);
+    // The token stage is before the publish too, but its record could not be read: D12 keeps it (I-2, fourth round P3-2).
+    expect(cell.record === 'T0').toBe(beforePublish && row.failure !== 'token');
+    if (beforePublish) expect([cell.signals, cell.release]).toEqual(['pid', row.failure === 'token' ? 'D12-deferred' : 'D12-released']);
     if (cell.signals === 'group') expect(beforePublish).toBe(false);
     // The child works only after go (I-7).
-    if (['state-write', 'group', 'tmp', 'mv', 'verify', 'verify-unreadable', 'signal', 'abort'].includes(row.failure)) expect(cell.child).toBe('never-starts');
+    if (['state-write', 'token', 'group', 'tmp', 'mv', 'verify', 'verify-unreadable', 'signal', 'abort'].includes(row.failure)) expect(cell.child).toBe('never-starts');
+    // ack present: the child started, so the parent treats it as after go — it neither waits on it as withdrawn
+    // (UAT: down's procedure in the trap) nor leaves its G unsent (fourth round P2-1).
+    if (row.failure === 'abort-acked') {
+      expect([cell.record, cell.child]).toEqual(['T1', 'ran']);
+      expect(cell.release).toBe(row.flow === 'uat' ? 'stop-then-D5' : 'D12-released-after-drain');
+    }
     // An unreadable owner keeps the lock (I-2) and says so; everything else ends with the lock gone.
     expect(cell.lockAfter === 'kept').toBe(cell.release === 'D12-deferred');
     if (cell.lockAfter === 'kept') expect(cell.status === 'failed-lock-left' || cell.status === 'sync-failed').toBe(true);
@@ -1141,6 +1161,7 @@ describe('#4288 PR1b table D: a handover step fails while the parent lives (§2.
   for (const flow of FLOWS) {
     it.todo(`PR1b: inject each failure into the ${flow} handover (CM_VERIFY_TEST_FAULT / a fake child) and assert record / signals / child / release / status / exit / wording`);
   }
+  it.todo('PR1b (§4.4, fourth round P2-1): up → down → up on the same run dir — the third up names its own handoff-<run_id>.go / .ack, removes them and sees them absent before the fork, and its child starts only after its own go (an earlier run’s go / ack left in the run dir changes nothing)');
 });
 
 describe('#4288 PR1b table D2: odd observations stay on the keeping side and are said (§2.6)', () => {
@@ -1174,13 +1195,13 @@ describe('#4288 PR1b table E: the argument / context checks (§4.2)', () => {
 });
 
 describe('#4288 PR1b: the table sizes written in the design doc (§2.8)', () => {
-  it('1135 rows in all (C′ counted as 6): 734 reachable, 90 rejected, 311 never', () => {
+  it('1139 rows in all (C′ counted as 6): 738 reachable, 90 rejected, 311 never', () => {
     const rows = [...ROWS_A, ...ROWS_B, ...ROWS_C, ...ROWS_D, ...ROWS_D2, ...ROWS_E];
     expect({
       all: rows.length + D5_RESULTS.length,
       reach: count(rows, 'reach') + D5_RESULTS.length,
       rejected: count(rows, 'rejected'),
       never: count(rows, 'never'),
-    }).toEqual({ all: 1135, reach: 734, rejected: 90, never: 311 });
+    }).toEqual({ all: 1139, reach: 738, rejected: 90, never: 311 });
   });
 });
