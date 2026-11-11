@@ -2264,6 +2264,8 @@ describe('#4288 PR1b, daily.sh hands the lock to run.ts’s process group (§4.5
       CM_RUN_LOCK_DIR: lockDir,
       CM_RUN_LOCK_TOKEN: '',
       FAKE_OUT: fakeOut,
+      // the handover directory (cm-daily-hand.*) is made under the sandbox: a run killed by the test leaves none in $TMPDIR
+      TMPDIR: path.join(root, 'tmp'),
       ...extra,
     };
   };
@@ -2274,6 +2276,7 @@ describe('#4288 PR1b, daily.sh hands the lock to run.ts’s process group (§4.5
     root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cm-daily-4288-'));
     lockDir = path.join(root, 'run.lock');
     fakeOut = path.join(root, 'fake-out');
+    fs.mkdirSync(path.join(root, 'tmp'));
     fs.writeFileSync(path.join(root, 'gitconfig'), '[user]\n\tname = t\n\temail = t@example.invalid\n[init]\n\tdefaultBranch = develop\n');
     // a fake `npx tsx scripts/agent-health/run.ts …`: says who it is and what the lock looks like, then ends (or waits)
     fs.mkdirSync(path.join(root, 'bin'));
@@ -2397,111 +2400,9 @@ exit \${FAKE_EXIT:-0}
     expect(fs.existsSync(lockDir)).toBe(false);
   }, REAL_SHELL_TEST_TIMEOUT_MS);
 
-  it('pr1b-4: TERM after the sync and before the child’s receipt: exactly one AGENT_HEALTH_SYNC line, status=failed reason=interrupted, exit 143', async () => {
-    const pauses = path.join(root, 'pauses');
-    fs.mkdirSync(pauses);
-    // the parent stops inside the handover (lock_hand_off, before `go`): the sync is done, `ack` cannot be there yet
-    const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], {
-      cwd: root,
-      env: dailyEnv({ CM_VERIFY_TEST_HANDOFF: 'pause:tmp', CM_VERIFY_TEST_HANDOFF_DIR: pauses }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    spawnedDaily.push(child);
-    let stdout = '';
-    child.stdout!.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr!.resume();
-    const exited = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
-    const end = Date.now() + 30_000;
-    while (!fs.existsSync(path.join(pauses, 'tmp.reached')) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fs.existsSync(path.join(pauses, 'tmp.reached'))).toBe(true);
-    expect(stdout).not.toContain('AGENT_HEALTH_SYNC');
-    process.kill(child.pid!, 'SIGTERM');
-    expect(await exited).toBe(143);
-    const lines = stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC '));
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/^AGENT_HEALTH_SYNC status=failed reason=interrupted exit=143 before=[0-9a-f]{8}$/);
-    expect(fs.existsSync(fakeOut)).toBe(false);
-  }, REAL_SHELL_TEST_TIMEOUT_MS);
-
-  it('pr1b-4 negative control: TERM before the sync has finished (npm install) still leaves no AGENT_HEALTH_SYNC line, exit 143', async () => {
-    // package-lock.json changes upstream, so daily.sh runs the install command, which waits here
-    const seed = path.join(root, 'seed');
-    fs.writeFileSync(path.join(seed, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
-    git(seed, 'commit', '-q', '-am', 'lock changed');
-    git(seed, 'push', '-q', 'origin', 'HEAD:develop');
-    const reached = path.join(root, 'install.reached');
-    const go = path.join(root, 'install.go');
-    const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], {
-      cwd: root,
-      env: dailyEnv({ AGENT_HEALTH_NPM_INSTALL_CMD: `: > '${reached}'; while [ ! -e '${go}' ]; do sleep 0.05; done` }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    spawnedDaily.push(child);
-    let stdout = '';
-    child.stdout!.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr!.resume();
-    const exited = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
-    const end = Date.now() + 30_000;
-    while (!fs.existsSync(reached) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fs.existsSync(reached)).toBe(true);
-    process.kill(child.pid!, 'SIGTERM');
-    fs.writeFileSync(go, '');
-    expect(await exited).toBe(143);
-    expect(stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC '))).toHaveLength(0);
-  }, REAL_SHELL_TEST_TIMEOUT_MS);
-
-  it('pr1b-4: a child killed from outside before it execs (no receipt, not 75): one AGENT_HEALTH_SYNC line, ok, and its exit code (137)', async () => {
-    const pauses = path.join(root, 'pauses');
-    fs.mkdirSync(pauses);
-    const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], {
-      cwd: root,
-      env: dailyEnv({ CM_VERIFY_TEST_HANDOFF: 'pause:tmp', CM_VERIFY_TEST_HANDOFF_DIR: pauses }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    spawnedDaily.push(child);
-    let stdout = '';
-    child.stdout!.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr!.resume();
-    const exited = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
-    const end = Date.now() + 30_000;
-    while (!fs.existsSync(path.join(pauses, 'tmp.reached')) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fs.existsSync(path.join(pauses, 'tmp.reached'))).toBe(true);
-    // the waiting child (cm-daily-child, a child of daily.sh) is killed before `go`
-    const waiting = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
-      .stdout.split('\n')
-      .map((line) => line.trim().split(/\s+/))
-      .filter((cols) => cols[1] === String(child.pid) && cols.slice(2).join(' ').includes('cm-daily-child'))
-      .map((cols) => Number(cols[0]));
-    expect(waiting).toHaveLength(1);
-    process.kill(waiting[0], 'SIGKILL');
-    fs.writeFileSync(path.join(pauses, 'tmp.go'), '');
-    expect(await exited).toBe(137);
-    const lines = stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC '));
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/^AGENT_HEALTH_SYNC status=ok /);
-    expect(fs.existsSync(fakeOut)).toBe(false);
-  }, REAL_SHELL_TEST_TIMEOUT_MS);
-
-  it('pr1b-4 negative control: --sync-only has exactly one AGENT_HEALTH_SYNC line, and it is ok', () => {
-    const result = spawnSync('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json'), '--sync-only'], {
-      cwd: root,
-      env: dailyEnv(),
-      encoding: 'utf8',
-      timeout: 90_000,
-    });
-    expect(result.status, result.stderr).toBe(0);
-    const lines = result.stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC '));
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/^AGENT_HEALTH_SYNC status=ok /);
-  });
-
-  it('pr1b-4 negative control: a run that ends normally has exactly one AGENT_HEALTH_SYNC line, and it is ok', () => {
-    const result = daily({ FAKE_EXIT: '0' });
-    expect(result.status, result.stderr).toBe(0);
-    const lines = result.stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC '));
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/^AGENT_HEALTH_SYNC status=ok /);
-  });
+  // pr1b-4 (TERM before the receipt, TERM during npm install, a child killed before it execs, --sync-only, a normal run):
+  // moved to tests/unit/scripts/agent-health/daily-trap-table-4288.test.ts as the cells C4 × TERM, B0 × TERM,
+  // C11 × EXIT, C1 × EXIT and C12 × EXIT of the trap table.
 
   it('TERM while run.ts runs (EXIT path F): its group is stopped, the lock is released, exit 143', async () => {
     const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], {
@@ -2522,130 +2423,7 @@ exit \${FAKE_EXIT:-0}
     expect(fs.existsSync(lockDir)).toBe(false);
   }, REAL_SHELL_TEST_TIMEOUT_MS);
 
-  // pr1b-5 / pr1b-6: every AGENT_HEALTH_SYNC line goes out through emit_sync_line (planned line -> echo -> mark).
-  // A TERM handled between the echo and the mark leaves the same line once or twice - never two different ones.
-  // The echo of the chosen line is wrapped by a BASH_ENV function (test only) that waits at the chosen point.
-  type SyncRoute = { match: string; args?: string[]; env?: Record<string, string>; killWaitingChild?: boolean; secondTerm?: boolean };
-  const termAtSyncLine = async (name: string, point: 'before' | 'after', route: SyncRoute): Promise<{ lines: string[]; code: number | null }> => {
-    const gate = path.join(root, `sync-${name}-${point}`);
-    fs.mkdirSync(gate);
-    const pauses = path.join(root, 'pauses');
-    const hook = path.join(root, `sync-${name}-${point}.sh`);
-    const wait = `: > "$CM_T_GATE/reached"; while [ ! -e "$CM_T_GATE/go" ]; do sleep 0.05; done`;
-    fs.writeFileSync(
-      hook,
-      [
-        'echo() {',
-        '  case "$1" in',
-        `    ${route.match})`,
-        `      if [ "$CM_T_POINT" = before ]; then ${wait}; fi`,
-        '      builtin echo "$@"',
-        `      if [ "$CM_T_POINT" = after ]; then ${wait}; fi`,
-        '      return 0 ;;',
-        '  esac',
-        '  builtin echo "$@"',
-        '}',
-        '',
-      ].join('\n'),
-    );
-    const handoff: Record<string, string> = {};
-    if (route.killWaitingChild || route.secondTerm) {
-      fs.mkdirSync(pauses);
-      handoff.CM_VERIFY_TEST_HANDOFF = 'pause:tmp';
-      handoff.CM_VERIFY_TEST_HANDOFF_DIR = pauses;
-    }
-    const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json'), ...(route.args ?? [])], {
-      cwd: root,
-      env: dailyEnv({ FAKE_WAIT: '1', BASH_ENV: hook, CM_T_POINT: point, CM_T_GATE: gate, ...handoff, ...(route.env ?? {}) }),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    spawnedDaily.push(child);
-    let stdout = '';
-    child.stdout!.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr!.resume();
-    const exited = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
-    const until = async (file: string): Promise<void> => {
-      const end = Date.now() + 30_000;
-      while (!fs.existsSync(file) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(fs.existsSync(file)).toBe(true);
-    };
-    if (route.killWaitingChild || route.secondTerm) {
-      await until(path.join(pauses, 'tmp.reached'));
-      if (route.killWaitingChild) {
-        const waiting = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
-          .stdout.split('\n')
-          .map((line) => line.trim().split(/\s+/))
-          .filter((cols) => cols[1] === String(child.pid) && cols.slice(2).join(' ').includes('cm-daily-child'))
-          .map((cols) => Number(cols[0]));
-        expect(waiting).toHaveLength(1);
-        process.kill(waiting[0], 'SIGKILL');
-        fs.writeFileSync(path.join(pauses, 'tmp.go'), '');
-      } else {
-        // the first TERM ends the script before the receipt: daily_on_exit then says the line (interrupted)
-        process.kill(child.pid!, 'SIGTERM');
-      }
-    }
-    await until(path.join(gate, 'reached'));
-    process.kill(child.pid!, 'SIGTERM');
-    fs.writeFileSync(path.join(gate, 'go'), '');
-    const code = await exited;
-    return { lines: stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC ')), code };
-  };
-  const expectOneLine = (lines: string[], point: 'before' | 'after', pattern: RegExp): void => {
-    // before the echo: exactly the planned line, once; after it: the same line, once or twice
-    expect(lines.length).toBeGreaterThanOrEqual(1);
-    expect(lines.length).toBeLessThanOrEqual(point === 'before' ? 1 : 2);
-    expect(new Set(lines).size).toBe(1);
-    expect(lines[0]).toMatch(pattern);
-  };
-
-  const routes: Array<{ name: string; route: SyncRoute; pattern: RegExp; code: number }> = [
-    {
-      name: 'failed-fail_sync',
-      route: { match: '"AGENT_HEALTH_SYNC status=failed reason=handoff-failed stage=mv"*', env: { CM_VERIFY_TEST_OBS_FAULT: 'handoff-publish=EIO' } },
-      pattern: /^AGENT_HEALTH_SYNC status=failed reason=handoff-failed stage=mv before=[0-9a-f]{8}$/,
-      code: 143,
-    },
-    { name: 'sync-only', route: { match: '"AGENT_HEALTH_SYNC status=ok"*', args: ['--sync-only'] }, pattern: /^AGENT_HEALTH_SYNC status=ok /, code: 143 },
-    { name: 'tail', route: { match: '"AGENT_HEALTH_SYNC status=ok"*', killWaitingChild: true }, pattern: /^AGENT_HEALTH_SYNC status=ok /, code: 143 },
-    {
-      name: 'exit-interrupted',
-      route: { match: '"AGENT_HEALTH_SYNC status=failed reason=interrupted"*', secondTerm: true },
-      pattern: /^AGENT_HEALTH_SYNC status=failed reason=interrupted exit=143 /,
-      code: 143,
-    },
-  ];
-  for (const { name, route, pattern, code } of routes) {
-    for (const point of ['before', 'after'] as const) {
-      it(`pr1b-6: route ${name}, TERM ${point} the mark: one status only (${point === 'before' ? 'the planned line once' : 'the same line once or twice'}), exit ${code}`, async () => {
-        const result = await termAtSyncLine(name, point, route);
-        expect(result.code).toBe(code);
-        expectOneLine(result.lines, point, pattern);
-      }, REAL_SHELL_TEST_TIMEOUT_MS);
-    }
-  }
-
-  it('pr1b-5: TERM between the planned ok line and its echo: the ok line once, no failed line, exit 143', async () => {
-    const { lines, code } = await termAtSyncLine('ok-ack', 'before', { match: '"AGENT_HEALTH_SYNC status=ok"*' });
-    expect(code).toBe(143);
-    expectOneLine(lines, 'before', /^AGENT_HEALTH_SYNC status=ok /);
-  }, REAL_SHELL_TEST_TIMEOUT_MS);
-
-  it('pr1b-5: TERM between the echo and the printed mark: only ok lines (the same line twice at most), no failed line, exit 143', async () => {
-    const { lines, code } = await termAtSyncLine('ok-ack', 'after', { match: '"AGENT_HEALTH_SYNC status=ok"*' });
-    expect(code).toBe(143);
-    expectOneLine(lines, 'after', /^AGENT_HEALTH_SYNC status=ok /);
-    expect(lines.join('\n')).not.toContain('status=failed');
-  }, REAL_SHELL_TEST_TIMEOUT_MS);
-
-  it('pr1b-6 scan: daily.sh prints an AGENT_HEALTH_SYNC line only inside emit_sync_line', () => {
-    const text = fs.readFileSync(path.join(work, 'scripts/agent-health/daily.sh'), 'utf8').split('\n');
-    const start = text.findIndex((line) => line.startsWith('emit_sync_line()'));
-    expect(start).toBeGreaterThan(0);
-    const end = text.findIndex((line, index) => index > start && line === '}');
-    const printing = (line: string): boolean => /^\s*(echo|printf)\b/.test(line) && (/AGENT_HEALTH_SYNC/.test(line) || /\$\{?SYNC_(PLANNED|OK)_LINE/.test(line));
-    const outside = text.map((line, index) => ({ line, index })).filter(({ line, index }) => printing(line) && (index < start || index > end));
-    expect(outside).toEqual([]);
-    expect(text.slice(start, end).filter(printing)).toHaveLength(1);
-  });
+  // pr1b-5 / pr1b-6 (TERM around the echo of each AGENT_HEALTH_SYNC line, and the emit_sync_line scan): moved to
+  // tests/unit/scripts/agent-health/daily-trap-table-4288.test.ts as the emit points p1/p2 of C1, C5, C7, C11 and the
+  // second TERM of X0 (the cells of pm-trap-table-4288-pr1b.md), and its I1 structure scan.
 });

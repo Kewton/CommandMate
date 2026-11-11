@@ -64,6 +64,15 @@ fi
 STARTED_AT="$(node -e 'process.stdout.write(new Date().toISOString())')"
 BEFORE="$(git rev-parse HEAD)" || exit 2
 
+# R-SIG (#4288): every end of this script after this point goes through daily_exit or one of the five handlers below,
+# and each of them ignores INT, TERM, HUP, PIPE and QUIT as its first command, so a second signal cannot end the EXIT
+# trap before the AGENT_HEALTH_SYNC line is out and the lock is released (an `exit` inside the EXIT trap does not come
+# back). KILL cannot be caught and is outside this rule.
+daily_exit() { # <code>
+  trap '' INT TERM HUP PIPE QUIT
+  exit "$1"
+}
+
 # The one AGENT_HEALTH_SYNC line. Every line goes out through emit_sync_line, the only place that prints one:
 # the line about to be printed is put in SYNC_PLANNED_LINE, echoed, and only then marked in SYNC_LINE_PRINTED.
 # SYNC_OK_LINE is set once the sync has succeeded. A signal between the echo and the mark makes daily_on_exit
@@ -84,7 +93,7 @@ fail_sync() {
   reason="$1"
   emit_sync_line "AGENT_HEALTH_SYNC status=failed reason=${reason} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
   if [ "${KEEP_REPORT:-0}" = 1 ] && [ -f "$OUT" ] && [ -n "${GO:-}" ] && [ "$OUT" -nt "$GO" ]; then
-    exit 2
+    daily_exit 2
   fi
   AH_OUT="$OUT" AH_STARTED_AT="$STARTED_AT" AH_BEFORE="$BEFORE" AH_REASON="$reason" node -e '
     const fs = require("fs");
@@ -103,7 +112,7 @@ fail_sync() {
     fs.mkdirSync(path.dirname(env.AH_OUT), { recursive: true });
     fs.writeFileSync(env.AH_OUT, JSON.stringify(report, null, 2) + "\n");
   ' || echo "daily.sh: could not write the report to $OUT" >&2
-  exit 2
+  daily_exit 2
 }
 
 # 3. One run at a time (UAT, this check, a manual run.ts).
@@ -113,6 +122,9 @@ fail_sync() {
 HAND=""
 CHILD=""
 CHILD_REAPED=0
+# 1 once the group of the lock (RUN_LOCK_G) was drained after its leader was reaped: an EXIT that comes between
+# the reaping and the end of the drain drains it again (it was not, before).
+GROUP_DRAINED=0
 
 # A step of the handover to run.ts's process group failed while this script lives (design
 # docs/design/run-lock-machine-lock-4288.md §4.5, table D). The child never works unsignalled. The
@@ -128,7 +140,8 @@ daily_handoff_fail() { # <stage>
   fi
   case "$stage" in
     arg | token | group | tmp | mv)
-      # before the publish: the child waits alone in its group, signal its pid only
+      # before the publish: the child waits alone in its group, signal its pid only (no group to drain after it)
+      GROUP_DRAINED=1
       kill -s KILL "$CHILD" 2>/dev/null
       wait "$CHILD" 2>/dev/null
       CHILD_REAPED=1
@@ -141,14 +154,17 @@ daily_handoff_fail() { # <stage>
         wait "$CHILD" 2>/dev/null
         CHILD_REAPED=1
         lock_drain_group "$RUN_LOCK_G" 1
+        GROUP_DRAINED=1
       else
+        GROUP_DRAINED=1 # not shown to be ours: the EXIT trap does not drain it either
         kill -s KILL "$CHILD" 2>/dev/null
         wait "$CHILD" 2>/dev/null
         CHILD_REAPED=1
       fi
       ;;
     abort)
-      # the child withdrew without an ack and ended
+      # the child withdrew without an ack and ended (alone in its group: nothing to drain after it)
+      GROUP_DRAINED=1
       wait "$CHILD" 2>/dev/null
       CHILD_REAPED=1
       ;;
@@ -159,22 +175,27 @@ daily_handoff_fail() { # <stage>
       wait "$CHILD" 2>/dev/null
       CHILD_REAPED=1
       [ -z "$RUN_LOCK_G" ] || lock_drain_group "$RUN_LOCK_G" 0
+      GROUP_DRAINED=1
       ;;
   esac
   fail_sync "handoff-failed stage=${stage%%-*}"
 }
 
-# EXIT (INT and TERM end in `exit 130/143`, so they come here): a line that was planned but not marked as
-# printed is printed as planned (the ok line; never failed). A run that synced, has no planned line and has not
-# said anything yet (interrupted before the child's receipt) says it failed, once - the one AGENT_HEALTH_SYNC
-# line is never missing after the sync. Then a child not yet waited for is stopped first (its group when the lock names
-# it), and the lock is released once - D12 keeps it while the group has a member.
+# EXIT (INT, TERM, HUP, PIPE and QUIT end in `exit 128+n` after ignoring all five, the other ends in daily_exit, so
+# the five are ignored before this runs): a line that was planned but not marked as printed is printed as planned (the ok line;
+# never failed). A run that synced, has no planned line and has not said anything yet (interrupted before the
+# child's receipt) says it failed, once - the one AGENT_HEALTH_SYNC line is never missing after the sync. Then a
+# child not yet waited for is stopped first (its group when the lock names it), a group whose leader was reaped but
+# that was not drained is drained, and the lock is released once - D12 keeps it while the group has a member, and a
+# release that did not remove it (not released / none) is said on stderr.
+# Only the main shell runs it: bash keeps the EXIT trap string across a fork, and a subshell signalled between the
+# fork and the reset of its handlers would run it (verify-run.sh cleanup_workdir, Issue #228).
 # shellcheck disable=SC2329 # run by the EXIT trap below
-daily_on_exit() {
-  local rc=$?
-  # A second INT/TERM while this runs would end it (an `exit` inside the EXIT trap does not come back) before the
-  # line is out or the lock is released: it is ignored here.
-  trap '' INT TERM
+daily_on_exit() { # <exit code>
+  [ "${BASH_SUBSHELL:-0}" -eq 0 ] || return 0
+  # R-SIG: the five are already ignored by every way in (the handlers, daily_exit); this keeps it so for any other.
+  trap '' INT TERM HUP PIPE QUIT
+  local rc="$1"
   if [ -n "$SYNC_PLANNED_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
     emit_sync_line "$SYNC_PLANNED_LINE"
   elif [ -n "$SYNC_OK_LINE" ] && [ -z "$SYNC_PLANNED_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
@@ -183,13 +204,23 @@ daily_on_exit() {
   if [ -n "$CHILD" ] && [ "$CHILD_REAPED" != 1 ]; then
     if [ -n "$RUN_LOCK_G" ]; then
       lock_stop_gate "$RUN_LOCK_G" "$CHILD"
+      GROUP_DRAINED=1
     else
       kill -s KILL "$CHILD" 2>/dev/null
       wait "$CHILD" 2>/dev/null
     fi
     CHILD_REAPED=1
   fi
+  if [ -n "$RUN_LOCK_G" ] && [ "$GROUP_DRAINED" != 1 ]; then
+    # the leader was reaped but its group was not drained (or the drain was cut short): TERM again, then KILL
+    lock_drain_group "$RUN_LOCK_G" 0
+    GROUP_DRAINED=1
+  fi
   run_lock_release "$T0"
+  case "$RUN_LOCK_RESULT" in
+    released | none) ;;
+    *) echo "daily.sh: the run lock was not released (${RUN_LOCK_RESULT:-unknown}${RUN_LOCK_ERROR:+: $RUN_LOCK_ERROR}); it is left for the next run to take over" >&2 ;;
+  esac
   [ -z "$HAND" ] || rm -rf "$HAND"
 }
 
@@ -202,9 +233,14 @@ if ! run_lock_acquire daily $$ "$T0"; then
 fi
 # run.ts inherits the lock through this; the child makes it T1 (<T0>-g<its group>) before it execs.
 export CM_RUN_LOCK_TOKEN="$T0"
-trap daily_on_exit EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'daily_on_exit "$?"' EXIT
+# R-SIG: an explicit handler for each of the five (a signal without one dies by default; an EXIT trap that then ignores
+# it does not run at all - measured on bash 3.2), whose first command ignores all five; then exit 128+n.
+trap 'trap "" INT TERM HUP PIPE QUIT; exit 130' INT
+trap 'trap "" INT TERM HUP PIPE QUIT; exit 143' TERM
+trap 'trap "" INT TERM HUP PIPE QUIT; exit 129' HUP
+trap 'trap "" INT TERM HUP PIPE QUIT; exit 141' PIPE
+trap 'trap "" INT TERM HUP PIPE QUIT; exit 131' QUIT
 
 # 4. Never pull over local edits to tracked files.
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
@@ -243,7 +279,7 @@ SYNC_OK_LINE="AGENT_HEALTH_SYNC status=ok before=$(printf '%s' "$BEFORE" | cut -
 
 if [ "$SYNC_ONLY" -eq 1 ]; then
   emit_sync_line "$SYNC_OK_LINE"
-  exit 0
+  daily_exit 0
 fi
 
 # run.ts is the one process this lock protects, so it is started as the leader of a group of its own
@@ -256,11 +292,13 @@ HAND="$(mktemp -d "${TMPDIR:-/tmp}/cm-daily-hand.XXXXXX")" || fail_sync "handoff
 GO="$HAND/go"
 ACK="$HAND/ack"
 DEADLINE=$(($(date +%s) + HANDOFF_WAIT_SEC))
-# ${arr[@]+...} keeps an empty array from expanding to "" on bash 3.2.
+# ${arr[@]+...} keeps an empty array from expanding to "" on bash 3.2. The child is a subshell that execs at once
+# (same pid, the leader of its group): in the fork window it is a subshell (BASH_SUBSHELL=1), so the EXIT trap string
+# it inherits returns at once in daily_on_exit's guard if a signal to the group lands there.
 set -m
-/bin/bash -c '. "$1" || exit 75; lock_child_wait "$2" "$3" "$4" "$5" || exit 75; export CM_RUN_LOCK_TOKEN="$CM_RUN_LOCK_TOKEN-g$$"; shift 6; exec "$@"' \
+( exec /bin/bash -c '. "$1" || exit 75; lock_child_wait "$2" "$3" "$4" "$5" || exit 75; export CM_RUN_LOCK_TOKEN="$CM_RUN_LOCK_TOKEN-g$$"; shift 6; exec "$@"' \
   cm-daily-child "$PWD/scripts/lib/machine-lock.sh" "$GO" "$ACK" "$DEADLINE" "$$" -- \
-  npx tsx scripts/agent-health/run.ts --out "$OUT" --synced-from "$BEFORE" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} </dev/null &
+  npx tsx scripts/agent-health/run.ts --out "$OUT" --synced-from "$BEFORE" ${RUN_ARGS[@]+"${RUN_ARGS[@]}"} ) </dev/null &
 CHILD=$!
 set +m
 run_lock_set_pid "$T0" "$$" "$CHILD" "$GO" || daily_handoff_fail "$RUN_LOCK_STAGE"
@@ -285,6 +323,7 @@ CODE=$?
 CHILD_REAPED=1
 # The leader is reaped: what is left of its group is drained (nothing is sent when it is empty).
 [ -z "$RUN_LOCK_G" ] || lock_drain_group "$RUN_LOCK_G" 0
+GROUP_DRAINED=1
 # The child ended with 75 before it made its receipt: it never exec'd run.ts (it could not make `ack`, or could
 # not read machine-lock.sh of the pulled tree). That is a failed handover, not run.ts's exit code (table D, ack).
 if [ "$CODE" -eq 75 ] && [ ! -e "$ACK" ]; then
@@ -293,4 +332,4 @@ fi
 if [ "$SYNC_LINE_PRINTED" != 1 ]; then
   emit_sync_line "$SYNC_OK_LINE"
 fi
-exit "$CODE"
+daily_exit "$CODE"

@@ -374,7 +374,7 @@
 - **bash の継承は `LOCK_HELD_*` を立てない**（継いだシェルの `run_lock_release` は `none`。PM Claude P3-5）。TS の継いだ handle の `release()` は何もしない（今のまま）
 - **`up`・`cleanup` は冒頭で `CM_RUN_LOCK_TOKEN` を消す**（run の子ではない。環境に残った token で daily の記録を「継いで」から引渡しで止まる経路を消す。Claude 5 P3）。**`daily.sh` は取得の後に `export CM_RUN_LOCK_TOKEN=<T0>`** し、自分の取得を継承の経路に通さない（F17）。子は引渡しの前に起こすので親からは T1 を渡せない。**子が exec の直前に `CM_RUN_LOCK_TOKEN="$CM_RUN_LOCK_TOKEN-g$$"`**（`bash -c` の `$$`＝子の pid＝G）を作り、`run.ts` は T1 を継ぐ（表 A `ts-inherit × own-other-g`。土台 D9。上流の 3 回目、PM Claude P2-2 (a)・Claude 5 P2-A）
 - **T1 は T0 の `label=`・`run_dir=` を引き継ぐ**（PM Claude P3-1）: `lock_hand_off` は `lock_format_owner` で書き直し、呼び手の欄は `LOCK_OWNER_EXTRA` からしか書かない。`run_lock_set_pid` は I-6 の確かめの owner の 1 回の読みのテキストから `label=`・`run_dir=` を取り、`LOCK_OWNER_EXTRA` にして `lock_hand_off` を呼ぶ（呼ぶたびに設定し、呼び終えたら戻す。§4.3 の S10）。`up` の断る文面の `down --run-dir` の案内（§4.6）は T1（`held-group`）でも出る。§4.4 の `:357-378` の新しい期待がこれを固定する
-- **daily の EXIT**（上流の 3 回目で分けた。Claude 5 P2-C・PM Claude P3-2）: **通常の終わり**は `wait "$child"` で長を回収した**直後**に `lock_drain_group "$G" 0`（空なら何も送らない。ゲート本体の `:2406` と同じ）を呼び、EXIT ではもう送らない。空になって番号が再利用されたかもしれない G に TERM を送らないため（`lock_stop_gate` は空かを見ずに `-G` へ TERM を送る）。**長をまだ回収していない経路**（`wait` の途中の INT／TERM、公開の後で `go` の前の失敗の枝の前）だけ `lock_stop_gate "$G" "$child"`（長を `wait` してから G を TERM・猶予・KILL。待っていない長に `lock_drain_group` を使うと長がゾンビで残り D12 が `deferred` になる、Claude 5 P2-5）。公開の前（G が無い・子 1 人）は子の pid に KILL して `wait`。どの経路も、その後で `run_lock_release` を 1 回（F16: D12 は最初に `LOCK_HELD_PATH` を消すので、G を空にする前に呼ばない）。INT／TERM は `exit 130／143` で EXIT に落とす。形は §4.5
+- **daily の EXIT**（上流の 3 回目で分けた。Claude 5 P2-C・PM Claude P3-2）: **通常の終わり**は `wait "$child"` で長を回収した**直後**に `lock_drain_group "$G" 0`（空なら何も送らない。ゲート本体の `:2406` と同じ）を呼び、EXIT ではもう送らない。空になって番号が再利用されたかもしれない G に TERM を送らないため（`lock_stop_gate` は空かを見ずに `-G` へ TERM を送る）。**長をまだ回収していない経路**（`wait` の途中の INT／TERM、公開の後で `go` の前の失敗の枝の前）だけ `lock_stop_gate "$G" "$child"`（長を `wait` してから G を TERM・猶予・KILL。待っていない長に `lock_drain_group` を使うと長がゾンビで残り D12 が `deferred` になる、Claude 5 P2-5）。公開の前（G が無い・子 1 人）は子の pid に KILL して `wait`。どの経路も、その後で `run_lock_release` を 1 回（F16: D12 は最初に `LOCK_HELD_PATH` を消すので、G を空にする前に呼ばない）。INT／TERM は `exit 130／143` で EXIT に落とす。形は §4.5（pr1b-7 で R-SIG: INT・TERM・HUP・PIPE・QUIT の 5 つに明示の trap、各 handler の最初のコマンドで 5 つを無視してから `exit 128+n`。§4.5 の後の「pr1b-7」）
 
 ### 4.3 PR1b と PR1c の契約（PM 共通の決定 4。PR1c の設計にも同じ文を置く）
 
@@ -534,7 +534,7 @@ daily_handoff_fail() { # <stage>  — 失敗の枝。どれも取り下げの期
     fail_sync "handoff-failed stage=${stage%%-*}"                                 # exit 2 → EXIT。verify-unreadable → verify、abort-acked → abort
 }
 
-daily_on_exit() {                                                                 # (F) EXIT（INT／TERM は exit 130／143 でここへ）
+daily_on_exit() {                                                                 # (F) EXIT（INT／TERM は exit 130／143 でここへ。pr1b-7 で 5 信号・下の注記）
     if [ -n "$child" ] && [ "$child_reaped" != 1 ]; then                          # 長をまだ回収していない
         if [ -n "$RUN_LOCK_G" ]; then lock_stop_gate "$RUN_LOCK_G" "$child"       # -G に TERM → 長を wait → 排水
         else kill -s KILL "$child" 2>/dev/null; wait "$child" 2>/dev/null; fi     # 公開の前: pid だけ
@@ -544,7 +544,14 @@ daily_on_exit() {                                                               
 }
 ```
 
-（関数の定義は実装では使う前に置く。上は読みの順。）`$$` は `bash -c` の単一引用符の中なので子の `bash` の pid＝G で、子は exec の直前に T1＝`<T0>-g<G>` を作る（土台 D9）。`run.ts` はそれを継ぐ（表 A `ts-inherit × own-other-g`）。stdin は `/dev/null`（`set -m` の下で端末から起こしたとき、背景のグループが端末を読んで SIGTTIN で止まり、G が生きたままロックが残るのを避ける。Claude 5 P3-C）。
+（関数の定義は実装では使う前に置く。上は読みの順。）
+
+**pr1b-7（trap の状態遷移表 pm-trap-table-4288-pr1b.md を正とした最後の直し、R-SIG）**: 上の (F) に次を足した。試験は `tests/unit/scripts/agent-health/daily-trap-table-4288.test.ts`（表と同じ id の `TRAP_TABLE` を `it.each` で全セル駆動）。
+- **R-SIG**: INT・TERM・HUP・PIPE・QUIT の 5 つすべてに `trap 'trap "" INT TERM HUP PIPE QUIT; exit 128+n' <SIG>`（130・143・129・141・131）。handler の最初のコマンドで 5 つを無視するので、2 本目の信号が EXIT 本体（`daily_on_exit`）を途中で終わらせない（表の X0、✗(a)(b)・△(c)）。trap の無い信号（既定の死）は bash 3.2 の実測で、HUP・PIPE・INT・TERM は EXIT trap を走らせるが行の `exit=` が 0 になり、QUIT は EXIT trap を走らせない（ロックは死んだ $$ の記録で残る）。KILL は捕まえられないので対象外。
+- 正常の終わりはすべて `daily_exit <code>`（5 つを無視してから exit）。trap を張った後に裸の `exit` は無い（走査の試験）。
+- `daily_on_exit` の 1 行目は `[ "${BASH_SUBSHELL:-0}" -eq 0 ] || return 0`（verify-run.sh の `cleanup_workdir` と同じ）、2 文目で 5 つを無視。EXIT trap は `trap 'daily_on_exit "$?"' EXIT`。子は `( exec /bin/bash -c '…' … ) </dev/null &` で起こし、fork の窓でも子は BASH_SUBSHELL=1（表の ?(f)）。
+- 長を回収したが G の排水が済んでいない（`wait` と排水の間・排水の途中の中断、表の △(g)）なら、EXIT が `lock_drain_group "$RUN_LOCK_G" 0` をやり直す（印 `GROUP_DRAINED`）。`daily_handoff_fail` の各段は、それぞれの規則で G を扱った（確かめられない G は排水しない）ことを同じ印で示す。`run_lock_release` の結果が `released`／`none` 以外なら stderr に `daily.sh: the run lock was not released (<結果>…)` を 1 行書く（I4）。
+- 直さず PR1d へ: 取得（`run_lock_acquire`）から trap の設定までの割込み（表の △(d)、A2。A3 の QUIT も同じ形）、fork と `CHILD=$!` の間（△(e)、子は自分で退く）。`$$` は `bash -c` の単一引用符の中なので子の `bash` の pid＝G で、子は exec の直前に T1＝`<T0>-g<G>` を作る（土台 D9）。`run.ts` はそれを継ぐ（表 A `ts-inherit × own-other-g`）。stdin は `/dev/null`（`set -m` の下で端末から起こしたとき、背景のグループが端末を読んで SIGTTIN で止まり、G が生きたままロックが残るのを避ける。Claude 5 P3-C）。
 
 表 D の各行が起きる所（daily ／ UAT）:
 
@@ -709,5 +716,5 @@ PM Claude `pm-review-4288-pr1b-upstream3-claude.md`（P1 0・P2 1・P3 5）。�
 
 - **1 グループのメンバーへの送信は `signal_member` の 1 か所だけ**: `drain_members` の TERM と KILL は、どちらも `signal_member <G> <TERM|KILL> <pid>` を通す。`signal_member` は送る直前に `member_in_group`（`kill -0` で生存、`ps -o pgid=` が今 G）を確かめ、外れた・示せない pid には送らない。選んだ時点（1 回目の確かめ）から TERM・KILL までの間に番号が別のグループで再利用されても送らない（codex P2 の TERM の側と、pr1b-3 の KILL の側を 1 つにした）。走査の試験（`run-lock-pr1b4-4288.test.ts`）が、`run-server.sh` で `signal_member` の外にある送信の行は「自分の子（`$UP_SERVER_PID`、回収前なので番号は再利用されない）」か「`stop_recorded` が直前に確かめた長（`kill "$pid"`）」だけであること、`daily.sh` の送信は自分の子（`$CHILD`）だけであることを固定する。
 - **2 陽性の対照は本体を駆動する**: 生きた pid r（別のグループ）を、`ps -o pgid=` が 1 回目は G・2 回目からは本当の値と答える形と、`kill -0` が 1 回目は生存・2 回目からは不在と答える形（`ps` は G のまま）で `drain_members G q r` に渡し、r に TERM も KILL も送られないこと、TERM を無視する本当のメンバー q には TERM と KILL が送られること（陰性の対照）を確かめる。
-- **3 daily の中断で `AGENT_HEALTH_SYNC` が 0 行にならない**: 同期の後で、まだ行を出していないうちに daily が終わる（受け取りの印の前の INT／TERM）と、`daily_on_exit` が `AGENT_HEALTH_SYNC status=failed reason=interrupted exit=<code> before=<8 桁>` を 1 回だけ出す（レポートは書かない。`run.ts` は始まっていない）。同期の前の中断は従来どおり行を出さない。`AGENT_HEALTH_SYNC` の行は関数 `emit_sync_line` だけが出す（pr1b-6）。出す予定の行を `SYNC_PLANNED_LINE` に置いてから echo し、echo の後に印 `SYNC_LINE_PRINTED` を立てる。`fail_sync`（failed）・`ok`（受け取りの印の後・`--sync-only`・末尾）・`daily_on_exit` の再出力と `interrupted` はすべてこの関数を通る（走査の試験が、関数の外に行を出す echo／printf が無いことを見る）。`daily_on_exit` は先頭で INT／TERM を無視する（2 本目の TERM で行が出ないうちに終わらせない）。`daily_on_exit` は、予定の行があって印が無ければその予定の行（`ok` を含む予定どおりの文。failed／interrupted は出さない）を出し、予定の行が無く同期の後なら従来どおり `interrupted` を 1 回出す。echo と印の間の中断で起きうるのは同じ行の 2 本だけで、予定が failed なら failed を、ok なら ok を出す。status は 1 通りに決まる（pr1b-5／6。読み手は同じ行の重複を 1 本と数える。試験は echo の前・後の 2 点に TERM を割り込ませる）。
+- **3 daily の中断で `AGENT_HEALTH_SYNC` が 0 行にならない**: 同期の後で、まだ行を出していないうちに daily が終わる（受け取りの印の前の INT／TERM）と、`daily_on_exit` が `AGENT_HEALTH_SYNC status=failed reason=interrupted exit=<code> before=<8 桁>` を 1 回だけ出す（レポートは書かない。`run.ts` は始まっていない）。同期の前の中断は従来どおり行を出さない。`AGENT_HEALTH_SYNC` の行は関数 `emit_sync_line` だけが出す（pr1b-6）。出す予定の行を `SYNC_PLANNED_LINE` に置いてから echo し、echo の後に印 `SYNC_LINE_PRINTED` を立てる。`fail_sync`（failed）・`ok`（受け取りの印の後・`--sync-only`・末尾）・`daily_on_exit` の再出力と `interrupted` はすべてこの関数を通る（走査の試験が、関数の外に行を出す echo／printf が無いことを見る）。`daily_on_exit` は先頭で INT／TERM を無視する（2 本目の TERM で行が出ないうちに終わらせない。pr1b-7 で R-SIG: 5 信号すべての handler の最初のコマンドと `daily_exit` でも無視する、§4.5 の後の注記）。`daily_on_exit` は、予定の行があって印が無ければその予定の行（`ok` を含む予定どおりの文。failed／interrupted は出さない）を出し、予定の行が無く同期の後なら従来どおり `interrupted` を 1 回出す。echo と印の間の中断で起きうるのは同じ行の 2 本だけで、予定が failed なら failed を、ok なら ok を出す。status は 1 通りに決まる（pr1b-5／6。読み手は同じ行の重複を 1 本と数える。試験は echo の前・後の 2 点に TERM を割り込ませる）。
 - **4 試験の名前**: `up` の trap の試験は「ゾンビが残らない」を確かめていない（`up` が終わった後は launchd が回収する）ので、名前と説明を「trap が止める（その pid で動き続けない）」に合わせた。回収の 2 行は隣の字面の試験が固定する。
