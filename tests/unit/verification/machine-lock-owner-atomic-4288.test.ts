@@ -1936,13 +1936,23 @@ ${call};
   const end = Date.now() + 30000;
   while (!fs.existsSync(reached) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20));
   expect(fs.existsSync(reached), `${impl} reached ${pause}`).toBe(true);
+  // sync / ts: the child creates the signal file before its pid is in it (pm-return-4288-pr1af-impl-3
+  // item 1). Wait (bounded) for the pid, and fail rather than skip the ESRCH wait below on an empty read.
+  let written = '';
+  if (impl !== 'bash') {
+    for (;;) {
+      written = fs.readFileSync(reached, 'utf8').trim();
+      if (/^\d+$/.test(written) || Date.now() >= end) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(written, `${impl} ${pause}: the pid in the signal file`).toMatch(/^\d+$/);
+  }
   const exited = new Promise((resolve) => child.on('exit', resolve));
   process.kill(-(child.pid as number), 'SIGKILL');
   await exited;
   // The pid the record names (pm-return-4288-pr1af-impl-2 item 3): under tsx the writer is the child's
   // child, which stays a zombie — `kill -0` answers alive — until launchd reaps it, after the exit
   // awaited above. The rows that judge a published record by its pid wait for ESRCH first.
-  const written = impl === 'bash' ? '' : fs.readFileSync(reached, 'utf8').trim();
   if (/^\d+$/.test(written)) await waitEsrch(Number(written));
 }
 
