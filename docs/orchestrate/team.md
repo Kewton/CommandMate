@@ -8,7 +8,7 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 | 役割 | インスタンス | ロール（CommandMate） | 仕事 |
 |---|---|---|---|
 | PM | `claude` | `project-manager` | 利用者の依頼をブリーフにし、開発リーダーに渡す。進みを見張り、承認の要るものだけ利用者に返す |
-| イネーブラー | `codex`（`codex-2`）。Codex が使えないときの代わりは Antigravity（`--instance antigravity`、§6 の 7） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
+| イネーブラー | `codex`（`codex-2`）。Codex の代わりは、週の上限切れなら Claude 5（`--instance claude-5`）、上限以外の不調なら Antigravity（`--instance antigravity`）（§6 の 7） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
 | ジャッジ | `claude-2` | `judge` | 統合した版の受け入れテスト・リグレッションテスト（UAT） |
 | 開発リーダー | `claude-3` | `dev-leader` | ブリーフを受けて `/orchestrate` を回す。難易度でワーカーを選ぶ |
 | ワーカー | Issue の worktree ごと | — | 易＝Command Code（#4238 のマージ後。それまでは orchestrate.md 1-2b の現行の担当）、中＝Claude sonnet、難＝Claude opus |
@@ -71,4 +71,8 @@ UAT はジャッジ（`claude-2`）が行い、結果はジャッジ → PM → 
 4. **API は呼び手と同じ PR で作る。** 呼び手の無い組み合わせは引数の検査で拒否し、広げるのは呼び手を作るとき。なぜ: 使われない組み合わせを P2 として直し続けた
 5. **P2 の処分に「狭めて塞ぐ」を必ず選択肢に入れる。** 今の呼び手が通らない経路は、まず拒否で塞ぐ。なぜ: 「広げて直す」だけでは穴が増え続けた
 6. **同じ種類の穴が 2 回出たら止める。** 直しを送る前に止め、作業に関わっていないイネーブラーに共通の原因を調べさせてから直しを出す。なぜ: 同じ種類の 2 回目で止まらず往復が続いた
-7. **レビュアーの代わり。** Codex が使えないとき（週の上限・接続の不調など）は Antigravity（`--instance antigravity`）を使う。`codex` と `codex-2` は同じアカウントの上限を共有するので、上限の対策にならない（stream disconnected のような個別の不調で `codex-2` へ振り替えるのは従来どおり）
+7. **レビュアーの代わり。**
+   - Codex の週の上限が切れたら、レビューは Claude 5（`--instance claude-5`、ロール `enabler`）に頼む。止まっていれば 1 行の send で起動してから送る
+   - 上限が回復したら（codex の画面の weekly limit の表示で確かめる）Codex に戻す。Claude 5 は戻した後に止めてよい
+   - 上限以外の Codex の不調（接続など）の代わりは Antigravity（`--instance antigravity`）
+   - `codex-2` は `codex` と同じアカウントの上限を共有するので、上限の対策にならない（stream disconnected のような個別の不調で `codex-2` へ振り替えるのは従来どおり）
