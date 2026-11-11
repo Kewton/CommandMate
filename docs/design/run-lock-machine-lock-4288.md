@@ -55,7 +55,7 @@
 
 | # | 不変条件 | 根拠（事実）と、守る場所 |
 |---|---|---|
-| **I-1 消す経路は 3 つ** | canonical の `<lock>` を消すのは次の 3 つだけ: (i) **持ち主自身の解放**（D12）: 記録の token が自分のもので、記録の pid が呼び手自身（TS は `process.pid`、bash は main シェルの `$$` で `kill -0 $$` が alive）、かつ記録に `pgid=` があればその G が空。(ii) **先頭としての解放**（D5）: 札の先頭で、記録の token が渡された自分の token のどれかで、保有者の判定（pid、`pgid=` があれば G も）が `gone`。(iii) **先頭の回収**: 札の先頭が、保有者が `gone` の記録を退かしてから token を確かめて消す／owner が無く空で 60 秒を超えた `<lock>` を `rmdir` する（D3）。missing・corrupt・不明・他の token の記録は、どの解放でも消さない | D12 `machine-lock.sh:198-257`・sync `:906-940`、D5 `verify-run.sh:1955-2003`・sync `:1109-1131`、回収 `:1459-1489`・sync `:703-731`、D3 `:1501-1535`・sync `:487-504`。試験: 表 A の `after = removed` の行は、`removalAllowed`（呼び手 × 形 × pid × G）に**ちょうど**一致する（1 回目は観測を見ていなかった。Claude 5 P3） |
+| **I-1 消す経路は 3 つ** | canonical の `<lock>` を消すのは次の 3 つだけ: (i) **持ち主自身の解放**（D12）: 記録の token が自分のもので、記録の pid が呼び手自身（TS は `process.pid`、bash は main シェルの `$$` で `kill -0 $$` が alive）、かつ記録に `pgid=` があればその G が空。(ii) **先頭としての解放**（D5）: 札の先頭で、記録の token が渡された自分の token のどれかで、保有者の判定（pid、`pgid=` があれば G も）が `gone`。(iii) **先頭の回収**: 札の先頭が、保有者が `gone` の記録を退かしてから token を確かめて消す／owner が無く空で猶予（PR1a の `LOCK_OWNERLESS_GRACE_MS`。値は写さない）を超えた `<lock>` を `rmdir` する（D3）。missing・corrupt・不明・他の token の記録は、どの解放でも消さない | D12 `machine-lock.sh:198-257`・sync `:906-940`、D5 `verify-run.sh:1955-2003`・sync `:1109-1131`、回収 `:1459-1489`・sync `:703-731`、D3 `:1501-1535`・sync `:487-504`。試験: 表 A の `after = removed` の行は、`removalAllowed`（呼び手 × 形 × pid × G）に**ちょうど**一致する（1 回目は観測を見ていなかった。Claude 5 P3） |
 | **I-2 不明は空きと読まない** | 観測が不明のとき、取らない・継がない・消さない・引き渡さない。不明は `refused`／`deferred`／`kept`／`unknown`／拒否のどれかで、後の先頭に残す | 試験: 行が**判定に使った軸**が unknown なら、取得・継承・`released`・`handed`・`removed`・`mine`・`t1`・`aside-removed` のどれも無い（`decidedOnUnknown`: 保有者の判定は pid が先で gone のときだけ G、D12 は G が先で gone のときだけ pid、自分の退避の片付けは G だけ。1 回目は `aside-removed` を見ていなかった。PM Claude P3-2） |
 | **I-3 needs-head は D5、再試行も D5** | 解放が `needs-head` を返したら、呼び手は同じ実行の中で D5 を呼ぶ。`deferred`・`not-head`・`unknown` は消さずに残し、保有者が死んだ後に次の先頭か D5 の再実行が消す。`lock_release_held`／`release` を 2 度呼ばない | `run_lock_release`（bash の D12 の包み）が needs-head を受けたら中で `run_lock_release_as_head` を `[T0, T1]` で 1 回呼ぶ。needs-head が出るのは UAT の T1（pid＝サーバー）の G が空になった後だけ（試験で固定）。TS は pid≠`process.pid` を拒むので needs-head は出ない |
 | **I-4 bash の呼び手は main シェル** | `run_lock_acquire`・`run_lock_set_pid`・`run_lock_release`（D12）・D5 は main シェル（`BASH_SUBSHELL=0`）から呼ぶ。1 つのシェルが持つ run-lock は 1 つ | サブシェルからの引渡しと解放は包みが拒否する（表 E `handoff-subshell`・`release-subshell`。本番の呼び手は無い） |
@@ -92,7 +92,7 @@
 |---|---|
 | `none` | `<lock>` も退避も前の札も無い |
 | `ticket-ahead` | `<lock>` は無く、他者の札が前に居る |
-| `ownerless-young`／`ownerless-old` | owner の無い**空の** `<lock>`、mtime ≤ 60 秒／> 60 秒 |
+| `ownerless-young`／`ownerless-old` | owner の無い**空の** `<lock>`、mtime が猶予以下／猶予超え（猶予は PR1a の定数 `LOCK_OWNERLESS_GRACE_MS`。run-lock の呼び手は `OWNERLESS_GRACE_MS`／`RUN_LOCK_OWNERLESS_GRACE_MS` の 1 か所から渡す。PR1a-f で 600000 に変わるが、値は写さない） |
 | `ownerless-nonempty` | owner の無い**空でない** `<lock>`（旧版の `owner.tmp.*`・`rm -rf` の部分失敗の残り）。D3 の `rmdir` が効かない。**PR1a-f で塞ぐ**、それまでは断り続けて文面で知らせる |
 | `unreadable` | owner が読めない（EIO・EACCES・数でない `pgid=`） |
 | `corrupt` | owner は読めたが `pid=` か `token=` が無い（排他作成と追記の間の SIGKILL で残る空の owner を含む、PM Claude P3-8）。**PR1a-f で塞ぐ** |

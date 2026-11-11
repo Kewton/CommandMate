@@ -15,6 +15,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  OWNERLESS_GRACE_MS,
   acquireRunLock,
   formatRunLockOwner,
   parseRunLockOwner,
@@ -83,7 +84,7 @@ describe('acquireRunLock', () => {
     fs.mkdirSync(lockDir);
     const now = Date.now();
     expect(acquireRunLock({ label: 'a', env, now: () => new Date(now) }).ok).toBe(false);
-    expect(acquireRunLock({ label: 'a', env, now: () => new Date(now + 120_000) }).ok).toBe(true);
+    expect(acquireRunLock({ label: 'a', env, now: () => new Date(now + 2 * OWNERLESS_GRACE_MS) }).ok).toBe(true);
   });
 
   it('is inherited by a child whose CM_RUN_LOCK_TOKEN names the live holder, and the child does not release it', () => {

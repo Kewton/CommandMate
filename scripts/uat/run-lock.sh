@@ -59,6 +59,8 @@ RUN_LOCK_HOLDER_RUN_DIR=""
 RUN_LOCK_FOREIGN_PID=""
 # A handover was tried in this shell (a second one is refused).
 RUN_LOCK_HANDED=""
+# The grace of an owner-less, empty <lock> before the head takes it out (D3); the one place run-lock names it.
+RUN_LOCK_OWNERLESS_GRACE_MS=60000
 # How long the parent waits to learn whether a child that "withdrew" had in fact started (seconds).
 HANDOFF_SETTLE_SEC=${HANDOFF_SETTLE_SEC:-3}
 
@@ -166,7 +168,7 @@ run_lock_begin() {
     run_lock_install_note
     machine_lock_use_kv_codec
     RUN_LOCK_NOTE_PATH=$1
-    LOCK_OWNERLESS_GRACE_MS=60000
+    LOCK_OWNERLESS_GRACE_MS=$RUN_LOCK_OWNERLESS_GRACE_MS
 }
 
 run_lock_end() {

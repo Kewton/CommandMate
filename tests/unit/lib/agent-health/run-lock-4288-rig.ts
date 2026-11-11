@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { OWNERLESS_GRACE_MS } from '@/lib/agent-health/run-lock';
+
 export const REPO = path.resolve(__dirname, '../../../..');
 export const RUN_LOCK_SH = path.join(REPO, 'scripts/uat/run-lock.sh');
 
@@ -190,7 +192,7 @@ export function applyOps(ops: Op[], ctx: FxCtx): void {
         fs.mkdirSync(op.dir, { recursive: true });
         break;
       case 'age': {
-        const old = new Date(Date.now() - 120_000);
+        const old = new Date(Date.now() - 2 * OWNERLESS_GRACE_MS);
         fs.utimesSync(op.dir, old, old);
         break;
       }

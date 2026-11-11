@@ -44,7 +44,8 @@ export const RUN_LOCK_DIR_ENV = 'CM_RUN_LOCK_DIR';
 export const RUN_LOCK_TOKEN_ENV = 'CM_RUN_LOCK_TOKEN';
 const LOCK_NAME = 'commandmate-run.lock';
 /** A lock directory without an owner file is still being made, up to this age. */
-const OWNERLESS_GRACE_MS = 60_000;
+/** The grace of an owner-less, empty `<lock>` before the head takes it out (D3); the one place run-lock names it (PR1a's LOCK_OWNERLESS_GRACE_MS). */
+export const OWNERLESS_GRACE_MS = 60_000;
 /** Characters a token may have (I-8): the moved-aside record's name carries it, and readers accept only these. */
 const TOKEN_PATTERN = /^[A-Za-z0-9-]+$/;
 

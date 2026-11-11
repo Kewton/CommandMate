@@ -77,8 +77,8 @@ import { removeTempDir } from '@tests/helpers/temp-dir';
 const P_SHAPES = [
   'none', // no <lock>, no moved-aside record, no ticket ahead
   'ticket-ahead', // no <lock>; a ticket of someone else is ahead in <lock>.queue
-  'ownerless-young', // <lock> with no owner, empty, mtime ≤ 60 s
-  'ownerless-old', // <lock> with no owner, empty, mtime > 60 s
+  'ownerless-young', // <lock> with no owner, empty, mtime ≤ the grace (OWNERLESS_GRACE_MS)
+  'ownerless-old', // <lock> with no owner, empty, mtime > the grace
   'ownerless-nonempty', // <lock> with no owner and not empty (an old version's owner.tmp.*, a partial rm): PR1a-f
   'unreadable', // <lock>/owner cannot be read (EIO, EACCES, a pgid= that is not a number)
   'corrupt', // <lock>/owner read, but no pid= or no token= (an empty owner from a SIGKILL mid-create): PR1a-f
