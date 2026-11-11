@@ -2,10 +2,12 @@
  * Issue #4288 PR1a-f — the owner written atomically (tmp → link(2)), the owner-less <lock> holding only
  * temporaries taken out by a graced head through a predicate of its own (the new `.owner-*` by age, the
  * older run-lock / supervisor.lock `owner.tmp.<pid>` only once that pid is gone), an empty owner taken
- * out by the head past a fixed grace, an unparsable owner named and never removed, and D7's reuse
- * check made independent of the time zone and of the clock (machine_lock_pid_identity: the lstart
- * difference is not a time-zone offset AND etime's start is after started_at). Design:
- * docs/design/machine-lock-owner-atomic-4288.md (upstream round 2).
+ * out by the head past a fixed grace (10 min), an unparsable owner named and never removed, and D7's
+ * reuse check made independent of the time zone (machine_lock_pid_identity: the same lstart string is
+ * alive; otherwise, with started_at, the start computed from etime against started_at; without it,
+ * unknown). Design: docs/design/machine-lock-owner-atomic-4288.md (upstream round 3: the invariants
+ * split into "new writers only" and "while older copies remain", the latter's known limits being
+ * `limit` rows of F with the condition that ends them; F expanded per real caller × implementation).
  *
  * UPSTREAM SKELETON (the design stage). This file holds the tables of §2 (T: implementation × owner
  * form × caller × three-valued observation → result; K: the interruption points of an acquisition ×
@@ -25,7 +27,8 @@
  * invariants, and the time-zone witness of §4 on plain numbers.
  *
  * Counts (written in the design §2.5): T 3 implementations × 17 forms × 4 callers × 3 observations =
- * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 46 rows. 403 rows.
+ * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 55 rows expanded
+ * into 250 implementation × caller cases, 30 unreachable, 220 reached. 577 behaviour rows.
  *
  * How the implementation will drive a row (for the implementation contract, not run here):
  *   - a root from fs.mkdtempSync under os.tmpdir(), removed in afterEach; nothing under ~/.commandmate,
@@ -34,7 +37,8 @@
  *     ages with fs.utimesSync, a kv record with lstart= / started_at= for the D7 forms), the
  *     observation made real (a live `sleep`, a dead pid, the test's own lstart under another TZ=) or
  *     injected (CM_VERIFY_TEST_OBS_FAULT=<point>=<ERRNO>, a `ps` shim on PATH, hooks.fault);
- *   - graced callers with LOCK_OWNERLESS_GRACE_MS / ownerlessGraceMs = 60000;
+ *   - graced callers with LOCK_OWNERLESS_GRACE_MS / ownerlessGraceMs = 600000 (the production value, I3),
+ *     the empty owner past LOCK_EMPTY_OWNER_GRACE_MS = 600000 (I4);
  *   - `acquire-behind`: a live ticket of another pid placed ahead in the queue;
  *   - K: the pauses of §2.6 (bash `CM_VERIFY_TEST_HANDOFF=pause:<stage>`, sync `hooks.onOwnerStage`,
  *     TS `__testHooks.onOwnerStage`), then SIGKILL;
@@ -42,7 +46,13 @@
  *
  * @vitest-environment node
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+const REPO = path.resolve(__dirname, '../../..');
+/** The production grace of the graced callers (I3) and the fixed grace of the empty owner (I4): 10 min (PM decision 1). */
+const GRACE_MS = 600_000;
 
 // ------------------------------------------------------------------ enumerations (§2.1)
 
@@ -124,12 +134,12 @@ type TableT = { readonly [F in Form]: { readonly [C in Caller]: Triple<C> } };
 
 /** What the decisive observation of each form is, per value (§2.1). */
 const AGE = {
-  alive: 'the <lock> (and every temporary in it) is 60 s old or younger',
-  gone: 'older than 60 s (fs.utimesSync)',
+  alive: `the <lock> (and every temporary in it) is ${GRACE_MS} ms old or younger`,
+  gone: `older than ${GRACE_MS} ms (fs.utimesSync)`,
   unknown: 'the listing, an lstat, an mtime or the owner read fails (lock-list / ownerless-tmp-lstat / ownerless-mtime / lock-owner = EIO)',
 } as const;
 const NAME_PID = {
-  alive: 'the pid in owner.tmp.<pid> answers kill -0 (a live sleep: an older writer stopped past the grace)',
+  alive: 'the pid in owner.tmp.<pid> answers kill -0 and started at or before the tmp mtime + 2 s (maybe the older writer, stopped past the grace); a pid started later is reused and reads as gone (F52)',
   gone: 'ESRCH',
   unknown: 'EPERM (CM_VERIFY_TEST_KILL0_CMD / hooks.kill)',
 } as const;
@@ -146,7 +156,7 @@ const OBS_MEANING = {
   'tmp-stray': AGE,
   'tmp-new+gone-dead': AGE,
   'tmp-new+gone-alive': { alive: 'the canonical age is not read (must not matter)', gone: 'not read', unknown: 'not read' },
-  'empty-owner': { ...AGE, alive: 'the owner is 60 s old or younger (LOCK_EMPTY_OWNER_GRACE_MS)', gone: 'older than 60 s' },
+  'empty-owner': { ...AGE, alive: `the owner is ${GRACE_MS} ms old or younger (LOCK_EMPTY_OWNER_GRACE_MS)`, gone: `older than ${GRACE_MS} ms` },
   'garbage-owner': { ...AGE, alive: 'young (must not matter: an unparsable owner is never removed)', gone: 'old (must not matter)' },
   'lstart-match': KILL0,
   'lstart-tz': KILL0,
@@ -163,7 +173,7 @@ const FORM_MEANING = {
   'empty-dir': '<lock> with no owner and nothing in it (K1; D3 as today)',
   'tmp-new': '<lock> holding only `.owner-<token>` (K2 / K3 of the new create, or an undo whose unlink failed: F17)',
   'tmp-old-young': '<lock> holding only `owner.tmp.<pid>` within the grace (an older run-lock.sh:62 / lib.sh:174 writer before its mv)',
-  'tmp-old': 'the same past the grace; taken out only when <pid> is gone (codex P1: a stopped older writer resuming would rm -rf a successor)',
+  'tmp-old': 'the same past the grace; taken out only when <pid> is shown not to be the writer (gone, or started after the tmp mtime + 2 s) (codex P1: a stopped older writer resuming would rm -rf a successor)',
   'tmp-stray': '<lock> with no owner holding a temporary and a name that is not one (a file `x`, a directory, owner.tmp.abc)',
   'tmp-new+gone-dead':
     'tmp-new in the canonical <lock> and a `.gone-*` whose record is dead: the take-back-half keeps lock_ownerless_empty (no), the cleanup uses lock_ownerless_temps_only (mutation control: widening the shared predicate makes the rmdir ENOTEMPTY and blocks every poll)',
@@ -171,13 +181,13 @@ const FORM_MEANING = {
   'empty-owner': 'an owner of 0 bytes (an older writer killed between `: >` / openSync and the write, or a power loss after link)',
   'garbage-owner': 'an owner that does not parse',
   'lstart-match': 'kv record with lstart= equal to ps -o lstart= (LC_ALL=C) and started_at= after the start',
-  'lstart-tz': 'the same holder, its lstart= written under another TZ= (the naive difference is a whole time-zone offset)',
-  'lstart-reused': 'lstart= differs by what is not a time-zone offset and the process under the pid started > started_at= + 2 s',
+  'lstart-tz': 'the same holder, its lstart= written under another TZ=, started_at= present: the start from etime is not after started_at + 2 s',
+  'lstart-reused': 'lstart= differs, started_at= present, and the process under the pid started > started_at= + 2 s (from etime)',
   'lstart-fails': 'ps -o lstart= fails or prints nothing (CM_VERIFY_TEST_OBS_FAULT=lstart=EIO)',
-  'etime-fails': 'lstart= differs (not an offset); ps -o etime= fails or prints a malformed value (etime=EIO, `bad:bad`, `1:99`)',
+  'etime-fails': 'lstart= differs, started_at= present; ps -o etime= fails or prints a malformed value (etime=EIO, `bad:bad`, `1:99`)',
   'lstart-same-etime-fails': 'lstart= equals ps; etime would fail but is never read',
-  'lstart-legacy': 'no started_at= (the older supervisor.lock record), a live holder under another TZ; the owner mtime stands in',
-  'lstart-legacy-reused': 'no started_at=, a reused pid started after the owner mtime + 2 s',
+  'lstart-legacy': 'no started_at= (the older supervisor.lock record), a live holder under another TZ: the strings differ, so unknown (no evidence of reuse; round 2\'s owner mtime stand-in is gone)',
+  'lstart-legacy-reused': 'no started_at=, a reused pid: unknown as well — reused only with started_at / etime evidence (PM decision 2)',
 } as const satisfies Record<Form, string>;
 
 // ------------------------------------------------------------------ table T, written per implementation (§2.3, §2.4)
@@ -282,16 +292,16 @@ const BASH_T = {
     'guard-head': ['kept', 'removed', 'kept'],
   },
   'lstart-legacy': {
-    'acquire-head-grace': [{ is: 'refused:rec', now: 'acquired' }, 'acquired', 'refused:unk'],
+    'acquire-head-grace': [{ is: 'refused:unk', now: 'acquired' }, 'acquired', 'refused:unk'],
     'acquire-head-nograce': UUU('no-kv-for-nograce'),
     'acquire-behind': Q,
     'guard-head': [{ is: 'kept', now: 'removed' }, 'removed', 'kept'],
   },
   'lstart-legacy-reused': {
-    'acquire-head-grace': ['acquired', 'acquired', { is: 'acquired', now: 'refused:unk' }],
+    'acquire-head-grace': [{ is: 'refused:unk', now: 'acquired' }, 'acquired', 'refused:unk'],
     'acquire-head-nograce': UUU('no-kv-for-nograce'),
     'acquire-behind': Q,
-    'guard-head': ['removed', 'removed', { is: 'removed', now: 'kept' }],
+    'guard-head': [{ is: 'kept', now: 'removed' }, 'removed', 'kept'],
   },
 } as const satisfies TableT;
 
@@ -455,8 +465,8 @@ const IDENTITY_OF = {
   'lstart-fails': 'unknown',
   'etime-fails': 'unknown',
   'lstart-same-etime-fails': 'alive',
-  'lstart-legacy': 'alive',
-  'lstart-legacy-reused': 'reused',
+  'lstart-legacy': 'unknown',
+  'lstart-legacy-reused': 'unknown',
 } as const satisfies Record<D7Form, 'alive' | 'reused' | 'unknown'>;
 
 /** Whether the recorded and the current lstart strings differ (what the implementation before PR1a-f compared). */
@@ -651,7 +661,7 @@ const KILL_NOW = {
   ts: { left: 'empty-owner', how: "the same with __testHooks.fault('owner-write')" },
 } as const satisfies Record<Impl, { left: Left | 'empty-owner'; how: string }>;
 
-// ------------------------------------------------------------------ table F (§3)
+// ------------------------------------------------------------------ table F (§3), per real caller × implementation
 
 /** The observation points (§2.8 of verify-lock-holder-group-4288.md); `new` ones are added by PR1a-f. */
 const POINTS = {
@@ -665,45 +675,77 @@ const POINTS = {
   'owner-unlink': 'existing',
   'lock-rmdir': 'existing',
   'lock-list': 'existing',
+  'lock-owner': 'existing',
   'ownerless-tmp-lstat': 'new',
   'ownerless-mtime': 'existing',
   'ownerless-tmp-unlink': 'new',
   'ownerless-rmdir': 'existing',
   'owner-tmp-pid': 'new',
   'empty-owner-move': 'new',
-  'owner-mtime': 'new',
   pid: 'existing',
   lstart: 'existing',
   etime: 'new',
 } as const;
 type Point = keyof typeof POINTS;
 
-const F_CALLERS = ['acquire', 'cleanup', 'empty-owner', 'd7', 'ticket', 'hand-off'] as const;
+/**
+ * The real callers (codex round 2 P2: not the operation names). The acquirers and the D6 guard are
+ * the callers of table T; guard-behind is a D6 guard that does not become the head; ticket-retire is
+ * lock_ticket_retirable / ticketRetirable / retirable inside every caller's queue wait; hand-off is
+ * lock_hand_off.
+ */
+const F_CALLERS = ['acquire-head-grace', 'acquire-head-nograce', 'guard-head', 'guard-behind', 'ticket-retire', 'hand-off'] as const;
 type FCaller = (typeof F_CALLERS)[number];
 
-/** keep: nothing removed or taken; own-only: only what this caller itself made is undone. No `residual` (I7). */
-type Direction = 'keep' | 'own-only';
 type FMessage = Message | 'owner-exists' | 'not-ours' | 'write-failed';
-type FResult =
-  | 'acquired'
-  | `refused:${FMessage}`
-  | 'cleanup:next-step'
-  | 'cleanup:next-poll'
-  | 'd7:original'
-  | 'd7:alive'
-  | 'd7:unknown'
-  | 'ticket:kept'
-  | 'hand-off:failed';
-type FLeft = 'nothing-made' | 'own-lock-undone' | 'unchanged' | 'lock+own-tmp' | 'lock-empty' | 'mine+tmp' | 'aside-kept';
+type FAcquire = 'acquired' | `refused:${FMessage}`;
+/** What each caller answers: D6 keeps `kept` (and absent / restore-failed), unlike round 2's FResult. */
+type FCodeOf<C extends FCaller> = C extends 'acquire-head-grace' | 'acquire-head-nograce'
+  ? FAcquire
+  : C extends 'guard-head'
+    ? 'removed' | 'kept' | 'absent' | 'restore-failed'
+    : C extends 'guard-behind'
+      ? 'not-head'
+      : C extends 'ticket-retire'
+        ? 'retired' | 'kept'
+        : 'handed' | 'failed';
+type FResult = FCodeOf<FCaller>;
+type FResults = { readonly [C in FCaller]?: FCodeOf<C> };
+
+/**
+ * keep: nothing removed or taken (a rule's own clean-up is the rule, not a failure direction);
+ * own-only: only what this caller itself made is undone; limit: outside a premise, a known limit
+ * that may fall on the removing side — `mixed` while older copies remain (I8 (b)), `premise` outside
+ * P1 (the wall clock). No `residual` (I7).
+ */
+type Direction = 'keep' | 'own-only' | 'limit';
+interface Limit {
+  readonly kind: 'mixed' | 'premise';
+  /** What ends it (§6.1), or why it stays. */
+  readonly until: string;
+}
+type FLeft =
+  | 'nothing-made'
+  | 'own-lock-undone'
+  | 'unchanged'
+  | 'lock+own-tmp'
+  | 'lock-empty'
+  | 'mine+tmp'
+  | 'aside-kept'
+  | 'reclaimed'
+  | 'two-holders-possible'
+  | 'live-holder-removed';
 
 interface FailureRow {
+  /** The implementations where the call exists. */
   readonly impls: readonly Impl[];
-  readonly caller: FCaller;
   readonly point: Point | null;
   readonly direction: Direction;
-  readonly result: FResult;
+  /** The callers that make this call, and what each answers. */
+  readonly results: FResults;
   readonly left: FLeft;
   readonly note: string;
+  readonly limit?: Limit;
 }
 
 const ALL = IMPLS;
@@ -711,76 +753,246 @@ const GRACED = ['bash', 'sync'] as const satisfies readonly Impl[];
 const BASH = ['bash'] as const satisfies readonly Impl[];
 const JS = ['sync', 'ts'] as const satisfies readonly Impl[];
 
+/** Both acquirers answer the same (the owner create is the same in the graced and the no-grace acquisition). */
+const ACQ = <const R extends FAcquire>(r: R) => ({ 'acquire-head-grace': r, 'acquire-head-nograce': r }) as const;
+/** The graced acquirer and the D6 guard (the clean-up of I3 and D7 are reached by both). */
+const AG_GH = <const R extends FAcquire, const G extends FCodeOf<'guard-head'>>(r: R, g: G) => ({ 'acquire-head-grace': r, 'guard-head': g }) as const;
+/** Every head: both acquirers and the D6 guard (I4's empty owner, an unparsable owner). */
+const HEADS = <const R extends FAcquire, const G extends FCodeOf<'guard-head'>>(r: R, g: G) => ({ ...ACQ(r), 'guard-head': g }) as const;
+
+const UNTIL_OLD_RUNLOCK = '§6.1 1 and 3: PR1b / PR1c merged (no older lib.sh / run-lock.sh writer) and the older worktree copies updated';
+const UNTIL_OLD_VERIFY = '§6.1 2 and 3: the skills port of verify-run.sh published (asked of a human) and the older worktree copies updated';
+
 const FAILURE_TABLE = {
-  'F1-mkdir-lock': { impls: ALL, caller: 'acquire', point: 'mkdir-lock', direction: 'keep', result: 'refused:unk', left: 'nothing-made', note: 'EEXIST is not a failure' },
-  'F2-tmp-create-exists': { impls: ALL, caller: 'acquire', point: 'owner-create', direction: 'own-only', result: 'refused:unk', left: 'unchanged', note: 'not opened: the tmp is not removed; the rmdir fails on a non-empty <lock>' },
-  'F3-tmp-create-other': { impls: ALL, caller: 'acquire', point: 'owner-create', direction: 'own-only', result: 'refused:unk', left: 'own-lock-undone', note: 'EACCES / ENOSPC; the head made this <lock>' },
-  'F4-tmp-write': { impls: ALL, caller: 'acquire', point: 'owner-write', direction: 'own-only', result: 'refused:write-failed', left: 'own-lock-undone', note: 'ENOSPC / EIO' },
-  'F5-tmp-write-short': { impls: ALL, caller: 'acquire', point: 'owner-write-short', direction: 'own-only', result: 'refused:write-failed', left: 'own-lock-undone', note: 'JS/TS: the sum of writeSync < byteLength; bash: the tmp read back differs' },
-  'F6-tmp-close': { impls: JS, caller: 'acquire', point: 'owner-close', direction: 'own-only', result: 'refused:write-failed', left: 'own-lock-undone', note: 'closeSync throws: not published (bash: caught by F5)' },
-  'F7-link-exists-file': { impls: ALL, caller: 'acquire', point: 'owner-publish', direction: 'own-only', result: 'refused:owner-exists', left: 'unchanged', note: 'own tmp removed' },
-  'F8-link-exists-dir': { impls: ALL, caller: 'acquire', point: 'owner-publish', direction: 'own-only', result: 'refused:owner-exists', left: 'unchanged', note: 'nothing made inside the directory (`ln` would: /bin/link and linkSync answer EEXIST)' },
-  'F9-link-exists-dirlink': { impls: ALL, caller: 'acquire', point: 'owner-publish', direction: 'own-only', result: 'refused:owner-exists', left: 'unchanged', note: 'nothing made where the symlink points (outside <lock>)' },
-  'F10-link-exists-filelink': { impls: ALL, caller: 'acquire', point: 'owner-publish', direction: 'own-only', result: 'refused:owner-exists', left: 'unchanged', note: 'the symlink is not followed or replaced' },
-  'F11-link-enoent': { impls: ALL, caller: 'acquire', point: 'owner-publish', direction: 'own-only', result: 'refused:unk', left: 'unchanged', note: 'own tmp removed if there; no rmdir: a <lock> there now is not ours' },
-  'F12-link-other': { impls: ALL, caller: 'acquire', point: 'owner-publish', direction: 'own-only', result: 'refused:unk', left: 'own-lock-undone', note: 'EPERM / ENOTSUP / EIO' },
-  'F13-readback-unknown-same-inode': { impls: ALL, caller: 'acquire', point: 'owner-readback', direction: 'own-only', result: 'refused:unk', left: 'own-lock-undone', note: 'the owner removed only after `-ef` / dev+ino says it is the tmp (as 70+i today)' },
-  'F14-readback-unknown-other-inode': { impls: ALL, caller: 'acquire', point: 'owner-readback', direction: 'own-only', result: 'refused:unk', left: 'unchanged', note: 'the owner is not the tmp: not removed; own tmp only' },
-  'F15-readback-not-ours': { impls: ALL, caller: 'acquire', point: 'owner-readback', direction: 'own-only', result: 'refused:not-ours', left: 'unchanged', note: 'own tmp removed' },
-  'F16-tmp-unlink-after-publish': { impls: ALL, caller: 'acquire', point: 'owner-unlink', direction: 'keep', result: 'acquired', left: 'mine+tmp', note: 'the tmp goes with the rm -rf of release / recovery' },
-  'F17-undo-tmp-unlink': { impls: ALL, caller: 'acquire', point: 'owner-unlink', direction: 'keep', result: 'refused:write-failed', left: 'lock+own-tmp', note: 'tmp-new: a graced head takes it out after the grace (I3)' },
-  'F18-undo-lock-rmdir': { impls: ALL, caller: 'acquire', point: 'lock-rmdir', direction: 'keep', result: 'refused:write-failed', left: 'lock-empty', note: 'as today' },
-  'F19-cleanup-list': { impls: GRACED, caller: 'cleanup', point: 'lock-list', direction: 'keep', result: 'refused:unk', left: 'unchanged', note: 'no mkdir this poll' },
-  'F20-cleanup-tmp-lstat': { impls: GRACED, caller: 'cleanup', point: 'ownerless-tmp-lstat', direction: 'keep', result: 'refused:unk', left: 'unchanged', note: 'no mkdir this poll' },
-  'F21-cleanup-mtime': { impls: GRACED, caller: 'cleanup', point: 'ownerless-mtime', direction: 'keep', result: 'refused:unk', left: 'unchanged', note: 'no mkdir this poll' },
-  'F22-cleanup-tmp-unlink': { impls: GRACED, caller: 'cleanup', point: 'ownerless-tmp-unlink', direction: 'keep', result: 'refused:unk', left: 'unchanged', note: 'not ENOENT: no rmdir, no mkdir this poll' },
-  'F23-cleanup-tmp-unlink-enoent': { impls: GRACED, caller: 'cleanup', point: 'ownerless-tmp-unlink', direction: 'keep', result: 'cleanup:next-step', left: 'unchanged', note: 'already gone (an older cleaner at the same time): on to the next name / the rmdir' },
-  'F24-cleanup-rmdir-notempty': { impls: GRACED, caller: 'cleanup', point: 'ownerless-rmdir', direction: 'keep', result: 'cleanup:next-poll', left: 'unchanged', note: 'taken in between: judged as a record next poll' },
-  'F25-cleanup-rmdir-other': { impls: GRACED, caller: 'cleanup', point: 'ownerless-rmdir', direction: 'keep', result: 'refused:unk', left: 'unchanged', note: 'no mkdir this poll' },
-  'F26-old-tmp-pid-unknown': { impls: GRACED, caller: 'cleanup', point: 'owner-tmp-pid', direction: 'keep', result: 'refused:unk', left: 'unchanged', note: 'kill -0 of the name\'s pid: EPERM / EIO' },
-  'F27-old-tmp-pid-alive': { impls: GRACED, caller: 'cleanup', point: null, direction: 'keep', result: 'refused:old-taker', left: 'unchanged', note: 'an older writer stopped past the grace; resumed, it mv-s its own tmp (codex P1 closed)' },
-  'F28-old-tmp-pid-not-numeric': { impls: GRACED, caller: 'cleanup', point: null, direction: 'keep', result: 'refused:stray', left: 'unchanged', note: 'owner.tmp.<not a pid>' },
-  'F29-empty-owner-young': { impls: ALL, caller: 'empty-owner', point: null, direction: 'keep', result: 'refused:taking', left: 'unchanged', note: '60 s or younger: maybe being written (P3-8)' },
-  'F30-empty-owner-move': { impls: ALL, caller: 'empty-owner', point: 'empty-owner-move', direction: 'keep', result: 'refused:unk', left: 'unchanged', note: 'the mv aside fails' },
-  'F31-empty-owner-aside-written': { impls: ALL, caller: 'empty-owner', point: null, direction: 'keep', result: 'refused:rec', left: 'aside-kept', note: 'no longer 0 bytes once moved: lock_settle_gone judges it as a record next poll' },
-  'F32-kill0-other': { impls: BASH, caller: 'd7', point: 'pid', direction: 'keep', result: 'd7:original', left: 'unchanged', note: 'EIO: unknown stays, D7 not applied' },
-  'F33-ps-lstart': { impls: BASH, caller: 'd7', point: 'lstart', direction: 'keep', result: 'd7:unknown', left: 'unchanged', note: 'alive → unknown:lstart:<errno>; EPERM stays' },
-  'F34-lstart-unparsed': { impls: BASH, caller: 'd7', point: 'lstart', direction: 'keep', result: 'd7:unknown', left: 'unchanged', note: 'machine_lock_lstart_naive_s fails on either string' },
-  'F35-ps-etime': { impls: BASH, caller: 'd7', point: 'etime', direction: 'keep', result: 'd7:unknown', left: 'unchanged', note: 'alive → unknown:etime:<errno>; EPERM stays' },
-  'F36-etime-malformed': { impls: BASH, caller: 'd7', point: 'etime', direction: 'keep', result: 'd7:unknown', left: 'unchanged', note: '`bad:bad`, `1:99`, `-1:00`, four fields: never read as 0 s elapsed (codex P2)' },
-  'F37-ticket-etime-malformed': { impls: ALL, caller: 'ticket', point: 'etime', direction: 'keep', result: 'ticket:kept', left: 'unchanged', note: 'bash lock_pid_start_ms takes the strict parse; JS/TS parseEtime checks the ranges' },
-  'F38-started-at-missing-mtime-fails': { impls: BASH, caller: 'd7', point: 'owner-mtime', direction: 'keep', result: 'd7:original', left: 'unchanged', note: 'no started_at= and no owner mtime: the pid alone' },
-  'F39-started-at-unparsed': { impls: BASH, caller: 'd7', point: null, direction: 'keep', result: 'd7:original', left: 'unchanged', note: 'date cannot read started_at=' },
-  'F40-started-at-carry-over': { impls: BASH, caller: 'd7', point: null, direction: 'keep', result: 'd7:alive', left: 'unchanged', note: 'LOB_STARTED_AT emptied per read: a record without started_at= after one with uses its own owner mtime' },
-  'F41-hostname': { impls: BASH, caller: 'd7', point: null, direction: 'keep', result: 'd7:original', left: 'unchanged', note: 'another host= is alive' },
-  'F42-clock-back-and-tz': { impls: BASH, caller: 'd7', point: null, direction: 'keep', result: 'd7:alive', left: 'unchanged', note: 'round 1\'s residual F24: witness (1) reads a time-zone-only difference as the same start' },
-  'F43-launchd-reader': { impls: BASH, caller: 'd7', point: null, direction: 'keep', result: 'd7:alive', left: 'unchanged', note: 'written under env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin (TZ, LC_ALL unset), read with TZ=UTC and TZ=Asia/Tokyo' },
-  'F44-pid-gone-group-alive': { impls: BASH, caller: 'd7', point: null, direction: 'keep', result: 'd7:original', left: 'unchanged', note: 'pgid= and lstart=, the pid gone and G alive: D7 not applied (no such record in production)' },
-  'F45-handoff-lstart': { impls: BASH, caller: 'hand-off', point: null, direction: 'keep', result: 'hand-off:failed', left: 'unchanged', note: 'LOCK_OWNER_EXTRA with lstart=: LHO_STAGE=lstart, the owner not rewritten (I5\'s premise)' },
-  'F46-garbage-owner': { impls: ALL, caller: 'acquire', point: null, direction: 'keep', result: 'refused:corrupt', left: 'unchanged', note: 'never removed; the refusal and D6 name <lock>/owner (I4)' },
+  'F1-mkdir-lock': { impls: ALL, point: 'mkdir-lock', direction: 'keep', results: ACQ('refused:unk'), left: 'nothing-made', note: 'EEXIST is not a failure' },
+  'F2-tmp-create-exists': { impls: ALL, point: 'owner-create', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'not opened: the tmp is not removed; the rmdir fails on a non-empty <lock>' },
+  'F3-tmp-create-other': {
+    impls: ALL,
+    point: 'owner-create',
+    direction: 'own-only',
+    results: ACQ('refused:unk'),
+    left: 'own-lock-undone',
+    note: 'EACCES / ENOSPC / ENOENT: rmdir of the <lock> this mkdir made (empty only). Resumed after the ticket expired, the rmdir may take another head\'s K1 <lock>; that head then refuses on ENOENT — nobody holds (safe side, PM Claude P3-2)',
+  },
+  'F4-tmp-write': { impls: ALL, point: 'owner-write', direction: 'own-only', results: ACQ('refused:write-failed'), left: 'own-lock-undone', note: 'ENOSPC / EIO' },
+  'F5-tmp-write-short': {
+    impls: ALL,
+    point: 'owner-write-short',
+    direction: 'own-only',
+    results: ACQ('refused:write-failed'),
+    left: 'own-lock-undone',
+    note: 'JS/TS: the sum of writeSync < byteLength; bash: the tmp read back with $(cat) differs from the stdin read once with $(cat) and written with printf %s\\n (same way on both sides: the trailing newline does not count, PM Claude P3-5)',
+  },
+  'F6-tmp-close': { impls: JS, point: 'owner-close', direction: 'own-only', results: ACQ('refused:write-failed'), left: 'own-lock-undone', note: 'closeSync throws: not published (bash: caught by F5)' },
+  'F7-link-exists-file': { impls: ALL, point: 'owner-publish', direction: 'own-only', results: ACQ('refused:owner-exists'), left: 'unchanged', note: 'own tmp removed' },
+  'F8-link-exists-dir': { impls: ALL, point: 'owner-publish', direction: 'own-only', results: ACQ('refused:owner-exists'), left: 'unchanged', note: 'nothing made inside the directory (`ln` would: /bin/link and linkSync answer EEXIST)' },
+  'F9-link-exists-dirlink': { impls: ALL, point: 'owner-publish', direction: 'own-only', results: ACQ('refused:owner-exists'), left: 'unchanged', note: 'nothing made where the symlink points (outside <lock>)' },
+  'F10-link-exists-filelink': { impls: ALL, point: 'owner-publish', direction: 'own-only', results: ACQ('refused:owner-exists'), left: 'unchanged', note: 'the symlink is not followed or replaced' },
+  'F11-link-enoent': { impls: ALL, point: 'owner-publish', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'own tmp removed if there; no rmdir: a <lock> there now is not ours' },
+  'F12-link-other': { impls: ALL, point: 'owner-publish', direction: 'own-only', results: ACQ('refused:unk'), left: 'own-lock-undone', note: 'EPERM / ENOTSUP / EIO' },
+  'F13-readback-unknown-same-inode': {
+    impls: ALL,
+    point: 'owner-readback',
+    direction: 'own-only',
+    results: ACQ('refused:unk'),
+    left: 'own-lock-undone',
+    note: 'the owner removed only when it is the tmp: bash `[ ! -L owner ] && [ owner -ef tmp ]` (P3-4), JS/TS lstat(owner) vs lstat(tmp) dev+ino (the tmp is closed: P3-3)',
+  },
+  'F14-readback-unknown-other-inode': { impls: ALL, point: 'owner-readback', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'another inode, a symlink, or no tmp to compare: the owner is not removed; own tmp only' },
+  'F15-readback-not-ours': { impls: ALL, point: 'owner-readback', direction: 'own-only', results: ACQ('refused:not-ours'), left: 'unchanged', note: 'own tmp removed' },
+  'F16-tmp-unlink-after-publish': { impls: ALL, point: 'owner-unlink', direction: 'keep', results: ACQ('acquired'), left: 'mine+tmp', note: 'the tmp goes with the rm -rf of release / recovery' },
+  'F17-undo-tmp-unlink': { impls: ALL, point: 'owner-unlink', direction: 'keep', results: ACQ('refused:write-failed'), left: 'lock+own-tmp', note: 'tmp-new: a graced head takes it out after the grace (I3)' },
+  'F18-undo-lock-rmdir': { impls: ALL, point: 'lock-rmdir', direction: 'keep', results: ACQ('refused:write-failed'), left: 'lock-empty', note: 'as today' },
+  'F19-cleanup-list': { impls: GRACED, point: 'lock-list', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'no mkdir this poll; D6 names it in LRO_UNKNOWN' },
+  'F20-cleanup-tmp-lstat': { impls: GRACED, point: 'ownerless-tmp-lstat', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'no mkdir this poll' },
+  'F21-cleanup-mtime': { impls: GRACED, point: 'ownerless-mtime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'no mkdir this poll' },
+  'F22-cleanup-tmp-unlink': { impls: GRACED, point: 'ownerless-tmp-unlink', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'not ENOENT: no rmdir, no mkdir this poll' },
+  'F23-cleanup-tmp-unlink-enoent': { impls: GRACED, point: 'ownerless-tmp-unlink', direction: 'keep', results: AG_GH('acquired', 'removed'), left: 'reclaimed', note: 'already gone (an older cleaner at the same time): on to the next name / the rmdir — the rule goes on' },
+  'F24-cleanup-rmdir-notempty': { impls: GRACED, point: 'ownerless-rmdir', direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'published in between: the owner is judged as a record' },
+  'F25-cleanup-rmdir-other': { impls: GRACED, point: 'ownerless-rmdir', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'no mkdir this poll' },
+  'F26-old-tmp-pid-unknown': { impls: GRACED, point: 'owner-tmp-pid', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: "kill -0 of the name's pid: EPERM / EIO" },
+  'F27-old-tmp-pid-alive': { impls: GRACED, point: null, direction: 'keep', results: AG_GH('refused:old-taker', 'kept'), left: 'unchanged', note: 'alive and started at or before the tmp mtime + 2 s: maybe the older writer stopped past the grace; resumed, it mv-s its own tmp (codex round 1 P1)' },
+  'F28-old-tmp-pid-not-numeric': { impls: GRACED, point: null, direction: 'keep', results: AG_GH('refused:stray', 'kept'), left: 'unchanged', note: 'owner.tmp.<not a pid>' },
+  'F29-empty-owner-young': { impls: ALL, point: null, direction: 'keep', results: HEADS('refused:taking', 'kept'), left: 'unchanged', note: '10 min or younger: maybe being written' },
+  'F30-empty-owner-move': { impls: ALL, point: 'empty-owner-move', direction: 'keep', results: HEADS('refused:unk', 'kept'), left: 'unchanged', note: 'the mv aside fails' },
+  'F31-empty-owner-aside-written': { impls: ALL, point: null, direction: 'keep', results: HEADS('refused:rec', 'kept'), left: 'aside-kept', note: 'no longer 0 bytes once moved: lock_settle_gone judges it as a record next poll' },
+  'F32-kill0-other': { impls: BASH, point: 'pid', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: EIO, unknown stays, D7 not applied' },
+  'F33-ps-lstart': { impls: BASH, point: 'lstart', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: alive → unknown:lstart:<errno>; EPERM stays' },
+  'F34-lstart-only-60s': {
+    impls: BASH,
+    point: null,
+    direction: 'keep',
+    results: AG_GH('refused:unk', 'kept'),
+    left: 'unchanged',
+    note: 'D7: no started_at=, the strings 60 s apart (readers under UTC0 and XXX-0:01, a live holder): unknown:lstart:EMISMATCH — round 2 read "not a multiple of 15 min" as another start (codex round 2 P2; PM decision 2)',
+  },
+  'F35-ps-etime': { impls: BASH, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: alive → unknown:etime:<errno>; EPERM stays' },
+  'F36-etime-malformed': { impls: BASH, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: `bad:bad`, `1:99`, `-1:00`, four fields: never read as 0 s elapsed' },
+  'F37-ticket-etime-malformed': { impls: ALL, point: 'etime', direction: 'keep', results: { 'ticket-retire': 'kept' }, left: 'unchanged', note: 'bash lock_pid_start_ms takes the strict parse; JS/TS parseEtime checks the ranges' },
+  'F38-lstart-only-reused': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: no started_at=, the pid reused by a live process: kept and named until that pid ends (round 2\'s owner mtime stand-in dropped)' },
+  'F39-started-at-unparsed': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: date cannot read started_at=, the strings differ: as if absent (F34)' },
+  'F40-started-at-carry-over': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: LOB_STARTED_AT emptied per read: a record without started_at= after one with is not read as reused' },
+  'F41-hostname': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: another host= is alive' },
+  'F42-clock-back': {
+    impls: BASH,
+    point: null,
+    direction: 'limit',
+    results: AG_GH('acquired', 'removed'),
+    left: 'live-holder-removed',
+    note: 'D7: the wall clock stepped back > 2 s between the holder\'s start and its acquisition, and the writer and reader TZ differ (the strings differ): now − etime > started_at + 2 s reads a live holder as reused. Same TZ: the strings match, never reached',
+    limit: { kind: 'premise', until: 'stays a premise (P1; the parent §1.8 treatment, PM Claude PR1c round 3 hand-over B-2)' },
+  },
+  'F43-launchd-reader': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: written under env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin (TZ, LC_ALL unset), read with TZ=UTC and TZ=Asia/Tokyo: started_at against etime, alive' },
+  'F44-pid-gone-group-alive': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: pgid= and lstart=, the pid gone and G alive: D7 not applied (no such record in production)' },
+  'F45-handoff-lstart': { impls: BASH, point: null, direction: 'keep', results: { 'hand-off': 'failed' }, left: 'unchanged', note: "LOCK_OWNER_EXTRA with lstart=: LHO_STAGE=lstart, the owner not rewritten (I5's premise)" },
+  'F46-garbage-owner': { impls: ALL, point: null, direction: 'keep', results: HEADS('refused:corrupt', 'kept'), left: 'unchanged', note: 'never removed; the refusal and D6 name <lock>/owner (I4)' },
+  'F47-guard-absent-check': { impls: GRACED, point: 'lock-list', direction: 'keep', results: { 'guard-head': 'kept' }, left: 'unchanged', note: "D6's own failure: its lock_ownerless_empty (the absent check, verify-run.sh:2030) answers unknown; named in LRO_UNKNOWN (an acquirer never makes this check)" },
+  'F48-guard-not-head': { impls: GRACED, point: null, direction: 'keep', results: { 'guard-behind': 'not-head' }, left: 'unchanged', note: "D6's own failure: not the head within its budget (a live ticket ahead): moves nothing (I0-b)" },
+  'F49-old-k1-resumed': {
+    impls: GRACED,
+    point: null,
+    direction: 'limit',
+    results: AG_GH('acquired', 'removed'),
+    left: 'two-holders-possible',
+    note: 'an older run-lock / supervisor.lock writer (no ticket) stopped after its mkdir, before owner.tmp.<pid> (no pid anywhere), past the 10 min grace; the head reclaims the empty <lock> and takes it; resumed, the writer writes its tmp in the successor\'s <lock> and mv -f replaces the owner (codex round 2 P1)',
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK },
+  },
+  'F50-pr1a-writer-ticket-expired': {
+    impls: ALL,
+    point: null,
+    direction: 'limit',
+    results: HEADS('acquired', 'removed'),
+    left: 'two-holders-possible',
+    note: 'a PR1a writer (`: >`, then cat >> by name, rm -f owner by name on failure) alive, its ticket retired at deadline + 60 s, stopped on an empty owner past 10 min; the head reclaims the empty owner and takes it; resumed, it appends to the successor\'s owner (unparsable, nobody removes it) or removes it by name (PM Claude round 2 P2-A)',
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY },
+  },
+  'F51-pre-pid-stop': {
+    impls: ALL,
+    point: null,
+    direction: 'limit',
+    results: HEADS('acquired', 'removed'),
+    left: 'two-holders-possible',
+    note: 'a copy older than PR1a (`printf > owner`, an older cmate-verify) stopped after opening the owner, before its pid is written, past 10 min; the head reclaims the empty owner; resumed, its write lands in the removed inode and it may believe it holds',
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY },
+  },
+  'F52-old-tmp-pid-reused': { impls: GRACED, point: null, direction: 'keep', results: AG_GH('acquired', 'removed'), left: 'reclaimed', note: 'the pid is alive but started after the tmp mtime + 2 s (from etime): not the writer, the rule takes it out (PM Claude P3-1; round 2 kept it old-taker for ever)' },
+  'F53-old-tmp-pid-etime': { impls: GRACED, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'the old tmp pid alive and its ps -o etime= fails or is malformed' },
+  'F54-started-at-60s': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: started_at= present, the strings 60 s apart (a minute-unit TZ offset, a live holder): the start from etime is not after started_at + 2 s, alive' },
+  'F55-old-tmp-clock-back': {
+    impls: GRACED,
+    point: null,
+    direction: 'limit',
+    results: AG_GH('acquired', 'removed'),
+    left: 'two-holders-possible',
+    note: 'an older writer whose wall clock stepped back > 2 s between its start and its tmp write, then stopped between the tmp and its mv past 10 min: F52 reads it as reused and takes the tmp out; resumed, its mv -f fails and its rm -rf "$dir" may remove the successor\'s <lock> (outside P1, while older copies remain)',
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK },
+  },
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
 const FAILURES = Object.keys(FAILURE_TABLE) as Failure[];
-const F_ROWS: Array<FailureRow & { id: Failure }> = FAILURES.map((id) => ({ id, ...FAILURE_TABLE[id] }));
+const F_ROWS: Array<FailureRow & { id: Failure }> = FAILURES.map((id) => ({ id, ...(FAILURE_TABLE[id] as FailureRow) }));
 
-// ------------------------------------------------------------------ §4: machine_lock_pid_identity (the contract PR1c calls)
+const F_UNREACHABLE_REASONS = {
+  'ts-no-grace': UNREACHABLE_REASONS['ts-no-grace'],
+  'ts-no-guard': UNREACHABLE_REASONS['ts-no-guard'],
+} as const;
+type FReason = keyof typeof F_UNREACHABLE_REASONS;
+function fReach(impl: Impl, caller: FCaller): FReason | null {
+  if (impl === 'ts' && caller === 'acquire-head-grace') return 'ts-no-grace';
+  if (impl === 'ts' && (caller === 'guard-head' || caller === 'guard-behind')) return 'ts-no-guard';
+  return null;
+}
+
+interface FCase {
+  id: Failure;
+  impl: Impl;
+  caller: FCaller;
+  result: FResult;
+  row: FailureRow;
+  unreachable: FReason | null;
+}
+const F_ALL_CASES: FCase[] = F_ROWS.flatMap((row) =>
+  row.impls.flatMap((impl) =>
+    (F_CALLERS.filter((c) => row.results[c] !== undefined) as FCaller[]).map((caller) => ({
+      id: row.id,
+      impl,
+      caller,
+      result: row.results[caller] as FResult,
+      row,
+      unreachable: fReach(impl, caller),
+    })),
+  ),
+);
+const F_CASES = F_ALL_CASES.filter((c) => c.unreachable === null);
+const fMoves = (r: FResult): boolean => r === 'acquired' || r === 'removed' || r === 'retired';
+
+// ------------------------------------------------------------------ §4: machine_lock_pid_identity (the contract PR1c uses through D7)
 
 const PID_IDENTITY = {
   bash: {
     name: 'machine_lock_pid_identity',
     file: 'scripts/lib/machine-lock.sh',
-    args: ['pid', 'recorded-lstart', 'started-at-ms'],
+    args: ['pid', 'recorded-lstart', 'started-at-ms (may be empty)'],
     answers: ['alive', 'reused', 'unknown:<point>:<errno>'],
-    helpers: ['machine_lock_etime_ms', 'machine_lock_lstart_naive_s'],
+    helpers: ['machine_lock_etime_ms'],
+    /** alive is "reuse not shown", a value leaning to keep: it decides whether to remove, never whether to stop (PM decision 3). */
+    use: 'D7 through lock_record_state only: the acquisition, lock_settle_gone and the D6 guard',
+    never: [
+      { file: 'scripts/agent-health/product/lib.sh', fn: 'proc_matches' },
+      { file: 'scripts/agent-health/product/deadline-guard.sh', fn: null },
+      { file: 'scripts/agent-health/product/supervisor.sh', fn: null },
+    ],
   },
   sync: { name: null, why: 'no JS caller reads lstart= (I6); parseEtime gains the range check (F37)' },
   ts: { name: null, why: 'the same' },
 } as const;
 
-/** Witness (1): the naive (zone-less) difference of two lstart strings is a time-zone offset. */
-const TZ_STEP_S = 900;
-const TZ_SPAN_S = 26 * 3600;
-const isTimeZoneOffset = (diffS: number): boolean => diffS % TZ_STEP_S === 0 && Math.abs(diffS) <= TZ_SPAN_S;
+/** The rule of §4.1 on plain values (no strings parsed): what the identity answers. */
+interface IdentityInput {
+  /** ps -o lstart= against the record: the same string, a different one, or unreadable. */
+  readonly cur: 'same' | 'differs' | 'unreadable';
+  /** started_at= in ms, or null when absent / unparsable. */
+  readonly startedAtMs: number | null;
+  /** now − etime in ms (taken before ps), or null when etime fails or is malformed. */
+  readonly startMs: number | null;
+}
+const SLACK_MS = 2000;
+function identity({ cur, startedAtMs, startMs }: IdentityInput): 'alive' | 'reused' | 'unknown' {
+  if (cur === 'unreadable') return 'unknown';
+  if (cur === 'same') return 'alive';
+  if (startedAtMs === null) return 'unknown'; // lstart= only: no evidence either way (PM decision 2)
+  if (startMs === null) return 'unknown';
+  return startMs > startedAtMs + SLACK_MS ? 'reused' : 'alive';
+}
+
+const T0 = Date.UTC(2026, 10, 11, 9, 32, 44); // the holder's real start (measured lstart: 09:32:44 UTC / 18:32:44 Asia/Tokyo)
+/** Witnesses of §4.1: each with its input, its answer, and the row it stands for. */
+const IDENTITY_CASES = {
+  'same-string': { input: { cur: 'same', startedAtMs: null, startMs: null }, answer: 'alive', row: 'lstart-match, lstart-same-etime-fails (etime never read)' },
+  'tz-9h-with-started-at': { input: { cur: 'differs', startedAtMs: T0 + 1000, startMs: T0 }, answer: 'alive', row: 'lstart-tz, F43' },
+  'tz-60s-with-started-at': { input: { cur: 'differs', startedAtMs: T0 + 1000, startMs: T0 }, answer: 'alive', row: 'F54 (the size of the string difference is not read)' },
+  'tz-60s-lstart-only': { input: { cur: 'differs', startedAtMs: null, startMs: T0 }, answer: 'unknown', row: 'F34 (round 2 said "not an offset")' },
+  'tz-9h-lstart-only': { input: { cur: 'differs', startedAtMs: null, startMs: T0 }, answer: 'unknown', row: 'lstart-legacy' },
+  'reused-with-started-at': { input: { cur: 'differs', startedAtMs: T0, startMs: T0 + 60_000 }, answer: 'reused', row: 'lstart-reused' },
+  'reused-lstart-only': { input: { cur: 'differs', startedAtMs: null, startMs: T0 + 60_000 }, answer: 'unknown', row: 'lstart-legacy-reused, F38' },
+  'etime-fails': { input: { cur: 'differs', startedAtMs: T0, startMs: null }, answer: 'unknown', row: 'etime-fails, F35, F36' },
+  'lstart-fails': { input: { cur: 'unreadable', startedAtMs: T0, startMs: T0 }, answer: 'unknown', row: 'lstart-fails, F33' },
+  'started-within-slack': { input: { cur: 'differs', startedAtMs: T0, startMs: T0 + SLACK_MS }, answer: 'alive', row: 'the 2 s slack (lock_now_ms in whole seconds)' },
+  // the clock stepped back 5 s after the holder started and before it wrote started_at: a live holder, read as reused
+  'clock-back-premise': { input: { cur: 'differs', startedAtMs: T0 - 4000, startMs: T0 }, answer: 'reused', row: 'F42 (limit, premise P1)' },
+} as const satisfies Record<string, { input: IdentityInput; answer: 'alive' | 'reused' | 'unknown'; row: string }>;
+
+/** Each D7 form of table T as an input of §4.1 (the identity of IDENTITY_OF must follow from the rule). */
+const FORM_IDENTITY = {
+  'lstart-match': 'same-string',
+  'lstart-tz': 'tz-9h-with-started-at',
+  'lstart-reused': 'reused-with-started-at',
+  'lstart-fails': 'lstart-fails',
+  'etime-fails': 'etime-fails',
+  'lstart-same-etime-fails': 'same-string',
+  'lstart-legacy': 'tz-9h-lstart-only',
+  'lstart-legacy-reused': 'reused-lstart-only',
+} as const satisfies Record<D7Form, keyof typeof IDENTITY_CASES>;
 
 /** machine_lock_etime_ms's rule, on the text: `[[dd-]hh:]mm:ss`, hh < 24, mm < 60, ss < 60; anything else is null. */
 function etimeMs(text: string): number | null {
@@ -817,10 +1029,13 @@ describe('Issue #4288 PR1a-f tables (design §2.5): shape', () => {
     for (const e of UNREACHABLE) expect(UNREACHABLE_REASONS[(e.cell as Unreachable).unreachable].length).toBeGreaterThan(0);
   });
 
-  it('K has 5 points × 3 implementations = 15 rows, F has 46 rows: 403 rows in all', () => {
+  it('K has 5 points × 3 implementations = 15 rows, F has 55 rows: 250 implementation × caller cases, 30 unreachable, 220 reached; 577 rows in all', () => {
     expect(KILL_ROWS).toHaveLength(15);
-    expect(FAILURES).toHaveLength(46);
-    expect(ROWS.length + KILL_ROWS.length + FAILURES.length).toBe(403);
+    expect(FAILURES).toHaveLength(55);
+    expect(F_ALL_CASES).toHaveLength(250);
+    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(30);
+    expect(F_CASES).toHaveLength(220);
+    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(577);
   });
 
   it('every form and every observation of it is defined', () => {
@@ -871,7 +1086,8 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
 
   it('I0-c: an unknown observation never takes or removes — except a reused pid read EPERM by both witnesses (I5)', () => {
     for (const e of ROWS.filter((r) => r.obs === 'unknown' && moves(r))) {
-      expect(['lstart-reused', 'lstart-legacy-reused']).toContain(e.form);
+      // round 3: lstart-legacy-reused is no longer taken (no started_at, no evidence of reuse)
+      expect(['lstart-reused']).toContain(e.form);
     }
   });
 
@@ -908,7 +1124,12 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
 
   it('I5: D7 turns nothing alive into taken except a reused pid; a live holder under another TZ, an older record or an etime it cannot read is kept', () => {
     for (const e of ROWS.filter((r) => isD7(r.form) && r.obs !== 'gone' && moves(r))) {
-      expect(['lstart-reused', 'lstart-legacy-reused']).toContain(e.form);
+      // reused only with the evidence of started_at and etime (PM decision 2): not the lstart=-only record
+      expect(['lstart-reused']).toContain(e.form);
+    }
+    for (const form of ['lstart-legacy', 'lstart-legacy-reused'] as const) {
+      expect(normalize(BASH_T[form]['acquire-head-grace'][0])).toMatchObject({ is: 'refused:unk' });
+      expect(normalize(BASH_T[form]['guard-head'][0])).toMatchObject({ is: 'kept' });
     }
     for (const form of ['lstart-tz', 'lstart-legacy', 'etime-fails'] as const) {
       expect(normalize(BASH_T[form]['acquire-head-grace'][0])).toMatchObject({ now: 'acquired' });
@@ -934,18 +1155,67 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
     }
   });
 
-  it('§3: no residual row (I7); own-only rows are the acquisition\'s own undo; the cleanup rows are graced, the D7 rows bash', () => {
+  it('§3: no residual row (I7); own-only rows are the acquisition\'s own undo; the clean-up rows are graced, the D7 rows bash', () => {
     expect(F_ROWS.filter((f) => (f.direction as string) === 'residual')).toEqual([]);
-    for (const f of F_ROWS) expect((F_CALLERS as readonly string[]).includes(f.caller)).toBe(true);
-    for (const f of F_ROWS.filter((r) => r.direction === 'own-only')) expect(f.caller).toBe('acquire');
-    for (const f of F_ROWS.filter((r) => r.caller === 'cleanup')) expect([...f.impls]).toEqual(['bash', 'sync']);
-    for (const f of F_ROWS.filter((r) => r.caller === 'd7' || r.caller === 'hand-off')) expect([...f.impls]).toEqual(['bash']);
+    for (const f of F_ROWS) for (const c of Object.keys(f.results)) expect((F_CALLERS as readonly string[]).includes(c)).toBe(true);
+    for (const f of F_ROWS.filter((r) => r.direction === 'own-only')) {
+      expect(Object.keys(f.results).sort()).toEqual(['acquire-head-grace', 'acquire-head-nograce']);
+    }
+    for (const id of ['F19-cleanup-list', 'F22-cleanup-tmp-unlink', 'F24-cleanup-rmdir-notempty', 'F26-old-tmp-pid-unknown', 'F52-old-tmp-pid-reused'] as const) {
+      expect([...FAILURE_TABLE[id].impls]).toEqual(['bash', 'sync']);
+    }
+    for (const f of F_ROWS.filter((r) => r.note.startsWith('D7:') || r.id === 'F45-handoff-lstart')) expect([...f.impls]).toEqual(['bash']);
     // every new point of §2.8 is driven by a row
     const used = new Set(F_ROWS.map((f) => f.point));
     for (const [p, kind] of Object.entries(POINTS)) if (kind === 'new') expect(used.has(p as Point)).toBe(true);
     // a short write and a failed close are rows (codex P2)
     expect(FAILURE_TABLE['F5-tmp-write-short'].point).toBe('owner-write-short');
     expect(FAILURE_TABLE['F6-tmp-close'].point).toBe('owner-close');
+  });
+
+  it('§3: F is written per real caller (codex round 2 P2): an acquirer and the D6 guard on the same failure agree, and the guard answers kept', () => {
+    for (const f of F_ROWS) {
+      const acq = f.results['acquire-head-grace'] ?? f.results['acquire-head-nograce'];
+      const guard = f.results['guard-head'];
+      if (acq !== undefined && guard !== undefined) expect(acq === 'acquired').toBe(guard === 'removed');
+      if (f.results['acquire-head-grace'] !== undefined && f.results['acquire-head-nograce'] !== undefined) {
+        expect(f.results['acquire-head-grace']).toBe(f.results['acquire-head-nograce']);
+      }
+    }
+    // the guard's own rows (D6's failures) and kept as a result
+    expect(FAILURE_TABLE['F47-guard-absent-check'].results).toEqual({ 'guard-head': 'kept' });
+    expect(FAILURE_TABLE['F48-guard-not-head'].results).toEqual({ 'guard-behind': 'not-head' });
+    expect(F_CASES.filter((c) => c.caller === 'guard-head' && c.result === 'kept').length).toBeGreaterThan(0);
+    // the clean-up and D7 rows name the guard too (round 2 named only the operation)
+    for (const f of F_ROWS.filter((r) => r.impls.length === 2 && r.impls[0] === 'bash' && r.impls[1] === 'sync')) {
+      expect(Object.keys(f.results).some((c) => c.startsWith('guard'))).toBe(true);
+    }
+    // TS has neither a graced acquirer nor a guard: such cases are unreachable, with the reason
+    for (const c of F_ALL_CASES.filter((x) => x.impl === 'ts' && (x.caller === 'acquire-head-grace' || x.caller.startsWith('guard')))) {
+      expect(c.unreachable).not.toBeNull();
+    }
+    for (const c of F_ALL_CASES.filter((x) => x.unreachable !== null)) expect(F_UNREACHABLE_REASONS[c.unreachable as FReason].length).toBeGreaterThan(0);
+  });
+
+  it('§3, I7, I8: a row that moves is the rule or the own undo — the removing side outside a premise is a `limit` row, mixed or premise, with what ends it', () => {
+    const moving = F_ROWS.filter((f) => f.direction === 'keep' && Object.values(f.results).some((r) => fMoves(r as FResult)));
+    expect(moving.map((f) => f.id).sort()).toEqual(['F16-tmp-unlink-after-publish', 'F23-cleanup-tmp-unlink-enoent', 'F52-old-tmp-pid-reused']);
+    const limits = F_ROWS.filter((f) => f.direction === 'limit');
+    expect(limits.map((f) => `${f.id}:${f.limit?.kind}`).sort()).toEqual([
+      'F42-clock-back:premise',
+      'F49-old-k1-resumed:mixed',
+      'F50-pr1a-writer-ticket-expired:mixed',
+      'F51-pre-pid-stop:mixed',
+      'F55-old-tmp-clock-back:mixed',
+    ]);
+    for (const f of limits) {
+      expect(f.limit?.until.length).toBeGreaterThan(0);
+      expect(['two-holders-possible', 'live-holder-removed']).toContain(f.left);
+    }
+    for (const f of F_ROWS.filter((r) => r.direction !== 'limit')) {
+      expect(f.limit).toBeUndefined();
+      expect(['two-holders-possible', 'live-holder-removed']).not.toContain(f.left);
+    }
   });
 
   it('the positive controls (cells whose result or wording changes) are the ones the design marks', () => {
@@ -979,8 +1249,8 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
         'etime-fails/guard-head/alive',
         'lstart-legacy/acquire-head-grace/alive',
         'lstart-legacy/guard-head/alive',
-        'lstart-legacy-reused/acquire-head-grace/unknown',
-        'lstart-legacy-reused/guard-head/unknown',
+        'lstart-legacy-reused/acquire-head-grace/alive',
+        'lstart-legacy-reused/guard-head/alive',
       ].sort(),
     );
   });
@@ -995,14 +1265,29 @@ describe('Issue #4288 PR1a-f §4: the time-zone independent comparison PR1c call
     expect(new Set(Object.values(IDENTITY_OF))).toEqual(new Set(['alive', 'reused', 'unknown']));
   });
 
-  it('witness (1): a whole time-zone offset is the same start; anything else (a second, a minute off) is not', () => {
-    expect(isTimeZoneOffset(0)).toBe(true);
-    expect(isTimeZoneOffset(9 * 3600)).toBe(true); // UTC vs Asia/Tokyo (measured: 09:32:44 / 18:32:44)
-    expect(isTimeZoneOffset(-(5 * 3600 + 1800))).toBe(true); // Asia/Kolkata
-    expect(isTimeZoneOffset(5 * 3600 + 2700)).toBe(true); // Asia/Kathmandu
-    expect(isTimeZoneOffset(9 * 3600 + 1)).toBe(false);
-    expect(isTimeZoneOffset(60)).toBe(false);
-    expect(isTimeZoneOffset(27 * 3600)).toBe(false);
+  it('the rule of §4.1 (round 3): the same string is alive; with started_at the start from etime decides; lstart= only is unknown; reused needs the evidence', () => {
+    for (const [name, c] of Object.entries(IDENTITY_CASES)) expect([name, identity(c.input)]).toEqual([name, c.answer]);
+    for (const form of D7_FORMS) expect([form, identity(IDENTITY_CASES[FORM_IDENTITY[form]].input)]).toEqual([form, IDENTITY_OF[form]]);
+    // the 60 s rows (codex round 2 P2): unknown without started_at, never reused on the size of the difference
+    expect(IDENTITY_CASES['tz-60s-lstart-only'].answer).toBe('unknown');
+    for (const c of Object.values(IDENTITY_CASES)) if (c.answer === 'reused') expect(c.input.startedAtMs).not.toBeNull();
+    // the clock stepping back is the premise row F42, not a quiet residual
+    expect(IDENTITY_CASES['clock-back-premise'].row).toContain('F42');
+    expect(FAILURE_TABLE['F42-clock-back'].limit.kind).toBe('premise');
+  });
+
+  it('§4.2: the identity decides whether to remove, never whether to stop — proc_matches, deadline-guard and supervisor do not call it (PM decision 3)', () => {
+    expect(PID_IDENTITY.bash.use).toContain('D7');
+    for (const { file, fn } of PID_IDENTITY.bash.never) {
+      const text = fs.readFileSync(path.join(REPO, file), 'utf8');
+      let body = text;
+      if (fn !== null) {
+        const start = text.indexOf(`${fn}() {`);
+        expect(start).toBeGreaterThanOrEqual(0);
+        body = text.slice(start, text.indexOf('\n}', start) + 2);
+      }
+      expect([file, body.includes('machine_lock_pid_identity')]).toEqual([file, false]);
+    }
   });
 
   it('the strict etime parse: valid forms read, malformed ones are null (never 0 s elapsed: codex P2)', () => {
@@ -1028,8 +1313,9 @@ describe('Issue #4288 PR1a-f behaviour K: an acquisition killed at each point (d
   for (const impl of IMPLS) it.todo(`${impl} positive control: today leaves ${KILL_NOW[impl].left} — ${KILL_NOW[impl].how}`);
 });
 
-describe('Issue #4288 PR1a-f failure directions F (design §3, to implement)', () => {
-  for (const f of F_ROWS) {
-    it.todo(`${f.id} [${f.impls.join(',')}] ${f.caller}${f.point ? ` @${f.point}` : ''}: ${f.direction} → ${f.result} / ${f.left} — ${f.note}`);
+describe.each(IMPLS)('Issue #4288 PR1a-f failure directions F: %s (design §3, to implement)', (impl) => {
+  for (const c of F_CASES.filter((x) => x.impl === impl)) {
+    const limit = c.row.limit ? ` [limit ${c.row.limit.kind}: ${c.row.limit.until}]` : '';
+    it.todo(`${c.id} ${c.caller}${c.row.point ? ` @${c.row.point}` : ''}: ${c.row.direction} → ${c.result} / ${c.row.left}${limit} — ${c.row.note}`);
   }
 });

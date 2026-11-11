@@ -1,9 +1,10 @@
 # #4288 PR1a-f: owner の書き込みの原子性・旧版の `owner.tmp.*` の回収・D7 の TZ 依存（設計の 4 つと試験の表）
 
 - Issue: #4288（2 番 run-lock・supervisor.lock の土台の続き）。土台: [lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) §1.6（D3・D7）・§1.9・§1.10・§1.14（PR1a の実装と D12 の不変条件）、[verify-lock-holder-group-4288.md](./verify-lock-holder-group-4288.md) §2.8（観測点の表）
-- PM の決定: `pm-return-4288-upstream.md` の共通の決定 1（PR1b・PR1c の上流のレビューから切り出した小さな PR）。上流 1 回目の指摘: `prereview/review-4288-pr1af-upstream.md`（codex、P1 1・P2 4・P3 1）・`pm-review-4288-pr1af-upstream-claude.md`（PM Claude、P2 6・P3 15）。PM の処分: `pm-return-4288-pr1af-upstream.md`（直す 1〜9。この版で全て入れた。対応は §7）
+- PM の決定: `pm-return-4288-upstream.md` の共通の決定 1（PR1b・PR1c の上流のレビューから切り出した小さな PR）。上流 1 回目の指摘: `prereview/review-4288-pr1af-upstream.md`（codex、P1 1・P2 4・P3 1）・`pm-review-4288-pr1af-upstream-claude.md`（PM Claude、P2 6・P3 15）。PM の処分: `pm-return-4288-pr1af-upstream.md`（直す 1〜9。対応は §7）。上流 2 回目の指摘: `prereview/review-4288-pr1af-upstream2.md`（codex、P1 1・P2 2・P3 1）・`pm-review-4288-pr1af-upstream2-claude.md`（PM Claude、P2 2・P3 7）。PM の処分: `pm-return-4288-pr1af-upstream2.md`（決定 1〜6。**この版（上流 3 回目）で全て入れた。対応は §7.1**）
 - この文書は上流の段（設計の 4 つ・試験の表）。実装は別の契約で、表の雛形 `tests/unit/verification/machine-lock-owner-atomic-4288.test.ts` の `it.todo` を赤から緑にする
-- 骨格は 1 回目のまま: **I1 tmp → `link`**、**I3 一時ファイルの名前だけ消して `rmdir`**、**I5 2 つの証拠が揃ったときだけ死**。D12（持ち主自身の解放）は触らない
+- 骨格は 1 回目のまま: **I1 tmp → `link`**、**I3 一時ファイルの名前だけ消して `rmdir`**、**I5 再利用は証拠が揃ったときだけ死**。D12（持ち主自身の解放）は触らない
+- 3 回目で変えたこと: 不変条件を「新版どうし」と「混在の間」に分けた（§1 の I8、旧い写しの長い停止からの再開は既知の限界として表 F の `limit` の行に置き、終わる条件を §6.1 に書いた）、空の owner・空の `<lock>` の回収の猶予を 10 分にした、D7 の「TZ の差は 15 分の倍数」の推定をやめた（`started_at` があれば etime の起動の時刻と比べ、`lstart=` だけの記録は一致で alive・不一致で unknown）、§4 の関数は「消すか消さないか」の判定専用と書いた、表 F を実際の呼び手 × 実装に展開した
 - 事実の行番号は `fd2f4a589`（develop、PR1a `c3387cbe7` を含む）
 
 ## 0. 今の振る舞い（事実）
@@ -21,7 +22,7 @@
 | E9 | 引渡し（D4）の owner の書き直しは `<lock>/.owner-<T1>` に書いてから `mv` する。pid は**後で起動した子**に替わり、`started_at` は `LOCK_ACQUIRED_AT` のまま、`LOCK_OWNER_EXTRA`（`lstart=` を含みうる）もそのまま書く | `verify-run.sh:1923-1944`（`:1930`）、sync `:943-947`・`:960-970` |
 | E10 | kv の記録の `started_at=` は `machine_lock_iso`（UTC の ISO、秒に切り捨て）で書く。BSD の `date -u -j -f '%Y-%m-%dT%H:%M:%SZ' <v> +%s` で秒に戻せる（実測 `2026-11-10T00:00:00Z` → `1794268800`） | `machine-lock.sh:167`・`:174-177` |
 | E11 | `ln src dst` は dst がディレクトリ（またはディレクトリへの symlink）なら**その中に** `dst/<basename src>` を作って 0 を返す。`/bin/link`（link(2) をそのまま呼ぶ）はどちらも `link: <dst>: File exists` で 1。`--` を受け、宛先の親が無ければ `No such file or directory`（実測 macOS、この版で再現。`lock_errno_of` で EEXIST・ENOENT に読める） | `/usr/share/man/man1/ln.1`、`/bin/link` |
-| E12 | PR1a 版の取得者は作成の間ずっと**自分の札を持つ**（札を退かすのは公開の成功の後、`lock_retire_own_ticket`）。札は `kill -0` で生きている間は退かされず、先頭は札の列で 1 人。PR1a 版の書き込みの失敗の後始末は `rm -f "$LOCK_PATH/owner"`（名前で）→ `rmdir` | `verify-run.sh:1619-1650`（`:1624`・`:1645`） |
+| E12 | PR1a 版の取得者は作成の間ずっと**自分の札を持つ**（札を退かすのは公開の成功の後、`lock_retire_own_ticket`）。ただし札は持ち主が生きていても外れる: `lock_ticket_retirable` は pid が死んだ（`gone`）・再利用された（`pid-reused`）・**今が期限＋`LOCK_SAME_HOST_GRACE_MS`（60000）を過ぎた（`expired`）**のどれかで札を退かす。期限は取得の開始＋予算で、run-lock・supervisor.lock・D6 のガードは予算 0 なので**期限＝開始**。作成の途中で 60 秒より長く止まった書き手の札は外れ、次の者が先頭になる（先頭が 1 人なのは「60 秒を超えて止まらない」前提の内だけ。親 §1.8 の前提）。PR1a 版の書き込みの失敗の後始末は `rm -f "$LOCK_PATH/owner"`（名前で）→ `rmdir` | `verify-run.sh:1619-1650`（`:1624`・`:1645`）、札 `:1154-1182`（`:1177`）・`:623`、期限 `:1559` |
 | E13 | 旧版の run-lock・supervisor.lock の取得者は札を持たない（`mkdir` を直に試す）。`mv` の失敗の後始末は `rm -rf "$dir"`（`lib.sh:178`、`run-lock.sh:127`）。旧版の読み手は「owner が無く 1 分より古い `<lock>`」を中身ごと取る（`lib.sh:141-144`） | `lib.sh:166-185`、`run-lock.sh:60-79` |
 | E14 | `lock_parse_owner_text`（kv の codec）は読みの最初に `LPO_*` を空に戻すが、`started_at=` は読まない。`lock_holder_state` は pid が gone でも G が生きていれば `alive` を返す | `machine-lock.sh:135-160`、`verify-run.sh:1107-1112` |
 
@@ -35,23 +36,29 @@
 
 前提:
 
-- **P0（札を持つ書き手）**: 保証は #4277 の札の規約に従う書き手（この repo の #4277 以降の `verify-run.sh`・skills の cmate-verify 0.7.0 以降・同期 JS・TS）の間で成り立つ。札を持つ書き手は、作成の途中で止まっている間も札が生きているので、他の誰も先頭にならない（E12）。札を持たない書き手は 2 種類で、扱いを分ける: (1) 旧版の run-lock・supervisor.lock（`owner.tmp.<pid>` の名前に pid がある）は I3 の pid の確かめで守る、(2) cmate-verify 0.7.0 より前の写し（札の規約そのものを知らない）は今も先頭の規約を無視して `mkdir` するので、親 §1.9 の「旧い取得者が動く間」と同じく保証の外。§5 の skills の port と sync-map.json の pin で減らす
+- **P0（札を持つ書き手と停止の長さ）**: 保証は #4277 の札の規約に従う書き手（この repo の #4277 以降の `verify-run.sh`・skills の cmate-verify 0.7.0 以降・同期 JS・TS）の間で成り立つ。札は持ち主が生きていても**期限＋60 秒で外れる**（E12）ので、「作成の途中で止まった書き手の札が生きている間は他の誰も先頭にならない」は 60 秒を超えない停止の間だけ言える。60 秒を超える停止の後に再開した書き手でも壊れないことは、**新しい形の書き手**については札に頼らずに示す（I8 の (a)。公開が `link` の排他で、止まった書き手は ENOENT／EEXIST で断り自分の tmp しか消さない）。旧い形の書き手（札を持たない旧版の run-lock・supervisor.lock、名前で書き・名前で消す PR1a 版とそれより前の写し）については示せない（I8 の (b)、既知の限界）。cmate-verify 0.7.0 より前の写し（札の規約そのものを知らない）は今も先頭の規約を無視して `mkdir` するので、親 §1.9 の「旧い取得者が動く間」と同じく保証の外。§5 の skills の port・sync-map.json の pin・§6.1 の写しの更新で減らす
+- **P1（壁時計）**: 持ち主のプロセスの起動から取得（`started_at` を書く時）までの間に、壁時計が `LOCK_PID_REUSE_SLACK_MS`（2 秒）より大きく戻らない。D7 の `reused` の証拠（§4.1 の 6）と旧版の tmp の pid の再利用の証拠（I3）はこの前提に依る。前提の外の振る舞いは表 F の F42（`limit`・`premise`）に書く（PM Claude の PR1c 上流 3 回目の申し送り B の 2）
 
 足すもの:
 
-- **I1（owner は完全な形でしか現れない。SIGKILL の範囲）**: どの実装も owner を「`<lock>/.owner-<token>` に**全て書き**（JS・TS は `writeSync` の戻り値の合計が `Buffer.byteLength(text)` と同じ、bash は tmp を読み直して書いた中身と同じ）、**閉じ**（`closeSync` が成功）→ `link(tmp, owner)`（排他。在れば EEXIST）→ 読み直し → tmp を消す」の順で公開する。`<lock>/owner` という名前が見える時点で中身は全て書かれている。よって**どの中断点（SIGKILL）も 0 バイトや書きかけの owner を残さない**（§2.6 の表 K）。fsync はしないので、停電・カーネルの停止の後は `link` 済みの 0 バイトの owner が残りうる。それは I4 の空の owner の回収で扱う（書いた者はもう居ない）
+- **I1（owner は完全な形でしか現れない。SIGKILL の範囲）**: どの実装も owner を「`<lock>/.owner-<token>` に**全て書き**（JS・TS は `writeSync` の戻り値の合計が `Buffer.byteLength(text)` と同じ、bash は標準入力を一度だけ変数に読み〔`lco_text=$(cat)`。`$(…)` は末尾の改行を落とす〕、`printf '%s\n' "$lco_text"` で tmp に書き、tmp を同じ `$(cat -- "$tmp")` で読み直した文字列が `$lco_text` と同じ。比べる 2 つを同じ取り方にするので、末尾の改行の差で正しく書けた tmp を短い書き込みと読まない: PM Claude P3-5）、**閉じ**（`closeSync` が成功）→ `link(tmp, owner)`（排他。在れば EEXIST）→ 読み直し → tmp を消す」の順で公開する。`<lock>/owner` という名前が見える時点で中身は全て書かれている。よって**どの中断点（SIGKILL）も 0 バイトや書きかけの owner を残さない**（§2.6 の表 K）。fsync はしないので、停電・カーネルの停止の後は `link` 済みの 0 バイトの owner が残りうる。それは I4 の空の owner の回収で扱う（書いた者はもう居ない）
 - **I2（排他は今のまま。公開は link(2) の意味）**: 公開は `link(2)` なので、在る owner（他者の記録・symlink・ディレクトリ・ディレクトリへの symlink）を書き換えない・その中に作らない。bash は `ln` でなく `LC_ALL=C /bin/link -- "$tmp" "$lock/owner"` を使う（E11。`ln` は宛先がディレクトリなら中に作って成功する）。EEXIST・ENOENT は `lock_errno_of` で読む。`mv`（`rename`）は在る owner を置き換えるので公開には使わない。札の `ln`（E8）は宛先にディレクトリができる経路が無いので変えない
-- **I2-b（戻しは自分のものだけ）**: 公開の後の戻し（読み直しが不明: F13）は、`<lock>/owner` が自分の tmp と**同じ inode**（bash は `[ "$lock/owner" -ef "$tmp" ]`、JS・TS は `lstat(owner)` と `fstat(tmp)` の `dev`・`ino`）のときだけ owner を消す。tmp を消す前に確かめる。違えば owner は他者のもので消さない。`link` が ENOENT（F11: 自分の `<lock>` か tmp が片付けられた）なら、今ある `<lock>` は他者のものなので `rmdir` しない
-- **I3（owner の無い `<lock>` の片付けの範囲）**: 片付けるのは**猶予つきの先頭**（`LOCK_OWNERLESS_GRACE_MS`／`ownerlessGraceMs` を渡した呼び手: run-lock・supervisor.lock、と D6 のガード）だけ。判定は**新しい述語** `lock_ownerless_temps_only`（bash）／`ownerlessTempsOnly`（同期 JS）で、呼ぶのは片付け `lock_expire_ownerless`／`expireOwnerless` **だけ**。既存の `lock_ownerless_empty`／`ownerlessEmptyLock`（「owner が無く中が**空**」）は意味を変えない（途中の戻し §2.7 の `lock_restore_from_gone` の `exists` の枝 `verify-run.sh:1338`、take-back-half `:1360`、D6 の `absent` の確かめ `:2030`、sync `:597`・`:622`・`:1164`、TS `:778`・`:800` が使うので）。新しい述語の答えは `no`（owner が在る）・`empty`・`temps:<names>`・`stray`・`absent`・`unknown:<point>:<path>:<errno>`。対象は「owner が missing」かつ「中の名前が全て一時ファイルの形で通常ファイル」かつ「`<lock>` と全ての一時ファイルの mtime が猶予より古い」かつ「**`owner.tmp.<pid>` の全てについて、その pid が `kill -0` で gone（ESRCH）**」のもの。`.owner-<token>` は新しい形と引渡しの tmp で、書き手は札を持つ（P0）ので年齢だけで足りる。`owner.tmp.<pid>` の pid が alive なら回収せず `machine-lock-ownerless-old-taker <lock> pid=<pid>` と名指す（旧版の書き手が猶予を超えて止まっている。再開すれば自分で `mv` する）。pid が EPERM・EIO（unknown）でも回収しない。pid が数字でなければ `stray`。消すのは**その一時ファイルの名前だけ**（`owner` という名前は消さない）と、最後の `rmdir <lock>`（空でなければ失敗する）。一時ファイルの unlink が ENOENT なら「もう無い」と読んで次へ進む（旧版の片付けと同時。F23）。途中で誰かが公開すれば `owner` が在るので `rmdir` が失敗し、ロックはそのまま残る
-- **I4（壊れた owner）**: 解けない owner（`garbage-owner`）は今のまま**誰も自動で消さない**。取得の断り・D6 の結果で `<lock>/owner` を名指す（`machine-lock-owner-corrupt <lock>/owner unparsable`）。**0 バイトの owner（`empty-owner`）は回収する**: 列の先頭（取得の先頭・猶予の無い取得の先頭・D6 のガード。D5 と同じ「先頭になってから」）が、owner の mtime が `LOCK_EMPTY_OWNER_GRACE_MS`（固定 60000。書き手の `: >` と `cat >>` の窓〔μs〕より十分長い。呼び手の猶予のオプションとは別で、猶予の無い呼び手にも効く）より古いことを確かめ、`<lock>` を `<lock>.gone-<自分の token>-<serial>` へ `mv` で退かし、退かした先の owner が**まだ 0 バイト**で mtime も古いことを確かめてから `rm -rf`。0 バイトでなくなっていれば（書き手が退かす間に書き終えた）退避を残し、次の周回で `lock_settle_gone` が記録として判定する（生きていれば戻す。既存の §2.7）。若い（60 秒以内の）空の owner は消さず、文面は `taking`（書いている途中）。空の owner を生むのは P0 の書き手では E1・E2 の窓だけで、その書き手は札を持つので、止まっている間に誰かが先頭になることは無い（E12）。旧い写し（PR1a 版・skills の port の前）は今後も生むので、回収は一度きりの掃除でなく恒常の規則
-- **I5（D7 の再利用の判定は 2 つの証拠が揃ったときだけ死に変える。TZ にも時計にも依らない）**: `lstart=` の行を持つ記録（D7 の対象。supervisor.lock）に限り、元の判定（`lock_holder_state`）のうち **`kill -0` の pid の観測が alive か EPERM** のとき（G だけで alive の記録には当てない: F44）、`machine_lock_pid_identity`（§4）を呼び、`reused` のときだけ gone（その後に G を見る）。2 つの証拠は (1) **lstart の違いが TZ の違いでない**（記録と `ps` の `lstart` を同じ規則で「地方時の付いていない日時」として秒に直し、差が 15 分の倍数かつ 26 時間以内なら TZ の違いだけ＝同じ起動。それ以外が違い）、(2) **etime の起動時刻が `started_at` ＋ `LOCK_PID_REUSE_SLACK_MS`（2000）より後**。どちらかが欠ければ `alive`、読めなければ `unknown:<point>:<errno>`（元が EPERM なら EPERM のまま）。**D7 は何かを alive に変えることはなく、死に変えるのは 2 つが揃ったときだけ**。前提: `lstart=`・`started_at=` は記録の pid のもので、その pid は `started_at` より前に起動した。これを崩す D4 の引渡し（pid が後で起動した子に替わる。E9）は、`LOCK_OWNER_EXTRA` に `lstart=` の行があれば**拒む**（`LHO_STAGE=lstart`、owner を書き直さない。F45。本番の呼び手は無い: supervisor は引き渡さない）
-  - `started_at=` が無い旧い記録（旧版の supervisor.lock）は、`<lock>/owner` の mtime（`lock_obs_mtime owner-mtime`）を `started_at` の代わりに使う。旧版の書き手は tmp に書いてから `mv` するので、owner の mtime は取得の時刻で、TZ に依らない。mtime が読めなければ D7 を当てず元の判定（pid だけ。F38）。`started_at=` が解けなければ（`date` が失敗）D7 を当てず元の判定（F39）
-  - `LOB_STARTED_AT` は**読みごとに空へ戻す**（`lock_parse_owner_text` の冒頭と `lock_obs_owner_fail`）。`lock_settle_gone` は退避を続けて読むので、戻さないと前の記録の時刻が `started_at=` の無い記録に持ち越される（F40）
+- **I2-b（戻しは自分のものだけ）**: 公開の後の戻し（読み直しが不明: F13）は、`<lock>/owner` が自分の tmp と**同じ inode**（下の比べ方）のときだけ owner を消す。bash は `[ ! -L "$lock/owner" ] && [ "$lock/owner" -ef "$tmp" ]`（`-ef` は symlink を辿るので、自分の tmp を指す symlink に置き換えられた owner を自分のものと読まないよう `! -L` を前に置く: PM Claude P3-4）。JS・TS は `lstat(owner)` と **`lstat(tmp)`**（名前で。tmp は公開の前に閉じている〔I1〕ので `fstat` は使えない: PM Claude P3-3）の `dev`・`ino` を比べる。tmp を消す前に確かめる。違えば owner は他者のもので消さない。tmp が無い（I3 で消された）・lstat が失敗して比べられなければ、owner は消さない（F14 と同じ倒れ方）。`link` が ENOENT（F11: 自分の `<lock>` か tmp が片付けられた）なら、今ある `<lock>` は他者のものなので `rmdir` しない
+- **I3（owner の無い `<lock>` の片付けの範囲）**: 片付けるのは**猶予つきの先頭**（`LOCK_OWNERLESS_GRACE_MS`／`ownerlessGraceMs` を渡した呼び手: run-lock・supervisor.lock、と D6 のガード）だけ。**本番の呼び手が渡す猶予は 600000（10 分）**（PM 決定 1。空の `<lock>` は旧版の書き手の K1〔`mkdir` の後・tmp の前〕でも生まれ、その窓は通常ミリ秒なので 10 分は十分長い。猶予はオプションの値で、節の既定は変えない。今それを渡すのは試験だけで、本番の呼び手は PR1b・PR1c が 600000 を渡す。PR1a の試験が渡す 60000 は規則を駆動する値でそのまま）。判定は**新しい述語** `lock_ownerless_temps_only`（bash）／`ownerlessTempsOnly`（同期 JS）で、呼ぶのは片付け `lock_expire_ownerless`／`expireOwnerless` **だけ**。既存の `lock_ownerless_empty`／`ownerlessEmptyLock`（「owner が無く中が**空**」）は意味を変えない（途中の戻し §2.7 の `lock_restore_from_gone` の `exists` の枝 `verify-run.sh:1338`、take-back-half `:1360`、D6 の `absent` の確かめ `:2030`、sync `:597`・`:622`・`:1164`、TS `:778`・`:800` が使うので）。新しい述語の答えは `no`（owner が在る）・`empty`・`temps:<names>`・`stray`・`absent`・`unknown:<point>:<path>:<errno>`。対象は「owner が missing」かつ「中の名前が全て一時ファイルの形で通常ファイル」かつ「`<lock>` と全ての一時ファイルの mtime が猶予より古い」かつ「**`owner.tmp.<pid>` の全てについて、その pid が書き手でないと示せた**」のもの。書き手でないと示せるのは、pid が `kill -0` で gone（ESRCH）か、pid が生きていて `ps -o etime=` から求めた起動の時刻（§4.1 の `machine_lock_etime_ms`、`now` は `ps` の前に取る）が**その tmp の mtime ＋ `LOCK_PID_REUSE_SLACK_MS`（2 秒）より後**（書き手は tmp を書く前に起動している。再利用した別のプロセス: PM Claude P3-1。P1 の壁時計の前提に依る）のとき。`.owner-<token>` は新しい形と引渡しの tmp で、年齢だけで足りる。理由は札ではなく公開の形: 止まった新しい書き手が再開しても、`<lock>` が片付けられていれば `link` が ENOENT（F11、`rmdir` しない）、後継が公開していれば EEXIST（F7）で断り、自分の tmp しか消さない。再開した書き手が後継より先に `link` すれば、後継の `link` が EEXIST になり 1 人だけが持つ（I8 の (a)、PM Claude 2 回目 §2 の検査）。`owner.tmp.<pid>` の pid が生きていて起動が tmp より前（書き手かもしれない）なら回収せず `machine-lock-ownerless-old-taker <lock> pid=<pid>` と名指す（旧版の書き手が猶予を超えて止まっている。再開すれば自分で `mv` する）。pid が EPERM・EIO（unknown）や etime が読めない・形が不正でも回収しない。pid が数字でなければ `stray`。消すのは**その一時ファイルの名前だけ**（`owner` という名前は消さない）と、最後の `rmdir <lock>`（空でなければ失敗する）。一時ファイルの unlink が ENOENT なら「もう無い」と読んで次へ進む（旧版の片付けと同時。F23）。途中で誰かが公開すれば `owner` が在るので `rmdir` が失敗し、ロックはそのまま残る
+- **I4（壊れた owner）**: 解けない owner（`garbage-owner`）は今のまま**誰も自動で消さない**。取得の断り・D6 の結果で `<lock>/owner` を名指す（`machine-lock-owner-corrupt <lock>/owner unparsable`）。**0 バイトの owner（`empty-owner`）は回収する**: 列の先頭（取得の先頭・猶予の無い取得の先頭・D6 のガード。D5 と同じ「先頭になってから」）が、owner の mtime が `LOCK_EMPTY_OWNER_GRACE_MS`（**固定 600000＝10 分**。PM 決定 1。書き手の `: >` と `cat >>` の窓〔μs〕より十分長い。呼び手の猶予のオプションとは別で、猶予の無い呼び手にも効く）より古いことを確かめ、`<lock>` を `<lock>.gone-<自分の token>-<serial>` へ `mv` で退かし、退かした先の owner が**まだ 0 バイト**で mtime も古いことを確かめてから `rm -rf`。0 バイトでなくなっていれば（書き手が退かす間に書き終えた）退避を残し、次の周回で `lock_settle_gone` が記録として判定する（生きていれば戻す。既存の §2.7）。若い（10 分以内の）空の owner は消さず、文面は `taking`（書いている途中）。新しい形の書き手は空の owner を見せない（I1）。空の owner を生むのは旧い形の書き手（PR1a 版の E1・E2 の窓、PR1a より前の `printf > owner`）と停電だけ。旧い形の書き手が 10 分を超えて止まり（札は期限＋60 秒で外れている。E12）、回収の後に再開すると、名前で追記・名前で消すので後継の owner を壊しうる（I8 の (b)、表 F の F50・F51。既知の限界）。旧い写し（PR1a 版・skills の port の前）は今後も生むので、回収は一度きりの掃除でなく恒常の規則
+- **I5（D7 の再利用の判定は、起動の時刻の証拠があるときだけ死に変える。TZ に依らない）**: `lstart=` の行を持つ記録（D7 の対象。supervisor.lock）に限り、元の判定（`lock_holder_state`）のうち **`kill -0` の pid の観測が alive か EPERM** のとき（G だけで alive の記録には当てない: F44）、`machine_lock_pid_identity`（§4）を呼び、`reused` のときだけ gone（その後に G を見る）。関数は (0) 記録と `ps` の `lstart` の**文字列が同じなら `alive`**（今の判定と同じ）。違うとき、(1) 記録に **`started_at=`（エポックに戻せる UTC の時刻。E10）がある**なら、**`ps -o etime=` から求めた起動の時刻（`now − etime`）を `started_at` と比べる**: `started_at` ＋ `LOCK_PID_REUSE_SLACK_MS`（2000）より後なら `reused`、そうでなければ `alive`（TZ に依らない: どちらもエポックの時刻）。(2) `started_at=` が**無い・解けない**記録（旧版の supervisor.lock）は、文字列が違えば **`unknown`（消さない）**。`lstart` の文字列は地方時なので、違いが TZ の違いか再利用かを示せない（「TZ の差は 15 分の倍数」の推定はやめた: TZ の offset は分・秒の単位も取りうる。codex 2 回目 P2、`tzset(3)`）。読めなければ `unknown:<point>:<errno>`（元が EPERM なら EPERM のまま）。**D7 は何かを alive に変えることはなく、死に変えるのは `started_at` と etime の証拠があるときだけ**。前提: `lstart=`・`started_at=` は記録の pid のもので、その pid は `started_at` より前に起動した（呼び手の義務: `started_at` はその pid が起動した**後**の時刻）、と P1（壁時計が起動と取得の間に 2 秒より大きく戻らない）。D4 の引渡し（pid が後で起動した子に替わる。E9）はこの前提を崩すので、`LOCK_OWNER_EXTRA` に `lstart=` の行があれば**拒む**（`LHO_STAGE=lstart`、owner を書き直さない。F45。本番の呼び手は無い: supervisor は引き渡さない）
+  - `started_at=` が無い旧い記録（`lstart-legacy*`）は、pid が死ねば（ESRCH）今どおり回収する。生きた pid が別のプロセスに再利用されている間は `unknown` で回収されず、文面 `machine-lock-holder-unknown … lstart:EMISMATCH` で名指す（消さない側の生存性の残り。旧版の supervisor の記録は PR1c が `started_at=` を書く形に替えるので、その後は生まれない）。2 回目の「owner の mtime を `started_at` の代わりに使う」はやめた（PM 決定 2: reused は `started_at`／etime の証拠があるときだけ）
+  - `started_at=` が `date` で解けない記録は「無い」と同じ扱い（文字列が違えば `unknown`。F39）
+  - `LOB_STARTED_AT` は**読みごとに空へ戻す**（`lock_parse_owner_text` の冒頭と `lock_obs_owner_fail`）。`lock_settle_gone` は退避を続けて読むので、戻さないと前の記録の時刻が `started_at=` の無い記録に持ち越され、無い記録を `reused` と読みうる（F40）
   - 時刻: `now` は `ps -o etime=` の**前**に取る（`ps` の遅れが計算値を早める＝生きている側に倒れる）。macOS の `lock_now_ms` は秒単位で、生きた持ち主の計算値は `started_at` ＋ 1 秒以下（`started_at` は秒に切り捨て）。閾値 2 秒に 1 秒の余裕
+  - 用途: `alive` は「再利用と示せなかった」で、「同じプロセス」の証明ではない。**消すか消さないか**（ロックの D7）にだけ使う。止める判定には使わない（§4.2）
 - **I6（3 実装の分担）**: I1・I2・I2-b・I4 は bash（`verify-run.sh` の節。`machine-lock.sh` が読み込む）・同期 JS・TS で同じ。I3 は猶予の口を持つ bash・同期 JS だけ（TS は `ownerlessGraceMs` も D6 のガードも持たない。呼び手が無い組み合わせは作らない）。I5 は bash の読み込み口だけ（supervisor.lock は bash だけが触る）。表は実装の軸を持ち、適用しない組み合わせは理由つきで「到達しない」（§2）
-- **I7（例外を残さない）**: 表 F に「消す側に倒れうる残り（residual）」の行は無い（型で `residual` を持たない）。解けない形は「回収しない＋文面」に倒す（旧版の tmp の生きた／不明な pid、TZ と時計の後退の重なりは I5 の (1) が TZ の違いだけを同じ起動と読むので起きない）
+- **I7（例外は限界の行として名前と終わる条件を持つ）**: 表 F に「消す側に倒れうる残り（residual）」という倒れ方は無い（型で持たない）。解けない形は「回収しない＋文面」に倒す（旧版の tmp の生きた／不明な pid、`lstart=` だけの記録の不一致）。消す側に倒れうるのは前提の外だけで、倒れ方 `limit` の行（`mixed`＝混在の間だけ: F49〜F51、`premise`＝P1 の外: F42）として書き、どの行も「何が起きると前提が崩れるか」と「いつ消えるか」を持つ（§6.1）。新版どうし・前提の内に `limit` の行は無い
+- **I8（不変条件の範囲: 新版どうしと混在の間）**（PM 決定 1）:
+  - (a) **新版どうし**（この PR の後の 3 実装と、PR1b・PR1c の後の run-lock・supervisor.lock の書き手だけが動く間）: 生きた保有者のロックは誰も消さない・2 者が同時に持たない（I0〜I5）。60 秒を超えて止まり札が外れた書き手が再開しても成り立つ: 新しい書き手は名前で書かず名前で消さず（`link` の排他と同じ inode の確かめだけ）、片付けられた `<lock>` では ENOENT、後継が公開した `<lock>` では EEXIST で断る（I3 の理由）。F3 の戻しの `rmdir` が他の先頭の K1 の空の `<lock>` を消すことはあるが、相手は tmp の作成か `link` が ENOENT になって断るだけ（安全側。F3）
+  - (b) **混在の間**（旧い写し: 旧版の `lib.sh`・`run-lock.sh`、PR1a 版とそれより前の `verify-run.sh` が残る間）: 旧い形の書き手が `mkdir`〜tmp〜`mv`／`: >`〜`cat >>` の途中で**猶予（10 分）を超えて止まり、回収の後に再開した**ときだけ、2 者が持ちうる・後継の owner が壊れうる（F49〜F51）。これは親 §1.8 の「60 秒を超える停止は前提の外」と同じ扱いの**既知の限界**。新版の側では、空の owner・空の `<lock>` の回収の猶予を 10 分にして窓を狭め（旧版の書き手の `mkdir`〜`mv` は通常ミリ秒）、旧版の tmp は pid が書き手でないと示せたときだけ消す（I3）ことで、残る窓を「10 分を超える停止からの再開」に限る。旧い写しが無くなれば（§6.1 の終わる条件）この限界は消える
 
-I5 が TZ・時計・EPERM の全てを解く理由: `ps -o lstart=` は起動の瞬間に記録された壁時計の値を地方時で出すだけなので、同じプロセスなら 2 つの `lstart` の差は TZ の差（15 分の倍数）にしかならない。時計の段差は起動の後には `lstart` を変えない。別のプロセスが同じ秒・15 分の倍数ずれて起動した偶然は alive に読む（消さない側）。別ユーザーに再利用された pid は `ps` で読めるので (1)(2) が揃う。
+`lstart` だけで TZ を解かない理由: `ps -o lstart=` は起動の瞬間の壁時計の値を地方時で出すので、同じプロセスでも読み手の TZ で文字列が変わる（E5）。地方時の差から TZ を推す方法（2 回目の「15 分の倍数」）は、分・秒の単位の offset（`UTC0` と `XXX-0:01` は 60 秒ずれる）を「違う起動」と読み、時計の後退と重なると生きた持ち主を消しうる（codex 2 回目 P2）。`started_at` はエポック（UTC）で書かれ、`now − etime` もエポックなので、2 つの比較は TZ に依らない。`lstart` は「同じなら確かに同じ起動」の速い道（0）にだけ使う。別ユーザーに再利用された pid も `ps` で読めるので、`started_at` があれば (1) で `reused` になる。
 
 ## 2. (b) 状態と遷移の表
 
@@ -59,17 +66,17 @@ I5 が TZ・時計・EPERM の全てを解く理由: `ps -o lstart=` は起動�
 
 - **実装（3）**: `bash`・`sync`（同期 JS）・`ts`
 - **owner の形（17）**:
-  - 空・tmp だけ（9）: `empty-dir`（owner も中身も無い。D3 の対照）・`tmp-new`（`.owner-<token>` だけ）・`tmp-old-young`（`owner.tmp.<pid>` だけで猶予の内）・`tmp-old`（`owner.tmp.<pid>` だけで猶予を過ぎた。観測は名前の pid）・`tmp-stray`（一時ファイルの形でない名前やディレクトリが混ざる）・`tmp-new+gone-dead`（canonical に `tmp-new`、死んだ記録の `.gone-*` がある。codex P2 の組。途中の戻しの述語を広げる変異の対照）・`tmp-new+gone-alive`（canonical に `tmp-new`、生きた記録の `.gone-*`）
+  - 空・tmp だけ（9）: `empty-dir`（owner も中身も無い。D3 の対照）・`tmp-new`（`.owner-<token>` だけ）・`tmp-old-young`（`owner.tmp.<pid>` だけで猶予の内）・`tmp-old`（`owner.tmp.<pid>` だけで猶予を過ぎた。観測は名前の pid。pid が生きていて起動が tmp の mtime ＋ 2 秒より後〔再利用〕は gone と同じ答え: 表 F の F52）・`tmp-stray`（一時ファイルの形でない名前やディレクトリが混ざる）・`tmp-new+gone-dead`（canonical に `tmp-new`、死んだ記録の `.gone-*` がある。codex P2 の組。途中の戻しの述語を広げる変異の対照）・`tmp-new+gone-alive`（canonical に `tmp-new`、生きた記録の `.gone-*`）
   - 壊れ（2）: `empty-owner`（0 バイト）・`garbage-owner`（解けない中身）
-  - 完全で D7 の対象（8、`lstart=` あり）: `lstart-match`・`lstart-tz`（TZ が違うだけの生きた持ち主）・`lstart-reused`（再利用）・`lstart-fails`（`ps -o lstart=` が読めない）・`etime-fails`（lstart は違い、`etime` が読めない・形が不正）・`lstart-same-etime-fails`（lstart は同じ、`etime` は読めない＝読まないので alive）・`lstart-legacy`（`started_at=` 無し、TZ が違うだけ、owner の mtime で判定）・`lstart-legacy-reused`（`started_at=` 無し、再利用）
+  - 完全で D7 の対象（8、`lstart=` あり）: `lstart-match`・`lstart-tz`（`started_at=` あり、TZ が違うだけの生きた持ち主。etime の起動が `started_at` 以前）・`lstart-reused`（`started_at=` あり、再利用。etime の起動が `started_at` ＋ 2 秒より後）・`lstart-fails`（`ps -o lstart=` が読めない）・`etime-fails`（lstart は違い、`etime` が読めない・形が不正）・`lstart-same-etime-fails`（lstart は同じ、`etime` は読めない＝読まないので alive）・`lstart-legacy`（`started_at=` 無し、TZ が違うだけの生きた持ち主。文字列が違うので unknown）・`lstart-legacy-reused`（`started_at=` 無し、再利用。同じく unknown＝消さない。PM 決定 2）
   - 完全で `lstart=` の無い記録は D7 の対象外で、この PR で振る舞いが変わらない（PR1a の表のまま）ので軸に入れない
 - **呼び手（4）**: `acquire-head-grace`（猶予つきの先頭の取得: run-lock・supervisor.lock）・`acquire-head-nograce`（猶予の無い先頭の取得: verify のゲート・merge-pr・precheck・gate-runner）・`acquire-behind`（先頭でない取得者）・`guard-head`（回収だけの先頭: D6 `lock_recover_only`／`recoverIfDead`）
-- **観測の 3 値**: 形ごとに決め手が違う（雛形の `OBS_MEANING`）。空・tmp だけ（`tmp-old*` を除く）・壊れは「年齢」（`alive`＝猶予以内、`gone`＝猶予より古い、`unknown`＝一覧・lstat・mtime・owner の読みの失敗）。`tmp-old*` は「名前の pid の `kill -0`」（`tmp-old-young` は年齢が先なので読まない）。`tmp-new+gone-alive` は退避の記録が生きているので canonical の年齢を読まない。D7 の形は「記録の pid の `kill -0`」（`alive`、`gone`＝ESRCH、`unknown`＝EPERM。EIO などは表 F の F32）
+- **観測の 3 値**: 形ごとに決め手が違う（雛形の `OBS_MEANING`）。空・tmp だけ（`tmp-old*` を除く）・壊れは「年齢」（`alive`＝猶予以内、`gone`＝猶予より古い。猶予は本番の値 10 分〔猶予つきの呼び手の `LOCK_OWNERLESS_GRACE_MS`=600000、空の owner の固定の `LOCK_EMPTY_OWNER_GRACE_MS`=600000〕で駆動する。`unknown`＝一覧・lstat・mtime・owner の読みの失敗）。`tmp-old*` は「名前の pid の `kill -0`」（`tmp-old-young` は年齢が先なので読まない）。`tmp-new+gone-alive` は退避の記録が生きているので canonical の年齢を読まない。D7 の形は「記録の pid の `kill -0`」（`alive`、`gone`＝ESRCH、`unknown`＝EPERM。EIO などは表 F の F32）
 
 ### 2.2 結果
 
 - 取得: `acquired`（ロックは `mine`）／`refused:<文面>`（`rec`〔生きた記録〕・`taking`〔owner の無い若い `<lock>`・若い空の owner、または猶予の無い呼び手〕・`queue`〔先頭でない〕・`unk`〔不明〕・`corrupt`〔解けない owner、新〕・`stray`〔I3 の対象外の中身、新〕・`old-taker`〔旧版の tmp の pid が生きている、新〕）
-- D6: `removed`／`kept`
+- D6: `removed`／`kept`（表 T の形で到達するのはこの 2 つ。D6 の `absent`・`not-head`・`restore-failed` は表 F の行で固定する）
 - ロックの行方は結果から決まる: `acquired`→`mine`、`removed`→`absent`、それ以外→`unchanged`
 - 陽性の対照は結果と文面の組（`refused:taking` と `refused:stray` は違う結果として数える。P3-12）
 
@@ -94,10 +101,12 @@ I5 が TZ・時計・EPERM の全てを解く理由: `ps -o lstart=` は起動�
 | lstart-fails | unk / acquired / unk | 到達しない | kept / removed / kept |
 | etime-fails | **unk**（→今 acquired） / acquired / unk | 到達しない | **kept**（→今 removed） / removed / kept |
 | lstart-same-etime-fails | rec / acquired / unk | 到達しない | kept / removed / kept |
-| lstart-legacy | **rec**（→今 acquired） / acquired / unk | 到達しない | **kept**（→今 removed） / removed / kept |
-| lstart-legacy-reused | acquired / acquired / **acquired**（→今 unk） | 到達しない | removed / removed / **removed**（→今 kept） |
+| lstart-legacy | **unk**（→今 acquired） / acquired / unk | 到達しない | **kept**（→今 removed） / removed / kept |
+| lstart-legacy-reused | **unk**（→今 acquired） / acquired / unk | 到達しない | **kept**（→今 removed） / removed / kept |
 
 `acquire-behind` は全ての形・値で `refused:queue`（I0-b）。
+
+3 回目で変わったセル: `lstart-legacy` × alive は `rec` → `unk`、`lstart-legacy-reused` × alive は `acquired` → `unk`・`removed` → `kept`、`lstart-legacy-reused` × unknown は `acquired` → `unk`・`removed` → `kept`（今の実装と同じになり、陽性の対照から外れた）。`lstart=` だけの記録の不一致は TZ か再利用かを示せないので消さない（I5 の (2)）。
 
 ### 2.4 実装ごとの違い（到達しない組み合わせ）
 
@@ -113,8 +122,8 @@ I5 が TZ・時計・EPERM の全てを解く理由: `ps -o lstart=` は起動�
 
 - 表 T: 3 実装 × 17 形 × 4 呼び手 × 3 値 = **612 セル**、到達しない **270**、到達する **342 行**
 - 表 K（中断点 × 実装、§2.6）: 5 × 3 = **15 行**
-- 表 F（外部の呼び出しの失敗、§3）: **46 行**
-- 合計 **403 行**（雛形の `it.todo` は、これに表 K の陽性の対照 3 本〔実装ごとに今の実装が `empty-owner` を残すこと、§2.6〕を足した 406）
+- 表 F（外部の呼び出しの失敗、§3）: **55 行**。実装 × 結果の欄の呼び手に展開して **250 件**、到達しない **30**（TS の `AG` は `ts-no-grace`、TS の `GH`・`GB` は `ts-no-guard`）、到達する **220 件**（1 件ごとに `it.todo`。2 回目の 46 行・行ごとに 1 本からの変更: 決定 4）
+- 合計 **577 行**（T 342・K 15・F 220。雛形の `it.todo` は、これに表 K の陽性の対照 3 本〔実装ごとに今の実装が `empty-owner` を残すこと、§2.6〕を足した 580）
 
 ### 2.6 表 K: 取得の中断点（SIGKILL）× 実装 → 残る形
 
@@ -132,66 +141,81 @@ TS は猶予つきの先頭を持たないので、その列は「到達しな�
 
 陽性の対照（今の実装が `empty-owner` を残すこと）: bash は `lock_obs_create` を `machine-lock.sh` 越しに直に呼び、標準入力をまだ書かれない FIFO にする（`: >` で 0 バイトの owner を作った後、`cat >>` が入力を待つ）→ SIGKILL → `<lock>/owner` が 0 バイト。同期 JS・TS は子プロセスで `hooks.fault('owner-write', …)` を返さない関数にし（`openSync` の後・`writeSync` の前に呼ばれる）→ SIGKILL → 0 バイト。
 
-## 3. (c) 外部の呼び出しの失敗の倒れ方（表 F、46 行）
+## 3. (c) 外部の呼び出しの失敗の倒れ方（表 F、55 行・実装 × 呼び手で 250 件、到達する 220 件）
 
-倒れ方は 2 つだけ（I7）: `keep`＝何も消さない・取らない（I3・I4 の規則どおりの片付けは「規則」で、失敗の倒れ方ではない）、`own-only`＝この呼び手が自分で作ったもの（自分の tmp・この `mkdir` が作った空の `<lock>`・この `link` が作った owner〔同じ inode を確かめて〕）だけを戻す。雛形の型は呼び手・実装・点・結果・ロックの行方を列挙で持つ。
+倒れ方は 3 つ（I7）: `keep`＝何も消さない・取らない（I3・I4 の規則どおりの片付けは「規則」で、失敗の倒れ方ではない）、`own-only`＝この呼び手が自分で作ったもの（自分の tmp・この `mkdir` が作った空の `<lock>`・この `link` が作った owner〔同じ inode を確かめて〕）だけを戻す、`limit`＝前提の外で消す側に倒れうる既知の限界（`mixed`＝混在の間だけ、`premise`＝P1 の外。どの行も終わる条件を持つ。I7・I8）。
 
-| # | 実装 | 呼び手 | 呼び出し・失敗（点） | 倒れ方 | 結果 | ロックの行方 |
-|---|---|---|---|---|---|---|
-| F1 | 3 | 取得 | `mkdir <lock>` が EEXIST 以外（`mkdir-lock`） | keep | unk | 何も作らない |
-| F2 | 3 | 取得 | tmp の排他作成が EEXIST（同じ token の tmp が在る。`owner-create`） | own-only | unk | 変わらない（tmp は開いていないので消さない。`rmdir` は空でないので残る） |
-| F3 | 3 | 取得 | tmp の作成がその他の errno（EACCES・ENOSPC。`owner-create`） | own-only | unk | 自分の `<lock>` を戻す（先頭は自分なので他者の `<lock>` ではない） |
-| F4 | 3 | 取得 | tmp の書き込みの失敗（ENOSPC・EIO。`owner-write`） | own-only | write-failed | 自分の tmp と `<lock>` を戻す |
-| F5 | 3 | 取得 | 短い書き込み（JS・TS は戻り値の合計が足りない、bash は tmp の読み直しが違う。`owner-write-short`、新） | own-only | write-failed | 同上 |
-| F6 | sync・ts | 取得 | `closeSync` の失敗（`owner-close`、新。bash はリダイレクトの閉じの失敗を F5 の読み直しで捕まえる） | own-only | write-failed | 同上 |
-| F7 | 3 | 取得 | `link` が EEXIST: owner が通常ファイル（`owner-publish`、新） | own-only | owner-exists | 変わらない（自分の tmp だけ消す） |
-| F8 | 3 | 取得 | `link` が EEXIST: owner がディレクトリ | own-only | owner-exists | 変わらない。**ディレクトリの中に何も作らない**（`ln` なら作る。E11） |
-| F9 | 3 | 取得 | `link` が EEXIST: owner がディレクトリへの symlink（`<lock>` の外を指す） | own-only | owner-exists | 変わらない。symlink の先に何も作らない |
-| F10 | 3 | 取得 | `link` が EEXIST: owner がファイルへの symlink | own-only | owner-exists | 変わらない |
-| F11 | 3 | 取得 | `link` が ENOENT（自分の tmp か `<lock>` が片付けられた） | own-only | unk | 変わらない。自分の tmp を（在れば）消し、**`rmdir` しない**（今ある `<lock>` は他者のもの。P3-6・P3-7） |
-| F12 | 3 | 取得 | `link` がその他（EPERM・ENOTSUP・EIO。`owner-publish`） | own-only | unk | 自分の tmp と `<lock>` を戻す |
-| F13 | 3 | 取得 | 読み直しが不明（EIO。`owner-readback`）、owner が自分の tmp と同じ inode | own-only | unk | owner と tmp を消し `rmdir`（今の `70+i` と同じ。同じ inode を確かめてから） |
-| F14 | 3 | 取得 | 読み直しが不明、owner が自分の tmp と違う inode（間に置き換えられた） | own-only | unk | 変わらない（owner を消さない。自分の tmp だけ） |
-| F15 | 3 | 取得 | 読み直しが他者の記録（`owner-readback`） | own-only | not-ours | 変わらない（自分の tmp だけ消す） |
-| F16 | 3 | 取得 | 公開の後の tmp の削除の失敗（`owner-unlink`） | keep | acquired | 取った。tmp は owner の隣に残り、解放・回収の `rm -rf` で消える |
-| F17 | 3 | 取得 | 戻しの tmp の削除の失敗（`owner-unlink`） | keep | write-failed | `<lock>` と自分の tmp が残る（`tmp-new`）。猶予つきの先頭が猶予の後に片付ける（I3） |
-| F18 | 3 | 取得 | 戻しの `rmdir <lock>` の失敗（`lock-rmdir`） | keep | write-failed | 空の `<lock>` が残る（今のまま） |
-| F19 | bash・sync | 片付け | 一覧の失敗（`lock-list`） | keep | unk | その周回は `mkdir` しない |
-| F20 | bash・sync | 片付け | 一時ファイルの lstat の失敗（`ownerless-tmp-lstat`、新） | keep | unk | 同上 |
-| F21 | bash・sync | 片付け | `<lock>`・一時ファイルの mtime の失敗（`ownerless-mtime`） | keep | unk | 同上 |
-| F22 | bash・sync | 片付け | 一時ファイルの削除の失敗（ENOENT 以外。`ownerless-tmp-unlink`、新） | keep | unk | その周回は `rmdir` も `mkdir` もしない |
-| F23 | bash・sync | 片付け | 一時ファイルの削除が ENOENT（旧版の片付けと同時） | keep | 次の段へ進む | 「もう無い」と読み、次の名前・`rmdir` へ（unknown にしない） |
-| F24 | bash・sync | 片付け | `rmdir` が ENOTEMPTY／EEXIST（途中で誰かが公開した。`ownerless-rmdir`） | keep | 次の周回 | 消さず、次の周回で記録として判定する |
-| F25 | bash・sync | 片付け | `rmdir` がその他の errno（`ownerless-rmdir`） | keep | unk | その周回は `mkdir` しない |
-| F26 | bash・sync | 片付け | 旧版の tmp の pid の `kill -0` が EPERM・EIO（`owner-tmp-pid`、新） | keep | unk | 変わらない |
-| F27 | bash・sync | 片付け | 旧版の tmp の pid が生きている（旧版の書き手が tmp と `mv` の間で猶予を超えて止まった。codex P1） | keep | old-taker | 変わらない。名指す。書き手が再開すれば自分で `mv` する（消していないので後継の `<lock>` を `rm -rf` する経路が生まれない） |
-| F28 | bash・sync | 片付け | 旧版の tmp の名前の pid が数字でない | keep | stray | 変わらない |
-| F29 | 3 | 空の owner の回収 | owner の mtime が 60 秒以内 | keep | taking | 変わらない（書いている途中かもしれない。P3-8） |
-| F30 | 3 | 空の owner の回収 | 退かす `mv` の失敗（`empty-owner-move`、新） | keep | unk | 変わらない |
-| F31 | 3 | 空の owner の回収 | 退かした先の owner が 0 バイトでなくなった（書き手が間に書き終えた） | keep | rec | 退避を残す。次の周回で `lock_settle_gone` が記録として判定する |
-| F32 | bash | D7 | `kill -0` が EPERM 以外の失敗（EIO） | keep | 元の判定 | 不明のまま（D7 は当てない） |
-| F33 | bash | D7 | `ps -o lstart=` の失敗・空（`lstart`） | keep | unknown | 元が alive なら `unknown:lstart:<errno>`、EPERM なら EPERM のまま |
-| F34 | bash | D7 | 記録か `ps` の `lstart` が日時として解けない（`lstart`） | keep | unknown | 同上 |
-| F35 | bash | D7 | `ps -o etime=` の失敗・空（`etime`、新） | keep | unknown | 元が alive なら `unknown:etime:<errno>`、EPERM なら EPERM のまま |
-| F36 | bash | D7 | `etime` の形が不正（`bad:bad`・`1:99`・`-1:00`・欄が 4 つ。`etime`） | keep | unknown | 同上（不正を経過 0 秒と読まない。codex P2） |
-| F37 | 3 | 札の退かし | 札の pid の `etime` の形が不正 | keep | 札を退かさない | bash の `lock_pid_start_ms` は新しい厳しい解き方を使う（今は `bad:bad` を「今起動した」と読み、生きた札を再利用として退かしうる）。JS・TS の `parseEtime` は範囲を足す |
-| F38 | bash | D7 | `started_at=` が無く、owner の mtime も読めない（`owner-mtime`） | keep | 元の判定 | D7 を当てず pid だけ |
-| F39 | bash | D7 | `started_at=` が `date` で解けない | keep | 元の判定 | 同上 |
-| F40 | bash | D7 | `started_at=` のある記録の後に、無い記録を読む（`lock_settle_gone` の続けての読み） | keep | alive | `LOB_STARTED_AT` は読みごとに空。前の記録の時刻を使わず、自分の owner の mtime で判定する |
-| F41 | bash | D7 | `hostname` が記録の `host=` と違う | keep | 元の判定 | 他 host の記録は alive（D7 は当てない） |
-| F42 | bash | D7 | 持ち主の起動から取得までの間に時計が 2 秒より大きく戻り、かつ書き手と読み手の TZ が違う（1 回目の F24） | keep | alive | (1) の証拠が「TZ の違いだけ」と読むので reused にならない（I5・I7。1 回目の residual を消した） |
-| F43 | bash | D7 | launchd の環境（`env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin`、`TZ`・`LC_ALL` 未設定）で書いた記録を `TZ=UTC`・`TZ=Asia/Tokyo` の読み手が読む | keep | alive | `lstart-tz` の具体の 1 行。`date -j -f` が BSD の `/bin/date` で効くこともここで固定する |
-| F44 | bash | D7 | 記録に `pgid=` と `lstart=` の両方、pid は gone・G は生（元の判定が G で alive） | keep | 元の判定 | D7 を当てない（`kill -0` の pid が gone）。本番の記録には無い形 |
-| F45 | bash | 引渡し | `LOCK_OWNER_EXTRA` に `lstart=` の行がある `lock_hand_off` | keep | 引渡しの失敗 | owner を書き直さない（`LHO_STAGE=lstart`）。I5 の前提を守る |
-| F46 | 3 | 取得 | 解けない owner（読めた） | keep | corrupt | 誰も消さない。断りと D6 の結果で `<lock>/owner` を名指す（I4） |
+**呼び手は操作名でなく実際の呼び手**（codex 2 回目 P2。表 T の呼び手と同じ名前）: `AG`＝猶予つきの先頭の取得（`acquire-head-grace`）、`AN`＝猶予の無い先頭の取得（`acquire-head-nograce`）、`GH`＝D6 のガードの先頭（`guard-head`。`lock_recover_only`／`recoverIfDead`）、`GB`＝先頭になれない D6 のガード（`guard-behind`）、`TR`＝札の退かし（`lock_ticket_retirable`／`ticketRetirable`／`retirable`。全ての呼び手の列の待ちの中）、`HO`＝引渡し（`lock_hand_off`）。結果の型は呼び手ごと: 取得は `acquired`／`refused:<文面>`、D6 は `removed`／`kept`／`absent`／`restore-failed`（**`kept` を持つ**。不明は `LRO_UNKNOWN`／結果の `unknown` で名指す）、`GB` は `not-head`、`TR` は `retired`／`kept`、`HO` は `handed`／`failed`。同じ失敗を取得とガードが通るとき、両方の結果を行に書く（取得の `acquired` ⇔ ガードの `removed` は雛形が検査する）。
 
-消す操作は全て own-only（自分の tmp・自分の `mkdir`・同じ inode を確かめた自分の `link`）か、規則（I3 の「pid が gone の旧版の tmp・猶予を過ぎた新しい tmp の名前と空の `<lock>` の `rmdir`」、I4 の「先頭が退かして 0 バイトのままと確かめた空の owner」、I5 の「2 つの証拠が揃った再利用」）。どれも生きた記録（`owner`）を消さない。
+実装の列は呼び出しが在る実装。行は「実装 × 結果の欄に書いた呼び手」に展開され（雛形の `F_CASES`）、TS の `AG` は `ts-no-grace`、TS の `GH`・`GB` は `ts-no-guard` で到達しない。D7 の行の `AN` は `no-kv-for-nograce`、片付けの行の `AN` は猶予が無いので片付けを呼ばない（結果の欄に書かない）。
+
+| # | 実装 | 呼び出し・失敗（点） | 倒れ方 | 呼び手ごとの結果 | ロックの行方 |
+|---|---|---|---|---|---|
+| F1 | 3 | `mkdir <lock>` が EEXIST 以外（`mkdir-lock`） | keep | AG・AN `refused:unk` | 何も作らない |
+| F2 | 3 | tmp の排他作成が EEXIST（同じ token の tmp が在る。`owner-create`） | own-only | AG・AN `refused:unk` | 変わらない（tmp は開いていないので消さない。`rmdir` は空でないので残る） |
+| F3 | 3 | tmp の作成がその他の errno（EACCES・ENOSPC・ENOENT。`owner-create`） | own-only | AG・AN `refused:unk` | この `mkdir` が作った `<lock>` を `rmdir` で戻す（空のときだけ）。札が期限＋60 秒で外れた後の再開なら、`rmdir` が他の先頭の K1 の空の `<lock>` を消すことがある。そのとき相手は tmp の作成か `link` が ENOENT で断る（F3・F11）だけで、誰も持たない（安全側。PM Claude P3-2。「先頭は自分なので他者の `<lock>` ではない」は 60 秒の内だけ） |
+| F4 | 3 | tmp の書き込みの失敗（ENOSPC・EIO。`owner-write`） | own-only | AG・AN `refused:write-failed` | 自分の tmp と `<lock>` を戻す |
+| F5 | 3 | 短い書き込み（JS・TS は戻り値の合計が足りない、bash は I1 の同じ取り方で読み直した文字列が違う。`owner-write-short`） | own-only | AG・AN `refused:write-failed` | 同上 |
+| F6 | sync・ts | `closeSync` の失敗（`owner-close`。bash はリダイレクトの閉じの失敗を F5 の読み直しで捕まえる） | own-only | AN `refused:write-failed`、sync は AG も | 同上 |
+| F7 | 3 | `link` が EEXIST: owner が通常ファイル（`owner-publish`） | own-only | AG・AN `refused:owner-exists` | 変わらない（自分の tmp だけ消す） |
+| F8 | 3 | `link` が EEXIST: owner がディレクトリ | own-only | 同上 | 変わらない。**ディレクトリの中に何も作らない**（`ln` なら作る。E11） |
+| F9 | 3 | `link` が EEXIST: owner がディレクトリへの symlink（`<lock>` の外を指す） | own-only | 同上 | 変わらない。symlink の先に何も作らない |
+| F10 | 3 | `link` が EEXIST: owner がファイルへの symlink | own-only | 同上 | 変わらない |
+| F11 | 3 | `link` が ENOENT（自分の tmp か `<lock>` が片付けられた） | own-only | AG・AN `refused:unk` | 変わらない。自分の tmp を（在れば）消し、**`rmdir` しない**（今ある `<lock>` は他者のもの） |
+| F12 | 3 | `link` がその他（EPERM・ENOTSUP・EIO。`owner-publish`） | own-only | AG・AN `refused:unk` | 自分の tmp と `<lock>` を戻す |
+| F13 | 3 | 読み直しが不明（EIO。`owner-readback`）、owner が自分の tmp と同じ inode（I2-b の比べ方） | own-only | AG・AN `refused:unk` | owner と tmp を消し `rmdir`（今の `70+i` と同じ。同じ inode を確かめてから） |
+| F14 | 3 | 読み直しが不明、owner が自分の tmp と違う inode・symlink・tmp が無く比べられない | own-only | AG・AN `refused:unk` | 変わらない（owner を消さない。自分の tmp だけ） |
+| F15 | 3 | 読み直しが他者の記録（`owner-readback`） | own-only | AG・AN `refused:not-ours` | 変わらない（自分の tmp だけ消す） |
+| F16 | 3 | 公開の後の tmp の削除の失敗（`owner-unlink`） | keep | AG・AN `acquired` | 取った。tmp は owner の隣に残り、解放・回収の `rm -rf` で消える |
+| F17 | 3 | 戻しの tmp の削除の失敗（`owner-unlink`） | keep | AG・AN `refused:write-failed` | `<lock>` と自分の tmp が残る（`tmp-new`）。猶予つきの先頭が猶予の後に片付ける（I3） |
+| F18 | 3 | 戻しの `rmdir <lock>` の失敗（`lock-rmdir`） | keep | AG・AN `refused:write-failed` | 空の `<lock>` が残る（今のまま） |
+| F19 | bash・sync | 片付けの一覧の失敗（`lock-list`） | keep | AG `refused:unk`、GH `kept` | 変わらない。その周回は `mkdir` しない |
+| F20 | bash・sync | 一時ファイルの lstat の失敗（`ownerless-tmp-lstat`） | keep | AG `refused:unk`、GH `kept` | 同上 |
+| F21 | bash・sync | `<lock>`・一時ファイルの mtime の失敗（`ownerless-mtime`） | keep | AG `refused:unk`、GH `kept` | 同上 |
+| F22 | bash・sync | 一時ファイルの削除の失敗（ENOENT 以外。`ownerless-tmp-unlink`） | keep | AG `refused:unk`、GH `kept` | その周回は `rmdir` も `mkdir` もしない |
+| F23 | bash・sync | 一時ファイルの削除が ENOENT（旧版の片付けと同時） | keep | AG `acquired`、GH `removed` | 「もう無い」と読み、次の名前・`rmdir` へ（規則どおりの片付けが続く） |
+| F24 | bash・sync | `rmdir` が ENOTEMPTY／EEXIST（途中で誰かが公開した。`ownerless-rmdir`） | keep | AG `refused:rec`、GH `kept` | 消さず、公開された owner を記録として判定する |
+| F25 | bash・sync | `rmdir` がその他の errno（`ownerless-rmdir`） | keep | AG `refused:unk`、GH `kept` | 変わらない。その周回は `mkdir` しない |
+| F26 | bash・sync | 旧版の tmp の pid の `kill -0` が EPERM・EIO（`owner-tmp-pid`） | keep | AG `refused:unk`、GH `kept` | 変わらない |
+| F27 | bash・sync | 旧版の tmp の pid が生きていて、起動が tmp の mtime ＋ 2 秒以前（書き手かもしれない） | keep | AG `refused:old-taker`、GH `kept` | 変わらない。名指す。書き手が再開すれば自分で `mv` する |
+| F28 | bash・sync | 旧版の tmp の名前の pid が数字でない | keep | AG `refused:stray`、GH `kept` | 変わらない |
+| F29 | 3 | 空の owner の mtime が 10 分以内 | keep | AG・AN `refused:taking`、GH `kept` | 変わらない（書いている途中かもしれない） |
+| F30 | 3 | 空の owner を退かす `mv` の失敗（`empty-owner-move`） | keep | AG・AN `refused:unk`、GH `kept` | 変わらない |
+| F31 | 3 | 退かした先の owner が 0 バイトでなくなった（書き手が間に書き終えた） | keep | AG・AN `refused:rec`、GH `kept` | 退避を残す。次の周回で `lock_settle_gone` が記録として判定する |
+| F32 | bash | D7: `kill -0` が EPERM 以外の失敗（EIO。`pid`） | keep | AG `refused:unk`、GH `kept` | 不明のまま（D7 は当てない） |
+| F33 | bash | D7: `ps -o lstart=` の失敗・空（`lstart`） | keep | AG `refused:unk`、GH `kept` | 元が alive なら `unknown:lstart:<errno>`、EPERM なら EPERM のまま |
+| F34 | bash | D7: `started_at=` の無い記録で、`lstart` の文字列が 60 秒違う（`UTC0` と `XXX-0:01` の読み手。生きた持ち主） | keep | AG `refused:unk`、GH `kept` | `unknown:lstart:EMISMATCH`。2 回目の「15 分の倍数でない＝違う起動」をやめた（codex 2 回目 P2。PM 決定 2 の「60 秒差の行は unknown」） |
+| F35 | bash | D7: `ps -o etime=` の失敗・空（`etime`） | keep | AG `refused:unk`、GH `kept` | 元が alive なら `unknown:etime:<errno>`、EPERM なら EPERM のまま |
+| F36 | bash | D7: `etime` の形が不正（`bad:bad`・`1:99`・`-1:00`・欄が 4 つ。`etime`） | keep | AG `refused:unk`、GH `kept` | 同上（不正を経過 0 秒と読まない） |
+| F37 | 3 | 札の pid の `etime` の形が不正 | keep | TR `kept` | 札を退かさない。bash の `lock_pid_start_ms` は新しい厳しい解き方を使い、JS・TS の `parseEtime` は範囲を足す |
+| F38 | bash | D7: `started_at=` の無い記録の pid が、別のプロセスに再利用されて生きている | keep | AG `refused:unk`、GH `kept` | 消さない（`unknown:lstart:EMISMATCH` で名指す）。pid が死ねば回収。2 回目の owner の mtime の代用はやめた（PM 決定 2） |
+| F39 | bash | D7: `started_at=` が `date` で解けない、`lstart` の文字列が違う | keep | AG `refused:unk`、GH `kept` | 「無い」と同じ（F34） |
+| F40 | bash | D7: `started_at=` のある記録の後に、無い記録を読む（`lock_settle_gone` の続けての読み）、文字列が違う | keep | AG `refused:unk`、GH `kept` | `LOB_STARTED_AT` は読みごとに空。前の記録の時刻で `reused` と読まない |
+| F41 | bash | D7: `hostname` が記録の `host=` と違う | keep | AG `refused:rec`、GH `kept` | 他 host の記録は alive（D7 は当てない） |
+| F42 | bash | D7: 持ち主の起動から取得までの間に壁時計が 2 秒より大きく戻り、かつ書き手と読み手の TZ が違う（文字列が違う） | limit（premise） | AG `acquired`、GH `removed` | **生きた持ち主を `reused` と読む**（P1 の外）。TZ が同じなら文字列が一致して起きない。終わる条件: 無し（前提として残す。親 §1.8 と同じ扱い。PM Claude 申し送り B の 2） |
+| F43 | bash | D7: launchd の環境（`env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin`、`TZ`・`LC_ALL` 未設定）で書いた記録を `TZ=UTC`・`TZ=Asia/Tokyo` の読み手が読む | keep | AG `refused:rec`、GH `kept` | `started_at` と etime の比較で alive。`lstart-tz` の具体の 1 行 |
+| F44 | bash | D7: 記録に `pgid=` と `lstart=` の両方、pid は gone・G は生（元の判定が G で alive） | keep | AG `refused:rec`、GH `kept` | D7 を当てない（`kill -0` の pid が gone）。本番の記録には無い形 |
+| F45 | bash | 引渡し: `LOCK_OWNER_EXTRA` に `lstart=` の行がある `lock_hand_off` | keep | HO `failed` | owner を書き直さない（`LHO_STAGE=lstart`）。I5 の前提を守る |
+| F46 | 3 | 解けない owner（読めた） | keep | AG・AN `refused:corrupt`、GH `kept` | 誰も消さない。断りと D6 の結果で `<lock>/owner` を名指す（I4） |
+| F47 | bash・sync | D6 の故障: ガードの「owner が無く中が空か」の確かめ（`lock_ownerless_empty`、`verify-run.sh:2030`）が不明（`lock-list`） | keep | GH `kept` | 変わらない。`LRO_UNKNOWN` で名指す（取得者はこの確かめを通らない） |
+| F48 | bash・sync | D6 の故障: ガードが予算のうちに先頭になれない（生きた札が前に居る） | keep | GB `not-head` | 何も動かさない（I0-b） |
+| F49 | bash・sync | 旧版の run-lock・supervisor.lock の書き手（札なし）が `mkdir` の後・`owner.tmp.<pid>` の前（旧版の K1。pid がどこにも無い）で 10 分を超えて止まり、先頭が `empty-dir` を回収して取った後に再開する | limit（mixed） | AG `acquired`、GH `removed` | 再開した書き手が後継の `<lock>` に tmp を書き `mv -f` で後継の owner を置き換える＝**2 者が持ちうる**（codex 2 回目 P1）。終わる条件: §6.1 の 1・3 |
+| F50 | 3 | PR1a 版の書き手（`: >` → 名前で `cat >>`、失敗で名前で `rm -f owner`）の pid は生きているが札は期限＋60 秒で外れ、空の owner のまま 10 分を超えて止まり、先頭が空の owner を回収して取った後に再開する | limit（mixed） | AG・AN `acquired`、GH `removed` | 再開した書き手が後継の owner に追記（解けない owner になり誰も消さず止まる）か、名前で後継の owner を消す＝**2 者が持ちうる**（PM Claude 2 回目 P2-A）。終わる条件: §6.1 の 2・3 |
+| F51 | 3 | PR1a より前の写し（`printf > owner`、cmate-verify の旧い写し）が owner を開いた後・pid を書く前に 10 分を超えて止まり、先頭が空の owner を回収して取った後に再開する | limit（mixed） | AG・AN `acquired`、GH `removed` | 書き込みは消された inode に届き、書き手は取ったと思いうる＝**2 者が持ちうる**（読み直しの無い写し）。終わる条件: §6.1 の 2・3 |
+| F52 | bash・sync | 旧版の tmp の pid が生きているが、起動が tmp の mtime ＋ 2 秒より後（再利用。PM Claude P3-1） | keep | AG `acquired`、GH `removed` | 規則どおりの片付け（書き手でないと示せた）。2 回目は永久に `old-taker` だった |
+| F53 | bash・sync | 旧版の tmp の pid が生きていて、その `ps -o etime=` が読めない・形が不正（`etime`） | keep | AG `refused:unk`、GH `kept` | 変わらない |
+| F54 | bash | D7: `started_at=` のある記録で、`lstart` の文字列が 60 秒違う（分の単位の TZ の差の生きた持ち主） | keep | AG `refused:rec`、GH `kept` | etime の起動が `started_at` 以前なので alive（文字列の差の大きさは読まない） |
+| F55 | bash・sync | 旧版の書き手の起動から tmp の書き込みまでの間に壁時計が 2 秒より大きく戻り、書き手が tmp と `mv` の間で 10 分を超えて止まる | limit（mixed） | AG `acquired`、GH `removed` | 生きた書き手の tmp を F52 の再利用と読んで片付け、再開した `mv -f` が ENOENT → 書き手の `rm -rf "$dir"` が後継の `<lock>` を消しうる。P1 の外かつ混在の間。終わる条件: §6.1 の 1・3 |
+
+消す操作は全て own-only（自分の tmp・自分の `mkdir`・同じ inode を確かめた自分の `link`）か、規則（I3 の「書き手でないと示せた旧版の tmp・猶予を過ぎた新しい tmp の名前と空の `<lock>` の `rmdir`」、I4 の「先頭が退かして 0 バイトのままと確かめた空の owner」、I5 の「`started_at` と etime が示した再利用」）。新版どうし・前提の内では、どれも生きた記録（`owner`）を消さない。`limit` の 5 行（F42・F49・F50・F51・F55）だけが前提の外で消す側に倒れうる（I7・I8）。
 
 流用する既存の部品の倒れ方: `lock_obs_mv`・`lock_obs_list`・`lock_obs_lstat`・`lock_obs_mtime` は 3 値で答える（§2.8）。`lock_pid_start_ms` の解き方は使わない（E7）: §4 の `machine_lock_etime_ms` に替え、札の退かしもそれを使う（F37）。10 秒のキャッシュは `$(…)` のコマンド置換の中では親に残らない（効かないだけで害は無い）ので D7 は使わない。
 
-## 4. TZ に依らない比較の関数（PR1c が呼ぶ）
+## 4. TZ に依らない比較の関数（PR1c が D7 経由で使う）
 
-PM の決定（案 A）: PR1c は独自の tz の包み（記録の `tz=` と読み手の `${TZ-}` の比較）を持たず、この関数を呼ぶ。マージの順は **PR1a-f → PR1c**。PR1c の設計の S3・§2.1 の tz の包み・F8・F9・前提 P3 は、この節を参照して直す（PR1c の上流 3 回目）。
+PM の決定（案 A）: PR1c は独自の tz の包み（記録の `tz=` と読み手の `${TZ-}` の比較）を持たず、この関数を呼ぶ。マージの順は **PR1a-f → PR1c**。PR1c の設計の S3・§2.1 の tz の包み・F8・F9・前提 P3 は、この節を参照して直す（PR1c の上流 3 回目で済み）。**名前と 3 値の契約（`machine_lock_pid_identity` → `alive`／`reused`／`unknown`）は 2 回目から変えない**（PM 決定 6。PR1c の upstream-4 がこれを前提にしている）。3 回目で変えたのは中の比べ方（15 分の倍数の推定をやめた）と、3 つ目の引数が空でもよいこと（空なら `lstart=` だけの記録の規則）だけ。
+
+**この関数は「消すか消さないか」の判定専用**（PM 決定 3）: `alive` は「再利用と示せなかった（同じ起動か、示す証拠が無い）」の意味で、ロックを**残す**側に倒した値。「同じプロセス」の証明ではないので、プロセスを**止める**判定（台帳の `proc_matches` など）には使わない（逆向きに倒れ、再利用された他人のプロセスを止めうる。codex 2 回目 P3・PM Claude 2 回目 P2-B）。
 
 ### 4.1 bash（`scripts/lib/machine-lock.sh`）
 
@@ -199,6 +223,7 @@ PM の決定（案 A）: PR1c は独自の tz の包み（記録の `tz=` と読
 machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>
 # 標準出力に 1 行: alive | reused | unknown:<point>:<errno>   （<point> は lstart か etime）
 # 終了コードは常に 0。呼び手は kill -0 の pid の観測が alive か EPERM のときだけ呼ぶ。
+# <started-at-ms> は空でもよい（started_at= の無い・解けない記録）。
 ```
 
 手順（この順）:
@@ -206,36 +231,40 @@ machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>
 1. `now=$(lock_now_ms)`（**`ps` の前**）
 2. `cur=$(LC_ALL=C ps -o lstart= -p <pid>)` を空白を詰めて読む。失敗・空なら `unknown:lstart:<errno>`（注入 `CM_VERIFY_TEST_OBS_FAULT=lstart=<ERRNO>`）
 3. `cur` が `<recorded-lstart>`（同じく詰めたもの）と同じなら `alive`
-4. 両方を `machine_lock_lstart_naive_s`（`LC_ALL=C TZ=UTC0 date -j -f '%a %b %d %T %Y' <s> +%s`、BSD。GNU は `date -u -d <s> +%s`。標準エラーに何か出たら失敗と読む）で秒に直す。どちらか失敗なら `unknown:lstart:EUNKNOWN`
-5. 差の絶対値が 900 の倍数かつ 93600（26 時間）以下なら `alive`（TZ の違いだけ）
-6. `et=$(ps -o etime= -p <pid>)` を `machine_lock_etime_ms` で解く。失敗・空・形が不正なら `unknown:etime:<errno>`（注入 `etime=<ERRNO>`）。`machine_lock_etime_ms` は `^([0-9]+-)?([0-9]{1,2}:)?[0-9]{1,2}:[0-9]{2}$` だけを受け（日の欄があるときは時の欄も要る）、時 < 24・分 < 60・秒 < 60 を確かめる。日の無い形で時の欄が 24 以上も不正
-7. `now - et > <started-at-ms> + LOCK_PID_REUSE_SLACK_MS` なら `reused`、そうでなければ `alive`
+4. `<started-at-ms>` が空なら `unknown:lstart:EMISMATCH`（文字列は地方時で、違いが TZ か再利用かを示せない。消さない。PM 決定 2）
+5. `et=$(ps -o etime= -p <pid>)` を `machine_lock_etime_ms` で解く。失敗・空・形が不正なら `unknown:etime:<errno>`（注入 `etime=<ERRNO>`、形の不正は `EINVAL`）。`machine_lock_etime_ms` は `^([0-9]+-)?([0-9]{1,2}:)?[0-9]{1,2}:[0-9]{2}$` だけを受け（日の欄があるときは時の欄も要る）、時 < 24・分 < 60・秒 < 60 を確かめる。日の無い形で時の欄が 24 以上も不正
+6. `now - et > <started-at-ms> + LOCK_PID_REUSE_SLACK_MS` なら `reused`、そうでなければ `alive`（どちらもエポックの時刻で、TZ に依らない）
 
-読み込み口の包み（`lock_record_state` の D7）の写像: 元の判定 `alive`（`kill -0` の pid が alive）→ 関数の答えをそのまま（`reused` は G を見る）。元の判定 `unknown:pid:EPERM` → `reused` なら G を見る、それ以外は EPERM のまま。`<started-at-ms>` は `started_at=`、無ければ owner の mtime（I5）、どちらも無ければ呼ばない。
+2 回目の手順 4・5（`machine_lock_lstart_naive_s` で地方時の付かない秒に直し、差が 900 の倍数かつ 26 時間以内なら TZ の違い）は消した。`machine_lock_lstart_naive_s` も足さない（BSD／GNU の `date` の違いを持ち込まない）。
 
-### 4.2 3 実装の対応
+読み込み口の包み（`lock_record_state` の D7）の写像: 元の判定 `alive`（`kill -0` の pid が alive）→ 関数の答えをそのまま（`reused` は G を見る）。元の判定 `unknown:pid:EPERM` → `reused` なら G を見る、それ以外は EPERM のまま。`<started-at-ms>` は記録の `started_at=` を `date -u -j -f '%Y-%m-%dT%H:%M:%SZ'`（BSD。GNU は `date -u -d`）で秒に直した ×1000。無い・解けなければ空で呼ぶ（2 回目の owner の mtime の代用はやめた）。
 
-| 実装 | 関数 | 今の呼び手 | 備考 |
+### 4.2 3 実装の対応と呼び手
+
+| 実装 | 関数 | 呼び手（今もこれからも） | 備考 |
 |---|---|---|---|
-| bash | `machine_lock_pid_identity`（新）・`machine_lock_etime_ms`（新）・`machine_lock_lstart_naive_s`（新） | D7 の包み（supervisor.lock）、PR1c の supervisor・deadline-guard | `verify-run.sh` の `lock_pid_start_ms` も `machine_lock_etime_ms` と同じ規則の解き方に替える（節の中に写しを置く: `verify-run.sh` は `machine-lock.sh` を読み込まない） |
-| sync | 足さない。`parseEtime` に範囲の検査を足す | 札の退かし（`ticketRetirable`） | `lstart=` の記録を読む JS の呼び手が無い（I6）。生まれたら、その PR で `pidIdentity(pid, recordedLstart, startedAtMs, hooks)` を同じ 3 値で足す |
+| bash | `machine_lock_pid_identity`（新）・`machine_lock_etime_ms`（新） | **D7 経由のロックの判定だけ**: 読み込み口の包み（`lock_record_state` の D7）を通る取得（supervisor.lock の `acquire-head-grace`）・退避の片付け（`lock_settle_gone`）・D6 のガード。PR1c もこの包みを通して使うだけ。**止める判定（`scripts/agent-health/product/lib.sh`・`deadline-guard.sh`・`supervisor.sh` の `proc_matches` など）からは呼ばない** | `verify-run.sh` の `lock_pid_start_ms` も `machine_lock_etime_ms` と同じ規則の解き方に替える（節の中に写しを置く: `verify-run.sh` は `machine-lock.sh` を読み込まない）。I3 の旧版の tmp の pid の再利用（F52）も同じ解き方 |
+| sync | 足さない。`parseEtime` に範囲の検査を足す | 札の退かし（`ticketRetirable`）・I3 の旧版の tmp の pid の再利用 | `lstart=` の記録を読む JS の呼び手が無い（I6）。生まれたら、その PR で `pidIdentity(pid, recordedLstart, startedAtMs, hooks)` を同じ 3 値・同じ用途の制限で足す |
 | ts | 足さない。`parseEtime` に範囲の検査を足す | 札の退かし（`retirable`） | 同上 |
+
+止める判定に TZ に依らない本人確認が要るなら、それは別の作業（`same | other | unknown` の厳しい版、`unknown` は止めない。止めないときに回収と確定も飛ばすかを一緒に決める: PM Claude の PR1c 上流 3 回目の申し送り B の 1。PM が #4288 に記録）で、この関数の意味を広げない。雛形は「`lib.sh` の `proc_matches` の本体と `deadline-guard.sh`・`supervisor.sh` が `machine_lock_pid_identity` を呼ばない」を読みで固定する（今の版で緑。PR1c の後も緑のまま）。
 
 ## 5. (d) PR の切り方
 
 - **1 本（PR1a-f）**。書くファイル:
-  - `.claude/skills/cmate-verify/scripts/verify-run.sh`・`.agents/skills/cmate-verify/scripts/verify-run.sh`（バイト一致）の機械ロックの節: `lock_obs_create` の中身（tmp → 読み直し → `/bin/link` → 読み直し → tmp の削除。引数・標準入力・戻り値 0/3/6/10+i/40+i/70+i は変えない）、K の割込みの口 5 つ、F13 の `-ef`、F11 の `rmdir` をしない、新しい述語 `lock_ownerless_temps_only` と `lock_expire_ownerless` からの呼び出し（`lock_ownerless_empty` は変えない）、空の owner の回収（I4）、取得と D6 の文面（`corrupt`・`stray`・`old-taker`・`taking`）、`lock_obs_owner` が codec の `LPO_STARTED_AT` を `LOB_STARTED_AT` に写す（読みごとに空）、`lock_pid_start_ms` の解き方、`lock_hand_off` の `lstart=` の拒否、`lock_recover` の `:1486` のコメント（「owner が無い退避は、持ち主の tmp が退かした先にあり、持ち主の `link` は ENOENT で断る」に直す）
-  - `scripts/lib/machine-lock.sh`: kv の codec が `started_at=` を読む、§4 の 3 関数、D7 の包みを I5 に替える（`machine_lock_lstart_state` は残す）
+  - `.claude/skills/cmate-verify/scripts/verify-run.sh`・`.agents/skills/cmate-verify/scripts/verify-run.sh`（バイト一致）の機械ロックの節: `lock_obs_create` の中身（tmp → 読み直し → `/bin/link` → 読み直し → tmp の削除。引数・標準入力・戻り値 0/3/6/10+i/40+i/70+i は変えない）、K の割込みの口 5 つ、F13 の `-ef`、F11 の `rmdir` をしない、新しい述語 `lock_ownerless_temps_only` と `lock_expire_ownerless` からの呼び出し（`lock_ownerless_empty` は変えない）、空の owner の回収（I4、固定 600000）、旧版の tmp の pid の再利用の確かめ（I3、etime と tmp の mtime。F52・F53）、I2-b の `[ ! -L … ] && [ … -ef … ]`、I1 の bash の読み直しの比べ方、取得と D6 の文面（`corrupt`・`stray`・`old-taker`・`taking`）、`lock_obs_owner` が codec の `LPO_STARTED_AT` を `LOB_STARTED_AT` に写す（読みごとに空）、`lock_pid_start_ms` の解き方、`lock_hand_off` の `lstart=` の拒否、`lock_recover` の `:1486` のコメント（「owner が無い退避は、持ち主の tmp が退かした先にあり、持ち主の `link` は ENOENT で断る」に直す）
+  - `scripts/lib/machine-lock.sh`: kv の codec が `started_at=` を読む、§4 の 2 関数（`machine_lock_pid_identity`・`machine_lock_etime_ms`）、D7 の包みを I5 に替える（`machine_lock_lstart_state` は残す）
   - `scripts/orchestrate/machine-lock-sync.mjs`: `makeObserver().create` の中身（`wx` の tmp → 全量の書き込み → `closeSync` → `linkSync` → 読み直し → tmp の削除。戻り値の形は同じ）、`hooks.onOwnerStage`、新しい述語 `ownerlessTempsOnly` と `expireOwnerless` からの呼び出し、空の owner の回収、文面、`parseEtime` の範囲
   - `src/lib/verification/machine-lock.ts`: `create` の中身（同上）、`__testHooks.onOwnerStage`、空の owner の回収、文面、`parseEtime` の範囲（I3 は足さない）
   - `.claude/skills/sync-map.json`: `verify-run.sh` の pin を再計算し、rationale に PR1a-f を足す（PR1a と同じ書き方、親 §1.11）
-  - `docs/design/verify-lock-holder-group-4288.md` §2.8: 点 `owner-write-short`・`owner-close`・`owner-publish`・`ownerless-tmp-lstat`・`ownerless-tmp-unlink`・`owner-tmp-pid`・`empty-owner-move`・`owner-mtime` を足し、`owner-create` の説明を「tmp の排他作成」に直す。読み込み口の点 `etime` は `lstart` と同じく注記と注入の試験で固定する
+  - `docs/design/verify-lock-holder-group-4288.md` §2.8: 点 `owner-write-short`・`owner-close`・`owner-publish`・`ownerless-tmp-lstat`・`ownerless-tmp-unlink`・`owner-tmp-pid`・`empty-owner-move` を足し（2 回目の `owner-mtime` は owner の mtime の代用をやめたので足さない）、`owner-create` の説明を「tmp の排他作成」に直す。読み込み口の点 `etime` は `lstart` と同じく注記と注入の試験で固定する
   - 試験: この雛形を実装で埋める。下の「意図した変更」の既存の試験
+- **PR1b・PR1c への申し送り（猶予の値）**: 本番の猶予つきの呼び手（PR1b の run-lock、PR1c の supervisor.lock と D6 のガード）は `ownerlessGraceMs`／`LOCK_OWNERLESS_GRACE_MS` に **600000** を渡す（I3、PM 決定 1）。親 §1.6 の D3・`lock-reservation-rest-4288.md:157` の「60000」はこの値に読み替える（親の文の直しは PR1b・PR1c の実装の契約で。この PR の scope の外）。節の既定（未設定＝片付けない）と、PR1a の試験が渡す 60000 は変えない
 - **skills の port の追跡**: `verify-run.sh` の変更は skills 側（cmate-verify）へ移植する PR を**作るところまで**（公開は伺う）。それまで skills の写しは E1 の窓を持つので、空の owner は生まれ続ける（I4 の回収は恒常の規則）。pin の rationale に「移植は別 PR、それまで byte-identical でない」と書く
 - **文面の持ち主**: `machine-lock-owner-corrupt`・`machine-lock-ownerless-stray`・`machine-lock-ownerless-old-taker`・`machine-lock-empty-owner-removed` の文面は PR1a-f が節の中で出す。PR1c の上流の設計が lib.sh で出すとしていた `corrupt`・`ownerless-tmp` の文面は、PR1a-f の後は節の文面を伝えるだけにする（二重にしない）
 - **API は呼び手と同じ PR**: 新しい公開の API は作らない（`machine_lock_pid_identity` の呼び手は同じ PR の D7 の包み）。オプション（`ownerlessGraceMs`／`LOCK_OWNERLESS_GRACE_MS`）の意味を I3 に広げるのは PR1a で入れたオプションの意味の拡張で、新しい API ではない（今それを渡すのは試験だけ。本番の呼び手は PR1b・PR1c）。空の owner の回収はオプションではなく既定の規則（I4）
 - **PR1b・PR1c との関係**: ファイルは重ならない（PR1b は `run-lock.ts`・`run-lock.sh`・`run-server.sh`・`daily.sh`、PR1c は `lib.sh`・`deadline-guard.sh`）が、D7（§4）・K の口（§2.6）・文面は PR1a-f が持ち、PR1b・PR1c は使うだけ。**マージは PR1a-f を先**にし、PR1b・PR1c の表はその後の振る舞いを期待にする
-- 難易度: 表が閉じていれば中（sonnet）。I5 の時刻の扱い（BSD/GNU の `date`、etime の解き方の共有）と 3 実装の一致があるので、上流のレビューで表 F が閉じなければ opus
+- 難易度: **opus**（PM 決定の「次」: 混在の扱い〔I8・表 F の `limit` の行〕と I5 の時刻の扱い、3 実装の一致があるので sonnet にしない）。PR1c の実装はこの PR の実装の上に積む（sonnet）
 
 ### 5.1 意図した変更（既存の試験）
 
@@ -250,33 +279,44 @@ machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>
 
 既存の D3 の試験（`machine-lock-options-4288.test.ts:246-247`、owner がディレクトリ・ディレクトリへの symlink）は変えない。ただし「ディレクトリ」の行は `isDirectory()` しか見ないので、実装の契約で「ディレクトリの中が空のまま」の検査を**新しい行**（表 F の F8）として足す（既存の期待は変えない）。
 
-固定している注入の点の名前（`owner-create`・`owner-write`・`owner-readback`・`owner-unlink`・`lock-rmdir`）と、`owner-create` の注入の対象（`<lock>/owner`。`lock-pr1a-review-fixes-4288.test.ts:186-198` が注入で後継の owner を置く）は変えない: `owner-create` の注入は tmp を開く前に `<lock>/owner` を対象に走らせ、後継が置かれれば公開の `link` が EEXIST になって取らない（期待どおり）。D7 の既存の試験（`machine-lock-options-4288.test.ts:560-596`）は `started_at=2026-11-10T00:00:00Z` で、生きた `sleep` は今日起動する。「違う lstart → removed」の行は `lstart` を TZ の違いでない値（秒の欄が違う）で置いていれば I5 でもそのまま通る。15 分の倍数だけずらした値で置いていれば、I5 では「TZ の違いだけ」で kept になる（実装の契約で行の値を確かめ、そうなら本文に無い指摘として報告する）。
+固定している注入の点の名前（`owner-create`・`owner-write`・`owner-readback`・`owner-unlink`・`lock-rmdir`）と、`owner-create` の注入の対象（`<lock>/owner`。`lock-pr1a-review-fixes-4288.test.ts:186-198` が注入で後継の owner を置く）は変えない: `owner-create` の注入は tmp を開く前に `<lock>/owner` を対象に走らせ、後継が置かれれば公開の `link` が EEXIST になって取らない（期待どおり）。D7 の既存の試験（`machine-lock-options-4288.test.ts:560-596`）は、記録を `kvRecord`（`:80-81`。**必ず `started_at=2026-11-10T00:00:00Z` を書く**）で置き、生きた `sleep` はその後に起動するので、「違う lstart（`Thu Jan  1 00:00:00 1970`）→ removed」の行は I5 の (1)（etime の起動が `started_at` ＋ 2 秒より後）で `reused` になりそのまま通る（3 回目に確かめた）。`started_at=` の無い記録を置く既存の試験は無い（`git grep -l 'lstart=' tests/unit tests/integration` は 4 ファイル。`product-supervisor-3312.test.ts` は旧い `lib.sh` の読み手を駆動し、PR1a-f の読み込み口を通らない。`process-inspector.test.ts` はロックの外）。
 
 ## 6. 新旧の混在
 
 | 書き手（旧） | 新しい読み手が見る形 | 新しい読み手の動き | 判定 |
 |---|---|---|---|
-| PR1a 版の `lock_obs_create`（`: >` → `cat >>`）が書いている途中 | 0 バイトの owner（若い） | 60 秒以内は `taking` で待つ。書き手は札を持つので、止まっていても他の誰も先頭にならず、回収されない（P0・E12） | ○ |
-| PR1a 版・PR1a より前の写し（`printf > owner`、`cfffb31c9:1416`）が SIGKILL で残した 0 バイトの owner | 古い `empty-owner` | 先頭が退かして 0 バイトのままを確かめて回収（I4）。猶予の無い呼び手（ゲート）も回収する | ○（P2-6 を閉じる） |
+| PR1a 版の `lock_obs_create`（`: >` → `cat >>`）が書いている途中 | 0 バイトの owner（若い） | 10 分以内は `taking` で待つ。書き手の札は期限＋60 秒で外れる（E12）が、空の owner は 10 分を過ぎるまで回収しない。10 分を超えて止まった書き手が回収の後に再開すると後継の owner を壊しうる | ○（10 分以内）。10 分を超える停止は F50（`limit`・`mixed`） |
+| PR1a 版・PR1a より前の写し（`printf > owner`、`cfffb31c9:1416`）が SIGKILL で残した 0 バイトの owner | 古い `empty-owner` | 先頭が退かして 0 バイトのままを確かめて回収（I4）。猶予の無い呼び手（ゲート）も回収する | ○（書き手が死んでいれば）。開いたまま 10 分を超えて止まった書き手の再開は F51（`limit`・`mixed`） |
 | 新しい `link` と旧い `set -C` の取り合い | どちらも名前 `owner` の排他（EEXIST）で、上書きしない | ○ | ○ |
 | 旧い読み手（PR1a 版・#4277 版）が新しい K2・K3 の `.owner-<token>` だけの `<lock>` を見る | 空でない、owner 無し | 旧い読み手は待つだけ（今の `empty-dir` と同じく取らない） | ○ |
-| 旧い `lib.sh`・`run-lock.sh`（札なし、`owner.tmp.$$` → `mv -f`、失敗で `rm -rf "$dir"`） | `tmp-old` | 名前の pid が gone のときだけ回収（I3）。書き手が猶予を超えて止まっていても生きていれば回収しない（`old-taker`）ので、再開した書き手の `rm -rf "$dir"` が後継の `<lock>` を消す経路は生まれない（codex P1） | ○ |
+| 旧い `lib.sh`・`run-lock.sh`（札なし、`owner.tmp.$$` → `mv -f`、失敗で `rm -rf "$dir"`） | `tmp-old` | 名前の pid が書き手でないと示せたとき（gone、または起動が tmp の mtime ＋ 2 秒より後: F52）だけ回収（I3）。書き手が猶予を超えて止まっていても生きていれば回収しない（`old-taker`）ので、再開した書き手の `rm -rf "$dir"` が後継の `<lock>` を消す経路は生まれない（codex 1 回目 P1） | ○。壁時計の後退と重なると F55（`limit`・`mixed`） |
+| 同上（旧版の K1: `mkdir` の後・tmp の前。pid がどこにも無い） | `empty-dir` | 猶予（本番 10 分）の後に回収（D3）。10 分を超えて止まった書き手が再開すると、後継の `<lock>` に tmp を書き `mv -f` で後継の owner を置き換える | ○（10 分以内）。10 分を超える停止は F49（`limit`・`mixed`。codex 2 回目 P1） |
 | 旧い `lib.sh` の読み手（`find -mmin +1` で owner の無い `<lock>` を中身ごと取る） | 新しい取得者の K1〜K3 で 1 分を超えて止まった `<lock>` | 旧い読み手が取ると、新しい取得者の `link` は ENOENT（F11）で断り、何も消さない | ○（親 §1.9 の範囲） |
 | 旧い `lib.sh` の退避 `<lock>.stale.*` | 読まない | 結果を変えない | ○ |
-| 旧い supervisor.lock の記録（`pid lstart label token`、`host=`・`started_at=` 無し） | `lstart-legacy*` | owner の mtime を `started_at` の代わりに I5（TZ が違うだけの生きた持ち主は残し、再利用は回収） | ○（P3-1） |
+| 旧い supervisor.lock の記録（`pid lstart label token`、`host=`・`started_at=` 無し） | `lstart-legacy*` | 文字列が同じなら alive、違えば unknown（消さない。TZ か再利用かを示せない。I5 の (2)）。pid が死ねば回収 | ○（消さない側。再利用された pid の間は止まる: F38） |
 | PR1a 版の `machine-lock.sh` を読む旧いチェックアウト（同期の前のガード） | 新しい記録 | `lstart=` の文字列だけで判定するので TZ の穴は旧いチェックアウトの同期まで残る | 範囲の文（§8 の 3） |
 | cmate-verify 0.7.0 より前の写し（札を知らない） | — | 札を無視して `mkdir` する。P0 の外（親 §1.9） | 範囲の文 |
+
+### 6.1 混在を終わらせる条件（I8 の (b) が消える条件。PM 決定 1）
+
+混在の間の限界（F49・F50・F51・F55）は、旧い形の書き手が動きうる写しが残る間だけある。次の 3 つが揃うと、動く書き手は全て新しい形になり、限界の行は消える（行は「終わった後は到達しない」として表に残し、消したことを試験で確かめるのは各条件の PR）。
+
+1. **旧版の run-lock・supervisor.lock の書き手が無くなる**: PR1b（`run-lock.sh`・`run-lock.ts` を machine-lock に載せる）と PR1c（`lib.sh` の supervisor.lock を machine-lock に載せる）が develop にマージされる（F49・F55）
+2. **skills の cmate-verify の写しが新しい形になる**: `verify-run.sh` の skills 側への移植の PR（§5。作るところまで。**公開は人に伺う**）が公開され、sync-map.json の pin が byte-identical に戻る（F50・F51）
+3. **古い worktree の写しを更新する**: PR1a-f・PR1b・PR1c のマージより前に分岐した worktree（`git worktree list` で見る。常駐の `../commandmate-agent-health`〔`agent-health-runner`。supervisor.lock を使う日次の Schedule〕と `../commandmate-main` を含む）の `verify-run.sh`・`lib.sh`・`run-lock.sh` を、develop（常駐は main のリリース）に合わせる。常駐の worktree は片付けず、ブランチを進めて更新する（CLAUDE.md の恒久 worktree）。PR1c の切替の手順に入れる（§8 の 3）
+
+3 つが揃うまでの窓は「旧い書き手が `mkdir`〜`mv`（通常ミリ秒）の途中で 10 分を超えて止まり、ちょうどその間に新しい先頭が回収して取る」ときだけ開く。
 
 ## 7. 処分（pm-return-4288-pr1af-upstream）の対応
 
 | 処分 | 入れた場所 |
 |---|---|
 | 1 旧版の再開で生きた後継のロックを消す（codex P1） | I3（`owner.tmp.<pid>` は pid が gone のときだけ）、表 T `tmp-old`・`tmp-old-young`、F26〜F28、§6 |
-| 2 I4 の前提の誤り（PM Claude P2-6） | P0、I4（空の owner は 60 秒を過ぎ先頭として退かして確かめて回収）、表 T `empty-owner`、F29〜F31、§5 の sync-map.json と skills の port |
+| 2 I4 の前提の誤り（PM Claude P2-6） | P0、I4（空の owner は 60 秒を過ぎ先頭として退かして確かめて回収。3 回目で 10 分に）、表 T `empty-owner`、F29〜F31、§5 の sync-map.json と skills の port |
 | 3 I3 は別の述語（PM Claude P2-2・codex P2） | I3 の `lock_ownerless_temps_only`／`ownerlessTempsOnly`、表 T `tmp-new+gone-dead`・`tmp-new+gone-alive` |
 | 4 bash の公開は link(2) の意味（PM Claude P2-1） | I2（`/bin/link --`、errno の読み）、I2-b（`-ef`）、E11、F7〜F11・F13・F14 |
 | 5 etime のパーサー（codex P2）ほか | I5、§4.1 の `machine_lock_etime_ms`、F35〜F37、F38〜F40、F45 |
-| 6 F24 の例外 | I5 の (1) を TZ の違いを同じ起動と読む比較にし、F42 を keep に。I7 と型（`residual` を持たない） |
+| 6 F24 の例外 | I5 の (1) を TZ の違いを同じ起動と読む比較にし、F42 を keep に。I7 と型（`residual` を持たない）。**3 回目で置き換えた**（§7.1 の 2: 15 分の倍数の推定をやめ、F42 は `limit`・`premise`） |
 | 7 表は型つきの列挙、3 実装の軸（PM Claude P2-3・P2-4・codex P2） | §2.4・§2.6・§3、雛形（3 つの表を別々の字面で書き、規則と互いとを比べる。TS の K1〜K3 は `no-grace-caller`、F5・F6） |
 | 8 TZ と PR1c の契約 | §4 |
 | 9 K の割込みの口・P3 の残り | §2.6、下の表 |
@@ -299,6 +339,17 @@ machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>
 | P3-14 割込みの口 | §2.6 |
 | P3-15 文面の持ち主・API の例外 | §5 |
 
+### 7.1 上流 2 回目の処分（pm-return-4288-pr1af-upstream2）の対応
+
+| 決定 | 入れた場所 |
+|---|---|
+| 1 不変条件を「新版どうし」と「混在の間」に分ける（codex P1・PM Claude P2-A） | I8（新設）、P0（札は期限＋60 秒で外れる事実に直した）、E12、I3（`.owner-*` の理由を札でなく公開の形に）、I4・I3 の猶予を 10 分（`LOCK_EMPTY_OWNER_GRACE_MS`=600000、本番の呼び手の `LOCK_OWNERLESS_GRACE_MS`=600000、§5 の PR1b・PR1c への申し送り）、表 F の F49〜F51・F55（`limit`・`mixed`）、§6 の行、§6.1（混在を終わらせる条件: PR1b・PR1c のマージ、skills の port の公開〔伺う〕、古い worktree の写しの更新） |
+| 2 TZ（codex P2） | I5（`started_at` があれば etime の起動の時刻と比べる、`lstart=` だけは一致で alive・不一致で unknown、reused は `started_at`／etime の証拠があるときだけ）、§4.1 の手順（2 回目の 4・5 と `machine_lock_lstart_naive_s` を消した）、表 T の `lstart-legacy*`、F34（60 秒差・`started_at` 無し → unknown）・F54（60 秒差・`started_at` あり → etime で alive）・F38〜F40、P1 と F42（壁時計の後退。`limit`・`premise`。PM Claude 申し送り B の 2） |
+| 3 §4 は「消すか消さないか」の判定専用（codex P3・PM Claude P2-B） | §4 の冒頭、§4.2 の呼び手の欄（D7 経由のロックの判定だけ、止める判定からは呼ばない）、I5 の「用途」、§9 の 1 行目（`proc_matches` の置き換えの提案を削った）、雛形の `PID_IDENTITY.use`・`never` と読みの試験 |
+| 4 表 F を Caller × Impl に展開（codex P2） | §3（呼び手は `AG`・`AN`・`GH`・`GB`・`TR`・`HO`、結果の型は呼び手ごと、D6 は `kept` を持つ、D6 の故障の行 F47・F48）、雛形の `FailureRow.results`・`F_CASES`（実装 × 呼び手ごとに 1 本の `it.todo`。2 回目の `impls` を並べた 1 行の todo をやめた） |
+| 5 PM Claude P3 | P3-1 旧版の tmp の pid の再利用: I3（etime の起動が tmp の mtime ＋ 2 秒より後なら書き手でない）、F52・F53・F55。P3-2 F3 の理由: F3。P3-3 I2-b は `lstat(tmp)`: I2-b。P3-4 bash の `-ef` に `! -L`: I2-b。P3-5 短い書き込みの末尾の改行: I1。P3-6 PR1c の順: §4 の冒頭（PR1c の上流 3 回目で済み）。P3-7 `TS_K` の型: `byGraced: By \| 'no-grace-caller'` は `KillRow` の型にあり、`npx tsc --noEmit` で確かめた |
+| 6 §4 の名前と 3 値は変えない | §4 の冒頭。変えたのは中の比べ方と、3 つ目の引数が空でもよいことだけ |
+
 ## 8. 残る判断（PM へ）
 
 1. **TS（`machine-lock.ts`）を PR1a-f に入れるか**: 1 回目のまま入れる案（同じ窓 E2、§2.8 の `owner-create` は 3 実装の点）。1 回目の PM Claude は賛成
@@ -307,7 +358,7 @@ machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>
 
 ## 9. 本文に無い指摘
 
-- `scripts/agent-health/product/deadline-guard.sh:55` と `supervisor.sh:105`・`:187`・`:238`（台帳の `lstart`）の `proc_matches` も地方時の `lstart` の文字列の比較で、E5 と同じ TZ 依存がある（台帳の判定で、ロックの外）。§4 の `machine_lock_pid_identity` を呼べば塞げる（PR1c か別 Issue）
+- `scripts/agent-health/product/deadline-guard.sh:55`・`lib.sh:217`・`lib.sh:294`（台帳の `lstart`）の `proc_matches` も地方時の `lstart` の文字列の比較で、E5 と同じ TZ 依存がある（台帳の止める判定で、ロックの外）。§4 の関数は消すか消さないかの判定専用なので、これには使わない（§4.2。2 回目のここにあった「§4 を呼べば塞げる」の提案は削った: PM 決定 3）。止める判定の TZ は別の作業（PM が #4288 に記録）
 - `lock_settle_gone`（`verify-run.sh:1400`）は owner の無い退避先を `rmdir` するだけなので、一時ファイルが残った `.gone-*` は空にならず残り続ける（保有中とは読まれないので害は無く、散らかるだけ）
 - `verify-run.sh:1129-1151` の `lock_pid_start_ms` は `etime` の形を確かめず、不正な出力を「今起動した」と読む（E7）。札の退かしで、生きた札を再利用と読みうる（消す側。ロックではなく列の順を崩す）。PR1a-f で同じ規則の解き方に替える（F37）が、今の develop にある欠陥として記録する
 - PR1a 版の書き込みの失敗の後始末 `rm -f "$LOCK_PATH/owner"`（`verify-run.sh:1645`）は名前で消すので、`cat >>` が失敗するまでの間に owner が他者のものに替わっていれば他者の owner を消す。P0 の札で先頭は 1 人なので今の develop では起きないが、PR1a-f で消える形（I2-b の `-ef`）
