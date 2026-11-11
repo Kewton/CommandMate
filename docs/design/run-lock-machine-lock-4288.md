@@ -132,7 +132,7 @@
 | `own-self` | — ×3 ¹ | — ×3 ² |
 | `own-other` | — ×3 ¹ | In / Rc / ✕unknown ³ |
 | `foreign` | ✕held / Rc / ✕unknown | 取得と同じ |
-| `aside-own` | — ×3 ¹ | In / Rl / ✕unknown ³ |
+| `aside-own` | — ×3 ¹ | In / Rl / ✕unknown r ³ ⁱ |
 | `aside-foreign` | ✕aside r / Rl / ✕unknown r | 取得と同じ |
 
 **pid だけの形 — 解放と引渡し**
@@ -168,6 +168,8 @@
 | `foreign-g` | kept ×9 | 0 ×9 | kept ×9 | 0 ×9 | stk ×9 | kept ×9 |
 | `aside-own-g` | — ×9 ¹⁰ | 0 ×9 | pid alive: kept / — ¹¹ / kept ; pid gone・unknown: kept / kept(aside-removed) / kept | 0 ×9 | ⊘handoff-twice ×9 | pid alive: miss / — ¹¹ / miss ; pid gone・unknown: miss / miss(aside-removed) / miss |
 | `aside-foreign-g` | kept ×9 | 0 ×9 | kept ×9 | 0 ×9 | stk ×9 | miss ×9 |
+
+注（実装の契約で直した 1 点。ⁱ）: 継承の `aside-own` × unknown は、先頭が不明な持ち主の退避の記録を `<lock>` へ戻す（PR1a の `settleGone`／`lock_settle_gone`、土台 §2.7）ので `r`（restored）。上流の 3・4 回目の表は `r` を付けていなかったが、TS・bash の両方の実装がそう動く（`aside-foreign` と同じ）。行の中身が変わったのではなく、後の `<lock>` の欄の誤りを直した。
 
 注（到達しない理由。試験の `never(…)` と同じ文）: ¹ 取得の token は毎回新しいので、自分の token の記録は取得の前に無い。² 継ぐ者は記録の pid ではない。³（到達の注。上流の 3 回目で 1 回目の値に戻した、PM Claude P2-1・Claude 5 P3-B）継承の `own-other`・`aside-own` は到達する: `run-lock-3359.test.ts:89-97`（pgid 無しの `daily-token` の記録を TS が `inherited`）、`run-server-3359.test.ts:430-433`（bash が `GOT`）、デプロイの朝（旧い `daily.sh` が T0 を pgid 無しで持ち、pull の後の新しい `run.ts` を起こす。土台 §1.9 の「新しい継承 × (a)」）。`aside-own` は D8 の 2 つ目の文（`<lock>` が missing の間は同じ token の生きた退避を継ぐ）。**新しい** daily の子が見る記録は T1（`own-other-g`。§4.5 で子が exec の前に T1 を作る）。`up`・`cleanup` は `CM_RUN_LOCK_TOKEN` を消してから取る（F17）ので、この行に来るのは継ぐ者だけ。狭めて塞ぐ（PM 共通の決定 2）のは本番の呼び手が無い行だけで、この 2 形には当てない。⁴ Node は自分の pid を観測しない。⁵ main シェルの `$$` は呼び手自身で生きている（自分の uid の生きた pid への `kill -0` は ESRCH にも EPERM にもならない。サブシェルは表 E で拒否）。⁶ D5 を呼ぶのは `down` と `run_lock_release` の needs-head の後だけで、どちらも記録の pid は呼び手の `$$` でない（Claude 5 P2-1・PM Claude P3-9）。⁷ `$$`／`process.pid` で取った記録は、その pid が生きている間 gone と判定されず退かされない。⁸ 下の「読み方」。⁹ 継ぐ者は G の中に居るので G は ESRCH にならない。¹⁰ TS は pgid を書かない。¹¹ UAT の T1 の pid は G の長なので、pid が生きていれば G は空でない。
 
@@ -670,3 +672,16 @@ PM Claude `pm-review-4288-pr1b-upstream3-claude.md`（P1 0・P2 1・P3 5）。�
 - 上流の 3 回目で読み直したもの: `verify-run.sh` の `lock_stop_gate`・`lock_drain_group`・`rga_handoff_fail`・`run_gate_handoff` の合図と失敗の枝・`lock_child_wait`・`lock_hand_off`・`lock_obs_pgid`、`machine-lock.sh` の `lock_format_owner`（呼び手の欄は `LOCK_OWNER_EXTRA` から）、`run-lock.sh` の `run_lock_pid_alive`（`:50-56`）・今の `run_lock_set_pid`（T0 の `label`・`run_dir` を書き直している）、`run-server.sh` の `cmd_up` のサーバーの起動（`own_home_env` の配列が `env -i` と `nohup` の間にある）と `:479`・`:497`、`daily.sh:88-141`、`supervisor.sh:262-270`、`uat-yaml-2590.test.ts:65-71`・`:187-193`、PR1c の §5.2（`495872a60` の `:283`）。実行したもの: この試験のファイルだけの `npx vitest run`・陽性の対照 3 つ（§2.8 の (4)〜(6)、os.tmpdir() の写しで）・`npm run lint`・`npx tsc --noEmit`
 - 上流の 4 回目で確かめたもの（実行）: `/bin/bash` 3.2.57（`bash --version`）で `set -u; v=NAME; [ -z "${!v+x}" ]` が未設定で真・空の値で偽・値ありで偽、`a=(); "${a[@]+"${a[@]}"}"` が空で通る（§4.5 の試験の口の形）。`run_id` は `cmd_up` で `date -u +%y%m%d%H%M%S` と `$RANDOM` から作られ `up` ごとに新しい（`run-server.sh` の `cmd_up`）。`run-server-3359.test.ts` の「the next up cleans …」の 2 回目の `up` は別の `run2` で、3 回目は今は無い（§4.4 の足す行）。`lock_child_wait`（`verify-run.sh:2065-2078`）は `go` が在れば次の確かめで `ack` を作り、期限・親の死では自分で `go` を作って `ack` を作らずに 1 を返す（`run_lock_abort_settle` の前提）。実行したもの: この試験のファイルと `tests/unit/guards`・`tests/unit/docs` の `npx vitest run`、陽性の対照 (7)〜(9)（os.tmpdir() の写しで）、`npm run lint`・`npx tsc --noEmit`・`node scripts/changelog-fragments.mjs check`
 - 探した対（上流の 3 回目）: 継承の行を固定する既存の試験（`git grep -n 'CM_RUN_LOCK_TOKEN' -- tests`）は `run-lock-3359.test.ts:89-97` と `run-server-3359.test.ts:430-433`で、どれも本書の表と一致する（`daily-sh.test.ts`・`metrics-sh.test.ts`・`uat-opencode-v1-files-4149.test.ts`・`run-server-3359.test.ts:72` は環境から消すか空にするだけ）。`down` の失敗を固定する試験は無い（`git grep 'stage down fail' -- tests` は 0 件）。`docs/en` に run-lock の写しは無い
+
+---
+
+## 10. 実装の契約で決めたこと・見つけたこと（赤から緑にした回）
+
+設計の表を実装に当てて緑にした。表の行は 1 つを除いて変えていない。
+
+- **表の誤り 1 点（上流へ戻す）**: 継承の `aside-own` × unknown は、上流の表では「断る・`<lock>` は変わらない」だったが、TS（`machine-lock-sync.mjs` の `settleGone`）も bash（`lock_settle_gone`）も、不明な持ち主の退避の記録を先頭が `<lock>` へ戻す（`aside-foreign` と同じ。土台 §2.7）。PR1a の部品なので PR1b は変えず、セルを `restored` に直した（§2.2 の注 ⁱ、試験の `TS_INHERIT`／`SH_INHERIT`）。
+- **試験の口 2 つ**: `RUN_LOCK_HEAD_BUDGET`（`run_lock_release_as_head` の先頭になる待ちの秒数。既定 10。D5 の `not-head` の行を 10 秒待たずに試すため）、`acquireRunLock` の `kill`・`fault`（D10。観測の EPERM を注入する）。本番では使わない。
+- **`lock_token` は引渡しの前に状態へ書く**（`server_pid` と同じ段、表 D `state-write`）: 公開の後に `up` が死んでも `down` が記録を T1 と読めるように。引渡しが公開の前に失敗した run では、状態の `lock_token` は記録にない token を指す（記録は T0 のまま）が、`down` は記録の token で読む。
+- **macOS では、Apple 製のバイナリ（`/bin/bash`・`/bin/sleep`）の環境は `ps eww` に出ない**: 合図を待っている UAT の子（まだ exec していない `/bin/bash`）の `CM_DB_PATH` は読めないので、`down` はそれを `alive-unverified`（`stop-refused`）と読む（表 C の `t0-up-dead × alive-verified` の行は、環境が読める OS でだけその行になる。待っている子は親の死で自分から取り下げる）。`up` の `CM_DB_PATH` の確かめは、子が exec した後のサーバー（node）に対して働くので変わらない。G の残りの確かめ（`CM_DB_PATH` が run dir の下）も、Apple 製のバイナリが G に残るときは「確かめられない」になり消さない側に倒れる。
+- **TS の `release()` は結果を返す**（`released`／`deferred`／`kept`／`none`。`needs-head` は pid≠`process.pid` の取得を断るので出ない）。呼び手（`main.ts`）は戻り値を使わない。
+- **駆動した範囲**: 表 A の到達の 590 行すべて（TS は同一プロセスで、bash は 1 行 1 プロセスで）、表 E の到達 12 行、UAT の表 D は `group`・`token`・`tmp`・`mv`・`verify-unreadable`・`signal`・`abort`・`ack`・`child-exits` の 9 行、daily の表 D は `token`・`mv`・`signal`・`ack` と通常の終わり・TERM、表 B は UAT の `tmp`・`acked`（親を kill -9）、表 C は `down` の 13 行と `up` の trap（自分で終わった長を回収する）1 本（`t1`×{alive-verified×none／verified、dead×verified／unverified／unknown／none×D5 の unknown・not-head・deferred、alive-unverified}、`t0-up-alive`、`other`、`absent`、`old`）、表 D2 は取得の列と `down` の列の一部。**駆動していない行**: 表 D の `state-write`（`state_set` を外から失敗させられない）・`verify`（読み直せるが T1 でない記録）・`abort-acked`（親の `mkdir go` が `go` を作ってから失敗する形）と daily の残り、表 B の `published`・`signalled`（止め所が無い）と daily の列、表 C の `zombie`（Apple 製のバイナリ以外で長を zombie にする手段が試験に無い。D2 の `zombie × down` は作り物の状態ファイルで駆動した）・`t1 × D5 kept`（`other` の行が同じ経路）・`t1 × alive-verified × unknown`（`ps` の失敗を注入できない）、表 D2 の `uat-trap`・`daily-exit` の列。これらは実装に分岐としてあり、設計の文と一致するが、この回の試験は走らせていない。

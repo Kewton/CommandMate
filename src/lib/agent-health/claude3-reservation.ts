@@ -9,7 +9,7 @@
  * premise, and publishes N+1 with `fs.linkSync` — which fails with EEXIST if
  * another caller published N+1 first, so of two racing callers exactly one
  * wins and the other re-reads. Nothing ever deletes or moves the current
- * generation (unlike run-lock's rename, design §1.4), and nothing reclaims a
+ * generation (unlike run-lock's recovery, design §1.4), and nothing reclaims a
  * reservation by age: `reviewAfter` only marks it for a person to look at.
  *
  * Old generations are cleaned, which frees their names; a caller paused for

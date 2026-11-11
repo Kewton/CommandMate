@@ -40,6 +40,14 @@ beforeEach(() => {
   }
   fs.mkdirSync(path.join(work, 'scripts', 'uat'), { recursive: true });
   fs.copyFileSync(path.join(SCRIPTS, '..', 'uat', 'run-lock.sh'), path.join(work, 'scripts', 'uat', 'run-lock.sh'));
+  // run-lock.sh loads the machine-wide lock (Issue #4288 PR1b): a rig, not an expectation.
+  fs.mkdirSync(path.join(work, 'scripts', 'lib'), { recursive: true });
+  fs.copyFileSync(path.join(SCRIPTS, '..', 'lib', 'machine-lock.sh'), path.join(work, 'scripts', 'lib', 'machine-lock.sh'));
+  fs.mkdirSync(path.join(work, '.claude', 'skills', 'cmate-verify', 'scripts'), { recursive: true });
+  fs.copyFileSync(
+    path.join(SCRIPTS, '..', '..', '.claude', 'skills', 'cmate-verify', 'scripts', 'verify-run.sh'),
+    path.join(work, '.claude', 'skills', 'cmate-verify', 'scripts', 'verify-run.sh')
+  );
   const git = (...args: string[]) => execFileSync('git', args, { cwd: work, env, stdio: 'ignore' });
   git('init', '-q');
   git('add', '.');

