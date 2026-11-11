@@ -131,7 +131,13 @@ drain_members() {
             sleep 0.1
             i=$((i + 1))
         done
-        for p in $alive; do kill -s KILL "$p" 2>/dev/null || true; done
+        # The grace may have been long: a pid that ended meanwhile may be somebody else's by now. Each one is
+        # looked at again (alive, still in group <G>) just before it is sent KILL.
+        for p in $alive; do
+            kill -0 "$p" 2>/dev/null || continue
+            [ "$(ps -o pgid= -p "$p" 2>/dev/null | tr -d ' ')" = "$g" ] || continue
+            kill -s KILL "$p" 2>/dev/null || true
+        done
         i=0
         while [ $i -lt 20 ]; do
             [ "$(lock_obs_kill0 group "-$g")" = gone ] && return 0
@@ -299,6 +305,8 @@ down_procedure() {
             ;;
         old) form=old ;;
     esac
+    # The older form is the state file's (design §2.4, as cleanup_leftovers): no lock_token, whatever the lock holds.
+    [ -n "$lock_token" ] || form=old
     if ! stop_recorded "$state" "$form"; then
         if [ "$LEADER_STUCK" -ne 1 ]; then
             DOWN_STATUS=stop-refused

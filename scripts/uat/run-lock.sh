@@ -55,8 +55,6 @@ RUN_LOCK_RESULT=""
 RUN_LOCK_STAGE=""
 RUN_LOCK_G=""
 RUN_LOCK_HOLDER_RUN_DIR=""
-# This shell took the lock with a pid that is not its own $$ (test-only; its release is refused).
-RUN_LOCK_FOREIGN_PID=""
 # A handover was tried in this shell (a second one is refused).
 RUN_LOCK_HANDED=""
 # The grace of an owner-less, empty <lock> before the head takes it out (D3): the section's
@@ -150,6 +148,8 @@ run_lock_require_loaded() {
 
 RUN_LOCK_NOTE_PATH=""
 RUN_LOCK_NOTE_INSTALLED=""
+# Set around D5 (a release as the head): the recovery note then says "released", not "took over".
+RUN_LOCK_RELEASING=""
 
 # The line a recovery prints for run-lock's own lock keeps its old wording; any other lock's
 # (supervisor.lock) goes to the loaded section's. Installed on the first call, never at source time.
@@ -161,7 +161,12 @@ run_lock_install_note() {
         local rl_label
         if [ -n "${RUN_LOCK_NOTE_PATH:-}" ] && [ "$1" = "$RUN_LOCK_NOTE_PATH" ]; then
             rl_label=$(printf '%s\n' "${lob_out:-}" | sed -n 's/^label=//p' | head -n 1)
-            echo "run-lock: took over a stale lock (pid $2, label $rl_label)" >&2
+            if [ -n "${RUN_LOCK_RELEASING:-}" ]; then
+                # D5 (down / the failure trap): this run's own lock is released after its holder is gone, nothing is taken over
+                echo "run-lock: released this run's lock (its holder pid $2 is gone, label $rl_label)" >&2
+            else
+                echo "run-lock: took over a stale lock (pid $2, label $rl_label)" >&2
+            fi
         else
             run_lock_base_note_recovered "$@"
         fi
@@ -331,8 +336,8 @@ RLI_EOF
 # $CM_RUN_LOCK_TOKEN and it is alive — RUN_LOCK_HOW=inherited, nothing is held by this shell),
 # 1 when somebody else does or the call is refused. On 1, RUN_LOCK_ERROR says who or why.
 # <pid> is the pid written to the owner: $$ for every caller (a UAT `up` hands the lock to its
-# server with run_lock_set_pid). A pid that is not $$ is accepted (a test writes the pid of a
-# process it started) but the shell that took it never releases it (run_lock_release refuses).
+# server with run_lock_set_pid). A pid that is not $$ is refused by the section before anything is
+# made (PR1a-f I1-b); the message names the pid and this shell.
 run_lock_acquire() {
     local label=${1:-} pid=${2:-} token=${3:-} run_dir=${4:-} dir queue rc
     RUN_LOCK_ERROR=""
@@ -382,12 +387,16 @@ run_lock_acquire() {
         RUN_LOCK_HOW=acquired
         RUN_LOCK_HANDED=""
         RUN_LOCK_G=""
-        RUN_LOCK_FOREIGN_PID=""
-        [ "$pid" = "$$" ] || RUN_LOCK_FOREIGN_PID=1
         run_lock_end
         return 0
     fi
-    run_lock_refusal "$dir"
+    case "$LOCK_UNKNOWN" in
+        'point=owner-pid '*)
+            # the section's I1-b refusal: the reason is the caller's pid, not another run's lock
+            RUN_LOCK_ERROR="run-lock: pid $pid is not this shell ($$): the record's pid must be the caller itself"
+            ;;
+        *) run_lock_refusal "$dir" ;;
+    esac
     run_lock_end
     return 1
 }
@@ -527,10 +536,6 @@ run_lock_release() {
         RUN_LOCK_ERROR="run-lock: run_lock_release must be called from the main shell that took the lock"
         return 1
     fi
-    if [ -n "$RUN_LOCK_FOREIGN_PID" ]; then
-        RUN_LOCK_ERROR="run-lock: this shell took the lock with a pid that is not its own; the record stays until that pid is gone and the next head recovers it"
-        return 1
-    fi
     dir=$(run_lock_dir)
     queue=$(machine_lock_queue_of "$dir")
     run_lock_begin "$dir"
@@ -544,9 +549,11 @@ run_lock_release() {
             [ -n "$t" ] || continue
             case " $tokens " in *" $t "*) ;; *) tokens="$tokens $t" ;; esac
         done
+        RUN_LOCK_RELEASING=1
         # shellcheck disable=SC2086 # the tokens are [A-Za-z0-9-]+, split on blanks
         lock_release_as_head "$dir" "$queue" "${RUN_LOCK_HEAD_BUDGET:-10}" $tokens
         rc=$?
+        RUN_LOCK_RELEASING=""
         RUN_LOCK_RESULT=$LRAH_RESULT
     fi
     if [ "$RUN_LOCK_RESULT" = released ] || [ "$RUN_LOCK_RESULT" = none ]; then
@@ -569,8 +576,10 @@ run_lock_release_as_head() {
     dir=$(run_lock_dir)
     queue=$(machine_lock_queue_of "$dir")
     run_lock_begin "$dir"
+    RUN_LOCK_RELEASING=1
     lock_release_as_head "$dir" "$queue" "${RUN_LOCK_HEAD_BUDGET:-10}" "$@"
     rc=$?
+    RUN_LOCK_RELEASING=""
     RUN_LOCK_RESULT=$LRAH_RESULT
     run_lock_end
     return "$rc"

@@ -64,10 +64,14 @@ fi
 STARTED_AT="$(node -e 'process.stdout.write(new Date().toISOString())')"
 BEFORE="$(git rev-parse HEAD)" || exit 2
 
-# Writes the minimal report and exits 2. $1 = reason.
+# Writes the minimal report and exits 2. $1 = reason. KEEP_REPORT=1 (run.ts started and may have written its
+# own report): that report is kept when it was written after the handover began (newer than `go`).
 fail_sync() {
   reason="$1"
   echo "AGENT_HEALTH_SYNC status=failed reason=${reason} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
+  if [ "${KEEP_REPORT:-0}" = 1 ] && [ -f "$OUT" ] && [ -n "${GO:-}" ] && [ "$OUT" -nt "$GO" ]; then
+    exit 2
+  fi
   AH_OUT="$OUT" AH_STARTED_AT="$STARTED_AT" AH_BEFORE="$BEFORE" AH_REASON="$reason" node -e '
     const fs = require("fs");
     const path = require("path");
@@ -135,7 +139,9 @@ daily_handoff_fail() { # <stage>
       CHILD_REAPED=1
       ;;
     abort-acked)
-      # the child started under T1: wait for it as on the normal path, then drain its group
+      # the child started under T1: wait for it as on the normal path, then drain its group; the report
+      # run.ts wrote is not overwritten by the minimal one
+      KEEP_REPORT=1
       wait "$CHILD" 2>/dev/null
       CHILD_REAPED=1
       [ -z "$RUN_LOCK_G" ] || lock_drain_group "$RUN_LOCK_G" 0
@@ -208,9 +214,10 @@ if ! git diff --quiet "$BEFORE" "$AFTER" -- package-lock.json; then
   NPM_INSTALL="done"
 fi
 
-echo "AGENT_HEALTH_SYNC status=ok before=$(printf '%s' "$BEFORE" | cut -c1-8) after=$(printf '%s' "$AFTER" | cut -c1-8) npm_install=${NPM_INSTALL}"
+SYNC_OK_LINE="AGENT_HEALTH_SYNC status=ok before=$(printf '%s' "$BEFORE" | cut -c1-8) after=$(printf '%s' "$AFTER" | cut -c1-8) npm_install=${NPM_INSTALL}"
 
 if [ "$SYNC_ONLY" -eq 1 ]; then
+  echo "$SYNC_OK_LINE"
   exit 0
 fi
 
@@ -232,9 +239,29 @@ set -m
 CHILD=$!
 set +m
 run_lock_set_pid "$T0" "$$" "$CHILD" "$GO" || daily_handoff_fail "$RUN_LOCK_STAGE"
+# The one AGENT_HEALTH_SYNC line: the `ok` line is made once the child has made its receipt (it will exec
+# run.ts) or has ended. A handover that failed has already written its own (status=failed) and a child that ends
+# without a receipt is reported by that line only, so the line is never there twice.
+SYNC_OK_PRINTED=0
+while [ ! -e "$ACK" ]; do
+  CHILD_STAT="$(ps -o stat= -p "$CHILD" 2>/dev/null | tr -d ' ')"
+  case "$CHILD_STAT" in '' | Z*) break ;; esac
+  [ "$(date +%s)" -le $((DEADLINE + 2)) ] || break
+  sleep 0.05
+done
+if [ -e "$ACK" ]; then
+  echo "$SYNC_OK_LINE"
+  SYNC_OK_PRINTED=1
+fi
 wait "$CHILD"
 CODE=$?
 CHILD_REAPED=1
 # The leader is reaped: what is left of its group is drained (nothing is sent when it is empty).
 [ -z "$RUN_LOCK_G" ] || lock_drain_group "$RUN_LOCK_G" 0
+# The child ended with 75 before it made its receipt: it never exec'd run.ts (it could not make `ack`, or could
+# not read machine-lock.sh of the pulled tree). That is a failed handover, not run.ts's exit code (table D, ack).
+if [ "$CODE" -eq 75 ] && [ ! -e "$ACK" ]; then
+  fail_sync "handoff-failed stage=ack"
+fi
+[ "$SYNC_OK_PRINTED" = 1 ] || echo "$SYNC_OK_LINE"
 exit "$CODE"

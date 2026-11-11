@@ -178,7 +178,7 @@ const CHECKS = [
   'token-chars', // token not [A-Za-z0-9-]+ (I-8, F4)
   'field-newline', // label / run_dir with a newline (I-8, F10)
   'ts-pid-not-self', // acquireRunLock({ pid }) with pid ≠ process.pid (PM Claude P3-3)
-  'sh-release-after-foreign-pid', // run_lock_release after run_lock_acquire <label> <pid≠$$> (F9 keeps that take, test-only)
+  'sh-release-after-foreign-pid', // run_lock_release after a refused run_lock_acquire <label> <pid≠$$> (I1-b): nothing is held, nothing is released
   'handoff-pid-not-self', // run_lock_set_pid when the recorded pid is not $$ (I-6)
   'handoff-pgid-self', // run_lock_set_pid with pgid = $$ or = this shell's own pgid (PM Claude P2-5, I-5)
   'handoff-twice', // run_lock_set_pid after a handover (no caller hands over twice)
@@ -937,7 +937,7 @@ const TABLE_E = {
     ts: { kind: 'never', why: 'TS は pid≠process.pid の取得を拒む（ts-pid-not-self）' },
     sh: refusedArg('the take with pid≠$$ is refused (I1-b); nothing is written, so nothing is released'),
   },
-  'handoff-pid-not-self': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('the take with pid≠$$ is refused (I1-b); nothing written, LOCK_PENDING_TOKEN not set') },
+  'handoff-pid-not-self': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('the take with pid≠$$ is refused (I1-b); nothing written; no lock is held, so set_pid stops at stage=token (lock_hand_off sets LOCK_PENDING_TOKEN, but no LOCK_HELD_PATH: release is none). The stage=arg branch for a readable record of T0 with pid≠$$ is driven in run-lock-pr1b3-4288.test.ts') },
   'handoff-pgid-self': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('stage=arg, 1') },
   'handoff-twice': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('stage=arg, 1') },
   'handoff-subshell': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('stage=arg, 1') },
@@ -1271,7 +1271,7 @@ describe('#4288 PR1b table A, driven: run-lock.ts and run-lock.sh over the reach
   let procs: Procs;
   const outcomes = new Map<string, Outcome>();
 
-  const rowCtx = (row: RowA, dir: string, self: Self, ownToken: string, g1: boolean): FxCtx => ({
+  const rowCtx = (row: RowA, dir: string, self: Self, ownToken: string, g1: boolean, asideNamer?: string): FxCtx => ({
     lockDir: path.join(dir, 'lock'),
     queueDir: path.join(dir, 'lock.queue'),
     procs,
@@ -1279,6 +1279,8 @@ describe('#4288 PR1b table A, driven: run-lock.ts and run-lock.sh over the reach
     ownToken,
     g1,
     foreignToken: 'foreign-tok',
+    // an inheritor reads asides moved by another head: the name carries the recoverer's token, not the record's
+    ...(asideNamer ? { asideNamer } : {}),
   });
 
   function runTs(row: RowA, dir: string): Outcome {
@@ -1286,7 +1288,7 @@ describe('#4288 PR1b table A, driven: run-lock.ts and run-lock.sh over the reach
     const inheritedHandle = row.caller === 'ts-release-inherited';
     const release = row.caller === 'ts-release' || inheritedHandle;
     const ownToken = inherit || inheritedHandle ? 'inh' : release ? 'rel-tok' : 'new-tok-unused';
-    const ctx = rowCtx(row, dir, process.pid, ownToken, false);
+    const ctx = rowCtx(row, dir, process.pid, ownToken, false, inherit ? 'recoverer-tok' : undefined);
     const inj = injection(row.shape, row.pid, row.group, ctx);
     // The odd failures of the P shapes are the acquisition's; a release row's lock is made by a real acquisition first.
     if (release) inj.faults = [];
@@ -1315,7 +1317,7 @@ describe('#4288 PR1b table A, driven: run-lock.ts and run-lock.sh over the reach
     const g1 = row.caller === 'sh-release-held' || row.caller === 'sh-release-as-head' || row.caller === 'sh-release-unheld';
     const inherit = row.caller === 'sh-inherit';
     const ownToken = inherit ? 'inh' : row.caller === 'sh-acquire' ? 'unused-tok' : 'rel-tok';
-    const ctx = rowCtx(row, dir, '$$', ownToken, g1);
+    const ctx = rowCtx(row, dir, '$$', ownToken, g1, inherit ? 'recoverer-tok' : undefined);
     const inj = injection(row.shape, row.pid, row.group, ctx);
     if (!['sh-acquire', 'sh-inherit'].includes(row.caller)) inj.faults = [];
     const ops = shapeOps(row.shape, row.pid, row.group, ctx);
@@ -2128,6 +2130,34 @@ describe.skipIf(!HAS_UAT_TOOLS)('#4288 PR1b, the UAT flow driven by run-server.s
     REAL_SHELL_TEST_TIMEOUT_MS
   );
 
+  // M1 (the trap's reap of a child that ended by itself): bash also reaps a finished background child from SIGCHLD, so a
+  // missing `wait` leaves no zombie that anybody can observe. What is pinned instead: a server that is alive but never
+  // listens is stopped by the trap (TERM, then reaped: no zombie is left), the state says failed and the lock is released;
+  // and the two lines of up_on_exit that make that reading explicit are still there (a guard against dropping them).
+  it(
+    'up trap, a server that never listens: --wait-listen runs out, the trap stops it and it is not left as a zombie; failed, lock released',
+    async () => {
+      const hangJs = path.join(root, 'hang.js');
+      fs.writeFileSync(hangJs, "require('fs').writeFileSync(require('path').join(require('path').dirname(process.env.CM_DB_PATH), 'started'), String(process.pid)); setInterval(() => {}, 1 << 30);\n");
+      const port = await freePort();
+      const up = script(upArgs(port, runDir, '2'), { CM_UAT_SERVER_ENTRY: hangJs });
+      expect(up.status).toBe(1);
+      expect(stateOf().status).toBe('failed');
+      const server = Number(stateOf().server_pid);
+      expect(server).toBeGreaterThan(1);
+      expect(spawnSync('ps', ['-o', 'stat=', '-p', String(server)], { encoding: 'utf8' }).stdout.trim()).toBe('');
+      expect(fs.existsSync(lockDir)).toBe(false);
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it('up_on_exit reaps a server that ended by itself before down’s procedure runs (the explicit reap is kept)', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '../../../../scripts/uat/run-server.sh'), 'utf8');
+    const body = src.slice(src.indexOf('up_on_exit() {'), src.indexOf('down_procedure "$UP_STATE" t1'));
+    expect(body).toContain('run_lock_reap_if_ended "$UP_SERVER_PID"');
+    expect(body).toContain('DOWN_REAP_PID=$UP_SERVER_PID');
+  });
+
   // ------------------------------------------------------------------ table D2
 
   it(
@@ -2250,6 +2280,7 @@ describe('#4288 PR1b, daily.sh hands the lock to run.ts’s process group (§4.5
       path.join(root, 'bin', 'npx'),
       `#!/bin/bash
 { echo "TOKEN=$CM_RUN_LOCK_TOKEN"; echo "PID=$$"; echo "PGID=$(ps -o pgid= -p $$ | tr -d ' ')"; cat "$CM_RUN_LOCK_DIR/owner"; } > "$FAKE_OUT"
+if [ -n "\${FAKE_LEAVE:-}" ]; then sleep 3600 >/dev/null 2>&1 </dev/null & echo $! > "$FAKE_LEAVE"; exit \${FAKE_EXIT:-0}; fi
 if [ -n "\${FAKE_WAIT:-}" ]; then exec sleep 3600; fi
 exit \${FAKE_EXIT:-0}
 `,
@@ -2331,13 +2362,39 @@ exit \${FAKE_EXIT:-0}
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 
-  it('daily ack: a child that cannot make its receipt ends without exec: exit 2 (handoff-failed stage=ack is run.ts not starting)', () => {
+  it('daily ack: a child that cannot make its receipt ends without exec (75): exit 2, handoff-failed stage=ack, one sync line, a report that says why', () => {
+    const report = path.join(root, 'report.json');
     const result = daily({ CM_VERIFY_TEST_OBS_FAULT: 'handoff-ack=EIO' });
-    // the child ends (75) before it execs: daily.sh waits for it and its exit code is the child's
+    // table D daily × ack: the child ends (75) before it execs; daily.sh does not pass 75 on, it says why
     expect(fs.existsSync(fakeOut)).toBe(false);
-    expect(result.status).toBe(75);
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stdout).toContain('reason=handoff-failed stage=ack');
+    expect(result.stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC '))).toHaveLength(1);
+    const written = JSON.parse(fs.readFileSync(report, 'utf8'));
+    expect(written.sync.status).toBe('failed');
+    expect(written.sync.reason).toBe('handoff-failed stage=ack');
     expect(fs.existsSync(lockDir)).toBe(false);
   });
+
+  it('(E) run.ts ends but leaves a member in its group: daily.sh drains the group, so the lock is released and the exit code is run.ts’s', async () => {
+    const isAlive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const member = path.join(root, 'member.pid');
+    const result = daily({ FAKE_LEAVE: member, FAKE_EXIT: '4' });
+    expect(result.status, result.stderr).toBe(4);
+    const pid = Number(fs.readFileSync(member, 'utf8').trim());
+    expect(pid).toBeGreaterThan(1);
+    const end = Date.now() + 15_000;
+    while (isAlive(pid) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(isAlive(pid)).toBe(false);
+    expect(fs.existsSync(lockDir)).toBe(false);
+  }, REAL_SHELL_TEST_TIMEOUT_MS);
 
   it('TERM while run.ts runs (EXIT path F): its group is stopped, the lock is released, exit 143', async () => {
     const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], {

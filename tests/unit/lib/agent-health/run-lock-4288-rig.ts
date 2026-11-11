@@ -80,11 +80,18 @@ export interface FxCtx {
   /** G shapes: the caller's record carries `<ownToken>-g<pgid>` (D12 / D5 callers) instead of ownToken (inheritors) */
   g1: boolean;
   foreignToken: string;
+  /**
+   * The token of whoever moved the record aside. A lock is moved aside by the head that recovers it, under the
+   * recoverer's token (`<lock>.gone-<recoverer token>-<serial>`, design §2.7 / F4), not under the owner's: the
+   * owner's token is inside the record. Unset: the owner's own token names it (the releaser clearing its own
+   * aside, D5). An inheritance row sets it, so the name and the record's token differ as in production.
+   */
+  asideNamer?: string;
 }
 
 export const recordHost = os.hostname();
 
-const asideOf = (ctx: FxCtx, token: string): string => `${ctx.lockDir}.gone-${token}-1`;
+const asideOf = (ctx: FxCtx, token: string): string => `${ctx.lockDir}.gone-${ctx.asideNamer ?? token}-1`;
 
 /** The files that make a record shape (design §2.1) with the pid and G observations given. */
 export function shapeOps(shape: string, pidObs: Obs, gObs: Obs | null, ctx: FxCtx): Op[] {

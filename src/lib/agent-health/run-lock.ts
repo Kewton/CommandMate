@@ -178,7 +178,8 @@ interface Hooks {
  * D8: a live holder under the inherited token is this caller's own. The owner is read once; the judgement is
  * the holder's (pid first, and the group only when the pid is gone), so an inheritor in the record's group
  * keeps a group-named record alive. While `<lock>` is missing, a moved-aside record of the same token that is
- * alive is inherited too (the head that moved it aside is putting it back). Gone or unknown is not inherited:
+ * alive is inherited too (the head that moved it aside is putting it back; the aside's name carries the
+ * recoverer's token, so the token of the record inside decides). Gone or unknown is not inherited:
  * the ordinary acquisition recovers a gone holder's lock, and refuses an unknown one.
  */
 function isInherited(dir: string, token: string, obs: Observer): boolean {
@@ -189,9 +190,11 @@ function isInherited(dir: string, token: string, obs: Observer): boolean {
   const base = path.basename(dir);
   const listed = obs.list('inherit-list', path.dirname(dir));
   if (listed.state !== 'listed') return false;
-  const prefix = `${base}.gone-${token}-`;
+  // A lock is moved aside under the recoverer's token (`<lock>.gone-<recoverer token>-<serial>`, §2.7), not the
+  // owner's: every well-formed aside is read and the token that counts is the one inside the record (as run_lock_inherits).
+  const prefix = `${base}.gone-`;
   for (const name of listed.names) {
-    if (!name.startsWith(prefix) || !GONE_SUFFIX_PATTERN.test(name.slice(`${base}.gone-`.length))) continue;
+    if (!name.startsWith(prefix) || !GONE_SUFFIX_PATTERN.test(name.slice(prefix.length))) continue;
     const moved = obs.owner('inherit-gone-owner', path.join(path.dirname(dir), name));
     if (moved.state === 'record' && moved.owner.token === token && holderState(moved.owner, { host, obs }).state === 'alive') return true;
   }
@@ -252,9 +255,6 @@ export function acquireRunLock(options: AcquireRunLockOptions): RunLockResult {
   const env = options.env ?? process.env;
   const dir = runLockDir(env);
   const fail = (error: string): RunLockResult => ({ ok: false, dir, error });
-  if (options.pid !== undefined && options.pid !== process.pid) {
-    return fail(`run-lock: pid ${options.pid} is not this process (${process.pid}): the record's pid must be the caller itself`);
-  }
   const token = options.token ?? `${options.label}-${process.pid}-${Math.random().toString(16).slice(2, 10)}`;
   if (!TOKEN_PATTERN.test(token)) return fail(`run-lock: a token must be [A-Za-z0-9-]+: ${JSON.stringify(token)}`);
   if (options.label.includes('\n')) return fail('run-lock: a label must not contain a newline');
@@ -281,7 +281,8 @@ export function acquireRunLock(options: AcquireRunLockOptions): RunLockResult {
       ownerCodec: KV_CODEC,
       ownerlessGraceMs: OWNERLESS_GRACE_MS,
       token,
-      ownerPid: process.pid,
+      // I1-b: the section refuses a pid that is not this process before anything is made (no check of our own)
+      ownerPid: options.pid ?? process.pid,
       ownerFields: { label: options.label },
       hooks: { now: hooks.now, pidAlive: hooks.pidAlive, kill: hooks.kill, fault: options.fault },
     } as Parameters<typeof acquireMachineLockSync>[1]);
@@ -290,6 +291,9 @@ export function acquireRunLock(options: AcquireRunLockOptions): RunLockResult {
     return fail(`ロックを作れない（${dir}）: ${(error as Error).message}`);
   }
   if (!handle.acquired) {
+    if (handle.unknown?.point === 'owner-pid') {
+      return fail(`run-lock: pid ${options.pid ?? process.pid} is not this process (${process.pid}): the record's pid must be the caller itself`);
+    }
     let unknown = handle.unknown ? `cannot tell: point=${handle.unknown.point} path=${handle.unknown.path} errno=${handle.unknown.code}` : null;
     // A ticket ahead whose pid cannot be observed (EPERM) is not "held": nobody can tell whether it is alive.
     const ahead = handle.heldBy?.match(/^queue ticket .*\(pid (\d+) on /);
