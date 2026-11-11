@@ -19,9 +19,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import * as H from './lock-owner-atomic-4288-harness';
+import { acquireMachineLock } from '@/lib/verification/machine-lock';
+import { scanRawCalls } from './lock-observation-scan-4288';
 
 // The harness imports machine-lock.ts, which imports the logger: kept quiet here (as the table's file does).
 vi.mock('@/lib/logger', () => {
@@ -250,5 +253,111 @@ describe('item 10 (PM Claude P3-10): lock_obs_create\'s exit-code bands hold for
     // and the caller's case decodes each band with these bases
     for (const base of [10, 40, 70, 85, 100]) expect(source).toContain(`$(( la_rc - ${base} ))`);
     for (const base of [10, 40, 85]) expect(source).toContain(`return $(( ${base} + LEI_INDEX ))`);
+  });
+});
+
+describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2, codex P2): a clean-up delete that fails after the lock was taken never throws and never strands the lock', () => {
+  const failing = (code: string) => {
+    throw Object.assign(new Error(`${code}: injected`), { code });
+  };
+  // markDone's rename of the {done:true} record and every delete of a ticket temporary (.t- / .d-) fail.
+  const inject = (): void => {
+    const rename = fsMod.renameSync;
+    const rm = fsMod.rmSync;
+    vi.spyOn(fsMod, 'renameSync').mockImplementation((a, b) => (path.basename(String(a)).startsWith('.d-') ? failing('EIO') : rename(a, b)));
+    vi.spyOn(fsMod, 'rmSync').mockImplementation((p, o) => (/\/\.[td]-/.test(String(p)) ? failing('EACCES') : rm(p, o)));
+    // The TS module reads `fs` through its named ESM exports: carry the spies over to them.
+    syncBuiltinESMExports();
+  };
+  const restore = (): void => {
+    vi.restoreAllMocks();
+    syncBuiltinESMExports();
+  };
+
+  it('sync: takeTicket\'s finally and retire → markDone fail to delete → acquired, the lock held, then released', () => {
+    const r = freshRoot();
+    const warnings: string[] = [];
+    let lock: ReturnType<typeof lockSync.acquireMachineLockSync> | 'threw' = 'threw';
+    inject();
+    try {
+      lock = lockSync.acquireMachineLockSync('x', { lockPath: H.lockPathIn(r), timeoutMs: 0, pollMs: 20, warn: (l: string) => warnings.push(l) });
+    } catch {
+      lock = 'threw';
+    } finally {
+      restore();
+    }
+    expect(lock === 'threw' ? 'threw' : lock.acquired).toBe(true);
+    expect(fs.existsSync(path.join(H.lockPathIn(r), 'owner'))).toBe(true);
+    expect(warnings.join('\n')).toMatch(/machine-lock-cleanup-left \S+\/\.t-\S+ \(EACCES; /);
+    expect(warnings.join('\n')).toMatch(/machine-lock-cleanup-left \S+\/\.d-\S+ \(EACCES; /);
+    expect((lock as { release: () => string }).release()).toBe('released');
+    expect(fs.existsSync(H.lockPathIn(r))).toBe(false);
+  });
+
+  it('TS: takeTicket\'s finally and retire → markDone fail to delete → acquired, the lock held, then released', async () => {
+    const r = freshRoot();
+    let result: Awaited<ReturnType<typeof acquireMachineLock>> | 'threw' = 'threw';
+    inject();
+    try {
+      result = await acquireMachineLock('x', { root: r, timeoutMs: 0, pollIntervalMs: 20 });
+    } catch {
+      result = 'threw';
+    } finally {
+      restore();
+    }
+    expect(result === 'threw' ? 'threw' : result.acquired).toBe(true);
+    const lockPath = path.join(r, 'x.lock');
+    expect(fs.existsSync(path.join(lockPath, 'owner'))).toBe(true);
+    const logs = ((globalThis as { __pr1afLogs?: string[] }).__pr1afLogs ?? []).join('\n');
+    expect(logs).toMatch(/machine-lock-cleanup-left .*\/\.t-.*"code":"EACCES"/);
+    expect(logs).toMatch(/machine-lock-cleanup-left .*\/\.d-.*"code":"EACCES"/);
+    (result as { handle?: { release: () => void } }).handle?.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('negative control: with nothing injected, both take and release as before and name nothing left', async () => {
+    const r = freshRoot();
+    const warnings: string[] = [];
+    const lock = lockSync.acquireMachineLockSync('x', { lockPath: H.lockPathIn(r), timeoutMs: 0, pollMs: 20, warn: (l: string) => warnings.push(l) });
+    expect(lock.acquired).toBe(true);
+    expect(lock.release()).toBe('released');
+    const t = await acquireMachineLock('y', { root: r, timeoutMs: 0, pollIntervalMs: 20 });
+    expect(t.acquired).toBe(true);
+    if (t.acquired) t.handle.release();
+    expect(warnings.join('\n')).not.toContain('cleanup-left');
+    expect(((globalThis as { __pr1afLogs?: string[] }).__pr1afLogs ?? []).join('\n')).not.toMatch(/cleanup-left .*\/y\.queue/);
+    expect([fs.existsSync(H.lockPathIn(r)), fs.existsSync(path.join(r, 'y.lock'))]).toEqual([false, false]);
+  });
+});
+
+describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has one place in each JS implementation', () => {
+  it.each([
+    ['sync', 'scripts/orchestrate/machine-lock-sync.mjs'],
+    ['ts', 'src/lib/verification/machine-lock.ts'],
+  ] as const)('%s: every raw rmSync is rmQuiet\'s (one call)', (impl, file) => {
+    const found = [...scanRawCalls(impl, fs.readFileSync(path.join(REPO, file), 'utf8'))].filter(([k]) => k.endsWith('|rmSync'));
+    expect(found).toEqual([['rmQuiet|rmSync', 1]]);
+  });
+
+  it('sync release: a delete of the own <lock> that fails is named and answers deferred (not thrown); a second call releases', () => {
+    const r = freshRoot();
+    const warnings: string[] = [];
+    const lock = lockSync.acquireMachineLockSync('x', { lockPath: H.lockPathIn(r), timeoutMs: 0, pollMs: 20, warn: (l: string) => warnings.push(l) });
+    expect(lock.acquired).toBe(true);
+    vi.spyOn(fsMod, 'rmSync').mockImplementation(() => {
+      throw Object.assign(new Error('EBUSY: injected'), { code: 'EBUSY' });
+    });
+    let first: string = 'threw';
+    try {
+      first = lock.release();
+    } catch {
+      first = 'threw';
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(first).toBe('deferred');
+    expect(warnings.join('\n')).toMatch(/machine-lock-release-failed \S+ \(EBUSY; /);
+    expect(lock.release()).toBe('released');
+    expect(fs.existsSync(H.lockPathIn(r))).toBe(false);
   });
 });

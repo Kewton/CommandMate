@@ -646,6 +646,25 @@ function readQueue(queueDir: string, obs: Observer): { entries: QueueEntry[]; un
   };
 }
 
+/**
+ * The one place a clean-up delete runs (#4288 PR1a-f impl-3): a ticket tmp, a used ticket, a
+ * moved-aside directory, the own <lock> at release. Never throws — `force` quiets ENOENT only, so an
+ * EACCES / EIO / EBUSY is caught here — and so never writes over the caller's answer or exception.
+ * With `what`, a failure is logged as `machine-lock-cleanup-left`. The errno, or null when removed or
+ * gone already.
+ */
+function rmQuiet(target: string, o: { recursive?: boolean; what?: string } = {}): string | null {
+  try {
+    rmSync(target, { recursive: o.recursive === true, force: true });
+    return null;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    const errno = typeof code === 'string' ? code : 'EUNKNOWN';
+    if (o.what) logger.warn('machine-lock-cleanup-left', { path: target, code: errno, what: o.what });
+    return errno;
+  }
+}
+
 /** Mark a ticket used, if it is still `token`'s, by renaming a `{done:true}` record over it. */
 function markDone(file: string, token: string): boolean {
   const current = readJson(file);
@@ -656,7 +675,7 @@ function markDone(file: string, token: string): boolean {
     renameSync(tmp, file);
     return true;
   } catch {
-    rmSync(tmp, { force: true });
+    rmQuiet(tmp, { what: 'the tmp of a ticket marked used' });
     return false;
   }
 }
@@ -698,7 +717,8 @@ function takeTicket(
     }
     return null;
   } finally {
-    rmSync(tmp, { force: true });
+    // A failed delete is named, never thrown over the number: a published ticket has to reach `mine`.
+    rmQuiet(tmp, { what: 'the tmp of a ticket' });
   }
 }
 
@@ -709,7 +729,7 @@ function collectGarbage(queueDir: string, now: number): void {
   for (const n of numbers) {
     if (n >= max) continue;
     const file = join(queueDir, machineLockTicketName(n));
-    if (readJson(file)?.done === true) rmSync(file, { force: true });
+    if (readJson(file)?.done === true) rmQuiet(file, { what: 'a used ticket' });
   }
   let names: string[];
   try {
@@ -720,7 +740,7 @@ function collectGarbage(queueDir: string, now: number): void {
   for (const name of names.filter((entry) => entry.startsWith('.t-') || entry.startsWith('.d-'))) {
     const file = join(queueDir, name);
     try {
-      if (now - statSync(file).mtimeMs > TEMP_MAX_AGE_MS) rmSync(file, { force: true });
+      if (now - statSync(file).mtimeMs > TEMP_MAX_AGE_MS) rmQuiet(file, { what: 'an old ticket tmp' });
     } catch {
       // gone meanwhile
     }
@@ -917,7 +937,7 @@ function moveOwnerIn(ctx: GoneContext, gone: string): 'restored' | 'absent' | 'r
   const moved = ctx.obs.link('restore-rename', join(gone, OWNER_FILE), join(ctx.lockPath, OWNER_FILE));
   if (moved.state === 'linked') {
     ctx.onRecover?.('restore-owner');
-    rmSync(gone, { recursive: true, force: true });
+    rmQuiet(gone, { recursive: true, what: 'the moved-aside directory after the put-back' });
     return 'restored';
   }
   if (moved.state === 'absent') return 'absent';
@@ -975,7 +995,7 @@ function reclaimGone(ctx: GoneContext, gone: string, token: string, takeBackHalf
   if (ctx.obs.rename('reclaim-rename', gone, mine).state !== 'moved') return { kept: false };
   const moved = ctx.obs.owner('reclaim-owner', mine);
   if (moved.state === 'record' && moved.owner.token === token) {
-    rmSync(mine, { recursive: true, force: true });
+    rmQuiet(mine, { recursive: true, what: 'the own moved-aside record judged gone' });
     logger.warn('machine-lock-gone-recovered', { gone, pid: moved.owner.pid });
   }
   return { kept: false };
@@ -1054,7 +1074,7 @@ function reclaimEmptyOwner(
   ctx.onRecover?.('empty-owner-moved');
   const after = ctx.obs.lstat('reclaim-owner', join(aside, OWNER_FILE));
   if (empty(after) && now - after.mtimeMs > MACHINE_LOCK_EMPTY_OWNER_GRACE_MS) {
-    rmSync(aside, { recursive: true, force: true });
+    rmQuiet(aside, { recursive: true, what: 'the own moved-aside <lock> of an old empty owner' });
     logger.warn('machine-lock-empty-owner-removed', { lockPath: ctx.lockPath, ageMs: Math.round(now - st.mtimeMs) });
     return { state: 'removed' };
   }
@@ -1091,7 +1111,7 @@ function breakStale(
   onRecover?.('moved');
   const moved = obs.owner('recover-owner', gone);
   if (moved.state === 'record' && moved.owner.token === owner.token) {
-    rmSync(gone, { recursive: true, force: true });
+    rmQuiet(gone, { recursive: true, what: 'the own moved-aside record judged gone' });
     logger.warn('machine-lock-broken-stale', { lockPath, pid: owner.pid });
     return 'recovered';
   }
@@ -1114,7 +1134,7 @@ function breakStale(
   }
   // ENOENT: the moved lock had no owner — a new writer's temporaries only (its link then answers ENOENT).
   if (back.state === 'linked') onRecover?.('restore-owner');
-  rmSync(gone, { recursive: true, force: true });
+  rmQuiet(gone, { recursive: true, what: 'the moved-aside directory after the put-back' });
   return 'restored';
 }
 
@@ -1285,14 +1305,8 @@ export async function acquireMachineLock(
                       cleanupOwnGone(ctx, token);
                       return;
                     }
-                    try {
-                      rmSync(lockPath, { recursive: true, force: true });
-                    } catch (error) {
-                      logger.warn('machine-lock-release-failed', {
-                        lockPath,
-                        error: error instanceof Error ? error.message : String(error),
-                      });
-                    }
+                    const code = rmQuiet(lockPath, { recursive: true });
+                    if (code !== null) logger.warn('machine-lock-release-failed', { lockPath, error: code });
                   },
                 },
               };
