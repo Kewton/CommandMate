@@ -339,7 +339,7 @@ describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has o
     expect(found).toEqual([['rmQuiet|rmSync', 1]]);
   });
 
-  it('sync release: a delete of the own <lock> that fails is named and answers deferred (not thrown); a second call releases', () => {
+  it('sync release: a delete of the own <lock> that fails is named once and thrown (never deferred); the <lock> and its owner stay', () => {
     const r = freshRoot();
     const warnings: string[] = [];
     const lock = lockSync.acquireMachineLockSync('x', { lockPath: H.lockPathIn(r), timeoutMs: 0, pollMs: 20, warn: (l: string) => warnings.push(l) });
@@ -347,7 +347,7 @@ describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has o
     vi.spyOn(fsMod, 'rmSync').mockImplementation(() => {
       throw Object.assign(new Error('EBUSY: injected'), { code: 'EBUSY' });
     });
-    let first: string = 'threw';
+    let first: string = 'returned';
     try {
       first = lock.release();
     } catch {
@@ -355,9 +355,10 @@ describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has o
     } finally {
       vi.restoreAllMocks();
     }
-    expect(first).toBe('deferred');
-    expect(warnings.join('\n')).toMatch(/machine-lock-release-failed \S+ \(EBUSY; /);
-    expect(lock.release()).toBe('released');
-    expect(fs.existsSync(H.lockPathIn(r))).toBe(false);
+    expect(first).toBe('threw');
+    expect(warnings.filter((l) => /machine-lock-release-failed \S+ \(EBUSY; /.test(l))).toHaveLength(1);
+    expect(warnings.join('\n')).not.toMatch(/deferred/);
+    expect(fs.existsSync(H.lockPathIn(r))).toBe(true);
+    expect(fs.existsSync(path.join(H.lockPathIn(r), 'owner'))).toBe(true);
   });
 });

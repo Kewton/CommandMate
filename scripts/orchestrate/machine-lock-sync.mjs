@@ -1267,14 +1267,12 @@ export function acquireMachineLockSync(name, options) {
                   }
                   released = true;
                   if (mine) {
-                    // A delete that fails (EACCES / EIO / EBUSY) is named, not thrown: the record is still
-                    // this acquisition's, so the release may be called again ('deferred', as TS's
-                    // machine-lock-release-failed).
+                    // A delete that fails (EACCES / EIO / EBUSY) is named once and thrown, as before: the
+                    // <lock> and its owner stay, and no 'deferred' is answered from here (#4288 PR1a-f impl-4).
                     const code = rmQuiet(lockPath, { recursive: true });
                     if (code === null) return 'released';
-                    released = false;
                     warn(`machine-lock-release-failed ${lockPath} (${code}; the record is still this acquisition's)`);
-                    return 'deferred';
+                    throw Object.assign(new Error(`${code}: cannot remove ${lockPath}`), { code });
                   }
                   if (current.state === 'unknown') {
                     warn(`machine-lock-release-deferred ${lockPath} point=release-owner errno=${current.code}`);

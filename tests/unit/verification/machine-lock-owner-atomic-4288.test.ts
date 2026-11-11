@@ -1903,7 +1903,7 @@ function leftForm(lock: string): string {
 }
 
 /** Kill an acquisition of `impl` at `pause` (a real SIGKILL of the process that took it). */
-async function killAt(impl: Impl, pause: Pause, r: string, who: 'acquire-head-grace' | 'acquire-head-nograce' = 'acquire-head-nograce'): Promise<void> {
+async function killAt(impl: Impl, pause: Pause, r: string, who: 'acquire-head-grace' | 'acquire-head-nograce' = 'acquire-head-nograce'): Promise<number> {
   const lock = lockOfRoot(r);
   const dir = fs.mkdtempSync(path.join(r, 'kill-'));
   const reached = path.join(dir, `${pause}.reached`);
@@ -1953,7 +1953,12 @@ ${call};
   // The pid the record names (pm-return-4288-pr1af-impl-2 item 3): under tsx the writer is the child's
   // child, which stays a zombie — `kill -0` answers alive — until launchd reaps it, after the exit
   // awaited above. The rows that judge a published record by its pid wait for ESRCH first.
-  if (/^\d+$/.test(written)) await waitEsrch(Number(written));
+  // The number of ESRCH waits passed (sync / ts: 1; bash: 0) — the K rows assert it, so dropping the wait is red.
+  if (/^\d+$/.test(written)) {
+    await waitEsrch(Number(written));
+    return 1;
+  }
+  return 0;
 }
 
 /** Wait (up to 30 s) until `pid` answers ESRCH to kill(pid, 0): exited and reaped. */
@@ -2013,7 +2018,9 @@ describe('Issue #4288 PR1a-f behaviour K: an acquisition killed at each point (d
   for (const k of KILL_ROWS) {
     it(`${k.impl} ${k.point} (pause ${k.pause}): leaves ${k.left}; graced ${k.byGraced}, no grace ${k.byNograce}`, async () => {
       const r = freshRoot();
-      await killAt(k.impl, k.pause, r);
+      const esrchWaits = await killAt(k.impl, k.pause, r);
+      // sync / ts: the record's pid is read from the signal file and its ESRCH awaited at least once.
+      if (k.impl !== 'bash') expect(esrchWaits, `${k.impl} ${k.pause}: ESRCH waits passed`).toBeGreaterThanOrEqual(1);
       // I1: whatever the point, never an empty or half owner.
       expect(leftForm(lockOfRoot(r))).toBe(k.left);
       if (k.byGraced !== 'no-grace-caller') {
