@@ -16,7 +16,7 @@ import { describe, it, expect } from 'vitest';
 import { CommanderError, type Command } from 'commander';
 import { buildProgram } from '../../../../src/cli/program';
 import { CLOSE_WHEN_ALLOWED, CLOSE_WHEN_DEFAULTS, CLOSE_WHEN_TYPES, parseCloseWhen } from '../../../../src/lib/mem/close-when';
-import { MEM_KINDS, type MemKind } from '../../../../src/types/mem';
+import { MEM_EXIT_BY_CODE, MEM_KINDS, type MemKind } from '../../../../src/types/mem';
 import { CLOSE_WHEN_FORMS, handoffRequestText } from '../../../../src/lib/handoff/template';
 
 const REQUEST = 'req-g9-0002';
@@ -29,7 +29,8 @@ function kindLine(kind: string): string | undefined {
 }
 
 function exampleOf(kind: string): string | undefined {
-  return /例: --close-when (\S+)/.exec(kindLine(kind) ?? '')?.[1];
+  const raw = /例: --close-when (\S+)/.exec(kindLine(kind) ?? '')?.[1];
+  return raw === undefined ? undefined : fillForm(raw);
 }
 
 interface Seen {
@@ -63,17 +64,38 @@ async function parseThroughCli(words: string[]): Promise<{ seen: Seen[]; error: 
   }
 }
 
-/** What the agent would run for a kind: the text's add line, its kind filled, with or without the example. */
-function proposeWords(kind: string, closeWhen: string | undefined): string[] {
-  const words = ['handoff', 'propose', '--request', REQUEST, 'add', '--kind', kind, '--text', 'x'];
-  return closeWhen === undefined ? words : [...words, '--close-when', closeWhen];
+/** Placeholders of a form, filled as an agent would. */
+function fillForm(value: string): string {
+  return value
+    .replace('<n>', '12')
+    .replace('<name>', 'feature/x')
+    .replace('<into>', 'develop')
+    .replace('<ISO8601+09:00>', '2026-11-11T09:00:00+09:00')
+    .replace('<id>', 'a1');
 }
 
-/** The exit the agent sees: 0 when the CLI parses it and the server's rule takes the condition. */
+/** The text's own `- 追加:` command, its kind filled; `--close-when <cond>` taken out or given the value. */
+function proposeWords(kind: string, closeWhen: string | undefined): string[] {
+  const line = TEXT.split('\n').find((l) => l.startsWith('- 追加:'));
+  const command = /commandmate (.*)$/.exec(line ?? '')![1];
+  const words = (command.match(/"[^"]*"|\S+/g) ?? []).map((w) => (w.startsWith('"') ? w.slice(1, -1) : w));
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    if (words[i] === '--close-when') {
+      if (closeWhen !== undefined) out.push('--close-when', closeWhen);
+      i++;
+    } else {
+      out.push(words[i].replace('<kind>', kind).replace('…', 'x'));
+    }
+  }
+  return out;
+}
+
+/** The exit the agent sees: the CLI's parse (commander: 2), else the server's refusal mapped as the CLI maps it. */
 async function exitOf(kind: string, closeWhen: string | undefined): Promise<number> {
   const { seen, error } = await parseThroughCli(proposeWords(kind, closeWhen));
   if (error !== null || seen.length !== 1) return 2;
-  return parseCloseWhen(kind as MemKind, seen[0].closeWhen).ok ? 0 : 2;
+  return parseCloseWhen(kind as MemKind, seen[0].closeWhen).ok ? 0 : MEM_EXIT_BY_CODE.invalid_close_when;
 }
 
 describe('[#4227 G9 PR4] the request text says which kinds need --close-when, and the values that are taken', () => {
@@ -82,6 +104,7 @@ describe('[#4227 G9 PR4] the request text says which kinds need --close-when, an
     expect(line).toBeDefined();
     const required = CLOSE_WHEN_DEFAULTS[kind] === null;
     expect(line).toContain(required ? '必須' : '省略可');
+    if (required) expect(line).toContain(`終了コード ${MEM_EXIT_BY_CODE.invalid_close_when}`);
     expect(line).not.toContain(required ? '省略可' : '必須');
     const listed = /使える値: ([^。]+)。/.exec(line!)?.[1].split(' / ') ?? [];
     expect(listed).toEqual(CLOSE_WHEN_TYPES.filter((type) => CLOSE_WHEN_ALLOWED[kind].has(type)));
@@ -94,7 +117,7 @@ describe('[#4227 G9 PR4] the request text says which kinds need --close-when, an
   });
 
   it.each(KINDS.filter((kind) => CLOSE_WHEN_DEFAULTS[kind] === null))('%s: (negative) required: without --close-when it is refused', async (kind) => {
-    expect(await exitOf(kind, undefined)).toBe(2);
+    expect(await exitOf(kind, undefined)).toBe(MEM_EXIT_BY_CODE.invalid_close_when);
     expect(parseCloseWhen(kind, undefined)).toEqual({ ok: false, reason: 'required' });
   });
 
@@ -103,19 +126,14 @@ describe('[#4227 G9 PR4] the request text says which kinds need --close-when, an
   });
 
   it('(negative) a type the kind forbids is refused (the text lists only the allowed ones)', async () => {
-    expect(await exitOf('decision', 'manual')).toBe(2);
-    expect(await exitOf('note', 'issue:#12')).toBe(2);
+    expect(await exitOf('decision', 'manual')).toBe(MEM_EXIT_BY_CODE.invalid_close_when);
+    expect(await exitOf('note', 'issue:#12')).toBe(MEM_EXIT_BY_CODE.invalid_close_when);
   });
 
   it('every type has a form in the text, and the form (filled) is taken by a kind that allows it', () => {
     expect(Object.keys(CLOSE_WHEN_FORMS).sort()).toEqual([...CLOSE_WHEN_TYPES].sort());
     for (const type of CLOSE_WHEN_TYPES) {
-      const filled = CLOSE_WHEN_FORMS[type]
-        .replace('<n>', '12')
-        .replace('<name>', 'feature/x')
-        .replace('<into>', 'develop')
-        .replace('<ISO8601+09:00>', '2026-11-11T09:00:00+09:00')
-        .replace('<id>', 'a1');
+      const filled = fillForm(CLOSE_WHEN_FORMS[type]);
       const kind = KINDS.find((k) => CLOSE_WHEN_ALLOWED[k].has(type)) ?? 'now';
       expect(parseCloseWhen(kind, filled).ok).toBe(true);
     }
@@ -124,6 +142,21 @@ describe('[#4227 G9 PR4] the request text says which kinds need --close-when, an
   it('the deadline of the header is written with +09:00 (an agent read the UTC form as the wrong hour)', () => {
     expect(TEXT).toContain('期限=2026-11-10T09:05:00+09:00');
     expect(TEXT).not.toContain('Z]');
-    expect(exampleOf('waiting')).toMatch(/\+09:00$/);
+    expect(TEXT).toMatch(/at:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00/);
+  });
+
+  it('next / external examples do not close by time; at: is said to close by itself', () => {
+    for (const kind of ['next', 'external'] as const) expect(exampleOf(kind)).not.toMatch(/^at:/);
+    expect(TEXT).toContain('at: はその時刻に自動で閉じる');
+  });
+
+  it('required kinds carry no brackets around --close-when; the form line leaves out a type no propose kind takes', () => {
+    expect(TEXT).not.toContain('[--close-when');
+    const forms = TEXT.split('\n').find((l) => l.startsWith('- --close-when の値の形'))!;
+    expect(forms).not.toContain('replaced');
+    for (const type of CLOSE_WHEN_TYPES) {
+      const taken = KINDS.some((kind) => CLOSE_WHEN_ALLOWED[kind].has(type));
+      expect(forms.includes(CLOSE_WHEN_FORMS[type])).toBe(taken);
+    }
   });
 });

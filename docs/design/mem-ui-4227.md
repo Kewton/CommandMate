@@ -365,9 +365,9 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
 ```
 [CommandMate: 終了の前の引き継ぎの依頼 request=<id> 期限=<ISO8601+09:00>]
 このセッションを終える前に、mem の更新を「提案」として出してください。確定は人が画面で行います。
-- 追加:  commandmate handoff propose --request <id> add --kind <kind> --text "…" [--close-when <cond>]
-- kind=<kind>: --close-when は必須／省略可。使える値: … 例: --close-when …（waiting・next・external は必須。kind ごとに 1 行）
-- --close-when の値の形: manual / issue:#<n> / … / at:<ISO8601+09:00>
+- 追加:  commandmate handoff propose --request <id> add --kind <kind> --text "…" --close-when <cond>
+- kind=<kind>: --close-when は必須（付けないと終了コード 2）／省略可。使える値: … 例: --close-when …（kind ごとに 1 行。例の型は kind の意味で選ぶ）
+- --close-when の値の形: manual / issue:#<n> / … / at:<ISO8601+09:00>（propose の kind が取る型だけ。at: はその時刻に自動で閉じる）
 - 更新:  commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
 - close: commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
 - 終わったら: commandmate handoff done --request <id>
@@ -378,7 +378,7 @@ propose が失敗したら（終了コードが 0 以外）、done の前に直�
 - 送るのは画面（`worktreeApi` の送信、`brief:'skip'`）。サーバから `sendUserMessage` を呼ばない（§1 の送信の呼び出し元の表を変えない）。`skip` なので境界は動かない（終わる会話に brief を付けない）
 - Agent の端末にポップアップは出さない（Issue の「やらないこと」）。これは送信の本文で、端末の操作ではない
 - **雛形と CLI の一致（G9、G-PR1+G-PR2 の審判の UAT の差し戻し）**：46cbe7699 では雛形の `propose --request <id> add …` を CLI が `unknown option '--request'` で拒んだ（`--request` は操作のサブコマンドにしか無かった）。CLI を両方の形を受け付けるようにした（`propose` にも `--request` を置き、操作は自分のもの→`propose` のものの順に読む `handoffRequestOf`。どちらにも無ければ 2・何も送らない）。不変条件：**雛形（`handoffRequestText` の出力）と CLI の手引き（ja・en の `commandmate handoff` の行）の全コマンド行を、実際の `buildProgram()` が parse し、名指したコマンドと依頼の ID に届く**（`tests/unit/cli/commands/handoff-template-parse-4227.test.ts`。行は本文から抜き出すので、雛形に足した行も自動で対象になる）。
-- **雛形の `--close-when`（G9、G-PR3 の UAT の差し戻し 3）**：雛形が `[--close-when …]` と省略可に見せたが、waiting・next・external は必須で、Agent の初回の `propose` が exit 2 だった。kind ごとの必須・省略可と使える型を `lib/mem/close-when` の `CLOSE_WHEN_DEFAULTS`・`CLOSE_WHEN_ALLOWED`・`CLOSE_WHEN_TYPES` から組み（写さない）、型の書き方は `CLOSE_WHEN_FORMS`（型の追加はコンパイルで落ちる）。時刻は期限も例も `+09:00`（UTC 表記を Agent が取り違えた）。不変条件：**kind ごとの例の行を実際の `buildProgram()` と `parseCloseWhen` に通すと受理される**／必須の kind で外すと拒否される（`handoff-template-close-when-4227.test.ts`）。
+- **雛形の `--close-when`（G9、G-PR3 の UAT の差し戻し 3）**：雛形が `[--close-when …]` と省略可に見せたが、waiting・next・external は必須で、Agent の初回の `propose` が exit 2 だった。kind ごとの必須・省略可と使える型を `lib/mem/close-when` の `CLOSE_WHEN_DEFAULTS`・`CLOSE_WHEN_ALLOWED`・`CLOSE_WHEN_TYPES` から組み（写さない）、型の書き方は `CLOSE_WHEN_FORMS`（型の追加はコンパイルで落ちる）。時刻は期限も例も `+09:00`（UTC 表記を Agent が取り違えた）。PM レビュー後: 例の型は kind の意味で選ぶ表（`EXAMPLE_TYPE`。next・external・note は manual、`at:` は自動で閉じるので例にしない）、必須の kind の `--close-when` に括弧を付けない、「終了コード」は `MEM_EXIT_BY_CODE` から、値の形の行は propose の kind が取る型だけ。不変条件：**kind ごとの例の行を実際の `buildProgram()` と `parseCloseWhen` に通すと受理される**／必須の kind で外すと拒否される（`handoff-template-close-when-4227.test.ts`）。
 - **propose の失敗の後の done（G9、1 行の決定）**：CLI の parse の誤りはサーバに届かないので、done の時点で失敗した propose があったかはサーバに分からない。そこで **提案 0 件で done が届いた依頼（`reviewing`・`agentDoneAt` あり・提案 0）は、ダイアログに「提案が失敗していたなら届いていない。依頼し直すには『終了をやめる』→『終了する』」を出す**（`handoff-done-empty`、`SessionHandoffDialog-done-empty-4227.test.tsx`）。雛形にも「失敗したら done の前に直して出し直す・propose と done を 1 つのコマンドにつながない」を書いた。done の後の提案は今どおり `request_closed`（受け付けない）。
 
 ### 4.3 提案の置き場（v71、`src/lib/db/migrations/v71-mem-handoff.ts`）

@@ -15,7 +15,7 @@
  */
 
 import { CLOSE_WHEN_ALLOWED, CLOSE_WHEN_DEFAULTS, CLOSE_WHEN_TYPES } from '@/lib/mem/close-when';
-import { MEM_KINDS, type MemCloseWhenType, type MemKind } from '@/types/mem';
+import { MEM_EXIT_BY_CODE, MEM_KINDS, type MemCloseWhenType, type MemKind } from '@/types/mem';
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -38,32 +38,52 @@ export const CLOSE_WHEN_FORMS: Readonly<Record<MemCloseWhenType, string>> = {
   at: 'at:<ISO8601+09:00>',
 };
 
-/** An example the kind takes: a time when it may, else the first type it allows. */
-function exampleFor(kind: MemKind, deadline: Date): string {
-  const type = CLOSE_WHEN_ALLOWED[kind].has('at') ? 'at' : [...CLOSE_WHEN_TYPES].find((t) => CLOSE_WHEN_ALLOWED[kind].has(t))!;
-  return CLOSE_WHEN_FORMS[type].replace('<ISO8601+09:00>', jstIso(new Date(deadline.getTime() + DAY_MS)));
+type ProposeKind = Exclude<MemKind, 'now'>;
+
+/**
+ * The type each kind's example uses, chosen for what the kind means: `at:` closes the item by itself at that
+ * time, so only a kind that is "until a time" would use it. Typed over the kinds: a kind added fails to compile.
+ */
+const EXAMPLE_TYPE: Readonly<Record<ProposeKind, MemCloseWhenType>> = {
+  waiting: 'pr',
+  decision: 'issue',
+  next: 'manual',
+  external: 'manual',
+  note: 'manual',
+};
+
+/** The kinds a hand-off can propose (`now` is the agent's own, not proposed here). */
+const PROPOSE_KINDS = MEM_KINDS.filter((kind): kind is ProposeKind => kind !== 'now');
+
+function exampleFor(kind: ProposeKind): string {
+  return CLOSE_WHEN_FORMS[EXAMPLE_TYPE[kind]];
 }
 
-function kindLines(deadline: Date): string[] {
-  return MEM_KINDS.filter((kind) => kind !== 'now').map((kind) => {
+function kindLines(): string[] {
+  return PROPOSE_KINDS.map((kind) => {
     const fallback = CLOSE_WHEN_DEFAULTS[kind];
-    const rule = fallback === null ? '--close-when は必須（無いと propose は終了コード 2）' : `--close-when は省略可（省略すると ${fallback === 'promoted' ? '決定の既定' : fallback}）`;
+    const rule =
+      fallback === null
+        ? `--close-when は必須（付けないと propose は終了コード ${MEM_EXIT_BY_CODE.invalid_close_when}）`
+        : `--close-when は省略可（省略すると ${fallback === 'promoted' ? '決定の既定' : fallback}）`;
     const types = [...CLOSE_WHEN_TYPES].filter((type) => CLOSE_WHEN_ALLOWED[kind].has(type));
-    return `- kind=${kind}: ${rule}。使える値: ${types.join(' / ')}。例: --close-when ${exampleFor(kind, deadline)}`;
+    return `- kind=${kind}: ${rule}。使える値: ${types.join(' / ')}。例: --close-when ${exampleFor(kind)}`;
   });
 }
 
-function formsLine(): string {
-  return `- --close-when の値の形: ${[...CLOSE_WHEN_TYPES].map((type) => CLOSE_WHEN_FORMS[type]).join(' / ')}（<…> は埋める。時刻は +09:00 の形）`;
+function formsLine(deadline: Date): string {
+  const taken = [...CLOSE_WHEN_TYPES].filter((type) => PROPOSE_KINDS.some((kind) => CLOSE_WHEN_ALLOWED[kind].has(type)));
+  const at = jstIso(new Date(deadline.getTime() + DAY_MS));
+  return `- --close-when の値の形: ${taken.map((type) => CLOSE_WHEN_FORMS[type]).join(' / ')}（<…> は埋める。at: はその時刻に自動で閉じる。時刻は +09:00 の形で、例 at:${at}）`;
 }
 
 export function handoffRequestText(requestId: string, deadline: Date): string {
   return [
     `[CommandMate: 終了の前の引き継ぎの依頼 request=${requestId} 期限=${jstIso(deadline)}]`,
     'このセッションを終える前に、mem の更新を「提案」として出してください。確定は人が画面で行います。',
-    `- 追加:  commandmate handoff propose --request ${requestId} add --kind <kind> --text "…" [--close-when <cond>]`,
-    ...kindLines(deadline),
-    formsLine(),
+    `- 追加:  commandmate handoff propose --request ${requestId} add --kind <kind> --text "…" --close-when <cond>`,
+    ...kindLines(),
+    formsLine(deadline),
     `- 更新:  commandmate handoff propose --request ${requestId} update <itemId> --base-version <v> --text "…"`,
     `- close: commandmate handoff propose --request ${requestId} close <itemId> --base-version <v> [--reason "…"]`,
     `- 終わったら: commandmate handoff done --request ${requestId}`,
