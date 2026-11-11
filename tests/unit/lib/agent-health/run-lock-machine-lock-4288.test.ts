@@ -2,6 +2,9 @@
  * Issue #4288 PR1b — the tables of docs/design/run-lock-machine-lock-4288.md §2 (the upstream stage:
  * the table is written and reviewed before the implementation; "赤から緑にする" is the next contract).
  * Second upstream round: the cells answer the reviews of ee92499cd (pm-return-4288-upstream.md).
+ * Third upstream round (pm-return-4288-pr1b-upstream2.md 1–6): the inheritance of own-other / aside-own is
+ * reachable again (the cells of the first round), table C holds t1 by every result of D5, and the UAT
+ * trap reaps a leader that ended by itself before it runs down's procedure.
  *
  * What this file is now: the tables of §2 as typed data built from enumerations, so that a cell left
  * out is a type error (`satisfies`), and the invariants of §1 checked over every row (pure table
@@ -176,7 +179,6 @@ const noneResult = c('none', 'unchanged');
 
 const FRESH_TOKEN = '取得の token は毎回新しい（T0 は run_id・daily-$$-…・cleanup-$$-…・<label>-<pid>-<乱数>）ので、自分の token の記録は取得の前に無い';
 const NOT_THE_PID = '継ぐ者は記録の pid ではない（記録の pid は親の daily.sh か UAT のサーバー）';
-const INHERIT_T1 = '継ぐ者は daily の子（run.ts とその bash の子）だけで、子は go の後に始まる（I-7）ので見る記録は T1（pgid=G）。up・cleanup は CM_RUN_LOCK_TOKEN を消してから取る（§4.2）';
 const IN_G = '継ぐ者は G の中に居るので G は ESRCH にならず、T1 は gone と判定されない（退かされもしない）';
 const NO_PGID_IN_TS = 'TS（run-lock.ts）は pgid を書かない（D9 は bash の daily と UAT だけ）';
 const NODE_SELF = 'Node は自分の pid を観測しない（process.pid は呼び手そのもの。sync の release は pid の一致だけを見る）';
@@ -248,9 +250,13 @@ const TS_INHERIT = {
   unreadable: all(r('unknown')),
   corrupt: all(r('corrupt')),
   'own-self': all(never(NOT_THE_PID)),
-  'own-other': all(never(INHERIT_T1)),
+  // Reached (third round, PM Claude P2-1): run-lock-3359.test.ts:89-97 (TS, inherited), run-server-3359.test.ts:430-433
+  // (bash, GOT), and the morning of a deploy — an old daily.sh holds T0 with no pgid= and starts the new run.ts
+  // (lock-reservation-rest-4288.md §1.9). The new daily's child sees T1 (own-other-g), not this shape.
+  'own-other': by(c('inherited', 'unchanged'), c('recovered-acquired', 'mine'), r('unknown')),
   foreign: by(r('held'), c('recovered-acquired', 'mine'), r('unknown')),
-  'aside-own': all(never(INHERIT_T1)),
+  // D8's second sentence: while <lock> is missing, a live moved-aside record under the same token is inherited.
+  'aside-own': by(c('inherited', 'unchanged'), c('reclaimed-acquired', 'mine'), r('unknown')),
   'aside-foreign': by(r('aside', 'restored'), c('reclaimed-acquired', 'mine'), r('unknown', 'restored')),
   'own-self-g': gAll(never(NOT_THE_PID)),
   'own-self-selfg': gAll(never(NO_PGID_IN_TS)),
@@ -277,9 +283,13 @@ const SH_INHERIT = {
   unreadable: all(r('unknown')),
   corrupt: all(r('corrupt')),
   'own-self': all(never(NOT_THE_PID)),
-  'own-other': all(never(INHERIT_T1)),
+  // Reached (third round, PM Claude P2-1): run-lock-3359.test.ts:89-97 (TS, inherited), run-server-3359.test.ts:430-433
+  // (bash, GOT), and the morning of a deploy — an old daily.sh holds T0 with no pgid= and starts the new run.ts
+  // (lock-reservation-rest-4288.md §1.9). The new daily's child sees T1 (own-other-g), not this shape.
+  'own-other': by(c('inherited', 'unchanged'), c('recovered-acquired', 'mine'), r('unknown')),
   foreign: by(r('held'), c('recovered-acquired', 'mine'), r('unknown')),
-  'aside-own': all(never(INHERIT_T1)),
+  // D8's second sentence: while <lock> is missing, a live moved-aside record under the same token is inherited.
+  'aside-own': by(c('inherited', 'unchanged'), c('reclaimed-acquired', 'mine'), r('unknown')),
   'aside-foreign': by(r('aside', 'restored'), c('reclaimed-acquired', 'mine'), r('unknown', 'restored')),
   'own-self-g': gAll(never(NOT_THE_PID)),
   'own-self-selfg': gAll(rejected('handoff-pgid-self')),
@@ -657,17 +667,54 @@ const TABLE_C = {
   absent: { ...newForm('missing'), unrecorded: { none: thenD5('none', 'missing'), verified: NO_G, unverified: NO_G, unknown: NO_G } },
 } satisfies Record<RecordC, Record<Leader, Record<Members, DownCell>>>;
 
+/**
+ * t1 by D5's own result (third round, PM 決定 3 / Claude 5 P3-A): D5 reads the owner again as the head, so where
+ * down calls D5 on t1 the row of TABLE_C (released) is one of its results. The others: deferred (the leader did
+ * not end within STOP_WAIT after TERM, or a member came back into G), not-head (the queue stayed jammed for 10 s),
+ * unknown (the owner could not be read at D5's read), kept (a head recovered our T1 after G emptied and took it),
+ * missing (that head released it too). The keys are exactly the t1 cells of TABLE_C that call D5 (checked below).
+ */
+const T1_D5_OTHER = ['deferred', 'not-head', 'unknown', 'kept', 'missing'] as const satisfies readonly D5Result[];
+type T1D5Other = (typeof T1_D5_OTHER)[number];
+const t1ByD5 = (signals: Signals): Record<T1D5Other, DownCell> => ({
+  deferred: thenD5(signals, 'deferred'),
+  'not-head': thenD5(signals, 'not-head'),
+  unknown: thenD5(signals, 'unknown'),
+  kept: thenD5(signals, 'kept'),
+  missing: thenD5(signals, 'missing'),
+});
+const TABLE_C_T1_D5 = {
+  'alive-verified': { none: t1ByD5('leader'), verified: t1ByD5('leader+group'), unverified: t1ByD5('leader+group') },
+  dead: { none: t1ByD5('none'), verified: t1ByD5('group') },
+} satisfies Partial<Record<Leader, Partial<Record<Members, Record<T1D5Other, DownCell>>>>>;
+
 interface RowC {
   id: string;
   record: RecordC;
   leader: Leader;
   members: Members;
+  /** set on the rows of TABLE_C_T1_D5: D5's result is the row's axis, not the record's default */
+  d5Axis?: T1D5Other;
   cell: DownCell;
 }
 
-const ROWS_C: RowC[] = RECORDS_C.flatMap((record) =>
-  LEADERS.flatMap((leader) => MEMBERS.map((members) => ({ id: `${record}/${leader}/${members}`, record, leader, members, cell: TABLE_C[record][leader][members] })))
-);
+const ROWS_C: RowC[] = [
+  ...RECORDS_C.flatMap((record) =>
+    LEADERS.flatMap((leader) => MEMBERS.map((members) => ({ id: `${record}/${leader}/${members}`, record, leader, members, cell: TABLE_C[record][leader][members] })))
+  ),
+  ...Object.entries(TABLE_C_T1_D5).flatMap(([leader, byMembers]) =>
+    Object.entries(byMembers as Partial<Record<Members, Record<T1D5Other, DownCell>>>).flatMap(([members, byD5]) =>
+      T1_D5_OTHER.map((d5Axis) => ({
+        id: `t1/${leader}/${members}/d5-${d5Axis}`,
+        record: 't1' as const,
+        leader: leader as Leader,
+        members: members as Members,
+        d5Axis,
+        cell: (byD5 as Record<T1D5Other, DownCell>)[d5Axis],
+      }))
+    )
+  ),
+];
 
 // ================================================================ table D (§2.5, PM Claude P2-3)
 
@@ -691,7 +738,7 @@ type Release =
   | 'D12-needs-head-D5-released' // T1 (UAT: pid = server): G emptied, D12 needs-head, D5 released
   | 'D12-released-after-drain' // daily's T1 (pid = $$): G emptied, D12 released
   | 'D12-deferred' // the owner cannot be read: kept for the next head
-  | 'stop-then-D5'; // UAT after go: the trap runs down's procedure (table C, record t1)
+  | 'stop-then-D5'; // UAT after go: the trap first reaps a leader that ended by itself (wait; a zombie returns at once), then runs down's procedure (table C, record t1)
 
 type FailMsg = `handoff-failed stage=${string}` | 'state-write-failed' | 'server-exited' | 'run-exited';
 
@@ -699,7 +746,11 @@ type FailCell =
   | {
       kind: 'reach';
       record: 'T0' | 'T1' | 'unknown';
-      /** what the parent sends before it releases: pid only before the publish, -G (checked: leader alive and its pgid is G) after */
+      /**
+       * what the parent sends before it releases: pid only before the publish (state-write / group / tmp / mv);
+       * 'group' after it — on every such row (verify, verify-unreadable, signal) -G only when the leader is alive
+       * and ps -o pgid= says G, else the pid only (I-10). 'none': the child ends by itself and is reaped by wait.
+       */
       signals: 'pid' | 'group' | 'none';
       child: 'never-starts' | 'exits' | 'ran';
       release: Release;
@@ -771,8 +822,8 @@ type OddCell =
 const TABLE_D2 = {
   zombie: {
     acquire: { kind: 'reach', result: 'refused', lock: 'kept', msg: 'held … (zombie: its parent <ppid> has not reaped it)' },
-    'daily-exit': { kind: 'never', why: 'daily の EXIT は長を wait する lock_stop_gate で G を空にする（§4.2）ので、長はゾンビで残らない。G の他のゾンビは group-not-emptied の行' },
-    'uat-trap': { kind: 'never', why: 'up の trap はサーバー（up の子）に送った後 wait する（§2.4）ので、長はゾンビで残らない' },
+    'daily-exit': { kind: 'never', why: 'daily は長を wait で回収してから EXIT で lock_drain_group を呼び、wait していない経路（INT／TERM・公開の後の失敗）は長を wait する lock_stop_gate を呼ぶ（§4.2）ので、長はゾンビで残らない。G の他のゾンビは group-not-emptied の行' },
+    'uat-trap': { kind: 'never', why: 'up の trap は、長（up の子）が自分で終わっていれば（ESRCH か ps -o stat= が Z）表 C の手続きの前に wait で回収し、送ったときは送った後に wait する（§2.4）ので、長はゾンビで残らない' },
     down: { kind: 'reach', result: 'stop-refused', lock: 'kept', msg: 'zombie: pid N (parent P has not reaped it)' },
   },
   'host-changed': {
@@ -905,7 +956,7 @@ describe('#4288 PR1b table A: record shape × caller × pid × G (docs/design/ru
   it('has every combination of the enumerations: 10 callers × (12 shapes × 3 + 6 shapes × 9) = 900 rows', () => {
     expect(ROWS_A).toHaveLength(CALLERS.length * (P_SHAPES.length * OBS.length + G_SHAPES.length * OBS.length * OBS.length));
     expect(ROWS_A).toHaveLength(900);
-    expect({ reach: count(ROWS_A, 'reach'), rejected: count(ROWS_A, 'rejected'), never: count(ROWS_A, 'never') }).toEqual({ reach: 578, rejected: 90, never: 232 });
+    expect({ reach: count(ROWS_A, 'reach'), rejected: count(ROWS_A, 'rejected'), never: count(ROWS_A, 'never') }).toEqual({ reach: 590, rejected: 90, never: 220 });
     expect(new Set(ROWS_A.map((row) => row.id)).size).toBe(ROWS_A.length);
   });
 
@@ -1003,12 +1054,25 @@ describe('#4288 PR1b table B: the D9 handover — stage × flow × event (§2.3,
 });
 
 describe('#4288 PR1b table C: UAT down — record × leader × the rest of its group (§2.4, review-4288h P2-3, PM P1-1)', () => {
-  it('has every combination, 120 rows (68 never, 52 reachable), and C′ covers every D5 result', () => {
-    expect(ROWS_C).toHaveLength(RECORDS_C.length * LEADERS.length * MEMBERS.length);
-    expect(ROWS_C).toHaveLength(120);
+  it('has every combination, 145 rows (120 + t1 by D5 25; 68 never, 77 reachable), and C′ covers every D5 result', () => {
+    expect(ROWS_C.filter((row) => !row.d5Axis)).toHaveLength(RECORDS_C.length * LEADERS.length * MEMBERS.length);
+    expect(ROWS_C).toHaveLength(145);
     expect(count(ROWS_C, 'never')).toBe(68);
-    expect(count(ROWS_C, 'reach')).toBe(52);
+    expect(count(ROWS_C, 'reach')).toBe(77);
     expect(Object.keys(D5_TO_STATUS).sort()).toEqual([...D5_RESULTS].sort());
+    // t1 × every D5 result: released is TABLE_C's row, the rest are TABLE_C_T1_D5 (PM 決定 3).
+    expect([...T1_D5_OTHER, 'released'].sort()).toEqual([...D5_RESULTS].sort());
+  });
+
+  it('t1 by D5 covers exactly the t1 cells where down calls D5, with the same signals (third round, Claude 5 P3-A)', () => {
+    const calling = ROWS_C.filter((row) => row.record === 't1' && !row.d5Axis && row.cell.kind === 'reach' && row.cell.d5 !== 'not-called');
+    const axisKeys = new Set(ROWS_C.filter((row) => row.d5Axis).map((row) => `${row.leader}/${row.members}`));
+    expect(new Set(calling.map((row) => `${row.leader}/${row.members}`))).toEqual(axisKeys);
+    for (const row of ROWS_C.filter((r) => r.d5Axis)) {
+      const base = TABLE_C.t1[row.leader][row.members];
+      if (base.kind !== 'reach' || row.cell.kind !== 'reach') throw new Error('both reach');
+      expect([row.cell.signals, row.cell.d5]).toEqual([base.signals, row.d5Axis]);
+    }
   });
 
   it.each(reachRows(ROWS_C))('$id: G is signalled only when shown to be the run’s, and “stopped” only on D5 released / missing (I-10, C′)', (row) => {
@@ -1029,7 +1093,7 @@ describe('#4288 PR1b table C: UAT down — record × leader × the rest of its g
     expect(cell.status === 'stopped').toBe(cell.d5 === 'released' || cell.d5 === 'missing');
     expect(cell.exit).toBe(cell.status === 'stopped' ? 0 : 1);
     // PM P1-1: down cleans this run's own T1 for sure once G is empty (the row the refusal of up points to).
-    if (row.record === 't1' && (row.members === 'none' || row.members === 'verified') && (row.leader === 'alive-verified' || row.leader === 'dead')) {
+    if (row.record === 't1' && !row.d5Axis && (row.members === 'none' || row.members === 'verified') && (row.leader === 'alive-verified' || row.leader === 'dead')) {
       expect([cell.d5, cell.status]).toEqual(['released', 'stopped']);
     }
   });
@@ -1043,6 +1107,8 @@ describe('#4288 PR1b table C: UAT down — record × leader × the rest of its g
 
   it.todo('PR1b: run down against a fake server (a sh that exec’s sleep, with a member in its group) for each reachable row and assert signals / D5 / status / exit / wording');
   it.todo('PR1b: the up trap after go runs the same procedure (record t1): stopped → status failed, any other → failed-server-left');
+  it.todo('PR1b: the up trap reaps a server that ended by itself (table D ack / child-exits: a zombie of up) with wait before the procedure, and reads it as dead (t1 × dead × none → D5 released → failed)');
+  it.todo('PR1b: t1 × D5 deferred / not-head / unknown / kept / missing — a leader that ignores TERM past STOP_WAIT, a ticket held ahead for 10 s, an owner made unreadable between the two reads, a head that recovers and takes / releases between them');
 });
 
 describe('#4288 PR1b table D: a handover step fails while the parent lives (§2.5, PM Claude P2-3)', () => {
@@ -1108,13 +1174,13 @@ describe('#4288 PR1b table E: the argument / context checks (§4.2)', () => {
 });
 
 describe('#4288 PR1b: the table sizes written in the design doc (§2.8)', () => {
-  it('1110 rows in all (C′ counted as 6): 697 reachable, 90 rejected, 323 never', () => {
+  it('1135 rows in all (C′ counted as 6): 734 reachable, 90 rejected, 311 never', () => {
     const rows = [...ROWS_A, ...ROWS_B, ...ROWS_C, ...ROWS_D, ...ROWS_D2, ...ROWS_E];
     expect({
       all: rows.length + D5_RESULTS.length,
       reach: count(rows, 'reach') + D5_RESULTS.length,
       rejected: count(rows, 'rejected'),
       never: count(rows, 'never'),
-    }).toEqual({ all: 1110, reach: 697, rejected: 90, never: 323 });
+    }).toEqual({ all: 1135, reach: 734, rejected: 90, never: 311 });
   });
 });
