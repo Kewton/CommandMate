@@ -64,12 +64,25 @@ fi
 STARTED_AT="$(node -e 'process.stdout.write(new Date().toISOString())')"
 BEFORE="$(git rev-parse HEAD)" || exit 2
 
+# The one AGENT_HEALTH_SYNC line. Every line goes out through emit_sync_line, the only place that prints one:
+# the line about to be printed is put in SYNC_PLANNED_LINE, echoed, and only then marked in SYNC_LINE_PRINTED.
+# SYNC_OK_LINE is set once the sync has succeeded. A signal between the echo and the mark makes daily_on_exit
+# print the planned line again (the ok line if ok was planned, the failed line if failed was planned): the same
+# line twice, never two different ones. All three are set here, before the EXIT trap, so the environment cannot.
+SYNC_OK_LINE=""
+SYNC_PLANNED_LINE=""
+SYNC_LINE_PRINTED=0
+emit_sync_line() { # <the whole line>
+  SYNC_PLANNED_LINE="$1"
+  echo "$SYNC_PLANNED_LINE"
+  SYNC_LINE_PRINTED=1
+}
+
 # Writes the minimal report and exits 2. $1 = reason. KEEP_REPORT=1 (run.ts started and may have written its
 # own report): that report is kept when it was written after the handover began (newer than `go`).
 fail_sync() {
   reason="$1"
-  echo "AGENT_HEALTH_SYNC status=failed reason=${reason} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
-  SYNC_LINE_PRINTED=1
+  emit_sync_line "AGENT_HEALTH_SYNC status=failed reason=${reason} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
   if [ "${KEEP_REPORT:-0}" = 1 ] && [ -f "$OUT" ] && [ -n "${GO:-}" ] && [ "$OUT" -nt "$GO" ]; then
     exit 2
   fi
@@ -100,13 +113,6 @@ fail_sync() {
 HAND=""
 CHILD=""
 CHILD_REAPED=0
-# The one AGENT_HEALTH_SYNC line: SYNC_OK_LINE is set once the sync has succeeded; SYNC_PLANNED_LINE is the line
-# about to be printed (set before the echo), SYNC_LINE_PRINTED the mark that it was (set after the echo, or by
-# fail_sync). All are set here, before the EXIT trap, so the environment cannot. A signal between the echo and
-# the mark makes daily_on_exit print the planned line again: the same line twice, never two different statuses.
-SYNC_OK_LINE=""
-SYNC_PLANNED_LINE=""
-SYNC_LINE_PRINTED=0
 
 # A step of the handover to run.ts's process group failed while this script lives (design
 # docs/design/run-lock-machine-lock-4288.md §4.5, table D). The child never works unsignalled. The
@@ -166,12 +172,13 @@ daily_handoff_fail() { # <stage>
 # shellcheck disable=SC2329 # run by the EXIT trap below
 daily_on_exit() {
   local rc=$?
+  # A second INT/TERM while this runs would end it (an `exit` inside the EXIT trap does not come back) before the
+  # line is out or the lock is released: it is ignored here.
+  trap '' INT TERM
   if [ -n "$SYNC_PLANNED_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
-    echo "$SYNC_PLANNED_LINE"
-    SYNC_LINE_PRINTED=1
+    emit_sync_line "$SYNC_PLANNED_LINE"
   elif [ -n "$SYNC_OK_LINE" ] && [ -z "$SYNC_PLANNED_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
-    echo "AGENT_HEALTH_SYNC status=failed reason=interrupted exit=${rc} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
-    SYNC_LINE_PRINTED=1
+    emit_sync_line "AGENT_HEALTH_SYNC status=failed reason=interrupted exit=${rc} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
   fi
   if [ -n "$CHILD" ] && [ "$CHILD_REAPED" != 1 ]; then
     if [ -n "$RUN_LOCK_G" ]; then
@@ -235,9 +242,7 @@ fi
 SYNC_OK_LINE="AGENT_HEALTH_SYNC status=ok before=$(printf '%s' "$BEFORE" | cut -c1-8) after=$(printf '%s' "$AFTER" | cut -c1-8) npm_install=${NPM_INSTALL}"
 
 if [ "$SYNC_ONLY" -eq 1 ]; then
-  SYNC_PLANNED_LINE="$SYNC_OK_LINE"
-  echo "$SYNC_PLANNED_LINE"
-  SYNC_LINE_PRINTED=1
+  emit_sync_line "$SYNC_OK_LINE"
   exit 0
 fi
 
@@ -273,9 +278,7 @@ while [ ! -e "$ACK" ]; do
   sleep 0.05
 done
 if [ -e "$ACK" ]; then
-  SYNC_PLANNED_LINE="$SYNC_OK_LINE"
-  echo "$SYNC_PLANNED_LINE"
-  SYNC_LINE_PRINTED=1
+  emit_sync_line "$SYNC_OK_LINE"
 fi
 wait "$CHILD"
 CODE=$?
@@ -288,8 +291,6 @@ if [ "$CODE" -eq 75 ] && [ ! -e "$ACK" ]; then
   fail_sync "handoff-failed stage=ack"
 fi
 if [ "$SYNC_LINE_PRINTED" != 1 ]; then
-  SYNC_PLANNED_LINE="$SYNC_OK_LINE"
-  echo "$SYNC_PLANNED_LINE"
-  SYNC_LINE_PRINTED=1
+  emit_sync_line "$SYNC_OK_LINE"
 fi
 exit "$CODE"
