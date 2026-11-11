@@ -1,6 +1,6 @@
 /**
  * Issue #4288 PR1c — supervisor.lock on the machine-wide lock (scripts/lib/machine-lock.sh, PR1a).
- * Design: docs/design/supervisor-lock-machine-lock-4288.md (upstream stage, 2nd round).
+ * Design: docs/design/supervisor-lock-machine-lock-4288.md (upstream stage, 3rd round).
  *
  * UPSTREAM SKELETON (the design stage). This file holds the tables of the design as typed enumerations,
  * so that a cell, a result or a failure outcome left out (or one the caller cannot answer) fails the
@@ -140,12 +140,33 @@ type TicketEnd = (typeof TICKET_END)[number];
 
 /**
  * The message (PRODUCT_LOCK_ERROR of a refused acquisition; the guard's stderr line when it keeps a lock a
- * person has to look at). Precedence on a refusal: loader > unk/eperm > queue > corrupt/tmp/host/tz/aside > rec > taking.
+ * person has to look at). Precedence on a refusal: loader > eperm > unk > queue > corrupt/tmp/host/tz/aside > rec > taking.
+ * eperm and unk come from the same noted unknown and never both: eperm is point=pid with errno=EPERM, unk any other
+ * (design §2.2, the sources of the messages: MESSAGE_SOURCES below).
  */
 const MESSAGES = ['rec', 'taking', 'queue', 'unk', 'eperm', 'corrupt', 'tmp', 'host', 'tz', 'aside', 'loader'] as const;
 type Message = (typeof MESSAGES)[number];
 /** Messages that ask a person to look (decision 1: the form is told apart, nothing is removed). */
 const PERSON_MESSAGES = ['eperm', 'corrupt', 'tmp', 'host', 'tz'] as const satisfies readonly Message[];
+
+/**
+ * Where lib.sh reads the kind of a message from (design §2.2): a global the machine-lock operation left, or a
+ * read made after the refusal for the message only (never for the judgement). `rank` is the precedence (1 wins);
+ * kinds of the same rank are exclusive by their condition (the first in this order when two would hold).
+ */
+const MESSAGE_SOURCES = {
+  loader: { rank: 1, from: 'PRODUCT_MACHINE_LOCK_OK (lib.sh, set once when it sources machine-lock.sh)', when: 'not 0: no machine-lock operation is called' },
+  eperm: { rank: 2, from: 'LOCK_UNKNOWN (acquire) / LRO_UNKNOWN (guard): the first unknown noted in the one poll', when: 'point=pid and errno=EPERM' },
+  unk: { rank: 3, from: 'LOCK_UNKNOWN / LRO_UNKNOWN, as eperm', when: 'not empty and not eperm' },
+  queue: { rank: 4, from: 'la_blocker of lock_acquire_path (emptied each poll, the ticket ahead; acquire only)', when: 'not empty' },
+  corrupt: { rank: 5, from: 'the read of <lock>/owner for the message', when: 'an owner with pid= or token= empty' },
+  tmp: { rank: 5, from: 'the listing of <lock> for the message', when: 'no owner, and owner.tmp.* in it' },
+  host: { rank: 5, from: 'the read of <lock>/owner for the message', when: 'a record whose host= is not LOCK_HOST' },
+  tz: { rank: 5, from: 'the read of <lock>/owner for the message', when: "a record with a tz= line not equal to the reader's ${TZ-}" },
+  aside: { rank: 5, from: 'LOCK_GONE_PENDING (lock_settle_gone) and the read of <lock>/owner', when: 'not empty, and no record in <lock> (the put-back failed)' },
+  rec: { rank: 6, from: 'the read of <lock>/owner for the message', when: 'a record with pid= and token= (none of the above)' },
+  taking: { rank: 7, from: 'none of the above (no owner; a failed ticket ln, F29, too)', when: 'otherwise' },
+} as const satisfies Record<Message, { rank: number; from: string; when: string }>;
 
 interface Row<C extends Caller> {
   readonly result: ResultOf<C>;
@@ -200,13 +221,15 @@ const LOADER_ROWS = {
     guard: 'as-table',
   },
   'lib-load-failed': {
-    setup: "lib.sh's own source of machine-lock.sh fails: PRODUCT_MACHINE_LOCK_OK=0, whatever run-lock.sh did",
+    setup:
+      "today's (old) run-lock.sh copied (it does not source machine-lock.sh) and MACHINE_LOCK_VERIFY_RUN naming a copy of verify-run.sh with the markers twice: lib.sh's own source fails, PRODUCT_MACHINE_LOCK_OK=0 (a run-lock.sh that loaded it would make lib.sh's second source return 0 at once)",
     loads: 0,
     acquire: 'refused(loader)',
     guard: 'unloaded, the ledger reclaimed as today',
   },
   'pid-alive-two-valued': {
-    setup: 'run_lock_pid_alive on a live / an ESRCH / an EPERM pid: 0 / 1 / 0 (two values, as today; proc_running relies on it)',
+    setup:
+      'run_lock_pid_alive on a live / an ESRCH / an EPERM pid: 0 / 1 / 0 (two values, as today; 1 is kill -0 and ps -p both failing, not ESRCH alone; proc_running relies on it)',
     loads: 1,
     acquire: 'as-table',
     guard: 'as-table',
@@ -251,17 +274,17 @@ const OBS_MEANING = {
   'other-plain': {
     alive: 'kill -0 of the recorded pid alive (no lstart= line, or an empty one, or no tz= line)',
     gone: 'ESRCH',
-    unknown: 'kill -0 fails other than ESRCH: EPERM (another user\'s process) and EIO are unknown',
+    unknown: 'kill -0 fails other than ESRCH and EPERM (EIO and the like); EPERM is F1 (message eperm)',
   },
   'other-lstart': {
     alive: 'the pid alive, the tz= of the record equal to the reader\'s TZ, and ps -o lstart= equal to the record',
     gone: 'ESRCH, or the pid alive and ps -o lstart= different (the pid was reused, D7)',
-    unknown: 'kill -0 fails other than ESRCH, or ps fails or prints nothing (CM_VERIFY_TEST_OBS_FAULT=lstart=EIO)',
+    unknown: 'kill -0 fails other than ESRCH and EPERM (EPERM is F1), or ps fails or prints nothing (CM_VERIFY_TEST_OBS_FAULT=lstart=EIO)',
   },
   'other-tz': {
     alive: 'tz= differs from the reader\'s TZ: lstart is dropped by lib.sh\'s codec, the pid alive',
     gone: 'ESRCH (TZ does not matter to kill -0)',
-    unknown: 'kill -0 fails other than ESRCH',
+    unknown: 'kill -0 fails other than ESRCH and EPERM (EPERM is F1)',
   },
   'other-host': {
     alive: 'not observed: a record of another host= is alive (lock_holder_state); kill -0 is not called',
@@ -271,7 +294,7 @@ const OBS_MEANING = {
   aside: {
     alive: "the moved-aside record's holder alive",
     gone: 'ESRCH',
-    unknown: 'kill -0 of it fails (EIO)',
+    unknown: 'kill -0 of it fails other than ESRCH and EPERM (EIO; EPERM is F1)',
   },
 } as const satisfies Record<Form, Record<Obs, string>>;
 
@@ -410,208 +433,278 @@ interface AsForm {
   readonly asForm: true;
 }
 type Outcome<C extends Caller> = Row<C> | AsForm;
+
+/** Why a reachable caller has no outcome for a failure (one word each; every reachable caller is either answered or excluded). */
+const EXCLUSIONS = {
+  behind: 'behind a live ticket: the acquisition withdraws its ticket (queue), the guard answers not-head, before this point',
+  'pre-queue': 'at the queue stage or before it (the loader): head or behind is not known yet, the head column answers for both',
+  unheld: 'no hold mark: the release answers none before it reads anything',
+  'own-pid-only': "the release observes only its own record and $$, never another holder's pid, lstart, tz or host",
+  'not-on-path': "this caller's function never passes the point (an acquisition-only, release-only or guard-only point)",
+  'no-effect': "the release passes it (lock_release_own_gone) but no own moved-aside record exists for supervisor.lock: nothing changes",
+} as const;
+type Exclusion = keyof typeof EXCLUSIONS;
+
+type Outcomes = { readonly [C in ReachableCaller]?: Outcome<C> };
+type Exclusions = { readonly [C in ReachableCaller]?: Exclusion };
 interface FailureRow {
   readonly point: string;
   readonly errno: string;
   readonly direction: Direction;
-  readonly callers: { readonly [C in ReachableCaller]?: Outcome<C> };
+  readonly callers: Outcomes;
+  readonly excluded: Exclusions;
 }
+/** Every reachable caller is written exactly once, in callers or in excluded: one left out (or written twice) fails the typecheck. */
+type Complete<O, E> = [Exclude<ReachableCaller, keyof O | keyof E>] extends [never]
+  ? [Extract<keyof O, keyof E>] extends [never]
+    ? unknown
+    : { readonly writtenTwice: Extract<keyof O, keyof E> }
+  : { readonly callerNotWritten: Exclude<ReachableCaller, keyof O | keyof E> };
+const failure = <const O extends Outcomes, const E extends Exclusions>(
+  row: { point: string; errno: string; direction: Direction; callers: O; excluded: E } & Complete<O, E>,
+) => row;
 const AS_FORM: AsForm = { asForm: true };
 
+/** The behind callers meet no observation of the record (S12): most failures. */
+const BEHIND = { 'acquire-behind': 'behind', 'guard-behind': 'behind' } as const;
+/** A failure at the queue stage: the head column answers for both. */
+const PRE_QUEUE = { 'acquire-behind': 'pre-queue', 'guard-behind': 'pre-queue' } as const;
+/** The releases do not pass a point of the acquisition or of the guard. */
+const NO_RELEASE = { 'release-main': 'not-on-path', 'release-unheld': 'unheld' } as const;
+/** An observation of another holder: the release reads its own $$ only. */
+const RELEASE_SELF = { 'release-main': 'own-pid-only', 'release-unheld': 'unheld' } as const;
+
 const FAILURE_TABLE = {
-  'F1-kill0-eperm': {
+  'F1-kill0-eperm': failure({
     point: 'pid (lock_obs_kill0)',
     errno: 'EPERM — the recorded pid reused by another user\'s process, or a holder of another user',
     direction: 'keep',
     callers: { 'acquire-head': refused('eperm'), 'guard-head': gKept('eperm') },
-  },
-  'F2-kill0-other': {
+    excluded: { ...BEHIND, ...RELEASE_SELF },
+  }),
+  'F2-kill0-other': failure({
     point: 'pid (lock_obs_kill0)',
     errno: 'EIO and the like (not ESRCH, not EPERM)',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk'), 'release-main': r('deferred', 'unchanged', 'none-taken') },
-  },
-  'F3-kill0-self-flips': {
+    excluded: { ...BEHIND, 'release-unheld': 'unheld' },
+  }),
+  'F3-kill0-self-flips': failure({
     point: 'pid of $$ (lock_release_held: the self check unknown, the next read alive)',
     errno: 'EIO once',
     direction: 'keep',
     callers: { 'release-main': r('needs-head', 'unchanged', 'none-taken') },
-  },
-  'F4-zombie-holder': {
+    excluded: { 'acquire-head': 'not-on-path', 'guard-head': 'not-on-path', ...BEHIND, 'release-unheld': 'unheld' },
+  }),
+  'F4-zombie-holder': failure({
     point: 'pid (kill -0 of a zombie answers alive)',
     errno: '— (the holder KILLed, not yet reaped)',
     direction: 'keep',
     callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
-  },
-  'F5-holder-killed': {
+    excluded: { ...BEHIND, ...RELEASE_SELF },
+  }),
+  'F5-holder-killed': failure({
     point: 'the supervisor KILLed by stop_and_wait (lib.sh): EXIT never runs',
     errno: '— (SIGKILL)',
     direction: 'keep',
     callers: { 'guard-head': G_REMOVED, 'acquire-head': ACQUIRED },
-  },
-  'F6-ps-lstart-judge': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F6-ps-lstart-judge': failure({
     point: 'lstart (machine_lock_lstart_state)',
     errno: 'ps fails or prints nothing',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
-  },
-  'F7-ps-lstart-at-write': {
+    excluded: { ...BEHIND, ...RELEASE_SELF },
+  }),
+  'F7-ps-lstart-at-write': failure({
     point: 'proc_lstart $$ when the owner is written',
     errno: 'ps fails: lstart= written empty',
     direction: 'keep',
     callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
-  },
-  'F8-tz-differs': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F8-tz-differs': failure({
     point: "lib.sh's codec: tz= of the record against the reader's ${TZ-}",
     errno: '— (writer and reader under different TZ values)',
     direction: 'keep',
     callers: { 'acquire-head': refused('tz'), 'guard-head': gKept('tz') },
-  },
-  'F9-tz-missing': {
+    excluded: { ...BEHIND, ...RELEASE_SELF },
+  }),
+  'F9-tz-missing': failure({
     point: "lib.sh's codec: a record with no tz= line (the old version's)",
     errno: '— (judged by the pid alone)',
     direction: 'keep',
     callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
-  },
-  'F10-hostname-changed': {
+    excluded: { ...BEHIND, ...RELEASE_SELF },
+  }),
+  'F10-hostname-changed': failure({
     point: 'LOCK_HOST (hostname) against the record\'s host=',
     errno: '— (the host name changed since the record was written)',
     direction: 'keep',
     callers: { 'acquire-head': refused('host'), 'guard-head': gKept('host') },
-  },
-  'F11-mkdir-lock': {
+    excluded: { ...BEHIND, ...RELEASE_SELF },
+  }),
+  'F11-mkdir-lock': failure({
     point: 'mkdir-lock',
     errno: 'other than EEXIST',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk') },
-  },
-  'F12-owner-create-exists': {
+    excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
+  }),
+  'F12-owner-create-exists': failure({
     point: 'owner-create (O_EXCL)',
     errno: 'EEXIST, or another record read back',
     direction: 'keep',
     callers: { 'acquire-head': refused('rec') },
-  },
-  'F13-owner-create-open': {
+    excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
+  }),
+  'F13-owner-create-open': failure({
     point: 'owner-create',
     errno: 'cannot open (ENOSPC, EACCES …)',
     direction: 'own-only',
     callers: { 'acquire-head': refused('unk') },
-  },
-  'F14-owner-write-or-readback': {
+    excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
+  }),
+  'F14-owner-write-or-readback': failure({
     point: 'owner-create (write) / owner-readback',
     errno: 'the write fails after the open, or the read back is unknown',
     direction: 'own-only',
     callers: { 'acquire-head': refused('unk') },
-  },
-  'F15-owner-unlink': {
+    excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
+  }),
+  'F15-owner-unlink': failure({
     point: 'rm -f <lock>/owner after F13/F14 (fault:owner-unlink)',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk', 'own-half-left') },
-  },
-  'F16-lock-rmdir': {
+    excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
+  }),
+  'F16-lock-rmdir': failure({
     point: 'rmdir <lock> after F13/F14 (fault:lock-rmdir)',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk', 'own-empty-left') },
-  },
-  'F17-killed-mid-owner': {
+    excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
+  }),
+  'F17-killed-mid-owner': failure({
     point: 'the acquirer dies between `: >owner` and `cat >>owner` (lock_obs_create)',
     errno: '— (SIGKILL, power loss): an empty or half owner is left — a corrupt form',
     direction: 'keep',
     callers: { 'acquire-head': refused('corrupt'), 'guard-head': gKept('corrupt') },
-  },
-  'F18-old-tmp-left': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F18-old-tmp-left': failure({
     point: 'the old version died between its mkdir and mv: <lock>/owner.tmp.<pid> only',
     errno: '— (ownerless-tmp form)',
     direction: 'keep',
     callers: { 'acquire-head': refused('tmp'), 'guard-head': gKept('tmp') },
-  },
-  'F19-owner-read': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F19-owner-read': failure({
     point: 'lock-owner / release-owner / recover-owner / gone-owner / reclaim-owner (lock_obs_owner)',
     errno: 'EACCES, EIO',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk'), 'release-main': r('deferred', 'unchanged', 'none-taken') },
-  },
-  'F20-gone-listing': {
+    excluded: { ...BEHIND, 'release-unheld': 'unheld' },
+  }),
+  'F20-gone-listing': failure({
     point: 'list-root / gone-lstat (lock_gone_candidates)',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': AS_FORM },
-  },
-  'F21-ownerless-rmdir': {
+    excluded: { ...BEHIND, 'release-main': 'no-effect', 'release-unheld': 'unheld' },
+  }),
+  'F21-ownerless-rmdir': failure({
     point: 'ownerless-rmdir (lock_expire_ownerless)',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
-  },
-  'F22-rename-aside-enoent': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F22-rename-aside-enoent': failure({
     point: 'rename-aside (lock_recover)',
     errno: 'ENOENT — someone removed it first',
     direction: 'keep',
     callers: { 'acquire-head': ACQUIRED, 'guard-head': r('absent', 'absent', 'retired') },
-  },
-  'F23-rename-aside-other': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F23-rename-aside-other': failure({
     point: 'rename-aside (lock_recover)',
     errno: 'other — lock_recover does not note it unknown, so the message is rec',
     direction: 'keep',
     callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
-  },
-  'F24-recover-restore-mkdir': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F24-recover-restore-mkdir': failure({
     point: 'restore-mkdir in lock_recover (the token differed; put back)',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('aside', 'aside'), 'guard-head': r('restore-failed', 'aside', 'retired') },
-  },
-  'F25-settle-restore-mkdir': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F25-settle-restore-mkdir': failure({
     point: 'restore-mkdir in lock_restore_from_gone (settling a moved-aside record)',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('aside', 'aside'), 'guard-head': r('kept', 'aside', 'retired') },
-  },
-  'F26-restore-rename': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F26-restore-rename': failure({
     point: 'restore-rename (mv <gone>/owner <lock>/owner)',
     errno: 'any — the empty <lock> is taken out again, the moved-aside record kept',
     direction: 'keep',
     callers: { 'acquire-head': refused('aside', 'aside'), 'guard-head': r('kept', 'aside', 'retired') },
-  },
-  'F27-rm-gone': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F27-rm-gone': failure({
     point: 'rm -rf <gone> after a recovery (|| true)',
     errno: 'any — a dead record moved aside is left; the next head settles it',
     direction: 'keep',
     callers: { 'acquire-head': ACQUIRED, 'guard-head': G_REMOVED },
-  },
-  'F28-rm-release-held': {
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  'F28-rm-release-held': failure({
     point: 'rm -rf <lock> in lock_release_held (|| true)',
     errno: 'any — answers released, the own record left (recovered after the shell exits)',
     direction: 'keep',
     callers: { 'release-main': r('released', 'unchanged', 'none-taken') },
-  },
-  'F29-ticket-ln': {
+    excluded: { 'acquire-head': 'not-on-path', 'guard-head': 'not-on-path', ...BEHIND, 'release-unheld': 'unheld' },
+  }),
+  'F29-ticket-ln': failure({
     point: 'lock_take_ticket (ln)',
-    errno: 'other than EEXIST',
+    errno: 'other than EEXIST — no unknown is noted and no ticket is left, so the message is taking (MESSAGE_SOURCES)',
     direction: 'keep',
-    callers: { 'acquire-head': r('refused', 'unchanged', 'none-taken', 'unk'), 'guard-head': r('not-head', 'unchanged', 'none-taken') },
-  },
-  'F30-queue-list': {
+    callers: { 'acquire-head': r('refused', 'unchanged', 'none-taken', 'taking'), 'guard-head': r('not-head', 'unchanged', 'none-taken') },
+    excluded: { ...PRE_QUEUE, ...NO_RELEASE },
+  }),
+  'F30-queue-list': failure({
     point: 'list-queue',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': r('not-head', 'unchanged', 'retired', 'unk') },
-  },
-  'F31-mark-done': {
+    excluded: { ...PRE_QUEUE, ...NO_RELEASE },
+  }),
+  'F31-mark-done': failure({
     point: 'lock_mark_done of the own ticket',
     errno: 'any — the ticket stays until its pid dies or its deadline + 60 s',
     direction: 'keep',
-    callers: { 'acquire-head': r('acquired', 'mine', 'left-until-retirable'), 'guard-head': AS_FORM },
-  },
-  'F32-ps-etime': {
+    callers: {
+      'acquire-head': r('acquired', 'mine', 'left-until-retirable'),
+      'acquire-behind': r('refused', 'unchanged', 'left-until-retirable', 'queue'),
+      'guard-head': AS_FORM,
+      'guard-behind': r('not-head', 'unchanged', 'left-until-retirable'),
+    },
+    excluded: { 'release-main': 'not-on-path', 'release-unheld': 'unheld' },
+  }),
+  'F32-ps-etime': failure({
     point: 'lock_pid_start_ms (ps -o etime=) of a ticket ahead',
     errno: 'any — the ticket is not read as reused: waited for',
     direction: 'keep',
     callers: { 'acquire-head': refused('queue'), 'guard-head': NOT_HEAD },
-  },
-  'F33-loader': {
+    excluded: { ...PRE_QUEUE, ...NO_RELEASE },
+  }),
+  'F33-loader': failure({
     point: 'machine_lock_load (lib.sh keeps the return in PRODUCT_MACHINE_LOCK_OK)',
     errno: 'verify-run.sh missing, markers not 1 / 1, set -e',
     direction: 'keep',
@@ -619,15 +712,18 @@ const FAILURE_TABLE = {
       'acquire-head': refused('loader'),
       'acquire-behind': refused('loader'),
       'guard-head': r('unloaded', 'unchanged', 'none-taken', 'loader'),
+      'guard-behind': r('unloaded', 'unchanged', 'none-taken', 'loader'),
       'release-main': NONE,
     },
-  },
-  'F34-reclaim-rename-or-rmdir': {
+    excluded: { 'release-unheld': 'unheld' },
+  }),
+  'F34-reclaim-rename-or-rmdir': failure({
     point: 'reclaim-rename / reclaim-rmdir (an empty <lock> while a put-back is unknown)',
     errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
-  },
+    excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
 const FAILURES = Object.keys(FAILURE_TABLE) as Failure[];
@@ -653,11 +749,22 @@ const COUNTS = {
 
 // ------------------------------------------------------------------ the result sets of the code
 
-/** Every `<VAR>=<value>` assignment of a result variable in the given sources (empty resets dropped). */
+/**
+ * Every `<VAR>=<value>` assignment of a result variable in the given sources (empty resets dropped). Comment lines
+ * (`#` first on the line) are skipped: a value named only in a comment — machine-lock.sh's `(LRH_RESULT=needs-head)`
+ * — must not keep the set whole after the code stopped assigning it (PM Claude P3-4).
+ */
 function codeResultSet(variable: string, sources: readonly string[]): string[] {
   const re = new RegExp(`\\b${variable}=([a-z][a-z-]*)`, 'g');
   const found = new Set<string>();
-  for (const src of sources) for (const m of fs.readFileSync(src, 'utf8').matchAll(re)) found.add(m[1]);
+  for (const src of sources) {
+    const code = fs
+      .readFileSync(src, 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    for (const m of code.matchAll(re)) found.add(m[1]);
+  }
   return [...found].sort();
 }
 const sorted = (xs: readonly string[]) => [...xs].sort();
@@ -709,6 +816,34 @@ describe('Issue #4288 PR1c table (design §2): shape', () => {
     expect(Object.entries(GROUP_AXIS).filter(([, v]) => 'reach' in v).map(([k]) => k)).toEqual(['none']);
   });
 
+  it('every failure answers or excludes each reachable caller exactly once (P3-5; the typecheck catches it first)', () => {
+    const reachable = CALLERS.filter((c) => !['release-subshell', 'd5-head', 'd5-behind'].includes(c)).sort();
+    for (const f of FAILURES) {
+      const answered = Object.keys(FAILURE_TABLE[f].callers as Outcomes);
+      const excluded = Object.keys(FAILURE_TABLE[f].excluded as Exclusions);
+      expect(answered.filter((c) => excluded.includes(c)), f).toEqual([]);
+      expect([...answered, ...excluded].sort(), f).toEqual(reachable);
+      for (const why of Object.values(FAILURE_TABLE[f].excluded as Exclusions) as string[]) expect(Object.keys(EXCLUSIONS)).toContain(why);
+    }
+    // A row that leaves a reachable caller unwritten does not typecheck (the control of the type above).
+    // @ts-expect-error callerNotWritten: release-main, release-unheld, guard-behind
+    failure({ point: 'p', errno: 'e', direction: 'keep', callers: { 'acquire-head': refused('unk') }, excluded: { 'acquire-behind': 'behind', 'guard-head': 'not-on-path' } });
+  });
+
+  it('the messages: every kind has one source, and eperm and unk never both answer one input (P2-A, P2-B)', () => {
+    expect(Object.keys(MESSAGE_SOURCES).sort()).toEqual([...MESSAGES].sort());
+    expect(MESSAGE_SOURCES.eperm.rank).toBeLessThan(MESSAGE_SOURCES.unk.rank);
+    expect(MESSAGE_SOURCES.unk.when).toContain('not eperm');
+    // The unknown of the pid axis is EIO and the like (§2.1); EPERM of the same pid is F1, the only eperm.
+    const epermCells = ROWS.filter((e) => e.cell.message === 'eperm');
+    expect(epermCells).toEqual([]);
+    const epermFailures = FAILURE_OUTCOMES.filter((o) => !('asForm' in o.outcome) && o.outcome.message === 'eperm').map((o) => o.failure);
+    expect([...new Set(epermFailures)]).toEqual(['F1-kill0-eperm']);
+    for (const form of ['other-plain', 'other-lstart', 'other-tz', 'aside'] as const) {
+      expect(OBS_MEANING[form].unknown, form).toContain('EPERM is F1');
+    }
+  });
+
   it('every observation of every form is defined', () => {
     for (const form of FORMS) for (const obs of OBS) expect(OBS_MEANING[form][obs].length).toBeGreaterThan(0);
   });
@@ -740,6 +875,29 @@ describe('Issue #4288 PR1c table: RESULTS come from the code (machine-lock.sh, v
     const copy = path.join(dir, 'verify-run.sh');
     fs.writeFileSync(copy, `${fs.readFileSync(VERIFY_RUN_SH, 'utf8')}\nLRO_RESULT=handed-over\n`);
     expect(codeResultSet('LRO_RESULT', [MACHINE_LOCK_SH, copy])).not.toEqual(sorted(CODE_RESULTS.LRO));
+  });
+
+  it('positive control: a value the code no longer assigns is caught even when a comment still names it', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr1c-results-'));
+    tmpDirs.push(dir);
+    const copy = path.join(dir, 'machine-lock.sh');
+    const text = fs.readFileSync(MACHINE_LOCK_SH, 'utf8');
+    const code = text
+      .split('\n')
+      .map((line) => (/^\s*#/.test(line) ? line : line.replace(/\bLRH_RESULT=needs-head\b/g, 'LRH_RESULT=deferred')))
+      .join('\n');
+    expect(code).not.toBe(text);
+    expect(code).toContain('(LRH_RESULT=needs-head)');
+    fs.writeFileSync(copy, code);
+    expect(codeResultSet('LRH_RESULT', [copy, VERIFY_RUN_SH])).not.toContain('needs-head');
+  });
+
+  it('negative control: an assignment written only in a comment adds nothing', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr1c-results-'));
+    tmpDirs.push(dir);
+    const copy = path.join(dir, 'verify-run.sh');
+    fs.writeFileSync(copy, `${fs.readFileSync(VERIFY_RUN_SH, 'utf8')}\n#   (LRO_RESULT=handed-over)\n`);
+    expect(codeResultSet('LRO_RESULT', [MACHINE_LOCK_SH, copy])).toEqual(sorted(CODE_RESULTS.LRO));
   });
 
   it('negative control: an unchanged copy reads the same sets', () => {
