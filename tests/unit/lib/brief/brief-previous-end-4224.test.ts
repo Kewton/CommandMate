@@ -241,3 +241,41 @@ describe('X-j the instance’s lifetime and author by B / D1’s rule (2nd revie
     expect(firstDataLine((await build()).body)).toBe('終わる前の更新を確認できない（この instance の更新の記録なし）');
   });
 });
+
+/**
+ * Issue #4227 pr3c (codex P2-2, PM return 4; design mem-ui-4227 §0.0b S-C): D2's X4 reads the
+ * hand-off's record through `readPreEndUpdate`. A conversation that ended through the hand-off as
+ * `confirmed` right before the new launch draws no line in the brief `buildBrief` makes; the same
+ * end `unconfirmed` draws D2's line as before. Positive control: with `readPreEndUpdate` answering
+ * `not_recorded` (the stub before pr3c) the first case fails.
+ */
+describe('[#4227 S-C] buildBrief reads the hand-off’s confirmed end (X4 wired)', () => {
+  function endedThroughHandoff(outcome: 'confirmed' | 'unconfirmed'): void {
+    const lifetime = readInstanceLifetime(world.db, 'wt-1', 'claude');
+    const previous = openBoundary(world.db, { worktreeId: 'wt-1', instanceId: 'claude', cliToolId: 'claude', lifetime, kind: 'launch', evidence: 'launch', openedAt: Date.now() - 3 * HOUR });
+    const at = Date.now() - 2 * HOUR;
+    world.db
+      .prepare(
+        `INSERT INTO mem_handoff_requests (id, repository_id, branch, detached, target_worktree_id, target_worktree_incarnation,
+           instance_id, cli_tool_id, instance_incarnation, instance_on_roster, boundary_id, state, outcome,
+           agent_deadline_at, expires_at, ended_at, created_at, updated_at, version)
+         VALUES ('req-s-c', ?, 'feature/x', 0, 'wt-1', ?, 'claude', 'claude', ?, 1, ?, 'ended', ?, ?, ?, ?, ?, ?, 1)`
+      )
+      .run(world.repo, getOrCreateWorktreeIncarnation(world.db, 'wt-1'), lifetime.incarnation, previous.id, outcome, at, at + 14 * 24 * HOUR, at, at - HOUR, at);
+  }
+
+  it('confirmed right before this launch: no "cannot be confirmed" line', async () => {
+    userTurn(Date.now() - 4 * HOUR);
+    endedThroughHandoff('confirmed');
+    expect(readPreEndUpdate(world.db, { worktreeId: 'wt-1', instanceId: 'claude', before: Date.now() })).toBe('recorded');
+    const built = await build();
+    expect(built.body).not.toBe('');
+    expect(built.body).not.toMatch(/終わる前の更新を確認できない/);
+  });
+
+  it('(negative control) unconfirmed: D2’s line as before', async () => {
+    userTurn(Date.now() - 4 * HOUR);
+    endedThroughHandoff('unconfirmed');
+    expect(firstDataLine((await build()).body)).toMatch(LEAD);
+  });
+});

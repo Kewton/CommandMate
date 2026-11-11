@@ -28,6 +28,8 @@ const WRITERS = [
   'openBoundary',
   'settleBoundaryClaim',
   'settleStaleClaim',
+  // Issue #4227 (S-B): a `decline` claim used up as `skipped(declined)`.
+  'settleDeclinedClaim',
   'skipBoundary',
   'getOrCreateWorktreeIncarnation',
   'openResetBoundaryFromSend',
