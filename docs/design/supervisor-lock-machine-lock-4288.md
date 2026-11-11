@@ -8,7 +8,7 @@
 - 土台: [lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) の §1（2 番、D1〜D12）・§1.11（PR1c の書くファイル）・§1.14（PR1a の実装と D12 の不変条件）・§7。PR1a は develop に入っている（`c3387cbe7`、この文書の行番号は `b57c2aba6`）
 - 対象: `scripts/agent-health/product/lib.sh` の `product_lock_*` と `scripts/agent-health/product/deadline-guard.sh` の回収を、PR1a の読み込み口 `scripts/lib/machine-lock.sh` の上に載せる部分だけ。run-lock（PR1b）は対象外
 - 試験の表の雛形: `tests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts`。表は型つきの列挙（足し忘れ・答えられない結果は `satisfies` で typecheck が落とす）。雛形は次の数をこの行から読み、自分の表の数と比べる（別々に作ったオブジェクトの比較）:
-  - 表の数: セル 297・行 185・拒否 39・不可能 73・失敗 34・拒否の検査 9・読み込み 5
+  - 表の数: セル 297・行 185・拒否 39・不可能 73・失敗 35・拒否の検査 9・読み込み 5
 - 表記: **事実**＝コード・実行で確かめたこと（`file:line`）、**見立て**＝事実からの推論で試していないこと、**未確認**＝この段で確かめていないこと、**決定**＝この文書で決めること（レビューで覆りうる）
 
 ## 0. 今の形と、載せた後の形（事実）
@@ -68,7 +68,7 @@ supervisor.lock だけの性質（事実）:
 | `stale-old` | canonical が無く、旧版の退避 `<lock>.stale.*` だけがある。新しい読み手は読まない（`.gone-` の形でない。`verify-run.sh:1277-1278`）ので、全セルが `absent` と同じ（P3-6） |
 | `ownerless` | `<lock>` はあるが owner が無く、中が空 |
 | `ownerless-tmp` | `<lock>` に owner が無く、旧版の `owner.tmp.<pid>` だけがある（旧版が `mkdir` と `mv` の間で死んだ。`lib.sh:173-176`）。PR1a-f I3 で、`<lock>` と tmp が猶予（600000 ms）より古く、tmp の名の pid が死んでいると示されたときだけ先頭が `lock_expire_ownerless` で tmp ごと取り除く（観測 `gone`、`ownerless` × `gone` と同じ行方）。猶予内、または書き手が生きている・不明のときは待ち、文面 `tmp`（`unknown` は `unk`）で知らせる。猶予を過ぎても残るなら人が見て消す（文面の最後） |
-| `corrupt` | owner はあるが `pid=` か `token=` が無い。生じ方は 2 つ: 取得中の SIGKILL（`lock_obs_create` が `: >` で作ってから `cat >>` で書く間。`verify-run.sh:1014-1020`。F17）と、後始末の `rm -f owner` の失敗（F15）。**PR1a-f で塞ぐ**（tmp→`mv` に戻す）。それまでは文面 `corrupt` で人に知らせ、消さない |
+| `corrupt` | owner はあるが `pid=` か `token=` が無い。生じ方は 2 つ: 取得中の SIGKILL（`lock_obs_create` が `: >` で作ってから `cat >>` で書く間。`verify-run.sh:1014-1020`。F17）と、後始末の `rm -f owner` の失敗（F15）。**PR1a-f で塞ぐ**（tmp→`mv` に戻す）。**0 バイトの owner は猶予（10 分）を過ぎたら先頭が取り除く**（PR1a-f I4。`ownerless` × `gone` と同じ行方。猶予内は待ち、文面は「空」と書く）。中身のある書きかけは誰も消さず、文面 `corrupt` で人に知らせる |
 | `own` | 呼び手の token の記録（pid＝取得した main シェルの `$$`、`lstart=`・`started_at=`・`v=1` あり、`pgid=` 無し） |
 | `other-plain` | 他の token の記録で `lstart=` が無いか空（F7）。D7 の関数を呼ばず pid だけで判定 |
 | `other-lstart` | 他の token の記録で `lstart=` があり、`kill -0` の pid の観測が alive・ESRCH・EPERM 以外の失敗のどれか。alive のとき D7 が `machine_lock_pid_identity` を呼ぶ（TZ の違いもここ。`started_at=` のある記録は `now − etime` との比較で TZ に依らず判定し、旧版の記録で `started_at=` が無ければ `lstart` の文字列が違うだけで `unknown:lstart:EMISMATCH`＝不明。PR1a-f I5 の (2)・§4.1 の 4） |
@@ -129,8 +129,8 @@ supervisor.lock だけの性質（事実）:
 | `unk` | `busy: <dir> cannot be judged (point=… path=… errno=…); not taken` | 3 |
 | `eperm` | `busy: <dir> held by pid N, which belongs to another user (EPERM): the holder may have died and its pid been reused — check and remove <dir> by hand (#4288 PR1a-f)` | 2 |
 | `queue` | `busy: queue ticket <t> (pid N) was ahead for <dir>; this supervisor withdrew its ticket and did not judge the lock` | 4 |
-| `corrupt` | `busy: <dir>/owner is not a lock record (pid= or token= missing: an acquisition died while writing it) — not taken; remove <dir> by hand when no supervisor runs (#4288 PR1a-f)` | 5 |
-| `tmp` | `busy: <dir> has no owner but holds <names> (an older supervisor died while taking it) — not taken; remove <dir> by hand (#4288 PR1a-f)` | 5 |
+| `corrupt` | 中身のある書きかけ: `busy: <dir>/owner is not a lock record (pid= or token= missing: an acquisition died while writing it) — nobody removes it; look at it and remove <dir> by hand when no supervisor runs (#4288 PR1a-f I4)`。0 バイトの owner: `busy: <dir>/owner is empty (an acquisition is writing it, or died after creating it) — not taken now; the head takes an empty owner out once it is older than the grace (PR1a-f I4, 10 minutes)`（手動削除は案内しない） | 5 |
+| `tmp` | `busy: <dir> has no owner but holds <names> (an acquisition is making it, or an older supervisor died while taking it) — not taken now; the head takes it out once <lock> and the temporaries are older than the grace (10 minutes) and the writer pid is shown gone (PR1a-f I3); if it stays longer, look at it and remove <dir> by hand` | 5 |
 | `host` | `busy: <dir> held by pid N on host <H>, not this host <h> — not judged; if the host name changed, remove <dir> by hand (#4288 PR1a-f)` | 5 |
 | `aside` | `busy: <dir> is held by a record moved aside (<gone>) that could not be put back` | 5 |
 | `rec` | `busy: <label> pid N holds <dir>`（今の文面、`lib.sh:188`） | 6 |
@@ -249,7 +249,7 @@ supervisor.lock だけの性質（事実）:
 | F17 | 取得中の SIGKILL（`: >owner` と `cat >>owner` の間。書きかけの owner） | — | 消さない | refused(corrupt)（次の取得） | kept(corrupt) | —（PR1a-f の tmp→`link` で新しい書き手は作らない。残った中身のある書きかけは `corrupt` のまま誰も消さず人が見る。0 バイトの owner は猶予〔10 分〕を過ぎたら先頭が取り除く〔I4。`ownerless` × `gone` と同じ行方で、下の別の試験〕） |
 | F18 | 旧版が `mkdir` と `mv` の間で死んだ（`owner.tmp.<pid>` だけ） | — | 消さない（猶予内） | refused(tmp) | kept(tmp) | —（猶予内の行。猶予を過ぎ書き手の pid が死んでいれば PR1a-f I3 が取り除く＝`ownerless-tmp` × `gone` の行。文面は「待つ。猶予を過ぎても残るなら人が見て消す」で、無条件の `remove by hand` ではない） |
 | F19 | owner の読み（`lock-owner`・`release-owner`・`recover-owner`・`gone-owner`・`reclaim-owner`） | EACCES・EIO | 消さない | refused(unk) | kept(unk) | release-main: deferred |
-| F20 | 退避の一覧（`list-root`・`gone-lstat`） | 失敗 | 消さない | refused(unk) | as-form（`lock_settle_gone … \|\| true` の後 canonical を読む `:2032`） | — |
+| F20 | 退避の一覧（`list-root`・`gone-lstat`） | 失敗 | 消さない | refused(unk) | as-form（`lock_settle_gone … \|\| true` の後 canonical を読む `:2032`。一覧の失敗は何も保有しない `absent`。退避の記録そのものが読めない〔`gone-lstat`・`gone-owner`〕ときだけ、記録が保有中の `kept(unk)`。ガードが `absent` を `kept` に写すのは退避の記録〔`<lock>.gone-…`〕があるときだけ〕 | — |
 | F21 | `ownerless-rmdir`（`lock_expire_ownerless`） | 失敗 | 消さない | refused(unk) | kept(unk) | — |
 | F22 | 回収の `rename-aside`（`:1463`） | ENOENT（誰かが先に消した） | 消さない | acquired / mine | absent / absent | — |
 | F23 | 同上 | その他 | 消さない | refused(rec)（`lock_recover` は unknown を記さない `:1467`） | kept | — |
@@ -260,10 +260,11 @@ supervisor.lock だけの性質（事実）:
 | F28 | 解放の `rm -rf <lock>`（`machine-lock.sh:241`、`\|\| true`） | 失敗 | 消さない | — | — | release-main: released / unchanged（答えが実態と違う＝本文に無い指摘） |
 | F29 | 札の `ln`（`lock_take_ticket` `:1212`） | EEXIST 以外 | 消さない | refused(taking) / none-taken（不明を記さず札も残らないので、文面の出どころから導けるのは `taking`。PM Claude P2-B） | not-head / none-taken | — |
 | F30 | 札の列の一覧（`list-queue`） | 失敗 | 消さない | refused(unk) | not-head(unk) | — |
-| F31 | 自分の札の `lock_mark_done` | 失敗 | 消さない | acquired / mine / left-until-retirable | as-form | acquire-behind: refused(queue) / unchanged / left-until-retirable、guard-behind: not-head / unchanged / left-until-retirable（後ろの呼び手も期限の枝で自分の札を取り下げる `:1698`・`:1908`。P3-5 の列挙で書き足した）。札は pid の死か期限＋60 秒で外れる。その間ガード・他の取得は `not-head`・`queue` |
+| F31 | 自分の札の `lock_mark_done` | 失敗 | 消さない | acquired / mine / left-until-retirable | removed / absent / left-until-retirable（§2 の `other-plain` × `gone` と同じく死んだ記録は消す。札だけが残る） | acquire-behind: refused(queue) / unchanged / left-until-retirable、guard-behind: not-head / unchanged / left-until-retirable（後ろの呼び手も期限の枝で自分の札を取り下げる `:1698`・`:1908`。P3-5 の列挙で書き足した）。札は pid の死か期限＋60 秒で外れる。その間ガード・他の取得は `not-head`・`queue` |
 | F32 | 前の札の `ps -o etime=`（`lock_pid_start_ms` `:1129`） | 失敗 | 消さない | refused(queue) | not-head | —（再利用と読まず、待つ） |
 | F33 | 読み込み口（`machine_lock_load`） | `verify-run.sh` が無い・印が 1 つずつでない・`set -e` | 消さない | refused(loader) | unloaded(loader) / none-taken | acquire-behind: refused(loader)、guard-behind: unloaded(loader) / none-taken（読み込みが無ければ札を取らないので head と同じ行。P3-5 の列挙で書き足した）、release-main: none |
-| F34 | `reclaim-rename`・`reclaim-rmdir`（戻しが不明な間の空の `<lock>`） | 失敗 | 消さない | refused(unk) | kept(unk) | —（駆動するのは `reclaim-rmdir`。`reclaim-rename` の失敗は、空の `<lock>` を取り除いた後なので不明を記さず先頭が `<lock>` を取る〔acquired / mine〕。これは PR1a-f の部品〔`lock_reclaim_gone`〕の動きで PR1c の範囲外のため、直さず「本文に無い指摘」として返す） |
+| F34a | `reclaim-rmdir`（戻しが不明な間の空の `<lock>` を取り除けない） | 失敗 | 消さない | refused(unk) | kept(unk) | — |
+| F34b | `reclaim-rename`（空の `<lock>` を取り除いた後の、死んだ退避の rename） | 失敗 | 消さない | **未決**（PM の調査待ち: 不明を記さず先頭が `<lock>` を取る〔acquired / mine〕のが安全な表の誤りか、PR1a-f の `lock_reclaim_gone` の欠陥か。pm-investigate-4288-f34-rename.md） | **未決** | 口 `reclaim-rename=EIO` で駆動はする（rename に届くことだけを見る）。期待は書かず試験は `it.todo`。PR1a-f の部品は直さない |
 
 使わないもの（事実）: supervisor.lock の経路は **tmux を呼ばない**（`lib.sh:121-205` と読み込み口の節に tmux は無い）。`lock_drain_group`（`KILL_GRACE_SEC`）・`lock_hand_off`・`lock_child_wait`・`lock_release_as_head` も呼ばない（S5・S7）。
 

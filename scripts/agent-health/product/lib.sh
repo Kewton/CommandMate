@@ -336,9 +336,14 @@ product_lock_recover_only() {
     PRODUCT_LOCK_RESULT=$LRO_RESULT
     # A put-back that failed leaves no <lock> and a moved-aside record that still holds: lock_recover_only
     # reads the missing <lock> as "absent", but the lock is held by the record aside (design §3 F25/F26: kept).
-    if [ "$LRO_RESULT" = absent ] && [ -n "${LOCK_GONE_PENDING-}" ]; then PRODUCT_LOCK_RESULT=kept; fi
+    # Only a moved-aside record (<lock>.gone-…) counts: a failed listing of the directory (F20, pending names the
+    # directory) holds nothing and stays the absent form the table gives it.
+    if [ "$LRO_RESULT" = absent ] && [ -n "${LOCK_GONE_PENDING-}" ]; then
+        case "$(basename "${LOCK_GONE_PENDING% unreadable}")" in *.gone-*) PRODUCT_LOCK_RESULT=kept ;; esac
+    fi
     unknown=${LRO_UNKNOWN-}
-    case "$LRO_RESULT" in
+    # The message follows the result as converted, not the one lock_recover_only returned.
+    case "$PRODUCT_LOCK_RESULT" in
         kept)
             product_lock_kind "$unknown" "" ""
             case "$PRODUCT_LOCK_KIND" in

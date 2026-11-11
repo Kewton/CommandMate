@@ -471,6 +471,7 @@ const EXCLUSIONS = {
   unheld: 'no hold mark: the release answers none before it reads anything',
   'own-pid-only': "the release observes only its own record and $$, never another holder's pid, lstart or host",
   'not-on-path': "this caller's function never passes the point (an acquisition-only, release-only or guard-only point)",
+  'pending-pm': "the expected outcome waits for the PM's F34 rename investigation (it.todo below; the fault is driven, nothing is compared)",
   'no-effect': "the release passes it (lock_release_own_gone) but no own moved-aside record exists for supervisor.lock: nothing changes",
 } as const;
 type Exclusion = keyof typeof EXCLUSIONS;
@@ -722,7 +723,8 @@ const FAILURE_TABLE = {
     callers: {
       'acquire-head': r('acquired', 'mine', 'left-until-retirable'),
       'acquire-behind': r('refused', 'unchanged', 'left-until-retirable', 'queue'),
-      'guard-head': AS_FORM,
+      // the dead record of other-plain × gone is removed as in §2, but the ticket stays: the mark-done that failed is the one of this ticket
+      'guard-head': r('removed', 'absent', 'left-until-retirable'),
       'guard-behind': r('not-head', 'unchanged', 'left-until-retirable'),
     },
     excluded: { 'release-main': 'not-on-path', 'release-unheld': 'unheld' },
@@ -748,12 +750,21 @@ const FAILURE_TABLE = {
     },
     excluded: { 'release-unheld': 'unheld' },
   }),
-  'F34-reclaim-rename-or-rmdir': failure({
+  'F34a-reclaim-rmdir': failure({
     point: 'reclaim-rmdir (an empty <lock> left by a put-back that stopped half way, with the moved-aside dead record still there)',
-    errno: 'any (the reclaim-rename half: a failed rename after the empty <lock> was taken out notes nothing unknown, so the head takes the lock — see the report of this change; not driven)',
+    errno: 'any',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
     excluded: { ...BEHIND, ...NO_RELEASE },
+  }),
+  // The expected outcome waits for the PM's investigation (pm-investigate-4288-f34-rename.md: is `acquired / mine` after a
+  // failed rename safe — a mistake of the table — or a defect of PR1a-f's lock_reclaim_gone?). Driven below, not compared.
+  'F34b-reclaim-rename': failure({
+    point: 'reclaim-rename (the dead moved-aside record is renamed away after the empty <lock> was taken out)',
+    errno: 'any (reclaim-rename=EIO)',
+    direction: 'keep',
+    callers: {},
+    excluded: { ...BEHIND, ...NO_RELEASE, 'acquire-head': 'pending-pm', 'guard-head': 'pending-pm' },
   }),
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
@@ -773,7 +784,7 @@ const COUNTS = {
   rows: 185,
   rejected: 39,
   impossible: 73,
-  failures: 34,
+  failures: 35,
   rejections: 9,
   loaderRows: 5,
 } as const;
@@ -1333,8 +1344,6 @@ interface Fixture {
   goneLeft?: boolean;
   /** a live ticket of another process ahead, whatever the caller (createdAt in ms when given) */
   ahead?: { createdAt?: number };
-  /** the ticket column when it differs from the table's (F31: the ticket stays) */
-  ticket?: TicketEnd;
   /** the §2 cell the failure leaves the caller with (the table says `asForm`) */
   asForm?: { form: Form; obs: Obs };
 }
@@ -1919,6 +1928,13 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
   };
   const callerIsRelease = (c: Caller): boolean => c === 'release-main';
 
+  /** a put-back stopped half way (an empty <lock>) while the dead record is still aside */
+  const f34Fixture = (base: string, caller: Caller, fault: string): Fixture => {
+    const fx = makeFixture('aside', 'gone', base, caller);
+    fs.mkdirSync(lockOf(base), { recursive: true });
+    return { ...fx, env: { CM_VERIFY_TEST_OBS_FAULT: fault } };
+  };
+
   type SpecFn = (base: string, caller: ReachableCaller, aux: string) => Fixture;
   const SPECS: Record<Failure, SpecFn | undefined> = {
     'F1-kill0-eperm': (base) => ({ env: {}, before: writeLock(base, recordText({ pid: 1, startedAt: isoNow() })) }),
@@ -2028,7 +2044,8 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
         : { env: { CM_VERIFY_TEST_OBS_FAULT: 'list-queue=EIO' } },
     'F31-mark-done': (base, caller) => {
       const stay = 'lock_mark_done() { return 1; }\n';
-      if (caller === 'guard-head') return onForm('other-plain', 'gone', base, caller, { bashPre: stay, ticket: 'left-until-retirable' });
+      // the guard meets the dead record of other-plain × gone (the table's row says what is left)
+      if (caller === 'guard-head') return onForm('other-plain', 'gone', base, caller, { bashPre: stay });
       return { env: {}, bashPre: stay };
     },
     'F32-ps-etime': (_base, _caller, aux) => {
@@ -2038,12 +2055,13 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
       return { env: { PATH: `${path.join(aux, 'bin')}:${process.env.PATH ?? ''}` }, ahead: { createdAt: 1000 } };
     },
     'F33-loader': undefined,
-    'F34-reclaim-rename-or-rmdir': (base, caller) => {
-      // a put-back stopped half way (an empty <lock>) while the dead record is still aside; the empty <lock> cannot be taken out
-      const fx = makeFixture('aside', 'gone', base, caller);
-      fs.mkdirSync(lockOf(base), { recursive: true });
-      return { ...fx, env: { CM_VERIFY_TEST_OBS_FAULT: 'reclaim-rmdir=EIO' } };
-    },
+    'F34a-reclaim-rmdir': (base, caller) => f34Fixture(base, caller, 'reclaim-rmdir=EIO'),
+    // the rename of the dead record fails after the empty <lock> was taken out; every call of lock_obs_mv is logged
+    // (aux/mv.log) so that a test can show the fault reached the rename without comparing the contested outcome
+    'F34b-reclaim-rename': (base, caller, aux) => ({
+      ...f34Fixture(base, caller, 'reclaim-rename=EIO'),
+      bashPre: `${orig('lock_obs_mv')}lock_obs_mv() { echo "$1" >>'${aux}/mv.log'; orig_lock_obs_mv "$@"; }\n`,
+    }),
   };
 
   function driveFailure(key: Failure, caller: ReachableCaller): void {
@@ -2055,7 +2073,7 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
     const fx = spec(base, caller, aux);
     const cell = ('asForm' in outcome ? (TABLE as Table)[fx.asForm?.form as Form][caller][fx.asForm?.obs as Obs] : outcome) as Row<Caller>;
     const d = runWith(caller, base, fx);
-    assertOutcome({ ...cell, ticket: fx.ticket ?? cell.ticket }, d, caller, `${key} × ${caller}`);
+    assertOutcome(cell, d, caller, `${key} × ${caller}`);
   }
 
   /** F33: the machine lock did not load. */
@@ -2074,6 +2092,19 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
     const beforeSnap = snap(base);
     const res = bashLib(base, callBody(caller, fx, base), fx.env, path.join(tree, 'scripts/agent-health/product/lib.sh'));
     assertOutcome(outcome, { ran: parseReport(res.stdout, res.stderr, base), fx, base, beforeSnap }, caller, `F33-loader × ${caller}`);
+  }
+
+  // F34b: the fault is driven (the rename is reached); the expected outcome is not written until the PM's investigation is back
+  for (const caller of ['acquire-head', 'guard-head'] as const) {
+    it.skipIf(!HAS_TOOLS)(`F34b-reclaim-rename × ${caller}: the injected rename failure is reached (outcome not compared)`, () => {
+      const base = mkTmp('cm-sup-lock-');
+      const aux = mkTmp('cm-sup-aux-');
+      const fx = SPECS['F34b-reclaim-rename']?.(base, caller, aux) as Fixture;
+      const d = runWith(caller, base, fx);
+      expect(fs.readFileSync(path.join(aux, 'mv.log'), 'utf8').split('\n')).toContain('reclaim-rename');
+      expect(typeof d.ran.result).toBe('string');
+    }, 60_000);
+    it.todo(`F34b-reclaim-rename × ${caller}: expected outcome — waits for the PM's F34 investigation (pm-investigate-4288-f34-rename.md)`);
   }
 
   for (const o of FAILURE_OUTCOMES) {
@@ -2234,4 +2265,23 @@ describe('Issue #4288 PR1c lib.sh details the tables do not name (PM Claude P3-2
     const ran = parseReport(res.stdout, res.stderr, base);
     expect(ran.result, res.stderr).toBe('acquired');
   });
+
+  // codex P3-1 / PM Claude P3-1: the guard turns `absent` into `kept` only for a moved-aside record, and its message follows the converted result
+  it.skipIf(!HAS_TOOLS)('F20 × guard-head, absent form: a failed listing of the directory holds nothing — absent, no kept, no message (as the §2 cell)', () => {
+    const base = mkTmp('cm-sup-lock-');
+    const d = runWith('guard-head', base, { env: { CM_VERIFY_TEST_OBS_FAULT: 'list-root=EIO' } });
+    expect(d.ran.result).toBe('absent');
+    expect(d.ran.kind).toBe('');
+    expect(d.ran.error).toBe('');
+    expect(d.ran.rc).toBe(0);
+  }, 60_000);
+
+  it.skipIf(!HAS_TOOLS)('F20 × guard-head, aside form: a moved-aside record that cannot be read is kept, and the guard says unk', () => {
+    const base = mkTmp('cm-sup-lock-');
+    const fx = makeFixture('aside', 'gone', base, 'guard-head');
+    const d = runWith('guard-head', base, { ...fx, env: { ...fx.env, CM_VERIFY_TEST_OBS_FAULT: 'gone-lstat=EIO' } });
+    expect(d.ran.result).toBe('kept');
+    expect(d.ran.kind).toBe('unk');
+    expect(d.ran.error).toContain('cannot be judged');
+  }, 60_000);
 });
