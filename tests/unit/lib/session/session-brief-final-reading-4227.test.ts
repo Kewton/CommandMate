@@ -3,11 +3,11 @@
  * `docs/design/mem-ui-4227.md` §3.2 table (b) and §11.22 #20).
  *
  * Whatever the plan left a `full` / `decline` send with ({@link STRICT_PLAN_OUTCOMES}: planned,
- * used up, empty, refused, a command), the claim reads the instance's current row again under the
+ * used up, empty, refused — pr3f: a command is no longer one, it stops at the plan), the claim reads the instance's current row again under the
  * input lock, right before the body. The table: every plan outcome × {the same boundary, A → B
  * while the send waited for the lock (a `/clear` typed by the send holding it)} × {full, decline}.
  *  - the same boundary: as the design's table says (the brief, the body alone, `consumed`,
- *    `empty`, the plan's abort, the command typed as it is);
+ *    `empty`, the plan's abort);
  *  - A → B: 409 `brief_choice`, the body not typed, B still `pending`.
  * The rows are built from {@link STRICT_PLAN_OUTCOMES}: an outcome added there with no scenario
  * here fails the type check (`satisfies Record<StrictPlanOutcome, …>`).
@@ -68,7 +68,10 @@ import {
   type SendOptions,
   type World,
 } from './session-brief-4274-harness';
-import { addAgentInstance } from '@/lib/db/agent-instances-db';
+import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
+import { recreateWorktree } from './brief-d2-4224-harness';
+import { withInstanceInputLock } from '@/lib/session/instance-input-lock';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { getBoundaryById, getCurrentBoundary } from '@/lib/db/session-brief-db';
 import { STRICT_PLAN_OUTCOMES, type StrictPlanOutcome } from '@/lib/session/session-brief';
 import type { BriefRequest } from '@/lib/session/brief-provider';
@@ -230,27 +233,6 @@ const SCENARIOS = {
       },
     },
   },
-  slash_command: {
-    full: {
-      body: '/model',
-      arrange: () => void fakeProvider(),
-      same: ({ result }, a) => {
-        expect(result.ok).toBe(true);
-        expect(typed(world, 'claude').at(-1)).toBe('/model');
-        expect(stateOf(a)).toBe('pending');
-      },
-    },
-    decline: {
-      body: '/model',
-      arrange: () => void fakeProvider(),
-      same: ({ result, report }, a) => {
-        expect(result.ok).toBe(true);
-        expect(typed(world, 'claude').at(-1)).toBe('/model');
-        expect(report).toEqual({ state: 'skipped', reason: 'slash_command' });
-        expect(stateOf(a)).toBe('pending');
-      },
-    },
-  },
 } satisfies Record<StrictPlanOutcome, Record<Choice, Scenario | typeof NOT_REACHABLE>>;
 
 interface Row {
@@ -268,8 +250,9 @@ const ROWS: Row[] = STRICT_PLAN_OUTCOMES.flatMap((outcome) =>
 );
 
 describe('H21 (pr3d) the final reading: every plan outcome × {same boundary, A → B while waiting for the lock} × {full, decline}', () => {
-  it('the table covers every reachable cell (9 scenarios × 2 boundaries)', () => {
-    expect(ROWS).toHaveLength(18);
+  // pr3f (PM decision 5): `slash_command` left the outcomes (a strict command stops at the plan): 7 scenarios.
+  it('the table covers every reachable cell (7 scenarios × 2 boundaries)', () => {
+    expect(ROWS).toHaveLength(14);
   });
 
   it.each(ROWS.map((row) => [`${row.outcome} × ${row.boundary} × ${row.choice}`, row] as const))('%s', async (_name, row) => {
@@ -378,8 +361,30 @@ describe('H21 (b2) command-code: used up at the plan, A → B while waiting for 
 // to take) send as the design's table (b) says, for both tools.
 // ---------------------------------------------------------------------------
 
-type Change = 'none' | 'a_to_b' | 'other_takes_a' | 'mode_off' | 'inject_off' | 'membership';
-const CHANGES: Change[] = ['none', 'a_to_b', 'other_takes_a', 'mode_off', 'inject_off', 'membership'];
+// pr3f (PM `pm-return-4227-pr3e.md` 6, PM Claude P2-1・P3-1): the predicate's axes the table missed —
+// the instance deleted and made again (condition 4), the worktree deleted and made again (condition 1),
+// and another process's claim on A (condition 5's `claimed`; two servers on one DB).
+type Change =
+  | 'none'
+  | 'a_to_b'
+  | 'other_takes_a'
+  | 'mode_off'
+  | 'inject_off'
+  | 'membership'
+  | 'instance_remade'
+  | 'worktree_remade'
+  | 'seeded_claim';
+const CHANGES: Change[] = [
+  'none',
+  'a_to_b',
+  'other_takes_a',
+  'mode_off',
+  'inject_off',
+  'membership',
+  'instance_remade',
+  'worktree_remade',
+  'seeded_claim',
+];
 type Tool = Extract<BoundaryTool, 'claude' | 'command-code'>;
 const TOOLS: Tool[] = ['claude', 'command-code'];
 
@@ -489,27 +494,6 @@ const TOOL_SCENARIOS = {
       },
     },
   },
-  slash_command: {
-    full: {
-      body: '/model',
-      arrange: () => void fakeProvider(),
-      same: ({ result }, a, tool) => {
-        expect(result.ok).toBe(true);
-        expect(typed(world, tool).at(-1)).toBe('/model');
-        expect(stateOf(a)).toBe('pending');
-      },
-    },
-    decline: {
-      body: '/model',
-      arrange: () => void fakeProvider(),
-      same: ({ result, report }, a, tool) => {
-        expect(result.ok).toBe(true);
-        expect(typed(world, tool).at(-1)).toBe('/model');
-        expect(report).toEqual({ state: 'skipped', reason: 'slash_command' });
-        expect(stateOf(a)).toBe('pending');
-      },
-    },
-  },
 } satisfies Record<StrictPlanOutcome, Record<Choice, ToolScenario | typeof NOT_REACHABLE>>;
 
 /**
@@ -532,6 +516,12 @@ function expectedOf(outcome: StrictPlanOutcome, change: Change): Expected {
       return { kind: 'aborted', reason: 'disabled' };
     case 'membership':
       return { kind: 'aborted', reason: 'settings_changed' };
+    case 'instance_remade':
+      return { kind: 'aborted', reason: 'incarnation_changed' };
+    case 'worktree_remade':
+      return { kind: 'aborted', reason: 'worktree_changed' };
+    case 'seeded_claim':
+      return { kind: 'aborted', reason: 'claimed' };
     default: {
       const unknownChange: never = change;
       throw new Error(`unknown change: ${String(unknownChange)}`);
@@ -552,24 +542,55 @@ const TOOL_ROWS: ToolRow[] = STRICT_PLAN_OUTCOMES.flatMap((outcome) =>
     CHOICES.flatMap((choice) => {
       const scenario: ToolScenario | typeof NOT_REACHABLE = TOOL_SCENARIOS[outcome][choice];
       if (scenario === NOT_REACHABLE) return [];
+      // A used-up row cannot be claimed (`claimBoundary` takes `pending` only): no seeded claim.
+      if (outcome === 'used_up' && change === 'seeded_claim') return [];
       return TOOLS.map((tool) => ({ outcome, change, choice, tool, scenario, expected: expectedOf(outcome, change) }));
     })
   )
 );
 
-/** The holder: a send that keeps the input lock (the outer one for command-code too) while it types. */
-function holderOf(row: ToolRow, a: string): { body: string; options: SendOptions } {
-  // A `/clear` opens B when it lands.
-  if (row.change === 'a_to_b') return { body: '/clear', options: {} };
-  // A plan that refused takes no lock of its own: any holder will do.
-  if (row.outcome === 'refused') return { body: 'hold', options: { brief: 'skip' } };
-  // A strict command takes the outer lock and leaves A as it is (the scenario's own command is `/model`).
-  return { body: '/status', options: { briefDetail: 'full', briefBoundary: a } };
+/**
+ * The holder: something that keeps the input lock (the outer one for command-code too) while the
+ * choosing send waits. A `/clear` (A → B) is typed under it and opens B when it lands; otherwise the
+ * lock is held as such, with nothing typed and A left as it is (pr3f: before, a strict `/status` send
+ * held it — a command with a strict choice is a 400 now, and the service stops it at its plan).
+ */
+async function holdFor(row: ToolRow): Promise<{ release: () => void; holder: Promise<unknown> }> {
+  if (row.change === 'a_to_b') return holdTheLock(row.tool, '/clear');
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held!: () => void;
+  const admitted = new Promise<void>((resolve) => (held = resolve));
+  const holder = withInstanceInputLock(resolveSessionName(row.tool, WT, row.tool), async () => {
+    held();
+    await gate;
+  });
+  await admitted;
+  return { release, holder };
+}
+
+/** pr3f: the change made while the choosing send waits for the lock (after its plan). */
+function makeChange(row: ToolRow, a: string): void {
+  const { tool } = row;
+  if (row.change === 'mode_off') setMem(world, 'off', true);
+  if (row.change === 'inject_off') setMem(world, 'on', false);
+  if (row.change === 'membership') world.branch = 'feature/b';
+  if (row.change === 'instance_remade') {
+    // PM Claude P2-1: deleted and made again under the same id, not launched (the dead row stays current).
+    removeAgentInstance(world.db, WT, tool);
+    addAgentInstance(world.db, WT, { id: tool, cliTool: tool, alias: '', order: tool === 'claude' ? 0 : 1 });
+  }
+  if (row.change === 'worktree_remade') recreateWorktree(world);
+  if (row.change === 'seeded_claim') {
+    // PM Claude P3-1: another server on the same DB claimed A (its token is not this process's).
+    world.db.prepare("UPDATE session_brief_boundaries SET state = 'claimed', claim_token = 'another-process:x' WHERE id = ?").run(a);
+  }
 }
 
 describe('H21 (pr3e) the final reading is one predicate: plan outcome × change while waiting × {full, decline} × {claude, command-code}', () => {
-  it('the table covers every reachable cell (9 scenarios × 6 changes × 2 tools)', () => {
-    expect(TOOL_ROWS).toHaveLength(9 * CHANGES.length * TOOLS.length);
+  // pr3f: 7 scenarios (no `slash_command`) × 9 changes × 2 tools, less used up × a seeded claim (2 choices × 2 tools).
+  it('the table covers every reachable cell (7 scenarios × 9 changes × 2 tools − used up × seeded claim)', () => {
+    expect(TOOL_ROWS).toHaveLength(7 * CHANGES.length * TOOLS.length - 2 * TOOLS.length);
   });
 
   it.each(TOOL_ROWS.map((row) => [`${row.tool}: ${row.outcome} × ${row.change} × ${row.choice}`, row] as const))('%s', async (_name, row) => {
@@ -578,8 +599,7 @@ describe('H21 (pr3e) the final reading is one predicate: plan outcome × change 
     launch(tool);
     const a = shown(tool);
     await row.scenario.arrange(tool);
-    const holding = holderOf(row, a);
-    const { release, holder } = await holdTheLock(tool, holding.body, holding.options);
+    const { release, holder } = await holdFor(row);
     // Another send that plans A while it is pending and queues before the choosing send. With
     // `injectOnStart` off (`refused`) its plan uses A up at once (D1's `disabled`): it goes after
     // the choosing send has planned, so that the choosing send still plans its refusal.
@@ -594,9 +614,7 @@ describe('H21 (pr3e) the final reading is one predicate: plan outcome × change 
       await ticks(200);
     }
     expect(shown(tool)).toBe(a);
-    if (row.change === 'mode_off') setMem(world, 'off', true);
-    if (row.change === 'inject_off') setMem(world, 'on', false);
-    if (row.change === 'membership') world.branch = 'feature/b';
+    makeChange(row, a);
     release();
     await holder;
     if (other) expect((await other).result.ok).toBe(true);
@@ -613,5 +631,9 @@ describe('H21 (pr3e) the final reading is one predicate: plan outcome × change 
     expect(skipReasonOf(a)).not.toBe('declined');
     if (row.change === 'a_to_b') expect(stateOf(shown(tool))).toBe('pending');
     if (row.change === 'other_takes_a' && row.outcome !== 'refused') expect(stateOf(a)).toBe('sent');
+    // pr3f: the abort leaves A as the change left it.
+    if (row.change === 'seeded_claim') expect(getBoundaryById(world.db, a)?.claimToken).toBe('another-process:x');
+    const untouched: Change[] = ['none', 'mode_off', 'inject_off', 'membership', 'instance_remade'];
+    if (row.outcome !== 'used_up' && untouched.includes(row.change)) expect(stateOf(a)).toBe('pending');
   });
 });

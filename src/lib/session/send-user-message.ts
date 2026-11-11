@@ -213,6 +213,13 @@ export type SendBriefParams =
 /** What {@link sendUserMessage} takes: the parameters and the brief's. */
 export type SendUserMessageRequest = SendUserMessageParams & SendBriefParams;
 
+/**
+ * Issue #4227 (pr3f, PM decision 5): a caller whose type names a strict choice (`brief: 'decline'`,
+ * `briefDetail: 'full'`) names the boundary it was chosen for too (`briefBoundary`), or it does not
+ * compile. The route's body is validated at run time instead (`validateBriefChoice`: 400).
+ */
+export type StrictBriefNamesBoundary<P> = P extends { brief: 'decline' } | { briefDetail: 'full' } ? { briefBoundary: string } : unknown;
+
 /** Result of {@link sendUserMessage}. */
 export type SendUserMessageResult =
   | { ok: true; message: ChatMessage }
@@ -347,9 +354,9 @@ function typedBodyFor(cliTool: ICLITool, content: string, absoluteImagePath: str
  * result with the failing stage; the caller decides how to surface the error.
  * DB record failures throw (same as before the extraction).
  */
-export async function sendUserMessage(
+export async function sendUserMessage<P extends SendUserMessageRequest>(
   db: Database.Database,
-  params: SendUserMessageRequest
+  params: P & StrictBriefNamesBoundary<P>
 ): Promise<SendUserMessageResult> {
   const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel, respondAgent } = params;
   // Issue #4065: read once, before the first await — a send granted while this

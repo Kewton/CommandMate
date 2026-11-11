@@ -1717,7 +1717,9 @@ export interface ChatMessage {
      * `lifetime_unpinned` — the entrance had no evidence of the worktree's lifetime. A send whose
      * pin is not proven `same` writes nothing on the ledger (D2 design §20); an `unknown` delivery
      * may carry `worktree_changed` when its claim could not be recorded for that reason.
-     * Issue #4227: `declined` — the screen's "don't read" used the boundary up.
+     * Issue #4227: `declined` — the screen's "don't read" used the boundary up. With `not_sent`,
+     * `claim_held` (pr3f) — the body was not typed and the boundary could not be put back to
+     * `pending`: it stays claimed by this server, whose next `full` / `decline` send is 409 `claimed`.
      */
     reason?: string;
     boundaryId?: string;

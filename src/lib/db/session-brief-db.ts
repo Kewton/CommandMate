@@ -425,15 +425,24 @@ export function settleBoundaryClaim(
  * been (`unknown`) uses the boundary up as `skipped(declined)` — only the claim this send
  * holds (`claimed` with the same token). A body that never went in (`not_sent`) is
  * {@link settleBoundaryClaim}'s, which puts the row back to `pending`.
+ *
+ * pr3f (S-B-commit): `full`'s empty brief is claimed the same way and settled here as
+ * `skipped(empty)` (`reason`), never used up before the body went in.
  */
-export function settleDeclinedClaim(db: Database.Database, id: string, claimToken: string, now: number): boolean {
+export function settleDeclinedClaim(
+  db: Database.Database,
+  id: string,
+  claimToken: string,
+  now: number,
+  reason: Extract<BoundarySkipReason, 'declined' | 'empty'> = 'declined'
+): boolean {
   return (
     db
       .prepare(
-        `UPDATE session_brief_boundaries SET state = 'skipped', skip_reason = 'declined', settled_at = ?, claim_token = NULL
+        `UPDATE session_brief_boundaries SET state = 'skipped', skip_reason = ?, settled_at = ?, claim_token = NULL
          WHERE id = ? AND state = 'claimed' AND claim_token = ?`
       )
-      .run(now, id, claimToken).changes === 1
+      .run(reason, now, id, claimToken).changes === 1
   );
 }
 

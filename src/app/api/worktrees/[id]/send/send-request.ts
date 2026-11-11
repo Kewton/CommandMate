@@ -12,6 +12,7 @@ import {
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { respondAgentFor } from '@/lib/session/respond-target';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
+import { BOUNDARY_TOOLS, isSlashCommandBody } from '@/lib/session/session-boundary';
 import type { SendRoleRequest } from './send-role';
 import {
   validateCopilotModelName,
@@ -98,6 +99,20 @@ export function validateBriefChoice(body: Pick<SendMessageRequest, 'brief' | 'br
   return null;
 }
 
+/** Issue #4227 (pr3f): a choice made for one boundary — `decline`, or `full`. */
+function isStrictBriefChoice(body: Pick<SendMessageRequest, 'brief' | 'briefDetail'>): boolean {
+  return body.brief === 'decline' || (body.brief === undefined && body.briefDetail === 'full');
+}
+
+/**
+ * Issue #4227 (pr3f, PM decision 5 — narrowed, not handled): the combinations the screen never sends
+ * (design §3.2.1: no choice for a command, nor for a tool without session boundaries) are refused
+ * here, before anything is resolved or written. The service stops them too (`slash_command`,
+ * `unsupported`); this answers them as the caller's mistake (400), with fixed words.
+ */
+export const STRICT_BRIEF_NOT_FOR_COMMAND = "brief 'decline' and briefDetail 'full' are not for a slash command";
+export const STRICT_BRIEF_NOT_FOR_TOOL = "brief 'decline' and briefDetail 'full' are only for a tool with session boundaries";
+
 /**
  * One step of the send handler (Issue #4055): its value, or the answer the
  * handler returns as is. `response` may be a promise — an answer the step
@@ -150,6 +165,10 @@ export function validateSendRequest(
         { status: 400 }
       ),
     };
+  }
+  const strictBrief = isStrictBriefChoice(body);
+  if (strictBrief && isSlashCommandBody(trimmedContent)) {
+    return { ok: false, response: NextResponse.json({ error: STRICT_BRIEF_NOT_FOR_COMMAND }, { status: 400 }) };
   }
 
   // Validate the requested CLI tool ID (DR4-002: fixed error text, no raw
@@ -212,6 +231,9 @@ export function validateSendRequest(
   // check this line used to carry had become unreachable. The one that still
   // matters is the check on `body.cliToolId` above, which runs on raw input.
   const cliToolId = resolution.target.cliToolId;
+  if (strictBrief && !BOUNDARY_TOOLS.has(cliToolId)) {
+    return { ok: false, response: NextResponse.json({ error: STRICT_BRIEF_NOT_FOR_TOOL }, { status: 400 }) };
+  }
 
   const modelRefusal = validateSendModel(body.model, cliToolId);
   if (modelRefusal) return { ok: false, response: modelRefusal };

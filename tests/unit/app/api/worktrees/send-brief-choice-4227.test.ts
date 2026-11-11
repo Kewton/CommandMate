@@ -73,7 +73,11 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
-import { validateBriefChoice } from '@/app/api/worktrees/[id]/send/send-request';
+import {
+  STRICT_BRIEF_NOT_FOR_COMMAND,
+  STRICT_BRIEF_NOT_FOR_TOOL,
+  validateBriefChoice,
+} from '@/app/api/worktrees/[id]/send/send-request';
 
 const WORKTREE_ID = 'wt-4227-send';
 
@@ -135,7 +139,8 @@ describe('[#4227 S-B] POST /send: the choice reaches the service, its abort is 4
       path: '/path/to/wt-4227-send',
       repositoryPath: '/path/to/repo',
       repositoryName: 'repo',
-      cliToolId: 'antigravity',
+      // pr3f (PM decision 5): a strict choice is for a tool with session boundaries (else 400).
+      cliToolId: 'command-code',
     };
     upsertWorktree(db, worktree);
   });
@@ -188,5 +193,75 @@ describe('[#4227 S-B] POST /send: the choice reaches the service, its abort is 4
     const response = await post({ content: 'hello' });
     expect(response.status).not.toBe(409);
     expect(JSON.stringify(await response.json())).not.toContain('boundary_changed');
+  });
+});
+
+/**
+ * pr3f (PM decision 5, root-cause §5): the combinations the screen never sends are narrowed at the
+ * route — a strict choice (`decline`, `full`) with a slash command, or for a tool without session
+ * boundaries, is 400 and the service is never called. Negative controls: the same bodies without a
+ * choice, and the screen's `short` with its boundary (design §3.2.1's table sends it), go on.
+ */
+describe('[#4227 pr3f] POST /send: a strict choice the screen never sends is 400, nothing resolved or sent', () => {
+  let db: Database.Database;
+
+  beforeEach(async () => {
+    db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    runMigrations(db);
+    const { setMockDb } = await import('@/lib/db/db-instance');
+    setMockDb(db);
+    vi.clearAllMocks();
+    hasSession.mockResolvedValue(true);
+    capturePane.mockResolvedValue('');
+    sendUserMessage.mockResolvedValue({ ok: true, message: { id: 1, worktreeId: WORKTREE_ID, role: 'user', content: 'hi' } });
+  });
+
+  afterEach(async () => {
+    const { closeDbInstance } = await import('@/lib/db/db-instance');
+    closeDbInstance();
+    db.close();
+  });
+
+  const worktreeOf = (cliToolId: Worktree['cliToolId']): Worktree => ({
+    id: WORKTREE_ID,
+    name: 'Send 4227',
+    path: '/path/to/wt-4227-send',
+    repositoryPath: '/path/to/repo',
+    repositoryName: 'repo',
+    cliToolId,
+  });
+
+  it.each([
+    ['decline', { brief: 'decline', briefBoundary: 'b-1' }],
+    ['full', { briefDetail: 'full', briefBoundary: 'b-1' }],
+  ] as const)('%s × `/model` → 400, the service not called', async (_name, choice) => {
+    upsertWorktree(db, worktreeOf('command-code'));
+    const response = await post({ content: '/model', ...choice });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: STRICT_BRIEF_NOT_FOR_COMMAND });
+    expect(sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['decline', { brief: 'decline', briefBoundary: 'b-1' }],
+    ['full', { briefDetail: 'full', briefBoundary: 'b-1' }],
+  ] as const)('%s for antigravity (no session boundaries) → 400, the service not called', async (_name, choice) => {
+    upsertWorktree(db, worktreeOf('antigravity'));
+    const response = await post({ content: 'hello', ...choice });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: STRICT_BRIEF_NOT_FOR_TOOL });
+    expect(sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['`/model` with no choice', 'command-code', { content: '/model' }],
+    ['`/model` with the screen’s short and its boundary', 'command-code', { content: '/model', briefDetail: 'short', briefBoundary: 'b-1' }],
+    ['antigravity with no choice', 'antigravity', { content: 'hello' }],
+    ['antigravity with short and its boundary', 'antigravity', { content: 'hello', briefDetail: 'short', briefBoundary: 'b-1' }],
+  ] as const)('negative: %s goes on to the service', async (_name, tool, body) => {
+    upsertWorktree(db, worktreeOf(tool));
+    await post(body);
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
   });
 });

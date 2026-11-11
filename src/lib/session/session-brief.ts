@@ -46,6 +46,7 @@ import {
   settleStaleClaim,
   skipBoundary,
   type BoundaryOutcome,
+  type BoundaryRow,
   type BoundarySkipReason,
   type BoundaryState,
   type InstanceLifetime,
@@ -107,17 +108,90 @@ export class BriefChoiceAbortedError extends Error {
  * strict choice (`full` / `decline`) with. None of these decides the shown row: whichever it is,
  * {@link SendBrief.claim} holds the instance's current row to one predicate first (pr3e: the same
  * conditions for every outcome — identity, state, worktree / instance, settings), under the input
- * lock right before the body, and only then acts on it. A new outcome is added here and in the claim's
- * exhaustive switch (the table test `session-brief-final-reading-4227` builds its rows from this list).
+ * lock right before the body, and only then commits (pr3f, {@link STRICT_COMMIT_RULES}). A new outcome
+ * is added here and in {@link strictKindOf}'s exhaustive switch (the table test
+ * `session-brief-final-reading-4227` builds its rows from this list).
  *
  *  - `planned` — the brief (`full`) or the reservation (`decline`) is ready to be claimed;
  *  - `used_up` — the shown row was used up by another send (the body alone, `consumed`);
- *  - `empty` — `full`'s brief came out empty (the body alone, the row skipped as `empty`);
- *  - `refused` — the plan stopped the send (an abort is held; nothing is typed);
- *  - `slash_command` — the body is a command: nothing is attached or taken.
+ *  - `empty` — `full`'s brief came out empty (the body alone, the row claimed and settled `empty`);
+ *  - `refused` — the plan stopped the send (its reason is the abort's; nothing is typed).
+ *
+ * pr3f (PM decision 5): a command (`/…`) with a strict choice is the route's 400 (the screen never
+ * offers the choice for one, design §3.2.1); the service stops it at the plan (`slash_command`).
  */
-export const STRICT_PLAN_OUTCOMES = ['planned', 'used_up', 'empty', 'refused', 'slash_command'] as const;
+export const STRICT_PLAN_OUTCOMES = ['planned', 'used_up', 'empty', 'refused'] as const;
 export type StrictPlanOutcome = (typeof STRICT_PLAN_OUTCOMES)[number];
+
+/**
+ * Issue #4227 (pr3f, the invariant S-B-commit): what a strict choice's commit acts on once the final
+ * reading held — `brief` (`full` with a brief), `decline`, `empty` (`full`, nothing to attach),
+ * `used_up` (another send used the shown row up).
+ */
+export type StrictKind = 'brief' | 'decline' | 'empty' | 'used_up';
+
+/** pr3f: the commit's one answer — the text to type, and nothing else, or why nothing is typed. */
+export type StrictCommit = { type: 'type'; text: string } | StrictAbort;
+export type StrictAbort = { type: 'abort'; reason: string };
+
+/** pr3f: what a kind's commit does (one table; the commit reads it, the table test builds its rows from it). */
+export interface StrictCommitRule {
+  /**
+   * The writes made before the body, in order. None uses the shown row up: the most is `claimed`
+   * (with this send's token). Any of them failing — a throw, no row changed, withheld, a reservation
+   * that answers nothing — is an abort: nothing typed, the row as it was.
+   */
+  writes: readonly Extract<BriefWriteSite, 'claim.reserve' | 'claim.row'>[];
+  /** What is typed: the brief in front of the body, or the body alone. */
+  typed: 'brief_and_body' | 'body';
+  /**
+   * How the claim is settled once the delivery answered (`settleInLock`): `delivery` — the outcome as
+   * it is (`sent` / `unknown` / `not_sent`); `declined` / `empty` — `sent` or `unknown` use the row up
+   * as `skipped(<this>)`. `not_sent` always puts it back to `pending`. null: nothing claimed, nothing
+   * settled (the report is the commit's: `consumed`).
+   */
+  settle: 'delivery' | 'declined' | 'empty' | null;
+}
+
+export const STRICT_COMMIT_RULES = {
+  brief: { writes: ['claim.reserve', 'claim.row'], typed: 'brief_and_body', settle: 'delivery' },
+  decline: { writes: ['claim.row'], typed: 'body', settle: 'declined' },
+  empty: { writes: ['claim.row'], typed: 'body', settle: 'empty' },
+  used_up: { writes: [], typed: 'body', settle: null },
+} as const satisfies Record<StrictKind, StrictCommitRule>;
+
+const abort = (reason: string): StrictAbort => ({ type: 'abort', reason });
+
+/** pr3f: an answer is a commit only when it is exactly one of the two shapes (null, undefined: not). */
+function isStrictCommit(answer: unknown): answer is StrictCommit {
+  if (typeof answer !== 'object' || answer === null) return false;
+  const value = answer as { type?: unknown; text?: unknown; reason?: unknown };
+  return (value.type === 'type' && typeof value.text === 'string') || (value.type === 'abort' && typeof value.reason === 'string');
+}
+
+/** pr3f: the kind a plan outcome commits as (`refused` never commits). */
+function strictKindOf(outcome: Exclude<StrictPlanOutcome, 'refused'>, declined: boolean): StrictKind {
+  switch (outcome) {
+    case 'planned':
+      return declined ? 'decline' : 'brief';
+    case 'empty':
+      return 'empty';
+    case 'used_up':
+      return 'used_up';
+    default: {
+      const unknownOutcome: never = outcome;
+      throw new Error(`unknown plan outcome: ${String(unknownOutcome)}`);
+    }
+  }
+}
+
+/** pr3f: thrown inside the claim's transaction to roll a write that changed no row back. */
+class ClaimRolledBack extends Error {
+  constructor() {
+    super('claim rolled back');
+    this.name = 'ClaimRolledBack';
+  }
+}
 
 /** Between the brief and the operator's body (D12: the brief's own framing is C's). */
 export const BRIEF_SEPARATOR = '\n\n';
@@ -299,8 +373,20 @@ function writeAtEntrance<T>(site: BriefWriteSite, write: () => T): T {
 
 /** This process. A claim another process left behind is read as `unknown` (design §3.5). */
 const PROCESS_NONCE = randomUUID();
-/** Claims a send of this process holds right now. */
+/**
+ * Claims a send of this process holds right now. pr3f (PM decision 3): a strict claim whose putting
+ * back (`not_sent` → `pending`) failed stays here, so the next strict send of this process finds it
+ * `claimed` (409) instead of recovering it as `unknown` (used up, never typed). After a restart the
+ * recovery reads it `unknown` (design §3.2, a risk kept).
+ */
 const liveClaims = new Set<string>();
+
+let writeVerdictOverride: ((site: BriefWriteSite) => BriefWriteWithheld | null) | undefined;
+
+/** pr3f (test seam): withhold a site's write as the gate would (null: the gate decides). */
+export function setBriefWriteVerdictForTest(override: ((site: BriefWriteSite) => BriefWriteWithheld | null) | undefined): void {
+  writeVerdictOverride = override;
+}
 
 let memTargetDepsOverride: MemTargetDeps | undefined;
 
@@ -388,8 +474,12 @@ interface Plan {
   provider: BriefProvider;
   built: BriefResult;
   claimToken: string;
-  /** Issue #4227 (S-B): a `decline` claim — no brief, the row is reserved and used up as declined. */
-  decline: boolean;
+  /**
+   * Issue #4227 (S-B): a claim that attaches nothing — `declined` (the screen's "don't read") or,
+   * pr3f, `empty` (`full`'s brief came out empty). The row is claimed before the body and used up as
+   * `skipped(<this>)` once it went in; null: the brief is attached.
+   */
+  skipAs: 'declined' | 'empty' | null;
 }
 
 /** Issue #4227 (pr3e): what a strict plan read, for the final reading's one predicate. */
@@ -432,7 +522,12 @@ export interface SendBriefInput {
   boundaryId?: string;
 }
 
-/** One send's brief. Every method fails open: a ledger error costs a log line, never the send. */
+/**
+ * One send's brief. Every method fails open for `auto` / `skip` / `force` (D1): a ledger error costs a
+ * log line, never the send. Issue #4227 (pr3f, S-B-commit): a strict choice (`full` / `decline`) does
+ * not go through those parts at the claim — it goes {@link SendBrief.claim} → the final reading →
+ * `commitStrict`, whose one answer is the text to type or the abort, and every failure is the abort.
+ */
 export class SendBrief {
   private readonly db: Database.Database | null;
   private readonly supported: boolean;
@@ -444,14 +539,18 @@ export class SendBrief {
   private reserved: { includedNoticeIds: string[] } | null = null;
   private settled: BoundaryOutcome | null = null;
   private report: BriefReport | null = null;
-  /** Issue #4227 (S-B): why a `full` / `decline` send stops before any key; thrown by {@link claim}. */
-  private aborted: BriefChoiceAbortedError | null = null;
   /**
-   * Issue #4227 (S-B, pr3d): the plan's named ways out for a strict choice that hold no abort and
-   * no plan (`planned` / `refused` are read from those, {@link strictOutcome}). Never the answer:
-   * the claim reads the current row again first, whatever this is (design §3.2).
+   * Issue #4227 (S-B, pr3f): the reason a strict choice's plan stopped (the first one wins). The plan's
+   * outcome, nothing more: the claim turns it into its abort before any reading or write
+   * ({@link strictOutcome} → `refused`), and the claim itself never sets it.
    */
-  private strictPlan: Extract<StrictPlanOutcome, 'used_up' | 'empty' | 'slash_command'> | null = null;
+  private planAbort: string | null = null;
+  /**
+   * Issue #4227 (S-B, pr3d): the plan's named way out for a strict choice that holds no abort and no
+   * plan (`planned` / `empty` / `refused` are read from those, {@link strictOutcome}). Never the
+   * answer: the claim reads the current row again first (design §3.2).
+   */
+  private strictPlan: Extract<StrictPlanOutcome, 'used_up'> | null = null;
   /**
    * Issue #4227 (S-B, pr3e): what the plan of a strict choice read — the shown row's state (still
    * `pending`, or used up), the membership and settings it was read under, and the worktree
@@ -466,8 +565,8 @@ export class SendBrief {
    */
   private strictOutcome(): StrictPlanOutcome | null {
     if (!this.strict) return null;
-    if (this.aborted) return 'refused';
-    if (this.planned) return 'planned';
+    if (this.planAbort !== null) return 'refused';
+    if (this.planned) return this.planned.skipAs === 'empty' ? 'empty' : 'planned';
     return this.strictPlan ?? 'refused';
   }
   readonly isReset: boolean;
@@ -508,9 +607,13 @@ export class SendBrief {
     return this.input.mode === 'decline' || (this.input.mode === 'auto' && this.input.detail === 'full');
   }
 
-  /** Issue #4227: the abort of a strict choice (the first reason wins). Reads the shown row's state. */
+  /** Issue #4227: a strict choice's plan stops here (the first reason wins). Writes nothing. */
   private refuse(reason: string): void {
-    if (this.aborted) return;
+    if (this.planAbort === null) this.planAbort = reason;
+  }
+
+  /** Issue #4227 (pr3f): the error a strict abort is thrown as. Reads the shown row's state now. */
+  private abortError(reason: string): BriefChoiceAbortedError {
     let boundary: { id: string; state: BoundaryState } | null = null;
     const shown = this.input.boundaryId;
     if (shown && this.db) {
@@ -523,10 +626,13 @@ export class SendBrief {
         this.warn('session-brief-abort-read-failed', error);
       }
     }
-    this.aborted = new BriefChoiceAbortedError(reason, boundary);
+    return new BriefChoiceAbortedError(reason, boundary);
   }
 
-  /** A skipped report — or, for a strict choice, its abort (Issue #4227). Writes nothing. */
+  /**
+   * A skipped report — or, for a strict choice's plan, its stop (Issue #4227). Writes nothing.
+   * pr3f: never reached by a strict claim (the commit answers its own aborts).
+   */
   private skipped(reason: string, rowId: string | null): void {
     if (this.strict) return this.refuse(reason);
     this.report = { state: 'skipped', reason, ...(rowId ? { boundaryId: rowId } : {}) };
@@ -538,7 +644,7 @@ export class SendBrief {
    * written, and the reason is answered for the caller to report (fail-closed).
    */
   private write(site: BriefWriteSite, db: Database.Database, write: () => void): BriefWriteWithheld | 'write' {
-    const verdict = briefWriteVerdict(BRIEF_WRITE_RULES[site], this.pin !== null, this.continuity(db), () => this.instanceAsPinned(db));
+    const verdict = writeVerdictOverride?.(site) ?? briefWriteVerdict(BRIEF_WRITE_RULES[site], this.pin !== null, this.continuity(db), () => this.instanceAsPinned(db));
     if (verdict !== 'write') {
       logger.info('session-brief-write-withheld', { worktreeId: this.input.worktreeId, instanceId: this.input.instanceId, site, verdict });
       return verdict;
@@ -553,10 +659,9 @@ export class SendBrief {
    * reports why nothing was written instead.
    */
   private skip(rowId: string | null, reason: BoundarySkipReason | 'no_brief' | 'settings_changed' | 'reservation_conflict', site: BriefWriteSite): void {
-    // Issue #4227 (S-B): a strict choice consumes nothing it was not asked to — only `full`'s
-    // `empty` (nothing to attach) is used up and the body sent, as `auto` does — by the claim's
-    // final reading only (pr3d), never by the plan.
-    if (this.strict && reason !== 'empty') return this.refuse(reason);
+    // Issue #4227 (S-B, pr3f): a strict choice's plan uses nothing up — `empty` included (its row is
+    // claimed and settled by the commit, never here). Its way out is the plan's stop.
+    if (this.strict) return this.refuse(reason);
     if (rowId !== null && this.db) {
       const db = this.db;
       let verdict: BriefWriteWithheld | 'write' = 'write';
@@ -623,8 +728,10 @@ export class SendBrief {
       return;
     }
     // A command with words in front of it is no command (a reset still opens its row, step 3).
-    const slash = isSlashCommandBody(content);
-    if (slash && !this.strict) {
+    if (isSlashCommandBody(content)) {
+      // Issue #4227 (pr3f, PM decision 5): a strict choice is never made for a command — the route
+      // answers 400, and the service stops before anything is read or written (nothing typed).
+      if (this.strict) return this.refuse('slash_command');
       if (mode !== 'auto') this.report = { state: 'skipped', reason: 'slash_command' };
       return;
     }
@@ -733,11 +840,6 @@ export class SendBrief {
     if (this.strict) {
       // pr3e: the plan's reading, for the one predicate of the final reading (design §3.2).
       this.strictSeen = { state: seenState, membershipKey: membershipKey(target), worktreeIncarnation };
-      if (slash) {
-        this.strictPlan = 'slash_command';
-        if (mode !== 'auto') this.report = { state: 'skipped', reason: 'slash_command' };
-        return;
-      }
       if (seenState === 'used_up') {
         this.strictPlan = 'used_up';
         return;
@@ -755,7 +857,7 @@ export class SendBrief {
         provider,
         built: { body: '', includedNoticeIds: [], mode: target.mode },
         claimToken: `${PROCESS_NONCE}:${randomUUID()}`,
-        decline: true,
+        skipAs: 'declined',
       };
       return;
     }
@@ -800,9 +902,19 @@ export class SendBrief {
     if (built.body === '' && built.skipReason === 'over_limit') return this.skip(rowId, 'over_limit', 'plan.consume');
     if (built.body === '') {
       // pr3d (codex P2, review-4227-pr3b): a strict `full` does not use the row up here — the
-      // claim's final reading does, once the shown row is found still the current one.
+      // claim's final reading does, once the shown row is found still the current one. pr3f: as a
+      // `decline` is — claimed by the commit, settled `skipped(empty)` once the body went in.
       if (this.strict) {
-        this.strictPlan = 'empty';
+        this.planned = {
+          boundary,
+          lifetime,
+          worktreeIncarnation,
+          membershipKey: membershipKey(target),
+          provider,
+          built: { body: '', includedNoticeIds: [], mode: target.mode },
+          claimToken: `${PROCESS_NONCE}:${randomUUID()}`,
+          skipAs: 'empty',
+        };
         return;
       }
       return this.skip(rowId, 'empty', 'plan.consume');
@@ -821,7 +933,7 @@ export class SendBrief {
       provider,
       built: { body: built.body, includedNoticeIds: [...built.includedNoticeIds], mode: built.mode },
       claimToken: `${PROCESS_NONCE}:${randomUUID()}`,
-      decline: false,
+      skipAs: null,
     };
   }
 
@@ -896,58 +1008,53 @@ export class SendBrief {
   }
 
   /**
-   * Issue #4227 (S-B, design §3.2 — the final reading, pr3e): a strict choice's claim. Under the
-   * input lock, right before the body, in one synchronous stretch of `withMemTarget`: the one
-   * predicate ({@link finalReading}) first, for every plan outcome; the outcomes differ only in
-   * what they type once it holds. Answers the text to type, or throws the abort (nothing typed).
+   * Issue #4227 (S-B, design §3.2 — pr3f, the invariant S-B-commit): a strict choice's claim, one
+   * road. Under the input lock, right before the body, in one synchronous stretch of `withMemTarget`:
+   * the final reading's one predicate ({@link finalReading}), then {@link commitStrict}; the `text` of
+   * its answer is what is typed — nothing else is. An abort (any failure) is thrown: nothing typed,
+   * the shown row as it was.
    */
   private async claimStrict(): Promise<string> {
+    const commit = await this.commitInFinalStretch();
+    if (commit.type === 'type') return commit.text;
+    throw this.abortError(commit.reason);
+  }
+
+  /**
+   * pr3f: the commit's one answer. The plan's stop is the abort before anything is read
+   * (`refused`, its reason first); a throw anywhere, or an answer that is not exactly a commit, is
+   * `claim_failed`. A claim made before an abort goes back (`not_sent`).
+   */
+  private async commitInFinalStretch(): Promise<StrictCommit> {
     const db = this.db;
-    if (!db) {
-      this.refuse('claim_failed');
-      throw this.aborted!;
-    }
-    const outcome: StrictPlanOutcome = this.strictOutcome() ?? 'refused';
-    let typedText: string | null;
+    const outcome = this.strictOutcome();
+    if (!db || outcome === null) return abort('claim_failed');
+    if (outcome === 'refused') return abort(this.planAbort ?? 'claim_failed');
+    const kind = strictKindOf(outcome, this.planned?.skipAs === 'declined');
+    let answer: unknown;
     try {
-      typedText = await withMemTarget(db, { via: 'worktree', worktreeId: this.input.worktreeId }, memTargetDepsOverride ?? {}, (target) => {
-        const current = this.finalReading(db, target);
-        if (!current) return null;
-        switch (outcome) {
-          case 'refused':
-            this.refuse('claim_failed');
-            return null;
-          case 'slash_command':
-            return this.input.content;
-          case 'used_up':
-            this.report = { state: 'consumed', boundaryId: current.id };
-            return this.input.content;
-          case 'empty':
-            // Nothing to attach: the shown row is used up as `empty` here (as `auto` does at its plan).
-            this.skip(current.id, 'empty', 'claim.consume');
-            return this.input.content;
-          case 'planned': {
-            const plan = this.planned!;
-            const brief = this.claimInStretch(db, plan, target);
-            if (brief === null || plan.decline) return this.input.content;
-            return brief + BRIEF_SEPARATOR + this.input.content;
-          }
-          default: {
-            const unknownOutcome: never = outcome;
-            throw new Error(`unknown plan outcome: ${String(unknownOutcome)}`);
-          }
-        }
-      });
+      answer = await withMemTarget(db, { via: 'worktree', worktreeId: this.input.worktreeId }, memTargetDepsOverride ?? {}, (target) =>
+        this.finalStretch(db, kind, target)
+      );
     } catch (error) {
       this.warn('session-brief-claim-failed', error);
-      // Issue #4227 (S-B, design §3.2 (2)): the stretch threw. A row already claimed goes back
-      // to `pending` (not used up), and the send stops before any key.
-      if (this.planned) this.unclaim(db, this.planned);
-      this.refuse('claim_failed');
-      throw this.aborted!;
+      answer = abort('claim_failed');
     }
-    if (this.aborted) throw this.aborted;
-    return typedText ?? this.input.content;
+    const commit: StrictCommit = isStrictCommit(answer) ? answer : abort('claim_failed');
+    if (commit.type === 'abort' && this.claimed && this.planned) this.unclaim(db, this.planned);
+    return commit;
+  }
+
+  /** pr3f: `withMemTarget`'s synchronous stretch — the predicate, then the commit. Never throws. */
+  private finalStretch(db: Database.Database, kind: StrictKind, target: MemTarget): StrictCommit {
+    try {
+      const reading = this.finalReading(db, target);
+      if (reading.type === 'abort') return reading;
+      return this.commitStrict(db, kind, reading.row);
+    } catch (error) {
+      this.warn('session-brief-claim-failed', error);
+      return abort('claim_failed');
+    }
   }
 
   /**
@@ -962,64 +1069,154 @@ export class SendBrief {
    *     that lifetime's (`incarnation_changed`);
    *  5. the state: as the plan read it — `pending` still `pending`, used up still used up; held by
    *     another send's claim, or taken meanwhile: `claimed`; back to `pending`: `superseded`.
-   * A plan's abort is kept (the first reason wins). Reads only; answers the current row, or null.
+   * Reads only; answers the current row (pr3f: one value, the row or the abort).
    */
-  private finalReading(db: Database.Database, target: MemTarget): { id: string; state: BoundaryState } | null {
-    if (this.aborted) return null;
+  private finalReading(db: Database.Database, target: MemTarget): { type: 'pass'; row: BoundaryRow } | StrictAbort {
     const seen = this.strictSeen;
     const pin = this.pin;
-    if (!seen || !pin) {
-      this.refuse('claim_failed');
-      return null;
-    }
+    if (!seen || !pin) return abort('claim_failed');
     const { worktreeId, instanceId, cliToolId } = this.input;
     if (this.continuity(db) !== 'same' || getWorktreeIncarnation(db, worktreeId) !== seen.worktreeIncarnation) {
-      this.refuse('worktree_changed');
-      return null;
+      return abort('worktree_changed');
     }
     if (!target.ok || membershipKey(target) !== seen.membershipKey) {
-      this.refuse(target.ok && target.mode === 'off' ? 'off' : target.ok && !target.features.injectOnStart ? 'disabled' : 'settings_changed');
-      return null;
+      return abort(target.ok && target.mode === 'off' ? 'off' : target.ok && !target.features.injectOnStart ? 'disabled' : 'settings_changed');
     }
     const current = getCurrentBoundary(db, worktreeId, instanceId);
-    if (!current || current.id !== this.input.boundaryId || current.state === 'superseded') {
-      this.refuse('superseded');
-      return null;
-    }
+    if (!current || current.id !== this.input.boundaryId || current.state === 'superseded') return abort('superseded');
     const now = readInstanceLifetime(db, worktreeId, instanceId);
     if (
       !sameInstanceLifetime(pin.instance, now, cliToolId) ||
       !sameInstanceLifetime({ incarnation: current.instanceIncarnation, onRoster: current.onRoster }, now, cliToolId)
     ) {
-      this.refuse('incarnation_changed');
-      return null;
+      return abort('incarnation_changed');
     }
     const usedUp = current.state !== 'pending';
-    if (current.state === 'claimed' || (seen.state === 'pending' && usedUp)) {
-      this.refuse('claimed');
-      return null;
-    }
-    if (seen.state === 'used_up' && !usedUp) {
-      this.refuse('superseded');
-      return null;
-    }
-    return { id: current.id, state: current.state };
+    if (current.state === 'claimed' || (seen.state === 'pending' && usedUp)) return abort('claimed');
+    if (seen.state === 'used_up' && !usedUp) return abort('superseded');
+    return { type: 'pass', row: current };
   }
 
-  /** Issue #4227: a claim this send made but will not type under goes back (`not_sent`). */
+  /**
+   * Issue #4227 (pr3f, the invariant S-B-commit): what the kind does once the final reading held,
+   * from {@link STRICT_COMMIT_RULES}. One answer: the text to type, built here and nowhere else, or
+   * the abort. Nothing is used up before the body: the most it writes is `claimed` (this send's
+   * token), and any write that throws, changes no row, is withheld, or a reservation that answers
+   * nothing, is the abort (nothing typed, the row as it was). The report is the commit's result.
+   */
+  private commitStrict(db: Database.Database, kind: StrictKind, row: BoundaryRow): StrictCommit {
+    const rule: StrictCommitRule = STRICT_COMMIT_RULES[kind];
+    const content = this.input.content;
+    if (rule.settle === null) {
+      // Used up by another send: nothing written, the body alone, said `consumed`.
+      this.report = { state: 'consumed', boundaryId: row.id };
+      return { type: 'type', text: content };
+    }
+    const plan = this.planned;
+    if (!plan || plan.boundary.id !== row.id) return abort('claim_failed');
+    let brief = { body: plan.built.body, includedNoticeIds: [...plan.built.includedNoticeIds] };
+    if (rule.writes.includes('claim.reserve') && plan.provider.reserve) {
+      const reserved = this.reserveStrict(db, plan);
+      if (reserved.type === 'abort') return reserved;
+      brief = reserved.brief;
+    }
+    if (rule.typed === 'brief_and_body' && brief.body === '') return abort('claim_failed');
+    const claimed = this.claimRowStrict(db, plan, row);
+    if (claimed !== 'claimed') return claimed;
+    liveClaims.add(plan.claimToken);
+    this.claimed = brief;
+    return { type: 'type', text: rule.typed === 'brief_and_body' ? brief.body + BRIEF_SEPARATOR + content : content };
+  }
+
+  /**
+   * pr3f: the provider's reservation for a strict `full`. A throw is `claim_failed`, withheld its
+   * verdict, an answer of nothing (or one that no longer fits) `reservation_conflict`. Once the
+   * provider answered, what it took is told back `discarded` unless this send's claim keeps it.
+   */
+  private reserveStrict(db: Database.Database, plan: Plan): { type: 'reserved'; brief: { body: string; includedNoticeIds: string[] } } | StrictAbort {
+    const provider = plan.provider;
+    let answer: unknown = null;
+    let verdict: BriefWriteWithheld | 'write';
+    try {
+      verdict = this.write('claim.reserve', db, () => {
+        answer = provider.reserve!({
+          boundaryId: plan.boundary.id,
+          claimToken: plan.claimToken,
+          includedNoticeIds: [...plan.built.includedNoticeIds],
+          body: plan.built.body,
+        });
+      });
+    } catch (error) {
+      this.warn('session-brief-reserve-failed', error);
+      return abort('claim_failed');
+    }
+    if (verdict !== 'write') return abort(verdict);
+    this.reserved = { includedNoticeIds: [...plan.built.includedNoticeIds] };
+    const reserved = answer as { body?: unknown; includedNoticeIds?: unknown } | null;
+    if (
+      !reserved ||
+      typeof reserved.body !== 'string' ||
+      reserved.body === '' ||
+      !Array.isArray(reserved.includedNoticeIds) ||
+      !withinVerifiedSize(this.input.typedBody(reserved.body + BRIEF_SEPARATOR + this.input.content))
+    ) {
+      return abort('reservation_conflict');
+    }
+    return { type: 'reserved', brief: { body: reserved.body, includedNoticeIds: reserved.includedNoticeIds.map(String) } };
+  }
+
+  /**
+   * pr3f: claim the shown row in one transaction (its incarnation filled when it had none, then the
+   * claim). A write that changes no row rolls the other back; a throw, too. Either is the abort.
+   */
+  private claimRowStrict(db: Database.Database, plan: Plan, row: BoundaryRow): 'claimed' | StrictAbort {
+    const { worktreeId, instanceId } = this.input;
+    let claimed = false;
+    let verdict: BriefWriteWithheld | 'write';
+    try {
+      verdict = this.write('claim.row', db, () => {
+        const now = readInstanceLifetime(db, worktreeId, instanceId);
+        claimed = db.transaction((): boolean => {
+          let incarnation = row.instanceIncarnation;
+          if (incarnation === null && now.incarnation !== null) {
+            if (fillBoundaryIncarnation(db, row.id, now.incarnation) !== true) throw new ClaimRolledBack();
+            incarnation = now.incarnation;
+          }
+          if (claimBoundary(db, row.id, plan.claimToken, incarnation) !== true) throw new ClaimRolledBack();
+          return true;
+        })();
+      });
+    } catch (error) {
+      if (!(error instanceof ClaimRolledBack)) this.warn('session-brief-claim-failed', error);
+      return abort('claim_failed');
+    }
+    if (verdict !== 'write') return abort(verdict);
+    return claimed ? 'claimed' : abort('claim_failed');
+  }
+
+  /**
+   * Issue #4227: a claim this send made but will not type under goes back (`not_sent`). pr3f (PM
+   * decision 3): when that fails, the claim stays this process's ({@link liveClaims}).
+   */
   private unclaim(db: Database.Database, plan: Plan): void {
     if (!this.claimed) return;
+    let putBack = false;
     try {
-      this.write('settle.claim', db, () => settleBoundaryClaim(db, plan.boundary.id, plan.claimToken, 'not_sent', null, Date.now()));
+      this.write('settle.claim', db, () => {
+        putBack = settleBoundaryClaim(db, plan.boundary.id, plan.claimToken, 'not_sent', null, Date.now());
+      });
     } catch (error) {
       this.warn('session-brief-unclaim-failed', error);
     } finally {
-      liveClaims.delete(plan.claimToken);
+      if (putBack) liveClaims.delete(plan.claimToken);
       this.claimed = null;
     }
   }
 
-  /** The synchronous stretch `withMemTarget` settled the membership in. Returns the brief, or null. */
+  /**
+   * The synchronous stretch `withMemTarget` settled the membership in. Returns the brief, or null.
+   * D1's (`auto` / `force`): fails open. pr3f: a strict choice never comes here ({@link commitStrict}).
+   */
   private claimInStretch(db: Database.Database, plan: Plan, target: MemTarget): string | null {
     const { worktreeId, instanceId, cliToolId } = this.input;
     const rowId = plan.boundary.existing ? plan.boundary.id : null;
@@ -1040,10 +1237,7 @@ export class SendBrief {
     let rowIncarnation = plan.lifetime.incarnation;
     if (plan.boundary.existing) {
       const row = getBoundaryById(db, plan.boundary.id);
-      if (!row) {
-        if (this.strict) this.refuse('superseded');
-        return null;
-      }
+      if (!row) return null;
       if (getCurrentBoundary(db, worktreeId, instanceId)?.id !== row.id) {
         // A newer boundary opened after this send planned (a relaunch inside another
         // send, a reset): the older one is not claimed (consistency review 1).
@@ -1063,8 +1257,8 @@ export class SendBrief {
 
     let body = plan.built.body;
     let includedNoticeIds = plan.built.includedNoticeIds;
-    // Issue #4227 (S-B): a `decline` reserves no notice (it attaches nothing).
-    if (plan.provider.reserve && !plan.decline) {
+    // Issue #4227 (S-B): a claim that attaches nothing reserves no notice.
+    if (plan.provider.reserve && plan.skipAs === null) {
       const provider = plan.provider;
       let reserved: { body: string; includedNoticeIds: string[] } | null = null;
       const reserving = this.write('claim.reserve', db, () => {
@@ -1092,31 +1286,35 @@ export class SendBrief {
 
     let claimedRow = false;
     const claiming = this.write('claim.row', db, () => {
-      if (!plan.boundary.existing) {
-        openBoundary(db, {
-          id: plan.boundary.id,
-          worktreeId,
-          instanceId,
-          cliToolId,
-          lifetime: now,
-          kind: 'explicit',
-          evidence: 'explicit',
-          openedAt: plan.boundary.openedAt,
-        });
-        rowIncarnation = now.incarnation;
-      } else if (rowIncarnation === null && now.incarnation !== null) {
-        fillBoundaryIncarnation(db, plan.boundary.id, now.incarnation);
-        rowIncarnation = now.incarnation;
-      }
-      claimedRow = claimBoundary(db, plan.boundary.id, plan.claimToken, rowIncarnation);
+      // pr3f (PM decision 4): the row's incarnation and the claim in one transaction — a claim that
+      // throws leaves no filled incarnation (or opened row) behind. A claim that changes no row
+      // keeps D1's answer (the body alone).
+      claimedRow = db.transaction((): boolean => {
+        if (!plan.boundary.existing) {
+          openBoundary(db, {
+            id: plan.boundary.id,
+            worktreeId,
+            instanceId,
+            cliToolId,
+            lifetime: now,
+            kind: 'explicit',
+            evidence: 'explicit',
+            openedAt: plan.boundary.openedAt,
+          });
+          rowIncarnation = now.incarnation;
+        } else if (rowIncarnation === null && now.incarnation !== null) {
+          fillBoundaryIncarnation(db, plan.boundary.id, now.incarnation);
+          rowIncarnation = now.incarnation;
+        }
+        return claimBoundary(db, plan.boundary.id, plan.claimToken, rowIncarnation);
+      })();
     });
     if (claiming !== 'write') {
       this.skipped(claiming, rowId);
       return null;
     }
     if (!claimedRow) {
-      // Issue #4227: another send claimed it between the plan and here (or it went).
-      if (this.strict) this.refuse('claimed');
+      // Another send claimed it between the plan and here (or it went).
       return null;
     }
     liveClaims.add(plan.claimToken);
@@ -1132,17 +1330,20 @@ export class SendBrief {
     const db = this.db;
     if (!db) return;
     let outcome = outcomeOf(state);
-    if (this.claimed && this.planned?.decline && this.settled === null) {
-      this.settleDeclineInLock(db, this.planned, outcome);
+    if (this.claimed && this.planned?.skipAs && this.settled === null) {
+      this.settleUnbriefedInLock(db, this.planned, this.planned.skipAs, outcome);
     } else if (this.claimed && this.planned && this.settled === null) {
       const planned = this.planned;
       const claimed = this.claimed;
       let withheld: BriefWriteWithheld | null = null;
+      let putBack = false;
+      let held = false;
       try {
         const now = Date.now();
         const delivered = { bytes: bytesOf(claimed.body), mode: planned.built.mode, includedIds: claimed.includedNoticeIds };
         const settling = this.write('settle.claim', db, () => {
-          settleBoundaryClaim(db, planned.boundary.id, planned.claimToken, outcome, delivered, now);
+          const settled = settleBoundaryClaim(db, planned.boundary.id, planned.claimToken, outcome, delivered, now);
+          if (outcome === 'not_sent') putBack = settled;
           if (outcome === 'sent') {
             const copied = copyDeliveryToRelaunchBoundaries(db, this.input.worktreeId, this.input.instanceId, planned.claimToken, delivered, now);
             if (copied > 0 && planned.boundary.kind !== 'launch' && planned.boundary.kind !== 'auto_restart') {
@@ -1168,11 +1369,15 @@ export class SendBrief {
       } catch (error) {
         this.warn('session-brief-settle-failed', error);
       } finally {
-        liveClaims.delete(planned.claimToken);
+        // pr3f (PM decision 3): a strict claim not put back stays this process's (the next strict
+        // send is 409 `claimed`); D1's goes as before (recovered `unknown` by the next request).
+        held = this.strict && outcome === 'not_sent' && !putBack;
+        if (!held) liveClaims.delete(planned.claimToken);
         this.settled = outcome;
       }
-      this.report =
-        outcome === 'sent'
+      this.report = held
+        ? { state: 'not_sent', reason: 'claim_held', boundaryId: planned.boundary.id }
+        : outcome === 'sent'
           ? { state: 'attached', boundaryId: planned.boundary.id }
           : { state: outcome === 'unknown' ? 'unknown' : 'not_sent', ...(withheld ? { reason: withheld } : {}), boundaryId: planned.boundary.id };
     }
@@ -1206,15 +1411,19 @@ export class SendBrief {
    * Issue #4227 (S-B, design §3.2 "`decline` の予約"): a body that went in (`sent`) or may have
    * (`unknown`) uses the row up as `skipped(declined)`; one that did not (`not_sent`) puts it back
    * to `pending` (`superseded` when a newer row opened) — "don't read" is not used up unsent.
+   * pr3f (S-B-commit): `full`'s empty brief the same way, as `skipped(empty)`. When the putting back
+   * fails, the claim stays this process's (PM decision 3) and the report says so (`claim_held`).
    */
-  private settleDeclineInLock(db: Database.Database, planned: Plan, state: BoundaryOutcome): void {
+  private settleUnbriefedInLock(db: Database.Database, planned: Plan, reason: 'declined' | 'empty', state: BoundaryOutcome): void {
     let outcome = state;
     let withheld: BriefWriteWithheld | null = null;
+    let putBack = false;
+    let held = false;
     try {
       const now = Date.now();
       const settling = this.write('settle.claim', db, () => {
-        if (outcome === 'not_sent') settleBoundaryClaim(db, planned.boundary.id, planned.claimToken, 'not_sent', null, now);
-        else settleDeclinedClaim(db, planned.boundary.id, planned.claimToken, now);
+        if (outcome === 'not_sent') putBack = settleBoundaryClaim(db, planned.boundary.id, planned.claimToken, 'not_sent', null, now);
+        else settleDeclinedClaim(db, planned.boundary.id, planned.claimToken, now, reason);
       });
       if (settling !== 'write') {
         withheld = settling;
@@ -1223,16 +1432,18 @@ export class SendBrief {
     } catch (error) {
       this.warn('session-brief-settle-failed', error);
     } finally {
-      liveClaims.delete(planned.claimToken);
+      held = outcome === 'not_sent' && !putBack;
+      if (!held) liveClaims.delete(planned.claimToken);
       this.settled = outcome;
     }
     const boundaryId = planned.boundary.id;
-    this.report =
-      outcome === 'not_sent'
+    this.report = held
+      ? { state: 'not_sent', reason: 'claim_held', boundaryId }
+      : outcome === 'not_sent'
         ? { state: 'not_sent', boundaryId }
         : withheld
           ? { state: 'unknown', reason: withheld, boundaryId }
-          : { state: 'skipped', reason: 'declined', boundaryId };
+          : { state: 'skipped', reason, boundaryId };
   }
 
   /** The lock's `finally`: a claim that never settled may have been typed (`unknown`). */
@@ -1243,8 +1454,8 @@ export class SendBrief {
   /** Step 4 (design §3.4 6): tell the provider, outside the lock. */
   async afterLock(): Promise<void> {
     const plan = this.planned;
-    // Issue #4227: a `decline` built nothing and reserved nothing; the provider is not told.
-    if (!plan || plan.decline || !plan.provider.settle) return;
+    // Issue #4227: a claim that attaches nothing (`decline`, an empty `full`) reserved nothing; the provider is not told.
+    if (!plan || plan.skipAs !== null || !plan.provider.settle) return;
     let outcome: BriefDeliveryOutcome | null = null;
     let includedNoticeIds: string[] = [];
     if (this.claimed && this.settled !== null) {
