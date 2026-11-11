@@ -51,6 +51,10 @@ import {
   take,
   writeOwner,
 } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-extract-4288-"]);
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;

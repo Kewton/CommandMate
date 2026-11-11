@@ -25,6 +25,10 @@ import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import * as H from './lock-owner-atomic-4288-harness';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { scanRawCalls } from './lock-observation-scan-4288';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["pr1af-impl2-4288-"]);
 
 // The harness imports machine-lock.ts, which imports the logger: kept quiet here (as the table's file does).
 vi.mock('@/lib/logger', () => {

@@ -62,6 +62,10 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import * as H from './lock-owner-atomic-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["pr1af-4288-", "pr1af-putback-"]);
 
 // The TS implementation's warnings are what names its refusals (corrupt, owner-exists …): read them here.
 // (A global, not an import of the harness: the harness imports machine-lock.ts, which imports the logger.)
@@ -1744,17 +1748,20 @@ describe('Issue #4288 PR1a-f §4: the time-zone independent comparison PR1c call
  * with utimes) or injected (CM_VERIFY_TEST_OBS_FAULT / hooks.fault, a `ps` shim on PATH, a pause).
  */
 let root = '';
+/** Every root a test made (a test that loops makes many): all removed in afterEach, not only the last. */
+const roots: string[] = [];
 const freshRoot = (): string => {
   H.pinBase(); // the row's one fixed reference (fixtures and the injected T0 are made from it)
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr1af-4288-'));
+  roots.push(root);
   return root;
 };
 afterEach(() => {
   H.unpinBase();
   H.killChildren();
-  if (root) {
-    spawnSync('chmod', ['-R', 'u+rwx', root]);
-    fs.rmSync(root, { recursive: true, force: true });
+  for (const r of roots.splice(0)) {
+    spawnSync('chmod', ['-R', 'u+rwx', r]);
+    fs.rmSync(r, { recursive: true, force: true });
   }
   root = '';
 });

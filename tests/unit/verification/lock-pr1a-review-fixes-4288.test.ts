@@ -24,6 +24,10 @@ import { pathToFileURL } from 'node:url';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { HOST, REPO, deadPid, killStarted, liveGroup, mutatedSync, removeRoot } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-pr1a-fixes-4288-"]);
 
 const LOADER = path.join(REPO, 'scripts/lib/machine-lock.sh');
 

@@ -33,6 +33,10 @@ import { spawnSync } from 'node:child_process';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { REPO, VERIFY_RUN, deadPid, killStarted, liveGroup, mutatedSync, removeRoot, waitSync } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-release-inv-4288-"]);
 
 const LOADER = path.join(REPO, 'scripts/lib/machine-lock.sh');
 

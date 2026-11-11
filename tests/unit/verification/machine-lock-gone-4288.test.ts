@@ -40,6 +40,10 @@ import {
   writeOwner,
 } from './lock-4288-harness';
 import type { Impl } from './lock-observation-scan-4288';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-gone-4288-"]);
 
 let root: string;
 beforeEach(() => {
