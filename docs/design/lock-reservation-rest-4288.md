@@ -1,6 +1,6 @@
 # Issue #4288 の 2〜5 番の設計（run-lock の回収・ready 待ちの実時間・claude-3 の自己予約・素の send）
 
-- 状態: 設計 第 1 版（設計の段。コードは変えない。実装は PM の確認の後、別の契約で行う）。2 番（§1）と §6・§7 の PR1 の行・§8 の supervisor.lock は**第 2 版**（事前レビュー `review-4288f.md` の P1 3・P2 6 の処置と、PM の決定「machine-lock の実装と規約に載せ替える」〔`pm-return-4288-prereview.md` の (a)〕・「supervisor.lock を PR1 に含める」〔`pm-return-4288-design.md` の (c)〕を反映。§1 の行番号は `426ad2661`）。2 番（§1）と §6・§7 の PR1 の行は**改訂 2**（codex-2 の再確認 `review-4288g.md` の新しい P1 2・P2 5 と、PM の決定 `pm-return-4288-design-rev1.md` の (a) を反映。処置は §1.13 の「改訂 2」の行。行番号は `850abbc71`）
+- 状態: 設計 第 1 版（設計の段。コードは変えない。実装は PM の確認の後、別の契約で行う）。2 番（§1）と §6・§7 の PR1 の行・§8 の supervisor.lock は**第 2 版**（事前レビュー `review-4288f.md` の P1 3・P2 6 の処置と、PM の決定「machine-lock の実装と規約に載せ替える」〔`pm-return-4288-prereview.md` の (a)〕・「supervisor.lock を PR1 に含める」〔`pm-return-4288-design.md` の (c)〕を反映。§1 の行番号は `426ad2661`）。2 番（§1）と §6・§7 の PR1 の行は**改訂 2**（codex-2 の再確認 `review-4288g.md` の新しい P1 2・P2 5 と、PM の決定 `pm-return-4288-design-rev1.md` の (a) を反映。処置は §1.13 の「改訂 2」の行。行番号は `850abbc71`）。**5 番は PM の決定で採らない**（§4 の冒頭）。3・4 番は PR2 で実装済み
 - 対象: Issue #4288 の対象 2〜5（1 番は PR #4295 でマージ済み。設計は [verify-lock-holder-group-4288.md](./verify-lock-holder-group-4288.md)）
 - 行番号は `fix/4288-lock-rest` の `ed9b89eac` のもの。名前で引くこと
 - 表記: **事実**＝コード・実行で確かめたこと、**見立て**＝事実からの推論で試していないこと、**未確認**＝この段で確かめていないこと
@@ -13,7 +13,7 @@
 | 2 run-lock の rename の回収（＋同じ形の supervisor.lock） | **直す**（TS・bash の両方で再現した） | 案 2D（第 2 版）: run-lock と supervisor.lock を machine-lock（#4277 の札・先頭だけの回収・#4288 の 1 番の退避の読みと 3 値の観測）の実装に載せる。載らない差 8 つ（owner の書式・パス・owner の無いディレクトリ・pid の引渡し・持ち主でない者の解放・取得しない回収者・`lstart`・継承）は、既定で働かないオプションと操作として machine-lock に足す。改訂 2 で、保護する実作業（UAT のサーバー・daily の子）のプロセスグループを owner に載せて親の死だけでは回収しない（D9、#4288 の 1 番と同じ形）、TS の観測を 3 値のまま渡す（D10）、時計を数値の ms で渡す（D11）、自己解放の条件（D12）を足した。第 1 版の案 2C は代案として比較に残す | 難（PR を 3 本に分ける） |
 | 3 ready 待ちの 90 秒 | **直す**（再現した。95 秒〜最大 5795 秒） | 案 3B: 開始時刻からの実時間の期限＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る | 易 |
 | 4 claude-3 の自己予約 | **直す** | 案 4B: `reserve --self`。`commandmate whoami --json` で呼び手が claude-3 のときだけ、状態確認を省いて持ち主 `leader` で取る | 易 |
-| 5 素の `commandmate send` | **一部直す**（事故の防止だけ。完全な排他は直さない） | 案 5C: Claude Code の PreToolUse フック（リポジトリの `.claude/settings.json`）で、Bash の `commandmate send mycodebranchdesk … --instance claude-3` を止める。製品の send は変えない | 易〜中 |
+| 5 素の `commandmate send` | **採らない（PM の決定）** | 案 5C（PreToolUse フック）は作らない。リポジトリの共有の設定（`.claude/settings.json`）を足すと、clone した利用者を含む全 Claude セッションに効くため。`team.md` に理由と送り方（claude-3 へは `claude3-reserve.ts send` だけ）を書く | — |
 
 PR は 2 番が 3 本（PR1a〜PR1c）、3〜5 番が 1 本（PR2）（§7）。
 
@@ -374,7 +374,7 @@ for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {   //
 | 案 | 中身 | 評価 |
 |---|---|---|
 | 3A 開始時刻からの実時間の期限だけ | `deps.now()` で `/clear` の後の時刻を取り、期限を過ぎたら止める | 1 回の `ls` が長いと、最後の 1 回のぶん（最大 300 秒）超える |
-| **3B 3A＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る（採用）** | 期限 `deadline = start + READY_TIMEOUT_MS`。各周回で `sleep(min(READY_POLL_MS, 残り))` → 残りが 0 なら止める → `ls` は `timeout = max(1 秒, 残り)` で実行。回数の上限 `READY_TIMEOUT_MS / READY_POLL_MS`（18 回）も残す | 実時間の上限が「90 秒＋1 秒程度」になる。回数の上限は、時計を固定した既存の試験（`tests/unit/scripts/agent-health/dispatch.test.ts:243-249`、`now` が固定）が止まるために要る |
+| **3B 3A＋回数の上限＋1 回の `ls` の timeout を残り時間に絞る（採用）** | 期限 `deadline = start + READY_TIMEOUT_MS` は**単調増加の時計**（`deps.monotonic`、既定 `performance.now()`）で数え、記録用の壁時計 `deps.now` と分ける（壁時計が戻っても上限が外れない）。各周回で `sleep(min(READY_POLL_MS, 残り))` → **sleep の後にも**残りを照合し 0 以下なら `ls` へ進まず止める → `ls` は `timeout = max(1, floor(残り))` ミリ秒（残りは 90 秒以下。単調時計の差は小数になり、`spawnSync` は小数の timeout を `ERR_OUT_OF_RANGE` で投げるため整数に切り下げる。`sleep` も同じ）で実行。回数の上限 `READY_TIMEOUT_MS / READY_POLL_MS`（18 回）も残す | 実時間の上限が「90 秒＋1 秒程度」になる。回数の上限は、時計を固定した既存の試験（`tests/unit/scripts/agent-health/dispatch.test.ts:243-249`、`now` が固定）が止まるために要る |
 | 3C 直さず文面だけ「19 回」に | — | 不採用。実時間の上限が無いままになる |
 
 `Exec` の型（`dispatch-main.ts:69`）に省略できる第 3 引数 `{ timeoutMs?: number }` を足し、`defaultExec` は `spawnSync` の `timeout` に使う（無ければ今の 300 秒）。既存の試験の stub は第 3 引数を無視するので変わらない。`readState` は ready 待ちの中だけ timeout 付きで呼ぶ（`checkState` など他の `ls` は今のまま）。timeout で切れた `ls` は `status: null` → `judgeAgentState(undefined)` → `unknown` で、ready ではないので待ちを続ける（今の `unknown` の扱いと同じ）。
@@ -417,17 +417,17 @@ for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {   //
 | 案 | 中身 | 評価 |
 |---|---|---|
 | 4A `reserve --no-state-check`（状態確認を省くだけ） | 誰でも省ける | 不採用。PM が claude-3 の busy を無視して予約できてしまい、#4243 の「処理中の claude-3 を予約しない」が崩れる |
-| **4B `reserve --self`（採用）** | `commandmate whoami --json` の `worktreeId`／`instanceId` が予約の送り先（`RESERVATION_TARGET`、`claude3-reservation.ts:50-54`）と一致するときだけ通す。状態確認（`claude3Free`）は省く（呼び手が claude-3 なので busy なのは自分）。持ち主は新しい値 `leader`、token は `leader-<時刻>-<乱数>` | claude-3 の中からしか通らない。予約が `held` なら今どおり exit 3（dispatch の run の中の claude-3 は自分では取れない＝取る必要が無い） |
+| **4B `reserve --self`（採用）** | `commandmate whoami --json` の `worktreeId`／`instanceId`／`cliToolId` が予約の送り先（`RESERVATION_TARGET`、`claude3-reservation.ts:50-54`）と一致するときだけ通す。状態確認（`claude3Free`）は省く（呼び手が claude-3 なので busy なのは自分）。持ち主は新しい値 `leader`、token は `leader-<時刻>-<乱数>` | claude-3 の中からしか通らない。予約が `held` なら今どおり exit 3（dispatch の run の中の claude-3 は自分では取れない＝取る必要が無い） |
 | 4C PM が代わりに取る（今の手順のまま。直さない） | — | 不採用。PM を通さない run が守られない |
 
-`whoami` は認証ではない（環境変数で偽れる）。予約の token も秘密ではない（#4243 §3.4）。4B の確認は「PM が誤って `--self` を使う」事故を止めるためのもの（見立て）。
+`whoami` は認証ではない（環境変数で偽れる）。予約の token も秘密ではない（#4243 §3.4）。4B の確認は「PM が誤って `--self` を使う」事故を止めるためのもの（見立て）。判定は dispatch の `judgeAgentState` と同じ 3 つ（worktree・インスタンス・cliTool＝`claude`）で、roster で claude-3 が別の tool のときは取れない（exit 2）。
 
 ### 3.4 規則
 
 | 操作 | 通る条件 | 作る世代 |
 |---|---|---|
 | `reserve --self --label <s> [--hours 1-24]` | whoami が `mycodebranchdesk`／`claude-3`（exit 0 かつ JSON が読める）・予約が `released` | `held`・`holder: 'leader'`・新しい token（標準出力） |
-| whoami が別のインスタンス・失敗（セッション外の exit 3 を含む） | — | 何も作らず **exit 2**（「--self は claude-3 の中からだけ使える」） |
+| whoami が別のインスタンス・別の tool（roster で claude-3 が codex 等）・失敗（セッション外の exit 3 を含む） | — | 何も作らず **exit 2**（「--self は claude-3 の中からだけ使える」） |
 | `send --token <leader の token>` | — | 今どおり exit 3（`beginSend(…, 'pm')`、`claude3-reservation.ts:477-487`。claude-3 は自分へ送らない） |
 | `renew`／`release --token` | token の一致（今のまま） | 今のまま |
 | `takeover --reason restart` | `holder: 'pm'` だけ（今のまま） | claude-3 は `/clear` の後も `status` で token を読み `release --token` で外せるので、引継ぎは足さない |
@@ -460,6 +460,8 @@ for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {   //
 ---
 
 ## 4. 5 番: 素の `commandmate send` で claude-3 へ送る経路が予約を通らない
+
+> **採らない（PM の決定）。** 以下の案 5C（`.claude/settings.json` の PreToolUse フックと `claude3-send-guard.mjs`）は作らない。理由: リポジトリの共有の設定を足すと、clone した利用者を含む全 Claude セッションに効くため。代わりに `docs/orchestrate/team.md` §4 に、理由と送り方（claude-3 へは `npx tsx scripts/agent-health/claude3-reserve.ts send` だけ）を書く。`dev-team-doc-4239.test.ts` が固定する「未対応（追跡）」の語は残す。以降の 4.2〜4.6 は検討の記録で、実装しない。
 
 ### 4.1 今の振る舞い（事実）
 

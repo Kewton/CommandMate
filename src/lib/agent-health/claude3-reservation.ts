@@ -53,7 +53,8 @@ export const RESERVATION_TARGET: ReservationTarget = {
   cliTool: DISPATCH_CLI_TOOL,
 };
 
-export type ReservationHolder = 'pm' | 'dispatch';
+/** `leader` is claude-3 itself, holding its own run (Issue #4288, `reserve --self`). */
+export type ReservationHolder = 'pm' | 'dispatch' | 'leader';
 
 export interface SendingMark {
   parentPid: number;
@@ -162,7 +163,7 @@ function parseGeneration(text: string, n: number): ReservationGeneration | null 
     generation: n,
     target: { worktreeId: String(t.worktreeId), instanceId: String(t.instanceId), cliTool: String(t.cliTool) },
     state: r.state,
-    holder: r.holder === 'pm' || r.holder === 'dispatch' ? r.holder : null,
+    holder: r.holder === 'pm' || r.holder === 'dispatch' || r.holder === 'leader' ? r.holder : null,
     token: str(r.token),
     label: str(r.label),
     date: str(r.date),
@@ -236,6 +237,9 @@ export function describeHolder(current: ReservationGeneration, now: Date): strin
   const overdue = isOverdue(current, now) ? '・期限超過・要確認' : '';
   if (current.holder === 'pm') {
     return `claude-3 を PM が予約中（${current.label ?? '-'}、${current.reviewAfter ?? '-'} まで${overdue}）`;
+  }
+  if (current.holder === 'leader') {
+    return `claude-3 を開発リーダー自身が予約中（${current.label ?? '-'}、${current.reviewAfter ?? '-'} まで${overdue}）`;
   }
   return `claude-3 を自動依頼（${current.date ?? '-'}）の run が予約中（${current.reviewAfter ?? '-'} まで${overdue}）`;
 }

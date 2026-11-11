@@ -130,6 +130,8 @@ describe('buildProgram', () => {
       'mem',
       // Issue #4223: the brief a restart reads (derived state and mem items within a byte budget)
       'brief',
+      // Issue #4227: the agent's proposals before a session ends (propose / done only)
+      'handoff',
     ];
 
     it.each(expectedCommands)('should register the %s command', (name) => {

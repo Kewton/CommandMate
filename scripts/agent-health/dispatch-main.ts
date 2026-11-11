@@ -66,12 +66,18 @@ export interface ExecResult {
 }
 
 /** Runs a command without a shell; never throws (a missing binary is status null). */
-export type Exec = (command: string, args: readonly string[]) => ExecResult;
+export type Exec = (command: string, args: readonly string[], options?: { timeoutMs?: number }) => ExecResult;
 
 export interface DispatchDeps {
   exec: Exec;
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
+  /**
+   * Monotonic milliseconds for deadlines (Issue #4288). `now` is the record's wall
+   * clock and may jump back; deadlines are counted here. Default: `performance.now()`
+   * — or, when only `now` is injected (a test), `now` itself.
+   */
+  monotonic?: () => number;
   env: NodeJS.ProcessEnv;
   homedir: string;
   /** The repository this runs in; the terms file goes under its `workspace/`. */
@@ -105,12 +111,13 @@ export const COLD_START_EXIT = 99;
 export const READY_TIMEOUT_MS = 90_000;
 export const READY_POLL_MS = 5_000;
 
-const defaultExec: Exec = (command, args) => {
+const defaultExec: Exec = (command, args, options) => {
   const result = spawnSync(command, [...args], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: 300_000,
+    // spawnSync throws ERR_OUT_OF_RANGE on a fractional timeout (Issue #4288).
+    timeout: Math.max(1, Math.floor(options?.timeoutMs ?? 300_000)),
   });
   return { status: result.error ? null : result.status, stdout: result.stdout ?? '' };
 };
@@ -120,6 +127,7 @@ function defaultDeps(): DispatchDeps {
     exec: defaultExec,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => new Date(),
+    monotonic: () => performance.now(),
     env: process.env,
     homedir: os.homedir(),
     repoRoot: path.resolve(__dirname, '..', '..'),
@@ -197,8 +205,8 @@ export function writeNotSent(
   return null;
 }
 
-function json(deps: DispatchDeps, command: string, args: string[]): unknown {
-  const result = deps.exec(command, args);
+function json(deps: DispatchDeps, command: string, args: string[], options?: { timeoutMs?: number }): unknown {
+  const result = options ? deps.exec(command, args, options) : deps.exec(command, args);
   if (result.status !== 0) return undefined;
   try {
     return JSON.parse(result.stdout);
@@ -209,6 +217,8 @@ function json(deps: DispatchDeps, command: string, args: string[]): unknown {
 
 export async function main(argv: readonly string[], overrides: Partial<DispatchDeps> = {}): Promise<number> {
   const deps: DispatchDeps = { ...defaultDeps(), ...overrides };
+  // A test that injects only `now` (a virtual clock) counts deadlines on it too.
+  if (overrides.now && !overrides.monotonic) deps.monotonic = () => overrides.now!().getTime();
   const parsed = parseDispatchArgs(argv);
   if (!parsed.ok) {
     if (parsed.help) {
@@ -344,7 +354,8 @@ async function dispatch(
   };
 
   // --- Claude 3
-  const readState = (): AgentState => judgeAgentState(json(deps, 'commandmate', ['ls', '--json']));
+  const readState = (options?: { timeoutMs?: number }): AgentState =>
+    judgeAgentState(json(deps, 'commandmate', ['ls', '--json'], options));
   /** Claude 3's state when it may be sent to; else the exit code of the stop (record written). */
   const checkState = (): { stop: number } | { kind: AgentState['kind'] } => {
     const state = readState();
@@ -436,10 +447,20 @@ async function dispatch(
     const cleared = await send('/clear', false);
     if (cleared.kind === 'refused') return refused(cleared);
     if (cleared.kind === 'failed') return fail('/clear を送れなかった', issues, deferred);
+    // Issue #4288: the limit is real time from here (not the sum of the sleeps), the
+    // count is capped (a frozen clock still stops), and one `ls` may not outlive the deadline.
     let ready = false;
-    for (let waited = 0; waited <= READY_TIMEOUT_MS; waited += READY_POLL_MS) {
-      await deps.sleep(READY_POLL_MS);
-      if (readState().kind === 'ready') {
+    const mono = deps.monotonic ?? (() => deps.now().getTime());
+    const deadline = mono() + READY_TIMEOUT_MS;
+    for (let polls = 0; polls < READY_TIMEOUT_MS / READY_POLL_MS; polls++) {
+      const untilDeadline = deadline - mono();
+      if (untilDeadline <= 0) break;
+      // Whole milliseconds, at least 1: a monotonic difference is fractional.
+      await deps.sleep(Math.max(1, Math.floor(Math.min(READY_POLL_MS, untilDeadline))));
+      // A sleep that returned late may have crossed the deadline: no more `ls`.
+      const left = deadline - mono();
+      if (left <= 0) break;
+      if (readState({ timeoutMs: Math.max(1, Math.floor(left)) }).kind === 'ready') {
         ready = true;
         break;
       }
