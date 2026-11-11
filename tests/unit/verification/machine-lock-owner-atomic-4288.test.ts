@@ -1953,22 +1953,22 @@ ${call};
   // The pid the record names (pm-return-4288-pr1af-impl-2 item 3): under tsx the writer is the child's
   // child, which stays a zombie — `kill -0` answers alive — until launchd reaps it, after the exit
   // awaited above. The rows that judge a published record by its pid wait for ESRCH first.
-  // The number of ESRCH waits passed (sync / ts: 1; bash: 0) — the K rows assert it, so dropping the wait is red.
+  // The number of ESRCH waits passed (sync / ts: the probes run until ESRCH, at least 1; bash: 0) — the K rows assert it, so dropping the wait is red.
+  let probes = 0;
   if (/^\d+$/.test(written)) {
-    await waitEsrch(Number(written));
-    return 1;
+    probes = await waitEsrch(Number(written));
   }
-  return 0;
+  return probes;
 }
 
-/** Wait (up to 30 s) until `pid` answers ESRCH to kill(pid, 0): exited and reaped. */
-async function waitEsrch(pid: number): Promise<void> {
+/** Wait (up to 30 s) until `pid` answers ESRCH to kill(pid, 0): exited and reaped. The number of probes run (>= 1). */
+async function waitEsrch(pid: number): Promise<number> {
   const end = Date.now() + 30000;
-  for (;;) {
+  for (let probes = 1; ; probes++) {
     try {
       process.kill(pid, 0);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return probes;
     }
     expect(Date.now() < end, `pid ${pid} reaped`).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 20));
