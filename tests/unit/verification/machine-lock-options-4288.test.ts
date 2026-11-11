@@ -729,6 +729,21 @@ describe('D12 and review-4288h P3: the holder\'s own release, and the end state 
     expect(fs.existsSync(lock)).toBe(true);
   });
 
+  // #4288 PR1a-f impl-2 (codex P2-1 / PM Claude P3-2): an owner that cannot be parsed (corrupt) or is of
+  // 0 bytes is not shown to be ours either — lock_release keeps the <lock> as for missing (I4, §3.1). In
+  // both codecs: the verify gate's JSON and the kv of run-lock / supervisor.lock.
+  it.each([
+    { form: 'corrupt (garbage), JSON gate', codec: '', make: `printf 'garbage\\n' > "$LK/owner"` },
+    { form: 'corrupt (garbage), kv codec', codec: KV, make: `printf 'garbage\\n' > "$LK/owner"` },
+    { form: 'empty (0 bytes), JSON gate', codec: '', make: `: > "$LK/owner"` },
+    { form: 'empty (0 bytes), kv codec', codec: KV, make: `: > "$LK/owner"` },
+  ])('lock_release on an owner $form keeps the <lock> and the owner', ({ codec, make }) => {
+    const lock = lockIn();
+    const r = sh(`${codec}${ACQ}T=$LOCK_TOKEN; ${make}; lock_release "$LK" "$T"; echo "rc=$?"`, { LK: lock });
+    expect(r.out.split('\n')).toEqual(['acquired', 'rc=0']);
+    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(true);
+  });
+
   it('a group that has a member keeps the lock (release-deferred); the drain empties it with the section\'s KILL_GRACE_SEC, and then it goes', () => {
     const lock = lockIn();
     const r = held(
