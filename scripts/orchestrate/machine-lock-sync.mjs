@@ -404,15 +404,23 @@ export function listQueue(queueDir) {
 const isLive = (entry) => entry.ticket === null || entry.ticket.done !== true;
 
 /**
- * Remove this call's own tmp (#4288 PR1a-f impl-2): never throws — `force` quiets ENOENT only, so an
- * EACCES / EIO of the unlink is caught here. The errno, or null when removed or gone already.
+ * The one place a clean-up delete runs (#4288 PR1a-f impl-2 / impl-3): a tmp, a used ticket, a
+ * moved-aside directory, the own <lock> at release. Never throws — `force` quiets ENOENT only, so an
+ * EACCES / EIO / EBUSY of the unlink is caught here — and so never writes over the caller's answer or
+ * exception. With `warn`, a failure is named `machine-lock-cleanup-left <path> (<errno>; <what>)`.
+ * The errno, or null when removed or gone already.
+ *
+ * @param {string} target
+ * @param {{ recursive?: boolean, warn?: (line: string) => void, what?: string }} [o]
  */
-function removeOwnTmp(tmp) {
+function rmQuiet(target, o = {}) {
   try {
-    fs.rmSync(tmp, { force: true });
+    fs.rmSync(target, { recursive: o.recursive === true, force: true });
     return null;
   } catch (err) {
-    return typeof err?.code === 'string' ? err.code : 'EUNKNOWN';
+    const code = typeof err?.code === 'string' ? err.code : 'EUNKNOWN';
+    o.warn?.(`machine-lock-cleanup-left ${target} (${code}; ${o.what ?? 'clean-up'}, not removed)`);
+    return code;
   }
 }
 
@@ -420,7 +428,7 @@ function removeOwnTmp(tmp) {
  * Mark the ticket at `file` used, if it is still `token`'s: a `{done:true}` record
  * renamed over it, so readers see the old or the new content, never half.
  */
-export function markDone(file, token) {
+export function markDone(file, token, warn = () => {}) {
   const current = readJson(file);
   if (!current || current.token !== token || current.done === true) return false;
   const tmp = path.join(path.dirname(file), `.d-${token}-${crypto.randomUUID()}`);
@@ -429,7 +437,7 @@ export function markDone(file, token) {
     fs.renameSync(tmp, file);
     return true;
   } catch {
-    fs.rmSync(tmp, { force: true });
+    rmQuiet(tmp, { warn, what: 'the tmp of a ticket marked used' });
     return false;
   }
 }
@@ -492,25 +500,26 @@ function takeTicket(queueDir, content, env) {
       // A listing that failed after the link cannot show the ticket is not late: withdraw it.
       const after = ticketNumbers(queueDir, env.obs);
       if (after === null || after.some((k) => k > n)) {
-        markDone(file, content.token);
+        markDone(file, content.token, env.warn);
         continue;
       }
       return n;
     }
     return null;
   } finally {
-    fs.rmSync(tmp, { force: true });
+    // A failed delete is named, never thrown over the number: a published ticket has to reach `mine`.
+    rmQuiet(tmp, { warn: env.warn, what: 'the tmp of a ticket' });
   }
 }
 
 /** Delete used tickets below the largest number (the largest is kept: it is what makes a late ticket withdraw). */
-function collectGarbage(queueDir, now) {
+function collectGarbage(queueDir, now, warn = () => {}) {
   const numbers = ticketNumbers(queueDir);
   const max = numbers.length > 0 ? numbers[numbers.length - 1] : 0;
   for (const n of numbers) {
     if (n >= max) continue;
     const file = path.join(queueDir, ticketName(n));
-    if (readJson(file)?.done === true) fs.rmSync(file, { force: true });
+    if (readJson(file)?.done === true) rmQuiet(file, { warn, what: 'a used ticket' });
   }
   let names = [];
   try {
@@ -521,7 +530,7 @@ function collectGarbage(queueDir, now) {
   for (const name of names.filter((entry) => entry.startsWith('.t-') || entry.startsWith('.d-'))) {
     const file = path.join(queueDir, name);
     try {
-      if (now - fs.statSync(file).mtimeMs > TEMP_MAX_AGE_MS) fs.rmSync(file, { force: true });
+      if (now - fs.statSync(file).mtimeMs > TEMP_MAX_AGE_MS) rmQuiet(file, { warn, what: 'an old ticket tmp' });
     } catch {
       // gone meanwhile
     }
@@ -767,7 +776,7 @@ function reclaimEmptyOwner(ctx, now) {
   ctx.onRecover?.('empty-owner-moved');
   const after = ctx.obs.lstat('reclaim-owner', path.join(aside, 'owner'));
   if (empty(after) && now - after.mtimeMs > EMPTY_OWNER_GRACE_MS) {
-    fs.rmSync(aside, { recursive: true, force: true });
+    rmQuiet(aside, { recursive: true, warn: ctx.warn, what: 'the own moved-aside <lock> of an old empty owner' });
     ctx.warn(`machine-lock-empty-owner-removed ${ctx.lockPath} (an owner of 0 bytes, ${Math.round(now - st.mtimeMs)} ms old)`);
     return { state: 'removed' };
   }
@@ -860,7 +869,7 @@ function moveOwnerIn(ctx, gone) {
   const moved = ctx.obs.link('restore-rename', path.join(gone, 'owner'), path.join(ctx.lockPath, 'owner'));
   if (moved.state === 'linked') {
     ctx.onRecover?.('restore-owner');
-    fs.rmSync(gone, { recursive: true, force: true });
+    rmQuiet(gone, { recursive: true, warn: ctx.warn, what: 'the moved-aside directory after the put-back' });
     return 'restored';
   }
   if (moved.state === 'absent') return 'absent';
@@ -921,7 +930,7 @@ function reclaimGone(ctx, gone, token, takeBackHalf) {
   if (ctx.obs.rename('reclaim-rename', gone, mine).state !== 'moved') return { kept: false };
   const moved = ctx.obs.owner('reclaim-owner', mine);
   if (moved.state === 'record' && moved.owner.token === token) {
-    fs.rmSync(mine, { recursive: true, force: true });
+    rmQuiet(mine, { recursive: true, warn: ctx.warn, what: 'the own moved-aside record judged gone' });
     ctx.warn(`machine-lock-gone-recovered ${gone} pid=${moved.owner.pid}`);
   }
   return { kept: false };
@@ -1000,7 +1009,7 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
   onRecover?.('moved');
   const moved = obs.owner('recover-owner', gone);
   if (moved.state === 'record' && moved.owner.token === dead.token) {
-    fs.rmSync(gone, { recursive: true, force: true });
+    rmQuiet(gone, { recursive: true, warn, what: 'the own moved-aside record judged gone' });
     warn(`machine-lock-broken-stale ${lockPath} pid=${dead.pid}`);
     return 'recovered';
   }
@@ -1023,7 +1032,7 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
   }
   // ENOENT: the moved lock had no owner — a new writer's temporaries only (its link then answers ENOENT).
   if (back.state === 'linked') onRecover?.('restore-owner');
-  fs.rmSync(gone, { recursive: true, force: true });
+  rmQuiet(gone, { recursive: true, warn, what: 'the moved-aside directory after the put-back' });
   return 'restored';
 }
 
@@ -1081,7 +1090,7 @@ export function acquireMachineLockSync(name, options) {
   };
   // setOwnerFields / handOff answer false, never throw: a tmp that cannot be removed is named and left.
   const dropOwnTmp = (tmp) => {
-    const code = removeOwnTmp(tmp);
+    const code = rmQuiet(tmp);
     if (code) warn(`machine-lock-tmp-left ${tmp} (${code}; this call's own tmp, not removed)`);
   };
   const now = hooks.now ?? (() => Date.now());
@@ -1093,6 +1102,7 @@ export function acquireMachineLockSync(name, options) {
     obs,
     link: hooks.link ?? ((src, dst) => fs.linkSync(src, dst)),
     beforeLink: hooks.beforeLink,
+    warn,
     startOf: (pid, why = {}) => {
       if (hooks.startOf) return hooks.startOf(pid);
       const cached = startCache.get(pid);
@@ -1140,7 +1150,7 @@ export function acquireMachineLockSync(name, options) {
   const broken = new Set();
   const mineFile = () => path.join(queueDir, ticketName(mine));
   const retire = () => {
-    if (mine !== null) markDone(mineFile(), token);
+    if (mine !== null) markDone(mineFile(), token, warn);
     mine = null;
   };
   const heldBy = () => {
@@ -1191,7 +1201,7 @@ export function acquireMachineLockSync(name, options) {
           if (!isLive(entry)) continue;
           const why = entry.ticket ? ticketRetirable(entry.ticket, judged) : null;
           if (why) {
-            if (markDone(entry.file, entry.ticket.token)) warn(`machine-lock-ticket-retired ${entry.file} (${why})`);
+            if (markDone(entry.file, entry.ticket.token, warn)) warn(`machine-lock-ticket-retired ${entry.file} (${why})`);
             continue;
           }
           blocker = entry;
@@ -1209,7 +1219,7 @@ export function acquireMachineLockSync(name, options) {
             const expired = expireOwnerless(ctx, options.ownerlessGraceMs, now());
             if (expired.state !== 'unknown' && claim(lockPath, owner, obs, warn, codec, hooks.onOwnerStage)) {
               retire();
-              collectGarbage(queueDir, now());
+              collectGarbage(queueDir, now(), warn);
               let released = false;
               // D4: the token a handover published (T1 = <T0>-g<pgid>), from the moment it is tried.
               let handed = null;
@@ -1257,8 +1267,14 @@ export function acquireMachineLockSync(name, options) {
                   }
                   released = true;
                   if (mine) {
-                    fs.rmSync(lockPath, { recursive: true, force: true });
-                    return 'released';
+                    // A delete that fails (EACCES / EIO / EBUSY) is named, not thrown: the record is still
+                    // this acquisition's, so the release may be called again ('deferred', as TS's
+                    // machine-lock-release-failed).
+                    const code = rmQuiet(lockPath, { recursive: true });
+                    if (code === null) return 'released';
+                    released = false;
+                    warn(`machine-lock-release-failed ${lockPath} (${code}; the record is still this acquisition's)`);
+                    return 'deferred';
                   }
                   if (current.state === 'unknown') {
                     warn(`machine-lock-release-deferred ${lockPath} point=release-owner errno=${current.code}`);
@@ -1396,6 +1412,7 @@ function asHead(lockPath, options, whenHead) {
     obs,
     link: hooks.link ?? ((src, dst) => fs.linkSync(src, dst)),
     beforeLink: hooks.beforeLink,
+    warn,
     startOf: (pid, why = {}) => (hooks.startOf ? hooks.startOf(pid) : processStartMs(pid, now(), now, why)),
   };
   const root = path.dirname(lockPath);
@@ -1427,7 +1444,7 @@ function asHead(lockPath, options, whenHead) {
           if (!isLive(entry)) continue;
           const why = entry.ticket ? ticketRetirable(entry.ticket, judged) : null;
           if (why) {
-            if (markDone(entry.file, entry.ticket.token)) warn(`machine-lock-ticket-retired ${entry.file} (${why})`);
+            if (markDone(entry.file, entry.ticket.token, warn)) warn(`machine-lock-ticket-retired ${entry.file} (${why})`);
             continue;
           }
           blocker = entry;
@@ -1443,7 +1460,7 @@ function asHead(lockPath, options, whenHead) {
       sleep(Math.min(pollMs, deadline - t));
     }
   } finally {
-    if (mine !== null) markDone(path.join(queueDir, ticketName(mine)), token);
+    if (mine !== null) markDone(path.join(queueDir, ticketName(mine)), token, warn);
   }
 }
 
