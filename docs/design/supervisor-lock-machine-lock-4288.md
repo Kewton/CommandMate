@@ -69,12 +69,14 @@ supervisor.lock だけの性質（事実）:
 | `ownerless` | `<lock>` はあるが owner が無く、中が空 |
 | `ownerless-tmp` | `<lock>` に owner が無く、旧版の `owner.tmp.<pid>` だけがある（旧版が `mkdir` と `mv` の間で死んだ。`lib.sh:173-176`）。`lock_ownerless_empty` は `no`（`verify-run.sh:1305`）で誰も取らない。**PR1a-f で塞ぐ**。それまでは文面 `tmp` で人に知らせ、消さない |
 | `corrupt` | owner はあるが `pid=` か `token=` が無い。生じ方は 2 つ: 取得中の SIGKILL（`lock_obs_create` が `: >` で作ってから `cat >>` で書く間。`verify-run.sh:1014-1020`。F17）と、後始末の `rm -f owner` の失敗（F15）。**PR1a-f で塞ぐ**（tmp→`mv` に戻す）。それまでは文面 `corrupt` で人に知らせ、消さない |
-| `own` | 呼び手の token の記録（pid＝取得した main シェルの `$$`、`lstart=`・`started_at=` あり、`pgid=` 無し） |
+| `own` | 呼び手の token の記録（pid＝取得した main シェルの `$$`、`lstart=`・`started_at=`・`v=1` あり、`pgid=` 無し） |
 | `other-plain` | 他の token の記録で `lstart=` が無いか空（F7）。D7 の関数を呼ばず pid だけで判定 |
 | `other-lstart` | 他の token の記録で `lstart=` があり、`kill -0` の pid の観測が alive・ESRCH・EPERM 以外の失敗のどれか。alive のとき D7 が `machine_lock_pid_identity` を呼ぶ（TZ の違いもここ。`started_at=` のある記録は `now − etime` との比較で TZ に依らず判定し、旧版の記録で `started_at=` が無ければ `lstart` の文字列が違うだけで `unknown:lstart:EMISMATCH`＝不明。PR1a-f I5 の (2)・§4.1 の 4） |
 | `other-eperm` | 他の token の記録で `lstart=` があり、`kill -0` が EPERM（別の利用者のプロセス）。D7 が `machine_lock_pid_identity` を呼び、`reused` なら死、それ以外は EPERM のまま（PR1a-f §4.1 の写像。文面 `eperm`） |
 | `other-host` | 他の token の記録で `host=` が `LOCK_HOST` と違う（`hostname` の変化を含む。Claude 5 P2-5・PM Claude P3-5）。`lock_holder_state` が `kill -0` を呼ばずに alive と答える（`verify-run.sh:1108`）。文面 `host` で人に知らせ、消さない |
 | `aside` | canonical の `<lock>` が無く、他の token の退避 `<lock>.gone-*` がある（戻しが途中で止まった） |
+
+**記録の `v=1`（PR1a-f I9、`e6a6911e0`）**: 新版の書き手（PR1c の supervisor.lock を含む）の kv の記録には、節の書式が書き手の版 `v=1` の行を足す。上の形（`own`・`other-*`・`aside` の新しい記録）と、記録を字面で比べる試験（実装の契約の行・既存の `3312.test.ts` の owner の読み）は `v=1` の行を含めて読み、期待の意味は変えない（判定は `v` で変わらない。`v` の無い記録は旧版の記録で、読み手が `machine-lock-legacy-writer` を出すだけ）。
 
 自分の token の退避は列挙しない: 自分の記録は自分が生きている間は回収されない（S3: pid が生きていれば、`machine_lock_pid_identity` は TZ の違いでも `alive` と答える）ので、自分の退避が生じるのは自分が死んだ後で、そのとき自分は解放を呼べない。1 回目の「TZ が同じ」という暗黙の前提は、PR1a-f の関数で前提でなくなった（PM Claude P2-3）。
 

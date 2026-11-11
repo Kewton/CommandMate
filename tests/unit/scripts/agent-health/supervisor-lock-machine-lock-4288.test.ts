@@ -25,7 +25,9 @@
  *     the product functions only (product_lock_acquire / product_lock_release / product_lock_recover_only):
  *     never lock_release_as_head or lock_recover_only directly (they are PR1a's; the rows are about lib.sh);
  *     nothing under ~/.commandmate, no server, no tmux;
- *   - the form is written in the base (`supervisor.lock/owner` as key=value lines, `.gone-*`, `.stale.*`,
+ *   - the form is written in the base (`supervisor.lock/owner` as key=value lines — a new writer's record carries
+ *     the `v=1` line (PR1a-f I9), and a row that compares a record's text reads it with that line; no `v=` is an old
+ *     writer's record —, `.gone-*`, `.stale.*`,
  *     `owner.tmp.<pid>`, an empty dir with `touch -t`), the observation made real (a live `sleep`, a dead
  *     pid, the test's own lstart, a reader under another TZ for F8) or injected (CM_VERIFY_TEST_KILL0_CMD,
  *     CM_VERIFY_TEST_OBS_FAULT=<point>=<ERRNO>, a `ps` shim on PATH, CM_VERIFY_TEST_HANDOFF=fault:… / pause:…);
@@ -1208,6 +1210,11 @@ describe("Issue #4288 PR1c: aligned with PR1a-f's upstream 3rd round (I3's grace
     expect(design).not.toContain('LOCK_OWNERLESS_GRACE_MS=60000');
     expect(design).toContain('PR1a-f I3 の本番の猶予');
     expect(OBS_MEANING.ownerless.gone).toContain('PR1a-f I3');
+  });
+
+  it("a new writer's record carries v=1 (PR1a-f I9): the forms and the rows comparing a record's text read that line", () => {
+    expect(design).toContain('`lstart=`・`started_at=`・`v=1` あり');
+    expect(design).toContain('記録を字面で比べる試験（実装の契約の行・既存の `3312.test.ts` の owner の読み）は `v=1` の行を含めて読み、期待の意味は変えない');
   });
 
   it('the existing :618-626 test (stderr empty) leans on the lstart texts matching: the implementation writes started_at= there', () => {
