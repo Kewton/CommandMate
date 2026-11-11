@@ -7,6 +7,11 @@
  *   commandmate handoff propose --request <id> close <itemId> --base-version <n> [--reason "<text>"]
  *   commandmate handoff done --request <id>
  *
+ * G9 (the UAT of G-PR1+G-PR2): `--request` of `propose` is taken both before its operation (the
+ * request text's form, `propose --request <id> add …`) and after it (`propose add --request <id> …`).
+ * Every command line of the request text (`lib/handoff/template.ts`) and of the CLI guide is parsed
+ * by this program in `tests/unit/cli/commands/handoff-template-parse-4227.test.ts`.
+ *
  * A proposal is never confirmed here: a person approves it on the screen, which writes
  * it against the item's version. **There is no way here to approve, cancel or end**
  * (design §7.3): those are the screen's, with its mark. The exit codes are mem's.
@@ -108,6 +113,18 @@ function requestId(options: HandoffCommonOptions): string {
   return options.request;
 }
 
+/**
+ * G9: the request a `propose` operation names — its own `--request`, else the one given to
+ * `propose` before the operation (the request text's form). Commander hands an option the parent
+ * knows to the parent wherever it stands, so both places are read.
+ */
+export function handoffRequestOf(command: Command): string | undefined {
+  const own = command.opts<HandoffCommonOptions>().request;
+  if (own) return own;
+  const parent = command.parent?.name() === 'propose' ? command.parent.opts<{ request?: string }>().request : undefined;
+  return parent || undefined;
+}
+
 const path = (worktreeId: string, request: string, rest: string) =>
   `/api/worktrees/${encodeURIComponent(worktreeId)}/mem/handoff/requests/${encodeURIComponent(request)}/${rest}`;
 
@@ -134,9 +151,14 @@ async function run(options: HandoffCommonOptions, action: (client: ApiClient) =>
   process.exit(MemExitCode.SUCCESS);
 }
 
-function withCommon(command: Command): Command {
-  return command
-    .requiredOption('--request <id>', 'The hand-off request id (from the request text)')
+const REQUEST_HELP = 'The hand-off request id (from the request text)';
+
+/**
+ * The options every subcommand takes. `propose`'s operations take `--request` as an ordinary
+ * option (it may stand before the operation instead; checked when run: 2, nothing sent).
+ */
+function withCommon(command: Command, request: 'required' | 'here-or-before' = 'required'): Command {
+  return (request === 'required' ? command.requiredOption('--request <id>', REQUEST_HELP) : command.option('--request <id>', REQUEST_HELP))
     .option('--worktree <id>', 'Worktree ID (default: your own session)')
     .option('--instance <id>', 'Instance ID (default: your own session)')
     .option('--json', 'Output as JSON')
@@ -200,7 +222,10 @@ export function createHandoffCommand(): Command {
   const handoff = new Command('handoff').description('Propose mem updates before your session ends (the screen asks; a person confirms)');
   handoff.addHelpText('after', HANDOFF_HELP);
 
-  const proposeCommand = new Command('propose').description('Propose one mem update for the hand-off (never confirms it)');
+  const proposeCommand = new Command('propose')
+    .description('Propose one mem update for the hand-off (never confirms it)')
+    // G9: the request text's form, `propose --request <id> add …` (after the operation works too).
+    .option('--request <id>', REQUEST_HELP);
   withCommon(
     proposeCommand
       .command('add')
@@ -210,8 +235,9 @@ export function createHandoffCommand(): Command {
       .option('--stdin', 'Read the text from stdin')
       .option('--close-when <cond>', 'When it closes')
       .option('--evidence <ref>', 'Evidence path (repeatable)', collect)
-      .option('--promote-to <dest>', 'Where a decision is reflected')
-  ).action((options: ProposeOptions) => propose('add', undefined, options));
+      .option('--promote-to <dest>', 'Where a decision is reflected'),
+    'here-or-before'
+  ).action((options: ProposeOptions, command: Command) => propose('add', undefined, { ...options, request: handoffRequestOf(command) }));
   withCommon(
     proposeCommand
       .command('update <itemId>')
@@ -220,15 +246,17 @@ export function createHandoffCommand(): Command {
       .option('--text <text>', 'New text')
       .option('--stdin', 'Read the text from stdin')
       .option('--close-when <cond>', 'New close condition')
-      .option('--evidence <ref>', 'Evidence path (repeatable; replaces the list)', collect)
-  ).action((itemId: string, options: ProposeOptions) => propose('update', itemId, options));
+      .option('--evidence <ref>', 'Evidence path (repeatable; replaces the list)', collect),
+    'here-or-before'
+  ).action((itemId: string, options: ProposeOptions, command: Command) => propose('update', itemId, { ...options, request: handoffRequestOf(command) }));
   withCommon(
     proposeCommand
       .command('close <itemId>')
       .description('Propose closing an item (an open decision is withdrawn)')
       .option('--base-version <n>', 'The version you read (mem list)')
-      .option('--reason <text>', 'Why')
-  ).action((itemId: string, options: ProposeOptions) => propose('close', itemId, options));
+      .option('--reason <text>', 'Why'),
+    'here-or-before'
+  ).action((itemId: string, options: ProposeOptions, command: Command) => propose('close', itemId, { ...options, request: handoffRequestOf(command) }));
   handoff.addCommand(proposeCommand);
 
   withCommon(handoff.command('done').description('Your proposals are all in: the screen shows them to a person')).action(

@@ -21,6 +21,12 @@ export interface FitTextOptions {
   trailingNewline: boolean;
   /** The provider's line budget (#2464). */
   maxLines?: number;
+  /**
+   * Issue #4227 (S-F, PM decision (a)): false draws each entry whole (no per-entry
+   * `BRIEF_ITEM_MAX_BYTES` omitted form) while the budget and `maxLines` still hold.
+   * Default true: the output is byte for byte what it was.
+   */
+  itemCap?: boolean;
 }
 
 export interface FittedText {
@@ -46,7 +52,9 @@ function takePrefix(count: number, fits: (taken: number) => boolean): number {
 
 export function fitText(model: BriefModel, options: FitTextOptions): FittedText {
   const all = options.maxBytes === null;
-  const drawn = model.items.map((item) => fittedEntryLine(item.entry, model.fixed.readAll, all).line);
+  // Issue #4227 (S-F): whole entries without the per-entry cap; the budget and lines stay `all`'s.
+  const uncapped = all || options.itemCap === false;
+  const drawn = model.items.map((item) => fittedEntryLine(item.entry, model.fixed.readAll, uncapped).line);
   const total = drawn.length;
   const extra = options.trailingNewline ? 1 : 0;
   // Issue #4224 (D2 design §7.4): the lead is required — the entries after it are cut, it is not.

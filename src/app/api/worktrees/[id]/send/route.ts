@@ -394,6 +394,9 @@ async function handleSend(
       // others call the service with its default (`never`).
       brief: body.brief ?? 'auto',
       briefPin,
+      // Issue #4227 (S-B): the screen's choice for the boundary its preview showed.
+      briefDetail: body.briefDetail,
+      briefBoundary: body.briefBoundary,
       onBrief: (report) => {
         brief.report = report;
       },
@@ -410,6 +413,14 @@ async function handleSend(
     });
 
     if (!result.ok) {
+      // Issue #4227 (S-B, design §3.2): the screen's choice stopped before any key. Not a send
+      // failure: the screen asks again with a new preview (the body and the image stay).
+      if (result.stage === 'brief_choice') {
+        return NextResponse.json(
+          { error: result.code, reason: result.reason, boundary: result.boundary },
+          { status: 409 }
+        );
+      }
       // Issue #1708: the session is sitting on a prompt, so nothing was sent.
       // 409 rather than 500 — the request was well formed and the server is
       // healthy; the session is simply in a state that cannot accept a message.

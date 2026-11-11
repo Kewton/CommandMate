@@ -18,8 +18,17 @@
  * request is made. A unit is cleared by two functions only: {@link settleHandoffDecide} (a
  * decide's answer) and {@link dropHandoffUnit} (the person's drop). The guard
  * `tests/unit/guards/handoff-close-paths-4227.test.ts` fails on any other reference that
- * clears one, and on any path that does not ask the rule. G-PR3 puts the items panel's units
- * in the same store.
+ * clears one, and on any path that does not ask the rule.
+ *
+ * G-PR3 (design §4.1.1・§2.4.1 (4e), "one rule for the whole screen"): the items panel's (G-1)
+ * units — a write being sent (`sending`) and the writes whose result is unknown (`unknown`, one
+ * per operation slot) — live in this store too, keyed by the worktree id each was sent for.
+ * Written by {@link startMemItemsWrite}, {@link settleMemItemsWrite} and {@link dropMemItemsUnit}
+ * only (a {@link SentMemItemsWrite}, made by the start only, names what it settles or drops). The
+ * write lock both screens read ({@link memItemsUnitsLock}, {@link handoffUnitsLock}) is the
+ * store's, so a unit outlives the panel (a remount, a page left and come back to) as the
+ * dialog's does, and a decide is not started while an item write is sent or unknown (nor the
+ * other way round).
  *
  * pr2f (PM decision in `pm-return-4227-pr2e-codex.md`; codex review-4227-pr2d P2-1・P2-2, PM
  * Claude pr2e P3-1): what runs after an await (a decide's settle, a close, a patch of the
@@ -93,6 +102,7 @@ export type SessionStopResult = 'stopped' | 'refused' | 'failed' | 'unknown';
 
 declare const SENT_BRAND: unique symbol;
 declare const OPENING_BRAND: unique symbol;
+declare const ITEMS_BRAND: unique symbol;
 
 /** A decide whose result is unknown (status 0) is sent again as it was (rule (4)). */
 export interface HandoffDecideUnit {
@@ -145,14 +155,38 @@ export interface HandoffOpening {
   readonly plainStopped: boolean;
 }
 
+/**
+ * G-PR3: one write of the items panel (G-1): the worktree it is sent to, its operation slot
+ * (`add`, `update:<id>`, `close:<id>`, rule (4)(b)) and the request as the panel built it (sent
+ * again as it is, rule (4)).
+ */
+export interface MemItemsUnit {
+  readonly worktreeId: string;
+  readonly slot: string;
+  readonly request: unknown;
+}
+
+/** G-PR3: one sending of an items write, made by {@link startMemItemsWrite} only. */
+export type SentMemItemsWrite = MemItemsUnit & { readonly [ITEMS_BRAND]: true };
+
+/** G-PR3: the items panel's units of one worktree. */
+export interface MemItemsUnits {
+  readonly sending: SentMemItemsWrite | null;
+  /** By slot: the writes whose result is unknown. */
+  readonly unknown: Readonly<Record<string, SentMemItemsWrite>>;
+}
+
 export interface HandoffStoreState {
   /** Keyed by worktree id. */
   readonly units: Readonly<Record<string, HandoffUnits>>;
   readonly opening: HandoffOpening | null;
+  /** G-PR3: the items panel's units, keyed by worktree id. */
+  readonly items: Readonly<Record<string, MemItemsUnits>>;
 }
 
 const NO_UNITS: HandoffUnits = { inflight: null, pending: null, stopping: false, cancelling: false };
-const EMPTY: HandoffStoreState = { units: {}, opening: null };
+const NO_ITEM_UNITS: MemItemsUnits = { sending: null, unknown: {} };
+const EMPTY: HandoffStoreState = { units: {}, opening: null, items: {} };
 let state: HandoffStoreState = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -193,6 +227,8 @@ function writeFlags(worktreeId: string, flags: Partial<Pick<HandoffUnits, 'stopp
 export function startHandoffDecide(unit: HandoffDecideUnit): SentHandoffDecide | null {
   const units = handoffUnitsOf(unit.worktreeId);
   if (units.inflight !== null || units.cancelling) return null;
+  // G-PR3 (rule (4)(e), one store): an items write being sent or unknown holds every decide.
+  if (memItemsUnitsLock() !== null) return null;
   const sending = { worktreeId: unit.worktreeId, requestId: unit.requestId, ifVersion: unit.ifVersion, decisions: unit.decisions } as SentHandoffDecide;
   commit({ ...state, units: { ...state.units, [unit.worktreeId]: { ...units, inflight: sending } } });
   return sending;
@@ -315,6 +351,65 @@ export function handoffUnitsLock(snapshot: HandoffStoreState = state): 'sending'
   if (all.some((units) => units.inflight !== null)) return 'sending';
   if (all.some((units) => units.pending !== null)) return 'unknown';
   return null;
+}
+
+/** G-PR3: the items panel's units of `worktreeId`. */
+export function memItemsUnitsOf(worktreeId: string, snapshot: HandoffStoreState = state): MemItemsUnits {
+  return snapshot.items[worktreeId] ?? NO_ITEM_UNITS;
+}
+
+/** G-PR3: every items write being sent, then every one whose result is unknown (any worktree). */
+export function memItemsUnitsAll(snapshot: HandoffStoreState = state): { sending: SentMemItemsWrite | null; unknown: SentMemItemsWrite[] } {
+  const all = Object.values(snapshot.items);
+  return {
+    sending: all.find((units) => units.sending !== null)?.sending ?? null,
+    unknown: all.flatMap((units) => Object.values(units.unknown)),
+  };
+}
+
+/** G-PR3: the write lock the items panel's units hold (any worktree's): sending, else unknown. */
+export function memItemsUnitsLock(snapshot: HandoffStoreState = state): 'sending' | 'unknown' | null {
+  const { sending, unknown } = memItemsUnitsAll(snapshot);
+  if (sending !== null) return 'sending';
+  return unknown.length > 0 ? 'unknown' : null;
+}
+
+/**
+ * G-PR3 (rule (4)(e)): starts sending an items write. Refused (null) while any items write is
+ * sent, while an unknown one of another slot or worktree waits (only its own resend is left),
+ * and while a decide of the hand-off is sent or unknown. The sending it returns names its settle.
+ */
+export function startMemItemsWrite(unit: MemItemsUnit): SentMemItemsWrite | null {
+  const { sending, unknown } = memItemsUnitsAll();
+  if (sending !== null) return null;
+  if (unknown.some((other) => other.worktreeId !== unit.worktreeId || other.slot !== unit.slot)) return null;
+  if (handoffUnitsLock() !== null) return null;
+  const started = { worktreeId: unit.worktreeId, slot: unit.slot, request: unit.request } as SentMemItemsWrite;
+  const units = memItemsUnitsOf(unit.worktreeId);
+  commit({ ...state, items: { ...state.items, [unit.worktreeId]: { ...units, sending: started } } });
+  return started;
+}
+
+/**
+ * G-PR3: an items write's answer — `unknown` keeps it for the next press (its slot's earlier one
+ * replaced), `answered` clears its slot. Only for `sending` while it is the one in flight.
+ */
+export function settleMemItemsWrite(sending: SentMemItemsWrite, outcome: 'unknown' | 'answered'): void {
+  const units = memItemsUnitsOf(sending.worktreeId);
+  if (units.sending !== sending) return;
+  const rest = { ...units.unknown };
+  delete rest[sending.slot];
+  const next = outcome === 'unknown' ? { ...rest, [sending.slot]: sending } : rest;
+  commit({ ...state, items: { ...state.items, [sending.worktreeId]: { sending: null, unknown: next } } });
+}
+
+/** G-PR3: the person's "drop it without sending it again" of the unknown items write `unit`. */
+export function dropMemItemsUnit(unit: SentMemItemsWrite): void {
+  const units = memItemsUnitsOf(unit.worktreeId);
+  if (units.unknown[unit.slot] !== unit) return;
+  const rest = { ...units.unknown };
+  delete rest[unit.slot];
+  commit({ ...state, items: { ...state.items, [unit.worktreeId]: { ...units, unknown: rest } } });
 }
 
 type RefusalListener = (path: HandoffClosePath, block: Exclude<HandoffCloseBlock, null>) => void;

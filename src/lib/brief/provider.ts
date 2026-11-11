@@ -148,6 +148,8 @@ export function createMemBriefProvider(getDb: () => Database.Database, deps: Mem
       maxBytes: request.budget.maxBytes,
       trailingNewline: false,
       maxLines: request.budget.maxLines,
+      // Issue #4227 (S-F): only `full` lifts the per-entry cap; absent / `short` are as before.
+      ...(request.detail === 'full' ? { itemCap: false } : {}),
     });
     if (fitted.leadUnfit) {
       // D2 design §7.4: the line after an unplanned end is required; without it, no brief.

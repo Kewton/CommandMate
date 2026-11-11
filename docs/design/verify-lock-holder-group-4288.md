@@ -296,14 +296,29 @@ drain_group G:
 | `rename-aside` | bash・TS・同期 JS | `rename <lock> → <lock>.gone-*`（回収） | 何もしない（消さない） |
 | `recover-owner` | bash・TS・同期 JS | 退かした owner の読み（回収の確かめ） | 判定した記録と読まない: 消さずに戻す |
 | `restore-mkdir` | bash・TS・同期 JS | `mkdir <lock>`（戻し） | 退避を残す（それが保有中として塞ぐ） |
-| `restore-rename` | bash・TS・同期 JS | `rename 退避/owner → <lock>/owner`（戻し） | 空の `<lock>` を rmdir で戻し、退避を残す |
+| `restore-rename` | bash・TS・同期 JS | `link 退避/owner → <lock>/owner`（戻し。#4288 PR1a-f I2-c で `rename` から `link` に。EEXIST は退避を残し `<lock>` を `rmdir` しない） | 空の `<lock>` を rmdir で戻し、退避を残す |
 | `reclaim-rename` | bash・TS・同期 JS | `rename 死んだ退避 → 自分の退避名` | 何もしない（消さない） |
 | `reclaim-owner` | bash・TS・同期 JS | 移した退避の owner の読み | 判定した記録と読まない: 消さない |
 | `reclaim-rmdir` | bash・TS・同期 JS | 途中で止まった戻しの空の `<lock>` の `rmdir`（回収の前。bash `lock_rmdir_errno`、TS・同期 JS `obs.rmdir`） | 退避を残し、その周回は `mkdir` しない（取らない）。点・パス・errno を出す |
 | `release-owner` | bash・TS・同期 JS | 解放の前の `<lock>/owner` の読み | 解放しない |
 | `release-list` | bash・TS・同期 JS | 解放のときの lock root の一覧（自分の退避の片付け） | 片付けない（消さない） |
-| `owner-create` | bash・TS・同期 JS | owner の排他作成（O_EXCL／`set -C`）と書き込み（取得。#4288 の 2 番 PR1a の D3） | 取らない。自分が開いた owner と空の `<lock>` だけを戻す（EEXIST は何も消さない。TS・同期 JS は errno 付きで投げる） |
-| `owner-readback` | bash・TS・同期 JS | 作成した owner の読み直し（自分の token か） | 取らない。自分が作った owner と空の `<lock>` を戻す |
+| `owner-create` | bash・TS・同期 JS | tmp（`<lock>/.owner-<token>`）の排他作成（O_EXCL／`set -C`。#4288 の 2 番 PR1a の D3、PR1a-f の I1） | 取らない。開いていないので何も消さず、自分の `mkdir` の `<lock>` を `rmdir`（空のときだけ）で戻す（TS・同期 JS は errno 付きで投げる） |
+| `owner-readback` | bash・TS・同期 JS | 公開した owner の読み直し（自分の token か） | 取らない。owner を自分の名前 `.undo-<token>` へ `rename` し、tmp と同じ inode なら消して `<lock>` を戻す（PR1a-f の I2-b） |
+| `owner-write` | bash・TS・同期 JS | tmp への書き込み（PR1a-f） | 取らない。自分の tmp と自分の `mkdir` の `<lock>` を戻す |
+| `owner-write-short` | bash・TS・同期 JS | tmp に書けたバイト数（TS・同期 JS は `writeSync` の戻り値の合計、bash は同じ取り方での読み直し） | 短い書き込みとして取らない。自分の tmp と `<lock>` を戻す |
+| `owner-close` | TS・同期 JS | tmp の `closeSync` | 書けたと読まない: 取らない。自分の tmp と `<lock>` を戻す |
+| `owner-publish` | bash・TS・同期 JS | `link tmp → <lock>/owner`（公開。EEXIST は在る owner を書き換えない・中に作らない） | 取らない。自分の tmp と `<lock>` を戻す（ENOENT は `<lock>` を `rmdir` しない） |
+| `owner-unlink` | bash・TS・同期 JS | 自分の一時ファイル（`.owner-<token>`・`.undo-<token>`）の unlink | 残す（取った後なら tmp は解放・回収の `rm -rf` で消える。戻しなら `<lock>` も残る） |
+| `lock-rmdir` | bash・TS・同期 JS | 戻しの `rmdir`（自分の `mkdir` の `<lock>`。空のときだけ消える） | `<lock>` を残す（消さない） |
+| `owner-undo-rename` | bash・TS・同期 JS | 戻しの `rename <lock>/owner → <lock>/.undo-<token>` | owner を消さない。自分の tmp だけ消し、`<lock>` を `rmdir` しない |
+| `owner-undo-lstat` | bash・TS・同期 JS | 戻しの inode の確かめ（`.undo-<token>` と tmp の lstat。bash は `[ ! -L ] && [ -ef ]`） | 自分のものと読まない: `link` で `<lock>/owner` に戻す |
+| `owner-undo-link` | bash・TS・同期 JS | 戻しの `link .undo-<token> → <lock>/owner` | `.undo-<token>` を残して名指す（`machine-lock-undo-restore-failed`） |
+| `ownerless-tmp-lstat` | bash・同期 JS | owner の無い `<lock>` の一時ファイルの lstat（種類と年齢。PR1a-f の I3） | 片付けない: その周回は `mkdir` しない（取らない） |
+| `owner-tmp-pid` | bash・同期 JS | 旧版の `owner.tmp.<pid>` の pid の `kill -0` | 書き手でないと読まない: 片付けない・その周回は `mkdir` しない |
+| `ownerless-tmp-unlink` | bash・同期 JS | 片付けの一時ファイルの unlink（ENOENT はもう無い） | `rmdir` も `mkdir` もしない（取らない） |
+| `empty-owner-move` | bash・TS・同期 JS | 0 バイトの owner の `<lock>` を自分の退避名へ `rename`（PR1a-f の I4） | 回収しない（取らない） |
+| `owner-pid` | bash・同期 JS | 最初の取得の `LOCK_OWNER_PID`／`ownerPid` が自分か（PR1a-f の I1-b） | 札も `mkdir` もせずに断る（取らない） |
+| `owner-fields` | bash・同期 JS | 呼び手の欄（`LOCK_OWNER_EXTRA`／`ownerFields`）に予約の鍵が無いか（PR1a-f の I1-c） | 札も `mkdir` もせずに断る（取らない） |
 | `ownerless-mtime` | bash・同期 JS | owner の無い空の `<lock>` の mtime（`ownerlessGraceMs` の年齢。D3） | 古いと読まない: `<lock>` を消さない・その周回は `mkdir` しない（取らない） |
 | `ownerless-rmdir` | bash・同期 JS | 猶予を過ぎた owner の無い空の `<lock>` の `rmdir` | その周回は `mkdir` しない（取らない）。点・パス・errno を出す |
 | `handoff-group` | bash | `ps -o pgid=`（ゲートのグループ G の確かめ） | ゲートを始めない（stage=group） |

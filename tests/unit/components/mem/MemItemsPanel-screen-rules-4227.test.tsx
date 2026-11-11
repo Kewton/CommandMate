@@ -23,6 +23,7 @@ import { MemItemsPanel, CLOSE_WHEN_REQUIRED_KINDS, editChanges, readSnapshot } f
 import { CLOSE_WHEN_DEFAULTS } from '@/lib/mem/close-when';
 import { memScreenActions, memTransition } from '@/lib/mem/transitions';
 import type { MemItemView, MemKind, MemState } from '@/types/mem';
+import { resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -701,3 +702,6 @@ describe('[#4227] the close condition a kind needs (P3-4)', () => {
     await waitFor(() => expect(screen.getByTestId('mem-items-notice').textContent).toContain('閉じる条件が要ります'));
   });
 });
+
+// G-PR3: the panel's units live in the hand-off's module store now; each test starts from an empty one.
+afterEach(() => resetHandoffStoreForTests());

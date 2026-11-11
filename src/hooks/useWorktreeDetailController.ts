@@ -102,6 +102,8 @@ import {
   askHandoffClose,
   beginHandoffOpening,
   closeHandoffOpening,
+  handoffStoreSnapshot,
+  handoffUnitsOf,
   type HandoffClosePath,
   type HandoffOpeningToken,
   type SessionStopResult,
@@ -1953,18 +1955,52 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setHandoffTarget(null);
     return true;
   }, []);
-  const openHandoff = useCallback((target: SessionKillTarget): void => {
+  const openHandoff = useCallback((target: SessionKillTarget, resumed: HandoffOpeningToken | null = null): void => {
     // pr2e: a new opening in the store (the request is made by the dialog for it); the units of
-    // the worktree are not touched.
-    handoffOpeningRef.current = beginHandoffOpening(worktreeId, target).token;
+    // the worktree are not touched. G10: `resumed` is the store's live opening taken back by a
+    // page made again (no new opening: the dialog finds it and makes nothing again).
+    handoffOpeningRef.current = resumed ?? beginHandoffOpening(worktreeId, target).token;
     handoffTargetRef.current = target;
     setHandoffTarget(target);
   }, [worktreeId]);
+  /**
+   * pr3c (review B P2-1): the worktree the effect below last ran for. A new mount starts at null,
+   * so only a change of `worktreeId` on a mounted page is a switch — not the page made again, nor
+   * React's StrictMode running a new mount's effects twice (dev, the e2e's `npm run dev`).
+   */
+  const handoffEffectWorktreeRef = useRef<string | null>(null);
   useEffect(() => {
+    // G10 (design §4.1.1, the UAT of G-PR1+G-PR2): the page itself is made again when the layout
+    // switches (AppShell draws its children under another parent for PC and phone) and when the
+    // worktree changes (Next keys the page by its `[id]`), so this hook mounts anew with no target
+    // while the store keeps the opening. Taken back here, the dialog is drawn open again without a
+    // person's press: this worktree's live opening (with or without a unit), and another
+    // worktree's while it holds a decide being sent or unknown (the invariant's units: they wait
+    // for the person's choice) — asked as a switch below, the rule keeps it (foreign). Another
+    // worktree's stop or cancel ends by its own answer and is not taken back (its page may begin
+    // its own opening meanwhile, pr2f).
+    const switched = handoffEffectWorktreeRef.current !== null && handoffEffectWorktreeRef.current !== worktreeId;
+    handoffEffectWorktreeRef.current = worktreeId;
+    const live = handoffStoreSnapshot().opening;
+    // pr3c: this worktree's live opening, already taken back by this page (StrictMode's second
+    // run, or back on the opening's own worktree): nothing to do — never closed by the rerun.
+    if (live !== null && !live.closed && live.worktreeId === worktreeId && handoffTargetRef.current !== null && handoffOpeningRef.current === live.token) return;
+    const liveTool = live?.target.cliToolId;
+    const liveUnits = live === null ? null : handoffUnitsOf(live.worktreeId);
+    const takeBack =
+      live !== null &&
+      !live.closed &&
+      (live.worktreeId === worktreeId || (liveUnits !== null && (liveUnits.inflight !== null || liveUnits.pending !== null)));
+    if (handoffTargetRef.current === null && takeBack && liveTool !== undefined && isCliToolType(liveTool)) {
+      if (!closeHandoffBy('page-end')) return;
+      openHandoff({ ...live.target, cliToolId: liveTool }, live.token);
+      if (live.worktreeId === worktreeId) return;
+    }
     // pr2d: a switch of worktree asks the rule too. Kept, the dialog shows that it is another
-    // worktree's and runs nothing of it here but the unit's drop and closing.
-    closeHandoffBy('worktree-switch');
-  }, [worktreeId, closeHandoffBy]);
+    // worktree's and runs nothing of it here but the unit's drop and closing. pr3c: asked only
+    // when the worktree did change on this page (a page made again starts with no target).
+    if (switched) closeHandoffBy('worktree-switch');
+  }, [worktreeId, closeHandoffBy, openHandoff]);
   /**
    * The hand-off's "end" for an explicit target snapshot: the PC split's own End (and its
    * restart), like {@link openKillConfirm}. The mode is read once per press; a read that

@@ -80,6 +80,32 @@ export type ApiErrorKind = 'http' | 'network' | 'timeout' | 'offline' | 'aborted
  * defaults from `status`, so every existing `new ApiError(msg, status)` keeps
  * the meaning it had.
  */
+/**
+ * Issue #4227 (S-B, design §3.2.1): the screen's choice for the session brief of the boundary
+ * its G-3 preview showed. `brief: 'decline'` — don't read; `briefDetail: 'full'` — read it all;
+ * `briefDetail: 'short'` — the short brief (as a send without a choice). `briefBoundary` names
+ * the boundary; the server answers 409 `boundary_changed` when it is no longer the one.
+ */
+export interface SendBriefChoice {
+  brief?: 'skip' | 'force' | 'decline';
+  briefDetail?: 'short' | 'full';
+  briefBoundary?: string;
+}
+
+/** Issue #4274 / #4227: what `/send` said about the brief (absent when there was nothing to say). */
+export interface SendBriefReport {
+  state: 'attached' | 'skipped' | 'unknown' | 'not_sent' | 'consumed';
+  reason?: string;
+  boundaryId?: string;
+}
+
+/** Issue #4227 (S-B): whether a send failed as 409 `boundary_changed` (nothing typed; ask again). */
+export function isBriefBoundaryChanged(error: unknown): error is ApiError & { data: { error: 'boundary_changed'; reason?: string } } {
+  if (!(error instanceof ApiError) || error.status !== 409) return false;
+  const data = error.data as { error?: unknown } | undefined;
+  return typeof data === 'object' && data !== null && data.error === 'boundary_changed';
+}
+
 export class ApiError extends Error {
   /** See {@link ApiErrorKind}. */
   public readonly kind: ApiErrorKind;
@@ -671,15 +697,16 @@ export const worktreeApi = {
    *
    * @param id - Worktree ID
    * @param content - Message content
-   * @param options - Optional settings (cliToolId, instanceId, imagePath)
-   * @returns The created message, with its `timestamp` revived to a `Date`
+   * @param options - Optional settings (cliToolId, instanceId, imagePath; Issue #4227: the G-3 choice)
+   * @returns The created message, with its `timestamp` revived to a `Date` (and `/send`'s `brief`
+   *   report when it gave one, Issue #4227)
    */
   async sendMessage(
     id: string,
     content: string,
-    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string }
-  ): Promise<ChatMessage> {
-    const body: { content: string; cliToolId?: string; instanceId?: string; imagePath?: string } = { content };
+    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string } & SendBriefChoice
+  ): Promise<ChatMessage & { brief?: SendBriefReport }> {
+    const body: { content: string; cliToolId?: string; instanceId?: string; imagePath?: string } & SendBriefChoice = { content };
     if (options?.cliToolId) {
       body.cliToolId = options.cliToolId;
     }
@@ -690,13 +717,18 @@ export const worktreeApi = {
     if (options?.imagePath) {
       body.imagePath = options.imagePath;
     }
-    const created = await fetchApi<ChatMessage>(`/api/worktrees/${id}/send`, {
+    // Issue #4227 (S-B, design §3.2.1): the screen's G-3 choice, only when there is one — a
+    // send without it is the same body, byte for byte.
+    if (options?.brief) body.brief = options.brief;
+    if (options?.briefDetail) body.briefDetail = options.briefDetail;
+    if (options?.briefBoundary) body.briefBoundary = options.briefBoundary;
+    const created = await fetchApi<ChatMessage & { brief?: SendBriefReport }>(`/api/worktrees/${id}/send`, {
       method: 'POST',
       body: JSON.stringify(body),
       // Issue #3194: with no session the server launches the agent inside this request.
       timeoutMs: getSendTimeoutMs(),
     });
-    return reviveMessageTimestamp(created);
+    return reviveMessageTimestamp(created) as ChatMessage & { brief?: SendBriefReport };
   },
 
   /**

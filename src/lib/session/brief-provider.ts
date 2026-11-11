@@ -54,6 +54,11 @@ export interface BriefRequest {
   };
   /** UTF-8 bytes and lines of the final text. Asked only when `maxBytes >= minBytes`. */
   budget: { maxBytes: number; maxLines: number };
+  /**
+   * Issue #4227 (S-F, PM decision (a)): `full` asks every entry that fits the budget whole
+   * (no per-entry cap). Absent or `short`: as before.
+   */
+  detail?: 'short' | 'full';
   now: number;
 }
 

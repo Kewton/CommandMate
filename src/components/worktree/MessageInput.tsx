@@ -7,7 +7,10 @@
 
 import React, { memo, useState, useCallback, FormEvent, useRef, useEffect, useLayoutEffect } from 'react';
 import { useTranslations } from 'next-intl';
-import { worktreeApi, handleApiError } from '@/lib/api-client';
+import { worktreeApi, handleApiError, isBriefBoundaryChanged, type SendBriefChoice } from '@/lib/api-client';
+import { fetchStartPreview, isCommandBody } from '@/lib/handoff/screen-client';
+import type { StartPreviewResponse } from '@/lib/handoff/preview';
+import { SessionStartBriefDialog, type StartBriefChoice } from '@/components/mem/SessionStartBriefDialog';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ChatMessage } from '@/types/models';
 import { Button, Spinner } from '@/components/ui';
@@ -177,6 +180,16 @@ export interface MessageInputProps {
  * <MessageInput worktreeId="main" onMessageSent={handleRefresh} cliToolId="claude" />
  * ```
  */
+/**
+ * Issue #4227 G-PR3 (G-3): how stale the cached start preview may be before a focus reads it
+ * again. The preview is read in the background (on focus, and after a send on an attended
+ * branch), never awaited by a send — a send with no shown preview is the same request, at the
+ * same moment, as before.
+ */
+const START_PREVIEW_REFRESH_MS = 10_000;
+
+type ShownStartPreview = Extract<StartPreviewResponse, { show: true }>;
+
 /** localStorage key prefix for draft message persistence */
 const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
 
@@ -252,6 +265,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
 
 export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false }: MessageInputProps) {
   const t = useTranslations('worktree');
+  const tc = useTranslations('common');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +332,46 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     removeAttachment,
     resetAfterSend,
   } = useImageAttachment(worktreeId, uploadFn);
+
+  // Issue #4227 G-PR3 (G-3, design §3): the start preview of this composer's instance, read in
+  // the background. A shown one makes the next send ask first (the draft stays until it is sent).
+  const briefInstance = instanceId || cliToolId || 'claude';
+  const startPreviewRef = useRef<{ key: string; at: number; value: StartPreviewResponse | null } | null>(null);
+  const previewSeqRef = useRef(0);
+  const [briefAsk, setBriefAsk] = useState<{ preview: ShownStartPreview; notice: string | null } | null>(null);
+  const [briefSending, setBriefSending] = useState(false);
+  const refreshStartPreview = useCallback(
+    (force: boolean) => {
+      const key = `${worktreeId}\u0000${briefInstance}`;
+      const cached = startPreviewRef.current;
+      if (!force && cached && cached.key === key && Date.now() - cached.at < START_PREVIEW_REFRESH_MS) return;
+      const seq = ++previewSeqRef.current;
+      startPreviewRef.current = { key, at: Date.now(), value: cached?.key === key ? cached.value : null };
+      void fetchStartPreview(worktreeId, briefInstance)
+        .then((value) => {
+          if (seq === previewSeqRef.current) startPreviewRef.current = { key, at: Date.now(), value };
+        })
+        .catch(() => undefined);
+    },
+    [worktreeId, briefInstance],
+  );
+  const handleComposerFocus = useCallback(() => {
+    refreshStartPreview(false);
+    onFocus?.();
+  }, [refreshStartPreview, onFocus]);
+  /** The cached preview when it is this composer's and says to ask. */
+  const shownStartPreview = useCallback((): ShownStartPreview | null => {
+    const cached = startPreviewRef.current;
+    if (!cached || cached.key !== `${worktreeId}\u0000${briefInstance}`) return null;
+    return cached.value && cached.value.show ? cached.value : null;
+  }, [worktreeId, briefInstance]);
+  /** After a send: the boundary may be used up (or a new one opened) — read again on an attended branch only. */
+  const afterSendStartPreview = useCallback(() => {
+    const cached = startPreviewRef.current?.value;
+    const attended = !!cached && (cached.show || cached.attended === true);
+    if (attended) refreshStartPreview(true);
+    else if (startPreviewRef.current) startPreviewRef.current = { ...startPreviewRef.current, value: null };
+  }, [refreshStartPreview]);
 
   // Restore draft message from localStorage on mount or (worktreeId, splitIndex) change.
   // Issue #728: also runs the legacy-key migration for splitIndex=0.
@@ -414,6 +468,16 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       options.imagePath = attachedImage.path;
     }
 
+    // Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): an attended branch with a pending boundary
+    // asks before the first send — BEFORE the draft is cleared or handed to the optimistic
+    // layer. A command carries no brief (D1 §4.1) and is never asked about.
+    const ask = isCommandBody(trimmed) ? null : shownStartPreview();
+    if (ask) {
+      setError(null);
+      setBriefAsk({ preview: ask, notice: null });
+      return;
+    }
+
     // Issue #1121: optimistic path. Hand the send to the history layer (which
     // shows a pending bubble and fires the API in the background) and clear the
     // composer immediately rather than blocking on the API. Send failures surface
@@ -430,6 +494,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       }
       onMessageSent?.(effectiveCliTool);
+      afterSendStartPreview();
       return;
     }
 
@@ -451,12 +516,81 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // path with nothing else to reconcile against — the optimistic path above
       // has `usePendingMessages` for that and passes nothing.
       onMessageSent?.(effectiveCliTool, created);
+      afterSendStartPreview();
     } catch (err) {
       setError(handleApiError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive, shownStartPreview, afterSendStartPreview]);
+
+  /**
+   * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
+   * boundary the preview showed. Awaited (not the optimistic layer): the draft — text and image —
+   * is cleared only once the server took it, so a 409 `boundary_changed` (nothing typed) asks
+   * again with a fresh preview and the draft as it was. Never sent again on its own.
+   */
+  const sendWithBriefChoice = useCallback(async (choice: StartBriefChoice) => {
+    const asked = briefAsk;
+    if (!asked || briefSending) return;
+    const trimmed = message.trim();
+    if (!trimmed && !attachedImage) {
+      setBriefAsk(null);
+      return;
+    }
+    const effectiveCliTool: CLIToolType = cliToolId || 'claude';
+    const choiceOptions: SendBriefChoice =
+      choice === 'decline'
+        ? { brief: 'decline', briefBoundary: asked.preview.boundary.id }
+        : { briefDetail: choice, briefBoundary: asked.preview.boundary.id };
+    const options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string } & SendBriefChoice = {
+      cliToolId: effectiveCliTool,
+      ...(instanceId && instanceId !== effectiveCliTool ? { instanceId } : {}),
+      ...(attachedImage ? { imagePath: attachedImage.path } : {}),
+      ...choiceOptions,
+    };
+    setBriefSending(true);
+    setSending(true);
+    setError(null);
+    try {
+      const created = await worktreeApi.sendMessage(worktreeId, trimmed, options);
+      setBriefAsk(null);
+      setMessage('');
+      setIsFreeInputMode(false);
+      resetAfterSend();
+      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
+      else if (isProcessing) showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
+      onMessageSent?.(effectiveCliTool, created);
+      refreshStartPreview(true);
+    } catch (err) {
+      if (isBriefBoundaryChanged(err)) {
+        const reason = typeof err.data.reason === 'string' ? err.data.reason : '';
+        const notice = `${tc('mem.startBrief.askAgain', { reason })}${reason === 'claimed' ? ` ${tc('mem.startBrief.claimed')}` : ''}`;
+        const fresh = await fetchStartPreview(worktreeId, briefInstance);
+        startPreviewRef.current = { key: `${worktreeId}\u0000${briefInstance}`, at: Date.now(), value: fresh };
+        if (fresh && fresh.show) {
+          setBriefAsk({ preview: fresh, notice });
+        } else {
+          // Nothing to ask any more (used up, or the branch changed): the draft stays for a plain send.
+          setBriefAsk(null);
+          setError(notice);
+        }
+      } else {
+        setBriefAsk(null);
+        setError(handleApiError(err));
+      }
+    } finally {
+      setBriefSending(false);
+      setSending(false);
+    }
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, splitIndex, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, briefInstance]);
+
+  const closeBriefAsk = useCallback(() => {
+    if (briefSending) return;
+    // Nothing is sent; the draft (text and image) stays in the composer.
+    setBriefAsk(null);
+  }, [briefSending]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -838,7 +972,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               onKeyDown={handleKeyDown}
               onCompositionStart={handleCompositionStart}
               onCompositionEnd={handleCompositionEnd}
-              onFocus={onFocus}
+              onFocus={handleComposerFocus}
               placeholder={t('composer.placeholder')}
               disabled={sending}
               rows={1}
@@ -874,6 +1008,18 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           newlineHint={t('composer.newlineHint')}
         />
       </form>
+
+      {/* Issue #4227 G-PR3 (G-3): how much of the hand-off the agent reads, asked before the send. */}
+      {briefAsk ? (
+        <SessionStartBriefDialog
+          isOpen
+          preview={briefAsk.preview.preview}
+          notice={briefAsk.notice}
+          busy={briefSending}
+          onChoose={(choice) => void sendWithBriefChoice(choice)}
+          onClose={closeBriefAsk}
+        />
+      ) : null}
 
       {/* Slash Command Selector */}
       <SlashCommandSelector

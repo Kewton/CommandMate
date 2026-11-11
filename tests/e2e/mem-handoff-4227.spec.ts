@@ -19,6 +19,8 @@
 import { test, expect, type BrowserContext, type Page, type Route } from '@playwright/test';
 
 const WT = 'e2e-handoff-4227';
+/** G10: another worktree, for the switch (the page's Loading). */
+const WT2 = 'e2e-handoff-4227-other';
 const RID = 'req-1';
 const BASE = `/api/worktrees/${WT}/mem/handoff/requests`;
 const HANDOFF_TEXT = 'Before this session ends, propose the updates of mem with `commandmate handoff propose`.';
@@ -66,6 +68,11 @@ interface Server {
   running: boolean;
   /** Which conversation runs now; a launch after a stop starts another. */
   conversation: number;
+  /**
+   * G-PR3 (#4289 B P3-6): whether D1 knows the instance's conversation (a boundary row). Without
+   * one, `create` is 409 `session_unknown` as the real route answers (`request.ts`).
+   */
+  boundary: boolean;
   request: HandoffRequest | null;
   proposals: Proposal[];
   items: Item[];
@@ -82,6 +89,10 @@ interface Server {
   /** Called by decide after its start passed, before the writes (to change things "on the way"). */
   duringDecide: (() => void) | null;
   tokens: number;
+  /** G10: list WT2 too (the sidebar's switch of worktree). */
+  second: boolean;
+  /** G10: while set, WT2's detail waits (the page shows its Loading). */
+  secondGate: Promise<void> | null;
 }
 
 const json = (route: Route, status: number, body: unknown) =>
@@ -207,7 +218,10 @@ function handoffRoute(server: Server, route: Route, path: string, method: string
   if (path === '' && method === 'POST') {
     if (server.mode !== 'on') return json(route, 409, { ok: false, code: 'disabled' });
     if (!server.popup) return json(route, 409, { ok: false, code: 'unattended' });
-    if (server.request && OPEN.includes(server.request.state)) return json(route, 409, { ...view(server), ok: false, code: 'request_open' });
+    // G-PR3: the request picked up carries its text, as the real route answers (pr2e P3-3).
+    if (server.request && OPEN.includes(server.request.state)) return json(route, 409, { ...view(server), ok: false, code: 'request_open', text: HANDOFF_TEXT });
+    // G-PR3 (#4289 B P3-6): no boundary, no request (the real route's order: after the open one).
+    if (!server.boundary) return json(route, 409, { ok: false, code: 'session_unknown' });
     server.proposals = [];
     server.request = {
       id: RID,
@@ -306,6 +320,8 @@ function handoffRoute(server: Server, route: Route, path: string, method: string
     if (!['awaiting_agent', 'reviewing', 'applying'].includes(request.state)) return refuse('request_closed');
     if (!versionOk()) return refuse('version_conflict');
     const force = body.force === true;
+    // G-PR3 (#4289 B P3-6): as the real route (`end.ts`): a confirmation running is stopped only by force.
+    if (request.state === 'applying' && !force) return json(route, 409, { ok: false, code: 'state_forbids', request: view(server).request });
     server.tokens += 1;
     request.state = 'ending';
     request.endToken = `end-${server.tokens}`;
@@ -339,12 +355,12 @@ function handoffRoute(server: Server, route: Route, path: string, method: string
   return json(route, 404, { ok: false, code: 'not_found' });
 }
 
-function worktreeRow(server: Server) {
+function worktreeRow(server: Server, id: string = WT) {
   const status = { isRunning: server.running, isWaitingForResponse: false, isProcessing: false };
   return {
-    id: WT,
-    name: 'feat/handoff',
-    path: `/tmp/${WT}`,
+    id,
+    name: id === WT ? 'feat/handoff' : 'feat/other',
+    path: `/tmp/${id}`,
     repositoryPath: `/tmp/${WT}-repo`,
     repositoryName: 'e2e-repo',
     repositoryDisplayName: 'E2E Repo',
@@ -358,7 +374,7 @@ function worktreeRow(server: Server) {
     isSessionRunning: server.running,
     isWaitingForResponse: false,
     isProcessing: false,
-    gitStatus: { currentBranch: 'feat/handoff', initialBranch: 'feat/handoff', isBranchMismatch: false, commitHash: 'e2e0000', isDirty: false },
+    gitStatus: { currentBranch: id === WT ? 'feat/handoff' : 'feat/other', initialBranch: id === WT ? 'feat/handoff' : 'feat/other', isBranchMismatch: false, commitHash: 'e2e0000', isDirty: false },
     sessionNotes: {},
     autoYesByInstance: {},
     lastActivityByInstance: {},
@@ -372,6 +388,7 @@ async function stubServer(context: BrowserContext): Promise<Server> {
     popup: true,
     running: true,
     conversation: 1,
+    boundary: true,
     request: null,
     proposals: [],
     items: [{ id: 'note-1', kind: 'note', text: 'first note', version: 1 }],
@@ -382,6 +399,8 @@ async function stubServer(context: BrowserContext): Promise<Server> {
     writes: [],
     duringDecide: null,
     tokens: 0,
+    second: false,
+    secondGate: null,
   };
   await context.route(
     (url) => url.pathname.startsWith('/api/'),
@@ -393,7 +412,13 @@ async function stubServer(context: BrowserContext): Promise<Server> {
       const body = (method === 'GET' ? {} : (request.postDataJSON() ?? {})) as Record<string, unknown>;
       const ok = (payload: unknown) => json(route, 200, payload);
 
-      if (pathname === '/api/worktrees') return ok({ worktrees: [worktreeRow(server)], repositories: [] });
+      if (pathname === '/api/worktrees') {
+        return ok({ worktrees: server.second ? [worktreeRow(server), worktreeRow(server, WT2)] : [worktreeRow(server)], repositories: [] });
+      }
+      if (pathname === `/api/worktrees/${WT2}`) {
+        if (server.secondGate) await server.secondGate;
+        return ok(worktreeRow(server, WT2));
+      }
       if (pathname.startsWith(BASE)) return handoffRoute(server, route, pathname.slice(BASE.length), method, body);
       const detail = /^\/api\/worktrees\/([^/]+)(\/.*)?$/.exec(pathname);
       if (detail && decodeURIComponent(detail[1]) === WT) {
@@ -679,3 +704,111 @@ for (const viewport of [
     });
   });
 }
+
+/**
+ * G10 (the UAT of G-PR1+G-PR2, design §4.1.1): a dialog holding something is drawn open again
+ * after the PC ↔ phone switch and the page's Loading, without a person's press. The cause found:
+ * AppShell draws the page under another parent per layout, so the page (and its `handoffTarget`)
+ * is mounted anew; the page now takes the store's live opening back on mount. Without that, the
+ * dialog is gone 100 ms after the switch (the UAT's g10-02) and these tests fail at the first
+ * `toBeVisible` after `setViewportSize`.
+ */
+test.describe('G10: the hand-off dialog stays over the layout switch and the Loading', () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  const decidePath = `${BASE}/${RID}/decide`;
+  const layoutOf = (width: number) => (width < 768 ? 'mobile' : 'desktop');
+
+  /** Opens the hand-off at 1280, approves the agent's proposal and loses the decide: an unknown unit. */
+  async function unknownUnit(page: Page, server: Server): Promise<void> {
+    await openHandoff(page, server);
+    agent.proposeUpdate(server, 'note-1', 'proposed by the agent');
+    agent.done(server);
+    await readAgain(page);
+    await page.getByTestId('handoff-approve-p-1').click();
+    // Page routes come before the context's: the decide is cut on the way (the UAT's disconnect).
+    // pr3c (codex P2-3): `unroute` matches the very function `route` was given (compared by
+    // identity), so the same reference goes to both — two arrows would leave the cut in place.
+    const isDecide = (url: URL) => url.pathname === decidePath;
+    await page.route(isDecide, (route) => route.abort('connectionreset'));
+    await page.getByTestId('handoff-confirm').click();
+    await expect(page.getByTestId('handoff-pending')).toBeVisible();
+    await page.unroute(isDecide);
+  }
+
+  test('an unknown result: 1280 → 390 → 1280 → 390 draws the dialog open with the unit each time; no second request', async ({ context, page }) => {
+    const server = await stubServer(context);
+    await unknownUnit(page, server);
+    for (const size of [{ width: 390, height: 844 }, { width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(size);
+      await expect(page.getByTestId('handoff-dialog')).toBeVisible();
+      await expect(page.getByTestId('handoff-dialog')).toHaveAttribute('data-layout', layoutOf(size.width));
+      await expect(page.getByTestId('handoff-pending')).toBeVisible();
+    }
+    // Drawn again, nothing was made again: one create, no kill, and the decide not applied.
+    expect(server.writes.filter((write) => write.path === '')).toHaveLength(1);
+    expect(server.kills).toEqual([]);
+    expect(server.proposals[0].state).toBe('proposed');
+    // The person's choice is still there to make, at the phone's width: sent again as it was.
+    await page.getByTestId('handoff-pending-resend').click();
+    await expect.poll(() => server.proposals[0].state).toBe('applied');
+    await expect(page.getByTestId('handoff-pending')).toHaveCount(0);
+    await expect(page.getByTestId('handoff-dialog')).toBeVisible();
+  });
+
+  test('waiting for the agent (no unit): drawn open again after 1280 → 390 → 1280 too', async ({ context, page }) => {
+    const server = await stubServer(context);
+    await openHandoff(page, server);
+    for (const size of [{ width: 390, height: 844 }, { width: 1280, height: 900 }]) {
+      await page.setViewportSize(size);
+      await expect(page.getByTestId('handoff-dialog')).toBeVisible();
+      // pr3c (review B P3-1): drawn under the new layout, not the dialog from before the remount.
+      await expect(page.getByTestId('handoff-dialog')).toHaveAttribute('data-layout', layoutOf(size.width));
+      await expect(page.getByTestId('handoff-state')).toBeVisible();
+    }
+    expect(server.writes.filter((write) => write.path === '')).toHaveLength(1);
+    expect(server.sends).toHaveLength(1);
+    expect(server.kills).toEqual([]);
+  });
+
+  test('the Loading of a switch of worktree: kept as the other worktree’s, then back on its own worktree it can be sent again', async ({ context, page }) => {
+    const server = await stubServer(context);
+    server.second = true;
+    await unknownUnit(page, server);
+    let release!: () => void;
+    server.secondGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The modal covers the sidebar: the click is dispatched to the row (the page's own switch).
+    await page.getByTestId('branch-list-item').filter({ hasText: 'feat/other' }).first().dispatchEvent('click');
+    await expect(page).toHaveURL(new RegExp(`/worktrees/${WT2}`));
+    release();
+    await expect(page.getByTestId('handoff-dialog')).toBeVisible();
+    await expect(page.getByTestId('handoff-foreign')).toBeVisible();
+    await expect(page.getByTestId('handoff-pending')).toBeVisible();
+    // And the layout switch on the other worktree's page keeps it as well.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByTestId('handoff-foreign')).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.getByTestId('branch-list-item').filter({ hasText: 'feat/handoff' }).first().dispatchEvent('click');
+    await expect(page).toHaveURL(new RegExp(`/worktrees/${WT}(?:$|[?#])`));
+    await expect(page.getByTestId('handoff-dialog')).toBeVisible();
+    await expect(page.getByTestId('handoff-foreign')).toHaveCount(0);
+    await expect(page.getByTestId('handoff-pending-resend')).toBeEnabled();
+    expect(server.writes.filter((write) => write.path === '')).toHaveLength(1);
+    expect(server.kills).toEqual([]);
+  });
+
+  test('G9: done with no proposal tells the person a proposal may not have arrived', async ({ context, page }) => {
+    const server = await stubServer(context);
+    await openHandoff(page, server);
+    agent.done(server);
+    await readAgain(page);
+    await expect(page.getByTestId('handoff-done-empty')).toBeVisible();
+    // Negative control: once a proposal is there, the notice goes (the list shows it).
+    agent.proposeUpdate(server, 'note-1', 'proposed by the agent');
+    await readAgain(page);
+    await expect(page.getByTestId('handoff-proposal-p-1')).toBeVisible();
+    await expect(page.getByTestId('handoff-done-empty')).toHaveCount(0);
+  });
+});

@@ -23,6 +23,11 @@ vi.mock('@/lib/brief/service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/brief/service')>();
   return { ...actual, briefForRoute: vi.fn(actual.briefForRoute) };
 });
+// Issue #4227 G-PR3: the start preview's route answers what handoffStartPreview answered, once.
+vi.mock('@/lib/handoff/preview', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/handoff/preview')>();
+  return { ...actual, handoffStartPreview: vi.fn(actual.handoffStartPreview) };
+});
 vi.mock('@/lib/logger', () => ({
   createLogger: () => {
     const quiet = () => undefined;
@@ -39,6 +44,10 @@ import { BRIEF_CHANGE_REASONS, BriefMembershipChangedError } from '@/lib/brief/b
 import { createMemBriefProvider } from '@/lib/brief/provider';
 import { BRIEF_ROUTE_RETRIES, briefForRoute } from '@/lib/brief/service';
 import { GET } from '@/app/api/worktrees/[id]/mem/brief/route';
+import { GET as START_PREVIEW_GET } from '@/app/api/worktrees/[id]/mem/start-preview/route';
+import { handoffStartPreview, type StartPreviewResponse } from '@/lib/handoff/preview';
+import { openBoundary } from '@/lib/db/session-brief-db';
+import { getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
 import { briefCallChain, chainSources } from './brief-call-chain';
 import type { BriefSourceReader } from '@/lib/brief/sources';
 import type { BriefRequest } from '@/lib/session/brief-provider';
@@ -81,7 +90,65 @@ interface RetryRow {
   untouched: () => Promise<void>;
 }
 
+/** Issue #4227 G-PR3: the start preview shows (attended, injectOnStart, a pending boundary of claude). */
+function previewShows(): void {
+  const current = getMemSettings(world.db, world.repo);
+  saveMemSettings(world.db, world.repo, { version: current.version, features: { ...current.features, popup: true, injectOnStart: true }, rules: [{ match: 'glob', pattern: '**', mode: 'on' }] });
+  openBoundary(world.db, { worktreeId: 'wt-1', instanceId: 'claude', cliToolId: 'claude', lifetime: readInstanceLifetime(world.db, 'wt-1', 'claude'), kind: 'launch', evidence: 'launch', openedAt: Date.now() });
+}
+const startPreview = () => handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps() });
+
 const ROWS: Record<string, RetryRow> = {
+  'src/app/api/worktrees/[id]/mem/start-preview/route.ts:GET': {
+    retries: false,
+    recreatedOnce: async () => {
+      // The route answers what handoffStartPreview answered, once: it adds no rebuild of its own.
+      hooks.db = world.db;
+      vi.mocked(handoffStartPreview).mockClear();
+      vi.mocked(handoffStartPreview).mockResolvedValueOnce({ status: 404, body: { ok: false, code: 'not_found' } });
+      const response = await START_PREVIEW_GET(new NextRequest('http://localhost/api/worktrees/wt-1/mem/start-preview?instance=claude'), { params: Promise.resolve({ id: 'wt-1' }) });
+      expect(response.status).toBe(404);
+      expect(vi.mocked(handoffStartPreview)).toHaveBeenCalledTimes(1);
+      expect(closedCount()).toBe(0);
+    },
+    untouched: async () => {
+      hooks.db = world.db;
+      vi.mocked(handoffStartPreview).mockClear();
+      vi.mocked(handoffStartPreview).mockResolvedValueOnce({ status: 200, body: { ok: true, show: false } });
+      const response = await START_PREVIEW_GET(new NextRequest('http://localhost/api/worktrees/wt-1/mem/start-preview?instance=claude'), { params: Promise.resolve({ id: 'wt-1' }) });
+      expect(response.status).toBe(200);
+      expect(vi.mocked(handoffStartPreview)).toHaveBeenCalledTimes(1);
+    },
+  },
+  'src/lib/handoff/preview.ts:handoffStartPreview': {
+    retries: false,
+    recreatedOnce: async () => {
+      await world.add('next', 'issue:#1');
+      previewShows();
+      let calls = 0;
+      world.fake.handler = () => {
+        calls += 1;
+        if (calls === 1) recreate();
+        return ISSUE('closed');
+      };
+      vi.mocked(briefForRoute).mockClear();
+      const outcome = await startPreview();
+      // One build of C (it does not rebuild for an ended lifetime); the preview says it could not read.
+      expect(vi.mocked(briefForRoute)).toHaveBeenCalledTimes(1);
+      expect(calls).toBe(1);
+      expect((outcome.body as StartPreviewResponse & { preview?: unknown }).preview ?? null).toBeNull();
+      expect(closedCount()).toBe(0);
+      expect(writtenB()).toBe(0);
+    },
+    untouched: async () => {
+      await world.add('next', 'issue:#1');
+      previewShows();
+      world.fake.handler = () => ISSUE('closed');
+      const outcome = await startPreview();
+      expect((outcome.body as StartPreviewResponse).show).toBe(true);
+      expect(closedCount()).toBe(1);
+    },
+  },
   'src/app/api/worktrees/[id]/mem/brief/route.ts:GET': {
     retries: false,
     recreatedOnce: async () => {

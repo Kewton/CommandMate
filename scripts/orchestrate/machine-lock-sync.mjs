@@ -50,6 +50,19 @@ export const SAME_HOST_GRACE_MS = 60_000;
 export const OTHER_HOST_GRACE_MS = 600_000;
 /** A live pid whose process started this much after the ticket was written is another process (pid reuse). */
 export const PID_REUSE_SLACK_MS = 2_000;
+/**
+ * An owner of 0 bytes older than this is taken out by the head (#4288 PR1a-f I4): fixed, for every head
+ * (with or without ownerlessGraceMs). An older writer's `: >` / openSync and its write are microseconds
+ * apart, so 10 min is far past any writer that is still writing (PM decision 1).
+ */
+export const EMPTY_OWNER_GRACE_MS = 600_000;
+/**
+ * The keys of the record the section writes itself (#4288 PR1a-f I1-c): a caller's `ownerFields` /
+ * `setOwnerFields` may not carry them (an extra `pid` would make the record name another process).
+ */
+export const RESERVED_OWNER_FIELDS = ['pid', 'host', 'token', 'acquiredAt', 'started_at', 'pgid', 'v', 'lstart', 'done'];
+/** The writer's version on the records this copy writes (#4288 PR1a-f I9): `v: 1` = tmp → link, the own pid, the rename undo. */
+export const OWNER_VERSION = 1;
 /** How long a `ps` answer about a pid's start is trusted before it is asked again. */
 const START_RECHECK_MS = 10_000;
 /** Temporary files older than this are left by a process that died mid-write. */
@@ -77,18 +90,33 @@ export function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
 }
 
-/** `ps -o etime=`: `[[dd-]hh:]mm:ss` → milliseconds, or null. */
+/**
+ * `ps -o etime=`: `[[dd-]hh:]mm:ss` → milliseconds, or null. The ranges are checked (#4288 PR1a-f F37:
+ * hours < 24, minutes and seconds < 60, a day field only with an hour field): a malformed answer is
+ * null — never read as "just started".
+ */
 export function parseEtime(text) {
-  const m = /^\s*(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)\s*$/.exec(String(text ?? ''));
+  const m = /^\s*(?:(\d+)-)?(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\s*$/.exec(String(text ?? ''));
   if (!m) return null;
   const [, days, hours, minutes, seconds] = m;
-  return (((Number(days ?? 0) * 24 + Number(hours ?? 0)) * 60 + Number(minutes)) * 60 + Number(seconds)) * 1000;
+  if (days !== undefined && hours === undefined) return null;
+  const h = Number(hours ?? 0);
+  const mi = Number(minutes);
+  const sec = Number(seconds);
+  if (h >= 24 || mi >= 60 || sec >= 60) return null;
+  return (((Number(days ?? 0) * 24 + h) * 60 + mi) * 60 + sec) * 1000;
 }
 
-/** When `pid` started (ms since epoch), from `ps -o etime=`; null when ps cannot say. */
-export function processStartMs(pid, now = Date.now()) {
+/**
+ * When `pid` started (ms since epoch), from `ps -o etime=`; null when ps cannot say. `now` is taken
+ * before ps and `clock()` again after it (#4288 PR1a-f, P1's observation window): a clock that stepped
+ * back in between, or a read of 1 s or more, is null too (a step inside it cannot be told).
+ */
+export function processStartMs(pid, now = Date.now(), clock = () => Date.now()) {
   const r = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' });
+  const after = clock();
   if (r.error || r.status !== 0) return null;
+  if (after < now || after - now >= 1000) return null;
   const elapsed = parseEtime(r.stdout);
   return elapsed === null ? null : now - elapsed;
 }
@@ -172,11 +200,15 @@ export function makeObserver(hooks = {}) {
         return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
       }
     },
-    /** lstat: dir / other (a file, a symlink) / absent / unknown — with the entry's own mtimeMs */
+    /**
+     * lstat: dir / other (a file, a symlink) / absent / unknown — with the entry's own mtimeMs, size,
+     * dev and ino, and `link` for a symlink (#4288 PR1a-f: the undo's inode check, the temporaries'
+     * kind and age, the empty owner's size)
+     */
     lstat(point, file) {
       try {
         const st = attempt(point, file, () => fs.lstatSync(file));
-        return { state: st.isDirectory() ? 'dir' : 'other', mtimeMs: st.mtimeMs };
+        return { state: st.isDirectory() ? 'dir' : 'other', mtimeMs: st.mtimeMs, size: st.size, dev: st.dev, ino: st.ino, link: st.isSymbolicLink(), file: st.isFile() };
       } catch (err) {
         return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
       }
@@ -192,10 +224,13 @@ export function makeObserver(hooks = {}) {
       }
       let owner;
       try {
-        owner = hooks.codec ? hooks.codec.parse(text) : JSON.parse(text);
+        owner = text.length === 0 ? null : hooks.codec ? hooks.codec.parse(text) : JSON.parse(text);
       } catch {
         return { state: 'corrupt' };
       }
+      // An owner of 0 bytes (an older writer killed between its open and its write, or a power loss
+      // after the link) is corrupt with `empty`: the head takes it out past EMPTY_OWNER_GRACE_MS (I4).
+      if (text.length === 0) return { state: 'corrupt', empty: true };
       if (!owner || typeof owner !== 'object' || typeof owner.pid !== 'number' || typeof owner.token !== 'string') return { state: 'corrupt' };
       // The pgid's number check is a step of this observation too (#4288 Codex re-review P1).
       return pgidFieldOk(owner) ? { state: 'record', owner } : { state: 'unknown', point, code: 'EINVAL' };
@@ -219,28 +254,69 @@ export function makeObserver(hooks = {}) {
       }
     },
     /**
-     * The exclusive create of a file with `text` in it (#4288 PR1a D3, `O_CREAT|O_EXCL`): created /
-     * exists (EEXIST: nothing opened) / unknown — `opened` says whether this call made the file (only
-     * then is it the caller's to remove). The write after the open fails at the point `owner-write`.
+     * The exclusive create of `tmp` (default `file`) with `text` written in whole and closed (#4288
+     * PR1a D3 `O_CREAT|O_EXCL`, PR1a-f I1): created / exists (EEXIST: nothing opened) / unknown —
+     * `opened` says whether this call made the file (only then is it the caller's to remove), `point`
+     * where it failed: `owner-write` (the write threw), `owner-write-short` (the bytes written fall
+     * short of `Buffer.byteLength(text)`), `owner-close` (closeSync threw: not known to be on disk).
+     * The fault seam of `point` is called with `file` (the owner's name) before the open, so a test can
+     * put a successor's owner there first. `onStage` is told `owner-tmp-opened` and `owner-tmp-written`
+     * (the pauses of §2.6).
      */
-    create(point, file, text) {
+    create(point, file, text, tmp = file, onStage = undefined) {
       let fd;
       try {
-        fd = attempt(point, file, () => fs.openSync(file, 'wx'));
+        fd = attempt(point, file, () => fs.openSync(tmp, 'wx'));
       } catch (err) {
         return errCode(err) === 'EEXIST' ? { state: 'exists' } : { state: 'unknown', point, code: errCode(err), opened: false };
       }
-      try {
-        attempt('owner-write', file, () => fs.writeSync(fd, text));
-        return { state: 'created' };
-      } catch (err) {
-        return { state: 'unknown', point, code: errCode(err), opened: true };
-      } finally {
+      onStage?.('owner-tmp-opened');
+      const buf = Buffer.from(text);
+      let failed = null;
+      for (let off = 0; off < buf.length && !failed; ) {
+        let wrote = 0;
         try {
-          fs.closeSync(fd);
-        } catch {
-          // closed or gone: nothing more to do
+          wrote = attempt('owner-write', file, () => fs.writeSync(fd, buf, off, buf.length - off));
+        } catch (err) {
+          failed = { point: 'owner-write', code: errCode(err) };
+          break;
         }
+        try {
+          attempt('owner-write-short', file, () => {
+            if (!(wrote > 0)) throw Object.assign(new Error(`short write: ${off} of ${buf.length} bytes`), { code: 'EIO' });
+          });
+        } catch (err) {
+          failed = { point: 'owner-write-short', code: errCode(err) };
+          break;
+        }
+        off += wrote;
+      }
+      try {
+        attempt('owner-close', file, () => fs.closeSync(fd));
+      } catch (err) {
+        if (!failed) failed = { point: 'owner-close', code: errCode(err) };
+      }
+      if (failed) return { state: 'unknown', point: failed.point, code: failed.code, opened: true };
+      onStage?.('owner-tmp-written');
+      return { state: 'created' };
+    },
+    /** link(2): linked / exists (EEXIST — whatever is there: a file, a directory, a symlink) / absent (ENOENT) / unknown */
+    link(point, from, to) {
+      try {
+        attempt(point, to, () => fs.linkSync(from, to));
+        return { state: 'linked' };
+      } catch (err) {
+        const code = errCode(err);
+        return code === 'EEXIST' ? { state: 'exists' } : code === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code };
+      }
+    },
+    /** unlink of a file name: removed / absent (ENOENT) / unknown */
+    unlink(point, file) {
+      try {
+        attempt(point, file, () => fs.unlinkSync(file));
+        return { state: 'removed' };
+      } catch (err) {
+        return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
       }
     },
     /** rmdir of an empty directory: removed / unknown — a failure keeps its errno (#4288 Codex re-review P2) */
@@ -433,18 +509,8 @@ function collectGarbage(queueDir, now) {
 /**
  * @returns {boolean} true when this call created the directory and owns it. A `mkdir` that failed
  * for another reason than EEXIST is not a claim and not a contention either: it throws, naming the errno.
- *
- * The owner is created exclusively and read back (#4288 PR1a D3, the same as verify-run.sh's
- * lock_obs_create): a name that is there (EEXIST) is never written over and nothing is removed — not
- * acquired; a record read back that is not this one (another token, corrupt, missing) is not acquired
- * either and nothing is removed. An owner that could not be created, written or read back (ENOSPC,
- * EIO) is not a lock taken: the owner is removed only when this call opened it, and the <lock> this
- * mkdir made is taken out again with rmdir (it is empty then), so no <lock> without an owner is left
- * for every reader to wait on (#4288 PM review P3-2). That error still ends the acquisition, as a
- * mkdir that failed does. Test seams (`fault`): owner-create, owner-write, owner-readback (observation
- * points), owner-unlink and lock-rmdir (the undo).
  */
-function claim(lockPath, owner, obs, fault = undefined, warn = () => {}, codec = JSON_OWNER_CODEC) {
+function claim(lockPath, owner, obs, warn = () => {}, codec = JSON_OWNER_CODEC, onStage = undefined) {
   const made = obs.mkdir('mkdir-lock', lockPath);
   if (made.state === 'exists') return false;
   if (made.state !== 'created') {
@@ -452,53 +518,247 @@ function claim(lockPath, owner, obs, fault = undefined, warn = () => {}, codec =
     err.code = made.code;
     throw err;
   }
+  onStage?.('owner-lock-made');
+  return publishOwner(lockPath, owner, obs, warn, codec, onStage);
+}
+
+const unknownError = (point, target, code) => {
+  const err = new Error(`machine-lock-unknown point=${point} path=${target} errno=${code}`);
+  err.code = code;
+  return err;
+};
+
+/**
+ * The owner of a <lock> this acquisition made, published whole (#4288 PR1a-f I1, the same as
+ * verify-run.sh's lock_obs_create and machine-lock.ts): written into `<lock>/.owner-<token>` (exclusive
+ * create, every byte written, closed) and published with link(2) — so `<lock>/owner` is never seen
+ * empty or half written, and an owner there (a file, a directory, a symlink to either) is never written
+ * over or into (EEXIST). Read back, the tmp removed. What a failure removes is only this call's own
+ * (I2, design §3): its tmp, the <lock> it made (rmdir: only when empty), and — when the read-back cannot
+ * be judged — the owner it published, moved to its own name `.undo-<token>` first and removed only when
+ * that is the tmp's inode (otherwise linked back: I2-b). Test seams: `fault` at owner-create,
+ * owner-write, owner-write-short, owner-close, owner-publish, owner-readback, owner-unlink, lock-rmdir,
+ * owner-undo-rename, owner-undo-lstat, owner-undo-link; `onStage` at the five pauses of §2.6.
+ *
+ * @returns {boolean} true when the owner read back is this one; false when another is there (not
+ * acquired, nothing of anyone else removed). Throws `machine-lock-unknown point=… path=… errno=…` when
+ * the owner could not be published or judged (the acquisition ends, as a failed mkdir does).
+ */
+function publishOwner(lockPath, owner, obs, warn, codec, onStage) {
   const file = path.join(lockPath, 'owner');
-  const created = obs.create('owner-create', file, codec.format(owner));
-  if (created.state === 'exists') {
+  const tmp = path.join(lockPath, `.owner-${owner.token}`);
+  const dropTmp = () => obs.unlink('owner-unlink', tmp).state !== 'unknown';
+  const takeOut = () => obs.rmdir('lock-rmdir', lockPath).state === 'removed';
+  const again = (out) => (out ? 'taken out again; not acquired' : 'and it could not be taken out again');
+  const created = obs.create('owner-create', file, codec.format(owner), tmp, onStage);
+  if (created.state !== 'created') {
+    if (created.state === 'exists' || !created.opened) {
+      // F2 (a tmp of this token is there: not opened, not removed — the rmdir fails on it) and F3.
+      const code = created.state === 'exists' ? 'EEXIST' : created.code;
+      warn(`machine-lock-owner-create-failed ${lockPath} (${code}; ${again(takeOut())})`);
+      throw unknownError('owner-create', file, code);
+    }
+    // F4-F6 (F17, F18 when the undo fails): the tmp opened by this call, and the <lock> it made.
+    const out = dropTmp() && takeOut();
+    warn(`machine-lock-owner-write-failed ${lockPath} (${created.code}; ${again(out)})`);
+    throw unknownError(created.point, file, created.code);
+  }
+  const linked = obs.link('owner-publish', tmp, file);
+  if (linked.state === 'exists') {
+    // F7-F10: an owner there — a file, a directory, a symlink — is left as it is; only the own tmp goes.
+    dropTmp();
     warn(`machine-lock-owner-exists ${lockPath} (not acquired; nothing removed)`);
     return false;
   }
-  let failed = created.state === 'created' ? null : created;
-  if (!failed) {
-    const back = obs.owner('owner-readback', lockPath);
-    if (back.state === 'record' && back.owner.token === owner.token) return true;
-    if (back.state !== 'unknown') {
-      warn(`machine-lock-owner-not-ours ${lockPath} (another record read back; not acquired, nothing removed)`);
-      return false;
+  if (linked.state !== 'linked') {
+    dropTmp();
+    if (linked.state === 'absent') {
+      // F11: this <lock> or the tmp was taken out meanwhile; a <lock> there now is not shown to be ours.
+      warn(`machine-lock-owner-publish-failed ${lockPath} (ENOENT; nothing else removed)`);
+      throw unknownError('owner-publish', file, 'ENOENT');
     }
-    failed = { ...back, opened: true };
+    warn(`machine-lock-owner-publish-failed ${lockPath} (${linked.code}; ${again(takeOut())})`);
+    throw unknownError('owner-publish', file, linked.code);
   }
-  if (failed.opened && !fault?.('owner-unlink', file)) fs.rmSync(file, { force: true });
-  const out = fault?.('lock-rmdir', lockPath) ? false : rmdirQuiet(lockPath);
-  warn(`machine-lock-owner-write-failed ${lockPath} (${failed.code}${out ? '' : '; and it could not be taken out again'})`);
-  const err = new Error(`machine-lock-unknown point=${failed.point} path=${file} errno=${failed.code}`);
-  err.code = failed.code;
-  throw err;
+  onStage?.('owner-linked');
+  const back = obs.owner('owner-readback', lockPath);
+  if (back.state === 'record' && back.owner.token === owner.token) {
+    // F16: a tmp that cannot be removed stays beside the owner; the release / the recovery takes it.
+    dropTmp();
+    onStage?.('owner-tmp-removed');
+    return true;
+  }
+  if (back.state !== 'unknown') {
+    dropTmp();
+    warn(`machine-lock-owner-not-ours ${lockPath} (another record read back; not acquired, nothing removed)`);
+    return false;
+  }
+  const undone = undoPublish(lockPath, owner.token, obs, warn);
+  warn(`machine-lock-owner-readback-unknown ${lockPath} (${back.code}; ${undone})`);
+  throw unknownError('owner-readback', file, back.code);
 }
 
 /**
- * D3 (#4288 PR1a): an owner-less, empty <lock> older than `graceMs` is taken out by the head — its
- * maker died between the mkdir and the owner (run-lock and supervisor.lock waited 60 s for that).
- * Only the head calls this, and nobody else makes a <lock> while it is the head. The age is
- * `now - mtimeMs` in ms (D11). An unknown keeps the poll from the mkdir and is reported.
+ * I2-b (#4288 PR1a-f): the owner this call published could not be read back. It is never removed by
+ * its name after a check (a successor's owner may be under that name by then): it is renamed to this
+ * call's own name `.undo-<token>`, and that name is checked against the tmp (lstat of both, dev and ino;
+ * not a symlink). The same inode: both names removed and the <lock> rmdir'd (F13). Anything else — another
+ * inode, a symlink, no tmp to compare, an lstat that failed — is linked back to `<lock>/owner` (F14); a
+ * link back that meets an owner (EEXIST, F58) or fails keeps `.undo-<token>` and says so. The rename
+ * finding no owner (F59) or failing (F60) removes only the own tmp. No rmdir but in F13.
  *
- * @returns {{ state: 'none' | 'absent' | 'young' | 'removed' | 'unknown', unknown?: { point: string, path: string, code: string } }}
+ * @returns {string} what was done, for the warning
+ */
+function undoPublish(lockPath, token, obs, warn) {
+  const file = path.join(lockPath, 'owner');
+  const tmp = path.join(lockPath, `.owner-${token}`);
+  const undo = path.join(lockPath, `.undo-${token}`);
+  const dropTmp = () => obs.unlink('owner-unlink', tmp);
+  const moved = obs.rename('owner-undo-rename', file, undo);
+  if (moved.state !== 'moved') {
+    dropTmp();
+    return moved.state === 'absent' ? 'no owner to undo' : `the undo rename failed (${moved.code}); the owner left`;
+  }
+  const a = obs.lstat('owner-undo-lstat', undo);
+  const b = obs.lstat('owner-undo-lstat', tmp);
+  const same = a.state === 'other' && b.state === 'other' && !a.link && !b.link && a.dev === b.dev && a.ino === b.ino;
+  if (same) {
+    obs.unlink('owner-unlink', undo);
+    dropTmp();
+    return obs.rmdir('lock-rmdir', lockPath).state === 'removed' ? 'own owner undone, taken out again' : 'own owner undone; the <lock> could not be taken out again';
+  }
+  const restored = obs.link('owner-undo-link', undo, file);
+  dropTmp();
+  if (restored.state === 'linked') {
+    obs.unlink('owner-unlink', undo);
+    return 'not shown to be ours: linked back';
+  }
+  warn(`machine-lock-undo-restore-failed ${lockPath} kept=${undo} (${restored.state === 'unknown' ? restored.code : restored.state === 'exists' ? 'EEXIST' : 'ENOENT'})`);
+  return `not shown to be ours and not linked back: kept ${undo}`;
+}
+
+/** The temporaries an owner-less <lock> may hold (I3): the new `.owner-<token>` and an older writer's `owner.tmp.<pid>`. */
+const NEW_TMP = /^\.owner-[A-Za-z0-9-]+$/;
+const OLD_TMP = /^owner\.tmp\.(.*)$/;
+
+/**
+ * I3's predicate (#4288 PR1a-f), used by the clean-up (expireOwnerless) only: `<lock>` has no owner and
+ * holds nothing but temporaries — `.owner-<token>` or `owner.tmp.<digits>`, each a regular file (not a
+ * symlink). ownerlessEmptyLock ("no owner and nothing in it") keeps its meaning for the put-back.
+ *
+ * @returns {{ state: 'no' | 'absent' | 'empty' } | { state: 'temps', temps: { name: string, file: string, mtimeMs: number, pid: number | null }[] } | { state: 'stray', name: string } | { state: 'unknown', unknown: { point: string, path: string, code: string } }}
+ */
+function ownerlessTempsOnly(ctx) {
+  const owner = ctx.obs.owner('lock-owner', ctx.lockPath);
+  if (owner.state === 'unknown') return { state: 'unknown', unknown: { point: 'lock-owner', path: path.join(ctx.lockPath, 'owner'), code: owner.code } };
+  if (owner.state !== 'missing') return { state: 'no' };
+  const listed = ctx.obs.list('lock-list', ctx.lockPath);
+  if (listed.state === 'absent') return { state: 'absent' };
+  if (listed.state === 'unknown') return { state: 'unknown', unknown: { point: 'lock-list', path: ctx.lockPath, code: listed.code } };
+  const temps = [];
+  for (const name of [...listed.names].sort()) {
+    const old = OLD_TMP.exec(name);
+    if (!NEW_TMP.test(name) && !(old && /^\d+$/.test(old[1]))) return { state: 'stray', name };
+    const file = path.join(ctx.lockPath, name);
+    const st = ctx.obs.lstat('ownerless-tmp-lstat', file);
+    if (st.state === 'unknown') return { state: 'unknown', unknown: { point: 'ownerless-tmp-lstat', path: file, code: st.code } };
+    if (st.state === 'absent') continue;
+    if (st.state !== 'other' || st.link) return { state: 'stray', name };
+    temps.push({ name, file, mtimeMs: st.mtimeMs, pid: old ? Number(old[1]) : null });
+  }
+  return temps.length === 0 ? { state: 'empty' } : { state: 'temps', temps };
+}
+
+/**
+ * D3 (#4288 PR1a) and I3 (PR1a-f): with `graceMs`, the head takes out an owner-less <lock> that holds
+ * nothing or only temporaries, when the <lock> and every temporary are older than `graceMs` and every
+ * older `owner.tmp.<pid>` is shown not to be its writer's: the pid is gone (ESRCH), or alive but started
+ * after the tmp's mtime + PID_REUSE_SLACK_MS (reused). Only those names are unlinked (an ENOENT is "gone
+ * already"), then the <lock> rmdir'd — never the name `owner`; an owner published meanwhile makes the
+ * rmdir fail (ENOTEMPTY: `published`, judged as a record). A name that is not a temporary is `stray` and
+ * an older writer that may be stopped mid-way is `old-taker` (named, not taken). Only the head calls
+ * this. The ages are compared in ms (D11). An unknown keeps the poll from the mkdir and is reported.
+ *
+ * @returns {{ state: 'none' | 'absent' | 'young' | 'removed' | 'stray' | 'old-taker' | 'published' | 'unknown', unknown?: { point: string, path: string, code: string } }}
  */
 function expireOwnerless(ctx, graceMs, now) {
   if (typeof graceMs !== 'number') return { state: 'none' };
-  const half = ownerlessEmptyLock(ctx);
-  if (half.state === 'unknown') return { state: 'unknown', unknown: half.unknown };
-  if (half.state !== 'yes') return { state: half.state === 'absent' ? 'absent' : 'none' };
+  const found = ownerlessTempsOnly(ctx);
+  if (found.state === 'unknown') return found;
+  if (found.state === 'no') return { state: 'none' };
+  if (found.state === 'absent') return { state: 'absent' };
+  if (found.state === 'stray') {
+    ctx.warnOnce(`machine-lock-ownerless-stray ${ctx.lockPath} (${found.name} is not a temporary of an owner: nobody takes the <lock> out; look at it and remove it by hand)`);
+    return { state: 'stray' };
+  }
+  const temps = found.state === 'temps' ? found.temps : [];
+  for (const t of temps) if (t.pid !== null) ctx.warnOnce(`machine-lock-legacy-writer ${ctx.lockPath} pid=${t.pid}`);
   const st = ctx.obs.lstat('ownerless-mtime', ctx.lockPath);
   if (st.state === 'absent') return { state: 'absent' };
   if (st.state === 'unknown') return { state: 'unknown', unknown: { point: 'ownerless-mtime', path: ctx.lockPath, code: st.code } };
   const age = now - st.mtimeMs;
-  if (age <= graceMs) return { state: 'young' };
+  if (age <= graceMs || temps.some((t) => now - t.mtimeMs <= graceMs)) return { state: 'young' };
+  for (const t of temps) {
+    if (t.pid === null) continue;
+    const pid = ctx.obs.pid('owner-tmp-pid', t.pid);
+    if (pid.state === 'gone') continue;
+    if (pid.state === 'unknown') return { state: 'unknown', unknown: { point: 'owner-tmp-pid', path: t.file, code: pid.code } };
+    const start = ctx.startOf(t.pid);
+    if (start === null) return { state: 'unknown', unknown: { point: 'etime', path: t.file, code: 'EINVAL' } };
+    if (start > t.mtimeMs + PID_REUSE_SLACK_MS) continue;
+    ctx.warnOnce(`machine-lock-ownerless-old-taker ${ctx.lockPath} pid=${t.pid} (an older writer that may be stopped before its rename: not taken out)`);
+    return { state: 'old-taker' };
+  }
+  for (const t of temps) {
+    const gone = ctx.obs.unlink('ownerless-tmp-unlink', t.file);
+    if (gone.state === 'unknown') return { state: 'unknown', unknown: { point: 'ownerless-tmp-unlink', path: t.file, code: gone.code } };
+  }
   const removed = ctx.obs.rmdir('ownerless-rmdir', ctx.lockPath);
-  if (removed.state === 'unknown') return { state: 'unknown', unknown: { point: 'ownerless-rmdir', path: ctx.lockPath, code: removed.code } };
-  ctx.warn(`machine-lock-ownerless-removed ${ctx.lockPath} (no owner for ${Math.round(age)} ms)`);
+  if (removed.state === 'unknown') {
+    if (removed.code === 'ENOTEMPTY' || removed.code === 'EEXIST') return { state: 'published' };
+    return { state: 'unknown', unknown: { point: 'ownerless-rmdir', path: ctx.lockPath, code: removed.code } };
+  }
+  ctx.warn(`machine-lock-ownerless-removed ${ctx.lockPath} (no owner for ${Math.round(age)} ms${temps.length ? `; ${temps.map((t) => t.name).join(' ')} removed` : ''})`);
   return { state: 'removed' };
 }
+
+/**
+ * I4 (#4288 PR1a-f): an owner of 0 bytes older than EMPTY_OWNER_GRACE_MS is taken out by the head —
+ * any head, with or without a grace. The <lock> is moved to this caller's own name
+ * `<lock>.gone-<token>-<serial>`, and removed only when the owner moved is still of 0 bytes and old: one
+ * that was written meanwhile is kept aside and judged as a record by the next pass (§2.7).
+ *
+ * @returns {{ state: 'none' | 'young' | 'removed' | 'kept' | 'unknown', aside?: string, unknown?: { point: string, path: string, code: string } }}
+ */
+function reclaimEmptyOwner(ctx, now) {
+  const ownerFile = path.join(ctx.lockPath, 'owner');
+  const empty = (st) => st.state === 'other' && st.file && st.size === 0;
+  const st = ctx.obs.lstat('lock-owner', ownerFile);
+  if (st.state === 'unknown') return { state: 'unknown', unknown: { point: 'lock-owner', path: ownerFile, code: st.code } };
+  if (!empty(st)) return { state: 'none' };
+  if (now - st.mtimeMs <= EMPTY_OWNER_GRACE_MS) return { state: 'young' };
+  const aside = `${ctx.lockPath}.gone-${ctx.myToken}-${++goneSerial}`;
+  const moved = ctx.obs.rename('empty-owner-move', ctx.lockPath, aside);
+  if (moved.state === 'absent') return { state: 'none' };
+  if (moved.state !== 'moved') return { state: 'unknown', unknown: { point: 'empty-owner-move', path: ctx.lockPath, code: moved.code } };
+  ctx.onRecover?.('empty-owner-moved');
+  const after = ctx.obs.lstat('reclaim-owner', path.join(aside, 'owner'));
+  if (empty(after) && now - after.mtimeMs > EMPTY_OWNER_GRACE_MS) {
+    fs.rmSync(aside, { recursive: true, force: true });
+    ctx.warn(`machine-lock-empty-owner-removed ${ctx.lockPath} (an owner of 0 bytes, ${Math.round(now - st.mtimeMs)} ms old)`);
+    return { state: 'removed' };
+  }
+  ctx.warn(`machine-lock-empty-owner-kept ${ctx.lockPath}: kept ${aside} (no longer an old empty owner: judged as a record next)`);
+  return { state: 'kept', aside };
+}
+
+/** I4: an unparsable owner is never removed; it is named (once). */
+const warnCorrupt = (ctx) => ctx.warnOnce(`machine-lock-owner-corrupt ${path.join(ctx.lockPath, 'owner')} unparsable (nobody removes it: look at it and remove the <lock> by hand)`);
+
+/** I9: a record without `v` is an older copy's; named once per process and lock (the observation §6.1 (b) reads). */
+const noteLegacy = (ctx, lockPath, record) => {
+  if (record && record.v === undefined) ctx.warnOnce(`machine-lock-legacy-writer ${lockPath} pid=${record.pid}`);
+};
 
 let goneSerial = 0;
 
@@ -566,18 +826,25 @@ function ownerlessEmptyLock(ctx) {
 }
 
 /**
- * Move a moved-aside owner back into `<lock>` and drop the moved-aside directory. ENOENT (the owner
- * is not there) is 'absent'; any other failure takes the `<lock>` this put-back made out again (it is
- * empty) and keeps the moved-aside directory, which goes on holding the lock (§2.7 B).
+ * Put a moved-aside owner back into `<lock>` and drop the moved-aside directory. The put-back is a
+ * link(2) (#4288 PR1a-f I2-c): an owner published between the check and the put-back is never written
+ * over — EEXIST keeps the moved-aside directory and the <lock> (it holds the publisher's owner) and is
+ * `restore-failed`, named. ENOENT (the owner is not there) is 'absent'; any other failure takes the
+ * `<lock>` this put-back made out again (it is empty) and keeps the moved-aside directory, which goes on
+ * holding the lock (§2.7 B).
  */
 function moveOwnerIn(ctx, gone) {
-  const moved = ctx.obs.rename('restore-rename', path.join(gone, 'owner'), path.join(ctx.lockPath, 'owner'));
-  if (moved.state === 'moved') {
+  const moved = ctx.obs.link('restore-rename', path.join(gone, 'owner'), path.join(ctx.lockPath, 'owner'));
+  if (moved.state === 'linked') {
     ctx.onRecover?.('restore-owner');
     fs.rmSync(gone, { recursive: true, force: true });
     return 'restored';
   }
   if (moved.state === 'absent') return 'absent';
+  if (moved.state === 'exists') {
+    ctx.warn(`machine-lock-restore-failed ${ctx.lockPath}: kept ${gone} (EEXIST)`);
+    return 'restore-failed';
+  }
   rmdirQuiet(ctx.lockPath);
   ctx.warn(`machine-lock-restore-failed ${ctx.lockPath}: kept ${gone} (${moved.code})`);
   return 'restore-failed';
@@ -664,6 +931,7 @@ function settleGone(ctx) {
       continue;
     }
     if (read.state === 'corrupt') continue;
+    noteLegacy(ctx, ctx.lockPath, read.owner);
     const holder = holderState(read.owner, ctx);
     if (holder.state === 'gone') {
       const reclaimed = reclaimGone(ctx, gone, read.owner.token, true);
@@ -719,14 +987,19 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
     return 'restore-failed';
   }
   onRecover?.('restore-mkdir');
-  const back = obs.rename('restore-rename', path.join(gone, 'owner'), path.join(lockPath, 'owner'));
+  // The put-back links (I2-c): an owner published in between is not written over.
+  const back = obs.link('restore-rename', path.join(gone, 'owner'), path.join(lockPath, 'owner'));
+  if (back.state === 'exists') {
+    warn(`machine-lock-restore-failed ${lockPath}: kept ${gone} (EEXIST)`);
+    return 'restore-failed';
+  }
   if (back.state === 'unknown') {
     rmdirQuiet(lockPath);
     warn(`machine-lock-restore-failed ${lockPath}: kept ${gone} (${back.code})`);
     return 'restore-failed';
   }
-  // ENOENT: the moved lock had no owner yet — its holder writes it into the restored path.
-  if (back.state === 'moved') onRecover?.('restore-owner');
+  // ENOENT: the moved lock had no owner — a new writer's temporaries only (its link then answers ENOENT).
+  if (back.state === 'linked') onRecover?.('restore-owner');
   fs.rmSync(gone, { recursive: true, force: true });
   return 'restored';
 }
@@ -762,6 +1035,14 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
  * is the token to acquire under; `ownerPid` the pid written to the owner (the ticket keeps
  * process.pid); `hooks.kill` stands in for process.kill (D10).
  *
+ * #4288 PR1a-f: `ownerPid` must be this process (I1-b: the first acquisition records its own pid only;
+ * another pid is the hand-off's) and `ownerFields` may not carry a key of RESERVED_OWNER_FIELDS (I1-c):
+ * either is refused before the ticket and the mkdir (`unknown.point` owner-pid / owner-fields, EINVAL).
+ * `ownerlessGraceMs` also takes out an owner-less <lock> of temporaries only (I3), and every head takes
+ * out an owner of 0 bytes older than EMPTY_OWNER_GRACE_MS (I4). `hooks.onOwnerStage(stage)` is called at
+ * the five points of the owner's publish (owner-lock-made, owner-tmp-opened, owner-tmp-written,
+ * owner-linked, owner-tmp-removed; test seam).
+ *
  * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, abandoned?: boolean, unknown?: { point: string, path: string, code: string }, release: () => ('released' | 'deferred' | 'needs-head' | 'kept' | 'none'), setOwnerFields: (fields: Record<string, unknown>) => boolean, handOff: (pid: number, pgid: number) => { ok: boolean, token?: string, stage?: string }, token?: string, path: string }}
  */
 export function acquireMachineLockSync(name, options) {
@@ -788,7 +1069,7 @@ export function acquireMachineLockSync(name, options) {
       if (hooks.startOf) return hooks.startOf(pid);
       const cached = startCache.get(pid);
       if (cached && now() - cached.at < START_RECHECK_MS) return cached.start;
-      const start = processStartMs(pid, now());
+      const start = processStartMs(pid, now(), now);
       startCache.set(pid, { start, at: now() });
       return start;
     },
@@ -796,8 +1077,24 @@ export function acquireMachineLockSync(name, options) {
   const lockPath = options.lockPath ?? lockPathOf(root, name);
   const queueDir = options.lockPath ? queueDirOfPath(options.lockPath) : queueDirOf(root, name);
   const token = typeof options.token === 'string' && options.token ? options.token : crypto.randomUUID();
-  const ownerPid = Number.isInteger(options.ownerPid) && options.ownerPid > 0 ? options.ownerPid : process.pid;
-  const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token };
+  const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token, startOf: env.startOf };
+  const noLock = () => ({ release: () => 'none', setOwnerFields: () => false, handOff: () => ({ ok: false, stage: 'token' }), path: lockPath });
+  // I1-b / I1-c: refused before the ticket and the mkdir — nothing is made.
+  // (`hooks.fault` at owner-pid / owner-fields answers the same refusal: the test seam of §2.8.)
+  const refuse = (point, line, code) => {
+    warn(line);
+    warn(`machine-lock-unknown point=${point} path=${lockPath} errno=${code}`);
+    return { acquired: false, waitedMs: 0, heldBy: null, unknown: { point, path: lockPath, code }, ...noLock() };
+  };
+  const pidFault = hooks.fault?.('owner-pid', lockPath);
+  if (pidFault || (options.ownerPid !== undefined && options.ownerPid !== null && options.ownerPid !== process.pid)) {
+    return refuse('owner-pid', `machine-lock-owner-pid-not-self ${lockPath} pid=${options.ownerPid}`, pidFault || 'EINVAL');
+  }
+  const fieldsFault = hooks.fault?.('owner-fields', lockPath);
+  const reserved = Object.keys(options.ownerFields ?? {}).find((k) => RESERVED_OWNER_FIELDS.includes(k));
+  if (fieldsFault || reserved !== undefined) {
+    return refuse('owner-fields', `machine-lock-owner-field-reserved ${lockPath} key=${reserved}`, fieldsFault || 'EINVAL');
+  }
   const startedAt = now();
   const deadline = startedAt + Math.max(0, timeoutMs);
   const pgid = validPgid(options.pgid) ? options.pgid : undefined;
@@ -830,7 +1127,8 @@ export function acquireMachineLockSync(name, options) {
     warn(`machine-lock-unknown point=${unknown.point} path=${unknown.path} errno=${unknown.code}`);
     return { unknown };
   };
-  const noLock = () => ({ release: () => 'none', setOwnerFields: () => false, handOff: () => ({ ok: false, stage: 'token' }), path: lockPath });
+  // An empty owner taken out goes on to the mkdir in the same poll — a few times at most.
+  let emptied = 0;
 
   try {
     for (;;) {
@@ -874,10 +1172,11 @@ export function acquireMachineLockSync(name, options) {
             pending = settled.pending;
             unknown = settled.unknown ?? null;
           } else {
-            const owner = { pid: ownerPid, host, token, acquiredAt: now(), ...(pgid ? { pgid } : {}), ...(options.ownerFields ?? {}) };
-            // D3: the head takes out an owner-less, empty <lock> past the caller's grace first.
+            // The section's own keys last (I1-c: the caller's fields cannot name another pid or token).
+            const owner = { ...(options.ownerFields ?? {}), pid: process.pid, host, token, acquiredAt: now(), ...(pgid ? { pgid } : {}), v: OWNER_VERSION };
+            // D3 / I3: the head takes out an owner-less <lock> of temporaries only past the caller's grace first.
             const expired = expireOwnerless(ctx, options.ownerlessGraceMs, now());
-            if (expired.state !== 'unknown' && claim(lockPath, owner, obs, hooks.fault, warn, codec)) {
+            if (expired.state !== 'unknown' && claim(lockPath, owner, obs, warn, codec, hooks.onOwnerStage)) {
               retire();
               collectGarbage(queueDir, now());
               let released = false;
@@ -938,14 +1237,29 @@ export function acquireMachineLockSync(name, options) {
                   if (handed !== null) cleanupOwnGone(ctx, handed);
                   return 'kept';
                 },
+                // Fields added to this acquisition's own record (merge-pr's phase). false, writing nothing,
+                // after the release or a handOff (the recorded pid is no longer this process: #4288 PR1a-f
+                // §3.1), for a reserved key (I1-c), for a record that is not this token's, and when the
+                // write or the rename fails — a <lock> moved aside meanwhile (ENOENT) included: never thrown
+                // to the caller, the own tmp removed.
                 setOwnerFields: (fields) => {
-                  if (released) return false;
+                  if (released || handed !== null) return false;
+                  const key = Object.keys(fields ?? {}).find((k) => RESERVED_OWNER_FIELDS.includes(k));
+                  if (key !== undefined) {
+                    warn(`machine-lock-owner-field-reserved ${lockPath} key=${key}`);
+                    return false;
+                  }
                   const current = readOwner(lockPath, codec);
                   if (!current || current.token !== token) return false;
                   const tmp = path.join(lockPath, `.owner-${crypto.randomUUID()}`);
-                  fs.writeFileSync(tmp, codec.format({ ...current, ...fields, pid: current.pid, token }));
-                  fs.renameSync(tmp, path.join(lockPath, 'owner'));
-                  return true;
+                  try {
+                    fs.writeFileSync(tmp, codec.format({ ...current, ...fields }));
+                    fs.renameSync(tmp, path.join(lockPath, 'owner'));
+                    return true;
+                  } catch {
+                    fs.rmSync(tmp, { force: true });
+                    return false;
+                  }
                 },
                 // D4 (#4288 PR1a): hand the lock, within this acquisition, to `pid` and its process group
                 // `pgid` under a NEW token T1 = <T0>-g<pgid> (tmp + rename, read back). Only the live
@@ -980,6 +1294,18 @@ export function acquireMachineLockSync(name, options) {
             if (expired.state === 'unknown') unknown = expired.unknown;
             const read = obs.owner('lock-owner', lockPath);
             if (read.state === 'unknown' && !unknown) unknown = { point: 'lock-owner', path: path.join(lockPath, 'owner'), code: read.code };
+            if (read.state === 'corrupt' && !read.empty) warnCorrupt(ctx);
+            if (read.state === 'corrupt' && read.empty) {
+              // I4: an owner of 0 bytes past the fixed grace is the head's to take out.
+              const e = reclaimEmptyOwner(ctx, now());
+              if (e.state === 'removed' && emptied < 3) {
+                emptied += 1;
+                continue;
+              }
+              if (e.state === 'kept') pending = e.aside;
+              if (e.state === 'unknown' && !unknown) unknown = e.unknown;
+            }
+            if (read.state === 'record') noteLegacy(ctx, lockPath, read.owner);
             const holder = read.state === 'record' ? read.owner : null;
             if (holder && !broken.has(holder.token)) {
               const state = holderState(holder, ctx);
@@ -1039,12 +1365,12 @@ function asHead(lockPath, options, whenHead) {
     obs,
     link: hooks.link ?? ((src, dst) => fs.linkSync(src, dst)),
     beforeLink: hooks.beforeLink,
-    startOf: (pid) => (hooks.startOf ? hooks.startOf(pid) : processStartMs(pid, now())),
+    startOf: (pid) => (hooks.startOf ? hooks.startOf(pid) : processStartMs(pid, now(), now)),
   };
   const root = path.dirname(lockPath);
   const queueDir = queueDirOfPath(lockPath);
   const token = crypto.randomUUID();
-  const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token };
+  const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token, startOf: env.startOf };
   const startedAt = now();
   const deadline = startedAt + Math.max(0, timeoutMs);
   const ticket = { pid: process.pid, host, token, createdAt: startedAt, deadline };
@@ -1124,7 +1450,10 @@ export function releaseAsHead(lockPath, tokens, options = {}) {
       ctx.warn(`machine-lock-release-deferred ${lockPath} (holder pid ${read.owner.pid}${validPgid(read.owner.pgid) ? ` pgid ${read.owner.pgid}` : ''} is ${holder.state})`);
       return { result: 'deferred', ...(holder.state === 'unknown' ? { unknown: { point: holder.point, path: lockPath, code: holder.code } } : {}) };
     }
-    fs.rmSync(lockPath, { recursive: true, force: true });
+    // Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name, the token checked —
+    // a successor that took the lock while this stopped past its ticket is put back.
+    const r = recoverLock(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
+    if (r !== 'recovered') return { result: 'kept' };
     for (const t of tokens) cleanupOwnGone(ctx, t);
     return { result: 'released' };
   });
@@ -1157,13 +1486,23 @@ export function recoverIfDead(lockPath, options = {}) {
     });
     const read = ctx.obs.owner('lock-owner', lockPath);
     if (read.state === 'unknown') return done('kept', { point: 'lock-owner', path: path.join(lockPath, 'owner'), code: read.code });
-    if (read.state === 'corrupt') return done('kept');
+    if (read.state === 'corrupt' && read.empty) {
+      const e = reclaimEmptyOwner(ctx, now());
+      return e.state === 'removed' ? done('removed') : done('kept', e.unknown);
+    }
+    if (read.state === 'corrupt') {
+      warnCorrupt(ctx);
+      return done('kept');
+    }
     if (read.state === 'missing') {
-      const expired = expireOwnerless(ctx, options.ownerlessGraceMs, now());
+      // A moved-aside record that holds (alive or unknown) keeps the owner-less <lock> too: the
+      // put-back is its (§2.7), not the clean-up's.
+      const expired = settled.block ? { state: 'none' } : expireOwnerless(ctx, options.ownerlessGraceMs, now());
       if (expired.state === 'removed') return done('removed');
       if (expired.state === 'absent' || ownerlessEmptyLock(ctx).state === 'absent') return done('absent');
       return done('kept', expired.unknown);
     }
+    noteLegacy(ctx, lockPath, read.owner);
     const holder = holderState(read.owner, ctx);
     if (holder.state === 'unknown') return done('kept', { point: holder.point, path: lockPath, code: holder.code });
     if (holder.state !== 'gone') return done('kept');
