@@ -270,8 +270,8 @@ const OBS_MEANING = {
     unknown: 'as absent',
   },
   ownerless: {
-    alive: 'the empty <lock> is 60 s old or younger (being made)',
-    gone: 'older than 60 s (touch -t)',
+    alive: "the empty <lock> is no older than the grace (being made): PR1a-f I3's production grace, which lib.sh passes as LOCK_OWNERLESS_GRACE_MS",
+    gone: 'older than that grace of PR1a-f I3 (touch -t)',
     unknown: 'its mtime or listing cannot be read (CM_VERIFY_TEST_OBS_FAULT=ownerless-mtime=EIO)',
   },
   'ownerless-tmp': {
@@ -295,9 +295,9 @@ const OBS_MEANING = {
     unknown: 'kill -0 fails other than ESRCH and EPERM (EIO and the like); EPERM is F1 (message eperm)',
   },
   'other-lstart': {
-    alive: 'kill -0 alive and machine_lock_pid_identity answers alive (also when only the TZ of writer and reader differ, F8)',
+    alive: 'kill -0 alive and machine_lock_pid_identity answers alive (the lstart texts equal, or started_at= with now − etime not later than started_at + 2 s: also when only the TZ of writer and reader differ, F8)',
     gone: 'ESRCH (the function is not called), or kill -0 alive and the function answers reused (D7)',
-    unknown: 'kill -0 fails other than ESRCH and EPERM (EPERM is F1 / other-eperm), or the function answers unknown:lstart|etime:… (F6; CM_VERIFY_TEST_OBS_FAULT=lstart=EIO / etime=EIO)',
+    unknown: 'kill -0 fails other than ESRCH and EPERM (EPERM is F1 / other-eperm), or the function answers unknown:lstart|etime:… (F6; CM_VERIFY_TEST_OBS_FAULT=lstart=EIO / etime=EIO; and F9: no started_at= and the lstart texts differ, unknown:lstart:EMISMATCH)',
   },
   'other-eperm': {
     alive: 'kill -0 EPERM and machine_lock_pid_identity answers alive: EPERM stays (message eperm)',
@@ -543,7 +543,7 @@ const FAILURE_TABLE = {
     excluded: { ...BEHIND, ...NO_RELEASE },
   }),
   'F8-tz-differs': failure({
-    point: 'machine_lock_pid_identity step 5: the lstart texts differ by a multiple of 900 s within 26 h',
+    point: 'machine_lock_pid_identity steps 5-6: the lstart texts differ, the record has started_at=, and now − etime is not later than started_at + 2 s (epoch times, so the TZ does not count)',
     errno: '— (writer and reader under different TZ values, the holder alive): the function answers alive',
     direction: 'keep',
     callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
@@ -551,9 +551,9 @@ const FAILURE_TABLE = {
   }),
   'F9-started-at-missing': failure({
     point: "machine_lock_pid_identity's <started-at-ms>: a record with no started_at= line (the old version's)",
-    errno: "— (the owner's mtime is used, PR1a-f I5; the holder alive): the function answers alive",
+    errno: '— (the holder alive, the lstart texts differ: another TZ or a reused pid cannot be told apart): the function answers unknown:lstart:EMISMATCH (PR1a-f §4.1 step 4; no mtime stands in for started_at). From EPERM it stays EPERM (refused(eperm), as other-eperm × unknown)',
     direction: 'keep',
-    callers: { 'acquire-head': refused('rec'), 'guard-head': G_KEPT },
+    callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
     excluded: { ...BEHIND, ...RELEASE_SELF },
   }),
   'F10-hostname-changed': failure({
@@ -1182,6 +1182,36 @@ describe('Issue #4288 PR1c: the stop judgements and the internal names the messa
     }
     expect(FAILURE_TABLE['F1-kill0-eperm'].errno).toContain('refused(eperm) / restored');
     expect(FAILURE_TABLE['F1-kill0-eperm'].errno).toContain('kept(eperm) / restored');
+  });
+});
+
+// ------------------------------------------------------------------ aligned with PR1a-f's upstream 3rd round (9537f6f06)
+
+describe("Issue #4288 PR1c: aligned with PR1a-f's upstream 3rd round (I3's grace, I5's started_at / etime)", () => {
+  const design = fs.readFileSync(DESIGN_MD, 'utf8');
+
+  it("F9: a record with no started_at= whose lstart text differs is unknown:lstart:EMISMATCH (no owner's mtime stands in)", () => {
+    expect(FAILURE_TABLE['F9-started-at-missing'].callers).toEqual({ 'acquire-head': refused('unk'), 'guard-head': gKept('unk') });
+    expect(FAILURE_TABLE['F9-started-at-missing'].errno).toContain('unknown:lstart:EMISMATCH');
+    expect(design).not.toContain('owner の mtime を使う');
+    expect(design).not.toContain('owner の mtime を `<started-at-ms>` に使う');
+    expect(design).toContain('unknown:lstart:EMISMATCH');
+  });
+
+  it('F8: a holder under another TZ is alive by started_at against now − etime, not by a multiple of 900 s', () => {
+    expect(FAILURE_TABLE['F8-tz-differs'].point).toContain('started_at');
+    expect(FAILURE_TABLE['F8-tz-differs'].point).not.toContain('900');
+    expect(design).not.toContain('900 秒の倍数');
+  });
+
+  it("the grace of an ownerless <lock> refers to PR1a-f I3's production grace, not a copied 60000", () => {
+    expect(design).not.toContain('LOCK_OWNERLESS_GRACE_MS=60000');
+    expect(design).toContain('PR1a-f I3 の本番の猶予');
+    expect(OBS_MEANING.ownerless.gone).toContain('PR1a-f I3');
+  });
+
+  it('the existing :618-626 test (stderr empty) leans on the lstart texts matching: the implementation writes started_at= there', () => {
+    expect(design).toContain('`:618-626` の生きた owner の記録に `started_at=` を足す');
   });
 });
 
