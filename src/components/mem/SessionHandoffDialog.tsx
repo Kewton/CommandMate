@@ -50,6 +50,7 @@ import {
   handoffStoreSnapshot,
   handoffTextSendable,
   handoffUnitsLock,
+  memItemsUnitsLock,
   handoffUnitsOf,
   isLiveHandoffOpening,
   listenHandoffRefusal,
@@ -139,6 +140,8 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   /** An extend or a rebase is answered (local: nothing is lost when it is drawn again). */
   const [writing, setWriting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  /** pr2e P3-3 (G-PR3): this instance is sending the text now (no second send from the button meanwhile). */
+  const [textSending, setTextSending] = useState(false);
 
   /** This dialog's opening, once its effect has made (or found) it for the target. */
   const opening: HandoffOpening | null =
@@ -157,7 +160,17 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const text = opening?.text ?? null;
   const plainOnly = opening?.plainOnly ?? null;
   const plainStopped = opening?.plainStopped ?? false;
-  const pending = units.pending;
+  /**
+   * pr2e P3-2 (G-PR3): after the page itself was made again (back / forward), the store may hold
+   * another worktree's unknown unit that locks this dialog's writes (`handoffUnitsLock` reads every
+   * worktree) while no page shows it. With none of its own, the dialog shows that one as "another
+   * worktree's unknown result": dropping it is all it allows (never sent from here).
+   */
+  const otherWorktreePending =
+    units.pending === null
+      ? (Object.entries(store.units).find(([id, other]) => id !== forWorktree && other.pending !== null)?.[1].pending ?? null)
+      : null;
+  const pending = units.pending ?? otherWorktreePending;
   const stopping = units.stopping;
   const cancelling = units.cancelling;
   const busy = writing || units.inflight !== null;
@@ -165,7 +178,8 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   useEffect(() => listenHandoffRefusal((_path, block) => setNotice({ tone: 'alert', text: t(CLOSE_NOTICE[block]) })), [t]);
 
   const ownLock = handoffUnitsLock(store);
-  const otherLock = useMemWriteLock(HANDOFF_LOCK_OWNER, ownLock);
+  // G-PR3: the items panel's units are the store's too — they hold the decide even while no panel is drawn.
+  const otherLock = useMemWriteLock(HANDOFF_LOCK_OWNER, ownLock) ?? memItemsUnitsLock(store);
   const lock = ownLock ?? otherLock;
 
   const requestId = view?.request.id ?? null;
@@ -199,10 +213,15 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const sendText = useCallback(
     async (of: HandoffOpening, requestIdToSend: string, body: string) => {
       if (!handoffTextSendable(of.token)) return;
-      const sent = await handoffApi.sendText(of.worktreeId, body, { cliToolId: of.target.cliToolId, instanceId: of.target.instanceId });
-      const marked = sent.ok ? await handoffApi.sent(of.worktreeId, requestIdToSend) : await handoffApi.sendFailed(of.worktreeId, requestIdToSend);
-      if (marked.ok && marked.body?.request) patchHandoffOpening(of.token, { view: marked.body });
-      if (isLiveHandoffOpening(of.token)) setNotice(sent.ok ? null : { tone: 'alert', text: t('mem.handoff.sendFailed') });
+      setTextSending(true);
+      try {
+        const sent = await handoffApi.sendText(of.worktreeId, body, { cliToolId: of.target.cliToolId, instanceId: of.target.instanceId });
+        const marked = sent.ok ? await handoffApi.sent(of.worktreeId, requestIdToSend) : await handoffApi.sendFailed(of.worktreeId, requestIdToSend);
+        if (marked.ok && marked.body?.request) patchHandoffOpening(of.token, { view: marked.body });
+        if (isLiveHandoffOpening(of.token)) setNotice(sent.ok ? null : { tone: 'alert', text: t('mem.handoff.sendFailed') });
+      } finally {
+        setTextSending(false);
+      }
     },
     [t]
   );
@@ -242,9 +261,11 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         await sendText(of, created.body.request.id, created.body.text);
         return;
       }
-      const body = created.body as Partial<HandoffReadResponse> | undefined;
+      const body = created.body as (Partial<HandoffReadResponse> & { text?: unknown }) | undefined;
       if (created.code === 'request_open' && body?.request) {
-        patchHandoffOpening(of.token, { created: 'done', view: body as HandoffReadResponse });
+        // pr2e P3-3 (G-PR3): the request picked up keeps its text, so an `unsent` one can be sent again.
+        const pickedText = typeof body.text === 'string' ? body.text : null;
+        patchHandoffOpening(of.token, { created: 'done', view: body as HandoffReadResponse, ...(pickedText !== null ? { text: pickedText } : {}) });
         return;
       }
       patchHandoffOpening(of.token, {
@@ -520,10 +541,16 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         {pending && (
           <div className="space-y-1 rounded border border-warning-border bg-warning-subtle p-2" data-testid="handoff-pending">
             <p className="text-xs text-foreground">{t('mem.handoff.unknown')}</p>
-            {!pendingSendable && (
-              <p className="text-xs text-muted-foreground" data-testid="handoff-pending-elsewhere">
-                {t('mem.handoff.pendingElsewhere', { worktree: pending.worktreeId })}
+            {otherWorktreePending !== null ? (
+              <p className="text-xs text-muted-foreground" data-testid="handoff-pending-other-worktree">
+                {t('mem.handoff.pendingOtherWorktree', { worktree: pending.worktreeId })}
               </p>
+            ) : (
+              !pendingSendable && (
+                <p className="text-xs text-muted-foreground" data-testid="handoff-pending-elsewhere">
+                  {t('mem.handoff.pendingElsewhere', { worktree: pending.worktreeId })}
+                </p>
+              )
             )}
             <div className="flex flex-wrap gap-2">
               <Button
@@ -593,7 +620,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
                 {t('mem.handoff.reload')}
               </Button>
             </div>
-            {request.state === 'awaiting_agent' && request.sendState === 'failed' && (
+            {request.state === 'awaiting_agent' && (request.sendState === 'failed' || (request.sendState === 'unsent' && !textSending)) && (
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={resendText} disabled={busy || cancelling || text === null} data-testid="handoff-resend-text">
                   {t('mem.handoff.resendText')}
@@ -614,6 +641,14 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
               </div>
             )}
 
+            {/* G9 (design §4.2): the agent said done with no proposal. The server cannot tell whether a
+                propose failed (a CLI parse error never reaches it), so the person is told that one may
+                not have arrived, and how to ask again ("don't end", then "end" again). */}
+            {request.state === 'reviewing' && request.agentDoneAt !== null && proposals.length === 0 && (
+              <p className="rounded border border-warning-border bg-warning-subtle p-2 text-xs text-foreground" data-testid="handoff-done-empty">
+                {t('mem.handoff.doneEmpty')}
+              </p>
+            )}
             {proposals.length > 0 && (
               <ul className="space-y-2" data-testid="handoff-proposals">
                 {proposals.map((proposal) => (

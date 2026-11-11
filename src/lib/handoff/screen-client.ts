@@ -15,6 +15,7 @@ import type {
   HandoffEndResponse,
   HandoffReadResponse,
 } from './types';
+import type { StartPreviewResponse } from './preview';
 
 export const HANDOFF_SCREEN_TIMEOUT_MS = 30000;
 
@@ -83,3 +84,36 @@ export const handoffApi = {
       body: JSON.stringify({ content: text, cliToolId: target.cliToolId, instanceId: target.instanceId, brief: 'skip' }),
     }),
 };
+
+/** Issue #4227 G-PR3 (design §3.1): the preview is given up after this (D1's provider timeout). */
+export const START_PREVIEW_TIMEOUT_MS = 2000;
+
+/**
+ * G-3's preview of the instance's next send (`GET …/mem/start-preview`). null when it could not
+ * be read in time — the screen then sends as it always did (`auto`), never asks on a guess.
+ */
+export async function fetchStartPreview(worktreeId: string, instanceId: string): Promise<StartPreviewResponse | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), START_PREVIEW_TIMEOUT_MS);
+  try {
+    const url = `/api/worktrees/${encodeURIComponent(worktreeId)}/mem/start-preview?instance=${encodeURIComponent(instanceId)}`;
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    const body = (await response.json()) as StartPreviewResponse;
+    return body && body.ok === true && typeof body.show === 'boolean' ? body : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Whether a body is a command to the tool, which carries no brief (D1 §4.1): the server's
+ * `isSlashCommandBody` (`session-boundary.ts`, not loadable in the browser), pinned equal by
+ * `tests/unit/lib/handoff/handoff-start-preview-client-4227.test.ts`.
+ */
+export function isCommandBody(content: string): boolean {
+  const word = content.trim().split(/\s/, 1)[0] ?? '';
+  return /^\/[^\s]+$/.test(word) || word.startsWith('!');
+}

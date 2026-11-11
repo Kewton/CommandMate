@@ -738,6 +738,7 @@
       "sendFailed": "The request could not be sent. Send it again, stop without proposals, or don't end.",
       "resendText": "Send the request again",
       "agentTimeout": "The agent has not said it is done in time. Wait (+5 min), go on with what came, stop without proposals, or don't end.",
+      "doneEmpty": "The agent said it was done without any proposal. If it tried to propose, that proposal may have failed and not arrived (proposals are not taken after done). To ask again, choose \"Don't end\" and press \"End\" again.",
       "extend": "Wait (+5 min)",
       "goOn": "Go on with what came",
       "direct": "Updates made without a proposal (read only; not rolled back)",
@@ -796,6 +797,7 @@
       "closeWhileUnknown": "A confirmation is being sent or its result is unknown. Send it again or drop it before closing.",
       "closeWhileCancelling": "The end is being cancelled. This cannot be closed, and no confirmation is sent, until it is answered.",
       "pendingElsewhere": "This confirmation is for worktree {worktree}. To send it again, open this on that worktree (here it can only be dropped).",
+      "pendingOtherWorktree": "Another worktree ({worktree}) has a confirmation whose result is unknown (from before the page was opened again). Here you can only drop it without sending it again; open that worktree to send it again.",
       "foreign": "This dialog is the hand-off before ending on worktree {worktree}. Nothing can be stopped or confirmed on this worktree; go back to that worktree to go on.",
       "plainStopped": "Stopped. Send the confirmation whose result is unknown again, or drop it, before closing.",
       "plainStopFailed": "Could not stop it. The session is still running; press stop again.",
@@ -815,6 +817,23 @@
         "empty": "(empty)",
         "none": "None"
       }
+    },
+    "startBrief": {
+      "title": "Read the previous hand-off",
+      "open": "Open items: {count} ({unreflected} unreflected decisions)",
+      "questionsNone": "Questions for a person: none",
+      "questions": "Questions for a person: {count}",
+      "questionsUnknown": "Questions for a person: {count} (unknown: could not read {sources})",
+      "updated": "Last updated: {at}",
+      "updatedNone": "Last updated: no record",
+      "previewFailed": "Could not read the preview.",
+      "short": "Read the short brief",
+      "full": "Read it all",
+      "decline": "Don't read this time",
+      "declineNote": "Without it, the note about how the last session ended is not delivered either. Closing sends nothing and returns to the composer.",
+      "askAgain": "The hand-off boundary changed ({reason}). Nothing was sent. Choose again.",
+      "claimed": "Another send is delivering the hand-off.",
+      "consumed": "This boundary's hand-off was already used (another send delivered it, or a send before a server restart ended without a known result). Only your message was sent."
     }
   }
 }

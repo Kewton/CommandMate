@@ -145,20 +145,27 @@ describe('D2 / D1 / token / ownerPid: a lock named by its path, in key=value, un
   it('sync JS: the lock, its queue and its records live beside the path; the bash loader excludes it and takes it after', async () => {
     const lock = lockIn();
     const holder = liveGroup();
-    const r = lockSync.acquireMachineLockSync('ignored', { lockPath: lock, timeoutMs: 0, token: 'run-T0', ownerPid: holder, ownerCodec: kvCodec });
+    // #4288 PR1a-f I1-b (design §5.1): the first acquisition records its own pid only — another
+    // ownerPid is refused before the ticket and the mkdir (F56). The record of another live process is
+    // put by the test (the form an older copy or a hand-off leaves).
+    const other = lockSync.acquireMachineLockSync('ignored', { lockPath: lock, timeoutMs: 0, token: 'run-T0', ownerPid: holder, ownerCodec: kvCodec });
+    expect(other.acquired).toBe(false);
+    expect(other.unknown).toEqual({ point: 'owner-pid', path: lock, code: 'EINVAL' });
+    expect(fs.existsSync(lock)).toBe(false);
+    const r = lockSync.acquireMachineLockSync('ignored', { lockPath: lock, timeoutMs: 0, token: 'run-T0', ownerCodec: kvCodec });
     expect(r.acquired).toBe(true);
     expect(r.path).toBe(lock);
     expect(tokenOf(lock)).toBe('run-T0');
-    expect(ownerOf(lock)).toMatch(new RegExp(`^pid=${holder}$`, 'm'));
+    expect(ownerOf(lock)).toMatch(new RegExp(`^pid=${process.pid}$`, 'm'));
     expect(fs.existsSync(path.join(root, 'run', 'commandmate-run.queue'))).toBe(true);
     expect(lockSync.queueDirOfPath(lock)).toBe(path.join(root, 'run', 'commandmate-run.queue'));
     expect(lockSync.queueDirOfPath(path.join(root, 'x', 'held'))).toBe(path.join(root, 'x', 'held.queue'));
-    // The bash loader, the same path and codec: the holder (ownerPid) is alive → refused.
+    expect(r.release()).toBe('released');
+    writeKv(lock, { pid: holder, token: 'run-T0' });
+    // The bash loader, the same path and codec: the holder is alive → refused.
     expect(sh(KV + ACQ, { LK: lock }).out).toMatch(/^refused/);
-    // D12's invariant (PR1a-c, codex-2 review-4288-pr1ab P2-1): the recorded pid (ownerPid) is not
-    // this process, so the holder does not remove it itself — it could die between the kill -0 and the
-    // delete — and releases as the head (D5), which keeps it while the holder lives.
-    expect(r.release()).toBe('needs-head');
+    // D12's invariant (PR1a-c, codex-2 review-4288-pr1ab P2-1): a record whose pid is not the caller is
+    // released as the head (D5), which keeps it while the holder lives.
     expect(sh(KV + ACQ, { LK: lock }).out).toMatch(/^refused/);
     expect(lockSync.releaseAsHead(lock, ['run-T0'], { timeoutMs: 0, ownerCodec: kvCodec }).result).toBe('deferred');
     killStarted();
@@ -167,19 +174,27 @@ describe('D2 / D1 / token / ownerPid: a lock named by its path, in key=value, un
     expect(sh(KV + ACQ, { LK: lock }).out).toBe('acquired');
   });
 
-  it('the bash loader writes key=value with host= under LOCK_WANT_TOKEN / LOCK_OWNER_PID, and the sync JS reads it the same way', () => {
+  it('the bash loader writes key=value with host= under LOCK_WANT_TOKEN / LOCK_OWNER_PID, and the sync JS reads it the same way', async () => {
     const lock = lockIn();
-    const live = liveGroup();
-    // A bash that takes the lock and exits leaves the record: its owner pid (live) keeps it.
-    expect(sh(`${KV}LOCK_WANT_TOKEN=run-B\nLOCK_OWNER_PID=${live}\n${ACQ}`, { LK: lock }).out).toBe('acquired');
+    // #4288 PR1a-f I1-b (design §5.1): the bash takes the lock under its own pid and stays alive — its
+    // own pid keeps the record (another LOCK_OWNER_PID is refused, F56).
+    expect(sh(`${KV}LOCK_OWNER_PID=${liveGroup()}\n${ACQ}`, { LK: lock }).out).toMatch(/^refused/);
+    expect(fs.existsSync(lock)).toBe(false);
+    const child = shBg(`${KV}LOCK_WANT_TOKEN=run-B\nLOCK_OWNER_PID=$$\n${ACQ}exec sleep 60\n`, { LK: lock });
+    const live = child.pid as number;
+    expect(await until(() => tokenOf(lock) === 'run-B')).toBe(true);
     const text = ownerOf(lock) ?? '';
     expect(text).toMatch(/^pid=\d+$/m);
     expect(text).toMatch(new RegExp(`^host=${HOST.replace(/[.]/g, '\\.')}$`, 'm'));
     expect(text).toMatch(/^token=run-B$/m);
     expect(text).toMatch(/^started_at=\d{4}-\d\d-\d\dT/m);
+    expect(text).toMatch(new RegExp(`^pid=${live}$`, 'm'));
+    expect(text).toMatch(/^v=1$/m);
     const held = lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, ownerCodec: kvCodec });
     expect(held.acquired).toBe(false);
     expect(held.heldBy).toBe(`pid ${live} on ${HOST}`);
+    killStarted();
+    expect(await until(() => pidGone(live))).toBe(true);
     // Its pid dead (an older record without host= is this host's): recovered by the sync JS.
     writeKv(lock, { pid: deadPid(), token: 'run-old', host: '' });
     const taken = lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, ownerCodec: kvCodec });
@@ -269,19 +284,29 @@ describe('D3: the owner is created exclusively — nothing there is written over
     expect(still(owner)).toBe(true);
   });
 
+  // #4288 PR1a-f (design §5.1): the exclusion is the publish's link(2), not the tmp's create — the
+  // mutation replaces the publish (/bin/link, linkSync) with a rename (mv -f, renameSync). The expectation
+  // (written over and called taken) is the same.
   it('positive control: the write without set -C / wx overwrites the successor\'s owner and calls it taken', async () => {
     const lock = lockIn();
     fs.mkdirSync(lock, { recursive: true });
     const owner = path.join(lock, 'owner');
-    const legacyBash = mutatedBash(root, (s) => s.replace('elif loc_out=$(export LC_ALL=C; set -C; : 2>&1 > "$2"); then', 'elif loc_out=$(export LC_ALL=C; : 2>&1 > "$2"); then'));
+    const legacyBash = mutatedBash(root, (s) => s.replace('elif lok_out=$(LC_ALL=C /bin/link -- "$2" "$3" 2>&1); then', 'elif lok_out=$(LC_ALL=C mv -f -- "$2" "$3" 2>&1); then'));
     fs.writeFileSync(owner, '{"pid":1,"token":"succ"}');
     const r = sh(`printf '%s\\n' "$(lock_format_owner $$ mine 1)" | lock_obs_create owner-create "$LK/owner" mine; echo "rc=$?"`, { LK: lock }, { verifyRun: legacyBash });
     expect(r.out).toBe('rc=0');
     expect(readText(owner)).toContain('"token":"mine"');
-    const legacySync = await mutatedSync(root, (s) => s.replace("fs.openSync(file, 'wx')", "fs.openSync(file, 'w')"));
+    const legacySync = await mutatedSync(root, (s) => s.replace('() => fs.linkSync(from, to)', '() => fs.renameSync(from, to)'));
     fs.writeFileSync(owner, '{"pid":1,"token":"succ"}');
-    expect(legacySync.makeObserver().create('owner-create', owner, '{"pid":2,"token":"mine"}').state).toBe('created');
+    const linked = legacySync.makeObserver().create('owner-create', owner, '{"pid":2,"token":"mine"}', path.join(lock, '.owner-mine'));
+    expect(linked.state).toBe('created');
+    expect(legacySync.makeObserver().link('owner-publish', path.join(lock, '.owner-mine'), owner).state).toBe('linked');
     expect(readText(owner)).toContain('mine');
+    // negative: the real link answers EEXIST and leaves the successor's owner
+    fs.writeFileSync(owner, '{"pid":1,"token":"succ"}');
+    lockSync.makeObserver().create('owner-create', owner, '{"pid":2,"token":"mine"}', path.join(lock, '.owner-mine'));
+    expect(lockSync.makeObserver().link('owner-publish', path.join(lock, '.owner-mine'), owner).state).toBe('exists');
+    expect(readText(owner)).toContain('succ');
   });
 
   it('bash: the undo removes only what this create made — owner-write taken out; owner-unlink / lock-rmdir failing leave the <lock> (nobody holds it twice)', () => {
@@ -292,7 +317,10 @@ describe('D3: the owner is created exclusively — nothing there is written over
     expect(fs.existsSync(lock)).toBe(false);
     const unlink = sh(ACQ, { LK: lock, CM_VERIFY_TEST_HANDOFF: 'fault:owner-write,fault:owner-unlink' });
     expect(unlink.err).toContain(`machine-lock-owner-write-failed ${lock} (and it could not be taken out again)`);
-    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(true);
+    // #4288 PR1a-f (design §5.1): what is half written is only the tmp — `<lock>/.owner-<token>` stays,
+    // and `<lock>/owner` was never published (I1).
+    expect(fs.readdirSync(lock).filter((n) => n.startsWith('.owner-'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(false);
     fs.rmSync(lock, { recursive: true });
     const rmdir = sh(ACQ, { LK: lock, CM_VERIFY_TEST_HANDOFF: 'fault:owner-write,fault:lock-rmdir' });
     expect(rmdir.err).toContain('(and it could not be taken out again)');
@@ -306,7 +334,9 @@ describe('D3: the owner is created exclusively — nothing there is written over
     expect(() => lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, hooks: { fault: fault({ 'owner-write': 'ENOSPC' }) } })).toThrow(/ENOSPC/);
     expect(fs.existsSync(lock)).toBe(false);
     expect(() => lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, hooks: { fault: fault({ 'owner-write': 'ENOSPC', 'owner-unlink': 'EIO' }) } })).toThrow(/ENOSPC/);
-    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(true);
+    // #4288 PR1a-f (design §5.1): the tmp stays, the owner was never published (I1).
+    expect(fs.readdirSync(lock).filter((n) => n.startsWith('.owner-'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(false);
   });
 });
 
@@ -482,7 +512,7 @@ describe('D5: the release by someone who is not the holder, as the head', () => 
     });
     started.push(legacy);
     expect(await until(() => fs.existsSync(path.join(dir, 'read')))).toBe(true);
-    const successor = sh(`${KV}LOCK_OWNER_PID=${liveGroup()}\n${ACQ}`, { LK: lock });
+    const successor = sh(`${KV}${ACQ}`, { LK: lock });
     expect(successor.out).toBe('acquired');
     fs.writeFileSync(path.join(dir, 'go'), '');
     await new Promise((resolve) => legacy.on('exit', resolve));
@@ -690,10 +720,13 @@ describe('D12 and review-4288h P3: the holder\'s own release, and the end state 
     expect(check(lock)).toBe(true);
   });
 
+  // #4288 PR1a-f (design §3.1, §5.1): lock_release's missing branch keeps the <lock> now, as
+  // lock_release_held does — the expectation of this former positive control is reversed (消す側から消さ
+  // ない側へ). The name is kept (the contract's decision): it names what the pre-PR1a-f section did.
   it('positive control: verify-run.sh\'s lock_release on a missing owner removes the other taker\'s <lock>', () => {
     const lock = lockIn();
     held(`T=$LOCK_TOKEN; rm -f "$LK/owner"; lock_release "$LK" "$T"; echo done`, { LK: lock });
-    expect(fs.existsSync(lock)).toBe(false);
+    expect(fs.existsSync(lock)).toBe(true);
   });
 
   it('a group that has a member keeps the lock (release-deferred); the drain empties it with the section\'s KILL_GRACE_SEC, and then it goes', () => {

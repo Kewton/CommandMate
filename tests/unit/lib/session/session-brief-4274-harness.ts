@@ -242,8 +242,11 @@ export function hook(world: World, tool: BoundaryTool, fixture: string, options:
 
 export interface SendOptions {
   instanceId?: string;
-  brief?: 'auto' | 'skip' | 'force' | 'never';
+  brief?: 'auto' | 'skip' | 'force' | 'never' | 'decline';
   absoluteImagePath?: string;
+  /** Issue #4227 (S-B): the screen's choice (`full`) and the boundary its preview showed. */
+  briefDetail?: 'short' | 'full';
+  briefBoundary?: string;
 }
 
 export interface Sent {
@@ -270,6 +273,8 @@ export async function send(tool: string, content: string, options: SendOptions =
     instanceId: options.instanceId,
     brief: briefModeOverride ?? options.brief ?? 'auto',
     briefPin,
+    ...(options.briefDetail ? { briefDetail: options.briefDetail } : {}),
+    ...(options.briefBoundary ? { briefBoundary: options.briefBoundary } : {}),
     absoluteImagePath: options.absoluteImagePath,
     onBrief: (r) => {
       report = r;

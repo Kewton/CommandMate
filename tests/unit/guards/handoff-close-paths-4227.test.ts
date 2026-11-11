@@ -510,7 +510,26 @@ function isPropertyName(node: ts.Identifier): boolean {
  * (`WorktreeDetailDesktop.tsx`) takes a type only (`import type { SessionStopResult }`), so it is
  * not one, and a value import there fails.
  */
-const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK]);
+const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK, 'src/components/mem/MemItemsPanel.tsx']);
+
+/**
+ * G-PR3 (design §4.1.1, "one rule for the whole screen"): the items panel's units live in the store
+ * (keyed by the worktree id), so the panel takes values from it — but only these: its own units'
+ * writers and the readers it draws from. A file named here may take no other value of the store
+ * (the hand-off's writers among them), so allowing it narrows nothing the guard held before. A file
+ * of {@link STORE_IMPORTERS} not named here (the dialog, the hook) may take any value.
+ */
+const STORE_IMPORTER_VALUES: Readonly<Record<string, readonly string[]>> = {
+  'src/components/mem/MemItemsPanel.tsx': [
+    'dropMemItemsUnit',
+    'handoffStoreSnapshot',
+    'handoffUnitsLock',
+    'memItemsUnitsAll',
+    'settleMemItemsWrite',
+    'startMemItemsWrite',
+    'subscribeHandoffStore',
+  ],
+};
 
 /**
  * pr2h: the invariant's first half. In `src/` but the store and {@link STORE_IMPORTERS}, nothing
@@ -522,7 +541,10 @@ function checkStoreImporters(files: ReadonlyArray<{ file: string; source: string
   const problems: string[] = [];
   for (const { file, source } of files) {
     const rel = posix(file);
-    if (rel === STORE || STORE_IMPORTERS.has(rel)) continue;
+    if (rel === STORE) continue;
+    // G-PR3: an importer with a list of values takes those only (a name, never `* as`, default or `*`).
+    const only = own(STORE_IMPORTER_VALUES, rel);
+    if (STORE_IMPORTERS.has(rel) && only === undefined) continue;
     const sf = parse(file, source);
     for (const statement of sf.statements) {
       if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && namesStore(file, statement.moduleSpecifier.text)) {
@@ -536,7 +558,10 @@ function checkStoreImporters(files: ReadonlyArray<{ file: string; source: string
               ...(bindings && ts.isNamespaceImport(bindings) ? [`* as ${bindings.name.text}`] : []),
               ...(bindings && ts.isNamedImports(bindings) ? bindings.elements.filter((e) => !e.isTypeOnly).map((e) => (e.propertyName ?? e.name).text) : []),
             ];
-        for (const value of values) problems.push(`${rel}: imports ${value} from the store (only ${[...STORE_IMPORTERS].join(', ')} may)`);
+        for (const value of values) {
+          if (only !== undefined && only.includes(value)) continue;
+          problems.push(`${rel}: imports ${value} from the store (only ${[...STORE_IMPORTERS].join(', ')} may${only !== undefined ? `; ${rel} only ${only.join(', ')}` : ''})`);
+        }
       }
       if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier) && namesStore(file, statement.moduleSpecifier.text) && !statement.isTypeOnly) {
         const clause = statement.exportClause;
@@ -768,6 +793,10 @@ const STORE_WRITERS: Record<string, string | null> = {
   noteHandoffHidden: 'HandoffOpeningToken',
   closeHandoffOpening: 'HandoffOpeningToken',
   resetHandoffStoreForTests: null,
+  // G-PR3: the items panel's units (design §4.1.1): a start takes the unit, its settle and drop the sending.
+  startMemItemsWrite: 'MemItemsUnit',
+  settleMemItemsWrite: 'SentMemItemsWrite',
+  dropMemItemsUnit: 'SentMemItemsWrite',
 };
 
 /**
@@ -800,6 +829,13 @@ const STORE_EXPORTS: Readonly<Record<string, 'writer' | 'reader'>> = {
   askHandoffClose: 'reader',
   closeHandoffOpening: 'writer',
   resetHandoffStoreForTests: 'writer',
+  // G-PR3: the items panel's units (design §4.1.1).
+  memItemsUnitsOf: 'reader',
+  memItemsUnitsAll: 'reader',
+  memItemsUnitsLock: 'reader',
+  startMemItemsWrite: 'writer',
+  settleMemItemsWrite: 'writer',
+  dropMemItemsUnit: 'writer',
 };
 
 /**
@@ -922,7 +958,7 @@ function checkWriterHandOn(files: ReadonlyArray<{ file: string; source: string }
  * pr2h: read from the parsed casts (`as X`, `<X>`), not the raw text.
  */
 function checkBrandCasts(files: ReadonlyArray<{ file: string; source: string }>): string[] {
-  const brands = new Set(['SentHandoffDecide', 'HandoffOpeningToken']);
+  const brands = new Set(['SentHandoffDecide', 'HandoffOpeningToken', 'SentMemItemsWrite']);
   const problems: string[] = [];
   for (const { file, source } of files) {
     if (posix(file) === STORE) continue;
@@ -936,7 +972,7 @@ function checkBrandCasts(files: ReadonlyArray<{ file: string; source: string }>)
       ts.forEachChild(node, visit);
     };
     visit(sf);
-    if (casts) problems.push(`${file} casts to SentHandoffDecide / HandoffOpeningToken (only the store makes them)`);
+    if (casts) problems.push(`${file} casts to SentHandoffDecide / HandoffOpeningToken / SentMemItemsWrite (only the store makes them)`);
   }
   return problems;
 }
@@ -1635,5 +1671,38 @@ describe('[#4227 pr2j] a writer’s name in the store is its declaration only; t
   it('node:module: a file that re-exports a value of it is an importer (the table’s equality sees it)', () => {
     const one = write('src/zz/new.ts', "export { createRequire } from 'node:module';\n");
     expect(nodeModuleImporters([one])).toEqual(['src/zz/new.ts']);
+  });
+});
+
+// G-PR3 (design §4.1.1): the items panel's units in the store — the panel is an importer of its
+// own writers and the readers it draws from only, and only the store makes their sendings.
+describe('[#4227 G-PR3] the items panel takes from the store its own units only', () => {
+  const PANEL_FILE = 'src/components/mem/MemItemsPanel.tsx';
+  const withLine = (head: string) => ({ file: PANEL_FILE, source: `${head}\n${read(PANEL_FILE)}` });
+
+  it('(negative control) the panel as it is passes', () => {
+    expect(checkStoreReach([{ file: PANEL_FILE, source: read(PANEL_FILE) }])).toEqual([]);
+  });
+
+  it.each([
+    ['a hand-off writer', "import { dropHandoffUnit } from '@/lib/handoff/close-rule';", /MemItemsPanel.tsx: imports dropHandoffUnit from the store/],
+    ['a reader not in its list', "import { liveHandoffOpeningFor } from '@/lib/handoff/close-rule';", /MemItemsPanel.tsx: imports liveHandoffOpeningFor from the store/],
+    ['a namespace import', "import * as rule from '@/lib/handoff/close-rule';", /MemItemsPanel.tsx: imports \* as rule from the store/],
+  ])('the panel taking %s fails', (_label, head, expected) => {
+    expect(checkStoreReach([withLine(head)]).join('\n')).toMatch(expected);
+  });
+
+  it('a cast to SentMemItemsWrite outside the store fails (only the store makes a sending)', () => {
+    const panel = withLine('const forged = {} as SentMemItemsWrite;\nvoid forged;');
+    expect(checkBrandCasts([panel]).join('\n')).toMatch(/MemItemsPanel.tsx casts to/);
+  });
+
+  it('a store function that writes the items units without being a writer of the table fails', () => {
+    const source = read(STORE).replace(
+      'export function memItemsUnitsOf(',
+      "export function forgetItems(worktreeId: string): void {\n  commit({ ...state, items: { ...state.items, [worktreeId]: { sending: null, unknown: {} } } });\n}\n\nexport function memItemsUnitsOf("
+    );
+    expect(source).toContain('forgetItems');
+    expect(checkStoreSignatures(source).join('\n')).toMatch(/forgetItems writes the store but is not one of its writers/);
   });
 });

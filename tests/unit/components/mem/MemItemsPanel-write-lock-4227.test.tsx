@@ -24,6 +24,8 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemItemsPanel } from '@/components/mem/MemItemsPanel';
 import { publishMemWriteLock } from '@/components/mem/mem-write-lock';
 import type { MemItemView } from '@/types/mem';
+import { memItemsUnitsAll, memItemsUnitsLock, resetHandoffStoreForTests, settleHandoffDecide, startHandoffDecide } from '@/lib/handoff/close-rule';
+import { memItemsApi } from '@/lib/mem/screen-client';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -456,5 +458,89 @@ describe('[#4227] B P3-4: taking a notice stays outside the lock', () => {
     expect(acknowledged[0].body).toEqual({ ifVersion: 4 });
     // Still locked: the acknowledgement is no write of items.
     expect(screen.getByTestId('mem-items-write-locked')).toBeTruthy();
+  });
+});
+
+// G-PR3: the panel's units live in the hand-off's module store now; each test starts from an empty one.
+afterEach(() => resetHandoffStoreForTests());
+
+/**
+ * Issue #4227 G-PR3 (design §4.1.1・§2.4.1 (4e), one rule for the whole screen): the panel's units
+ * live in the hand-off's store (keyed by the worktree id), like the dialog's. Positive control: on
+ * the panel of G-PR2 (units in the component's state) the unit is gone after a remount and the
+ * store knows nothing of it — both rows below fail there.
+ */
+describe('[#4227 G-PR3] the panel’s units are the store’s', () => {
+  it.each(['add', 'edit', 'close'] as const)('an unknown %s survives the panel unmounted and drawn again (still locked, still resent as it was)', async (unit) => {
+    const first = renderPanel();
+    await screen.findByTestId('mem-item-edit-d3');
+    await startUnit(unit, 'unknown');
+    const sent = writesOf(UNIT[unit].op)[0];
+    first.unmount();
+    expect(memItemsUnitsLock()).toBe('unknown');
+    renderPanel();
+    await screen.findByTestId('mem-items-write-locked');
+    expect(screen.getByTestId('mem-items-write-locked').textContent).toContain('結果が分からない要求');
+    if (unit !== 'add') press(unit === 'edit' ? 'mem-item-edit-n1' : 'mem-item-close-n1');
+    // Sendable once the list and the selection are read again (rule (4)(a): its own destination).
+    await waitFor(() => expect(button(UNIT[unit].resend)?.disabled).toBe(false));
+    press(UNIT[unit].resend);
+    await waitFor(() => expect(writesOf(UNIT[unit].op)).toHaveLength(2));
+    expect(writesOf(UNIT[unit].op)[1]).toEqual(sent);
+    await waitFor(() => expect(memItemsUnitsLock()).toBeNull());
+  });
+
+  it('the hand-off’s unknown decide in the store locks the panel with no dialog drawn', async () => {
+    const sending = startHandoffDecide({ worktreeId: 'wt-1', requestId: 'r1', ifVersion: 1, decisions: [] });
+    settleHandoffDecide(sending!, 'unknown');
+    renderPanel();
+    await screen.findByTestId('mem-items-write-locked');
+    press('mem-item-edit-n1');
+    type('mem-item-edit-text-n1', 'not while the decide is unknown');
+    press('mem-item-save-n1');
+    expect(writes).toHaveLength(0);
+  });
+
+  it('an unknown panel unit holds the hand-off’s decide in the store (the other way round)', async () => {
+    renderPanel();
+    await screen.findByTestId('mem-item-edit-d3');
+    await startUnit('close', 'unknown');
+    expect(startHandoffDecide({ worktreeId: 'wt-1', requestId: 'r1', ifVersion: 1, decisions: [] })).toBeNull();
+  });
+
+  it('(negative control) with nothing held, the panel writes and the store is left empty', async () => {
+    renderPanel();
+    await screen.findByTestId('mem-item-edit-d3');
+    press('mem-item-edit-n1');
+    type('mem-item-edit-text-n1', 'plain');
+    press('mem-item-save-n1');
+    await waitFor(() => expect(find('n1').text).toBe('plain'));
+    expect(memItemsUnitsLock()).toBeNull();
+  });
+});
+
+/**
+ * pr3c (review A P3-3): a write whose `run` throws before its answer is settled is unknown, as the
+ * dialog's decide is (its finally settles `unknown`): the slot's unit stays for the person's resend
+ * or drop. Positive control: before pr3c the finally settled it `answered`, dropping the slot's
+ * earlier unknown with no choice of the person (the lock went null).
+ */
+describe('[#4227 pr3c] a throw is unknown, never answered', () => {
+  it('an unknown close resent and the client throws: still unknown, still locked, resent as it was', async () => {
+    renderPanel();
+    await screen.findByTestId('mem-item-edit-d3');
+    await startUnit('close', 'unknown');
+    const sent = writesOf('close')[0];
+    const spy = vi.spyOn(memItemsApi, 'close').mockRejectedValueOnce(new Error('thrown before an answer'));
+    press(UNIT.close.resend);
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(button(UNIT.close.resend)?.disabled).toBe(false));
+    expect(memItemsUnitsLock()).toBe('unknown');
+    expect(memItemsUnitsAll().unknown.map((unit) => unit.slot)).toEqual(['close:n1']);
+    expect(screen.getByTestId('mem-items-write-locked').textContent).toContain('結果が分からない要求');
+    press(UNIT.close.resend);
+    await waitFor(() => expect(writesOf('close')).toHaveLength(2));
+    expect(writesOf('close')[1]).toEqual(sent);
+    await waitFor(() => expect(memItemsUnitsLock()).toBeNull());
   });
 });

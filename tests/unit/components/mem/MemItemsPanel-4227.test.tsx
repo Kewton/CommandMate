@@ -11,6 +11,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { MemItemsPanel } from '@/components/mem/MemItemsPanel';
 import { SCREEN_CLIENT_HEADER } from '@/lib/security/screen-request';
 import type { MemItemView, MemMode } from '@/types/mem';
+import { resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -234,3 +235,6 @@ describe('[#4227] the items screen', () => {
     expect(writes[0]).toMatchObject({ url: '/api/repositories/repo-1/mem/notices/nt1/acknowledge', headers: { [SCREEN_CLIENT_HEADER]: 'screen' }, body: { ifVersion: 3 } });
   });
 });
+
+// G-PR3: the panel's units live in the hand-off's module store now; each test starts from an empty one.
+afterEach(() => resetHandoffStoreForTests());
