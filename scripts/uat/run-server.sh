@@ -111,33 +111,44 @@ group_members() {
     printf '%s\n' "$out" | awk -v g="$1" '$2 == g && $1 != g { print $1 }'
 }
 
+# member_in_group <G> <pid> — 0 when <pid> is alive and ps says its process group is <G> now; 1 when it
+# is gone, in another group, or ps cannot say (unknown is "not a member").
+member_in_group() {
+    kill -0 "$2" 2>/dev/null || return 1
+    [ "$(ps -o pgid= -p "$2" 2>/dev/null | tr -d ' ')" = "$1" ] || return 1
+    return 0
+}
+
+# signal_member <G> <TERM|KILL> <pid> — the one place a member of a group is sent a signal (design §12 of
+# docs/design/run-lock-machine-lock-4288.md, pr1b-4): just before the send it looks again (alive, in group
+# <G> now) and sends nothing to a pid that is not, or cannot be shown to be — a number seen in <G> earlier may
+# be somebody else's by now. 0 when it was sent, 1 when it was not.
+signal_member() {
+    member_in_group "$1" "$3" || return 1
+    kill -s "$2" "$3" 2>/dev/null
+}
+
 # drain_members <G> <pid>... — TERM, grace, KILL for those of the pids that are still in group <G>
-# (one by one, never the group's number: an emptied group's number may be reused). Returns 0 when
-# the group <G> is empty afterwards (ESRCH), 1 when it is not or cannot be shown to be.
+# (one by one, never the group's number: an emptied group's number may be reused). Every signal goes
+# through signal_member, which looks at the pid again just before it. Returns 0 when the group <G> is
+# empty afterwards (ESRCH), 1 when it is not or cannot be shown to be.
 drain_members() {
     local g=$1 p alive="" i
     shift
     for p in "$@"; do
-        kill -0 "$p" 2>/dev/null || continue
-        [ "$(ps -o pgid= -p "$p" 2>/dev/null | tr -d ' ')" = "$g" ] || continue
-        alive="$alive $p"
+        member_in_group "$g" "$p" && alive="$alive $p"
     done
     if [ -n "$alive" ]; then
         log "stopping what is left of group $g:$alive"
-        for p in $alive; do kill -s TERM "$p" 2>/dev/null || true; done
+        for p in $alive; do signal_member "$g" TERM "$p" || true; done
         i=0
         while [ $i -lt 50 ]; do
             [ "$(lock_obs_kill0 group "-$g")" = gone ] && return 0
             sleep 0.1
             i=$((i + 1))
         done
-        # The grace may have been long: a pid that ended meanwhile may be somebody else's by now. Each one is
-        # looked at again (alive, still in group <G>) just before it is sent KILL.
-        for p in $alive; do
-            kill -0 "$p" 2>/dev/null || continue
-            [ "$(ps -o pgid= -p "$p" 2>/dev/null | tr -d ' ')" = "$g" ] || continue
-            kill -s KILL "$p" 2>/dev/null || true
-        done
+        # The grace may have been long: a pid that ended meanwhile may be somebody else's by now.
+        for p in $alive; do signal_member "$g" KILL "$p" || true; done
         i=0
         while [ $i -lt 20 ]; do
             [ "$(lock_obs_kill0 group "-$g")" = gone ] && return 0

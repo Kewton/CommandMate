@@ -69,6 +69,7 @@ BEFORE="$(git rev-parse HEAD)" || exit 2
 fail_sync() {
   reason="$1"
   echo "AGENT_HEALTH_SYNC status=failed reason=${reason} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
+  SYNC_LINE_PRINTED=1
   if [ "${KEEP_REPORT:-0}" = 1 ] && [ -f "$OUT" ] && [ -n "${GO:-}" ] && [ "$OUT" -nt "$GO" ]; then
     exit 2
   fi
@@ -99,6 +100,10 @@ fail_sync() {
 HAND=""
 CHILD=""
 CHILD_REAPED=0
+# The one AGENT_HEALTH_SYNC line: SYNC_OK_LINE is set once the sync has succeeded, SYNC_LINE_PRINTED once a
+# line (ok or failed) has been printed. Both are set here, before the EXIT trap, so the environment cannot.
+SYNC_OK_LINE=""
+SYNC_LINE_PRINTED=0
 
 # A step of the handover to run.ts's process group failed while this script lives (design
 # docs/design/run-lock-machine-lock-4288.md §4.5, table D). The child never works unsignalled. The
@@ -150,11 +155,17 @@ daily_handoff_fail() { # <stage>
   fail_sync "handoff-failed stage=${stage%%-*}"
 }
 
-# EXIT (INT and TERM end in `exit 130/143`, so they come here): a child not yet waited for is stopped
-# first (its group when the lock names it), then the lock is released once - D12 keeps it while the
-# group has a member.
+# EXIT (INT and TERM end in `exit 130/143`, so they come here): a run that synced but has not said so yet
+# (interrupted before the child's receipt) says it failed, once - the one AGENT_HEALTH_SYNC line is never
+# missing after the sync. Then a child not yet waited for is stopped first (its group when the lock names
+# it), and the lock is released once - D12 keeps it while the group has a member.
 # shellcheck disable=SC2329 # run by the EXIT trap below
 daily_on_exit() {
+  local rc=$?
+  if [ -n "$SYNC_OK_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
+    echo "AGENT_HEALTH_SYNC status=failed reason=interrupted exit=${rc} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
+    SYNC_LINE_PRINTED=1
+  fi
   if [ -n "$CHILD" ] && [ "$CHILD_REAPED" != 1 ]; then
     if [ -n "$RUN_LOCK_G" ]; then
       lock_stop_gate "$RUN_LOCK_G" "$CHILD"
@@ -218,6 +229,7 @@ SYNC_OK_LINE="AGENT_HEALTH_SYNC status=ok before=$(printf '%s' "$BEFORE" | cut -
 
 if [ "$SYNC_ONLY" -eq 1 ]; then
   echo "$SYNC_OK_LINE"
+  SYNC_LINE_PRINTED=1
   exit 0
 fi
 
@@ -240,9 +252,11 @@ CHILD=$!
 set +m
 run_lock_set_pid "$T0" "$$" "$CHILD" "$GO" || daily_handoff_fail "$RUN_LOCK_STAGE"
 # The one AGENT_HEALTH_SYNC line: the `ok` line is made once the child has made its receipt (it will exec
-# run.ts) or has ended. A handover that failed has already written its own (status=failed) and a child that ends
-# without a receipt is reported by that line only, so the line is never there twice.
-SYNC_OK_PRINTED=0
+# run.ts) or has ended. A handover that failed has already written its own (status=failed). A child that ends
+# with 75 and no receipt never exec'd: that is the failed line only (stage=ack, below). A child that ends with
+# any other code and no receipt (a signal from outside before it exec'd) gets the `ok` line once it is reaped:
+# the sync itself succeeded and its exit code is passed on. An interruption of this script before any line is
+# made is the failed line of daily_on_exit. So the line is there once, never twice.
 while [ ! -e "$ACK" ]; do
   CHILD_STAT="$(ps -o stat= -p "$CHILD" 2>/dev/null | tr -d ' ')"
   case "$CHILD_STAT" in '' | Z*) break ;; esac
@@ -251,7 +265,7 @@ while [ ! -e "$ACK" ]; do
 done
 if [ -e "$ACK" ]; then
   echo "$SYNC_OK_LINE"
-  SYNC_OK_PRINTED=1
+  SYNC_LINE_PRINTED=1
 fi
 wait "$CHILD"
 CODE=$?
@@ -263,5 +277,8 @@ CHILD_REAPED=1
 if [ "$CODE" -eq 75 ] && [ ! -e "$ACK" ]; then
   fail_sync "handoff-failed stage=ack"
 fi
-[ "$SYNC_OK_PRINTED" = 1 ] || echo "$SYNC_OK_LINE"
+if [ "$SYNC_LINE_PRINTED" != 1 ]; then
+  echo "$SYNC_OK_LINE"
+  SYNC_LINE_PRINTED=1
+fi
 exit "$CODE"
