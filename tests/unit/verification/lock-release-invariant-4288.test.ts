@@ -45,10 +45,12 @@ afterEach(() => {
   removeRoot(root);
 });
 
-function bash(script: string, env: Record<string, string> = {}, loader = LOADER) {
+function bash(script: string, env: Record<string, string> = {}, loader = LOADER, detached = false) {
   const r = spawnSync('bash', ['-c', `set -u\n. '${loader}' || { echo LOAD-FAILED; exit 3; }\n${script}`], {
     encoding: 'utf8',
     timeout: 30000,
+    // `detached` (setsid: the shell leads its own group G) works in spawnSync but is missing from its types.
+    ...({ detached } as object),
     env: {
       ...process.env,
       CM_VERIFY_LOCK_ROOT: path.join(root, 'verify-root'),
@@ -386,17 +388,72 @@ echo parent-exits`,
   });
 
   it('positive control: before the $$-is-alive check (PR1a-c) the subshell removes T2', () => {
-    const loader = mutatedLoader((s) => s.replace('if [ "$LOB_PID" = "$$" ] && [ "$(lock_obs_kill0 pid "$$")" = alive ]; then', () => 'if [ "$LOB_PID" = "$$" ]; then'));
+    const loader = mutatedLoader((s) => s.replace('if [ "${BASH_SUBSHELL:-0}" = 0 ] && [ "$LOB_PID" = "$$" ] && [ "$(lock_obs_kill0 pid "$$")" = alive ]; then', () => 'if [ "$LOB_PID" = "$$" ]; then'));
     const { lock, lines } = parentDies(loader);
     expect(lines.filter((l) => !l.startsWith('verify-run:')), lines.join('\n')).toEqual(['successor-acquired', 'held=released', 'done']);
     expect(fs.existsSync(lock), 'T2 was removed under the head').toBe(false);
   });
 
-  it('negative control: a subshell whose parent is alive releases its own record as before', () => {
+  it('narrowed (PR1a-e): a subshell whose parent is alive does not release either → needs-head (the main shell releases)', () => {
     const lock = lockIn();
     const r = bash(`machine_lock_use_kv_codec\n${ACQ}( lock_release_held "$LK"; echo "held=$LRH_RESULT" )`, { LK: lock });
+    expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=needs-head']);
+    expect(fs.existsSync(lock)).toBe(true);
+  });
+
+  it('negative control: the main shell (BASH_SUBSHELL=0) releases its own record as before', () => {
+    const lock = lockIn();
+    const r = bash(`machine_lock_use_kv_codec\n${ACQ}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released']);
     expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  /**
+   * PR1a-e (PM Claude A P3-1): the window after the `$$` check. The subshell reads `$$` alive, then the
+   * parent dies and the head takes T2 before the delete. Made by a hook on the pid observation: right
+   * after it answers "alive" for $$ it kills the parent, waits for its death and runs the successor.
+   * Narrowed: a subshell never removes directly (needs-head), so the window does not exist.
+   */
+  function windowAfterCheck(loader = LOADER) {
+    const lock = lockIn();
+    const outFile = path.join(root, 'window.out');
+    const r = bash(
+      `machine_lock_use_kv_codec
+${ACQ}P=$$
+(
+  eval "lok_real() $(declare -f lock_obs_kill0 | sed 1d)"
+  lock_obs_kill0() {
+    lok_r=$(lok_real "$@")
+    if [ "$1" = pid ] && [ "$2" = "$P" ] && [ "$lok_r" = alive ]; then
+      kill -9 "$P"
+      while kill -0 "$P" 2>/dev/null; do sleep 0.05; done
+      bash '${SUCCESSOR()}' '${loader}' >&2 || true
+    fi
+    printf '%s' "$lok_r"
+  }
+  lock_release_held "$LK"; echo "held=$LRH_RESULT"
+  echo done
+) >'${outFile}' 2>&1 </dev/null &
+wait`,
+      { LK: lock, MACHINE_LOCK_VERIFY_RUN: loader === LOADER ? '' : VERIFY_RUN },
+      loader,
+    );
+    expect(waitSync(() => fs.existsSync(outFile) && fs.readFileSync(outFile, 'utf8').includes('done\n'), 20000), r.err).toBe(true);
+    return { lock, lines: fs.readFileSync(outFile, 'utf8').trim().split('\n').filter((l) => !l.startsWith('verify-run:')) };
+  }
+
+  it('the parent dies right after the $$ check, the head takes T2 → the subshell does not remove T2 (needs-head)', () => {
+    const { lock, lines } = windowAfterCheck();
+    // The hook fires on the pid observation of the needs-head path too: T2 is taken there, and stays.
+    expect(lines, lines.join('\n')).toEqual(['successor-acquired', 'held=needs-head', 'done']);
+    expect(ownerToken(lock)).toBe('T2');
+  });
+
+  it('positive control: without the BASH_SUBSHELL term (PR1a-d) the window removes T2 under the head', () => {
+    const loader = mutatedLoader((s) => s.replace('[ "${BASH_SUBSHELL:-0}" = 0 ] && ', ''));
+    const { lock, lines } = windowAfterCheck(loader);
+    expect(lines, lines.join('\n')).toEqual(['successor-acquired', 'held=released', 'done']);
+    expect(fs.existsSync(lock), 'T2 was removed under the head').toBe(false);
   });
 });
 
@@ -411,14 +468,14 @@ describe('6. PR1a-d (codex P2-1): the own-group exception and its limit (design 
    */
   it('the caller alone in its group → released', () => {
     const lock = lockIn();
-    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
+    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock }, LOADER, true);
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released']);
     expect(fs.existsSync(lock)).toBe(false);
   });
 
   it('a child still running in the group → released (the known limit of the exception, design D12)', () => {
     const lock = lockIn();
-    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}sleep 30 &\nchild=$!\nlock_release_held "$LK"; echo "held=$LRH_RESULT child=$(kill -0 $child 2>/dev/null && echo alive || echo gone)"\nkill $child`, { LK: lock });
+    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}sleep 30 &\nchild=$!\nlock_release_held "$LK"; echo "held=$LRH_RESULT child=$(kill -0 $child 2>/dev/null && echo alive || echo gone)"\nkill $child`, { LK: lock }, LOADER, true);
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released child=alive']);
     expect(fs.existsSync(lock)).toBe(false);
   });
