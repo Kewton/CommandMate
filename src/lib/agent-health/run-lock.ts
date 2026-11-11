@@ -10,7 +10,7 @@
  * token checked, deleted), and every observation answers in three values —
  * an unknown (EPERM, EIO …) is never read as "free". The owner is key=value
  * lines (`pid=`, `host=`, `token=`, `started_at=`, `label=`, `run_dir=`,
- * `pgid=`): the same text scripts/uat/run-lock.sh writes with
+ * `pgid=`, `v=`): the same text scripts/uat/run-lock.sh writes with
  * scripts/lib/machine-lock.sh, so an older reader's `sed -n 's/^pid=//p'`
  * still reads it.
  *
@@ -34,6 +34,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {
+  EMPTY_OWNER_GRACE_MS,
   GONE_SUFFIX_PATTERN,
   acquireMachineLockSync,
   holderState,
@@ -43,9 +44,8 @@ import {
 export const RUN_LOCK_DIR_ENV = 'CM_RUN_LOCK_DIR';
 export const RUN_LOCK_TOKEN_ENV = 'CM_RUN_LOCK_TOKEN';
 const LOCK_NAME = 'commandmate-run.lock';
-/** A lock directory without an owner file is still being made, up to this age. */
-/** The grace of an owner-less, empty `<lock>` before the head takes it out (D3); the one place run-lock names it (PR1a's LOCK_OWNERLESS_GRACE_MS). */
-export const OWNERLESS_GRACE_MS = 60_000;
+/** The grace of an owner-less, empty `<lock>` before the head takes it out (D3): PR1a-f's constant (600000), never a value written here. */
+export const OWNERLESS_GRACE_MS: number = EMPTY_OWNER_GRACE_MS;
 /** Characters a token may have (I-8): the moved-aside record's name carries it, and readers accept only these. */
 const TOKEN_PATTERN = /^[A-Za-z0-9-]+$/;
 
@@ -149,6 +149,8 @@ const KV_CODEC = {
       label: fields.get('label') ?? '',
       ...(fields.has('run_dir') ? { runDir: fields.get('run_dir') } : {}),
       ...(fields.has('lstart') ? { lstart: fields.get('lstart') } : {}),
+      // I9: the writer's version (`v=1` from PR1a-f on); a record without it is an older copy's (named once by the reader).
+      ...(/^[0-9]+$/.test(fields.get('v') ?? '') ? { v: Number(fields.get('v')) } : {}),
       ...(fields.has('pgid') ? { pgid: /^[0-9]+$/.test(fields.get('pgid') ?? '') ? Number(fields.get('pgid')) : Number.NaN } : {}),
     };
   },
@@ -156,6 +158,7 @@ const KV_CODEC = {
     const lines = [`pid=${record.pid}`, `host=${record.host}`, `token=${record.token}`];
     const at = typeof record.acquiredAt === 'number' ? record.acquiredAt : Date.now();
     lines.push(`started_at=${new Date(at).toISOString().replace(/\.\d{3}Z$/, 'Z')}`);
+    if (typeof record.v === 'number') lines.push(`v=${record.v}`);
     if (typeof record.label === 'string') lines.push(`label=${record.label}`);
     if (typeof record.runDir === 'string' && record.runDir) lines.push(`run_dir=${record.runDir}`);
     if (typeof record.pgid === 'number') lines.push(`pgid=${record.pgid}`);

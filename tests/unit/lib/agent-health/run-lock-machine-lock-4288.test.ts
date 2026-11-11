@@ -931,13 +931,13 @@ const TABLE_E = {
   'field-newline': { ts: refusedArg('{ ok: false, error }'), sh: refusedArg('RUN_LOCK_ERROR, 1') },
   'ts-pid-not-self': {
     ts: refusedArg('{ ok: false, error }'),
-    sh: { kind: 'never', why: 'bash の取得は pid≠$$ を受ける（F9、run-lock-3359.test.ts の TS↔bash の読み合わせ）。代わりにその取得の解放と引渡しを拒む' },
+    sh: { kind: 'never', why: 'bash の取得も pid≠$$ を断る（PR1a-f I1-b。下の 2 行はその断りの後の解放と引渡し）' },
   },
   'sh-release-after-foreign-pid': {
     ts: { kind: 'never', why: 'TS は pid≠process.pid の取得を拒む（ts-pid-not-self）' },
-    sh: refusedArg('RUN_LOCK_ERROR, 1; the record stays until its pid dies and the next head recovers it'),
+    sh: refusedArg('the take with pid≠$$ is refused (I1-b); nothing is written, so nothing is released'),
   },
-  'handoff-pid-not-self': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('stage=arg, 1; nothing written, LOCK_PENDING_TOKEN not set') },
+  'handoff-pid-not-self': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('the take with pid≠$$ is refused (I1-b); nothing written, LOCK_PENDING_TOKEN not set') },
   'handoff-pgid-self': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('stage=arg, 1') },
   'handoff-twice': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('stage=arg, 1') },
   'handoff-subshell': { ts: NO_HANDOFF_IN_TS, sh: refusedArg('stage=arg, 1') },
@@ -1576,17 +1576,19 @@ describe('#4288 PR1b table E, driven: the refused arguments and contexts touch n
         expect(r.queueAfter).toEqual([]);
         break;
       case 'sh-release-after-foreign-pid':
-        expect(r.out.rc).toBe('1');
-        expect(r.out.err).toContain('not its own');
-        // the record stays (until its pid is gone and the next head recovers it)
-        expect(r.after.owner).toContain('token=foreign-pid-tok');
+        // PR1a-f I1-b: the take with a pid that is not $$ is refused before anything is written, so there is nothing to release
+        expect(r.out['acquire-failed']).toBe('1');
+        expect(r.after.lockExists).toBe(false);
+        expect(r.queueAfter).toEqual([]);
         break;
       case 'handoff-pid-not-self':
+        // PR1a-f I1-b: the first take with a pid that is not $$ is refused (the pid of a record is handed over by the hand-off only)
+        expect(r.out['acquire-failed']).toBe('1');
         expect(r.out.rc).toBe('1');
-        expect(r.out.stage).toBe('arg');
-        expect(r.out.pending).toBe('');
-        expect(r.after.owner).toContain('token=t0-tok');
-        expect(r.after.owner).not.toContain('pgid=');
+        // nothing is held, so the hand-off stops at its first read of the record (stage=token) and makes nothing
+        expect(r.out.stage).toBe('token');
+        expect(r.after.lockExists).toBe(false);
+        expect(r.queueAfter).toEqual([]);
         break;
       case 'handoff-pgid-self':
       case 'handoff-twice':

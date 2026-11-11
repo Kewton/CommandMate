@@ -59,8 +59,9 @@ RUN_LOCK_HOLDER_RUN_DIR=""
 RUN_LOCK_FOREIGN_PID=""
 # A handover was tried in this shell (a second one is refused).
 RUN_LOCK_HANDED=""
-# The grace of an owner-less, empty <lock> before the head takes it out (D3); the one place run-lock names it.
-RUN_LOCK_OWNERLESS_GRACE_MS=60000
+# The grace of an owner-less, empty <lock> before the head takes it out (D3): the section's
+# LOCK_EMPTY_OWNER_GRACE_MS (PR1a-f, 600000), set once the section is loaded (below).
+RUN_LOCK_OWNERLESS_GRACE_MS=""
 # How long the parent waits to learn whether a child that "withdrew" had in fact started (seconds).
 HANDOFF_SETTLE_SEC=${HANDOFF_SETTLE_SEC:-3}
 
@@ -75,6 +76,10 @@ else
 fi
 if [ -z "$RUN_LOCK_LOAD_ERROR" ] && [ -z "${MACHINE_LOCK_LOADED:-}" ]; then
     RUN_LOCK_LOAD_ERROR="$RUN_LOCK_MACHINE_LOCK_SH did not load the lock section"
+fi
+if [ -z "$RUN_LOCK_LOAD_ERROR" ]; then
+    RUN_LOCK_OWNERLESS_GRACE_MS=${LOCK_EMPTY_OWNER_GRACE_MS:-}
+    [ -n "$RUN_LOCK_OWNERLESS_GRACE_MS" ] || RUN_LOCK_LOAD_ERROR="$RUN_LOCK_MACHINE_LOCK_SH did not define LOCK_EMPTY_OWNER_GRACE_MS"
 fi
 
 # run_lock_dir — prints the lock directory.
