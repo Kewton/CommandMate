@@ -65,6 +65,19 @@ function bash(script: string, env: Record<string, string> = {}, loader = LOADER,
 }
 
 const ACQ = `if lock_acquire_path "$LK" "$(machine_lock_queue_of "$LK")" 0; then echo acquired; else echo "refused $LOCK_HELD_BY"; fi\n`;
+/**
+ * #4288 PR1a-f (design §5.1, I1-b / I1-c): the first acquisition records only the caller's own pid,
+ * and a caller's LOCK_OWNER_EXTRA may not carry pgid=. A record naming another pid or a pgid is put by
+ * the test itself after the caller took the lock — the same token (`$LOCK_TOKEN`), the pid and the pgid
+ * given (REC_PID / REC_PGID) — so the release race and the D12 table drive the same records as before.
+ */
+const PLACE = `{ printf 'pid=%s\\nhost=%s\\ntoken=%s\\nv=1\\n' "$REC_PID" "$LOCK_HOST" "$LOCK_TOKEN"; [ -z "\${REC_PGID:-}" ] || printf 'pgid=%s\\n' "$REC_PGID"; } > "$LK/.owner-place" && mv -f "$LK/.owner-place" "$LK/owner"\n`;
+/** The sync JS / JSON form of the same: the record of `token` rewritten with the pid and pgid given. */
+const placeJson = (lock: string, rec: { pid: number; token: string; pgid?: number }) => {
+  const tmp = path.join(lock, '.owner-place');
+  fs.writeFileSync(tmp, JSON.stringify({ pid: rec.pid, host: os.hostname(), token: rec.token, acquiredAt: 0, ...(rec.pgid !== undefined ? { pgid: rec.pgid } : {}), v: 1 }));
+  fs.renameSync(tmp, path.join(lock, 'owner'));
+};
 const lockIn = () => path.join(root, 'run', 'commandmate-run.lock');
 const ownerToken = (lock: string): string | null => {
   try {
@@ -101,7 +114,6 @@ describe('1. codex-2 P2-1: a recorded pid read alive that dies before the delete
       lockPath: lock,
       timeoutMs: 0,
       token: 'T0',
-      ownerPid: dead,
       hooks: {
         pidAlive: (pid: number) => {
           if (releasing && pid === dead) {
@@ -113,6 +125,7 @@ describe('1. codex-2 P2-1: a recorded pid read alive that dies before the delete
       },
     });
     expect(a.acquired).toBe(true);
+    placeJson(lock, { pid: dead, token: 'T0' }); // §5.1: the record of T0 names the dead pid
     releasing = true;
     const result = a.release();
     return { lock, result, successor: successor as ReturnType<typeof lockSync.acquireMachineLockSync> | null };
@@ -147,9 +160,8 @@ describe('1. codex-2 P2-1: a recorded pid read alive that dies before the delete
     const dead = deadPid();
     const r = bash(
       `machine_lock_use_kv_codec
-LOCK_OWNER_PID=${dead}
 ${ACQ}T0=$LOCK_TOKEN
-eval "lock_obs_kill0_real() $(declare -f lock_obs_kill0 | sed 1d)"
+REC_PID=${dead}; ${PLACE}eval "lock_obs_kill0_real() $(declare -f lock_obs_kill0 | sed 1d)"
 lock_obs_kill0() {
   if [ "$1" = pid ] && [ "$2" = ${dead} ]; then
     bash -c "set -u; . '${loader}'; machine_lock_use_kv_codec; LOCK_WANT_TOKEN=T2; lock_acquire_path '$LK' \\"\\$(machine_lock_queue_of '$LK')\\" 0 && echo successor-acquired >&2" >/dev/null
@@ -187,7 +199,8 @@ describe('2. codex-2 P2-2: the initial record (no handOff) is judged by its grou
   it('sync JS: ownerPid not the caller, its live group on record → deferred, the lock stays', () => {
     const lock = lockIn();
     const g = liveGroup();
-    const r = lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, token: 'T0', ownerPid: g, pgid: g });
+    const r = lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, token: 'T0' });
+    placeJson(lock, { pid: g, token: 'T0', pgid: g }); // §5.1: the record put by the test
     expect(r.release()).toBe('deferred');
     expect(ownerToken(lock)).toBe('T0');
   });
@@ -203,7 +216,7 @@ describe('2. codex-2 P2-2: the initial record (no handOff) is judged by its grou
   it('bash (the same scene; bash judged every record\'s group already): deferred', () => {
     const lock = lockIn();
     const g = liveGroup();
-    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_PID=${g}\nLOCK_OWNER_EXTRA=pgid=${g}\n${ACQ}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
+    const r = bash(`machine_lock_use_kv_codec\n${ACQ}REC_PID=${g}; REC_PGID=${g}; ${PLACE}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=deferred']);
     expect(fs.existsSync(lock)).toBe(true);
   });
@@ -251,11 +264,12 @@ describe('3. the table (D12 / §1.14): one invariant, the same rows for bash and
       lockPath: lock,
       timeoutMs: 0,
       token: 'T0',
-      ...(via === 'initial' && p !== 'self' ? { ownerPid: p } : {}),
-      ...(via === 'initial' && g !== null ? { pgid: g } : {}),
+      ...(via === 'initial' && p === 'self' && g !== null ? { pgid: g } : {}),
       hooks: { fault: (point: string) => (faulting && pid === 'unknown' && point === 'pid' ? 'EPERM' : undefined) },
     });
     expect(r.acquired).toBe(true);
+    // §5.1: an initial record of another pid is put by the test (the first acquisition records its own).
+    if (via === 'initial' && p !== 'self') placeJson(lock, { pid: p, token: 'T0', ...(g !== null ? { pgid: g } : {}) });
     const tokens = ['T0'];
     if (via === 'handOff') {
       const handed = r.handOff(p === 'self' ? process.pid : p, g as number);
@@ -278,11 +292,12 @@ describe('3. the table (D12 / §1.14): one invariant, the same rows for bash and
     const p = pidOf(pid);
     const g = groupOf(group);
     const pidSh = p === 'self' ? '$$' : String(p);
-    const init = via === 'initial' ? `${p === 'self' ? '' : `LOCK_OWNER_PID=${p}\n`}${g !== null ? `LOCK_OWNER_EXTRA=pgid=${g}\n` : ''}` : '';
+    // §5.1: an initial record naming another pid or a pgid is put by the test after its own acquisition.
+    const init = via === 'initial' && (p !== 'self' || g !== null) ? `REC_PID=${pidSh}; REC_PGID=${g ?? ''}; ${PLACE}` : '';
     const hand = via === 'handOff' ? `lock_hand_off "$LK" "$LOCK_TOKEN" ${pidSh} ${g}; T1=$LHO_TOKEN; echo "stage=[$LHO_STAGE]"\n` : 'echo "stage=[]"\n';
     const r = bash(
       `machine_lock_use_kv_codec
-${init}${ACQ}T0=$LOCK_TOKEN; T1=
+${ACQ}${init}T0=$LOCK_TOKEN; T1=
 ${hand}[ "$PID_KIND" != unknown ] || CM_VERIFY_TEST_OBS_FAULT="pid=EPERM"
 lock_release_held "$LK"; echo "held=$LRH_RESULT"
 CM_VERIFY_TEST_OBS_FAULT=
@@ -328,14 +343,14 @@ describe('4. the caller\'s own group (pid = pgid = the caller: merge-pr\'s pgid:
 
   it('bash: pid = pgid = $$ is released though the group cannot be shown empty', () => {
     const lock = lockIn();
-    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}CM_VERIFY_TEST_OBS_FAULT=group=EPERM\nlock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
+    const r = bash(`machine_lock_use_kv_codec\n${ACQ}REC_PID=$$; REC_PGID=$$; ${PLACE}CM_VERIFY_TEST_OBS_FAULT=group=EPERM\nlock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released']);
     expect(fs.existsSync(lock)).toBe(false);
   });
 
   it('negative (bash): the same unknown group under the caller\'s pid but another pgid → deferred', () => {
     const lock = lockIn();
-    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$(( $$ + 1 ))"\n${ACQ}CM_VERIFY_TEST_OBS_FAULT=group=EPERM\nlock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
+    const r = bash(`machine_lock_use_kv_codec\n${ACQ}REC_PID=$$; REC_PGID=$(( $$ + 1 )); ${PLACE}CM_VERIFY_TEST_OBS_FAULT=group=EPERM\nlock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock });
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=deferred']);
     expect(fs.existsSync(lock)).toBe(true);
   });
@@ -468,14 +483,14 @@ describe('6. PR1a-d (codex P2-1): the own-group exception and its limit (design 
    */
   it('the caller alone in its group → released', () => {
     const lock = lockIn();
-    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock }, LOADER, true);
+    const r = bash(`machine_lock_use_kv_codec\n${ACQ}REC_PID=$$; REC_PGID=$$; ${PLACE}lock_release_held "$LK"; echo "held=$LRH_RESULT"`, { LK: lock }, LOADER, true);
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released']);
     expect(fs.existsSync(lock)).toBe(false);
   });
 
   it('a child still running in the group → released (the known limit of the exception, design D12)', () => {
     const lock = lockIn();
-    const r = bash(`machine_lock_use_kv_codec\nLOCK_OWNER_EXTRA="pgid=$$"\n${ACQ}sleep 30 &\nchild=$!\nlock_release_held "$LK"; echo "held=$LRH_RESULT child=$(kill -0 $child 2>/dev/null && echo alive || echo gone)"\nkill $child`, { LK: lock }, LOADER, true);
+    const r = bash(`machine_lock_use_kv_codec\n${ACQ}REC_PID=$$; REC_PGID=$$; ${PLACE}sleep 30 &\nchild=$!\nlock_release_held "$LK"; echo "held=$LRH_RESULT child=$(kill -0 $child 2>/dev/null && echo alive || echo gone)"\nkill $child`, { LK: lock }, LOADER, true);
     expect(r.out.split('\n'), r.err).toEqual(['acquired', 'held=released child=alive']);
     expect(fs.existsSync(lock)).toBe(false);
   });

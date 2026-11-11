@@ -58,7 +58,20 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
+import * as H from './lock-owner-atomic-4288-harness';
+
+// The TS implementation's warnings are what names its refusals (corrupt, owner-exists …): read them here.
+// (A global, not an import of the harness: the harness imports machine-lock.ts, which imports the logger.)
+vi.mock('@/lib/logger', () => {
+  const g = globalThis as { __pr1afLogs?: string[] };
+  const LOGS = (g.__pr1afLogs ??= []);
+  const push = (event: string, data?: unknown) => LOGS.push(`${event} ${JSON.stringify(data ?? {})}`);
+  const logger = { warn: push, info: () => {}, error: push, debug: () => {}, withContext: () => logger };
+  return { createLogger: () => logger };
+});
 
 const REPO = path.resolve(__dirname, '../../..');
 /** The production grace of the graced callers (I3) and the fixed grace of the empty owner (I4): 10 min (PM decision 1). */
@@ -1716,21 +1729,802 @@ describe('Issue #4288 PR1a-f §4: the time-zone independent comparison PR1c call
 
 // ------------------------------------------------------------------ behaviour (the implementation contract)
 
+/*
+ * The rows driven against the three implementations (lock-owner-atomic-4288-harness.ts): every root a
+ * mkdtemp under os.tmpdir(), removed in afterEach; the processes a row starts killed there. A row's
+ * observation is made real (a live `sleep`, a dead pid, a lstart printed under another TZ=, an age set
+ * with utimes) or injected (CM_VERIFY_TEST_OBS_FAULT / hooks.fault, a `ps` shim on PATH, a pause).
+ */
+let root = '';
+const freshRoot = (): string => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr1af-4288-'));
+  return root;
+};
+afterEach(() => {
+  H.killChildren();
+  if (root) {
+    spawnSync('chmod', ['-R', 'u+rwx', root]);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  root = '';
+});
+
+const lockOfRoot = (r: string): string => H.lockPathIn(r);
+const write = (file: string, text: string): void => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, text);
+};
+/** Replace a file by a rename (a different inode under the same name). */
+const replaceFile = (file: string, text: string): void => {
+  const tmp = `${file}.repl`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, file);
+};
+const agedAll = (dir: string, ageMs: number): void => {
+  for (const n of fs.readdirSync(dir)) H.age(path.join(dir, n), ageMs);
+  H.age(dir, ageMs);
+};
+const goneDirs = (r: string): string[] => fs.readdirSync(r).filter((n) => n.startsWith('x.lock.gone-')).map((n) => path.join(r, n));
+const namesIn = (dir: string): string[] | null => (fs.existsSync(dir) ? fs.readdirSync(dir).sort() : null);
+/** The D7 records and the forms of table T use the key=value codec in bash's graced callers (supervisor.lock). */
+const kvFor = (impl: Impl, who: string): boolean => impl === 'bash' && who !== 'acquire-head-nograce';
+const LSTART_1970 = 'Thu Jan  1 00:00:00 1970';
+
+/** The setup of a cell of table T (the observation of §2.1 made real or injected). */
+function setupT(impl: Impl, form: Form, caller: Caller, obs: Obs, r: string): H.DriveOptions {
+  const lock = lockOfRoot(r);
+  const kv = kvFor(impl, caller);
+  const faults: string[] = [];
+  const o: H.DriveOptions = { tz: 'UTC' };
+  if (caller === 'acquire-behind') H.ticketAhead(r);
+  const ageMs = obs === 'alive' ? 0 : H.OLD_MS;
+  const ageFault = () => {
+    if (obs === 'unknown') faults.push('lock-owner=EIO');
+  };
+  switch (form) {
+    case 'empty-dir':
+      fs.mkdirSync(lock);
+      H.age(lock, ageMs);
+      ageFault();
+      break;
+    case 'tmp-new':
+    case 'tmp-stray':
+      write(path.join(lock, '.owner-abc'), '{"pid":1,"tok');
+      if (form === 'tmp-stray') write(path.join(lock, 'x'), '');
+      agedAll(lock, ageMs);
+      ageFault();
+      break;
+    case 'tmp-old-young':
+    case 'tmp-old': {
+      const pid = obs === 'gone' ? H.dead() : H.liveSleep();
+      write(path.join(lock, `owner.tmp.${pid}`), `pid=${pid}\n`);
+      agedAll(lock, form === 'tmp-old-young' ? 0 : H.OLD_MS);
+      if (obs === 'unknown') faults.push(`owner-tmp-pid=EPERM`);
+      if (obs === 'alive') {
+        // The pid started long before the tmp (maybe its writer): a ps shim for bash, startOf for the sync JS.
+        o.pathPrefix = H.psShim(r);
+        o.env = { FAKE_ETIME_PID: String(pid), FAKE_ETIME: '1-00:00:00' };
+        o.hooks = { startOf: (p: number) => (p === pid ? Date.now() - 86_400_000 : null) };
+      }
+      break;
+    }
+    case 'tmp-new+gone-dead':
+    case 'tmp-new+gone-alive': {
+      write(path.join(lock, '.owner-abc'), '{"pid":1,"tok');
+      agedAll(lock, form === 'tmp-new+gone-alive' ? H.OLD_MS : ageMs);
+      const alive = form === 'tmp-new+gone-alive';
+      write(path.join(r, 'x.lock.gone-111-1', 'owner'), H.recordText({ pid: alive ? process.pid : H.dead(), token: alive ? 'live-gone' : 'dead-gone', v: true }, kv));
+      faults.push(...(obs === 'unknown' ? ['lock-owner=EIO'] : []));
+      break;
+    }
+    case 'empty-owner':
+    case 'garbage-owner':
+      write(path.join(lock, 'owner'), form === 'empty-owner' ? '' : 'garbage');
+      agedAll(lock, ageMs);
+      ageFault();
+      break;
+    default: {
+      // D7 (bash only): a kv record with lstart=, read under TZ=UTC.
+      const live = H.liveSleep();
+      const pid = obs === 'gone' ? H.dead() : live;
+      if (obs === 'unknown') faults.push(`pid@${live}=EPERM`);
+      const utc = H.lstartOf(live, 'UTC');
+      const tokyo = H.lstartOf(live, 'Asia/Tokyo');
+      const now = H.iso(Date.now());
+      const rec: H.OwnerRecord = { pid, token: 'T1' };
+      switch (form) {
+        case 'lstart-match':
+          Object.assign(rec, { lstart: utc, started_at: now });
+          break;
+        case 'lstart-tz':
+          Object.assign(rec, { lstart: tokyo, started_at: now });
+          break;
+        case 'lstart-reused':
+          Object.assign(rec, { lstart: LSTART_1970, started_at: H.iso(Date.now() - 3_600_000) });
+          break;
+        case 'lstart-fails':
+          Object.assign(rec, { lstart: utc, started_at: now });
+          faults.push('lstart=EIO');
+          break;
+        case 'etime-fails':
+          Object.assign(rec, { lstart: tokyo, started_at: now });
+          faults.push('etime=EIO');
+          break;
+        case 'lstart-same-etime-fails':
+          Object.assign(rec, { lstart: utc, started_at: now });
+          faults.push('etime=EIO');
+          break;
+        case 'lstart-legacy':
+          Object.assign(rec, { lstart: tokyo });
+          break;
+        case 'lstart-legacy-reused':
+          Object.assign(rec, { lstart: LSTART_1970 });
+          break;
+      }
+      write(path.join(lock, 'owner'), H.recordText(rec, true));
+    }
+  }
+  o.fault = faults.join(' ');
+  return o;
+}
+
 describe.each(IMPLS)('Issue #4288 PR1a-f behaviour T: %s (to implement)', (impl) => {
   for (const e of ROWS.filter((r) => r.impl === impl)) {
     const now = e.cell.now ? ` [today: ${e.cell.now}]` : '';
-    it.todo(`${e.form} × ${e.caller} × ${e.obs} → ${e.cell.is} / ${lockAfter(e.cell.is)}${now}`);
+    it(`${e.form} × ${e.caller} × ${e.obs} → ${e.cell.is} / ${lockAfter(e.cell.is)}${now}`, async () => {
+      const r = freshRoot();
+      const o = setupT(impl, e.form, e.caller, e.obs, r);
+      const before = H.snapshot(r);
+      const out = await H.drive(impl, e.caller, r, o);
+      expect(out.code, out.log).toBe(e.cell.is);
+      const after = lockAfter(e.cell.is);
+      if (after === 'mine') expect(H.isMine(r), H.snapshot(r)).toBe(true);
+      else if (after === 'absent') expect(fs.existsSync(lockOfRoot(r))).toBe(false);
+      else expect(H.snapshot(r)).toBe(before);
+    }, 60000);
   }
 });
 
+/** What an interrupted acquisition left (§2.6): the names in <lock>. */
+function leftForm(lock: string): string {
+  const names = namesIn(lock);
+  if (names === null) return 'absent';
+  const tmps = names.filter((n) => n.startsWith('.owner-'));
+  const owner = names.includes('owner');
+  if (names.length === 0) return 'empty-dir';
+  if (!owner && tmps.length === names.length) return 'tmp-new';
+  if (owner) {
+    const text = fs.readFileSync(path.join(lock, 'owner'), 'utf8');
+    if (text.length === 0) return 'empty-owner';
+    if (!/"v":1|^v=1$/m.test(text)) return 'garbage-owner';
+    return tmps.length > 0 ? 'complete+tmp' : 'complete';
+  }
+  return `other:${names.join(',')}`;
+}
+
+/** Kill an acquisition of `impl` at `pause` (a real SIGKILL of the process that took it). */
+async function killAt(impl: Impl, pause: Pause, r: string, who: 'acquire-head-grace' | 'acquire-head-nograce' = 'acquire-head-nograce'): Promise<void> {
+  const lock = lockOfRoot(r);
+  const dir = fs.mkdtempSync(path.join(r, 'kill-'));
+  const reached = path.join(dir, `${pause}.reached`);
+  let child: ChildProcess;
+  if (impl === 'bash') {
+    // bash: the record in the format its reader keeps (key=value for the graced callers, JSON for the gate).
+    child = spawn('bash', ['-c', `${H.bashPrelude(who)}if lock_acquire_path "$LK" "$(machine_lock_queue_of "$LK")" 0; then echo acquired; fi\n`], {
+      stdio: 'ignore',
+      detached: true,
+      env: { ...H.bashEnv(r, {}), CM_VERIFY_TEST_HANDOFF: `pause:${pause}`, CM_VERIFY_TEST_HANDOFF_DIR: dir },
+    });
+  } else {
+    const mod = impl === 'sync' ? path.join(REPO, 'scripts/orchestrate/machine-lock-sync.mjs') : path.join(REPO, 'src/lib/verification/machine-lock.ts');
+    const call =
+      impl === 'sync'
+        ? `m.acquireMachineLockSync('x', { lockPath: ${JSON.stringify(lock)}, timeoutMs: 0, hooks: { onOwnerStage } })`
+        : `await m.acquireMachineLock('x', { root: ${JSON.stringify(r)}, timeoutMs: 0, __testHooks: { onOwnerStage } })`;
+    const script = `import fs from 'node:fs';
+const m = await import(${JSON.stringify(mod)});
+const onOwnerStage = (s) => { if (s === ${JSON.stringify(pause)}) { fs.writeFileSync(${JSON.stringify(reached)}, ''); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120000); } };
+${call};
+`;
+    const file = path.join(dir, impl === 'sync' ? 'kill.mjs' : 'kill.mts');
+    fs.writeFileSync(file, script);
+    child = impl === 'sync'
+      ? spawn(process.execPath, [file], { stdio: 'ignore', detached: true, cwd: REPO })
+      : spawn(path.join(REPO, 'node_modules/.bin/tsx'), [file], { stdio: 'ignore', detached: true, cwd: REPO });
+  }
+  H.children.push(child);
+  const end = Date.now() + 30000;
+  while (!fs.existsSync(reached) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(fs.existsSync(reached), `${impl} reached ${pause}`).toBe(true);
+  const exited = new Promise((resolve) => child.on('exit', resolve));
+  process.kill(-(child.pid as number), 'SIGKILL');
+  await exited;
+}
+
+/** Who takes out what the killed acquisition left (§2.6), on a copy of it aged past the grace. */
+async function takenBy(impl: Impl, who: 'acquire-head-grace' | 'acquire-head-nograce', from: string): Promise<string> {
+  const r = fs.mkdtempSync(path.join(root, `by-${who}-`));
+  fs.cpSync(lockOfRoot(from), lockOfRoot(r), { recursive: true });
+  agedAll(lockOfRoot(r), H.OLD_MS);
+  const young = fs.mkdtempSync(path.join(root, `young-${who}-`));
+  fs.cpSync(lockOfRoot(from), lockOfRoot(young), { recursive: true });
+  agedAll(lockOfRoot(young), 0);
+  const old = await H.drive(impl, who, r);
+  const fresh = await H.drive(impl, who, young);
+  if (old.code === 'acquired' && fresh.code === 'acquired') return 'recover-when-pid-gone';
+  if (old.code === 'acquired' && fresh.code !== 'acquired') return 'graced-head-after-grace';
+  return old.code === 'refused:taking' ? 'nobody-until-a-human' : `?${old.code}/${fresh.code}`;
+}
+
+/** The pre-PR1a-f owner create, written out (E1, E2): an empty owner first, the record after it. */
+async function killToday(impl: Impl, r: string): Promise<string> {
+  const lock = lockOfRoot(r);
+  fs.mkdirSync(lock);
+  const owner = path.join(lock, 'owner');
+  let child: ChildProcess;
+  if (impl === 'bash') {
+    const fifo = path.join(r, 'stdin.fifo');
+    spawnSync('mkfifo', [fifo]);
+    // verify-run.sh's lock_obs_create before PR1a-f: `set -C; : > owner`, then `cat >> owner`.
+    child = spawn('bash', ['-c', 'if ( export LC_ALL=C; set -C; : > "$1" ) 2>/dev/null; then cat >> "$1" < "$2"; fi', 'bash', owner, fifo], { stdio: 'ignore', detached: true });
+  } else {
+    // makeObserver().create before PR1a-f: openSync(owner, 'wx'), the fault seam, writeSync — a seam that never returns.
+    child = spawn(process.execPath, ['-e', `const fs = require('fs'); const fd = fs.openSync(${JSON.stringify(owner)}, 'wx'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120000); fs.writeSync(fd, '{}');`], { stdio: 'ignore', detached: true });
+  }
+  H.children.push(child);
+  const end = Date.now() + 10000;
+  while (!fs.existsSync(owner) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20));
+  const exited = new Promise((resolve) => child.on('exit', resolve));
+  process.kill(-(child.pid as number), 'SIGKILL');
+  await exited;
+  return leftForm(lock);
+}
+
 describe('Issue #4288 PR1a-f behaviour K: an acquisition killed at each point (design §2.6, to implement)', () => {
-  for (const k of KILL_ROWS) it.todo(`${k.impl} ${k.point} (pause ${k.pause}): leaves ${k.left}; graced ${k.byGraced}, no grace ${k.byNograce}`);
-  for (const impl of IMPLS) it.todo(`${impl} positive control: today leaves ${KILL_NOW[impl].left} — ${KILL_NOW[impl].how}`);
+  for (const k of KILL_ROWS) {
+    it(`${k.impl} ${k.point} (pause ${k.pause}): leaves ${k.left}; graced ${k.byGraced}, no grace ${k.byNograce}`, async () => {
+      const r = freshRoot();
+      await killAt(k.impl, k.pause, r);
+      // I1: whatever the point, never an empty or half owner.
+      expect(leftForm(lockOfRoot(r))).toBe(k.left);
+      if (k.byGraced !== 'no-grace-caller') {
+        let from = r;
+        if (k.impl === 'bash') {
+          from = fs.mkdtempSync(path.join(r, 'kv-'));
+          await killAt(k.impl, k.pause, from, 'acquire-head-grace');
+          expect(leftForm(lockOfRoot(from))).toBe(k.left);
+        }
+        expect(await takenBy(k.impl, 'acquire-head-grace', from)).toBe(k.byGraced);
+      }
+      expect(await takenBy(k.impl, 'acquire-head-nograce', r)).toBe(k.byNograce);
+    }, 90000);
+  }
+  for (const impl of IMPLS) {
+    it(`${impl} positive control: today leaves ${KILL_NOW[impl].left} — ${KILL_NOW[impl].how}`, async () => {
+      const r = freshRoot();
+      expect(await killToday(impl, r)).toBe(KILL_NOW[impl].left);
+      // and the K rows of the new form never do (I1)
+      expect(KILL_ROWS.filter((x) => x.impl === impl).map((x) => x.left)).not.toContain(KILL_NOW[impl].left);
+    }, 30000);
+  }
 });
+
+// ------------------------------------------------------------------ F: the failure rows driven
+
+type FRun = { code: string; check?: () => void };
+type FDriver = (impl: Impl, caller: FCaller, r: string) => Promise<FRun>;
+
+/** The who of a caller of table F that drive() knows. */
+const whoOf = (caller: FCaller): H.Who => (caller === 'ticket-retire' ? 'acquire-head-nograce' : (caller as H.Who));
+const recordFor = (impl: Impl, caller: FCaller, rec: H.OwnerRecord): string => H.recordText(rec, kvFor(impl, caller));
+const ACQ_CALL = 'if lock_acquire_path "$LK" "$(machine_lock_queue_of "$LK")" 0; then echo acquired; else echo "refused $LOCK_HELD_BY"; fi\n';
+
+/** A fault-only row: the lock left as `left` says. */
+const faultRow =
+  (fault: string, left: (r: string) => void): FDriver =>
+  async (impl, caller, r) => {
+    const out = await H.drive(impl, whoOf(caller), r, { fault });
+    return { code: out.code, check: () => left(r) };
+  };
+const absentLock = (r: string) => expect(fs.existsSync(lockOfRoot(r))).toBe(false);
+
+/** Something done between the tmp's write and its publish / after the publish (§2.6's pauses), in each implementation. */
+async function atStage(impl: Impl, caller: FCaller, r: string, stage: Pause, act: () => void, o: H.DriveOptions = {}): Promise<H.Outcome> {
+  if (impl === 'bash') return H.driveBashPaused(whoOf(caller), r, { [stage]: act }, o);
+  return H.drive(impl, whoOf(caller), r, { ...o, hooks: { ...(o.hooks ?? {}), onOwnerStage: (s: string) => (s === stage ? act() : undefined) } });
+}
+
+/** A successor's owner of each kind put where the publish's link lands (F7-F10). */
+const SUCCESSOR = JSON.stringify({ pid: process.pid, host: H.HOST, token: 'succ', acquiredAt: 0, v: 1 });
+const publishMeets =
+  (kind: 'file' | 'dir' | 'dirlink' | 'filelink'): FDriver =>
+  async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    const owner = path.join(lock, 'owner');
+    const outsideDir = path.join(r, 'outside-dir');
+    const outsideFile = path.join(r, 'outside-file');
+    fs.mkdirSync(outsideDir);
+    fs.writeFileSync(outsideFile, 'outside');
+    const out = await atStage(impl, caller, r, 'owner-tmp-written', () => {
+      if (kind === 'file') fs.writeFileSync(owner, SUCCESSOR);
+      if (kind === 'dir') fs.mkdirSync(owner);
+      if (kind === 'dirlink') fs.symlinkSync(outsideDir, owner);
+      if (kind === 'filelink') fs.symlinkSync(outsideFile, owner);
+    });
+    return {
+      code: out.code,
+      check: () => {
+        expect(namesIn(lock)).toEqual(['owner']); // own tmp removed, nothing else made
+        if (kind === 'file') expect(fs.readFileSync(owner, 'utf8')).toBe(SUCCESSOR);
+        if (kind === 'dir') expect(fs.readdirSync(owner)).toEqual([]);
+        if (kind === 'dirlink') expect([fs.lstatSync(owner).isSymbolicLink(), fs.readdirSync(outsideDir)]).toEqual([true, []]);
+        if (kind === 'filelink') expect([fs.lstatSync(owner).isSymbolicLink(), fs.readFileSync(outsideFile, 'utf8')]).toEqual([true, 'outside']);
+      },
+    };
+  };
+
+/** An owner-less <lock> holding `names`, aged; the graced callers and the guard. */
+const ownerless = (r: string, names: string[], ageMs = H.OLD_MS): string => {
+  const lock = lockOfRoot(r);
+  fs.mkdirSync(lock);
+  for (const n of names) write(path.join(lock, n), 'x');
+  agedAll(lock, ageMs);
+  return lock;
+};
+
+/** bash D7: a kv record of `rec` under the lock, read under `tz` (default UTC). */
+const d7 = (r: string, rec: H.OwnerRecord): void => write(path.join(lockOfRoot(r), 'owner'), H.recordText(rec, true));
+const d7Row =
+  (make: (live: number) => { rec: H.OwnerRecord; fault?: string; tz?: string; pathPrefix?: string; env?: Record<string, string> }): FDriver =>
+  async (impl, caller, r) => {
+    const live = H.liveSleep();
+    const m = make(live);
+    d7(r, m.rec);
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r, { fault: m.fault, tz: m.tz ?? 'UTC', pathPrefix: m.pathPrefix, env: m.env });
+    return { code: out.code, check: () => (out.code === 'acquired' || out.code === 'removed' ? undefined : expect(H.snapshot(r)).toBe(before)) };
+  };
+
+/** The record of a dead holder that a head recovers (the put-back rows). */
+const deadRecord = (impl: Impl, caller: FCaller, r: string, token = 'T0'): void =>
+  write(path.join(lockOfRoot(r), 'owner'), recordFor(impl, caller, { pid: H.dead(), token, v: true }));
+
+const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
+  'F1-mkdir-lock': faultRow('mkdir-lock=EACCES', absentLock),
+  'F2-tmp-create-exists': faultRow('owner-create=EEXIST', absentLock),
+  'F3-tmp-create-other': faultRow('owner-create=EACCES', absentLock),
+  'F4-tmp-write': faultRow('owner-write=ENOSPC', absentLock),
+  'F5-tmp-write-short': faultRow('owner-write-short=EIO', absentLock),
+  'F6-tmp-close': faultRow('owner-close=EIO', absentLock),
+  'F7-link-exists-file': publishMeets('file'),
+  'F8-link-exists-dir': publishMeets('dir'),
+  'F9-link-exists-dirlink': publishMeets('dirlink'),
+  'F10-link-exists-filelink': publishMeets('filelink'),
+  'F11-link-enoent': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    // This <lock> (and the tmp) taken out by an older cleaner, and a successor's K1 <lock> in its place.
+    const out = await atStage(impl, caller, r, 'owner-tmp-written', () => {
+      fs.rmSync(lock, { recursive: true, force: true });
+      fs.mkdirSync(lock);
+    });
+    return { code: out.code, check: () => expect(namesIn(lock)).toEqual([]) };
+  },
+  'F12-link-other': faultRow('owner-publish=EPERM', absentLock),
+  'F13-readback-unknown-same-inode': faultRow('owner-readback=EIO', absentLock),
+  'F14-readback-unknown-other-inode': async (impl, caller, r) => {
+    const owner = path.join(lockOfRoot(r), 'owner');
+    const out = await atStage(impl, caller, r, 'owner-linked', () => replaceFile(owner, SUCCESSOR), { fault: 'owner-readback=EIO' });
+    return { code: out.code, check: () => expect([namesIn(lockOfRoot(r)), fs.readFileSync(owner, 'utf8')]).toEqual([['owner'], SUCCESSOR]) };
+  },
+  'F15-readback-not-ours': async (impl, caller, r) => {
+    const owner = path.join(lockOfRoot(r), 'owner');
+    const succ = recordFor(impl, caller, { pid: process.pid, token: 'succ', v: true });
+    const out = await atStage(impl, caller, r, 'owner-linked', () => replaceFile(owner, succ));
+    return { code: out.code, check: () => expect([namesIn(lockOfRoot(r)), fs.readFileSync(owner, 'utf8')]).toEqual([['owner'], succ]) };
+  },
+  'F16-tmp-unlink-after-publish': async (impl, caller, r) => {
+    const out = await H.drive(impl, whoOf(caller), r, { fault: 'owner-unlink=EIO' });
+    return { code: out.code, check: () => expect(namesIn(lockOfRoot(r))?.map((n) => n.replace(/^\.owner-.*/, '.owner-<token>'))).toEqual(['.owner-<token>', 'owner']) };
+  },
+  'F17-undo-tmp-unlink': faultRow('owner-write=EIO owner-unlink=EIO', (r) => expect(namesIn(lockOfRoot(r))?.map((n) => n.replace(/^\.owner-.*/, '.owner-<token>'))).toEqual(['.owner-<token>'])),
+  'F18-undo-lock-rmdir': faultRow('owner-write=EIO lock-rmdir=EIO', (r) => expect(namesIn(lockOfRoot(r))).toEqual([])),
+  ...Object.fromEntries(
+    (
+      [
+        ['F19-cleanup-list', 'lock-list=EIO'],
+        ['F20-cleanup-tmp-lstat', 'ownerless-tmp-lstat=EIO'],
+        ['F21-cleanup-mtime', 'ownerless-mtime=EIO'],
+        ['F22-cleanup-tmp-unlink', 'ownerless-tmp-unlink=EIO'],
+        ['F25-cleanup-rmdir-other', 'ownerless-rmdir=EACCES'],
+      ] as const
+    ).map(([id, fault]) => [
+      id,
+      (async (impl, caller, r) => {
+        ownerless(r, ['.owner-abc']);
+        const before = H.snapshot(r);
+        const out = await H.drive(impl, whoOf(caller), r, { fault });
+        // F25 fails at the rmdir, after the rule's own unlink of the temporaries: the <lock> stays, owner-less.
+        return { code: out.code, check: () => (id === 'F25-cleanup-rmdir-other' ? expect(H.snapshot(r)).toBe('|<no owner>') : expect(H.snapshot(r)).toBe(before)) };
+      }) satisfies FDriver,
+    ]),
+  ),
+  'F23-cleanup-tmp-unlink-enoent': async (impl, caller, r) => {
+    ownerless(r, ['.owner-abc']);
+    // An older cleaner removed the name between the listing and this unlink.
+    const bashPre = `eval "lock_obs_unlink_real() $(declare -f lock_obs_unlink | sed 1d)"\nlock_obs_unlink() { if [ "$1" = ownerless-tmp-unlink ]; then rm -f "$2"; echo absent; return 0; fi; lock_obs_unlink_real "$@"; }\n`;
+    const fault = (point: string, target: string) => {
+      if (point !== 'ownerless-tmp-unlink') return undefined;
+      fs.rmSync(target, { force: true });
+      return 'ENOENT';
+    };
+    const out = await H.drive(impl, whoOf(caller), r, { bashPre, hooks: { fault } });
+    return { code: out.code, check: () => (caller === 'guard-head' ? absentLock(r) : expect(H.isMine(r)).toBe(true)) };
+  },
+  'F24-cleanup-rmdir-notempty': async (impl, caller, r) => {
+    const lock = ownerless(r, ['.owner-abc']);
+    const pub = recordFor(impl, caller, { pid: process.pid, token: 'pub', v: true });
+    // Someone published between the unlink of the temporaries and the rmdir.
+    const bashPre = `eval "lock_rmdir_errno_real() $(declare -f lock_rmdir_errno | sed 1d)"\nlock_rmdir_errno() { if [ "$1" = ownerless-rmdir ]; then printf '%s' '${pub}' > "$2/owner"; fi; lock_rmdir_errno_real "$@"; }\n`;
+    const fault = (point: string) => {
+      if (point === 'ownerless-rmdir') fs.writeFileSync(path.join(lock, 'owner'), pub);
+      return undefined;
+    };
+    const out = await H.drive(impl, whoOf(caller), r, { bashPre, hooks: { fault } });
+    return { code: out.code, check: () => expect([namesIn(lock), fs.readFileSync(path.join(lock, 'owner'), 'utf8')]).toEqual([['owner'], pub]) };
+  },
+  'F26-old-tmp-pid-unknown': async (impl, caller, r) => {
+    const pid = H.liveSleep();
+    ownerless(r, [`owner.tmp.${pid}`]);
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r, { fault: 'owner-tmp-pid=EPERM' });
+    return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
+  },
+  'F27-old-tmp-pid-alive': async (impl, caller, r) => {
+    const pid = H.liveSleep();
+    ownerless(r, [`owner.tmp.${pid}`]);
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r, {
+      pathPrefix: H.psShim(r),
+      env: { FAKE_ETIME_PID: String(pid), FAKE_ETIME: '1-00:00:00' },
+      hooks: { startOf: (p: number) => (p === pid ? Date.now() - 86_400_000 : null) },
+    });
+    return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
+  },
+  'F28-old-tmp-pid-not-numeric': async (impl, caller, r) => {
+    ownerless(r, ['owner.tmp.abc']);
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r);
+    return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
+  },
+  'F29-empty-owner-young': async (impl, caller, r) => {
+    write(path.join(lockOfRoot(r), 'owner'), '');
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r);
+    return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
+  },
+  'F30-empty-owner-move': async (impl, caller, r) => {
+    write(path.join(lockOfRoot(r), 'owner'), '');
+    agedAll(lockOfRoot(r), H.OLD_MS);
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r, { fault: 'empty-owner-move=EIO' });
+    return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
+  },
+  'F31-empty-owner-aside-written': async (impl, caller, r) => {
+    write(path.join(lockOfRoot(r), 'owner'), '');
+    agedAll(lockOfRoot(r), H.OLD_MS);
+    const rec = recordFor(impl, caller, { pid: process.pid, token: 'late', v: true });
+    // The writer finished its write while the head moved the <lock> aside (or an older head moved a live successor's).
+    const writeAside = () => {
+      for (const g of goneDirs(r)) fs.writeFileSync(path.join(g, 'owner'), rec);
+    };
+    const out =
+      impl === 'bash'
+        ? await H.driveBashPaused(whoOf(caller), r, { 'empty-owner-moved': writeAside })
+        : await H.drive(impl, whoOf(caller), r, { hooks: { onRecover: (s: string) => (s === 'empty-owner-moved' ? writeAside() : undefined) } });
+    return {
+      code: out.code,
+      check: () => {
+        const gs = goneDirs(r);
+        expect(gs).toHaveLength(1);
+        expect(fs.readFileSync(path.join(gs[0], 'owner'), 'utf8')).toBe(rec);
+      },
+    };
+  },
+  'F32-kill0-other': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: H.iso(Date.now()) }, fault: `pid@${live}=EIO` })),
+  'F33-ps-lstart': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'UTC'), started_at: H.iso(Date.now()) }, fault: 'lstart=EIO' })),
+  'F34-lstart-only-60s': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'XXX-0:01') }, tz: 'UTC0' })),
+  'F35-ps-etime': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: H.iso(Date.now()) }, fault: 'etime=EIO' })),
+  'F36-etime-malformed': async (impl, caller, r) => {
+    const codes: string[] = [];
+    for (const bad of ['bad:bad', '1:99', '-1:00', '1:2:3:4']) {
+      const sub = fs.mkdtempSync(path.join(r, 'm-'));
+      const live = H.liveSleep();
+      d7(sub, { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: H.iso(Date.now()) });
+      codes.push((await H.drive(impl, whoOf(caller), sub, { tz: 'UTC', pathPrefix: H.psShim(sub), env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: bad } })).code);
+    }
+    expect(new Set(codes).size).toBe(1);
+    return { code: codes[0] };
+  },
+  'F37-ticket-etime-malformed': async (impl, caller, r) => {
+    // A live ticket ahead whose pid's etime is malformed: never read as "just started" (it would be pid-reused).
+    const live = H.liveSleep();
+    const q = H.queueIn(r);
+    fs.mkdirSync(q, { recursive: true });
+    const now = Date.now();
+    fs.writeFileSync(path.join(q, '000000000001'), JSON.stringify({ pid: live, host: H.HOST, token: 'ahead', createdAt: now - 60_000, deadline: now + 3_600_000 }));
+    const shim = H.psShim(r);
+    const out = await H.drive(impl, 'acquire-head-nograce', r, { pathPrefix: shim, env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: 'bad:bad' } });
+    const ticket = JSON.parse(fs.readFileSync(path.join(q, '000000000001'), 'utf8'));
+    return { code: out.code === 'refused:queue' && ticket.done !== true ? 'kept' : `retired(${out.code})` };
+  },
+  'F38-lstart-only-reused': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: LSTART_1970 } })),
+  'F39-started-at-unparsed': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: 'not-a-date' } })),
+  'F40-started-at-carry-over': async (impl, caller, r) => {
+    // A moved-aside record WITH started_at= (a dead pid, read first and reclaimed), then the lock's own
+    // record WITHOUT one (a live pid, another lstart string): the second read must not inherit the first's time.
+    const live = H.liveSleep();
+    write(path.join(r, 'x.lock.gone-111-1', 'owner'), H.recordText({ pid: H.dead(), token: 'old', lstart: LSTART_1970, started_at: '2026-01-01T00:00:00Z' }, true));
+    d7(r, { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo') });
+    const out = await H.drive(impl, whoOf(caller), r, { tz: 'UTC' });
+    return { code: out.code, check: () => expect(fs.readFileSync(path.join(lockOfRoot(r), 'owner'), 'utf8')).toContain('token=T1') };
+  },
+  'F41-hostname': d7Row((live) => ({ rec: { pid: live, token: 'T1', host: 'another-host.example', lstart: LSTART_1970, started_at: '2026-01-01T00:00:00Z' } })),
+  'F42-clock-back': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: H.iso(Date.now() - 10_000) } })),
+  'F43-launchd-reader': async (impl, caller, r) => {
+    const codes: string[] = [];
+    for (const tz of ['UTC', 'Asia/Tokyo']) {
+      const sub = fs.mkdtempSync(path.join(r, 'l-'));
+      const live = H.liveSleep();
+      // written under env -i (TZ, LC_ALL unset), as launchd starts the supervisor
+      const lstart = (spawnSync('env', ['-i', 'PATH=/usr/bin:/bin:/usr/sbin:/sbin', 'ps', '-o', 'lstart=', '-p', String(live)], { encoding: 'utf8' }).stdout ?? '').trim();
+      d7(sub, { pid: live, token: 'T1', lstart, started_at: H.iso(Date.now()) });
+      codes.push((await H.drive(impl, whoOf(caller), sub, { tz })).code);
+    }
+    expect(new Set(codes).size).toBe(1);
+    return { code: codes[0] };
+  },
+  'F44-pid-gone-group-alive': d7Row((live) => ({ rec: { pid: H.dead(), token: 'T1', pgid: live, lstart: LSTART_1970, started_at: '2026-01-01T00:00:00Z' } })),
+  'F45-handoff-lstart': async (_impl, _caller, r) => {
+    const out = spawnSync(
+      'bash',
+      ['-c', `${H.bashPrelude('acquire-head-grace')}${ACQ_CALL}cp "$LK/owner" "$LK/../before"\nLOCK_OWNER_EXTRA='lstart=Thu Jan  1 00:00:00 1970'\nlock_hand_off "$LK" "$LOCK_TOKEN" $$ $$; echo "stage=$LHO_STAGE"`],
+      { encoding: 'utf8', env: H.bashEnv(r, {}) },
+    );
+    const stage = /stage=(.*)/.exec(out.stdout ?? '')?.[1] ?? '';
+    return { code: stage === 'lstart' ? 'failed' : `handed(${stage})`, check: () => expect(fs.readFileSync(path.join(lockOfRoot(r), 'owner'), 'utf8')).toBe(fs.readFileSync(path.join(r, 'before'), 'utf8')) };
+  },
+  'F46-garbage-owner': async (impl, caller, r) => {
+    write(path.join(lockOfRoot(r), 'owner'), 'garbage');
+    agedAll(lockOfRoot(r), H.OLD_MS);
+    const out = await H.drive(impl, whoOf(caller), r);
+    return {
+      code: out.code,
+      check: () => {
+        expect(fs.readFileSync(path.join(lockOfRoot(r), 'owner'), 'utf8')).toBe('garbage');
+        expect(out.log).toMatch(/machine-lock-owner-corrupt /);
+        expect(out.log).toContain(path.join(lockOfRoot(r), 'owner'));
+      },
+    };
+  },
+  'F47-guard-absent-check': async (impl, caller, r) => {
+    ownerless(r, []);
+    const out = await H.drive(impl, whoOf(caller), r, { fault: 'lock-list=EIO' });
+    return { code: out.code, check: () => expect(out.unknown).toContain('point=lock-list') };
+  },
+  'F48-guard-not-head': async (impl, caller, r) => {
+    H.ticketAhead(r);
+    ownerless(r, []);
+    const out = await H.drive(impl, 'guard-behind', r);
+    return { code: out.code, check: () => expect(namesIn(lockOfRoot(r))).toEqual([]) };
+  },
+  'F49-old-k1-resumed': async (impl, caller, r) => {
+    const lock = ownerless(r, []);
+    const out = await H.drive(impl, whoOf(caller), r);
+    // The older writer resumes past its K1: its owner.tmp.<pid> and `mv -f` replace the successor's owner.
+    if (out.code === 'acquired') {
+      fs.writeFileSync(path.join(lock, 'owner.tmp.1'), 'pid=1\n');
+      fs.renameSync(path.join(lock, 'owner.tmp.1'), path.join(lock, 'owner'));
+    }
+    return { code: out.code, check: () => (out.code === 'acquired' ? expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toBe('pid=1\n') : absentLock(r)) };
+  },
+  'F50-pr1a-writer-ticket-expired': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    write(path.join(lock, 'owner'), '');
+    agedAll(lock, H.OLD_MS);
+    const out = await H.drive(impl, whoOf(caller), r);
+    // The PR1a writer resumes: `cat >>` by name lands in the successor's owner (unparsable from now on).
+    if (out.code === 'acquired') fs.appendFileSync(path.join(lock, 'owner'), '{"pid":1}\n');
+    return { code: out.code, check: () => (out.code === 'acquired' ? expect(H.isMine(r)).toBe(true) : absentLock(r)) };
+  },
+  'F51-pre-pid-stop': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    write(path.join(lock, 'owner'), '');
+    agedAll(lock, H.OLD_MS);
+    const fd = fs.openSync(path.join(lock, 'owner'), 'a'); // the older writer, opened and stopped
+    const out = await H.drive(impl, whoOf(caller), r);
+    fs.writeSync(fd, '{"pid":1}'); // resumed: its write lands in the inode taken out
+    fs.closeSync(fd);
+    return { code: out.code, check: () => (out.code === 'acquired' ? expect(H.isMine(r)).toBe(true) : absentLock(r)) };
+  },
+  'F52-old-tmp-pid-reused': async (impl, caller, r) => {
+    const pid = H.liveSleep(); // started now: after the tmp's mtime + 2 s
+    ownerless(r, [`owner.tmp.${pid}`]);
+    const out = await H.drive(impl, whoOf(caller), r);
+    return { code: out.code, check: () => (caller === 'guard-head' ? absentLock(r) : expect(H.isMine(r)).toBe(true)) };
+  },
+  'F53-old-tmp-pid-etime': async (impl, caller, r) => {
+    const pid = H.liveSleep();
+    ownerless(r, [`owner.tmp.${pid}`]);
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r, { pathPrefix: H.psShim(r), env: { FAKE_ETIME_PID: String(pid), FAKE_ETIME: 'bad:bad' }, hooks: { startOf: () => null } });
+    return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
+  },
+  'F54-started-at-60s': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'XXX-0:01'), started_at: H.iso(Date.now()) }, tz: 'UTC0' })),
+  'F55-old-tmp-clock-back': async (impl, caller, r) => {
+    const pid = H.liveSleep(); // the writer itself, whose clock stepped back: it reads as reused (F52)
+    const lock = ownerless(r, [`owner.tmp.${pid}`]);
+    const out = await H.drive(impl, whoOf(caller), r);
+    // Resumed: its `mv -f` finds no tmp, and its failure path `rm -rf "$dir"` removes the successor's <lock>.
+    if (out.code === 'acquired') fs.rmSync(lock, { recursive: true, force: true });
+    return { code: out.code, check: () => absentLock(r) };
+  },
+  'F56-owner-pid-not-self': async (impl, caller, r) => {
+    const other = H.liveSleep();
+    const out = await H.drive(impl, whoOf(caller), r, { bashPre: `LOCK_OWNER_PID=${other}\n`, syncOptions: { ownerPid: other } });
+    return { code: out.code, check: () => expect([fs.existsSync(lockOfRoot(r)), fs.existsSync(H.queueIn(r)), out.log]).toEqual([false, false, expect.stringContaining('machine-lock-owner-pid-not-self')]) };
+  },
+  'F58-undo-restore-exists': async (impl, caller, r) => {
+    const out = await H.drive(impl, whoOf(caller), r, { fault: 'owner-readback=EIO owner-undo-lstat=EIO owner-undo-link=EEXIST' });
+    return {
+      code: out.code,
+      check: () => {
+        expect(namesIn(lockOfRoot(r))?.map((n) => n.replace(/^\.undo-.*/, '.undo-<token>'))).toEqual(['.undo-<token>']);
+        expect(out.log).toContain('machine-lock-undo-restore-failed');
+      },
+    };
+  },
+  'F59-undo-rename-enoent': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    const out = await atStage(impl, caller, r, 'owner-linked', () => fs.rmSync(path.join(lock, 'owner')), { fault: 'owner-readback=EIO' });
+    return { code: out.code, check: () => expect(namesIn(lock)).toEqual([]) };
+  },
+  'F60-undo-rename-other': async (impl, caller, r) => {
+    const out = await H.drive(impl, whoOf(caller), r, { fault: 'owner-readback=EIO owner-undo-rename=EIO' });
+    return { code: out.code, check: () => expect(namesIn(lockOfRoot(r))).toEqual(['owner']) };
+  },
+  'F62-release-head-paused': async (impl, _caller, r) => {
+    const lock = lockOfRoot(r);
+    write(path.join(lock, 'owner'), H.recordText({ pid: H.dead(), token: 'T0', v: true }, impl === 'bash'));
+    const succ = H.recordText({ pid: process.pid, token: 'T2', v: true }, impl === 'bash');
+    // Between its judgement and its removal, another head recovered the dead record and took the lock (T2).
+    const successor = () => {
+      fs.rmSync(lock, { recursive: true, force: true });
+      write(path.join(lock, 'owner'), succ);
+    };
+    let code: string;
+    if (impl === 'bash') {
+      const out = await H.driveBashPaused('guard-head', r, { 'release-head-judged': successor }, { call: 'lock_release_as_head "$LK" "$(machine_lock_queue_of "$LK")" 0 T0; echo "result $LRAH_RESULT"\n' });
+      code = out.code;
+    } else {
+      code = lockSync.releaseAsHead(lock, ['T0'], { timeoutMs: 0, hooks: { onRecover: (s: string) => (s === 'before-move' ? successor() : undefined) } }).result;
+    }
+    return { code, check: () => expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toBe(succ) };
+  },
+  'F63-guard-absent': async (impl, caller, r) => {
+    const out = await H.drive(impl, whoOf(caller), r);
+    return { code: out.code, check: () => absentLock(r) };
+  },
+  'F64-guard-restore-failed': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    deadRecord(impl, caller, r);
+    const succ = recordFor(impl, caller, { pid: process.pid, token: 'T2', v: true });
+    const successor = () => replaceFile(path.join(lock, 'owner'), succ);
+    const out =
+      impl === 'bash'
+        ? await H.driveBashPaused('guard-head', r, { 'recover-only-judged': successor }, { fault: 'restore-mkdir=EACCES' })
+        : await H.drive(impl, 'guard-head', r, { fault: 'restore-mkdir=EACCES', hooks: { onRecover: (s: string) => (s === 'before-move' ? successor() : undefined) } });
+    return {
+      code: out.code,
+      check: () => {
+        absentLock(r);
+        expect(goneDirs(r).map((g) => fs.readFileSync(path.join(g, 'owner'), 'utf8'))).toEqual([succ]);
+      },
+    };
+  },
+  'F65-clock-back-during-observation': async (impl, caller, r) => {
+    const live = H.liveSleep();
+    d7(r, { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: H.iso(Date.now()) });
+    const out = await H.drive(impl, whoOf(caller), r, { fault: 'etime=ECLOCK', tz: 'UTC' });
+    // The same answer from a real step back between the two reads of the clock (lock_now_ms replaced).
+    const direct = spawnSync(
+      'bash',
+      ['-c', `${H.bashPrelude('acquire-head-grace')}C="$LK.clock"; : > "$C"\nlock_now_ms() { if [ -s "$C" ]; then echo 970100; else echo 1 > "$C"; echo 1000000; fi; }\nmachine_lock_pid_identity ${live} 'Thu Jan  1 00:00:00 1970' 110000`],
+      { encoding: 'utf8', env: H.bashEnv(r, {}) },
+    );
+    return { code: out.code, check: () => expect((direct.stdout ?? '').trim()).toBe('unknown:etime:ECLOCK') };
+  },
+  'F66-owner-without-v': async (impl, caller, r) => {
+    write(path.join(lockOfRoot(r), 'owner'), recordFor(impl, caller, { pid: process.pid, token: 'older', v: false }));
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r);
+    return {
+      code: out.code,
+      check: () => {
+        expect(H.snapshot(r)).toBe(before);
+        expect(out.log).toContain(impl === 'ts' ? 'machine-lock-legacy-writer' : `machine-lock-legacy-writer ${lockOfRoot(r)} pid=${process.pid}`);
+      },
+    };
+  },
+  'F67-put-back-link-exists': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    deadRecord(impl, caller, r);
+    const succ = recordFor(impl, caller, { pid: process.pid, token: 'T2', v: true });
+    const w = recordFor(impl, caller, { pid: process.pid, token: 'W', v: true });
+    // The record moved aside is a successor's (T2: its token differs), and while the put-back checks, W publishes.
+    const moved = () => {
+      for (const g of goneDirs(r)) replaceFile(path.join(g, 'owner'), succ);
+    };
+    const publish = () => write(path.join(lock, 'owner'), w);
+    const out =
+      impl === 'bash'
+        ? await H.driveBashPaused(whoOf(caller), r, { 'recover-moved': moved, 'restore-mkdir': publish })
+        : await H.drive(impl, whoOf(caller), r, { hooks: { onRecover: (s: string) => (s === 'moved' ? moved() : s === 'restore-mkdir' ? publish() : undefined) } });
+    return {
+      code: out.code,
+      check: () => {
+        expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toBe(w);
+        expect(goneDirs(r).map((g) => fs.readFileSync(path.join(g, 'owner'), 'utf8'))).toEqual([succ]);
+        expect(out.log).toContain('machine-lock-restore-failed');
+      },
+    };
+  },
+  'F68-owner-fields-reserved': async (impl, caller, r) => {
+    const out = await H.drive(impl, whoOf(caller), r, { bashPre: 'LOCK_OWNER_EXTRA=pgid=4242\n', syncOptions: { ownerFields: { pid: 4242 } } });
+    return { code: out.code, check: () => expect([fs.existsSync(lockOfRoot(r)), out.log]).toEqual([false, expect.stringContaining('machine-lock-owner-field-reserved')]) };
+  },
+  'F70-clock-back-offset-by-reader-stop': async (impl, caller, r) => {
+    const live = H.liveSleep();
+    // started 100 s, acquired 110 s; now_before 1000 s; the clock back to 970 s, BSD etime 870 s; the reader stops 30 s: now_after 1000 s.
+    d7(r, { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: '1970-01-01T00:01:50Z' });
+    const out = await H.drive(impl, whoOf(caller), r, {
+      tz: 'UTC',
+      bashPre: 'lock_now_ms() { echo 1000000; }\n',
+      pathPrefix: H.psShim(r),
+      env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: '14:30' },
+    });
+    return { code: out.code };
+  },
+};
+
+/** Rows not driven here, with why (reported by the implementation contract). */
+const F_NOT_DRIVEN: Partial<Record<Failure, string>> = {
+  'F57-undo-paused-after-rename': 'needs a pause inside the undo (between its rename and its check): no pause of §2.6 is there',
+  'F61-undo-successor-before-rename': 'needs the parent $$ of the pipeline to die between the read-back and the rename while a successor recovers: an interleaving of three processes',
+  'F69-new-k1-writer-into-emptied-name': 'outside P0: two writers stopped past 10 min interleaved with a third — named, not fixed',
+  'F71-old-writer-in-generic-shell': 'outside P0, mixed: an older copy in a generic shell — ended by the restart of §6.1 (c), nothing to drive in this repository',
+};
 
 describe.each(IMPLS)('Issue #4288 PR1a-f failure directions F: %s (design §3, to implement)', (impl) => {
   for (const c of F_CASES.filter((x) => x.impl === impl)) {
     const limit = c.row.limit ? ` [limit ${c.row.limit.kind}: ${c.row.limit.until}]` : '';
-    it.todo(`${c.id} ${c.caller}${c.row.point ? ` @${c.row.point}` : ''}: ${c.row.direction} → ${c.result} / ${c.row.left}${limit} — ${c.row.note}`);
+    const name = `${c.id} ${c.caller}${c.row.point ? ` @${c.row.point}` : ''}: ${c.row.direction} → ${c.result} / ${c.row.left}${limit} — ${c.row.note}`;
+    const driver = F_DRIVERS[c.id];
+    if (!driver) {
+      it.todo(name);
+      continue;
+    }
+    it(name, async () => {
+      const r = freshRoot();
+      const run = await driver(impl, c.caller, r);
+      expect(run.code).toBe(c.result);
+      run.check?.();
+    }, 60000);
   }
+});
+
+describe('Issue #4288 PR1a-f: the rows of F not driven are named with why', () => {
+  it('every F row has a driver or a reason', () => {
+    for (const id of FAILURES) expect([id, F_DRIVERS[id] !== undefined || F_NOT_DRIVEN[id] !== undefined]).toEqual([id, true]);
+    for (const id of Object.keys(F_NOT_DRIVEN)) expect(F_DRIVERS[id as Failure]).toBeUndefined();
+  });
 });
