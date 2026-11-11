@@ -63,8 +63,22 @@ export function lstartOf(pid: number, tz: string | null): string {
 
 export const iso = (ms: number): string => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace('.000Z', 'Z');
 
+/**
+ * The one fixed reference of a row (#4288 PR1a-f impl-8): every time the row writes into a fixture
+ * (started_at=, mtimes, ticket fields) and the T0 of the injected observation are made from it, so a delay
+ * between building the fixture and driving the call (a loaded machine) cannot move one against the other.
+ * `pinBase()` is the only real clock read of a row's setup (called by the test's root maker); without a pin
+ * (the other test files) `base()` is the real clock at the call, as before.
+ */
+let pinnedBase: number | null = null;
+export const pinBase = (): number => (pinnedBase = Date.now());
+export const unpinBase = (): void => {
+  pinnedBase = null;
+};
+export const base = (): number => pinnedBase ?? Date.now();
+
 export function age(file: string, ageMs: number): void {
-  const t = (Date.now() - ageMs) / 1000;
+  const t = (base() - ageMs) / 1000;
   fs.utimesSync(file, t, t);
 }
 
@@ -134,7 +148,7 @@ export const queueIn = (root: string): string => path.join(root, 'x.queue');
 export function ticketAhead(root: string): void {
   const q = queueIn(root);
   fs.mkdirSync(q, { recursive: true });
-  const now = Date.now();
+  const now = base();
   fs.writeFileSync(path.join(q, '000000000001'), JSON.stringify({ pid: process.pid, host: HOST, token: 'ahead', createdAt: now, deadline: now + 3_600_000 }));
 }
 
@@ -236,7 +250,7 @@ function withObservation(root: string, o: DriveOptions): DriveOptions {
   const real = path.join(dir, 'ps-real');
   const reads = path.join(dir, 'clock-reads');
   for (const f of [count, real, reads]) fs.writeFileSync(f, '');
-  const t0 = Date.now(); // the setup's one read; the implementation under test never reads the real clock
+  const t0 = base(); // the row's fixed reference: the fixtures' times are made from the same one
   const step = o.observation === 'slow' ? 1500 : 0;
   const size = (f: string): number => fs.statSync(f).size;
   const clock = (): number => {
