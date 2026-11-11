@@ -16,7 +16,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
@@ -734,16 +734,34 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Render
   // ========================================================================
 
+  // Issue #4227 (G-4, G10): the hand-off before ending, drawn in one place for PC and phone and
+  // kept over the page's Loading (a first read of another worktree, a page made again): keyed
+  // beside the content, it is the same instance whichever branch below draws the content. It
+  // never kills by itself: its stop runs `stopForHandoff`, the existing stop, from its handler.
+  const withHandoff = (content: React.ReactNode): React.ReactElement => (
+    <>
+      <Fragment key="content">{content}</Fragment>
+      <SessionHandoffDialog
+        key="handoff"
+        isOpen={handoffTarget !== null}
+        worktreeId={worktreeId}
+        target={handoffTarget}
+        onClose={closeHandoff}
+        onStop={stopForHandoff}
+      />
+    </>
+  );
+
   // Handle loading state
   if (loading) {
-    return <LoadingIndicator />;
+    return withHandoff(<LoadingIndicator />);
   }
 
   // Issue #2498: an expired session is a re-login, not an error. It used to
   // reach ErrorDisplay carrying the HTML parse failure, which told the user
   // nothing they could act on.
   if (isAuthExpired) {
-    return (
+    return withHandoff(
       <SessionExpiredNotice
         message={tWorktree('editor.sessionExpired')}
         loginLabel={tAuth('login.submitButton')}
@@ -759,7 +777,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // still the right answer. A poll that fails once a worktree is on screen no
   // longer lands here; it raises `isReconnecting` and the screen stays put.
   if (error) {
-    return <ErrorDisplay message={error} onRetry={handleRetry} />;
+    return withHandoff(<ErrorDisplay message={error} onRetry={handleRetry} />);
   }
 
   // Issue #956: the kill-session confirmation dialog must show the active
@@ -789,7 +807,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
   // Render desktop layout
   if (!isMobile) {
-    return (
+    return withHandoff(
       // [#2345] The file-link scope wraps the PC layout too: its split builds
       // one frozen prop object for both the chat surface and the History
       // column, so neither can be handed `worktreePath` from here directly.
@@ -872,9 +890,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           isKillPending={isKillPending}
           onKillCancel={handleKillCancel}
           onKillConfirm={handleKillConfirm}
-          handoffTarget={handoffTarget}
-          onHandoffClose={closeHandoff}
-          onHandoffStop={stopForHandoff}
           moveTarget={moveTarget}
           isMoveDialogOpen={isMoveDialogOpen}
           onMoveCancel={handleMoveCancel}
@@ -904,7 +919,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // the composer fly off-screen on Android Chrome). Falls back to `100%` (fill
   // the AppShell main) until visualViewport is measured / on unsupported
   // browsers, preserving the pre-#1166 full-height behavior.
-  return (
+  return withHandoff(
     <ErrorBoundary componentName="WorktreeDetailRefactored">
       {/* Issue #2213: the screen-scoped seam between the chat surface inside the
           terminal tab and the composer docked below it. The surface registers its
@@ -1372,15 +1387,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                 </div>
               </div>
             </Modal>
-            {/* Issue #4227 (G-4, Mobile): the hand-off before ending — the same dialog
-                and the same existing stop as PC; it never kills by itself. */}
-            <SessionHandoffDialog
-              isOpen={handoffTarget !== null}
-              worktreeId={worktreeId}
-              target={handoffTarget}
-              onClose={closeHandoff}
-              onStop={stopForHandoff}
-            />
             {/* [Issue #162] Move Dialog (Mobile) */}
             {moveTarget && (
               <MoveDialog

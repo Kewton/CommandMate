@@ -2,17 +2,21 @@
  * The hand-off's units over the real page drawing the dialog again (Issue #4227 G-PR2 pr2e,
  * design `mem-ui-4227.md` §4.1.1; PM Claude pr2d P2-1, codex review-4227-pr2c P2-1).
  *
- * The real `WorktreeDetailRefactored` (PC: in `WorktreeDetailDesktop`; phone: its own branch),
- * the real hook and the real `SessionHandoffDialog`. A decide whose result is unknown:
+ * The real `WorktreeDetailRefactored` (G10: it draws the dialog in one place, outside its Loading
+ * and its PC / phone branches), the real hook and the real `SessionHandoffDialog`, under `Shell`,
+ * which draws the page under another parent per layout as `AppShell` does (the page is made anew
+ * on a turn). A decide whose result is unknown:
  *
- * - PC ↔ phone (`useIsMobile` turns: a turn of the device, a change of width): the dialog is a
- *   new instance in the other branch; the unit stays and no second request is made.
- * - a switch of worktree whose detail is not yet read: the page draws its Loading (the dialog
- *   is taken out) and then B's page; the unit stays, shown as A's ("foreign"), and no request is
- *   made on B. B's read is held here so the Loading is seen.
+ * - PC ↔ phone (`useIsMobile` turns: a turn of the device, a change of width): the page and the
+ *   dialog are new instances under the other parent; the unit stays and no second request is made.
+ * - a switch of worktree whose detail is not yet read: the page draws its Loading and then B's
+ *   page; G10: the dialog stays drawn over the Loading. The unit stays, shown as A's ("foreign"),
+ *   and no request is made on B. B's read is held here so the Loading is seen.
  *
  * Positive control: `rule.perInstance` empties the store when the dialog is taken out (the
- * units back in the component's life, as before pr2e): the unit is lost on both.
+ * units back in the component's life, as before pr2e): the unit is lost on both (G10: the
+ * Loading no longer takes the dialog out, so the second is the page made anew on B, as Next
+ * keys it by its `[id]`).
  * Negative control: nothing held, the switch closes the hand-off.
  *
  * next-intl is the global echo mock: labels read as their keys.
@@ -20,7 +24,7 @@
  * @vitest-environment jsdom
  */
 
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -289,6 +293,22 @@ afterEach(() => {
   window.history.replaceState({}, '', '/');
 });
 
+/**
+ * The page as `AppShell` draws it: under another parent for PC and phone, so a turn makes the page
+ * anew. `pageKey` stands for Next's key of the page by its `[id]`.
+ */
+function Shell({ id, pageKey }: { id: string; pageKey?: string }) {
+  const mobile = useSyncExternalStore(
+    (listener: () => void) => {
+      env.listeners.add(listener);
+      return () => env.listeners.delete(listener);
+    },
+    () => env.mobile
+  );
+  const page = <WorktreeDetailRefactored key={pageKey} worktreeId={id} />;
+  return mobile ? <div data-testid="shell-phone">{page}</div> : <section data-testid="shell-pc">{page}</section>;
+}
+
 /** The width falls under the breakpoint (a turn of the device, a resize). */
 function turnToPhone(): void {
   act(() => {
@@ -301,7 +321,7 @@ const creates = () => posts.filter((post) => post.path === '/mem/handoff/request
 
 /** A's page, its End, the hand-off, and (if `unknown`) a decide whose result is unknown. */
 async function openOnA(unknown: boolean) {
-  const view = render(<WorktreeDetailRefactored worktreeId={A} />);
+  const view = render(<Shell id={A} />);
   fireEvent.click(await screen.findByTestId('desktop-kill-session'));
   fireEvent.click(await screen.findByTestId('handoff-approve-p1'));
   if (unknown) {
@@ -326,9 +346,12 @@ describe('[#4227 pr2e] the real page draws the dialog again: the unit stays', ()
   it('a switch to B through the Loading (B’s read held) while unknown: kept as A’s, no request on B', async () => {
     const view = await openOnA(true);
     holdB = true;
-    view.rerender(<WorktreeDetailRefactored worktreeId={B} />);
+    view.rerender(<Shell id={B} />);
     await waitFor(() => expect(releaseB).not.toBeNull());
-    await waitFor(() => expect(screen.queryByTestId('handoff-dialog')).toBeNull());
+    // G10: the Loading no longer takes the dialog out — it is drawn, as A's, while B is read.
+    await waitFor(() => expect(screen.queryByTestId('desktop-kill-session')).toBeNull());
+    expect(screen.getByTestId('handoff-dialog')).toBeTruthy();
+    expect(screen.getByTestId('handoff-foreign')).toBeTruthy();
     await act(async () => releaseB?.());
     expect(await screen.findByTestId('handoff-foreign')).toBeTruthy();
     expect(screen.getByTestId('handoff-pending')).toBeTruthy();
@@ -340,7 +363,7 @@ describe('[#4227 pr2e] the real page draws the dialog again: the unit stays', ()
   it('(negative control) nothing held: the switch through the Loading closes the hand-off', async () => {
     const view = await openOnA(false);
     holdB = true;
-    view.rerender(<WorktreeDetailRefactored worktreeId={B} />);
+    view.rerender(<Shell id={B} />);
     await waitFor(() => expect(releaseB).not.toBeNull());
     await act(async () => releaseB?.());
     await screen.findByTestId('desktop-kill-session');
@@ -360,7 +383,7 @@ describe('[#4227 pr2e] the real page draws the dialog again: the unit stays', ()
     const view = await openOnA(true);
     rule.perInstance = true;
     holdB = true;
-    view.rerender(<WorktreeDetailRefactored worktreeId={B} />);
+    view.rerender(<Shell id={B} pageKey={B} />);
     await waitFor(() => expect(releaseB).not.toBeNull());
     await act(async () => releaseB?.());
     await waitFor(() => expect(posts.filter((post) => post.worktree === B && post.path === '/mem/handoff/requests')).toHaveLength(1));

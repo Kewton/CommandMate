@@ -62,6 +62,9 @@
  * 3. The paths named at the call sites are exactly `HANDOFF_CLOSE_PATHS` (no path declared and
  *    unused, none used and undeclared).
  * 4. The pages hand the dialog the hook's `closeHandoff` (directly, or as `onHandoffClose`).
+ *    G10 (G-PR4): the dialog has one host, `WorktreeDetailRefactored` (outside its Loading and its
+ *    PC / phone branches); the PC page draws none. That one host's `onClose` is the hook's
+ *    `closeHandoff`, which asks the rule (`closeHandoffBy('dialog')`) — `checkPageHosts`.
  *
  * Positive controls: copies of the real sources under `os.tmpdir()` with one way round the rule
  * added (an effect that clears the target, a button that calls `onClose`, a reopening that clears
@@ -507,8 +510,8 @@ function isPropertyName(node: ts.Identifier): boolean {
  * take a value from the store — the dialog and the page's hook. Fixed here: a new reader (a wrapper
  * of a writer, a bridge, an alias) fails until it is named. pr2i (PM Claude pr2h P3-1, codex
  * review-4227-pr2g P2-3): a reader is a file that takes a value; the PC page
- * (`WorktreeDetailDesktop.tsx`) takes a type only (`import type { SessionStopResult }`), so it is
- * not one, and a value import there fails.
+ * (`WorktreeDetailDesktop.tsx`) took a type only (`import type { SessionStopResult }`; since G10 it
+ * draws no dialog and takes nothing of the store), so it is not one, and a value import there fails.
  */
 const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK, 'src/components/mem/MemItemsPanel.tsx']);
 
@@ -1010,6 +1013,23 @@ function usedPaths(...sources: string[]): Set<string> {
   return used;
 }
 
+/**
+ * G10: the pages' hosts of the dialog. The PC page draws none; the page draws one, whose `onClose`
+ * is the hook's `closeHandoff` (the close through the rule, checked in the hook by the test below).
+ */
+function checkPageHosts(desktop: string, refactored: string): string[] {
+  const problems: string[] = [];
+  const hosts = (source: string) => source.match(/<SessionHandoffDialog\b[\s\S]*?\/>/g) ?? [];
+  const pc = hosts(desktop);
+  if (pc.length !== 0) problems.push(`WorktreeDetailDesktop.tsx draws the dialog ${pc.length} time(s) (the page's one host draws it)`);
+  const page = hosts(refactored);
+  if (page.length !== 1) problems.push(`WorktreeDetailRefactored.tsx draws the dialog ${page.length} time(s), not once`);
+  for (const host of page) {
+    if (!/\bonClose=\{closeHandoff\}/.test(host)) problems.push('WorktreeDetailRefactored.tsx: the dialog\'s onClose is not the hook\'s closeHandoff');
+  }
+  return problems;
+}
+
 function checkPaths(dialog: string, hook: string): string[] {
   const used = usedPaths(dialog, hook);
   const declared = new Set<string>(HANDOFF_CLOSE_PATHS);
@@ -1072,8 +1092,8 @@ describe('[#4227 pr2d] every path that closes the hand-off asks the one rule', (
   it('the pages hand the dialog the hook’s closeHandoff', () => {
     const desktop = read(PAGES[0]);
     const refactored = read(PAGES[1]);
-    expect(desktop).toMatch(/<SessionHandoffDialog[\s\S]*?onClose=\{onHandoffClose\}/);
-    expect(refactored).toMatch(/onHandoffClose=\{closeHandoff\}/);
+    // G10: one host (the page's), outside its Loading and its PC / phone branches.
+    expect(checkPageHosts(desktop, refactored)).toEqual([]);
     expect(refactored).toMatch(/<SessionHandoffDialog[\s\S]*?onClose=\{closeHandoff\}/);
     expect(read(HOOK)).toMatch(/const closeHandoff = useCallback\(\(\): void => \{\s*closeHandoffBy\('dialog'\);/);
   });
@@ -1103,6 +1123,17 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
     expect(checkHook(hook)).toEqual([]);
     expect(checkPaths(dialog, hook)).toEqual([]);
     expect(checkStore(mutated(STORE, 'function markClosed(token: HandoffOpeningToken): void {', 'function markClosed(token: HandoffOpeningToken): void  {'))).toEqual([]);
+  });
+
+  it('G10: a second host on the PC page, or the page’s host closed past the rule, fails', () => {
+    const desktop = mutated(PAGES[0], '        {/* [Issue #162] Move Dialog */}', '        <SessionHandoffDialog isOpen={false} worktreeId={worktreeId} target={null} onClose={onKillCancel} onStop={async () => ({ ok: true })} />\n        {/* [Issue #162] Move Dialog */}');
+    expect(checkPageHosts(desktop, read(PAGES[1])).join('\n')).toMatch(/WorktreeDetailDesktop.tsx draws the dialog 1 time/);
+    const bypass = mutated(PAGES[1], 'onClose={closeHandoff}', 'onClose={handleKillCancel}');
+    expect(checkPageHosts(read(PAGES[0]), bypass).join('\n')).toMatch(/onClose is not the hook's closeHandoff/);
+  });
+
+  it('(negative control) G10: the pages as they are pass checkPageHosts', () => {
+    expect(checkPageHosts(read(PAGES[0]), read(PAGES[1]))).toEqual([]);
   });
 
   it('a worktree switch that clears the target directly (the code before pr2d) fails', () => {
