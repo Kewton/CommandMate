@@ -154,6 +154,10 @@ file_uid() {
 PRODUCT_LOCK_RESULT=""
 PRODUCT_LOCK_ERROR=""
 PRODUCT_LOCK_KIND=""
+# I3's grace (PR1a-f): an owner-less, empty <lock> (or one holding only temporaries) older than this is the
+# head's to take out. Its own constant — the same 600000 ms as I4's LOCK_EMPTY_OWNER_GRACE_MS (an owner of
+# 0 bytes) but not borrowed from it, so changing I4 does not move this one.
+PRODUCT_LOCK_OWNERLESS_GRACE_MS=600000
 # How long the guard waits for the head of the queue; the supervisor waits for nobody.
 PRODUCT_LOCK_GUARD_BUDGET_SEC="${CM_PRODUCT_LOCK_GUARD_BUDGET_SEC:-10}"
 
@@ -167,6 +171,7 @@ product_lock_queue_dir() {
 
 # product_lock_reject <fn> <reason> — 2, nothing touched.
 product_lock_reject() {
+    PRODUCT_LOCK_KIND=""
     PRODUCT_LOCK_RESULT=rejected
     PRODUCT_LOCK_ERROR="$1: $2"
     return 2
@@ -175,7 +180,7 @@ product_lock_reject() {
 # The lock section holds one set of options per shell: put ours down on every call.
 product_lock_setup() {
     machine_lock_use_kv_codec
-    LOCK_OWNERLESS_GRACE_MS=$LOCK_EMPTY_OWNER_GRACE_MS
+    LOCK_OWNERLESS_GRACE_MS=$PRODUCT_LOCK_OWNERLESS_GRACE_MS
     LOCK_WANT_TOKEN=""
     LOCK_OWNER_PID=""
     LOCK_PENDING_TOKEN=""
@@ -235,8 +240,14 @@ product_lock_message() {
         unk) printf 'busy: %s cannot be judged (%s); not taken\n' "$dir" "$unknown" ;;
         eperm) printf 'busy: %s held by pid %s, which belongs to another user (EPERM): the holder may have died and its pid been reused — check and remove %s by hand (#4288 PR1a-f)\n' "$dir" "${LPO_PID:-?}" "$dir" ;;
         queue) printf 'busy: queue ticket %s (pid %s) was ahead for %s; this supervisor withdrew its ticket and did not judge the lock\n' "${blocker##*/}" "$(lock_json_field "$blocker" pid 2>/dev/null)" "$dir" ;;
-        corrupt) printf 'busy: %s/owner is not a lock record (pid= or token= missing: an acquisition died while writing it) — not taken; remove %s by hand when no supervisor runs (#4288 PR1a-f)\n' "$dir" "$dir" ;;
-        tmp) printf 'busy: %s has no owner but holds %s (an older supervisor died while taking it) — not taken; remove %s by hand (#4288 PR1a-f)\n' "$dir" "$(find "$dir" -maxdepth 1 -name 'owner.tmp.*' 2>/dev/null | sed 's|.*/||' | tr '\n' ' ' | sed 's/ $//')" "$dir" ;;
+        corrupt)
+            if [ -f "$dir/owner" ] && [ ! -s "$dir/owner" ]; then
+                printf 'busy: %s/owner is empty (an acquisition is writing it, or died after creating it) — not taken now; the head takes an empty owner out once it is older than the grace (PR1a-f I4, 10 minutes)\n' "$dir"
+            else
+                printf 'busy: %s/owner is not a lock record (pid= or token= missing: an acquisition died while writing it) — nobody removes it; look at it and remove %s by hand when no supervisor runs (#4288 PR1a-f I4)\n' "$dir" "$dir"
+            fi
+            ;;
+        tmp) printf 'busy: %s has no owner but holds %s (an acquisition is making it, or an older supervisor died while taking it) — not taken now; the head takes it out once <lock> and the temporaries are older than the grace (10 minutes) and the writer pid is shown gone (PR1a-f I3); if it stays longer, look at it and remove %s by hand\n' "$dir" "$(find "$dir" -maxdepth 1 -name 'owner.tmp.*' 2>/dev/null | sed 's|.*/||' | tr '\n' ' ' | sed 's/ $//')" "$dir" ;;
         host) printf 'busy: %s held by pid %s on host %s, not this host %s — not judged; if the host name changed, remove %s by hand (#4288 PR1a-f)\n' "$dir" "${LPO_PID:-?}" "${LPO_HOST:-?}" "$LOCK_HOST" "$dir" ;;
         aside) printf 'busy: %s is held by a record moved aside (%s) that could not be put back\n' "$dir" "$gone" ;;
         rec) printf 'busy: %s pid %s holds %s\n' "${LPO_LABEL:-supervisor}" "${LPO_PID:-?}" "$dir" ;;
@@ -251,6 +262,7 @@ product_lock_acquire() {
     local dir lstart unknown blocker gone
     PRODUCT_LOCK_RESULT=""
     PRODUCT_LOCK_ERROR=""
+    PRODUCT_LOCK_KIND=""
     [ $# -eq 1 ] || { product_lock_reject product_lock_acquire "takes exactly one argument (the label)"; return; }
     [ -n "${PRODUCT_BASE:-}" ] || { product_lock_reject product_lock_acquire "PRODUCT_BASE is empty"; return; }
     case "$1" in
@@ -285,6 +297,7 @@ product_lock_acquire() {
 product_lock_release() {
     PRODUCT_LOCK_RESULT=""
     PRODUCT_LOCK_ERROR=""
+    PRODUCT_LOCK_KIND=""
     [ $# -eq 0 ] || { product_lock_reject product_lock_release "takes no argument"; return; }
     [ -n "${PRODUCT_BASE:-}" ] || { product_lock_reject product_lock_release "PRODUCT_BASE is empty"; return; }
     [ "${BASH_SUBSHELL:-0}" = 0 ] || { product_lock_reject product_lock_release "called from a subshell"; return; }
@@ -307,6 +320,7 @@ product_lock_recover_only() {
     local unknown
     PRODUCT_LOCK_RESULT=""
     PRODUCT_LOCK_ERROR=""
+    PRODUCT_LOCK_KIND=""
     [ $# -eq 0 ] || { product_lock_reject product_lock_recover_only "takes no argument"; return; }
     [ -n "${PRODUCT_BASE:-}" ] || { product_lock_reject product_lock_recover_only "PRODUCT_BASE is empty"; return; }
     [ -z "${LOCK_HELD_PATH:-}" ] || { product_lock_reject product_lock_recover_only "this shell holds the lock (the guard never acquires)"; return; }
@@ -317,17 +331,29 @@ product_lock_recover_only() {
         return 0
     fi
     product_lock_setup
+    LOCK_GONE_PENDING=""
     lock_recover_only "$(product_lock_dir)" "$(product_lock_queue_dir)" "$PRODUCT_LOCK_GUARD_BUDGET_SEC"
     PRODUCT_LOCK_RESULT=$LRO_RESULT
+    # A put-back that failed leaves no <lock> and a moved-aside record that still holds: lock_recover_only
+    # reads the missing <lock> as "absent", but the lock is held by the record aside (design §3 F25/F26: kept).
+    if [ "$LRO_RESULT" = absent ] && [ -n "${LOCK_GONE_PENDING-}" ]; then PRODUCT_LOCK_RESULT=kept; fi
     unknown=${LRO_UNKNOWN-}
     case "$LRO_RESULT" in
-        kept | not-head)
+        kept)
             product_lock_kind "$unknown" "" ""
             case "$PRODUCT_LOCK_KIND" in
                 eperm | unk | corrupt | tmp | host)
                     PRODUCT_LOCK_ERROR=$(product_lock_message "$PRODUCT_LOCK_KIND" "$unknown" "" "")
                     ;;
             esac
+            ;;
+        not-head)
+            # Behind a live ticket the guard did not judge the lock: its record is not read for a message,
+            # only an unknown the wait itself noted (the queue could not be listed) is told.
+            if [ -n "$unknown" ]; then
+                product_lock_kind "$unknown" "" ""
+                PRODUCT_LOCK_ERROR=$(product_lock_message "$PRODUCT_LOCK_KIND" "$unknown" "" "")
+            fi
             ;;
     esac
     return 0

@@ -67,7 +67,7 @@ supervisor.lock だけの性質（事実）:
 | `absent` | `<base>/supervisor.lock` が無い（退避も無い） |
 | `stale-old` | canonical が無く、旧版の退避 `<lock>.stale.*` だけがある。新しい読み手は読まない（`.gone-` の形でない。`verify-run.sh:1277-1278`）ので、全セルが `absent` と同じ（P3-6） |
 | `ownerless` | `<lock>` はあるが owner が無く、中が空 |
-| `ownerless-tmp` | `<lock>` に owner が無く、旧版の `owner.tmp.<pid>` だけがある（旧版が `mkdir` と `mv` の間で死んだ。`lib.sh:173-176`）。`lock_ownerless_empty` は `no`（`verify-run.sh:1305`）で誰も取らない。**PR1a-f で塞ぐ**。それまでは文面 `tmp` で人に知らせ、消さない |
+| `ownerless-tmp` | `<lock>` に owner が無く、旧版の `owner.tmp.<pid>` だけがある（旧版が `mkdir` と `mv` の間で死んだ。`lib.sh:173-176`）。PR1a-f I3 で、`<lock>` と tmp が猶予（600000 ms）より古く、tmp の名の pid が死んでいると示されたときだけ先頭が `lock_expire_ownerless` で tmp ごと取り除く（観測 `gone`、`ownerless` × `gone` と同じ行方）。猶予内、または書き手が生きている・不明のときは待ち、文面 `tmp`（`unknown` は `unk`）で知らせる。猶予を過ぎても残るなら人が見て消す（文面の最後） |
 | `corrupt` | owner はあるが `pid=` か `token=` が無い。生じ方は 2 つ: 取得中の SIGKILL（`lock_obs_create` が `: >` で作ってから `cat >>` で書く間。`verify-run.sh:1014-1020`。F17）と、後始末の `rm -f owner` の失敗（F15）。**PR1a-f で塞ぐ**（tmp→`mv` に戻す）。それまでは文面 `corrupt` で人に知らせ、消さない |
 | `own` | 呼び手の token の記録（pid＝取得した main シェルの `$$`、`lstart=`・`started_at=`・`v=1` あり、`pgid=` 無し） |
 | `other-plain` | 他の token の記録で `lstart=` が無いか空（F7）。D7 の関数を呼ばず pid だけで判定 |
@@ -165,7 +165,9 @@ supervisor.lock だけの性質（事実）:
 | ownerless / alive | refused(taking) / unchanged | refused(queue) | kept | 拒否 | none | kept / unchanged | not-head | 不可能 |
 | ownerless / gone | **acquired / mine** | refused(queue) | kept | 拒否 | none | **removed / absent** | not-head | 不可能 |
 | ownerless / unknown | refused(unk) / unchanged | refused(queue) | kept | 拒否 | none | kept(unk) / unchanged | not-head | 不可能 |
-| ownerless-tmp / 3 値とも | refused(tmp) / unchanged | refused(queue) | kept | 拒否 | none | kept(tmp) / unchanged | not-head | 不可能 |
+| ownerless-tmp / alive | refused(tmp) / unchanged | refused(queue) | kept | 拒否 | none | kept(tmp) / unchanged | not-head | 不可能 |
+| ownerless-tmp / gone | **acquired / mine** | refused(queue) | kept | 拒否 | none | **removed / absent** | not-head | 不可能 |
+| ownerless-tmp / unknown | refused(unk) / unchanged | refused(queue) | kept | 拒否 | none | kept(unk) / unchanged | not-head | 不可能 |
 | corrupt / 3 値とも | refused(corrupt) / unchanged | refused(queue) | kept | 拒否 | none | kept(corrupt) / unchanged | not-head | 不可能 |
 | own / alive | 拒否 | 拒否 | **released / absent** | 拒否 | none | 不可能 | 不可能 | 不可能 |
 | own / gone | 拒否 | 拒否 | 不可能 | 拒否 | none | 不可能 | 不可能 | 不可能 |
@@ -200,7 +202,7 @@ supervisor.lock だけの性質（事実）:
 - `acquire-behind` は札の前に生きた札がある（`la_blocker`）ので `mkdir`・回収・判定に進まず、期限の枝で札を取り下げて 1 を返す（`:1697-1704`）。形に依らず `refused(queue)`（S12、Claude 5 P2-2 への個別の決定）
 - `aside` × `alive`・`unknown` は先頭が退避を戻す（`lock_restore_from_gone` `:1327`）。取得は断り、ガードは `kept`
 - `ownerless` × `gone` × `acquire-head` は先頭の `rmdir`（`lock_expire_ownerless` `:1501-1535`）→ `mkdir`。既存の試験 `:603-608` の期待のまま
-- `ownerless-tmp` は `lock_ownerless_empty` が `no` なので `lock_expire_ownerless` が何もせず、`mkdir` が EEXIST、owner が missing で `LOCK_HELD_BY` が空のまま期限の枝で断る（`:1301-1306`・`:1610`）。ガードは `LRO_RESULT=kept`（`:2027-2031`）
+- `ownerless-tmp`（PR1a-f I3 で表を直した。PR1c の 3 回目までは「3 値とも `kept`、誰も取らない」としていた）: `lock_ownerless_temps_only` が tmp だけと示し、`<lock>` と tmp が猶予より古く tmp の名の pid が死んでいれば先頭の `lock_expire_ownerless` が取り除く（`gone`: 取得は `mkdir` へ進み `acquired / mine`、ガードは `removed / absent`）。猶予内は `alive`（待つ、`tmp`）、mtime・lstat・書き手の判定が読めなければ `unknown`（`unk`）
 
 ### 2.3 表と不変条件の突き合わせ（試験の雛形で表そのものに掛ける）
 
@@ -209,14 +211,14 @@ supervisor.lock だけの性質（事実）:
 1. `acquired` は `acquire-head` だけで、行方は `mine`（S2）
 2. `*-behind` の行の行方は全て `unchanged`、`acquire-behind` は全て `refused(queue) / unchanged / retired`（S1・S3・S12）
 3. 観測が `unknown` の行は、行方が `unchanged` か `restored` で、結果が `acquired`・`released`・`removed` でない（S3）
-4. `own` 以外の記録を消す（行方が `absent`・`mine`）のは `acquire-head`・`guard-head` の `gone` だけで、`corrupt`・`ownerless-tmp`・`other-host` は誰も消さない（S3・決定 1）
+4. `own` 以外の記録を消す（行方が `absent`・`mine`）のは `acquire-head`・`guard-head` の `gone` だけで、`corrupt`・`other-host` は誰も消さず、`ownerless-tmp` は `gone`（猶予超・書き手の死）だけを消す（S3・決定 1、PR1a-f I3）
 5. `own` を消すのは `release-main` × `alive` だけ（S4。1 回目の D5 経由の 2 行は不可能に移った）
 6. `release-subshell` と D5 の行は 1 つも無い（S5・S6）
 7. `release-unheld` は全て `none / unchanged / none-taken`（S4 の 1 回きり）
 8. 解放は `own` 以外の記録を動かさない（S4）
 9. 失敗で消す側（`own-only`）は F13・F14 だけ（§3）
 10. 取得の `refused` には文面があり、文面を持つのは `refused` とガードの `kept` だけ（S11）
-11. 人が消す形（`corrupt`・`ownerless-tmp`・`other-host`）は、`acquire-head`・`guard-head` の全観測でその文面を出す（決定 1）。人に知らせる文面の失敗の行は記録を消さない
+11. 人が消す形（`corrupt`・`other-host`）は、`acquire-head`・`guard-head` の全観測でその文面を出す（決定 1）。`ownerless-tmp` は `alive` で `tmp`、`unknown` で `unk`、`gone` は先頭が取り除く（PR1a-f I3）。人に知らせる文面の失敗の行は記録を消さない
 12. `restored` は `aside` の形だけ、ガードは `mine` にしない（S8、PM Claude P3-7）
 13. §2 の行は、取った札を必ず `retired` にし、解放は札を取らない（S8・S12）
 14. `stale-old` の列は `absent` と同じ（§4、P3-6）
@@ -242,17 +244,17 @@ supervisor.lock だけの性質（事実）:
 | F12 | `owner-create`（`:1010`） | EEXIST・他の記録を読み直した | 消さない | refused(rec) | — | — |
 | F13 | 同上 | 開けない（10+i） | **自分の `mkdir` だけ戻す** | refused(unk) / unchanged | — | — |
 | F14 | 同上・`owner-readback` | 開いた後の書き込みの失敗（40+i）・読み直しが不明（70+i） | **自分の owner と `<lock>` だけ戻す** | refused(unk) / unchanged | — | — |
-| F15 | F13・F14 の後始末の `rm -f owner`（`fault:owner-unlink`） | 失敗 | 消さない | refused(unk) / own-half-left | — | —（残りは `corrupt` の形になり文面 `corrupt`） |
-| F16 | 同上の `rmdir <lock>`（`fault:lock-rmdir`） | 失敗 | 消さない | refused(unk) / own-empty-left | — | —（PR1a-f I3 の本番の猶予の後に先頭が `rmdir`） |
-| F17 | 取得中の SIGKILL（`: >owner` と `cat >>owner` の間） | — | 消さない | refused(corrupt)（次の取得） | kept(corrupt) | —（PR1a-f で tmp→`mv` に戻して塞ぐ） |
-| F18 | 旧版が `mkdir` と `mv` の間で死んだ（`owner.tmp.<pid>` だけ） | — | 消さない | refused(tmp) | kept(tmp) | —（PR1a-f で回収） |
+| F15 | F13・F14 の後始末の `rm -f owner`（`fault:owner-unlink`） | 失敗 | 消さない | refused(unk) / own-half-left | — | —（PR1a-f の tmp→`link` で、残るのは owner でなくこの取得の `.owner-<token>` だけ。owner が無いので `corrupt` ではなく I3 が猶予の後に取り除く。PR1c の 3 回目までは「`corrupt` の形」としていた） |
+| F16 | 同上の `rmdir <lock>`（`fault:lock-rmdir`） | 失敗 | 消さない | refused(unk) / own-empty-left | — | —（空の `<lock>` が残る。PR1a-f I3 の本番の猶予の後に先頭が `rmdir`） |
+| F17 | 取得中の SIGKILL（`: >owner` と `cat >>owner` の間。書きかけの owner） | — | 消さない | refused(corrupt)（次の取得） | kept(corrupt) | —（PR1a-f の tmp→`link` で新しい書き手は作らない。残った中身のある書きかけは `corrupt` のまま誰も消さず人が見る。0 バイトの owner は猶予〔10 分〕を過ぎたら先頭が取り除く〔I4。`ownerless` × `gone` と同じ行方で、下の別の試験〕） |
+| F18 | 旧版が `mkdir` と `mv` の間で死んだ（`owner.tmp.<pid>` だけ） | — | 消さない（猶予内） | refused(tmp) | kept(tmp) | —（猶予内の行。猶予を過ぎ書き手の pid が死んでいれば PR1a-f I3 が取り除く＝`ownerless-tmp` × `gone` の行。文面は「待つ。猶予を過ぎても残るなら人が見て消す」で、無条件の `remove by hand` ではない） |
 | F19 | owner の読み（`lock-owner`・`release-owner`・`recover-owner`・`gone-owner`・`reclaim-owner`） | EACCES・EIO | 消さない | refused(unk) | kept(unk) | release-main: deferred |
 | F20 | 退避の一覧（`list-root`・`gone-lstat`） | 失敗 | 消さない | refused(unk) | as-form（`lock_settle_gone … \|\| true` の後 canonical を読む `:2032`） | — |
 | F21 | `ownerless-rmdir`（`lock_expire_ownerless`） | 失敗 | 消さない | refused(unk) | kept(unk) | — |
 | F22 | 回収の `rename-aside`（`:1463`） | ENOENT（誰かが先に消した） | 消さない | acquired / mine | absent / absent | — |
 | F23 | 同上 | その他 | 消さない | refused(rec)（`lock_recover` は unknown を記さない `:1467`） | kept | — |
 | F24 | `lock_recover` の戻しの `restore-mkdir`（`:1477`） | 失敗 | 消さない | refused(aside) / aside | restore-failed / aside | — |
-| F25 | `lock_restore_from_gone` の `restore-mkdir`（`:1328`） | 失敗 | 消さない | refused(aside) / aside | kept / aside | — |
+| F25 | `lock_restore_from_gone` の `restore-mkdir`（`:1328`） | 失敗 | 消さない | refused(aside) / aside | kept / aside | —（`lock_recover_only` は `<lock>` が無いので `absent` を返すが、退避が保有中なので lib.sh が `kept` に写す。PR1c 3 回目までの lib.sh は `absent` のままで、この行を試験が駆動して赤になった） |
 | F26 | `restore-rename`（`:1312`） | 失敗 | 消さない | refused(aside) / aside | kept / aside | —（空の `<lock>` を戻して退避を残す `:1319-1322`） |
 | F27 | 回収の `rm -rf <gone>`（`:1472`、`\|\| true`） | 失敗 | 消さない | acquired / mine | removed / absent | —（死んだ退避が残り次の先頭が片付ける） |
 | F28 | 解放の `rm -rf <lock>`（`machine-lock.sh:241`、`\|\| true`） | 失敗 | 消さない | — | — | release-main: released / unchanged（答えが実態と違う＝本文に無い指摘） |
@@ -261,7 +263,7 @@ supervisor.lock だけの性質（事実）:
 | F31 | 自分の札の `lock_mark_done` | 失敗 | 消さない | acquired / mine / left-until-retirable | as-form | acquire-behind: refused(queue) / unchanged / left-until-retirable、guard-behind: not-head / unchanged / left-until-retirable（後ろの呼び手も期限の枝で自分の札を取り下げる `:1698`・`:1908`。P3-5 の列挙で書き足した）。札は pid の死か期限＋60 秒で外れる。その間ガード・他の取得は `not-head`・`queue` |
 | F32 | 前の札の `ps -o etime=`（`lock_pid_start_ms` `:1129`） | 失敗 | 消さない | refused(queue) | not-head | —（再利用と読まず、待つ） |
 | F33 | 読み込み口（`machine_lock_load`） | `verify-run.sh` が無い・印が 1 つずつでない・`set -e` | 消さない | refused(loader) | unloaded(loader) / none-taken | acquire-behind: refused(loader)、guard-behind: unloaded(loader) / none-taken（読み込みが無ければ札を取らないので head と同じ行。P3-5 の列挙で書き足した）、release-main: none |
-| F34 | `reclaim-rename`・`reclaim-rmdir`（戻しが不明な間の空の `<lock>`） | 失敗 | 消さない | refused(unk) | kept(unk) | — |
+| F34 | `reclaim-rename`・`reclaim-rmdir`（戻しが不明な間の空の `<lock>`） | 失敗 | 消さない | refused(unk) | kept(unk) | —（駆動するのは `reclaim-rmdir`。`reclaim-rename` の失敗は、空の `<lock>` を取り除いた後なので不明を記さず先頭が `<lock>` を取る〔acquired / mine〕。これは PR1a-f の部品〔`lock_reclaim_gone`〕の動きで PR1c の範囲外のため、直さず「本文に無い指摘」として返す） |
 
 使わないもの（事実）: supervisor.lock の経路は **tmux を呼ばない**（`lib.sh:121-205` と読み込み口の節に tmux は無い）。`lock_drain_group`（`KILL_GRACE_SEC`）・`lock_hand_off`・`lock_child_wait`・`lock_release_as_head` も呼ばない（S5・S7）。
 
@@ -347,7 +349,7 @@ PR1c の側の行（雛形の `LOADER_ROWS`、実装の契約で赤から緑に�
 
 決めたこと（この文書）: 記録に `pgid=` を書かない（S7）、ガードの予算は 10 秒、読み込みの失敗はガードの exit code に効かせない（S9）、大域変数と関数の差し替えは呼ぶたびに置く（S10）、D5 を呼ばない（S5）・サブシェルの解放とガードを拒む（S6）、予算 0 で札の後ろは札を取り下げて `queue` で抜ける（S12）、時刻の比較は PR1a-f の `machine_lock_pid_identity` に寄せる（§2.1、マージの順 PR1a-f → PR1c）、引数・文脈での拒否（§5）、文面の 10 種類と優先と出どころ（§2.2）。
 
-PR1a-f へ（共通の決定 1。PR1c では形を区別して文面で人に知らせ、消さない）: 取得中の SIGKILL の空の owner（`corrupt`、F17）、旧版の `owner.tmp.*` だけの `<lock>`（`ownerless-tmp`、F18）、D7 の TZ 依存と EPERM の再利用 pid は PR1a-f の `machine_lock_pid_identity` で解き、PR1c はそれを呼ぶ（§2.1。F1・F8・F9・`other-eperm`）。
+PR1a-f へ渡したもの（共通の決定 1。PR1a-f で I3・I4 として入り、表はそれに合わせて直した。PR1c の文面は、取り除かれるまでの間の形を区別して知らせる）: 取得中の SIGKILL の空の owner（`corrupt`、F17、I4）、旧版の `owner.tmp.*` だけの `<lock>`（`ownerless-tmp`、F18、I3）、D7 の TZ 依存と EPERM の再利用 pid は PR1a-f の `machine_lock_pid_identity` で解き、PR1c はそれを呼ぶ（§2.1。F1・F8・F9・`other-eperm`）。
 
 残る判断（PM へ。止める条件ではない）:
 

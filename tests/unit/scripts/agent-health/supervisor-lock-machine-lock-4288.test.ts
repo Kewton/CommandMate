@@ -15,12 +15,14 @@
  * below reads those sets out of machine-lock.sh and verify-run.sh and compares the two objects, made
  * apart, so a result value added to the code and not to the table (or the other way) fails here.
  *
- * Nothing here calls the implementation: every behaviour row is an `it.todo`, and the implementation
- * contract of PR1c turns them red → green (scripts/agent-health/product/lib.sh, deadline-guard.sh).
- * What runs now is the tables checking themselves against the invariants of §1, the code's result sets,
- * and the counts written in the design.
+ * The tables are checked against the invariants of §1, the code's result sets and the counts written in the
+ * design (the first half of this file). The second half drives them through lib.sh / deadline-guard.sh: every
+ * row of §2 (11 forms × 6 reachable callers × 3 observations) and every failure outcome of §3 is run, and the
+ * end state is compared with the table's outcome column as it stands — the result, the message, the record
+ * (the whole of the base except the queue: an empty <lock> left behind is a difference), the moved-aside
+ * records and the caller's ticket. The only `it.todo` left are rows outside the stop premise (none now).
  *
- * How the implementation will drive a row (for the implementation contract, not run here):
+ * How a row is driven:
  *   - bash under `set -u`, `PRODUCT_BASE=<mkdtemp under os.tmpdir()>`, `. scripts/agent-health/product/lib.sh`,
  *     the product functions only (product_lock_acquire / product_lock_release / product_lock_recover_only):
  *     never lock_release_as_head or lock_recover_only directly (they are PR1a's; the rows are about lib.sh);
@@ -278,9 +280,9 @@ const OBS_MEANING = {
     unknown: 'its mtime or listing cannot be read (CM_VERIFY_TEST_OBS_FAULT=ownerless-mtime=EIO)',
   },
   'ownerless-tmp': {
-    alive: 'not observed: <lock> has no owner and holds owner.tmp.<pid> of the old version (never taken; a person removes it)',
-    gone: 'not observed (the pid in the tmp name is not read)',
-    unknown: 'not observed',
+    alive: "<lock> and owner.tmp.<pid> are no older than PR1a-f I3's grace (the writer may be writing): waited for, told as `tmp`",
+    gone: "older than that grace and the pid in the tmp name is ESRCH: the head takes the tmp and the <lock> out (PR1a-f I3), as ownerless × gone",
+    unknown: 'its mtime / lstat / the writer pid cannot be read (CM_VERIFY_TEST_OBS_FAULT=ownerless-mtime=EIO): as ownerless × unknown',
   },
   corrupt: {
     alive: 'the pid left in the record is alive (must not matter)',
@@ -391,7 +393,14 @@ const TABLE = {
     'acquire-behind': QUEUE,
     'guard-head': { alive: G_KEPT, gone: G_REMOVED, unknown: gKept('unk') },
   },
-  'ownerless-tmp': personOnly('tmp'),
+  // PR1a-f I3: a <lock> holding only temporaries is the head's to take out once <lock> and the tmp are older than
+  // the grace and the writer pid is shown gone; younger, or with a writer that may still be there, it is waited for.
+  'ownerless-tmp': {
+    ...NOT_OURS,
+    'acquire-head': { alive: refused('tmp'), gone: ACQUIRED, unknown: refused('unk') },
+    'acquire-behind': QUEUE,
+    'guard-head': { alive: gKept('tmp'), gone: G_REMOVED, unknown: gKept('unk') },
+  },
   corrupt: personOnly('corrupt'),
   own: {
     'acquire-head': same(HOLDING),
@@ -595,8 +604,8 @@ const FAILURE_TABLE = {
     excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
   }),
   'F15-owner-unlink': failure({
-    point: 'rm -f <lock>/owner after F13/F14 (fault:owner-unlink)',
-    errno: 'any',
+    point: "the removal of this acquisition's own temporary <lock>/.owner-<token> after F13/F14 (fault:owner-unlink; PR1a-f's tmp→link leaves a tmp, not an owner)",
+    errno: 'any — the <lock> is left holding only that tmp (own-half-left); with no owner it is I3\'s to take out after the grace, never read as a corrupt record',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk', 'own-half-left') },
     excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
@@ -609,15 +618,15 @@ const FAILURE_TABLE = {
     excluded: { 'guard-head': 'not-on-path', ...BEHIND, ...NO_RELEASE },
   }),
   'F17-killed-mid-owner': failure({
-    point: 'the acquirer dies between `: >owner` and `cat >>owner` (lock_obs_create)',
-    errno: '— (SIGKILL, power loss): an empty or half owner is left — a corrupt form',
+    point: 'an owner that is not a record: a half-written one (an older copy\'s writer killed between `: >owner` and `cat >>owner`, or a power loss after the link)',
+    errno: '— (SIGKILL, power loss): a non-empty half owner, or a 0-byte owner younger than PR1a-f I4\'s grace, is a corrupt form (refused / kept, nothing removed); a 0-byte owner older than that grace is the head\'s to take out (acquire-head acquired / mine, guard-head removed / absent: driven below, as ownerless × gone)',
     direction: 'keep',
     callers: { 'acquire-head': refused('corrupt'), 'guard-head': gKept('corrupt') },
     excluded: { ...BEHIND, ...NO_RELEASE },
   }),
   'F18-old-tmp-left': failure({
     point: 'the old version died between its mkdir and mv: <lock>/owner.tmp.<pid> only',
-    errno: '— (ownerless-tmp form)',
+    errno: '— (ownerless-tmp form): within PR1a-f I3\'s grace it is waited for (refused(tmp) / kept(tmp)); older than the grace with the writer pid gone it is taken out (as ownerless-tmp × gone: driven below)',
     direction: 'keep',
     callers: { 'acquire-head': refused('tmp'), 'guard-head': gKept('tmp') },
     excluded: { ...BEHIND, ...NO_RELEASE },
@@ -730,8 +739,9 @@ const FAILURE_TABLE = {
     errno: 'verify-run.sh missing, markers not 1 / 1, set -e',
     direction: 'keep',
     callers: {
-      'acquire-head': refused('loader'),
-      'acquire-behind': refused('loader'),
+      // no ticket is taken when the section did not load (the loader is checked first)
+      'acquire-head': r('refused', 'unchanged', 'none-taken', 'loader'),
+      'acquire-behind': r('refused', 'unchanged', 'none-taken', 'loader'),
       'guard-head': r('unloaded', 'unchanged', 'none-taken', 'loader'),
       'guard-behind': r('unloaded', 'unchanged', 'none-taken', 'loader'),
       'release-main': NONE,
@@ -739,8 +749,8 @@ const FAILURE_TABLE = {
     excluded: { 'release-unheld': 'unheld' },
   }),
   'F34-reclaim-rename-or-rmdir': failure({
-    point: 'reclaim-rename / reclaim-rmdir (an empty <lock> while a put-back is unknown)',
-    errno: 'any',
+    point: 'reclaim-rmdir (an empty <lock> left by a put-back that stopped half way, with the moved-aside dead record still there)',
+    errno: 'any (the reclaim-rename half: a failed rename after the empty <lock> was taken out notes nothing unknown, so the head takes the lock — see the report of this change; not driven)',
     direction: 'keep',
     callers: { 'acquire-head': refused('unk'), 'guard-head': gKept('unk') },
     excluded: { ...BEHIND, ...NO_RELEASE },
@@ -1055,9 +1065,11 @@ describe('Issue #4288 PR1c table: the table keeps the invariants (a) (design §1
       expect(['acquire-head', 'guard-head'], `${e.caller} × ${e.form} × ${e.obs}`).toContain(e.caller);
       expect(e.obs).toBe('gone');
     }
-    for (const form of ['corrupt', 'ownerless-tmp', 'other-host'] as const) {
+    for (const form of ['corrupt', 'other-host'] as const) {
       expect(ROWS.filter((r) => r.form === form && r.cell.lock !== 'unchanged')).toEqual([]);
     }
+    // PR1a-f I3: ownerless-tmp is the head's to take out once it is old and the writer is shown gone — as ownerless × gone, and no other obs
+    expect(ROWS.filter((r) => r.form === 'ownerless-tmp' && r.cell.lock !== 'unchanged').map((r) => `${r.caller}/${r.obs}`)).toEqual(['acquire-head/gone', 'guard-head/gone']);
   });
 
   it('5 (S4): the own record is removed only by the main shell on alive', () => {
@@ -1094,7 +1106,8 @@ describe('Issue #4288 PR1c table: the table keeps the invariants (a) (design §1
     const want = { corrupt: 'corrupt', 'ownerless-tmp': 'tmp', 'other-host': 'host' } as const;
     for (const [form, message] of Object.entries(want)) {
       for (const caller of ['acquire-head', 'guard-head'] as const) {
-        for (const obs of OBS) expect((TABLE as Table)[form as Form][caller][obs]).toMatchObject({ message });
+        // PR1a-f I3: an old ownerless-tmp whose writer is gone is not "a form only a person clears": the head takes it out
+        for (const obs of OBS) if (!(form === 'ownerless-tmp' && obs === 'gone')) expect((TABLE as Table)[form as Form][caller][obs]).toMatchObject({ message: form === 'ownerless-tmp' && obs === 'unknown' ? 'unk' : message });
       }
     }
     for (const f of FAILURES) {
@@ -1228,13 +1241,21 @@ describe("Issue #4288 PR1c: aligned with PR1a-f's upstream 3rd round (I3's grace
 // Each row of the §2 table is driven through lib.sh itself (bash under `set -u`, a private PRODUCT_BASE made with
 // fs.mkdtempSync under os.tmpdir(), removed in afterEach): the form is written in the base, the observation made real
 // (a live `sleep`, a pid that is gone, pid 1 for EPERM) or injected (CM_VERIFY_TEST_OBS_FAULT), and the answer read back
-// from PRODUCT_LOCK_RESULT / PRODUCT_LOCK_KIND / PRODUCT_LOCK_ERROR / the files. A row the driver cannot make is listed in
-// UNDRIVEN with the reason (it stays an `it.todo`): nothing of a table row is silently skipped.
+// from PRODUCT_LOCK_RESULT / PRODUCT_LOCK_KIND / PRODUCT_LOCK_ERROR / the files (the whole base but the queue is compared
+// as the table says; no row is skipped).
 
 const HAS_TOOLS = spawnSync('bash', ['-c', 'command -v ps && command -v hostname'], { encoding: 'utf8' }).status === 0;
 const tmpDirs: string[] = [];
 const children: ChildProcess[] = [];
+const killPids: number[] = [];
 afterEach(() => {
+  for (const pid of killPids.splice(0)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      /* gone */
+    }
+  }
   for (const c of children.splice(0)) {
     try {
       c.kill('SIGKILL');
@@ -1292,25 +1313,73 @@ function recordText(o: RecordOpts): string {
 
 const OLD = '202601010000';
 
+/** What a driven row sets up and expects besides the table's cell. */
 interface Fixture {
   /** extra environment for the bash that runs the caller */
   env: Record<string, string>;
   /** the canonical record's text before the call (undefined: no canonical <lock>) */
   before?: string;
-  /** the moved-aside record's text, when the form has one */
+  /** the moved-aside (or swapped-in) record's text, when the end state has one */
   aside?: string;
   /** the caller holds the lock itself (`own`): the script takes it first */
   takeFirst?: boolean;
+  /** bash run after lib.sh is sourced and before the call: wrappers of the observation functions */
+  bashPre?: string;
+  /** release-main with takeFirst: bash run after the acquisition and before the release */
+  afterAcquire?: string;
+  /** what appears in the base during the call (a race): added to the expected end state */
+  planted?: Snap;
+  /** a dead record moved aside is left behind by a failed `rm -rf` (F27) */
+  goneLeft?: boolean;
+  /** a live ticket of another process ahead, whatever the caller (createdAt in ms when given) */
+  ahead?: { createdAt?: number };
+  /** the ticket column when it differs from the table's (F31: the ticket stays) */
+  ticket?: TicketEnd;
+  /** the §2 cell the failure leaves the caller with (the table says `asForm`) */
+  asForm?: { form: Form; obs: Obs };
 }
 
-/** Why a (form × obs) cannot be made by the driver (the row stays an `it.todo`). */
-function undriven(form: Form, obs: Obs, caller: Caller): string | undefined {
-  if ((form === 'absent' || form === 'stale-old') && obs !== 'gone') {
-    return 'needs a race on mkdir / a listing fault (EEXIST in between, a failing list): driven by the failure rows F11 / F20';
-  }
-  void caller;
-  return undefined;
+// ---- wrappers of the section's observation functions (bash, defined after lib.sh is sourced: the
+// ---- `bashPre` of PR1a-f's harness). `orig_<fn>` is the original, called after the interference.
+const orig = (fn: string): string => `eval "orig_$(declare -f ${fn})"\n`;
+/** Another taker's mkdir wins between this acquisition's decision and its own mkdir (absent × alive). */
+const WRAP_MKDIR_RACE = `${orig('lock_obs_mkdir')}lock_obs_mkdir() { if [ "$1" = mkdir-lock ]; then mkdir "$2" 2>/dev/null; fi; orig_lock_obs_mkdir "$@"; }\n`;
+/** A taker's <lock> appears between the guard's owner read and its listing (absent × alive). */
+const WRAP_LIST_RACE = `${orig('lock_obs_list')}lock_obs_list() { if [ "$1" = lock-list ]; then mkdir -p "$2" 2>/dev/null; fi; orig_lock_obs_list "$@"; }\n`;
+/**
+ * machine_lock_pid_identity reads the clock before and after its two `ps` calls and answers unknown:etime:ECLOCK when
+ * they took 1 s or more (PR1a-f §4.1, a safe answer). Under load that made the rows that need the `reused` verdict
+ * (other-eperm × gone) fail now and then, so those rows pin the clock inside this one function: the verdict they
+ * assert is independent of how long `ps` took. Everything else still reads the real clock.
+ */
+const PIN_CLOCK = `${orig('lock_now_ms')}eval "orig2_$(declare -f machine_lock_pid_identity)"\nmachine_lock_pid_identity() { local t rc; t=$(orig_lock_now_ms); lock_now_ms() { echo "$t"; }; orig2_machine_lock_pid_identity "$@"; rc=$?; lock_now_ms() { orig_lock_now_ms; }; return $rc; }\n`;
+
+// ---- the end state of the base: everything under it except the queue (dirs as '', files as their text)
+type Snap = Record<string, string>;
+const LOCK_NAME = 'supervisor.lock';
+function snap(base: string): Snap {
+  const out: Snap = {};
+  const walk = (rel: string): void => {
+    for (const n of fs.readdirSync(path.join(base, rel)).sort()) {
+      const r = rel ? `${rel}/${n}` : n;
+      if (r === 'supervisor.queue') continue;
+      if (fs.lstatSync(path.join(base, r)).isDirectory()) {
+        out[r] = '';
+        walk(r);
+      } else {
+        out[r] = fs.readFileSync(path.join(base, r), 'utf8');
+      }
+    }
+  };
+  walk('');
+  return out;
 }
+const isLockKey = (k: string): boolean => k === LOCK_NAME || k.startsWith(`${LOCK_NAME}/`) || k.startsWith(`${LOCK_NAME}.gone-`);
+const isGoneKey = (k: string): boolean => k.startsWith(`${LOCK_NAME}.gone-`);
+const pick = (s: Snap, f: (k: string) => boolean): Snap => Object.fromEntries(Object.entries(s).filter(([k]) => f(k)));
+
+/** The time-of-day-independent shape of an own record's lstart= line (ps -o lstart= under LC_ALL=C). */
+const LSTART_LINE = /^lstart=\w{3} \w{3} +\d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/m;
 
 function makeFixture(form: Form, obs: Obs, base: string, caller: Caller): Fixture {
   const lock = path.join(base, 'supervisor.lock');
@@ -1327,11 +1396,26 @@ function makeFixture(form: Form, obs: Obs, base: string, caller: Caller): Fixtur
   };
   switch (form) {
     case 'absent':
-      return { env };
     case 'stale-old': {
-      fs.mkdirSync(`${lock}.stale.123.456`, { recursive: true });
-      fs.writeFileSync(path.join(`${lock}.stale.123.456`, 'owner'), recordText({ pid: live(), v: false }));
-      return { env };
+      if (form === 'stale-old') {
+        fs.mkdirSync(`${lock}.stale.123.456`, { recursive: true });
+        fs.writeFileSync(path.join(`${lock}.stale.123.456`, 'owner'), recordText({ pid: live(), v: false }));
+      }
+      const fx: Fixture = { env };
+      if (obs === 'unknown') {
+        // the head's own observation fails; the callers that do not observe are given both faults and answer as for gone
+        env.CM_VERIFY_TEST_OBS_FAULT = caller === 'acquire-head' ? 'mkdir-lock=EIO' : caller === 'guard-head' ? 'lock-list=EIO' : 'mkdir-lock=EIO lock-list=EIO';
+      } else if (obs === 'alive') {
+        // someone else's <lock> appears just as this caller looks (a race the callers that do not observe cannot meet)
+        if (caller === 'acquire-head') {
+          fx.bashPre = WRAP_MKDIR_RACE;
+          fx.planted = { [LOCK_NAME]: '' };
+        } else if (caller === 'guard-head') {
+          fx.bashPre = WRAP_LIST_RACE;
+          fx.planted = { [LOCK_NAME]: '' };
+        }
+      }
+      return fx;
     }
     case 'ownerless': {
       fs.mkdirSync(lock, { recursive: true });
@@ -1340,9 +1424,14 @@ function makeFixture(form: Form, obs: Obs, base: string, caller: Caller): Fixtur
       return { env };
     }
     case 'ownerless-tmp': {
+      // PR1a-f I3: young (alive: the writer may be writing) / older than the grace with the writer pid gone (gone) /
+      // its age cannot be read (unknown)
       fs.mkdirSync(lock, { recursive: true });
-      fs.writeFileSync(path.join(lock, 'owner.tmp.4242'), 'pid=1\n');
-      return { env, before: undefined };
+      const tmp = path.join(lock, `owner.tmp.${obs === 'alive' ? 4242 : deadPid()}`);
+      fs.writeFileSync(tmp, 'pid=1\n');
+      if (obs !== 'alive') spawnSync('touch', ['-t', OLD, tmp, lock]);
+      if (obs === 'unknown') env.CM_VERIFY_TEST_OBS_FAULT = 'ownerless-mtime=EIO';
+      return { env };
     }
     case 'corrupt': {
       const text = put(`pid=${pidOf(obs)}\n`);
@@ -1375,7 +1464,7 @@ function makeFixture(form: Form, obs: Obs, base: string, caller: Caller): Fixtur
           ? put(recordText({ pid: 1, startedAt: isoNow(), lstart: lstartOf(1) }))
           : put(recordText({ pid: 1, startedAt: '2015-01-01T00:00:00Z', lstart: 'Thu Jan  1 00:00:00 2015' }));
       if (obs === 'unknown') env.CM_VERIFY_TEST_OBS_FAULT = 'etime=EIO';
-      return { env, before: text };
+      return { env, before: text, bashPre: PIN_CLOCK };
     }
     case 'other-host': {
       const text = put(recordText({ pid: pidOf(obs), host: 'some-other-host.invalid', startedAt: isoNow() }));
@@ -1427,51 +1516,64 @@ function parseReport(stdout: string, stderr: string, base: string): Ran {
   return { rc: Number(get('RC')), result: get('RES'), kind: get('KIND'), error: get('ERR'), stderr, tickets: readTickets(base) };
 }
 
-/** A live ticket of another process ahead in the queue. */
-function placeTicketAhead(base: string): void {
+/** A live ticket of another process ahead in the queue (createdAt: ms; the default is now). */
+function placeTicketAhead(base: string, createdAt?: number): void {
   const q = path.join(base, 'supervisor.queue');
   fs.mkdirSync(q, { recursive: true });
   const now = Date.now();
   fs.writeFileSync(
     path.join(q, '000000000001'),
-    `{"pid":${liveProcess()},"host":"${os.hostname()}","token":"ahead","createdAt":${now},"deadline":${now + 600_000}}\n`,
+    `{"pid":${liveProcess()},"host":"${os.hostname()}","token":"ahead","createdAt":${createdAt ?? now},"deadline":${now + 600_000}}\n`,
   );
 }
 
-function runRow(caller: Caller, form: Form, obs: Obs): { ran: Ran; fx: Fixture; base: string; mine?: string } {
-  const base = mkTmp('cm-sup-lock-');
-  const fx = makeFixture(form, obs, base, caller);
-  if (caller === 'acquire-behind' || caller === 'guard-behind') placeTicketAhead(base);
+/** The bash that makes the call for a caller, with the fixture's wrappers in front. */
+function callBody(caller: Caller, fx: Fixture, base: string): string {
+  const pre = fx.bashPre ?? '';
   const lock = path.join(base, 'supervisor.lock');
-  let body: string;
   switch (caller) {
     case 'acquire-head':
     case 'acquire-behind':
-      body = `product_lock_acquire t; rc=$?\n${REPORT}`;
-      break;
+      return `${pre}product_lock_acquire t; rc=$?\n${REPORT}`;
     case 'guard-head':
     case 'guard-behind':
-      body = `product_lock_recover_only; rc=$?\n${REPORT}`;
-      break;
+      return `${pre}product_lock_recover_only; rc=$?\n${REPORT}`;
     case 'release-unheld':
-      body = `product_lock_release; rc=$?\n${REPORT}`;
-      break;
+      return `${pre}product_lock_release; rc=$?\n${REPORT}`;
     case 'release-main': {
       if (fx.takeFirst) {
-        body = `product_lock_acquire t || exit 9\nexport ${Object.entries(fx.env).map(([k, v]) => `${k}='${v}'`).join(' ') || 'X=1'}\nproduct_lock_release; rc=$?\n${REPORT}`;
+        const exported = Object.entries(fx.env)
+          .map(([k, v]) => `${k}='${v}'`)
+          .join(' ');
+        const body = `${pre}product_lock_acquire t || exit 9\n${exported ? `export ${exported}\n` : ''}${fx.afterAcquire ?? ''}\nproduct_lock_release; rc=$?\n${REPORT}`;
         fx.env = {};
-      } else {
-        // the caller holds a mark (this shell took the lock once); the record is another's now
-        body = `LOCK_HELD_PATH='${lock}'; LOCK_HELD_TOKEN=mine-token\nproduct_lock_release; rc=$?\n${REPORT}`;
+        return body;
       }
-      break;
+      // the caller holds a mark (this shell took the lock once); the record is another's now
+      return `${pre}LOCK_HELD_PATH='${lock}'; LOCK_HELD_TOKEN=mine-token\nproduct_lock_release; rc=$?\n${REPORT}`;
     }
     default:
       throw new Error(`not driven: ${caller}`);
   }
-  const res = bashLib(base, body, fx.env);
-  const ran = parseReport(res.stdout, res.stderr, base);
-  return { ran, fx, base };
+}
+
+interface Driven {
+  ran: Ran;
+  fx: Fixture;
+  base: string;
+  beforeSnap: Snap;
+}
+function runWith(caller: Caller, base: string, fx: Fixture): Driven {
+  if (caller === 'acquire-behind' || caller === 'guard-behind' || fx.ahead) placeTicketAhead(base, fx.ahead?.createdAt);
+  const beforeSnap = snap(base);
+  const res = bashLib(base, callBody(caller, fx, base), fx.env);
+  return { ran: parseReport(res.stdout, res.stderr, base), fx, base, beforeSnap };
+}
+
+function runRow(caller: Caller, form: Form, obs: Obs): Driven {
+  const base = mkTmp('cm-sup-lock-');
+  const fx = makeFixture(form, obs, base, caller);
+  return runWith(caller, base, fx);
 }
 
 function lockOwnerText(base: string): string | undefined {
@@ -1489,62 +1591,117 @@ const KIND_OF_CELL_MESSAGE: Record<Message, string> = {
   tmp: 'tmp',
   host: 'host',
   aside: 'aside',
-  loader: 'loader',
+  loader: '',
 };
 
-function checkRow(e: RowEntry): void {
-  const { ran, fx, base } = runRow(e.caller, e.form, e.obs);
-  const cell = e.cell as Row<Caller>;
-  expect(ran.result, `${e.caller} × ${e.form} × ${e.obs}: ${ran.stderr}`).toBe(cell.result);
-  if (cell.message !== undefined) {
-    const isGuard = e.caller === 'guard-head';
-    expect(ran.kind, ran.error).toBe(KIND_OF_CELL_MESSAGE[cell.message]);
-    expect(ran.error).not.toBe('');
+interface Expected {
+  readonly result: string;
+  readonly lock: LockAfter;
+  readonly ticket: TicketEnd;
+  readonly message?: Message;
+}
+
+/**
+ * The end state against the table's outcome as it stands: the result, the message (the kind and the line), where the
+ * record ends — the whole of the base but the queue is compared, so an empty <lock>, a temporary or a moved-aside
+ * record left behind is a difference — and the caller's own ticket.
+ */
+function assertOutcome(cell: Expected, d: Driven, caller: Caller, label: string): void {
+  const { ran, fx, base } = d;
+  expect(ran.result, `${label}: ${ran.stderr}`).toBe(cell.result);
+  const isGuard = caller === 'guard-head' || caller === 'guard-behind';
+  if (cell.message === 'loader') {
+    expect(ran.error, label).toMatch(/^busy: the machine lock could not be loaded/);
+  } else if (cell.message !== undefined) {
+    expect(ran.kind, `${label}: ${ran.error}`).toBe(KIND_OF_CELL_MESSAGE[cell.message]);
+    expect(ran.error, label).not.toBe('');
     if (isGuard) expect(ran.error).toContain('busy:');
-  } else if (e.caller === 'guard-head') {
-    expect(ran.error, 'the guard names a lock only when a person has to look at it').toBe('');
+  } else if (isGuard || caller.startsWith('release')) {
+    expect(ran.error, `${label}: a line is told only when a person has to look`).toBe('');
   }
+
   // where the record ends
-  const owner = lockOwnerText(base);
+  const after = snap(base);
+  expect(pick(after, (k) => !isLockKey(k)), `${label}: nothing but the lock may change`).toEqual(pick(d.beforeSnap, (k) => !isLockKey(k)));
+  const lockAfter = pick(after, isLockKey);
+  const canon = pick(lockAfter, (k) => !isGoneKey(k));
+  const goneKeys = Object.keys(lockAfter).filter(isGoneKey);
+  const owner = canon[`${LOCK_NAME}/owner`];
+  const leftover = (): void => {
+    if (fx.goneLeft) expect(goneKeys.length, `${label}: the dead record moved aside stays`).toBeGreaterThan(0);
+    else expect(goneKeys, `${label}: no moved-aside record left`).toEqual([]);
+  };
   switch (cell.lock) {
     case 'unchanged':
-      if (e.form === 'own' && fx.takeFirst) {
+      if (fx.takeFirst) {
+        expect(Object.keys(canon).sort(), label).toEqual([LOCK_NAME, `${LOCK_NAME}/owner`]);
         expect(owner).toContain('label=t');
-      } else if (e.form === 'own') {
-        expect(owner).toBe(fx.before);
-      } else if (fx.before === undefined) {
-        // no canonical record before (absent, ownerless, ownerless-tmp, stale-old): none now
-        expect(owner).toBeUndefined();
-      } else if (fx.before !== undefined) {
-        expect(owner).toBe(fx.before);
+        leftover();
+      } else {
+        expect(lockAfter, `${label}: the lock as it was`).toEqual({ ...pick(d.beforeSnap, isLockKey), ...(fx.planted ?? {}) });
       }
       break;
     case 'absent':
-      expect(fs.existsSync(path.join(base, 'supervisor.lock'))).toBe(false);
+      expect(canon, `${label}: no <lock> left`).toEqual({});
+      leftover();
       break;
     case 'mine':
+      expect(Object.keys(canon).sort(), `${label}: the <lock> holds the owner and nothing else`).toEqual([LOCK_NAME, `${LOCK_NAME}/owner`]);
       expect(owner).toContain('label=t');
+      expect(owner, 'the own record carries the start time the reuse check needs (D7)').toMatch(LSTART_LINE);
+      expect(owner).toMatch(/^started_at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m);
+      expect(owner).toMatch(/^v=1$/m);
+      expect(owner, 'supervisor.lock never records a group (S7)').not.toContain('pgid=');
+      if (fx.before !== undefined) expect(owner).not.toBe(fx.before);
+      leftover();
       break;
     case 'restored':
+      expect(Object.keys(canon).sort(), label).toEqual([LOCK_NAME, `${LOCK_NAME}/owner`]);
       expect(owner).toBe(fx.aside);
+      expect(goneKeys, label).toEqual([]);
+      break;
+    case 'aside':
+      expect(canon, `${label}: no <lock>, the record stays aside`).toEqual({});
+      // the snapshot lists the moved-aside directory and its owner file: one directory, holding the judged record
+      expect(goneKeys.filter((k) => !k.includes('/')), label).toHaveLength(1);
+      expect(lockAfter[`${goneKeys.find((k) => !k.includes('/'))}/owner`]).toBe(fx.aside);
+      break;
+    case 'own-half-left': {
+      // PR1a-f's tmp→link: what this acquisition's failed clean-up leaves is its own `.owner-<token>`, never an owner
+      const keys = Object.keys(canon).sort();
+      expect(keys[0], label).toBe(LOCK_NAME);
+      expect(keys.length, label).toBeGreaterThan(1);
+      for (const k of keys.slice(1)) expect(k, label).toMatch(/^supervisor\.lock\/\.owner-/);
+      leftover();
+      break;
+    }
+    case 'own-empty-left':
+      expect(canon, `${label}: the empty <lock> this acquisition made stays`).toEqual({ [LOCK_NAME]: '' });
+      leftover();
       break;
   }
-  if (cell.lock !== 'restored' && cell.lock !== 'unchanged') {
-    expect(fs.readdirSync(base).filter((n) => n.startsWith('supervisor.lock.gone-'))).toEqual([]);
-  }
-  // the caller's own ticket: retired (done) or none taken
-  const behind = e.caller === 'acquire-behind' || e.caller === 'guard-behind';
+
+  // the caller's own ticket: retired (done), none taken, or left until it can be retired
+  const behind = caller === 'acquire-behind' || caller === 'guard-behind' || fx.ahead !== undefined;
   const mineTickets = Object.entries(ran.tickets).filter(([n]) => !(behind && n === '000000000001'));
   if (fx.takeFirst) {
     // the acquisition before the release took (and retired) its own ticket; the release adds none
-    expect(Object.keys(ran.tickets)).toHaveLength(1);
+    expect(Object.keys(ran.tickets), label).toHaveLength(1);
     for (const [, text] of mineTickets) expect(text).toContain('"done":true');
   } else if (cell.ticket === 'none-taken') {
-    expect(mineTickets).toEqual([]);
+    expect(mineTickets, `${label}: no ticket of its own`).toEqual([]);
   } else if (cell.ticket === 'retired') {
-    expect(mineTickets.length).toBeGreaterThan(0);
-    for (const [, text] of mineTickets) expect(text).toContain('"done":true');
+    expect(mineTickets.length, label).toBeGreaterThan(0);
+    for (const [, text] of mineTickets) expect(text, label).toContain('"done":true');
+  } else {
+    expect(mineTickets.length, label).toBeGreaterThan(0);
+    for (const [, text] of mineTickets) expect(text, `${label}: the ticket is not marked done`).not.toContain('"done":true');
   }
+}
+
+function checkRow(e: RowEntry): void {
+  const d = runRow(e.caller, e.form, e.obs);
+  assertOutcome(e.cell, d, e.caller, `${e.caller} × ${e.form} × ${e.obs}`);
 }
 
 describe.each(CALLERS)('Issue #4288 PR1c behaviour: %s (lib.sh / deadline-guard.sh)', (caller) => {
@@ -1552,9 +1709,8 @@ describe.each(CALLERS)('Issue #4288 PR1c behaviour: %s (lib.sh / deadline-guard.
   for (const e of rows) {
     const msg = e.cell.message ? ` (${e.cell.message})` : '';
     const title = `${e.form} × ${e.obs} → ${e.cell.result}${msg} / ${e.cell.lock} / ticket ${e.cell.ticket}`;
-    const why = undriven(e.form, e.obs, e.caller);
-    if (!HAS_TOOLS || why !== undefined) {
-      it.todo(`${title}${why ? ` — not driven: ${why}` : ''}`);
+    if (!HAS_TOOLS) {
+      it.todo(`${title} — needs ps and hostname`);
     } else {
       it(title, () => checkRow(e), 60_000);
     }
@@ -1714,134 +1870,197 @@ describe('Issue #4288 PR1c loader rows: the PR1b ↔ PR1c contract (design §5.2
   });
 });
 
-describe('Issue #4288 PR1c failure outcomes (design §3): the rows the driver makes; the others stay todo with their injection', () => {
-  interface Spec {
-    /** writes the canonical record / form; returns the record text kept (undefined: no canonical <lock>) */
-    setup: (base: string) => string | undefined;
-    env?: Record<string, string>;
-    /** the reader's own environment on top (a different TZ) */
-    expect: Partial<Record<'acquire-head' | 'guard-head', { result: string; kind?: string; lock?: 'unchanged' | 'absent' | 'mine' }>>;
-  }
+describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the table driven, and compared as the table says', () => {
   const lockOf = (base: string): string => path.join(base, 'supervisor.lock');
-  const withRecord =
-    (o: Omit<RecordOpts, 'pid'> & { pid?: number }, pidKind: 'live' | 'dead' | number = 'live') =>
-    (base: string): string => {
-      const pid = typeof pidKind === 'number' ? pidKind : pidKind === 'live' ? liveProcess() : deadPid();
-      fs.mkdirSync(lockOf(base), { recursive: true });
-      const text = recordText({ ...o, pid: o.pid ?? pid });
-      fs.writeFileSync(path.join(lockOf(base), 'owner'), text);
-      return text;
-    };
+  const writeLock = (base: string, text: string): string => {
+    fs.mkdirSync(lockOf(base), { recursive: true });
+    fs.writeFileSync(path.join(lockOf(base), 'owner'), text);
+    return text;
+  };
   const pidLstart = (pid: number, tz: string): string =>
     spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: tz } }).stdout.trim();
+  const shim = (aux: string, name: string, text: string): string => {
+    fs.mkdirSync(path.join(aux, 'bin'), { recursive: true });
+    const f = path.join(aux, 'bin', name);
+    fs.writeFileSync(f, text, { mode: 0o755 });
+    return f;
+  };
+  const sleepMs = (ms: number): void => {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  };
+  /** A pid kill -0 answers alive for although it ended: a child of a process that never waits for it. */
+  const zombiePid = (aux: string): number => {
+    const f = path.join(aux, 'zpid');
+    spawnSync('bash', ['-c', `( sh -c 'exit 0' & echo $! > '${f}'; echo $BASHPID > '${f}.parent'; exec sleep 600 ) </dev/null >/dev/null 2>&1 &`]);
+    for (let i = 0; i < 300; i++) {
+      if (fs.existsSync(`${f}.parent`)) {
+        // an empty (half-written) file reads as 0, and kill(0) is the whole process group — only a real pid goes in
+        const parent = Number(fs.readFileSync(`${f}.parent`, 'utf8').trim());
+        if (Number.isInteger(parent) && parent > 1 && !killPids.includes(parent)) killPids.push(parent);
+      }
+      if (fs.existsSync(f) && fs.existsSync(`${f}.parent`)) {
+        const z = Number(fs.readFileSync(f, 'utf8'));
+        if (/Z/.test(spawnSync('ps', ['-o', 'stat=', '-p', String(z)], { encoding: 'utf8' }).stdout)) return z;
+      }
+      sleepMs(50);
+    }
+    throw new Error('no zombie');
+  };
+  /** The base a killed supervisor left: it took the lock and was killed (SIGKILL), so its EXIT never ran. */
+  const killedHolder = (base: string): string => {
+    bashLib(base, 'product_lock_acquire t || exit 9\nkill -9 $$', {});
+    return fs.readFileSync(path.join(lockOf(base), 'owner'), 'utf8');
+  };
+  const liveRecord = (): string => recordText({ pid: liveProcess(), startedAt: isoNow() });
+  /** The §2 cell's fixture (setup of the form) with the failure's interference added. */
+  const onForm = (form: Form, obs: Obs, base: string, caller: Caller, extra: Partial<Fixture> & { env?: Record<string, string> }): Fixture => {
+    const fx = makeFixture(form, obs, base, caller);
+    return { ...fx, ...extra, env: { ...fx.env, ...(extra.env ?? {}) }, asForm: { form, obs } };
+  };
+  const callerIsRelease = (c: Caller): boolean => c === 'release-main';
 
-  const SPECS: Record<string, Spec> = {
-    'F1-kill0-eperm': {
-      setup: withRecord({ startedAt: isoNow() }, 1),
-      expect: { 'acquire-head': { result: 'refused', kind: 'eperm' }, 'guard-head': { result: 'kept', kind: 'eperm' } },
+  type SpecFn = (base: string, caller: ReachableCaller, aux: string) => Fixture;
+  const SPECS: Record<Failure, SpecFn | undefined> = {
+    'F1-kill0-eperm': (base) => ({ env: {}, before: writeLock(base, recordText({ pid: 1, startedAt: isoNow() })) }),
+    'F2-kill0-other': (base, caller): Fixture =>
+      callerIsRelease(caller)
+        ? { env: {}, takeFirst: true, afterAcquire: 'export CM_VERIFY_TEST_OBS_FAULT=pid=EIO' }
+        : { env: { CM_VERIFY_TEST_OBS_FAULT: 'pid=EIO' }, before: writeLock(base, liveRecord()) },
+    'F3-kill0-self-flips': (_base, _caller, aux) => {
+      // the first kill -0 (the release's check of $$) says EIO, the next one tells the truth
+      const cmd = shim(aux, 'kill0flip', `#!/bin/bash\nf="${aux}/count"; n=$(cat "$f" 2>/dev/null || echo 0); n=$((n+1)); echo $n >"$f"\nif [ "$n" = 1 ]; then echo "kill: ($3) - Input/output error" >&2; exit 1; fi\nkill -0 -- "$3"\n`);
+      return { env: {}, takeFirst: true, afterAcquire: `export CM_VERIFY_TEST_KILL0_CMD='${cmd}'` };
     },
-    'F2-kill0-other': {
-      setup: withRecord({ startedAt: isoNow() }),
-      env: { CM_VERIFY_TEST_OBS_FAULT: 'pid=EIO' },
-      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    'F4-zombie-holder': (base, _caller, aux) => ({ env: {}, before: writeLock(base, recordText({ pid: zombiePid(aux), startedAt: isoNow() })) }),
+    'F5-holder-killed': (base) => ({ env: {}, before: killedHolder(base) }),
+    'F6-ps-lstart-judge': (base) => {
+      const pid = liveProcess();
+      return { env: { CM_VERIFY_TEST_OBS_FAULT: 'lstart=EIO' }, before: writeLock(base, recordText({ pid, startedAt: isoNow(), lstart: lstartOf(pid) })) };
     },
-    'F6-ps-lstart-judge': {
-      setup: (base) => {
-        const pid = liveProcess();
-        return withRecord({ startedAt: isoNow(), lstart: lstartOf(pid) }, pid)(base);
-      },
-      env: { CM_VERIFY_TEST_OBS_FAULT: 'lstart=EIO' },
-      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    'F7-ps-lstart-at-write': (base) => ({ env: {}, before: writeLock(base, recordText({ pid: liveProcess(), startedAt: isoNow(), lstart: '' })) }),
+    'F8-tz-differs': (base) => {
+      const pid = liveProcess();
+      return { env: { TZ: 'Pacific/Auckland' }, bashPre: PIN_CLOCK, before: writeLock(base, recordText({ pid, startedAt: isoNow(), lstart: pidLstart(pid, 'UTC') })) };
     },
-    'F7-ps-lstart-at-write': {
-      setup: withRecord({ startedAt: isoNow(), lstart: '' }),
-      expect: { 'acquire-head': { result: 'refused', kind: 'rec' }, 'guard-head': { result: 'kept' } },
+    'F9-started-at-missing': (base) => {
+      const pid = liveProcess();
+      return { env: { TZ: 'Pacific/Auckland' }, before: writeLock(base, recordText({ pid, lstart: pidLstart(pid, 'UTC') })) };
     },
-    'F8-tz-differs': {
-      setup: (base) => {
-        const pid = liveProcess();
-        return withRecord({ startedAt: isoNow(), lstart: pidLstart(pid, 'UTC') }, pid)(base);
-      },
-      env: { TZ: 'Pacific/Auckland' },
-      expect: { 'acquire-head': { result: 'refused', kind: 'rec' }, 'guard-head': { result: 'kept' } },
+    'F10-hostname-changed': (base) => ({ env: {}, before: writeLock(base, recordText({ pid: liveProcess(), host: 'some-other-host.invalid', startedAt: isoNow() })) }),
+    'F11-mkdir-lock': () => ({ env: { CM_VERIFY_TEST_OBS_FAULT: 'mkdir-lock=EIO' } }),
+    'F12-owner-create-exists': (_base, _caller, aux) => {
+      // another taker's owner is published between this acquisition's mkdir and its own link
+      const text = liveRecord();
+      fs.writeFileSync(path.join(aux, 'rec'), text);
+      return {
+        env: {},
+        bashPre: `lock_test_pause() { if [ "$1" = owner-lock-made ]; then cp '${aux}/rec' "$LOCK_PATH/owner"; fi; }\n`,
+        planted: { [LOCK_NAME]: '', [`${LOCK_NAME}/owner`]: text },
+      };
     },
-    'F9-started-at-missing': {
-      setup: (base) => {
-        const pid = liveProcess();
-        return withRecord({ lstart: pidLstart(pid, 'UTC') }, pid)(base);
-      },
-      env: { TZ: 'Pacific/Auckland' },
-      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    'F13-owner-create-open': () => ({ env: { CM_VERIFY_TEST_OBS_FAULT: 'owner-create=EACCES' } }),
+    'F14-owner-write-or-readback': () => ({ env: { CM_VERIFY_TEST_HANDOFF: 'fault:owner-write' } }),
+    'F15-owner-unlink': () => ({ env: { CM_VERIFY_TEST_HANDOFF: 'fault:owner-write,fault:owner-unlink' } }),
+    'F16-lock-rmdir': () => ({ env: { CM_VERIFY_TEST_HANDOFF: 'fault:owner-write,fault:lock-rmdir' } }),
+    'F17-killed-mid-owner': (base) => ({ env: {}, before: writeLock(base, `pid=${liveProcess()}\nhost=${os.hostname()}\n`) }),
+    'F18-old-tmp-left': (base) => {
+      fs.mkdirSync(lockOf(base), { recursive: true });
+      fs.writeFileSync(path.join(lockOf(base), 'owner.tmp.4242'), 'pid=4242\n');
+      return { env: {} };
     },
-    'F10-hostname-changed': {
-      setup: withRecord({ host: 'some-other-host.invalid', startedAt: isoNow() }),
-      expect: { 'acquire-head': { result: 'refused', kind: 'host' }, 'guard-head': { result: 'kept', kind: 'host' } },
+    'F19-owner-read': (base, caller): Fixture =>
+      callerIsRelease(caller)
+        ? { env: {}, takeFirst: true, afterAcquire: 'export CM_VERIFY_TEST_OBS_FAULT=release-owner=EIO' }
+        : { env: { CM_VERIFY_TEST_OBS_FAULT: 'lock-owner=EIO' }, before: writeLock(base, liveRecord()) },
+    'F20-gone-listing': (base, caller) =>
+      caller === 'guard-head'
+        ? // the failing listing of the moved-aside records does not change what the guard does with a dead record
+          onForm('other-plain', 'gone', base, caller, { env: { CM_VERIFY_TEST_OBS_FAULT: 'list-root=EIO' } })
+        : { env: { CM_VERIFY_TEST_OBS_FAULT: 'list-root=EIO' } },
+    'F21-ownerless-rmdir': (base) => {
+      fs.mkdirSync(lockOf(base), { recursive: true });
+      spawnSync('touch', ['-t', OLD, lockOf(base)]);
+      return { env: { CM_VERIFY_TEST_OBS_FAULT: 'ownerless-rmdir=EIO' } };
     },
-    'F11-mkdir-lock': {
-      setup: () => undefined,
-      env: { CM_VERIFY_TEST_OBS_FAULT: 'mkdir-lock=EIO' },
-      expect: { 'acquire-head': { result: 'refused', kind: 'unk' } },
+    'F22-rename-aside-enoent': (base) => ({
+      // someone removes the lock just as this caller moves it aside
+      env: {},
+      bashPre: `${orig('lock_obs_mv')}lock_obs_mv() { if [ "$1" = rename-aside ]; then rm -rf "$2"; fi; orig_lock_obs_mv "$@"; }\n`,
+      before: writeLock(base, recordText({ pid: deadPid(), startedAt: isoNow() })),
+    }),
+    'F23-rename-aside-other': (base) => ({
+      env: { CM_VERIFY_TEST_OBS_FAULT: 'rename-aside=EIO' },
+      before: writeLock(base, recordText({ pid: deadPid(), startedAt: isoNow() })),
+    }),
+    'F24-recover-restore-mkdir': (base, _caller, aux) => {
+      // a successor took the lock after the dead record was judged: moved aside it is not the judged token, so it is put back —
+      // and the put-back's mkdir fails
+      const successor = recordText({ pid: liveProcess(), token: 'succ-token', startedAt: isoNow() });
+      fs.writeFileSync(path.join(aux, 'succ'), successor);
+      writeLock(base, recordText({ pid: deadPid(), startedAt: isoNow() }));
+      return {
+        env: { CM_VERIFY_TEST_OBS_FAULT: 'restore-mkdir=EIO' },
+        bashPre: `${orig('lock_obs_mv')}lock_obs_mv() { if [ "$1" = rename-aside ]; then cp '${aux}/succ' "$2/owner"; fi; orig_lock_obs_mv "$@"; }\n`,
+        aside: successor,
+      };
     },
-    'F17-killed-mid-owner': {
-      setup: (base) => {
-        fs.mkdirSync(lockOf(base), { recursive: true });
-        fs.writeFileSync(path.join(lockOf(base), 'owner'), `pid=${liveProcess()}\nhost=${os.hostname()}\n`);
-        return fs.readFileSync(path.join(lockOf(base), 'owner'), 'utf8');
-      },
-      expect: { 'acquire-head': { result: 'refused', kind: 'corrupt' }, 'guard-head': { result: 'kept', kind: 'corrupt' } },
+    'F25-settle-restore-mkdir': (base, caller) => ({ ...makeFixture('aside', 'alive', base, caller), env: { CM_VERIFY_TEST_OBS_FAULT: 'restore-mkdir=EIO' } }),
+    'F26-restore-rename': (base, caller) => ({ ...makeFixture('aside', 'alive', base, caller), env: { CM_VERIFY_TEST_OBS_FAULT: 'restore-rename=EIO' } }),
+    'F27-rm-gone': (base) => ({
+      env: {},
+      // the `rm -rf` of the dead record moved aside fails (|| true): the record stays aside, dead
+      bashPre: 'rm() { case "$*" in *.gone-*) return 1;; esac; command rm "$@"; }\n',
+      before: writeLock(base, recordText({ pid: deadPid(), startedAt: isoNow() })),
+      goneLeft: true,
+    }),
+    'F28-rm-release-held': () => ({ env: {}, takeFirst: true, afterAcquire: 'rm() { case "$*" in *supervisor.lock*) return 1;; esac; command rm "$@"; }' }),
+    'F29-ticket-ln': () => ({
+      env: {},
+      bashPre: 'ln() { case "$*" in *supervisor.queue*) echo "ln: $2: Permission denied" >&2; return 1;; esac; command ln "$@"; }\n',
+    }),
+    'F30-queue-list': (_base, caller, aux): Fixture =>
+      caller === 'guard-head'
+        ? {
+            // the publish of the ticket lists the queue twice before the head check: only from the third listing on it fails
+            env: {},
+            bashPre: `${orig('lock_obs_list')}lock_obs_list() { if [ "$1" = list-queue ]; then n=$(cat '${aux}/n' 2>/dev/null || echo 0); n=$((n+1)); echo $n >'${aux}/n'; if [ $n -ge 3 ]; then CM_VERIFY_TEST_OBS_FAULT=list-queue=EIO orig_lock_obs_list "$@"; return; fi; fi; orig_lock_obs_list "$@"; }\n`,
+          }
+        : { env: { CM_VERIFY_TEST_OBS_FAULT: 'list-queue=EIO' } },
+    'F31-mark-done': (base, caller) => {
+      const stay = 'lock_mark_done() { return 1; }\n';
+      if (caller === 'guard-head') return onForm('other-plain', 'gone', base, caller, { bashPre: stay, ticket: 'left-until-retirable' });
+      return { env: {}, bashPre: stay };
     },
-    'F18-old-tmp-left': {
-      setup: (base) => {
-        fs.mkdirSync(lockOf(base), { recursive: true });
-        fs.writeFileSync(path.join(lockOf(base), 'owner.tmp.4242'), 'pid=4242\n');
-        return undefined;
-      },
-      expect: { 'acquire-head': { result: 'refused', kind: 'tmp' }, 'guard-head': { result: 'kept', kind: 'tmp' } },
+    'F32-ps-etime': (_base, _caller, aux) => {
+      // the process of the ticket ahead started after the ticket was made (reused pid) — unless ps cannot say when
+      const ps = shim(aux, 'ps', '#!/bin/bash\ncase "$*" in *etime*) exit 1;; esac\nexec /bin/ps "$@"\n');
+      void ps;
+      return { env: { PATH: `${path.join(aux, 'bin')}:${process.env.PATH ?? ''}` }, ahead: { createdAt: 1000 } };
     },
-    'F19-owner-read': {
-      setup: withRecord({ startedAt: isoNow() }),
-      env: { CM_VERIFY_TEST_OBS_FAULT: 'lock-owner=EIO' },
-      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
-    },
-    'F21-ownerless-rmdir': {
-      setup: (base) => {
-        fs.mkdirSync(lockOf(base), { recursive: true });
-        spawnSync('touch', ['-t', OLD, lockOf(base)]);
-        return undefined;
-      },
-      env: { CM_VERIFY_TEST_OBS_FAULT: 'ownerless-rmdir=EIO' },
-      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
-    },
-    'F30-queue-list': {
-      setup: withRecord({ startedAt: isoNow() }),
-      env: { CM_VERIFY_TEST_OBS_FAULT: 'list-queue=EIO' },
-      // the guard's not-head(unk) needs the list fault to hit only the second listing (the ticket publish lists the
-      // queue too, with the same point, and fails first): not driven, F30 × guard-head stays a todo
-      expect: { 'acquire-head': { result: 'refused', kind: 'unk' } },
+    'F33-loader': undefined,
+    'F34-reclaim-rename-or-rmdir': (base, caller) => {
+      // a put-back stopped half way (an empty <lock>) while the dead record is still aside; the empty <lock> cannot be taken out
+      const fx = makeFixture('aside', 'gone', base, caller);
+      fs.mkdirSync(lockOf(base), { recursive: true });
+      return { ...fx, env: { CM_VERIFY_TEST_OBS_FAULT: 'reclaim-rmdir=EIO' } };
     },
   };
 
-  function driveSpec(key: string, caller: 'acquire-head' | 'guard-head'): void {
-    const spec = SPECS[key];
-    const want = spec.expect[caller];
-    if (!want) throw new Error(`no expectation for ${key} × ${caller}`);
+  function driveFailure(key: Failure, caller: ReachableCaller): void {
+    const outcome = (FAILURE_TABLE[key].callers as Record<string, Outcome<Caller>>)[caller];
     const base = mkTmp('cm-sup-lock-');
-    const before = spec.setup(base);
-    const body = caller === 'acquire-head' ? `product_lock_acquire t; rc=$?\n${REPORT}` : `product_lock_recover_only; rc=$?\n${REPORT}`;
-    const res = bashLib(base, body, spec.env ?? {});
-    const ran = parseReport(res.stdout, res.stderr, base);
-    expect(ran.result, `${key} × ${caller}: ${res.stderr}`).toBe(want.result);
-    if (want.kind) expect(ran.kind, ran.error).toBe(want.kind);
-    if (want.lock !== 'absent') {
-      if (before !== undefined) expect(lockOwnerText(base)).toBe(before);
-      else expect(lockOwnerText(base)).toBeUndefined();
-    }
-    // no ticket of the caller left open
-    for (const text of Object.values(ran.tickets)) expect(text).toContain('"done":true');
+    const aux = mkTmp('cm-sup-aux-');
+    const spec = SPECS[key];
+    if (spec === undefined) throw new Error(`no driver for ${key}`);
+    const fx = spec(base, caller, aux);
+    const cell = ('asForm' in outcome ? (TABLE as Table)[fx.asForm?.form as Form][caller][fx.asForm?.obs as Obs] : outcome) as Row<Caller>;
+    const d = runWith(caller, base, fx);
+    assertOutcome({ ...cell, ticket: fx.ticket ?? cell.ticket }, d, caller, `${key} × ${caller}`);
   }
 
   /** F33: the machine lock did not load. */
-  function driveLoader(caller: 'acquire-head' | 'acquire-behind' | 'guard-head' | 'guard-behind' | 'release-main'): void {
+  function driveLoader(caller: ReachableCaller): void {
+    const outcome = (FAILURE_TABLE['F33-loader'].callers as Record<string, Outcome<Caller>>)[caller] as Row<Caller>;
     const tree = mkTmp('cm-sup-tree-');
     for (const rel of ['scripts/agent-health/product/lib.sh', 'scripts/agent-health/product/ledger.py', 'scripts/lib/port-pids.sh', 'scripts/lib/machine-lock.sh', 'scripts/uat/run-lock.sh', '.claude/skills/cmate-verify/scripts/verify-run.sh']) {
       fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true });
@@ -1850,40 +2069,169 @@ describe('Issue #4288 PR1c failure outcomes (design §3): the rows the driver ma
     const bad = path.join(tree, 'markers-twice.sh');
     fs.writeFileSync(bad, `${fs.readFileSync(VERIFY_RUN_SH, 'utf8')}\n# --- machine-wide gate lock\n`);
     const base = mkTmp('cm-sup-lock-');
+    const fx: Fixture = { env: { MACHINE_LOCK_VERIFY_RUN: bad } };
     if (caller.endsWith('behind')) placeTicketAhead(base);
-    const fn = caller.startsWith('acquire') ? 'product_lock_acquire t' : caller.startsWith('guard') ? 'product_lock_recover_only' : 'product_lock_release';
-    const res = bashLib(base, `${fn}; rc=$?\n${REPORT}`, { MACHINE_LOCK_VERIFY_RUN: bad }, path.join(tree, 'scripts/agent-health/product/lib.sh'));
-    const ran = parseReport(res.stdout, res.stderr, base);
-    expect(ran.result).toBe(caller.startsWith('acquire') ? 'refused' : caller.startsWith('guard') ? 'unloaded' : 'none');
-    if (!caller.startsWith('release')) expect(ran.error).toMatch(/^busy: the machine lock could not be loaded/);
-    expect(fs.existsSync(lockOf(base))).toBe(false);
-    // no ticket of its own was taken (the one placed ahead is the only one)
-    expect(Object.keys(ran.tickets).filter((n) => !caller.endsWith('behind') || n !== '000000000001')).toEqual([]);
+    const beforeSnap = snap(base);
+    const res = bashLib(base, callBody(caller, fx, base), fx.env, path.join(tree, 'scripts/agent-health/product/lib.sh'));
+    assertOutcome(outcome, { ran: parseReport(res.stdout, res.stderr, base), fx, base, beforeSnap }, caller, `F33-loader × ${caller}`);
   }
 
   for (const o of FAILURE_OUTCOMES) {
     const out = 'asForm' in o.outcome ? 'as the §2 cell' : `${o.outcome.result}${o.outcome.message ? ` (${o.outcome.message})` : ''} / ${o.outcome.lock} / ticket ${o.outcome.ticket}`;
     const title = `${o.failure} × ${o.caller}: ${FAILURE_TABLE[o.failure].direction} → ${out}`;
-    const spec = SPECS[o.failure];
-    if (HAS_TOOLS && spec && (o.caller === 'acquire-head' || o.caller === 'guard-head') && spec.expect[o.caller]) {
-      it(title, () => driveSpec(o.failure, o.caller as 'acquire-head' | 'guard-head'), 60_000);
-    } else if (HAS_TOOLS && o.failure === 'F33-loader' && o.caller !== ('d5-head' as string)) {
-      it(title, () => driveLoader(o.caller as 'acquire-head'), 60_000);
-    } else if (HAS_TOOLS && o.failure === 'F2-kill0-other' && o.caller === 'release-main') {
-      it(title, () => {
-        const { ran } = runRow('release-main', 'own', 'unknown');
-        expect(ran.result).toBe('deferred');
-      }, 60_000);
-    } else if (HAS_TOOLS && o.failure === 'F19-owner-read' && o.caller === 'release-main') {
-      it(title, () => {
-        const base = mkTmp('cm-sup-lock-');
-        const res = bashLib(base, `product_lock_acquire t || exit 9\nexport CM_VERIFY_TEST_OBS_FAULT=release-owner=EIO\nproduct_lock_release; rc=$?\n${REPORT}`, {});
-        const ran = parseReport(res.stdout, res.stderr, base);
-        expect(ran.result).toBe('deferred');
-        expect(lockOwnerText(base)).toContain('label=t');
-      }, 60_000);
+    if (!HAS_TOOLS) {
+      it.todo(`${title} — needs ps and hostname`);
+    } else if (o.failure === 'F33-loader') {
+      it(title, () => driveLoader(o.caller), 60_000);
     } else {
-      it.todo(title);
+      it(title, () => driveFailure(o.failure, o.caller), 60_000);
     }
   }
+});
+
+describe('Issue #4288 PR1c lib.sh details the tables do not name (PM Claude P3-2/3/4/5/7, codex P3-2)', () => {
+  const kv = (text: string | undefined, key: string): string | undefined => text?.split('\n').find((l) => l.startsWith(`${key}=`))?.slice(key.length + 1);
+
+  it('an own record carries label, lstart (D7), started_at and v=1, and no pgid (S7) — a lstart that goes missing is red', () => {
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(base, `product_lock_acquire mylabel; rc=$?\n${REPORT}`, {});
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result).toBe('acquired');
+    const owner = lockOwnerText(base);
+    expect(kv(owner, 'label')).toBe('mylabel');
+    expect(owner).toMatch(LSTART_LINE);
+    expect(kv(owner, 'started_at')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(kv(owner, 'v')).toBe('1');
+    expect(owner).not.toContain('pgid=');
+  });
+
+  it('LOCK_OWNER_EXTRA is set after the section is loaded: a value from the environment is not inherited, lstart= is in the record (PR1a-f clears it at load)', () => {
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(base, `product_lock_acquire real; rc=$?\n${REPORT}`, { LOCK_OWNER_EXTRA: 'lstart=from-the-environment\nlabel=env' });
+    expect(parseReport(res.stdout, res.stderr, base).result).toBe('acquired');
+    const owner = lockOwnerText(base);
+    expect(kv(owner, 'label')).toBe('real');
+    expect(owner).toMatch(LSTART_LINE);
+    expect(owner).not.toContain('from-the-environment');
+  });
+
+  it('S2: the acquisition has a budget of 0 — behind a live ticket it answers at once, not after a wait', () => {
+    const base = mkTmp('cm-sup-lock-');
+    placeTicketAhead(base);
+    const res = bashLib(base, `t0=$(lock_now_ms); product_lock_acquire t; rc=$?; t1=$(lock_now_ms)\n${REPORT}\necho "MS=$((t1 - t0))"`, {});
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result).toBe('refused');
+    expect(ran.kind).toBe('queue');
+    const ms = Number((res.stdout.split('\n').find((l) => l.startsWith('MS=')) ?? 'MS=999999').slice(3));
+    expect(ms, 'a budget of 2 s would wait 2000 ms or more').toBeLessThan(1500);
+  });
+
+  it("S10: every call puts the section's options down again — values left by another caller in the same shell do not leak in", () => {
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(
+      base,
+      `LOCK_WANT_TOKEN=bogus-token LOCK_OWNER_PID=1 LOCK_PENDING_TOKEN=pending LOCK_OWNER_EXTRA='label=zzz' LOCK_OWNERLESS_GRACE_MS=1\nproduct_lock_acquire t; rc=$?\n${REPORT}\necho "SELF=$$"`,
+      {},
+    );
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result, res.stderr).toBe('acquired');
+    const owner = lockOwnerText(base);
+    expect(kv(owner, 'token')).not.toBe('bogus-token');
+    expect(kv(owner, 'pid')).toBe((res.stdout.split('\n').find((l) => l.startsWith('SELF=')) ?? '').slice(5));
+    expect(kv(owner, 'label')).toBe('t');
+  });
+
+  it("S10 (release): the release puts the section's options down again too — a codec another caller left in the shell does not make it miss its own record", () => {
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(
+      base,
+      `product_lock_acquire t || exit 9\nlock_parse_owner_text() { LPO_PID=""; LPO_HOST=""; LPO_TOKEN=""; LPO_PGID=""; LPO_LSTART=""; LPO_STARTED_AT=""; LPO_V=""; }\nLOCK_OWNER_CODEC=other\nproduct_lock_release; rc=$?\n${REPORT}`,
+      {},
+    );
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result, res.stderr).toBe('released');
+    expect(fs.existsSync(path.join(base, 'supervisor.lock')), 'the lock is gone').toBe(false);
+  });
+
+  it("I3's grace is lib.sh's own constant: changing I4's (0-byte owner) grace does not move the grace of an owner-less <lock>", () => {
+    const lib = codeLines(fs.readFileSync(LIB_SH, 'utf8')).join('\n');
+    expect(lib).toMatch(/^PRODUCT_LOCK_OWNERLESS_GRACE_MS=600000$/m);
+    expect(lib).toContain('LOCK_OWNERLESS_GRACE_MS=$PRODUCT_LOCK_OWNERLESS_GRACE_MS');
+    expect(lib).not.toContain('LOCK_EMPTY_OWNER_GRACE_MS');
+    const base = mkTmp('cm-sup-lock-');
+    fs.mkdirSync(path.join(base, 'supervisor.lock'));
+    const res = bashLib(base, `LOCK_EMPTY_OWNER_GRACE_MS=1\nsleep 0.1\nproduct_lock_acquire t; rc=$?\n${REPORT}`, {});
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result, 'a fresh empty <lock> is young whatever I4 says').toBe('refused');
+    expect(ran.kind).toBe('taking');
+  });
+
+  it('PRODUCT_LOCK_KIND is emptied by every call: a refusal does not leave its kind to a later success, rejection or release', () => {
+    const base = mkTmp('cm-sup-lock-');
+    fs.mkdirSync(path.join(base, 'supervisor.lock'));
+    fs.writeFileSync(path.join(base, 'supervisor.lock', 'owner'), `pid=${liveProcess()}\n`);
+    const res = bashLib(
+      base,
+      `product_lock_acquire t; echo "A=$PRODUCT_LOCK_KIND"\nproduct_lock_acquire; echo "B=$PRODUCT_LOCK_KIND $PRODUCT_LOCK_RESULT"\nproduct_lock_recover_only; echo "C=$PRODUCT_LOCK_KIND"\nproduct_lock_release; echo "D=$PRODUCT_LOCK_KIND"\nrm -rf "${base}/supervisor.lock"\nproduct_lock_acquire t; echo "E=$PRODUCT_LOCK_KIND $PRODUCT_LOCK_RESULT"\nproduct_lock_release; echo "F=$PRODUCT_LOCK_KIND $PRODUCT_LOCK_RESULT"`,
+      {},
+    );
+    expect(res.stdout).toContain('A=corrupt');
+    expect(res.stdout).toContain('B= rejected');
+    expect(res.stdout).toContain('C=corrupt');
+    expect(res.stdout).toContain('D=\n');
+    expect(res.stdout).toContain('E= acquired');
+    expect(res.stdout).toContain('F= released');
+  });
+
+  it("F17 (PR1a-f I4): a 0-byte owner past the grace is the head's to take out; within it, and a half-written one, are told and kept", () => {
+    const empty = (old: boolean): string => {
+      const base = mkTmp('cm-sup-lock-');
+      fs.mkdirSync(path.join(base, 'supervisor.lock'));
+      fs.writeFileSync(path.join(base, 'supervisor.lock', 'owner'), '');
+      if (old) spawnSync('touch', ['-t', OLD, path.join(base, 'supervisor.lock', 'owner')]);
+      return base;
+    };
+    const acquire = (base: string): Ran => {
+      const res = bashLib(base, `product_lock_acquire t; rc=$?\n${REPORT}`, {});
+      return parseReport(res.stdout, res.stderr, base);
+    };
+    const guard = (base: string): Ran => {
+      const res = bashLib(base, `product_lock_recover_only; rc=$?\n${REPORT}`, {});
+      return parseReport(res.stdout, res.stderr, base);
+    };
+    const a = acquire(empty(true));
+    expect(a.result).toBe('acquired');
+    const gBase = empty(true);
+    expect(guard(gBase).result).toBe('removed');
+    expect(fs.existsSync(path.join(gBase, 'supervisor.lock'))).toBe(false);
+    const young = empty(false);
+    const y = acquire(young);
+    expect(y.result).toBe('refused');
+    expect(y.kind).toBe('corrupt');
+    expect(y.error).toContain('is empty');
+    expect(y.error).not.toContain('by hand');
+    expect(lockOwnerText(young)).toBe('');
+    const yg = guard(young);
+    expect(yg.result).toBe('kept');
+    expect(yg.kind).toBe('corrupt');
+  });
+
+  it('ownerless-tmp (PR1a-f I3): the young tmp is told without a "by hand" order that is false for it', () => {
+    const base = mkTmp('cm-sup-lock-');
+    fs.mkdirSync(path.join(base, 'supervisor.lock'));
+    fs.writeFileSync(path.join(base, 'supervisor.lock', 'owner.tmp.4242'), 'pid=4242\n');
+    const res = bashLib(base, `product_lock_acquire t; rc=$?\n${REPORT}`, {});
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.kind).toBe('tmp');
+    expect(ran.error).toContain('PR1a-f I3');
+    expect(ran.error).not.toMatch(/not taken; remove .* by hand/);
+  });
+
+  it('F32 positive control: without the failing etime, the process of the ticket ahead started after the ticket was made — the ticket is retired and the lock taken', () => {
+    const base = mkTmp('cm-sup-lock-');
+    placeTicketAhead(base, 1000);
+    const res = bashLib(base, `product_lock_acquire t; rc=$?\n${REPORT}`, {});
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result, res.stderr).toBe('acquired');
+  });
 });
