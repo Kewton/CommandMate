@@ -95,7 +95,9 @@ function proposeWords(kind: string, closeWhen: string | undefined): string[] {
 async function exitOf(kind: string, closeWhen: string | undefined): Promise<number> {
   const { seen, error } = await parseThroughCli(proposeWords(kind, closeWhen));
   if (error !== null || seen.length !== 1) return 2;
-  return parseCloseWhen(kind as MemKind, seen[0].closeWhen).ok ? 0 : MEM_EXIT_BY_CODE.invalid_close_when;
+  // The kind the CLI parsed must be the kind asked for: the rule is applied to what the CLI saw.
+  expect(seen[0].kind).toBe(kind);
+  return parseCloseWhen(seen[0].kind as MemKind, seen[0].closeWhen).ok ? 0 : MEM_EXIT_BY_CODE.invalid_close_when;
 }
 
 describe('[#4227 G9 PR4] the request text says which kinds need --close-when, and the values that are taken', () => {
@@ -158,5 +160,25 @@ describe('[#4227 G9 PR4] the request text says which kinds need --close-when, an
       const taken = KINDS.some((kind) => CLOSE_WHEN_ALLOWED[kind].has(type));
       expect(forms.includes(CLOSE_WHEN_FORMS[type])).toBe(taken);
     }
+  });
+
+  it('the line of a kind: the example run under another kind is refused (the kind parsed is the one checked)', async () => {
+    // `next`'s example (manual) under `decision`, which does not take manual.
+    expect(await exitOf('decision', exampleOf('next'))).toBe(MEM_EXIT_BY_CODE.invalid_close_when);
+  });
+
+  it('the help of handoff names the kinds that require --close-when, the same as the rule', async () => {
+    const required = KINDS.filter((kind) => CLOSE_WHEN_DEFAULTS[kind] === null);
+    const program = buildProgram();
+    const handoff = program.commands.find((c) => c.name() === 'handoff')!;
+    const add = handoff.commands.find((c) => c.name() === 'propose')!.commands.find((c) => c.name() === 'add')!;
+    const option = add.options.find((o) => o.long === '--close-when')!;
+    const fromHelp = (text: string): string[] => /required for ([a-z]+(?: \/ [a-z]+)*)/.exec(text)?.[1].split(' / ') ?? [];
+    expect(fromHelp(option.description)).toEqual(required);
+    let help = '';
+    handoff.configureOutput({ writeOut: (t) => void (help += t), writeErr: () => undefined });
+    handoff.outputHelp();
+    expect(help).toMatch(/required for kind waiting \/ next \/ external/);
+    expect(help).toMatch(new RegExp(`optional for ${KINDS.filter((k) => !required.includes(k)).join(' / ')}`));
   });
 });

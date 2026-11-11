@@ -35,6 +35,9 @@ writes it against the item's version. Approving, cancelling and ending are the s
 Target: inside a CommandMate session, your own instance (whoami). In an ordinary shell,
 name it: --worktree <id> --instance <id>.
 
+--close-when of "propose add": required for kind waiting / next / external (without it: exit 2,
+nothing stored); optional for decision / note. The values a kind takes are in "mem --help".
+
 Exit codes:
   0   done
   1   the server is not running
@@ -233,7 +236,7 @@ export function createHandoffCommand(): Command {
       .option('--kind <kind>', `Kind: ${MEM_KINDS.filter((kind) => kind !== 'now').join(', ')}`)
       .option('--text <text>', 'Text')
       .option('--stdin', 'Read the text from stdin')
-      .option('--close-when <cond>', 'When it closes')
+      .option('--close-when <cond>', 'When it closes (required for waiting / next / external)')
       .option('--evidence <ref>', 'Evidence path (repeatable)', collect)
       .option('--promote-to <dest>', 'Where a decision is reflected'),
     'here-or-before'
