@@ -110,15 +110,24 @@ export function parseEtime(text) {
 /**
  * When `pid` started (ms since epoch), from `ps -o etime=`; null when ps cannot say. `now` is taken
  * before ps and `clock()` again after it (#4288 PR1a-f, P1's observation window): a clock that stepped
- * back in between, or a read of 1 s or more, is null too (a step inside it cannot be told).
+ * back in between, or a read of 1 s or more, is null too (a step inside it cannot be told). `why.code`
+ * says which null it is: ECLOCK for the clock (I3 names it so, F53), EINVAL for ps that cannot say.
+ *
+ * @param {{ code?: string }} [why]
  */
-export function processStartMs(pid, now = Date.now(), clock = () => Date.now()) {
+export function processStartMs(pid, now = Date.now(), clock = () => Date.now(), why = {}) {
   const r = spawnSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8' });
   const after = clock();
+  why.code = 'EINVAL';
   if (r.error || r.status !== 0) return null;
-  if (after < now || after - now >= 1000) return null;
+  if (after < now || after - now >= 1000) {
+    why.code = 'ECLOCK';
+    return null;
+  }
   const elapsed = parseEtime(r.stdout);
-  return elapsed === null ? null : now - elapsed;
+  if (elapsed === null) return null;
+  delete why.code;
+  return now - elapsed;
 }
 
 /** EPERM is alive (someone else's process); only ESRCH is gone. */
@@ -395,6 +404,19 @@ export function listQueue(queueDir) {
 const isLive = (entry) => entry.ticket === null || entry.ticket.done !== true;
 
 /**
+ * Remove this call's own tmp (#4288 PR1a-f impl-2): never throws — `force` quiets ENOENT only, so an
+ * EACCES / EIO of the unlink is caught here. The errno, or null when removed or gone already.
+ */
+function removeOwnTmp(tmp) {
+  try {
+    fs.rmSync(tmp, { force: true });
+    return null;
+  } catch (err) {
+    return typeof err?.code === 'string' ? err.code : 'EUNKNOWN';
+  }
+}
+
+/**
  * Mark the ticket at `file` used, if it is still `token`'s: a `{done:true}` record
  * renamed over it, so readers see the old or the new content, never half.
  */
@@ -663,7 +685,7 @@ function ownerlessTempsOnly(ctx) {
     const st = ctx.obs.lstat('ownerless-tmp-lstat', file);
     if (st.state === 'unknown') return { state: 'unknown', unknown: { point: 'ownerless-tmp-lstat', path: file, code: st.code } };
     if (st.state === 'absent') continue;
-    if (st.state !== 'other' || st.link) return { state: 'stray', name };
+    if (st.state !== 'other' || st.link || !st.file) return { state: 'stray', name }; // a FIFO, a socket … too (as bash)
     temps.push({ name, file, mtimeMs: st.mtimeMs, pid: old ? Number(old[1]) : null });
   }
   return temps.length === 0 ? { state: 'empty' } : { state: 'temps', temps };
@@ -703,8 +725,9 @@ function expireOwnerless(ctx, graceMs, now) {
     const pid = ctx.obs.pid('owner-tmp-pid', t.pid);
     if (pid.state === 'gone') continue;
     if (pid.state === 'unknown') return { state: 'unknown', unknown: { point: 'owner-tmp-pid', path: t.file, code: pid.code } };
-    const start = ctx.startOf(t.pid);
-    if (start === null) return { state: 'unknown', unknown: { point: 'etime', path: t.file, code: 'EINVAL' } };
+    const why = {};
+    const start = ctx.startOf(t.pid, why);
+    if (start === null) return { state: 'unknown', unknown: { point: 'etime', path: t.file, code: why.code ?? 'EINVAL' } };
     if (start > t.mtimeMs + PID_REUSE_SLACK_MS) continue;
     ctx.warnOnce(`machine-lock-ownerless-old-taker ${ctx.lockPath} pid=${t.pid} (an older writer that may be stopped before its rename: not taken out)`);
     return { state: 'old-taker' };
@@ -1056,6 +1079,11 @@ export function acquireMachineLockSync(name, options) {
     warned.add(line);
     warn(line);
   };
+  // setOwnerFields / handOff answer false, never throw: a tmp that cannot be removed is named and left.
+  const dropOwnTmp = (tmp) => {
+    const code = removeOwnTmp(tmp);
+    if (code) warn(`machine-lock-tmp-left ${tmp} (${code}; this call's own tmp, not removed)`);
+  };
   const now = hooks.now ?? (() => Date.now());
   const host = hooks.host ?? os.hostname();
   const startCache = new Map();
@@ -1065,12 +1093,15 @@ export function acquireMachineLockSync(name, options) {
     obs,
     link: hooks.link ?? ((src, dst) => fs.linkSync(src, dst)),
     beforeLink: hooks.beforeLink,
-    startOf: (pid) => {
+    startOf: (pid, why = {}) => {
       if (hooks.startOf) return hooks.startOf(pid);
       const cached = startCache.get(pid);
-      if (cached && now() - cached.at < START_RECHECK_MS) return cached.start;
-      const start = processStartMs(pid, now(), now);
-      startCache.set(pid, { start, at: now() });
+      if (cached && now() - cached.at < START_RECHECK_MS) {
+        if (cached.code) why.code = cached.code;
+        return cached.start;
+      }
+      const start = processStartMs(pid, now(), now, why);
+      startCache.set(pid, { start, at: now(), code: why.code });
       return start;
     },
   };
@@ -1257,7 +1288,7 @@ export function acquireMachineLockSync(name, options) {
                     fs.renameSync(tmp, path.join(lockPath, 'owner'));
                     return true;
                   } catch {
-                    fs.rmSync(tmp, { force: true });
+                    dropOwnTmp(tmp);
                     return false;
                   }
                 },
@@ -1277,12 +1308,12 @@ export function acquireMachineLockSync(name, options) {
                     if (code) throw Object.assign(new Error(`${code}: injected at handoff-tmp ${tmp}`), { code });
                     fs.writeFileSync(tmp, codec.format({ ...read.owner, pid, token: t1, pgid }));
                   } catch {
-                    fs.rmSync(tmp, { force: true });
+                    dropOwnTmp(tmp);
                     return { ok: false, stage: 'tmp', token: t1 };
                   }
                   hooks.onRecover?.('hand-off-tmp');
                   if (obs.rename('handoff-publish', tmp, path.join(lockPath, 'owner')).state !== 'moved') {
-                    fs.rmSync(tmp, { force: true });
+                    dropOwnTmp(tmp);
                     return { ok: false, stage: 'mv', token: t1 };
                   }
                   const back = obs.owner('handoff-verify', lockPath);
@@ -1365,7 +1396,7 @@ function asHead(lockPath, options, whenHead) {
     obs,
     link: hooks.link ?? ((src, dst) => fs.linkSync(src, dst)),
     beforeLink: hooks.beforeLink,
-    startOf: (pid) => (hooks.startOf ? hooks.startOf(pid) : processStartMs(pid, now(), now)),
+    startOf: (pid, why = {}) => (hooks.startOf ? hooks.startOf(pid) : processStartMs(pid, now(), now, why)),
   };
   const root = path.dirname(lockPath);
   const queueDir = queueDirOfPath(lockPath);

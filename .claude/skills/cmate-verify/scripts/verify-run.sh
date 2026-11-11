@@ -670,8 +670,10 @@ LOCK_OWNER_PID=""
 LOCK_OWNERLESS_GRACE_MS=""
 LOCK_OWNER_CODEC=""
 # The caller's own lines of a kv record (scripts/lib/machine-lock.sh's codec: label=, run_dir=, lstart=).
-# A key the section writes itself is refused (#4288 PR1a-f I1-c, lock_owner_extra_reserved).
-LOCK_OWNER_EXTRA=${LOCK_OWNER_EXTRA:-}
+# A key the section writes itself is refused (#4288 PR1a-f I1-c, lock_owner_extra_reserved). Not taken
+# from the environment (like the options above): set by the caller after the load, so an exported value
+# never reaches a record nor refuses the verify gate's JSON acquisition.
+LOCK_OWNER_EXTRA=""
 case "${CM_VERIFY_TEST_HANDOFF_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) HANDOFF_WAIT_SEC=$CM_VERIFY_TEST_HANDOFF_WAIT_SEC;; esac
 
 # Milliseconds since the epoch. `date +%s%3N` where date has it (GNU), else
@@ -773,7 +775,9 @@ lock_errno_text() { # <errno>
 }
 
 # An errno carried in an exit code (lock_obs_create answers from a pipeline's last element): its
-# index in LOCK_ERRNOS (LEI_INDEX; a name not listed is EUNKNOWN's), and back.
+# index in LOCK_ERRNOS (LEI_INDEX; a name not listed is EUNKNOWN's), and back. The bands of
+# lock_obs_create (10+i, 40+i, 70+i, 85+i, 100+i; 99 is F11's ENOENT) hold for at most 14 names:
+# a 15th would make 85+14 read as 99 (tests/unit/verification/lock-pr1af-impl2-4288.test.ts fixes it).
 LOCK_ERRNOS="ESRCH EPERM EACCES ENOENT EEXIST EIO EISDIR ENOTDIR ENOTEMPTY ENOSPC ELOOP EROFS EINVAL EUNKNOWN"
 lock_errno_index() { # <errno>
   LEI_INDEX=0
@@ -919,7 +923,9 @@ lock_obs_owner() { # <point> <dir>
     lob_out=$(lock_errno_text "$LTF_CODE")
     lob_rc=1
   else
-    lob_out=$(LC_ALL=C cat -- "$2/owner" 2>&1)
+    # The `.` keeps the trailing newlines `$(…)` would drop: an owner of only newlines is not of 0
+    # bytes (corrupt and named, as the JS reads it; never I4's to take out).
+    lob_out=$(LC_ALL=C cat -- "$2/owner" 2>&1 && echo .)
     lob_rc=$?
   fi
   if [ "$lob_rc" -ne 0 ]; then
@@ -927,9 +933,15 @@ lock_obs_owner() { # <point> <dir>
     if [ "$LOB_CODE" = ENOENT ] && [ ! -L "$2/owner" ]; then LOB_CLASS=missing; fi
     return 0
   fi
+  lob_out=${lob_out%.}
   if [ -z "$lob_out" ]; then
     LOB_CLASS=corrupt
     LOB_EMPTY=1
+    return 0
+  fi
+  while [ "${lob_out%$'\n'}" != "$lob_out" ]; do lob_out=${lob_out%$'\n'}; done
+  if [ -z "$lob_out" ]; then
+    LOB_CLASS=corrupt
     return 0
   fi
   # A caller's own record format (#4288 PR1a D1: run-lock / supervisor.lock keep key=value lines). The
@@ -1300,12 +1312,13 @@ lock_etime_ms() { # <etime text>
 # When <pid> started (ms), from `ps -o etime=`; empty when ps cannot say. The clock is read before ps
 # and again after it (#4288 PR1a-f, P1's observation window): a step back in between, or a read of 1 s
 # or more, is empty too (a step inside it cannot be told; the ticket is not retired, an older tmp not
-# taken out). The start is <before> − etime. No cache: a command substitution cannot keep one.
+# taken out) and returns 3, so I3 names it ECLOCK (F53); ps that cannot say is empty with 0. The start
+# is <before> − etime. No cache: a command substitution cannot keep one.
 lock_pid_start_ms() { # <pid>
   lps_before=$(lock_now_ms) || return 0
   if ! lps_et=$(ps -o etime= -p "$1" 2>/dev/null); then return 0; fi
   lps_after=$(lock_now_ms) || return 0
-  if [ "$lps_after" -lt "$lps_before" ] || [ $(( lps_after - lps_before )) -ge 1000 ]; then return 0; fi
+  if [ "$lps_after" -lt "$lps_before" ] || [ $(( lps_after - lps_before )) -ge 1000 ]; then return 3; fi
   lps_ms=$(lock_etime_ms "$lps_et") || return 0
   echo $(( lps_before - lps_ms ))
 }
@@ -1768,9 +1781,10 @@ LEO_EOF
         LEO_RESULT=unknown
         return 1;;
     esac
-    leo_start=$(lock_pid_start_ms "$leo_pid") || leo_start=""
+    leo_why=EINVAL
+    leo_start=$(lock_pid_start_ms "$leo_pid") || { [ "$?" = 3 ] && leo_why=ECLOCK; leo_start=""; }
     if [ -z "$leo_start" ]; then
-      lock_note_unknown etime "$1/$leo_n" EINVAL
+      lock_note_unknown etime "$1/$leo_n" "$leo_why"
       LEO_RESULT=unknown
       return 1
     fi
@@ -2135,11 +2149,13 @@ lock_release() { # <lock-path> <token>
     unknown)
       echo "verify-run: machine-lock-release-deferred $1 point=release-owner errno=$LOB_CODE" >&2
       return 1;;
-    missing)
+    missing|corrupt)
       # The lock was moved aside (or never had an owner): this run's own records are cleaned. The
       # <lock> is NOT removed (#4288 PR1a-f §3.1, as lock_release_held): an owner-less <lock> is not
       # shown to be ours (an older head's move-aside, a put-back half way, another taker's K1); the
-      # clean-up (I3) and the take-back-half deal with one left empty.
+      # clean-up (I3) and the take-back-half deal with one left empty. Nor is one whose owner cannot be
+      # parsed or is of 0 bytes (corrupt, I4: nobody removes an owner it cannot read by its name; an
+      # empty one past its grace is the head's, through lock_reclaim_empty_owner).
       lock_release_own_gone "$1" "$2"
       lock_forget_held "$1" "$2"
       return 0;;

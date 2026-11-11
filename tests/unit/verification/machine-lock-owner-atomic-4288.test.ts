@@ -2034,6 +2034,31 @@ async function atStage(impl: Impl, caller: FCaller, r: string, stage: Pause, act
   return H.drive(impl, whoOf(caller), r, { ...o, hooks: { ...(o.hooks ?? {}), onOwnerStage: (s: string) => (s === stage ? act() : undefined) } });
 }
 
+/**
+ * Something done inside the undo of a publish whose read-back failed (owner-readback=EIO): at `point`
+ * (owner-undo-rename: before the rename; owner-undo-lstat: after it, before the inode check), once. bash
+ * reaches the point through lock_test_obs_fault in the pipeline's subshell, wrapped here to pause there
+ * (as F23 wraps lock_obs_unlink); sync and TS through hooks.fault, which acts and injects nothing.
+ */
+async function atUndo(impl: Impl, caller: FCaller, r: string, point: 'owner-undo-rename' | 'owner-undo-lstat', act: () => void): Promise<H.Outcome> {
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    act();
+  };
+  if (impl === 'bash') {
+    const wrap = `eval "ltof_real() $(declare -f lock_test_obs_fault | sed 1d)"\nlock_test_obs_fault() { if [ "$1" = ${point} ]; then lock_test_pause at-${point}; fi; ltof_real "$@"; }\n`;
+    return H.driveBashPaused(whoOf(caller), r, { [`at-${point}`]: once }, { fault: 'owner-readback=EIO', bashPre: wrap });
+  }
+  const fault = (p: string): string | undefined => {
+    if (p === 'owner-readback') return 'EIO';
+    if (p === point) once();
+    return undefined;
+  };
+  return H.drive(impl, whoOf(caller), r, { hooks: { fault } });
+}
+
 /** A successor's owner of each kind put where the publish's link lands (F7-F10). */
 const SUCCESSOR = JSON.stringify({ pid: process.pid, host: H.HOST, token: 'succ', acquiredAt: 0, v: 1 });
 const publishMeets =
@@ -2091,7 +2116,33 @@ const deadRecord = (impl: Impl, caller: FCaller, r: string, token = 'T0'): void 
 
 const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
   'F1-mkdir-lock': faultRow('mkdir-lock=EACCES', absentLock),
-  'F2-tmp-create-exists': faultRow('owner-create=EEXIST', absentLock),
+  'F2-tmp-create-exists': async (impl, caller, r) => {
+    // A real tmp of this acquisition's token is there before its create (not an injected EEXIST): the
+    // exclusive create answers EEXIST, the tmp is neither opened nor removed and the rmdir fails on it.
+    const lock = lockOfRoot(r);
+    const fixed = 'F2tmp';
+    const tokenNow = (): string => {
+      if (impl !== 'ts') return fixed;
+      // TS takes no token: the one its ticket carries (the ticket is still in the queue at owner-lock-made).
+      const q = H.queueIn(r);
+      const tickets = fs.readdirSync(q).filter((n) => /^\d{12}$/.test(n));
+      return (JSON.parse(fs.readFileSync(path.join(q, tickets[0]), 'utf8')) as { token: string }).token;
+    };
+    let tmp = '';
+    const placeTmp = () => {
+      tmp = path.join(lock, `.owner-${tokenNow()}`);
+      fs.writeFileSync(tmp, 'left by an earlier attempt');
+    };
+    const out = await atStage(impl, caller, r, 'owner-lock-made', placeTmp, { bashPre: `LOCK_WANT_TOKEN=${fixed}\n`, syncOptions: { token: fixed } });
+    return {
+      code: out.code,
+      check: () => {
+        expect(tmp).not.toBe('');
+        expect(namesIn(lock)).toEqual([path.basename(tmp)]); // the <lock> stays: its rmdir failed on the tmp
+        expect(fs.readFileSync(tmp, 'utf8')).toBe('left by an earlier attempt'); // neither opened nor removed
+      },
+    };
+  },
   'F3-tmp-create-other': faultRow('owner-create=EACCES', absentLock),
   'F4-tmp-write': faultRow('owner-write=ENOSPC', absentLock),
   'F5-tmp-write-short': faultRow('owner-write-short=EIO', absentLock),
@@ -2383,6 +2434,33 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
       },
     };
   },
+  'F57-undo-paused-after-rename': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    const seen: string[] = [];
+    const out = await atUndo(impl, caller, r, 'owner-undo-lstat', () => {
+      // Stopped right after the undo's rename, past 60 s and the 10 min grace: the writer's ticket expired
+      // (removed here) and every name is older than the grace. Every head reads the <lock> stray.
+      fs.rmSync(H.queueIn(r), { recursive: true, force: true });
+      agedAll(lock, H.OLD_MS);
+      const before = namesIn(lock);
+      seen.push(JSON.stringify(before?.map((n) => n.replace(/-.*/, ''))));
+      const s = lockSync.recoverIfDead(lock, { timeoutMs: 0, ownerlessGraceMs: H.GRACE_MS, warn: () => {} });
+      seen.push(`sync:${s.result}`);
+      const b = spawnSync('bash', ['-c', `${H.bashPrelude('guard-head')}lock_recover_only "$LK" "$(machine_lock_queue_of "$LK")" 0; echo "result $LRO_RESULT"\n`], {
+        encoding: 'utf8',
+        env: H.bashEnv(r, {}),
+      });
+      seen.push(`bash:${/result (\S+)/.exec(b.stdout ?? '')?.[1]}`);
+      seen.push(JSON.stringify(namesIn(lock)) === JSON.stringify(before) ? 'unchanged' : `changed:${JSON.stringify(namesIn(lock))}`);
+    });
+    return {
+      code: out.code,
+      check: () => {
+        expect(seen).toEqual(['[".owner",".undo"]', 'sync:kept', 'bash:kept', 'unchanged']);
+        expect(namesIn(lock)).toBeNull(); // resumed: its own inode (F13) — both own names removed, the <lock> rmdir'd
+      },
+    };
+  },
   'F59-undo-rename-enoent': async (impl, caller, r) => {
     const lock = lockOfRoot(r);
     const out = await atStage(impl, caller, r, 'owner-linked', () => fs.rmSync(path.join(lock, 'owner')), { fault: 'owner-readback=EIO' });
@@ -2391,6 +2469,19 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
   'F60-undo-rename-other': async (impl, caller, r) => {
     const out = await H.drive(impl, whoOf(caller), r, { fault: 'owner-readback=EIO owner-undo-rename=EIO' });
     return { code: out.code, check: () => expect(namesIn(lockOfRoot(r))).toEqual(['owner']) };
+  },
+  'F61-undo-successor-before-rename': async (impl, caller, r) => {
+    const lock = lockOfRoot(r);
+    const succ = recordFor(impl, caller, { pid: process.pid, token: 'succ', v: true });
+    const out = await atUndo(impl, caller, r, 'owner-undo-rename', () => {
+      // Before the undo's rename: the recorded pid died, the ticket retired, and a successor recovered —
+      // this <lock> moved aside with the tmp in it and removed — and took (its own <lock> and owner).
+      fs.renameSync(lock, `${lock}.gone-f61-1`);
+      fs.rmSync(`${lock}.gone-f61-1`, { recursive: true, force: true });
+      write(path.join(lock, 'owner'), succ);
+    });
+    // The rename moves the successor's owner; no tmp to compare, so it is linked back (the same inode).
+    return { code: out.code, check: () => expect([namesIn(lock), fs.readFileSync(path.join(lock, 'owner'), 'utf8')]).toEqual([['owner'], succ]) };
   },
   'F62-release-head-paused': async (impl, _caller, r) => {
     const lock = lockOfRoot(r);
@@ -2498,8 +2589,6 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
 
 /** Rows not driven here, with why (reported by the implementation contract). */
 const F_NOT_DRIVEN: Partial<Record<Failure, string>> = {
-  'F57-undo-paused-after-rename': 'needs a pause inside the undo (between its rename and its check): no pause of §2.6 is there',
-  'F61-undo-successor-before-rename': 'needs the parent $$ of the pipeline to die between the read-back and the rename while a successor recovers: an interleaving of three processes',
   'F69-new-k1-writer-into-emptied-name': 'outside P0: two writers stopped past 10 min interleaved with a third — named, not fixed',
   'F71-old-writer-in-generic-shell': 'outside P0, mixed: an older copy in a generic shell — ended by the restart of §6.1 (c), nothing to drive in this repository',
 };
