@@ -302,10 +302,14 @@ drain_group G:
 | `reclaim-rmdir` | bash・TS・同期 JS | 途中で止まった戻しの空の `<lock>` の `rmdir`（回収の前。bash `lock_rmdir_errno`、TS・同期 JS `obs.rmdir`） | 退避を残し、その周回は `mkdir` しない（取らない）。点・パス・errno を出す |
 | `release-owner` | bash・TS・同期 JS | 解放の前の `<lock>/owner` の読み | 解放しない |
 | `release-list` | bash・TS・同期 JS | 解放のときの lock root の一覧（自分の退避の片付け） | 片付けない（消さない） |
+| `owner-create` | bash・TS・同期 JS | owner の排他作成（O_EXCL／`set -C`）と書き込み（取得。#4288 の 2 番 PR1a の D3） | 取らない。自分が開いた owner と空の `<lock>` だけを戻す（EEXIST は何も消さない。TS・同期 JS は errno 付きで投げる） |
+| `owner-readback` | bash・TS・同期 JS | 作成した owner の読み直し（自分の token か） | 取らない。自分が作った owner と空の `<lock>` を戻す |
+| `ownerless-mtime` | bash・同期 JS | owner の無い空の `<lock>` の mtime（`ownerlessGraceMs` の年齢。D3） | 古いと読まない: `<lock>` を消さない・その周回は `mkdir` しない（取らない） |
+| `ownerless-rmdir` | bash・同期 JS | 猶予を過ぎた owner の無い空の `<lock>` の `rmdir` | その周回は `mkdir` しない（取らない）。点・パス・errno を出す |
 | `handoff-group` | bash | `ps -o pgid=`（ゲートのグループ G の確かめ） | ゲートを始めない（stage=group） |
-| `handoff-token` | bash | 公開の前の owner の読み（T0 か） | ゲートを始めない・解放しない（stage=token） |
-| `handoff-publish` | bash | `mv .owner-T1 → owner`（公開） | ゲートを始めない（stage=mv） |
-| `handoff-verify` | bash | 公開の後の owner の読み直し（T1・G か） | ゲートを始めない（stage=verify） |
+| `handoff-token` | bash・同期 JS | 公開の前の owner の読み（T0 か） | ゲートを始めない・解放しない（stage=token） |
+| `handoff-publish` | bash・同期 JS | `mv .owner-T1 → owner`（公開） | ゲートを始めない（stage=mv） |
+| `handoff-verify` | bash・同期 JS | 公開の後の owner の読み直し（T1・G か） | ゲートを始めない（stage=verify） |
 | `handoff-signal` | bash | 本体の `mkdir go`（合図） | ゲートを始めない（stage=signal） |
 | `handoff-self` | bash | 子の `kill -0 <本体>` | 本体が生きていると読まない: 取り下げて exec しない |
 | `handoff-go` | bash | 子の取り下げの `mkdir go` | 合図と読まない: exec しない |
@@ -316,6 +320,7 @@ drain_group G:
 - **行ごとの注入**: 読み手の 18 点 × 3 実装（54 行）は、行ごとに「注入あり → 取らない・消さない・解放しない（待ちは予算で終わり、点・パス・errno を出す）」と「同じ状態で注入なし → 逆の結果」の対で固定する（注入が結果を変えたことの対照）。書き手の 9 点は `verify-run-holder-group-4288.test.ts` で `FAIL exit=125`・`stage=…`・副作用 0 を固定する。実物の失敗（root の `chmod 0333`）でも 3 実装が取らないこと、直しを外した形（bash の glob で未展開を「無い」と読む読み手、同期 JS の一覧の失敗を空とする読み手、第 4 版の `kill -0` の成功だけを見るグループの判定）が同じ失敗の下で取る・解放することを陽性の対照にする。
 - **札（#4277）の観測**: 札の一覧も同じ規則に入れた（`list-queue`）。取得の周回で `.queue` が一覧できなければその周回は先頭にならず、札を取る `takeTicket`／`lock_take_ticket` も一覧の失敗では札を取らない（後から一覧して遅れの判定ができないので取り下げる）。札の形・番号・回収の規約は変えない。
 
+- **#4288 の 2 番（run-lock・supervisor.lock を載せる土台、PR1a）で足した点**（[lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) §1.6）: `owner-create`・`owner-readback`（D3: owner の排他作成と読み直し。3 実装）、`ownerless-mtime`・`ownerless-rmdir`（D3: `ownerlessGraceMs` を渡したときだけ。bash・同期 JS）。`handoff-token`・`handoff-publish`・`handoff-verify` は同期 JS の `handOff`（D4）も通る（不明なら引き渡さない＝守る子を始めない）。bash の引渡し `lock_hand_off`（D4）・持ち主でない者の解放 `lock_release_as_head`（D5、`release-owner` と `pid`・`group`）・回収だけ `lock_recover_only`（D6、`lock-owner` と回収の各点）・子の待ち `lock_child_wait`（D9、`handoff-self`・`handoff-go`・`handoff-ack`）は既存の点を使う。読み込み口 `scripts/lib/machine-lock.sh` だけにある観測は、supervisor.lock の `ps -o lstart=`（点 `lstart`、D7。注入は `CM_VERIFY_TEST_OBS_FAULT=lstart=<ERRNO>`、不明は回収しない）と、自己解放 `lock_release_held`（D12）の `release-owner`・`group`・`pid`。この 2 つは 3 実装の走査の対象外のファイルなので表の行にせず、`tests/unit/verification/machine-lock-options-4288.test.ts` が注入で固定する。
 - **§6 の止め所との対応**: §6 の `fault:group|token|mv|verify|signal|child-go|child-ack` は、観測点 `handoff-group|handoff-token|handoff-publish|handoff-verify|handoff-signal|handoff-go|handoff-ack` への注入（`CM_VERIFY_TEST_OBS_FAULT`）に置き換えた。`CM_VERIFY_TEST_HANDOFF` の `fault:` に残したのは観測でない `tmp`（tmp の書き込み）と `drain`（`drain_group` を signal を送らずに 1 にする）だけ。`pause:` は §6 のとおり（`forked`・`group`・`watchdog`・`tmp`・`published`・`signalled`・`acked`〔子の側、`ack` の後・exec の前〕・`leader-exited`・`recover-moved`・`restore-mkdir`・`restore-owner`）。
 
 #### 実装での判断（設計からの差。理由つき）

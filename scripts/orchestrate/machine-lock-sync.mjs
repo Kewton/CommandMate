@@ -60,6 +60,18 @@ const LINK_TRIES_PER_POLL = 32;
 export const ticketName = (n) => String(n).padStart(12, '0');
 export const lockPathOf = (root, name) => path.join(root, `${name}.lock`);
 export const queueDirOf = (root, name) => path.join(root, `${name}.queue`);
+/**
+ * The queue of tickets of a lock named by its path (#4288 PR1a D2): `<lock without .lock>.queue` —
+ * the same directory `queueDirOf(root, name)` names for `<root>/<name>.lock`, and bash's
+ * `machine_lock_queue_of` (scripts/lib/machine-lock.sh).
+ */
+export const queueDirOfPath = (lockPath) => `${lockPath.endsWith('.lock') ? lockPath.slice(0, -'.lock'.length) : lockPath}.queue`;
+
+/** The owner record as JSON (the convention's own shape). A caller with another format passes `ownerCodec` (#4288 PR1a D1). */
+export const JSON_OWNER_CODEC = { parse: (text) => JSON.parse(text), format: (record) => JSON.stringify(record) };
+
+/** How long releaseAsHead / recoverIfDead wait to become the head by default (D5). */
+export const HEAD_BUDGET_MS = 10_000;
 
 export function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
@@ -121,7 +133,12 @@ export const GONE_SUFFIX_PATTERN = /^[A-Za-z0-9-]+$/;
  * `hooks.fault(point, target)` may answer an errno to inject there (tests only), and the
  * classification below is the same for an injected and a real failure.
  *
- * @param {{ fault?: (point: string, target: string) => string | null | undefined, pidAlive?: (pid: number) => boolean, groupAlive?: (pgid: number) => boolean }} [hooks]
+ * `hooks.kill` (#4288 PR1a D10) stands in for `process.kill(target, 0)` and throws as it does; its
+ * error goes through the same classification (ESRCH gone, EPERM and anything else unknown), so a
+ * caller's injection cannot turn a failure into "dead". `hooks.codec` parses the owner record
+ * (default JSON, D1).
+ *
+ * @param {{ fault?: (point: string, target: string) => string | null | undefined, pidAlive?: (pid: number) => boolean, groupAlive?: (pgid: number) => boolean, kill?: (target: number, signal: number) => void, codec?: { parse: (text: string) => any } }} [hooks]
  */
 export function makeObserver(hooks = {}) {
   const attempt = (point, target, fn) => {
@@ -136,7 +153,7 @@ export function makeObserver(hooks = {}) {
   const probe = (point, target, legacy, signalTarget) => {
     try {
       if (legacy) return attempt(point, target, () => (legacy() ? { state: 'alive' } : { state: 'gone' }));
-      attempt(point, target, () => process.kill(signalTarget, 0));
+      attempt(point, target, () => (hooks.kill ? hooks.kill(signalTarget, 0) : process.kill(signalTarget, 0)));
       return { state: 'alive' };
     } catch (err) {
       return errCode(err) === 'ESRCH' ? { state: 'gone' } : { state: 'unknown', point, code: errCode(err) };
@@ -155,10 +172,11 @@ export function makeObserver(hooks = {}) {
         return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
       }
     },
-    /** lstat: dir / other (a file, a symlink) / absent / unknown */
+    /** lstat: dir / other (a file, a symlink) / absent / unknown — with the entry's own mtimeMs */
     lstat(point, file) {
       try {
-        return { state: attempt(point, file, () => fs.lstatSync(file)).isDirectory() ? 'dir' : 'other' };
+        const st = attempt(point, file, () => fs.lstatSync(file));
+        return { state: st.isDirectory() ? 'dir' : 'other', mtimeMs: st.mtimeMs };
       } catch (err) {
         return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
       }
@@ -174,7 +192,7 @@ export function makeObserver(hooks = {}) {
       }
       let owner;
       try {
-        owner = JSON.parse(text);
+        owner = hooks.codec ? hooks.codec.parse(text) : JSON.parse(text);
       } catch {
         return { state: 'corrupt' };
       }
@@ -198,6 +216,31 @@ export function makeObserver(hooks = {}) {
         return { state: 'moved' };
       } catch (err) {
         return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
+      }
+    },
+    /**
+     * The exclusive create of a file with `text` in it (#4288 PR1a D3, `O_CREAT|O_EXCL`): created /
+     * exists (EEXIST: nothing opened) / unknown — `opened` says whether this call made the file (only
+     * then is it the caller's to remove). The write after the open fails at the point `owner-write`.
+     */
+    create(point, file, text) {
+      let fd;
+      try {
+        fd = attempt(point, file, () => fs.openSync(file, 'wx'));
+      } catch (err) {
+        return errCode(err) === 'EEXIST' ? { state: 'exists' } : { state: 'unknown', point, code: errCode(err), opened: false };
+      }
+      try {
+        attempt('owner-write', file, () => fs.writeSync(fd, text));
+        return { state: 'created' };
+      } catch (err) {
+        return { state: 'unknown', point, code: errCode(err), opened: true };
+      } finally {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // closed or gone: nothing more to do
+        }
       }
     },
     /** rmdir of an empty directory: removed / unknown — a failure keeps its errno (#4288 Codex re-review P2) */
@@ -227,9 +270,9 @@ export function holderState(record, env) {
   return env.obs.group('group', record.pgid);
 }
 
-function readJson(file) {
+function readJson(file, parse = JSON.parse) {
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const parsed = parse(fs.readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
     return null;
@@ -237,8 +280,8 @@ function readJson(file) {
 }
 
 /** The lock's owner record, or null while it is unreadable (just created, or corrupt: wait, never break). */
-export function readOwner(lockPath) {
-  const owner = readJson(path.join(lockPath, 'owner'));
+export function readOwner(lockPath, codec = JSON_OWNER_CODEC) {
+  const owner = readJson(path.join(lockPath, 'owner'), codec.parse);
   return owner && typeof owner.pid === 'number' && typeof owner.token === 'string' ? owner : null;
 }
 
@@ -390,8 +433,18 @@ function collectGarbage(queueDir, now) {
 /**
  * @returns {boolean} true when this call created the directory and owns it. A `mkdir` that failed
  * for another reason than EEXIST is not a claim and not a contention either: it throws, naming the errno.
+ *
+ * The owner is created exclusively and read back (#4288 PR1a D3, the same as verify-run.sh's
+ * lock_obs_create): a name that is there (EEXIST) is never written over and nothing is removed — not
+ * acquired; a record read back that is not this one (another token, corrupt, missing) is not acquired
+ * either and nothing is removed. An owner that could not be created, written or read back (ENOSPC,
+ * EIO) is not a lock taken: the owner is removed only when this call opened it, and the <lock> this
+ * mkdir made is taken out again with rmdir (it is empty then), so no <lock> without an owner is left
+ * for every reader to wait on (#4288 PM review P3-2). That error still ends the acquisition, as a
+ * mkdir that failed does. Test seams (`fault`): owner-create, owner-write, owner-readback (observation
+ * points), owner-unlink and lock-rmdir (the undo).
  */
-function claim(lockPath, owner, obs, fault = undefined, warn = () => {}) {
+function claim(lockPath, owner, obs, fault = undefined, warn = () => {}, codec = JSON_OWNER_CODEC) {
   const made = obs.mkdir('mkdir-lock', lockPath);
   if (made.state === 'exists') return false;
   if (made.state !== 'created') {
@@ -400,25 +453,51 @@ function claim(lockPath, owner, obs, fault = undefined, warn = () => {}) {
     throw err;
   }
   const file = path.join(lockPath, 'owner');
-  try {
-    const code = fault?.('owner-write', file);
-    if (code) {
-      const err = new Error(`${code}: injected at owner-write ${file}`);
-      err.code = code;
-      throw err;
-    }
-    fs.writeFileSync(file, JSON.stringify(owner));
-  } catch (err) {
-    // An owner that could not be written (ENOSPC, EIO) is not a lock taken: the <lock> this mkdir
-    // made is taken out again, so no <lock> without an owner is left for every reader to wait on
-    // (#4288 PM review P3-2, the same as verify-run.sh's lock_acquire). The error still ends the
-    // acquisition, as a mkdir that failed does.
-    fs.rmSync(file, { force: true });
-    rmdirQuiet(lockPath);
-    warn(`machine-lock-owner-write-failed ${lockPath} (${errCode(err)})`);
-    throw err;
+  const created = obs.create('owner-create', file, codec.format(owner));
+  if (created.state === 'exists') {
+    warn(`machine-lock-owner-exists ${lockPath} (not acquired; nothing removed)`);
+    return false;
   }
-  return true;
+  let failed = created.state === 'created' ? null : created;
+  if (!failed) {
+    const back = obs.owner('owner-readback', lockPath);
+    if (back.state === 'record' && back.owner.token === owner.token) return true;
+    if (back.state !== 'unknown') {
+      warn(`machine-lock-owner-not-ours ${lockPath} (another record read back; not acquired, nothing removed)`);
+      return false;
+    }
+    failed = { ...back, opened: true };
+  }
+  if (failed.opened && !fault?.('owner-unlink', file)) fs.rmSync(file, { force: true });
+  const out = fault?.('lock-rmdir', lockPath) ? false : rmdirQuiet(lockPath);
+  warn(`machine-lock-owner-write-failed ${lockPath} (${failed.code}${out ? '' : '; and it could not be taken out again'})`);
+  const err = new Error(`machine-lock-unknown point=${failed.point} path=${file} errno=${failed.code}`);
+  err.code = failed.code;
+  throw err;
+}
+
+/**
+ * D3 (#4288 PR1a): an owner-less, empty <lock> older than `graceMs` is taken out by the head — its
+ * maker died between the mkdir and the owner (run-lock and supervisor.lock waited 60 s for that).
+ * Only the head calls this, and nobody else makes a <lock> while it is the head. The age is
+ * `now - mtimeMs` in ms (D11). An unknown keeps the poll from the mkdir and is reported.
+ *
+ * @returns {{ state: 'none' | 'absent' | 'young' | 'removed' | 'unknown', unknown?: { point: string, path: string, code: string } }}
+ */
+function expireOwnerless(ctx, graceMs, now) {
+  if (typeof graceMs !== 'number') return { state: 'none' };
+  const half = ownerlessEmptyLock(ctx);
+  if (half.state === 'unknown') return { state: 'unknown', unknown: half.unknown };
+  if (half.state !== 'yes') return { state: half.state === 'absent' ? 'absent' : 'none' };
+  const st = ctx.obs.lstat('ownerless-mtime', ctx.lockPath);
+  if (st.state === 'absent') return { state: 'absent' };
+  if (st.state === 'unknown') return { state: 'unknown', unknown: { point: 'ownerless-mtime', path: ctx.lockPath, code: st.code } };
+  const age = now - st.mtimeMs;
+  if (age <= graceMs) return { state: 'young' };
+  const removed = ctx.obs.rmdir('ownerless-rmdir', ctx.lockPath);
+  if (removed.state === 'unknown') return { state: 'unknown', unknown: { point: 'ownerless-rmdir', path: ctx.lockPath, code: removed.code } };
+  ctx.warn(`machine-lock-ownerless-removed ${ctx.lockPath} (no owner for ${Math.round(age)} ms)`);
+  return { state: 'removed' };
 }
 
 let goneSerial = 0;
@@ -657,7 +736,7 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
  *
  * @param {string} name
  * @param {{
- *   root: string,
+ *   root?: string,
  *   timeoutMs: number,
  *   pollMs?: number,
  *   sleep?: (ms: number) => void,
@@ -667,12 +746,28 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
  *   shouldAbandon?: () => boolean,
  *   onWait?: () => void,
  *   warn?: (line: string) => void,
- *   hooks?: { onRecover?(stage: 'before-move' | 'moved' | 'restore-mkdir' | 'restore-owner'): void, link?: (src: string, dst: string) => void, beforeLink?: (n: number) => void, startOf?: (pid: number) => number | null, now?: () => number, host?: string, pidAlive?: (pid: number) => boolean, groupAlive?: (pgid: number) => boolean, fault?: (point: string, target: string) => string | null | undefined },
+ *   hooks?: { onRecover?(stage: 'before-move' | 'moved' | 'restore-mkdir' | 'restore-owner' | 'hand-off-tmp'): void, link?: (src: string, dst: string) => void, beforeLink?: (n: number) => void, startOf?: (pid: number) => number | null, now?: () => number, host?: string, pidAlive?: (pid: number) => boolean, groupAlive?: (pgid: number) => boolean, kill?: (target: number, signal: number) => void, fault?: (point: string, target: string) => string | null | undefined },
+ *   lockPath?: string,
+ *   ownerCodec?: { parse: (text: string) => any, format: (record: Record<string, unknown>) => string },
+ *   ownerlessGraceMs?: number,
+ *   token?: string,
+ *   ownerPid?: number,
  * }} options
- * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, abandoned?: boolean, unknown?: { point: string, path: string, code: string }, release: () => void, setOwnerFields: (fields: Record<string, unknown>) => boolean, path: string }}
+ *
+ * Options for run-lock and supervisor.lock (#4288 PR1a, docs/design/lock-reservation-rest-4288.md
+ * §1.6); none of them is set by gate-runner, precheck or merge-pr, and each is off by default:
+ * `lockPath` names the lock by its path (D2: `root` and `name` are then ignored, the queue is
+ * `queueDirOfPath(lockPath)`); `ownerCodec` reads and writes the owner in another format (D1);
+ * `ownerlessGraceMs` lets the head take out an owner-less, empty <lock> older than that (D3); `token`
+ * is the token to acquire under; `ownerPid` the pid written to the owner (the ticket keeps
+ * process.pid); `hooks.kill` stands in for process.kill (D10).
+ *
+ * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, abandoned?: boolean, unknown?: { point: string, path: string, code: string }, release: () => ('released' | 'deferred' | 'needs-head' | 'kept' | 'none'), setOwnerFields: (fields: Record<string, unknown>) => boolean, handOff: (pid: number, pgid: number) => { ok: boolean, token?: string, stage?: string }, token?: string, path: string }}
  */
 export function acquireMachineLockSync(name, options) {
-  const { root, timeoutMs, pollMs = LOCK_POLL_MS, sleep = sleepSync, hooks = {} } = options;
+  const { timeoutMs, pollMs = LOCK_POLL_MS, sleep = sleepSync, hooks = {} } = options;
+  const root = options.lockPath ? path.dirname(options.lockPath) : options.root;
+  const codec = options.ownerCodec ?? JSON_OWNER_CODEC;
   const warn = options.warn ?? (() => {});
   const warned = new Set();
   const warnOnce = (line) => {
@@ -683,7 +778,7 @@ export function acquireMachineLockSync(name, options) {
   const now = hooks.now ?? (() => Date.now());
   const host = hooks.host ?? os.hostname();
   const startCache = new Map();
-  const obs = makeObserver({ fault: hooks.fault, pidAlive: hooks.pidAlive, groupAlive: hooks.groupAlive });
+  const obs = makeObserver({ fault: hooks.fault, pidAlive: hooks.pidAlive, groupAlive: hooks.groupAlive, kill: hooks.kill, codec });
   const env = {
     host,
     obs,
@@ -698,9 +793,10 @@ export function acquireMachineLockSync(name, options) {
       return start;
     },
   };
-  const lockPath = lockPathOf(root, name);
-  const queueDir = queueDirOf(root, name);
-  const token = crypto.randomUUID();
+  const lockPath = options.lockPath ?? lockPathOf(root, name);
+  const queueDir = options.lockPath ? queueDirOfPath(options.lockPath) : queueDirOf(root, name);
+  const token = typeof options.token === 'string' && options.token ? options.token : crypto.randomUUID();
+  const ownerPid = Number.isInteger(options.ownerPid) && options.ownerPid > 0 ? options.ownerPid : process.pid;
   const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token };
   const startedAt = now();
   const deadline = startedAt + Math.max(0, timeoutMs);
@@ -720,7 +816,7 @@ export function acquireMachineLockSync(name, options) {
     mine = null;
   };
   const heldBy = () => {
-    const owner = readOwner(lockPath);
+    const owner = readOwner(lockPath, codec);
     // The gate's group (#4288): with verify-run.sh's runner killed, the pid is dead and the group holds.
     // Added here, not in describeOwner: merge-pr's heldByLine appends the pgid to describeOwner itself.
     if (owner) return `${describeOwner(owner)}${validPgid(owner.pgid) ? ` (pgid ${owner.pgid})` : ''}`;
@@ -734,7 +830,7 @@ export function acquireMachineLockSync(name, options) {
     warn(`machine-lock-unknown point=${unknown.point} path=${unknown.path} errno=${unknown.code}`);
     return { unknown };
   };
-  const noLock = () => ({ release: () => {}, setOwnerFields: () => false, path: lockPath });
+  const noLock = () => ({ release: () => 'none', setOwnerFields: () => false, handOff: () => ({ ok: false, stage: 'token' }), path: lockPath });
 
   try {
     for (;;) {
@@ -778,46 +874,112 @@ export function acquireMachineLockSync(name, options) {
             pending = settled.pending;
             unknown = settled.unknown ?? null;
           } else {
-            const owner = { pid: process.pid, host, token, acquiredAt: now(), ...(pgid ? { pgid } : {}), ...(options.ownerFields ?? {}) };
-            if (claim(lockPath, owner, obs, hooks.fault, warn)) {
+            const owner = { pid: ownerPid, host, token, acquiredAt: now(), ...(pgid ? { pgid } : {}), ...(options.ownerFields ?? {}) };
+            // D3: the head takes out an owner-less, empty <lock> past the caller's grace first.
+            const expired = expireOwnerless(ctx, options.ownerlessGraceMs, now());
+            if (expired.state !== 'unknown' && claim(lockPath, owner, obs, hooks.fault, warn, codec)) {
               retire();
               collectGarbage(queueDir, now());
               let released = false;
+              // D4: the token a handover published (T1 = <T0>-g<pgid>), from the moment it is tried.
+              let handed = null;
               return {
                 acquired: true,
                 waitedMs: now() - startedAt,
                 heldBy: null,
                 path: lockPath,
+                token,
                 // Never moves a lock that is not this acquisition's: a second call, or a call after the
                 // lock was taken by someone else, leaves it where it is (Codex review 2, finding 1). An
                 // owner that cannot be read is not known to be ours, so it stays too (#4288).
+                // D12 (#4288 PR1a-c, docs/design/lock-reservation-rest-4288.md — the invariant of the
+                // three implementations, the same as bash's lock_release_held): a record of ours is
+                // removed here only when its recorded pid is this process and, when it names a pgid,
+                // that group is empty. A group with a member, or one that cannot be shown empty, keeps
+                // it ('deferred', the release may be called again). Any other recorded pid — after a
+                // handOff or the initial ownerPid alike, alive, gone or unknown — is not removed: a pid
+                // read alive can die before the delete, and a head recover it and take the lock in
+                // between, so the caller releases with releaseAsHead(lockPath, [token, T1]) (D5) —
+                // 'needs-head', once. A pid that cannot be observed is 'deferred'. The group of a record
+                // whose pid and pgid are both this process (merge-pr's pgid: process.pid) is not judged:
+                // this process is a member of it by definition.
                 release: () => {
-                  if (released) return;
-                  released = true;
+                  if (released) return 'none';
                   const current = obs.owner('release-owner', lockPath);
-                  if (current.state === 'record' && current.owner.token === token) {
+                  const mine = current.state === 'record' && (current.owner.token === token || (handed !== null && current.owner.token === handed));
+                  const ownGroup = mine && current.owner.pid === process.pid && current.owner.pgid === process.pid;
+                  if (mine && validPgid(current.owner.pgid) && !ownGroup) {
+                    const group = obs.group('group', current.owner.pgid);
+                    if (group.state !== 'gone') {
+                      warn(`machine-lock-release-deferred ${lockPath} pgid=${current.owner.pgid}`);
+                      return 'deferred';
+                    }
+                  }
+                  if (mine && current.owner.pid !== process.pid) {
+                    const holder = obs.pid('pid', current.owner.pid);
+                    if (holder.state === 'unknown') {
+                      warn(`machine-lock-release-deferred ${lockPath} (recorded pid ${current.owner.pid} is unknown: ${holder.code})`);
+                      return 'deferred';
+                    }
+                    released = true;
+                    warn(`machine-lock-release-needs-head ${lockPath} (recorded pid ${current.owner.pid} is not this process; release as the head)`);
+                    return 'needs-head';
+                  }
+                  released = true;
+                  if (mine) {
                     fs.rmSync(lockPath, { recursive: true, force: true });
-                    return;
+                    return 'released';
                   }
                   if (current.state === 'unknown') {
                     warn(`machine-lock-release-deferred ${lockPath} point=release-owner errno=${current.code}`);
-                    return;
+                    return 'deferred';
                   }
                   cleanupOwnGone(ctx, token);
+                  if (handed !== null) cleanupOwnGone(ctx, handed);
+                  return 'kept';
                 },
                 setOwnerFields: (fields) => {
                   if (released) return false;
-                  const current = readOwner(lockPath);
+                  const current = readOwner(lockPath, codec);
                   if (!current || current.token !== token) return false;
                   const tmp = path.join(lockPath, `.owner-${crypto.randomUUID()}`);
-                  fs.writeFileSync(tmp, JSON.stringify({ ...current, ...fields, pid: current.pid, token }));
+                  fs.writeFileSync(tmp, codec.format({ ...current, ...fields, pid: current.pid, token }));
                   fs.renameSync(tmp, path.join(lockPath, 'owner'));
                   return true;
                 },
+                // D4 (#4288 PR1a): hand the lock, within this acquisition, to `pid` and its process group
+                // `pgid` under a NEW token T1 = <T0>-g<pgid> (tmp + rename, read back). Only the live
+                // holder calls it, before the process it protects starts (D9). T1 is this handle's from
+                // the moment it is tried, so a release after a failure in the middle still knows it.
+                handOff: (pid, pgid) => {
+                  const t1 = `${token}-g${pgid}`;
+                  if (released || !Number.isInteger(pid) || !validPgid(pgid)) return { ok: false, stage: 'token', token: t1 };
+                  handed = t1;
+                  const read = obs.owner('handoff-token', lockPath);
+                  if (read.state !== 'record' || read.owner.token !== token) return { ok: false, stage: 'token', token: t1 };
+                  const tmp = path.join(lockPath, `.owner-${t1}`);
+                  try {
+                    const code = hooks.fault?.('handoff-tmp', tmp);
+                    if (code) throw Object.assign(new Error(`${code}: injected at handoff-tmp ${tmp}`), { code });
+                    fs.writeFileSync(tmp, codec.format({ ...read.owner, pid, token: t1, pgid }));
+                  } catch {
+                    fs.rmSync(tmp, { force: true });
+                    return { ok: false, stage: 'tmp', token: t1 };
+                  }
+                  hooks.onRecover?.('hand-off-tmp');
+                  if (obs.rename('handoff-publish', tmp, path.join(lockPath, 'owner')).state !== 'moved') {
+                    fs.rmSync(tmp, { force: true });
+                    return { ok: false, stage: 'mv', token: t1 };
+                  }
+                  const back = obs.owner('handoff-verify', lockPath);
+                  if (back.state !== 'record' || back.owner.token !== t1 || back.owner.pid !== pid || back.owner.pgid !== pgid) return { ok: false, stage: 'verify', token: t1 };
+                  return { ok: true, token: t1 };
+                },
               };
             }
+            if (expired.state === 'unknown') unknown = expired.unknown;
             const read = obs.owner('lock-owner', lockPath);
-            if (read.state === 'unknown') unknown = { point: 'lock-owner', path: path.join(lockPath, 'owner'), code: read.code };
+            if (read.state === 'unknown' && !unknown) unknown = { point: 'lock-owner', path: path.join(lockPath, 'owner'), code: read.code };
             const holder = read.state === 'record' ? read.owner : null;
             if (holder && !broken.has(holder.token)) {
               const state = holderState(holder, ctx);
@@ -848,4 +1010,165 @@ export function acquireMachineLockSync(name, options) {
     retire();
     throw err;
   }
+}
+
+/**
+ * The head of `queueDir`'s queue, for the operations that do not take the lock (#4288 PR1a D5 / D6):
+ * a ticket is taken and waited on with the rules of acquireMachineLockSync (#4277: never retired by
+ * age alone), and `whenHead(ctx)` runs while this caller is the head — when nobody of these
+ * implementations mkdirs, recovers or rmdirs the lock. The ticket is done on every path.
+ *
+ * @returns {any} what `whenHead` returned, or `{ result: 'not-head', heldBy, unknown? }` when the
+ * budget ran out first
+ */
+function asHead(lockPath, options, whenHead) {
+  const { timeoutMs = HEAD_BUDGET_MS, pollMs = LOCK_POLL_MS, sleep = sleepSync, hooks = {} } = options;
+  const codec = options.ownerCodec ?? JSON_OWNER_CODEC;
+  const warn = options.warn ?? (() => {});
+  const warned = new Set();
+  const warnOnce = (line) => {
+    if (warned.has(line)) return;
+    warned.add(line);
+    warn(line);
+  };
+  const now = hooks.now ?? (() => Date.now());
+  const host = hooks.host ?? os.hostname();
+  const obs = makeObserver({ fault: hooks.fault, pidAlive: hooks.pidAlive, groupAlive: hooks.groupAlive, kill: hooks.kill, codec });
+  const env = {
+    host,
+    obs,
+    link: hooks.link ?? ((src, dst) => fs.linkSync(src, dst)),
+    beforeLink: hooks.beforeLink,
+    startOf: (pid) => (hooks.startOf ? hooks.startOf(pid) : processStartMs(pid, now())),
+  };
+  const root = path.dirname(lockPath);
+  const queueDir = queueDirOfPath(lockPath);
+  const token = crypto.randomUUID();
+  const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token };
+  const startedAt = now();
+  const deadline = startedAt + Math.max(0, timeoutMs);
+  const ticket = { pid: process.pid, host, token, createdAt: startedAt, deadline };
+  let mine = null;
+  try {
+    for (;;) {
+      if (mine !== null) {
+        const current = readJson(path.join(queueDir, ticketName(mine)));
+        if (!current || current.done === true || current.token !== token) mine = null;
+      }
+      let blocker = null;
+      let unknown = null;
+      if (mine === null) {
+        mine = takeTicket(queueDir, ticket, env);
+        if (mine === null) unknown = readQueue(queueDir, obs).unknown ?? null;
+      }
+      if (mine !== null) {
+        const judged = { ...env, now: now() };
+        const queue = readQueue(queueDir, obs);
+        if (queue.unknown) unknown = queue.unknown;
+        for (const entry of queue.entries) {
+          if (entry.n >= mine) break;
+          if (!isLive(entry)) continue;
+          const why = entry.ticket ? ticketRetirable(entry.ticket, judged) : null;
+          if (why) {
+            if (markDone(entry.file, entry.ticket.token)) warn(`machine-lock-ticket-retired ${entry.file} (${why})`);
+            continue;
+          }
+          blocker = entry;
+          break;
+        }
+        if (!blocker && !queue.unknown) return whenHead(ctx);
+      }
+      const t = now();
+      if (t >= deadline) {
+        const heldBy = blocker ? `queue ticket ${blocker.file}${blocker.ticket ? ` (${describeOwner(blocker.ticket)})` : ' (unreadable)'}` : null;
+        return { result: 'not-head', heldBy, ...(unknown ? { unknown } : {}) };
+      }
+      sleep(Math.min(pollMs, deadline - t));
+    }
+  } finally {
+    if (mine !== null) markDone(path.join(queueDir, ticketName(mine)), token);
+  }
+}
+
+/**
+ * D5 (#4288 PR1a): the release by someone who is not the holder — UAT's `down` and the failure trap
+ * after a handover, which stop the holder (the server) first. Between reading the token and the
+ * delete a head could recover the dead holder's lock and take it, so this releases only as the head
+ * of the queue (`options.timeoutMs`, default 10 s): one read of the owner; a record under one of
+ * `tokens` whose holder (pid, and the group when it names one) is gone is removed ('released'); a
+ * holder still there or unknown is left ('deferred': never under a group that did not empty); a
+ * missing owner cleans only these tokens' own moved-aside records ('missing'); another token, a
+ * corrupt record or an unreadable owner is left ('kept' / 'unknown'). Not the head in time:
+ * 'not-head', nothing done (the holder is dead; the next head recovers it).
+ *
+ * @param {string} lockPath
+ * @param {string[]} tokens
+ * @param {{ timeoutMs?: number, pollMs?: number, sleep?: (ms: number) => void, warn?: (line: string) => void, ownerCodec?: { parse: (text: string) => any, format: (record: Record<string, unknown>) => string }, hooks?: Record<string, any> }} [options]
+ * @returns {{ result: 'released' | 'missing' | 'deferred' | 'kept' | 'unknown' | 'not-head', unknown?: { point: string, path: string, code: string }, heldBy?: string | null }}
+ */
+export function releaseAsHead(lockPath, tokens, options = {}) {
+  return asHead(lockPath, options, (ctx) => {
+    ctx.onRecover?.('release-head-read');
+    const read = ctx.obs.owner('release-owner', lockPath);
+    if (read.state === 'unknown') {
+      ctx.warn(`machine-lock-release-deferred ${lockPath} point=release-owner errno=${read.code}`);
+      return { result: 'unknown', unknown: { point: 'release-owner', path: path.join(lockPath, 'owner'), code: read.code } };
+    }
+    if (read.state === 'missing') {
+      for (const t of tokens) cleanupOwnGone(ctx, t);
+      return { result: 'missing' };
+    }
+    if (read.state !== 'record' || !tokens.includes(read.owner.token)) return { result: 'kept' };
+    const holder = holderState(read.owner, ctx);
+    if (holder.state !== 'gone') {
+      ctx.warn(`machine-lock-release-deferred ${lockPath} (holder pid ${read.owner.pid}${validPgid(read.owner.pgid) ? ` pgid ${read.owner.pgid}` : ''} is ${holder.state})`);
+      return { result: 'deferred', ...(holder.state === 'unknown' ? { unknown: { point: holder.point, path: lockPath, code: holder.code } } : {}) };
+    }
+    fs.rmSync(lockPath, { recursive: true, force: true });
+    for (const t of tokens) cleanupOwnGone(ctx, t);
+    return { result: 'released' };
+  });
+}
+
+/**
+ * D6 (#4288 PR1a): recover a dead holder's lock without taking it (the counterpart of bash's
+ * lock_recover_only for supervisor.lock's deadline guard; no caller of this copy yet — it keeps the
+ * three implementations' rules the same). As the head: the moved-aside records are settled (§2.7),
+ * the owner read once, and a lock whose holder is gone is recovered (moved aside, its token checked,
+ * put back when it differs); an owner-less, empty <lock> older than `options.ownerlessGraceMs` is
+ * taken out. Never a mkdir of the lock.
+ *
+ * @param {string} lockPath
+ * @param {{ timeoutMs?: number, pollMs?: number, sleep?: (ms: number) => void, warn?: (line: string) => void, ownerlessGraceMs?: number, ownerCodec?: { parse: (text: string) => any, format: (record: Record<string, unknown>) => string }, hooks?: Record<string, any> }} [options]
+ * @returns {{ result: 'removed' | 'kept' | 'restore-failed' | 'absent' | 'not-head', unknown?: { point: string, path: string, code: string }, pending?: string }}
+ */
+export function recoverIfDead(lockPath, options = {}) {
+  const now = options.hooks?.now ?? (() => Date.now());
+  return asHead(lockPath, options, (ctx) => {
+    const settled = settleGone(ctx);
+    // The first unknown is the one returned, as bash's LRO_UNKNOWN (lock_note_unknown keeps the
+    // first): a settle whose observation failed (list-root, gone-owner …) is not dropped by a later
+    // answer such as 'absent' (Codex review-4288-pr1a P3).
+    const first = settled.block && settled.unknown ? settled.unknown : null;
+    const done = (result, unknown) => ({
+      result,
+      ...(first ?? unknown ? { unknown: first ?? unknown } : {}),
+      ...(settled.block && settled.pending ? { pending: settled.pending } : {}),
+    });
+    const read = ctx.obs.owner('lock-owner', lockPath);
+    if (read.state === 'unknown') return done('kept', { point: 'lock-owner', path: path.join(lockPath, 'owner'), code: read.code });
+    if (read.state === 'corrupt') return done('kept');
+    if (read.state === 'missing') {
+      const expired = expireOwnerless(ctx, options.ownerlessGraceMs, now());
+      if (expired.state === 'removed') return done('removed');
+      if (expired.state === 'absent' || ownerlessEmptyLock(ctx).state === 'absent') return done('absent');
+      return done('kept', expired.unknown);
+    }
+    const holder = holderState(read.owner, ctx);
+    if (holder.state === 'unknown') return done('kept', { point: holder.point, path: lockPath, code: holder.code });
+    if (holder.state !== 'gone') return done('kept');
+    ctx.onRecover?.('recover-only-judged');
+    const r = recoverLock(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
+    return done(r === 'recovered' ? 'removed' : r === 'restore-failed' ? 'restore-failed' : r === 'gone' ? 'absent' : 'kept');
+  });
 }
