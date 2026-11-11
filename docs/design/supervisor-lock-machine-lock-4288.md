@@ -264,7 +264,7 @@ supervisor.lock だけの性質（事実）:
 | F32 | 前の札の `ps -o etime=`（`lock_pid_start_ms` `:1129`） | 失敗 | 消さない | refused(queue) | not-head | —（再利用と読まず、待つ） |
 | F33 | 読み込み口（`machine_lock_load`） | `verify-run.sh` が無い・印が 1 つずつでない・`set -e` | 消さない | refused(loader) | unloaded(loader) / none-taken | acquire-behind: refused(loader)、guard-behind: unloaded(loader) / none-taken（読み込みが無ければ札を取らないので head と同じ行。P3-5 の列挙で書き足した）、release-main: none |
 | F34a | `reclaim-rmdir`（戻しが不明な間の空の `<lock>` を取り除けない） | 失敗 | 消さない | refused(unk) | kept(unk) | — |
-| F34b | `reclaim-rename`（空の `<lock>` を取り除いた後の、死んだ退避の rename） | 失敗 | 消さない | **未決**（PM の調査待ち: 不明を記さず先頭が `<lock>` を取る〔acquired / mine〕のが安全な表の誤りか、PR1a-f の `lock_reclaim_gone` の欠陥か。pm-investigate-4288-f34-rename.md） | **未決** | 口 `reclaim-rename=EIO` で駆動はする（rename に届くことだけを見る）。期待は書かず試験は `it.todo`。PR1a-f の部品は直さない |
+| F34b | `reclaim-rename`（空の `<lock>` を取り除いた後の、死んだ退避の rename） | 失敗 | 消さない | acquired / mine / retired | absent / absent / retired | —（gone の判定は rename の前に確定し、rename の失敗は何も変えず不明も記さない。`<lock>` は mkdir と link の排他で取るので二重保有は無く、安全。死んだ退避は次の先頭まで残る〔`goneLeft`〕。PM の調査 pm-investigate-4288-f34-rename.md と PR1a-f の観測点の試験が同じ期待。2 回目まで拒否としていたのは表の誤り。残る観測性の穴〔警告も不明も出ない〕は記録のみ） |
 
 使わないもの（事実）: supervisor.lock の経路は **tmux を呼ばない**（`lib.sh:121-205` と読み込み口の節に tmux は無い）。`lock_drain_group`（`KILL_GRACE_SEC`）・`lock_hand_off`・`lock_child_wait`・`lock_release_as_head` も呼ばない（S5・S7）。
 
