@@ -2521,4 +2521,63 @@ exit \${FAKE_EXIT:-0}
     expect(() => process.kill(Number(seen.PID), 0)).toThrow();
     expect(fs.existsSync(lockDir)).toBe(false);
   }, REAL_SHELL_TEST_TIMEOUT_MS);
+
+  // pr1b-5: the ok line is planned (variable) before the echo and marked printed after it. A TERM that is
+  // handled between the two points leaves the same ok line, once or twice - never an ok line and a failed one.
+  // The echo of the ok line is wrapped by a BASH_ENV function (test only) that waits at the chosen point.
+  const termAtOkLine = async (point: 'before' | 'after'): Promise<{ lines: string[]; code: number | null }> => {
+    const gate = path.join(root, `okline-${point}`);
+    fs.mkdirSync(gate);
+    const hook = path.join(root, `okline-${point}.sh`);
+    fs.writeFileSync(
+      hook,
+      [
+        'echo() {',
+        '  case "$1" in',
+        '    "AGENT_HEALTH_SYNC status=ok"*)',
+        `      if [ "$CM_T_POINT" = before ]; then : > "$CM_T_GATE/reached"; while [ ! -e "$CM_T_GATE/go" ]; do sleep 0.05; done; fi`,
+        '      builtin echo "$@"',
+        `      if [ "$CM_T_POINT" = after ]; then : > "$CM_T_GATE/reached"; while [ ! -e "$CM_T_GATE/go" ]; do sleep 0.05; done; fi`,
+        '      return 0 ;;',
+        '  esac',
+        '  builtin echo "$@"',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    const child = spawn('bash', [path.join(work, 'scripts/agent-health/daily.sh'), '--out', path.join(root, 'report.json')], {
+      cwd: root,
+      env: dailyEnv({ FAKE_WAIT: '1', BASH_ENV: hook, CM_T_POINT: point, CM_T_GATE: gate }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    spawnedDaily.push(child);
+    let stdout = '';
+    child.stdout!.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr!.resume();
+    const exited = new Promise<number | null>((resolve) => child.on('close', (code) => resolve(code)));
+    const end = Date.now() + 30_000;
+    while (!fs.existsSync(path.join(gate, 'reached')) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fs.existsSync(path.join(gate, 'reached'))).toBe(true);
+    process.kill(child.pid!, 'SIGTERM');
+    fs.writeFileSync(path.join(gate, 'go'), '');
+    const code = await exited;
+    return { lines: stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC ')), code };
+  };
+
+  it('pr1b-5: TERM between the planned ok line and its echo: the ok line once, no failed line, exit 143', async () => {
+    const { lines, code } = await termAtOkLine('before');
+    expect(code).toBe(143);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^AGENT_HEALTH_SYNC status=ok /);
+  }, REAL_SHELL_TEST_TIMEOUT_MS);
+
+  it('pr1b-5: TERM between the echo and the printed mark: only ok lines (the same line twice at most), no failed line, exit 143', async () => {
+    const { lines, code } = await termAtOkLine('after');
+    expect(code).toBe(143);
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    expect(lines.length).toBeLessThanOrEqual(2);
+    expect(new Set(lines).size).toBe(1);
+    expect(lines[0]).toMatch(/^AGENT_HEALTH_SYNC status=ok /);
+    expect(lines.join('\n')).not.toContain('status=failed');
+  }, REAL_SHELL_TEST_TIMEOUT_MS);
 });

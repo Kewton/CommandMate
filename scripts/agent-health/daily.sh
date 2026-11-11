@@ -8,8 +8,8 @@
 # sync fails the check is NOT run: a minimal report (with completedAt, so the
 # watchdog does not mistake it for a missing run) is written and the exit is 2.
 #
-# stdout carries exactly one AGENT_HEALTH_SYNC line from this script; git and
-# npm output goes to stderr.
+# stdout carries one AGENT_HEALTH_SYNC line from this script (the same line may appear twice when a signal
+# lands between its echo and the mark; readers count identical lines as one); git and npm output goes to stderr.
 #
 # The shared run lock (scripts/uat/run-lock.sh, Issue #3359) is held from
 # before the sync until run.ts has finished, so a UAT server or a manual
@@ -100,9 +100,12 @@ fail_sync() {
 HAND=""
 CHILD=""
 CHILD_REAPED=0
-# The one AGENT_HEALTH_SYNC line: SYNC_OK_LINE is set once the sync has succeeded, SYNC_LINE_PRINTED once a
-# line (ok or failed) has been printed. Both are set here, before the EXIT trap, so the environment cannot.
+# The one AGENT_HEALTH_SYNC line: SYNC_OK_LINE is set once the sync has succeeded; SYNC_PLANNED_LINE is the line
+# about to be printed (set before the echo), SYNC_LINE_PRINTED the mark that it was (set after the echo, or by
+# fail_sync). All are set here, before the EXIT trap, so the environment cannot. A signal between the echo and
+# the mark makes daily_on_exit print the planned line again: the same line twice, never two different statuses.
 SYNC_OK_LINE=""
+SYNC_PLANNED_LINE=""
 SYNC_LINE_PRINTED=0
 
 # A step of the handover to run.ts's process group failed while this script lives (design
@@ -155,14 +158,18 @@ daily_handoff_fail() { # <stage>
   fail_sync "handoff-failed stage=${stage%%-*}"
 }
 
-# EXIT (INT and TERM end in `exit 130/143`, so they come here): a run that synced but has not said so yet
-# (interrupted before the child's receipt) says it failed, once - the one AGENT_HEALTH_SYNC line is never
-# missing after the sync. Then a child not yet waited for is stopped first (its group when the lock names
+# EXIT (INT and TERM end in `exit 130/143`, so they come here): a line that was planned but not marked as
+# printed is printed as planned (the ok line; never failed). A run that synced, has no planned line and has not
+# said anything yet (interrupted before the child's receipt) says it failed, once - the one AGENT_HEALTH_SYNC
+# line is never missing after the sync. Then a child not yet waited for is stopped first (its group when the lock names
 # it), and the lock is released once - D12 keeps it while the group has a member.
 # shellcheck disable=SC2329 # run by the EXIT trap below
 daily_on_exit() {
   local rc=$?
-  if [ -n "$SYNC_OK_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
+  if [ -n "$SYNC_PLANNED_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
+    echo "$SYNC_PLANNED_LINE"
+    SYNC_LINE_PRINTED=1
+  elif [ -n "$SYNC_OK_LINE" ] && [ -z "$SYNC_PLANNED_LINE" ] && [ "$SYNC_LINE_PRINTED" != 1 ]; then
     echo "AGENT_HEALTH_SYNC status=failed reason=interrupted exit=${rc} before=$(printf '%s' "$BEFORE" | cut -c1-8)"
     SYNC_LINE_PRINTED=1
   fi
@@ -228,7 +235,8 @@ fi
 SYNC_OK_LINE="AGENT_HEALTH_SYNC status=ok before=$(printf '%s' "$BEFORE" | cut -c1-8) after=$(printf '%s' "$AFTER" | cut -c1-8) npm_install=${NPM_INSTALL}"
 
 if [ "$SYNC_ONLY" -eq 1 ]; then
-  echo "$SYNC_OK_LINE"
+  SYNC_PLANNED_LINE="$SYNC_OK_LINE"
+  echo "$SYNC_PLANNED_LINE"
   SYNC_LINE_PRINTED=1
   exit 0
 fi
@@ -256,7 +264,8 @@ run_lock_set_pid "$T0" "$$" "$CHILD" "$GO" || daily_handoff_fail "$RUN_LOCK_STAG
 # with 75 and no receipt never exec'd: that is the failed line only (stage=ack, below). A child that ends with
 # any other code and no receipt (a signal from outside before it exec'd) gets the `ok` line once it is reaped:
 # the sync itself succeeded and its exit code is passed on. An interruption of this script before any line is
-# made is the failed line of daily_on_exit. So the line is there once, never twice.
+# made is the failed line of daily_on_exit. A planned line that was not marked printed is printed again as planned by
+# daily_on_exit: at most the same line twice, never ok and failed together.
 while [ ! -e "$ACK" ]; do
   CHILD_STAT="$(ps -o stat= -p "$CHILD" 2>/dev/null | tr -d ' ')"
   case "$CHILD_STAT" in '' | Z*) break ;; esac
@@ -264,7 +273,8 @@ while [ ! -e "$ACK" ]; do
   sleep 0.05
 done
 if [ -e "$ACK" ]; then
-  echo "$SYNC_OK_LINE"
+  SYNC_PLANNED_LINE="$SYNC_OK_LINE"
+  echo "$SYNC_PLANNED_LINE"
   SYNC_LINE_PRINTED=1
 fi
 wait "$CHILD"
@@ -278,7 +288,8 @@ if [ "$CODE" -eq 75 ] && [ ! -e "$ACK" ]; then
   fail_sync "handoff-failed stage=ack"
 fi
 if [ "$SYNC_LINE_PRINTED" != 1 ]; then
-  echo "$SYNC_OK_LINE"
+  SYNC_PLANNED_LINE="$SYNC_OK_LINE"
+  echo "$SYNC_PLANNED_LINE"
   SYNC_LINE_PRINTED=1
 fi
 exit "$CODE"
