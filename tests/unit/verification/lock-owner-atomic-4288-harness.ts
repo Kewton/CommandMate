@@ -185,6 +185,27 @@ export interface DriveOptions {
   pathPrefix?: string;
   /** bash: the call itself (default: the acquisition, or the guard). */
   call?: string;
+  /**
+   * The speed of the start-time observation (`ps -o etime=` between two clock reads; #4288 PR1a-f impl-6):
+   * 'fast' — the clock the observation reads is frozen, so a slow ps / perl on a loaded machine cannot make
+   * it a 1 s read (ECLOCK); 'slow' — every other read of the clock jumps 1.5 s forward, so every window around
+   * ps is a read of 1 s or more (ECLOCK). Unset: the real clock (the row does not depend on the speed).
+   * An explicit `hooks.now` / a `bashPre` of its own wins.
+   */
+  observation?: 'fast' | 'slow';
+}
+
+/** The clock the JS implementations read for an observation of the given speed. */
+function observationClock(speed: 'fast' | 'slow'): () => number {
+  const base = Date.now();
+  let n = 0;
+  return speed === 'fast' ? () => base : () => Date.now() + (n++ % 2 === 1 ? 1500 : 0);
+}
+
+/** bash: `lock_now_ms` for an observation of the given speed (the prelude's perl one otherwise). */
+function observationBashPre(speed: 'fast' | 'slow'): string {
+  if (speed === 'fast') return `lock_now_ms() { echo ${Date.now()}; }\n`;
+  return 'C="$LK.clock"; : > "$C"\nlock_now_ms() { if [ -s "$C" ]; then : > "$C"; lnm_b=1500; else echo 1 > "$C"; lnm_b=0; fi; echo $(( $(perl -MTime::HiRes=time -e \'printf("%d", time()*1000)\') + lnm_b )); }\n';
 }
 
 function faultFn(spec?: string): ((point: string, target: string) => string | undefined) | undefined {
@@ -250,14 +271,15 @@ function bashOutcome(who: Who, out: string, err: string): Outcome {
 export async function drive(impl: Impl, who: Who, root: string, o: DriveOptions = {}): Promise<Outcome> {
   if (impl === 'bash') {
     const call = o.call ?? (who === 'guard-head' || who === 'guard-behind' ? BASH_GUARD : BASH_ACQ);
-    const r = spawnSync('bash', ['-c', `${bashPrelude(who)}${o.bashPre ?? ''}\n${call}`], { encoding: 'utf8', timeout: 60000, env: bashEnv(root, o) });
+    const obs = o.observation ? observationBashPre(o.observation) : '';
+    const r = spawnSync('bash', ['-c', `${bashPrelude(who)}${obs}${o.bashPre ?? ''}\n${call}`], { encoding: 'utf8', timeout: 60000, env: bashEnv(root, o) });
     return bashOutcome(who, (r.stdout ?? '').trim(), r.stderr ?? '');
   }
   const fault = faultFn(o.fault);
   const lock = lockPathIn(root);
   if (impl === 'sync') {
     const warnings: string[] = [];
-    const hooks = { ...(fault ? { fault } : {}), ...(o.hooks ?? {}) };
+    const hooks = { ...(fault ? { fault } : {}), ...(o.observation ? { now: observationClock(o.observation) } : {}), ...(o.hooks ?? {}) };
     const restore = withEnv(o);
     try {
       if (who === 'guard-head' || who === 'guard-behind') {
@@ -288,7 +310,7 @@ export async function drive(impl: Impl, who: Who, root: string, o: DriveOptions 
   LOGS.length = 0;
   const restore = withEnv(o);
   try {
-    const r = await acquireMachineLock('x', { root, timeoutMs: 0, pollIntervalMs: 20, __testHooks: { ...(fault ? { fault } : {}), ...(o.hooks ?? {}) } });
+    const r = await acquireMachineLock('x', { root, timeoutMs: 0, pollIntervalMs: 20, __testHooks: { ...(fault ? { fault } : {}), ...(o.observation ? { now: observationClock(o.observation) } : {}), ...(o.hooks ?? {}) } });
     const log = LOGS.join('\n');
     if (r.acquired) return { code: 'acquired', log, heldBy: null, unknown: null };
     const u = r.unknown ? `point=${r.unknown.point} path=${r.unknown.path} errno=${r.unknown.code}` : null;

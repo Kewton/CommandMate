@@ -1004,6 +1004,14 @@ const FAILURE_TABLE = {
     note: "outside P0, mixed (codex round 4 P2): an older copy's functions loaded into a generic shell (bash -s, an interactive shell) or node, stopped past 10 min mid-steps (before writing too): the ps narrowing of §6.1 (a) does not see its command, and it writes nothing (b) could see; resumed, it mv -f's / deletes by name the successor's owner (as F49-F51)",
     limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0' },
   },
+  'F72-old-tmp-slow-observation': {
+    impls: GRACED,
+    point: 'etime',
+    direction: 'keep',
+    results: AG_GH('refused:unk', 'kept'),
+    left: 'unchanged',
+    note: 'impl-6: the pid of an older tmp is alive and the observation of its start (ps -o etime= between two clock reads) took 1 s or more (a loaded machine): ECLOCK, so unknown — the conservative side, the tmp kept and named (etime ECLOCK), never read as reused (F52, F55 pin the fast side)',
+  },
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
 const FAILURES = Object.keys(FAILURE_TABLE) as Failure[];
@@ -1184,13 +1192,13 @@ describe('Issue #4288 PR1a-f tables (design §2.5): shape', () => {
     for (const e of UNREACHABLE) expect(UNREACHABLE_REASONS[(e.cell as Unreachable).unreachable].length).toBeGreaterThan(0);
   });
 
-  it('K has 5 points × 3 implementations = 15 rows, F has 71 rows: 331 implementation × caller cases, 42 unreachable, 289 reached; 646 rows in all', () => {
+  it('K has 5 points × 3 implementations = 15 rows, F has 72 rows: 335 implementation × caller cases, 42 unreachable, 293 reached; 650 rows in all', () => {
     expect(KILL_ROWS).toHaveLength(15);
-    expect(FAILURES).toHaveLength(71);
-    expect(F_ALL_CASES).toHaveLength(331);
+    expect(FAILURES).toHaveLength(72);
+    expect(F_ALL_CASES).toHaveLength(335);
     expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(42);
-    expect(F_CASES).toHaveLength(289);
-    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(646);
+    expect(F_CASES).toHaveLength(293);
+    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(650);
   });
 
   it('every form and every observation of it is defined', () => {
@@ -1775,7 +1783,8 @@ function setupT(impl: Impl, form: Form, caller: Caller, obs: Obs, r: string): H.
   const lock = lockOfRoot(r);
   const kv = kvFor(impl, caller);
   const faults: string[] = [];
-  const o: H.DriveOptions = { tz: 'UTC' };
+  // A fast observation, except a bash waiter behind a ticket (it polls on the clock, which stays real there).
+  const o: H.DriveOptions = { tz: 'UTC', ...(impl === 'bash' && caller === 'acquire-behind' ? {} : { observation: 'fast' as const }) };
   if (caller === 'acquire-behind') H.ticketAhead(r);
   const ageMs = obs === 'alive' ? 0 : H.OLD_MS;
   const ageFault = () => {
@@ -2142,7 +2151,7 @@ const d7Row =
     const m = make(live);
     d7(r, m.rec);
     const before = H.snapshot(r);
-    const out = await H.drive(impl, whoOf(caller), r, { fault: m.fault, tz: m.tz ?? 'UTC', pathPrefix: m.pathPrefix, env: m.env });
+    const out = await H.drive(impl, whoOf(caller), r, { fault: m.fault, tz: m.tz ?? 'UTC', pathPrefix: m.pathPrefix, env: m.env, observation: 'fast' });
     return { code: out.code, check: () => (out.code === 'acquired' || out.code === 'removed' ? undefined : expect(H.snapshot(r)).toBe(before)) };
   };
 
@@ -2274,6 +2283,7 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
       pathPrefix: H.psShim(r),
       env: { FAKE_ETIME_PID: String(pid), FAKE_ETIME: '1-00:00:00' },
       hooks: { startOf: (p: number) => (p === pid ? Date.now() - 86_400_000 : null) },
+      observation: 'fast',
     });
     return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
   },
@@ -2340,7 +2350,7 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
     const now = Date.now();
     fs.writeFileSync(path.join(q, '000000000001'), JSON.stringify({ pid: live, host: H.HOST, token: 'ahead', createdAt: now - 60_000, deadline: now + 3_600_000 }));
     const shim = H.psShim(r);
-    const out = await H.drive(impl, 'acquire-head-nograce', r, { pathPrefix: shim, env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: 'bad:bad' } });
+    const out = await H.drive(impl, 'acquire-head-nograce', r, { pathPrefix: shim, env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: 'bad:bad' }, observation: 'fast' });
     const ticket = JSON.parse(fs.readFileSync(path.join(q, '000000000001'), 'utf8'));
     return { code: out.code === 'refused:queue' && ticket.done !== true ? 'kept' : `retired(${out.code})` };
   },
@@ -2365,7 +2375,7 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
       // written under env -i (TZ, LC_ALL unset), as launchd starts the supervisor
       const lstart = (spawnSync('env', ['-i', 'PATH=/usr/bin:/bin:/usr/sbin:/sbin', 'ps', '-o', 'lstart=', '-p', String(live)], { encoding: 'utf8' }).stdout ?? '').trim();
       d7(sub, { pid: live, token: 'T1', lstart, started_at: H.iso(Date.now()) });
-      codes.push((await H.drive(impl, whoOf(caller), sub, { tz })).code);
+      codes.push((await H.drive(impl, whoOf(caller), sub, { tz, observation: 'fast' })).code);
     }
     expect(new Set(codes).size).toBe(1);
     return { code: codes[0] };
@@ -2436,24 +2446,31 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
   'F52-old-tmp-pid-reused': async (impl, caller, r) => {
     const pid = H.liveSleep(); // started now: after the tmp's mtime + 2 s
     ownerless(r, [`owner.tmp.${pid}`]);
-    const out = await H.drive(impl, whoOf(caller), r);
+    const out = await H.drive(impl, whoOf(caller), r, { observation: 'fast' }); // a fast observation: the start is read, not unknown
     return { code: out.code, check: () => (caller === 'guard-head' ? absentLock(r) : expect(H.isMine(r)).toBe(true)) };
   },
   'F53-old-tmp-pid-etime': async (impl, caller, r) => {
     const pid = H.liveSleep();
     ownerless(r, [`owner.tmp.${pid}`]);
     const before = H.snapshot(r);
-    const out = await H.drive(impl, whoOf(caller), r, { pathPrefix: H.psShim(r), env: { FAKE_ETIME_PID: String(pid), FAKE_ETIME: 'bad:bad' }, hooks: { startOf: () => null } });
+    const out = await H.drive(impl, whoOf(caller), r, { pathPrefix: H.psShim(r), env: { FAKE_ETIME_PID: String(pid), FAKE_ETIME: 'bad:bad' }, hooks: { startOf: () => null }, observation: 'fast' });
     return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
   },
   'F54-started-at-60s': d7Row((live) => ({ rec: { pid: live, token: 'T1', lstart: H.lstartOf(live, 'XXX-0:01'), started_at: H.iso(Date.now()) }, tz: 'UTC0' })),
   'F55-old-tmp-clock-back': async (impl, caller, r) => {
     const pid = H.liveSleep(); // the writer itself, whose clock stepped back: it reads as reused (F52)
     const lock = ownerless(r, [`owner.tmp.${pid}`]);
-    const out = await H.drive(impl, whoOf(caller), r);
+    const out = await H.drive(impl, whoOf(caller), r, { observation: 'fast' });
     // Resumed: its `mv -f` finds no tmp, and its failure path `rm -rf "$dir"` removes the successor's <lock>.
     if (out.code === 'acquired') fs.rmSync(lock, { recursive: true, force: true });
     return { code: out.code, check: () => absentLock(r) };
+  },
+  'F72-old-tmp-slow-observation': async (impl, caller, r) => {
+    const pid = H.liveSleep(); // started now, as F52: with a fast observation it reads as reused and is taken out
+    ownerless(r, [`owner.tmp.${pid}`]);
+    const before = H.snapshot(r);
+    const out = await H.drive(impl, whoOf(caller), r, { observation: 'slow' });
+    return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
   },
   'F56-owner-pid-not-self': async (impl, caller, r) => {
     const other = H.liveSleep();
