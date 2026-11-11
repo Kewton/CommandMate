@@ -98,7 +98,7 @@ describe('the observation-point table (§2.8)', () => {
     });
 
     it('a second raw call in an exempted function changes its count', () => {
-      const sync = read(SOURCES.sync).replace('function collectGarbage(queueDir, now) {', 'function collectGarbage(queueDir, now) {\n  fs.readdirSync(queueDir);');
+      const sync = read(SOURCES.sync).replace('function collectGarbage(queueDir, now, warn = () => {}) {', 'function collectGarbage(queueDir, now, warn = () => {}) {\n  fs.readdirSync(queueDir);');
       expect(scanRawCalls('sync', sync).get('collectGarbage|readdirSync')).toBe(2);
     });
 

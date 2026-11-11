@@ -1923,7 +1923,7 @@ async function killAt(impl: Impl, pause: Pause, r: string, who: 'acquire-head-gr
         : `await m.acquireMachineLock('x', { root: ${JSON.stringify(r)}, timeoutMs: 0, __testHooks: { onOwnerStage } })`;
     const script = `import fs from 'node:fs';
 const m = await import(${JSON.stringify(mod)});
-const onOwnerStage = (s) => { if (s === ${JSON.stringify(pause)}) { fs.writeFileSync(${JSON.stringify(reached)}, ''); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120000); } };
+const onOwnerStage = (s) => { if (s === ${JSON.stringify(pause)}) { fs.writeFileSync(${JSON.stringify(reached)}, String(process.pid)); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120000); } };
 ${call};
 `;
     const file = path.join(dir, impl === 'sync' ? 'kill.mjs' : 'kill.mts');
@@ -1939,6 +1939,25 @@ ${call};
   const exited = new Promise((resolve) => child.on('exit', resolve));
   process.kill(-(child.pid as number), 'SIGKILL');
   await exited;
+  // The pid the record names (pm-return-4288-pr1af-impl-2 item 3): under tsx the writer is the child's
+  // child, which stays a zombie — `kill -0` answers alive — until launchd reaps it, after the exit
+  // awaited above. The rows that judge a published record by its pid wait for ESRCH first.
+  const written = impl === 'bash' ? '' : fs.readFileSync(reached, 'utf8').trim();
+  if (/^\d+$/.test(written)) await waitEsrch(Number(written));
+}
+
+/** Wait (up to 30 s) until `pid` answers ESRCH to kill(pid, 0): exited and reaped. */
+async function waitEsrch(pid: number): Promise<void> {
+  const end = Date.now() + 30000;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
+    }
+    expect(Date.now() < end, `pid ${pid} reaped`).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /** Who takes out what the killed acquisition left (§2.6), on a copy of it aged past the grace. */
