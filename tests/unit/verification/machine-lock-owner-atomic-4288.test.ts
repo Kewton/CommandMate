@@ -7,7 +7,10 @@
  * alive; otherwise, with started_at, the start computed from etime against started_at; without it,
  * unknown). Design: docs/design/machine-lock-owner-atomic-4288.md (upstream round 3: the invariants
  * split into "new writers only" and "while older copies remain", the latter's known limits being
- * `limit` rows of F with the condition that ends them; F expanded per real caller × implementation).
+ * `limit` rows of F with the condition that ends them; F expanded per real caller × implementation;
+ * round 4: the first acquisition records only its own pid, the undo after a confirmation never deletes
+ * by name — rename to a name of its own, check that inode, delete or link it back — the paths left are
+ * listed in §3.1, the clock read before and after ps, the writer's version v=1 on new records).
  *
  * UPSTREAM SKELETON (the design stage). This file holds the tables of §2 (T: implementation × owner
  * form × caller × three-valued observation → result; K: the interruption points of an acquisition ×
@@ -27,8 +30,8 @@
  * invariants, and the time-zone witness of §4 on plain numbers.
  *
  * Counts (written in the design §2.5): T 3 implementations × 17 forms × 4 callers × 3 observations =
- * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 55 rows expanded
- * into 250 implementation × caller cases, 30 unreachable, 220 reached. 577 behaviour rows.
+ * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 66 rows expanded
+ * into 301 implementation × caller cases, 37 unreachable, 264 reached. 621 behaviour rows.
  *
  * How the implementation will drive a row (for the implementation contract, not run here):
  *   - a root from fs.mkdtempSync under os.tmpdir(), removed in afterEach; nothing under ~/.commandmate,
@@ -682,6 +685,9 @@ const POINTS = {
   'ownerless-rmdir': 'existing',
   'owner-tmp-pid': 'new',
   'empty-owner-move': 'new',
+  'owner-pid': 'new',
+  'owner-undo-rename': 'new',
+  'owner-undo-link': 'new',
   pid: 'existing',
   lstart: 'existing',
   etime: 'new',
@@ -692,9 +698,10 @@ type Point = keyof typeof POINTS;
  * The real callers (codex round 2 P2: not the operation names). The acquirers and the D6 guard are
  * the callers of table T; guard-behind is a D6 guard that does not become the head; ticket-retire is
  * lock_ticket_retirable / ticketRetirable / retirable inside every caller's queue wait; hand-off is
- * lock_hand_off.
+ * lock_hand_off; release-head (round 4) is D5's release by a non-holder as the head
+ * (lock_release_as_head / releaseAsHead, bash and the sync JS only).
  */
-const F_CALLERS = ['acquire-head-grace', 'acquire-head-nograce', 'guard-head', 'guard-behind', 'ticket-retire', 'hand-off'] as const;
+const F_CALLERS = ['acquire-head-grace', 'acquire-head-nograce', 'guard-head', 'guard-behind', 'ticket-retire', 'hand-off', 'release-head'] as const;
 type FCaller = (typeof F_CALLERS)[number];
 
 type FMessage = Message | 'owner-exists' | 'not-ours' | 'write-failed';
@@ -708,7 +715,9 @@ type FCodeOf<C extends FCaller> = C extends 'acquire-head-grace' | 'acquire-head
       ? 'not-head'
       : C extends 'ticket-retire'
         ? 'retired' | 'kept'
-        : 'handed' | 'failed';
+        : C extends 'hand-off'
+          ? 'handed' | 'failed'
+          : 'released' | 'missing' | 'deferred' | 'kept' | 'unknown' | 'not-head';
 type FResult = FCodeOf<FCaller>;
 type FResults = { readonly [C in FCaller]?: FCodeOf<C> };
 
@@ -723,6 +732,8 @@ interface Limit {
   readonly kind: 'mixed' | 'premise';
   /** What ends it (§6.1), or why it stays. */
   readonly until: string;
+  /** Whom it falls on (I9): `no-v` — only a writer / record without v= (an older copy); `any` — new writers too (a premise). */
+  readonly writer: 'no-v' | 'any';
 }
 type FLeft =
   | 'nothing-made'
@@ -760,8 +771,8 @@ const AG_GH = <const R extends FAcquire, const G extends FCodeOf<'guard-head'>>(
 /** Every head: both acquirers and the D6 guard (I4's empty owner, an unparsable owner). */
 const HEADS = <const R extends FAcquire, const G extends FCodeOf<'guard-head'>>(r: R, g: G) => ({ ...ACQ(r), 'guard-head': g }) as const;
 
-const UNTIL_OLD_RUNLOCK = '§6.1 1 and 3: PR1b / PR1c merged (no older lib.sh / run-lock.sh writer) and the older worktree copies updated';
-const UNTIL_OLD_VERIFY = '§6.1 2 and 3: the skills port of verify-run.sh published (asked of a human) and the older worktree copies updated';
+const UNTIL_OLD_RUNLOCK = '§6.1 1 and 3: PR1b / PR1c merged (no older lib.sh / run-lock.sh writer) and the older worktree copies updated; then (a) no process started before that runs an older copy (ps) and (b) 7 days without a record lacking v=';
+const UNTIL_OLD_VERIFY = '§6.1 2 and 3: the skills port of verify-run.sh published (asked of a human) and the older worktree copies updated; then (a) no process started before that runs an older copy (ps) and (b) 7 days without a record lacking v=';
 
 const FAILURE_TABLE = {
   'F1-mkdir-lock': { impls: ALL, point: 'mkdir-lock', direction: 'keep', results: ACQ('refused:unk'), left: 'nothing-made', note: 'EEXIST is not a failure' },
@@ -796,9 +807,9 @@ const FAILURE_TABLE = {
     direction: 'own-only',
     results: ACQ('refused:unk'),
     left: 'own-lock-undone',
-    note: 'the owner removed only when it is the tmp: bash `[ ! -L owner ] && [ owner -ef tmp ]` (P3-4), JS/TS lstat(owner) vs lstat(tmp) dev+ino (the tmp is closed: P3-3)',
+    note: 'round 4: the owner is renamed to .undo-<token> first and that name is checked against the tmp — bash `[ ! -L undo ] && [ undo -ef tmp ]` (P3-4), JS/TS lstat(undo) vs lstat(tmp) dev+ino (the tmp is closed: P3-3); the same inode: .undo-<token> and the tmp removed, rmdir. The name `owner` is never removed after a check',
   },
-  'F14-readback-unknown-other-inode': { impls: ALL, point: 'owner-readback', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'another inode, a symlink, or no tmp to compare: the owner is not removed; own tmp only' },
+  'F14-readback-unknown-other-inode': { impls: ALL, point: 'owner-readback', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'the renamed one is another inode, a symlink, or there is no tmp to compare: linked back to <lock>/owner and .undo-<token> removed; own tmp only' },
   'F15-readback-not-ours': { impls: ALL, point: 'owner-readback', direction: 'own-only', results: ACQ('refused:not-ours'), left: 'unchanged', note: 'own tmp removed' },
   'F16-tmp-unlink-after-publish': { impls: ALL, point: 'owner-unlink', direction: 'keep', results: ACQ('acquired'), left: 'mine+tmp', note: 'the tmp goes with the rm -rf of release / recovery' },
   'F17-undo-tmp-unlink': { impls: ALL, point: 'owner-unlink', direction: 'keep', results: ACQ('refused:write-failed'), left: 'lock+own-tmp', note: 'tmp-new: a graced head takes it out after the grace (I3)' },
@@ -828,7 +839,7 @@ const FAILURE_TABLE = {
   },
   'F35-ps-etime': { impls: BASH, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: alive → unknown:etime:<errno>; EPERM stays' },
   'F36-etime-malformed': { impls: BASH, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: `bad:bad`, `1:99`, `-1:00`, four fields: never read as 0 s elapsed' },
-  'F37-ticket-etime-malformed': { impls: ALL, point: 'etime', direction: 'keep', results: { 'ticket-retire': 'kept' }, left: 'unchanged', note: 'bash lock_pid_start_ms takes the strict parse; JS/TS parseEtime checks the ranges' },
+  'F37-ticket-etime-malformed': { impls: ALL, point: 'etime', direction: 'keep', results: { 'ticket-retire': 'kept' }, left: 'unchanged', note: 'bash lock_pid_start_ms takes the strict parse; JS/TS parseEtime checks the ranges; the clock read before and after ps as in F65 (a step back in between keeps the ticket)' },
   'F38-lstart-only-reused': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: no started_at=, the pid reused by a live process: kept and named until that pid ends (round 2\'s owner mtime stand-in dropped)' },
   'F39-started-at-unparsed': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: date cannot read started_at=, the strings differ: as if absent (F34)' },
   'F40-started-at-carry-over': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: LOB_STARTED_AT emptied per read: a record without started_at= after one with is not read as reused' },
@@ -839,8 +850,8 @@ const FAILURE_TABLE = {
     direction: 'limit',
     results: AG_GH('acquired', 'removed'),
     left: 'live-holder-removed',
-    note: 'D7: the wall clock stepped back > 2 s between the holder\'s start and its acquisition, and the writer and reader TZ differ (the strings differ): now − etime > started_at + 2 s reads a live holder as reused. Same TZ: the strings match, never reached',
-    limit: { kind: 'premise', until: 'stays a premise (P1; the parent §1.8 treatment, PM Claude PR1c round 3 hand-over B-2)' },
+    note: 'D7: the wall clock stepped back > 2 s between the holder\'s start and its acquisition, and the writer and reader TZ differ (the strings differ): now − etime > started_at + 2 s reads a live holder as reused; so does GNU ps\'s monotonic etime with the clock stepped forward > 2 s after the acquisition. A change between now and ps is F65 (unknown), not this row. Same TZ: the strings match, never reached',
+    limit: { kind: 'premise', until: 'stays a premise (P1; the parent §1.8 treatment, PM Claude PR1c round 3 hand-over B-2)', writer: 'any' },
   },
   'F43-launchd-reader': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: written under env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin (TZ, LC_ALL unset), read with TZ=UTC and TZ=Asia/Tokyo: started_at against etime, alive' },
   'F44-pid-gone-group-alive': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: pgid= and lstart=, the pid gone and G alive: D7 not applied (no such record in production)' },
@@ -855,7 +866,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older run-lock / supervisor.lock writer (no ticket) stopped after its mkdir, before owner.tmp.<pid> (no pid anywhere), past the 10 min grace; the head reclaims the empty <lock> and takes it; resumed, the writer writes its tmp in the successor\'s <lock> and mv -f replaces the owner (codex round 2 P1)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v' },
   },
   'F50-pr1a-writer-ticket-expired': {
     impls: ALL,
@@ -864,7 +875,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a PR1a writer (`: >`, then cat >> by name, rm -f owner by name on failure) alive, its ticket retired at deadline + 60 s, stopped on an empty owner past 10 min; the head reclaims the empty owner and takes it; resumed, it appends to the successor\'s owner (unparsable, nobody removes it) or removes it by name (PM Claude round 2 P2-A)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v' },
   },
   'F51-pre-pid-stop': {
     impls: ALL,
@@ -873,10 +884,10 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a copy older than PR1a (`printf > owner`, an older cmate-verify) stopped after opening the owner, before its pid is written, past 10 min; the head reclaims the empty owner; resumed, its write lands in the removed inode and it may believe it holds',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v' },
   },
   'F52-old-tmp-pid-reused': { impls: GRACED, point: null, direction: 'keep', results: AG_GH('acquired', 'removed'), left: 'reclaimed', note: 'the pid is alive but started after the tmp mtime + 2 s (from etime): not the writer, the rule takes it out (PM Claude P3-1; round 2 kept it old-taker for ever)' },
-  'F53-old-tmp-pid-etime': { impls: GRACED, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'the old tmp pid alive and its ps -o etime= fails or is malformed' },
+  'F53-old-tmp-pid-etime': { impls: GRACED, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'the old tmp pid alive and its ps -o etime= fails or is malformed, or the clock stepped back while it was read / the read took 1 s or more (ECLOCK, as F65)' },
   'F54-started-at-60s': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: started_at= present, the strings 60 s apart (a minute-unit TZ offset, a live holder): the start from etime is not after started_at + 2 s, alive' },
   'F55-old-tmp-clock-back': {
     impls: GRACED,
@@ -885,8 +896,41 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older writer whose wall clock stepped back > 2 s between its start and its tmp write, then stopped between the tmp and its mv past 10 min: F52 reads it as reused and takes the tmp out; resumed, its mv -f fails and its rm -rf "$dir" may remove the successor\'s <lock> (outside P1, while older copies remain)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v' },
   },
+  'F56-owner-pid-not-self': { impls: GRACED, point: 'owner-pid', direction: 'keep', results: ACQ('refused:unk'), left: 'nothing-made', note: "round 4, I1-b: LOCK_OWNER_PID / ownerPid not the caller's own pid: refused before the ticket and the mkdir (machine-lock-owner-pid-not-self); another pid is recorded by the hand-off (D4) only" },
+  'F57-undo-paused-after-rename': {
+    impls: ALL,
+    point: null,
+    direction: 'own-only',
+    results: ACQ('refused:unk'),
+    left: 'unchanged',
+    note: 'round 4, the interrupt right after the check: stopped past 60 s after the rename to .undo-<token> (before the inode check, or after it before the unlink / the link back): no owner and a .undo-<token> in <lock> — every head reads it stray and neither cleans nor recovers; resumed, the writer checks, removes or links back its own name only',
+  },
+  'F58-undo-restore-exists': {
+    impls: ALL,
+    point: 'owner-undo-link',
+    direction: 'limit',
+    results: ACQ('refused:unk'),
+    left: 'two-holders-possible',
+    note: 'the link back of .undo-<token> answers EEXIST: an older writer (`: >`, `printf >`) made an owner in the moment the owner was moved: not put back, .undo-<token> kept, machine-lock-undo-restore-failed for a human. A new writer links only into the <lock> it made (in a successor\'s <lock> its tmp is gone: ENOENT, F11)',
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v' },
+  },
+  'F59-undo-rename-enoent': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'the owner is no longer there: own tmp removed, no rmdir (the <lock> there is not shown to be ours)' },
+  'F60-undo-rename-other': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'another errno: the owner is not removed; own tmp only; named as unknown' },
+  'F61-undo-successor-before-rename': {
+    impls: ALL,
+    point: null,
+    direction: 'own-only',
+    results: ACQ('refused:unk'),
+    left: 'unchanged',
+    note: "codex round 3 P2's order, new writers only, a sane clock: stopped after the read-back failed and before the rename, the recorded pid dies meanwhile (bash: the parent $$ of the pipeline's subshell), the ticket retires, a successor recovers and takes; resumed, the rename moves the successor's owner, the own tmp went with the recovery so nothing compares, and the link puts the successor's owner back (the same inode)",
+  },
+  'F62-release-head-paused': { impls: GRACED, point: null, direction: 'keep', results: { 'release-head': 'kept' }, left: 'unchanged', note: "round 4: D5 judged the record gone, stopped past its ticket, another head recovered and took; resumed, it removes by lock_recover / recoverLock (moved aside under its own name, the token checked: the successor's differs from T0 / T1, put back), no longer rm -rf <lock> by name" },
+  'F63-guard-absent': { impls: GRACED, point: null, direction: 'keep', results: { 'guard-head': 'absent' }, left: 'unchanged', note: 'D6 as the head finds no <lock> (codex round 3 P3)' },
+  'F64-guard-restore-failed': { impls: GRACED, point: null, direction: 'keep', results: { 'guard-head': 'restore-failed' }, left: 'aside-kept', note: "D6 moved a record aside whose token differs (a successor took it in between) and the restore mkdir fails: the aside stays and is read as held while its record lives (§2.7); machine-lock-restore-failed (codex round 3 P3)" },
+  'F65-clock-back-during-observation': { impls: BASH, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: now_after < now_before (the clock stepped back between now and ps) or the read took 1 s or more: unknown:etime:ECLOCK, read again next poll (codex round 3 P2: now 1000 s, back to 970 s, etime 870 s used to read a start of 130 s > 110 s + 2 s as reused)' },
+  'F66-owner-without-v': { impls: ALL, point: null, direction: 'keep', results: HEADS('refused:rec', 'kept'), left: 'unchanged', note: 'I9: a parsed record without v= (an older copy) or an older owner.tmp.<pid>: judged as before; named once per process and lock, machine-lock-legacy-writer <lock> pid=<pid> — the observation that ends the mixed period (§6.1 (b))' },
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
 const FAILURES = Object.keys(FAILURE_TABLE) as Failure[];
@@ -955,14 +999,29 @@ interface IdentityInput {
   readonly startedAtMs: number | null;
   /** now − etime in ms (taken before ps), or null when etime fails or is malformed. */
   readonly startMs: number | null;
+  /** Round 4: the clock read before and after ps and the etime read in between; when given, it decides startMs. */
+  readonly observed?: Observation;
+}
+interface Observation {
+  readonly nowBefore: number;
+  readonly nowAfter: number;
+  readonly etime: number;
 }
 const SLACK_MS = 2000;
-function identity({ cur, startedAtMs, startMs }: IdentityInput): 'alive' | 'reused' | 'unknown' {
+/** §4.1 5–6 (round 4): a step back between the two reads, or a read of 1 s or more, is unknown (ECLOCK). */
+function startFrom({ nowBefore, nowAfter, etime }: Observation): number | null {
+  if (nowAfter < nowBefore || nowAfter - nowBefore >= 1000) return null;
+  return nowBefore - etime;
+}
+/** Round 3's rule (now before ps only): the positive control of F65. */
+const startFromRound3 = ({ nowBefore, etime }: Observation): number => nowBefore - etime;
+function identity({ cur, startedAtMs, startMs, observed }: IdentityInput): 'alive' | 'reused' | 'unknown' {
   if (cur === 'unreadable') return 'unknown';
   if (cur === 'same') return 'alive';
   if (startedAtMs === null) return 'unknown'; // lstart= only: no evidence either way (PM decision 2)
-  if (startMs === null) return 'unknown';
-  return startMs > startedAtMs + SLACK_MS ? 'reused' : 'alive';
+  const start = observed ? startFrom(observed) : startMs;
+  if (start === null) return 'unknown';
+  return start > startedAtMs + SLACK_MS ? 'reused' : 'alive';
 }
 
 const T0 = Date.UTC(2026, 10, 11, 9, 32, 44); // the holder's real start (measured lstart: 09:32:44 UTC / 18:32:44 Asia/Tokyo)
@@ -980,6 +1039,29 @@ const IDENTITY_CASES = {
   'started-within-slack': { input: { cur: 'differs', startedAtMs: T0, startMs: T0 + SLACK_MS }, answer: 'alive', row: 'the 2 s slack (lock_now_ms in whole seconds)' },
   // the clock stepped back 5 s after the holder started and before it wrote started_at: a live holder, read as reused
   'clock-back-premise': { input: { cur: 'differs', startedAtMs: T0 - 4000, startMs: T0 }, answer: 'reused', row: 'F42 (limit, premise P1)' },
+  // round 4 (codex round 3 P2): started 100 s, acquired 110 s; now_before 1000 s, the clock back to 970 s before
+  // ps, BSD etime 870 s: round 3 read a start of 130 s (> 112 s, reused); now_after < now_before is unknown
+  'clock-back-during-observation': {
+    input: { cur: 'differs', startedAtMs: 110_000, startMs: null, observed: { nowBefore: 1_000_000, nowAfter: 970_100, etime: 870_000 } },
+    answer: 'unknown',
+    row: 'F65',
+  },
+  // a step back of 300 ms hidden inside a 200 ms read: the error stays under the read's length, alive
+  'hidden-step-within-observation': {
+    input: { cur: 'differs', startedAtMs: 110_000, startMs: null, observed: { nowBefore: 1_000_000, nowAfter: 1_000_200, etime: 900_100 } },
+    answer: 'alive',
+    row: 'P1 (the observation window)',
+  },
+  'slow-observation': {
+    input: { cur: 'differs', startedAtMs: 110_000, startMs: null, observed: { nowBefore: 1_000_000, nowAfter: 1_001_000, etime: 900_000 } },
+    answer: 'unknown',
+    row: 'F65 (1 s or more: a step inside cannot be told)',
+  },
+  'clock-forward-during-observation': {
+    input: { cur: 'differs', startedAtMs: 110_000, startMs: null, observed: { nowBefore: 1_000_000, nowAfter: 1_030_100, etime: 930_000 } },
+    answer: 'unknown',
+    row: 'F65',
+  },
 } as const satisfies Record<string, { input: IdentityInput; answer: 'alive' | 'reused' | 'unknown'; row: string }>;
 
 /** Each D7 form of table T as an input of §4.1 (the identity of IDENTITY_OF must follow from the rule). */
@@ -1029,13 +1111,13 @@ describe('Issue #4288 PR1a-f tables (design §2.5): shape', () => {
     for (const e of UNREACHABLE) expect(UNREACHABLE_REASONS[(e.cell as Unreachable).unreachable].length).toBeGreaterThan(0);
   });
 
-  it('K has 5 points × 3 implementations = 15 rows, F has 55 rows: 250 implementation × caller cases, 30 unreachable, 220 reached; 577 rows in all', () => {
+  it('K has 5 points × 3 implementations = 15 rows, F has 66 rows: 301 implementation × caller cases, 37 unreachable, 264 reached; 621 rows in all', () => {
     expect(KILL_ROWS).toHaveLength(15);
-    expect(FAILURES).toHaveLength(55);
-    expect(F_ALL_CASES).toHaveLength(250);
-    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(30);
-    expect(F_CASES).toHaveLength(220);
-    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(577);
+    expect(FAILURES).toHaveLength(66);
+    expect(F_ALL_CASES).toHaveLength(301);
+    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(37);
+    expect(F_CASES).toHaveLength(264);
+    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(621);
   });
 
   it('every form and every observation of it is defined', () => {
@@ -1186,8 +1268,9 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
     expect(FAILURE_TABLE['F47-guard-absent-check'].results).toEqual({ 'guard-head': 'kept' });
     expect(FAILURE_TABLE['F48-guard-not-head'].results).toEqual({ 'guard-behind': 'not-head' });
     expect(F_CASES.filter((c) => c.caller === 'guard-head' && c.result === 'kept').length).toBeGreaterThan(0);
-    // the clean-up and D7 rows name the guard too (round 2 named only the operation)
-    for (const f of F_ROWS.filter((r) => r.impls.length === 2 && r.impls[0] === 'bash' && r.impls[1] === 'sync')) {
+    // the clean-up and D7 rows name the guard too (round 2 named only the operation); round 4: the rows the
+    // graced acquirer reaches without the no-grace one (F56 is both acquirers' option check, F62 is D5's)
+    for (const f of F_ROWS.filter((r) => r.impls.length === 2 && r.impls[0] === 'bash' && r.impls[1] === 'sync' && r.results['acquire-head-grace'] !== undefined && r.results['acquire-head-nograce'] === undefined)) {
       expect(Object.keys(f.results).some((c) => c.startsWith('guard'))).toBe(true);
     }
     // TS has neither a graced acquirer nor a guard: such cases are unreachable, with the reason
@@ -1207,9 +1290,12 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
       'F50-pr1a-writer-ticket-expired:mixed',
       'F51-pre-pid-stop:mixed',
       'F55-old-tmp-clock-back:mixed',
+      'F58-undo-restore-exists:mixed',
     ]);
     for (const f of limits) {
       expect(f.limit?.until.length).toBeGreaterThan(0);
+      // I9: a mixed limit falls only on a writer without v=; a premise on any writer
+      expect(f.limit?.writer).toBe(f.limit?.kind === 'mixed' ? 'no-v' : 'any');
       expect(['two-holders-possible', 'live-holder-removed']).toContain(f.left);
     }
     for (const f of F_ROWS.filter((r) => r.direction !== 'limit')) {
@@ -1256,6 +1342,42 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
   });
 });
 
+describe('Issue #4288 PR1a-f round 4 (design §3.1, I1-b, I2-b, I9, P1): no name deleted after a check, the own pid only, v=', () => {
+  it('I1-b: the first acquisition with another pid is refused before anything is made (F56); another pid is the hand-off\'s only', () => {
+    const f = FAILURE_TABLE['F56-owner-pid-not-self'];
+    expect([f.point, f.left, f.direction]).toEqual(['owner-pid', 'nothing-made', 'keep']);
+    expect(f.results).toEqual({ 'acquire-head-grace': 'refused:unk', 'acquire-head-nograce': 'refused:unk' });
+    expect([...f.impls]).toEqual(['bash', 'sync']); // TS has no ownerPid
+  });
+
+  it('I2-b: the undo renames to its own name before the check; the interrupt right after the check and codex round 3\'s order leave the successor\'s owner', () => {
+    for (const id of ['F13-readback-unknown-same-inode', 'F14-readback-unknown-other-inode', 'F57-undo-paused-after-rename', 'F59-undo-rename-enoent', 'F60-undo-rename-other', 'F61-undo-successor-before-rename'] as const) {
+      const f = FAILURE_TABLE[id];
+      expect([id, f.direction, [...f.impls]]).toEqual([id, 'own-only', ['bash', 'sync', 'ts']]);
+    }
+    expect(FAILURE_TABLE['F13-readback-unknown-same-inode'].note).toContain('.undo-<token>');
+    for (const id of ['F57-undo-paused-after-rename', 'F59-undo-rename-enoent', 'F60-undo-rename-other', 'F61-undo-successor-before-rename'] as const) {
+      expect([id, FAILURE_TABLE[id].left]).toEqual([id, 'unchanged']);
+    }
+    // the only way the undo can leave two holders is an older writer in the moved moment (F58, mixed, no v=)
+    expect(FAILURE_TABLE['F58-undo-restore-exists'].limit).toMatchObject({ kind: 'mixed', writer: 'no-v' });
+  });
+
+  it('§3.1: D5 removes through lock_recover (F62); D6 answers absent and restore-failed in rows of their own (F63, F64; codex round 3 P3)', () => {
+    expect(FAILURE_TABLE['F62-release-head-paused'].results).toEqual({ 'release-head': 'kept' });
+    const guard = F_CASES.filter((c) => c.caller === 'guard-head').map((c) => c.result);
+    for (const r of ['removed', 'kept', 'absent', 'restore-failed'] as const) expect([r, guard.includes(r)]).toEqual([r, true]);
+    expect(F_CASES.filter((c) => c.caller === 'guard-behind').map((c) => c.result)).toContain('not-head');
+  });
+
+  it('I9: a record without v= is judged as before and named (F66); the mixed limits fall only on such writers', () => {
+    const f = FAILURE_TABLE['F66-owner-without-v'];
+    expect([f.direction, f.left]).toEqual(['keep', 'unchanged']);
+    expect(f.note).toContain('machine-lock-legacy-writer');
+    for (const l of F_ROWS.filter((r) => r.limit?.kind === 'mixed')) expect([l.id, l.limit?.writer]).toEqual([l.id, 'no-v']);
+  });
+});
+
 describe('Issue #4288 PR1a-f §4: the time-zone independent comparison PR1c calls', () => {
   it('the contract: bash machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms> → alive | reused | unknown; no JS twin without a caller', () => {
     expect(PID_IDENTITY.bash.name).toBe('machine_lock_pid_identity');
@@ -1274,6 +1396,10 @@ describe('Issue #4288 PR1a-f §4: the time-zone independent comparison PR1c call
     // the clock stepping back is the premise row F42, not a quiet residual
     expect(IDENTITY_CASES['clock-back-premise'].row).toContain('F42');
     expect(FAILURE_TABLE['F42-clock-back'].limit.kind).toBe('premise');
+    // round 4: the step back during the read is unknown now; round 3's rule read it as reused (the positive control)
+    const back = IDENTITY_CASES['clock-back-during-observation'].input.observed;
+    expect(startFromRound3(back)).toBeGreaterThan(110_000 + SLACK_MS);
+    expect(startFrom(back)).toBeNull();
   });
 
   it('§4.2: the identity decides whether to remove, never whether to stop — proc_matches, deadline-guard and supervisor do not call it (PM decision 3)', () => {
