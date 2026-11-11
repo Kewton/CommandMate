@@ -1,8 +1,9 @@
-# Issue #4288 PR1c の設計: supervisor.lock を machine-lock に載せる（上流の段・3 回目）
+# Issue #4288 PR1c の設計: supervisor.lock を machine-lock に載せる（上流の段・4 回目）
 
-- 状態: 上流の段の 3 回目（設計の 4 つと試験の表の雛形）。コードは変えない。実装は、この表がレビューで P2 0 になった後に「表を赤から緑にする」別の契約で行う（PM の依頼 `pm-brief-claude3-upstream-1111.md` の段 1・2）
+- 状態: 上流の段の 4 回目（設計の 4 つと試験の表の雛形）。コードは変えない。実装は、この表がレビューで P2 0 になった後に「表を赤から緑にする」別の契約で行う（PM の依頼 `pm-brief-claude3-upstream-1111.md` の段 1・2）
 - 2 回目の入力: Claude 5 `prereview/review-4288-pr1c-upstream.md`（P2 5・P3 5）、PM Claude `pm-review-4288-pr1c-upstream-claude.md`（P2 4・P3 9）、PM の処分 `pm-return-4288-upstream.md`（共通の決定 1〜5 と PR1c の個別の決定）。不変条件は全員一致で正しいので変えず、表と既存の試験との契約を直した（§9 に指摘ごとの処分）
 - 3 回目の入力: PM Claude `pm-review-4288-pr1c-upstream2-claude.md`（P2 2・P3 6）、Claude 5 `prereview/review-4288-pr1c-upstream2.md`、PM の処分 `pm-return-4288-pr1c-upstream2.md` の 1・2・4。直したのは文と期待値だけで、規則・不変条件・表の形は変えない（§10）。処分の 3（TZ を PR1a-f の比較に寄せる）は、PR1a-f の上流 2 回目で関数の名前と契約が決まった後の追加の指示（`reinstruct-4288-pr1c-tz.md`）で直した: 独自の tz の包みを消し、生死の判定の時刻の比較を PR1a-f の関数に寄せた（S3・§2.1・F8・F9・前提 P3、形 `other-tz` → `other-eperm`、文面 `tz` を外して 10 種類。§10）
+- 4 回目の入力: PM Claude `pm-review-4288-pr1c-upstream3-claude.md`（P1 0・P2 0・P3 4、実装へ進めてよい）、PM の処分 `pm-return-4288-pr1c-upstream3.md`。文の直しだけで、規則・不変条件・表の形・数は変えない。直したのは P3-1（止める判定の `proc_matches` は関数を呼ばない）・P3-2（文面が頼る内部の名前の検査）・P3-3（`aside` × EPERM の行方）と、申し送り B の 1 を PR1c で変えないと書いたこと（§11）。P3-4（実装の契約の土台）は PM が契約で受ける
 - 土台: [lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) の §1（2 番、D1〜D12）・§1.11（PR1c の書くファイル）・§1.14（PR1a の実装と D12 の不変条件）・§7。PR1a は develop に入っている（`c3387cbe7`、この文書の行番号は `b57c2aba6`）
 - 対象: `scripts/agent-health/product/lib.sh` の `product_lock_*` と `scripts/agent-health/product/deadline-guard.sh` の回収を、PR1a の読み込み口 `scripts/lib/machine-lock.sh` の上に載せる部分だけ。run-lock（PR1b）は対象外
 - 試験の表の雛形: `tests/unit/scripts/agent-health/supervisor-lock-machine-lock-4288.test.ts`。表は型つきの列挙（足し忘れ・答えられない結果は `satisfies` で typecheck が落とす）。雛形は次の数をこの行から読み、自分の表の数と比べる（別々に作ったオブジェクトの比較）:
@@ -76,7 +77,7 @@ supervisor.lock だけの性質（事実）:
 
 自分の token の退避は列挙しない: 自分の記録は自分が生きている間は回収されない（S3: pid が生きていれば、`machine_lock_pid_identity` は TZ の違いでも `alive` と答える）ので、自分の退避が生じるのは自分が死んだ後で、そのとき自分は解放を呼べない。1 回目の「TZ が同じ」という暗黙の前提は、PR1a-f の関数で前提でなくなった（PM Claude P2-3）。
 
-**生死の判定の時刻の比較（決定、PM の処分 3・案 A）**: PR1c は独自の tz の包み（記録の `tz=` と読み手の `${TZ-}` の比較）を持たず、PR1a-f の `machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>`（PR1a-f の設計 `docs/design/machine-lock-owner-atomic-4288.md` §4.1・§4.2、`be8275def`） を呼ぶ（読み込み口の D7 の包み `lock_record_state` が呼ぶので、lib.sh は関数を足さず、記録に `tz=` も書かない）。契約: 標準出力に 1 行 `alive | reused | unknown:<point>:<errno>`（`<point>` は `lstart` か `etime`）、終了コードは常に 0、呼ぶのは `kill -0` の pid の観測が alive か EPERM のときだけ。写像（PR1a-f §4.1）: 元が alive → `alive` は生、`reused` は死（G を見る。supervisor.lock は `pgid=` を書かないので死）、`unknown:…` は不明。元が `unknown:pid:EPERM` → `reused` は死、それ以外は EPERM のまま。`<started-at-ms>` は `started_at=`、無ければ owner の mtime（PR1a-f I5）。2 回目にあった「`tz=` の値に改行が入ると行を差し込める」件（PM Claude P3-3）は、PR1c が `tz=` を書かなくなったので PR1c には無く、記録の欄の検査は PR1a-f の側に寄せた。依存: PR1c は PR1a-f の後にマージし（PR1a-f → PR1c）、PR1c 単独の版は作らない。
+**生死の判定の時刻の比較（決定、PM の処分 3・案 A）**: PR1c は独自の tz の包み（記録の `tz=` と読み手の `${TZ-}` の比較）を持たず、PR1a-f の `machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>`（PR1a-f の設計 `docs/design/machine-lock-owner-atomic-4288.md` §4.1・§4.2、`be8275def`） を呼ぶ（読み込み口の D7 の包み `lock_record_state` が呼ぶので、lib.sh は関数を足さず、記録に `tz=` も書かない）。契約: 標準出力に 1 行 `alive | reused | unknown:<point>:<errno>`（`<point>` は `lstart` か `etime`）、終了コードは常に 0、呼ぶのは `kill -0` の pid の観測が alive か EPERM のときだけ。写像（PR1a-f §4.1）: 元が alive → `alive` は生、`reused` は死（G を見る。supervisor.lock は `pgid=` を書かないので死）、`unknown:…` は不明。元が `unknown:pid:EPERM` → `reused` は死、それ以外は EPERM のまま。`<started-at-ms>` は `started_at=`、無ければ owner の mtime（PR1a-f I5）。2 回目にあった「`tz=` の値に改行が入ると行を差し込める」件（PM Claude P3-3）は、PR1c が `tz=` を書かなくなったので PR1c には無く、記録の欄の検査は PR1a-f の側に寄せた。依存: PR1c は PR1a-f の後にマージし（PR1a-f → PR1c）、PR1c 単独の版は作らない。**呼ぶのはロックの D7（消すか消さないか）だけ（PM の処分、上流の 4 回目 P3-1）**: 台帳の止める判定（`deadline-guard.sh:55`・`lib.sh:217`・`lib.sh:294` の `proc_matches`）では `machine_lock_pid_identity` を呼ばず、今の文字列の一致（`lib.sh:84-86`）のまま変えない。PR1c で `proc_matches` を関数に置き換えない。止める判定に TZ に依らない比較が要るなら、PR1a-f が足す厳しい版（`same | other | unknown`、`unknown` は止めない）を使う別の作業にする（その時は下の §3 の `deadline-guard.sh` の件も一緒に決める）。雛形の `stopJudgementProblems` が、`lib.sh`・`deadline-guard.sh` のコードの行に関数の名前が無いことと、3 か所が `proc_matches` で判定することを grep で確かめる。
 
 **呼び手（9）**: 本番の呼び手が無い経路は表に残し、セルを「拒否」か「不可能」にする（共通の決定 2）。
 
@@ -107,7 +108,7 @@ supervisor.lock だけの性質（事実）:
 | `other-plain` | `kill -0` の記録の pid | 生きている | ESRCH | EIO など（ESRCH・EPERM 以外。EPERM は F1） |
 | `other-lstart` | `kill -0` の後、生きた pid の `machine_lock_pid_identity`（D7） | 生きていて関数が `alive`（TZ の違いだけのときも） | ESRCH、または関数が `reused` | `kill -0` の EIO など（ESRCH・EPERM 以外）、または関数が `unknown:lstart|etime:…`（F6） |
 | `other-eperm` | `kill -0` が EPERM の後の `machine_lock_pid_identity`（D7） | 関数が `alive`（EPERM のまま） | 関数が `reused`（死んだ監督役の pid を別の利用者が再利用） | 関数が `unknown:…`（EPERM のまま） |
-| `aside` | 退避の記録の `lock_record_state` | 生きている | ESRCH | EIO など（ESRCH・EPERM 以外。EPERM は F1） |
+| `aside` | 退避の記録の `lock_record_state` | 生きている | ESRCH | EIO など（ESRCH・EPERM 以外。EPERM は F1。`aside` の EPERM でも先頭が退避を戻すので、行方は F1 の `unchanged` でなく `restored`。F1 の注） |
 
 `other-lstart` の pid が死んでいる場合は `kill -0` が先に ESRCH を返し、関数（`ps`）を呼ばない（PR1a-f §4.1 の「alive か EPERM のときだけ呼ぶ」）。既存の `:647` の試験の割込み（`ps` の stub）が新しい形で働かない理由（§5.1）。
 
@@ -148,6 +149,8 @@ supervisor.lock だけの性質（事実）:
 | `aside` | `LOCK_GONE_PENDING`（`lock_settle_gone` が記す `:1381-1421`。周の頭で空にする `:1564`）と、文面のための owner の読み | 空でなく、canonical の `<lock>` に記録が無い（戻しが失敗した。戻せた `aside` × `alive` は記録があるので `rec`） |
 | `rec` | 文面のための owner の読み | `pid=` と `token=` がある記録（上のどれにも当たらない） |
 | `taking` | 上のどれにも当たらない | owner が無い。札の `ln` の失敗（F29）もここ: `lock_acquire_path` は stderr に 1 行出して 1 を返すだけで不明を記さず（`:1576-1579`）、自分の札も残らない（`LOCK_TICKET` は空）ので、今の大域変数からは `unk` を導けない（`unk` に揃える読みは足さない。小さい方を選んだ） |
+
+`queue` の `la_blocker` と `aside` の `LOCK_GONE_PENDING` は `verify-run.sh` の錠の節の**内部の名前**で、節の契約ではない（`LOCK_UNKNOWN`・`LRO_UNKNOWN` は呼び手向けに書かれている）。名前が変わると文面だけが黙って `taking` に落ちるので、雛形の `messageInternalProblems` が、錠の節（`# --- machine-wide gate lock` から `# --- gate execution` まで）のコードの行に `la_blocker=` と `LOCK_GONE_PENDING=` の代入があり、どちらも `local` でないことを確かめる（PM の処分、上流の 4 回目 P3-2）。この 2 つを PR1a-f の契約に名前として書くかは PR1a-f の側で決める（PR1c は書かない）。
 
 ガードが stderr に 1 行出すのは、`unloaded` の `loader`、`LRO_UNKNOWN` が空でないときの `unk`・`eperm`（`kept` と、F30 の `not-head`）、`kept` の `corrupt`・`tmp`・`host` だけ（exit code は変えない。S8）。それ以外の種類（`rec`・`taking`・`aside`）はガードでは出さない（表の `kept` の行が文面を持たない）。
 
@@ -222,7 +225,7 @@ supervisor.lock だけの性質（事実）:
 
 | # | 点（場所） | 失敗 | 向き | acquire-head | guard-head | release-main・他 |
 |---|---|---|---|---|---|---|
-| F1 | `pid`（`lock_obs_kill0` `verify-run.sh:848`） | EPERM のまま（`lstart=` の無い記録、または `machine_lock_pid_identity` が `reused` と言わない。`lstart=` のある記録では `other-eperm` × `alive`・`unknown` と同じ答え。`reused` なら `other-eperm` × `gone`） | 消さない | refused(eperm) / unchanged | kept(eperm) | — |
+| F1 | `pid`（`lock_obs_kill0` `verify-run.sh:848`） | EPERM のまま（`lstart=` の無い記録、または `machine_lock_pid_identity` が `reused` と言わない。`lstart=` のある記録では `other-eperm` × `alive`・`unknown` と同じ答え。`reused` なら `other-eperm` × `gone`） | 消さない | refused(eperm) / unchanged | kept(eperm) | —（注: `aside` の形〔退避の記録の pid が EPERM〕では、先頭が不明を記してから退避を戻す〔`lock_settle_gone` → `lock_restore_from_gone`〕ので、行方は `unchanged` でなく `restored`: acquire-head は `refused(eperm) / restored`、guard-head は `kept(eperm) / restored`。`aside` × `unknown` の行方と同じ。上流の 4 回目 P3-3） |
 | F2 | 同上 | EIO など | 消さない | refused(unk) | kept(unk) | release-main: deferred |
 | F3 | `$$` の `kill -0`（`lock_release_held` の自己の確かめが不明、次の読みが alive） | EIO が 1 回 | 消さない | — | — | release-main: needs-head / unchanged（D5 は呼ばない。S5） |
 | F4 | `kill -0` がゾンビを alive と読む | ガードの KILL の直後で launchd が刈り取る前 | 消さない | refused(rec) | kept | —（刈り取りの後の先頭が回収。旧版の `proc_running` はゾンビを死と読んだ。PM Claude P3-4） |
@@ -262,6 +265,8 @@ supervisor.lock だけの性質（事実）:
 流用する既存の部品の倒れ方（事実）:
 
 - `proc_lstart`（`lib.sh:66`）: 書く側だけに使う（記録の `lstart=` の値。旧い読み手と同じ形に揃えるため squeeze しない）。判定は PR1a-f の `machine_lock_pid_identity`。失敗は F7
+- `proc_matches`（`lib.sh:84-86`、`lstart` の文字列の一致）: 台帳の止める判定（`deadline-guard.sh:55`・`lib.sh:217` の `reclaim_server`・`lib.sh:294` の `reclaim_runner`）に今のまま使う。PR1c は変えず、`machine_lock_pid_identity` を呼ばない（§2.1 の決定、P3-1）。ロックの判定には使わない（`product_lock_owner_alive` は消す、§5）
+- `deadline-guard.sh` で `proc_matches` が偽のとき（`:55`）、supervisor を止めずに先へ進み、その台帳を回収して確定する（`:68-78`）。TZ が違えば生きた supervisor でも偽になりうるが、これは**今からある形**で PR1c の退行ではない。PR1c では変えない（PM の処分、申し送り B の 1。#4288 の後続の項目として PM が記録する）
 - `run_lock_field`（`run-lock.sh:44-47`）: 取得が断ったときの文面だけに使う。判定には使わない。失敗は空の文字列（文面が欠けるだけ）
 - `run_lock_pid_alive`（`run-lock.sh:50-56`、2 値）: 0＝`kill -0` か `ps -p` が成功（EPERM の生きた pid を含む）、1＝`kill -0` も `ps -p` も失敗（ESRCH に限らない。`ps` の失敗も 1 になる）、または pid が数字でない。ロックの判定には使わない（`proc_running` が台帳の回収に使う）。2 値のまま（§5.2）
 
@@ -379,3 +384,13 @@ PR1a-f へ（共通の決定 1。PR1c では形を区別して文面で人に知
 | PM Claude P3-5（影響のある呼び手の書き忘れが型で落ちない） | F ごとに到達する 6 呼び手を `callers` か `excluded`（1 語の理由）のちょうど一方に書き、`failure()` の型で書き忘れ・二重を落とす（`@ts-expect-error` の対照と実行時の検査）。列挙で F31 の後ろの 2 呼び手（札が期限まで残る）と F33 の `guard-behind` を書き足した |
 | PM Claude P3-6（`lib-load-failed` の作り方） | §5.2 の行と `LOADER_ROWS` を「旧い `run-lock.sh` の写し＋印が 2 つある `verify-run.sh` の写し（`MACHINE_LOCK_VERIFY_RUN`）」に狭めた |
 | PM Claude P3-1・P3-3、Claude 5 P2-A（TZ）＝PM の処分 3 | 追加の指示 `reinstruct-4288-pr1c-tz.md` で直した: 独自の tz の包みを消し、PR1a-f の `machine_lock_pid_identity <pid> <recorded-lstart> <started-at-ms>`（PR1a-f の設計 `docs/design/machine-lock-owner-atomic-4288.md` §4.1・§4.2、`be8275def`） を呼ぶ形に（S3・§2.1・F6・F8・F9・前提 P3）。形 `other-tz` を関数の 3 値を受ける `other-eperm`（EPERM の記録）に置き換え、`other-lstart` の観測を関数の 3 値にした。文面 `tz` を外した（10 種類）。`tz=` の改行の件は PR1c が `tz=` を書かなくなったので PR1a-f の側の検査に寄せた。マージの順 PR1a-f → PR1c（§5） |
+
+## 11. 上流の 3 回目の指摘と処分（4 回目で直したもの、文の直しだけ）
+
+| 指摘 | 処分（この文書・雛形） |
+|---|---|
+| PM Claude P3-1（止める判定では関数を呼ばない） | §2.1 の決定と §3 の「流用する既存の部品」に、`proc_matches`（`deadline-guard.sh:55`・`lib.sh:217`・`lib.sh:294`）は今の文字列の一致のままで `machine_lock_pid_identity` を呼ばない、と書いた。雛形に `stopJudgementProblems`（grep の検査）と陽性・陰性の対照 |
+| PM Claude P3-2（`queue`・`aside` が `verify-run.sh` の内部の名前に頼る） | §2.2 に内部の名前に頼ると書き、雛形に `messageInternalProblems`（錠の節に `la_blocker=`・`LOCK_GONE_PENDING=` の代入があり `local` でない）と陽性の対照。PR1a-f の契約に名前を書くかは PR1a-f の側 |
+| PM Claude P3-3（`aside` × EPERM の行方） | F1 に注: `aside` では行方 `restored`（`refused(eperm) / restored`・`kept(eperm) / restored`）。§2.1 の `aside` の行と雛形の F1 の文も同じに。表の形・数は変えない |
+| PM Claude P3-4（実装の契約の土台） | PM の処分どおり実装の契約の側（PR1a-f の実装のブランチの上に積む）。この文書は変えない |
+| 申し送り B の 1（`deadline-guard.sh` で `proc_matches` が偽なら回収と確定へ進む） | 今からある形として PR1c では変えない、と §3 に 1 行 |

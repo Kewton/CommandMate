@@ -1,6 +1,6 @@
 /**
  * Issue #4288 PR1c — supervisor.lock on the machine-wide lock (scripts/lib/machine-lock.sh, PR1a).
- * Design: docs/design/supervisor-lock-machine-lock-4288.md (upstream stage, 3rd round).
+ * Design: docs/design/supervisor-lock-machine-lock-4288.md (upstream stage, 4th round).
  *
  * UPSTREAM SKELETON (the design stage). This file holds the tables of the design as typed enumerations,
  * so that a cell, a result or a failure outcome left out (or one the caller cannot answer) fails the
@@ -43,6 +43,8 @@ const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const MACHINE_LOCK_SH = path.join(REPO_ROOT, 'scripts/lib/machine-lock.sh');
 const VERIFY_RUN_SH = path.join(REPO_ROOT, '.claude/skills/cmate-verify/scripts/verify-run.sh');
 const DESIGN_MD = path.join(REPO_ROOT, 'docs/design/supervisor-lock-machine-lock-4288.md');
+const LIB_SH = path.join(REPO_ROOT, 'scripts/agent-health/product/lib.sh');
+const DEADLINE_GUARD_SH = path.join(REPO_ROOT, 'scripts/agent-health/product/deadline-guard.sh');
 
 // ------------------------------------------------------------------ enumerations (§2.1)
 
@@ -493,7 +495,7 @@ const RELEASE_SELF = { 'release-main': 'own-pid-only', 'release-unheld': 'unheld
 const FAILURE_TABLE = {
   'F1-kill0-eperm': failure({
     point: 'pid (lock_obs_kill0)',
-    errno: 'EPERM that stays EPERM: a record with no lstart=, or machine_lock_pid_identity not answering reused (with lstart= the same answer as other-eperm × alive / unknown)',
+    errno: 'EPERM that stays EPERM: a record with no lstart=, or machine_lock_pid_identity not answering reused (with lstart= the same answer as other-eperm × alive / unknown). On the aside form the head puts the moved record back first, so the record ends restored, not unchanged (acquire-head refused(eperm) / restored, guard-head kept(eperm) / restored: as aside × unknown)',
     direction: 'keep',
     callers: { 'acquire-head': refused('eperm'), 'guard-head': gKept('eperm') },
     excluded: { ...BEHIND, ...RELEASE_SELF },
@@ -785,6 +787,66 @@ function codeResultSet(variable: string, sources: readonly string[]): string[] {
 }
 const sorted = (xs: readonly string[]) => [...xs].sort();
 
+/** The lines of a shell text that are code (a line with `#` first is a comment and dropped). */
+const codeLines = (text: string): string[] => text.split('\n').filter((line) => !/^\s*#/.test(line));
+
+/** The text of the shell function `name() {` up to the first `}` alone at the start of a line; undefined when absent. */
+function shellFunction(text: string, name: string): string | undefined {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => new RegExp(`^${name}\\(\\)\\s*\\{`).test(line));
+  if (start < 0) return undefined;
+  const end = lines.findIndex((line, i) => i > start && /^\}\s*$/.test(line));
+  return lines.slice(start, end < 0 ? undefined : end + 1).join('\n');
+}
+
+/**
+ * The stop judgements (the ledger's "stop it or not": TERM / KILL when true) stay the string match of proc_matches,
+ * and machine_lock_pid_identity is called only through the D7 wrapper of the loader (design §2.1, P3-1): lib.sh
+ * and deadline-guard.sh never call it, proc_matches included, and the three stop sites still call proc_matches.
+ */
+const STOP_SITES = [
+  { file: 'deadline-guard.sh', what: 'the supervisor past its deadline', call: /proc_matches "\$sup_pid" "\$sup_lstart"/ },
+  { file: 'lib.sh', what: 'reclaim_server', call: /proc_matches "\$pid" "\$lstart" && \[ "\$\(env_db_of / },
+  { file: 'lib.sh', what: 'reclaim_runner', call: /proc_matches "\$pid" "\$lstart" && \[ "\$\(proc_pgid / },
+] as const;
+function stopJudgementProblems(lib: string, guard: string): string[] {
+  const problems: string[] = [];
+  const body = shellFunction(lib, 'proc_matches');
+  if (body === undefined) problems.push('lib.sh: proc_matches is not defined');
+  const texts = { 'lib.sh': lib, 'deadline-guard.sh': guard } as const;
+  for (const [file, text] of Object.entries(texts)) {
+    if (codeLines(text).some((line) => line.includes('machine_lock_pid_identity'))) problems.push(`${file}: calls machine_lock_pid_identity`);
+  }
+  for (const site of STOP_SITES) {
+    if (!codeLines(texts[site.file]).some((line) => site.call.test(line))) problems.push(`${site.file}: ${site.what} is not judged by proc_matches`);
+  }
+  return problems;
+}
+
+/**
+ * The internal names of verify-run.sh's lock section that the messages `queue` and `aside` read after the
+ * operation returned (design §2.2, P3-2). They are not a contract of the section: a rename would let the message
+ * fall to `taking` silently, so their assignment (and that la_blocker is not `local`) is checked here.
+ */
+const MESSAGE_INTERNALS = { queue: 'la_blocker', aside: 'LOCK_GONE_PENDING' } as const satisfies Partial<Record<Message, string>>;
+function lockSection(text: string): string | undefined {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.startsWith('# --- machine-wide gate lock'));
+  const end = lines.findIndex((line, i) => i > start && line.startsWith('# --- gate execution'));
+  return start < 0 || end < 0 ? undefined : lines.slice(start, end + 1).join('\n');
+}
+function messageInternalProblems(verifyRun: string): string[] {
+  const section = lockSection(verifyRun);
+  if (section === undefined) return ['verify-run.sh: the lock section markers are not found'];
+  const code = codeLines(section);
+  const problems: string[] = [];
+  for (const [kind, name] of Object.entries(MESSAGE_INTERNALS)) {
+    if (!code.some((line) => new RegExp(`(^|[\\s;|&])${name}=`).test(line))) problems.push(`${kind}: ${name}= is not assigned in the lock section`);
+    if (code.some((line) => new RegExp(`\\blocal\\b[^#]*\\b${name}\\b`).test(line))) problems.push(`${kind}: ${name} is local (gone when the operation returns)`);
+  }
+  return problems;
+}
+
 // ------------------------------------------------------------------ the tables check themselves
 
 describe('Issue #4288 PR1c table (design §2): shape', () => {
@@ -1062,6 +1124,64 @@ describe('Issue #4288 PR1c table: the table keeps the invariants (a) (design §1
     ).map((o) => o.failure);
     // F5: the holder is dead (KILL); F22: already removed by someone; F27: recovered, only its aside left.
     expect([...new Set(removing)].sort()).toEqual(['F22-rename-aside-enoent', 'F27-rm-gone', 'F31-mark-done', 'F5-holder-killed'].sort());
+  });
+});
+
+// ------------------------------------------------------------------ what the design leans on in the code (upstream 4th round)
+
+describe('Issue #4288 PR1c: the stop judgements and the internal names the messages read (design §2.1, §2.2, §3)', () => {
+  const lib = fs.readFileSync(LIB_SH, 'utf8');
+  const guard = fs.readFileSync(DEADLINE_GUARD_SH, 'utf8');
+  const verifyRun = fs.readFileSync(VERIFY_RUN_SH, 'utf8');
+
+  it('P3-1: proc_matches (the stop judgements: deadline-guard, reclaim_server, reclaim_runner) never calls machine_lock_pid_identity', () => {
+    expect(stopJudgementProblems(lib, guard)).toEqual([]);
+    const design = fs.readFileSync(DESIGN_MD, 'utf8');
+    expect(design).toContain('止める判定（`deadline-guard.sh:55`・`lib.sh:217`・`lib.sh:294` の `proc_matches`）では `machine_lock_pid_identity` を呼ばず');
+  });
+
+  it('P3-1 positive control: proc_matches calling machine_lock_pid_identity, or a stop site judged without it, is caught', () => {
+    const body = shellFunction(lib, 'proc_matches') as string;
+    const swapped = lib.replace(body, body.replace(/\[ "\$\(proc_lstart "\$1"\)" = "\$2" \]/, '[ "$(machine_lock_pid_identity "$1" "$2" 0)" = alive ]'));
+    expect(swapped).not.toBe(lib);
+    expect(stopJudgementProblems(swapped, guard)).toEqual(['lib.sh: calls machine_lock_pid_identity']);
+    const guardSwapped = guard.replace('proc_matches "$sup_pid" "$sup_lstart"', 'proc_alive "$sup_pid"');
+    expect(guardSwapped).not.toBe(guard);
+    expect(stopJudgementProblems(lib, guardSwapped)).toEqual(['deadline-guard.sh: the supervisor past its deadline is not judged by proc_matches']);
+  });
+
+  it('P3-1 negative control: the name in a comment only is not a call', () => {
+    expect(stopJudgementProblems(`${lib}\n# proc_matches is not machine_lock_pid_identity\n`, guard)).toEqual([]);
+  });
+
+  it('P3-2: the queue and aside messages read la_blocker and LOCK_GONE_PENDING, assigned in the lock section and not local', () => {
+    expect(messageInternalProblems(verifyRun)).toEqual([]);
+    expect(MESSAGE_SOURCES.queue.from).toContain(MESSAGE_INTERNALS.queue);
+    expect(MESSAGE_SOURCES.aside.from).toContain(MESSAGE_INTERNALS.aside);
+  });
+
+  it('P3-2 positive control: a renamed or local name is caught', () => {
+    const renamed = verifyRun.replace(/\bla_blocker=/g, 'la_ahead=');
+    expect(renamed).not.toBe(verifyRun);
+    expect(messageInternalProblems(renamed)).toEqual(['queue: la_blocker= is not assigned in the lock section']);
+    const local = verifyRun.replace(/^(\s*)la_blocker=""/m, '$1local la_blocker=""');
+    expect(local).not.toBe(verifyRun);
+    expect(messageInternalProblems(local)).toEqual(['queue: la_blocker is local (gone when the operation returns)']);
+  });
+
+  it('P3-2 positive control: an assignment left only in a comment does not count', () => {
+    const commented = verifyRun.replace(/^(\s*)(.*\bLOCK_GONE_PENDING=.*)$/gm, '$1# $2');
+    expect(messageInternalProblems(commented)).toEqual(['aside: LOCK_GONE_PENDING= is not assigned in the lock section']);
+  });
+
+  it('P3-3: an EPERM of the aside record ends restored, as aside × unknown (F1 note)', () => {
+    const t = (TABLE as Table).aside;
+    for (const caller of ['acquire-head', 'guard-head'] as const) {
+      const cell = t[caller].unknown;
+      expect(isRow(cell) && cell.lock, caller).toBe('restored');
+    }
+    expect(FAILURE_TABLE['F1-kill0-eperm'].errno).toContain('refused(eperm) / restored');
+    expect(FAILURE_TABLE['F1-kill0-eperm'].errno).toContain('kept(eperm) / restored');
   });
 });
 
