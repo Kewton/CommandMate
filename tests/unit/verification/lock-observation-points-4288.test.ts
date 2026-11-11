@@ -40,6 +40,7 @@ import {
   readOwnerToken,
   removeRoot,
   take,
+  takeDefaults,
   writeOwner,
   type TakeResult,
 } from './lock-4288-harness';
@@ -59,6 +60,7 @@ beforeEach(() => {
 afterEach(() => {
   killStarted();
   removeRoot(root);
+  delete takeDefaults.ownerlessGraceMs;
 });
 
 describe('the observation-point table (§2.8)', () => {
@@ -221,6 +223,14 @@ interface Scenario {
   between?: (name: string) => { fn: () => void; sh: string };
 }
 
+/** An owner-less, empty <lock> made `ageMs` ago, read with the 60 s grace of run-lock (#4288 PR1a D3). */
+const ownerlessLock = (name: string, ageMs: number) => {
+  const dir = lockOf(root, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const t = (Date.now() - ageMs) / 1000;
+  fs.utimesSync(dir, t, t);
+  takeDefaults.ownerlessGraceMs = 60_000;
+};
 const deadOwner = (token: string, extra: Record<string, unknown> = {}) => ({ pid: deadPid(), host: HOST, token, acquiredAt: 0, ...extra });
 const liveOwner = (token: string) => ({ pid: process.pid, host: HOST, token, acquiredAt: 0 });
 const notTaken = (r: TakeResult, impl: Impl) => {
@@ -453,6 +463,51 @@ const SCENARIOS: Record<string, Scenario> = {
       expect(r.acquired).toBe(true);
       expect(goneEntries(root, name)).toEqual([]);
     },
+  },
+  // #4288 PR1a (D3): the owner's exclusive create and its read-back — a failure there is not a lock
+  // taken, and the <lock> this acquisition made is taken out again (no owner-less <lock> is left).
+  'owner-create': {
+    code: 'EACCES',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+      const said = impl === 'bash' ? r.unknown : r.error;
+      expect(said).toMatch(/point=owner-create path=\S+ errno=EACCES/);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'owner-readback': {
+    code: 'EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+      const said = impl === 'bash' ? r.unknown : r.error;
+      expect(said).toMatch(/point=owner-readback path=\S+ errno=EIO/);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  // D3 with ownerlessGraceMs (run-lock / supervisor.lock's 60 s): an owner-less, empty <lock> 120 s old.
+  'ownerless-mtime': {
+    code: 'EIO',
+    reported: true,
+    setup: (name) => ownerlessLock(name, 120_000),
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(true);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'ownerless-rmdir': {
+    code: 'EACCES',
+    reported: true,
+    setup: (name) => ownerlessLock(name, 120_000),
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(true);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
   },
 };
 

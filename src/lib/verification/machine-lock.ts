@@ -47,9 +47,11 @@
 
 import { spawnSync } from 'child_process';
 import {
+  closeSync,
   linkSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -57,6 +59,7 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from 'fs';
 import { homedir, hostname } from 'os';
 import { basename, dirname, join } from 'path';
@@ -320,6 +323,7 @@ type OwnerObs = { state: 'record'; owner: LockOwner } | { state: 'missing' } | {
 type MkdirObs = { state: 'created' } | { state: 'exists' } | Unknown;
 type RenameObs = { state: 'moved' } | { state: 'absent' } | Unknown;
 type RmdirObs = { state: 'removed' } | Unknown;
+type CreateObs = { state: 'created' } | { state: 'exists' } | { state: 'unknown'; code: string; opened: boolean };
 
 interface Observer {
   pid(point: string, pid: number): ProcessObs;
@@ -330,6 +334,7 @@ interface Observer {
   mkdir(point: string, dir: string): MkdirObs;
   rename(point: string, from: string, to: string): RenameObs;
   rmdir(point: string, dir: string): RmdirObs;
+  create(point: string, file: string, text: string): CreateObs;
 }
 
 function toOwner(parsed: unknown): LockOwner | null {
@@ -422,6 +427,31 @@ function makeObserver(hooks: Pick<MachineLockTestHooks, 'fault' | 'pidAlive' | '
         return { state: 'moved' };
       } catch (error) {
         return errCode(error) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', code: errCode(error) };
+      }
+    },
+    /**
+     * The exclusive create of a file with `text` in it (#4288 PR1a D3, `O_CREAT|O_EXCL`): EEXIST is
+     * "exists" (nothing opened); any other failure is unknown, with `opened` saying whether this call
+     * made the file (only then is it the caller's to remove). The write fails at the point `owner-write`.
+     */
+    create(point, file, text) {
+      let fd: number;
+      try {
+        fd = attempt(point, file, () => openSync(file, 'wx'));
+      } catch (error) {
+        return errCode(error) === 'EEXIST' ? { state: 'exists' } : { state: 'unknown', code: errCode(error), opened: false };
+      }
+      try {
+        attempt('owner-write', file, () => writeSync(fd, text));
+        return { state: 'created' };
+      } catch (error) {
+        return { state: 'unknown', code: errCode(error), opened: true };
+      } finally {
+        try {
+          closeSync(fd);
+        } catch {
+          // closed or gone: nothing more to do
+        }
       }
     },
     /** rmdir of an empty directory, whose failure keeps its errno (#4288 Codex re-review P2). */
@@ -627,26 +657,37 @@ function claim(
     error.code = made.code;
     throw error;
   }
+  // The owner is created exclusively and read back (#4288 PR1a D3 — the same rule as
+  // machine-lock-sync.mjs's claim and verify-run.sh's lock_obs_create): a name that is there (EEXIST)
+  // is never written over and nothing is removed; a record read back that is not this one is not
+  // acquired and nothing is removed. An owner that could not be created, written or read back
+  // (ENOSPC, EIO) is not a lock taken: the owner is removed only when this call opened it, and the
+  // <lock> this mkdir made is taken out again, so no <lock> without an owner is left for every reader
+  // to wait on (#4288 PM review P3-2). That error still ends the acquisition, as a mkdir that failed
+  // does. Test seams (`fault`): owner-create, owner-write, owner-readback, owner-unlink, lock-rmdir.
   const file = join(lockPath, OWNER_FILE);
-  try {
-    const code = fault?.('owner-write', file);
-    if (code) {
-      const error: NodeJS.ErrnoException = new Error(`${code}: injected at owner-write ${file}`);
-      error.code = code;
-      throw error;
-    }
-    writeFileSync(file, JSON.stringify(owner), { encoding: 'utf8' });
-  } catch (error) {
-    // An owner that could not be written (ENOSPC, EIO) is not a lock taken: the <lock> this mkdir
-    // made is taken out again, so no <lock> without an owner is left for every reader to wait on
-    // (#4288 PM review P3-2, the same as verify-run.sh's lock_acquire). The error still ends the
-    // acquisition, as a mkdir that failed does.
-    rmSync(file, { force: true });
-    rmdirQuiet(lockPath);
-    logger.warn('machine-lock-owner-write-failed', { lockPath, code: errCode(error) });
-    throw error;
+  const created = obs.create('owner-create', file, JSON.stringify(owner));
+  if (created.state === 'exists') {
+    logger.warn('machine-lock-owner-exists', { lockPath });
+    return false;
   }
-  return true;
+  let failed: { point: string; code: string; opened: boolean } | null =
+    created.state === 'unknown' ? { point: 'owner-create', code: created.code, opened: created.opened } : null;
+  if (!failed) {
+    const back = obs.owner('owner-readback', lockPath);
+    if (back.state === 'record' && back.owner.token === owner.token) return true;
+    if (back.state !== 'unknown') {
+      logger.warn('machine-lock-owner-not-ours', { lockPath });
+      return false;
+    }
+    failed = { point: 'owner-readback', code: back.code, opened: true };
+  }
+  if (failed.opened && !fault?.('owner-unlink', file)) rmSync(file, { force: true });
+  const out = fault?.('lock-rmdir', lockPath) ? false : rmdirQuiet(lockPath);
+  logger.warn('machine-lock-owner-write-failed', { lockPath, code: failed.code, takenOut: out });
+  const error: NodeJS.ErrnoException = new Error(`machine-lock-unknown point=${failed.point} path=${file} errno=${failed.code}`);
+  error.code = failed.code;
+  throw error;
 }
 
 let goneSerial = 0;
