@@ -1783,7 +1783,7 @@ function setupT(impl: Impl, form: Form, caller: Caller, obs: Obs, r: string): H.
   const lock = lockOfRoot(r);
   const kv = kvFor(impl, caller);
   const faults: string[] = [];
-  // A fast observation, except a bash waiter behind a ticket (it polls on the clock, which stays real there).
+  // A fast, fully injected observation, except a bash waiter behind a ticket (it polls on the clock, which stays real there).
   const o: H.DriveOptions = { tz: 'UTC', ...(impl === 'bash' && caller === 'acquire-behind' ? {} : { observation: 'fast' as const }) };
   if (caller === 'acquire-behind') H.ticketAhead(r);
   const ageMs = obs === 'alive' ? 0 : H.OLD_MS;
@@ -1813,7 +1813,8 @@ function setupT(impl: Impl, form: Form, caller: Caller, obs: Obs, r: string): H.
         // The pid started long before the tmp (maybe its writer): a ps shim for bash, startOf for the sync JS.
         o.pathPrefix = H.psShim(r);
         o.env = { FAKE_ETIME_PID: String(pid), FAKE_ETIME: '1-00:00:00' };
-        o.hooks = { startOf: (p: number) => (p === pid ? Date.now() - 86_400_000 : null) };
+        const started = Date.now() - 86_400_000; // the setup's read, not the hook's
+        o.hooks = { startOf: (p: number) => (p === pid ? started : null) };
       }
       break;
     }
@@ -2279,10 +2280,11 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
     const pid = H.liveSleep();
     ownerless(r, [`owner.tmp.${pid}`]);
     const before = H.snapshot(r);
+    const started = Date.now() - 86_400_000; // the setup's read, not the hook's
     const out = await H.drive(impl, whoOf(caller), r, {
       pathPrefix: H.psShim(r),
       env: { FAKE_ETIME_PID: String(pid), FAKE_ETIME: '1-00:00:00' },
-      hooks: { startOf: (p: number) => (p === pid ? Date.now() - 86_400_000 : null) },
+      hooks: { startOf: (p: number) => (p === pid ? started : null) },
       observation: 'fast',
     });
     return { code: out.code, check: () => expect(H.snapshot(r)).toBe(before) };
@@ -2337,7 +2339,7 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
       const sub = fs.mkdtempSync(path.join(r, 'm-'));
       const live = H.liveSleep();
       d7(sub, { pid: live, token: 'T1', lstart: H.lstartOf(live, 'Asia/Tokyo'), started_at: H.iso(Date.now()) });
-      codes.push((await H.drive(impl, whoOf(caller), sub, { tz: 'UTC', pathPrefix: H.psShim(sub), env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: bad } })).code);
+      codes.push((await H.drive(impl, whoOf(caller), sub, { tz: 'UTC', pathPrefix: H.psShim(sub), env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: bad }, observation: 'fast' })).code);
     }
     expect(new Set(codes).size).toBe(1);
     return { code: codes[0] };
@@ -2660,6 +2662,53 @@ describe.each(IMPLS)('Issue #4288 PR1a-f failure directions F: %s (design §3, t
       const run = await driver(impl, c.caller, r);
       expect(run.code).toBe(c.result);
       run.check?.();
+    }, 60000);
+  }
+});
+
+/** The rows whose verdict reads the start of a pid (ps -o etime= between two clock reads): all fully injected. */
+const OBSERVATION_ROWS: readonly Failure[] = [
+  'F27-old-tmp-pid-alive',
+  'F37-ticket-etime-malformed',
+  'F52-old-tmp-pid-reused',
+  'F53-old-tmp-pid-etime',
+  'F55-old-tmp-clock-back',
+  'F72-old-tmp-slow-observation',
+];
+
+describe('Issue #4288 PR1a-f impl-7: the observation rows read no real clock and no real etime', () => {
+  // Watched: every read of Date.now / performance.now whose stack is in the two implementations, except
+  // markDone's `doneAt` stamp (written into a retired ticket, never an input of an observation or a verdict).
+  const IMPL_FILE = /scripts\/orchestrate\/machine-lock-sync\.mjs|src\/lib\/verification\/machine-lock\.ts/;
+  const watched = (stack: string): boolean => IMPL_FILE.test(stack) && !/at markDone /.test(stack);
+  for (const c of F_CASES.filter((x) => (OBSERVATION_ROWS as readonly string[]).includes(x.id))) {
+    it(`${c.id} ${c.impl} ${c.caller}: Date.now / performance.now are read 0 times by the implementation, ps etime 0 times for real`, async () => {
+      const driver = F_DRIVERS[c.id] as FDriver;
+      const r = freshRoot();
+      const fromImpl: string[] = [];
+      const spy = (fn: () => number) => (): number => {
+        const stack = new Error().stack ?? '';
+        if (watched(stack)) fromImpl.push(stack.split('\n').find((l) => IMPL_FILE.test(l)) ?? '?');
+        return fn();
+      };
+      const realDateNow = Date.now.bind(Date);
+      const realPerfNow = performance.now.bind(performance);
+      vi.spyOn(Date, 'now').mockImplementation(spy(realDateNow));
+      vi.spyOn(performance, 'now').mockImplementation(spy(realPerfNow));
+      let run: FRun;
+      try {
+        run = await driver(c.impl, c.caller, r);
+      } finally {
+        vi.restoreAllMocks();
+      }
+      expect(run.code).toBe(c.result);
+      expect(fromImpl).toEqual([]);
+      const rec = H.lastObservation();
+      expect(rec, 'the drive went through the injected observation').not.toBeNull();
+      expect(rec?.realEtimeReads).toBe(0);
+      // bash reads its clock through lock_now_ms (replaced by the injected one); the JS ones through hooks.now
+      if (c.id !== 'F27-old-tmp-pid-alive' && c.id !== 'F53-old-tmp-pid-etime') expect(rec?.clockReads).toBeGreaterThanOrEqual(2);
+      if (c.impl === 'bash') expect(rec?.psQueries).toBeGreaterThanOrEqual(1);
     }, 60000);
   }
 });

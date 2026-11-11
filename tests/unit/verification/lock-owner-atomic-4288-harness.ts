@@ -68,14 +68,33 @@ export function age(file: string, ageMs: number): void {
   fs.utimesSync(file, t, t);
 }
 
-/** A `ps` first on PATH that answers `-o etime=` for FAKE_ETIME_PID with FAKE_ETIME (else the real ps). */
+/**
+ * A `ps` first on PATH that answers `-o etime=` for FAKE_ETIME_PID with FAKE_ETIME, and — with CM_OBS_ETIME
+ * set (an `observation` drive) — for every live pid with CM_OBS_ETIME, so no real etime is read. Each etime
+ * query appends one byte to CM_OBS_COUNT (the injected clock counts the queries: one step per observation);
+ * a query that falls through to the real ps appends to CM_OBS_REAL_LOG. Anything else is the real ps.
+ */
 export function psShim(dir: string): string {
   const real = (spawnSync('sh', ['-c', 'command -v ps'], { encoding: 'utf8' }).stdout ?? '').trim() || '/bin/ps';
   const bin = path.join(dir, 'shim-bin');
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(
     path.join(bin, 'ps'),
-    `#!/bin/sh\nlast=""\nfor a in "$@"; do last=$a; done\ncase " $* " in\n  *" etime= "*) if [ -n "\${FAKE_ETIME_PID:-}" ] && [ "$last" = "$FAKE_ETIME_PID" ]; then echo "$FAKE_ETIME"; exit 0; fi;;\nesac\nexec ${real} "$@"\n`,
+    [
+      '#!/bin/sh',
+      'last=""',
+      'for a in "$@"; do last=$a; done',
+      'case " $* " in',
+      '  *" etime= "*)',
+      '    if [ -n "${CM_OBS_COUNT:-}" ]; then printf x >> "$CM_OBS_COUNT"; fi',
+      '    if [ -n "${FAKE_ETIME_PID:-}" ] && [ "$last" = "$FAKE_ETIME_PID" ]; then echo "$FAKE_ETIME"; exit 0; fi',
+      '    if [ -n "${CM_OBS_ETIME:-}" ] && kill -0 "$last" 2>/dev/null; then echo "$CM_OBS_ETIME"; exit 0; fi',
+      '    if [ -n "${CM_OBS_REAL_LOG:-}" ]; then printf x >> "$CM_OBS_REAL_LOG"; fi',
+      '    ;;',
+      'esac',
+      `exec ${real} "$@"`,
+      '',
+    ].join('\n'),
     { mode: 0o755 },
   );
   return bin;
@@ -186,26 +205,53 @@ export interface DriveOptions {
   /** bash: the call itself (default: the acquisition, or the guard). */
   call?: string;
   /**
-   * The speed of the start-time observation (`ps -o etime=` between two clock reads; #4288 PR1a-f impl-6):
-   * 'fast' — the clock the observation reads is frozen, so a slow ps / perl on a loaded machine cannot make
-   * it a 1 s read (ECLOCK); 'slow' — every other read of the clock jumps 1.5 s forward, so every window around
-   * ps is a read of 1 s or more (ECLOCK). Unset: the real clock (the row does not depend on the speed).
+   * The start-time observation (`ps -o etime=` between two clock reads), fully injected (#4288 PR1a-f impl-6/7):
+   * the clock is a fixed base plus a step per etime query (0 for 'fast', 1500 ms for 'slow': the read before ps
+   * and the read after it differ by exactly the step — a 'slow' one is a read of 1 s or more, ECLOCK), and ps
+   * answers a live pid's etime from the shim. Unset: the real clock and ps (the row does not depend on them).
    * An explicit `hooks.now` / a `bashPre` of its own wins.
    */
   observation?: 'fast' | 'slow';
 }
 
-/** The clock the JS implementations read for an observation of the given speed. */
-function observationClock(speed: 'fast' | 'slow'): () => number {
-  const base = Date.now();
-  let n = 0;
-  return speed === 'fast' ? () => base : () => Date.now() + (n++ % 2 === 1 ? 1500 : 0);
+/** What an `observation` drive recorded (for the spy row): ps etime queries answered by the shim, real ones, clock reads. */
+export interface ObservationRecord {
+  psQueries: number;
+  realEtimeReads: number;
+  clockReads: number;
 }
+let lastObservationRecord: (() => ObservationRecord) | null = null;
+export const lastObservation = (): ObservationRecord | null => (lastObservationRecord ? lastObservationRecord() : null);
 
-/** bash: `lock_now_ms` for an observation of the given speed (the prelude's perl one otherwise). */
-function observationBashPre(speed: 'fast' | 'slow'): string {
-  if (speed === 'fast') return `lock_now_ms() { echo ${Date.now()}; }\n`;
-  return 'C="$LK.clock"; : > "$C"\nlock_now_ms() { if [ -s "$C" ]; then : > "$C"; lnm_b=1500; else echo 1 > "$C"; lnm_b=0; fi; echo $(( $(perl -MTime::HiRes=time -e \'printf("%d", time()*1000)\') + lnm_b )); }\n';
+/**
+ * The observation of #4288 PR1a-f impl-7: the clock AND the ps etime of an observation, both injected. The
+ * clock is the fixed base T0 plus `step` for every etime query so far (the shim counts them in a file): a read
+ * before ps and the read after it differ by `step` — 0 ('fast') or 1500 ('slow') — whatever the order of the
+ * calls, the load of the machine or the real time that passes. ps answers CM_OBS_ETIME for a live pid.
+ */
+function withObservation(root: string, o: DriveOptions): DriveOptions {
+  if (!o.observation) return o;
+  const dir = fs.mkdtempSync(path.join(root, 'obs-'));
+  const count = path.join(dir, 'ps-count');
+  const real = path.join(dir, 'ps-real');
+  const reads = path.join(dir, 'clock-reads');
+  for (const f of [count, real, reads]) fs.writeFileSync(f, '');
+  const t0 = Date.now(); // the setup's one read; the implementation under test never reads the real clock
+  const step = o.observation === 'slow' ? 1500 : 0;
+  const size = (f: string): number => fs.statSync(f).size;
+  const clock = (): number => {
+    fs.appendFileSync(reads, 'x');
+    return t0 + step * size(count);
+  };
+  lastObservationRecord = () => ({ psQueries: size(count), realEtimeReads: size(real), clockReads: size(reads) });
+  const bashClock = `lock_now_ms() { printf x >> '${reads}'; echo $(( ${t0} + ${step} * $(wc -c < '${count}') )); }\n`;
+  return {
+    ...o,
+    pathPrefix: o.pathPrefix ?? psShim(root),
+    env: { CM_OBS_COUNT: count, CM_OBS_REAL_LOG: real, CM_OBS_ETIME: '00:00', ...(o.env ?? {}) },
+    bashPre: `${bashClock}${o.bashPre ?? ''}`,
+    hooks: { now: clock, ...(o.hooks ?? {}) },
+  };
 }
 
 function faultFn(spec?: string): ((point: string, target: string) => string | undefined) | undefined {
@@ -268,18 +314,18 @@ function bashOutcome(who: Who, out: string, err: string): Outcome {
 }
 
 /** One call of `who` on the lock under `root`, synchronously (bash and sync) or not (TS). */
-export async function drive(impl: Impl, who: Who, root: string, o: DriveOptions = {}): Promise<Outcome> {
+export async function drive(impl: Impl, who: Who, root: string, o0: DriveOptions = {}): Promise<Outcome> {
+  const o = withObservation(root, o0);
   if (impl === 'bash') {
     const call = o.call ?? (who === 'guard-head' || who === 'guard-behind' ? BASH_GUARD : BASH_ACQ);
-    const obs = o.observation ? observationBashPre(o.observation) : '';
-    const r = spawnSync('bash', ['-c', `${bashPrelude(who)}${obs}${o.bashPre ?? ''}\n${call}`], { encoding: 'utf8', timeout: 60000, env: bashEnv(root, o) });
+    const r = spawnSync('bash', ['-c', `${bashPrelude(who)}${o.bashPre ?? ''}\n${call}`], { encoding: 'utf8', timeout: 60000, env: bashEnv(root, o) });
     return bashOutcome(who, (r.stdout ?? '').trim(), r.stderr ?? '');
   }
   const fault = faultFn(o.fault);
   const lock = lockPathIn(root);
   if (impl === 'sync') {
     const warnings: string[] = [];
-    const hooks = { ...(fault ? { fault } : {}), ...(o.observation ? { now: observationClock(o.observation) } : {}), ...(o.hooks ?? {}) };
+    const hooks = { ...(fault ? { fault } : {}), ...(o.hooks ?? {}) };
     const restore = withEnv(o);
     try {
       if (who === 'guard-head' || who === 'guard-behind') {
@@ -310,7 +356,7 @@ export async function drive(impl: Impl, who: Who, root: string, o: DriveOptions 
   LOGS.length = 0;
   const restore = withEnv(o);
   try {
-    const r = await acquireMachineLock('x', { root, timeoutMs: 0, pollIntervalMs: 20, __testHooks: { ...(fault ? { fault } : {}), ...(o.observation ? { now: observationClock(o.observation) } : {}), ...(o.hooks ?? {}) } });
+    const r = await acquireMachineLock('x', { root, timeoutMs: 0, pollIntervalMs: 20, __testHooks: { ...(fault ? { fault } : {}), ...(o.hooks ?? {}) } });
     const log = LOGS.join('\n');
     if (r.acquired) return { code: 'acquired', log, heldBy: null, unknown: null };
     const u = r.unknown ? `point=${r.unknown.point} path=${r.unknown.path} errno=${r.unknown.code}` : null;

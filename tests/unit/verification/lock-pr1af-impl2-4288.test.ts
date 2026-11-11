@@ -154,7 +154,7 @@ describe('item 7 (PM Claude P3-8, F53): I3 reading an older tmp pid while the cl
     for (const impl of ['bash', 'sync'] as const) {
       const r = freshRoot();
       const live = oldTmp(r);
-      const out = await H.drive(impl, 'guard-head', r, { pathPrefix: H.psShim(r), env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: 'garbage' } });
+      const out = await H.drive(impl, 'guard-head', r, { pathPrefix: H.psShim(r), env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: 'garbage' }, observation: 'fast' });
       expect([impl, out.code, out.unknown]).toEqual([impl, 'kept', expect.stringMatching(/^point=etime .* errno=EINVAL$/)]);
       fs.rmSync(r, { recursive: true, force: true });
     }
