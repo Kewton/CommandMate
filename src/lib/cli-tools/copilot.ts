@@ -25,8 +25,8 @@ import {
   capturePane,
 } from '../tmux/tmux';
 import { sendMessageWithSubmitVerification, type InputReadiness } from './submit-verified-sender';
-import { recheckComposerBeforeInput } from '@/lib/session/composer-clear';
-import { INPUT_RECHECK_PROMPT_WAITING_CODE } from '@/lib/session/send-attempt-types';
+import { assertAgentInForeground, recheckComposerBeforeInput } from '@/lib/session/composer-clear';
+import { AGENT_NOT_IN_FOREGROUND_CODE, INPUT_RECHECK_PROMPT_WAITING_CODE } from '@/lib/session/send-attempt-types';
 import { PROMPT_WAIT_DIALOG_CONFIRM_MS, createDialogConfirmation, readBeforeDeadline } from './prompt-wait-dialog';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { detectSessionStatus } from '../detection/status-detector';
@@ -378,7 +378,10 @@ async function rethrowIfDialogOpen(sessionName: string): Promise<void> {
   try {
     await recheckComposerBeforeInput(sessionName, 'copilot');
   } catch (error: unknown) {
-    if ((error as { code?: unknown }).code === INPUT_RECHECK_PROMPT_WAITING_CODE) throw error;
+    const code = (error as { code?: unknown }).code;
+    // Issue #4300: an exited agent never shows the composer, so the wait ends not-ready;
+    // keep `agent-not-in-foreground` rather than the wait's own `prompt-not-ready`.
+    if (code === INPUT_RECHECK_PROMPT_WAITING_CODE || code === AGENT_NOT_IN_FOREGROUND_CODE) throw error;
   }
 }
 
@@ -1102,6 +1105,8 @@ export class CopilotTool extends BaseCLITool {
       // The pane's text goes to the log, not the message: the message is read by
       // `classifySendFailure`, which a screen quoting its keywords would steer (#3954).
       logger.warn('copilot-model-switch-not-idle', { model: modelName, bottomRow: describeBottomRow(idle.output) });
+      // Issue #4300: the agent having exited is the reason, not the idle wait.
+      await assertAgentInForeground(sessionName, 'copilot');
       throw new Error(
         `copilot did not become idle within ${COPILOT_MODEL_SWITCH_TIMEOUT_MS}ms, so /model was not sent`
       );

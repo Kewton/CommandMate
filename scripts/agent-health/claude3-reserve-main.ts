@@ -4,6 +4,7 @@
  * and the design in docs/design/claude3-dispatch-exclusion-4243.md.
  *
  *   reserve --label <s> [--hours 1-24]            → prints the token
+ *   reserve --self --label <s> [--hours 1-24]     (from inside claude-3 only: holder leader, no state check)
  *   send --token <t> <message>                    → commandmate send mycodebranchdesk <message> --instance claude-3
  *   renew --token <t> [--hours 1-24]
  *   release --token <t>
@@ -34,6 +35,7 @@ import {
   isSending,
   defaultIsAlive,
   readReservation,
+  RESERVATION_TARGET,
   releaseReservation,
   renewReservation,
   sendUnderReservation,
@@ -69,6 +71,7 @@ export const RESERVE_USAGE = [
   'Usage: npx tsx scripts/agent-health/claude3-reserve.ts <command>',
   '',
   '  reserve --label <s> [--hours 1-24]   reserve claude-3 for PM; prints the token (review after 8h by default)',
+  '  reserve --self --label <s> [--hours 1-24]  claude-3 reserves itself (only from inside claude-3; skips the busy check)',
   '  send --token <t> <message>           send to claude-3 under the reservation',
   '  renew --token <t> [--hours 1-24]     move the review time',
   '  release --token <t>                  give claude-3 back',
@@ -103,7 +106,7 @@ function defaultDeps(): ReserveDeps {
 }
 
 type Command =
-  | { kind: 'reserve'; label: string; hours: number }
+  | { kind: 'reserve'; label: string; hours: number; self: boolean }
   | { kind: 'send'; token: string; message: string }
   | { kind: 'renew'; token: string; hours: number }
   | { kind: 'release'; token: string }
@@ -128,7 +131,7 @@ export function parseReserveArgs(argv: readonly string[]): ReserveParse {
       const value = rest[++i];
       if (value === undefined || value.startsWith('--')) return { ok: false, error: `${arg} needs a value` };
       values[arg] = value;
-    } else if (arg === '--force' || arg === '--json') {
+    } else if (arg === '--force' || arg === '--json' || arg === '--self') {
       flags.add(arg);
     } else if (arg.startsWith('--')) {
       return { ok: false, error: `unknown argument: ${arg}\n\n${RESERVE_USAGE}` };
@@ -153,11 +156,11 @@ export function parseReserveArgs(argv: readonly string[]): ReserveParse {
 
   switch (sub) {
     case 'reserve': {
-      const bad = failWith(allowed(['--label', '--hours']) ?? need('--label'));
+      const bad = failWith(allowed(['--label', '--hours'], ['--self']) ?? need('--label'));
       if (bad) return bad;
       const h = hours();
       if (typeof h === 'string') return { ok: false, error: h };
-      return { ok: true, command: { kind: 'reserve', label: values['--label'], hours: h } };
+      return { ok: true, command: { kind: 'reserve', label: values['--label'], hours: h, self: flags.has('--self') } };
     }
     case 'send': {
       const bad = failWith(allowed(['--token'], [], 1) ?? need('--token'));
@@ -264,6 +267,23 @@ function claude3Free(deps: ReserveDeps): number {
   return 0;
 }
 
+/** Issue #4288: is the caller claude-3 itself (`commandmate whoami --json`)? Not authentication: it stops a PM's slip. */
+function callerIsClaude3(deps: ReserveDeps): boolean {
+  const result = deps.exec('commandmate', ['whoami', '--json']);
+  if (result.status !== 0) return false;
+  try {
+    const who = JSON.parse(result.stdout) as { worktreeId?: unknown; instanceId?: unknown; cliToolId?: unknown };
+    // The same three-way match as dispatch's judge: a claude-3 slot that holds another tool is not the leader.
+    return (
+      who.worktreeId === RESERVATION_TARGET.worktreeId &&
+      who.instanceId === RESERVATION_TARGET.instanceId &&
+      who.cliToolId === RESERVATION_TARGET.cliTool
+    );
+  } catch {
+    return false;
+  }
+}
+
 function report(deps: ReserveDeps, result: ReservationResult, done: string): number {
   if (!result.ok) {
     deps.stderr(result.message);
@@ -314,9 +334,21 @@ async function run(command: Command, env: ReservationEnv, deps: ReserveDeps, spa
         deps.stderr(describeHolder(read.current, now));
         return 3;
       }
-      const free = claude3Free(deps);
-      if (free !== 0) return free;
-      const result = acquireReservation(env, { holder: 'pm', label: command.label, hours: command.hours });
+      if (command.self) {
+        // claude-3 is busy by definition while it runs this command: the state check is skipped.
+        if (!callerIsClaude3(deps)) {
+          deps.stderr('--self は claude-3（mycodebranchdesk の claude-3）の中からだけ使える');
+          return 2;
+        }
+      } else {
+        const free = claude3Free(deps);
+        if (free !== 0) return free;
+      }
+      const result = acquireReservation(env, {
+        holder: command.self ? 'leader' : 'pm',
+        label: command.label,
+        hours: command.hours,
+      });
       if (!result.ok) {
         deps.stderr(result.message);
         return result.code;
