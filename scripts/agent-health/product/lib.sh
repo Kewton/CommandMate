@@ -21,12 +21,22 @@
 #
 # bash 3.2 compatible (macOS /bin/bash).
 
+# The lock section's options are read by the code machine-lock.sh loads, the results by the callers.
+# shellcheck disable=SC2034,SC2153
 PRODUCT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRODUCT_REPO_ROOT="$(cd "$PRODUCT_LIB_DIR/../../.." && pwd)"
 # shellcheck source=scripts/uat/run-lock.sh
 . "$PRODUCT_REPO_ROOT/scripts/uat/run-lock.sh"
 # shellcheck source=scripts/lib/port-pids.sh
 . "$PRODUCT_REPO_ROOT/scripts/lib/port-pids.sh"
+# The machine-wide lock (supervisor.lock). Sourced here on its own, whatever run-lock.sh did: a
+# failed load must stop the lock being taken (PRODUCT_MACHINE_LOCK_OK), never run it unlocked.
+# shellcheck source=scripts/lib/machine-lock.sh
+. "$PRODUCT_REPO_ROOT/scripts/lib/machine-lock.sh"
+PRODUCT_MACHINE_LOCK_OK=$?
+if [ "$PRODUCT_MACHINE_LOCK_OK" != 0 ]; then
+    PRODUCT_MACHINE_LOCK_ERROR="scripts/lib/machine-lock.sh could not be sourced (status $PRODUCT_MACHINE_LOCK_OK)"
+fi
 
 PRODUCT_LEDGER_PY="$PRODUCT_LIB_DIR/ledger.py"
 PRODUCT_STOP_WAIT_TENTHS="${CM_PRODUCT_STOP_WAIT_TENTHS:-50}"
@@ -118,89 +128,208 @@ file_uid() {
 
 # ------------------------------------------------------ supervisor lock
 
-# A mkdir lock at <base>/supervisor.lock, separate from scripts/uat/run-lock.sh
-# but built the same way. `owner` holds pid, lstart and a token, so a reused pid
-# is not mistaken for the owner. A directory with no owner file yet is one
-# being made right now (its maker is between mkdir and writing the owner) and
-# is protected for a minute, as run-lock.sh protects it; only after that is it
-# taken as left by a maker that died.
+# supervisor.lock is the machine-wide lock (scripts/lib/machine-lock.sh, Issue
+# #4288 PR1c; docs/design/supervisor-lock-machine-lock-4288.md) at
+# <base>/supervisor.lock, its queue of tickets at <base>/supervisor.queue:
+#
+#   acquire   lock_acquire_path with a budget of 0 — one try, as the head of
+#             the queue. Behind a live ticket it withdraws its own ticket and
+#             does not judge the lock (message `queue`).
+#   release   lock_release_held: removes the record only when its token is this
+#             shell's and its pid is this main shell's $$; anything else stays.
+#   recover   lock_recover_only (the deadline guard): recovers a dead holder's
+#             lock as the head of the queue, never takes it.
+#
+# A holder is read once from `owner` (key=value lines); it is dead when its pid
+# is ESRCH, or when its lstart= says the pid was reused (D7, judged by
+# machine_lock_pid_identity inside the lock section — here only). What cannot
+# be judged (EPERM, EIO, a host name that changed, a record being written) is
+# never taken, removed or released: the refusal says why in PRODUCT_LOCK_ERROR.
+#
+# Results are left in PRODUCT_LOCK_RESULT (the guard: LRO_RESULT, or unloaded /
+# rejected) and PRODUCT_LOCK_ERROR; a call refused for its arguments or context
+# returns 2 and touches nothing. Each call sets the lock section's options
+# afresh (the section holds one set per shell).
+
+PRODUCT_LOCK_RESULT=""
+PRODUCT_LOCK_ERROR=""
+PRODUCT_LOCK_KIND=""
+# How long the guard waits for the head of the queue; the supervisor waits for nobody.
+PRODUCT_LOCK_GUARD_BUDGET_SEC="${CM_PRODUCT_LOCK_GUARD_BUDGET_SEC:-10}"
 
 product_lock_dir() {
     printf '%s/supervisor.lock\n' "$PRODUCT_BASE"
 }
 
-product_lock_owner_alive() {
-    local dir=$1 pid lstart
-    pid=$(run_lock_field "$dir" pid)
-    lstart=$(run_lock_field "$dir" lstart)
-    [ -n "$pid" ] && proc_matches "$pid" "$lstart"
+product_lock_queue_dir() {
+    machine_lock_queue_of "$(product_lock_dir)"
 }
 
-# product_lock_is_stale <lock dir> — its owner is gone, or it has had no owner
-# for over a minute.
-product_lock_is_stale() {
-    local dir=$1
-    if [ ! -f "$dir/owner" ]; then
-        [ -n "$(find "$dir" -maxdepth 0 -mmin +1 2>/dev/null)" ]
-        return
+# product_lock_reject <fn> <reason> — 2, nothing touched.
+product_lock_reject() {
+    PRODUCT_LOCK_RESULT=rejected
+    PRODUCT_LOCK_ERROR="$1: $2"
+    return 2
+}
+
+# The lock section holds one set of options per shell: put ours down on every call.
+product_lock_setup() {
+    machine_lock_use_kv_codec
+    LOCK_OWNERLESS_GRACE_MS=$LOCK_EMPTY_OWNER_GRACE_MS
+    LOCK_WANT_TOKEN=""
+    LOCK_OWNER_PID=""
+    LOCK_PENDING_TOKEN=""
+    LOCK_OWNER_EXTRA=""
+}
+
+# product_lock_kind <unknown> <blocker> <gone-pending> — what to tell a person
+# about the lock that was not taken (PRODUCT_LOCK_KIND; the owner is read here
+# for the message only, never for the judgement). Precedence: eperm, unk, queue,
+# corrupt, tmp, host, aside, rec, taking.
+product_lock_kind() {
+    local unknown=$1 blocker=$2 gone=$3 dir text
+    dir=$(product_lock_dir)
+    LPO_PID=""
+    LPO_HOST=""
+    LPO_TOKEN=""
+    LPO_LABEL=""
+    if [ -f "$dir/owner" ]; then
+        text=$(cat "$dir/owner" 2>/dev/null) || text=""
+        lock_parse_owner_text "$text" || true
+        LPO_LABEL=$(printf '%s\n' "$text" | sed -n 's/^label=//p' | head -n 1)
     fi
-    ! product_lock_owner_alive "$dir"
+    case "$unknown" in
+        '') ;;
+        *"point=pid "*"errno=EPERM"*)
+            PRODUCT_LOCK_KIND=eperm
+            return 0
+            ;;
+        *)
+            PRODUCT_LOCK_KIND=unk
+            return 0
+            ;;
+    esac
+    if [ -n "$blocker" ]; then
+        PRODUCT_LOCK_KIND=queue
+    elif [ -f "$dir/owner" ] && { [ -z "$LPO_PID" ] || [ -z "$LPO_TOKEN" ]; }; then
+        PRODUCT_LOCK_KIND=corrupt
+    elif [ ! -f "$dir/owner" ] && [ -n "$(find "$dir" -maxdepth 1 -name 'owner.tmp.*' 2>/dev/null | head -n 1)" ]; then
+        PRODUCT_LOCK_KIND=tmp
+    elif [ -f "$dir/owner" ] && [ "$LPO_HOST" != "$LOCK_HOST" ]; then
+        PRODUCT_LOCK_KIND=host
+    elif [ -n "$gone" ] && [ ! -f "$dir/owner" ]; then
+        PRODUCT_LOCK_KIND=aside
+    elif [ -f "$dir/owner" ]; then
+        PRODUCT_LOCK_KIND=rec
+    else
+        PRODUCT_LOCK_KIND=taking
+    fi
 }
 
-# product_lock_take_stale <lock dir> — moves a stale lock aside and removes it.
-# When the moved directory is not the one judged stale (another supervisor
-# took over in between and made a fresh one), it is put back.
-product_lock_take_stale() {
-    local dir=$1 judged aside
-    judged=$(run_lock_field "$dir" token)
-    aside="$dir.stale.$$.$RANDOM"
-    mv "$dir" "$aside" 2>/dev/null || return 0
-    if [ "$(run_lock_field "$aside" token)" != "$judged" ] || ! product_lock_is_stale "$aside"; then
-        [ -e "$dir" ] || mv "$aside" "$dir" 2>/dev/null || true
+# product_lock_message <kind> <unknown> <blocker> <gone-pending> — the text of a kind.
+product_lock_message() {
+    local kind=$1 unknown=$2 blocker=$3 gone=$4 dir
+    dir=$(product_lock_dir)
+    case "$kind" in
+        loader) printf 'busy: the machine lock could not be loaded (%s); not taken\n' "${PRODUCT_MACHINE_LOCK_ERROR:-machine-lock.sh did not load}" ;;
+        unk) printf 'busy: %s cannot be judged (%s); not taken\n' "$dir" "$unknown" ;;
+        eperm) printf 'busy: %s held by pid %s, which belongs to another user (EPERM): the holder may have died and its pid been reused — check and remove %s by hand (#4288 PR1a-f)\n' "$dir" "${LPO_PID:-?}" "$dir" ;;
+        queue) printf 'busy: queue ticket %s (pid %s) was ahead for %s; this supervisor withdrew its ticket and did not judge the lock\n' "${blocker##*/}" "$(lock_json_field "$blocker" pid 2>/dev/null)" "$dir" ;;
+        corrupt) printf 'busy: %s/owner is not a lock record (pid= or token= missing: an acquisition died while writing it) — not taken; remove %s by hand when no supervisor runs (#4288 PR1a-f)\n' "$dir" "$dir" ;;
+        tmp) printf 'busy: %s has no owner but holds %s (an older supervisor died while taking it) — not taken; remove %s by hand (#4288 PR1a-f)\n' "$dir" "$(find "$dir" -maxdepth 1 -name 'owner.tmp.*' 2>/dev/null | sed 's|.*/||' | tr '\n' ' ' | sed 's/ $//')" "$dir" ;;
+        host) printf 'busy: %s held by pid %s on host %s, not this host %s — not judged; if the host name changed, remove %s by hand (#4288 PR1a-f)\n' "$dir" "${LPO_PID:-?}" "${LPO_HOST:-?}" "$LOCK_HOST" "$dir" ;;
+        aside) printf 'busy: %s is held by a record moved aside (%s) that could not be put back\n' "$dir" "$gone" ;;
+        rec) printf 'busy: %s pid %s holds %s\n' "${LPO_LABEL:-supervisor}" "${LPO_PID:-?}" "$dir" ;;
+        *) printf 'busy: %s is being taken by another supervisor right now\n' "$dir" ;;
+    esac
+}
+
+# product_lock_acquire <label> — 0 when held, 1 when someone else has it or it
+# could not be judged (PRODUCT_LOCK_ERROR says which), 2 when refused for its
+# arguments or context.
+product_lock_acquire() {
+    local dir lstart unknown blocker gone
+    PRODUCT_LOCK_RESULT=""
+    PRODUCT_LOCK_ERROR=""
+    [ $# -eq 1 ] || { product_lock_reject product_lock_acquire "takes exactly one argument (the label)"; return; }
+    [ -n "${PRODUCT_BASE:-}" ] || { product_lock_reject product_lock_acquire "PRODUCT_BASE is empty"; return; }
+    case "$1" in
+        '' | *$'\n'*) { product_lock_reject product_lock_acquire "the label is empty or has a newline"; return; } ;;
+    esac
+    [ -z "${LOCK_HELD_PATH:-}" ] || { product_lock_reject product_lock_acquire "this shell already holds a machine lock"; return; }
+    if [ "$PRODUCT_MACHINE_LOCK_OK" != 0 ]; then
+        PRODUCT_LOCK_RESULT=refused
+        PRODUCT_LOCK_ERROR=$(product_lock_message loader "" "" "")
+        return 1
+    fi
+    dir=$(product_lock_dir)
+    product_lock_setup
+    lstart=$(proc_lstart $$)
+    LOCK_OWNER_EXTRA=$(printf 'label=%s\nlstart=%s' "$1" "$lstart")
+    if lock_acquire_path "$dir" "$(product_lock_queue_dir)" 0; then
+        PRODUCT_LOCK_RESULT=acquired
         return 0
     fi
-    product_log "took over a stale lock (pid $(run_lock_field "$aside" pid))"
-    rm -rf "$aside"
-}
-
-# product_lock_acquire <label> — 0 when held, 1 when someone else has it.
-product_lock_acquire() {
-    local dir tmp attempt=0
-    dir=$(product_lock_dir)
-    PRODUCT_LOCK_TOKEN="$$-$RANDOM$RANDOM"
-    while [ $attempt -lt 5 ]; do
-        attempt=$((attempt + 1))
-        if mkdir "$dir" 2>/dev/null; then
-            tmp="$dir/owner.tmp.$$"
-            if printf 'pid=%s\nlstart=%s\nlabel=%s\ntoken=%s\n' "$$" "$(proc_lstart $$)" "$1" "$PRODUCT_LOCK_TOKEN" >"$tmp" &&
-                mv -f "$tmp" "$dir/owner"; then
-                return 0
-            fi
-            rm -rf "$dir"
-            PRODUCT_LOCK_ERROR="could not write the owner of $dir"
-            return 1
-        fi
-        if product_lock_is_stale "$dir"; then
-            product_lock_take_stale "$dir"
-            continue
-        fi
-        if [ -f "$dir/owner" ]; then
-            PRODUCT_LOCK_ERROR="busy: $(run_lock_field "$dir" label) pid $(run_lock_field "$dir" pid) holds $dir"
-        else
-            PRODUCT_LOCK_ERROR="busy: $dir is being taken by another supervisor right now"
-        fi
-        return 1
-    done
-    # shellcheck disable=SC2034 # read by the caller
-    PRODUCT_LOCK_ERROR="could not take $dir after $attempt attempts"
+    unknown=${LOCK_UNKNOWN-}
+    blocker=${la_blocker-}
+    gone=${LOCK_GONE_PENDING-}
+    product_lock_kind "$unknown" "$blocker" "$gone"
+    PRODUCT_LOCK_RESULT=refused
+    PRODUCT_LOCK_ERROR=$(product_lock_message "$PRODUCT_LOCK_KIND" "$unknown" "$blocker" "$gone")
     return 1
 }
 
-# product_lock_release — only a lock this process holds.
+# product_lock_release — only a lock this shell holds, and only its own record
+# (the main shell's $$): anything else is kept for the next head to recover.
+# Called from the supervisor's EXIT, which ends the shell, so nothing is retried.
 product_lock_release() {
-    local dir
-    dir=$(product_lock_dir)
-    [ -n "${PRODUCT_LOCK_TOKEN:-}" ] && [ "$(run_lock_field "$dir" token)" = "$PRODUCT_LOCK_TOKEN" ] && rm -rf "$dir"
+    PRODUCT_LOCK_RESULT=""
+    PRODUCT_LOCK_ERROR=""
+    [ $# -eq 0 ] || { product_lock_reject product_lock_release "takes no argument"; return; }
+    [ -n "${PRODUCT_BASE:-}" ] || { product_lock_reject product_lock_release "PRODUCT_BASE is empty"; return; }
+    [ "${BASH_SUBSHELL:-0}" = 0 ] || { product_lock_reject product_lock_release "called from a subshell"; return; }
+    if [ "$PRODUCT_MACHINE_LOCK_OK" != 0 ]; then
+        PRODUCT_LOCK_RESULT=none
+        return 0
+    fi
+    product_lock_setup
+    lock_release_held "$(product_lock_dir)" || true
+    PRODUCT_LOCK_RESULT=$LRH_RESULT
+    return 0
+}
+
+# product_lock_recover_only — the deadline guard's recovery of a dead
+# supervisor's lock (never a take). PRODUCT_LOCK_RESULT is removed | kept |
+# restore-failed | absent | not-head | unloaded; PRODUCT_LOCK_ERROR is a line
+# for a person when the lock was kept and needs one. Returns 0 whatever the
+# result (the guard's exit code does not depend on the lock), 2 when refused.
+product_lock_recover_only() {
+    local unknown
+    PRODUCT_LOCK_RESULT=""
+    PRODUCT_LOCK_ERROR=""
+    [ $# -eq 0 ] || { product_lock_reject product_lock_recover_only "takes no argument"; return; }
+    [ -n "${PRODUCT_BASE:-}" ] || { product_lock_reject product_lock_recover_only "PRODUCT_BASE is empty"; return; }
+    [ -z "${LOCK_HELD_PATH:-}" ] || { product_lock_reject product_lock_recover_only "this shell holds the lock (the guard never acquires)"; return; }
+    [ "${BASH_SUBSHELL:-0}" = 0 ] || { product_lock_reject product_lock_recover_only "called from a subshell"; return; }
+    if [ "$PRODUCT_MACHINE_LOCK_OK" != 0 ]; then
+        PRODUCT_LOCK_RESULT=unloaded
+        PRODUCT_LOCK_ERROR=$(product_lock_message loader "" "" "")
+        return 0
+    fi
+    product_lock_setup
+    lock_recover_only "$(product_lock_dir)" "$(product_lock_queue_dir)" "$PRODUCT_LOCK_GUARD_BUDGET_SEC"
+    PRODUCT_LOCK_RESULT=$LRO_RESULT
+    unknown=${LRO_UNKNOWN-}
+    case "$LRO_RESULT" in
+        kept | not-head)
+            product_lock_kind "$unknown" "" ""
+            case "$PRODUCT_LOCK_KIND" in
+                eperm | unk | corrupt | tmp | host)
+                    PRODUCT_LOCK_ERROR=$(product_lock_message "$PRODUCT_LOCK_KIND" "$unknown" "" "")
+                    ;;
+            esac
+            ;;
+    esac
     return 0
 }
 

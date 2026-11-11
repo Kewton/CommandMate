@@ -78,14 +78,16 @@ for file in "$PRODUCT_BASE"/ledger/*.json; do
     fi
 done
 
-# A lock its supervisor left when it died (or was stopped above). Taken the
-# way the supervisor takes one: moved aside, and put back unless the moved one
-# is still the one judged stale — a supervisor starting in between has made a
-# fresh lock at that path, and it must not be removed.
-lock="$PRODUCT_BASE/supervisor.lock"
-if [ -d "$lock" ] && product_lock_is_stale "$lock"; then
-    product_lock_take_stale "$lock"
-fi
+# A lock its supervisor left when it died (or was stopped above): recovered as
+# the head of the queue of the machine-wide lock, never taken (lib.sh). The
+# result does not change the exit code; a lock it keeps for a person to look at
+# is said on stderr.
+# shellcheck disable=SC2119 # takes no argument
+product_lock_recover_only
+case "$PRODUCT_LOCK_RESULT" in
+    removed) product_log "took over a stale supervisor.lock" ;;
+esac
+[ -z "$PRODUCT_LOCK_ERROR" ] || product_log "$PRODUCT_LOCK_ERROR"
 
 [ $handled -eq 0 ] && product_log "nothing to reclaim for $DATE"
 exit $rc

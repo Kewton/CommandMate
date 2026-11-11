@@ -36,6 +36,7 @@
  *
  * @vitest-environment node
  */
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1223,34 +1224,666 @@ describe("Issue #4288 PR1c: aligned with PR1a-f's upstream 3rd round (I3's grace
 });
 
 // ------------------------------------------------------------------ behaviour (the implementation contract)
+//
+// Each row of the §2 table is driven through lib.sh itself (bash under `set -u`, a private PRODUCT_BASE made with
+// fs.mkdtempSync under os.tmpdir(), removed in afterEach): the form is written in the base, the observation made real
+// (a live `sleep`, a pid that is gone, pid 1 for EPERM) or injected (CM_VERIFY_TEST_OBS_FAULT), and the answer read back
+// from PRODUCT_LOCK_RESULT / PRODUCT_LOCK_KIND / PRODUCT_LOCK_ERROR / the files. A row the driver cannot make is listed in
+// UNDRIVEN with the reason (it stays an `it.todo`): nothing of a table row is silently skipped.
 
-describe.each(CALLERS)('Issue #4288 PR1c behaviour: %s (to implement: lib.sh / deadline-guard.sh)', (caller) => {
+const HAS_TOOLS = spawnSync('bash', ['-c', 'command -v ps && command -v hostname'], { encoding: 'utf8' }).status === 0;
+const tmpDirs: string[] = [];
+const children: ChildProcess[] = [];
+afterEach(() => {
+  for (const c of children.splice(0)) {
+    try {
+      c.kill('SIGKILL');
+    } catch {
+      /* gone */
+    }
+  }
+  for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+});
+
+function mkTmp(prefix: string): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(d);
+  return d;
+}
+
+function lstartOf(pid: number): string {
+  return spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).stdout.trim();
+}
+
+function isoNow(): string {
+  return new Date(Math.floor(Date.now() / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+}
+
+/** A process that lives until the test ends. */
+function liveProcess(): number {
+  const c = spawn('sleep', ['600'], { stdio: 'ignore' });
+  children.push(c);
+  return c.pid as number;
+}
+
+/** A pid that is gone (a child waited for). */
+function deadPid(): number {
+  const r = spawnSync('bash', ['-c', 'echo $$']);
+  return Number(r.stdout.toString().trim());
+}
+
+interface RecordOpts {
+  pid: number;
+  token?: string;
+  host?: string;
+  lstart?: string;
+  startedAt?: string;
+  label?: string;
+  v?: boolean;
+}
+function recordText(o: RecordOpts): string {
+  const lines = [`pid=${o.pid}`, `host=${o.host ?? os.hostname()}`, `token=${o.token ?? 'other-token'}`];
+  if (o.startedAt !== undefined) lines.push(`started_at=${o.startedAt}`);
+  if (o.v !== false) lines.push('v=1');
+  lines.push(`label=${o.label ?? 'other'}`);
+  if (o.lstart !== undefined) lines.push(`lstart=${o.lstart}`);
+  return `${lines.join('\n')}\n`;
+}
+
+const OLD = '202601010000';
+
+interface Fixture {
+  /** extra environment for the bash that runs the caller */
+  env: Record<string, string>;
+  /** the canonical record's text before the call (undefined: no canonical <lock>) */
+  before?: string;
+  /** the moved-aside record's text, when the form has one */
+  aside?: string;
+  /** the caller holds the lock itself (`own`): the script takes it first */
+  takeFirst?: boolean;
+}
+
+/** Why a (form × obs) cannot be made by the driver (the row stays an `it.todo`). */
+function undriven(form: Form, obs: Obs, caller: Caller): string | undefined {
+  if ((form === 'absent' || form === 'stale-old') && obs !== 'gone') {
+    return 'needs a race on mkdir / a listing fault (EEXIST in between, a failing list): driven by the failure rows F11 / F20';
+  }
+  void caller;
+  return undefined;
+}
+
+function makeFixture(form: Form, obs: Obs, base: string, caller: Caller): Fixture {
+  const lock = path.join(base, 'supervisor.lock');
+  const env: Record<string, string> = {};
+  const live = (): number => liveProcess();
+  const put = (text: string): string => {
+    fs.mkdirSync(lock, { recursive: true });
+    fs.writeFileSync(path.join(lock, 'owner'), text);
+    return text;
+  };
+  const pidOf = (o: Obs): number => (o === 'gone' ? deadPid() : live());
+  const unknownPid = (o: Obs): void => {
+    if (o === 'unknown') env.CM_VERIFY_TEST_OBS_FAULT = 'pid=EIO';
+  };
+  switch (form) {
+    case 'absent':
+      return { env };
+    case 'stale-old': {
+      fs.mkdirSync(`${lock}.stale.123.456`, { recursive: true });
+      fs.writeFileSync(path.join(`${lock}.stale.123.456`, 'owner'), recordText({ pid: live(), v: false }));
+      return { env };
+    }
+    case 'ownerless': {
+      fs.mkdirSync(lock, { recursive: true });
+      if (obs !== 'alive') spawnSync('touch', ['-t', OLD, lock]);
+      if (obs === 'unknown') env.CM_VERIFY_TEST_OBS_FAULT = 'ownerless-mtime=EIO';
+      return { env };
+    }
+    case 'ownerless-tmp': {
+      fs.mkdirSync(lock, { recursive: true });
+      fs.writeFileSync(path.join(lock, 'owner.tmp.4242'), 'pid=1\n');
+      return { env, before: undefined };
+    }
+    case 'corrupt': {
+      const text = put(`pid=${pidOf(obs)}\n`);
+      return { env, before: text };
+    }
+    case 'own': {
+      if (caller !== 'release-main') {
+        // the caller's own token in the record, but nothing held by this shell (release-unheld)
+        const text = put(recordText({ pid: live(), token: 'mine-token', startedAt: isoNow() }));
+        return { env, before: text };
+      }
+      unknownPid(obs);
+      return { env, takeFirst: true };
+    }
+    case 'other-plain': {
+      const text = put(recordText({ pid: pidOf(obs), startedAt: isoNow() }));
+      unknownPid(obs);
+      return { env, before: text };
+    }
+    case 'other-lstart': {
+      const pid = pidOf(obs);
+      const text = put(recordText({ pid, startedAt: isoNow(), lstart: obs === 'gone' ? 'x' : lstartOf(pid) }));
+      if (obs === 'unknown') env.CM_VERIFY_TEST_OBS_FAULT = 'lstart=EIO';
+      return { env, before: text };
+    }
+    case 'other-eperm': {
+      // pid 1 belongs to another user: kill -0 answers EPERM.
+      const text =
+        obs === 'alive'
+          ? put(recordText({ pid: 1, startedAt: isoNow(), lstart: lstartOf(1) }))
+          : put(recordText({ pid: 1, startedAt: '2015-01-01T00:00:00Z', lstart: 'Thu Jan  1 00:00:00 2015' }));
+      if (obs === 'unknown') env.CM_VERIFY_TEST_OBS_FAULT = 'etime=EIO';
+      return { env, before: text };
+    }
+    case 'other-host': {
+      const text = put(recordText({ pid: pidOf(obs), host: 'some-other-host.invalid', startedAt: isoNow() }));
+      return { env, before: text };
+    }
+    case 'aside': {
+      const pid = pidOf(obs);
+      const text = recordText({ pid, token: 'aside-token', startedAt: isoNow() });
+      const gone = `${lock}.gone-aside-token-1`;
+      fs.mkdirSync(gone, { recursive: true });
+      fs.writeFileSync(path.join(gone, 'owner'), text);
+      unknownPid(obs);
+      void caller;
+      return { env, aside: text };
+    }
+  }
+}
+
+interface Ran {
+  rc: number;
+  result: string;
+  kind: string;
+  error: string;
+  stderr: string;
+  /** the tickets the call left or made (name → text) */
+  tickets: Record<string, string>;
+}
+
+function bashLib(base: string, body: string, env: Record<string, string>, lib = LIB_SH, timeout = 60_000) {
+  return spawnSync('bash', ['-c', `set -u\nPRODUCT_BASE='${base}'\n. '${lib}'\n${body}`], {
+    env: { PATH: process.env.PATH ?? '', HOME: base, TMPDIR: os.tmpdir(), LC_ALL: 'C', CM_PRODUCT_LOCK_GUARD_BUDGET_SEC: '1', ...env } as unknown as NodeJS.ProcessEnv,
+    encoding: 'utf8',
+    timeout,
+  });
+}
+
+const REPORT = 'echo "RC=$rc"; echo "RES=$PRODUCT_LOCK_RESULT"; echo "KIND=$PRODUCT_LOCK_KIND"; printf "ERR=%s\\n" "$(printf %s "$PRODUCT_LOCK_ERROR" | tr "\\n" " ")"';
+
+function readTickets(base: string): Record<string, string> {
+  const q = path.join(base, 'supervisor.queue');
+  if (!fs.existsSync(q)) return {};
+  const out: Record<string, string> = {};
+  for (const n of fs.readdirSync(q)) if (/^\d{12}$/.test(n)) out[n] = fs.readFileSync(path.join(q, n), 'utf8');
+  return out;
+}
+
+function parseReport(stdout: string, stderr: string, base: string): Ran {
+  const get = (k: string): string => (stdout.split('\n').find((l) => l.startsWith(`${k}=`)) ?? '').slice(k.length + 1);
+  return { rc: Number(get('RC')), result: get('RES'), kind: get('KIND'), error: get('ERR'), stderr, tickets: readTickets(base) };
+}
+
+/** A live ticket of another process ahead in the queue. */
+function placeTicketAhead(base: string): void {
+  const q = path.join(base, 'supervisor.queue');
+  fs.mkdirSync(q, { recursive: true });
+  const now = Date.now();
+  fs.writeFileSync(
+    path.join(q, '000000000001'),
+    `{"pid":${liveProcess()},"host":"${os.hostname()}","token":"ahead","createdAt":${now},"deadline":${now + 600_000}}\n`,
+  );
+}
+
+function runRow(caller: Caller, form: Form, obs: Obs): { ran: Ran; fx: Fixture; base: string; mine?: string } {
+  const base = mkTmp('cm-sup-lock-');
+  const fx = makeFixture(form, obs, base, caller);
+  if (caller === 'acquire-behind' || caller === 'guard-behind') placeTicketAhead(base);
+  const lock = path.join(base, 'supervisor.lock');
+  let body: string;
+  switch (caller) {
+    case 'acquire-head':
+    case 'acquire-behind':
+      body = `product_lock_acquire t; rc=$?\n${REPORT}`;
+      break;
+    case 'guard-head':
+    case 'guard-behind':
+      body = `product_lock_recover_only; rc=$?\n${REPORT}`;
+      break;
+    case 'release-unheld':
+      body = `product_lock_release; rc=$?\n${REPORT}`;
+      break;
+    case 'release-main': {
+      if (fx.takeFirst) {
+        body = `product_lock_acquire t || exit 9\nexport ${Object.entries(fx.env).map(([k, v]) => `${k}='${v}'`).join(' ') || 'X=1'}\nproduct_lock_release; rc=$?\n${REPORT}`;
+        fx.env = {};
+      } else {
+        // the caller holds a mark (this shell took the lock once); the record is another's now
+        body = `LOCK_HELD_PATH='${lock}'; LOCK_HELD_TOKEN=mine-token\nproduct_lock_release; rc=$?\n${REPORT}`;
+      }
+      break;
+    }
+    default:
+      throw new Error(`not driven: ${caller}`);
+  }
+  const res = bashLib(base, body, fx.env);
+  const ran = parseReport(res.stdout, res.stderr, base);
+  return { ran, fx, base };
+}
+
+function lockOwnerText(base: string): string | undefined {
+  const f = path.join(base, 'supervisor.lock', 'owner');
+  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : undefined;
+}
+
+const KIND_OF_CELL_MESSAGE: Record<Message, string> = {
+  rec: 'rec',
+  taking: 'taking',
+  queue: 'queue',
+  unk: 'unk',
+  eperm: 'eperm',
+  corrupt: 'corrupt',
+  tmp: 'tmp',
+  host: 'host',
+  aside: 'aside',
+  loader: 'loader',
+};
+
+function checkRow(e: RowEntry): void {
+  const { ran, fx, base } = runRow(e.caller, e.form, e.obs);
+  const cell = e.cell as Row<Caller>;
+  expect(ran.result, `${e.caller} × ${e.form} × ${e.obs}: ${ran.stderr}`).toBe(cell.result);
+  if (cell.message !== undefined) {
+    const isGuard = e.caller === 'guard-head';
+    expect(ran.kind, ran.error).toBe(KIND_OF_CELL_MESSAGE[cell.message]);
+    expect(ran.error).not.toBe('');
+    if (isGuard) expect(ran.error).toContain('busy:');
+  } else if (e.caller === 'guard-head') {
+    expect(ran.error, 'the guard names a lock only when a person has to look at it').toBe('');
+  }
+  // where the record ends
+  const owner = lockOwnerText(base);
+  switch (cell.lock) {
+    case 'unchanged':
+      if (e.form === 'own' && fx.takeFirst) {
+        expect(owner).toContain('label=t');
+      } else if (e.form === 'own') {
+        expect(owner).toBe(fx.before);
+      } else if (fx.before === undefined) {
+        // no canonical record before (absent, ownerless, ownerless-tmp, stale-old): none now
+        expect(owner).toBeUndefined();
+      } else if (fx.before !== undefined) {
+        expect(owner).toBe(fx.before);
+      }
+      break;
+    case 'absent':
+      expect(fs.existsSync(path.join(base, 'supervisor.lock'))).toBe(false);
+      break;
+    case 'mine':
+      expect(owner).toContain('label=t');
+      break;
+    case 'restored':
+      expect(owner).toBe(fx.aside);
+      break;
+  }
+  if (cell.lock !== 'restored' && cell.lock !== 'unchanged') {
+    expect(fs.readdirSync(base).filter((n) => n.startsWith('supervisor.lock.gone-'))).toEqual([]);
+  }
+  // the caller's own ticket: retired (done) or none taken
+  const behind = e.caller === 'acquire-behind' || e.caller === 'guard-behind';
+  const mineTickets = Object.entries(ran.tickets).filter(([n]) => !(behind && n === '000000000001'));
+  if (fx.takeFirst) {
+    // the acquisition before the release took (and retired) its own ticket; the release adds none
+    expect(Object.keys(ran.tickets)).toHaveLength(1);
+    for (const [, text] of mineTickets) expect(text).toContain('"done":true');
+  } else if (cell.ticket === 'none-taken') {
+    expect(mineTickets).toEqual([]);
+  } else if (cell.ticket === 'retired') {
+    expect(mineTickets.length).toBeGreaterThan(0);
+    for (const [, text] of mineTickets) expect(text).toContain('"done":true');
+  }
+}
+
+describe.each(CALLERS)('Issue #4288 PR1c behaviour: %s (lib.sh / deadline-guard.sh)', (caller) => {
   const rows = ROWS.filter((r) => r.caller === caller);
   for (const e of rows) {
     const msg = e.cell.message ? ` (${e.cell.message})` : '';
-    it.todo(`${e.form} × ${e.obs} → ${e.cell.result}${msg} / ${e.cell.lock} / ticket ${e.cell.ticket}`);
+    const title = `${e.form} × ${e.obs} → ${e.cell.result}${msg} / ${e.cell.lock} / ticket ${e.cell.ticket}`;
+    const why = undriven(e.form, e.obs, e.caller);
+    if (!HAS_TOOLS || why !== undefined) {
+      it.todo(`${title}${why ? ` — not driven: ${why}` : ''}`);
+    } else {
+      it(title, () => checkRow(e), 60_000);
+    }
   }
   if (rows.length === 0) {
     // release-subshell: one rejection row (§5); d5-*: no product path calls D5 (S5).
-    it.todo(caller === 'release-subshell' ? 'rejected (release-in-subshell): nothing removed, exit 2' : 'not reached by any product_lock_* (S5)');
+    if (caller === 'release-subshell') {
+      it('rejected (release-in-subshell): nothing removed, exit 2', () => {
+        const base = mkTmp('cm-sup-lock-');
+        const res = bashLib(
+          base,
+          `product_lock_acquire t || exit 9\n( product_lock_release; echo "SUBRC=$? $PRODUCT_LOCK_RESULT" )\nls "${base}/supervisor.lock/owner" >/dev/null && echo STILL-THERE`,
+          {},
+        );
+        expect(res.stdout).toContain('SUBRC=2 rejected');
+        expect(res.stdout).toContain('STILL-THERE');
+      });
+    } else {
+      it('not reached by any product_lock_* (S5): no function of lib.sh calls lock_release_as_head', () => {
+        const lib = fs.readFileSync(LIB_SH, 'utf8');
+        expect(codeLines(lib).filter((l) => /lock_release_as_head/.test(l))).toEqual([]);
+      });
+    }
   }
 });
 
-describe('Issue #4288 PR1c rejections (design §5, to implement)', () => {
+describe('Issue #4288 PR1c rejections (design §5)', () => {
+  const runs: Record<RejectionKey, (base: string) => { body: string; env?: Record<string, string>; base?: string }> = {
+    'acquire-arity': () => ({ body: 'product_lock_acquire; rc=$?\n' + REPORT }),
+    'acquire-label': () => ({ body: 'product_lock_acquire "$(printf "a\\npgid=1")"; rc=$?\n' + REPORT }),
+    'acquire-while-holding': () => ({ body: 'product_lock_acquire t || exit 9\nproduct_lock_acquire u; rc=$?\n' + REPORT }),
+    'release-args': () => ({ body: 'product_lock_release x; rc=$?\n' + REPORT }),
+    'release-in-subshell': () => ({ body: '( product_lock_release; rc=$?\n' + REPORT + ' )' }),
+    'recover-args': () => ({ body: 'product_lock_recover_only x; rc=$?\n' + REPORT }),
+    'recover-while-holding': () => ({ body: 'product_lock_acquire t || exit 9\nproduct_lock_recover_only; rc=$?\n' + REPORT }),
+    'recover-in-subshell': () => ({ body: '( product_lock_recover_only; rc=$?\n' + REPORT + ' )' }),
+    'base-empty': () => ({ body: 'PRODUCT_BASE=""\nfor f in product_lock_acquire:t product_lock_release: product_lock_recover_only:; do fn=${f%%:*}; a=${f#*:}; ${fn} ${a:+$a}; echo "ONE:$fn rc=$? $PRODUCT_LOCK_RESULT"; done' }),
+  };
   for (const k of Object.keys(REJECTIONS) as RejectionKey[]) {
-    it.todo(`${k}: ${REJECTIONS[k].fn} with ${REJECTIONS[k].check} → rejected (exit 2), nothing touched`);
+    it(`${k}: ${REJECTIONS[k].fn} with ${REJECTIONS[k].check} → rejected (exit 2), nothing touched`, () => {
+      const base = mkTmp('cm-sup-lock-');
+      const { body } = runs[k](base);
+      const res = bashLib(base, body, {});
+      if (k === 'base-empty') {
+        const lines = res.stdout.split('\n').filter((l) => l.startsWith('ONE:'));
+        expect(lines).toHaveLength(3);
+        for (const l of lines) expect(l).toMatch(/rc=2 rejected$/);
+      } else {
+        const ran = parseReport(res.stdout, res.stderr, base);
+        expect(ran.rc).toBe(2);
+        expect(ran.result).toBe('rejected');
+        expect(ran.error).not.toBe('');
+      }
+      if (k !== 'acquire-while-holding' && k !== 'recover-while-holding') {
+        // nothing touched: no lock, no ticket
+        expect(fs.existsSync(path.join(base, 'supervisor.lock'))).toBe(false);
+        expect(Object.keys(readTickets(base))).toEqual([]);
+      } else {
+        // the lock the shell took is still its own
+        expect(lockOwnerText(base)).toContain('label=t');
+      }
+    });
   }
 });
 
-describe('Issue #4288 PR1c loader rows: the PR1b ↔ PR1c contract (design §5.2, to implement)', () => {
-  for (const [k, v] of Object.entries(LOADER_ROWS)) {
-    it.todo(`${k}: ${v.setup} → loads ${v.loads}, acquire ${v.acquire}, guard ${v.guard}`);
-  }
+describe('Issue #4288 PR1c loader rows: the PR1b ↔ PR1c contract (design §5.2)', () => {
+  const oldRunLock = (dir: string): void => {
+    fs.mkdirSync(path.join(dir, 'scripts/uat'), { recursive: true });
+    fs.copyFileSync(path.join(REPO_ROOT, 'scripts/uat/run-lock.sh'), path.join(dir, 'scripts/uat/run-lock.sh'));
+  };
+  /** A copy of the product dir and what it sources, under os.tmpdir(): lib.sh finds its repo root by its own path. */
+  const makeTree = (): string => {
+    const tree = mkTmp('cm-sup-tree-');
+    for (const rel of ['scripts/agent-health/product/lib.sh', 'scripts/agent-health/product/ledger.py', 'scripts/lib/port-pids.sh', 'scripts/lib/machine-lock.sh', 'scripts/uat/run-lock.sh', '.claude/skills/cmate-verify/scripts/verify-run.sh']) {
+      fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true });
+      fs.copyFileSync(path.join(REPO_ROOT, rel), path.join(tree, rel));
+    }
+    return tree;
+  };
+  const twice = (tree: string): string => {
+    const f = path.join(tree, 'markers-twice.sh');
+    const src = fs.readFileSync(VERIFY_RUN_SH, 'utf8');
+    fs.writeFileSync(f, `${src}\n# --- machine-wide gate lock\n`);
+    return f;
+  };
+
+  it('load-once: a run-lock.sh that sources machine-lock.sh first leaves lib.sh with one load, the table as is', () => {
+    const tree = makeTree();
+    const rl = path.join(tree, 'scripts/uat/run-lock.sh');
+    fs.appendFileSync(rl, `\n. '${path.join(tree, 'scripts/lib/machine-lock.sh')}'\n`);
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(base, 'echo "OK=$PRODUCT_MACHINE_LOCK_OK"; product_lock_acquire t; rc=$?\n' + REPORT, {}, path.join(tree, 'scripts/agent-health/product/lib.sh'));
+    expect(res.stdout).toContain('OK=0');
+    expect(res.stdout).toContain('RES=acquired');
+  });
+
+  it('run-lock-load-failed: a failed machine-lock load by run-lock.sh leaves lib.sh loading it itself (a second try on the same copy fails too: refused(loader))', () => {
+    const tree = makeTree();
+    const bad = twice(tree);
+    const rl = path.join(tree, 'scripts/uat/run-lock.sh');
+    fs.appendFileSync(rl, `\n. '${path.join(tree, 'scripts/lib/machine-lock.sh')}' || true\n`);
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(
+      base,
+      'type run_lock_field >/dev/null && type run_lock_pid_alive >/dev/null && echo FUNCS\nproduct_lock_acquire t; rc=$?\n' + REPORT + '\nproduct_lock_recover_only; echo "G=$PRODUCT_LOCK_RESULT"',
+      { MACHINE_LOCK_VERIFY_RUN: bad },
+      path.join(tree, 'scripts/agent-health/product/lib.sh'),
+    );
+    expect(res.stdout).toContain('FUNCS');
+    expect(res.stdout).toContain('RES=refused');
+    expect(res.stdout).toContain('KIND=');
+    expect(res.stdout).toContain('G=unloaded');
+    expect(fs.existsSync(path.join(base, 'supervisor.lock'))).toBe(false);
+  });
+
+  it('old-run-lock-copy: today\'s run-lock.sh (no machine-lock source): one load by lib.sh, the table as is', () => {
+    const tree = makeTree();
+    oldRunLock(tree);
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(base, 'echo "OK=$PRODUCT_MACHINE_LOCK_OK"; product_lock_acquire t; rc=$?\n' + REPORT, {}, path.join(tree, 'scripts/agent-health/product/lib.sh'));
+    expect(res.stdout).toContain('OK=0');
+    expect(res.stdout).toContain('RES=acquired');
+  });
+
+  it('lib-load-failed: lib.sh\'s own source fails (an old run-lock.sh, markers twice): PRODUCT_MACHINE_LOCK_OK is not 0, refused(loader), unloaded', () => {
+    const tree = makeTree();
+    const bad = twice(tree);
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(
+      base,
+      'echo "OK=$PRODUCT_MACHINE_LOCK_OK"; product_lock_acquire t; rc=$?\n' + REPORT + '\nproduct_lock_recover_only; echo "G=$PRODUCT_LOCK_RESULT"; product_lock_release; echo "R=$PRODUCT_LOCK_RESULT"',
+      { MACHINE_LOCK_VERIFY_RUN: bad },
+      path.join(tree, 'scripts/agent-health/product/lib.sh'),
+    );
+    expect(res.stdout).not.toContain('OK=0');
+    expect(res.stdout).toContain('RC=1');
+    expect(res.stdout).toContain('RES=refused');
+    expect(res.stdout).toMatch(/ERR=busy: the machine lock could not be loaded/);
+    expect(res.stdout).toContain('G=unloaded');
+    expect(res.stdout).toContain('R=none');
+    expect(fs.existsSync(path.join(base, 'supervisor.lock'))).toBe(false);
+  });
+
+  it('pid-alive-two-valued: run_lock_pid_alive answers 0 / 1 / 0 for a live / an ESRCH / an EPERM pid, and proc_running follows', () => {
+    const live = liveProcess();
+    const base = mkTmp('cm-sup-lock-');
+    const res = bashLib(
+      base,
+      `run_lock_pid_alive ${live}; echo "A=$?"; run_lock_pid_alive ${deadPid()}; echo "B=$?"; run_lock_pid_alive 1; echo "C=$?"; proc_running ${live}; echo "D=$?"; proc_running 1; echo "E=$?"`,
+      {},
+    );
+    expect(res.stdout).toContain('A=0');
+    expect(res.stdout).toContain('B=1');
+    expect(res.stdout).toContain('C=0');
+    expect(res.stdout).toContain('D=0');
+    expect(res.stdout).toContain('E=0');
+  });
 });
 
-describe('Issue #4288 PR1c failure outcomes (design §3, to implement)', () => {
+describe('Issue #4288 PR1c failure outcomes (design §3): the rows the driver makes; the others stay todo with their injection', () => {
+  interface Spec {
+    /** writes the canonical record / form; returns the record text kept (undefined: no canonical <lock>) */
+    setup: (base: string) => string | undefined;
+    env?: Record<string, string>;
+    /** the reader's own environment on top (a different TZ) */
+    expect: Partial<Record<'acquire-head' | 'guard-head', { result: string; kind?: string; lock?: 'unchanged' | 'absent' | 'mine' }>>;
+  }
+  const lockOf = (base: string): string => path.join(base, 'supervisor.lock');
+  const withRecord =
+    (o: Omit<RecordOpts, 'pid'> & { pid?: number }, pidKind: 'live' | 'dead' | number = 'live') =>
+    (base: string): string => {
+      const pid = typeof pidKind === 'number' ? pidKind : pidKind === 'live' ? liveProcess() : deadPid();
+      fs.mkdirSync(lockOf(base), { recursive: true });
+      const text = recordText({ ...o, pid: o.pid ?? pid });
+      fs.writeFileSync(path.join(lockOf(base), 'owner'), text);
+      return text;
+    };
+  const pidLstart = (pid: number, tz: string): string =>
+    spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', TZ: tz } }).stdout.trim();
+
+  const SPECS: Record<string, Spec> = {
+    'F1-kill0-eperm': {
+      setup: withRecord({ startedAt: isoNow() }, 1),
+      expect: { 'acquire-head': { result: 'refused', kind: 'eperm' }, 'guard-head': { result: 'kept', kind: 'eperm' } },
+    },
+    'F2-kill0-other': {
+      setup: withRecord({ startedAt: isoNow() }),
+      env: { CM_VERIFY_TEST_OBS_FAULT: 'pid=EIO' },
+      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    },
+    'F6-ps-lstart-judge': {
+      setup: (base) => {
+        const pid = liveProcess();
+        return withRecord({ startedAt: isoNow(), lstart: lstartOf(pid) }, pid)(base);
+      },
+      env: { CM_VERIFY_TEST_OBS_FAULT: 'lstart=EIO' },
+      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    },
+    'F7-ps-lstart-at-write': {
+      setup: withRecord({ startedAt: isoNow(), lstart: '' }),
+      expect: { 'acquire-head': { result: 'refused', kind: 'rec' }, 'guard-head': { result: 'kept' } },
+    },
+    'F8-tz-differs': {
+      setup: (base) => {
+        const pid = liveProcess();
+        return withRecord({ startedAt: isoNow(), lstart: pidLstart(pid, 'UTC') }, pid)(base);
+      },
+      env: { TZ: 'Pacific/Auckland' },
+      expect: { 'acquire-head': { result: 'refused', kind: 'rec' }, 'guard-head': { result: 'kept' } },
+    },
+    'F9-started-at-missing': {
+      setup: (base) => {
+        const pid = liveProcess();
+        return withRecord({ lstart: pidLstart(pid, 'UTC') }, pid)(base);
+      },
+      env: { TZ: 'Pacific/Auckland' },
+      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    },
+    'F10-hostname-changed': {
+      setup: withRecord({ host: 'some-other-host.invalid', startedAt: isoNow() }),
+      expect: { 'acquire-head': { result: 'refused', kind: 'host' }, 'guard-head': { result: 'kept', kind: 'host' } },
+    },
+    'F11-mkdir-lock': {
+      setup: () => undefined,
+      env: { CM_VERIFY_TEST_OBS_FAULT: 'mkdir-lock=EIO' },
+      expect: { 'acquire-head': { result: 'refused', kind: 'unk' } },
+    },
+    'F17-killed-mid-owner': {
+      setup: (base) => {
+        fs.mkdirSync(lockOf(base), { recursive: true });
+        fs.writeFileSync(path.join(lockOf(base), 'owner'), `pid=${liveProcess()}\nhost=${os.hostname()}\n`);
+        return fs.readFileSync(path.join(lockOf(base), 'owner'), 'utf8');
+      },
+      expect: { 'acquire-head': { result: 'refused', kind: 'corrupt' }, 'guard-head': { result: 'kept', kind: 'corrupt' } },
+    },
+    'F18-old-tmp-left': {
+      setup: (base) => {
+        fs.mkdirSync(lockOf(base), { recursive: true });
+        fs.writeFileSync(path.join(lockOf(base), 'owner.tmp.4242'), 'pid=4242\n');
+        return undefined;
+      },
+      expect: { 'acquire-head': { result: 'refused', kind: 'tmp' }, 'guard-head': { result: 'kept', kind: 'tmp' } },
+    },
+    'F19-owner-read': {
+      setup: withRecord({ startedAt: isoNow() }),
+      env: { CM_VERIFY_TEST_OBS_FAULT: 'lock-owner=EIO' },
+      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    },
+    'F21-ownerless-rmdir': {
+      setup: (base) => {
+        fs.mkdirSync(lockOf(base), { recursive: true });
+        spawnSync('touch', ['-t', OLD, lockOf(base)]);
+        return undefined;
+      },
+      env: { CM_VERIFY_TEST_OBS_FAULT: 'ownerless-rmdir=EIO' },
+      expect: { 'acquire-head': { result: 'refused', kind: 'unk' }, 'guard-head': { result: 'kept', kind: 'unk' } },
+    },
+    'F30-queue-list': {
+      setup: withRecord({ startedAt: isoNow() }),
+      env: { CM_VERIFY_TEST_OBS_FAULT: 'list-queue=EIO' },
+      // the guard's not-head(unk) needs the list fault to hit only the second listing (the ticket publish lists the
+      // queue too, with the same point, and fails first): not driven, F30 × guard-head stays a todo
+      expect: { 'acquire-head': { result: 'refused', kind: 'unk' } },
+    },
+  };
+
+  function driveSpec(key: string, caller: 'acquire-head' | 'guard-head'): void {
+    const spec = SPECS[key];
+    const want = spec.expect[caller];
+    if (!want) throw new Error(`no expectation for ${key} × ${caller}`);
+    const base = mkTmp('cm-sup-lock-');
+    const before = spec.setup(base);
+    const body = caller === 'acquire-head' ? `product_lock_acquire t; rc=$?\n${REPORT}` : `product_lock_recover_only; rc=$?\n${REPORT}`;
+    const res = bashLib(base, body, spec.env ?? {});
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result, `${key} × ${caller}: ${res.stderr}`).toBe(want.result);
+    if (want.kind) expect(ran.kind, ran.error).toBe(want.kind);
+    if (want.lock !== 'absent') {
+      if (before !== undefined) expect(lockOwnerText(base)).toBe(before);
+      else expect(lockOwnerText(base)).toBeUndefined();
+    }
+    // no ticket of the caller left open
+    for (const text of Object.values(ran.tickets)) expect(text).toContain('"done":true');
+  }
+
+  /** F33: the machine lock did not load. */
+  function driveLoader(caller: 'acquire-head' | 'acquire-behind' | 'guard-head' | 'guard-behind' | 'release-main'): void {
+    const tree = mkTmp('cm-sup-tree-');
+    for (const rel of ['scripts/agent-health/product/lib.sh', 'scripts/agent-health/product/ledger.py', 'scripts/lib/port-pids.sh', 'scripts/lib/machine-lock.sh', 'scripts/uat/run-lock.sh', '.claude/skills/cmate-verify/scripts/verify-run.sh']) {
+      fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true });
+      fs.copyFileSync(path.join(REPO_ROOT, rel), path.join(tree, rel));
+    }
+    const bad = path.join(tree, 'markers-twice.sh');
+    fs.writeFileSync(bad, `${fs.readFileSync(VERIFY_RUN_SH, 'utf8')}\n# --- machine-wide gate lock\n`);
+    const base = mkTmp('cm-sup-lock-');
+    if (caller.endsWith('behind')) placeTicketAhead(base);
+    const fn = caller.startsWith('acquire') ? 'product_lock_acquire t' : caller.startsWith('guard') ? 'product_lock_recover_only' : 'product_lock_release';
+    const res = bashLib(base, `${fn}; rc=$?\n${REPORT}`, { MACHINE_LOCK_VERIFY_RUN: bad }, path.join(tree, 'scripts/agent-health/product/lib.sh'));
+    const ran = parseReport(res.stdout, res.stderr, base);
+    expect(ran.result).toBe(caller.startsWith('acquire') ? 'refused' : caller.startsWith('guard') ? 'unloaded' : 'none');
+    if (!caller.startsWith('release')) expect(ran.error).toMatch(/^busy: the machine lock could not be loaded/);
+    expect(fs.existsSync(lockOf(base))).toBe(false);
+    // no ticket of its own was taken (the one placed ahead is the only one)
+    expect(Object.keys(ran.tickets).filter((n) => !caller.endsWith('behind') || n !== '000000000001')).toEqual([]);
+  }
+
   for (const o of FAILURE_OUTCOMES) {
     const out = 'asForm' in o.outcome ? 'as the §2 cell' : `${o.outcome.result}${o.outcome.message ? ` (${o.outcome.message})` : ''} / ${o.outcome.lock} / ticket ${o.outcome.ticket}`;
-    it.todo(`${o.failure} × ${o.caller}: ${FAILURE_TABLE[o.failure].direction} → ${out}`);
+    const title = `${o.failure} × ${o.caller}: ${FAILURE_TABLE[o.failure].direction} → ${out}`;
+    const spec = SPECS[o.failure];
+    if (HAS_TOOLS && spec && (o.caller === 'acquire-head' || o.caller === 'guard-head') && spec.expect[o.caller]) {
+      it(title, () => driveSpec(o.failure, o.caller as 'acquire-head' | 'guard-head'), 60_000);
+    } else if (HAS_TOOLS && o.failure === 'F33-loader' && o.caller !== ('d5-head' as string)) {
+      it(title, () => driveLoader(o.caller as 'acquire-head'), 60_000);
+    } else if (HAS_TOOLS && o.failure === 'F2-kill0-other' && o.caller === 'release-main') {
+      it(title, () => {
+        const { ran } = runRow('release-main', 'own', 'unknown');
+        expect(ran.result).toBe('deferred');
+      }, 60_000);
+    } else if (HAS_TOOLS && o.failure === 'F19-owner-read' && o.caller === 'release-main') {
+      it(title, () => {
+        const base = mkTmp('cm-sup-lock-');
+        const res = bashLib(base, `product_lock_acquire t || exit 9\nexport CM_VERIFY_TEST_OBS_FAULT=release-owner=EIO\nproduct_lock_release; rc=$?\n${REPORT}`, {});
+        const ran = parseReport(res.stdout, res.stderr, base);
+        expect(ran.result).toBe('deferred');
+        expect(lockOwnerText(base)).toContain('label=t');
+      }, 60_000);
+    } else {
+      it.todo(title);
+    }
   }
 });
