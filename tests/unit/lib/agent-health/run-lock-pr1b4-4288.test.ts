@@ -60,7 +60,9 @@ describe('#4288 PR1b-4: the sends of run-server.sh and daily.sh (scan)', () => {
     expect(outside.length).toBeGreaterThan(0);
     for (const { line, text } of outside) {
       const at = offsetOf(line);
+      // $UP_SERVER_PID / -$UP_SERVER_PID: this shell's own child, sent before it is reaped (wait), so its number cannot be reused yet.
       const toOwnChild = /kill -s KILL (-- )?"-?\$UP_SERVER_PID" 2>\/dev\/null/.test(text);
+      // kill "$pid" in stop_recorded (a line this PR did not change): sent only after it checked alive, not a zombie, CM_DB_PATH under run_dir, the port listened on by that pid alone (or by nobody yet) and, in the new form, pgid = pid — a stronger identity check than signal_member's.
       const toVerifiedLeader = text.trim() === 'kill "$pid" 2>/dev/null || true' && at >= stopStart && at < stopStart + stopRecorded.length;
       expect(toOwnChild || toVerifiedLeader, `run-server.sh:${line}: ${text.trim()}`).toBe(true);
     }
@@ -70,6 +72,7 @@ describe('#4288 PR1b-4: the sends of run-server.sh and daily.sh (scan)', () => {
     const src = fs.readFileSync(DAILY, 'utf8');
     const lines = sendLines(src);
     expect(lines.length).toBeGreaterThan(0);
+    // $CHILD / -$CHILD: daily.sh's own child, sent before it is reaped (wait); the group only after it is shown to lead it.
     for (const { line, text } of lines) expect(/kill -s KILL (-- )?"-?\$CHILD" 2>\/dev\/null/.test(text), `daily.sh:${line}: ${text.trim()}`).toBe(true);
   });
 });
