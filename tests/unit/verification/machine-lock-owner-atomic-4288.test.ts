@@ -10,7 +10,10 @@
  * `limit` rows of F with the condition that ends them; F expanded per real caller × implementation;
  * round 4: the first acquisition records only its own pid, the undo after a confirmation never deletes
  * by name — rename to a name of its own, check that inode, delete or link it back — the paths left are
- * listed in §3.1, the clock read before and after ps, the writer's version v=1 on new records).
+ * listed in §3.1, the clock read before and after ps, the writer's version v=1 on new records;
+ * round 5: the put-back of a moved-aside owner links instead of renaming over — EEXIST keeps the aside
+ * and names it (I2-c, F67) — and §3.1's enumeration closed: lock_release's missing branch keeps the
+ * <lock>, setOwnerFields answers false instead of throwing, the rmdir-only and own-name paths).
  *
  * UPSTREAM SKELETON (the design stage). This file holds the tables of §2 (T: implementation × owner
  * form × caller × three-valued observation → result; K: the interruption points of an acquisition ×
@@ -30,8 +33,8 @@
  * invariants, and the time-zone witness of §4 on plain numbers.
  *
  * Counts (written in the design §2.5): T 3 implementations × 17 forms × 4 callers × 3 observations =
- * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 66 rows expanded
- * into 301 implementation × caller cases, 37 unreachable, 264 reached. 621 behaviour rows.
+ * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 67 rows expanded
+ * into 310 implementation × caller cases, 39 unreachable, 271 reached. 628 behaviour rows.
  *
  * How the implementation will drive a row (for the implementation contract, not run here):
  *   - a root from fs.mkdtempSync under os.tmpdir(), removed in afterEach; nothing under ~/.commandmate,
@@ -50,8 +53,9 @@
  * @vitest-environment node
  */
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const REPO = path.resolve(__dirname, '../../..');
 /** The production grace of the graced callers (I3) and the fixed grace of the empty owner (I4): 10 min (PM decision 1). */
@@ -688,6 +692,8 @@ const POINTS = {
   'owner-pid': 'new',
   'owner-undo-rename': 'new',
   'owner-undo-link': 'new',
+  /** The put-back of a moved-aside owner (§2.7): the name kept, what it observes is link(2) from round 5 (I2-c). */
+  'restore-rename': 'existing',
   pid: 'existing',
   lstart: 'existing',
   etime: 'new',
@@ -931,6 +937,14 @@ const FAILURE_TABLE = {
   'F64-guard-restore-failed': { impls: GRACED, point: null, direction: 'keep', results: { 'guard-head': 'restore-failed' }, left: 'aside-kept', note: "D6 moved a record aside whose token differs (a successor took it in between) and the restore mkdir fails: the aside stays and is read as held while its record lives (§2.7); machine-lock-restore-failed (codex round 3 P3)" },
   'F65-clock-back-during-observation': { impls: BASH, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'D7: now_after < now_before (the clock stepped back between now and ps) or the read took 1 s or more: unknown:etime:ECLOCK, read again next poll (codex round 3 P2: now 1000 s, back to 970 s, etime 870 s used to read a start of 130 s > 110 s + 2 s as reused)' },
   'F66-owner-without-v': { impls: ALL, point: null, direction: 'keep', results: HEADS('refused:rec', 'kept'), left: 'unchanged', note: 'I9: a parsed record without v= (an older copy) or an older owner.tmp.<pid>: judged as before; named once per process and lock, machine-lock-legacy-writer <lock> pid=<pid> — the observation that ends the mixed period (§6.1 (b))' },
+  'F67-put-back-link-exists': {
+    impls: ALL,
+    point: 'restore-rename',
+    direction: 'keep',
+    results: HEADS('refused:rec', 'restore-failed'),
+    left: 'aside-kept',
+    note: "round 5 (PM Claude round 4 P2-1): an owner published between the put-back's check (created / ownerless-empty) and its link(gone/owner, <lock>/owner) — EEXIST: not put back, the aside kept, the <lock> not rmdir'd (it holds the publisher's owner); machine-lock-restore-failed <lock>: kept <gone> (EEXIST). Round 4's rename overwrote it. Interrupt after pause:restore-mkdir. A new writer resumed from K1 into that window still makes two holders (I8 (a)'s exception, §8 4)",
+  },
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
 const FAILURES = Object.keys(FAILURE_TABLE) as Failure[];
@@ -1111,13 +1125,13 @@ describe('Issue #4288 PR1a-f tables (design §2.5): shape', () => {
     for (const e of UNREACHABLE) expect(UNREACHABLE_REASONS[(e.cell as Unreachable).unreachable].length).toBeGreaterThan(0);
   });
 
-  it('K has 5 points × 3 implementations = 15 rows, F has 66 rows: 301 implementation × caller cases, 37 unreachable, 264 reached; 621 rows in all', () => {
+  it('K has 5 points × 3 implementations = 15 rows, F has 67 rows: 310 implementation × caller cases, 39 unreachable, 271 reached; 628 rows in all', () => {
     expect(KILL_ROWS).toHaveLength(15);
-    expect(FAILURES).toHaveLength(66);
-    expect(F_ALL_CASES).toHaveLength(301);
-    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(37);
-    expect(F_CASES).toHaveLength(264);
-    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(621);
+    expect(FAILURES).toHaveLength(67);
+    expect(F_ALL_CASES).toHaveLength(310);
+    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(39);
+    expect(F_CASES).toHaveLength(271);
+    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(628);
   });
 
   it('every form and every observation of it is defined', () => {
@@ -1375,6 +1389,129 @@ describe('Issue #4288 PR1a-f round 4 (design §3.1, I1-b, I2-b, I9, P1): no name
     expect([f.direction, f.left]).toEqual(['keep', 'unchanged']);
     expect(f.note).toContain('machine-lock-legacy-writer');
     for (const l of F_ROWS.filter((r) => r.limit?.kind === 'mixed')) expect([l.id, l.limit?.writer]).toEqual([l.id, 'no-v']);
+  });
+});
+
+// ------------------------------------------------------------------ §3.1: the paths that delete or overwrite a lock name after a check
+
+/**
+ * §3.1 as data (round 5 closed it against PM Claude round 4's grep of the four lock sections: 13 paths
+ * and the tickets). `after` is the form PR1a-f leaves: no path may be `check-then-name` (a check, then
+ * a delete / overwrite by the name `<lock>` or `<lock>/owner` that a successor may hold by then).
+ */
+type NamedForm =
+  | 'rename-inode' // rename to an own name, check that inode, delete or link back (I2-b)
+  | 'link-back' // link(2) back, EEXIST kept and named (I2-c)
+  | 'rmdir-only' // rmdir: succeeds only on an empty directory, the check itself
+  | 'own-name' // the check and the delete act on a name only this caller makes (token + serial)
+  | 'temps-only' // only temporary names unlinked, then rmdir (I3)
+  | 'self-record' // the record's pid is the caller itself (D12, D4): nobody recovers it while the caller stops
+  | 'not-removed' // the branch no longer deletes the name
+  | 'outside' // the ticket queue: the order changes, no owner / <lock> / aside is removed (#4277)
+  | 'check-then-name';
+const NAMED_PATHS = {
+  'undo-after-publish': { pm: 1, impls: ALL, after: 'rename-inode', changed: true },
+  'write-failure-cleanup': { pm: 2, impls: ALL, after: 'rmdir-only', changed: true },
+  'release-as-head-d5': { pm: 3, impls: GRACED, after: 'own-name', changed: true },
+  'empty-owner-reclaim': { pm: 4, impls: ALL, after: 'own-name', changed: true },
+  'dead-holder-recover': { pm: 5, impls: ALL, after: 'own-name', changed: false },
+  'ownerless-cleanup': { pm: 6, impls: GRACED, after: 'temps-only', changed: true },
+  'release-held-d12': { pm: 7, impls: ALL, after: 'self-record', changed: false },
+  'lock-release-missing': { pm: 8, impls: BASH, after: 'not-removed', changed: true },
+  'set-owner-fields': { pm: 9, impls: ['sync'], after: 'self-record', changed: true },
+  'hand-off-publish-d4': { pm: 10, impls: GRACED, after: 'self-record', changed: false },
+  'put-back': { pm: 11, impls: ALL, after: 'link-back', changed: true },
+  'take-back-half-rmdir': { pm: 12, impls: ALL, after: 'rmdir-only', changed: false },
+  'reclaim-own-name': { pm: 12, impls: ALL, after: 'own-name', changed: false },
+  'settle-missing-rmdir': { pm: 13, impls: ALL, after: 'rmdir-only', changed: false },
+  'tickets-mark-done': { pm: null, impls: ALL, after: 'outside', changed: false },
+} as const satisfies Record<string, { pm: number | null; impls: readonly Impl[]; after: NamedForm; changed: boolean }>;
+
+/** setOwnerFields (sync) after round 5: what it answers instead of writing or throwing. */
+const SET_OWNER_FIELDS = {
+  released: false,
+  'token-differs': false,
+  'after-hand-off': false,
+  'lock-gone-enoent': false, // round 5 (PM Claude round 4 P3-3): no longer thrown to merge-pr
+  'write-or-rename-fails': false,
+  written: true,
+} as const satisfies Record<string, boolean>;
+
+describe('Issue #4288 PR1a-f round 5 (design I2-c, §3.1, §7.3): the put-back links, the enumeration is closed', () => {
+  it('I2-c: the put-back of a moved-aside owner links; EEXIST keeps the aside and the <lock>, in all three implementations (F67)', () => {
+    const f = FAILURE_TABLE['F67-put-back-link-exists'];
+    expect([[...f.impls], f.point, f.direction, f.left]).toEqual([['bash', 'sync', 'ts'], 'restore-rename', 'keep', 'aside-kept']);
+    expect(f.results).toEqual({ 'acquire-head-grace': 'refused:rec', 'acquire-head-nograce': 'refused:rec', 'guard-head': 'restore-failed' });
+    expect(f.note).toContain('EEXIST');
+    expect(f.note).toContain('machine-lock-restore-failed');
+    // reached by the TS acquirers, not by a TS guard (there is none)
+    const ts = F_ALL_CASES.filter((c) => c.id === 'F67-put-back-link-exists' && c.impl === 'ts');
+    expect(ts.map((c) => `${c.caller}:${c.unreachable ?? 'reached'}`).sort()).toEqual(['acquire-head-grace:ts-no-grace', 'acquire-head-nograce:reached', 'guard-head:ts-no-guard']);
+    // the put-back point keeps its name (lock-observation-points-4288 pins it)
+    expect(POINTS['restore-rename']).toBe('existing');
+  });
+
+  it('§3.1: every path PM Claude round 4 found is listed, and none checks then deletes or overwrites by name', () => {
+    const found = new Set(Object.values(NAMED_PATHS).map((p) => p.pm).filter((n) => n !== null));
+    expect([...found].sort((a, b) => (a as number) - (b as number))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    for (const [id, p] of Object.entries(NAMED_PATHS)) expect([id, p.after]).not.toEqual([id, 'check-then-name']);
+    // round 5's changes: the put-back links, lock_release's missing branch keeps the <lock>
+    expect(NAMED_PATHS['put-back'].after).toBe('link-back');
+    expect(NAMED_PATHS['lock-release-missing']).toMatchObject({ after: 'not-removed', changed: true });
+    // the tickets are outside not because the name is the caller's own (lock_mark_done retires another
+    // waiter's ticket too) but because a ticket's replacement removes no owner (PM Claude round 4 P3-5)
+    expect(NAMED_PATHS['tickets-mark-done'].after).toBe('outside');
+  });
+
+  it('§3.1: setOwnerFields answers false instead of writing after a hand-off or throwing on a missing <lock> (PM Claude round 4 P3-3)', () => {
+    const answers = Object.entries(SET_OWNER_FIELDS);
+    expect(answers.filter(([, v]) => v).map(([k]) => k)).toEqual(['written']);
+    expect(SET_OWNER_FIELDS['lock-gone-enoent']).toBe(false);
+  });
+
+  describe('the primitive under the put-back, on a real directory (os.tmpdir)', () => {
+    let root: string | null = null;
+    afterEach(() => {
+      if (root !== null) fs.rmSync(root, { recursive: true, force: true });
+      root = null;
+    });
+    /** A <lock> the put-back made, an owner published into it in the window, and the aside's record. */
+    const window = (): { lock: string; gone: string } => {
+      root = fs.mkdtempSync(path.join(os.tmpdir(), 'pr1af-putback-'));
+      const lock = path.join(root, 'x.lock');
+      const gone = path.join(root, 'x.lock.gone-A-1');
+      fs.mkdirSync(lock);
+      fs.mkdirSync(gone);
+      fs.writeFileSync(path.join(gone, 'owner'), '{"token":"R"}\n');
+      fs.writeFileSync(path.join(lock, 'owner'), '{"token":"W"}\n'); // published between the check and the put-back
+      return { lock, gone };
+    };
+
+    it('positive control: round 4\'s rename(gone/owner, <lock>/owner) overwrites the owner published in the window', () => {
+      const { lock, gone } = window();
+      fs.renameSync(path.join(gone, 'owner'), path.join(lock, 'owner'));
+      expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toContain('"R"');
+    });
+
+    it('I2-c: link(gone/owner, <lock>/owner) answers EEXIST and leaves both records (the aside kept, the <lock> not rmdir\'d)', () => {
+      const { lock, gone } = window();
+      let code: string | null = null;
+      try {
+        fs.linkSync(path.join(gone, 'owner'), path.join(lock, 'owner'));
+      } catch (e) {
+        code = (e as NodeJS.ErrnoException).code ?? null;
+      }
+      expect(code).toBe('EEXIST');
+      expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toContain('"W"');
+      expect(fs.readFileSync(path.join(gone, 'owner'), 'utf8')).toContain('"R"');
+    });
+
+    it('negative control: with no owner published, link puts the record back as rename did', () => {
+      const { lock, gone } = window();
+      fs.unlinkSync(path.join(lock, 'owner'));
+      fs.linkSync(path.join(gone, 'owner'), path.join(lock, 'owner'));
+      expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toContain('"R"');
+    });
   });
 });
 
