@@ -13,7 +13,10 @@
  * listed in §3.1, the clock read before and after ps, the writer's version v=1 on new records;
  * round 5: the put-back of a moved-aside owner links instead of renaming over — EEXIST keeps the aside
  * and names it (I2-c, F67) — and §3.1's enumeration closed: lock_release's missing branch keeps the
- * <lock>, setOwnerFields answers false instead of throwing, the rmdir-only and own-name paths).
+ * <lock>, setOwnerFields answers false instead of throwing, the rmdir-only and own-name paths);
+ * round 5 addition (PM decision): the guarantee written under the stop premise P0 (no writer stops past
+ * the grace inside the lock's steps) and P1 (the wall clock) — every `limit` row names the premise it is
+ * outside of (F69-F71 added, not fixed) — and the record's reserved keys refused in the caller's fields (I1-c, F68).
  *
  * UPSTREAM SKELETON (the design stage). This file holds the tables of §2 (T: implementation × owner
  * form × caller × three-valued observation → result; K: the interruption points of an acquisition ×
@@ -33,8 +36,8 @@
  * invariants, and the time-zone witness of §4 on plain numbers.
  *
  * Counts (written in the design §2.5): T 3 implementations × 17 forms × 4 callers × 3 observations =
- * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 67 rows expanded
- * into 310 implementation × caller cases, 39 unreachable, 271 reached. 628 behaviour rows.
+ * 612 cells, 270 unreachable, 342 rows; K 5 points × 3 implementations = 15 rows; F 71 rows expanded
+ * into 331 implementation × caller cases, 42 unreachable, 289 reached. 646 behaviour rows.
  *
  * How the implementation will drive a row (for the implementation contract, not run here):
  *   - a root from fs.mkdtempSync under os.tmpdir(), removed in afterEach; nothing under ~/.commandmate,
@@ -692,6 +695,8 @@ const POINTS = {
   'owner-pid': 'new',
   'owner-undo-rename': 'new',
   'owner-undo-link': 'new',
+  /** Round 5 addition (I1-c): the caller's fields carry a reserved key of the record. */
+  'owner-fields': 'new',
   /** The put-back of a moved-aside owner (§2.7): the name kept, what it observes is link(2) from round 5 (I2-c). */
   'restore-rename': 'existing',
   pid: 'existing',
@@ -740,6 +745,8 @@ interface Limit {
   readonly until: string;
   /** Whom it falls on (I9): `no-v` — only a writer / record without v= (an older copy); `any` — new writers too (a premise). */
   readonly writer: 'no-v' | 'any';
+  /** Which premise is broken (the design's "前提 P0"): P0 a stop past the grace (10 min) inside the lock's steps, P1 the wall clock. */
+  readonly outside: 'P0' | 'P1' | 'P0+P1';
 }
 type FLeft =
   | 'nothing-made'
@@ -779,6 +786,10 @@ const HEADS = <const R extends FAcquire, const G extends FCodeOf<'guard-head'>>(
 
 const UNTIL_OLD_RUNLOCK = '§6.1 1 and 3: PR1b / PR1c merged (no older lib.sh / run-lock.sh writer) and the older worktree copies updated; then (a) no process started before that runs an older copy (ps) and (b) 7 days without a record lacking v=';
 const UNTIL_OLD_VERIFY = '§6.1 2 and 3: the skills port of verify-run.sh published (asked of a human) and the older worktree copies updated; then (a) no process started before that runs an older copy (ps) and (b) 7 days without a record lacking v=';
+
+const UNTIL_RESTART = '§6.1 (c): after the deploy, every process that may have loaded an older copy (agent sessions and their shells, daily / supervisor / resident shells, the server, interactive shells) restarted once (T_RESTART); the ps narrowing (a) and the 7 days (b) are only the best-effort aid';
+const STAYS_P0 = 'stays a premise (P0: no writer stops past the grace inside the lock\'s steps; a lock on mkdir / link / rename alone has no fencing)';
+const STAYS_P1 = 'stays a premise (P1: the wall clock does not change by more than 2 s from the writer\'s start to the end of the reader\'s observation)';
 
 const FAILURE_TABLE = {
   'F1-mkdir-lock': { impls: ALL, point: 'mkdir-lock', direction: 'keep', results: ACQ('refused:unk'), left: 'nothing-made', note: 'EEXIST is not a failure' },
@@ -857,7 +868,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'live-holder-removed',
     note: 'D7: the wall clock stepped back > 2 s between the holder\'s start and its acquisition, and the writer and reader TZ differ (the strings differ): now − etime > started_at + 2 s reads a live holder as reused; so does GNU ps\'s monotonic etime with the clock stepped forward > 2 s after the acquisition. A change between now and ps is F65 (unknown), not this row. Same TZ: the strings match, never reached',
-    limit: { kind: 'premise', until: 'stays a premise (P1; the parent §1.8 treatment, PM Claude PR1c round 3 hand-over B-2)', writer: 'any' },
+    limit: { kind: 'premise', until: 'stays a premise (P1; the parent §1.8 treatment, PM Claude PR1c round 3 hand-over B-2)', writer: 'any', outside: 'P1' },
   },
   'F43-launchd-reader': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: written under env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin (TZ, LC_ALL unset), read with TZ=UTC and TZ=Asia/Tokyo: started_at against etime, alive' },
   'F44-pid-gone-group-alive': { impls: BASH, point: null, direction: 'keep', results: AG_GH('refused:rec', 'kept'), left: 'unchanged', note: 'D7: pgid= and lstart=, the pid gone and G alive: D7 not applied (no such record in production)' },
@@ -872,7 +883,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older run-lock / supervisor.lock writer (no ticket) stopped after its mkdir, before owner.tmp.<pid> (no pid anywhere), past the 10 min grace; the head reclaims the empty <lock> and takes it; resumed, the writer writes its tmp in the successor\'s <lock> and mv -f replaces the owner (codex round 2 P1)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0' },
   },
   'F50-pr1a-writer-ticket-expired': {
     impls: ALL,
@@ -881,7 +892,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a PR1a writer (`: >`, then cat >> by name, rm -f owner by name on failure) alive, its ticket retired at deadline + 60 s, stopped on an empty owner past 10 min; the head reclaims the empty owner and takes it; resumed, it appends to the successor\'s owner (unparsable, nobody removes it) or removes it by name (PM Claude round 2 P2-A)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0' },
   },
   'F51-pre-pid-stop': {
     impls: ALL,
@@ -890,7 +901,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a copy older than PR1a (`printf > owner`, an older cmate-verify) stopped after opening the owner, before its pid is written, past 10 min; the head reclaims the empty owner; resumed, its write lands in the removed inode and it may believe it holds',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0' },
   },
   'F52-old-tmp-pid-reused': { impls: GRACED, point: null, direction: 'keep', results: AG_GH('acquired', 'removed'), left: 'reclaimed', note: 'the pid is alive but started after the tmp mtime + 2 s (from etime): not the writer, the rule takes it out (PM Claude P3-1; round 2 kept it old-taker for ever)' },
   'F53-old-tmp-pid-etime': { impls: GRACED, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'the old tmp pid alive and its ps -o etime= fails or is malformed, or the clock stepped back while it was read / the read took 1 s or more (ECLOCK, as F65)' },
@@ -902,7 +913,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older writer whose wall clock stepped back > 2 s between its start and its tmp write, then stopped between the tmp and its mv past 10 min: F52 reads it as reused and takes the tmp out; resumed, its mv -f fails and its rm -rf "$dir" may remove the successor\'s <lock> (outside P1, while older copies remain)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0+P1' },
   },
   'F56-owner-pid-not-self': { impls: GRACED, point: 'owner-pid', direction: 'keep', results: ACQ('refused:unk'), left: 'nothing-made', note: "round 4, I1-b: LOCK_OWNER_PID / ownerPid not the caller's own pid: refused before the ticket and the mkdir (machine-lock-owner-pid-not-self); another pid is recorded by the hand-off (D4) only" },
   'F57-undo-paused-after-rename': {
@@ -920,7 +931,7 @@ const FAILURE_TABLE = {
     results: ACQ('refused:unk'),
     left: 'two-holders-possible',
     note: 'the link back of .undo-<token> answers EEXIST: an older writer (`: >`, `printf >`) made an owner in the moment the owner was moved: not put back, .undo-<token> kept, machine-lock-undo-restore-failed for a human. A new writer links only into the <lock> it made (in a successor\'s <lock> its tmp is gone: ENOENT, F11)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0' },
   },
   'F59-undo-rename-enoent': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'the owner is no longer there: own tmp removed, no rmdir (the <lock> there is not shown to be ours)' },
   'F60-undo-rename-other': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'another errno: the owner is not removed; own tmp only; named as unknown' },
@@ -944,6 +955,41 @@ const FAILURE_TABLE = {
     results: HEADS('refused:rec', 'restore-failed'),
     left: 'aside-kept',
     note: "round 5 (PM Claude round 4 P2-1): an owner published between the put-back's check (created / ownerless-empty) and its link(gone/owner, <lock>/owner) — EEXIST: not put back, the aside kept, the <lock> not rmdir'd (it holds the publisher's owner); machine-lock-restore-failed <lock>: kept <gone> (EEXIST). Round 4's rename overwrote it. Interrupt after pause:restore-mkdir. A new writer resumed from K1 into that window still makes two holders (I8 (a)'s exception, §8 4)",
+  },
+  'F68-owner-fields-reserved': {
+    impls: GRACED,
+    point: 'owner-fields',
+    direction: 'keep',
+    results: ACQ('refused:unk'),
+    left: 'nothing-made',
+    note: "round 5 addition (codex round 4 P2, PM decision 3; not a premise, so closed): ownerFields (sync, spread last today) / LOCK_OWNER_EXTRA (bash kv, the first line of a key wins, so an extra pgid= beat the section's) carries a reserved key (pid host token acquiredAt/started_at pgid v; sync also lstart done; bash lstart= past its first line): refused before the ticket and the mkdir, machine-lock-owner-field-reserved <lock> key=<k>; setOwnerFields answers false. TS has no such entry (I1-c)",
+  },
+  'F69-new-k1-writer-into-emptied-name': {
+    impls: ALL,
+    point: null,
+    direction: 'limit',
+    results: ACQ('refused:unk'),
+    left: 'two-holders-possible',
+    note: "outside P0 (codex round 4 P2): a new writer C stopped at K1 past 10 min, A recovered and published, A's parent died (F61's order) and B took, C resumed and made its tmp inside B's <lock>, A's undo moved B's owner to .undo-<A> and C linked into the emptied name; A's link back is EEXIST — B and C hold. The put-back's empty <lock> (F67) is the same shape. Named, not fixed",
+    limit: { kind: 'premise', until: STAYS_P0, writer: 'any', outside: 'P0' },
+  },
+  'F70-clock-back-offset-by-reader-stop': {
+    impls: BASH,
+    point: 'etime',
+    direction: 'limit',
+    results: AG_GH('acquired', 'removed'),
+    left: 'live-holder-removed',
+    note: 'D7: outside P1 (codex round 4 P2): start 100 s, acquired 110 s, now_before 1000 s, the clock back to 970 s, BSD etime 870 s, the reader stops 30 s, now_after 1000 s — the difference 0 passes the ECLOCK check and the start reads 130 s > 112 s: a live holder whose lstart string differs (another TZ) is read as reused. Two wall-clock reads cannot bound the real elapsed time. Named, not fixed',
+    limit: { kind: 'premise', until: STAYS_P1, writer: 'any', outside: 'P1' },
+  },
+  'F71-old-writer-in-generic-shell': {
+    impls: ALL,
+    point: null,
+    direction: 'limit',
+    results: HEADS('acquired', 'removed'),
+    left: 'two-holders-possible',
+    note: "outside P0, mixed (codex round 4 P2): an older copy's functions loaded into a generic shell (bash -s, an interactive shell) or node, stopped past 10 min mid-steps (before writing too): the ps narrowing of §6.1 (a) does not see its command, and it writes nothing (b) could see; resumed, it mv -f's / deletes by name the successor's owner (as F49-F51)",
+    limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0' },
   },
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
@@ -1125,13 +1171,13 @@ describe('Issue #4288 PR1a-f tables (design §2.5): shape', () => {
     for (const e of UNREACHABLE) expect(UNREACHABLE_REASONS[(e.cell as Unreachable).unreachable].length).toBeGreaterThan(0);
   });
 
-  it('K has 5 points × 3 implementations = 15 rows, F has 67 rows: 310 implementation × caller cases, 39 unreachable, 271 reached; 628 rows in all', () => {
+  it('K has 5 points × 3 implementations = 15 rows, F has 71 rows: 331 implementation × caller cases, 42 unreachable, 289 reached; 646 rows in all', () => {
     expect(KILL_ROWS).toHaveLength(15);
-    expect(FAILURES).toHaveLength(67);
-    expect(F_ALL_CASES).toHaveLength(310);
-    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(39);
-    expect(F_CASES).toHaveLength(271);
-    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(628);
+    expect(FAILURES).toHaveLength(71);
+    expect(F_ALL_CASES).toHaveLength(331);
+    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(42);
+    expect(F_CASES).toHaveLength(289);
+    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(646);
   });
 
   it('every form and every observation of it is defined', () => {
@@ -1305,6 +1351,9 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
       'F51-pre-pid-stop:mixed',
       'F55-old-tmp-clock-back:mixed',
       'F58-undo-restore-exists:mixed',
+      'F69-new-k1-writer-into-emptied-name:premise',
+      'F70-clock-back-offset-by-reader-stop:premise',
+      'F71-old-writer-in-generic-shell:mixed',
     ]);
     for (const f of limits) {
       expect(f.limit?.until.length).toBeGreaterThan(0);
@@ -1512,6 +1561,109 @@ describe('Issue #4288 PR1a-f round 5 (design I2-c, §3.1, §7.3): the put-back l
       fs.linkSync(path.join(gone, 'owner'), path.join(lock, 'owner'));
       expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toContain('"R"');
     });
+  });
+});
+
+// ------------------------------------------------------------------ the stop premise P0 (PM decision, round 5 addition) and I1-c
+
+/** I1-c: the record's reserved keys a caller's fields may not carry, per implementation (3 rows). */
+const RESERVED_FIELDS = {
+  bash: {
+    entry: 'LOCK_OWNER_EXTRA (kv codec; lock_acquire_path and lock_hand_off)',
+    reserved: ['pid', 'host', 'token', 'started_at', 'pgid', 'v'],
+    lstart: 'one line allowed (D7\'s only entry in the kv record), a second refused',
+    answer: 'refused:unk point=owner-fields errno=EINVAL; hand-off LHO_STAGE=fields',
+  },
+  sync: {
+    entry: 'ownerFields (acquireMachineLockSync) and setOwnerFields',
+    reserved: ['pid', 'host', 'token', 'acquiredAt', 'started_at', 'pgid', 'v', 'lstart', 'done'],
+    lstart: 'refused (no D7 in the sync JS)',
+    answer: "refused (unknown.point 'owner-fields', EINVAL); setOwnerFields false",
+  },
+  ts: {
+    entry: null,
+    reserved: [],
+    lstart: 'no entry',
+    answer: 'unreachable: no caller-supplied fields (an entry added later refuses the same keys, §5)',
+  },
+} as const satisfies Record<Impl, { entry: string | null; reserved: readonly string[]; lstart: string; answer: string }>;
+
+/** Today's record assembly (machine-lock-sync.mjs:877): the caller's fields spread last. */
+const syncRecordToday = (pid: number, token: string, fields: Record<string, unknown>) => ({ pid, host: 'h', token, acquiredAt: 1, ...fields });
+/** bash kv today: lock_format_owner prints pid/host/token/started_at, then LOCK_OWNER_EXTRA, then pgid; the parser keeps a key's first line. */
+const kvParseFirstWins = (lines: string[]): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const l of lines) {
+    const k = l.slice(0, l.indexOf('='));
+    if (!(k in out)) out[k] = l.slice(l.indexOf('=') + 1);
+  }
+  return out;
+};
+/** I1-c's check (the model the implementation contract drives). */
+const reservedKeyOf = (impl: Impl, keys: readonly string[]): string | null => {
+  const r = RESERVED_FIELDS[impl].reserved as readonly string[];
+  const hit = keys.find((k) => r.includes(k));
+  if (hit !== undefined) return hit;
+  if (impl === 'bash' && keys.filter((k) => k === 'lstart').length > 1) return 'lstart';
+  return null;
+};
+
+describe('Issue #4288 PR1a-f the stop premise P0 (design "前提 P0", §7.4): the guarantee under P0, outside it named, I1-c closed', () => {
+  it('every limit row says which premise it is outside of; the mixed ones are a special case of P0', () => {
+    const limits = F_ROWS.filter((f) => f.direction === 'limit');
+    expect(limits).toHaveLength(9);
+    for (const f of limits) expect([f.id, ['P0', 'P1', 'P0+P1'].includes(f.limit?.outside as string)]).toEqual([f.id, true]);
+    for (const f of limits.filter((r) => r.limit?.kind === 'mixed')) expect([f.id, f.limit?.outside.startsWith('P0')]).toEqual([f.id, true]);
+    expect(Object.fromEntries(limits.map((f) => [f.id, f.limit?.outside]))).toEqual({
+      'F42-clock-back': 'P1',
+      'F49-old-k1-resumed': 'P0',
+      'F50-pr1a-writer-ticket-expired': 'P0',
+      'F51-pre-pid-stop': 'P0',
+      'F55-old-tmp-clock-back': 'P0+P1',
+      'F58-undo-restore-exists': 'P0',
+      'F69-new-k1-writer-into-emptied-name': 'P0',
+      'F70-clock-back-offset-by-reader-stop': 'P1',
+      'F71-old-writer-in-generic-shell': 'P0',
+    });
+  });
+
+  it('codex round 4\'s three crossings are outside rows, one each, not fixed (F69 new writers too, F70 the clock, F71 ended by the restart)', () => {
+    expect(FAILURE_TABLE['F69-new-k1-writer-into-emptied-name'].limit).toMatchObject({ kind: 'premise', writer: 'any', outside: 'P0' });
+    expect(FAILURE_TABLE['F70-clock-back-offset-by-reader-stop'].limit).toMatchObject({ kind: 'premise', writer: 'any', outside: 'P1' });
+    expect([...FAILURE_TABLE['F70-clock-back-offset-by-reader-stop'].impls]).toEqual(['bash']);
+    expect(FAILURE_TABLE['F71-old-writer-in-generic-shell'].limit).toMatchObject({ kind: 'mixed', writer: 'no-v', outside: 'P0' });
+    expect(FAILURE_TABLE['F71-old-writer-in-generic-shell'].limit.until).toContain('restarted');
+    expect(FAILURE_TABLE['F71-old-writer-in-generic-shell'].limit.until).toContain('best-effort');
+    // F70's numbers: the difference of the two wall-clock reads is 0, yet the computed start is past started_at + 2 s
+    const nowBefore = 1000_000;
+    const etime = 870_000;
+    const nowAfter = 1000_000;
+    expect(nowAfter - nowBefore < 0 || nowAfter - nowBefore >= 1000).toBe(false); // passes the ECLOCK check
+    expect(nowBefore - etime > 110_000 + 2000).toBe(true); // read as reused: the row the premise names
+  });
+
+  it('I1-c: the reserved keys are refused in the three implementations\' rows (F68, TS has no entry)', () => {
+    const f = FAILURE_TABLE['F68-owner-fields-reserved'];
+    expect([[...f.impls], f.point, f.direction, f.left]).toEqual([['bash', 'sync'], 'owner-fields', 'keep', 'nothing-made']);
+    expect(f.results).toEqual({ 'acquire-head-grace': 'refused:unk', 'acquire-head-nograce': 'refused:unk' });
+    for (const k of ['pid', 'token', 'pgid', 'v', 'host']) {
+      expect([k, reservedKeyOf('bash', [k]), reservedKeyOf('sync', [k])]).toEqual([k, k, k]);
+    }
+    expect(RESERVED_FIELDS.ts.entry).toBeNull();
+    expect(SET_OWNER_FIELDS['written']).toBe(true);
+  });
+
+  it('positive control: today the caller\'s fields reach the reserved keys (sync spreads them last; bash kv keeps an extra pgid= before the section\'s)', () => {
+    expect(syncRecordToday(process.pid, 'T0', { pid: 999_999 }).pid).toBe(999_999);
+    const kv = kvParseFirstWins(['pid=100', 'host=h', 'token=T0', 'started_at=2026-11-11T00:00:00Z', 'pgid=4242', 'pgid=100']);
+    expect(kv.pgid).toBe('4242');
+  });
+
+  it('negative control: the fields the callers pass today are not reserved (merge-pr phase / repo / base, supervisor lstart= label= run_dir=)', () => {
+    expect(reservedKeyOf('sync', ['phase', 'repo', 'base'])).toBeNull();
+    expect(reservedKeyOf('bash', ['lstart', 'label', 'run_dir'])).toBeNull();
+    expect(reservedKeyOf('bash', ['lstart', 'lstart'])).toBe('lstart');
+    expect(reservedKeyOf('sync', ['lstart'])).toBe('lstart');
   });
 });
 
