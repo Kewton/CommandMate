@@ -99,6 +99,16 @@ Merge main back into develop (-s ours, restores ancestry)
 
    > **Note**: `git log origin/main..origin/develop` reports far more commits than reality because of squashing (e.g. 136 commits for a 15-file diff). **The tree diff (`git diff`) is authoritative.**
 
+### Step 0.5: Reconcile the slash-command catalog
+
+Before bumping the version, bring the built-in slash-command catalog up to date with each CLI's authoritative source (Issues #1489 / #2026). Two jobs — **do not mix them**:
+
+- **A. Add commands to the catalog (machine)**: `npm run catalog:refresh -- --write` rewrites `src/config/slash-commands-catalog.json` and `locales/{en,ja}/worktree.json`. The ja strings are placeholders prefixed `[要レビュー]`, so review the release PR diff by hand.
+- **B. Re-attest (humans only)**: rewrite `commands` / `version` / `observedAt` in `src/config/slash-commands-attestations.json` by actually reading the source. This is deliberately not something a machine does.
+- Applying A alone puts the catalog ahead of the attestation, and `tests/unit/lib/standard-commands.test.ts` fails with "in the catalog but not attested". **That is the review gate, not a defect — do not loosen the test's expectation.**
+
+The commands themselves live in [Phase 1.5 of the `/release` skill](../../.claude/skills/release/SKILL.md), which is the source of truth.
+
 ### Step 1: Determine Version
 
 ```bash
@@ -172,6 +182,21 @@ Conventions:
 - Omit category headings that have no entries (`apply` never emits a section without fragments)
 
 See [`templates/changelog-entry.md`](../../.claude/skills/release/templates/changelog-entry.md) for details.
+
+### Step 3a: The landing page's release line (website/index.html)
+
+The LP carries the release line as static markup, directly under the prereq line (Issue #2552 — no API call at page load). Rewrite that one line on every release.
+
+```html
+<p class="release-line">vX.Y.Z · released YYYY-MM-DD · N+ releases</p>
+```
+
+- Take the date from the `## [X.Y.Z] - YYYY-MM-DD` heading Step 3 wrote into CHANGELOG (do not re-derive it in JST — that would make two sources of truth)
+- `N` is the total number of Releases. Add the one you are about to create and round down to ten (`N+` is a lower-bound approximation)
+- `tests/unit/website/landing-page.test.ts` matches the version against `package.json`'s `version` and the date against the CHANGELOG heading, so forgetting this fails `npm run test:unit`
+- v0.51.0 missed this and had to be fixed after the fact (commit 418c9d22d)
+
+The commands themselves live in [step 2-2a of the `/release` skill](../../.claude/skills/release/SKILL.md), which is the source of truth.
 
 ### Step 3b: Write release-notes/X.Y.Z.json
 
