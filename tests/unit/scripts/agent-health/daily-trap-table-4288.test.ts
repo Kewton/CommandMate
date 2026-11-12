@@ -455,7 +455,14 @@ const OTHER_SIGNAL_ROWS: Row[] = OTHER.flatMap((signal): Row[] => {
         column: signal,
         cell:
           section === 'A1'
-            ? { kind: 'same', as: `A0 × ${signal}`, why: 'trap の前の既定の死でロックも無い（A0 と同じ状態）' }
+            ? {
+                kind: 'same',
+                as: `A0 × ${signal}`,
+                why:
+                  signal === 'QUIT'
+                    ? 'trap の前の QUIT は bash の版で異なる（3.2 は既定の死、5 以上は QUIT を無視して通常の終わり）。ロックも無く A0 と同じ状態'
+                    : 'trap の前の既定の死でロックも無い（A0 と同じ状態）',
+              }
             : section === 'C3'
               ? { kind: 'same', as: 'C3 × TERM', why: 'fork の窓は駆動できない。handler は TERM と同じ形' }
               : { kind: 'same', as: `${section}p1 × TERM`, why: `${signal} の handler は TERM と同じ形（無視を張ってから exit ${code}）。emit の点の規則は TERM の行と同じ` },
@@ -513,6 +520,8 @@ TRAP_TABLE.push(...R_SIG_ROWS);
 // still drives its cell (陰性対照; before pr1b-9, C7p1 sent at the echo with run.ts not started yet: ENOENT fake-out).
 // pr1b-10: a send that does not wait for them comes out 判定不能 (陽性対照) by a gate, not by the clock: the fake npx is
 // held (holdRunTs) until after the send, and C4 is sent while the main shell is paused before `tmp` (sendAt).
+/** pr1b-13: the mark the fake npx leaves when its hold ran out before the release */
+const HOLD_TIMEOUT = 'hold-timeout';
 const C7_OK_ECHO = 'AGENT_HEALTH_SYNC status=ok*';
 const STAGE_CONTROL_ROWS: Row[] = [
   {
@@ -830,7 +839,10 @@ describe(`#4288 PR1b, daily.sh driven at every cell of the trap table (bash ${BA
       path.join(root, 'bin', 'npx'),
       `#!/bin/bash
 if [ -n "\${CM_T_NPX_DELAY:-}" ]; then sleep "$CM_T_NPX_DELAY"; fi
-if [ -n "\${CM_T_NPX_HOLD:-}" ]; then i=0; while [ ! -e "$CM_T_NPX_HOLD" ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done; fi
+# pr1b-13: the hold has a cap (CM_T_NPX_HOLD_LIMIT steps of 0.05 s, ~60 s) only so a run cannot hang; reaching it is not a
+# release: run.ts is not started (no run-ts.started, no FAKE_OUT), the mark hold-timeout is left and the fake ends 97,
+# and the row fails by that name (the gate of the control broke) instead of opening the gate by the clock
+if [ -n "\${CM_T_NPX_HOLD:-}" ]; then i=0; while [ ! -e "$CM_T_NPX_HOLD" ] && [ $i -lt "\${CM_T_NPX_HOLD_LIMIT:-1200}" ]; do sleep 0.05; i=$((i+1)); done; if [ ! -e "$CM_T_NPX_HOLD" ]; then : > "$CM_T_GATE/hold-timeout"; exit 97; fi; fi
 { echo "TOKEN=$CM_RUN_LOCK_TOKEN"; echo "PID=$$"; } > "$FAKE_OUT"
 : > "$CM_T_GATE/run-ts.started"
 if [ -n "\${FAKE_LEAVE_DEAF:-}" ]; then ( trap '' TERM; exec sleep 3600 ) >/dev/null 2>&1 </dev/null & echo $! > "$FAKE_OUT.member"; : > "$CM_T_GATE/run-ts.ended"; exit \${FAKE_EXIT:-0}; fi
@@ -992,6 +1004,9 @@ exit \${FAKE_EXIT:-0}
       if (last && signals.length > 0) {
         // the marks of the child that the cell's stage needs (run.ts started / ended) — not waited by the control
         if (stage && d.noWait !== 'child') for (const mark of stage.present) await until(path.join(gate, mark));
+        // pr1b-13, the mutant of the hold's cap (run by hand with CM_T_NPX_HOLD_LIMIT made small): the send comes after
+        // the hold ran out, the way a send later than ~60 s would — the row must fail by the name hold-timeout
+        if (d.holdRunTs && process.env.CM_T_MUTANT_SEND_AFTER_HOLD === '1') await until(path.join(gate, HOLD_TIMEOUT), 60_000);
         send('first', stage, signals);
         if (d.holdRunTs) fs.writeFileSync(release, '');
       }
@@ -1066,6 +1081,13 @@ exit \${FAKE_EXIT:-0}
           `${JSON.stringify({ row: rowName(row), bash: version, red: !!cell.red, undecidable: !!cell.undecidable, stage: firstStage(row), sent: outcome.sent, lines: outcome.lines, code: outcome.code, signal: outcome.signal, lockLeft: fs.existsSync(lockDir), expectFor: cell.expectFor ?? null })}\n`
         );
       }
+      // pr1b-13: the fake npx's hold ran out before the release (the send came later than its cap): the gate of the
+      // control broke. Not green and not 判定不能 — a failure by that name (run.ts was not started)
+      if (fs.existsSync(path.join(gate, HOLD_TIMEOUT))) {
+        throw new Error(
+          `${HOLD_TIMEOUT}: ${rowName(row)} — 対照の仕組みの失敗（偽の npx の hold が解除の前に上限に届いた。run.ts は起動していない: run-ts.started=${fs.existsSync(path.join(gate, 'run-ts.started'))}）`
+        );
+      }
       // the stage of each send (pr1b-9): a send off the cell's stage drove another cell — 判定不能, never compared
       const off = outcome.sent.filter((s) => s.off !== null).map((s) => `${s.at}: ${s.off}`);
       if (cell.undecidable) {
@@ -1081,6 +1103,12 @@ exit \${FAKE_EXIT:-0}
           failure = error;
         }
         expect(failure, 'the copy with a part of the fix taken out met the fixed outcome: the control does not show the defect').toBeDefined();
+        // pr1b-13: what the control was red on (the first assertion that differed), so a report says whether it is red
+        // for the defect it shows, on each bash
+        if (process.env.CM_T_REPORT) {
+          const why = failure instanceof Error ? failure.message : String(failure);
+          fs.appendFileSync(process.env.CM_T_REPORT, `${JSON.stringify({ row: rowName(row), bash: BASH_UNDER_TEST, redBecause: why.slice(0, 600) })}\n`);
+        }
         return;
       }
       await check(outcome, cell.expect, cell.drive, row);
