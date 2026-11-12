@@ -51,6 +51,45 @@ export type MemCloseWhen =
 
 export type MemCloseWhenType = MemCloseWhen['type'];
 
+/**
+ * Every type the grammar knows, in the order of the table (§2.3). This and the two tables below
+ * are `lib/mem/close-when`'s (re-exported there), kept here so the CLI can read them (#4227 G-PR4).
+ */
+export const CLOSE_WHEN_TYPES: readonly MemCloseWhenType[] = [
+  'replaced',
+  'manual',
+  'issue',
+  'pr',
+  'branch',
+  'relay',
+  'worktree',
+  'session',
+  'at',
+];
+
+/** §2.3: which kind takes which type. The fixture holds the same table. */
+export const CLOSE_WHEN_ALLOWED: Readonly<Record<MemKind, ReadonlySet<MemCloseWhenType>>> = {
+  now: new Set(['replaced', 'issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
+  waiting: new Set(['issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
+  decision: new Set(['issue', 'pr', 'branch', 'at']),
+  next: new Set(['manual', 'issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
+  external: new Set(['manual', 'issue', 'pr', 'branch', 'at']),
+  note: new Set(['manual', 'at']),
+};
+
+/**
+ * What an omitted condition means per kind. `null`: required. `promoted`: the
+ * decision default, stored as NULL and closed only by its transitions (§3.2).
+ */
+export const CLOSE_WHEN_DEFAULTS: Readonly<Record<MemKind, 'replaced' | 'manual' | 'promoted' | null>> = {
+  now: 'replaced',
+  waiting: null,
+  decision: 'promoted',
+  next: null,
+  external: null,
+  note: 'manual',
+};
+
 /** Who an item belongs to (§12.3). */
 export interface MemItemOwner {
   repositoryId: string;

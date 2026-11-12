@@ -10,12 +10,15 @@
  * `lib/mem/close-when` (`CLOSE_WHEN_DEFAULTS` / `CLOSE_WHEN_ALLOWED` / `CLOSE_WHEN_TYPES`), not copied;
  * each kind's example is run through the CLI and `parseCloseWhen` in
  * `tests/unit/cli/commands/handoff-template-close-when-4227.test.ts`. Times are written `+09:00`.
+ * Which kinds require it is said by the one generated line of `./close-when-kinds` (g9f), the same
+ * text the CLI's help and the guides carry; no list of kinds is written here.
  *
  * @module lib/handoff/template
  */
 
 import { CLOSE_WHEN_ALLOWED, CLOSE_WHEN_DEFAULTS, CLOSE_WHEN_TYPES } from '@/lib/mem/close-when';
 import { MEM_EXIT_BY_CODE, MEM_KINDS, type MemCloseWhenType, type MemKind } from '@/types/mem';
+import { closeWhenKindsText } from './close-when-kinds';
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,10 +63,11 @@ function exampleFor(kind: ProposeKind): string {
 }
 
 function kindLines(): string[] {
+  const { required } = closeWhenKindsText();
   return PROPOSE_KINDS.map((kind) => {
     const fallback = CLOSE_WHEN_DEFAULTS[kind];
     const rule =
-      fallback === null
+      required.includes(kind)
         ? `--close-when は必須（付けないと propose は終了コード ${MEM_EXIT_BY_CODE.invalid_close_when}）`
         : `--close-when は省略可（省略すると ${fallback === 'promoted' ? '決定の既定' : fallback}）`;
     const types = [...CLOSE_WHEN_TYPES].filter((type) => CLOSE_WHEN_ALLOWED[kind].has(type));
@@ -82,6 +86,7 @@ export function handoffRequestText(requestId: string, deadline: Date): string {
     `[CommandMate: 終了の前の引き継ぎの依頼 request=${requestId} 期限=${jstIso(deadline)}]`,
     'このセッションを終える前に、mem の更新を「提案」として出してください。確定は人が画面で行います。',
     `- 追加:  commandmate handoff propose --request ${requestId} add --kind <kind> --text "…" --close-when <cond>`,
+    closeWhenKindsText().ja,
     ...kindLines(),
     formsLine(deadline),
     `- 更新:  commandmate handoff propose --request ${requestId} update <itemId> --base-version <v> --text "…"`,

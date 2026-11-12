@@ -26,6 +26,10 @@ import { ApiClient, ApiError } from '../utils/api-client';
 import { TOKEN_WARNING } from '../utils/command-helpers';
 import { resolveSessionIdentity } from './whoami';
 import { MEM_EXIT_BY_CODE, MEM_KINDS, type MemErrorCode } from '../../types/mem';
+// Relative, no `@/`: the CLI build resolves no alias. The kinds that need --close-when come from here only (#4227 G9).
+import { closeWhenKindsText } from '../../lib/handoff/close-when-kinds';
+
+const CLOSE_WHEN_KINDS = closeWhenKindsText();
 
 const HANDOFF_HELP = `
 Used when CommandMate's screen asks this agent, before its session ends, to propose its
@@ -35,8 +39,8 @@ writes it against the item's version. Approving, cancelling and ending are the s
 Target: inside a CommandMate session, your own instance (whoami). In an ordinary shell,
 name it: --worktree <id> --instance <id>.
 
---close-when of "propose add": required for kind waiting / next / external (without it: exit 2,
-nothing stored); optional for decision / note. The values a kind takes are in "mem --help".
+${CLOSE_WHEN_KINDS.en}
+The values a kind takes are in "mem --help".
 
 Exit codes:
   0   done
@@ -236,7 +240,7 @@ export function createHandoffCommand(): Command {
       .option('--kind <kind>', `Kind: ${MEM_KINDS.filter((kind) => kind !== 'now').join(', ')}`)
       .option('--text <text>', 'Text')
       .option('--stdin', 'Read the text from stdin')
-      .option('--close-when <cond>', 'When it closes (required for waiting / next / external)')
+      .option('--close-when <cond>', CLOSE_WHEN_KINDS.option)
       .option('--evidence <ref>', 'Evidence path (repeatable)', collect)
       .option('--promote-to <dest>', 'Where a decision is reflected'),
     'here-or-before'
