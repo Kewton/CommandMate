@@ -268,7 +268,7 @@ export function validateSendModel(
   // Issue #2771 adds claude, on antigravity's terms rather than copilot's:
   // `claude --model` is a launch flag, and the in-session switch is the very
   // `/model` trap named above. So it is honoured when this send STARTS the
-  // session and refused when the session is already running — see below.
+  // session and refused when the session is already running — see `refuseModelOnRunningSession` in send-session-start.ts.
   if (model) {
     // model is only supported for copilot, antigravity and claude
     if (cliToolId !== 'copilot' && cliToolId !== 'antigravity' && cliToolId !== 'claude') {

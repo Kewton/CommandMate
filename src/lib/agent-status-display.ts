@@ -25,7 +25,9 @@ export interface HeaderInstanceItem<T> {
 }
 
 /**
- * Issue #3593: the header's session field is [current session][N others ▾][+].
+ * Issue #3593 / #4218: the header's session field is the current session's pill
+ * in the identity group; the sessions list ("≡ N sessions ▾") and the "+" sit
+ * in the right-hand controls.
  *
  * The current session is the one the selected split shows — the worktree
  * screen keeps `activeInstanceId` equal to it on PC. An id the roster does not
@@ -46,7 +48,7 @@ export function resolveCurrentInstanceId<T extends { id: string }>(
 }
 
 /**
- * Issue #3593: the "N others" list — every instance but the current one, the
+ * Issue #3593: the sessions list's other rows — every instance but the current one, the
  * ones waiting for an answer (`waiting`, the amber prompt) first, then roster
  * order. Stable, so two waiting instances keep their roster order.
  */

@@ -67,7 +67,7 @@ export function answerSendFailure(
   input: SendFailureInput,
 ): NextResponse | Promise<NextResponse> {
   const { cliTool, worktreeId: id, instanceId, sendAttemptInstance, ownAttempt, sendStartedAt, trimmedContent } = input;
-  // Issue #2865: checked above as well; this is the send service's own
+  // Issue #2865: checked in route.ts (handleSend) as well; this is the send service's own
   // refusal (the session changed hands in between, or the row vanished).
   if (result.stage === 'foreign_session') {
     return NextResponse.json(
@@ -90,9 +90,9 @@ export function answerSendFailure(
     );
   }
   // Issue #3006: the session this request (or one just before it) launched
-  // has not shown its input prompt yet. Answered exactly as a slow start
-  // above is — 503 + SESSION_STARTING, message unwrapped — so the CLI and
-  // dispatch read one "still starting, retry" whichever step noticed it.
+  // has not shown its input prompt yet. Answered exactly as a slow start is
+  // (`answerSessionStartTimeout`, send-session-start.ts) — 503 + SESSION_STARTING,
+  // message unwrapped — so the CLI and dispatch read one "still starting, retry" whichever step noticed it.
   if (result.code === SESSION_STARTING_CODE) {
     return answerSessionStartTimeout(result.error, cliTool, id, instanceId);
   }

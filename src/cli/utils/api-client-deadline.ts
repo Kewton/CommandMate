@@ -7,7 +7,7 @@ import { WaitExitCode } from '../types';
 import { ApiError, withServerUrl } from './api-client-errors';
 
 /**
- * A request ended by the deadline of a client from {@link ApiClient.withDeadline}
+ * A request ended by the deadline of a client from `ApiClient.withDeadline` (api-client.ts)
  * (Issue #3983).
  *
  * An `ApiError` with exit 124 so that the commands' own error handling reports

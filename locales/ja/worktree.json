@@ -1,6 +1,5 @@
 {
   "agentStatus": {
-    "overflowTrigger": "他のエージェント",
     "sessions": "セッション {count}",
     "sessionsLabel": "セッション {count} 件",
     "sessionsWaitingLabel": "セッション {count} 件（うち {waiting} 件が応答待ち）",

@@ -67,11 +67,13 @@
   次に選んだ並び順を使う。エージェントごとの最終活動時刻は無いので「更新日時」はブランチの
   `updatedAt`。並び順が「ステータス」のときだけ、状態の段が向き（要対応が先／後）に従う
 - **次アクション**: `getNextAction()`（`src/lib/session/next-action-helper.ts`）は
-  辞書キー（`nextAction.*`）を返す。サイドバー行では `waiting` と `awaitingInstruction` の
-  ときだけ**インライン表示**し（hover 限定はタッチ端末で永久に不可視になるため）、
-  それ以外はツールチップにのみ出す
-- **`awaitingInstruction`**: タスク完了・次の指示待ちは amber ではなく**緑バッジ**
-  （`awaitingInstruction.badge`）でサイドバー行と PC の worktree 詳細ヘッダーに出す。
+  辞書キー（`nextAction.*`）を返す。サイドバーの行は 1 行なので、次アクションは**選択中の行**に
+  2 行目として出し、選択していない行ではツールチップにのみ出す。hover できない端末
+  （`hover: none`。ツールチップが開かない）に限り、`waiting` と `awaitingInstruction` の
+  2 状態だけは選択の有無によらず行に出す（`branchNextActionClass()`）
+- **`awaitingInstruction`**: タスク完了・次の指示待ちは amber ではなく緑で出す。サイドバー行では
+  行の右の**緑のチェック印**（文言 `awaitingInstruction.badge` はスクリーンリーダーと title）、
+  PC の worktree 詳細ヘッダーでは現在のセッションの札の右に**緑のバッジ**。
   「待たせている」と「待っている」を色で取り違えさせない
 
 ### 表示の適用範囲（Issue #1078 で統一済み）
