@@ -18,7 +18,7 @@
  * Based on Issue #13 UX Improvement design specification.
  */
 
-import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useCallback, useMemo, useState, useRef, useSyncExternalStore } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
@@ -108,6 +108,15 @@ import {
   type HandoffOpeningToken,
   type SessionStopResult,
 } from '@/lib/handoff/close-rule';
+import {
+  handoffRegistrySnapshot,
+  isCurrentHandoffRegistration,
+  registerHandoffPage,
+  reportHandoffPageAuth,
+  subscribeHandoffRegistry,
+  unregisterHandoffPage,
+  type HandoffPageRegistration,
+} from '@/lib/handoff/page-registration';
 import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
@@ -442,6 +451,29 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * the /login HTML ("Unexpected token <").
    */
   const [isAuthExpired, setIsAuthExpired] = useState(false);
+  /**
+   * Issue #4317 PR1 (`@/lib/handoff/page-registration`): this page's registration for the hand-off
+   * dialog — a new identity per mount and per worktree (StrictMode's setup → cleanup → setup makes
+   * two), apart from the opening's token. Its cleanup removes its own only. `null` until the
+   * effect has run: the dialog is drawn but starts nothing meanwhile.
+   */
+  const [handoffRegistration, setHandoffRegistration] = useState<HandoffPageRegistration | null>(null);
+  const handoffRegistrationRef = useRef<HandoffPageRegistration | null>(null);
+  useEffect(() => {
+    const registration = registerHandoffPage(worktreeId);
+    handoffRegistrationRef.current = registration;
+    setHandoffRegistration(registration);
+    return () => {
+      unregisterHandoffPage(registration);
+      if (handoffRegistrationRef.current === registration) handoffRegistrationRef.current = null;
+    };
+  }, [worktreeId]);
+  /**
+   * Issue #4317 PR1: the session's expiry as the registry holds it over the pages. A page mounted
+   * while it is expired starts with its own `isAuthExpired` false (and its Retry sets it false
+   * before reading); neither is a recovery. Only the current page's authenticated read clears it.
+   */
+  const handoffRegistry = useSyncExternalStore(subscribeHandoffRegistry, handoffRegistrySnapshot, handoffRegistrySnapshot);
   /**
    * Bumped at the end of every poll cycle (Issue #1816).
    *
@@ -931,6 +963,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       cancelDetailRetry();
       setIsReconnecting(false);
       setIsAuthExpired(false);
+      // Issue #4317 PR1: an authenticated read of this page — a recovery only while it is the current page.
+      reportHandoffPageAuth(handoffRegistrationRef.current, 'authenticated');
       setError(null);
       return data;
     } catch (err) {
@@ -951,6 +985,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Branch first so the raw parse message never reaches the screen.
       if (status === 401) {
         setIsAuthExpired(true);
+        // Issue #4317 PR1: held over the pages (a page made next starts with its own false).
+        reportHandoffPageAuth(handoffRegistrationRef.current, 'expired');
         setIsReconnecting(false);
         setError(null);
         return null;
@@ -2042,6 +2078,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   }, [worktreeId]);
   const openEnd = useCallback(async (target: SessionKillTarget): Promise<void> => {
     if (endReadingRef.current !== null) return;
+    // Issue #4317 PR1: the press belongs to this page's registration; a page not registered (yet,
+    // or any more) or not the current one opens nothing.
+    const registration = handoffRegistrationRef.current;
+    if (!isCurrentHandoffRegistration(registration)) return;
     // pr2d (PM Claude pr2c P3-2): a hand-off that holds something is not replaced by another
     // "end" (asked again after the read, which may take seconds).
     if (handoffTargetRef.current !== null && askHandoffClose('page-end') !== null) return;
@@ -2062,6 +2102,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (endReadingRef.current === reading) endReadingRef.current = null;
     }
     if (startedFor !== worktreeIdRef.current) return;
+    // Issue #4317 PR1: checked again after the mode's read — the worktree id alone does not tell an
+    // old page (unmounted, or made again) from the one now registered with the same id.
+    if (!isCurrentHandoffRegistration(registration)) return;
     if (attended) {
       // pr2d (PM Claude pr2c P3-2 (b)): a kill in flight keeps its confirmation (Issue #1171),
       // and the hand-off does not open over it (before, both were open).
@@ -2620,6 +2663,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handoffTarget,
     closeHandoff,
     stopForHandoff,
+    handoffRegistration,
+    /**
+     * Issue #4317 PR1: the dialog is not drawn (unmounted, never hidden with `isOpen={false}`): this
+     * page's own 401, or the expiry the registry holds over the pages until the current page's
+     * authenticated read.
+     */
+    handoffAuthExpired: isAuthExpired || handoffRegistry.authExpired,
     isKillPending,
     handleLoadContent,
     handleLoadError,
