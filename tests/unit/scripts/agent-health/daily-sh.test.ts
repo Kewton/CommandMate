@@ -19,6 +19,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const SCRIPT = path.resolve(__dirname, '../../../../scripts/agent-health/daily.sh');
 const RUN_LOCK = path.resolve(__dirname, '../../../../scripts/uat/run-lock.sh');
+const MACHINE_LOCK = path.resolve(__dirname, '../../../../scripts/lib/machine-lock.sh');
+const VERIFY_RUN = path.resolve(__dirname, '../../../../.claude/skills/cmate-verify/scripts/verify-run.sh');
 
 let root: string;
 let origin: string;
@@ -93,6 +95,13 @@ beforeEach(() => {
   fs.copyFileSync(SCRIPT, path.join(seed, 'scripts', 'agent-health', 'daily.sh'));
   fs.mkdirSync(path.join(seed, 'scripts', 'uat'), { recursive: true });
   fs.copyFileSync(RUN_LOCK, path.join(seed, 'scripts', 'uat', 'run-lock.sh'));
+  // run-lock.sh loads the machine-wide lock (Issue #4288 PR1b): scripts/lib/machine-lock.sh, which cuts the
+  // lock section out of the cmate-verify runner. A rig, not an expectation: without them the lock would be
+  // "not loaded" and daily.sh would report that instead of the lock it is meant to take.
+  fs.mkdirSync(path.join(seed, 'scripts', 'lib'), { recursive: true });
+  fs.copyFileSync(MACHINE_LOCK, path.join(seed, 'scripts', 'lib', 'machine-lock.sh'));
+  fs.mkdirSync(path.join(seed, '.claude', 'skills', 'cmate-verify', 'scripts'), { recursive: true });
+  fs.copyFileSync(VERIFY_RUN, path.join(seed, '.claude', 'skills', 'cmate-verify', 'scripts', 'verify-run.sh'));
   fs.writeFileSync(path.join(seed, 'package-lock.json'), '{"lockfileVersion":3}\n');
   fs.writeFileSync(path.join(seed, 'README.md'), 'seed\n');
   git(seed, 'add', '.');

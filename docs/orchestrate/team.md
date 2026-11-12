@@ -59,6 +59,7 @@ PM が素の `commandmate send` を打つことを仕組みで止めるのは未
 UAT はジャッジ（`claude-2`）が行い、結果はジャッジ → PM → 開発リーダーの順で返す。不合格の修正ループ（`/uat-fix-loop`）は開発リーダーが回す。
 修正ループ内の再UAT（`/uat-fix-loop` の Step 5 の `/uat`）と全 Issue の回帰確認も同じで、開発リーダーが自分で `/uat` を回さず、PM 経由でジャッジに頼み結果を待つ。
 開発リーダー以外の人が 1 人で `/orchestrate` を回す場合（今の運用）は、`orchestrate.md` の Phase 7 の手順のままでよい。
+UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1b を含む develop を取り込んでから起こす（`scripts/uat/run-server.sh` は各 worktree のチェックアウトのものを使うので、取り込む前の worktree は旧い run-lock のまま取り合い、混在の間は旧い `up` が新しい `up` のロックを pid だけで死んだと読んで取ることがある。設計は `docs/design/run-lock-machine-lock-4288.md` と `docs/design/lock-reservation-rest-4288.md` §1.9）。
 
 ## 6. 直しとレビューを収束させる規則
 
