@@ -295,7 +295,7 @@ describe('ask --agent <tool> alone: the send, the wait and the read all address 
   it('falls back to command-code\'s own pane, not the default\'s, when no turn row lands', async () => {
     startServer({
       claude: { doneAt: NOW - 60_000, pane: 'the default claude pane' },
-      'command-code': { doneAt: NOW + 5_000, pane: '> Reply with exactly: OK short\nOK short' },
+      'command-code': { doneAt: NOW + 5_000, pane: 'OK short' },
     });
 
     await runAsk(['Reply with exactly: OK short', '--agent', 'command-code', '--json']);

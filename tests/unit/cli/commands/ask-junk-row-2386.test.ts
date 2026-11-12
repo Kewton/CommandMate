@@ -292,7 +292,7 @@ describe('ask: the reply carries no control characters (Issue #2386)', () => {
     mockRoutes({
       cliToolId: 'copilot',
       messages: () => [],
-      pane: `> hi\n${ESC}[32mcopilot said this${ESC}[0m\n`,
+      pane: `${ESC}[32mcopilot said this${ESC}[0m\n`,
     });
 
     await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
@@ -319,7 +319,7 @@ describe("ask: CommandMate's own rows are not the agent's answer (Issue #2386)",
           timestamp: new Date(NOW + 1_000).toISOString(),
         }),
       ],
-      pane: '> hi\ncopilot said this\n',
+      pane: 'copilot said this\n',
     });
 
     await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
@@ -341,7 +341,7 @@ describe("ask: CommandMate's own rows are not the agent's answer (Issue #2386)",
           timestamp: new Date(NOW + 1_000).toISOString(),
         }),
       ],
-      pane: '> hi\ncopilot said this\n',
+      pane: 'copilot said this\n',
     });
 
     await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
