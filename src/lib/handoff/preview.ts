@@ -2,7 +2,7 @@
  * G-3's preview: what the screen shows before the first send after a boundary (Issue #4227
  * G-PR3, design `docs/design/mem-ui-4227.md` §3.1・§3.1.1・§3.2).
  *
- * `GET /api/worktrees/:id/mem/screen/start-preview?instance=` answers whether to ask
+ * `GET /api/worktrees/:id/mem/start-preview?instance=` answers whether to ask
  * (`show`: attended (`popup`), mode `on` / `derived`, `injectOnStart`, a `pending` boundary)
  * and three lines: the open items, the questions waiting for a person, the last update.
  * A read: no boundary, notice or reservation is taken or used (the list's condition
@@ -145,6 +145,15 @@ export interface StartPreviewDeps {
   brief?: BriefBuildDeps;
 }
 
+/**
+ * Issue #4227 G-PR6: how many times the preview is built again when the boundary changed while
+ * its lines were read. Past this the preview is not answered (the screen sends nothing and says
+ * so) rather than shown for a boundary that is no longer the one the send would carry.
+ */
+export const START_PREVIEW_MAX_BUILDS = 3;
+
+type PreviewTarget = { mode: string; popup: boolean; injectOnStart: boolean };
+
 /** The preview of `instanceId`'s next send on the worktree (design §3.1). A read. */
 export async function handoffStartPreview(
   db: Database.Database,
@@ -154,45 +163,67 @@ export async function handoffStartPreview(
 ): Promise<MemOutcome> {
   if (!instanceId || !isInstanceId(instanceId)) return memError('invalid_request', { field: 'instance' });
   if (!getWorktreeById(db, worktreeId)) return memError('not_found');
-  const target = await withMemTarget(db, { via: 'worktree', worktreeId }, deps.mem ?? {}, (resolved) =>
-    resolved.ok ? { mode: resolved.mode, popup: resolved.features.popup, injectOnStart: resolved.features.injectOnStart } : null
-  );
-  if (!target || target.mode === 'off') return { status: 200, body: { ok: true, show: false } satisfies StartPreviewResponse };
-  if (!target.popup) return { status: 200, body: { ok: true, show: false, attended: false } satisfies StartPreviewResponse };
-  if (!target.injectOnStart) {
-    // design §0.0 S-F: with `injectOnStart` false D1 attaches nothing whatever is chosen.
-    return { status: 200, body: { ok: true, show: false, attended: true, injectOnStart: false } satisfies StartPreviewResponse };
-  }
-  const current = getCurrentBoundary(db, worktreeId, instanceId);
-  if (!current || current.state !== 'pending') {
-    return { status: 200, body: { ok: true, show: false, attended: true, injectOnStart: true, mode: target.mode } satisfies StartPreviewResponse };
-  }
-  let preview: StartPreviewLines | null = null;
-  try {
-    // One build of C (its own pinned lifetimes; `on` evaluates the conditions once, as a read).
-    const briefed = await briefForRoute(db, worktreeId, { instance: instanceId, budget: null, format: 'json', all: '1' }, deps.brief ?? { target: deps.mem });
-    if (briefed.status === 200) {
-      const json = briefed.body as BriefJson;
-      let lines: Pick<StartPreviewLines, 'open' | 'lastUpdatedAt'> | null = null;
-      if (target.mode === 'on') {
-        lines = openLinesOfBrief(json);
-      } else {
-        const listed = await memList(db, { via: 'worktree', worktreeId }, {}, deps.mem ?? {});
-        if (listed.status === 200) lines = openLinesOf(listed.body as MemListResponse);
-      }
-      if (lines) preview = { ...lines, humanQuestions: classifyHumanQuestions(json, worktreeId, instanceId) };
+  const readTarget = (): Promise<PreviewTarget | null> =>
+    withMemTarget(db, { via: 'worktree', worktreeId }, deps.mem ?? {}, (resolved) =>
+      resolved.ok ? { mode: resolved.mode, popup: resolved.features.popup, injectOnStart: resolved.features.injectOnStart } : null
+    );
+  // G-PR6 (design §3.2): the lines are read across awaits (C's build, A's list), and a boundary
+  // can open, be used or be superseded meanwhile. After the read the target and the boundary are
+  // read again; when either changed the preview is made again for what is current now — never
+  // the old boundary's id on lines read for it, never the new id on the old lines.
+  for (let build = 0; build < START_PREVIEW_MAX_BUILDS; build += 1) {
+    const target = await readTarget();
+    if (!target || target.mode === 'off') return { status: 200, body: { ok: true, show: false } satisfies StartPreviewResponse };
+    if (!target.popup) return { status: 200, body: { ok: true, show: false, attended: false } satisfies StartPreviewResponse };
+    if (!target.injectOnStart) {
+      // design §0.0 S-F: with `injectOnStart` false D1 attaches nothing whatever is chosen.
+      return { status: 200, body: { ok: true, show: false, attended: true, injectOnStart: false } satisfies StartPreviewResponse };
     }
-  } catch {
-    preview = null;
+    const mode = target.mode as 'on' | 'derived';
+    const current = getCurrentBoundary(db, worktreeId, instanceId);
+    if (!current || current.state !== 'pending') {
+      return { status: 200, body: { ok: true, show: false, attended: true, injectOnStart: true, mode } satisfies StartPreviewResponse };
+    }
+    let preview: StartPreviewLines | null = null;
+    try {
+      // One build of C (its own pinned lifetimes; `on` evaluates the conditions once, as a read).
+      const briefed = await briefForRoute(db, worktreeId, { instance: instanceId, budget: null, format: 'json', all: '1' }, deps.brief ?? { target: deps.mem });
+      if (briefed.status === 200) {
+        const json = briefed.body as BriefJson;
+        let lines: Pick<StartPreviewLines, 'open' | 'lastUpdatedAt'> | null = null;
+        if (mode === 'on') {
+          lines = openLinesOfBrief(json);
+        } else {
+          const listed = await memList(db, { via: 'worktree', worktreeId }, {}, deps.mem ?? {});
+          if (listed.status === 200) lines = openLinesOf(listed.body as MemListResponse);
+        }
+        if (lines) preview = { ...lines, humanQuestions: classifyHumanQuestions(json, worktreeId, instanceId) };
+      }
+    } catch {
+      preview = null;
+    }
+    const after = getCurrentBoundary(db, worktreeId, instanceId);
+    const targetAfter = await readTarget();
+    const settled =
+      after !== null &&
+      after.id === current.id &&
+      after.state === 'pending' &&
+      targetAfter !== null &&
+      targetAfter.mode === target.mode &&
+      targetAfter.popup === target.popup &&
+      targetAfter.injectOnStart === target.injectOnStart;
+    if (!settled) continue;
+    const body: StartPreviewResponse = {
+      ok: true,
+      show: true,
+      attended: true,
+      injectOnStart: true,
+      mode,
+      boundary: { id: current.id, kind: current.kind },
+      preview,
+    };
+    return { status: 200, body };
   }
-  const body: StartPreviewResponse = {
-    ok: true,
-    show: true,
-    attended: true,
-    injectOnStart: true,
-    mode: target.mode,
-    boundary: { id: current.id, kind: current.kind },
-    preview,
-  };
-  return { status: 200, body };
+  // The boundary kept changing under the read: not answered (the screen keeps the draft).
+  return memError('state_forbids', { reason: 'boundary_unsettled' });
 }

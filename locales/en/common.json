@@ -578,7 +578,7 @@
     "featureHelp": {
       "injectOnStart": "Attach a short summary (brief) to the first send after a session boundary (start, reset, resume).",
       "promptOnEvents": "After an action (a PR, a merge), prompt the agent to update mem.",
-      "popup": "Attended: on a branch with mode on, \"end\" shows the hand-off (approve the agent's proposals, then a person presses stop). The screen that asks when a session opens does not appear yet. Off (the default) is unattended. Separate from auto-yes."
+      "popup": "Attended: on a branch with mode on, \"end\" shows the hand-off (approve the agent's proposals, then a person presses stop). On a branch with mode on or derived and injectOnStart on, the first plain send after a boundary (start, reset, resume) asks how much of the hand-off to read first (opening the screen alone does not ask; a command is never asked about). Off (the default) is unattended. Separate from auto-yes."
     },
     "items": {
       "open": "View items",
@@ -827,6 +827,8 @@
       "updated": "Last updated: {at}",
       "updatedNone": "Last updated: no record",
       "previewFailed": "Could not read the preview.",
+      "checkFailed": "Could not check whether to ask about the hand-off, so nothing was sent (your message is still in the box).",
+      "retry": "Try again",
       "short": "Read the short brief",
       "full": "Read it all",
       "decline": "Don't read this time",

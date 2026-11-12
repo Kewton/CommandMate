@@ -578,7 +578,7 @@
     "featureHelp": {
       "injectOnStart": "セッションの境界（起動・reset・resume）の最初の送信に、短い要約（brief）を付けます。",
       "promptOnEvents": "操作（PR・マージなど）の後に、mem を更新するよう Agent に促します。",
-      "popup": "対話：オンで mode が on のブランチでは、「終了」が引き継ぎ（Agent の提案を承認してから人が停止を押す）を出します。開始の確認の画面はまだ出ません。オフ（既定）は無人です。auto-yes とは別の設定です。"
+      "popup": "対話：オンで mode が on のブランチでは、「終了」が引き継ぎ（Agent の提案を承認してから人が停止を押す）を出します。mode が on か derived で injectOnStart がオンのブランチでは、境界（起動・reset・resume）の後の最初の通常の送信の前に、引き継ぎをどれだけ読むかを聞きます（画面を開いただけでは出ません。コマンドの送信では聞きません）。オフ（既定）は無人です。auto-yes とは別の設定です。"
     },
     "items": {
       "open": "項目を見る",
@@ -827,6 +827,8 @@
       "updated": "最終更新：{at}",
       "updatedNone": "最終更新：記録なし",
       "previewFailed": "preview を取れませんでした。",
+      "checkFailed": "引き継ぎを読むかどうかの確認を取れなかったため、送っていません（本文は入力欄に残しています）。",
+      "retry": "もう一度",
       "short": "短い要約を読む",
       "full": "全文を読む",
       "decline": "今回は読まない",

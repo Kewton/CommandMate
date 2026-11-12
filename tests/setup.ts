@@ -372,6 +372,28 @@ delete process.env.CM_VAPID_SUBJECT;
 // Covers only the Vitest suite, not the other steps of `commandmate verify`.
 const testDatabase = isolateTestDatabaseEnv(process.env);
 
+// Issue #4227 G-PR6: every plain send of the composer (`MessageInput`) now reads the start
+// preview afresh and sends NOTHING when it cannot be read (design `mem-ui-4227.md` §3.2). In
+// jsdom the real `fetchStartPreview` cannot be read (a relative URL), so a composer test that
+// never asked about the hand-off would see every send held. The default is the server's answer
+// for an unattended branch (popup 0) — `{ ok: true, show: false, attended: false }` — and only
+// `fetchStartPreview` is replaced; every other export of the module is the real one. A test of the
+// choice itself mocks it explicitly; the default counts its calls on
+// `globalThis.__cmDefaultStartPreviewCalls` so such a test can assert it never leaned on it
+// (`MessageInput-start-brief-4227`). No unit test exercises the real `fetchStartPreview`
+// (`git grep screen-client -- tests`); one that does takes it with `vi.importActual`.
+vi.mock('@/lib/handoff/screen-client', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/handoff/screen-client')>('@/lib/handoff/screen-client');
+  return {
+    ...actual,
+    fetchStartPreview: vi.fn(async () => {
+      const marks = globalThis as { __cmDefaultStartPreviewCalls?: number };
+      marks.__cmDefaultStartPreviewCalls = (marks.__cmDefaultStartPreviewCalls ?? 0) + 1;
+      return { ok: true as const, show: false as const, attended: false };
+    }),
+  };
+});
+
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({
   useTranslations: (namespace?: string) => {
