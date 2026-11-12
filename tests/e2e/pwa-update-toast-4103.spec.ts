@@ -23,6 +23,7 @@ import { test, expect, type Locator, type Page, type Route } from '@playwright/t
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
 import { Z_INDEX } from '@/config/z-index';
 import { getTerminalSplitsStorageKey } from '@/config/terminal-split-config';
+import { mockStartPreview } from './fixtures/start-preview-helpers';
 
 const WORKTREE_ID = 'e2e-pwa-update-toast-4103';
 const PC_VIEWPORT = { width: 1280, height: 800 } as const;
@@ -163,6 +164,7 @@ async function mockApi(page: Page, { relays = { open: [], held: [] }, prompt, ro
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /** See the file header. Returns a counter of how many served scripts had the guard. */

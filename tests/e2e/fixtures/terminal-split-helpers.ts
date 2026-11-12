@@ -18,6 +18,7 @@
  */
 
 import type { Page, Route } from '@playwright/test';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Unique worktree IDs scoped to these specs (must not collide with other
  *  e2e specs that reuse generic IDs like `test-worktree`). */
@@ -214,6 +215,7 @@ export async function mockWorktreeApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /** sessionStorage guard key: ensures the localStorage clear runs only on the

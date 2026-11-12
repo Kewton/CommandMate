@@ -31,6 +31,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Page, Route } from '@playwright/test';
 import { getTerminalSplitsStorageKey } from '../../../src/config/terminal-split-config';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Worktree id scoped to the #3999 spec (must not collide with other specs). */
 export const E2E_PLAN_REVIEW_WORKTREE = 'e2e-plan-review-3999';
@@ -242,6 +243,7 @@ export async function mockPlanReviewApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
   return mock;
 }
 

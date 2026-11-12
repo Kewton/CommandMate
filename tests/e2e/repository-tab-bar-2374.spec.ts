@@ -19,6 +19,7 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import { mockStartPreview } from './fixtures/start-preview-helpers';
 
 /** localStorage key for the desktop sidebar's open state (Issue #2374 Phase 1). */
 const SIDEBAR_OPEN_KEY = 'mcbd-sidebar-open';
@@ -133,6 +134,7 @@ async function stubWorktrees(page: Page, worktrees: StubWorktree[]): Promise<voi
 
     return route.continue();
   });
+  await mockStartPreview(page);
 }
 
 /** Repository names in the order the strip paints them. */
