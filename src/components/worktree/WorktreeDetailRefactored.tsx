@@ -738,17 +738,24 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // kept over the page's Loading (a first read of another worktree, a page made again): keyed
   // beside the content, it is the same instance whichever branch below draws the content. It
   // never kills by itself: its stop runs `stopForHandoff`, the existing stop, from its handler.
+  // While the session is expired it is not drawn (G10b, codex P2-1): the modal would cover the
+  // re-login button and trap the focus, and an unknown decide refuses to close. It is left
+  // unmounted, not hidden with `isOpen={false}` (a hidden dialog closes its opening). The opening
+  // and its units stay in the store; once the page recovers (a read succeeds), the dialog mounts
+  // again for the same opening and target, and makes or sends nothing again.
   const withHandoff = (content: React.ReactNode): React.ReactElement => (
     <>
       <Fragment key="content">{content}</Fragment>
-      <SessionHandoffDialog
-        key="handoff"
-        isOpen={handoffTarget !== null}
-        worktreeId={worktreeId}
-        target={handoffTarget}
-        onClose={closeHandoff}
-        onStop={stopForHandoff}
-      />
+      {!isAuthExpired && (
+        <SessionHandoffDialog
+          key="handoff"
+          isOpen={handoffTarget !== null}
+          worktreeId={worktreeId}
+          target={handoffTarget}
+          onClose={closeHandoff}
+          onStop={stopForHandoff}
+        />
+      )}
     </>
   );
 

@@ -823,46 +823,74 @@ test.describe('G10: the hand-off dialog stays over the layout switch and the Loa
  * - (b) a cache miss with the first read held: A is not in the list and its detail waits, so the
  *   page stays in its Loading through every sample;
  * - (c) the route's own transition held: the page's RSC request waits {@link ROUTE_HOLD_MS}, so
- *   for that time A's page does not exist yet (the route's `loading.tsx`, no dialog). G10 does not
- *   close this window; it is measured, not widened (a host outside the page is another decision).
+ *   for that time A's page does not exist yet (the route's `loading.tsx`, no dialog).
  *
- * The samples are taken in the browser at fixed times from the push (no `toBeVisible`, which
- * would wait the gap away) and written to the test's annotations. (b) is asserted at all three;
- * the 100ms of (a) and (c) is recorded only (the window before the page exists, which G10's 案 1
- * does not close — whether to widen is the PM's decision).
+ * G10b (PM's decision, codex P2-2): the point is that **once drawn, the dialog does not go away**.
+ * From the push to 3s the dialogs are counted in the browser every {@link SAMPLE_EVERY_MS}ms (no
+ * `toBeVisible`, which would wait a gap away). The invariant asserted in (a)(b)(c): after the first
+ * sample with a dialog there is no sample without one (0 transitions 1→0), one dialog at most, and
+ * one by 1s. The value at 100ms is **recorded, not asserted** in (a) and (c): it is a known gap
+ * (in dev the route's load and its Suspense come before the page exists), noted in the test's
+ * annotations — if it becomes 1 the note changes, so it is noticed. (b) asserts 100ms too.
  */
-test.describe('G10 (G-PR4): back on the worktree, sampled at 100ms・1s・3s after the push (dev, StrictMode)', () => {
+test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after the push (dev, StrictMode)', () => {
   test.use({ viewport: { width: 1280, height: 900 } });
   const ROUTE_HOLD_MS = 500;
-  const SAMPLE_AT = [100, 1000, 3000] as const;
+  const SAMPLE_EVERY_MS = 50;
+  const SAMPLE_UNTIL_MS = 3000;
 
   type Sample = { at: number; elapsed: number; dialogs: number; path: string };
+  type Summary = {
+    samples: Sample[];
+    /** The `at` of the first sample with a dialog (null: never). */
+    firstOneAt: number | null;
+    /** How many times a sample without a dialog follows one with a dialog. */
+    backToZero: number;
+    maxDialogs: number;
+    at100: number;
+    at1000: number;
+    at3000: number;
+  };
 
-  /** Pushes to `to` and counts the dialogs at {@link SAMPLE_AT} from the push, in the page. */
-  async function pushAndSample(page: Page, to: string): Promise<Sample[]> {
-    return page.evaluate(
-      async ({ to, at }) => {
+  /** Pushes to `to` and counts the dialogs every {@link SAMPLE_EVERY_MS}ms to {@link SAMPLE_UNTIL_MS}, in the page. */
+  async function pushAndSample(page: Page, to: string): Promise<Summary> {
+    const samples = await page.evaluate(
+      async ({ to, every, until }) => {
         const router = (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router;
-        const samples: { at: number; elapsed: number; dialogs: number; path: string }[] = [];
+        const out: { at: number; elapsed: number; dialogs: number; path: string }[] = [];
         const start = performance.now();
         router.push(to);
         await new Promise<void>((resolve) => {
-          for (const ms of at) {
+          for (let ms = every; ms <= until; ms += every) {
             setTimeout(() => {
-              samples.push({
+              out.push({
                 at: ms,
                 elapsed: Math.round(performance.now() - start),
                 dialogs: document.querySelectorAll('[data-testid="handoff-dialog"]').length,
                 path: location.pathname,
               });
-              if (samples.length === at.length) resolve();
+              if (ms === until) resolve();
             }, ms);
           }
         });
-        return samples;
+        return out;
       },
-      { to, at: [...SAMPLE_AT] },
+      { to, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS },
     );
+    samples.sort((x, y) => x.at - y.at);
+    const first = samples.find((sample) => sample.dialogs >= 1);
+    let backToZero = 0;
+    for (let i = 1; i < samples.length; i++) if (samples[i - 1].dialogs >= 1 && samples[i].dialogs === 0) backToZero++;
+    const valueAt = (at: number): number => samples.find((sample) => sample.at === at)?.dialogs ?? -1;
+    return {
+      samples,
+      firstOneAt: first ? first.at : null,
+      backToZero,
+      maxDialogs: Math.max(...samples.map((sample) => sample.dialogs)),
+      at100: valueAt(100),
+      at1000: valueAt(1000),
+      at3000: valueAt(3000),
+    };
   }
 
   /** A waiting for the agent, then B for 4 seconds (no unit: B does not show A's), then back. */
@@ -876,10 +904,33 @@ test.describe('G10 (G-PR4): back on the worktree, sampled at 100ms・1s・3s aft
     expect(await page.getByTestId('handoff-dialog').count()).toBe(0);
   }
 
-  function record(name: string, samples: Sample[]): void {
-    const line = samples.map((s) => `${s.at}ms(${s.elapsed}ms ${s.path})=${s.dialogs}`).join(' ');
+  function record(name: string, summary: Summary): void {
+    const line =
+      `first=${summary.firstOneAt}ms 1→0=${summary.backToZero} max=${summary.maxDialogs} ` +
+      `100ms=${summary.at100} 1s=${summary.at1000} 3s=${summary.at3000} | ` +
+      summary.samples.map((s) => `${s.at}:${s.dialogs}`).join(' ');
     test.info().annotations.push({ type: `G10 ${name}`, description: line });
     console.log(`[G10 ${name}] ${line}`);
+  }
+
+  /** The invariant of (a)(b)(c): once drawn it stays; one dialog; drawn by 1s and at 3s. */
+  function expectStays(summary: Summary): void {
+    expect(summary.backToZero).toBe(0);
+    expect(summary.maxDialogs).toBeLessThanOrEqual(1);
+    expect(summary.firstOneAt).not.toBeNull();
+    expect(summary.firstOneAt as number).toBeLessThanOrEqual(1000);
+    expect(summary.at1000).toBe(1);
+    expect(summary.at3000).toBe(1);
+  }
+
+  /** The 100ms of (a) and (c): recorded, never asserted (a known gap; a note that changes when it is 1). */
+  function noteKnownGap(name: string, summary: Summary): void {
+    const description =
+      summary.at100 === 0
+        ? `known gap (not asserted): 100ms=0, first at ${summary.firstOneAt}ms — in dev the route's load and its Suspense come before the page exists`
+        : `100ms=${summary.at100}: the known gap did not show in this run; if it holds, the note and the design's G10 line can go`;
+    test.info().annotations.push({ type: `G10 ${name} 100ms`, description });
+    console.log(`[G10 ${name} 100ms] ${description}`);
   }
 
   function nothingMadeAgain(server: Server): void {
@@ -888,21 +939,18 @@ test.describe('G10 (G-PR4): back on the worktree, sampled at 100ms・1s・3s aft
     expect(server.kills).toEqual([]);
   }
 
-  test('(a) a cache hit: measured at 100ms・1s・3s', async ({ context, page }) => {
+  test('(a) a cache hit: once drawn the dialog stays (sampled every 50ms to 3s)', async ({ context, page }) => {
     const server = await stubServer(context);
     server.second = true;
     await waitingThenAway(page, server);
-    const samples = await pushAndSample(page, `/worktrees/${WT}`);
-    record('(a) cache hit', samples);
-    // The first local run (2026-11-12, 3 workers) had 0 at 100ms (112ms, the URL already A's): the
-    // route's RSC request and the whole PC page's first render under StrictMode come before the
-    // page's first commit (the unit test fixes that the first commit has the dialog). Recorded,
-    // not asserted, as (c); after that the dialog is there.
-    expect(samples.slice(1).map((s) => s.dialogs)).toEqual([1, 1]);
+    const summary = await pushAndSample(page, `/worktrees/${WT}`);
+    record('(a) cache hit', summary);
+    noteKnownGap('(a) cache hit', summary);
+    expectStays(summary);
     nothingMadeAgain(server);
   });
 
-  test('(b) a cache miss, the first read held through the samples: one dialog over the Loading at 100ms・1s・3s', async ({ context, page }) => {
+  test('(b) a cache miss, the first read held through the samples: one dialog over the Loading, from 100ms, staying', async ({ context, page }) => {
     const server = await stubServer(context);
     let hold: Promise<void> | null = null;
     let release: () => void = () => undefined;
@@ -922,16 +970,17 @@ test.describe('G10 (G-PR4): back on the worktree, sampled at 100ms・1s・3s aft
     hold = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const samples = await pushAndSample(page, `/worktrees/${WT}`);
-    record('(b) cache miss, first read held', samples);
+    const summary = await pushAndSample(page, `/worktrees/${WT}`);
+    record('(b) cache miss, first read held', summary);
     release();
     hold = null;
-    expect(samples.map((s) => s.dialogs)).toEqual([1, 1, 1]);
+    expectStays(summary);
+    expect(summary.at100).toBe(1);
     await expect(page.getByTestId('handoff-state')).toBeVisible();
     nothingMadeAgain(server);
   });
 
-  test(`(c) the route's transition held ${ROUTE_HOLD_MS}ms: measured at 100ms・1s・3s`, async ({ context, page }) => {
+  test(`(c) the route's transition held ${ROUTE_HOLD_MS}ms: once drawn the dialog stays (sampled every 50ms to 3s)`, async ({ context, page }) => {
     const server = await stubServer(context);
     server.second = true;
     let holding = false;
@@ -944,12 +993,11 @@ test.describe('G10 (G-PR4): back on the worktree, sampled at 100ms・1s・3s aft
     );
     await waitingThenAway(page, server);
     holding = true;
-    const samples = await pushAndSample(page, `/worktrees/${WT}`);
+    const summary = await pushAndSample(page, `/worktrees/${WT}`);
     holding = false;
-    record(`(c) route held ${ROUTE_HOLD_MS}ms`, samples);
-    // While the route is held A's page does not exist yet (案 1 does not close this window; the
-    // 100ms sample is recorded above, not asserted). After the page is made, it is drawn.
-    expect(samples.slice(1).map((s) => s.dialogs)).toEqual([1, 1]);
+    record(`(c) route held ${ROUTE_HOLD_MS}ms`, summary);
+    noteKnownGap(`(c) route held ${ROUTE_HOLD_MS}ms`, summary);
+    expectStays(summary);
     nothingMadeAgain(server);
   });
 });
