@@ -336,6 +336,25 @@ function classifyKillFailure(err: unknown): 'ended' | 'refused' | 'errored' | 's
   return err.status >= 400 ? 'refused' : 'silent';
 }
 
+/**
+ * Issue #4227 G10 (design §4.1.1): the store's live opening a page of `worktreeId` takes back —
+ * this worktree's own (with or without a unit), or another worktree's while it holds a decide
+ * being sent or unknown. Another worktree's opening without a unit is not taken (its stop or
+ * cancel ends by its own answer). Reads the store only: the page's first render and its effect
+ * ask the same condition.
+ */
+function handoffTakeBackOf(worktreeId: string): { worktreeId: string; target: SessionKillTarget; token: HandoffOpeningToken } | null {
+  const live = handoffStoreSnapshot().opening;
+  if (live === null || live.closed) return null;
+  const liveTool = live.target.cliToolId;
+  if (liveTool === undefined || !isCliToolType(liveTool)) return null;
+  if (live.worktreeId !== worktreeId) {
+    const units = handoffUnitsOf(live.worktreeId);
+    if (units.inflight === null && units.pending === null) return null;
+  }
+  return { worktreeId: live.worktreeId, target: { ...live.target, cliToolId: liveTool }, token: live.token };
+}
+
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
   const isMobile = useIsMobile();
   // Issue #874: ref mirror so the message/output fetchers (which read state via
@@ -1930,11 +1949,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * readable) opens the plain confirmation as before. The hand-off never kills: its stop
    * button runs {@link stopForHandoff}, the existing stop, from its handler only.
    */
-  const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(null);
+  /**
+   * G10 (G-PR4, the UAT of G-PR3 (差し戻し 4)): a page made anew (Next keys it by `[id]`, AppShell
+   * draws it under another parent for PC and phone) starts from the opening it would take back
+   * ({@link handoffTakeBackOf}, the effect's own condition) instead of from nothing, so the dialog
+   * is drawn by the first render rather than after the effect. Read once per mount (React's
+   * StrictMode may run it twice: it reads only — nothing begins, closes or patches in render).
+   */
+  const [initialHandoff] = useState(() => handoffTakeBackOf(worktreeId));
+  const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(initialHandoff?.target ?? null);
   /** Mirrors `handoffTarget` for the paths below, read in the same tick. */
-  const handoffTargetRef = useRef<SessionKillTarget | null>(null);
+  const handoffTargetRef = useRef<SessionKillTarget | null>(initialHandoff?.target ?? null);
   /** pr2f: the opening {@link openHandoff} began; the page's closes name it (never a newer one). */
-  const handoffOpeningRef = useRef<HandoffOpeningToken | null>(null);
+  const handoffOpeningRef = useRef<HandoffOpeningToken | null>(initialHandoff?.token ?? null);
   /**
    * Issue #4227 pr2d (design §4.1.1): the page's only way of closing the hand-off. It asks the
    * one rule (`closeHandoffOpening`, which asks `askHandoffClose`) with the path's name: while the
@@ -1983,18 +2010,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     handoffEffectWorktreeRef.current = worktreeId;
     const live = handoffStoreSnapshot().opening;
     // pr3c: this worktree's live opening, already taken back by this page (StrictMode's second
-    // run, or back on the opening's own worktree): nothing to do — never closed by the rerun.
+    // run, or back on the opening's own worktree; G10: or by the first render's initial state):
+    // nothing to do — never closed by the rerun.
     if (live !== null && !live.closed && live.worktreeId === worktreeId && handoffTargetRef.current !== null && handoffOpeningRef.current === live.token) return;
-    const liveTool = live?.target.cliToolId;
-    const liveUnits = live === null ? null : handoffUnitsOf(live.worktreeId);
-    const takeBack =
-      live !== null &&
-      !live.closed &&
-      (live.worktreeId === worktreeId || (liveUnits !== null && (liveUnits.inflight !== null || liveUnits.pending !== null)));
-    if (handoffTargetRef.current === null && takeBack && liveTool !== undefined && isCliToolType(liveTool)) {
+    const back = handoffTakeBackOf(worktreeId);
+    if (handoffTargetRef.current === null && back !== null) {
       if (!closeHandoffBy('page-end')) return;
-      openHandoff({ ...live.target, cliToolId: liveTool }, live.token);
-      if (live.worktreeId === worktreeId) return;
+      openHandoff(back.target, back.token);
+      if (back.worktreeId === worktreeId) return;
     }
     // pr2d: a switch of worktree asks the rule too. Kept, the dialog shows that it is another
     // worktree's and runs nothing of it here but the unit's drop and closing. pr3c: asked only

@@ -39,6 +39,7 @@ import {
   type MemPurgeResponse,
   type MemWriteResponse,
 } from '../../types/mem';
+import { closeWhenKindsText } from '../../lib/handoff/close-when-kinds';
 import { isMemSuggestHookEvent, MEM_SUGGEST_HOOK_EVENTS, type MemSuggestResponse } from '../../types/mem-suggest';
 
 const MEM_HELP = `
@@ -49,7 +50,7 @@ Target: inside a CommandMate session, your own instance (whoami). In an ordinary
 name it: --worktree <id> --instance <id> for writes; --worktree <id>, or
 --repository <id> --branch <name>, for list / mode / purge.
 
---close-when (required for waiting / next / external):
+${closeWhenKindsText().memHelp}
   manual | replaced (now only) | issue:[host/owner/repo]#N | pr:[host/owner/repo]#N[?state=merged|closed]
   branch:<name>?merged=<ref>[&scope=local|remote] | branch:<name>?deleted
   relay:<id> | worktree:<id> | session:task:<id> | session:verify:<run id> |
@@ -419,7 +420,7 @@ export function createMemCommand(): Command {
       .requiredOption('--kind <kind>', MEM_KINDS.filter((kind) => kind !== 'now').join(' | '))
       .option('--text <text>', 'The text')
       .option('--stdin', 'Read the text from stdin')
-      .option('--close-when <cond>', 'When it closes (required for waiting / next / external)')
+      .option('--close-when <cond>', closeWhenKindsText().option)
       .option('--promote-to <dest>', 'Where a decision is to be recorded: path:<rel> | issue:#N | pr:#N')
       .option('--quote <words>', "An agent's quotation of what was said (with --quote-at)")
       .option('--quote-at <ts>', 'When it was said: ISO 8601 with an offset')
