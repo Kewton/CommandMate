@@ -393,6 +393,16 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   useEffect(() => {
     messageRef.current = message;
   }, [message]);
+  // G-PR6 (codex P2-1・P2-5): what a send waiting on its preview checks again after the wait —
+  // the attached image (removed, replaced, added) and a plan review that began meanwhile.
+  const attachedImagePathRef = useRef<string | null>(null);
+  const planReviewActiveRef = useRef(false);
+  useEffect(() => {
+    attachedImagePathRef.current = attachedImage?.path ?? null;
+  }, [attachedImage]);
+  useEffect(() => {
+    planReviewActiveRef.current = !!planReviewActive;
+  }, [planReviewActive]);
   /**
    * Read the preview of this composer's target now. `current` is false when the target changed or
    * the composer went away while it was read; the cache takes the value only under the rule above.
@@ -548,9 +558,23 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           setBriefChecking(false);
         }
       }
-      // Superseded (the target changed, the composer went, a newer attempt) — or the draft was
-      // edited while the preview was read: nothing is sent, the draft is as it is now.
-      if (!read.current || attempt !== sendAttemptRef.current || messageRef.current.trim() !== trimmed) return;
+      // Superseded (the target changed, the composer went, a newer attempt) — or the draft (its
+      // text or its image) was changed while the preview was read: nothing is sent, the draft is
+      // as it is now.
+      if (
+        !read.current ||
+        attempt !== sendAttemptRef.current ||
+        messageRef.current.trim() !== trimmed ||
+        attachedImagePathRef.current !== (attachedImage?.path ?? null)
+      ) {
+        return;
+      }
+      // A plan review that began while the preview was read stops the send, as one up before it
+      // does (Issue #3999): the draft stays.
+      if (planReviewActiveRef.current) {
+        setPlanReviewStopped(true);
+        return;
+      }
       if (!read.value) {
         setBriefCheckFailed(true);
         return;

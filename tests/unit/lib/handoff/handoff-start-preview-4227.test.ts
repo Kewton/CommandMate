@@ -318,6 +318,33 @@ describe.each(['on', 'derived'] as const)('G-PR6 mode %s: the boundary changes w
     // rule inside its one pinned request, not the preview building again.)
   });
 
+  it('A → B while the target is resolved again after the lines (P2-3): 409 boundary_changed, never A', async () => {
+    const a = openPending();
+    const base = world.deps();
+    const inner = base.observe!;
+    let calls = 0;
+    let trigger = Number.POSITIVE_INFINITY;
+    const mem = {
+      ...base,
+      observe: async (path: string) => {
+        calls += 1;
+        if (calls === trigger) openPending(); // B opens while this (the last) observe is awaited
+        return inner(path);
+      },
+    };
+    // Baseline: how many times the preview resolves the target (its last one is the final re-read).
+    const baseline = await handoffStartPreview(world.db, 'wt-1', 'claude', { mem, brief: world.briefDeps() });
+    expect(baseline.body).toMatchObject({ ok: true, show: true, boundary: { id: a } });
+    const total = calls;
+    calls = 0;
+    trigger = total;
+    const outcome = await handoffStartPreview(world.db, 'wt-1', 'claude', { mem, brief: world.briefDeps() });
+    expect(boundaryState(a)).toBe('superseded');
+    expect(outcome.status).toBe(409);
+    expect(outcome.body).toMatchObject({ ok: false, code: 'boundary_changed' });
+    expect(JSON.stringify(outcome.body)).not.toContain(a);
+  });
+
   it('negative: nothing changes under the read — one build, the boundary as it was', async () => {
     const a = openPending();
     const held = heldStateReader();

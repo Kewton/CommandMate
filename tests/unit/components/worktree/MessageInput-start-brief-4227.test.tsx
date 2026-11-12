@@ -57,19 +57,31 @@ vi.mock('@/lib/handoff/screen-client', async (importOriginal) => {
   return { ...actual, fetchStartPreview: fetchStartPreviewMock };
 });
 
-vi.mock('@/hooks/useImageAttachment', () => ({
-  useImageAttachment: () => ({
-    attachedImage: { path: '.commandmate/attachments/shot.png', file: new File(['x'], 'shot.png') },
-    fileInputRef: { current: null },
-    isUploading: false,
-    error: null,
-    acceptAttribute: 'image/*',
-    openFileDialog: vi.fn(),
-    handleFileSelect: vi.fn(),
-    removeAttachment: vi.fn(),
-    resetAfterSend: resetAfterSendMock,
-  }),
+// G-PR6 (codex P2-1): the image is the hook's state, so a test can remove or replace it while a
+// send waits on its preview (`imageState.set`), as the real hook's remove / select do.
+const { imageState } = vi.hoisted(() => ({
+  imageState: { set: null as null | ((path: string | null) => void) },
 }));
+vi.mock('@/hooks/useImageAttachment', async () => {
+  const { useState } = await import('react');
+  return {
+    useImageAttachment: () => {
+      const [path, setPath] = useState<string | null>('.commandmate/attachments/shot.png');
+      imageState.set = setPath;
+      return {
+        attachedImage: path ? { path, file: new File(['x'], 'shot.png') } : null,
+        fileInputRef: { current: null },
+        isUploading: false,
+        error: null,
+        acceptAttribute: 'image/*',
+        openFileDialog: vi.fn(),
+        handleFileSelect: vi.fn(),
+        removeAttachment: vi.fn(),
+        resetAfterSend: resetAfterSendMock,
+      };
+    },
+  };
+});
 
 vi.mock('@/hooks/useSlashCommands', () => ({
   useSlashCommands: vi.fn(() => ({
@@ -379,6 +391,45 @@ describe.each(G6_CASES)('G-PR6 %s (%s, phone %s), mode %s', (_name, path, mobile
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
     expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ briefDetail: 'short', briefBoundary: 'b-B' });
     expect(onOptimisticSend).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['removed', null],
+    ['replaced', '.commandmate/attachments/other.png'],
+  ] as const)('(9) the image is %s while the read waits: nothing is sent, the draft and the image as they are now', async (_what, next) => {
+    const read = deferred<unknown>();
+    fetchStartPreviewMock.mockReturnValueOnce(read.promise);
+    const { onOptimisticSend } = renderComposer(path);
+    typeMessage('hello agent');
+    submit();
+    await flush();
+    await act(async () => imageState.set?.(next));
+    await act(async () => read.resolve(NOT_SHOWN));
+    await flush();
+    expect(onOptimisticSend).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(resetAfterSendMock).not.toHaveBeenCalled();
+    expect(getTextarea().value).toBe('hello agent');
+    if (next) expect(screen.getByTestId('image-attachment-preview').textContent).toContain('shot.png');
+  });
+
+  it('(10) a plan review begins while the read waits: nothing is sent, the draft stays, the notice says so', async () => {
+    const read = deferred<unknown>();
+    fetchStartPreviewMock.mockReturnValueOnce(read.promise);
+    const onOptimisticSend = vi.fn();
+    const props = { ...createDefaultProps({ cliToolId: 'claude', isSessionRunning: true }), ...(path === 'optimistic' ? { onOptimisticSend } : {}) };
+    const { rerender } = render(<MessageInput {...props} />);
+    typeMessage('hello agent');
+    submit();
+    await flush();
+    rerender(<MessageInput {...props} planReviewActive />);
+    await act(async () => read.resolve(NOT_SHOWN));
+    await flush();
+    expect(onOptimisticSend).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(getTextarea().value).toBe('hello agent');
+    expect(screen.getByTestId('composer-plan-review-notice').getAttribute('role')).toBe('alert');
+    void mode;
   });
 
   it('(7) a second Enter while the read is waiting: sent once, the draft not cleared meanwhile', async () => {

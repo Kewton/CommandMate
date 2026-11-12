@@ -197,10 +197,15 @@ export async function handoffStartPreview(
   } catch {
     preview = null;
   }
-  // G-PR6 (design §3.1): the lines were read across awaits. Read the boundary and the target again;
-  // when either changed, A's lines are not answered under any id (409, the screen reads again).
-  const after = getCurrentBoundary(db, worktreeId, instanceId);
-  const targetAfter = await readTarget();
+  // G-PR6 (design §3.1): the lines were read across awaits. Read the target again and, in the same
+  // synchronous stretch as its resolution (no await after it), the boundary; when either changed,
+  // A's lines are not answered under any id (409, the screen reads again).
+  const final = await withMemTarget(db, { via: 'worktree', worktreeId }, deps.mem ?? {}, (resolved) => ({
+    target: resolved.ok ? { mode: resolved.mode, popup: resolved.features.popup, injectOnStart: resolved.features.injectOnStart } : null,
+    boundary: getCurrentBoundary(db, worktreeId, instanceId),
+  }));
+  const after = final.boundary;
+  const targetAfter: PreviewTarget | null = final.target;
   const targetSame =
     targetAfter !== null &&
     targetAfter.mode === target.mode &&
