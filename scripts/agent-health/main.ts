@@ -65,7 +65,7 @@ import { HookListener } from './hook-listener';
 import { locateServerLog, ServerLogWatch } from './production-log';
 import { probeLimitedTool, probeTool, readVersion, type ProbeOutcome } from './probe-tool';
 import { AgentHealthTmux } from './tmux-driver';
-import { LIMITED_TOOL_SPECS, TOOL_PROBE_SPECS } from './tool-table';
+import { LIMITED_TOOL_SPECS, pinLaunchCodexHome, TOOL_PROBE_SPECS } from './tool-table';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const DEFAULT_DIR = path.join(os.homedir(), '.commandmate', 'agent-health');
@@ -231,6 +231,9 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   }
 
   // `resolveRelayScriptPath()` is cwd-relative (scripts/hooks/cmate-agent-event.sh).
+  // Issue #4290: a relative CODEX_HOME is read against THIS cwd, before the chdir.
+  const launchCwd = process.cwd();
+  pinLaunchCodexHome(process.env, launchCwd);
   process.chdir(REPO_ROOT);
   const workRoot = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), WORK_PREFIX));
   const hooksDir = path.join(workRoot, 'hooks');
@@ -294,7 +297,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
       // falls back to this one arrives without correlation keys and fails
       // the check — it never reaches production.
       CM_HOOK_URL: listener.agentEventUrl,
-    });
+    }, launchCwd);
     tmux = new AgentHealthTmux(childEnv, workRoot);
     if (await tmux.isServerRunning()) {
       // The lock says no run is live, so this is a crashed run's leftover.

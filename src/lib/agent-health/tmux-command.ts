@@ -10,7 +10,7 @@
  */
 
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
 
 /** The private tmux socket label. Nothing else in CommandMate uses it. */
@@ -80,7 +80,9 @@ export function buildTmuxStartArgv(configPath: string, args: readonly string[]):
  */
 export function buildChildEnv(
   base: Readonly<Record<string, string | undefined>>,
-  overrides: Readonly<Record<string, string>> = {}
+  overrides: Readonly<Record<string, string>> = {},
+  /** The cwd a relative CODEX_HOME is read against: where the script was launched, not a later chdir. */
+  baseCwd: string = process.cwd()
 ): NodeJS.ProcessEnv {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) {
@@ -100,7 +102,7 @@ export function buildChildEnv(
   // fall back to the same default. `base` (process.env) is never written.
   if (CODEX_HOME_VAR in merged) {
     merged[CODEX_HOME_VAR] = resolveSafeAbsoluteDirectory(
-      merged[CODEX_HOME_VAR],
+      merged[CODEX_HOME_VAR] ? resolve(baseCwd, merged[CODEX_HOME_VAR]) : undefined,
       join(homedir(), '.codex'),
       CODEX_HOME_VAR
     );

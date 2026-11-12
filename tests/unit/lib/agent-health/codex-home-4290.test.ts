@@ -110,3 +110,75 @@ describe('[#4290] history resolveCodexHome follows the safe-directory rule', () 
     expect(resolveCodexHome({ CODEX_HOME: 'rel' })).toBe(path.join(root, 'rel'));
   });
 });
+
+describe('[#4290] main order: launch cwd -> chdir to the repo root -> child env', () => {
+  let root: string;
+  let launch: string;
+  let repoRoot: string;
+  const originalCwd = process.cwd();
+  const savedEnv = process.env.CODEX_HOME;
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4290-m-')));
+    launch = path.join(root, 'launch');
+    repoRoot = path.join(root, 'repo');
+    fs.mkdirSync(launch);
+    fs.mkdirSync(repoRoot);
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    const { resetLaunchCodexHome } = await import('../../../../scripts/agent-health/tool-table');
+    resetLaunchCodexHome();
+    if (savedEnv === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedEnv;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  function trustPath(guarded: { trustState: unknown[] } | undefined): string | undefined {
+    const first = guarded?.trustState[0];
+    return typeof first === 'string' ? first : (first as { path: string } | undefined)?.path;
+  }
+
+  /** The same three steps as scripts/agent-health/main.ts. */
+  async function runMainOrder(codexHome: string | undefined) {
+    const { pinLaunchCodexHome, TOOL_PROBE_SPECS } = await import('../../../../scripts/agent-health/tool-table');
+    if (codexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = codexHome;
+    process.chdir(launch);
+    const launchCwd = process.cwd();
+    pinLaunchCodexHome(process.env, launchCwd);
+    process.chdir(repoRoot);
+    const childEnv = buildChildEnv(process.env, {}, launchCwd);
+    const guarded = TOOL_PROBE_SPECS.codex.guardedFiles?.();
+    return { childEnv, guarded };
+  }
+
+  it('a relative CODEX_HOME means <launch cwd>/isolated for the child and the guarded files', async () => {
+    const { childEnv, guarded } = await runMainOrder('./isolated');
+    const expected = path.join(launch, 'isolated');
+    expect(childEnv.CODEX_HOME).toBe(expected);
+    expect(trustPath(guarded)).toBe(path.join(expected, 'config.toml'));
+    expect(guarded?.hookConfig?.[0]).toBe(path.join(expected, 'hooks.json'));
+    expect(process.env.CODEX_HOME).toBe('./isolated');
+  });
+
+  it('an absolute value and an unset value behave as before', async () => {
+    const abs = path.join(root, 'abs');
+    const a = await runMainOrder(abs);
+    expect(a.childEnv.CODEX_HOME).toBe(abs);
+    expect(trustPath(a.guarded)).toBe(path.join(abs, 'config.toml'));
+    const u = await runMainOrder(undefined);
+    expect(u.childEnv).not.toHaveProperty('CODEX_HOME');
+    expect(trustPath(u.guarded)).toBe(path.join(os.homedir(), '.codex', 'config.toml'));
+  });
+
+  it('main.ts reads the launch cwd and pins before it chdirs', () => {
+    const src = fs.readFileSync(path.join(originalCwd, 'scripts/agent-health/main.ts'), 'utf8');
+    const iPin = src.indexOf('pinLaunchCodexHome(process.env, launchCwd)');
+    const iChdir = src.indexOf('process.chdir(REPO_ROOT)');
+    expect(iPin).toBeGreaterThan(-1);
+    expect(iPin).toBeLessThan(iChdir);
+    expect(src).toMatch(/launchCwd\s*\);/);
+  });
+});
