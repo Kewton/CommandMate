@@ -48,7 +48,7 @@
 // at exactly that moment (`worktree-status-helper.test.ts` does).
 import { STATUS_REASON } from '@/lib/detection/status-reason';
 import type { SessionStatus } from '@/lib/detection/status-detector';
-import { STRUCTURED_STATE_MAX_AGE_MS } from '@/lib/session/agent-event-state';
+import { STRUCTURED_STATE_MAX_AGE_MS } from '@/lib/session/agent-event-structured-state';
 
 // The type lives in an import-free module so `src/cli/types/api-responses.ts`,
 // which cannot resolve `@/`, can share it. Re-exported under the same name.
