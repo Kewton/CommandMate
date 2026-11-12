@@ -229,6 +229,11 @@ const EXCLUDED: readonly {
     allow: [{ pattern: /^npm run test:e2e$/, why: 'the excluded check itself' }],
   },
   {
+    match: { key: 'test-e2e › E2E heap summary' },
+    reason: 'Reports the E2E webServer heap peak (Issue #4308); a CI-only measurement of Run E2E tests, checks nothing.',
+    allow: [{ pattern: /^node scripts\/ci\/e2e-heap-probe\.cjs summarize "\$RUNNER_TEMP\/e2e-heap" \|\| true$/, why: 'the measurement itself' }],
+  },
+  {
     // [Issue #3481] Declared like `claudemd-size`, but not as a verify gate: the gate list in
     // .commandmate/verify.yaml is pinned by tests/unit/verification/verify-config.test.ts.
     match: { key: 'orchestrate-size › Check orchestrate.md size' },
