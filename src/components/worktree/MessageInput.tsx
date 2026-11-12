@@ -678,7 +678,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         // lands later cannot put the old boundary back; a target change voids this answer.
         const { value: fresh, current } = await readStartPreview();
         if (!current) return;
-        if (fresh && fresh.show) {
+        if (fresh === null) {
+          // The read failed (or the boundary moved again under it, 409 → null): the same as a failed
+          // read before a send — nothing is sent, the draft stays, "try again" reads anew.
+          setBriefAsk(null);
+          setBriefCheckFailed(true);
+        } else if (fresh.show) {
           setBriefAsk({ preview: fresh, notice });
         } else {
           // Nothing to ask any more (used up, or the branch changed): the draft stays for a plain send.

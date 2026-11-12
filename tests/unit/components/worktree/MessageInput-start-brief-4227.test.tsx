@@ -213,6 +213,22 @@ describe.each(PATHS)('H19 %s', (_name, path, mobile) => {
     expect(sendMessageMock.mock.calls[1][2]).toMatchObject({ brief: 'decline', briefBoundary: 'b-2' });
   });
 
+  it('(h2) 409 boundary_changed and the read after it fails (null): the read-failure notice, no dialog, the draft kept, nothing sent again', async () => {
+    // G-PR6 (codex-2 review-4227-pr6b P2): a null read after the 409 is a failed read, not "nothing to ask".
+    fetchStartPreviewMock.mockResolvedValueOnce(SHOWN('b-1')).mockResolvedValueOnce(SHOWN('b-1')).mockResolvedValueOnce(null);
+    sendMessageMock.mockRejectedValueOnce(new ApiError('boundary_changed', 409, { error: 'boundary_changed', reason: 'superseded', boundary: null }));
+    renderComposer(path);
+    await focusAndRead();
+    typeMessage('hello agent');
+    submit();
+    fireEvent.click(await screen.findByTestId('session-start-brief-decline'));
+    expect(await screen.findByTestId('session-start-brief-check-failed')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(getTextarea().value).toBe('hello agent');
+    expect(resetAfterSendMock).not.toHaveBeenCalled();
+  });
+
   it('negative: unattended (no preview to ask) sends the request it always did', async () => {
     fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
     const { onOptimisticSend } = renderComposer(path);
