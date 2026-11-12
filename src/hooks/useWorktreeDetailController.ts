@@ -371,8 +371,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // without being recreated on every isMobile change.
   const isMobileRef = useRef(isMobile);
   isMobileRef.current = isMobile;
-  // Issue #747: the sidebar toggle moved into the ActivityBar (which reads
-  // SidebarContext directly), so DesktopHeader no longer needs `toggle` here.
+  // Issue #747: the sidebar toggle left DesktopHeader (it is the sidebar's own
+  // button since #3512, which reads SidebarContext directly), so DesktopHeader
+  // no longer needs `toggle` here.
   const { openMobileDrawer } = useSidebarContext();
   const router = useRouter();
   const pathname = usePathname();

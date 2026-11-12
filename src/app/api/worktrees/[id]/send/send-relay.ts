@@ -17,7 +17,7 @@ import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind'
 import type { SendStep } from './send-request';
 
 /**
- * What the handler learned about a relay-bound send, for {@link POST} to settle
+ * What the handler learned about a relay-bound send, for `POST` (route.ts) to settle
  * the relay with and answer `sendOutcome` from (Issue #3957).
  */
 export interface RouteRelayState {
@@ -98,7 +98,7 @@ export function reserveRelayForSend(
   const { worktreeId: id, cliToolId, instanceId } = input;
   // Issue #3957: reserve the bound relay now — after the body and the
   // destination are validated and resolved, before the first side effect
-  // (the session start below). A refusal sends nothing.
+  // (the session start, in `route.ts` and `send-session-start.ts`). A refusal sends nothing.
   if (relayId !== undefined) {
     if (typeof relayId !== 'string') {
       return { ok: false, response: NextResponse.json({ error: 'relayId must be a string', code: 'RELAY_BIND_INVALID' }, { status: 400 }) };

@@ -46,7 +46,7 @@ function serverErrorDetail(payload?: ApiErrorPayload): string | undefined {
  * for a typo in an id that was correct: the CLI was dialling a *different*
  * CommandMate server than the one that had started its session, and the id it
  * was asking about lived on the other one. Optional so the two callers that
- * classify without a client ({@link ApiClient} aside, `server-capabilities.ts`)
+ * classify without a client (`ApiClient` in api-client.ts aside, `server-capabilities.ts`)
  * keep compiling and keep their wording.
  */
 export interface ApiErrorContext {

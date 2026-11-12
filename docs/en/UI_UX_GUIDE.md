@@ -21,7 +21,7 @@ CommandMate provides a responsive UI optimized for both desktop and mobile.
 
 | Screen | Layout | Features |
 |--------|--------|----------|
-| **Desktop** | One-row header + second-row action bar + body (TerminalContainer; the ActivityPane opens from the right, over it) | Tools right after the header's heading on the left, Verification chip on the second row, instant Tooltip, History embedded in the Terminal area, a pane that sits beside the body when pinned |
+| **Desktop** | One-row header + second-row action bar + body (TerminalContainer; the ActivityPane opens from the right by default, or the left, over it) | Tools right after the header's heading on the left, Verification chip on the second row, instant Tooltip, History embedded in the Terminal area, a pane that sits beside the body when pinned |
 | **Mobile** | Tab-based | Bottom navigation |
 
 ---
@@ -79,7 +79,7 @@ The header is one row: from the left, "repository › branch › the session on 
   - The worktree's progress (Status) is not set here but from the sidebar row's "…" → Status
 
 #### 2. Tools (HeaderToolBar) and the Verification chip
-- What the vertical Activity Bar held is split between the icons at the right of the header (`HeaderToolBar`) and the Verification chip on the second row (`VerificationStatusChip`) (Issue #3591)
+- What the vertical Activity Bar held is split between the icons right after the header's identity group (repository › branch › session) (`HeaderToolBar`) and the Verification chip on the second row (`VerificationStatusChip`) (Issue #3591)
 - 10 Activities. **The single source is `ACTIVITIES` in `src/config/activity-bar-config.ts`**; the list below is a copy. Its order is the order of the header's tools and of the ←/→ keys (append new activities at the end — an insert silently renumbers the keyboard order).
   1. `files` — File Tree (Issue #2259: renamed to tell it apart from the action bar's "Open Files"; the id stays `files`)
   2. `git` — Git
@@ -97,7 +97,7 @@ The header is one row: from the left, "repository › branch › the session on 
 
 #### 3. ActivityPane (renders the selected Activity)
 - Displays the content of the currently selected Activity. Closed by default (a worktree opened for the first time starts closed, Issue #3589)
-- Opens from the right over the body, whose width does not change. Esc, ×, re-clicking the same tool, an outside click or opening a file closes it
+- Opens from the right by default, over the body, whose width does not change. "Move to left" / "Move to right" in the pane title switches the side (shared across worktrees, Issue #4219). Esc, ×, re-clicking the same tool, an outside click or opening a file closes it
 - Pinned, it sits beside the body (the earlier layout) and its boundary can be dragged. The pin is shared across worktrees
 
 #### 4. TerminalContainer (Right Pane, Issue #730)
@@ -244,7 +244,7 @@ src/components/
 ├── worktree/
 │   ├── WorktreeDetailRefactored.tsx  # Main component (PC delegates to WorktreeDetailDesktop)
 │   ├── WorktreeDesktopLayout.tsx     # Body + ActivityPane (laid over / beside when pinned, Issue #3589 / #3591)
-│   ├── HeaderToolBar.tsx             # Tools at the right of the header (Issue #3591; the old ActivityBar.tsx is not mounted)
+│   ├── HeaderToolBar.tsx             # Tools right after the identity group (Issue #3591 / #4218; the old ActivityBar.tsx is not mounted)
 │   ├── VerificationStatusChip.tsx    # Second-row Verification chip (Issue #1816 / #2064 / #3590)
 │   ├── ActivityPane.tsx              # Renders the selected Activity (Issue #727)
 │   ├── TerminalContainer.tsx         # History + Terminal container (Issue #730)

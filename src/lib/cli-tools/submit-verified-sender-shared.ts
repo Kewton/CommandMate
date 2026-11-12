@@ -191,7 +191,7 @@ export interface SubmitVerifiedSendParams {
    * is read again for at most {@link INPUT_READINESS_UNDER_LOCK_WAIT_MS} — the
    * captures included: one still running at the deadline is not waited for,
    * and a frame read after it is not taken — each read through
-   * {@link recheckComposerBeforeInput}, so a dialog that opens is refused at
+   * `recheckComposerBeforeInput` (`@/lib/session/composer-clear`), so a dialog that opens is refused at
    * once (`prompt-waiting`) and the lock let go rather than held for a person.
    * Past that the send THROWS with a `prompt not ready` wording
    * (`not-sent` / `prompt-not-ready`). Omitted, nothing changes.

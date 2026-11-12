@@ -28,7 +28,7 @@ import {
   takeResumedAcrossRoleNotice,
   type LaunchRoleSnapshot,
 } from '@/lib/session/role-launch';
-import { roleEnvReaderForPane } from '@/lib/agent-roles/pane-env';
+import { roleEnvReaderForPane, roleLaunchCwdReaderForPane } from '@/lib/agent-roles/pane-env';
 import { InstanceRoleRequestError, readRosterRevision, setManagedInstanceRole } from '@/lib/agent-roles/management';
 import { parseRoleAssignmentInput } from '@/lib/agent-roles/validation';
 import {
@@ -216,6 +216,7 @@ export async function prepareSendRole(
     instanceId,
     worktreePath: worktree.path,
     readEnv: roleEnvReaderForPane({ worktreeId: worktree.id, cliToolId, instanceId }),
+    readLaunchCwd: roleLaunchCwdReaderForPane({ worktreeId: worktree.id, cliToolId, instanceId }),
   });
   if (snapshot.refusal) {
     return refuse(snapshot.refusal.message, ROLE_LAUNCH_REFUSED_CODE, { saved, stored }, recordNotSent, 'role-launch-refused', 409, {
