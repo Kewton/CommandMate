@@ -185,6 +185,39 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   the header. When the send's outcome is unknown the relay is left open, nothing
   is resent, and 'commandmate relays --id <relay-id>' shows why it is held.
 
+### commandmate whoami [--json]
+  Which worktree / instance is THIS session? Reads CM_WORKTREE_ID / CM_INSTANCE_ID /
+  CM_CLI_TOOL (or the CM_AGENT_* launch-line variables), else the mcbd-... tmux
+  session name. --json: worktreeId, instanceId, cliToolId, alias, source, sessionName,
+  serverUrl (+ serverMismatch: true when this CLI is talking to a different server).
+  Exit 3 (NOT_IN_SESSION) when the shell is not inside a CommandMate agent session.
+
+### commandmate peers [--json]
+  The other agent sessions in THIS repository, your own row marked '(you)', each
+  other row with a ready-to-run 'ask' line. --json: self, serverUrl, peers[]
+  (worktreeId, instanceId, cliTool, alias, status, isSelf, ask). Exit 3
+  (NOT_IN_SESSION) outside a session.
+
+### commandmate ask <worktree-id> "<request>" [--instance <id>]
+  send + wait + read the reply, in one command. Name the target with --instance
+  alone (--agent is for an instance the roster does not know).
+    --timeout <seconds>   Maximum wait for the reply (default 1800)
+    --json                worktreeId, instanceId, cliToolId, source (history|pane|none),
+                          reply, overlapped (only when true)
+    --async               Do not wait: register a relay, print its id, exit 0. The reply
+                          is typed into --reply-to's composer when the turn ends.
+    --reply-to <target>   <worktree-id>[@<instance-id|alias>], or 'self' (default)
+    --allow-relay-chain   Permit a relay opened while answering a relayed message
+  There is no --auto-yes on purpose. Wait ('ask') when the reply is your next step;
+  'ask --async' (or 'send --reply-to') when you can end your turn. Exit codes are
+  wait's (0 / 10 / 21 / 124) plus:
+    11  UPSTREAM_FAULT  the turn never ran (ask always uses failOnUpstreamFault);
+                        id=context-limit: 'instances <id> kill <instance>' and ask again;
+                        id=model-capacity: ask another instance or model
+    32  ROLE NOT_SENT   the role condition does not hold; nothing was typed
+    2   a relay refusal (reason on stderr), a bad argument, or the target is on a prompt
+  Full guide: 'commandmate docs --section delegation'.
+
 ### commandmate relays
   List the standing delegations this session is waiting on and owes.
 
@@ -219,6 +252,18 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   An expired relay whose expiry notice is still stopped (Issue #4193) is
   listed under "# closed, notice not delivered yet" (closedBlocked in --json)
   until the notice goes out; it is not an open relay and is not counted.
+
+  Settle a delivery held as uncertain (delivery=uncertain; Issue #4082) after
+  looking at the requester's pane (the check= line names it):
+
+    commandmate relays resolve <relay-id> --payload <id> --attempt <id> --confirm
+    commandmate relays resolve <relay-id> --payload <id> --attempt <id> --retry
+    commandmate relays resolve <relay-id> --payload <id> --attempt <id> --discard
+
+  --payload / --attempt are payload=<kind>:<id> and attempt=<id> from
+  'relays --id <relay-id>'. Exactly one of: --confirm (it arrived; types
+  nothing), --retry (it did not: queued again, sent once when the requester can
+  take it), --discard (drop it, send nothing). Do not resend by hand first.
 
 ### commandmate wait <worktree-id...>
   Block until agent completes or prompt is detected.
@@ -690,7 +735,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   0   SUCCESS          - Completed successfully
   1   DEPENDENCY_ERROR - Server not running
   2   CONFIG_ERROR     - Validation error (invalid agent, duration, etc.)
+  3   NOT_IN_SESSION   - whoami / peers run outside a CommandMate agent session
   10  PROMPT_DETECTED  - Prompt detected during wait
+  11  UPSTREAM_FAULT   - The turn never ran: an upstream fault was on the screen (ask always; wait --fail-on-upstream-fault)
   20  VERIFY_FAILED    - A verification gate failed (verify, wait --verify)
   21  NOT_STARTED      - Nothing to verify: no commits, no uncommitted changes
   30  NO_ACTIVE_SESSIONS - interrupt found no running session to interrupt
