@@ -3432,7 +3432,11 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 
 - 対象は、セッションの中では `whoami` で決まる自分の instance。通常のシェルでは、書き込みに `--worktree <id> --instance <id>`、`list` / `mode` / `purge` に `--worktree <id>` か `--repository <id> --branch <name>` を付ける（無ければ exit 2 `target_required`）
 - `now` はそのセッションのメモ（#2427）と同じもの。100 文字まで。次の `now` で置き換わり、前の内容は `superseded` として残る（枠ごとに新しい 20 件）
-- kind は `now` / `waiting` / `decision` / `next` / `external` / `note`。`--close-when` は `waiting` / `next` / `external` で必須。省略すると `now` → `replaced`、`note` → `manual`、`decision` → 反映（promote）まで閉じない
+- kind は `now` / `waiting` / `decision` / `next` / `external` / `note`。
+
+mem add の --close-when は kind が waiting / next / external のとき必須（無いと終了コード 2 で、何も保存しない）。decision / note は省略できる。
+
+- `--close-when` を省略すると `now` → `replaced`、`note` → `manual`、`decision` → 反映（promote）まで閉じない
 - `--close-when`：`manual` ・ `replaced`（now だけ）・ `issue:[host/owner/repo]#N` ・ `pr:[host/owner/repo]#N[?state=merged|closed]` ・ `branch:<name>?merged=<ref>[&scope=local|remote]` ・ `branch:<name>?deleted` ・ `relay:<id>` ・ `worktree:<id>` ・ `session:task:<id>` ・ `session:verify:<run id>` ・ `session:schedule:<実行ログ id>` ・ `at:<オフセット付き ISO 8601>`。`session:` は CommandMate が終わりを記録している 3 種類だけ（tmux のセッション名・PID は受けない）。`branch:…?deleted` も書いた時点の tip を保存する（ref が無ければ空）
 - `update` / `close` ができるのは作成した instance（同じ世代）と人（画面）だけ。instance を消して同じ ID で作り直すと別の世代になり、前の項目は変えられない（exit 55）
 - `--key` を付けた `add` は、同じ key・同じ内容の再送で最初の項目を返す（`replayed: true`）。中身が違えば exit 54
@@ -3526,7 +3530,7 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 
 - 上部にブランチの mode と、それを決めたもの（上書き・規則・既定）が出ます。`derived` は「凍結中」で、この画面からも書けません。`off` は一覧を出しません（項目は消えずに残っています）。「mode・機能を変える」で mem の設定をその場で開き、このブランチの上書きを足せます
 - 一覧は種類ごとの節で、行ごとに作成者・所有の instance・更新者・版・閉じる条件とその評価（`{result:reason}`）・古さを出します。記録済みの決定には「未反映：記録しただけで、正本へはまだ反映されていません」が出ます。決定の記録・反映は「記録・反映へ」から上の決定の画面で行います（この画面は書きません）
-- 書くには、このブランチの作業木と、その roster の instance を選びます（項目の所有は instance が持ちます）。作成者・更新者は `human` になります。作業木の今のブランチが画面のブランチと違うときは読むだけです。追加は 1 回の要求ごとに 1 つの key を作ります。結果が分からないとき（時間切れ・接続が切れた）は、入力を固定して「同じ内容で送り直す」を出し、同じ内容・同じ key で送り直すので、最初の要求が書けていても 2 件になりません（同じ項目が返ります）。送り直す要求は、送ったときの作業木・instance・内容・key のまま変わりません（追加・項目ごとの編集・close で 1 つずつ持ち、別の操作が終わっても消えません。残っている間はほかの書き込みを待たせます。下の「同時編集」）。作業木や instance の選択を変えると、その選択では送り直せないことを示すので、「その宛先に戻す」か「送り直さずにやめる」を選びます。編集・close の送り直しには key が無いので、409 が返ったら（最初の要求が書けていた場合も、他で変わっていた場合も）「保存しました」とはせず、同時編集の比較に戻ります。作業木の HEAD が別のブランチへ移っていたら、何も書かずに断ります。閉じる条件が必須の種類（waiting・next・external）は、入力欄に「必須」と出ます
+- 書くには、このブランチの作業木と、その roster の instance を選びます（項目の所有は instance が持ちます）。作成者・更新者は `human` になります。作業木の今のブランチが画面のブランチと違うときは読むだけです。追加は 1 回の要求ごとに 1 つの key を作ります。結果が分からないとき（時間切れ・接続が切れた）は、入力を固定して「同じ内容で送り直す」を出し、同じ内容・同じ key で送り直すので、最初の要求が書けていても 2 件になりません（同じ項目が返ります）。送り直す要求は、送ったときの作業木・instance・内容・key のまま変わりません（追加・項目ごとの編集・close で 1 つずつ持ち、別の操作が終わっても消えません。残っている間はほかの書き込みを待たせます。下の「同時編集」）。作業木や instance の選択を変えると、その選択では送り直せないことを示すので、「その宛先に戻す」か「送り直さずにやめる」を選びます。編集・close の送り直しには key が無いので、409 が返ったら（最初の要求が書けていた場合も、他で変わっていた場合も）「保存しました」とはせず、同時編集の比較に戻ります。作業木の HEAD が別のブランチへ移っていたら、何も書かずに断ります。閉じる条件が必須の種類（上の `--close-when` の規則）は、入力欄に「必須」と出ます
 - **人が書いた項目**：この画面で人が追加した項目（作成者 `human`）は、所有に選んだ instance の Agent でも `commandmate mem update`／`mem close` では変えられず閉じられません（exit 55、`not_owner`）。変えたり閉じたりできるのは人（この画面）だけです。閉じる条件による close（サーバの評価）は、誰が書いた項目にも今までどおり効きます
 - **ボタン**：出るのは今の状態でできる操作だけです（記録済みの決定に「編集」は出ません。反映済みの決定の close は「close」、開いた決定の close は「取り下げる」）
 - `now`（セッションごとの今）はこの画面では追加・編集しません。今までどおり作業木の画面のセッションのメモから書きます

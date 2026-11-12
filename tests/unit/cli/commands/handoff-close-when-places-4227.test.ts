@@ -13,9 +13,15 @@
  *  3. the description of `propose add --close-when` (`src/cli/commands/handoff.ts`); `option`
  *  4. `docs/user-guide/cli-operations-guide.md` (ja), the `## commandmate handoff` chapter; the `ja` line
  *  5. `docs/en/user-guide/cli-operations-guide.md` (en), the same chapter; the `en` line
+ *  6. the help body of `commandmate mem` (`MEM_HELP`, `src/cli/commands/mem.ts`); the `memHelp` line
+ *  7. the description of `mem add --close-when` (`src/cli/commands/mem.ts`); `option`
+ *  8. `docs/user-guide/cli-operations-guide.md` (ja), the `## commandmate mem` chapter; the `memJa` line
+ *  9. `docs/en/user-guide/cli-operations-guide.md` (en), the same chapter; the `memEn` line
+ * (g-pr4-g9g added 6-9. The mem chapters keep their other kind inventories — all six kinds, the limits
+ * table — so for them the "no other list" check reads only the lines that talk about `--close-when` / required.)
  *
  * Mutations (in memory, the repository is not written): the generated list in each place gets `/ now`,
- * gets an unknown word, or loses a kind; each is red at each place (5 × 3). One more: a hand-written list
+ * gets an unknown word, or loses a kind; each is red at each place (9 × 3). One more: a hand-written list
  * line added next to the right one is red too.
  *
  * @vitest-environment node
@@ -41,6 +47,8 @@ interface Place {
   generated: string;
   form: Form;
   read: () => string;
+  /** Only the lines matching this are searched for a hand-written list (default: all lines). */
+  scope?: RegExp;
 }
 
 function handoffCommand() {
@@ -64,10 +72,29 @@ function optionHelp(): string {
   return add.options.find((o) => o.long === '--close-when')!.description;
 }
 
-/** The `## commandmate handoff` chapter, up to the next `## ` heading. */
-function chapter(file: string): string {
+function memCommand() {
+  return buildProgram().commands.find((c) => c.name() === 'mem')!;
+}
+
+function memHelpBody(): string {
+  const command = memCommand();
+  let help = '';
+  command.configureOutput({ writeOut: (t) => void (help += t), writeErr: () => undefined });
+  command.outputHelp();
+  return help;
+}
+
+function memAddOptionHelp(): string {
+  const add = memCommand().commands.find((c) => c.name() === 'add')!;
+  return add.options.find((o) => o.long === '--close-when')!.description;
+}
+
+const TALKS_ABOUT_RULE = /close-when|必須|required/i;
+
+/** The `## commandmate <name>` chapter, up to the next `## ` heading. */
+function chapter(file: string, name = 'handoff'): string {
   const text = readFileSync(path.join(ROOT, file), 'utf-8');
-  const start = text.indexOf('\n## commandmate handoff\n');
+  const start = text.indexOf(`\n## commandmate ${name}\n`);
   expect(start).toBeGreaterThanOrEqual(0);
   const end = text.indexOf('\n## ', start + 1);
   return text.slice(start + 1, end < 0 ? undefined : end);
@@ -79,6 +106,10 @@ const PLACES: Place[] = [
   { name: '3 handoff.ts: propose add --close-when', generated: RULE.option, form: 'whole', read: optionHelp },
   { name: '4 docs/user-guide/cli-operations-guide.md', generated: RULE.ja, form: 'line', read: () => chapter('docs/user-guide/cli-operations-guide.md') },
   { name: '5 docs/en/user-guide/cli-operations-guide.md', generated: RULE.en, form: 'line', read: () => chapter('docs/en/user-guide/cli-operations-guide.md') },
+  { name: '6 mem.ts: MEM_HELP', generated: RULE.memHelp, form: 'line', read: memHelpBody },
+  { name: '7 mem.ts: mem add --close-when', generated: RULE.option, form: 'whole', read: memAddOptionHelp },
+  { name: '8 docs/user-guide/cli-operations-guide.md (mem)', generated: RULE.memJa, form: 'line', scope: TALKS_ABOUT_RULE, read: () => chapter('docs/user-guide/cli-operations-guide.md', 'mem') },
+  { name: '9 docs/en/user-guide/cli-operations-guide.md (mem)', generated: RULE.memEn, form: 'line', scope: TALKS_ABOUT_RULE, read: () => chapter('docs/en/user-guide/cli-operations-guide.md', 'mem') },
 ];
 
 const KIND = `(?:${MEM_KINDS.join('|')})`;
@@ -86,7 +117,7 @@ const KIND = `(?:${MEM_KINDS.join('|')})`;
 const OLD_LIST = new RegExp(`\`?\\b${KIND}\\b\`?\\s*(?:/|・|、|,|\\bor\\b|\\band\\b)\\s*\`?\\b${KIND}\\b`, 'g');
 
 /** What is wrong with a place's text: empty when it uses the generated string once and has no other list. */
-function problems(text: string, generated: string, form: Form): string[] {
+function problems(text: string, generated: string, form: Form, scope?: RegExp): string[] {
   const out: string[] = [];
   let rest: string;
   if (form === 'whole') {
@@ -96,7 +127,7 @@ function problems(text: string, generated: string, form: Form): string[] {
     const lines = text.split('\n');
     const hits = lines.filter((line) => line === generated).length;
     if (hits !== 1) out.push(`the generated line is there ${hits} times, not once`);
-    rest = lines.filter((line) => line !== generated).join('\n');
+    rest = lines.filter((line) => line !== generated && (!scope || scope.test(line))).join('\n');
   }
   for (const match of rest.matchAll(OLD_LIST)) out.push(`a list not from the generator: ${JSON.stringify(match[0])}`);
   return out;
@@ -142,7 +173,7 @@ describe('[#4227 G9] the generated text of the kinds that need --close-when', ()
 
 describe('[#4227 G9] every place that names the kinds uses the generated text, and no hand-written list', () => {
   it.each(PLACES.map((p) => [p.name, p] as const))('(ii) %s', (_name, place) => {
-    expect(problems(place.read(), place.generated, place.form)).toEqual([]);
+    expect(problems(place.read(), place.generated, place.form, place.scope)).toEqual([]);
   });
 
   const cases = PLACES.flatMap((place) => MUTATIONS.map(([mutation, change]) => [place.name, mutation, place, change] as const));
@@ -151,7 +182,22 @@ describe('[#4227 G9] every place that names the kinds uses the generated text, a
     expect(text).toContain(RULE.requiredList);
     const mutated = text.replace(RULE.requiredList, change(RULE.requiredList));
     expect(mutated).not.toBe(text);
-    expect(problems(mutated, place.generated, place.form)).not.toEqual([]);
+    expect(problems(mutated, place.generated, place.form, place.scope)).not.toEqual([]);
+  });
+
+  it('(ii) the source of mem.ts has no hand-written required-kinds sentence and uses the generator', () => {
+    const source = readFileSync(path.join(ROOT, 'src/cli/commands/mem.ts'), 'utf-8');
+    expect(source).not.toMatch(/required for (?:`?\w+`?\s*\/\s*)+/);
+    expect(source).toContain('closeWhenKindsText()');
+    expect(source).not.toMatch(/from '@\//);
+  });
+
+  it('(iii) positive control: the mem chapter of c12cfeb43 (hand-written rule, no generated line) is red', () => {
+    const oldJa = '- kind は `now` / `waiting` / `decision`。`--close-when` は `waiting` / `next` / `external` で必須。省略すると `now` → `replaced`';
+    const oldEn = '- Kinds: `now`. `--close-when` is required for `waiting` / `next` / `external`; omitted, `now` → `replaced`';
+    expect(problems(oldJa, RULE.memJa, 'line', TALKS_ABOUT_RULE)).not.toEqual([]);
+    expect(problems(oldEn, RULE.memEn, 'line', TALKS_ABOUT_RULE)).not.toEqual([]);
+    expect(problems(oldJa, RULE.memJa, 'line', TALKS_ABOUT_RULE).join()).toContain('0 times');
   });
 
   it.each(['src/lib/handoff/template.ts', 'src/cli/commands/handoff.ts'])(
@@ -166,8 +212,8 @@ describe('[#4227 G9] every place that names the kinds uses the generated text, a
   it.each(PLACES.filter((p) => p.form === 'line').map((p) => [p.name, p] as const))(
     '(iii) %s: a hand-written list line added beside the generated one is red',
     (_name, place) => {
-      const mutated = `${place.read()}\n- \`waiting\`・\`next\`・\`external\`・\`now\` require it`;
-      expect(problems(mutated, place.generated, place.form)).not.toEqual([]);
+      const mutated = `${place.read()}\n- \`waiting\`・\`next\`・\`external\`・\`now\` are required for --close-when`;
+      expect(problems(mutated, place.generated, place.form, place.scope)).not.toEqual([]);
     }
   );
 });

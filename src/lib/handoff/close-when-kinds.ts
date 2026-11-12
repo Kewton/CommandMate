@@ -30,8 +30,14 @@ export interface CloseWhenKindsText {
   ja: string;
   /** One line, English: the help body of `commandmate handoff`, and the en guide verbatim. */
   en: string;
-  /** The description of `propose add --close-when`. */
+  /** The description of `propose add --close-when` and of `mem add --close-when`. */
   option: string;
+  /** The line that heads the `--close-when` part of the help body of `commandmate mem`. */
+  memHelp: string;
+  /** One line, Japanese: the `commandmate mem` chapter of the ja guide, verbatim. */
+  memJa: string;
+  /** One line, English: the `commandmate mem` chapter of the en guide, verbatim. */
+  memEn: string;
 }
 
 export function closeWhenKindsText(): CloseWhenKindsText {
@@ -49,5 +55,8 @@ export function closeWhenKindsText(): CloseWhenKindsText {
     ja: `propose add の --close-when は kind が ${requiredList} のとき必須（無いと終了コード ${exit} で、何も保存しない）。${optionalList} は省略できる。`,
     en: `--close-when of "propose add": required for kind ${requiredList} (without it: exit ${exit}, nothing stored); optional for ${optionalList}.`,
     option: `When it closes (required for ${requiredList})`,
+    memHelp: `--close-when (required for ${requiredList}):`,
+    memJa: `mem add の --close-when は kind が ${requiredList} のとき必須（無いと終了コード ${exit} で、何も保存しない）。${optionalList} は省略できる。`,
+    memEn: `--close-when of "mem add": required for kind ${requiredList} (without it: exit ${exit}, nothing stored); optional for ${optionalList}.`,
   };
 }
