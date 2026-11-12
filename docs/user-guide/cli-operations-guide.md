@@ -68,6 +68,10 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate sync`](#commandmate-sync) | サーバーのworktree再スキャン（GUI同期ボタン相当） |
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
+| [`commandmate whoami`](#commandmate-whoami) | このセッションがどの worktree・インスタンスかの表示 |
+| [`commandmate peers`](#commandmate-peers) | 同じリポジトリの他セッションの一覧（そのまま実行できる `ask` 行つき） |
+| [`commandmate ask`](#commandmate-ask) | 他のセッションへ依頼して返答を受け取る（`--async` は待たない） |
+| [`commandmate relays`](#commandmate-relays) | `--async` / `--reply-to` の待ちの一覧・取り下げ・保留の解決 |
 | [`commandmate prompt`](#commandmate-prompt) | 止まっている画面の観測（種類・選択肢・観測トークン） |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
 | [`commandmate interrupt`](#commandmate-interrupt) | 生成中のターンの中断（GUI の中断ボタン相当） |
@@ -964,6 +968,222 @@ Completed: localllm-test-main (basis=hook_stop)
 | `hook_stop` | エージェント自身が、この `wait` が採用したターンの終了を報告した |
 | `session_gone` | 一度動いていた tmux セッションが消えた |
 | `scraper_ready` | 画面が composer に戻っただけ。**誰も裏付けていない**（hooks が無いインスタンスの通常経路） |
+
+---
+
+## commandmate whoami
+
+このセッションが**どの worktree のどのエージェントインスタンスか**を表示します。エージェントが他のセッションへ
+`ask` するとき、自分の worktree ID と instance ID を知る入口です（Issue #2376）。
+
+### 使用方法
+
+```bash
+commandmate whoami [--json] [--token <token>]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--json` | JSON で出力 |
+| `--token <token>` | 認証トークン（プロセスリストに見えるため `CM_AUTH_TOKEN` 環境変数を推奨） |
+
+### 何を見て答えるか
+
+1. 環境変数 `CM_WORKTREE_ID` / `CM_INSTANCE_ID` / `CM_CLI_TOOL`（無ければ起動行の `CM_AGENT_*`）。`source` は `env`
+2. 無ければ tmux セッション名 `mcbd-[<ns>-]<tool>-<worktree>[-<n>]`。`source` は `tmux-session`
+
+### 出力
+
+```text
+worktree:  commandmate-issue-101
+instance:  claude
+cli_tool:  claude
+alias:     Claude
+source:    env
+tmux:      mcbd-…-claude-commandmate-issue-101
+server:    http://localhost:3000
+```
+
+`--json` は `worktreeId` / `instanceId` / `cliToolId` / `alias`（roster に無ければ `null`）/ `source` /
+`sessionName` / `serverUrl` を返します。このセッションの worktree が接続先サーバーの一覧に無いとき
+（別のサーバーに接続している）は、stderr に警告を出し、`--json` に `"serverMismatch": true` を足します
+（終了コードは 0 のまま。Issue #2404）。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 答えた |
+| 3 | **NOT_IN_SESSION**: CommandMate が起動したエージェントセッションの中ではない（理由は stderr）。`ExitCode.START_FAILED` と同じ番号だが、サーバー起動の失敗とは無関係 |
+| 1 / 2 / 99 | サーバー未起動・引数エラー・予期しないエラー（[全終了コード一覧](#全終了コード一覧)） |
+
+---
+
+## commandmate peers
+
+このリポジトリにいる**他のエージェントセッション**を一覧し、各行に**そのまま実行できる `ask` の行**を付けます
+（Issue #2376）。`ls` と `instances` を組み合わせて探す手間を 1 回にまとめたものです。
+
+### 使用方法
+
+```bash
+commandmate peers [--json] [--token <token>]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--json` | JSON で出力 |
+| `--token <token>` | 認証トークン |
+
+自分のセッションは `commandmate whoami` と同じ方法で決め、**同じリポジトリの worktree** に絞ります。自分の行には
+`(you)` が付き、`ask` の行は付きません。
+
+```text
+commandmate-issue-102 / codex
+  alias: Codex   tool: codex   status: ready
+  commandmate ask commandmate-issue-102 --instance codex "<request>"
+```
+
+`--json` は `self`（`worktreeId` / `instanceId` / `cliToolId`）、`serverUrl`、`peers`（各行に `worktreeId` /
+`instanceId` / `cliTool` / `alias` / `status` / `isSelf` / `ask`。自分の行の `ask` は `null`）を返します。接続先が
+別のサーバーなら `serverMismatch: true` と stderr の警告が付きます。同じリポジトリに他のセッションが無いときは
+`No peer sessions found.` です。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 一覧を出した |
+| 3 | **NOT_IN_SESSION**: エージェントセッションの外から実行した（`whoami` と同じ） |
+| 1 / 2 / 99 | サーバー未起動・引数エラー・予期しないエラー |
+
+---
+
+## commandmate ask
+
+別のエージェントセッションへ依頼を送り、**返答を受け取るまでを 1 コマンドで**行います（`send` + `wait` + 返答の読み取り。
+Issue #2376 / #2377）。
+
+### 使用方法
+
+```bash
+commandmate ask <worktree-id> "<依頼>" --instance <id> [--timeout <秒>] [--json]
+commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <target>] [--allow-relay-chain]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--instance <id>` | 送り先のインスタンス（`<agent>` または `<agent>-<n>`。roster の alias も可）。**送り先はこれ 1 つで指定する**。省略時はそのツールの主インスタンス。alias が 2 行に当たると exit 2 |
+| `--agent <agent>` | roster に無いインスタンスへのアドホック指定（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`） |
+| `--timeout <秒>` | 返答を待つ上限（既定 1800） |
+| `--json` | 返答を JSON で出力 |
+| `--async` | 待たない。relay を登録して relay ID を出し、exit 0。返答は相手のターンが終わったとき `--reply-to` の入力欄へ届く |
+| `--reply-to <target>` | `--async` の返答の届け先: `<worktree-id>[@<instance-id\|alias>]`、または `self`（このコマンドを実行しているセッション。既定） |
+| `--allow-relay-chain` | relay された依頼に答える途中で開く relay を許可（既定は拒否。連鎖は 3 ホップで止まる） |
+| `--token <token>` | 認証トークン |
+
+`--auto-yes` は**意図的にありません**。他のセッションの Auto-Yes を入れるのは、そのセッションの安全柵の判断であり、質問の一部では
+ありません。
+
+### 待つか、待たないか
+
+| 状況 | 使うもの |
+|------|---------|
+| 返答が**次の一手に要る**（レビューの判定、調査の結果など） | `ask`（ブロックして返答を stdout に出す） |
+| 返答を待たず**自分のターンを終えたい** | `ask --async`、または `send --reply-to`。返答は後で `[from <alias> / <worktree>]` つきで自分の入力欄に届く |
+
+`--async` の標準出力は relay ID だけです（`--json` では `worktreeId` / `instanceId` / `cliToolId` / `relayId` / `mode: "async"`）。
+未解決の relay は [`commandmate relays`](#commandmate-relays) で見て、取り下げは `relays cancel` です。
+別のセッションの確認ダイアログには、`respond` で**代わりに答えない**でください（番号を取り違えると既定が選ばれます）。
+
+### 出力
+
+標準出力は返答の本文です。`--json` は次の形です。
+
+```json
+{
+  "worktreeId": "commandmate-issue-102",
+  "instanceId": "codex",
+  "cliToolId": "codex",
+  "source": "history",
+  "reply": "…",
+  "overlapped": true
+}
+```
+
+`source` は `history`（転写）/ `pane`（画面）/ `none`。`overlapped` は重なりを見つけたときだけ付きます
+（[同じインスタンスへ重ねて `ask` しない（Issue #3955）](#commandmate-wait)）。ターンは終わったが返答を読めなかったときは、
+stderr に警告を出して exit 0 です。上流障害（exit 11）では `--json` に `upstreamFault` を出します。
+
+### 終了コード
+
+`wait` の終了コードに、`ask` 固有の 11 と 32 が加わります。
+
+| コード | 意味 | 次のアクション |
+|:------:|------|---------------|
+| 0 | ターンが終わった（`--async` は relay を登録できた）。stdout が返答 | — |
+| 1 | サーバー未起動など（DEPENDENCY_ERROR） | `commandmate start --daemon` |
+| 2 | 引数エラー、alias の曖昧、**relay の拒否**（理由は stderr。CONFIG_ERROR と同じ番号）、相手が確認待ちで本文を送れなかった | stderr を読む。再送しない |
+| 10 | 相手が確認待ち。stdout にプロンプトの JSON | 報告する。`respond` で代わりに答えない |
+| 11 | **UPSTREAM_FAULT**: ターンが走らなかった。stderr と `--json` に `id=…`（`ask` は常に `failOnUpstreamFault: true`）。`id=context-limit` は文脈上限で、`instances <id> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別のインスタンス・モデルへ送る（#3936） | 時間を置くか送り先を変えて再送 |
+| 21 | 動いているセッションが無い | `instances <id>` で roster を確認 |
+| 32 | **ROLE NOT_SENT**: ロールの条件を満たさず、本文を入力していない | ロールの設定を見直す |
+| 99 | 予期しないエラー | — |
+| 124 | タイムアウト。送信が期限を過ぎて返った場合は**送信済み**（stderr に出る） | `capture <id> --instance <id> --pane --tail 60` で見る。**再送しない** |
+
+### 関連する節
+
+`ask` の細かい挙動は、[`commandmate wait`](#commandmate-wait) の下の次の節にあります（見出しはそのまま）。
+
+- 同じインスタンスへ重ねて `ask` しない（Issue #3955）
+- relay 配送と送信の結合（Issue #3957）
+- `ask` の上流障害と `id=context-limit`（Issue #3011）
+
+---
+
+## commandmate relays
+
+`ask --async` / `send --reply-to` が作った**待ち（relay）**を表示・取り下げ・保留の解決をします。
+
+### 使用方法
+
+```bash
+commandmate relays [--worktree <id>] [--instance <id>] [--id <relay-id>] [--json]
+commandmate relays cancel <relay-id> [--json]
+commandmate relays resolve <relay-id> --payload <id> --attempt <id> (--confirm | --retry | --discard) [--json]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--worktree <id>` | 一覧する worktree（既定はこのコマンドを実行しているセッション） |
+| `--instance <id>` | `--worktree` 内のインスタンス（id または alias） |
+| `--id <relay-id>` | 1 本の relay を、閉じたものも含めて表示（`send=` / `overlap=` / `hold=`） |
+| `--json` | JSON で出力 |
+| `--token <token>` | 認証トークン（親の `relays` に付けても、サブコマンドに付けても効く） |
+
+### サブコマンド
+
+| サブコマンド | 説明 |
+|-------------|------|
+| `relays cancel <relay-id>` | 開いている relay を取り下げ、以後の配送を止める。いま配送中の relay は 409（exit 2）。閉じた relay も exit 2。保留として入力欄に届いたかもしれないものは取り戻せない |
+| `relays resolve <relay-id>` | 配送が**不確定**（`uncertain`）で保留になったものを、依頼元の画面を確かめてから片付ける。`--payload <id>` と `--attempt <id>`（`relays --id` の `payload=<種類>:<id>` と `attempt=<id>`）に加え、`--confirm`（届いていた）/ `--retry`（届いていない: もう一度送る）/ `--discard`（送らずに捨てる）のどれか 1 つが必須（Issue #4082。npm 0.49.3 から） |
+
+一覧の列は `<relay-id> <state> <requester> <- <worker> hops=<n> expires=<iso>` に、必要に応じて `send=` / `overlap=` /
+`hold=` / `delivery=` / `payload=` / `attempt=` / `reason=` / `check=` / `pending=` / `blocked=` が付きます
+（`pending=` / `blocked=` は #4105、期限切れの通知が止まっている relay の `# closed, notice not delivered yet` は #4193。
+どちらも npm 0.50.0 から）。状態は `pending` / `prompt` / `delivered` / `expired` / `cancelled` です。
+
+終了コードは、成功が 0、引数・relay の不正と拒否が 2（CONFIG_ERROR）、サーバー未起動が 1、予期しないエラーが 99 です。
+
+### 関連する節
+
+relay の詳しい挙動は、[`commandmate wait`](#commandmate-wait) の下の次の節にあります（見出しはそのまま）。
+
+- relay 配送と送信の結合（Issue #3957）
+- 不確定な配送は自動で再送しない（Issue #4064）
+- 保留を解決する（Issue #4082）
+- 保留の知らせ・表示・件数（Issue #4082）
+- 依頼元の確認の案内で止まった配送（Issue #4105）
 
 ---
 
@@ -4396,6 +4616,7 @@ commandmate ls --token your-token
 | 1 | DEPENDENCY_ERROR | サーバー未起動等のインフラエラー／使える remote Provider が無い（`remote`） |
 | 2 | CONFIG_ERROR | バリデーションエラー（不正なagent, duration等）／更新フローの無いツール（`agents update`） |
 | 3 | START_FAILED | サーバーの起動・起動後の確認に失敗（`start` / `update` / `remote`） |
+| 3 | NOT_IN_SESSION | エージェントセッションの外から実行した（`whoami` / `peers`）。`start` 系の START_FAILED とは別の意味 |
 | 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`）／ Provider を閉じきれない（`remote stop`） |
 | 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証、`agents update`: エージェント CLI の更新コマンド） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |
