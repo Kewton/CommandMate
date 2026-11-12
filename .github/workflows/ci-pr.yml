@@ -876,6 +876,23 @@ jobs:
           # ran out of heap at ~5.4GB after ~285 specs (PR #4306 x2, PR #4310 x2): about 10%
           # headroom. 8192 is the quick fix; measuring where the heap grows is #4308's rest.
           NODE_OPTIONS: '--max-old-space-size=8192'
+          CM_E2E_HEAP_PROBE_DIR: ${{ runner.temp }}/e2e-heap
+
+      # [Issue #4308] Peak heap of the dev webServer vs its limit. Never affects the verdict.
+      - name: E2E heap summary
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: node scripts/ci/e2e-heap-probe.cjs summarize "$RUNNER_TEMP/e2e-heap" || true
+
+      - name: Upload E2E heap record
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-heap
+          path: ${{ runner.temp }}/e2e-heap/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

@@ -174,6 +174,18 @@ export default defineConfig({
       GIT_CEILING_DIRECTORIES,
       CM_SESSION_KILL_LEDGER_ROOT: E2E_SESSION_KILL_LEDGER_ROOT,
       CM_LOG_LEVEL: 'warn',
+      // [Issue #4308] CI-only heap probe: loaded into the dev server (and its node
+      // children) via NODE_OPTIONS. Without CM_E2E_HEAP_PROBE_DIR nothing changes.
+      ...(process.env.CM_E2E_HEAP_PROBE_DIR
+        ? {
+            NODE_OPTIONS: [
+              process.env.NODE_OPTIONS,
+              `--require ${path.resolve(__dirname, 'scripts/ci/e2e-heap-probe.cjs')}`,
+            ]
+              .filter(Boolean)
+              .join(' '),
+          }
+        : {}),
     },
   },
 });
