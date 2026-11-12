@@ -21,6 +21,13 @@
  * first / second signal: the explicit ones must be green, the copies without a part of R-SIG (a trap removed, a signal
  * left out of the ignores) must be red (`red`: they must NOT meet the R-SIG outcome). The bash version is in the describe.
  *
+ * The stage of a send (pr1b-9): a signal is sent only once the marks of the cell's stage are there (the gates of the
+ * stops, `main-wait.reached` of the main shell at its `wait "$CHILD"`, `ack.made` of the child, `run-ts.started` /
+ * `run-ts.ended` of the fake run.ts). The marks seen at each send are recorded; a send whose marks are not the cell's
+ * stage (a mark it needs is missing, or one it must not have is there) is 判定不能: the run drove another cell, so the
+ * row fails with that message and its outcome is not compared (not green, not red). STAGE_OF lists the stage of every
+ * driven row; the rows `（判定不能の陽性対照 …）` send without waiting for the marks and must come out 判定不能.
+ *
  * The X0 positive control runs a copy of daily.sh with the fix taken out (the handlers without their first `trap ""`,
  * daily_exit without it), committed in the sandbox clone only: a second TERM at X0 leaves no line and the lock (✗(a)).
  *
@@ -117,10 +124,13 @@ type Drive = {
   x0Signals?: NodeJS.Signals[];
   /** run a copy of daily.sh with a part of R-SIG taken out (the positive controls) */
   mutant?: Mutant;
+  /** the controls of the stage check: send without waiting for the child's marks ('child') or for any mark ('all') */
+  noWait?: 'child' | 'all';
 };
 type Cell =
   /** red: a positive control — the copy of daily.sh with a part taken out must NOT meet `expect` (the R-SIG outcome) */
-  | { kind: 'drive'; drive: Drive; expect: Expect; disposition?: string; red?: boolean }
+  /** undecidable: a control of the stage check — the send must come out 判定不能 */
+  | { kind: 'drive'; drive: Drive; expect: Expect; disposition?: string; red?: boolean; undecidable?: boolean }
   | { kind: 'same'; as: string; why: string }
   | { kind: 'na'; why: string }
   | { kind: 'theory'; why: string; disposition: string };
@@ -135,6 +145,8 @@ const ACK = failed(/^handoff-failed stage=ack before=/);
 const freed = (sync: Sync, exit: Expect['exit'], extra: Partial<Expect> = {}): Expect => ({ sync, exit, lock: 'free', runTs: 'not-checked', ...extra });
 const drive = (d: Drive, e: Expect, disposition?: string): Cell => ({ kind: 'drive', drive: d, expect: e, disposition });
 const red = (d: Drive, e: Expect, disposition: string): Cell => ({ kind: 'drive', drive: d, expect: e, disposition, red: true });
+/** a control of the stage check: its send must come out 判定不能 */
+const undecidable = (d: Drive, e: Expect): Cell => ({ kind: 'drive', drive: d, expect: e, undecidable: true });
 const NO_HANDLER = 'INT/TERM の handler がまだ無い（既定の死）。2 本目も既定で死ぬだけで、X0 は無い';
 
 /** the emit points of a route (§2.2): p0 – p3, each with TERM and TERM2 (the same stop plus x0) */
@@ -466,7 +478,111 @@ const R_SIG_ROWS: Row[] = SIGS.flatMap((signal): Row[] => [
 ]);
 TRAP_TABLE.push(...R_SIG_ROWS);
 
+// pr1b-9: the controls of the stage check. run.ts starting 3 s late (CM_T_NPX_DELAY): a row that waits for its marks
+// still drives its cell (陰性対照; before pr1b-9, C7p1 sent at the echo with run.ts not started yet: ENOENT fake-out);
+// a send that does not wait for them comes out 判定不能 (陽性対照).
+const C7_OK_ECHO = 'AGENT_HEALTH_SYNC status=ok*';
+const STAGE_CONTROL_ROWS: Row[] = [
+  {
+    section: 'C7',
+    point: 'p1',
+    column: 'TERM',
+    variant: '陰性対照: run.ts の起動が 3 秒遅れても印を待って送る',
+    cell: drive({ stops: ['echo-before'], env: { FAKE_WAIT: '1', CM_T_NPX_DELAY: '3' }, echo: C7_OK_ECHO }, freed(OK, 143, { runTs: 'stopped' })),
+  },
+  {
+    section: 'C8',
+    column: 'TERM',
+    variant: '陰性対照: run.ts の起動が 3 秒遅れても印を待って送る',
+    cell: drive({ stops: ['run-ts'], env: { FAKE_WAIT: '1', CM_T_NPX_DELAY: '3' } }, freed(OK, 143, { runTs: 'stopped' })),
+  },
+  {
+    section: 'C7',
+    point: 'p1',
+    column: 'TERM',
+    variant: '判定不能の陽性対照: run.ts の起動の印を待たずに送る',
+    cell: undecidable({ stops: ['echo-before'], env: { FAKE_WAIT: '1', CM_T_NPX_DELAY: '3' }, echo: C7_OK_ECHO, noWait: 'child' }, freed(OK, 143, { runTs: 'stopped' })),
+  },
+  {
+    section: 'C8',
+    column: 'TERM',
+    variant: '判定不能の陽性対照: run.ts の起動の印を待たずに送る',
+    cell: undecidable({ stops: ['run-ts'], env: { FAKE_WAIT: '1', CM_T_NPX_DELAY: '3' }, noWait: 'child' }, freed(OK, 143, { runTs: 'stopped' })),
+  },
+  {
+    section: 'C4',
+    column: 'TERM',
+    variant: '判定不能の陽性対照: どの印も待たずに送る',
+    cell: undecidable({ stops: ['tmp'], noWait: 'all' }, freed(INTERRUPTED(143), 143, { runTs: 'never' })),
+  },
+];
+TRAP_TABLE.push(...STAGE_CONTROL_ROWS);
+
 const rowName = (row: Row): string => `${row.section}${row.point ?? ''} × ${row.column}${row.variant ? `（${row.variant}）` : ''}`;
+
+/** The marks that say how far a run is: the gates of the stops (`<stop>.reached`), the main shell at `wait "$CHILD"`
+ * (`main-wait.reached`), the child's receipt (`ack.made`), the fake run.ts started / about to end. */
+type Stage = { present: string[]; absent: string[] };
+const reachedOf = (stop: Stop): string => (stop === 'run-ts' ? 'main-wait.reached' : `${stop}.reached`);
+const NO_CHILD_YET = ['main-wait.reached', 'ack.made', 'run-ts.started'];
+/** pr1b-9: the stage the first signal of a driven row needs (null: the row sends none, or only at x0). The main shell
+ * is held at the gate of its last stop, so what comes after it in the main shell cannot be there; the child runs on its
+ * own, so what the cell says of it (run.ts started or not, ended) is a mark the send waits for (present) or checks the
+ * absence of (absent). */
+const firstStage = (row: Row): Stage | null => {
+  if (row.cell.kind !== 'drive') return null;
+  const d = row.cell.drive;
+  if (d.stops.length === 0 || FIRST[row.column].length === 0) return null;
+  const reached = d.stops.map(reachedOf);
+  const at = (present: string[], absent: string[]): Stage => ({ present: [...new Set([...reached, ...present])], absent });
+  const last = d.stops[d.stops.length - 1];
+  switch (last) {
+    case 'node-start': // A0: no lock, no trap
+    case 'owner-lock-made': // A2: inside the acquire
+    case 'trap-int': // A3
+    case 'npm-install': // B0
+    case 'mktemp': // C0
+    case 'deadline-date': // C2: HAND made, no child
+    case 'tmp': // C4 / C11 / X0: the child waits for `go`
+    case 'ack-loop': // C6: the child is held before its `ack`
+      return at([], NO_CHILD_YET);
+    case 'run-ts': // C8 / X1: the main shell at `wait "$CHILD"`, run.ts running
+      return at(['ack.made', 'run-ts.started'], ['run-ts.ended']);
+    case 'drain': // C9: run.ts ended and was reaped
+      return at(['main-wait.reached', 'run-ts.ended'], []);
+    case 'daily-exit': // C1p3 (--sync-only: no child) / C12 (run.ts ended)
+      return row.section === 'C1' ? at([], NO_CHILD_YET) : at(['main-wait.reached', 'run-ts.ended'], []);
+    case 'fail-cut':
+    case 'fail-node':
+    case 'echo-before':
+    case 'echo-after':
+      switch (row.section) {
+        case 'B0f': // the sync failed: no child
+        case 'C1': // --sync-only: no child
+        case 'C5': // the handover failed before `go`: the child is killed in daily_handoff_fail (its wait is not main's)
+          return at([], NO_CHILD_YET);
+        case 'C7': // the ack was seen, run.ts runs, the main shell is not at its wait yet
+          return at(['ack.made', 'run-ts.started'], ['main-wait.reached', 'run-ts.ended']);
+        case 'C10': // the child ended 75 without its ack and was reaped
+        case 'C11': // the child was killed before `go` and was reaped
+          return at(['main-wait.reached'], ['run-ts.started']);
+        default:
+          break;
+      }
+      break;
+    default:
+      break;
+  }
+  throw new Error(`no stage for ${rowName(row)}`);
+};
+/** the stage of the send at x0: daily_on_exit is held at its `trap ''` */
+const x0Stage = (row: Row): Stage | null => (row.cell.kind === 'drive' && row.cell.drive.x0 ? { present: ['x0.reached'], absent: [] } : null);
+/** null when the marks seen are the stage, else what is off */
+const offStage = (stage: Stage, seen: readonly string[]): string | null => {
+  const missing = stage.present.filter((mark) => !seen.includes(mark));
+  const extra = stage.absent.filter((mark) => seen.includes(mark));
+  return missing.length === 0 && extra.length === 0 ? null : `missing [${missing.join(', ')}] not expected [${extra.join(', ')}] seen [${seen.join(', ')}]`;
+};
 
 // ================================================================ the table itself
 
@@ -485,6 +601,17 @@ describe('#4288 PR1b, the trap table of daily.sh (pm-trap-table-4288-pr1b.md)', 
       expect([section, columns.has('TERM2')]).toEqual([section, true]);
       for (const other of OTHER) expect([section, other, columns.has(other)]).toEqual([section, other, true]);
     }
+  });
+
+  it('gives every driven row that sends a signal the stage of that send (pr1b-9)', () => {
+    for (const row of TRAP_TABLE.filter((r) => r.cell.kind === 'drive')) {
+      const stage = firstStage(row);
+      const d = (row.cell as Extract<Cell, { kind: 'drive' }>).drive;
+      if (d.stops.length > 0 && FIRST[row.column].length > 0) expect([rowName(row), stage !== null]).toEqual([rowName(row), true]);
+      if (d.x0) expect(x0Stage(row)).not.toBeNull();
+    }
+    // the controls: two that wait (green) and three that do not (判定不能)
+    expect(TRAP_TABLE.filter((row) => row.cell.kind === 'drive' && row.cell.undecidable).map(rowName)).toHaveLength(3);
   });
 
   it.each(TRAP_TABLE.filter((row) => row.cell.kind !== 'drive').map((row) => [rowName(row), row] as const))('%s: not driven, and says why', (_name, row) => {
@@ -583,10 +710,17 @@ wait() {
   builtin wait "$@"
 }
 mkdir() {
+  local s
   if [ "$0" = cm-daily-child ] && [ -n "\${CM_T_HOLD_ACK:-}" ]; then
     case "$*" in */ack) cm_t_hit ack-hold ;; esac
   fi
   command mkdir "$@"
+  s=$?
+  # not a stop: the child made its receipt
+  if [ "$0" = cm-daily-child ] && [ "$s" -eq 0 ]; then
+    case "$*" in */ack) : > "$CM_T_GATE/ack.made" ;; esac
+  fi
+  return $s
 }
 `.replace(/\\\$/g, '$');
 
@@ -663,9 +797,12 @@ describe(`#4288 PR1b, daily.sh driven at every cell of the trap table (bash ${BA
     fs.writeFileSync(
       path.join(root, 'bin', 'npx'),
       `#!/bin/bash
+if [ -n "\${CM_T_NPX_DELAY:-}" ]; then sleep "$CM_T_NPX_DELAY"; fi
 { echo "TOKEN=$CM_RUN_LOCK_TOKEN"; echo "PID=$$"; } > "$FAKE_OUT"
-if [ -n "\${FAKE_LEAVE_DEAF:-}" ]; then ( trap '' TERM; exec sleep 3600 ) >/dev/null 2>&1 </dev/null & echo $! > "$FAKE_OUT.member"; exit \${FAKE_EXIT:-0}; fi
+: > "$CM_T_GATE/run-ts.started"
+if [ -n "\${FAKE_LEAVE_DEAF:-}" ]; then ( trap '' TERM; exec sleep 3600 ) >/dev/null 2>&1 </dev/null & echo $! > "$FAKE_OUT.member"; : > "$CM_T_GATE/run-ts.ended"; exit \${FAKE_EXIT:-0}; fi
 if [ -n "\${FAKE_WAIT:-}" ]; then exec sleep 3600; fi
+: > "$CM_T_GATE/run-ts.ended"
 exit \${FAKE_EXIT:-0}
 `,
       { mode: 0o755 }
@@ -691,6 +828,11 @@ exit \${FAKE_EXIT:-0}
 
   afterEach(() => {
     for (const child of spawned.splice(0)) child.kill('SIGKILL');
+    // a fake run.ts that a 判定不能 control left waiting (it started after the send)
+    if (fs.existsSync(fakeOut)) {
+      const pid = /PID=(\d+)/.exec(fs.readFileSync(fakeOut, 'utf8'))?.[1];
+      if (pid && isAlive(Number(pid))) process.kill(Number(pid), 'SIGKILL');
+    }
     const member = `${fakeOut}.member`;
     if (fs.existsSync(member)) {
       try {
@@ -743,8 +885,16 @@ exit \${FAKE_EXIT:-0}
     await until(path.join(gate, 'held'));
   };
 
-  type Outcome = { code: number | null; signal: NodeJS.Signals | null; lines: string[]; stderr: string; childPid: number };
-  const run = async (column: Column, d: Drive): Promise<Outcome> => {
+  /** a send: where (the first signal / x0), the marks there, and what is off the cell's stage (null: on it) */
+  type Sent = { at: 'first' | 'x0'; marks: string[]; off: string | null };
+  type Outcome = { code: number | null; signal: NodeJS.Signals | null; lines: string[]; stderr: string; childPid: number; sent: Sent[] };
+  const marks = (): string[] =>
+    fs
+      .readdirSync(gate)
+      .filter((name) => /\.(reached|made|started|ended)$/.test(name))
+      .sort();
+  const run = async (row: Row, d: Drive): Promise<Outcome> => {
+    const column = row.column;
     prepare(d);
     if (d.setup?.includes('held')) await hold();
     const env: Record<string, string> = { ...(d.env ?? {}) };
@@ -773,36 +923,52 @@ exit \${FAKE_EXIT:-0}
     child.stderr!.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('close', (code, signal) => resolve({ code, signal })));
     const signals = FIRST[column];
+    const sent: Sent[] = [];
+    /** records the marks there and sends (the record is taken before the signals) */
+    const send = (at: Sent['at'], stage: Stage | null, list: readonly NodeJS.Signals[]): void => {
+      const seen = marks();
+      sent.push({ at, marks: seen, off: stage ? offStage(stage, seen) : null });
+      for (const signal of list) process.kill(child.pid!, signal);
+    };
+    const stage = firstStage(row);
 
+    if (d.noWait === 'all') {
+      // the control: sent at once, before any mark; the run is left to end by itself (or is ended)
+      send('first', stage, signals);
+      const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
+      const { code, signal } = await exited;
+      clearTimeout(timer);
+      return { code, signal, lines: stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC ')), stderr, childPid: child.pid!, sent };
+    }
     for (const [index, stop] of d.stops.entries()) {
       const last = index === d.stops.length - 1;
-      if (stop === 'run-ts') {
-        const end = Date.now() + 30_000;
-        while (!(fs.existsSync(fakeOut) && fs.readFileSync(fakeOut, 'utf8').includes('PID=')) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 25));
-        expect(fs.existsSync(fakeOut)).toBe(true);
-        // run.ts can be running before the main shell has made its line (its ack loop polls): C8 is the `wait`
-        await until(path.join(gate, 'main-wait.reached'));
-      } else {
-        await until(path.join(gate, `${stop}.reached`));
-      }
+      // the main shell's mark of the stop (C8: its `wait "$CHILD"`)
+      await until(path.join(gate, reachedOf(stop)));
       if (stop === 'tmp' && d.killChild) {
+        // the child is there (forked and exec'd as cm-daily-child) before it is killed
+        const end = Date.now() + 30_000;
+        while (waitingChild(child.pid!).length === 0 && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 25));
         const waiting = waitingChild(child.pid!);
         expect(waiting).toHaveLength(1);
         process.kill(waiting[0], 'SIGKILL');
       }
-      if (last) for (const signal of signals) process.kill(child.pid!, signal);
+      if (last && signals.length > 0) {
+        // the marks of the child that the cell's stage needs (run.ts started / ended) — not waited by the control
+        if (stage && d.noWait !== 'child') for (const mark of stage.present) await until(path.join(gate, mark));
+        send('first', stage, signals);
+      }
       if (stop !== 'run-ts') fs.writeFileSync(path.join(gate, `${stop}.go`), '');
       // the child's `ack` stays held: it must not exec run.ts while the EXIT trap has not stopped it yet
     }
     if (d.x0) {
       await until(path.join(gate, 'x0.reached'), 60_000);
       // the second TERM, and an INT, while daily_on_exit is held at its `trap '' INT TERM`
-      for (const signal of d.x0Signals ?? (['SIGTERM', 'SIGINT'] as NodeJS.Signals[])) process.kill(child.pid!, signal);
+      send('x0', x0Stage(row), d.x0Signals ?? (['SIGTERM', 'SIGINT'] as NodeJS.Signals[]));
       await new Promise((resolve) => setTimeout(resolve, 150));
       fs.writeFileSync(path.join(gate, 'x0.go'), '');
     }
     const { code, signal } = await exited;
-    return { code, signal, lines: stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC ')), stderr, childPid: child.pid! };
+    return { code, signal, lines: stdout.split('\n').filter((line) => line.startsWith('AGENT_HEALTH_SYNC ')), stderr, childPid: child.pid!, sent };
   };
 
   const handChildren = (): string[] =>
@@ -853,15 +1019,22 @@ exit \${FAKE_EXIT:-0}
     '%s',
     async (_name, row) => {
       const cell = row.cell as Extract<Cell, { kind: 'drive' }>;
-      const outcome = await run(row.column, cell.drive);
+      const outcome = await run(row, cell.drive);
       // the record of each run (bash version, lines, exit, lock), for the closing table of the contract
       if (process.env.CM_T_REPORT) {
         const version = spawnSync('bash', ['-c', 'echo $BASH_VERSION'], { encoding: 'utf8' }).stdout.trim();
         fs.appendFileSync(
           process.env.CM_T_REPORT,
-          `${JSON.stringify({ row: rowName(row), bash: version, red: !!cell.red, lines: outcome.lines, code: outcome.code, signal: outcome.signal, lockLeft: fs.existsSync(lockDir) })}\n`
+          `${JSON.stringify({ row: rowName(row), bash: version, red: !!cell.red, undecidable: !!cell.undecidable, stage: firstStage(row), sent: outcome.sent, lines: outcome.lines, code: outcome.code, signal: outcome.signal, lockLeft: fs.existsSync(lockDir) })}\n`
         );
       }
+      // the stage of each send (pr1b-9): a send off the cell's stage drove another cell — 判定不能, never compared
+      const off = outcome.sent.filter((s) => s.off !== null).map((s) => `${s.at}: ${s.off}`);
+      if (cell.undecidable) {
+        expect(off, 'the control sent without waiting for its marks and was still on the stage: the check does not see a send off it').not.toEqual([]);
+        return;
+      }
+      if (off.length > 0) throw new Error(`判定不能: ${rowName(row)} — 信号を送った時点の印がセルの前提の段と違う（${off.join('; ')}）。別のセルの状態を駆動したので期待とは比べない`);
       if (cell.red) {
         let failure: unknown;
         try {
