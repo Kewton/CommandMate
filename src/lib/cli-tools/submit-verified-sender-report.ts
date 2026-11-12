@@ -177,19 +177,19 @@ export function reportSubmittedBodyInComposer(
   });
 }
 
-/** The read-back's state, rule and frame, as {@link sendUnderInputLock}'s loop holds them (Issue #4057). */
+/** The read-back's state, rule and frame, as the loop of `sendUnderInputLock` (submit-verified-sender.ts) holds them (Issue #4057). */
 export interface SubmitReadBack {
   state: SubmitState;
   rule: SubmitRule;
   output: string;
 }
 
-/** `params.submitEnterCount`, else the composer's (Issue #4057: split out of {@link sendUnderInputLock}). */
+/** `params.submitEnterCount`, else the composer's (Issue #4057: split out of `sendUnderInputLock` (submit-verified-sender.ts)). */
 export function resolveSubmitEnterCount(params: SubmitVerifiedSendParams, composer: ComposerSpec): number {
   return params.submitEnterCount ?? composer.submitEnterCount;
 }
 
-/** Whether a failed paste must leave a carried mark (Issue #4057: split out of {@link sendUnderInputLock}). */
+/** Whether a failed paste must leave a carried mark (Issue #4057: split out of `sendUnderInputLock` (submit-verified-sender.ts)). */
 export function pasteFailureMayHaveTyped(error: unknown): boolean {
   // Whether tmux put any of it into the pane is unknown — except after a
   // refused input boundary (Issue #3992) or a failed `load-buffer` (Issue
@@ -199,12 +199,12 @@ export function pasteFailureMayHaveTyped(error: unknown): boolean {
   return !isInputBoundaryRefusal(error) && !notStarted;
 }
 
-/** Whether the typed body is waited for before Enter (Issue #4057: split out of {@link sendUnderInputLock}). */
+/** Whether the typed body is waited for before Enter (Issue #4057: split out of `sendUnderInputLock` (submit-verified-sender.ts)). */
 export function shouldAwaitTypedBody(awaitTypedBody: boolean, cliToolId: CLIToolType): boolean {
   return awaitTypedBody && SUPPORTED_COMPOSER_TOOLS.has(cliToolId);
 }
 
-/** The receipt a read-back's verdict asks for (Issue #4057: split out of {@link sendUnderInputLock}). */
+/** The receipt a read-back's verdict asks for (Issue #4057: split out of `sendUnderInputLock` (submit-verified-sender.ts)). */
 export function promptReceiptFor(input: {
   state: SubmitState;
   rule: SubmitRule;
@@ -225,7 +225,7 @@ export type PromptReportOutcome = Awaited<ReturnType<typeof awaitPromptReport>>;
 
 /**
  * The read-back after an `awaited` receipt, from what {@link awaitPromptReport}
- * resolved to (Issue #4057: split out of {@link sendUnderInputLock}). Synchronous:
+ * resolved to (Issue #4057: split out of `sendUnderInputLock` (submit-verified-sender.ts)). Synchronous:
  * the wait itself stays in the caller, so the continuation after it is the
  * original one. THROWS when the agent never reported the prompt.
  */
@@ -266,7 +266,7 @@ export function settleAwaitedPromptReport(input: {
   return { state, rule: screenRule, output: screenOutput };
 }
 
-/** Remember a body only the screen called submitted (Issue #4057: split out of {@link sendUnderInputLock}). */
+/** Remember a body only the screen called submitted (Issue #4057: split out of `sendUnderInputLock` (submit-verified-sender.ts)). */
 export function rememberScreenOnlySubmit(input: {
   sessionName: string;
   cliToolId: CLIToolType;
@@ -289,7 +289,7 @@ export function rememberScreenOnlySubmit(input: {
   }
 }
 
-/** Log a failed clear of a replaced input line (Issue #4057: split out of {@link sendUnderInputLock}). */
+/** Log a failed clear of a replaced input line (Issue #4057: split out of `sendUnderInputLock` (submit-verified-sender.ts)). */
 export function logClearInputFailed(sessionName: string, cliToolId: CLIToolType, clearError: unknown): void {
   logger.error('submit-clear-input-failed', {
     sessionName,
@@ -300,7 +300,7 @@ export function logClearInputFailed(sessionName: string, cliToolId: CLIToolType,
 
 /**
  * Whether a read-back that is not the last one sends no Enter (Issue #4057:
- * split out of {@link sendUnderInputLock}; the caller goes on to the next read).
+ * split out of `sendUnderInputLock` (submit-verified-sender.ts); the caller goes on to the next read).
  */
 export function holdsResendEnter(input: {
   state: SubmitState;

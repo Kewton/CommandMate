@@ -220,7 +220,8 @@ const MOBILE_SEARCH_BAR_TOP_CLASS = 'top-16';
  * tab's props are built by `MobileContent` (`WorktreeDetailMobile`) as one
  * frozen object, and neither a new prop nor a new context could cross that
  * boundary without a module every mount of this tab does not already have.
- * The list is the same information: both routes build
+ * The list carries the same fields for this label, though not the whole
+ * detail (it has no `gitStatus`): both routes build
  * `sessionStatusByInstance` with `detectWorktreeSessionStatus`, so the phone
  * and the desktop read one field from one builder, and `buildModelByInstance`
  * is the same projection `WorktreeDetailDesktop` feeds the split. The list

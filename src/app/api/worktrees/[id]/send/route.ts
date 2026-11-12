@@ -212,7 +212,7 @@ async function handleSend(
     // failed start to a phone (`BaseCLITool.startSession`). Removing the copy
     // leaves one gate, and it is the one that notifies.
     //
-    // The 503 is preserved below by mapping SESSION_START_UNAVAILABLE, and the
+    // The 503 is preserved by mapping SESSION_START_UNAVAILABLE (send-session-start.ts), and the
     // body is now the tool's own wording — which for copilot carries its install
     // hint (#1907) that this route's fixed sentence used to discard.
     //

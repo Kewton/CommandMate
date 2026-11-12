@@ -1158,7 +1158,8 @@ export const DesktopHeader = memo(function DesktopHeader({
       // controls keeps them at the right end whatever the left takes.
       className="flex h-11 flex-shrink-0 items-center gap-3 px-4 bg-surface border-b border-border"
     >
-      {/* Left: status and title (Issue #747: hamburger moved to ActivityBar;
+      {/* Left: status and title (Issue #747: the hamburger moved out of this header —
+          the sidebar's own toggle since #3512;
           Issue #2647: the Home button and its divider were removed).
           Issue #2481: `min-w-0` makes this group — not the controls on the
           right — the one that gives way on a narrow header: its text

@@ -76,9 +76,10 @@ Tailwind からは `bg-background` / `bg-surface` / `text-accent-500` のよう�
 `--sidebar-*`（Issue #1073）は **standalone なリテラル RGB 値**で定義する（`--surface` 等を
 `var()` 参照しない）。理由: `--surface` 階梯の将来改修がサイドバー色に意図せず波及するのを防ぐため。
 「テーマ追従」方式のため、ライトは白系パネル（slate-50 + ヘアライン）、ダークは `#141821`
-（`--surface` = #1049 の階梯）に整合させる。`ThemeToggle` はサイドバー／ヘッダー共有部品のため
+（`--surface` = #1049 の階梯）に整合させる。共有部品はサイドバー専用でなければ
 `--sidebar-*` には束縛せず、テーマ中立トークン（`text-muted-foreground` / `hover:bg-muted` /
-`focus:ring-ring`）で着色する。
+`focus:ring-ring`）で着色する（`ThemeToggle` がその例だったが、今は本番のどの画面からも使われない。
+テーマの切り替えは設定メニュー `SettingsMenu`）。
 
 ### Tailwind クラス対応
 
@@ -245,7 +246,7 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 インタラクティブ要素のフォーカスリングは **`focus-visible:`**（`focus:` ではなく）で表現し、
 キーボード操作時のみリングを描画する（マウスクリックでリングを出さない）。手本は `Tabs` / `Switch`。
 
-- **ボタン系プリミティブ**（`Button` / `SidebarToggle` / アイコンボタン等）:
+- **ボタン系プリミティブ**（`Button` / アイコンボタン等）:
   `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background`。
   `ring-offset-background` を必ず付ける（未指定だと Tailwind 既定の白オフセットがダークで白ハローになる）。
 - **フォーム系プリミティブ**（`Input` / `Textarea` / `Select` トリガー等）:
