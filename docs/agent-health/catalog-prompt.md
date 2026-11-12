@@ -22,7 +22,7 @@
    bash scripts/agent-health/daily.sh --sync-only --out "$SYNC_REPORT"; echo "EXIT=$?"
    ```
    - `EXIT=0` なら次へ進む
-   - `EXIT=2`（同期の失敗）なら、出力の `AGENT_HEALTH_SYNC …` の行を最後の報告に含めて手順 3 へ進む（スクリプトは実行しない）
+   - `EXIT=2`（同期の失敗）なら、出力の `AGENT_HEALTH_SYNC …` の行（同じ行の重複は 1 本と数える）を最後の報告に含めて手順 3 へ進む（スクリプトは実行しない）
 2. スクリプトを実行する（ソースの取得を含め 1〜3 分ほど）
    ```bash
    npx tsx scripts/agent-health/catalog-check.ts; echo "EXIT=$?"

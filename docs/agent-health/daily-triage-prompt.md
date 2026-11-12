@@ -51,5 +51,6 @@
    ```
    AGENT_HEALTH date=<YYYY-MM-DD> pass=<数> fail=<数> flaky=<数> skip=<数> skip_kinds=<種類>:<数>,… issues_created=<番号をカンマ区切り> issues_commented=<番号をカンマ区切り> sync=<AGENT_HEALTH_SYNC の status>
    ```
+   - 同じ `AGENT_HEALTH_SYNC` の行の重複は 1 本と数える（出力の直後の中断で 2 本並びうる。`status` は 1 通りに決まる）
    - `pass`・`fail`・`skip` は手順 2 の `COUNTS=`（レポートの `coverage.counts`。9 ツール × 7 項目）の数。`skip_kinds` は `SKIP_KINDS=` の値をそのまま書く
      （例: `no-definition:5,not-shown:2,signed-out:6,unsupported:12`）。`coverage` が無いレポート（`EXIT=2` の同期失敗など）は `skip_kinds=-`
