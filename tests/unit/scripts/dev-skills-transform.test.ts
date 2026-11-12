@@ -2,7 +2,13 @@
  * Unit tests for the -dev skill transform (Issue #4323).
  * @vitest-environment node
  */
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { generate } from '../../../scripts/dev-skills/generate.mjs';
 import {
   DESCRIPTION_PREFIX,
   countDevCli,
@@ -105,5 +111,101 @@ describe('inverse', () => {
   it('counts commandmatedev only where the rules produced it', () => {
     expect(countDevCli(forward('references/x.md', 'commandmate a, `commandmate`, CommandMate'))).toBe(2);
     expect(countDevCli('commandmate a')).toBe(0);
+  });
+});
+
+describe('generate: refuses an upstream whose file set is not the declared one (Issue #4323)', () => {
+  let tmp: string | null = null;
+  afterEach(() => {
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    tmp = null;
+  });
+
+  const sha = (t: string) => createHash('sha256').update(t).digest('hex');
+  const FILES: Record<string, string> = { 'SKILL.md': '---\nname: cmate-handoff\ndescription: d\n---\n', 'references/a.md': 'commandmate send\n' };
+
+  function fixture(omit?: string) {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dev-skills-gen-'));
+    const source = path.join(tmp, 'skills-src');
+    const repoRoot = path.join(tmp, 'repo');
+    const pinPath = path.join(tmp, 'pin.json');
+    // The generator reads every UPSTREAM_PACKAGES entry, so both are faked.
+    const manifestOf = (files: Record<string, string>) =>
+      `version: 1.0.0\nfiles:\n${Object.entries(files)
+        .map(([p, t]) => `  - path: ${p}\n    sha256: ${sha(t)}`)
+        .join('\n')}\n`;
+    for (const up of ['skills/cmate-delegate', 'skills/cmate-handoff']) {
+      const dir = path.join(source, up);
+      fs.mkdirSync(path.join(dir, 'references'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'commandmate.skill.yaml'), manifestOf(FILES));
+      for (const [p, t] of Object.entries(FILES)) {
+        if (p !== omit) fs.writeFileSync(path.join(dir, p), t);
+      }
+    }
+    execFileSync('git', ['init', '-q'], { cwd: source });
+    execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x'], { cwd: source });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8' }).trim();
+    return { source, repoRoot, pinPath, head };
+  }
+
+  const pinOf = (head: string) => ({
+    ref: head,
+    packages: ['cmate-delegate-dev', 'cmate-handoff-dev'].map((id) => ({
+      id,
+      upstream: id === 'cmate-delegate-dev' ? 'skills/cmate-delegate' : 'skills/cmate-handoff',
+      version: '1.0.0',
+      files: Object.entries(FILES).map(([p, t]) => ({ path: p, upstreamSha256: sha(t), outputSha256: 'x' })),
+    })),
+  });
+
+  function seedRoots(repoRoot: string) {
+    for (const root of ['.claude/skills', '.agents/skills']) {
+      for (const id of ['cmate-delegate-dev', 'cmate-handoff-dev']) {
+        for (const p of Object.keys(FILES)) {
+          const abs = path.join(repoRoot, root, id, p);
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, 'ORIGINAL');
+        }
+      }
+    }
+  }
+
+  const rootsUntouched = (repoRoot: string) =>
+    ['.claude/skills', '.agents/skills'].every((root) =>
+      ['cmate-delegate-dev', 'cmate-handoff-dev'].every((id) =>
+        Object.keys(FILES).every((p) => fs.readFileSync(path.join(repoRoot, root, id, p), 'utf8') === 'ORIGINAL'),
+      ),
+    );
+
+  it('(1) a declared file missing from upstream (no --ref) fails and writes nothing', () => {
+    const { source, repoRoot, pinPath, head } = fixture('references/a.md');
+    seedRoots(repoRoot);
+    fs.writeFileSync(pinPath, JSON.stringify(pinOf(head)));
+    const before = fs.readFileSync(pinPath, 'utf8');
+    expect(() => generate({ source, repoRoot, pinPath })).toThrow(/references\/a\.md/);
+    expect(rootsUntouched(repoRoot)).toBe(true);
+    expect(fs.readFileSync(pinPath, 'utf8')).toBe(before);
+  });
+
+  it('(2) --ref with a declared file missing must not shrink the pin', () => {
+    const { source, repoRoot, pinPath, head } = fixture('references/a.md');
+    seedRoots(repoRoot);
+    fs.writeFileSync(pinPath, JSON.stringify(pinOf(head)));
+    const before = fs.readFileSync(pinPath, 'utf8');
+    expect(() => generate({ source, repoRoot, pinPath, ref: head })).toThrow(/references\/a\.md/);
+    expect(rootsUntouched(repoRoot)).toBe(true);
+    expect(fs.readFileSync(pinPath, 'utf8')).toBe(before);
+  });
+
+  it('(negative control) a complete upstream still generates both roots', () => {
+    const { source, repoRoot, pinPath, head } = fixture();
+    seedRoots(repoRoot);
+    fs.writeFileSync(pinPath, JSON.stringify(pinOf(head)));
+    generate({ source, repoRoot, pinPath, ref: head });
+    for (const root of ['.claude/skills', '.agents/skills']) {
+      expect(fs.readFileSync(path.join(repoRoot, root, 'cmate-handoff-dev/references/a.md'), 'utf8')).toBe(
+        'commandmatedev send\n',
+      );
+    }
   });
 });

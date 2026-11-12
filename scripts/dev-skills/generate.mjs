@@ -103,11 +103,24 @@ export function checkDerived({ repoRoot = REPO_ROOT, pin = readPin() } = {}) {
   return problems;
 }
 
+/** Throw naming every file missing from / extra in `actual` relative to `expected`. */
+function assertSameSet(label, actual, expected) {
+  const a = new Set(actual);
+  const e = new Set(expected);
+  const missing = expected.filter((f) => !a.has(f)).sort();
+  const extra = actual.filter((f) => !e.has(f)).sort();
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(
+      `${label}: missing [${missing.join(', ')}], extra [${extra.join(', ')}]; nothing was written`,
+    );
+  }
+}
+
 function gitHead(source) {
   return execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 }
 
-export function generate({ source, ref = null, repoRoot = REPO_ROOT, pinPath = PIN_PATH, headOf = gitHead }) {
+export function generate({ source, ref = /** @type {string | null} */ (null), repoRoot = REPO_ROOT, pinPath = PIN_PATH, headOf = gitHead }) {
   const head = headOf(source);
   const existing = existsSync(pinPath) ? readPin(pinPath) : null;
   const repin = ref !== null;
@@ -127,8 +140,14 @@ export function generate({ source, ref = null, repoRoot = REPO_ROOT, pinPath = P
     const version = /^version: (\S+)$/m.exec(manifestText)?.[1];
     const digests = manifestDigests(manifestText);
     const pinned = existing?.packages.find((p) => p.id === def.id);
+    const actualFiles = listFiles(srcDir).filter((f) => f !== MANIFEST);
+    // Nothing is deleted or written before these set checks pass (Issue #4323).
+    assertSameSet(`${def.upstream} files vs its manifest`, actualFiles, [...digests.keys()]);
+    if (!repin) {
+      assertSameSet(`${def.upstream} files vs pin`, actualFiles, (pinned?.files ?? []).map((f) => f.path));
+    }
     const files = [];
-    for (const rel of listFiles(srcDir).filter((f) => f !== MANIFEST)) {
+    for (const rel of actualFiles) {
       const buf = readFileSync(path.join(srcDir, rel));
       const upstreamSha256 = sha256(buf);
       if (digests.get(rel) !== upstreamSha256) {
