@@ -1,0 +1,74 @@
+{
+  "ref": "64f81858e20babae9b9596efc3ac5eac423d5793",
+  "packages": [
+    {
+      "id": "cmate-delegate-dev",
+      "upstream": "skills/cmate-delegate",
+      "version": "0.3.0",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "upstreamSha256": "b81277f124ccda08c6b169891f8341d3369335c28f28bde5b64e62048748cc75",
+          "outputSha256": "f41f058ef42e723e0ec0d56d6568b610ef418f683f82428a66a9ec6392e24487"
+        },
+        {
+          "path": "references/agent-compatibility.md",
+          "upstreamSha256": "fdc58d3c57aecfd56557d6f0f0fd91c603d4f00c6c6a742267b95d7acee349e4",
+          "outputSha256": "dc29d03445ac1d1585d534a2c42bc609148efe8ee11b7a2f7cf2368506365527"
+        },
+        {
+          "path": "references/delegation-brief.md",
+          "upstreamSha256": "a63b71d8847a3a5d03c9ef3e0005e5d2b56972370cd7e2163353b3b27dcd3725",
+          "outputSha256": "a63b71d8847a3a5d03c9ef3e0005e5d2b56972370cd7e2163353b3b27dcd3725"
+        },
+        {
+          "path": "references/exit-codes.md",
+          "upstreamSha256": "d2ede8f7f9c921827ca623b662ac1ec2e800f9e2c9befcf5efaee104217da34d",
+          "outputSha256": "9f759f98c2c4b0b489f686e4dd97f65df8e2d7c735578a8e11e98b4f01956f23"
+        },
+        {
+          "path": "references/release-notes.md",
+          "upstreamSha256": "33753930a6ef37e207804f56dfb0cacf86bc1bc16444f1b91c52caad1aea472e",
+          "outputSha256": "a03538b8a2c0e5eb8244fbfcffed5de8f9b3436f53a770b0df38324ba7565e7a"
+        },
+        {
+          "path": "scripts/ask.sh",
+          "upstreamSha256": "e561633bd9fa4d776e08546fb3bf5113bc408300c9de3ca330ed8f18aef524c8",
+          "outputSha256": "00fc44c76e41e7e0fb2dd4c490f25a6711c9c5a93de087f2765c7c6e64113a3d"
+        }
+      ]
+    },
+    {
+      "id": "cmate-handoff-dev",
+      "upstream": "skills/cmate-handoff",
+      "version": "0.1.0",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "upstreamSha256": "75b8d9aec41168fb6cd1d8cda4d7a9f844b06e879ae0d7f998639a91b1d00526",
+          "outputSha256": "5184c8f4bf943ff69b5137f610748a953453675a9fa3d332c69b31d2d1d1290b"
+        },
+        {
+          "path": "references/agent-compatibility.md",
+          "upstreamSha256": "5e64882510acdf0581da299ebbbf6efef0da2811d29ed54c233b3ead268f9fbc",
+          "outputSha256": "dc50099e9262446d02187eba8f974f4fa6047e94ee12cf6676a5cdfd34e50c2c"
+        },
+        {
+          "path": "references/changelog.md",
+          "upstreamSha256": "409caf8675ecf92181e5506e78d30f0aa50c200c027c12c7665c759369f8651b",
+          "outputSha256": "53a8042e40321bd495e7228f06b1ec1aedbdbd1692241992586f2233fa7cd557"
+        },
+        {
+          "path": "references/exit-codes.md",
+          "upstreamSha256": "085a00f2e3e126ea7a567dec619cbe495829d05b6a2a41e92a98e8b96d9726cb",
+          "outputSha256": "f3d607e57a90acc1aae0a618c03913e0e78901f8f129675f80e861cf47a76e36"
+        },
+        {
+          "path": "references/kinds-and-close-when.md",
+          "upstreamSha256": "7eaf305aa34253b1b5435e47a3e9b7943dd53af5dabf07565f47adc010f50bd9",
+          "outputSha256": "86c961772c321d543f89e6f4da3d12f4fd2e0ae71db22cff5d2d1650f7201dc8"
+        }
+      ]
+    }
+  ]
+}
