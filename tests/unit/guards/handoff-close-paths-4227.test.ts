@@ -1026,6 +1026,8 @@ function checkPageHosts(desktop: string, refactored: string): string[] {
   if (page.length !== 1) problems.push(`WorktreeDetailRefactored.tsx draws the dialog ${page.length} time(s), not once`);
   for (const host of page) {
     if (!/\bonClose=\{closeHandoff\}/.test(host)) problems.push('WorktreeDetailRefactored.tsx: the dialog\'s onClose is not the hook\'s closeHandoff');
+    // Issue #4317 PR1: the host hands the dialog the page's registration (left out, nothing would be checked).
+    if (!/\bregistration=\{handoffRegistration\}/.test(host)) problems.push('WorktreeDetailRefactored.tsx: the dialog is not handed the page\'s registration');
   }
   return problems;
 }
@@ -1130,6 +1132,9 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
     expect(checkPageHosts(desktop, read(PAGES[1])).join('\n')).toMatch(/WorktreeDetailDesktop.tsx draws the dialog 1 time/);
     const bypass = mutated(PAGES[1], 'onClose={closeHandoff}', 'onClose={handleKillCancel}');
     expect(checkPageHosts(read(PAGES[0]), bypass).join('\n')).toMatch(/onClose is not the hook's closeHandoff/);
+    // Issue #4317 PR1: a host without the page's registration fails.
+    const unregistered = mutated(PAGES[1], '          registration={handoffRegistration}\n', '');
+    expect(checkPageHosts(read(PAGES[0]), unregistered).join('\n')).toMatch(/not handed the page's registration/);
   });
 
   it('(negative control) G10: the pages as they are pass checkPageHosts', () => {
