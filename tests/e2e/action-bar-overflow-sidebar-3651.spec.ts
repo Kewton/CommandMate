@@ -11,6 +11,7 @@
 
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { E2E_WORKTREE_A, setupSplitTest } from './fixtures/terminal-split-helpers';
+import { mockStartPreview } from './fixtures/start-preview-helpers';
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -116,6 +117,7 @@ async function mockRunningSessionWithNote(page: Page): Promise<void> {
       return route.fallback();
     },
   );
+  await mockStartPreview(page);
 }
 
 function overlaps(a: Box, b: Box): boolean {

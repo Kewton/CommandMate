@@ -124,10 +124,11 @@ describe('[#2069] getCodexHomeForVersionRead', () => {
   });
 
   it('answers UNKNOWN for a relative $CODEX_HOME, rather than falling back', () => {
-    // `hooks-config` forwards a relative value to codex verbatim, and codex
-    // resolves it against the AGENT's worktree cwd — so the file is at
-    // `<worktree>/.codex-shared/version.json` and this process cannot say which
-    // worktree. Falling back to ~/.codex would not be "no data": it would be an
+    // Since #4233 `hooks-config` resolves a relative value against the SERVER's
+    // cwd and pins that on codex's launch line, so the file is at
+    // `<serverCwd>/.codex-shared/version.json`. This reader also runs from CLI
+    // processes in an arbitrary cwd and cannot reproduce that resolution, so it
+    // does not guess. Falling back to ~/.codex would not be "no data": it would be an
     // unrelated install's version reported with full confidence.
     expect(getCodexHomeForVersionRead({ CODEX_HOME: '.codex-shared' })).toBeNull();
     expect(getCodexHomeForVersionRead({ CODEX_HOME: '../shared/.codex' })).toBeNull();

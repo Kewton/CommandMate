@@ -12,6 +12,7 @@
  */
 
 import type { Page, Route } from '@playwright/test';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Worktree id scoped to these specs so it cannot collide with other suites. */
 export const E2E_EDITOR_WORKTREE = 'e2e-editor-indent';
@@ -148,4 +149,5 @@ export async function mockEditorApi(page: Page): Promise<void> {
       return fulfillJson(route, {});
     }
   );
+  await mockStartPreview(page);
 }

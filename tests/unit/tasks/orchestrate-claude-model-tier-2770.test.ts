@@ -85,6 +85,8 @@ function launchCalls(reported: string): { code: number; calls: string[]; contrac
         calls.push(`git ${args.slice(2).join(' ')}`);
         return { status: 0, stdout: '', stderr: '' };
       }
+      // The instance is resolved first (`reply --json`, #4238 review); not one of the calls this test reads.
+      if (args[0] === 'reply') return { status: 0, stdout: JSON.stringify({ instanceId: 'claude', cliToolId: 'claude', reply: null }), stderr: '' };
       calls.push(args[0] === 'instances' ? `instances ${args[2]}` : args[0]);
       if (args[0] === 'instances' && args[2] === '--json') return { status: 0, stdout: JSON.stringify([{ instanceId: 'claude', running }]), stderr: '' };
       if (args[0] === 'instances' && args[2] === 'kill') running = false;
@@ -120,7 +122,7 @@ describe('/orchestrate 1-2b: three tiers', () => {
   const body = section('1-2b');
 
   it('has one row per tier, with the model each one runs on', () => {
-    expect(body).toMatch(/^\| 易 \| antigravity \| —/m);
+    expect(body).toMatch(/^\| 易 \| command-code \| —/m);
     expect(body).toMatch(/^\| 中 \| claude \| sonnet \|/m);
     expect(body).toMatch(/^\| 難 \| claude \| opus \|/m);
   });
@@ -154,7 +156,7 @@ describe('/orchestrate 1-2b: three tiers', () => {
 
 describe('/orchestrate: the model never becomes an --instance value', () => {
   it('documents claude-sonnet / claude-opus for --assign only', () => {
-    expect(orchestrate).toContain('--assign `<N>=<claude|claude-opus|claude-sonnet|antigravity>`');
+    expect(orchestrate).toContain('--assign `<N>=<claude|claude-opus|claude-sonnet|command-code>`');
     expect(orchestrate).toMatch(/`--instance` は常に `claude`/);
   });
 
@@ -175,7 +177,7 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
   const body = section('3-1');
 
   it('reads three columns from assign.tsv', () => {
-    expect(body).toContain('"<issue>\\t<claude|antigravity>\\t<opus|sonnet|->"');
+    expect(body).toContain('"<issue>\\t<claude|command-code>\\t<opus|sonnet|->"');
     expect(body).toContain('read -r issue AGENT MODEL');
   });
 
@@ -251,12 +253,14 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
 describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures', () => {
   it('3-4 names all three destinations', () => {
     const row = section('3-4').split('\n').find((line) => line.startsWith('| `20` |')) ?? '';
-    expect(row).toContain('Claude（opus）へ切替（3-5）');
+    expect(row).toContain('Command Code 担当は Claude（sonnet）へ格上げ（3-5）');
     expect(row).toContain('opus へ格上げ（3-5b）');
     expect(row).toContain('Claude（opus）担当は人間へエスカレーション');
   });
 
   // #3883: 3-5 / 3-5b call the same launch-worker.mjs as 3-1 (opus written, checked, restarted once).
+  // Reads the legacy Antigravity section of switching.md on purpose: it is kept ("今は使わない", #4238) because the Command Code
+  // section refers to its steps 1-2 and its handoff form; the current Command Code -> sonnet path is pinned in the #4238 describe below.
   it('3-5 switches an Antigravity Issue to opus, never to sonnet', () => {
     const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`;
     expect(body).toContain('AGENT=claude; MODEL=opus');
@@ -281,6 +285,101 @@ describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures
   it('the error table agrees with 3-4', () => {
     const row = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
     expect(row).toContain('3-5b');
+  });
+});
+
+describe('/orchestrate: the easy tier is Command Code (Issue #4238)', () => {
+  it('Phase 0 sends the easy tier to --instance command-code, with no --model', () => {
+    const phase0 = orchestrate.slice(orchestrate.indexOf('## Phase 0'), orchestrate.indexOf('## Phase 1'));
+    expect(phase0).toContain('**易 → `--instance command-code`**');
+    expect(phase0).toContain('Command Code がワーカー起因で 2 回不合格になったら Claude（sonnet）に上げる（3-5）');
+    expect(phase0).not.toMatch(/--instance antigravity/);
+  });
+
+  it('1-2b names Command Code for the easy tier and points at its document', () => {
+    const body = section('1-2b');
+    expect(body).toContain('**Command Code に回す（すべて満たせば「易」）**');
+    expect(body).not.toMatch(/^\| 易 \| antigravity/m);
+    expect(body).toContain('docs/orchestrate/command-code.md');
+  });
+
+  it('3-5 raises a Command Code Issue to Claude sonnet, and 3-5b then takes it to opus', () => {
+    const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ')}`;
+    expect(section('3-5')).toContain('Command Code 担当の Issue が');
+    expect(body).toContain('AGENT=claude; MODEL=sonnet');
+    expect(body).toContain('commandmatedev instances "$WT" kill command-code');
+    expect(body).toContain('--instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml"');
+    expect(body).toContain('3-5b');
+    expect(body).not.toMatch(/MODEL=opus/);
+    // Bound to the new task, like every switch (#3118).
+    expect(body).toMatch(/wait-verify\.mjs[\s\S]*--task "\$TASK_ID"/);
+  });
+
+  it('the error table and 8-3 agree with 3-5', () => {
+    const row = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
+    expect(row).toContain('Command Code 担当は Claude（sonnet）へ格上げ（3-5）');
+    expect(orchestrate).toContain('- Command Code から Claude（sonnet）への格上げ（3-5）');
+  });
+});
+
+describe('/orchestrate: after a raise from Command Code, failures go sonnet → opus → a person everywhere (Issue #4238 review)', () => {
+  const body34 = section('3-4');
+
+  it('the 3-4 text splits the Claude branch: sonnet goes to 3-5b, only opus stops for a person', () => {
+    expect(body34).toContain('**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 で格上げした sonnet も同じ）');
+    expect(body34).toContain('**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ');
+    // The old branch stopped every Claude worker, a sonnet raised by 3-5 included.
+    expect(body34).not.toContain('**Claude 担当は** worker を止め');
+  });
+
+  it('the 3-4 table, the error table, 3-5b and switching.md say the same', () => {
+    const tableRow = body34.split('\n').find((line) => line.startsWith('| `20` |')) ?? '';
+    const errorRow = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
+    for (const row of [tableRow, errorRow]) {
+      expect(row).toContain('Claude（sonnet）担当は opus へ格上げ（3-5b）');
+      expect(row).toContain('Claude（opus）担当は人間へエスカレーション');
+    }
+    expect(section('3-5b')).toContain('Claude（sonnet）担当の Issue が');
+    expect(docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ')).toMatch(/ワーカー起因の不合格 2 回で 3-5b の opus への格上げ/);
+    expect(docSection('switching.md', '3-5b sonnet から opus への格上げ')).toContain('Claude（opus）担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）');
+  });
+
+  it('orchestrate.md stays within its 118,000-byte cap', () => {
+    expect(Buffer.byteLength(orchestrate, 'utf-8')).toBeLessThanOrEqual(118_000);
+  });
+});
+
+describe('/orchestrate: the Command Code send and the re-instruction signal are documented (Issue #4238 review)', () => {
+  const doc = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate/command-code.md'), 'utf-8');
+
+  it('a session started under ask is stopped before the send, and an alias is checked by its tool', () => {
+    expect(doc).toContain('動いているセッションを止めてから契約を送る');
+    expect(doc).toContain('alias（例: `cc`）でも同じ確認が効く');
+    expect(launcher).toContain("stopped('Command Code reads its permissions when the session starts')");
+  });
+
+  it('3-4 re-instructs through wait-verify with the send time; the plain two steps are a Claude-only manual stand-in (re-review)', () => {
+    const body = section('3-4');
+    expect(body).toContain('SENT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)');
+    expect(body).toMatch(/wait-verify\.mjs[\s\S]*--after-reinstruct --signal-since "\$SENT_AT"/);
+    expect(body).toContain('Claude 担当だけは、スクリプトを使えないときの手動の代わりに素の 2 段でもよい');
+    const manual = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate/antigravity.md'), 'utf-8');
+    expect(manual).toContain('SINCE=${SENT_AT:-$TASK_CREATED}');
+    expect(manual).toContain('--since "$SINCE"');
+    expect(manual).not.toContain('--since "$TASK_CREATED"');
+  });
+
+  it('a verification started again without a re-instruction is --reverify, in 3-3 and in exit-codes.md (re-review)', () => {
+    expect(section('3-3')).toContain('`--reverify --task "$TASK_ID"`');
+    const exitCodes = readFileSync(path.join(REPO_ROOT, 'docs/orchestrate/exit-codes.md'), 'utf-8');
+    expect(exitCodes).toContain('`wait-verify.mjs --reverify --task <id>` で検証し直す');
+    expect(exitCodes).not.toContain('`wait-verify.mjs --after-reinstruct --task <id>` で検証し直す');
+  });
+
+  it('after a re-instruction only a signal written after the send counts', () => {
+    expect(doc).toContain('合図は再指示の送信より後に');
+    expect(orchestrate).toContain('完了の合図は再指示の送信（`$SENT_AT`）より後のものだけを数える');
+    expect(orchestrate).toContain('`--signal-since`');
   });
 });
 
@@ -347,5 +446,23 @@ describe('.claude/commands: a sonnet-pinned command still asks for opus where it
       .filter(({ line }) => !/^Use [a-z-]+-agent \(model: opus\)/.test(line))
       .map(({ name, lineNumber }) => `${name}:${lineNumber}`);
     expect(unprotected).toEqual([]);
+  });
+});
+
+describe('send --model: which tools it works for (Issue #4247)', () => {
+  // src/cli/commands/send.ts validateSendModel accepts copilot / antigravity / claude;
+  // the server answers 400 for antigravity / claude on a running session (send-session-start.ts refuseModelOnRunningSession).
+  it('orchestrate.md and CLAUDE.md both name copilot, antigravity and claude, not the old two-tool lists', () => {
+    const claudeMd = readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf-8');
+    expect(orchestrate).toContain('copilot / antigravity / claude に効く');
+    expect(orchestrate).not.toContain('copilot / antigravity 専用');
+    expect(claudeMd).toContain('copilot/antigravity/claude に効く');
+    expect(claudeMd).not.toContain('（claude/antigravity）');
+  });
+
+  it('3-5 Command Code path still goes to sonnet (current procedure, not the legacy Antigravity section)', () => {
+    const body = docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ');
+    expect(body).toContain('commandmatedev instances "$WT" kill command-code');
+    expect(body).toContain('sonnet');
   });
 });

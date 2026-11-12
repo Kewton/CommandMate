@@ -235,6 +235,20 @@ export function getLastKnownStatus(key: string, now: number = Date.now()): LastK
 }
 
 /**
+ * The last positively confirmed verdict for `key`, or null when there is none or
+ * it is past {@link LAST_KNOWN_STATUS_TTL_MS} (Issue #4223).
+ *
+ * The same answer as {@link getLastKnownStatus}, read without touching the map:
+ * an expired latch is left for the next write's sweep instead of being deleted,
+ * so the brief's read changes no state.
+ */
+export function peekLastKnownStatus(key: string, now: number = Date.now()): LastKnownStatus | null {
+  const latch = latches.get(key);
+  if (latch === undefined || expired(latch, now)) return null;
+  return latch;
+}
+
+/**
  * Drop the latch for a session that is no longer running.
  *
  * A dead session's last confirmed status describes a process that is gone, and

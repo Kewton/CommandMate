@@ -16,6 +16,7 @@
  */
 
 import { test, expect, type Page, type Route } from '@playwright/test';
+import { mockStartPreview } from './fixtures/start-preview-helpers';
 
 const WORKTREE_ID = 'e2e-auto-yes-answer-mode-3863';
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 } as const;
@@ -155,6 +156,7 @@ async function mockApi(page: Page, state: FakeAutoYes): Promise<void> {
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /** The Auto Yes switch (its accessible name is "Auto Yes モード" / "Auto Yes mode"). */

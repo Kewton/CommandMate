@@ -22,6 +22,7 @@ import {
   type HeaderInstanceItem,
 } from '@/lib/agent-status-display';
 import {
+  HeaderSessionPill,
   HeaderSessionSwitcher,
   type HeaderSessionEntry,
 } from '@/components/worktree/HeaderSessionSwitcher';
@@ -843,29 +844,31 @@ interface DesktopHeaderProps {
    * instance in the roster with no open split has no entry, and every tool but
    * opencode has none either. Absent renders exactly what pre-#2042 rendered.
    *
-   * **Tooltip only, like the model before it.** The session field has a fixed
-   * width (Issue #3593), so a second visible string would only truncate the
-   * name. The visible chip lives on the split pane's own header, which has the
+   * **Tooltip only, like the model before it.** The session pill is capped
+   * (Issue #3593; `max-w-44` since #4218), so a second visible string would
+   * only truncate the name. The visible chip lives on the split pane's own header, which has the
    * width.
    */
   agentSessionByInstance?: Readonly<Record<string, AgentSessionSnapshot>>;
   /**
-   * Issue #3514: the "+" that adds an agent, drawn at the right end of the
-   * agent row (Issue #3593: after the session field, and the list's
-   * "Add session…" presses it — it must be the row's last element). A slot rather than the control itself so this module keeps no
+   * Issue #3514: the "+" that adds an agent (Issue #3593: the list's
+   * "Add session…" presses it — it must be the session group's last
+   * element; Issue #4218: that group is the sessions trigger and the "+", in
+   * the controls group). A slot rather than the control itself so this module keeps no
    * dependency on the roster write (the parent owns the roster and the split
    * placement). Omitted renders nothing — the pre-#3514 row.
    */
   agentAddControl?: React.ReactNode;
   /**
    * Issue #3593: the instance each split shows, by split index (from
-   * `TerminalSplitContainer`'s `onSelectedSplitChange`). The "N others" list
+   * `TerminalSplitContainer`'s `onSelectedSplitChange`). The sessions list
    * names the split a session is in ("Split 2"). Omitted names none.
    */
   splitInstanceIds?: readonly string[];
   /**
-   * Issue #3591: the worktree's tools (`HeaderToolBar`) at the right end of
-   * the row, replacing the vertical activity bar. Drawn only when
+   * Issue #3591: the worktree's tools (`HeaderToolBar`), replacing the
+   * vertical activity bar — Issue #4218: right after the identity group,
+   * before the right-aligned controls. Drawn only when
    * {@link onActivityToggle} is given; on a narrow header the trailing tools
    * fold behind "…" before the identity group clips (`useDesktopHeaderFit`).
    */
@@ -1021,8 +1024,8 @@ export const DesktopHeader = memo(function DesktopHeader({
   // ONE badge for the whole row, not one per pill, which is the same
   // granularity `BranchListItem` shows (`branch.awaitingInstruction` is
   // already the fold across every instance — see
-  // `deriveWorktreeWaitingDetail`). Issue #3593: drawn beside the current
-  // session, outside the fixed-width session field, on the same condition.
+  // `deriveWorktreeWaitingDetail`). Issue #3593 / #4218: drawn right after
+  // the current session's pill, on the same condition.
   //
   // Resolved per instance with the same per-instance → per-CLI fallback
   // the status dots use, so an alias instance is not read off a roster
@@ -1046,28 +1049,6 @@ export const DesktopHeader = memo(function DesktopHeader({
   const appUpdate = useAppUpdate();
   const appUpdateKey = `${appUpdate.updateInfo?.latestVersion ?? ''}:${appUpdate.hasUpdate}:${appUpdate.state}`;
 
-  // Issue #2481: everything that changes how wide the row is. A change here
-  // may have made room, so the fit starts over. Issue #3590: the verification
-  // chip, the one part that could not be keyed, moved to the second row.
-  // Issue #3593: the session field has a fixed width, so the sessions — their
-  // number, names and states — are not part of it; only whether there is one.
-  const headerFitKey = [
-    locale,
-    worktreeName,
-    repositoryName,
-    showGitBranch ? (gitFacts?.currentBranch ?? '') : '',
-    gitFacts?.isDirty ? 'dirty' : '',
-    gitFacts?.statusUnknown ? 'status-unknown' : '',
-    showKillButton ? 'end' : '',
-    awaitingInstruction ? 'awaiting' : '',
-    appUpdateKey,
-    headerItems.length > 0 ? 'sessions' : '',
-  ].join('\n');
-  const headerRef = useRef<HTMLDivElement>(null);
-  const identityRef = useRef<HTMLDivElement>(null);
-  // Issue #3591: the tools fold one at a time before the identity group clips.
-  const headerToolCount = onActivityToggle ? HEADER_TOOLS.length : 0;
-  const headerFit = useDesktopHeaderFit(headerRef, identityRef, headerFitKey, headerToolCount);
 
   // Issue #1783 / #1784 / #2042 / #2054: what a session's tooltip says — the
   // visible `{label}: {status}`, then the model (and effort, and the persona an
@@ -1126,11 +1107,38 @@ export const DesktopHeader = memo(function DesktopHeader({
   const currentEntry = currentItem ? toEntry(currentItem) : null;
   const otherEntries = orderOtherInstances(headerItems, (inst) => inst.id === currentInstanceId).map(toEntry);
 
+  // Issue #2481: everything that changes how wide the row is. A change here
+  // may have made room, so the fit starts over. Issue #3590: the verification
+  // chip, the one part that could not be keyed, moved to the second row.
+  // Issue #3593: the sessions trigger has a fixed width, so the sessions —
+  // their number, names and states — are not part of it; only whether there
+  // is one. Issue #4218: the current session's pill sits in the identity group
+  // now and is as wide as its label (up to `max-w-44`), so that label is.
+  const headerFitKey = [
+    locale,
+    worktreeName,
+    repositoryName,
+    showGitBranch ? (gitFacts?.currentBranch ?? '') : '',
+    gitFacts?.isDirty ? 'dirty' : '',
+    gitFacts?.statusUnknown ? 'status-unknown' : '',
+    showKillButton ? 'end' : '',
+    awaitingInstruction ? 'awaiting' : '',
+    appUpdateKey,
+    headerItems.length > 0 ? 'sessions' : '',
+    currentEntry?.fullLabel ?? '',
+  ].join('\n');
+  const headerRef = useRef<HTMLDivElement>(null);
+  const identityRef = useRef<HTMLDivElement>(null);
+  // Issue #3591: the tools fold one at a time before the identity group clips.
+  const headerToolCount = onActivityToggle ? HEADER_TOOLS.length : 0;
+  const headerFit = useDesktopHeaderFit(headerRef, identityRef, headerFitKey, headerToolCount);
+
   // Issue #3593: the list's "Add session…" opens the "+" (#3514), which is the
-  // row's last element: the slot's own button.
-  const agentRowRef = useRef<HTMLDivElement>(null);
+  // session group's last element: the slot's own button. Issue #4218: that
+  // group is the trigger and the "+", in the controls group.
+  const sessionControlsRef = useRef<HTMLDivElement>(null);
   const findAddButton = (): HTMLButtonElement | null => {
-    const host = agentRowRef.current?.lastElementChild ?? null;
+    const host = sessionControlsRef.current?.lastElementChild ?? null;
     if (!host) return null;
     return host instanceof HTMLButtonElement ? host : host.querySelector('button');
   };
@@ -1138,22 +1146,31 @@ export const DesktopHeader = memo(function DesktopHeader({
     findAddButton()?.click();
   };
 
+  const hasSessions = Boolean(instances && instances.length > 0);
+
   return (
     <div
       ref={headerRef}
       data-testid="desktop-header"
       // Issue #3590: one row, 44px including the bottom border (`h-11` with
       // border-box sizing). The controls on the right are at most 36px tall.
-      className="flex h-11 flex-shrink-0 items-center justify-between gap-3 px-4 bg-surface border-b border-border"
+      // Issue #4218: identity → tools → (room) → controls; `ml-auto` on the
+      // controls keeps them at the right end whatever the left takes.
+      className="flex h-11 flex-shrink-0 items-center gap-3 px-4 bg-surface border-b border-border"
     >
       {/* Left: status and title (Issue #747: hamburger moved to ActivityBar;
           Issue #2647: the Home button and its divider were removed).
           Issue #2481: `min-w-0` makes this group — not the controls on the
-          right — the one that gives way on a narrow header: the name,
-          repository and branch truncate. The dot and the `*` / `?` marks keep
-          their width. Clipped only as the fit's last resort.
-          Issue #3590: one line — dot, name ▾ (`*` `?`), repository, and the
-          checked-out branch when it differs from the name. */}
+          right — the one that gives way on a narrow header: its text
+          truncates. The dot and the `*` / `?` marks keep their width. Clipped
+          only as the fit's last resort.
+          Issue #4218: one line read left to right — dot, repository ›
+          branch ▾ (`*` `?`, the checked-out branch when it differs) ›
+          the session on screen and its "awaiting instruction" badge.
+          The shrink order: the repository and the checked-out branch first
+          (`shrink-4`, context the tooltip and Info also carry), then the
+          branch heading (`shrink-2`, down to 6rem), the session pill last
+          (`shrink`, down to its floor). */}
       <div
         ref={identityRef}
         data-testid="desktop-header-identity"
@@ -1168,14 +1185,21 @@ export const DesktopHeader = memo(function DesktopHeader({
           className={statusUnclassified ? UNCLASSIFIED_STATUS_DOT_CLASS : undefined}
           data-unclassified={statusUnclassified ? 'true' : undefined}
         />
+        {/* Issue #3590: opens the Repositories screen. Two repositories can
+            each have a `develop`, so it is always drawn. Issue #4218: first,
+            so the line reads repository › branch › session. */}
+        <WorktreeBreadcrumbRepository repositoryName={repositoryName} />
+        <span aria-hidden="true" data-header-separator="" className="flex-shrink-0 text-muted-foreground">
+          ›
+        </span>
         {/* Issue #3513: a breadcrumb — the branch is the heading, with a ▾
-            that opens the tab strip's branch list. Issue #2481: gives way
-            before the repository (`shrink-4` against its 1), down to a floor
-            that keeps the start of the name readable. Issue #3590: the memo
-            rides on the name's tooltip. */}
+            that opens the tab strip's branch list. Issue #3590: the memo
+            rides on the name's tooltip. Issue #4218: gives way after the
+            repository (`shrink-2` against its 4), down to a floor that keeps
+            the start of the name readable. */}
         <h1
           data-testid="desktop-worktree-name"
-          className="min-w-[6rem] max-w-[240px] shrink-4 truncate text-lg font-semibold leading-tight text-foreground"
+          className="min-w-[6rem] max-w-[240px] shrink-2 truncate text-lg font-semibold leading-tight text-foreground"
         >
           <WorktreeBreadcrumbBranch
             worktreeId={worktreeId}
@@ -1202,62 +1226,91 @@ export const DesktopHeader = memo(function DesktopHeader({
             ?
           </span>
         )}
-        {/* Issue #3590: on the same line, right of the name; opens the
-            Repositories screen. Two repositories can each have a `develop`,
-            so it is always drawn. */}
-        <WorktreeBreadcrumbRepository repositoryName={repositoryName} />
         {showGitBranch && gitFacts && (
           <span
-            className="min-w-0 truncate max-w-[150px] font-mono text-xs text-muted-foreground"
+            className="min-w-0 shrink-4 truncate max-w-[150px] font-mono text-xs text-muted-foreground"
             title={gitFacts.currentBranch}
             data-testid="desktop-branch-name"
           >
             {truncateString(gitFacts.currentBranch, DESKTOP_BRANCH_MAX_LENGTH)}
           </span>
         )}
-      </div>
-
-      {/* Right: Per-agent status row + Status dropdown + Info button.
-          Issue #2481: never shrinks, so the controls always keep their width.
-          Issue #3593: the agent row is fixed-width now, so a narrow header
-          truncates and then clips the identity group. `max-w-full` only
-          matters on a header too narrow even for this group alone: it caps the
-          group at the header's width and the agent row (`min-w-0`) yields. */}
-      <div className="flex items-center gap-2 flex-shrink-0 max-w-full" data-testid="desktop-header-controls">
-        {/* Issue #749/#869/#1078: Per-instance session status row (PC only).
-            Distinct from the worktree-level StatusDot on the left: this row is
-            per-agent-instance and doubles as an instance switcher.
-            Issue #3593: [current session][N others ▾][+] — the current one is
-            the session the selected split shows, the rest are in a list
-            (HeaderSessionSwitcher). Both have fixed widths, so the row no
-            longer folds pills to fit (#2481's fold is gone); the "awaiting
-            instruction" badge sits beside the current session.
-            Rendered only when instances is provided (backward compat). */}
-        {instances && instances.length > 0 && (
-          <div
-            ref={agentRowRef}
-            className={`flex items-center gap-2 min-w-0${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
-            data-testid="desktop-agent-status-row"
-          >
-            {/*
-              Issue #1787: `awaitingInstruction` (the agent said its turn is
-              over) is a SECONDARY state deliberately styled `success` green,
-              so it can never be read as the amber "needs your answer" case
-              the StatusDots own. Same tokens, same wording and the same two
-              dictionary keys as the sidebar badge — two surfaces showing one
-              state must not look like two different states. Issue #3593: on
-              the left of the current session, outside the fixed-width field.
-            */}
-            {awaitingInstruction && (
-              <span
-                data-testid="desktop-awaiting-instruction-badge"
-                className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
-                title={tWorktree('awaitingInstruction.label')}
-              >
-                {tWorktree('awaitingInstruction.badge')}
+        {/* Issue #749/#869/#1078: the session on screen (PC only), distinct
+            from the worktree-level StatusDot: it is per agent instance.
+            Issue #3593: the session the selected split shows. Issue #4218:
+            at the end of the identity line, with the "awaiting instruction"
+            badge beside it; the list of every session is in the controls
+            group. Rendered only when instances is provided (backward compat). */}
+        {hasSessions && (
+          <>
+            {currentEntry && (
+              <span aria-hidden="true" data-header-separator="" className="flex-shrink-0 text-muted-foreground">
+                ›
               </span>
             )}
+            <div
+              className={`flex min-w-0 items-center gap-2${headerFit.squeezed ? ' overflow-x-clip' : ''}`}
+              data-testid="desktop-agent-status-row"
+            >
+              {currentEntry && (
+                <HeaderSessionPill
+                  current={currentEntry}
+                  onSelect={onActiveInstanceChange}
+                  onDragStart={handleAgentDragStart}
+                  onDragEnd={handleAgentDragEnd}
+                  draggingInstanceId={draggingInstanceId}
+                />
+              )}
+              {/*
+                Issue #1787: `awaitingInstruction` (the agent said its turn is
+                over) is a SECONDARY state deliberately styled `success` green,
+                so it can never be read as the amber "needs your answer" case
+                the StatusDots own. Same tokens, same wording and the same two
+                dictionary keys as the sidebar badge — two surfaces showing one
+                state must not look like two different states. Issue #4218:
+                right after the current session's pill.
+              */}
+              {awaitingInstruction && (
+                <span
+                  data-testid="desktop-awaiting-instruction-badge"
+                  className="flex-shrink-0 rounded-full bg-success-subtle px-1.5 py-0.5 text-[10px] font-medium leading-4 text-success-foreground"
+                  title={tWorktree('awaitingInstruction.label')}
+                >
+                  {tWorktree('awaitingInstruction.badge')}
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
+      {/* Issue #3591: the worktree's tools — what the vertical activity bar
+          held. Issue #4218: right after the identity group (the header's gap
+          between them), outside both groups: it never shrinks, and on a
+          narrow header the fit folds the trailing tools behind "…" before the
+          identity group clips. */}
+      {onActivityToggle && (
+        <HeaderToolBar
+          active={activeActivity}
+          onToggle={onActivityToggle}
+          foldedCount={headerFit.foldedTools}
+        />
+      )}
+
+      {/* Right: the sessions list + "+", End, Update and Info.
+          Issue #2481: never shrinks, so the controls always keep their width.
+          Issue #4218: `ml-auto` puts it at the right end; Info is its last
+          child. `max-w-full` only matters on a header too narrow even for
+          this group alone. */}
+      <div className="ml-auto flex items-center gap-2 flex-shrink-0 max-w-full" data-testid="desktop-header-controls">
+        {/* Issue #3593 / #4218: "≡ N sessions ▾" — every session in a list —
+            then the "+" that adds one. */}
+        {hasSessions && (
+          <div
+            ref={sessionControlsRef}
+            className="flex flex-shrink-0 items-center gap-2"
+            data-testid="desktop-session-controls"
+          >
             <HeaderSessionSwitcher
               current={currentEntry}
               others={otherEntries}
@@ -1270,7 +1323,7 @@ export const DesktopHeader = memo(function DesktopHeader({
               canAddSession={(instances?.length ?? 0) < MAX_AGENT_INSTANCES}
             />
 
-            {/* Issue #3514: add an agent — the right end of the agent row. */}
+            {/* Issue #3514: add an agent — the session group's last element. */}
             {agentAddControl}
           </div>
         )}
@@ -1302,48 +1355,37 @@ export const DesktopHeader = memo(function DesktopHeader({
         {/* Issue #3513: the PC display-size selector (#917) is no longer here.
             It moved to the settings menu at the foot of the sidebar and the
             icon rail (#3510 / #3512), the same as it left the global Header. */}
-      <Button
-        variant="ghost"
-        type="button"
-        onClick={onInfoClick}
-        className="relative flex flex-shrink-0 items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-        aria-label={tWorktree('detail.viewInfo')}
-        data-testid="desktop-info-button"
-      >
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
+        <Button
+          variant="ghost"
+          type="button"
+          onClick={onInfoClick}
+          className="relative flex flex-shrink-0 items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+          aria-label={tWorktree('detail.viewInfo')}
+          data-testid="desktop-info-button"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-        <span className="text-sm font-medium">{tWorktree('detail.info')}</span>
-        {hasUpdate && (
-          <NotificationDot
-            data-testid="info-update-indicator"
-            className="absolute top-0 right-0"
-            aria-label={tWorktree('tabs.updateAvailable')}
-          />
-        )}
-      </Button>
-        {/* Issue #3591: the worktree's tools — what the vertical activity
-            bar held — at the right end, under which their pane opens. The
-            controls group never shrinks; on a narrow header the fit folds the
-            trailing tools behind "…" instead. */}
-        {onActivityToggle && (
-          <HeaderToolBar
-            active={activeActivity}
-            onToggle={onActivityToggle}
-            foldedCount={headerFit.foldedTools}
-          />
-        )}
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span className="text-sm font-medium">{tWorktree('detail.info')}</span>
+          {hasUpdate && (
+            <NotificationDot
+              data-testid="info-update-indicator"
+              className="absolute top-0 right-0"
+              aria-label={tWorktree('tabs.updateAvailable')}
+            />
+          )}
+        </Button>
       </div>
     </div>
   );

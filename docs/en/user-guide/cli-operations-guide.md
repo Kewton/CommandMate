@@ -70,6 +70,9 @@ node bin/commandmate.js ls
 | [`commandmate auto-yes`](#commandmate-auto-yes) | Control auto-yes |
 | [`commandmate instances`](#commandmate-instances) | List, add, remove, and rename agent instances (the roster) |
 | [`commandmate roles`](#commandmate-roles) | Define roles and set the defaults per tool and repository |
+| [`commandmate mem`](#commandmate-mem) | Read and write the items that carry work across sessions (now, waiting, decisions, …); the mode is read-only |
+| [`commandmate handoff`](#commandmate-handoff) | The hand-off before a session ends: the agent proposes its mem updates (a person confirms on the screen) |
+| [`commandmate brief`](#commandmate-brief) | The summary a restart reads (derived state and mem items) within a UTF-8 byte budget |
 | [`commandmate report`](#commandmate-report) | Generate, show, and list daily reports; aggregate Eval metrics |
 | [`commandmate skill`](#commandmate-skill) | Browse the Skill catalog; plan, install, update, uninstall, and inspect Skills |
 | [`commandmate update`](#commandmate-update) | Update CommandMate itself (stop, update, restart) |
@@ -259,9 +262,15 @@ commandmate send <worktree-id> "<message>" --instance codex
 commandmate send <worktree-id> "<message>" --instance codex --role reviewer  # Save the role, and send only to a process running it (see commandmate roles)
 commandmate send <worktree-id> "<message>" --agent codex --instance codex-3 --register --role reviewer  # Create the instance and its role first, then send
 commandmate send <worktree-id> "<message>" --instance opencode --new-conversation  # OpenCode V1: start a stopped session on a new conversation, not the remembered one
+commandmate send <worktree-id> "<message>" --no-brief    # no session brief on this send only (the boundary keeps it for the next)
+commandmate send <worktree-id> "<message>" --with-brief  # attach the session brief to this send even with no boundary detected
 commandmate send <worktree-id> "<message>" --auto-yes --duration 3h
 commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode careful  # questions are yours
 ```
+
+**Session brief (Issue #4274)**: on claude, codex and command-code, the first send after a conversation boundary (a new launch, a reset such as `/clear` or codex's `/new`, a resume to another conversation, a restart) carries the mem brief once, in front of the message — only when mem is `on` / `derived` for the branch and `injectOnStart` is enabled. Reconnecting to a running process is not a boundary. `--no-brief` skips it for that one send without changing any setting; `--with-brief` attaches it with no boundary. Giving both is exit 2 with nothing sent. When the brief and the message together would pass the length #2464 verified (48 KiB, 240 lines), the brief is left off and the message is never cut. The response's `brief` says what happened when one was attached or a flag was given. Other tools, relay delivery, Schedule, terminal commands and answers never carry it.
+
+**What the brief holds, and when it is left off (Issue #4224)**: the brief is built as [`commandmate brief`](#commandmate-brief) builds it (C, #4223), and only the "it ended" notices that are in the text typed are acknowledged, when the delivery is `sent` (an `unknown` delivery is not an acknowledgement). When the worktree is deleted, made again or renamed after the send was accepted and before it is typed, the old request's brief is not put into the new worktree (`brief.reason` is `worktree_changed`; a send whose lifetimes could not be fixed at its entrance says `lifetime_unpinned`). After a process ended in a way nobody planned, the brief's data starts with the line 「終わる前の更新を確認できない（この instance の最終更新は N 時間前）」 ("the update before the end cannot be confirmed; this instance's last update was N hours ago") — on an `on` branch, only when an earlier conversation is on record, and never as a verdict. When that line does not fit the budget the brief is left off (`over_limit`) and the message is never cut. When a briefed send is read back from the transcript into the history, its row keeps the message alone and no row is added. A message whose first word starts with `/` (`/model`, `/plugin:cmd`, `/mcp__srv__prompt`, `/prompts:name`, …) or that starts with `!` is a command to the tool: it is never briefed and the boundary is kept for the next send. When the instance is deleted and made again after the send was accepted, the old request does not use the new instance's launch boundary (the next request does). Nor does it settle a boundary a gone process left mid-send. A send accepted after the instance was made again, while the new launch boundary is not open yet and the earlier instance's launch boundary is still the current one, clears that boundary without a brief (`incarnation_changed`). A send whose worktree lifetime could not be confirmed when it was accepted (`lifetime_unpinned`), or whose worktree was made again (`worktree_changed`), writes nothing on the ledger — clearing a boundary included.
 
 `--auto-yes-answer-mode <m>` picks the answer mode `--auto-yes` arms with (`recommended` / `careful`;
 see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863)). Without `--auto-yes` it is
@@ -307,6 +316,7 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--model <model>` | Model to use (copilot / antigravity / claude only). **copilot** switches inside the session. **antigravity and claude take it as a launch flag**: it applies only when this send starts the session, and a running session answers 400 (stop the session and resend to switch). For claude the value is an alias (`sonnet` / `opus` / `opus[1m]`) or a full id (`claude-sonnet-5`). The target must be named (`--instance` or `--agent`) | The tool's default |
 | `--auto-yes` | Enable auto-yes before sending. Applied after the message (a tool `--model` defers it for, or a grant already on with a role or pin), a failure is a warning and exit 0, because the message has gone out. Do not send it again: the warning's command enables it. A failure before the message is an error with nothing sent (Issue #4159) | - |
 | `--duration <d>` | Auto-yes duration (`1h`-`24h`, whole hours; e.g. `1h` / `3h` / `8h`). Out of range exits 2 with or without `--auto-yes` | 1h |
+| `--note "<text>"` | With `--reply-to`: what you wait for, kept in the sender's mem (your own session, `whoami`) as a `waiting` item (`close_when=relay:<id>`, `evidence=[relay:<id>]`; it closes when the relay ends). Only the note and the relay id are stored — not the other session, the time or the message. **The message is not changed.** Without `--reply-to` or a session identity: exit 2. When mem refuses it (mode not `on` 50, a check 2, the open limit 56, ...) **nothing is sent**: the contract's task is failed, the Auto-Yes grant this send armed and the relay are withdrawn, and send exits with mem's code. With `--auto-yes`, an Auto-Yes state that cannot be read first stops the send before arming (exit 99), and `--instance` is required (with `--agent` alone there is no instance to read the state for: exit 2, nothing done). A send known not to have gone in closes the item (Issue #4226) | - |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
 
 ### Input that overlaps a send (input lock (#3952))
@@ -802,7 +812,7 @@ To answer a screen only while it is still the one observed, pass its kind and to
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
 | `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `base-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). `base-withholds` (Issue #3822) means the base rules withheld the answer before the contract was read, with or without a contract (today only `allow-once-unidentified`; changing the contract does not bring the answer back). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
-| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer; `prompt-unreported` when, on a new claude session's first send, the composer no longer showed the body after Enter but claude never reported the prompt with `UserPromptSubmit` (Issue #4035) — the body may still have been submitted (for example where only `SessionStart` arrives and the http `UserPromptSubmit` hook does not), so check with `commandmate capture <worktree-id> --pane` before resending; the screen is read once more right before failing and a generating screen makes it `sent` (Issue #4048); a session recreated while the send waits after its Enter is `indeterminate`, not `not-sent` (`session-replaced`), since the old process may have taken it (Issue #4048); a `sent` record turns `found-in-composer` when the next send finds that body still in the composer (claude only, and only the record of the send whose body it is; other tools only log the warning and keep `lastSend`, Issue #4048) — only while that send runs; the lasting record is the warn log `pre-send-found-submitted-body`). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body), and `paste-not-started` (Issue #4031: a long body sent as one paste could not be loaded into the tmux buffer — `load-buffer` failed, so `paste-buffer` never ran; `not-sent` with or without a relay, and the send API's `sendOutcome` is `not_sent`; a failed `paste-buffer` stays `indeterminate` (`send-error`) / `unknown`); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
+| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer; `prompt-unreported` when, on a new claude session's first send, the composer no longer showed the body after Enter but claude never reported the prompt with `UserPromptSubmit` (Issue #4035) — the body may still have been submitted (for example where only `SessionStart` arrives and the http `UserPromptSubmit` hook does not), so check with `commandmate capture <worktree-id> --pane` before resending; the screen is read once more right before failing and a generating screen makes it `sent` (Issue #4048); a session recreated while the send waits after its Enter is `indeterminate`, not `not-sent` (`session-replaced`), since the old process may have taken it (Issue #4048); a `sent` record turns `found-in-composer` when the next send finds that body still in the composer (claude only, and only the record of the send whose body it is; other tools only log the warning and keep `lastSend`, Issue #4048) — only while that send runs; the lasting record is the warn log `pre-send-found-submitted-body`). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), `agent-not-in-foreground` (Issue #4300: the agent has exited and the pane is back at its shell, so nothing was typed; stop the instance's session with `commandmate instances <worktree-id> kill <instance-id>` and send again), `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body), and `paste-not-started` (Issue #4031: a long body sent as one paste could not be loaded into the tmux buffer — `load-buffer` failed, so `paste-buffer` never ran; `not-sent` with or without a relay, and the send API's `sendOutcome` is `not_sent`; a failed `paste-buffer` stays `indeterminate` (`send-error`) / `unknown`); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
 
 **`lastSend` is not "the send that finished last" (Issue #4065).** When sends overlap, it follows the order in which the input lock was granted (its generation). It is not necessarily the reading request's own outcome (a request's own outcome is in the `send` error and the send API's `sendOutcome`).
 - The record of a send that was granted the lock (including a `not-sent` refused after the grant, before the body) is not kept when a send granted the lock later already has a record for the same instance.
@@ -2534,6 +2544,232 @@ Failures included, on stdout (the same sentence goes to stderr). A failure with 
 
 ---
 
+## commandmate mem
+
+Typed items that carry the state of a piece of work across sessions (Issue #4221, Epic #4220). Only what CommandMate cannot know itself (intent, the next step, who you are waiting for, decisions, outside state) is kept, each with a condition that closes it. Items belong to a registered repository and a branch, so they survive a worktree made again for the same branch.
+
+### Turning it on (the screen only)
+
+Off by default. The mode (`off` / `derived` / `on`) is set on **the "mem" of each row of the Repositories screen**, as branch-name rules (the first that matches from the top; `*` stays within `/`, `**` crosses it; a `detached HEAD` row) and per-branch overrides. Precedence: the branch override → the rules → `off`. **The CLI has no way to change the mode** (`mem mode` only reads it). Writes (`now` / `add` / `update` / `close`) go through only on a branch whose mode is `on`; `off` and `derived` answer exit 50 and store nothing.
+
+### Usage
+
+```bash
+commandmate mem now "<text>" [--close-when <cond>] [--evidence <ref>]
+commandmate mem add --kind <kind> (--text "<text>" | --stdin) [--close-when <cond>] [--promote-to <dest>] [--quote "<words>" --quote-at <ts>] [--evidence <ref>] [--key <key>]
+commandmate mem update <id> --if-version <n> [--text … | --stdin] [--close-when …] [--evidence …]
+commandmate mem close <id> [--reason "<text>"]
+commandmate mem list [--all] [--branch <name>] [--json]
+commandmate mem check [--branch <name>] [--json]
+commandmate mem check --suggest [--instance <id>] [--json]
+commandmate mem check --suggest --quiet [--hook <event>]
+commandmate mem mode [--json]
+commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+```
+
+- Inside a session the target is your own instance (`whoami`). In an ordinary shell, writes need `--worktree <id> --instance <id>`, and `list` / `mode` / `purge` need `--worktree <id>` or `--repository <id> --branch <name>` (otherwise exit 2 `target_required`)
+- `now` is the session's note (#2427). Up to 100 characters. The next `now` replaces it; the previous content is kept as `superseded` (the newest 20 per slot)
+- Kinds: `now` / `waiting` / `decision` / `next` / `external` / `note`.
+
+--close-when of "mem add": required for kind waiting / next / external (without it: exit 2, nothing stored); optional for decision / note.
+
+- With `--close-when` omitted, `now` → `replaced`, `note` → `manual`, `decision` → open until promoted
+- `--close-when`: `manual` · `replaced` (now only) · `issue:[host/owner/repo]#N` · `pr:[host/owner/repo]#N[?state=merged|closed]` · `branch:<name>?merged=<ref>[&scope=local|remote]` · `branch:<name>?deleted` · `relay:<id>` · `worktree:<id>` · `session:task:<id>` · `session:verify:<run id>` · `session:schedule:<execution log id>` · `at:<ISO 8601 with an offset>`. `session:` takes only the three runs CommandMate records the end of (no tmux session name, no PID). `branch:…?deleted` also stores the tip at the time of writing (empty when the ref does not exist)
+- Only the instance that wrote an item (its same incarnation) and a person (on the screen) may `update` / `close` it. An instance removed and made again under the same id is another incarnation and cannot change the earlier items (exit 55)
+- `add` with `--key` answers the first item to a retry with the same key and content (`replayed: true`); different content is exit 54
+- `purge` deletes nothing without `--confirm` and shows the counts. Recorded / promoted decisions are left out unless `--include-decisions`. Refused from inside an agent session (exit 55)
+
+### Evaluating the close conditions (Issue #4222)
+
+Conditions are **evaluated when read** (`mem list`, `mem check`, the brief); nothing watches in the background and nothing polls. Only a branch in mode `on` is evaluated; `off` / `derived` ask nothing and close nothing (`mem check` exits 50). Each result is one of three, with a fixed reason word (`reason`): `list --json` carries `conditions` (by item ID), `check --json` carries `results`.
+
+| Result | Closes? | Examples |
+|---|---|---|
+| `met` | Yes (`close_reason=condition`, `updated_by=server`), with one end record (condition, what was observed, end reason, outcome) and one "it ended" notice | `issue-closed`, `pr-merged`, `branch-deleted`, `relay-delivered`, `task-succeeded`, `worktree-deleted`, `time-passed` |
+| `not-met` | No | `issue-open`, `not-merged`, `no-new-commits`, `relay-delivery-attempting`, `task-running` |
+| `unknown` | **No** | `not_found` (404), `unauthenticated`, `forbidden`, `rate_limited`, `offline`, `query_timeout`, `gh_unavailable`, `host_not_allowed`, `branch-diverged`, `branch-order-uncertain`, `relay-delivery-uncertain`, `session_kind_unknown`, `query_budget_exhausted`, `deadline_exceeded`, … |
+
+- **Met, per type**: `issue` closed (the outcome from `state_reason`); `pr` merged (closed with `?state=closed`); `branch … merged` means it reached `into` with commits after the tip it had when written (merged into another ref, or a new branch with no change yet, is not met; `scope=remote` sees a squash merge through the GitHub PR); `deleted` means the ref is gone (not "could not be read"); `relay` delivered (`expired` / `cancelled` are met with outcome `failure`; never closed while a delivery hold or an undelivered payload remains); `worktree` deleted (a rename is not met); `session` a terminal task / verify / schedule state (`running`, `waiting_input` are not met); `at` the time has passed
+- **Query limits**: per evaluation, 8 GitHub / `git ls-remote` queries (5 s each), 24 local git queries (3 s each), 10 s in all. The same target is asked once. Items past a limit are unknown
+- **GitHub hosts**: only `github.com` and the host of the item's repository's `origin` are asked (others: `host_not_allowed`). No `git fetch`
+- **Re-created branches**: a branch deleted and made again under the same name is another branch (locally told apart by its reflog's creation time; one made in the same second as the item cannot be ordered and stays unknown). Use `pr:` to follow a remote one exactly
+- **Decisions**: a decision met before it is promoted stays open, marked `unreflected`
+- **The "it ended" notice**: the author's session (the same instance incarnation) gets it once, in its next brief. A `check`, another instance's brief or the screen's preview evaluating first does not use it up. If the author's incarnation has ended, the next session of the same branch gets it; if none, it stays in the screen's undelivered list (`GET /api/repositories/:id/mem/notices?branch=`) for a person to take
+
+### Prompts to update (`check --suggest`, Issue #4226)
+
+`mem check --suggest` applies the prompt rules to your own items and your own `now`. It runs no model, adds no watcher and changes no hook settings (no hook hands a line back to the agent's context; at a conversation boundary the brief does, and before a summary or at the end of a turn a skill's steps call this command).
+
+| code | When |
+|---|---|
+| `now_missing` | Your instance has no `now` (instances on the roster only) |
+| `now_stale` | Your `now` has not been updated for a day |
+| `now_condition_met` | Your `now` closed because its condition was met (not with `--quiet`) |
+| `decision_unreflected` | An `open` / `recorded` decision is stale (14 days), or met but not reflected |
+| `manual_stale` | A `next` / `external` / `note` closed by `manual` is stale |
+| `open_count` | The open items of the branch reached the warning count (the same formula as `mem list`'s warning) |
+| `ref_unknown` | A condition's reference is not found (`not_found` / `relay_not_found`; not with `--quiet`) |
+| `evidence_missing` | A `path:` of `evidence` is gone (a symbolic link counts as gone) |
+| `decision_no_destination` | An `open` decision has no destination (`promote_to`) |
+
+- It looks at items you wrote (the same incarnation of the instance; a rename of the worktree id keeps them) and items a person wrote on the screen. **It does not find an intention that should have been written and was not** (it sees the state of what is written, and an empty `now`)
+- What it prints is a fixed sentence per code with ids and versions; never an item's text or a branch name. `branch` in `--json` is replaced as the brief does (`null` for a branch with a secret-like value or invisible characters)
+- **Exit codes**: **57** when there is at least one prompt, 0 otherwise. Mode `off` / `derived`: nothing on stdout, exit 50. With `promptOnEvents` (the screen's mem settings) off, no prompt and exit 0 (`disabledBy: "promptOnEvents"` in `--json`). When the mode, the settings, the branch, the registration or the lifetime of the instance or worktree changed during the evaluation: nothing, exit 0 (`discarded` in `--json`, one line on stderr saying to run it again)
+- `--suggest` evaluates the conditions (like `mem list`, it may close what is met). It says whether a prompt was shown (`shown`) and prints everything every time
+- `--quiet` is what a skill's steps call. It **always exits 0**, prints only the prompts this instance has not been shown, in one line (280 bytes at most), and records them. It asks no condition. The record is in the database: **the same state is not prompted again, a server restart included** (going back to a branch, or to another registered root of the same Git, prompts nothing while their state is unchanged). A new conversation boundary, a new incarnation of the instance or a new state (an item's version, ...) prompts once. No identity, or an `--instance` that is not yours: nothing. `--json` loses to quiet. A flag error commander refuses (an unknown flag) is exit 1 as ever
+- Known limits: a prompt recorded by the server whose answer did not reach the CLI within its deadline (4 seconds) is recorded and never shown (the server's 3-second deadline counts from when it takes the request, not the time the CLI spent before that, such as resolving the session identity, so it does not close this gap). The records of an instance off the roster, a branch git no longer has, or a root whose registration was removed stay until the next `--quiet` in that worktree or until the worktree is deleted
+- `--hook <event>` (`session_start` / `pre_compact` / `turn_end` / `manual`) marks where it was called; it is logged and echoed in `--json` only
+- A process with the same OS rights can call the API (`POST /api/worktrees/<id>/mem/suggest`) directly and use up another instance's record. Like the author check, this stops mistakes, not intent
+
+### Checks on the free fields
+
+Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checked on the server for its length limit, secret-like strings (tokens, keys, `password=`, …) and control characters. `path:` in `evidence` and `promote_to` takes repository-relative paths only, and refuses absolute paths, `..` leaving the repository, a symlink on the way and files like `.env`. A refusal shows only `code`, `field` and `rule` in the error, `--json` and the log — **never the refused text itself**.
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Done (also a `--key` retry answering the existing item) |
+| 1 | The server cannot be reached |
+| 2 | Invalid input (`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required`, …); nothing stored |
+| 50 | `disabled`: the branch's mode is `off` or `derived`; nothing stored (`check` asks nothing either) |
+| 51 | `version_conflict`: `--if-version` is not the current version; the stored item is returned |
+| 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
+| 53 | `ambiguous`: registered roots of one git whose settings differ, a root git cannot identify, or a registration that kept changing |
+| 54 | `duplicate_key`: the same `--key` with different content |
+| 55 | `not_owner` / `state_forbids`: not the author (another incarnation included), a state that does not allow it, or `purge` inside a session |
+| 56 | `limit_exceeded`: too many open items on the branch (30 for `waiting` / `next` / `external`, 50 for `note`; `decision` only warns) |
+| 57 | `check --suggest`: there is at least one prompt (Issue #4226; `--quiet` always exits 0) |
+
+### Recording a decision in its canonical place (screen only, Issue #4225)
+
+A `decision` is written to an Issue / PR comment or a worktree document (`promote_to`) **only when a person approves the diff on the screen** (the "mem" of each row of the Repositories screen → "Record decisions in their canonical place", `/repositories/<id>/mem/decisions?branch=<name>`). **The CLI has no way to do it** (`commandmate mem` has no promote / approve sub-command). No other path — the brief, `check`, prompts, Schedules — writes.
+
+1. Choose the item and a worktree and press "Make the diff". The whole body, the destination as resolved (`Issue <host>/<owner>/<repo>#N`, or `<worktree> (<branch>): <path>`), the account that posts, the effect ("changes the specification" by default / "record only") and the expiry (30 minutes) are shown. Changing the worktree, the effect or the quote's check drops the diff shown (make it again before approving). A quote an agent wrote is shown beside its check and written as "recorded by the agent (unchecked)"; it becomes "checked by a person on the screen" only when you tick the check after comparing it with the original (the check is cleared when you choose another item). Free text (the decision, the quote) goes inside code blocks, and invisible characters are shown as `[U+XXXX]`
+2. Press "Approve and write". Right before writing, the item's version, the destination (host, repository and number, or worktree, branch and path), the fingerprint of the content the diff was made from, the worktree's lifetime, the mode and the poster are checked again; if any changed, **nothing is written** and a new diff is asked for (another session changed the document after the approval, the worktree was deleted or switched to another branch, the same item was approved in parallel, …)
+3. Once written, "changes the specification" leaves the item `recorded` (**not reflected**: only recorded as a comment or in a document, not yet reflected in the canonical place such as the Issue body), and "record only" makes it `promoted`. A `recorded` item becomes `promoted` when a person reflects it and presses "I checked it is reflected in the canonical place"
+
+- **Documents**: a marked block is appended at the end of an existing document (never rewritten or replaced). `.md` only, up to 1 MiB. A path outside the repository, an absolute path, a symlink, `.git`, `.env` and the like are refused. **Agents' instruction files are refused too** (a record an agent wrote is never read as an instruction by the agents after it): anything under `.claude/`, `.agents/`, `.codex/`, `.gemini/`, `.agent/`, `.cursor/`, `.windsurf/`, `.clinerules/`, `.commandcode/` or `.opencode/` at any depth, files named `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`, `GEMINI.md` or `CMATE.md`, and `.github/copilot-instructions.md` and anything under `.github/instructions/`, `.github/prompts/`, `.github/chatmodes/`, `.github/skills/` or `.config/opencode/` (case-insensitive; every root an agent was measured to discover Skills from is always among them). A new document appears whole through `link` from a temporary file (a `.commandmate-promote-<id>.tmp` left behind is taken back by the reconcile). **Nothing is committed or pushed** (the change stays in the worktree)
+- **Comments**: the body starts with a mark naming the operation (`<!-- commandmate-promote:op=…; item=… -->`). The poster is fixed by the token read once with `gh auth token --hostname <host>`, given to both the check and the post (the token is never stored or shown)
+- **Unknown outcomes**: a lost answer, a timeout, a database update that failed after the write, a restart and the like are kept as "outcome unknown" and **never sent again by themselves**. "Reconcile" on the screen looks for the mark (for a comment: the poster and the body's fingerprint; for a document: the block). If it is not found, the outcome stays unknown until a person presses "I checked it is not there" (on GitHub or in the worktree)
+- **The mark is found but not what was written** (the comment was edited, the document's block was changed by hand): the outcome stays unknown, and the reconcile shows "What was found (as it is now)" beside "What was meant to be written (the approved body)". If you judge from both that it was written, press "Treat as written" (recorded as succeeded and the item moves; nothing is written outside). Pressing "I checked it is not there" here lets the next approval write the same decision again
+- When the write succeeded but the item did not move (the worktree was re-created, the version changed, the mode is not `on`), the screen says so, and "Treat as recorded" makes the transition only (nothing is written outside)
+- The mode is that of **the item's branch** (not the chosen worktree's current branch). With several roots of the same Git, it is written only when every root agrees the item's branch is `on` (roots whose settings differ write nothing)
+- An operation whose outcome is not settled stays on the screen under "Operations still unsettled after their item was closed or deleted" after the item was closed with `mem close` or deleted with `mem purge`, and can still be reconciled. A worktree whose id changed by a rename is reconciled as the same worktree (one deleted and made again is another)
+- A write that succeeded after its item was closed or deleted cannot move the item (a closed item never moves). The screen offers only "Treat as recorded (the outcome only; the closed item does not move)", which records that a person checked the outcome (the item stays closed)
+- When the roots of the same Git disagree on the setting of the item's branch, the screen warns and stops listing and approving decisions, but keeps showing the operations whose outcome is not settled; they can still be reconciled or checked as not there (the item does not move until the roots agree)
+- The screen of any root of the same Git reconciles and settles the operations of that Git's roots (a root of another Git does not reach them)
+- Invisible characters in the branch or the author are warned about too. A branch is written in its omitted form (`(省略 N bytes・reason)`)
+
+### Viewing and writing items on the screen (screen only, Issue #4227)
+
+A branch's items are shown under **the "mem" of each row of the Repositories screen → "View items"** (`/repositories/<id>/mem?branch=<name>[&worktree=<id>]`), where a person adds, edits and closes them. The PC and the phone share the screen (at a phone's width the rows only wrap). **The CLI has no way to do it** (the screen's writes accept requests with the mark only).
+
+- The top shows the branch's mode and what decided it (an override, a rule, the default). `derived` is "frozen", and this screen cannot write either. `off` lists nothing (the items are kept). "Change the mode and features" opens the mem settings in place, where an override for this branch can be added
+- The list has a section per kind; each row shows the author, the owning instance, who updated it, the version, the close condition and its answer (`{result:reason}`) and staleness. A recorded decision shows "Not reflected: recorded only, not yet reflected in the canonical place". Recording and reflecting a decision is done on the decisions screen above, through "Record and reflect" (this screen does not write it)
+- To write, choose a worktree of this branch and an instance of its roster (an item is owned by an instance). The author and updater are `human`. When the worktree's current branch is not the screen's branch, it is read only. An add makes one key per request. When the result is unknown (a timeout, a lost connection), the input is held and "Send the same again" sends the same content with the same key, so even if the first request was written there is still one item (the same item comes back). The request sent again does not change: it keeps the worktree, instance, content and key it was sent with (one per operation — the add, and each item's edit and close — and another operation finishing does not drop it; while it remains, other writes wait — see "Concurrent edits" below). When the worktree or instance selection is changed, the screen says it cannot be sent with that selection, and you choose "Go back to that destination" or not to send it again. An edit or close sent again has no key, so a 409 to it (whether the first request was written or someone else changed the item) is never shown as saved: it goes back to the concurrent-edit comparison. If the worktree's HEAD moved to another branch, nothing is written and the add is refused. For the kinds that need a close condition (the `--close-when` rule above) the field says "required"
+- **Items a person wrote**: an item a person added on this screen (author `human`) cannot be changed or closed through `commandmate mem update` / `mem close`, even by the agent of the instance chosen as its owner (exit 55, `not_owner`). Only a person (this screen) changes or closes it. A close by its condition (the server's evaluation) still applies to any item
+- **Buttons**: only what the current state allows is offered (a recorded decision has no "Edit"; a reflected decision closes with "Close", an open one with "Withdraw")
+- `now` (each session's current state) is not added or edited here; write it from the session note on the worktree screen as before
+- **Concurrent edits**: an edit and a close send the version read when they were opened (a read of the list meanwhile does not replace it). An edit sends only the fields you changed (emptying the evidence sends "no evidence"; a field you did not change is not sent, so what someone else wrote meanwhile stays). If it changed elsewhere (another page, an agent's `mem update`, a close by condition), nothing is written; for an edit, **your draft, the value you read and the current value** are shown side by side with the text and the evidence, along with the fields saving on top would send. Only pressing "Save my draft on top of the current value" sends it again with the new version (it is never laid on top by itself). For a close, what you read and the current value are shown, and "Close it again, having seen the current value" starts the confirmation again. The comparison is shown above the list, not inside the item's row. The resend of an edit or a close whose result is still unknown is in the item's row while the item is listed, and above the list once it is not (for example, it was closed and left the default list). Either way, when the item was closed and left the default list (closed items hidden), you can still check them without choosing "Show closed items" (for example, a close whose answer was lost and whose resend finds it already closed: the current value says closed, and no "close again" is offered). Opening or saving another item's edit or close does not remove a comparison. **While a request is being sent, or a request whose result is unknown remains, no other write (add, edit, close, save on top, close again) can be made: it waits** (the screen says why; this keeps anything from being written twice or mixed up). Send that request again or press "Do not send again", and writing is possible again. Reading again and changing the worktree or instance still work. A resend (and a request being sent) keeps the content it sent and cannot be changed; to give it up, press "Do not send again" (the list is read again, so you can check whether it was written)
+- **Stale pages**: the screen reads the list again when it gets the focus back and every 30 seconds, and marks a row whose version moved as "Updated"
+- **Closing a recorded decision**: a `recorded` decision you decide not to reflect closes only after a two-step confirmation ("This decision is recorded; it will be closed without being reflected in the canonical place. Comments and other records stay"), with the reason `withdrawn`. `commandmate mem close` still refuses `recorded` (exit 55). Closing an open decision is a withdrawal (`withdrawn`)
+- **Undelivered notices**: the "it ended" notices no session took are listed, each with "Take it"
+- Of the mem settings' features, "Pop-ups" is the attended or unattended (the default) setting. On a branch with it on and mode `on`, "end" shows the hand-off screen ("commandmate handoff" below). It is separate from auto-yes; neither changes the other
+- **Asked when a session opens** (Issue #4227): on a branch with Pop-ups on, mode `on` or `derived` and "inject on start" on, the first send after a conversation boundary (a launch, a restart, a reset…) first shows three lines (open items and how many decisions are not reflected, questions waiting for a person, the last update) and three choices: **read the short brief** (the default, as before), **read it all** (entries that fit the budget are not cut at 512 bytes; the whole budget and the line limit still hold), **don't read this time** (this boundary's brief is not attached, nor on the next send; the note about how the last session ended is not delivered either). Closing sends nothing and leaves the text and the image in the composer; they are cleared only once sent. When the boundary changed after it was shown (another launch or reset, another send is delivering the brief, or the mode, inject on start or the branch changed while the send waited) nothing is typed (409 `boundary_changed`) and you are asked again with fresh lines. Questions that could not be read are shown as unknown, never as none. A command (a send starting with `/` or `!`) is not asked about (calling the API directly with "read it all" or "don't read" for a command, or for a tool without conversation boundaries, is a 400). When "read it all" or "don't read" did not get the text typed, the boundary is not used up (if putting it back fails too, this server's next choice is 409 `claimed`, and after a restart the boundary counts as used: you are not asked again, only the text is sent, and the screen says the brief was already used). Whether to ask is read afresh for every send, at the moment it is sent (not from what was read when the composer was focused): the send waits until it is read (at most 2 seconds), and a second Enter or send-button press meanwhile does not send twice. When it cannot be read, takes over 2 seconds, or the boundary changed while it was read (409 `boundary_changed`), nothing is sent: the text and the image stay, with the reason and "Try again" (with Pop-ups off, the send goes with the short brief as before). A send is not made either when the text or the image changed, another instance was selected, or a plan review began while it waited. Resending a message that failed (the resend button, the automatic resend when the connection comes back) is not asked about and goes with the short brief, as before
+
+### What is not prevented
+
+- Only the screen path changes the mode (the server checks a mark only the screen sends and a matching `Origin`). A process with the same OS rights (agents included) can still forge the mark with `curl`, or write the database file directly. CommandMate does not prevent or detect that
+- What is prevented: the mode changing through the CLI's regular commands, a CLI user changing it without knowing, and a page of another origin changing it through the user's browser
+- `--instance` can be claimed falsely too. The author check keeps a session from changing another's items by mistake; it does not stop a deliberate rewrite
+- Approving a decision's record (promote) is limited to the screen path by the same mark. A process with the same OS rights can forge it, and can rewrite the operation records in the database to read "succeeded". That agents do not approve rests on the CLI having no way to and on the skills' instructions, not on a guarantee
+- A person's item writes on the screen (Issue #4227) are limited to the screen path by the same mark. A person passes the author check (a person may change any item; conversely, an item a person wrote is not changed through an agent's entrance), so the worktree's and the instance's lifetimes, the branch, the mode and the version are checked right before the write. A process with the same OS rights that forges the mark writes as a person
+
+---
+
+## commandmate handoff
+
+The **agent's side** of the hand-off before a session ends (Issue #4227). When a person starts the hand-off from the screen's "end" (only on a branch set to be attended, `popup` on, with mode `on`), the screen sends the agent a request, and the agent puts its mem updates up as **proposals** with this command. A proposal is not an update: only what a person approves on the screen, after seeing the difference, is confirmed against the item's version.
+
+```bash
+commandmate handoff propose --request <id> add --kind <kind> --text "…" [--close-when …] [--evidence …]
+commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
+commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
+commandmate handoff done --request <id>
+```
+
+--close-when of "propose add": required for kind waiting / next / external (without it: exit 2, nothing stored); optional for decision / note.
+
+(This line is the one `commandmate handoff --help` prints, made from the same rule as the request text.)
+
+- `--request` is the id in the request text. For `propose` it may stand before the operation (`add`, `update`, `close`) or after it; with neither it is 2 and nothing is sent. Inside a session the target is yourself (whoami); in an ordinary shell add `--worktree <id> --instance <id>`
+- Which kinds need `--close-when` on `propose add` is the line above. The values a kind takes are fixed per kind (`--close-when` in `commandmate mem --help`; `at:` closes the item by itself at that time, written with `+09:00`). The request text also gives each kind's rule and an example
+- If a `propose` fails (an exit code other than 0), fix it and propose again before `done`: nothing is taken after `done`. When `done` arrives with no proposal, the screen says that a failed proposal did not arrive, and a person can ask again with "Don't end" and then "End"
+- **There is no way here to approve, cancel or end** (the screen's only, with its mark)
+- Only the instance asked can propose (another gets `not_requested`). Past the agent's time (5 minutes; the screen can add 5 minutes twice), after `done`, after a forced stop or a cancel, nothing is taken (`request_closed`)
+- A proposal never touches `now`. A decision is proposed as an add (open) or the withdrawal of an open one (close); closing a recorded decision is a person's, on the screen (`state_forbids`)
+- If the session is started again after the request (a restart, reset or resume: a new D1 boundary), proposals to the old request are refused with `session_changed` and the request expires
+
+### How a hand-off ends and what is recorded (a person stops it)
+
+- The hand-off **never stops a session**. Only the existing stop a person presses does. The screen's "Stop" declares the stop, runs the existing stop, then asks the server to observe it; the server checks with `isRunning` and records it. Nothing stops anything from a deadline, a cancel, a confirmation or a read
+- The record is `confirmed` (the agent's `done`, every proposal decided, every confirmation in, and the stop observed after the person's press — all of them) or `unconfirmed` with a reason: `forced`, `agent_timeout`, `request_failed`, `undecided_left`, `conflict_left`, `apply_failed`, `session_changed`. "Stop now" before confirming is always `unconfirmed(forced)`. When the stop cannot be confirmed nothing is recorded and the screen asks to press Stop again
+- The screen's "end" (the PC header's and each split's, the phone's "…" → End) reads the mode when pressed: with attended on and mode `on` it opens this hand-off; otherwise (unattended, mode not `on`, the mode not readable or not answered in 5 seconds) the usual confirmation as before. Opening either stops nothing. "Don't end" keeps the session
+- The hand-off screen **does not close while a confirmation is being sent, a confirmation's result is unknown, a cancel waits for its answer, or the stop is in progress** — by Esc, ×, the backdrop, a button, another "end" or a switch of worktree (it says why). A confirmation whose result is unknown stays until you send it again or drop it; the stop can still be pressed meanwhile. Switching worktree keeps the screen: on the other worktree nothing can be stopped or confirmed and the confirmation can only be dropped; back on its own worktree it can be sent again. These stay, and no request is made again, when the screen switches between PC and phone (a turn of the device, a change of width) or disappears for a moment while a switch of worktree loads. A hand-off screen not closed is shown open again when you come back to its worktree from another page (also while the agent's proposals are awaited). After cancelling, neither a confirmation nor the request's text is sent. An earlier confirmation, cancel, stop or request whose answer comes back late does nothing to a confirmation sent since, nor to a hand-off screen opened again (or opened on another page): it does not close it, mark it unknown or rewrite what it shows. Where no request could be made and only the existing stop is offered, it says "stopped" only when the session stopped; when it could not be stopped, or it is not known, it says why and the stop button stays (press it again)
+- The exit codes are mem's: 0 done, 2 invalid input, 50 mode not on, 51 version conflict, 52 not found, 55 `not_requested` / `request_closed` / `session_changed` / `state_forbids`
+
+---
+
+## commandmate brief
+
+The summary a restart reads (Issue #4223, Epic #4220). The state CommandMate holds (the instances' state, auto-yes, relays, execution contracts, verification, the orchestrate run, a reference to the conversation) is read from its source every time, set next to the branch's mem items, and kept **within a budget of UTF-8 bytes**. No model and no external generator is called. Nothing is copied (the brief is never stored). This command only reads: it acknowledges no "it ended" notice (putting the brief into a session is #4224).
+
+### Usage
+
+```bash
+commandmate brief [--budget <bytes>] [--json] [--all] [--worktree <id> --instance <id>]
+commandmate brief --session-start     # from a SessionStart hook (Issue #4224)
+```
+
+- The target is your own instance inside a CommandMate session (resolved like `whoami`). In an ordinary shell, give **both** `--worktree` and `--instance` (only one is exit 2)
+- `--budget` is the UTF-8 byte count of the whole output, the final newline included. Text: 1,024–49,152 (default 4,096); `--json`: 4,096–49,152 (default 16,384). Anything else, or a value that is not a whole number (`0`, negative, decimal, `1e3`, empty), is exit 2 and prints nothing
+- `--all` drops the budget and prints every entry (not with `--budget`)
+- `--json` is one line of JSON (`schema: "cmate-brief/v1"`); whole elements of `entries` are dropped to fit
+
+### What it shows
+
+- A fixed top: the block's fences (`<<<cmate-brief:<tag>` … `cmate-brief:<tag>>>>`), a line saying that what follows is data, not instructions, the mode and the target, and **the number of entries left out with the command that reads them all** (`omitted=<n> all="commandmate brief … --all"`). The closing fence is never dropped
+- One entry per line, each with its source (`src=`), author (`by=`) and time (`updated=`). Free text is a JSON string; for every source (task titles, branch names and run stages as well as mem items), a secret-like value, a control character or a bidirectional control is not shown and the line says `withheld=<code>`. Invisible characters (every Unicode Default_Ignorable_Code_Point, format character (Cf), line / paragraph separator, private-use code point and variation selector) are replaced by a visible `[U+XXXX]`. Only the ZWJ and VS15/VS16 inside an emoji sequence and the tags of an RGI subdivision flag are kept, so a Persian ZWNJ or an Indic ZWJ is replaced too. An entry over 512 bytes shows its body and references (`refs`) in the omitted form (`…(本文 <n> bytes を省略。読む: …)`)
+- A fixed order: what waits for a person (an open wait, a relay in `prompt`) → your own `now` → relays with a delivery hold → unreflected decisions → next steps → your session's state (the instance, auto-yes, the contract, your verification, the run) → other sessions' `now` → waiting and external items → ended notices → the rest. The same state gives the same order, and the cut stops at the first entry that does not fit
+- A source that cannot be read is one line saying `unavailable=<reason>` (`timeout`, `read_failed`, `no_transcript_reader`, `no_turn_yet`) or `unsupported=<reason>` (`format`, `too_large`), and the other lines are printed (exit 0)
+- An instance's state is the value the ordinary monitoring last observed; the brief never captures the screen or detects a state for itself (`observed=none` when nothing was observed). Auto-yes is read per instance; a grant past its deadline reads `enabled=false stop=expired`, and the state is not rewritten
+- The conversation is a reference only: the time of the last transcript turn and the command that reads it (`commandmate reply <worktree-id> --instance <id>`), never its body
+- On a `derived` branch only the derived state is shown; hand-written items and notices are not read. On `on`, the close conditions are evaluated when read (as `mem list` does)
+
+### From a SessionStart hook (`--session-start`, Issue #4224)
+
+- On a branch with `injectOnStart` enabled, the send path (claude, codex, command-code) puts the brief in front of a conversation's first send, once. A `SessionStart` hook that prints the brief should **use `commandmate brief --session-start`, not the plain `commandmate brief`**
+- `--session-start` prints nothing to stdout and exits 0 (one line on stderr) when the branch is `derived` / `on` with `injectOnStart` enabled and the instance's tool is one the send path briefs. Otherwise it prints what the plain command prints (a tool the send path does not brief gets it from the hook)
+- It is decided from the membership, the mode, `injectOnStart` and the tool alone: the boundary ledger is neither read nor written, and nothing is reserved or acknowledged. Not with `--json` (exit 2)
+- No double brief is guaranteed for the hooks CommandMate installs and hooks that use `--session-start`. A hook of your own that prints the plain `commandmate brief`, or a hand-written handoff, at `SessionStart` cannot be stopped
+- It does not look at the hook's `source` (`startup`, `resume`, `clear`, `compact`, …) or at whether the conversation goes through CommandMate's send. When the conditions hold it prints nothing after a `compact` or in a conversation started outside CommandMate too, and such a conversation gets the brief from neither side (the send path briefs only what is sent with CommandMate's `send`)
+- When the worktree or the instance is deleted and made again while it decides, it prints no brief for the new one and evaluates no close condition (exit 52, `reason` is `lifetime_changed`)
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Printed (also when a source could not be read) |
+| 1 | The server is not reachable |
+| 2 | Invalid input (the budget's range or form, `--all` with `--budget`, only one of `--worktree` / `--instance`, an id's shape). Nothing printed |
+| 50 | The branch's mode is `off` (also when it turned `off` while the brief was built). Nothing on stdout, one line on stderr |
+| 52 | Not registered, no such worktree / instance, the branch cannot be read, or the worktree / instance was deleted and made again while the brief was built (`reason: lifetime_changed`; it is not rebuilt for the new one) |
+| 53 | `ambiguous`, or the membership kept changing while it was rebuilt |
+| 99 | Anything else |
+
+---
+
 ## commandmate report
 
 Generate, show, and list daily reports (a summary of the day's agent activity, Issue #636).
@@ -3142,6 +3378,7 @@ commandmate ls --token your-token
 | 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
 | 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
+| 50–57 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded), and a prompt from `mem check --suggest` (57); see the exit codes of [commandmate mem](#commandmate-mem). `send --note` refused by mem ends in 50–56 too |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |
 

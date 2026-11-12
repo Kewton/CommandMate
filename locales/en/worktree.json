@@ -1,10 +1,11 @@
 {
   "agentStatus": {
     "overflowTrigger": "More agents",
-    "otherSessions": "{count} more",
-    "otherSessionsLabel": "{count} other sessions",
-    "otherSessionsWaitingLabel": "{count} other sessions, {waiting} waiting for your answer",
-    "otherSessionsList": "Other sessions",
+    "sessions": "Sessions {count}",
+    "sessionsLabel": "Sessions: {count}",
+    "sessionsWaitingLabel": "Sessions: {count}, {waiting} waiting for your answer",
+    "sessionsList": "Sessions",
+    "currentSession": "Showing",
     "inSplit": "Split {index}",
     "addSession": "Add session…"
   },
@@ -1207,7 +1208,9 @@
     "terminalPane": "Terminal pane",
     "pinPane": "Pin beside the terminal",
     "unpinPane": "Unpin (show over the terminal)",
-    "closePane": "Close panel"
+    "closePane": "Close panel",
+    "movePaneLeft": "Move to left",
+    "movePaneRight": "Move to right"
   },
   "worktreeStatus": {
     "notSet": "Not set",
@@ -1345,7 +1348,10 @@
     "hint": "Enter to save, Esc to cancel. An empty note is removed.",
     "editLabel": "Edit the session note for {split}",
     "label": "Note: {note} (updated {time})",
-    "empty": "No note yet"
+    "empty": "No note yet",
+    "rejected": "This note contains text that cannot be stored (something like a secret, or a control character). What you typed is kept.",
+    "conflict": "This note was changed elsewhere and has been read again. What you typed is kept.",
+    "failed": "The note could not be saved. What you typed is kept."
   },
   "nextAction": {
     "start": "Start",

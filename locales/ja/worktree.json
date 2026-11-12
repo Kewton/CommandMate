@@ -1,10 +1,11 @@
 {
   "agentStatus": {
     "overflowTrigger": "他のエージェント",
-    "otherSessions": "ほか {count}",
-    "otherSessionsLabel": "ほかのセッション {count} 件",
-    "otherSessionsWaitingLabel": "ほかのセッション {count} 件（うち {waiting} 件が応答待ち）",
-    "otherSessionsList": "ほかのセッション",
+    "sessions": "セッション {count}",
+    "sessionsLabel": "セッション {count} 件",
+    "sessionsWaitingLabel": "セッション {count} 件（うち {waiting} 件が応答待ち）",
+    "sessionsList": "セッション一覧",
+    "currentSession": "表示中",
     "inSplit": "分割 {index}",
     "addSession": "セッションを追加…"
   },
@@ -1207,7 +1208,9 @@
     "terminalPane": "ターミナルペイン",
     "pinPane": "ターミナルの横に固定",
     "unpinPane": "固定を解除（ターミナルの上に重ねる）",
-    "closePane": "パネルを閉じる"
+    "closePane": "パネルを閉じる",
+    "movePaneLeft": "左に移す",
+    "movePaneRight": "右に移す"
   },
   "worktreeStatus": {
     "notSet": "未設定",
@@ -1345,7 +1348,10 @@
     "hint": "Enter で保存、Esc で取消。空にすると削除します。",
     "editLabel": "{split} のセッションメモを編集",
     "label": "メモ: {note}（{time} 更新）",
-    "empty": "メモなし"
+    "empty": "メモなし",
+    "rejected": "保存できない文字列（秘密らしい文字列・制御文字など）が含まれています。入力は残しています。",
+    "conflict": "他で更新されました。最新の内容を読み直しました。入力は残しています。",
+    "failed": "保存できませんでした。入力は残しています。"
   },
   "nextAction": {
     "start": "開始",

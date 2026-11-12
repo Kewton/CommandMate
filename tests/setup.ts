@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import '@testing-library/jest-dom/vitest';
+import { AGENT_CORRELATION_ENV_KEYS } from '../src/lib/security/env-sanitizer';
 import {
   REAL_SHELL_TEST_TIMEOUT_MS,
   startsRealSubprocess,
@@ -50,6 +51,21 @@ if (currentTestPath !== undefined) {
       hookTimeout: REAL_SHELL_TEST_TIMEOUT_MS,
     });
   }
+}
+
+// Issue #4275: drop the agent correlation keys the suite inherited.
+//
+// The suite is run from inside agent tmux sessions (`wait --verify`), where
+// CM_AGENT_WORKTREE_ID / CM_AGENT_INSTANCE_ID / ... name the *agent's* worktree.
+// A test that hands `process.env` to a child then reads the parent agent's
+// identity (measured in #4266: worktree-id `mycodebranchdesk`, instance `codex`).
+// Decision: delete them here for every test file rather than having each test
+// save them, because a per-test list is a hole the next test reopens. A test
+// that wants a value sets it itself (this runs before the test file does), so
+// tests that read an explicit correlation key are unaffected. The key list is
+// imported from the module that defines it, not copied.
+for (const key of AGENT_CORRELATION_ENV_KEYS) {
+  delete process.env[key];
 }
 
 // Issue #1760: keep agent config generation out of the developer's home.
@@ -355,6 +371,28 @@ delete process.env.CM_VAPID_SUBJECT;
 // getDbInstance() refuses any non-temp path under Vitest as a backstop.
 // Covers only the Vitest suite, not the other steps of `commandmate verify`.
 const testDatabase = isolateTestDatabaseEnv(process.env);
+
+// Issue #4227 G-PR6: every plain send of the composer (`MessageInput`) now reads the start
+// preview afresh and sends NOTHING when it cannot be read (design `mem-ui-4227.md` §3.2). In
+// jsdom the real `fetchStartPreview` cannot be read (a relative URL), so a composer test that
+// never asked about the hand-off would see every send held. The default is the server's answer
+// for an unattended branch (popup 0) — `{ ok: true, show: false, attended: false }` — and only
+// `fetchStartPreview` is replaced; every other export of the module is the real one. A test of the
+// choice itself mocks it explicitly; the default counts its calls on
+// `globalThis.__cmDefaultStartPreviewCalls` so such a test can assert it never leaned on it
+// (`MessageInput-start-brief-4227`). No unit test exercises the real `fetchStartPreview`
+// (`git grep screen-client -- tests`); one that does takes it with `vi.importActual`.
+vi.mock('@/lib/handoff/screen-client', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/handoff/screen-client')>('@/lib/handoff/screen-client');
+  return {
+    ...actual,
+    fetchStartPreview: vi.fn(async () => {
+      const marks = globalThis as { __cmDefaultStartPreviewCalls?: number };
+      marks.__cmDefaultStartPreviewCalls = (marks.__cmDefaultStartPreviewCalls ?? 0) + 1;
+      return { ok: true as const, show: false as const, attended: false };
+    }),
+  };
+});
 
 // Mock next-intl for all component tests
 vi.mock('next-intl', () => ({

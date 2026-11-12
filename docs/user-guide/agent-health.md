@@ -324,7 +324,10 @@ fixture にするには足りない）。
 ロックは `mkdir` で作るディレクトリ（原子的。中の `owner` に pid・開始時刻・種類・token）で、場所は `$CM_RUN_LOCK_DIR`、
 無ければ `<os.tmpdir()>/commandmate-run.lock`（テストが触る `~/.commandmate/` には置かない）。`daily.sh` は同期の前に取り、
 `run.ts` の終わりまで持つ（`run.ts` は `CM_RUN_LOCK_TOKEN` で受け継ぐ）。UAT は `up` の前から `down` の後まで持ち、
-その間の持ち主の pid はサーバのもの。持ち主の pid が死んでいるロックは取り直す。以前の `run.lock`（state の隣）は使わない。
+その間の持ち主はサーバ（と、その専用のプロセスグループ）。持ち主が死んでいても、そのグループにまだ生きたプロセスが残っている間は
+ロックは取り直せず、断られる。前の run のサーバが残っている（`up` が断られる・`down` が `stop-refused` になる）ときは、
+**先に `down --run-dir <dir>` を実行して**サーバとグループを止め、ロックを解放してから次の `up` を行う（`up` を繰り返しても回復しない）。
+`down` はグループが空になったことを確かめるまでロックを残す。以前の `run.lock`（state の隣）は使わない。
 
 ## 手で実行する
 
@@ -361,7 +364,7 @@ tmux -L cm-agent-health kill-server
 - 確認専用の worktree（`../commandmate-agent-health`）に `docs/agent-health/CMATE.example.md` の中身を `CMATE.md` として置く。CommandMate の Schedule 機能が毎日 07:00 に Antigravity（`agy -p`）で `docs/agent-health/daily-triage-prompt.md` の手順を実行し、結果を Issue にする
 - この worktree は常駐用で、ブランチ `agent-health-runner`（upstream は `origin/develop`。独自の commit は持たない）を使う。develop は本体の作業ディレクトリで使っているため同じブランチは使えない。作り方: `git worktree add -b agent-health-runner ../commandmate-agent-health origin/develop` のあと `git -C ../commandmate-agent-health branch --set-upstream-to=origin/develop`、`npm install --include=dev`、リポジトリの同期
 - 依頼文は `bash scripts/agent-health/daily.sh --out <レポート>` を呼ぶだけ。`daily.sh` が同期（`git pull --ff-only origin develop`）・依存の更新（同期の前後で `package-lock.json` が変わったときだけ `npm install --include=dev`）・`run.ts` の実行をまとめて行い、標準出力に `AGENT_HEALTH_SYNC status=ok|failed …` を 1 行出す
-- 同期に失敗すると（追跡ファイルの未コミットの変更 `dirty-worktree`・`pull-failed: <git の最後の行>`・`npm-install-failed`・ほかの実行（UAT など）が共通のロックを持っている `run-locked: <持ち主>`）確認を実行せず、`completedAt` と `scriptErrors` を持ち `tools` が空の最小のレポートを書いて exit 2 になる（08:00 の見張り役が「実行されなかった」と取り違えないため）
+- 同期に失敗すると（追跡ファイルの未コミットの変更 `dirty-worktree`・`handoff-failed stage=<段>`（`run.ts` へのロックの引き渡しに失敗。子が受け取りの印を作れず `exec` の前に終わった場合は `stage=ack`）・`pull-failed: <git の最後の行>`・`npm-install-failed`・ほかの実行（UAT など）が共通のロックを持っている `run-locked: <持ち主>`）確認を実行せず、`completedAt` と `scriptErrors` を持ち `tools` が空の最小のレポートを書いて exit 2 になる（08:00 の見張り役が「実行されなかった」と取り違えないため）。同期の後で `run.ts` へ渡す前に `daily.sh` が INT／TERM／HUP／PIPE／QUIT で止められたときは、レポートを書かず `AGENT_HEALTH_SYNC status=failed reason=interrupted exit=<130|143|129|141|131> …` の 1 行だけを出す（終わり始めた後の 2 本目のシグナルは無視するので、行とロックの解放が途中で切れない。KILL は対象外）（`AGENT_HEALTH_SYNC` の行は 1 つの関数だけが出し、シグナルが行の出力と印の間に割り込むと同じ行が 2 本になりうる。同じ行の重複は 1 本と数える。status が食い違う 2 行は出ない）
 - レポートの `sync`（`daily.sh` 経由のときだけ）: `status`（`ok` / `failed`）、`before` / `after`（同期の前後の commit。失敗時は両方とも前の commit）、`reason`（失敗の理由）。`run.ts` を手で実行したときは `sync` は無い
 - **worktree の片付けで削除しない**（CLAUDE.md の「恒久 worktree（クリーンアップ対象外）」）。消すと翌朝の Schedule が動かない
 - ラベル `agent-health` を作っておく: `gh label create agent-health --repo Kewton/CommandMate --description "日次ヘルスチェックが自動登録した Issue"`
@@ -561,8 +564,8 @@ interface MetricsReport {
 
 ## 自動依頼（develop の Claude 3 へ /orchestrate、Issue #3045）
 
-日次確認（07:00、バグ Issue）と計測（06:30、改善 Issue）の後、08:30 に develop の **Claude 3**
-（worktree `mycodebranchdesk`・instance `claude-3`。この用途の専用）へ `/orchestrate` を依頼し、調査から修正・develop への
+日次確認（07:00、バグ Issue）と計測（06:30、改善 Issue）の後、08:30 に develop の **Claude 3（開発リーダー）**
+（worktree `mycodebranchdesk`・instance `claude-3`。開発リーダーと兼ねる。[体制](../orchestrate/team.md)）へ `/orchestrate` を依頼し、調査から修正・develop への
 マージまでを毎日自動で回す。main へのリリース（GO／NO-GO）は「リリース判断レポート」を見て利用者が決める。
 
 ```bash
@@ -591,8 +594,17 @@ npx tsx scripts/agent-health/dispatch.ts --dry-run   # 選定と状態確認だ�
 - **Claude 3 の状態**（`commandmate ls --json` の `sessionStatusByInstance["claude-3"]`）: 実行中で処理中でもプロンプト待ちでもなければ
   入力待ち（送る）。処理中・プロンプト待ちは送らない（`skipped-busy`。全件を持ち越し）。セッションが無ければ `send` が起動する。
   roster に `claude-3`（cliTool `claude`）が無いときは送らずに失敗する
+- **claude-3 の予約**（Issue #4243。[体制](../orchestrate/team.md#4-agent-health-の依頼とブリーフが重なったとき)）: 対象が 1 件以上あれば、状態を見る前に予約
+  （`~/.commandmate/agent-health/claude3.reservation`。置き場所は固定で、`--state-dir`・`$AGENT_HEALTH_DIR` では動かない）を取る。
+  PM（開発リーダーとしてのブリーフ）、開発リーダー（`claude-3`）自身（`reserve --self`。持ち主は `leader`、理由は「開発リーダー自身が予約中」）か前日の自動依頼の run が持っていれば、`/clear` も依頼も送らず、条件ファイル・ラベル・コメントも作らずに
+  `skipped-busy`（`reason` に持ち主と期限。期限を過ぎていれば「期限超過・要確認」。全件を持ち越し・exit 0）。待たない。
+  同じ日の別の dispatch が持っていれば記録を書かずに 1 行だけ出す。当日の `sent` は `dispatch/<日付>.json.sent` に 1 回だけ排他作成してから記録を書き、見送り・失敗の記録はその印を見て `sent` を置き換えない（書いた後に印が現れたら `sent` に戻す）。当日の記録を読む側（翌日以降の dispatch・リリース判断レポート）は印を先に読む。
+  依頼を送った後も予約は外さず、run の最後に `claude-3` が条件ファイルの指示で `npx tsx scripts/agent-health/claude3-reserve.ts finish --token <token>` を実行する（その token の完了の印を残してから解除。解除が通らなかったときは、この印があるときだけ PM が `takeover --reason dispatch-finished` で引き継げる）。
+  依頼の前に止まったとき（busy・`/clear` の失敗・入力待ちに戻らない・条件ファイルが書けない）と、依頼が再送の後も `exit 99`（未送信）のときは dispatch が自分で外す。
+  依頼がそれ以外の非 0 で終わったときは届いたか分からないので外さない（`reason` に「届いたか不明」）。PM か人が `status` を見て `takeover`／`release --force` する
 - **送信**: `commandmate send mycodebranchdesk "/clear" --instance claude-3` → 5 秒ごとに状態を見て入力待ちに戻ったことを確かめる（90 秒まで）→
-  `commandmate send mycodebranchdesk "<依頼>" --instance claude-3 --auto-yes --duration 8h`。どちらも `exit 99`（起動直後）なら 2 分後に 1 回だけ再送
+  `commandmate send mycodebranchdesk "<依頼>" --instance claude-3 --auto-yes --duration 8h`。どちらも `exit 99`（起動直後）なら 2 分後に 1 回だけ再送。
+  送るたび（再送も）に予約がまだ自分のものかを確かめ、送信中の印を付けてから送る。途中で引き継がれていたら送らずに `skipped-busy`（`reason`: 予約が途中で引き継がれた）
 - **依頼の中身**: 送る本文は **改行を含まない 1 行** `/orchestrate <番号…> <条件ファイルの絶対パス> の条件に従うこと`
   （複数行の送信は Claude Code に貼り付けとして扱われ、スラッシュコマンドとして実行されないため）。`--full` は付けない
   （UAT を main の作業ディレクトリで走らせないため）。条件は送る前に `workspace/agent-health/<日付>/dispatch-terms-<番号を - でつないだもの>.md`

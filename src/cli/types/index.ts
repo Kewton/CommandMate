@@ -449,6 +449,13 @@ export interface SendOptions {
    */
   ignoreStructuredPrompt?: boolean;
   /**
+   * Issue #4274: `--no-brief` (commander sets `brief: false`; true otherwise) — this
+   * send carries no session brief, and the boundary stays for the next one.
+   */
+  brief?: boolean;
+  /** Issue #4274: `--with-brief` — this send carries the session brief even with no boundary detected. */
+  withBrief?: boolean;
+  /**
    * Issue #2377: deliver the target's reply to this session when it finishes.
    *
    * `<worktree-id>[@<instance-id>]`, or `self` for the session running the
@@ -464,6 +471,11 @@ export interface SendOptions {
    * `MAX_RELAY_HOPS`.
    */
   allowRelayChain?: boolean;
+  /**
+   * Issue #4226: with `--reply-to`, what the sender waits for, kept in mem as a `waiting`
+   * item closed by the relay. Never added to the message.
+   */
+  note?: string;
 }
 
 /** task list command options [Issue #1545] */
@@ -872,4 +884,54 @@ export function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+/**
+ * What a `mem` command can end in (Issue #4221, design §12.1). Input errors stay
+ * {@link ExitCode.CONFIG_ERROR} (2) and nothing was stored. 50-56 because 30-32 and
+ * 40-41 are read out of the same `$?` by orchestration loops. The full map from the
+ * server's `code` is `MEM_EXIT_BY_CODE` in `src/types/mem.ts`.
+ */
+export const MemExitCode = {
+  SUCCESS: 0,
+  /** mode is `off` or `derived` for the branch: nothing was stored. */
+  DISABLED: 50,
+  /** `--if-version` is not the current version (or a mem note needs one): nothing was stored. */
+  CONFLICT: 51,
+  /** No such item, instance, registered repository, or the branch could not be read. */
+  TARGET_NOT_FOUND: 52,
+  /** The repository is ambiguous (roots that differ, git not answering, registration changing). */
+  AMBIGUOUS: 53,
+  /** The same `--key` was used for a different request. */
+  DUPLICATE: 54,
+  /** Not the author's incarnation, or the state does not allow it (also purge from a session). */
+  NOT_OWNER: 55,
+  /** Too many open items of the kind on the branch. */
+  LIMIT: 56,
+  /** `check --suggest`: at least one prompt to update mem (Issue #4226). */
+  SUGGESTED: 57,
+} as const;
+export type MemExitCode = typeof MemExitCode[keyof typeof MemExitCode];
+
+/**
+ * Shared by `handoff propose` and `handoff done` (Issue #4227, design `mem-ui-4227.md` §4.3).
+ * The exit codes are mem's ({@link MemExitCode}); the hand-off's own refusals map onto
+ * them (`not_requested` / `request_closed` / `session_changed` → 55, `not_found` → 52).
+ */
+export interface HandoffCommonOptions {
+  request?: string;
+  worktree?: string;
+  instance?: string;
+  json?: boolean;
+  token?: string;
+}
+
+/** Shared by every `mem` subcommand (Issue #4221). */
+export interface MemCommonOptions {
+  json?: boolean;
+  token?: string;
+  worktree?: string;
+  instance?: string;
+  repository?: string;
+  branch?: string;
 }

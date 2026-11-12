@@ -14,11 +14,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendRecord, readRecords, summarize } from '../../../../scripts/orchestrate/run-log.mjs';
 import {
   baselineTask,
+  completionSignalSince,
+  inheritedSignalSince,
   defaultResolveTarget,
   defaultRun,
   defaultSpawnToLog,
+  SIGNAL_INSTANCES,
   main,
   mutexWaitOnly,
+  needsCompletionSignal,
   newerTask,
   parseArgs,
   runIdOf,
@@ -1433,6 +1437,194 @@ describe('every Antigravity instance waits for the signal, whatever its id (#388
     expect(main(base('codex-2'), h.deps)).toBe(0);
     expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
     expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
+  });
+});
+
+describe('Command Code waits for the completion signal (Issue #4238)', () => {
+  const cc = (instance: string, ...extra: string[]) =>
+    [...argv().map((a) => (a === 'claude' ? instance : a)), '--signal-timeout', '60', ...extra];
+
+  it('lists command-code among the tools that need the signal', () => {
+    expect(SIGNAL_INSTANCES).toContain('command-code');
+    expect(needsCompletionSignal({ instance: 'command-code' })).toBe(true);
+    expect(needsCompletionSignal({ instance: 'command-code-2' })).toBe(true);
+    expect(needsCompletionSignal({ instance: 'cc', cliToolId: 'command-code' })).toBe(true);
+  });
+
+  it('a turn end without the signal starts no verification and keeps Auto-Yes (positive control)', () => {
+    const h = harness({ pane: ['working…'], resolvedTools: { 'command-code': 'command-code' } });
+    expect(main(cc('command-code'), h.deps)).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    expect(h.autoYesCalls()).toEqual([]);
+    expect(records()[0].note).toMatch(/no IMPL_COMPLETED line within 60s/);
+  });
+
+  it('the signal on screen: verified and judged', () => {
+    const h = harness({ pane: ['working…', 'IMPL_COMPLETED'], resolvedTools: { 'command-code': 'command-code' } });
+    expect(main(cc('command-code'), h.deps)).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(records()[0].note).toContain('signal=seen');
+  });
+
+  it('claude does not wait for the signal (negative control)', () => {
+    expect(needsCompletionSignal({ instance: 'claude' })).toBe(false);
+    expect(needsCompletionSignal({ instance: 'claude-2', cliToolId: 'claude' })).toBe(false);
+    const h = harness({ pane: ['no signal'] });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(h.ran.some((c) => c.args.includes('--pane'))).toBe(false);
+  });
+});
+
+describe('after a re-instruction, only a signal written after it counts (Issue #4238 review)', () => {
+  // The task was created at 00:30, the previous attempt's IMPL_COMPLETED was written at 00:50
+  // on the same HEAD (committed 00:40), and the re-instruction went out just before this call (01:00).
+  const t1cc = task('t-1', -30, 'command-code');
+  const OLD = { at: -10, text: 'IMPL_COMPLETED' };
+  const cc = (...extra: string[]) =>
+    [...argv('--after-reinstruct').map((a) => (a === 'claude' ? 'command-code' : a)), '--signal-timeout', '60', ...extra];
+  /** The harness, with `reply --since` answering the newest of `rows` written at or after --since (as reply-ledger does). */
+  function go(rows: { at: number; text: string }[], extra: string[] = []) {
+    const h = harness({
+      tasks: [t1cc],
+      commitMinute: -20,
+      pane: [`IMPL_COMPLETED head=${HEAD_A}`],
+      resolvedTools: { 'command-code': 'command-code' },
+    });
+    const inner = h.deps.run;
+    const sinces: string[] = [];
+    h.deps.run = (command: string, args: string[], opts?: { timeoutMs?: number }) => {
+      const since = args[0] === 'reply' && args.includes('--since') ? args[args.indexOf('--since') + 1] : null;
+      if (since === null || since.startsWith('9999')) return inner(command, args, opts);
+      h.ran.push({ command, args, opts });
+      sinces.push(since);
+      const seen = rows.filter((r) => T0 + r.at * 60_000 >= Date.parse(since)).at(-1);
+      return { status: 0, stdout: JSON.stringify({ worktreeId: 'wt-1', instanceId: 'command-code', reply: seen?.text ?? null }), stderr: '' };
+    };
+    const code = main(cc(...extra), h.deps);
+    return { h, code, sinces };
+  }
+
+  it('the previous attempt’s signal on the same HEAD is not this attempt’s: no verification (positive control)', () => {
+    const { h, code, sinces } = go([OLD]);
+    expect(code).toBe(3);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+    expect(h.autoYesCalls()).toEqual([]);
+    expect(records()[0].note).toMatch(/no IMPL_COMPLETED line within 60s/);
+    // Searched from the re-instruction on (this call's start), not from the task's creation.
+    expect(sinces[0]).toBe(iso(0));
+  });
+
+  it('a signal written after the re-instruction counts (negative control)', () => {
+    const { h, code } = go([OLD, { at: 15, text: 'IMPL_COMPLETED' }]);
+    expect(code).toBe(0);
+    expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+    expect(records()[0].note).toContain('signal=seen(reply)');
+  });
+
+  it('--signal-since names the send: a signal between the send and the call counts, one before it does not', () => {
+    expect(go([OLD, { at: -2, text: 'IMPL_COMPLETED' }], ['--signal-since', iso(-5)]).code).toBe(0);
+    expect(go([OLD], ['--signal-since', iso(-5)]).code).toBe(3);
+  });
+
+  it('completionSignalSince: the task’s creation without a re-instruction, the later of it and the send after one', () => {
+    const baseline = { id: 't-1', createdAt: T0 - 30 * 60_000, found: true };
+    expect(completionSignalSince({ baseline, afterReinstruct: false, startedMs: T0 })).toBe(T0 - 30 * 60_000);
+    expect(completionSignalSince({ baseline, afterReinstruct: true, startedMs: T0 })).toBe(T0);
+    expect(completionSignalSince({ baseline, afterReinstruct: true, signalSince: iso(-5), startedMs: T0 })).toBe(T0 - 5 * 60_000);
+    expect(completionSignalSince({ baseline: { ...baseline, found: false }, afterReinstruct: true, startedMs: T0 })).toBe(T0);
+  });
+
+  it('a recorded call after a re-instruction leaves its boundary in the note (for a --reverify after it)', () => {
+    go([OLD, { at: 15, text: 'IMPL_COMPLETED' }], ['--signal-since', iso(-5)]);
+    expect(records()[0].note).toContain(`signal-since=${iso(-5)}`);
+  });
+
+  describe('--reverify: the verification started again without a new re-instruction (Issue #4238 re-review)', () => {
+    // The re-instruction went out at 00:55; its signal came at 00:58; the verification then ended in a mutex wait (exit 99).
+    const NEW = { at: -2, text: 'IMPL_COMPLETED' };
+    const earlierCall = () =>
+      appendRecord(runDir, '3477', {
+        issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-1',
+        note: `exit=99(error) mutex-requeue=2 mutex-requeue-limit signal-since=${iso(-5)} key=3477:3477:t-1:a1 auto-yes=kept`,
+      });
+
+    it('a finished Command Code task: the signal already written after the re-instruction is enough (positive control)', () => {
+      earlierCall();
+      const { h, code, sinces } = go([OLD, NEW], ['--reverify']);
+      expect(code).toBe(0);
+      expect(h.spawned.map((c) => c.args[0])).toEqual(['wait', 'verify']);
+      expect(sinces[0]).toBe(iso(-5));
+      expect(records().at(-1)?.note).toContain(`signal-since=${iso(-5)}`);
+    });
+
+    it('the same call as a new re-instruction (the guide before this fix) finds no new signal: exit 3', () => {
+      earlierCall();
+      expect(go([OLD, NEW]).code).toBe(3);
+    });
+
+    it('still not the previous attempt’s signal: with only that one, no verdict (negative control)', () => {
+      earlierCall();
+      expect(go([OLD], ['--reverify']).code).toBe(3);
+    });
+
+    it('no boundary recorded (the call before was not after a re-instruction): the task’s creation, as that call had', () => {
+      expect(go([OLD], ['--reverify']).code).toBe(0);
+    });
+
+    describe('a call after a re-instruction that ended before it recorded (Issue #4244)', () => {
+      /** The first attempt's verification was recorded without a boundary; then a re-instruction's wait fell over. */
+      function interruptedReinstructThen(extra: string[]) {
+        appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-1', note: 'exit=20(verify)' });
+        const first = harness({ tasks: [t1cc], commitMinute: -20, pane: ['x'], resolvedTools: { 'command-code': 'command-code' } });
+        first.deps.spawnToLog = () => {
+          throw new Error('wait fell over');
+        };
+        const before = records().length;
+        const code = main(cc('--signal-since', iso(-5)), first.deps);
+        expect(code).toBe(1);
+        expect(records()).toHaveLength(before);
+        return go([OLD], extra);
+      }
+
+      it('the previous attempt’s signal is not counted by the --reverify after it (positive control)', () => {
+        const { h, code, sinces } = interruptedReinstructThen(['--reverify']);
+        expect(code).toBe(3);
+        expect(h.spawned.map((c) => c.args[0])).toEqual(['wait']);
+        expect(h.autoYesCalls()).toEqual([]);
+        expect(sinces[0]).toBe(iso(-5));
+      });
+
+      it('a new send (no --after-reinstruct) drops the mark: a later --reverify dates from the task, as before (negative control)', () => {
+        interruptedReinstructThen(['--reverify']);
+        const fresh = harness({ tasks: [t1cc], commitMinute: -20, pane: ['x'], resolvedTools: { 'command-code': 'command-code' } });
+        main([...argv().map((a) => (a === 'claude' ? 'command-code' : a)), '--signal-timeout', '60'], fresh.deps);
+        expect(go([OLD], ['--reverify']).code).toBe(0);
+      });
+
+      it('the mark never moves the next of run-log.mjs: it is not a record', () => {
+        interruptedReinstructThen(['--reverify']);
+        expect(records().every((r) => r.stage === 'verify')).toBe(true);
+      });
+    });
+
+    it('inheritedSignalSince reads the last verification of this task and work item only', () => {
+      earlierCall();
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-0', note: `signal-since=${iso(9)}` });
+      appendRecord(runDir, '3477', { issue: 3477, stage: 'verify', result: 'fail', head: HEAD_A, taskId: 't-1', item: 'pr2', note: `signal-since=${iso(9)}` });
+      expect(inheritedSignalSince(records(), { issue: 3477, item: undefined, taskId: 't-1' })).toBe(T0 - 5 * 60_000);
+      expect(inheritedSignalSince(records(), { issue: 3477, item: 'pr2', taskId: 't-1' })).toBe(T0 + 9 * 60_000);
+      expect(inheritedSignalSince([], { issue: 3477, item: undefined, taskId: 't-1' })).toBeNull();
+    });
+
+    it('--reverify needs --task, and implies --after-reinstruct', () => {
+      expect(parseArgs(['--run-dir', 'r', '--issues', '1', '--issue', '1', '--wt', 'w', '--worktree', '/w', '--instance', 'claude', '--reverify']).error).toMatch(/--reverify needs --task/);
+      expect(parseArgs([...argv('--reverify')]).options?.afterReinstruct).toBe(true);
+    });
+  });
+
+  it('--signal-since is refused without --after-reinstruct, and when it is not a date', () => {
+    expect(parseArgs([...argv(), '--signal-since', iso(0)]).error).toMatch(/--after-reinstruct/);
+    expect(parseArgs([...argv('--after-reinstruct'), '--signal-since', 'yesterday']).error).toMatch(/ISO 8601/);
   });
 });
 

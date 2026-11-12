@@ -356,13 +356,20 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh (Issue #3359)', () => {
   it(
     'the next up cleans what a killed run left: its server (verified) and its socket dir',
     async () => {
+      // INTENDED CHANGE (Issue #4288 PR1b, docs/design/run-lock-machine-lock-4288.md §4.4): the lock is now
+      // held by the server's process GROUP, so a driver that died (its owner pid is dead) while the server
+      // lives no longer lets a second `up` break the lock and stop the server — a live group is never
+      // recovered (table A: foreign-g × pid gone × G alive → held-group). The refusal names the way out,
+      // `run-server.sh down --run-dir <run>` (table C: t1 × alive-verified → D5 released → stopped), and
+      // the `up` after that `down` starts again on the same run dir. It narrows removal, it does not weaken
+      // the test: the server and the socket dir are still cleaned, by `down`, with the verification of #3359.
       const port = await freePort();
       expect(runScript(['up', '--port', String(port), '--run-dir', runDir]).status).toBe(0);
       const first = stateOf(runDir);
       const firstPid = Number(first.server_pid);
       expect(await waitFor(() => listens(port, firstPid))).toBe(true);
-      // The driver was killed and its lock went stale (its owner is dead),
-      // while the server and the private tmux server are still there.
+      // The driver was killed and its pid in the owner is dead, while the server (the group's leader) and
+      // the private tmux server are still there.
       const dead = spawnSync(process.execPath, ['-e', '']).pid!;
       const owner = path.join(lockDir, 'owner');
       fs.writeFileSync(owner, fs.readFileSync(owner, 'utf8').replace(/^pid=.*$/m, `pid=${dead}`));
@@ -370,11 +377,28 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh (Issue #3359)', () => {
       const run2 = path.join(root, 'run2');
       const second = runScript(['up', '--port', String(port), '--run-dir', run2]);
 
-      expect(second.status, second.stderr).toBe(0);
-      expect(alive(firstPid)).toBe(false);
+      expect(second.status).toBe(1);
+      expect(second.stderr).toContain(`another run holds ${lockDir} (`);
+      expect(second.stderr).toContain(`run-server.sh down --run-dir ${runDir}`);
+      expect(alive(firstPid)).toBe(true);
+      expect(fs.existsSync(first.sock_dir)).toBe(true);
+
+      const down = runScript(['down', '--run-dir', runDir]);
+      expect(down.status, down.stderr).toBe(0);
+      expect(await waitFor(() => !alive(firstPid))).toBe(true);
       expect(fs.existsSync(first.sock_dir)).toBe(false);
-      expect(stateOf(runDir).status).toBe('cleaned');
-      expect(runScript(['down', '--run-dir', run2]).status).toBe(0);
+      expect(fs.existsSync(lockDir)).toBe(false);
+      expect(stateOf(runDir).status).toBe('stopped');
+
+      // A go / ack of the first run left in the run dir (an `up` that did not clean after itself) changes
+      // nothing: the third `up` names its own (handoff-<run_id>.go / .ack) and starts only after its own go.
+      fs.mkdirSync(path.join(runDir, `handoff-${first.run_id}.go`));
+      fs.mkdirSync(path.join(runDir, `handoff-${first.run_id}.ack`));
+      const third = runScript(['up', '--port', String(port), '--run-dir', runDir, '--wait-listen', '30']);
+      expect(third.status, third.stderr).toBe(0);
+      expect(stateOf(runDir).status).toBe('up');
+      expect(stateOf(runDir).run_id).not.toBe(first.run_id);
+      expect(runScript(['down', '--run-dir', runDir]).status).toBe(0);
     },
     REAL_SHELL_TEST_TIMEOUT_MS
   );
@@ -433,7 +457,16 @@ describe('run-lock.sh (Issue #3359)', () => {
     expect(bash(acquireScript('child'), { CM_RUN_LOCK_TOKEN: 'parent' }).stdout.trim()).toBe('GOT');
     bash(`. '${RUN_LOCK}'; run_lock_release child`);
     expect(fs.existsSync(lockDir)).toBe(true);
+    // INTENDED CHANGE (Issue #4288 PR1b, docs/design/run-lock-machine-lock-4288.md §4.4): a shell that took
+    // nothing does not release (D12 answers `none`, table A: sh-release-unheld). The record goes with its
+    // holder: the holder's own shell releases it, or — once its pid is dead — the head of the queue does
+    // (D5, run_lock_release_as_head), which is what the second half shows.
     bash(`. '${RUN_LOCK}'; run_lock_release parent`);
+    expect(fs.existsSync(lockDir)).toBe(true);
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    const owner = path.join(lockDir, 'owner');
+    fs.writeFileSync(owner, fs.readFileSync(owner, 'utf8').replace(/^pid=.*$/m, `pid=${dead}`));
+    bash(`. '${RUN_LOCK}'; run_lock_release_as_head parent`);
     expect(fs.existsSync(lockDir)).toBe(false);
   });
 

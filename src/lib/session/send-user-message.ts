@@ -89,13 +89,22 @@ import {
   withInstanceInputLock,
   type InputBoundaryHooks,
 } from '@/lib/session/instance-input-lock';
+import {
+  BriefChoiceAbortedError,
+  SendBrief,
+  type BriefDetail,
+  type BriefReport,
+  type BriefRequestPin,
+  type BriefSendMode,
+} from '@/lib/session/session-brief';
+import { runInSendScope } from '@/lib/session/session-boundary';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
 
 const logger = createLogger('session/send-user-message');
 
-/** Parameters for {@link sendUserMessage}. All values must be pre-validated. */
+/** Parameters for {@link sendUserMessage}, besides the brief's ({@link SendBriefParams}). All values must be pre-validated. */
 export interface SendUserMessageParams {
   /** Target worktree ID. */
   worktreeId: string;
@@ -168,7 +177,48 @@ export interface SendUserMessageParams {
    * is read on entry here.
    */
   observedInputGeneration?: number;
+  /** Issue #4274: what became of the brief, when there is something to say (the route's `brief`). */
+  onBrief?: (report: BriefReport) => void;
 }
+
+/**
+ * Issue #4274: whether this send may carry the session brief of a boundary
+ * (`docs/design/session-boundary-brief-4274.md` §4). `never` (the default) puts nothing
+ * in front and claims nothing — relay delivery, and any caller that does not say.
+ * `auto`: the first send after a boundary carries it once. `skip` (`--no-brief`): not
+ * this send, the boundary stays. `force` (`--with-brief`). A reset command this sends
+ * opens its boundary whatever the value.
+ *
+ * Issue #4224 (D2 design §2.4): a send that may carry a brief (`auto` / `force`) names the
+ * lifetimes its request's entrance fixed (`pinBriefWorktree` → `pinBriefRequest`, read
+ * where the request first read the worktree and resolved the instance). The service never
+ * reads them itself: a wait before it (ownership, the prompt guard, a launch, `/model`)
+ * would be read across. `never` (the default) and `skip` need none.
+ */
+export type SendBriefParams =
+  | { brief?: Exclude<BriefSendMode, 'auto' | 'force' | 'decline'>; briefPin?: BriefRequestPin }
+  | {
+      brief: 'auto' | 'force' | 'decline';
+      briefPin: BriefRequestPin;
+      /**
+       * Issue #4227 (S-B, design §3.2): the screen's choice for the boundary its preview showed
+       * (`briefBoundary`). `full` (with `auto`) asks the whole brief; `decline` uses the boundary
+       * up unbriefed. Either acts on that boundary only, else the send stops before any key
+       * (`stage: 'brief_choice'`).
+       */
+      briefDetail?: BriefDetail;
+      briefBoundary?: string;
+    };
+
+/** What {@link sendUserMessage} takes: the parameters and the brief's. */
+export type SendUserMessageRequest = SendUserMessageParams & SendBriefParams;
+
+/**
+ * Issue #4227 (pr3f, PM decision 5): a caller whose type names a strict choice (`brief: 'decline'`,
+ * `briefDetail: 'full'`) names the boundary it was chosen for too (`briefBoundary`), or it does not
+ * compile. The route's body is validated at run time instead (`validateBriefChoice`: 400).
+ */
+export type StrictBriefNamesBoundary<P> = P extends { brief: 'decline' } | { briefDetail: 'full' } ? { briefBoundary: string } : unknown;
 
 /** Result of {@link sendUserMessage}. */
 export type SendUserMessageResult =
@@ -197,6 +247,19 @@ export type SendUserMessageResult =
       stage: 'model' | 'send' | 'prompt_waiting' | 'foreign_session';
       error: string;
       code?: typeof SESSION_STARTING_CODE;
+    }
+  /**
+   * Issue #4227 (S-B, design §3.2): a `full` / `decline` send stopped before any key — the
+   * boundary the screen showed is not the one it would act on, or the brief chosen could not
+   * be made. Nothing was typed and nothing recorded as an attempt; the route answers 409.
+   */
+  | {
+      ok: false;
+      stage: 'brief_choice';
+      code: 'boundary_changed';
+      reason: string;
+      boundary: { id: string; state: string } | null;
+      error: string;
     };
 
 function getErrorMessage(error: unknown): string {
@@ -291,9 +354,9 @@ function typedBodyFor(cliTool: ICLITool, content: string, absoluteImagePath: str
  * result with the failing stage; the caller decides how to surface the error.
  * DB record failures throw (same as before the extraction).
  */
-export async function sendUserMessage(
+export async function sendUserMessage<P extends SendUserMessageRequest>(
   db: Database.Database,
-  params: SendUserMessageParams
+  params: P & StrictBriefNamesBoundary<P>
 ): Promise<SendUserMessageResult> {
   const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel, respondAgent } = params;
   // Issue #4065: read once, before the first await — a send granted while this
@@ -335,7 +398,22 @@ export async function sendUserMessage(
   //   copilot's selection-list keys (input noted, no ticket), opencode's HTTP
   //   delivery and its keyboard fallback (a dispatch noted) — or anything else
   //   that reports neither; kept in the order attempts finish.
-  const typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
+  let typedContent = typedBodyFor(cliTool, content, absoluteImagePath);
+  // Issue #4274: the text the tool types — the operator's body, or a claimed brief
+  // in front of it (`session-brief`). The history row keeps the operator's body.
+  let typedText = content;
+  const sendBrief = new SendBrief({
+    db,
+    worktreeId,
+    cliToolId,
+    instanceId: resolvedInstanceId,
+    mode: params.brief ?? 'never',
+    pin: params.briefPin ?? null,
+    ...('briefDetail' in params && params.briefDetail ? { detail: params.briefDetail } : {}),
+    ...('briefBoundary' in params && params.briefBoundary ? { boundaryId: params.briefBoundary } : {}),
+    content,
+    typedBody: (text) => typedBodyFor(cliTool, text, absoluteImagePath),
+  });
   let inputGeneration: number | undefined;
   let inputNotedWithoutTicket = false;
   let dispatched = false;
@@ -479,6 +557,11 @@ export async function sendUserMessage(
     }
   }
 
+  // Issue #4274: the brief's plan — the boundary, the membership and mode, the
+  // budget and the provider's text — after every refusal above, which leave the
+  // ledger untouched. Never throws; nothing planned leaves the send as it was.
+  await sendBrief.plan();
+
   // Generate the user-message timestamp BEFORE saving the pending response so
   // ordering holds: assistantResponse < userMessage.
   //
@@ -596,7 +679,7 @@ export async function sendUserMessage(
       let failure = classifySendFailure(error);
       if (
         (failure.reason === 'submit-unconfirmed' || failure.reason === 'prompt-unreported') &&
-        (await composerStillHolds(worktreeId, cliToolId, instanceId, content))
+        (await composerStillHolds(worktreeId, cliToolId, instanceId, typedText))
       ) {
         failure = { state: 'indeterminate', reason: 'composer-residue' };
       }
@@ -609,7 +692,7 @@ export async function sendUserMessage(
     if (absoluteImagePath) {
       if (isImageCapableCLITool(cliTool)) {
         // Image-capable tool: use native image sending
-        await cliTool.sendMessageWithImage(worktreeId, content, absoluteImagePath, instanceId);
+        await cliTool.sendMessageWithImage(worktreeId, typedText, absoluteImagePath, instanceId);
       } else {
         // Fallback: embed path in message. Issue #2035 moved the wording to
         // `@/lib/cli-tools/opencode` so this branch and opencode's own fallback
@@ -617,7 +700,7 @@ export async function sendUserMessage(
         // apart; the behaviour of this line is unchanged.
         await cliTool.sendMessage(
           worktreeId,
-          formatImagePathFallbackMessage(content, absoluteImagePath),
+          formatImagePathFallbackMessage(typedText, absoluteImagePath),
           instanceId
         );
       }
@@ -635,7 +718,34 @@ export async function sendUserMessage(
       // composer (`❯ line one` / `  line two` / `  line three`) and a SEPARATE
       // Enter submits all of it — the transcript echo keeps the line breaks — so
       // the flattening is not needed to make Enter submit and is now gone.
-      await cliTool.sendMessage(worktreeId, content, instanceId);
+      await cliTool.sendMessage(worktreeId, typedText, instanceId);
+    }
+  }
+
+  // Issue #4274: the claim, the delivery and the ledger's settlement in one
+  // stretch under the input lock, so the lock is released only once the boundary
+  // says how this send ended (a send queued behind reads it settled), and a reset
+  // this send typed has opened its row (2nd review A).
+  async function deliverWithBrief(): Promise<Awaited<ReturnType<typeof deliver>> | { aborted: BriefChoiceAbortedError }> {
+    try {
+      try {
+        typedText = await sendBrief.claim();
+      } catch (error) {
+        // Issue #4227 (S-B, design §3.2 (3)): read by its type only — the value `claim()` threw,
+        // before any key. Never `classifySendFailure` (a tmux error quoting the body is not this).
+        if (error instanceof BriefChoiceAbortedError) return { aborted: error };
+        throw error;
+      }
+      if (typedText !== content) typedContent = typedBodyFor(cliTool, typedText, absoluteImagePath);
+      const deliverStartedAt = Date.now();
+      const result = await runInSendScope(sendBrief.claimTokenForScope(), deliver);
+      sendBrief.settleInLock(
+        'sent' in result ? 'sent' : result.failure.state,
+        'sent' in result && result.inputStartedAt ? result.inputStartedAt.getTime() : deliverStartedAt
+      );
+      return result;
+    } finally {
+      sendBrief.abandonInLock();
     }
   }
 
@@ -644,15 +754,29 @@ export async function sendUserMessage(
   // others — opencode's HTTP delivery never touches the composer, and holding
   // the lock across it would stall a concurrent tmux send for nothing; their
   // tmux path takes the lock inside the shared sender.
-  const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId)
+  //
+  // Issue #4274: command-code too, but only for a send with a brief to claim or a
+  // reset to record — its own sender joins the outer ticket (`instance-input-lock`).
+  // Every other send of it takes the path it took before.
+  const delivery = SUPPORTED_COMPOSER_TOOLS.has(cliToolId) || sendBrief.needsOuterLock()
     ? await withInstanceInputLock(sessionName, (ticket) => {
         inputGeneration = ticket.generation;
-        return deliver();
+        return deliverWithBrief();
       }).catch((error: unknown) => ({
         error,
         failure: classifySendFailure(error),
       }))
-    : await deliver();
+    : await deliverWithBrief();
+  // Issue #4274: the provider hears how its text ended, outside the lock.
+  await sendBrief.afterLock();
+  // Issue #4227 (S-B): the screen's choice stopped the send before any key — not a send
+  // failure (no attempt, no relay hold, no prompt branch). The boundary is as it was.
+  if ('aborted' in delivery) {
+    const { reason, boundary } = delivery.aborted;
+    return { ok: false, stage: 'brief_choice', code: 'boundary_changed', reason, boundary, error: delivery.aborted.message };
+  }
+  const briefReport = sendBrief.reportForResponse();
+  if (briefReport) params.onBrief?.(briefReport);
   if (!('sent' in delivery)) {
     const { error, failure } = delivery;
     settle(failure.state, failure.reason);

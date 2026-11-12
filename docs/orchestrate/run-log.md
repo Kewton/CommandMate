@@ -34,6 +34,9 @@ Unit Tests を待つかも、照合した作業の HEAD の `verify` で決め�
 docs/orchestrate/ci-merge.md#6-1-1-重い検証の資源制御と待ちの記録）。`wait-verify.mjs` は、最後の `verify` が始めた run の各ゲートの `[timing]`
 を `verify show <id> --json` で読んで合計して渡す（#3909。mutex 待ちの SKIP も入る。mutex 待ちだけの exit 99 で検証を並び直したとき（#3938）は、並び直した全試行の run の合計になる（docs/orchestrate/exit-codes.md#3-4-99-の対応）。`runSec` には待ちの無いゲートの duration も足す。run を読めないときは書かない。GATE 行からは読まない）。どのゲートもそれを持たない verify（古いサーバ、何も待たなかった run）の行にも書かない。
 `status --json` の `stages.verify` で読める。
+`merge-pr.mjs --queue` の `queue` の行（#4277）は進捗の段ではない: HEAD を持てず（`--head` を付けると拒否）、`readRecords` は `records` と別の
+`logRecords` に返すので、`next`・`head`・unit の一覧・env-clean の集計には入らない。`status` は要約の後に `queue:` の段落（`--json` は `queue`）を出す
+（docs/orchestrate/ci-merge.md#6-2-マージの列--queue）。
 
 ## 1-5 同じ Issue の複数の PR（work item）
 
@@ -144,6 +147,7 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 # を単位にし（同じ WT は再試行、別の WT は別の PR）、単位ごとの最新の行だけを、その単位が tasks.tsv に初めて出た順に 1 本ずつ。
 # Issue を閉じるのはその Issue の最後の対象だけ。それより前の対象は閉じない（item 無しには --close - を付ける）。
 # item 有りと無しが混ざる Issue はどれが最後か決められないので、全部 --close - にして、全部マージした後に手で閉じる
+# 同じ単位を 1 回の呼び出しで順に流すなら merge-pr.mjs --queue（entry は <issue>[/<item>][@<pr>]。docs/orchestrate/ci-merge.md#6-2-マージの列--queue）
 while IFS="$(printf '\t')" read -r CLOSE issue WT AGENT TASK_ID MODEL COL6 REST <&3; do
   ITEM=; case "$COL6" in item=?*) ITEM=${COL6#item=} ;; esac   # item= で始まらない 6 列目（旧い run のラベル）は item 無し
   ITEM_ARGS=(); [ -z "$ITEM" ] || ITEM_ARGS=(--item "$ITEM")
@@ -179,3 +183,13 @@ done 3< <(awk -F'\t' '{
   `verify-<issue>[-<item>][.a<n>].env.json` に execution key と一緒に置く。`end` は記録の note に足す `env=<hash>` を出し、検証中に入力が変わっていれば
   `env-changed-during-verify=<項目>` と exit 3（雛形は `RC=3`＝`verify=fail` にする。裁定にしない）。precheck / publish / merge はこの `env=` を 3-3 の記録と同じに照らし合わせる
   （docs/orchestrate/workers.md の「合格を使う地点も環境を照らし合わせる」）
+
+## 1-5 plan.md の対象 Issue 表の例
+
+```markdown
+  | Issue | 種別 | 難易度 | 担当 | モデル | 根拠 |
+  |---|---|---|---|---|---|
+  | #2595 | BUG | 易 | command-code | — | テスト 1 ファイル／原因と確定仕様あり／受入基準すべて自動 |
+  | #2760 | BUG | 中 | claude | sonnet | 当てはまる観点は「危険な領域」（`src/lib/tmux/**`）だけ／全変更が確定 diff／受入基準すべて自動／退避路あり |
+  | #2598 | FEATURE | 難 | claude | opus | 影響ファイル 7 以上（新規 hook あり）／対応方針が Phase 2 段／合否が実機でしか決まらない項目あり |
+  ```

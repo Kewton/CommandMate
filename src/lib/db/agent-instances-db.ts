@@ -27,6 +27,13 @@ import {
   isCliToolType,
   getCliToolDisplayName,
 } from '@/lib/cli-tools/types';
+import { archiveNowSlots, nextSlotVersion } from '@/lib/db/mem-db';
+import {
+  endInstanceIncarnation,
+  getInstanceIncarnation,
+  listInstanceIncarnations,
+  startInstanceIncarnation,
+} from '@/lib/mem/incarnation';
 
 /**
  * Thrown when an operation would exceed MAX_AGENT_INSTANCES for a worktree.
@@ -273,6 +280,47 @@ export function setAgentInstances(
       .filter((row) => !kept.has(`${row.instance_id}\u0000${row.cli_tool_id}`))
       .map((row) => row.instance_id);
     revokeInstanceCreationKeys(db, worktreeId, leaving);
+    // Issue #4221: the incarnation of an (id, tool) pair. A pair that stays keeps it
+    // (an alias edit or a reorder is the same instance); a pair that goes ends it,
+    // and the `now` written under it moves to mem_items first. A derived primary
+    // saved into the roster with its own tool is the same pair (2nd review 8).
+    const nextTool = new Map(instances.map((instance) => [instance.id, instance.cliTool as string]));
+    const memSlots = db
+      .prepare('SELECT instance_id, mem_cli_tool_id FROM session_notes WHERE worktree_id = ? AND mem_item_id IS NOT NULL')
+      .all(worktreeId) as Array<{ instance_id: string; mem_cli_tool_id: string | null }>;
+    const endedSlots = memSlots
+      .filter((slot) => nextTool.get(slot.instance_id) !== slot.mem_cli_tool_id)
+      .map((slot) => slot.instance_id);
+    archiveNowSlots(db, [worktreeId], { instanceIds: endedSlots, now, deleteRows: true });
+    for (const incarnation of listInstanceIncarnations(db, worktreeId)) {
+      if (nextTool.get(incarnation.instanceId) !== incarnation.cliToolId) {
+        endInstanceIncarnation(db, worktreeId, incarnation.instanceId);
+      }
+    }
+    const previousPairs = new Set(
+      (db.prepare('SELECT instance_id, cli_tool_id FROM agent_instances WHERE worktree_id = ?').all(worktreeId) as Array<{
+        instance_id: string;
+        cli_tool_id: string;
+      }>).map((row) => `${row.instance_id}\u0000${row.cli_tool_id}`)
+    );
+    for (const instance of instances) {
+      // A new pair starts its incarnation here, so a request that read none before a
+      // remove and re-add cannot borrow this one (2nd review 3). A pair kept from
+      // before v66 gets one on its first mem write.
+      if (
+        !previousPairs.has(`${instance.id}\u0000${instance.cliTool}`) &&
+        !getInstanceIncarnation(db, worktreeId, instance.id)
+      ) {
+        startInstanceIncarnation(
+          db,
+          worktreeId,
+          instance.id,
+          instance.cliTool,
+          now,
+          rosterIssue(previousPairs.size === 0, instance.id, instance.cliTool)
+        );
+      }
+    }
     db.prepare(`DELETE FROM agent_instances WHERE worktree_id = ?`).run(worktreeId);
     // Issue #2048: the settings table is keyed on an instance id and this write
     // is a full replace, so an instance dropped from the roster would otherwise
@@ -303,6 +351,18 @@ export function setAgentInstances(
 }
 
 /**
+ * How a roster save issues a new incarnation (Issue #4222, S6・2nd review ①).
+ *
+ * The first save of a worktree whose roster was derived (no rows) copies the derived
+ * primaries into it: a primary pair (`id === tool`) may have been running for long
+ * before, so its incarnation is `lazy`, which is no evidence that it was born after an
+ * item. An id that is not a primary is never derived, so it is new: `roster`.
+ */
+function rosterIssue(firstSave: boolean, instanceId: string, cliToolId: string): 'roster' | 'lazy' {
+  return firstSave && instanceId === cliToolId ? 'lazy' : 'roster';
+}
+
+/**
  * Add a single agent instance to a worktree.
  *
  * @throws AgentInstanceLimitError when adding would exceed MAX_AGENT_INSTANCES
@@ -329,11 +389,19 @@ export function addAgentInstance(
     }
 
     const order = Number.isInteger(instance.order) ? instance.order : count;
+    const now = Date.now();
     db.prepare(`
       INSERT INTO agent_instances
         (worktree_id, instance_id, cli_tool_id, alias, sort_order, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(worktreeId, instance.id, instance.cliTool, instance.alias ?? '', order, Date.now());
+    `).run(worktreeId, instance.id, instance.cliTool, instance.alias ?? '', order, now);
+    // Issue #4221: a derived primary saved with its own tool keeps its incarnation;
+    // anything else starts one, after moving out a `now` of another tool.
+    const incarnation = getInstanceIncarnation(db, worktreeId, instance.id);
+    if (!incarnation || incarnation.cliToolId !== instance.cliTool) {
+      archiveNowSlots(db, [worktreeId], { instanceIds: [instance.id], now, deleteRows: true });
+      startInstanceIncarnation(db, worktreeId, instance.id, instance.cliTool, now, rosterIssue(count === 0, instance.id, instance.cliTool));
+    }
   });
   add();
 }
@@ -348,6 +416,14 @@ export function removeAgentInstance(
   worktreeId: string,
   instanceId: string
 ): boolean {
+  return db.transaction(() => removeAgentInstanceRows(db, worktreeId, instanceId))();
+}
+
+function removeAgentInstanceRows(db: Database.Database, worktreeId: string, instanceId: string): boolean {
+  // Issue #4221: the `now` written by this instance moves to mem_items before its
+  // slot goes, whatever the mode, and its incarnation ends.
+  archiveNowSlots(db, [worktreeId], { instanceIds: [instanceId], deleteRows: true });
+  endInstanceIncarnation(db, worktreeId, instanceId);
   const result = db.prepare(`
     DELETE FROM agent_instances WHERE worktree_id = ? AND instance_id = ?
   `).run(worktreeId, instanceId);
@@ -573,6 +649,21 @@ export interface SessionNote {
   text: string;
   /** Epoch ms the note was last written; rendered beside it. */
   updatedAt: number;
+  /**
+   * Issue #4221: the row's version. Never repeats for a slot, deletes included; the
+   * screen sends it back as `baseVersion`.
+   */
+  version: number;
+  /** Issue #4221: set when this note is the `now` of mem (D7). */
+  mem: { itemId: string; createdBy: 'agent' | 'human'; updatedBy: 'agent' | 'human' | 'server' } | null;
+}
+
+/** Thrown by {@link setSessionNote} for a row that is the `now` of mem: it is written through mem's checks. */
+export class SessionNoteIsMemError extends Error {
+  constructor() {
+    super('This note is a mem item; write it through the mem checks');
+    this.name = 'SessionNoteIsMemError';
+  }
 }
 
 /** Thrown when a note is longer than {@link MAX_SESSION_NOTE_LENGTH}. */
@@ -588,6 +679,23 @@ interface SessionNoteRow {
   instance_id: string;
   note: string;
   updated_at: number;
+  version: number;
+  mem_item_id: string | null;
+  created_by: 'agent' | 'human' | null;
+  updated_by: 'agent' | 'human' | 'server' | null;
+}
+
+const SESSION_NOTE_COLUMNS = 'instance_id, note, updated_at, version, mem_item_id, created_by, updated_by';
+
+function toSessionNote(row: SessionNoteRow): SessionNote {
+  return {
+    text: row.note,
+    updatedAt: row.updated_at,
+    version: row.version,
+    mem: row.mem_item_id
+      ? { itemId: row.mem_item_id, createdBy: row.created_by ?? 'agent', updatedBy: row.updated_by ?? 'agent' }
+      : null,
+  };
 }
 
 /** Below this code point (plus DEL) a character cannot be typed into a memo. */
@@ -641,12 +749,12 @@ export function getSessionNote(
   instanceId: string
 ): SessionNote | null {
   const row = db.prepare(`
-    SELECT instance_id, note, updated_at
+    SELECT ${SESSION_NOTE_COLUMNS}
     FROM session_notes
     WHERE worktree_id = ? AND instance_id = ?
   `).get(worktreeId, instanceId) as SessionNoteRow | undefined;
 
-  return row ? { text: row.note, updatedAt: row.updated_at } : null;
+  return row ? toSessionNote(row) : null;
 }
 
 /**
@@ -661,14 +769,14 @@ export function getSessionNotesByWorktree(
   worktreeId: string
 ): Record<string, SessionNote> {
   const rows = db.prepare(`
-    SELECT instance_id, note, updated_at
+    SELECT ${SESSION_NOTE_COLUMNS}
     FROM session_notes
     WHERE worktree_id = ?
   `).all(worktreeId) as SessionNoteRow[];
 
   const notes: Record<string, SessionNote> = {};
   for (const row of rows) {
-    notes[row.instance_id] = { text: row.note, updatedAt: row.updated_at };
+    notes[row.instance_id] = toSessionNote(row);
   }
   return notes;
 }
@@ -688,14 +796,14 @@ export function getAllSessionNotes(
   db: Database.Database
 ): Record<string, Record<string, SessionNote>> {
   const rows = db.prepare(`
-    SELECT worktree_id, instance_id, note, updated_at
+    SELECT worktree_id, ${SESSION_NOTE_COLUMNS}
     FROM session_notes
   `).all() as Array<SessionNoteRow & { worktree_id: string }>;
 
   const byWorktree: Record<string, Record<string, SessionNote>> = {};
   for (const row of rows) {
     const notes = byWorktree[row.worktree_id] ?? (byWorktree[row.worktree_id] = {});
-    notes[row.instance_id] = { text: row.note, updatedAt: row.updated_at };
+    notes[row.instance_id] = toSessionNote(row);
   }
   return byWorktree;
 }
@@ -729,22 +837,35 @@ export function setSessionNote(
     throw new SessionNoteTooLongError();
   }
 
-  if (normalized.length === 0) {
+  return db.transaction((): SessionNote | null => {
+    // Issue #4221: a row that is the `now` of mem is written through mem's checks
+    // (the note route's `writeScreenNote`), never past them.
+    const existing = db
+      .prepare('SELECT mem_item_id FROM session_notes WHERE worktree_id = ? AND instance_id = ?')
+      .get(worktreeId, instanceId) as { mem_item_id: string | null } | undefined;
+    if (existing?.mem_item_id) throw new SessionNoteIsMemError();
+
+    // Issue #4221: every write and delete moves the slot's version on, so a screen that
+    // read an older one is told rather than overwritten.
+    const version = nextSlotVersion(db, worktreeId, instanceId);
+    if (normalized.length === 0) {
+      db.prepare(`
+        DELETE FROM session_notes WHERE worktree_id = ? AND instance_id = ?
+      `).run(worktreeId, instanceId);
+      return null;
+    }
+
     db.prepare(`
-      DELETE FROM session_notes WHERE worktree_id = ? AND instance_id = ?
-    `).run(worktreeId, instanceId);
-    return null;
-  }
+      INSERT INTO session_notes (worktree_id, instance_id, note, updated_at, version)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(worktree_id, instance_id) DO UPDATE SET
+        note = excluded.note,
+        updated_at = excluded.updated_at,
+        version = excluded.version
+    `).run(worktreeId, instanceId, normalized, at, version);
 
-  db.prepare(`
-    INSERT INTO session_notes (worktree_id, instance_id, note, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(worktree_id, instance_id) DO UPDATE SET
-      note = excluded.note,
-      updated_at = excluded.updated_at
-  `).run(worktreeId, instanceId, normalized, at);
-
-  return { text: normalized, updatedAt: at };
+    return { text: normalized, updatedAt: at, version, mem: null };
+  })();
 }
 
 /**

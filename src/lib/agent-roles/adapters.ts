@@ -60,6 +60,12 @@ export interface RoleComposition {
   opencodeUserContent?: Record<string, unknown> | null;
   /** OpenCode V2: the agent whose `system` is overridden (§7.1). */
   opencodeV2EffectiveAgent?: string;
+  /**
+   * OpenCode V2 (Issue #4233): the cwd a relative `XDG_CONFIG_HOME` / `HOME` was
+   * resolved against (the worktree). Set only then; the launch line is typed only
+   * while the pane is still there. Not part of what is injected.
+   */
+  opencodeV2LaunchCwd?: string;
   /** Schedule's `agent`. Changes what V2 overrides; alongside for V1 and Claude. */
   explicitAgent?: string | null;
 }

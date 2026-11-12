@@ -521,18 +521,24 @@ gates:
     mutex: e2e-port
 ```
 
-**両ランナーが従う規約**（一致していなければ排他にならない。同じマシンで CommandMate の
-runner と standalone runner が同じ資源に触れる）:
+**ロックを取る全実装が従う規約**（一致していなければ排他にならない。同じマシンで CommandMate の
+runner・standalone runner・`/orchestrate` の precheck と merge-pr が同じ資源に触れる。実装は 9.2.1 の表）:
 
 | 項目 | 規約 |
 |---|---|
 | パス | `~/.commandmate/locks/<name>.lock` |
 | 方式 | **`mkdir` によるアトミックな作成**。macOS に `flock(1)` が無いため、移植可能な方式を採る |
-| 保有者記録 | ロックディレクトリ内の `owner` ファイル。JSON `{"pid":N,"host":"…","token":"…","acquiredAt":ms}` |
-| 待ち | ロックが空くまでポーリング（既定 250ms 間隔）。待ち時間の上限は**そのゲートの `timeoutSec`** |
-| 解放 | `owner` の `token` が自分のものであるときだけディレクトリを削除する |
-| 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しない（`kill(pid,0)` が ESRCH）ときのみ、待つ側が奪ってよい。**他ホストの pid では判断しない**（共有 home で 2 台が同時実行しうる） |
+| 保有者記録 | ロックディレクトリ内の `owner` ファイル。JSON `{"pid":N,"host":"…","token":"…","acquiredAt":ms}`。verify-run.sh は mutex 付きのゲートの起動時に、`owner` を `pgid`（ゲートのプロセスグループ G）付き・**新しい token**（`<T0>-g<G>`）で tmp＋`mv` により書き直し、読み直して確かめてから子に合図を出す（書き直せなければゲートを始めない）。同じ token のまま中身を変えないのは、書き直しの前の記録で死を判定した回収者が、書き直した記録を消さないため（退かした記録の token が違えば戻す）（#4288、`verify-lock-holder-group-4288.md` §2.2〜§2.3） |
+| 待ち | ロックが空くまでポーリング（既定 250ms 間隔）。待ち時間の上限は**そのゲートの `mutexWaitSec`、無ければ `timeoutSec`**（#4162） |
+| 札（#4277） | 待つ側は先に `<root>/<name>.queue/<12 桁の連番>` の札を取る。中身 `{"pid","host","token","createdAt","deadline","pgid"?}` を書いた一時ファイルを `link(2)` で「最大の番号 + 1」へ公開し（在れば EEXIST でやり直す）、公開後に自分より大きい番号があれば取り下げて取り直す。**札の無いまま `mkdir` しない** |
+| 待ちの順（#4277） | **生きている札の先頭の持ち主だけ**が `mkdir` を試す。取れたら自分の札を `{"done":true}` にし、最大の番号より小さい `done` の札を消す（最大の番号は消さない）。期限（`deadline`）を過ぎた待ち手は `mkdir` を試さず札を `done` にして返る |
+| 札を外してよい条件 | 同じ host で pid が ESRCH（`pgid` があればグループも空）、同じ host で pid が再利用されている（`ps -o etime=` の起動時刻が札の `createdAt` より 2 秒以上新しい）、`deadline` から同じ host は 60 秒・他 host は 600 秒を過ぎた、のどれか。年齢だけでは外さない。読めない札は外さない |
+| 解放 | `owner` の `token` が自分のものであるときだけディレクトリを削除する。**1 つの取得の解放は 1 回だけ**で、2 回目は何もしない（#4277。古い handle が次の保有者のロックを動かさない）。verify-run.sh は全ての解放の経路（通常の終了・timeout・取消し・EXIT trap）で、ゲートのグループ G が空（ESRCH）になってから解放し、`owner` の `pgid` のグループに人が居る（EPERM を含む）間は消さない（#4288 §2.5） |
+| 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しない（`kill(pid,0)` が ESRCH）、`pgid` があればそのグループにも 1 つも残っていない（`kill(-pgid,0)` が ESRCH）ときのみ、**列の先頭の待ち手が**回収してよい。回収はロックを `<name>.lock.gone-<token>` へ `rename` で退かしてから中身を読み、死んだと判定した token のときだけ消す（違えば元へ戻す）。戻せずに残った `<name>.lock.gone-<token>-<serial>`（接尾に `.`・`_` を含まない退避名の形のものだけ。別の mutex `a.lock.gone-b` は読まない）は、記録が生きている・読めない間は**保有中**と読んで `mkdir` しない。列の先頭が戻すか、記録が死んでから消し、途中で止まった戻し（空の `<lock>`）は完了・回収する（#4288 §2.7）。**他ホストの pid では判断しない**（共有 home で 2 台が同時実行しうる） |
+| 観測の 3 値（#4288） | 取得・回収・解放の判断に使う全ての観測（`kill -0`・`owner` の読み・一覧・`mkdir`・`rename`）は「生きている／いない／不明」の 3 値を返す関数を通す（bash `lock_obs_*`、TS・同期 JS `makeObserver`）。「いない」は観測が成功して否定の証拠を返したとき（ESRCH・ENOENT・成功した一覧）だけで、EPERM・EACCES・EIO・一覧の失敗は**不明**。不明のときは取らない・消さない・解放しない。待ちは予算で終わり、何が不明だったか（観測点・パス・errno）を出す（bash は stderr の `machine-lock-unknown`、TS・同期 JS は戻り値の `unknown`。製品のランナーの `mutex-wait` の `logTail` と precheck の `held` の行にも `unknown point=… path=… errno=…` を出す）。保有者の判定は `owner` の 1 回の読みから（欄を読み直さない）。観測の関数の内側の段（欄の取り出し・pgid の数値の検査）の失敗も不明（取り出しの失敗は `EUNKNOWN`、`pgid` の鍵が在って値が 0 以上の整数でなければ `EINVAL`）で、`pgid` の鍵の無い旧い `owner` だけが pid だけで判定される。途中で止まった戻しの空の `<lock>` の `rmdir` の失敗も `point=reclaim-rmdir`・パス・errno を出す。bash の `kill -0` の文面は `LC_ALL=C` で読む。`held by` は `owner` に `pgid` があれば `(pgid G)` を添える。最初の `owner` を書けなければ `<lock>` を `rmdir` で戻し、取れなかったことにする。観測点の一覧は `verify-lock-holder-group-4288.md` §2.8 |
 | 名前 | `^[A-Za-z0-9_.-]+$` / 64 文字以内。ゲート ID ではなく**資源**の名前なので、別リポジトリのゲート同士が `port.60303` のような名前で排他し合ってよい |
+| run-lock・supervisor.lock の土台（#4288 の 2 番 PR1a） | 同じ規約に、**既定で働かない**オプションと操作を足した（gate-runner・precheck・merge-pr・verify-run.sh のゲートはどれも使わない。[lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) §1.6）。オプション（同期 JS `acquireMachineLockSync`、bash は `scripts/lib/machine-lock.sh` で読み込んだ節の変数）: `lockPath`／`lock_acquire_path <lock> <queue> <budget>`（パスで渡す。札の列は `${lock%.lock}.queue`、退避は `<lock>.gone-*`）・`ownerCodec`／`LOCK_OWNER_CODEC`＋`lock_parse_owner_text`・`lock_format_owner`（owner の書式。読み込み口は `key=value` の行で `host=`・`pgid=` を足す）・`ownerlessGraceMs`／`LOCK_OWNERLESS_GRACE_MS`（owner の無い空の `<lock>` を、列の先頭だけがこの ms より古ければ `rmdir` する）・`token`／`LOCK_WANT_TOKEN`・`ownerPid`／`LOCK_OWNER_PID`（owner に書く pid。札の pid は自分）・`hooks.kill`（`process.kill` の代わり。分類は同じ 3 値）。操作: 引渡し `handOff(pid, pgid)`／`lock_hand_off`（同じ取得の中で owner を新しい token `<T0>-g<G>` の pid・pgid に tmp＋`mv`→読み直し）、持ち主でない者の解放 `releaseAsHead`／`lock_release_as_head`（札の先頭になってから、渡された token で保有者が死んでいるときだけ消す）、回収だけ `recoverIfDead`／`lock_recover_only`（先頭で回収し、`mkdir` はしない）、子の待ち `lock_child_wait`（合図まで実作業を始めない）、持ち主自身の解放 `lock_release_held`／handle の `release`（1 回きり・missing／壊れた記録では消さない。直接消すのは記録の pid が呼び手自身で、グループがあればそれが空のときだけ。自分でない pid は `needs-head` で先頭の解放へ回す。[lock-reservation-rest-4288.md](./lock-reservation-rest-4288.md) D12）、supervisor.lock の `lstart`（読み込み口。`lstart=` のある記録だけ、pid の再利用を死と読む）。**全ての実装で、owner の最初の書き込みは排他作成**（`O_EXCL`／`set -C`）で、読み直して自分の token のときだけ取れたとする（EEXIST・他の記録では何も消さない） |
+| マージのロックの置き場（#4277） | merge-pr のロックと `.unresolved/` は `<root>/merge/` に置く。`mutex` の名前は `/` を含めないので root 直下にしか作れず、`mutex: merge.Kewton.CommandMate.develop` と書いたゲートも別のロックになる（ゲートの回収は `.unresolved/` を書かないので、同じ場所だと書込みの途中で死んだマージの停止を消せた） |
 
 環境変数 `CM_VERIFY_LOCK_ROOT` でルートを差し替えられる（テストは必ずこれを使うこと。
 実 `~/.commandmate/locks` を使うテストは、並列 worktree の稼働中ランと排他して偽の赤を作る）。
@@ -569,12 +575,18 @@ claudemd-size / route-exports。各 0.1〜0.3s）は失敗を秒で返すため�
 #### 9.2.1 `mutex` が届かない範囲 — 手で回すフル `test:unit`（Issue #1985）
 
 `mutex` のロックを取るのは次の 3 箇所**だけ**である（Issue #3909 で precheck の追加後に合わせて直した）。
+4 行目の merge-pr のロックは `mutex` ではないが、同じ規約・同じ root を使う（#4277）。
 
 | 取る場所 | いつ取るか |
 |---|---|
 | `gate-runner.ts` の `runGateAttempt` | `mutex` を宣言したゲートの試行ごと（CommandMate の runner） |
 | `.claude/skills/cmate-verify/scripts/verify-run.sh`（＋ `.agents/...` のコピー） | 同じく試行ごと（standalone runner、同じパス規約） |
 | `scripts/orchestrate/precheck.mjs`（`acquireMachineLockSync`） | `/orchestrate` 6-1-1 の `related` / `tests` の段が広いときだけ `cpu.heavy` を取る（#3884 H-10。ガードと docs だけの狭い段は取らない） |
+| `scripts/orchestrate/merge-pr.mjs`（`machine-lock-sync.mjs`） | マージの間ずっと、base ごとの `merge.<owner>.<repo>.<base>` を取る（#4277。置き場は root の下の `merge/`。`mutex` は root 直下なので、同じ名前の `mutex` でもマージのロックに届かない。owner に `pgid` と `phase`） |
+
+札（#4277）には 4 つとも追従している: `gate-runner.ts`（`machine-lock.ts`）・`verify-run.sh`（bash。`.claude` と `.agents` はバイト一致）・
+precheck・merge-pr（`machine-lock-sync.mjs`）。札を知らないのは旧版だけ（再ビルド前の本番サーバー、`commandmate-skills` の写し。移植は別途）で、
+旧版と混在する間の排他は死んだ保有者が無いときに限る（docs/design/merge-queue-fair-lock-4277.md §2.4・§8）。
 
 したがって `cpu.heavy` が保証するのは「**ゲートとして、または precheck の広い段として**起動された
 重いスイートは同時に 1 本」までであって、ワーカーや開発者が手で叩く `npm run test:unit`

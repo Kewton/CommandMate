@@ -94,9 +94,13 @@ done
 | 42 | `EXIT_STOP_UNCONFIRMED` | `stop UNCONFIRMED`。止めたと確かめられない。40・41・44 や `ready` にならないときの停止で確かめられないときもこれになる | 何も送り直さない。人が止めたことを確かめてから送り直す |
 | 43 | `EXIT_AUTO_YES_UNCONFIRMED` | `auto-yes UNCONFIRMED`。Auto-Yes を切れたと確かめられない。`--disable` の失敗・読み返しで on のほか、インスタンスの一覧やロールの読み取りの失敗、一覧にインスタンスが無いときも含む。何も送っていない | `.err` の理由を読み、`auto-yes --disable` と `instances --json` を確かめて送り直す |
 | 44 | `EXIT_ROLE_CHANGED` | 起動のメッセージで固定したロールが保てない。止めた。契約は送っていない。理由は 3 つ: `ready` を待つ間に世代か指紋が変わった／ロールのあるサーバーに起動の記録が無い（再起動など）／契約の送信が send の 32 で断られた（止めたと確かめられなければ 42） | ロールの設定が意図どおりかを確かめ、同じ呼び出しで送り直す（新しいセッションが今の設定で起動する） |
+| 45 | `EXIT_PERMISSION_ASK` | `permission ASK`。Command Code の worktree の `.commandcode/settings.local.json`（無ければ `settings.json`）の `permissions.defaultMode` が `ask`、または設定ファイルが JSON のオブジェクトでない。何も送っていない（#4238） | 利用者に `ask` 以外にしてもらい、同じ呼び出しで送り直す（docs/orchestrate/command-code.md#3-1-権限の既定を確かめる） |
 | それ以外 | | send の戻り値をそのまま返す（99 など） | 上の `send` の表 |
 
-**`--model -` の直接送信**（Antigravity）は、モデルの確認も停止も Auto-Yes の切断も行わないので 40〜44 を返さず、send の戻り値をそのまま返す。31 / 32 もそのまま。
+**`--model -` の直接送信**（Command Code。今は使わない Antigravity も）は、モデルの確認も Auto-Yes の切断も行わないので 40・41・43・44 を返さず、send の戻り値をそのまま返す。31 / 32 もそのまま。
+Command Code（サーバーが `--instance` を解決したツールが `command-code` のもの。`command-code-<n>` や alias も）だけは、送る前に権限の既定を読み、`ask` なら 45 で止まる。
+`ask` でなければ、動いているセッションを止めてから送る（権限は起動時に決まるので、`ask` で起動済みのセッションに送ると設定を直しても確認の画面で止まる）。止まったと確かめられなければ 42。Claude のモデルを渡すと exit 2。
+`--instance` を解決できなければ、どの担当でも何も送らずに exit 2。
 
 ## 3-2 monitor の起動と読み方
 
@@ -114,12 +118,12 @@ MONITOR_HOOKS_BASE=origin/develop \
 
 介入先の tmux セッションは capture の `cliToolId` から導出されるので**指定は不要**（#1601）。
 既定インスタンス以外を見るときだけ `<worktree-id>@<instance-id>`（例 `w1@codex-2`）で指定する。
-**Antigravity のワーカーは `<worktree-id>@antigravity` で渡す**（worktree の既定は claude なので、
-付けないと Claude のペインを見る）。
+**Command Code のワーカーは `<worktree-id>@command-code` で渡す**（worktree の既定は claude なので、
+付けないと Claude のペインを見る。Antigravity のときは `@antigravity` だった）。
 
-Antigravity のワーカーの画面判定の目印（#2606 の修正の経緯を含む）は、monitor の表示と画面が食い違うときに docs/orchestrate/antigravity.md#3-2-画面判定の目印と経緯 を読む。
+Antigravity（今は使わない）のワーカーの画面判定の目印（#2606 の修正の経緯を含む）は、monitor の表示と画面が食い違うときに docs/orchestrate/antigravity.md#3-2-画面判定の目印と経緯 を読む。
 
-Antigravity のワーカーについては次のように扱う:
+Antigravity のワーカー（今は使わない）については次のように扱っていた:
 
 - `hooks-task.sh` は引き続き**必ず**付け、完了の一次ソースにする。ポーラーのカーソルが画面の最終行を
   越えていると、`realtimeSnippet` にも `content` にもペインの行が無く、そのポーリングは `IDLE` になる
@@ -158,7 +162,7 @@ exit 10 にもならない）。
 
 ## 3-3 wait-verify.mjs が行う完了の確定
 
-- **完了の確定**（下の 2 つの手順と同じことをスクリプトが行う）: Antigravity の instance（`antigravity-2` などの追加 instance と、その alias も。
+- **完了の確定**（下の 2 つの手順と同じことをスクリプトが行う）: Command Code と Antigravity の instance（`command-code-2` / `antigravity-2` などの追加 instance と、その alias も。
   サーバーが解決した担当ツール `cliToolId` で決める、#3883）と `--require-signal` を付けた担当は、
   行全体が `IMPL_COMPLETED` の行が出るまで 30 秒ごとに待ち、**合図を見るまで検証を始めない**（`wait --verify` ではなく `wait` → 合図 → `verify --task` に分ける。
   作業の途中のターン終了で検証を走らせない、#3883）。合図は**この task のもの**だけを数える: この task の返事（`reply "$WT" --instance <id> --since <task の作成時刻> --json`）が
@@ -212,7 +216,7 @@ exit 10 にもならない）。
   `verify` は task をサーバーに任せる）。一覧が読めて task が無いときは、新しい task の確認はしないが、同じく `wait` → `verify` に分ける（#3883 N8）。
   `--task` が一覧（新しい順に 20 件）の外にあるときは `task show <task> --json` で個別に読み、作成時刻で比べて見張りを続ける（開始時も、一覧が読めた時点で基準を取り直すときも）。
   開始時の一覧の照会が失敗したら、`wait` を始める前に 5 秒おきに読み直す（3 回まで）。`wait --verify` が待ち始める前に task を結び付けるのと同じく、待ち始めの task に `verify --task` を結び付けるため（#3633）。
-  確認は、待機中（30 秒ごと）・`verify` の直前（再検証の前・Antigravity の合図待ちの周回も）・検証が終わって裁定を確定する前（Auto-Yes を切る前）に
+  確認は、待機中（30 秒ごと）・`verify` の直前（再検証の前・Command Code の合図待ちの周回も）・検証が終わって裁定を確定する前（Auto-Yes を切る前）に
   一覧を引き直して行う。同じ instance の、基準の task より新しい task（基準が一覧にあれば一覧の順序で決めるので、同じ時刻でも後に作られたものは新しい。
   無ければ作成時刻で比べる）があれば、古い task では検証せずに（または検証の結果を使わずに）**exit 3** で抜ける。記録は `fail`、要約は
   `unconfirmed: a newer task <新しい task id> was created for this instance after task <古い task id>; … auto-yes=kept`。
@@ -235,3 +239,44 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 このとき `work-evidence` と `scope` は落ちるので、**オーケストレーターが手で照合する**
 （commits ≥ 1 かつ作業ツリークリーン／`git diff --name-only origin/develop...HEAD` を契約の
 `allow` と `deny` に突き合わせる）。ワーカーが完了しているかは commits と作業ツリーの状態で見る。
+
+## 3-1 モデルの確認結果ごとの扱い
+
+- `model ok`: そのまま 3-2 へ
+- 起動のメッセージが exit 99 でも、launch-worker.mjs は画面の model を読み、読めれば契約へ進む（`send-init-*.err` に記録）。読めなければ下の UNKNOWN と同じ扱い
+- `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す（契約はまだ送っていない）
+- exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
+  8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
+- exit 42（`stop UNCONFIRMED`）: kill が失敗した・まだ動いている。**何も送り直さない**。人がセッションを止めたことを確かめてから送り直す
+- exit 43（`auto-yes UNCONFIRMED`）: 起動の前に Auto-Yes を切れたと確かめられない（一覧・ロールが読めないときも）。何も送っていない。`auto-yes --disable` を確かめてから送り直す
+- exit 45（`permission ASK`）: Command Code の権限の既定が `ask`。何も送っていない。docs/orchestrate/command-code.md#3-1-権限の既定を確かめる
+- exit 31 / 32 / 43 / 44 の意味と対処（send とワーカーの起動で違う）は docs/orchestrate/workers.md#3-1-send-とワーカーの起動の-exit-code を読む
+- tasks.tsv は 5 列になった（`issue` / `WT` / `AGENT` / `TASK_ID` / `MODEL`）。**`--instance` に渡すのは 3 列目の `AGENT`**（`claude`）で、5 列目ではない
+
+## 3-3 合格の記録を再利用しない理由
+
+- **合格の記録は再利用しない。** 合格は task・契約（そのゲートの定義）・その task の開始時の env-clean の基準に結び付いていて、
+  HEAD だけでは同じ確認と言えない（同じブランチに次の契約を送った直後も HEAD は同じ）。呼ぶたびに待って検証する。
+  落ちた後の再開では、`run-log.mjs status` で `verify=ok` の Issue を呼び直さない（終わった task を `wait --verify` で裁定し直すと、
+  紐づかない再検証になり #3118 の形で exit 20 になる）。再指示せずに検証だけをやり直すときは `--reverify --task "$TASK_ID"`
+  （合図の境界は前の呼び出しのものを run の記録の `signal-since=` から引き継ぐ。既に出た合図で裁定に進む）
+
+## 3-1 goal に手順を書き下す理由
+
+契約の goal だけでは足りない Issue（`/bug-fix` の調査手順、Phase 2.5 の分析結果の参照など）は、
+**goal 本文にその指示を書く**。契約は送信メッセージそのものなので、素の send で送っていた文面は
+すべて goal に入る。goal の先頭にスラッシュコマンドを書いても起動しないので、
+必要な手順は goal に書き下す（2-4-2）。
+
+## Phase 0 Claude のモデルの決まり方
+
+- **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity / claude に効くが antigravity / claude は新規起動時のみ。稼働中の claude に渡すと 400）。
+    セッションの**起動時**に、worktree の `.claude/settings.local.json` から決まる。書くのは 3-1 の `launch-worker.mjs`（opus も sonnet も明示して書く）
+  - **ワーカーに `/model` を送らない。** Enter が `~/.claude/settings.json` のグローバル既定を書き換える（#1495 / #2297）
+
+## 4-3 設計の修正指示の send
+
+この send は `launch-worker.mjs` を通さない。動いているワーカーへの 1 往復の指示で、モデルは起動時に固定済み・契約も作り直さないため。
+
+修正指示は**契約を作り直さない**（契約は Issue 単位の宣言であり、1往復の指摘ではない）。
+指示の反映は、3-4 の同じ手順（`wait` → `verify --task "$TASK_ID"`）で裁定する。

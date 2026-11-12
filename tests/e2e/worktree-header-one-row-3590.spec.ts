@@ -185,8 +185,9 @@ test.describe('Worktree header in one row (Issue #3590)', () => {
       expect(b.y).toBeGreaterThanOrEqual(headerBox.y);
       expect(b.y + b.height).toBeLessThanOrEqual(headerBox.y + headerBox.height);
     }
-    expect(repo.x).toBeGreaterThan(name.x);
-    expect(branch.x).toBeGreaterThan(repo.x);
+    // Issue #4218: repository › name › (checked-out) branch.
+    expect(name.x).toBeGreaterThan(repo.x + repo.width);
+    expect(branch.x).toBeGreaterThan(name.x);
     // The memo is not drawn; it is the name's tooltip.
     await expect(header).not.toContainText('E2E split test worktree');
 
@@ -238,6 +239,10 @@ test.describe('Worktree header in one row (Issue #3590)', () => {
     const identity = await box(page.getByTestId('desktop-header-identity'));
     const controls = await box(page.getByTestId('desktop-header-controls'));
     expect(overlaps(identity, controls)).toBe(false);
+    // Issue #4218: the tools sit between the two, overlapping neither.
+    const tools = await box(page.getByTestId('header-tool-bar'));
+    expect(overlaps(identity, tools)).toBe(false);
+    expect(overlaps(tools, controls)).toBe(false);
     const left = await box(page.getByTestId('split-action-bar-left'));
     for (const testId of ['toggle-history-pane', 'toggle-file-panel']) {
       expect(overlaps(left, await box(page.getByTestId(testId)))).toBe(false);

@@ -261,6 +261,8 @@ git pull origin develop
 - 修正が該当Issue内で完結 → 該当Issueのみ
 - 共通モジュールに修正が入った → 全Issue
 
+> 開発体制（[team.md](../../docs/orchestrate/team.md#5-uat-の結果の返し方phase-7)）では、この再UAT（`/uat`）と全Issueの回帰確認も開発リーダーは自分で回さず、PM 経由でジャッジ（`claude-2`）に頼み結果を待つ。1 人で回す今の運用では従来どおり。
+
 ---
 
 ## Step 6: 結果判定

@@ -47,13 +47,27 @@
  * have roles (it restarted, and knows nothing of this process) is not "nothing to
  * pin": stopped and 44, unlike an older server or a tool roles do not apply to.
  *
+ * Command Code (Issue #4238, the easy tier) has no Claude model: `--model -` only,
+ * and nothing is written to `.claude/`. Its interactive permissions are fixed
+ * when the session starts, from the worktree's `.commandcode/settings.local.json`
+ * (else `.commandcode/settings.json`) `permissions.defaultMode`, and `ask` stops
+ * on a confirmation screen even under Auto-Yes. So before the send that mode is
+ * read; `ask`, or a settings file that is not a JSON object, sends nothing (45).
+ * Otherwise a running session is stopped (and the stop confirmed, else 42) before
+ * the send, as for Claude: one started under `ask` would keep it after the
+ * settings were fixed, and the send would reuse it. Command Code is told by the
+ * tool the server resolves `--instance` to (`cliToolId`), so an alias of it is
+ * checked the same way; the id the server answers is the one every call uses.
+ * An `--instance` the server cannot resolve sends nothing (2).
+ *
  * Exit code (send): 0 sent (and for Claude the model matched before the
  * contract went out); 40 the model did not match after one restart; 41 the
  * model could not be read after one restart (the session is stopped and the
  * contract not sent in both); 42 a stop could not be confirmed (nothing more
  * sent); 43 Auto-Yes could not be confirmed off before the start, which includes
  * an instance list or roles that could not be read (nothing sent); 44 the role fixed at the starting message no longer holds (stopped, not
- * sent); 2 a usage error or a settings file git does not ignore (nothing
+ * sent); 45 a Command Code worktree whose permissions default is `ask`, or
+ * cannot be read (nothing sent); 2 a usage error (a Claude model for Command Code too), an `--instance` that cannot be resolved, or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
  * starting message: stopped, contract not sent); otherwise the `send`'s own
  * exit code (99 = not sent, 3-1's cold start; 31 / 32, see
@@ -72,7 +86,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { allocateLog, itemProblem, workItemName } from './execution-key.mjs';
-import { defaultRun } from './wait-verify.mjs';
+import { QUERY_TIMEOUT_MS, defaultRun } from './wait-verify.mjs';
+import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 
 /**
  * The value written for each contract model. `opus[1m]` keeps the 1M context
@@ -93,6 +108,12 @@ export const EXIT_MODEL_UNKNOWN = 41;
 export const EXIT_STOP_UNCONFIRMED = 42;
 export const EXIT_AUTO_YES_UNCONFIRMED = 43;
 export const EXIT_ROLE_CHANGED = 44;
+/** A Command Code worktree that would stop on a confirmation screen (`permissions.defaultMode: ask`), or unreadable (#4238). */
+export const EXIT_PERMISSION_ASK = 45;
+/** Command Code's worktree settings, in the order they decide `permissions.defaultMode` (#4238). */
+export const COMMAND_CODE_SETTINGS_FILES = [path.join('.commandcode', 'settings.local.json'), path.join('.commandcode', 'settings.json')];
+/** The roster's tool id of Command Code (`command-code`, `command-code-2`, …). */
+export const COMMAND_CODE_INSTANCE = 'command-code';
 /** `send`'s exit code for a role condition that does not hold: nothing typed (`RoleExitCode.NOT_SENT`). */
 export const EXIT_ROLE_NOT_SENT = 32;
 /** `send`'s exit code for a role conflict such as a moved roster: nothing sent (`RoleExitCode.CONFLICT`). */
@@ -110,6 +131,56 @@ export const READY_POLL_SEC = 10;
 /** Starts the session without handing it the contract: no work, no files, no Auto-Yes. */
 export const INIT_MESSAGE =
   'セッションの起動とモデルの確認です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。';
+
+/** Whether an instance id is a Command Code instance's (`command-code` or `command-code-<n>`). */
+export function isCommandCodeInstance(instance) {
+  return instance === COMMAND_CODE_INSTANCE || String(instance ?? '').startsWith(`${COMMAND_CODE_INSTANCE}-`);
+}
+
+/**
+ * Whether the resolved target runs Command Code: the tool the server named
+ * (`cliToolId`), as wait-verify's needsCompletionSignal reads it, so an alias
+ * (`cc`) is Command Code too; a server that names no tool leaves the id's form.
+ *
+ * @param {{ instanceId: string, cliToolId?: string }} target
+ */
+export function isCommandCodeTarget({ instanceId, cliToolId }) {
+  return cliToolId ? cliToolId === COMMAND_CODE_INSTANCE : isCommandCodeInstance(instanceId);
+}
+
+/** `--instance` (an id or an alias) resolved by the server, through the CLI the script was given (resolve-instance.mjs). */
+export function defaultResolveTarget(run, cli, wt, selector) {
+  return resolveInstanceThroughCli(run, cli, wt, selector, { timeoutMs: QUERY_TIMEOUT_MS, withTool: true });
+}
+
+/**
+ * The `permissions.defaultMode` a Command Code session in `worktree` starts with
+ * (#4238): the local settings' when it names one, else the shared settings'.
+ * A file that is there but not a JSON object is an error: the mode cannot be
+ * told, and `ask` is not ruled out.
+ *
+ * @returns {{ mode: string | null, file: string | null, error?: string }}
+ */
+export function commandCodePermissionMode(worktree) {
+  for (const rel of COMMAND_CODE_SETTINGS_FILES) {
+    const file = path.join(worktree, rel);
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    if (text.trim() === '') continue;
+    let settings = null;
+    try {
+      settings = JSON.parse(text);
+    } catch {
+      settings = null;
+    }
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return { mode: null, file, error: `${file} is not a JSON object` };
+    }
+    const mode = settings.permissions?.defaultMode;
+    if (typeof mode === 'string' && mode.trim() !== '') return { mode: mode.trim(), file };
+  }
+  return { mode: null, file: null };
+}
 
 function defaultSleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -408,6 +479,7 @@ export function parseArgs(argv) {
  * @param {string[]} argv
  * @param {{
  *   run?: (command: string, args: string[], opts?: { cwd?: string }) => { status: number, stdout: string, stderr: string },
+ *   resolveTarget?: typeof defaultResolveTarget,
  *   sleep?: (ms: number) => void,
  *   out?: (line: string) => void,
  *   log?: (line: string) => void,
@@ -441,6 +513,18 @@ export function main(argv, deps = {}) {
       return verdict === 'ok' ? 0 : verdict === 'mismatch' ? EXIT_MODEL_MISMATCH : EXIT_MODEL_UNKNOWN;
     }
 
+    // One id for everything that follows (the stop, Auto-Yes, the sends), and the tool behind it:
+    // an alias of a Command Code instance gets the Command Code checks (#4238 review). Unresolvable, nothing is sent.
+    const target = (deps.resolveTarget ?? defaultResolveTarget)(run, o.cli, o.wt, o.instance);
+    if ('error' in target) {
+      error(`cannot resolve --instance '${o.instance}' in ${o.wt}: ${target.error} (nothing sent)`);
+      return 2;
+    }
+    const given = o.instance;
+    o.instance = target.instanceId;
+    if (given !== o.instance) log(`instance ${given} -> ${o.instance}${target.cliToolId ? ` (${target.cliToolId})` : ''}`);
+    const commandCode = isCommandCodeTarget(target);
+
     const issue = Number(o.issue);
     const workItem = workItemName(issue, o.item);
     const ctx = { run, sleep, cli: o.cli, wt: o.wt, instance: o.instance };
@@ -464,6 +548,23 @@ export function main(argv, deps = {}) {
     };
     const contractArgs = ['--contract', o.contract, '--instance', o.instance, '--auto-yes', '--duration', o.duration];
 
+    if (commandCode) {
+      // No Claude model for Command Code (#4238): nothing goes to .claude/, and a model given is a mistake of the caller.
+      if (o.model !== '-') {
+        error(`--model ${o.model} is a Claude model; ${o.instance} (Command Code) takes --model - (nothing sent)\n${USAGE}`);
+        return 2;
+      }
+      const permission = commandCodePermissionMode(o.worktree);
+      if (permission.error || permission.mode === 'ask') {
+        const why = permission.error ?? `permissions.defaultMode is ask in ${permission.file}`;
+        log(`permission ASK ${o.instance} of ${o.wt}: ${why}; it would stop on a confirmation screen even under Auto-Yes. nothing is sent — set another mode and send again`);
+        return EXIT_PERMISSION_ASK;
+      }
+      log(`permission ok ${o.instance} of ${o.wt}: defaultMode=${permission.mode ?? '(not set)'} (${permission.file ?? 'no .commandcode settings'})`);
+      // The mode is read when the session starts: a session started under `ask` keeps it after the
+      // settings are fixed, and the send would reuse it. Stopped first, so the send starts one on the mode read above.
+      if (!stopped('Command Code reads its permissions when the session starts')) return EXIT_STOP_UNCONFIRMED;
+    }
     if (o.model === '-') {
       const sent = sendTo('send', contractArgs);
       log(`send exit=${sent.status} issue=${workItem} task=${sent.taskId || '-'} (${sent.name})`);

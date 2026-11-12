@@ -137,7 +137,8 @@ describe('[#3999] MessageInput: no send into a plan review', () => {
     render(<MessageInput {...createDefaultProps({ cliToolId: 'claude' })} onOptimisticSend={onOptimisticSend} />);
     typeMessage(DRAFT);
     pressEnter();
-    expect(onOptimisticSend).toHaveBeenCalledWith(DRAFT, { cliToolId: 'claude' });
+    // Issue #4227 G-PR6: the send follows the start preview's read, so it is asynchronous.
+    await waitFor(() => expect(onOptimisticSend).toHaveBeenCalledWith(DRAFT, { cliToolId: 'claude' }));
     expect(screen.queryByTestId('composer-plan-review-notice')).not.toBeInTheDocument();
   });
 

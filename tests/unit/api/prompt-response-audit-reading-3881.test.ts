@@ -76,7 +76,7 @@ vi.mock('@/lib/cli-tools/manager', () => ({
 }));
 
 import { POST as promptResponse } from '@/app/api/worktrees/[id]/prompt-response/route';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 import { createMessage, getMessages, upsertWorktree } from '@/lib/db';
 import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { setMockDb } from '@/lib/db/db-instance';
@@ -99,8 +99,7 @@ let db: Database.Database;
 beforeEach(() => {
   vi.clearAllMocks();
   tmpDir = mkdtempSync(path.join(os.tmpdir(), 'cmate-3881-manual-'));
-  db = new Database(path.join(tmpDir, 'chat.sqlite'));
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(tmpDir, 'chat.sqlite'));
   setMockDb(db);
   upsertWorktree(db, {
     id: WT,

@@ -17,6 +17,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 import {
   runMigrations,
   rollbackMigrations,
@@ -50,9 +51,7 @@ function insertV62Relay(id: string, payloadId: string | null): void {
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-v63-'));
-  db = new Database(path.join(dir, 'db.sqlite'));
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(dir, 'db.sqlite'), { foreignKeys: true });
   rollbackMigrations(db, 62);
   insertWorktree('wt-a');
   insertWorktree('wt-b');

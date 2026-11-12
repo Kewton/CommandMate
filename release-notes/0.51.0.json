@@ -1,0 +1,90 @@
+{
+  "version": "0.51.0",
+  "date": "2026-11-12",
+  "highlight": {
+    "ja": "作業の状態を「mem」の項目としてブランチごとに残し、会話が切り替わった後の最初の送信の前に要約を付けるか選べるようになりました。",
+    "en": "You can now keep work state as mem items per branch, and choose whether to add a summary before the first message after a conversation switch."
+  },
+  "added": [
+    {
+      "ja": "Repositories の画面で、ブランチごとに mem（作業の状態の記録）を有効にできるようになりました。",
+      "en": "You can now turn on mem, a record of work state, for each branch from the Repositories screen."
+    },
+    {
+      "ja": "CLI の mem コマンドで、作業の状態の項目を追加・更新・終了できるようになりました。",
+      "en": "The mem command in the CLI now lets you add, update, and close work state items."
+    },
+    {
+      "ja": "mem の項目に閉じる条件を付けられ、条件が満たされると知らせが出るようになりました。",
+      "en": "Mem items can now have a closing condition, and you are notified when it is met."
+    },
+    {
+      "ja": "CLI の brief コマンドで、作業の状態を決まった長さの要約として読めるようになりました。",
+      "en": "The brief command in the CLI now shows the work state as a summary of a fixed size."
+    },
+    {
+      "ja": "mem を有効にしたブランチでは、会話の切り替わりの後の最初の送信の前に、要約を付けるかを選べるようになりました。",
+      "en": "On branches with mem turned on, you can choose whether to add a work summary to the first message after a conversation switch."
+    },
+    {
+      "ja": "mem の項目を画面で一覧し、追加・編集・終了できるようになりました（PC とスマホ）。",
+      "en": "You can now list, add, edit, and close mem items on screen, on both desktop and mobile."
+    },
+    {
+      "ja": "mem の決定事項を、画面で差分を承認したときだけ Issue のコメントや文書へ記録できるようになりました。",
+      "en": "Mem decisions can now be written to Issue comments or documents, only after you approve the diff on screen."
+    },
+    {
+      "ja": "mem の更新を促す mem check と、送信に記録を添える send のオプションを追加しました。",
+      "en": "Added mem check to suggest mem updates, and a send option to attach a note to a message."
+    },
+    {
+      "ja": "セッションを閉じるときに、依頼や承認などの引き継ぎを mem に残せるようになりました。",
+      "en": "When closing a session, you can now leave a handoff of requests and approvals in mem."
+    },
+    {
+      "ja": "アクティビティペインを左右どちらにも置けるようになりました。",
+      "en": "The activity pane can now be placed on either the left or the right."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "PC のヘッダーを「リポジトリ、ブランチ、セッション」の順に並べ、セッション一覧を全件表示にしました。",
+      "en": "The desktop header now reads repository, branch, then session, and the session list shows every session."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "終了してシェルに戻ったペインへの送信で、本文がシェルのコマンドとして実行される問題を止めるようにしました。",
+      "en": "Sending to a pane that has fallen back to the shell no longer runs the message as a shell command."
+    },
+    {
+      "ja": "相対パスで指定した CODEX_HOME などで、フックやロールがエージェントに届かない問題を直しました。",
+      "en": "Fixed hooks and roles not reaching the agent when settings such as CODEX_HOME were given as relative paths."
+    },
+    {
+      "ja": "OpenCode で、フォルダ名の語によって Auto-Yes の判定を誤る問題を直しました。",
+      "en": "Fixed OpenCode Auto-Yes decisions being thrown off by words in the folder name."
+    },
+    {
+      "ja": "ツールチップが、ボタンが動いたり文言が変わったりしても正しい位置に出るようにしました。",
+      "en": "Tooltips now stay in the right place when their button moves or its label changes."
+    },
+    {
+      "ja": "ブラウザの保存領域が使えない環境で、詳細画面やファイル画面がエラーになる問題を直しました。",
+      "en": "Fixed the detail and file screens failing when browser storage is unavailable."
+    },
+    {
+      "ja": "作業木を切り替えて戻った直後に、引き継ぎのダイアログが一瞬消える問題を直しました。",
+      "en": "Fixed the handoff dialog briefly disappearing right after switching worktrees and coming back."
+    },
+    {
+      "ja": "引き継ぎの提案で、確定のときに失敗する終わりの条件をその場で断るようにしました。",
+      "en": "Handoff proposals now reject a closing condition right away when it would fail on approval."
+    },
+    {
+      "ja": "送信の前の要約の確認が読めないときは、送らずに下書きを残し、もう一度試せるようにしました。",
+      "en": "When the summary check before sending cannot be read, the message is no longer sent and the draft is kept so you can try again."
+    }
+  ]
+}

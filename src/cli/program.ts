@@ -41,6 +41,9 @@ import { createAgentsCommand } from './commands/agents';
 import { createSkillCommand } from './commands/skill';
 // Issue #1937 (R9): expose the server to a phone and pair it with a QR code
 import { createRemoteCommand } from './commands/remote';
+import { createMemCommand } from './commands/mem';
+import { createHandoffCommand } from './commands/handoff';
+import { createBriefCommand } from './commands/brief';
 // Issue #1195: Guided quickstart for bare `npx commandmate`
 import { quickstartCommand } from './commands/quickstart';
 import { isInteractive } from './utils/prompt';
@@ -277,6 +280,17 @@ export function buildProgram(): Command {
   // Registered next to the server lifecycle commands it builds on rather than
   // with the agent-orchestration group, which it has nothing to do with.
   program.addCommand(createRemoteCommand());
+
+  // Issue #4221: mem — the items that carry work across sessions. Reads the mode;
+  // has no way to change it (the screen does).
+  program.addCommand(createMemCommand());
+
+  // Issue #4227: handoff — the agent proposes its mem updates before a session ends
+  // (propose / done only; approving, cancelling and ending are the screen's).
+  program.addCommand(createHandoffCommand());
+
+  // Issue #4223: brief — the derived state and the mem items within a byte budget.
+  program.addCommand(createBriefCommand());
 
   // Issue #264: AI Tool Integration help section
   program.addHelpText('after', `

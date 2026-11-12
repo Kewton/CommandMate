@@ -23,7 +23,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { runMigrations } from '@/lib/db/db-migrations';
+import { openMigratedFileDb } from '../../helpers/migrated-file-db';
 
 let db: Database.Database;
 let tmpDir: string;
@@ -100,8 +100,7 @@ const base = { worktreeId: WT, cliToolId: 'claude' as const };
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-3798-gate-'));
-  db = new Database(path.join(tmpDir, 'db.sqlite'));
-  runMigrations(db);
+  db = openMigratedFileDb(path.join(tmpDir, 'db.sqlite'));
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
   vi.setSystemTime(T0);
   clearAutoYesHolds();

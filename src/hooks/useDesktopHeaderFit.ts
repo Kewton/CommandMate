@@ -11,8 +11,9 @@
  *
  * - the header (`DesktopHeader`): fold its tools behind a "…" button one at a
  *   time from the end (Issue #3591), then clip the identity group
- *   ({@link useDesktopHeaderFit}). Issue #3593: its session field has a fixed
- *   width, so there are no agent pills to fold;
+ *   ({@link useDesktopHeaderFit}). Issue #3593: there are no agent pills to
+ *   fold. Issue #4218: the current session's pill is in the identity group and
+ *   declares its readable width ({@link FIT_MIN_WIDTH_ATTR});
  * - the second row (`TerminalSplitContainer`'s action bar): drop the History /
  *   Files labels to their icons, then move the slotted items (the
  *   Verification chip, and with one split that split's session controls,
@@ -195,11 +196,15 @@ export interface DesktopHeaderFit {
  * Issue #3590: the Verification chip left the header for the second row
  * ({@link useSplitActionBarFit}), so nothing in the header is unkeyed any more.
  * Issue #3593: the agent pills, which used to fold into "+N" one at a time
- * before this step, became a fixed-width session field — the same width
- * whatever the number of sessions — so there is nothing to fold first.
+ * before this step, became one current-session pill and a fixed-width list
+ * trigger — so there is nothing to fold first. Issue #4218: the pill sits at
+ * the end of the identity group and shrinks with it; its label clipped below
+ * its {@link FIT_MIN_WIDTH_ATTR} counts as "does not fit", so the tools fold
+ * before the session name gets unreadable.
  *
  * Issue #3591: the worktree's tools moved into the header (`HeaderToolBar`),
- * inside the controls group that never shrinks. Before the identity group
+ * which never shrinks (Issue #4218: right after the identity group, outside
+ * it, so its overflow is still the signal). Before the identity group
  * clips, they fold behind a "…" button one at a time from the end — step `k`
  * (1 … `toolCount`) folds the last `k` — so the narrower the header, the more
  * tools are two clicks away, and only past the last one does the row clip.

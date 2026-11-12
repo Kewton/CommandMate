@@ -230,14 +230,16 @@ afterEach(() => {
 });
 
 describe('SessionTile composer (Issue #2512)', () => {
-  it('sends free text from the tile and shows the optimistic bubble at once', () => {
+  it('sends free text from the tile and shows the optimistic bubble at once', async () => {
     // Never resolves: the bubble must not be waiting on the API.
     sendMessageMock.mockReturnValue(new Promise(() => {}));
     render(<SessionTile worktree={createWorktree()} enabled connectivity={ONLINE} />);
 
     send('continue');
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    // Issue #4227 G-PR6: the composer reads the start preview before it sends (tests/setup.ts
+    // answers it unattended), so the send is asynchronous — it still never waits on the API.
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
     expect(sendMessageMock).toHaveBeenCalledWith('wt-1', 'continue', { cliToolId: 'claude' });
     expect(rows()).toEqual([{ content: 'continue', optimistic: 'sending' }]);
     // The composer cleared itself rather than waiting for the send.
@@ -284,7 +286,7 @@ describe('SessionTile composer (Issue #2512)', () => {
     expect(rows()).toEqual([{ content: 'yes', optimistic: '' }]);
   });
 
-  it('keeps a bubble on the instance it was sent to when the tile is switched', () => {
+  it('keeps a bubble on the instance it was sent to when the tile is switched', async () => {
     sendMessageMock.mockReturnValue(new Promise(() => {}));
     render(
       <SessionTile
@@ -295,7 +297,8 @@ describe('SessionTile composer (Issue #2512)', () => {
     );
 
     send('for claude');
-    expect(rows()).toHaveLength(1);
+    // Issue #4227 G-PR6: asynchronous after the start preview is read.
+    await waitFor(() => expect(rows()).toHaveLength(1));
 
     fireEvent.change(screen.getByTestId('session-tile-instance-wt-1'), { target: { value: 'codex' } });
     expect(rows()).toEqual([]);
@@ -333,7 +336,11 @@ describe('SessionTile composer (Issue #2512)', () => {
     transcript.rows = [serverUserRow('old', 'yes', { timestamp: new Date(Date.now() - 60_000) })];
     render(<SessionTile worktree={createWorktree()} enabled connectivity={ONLINE} />);
 
+    // Issue #4227 G-PR6: a second press while the first send still reads its start preview is the
+    // same draft pressed twice and is not sent again (MessageInput-start-brief-4227); a person can
+    // type the second message only once the first is sent, so the second send follows it.
     send('yes');
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
     send('yes');
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
     expect(rows().filter((row) => row.optimistic === 'sending')).toHaveLength(2);

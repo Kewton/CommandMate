@@ -22,7 +22,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { CODEX_HOME_ENV_VAR, getCodexHome } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCodexHomeForVersionRead } from '@/lib/updates/codex-version';
 
@@ -77,16 +77,26 @@ describe('[#2069] the two $CODEX_HOME resolvers agree where they must', () => {
 });
 
 describe('[#2069] the one deliberate divergence: a relative $CODEX_HOME', () => {
-  it('hooks-config forwards it verbatim — codex resolves it against ITS cwd', () => {
-    // This is the fact that makes the divergence necessary rather than sloppy:
-    // the value CommandMate hands codex is the relative string itself, so the
-    // file lands under whichever worktree the agent is running in.
-    expect(getCodexHome({ codexHome: '.codex-shared' })).toBe('.codex-shared');
+  it('hooks-config makes it absolute against the server cwd and pins that on the launch line', () => {
+    // Issue #4233 changed this expectation (the one change the design allows,
+    // docs/design/relative-config-home-4233.md §2.2). #2069 decided only that
+    // the VERSION READER answers "unknown" for a relative value instead of
+    // guessing; the verbatim pass-through it pinned here was the pre-existing
+    // behaviour it cited as the reason, not a decision of its own. That
+    // pass-through was itself the #4233 defect: the server wrote hooks.json and
+    // the relay under `<serverCwd>/<rel>` while codex, started in the worktree,
+    // read `<worktree>/<rel>`. hooks-config now resolves the value against the
+    // server's cwd, so the file it writes and the home codex is pinned to are
+    // one directory. The divergence #2069 cares about still stands — see the
+    // next case: the version reader may run from a CLI in any cwd, so it still
+    // refuses to guess.
+    expect(getCodexHome({ codexHome: '.codex-shared' })).toBe(resolve(process.cwd(), '.codex-shared'));
   });
 
   it('the version reader answers UNKNOWN instead of guessing ~/.codex', () => {
-    // The server is not in that worktree, and with several open it cannot pick
-    // one. Null makes every surface say "no update information" — the same
+    // Since #4233 hooks-config resolves the value against the SERVER's cwd, but
+    // this reader is also called from CLI processes in an arbitrary cwd, so it
+    // cannot reproduce that resolution and must not guess. Null makes every surface say "no update information" — the same
     // thing they say when codex has never run — instead of reporting an
     // unrelated install's version as this one's.
     expect(getCodexHomeForVersionRead({ [CODEX_HOME_ENV_VAR]: '.codex-shared' })).toBeNull();

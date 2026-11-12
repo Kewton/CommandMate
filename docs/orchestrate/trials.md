@@ -49,6 +49,7 @@
 ## 5-2b 整合性レビューの進め方と記録
 
 - **Codex のセッション:** 1 つを直列で使う。依頼は 1 本ずつ（ロック）。待ち時間を記録する
+- **送り先:** `--wt` に Issue の worktree を渡さない（#4259）。そこで起動した Codex のセッションは env-clean にワーカーの残りと数えられる。既定（`mycodebranchdesk`）か `--instance codex-2` を使う。同じ worktree を指すと何も送らず exit 2
 - **依頼の手順:** run ごとに `review-<N>.sh` を手で写さず、`scripts/orchestrate/consistency-review.mjs` を 1 回呼ぶ（#3528）。
   `--brief` には、その Issue の変更の種類と特に見たいこと（数行）だけを書く。状態ファイルがある run は `--routes <plan-check.mjs routes の出力>` を足すと、依頼文に「割込み順序と読者の一覧」が入る（無いときは「渡されていない」と入る。#3884）。依頼文の残り（目的・対象・手順・出力の形・触ってはいけないもの・`DONE:` の締め方）は
   雛形 `scripts/orchestrate/templates/consistency-review.md` から作られ、再レビュー（`--rereview --previous <前回の review-<N>.md>`）は
@@ -120,3 +121,10 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
 | 返答の本文に `DONE:` 行が無い | `no-done` | fail | なし | 1 | `.prompt.txt` `.json` `.err` `.md` |
 | `"overlapped": true`（`DONE:` 行があっても。1 本ずつ送り直す） | `overlapped` | fail | なし | 1 | `.prompt.txt` `.json` `.err` `.md` |
 | 上のどれでもない（裁定） | `ok` | ok | 1 行 | 0 | `.prompt.txt` `.json` `.err` `.md` |
+
+## 5-2b 対象・段・担当・再レビュー
+
+- **対象（変更の影響で選ぶ。接頭辞の一律の除外はしない）:** 危険な変更（hook・セッション・検出・ポーリング・tmux・security・応答の形・隔離）と、対になる場所がある変更。refactor でも、共有の処理を動かすもの・検証の条件を変えるものは対象に残す。docs だけ・テストだけは除く。**除外した PR からも、run ごとに 1 本を抜き出してレビューし、偏りを確かめる**
+- **段:** ワーカーの完了の後・PR の前。依頼したときの HEAD を記録し、その後の変更と区別する。ワーカーの「対になる場所を探した結果」（2-4-2）を入力に使い、レビューの独自の発見を見分ける
+- **担当:** Codex（暫定。優位が実証されたとは扱わない）。Claude を足すのは、重大な変更・ワーカーが「未確認」と書いた所・判断が割れた所（隔離・所有・security に限らない）
+- **再レビュー:** 自動は 3 回まで。3 回目の後に重大な指摘が残ったら、**止めて人の判断へ**（別の Issue に送ってマージしない）

@@ -1,7 +1,7 @@
 # Jev による Issue の棚卸し（優先度・担当モデルの下書き）
 
 Jev は TypeSafe の System One モデル。状態（テキストか JSON）と型付きの質問を送ると、文章ではなく構造化された答えを返す。
-Issue の優先度と、1-2b の担当（antigravity / sonnet / opus）の**下書き**に使う。裁定ではない。
+Issue の優先度と、1-2b の担当（command-code / sonnet / opus）の**下書き**に使う。裁定ではない。
 
 - 公式: https://docs.typesafe.ai/introduction ／ Quick Start ／ 索引 https://docs.typesafe.ai/llms.txt
 - 鍵: `.env` の `JEV_API_KEY`（画面・ログ・Issue に出さない）。送るのは公開リポジトリの Issue 本文だけにする

@@ -15,6 +15,9 @@ import {
   validateSchema,
   rollbackMigrations,
 } from '../../../src/lib/db/db-migrations';
+// Issue #4274: v68 lands before #4222's v67 (PM decision), so the history is counted
+// against the migrations this build defines rather than the version number.
+import { migrations as DEFINED_MIGRATIONS } from '../../../src/lib/db/migrations';
 
 describe('db-migrations', () => {
   let db: Database.Database;
@@ -34,7 +37,7 @@ describe('db-migrations', () => {
 
   describe('CURRENT_SCHEMA_VERSION', () => {
     it('should be 61 after Migration #61 (session notes, #2427)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(65);
+      expect(CURRENT_SCHEMA_VERSION).toBe(71);
     });
   });
 
@@ -154,7 +157,8 @@ describe('db-migrations', () => {
       runMigrations(db);
 
       const history = getMigrationHistory(db);
-      expect(history.length).toBe(CURRENT_SCHEMA_VERSION);
+      expect(history.length).toBe(DEFINED_MIGRATIONS.length);
+      expect(history[history.length - 1].version).toBe(CURRENT_SCHEMA_VERSION);
       expect(history.find(m => m.version === 16)?.name).toBe('add-issue-no-to-external-apps');
       expect(history.find(m => m.version === 17)?.name).toBe('add-scheduled-executions-and-execution-logs');
     });

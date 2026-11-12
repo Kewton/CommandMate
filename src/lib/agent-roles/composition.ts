@@ -14,13 +14,25 @@
  * it starts is this process's. A Schedule reads what its child gets
  * (`sanitizeEnvForChildProcess`). What a login shell's rc adds cannot be known here.
  *
+ * ## Which cwd (Issue #4233)
+ *
+ * A relative `XDG_CONFIG_HOME` / `HOME` is resolved by OpenCode V2 against ITS cwd,
+ * not this process's, so it is resolved here against the cwd the agent is started
+ * in: the worktree for a new pane and a Schedule. A pane that is reused can have
+ * been `cd`'d away from it; {@link RoleCompositionContext.readLaunchCwd} says where
+ * it is, and a value that would resolve somewhere other than the worktree is
+ * refused rather than read from the wrong place. An absolute or unset value reads
+ * no cwd at all. The composition then names the cwd it depended on
+ * (`opencodeV2LaunchCwd`), and the launch checks it again right before it types
+ * its line. See docs/design/relative-config-home-4233.md §3.2 / §8.2.
+ *
  * Errors name a file or a variable, never a value: these can hold API keys.
  *
  * @module lib/agent-roles/composition
  */
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { isAbsolute, join, resolve } from 'path';
 import { parse as parseToml } from 'smol-toml';
 import { getCodexHome } from '@/lib/hooks/sources/codex/hooks-config';
 import type { AgentRoleCliTool } from '@/types/agent-roles';
@@ -47,7 +59,18 @@ export interface RoleCompositionContext {
   explicitAgent?: string | null;
   /** Another Codex home than this process's. A probe's, in its isolated state. */
   codexHome?: string;
+  /**
+   * The cwd the agent will really start in, when that is not known to be
+   * `worktreePath` (Issue #4233): a reused pane's `#{pane_current_path}`. Null, or
+   * no reader, means the start is in `worktreePath` (a new pane, a Schedule).
+   * Read only when a relative `XDG_CONFIG_HOME` / `HOME` needs it; a rejection
+   * refuses the role.
+   */
+  readLaunchCwd?: RoleLaunchCwdReader;
 }
+
+/** Reads the cwd a reused pane would start the agent in, or null for "a new pane". */
+export type RoleLaunchCwdReader = () => Promise<string | null>;
 
 /** An agent name goes into a config key, so nothing unusual gets through unnoticed. */
 const AGENT_NAME = /^[A-Za-z0-9_.-]+$/;
@@ -201,15 +224,67 @@ export function resolveOpencodeV2EffectiveAgent(input: OpencodeV2AgentInput): st
 
 const JSON_NAMES = ['opencode.json', 'opencode.jsonc'] as const;
 
+function samePath(a: string, b: string): boolean {
+  const real = (path: string): string => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return resolve(path);
+    }
+  };
+  return real(a) === real(b);
+}
+
+/**
+ * Check that the cwd an agent would start in is `worktreePath` (Issue #4233).
+ * Null from the reader means a pane that does not exist yet, which is created in
+ * the worktree. Used when the composition is read, and again right before the
+ * launch line is typed ({@link RoleComposition.opencodeV2LaunchCwd}): the pane
+ * can be `cd`'d from its terminal in between.
+ *
+ * @throws {RoleCompositionError} The cwd cannot be read, or is not the worktree
+ */
+export async function assertLaunchCwdIsWorktree(
+  worktreePath: string,
+  readLaunchCwd: RoleLaunchCwdReader | undefined
+): Promise<void> {
+  if (!readLaunchCwd) return;
+  let cwd: string | null;
+  try {
+    cwd = await readLaunchCwd();
+  } catch {
+    throw new RoleCompositionError(
+      "XDG_CONFIG_HOME or HOME is relative and the pane's current directory could not be read, " +
+        'so the settings OpenCode V2 would read cannot be worked out'
+    );
+  }
+  if (cwd === null || samePath(cwd, worktreePath)) return;
+  throw new RoleCompositionError(
+    `XDG_CONFIG_HOME or HOME is relative and the pane's current directory ${cwd} is not the worktree, ` +
+      'so the settings OpenCode V2 would read cannot be worked out; restart the session or make the value absolute'
+  );
+}
+
 async function loadOpencodeV2Agent(
   context: RoleCompositionContext,
   userContent: Record<string, unknown> | null
-): Promise<string> {
-  const home = (await context.readEnv('HOME')) || homedir();
-  const configHome = (await context.readEnv('XDG_CONFIG_HOME')) || join(home, '.config');
+): Promise<{ agent: string; launchCwd: string | null }> {
+  const rawHome = (await context.readEnv('HOME')) || undefined;
+  const rawConfigHome = (await context.readEnv('XDG_CONFIG_HOME')) || undefined;
+  // Issue #4233: the one that decides the global dir. A relative HOME only
+  // matters when XDG_CONFIG_HOME is unset.
+  const deciding = rawConfigHome ?? rawHome;
+  let base: string | null = null;
+  if (deciding !== undefined && !isAbsolute(deciding)) {
+    await assertLaunchCwdIsWorktree(context.worktreePath, context.readLaunchCwd);
+    base = context.worktreePath;
+  }
+  const fromLaunchCwd = (value: string): string => (base === null || isAbsolute(value) ? value : resolve(base, value));
+  const home = rawHome !== undefined ? fromLaunchCwd(rawHome) : homedir();
+  const configHome = rawConfigHome !== undefined ? fromLaunchCwd(rawConfigHome) : join(home, '.config');
   const globalDir = join(configHome, 'opencode');
   const projectDirs = [context.worktreePath, join(context.worktreePath, '.opencode')];
-  return resolveOpencodeV2EffectiveAgent({
+  const agent = resolveOpencodeV2EffectiveAgent({
     explicitAgent: context.explicitAgent,
     userContent,
     projectConfigs: readConfigLevel(projectDirs.flatMap((dir) => JSON_NAMES.map((name) => join(dir, name)))),
@@ -221,6 +296,7 @@ async function loadOpencodeV2Agent(
       return candidates.find((path) => existsSync(path)) ?? null;
     },
   });
+  return { agent, launchCwd: base };
 }
 
 /**
@@ -246,10 +322,13 @@ export async function loadRoleComposition(
     }
     case 'opencode-v2': {
       const opencodeUserContent = parseUserOpencodeContent(await context.readEnv(OPENCODE_CONFIG_CONTENT_ENV_VAR));
+      const { agent, launchCwd } = await loadOpencodeV2Agent(context, opencodeUserContent);
       return {
         explicitAgent,
         opencodeUserContent,
-        opencodeV2EffectiveAgent: await loadOpencodeV2Agent(context, opencodeUserContent),
+        opencodeV2EffectiveAgent: agent,
+        // Issue #4233: only when a relative value was resolved against it.
+        ...(launchCwd !== null ? { opencodeV2LaunchCwd: launchCwd } : {}),
       };
     }
     default:

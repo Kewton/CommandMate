@@ -586,6 +586,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   --reply-to reads nothing first: it cannot tell a grant it armed from one already on, so a refused
   send leaves it on, with the command that stops it. A server too old to name its grants (no
   grantId) is not asked to withdraw one either: it stays on, with the same command.
+  send --no-brief / --with-brief (Issue #4274): the first send after a conversation boundary of
+  claude, codex or command-code (launch, /clear or /new, a resume, a restart; not a reconnect)
+  carries the mem session brief once, when mem is on/derived and injectOnStart is enabled.
+  --no-brief skips it for this send only; --with-brief attaches it anyway; both is exit 2.
+  The brief is left off, never the message, past 48 KiB / 240 lines.
   send --new-conversation: OpenCode V1 continues the conversation it remembers, even under another
   role, and stopping it does not forget it. Stop the session and send with this to start a new one.
   Another tool, or a session running or starting at that check, is exit 2 with nothing sent.

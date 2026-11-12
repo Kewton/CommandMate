@@ -16,7 +16,7 @@
 
 'use client';
 
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
@@ -45,6 +45,8 @@ import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { Modal } from '@/components/ui/Modal';
+import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
+import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
@@ -327,9 +329,12 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleInsertToSplit,
     handleKillCancel,
     handleKillConfirm,
-    openKillConfirm,
-    openActiveKillConfirm,
     killTarget,
+    openActiveEnd,
+    openEnd,
+    handoffTarget,
+    closeHandoff,
+    stopForHandoff,
     isKillPending,
     handleLoadContent,
     handleLoadError,
@@ -713,19 +718,57 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setDirectInputOpen(true);
   }, [worktreeId, handleMobileTabChange]);
 
+  // Issue #4227 (G-4): every "end" — the PC header's, each split's own (and its restart),
+  // the phone's actions sheet — goes through the mem mode read: the hand-off on a branch
+  // set to be attended with mode `on`, the plain confirmation (as before) otherwise.
+  const handleActiveEnd = useCallback((): void => {
+    void openActiveEnd();
+  }, [openActiveEnd]);
+  const handleSplitEnd = useCallback(
+    (target: SessionKillTarget): void => {
+      void openEnd(target);
+    },
+    [openEnd],
+  );
+
   // Render
   // ========================================================================
 
+  // Issue #4227 (G-4, G10): the hand-off before ending, drawn in one place for PC and phone and
+  // kept over the page's Loading (a first read of another worktree, a page made again): keyed
+  // beside the content, it is the same instance whichever branch below draws the content. It
+  // never kills by itself: its stop runs `stopForHandoff`, the existing stop, from its handler.
+  // While the session is expired it is not drawn (G10b, codex P2-1): the modal would cover the
+  // re-login button and trap the focus, and an unknown decide refuses to close. It is left
+  // unmounted, not hidden with `isOpen={false}` (a hidden dialog closes its opening). The opening
+  // and its units stay in the store; once the page recovers (a read succeeds), the dialog mounts
+  // again for the same opening and target, and makes or sends nothing again.
+  const withHandoff = (content: React.ReactNode): React.ReactElement => (
+    <>
+      <Fragment key="content">{content}</Fragment>
+      {!isAuthExpired && (
+        <SessionHandoffDialog
+          key="handoff"
+          isOpen={handoffTarget !== null}
+          worktreeId={worktreeId}
+          target={handoffTarget}
+          onClose={closeHandoff}
+          onStop={stopForHandoff}
+        />
+      )}
+    </>
+  );
+
   // Handle loading state
   if (loading) {
-    return <LoadingIndicator />;
+    return withHandoff(<LoadingIndicator />);
   }
 
   // Issue #2498: an expired session is a re-login, not an error. It used to
   // reach ErrorDisplay carrying the HTML parse failure, which told the user
   // nothing they could act on.
   if (isAuthExpired) {
-    return (
+    return withHandoff(
       <SessionExpiredNotice
         message={tWorktree('editor.sessionExpired')}
         loginLabel={tAuth('login.submitButton')}
@@ -741,7 +784,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // still the right answer. A poll that fails once a worktree is on screen no
   // longer lands here; it raises `isReconnecting` and the screen stays put.
   if (error) {
-    return <ErrorDisplay message={error} onRetry={handleRetry} />;
+    return withHandoff(<ErrorDisplay message={error} onRetry={handleRetry} />);
   }
 
   // Issue #956: the kill-session confirmation dialog must show the active
@@ -771,7 +814,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
   // Render desktop layout
   if (!isMobile) {
-    return (
+    return withHandoff(
       // [#2345] The file-link scope wraps the PC layout too: its split builds
       // one frozen prop object for both the chat surface and the History
       // column, so neither can be handed `worktreePath` from here directly.
@@ -846,8 +889,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onWorktreeUpdate={setWorktree}
           fileInputRef={fileInputRef}
           onFileInputChange={handleFileInputChange}
-          onKillSession={openActiveKillConfirm}
-          onRequestSessionEnd={openKillConfirm}
+          // Issue #4227 (G-4): "end" reads the mem mode and opens the hand-off on a branch
+          // set to be attended with mode `on`, the plain confirmation otherwise.
+          onKillSession={handleActiveEnd}
+          onRequestSessionEnd={handleSplitEnd}
           killTarget={killTarget}
           isKillPending={isKillPending}
           onKillCancel={handleKillCancel}
@@ -881,7 +926,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // the composer fly off-screen on Android Chrome). Falls back to `100%` (fill
   // the AppShell main) until visualViewport is measured / on unsupported
   // browsers, preserving the pre-#1166 full-height behavior.
-  return (
+  return withHandoff(
     <ErrorBoundary componentName="WorktreeDetailRefactored">
       {/* Issue #2213: the screen-scoped seam between the chat surface inside the
           terminal tab and the composer docked below it. The surface registers its
@@ -1275,8 +1320,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             )}
 
             {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
-                Issue #1171: End defers to openActiveKillConfirm, which snapshots the
-                active instance as the kill target and opens the confirm dialog.
+                Issue #1171: End snapshots the active instance as the kill target.
+                Issue #4227 (G-4): through openActiveEnd, which opens the hand-off on a
+                branch set to be attended with mode `on` and the confirm dialog otherwise.
                 Issue #2823: on the chat surface `TerminalDisplay` is not mounted,
                 so the row searches the conversation through `chat-search-open`,
                 which only the phone's transcript hears (`openSearchOnWindowEvent`).
@@ -1290,7 +1336,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   new CustomEvent(isMobileChatSurface ? 'chat-search-open' : 'terminal-search-open'),
                 )
               }
-              onEnd={openActiveKillConfirm}
+              onEnd={handleActiveEnd}
               endDisabled={!activeSessionRunning}
               onDirectInput={openDirectInput}
               directInputUnavailableReason={directInputUnavailableReason}

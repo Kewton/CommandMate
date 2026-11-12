@@ -1232,6 +1232,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             </div>
           </div>
         </Modal>
+        {/* Issue #4227 (G-4, G10): the hand-off before ending is drawn by the page
+            (`WorktreeDetailRefactored`), once, outside its Loading and its PC / phone branches. */}
         {/* [Issue #162] Move Dialog */}
         {moveTarget && (
           <MoveDialog

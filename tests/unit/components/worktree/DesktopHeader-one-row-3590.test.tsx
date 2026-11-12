@@ -79,10 +79,10 @@ describe('DesktopHeader is one row (Issue #3590)', () => {
     ]) {
       expect(screen.getByTestId(testId).parentElement).toBe(identity);
     }
-    // Name first, then the repository, then the branch.
+    // Issue #4218: the repository first, then the name, then the branch.
     const order = Array.from(identity.children).map((el) => el.getAttribute('data-testid'));
-    expect(order.indexOf('desktop-worktree-name')).toBeLessThan(order.indexOf('desktop-repository-name'));
-    expect(order.indexOf('desktop-repository-name')).toBeLessThan(order.indexOf('desktop-branch-name'));
+    expect(order.indexOf('desktop-repository-name')).toBeLessThan(order.indexOf('desktop-worktree-name'));
+    expect(order.indexOf('desktop-worktree-name')).toBeLessThan(order.indexOf('desktop-branch-name'));
   });
 
   it('links the repository name to the Repositories screen', () => {
@@ -127,15 +127,19 @@ describe('DesktopHeader git facts (Issue #3590 table)', () => {
     });
   }
 
+  // Issue #4218: the repository moved before the name, so the marks are
+  // followed by the checked-out branch (when it differs) instead. The `it`
+  // name is #3590's and is kept as it was; what it pins now is that order.
   it('draws `*` and `?` right after the name, before the repository', () => {
-    renderHeader(git({ isDirty: true, statusUnknown: true }));
+    renderHeader(git({ currentBranch: 'feature/other', isDirty: true, statusUnknown: true }));
     const order = Array.from(screen.getByTestId('desktop-header-identity').children).map((el) =>
       el.getAttribute('data-testid')
     );
     const name = order.indexOf('desktop-worktree-name');
     expect(order.indexOf('desktop-git-dirty')).toBe(name + 1);
     expect(order.indexOf('desktop-git-status-unknown')).toBe(name + 2);
-    expect(order.indexOf('desktop-repository-name')).toBe(name + 3);
+    expect(order.indexOf('desktop-branch-name')).toBe(name + 3);
+    expect(order.indexOf('desktop-repository-name')).toBeLessThan(name);
   });
 
   it('keeps the uncommitted / unknown wording on the marks (negative control)', () => {

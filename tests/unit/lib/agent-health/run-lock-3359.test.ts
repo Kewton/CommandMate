@@ -15,6 +15,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  OWNERLESS_GRACE_MS,
   acquireRunLock,
   formatRunLockOwner,
   parseRunLockOwner,
@@ -83,7 +84,7 @@ describe('acquireRunLock', () => {
     fs.mkdirSync(lockDir);
     const now = Date.now();
     expect(acquireRunLock({ label: 'a', env, now: () => new Date(now) }).ok).toBe(false);
-    expect(acquireRunLock({ label: 'a', env, now: () => new Date(now + 120_000) }).ok).toBe(true);
+    expect(acquireRunLock({ label: 'a', env, now: () => new Date(now + 2 * OWNERLESS_GRACE_MS) }).ok).toBe(true);
   });
 
   it('is inherited by a child whose CM_RUN_LOCK_TOKEN names the live holder, and the child does not release it', () => {
@@ -111,15 +112,18 @@ describe('acquireRunLock', () => {
     if (held.ok) held.release();
 
     // And the other way: what bash writes, the TS side reads.
-    const bashHeld = spawnSync('bash', ['-c', `. '${RUN_LOCK_SH}'; run_lock_acquire uat ${process.pid} sh-token /r`], {
+    // (the pid of the record is the shell itself: a pid that is not $$ is refused, PR1a-f I1-b)
+    const bashHeld = spawnSync('bash', ['-c', `. '${RUN_LOCK_SH}'; run_lock_acquire uat $$ sh-token /r && echo "PID:$$"`], {
       env: { ...process.env, ...env },
       encoding: 'utf8',
       timeout: REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
     });
     assertSubprocessCompleted(bashHeld, 'run-lock.sh');
     expect(bashHeld.status).toBe(0);
-    expect(readRunLockOwner(lockDir)).toMatchObject({ pid: process.pid, label: 'uat', token: 'sh-token', runDir: '/r' });
-    expect(acquireRunLock({ label: 'agent-health', env }).ok).toBe(false);
+    const shellPid = Number(/PID:(\d+)/.exec(bashHeld.stdout)?.[1]);
+    expect(readRunLockOwner(lockDir)).toMatchObject({ pid: shellPid, label: 'uat', token: 'sh-token', runDir: '/r' });
+    // the shell has ended, so its record is a dead holder's and the TS side recovers it
+    expect(acquireRunLock({ label: 'agent-health', env }).ok).toBe(true);
   });
 });
 

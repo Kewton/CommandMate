@@ -27,6 +27,15 @@
  * (`<step>=held`, result `skip`, exit 3) — neither ok nor a failed test, and
  * worth running again once the machine is quieter.
  *
+ * `--heavy-to-ci` (Issue #4265): a heavy step is not run and does not wait for
+ * the lock; it is recorded as `<step>=ci` — left to the PR's CI, which
+ * merge-pr.mjs waits for on that same HEAD before it merges. merge-pr passes it
+ * only for the HEAD its own 6-2 refresh made; the first precheck (before
+ * publish-pr) and one merge-pr runs without a refresh are not given it. The
+ * light steps and a narrow `related` / `tests` run as always, and a failed one
+ * fails the precheck. A `<step>=ci` record is reused only by another
+ * `--heavy-to-ci` precheck: without the flag the heavy step runs.
+ *
  * The result goes to the `precheck` stage of `run-log.mjs` with the HEAD it
  * ran on. An `ok` precheck for the same HEAD and the same options (base, kind,
  * metrics, allow-removed-tests, build) is reused instead of run again — every
@@ -51,9 +60,8 @@
  * Usage:
  *   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--base origin/develop] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force]
- *        [--item <work item>]
+ *        [--heavy-to-ci] [--item <work item>]
  */
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -66,6 +74,7 @@ import { itemOption, workHeadOf } from './pr-common.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { allocateLog, executionKey, workItemName } from './execution-key.mjs';
 import { diffManifest, manifestHash, takeManifest, verifyEnvState } from './env-manifest.mjs';
+import { LOCK_POLL_MS, acquireMachineLockSync as acquireTicketedLockSync } from './machine-lock-sync.mjs';
 
 export const DEFAULT_BASE = 'origin/develop';
 /**
@@ -76,6 +85,8 @@ export const DEFAULT_BASE = 'origin/develop';
 export const EXIT_HELD = 3;
 /** The step status of a heavy step left unrun for want of the lock. */
 export const HELD = 'held';
+/** The step status of a heavy step `--heavy-to-ci` left to the PR's CI (Issue #4265). */
+export const TO_CI = 'ci';
 /** Run order: cheap and decisive first, the test runs last. */
 export const STEPS = ['changelog', 'removed-tests', 'eslint', 'lint-sh', 'suppressions', 'tsc', 'related', 'tests'];
 /** The verify-stage gate whose pass on the same HEAD already covers a step. */
@@ -121,7 +132,6 @@ export const HEAVY_TEST_FILES = 50;
 export const HEAVY_RELATED_SOURCES = 20;
 /** The wait budget: the `timeoutSec` of the `unit` gate the lock is shared with (verify.yaml). */
 export const HEAVY_LOCK_TIMEOUT_SEC = 5400;
-const LOCK_POLL_MS = 250;
 const CODE_FILE = /\.(?:[cm]?js|jsx|tsx?)$/;
 const TEST_FILE = /^tests\/unit\/.+\.test\.tsx?$/;
 const RELATED_SOURCE = /^(?:src|scripts)\/.+\.(?:[cm]?js|jsx|tsx?)$/;
@@ -447,7 +457,7 @@ export function planSteps({ changed, deleted }, { base, kind, metrics = false, b
 export function parseNote(note) {
   /** @type {Record<string, string>} */
   const steps = {};
-  for (const match of String(note ?? '').matchAll(/(?:^|\s)([a-z-]+)=(ok|fail|skip|held)\b/g)) steps[match[1]] = match[2];
+  for (const match of String(note ?? '').matchAll(/(?:^|\s)([a-z-]+)=(ok|fail|skip|held|ci)\b/g)) steps[match[1]] = match[2];
   return steps;
 }
 
@@ -490,73 +500,18 @@ export function optionsFromNote(note, fallbackBase = DEFAULT_BASE) {
   ];
 }
 
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function readLockOwner(lockPath) {
-  try {
-    const owner = JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8'));
-    return typeof owner.pid === 'number' && typeof owner.token === 'string' ? owner : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Only a holder recorded on this host whose pid is gone (ESRCH) is stale — machine-lock.ts isStaleOwner. */
-function isStaleOwner(owner) {
-  if (owner.host !== os.hostname()) return false;
-  try {
-    process.kill(owner.pid, 0);
-    return false;
-  } catch (err) {
-    return err?.code === 'ESRCH';
-  }
-}
-
 /**
  * Take the machine-wide lock `name` the way src/lib/verification/machine-lock.ts
- * does (an atomic `mkdir` of `<root>/<name>.lock` with an owner record; a stale
- * holder is broken once), synchronously — precheck runs its steps with
- * spawnSync. Waits up to `timeoutMs`.
+ * does — in ticket order since #4277, so a long wait here is not overtaken by a
+ * verify gate that came later (machine-lock-sync.mjs) — synchronously: precheck
+ * runs its steps with spawnSync. Waits up to `timeoutMs`.
  *
- * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void }}
+ * @param {string} name
+ * @param {{ root: string, timeoutMs: number, pollMs?: number, sleep?: (ms: number) => void }} options
+ * @returns {{ acquired: boolean, waitedMs: number, heldBy: string | null, unknown?: { point: string, path: string, code: string }, release: () => void }}
  */
-export function acquireMachineLockSync(name, { root, timeoutMs, pollMs = LOCK_POLL_MS, sleep = sleepSync }) {
-  const lockPath = path.join(root, `${name}.lock`);
-  const token = crypto.randomUUID();
-  const startedAt = Date.now();
-  const broken = new Set();
-  fs.mkdirSync(root, { recursive: true });
-  for (;;) {
-    try {
-      fs.mkdirSync(lockPath);
-      fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: process.pid, host: os.hostname(), token, acquiredAt: Date.now() }));
-      return {
-        acquired: true,
-        waitedMs: Date.now() - startedAt,
-        heldBy: null,
-        release: () => {
-          const current = readLockOwner(lockPath);
-          if (current && current.token !== token) return;
-          fs.rmSync(lockPath, { recursive: true, force: true });
-        },
-      };
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-    }
-    const holder = readLockOwner(lockPath);
-    if (holder && !broken.has(holder.token) && isStaleOwner(holder)) {
-      broken.add(holder.token);
-      if (readLockOwner(lockPath)?.token === holder.token) fs.rmSync(lockPath, { recursive: true, force: true });
-      continue;
-    }
-    const waitedMs = Date.now() - startedAt;
-    if (waitedMs >= timeoutMs) {
-      return { acquired: false, waitedMs, heldBy: holder ? `pid ${holder.pid} on ${holder.host || 'unknown host'}` : null, release: () => {} };
-    }
-    sleep(Math.min(pollMs, timeoutMs - waitedMs));
-  }
+export function acquireMachineLockSync(name, { root, timeoutMs, pollMs = LOCK_POLL_MS, sleep }) {
+  return acquireTicketedLockSync(name, { root, timeoutMs, pollMs, ...(sleep ? { sleep } : {}) });
 }
 
 /**
@@ -580,7 +535,7 @@ const lines = (text) => text.split('\n').map((l) => l.trim()).filter(Boolean);
 
 const USAGE = `Usage:
   node scripts/orchestrate/precheck.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
-       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force] [--item <work item>]`;
+       [--base ${DEFAULT_BASE}] [--kind <feature|bug|refactor|docs>] [--metrics] [--build] [--allow-removed-tests] [--force] [--heavy-to-ci] [--item <work item>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -591,10 +546,16 @@ const FLAGS = {
   '--kind': 'kind',
   '--item': 'item',
 };
-const SWITCHES = { '--metrics': 'metrics', '--build': 'build', '--allow-removed-tests': 'allowRemovedTests', '--force': 'force' };
+const SWITCHES = {
+  '--metrics': 'metrics',
+  '--build': 'build',
+  '--allow-removed-tests': 'allowRemovedTests',
+  '--force': 'force',
+  '--heavy-to-ci': 'heavyToCi',
+};
 
 export function parseArgs(argv) {
-  const options = { base: DEFAULT_BASE, metrics: false, build: false, allowRemovedTests: false, force: false };
+  const options = { base: DEFAULT_BASE, metrics: false, build: false, allowRemovedTests: false, force: false, heavyToCi: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (SWITCHES[arg]) options[SWITCHES[arg]] = true;
@@ -616,8 +577,9 @@ export function parseArgs(argv) {
  *   run?: typeof defaultRun,
  *   findTestsNaming?: typeof findTestsNaming,
  *   estimateRelatedTests?: typeof estimateRelatedTests,
- *   acquireHeavyLock?: (timeoutMs: number) => { acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void },
+ *   acquireHeavyLock?: (timeoutMs: number) => { acquired: boolean, waitedMs: number, heldBy: string | null, unknown?: { point: string, path: string, code: string }, release: () => void },
  *   now?: () => Date,
+ *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
  * }} [deps]
@@ -679,7 +641,8 @@ export function main(argv, deps = {}) {
       const previous = findLatest(records, { issue, item, stage: 'precheck', head });
       if (previous && previous.result === 'ok') {
         const done = parseNote(previous.note);
-        const missing = toRun.filter((step) => done[step] !== 'ok');
+        // A step left to CI counts as done only for another --heavy-to-ci precheck (#4265).
+        const missing = toRun.filter((step) => done[step] !== 'ok' && !(o.heavyToCi && plan[step].heavy && done[step] === TO_CI));
         const sameOptions = (previous.note ?? '').split(/\s+/).includes(opts);
         // The result holds for the environment it was taken in (#3883 N9); one from before env= is reused with a warning.
         const env = verifyEnvState(previous, where);
@@ -751,6 +714,13 @@ export function main(argv, deps = {}) {
       // whole budget leaves the step unrun (N1): running it beside the holder is the
       // load-flipped verdict the lock exists to prevent, and failing it would record
       // a resource conflict as a test failure.
+      // --heavy-to-ci (#4265): the PR's CI on this HEAD runs it; merge-pr waits for that CI.
+      if (heavy && o.heavyToCi) {
+        results[step] = TO_CI;
+        fs.appendFileSync(logFile, `\n## ${step}: not run — left to the PR's CI (--heavy-to-ci; ${HEAVY_MUTEX} not taken)\n`);
+        log(`  ${step} ${TO_CI} (not run: left to the PR's CI, ${HEAVY_MUTEX} not taken)`);
+        continue;
+      }
       if (heavy && heldBy !== null) {
         results[step] = HELD;
         fs.appendFileSync(logFile, `\n## ${step}: not run — ${HEAVY_MUTEX} ${heldBy}\n`);
@@ -762,7 +732,9 @@ export function main(argv, deps = {}) {
       if (lock) {
         mutexMs += lock.waitedMs;
         if (!lock.acquired) {
-          heldBy = `held${lock.heldBy ? ` by ${lock.heldBy}` : ''} for ${(lock.waitedMs / 1000).toFixed(1)}s`;
+          // What the lock could not observe (#4288): point, path and errno — not an ordinary conflict.
+          const unknown = lock.unknown ? `; unknown point=${lock.unknown.point} path=${lock.unknown.path} errno=${lock.unknown.code}` : '';
+          heldBy = `held${lock.heldBy ? ` by ${lock.heldBy}` : ''} for ${(lock.waitedMs / 1000).toFixed(1)}s${unknown}`;
           results[step] = HELD;
           fs.appendFileSync(logFile, `\n## ${step}: not run — ${HEAVY_MUTEX} ${heldBy}\n`);
           log(`  ${step} ${HELD} (not run: ${HEAVY_MUTEX} ${heldBy})`);

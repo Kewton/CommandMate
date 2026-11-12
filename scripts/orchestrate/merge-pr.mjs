@@ -17,7 +17,12 @@
  *      by publish-pr.mjs after a refresh, or not pushed yet — the conflict-marker
  *      sweep over every tracked file, and precheck.mjs (tsc, `vitest related`
  *      over the imports, the tests naming a changed path, the guards …) unless
- *      the run record already has `precheck=ok` for that very HEAD. Only then
+ *      the run record already has `precheck=ok` for that very HEAD. On the HEAD
+ *      this run's own refresh made, precheck gets `--heavy-to-ci` (#4265): the
+ *      steps that would take `cpu.heavy` are recorded `=ci` and left to the PR's
+ *      CI on that HEAD (step 5), so a worker's `wait --verify` holding the lock
+ *      does not hold the merge; the light steps run and stop the push as before.
+ *      Without a refresh in this run the precheck takes the lock as before. Only then
  *      `git push`;
  *   5. the PR's checks (6-3): no `fail` / `cancel` in `bucket` — a failed job is
  *      re-run once per HEAD (`gh run rerun --failed`, recorded in the `ci` stage
@@ -53,6 +58,20 @@
  * `git push` here and in publish-pr.mjs goes through pr-common.mjs pushHead (#4162), which sends the
  * checked SHA by itself, so a local HEAD that moved since does not go out.
  *
+ * `--queue <entry,...>` (#4277): the entries `<issue>[/<item>][@<pr>]` one after another in this one
+ * process, each through the same steps 1-6. Every entry is resolved (PR → branch → worktree) before
+ * anything is written; exit 3 and 4 are retried (3: twice, 60 s apart; 4: five times, at once), any
+ * other non-zero stops the queue. The queue's state is the run record's `queue` lines (run-log.mjs
+ * LOG_STAGES: no HEAD, not progress). docs/orchestrate/ci-merge.md#6-2-マージの列--queue
+ *
+ * One merge at a time per base: every merge-pr — one PR or a queue — holds the merge lock
+ * `merge.<owner>.<repo>.<base>` (machine-lock-sync.mjs: tickets, first come first served) for its
+ * whole run. The process that holds it is a process group of its own (the command re-starts itself
+ * detached, `CM_MERGE_PR_INNER`), and the lock is recovered only when no process of the group is
+ * left, so a push or merge its dead parent left running is never overlapped. A holder that died
+ * while writing (`phase` push / merge / close) leaves an unresolved record beside the lock: every
+ * later merge-pr on that base stops until a run that names that PR has finished it.
+ *
  * Exit code: 0 merged (or already merged), 1 a condition or a command failed,
  * 2 usage error or a dirty tree, 3 the precheck is on hold, 4 the base moved during the CI wait,
  * 124 no CI registered within --register-timeout, or it did not settle within --ci-timeout.
@@ -61,14 +80,31 @@
  *   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
  *        [--pr <number>] [--branch <name>] [--base develop] [--repo Kewton/CommandMate]
  *        [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--register-timeout <sec>] [--poll <sec>] [--item <work item>]
+ *        [--merge-lock-timeout <sec>]
+ *   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --queue <issue[/item][@pr],...>
+ *        [--close -] [--last] [--unit-related] [--base …] [--repo …] [--ci-timeout …] [--register-timeout …] [--poll …] [--merge-lock-timeout <sec>]
  */
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
 import { verifyEnvState } from './env-manifest.mjs';
-import { BUILD_STEPS, findTestsNaming, main as runPrecheck, optionsFromNote, parseNote, passedGates } from './precheck.mjs';
+import { itemProblem } from './execution-key.mjs';
+import { acquireMachineLockSync, describeOwner, lockPathOf, readOwner } from './machine-lock-sync.mjs';
+import {
+  BUILD_STEPS,
+  TO_CI,
+  findTestsNaming,
+  machineLockRoot,
+  main as runPrecheck,
+  optionsFromNote,
+  parseNote,
+  passedGates,
+} from './precheck.mjs';
 import {
   DEFAULT_BASE_BRANCH,
   DEFAULT_REPO,
@@ -94,6 +130,16 @@ export const DEFAULT_CI_TIMEOUT_SEC = 3600;
 export const DEFAULT_REGISTER_TIMEOUT_SEC = 600;
 export const DEFAULT_POLL_SEC = 30;
 export const BASE_MOVED_EXIT = 4;
+export const HELD_EXIT = 3;
+/** The merge lock's wait (#4277): the default, and the cap a ticket's deadline may be given. */
+export const DEFAULT_MERGE_LOCK_TIMEOUT_SEC = 14400;
+export const MAX_MERGE_LOCK_TIMEOUT_SEC = 86400;
+/** `--queue`'s retries of one entry (#4277): exit 3 twice, 60 s apart; exit 4 five times, at once. */
+export const QUEUE_RETRIES = { [HELD_EXIT]: { max: 2, waitSec: 60 }, [BASE_MOVED_EXIT]: { max: 5, waitSec: 0 } };
+/** The phases in which the merge lock's holder writes outside: a holder that died in one leaves the write unconfirmed. */
+export const WRITE_PHASES = ['push', 'merge', 'close'];
+/** Set in the inner process (its own process group) the command re-starts itself as (#4277). */
+export const INNER_ENV = 'CM_MERGE_PR_INNER';
 export const BUILD_CHECK = 'Build';
 export const UNIT_CHECK = 'Unit Tests';
 /**
@@ -185,6 +231,15 @@ export function ranFullUnit(verifyRecord) {
   return passedGates(verifyRecord).includes('unit');
 }
 
+/**
+ * Whether a precheck record left a heavy step to the PR's CI (`<step>=ci`, `--heavy-to-ci`, #4265).
+ * Such a HEAD waits for CI's `Unit Tests` with or without `--last`: no local run tested its tree.
+ */
+export function leftHeavyToCi(precheckRecord) {
+  if (!precheckRecord) return false;
+  return Object.values(parseNote(precheckRecord.note)).includes(TO_CI);
+}
+
 /** Whether a precheck record built everything CI's `Build` builds (`build`, `build:cli`, `build:server`). */
 export function builtLikeCi(precheckRecord) {
   if (!precheckRecord || precheckRecord.result !== 'ok') return false;
@@ -195,7 +250,10 @@ export function builtLikeCi(precheckRecord) {
 const USAGE = `Usage:
   node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --issue <N> --worktree <path>
        [--pr <number>] [--branch <name>] [--base ${DEFAULT_BASE_BRANCH}] [--repo ${DEFAULT_REPO}]
-       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--register-timeout <sec>] [--poll <sec>] [--item <work item>]`;
+       [--close <N|->] [--last] [--unit-related] [--ci-timeout <sec>] [--register-timeout <sec>] [--poll <sec>] [--item <work item>]
+       [--merge-lock-timeout <sec>]
+  node scripts/orchestrate/merge-pr.mjs --run-dir <dir> --issues <range> --queue <issue[/item][@pr],...>
+       [--close -] [--last] [--unit-related] [--base …] [--repo …] [--ci-timeout …] [--register-timeout …] [--poll …] [--merge-lock-timeout <sec>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -211,8 +269,50 @@ const FLAGS = {
   '--register-timeout': 'registerTimeout',
   '--poll': 'poll',
   '--item': 'item',
+  '--queue': 'queue',
+  '--merge-lock-timeout': 'mergeLockTimeout',
 };
+/** The single-PR flags `--queue` replaces (each entry names its own). */
+const SINGLE_ONLY = ['--issue', '--worktree', '--pr', '--branch', '--item'];
+const ENTRY_PATTERN = /^(\d+)(?:\/([^@/,\s]+))?(?:@(\d+))?$/;
+
+/**
+ * `--queue`'s entries: `<issue>[/<item>][@<pr>]`, comma-separated (#4277).
+ *
+ * @returns {{ entries: { text: string, issue: number, item: string | null, pr: number | null }[] } | { error: string }}
+ */
+export function parseQueue(text) {
+  const entries = [];
+  for (const raw of String(text ?? '').split(',')) {
+    const part = raw.trim();
+    const m = ENTRY_PATTERN.exec(part);
+    if (!m) return { error: `--queue: ${part || '(empty)'} is not <issue>[/<item>][@<pr>]` };
+    const problem = itemProblem(m[2]);
+    if (problem) return { error: `--queue: ${part}: ${problem}` };
+    entries.push({ text: part, issue: Number(m[1]), item: m[2] ?? null, pr: m[3] ? Number(m[3]) : null });
+  }
+  // Two entries are one unit when nothing tells their PRs apart; two named PRs of one Issue are two (#4277, review 2 finding 4).
+  const seen = new Set();
+  for (const entry of entries) {
+    const key = `${entry.issue}/${entry.item ?? ''}@${entry.pr ?? '?'}`;
+    if (seen.has(key)) return { error: `--queue: ${entry.text} is given twice` };
+    seen.add(key);
+  }
+  for (const entry of entries.filter((e) => e.pr === null)) {
+    if (entries.some((other) => other !== entry && other.issue === entry.issue && other.item === entry.item)) {
+      return { error: `--queue: ${entry.text} and another entry are the same unit — name each PR (${entry.issue}${entry.item ? `/${entry.item}` : ''}@<pr>)` };
+    }
+  }
+  return { entries };
+}
 const SWITCHES = { '--last': 'last', '--unit-related': 'unitRelated' };
+
+/** The merge lock of a base (#4277): `merge.<owner>.<repo>.<base>` in the lock name's alphabet, 64 characters at most. */
+export function mergeLockName(repo, base) {
+  const name = `merge.${repo}.${base}`.replace(/\//g, '.').replace(/[^A-Za-z0-9_.-]/g, '_');
+  if (name.length <= 64) return name;
+  return `${name.slice(0, 51)}.${crypto.createHash('sha1').update(name).digest('hex').slice(0, 12)}`;
+}
 
 export function parseArgs(argv) {
   const options = {
@@ -223,13 +323,26 @@ export function parseArgs(argv) {
     ciTimeout: String(DEFAULT_CI_TIMEOUT_SEC),
     registerTimeout: String(DEFAULT_REGISTER_TIMEOUT_SEC),
     poll: String(DEFAULT_POLL_SEC),
+    mergeLockTimeout: String(DEFAULT_MERGE_LOCK_TIMEOUT_SEC),
     close: /** @type {string | undefined} */ (undefined),
+    queue: /** @type {string | undefined} */ (undefined),
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (SWITCHES[arg]) options[SWITCHES[arg]] = true;
     else if (FLAGS[arg] && i + 1 < argv.length) options[FLAGS[arg]] = argv[++i];
     else return { error: `unknown or incomplete argument: ${arg}` };
+  }
+  if (options.queue !== undefined) {
+    for (const flag of ['--run-dir', '--issues']) {
+      if (!options[FLAGS[flag]]) return { error: `${flag} is required` };
+    }
+    const combined = SINGLE_ONLY.find((flag) => options[FLAGS[flag]] !== undefined);
+    if (combined) return { error: `--queue cannot be combined with ${combined} (each entry names its own)` };
+    if (options.close !== undefined && options.close !== '-') return { error: `--queue takes --close - or none (got --close ${options.close})` };
+    // The entries are read by main (parseQueue), so orchestrate.md's `--queue "$MERGE_ISSUES"` can be checked as written.
+    options.item = null;
+    return { options };
   }
   for (const flag of ['--run-dir', '--issues', '--issue', '--worktree']) {
     if (!options[FLAGS[flag]]) return { error: `${flag} is required` };
@@ -247,8 +360,16 @@ export function validate(options) {
   if (!/^\d+$/.test(options.issue)) return `--issue must be an Issue number (got ${options.issue})`;
   if (options.close !== '-' && !/^\d+$/.test(options.close)) return `--close must be an Issue number or - (got ${options.close})`;
   if (options.pr !== undefined && !/^\d+$/.test(options.pr)) return `--pr must be a PR number (got ${options.pr})`;
-  for (const flag of ['--ci-timeout', '--register-timeout', '--poll']) {
+  return validateShared(options);
+}
+
+/** What one PR and a queue check alike. */
+function validateShared(options) {
+  for (const flag of ['--ci-timeout', '--register-timeout', '--poll', '--merge-lock-timeout']) {
     if (!/^\d+$/.test(options[FLAGS[flag]])) return `${flag} must be seconds (got ${options[FLAGS[flag]]})`;
+  }
+  if (Number(options.mergeLockTimeout) > MAX_MERGE_LOCK_TIMEOUT_SEC) {
+    return `--merge-lock-timeout must be at most ${MAX_MERGE_LOCK_TIMEOUT_SEC} (got ${options.mergeLockTimeout})`;
   }
   return null;
 }
@@ -260,15 +381,23 @@ export function validate(options) {
  *   sleep?: (ms: number) => void,
  *   now?: () => Date,
  *   findTestsNaming?: typeof findTestsNaming,
+ *   acquireHeavyLock?: (timeoutMs: number) => { acquired: boolean, waitedMs: number, heldBy: string | null, release: () => void },
+ *   estimateRelatedTests?: (worktree: string, sources: string[]) => number,
+ *   home?: string,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
+ *   runPrecheck?: typeof runPrecheck,
+ *   lockRoot?: string,   the directory of the merge locks (default: mergeLockRoot of the machine-lock root)
+ *   repoDir?: string,
+ *   pgid?: number,
+ *   lockSleep?: (ms: number) => void,
+ *   acquireMergeLock?: typeof acquireMachineLockSync,
+ *   mergeOne?: (options: any, deps: any) => number,
  * }} [deps]
  * @returns {number} exit code
  */
 export function main(argv, deps = {}) {
-  const { sleep = defaultSleep, now = () => new Date() } = deps;
-  const findNaming = deps.findTestsNaming ?? findTestsNaming;
-  const log = deps.log ?? ((line) => console.log(line));
+  const { sleep = defaultSleep } = deps;
   const error = deps.error ?? ((line) => console.error(line));
   // GitHub's 5xx and dropped connections are asked again for reads, and said so; writes
   // are sent once and read back through ghWrite (#3633 D).
@@ -280,11 +409,36 @@ export function main(argv, deps = {}) {
     return 2;
   }
   const o = parsed.options;
-  const invalid = validate(o);
+  if (o.queue !== undefined) {
+    const queue = parseQueue(o.queue);
+    if ('error' in queue) {
+      error(`${queue.error}\n${USAGE}`);
+      return 2;
+    }
+    o.entries = queue.entries;
+  }
+  const invalid = o.entries ? validateShared(o) : validate(o);
   if (invalid) {
     error(`${invalid}\n${USAGE}`);
     return 2;
   }
+  const inner = { ...deps, run, error, log: deps.log ?? ((line) => console.log(line)), now: deps.now ?? (() => new Date()) };
+  return o.entries ? runQueue(o, inner) : runOne(o, inner);
+}
+
+/**
+ * Steps 1-6 for one PR (`o` is parseArgs' single-PR options). The caller holds the merge lock;
+ * `deps.phase` is told before each write outside (push, merge, close) and `deps.beforeWrite`
+ * may stop the PR before anything is written (an unresolved write of another PR, #4277).
+ *
+ * @returns {number} exit code
+ */
+export function mergeOne(o, deps) {
+  const { sleep = defaultSleep, now = () => new Date(), run } = deps;
+  const findNaming = deps.findTestsNaming ?? findTestsNaming;
+  const log = deps.log ?? ((line) => console.log(line));
+  const error = deps.error ?? ((line) => console.error(line));
+  const phase = deps.phase ?? (() => {});
   const issue = Number(o.issue);
   const item = o.item;
   const baseRef = `origin/${o.base}`;
@@ -324,8 +478,16 @@ export function main(argv, deps = {}) {
       }
     }
 
+    const stop = deps.beforeWrite?.(pr.number);
+    if (stop) {
+      error(`merge #${issue}: ${stop}`);
+      return 1;
+    }
+    phase('refresh', { pr: pr.number });
+
     // 1. Never merge twice: finish what a merged PR leaves (the record, the Issue).
     if (pr.state === 'MERGED') {
+      phase('close');
       const { records } = readRecords(o.runDir, o.issues);
       if (!findLatest(records, { issue, item, stage: 'merge', head: pr.headRefOid, result: 'ok' })) {
         record('merge', 'ok', pr.headRefOid, `pr=#${pr.number} already-merged`);
@@ -431,13 +593,22 @@ export function main(argv, deps = {}) {
         error(`merge #${issue}: no precheck=ok record to take the options from (kind etc.) — run precheck.mjs on the work HEAD first; not pushed`);
         return 1;
       }
+      phase('precheck');
       const code = (deps.runPrecheck ?? runPrecheck)(
         [
           '--run-dir', o.runDir, '--issues', o.issues, '--issue', String(issue), '--worktree', o.worktree,
           ...optionsFromNote(workPrecheck.note, baseRef),
+          // The HEAD this run's refresh made: the heavy steps are the PR's CI's on this very HEAD,
+          // which step 5 waits for before the merge — not cpu.heavy's here (#4265).
+          ...(refreshed ? ['--heavy-to-ci'] : []),
           ...(item ? ['--item', item] : []),
         ],
-        { run, now, log, error, findTestsNaming: findNaming, home: deps.home }
+        {
+          run, now, log, error, findTestsNaming: findNaming, home: deps.home,
+          // Test seams of precheck.mjs main, passed through when given.
+          ...(deps.acquireHeavyLock ? { acquireHeavyLock: deps.acquireHeavyLock } : {}),
+          ...(deps.estimateRelatedTests ? { estimateRelatedTests: deps.estimateRelatedTests } : {}),
+        }
       );
       if (code === 3) {
         // precheck exit 3: a heavy step could not take the machine lock — undecided, not failed.
@@ -459,19 +630,30 @@ export function main(argv, deps = {}) {
       }
     }
     if (head !== pr.headRefOid) {
+      phase('push');
       const push = pushHead(run, o.worktree, { branch, head, sleep, notice: error });
       if (push.status !== 0) throw new Error(`git push failed: ${(push.stderr || push.stdout).trim()}`);
       log(`merge #${issue}: refresh=${refreshed ? 'merged' : 'unpushed'} marker=ok precheck=ok; pushed ${head.slice(0, 7)}`);
     }
 
     // 5. The checks of this HEAD.
+    phase('ci-wait');
     records = readRecords(o.runDir, o.issues).records;
-    const needBuild = !builtLikeCi(findLatest(records, { issue, item, stage: 'precheck', head }));
+    const headPrecheckNow = findLatest(records, { issue, item, stage: 'precheck', head });
+    const needBuild = !builtLikeCi(headPrecheckNow);
     // The verify judged at the work HEAD (step 3, or again after the refresh): whether it ran the
     // full unit suite. A latest verify of another HEAD is not that one, and does not spare the wait (#4076).
     const latestVerify = latestByStage(records, issue, item).verify ?? null;
     const verify = latestVerify && unmetStage('verify', latestVerify, { head, workHead }) === null ? latestVerify : null;
-    const need = { needBuild, needUnit: o.unitRelated || !ranFullUnit(verify), last: o.last, required: o.last ? LAST_REQUIRED_CHECKS : [] };
+    // A HEAD whose precheck left the heavy steps to CI (the refresh's, #4265) is the combination no
+    // local test has seen: the worker's full unit ran on the work HEAD, not on it — wait for `Unit Tests`.
+    const heavyToCi = leftHeavyToCi(headPrecheckNow);
+    const need = {
+      needBuild,
+      needUnit: o.unitRelated || heavyToCi || !ranFullUnit(verify),
+      last: o.last,
+      required: o.last ? LAST_REQUIRED_CHECKS : [],
+    };
     const rerunDone = records.some(
       (r) => r.issue === issue && inItem(r, item) && r.stage === 'ci' && r.head === head && /(^| )rerun=/.test(r.note ?? '')
     );
@@ -488,6 +670,7 @@ export function main(argv, deps = {}) {
       const current = viewPr(pr.number);
       title = current.title ?? title;
       if (current.state === 'MERGED') {
+        phase('close');
         record('merge', 'ok', current.headRefOid, `pr=#${pr.number} merged-elsewhere`, current.headRefOid === head ? workHead : null);
         log(`merge #${issue}: #${pr.number} was merged meanwhile — issue ${o.close}: ${closeIssue(pr.number)}`);
         return 0;
@@ -594,6 +777,7 @@ export function main(argv, deps = {}) {
     // The squash commit is named after the PR (publish-pr titles it), also over
     // a fold or a refresh: the subject is the PR's own title, as read on the last look at it.
     const subject = squashSubject(title, pr.number);
+    phase('merge');
     const merged = ghWrite(run, [
       'pr', 'merge', String(pr.number), '--repo', o.repo, '--squash', '--match-head-commit', head,
       ...(subject ? ['--subject', subject] : []),
@@ -610,6 +794,7 @@ export function main(argv, deps = {}) {
       return 1;
     }
     record('merge', 'ok', head, `pr=#${pr.number} squash`, workHead);
+    phase('close');
     log(`merge #${issue}: #${pr.number} merged — issue ${o.close}: ${closeIssue(pr.number)}`);
     return 0;
   } catch (err) {
@@ -618,5 +803,388 @@ export function main(argv, deps = {}) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The merge lock, and what a dead holder left unresolved (#4277)
+// ---------------------------------------------------------------------------
+
+const unresolvedDir = (root, name) => path.join(root, `${name}.unresolved`);
+
+/**
+ * Where the merge locks live: a directory of their own under the machine-lock root (#4277, 5-2b review
+ * P2-2). A verify.yaml `mutex` is a bare name in the root (`<root>/<name>.lock`, no `/` allowed), so
+ * no gate — the product runner's recovery included, which knows nothing of `.unresolved/` — can take,
+ * recover or delete a merge lock, whatever its `mutex` is called (`merge.Kewton.CommandMate.develop`
+ * included). Only merge-pr reads and writes here.
+ */
+export const MERGE_LOCK_DIR_NAME = 'merge';
+export function mergeLockRoot(machineRoot) {
+  return path.join(machineRoot, MERGE_LOCK_DIR_NAME);
+}
+
+/**
+ * The writes of dead merge lock holders that nobody has confirmed: one file per dead holder, kept
+ * until a merge-pr that names that PR ends with 0. Read by every merge-pr on the base (Codex review 2
+ * finding 2: the stop must not be lost to the one run that happened to recover the lock).
+ *
+ * @returns {{ file: string, owner: any }[]}
+ */
+export function readUnresolved(root, name) {
+  const dir = unresolvedDir(root, name);
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((entry) => entry.endsWith('.json')).sort();
+  } catch {
+    return [];
+  }
+  return names.flatMap((entry) => {
+    const file = path.join(dir, entry);
+    try {
+      return [{ file, owner: JSON.parse(fs.readFileSync(file, 'utf8')) }];
+    } catch {
+      // Unreadable: still a stop, named by its file.
+      return [{ file, owner: { phase: 'unknown', pr: null, issue: null } }];
+    }
+  });
+}
+
+/** Written before the dead holder's lock is removed, so a recoverer that dies here leaves the stop behind. */
+function persistUnresolved(root, name, owner) {
+  const dir = unresolvedDir(root, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${String(owner.token).replace(/[^A-Za-z0-9_.-]/g, '_')}.json`);
+  try {
+    fs.writeFileSync(file, JSON.stringify({ ...owner, recoveredAt: new Date().toISOString(), recoveredBy: process.pid }), { flag: 'wx' });
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+  }
+  return file;
+}
+
+const describeUnresolved = (owner) =>
+  `#${owner.issue ?? '?'}${owner.item ? `/${owner.item}` : ''} (pr=#${owner.pr ?? '?'}) phase=${owner.phase ?? '?'}`;
+
+/**
+ * Take the merge lock of `o.repo` / `o.base` (machine-lock-sync.mjs, ticket order). The owner names
+ * this process group, so the lock outlives a dead parent while its git / gh children still run.
+ */
+function takeMergeLock(o, deps, recovered) {
+  const root = deps.lockRoot ?? mergeLockRoot(machineLockRoot(deps.home ?? os.homedir()));
+  const name = mergeLockName(o.repo, o.base);
+  const acquire = deps.acquireMergeLock ?? acquireMachineLockSync;
+  const lock = acquire(name, {
+    root,
+    timeoutMs: Number(o.mergeLockTimeout) * 1000,
+    ...(deps.pgid ? { pgid: deps.pgid } : {}),
+    ...(deps.lockSleep ? { sleep: deps.lockSleep } : {}),
+    ownerFields: { phase: 'idle', repo: o.repo, base: o.base },
+    warn: (line) => deps.log(`merge lock: ${line}`),
+    onStaleHolder: (owner) => {
+      const write = WRITE_PHASES.includes(owner.phase);
+      recovered.push({ owner, write, file: write ? persistUnresolved(root, name, owner) : null });
+    },
+  });
+  return { lock, root, name };
+}
+
+function heldByLine(root, name, lock) {
+  const owner = readOwner(lockPathOf(root, name));
+  if (!owner) return lock.heldBy ?? 'nobody readable';
+  return `${describeOwner(owner)}${owner.pgid ? ` (pgid ${owner.pgid})` : ''}, phase ${owner.phase ?? '-'}${owner.pr ? ` pr=#${owner.pr}` : ''}`;
+}
+
+/** One PR under the merge lock: the call before #4277, with the lock and the unresolved check around it. */
+function runOne(o, deps) {
+  const recovered = [];
+  const { lock, root, name } = takeMergeLock(o, deps, recovered);
+  if (!lock.acquired) {
+    deps.error(`merge #${o.issue}: merge lock ${name} held by ${heldByLine(root, name, lock)} for ${Math.round(lock.waitedMs / 1000)}s (--merge-lock-timeout ${o.mergeLockTimeout}) — not started`);
+    return 124;
+  }
+  try {
+    for (const r of recovered) deps.log(`merge #${o.issue}: recovered the merge lock of a dead holder ${describeUnresolved(r.owner)}${r.write ? ' — its write is unconfirmed' : ''}`);
+    let mine = [];
+    const code = mergeOne(o, {
+      ...deps,
+      phase: (p, fields = {}) => lock.setOwnerFields({ phase: p, entry: o.item ? `${o.issue}/${o.item}` : String(o.issue), issue: Number(o.issue), item: o.item, ...fields }),
+      beforeWrite: (prNumber) => {
+        const pending = readUnresolved(root, name);
+        const others = pending.filter((u) => u.owner.pr !== prNumber);
+        if (others.length > 0) {
+          return `not started — a merge-pr died while writing ${others.map((u) => describeUnresolved(u.owner)).join(', ')}; run merge-pr on that PR first (${others.map((u) => u.file).join(', ')})`;
+        }
+        mine = pending;
+        return null;
+      },
+    });
+    if (code === 0) for (const u of mine) fs.rmSync(u.file, { force: true });
+    return code;
+  } finally {
+    lock.setOwnerFields({ phase: 'idle' });
+    lock.release();
+  }
+}
+
+/** `git worktree list --porcelain` → { path, branch } (branch without refs/heads/). */
+export function parseWorktreeList(text) {
+  const out = [];
+  for (const block of String(text ?? '').split(/\n\s*\n/)) {
+    const wt = /^worktree (.+)$/m.exec(block)?.[1];
+    const branch = /^branch refs\/heads\/(.+)$/m.exec(block)?.[1];
+    if (wt) out.push({ path: wt.trim(), branch: branch ? branch.trim() : null });
+  }
+  return out;
+}
+
+/**
+ * Every entry's PR → branch → worktree, before anything is written (#4277, design §3.1). Reads only:
+ * the run record's `pr` stage, `gh pr view` and `git worktree list`.
+ *
+ * @returns {{ resolved: any[] } | { problems: string[] }}
+ */
+export function resolveEntries(o, deps) {
+  const { run } = deps;
+  const { records } = readRecords(o.runDir, o.issues);
+  const problems = [];
+  let worktrees = null;
+  const listWorktrees = () => {
+    if (worktrees === null) {
+      const out = run('git', ['-C', deps.repoDir ?? process.cwd(), 'worktree', 'list', '--porcelain']);
+      if (out.status !== 0) throw new Error(`git worktree list failed: ${out.stderr.trim()}`);
+      worktrees = parseWorktreeList(out.stdout);
+    }
+    return worktrees;
+  };
+  const resolved = [];
+  for (const entry of o.entries) {
+    let prNumber = entry.pr;
+    if (prNumber === null) {
+      const named = new Set(
+        records
+          .filter((r) => r.issue === entry.issue && r.stage === 'pr' && inItem(r, entry.item))
+          .map((r) => /(?:^|\s)pr=#(\d+)\b/.exec(r.note ?? '')?.[1])
+          .filter(Boolean)
+      );
+      if (named.size === 0) {
+        problems.push(`${entry.text}: the run record has no pr=#N for it — run publish-pr.mjs first, or name it ${entry.text}@<pr>`);
+        continue;
+      }
+      if (named.size > 1) {
+        problems.push(`${entry.text}: the run record names ${[...named].map((n) => `#${n}`).join(' and ')} — name each as ${entry.text}@<pr>`);
+        continue;
+      }
+      prNumber = Number([...named][0]);
+    }
+    let pr;
+    try {
+      pr = ghJson(run, ['pr', 'view', String(prNumber), '--repo', o.repo, '--json', 'number,state,headRefOid,headRefName']);
+    } catch (err) {
+      problems.push(`${entry.text}: gh pr view ${prNumber}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+    if (pr.state === 'MERGED') {
+      // Recorded and closed only (step 1): a worktree cleaned up after the merge does not stop a resumed queue.
+      resolved.push({ ...entry, pr: prNumber, branch: pr.headRefName ?? null, worktree: null, merged: true });
+      continue;
+    }
+    if (pr.state !== 'OPEN') {
+      problems.push(`${entry.text}: #${prNumber} is ${pr.state}`);
+      continue;
+    }
+    const matches = listWorktrees().filter((wt) => wt.branch === pr.headRefName);
+    if (matches.length !== 1) {
+      problems.push(`${entry.text}: ${matches.length === 0 ? 'no worktree' : `${matches.length} worktrees`} on ${pr.headRefName} (#${prNumber})`);
+      continue;
+    }
+    resolved.push({ ...entry, pr: prNumber, branch: pr.headRefName, worktree: matches[0].path, merged: false });
+  }
+  const numbers = resolved.map((e) => e.pr);
+  for (const [i, n] of numbers.entries()) {
+    if (numbers.indexOf(n) !== i) problems.push(`#${n} is named by two entries (${resolved.filter((e) => e.pr === n).map((e) => e.text).join(', ')})`);
+  }
+  if (problems.length > 0) return { problems };
+  return { resolved: assignClose(resolved, o.close) };
+}
+
+/**
+ * Which entry closes its Issue, decided on the order the entries RUN in: only the last of an Issue,
+ * and only one without a work item (the rule of a single call, #3883) — earlier PRs of the Issue leave
+ * it open (review 2 finding 4). runQueue calls it again after moving an unconfirmed write to the
+ * front (5-2b review P2-1): `3883@3889,3883@3895` run as 3895, 3889 must close after 3889, not 3895.
+ * A queue stops at the first failure, so the Issue is closed only once all its entries merged.
+ */
+export function assignClose(entries, close) {
+  return entries.map((entry, i) => ({
+    ...entry,
+    close: close === '-' || entry.item !== null || entries.slice(i + 1).some((later) => later.issue === entry.issue) ? '-' : String(entry.issue),
+  }));
+}
+
+/**
+ * `--queue`: the entries one after another under one merge lock (#4277, design §3).
+ *
+ * @returns {number} exit code
+ */
+export function runQueue(o, deps) {
+  const { now, log, error } = deps;
+  const sleep = deps.sleep ?? defaultSleep;
+  let resolution;
+  try {
+    resolution = resolveEntries(o, deps);
+  } catch (err) {
+    error(`merge --queue: ${err instanceof Error ? err.message : String(err)} — nothing was changed`);
+    return 1;
+  }
+  if ('problems' in resolution) {
+    error(`merge --queue ${o.queue}: not started, nothing was changed:\n  ${resolution.problems.join('\n  ')}`);
+    return 2;
+  }
+  const entries = resolution.resolved;
+  const total = entries.length;
+  const record = (entry, result, state, extra = '') => {
+    // By PR (unique in a queue): the order that runs holds copies once the close is decided again.
+    const pos = entries.findIndex((e) => e.pr === entry.pr) + 1;
+    const note = `state=${state} queue=${o.queue} pos=${pos}/${total} pr=#${entry.pr}${extra ? ` ${extra}` : ''}`;
+    appendRecord(o.runDir, o.issues, { issue: entry.issue, item: entry.item, stage: 'queue', result, note }, now());
+    log(`queue #${entry.issue}${entry.item ? `/${entry.item}` : ''} ${state}: ${note}`);
+  };
+  for (const entry of entries) {
+    record(entry, 'skip', 'waiting', `branch=${entry.branch ?? '-'} worktree=${entry.worktree ?? '-'}${entry.merged ? ' merged=yes' : ''}`);
+  }
+
+  const recovered = [];
+  const { lock, root, name } = takeMergeLock(o, deps, recovered);
+  if (!lock.acquired) {
+    const holder = heldByLine(root, name, lock);
+    record(entries[0], 'fail', 'lock-timeout', `waited=${Math.round(lock.waitedMs / 1000)}s`);
+    error(`merge --queue: merge lock ${name} held by ${holder} for ${Math.round(lock.waitedMs / 1000)}s (--merge-lock-timeout ${o.mergeLockTimeout}) — not started`);
+    return 124;
+  }
+  try {
+    for (const r of recovered) {
+      record(entries[0], r.write ? 'fail' : 'skip', 'recovered', `from=${describeUnresolved(r.owner).replace(/ /g, '_')} phase=${r.owner.phase ?? '-'}`);
+    }
+    // Every unconfirmed write on this base must be one of this queue's PRs; those go first (design §3.2).
+    const pending = readUnresolved(root, name);
+    let order = [...entries];
+    for (const u of [...pending].reverse()) {
+      const at = order.findIndex((entry) => entry.pr === u.owner.pr);
+      if (at < 0) {
+        record(entries[0], 'fail', 'recovered-stop', `from=#${u.owner.issue ?? '?'} phase=${u.owner.phase ?? '?'} unresolved-pr=#${u.owner.pr ?? '?'}`);
+        error(
+          `merge --queue: an earlier merge-pr died while writing ${describeUnresolved(u.owner)} — nothing was changed; ` +
+            `run that entry first (add it to the queue: ${u.owner.issue}${u.owner.item ? `/${u.owner.item}` : ''}@${u.owner.pr}). Record: ${u.file}`
+        );
+        return 1;
+      }
+      order.unshift(...order.splice(at, 1));
+    }
+    if (pending.length > 0) {
+      log(`merge --queue: finishing the unconfirmed write(s) first: ${pending.map((u) => describeUnresolved(u.owner)).join(', ')}`);
+      // The close was decided on the given order; decide it again on the order that runs (P2-1).
+      order = assignClose(order, o.close);
+    }
+
+    const lastIndex = order.length - 1;
+    for (const [index, entry] of order.entries()) {
+      const tries = { [HELD_EXIT]: 0, [BASE_MOVED_EXIT]: 0 };
+      for (let attempt = 1; ; attempt++) {
+        record(entry, 'skip', 'running', `attempt=${attempt}`);
+        const options = {
+          ...o,
+          issue: String(entry.issue),
+          item: entry.item,
+          worktree: entry.worktree ?? '-',
+          pr: String(entry.pr),
+          branch: entry.branch ?? undefined,
+          close: entry.close,
+          last: o.last || index === lastIndex,
+        };
+        const code = (deps.mergeOne ?? mergeOne)(options, {
+          ...deps,
+          phase: (p, fields = {}) => lock.setOwnerFields({ phase: p, entry: entry.text, issue: entry.issue, item: entry.item, pr: entry.pr, ...fields }),
+        });
+        lock.setOwnerFields({ phase: 'idle' });
+        if (code === 0) {
+          record(entry, 'ok', 'merged', `attempt=${attempt}`);
+          for (const u of pending.filter((p) => p.owner.pr === entry.pr)) fs.rmSync(u.file, { force: true });
+          break;
+        }
+        const retry = QUEUE_RETRIES[code];
+        if (retry && tries[code] < retry.max) {
+          tries[code] += 1;
+          record(entry, 'skip', 'retry', `attempt=${attempt} exit=${code} next-in=${retry.waitSec}s`);
+          if (retry.waitSec > 0) sleep(retry.waitSec * 1000);
+          continue;
+        }
+        record(entry, 'fail', 'stopped', `attempt=${attempt} exit=${code}`);
+        const rest = order.slice(index + 1).map((e) => e.text);
+        error(`merge --queue: stopped at ${entry.text} (exit ${code}${retry ? `, after ${tries[code]} retr${tries[code] === 1 ? 'y' : 'ies'}` : ''})${rest.length > 0 ? ` — not started: ${rest.join(', ')}` : ''}`);
+        return code;
+      }
+    }
+    return 0;
+  } finally {
+    lock.setOwnerFields({ phase: 'idle' });
+    lock.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The command: an outer process that re-starts itself as the inner one (#4277)
+// ---------------------------------------------------------------------------
+
+/**
+ * How the outer process starts the inner one: a new process group (detached) whose leader is the
+ * inner process, with the parent's whole environment plus INNER_ENV — PATH, the gh login and
+ * CM_VERIFY_LOCK_ROOT are inherited (Codex review 2 finding 3).
+ */
+/** @param {Record<string, string | undefined>} [env] */
+export function innerSpawnOptions(env = process.env) {
+  return { detached: true, stdio: 'inherit', env: { ...env, [INNER_ENV]: '1' } };
+}
+
+const FORWARDED_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
+/**
+ * Start the inner process and wait for it; INT / TERM / HUP go to its whole group.
+ *
+ * @param {string[]} argv
+ * @param {{ spawnImpl?: typeof spawn, script?: string, env?: Record<string, string | undefined> }} [options]
+ * @returns {Promise<number>}
+ */
+export function runOuter(argv, { spawnImpl = spawn, script = fileURLToPath(import.meta.url), env = process.env } = {}) {
+  return new Promise((resolve) => {
+    const child = spawnImpl(process.execPath, [script, ...argv], innerSpawnOptions(env));
+    const handlers = FORWARDED_SIGNALS.map((signal) => {
+      const handler = () => {
+        try {
+          process.kill(-child.pid, signal);
+        } catch {
+          // the group is gone already
+        }
+      };
+      process.on(signal, handler);
+      return [signal, handler];
+    });
+    const done = (code) => {
+      for (const [signal, handler] of handlers) process.off(signal, handler);
+      resolve(code);
+    };
+    child.on('error', (err) => {
+      console.error(`merge-pr: could not start the inner process: ${err.message}`);
+      done(1);
+    });
+    child.on('exit', (code, signal) => done(code ?? (signal ? 128 + (os.constants.signals[signal] ?? 0) : 1)));
+  });
+}
+
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) {
+  if (process.env[INNER_ENV] === '1') {
+    // Not inherited further: a merge-pr started by a child (a test) is an outer process of its own.
+    delete process.env[INNER_ENV];
+    process.exit(main(process.argv.slice(2), { pgid: process.pid }));
+  } else {
+    runOuter(process.argv.slice(2)).then((code) => process.exit(code));
+  }
+}

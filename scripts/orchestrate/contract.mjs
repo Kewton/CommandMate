@@ -16,8 +16,8 @@
  *                            # tells the worker to fold into develop's changelog.d/<issue>.md (a key suffix alone does not)
  *   title: "<Issue title>"   # required
  *   kind: feature            # feature | bug | refactor | docs
- *   agent: claude            # claude | antigravity
- *   model: opus              # opus | sonnet ("-" / omitted for antigravity)
+ *   agent: claude            # claude | command-code (antigravity was replaced by command-code, #4238)
+ *   model: opus              # opus | sonnet ("-" / omitted for command-code)
  *   gates: [lint, typecheck, unit-related]   # omitted: the kind's default, with build-server when the scope reaches the server build and --worktree's verify.yaml declares it
  *   scope: ["scripts/orchestrate/**"]   # changelog.d/<issue>.md is added for you
  *   decisions: ["…"]         # answers to the Issue's open questions
@@ -359,7 +359,13 @@ const KINDS = {
   refactor: { label: '整理', section: 'Changed', type: 'refactor' },
   docs: { label: 'ドキュメント', section: 'Documentation', type: 'docs' },
 };
-const AGENTS = ['claude', 'antigravity'];
+const AGENTS = ['claude', 'command-code'];
+/**
+ * Workers that no longer take the easy tier (Issue #4238): the config is refused
+ * with the worker that replaced it, so a config written before the switch does
+ * not quietly become a contract for a tool the run no longer sends to.
+ */
+export const REPLACED_AGENTS = { antigravity: 'command-code' };
 const MODELS = ['opus', 'sonnet'];
 const BUMPS = ['minor', 'major'];
 
@@ -470,7 +476,11 @@ export function normalizeConfig(raw, options = {}) {
   if (!kind) problems.push(`kind: must be one of ${Object.keys(KINDS).join(' / ')} (got ${raw.kind})`);
 
   const agent = raw.agent === undefined ? 'claude' : raw.agent;
-  if (!AGENTS.includes(agent)) problems.push(`agent: must be one of ${AGENTS.join(' / ')} (got ${raw.agent})`);
+  if (Object.hasOwn(REPLACED_AGENTS, agent)) {
+    problems.push(
+      `agent: ${agent} was replaced by ${REPLACED_AGENTS[agent]} for the easy tier (#4238); write agent: ${REPLACED_AGENTS[agent]} (no contract generated)`
+    );
+  } else if (!AGENTS.includes(agent)) problems.push(`agent: must be one of ${AGENTS.join(' / ')} (got ${raw.agent})`);
 
   let model = raw.model === undefined || raw.model === '-' ? null : raw.model;
   if (agent === 'claude') {

@@ -31,6 +31,7 @@ import { getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { probeRunningSessionHookUrl } from '@/lib/cli-tools/base';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { pinBriefRequest, pinBriefWorktree, type BriefReport } from '@/lib/session/session-brief';
 import { PROMPT_WAITING_CODE } from '@/lib/session/prompt-waiting-guard';
 import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import { recordSendAttempt } from '@/lib/session/send-attempt-state';
@@ -88,7 +89,11 @@ export async function POST(
 ) {
   const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
   const role: RouteRoleState = { settings: null };
-  const handled = await handleSend(request, context, relay, role);
+  const brief: RouteBriefState = { report: null };
+  const answered = await handleSend(request, context, relay, role, brief);
+  // Issue #4274: `brief` only when one was attached, a flag asked, or the delivery of
+  // a claimed one is unknown — a send with neither answers byte for byte as before.
+  const handled = brief.report ? await withBody(answered, { brief: brief.report }) : answered;
   // Issue #4116: whatever refuses a send after its role was saved, the answer says it
   // stayed saved. Nothing saved, nothing added: a send with no role answers as it did.
   const response = role.settings && handled.status >= 400
@@ -112,6 +117,11 @@ export async function POST(
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
   return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/** Issue #4274: what the send service said about this send's brief. */
+interface RouteBriefState {
+  report: BriefReport | null;
 }
 
 /** What this request saved for the instance, for its answer. */
@@ -143,7 +153,8 @@ async function handleSend(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
   relay: RouteRelayState,
-  role: RouteRoleState
+  role: RouteRoleState,
+  brief: RouteBriefState
 ) {
   // Issue #4065: the input generation counter at the request's outermost
   // entry, before the body is read and before every wait below. A refusal of
@@ -157,7 +168,10 @@ async function handleSend(
 
     // Check if worktree exists
     const worktree = getWorktreeById(db, id);
-    if (!worktree) {
+    // Issue #4224 (D2 design §2.4, step 1): the worktree's lifetime this request is for,
+    // fixed in the same stretch it is read in — before the body is parsed or anything waits.
+    const briefWorktreePin = worktree ? pinBriefWorktree(db, id) : null;
+    if (!worktree || !briefWorktreePin) {
       return NextResponse.json(
         { error: `Worktree '${id}' not found` },
         { status: 404 }
@@ -173,6 +187,8 @@ async function handleSend(
     if (!validated.ok) return validated.response;
     const { trimmedContent, requestedCliToolId, instanceId, target } = validated.value;
     const cliToolId = target.cliToolId;
+    // Issue #4224 (step 2): the instance's lifetime, in the stretch it is resolved in.
+    const briefPin = pinBriefRequest(db, briefWorktreePin, instanceId ?? cliToolId);
     // Issue #4116: in the same step as the resolution, before anything waits.
     const roleRosterMark = readRoleRosterMark(db, id, body);
 
@@ -374,6 +390,16 @@ async function handleSend(
       // Issue #1737: `commandmate send --ignore-structured-prompt`.
       ignoreStructuredPromptGuard: body.ignoreStructuredPromptGuard === true,
       observedInputGeneration,
+      // Issue #4274: the screen, `send` and `ask` reach here; relay delivery and the
+      // others call the service with its default (`never`).
+      brief: body.brief ?? 'auto',
+      briefPin,
+      // Issue #4227 (S-B): the screen's choice for the boundary its preview showed.
+      briefDetail: body.briefDetail,
+      briefBoundary: body.briefBoundary,
+      onBrief: (report) => {
+        brief.report = report;
+      },
       onAttempt: (attempt) => {
         ownAttempt = attempt;
         relay.attempt = attempt.state;
@@ -387,6 +413,14 @@ async function handleSend(
     });
 
     if (!result.ok) {
+      // Issue #4227 (S-B, design §3.2): the screen's choice stopped before any key. Not a send
+      // failure: the screen asks again with a new preview (the body and the image stay).
+      if (result.stage === 'brief_choice') {
+        return NextResponse.json(
+          { error: result.code, reason: result.reason, boundary: result.boundary },
+          { status: 409 }
+        );
+      }
       // Issue #1708: the session is sitting on a prompt, so nothing was sent.
       // 409 rather than 500 — the request was well formed and the server is
       // healthy; the session is simply in a state that cannot accept a message.
