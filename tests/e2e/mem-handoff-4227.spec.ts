@@ -1041,4 +1041,160 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
     expectStays(summary);
     nothingMadeAgain(server);
   });
+
+  /**
+   * Issue #4317 PR2 (d): the host of the dialog is outside the route (`AppShellGate`, beside the
+   * shell), so the route's Loading between two worktrees with a unit never takes it away. The start
+   * is the cause's: A's unknown unit shown on B as A's (foreign, one dialog); then B → A by
+   * `router.push` with the route's RSC request held {@link ROUTE_HOLD_MS}ms, so A's page does not
+   * exist for that time and the route's `loading.tsx` is drawn (checked: a run whose request was
+   * not held, or whose Loading was never committed, proves nothing and fails).
+   *
+   * Counted two ways from before the push: a MutationObserver (every notification's DOM; it says
+   * nothing of a removal and a re-add inside one batch of records) and the 50ms samples of (a)(b)(c)
+   * judged by their measured `elapsed` (late samples: indeterminate, a failure). Asserted: one
+   * dialog at the start, no notification with 0 and none with 2, one at the end, the same DOM node
+   * of the dialog all along (one opening: one token); then A's page is back, the foreign notice
+   * gone, the unit sent again from it — and the push made no create, send, decide, cancel, end nor
+   * kill. Before the fix (the host inside the page) this counts 0 dialogs during the Loading (2
+   * notifications with 0, the node changed; the 50ms samples missed both). B settles 4s before the
+   * push, as in (a)(b)(c) (a push while B was still loading was seen not to navigate at all).
+   */
+  test(`(d) B shows A's unknown unit (foreign); B → A with the route held ${ROUTE_HOLD_MS}ms: one dialog, the same node, in every notification`, async ({ context, page }) => {
+    const server = await stubServer(context);
+    server.second = true;
+    let holding = false;
+    let held = 0;
+    await context.route(
+      (url) => url.pathname === `/worktrees/${WT}`,
+      async (route) => {
+        if (holding && route.request().headers()['rsc'] === '1') {
+          held++;
+          await new Promise((done) => setTimeout(done, ROUTE_HOLD_MS));
+        }
+        return route.fallback();
+      },
+    );
+    // A: the hand-off with an unknown decide (as G10's switch test).
+    await openHandoff(page, server);
+    agent.proposeUpdate(server, 'note-1', 'proposed by the agent');
+    agent.done(server);
+    await readAgain(page);
+    await page.getByTestId('handoff-approve-p-1').click();
+    const decidePath = `${BASE}/${RID}/decide`;
+    const isDecide = (url: URL) => url.pathname === decidePath;
+    let cut: Record<string, unknown> | null = null;
+    await page.route(isDecide, (route) => {
+      cut = route.request().postDataJSON() as Record<string, unknown>;
+      return route.abort('connectionreset');
+    });
+    await page.getByTestId('handoff-confirm').click();
+    await expect(page.getByTestId('handoff-pending')).toBeVisible();
+    await page.unroute(isDecide);
+    expect(cut).not.toBeNull();
+    // B: A's unit shown as A's (one dialog).
+    await page.evaluate((to) => (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push(to), `/worktrees/${WT2}`);
+    await expect(page).toHaveURL(new RegExp(`/worktrees/${WT2}`));
+    await expect(page.getByTestId('handoff-foreign')).toBeVisible();
+    await expect(page.getByTestId('handoff-pending')).toBeVisible();
+    // As (a)(b)(c): B settles before the push back.
+    await page.waitForTimeout(4000);
+    await expect(page.getByTestId('handoff-foreign')).toBeVisible();
+    const writesBefore = server.writes.map((write) => write.path);
+    const sendsBefore = server.sends.length;
+
+    holding = true;
+    const run = await page.evaluate(
+      async ({ to, every, until, skew }) => {
+        const router = (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router;
+        const selector = '[data-testid="handoff-dialog"]';
+        const dialogs = () => document.querySelectorAll(selector);
+        const startNode = document.querySelector(selector);
+        const start = dialogs().length;
+        const notes: number[] = [];
+        let notifications = 0;
+        let sameNode = true;
+        let loadingSeen = false;
+        const look = (): void => {
+          const found = dialogs();
+          notes.push(found.length);
+          if (found.length !== 1 || found[0] !== startNode) sameNode = false;
+          if (document.querySelector('[data-testid="route-loading"]')) loadingSeen = true;
+        };
+        const observer = new MutationObserver(() => {
+          notifications++;
+          look();
+        });
+        const samples: { at: number; elapsed: number; dialogs: number; path: string }[] = [];
+        let pending = 0;
+        let final = -1;
+        let finalSame = false;
+        const t0 = performance.now();
+        try {
+          observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+          router.push(to);
+          await new Promise<void>((resolve) => {
+            for (let ms = every; ms <= until; ms += every) {
+              setTimeout(() => {
+                const count = dialogs().length;
+                samples.push({ at: ms, elapsed: Math.round(performance.now() - t0), dialogs: count, path: location.pathname });
+                if (document.querySelector('[data-testid="route-loading"]')) loadingSeen = true;
+                if (ms === until) resolve();
+              }, ms + skew);
+            }
+          });
+          // The records not delivered yet, then the DOM as it is now.
+          const records = observer.takeRecords();
+          pending = records.length;
+          if (pending > 0) look();
+          final = dialogs().length;
+          finalSame = final === 1 && dialogs()[0] === startNode;
+        } finally {
+          observer.disconnect();
+        }
+        return { start, notes, notifications, sameNode, loadingSeen, samples, pending, final, finalSame };
+      },
+      { to: `/worktrees/${WT}`, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS, skew: SKEW_MS },
+    );
+    holding = false;
+    const summary = summarize(run.samples);
+    record(`(d) B→A foreign, route held ${ROUTE_HOLD_MS}ms`, summary);
+    const line =
+      `start=${run.start} notifications=${run.notifications} zeros=${run.notes.filter((n) => n === 0).length} ` +
+      `max=${Math.max(0, ...run.notes)} pending=${run.pending} final=${run.final} sameNode=${run.sameNode && run.finalSame} ` +
+      `loadingSeen=${run.loadingSeen} held=${held} paths=${[...new Set(run.samples.map((sample) => sample.path))].join('>')}`;
+    test.info().annotations.push({ type: 'G10 (d) observer', description: line });
+    console.log(`[G10 (d) observer] ${line}`);
+
+    // The run proves something only if the route's request was held and its Loading was committed.
+    expect(held, 'the route’s RSC request was not made (a cached run proves nothing)').toBeGreaterThan(0);
+    expect(run.loadingSeen, 'the route’s Loading was never committed').toBe(true);
+    expect(run.start).toBe(1);
+    expect(run.notifications).toBeGreaterThan(0);
+    expect(run.notes.filter((n) => n === 0)).toEqual([]);
+    expect(Math.max(...run.notes)).toBeLessThanOrEqual(1);
+    expect(run.final).toBe(1);
+    expect(run.sameNode && run.finalSame, 'the dialog’s DOM node changed within one opening').toBe(true);
+    // The samples, judged as (a)(b)(c) (late samples: indeterminate), and none at 0 from the start.
+    expectStays(summary);
+    expect(summary.samples.filter((sample) => sample.dialogs === 0)).toEqual([]);
+
+    // A's page is back: its own dialog (not foreign), the unit there to send again.
+    await expect(page).toHaveURL(new RegExp(`/worktrees/${WT}(?:$|[?#])`));
+    await expect(page.getByTestId('desktop-kill-session')).toBeVisible();
+    await expect(page.getByTestId('handoff-foreign')).toHaveCount(0);
+    await expect(page.getByTestId('handoff-pending-resend')).toBeEnabled();
+    // The push made nothing: no create, send, decide, cancel, end nor kill.
+    expect(server.writes.map((write) => write.path)).toEqual(writesBefore);
+    expect(server.sends).toHaveLength(sendsBefore);
+    expect(server.kills).toEqual([]);
+    expect(server.proposals[0].state).toBe('proposed');
+    // Sent again by the person, as it was cut: to A's request, with its version and decisions.
+    await page.getByTestId('handoff-pending-resend').click();
+    await expect.poll(() => server.proposals[0].state).toBe('applied');
+    const decides = server.writes.filter((write) => write.path === `/${RID}/decide`);
+    expect(decides).toHaveLength(1);
+    expect(decides[0].body).toEqual(cut);
+    expect(server.kills).toEqual([]);
+  });
 });

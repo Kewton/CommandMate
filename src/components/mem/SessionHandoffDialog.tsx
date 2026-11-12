@@ -176,6 +176,20 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     isOpen && target && store.opening && !store.opening.closed && store.opening.target.instanceId === target.instanceId ? store.opening : null;
   const token = opening?.token ?? null;
   /**
+   * Issue #4317 PR2: the host beside the shell keeps this instance (and its DOM) over route and
+   * width changes, so what is local here — the person's choices, the notice, `writing` — is per
+   * opening: set afresh when another opening is shown, kept while the same one is (and while none is).
+   */
+  const [localFor, setLocalFor] = useState<HandoffOpeningToken | null>(token);
+  if (token !== null && token !== localFor) {
+    setLocalFor(token);
+    if (localFor !== null) {
+      setChoices({});
+      setNotice(null);
+      setWriting(false);
+    }
+  }
+  /**
    * The worktree the dialog was opened for (pr2d). The page keeps the dialog over a switch of
    * worktree while it holds something; on another worktree's page it is "foreign": its request
    * is still addressed to that worktree, and no stop nor write of this dialog's runs there
@@ -272,8 +286,9 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     let current = liveHandoffOpeningFor(target.instanceId);
     if (!current) {
       if (shownRef.current !== null) return;
-      // Issue #4317 PR1: no opening begins without the current registration.
-      if (!actionable) return;
+      // Issue #4317 PR1: no opening begins without the current registration. PR2: read again now (the
+      // render's registration may have been left since — the host's dialog outlives the pages).
+      if (!actionable || !registered()) return;
       current = beginHandoffOpening(worktreeId, target);
     }
     shownRef.current = current.token;

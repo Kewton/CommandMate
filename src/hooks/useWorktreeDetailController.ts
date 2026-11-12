@@ -103,7 +103,6 @@ import {
   beginHandoffOpening,
   closeHandoffOpening,
   handoffStoreSnapshot,
-  handoffUnitsOf,
   type HandoffClosePath,
   type HandoffOpeningToken,
   type SessionStopResult,
@@ -111,12 +110,14 @@ import {
 import {
   handoffRegistrySnapshot,
   handoffPageMayStart,
+  publishHandoffPageView,
   registerHandoffPage,
   reportHandoffPageAuth,
   subscribeHandoffRegistry,
   unregisterHandoffPage,
   type HandoffPageRegistration,
 } from '@/lib/handoff/page-registration';
+import { handoffTakeBackOf } from '@/lib/handoff/take-back';
 import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
@@ -343,25 +344,6 @@ function classifyKillFailure(err: unknown): 'ended' | 'refused' | 'errored' | 's
   if (err.status === 404) return 'ended';
   if (err.status >= 500) return 'errored';
   return err.status >= 400 ? 'refused' : 'silent';
-}
-
-/**
- * Issue #4227 G10 (design §4.1.1): the store's live opening a page of `worktreeId` takes back —
- * this worktree's own (with or without a unit), or another worktree's while it holds a decide
- * being sent or unknown. Another worktree's opening without a unit is not taken (its stop or
- * cancel ends by its own answer). Reads the store only: the page's first render and its effect
- * ask the same condition.
- */
-function handoffTakeBackOf(worktreeId: string): { worktreeId: string; target: SessionKillTarget; token: HandoffOpeningToken } | null {
-  const live = handoffStoreSnapshot().opening;
-  if (live === null || live.closed) return null;
-  const liveTool = live.target.cliToolId;
-  if (liveTool === undefined || !isCliToolType(liveTool)) return null;
-  if (live.worktreeId !== worktreeId) {
-    const units = handoffUnitsOf(live.worktreeId);
-    if (units.inflight === null && units.pending === null) return null;
-  }
-  return { worktreeId: live.worktreeId, target: { ...live.target, cliToolId: liveTool }, token: live.token };
 }
 
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
@@ -2000,7 +1982,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * is drawn by the first render rather than after the effect. Read once per mount (React's
    * StrictMode may run it twice: it reads only — nothing begins, closes or patches in render).
    */
-  const [initialHandoff] = useState(() => handoffTakeBackOf(worktreeId));
+  const [initialHandoff] = useState(() => handoffTakeBackOf(worktreeId, isCliToolType));
   const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(initialHandoff?.target ?? null);
   /** Mirrors `handoffTarget` for the paths below, read in the same tick. */
   const handoffTargetRef = useRef<SessionKillTarget | null>(initialHandoff?.target ?? null);
@@ -2057,7 +2039,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // run, or back on the opening's own worktree; G10: or by the first render's initial state):
     // nothing to do — never closed by the rerun.
     if (live !== null && !live.closed && live.worktreeId === worktreeId && handoffTargetRef.current !== null && handoffOpeningRef.current === live.token) return;
-    const back = handoffTakeBackOf(worktreeId);
+    const back = handoffTakeBackOf(worktreeId, isCliToolType);
     if (handoffTargetRef.current === null && back !== null) {
       if (!closeHandoffBy('page-end')) return;
       openHandoff(back.target, back.token);
@@ -2136,8 +2118,26 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const closeHandoff = useCallback((): void => {
     closeHandoffBy('dialog');
   }, [closeHandoffBy]);
-  /** The existing stop for the hand-off's target (G-4's stop button), and how it ended. */
-  const stopForHandoff = useCallback(async (): Promise<SessionStopResult> => stopSession(handoffTarget), [handoffTarget, stopSession]);
+  /**
+   * The existing stop for the hand-off's target (G-4's stop button), and how it ended. Issue #4317
+   * PR2: stable (it reads the target and the stop as they are when pressed), since it is published
+   * on the registration — a new identity per render would publish, and draw the page, again.
+   */
+  const stopSessionRef = useRef(stopSession);
+  stopSessionRef.current = stopSession;
+  const stopForHandoff = useCallback(async (): Promise<SessionStopResult> => stopSessionRef.current(handoffTargetRef.current), []);
+  /**
+   * Issue #4317 PR2: the dialog's host is beside the shell (`HandoffDialogHost`, outside the route and
+   * the PC / phone branches), not in this page. The page publishes on its registration what the
+   * dialog shows — its target, its close through the rule and its existing stop — and the host draws
+   * the current registration's. Runs after the registration's effect (declared before), in the same
+   * flush; a registration gone takes its view with it.
+   */
+  useEffect(() => {
+    const registration = handoffRegistrationRef.current;
+    if (registration === null) return;
+    publishHandoffPageView(registration, { target: handoffTarget, onClose: closeHandoff, onStop: stopForHandoff });
+  }, [handoffRegistration, handoffTarget, closeHandoff, stopForHandoff]);
 
   /** Issue #1171: cancel — a no-op while a kill POST is in flight (keeps target). */
   const handleKillCancel = useCallback((): void => {

@@ -62,9 +62,14 @@
  * 3. The paths named at the call sites are exactly `HANDOFF_CLOSE_PATHS` (no path declared and
  *    unused, none used and undeclared).
  * 4. The pages hand the dialog the hook's `closeHandoff` (directly, or as `onHandoffClose`).
- *    G10 (G-PR4): the dialog has one host, `WorktreeDetailRefactored` (outside its Loading and its
- *    PC / phone branches); the PC page draws none. That one host's `onClose` is the hook's
- *    `closeHandoff`, which asks the rule (`closeHandoffBy('dialog')`) — `checkPageHosts`.
+ *    G10 (G-PR4): the dialog has one host. Issue #4317 PR2 (replaced, not weakened): the pages draw
+ *    it 0 times; the one host is `HandoffDialogHost`, mounted once by `AppShellGate` beside the shell
+ *    (not under `AppShell` nor in a branch of it); it draws the dialog once, never hidden with
+ *    `isOpen`, never permitted by `shouldRenderShell`. Its `onClose` / `onStop` / `registration` are
+ *    the current registration's view only — published by the page's hook as its `closeHandoff`
+ *    (which asks the rule, `closeHandoffBy('dialog')`) and its `stopForHandoff` — and with no page
+ *    registered it hands the dialog no callback of a page and no registration (nothing new starts)
+ *    — `checkPageHosts`.
  *
  * Positive controls: copies of the real sources under `os.tmpdir()` with one way round the rule
  * added (an effect that clears the target, a button that calls `onClose`, a reopening that clears
@@ -84,6 +89,10 @@ const ROOT = path.resolve(__dirname, '../../..');
 const DIALOG = 'src/components/mem/SessionHandoffDialog.tsx';
 const HOOK = 'src/hooks/useWorktreeDetailController.ts';
 const PAGES = ['src/components/worktree/WorktreeDetailDesktop.tsx', 'src/components/worktree/WorktreeDetailRefactored.tsx'];
+/** Issue #4317 PR2: the one host of the dialog, and where it is mounted. */
+const HOST = 'src/components/mem/HandoffDialogHost.tsx';
+const GATE = 'src/components/layout/AppShellGate.tsx';
+const TAKE_BACK = 'src/lib/handoff/take-back.ts';
 const STORE = 'src/lib/handoff/close-rule.ts';
 
 const read = (file: string): string => readFileSync(path.join(ROOT, file), 'utf8');
@@ -513,7 +522,7 @@ function isPropertyName(node: ts.Identifier): boolean {
  * (`WorktreeDetailDesktop.tsx`) took a type only (`import type { SessionStopResult }`; since G10 it
  * draws no dialog and takes nothing of the store), so it is not one, and a value import there fails.
  */
-const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK, 'src/components/mem/MemItemsPanel.tsx']);
+const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK, 'src/components/mem/MemItemsPanel.tsx', HOST, TAKE_BACK]);
 
 /**
  * G-PR3 (design §4.1.1, "one rule for the whole screen"): the items panel's units live in the store
@@ -523,6 +532,9 @@ const STORE_IMPORTERS: ReadonlySet<string> = new Set([DIALOG, HOOK, 'src/compone
  * of {@link STORE_IMPORTERS} not named here (the dialog, the hook) may take any value.
  */
 const STORE_IMPORTER_VALUES: Readonly<Record<string, readonly string[]>> = {
+  // Issue #4317 PR2: the host beside the shell and the take-back condition read the store only.
+  [HOST]: ['handoffStoreSnapshot', 'subscribeHandoffStore'],
+  [TAKE_BACK]: ['handoffStoreSnapshot', 'handoffUnitsOf'],
   'src/components/mem/MemItemsPanel.tsx': [
     'dropMemItemsUnit',
     'handoffStoreSnapshot',
@@ -1014,22 +1026,58 @@ function usedPaths(...sources: string[]): Set<string> {
 }
 
 /**
- * G10: the pages' hosts of the dialog. The PC page draws none; the page draws one, whose `onClose`
- * is the hook's `closeHandoff` (the close through the rule, checked in the hook by the test below).
+ * G10: the hosts of the dialog. Issue #4317 PR2 (the page's one host replaced by one beside the
+ * shell, not weakened): in `src/` the dialog is drawn once, by `HandoffDialogHost`, and the pages
+ * draw it 0 times; the host is mounted once, by `AppShellGate`, beside `AppShell` (not under it);
+ * it is never hidden with `isOpen` nor permitted by `shouldRenderShell`; its `onClose` / `onStop` /
+ * `registration` are the current registration's view, which the page's hook publishes as its
+ * `closeHandoff` (the close through the rule) and `stopForHandoff`; with no page registered it
+ * hands the dialog no page's callback and no registration.
  */
-function checkPageHosts(desktop: string, refactored: string): string[] {
+function checkPageHosts(files: ReadonlyArray<{ file: string; source: string }>): string[] {
   const problems: string[] = [];
-  const hosts = (source: string) => source.match(/<SessionHandoffDialog\b[\s\S]*?\/>/g) ?? [];
-  const pc = hosts(desktop);
-  if (pc.length !== 0) problems.push(`WorktreeDetailDesktop.tsx draws the dialog ${pc.length} time(s) (the page's one host draws it)`);
-  const page = hosts(refactored);
-  if (page.length !== 1) problems.push(`WorktreeDetailRefactored.tsx draws the dialog ${page.length} time(s), not once`);
-  for (const host of page) {
-    if (!/\bonClose=\{closeHandoff\}/.test(host)) problems.push('WorktreeDetailRefactored.tsx: the dialog\'s onClose is not the hook\'s closeHandoff');
-    // Issue #4317 PR1: the host hands the dialog the page's registration (left out, nothing would be checked).
-    if (!/\bregistration=\{handoffRegistration\}/.test(host)) problems.push('WorktreeDetailRefactored.tsx: the dialog is not handed the page\'s registration');
+  const dialogTags = (source: string) => source.match(/<SessionHandoffDialog\b[\s\S]*?\/>/g) ?? [];
+  const sourceOf = (file: string) => files.find((entry) => posix(entry.file) === file)?.source ?? '';
+  for (const { file, source } of files) {
+    const rel = posix(file);
+    const count = dialogTags(source).length;
+    if (rel === HOST) continue;
+    if (count !== 0) problems.push(`${path.basename(rel)} draws the dialog ${count} time(s) (the one host beside the shell draws it)`);
   }
+  const host = sourceOf(HOST);
+  const tags = dialogTags(host);
+  if (tags.length !== 1) problems.push(`HandoffDialogHost.tsx draws the dialog ${tags.length} time(s), not once`);
+  for (const tag of tags) {
+    if (!/\bonClose=\{view\.onClose\}/.test(tag)) problems.push('HandoffDialogHost.tsx: the dialog\'s onClose is not the registered view\'s');
+    if (!/\bonStop=\{view\.onStop\}/.test(tag)) problems.push('HandoffDialogHost.tsx: the dialog\'s onStop is not the registered view\'s');
+    if (!/\bregistration=\{view\.registration\}/.test(tag)) problems.push('HandoffDialogHost.tsx: the dialog is not handed the page\'s registration');
+    if (!/\bisOpen\s*\n/.test(tag) && !/\bisOpen=\{true\}/.test(tag)) problems.push('HandoffDialogHost.tsx: the dialog is hidden with isOpen (a hidden dialog closes its opening; it is unmounted instead)');
+  }
+  const hostCode = host.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  if (/\bshouldRenderShell\b/.test(hostCode)) problems.push('HandoffDialogHost.tsx: shouldRenderShell is not the host\'s permission (it is true on the list too)');
+  if (!/registration: current\.id\b/.test(host)) problems.push('HandoffDialogHost.tsx: the registered view is not handed with its own registration');
+  if (!/onClose: NO_CLOSE, onStop: NO_STOP, registration: null\b/.test(host)) problems.push('HandoffDialogHost.tsx: with no page registered, the dialog is handed a page\'s callback or a registration');
+  const hook = sourceOf(HOOK);
+  if (!/publishHandoffPageView\(registration, \{ target: handoffTarget, onClose: closeHandoff, onStop: stopForHandoff \}\)/.test(hook)) {
+    problems.push('useWorktreeDetailController.ts: the page does not publish its closeHandoff / stopForHandoff on its registration');
+  }
+  const mounts = files.flatMap(({ file, source }) => (source.match(/<HandoffDialogHost\b/g) ?? []).map(() => posix(file)));
+  if (mounts.length !== 1 || mounts[0] !== GATE) problems.push(`the host is mounted ${mounts.length} time(s) (${mounts.join(', ')}), not once by AppShellGate.tsx`);
+  const gate = sourceOf(GATE);
+  if (/<AppShell\b[^>]*>(?:(?!<\/AppShell>)[\s\S])*<HandoffDialogHost\b/.test(gate)) problems.push('AppShellGate.tsx: the host is under AppShell (made anew with its branch)');
   return problems;
+}
+
+/** The sources `checkPageHosts` reads: `src/`'s `.tsx` files (the JSX that can draw a host) and the hook. */
+function hostSources(): Array<{ file: string; source: string }> {
+  return sourcesUnder('src')
+    .filter((file) => file.endsWith('.tsx') || posix(file) === HOOK)
+    .map((file) => ({ file, source: read(file) }));
+}
+
+/** The sources of `checkPageHosts` with one file replaced (its mutated copy). */
+function withFile(files: ReadonlyArray<{ file: string; source: string }>, file: string, source: string): Array<{ file: string; source: string }> {
+  return files.map((entry) => (posix(entry.file) === file ? { file: entry.file, source } : entry));
 }
 
 function checkPaths(dialog: string, hook: string): string[] {
@@ -1091,12 +1139,14 @@ describe('[#4227 pr2d] every path that closes the hand-off asks the one rule', (
     expect(checkPaths(read(DIALOG), read(HOOK))).toEqual([]);
   });
 
-  it('the pages hand the dialog the hook’s closeHandoff', () => {
-    const desktop = read(PAGES[0]);
-    const refactored = read(PAGES[1]);
-    // G10: one host (the page's), outside its Loading and its PC / phone branches.
-    expect(checkPageHosts(desktop, refactored)).toEqual([]);
-    expect(refactored).toMatch(/<SessionHandoffDialog[\s\S]*?onClose=\{closeHandoff\}/);
+  it('the pages hand the dialog the hook’s closeHandoff', { timeout: 60_000 }, () => {
+    // Issue #4317 PR2: the pages draw 0; one host beside the shell, handed the page's closeHandoff
+    // through its registration.
+    const files = hostSources();
+    expect(files.some(({ file }) => posix(file) === HOST)).toBe(true);
+    expect(files.some(({ file }) => posix(file) === PAGES[1])).toBe(true);
+    expect(checkPageHosts(files)).toEqual([]);
+    expect(read(PAGES[1])).not.toMatch(/<SessionHandoffDialog\b/);
     expect(read(HOOK)).toMatch(/const closeHandoff = useCallback\(\(\): void => \{\s*closeHandoffBy\('dialog'\);/);
   });
 });
@@ -1127,18 +1177,35 @@ describe('[#4227 pr2d] (positive controls) a way round the rule fails the guard'
     expect(checkStore(mutated(STORE, 'function markClosed(token: HandoffOpeningToken): void {', 'function markClosed(token: HandoffOpeningToken): void  {'))).toEqual([]);
   });
 
-  it('G10: a second host on the PC page, or the page’s host closed past the rule, fails', () => {
-    const desktop = mutated(PAGES[0], '        {/* [Issue #162] Move Dialog */}', '        <SessionHandoffDialog isOpen={false} worktreeId={worktreeId} target={null} onClose={onKillCancel} onStop={async () => ({ ok: true })} />\n        {/* [Issue #162] Move Dialog */}');
-    expect(checkPageHosts(desktop, read(PAGES[1])).join('\n')).toMatch(/WorktreeDetailDesktop.tsx draws the dialog 1 time/);
-    const bypass = mutated(PAGES[1], 'onClose={closeHandoff}', 'onClose={handleKillCancel}');
-    expect(checkPageHosts(read(PAGES[0]), bypass).join('\n')).toMatch(/onClose is not the hook's closeHandoff/);
-    // Issue #4317 PR1: a host without the page's registration fails.
-    const unregistered = mutated(PAGES[1], '          registration={handoffRegistration}\n', '');
-    expect(checkPageHosts(read(PAGES[0]), unregistered).join('\n')).toMatch(/not handed the page's registration/);
+  it('G10: a second host on the PC page, or the page’s host closed past the rule, fails', { timeout: 60_000 }, () => {
+    const files = hostSources();
+    const fails = (file: string, from: string | RegExp, to: string): string => checkPageHosts(withFile(files, file, mutated(file, from, to))).join('\n');
+    // A host on a page again (the PC page, or the page's own before PR2).
+    expect(fails(PAGES[0], '        {/* [Issue #162] Move Dialog */}', '        <SessionHandoffDialog isOpen={false} worktreeId={worktreeId} target={null} onClose={onKillCancel} onStop={async () => ({ ok: true })} />\n        {/* [Issue #162] Move Dialog */}')).toMatch(/WorktreeDetailDesktop.tsx draws the dialog 1 time/);
+    expect(fails(PAGES[1], '  // Handle loading state\n', '  const host = <SessionHandoffDialog isOpen worktreeId={worktreeId} target={null} onClose={handleKillCancel} onStop={stopSession} />;\n  // Handle loading state\n')).toMatch(/WorktreeDetailRefactored.tsx draws the dialog 1 time/);
+    // The host's close past the page's rule, or without the page's registration (Issue #4317 PR1).
+    expect(fails(HOST, 'onClose={view.onClose}', 'onClose={() => undefined}')).toMatch(/onClose is not the registered view's/);
+    expect(fails(HOST, '      registration={view.registration}\n', '')).toMatch(/not handed the page's registration/);
+    // Hidden with isOpen (which closes the opening) instead of unmounted.
+    expect(fails(HOST, '      isOpen\n', '      isOpen={view !== null}\n')).toMatch(/hidden with isOpen/);
+    // With no page registered, the last page's callback (or its registration) used.
+    expect(fails(HOST, 'onClose: NO_CLOSE, onStop: NO_STOP, registration: null', 'onClose: NO_CLOSE, onStop: NO_STOP, registration: registry.live[0]?.id ?? null')).toMatch(/handed a page's callback or a registration/);
+    // Permitted by shouldRenderShell (true on the list too).
+    expect(fails(HOST, 'if (route === null || registry.authExpired) return null;', "if (route === null || registry.authExpired || !shouldRenderShell(pathname ?? '')) return null;")).toMatch(/shouldRenderShell is not the host's permission/);
+    // The page publishes another close than its closeHandoff (the rule's).
+    expect(fails(HOOK, 'onClose: closeHandoff, onStop: stopForHandoff })', 'onClose: () => setHandoffTarget(null), onStop: stopForHandoff })')).toMatch(/does not publish its closeHandoff/);
+    // The host under AppShell (made anew with the gate's branch), or mounted twice.
+    expect(fails(GATE, '<AppShell key="shell">{children}</AppShell>', '<AppShell key="shell">{children}<HandoffDialogHost /></AppShell>')).toMatch(/mounted 2 time|under AppShell/);
+    expect(fails(GATE, '      {body}\n      <HandoffDialogHost key="handoff" />\n', '      {body}\n')).toMatch(/mounted 0 time/);
   });
 
-  it('(negative control) G10: the pages as they are pass checkPageHosts', () => {
-    expect(checkPageHosts(read(PAGES[0]), read(PAGES[1]))).toEqual([]);
+  it('(negative control) G10: the pages as they are pass checkPageHosts', { timeout: 60_000 }, () => {
+    const files = hostSources();
+    expect(checkPageHosts(files)).toEqual([]);
+    // An unmutated copy of each file passes too.
+    for (const file of [PAGES[0], PAGES[1], HOST, GATE, HOOK]) {
+      expect(checkPageHosts(withFile(files, file, mutated(file, /$/, '\n')))).toEqual([]);
+    }
   });
 
   it('a worktree switch that clears the target directly (the code before pr2d) fails', () => {

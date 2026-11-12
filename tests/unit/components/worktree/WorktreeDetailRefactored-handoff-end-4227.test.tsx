@@ -154,6 +154,8 @@ vi.mock('@/components/mem/SessionHandoffDialog', () => ({
 }));
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+// Issue #4317 PR2: the dialog's one host is beside the shell (`AppShellGate`), not in the page.
+import { HandoffDialogHost } from '@/components/mem/HandoffDialogHost';
 
 const WORKTREE_ID = 'wt-4227';
 const KILL_WARNING = 'worktree.session.endWarning';
@@ -234,7 +236,7 @@ afterEach(() => {
 });
 
 async function pressEnd(): Promise<void> {
-  render(<WorktreeDetailRefactored worktreeId={WORKTREE_ID} />);
+  render(<><WorktreeDetailRefactored worktreeId={WORKTREE_ID} /><HandoffDialogHost /></>);
   if (env.mobile) {
     fireEvent.click(await screen.findByTestId('mobile-more-actions-button'));
     const end = await screen.findByTestId('actions-sheet-end');
@@ -298,7 +300,7 @@ describe('[#4227 G-4] B P2-1: a PC split pane’s own End, for a session that is
   });
 
   it('mode on + popup: one mode read, the hand-off for that pane’s session, nothing killed until its stop', async () => {
-    render(<WorktreeDetailRefactored worktreeId={WORKTREE_ID} />);
+    render(<><WorktreeDetailRefactored worktreeId={WORKTREE_ID} /><HandoffDialogHost /></>);
     fireEvent.click(await screen.findByTestId('split-end-codex-2'));
     const dialog = await screen.findByTestId('handoff-dialog-stub');
     expect(dialog).toHaveAttribute('data-instance', 'codex-2');
@@ -311,7 +313,7 @@ describe('[#4227 G-4] B P2-1: a PC split pane’s own End, for a session that is
 
   it('popup off: the plain confirmation for that pane’s session; nothing killed until it is confirmed, then that session only', async () => {
     modeBody = { ok: true, mode: 'on', features: { popup: false } };
-    render(<WorktreeDetailRefactored worktreeId={WORKTREE_ID} />);
+    render(<><WorktreeDetailRefactored worktreeId={WORKTREE_ID} /><HandoffDialogHost /></>);
     fireEvent.click(await screen.findByTestId('split-end-codex-2'));
     expect(await screen.findByText(KILL_WARNING)).toBeInTheDocument();
     expect(modeReads).toHaveLength(1);
