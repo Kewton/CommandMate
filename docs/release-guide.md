@@ -114,6 +114,16 @@ main を develop へマージバック（-s ours・祖先復元）
    > タスク成功率・検証 pass 率・`gateFailBreakdown` 上位・人間介入回数をリリース PR 本文の
    > 「Vibe Metrics」節に貼ります。詳細は [`.claude/skills/release/SKILL.md`](../.claude/skills/release/SKILL.md) の 1-4 を参照。
 
+### Step 0.5: スラッシュコマンドカタログのリコンサイル
+
+版 bump の**前**に、組み込みスラッシュコマンドのカタログを各 CLI の権威ソースから最新化します（Issue #1489 / #2026）。作業は 2 つあり、**混ぜない**でください。
+
+- **A. カタログにコマンドを足す（機械）**: `npm run catalog:refresh -- --write` が `src/config/slash-commands-catalog.json` と `locales/{en,ja}/worktree.json` を書き換えます。ja は `[要レビュー]` 付きの仮訳なので、リリース PR の diff で必ず人手レビューします。
+- **B. attestation を採り直す（人間だけ）**: `src/config/slash-commands-attestations.json` の `commands` / `version` / `observedAt` を、ソースを実際に読んで書き直します。機械にやらせない設計です。
+- A だけを適用するとカタログが attestation より先に進み、`tests/unit/lib/standard-commands.test.ts` が「カタログにあるが attestation に無い」で落ちます。**これは審査ゲートであり、テストの期待を緩めないこと。**
+
+手順のコマンドは [`/release` スキルの Phase 1.5](../.claude/skills/release/SKILL.md) が正本です。
+
 ### Step 1: バージョン決定
 
 ```bash
@@ -187,6 +197,21 @@ npm version 0.10.1 --no-git-tag-version
 - 該当が無いカテゴリの見出しは書かない（`apply` は断片の無い節を出さない）
 
 詳細は [`templates/changelog-entry.md`](../.claude/skills/release/templates/changelog-entry.md) を参照。
+
+### Step 3a: LP の版行（website/index.html）
+
+LP には、prereq 行の下に版行が静的に書いてあります（Issue #2552。ページ読み込み時に API は叩きません）。リリースのたびにこの 1 行を書き換えます。
+
+```html
+<p class="release-line">vX.Y.Z · released YYYY-MM-DD · N+ releases</p>
+```
+
+- 日付は Step 3 で CHANGELOG に書いた `## [X.Y.Z] - YYYY-MM-DD` の見出しから取ります（JST で書き直さない。二重管理になる）
+- `N` は Release の総数です。これから作る今回の 1 本を足し、10 の位で切り捨てます（`N+` は下限の概数）
+- `tests/unit/website/landing-page.test.ts` が版を `package.json` の `version` と、日付を CHANGELOG の見出しと突き合わせるので、忘れると `npm run test:unit` が落ちます
+- v0.51.0 では上げ忘れ、後追いになりました（commit 418c9d22d）
+
+手順のコマンドは [`/release` スキルの 2-2a](../.claude/skills/release/SKILL.md) が正本です。
 
 ### Step 3b: release-notes/X.Y.Z.json の作成
 
