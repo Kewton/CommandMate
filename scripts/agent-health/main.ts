@@ -196,28 +196,7 @@ function readRoleFile(file: string): ExplicitRole {
   return { id: parsed.id, body: parsed.body };
 }
 
-/**
- * Issue #4290: why this run refuses to start for `CODEX_HOME`, or null.
- *
- * A relative value is resolved by every reader against its own cwd (this
- * script's launch cwd, the repo root after `chdir`, the probe worktree, the
- * private tmux). Handing one value to each reader one by one kept missing a
- * reader (`prepareLaunch` re-resolves it), so agent-health takes no relative
- * `CODEX_HOME` at all. Empty or unset is the default home, as before.
- */
-export function codexHomeProblem(env: Readonly<Record<string, string | undefined>>): string | null {
-  const value = env.CODEX_HOME;
-  if (!value || path.isAbsolute(value)) return null;
-  return `CODEX_HOME must be an absolute path for agent-health; got ${JSON.stringify(value)}`;
-}
-
 async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentHealthExitCode> {
-  // First, before anything is created, written or started.
-  const codexHomeError = codexHomeProblem(process.env);
-  if (codexHomeError) {
-    log(codexHomeError);
-    return 2;
-  }
   let role: ExplicitRole | null = null;
   if (options.roleFile !== null) {
     try {
