@@ -1,0 +1,112 @@
+/**
+ * Issue #4290 (3): one CODEX_HOME for the agent-health parent, its children and
+ * the history reader.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { buildChildEnv } from '@/lib/agent-health/tmux-command';
+import { getCodexHome } from '@/lib/hooks/sources/codex/hooks-config';
+import { resolveCodexHome } from '@/lib/hooks/sources/codex/history';
+
+describe('[#4290] CODEX_HOME handed to agent-health children', () => {
+  let root: string;
+  let parentCwd: string;
+  let probeCwd: string;
+  const savedEnv = process.env.CODEX_HOME;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4290-'));
+    parentCwd = path.join(root, 'parent');
+    fs.mkdirSync(parentCwd);
+    probeCwd = path.join(root, 'probe');
+    fs.mkdirSync(probeCwd);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (savedEnv === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedEnv;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('pins a relative CODEX_HOME to the parent cwd, not the probe cwd (red before the fix)', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(parentCwd);
+    const base = { PATH: '/usr/bin', CODEX_HOME: 'rel-home' };
+    const env = buildChildEnv(base);
+    expect(env.CODEX_HOME).toBe(path.join(parentCwd, 'rel-home'));
+    // A child whose cwd is the probe worktree sees the same directory.
+    expect(path.resolve(probeCwd, env.CODEX_HOME as string)).toBe(env.CODEX_HOME);
+    // The parent's own environment is untouched.
+    expect(base.CODEX_HOME).toBe('rel-home');
+  });
+
+  it('matches getCodexHome(), which the backup/check/restore of config files uses', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(parentCwd);
+    process.env.CODEX_HOME = './nested/home';
+    expect(buildChildEnv(process.env).CODEX_HOME).toBe(getCodexHome());
+  });
+
+  it('also normalises a relative value that arrives as an override', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(parentCwd);
+    expect(buildChildEnv({}, { CODEX_HOME: 'ov' }).CODEX_HOME).toBe(path.join(parentCwd, 'ov'));
+  });
+
+  it('falls back to the getCodexHome default for an empty value', () => {
+    delete process.env.CODEX_HOME;
+    const env = buildChildEnv({ CODEX_HOME: '' });
+    expect(env.CODEX_HOME).toBe(getCodexHome());
+    expect(env.CODEX_HOME).toBe(path.join(os.homedir(), '.codex'));
+  });
+
+  it('falls back to the default for a virtual filesystem value', () => {
+    expect(buildChildEnv({ CODEX_HOME: '/proc/self/codex' }).CODEX_HOME).toBe(
+      path.join(os.homedir(), '.codex')
+    );
+  });
+
+  it('keeps an absolute value, a temp dir, and an unset value as they were', () => {
+    const abs = path.join(root, 'abs-home');
+    expect(buildChildEnv({ CODEX_HOME: abs }).CODEX_HOME).toBe(abs);
+    expect(buildChildEnv({ PATH: '/usr/bin' })).not.toHaveProperty('CODEX_HOME');
+  });
+});
+
+describe('[#4290] history resolveCodexHome follows the safe-directory rule', () => {
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4290-h-'));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const dflt = () => path.join(os.homedir(), '.codex');
+
+  it('refuses /proc, /sys and /dev and uses the default (red before the fix)', () => {
+    expect(resolveCodexHome({ CODEX_HOME: '/proc/self/x' })).toBe(dflt());
+    expect(resolveCodexHome({ CODEX_HOME: '/sys/x' })).toBe(dflt());
+    expect(resolveCodexHome({ CODEX_HOME: '/dev/x' })).toBe(dflt());
+  });
+
+  it('refuses a symlink into a virtual filesystem (Linux only)', () => {
+    if (!fs.existsSync('/proc/self')) return;
+    const link = path.join(root, 'link');
+    fs.symlinkSync('/proc/self', link);
+    expect(resolveCodexHome({ CODEX_HOME: link })).toBe(dflt());
+  });
+
+  it('keeps a normal temp dir, an absolute value and the unset / empty defaults', () => {
+    expect(resolveCodexHome({ CODEX_HOME: root })).toBe(root);
+    expect(resolveCodexHome({})).toBe(dflt());
+    expect(resolveCodexHome({ CODEX_HOME: '' })).toBe(dflt());
+  });
+
+  it('absolutises a relative value against the reading cwd, as getCodexHome does', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue(root);
+    expect(resolveCodexHome({ CODEX_HOME: 'rel' })).toBe(path.join(root, 'rel'));
+  });
+});
