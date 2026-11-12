@@ -330,7 +330,7 @@ exit 53（曖昧）・55（他人の項目・`recorded`）・56（上限）・`r
 1. 人の決定を `mem add --kind decision --promote-to issue:#N --quote "…" --quote-at …` で記録し、人に承認を頼む（§2.4）
 2. 人が E の画面で承認すると、Issue にコメントが付き、decision は `recorded`（効果 `spec`）になる。**コメントは記録であって反映ではない**（E §0.2 E4）
 3. 人が Issue の本文（受入条件など）を書き換え、画面で「正本へ反映したことを確かめた」を押すと `promoted`
-4. re-plan（`cmate-orchestrate` の plan・ワーカーへの再指示）の前に `commandmate mem list --json` で、その decision の `state` が `promoted`（または `closed`）であることを確かめる。`recorded`・`open` なら re-plan しない。人へ「decision `<id>` が未反映です」と 1 行返して止まる
+4. re-plan（`cmate-orchestrate` の plan・ワーカーへの再指示）の前に `commandmate mem list --all --json` で（既定の list は closed を除くため `--all`）、その decision の `state` が `promoted`（または `closed`）であることを確かめる。`recorded`・`open` なら re-plan しない。人へ「decision `<id>` が未反映です」と 1 行返して止まる
 5. mode が `on` でないときは mem で確かめられない。従来どおり、人が本文を直したと言ったことを根拠にする
 
 - ［見立て］手順の正本は `cmate-handoff` の §5（decision と promote）に置き、`cmate-orchestrate` §17 と `cmate-acceptance-test` は参照する
