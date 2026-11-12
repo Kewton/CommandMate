@@ -66,9 +66,6 @@ import { postMessage, registerRelayForMessage } from './message-dispatch';
 /** Default `--timeout`, in seconds. Matches the GUI's delegation brief. */
 const DEFAULT_ASK_TIMEOUT_SECONDS = 1800;
 
-/** Squeezed pane lines kept for the fallback reply. */
-const PANE_FALLBACK_TAIL = 80;
-
 /**
  * How long `ask` will hold out for the turn row after the turn ends.
  *
@@ -217,12 +214,17 @@ async function readLatestReply(
 }
 
 /**
- * The squeezed tail of the pane, for a tool that keeps no transcript.
+ * The squeezed pane, for a tool that keeps no transcript.
  *
  * copilot / gemini / vibe-local publish no chat rows, so the screen is the only
  * record of what they said. Through `capture`'s own reader — the same route,
  * the same squeeze, the same client-side placement — so nothing that consumes
  * `/capture` sees a different payload because this command exists.
+ *
+ * The whole squeezed frame, not a fixed tail (Issue #4315): an agent draws from
+ * the top of the 1000-row pane, and rows below the reply that are not blank
+ * (a border's `│` after 110 spaces, measured live) survive the squeeze, so an
+ * 80-line tail held only those and the composer while the reply sat on row 305.
  *
  * @param client - API client
  * @param worktreeId - Worktree ID
@@ -238,7 +240,7 @@ async function readPaneTail(
   // Issue #3983: bounded like the ledger reads; a pane that does not answer is
   // "no readable pane" (readSqueezedPaneTail never throws).
   const graceClient = client.withDeadline(Date.now() + REPLY_TURN_ROW_GRACE_MS);
-  return readSqueezedPaneTail(graceClient, worktreeId, cliToolId, instanceId, PANE_FALLBACK_TAIL);
+  return readSqueezedPaneTail(graceClient, worktreeId, cliToolId, instanceId);
 }
 
 /** Argument checks. A mocked `process.exit` returns, so nothing here stops early. */

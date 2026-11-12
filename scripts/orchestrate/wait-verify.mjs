@@ -704,7 +704,12 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
     if (reply !== null) {
       if (hasCompletionSignal(reply, { head })) return { seen: true, head, note: 'signal=seen(reply)' };
     } else {
-      const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane', '--tail', '40'], { cwd });
+      // The whole squeezed frame, not a `--tail` window (#4315): a pane drawn from
+      // the top keeps rows that are not blank (a border's `│` after 110 spaces)
+      // below the transcript, and a window of the last 40 held only those and
+      // the composer while the signal sat on row 305. The checks below, not the
+      // window, are what tie a line to this task.
+      const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane'], { cwd });
       const screen = pane.status === 0 ? pane.stdout : '';
       if (!sinceIso) {
         if (hasCompletionSignal(screen, { head })) return { seen: true, head, note: 'signal=seen signal-task=unknown' };

@@ -364,7 +364,7 @@ function parseFollowInterval(raw: string | undefined): number {
 }
 
 /**
- * Read one instance's pane and return its squeezed tail, or null.
+ * Read one instance's pane and return it squeezed (its tail, with `tail`), or null.
  *
  * Exported for `ask` (Issue #2376), which needs the same read for the tools
  * that keep no transcript — and which must not import
@@ -379,14 +379,15 @@ function parseFollowInterval(raw: string | undefined): number {
  * @param worktreeId - Worktree ID
  * @param cliToolId - Resolved CLI tool
  * @param instanceId - Resolved instance ID, when there is one
- * @param tail - Lines of squeezed transcript to keep
+ * @param tail - Lines of squeezed transcript to keep; omitted keeps the whole
+ *   frame (Issue #4315: `ask` looks for a reply that may sit far above the end)
  */
 export async function readSqueezedPaneTail(
   client: ApiClient,
   worktreeId: string,
   cliToolId: string,
   instanceId: string | undefined,
-  tail: number,
+  tail?: number,
 ): Promise<string | null> {
   try {
     const data = await client.post<PaneCaptureResponse>(
