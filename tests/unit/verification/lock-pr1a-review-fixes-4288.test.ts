@@ -24,6 +24,10 @@ import { pathToFileURL } from 'node:url';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { HOST, REPO, deadPid, killStarted, liveGroup, mutatedSync, removeRoot } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-pr1a-fixes-4288-"]);
 
 const LOADER = path.join(REPO, 'scripts/lib/machine-lock.sh');
 
@@ -206,10 +210,12 @@ describe('2. machine-lock.ts creates the owner exclusively', () => {
 
   it('positive control: a copy that opens with \'w\' overwrites the successor\'s owner and calls it taken', async () => {
     const source = fs.readFileSync(path.join(REPO, 'src/lib/verification/machine-lock.ts'), 'utf8');
+    // #4288 PR1a-f (design §5.1): the exclusion is the publish's link(2) — the mutation turns it into a
+    // rename (which replaces the owner there); the expectation (written over and called taken) is the same.
     const out = source
-      .replace("openSync(file, 'wx')", "openSync(file, 'w')")
+      .replace('() => linkSync(from, to)', '() => renameSync(from, to)')
       .replace("from '@/lib/logger'", `from '${path.join(REPO, 'src/lib/logger')}'`);
-    expect(out).not.toContain("openSync(file, 'wx')");
+    expect(out).not.toContain('() => linkSync(from, to)');
     const file = path.join(root, `machine-lock-mutated-${Math.random().toString(36).slice(2)}.ts`);
     fs.writeFileSync(file, out);
     const legacy = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as typeof import('@/lib/verification/machine-lock');

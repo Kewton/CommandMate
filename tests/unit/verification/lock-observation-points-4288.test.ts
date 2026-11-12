@@ -44,6 +44,10 @@ import {
   writeOwner,
   type TakeResult,
 } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-obs-4288-"]);
 
 const SOURCES: Record<Impl, string> = {
   bash: '.claude/skills/cmate-verify/scripts/verify-run.sh',
@@ -98,7 +102,7 @@ describe('the observation-point table (§2.8)', () => {
     });
 
     it('a second raw call in an exempted function changes its count', () => {
-      const sync = read(SOURCES.sync).replace('function collectGarbage(queueDir, now) {', 'function collectGarbage(queueDir, now) {\n  fs.readdirSync(queueDir);');
+      const sync = read(SOURCES.sync).replace('function collectGarbage(queueDir, now, warn = () => {}) {', 'function collectGarbage(queueDir, now, warn = () => {}) {\n  fs.readdirSync(queueDir);');
       expect(scanRawCalls('sync', sync).get('collectGarbage|readdirSync')).toBe(2);
     });
 
@@ -221,6 +225,8 @@ interface Scenario {
   /** The wait ends at its budget naming the unknown (point, path, errno). */
   reported?: boolean;
   between?: (name: string) => { fn: () => void; sh: string };
+  /** #4288 PR1a-f: a fault injected in both runs (the failure that leads to this point, e.g. the read-back for the undo). */
+  alsoFault?: string;
 }
 
 /** An owner-less, empty <lock> made `ageMs` ago, read with the 60 s grace of run-lock (#4288 PR1a D3). */
@@ -231,6 +237,30 @@ const ownerlessLock = (name: string, ageMs: number) => {
   fs.utimesSync(dir, t, t);
   takeDefaults.ownerlessGraceMs = 60_000;
 };
+/** #4288 PR1a-f: an owner-less <lock> holding `names` (each a file), all `ageMs` old, read with run-lock's production grace (10 min). */
+const ownerlessWith = (name: string, names: string[], ageMs: number, ownerText?: string) => {
+  const dir = lockOf(root, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const t = (Date.now() - ageMs) / 1000;
+  for (const n of names) {
+    fs.writeFileSync(path.join(dir, n), 'x');
+    fs.utimesSync(path.join(dir, n), t, t);
+  }
+  if (ownerText !== undefined) {
+    fs.writeFileSync(path.join(dir, 'owner'), ownerText);
+    fs.utimesSync(path.join(dir, 'owner'), t, t);
+  }
+  fs.utimesSync(dir, t, t);
+  takeDefaults.ownerlessGraceMs = 600_000;
+};
+/** What the lock directory held while it was held (`between`), for the rows whose difference is a temporary. */
+const seen = (name: string) => {
+  const file = path.join(root, `${name}.seen`);
+  const lock = lockOf(root, name);
+  return { fn: () => fs.writeFileSync(file, fs.readdirSync(lock).join('\n')), sh: `ls -A "${lock}" > "${file}"` };
+};
+const seenText = (name: string) => fs.readFileSync(path.join(root, `${name}.seen`), 'utf8');
+const lockNames = (name: string) => (fs.existsSync(lockOf(root, name)) ? fs.readdirSync(lockOf(root, name)) : null);
 const deadOwner = (token: string, extra: Record<string, unknown> = {}) => ({ pid: deadPid(), host: HOST, token, acquiredAt: 0, ...extra });
 const liveOwner = (token: string) => ({ pid: process.pid, host: HOST, token, acquiredAt: 0 });
 const notTaken = (r: TakeResult, impl: Impl) => {
@@ -509,6 +539,183 @@ const SCENARIOS: Record<string, Scenario> = {
     },
     control: (r) => expect(r.acquired).toBe(true),
   },
+  // #4288 PR1a-f (docs/design/machine-lock-owner-atomic-4288.md): the owner published whole — a failure
+  // of the tmp's write, of its close or of the publish's link leaves nothing taken and the <lock> this
+  // acquisition made taken out again.
+  'owner-write': {
+    code: 'EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'owner-write-short': {
+    code: 'EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'owner-close': {
+    code: 'EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'owner-publish': {
+    code: 'EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  // The tmp's unlink after the publish (F16): taken all the same, the tmp left beside the owner.
+  'owner-unlink': {
+    code: 'EIO',
+    setup: () => {},
+    between: (name) => seen(name),
+    injected: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(seenText(name)).toMatch(/^\.owner-/m);
+    },
+    control: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(seenText(name)).not.toMatch(/^\.owner-/m);
+    },
+  },
+  // The undo's rmdir of its own empty <lock> (F18): the write failed, the <lock> is left.
+  'lock-rmdir': {
+    code: 'EIO',
+    alsoFault: 'owner-write=EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(lockNames(name)).toEqual([]);
+    },
+    control: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+  },
+  // The undo after a read-back that cannot be judged (I2-b): the rename to the own name, the inode check, the link back.
+  'owner-undo-rename': {
+    code: 'EIO',
+    alsoFault: 'owner-readback=EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      // The owner is not removed (F60): only the own tmp goes, no rmdir.
+      expect(lockNames(name)).toEqual(['owner']);
+    },
+    control: (r, name, impl) => {
+      notTaken(r, impl);
+      // Its own inode (F13): undone and the <lock> taken out.
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+  },
+  'owner-undo-lstat': {
+    code: 'EIO',
+    alsoFault: 'owner-readback=EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      // Not shown to be its own (F14): linked back to <lock>/owner, the own names removed.
+      expect(lockNames(name)).toEqual(['owner']);
+    },
+    control: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+  },
+  'owner-undo-link': {
+    code: 'EIO',
+    alsoFault: 'owner-readback=EIO owner-undo-lstat=EIO',
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      // Not linked back (F58's form): .undo-<token> is kept, never removed by a check.
+      expect(lockNames(name)?.filter((n) => n !== 'owner').map((n) => n.replace(/-.*/, ''))).toEqual(['.undo']);
+    },
+    control: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(lockNames(name)).toEqual(['owner']);
+    },
+  },
+  // I3: an owner-less <lock> of temporaries only, past the production grace (10 min).
+  'ownerless-tmp-lstat': {
+    code: 'EIO',
+    reported: true,
+    setup: (name) => ownerlessWith(name, ['.owner-abc'], 700_000),
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(lockNames(name)).toEqual(['.owner-abc']);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'owner-tmp-pid': {
+    code: 'EPERM',
+    reported: true,
+    setup: (name) => ownerlessWith(name, [`owner.tmp.${deadPid()}`], 700_000),
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(lockNames(name)).toHaveLength(1);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'ownerless-tmp-unlink': {
+    code: 'EIO',
+    reported: true,
+    setup: (name) => ownerlessWith(name, ['.owner-abc'], 700_000),
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(lockNames(name)).toEqual(['.owner-abc']);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  // I4: an owner of 0 bytes past the fixed grace (10 min) — every head, no grace option needed.
+  'empty-owner-move': {
+    code: 'EIO',
+    reported: true,
+    setup: (name) => {
+      ownerlessWith(name, [], 700_000, '');
+      delete takeDefaults.ownerlessGraceMs;
+    },
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(lockNames(name)).toEqual(['owner']);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  // I1-b / I1-c: the option checks of the first acquisition (an injection answers the same refusal).
+  'owner-pid': {
+    code: 'EINVAL',
+    reported: true,
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  'owner-fields': {
+    code: 'EINVAL',
+    reported: true,
+    setup: () => {},
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
 };
 
 const READER_ROWS = OBSERVATION_POINTS.filter((p) => !p.point.startsWith('handoff-')).flatMap((p) => p.impls.map((impl) => ({ point: p.point, impl, unknown: p.unknown })));
@@ -522,7 +729,7 @@ describe('every reader row: an injected failure is unknown, and unknown takes, d
     const s = SCENARIOS[point];
     const name = `obs-${point}`;
     s.setup(name);
-    const injected = await take(impl, root, name, { fault: `${point}=${s.code}`, between: s.between?.(name) });
+    const injected = await take(impl, root, name, { fault: `${point}=${s.code}${s.alsoFault ? ` ${s.alsoFault}` : ''}`, between: s.between?.(name) });
     s.injected(injected, name, impl);
     if (s.reported) {
       // fail-closed does not wedge: the wait ended at its budget, naming what it could not observe.
@@ -533,7 +740,7 @@ describe('every reader row: an injected failure is unknown, and unknown takes, d
     removeRoot(root);
     fs.mkdirSync(root);
     s.setup(name);
-    s.control(await take(impl, root, name, { between: s.between?.(name) }), name, impl);
+    s.control(await take(impl, root, name, { fault: s.alsoFault, between: s.between?.(name) }), name, impl);
   }, 30000);
 });
 

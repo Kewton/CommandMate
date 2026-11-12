@@ -17,7 +17,7 @@
  *
  * @vitest-environment node
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,16 +26,25 @@ import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import {
   HOST,
   REPO,
+  assertWithinLimit,
   deadPid,
+  drivenDrainClock,
   groupAlive,
   killStarted,
   liveGroup,
   mutatedBash,
   mutatedSync,
+  pinnedObservation,
   removeRoot,
   started,
+  until as untilOrLimit,
   writeOwner,
+  type PinnedObservation,
 } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-options-4288-"]);
 
 const LOADER = path.join(REPO, 'scripts/lib/machine-lock.sh');
 
@@ -62,9 +71,48 @@ const baseEnv = (env: Record<string, string>) => ({
   ...env,
 });
 
-function sh(script: string, env: Record<string, string> = {}, o: { verifyRun?: string; timeout?: number } = {}) {
-  const r = spawnSync('bash', ['-c', prelude(o.verifyRun) + script], { encoding: 'utf8', timeout: o.timeout ?? 30000, env: baseEnv(env) });
+/**
+ * One bash. `pin` (#4288 PR1a-f impl-10): the injected observation of the harness (pinnedObservation /
+ * drivenDrainClock) — its shims first on PATH, its env, and its function overrides right after the load.
+ */
+function sh(
+  script: string,
+  env: Record<string, string> = {},
+  o: { verifyRun?: string; timeout?: number; pin?: Pick<PinnedObservation, 'pathPrefix' | 'env' | 'bashPre'> } = {},
+) {
+  const pinEnv = o.pin ? { ...o.pin.env, ...(o.pin.pathPrefix ? { PATH: `${o.pin.pathPrefix}:${process.env.PATH}` } : {}) } : {};
+  const timeout = o.timeout ?? 30000;
+  const r = spawnSync('bash', ['-c', prelude(o.verifyRun) + (o.pin?.bashPre ?? '') + script], { encoding: 'utf8', timeout, env: baseEnv({ ...pinEnv, ...env }) });
+  assertWithinLimit(r, 'sh (bash)', timeout);
   return { out: (r.stdout ?? '').trim(), err: r.stderr ?? '', status: r.status };
+}
+
+/**
+ * The fixed reference of the clock rows of this file (#4288 PR1a-f impl-10, table A A1–A6): a whole second,
+ * one minute after the records' started_at (kvRecord: 2026-11-10T00:00:00Z). Nothing of a pinned row reads
+ * the real clock: the fixtures' mtimes, bash's lock_now_ms / date +%s and the JS hooks.now all come from it.
+ */
+const T0 = Date.UTC(2026, 10, 10, 0, 1, 0);
+/**
+ * The real-clock reads (Date.now / performance.now) during `body` — as owner-atomic's spy counts them: every
+ * read but markDone's `doneAt` stamp (written into a retired ticket, never an input of a verdict).
+ */
+function realJsClockReads<T>(body: () => T): { value: T; reads: number } {
+  let reads = 0;
+  const count = (fn: () => number) => (): number => {
+    if (!/at markDone /.test(new Error().stack ?? '')) reads += 1;
+    return fn();
+  };
+  const realDate = Date.now.bind(Date);
+  const realPerf = performance.now.bind(performance);
+  const d = vi.spyOn(Date, 'now').mockImplementation(count(realDate));
+  const p = vi.spyOn(performance, 'now').mockImplementation(count(realPerf));
+  try {
+    return { value: body(), reads };
+  } finally {
+    d.mockRestore();
+    p.mockRestore();
+  }
 }
 
 function shBg(script: string, env: Record<string, string> = {}): ChildProcess {
@@ -121,12 +169,8 @@ const lockIn = (sub = 'run') => path.join(root, sub, 'commandmate-run.lock');
  * of the loop, and until then its zombie answers kill -0 (a synchronous wait would never see it go).
  */
 async function until(predicate: () => boolean, timeoutMs = 10000): Promise<boolean> {
-  const end = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > end) return false;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return true;
+  // Past the limit: thrown as LIMIT (A14) — the limit of a loaded machine, not the row's result.
+  return untilOrLimit(predicate, timeoutMs);
 }
 const pidGone = (pid: number) => {
   try {
@@ -136,8 +180,9 @@ const pidGone = (pid: number) => {
     return (error as NodeJS.ErrnoException).code === 'ESRCH';
   }
 };
-const ageDir = (dir: string, ageMs: number) => {
-  const t = (Date.now() - ageMs) / 1000;
+/** The mtime `ageMs` before `from` (the real clock unless a pinned row passes its T0). */
+const ageDir = (dir: string, ageMs: number, from: number = Date.now()) => {
+  const t = (from - ageMs) / 1000;
   fs.utimesSync(dir, t, t);
 };
 
@@ -145,20 +190,27 @@ describe('D2 / D1 / token / ownerPid: a lock named by its path, in key=value, un
   it('sync JS: the lock, its queue and its records live beside the path; the bash loader excludes it and takes it after', async () => {
     const lock = lockIn();
     const holder = liveGroup();
-    const r = lockSync.acquireMachineLockSync('ignored', { lockPath: lock, timeoutMs: 0, token: 'run-T0', ownerPid: holder, ownerCodec: kvCodec });
+    // #4288 PR1a-f I1-b (design §5.1): the first acquisition records its own pid only — another
+    // ownerPid is refused before the ticket and the mkdir (F56). The record of another live process is
+    // put by the test (the form an older copy or a hand-off leaves).
+    const other = lockSync.acquireMachineLockSync('ignored', { lockPath: lock, timeoutMs: 0, token: 'run-T0', ownerPid: holder, ownerCodec: kvCodec });
+    expect(other.acquired).toBe(false);
+    expect(other.unknown).toEqual({ point: 'owner-pid', path: lock, code: 'EINVAL' });
+    expect(fs.existsSync(lock)).toBe(false);
+    const r = lockSync.acquireMachineLockSync('ignored', { lockPath: lock, timeoutMs: 0, token: 'run-T0', ownerCodec: kvCodec });
     expect(r.acquired).toBe(true);
     expect(r.path).toBe(lock);
     expect(tokenOf(lock)).toBe('run-T0');
-    expect(ownerOf(lock)).toMatch(new RegExp(`^pid=${holder}$`, 'm'));
+    expect(ownerOf(lock)).toMatch(new RegExp(`^pid=${process.pid}$`, 'm'));
     expect(fs.existsSync(path.join(root, 'run', 'commandmate-run.queue'))).toBe(true);
     expect(lockSync.queueDirOfPath(lock)).toBe(path.join(root, 'run', 'commandmate-run.queue'));
     expect(lockSync.queueDirOfPath(path.join(root, 'x', 'held'))).toBe(path.join(root, 'x', 'held.queue'));
-    // The bash loader, the same path and codec: the holder (ownerPid) is alive → refused.
+    expect(r.release()).toBe('released');
+    writeKv(lock, { pid: holder, token: 'run-T0' });
+    // The bash loader, the same path and codec: the holder is alive → refused.
     expect(sh(KV + ACQ, { LK: lock }).out).toMatch(/^refused/);
-    // D12's invariant (PR1a-c, codex-2 review-4288-pr1ab P2-1): the recorded pid (ownerPid) is not
-    // this process, so the holder does not remove it itself — it could die between the kill -0 and the
-    // delete — and releases as the head (D5), which keeps it while the holder lives.
-    expect(r.release()).toBe('needs-head');
+    // D12's invariant (PR1a-c, codex-2 review-4288-pr1ab P2-1): a record whose pid is not the caller is
+    // released as the head (D5), which keeps it while the holder lives.
     expect(sh(KV + ACQ, { LK: lock }).out).toMatch(/^refused/);
     expect(lockSync.releaseAsHead(lock, ['run-T0'], { timeoutMs: 0, ownerCodec: kvCodec }).result).toBe('deferred');
     killStarted();
@@ -167,19 +219,27 @@ describe('D2 / D1 / token / ownerPid: a lock named by its path, in key=value, un
     expect(sh(KV + ACQ, { LK: lock }).out).toBe('acquired');
   });
 
-  it('the bash loader writes key=value with host= under LOCK_WANT_TOKEN / LOCK_OWNER_PID, and the sync JS reads it the same way', () => {
+  it('the bash loader writes key=value with host= under LOCK_WANT_TOKEN / LOCK_OWNER_PID, and the sync JS reads it the same way', async () => {
     const lock = lockIn();
-    const live = liveGroup();
-    // A bash that takes the lock and exits leaves the record: its owner pid (live) keeps it.
-    expect(sh(`${KV}LOCK_WANT_TOKEN=run-B\nLOCK_OWNER_PID=${live}\n${ACQ}`, { LK: lock }).out).toBe('acquired');
+    // #4288 PR1a-f I1-b (design §5.1): the bash takes the lock under its own pid and stays alive — its
+    // own pid keeps the record (another LOCK_OWNER_PID is refused, F56).
+    expect(sh(`${KV}LOCK_OWNER_PID=${liveGroup()}\n${ACQ}`, { LK: lock }).out).toMatch(/^refused/);
+    expect(fs.existsSync(lock)).toBe(false);
+    const child = shBg(`${KV}LOCK_WANT_TOKEN=run-B\nLOCK_OWNER_PID=$$\n${ACQ}exec sleep 60\n`, { LK: lock });
+    const live = child.pid as number;
+    expect(await until(() => tokenOf(lock) === 'run-B')).toBe(true);
     const text = ownerOf(lock) ?? '';
     expect(text).toMatch(/^pid=\d+$/m);
     expect(text).toMatch(new RegExp(`^host=${HOST.replace(/[.]/g, '\\.')}$`, 'm'));
     expect(text).toMatch(/^token=run-B$/m);
     expect(text).toMatch(/^started_at=\d{4}-\d\d-\d\dT/m);
+    expect(text).toMatch(new RegExp(`^pid=${live}$`, 'm'));
+    expect(text).toMatch(/^v=1$/m);
     const held = lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, ownerCodec: kvCodec });
     expect(held.acquired).toBe(false);
     expect(held.heldBy).toBe(`pid ${live} on ${HOST}`);
+    killStarted();
+    expect(await until(() => pidGone(live))).toBe(true);
     // Its pid dead (an older record without host= is this host's): recovered by the sync JS.
     writeKv(lock, { pid: deadPid(), token: 'run-old', host: '' });
     const taken = lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, ownerCodec: kvCodec });
@@ -206,16 +266,26 @@ describe('D3: an owner-less, empty <lock> is taken out by the head only past the
     { age: 59_000, taken: false },
     { age: 61_000, taken: true },
   ];
+  // #4288 PR1a-f impl-10 (A4): the age is made from T0 and both implementations read T0 as now — 1 s of
+  // margin against the grace no longer meets the time a loaded machine takes to spawn the bash.
   it.each(ROWS)('bash and sync JS agree at $age ms: taken=$taken', ({ age, taken }) => {
     for (const impl of ['bash', 'sync'] as const) {
       const lock = lockIn(`${impl}-${age}`);
       fs.mkdirSync(lock, { recursive: true });
-      ageDir(lock, age);
+      ageDir(lock, age, T0);
+      const pin = pinnedObservation(root, { t0: T0, date: true });
       const got =
         impl === 'bash'
-          ? sh(`LOCK_OWNERLESS_GRACE_MS=60000\n${ACQ}`, { LK: lock }).out === 'acquired'
-          : lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, ownerlessGraceMs: 60_000 }).acquired;
-      expect(got, impl).toBe(taken);
+          ? sh(`LOCK_OWNERLESS_GRACE_MS=60000\n${ACQ}`, { LK: lock }, { pin }).out === 'acquired'
+          : realJsClockReads(() => lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, ownerlessGraceMs: 60_000, hooks: { now: pin.now } }).acquired);
+      if (impl === 'bash') {
+        expect(got, impl).toBe(taken);
+        expect(pin.record(), 'bash: no real clock, no real etime').toMatchObject({ realClockReads: 0, realEtimeReads: 0 });
+      } else {
+        const sync = got as { value: boolean; reads: number };
+        expect(sync.value, impl).toBe(taken);
+        expect(sync.reads, 'sync: no real clock').toBe(0);
+      }
     }
   });
 
@@ -269,19 +339,29 @@ describe('D3: the owner is created exclusively — nothing there is written over
     expect(still(owner)).toBe(true);
   });
 
+  // #4288 PR1a-f (design §5.1): the exclusion is the publish's link(2), not the tmp's create — the
+  // mutation replaces the publish (/bin/link, linkSync) with a rename (mv -f, renameSync). The expectation
+  // (written over and called taken) is the same.
   it('positive control: the write without set -C / wx overwrites the successor\'s owner and calls it taken', async () => {
     const lock = lockIn();
     fs.mkdirSync(lock, { recursive: true });
     const owner = path.join(lock, 'owner');
-    const legacyBash = mutatedBash(root, (s) => s.replace('elif loc_out=$(export LC_ALL=C; set -C; : 2>&1 > "$2"); then', 'elif loc_out=$(export LC_ALL=C; : 2>&1 > "$2"); then'));
+    const legacyBash = mutatedBash(root, (s) => s.replace('elif lok_out=$(LC_ALL=C /bin/link -- "$2" "$3" 2>&1); then', 'elif lok_out=$(LC_ALL=C mv -f -- "$2" "$3" 2>&1); then'));
     fs.writeFileSync(owner, '{"pid":1,"token":"succ"}');
     const r = sh(`printf '%s\\n' "$(lock_format_owner $$ mine 1)" | lock_obs_create owner-create "$LK/owner" mine; echo "rc=$?"`, { LK: lock }, { verifyRun: legacyBash });
     expect(r.out).toBe('rc=0');
     expect(readText(owner)).toContain('"token":"mine"');
-    const legacySync = await mutatedSync(root, (s) => s.replace("fs.openSync(file, 'wx')", "fs.openSync(file, 'w')"));
+    const legacySync = await mutatedSync(root, (s) => s.replace('() => fs.linkSync(from, to)', '() => fs.renameSync(from, to)'));
     fs.writeFileSync(owner, '{"pid":1,"token":"succ"}');
-    expect(legacySync.makeObserver().create('owner-create', owner, '{"pid":2,"token":"mine"}').state).toBe('created');
+    const linked = legacySync.makeObserver().create('owner-create', owner, '{"pid":2,"token":"mine"}', path.join(lock, '.owner-mine'));
+    expect(linked.state).toBe('created');
+    expect(legacySync.makeObserver().link('owner-publish', path.join(lock, '.owner-mine'), owner).state).toBe('linked');
     expect(readText(owner)).toContain('mine');
+    // negative: the real link answers EEXIST and leaves the successor's owner
+    fs.writeFileSync(owner, '{"pid":1,"token":"succ"}');
+    lockSync.makeObserver().create('owner-create', owner, '{"pid":2,"token":"mine"}', path.join(lock, '.owner-mine'));
+    expect(lockSync.makeObserver().link('owner-publish', path.join(lock, '.owner-mine'), owner).state).toBe('exists');
+    expect(readText(owner)).toContain('succ');
   });
 
   it('bash: the undo removes only what this create made — owner-write taken out; owner-unlink / lock-rmdir failing leave the <lock> (nobody holds it twice)', () => {
@@ -292,7 +372,10 @@ describe('D3: the owner is created exclusively — nothing there is written over
     expect(fs.existsSync(lock)).toBe(false);
     const unlink = sh(ACQ, { LK: lock, CM_VERIFY_TEST_HANDOFF: 'fault:owner-write,fault:owner-unlink' });
     expect(unlink.err).toContain(`machine-lock-owner-write-failed ${lock} (and it could not be taken out again)`);
-    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(true);
+    // #4288 PR1a-f (design §5.1): what is half written is only the tmp — `<lock>/.owner-<token>` stays,
+    // and `<lock>/owner` was never published (I1).
+    expect(fs.readdirSync(lock).filter((n) => n.startsWith('.owner-'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(false);
     fs.rmSync(lock, { recursive: true });
     const rmdir = sh(ACQ, { LK: lock, CM_VERIFY_TEST_HANDOFF: 'fault:owner-write,fault:lock-rmdir' });
     expect(rmdir.err).toContain('(and it could not be taken out again)');
@@ -306,7 +389,9 @@ describe('D3: the owner is created exclusively — nothing there is written over
     expect(() => lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, hooks: { fault: fault({ 'owner-write': 'ENOSPC' }) } })).toThrow(/ENOSPC/);
     expect(fs.existsSync(lock)).toBe(false);
     expect(() => lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, hooks: { fault: fault({ 'owner-write': 'ENOSPC', 'owner-unlink': 'EIO' }) } })).toThrow(/ENOSPC/);
-    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(true);
+    // #4288 PR1a-f (design §5.1): the tmp stays, the owner was never published (I1).
+    expect(fs.readdirSync(lock).filter((n) => n.startsWith('.owner-'))).toHaveLength(1);
+    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(false);
   });
 });
 
@@ -482,7 +567,7 @@ describe('D5: the release by someone who is not the holder, as the head', () => 
     });
     started.push(legacy);
     expect(await until(() => fs.existsSync(path.join(dir, 'read')))).toBe(true);
-    const successor = sh(`${KV}LOCK_OWNER_PID=${liveGroup()}\n${ACQ}`, { LK: lock });
+    const successor = sh(`${KV}${ACQ}`, { LK: lock });
     expect(successor.out).toBe('acquired');
     fs.writeFileSync(path.join(dir, 'go'), '');
     await new Promise((resolve) => legacy.on('exit', resolve));
@@ -507,17 +592,22 @@ describe('D6: recover without taking', () => {
     expect(fs.existsSync(syncLock)).toBe(left);
   });
 
+  // #4288 PR1a-f impl-10 (A5): ages from T0, now = T0 (bash: lock_now_ms and date; sync: hooks.now).
   it('bash and sync JS: an owner-less <lock> past the grace is taken out; younger is kept', () => {
+    const pin = pinnedObservation(root, { t0: T0, date: true });
     const old = lockIn('old');
     fs.mkdirSync(old, { recursive: true });
-    ageDir(old, 61_000);
-    expect(sh(`LOCK_OWNERLESS_GRACE_MS=60000\nlock_recover_only "$LK" "$(machine_lock_queue_of "$LK")" 0; echo "$LRO_RESULT"`, { LK: old }).out).toBe('removed');
+    ageDir(old, 61_000, T0);
+    expect(sh(`LOCK_OWNERLESS_GRACE_MS=60000\nlock_recover_only "$LK" "$(machine_lock_queue_of "$LK")" 0; echo "$LRO_RESULT"`, { LK: old }, { pin }).out).toBe('removed');
+    expect(pin.record()).toMatchObject({ realClockReads: 0, realEtimeReads: 0 });
     const young = lockIn('young');
     fs.mkdirSync(young, { recursive: true });
-    ageDir(young, 59_000);
-    expect(lockSync.recoverIfDead(young, { timeoutMs: 0, ownerlessGraceMs: 60_000 }).result).toBe('kept');
-    ageDir(young, 61_000);
-    expect(lockSync.recoverIfDead(young, { timeoutMs: 0, ownerlessGraceMs: 60_000 }).result).toBe('removed');
+    ageDir(young, 59_000, T0);
+    const kept = realJsClockReads(() => lockSync.recoverIfDead(young, { timeoutMs: 0, ownerlessGraceMs: 60_000, hooks: { now: pin.now } }).result);
+    expect(kept).toEqual({ value: 'kept', reads: 0 });
+    ageDir(young, 61_000, T0);
+    const removed = realJsClockReads(() => lockSync.recoverIfDead(young, { timeoutMs: 0, ownerlessGraceMs: 60_000, hooks: { now: pin.now } }).result);
+    expect(removed).toEqual({ value: 'removed', reads: 0 });
   });
 
   it('a live lock put in after the judgement (recover-only-judged) is put back, not removed — bash and sync JS', async () => {
@@ -567,7 +657,12 @@ describe('D7 (loader): supervisor.lock\'s lstart — a reused pid is gone, in th
     const lock = lockIn();
     const pid = liveGroup();
     writeKv(lock, { pid, token: 'sup', lstart: lstart(pid) });
-    expect(sh(`${KV}lock_recover_only "$LK" "$(machine_lock_queue_of "$LK")" 0; echo "$LRO_RESULT"`, { LK: lock }).out).toBe(result);
+    // #4288 PR1a-f impl-10 (A1 / A3): the observation pinned (the harness's fixed clock + ps shim + date):
+    // the read before ps and after it are both T0, ps answers etime 00:00 — a loaded machine that takes a
+    // second over ps no longer turns the reused pid into ECLOCK (kept). Real clock and etime reads: 0.
+    const pin = pinnedObservation(root, { t0: T0, date: true });
+    expect(sh(`${KV}lock_recover_only "$LK" "$(machine_lock_queue_of "$LK")" 0; echo "$LRO_RESULT"`, { LK: lock }, { pin }).out).toBe(result);
+    expect(pin.record()).toMatchObject({ realClockReads: 0, realEtimeReads: 0 });
   });
 
   it('ps that cannot say is unknown: kept, and named', () => {
@@ -584,11 +679,14 @@ describe('D7 (loader): supervisor.lock\'s lstart — a reused pid is gone, in th
     writeKv(gone, { pid, token: 'sup-old', lstart: 'Thu Jan  1 00:00:00 1970' });
     const legacy = mutatedBash(root, (s) => s.replace('    lsg_state=$(lock_record_state)', '    lsg_state=$(lock_holder_state "$LOB_PID" "$LOB_HOST" "$LOB_PGID")'));
     // Read alive: put back as the lock, and the acquisition refused.
-    expect(sh(`${KV}${ACQ}`, { LK: lock }, { verifyRun: legacy }).out).toMatch(/^refused/);
+    expect(sh(`${KV}${ACQ}`, { LK: lock }, { verifyRun: legacy, pin: pinnedObservation(root, { t0: T0, date: true }) }).out).toMatch(/^refused/);
     expect(tokenOf(lock)).toBe('sup-old');
     fs.rmSync(lock, { recursive: true, force: true });
     writeKv(gone, { pid, token: 'sup-old', lstart: 'Thu Jan  1 00:00:00 1970' });
-    expect(sh(`${KV}${ACQ}`, { LK: lock }).out).toBe('acquired');
+    // #4288 PR1a-f impl-10 (A2): the same pinned observation as A1 (the loaded run read ECLOCK: restore pending).
+    const pin = pinnedObservation(root, { t0: T0, date: true });
+    expect(sh(`${KV}${ACQ}`, { LK: lock }, { pin }).out).toBe('acquired');
+    expect(pin.record()).toMatchObject({ realClockReads: 0, realEtimeReads: 0 });
     expect(gones(lock)).toEqual([]);
   });
 });
@@ -690,27 +788,54 @@ describe('D12 and review-4288h P3: the holder\'s own release, and the end state 
     expect(check(lock)).toBe(true);
   });
 
+  // #4288 PR1a-f (design §3.1, §5.1): lock_release's missing branch keeps the <lock> now, as
+  // lock_release_held does — the expectation of this former positive control is reversed (消す側から消さ
+  // ない側へ). The name is kept (the contract's decision): it names what the pre-PR1a-f section did.
   it('positive control: verify-run.sh\'s lock_release on a missing owner removes the other taker\'s <lock>', () => {
     const lock = lockIn();
     held(`T=$LOCK_TOKEN; rm -f "$LK/owner"; lock_release "$LK" "$T"; echo done`, { LK: lock });
-    expect(fs.existsSync(lock)).toBe(false);
+    expect(fs.existsSync(lock)).toBe(true);
+  });
+
+  // #4288 PR1a-f impl-2 (codex P2-1 / PM Claude P3-2): an owner that cannot be parsed (corrupt) or is of
+  // 0 bytes is not shown to be ours either — lock_release keeps the <lock> as for missing (I4, §3.1). In
+  // both codecs: the verify gate's JSON and the kv of run-lock / supervisor.lock.
+  it.each([
+    { form: 'corrupt (garbage), JSON gate', codec: '', make: `printf 'garbage\\n' > "$LK/owner"` },
+    { form: 'corrupt (garbage), kv codec', codec: KV, make: `printf 'garbage\\n' > "$LK/owner"` },
+    { form: 'empty (0 bytes), JSON gate', codec: '', make: `: > "$LK/owner"` },
+    { form: 'empty (0 bytes), kv codec', codec: KV, make: `: > "$LK/owner"` },
+  ])('lock_release on an owner $form keeps the <lock> and the owner', ({ codec, make }) => {
+    const lock = lockIn();
+    const r = sh(`${codec}${ACQ}T=$LOCK_TOKEN; ${make}; lock_release "$LK" "$T"; echo "rc=$?"`, { LK: lock });
+    expect(r.out.split('\n')).toEqual(['acquired', 'rc=0']);
+    expect(fs.existsSync(path.join(lock, 'owner'))).toBe(true);
   });
 
   it('a group that has a member keeps the lock (release-deferred); the drain empties it with the section\'s KILL_GRACE_SEC, and then it goes', () => {
     const lock = lockIn();
-    const r = held(
-      `set -m
-( trap '' TERM; exec sleep 60 ) &
+    // #4288 PR1a-f impl-10 (D12, PM の追記 2): the drain's clock is driven (1 s per read until KILL, then still):
+    // the grace is counted in reads, not in the real seconds of a loaded machine, and the wait after KILL lasts
+    // until the group is seen empty — `drained` no longer depends on how fast the zombie is reaped. The child
+    // marks that its TERM is ignored before the drain starts (a TERM before the trap killed it at once).
+    const pin = pinnedObservation(root, { t0: T0, date: true });
+    const drain = drivenDrainClock(root);
+    const ready = path.join(root, 'child-ready');
+    const r = sh(
+      `${KV}${drain.bashPre}${ACQ}set -m
+( trap '' TERM; : > '${ready}'; exec sleep 60 ) &
 G=$!
 set +m
+while [ ! -e '${ready}' ]; do sleep 0.01; done
 lock_hand_off "$LK" "$LOCK_TOKEN" $$ "$G"
 echo "stage=[$LHO_STAGE]"
 LOCK_HELD_PATH_SAVED=$LOCK_HELD_PATH
 lock_release_held "$LK"; echo "held=$LRH_RESULT"
-s=$(date +%s); if lock_drain_group "$G" 0; then echo drained; fi; echo "took=$(( $(date +%s) - s ))"
+s=$(lock_now_sec); if lock_drain_group "$G" 0; then echo drained; fi; echo "took=$(( $(lock_now_sec) - s ))"
 LOCK_HELD_PATH=$LOCK_HELD_PATH_SAVED; LOCK_PENDING_TOKEN="$LOCK_TOKEN-g$G"
 lock_release_held "$LK"; echo "after=$LRH_RESULT"`,
-      { LK: lock },
+      { LK: lock, ...drain.env },
+      { pin },
     );
     const lines = r.out.split('\n');
     expect(lines.slice(0, 3)).toEqual(['acquired', 'stage=[]', 'held=deferred']);
@@ -718,6 +843,10 @@ lock_release_held "$LK"; echo "after=$LRH_RESULT"`,
     expect(Number(/took=(\d+)/.exec(lines[4])?.[1])).toBeGreaterThanOrEqual(4);
     expect(lines[5]).toBe('after=released');
     expect(fs.existsSync(lock)).toBe(false);
+    // The drain went TERM → the grace (5 reads of the clock) → KILL → empty; nothing read the real clock.
+    expect(drain.steps()).toEqual(['term', 'kill', 'drained']);
+    expect(lines[4]).toBe('took=6');
+    expect(pin.record()).toMatchObject({ realClockReads: 0, realEtimeReads: 0 });
   }, 30000);
 
   it.each<{ stage: string; env: Record<string, string>; record: string }>([
@@ -760,14 +889,31 @@ describe('the loader (scripts/lib/machine-lock.sh)', () => {
 
   it('positive control (P2-1): a section without KILL_GRACE_SEC drains a TERM-ignoring group with no grace at all', () => {
     const legacy = mutatedBash(root, (s) => s.replace(/\nKILL_GRACE_SEC=5\n/, '\n'));
-    const drain = `set -m
-( trap '' TERM; exec sleep 60 ) &
+    // #4288 PR1a-f impl-10 (A6): the drain's clock driven by reads (drivenDrainClock), the child ready (its
+    // TERM ignored) before the drain: `took` is the count of the drain's clock reads, not real seconds.
+    const run = (verifyRun?: string) => {
+      const drain = drivenDrainClock(root);
+      const ready = path.join(fs.mkdtempSync(path.join(root, 'ready-')), 'ready');
+      const out = sh(
+        `${drain.bashPre}set -m
+( trap '' TERM; : > '${ready}'; exec sleep 60 ) &
 G=$!
 set +m
-s=$(date +%s); lock_drain_group "$G" 0; echo "took=$(( $(date +%s) - s ))"`;
+while [ ! -e '${ready}' ]; do sleep 0.01; done
+s=$(lock_now_sec); lock_drain_group "$G" 0; echo "took=$(( $(lock_now_sec) - s ))"`,
+        drain.env,
+        { verifyRun, pin: pinnedObservation(root, { t0: T0, date: true }) },
+      ).out;
+      return { out, steps: drain.steps() };
+    };
     const tookOf = (out: string) => Number(/took=(\d+)/.exec(out)?.[1]);
-    expect(tookOf(sh(drain, {}, { verifyRun: legacy }).out), 'KILL at once: the grace was 0').toBeLessThanOrEqual(2);
-    expect(tookOf(sh(drain).out), 'the section\'s own 5 s grace').toBeGreaterThanOrEqual(4);
+    const legacyRun = run(legacy);
+    const own = run();
+    expect(tookOf(legacyRun.out), 'KILL at once: the grace was 0').toBeLessThanOrEqual(2);
+    expect(tookOf(own.out), 'the section\'s own 5 s grace').toBeGreaterThanOrEqual(4);
+    // Exactly: no read of the grace between TERM and KILL (took=2) against the 5 of the section (took=6).
+    expect([legacyRun.out, legacyRun.steps]).toEqual(['took=2', ['term', 'kill', 'drained']]);
+    expect([own.out, own.steps]).toEqual(['took=6', ['term', 'kill', 'drained']]);
   }, 30000);
 
   it('is loaded once: a second source keeps the first load\'s state', () => {
@@ -790,4 +936,120 @@ s=$(date +%s); lock_drain_group "$G" 0; echo "took=$(( $(date +%s) - s ))"`;
     const b = fs.readFileSync(path.join(REPO, '.agents/skills/cmate-verify/scripts/verify-run.sh'));
     expect(a.equals(b)).toBe(true);
   });
+});
+
+/**
+ * #4288 PR1a-f impl-10 — the closing conditions of table A (enabler-return-4288-time-load-deps.md §2, PM の追記 5)
+ * for the rows of this file, each as a drive with a mode:
+ *   (i)   pinned: the real clock (date) and the real etime are read 0 times (the shims' records);
+ *   (ii)  a ps that sleeps 1.2 s first on PATH changes no answer of a pinned drive;
+ *   (iii) the fix taken out (pin: false — the form before impl-10) reads the real clock, so (i) is red; and for
+ *         A1 / A2 the slow ps then turns the answer (ECLOCK): what the pin decides is shown, not assumed.
+ */
+describe('#4288 PR1a-f impl-10: table A (A1 A2 A4 A5 A6 D12) — (i) no real clock or etime, (ii) a 1.2 s ps changes nothing, (iii) unpinned it reads the real clock', () => {
+  type Mode = { pin: boolean; slowPs: boolean };
+  const PINNED: Mode = { pin: true, slowPs: false };
+  const PINNED_SLOW: Mode = { pin: true, slowPs: true };
+  const UNPINNED_SLOW: Mode = { pin: false, slowPs: true };
+  const lstartNow = (pid: number) => spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).stdout.trim();
+  const sub = (tag: string) => lockIn(`${tag}-${Math.random().toString(36).slice(2)}`);
+  const RECOVER = `${KV}lock_recover_only "$LK" "$(machine_lock_queue_of "$LK")" 0; echo "$LRO_RESULT"`;
+
+  const rowA1 = (reused: boolean, m: Mode) => {
+    const lock = sub('a1');
+    const pid = liveGroup();
+    writeKv(lock, { pid, token: 'sup', lstart: reused ? 'Thu Jan  1 00:00:00 1970' : lstartNow(pid) });
+    const pin = pinnedObservation(root, { t0: T0, date: true, ...m });
+    return { out: sh(RECOVER, { LK: lock }, { pin }).out, rec: pin.record() };
+  };
+  const rowA2 = (m: Mode) => {
+    const lock = sub('a2');
+    writeKv(`${lock}.gone-xx-1`, { pid: liveGroup(), token: 'sup-old', lstart: 'Thu Jan  1 00:00:00 1970' });
+    const pin = pinnedObservation(root, { t0: T0, date: true, ...m });
+    return { out: sh(`${KV}${ACQ}`, { LK: lock }, { pin }).out, rec: pin.record() };
+  };
+  const rowOwnerless = (age: number, m: Mode) => {
+    const lock = sub('a4');
+    fs.mkdirSync(lock, { recursive: true });
+    ageDir(lock, age, T0);
+    const pin = pinnedObservation(root, { t0: T0, date: true, ...m });
+    return { out: sh(`LOCK_OWNERLESS_GRACE_MS=60000\n${ACQ}`, { LK: lock }, { pin }).out, rec: pin.record() };
+  };
+  const rowOwnerlessSync = (age: number, pinned: boolean, op: 'acquire' | 'recover') => {
+    const lock = sub('a5');
+    fs.mkdirSync(lock, { recursive: true });
+    ageDir(lock, age, T0);
+    const hooks = pinned ? { now: () => T0 } : {};
+    return realJsClockReads(() =>
+      op === 'acquire'
+        ? String(lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, ownerlessGraceMs: 60_000, hooks }).acquired)
+        : lockSync.recoverIfDead(lock, { timeoutMs: 0, ownerlessGraceMs: 60_000, hooks }).result,
+    );
+  };
+  /** A6 / D12's drain of a TERM-ignoring group; `driven` false is the form before impl-10 (the real seconds). */
+  const rowDrain = (m: Mode, driven: boolean) => {
+    const drain = drivenDrainClock(root);
+    const ready = path.join(fs.mkdtempSync(path.join(root, 'ready-')), 'ready');
+    const pin = pinnedObservation(root, { t0: T0, date: true, ...m });
+    const out = sh(
+      `${driven ? drain.bashPre : ''}set -m
+( trap '' TERM; : > '${ready}'; exec sleep 60 ) &
+G=$!
+set +m
+while [ ! -e '${ready}' ]; do sleep 0.01; done
+if lock_drain_group "$G" 0; then echo drained; else echo left; fi`,
+      drain.env,
+      { pin },
+    ).out;
+    return { out, steps: drain.steps(), rec: pin.record() };
+  };
+
+  it.each([
+    { form: 'A1 reused lstart', expected: 'removed', run: (m: Mode) => rowA1(true, m) },
+    { form: 'A3 the same lstart', expected: 'kept', run: (m: Mode) => rowA1(false, m) },
+    { form: 'A2 the reused record aside, taken', expected: 'acquired', run: (m: Mode) => rowA2(m) },
+    { form: 'A4 ownerless 59000 ms (bash)', expected: /^refused/, run: (m: Mode) => rowOwnerless(59_000, m) },
+    { form: 'A4/A5 ownerless 61000 ms (bash)', expected: 'acquired', run: (m: Mode) => rowOwnerless(61_000, m) },
+  ])('$form: (i) pinned → $expected, 0 real clock / etime reads; (ii) the same behind a 1.2 s ps', ({ expected, run }) => {
+    for (const m of [PINNED, PINNED_SLOW]) {
+      const r = run(m);
+      expect(r.out, JSON.stringify(m)).toMatch(expected instanceof RegExp ? expected : new RegExp(`^${expected}$`));
+      expect(r.rec, JSON.stringify(m)).toMatchObject({ realClockReads: 0, realEtimeReads: 0 });
+    }
+  }, 60000);
+
+  it('(iii) A1 / A2 unpinned behind the 1.2 s ps: the real clock and etime are read (the (i) record is not 0) and the answer turns (ECLOCK)', () => {
+    const a1 = rowA1(true, UNPINNED_SLOW);
+    expect(a1.out).toBe('kept');
+    expect(a1.rec.realClockReads).toBeGreaterThan(0);
+    expect(a1.rec.realEtimeReads).toBeGreaterThan(0);
+    const a2 = rowA2(UNPINNED_SLOW);
+    expect(a2.out).toMatch(/^refused/);
+    expect(a2.rec.realClockReads).toBeGreaterThan(0);
+  }, 60000);
+
+  it('(iii) A4 bash unpinned: the real clock is read (the (i) record is not 0)', () => {
+    const r = rowOwnerless(61_000, { pin: false, slowPs: false });
+    expect(r.rec.realClockReads).toBeGreaterThan(0);
+  });
+
+  it.each([
+    { op: 'acquire' as const, age: 59_000, expected: 'false' },
+    { op: 'acquire' as const, age: 61_000, expected: 'true' },
+    { op: 'recover' as const, age: 59_000, expected: 'kept' },
+    { op: 'recover' as const, age: 61_000, expected: 'removed' },
+  ])('A4/A5 sync $op at $age ms: hooks.now pinned → $expected with 0 real clock reads; without it (iii) the real clock is read', ({ op, age, expected }) => {
+    expect(rowOwnerlessSync(age, true, op)).toEqual({ value: expected, reads: 0 });
+    expect(rowOwnerlessSync(age, false, op).reads).toBeGreaterThan(0);
+  });
+
+  it('A6 / D12: the driven drain → TERM, 5 reads, KILL, drained — the same behind a 1.2 s ps; 0 real clock reads; (iii) undriven it reads the real clock', () => {
+    for (const m of [PINNED, PINNED_SLOW]) {
+      const r = rowDrain(m, true);
+      expect([r.out, r.steps], JSON.stringify(m)).toEqual(['drained', ['term', 'kill', 'drained']]);
+      expect(r.rec, JSON.stringify(m)).toMatchObject({ realClockReads: 0, realEtimeReads: 0 });
+    }
+    const undriven = rowDrain({ pin: false, slowPs: false }, false);
+    expect(undriven.rec.realClockReads).toBeGreaterThan(0);
+  }, 60000);
 });

@@ -286,9 +286,10 @@ describe('§2.3 / §2.4: the gate starts only after its group is on record — a
   });
 
   it('handoff-self=EPERM: the child cannot tell its runner is alive, withdraws, and runs nothing (stage=abort)', async () => {
-    const run = runAsync([SIDE], { CM_VERIFY_TEST_OBS_FAULT: 'handoff-self=EPERM', CM_VERIFY_TEST_HANDOFF: 'pause:published' });
+    const run = runAsync([SIDE], { CM_VERIFY_TEST_OBS_FAULT: 'handoff-self=EPERM', CM_VERIFY_TEST_HANDOFF: 'pause:published,mark:child-withdrew' });
     await until(() => fs.existsSync(handoff('published.reached')));
-    await new Promise((r) => setTimeout(r, 500));
+    // #4288 PR1a-f impl-11 (codex P2-2): the runner goes on once the child has withdrawn (its mark), not after 500 ms.
+    await until(() => fs.existsSync(handoff('child-withdrew.reached')));
     fs.writeFileSync(handoff('published.go'), '');
     await run.wait();
     expect(run.stderr()).toContain('stage=abort');
@@ -296,9 +297,11 @@ describe('§2.3 / §2.4: the gate starts only after its group is on record — a
   }, 30000);
 
   it('the handoff deadline: a runner stopped (alive) before its signal — the child withdraws at the deadline, nothing runs, 125 not 124', async () => {
-    const run = runAsync([SIDE], { CM_VERIFY_TEST_HANDOFF: 'pause:published', CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '1' });
+    const run = runAsync([SIDE], { CM_VERIFY_TEST_HANDOFF: 'pause:published,mark:child-withdrew', CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '1' });
     await until(() => fs.existsSync(handoff('published.reached')));
-    await new Promise((r) => setTimeout(r, 2500));
+    // #4288 PR1a-f impl-11 (codex P2-2): the runner is let go once the child has withdrawn at its deadline
+    // (the mark), not 2.5 s later — a loaded child may not have seen its deadline by then.
+    await until(() => fs.existsSync(handoff('child-withdrew.reached')));
     fs.writeFileSync(handoff('published.go'), '');
     await run.wait();
     expect(run.stdout()).toContain('GATE g FAIL exit=125');
@@ -309,11 +312,12 @@ describe('§2.3 / §2.4: the gate starts only after its group is on record — a
   it('handoff-go=EACCES: a child that cannot make its withdrawal and does not see the signal does not run (stage=ack)', async () => {
     const run = runAsync([SIDE], {
       CM_VERIFY_TEST_OBS_FAULT: 'handoff-go=EACCES',
-      CM_VERIFY_TEST_HANDOFF: 'pause:published',
+      CM_VERIFY_TEST_HANDOFF: 'pause:published,mark:child-withdrew',
       CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '1',
     });
     await until(() => fs.existsSync(handoff('published.reached')));
-    await new Promise((r) => setTimeout(r, 2500));
+    // #4288 PR1a-f impl-11 (codex P2-2): the child's withdrawal (its go refused, the mark written), then the runner.
+    await until(() => fs.existsSync(handoff('child-withdrew.reached')));
     fs.writeFileSync(handoff('published.go'), '');
     await run.wait();
     // The runner's own signal then succeeds, but no ack ever came: not started.
@@ -340,7 +344,10 @@ describe('§2.3 / §2.4: the gate starts only after its group is on record — a
 
 describe('§2.4 / §2.6: the watchdog counts the timeout from the ack', () => {
   it('a handoff held up past timeoutSec does not kill the waiting child: the gate runs once, then times out (124)', async () => {
-    const run = runAsync([{ command: 'echo ran >> $MARK/side; sleep 5', timeoutSec: 1 }], { CM_VERIFY_TEST_HANDOFF: 'pause:published' });
+    // #4288 PR1a-f impl-12 (codex P2-b): the gate ends only on the watchdog's TERM, which the watchdog sends after
+    // it has put the timeout on record — not a `sleep 5` racing a 1 s watchdog that a loaded machine may delay.
+    // The loop is capped (~60 s, codex-12) so a red run, where the watchdog never fires, leaves no endless gate behind.
+    const run = runAsync([{ command: "trap 'exit 0' TERM; echo ran >> $MARK/side; for _ in $(seq 1200); do sleep 0.05; done", timeoutSec: 1 }], { CM_VERIFY_TEST_HANDOFF: 'pause:published' });
     await until(() => fs.existsSync(handoff('published.reached')));
     await new Promise((r) => setTimeout(r, 2000));
     fs.writeFileSync(handoff('published.go'), '');
@@ -352,15 +359,29 @@ describe('§2.4 / §2.6: the watchdog counts the timeout from the ack', () => {
 
 describe('§2.5: released only once the gate\'s group is empty', () => {
   const LEAVES_CHILD = { command: "(trap '' TERM; exec sleep 30) & echo $! > $MARK/bg; exit 0" };
+  /** The same child, which sets its TERM trap only when the test arms it, and says so (bg-ready). The wait for the
+   *  arm is capped (~60 s, codex-12) so a test that fails before arming leaves no endless child behind. */
+  const LEAVES_ARMED_CHILD = { command: "(for _ in $(seq 1200); do test -e $MARK/arm && break; sleep 0.05; done; trap '' TERM; touch $MARK/bg-ready; exec sleep 30) & echo $! > $MARK/bg; exit 0" };
 
   it('a gate that leaves a TERM-ignoring child: held while it lives, the child stopped (KILL after the grace), then released', async () => {
-    const run = runAsync([LEAVES_CHILD]);
-    await until(() => fs.existsSync(mark('bg')) && fs.readFileSync(mark('bg'), 'utf8').trim() !== '');
+    const drainLog = mark('drain-steps');
+    // #4288 PR1a-f impl-12 (codex P2-a): every step waited for by a mark, both ways —
+    //   1. the leader has exited and the drain has not begun (pause:leader-exited);
+    //   2. the child has set its TERM trap (bg-ready) before the drain may send TERM;
+    //   3. the drain has sent TERM and is held (pause:drain-term) until the reader has looked.
+    const run = runAsync([LEAVES_ARMED_CHILD], { CM_VERIFY_TEST_DRAIN_LOG: drainLog, CM_VERIFY_TEST_HANDOFF: 'pause:leader-exited,pause:drain-term' });
+    await until(() => fs.existsSync(handoff('leader-exited.reached')));
     const bg = Number(fs.readFileSync(mark('bg'), 'utf8'));
+    fs.writeFileSync(mark('arm'), '');
+    await until(() => fs.existsSync(mark('bg-ready')));
+    fs.writeFileSync(handoff('leader-exited.go'), '');
+    await until(() => fs.existsSync(handoff('drain-term.reached')));
     // The leader has exited; the run drains the group — nobody takes the lock meanwhile.
-    await new Promise((r) => setTimeout(r, 300));
+    expect(fs.readFileSync(drainLog, 'utf8')).toBe('term\n');
     expect((await take('ts', locks, 'holder')).acquired).toBe(false);
+    fs.writeFileSync(handoff('drain-term.go'), '');
     await run.wait();
+    expect(fs.readFileSync(drainLog, 'utf8')).toBe('term\nkill\ndrained\n');
     expect(run.stdout()).toContain('GATE g PASS exit=0');
     expect(run.stderr()).toMatch(/gate g left processes in group \d+; stopped them before releasing/);
     expect(waitSync(() => spawnSync('kill', ['-0', String(bg)]).status !== 0, 3000)).toBe(true);
@@ -368,10 +389,13 @@ describe('§2.5: released only once the gate\'s group is empty', () => {
   }, 30000);
 
   it('negative: a gate that leaves nothing is released without waiting out the grace', () => {
-    const t = Date.now();
-    const r = runSync([{ command: 'true' }]);
+    // #4288 PR1a-f impl-11 (codex P2-2): "without waiting out the grace" is the drain's record — the group
+    // seen empty at once (`empty`: no TERM, no grace, no KILL) — not a run shorter than 4 s.
+    const drainLog = mark('drain-steps');
+    const r = runSync([{ command: 'true' }], { CM_VERIFY_TEST_DRAIN_LOG: drainLog });
     expect(r.stdout).toContain('GATE g PASS');
-    expect(Date.now() - t).toBeLessThan(4000);
+    expect(fs.readFileSync(drainLog, 'utf8')).toBe('empty\n');
+    expect(fs.existsSync(lockPath())).toBe(false);
     expect(r.stderr).not.toContain('left processes');
   });
 
