@@ -3,11 +3,18 @@
  * shows its re-login notice. The hand-off dialog, kept over the Loading by G10, must not be drawn
  * then: its modal would cover the re-login button and hold the focus, and a decide whose result is
  * unknown refuses to close. The opening and its unit stay in the store; once a read succeeds
- * again, the same unit's dialog is drawn again (nothing is made or sent again).
+ * again ON THE SAME PAGE, the same unit's dialog is drawn again (nothing is made or sent again).
+ *
+ * Scope of the guarantee (G10c, codex-2 P2-1 (b)): "the same page, the session comes back" only.
+ * The re-login button is a HARD navigation (`window.location.href = '/login'`), after which the
+ * page and the in-memory hand-off store are built anew, so the unit does not survive it. That is
+ * the same before G10 (fd2f4a589): the store has no persistence. Keeping the unit across a hard
+ * navigation is a new requirement (recorded on #4289), not something G10 took away.
  *
  * Controls: (1) 401 → the notice's button is reachable, no dialog / modal in the document;
- * (2) after the re-login (a read succeeds) the dialog of the same opening and unit is back;
- * (3) the unit (an unknown decide) is in the store throughout, and the dialog back is the unit's.
+ * (2) the session comes back on the same page (a read succeeds): the dialog of the same opening and unit is back;
+ * (3) the unit (an unknown decide) is in the store throughout, and the dialog back is the unit's;
+ * (4) the re-login button's hard navigation: the in-memory store is empty afterwards (unchanged by G10).
  * Negative control: with the session healthy the dialog is drawn (G10's own cases stay).
  * Positive control (the code before G10b): the dialog was drawn over the notice (case 1 fails).
  *
@@ -282,7 +289,7 @@ describe('[#4227 G10b] an expired session: the re-login comes before the hand-of
     expect(document.activeElement).toBe(button);
   });
 
-  it('after the re-login (a read succeeds) the dialog of the same unit is drawn again, and nothing is made or sent again', async () => {
+  it('after the session comes back on the same page (a read succeeds) the dialog of the same unit is drawn again, and nothing is made or sent again', async () => {
     const { own } = openingWithUnknownDecide();
     detailStatus = 401;
     render(<Page id={A} />);
@@ -300,7 +307,7 @@ describe('[#4227 G10b] an expired session: the re-login comes before the hand-of
     expect(sends()).toHaveLength(0);
   });
 
-  it('the unit is not lost while the session is expired, and the dialog back holds it (a close is still refused)', async () => {
+  it('the unit is not lost while the session is expired on the same page, and the dialog back holds it (a close is still refused)', async () => {
     const { own, sending } = openingWithUnknownDecide();
     detailStatus = 401;
     render(<Page id={A} />);
@@ -313,6 +320,29 @@ describe('[#4227 G10b] an expired session: the re-login comes before the hand-of
     expect(handoffUnitsOf(A).pending).toBe(sending);
     expect(document.querySelector('[data-testid="handoff-dialog"]')).not.toBeNull();
     expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+  });
+
+  it('(hard navigation) the re-login button navigates away for real, and the in-memory store of the next page is empty: the unit does not survive it (the same before G10)', async () => {
+    const { own } = openingWithUnknownDecide();
+    detailStatus = 401;
+    const loc = { href: '/worktrees/wt-a' };
+    vi.stubGlobal('location', loc);
+    render(<Page id={A} />);
+    await settle();
+    const button = document.querySelector('[data-testid="worktree-detail-relogin"]') as HTMLElement;
+    expect(button).not.toBeNull();
+    await act(async () => {
+      button.click();
+    });
+    // The click assigned `location.href`: a hard navigation (not router.push).
+    expect(loc.href).toBe('/login');
+    expect(handoffStoreSnapshot().opening?.token).toBe(own.token);
+
+    // What the browser does with a hard navigation: every module is loaded anew. The next page's store is empty.
+    vi.resetModules();
+    const fresh = await import('@/lib/handoff/close-rule');
+    expect(fresh.handoffStoreSnapshot().opening).toBeNull();
+    expect(fresh.handoffUnitsOf(A).pending).toBeNull();
   });
 
   it('(negative control) a healthy session draws the dialog as before', async () => {

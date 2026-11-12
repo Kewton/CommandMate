@@ -829,7 +829,9 @@ test.describe('G10: the hand-off dialog stays over the layout switch and the Loa
  * From the push to 3s the dialogs are counted in the browser every {@link SAMPLE_EVERY_MS}ms (no
  * `toBeVisible`, which would wait a gap away). The invariant asserted in (a)(b)(c): after the first
  * sample with a dialog there is no sample without one (0 transitions 1→0), one dialog at most, and
- * one by 1s. The value at 100ms is **recorded, not asserted** in (a) and (c): it is a known gap
+ * one by 1s. G10c (codex-2 P2-2): that is judged by each sample's MEASURED `elapsed`, not by the
+ * `at` it was scheduled for (a timer that fires late cannot pass as "on time"); a run in which any
+ * sample fired more than 100ms after its schedule is indeterminate and fails. The value at 100ms is **recorded, not asserted** in (a) and (c): it is a known gap
  * (in dev the route's load and its Suspense come before the page exists), noted in the test's
  * annotations — if it becomes 1 the note changes, so it is noticed. (b) asserts 100ms too.
  */
@@ -839,23 +841,65 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
   const SAMPLE_EVERY_MS = 50;
   const SAMPLE_UNTIL_MS = 3000;
 
+  /** A sample is judged by the `elapsed` it was really taken at, never by the `at` it was scheduled for. */
+  const DEADLINE_MS = 1000;
+  /** A sample that fires later than this after its schedule makes the run indeterminate (a failure, never green). */
+  const MAX_LATE_MS = 100;
+  /** Mutation knob for the judge's own check (G10c): every sample fires this many ms after its schedule. */
+  const SKEW_MS = Number(process.env.G10_SAMPLE_SKEW_MS ?? 0);
+
   type Sample = { at: number; elapsed: number; dialogs: number; path: string };
   type Summary = {
+    /** In the order they were really taken (by `elapsed`). */
     samples: Sample[];
-    /** The `at` of the first sample with a dialog (null: never). */
-    firstOneAt: number | null;
-    /** How many times a sample without a dialog follows one with a dialog. */
+    /** The `elapsed` of the first sample with a dialog (null: never). */
+    firstOneElapsed: number | null;
+    /** How many times a sample without a dialog follows one with a dialog (in the order taken). */
     backToZero: number;
     maxDialogs: number;
+    /** The largest `elapsed - at`; above {@link MAX_LATE_MS} the run proves nothing. */
+    maxLate: number;
+    indeterminate: boolean;
+    /** The dialogs of the last sample really taken by {@link DEADLINE_MS} (-1: none was). */
+    lastBeforeDeadline: number;
+    /** That sample's `elapsed`. */
+    lastBeforeDeadlineElapsed: number | null;
+    /** The sample scheduled for 100ms: its dialogs and the `elapsed` it was taken at. */
     at100: number;
-    at1000: number;
-    at3000: number;
+    at100Elapsed: number | null;
+    /** The last sample (scheduled for {@link SAMPLE_UNTIL_MS}). */
+    final: number;
   };
+
+  /** Pure: the judgement of a run from its samples, by their measured `elapsed`. */
+  function summarize(raw: Sample[]): Summary {
+    const samples = [...raw].sort((x, y) => x.elapsed - y.elapsed || x.at - y.at);
+    const first = samples.find((sample) => sample.dialogs >= 1);
+    let backToZero = 0;
+    for (let i = 1; i < samples.length; i++) if (samples[i - 1].dialogs >= 1 && samples[i].dialogs === 0) backToZero++;
+    const maxLate = Math.max(...samples.map((sample) => sample.elapsed - sample.at));
+    const inTime = samples.filter((sample) => sample.elapsed <= DEADLINE_MS);
+    const lastInTime = inTime.length > 0 ? inTime[inTime.length - 1] : null;
+    const hundred = samples.find((sample) => sample.at === 100);
+    return {
+      samples,
+      firstOneElapsed: first ? first.elapsed : null,
+      backToZero,
+      maxDialogs: Math.max(...samples.map((sample) => sample.dialogs)),
+      maxLate,
+      indeterminate: samples.length === 0 || maxLate > MAX_LATE_MS,
+      lastBeforeDeadline: lastInTime ? lastInTime.dialogs : -1,
+      lastBeforeDeadlineElapsed: lastInTime ? lastInTime.elapsed : null,
+      at100: hundred ? hundred.dialogs : -1,
+      at100Elapsed: hundred ? hundred.elapsed : null,
+      final: samples.length > 0 ? samples[samples.length - 1].dialogs : -1,
+    };
+  }
 
   /** Pushes to `to` and counts the dialogs every {@link SAMPLE_EVERY_MS}ms to {@link SAMPLE_UNTIL_MS}, in the page. */
   async function pushAndSample(page: Page, to: string): Promise<Summary> {
     const samples = await page.evaluate(
-      async ({ to, every, until }) => {
+      async ({ to, every, until, skew }) => {
         const router = (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router;
         const out: { at: number; elapsed: number; dialogs: number; path: string }[] = [];
         const start = performance.now();
@@ -870,27 +914,14 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
                 path: location.pathname,
               });
               if (ms === until) resolve();
-            }, ms);
+            }, ms + skew);
           }
         });
         return out;
       },
-      { to, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS },
+      { to, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS, skew: SKEW_MS },
     );
-    samples.sort((x, y) => x.at - y.at);
-    const first = samples.find((sample) => sample.dialogs >= 1);
-    let backToZero = 0;
-    for (let i = 1; i < samples.length; i++) if (samples[i - 1].dialogs >= 1 && samples[i].dialogs === 0) backToZero++;
-    const valueAt = (at: number): number => samples.find((sample) => sample.at === at)?.dialogs ?? -1;
-    return {
-      samples,
-      firstOneAt: first ? first.at : null,
-      backToZero,
-      maxDialogs: Math.max(...samples.map((sample) => sample.dialogs)),
-      at100: valueAt(100),
-      at1000: valueAt(1000),
-      at3000: valueAt(3000),
-    };
+    return summarize(samples);
   }
 
   /** A waiting for the agent, then B for 4 seconds (no unit: B does not show A's), then back. */
@@ -906,28 +937,35 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
 
   function record(name: string, summary: Summary): void {
     const line =
-      `first=${summary.firstOneAt}ms 1→0=${summary.backToZero} max=${summary.maxDialogs} ` +
-      `100ms=${summary.at100} 1s=${summary.at1000} 3s=${summary.at3000} | ` +
-      summary.samples.map((s) => `${s.at}:${s.dialogs}`).join(' ');
+      `first=${summary.firstOneElapsed}ms(elapsed) 1→0=${summary.backToZero} max=${summary.maxDialogs} ` +
+      `judged@${summary.lastBeforeDeadlineElapsed}ms=${summary.lastBeforeDeadline} 100ms-sample@${summary.at100Elapsed}ms=${summary.at100} ` +
+      `final=${summary.final} maxLate=${summary.maxLate}ms${summary.indeterminate ? ' INDETERMINATE' : ''} | ` +
+      summary.samples.map((s) => `${s.at}:${s.dialogs}@${s.elapsed}`).join(' ');
     test.info().annotations.push({ type: `G10 ${name}`, description: line });
     console.log(`[G10 ${name}] ${line}`);
   }
 
-  /** The invariant of (a)(b)(c): once drawn it stays; one dialog; drawn by 1s and at 3s. */
+  /**
+   * The invariant of (a)(b)(c), judged by the measured `elapsed`: a run whose samples fired more than
+   * {@link MAX_LATE_MS} after their schedule is indeterminate (it fails, never green); once drawn it
+   * stays (0 transitions 1→0); one dialog at most; a dialog seen by 1s, and the last sample really
+   * taken by 1s (and the last of all) shows one.
+   */
   function expectStays(summary: Summary): void {
+    expect(summary.indeterminate, `indeterminate: a sample fired ${summary.maxLate}ms after its schedule (limit ${MAX_LATE_MS}ms)`).toBe(false);
     expect(summary.backToZero).toBe(0);
     expect(summary.maxDialogs).toBeLessThanOrEqual(1);
-    expect(summary.firstOneAt).not.toBeNull();
-    expect(summary.firstOneAt as number).toBeLessThanOrEqual(1000);
-    expect(summary.at1000).toBe(1);
-    expect(summary.at3000).toBe(1);
+    expect(summary.firstOneElapsed).not.toBeNull();
+    expect(summary.firstOneElapsed as number).toBeLessThanOrEqual(DEADLINE_MS);
+    expect(summary.lastBeforeDeadline).toBe(1);
+    expect(summary.final).toBe(1);
   }
 
   /** The 100ms of (a) and (c): recorded, never asserted (a known gap; a note that changes when it is 1). */
   function noteKnownGap(name: string, summary: Summary): void {
     const description =
       summary.at100 === 0
-        ? `known gap (not asserted): 100ms=0, first at ${summary.firstOneAt}ms — in dev the route's load and its Suspense come before the page exists`
+        ? `known gap (not asserted): 100ms=0, first at ${summary.firstOneElapsed}ms (elapsed) — in dev the route's load and its Suspense come before the page exists`
         : `100ms=${summary.at100}: the known gap did not show in this run; if it holds, the note and the design's G10 line can go`;
     test.info().annotations.push({ type: `G10 ${name} 100ms`, description });
     console.log(`[G10 ${name} 100ms] ${description}`);
