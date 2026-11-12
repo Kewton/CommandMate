@@ -465,12 +465,15 @@ describe('dispatch main under the claude-3 reservation (#4243)', () => {
     expect(current().state).toBe('released');
   });
 
-  it('positive: a slow state check (300 s each, over 30 min in total) does not end the reservation', async () => {
+  it('positive: a slow first state check (31 min) does not end the reservation', async () => {
     let pmCode: boolean | null = null;
-    const base = stub({ issues: one, ls: [READY, BUSY, BUSY, BUSY, BUSY, BUSY, BUSY, READY] });
+    // Issue #4288: the ready wait after /clear is now bounded to 90 s of real time, so the slow
+    // part is the first state check (31 min); the later ones are instant.
+    const base = stub({ issues: one, ls: [READY, BUSY, READY] });
+    let lsSeen = 0;
     const exec: Exec = (command, args) => {
       if (command === 'commandmate' && args[0] === 'ls') {
-        clock += 300_000;
+        if (lsSeen++ === 0) clock += 31 * 60_000;
         if (clock - NOW > 30 * 60_000 && pmCode === null) {
           pmCode = acquireReservation(resEnv(), { holder: 'pm', label: 'late' }).ok;
         }

@@ -99,6 +99,16 @@ import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
 import {
+  askHandoffClose,
+  beginHandoffOpening,
+  closeHandoffOpening,
+  handoffStoreSnapshot,
+  handoffUnitsOf,
+  type HandoffClosePath,
+  type HandoffOpeningToken,
+  type SessionStopResult,
+} from '@/lib/handoff/close-rule';
+import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
 } from '@/lib/polling/auto-yes-enter-sent';
@@ -266,6 +276,12 @@ export const DETAIL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
 export const STALE_BANNER_FAILURE_THRESHOLD = 3;
 
 /**
+ * Issue #4227 (G-4): how long "end" waits for the mem mode before it opens the plain
+ * confirmation instead. The read only chooses the dialog; it must not make "end" hang.
+ */
+export const END_MODE_READ_TIMEOUT_MS = 5000;
+
+/**
  * Issue #2499: transport options every poll on this screen uses.
  *
  * **Who owns the retry.** #2498 put the retry ladder above and the consecutive-
@@ -318,6 +334,25 @@ function classifyKillFailure(err: unknown): 'ended' | 'refused' | 'errored' | 's
   if (err.status === 404) return 'ended';
   if (err.status >= 500) return 'errored';
   return err.status >= 400 ? 'refused' : 'silent';
+}
+
+/**
+ * Issue #4227 G10 (design §4.1.1): the store's live opening a page of `worktreeId` takes back —
+ * this worktree's own (with or without a unit), or another worktree's while it holds a decide
+ * being sent or unknown. Another worktree's opening without a unit is not taken (its stop or
+ * cancel ends by its own answer). Reads the store only: the page's first render and its effect
+ * ask the same condition.
+ */
+function handoffTakeBackOf(worktreeId: string): { worktreeId: string; target: SessionKillTarget; token: HandoffOpeningToken } | null {
+  const live = handoffStoreSnapshot().opening;
+  if (live === null || live.closed) return null;
+  const liveTool = live.target.cliToolId;
+  if (liveTool === undefined || !isCliToolType(liveTool)) return null;
+  if (live.worktreeId !== worktreeId) {
+    const units = handoffUnitsOf(live.worktreeId);
+    if (units.inflight === null && units.pending === null) return null;
+  }
+  return { worktreeId: live.worktreeId, target: { ...live.target, cliToolId: liveTool }, token: live.token };
 }
 
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
@@ -1819,10 +1854,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setKillTarget({ cliToolId, instanceId, label });
   }, []);
 
-  /** Issue #1171: execute the kill for the snapshotted target only. */
-  const handleKillConfirm = useCallback(async (): Promise<void> => {
-    const target = killTarget;
-    if (!target || isKillPendingRef.current) return;
+  /**
+   * Issue #1171: execute the kill for the snapshotted target only. Issue #4227: the body is
+   * the existing stop as it was, taken out as `stopSession(target)` so the hand-off's stop
+   * button (G-4) runs the same one — not a copy — for the target it snapshotted. pr2e (codex
+   * P2-2): it says how it ended, so the hand-off's plain stop says "stopped" only when it did.
+   */
+  const stopSession = useCallback(async (target: SessionKillTarget | null): Promise<SessionStopResult> => {
+    if (!target || isKillPendingRef.current) return 'unknown';
     isKillPendingRef.current = true;
     setIsKillPending(true);
 
@@ -1859,15 +1898,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // name); alias instances terminate only that instance's session.
       await worktreeApi.killSession(worktreeId, target.cliToolId, target.instanceId);
       await finishEnded();
+      return 'stopped';
     } catch (err) {
       // Issue #1171: a 404 means the session already ended (natural-termination
       // race). The goal is achieved, so re-sync and close rather than error.
       const failure = classifyKillFailure(err);
       if (failure === 'ended') {
         await finishEnded();
+        return 'stopped';
       } else if (failure === 'refused') {
         // Keep the target so the user can retry; surface a failure toast.
         showToast(tWorktree('session.failedToKill'), 'error');
+        return 'refused';
       } else {
         // Issue #4160: this answer says nothing about the session, so what is running
         // now decides. Another worktree is on screen after a switch and this one's
@@ -1875,22 +1917,176 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         const running = isStillOnScreen() ? await readRunningInstances(worktreeId) : null;
         if (running === null) {
           showToast(tCommon('sessionKill.outcomeUnknown', { label: target.label }), 'warning');
+          return 'unknown';
         } else if (running[target.instanceId] !== true) {
           await finishEnded();
+          return 'stopped';
         } else if (failure === 'errored') {
           showToast(tWorktree('session.failedToKill'), 'error');
+          return 'failed';
         } else {
           // Issue #4160: past the deadline the kill may still be working (a tool's
           // graceful exit takes seconds), so this is not called a failure. Pressing
           // again is safe: a session that has gone by then answers 404.
           showToast(tCommon('sessionKill.inProgress', { label: target.label }), 'warning');
+          return 'unknown';
         }
       }
     } finally {
       isKillPendingRef.current = false;
       setIsKillPending(false);
     }
-  }, [killTarget, worktreeId, actions, fetchWorktree, showToast, tWorktree, tCommon]);
+  }, [worktreeId, actions, fetchWorktree, showToast, tWorktree, tCommon]);
+
+  const handleKillConfirm = useCallback(async (): Promise<void> => {
+    await stopSession(killTarget);
+  }, [killTarget, stopSession]);
+
+  /**
+   * Issue #4227 (G-4, design `mem-ui-4227.md` §4.1): "end" on a branch set to be attended
+   * (`popup`) with mode `on` opens the hand-off dialog for the snapshotted target instead
+   * of the plain confirmation; anything else (unattended, mode not `on`, or the mode not
+   * readable) opens the plain confirmation as before. The hand-off never kills: its stop
+   * button runs {@link stopForHandoff}, the existing stop, from its handler only.
+   */
+  /**
+   * G10 (G-PR4, the UAT of G-PR3 (差し戻し 4)): a page made anew (Next keys it by `[id]`, AppShell
+   * draws it under another parent for PC and phone) starts from the opening it would take back
+   * ({@link handoffTakeBackOf}, the effect's own condition) instead of from nothing, so the dialog
+   * is drawn by the first render rather than after the effect. Read once per mount (React's
+   * StrictMode may run it twice: it reads only — nothing begins, closes or patches in render).
+   */
+  const [initialHandoff] = useState(() => handoffTakeBackOf(worktreeId));
+  const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(initialHandoff?.target ?? null);
+  /** Mirrors `handoffTarget` for the paths below, read in the same tick. */
+  const handoffTargetRef = useRef<SessionKillTarget | null>(initialHandoff?.target ?? null);
+  /** pr2f: the opening {@link openHandoff} began; the page's closes name it (never a newer one). */
+  const handoffOpeningRef = useRef<HandoffOpeningToken | null>(initialHandoff?.token ?? null);
+  /**
+   * Issue #4227 pr2d (design §4.1.1): the page's only way of closing the hand-off. It asks the
+   * one rule (`closeHandoffOpening`, which asks `askHandoffClose`) with the path's name: while the
+   * dialog stops, sends or holds an unknown decide, or waits for its cancel's answer, it stays
+   * (and says why). The rule reads the store of `@/lib/handoff/close-rule` (pr2e), so a dialog
+   * not drawn at the moment (the page's Loading) holds as much as one drawn. The guard
+   * `handoff-close-paths-4227` keeps `setHandoffTarget(null)` here only. pr2f: it names the
+   * opening it began; `stale` (another opening began since, e.g. another page's) means its own is
+   * over already — its target goes, and the other opening is not touched (its units stay in the store).
+   */
+  const closeHandoffBy = useCallback((path: HandoffClosePath): boolean => {
+    if (handoffTargetRef.current === null) return true;
+    const opening = handoffOpeningRef.current;
+    const answer = opening === null ? null : closeHandoffOpening(opening, path);
+    if (answer !== null && answer !== 'stale') return false;
+    handoffOpeningRef.current = null;
+    handoffTargetRef.current = null;
+    setHandoffTarget(null);
+    return true;
+  }, []);
+  const openHandoff = useCallback((target: SessionKillTarget, resumed: HandoffOpeningToken | null = null): void => {
+    // pr2e: a new opening in the store (the request is made by the dialog for it); the units of
+    // the worktree are not touched. G10: `resumed` is the store's live opening taken back by a
+    // page made again (no new opening: the dialog finds it and makes nothing again).
+    handoffOpeningRef.current = resumed ?? beginHandoffOpening(worktreeId, target).token;
+    handoffTargetRef.current = target;
+    setHandoffTarget(target);
+  }, [worktreeId]);
+  /**
+   * pr3c (review B P2-1): the worktree the effect below last ran for. A new mount starts at null,
+   * so only a change of `worktreeId` on a mounted page is a switch — not the page made again, nor
+   * React's StrictMode running a new mount's effects twice (dev, the e2e's `npm run dev`).
+   */
+  const handoffEffectWorktreeRef = useRef<string | null>(null);
+  useEffect(() => {
+    // G10 (design §4.1.1, the UAT of G-PR1+G-PR2): the page itself is made again when the layout
+    // switches (AppShell draws its children under another parent for PC and phone) and when the
+    // worktree changes (Next keys the page by its `[id]`), so this hook mounts anew with no target
+    // while the store keeps the opening. Taken back here, the dialog is drawn open again without a
+    // person's press: this worktree's live opening (with or without a unit), and another
+    // worktree's while it holds a decide being sent or unknown (the invariant's units: they wait
+    // for the person's choice) — asked as a switch below, the rule keeps it (foreign). Another
+    // worktree's stop or cancel ends by its own answer and is not taken back (its page may begin
+    // its own opening meanwhile, pr2f).
+    const switched = handoffEffectWorktreeRef.current !== null && handoffEffectWorktreeRef.current !== worktreeId;
+    handoffEffectWorktreeRef.current = worktreeId;
+    const live = handoffStoreSnapshot().opening;
+    // pr3c: this worktree's live opening, already taken back by this page (StrictMode's second
+    // run, or back on the opening's own worktree; G10: or by the first render's initial state):
+    // nothing to do — never closed by the rerun.
+    if (live !== null && !live.closed && live.worktreeId === worktreeId && handoffTargetRef.current !== null && handoffOpeningRef.current === live.token) return;
+    const back = handoffTakeBackOf(worktreeId);
+    if (handoffTargetRef.current === null && back !== null) {
+      if (!closeHandoffBy('page-end')) return;
+      openHandoff(back.target, back.token);
+      if (back.worktreeId === worktreeId) return;
+    }
+    // pr2d: a switch of worktree asks the rule too. Kept, the dialog shows that it is another
+    // worktree's and runs nothing of it here but the unit's drop and closing. pr3c: asked only
+    // when the worktree did change on this page (a page made again starts with no target).
+    if (switched) closeHandoffBy('worktree-switch');
+  }, [worktreeId, closeHandoffBy, openHandoff]);
+  /**
+   * The hand-off's "end" for an explicit target snapshot: the PC split's own End (and its
+   * restart), like {@link openKillConfirm}. The mode is read once per press; a read that
+   * fails, answers anything but `on` + `popup`, or takes longer than
+   * {@link END_MODE_READ_TIMEOUT_MS} opens the plain confirmation, so "end" never hangs on it.
+   */
+  /**
+   * Issue #4227 pr2c (review B P3-5): one read at a time. A press while the mode is being read
+   * is ignored, so two answers that differ (one past its deadline, one `on`) cannot open both
+   * the plain confirmation and the hand-off; and whichever opens closes the other.
+   */
+  const endReadingRef = useRef<object | null>(null);
+  useEffect(() => {
+    // Another worktree's read answers nothing here (`startedFor` below): it holds no press.
+    endReadingRef.current = null;
+  }, [worktreeId]);
+  const openEnd = useCallback(async (target: SessionKillTarget): Promise<void> => {
+    if (endReadingRef.current !== null) return;
+    // pr2d (PM Claude pr2c P3-2): a hand-off that holds something is not replaced by another
+    // "end" (asked again after the read, which may take seconds).
+    if (handoffTargetRef.current !== null && askHandoffClose('page-end') !== null) return;
+    const reading = {};
+    endReadingRef.current = reading;
+    const startedFor = worktreeId;
+    let attended = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), END_MODE_READ_TIMEOUT_MS);
+    try {
+      const response = await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/mem/mode`, { signal: controller.signal });
+      const body = (await response.json()) as { ok?: boolean; mode?: string; features?: { popup?: boolean } };
+      attended = response.ok && body.ok === true && body.mode === 'on' && body.features?.popup === true;
+    } catch {
+      attended = false;
+    } finally {
+      clearTimeout(timer);
+      if (endReadingRef.current === reading) endReadingRef.current = null;
+    }
+    if (startedFor !== worktreeIdRef.current) return;
+    if (attended) {
+      // pr2d (PM Claude pr2c P3-2 (b)): a kill in flight keeps its confirmation (Issue #1171),
+      // and the hand-off does not open over it (before, both were open).
+      if (isKillPendingRef.current) return;
+      if (!closeHandoffBy('page-end')) return;
+      setKillTarget(null);
+      openHandoff(target);
+    } else {
+      if (!closeHandoffBy('page-end')) return;
+      setKillTarget(target);
+    }
+  }, [worktreeId, closeHandoffBy, openHandoff]);
+  /** The DesktopHeader / mobile End: the active instance, snapshotted at press time. */
+  const openActiveEnd = useCallback(async (): Promise<void> => {
+    const instanceId = activeInstanceIdRef.current;
+    const cliToolId = activeCliTabRef.current;
+    const label = getActiveInstanceLabel(agentInstancesRef.current, instanceId, cliToolId);
+    await openEnd({ cliToolId, instanceId, label });
+  }, [openEnd]);
+  /** The dialog's `onClose`: the dialog asked the rule already; the page asks again. */
+  const closeHandoff = useCallback((): void => {
+    closeHandoffBy('dialog');
+  }, [closeHandoffBy]);
+  /** The existing stop for the hand-off's target (G-4's stop button), and how it ended. */
+  const stopForHandoff = useCallback(async (): Promise<SessionStopResult> => stopSession(handoffTarget), [handoffTarget, stopSession]);
 
   /** Issue #1171: cancel — a no-op while a kill POST is in flight (keeps target). */
   const handleKillCancel = useCallback((): void => {
@@ -2418,6 +2614,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     openKillConfirm,
     openActiveKillConfirm,
     killTarget,
+    // Issue #4227 (G-4): the hand-off before ending, for the screens that render it.
+    openActiveEnd,
+    openEnd,
+    handoffTarget,
+    closeHandoff,
+    stopForHandoff,
     isKillPending,
     handleLoadContent,
     handleLoadError,

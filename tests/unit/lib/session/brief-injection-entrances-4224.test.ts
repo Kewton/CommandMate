@@ -96,6 +96,11 @@ const ENTRANCES: Record<string, Entrance> = {
     send: 'auto',
   },
   'send route, force (`--with-brief`)': { writes: ['openBoundary', 'claimBoundary', 'settleBoundaryClaim', 'getOrCreateWorktreeIncarnation'], send: 'force' },
+  // Issue #4227 (S-B): the screen's G-3 "don't read" — the shown row reserved, then used up as declined.
+  'send route, decline (screen G-3 "don\u2019t read")': {
+    writes: ['claimBoundary', 'settleDeclinedClaim', 'settleBoundaryClaim', 'getOrCreateWorktreeIncarnation'],
+    heldBy: 'session-brief-entrances-4274 (the decline row) and session-brief-choice-4227 (H21)',
+  },
   'send route, skip (`--no-brief`)': { writes: [], heldBy: 'session-brief-boundaries-4274 (`--no-brief` once); this file (c) through auto after it' },
   'Timer and relay delivery (never)': { writes: [], heldBy: 'brief-call-chain-forms-4224 R6 (no brief named) and session-brief-entrances-4274 (d)' },
   'commandmate brief / --session-start (route GET)': { writes: [], heldBy: 'brief-session-start-4224 K5 (no ledger, no reservation) and brief-retry-paths-4223' },

@@ -18,6 +18,52 @@ import path from 'path';
 import { openMigratedFileDb } from '@tests/helpers/migrated-file-db';
 import { makeTempDir, removeTempDir } from '@tests/helpers/temp-dir';
 
+/**
+ * Issue #4227 G-PR2 (PM P3-a): the mutation of the D6 rows' control — the check of the
+ * mark of a person's approval removed (`approvalMarkHolds` always true, and its use never
+ * refused), to show it is that check that refuses a changed or used approval.
+ */
+const markMutation = { removed: false };
+/**
+ * Issue #4227 pr2c (A P3-2): one check of `approvalMarkHolds` dropped alone — the mark's
+ * write fitted to the proposal (`op`), the request read as `applying` under the mark's token
+ * (`request`), or the write's worktree and instance fitted to the request's (`target`) —
+ * by handing the real function what makes that check pass and nothing else.
+ */
+const markMismatchMutation: { dropped: 'op' | 'request' | 'target' | null } = { dropped: null };
+vi.mock('@/lib/db/handoff-db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db/handoff-db')>();
+  const mutated = (...args: Parameters<typeof actual.approvalMarkHolds>): boolean => {
+    const [database, mark, write] = args;
+    const proposal = actual.getHandoffProposal(database, mark.proposalId);
+    const request = proposal ? actual.getHandoffRequest(database, proposal.requestId) : null;
+    if (!proposal || !request) return actual.approvalMarkHolds(...args);
+    switch (markMismatchMutation.dropped) {
+      case 'op':
+        return actual.approvalMarkHolds(database, mark, { ...write, op: proposal.op, itemId: proposal.itemId });
+      case 'target':
+        return actual.approvalMarkHolds(database, mark, { ...write, worktreeId: request.targetWorktreeId, instanceId: request.instanceId });
+      case 'request': {
+        // The request read as it would be under the mark (applying, the mark's token), then put back.
+        const saved = database.prepare('SELECT state, apply_token FROM mem_handoff_requests WHERE id = ?').get(request.id) as { state: string; apply_token: string | null };
+        database.prepare("UPDATE mem_handoff_requests SET state = 'applying', apply_token = ? WHERE id = ?").run(mark.applyToken, request.id);
+        try {
+          return actual.approvalMarkHolds(...args);
+        } finally {
+          database.prepare('UPDATE mem_handoff_requests SET state = ?, apply_token = ? WHERE id = ?').run(saved.state, saved.apply_token, request.id);
+        }
+      }
+      default:
+        return actual.approvalMarkHolds(...args);
+    }
+  };
+  return {
+    ...actual,
+    approvalMarkHolds: (...args: Parameters<typeof actual.approvalMarkHolds>) => (markMutation.removed ? true : mutated(...args)),
+    consumeApprovalMark: (...args: Parameters<typeof actual.consumeApprovalMark>) => (markMutation.removed ? true : actual.consumeApprovalMark(...args)),
+  };
+});
+
 vi.mock('@/lib/logger', () => ({
   createLogger: () => {
     const quiet = () => undefined;
@@ -26,6 +72,15 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { createRepository } from '@/lib/db/db-repository';
+import {
+  changeHandoffRequest,
+  consumeApprovalMark,
+  getHandoffProposal,
+  insertHandoffProposal,
+  insertHandoffRequest,
+  setHandoffProposalState,
+  type HandoffApprovalMark,
+} from '@/lib/db/handoff-db';
 import { closeMemItemByCondition, getMemRecord, getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
 import { deleteWorktreesByIds } from '@/lib/db/worktree-db';
 import { getOrCreateWorktreeIncarnation } from '@/lib/mem/incarnation';
@@ -172,6 +227,81 @@ const humanItem = async (text: string, kind: 'note' | 'next' = 'note') => {
   expect(item.createdBy).toBe('human');
   return { id: item.id, version: item.version };
 };
+/**
+ * Issue #4227 G-PR2 (PM P3-a): a hand-off proposal to update `made`, approved by a person
+ * (the request `applying` under a decide's token, the proposal `approved` with the
+ * fingerprint the person saw), confirmed through the one entrance as the proposer with
+ * the mark. `tamper`: the proposal's content changed after the approval. `used`: the mark
+ * was used once already. `mark: false`: a proposer with no approval at all.
+ */
+let proposals = 0;
+/**
+ * Issue #4227 pr2c (A P3-2): a mark that is the proposal's own (approved, the fingerprint the
+ * person saw, unused) but does not fit the write: `proposalOp` / `proposalItemId` (the proposal
+ * is of another op or item), `requestAfter` (the request no longer `applying` under the token),
+ * `requestWorktree` / `requestInstance` (the request is of another worktree or instance).
+ */
+interface MarkMismatch {
+  proposalOp?: 'close';
+  proposalItemId?: string;
+  requestAfter?: 'cancelled' | 'other-token';
+  requestWorktree?: string;
+  requestInstance?: string;
+}
+async function proposalWrite(
+  made: { id: string; version: number },
+  text: string,
+  options: { tamper?: boolean; used?: boolean; mark?: boolean } & MarkMismatch = {}
+) {
+  proposals += 1;
+  const now = Date.now();
+  const token = `tok-${proposals}`;
+  const requestId = `req-${proposals}`;
+  insertHandoffRequest(db, {
+    id: requestId,
+    repositoryId: repoA,
+    branch: 'feature/x',
+    detached: false,
+    targetWorktreeId: options.requestWorktree ?? WT,
+    targetWorktreeIncarnation: getOrCreateWorktreeIncarnation(db, WT),
+    instanceId: options.requestInstance ?? 'claude',
+    cliToolId: 'claude',
+    instanceIncarnation: null,
+    instanceOnRoster: false,
+    boundaryId: `boundary-${proposals}`,
+    agentDeadlineAt: now + 60_000,
+    expiresAt: now + 3_600_000,
+    now,
+  });
+  changeHandoffRequest(db, requestId, null, { state: 'applying', applyToken: token }, now);
+  const proposal = insertHandoffProposal(db, {
+    id: `prop-${proposals}`,
+    requestId,
+    op: options.proposalOp ?? 'update',
+    itemId: options.proposalItemId ?? made.id,
+    kind: 'note',
+    baseVersion: made.version,
+    payload: options.proposalOp === 'close' ? { reason: text } : { text },
+    authorInstanceId: 'claude',
+    authorIncarnation: null,
+    checkedRulesVersion: 1,
+    now,
+  });
+  setHandoffProposalState(db, proposal.id, ['proposed'], { state: 'approved', applyToken: token, approvedFingerprint: proposal.fingerprint }, now);
+  const mark: HandoffApprovalMark = { proposalId: proposal.id, applyToken: token, fingerprint: proposal.fingerprint };
+  if (options.tamper) db.prepare('UPDATE mem_handoff_proposals SET base_version = base_version + 1 WHERE id = ?').run(proposal.id);
+  if (options.used) expect(consumeApprovalMark(db, mark, { itemId: 'elsewhere', version: 1 }, now)).toBe(true);
+  if (options.requestAfter === 'cancelled') db.prepare("UPDATE mem_handoff_requests SET state = 'cancelled', apply_token = NULL WHERE id = ?").run(requestId);
+  if (options.requestAfter === 'other-token') db.prepare("UPDATE mem_handoff_requests SET apply_token = 'tok-other' WHERE id = ?").run(requestId);
+  const outcome = await memWriteFromScreen(
+    db,
+    screenRequest(),
+    WT,
+    { op: 'update', author: 'proposer', itemId: made.id, body: { instanceId: 'claude', ifVersion: made.version, text }, ...(options.mark === false ? {} : { approval: mark }) },
+    deps()
+  );
+  return { outcome, proposalId: proposal.id };
+}
 const decisionIs = (state: string) => (made: { id: string; version: number } | undefined) =>
   itemIs('id = ? AND state = ? AND version = ?', made!.id, state, made!.version + 1);
 
@@ -290,6 +420,22 @@ const ENTRANCES: Record<string, Entrance> = {
     before: () => humanItem('a person wrote it to close'),
     request: (made) => screenWrite('close', { ifVersion: made!.version }, made!.id),
     landed: (made) => itemIs("id = ? AND state = 'closed' AND created_by = 'human'", made!.id),
+  },
+  // Issue #4227 G-PR2 (PM P3-a): the confirmation of a hand-off proposal a person approved
+  // (`decide`'s one call), and a proposer with no approval (written as the agent it is).
+  'proposal-approved-update': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => addNote('to confirm a proposal on'),
+    request: async (made) => (await proposalWrite(made!, 'proposal approved')).outcome,
+    landed: (made) => itemIs("id = ? AND text = 'proposal approved' AND updated_by = 'human'", made!.id),
+  },
+  'proposal-update': {
+    fn: 'memWriteFromScreen',
+    mode: 'on',
+    before: () => addNote('to propose on without approval'),
+    request: async (made) => (await proposalWrite(made!, 'proposal unapproved', { mark: false })).outcome,
+    landed: (made) => itemIs("id = ? AND text = 'proposal unapproved' AND updated_by = 'agent'", made!.id),
   },
   'cli-purge': {
     fn: 'memPurge',
@@ -552,17 +698,72 @@ describe('a decision moves only when the branch is on and the version is the one
  * are unchanged (the `cli-*` rows of the table above, and the control here).
  */
 describe('an item a person wrote is changed and closed by a person only (Epic #4220 D6, Issue #4227)', () => {
-  const D6_ROWS: Record<string, { refused: boolean; kind?: 'note' | 'next' }> = {
+  /**
+   * Issue #4227 G-PR2 (PM P3-a): the four rows of the hand-off's confirmation. A proposal a
+   * person approved is a person's entrance (lands on a person's item); a proposer with no
+   * approval, a proposal changed after its approval and an approval used once already are
+   * refused (`not_owner` / `not_approved`). The last two have their own request (they are
+   * always refused, so they are not rows of the re-creation table); the mark is judged by the
+   * stored rows only. Each is shown to rest on the check by the mutation below.
+   */
+  const D6_ROWS: Record<
+    string,
+    { refused: boolean; kind?: 'note' | 'next'; code?: string; request?: (made: { id: string; version: number }, key: string) => Promise<{ status: number; body: unknown }> }
+  > = {
     'cli-update': { refused: true },
     'cli-close': { refused: true },
     'condition-update': { refused: true, kind: 'next' },
     'screen-update': { refused: false },
     'screen-close': { refused: false },
+    'proposal-approved-update': { refused: false },
+    'proposal-update': { refused: true },
+    'proposal-changed-after-approval': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'changed after approval', { tamper: true })).outcome,
+    },
+    'proposal-approval-used-twice': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'second use of an approval', { used: true })).outcome,
+    },
+    // Issue #4227 pr2c (A P3-2): each check of `approvalMarkHolds` besides the content and the
+    // use, called directly (no decide, no fence before it). Each lands without its check.
+    'proposal-mark-of-another-op': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'mark of a close', { proposalOp: 'close' })).outcome,
+    },
+    'proposal-mark-of-another-item': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'mark of another item', { proposalItemId: 'mem-another-item' })).outcome,
+    },
+    'proposal-mark-request-cancelled': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'request cancelled', { requestAfter: 'cancelled' })).outcome,
+    },
+    'proposal-mark-request-other-token': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'request of another decide', { requestAfter: 'other-token' })).outcome,
+    },
+    'proposal-mark-of-another-worktree': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'request of another worktree', { requestWorktree: 'wt-another' })).outcome,
+    },
+    'proposal-mark-of-another-instance': {
+      refused: true,
+      code: 'not_approved',
+      request: async (made) => (await proposalWrite(made, 'request of another instance', { requestInstance: 'codex' })).outcome,
+    },
   };
 
   it('names the agent and the person entrances that take an item (each a row of the table above)', () => {
-    for (const key of Object.keys(D6_ROWS)) expect(ENTRANCES[key]?.before).toBeTypeOf('function');
-    const rowFns = new Set(Object.keys(D6_ROWS).map((key) => ENTRANCES[key].fn));
+    for (const key of Object.keys(D6_ROWS)) expect(D6_ROWS[key].request ?? ENTRANCES[key]?.before).toBeTypeOf('function');
+    const rowFns = new Set(Object.keys(D6_ROWS).filter((key) => !D6_ROWS[key].request).map((key) => ENTRANCES[key].fn));
     expect([...rowFns].sort()).toEqual(['memCloseItem', 'memUpdateItem', 'memWriteFromScreen']);
   });
 
@@ -571,15 +772,85 @@ describe('an item a person wrote is changed and closed by a person only (Epic #4
     makeWorktree();
     setMode('on');
     const made = await humanItem(`person ${key}`, row.kind);
-    const outcome = await ENTRANCES[key].request(made);
+    const outcome = row.request ? await row.request(made, key) : await ENTRANCES[key].request(made);
     if (row.refused) {
       expect(outcome.status).toBe(409);
-      expect((outcome.body as { code: string }).code).toBe('not_owner');
+      expect((outcome.body as { code: string }).code).toBe(row.code ?? 'not_owner');
       expect(itemIs("id = ? AND version = ? AND state = 'open' AND text = ?", made.id, made.version, `person ${key}`)).toBe(true);
     } else {
       expect(outcome.status).toBeLessThan(300);
       expect(ENTRANCES[key].landed(made)).toBe(true);
     }
+  });
+
+  it('(mutation, PM P3-a) without the check of the mark, a changed or used approval writes a person’s item', async () => {
+    makeWorktree();
+    setMode('on');
+    markMutation.removed = true;
+    try {
+      const changed = await humanItem('person mutation changed');
+      const tampered = await proposalWrite(changed, 'changed after approval', { tamper: true });
+      expect(tampered.outcome.status).toBeLessThan(300);
+      expect(itemIs("id = ? AND text = 'changed after approval'", changed.id)).toBe(true);
+      // One open hand-off request per instance: the first one is over.
+      db.prepare("UPDATE mem_handoff_requests SET state = 'cancelled', apply_token = NULL").run();
+      const used = await humanItem('person mutation used');
+      const twice = await proposalWrite(used, 'second use of an approval', { used: true });
+      expect(twice.outcome.status).toBeLessThan(300);
+      expect(itemIs("id = ? AND text = 'second use of an approval'", used.id)).toBe(true);
+    } finally {
+      markMutation.removed = false;
+    }
+  });
+
+  /**
+   * Issue #4227 pr2c (A P3-2): the mismatched marks rest on their own check of
+   * `approvalMarkHolds` (op・item, the request `applying` under the token, the worktree and
+   * instance). Each check is dropped alone here (`markMismatchMutation`, the rest of the
+   * function kept): the write that was `not_approved` above lands.
+   */
+  it.each([
+    ['op・item', 'op', { proposalOp: 'close' }],
+    ['op・item', 'op', { proposalItemId: 'mem-another-item' }],
+    ['request state and token', 'request', { requestAfter: 'cancelled' }],
+    ['request state and token', 'request', { requestAfter: 'other-token' }],
+    ['worktree and instance', 'target', { requestWorktree: 'wt-another' }],
+    ['worktree and instance', 'target', { requestInstance: 'codex' }],
+  ] as const)('(mutation, A P3-2) without the check of %s the mismatched mark %j writes', async (_name, check, mismatch) => {
+    makeWorktree();
+    setMode('on');
+    markMismatchMutation.dropped = check;
+    try {
+      const made = await humanItem(`person mismatch ${JSON.stringify(mismatch)}`);
+      const written = await proposalWrite(made, 'written by a mismatched mark', mismatch as MarkMismatch);
+      expect(written.outcome.status).toBeLessThan(300);
+    } finally {
+      markMismatchMutation.dropped = null;
+    }
+  });
+
+  it('(PM P3-a) the mark is used once: confirmed, the proposal is `applied` and the same mark refuses after', async () => {
+    makeWorktree();
+    setMode('on');
+    const made = await humanItem('person once');
+    const first = await proposalWrite(made, 'confirmed once');
+    expect(first.outcome.status).toBeLessThan(300);
+    expect(getHandoffProposal(db, first.proposalId)).toMatchObject({ state: 'applied', applyToken: null });
+    const again = await memWriteFromScreen(
+      db,
+      screenRequest(),
+      WT,
+      {
+        op: 'update',
+        author: 'proposer',
+        itemId: made.id,
+        body: { instanceId: 'claude', ifVersion: made.version + 1, text: 'again with the same mark' },
+        approval: { proposalId: first.proposalId, applyToken: `tok-${proposals}`, fingerprint: getHandoffProposal(db, first.proposalId)!.fingerprint },
+      },
+      deps()
+    );
+    expect((again.body as { code: string }).code).toBe('not_approved');
+    expect(itemIs("id = ? AND text = 'confirmed once'", made.id)).toBe(true);
   });
 
   it('(control) the same agent entrances still change and close the agent’s own item', async () => {

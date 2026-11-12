@@ -51,6 +51,10 @@ import {
   take,
   writeOwner,
 } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-extract-4288-"]);
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;
@@ -429,9 +433,14 @@ describe('the scan: a call inside an observer whose failure nothing reads (P1)',
   });
 
   it('self-test (bash): a multi-line substitution (an awk program) is checked at its closing line', () => {
-    const legacy = read(SOURCES.bash).replace(`    }') || lps_val=""\n`, `    }')\n`);
-    expect(legacy).not.toBe(read(SOURCES.bash));
+    // #4288 PR1a-f: lock_pid_start_ms no longer parses etime with a multi-line awk (the strict parse is
+    // lock_etime_ms, pure arithmetic), so the program is written into an observer of the test's own.
+    const program = `lock_pid_start_ms() { # <pid>\n  lps_val=$(printf '%s\\n' "$1" | awk '\n    NF == 1 {\n      print $1\n    }')\n  echo "$lps_val"\n}\n`;
+    const legacy = `${read(SOURCES.bash)}\n${program}`;
     expect(scanUncheckedCalls('bash', legacy).map((f) => f.split(':')[0])).toEqual(['lock_pid_start_ms']);
+    const checked = `${read(SOURCES.bash)}\n${program.replace(`    }')\n`, `    }') || lps_val=""\n`)}`;
+    expect(checked).not.toBe(legacy);
+    expect(scanUncheckedCalls('bash', checked)).toEqual([]);
   });
 
   it.each(['ts', 'sync'] as const)('self-test (%s): a throwing call moved out of the observer\'s try is found', (impl) => {

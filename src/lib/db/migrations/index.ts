@@ -55,6 +55,8 @@ import { v68_migrations } from './v68-session-brief-boundaries';
 // Issue #4225: the promote path of mem (previews, operations, attempts).
 import { v69_migrations } from './v69-mem-promote';
 import { v70_migrations } from './v70-suggestion-shown';
+// Issue #4227 (G-PR2): the hand-off of a session that ends (requests, proposals).
+import { v71_migrations } from './v71-mem-handoff';
 
 /**
  * Complete ordered list of all migrations.
@@ -113,4 +115,5 @@ export const migrations: Migration[] = [
   ...v68_migrations,
   ...v69_migrations,
   ...v70_migrations,
+  ...v71_migrations,
 ];

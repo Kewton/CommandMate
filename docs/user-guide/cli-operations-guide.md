@@ -80,6 +80,7 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate instances`](#commandmate-instances) | エージェントインスタンス（roster）の一覧・追加・削除・alias変更 |
 | [`commandmate roles`](#commandmate-roles) | ロールの定義と、ツール・リポジトリごとの既定の設定 |
 | [`commandmate mem`](#commandmate-mem) | セッションをまたぐ作業の項目（now・待ち・決定など）の読み書き。mode は読むだけ |
+| [`commandmate handoff`](#commandmate-handoff) | セッションを終える前の引き継ぎで、Agent が mem の更新を提案として出す（確定は人が画面で） |
 | [`commandmate brief`](#commandmate-brief) | 再開のときに読む要約（導いた状態と mem の項目）を UTF-8 のバイト数の予算の内で出す |
 | [`commandmate agents`](#commandmate-agents) | エージェント CLI の版表示と更新（pane の外で `codex update` を実行） |
 | [`commandmate report`](#commandmate-report) | 日次レポートの生成・表示・一覧、Eval メトリクス集計 |
@@ -1012,7 +1013,7 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `base-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。`base-withholds`（Issue #3822）は契約より前の基本の判定で見送ったことを表し、契約の有無によらない（今は `allow-once-unidentified` だけ。契約を見直しても答えは戻らない）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
-| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`prompt-unreported` の本文は提出済みのことがある（`SessionStart` だけ届き http の `UserPromptSubmit` が届かない環境など）ので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる。投げる直前に画面を 1 回読み直し、生成中なら `sent` にする（Issue #4048）。Enter の後に待つ間にセッションが作り直されたときは `not-sent`（`session-replaced`）ではなく `indeterminate`（旧プロセスが受け取った可能性がある。Issue #4048）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる（claude だけ・その本文の送信の記録だけ。claude 以外は warn のログだけで `lastSend` は変えない。Issue #4048）。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`prompt-unreported` の本文は提出済みのことがある（`SessionStart` だけ届き http の `UserPromptSubmit` が届かない環境など）ので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる。投げる直前に画面を 1 回読み直し、生成中なら `sent` にする（Issue #4048）。Enter の後に待つ間にセッションが作り直されたときは `not-sent`（`session-replaced`）ではなく `indeterminate`（旧プロセスが受け取った可能性がある。Issue #4048）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる（claude だけ・その本文の送信の記録だけ。claude 以外は warn のログだけで `lastSend` は変えない。Issue #4048）。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、エージェントが終わりペインがシェルに戻っていたため何も打たなかった `agent-not-in-foreground`（Issue #4300。`commandmate instances <worktree-id> kill <instance-id>` でそのインスタンスのセッションを止めてから送り直す）、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
 
 **`lastSend` は「最後に終わった送信」ではありません（Issue #4065）。** 送信が並んだときは、入力ロックを渡された順（世代）で決めます。読む側の要求自身の結末とは限りません（自分の結末は `send` のエラーと送信 API の `sendOutcome` で見ます）。
 - ロックを渡された送信の記録（ロックの後・本文の前に断られた `not-sent` も含む）は、同じインスタンスで後からロックを渡された送信の記録が既にあれば残しません。
@@ -3431,7 +3432,11 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 
 - 対象は、セッションの中では `whoami` で決まる自分の instance。通常のシェルでは、書き込みに `--worktree <id> --instance <id>`、`list` / `mode` / `purge` に `--worktree <id>` か `--repository <id> --branch <name>` を付ける（無ければ exit 2 `target_required`）
 - `now` はそのセッションのメモ（#2427）と同じもの。100 文字まで。次の `now` で置き換わり、前の内容は `superseded` として残る（枠ごとに新しい 20 件）
-- kind は `now` / `waiting` / `decision` / `next` / `external` / `note`。`--close-when` は `waiting` / `next` / `external` で必須。省略すると `now` → `replaced`、`note` → `manual`、`decision` → 反映（promote）まで閉じない
+- kind は `now` / `waiting` / `decision` / `next` / `external` / `note`。
+
+mem add の --close-when は kind が waiting / next / external のとき必須（無いと終了コード 2 で、何も保存しない）。decision / note は省略できる。
+
+- `--close-when` を省略すると `now` → `replaced`、`note` → `manual`、`decision` → 反映（promote）まで閉じない
 - `--close-when`：`manual` ・ `replaced`（now だけ）・ `issue:[host/owner/repo]#N` ・ `pr:[host/owner/repo]#N[?state=merged|closed]` ・ `branch:<name>?merged=<ref>[&scope=local|remote]` ・ `branch:<name>?deleted` ・ `relay:<id>` ・ `worktree:<id>` ・ `session:task:<id>` ・ `session:verify:<run id>` ・ `session:schedule:<実行ログ id>` ・ `at:<オフセット付き ISO 8601>`。`session:` は CommandMate が終わりを記録している 3 種類だけ（tmux のセッション名・PID は受けない）。`branch:…?deleted` も書いた時点の tip を保存する（ref が無ければ空）
 - `update` / `close` ができるのは作成した instance（同じ世代）と人（画面）だけ。instance を消して同じ ID で作り直すと別の世代になり、前の項目は変えられない（exit 55）
 - `--key` を付けた `add` は、同じ key・同じ内容の再送で最初の項目を返す（`replayed: true`）。中身が違えば exit 54
@@ -3525,7 +3530,7 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 
 - 上部にブランチの mode と、それを決めたもの（上書き・規則・既定）が出ます。`derived` は「凍結中」で、この画面からも書けません。`off` は一覧を出しません（項目は消えずに残っています）。「mode・機能を変える」で mem の設定をその場で開き、このブランチの上書きを足せます
 - 一覧は種類ごとの節で、行ごとに作成者・所有の instance・更新者・版・閉じる条件とその評価（`{result:reason}`）・古さを出します。記録済みの決定には「未反映：記録しただけで、正本へはまだ反映されていません」が出ます。決定の記録・反映は「記録・反映へ」から上の決定の画面で行います（この画面は書きません）
-- 書くには、このブランチの作業木と、その roster の instance を選びます（項目の所有は instance が持ちます）。作成者・更新者は `human` になります。作業木の今のブランチが画面のブランチと違うときは読むだけです。追加は 1 回の要求ごとに 1 つの key を作ります。結果が分からないとき（時間切れ・接続が切れた）は、入力を固定して「同じ内容で送り直す」を出し、同じ内容・同じ key で送り直すので、最初の要求が書けていても 2 件になりません（同じ項目が返ります）。送り直す要求は、送ったときの作業木・instance・内容・key のまま変わりません（追加・項目ごとの編集・close で 1 つずつ持ち、別の操作が終わっても消えません。残っている間はほかの書き込みを待たせます。下の「同時編集」）。作業木や instance の選択を変えると、その選択では送り直せないことを示すので、「その宛先に戻す」か「送り直さずにやめる」を選びます。編集・close の送り直しには key が無いので、409 が返ったら（最初の要求が書けていた場合も、他で変わっていた場合も）「保存しました」とはせず、同時編集の比較に戻ります。作業木の HEAD が別のブランチへ移っていたら、何も書かずに断ります。閉じる条件が必須の種類（waiting・next・external）は、入力欄に「必須」と出ます
+- 書くには、このブランチの作業木と、その roster の instance を選びます（項目の所有は instance が持ちます）。作成者・更新者は `human` になります。作業木の今のブランチが画面のブランチと違うときは読むだけです。追加は 1 回の要求ごとに 1 つの key を作ります。結果が分からないとき（時間切れ・接続が切れた）は、入力を固定して「同じ内容で送り直す」を出し、同じ内容・同じ key で送り直すので、最初の要求が書けていても 2 件になりません（同じ項目が返ります）。送り直す要求は、送ったときの作業木・instance・内容・key のまま変わりません（追加・項目ごとの編集・close で 1 つずつ持ち、別の操作が終わっても消えません。残っている間はほかの書き込みを待たせます。下の「同時編集」）。作業木や instance の選択を変えると、その選択では送り直せないことを示すので、「その宛先に戻す」か「送り直さずにやめる」を選びます。編集・close の送り直しには key が無いので、409 が返ったら（最初の要求が書けていた場合も、他で変わっていた場合も）「保存しました」とはせず、同時編集の比較に戻ります。作業木の HEAD が別のブランチへ移っていたら、何も書かずに断ります。閉じる条件が必須の種類（上の `--close-when` の規則）は、入力欄に「必須」と出ます
 - **人が書いた項目**：この画面で人が追加した項目（作成者 `human`）は、所有に選んだ instance の Agent でも `commandmate mem update`／`mem close` では変えられず閉じられません（exit 55、`not_owner`）。変えたり閉じたりできるのは人（この画面）だけです。閉じる条件による close（サーバの評価）は、誰が書いた項目にも今までどおり効きます
 - **ボタン**：出るのは今の状態でできる操作だけです（記録済みの決定に「編集」は出ません。反映済みの決定の close は「close」、開いた決定の close は「取り下げる」）
 - `now`（セッションごとの今）はこの画面では追加・編集しません。今までどおり作業木の画面のセッションのメモから書きます
@@ -3533,7 +3538,8 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - **古い差分**：画面はフォーカスを取り戻したときと 30 秒ごとに一覧を読み直し、版が進んだ行に「更新されました」を付けます
 - **記録済みの決定を閉じる**：反映しないと決めた `recorded` の決定は、2 段の確認（「この決定は記録済みですが、正本へ反映しないことにして閉じます。コメントなどの記録は消えません」）の後でだけ閉じられ、理由は `withdrawn` になります。`commandmate mem close` は今までどおり `recorded` を断ります（exit 55）。開いた決定の close は「取り下げ」（`withdrawn`）です
 - **未配送の知らせ**：どのセッションも引き取らなかった「終わった」知らせの一覧と「引き取る」があります
-- mem の設定の機能のうち「ポップアップ」は、対話か無人（既定）かの設定です。この版では設定を保存するだけで、開始・終了の確認の画面はまだ出ません。auto-yes とは別の設定で、互いに変えません
+- mem の設定の機能のうち「ポップアップ」は、対話か無人（既定）かの設定です。オンで mode が `on` のブランチでは、「終了」が引き継ぎの画面を出します（下の「commandmate handoff」）。auto-yes とは別の設定で、互いに変えません
+- **開くときの確認**（Issue #4227）：ポップアップがオンで mode が `on` か `derived`、「起動時の差し込み」がオンのブランチでは、会話の区切り（起動・再起動・reset など）の後の最初の送信の前に、3 行（開いている項目の件数とうち未反映の決定・人への質問の件数・最終更新）と 3 つの選択を出します：**短い要約を読む**（既定。今までどおり）・**全文を読む**（予算に入る項目は 512 バイトを超えても省略しない。全体の予算と行の上限は今までどおり）・**今回は読まない**（この区切りの要約を付けず、次の送信にも付けない。前回の終わり方の注意も届かない）。閉じると何も送らず、本文と画像は入力欄に残ります。本文と画像は送れたときだけ消えます。見せた後に区切りが変わった（別の起動・reset、別の送信が要約を渡している、待つ間に mode・起動時の差し込み・ブランチが変わった）ときは何も打たずに断り（409 `boundary_changed`）、新しい 3 行で聞き直します。人への質問を読めなかったときは「不明」と出し、「なし」とは出しません。コマンド（`/` や `!` で始まる送信）では聞きません（API を直に呼んで「全文を読む」「読まない」をコマンドや区切りを持たないツールに付けると 400）。「全文を読む」「読まない」で本文が打たれなかったときは区切りを使い切りません（戻す記録にも失敗したときは、そのサーバーでの次の選択が 409 `claimed` になり、再起動の後は使い切った扱いになり、聞き直さずに本文だけを送って「使い済み」と知らせます）。確認は入力欄にフォーカスしたときに裏で読んだ結果で決め、送信は待たせません（読めなかった・間に合わなかったときは今までどおり短い要約で送ります）
 
 ### 防げないこと（検査の限界）
 
@@ -3542,6 +3548,39 @@ commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before 
 - `--instance` の名乗りも偽れる。作成者の検査は別のセッションの項目を誤って書き換えないためのもので、悪意の書き換えを防ぐものではない
 - 決定の記録（promote）の承認も同じ印で画面の経路に限っている。同じ OS 権限のプロセスは印を偽れ、DB の操作の記録を書き換えて「成功」にもできる。Agent に承認させないのは CLI に口が無いことと skill の指示であって、保証ではない
 - 画面の項目の書き込み（Issue #4227）も同じ印で画面の経路に限っている。人の書き込みは作成者の検査を通らない（人はどの項目も変えられる。逆に人が書いた項目は Agent の入口からは変えられない）ので、作業木・instance の寿命・ブランチ・mode・版を書き込みの直前に照合する。同じ OS 権限のプロセスが印を偽れば、人として書ける
+
+---
+
+## commandmate handoff
+
+セッションを終える前の引き継ぎ（Issue #4227）で、**Agent が使う口**です。人が画面の「終了」から引き継ぎを始めると（対話の設定 `popup` がオンで mode が `on` のブランチだけ）、画面が Agent に依頼の文を送り、Agent はこのコマンドで mem の更新を **提案** として出します。提案は更新ではありません。人が画面で差分を見て承認したものだけが、項目の版を照合して確定します。
+
+```bash
+commandmate handoff propose --request <id> add --kind <kind> --text "…" [--close-when …] [--evidence …]
+commandmate handoff propose --request <id> update <itemId> --base-version <v> --text "…"
+commandmate handoff propose --request <id> close <itemId> --base-version <v> [--reason "…"]
+commandmate handoff done --request <id>
+```
+
+propose add の --close-when は kind が waiting / next / external のとき必須（無いと終了コード 2 で、何も保存しない）。decision / note は省略できる。
+
+（この 1 行は `commandmate handoff --help` と依頼の文に出る文と同じ規則から作られます。英語の help では同じ規則が英文で出ます）
+
+- `--request` は依頼の文にある ID です。`propose` では操作（`add`・`update`・`close`）の前に置いても後に置いても同じです。どちらにも無いと 2 で、何も送りません。宛先はセッションの中なら自分（whoami）、普通のシェルでは `--worktree <id> --instance <id>` を付けます
+- `propose add` の `--close-when` の必須・省略可は上の 1 行のとおりです。使える値は kind ごとに決まっています（`commandmate mem --help` の `--close-when`。`at:` はその時刻に自動で閉じます。時刻は `+09:00` の形）。依頼の文にも kind ごとの必須と例が書かれています
+- `propose` が失敗したら（終了コードが 0 以外）、`done` の前に直して出し直してください。`done` の後の提案は受けません。提案が 0 件のまま `done` が届くと、画面は「提案が失敗していたなら届いていない」と出し、人は「終了をやめる」→「終了する」で依頼し直せます
+- **承認・取り消し・終了の口はありません**（画面だけ、印つきの要求だけを受けます）
+- 提案は依頼された instance だけが出せます（他の instance は `not_requested`）。Agent の時間（5 分、画面で 2 回まで 5 分ずつ延ばせる）を過ぎた・`done` の後・強制終了の後・取り消しの後は受けません（`request_closed`）
+- 提案は `now` を扱いません。決定は追加（開いた決定）と、開いた決定の取り下げ（close）だけです。記録済みの決定の close は人が画面で行います（`state_forbids`）
+- 依頼の後にセッションを起動し直した（再起動・reset・resume など、D1 の境界が新しくなった）ら、古い依頼への提案は `session_changed` で断られ、依頼は期限切れになります
+
+### 引き継ぎの終わり方と記録（停止は人が押す）
+
+- 引き継ぎは **セッションを止めません**。止めるのは、人がその場で押す既存の停止だけです。画面の「停止する」は、停止の宣言 → 既存の停止 → 止まったことの観測 の順に行い、サーバは止まったかを `isRunning` で確かめて記録します。期限・取り消し・確定・読みからは何も止めません
+- 記録は `confirmed`（Agent の `done`・全提案への判断・確定の全成功・人の停止の後に止まったことを観測、の全部）か `unconfirmed`（理由つき：`forced`・`agent_timeout`・`request_failed`・`undecided_left`・`conflict_left`・`apply_failed`・`session_changed`）です。確定の前に「今すぐ停止」を押した強制終了は、必ず `unconfirmed(forced)` です。止まったことを確かめられないときは記録せず、もう一度停止を押すよう画面が出します
+- 画面の「終了」（PC のヘッダーと各分割の「終了」・スマホの「…」の「終了」）は、押したときに mode を読み、対話の設定がオンで mode が `on` ならこの引き継ぎの画面を、それ以外（無人・mode が `on` でない・読めない・5 秒で答えない）は今までどおりの確認を出します。どちらも開いただけでは止めません。「終了をやめる」はセッションを続けます
+- 引き継ぎの画面は、**確定の送信中・結果が分からない確定・取り消しの応答待ち・停止の途中の間は閉じません**（Esc・×・背景・ボタン・別の「終了」・作業木の切り替えのどれでも。理由が出ます）。結果が分からない確定は「同じ内容で送り直す」か「送り直さずにやめる」を選ぶまで残ります。その間も停止は押せます。作業木を切り替えても画面は残り、その作業木では停止も確定もできず「送り直さずにやめる」だけ押せます。元の作業木に戻ると送り直せます。PC とスマホの表示が切り替わっても（向き・幅の変更）、切り替えの読み込み中に画面が一度消えても、これらは残り、依頼も作り直しません。閉じていない引き継ぎの画面は、別のページへ移ってからその作業木に戻ったときも開いたまま出ます（Agent の提案を待っている間も）。取り消しを押した後は確定も依頼の文も送りません。前の確定・取り消し・停止・依頼の作成の応答が遅れて返っても、その後に始めた確定や、開き直した（または別のページで開いた）引き継ぎの画面には何もしません（閉じたり、結果が分からない扱いにしたり、表示を書き換えたりしません）。依頼を作れず既存の停止だけを出す画面では、止まったときだけ「停止しました」と出し、止められなかった・分からないときは理由を出して停止ボタンを残します（もう一度押せます）
+- 終了コードは mem と同じです：0 成功・2 入力の誤り・50 mode が on でない・51 版の競合・52 見つからない・55 `not_requested`／`request_closed`／`session_changed`／`state_forbids`
 
 ---
 

@@ -12,6 +12,7 @@ import { notifyTmuxSessionCreated } from './session-created-signal';
 import { validateSessionName } from '@/lib/cli-tools/validation';
 import { TMUX_HISTORY_LIMIT, TUI_PANE_HEIGHT, TUI_PANE_WIDTH } from '@/config/tmux-pane-config';
 import { createLogger } from '@/lib/logger';
+import { isShellPaneCommand } from '@/lib/detection/shared/shell-pane-command';
 import { NAVIGATION_KEY_VALUES, type NavigationKey, type TerminalKey } from '@/types/terminal-keys';
 import { isDirectInputEvent, type DirectInputEvent } from '../../types/direct-input';
 import {
@@ -317,6 +318,57 @@ export async function getPaneCurrentCommand(sessionName: string): Promise<string
     return command === '' ? null : command;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Who holds a pane's terminal (Issue #4300):
+ *
+ *   - `shell`   - the pane's own shell (`pane_pid`) is in the foreground: tmux
+ *                 names a shell AND `ps` says that shell's process group owns
+ *                 the terminal (`tpgid == pane_pid`). The agent is not there.
+ *   - `other`   - something else is in the foreground (the agent, or a wrapper
+ *                 script that did not `exec` — tmux names it `bash`, but it
+ *                 runs in its own process group, so `tpgid != pane_pid`).
+ *   - `unknown` - it could not be read (tmux or `ps` failed, or answered
+ *                 something unexpected).
+ *
+ * Only `shell` is evidence. A caller refuses on it and on nothing else.
+ */
+export type PaneForeground = 'shell' | 'other' | 'unknown';
+
+/**
+ * Read who holds a pane's terminal (Issue #4300, design `案 D`). One
+ * `display-message`; `ps` is asked only when tmux names a shell, so a pane
+ * running its agent costs no extra process. Never throws.
+ *
+ * @param sessionName - Target session name
+ */
+export async function readPaneForeground(sessionName: string): Promise<PaneForeground> {
+  let command: string;
+  let panePid: string;
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', '-t', exactTarget(sessionName), '#{pane_current_command}\t#{pane_pid}'],
+      { timeout: DEFAULT_TIMEOUT }
+    );
+    const match = /^([^\t\n]+)\t(\d+)\s*$/.exec(String(stdout));
+    if (match === null) return 'unknown';
+    command = match[1].trim();
+    panePid = match[2];
+  } catch {
+    return 'unknown';
+  }
+  if (command === '') return 'unknown';
+  if (!isShellPaneCommand(command)) return 'other';
+  try {
+    const { stdout } = await execFileAsync('ps', ['-o', 'tpgid=', '-p', panePid], { timeout: DEFAULT_TIMEOUT });
+    const tpgid = String(stdout).trim();
+    if (!/^-?\d+$/.test(tpgid)) return 'unknown';
+    return tpgid === panePid ? 'shell' : 'other';
+  } catch {
+    return 'unknown';
   }
 }
 

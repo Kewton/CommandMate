@@ -872,7 +872,10 @@ jobs:
         run: npm run test:e2e
         env:
           CI: 'true'
-          NODE_OPTIONS: '--max-old-space-size=6144'
+          # [Issue #4308] The dev webServer that playwright boots inherits this. At 6144 it
+          # ran out of heap at ~5.4GB after ~285 specs (PR #4306 x2, PR #4310 x2): about 10%
+          # headroom. 8192 is the quick fix; measuring where the heap grows is #4308's rest.
+          NODE_OPTIONS: '--max-old-space-size=8192'
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

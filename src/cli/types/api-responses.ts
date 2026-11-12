@@ -1707,7 +1707,8 @@ export interface ChatMessage {
    * Mirrors: src/lib/session/session-brief.ts BriefReport.
    */
   brief?: {
-    state: 'attached' | 'skipped' | 'unknown' | 'not_sent';
+    /** Issue #4227: `consumed` — the screen's `full` / `decline` found its boundary used up by another send. */
+    state: 'attached' | 'skipped' | 'unknown' | 'not_sent' | 'consumed';
     /**
      * A word when skipped: `no_brief`, `unsupported`, `slash_command`, `off`, `disabled`,
      * `target_unresolved`, `empty`, `over_limit`, `provider_failed`, `incarnation_changed`,
@@ -1716,6 +1717,9 @@ export interface ChatMessage {
      * `lifetime_unpinned` — the entrance had no evidence of the worktree's lifetime. A send whose
      * pin is not proven `same` writes nothing on the ledger (D2 design §20); an `unknown` delivery
      * may carry `worktree_changed` when its claim could not be recorded for that reason.
+     * Issue #4227: `declined` — the screen's "don't read" used the boundary up. With `not_sent`,
+     * `claim_held` (pr3f) — the body was not typed and the boundary could not be put back to
+     * `pending`: it stays claimed by this server, whose next `full` / `decline` send is 409 `claimed`.
      */
     reason?: string;
     boundaryId?: string;

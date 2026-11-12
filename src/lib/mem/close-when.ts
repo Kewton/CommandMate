@@ -11,47 +11,22 @@
  * @module lib/mem/close-when
  */
 
-import type { MemCloseWhen, MemCloseWhenType, MemKind } from '@/types/mem';
+import {
+  CLOSE_WHEN_ALLOWED,
+  CLOSE_WHEN_DEFAULTS,
+  type MemCloseWhen,
+  type MemKind,
+} from '@/types/mem';
 import { parseIsoWithOffset } from './validate';
 
 export const CLOSE_WHEN_SCHEMA = 1;
 export const CLOSE_WHEN_MAX_LENGTH = 300;
 
-/** Every type the grammar knows, in the order of the table (§2.3). */
-export const CLOSE_WHEN_TYPES: readonly MemCloseWhenType[] = [
-  'replaced',
-  'manual',
-  'issue',
-  'pr',
-  'branch',
-  'relay',
-  'worktree',
-  'session',
-  'at',
-];
-
-/** §2.3: which kind takes which type. The fixture holds the same table. */
-export const CLOSE_WHEN_ALLOWED: Readonly<Record<MemKind, ReadonlySet<MemCloseWhenType>>> = {
-  now: new Set(['replaced', 'issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
-  waiting: new Set(['issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
-  decision: new Set(['issue', 'pr', 'branch', 'at']),
-  next: new Set(['manual', 'issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
-  external: new Set(['manual', 'issue', 'pr', 'branch', 'at']),
-  note: new Set(['manual', 'at']),
-};
-
 /**
- * What an omitted condition means per kind. `null`: required. `promoted`: the
- * decision default, stored as NULL and closed only by its transitions (§3.2).
+ * The kind × type table and the defaults live in `types/mem` (Issue #4227 G-PR4): the CLI reads them
+ * there without the `@/` alias. Re-exported here under the same names; nothing about them changes.
  */
-export const CLOSE_WHEN_DEFAULTS: Readonly<Record<MemKind, 'replaced' | 'manual' | 'promoted' | null>> = {
-  now: 'replaced',
-  waiting: null,
-  decision: 'promoted',
-  next: null,
-  external: null,
-  note: 'manual',
-};
+export { CLOSE_WHEN_ALLOWED, CLOSE_WHEN_DEFAULTS, CLOSE_WHEN_TYPES } from '@/types/mem';
 
 export interface CloseWhenTarget {
   host: string;
@@ -324,6 +299,41 @@ export function finalizeCloseWhen(
     case 'at':
       return { ok: true, value: { schema: 1, type: 'at', epochMs: draft.epochMs, offset: draft.offset } };
   }
+}
+
+/** What git answers for a condition (the same two questions `mem add` asks). */
+export interface CloseWhenGitAnswers {
+  originUrl: (worktreePath: string) => Promise<string | null>;
+  refTip: (worktreePath: string, ref: string) => Promise<string | null>;
+}
+
+/**
+ * The entrance check of a condition that `mem add` runs (git's answers, then `finalizeCloseWhen`),
+ * for a caller that stores nothing yet (a hand-off proposal): the same refusal at the same moment.
+ * The worktree's incarnation is only looked up here, never made.
+ */
+export async function checkCloseWhenBindable(
+  draft: CloseWhenDraft,
+  worktreePath: string,
+  git: CloseWhenGitAnswers,
+  worktreeExists: (worktreeId: string) => boolean
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const needs = closeWhenGitNeeds(draft);
+  let tip: string | null = null;
+  if (needs.tipOf !== null) {
+    for (const ref of needs.tipOf) {
+      tip = await git.refTip(worktreePath, ref);
+      if (tip) break;
+    }
+  }
+  const bound = finalizeCloseWhen(draft, {
+    origin: needs.origin ? parseOriginUrl(await git.originUrl(worktreePath)) : null,
+    tip,
+    repositoryId: '',
+    worktreeIncarnation: (worktreeId) => (worktreeExists(worktreeId) ? 'exists' : null),
+    sessionGeneration: null,
+  });
+  return bound.ok ? { ok: true } : { ok: false, reason: bound.reason };
 }
 
 /** Read a stored value back; null for NULL or a shape this version does not know. */
