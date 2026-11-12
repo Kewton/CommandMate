@@ -1740,7 +1740,11 @@ describe.skipIf(!HAS_UAT_TOOLS)('#4288 PR1b, the UAT flow driven by run-server.s
       }
     }
     for (const name of fs.existsSync(root) ? fs.readdirSync(root).filter((n) => n.startsWith('cmuat-')) : []) {
-      spawnSync('tmux', ['-S', path.join(root, name, 'tmux.sock'), 'kill-server'], { stdio: 'ignore' });
+      // The socket goes in a variable first: the tmux-live-test-safety guard reads a
+      // call's own argv up to `kill-server`, and a `)` inside it (path.join(...))
+      // starts a new segment there, so the `-S` before it would not be seen.
+      const sock = path.join(root, name, 'tmux.sock');
+      spawnSync('tmux', ['-S', sock, 'kill-server'], { stdio: 'ignore' });
     }
     for (const dir of [runDir, path.join(root, 'run2')]) {
       for (const file of ['member.pid']) {
