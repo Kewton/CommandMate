@@ -9,10 +9,6 @@
  * that spells the teardown without the socket label.
  */
 
-import { homedir } from 'os';
-import { join, resolve } from 'path';
-import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
-
 /** The private tmux socket label. Nothing else in CommandMate uses it. */
 export const AGENT_HEALTH_TMUX_SOCKET = 'cm-agent-health';
 
@@ -41,8 +37,6 @@ export const STRIPPED_CHILD_ENV_PREFIXES: readonly string[] = ['CM_', 'CLAUDE', 
 
 /** Kept even though they match a stripped prefix: they locate the user's own config. */
 export const KEPT_CHILD_ENV_VARS: readonly string[] = ['CODEX_HOME', 'CLAUDE_CONFIG_DIR'];
-
-const CODEX_HOME_VAR = 'CODEX_HOME';
 
 export function buildTmuxArgv(args: readonly string[]): string[] {
   if (args.length === 0) {
@@ -80,9 +74,7 @@ export function buildTmuxStartArgv(configPath: string, args: readonly string[]):
  */
 export function buildChildEnv(
   base: Readonly<Record<string, string | undefined>>,
-  overrides: Readonly<Record<string, string>> = {},
-  /** The cwd a relative CODEX_HOME is read against: where the script was launched, not a later chdir. */
-  baseCwd: string = process.cwd()
+  overrides: Readonly<Record<string, string>> = {}
 ): NodeJS.ProcessEnv {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) {
@@ -94,20 +86,7 @@ export function buildChildEnv(
   }
   // ProcessEnv (as augmented by Next) declares NODE_ENV required; a child
   // environment is whatever the parent had, which may not include it.
-  const merged: Record<string, string> = { ...env, ...overrides };
-  // Issue #4290: a relative CODEX_HOME would be resolved by each child against
-  // ITS cwd (the probe worktree, the private tmux's start dir). Pin it to this
-  // (the reading) process's cwd, the same rule `getCodexHome` applies to the
-  // config files agent-health backs up and checks. Empty / virtual-FS values
-  // fall back to the same default. `base` (process.env) is never written.
-  if (CODEX_HOME_VAR in merged) {
-    merged[CODEX_HOME_VAR] = resolveSafeAbsoluteDirectory(
-      merged[CODEX_HOME_VAR] ? resolve(baseCwd, merged[CODEX_HOME_VAR]) : undefined,
-      join(homedir(), '.codex'),
-      CODEX_HOME_VAR
-    );
-  }
-  return merged as NodeJS.ProcessEnv;
+  return { ...env, ...overrides } as NodeJS.ProcessEnv;
 }
 
 /** `=name:` — an exact session match, so `probe` never resolves to `probe-2`. */

@@ -65,7 +65,7 @@ import { HookListener } from './hook-listener';
 import { locateServerLog, ServerLogWatch } from './production-log';
 import { probeLimitedTool, probeTool, readVersion, type ProbeOutcome } from './probe-tool';
 import { AgentHealthTmux } from './tmux-driver';
-import { LIMITED_TOOL_SPECS, pinLaunchCodexHome, TOOL_PROBE_SPECS } from './tool-table';
+import { LIMITED_TOOL_SPECS, TOOL_PROBE_SPECS } from './tool-table';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const DEFAULT_DIR = path.join(os.homedir(), '.commandmate', 'agent-health');
@@ -196,7 +196,28 @@ function readRoleFile(file: string): ExplicitRole {
   return { id: parsed.id, body: parsed.body };
 }
 
+/**
+ * Issue #4290: why this run refuses to start for `CODEX_HOME`, or null.
+ *
+ * A relative value is resolved by every reader against its own cwd (this
+ * script's launch cwd, the repo root after `chdir`, the probe worktree, the
+ * private tmux). Handing one value to each reader one by one kept missing a
+ * reader (`prepareLaunch` re-resolves it), so agent-health takes no relative
+ * `CODEX_HOME` at all. Empty or unset is the default home, as before.
+ */
+export function codexHomeProblem(env: Readonly<Record<string, string | undefined>>): string | null {
+  const value = env.CODEX_HOME;
+  if (!value || path.isAbsolute(value)) return null;
+  return `CODEX_HOME must be an absolute path for agent-health; got ${JSON.stringify(value)}`;
+}
+
 async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentHealthExitCode> {
+  // First, before anything is created, written or started.
+  const codexHomeError = codexHomeProblem(process.env);
+  if (codexHomeError) {
+    log(codexHomeError);
+    return 2;
+  }
   let role: ExplicitRole | null = null;
   if (options.roleFile !== null) {
     try {
@@ -231,9 +252,6 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
   }
 
   // `resolveRelayScriptPath()` is cwd-relative (scripts/hooks/cmate-agent-event.sh).
-  // Issue #4290: a relative CODEX_HOME is read against THIS cwd, before the chdir.
-  const launchCwd = process.cwd();
-  pinLaunchCodexHome(process.env, launchCwd);
   process.chdir(REPO_ROOT);
   const workRoot = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), WORK_PREFIX));
   const hooksDir = path.join(workRoot, 'hooks');
@@ -297,7 +315,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
       // falls back to this one arrives without correlation keys and fails
       // the check — it never reaches production.
       CM_HOOK_URL: listener.agentEventUrl,
-    }, launchCwd);
+    });
     tmux = new AgentHealthTmux(childEnv, workRoot);
     if (await tmux.isServerRunning()) {
       // The lock says no run is live, so this is a crashed run's leftover.

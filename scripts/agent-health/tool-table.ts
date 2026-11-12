@@ -150,35 +150,6 @@ export interface ToolProbeSpec {
 }
 
 /** `$XDG_STATE_HOME`, or its XDG default `~/.local/state`. */
-let pinnedCodexHome: string | null = null;
-
-/**
- * Issue #4290: fix the CODEX_HOME this run guards and hands to its children,
- * from the cwd the script was LAUNCHED in. `main` chdirs to the repo root
- * before building any of that, so reading `process.env` + `process.cwd()` later
- * would resolve a relative value against the repo root. Does not write
- * `process.env`. Returns the pinned absolute home.
- */
-export function pinLaunchCodexHome(
-  env: Readonly<Record<string, string | undefined>>,
-  launchCwd: string
-): string {
-  const configured = env.CODEX_HOME;
-  // getCodexHome({ codexHome }) takes the already-absolute form; unset / empty
-  // takes the same default as before.
-  pinnedCodexHome = getCodexHome(configured ? { codexHome: path.resolve(launchCwd, configured) } : {});
-  return pinnedCodexHome;
-}
-
-/** Forget the pin (tests). */
-export function resetLaunchCodexHome(): void {
-  pinnedCodexHome = null;
-}
-
-function launchCodexHome(): string {
-  return pinnedCodexHome ?? getCodexHome();
-}
-
 export function userStateHome(env: Readonly<Record<string, string | undefined>> = process.env): string {
   const configured = env.XDG_STATE_HOME;
   return configured && path.isAbsolute(configured) ? configured : path.join(os.homedir(), '.local', 'state');
@@ -340,10 +311,10 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       denyKeys: ['Escape'],
     },
     guardedFiles: () => ({
-      hookConfig: [getCodexHooksPath({ codexHome: launchCodexHome() }), getCodexRelayInstallPath(launchCodexHome())],
+      hookConfig: [getCodexHooksPath(), getCodexRelayInstallPath(getCodexHome())],
       // TOML, not JSON (Issue #3031): compared with the run's
       // `[projects."<dir>"]` tables taken out line by line.
-      trustState: [{ path: path.join(launchCodexHome(), 'config.toml'), compare: sameTomlWithoutMarker }],
+      trustState: [{ path: path.join(getCodexHome(), 'config.toml'), compare: sameTomlWithoutMarker }],
     }),
     // The first stage only: Enter on a model row opens the effort stage and
     // is never sent.
@@ -356,7 +327,7 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
       ],
       closeKey: 'Escape',
       settings: () => ({
-        path: path.join(launchCodexHome(), 'config.toml'),
+        path: path.join(getCodexHome(), 'config.toml'),
         format: 'toml',
         keys: ['model', 'model_reasoning_effort'],
       }),
