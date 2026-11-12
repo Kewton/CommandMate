@@ -136,7 +136,8 @@ type Drive = {
 type Cell =
   /** red: a positive control — the copy of daily.sh with a part taken out must NOT meet `expect` (the R-SIG outcome) */
   /** undecidable: a control of the stage check — the send must come out 判定不能 */
-  | { kind: 'drive'; drive: Drive; expect: Expect; disposition?: string; red?: boolean; undecidable?: boolean }
+  /** expectFor: the expectation was chosen by the bash version (pr1b-12), and for which one */
+  | { kind: 'drive'; drive: Drive; expect: Expect; disposition?: string; red?: boolean; undecidable?: boolean; expectFor?: string }
   | { kind: 'same'; as: string; why: string }
   | { kind: 'na'; why: string }
   | { kind: 'theory'; why: string; disposition: string };
@@ -154,6 +155,19 @@ const red = (d: Drive, e: Expect, disposition: string): Cell => ({ kind: 'drive'
 /** a control of the stage check: its send must come out 判定不能 */
 const undecidable = (d: Drive, e: Expect): Cell => ({ kind: 'drive', drive: d, expect: e, undecidable: true });
 const NO_HANDLER = 'INT/TERM の handler がまだ無い（既定の死）。2 本目も既定で死ぬだけで、X0 は無い';
+
+/**
+ * pr1b-12 (pm-return-4288-pr1b-bash52.md): the major version of the bash the rows run under (BASH_VERSINFO[0]).
+ * A QUIT that reaches the sections before the QUIT trap (A0・A2・A3) is the default death on bash 3.2 (macOS, the
+ * production /bin/bash), but bash 5 (5.1・5.2 measured, CI's Linux) ignores SIGQUIT itself (SigIgn bit 3, and
+ * `trap - QUIT` does not bring the death back): the run goes on to its normal end. The expectation of those three cells
+ * is chosen by this version; the row's record (CM_T_REPORT) says which version the expectation was chosen for.
+ */
+const BASH_MAJOR = Number(spawnSync('bash', ['-c', 'echo "${BASH_VERSINFO[0]}"'], { encoding: 'utf8' }).stdout.trim());
+/** bash ≥ 5 ignores a QUIT that has no trap (the measurement above) */
+const QUIT_IGNORED_WITHOUT_TRAP = BASH_MAJOR >= 5;
+/** the version an expectation chosen by the bash version was chosen for */
+const EXPECT_FOR = QUIT_IGNORED_WITHOUT_TRAP ? `bash>=5 (${BASH_MAJOR})` : `bash<5 (${BASH_MAJOR})`;
 
 /** the emit points of a route (§2.2): p0 – p3, each with TERM and TERM2 (the same stop plus x0) */
 const emitPoints = (
@@ -398,6 +412,8 @@ const TRAP_TABLE: Row[] = [
 
 // HUP・PIPE・QUIT（PM 追補 2）: the sections a stop reaches, each signal once. HUP and PIPE end bash through the EXIT
 // trap even with no handler (A3); QUIT does not, so it has a handler of the same shape as INT/TERM from 205–207 on.
+// pr1b-12: before that handler (A0・A2・A3) a QUIT is the default death on bash 3.2 only; bash ≥ 5 ignores it and the
+// run ends as it normally does (one SYNC line, exit 0, the lock freed, nothing left in TMPDIR) — QUIT_IGNORED_WITHOUT_TRAP.
 const OTHER = ['HUP', 'PIPE', 'QUIT'] as const;
 const sigDeath = (signal: (typeof OTHER)[number]): Expect['exit'] => `SIG${signal}` as Expect['exit'];
 const OTHER_SIGNAL_ROWS: Row[] = OTHER.flatMap((signal): Row[] => {
@@ -422,8 +438,17 @@ const OTHER_SIGNAL_ROWS: Row[] = OTHER.flatMap((signal): Row[] => {
     ['C12', { stops: ['daily-exit'] }, freed(OK, code, { runTs: 'ended' })],
   ];
   const same: Section[] = ['A1', 'B0f', 'C1', 'C3', 'C5', 'C7', 'C10', 'C11'];
+  /** pr1b-12: A0・A2・A3 × QUIT on bash ≥ 5 — the QUIT is ignored, and the run's end is the normal one (C12 × EXIT) */
+  const beforeQuitTrap = (section: Section): boolean => signal === 'QUIT' && (section === 'A0' || section === 'A2' || section === 'A3');
+  const QUIT_IGNORED = 'bash 5 は trap の無い QUIT を自身で無視する（pm-return-4288-pr1b-bash52.md）。通常の終わりと同じ';
   return [
-    ...rows.map(([section, d, e, disposition]): Row => ({ section, column: signal, cell: drive(d, e, disposition) })),
+    ...rows.map(([section, d, e, disposition]): Row => {
+      if (!beforeQuitTrap(section)) return { section, column: signal, cell: drive(d, e, disposition) };
+      const cell: Cell = QUIT_IGNORED_WITHOUT_TRAP
+        ? { kind: 'drive', drive: d, expect: freed(OK, 0, { runTs: 'ended' }), disposition: QUIT_IGNORED, expectFor: EXPECT_FOR }
+        : { kind: 'drive', drive: d, expect: e, disposition, expectFor: EXPECT_FOR };
+      return { section, column: signal, cell };
+    }),
     ...same.map(
       (section): Row => ({
         section,
@@ -1038,7 +1063,7 @@ exit \${FAKE_EXIT:-0}
         const version = spawnSync('bash', ['-c', 'echo $BASH_VERSION'], { encoding: 'utf8' }).stdout.trim();
         fs.appendFileSync(
           process.env.CM_T_REPORT,
-          `${JSON.stringify({ row: rowName(row), bash: version, red: !!cell.red, undecidable: !!cell.undecidable, stage: firstStage(row), sent: outcome.sent, lines: outcome.lines, code: outcome.code, signal: outcome.signal, lockLeft: fs.existsSync(lockDir) })}\n`
+          `${JSON.stringify({ row: rowName(row), bash: version, red: !!cell.red, undecidable: !!cell.undecidable, stage: firstStage(row), sent: outcome.sent, lines: outcome.lines, code: outcome.code, signal: outcome.signal, lockLeft: fs.existsSync(lockDir), expectFor: cell.expectFor ?? null })}\n`
         );
       }
       // the stage of each send (pr1b-9): a send off the cell's stage drove another cell — 判定不能, never compared
