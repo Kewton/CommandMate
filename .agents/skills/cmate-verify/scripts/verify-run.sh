@@ -674,12 +674,14 @@ LOCK_OWNER_CODEC=""
 # from the environment (like the options above): set by the caller after the load, so an exported value
 # never reaches a record nor refuses the verify gate's JSON acquisition.
 LOCK_OWNER_EXTRA=""
-case "${CM_VERIFY_TEST_HANDOFF_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) HANDOFF_WAIT_SEC=$CM_VERIFY_TEST_HANDOFF_WAIT_SEC;; esac
+# Every seam of seconds below is read as decimal (#4288 PR1a-f impl-11): `08` / `010` would otherwise be
+# octal (an error / 8) in the arithmetic of their readers while `sleep` reads 8 / 10.
+case "${CM_VERIFY_TEST_HANDOFF_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) HANDOFF_WAIT_SEC=$(( 10#$CM_VERIFY_TEST_HANDOFF_WAIT_SEC ));; esac
 # Test seams of the drain (#4288 PR1a-f impl-10; unset — the default — changes nothing): the grace
 # between TERM and KILL (KILL_GRACE_SEC, every user of it) and the wait after KILL (LOCK_KILL_WAIT_SEC).
 LOCK_KILL_WAIT_SEC=2
-case "${CM_VERIFY_TEST_KILL_GRACE_SEC:-}" in ''|*[!0-9]*) ;; *) KILL_GRACE_SEC=$CM_VERIFY_TEST_KILL_GRACE_SEC;; esac
-case "${CM_VERIFY_TEST_KILL_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) LOCK_KILL_WAIT_SEC=$CM_VERIFY_TEST_KILL_WAIT_SEC;; esac
+case "${CM_VERIFY_TEST_KILL_GRACE_SEC:-}" in ''|*[!0-9]*) ;; *) KILL_GRACE_SEC=$(( 10#$CM_VERIFY_TEST_KILL_GRACE_SEC ));; esac
+case "${CM_VERIFY_TEST_KILL_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) LOCK_KILL_WAIT_SEC=$(( 10#$CM_VERIFY_TEST_KILL_WAIT_SEC ));; esac
 
 # Milliseconds since the epoch. `date +%s%3N` where date has it (GNU), else
 # seconds * 1000 (macOS) — the ticket deadline is then whole seconds, which is

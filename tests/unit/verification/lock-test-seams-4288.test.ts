@@ -50,6 +50,7 @@ function sh(script: string, env: Record<string, string> = {}) {
       CM_VERIFY_TEST_HANDOFF_DIR: '',
       CM_VERIFY_TEST_KILL_GRACE_SEC: '',
       CM_VERIFY_TEST_KILL_WAIT_SEC: '',
+      CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '',
       CM_VERIFY_TEST_DRAIN_LOG: '',
       ...env,
     },
@@ -68,9 +69,24 @@ describe('the drain seams: off by default, the grace / the wait / the steps when
     expect(sh('echo "$KILL_GRACE_SEC $LOCK_KILL_WAIT_SEC"', { CM_VERIFY_TEST_KILL_GRACE_SEC: '0', CM_VERIFY_TEST_KILL_WAIT_SEC: '7' })).toBe('0 7');
   });
 
+  // #4288 PR1a-f impl-11 (codex P2-1): the seams of seconds are decimal. `08` / `010` used to be kept as
+  // written: `08` broke the drain's arithmetic (not an octal digit) and `010` was 8 there but 10 for sleep.
+  it('negative: `08` / `010` are 8 / 10 for every reader (the value, the arithmetic, sleep\'s text); unset stays 5 / 2 / 30', () => {
+    const read = 'echo "$KILL_GRACE_SEC $LOCK_KILL_WAIT_SEC $HANDOFF_WAIT_SEC $(( KILL_GRACE_SEC + 0 )) $(( LOCK_KILL_WAIT_SEC + 0 )) $(( HANDOFF_WAIT_SEC + 0 ))"';
+    expect(sh(read, { CM_VERIFY_TEST_KILL_GRACE_SEC: '08', CM_VERIFY_TEST_KILL_WAIT_SEC: '010', CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '09' })).toBe('8 10 9 8 10 9');
+    expect(sh(read, { CM_VERIFY_TEST_KILL_GRACE_SEC: '010', CM_VERIFY_TEST_KILL_WAIT_SEC: '08', CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '010' })).toBe('10 8 10 10 8 10');
+    expect(sh(read, { CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '' })).toBe('5 2 30 5 2 30');
+    expect(sh(read, { CM_VERIFY_TEST_KILL_GRACE_SEC: '08s', CM_VERIFY_TEST_KILL_WAIT_SEC: '0x8', CM_VERIFY_TEST_HANDOFF_WAIT_SEC: '-08' })).toBe('5 2 30 5 2 30');
+  });
+
+  // #4288 PR1a-f impl-11 (codex P2-3): the delegation to date is seen in the call's record and a fixed answer
+  // (a `date` on PATH), not in the real seconds between two reads.
   it('negative: lock_now_sec is the real `date +%s` unless redefined', () => {
-    const [a, b] = sh('echo "$(lock_now_sec) $(date +%s)"').split(' ').map(Number);
-    expect(Math.abs(a - b)).toBeLessThanOrEqual(1);
+    const bin = fs.mkdtempSync(path.join(root, 'date-bin-'));
+    const calls = path.join(bin, 'calls');
+    fs.writeFileSync(path.join(bin, 'date'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\necho 1234567890\n`, { mode: 0o755 });
+    expect(sh('PATH="$SHIM:$PATH"; echo "$(lock_now_sec)"', { SHIM: bin })).toBe('1234567890');
+    expect(fs.readFileSync(calls, 'utf8')).toBe('+%s\n');
   });
 
   it('an empty group: no log by default; with the log, one line `empty`', () => {
@@ -116,7 +132,7 @@ describe('B3: `<point>@@<target>` is a whole-target match; `<point>@<sub>` stays
 
 describe('mark:child-withdrew — lock_child_wait marks its withdrawal (no wait), only when asked', () => {
   const wait = (env: Record<string, string>) =>
-    sh(`D=$(mktemp -d '${root}/cw-XXXXXX'); if lock_child_wait "$D/go" "$D/ack" $(( $(date +%s) - 1 )) $$; then echo ran; else echo withdrew; fi`, env);
+    sh(`D=$(mktemp -d '${root}/cw-XXXXXX'); if lock_child_wait "$D/go" "$D/ack" 1 $$; then echo ran; else echo withdrew; fi`, env);
 
   it('a passed deadline: withdraws, and the mark is written', () => {
     const dir = fs.mkdtempSync(path.join(root, 'handoff-'));
