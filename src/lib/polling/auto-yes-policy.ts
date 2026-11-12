@@ -173,6 +173,11 @@ export function isAutoYesBlockedByPolicy(policy: AutoYesPolicy | null): boolean 
  * (Issue #3723). The poller's own lookup ({@link getSessionAutoYesPolicyEntry})
  * judged by {@link isAutoYesBlockedByPolicy}, so the list cannot read `blocked`
  * for an instance the poller would answer, or the reverse.
+ *
+ * **Not a pure read despite the name (Issue #4291):** the lookup goes through the
+ * poller's TTL cache, so a miss reads the task from the DB and WRITES the entry to
+ * `policyCache` (the only thing written: no Auto-Yes state, no ledger). A reader
+ * that must leave the cache untouched (the brief, #4223 U11) must not call this.
  */
 export function isSessionAutoYesBlockedByContract(
   worktreeId: string,
