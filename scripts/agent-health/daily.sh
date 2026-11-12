@@ -234,8 +234,8 @@ fi
 # run.ts inherits the lock through this; the child makes it T1 (<T0>-g<its group>) before it execs.
 export CM_RUN_LOCK_TOKEN="$T0"
 trap 'daily_on_exit "$?"' EXIT
-# R-SIG: an explicit handler for each of the five (a signal without one dies by default; an EXIT trap that then ignores
-# it does not run at all - measured on bash 3.2), whose first command ignores all five; then exit 128+n.
+# R-SIG: an explicit handler for each of the five, whose first command ignores all five; then exit 128+n.
+# Without one (bash 3.2): TERM/HUP/PIPE run EXIT with $?=0 then die, QUIT skips EXIT (lock left), INT may not end it.
 trap 'trap "" INT TERM HUP PIPE QUIT; exit 130' INT
 trap 'trap "" INT TERM HUP PIPE QUIT; exit 143' TERM
 trap 'trap "" INT TERM HUP PIPE QUIT; exit 129' HUP
