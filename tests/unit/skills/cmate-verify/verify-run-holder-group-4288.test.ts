@@ -346,7 +346,8 @@ describe('§2.4 / §2.6: the watchdog counts the timeout from the ack', () => {
   it('a handoff held up past timeoutSec does not kill the waiting child: the gate runs once, then times out (124)', async () => {
     // #4288 PR1a-f impl-12 (codex P2-b): the gate ends only on the watchdog's TERM, which the watchdog sends after
     // it has put the timeout on record — not a `sleep 5` racing a 1 s watchdog that a loaded machine may delay.
-    const run = runAsync([{ command: "trap 'exit 0' TERM; echo ran >> $MARK/side; while :; do sleep 0.05; done", timeoutSec: 1 }], { CM_VERIFY_TEST_HANDOFF: 'pause:published' });
+    // The loop is capped (~60 s, codex-12) so a red run, where the watchdog never fires, leaves no endless gate behind.
+    const run = runAsync([{ command: "trap 'exit 0' TERM; echo ran >> $MARK/side; for _ in $(seq 1200); do sleep 0.05; done", timeoutSec: 1 }], { CM_VERIFY_TEST_HANDOFF: 'pause:published' });
     await until(() => fs.existsSync(handoff('published.reached')));
     await new Promise((r) => setTimeout(r, 2000));
     fs.writeFileSync(handoff('published.go'), '');
@@ -358,8 +359,9 @@ describe('§2.4 / §2.6: the watchdog counts the timeout from the ack', () => {
 
 describe('§2.5: released only once the gate\'s group is empty', () => {
   const LEAVES_CHILD = { command: "(trap '' TERM; exec sleep 30) & echo $! > $MARK/bg; exit 0" };
-  /** The same child, which sets its TERM trap only when the test arms it, and says so (bg-ready). */
-  const LEAVES_ARMED_CHILD = { command: "(until test -e $MARK/arm; do sleep 0.05; done; trap '' TERM; touch $MARK/bg-ready; exec sleep 30) & echo $! > $MARK/bg; exit 0" };
+  /** The same child, which sets its TERM trap only when the test arms it, and says so (bg-ready). The wait for the
+   *  arm is capped (~60 s, codex-12) so a test that fails before arming leaves no endless child behind. */
+  const LEAVES_ARMED_CHILD = { command: "(for _ in $(seq 1200); do test -e $MARK/arm && break; sleep 0.05; done; trap '' TERM; touch $MARK/bg-ready; exec sleep 30) & echo $! > $MARK/bg; exit 0" };
 
   it('a gate that leaves a TERM-ignoring child: held while it lives, the child stopped (KILL after the grace), then released', async () => {
     const drainLog = mark('drain-steps');
