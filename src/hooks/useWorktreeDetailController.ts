@@ -859,6 +859,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // left, so its reply cannot put back a status changed in the meantime.
     const statusGeneration = currentWorktreeStatusGeneration();
     const requestSeq = ++detailRequestSeqRef.current;
+    // Issue #4317 PR1 (再指示 1): the registration this read started under. Its answer reports the
+    // session's state for that registration only — taken while it is still the current one, never
+    // for the registration current when it answers (StrictMode's second setup, a page made again).
+    const authRegistration = handoffRegistrationRef.current;
     const rosterSaveGeneration = rosterSaveGenerationRef.current;
     const recordSaveGeneration = recordSaveGenerationRef.current;
     const vibeLocalSaveGeneration = vibeLocalSaveGenerationRef.current;
@@ -963,8 +967,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       cancelDetailRetry();
       setIsReconnecting(false);
       setIsAuthExpired(false);
-      // Issue #4317 PR1: an authenticated read of this page — a recovery only while it is the current page.
-      reportHandoffPageAuth(handoffRegistrationRef.current, 'authenticated');
+      // Issue #4317 PR1: an authenticated read started under the current registration — the only recovery.
+      reportHandoffPageAuth(authRegistration, 'authenticated');
       setError(null);
       return data;
     } catch (err) {
@@ -986,7 +990,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       if (status === 401) {
         setIsAuthExpired(true);
         // Issue #4317 PR1: held over the pages (a page made next starts with its own false).
-        reportHandoffPageAuth(handoffRegistrationRef.current, 'expired');
+        reportHandoffPageAuth(authRegistration, 'expired');
         setIsReconnecting(false);
         setError(null);
         return null;

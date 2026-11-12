@@ -8,8 +8,18 @@
  * page whose registration is gone or not current. Negative controls: the current page opens it, and
  * the late cleanup of an older page leaves the newer page's "end" working.
  *
+ * 再指示 1 (the consistency review's P2): a read's answer reports the session's state for the
+ * registration it started under, taken only while that one is still the current one. Under
+ * StrictMode (setup → cleanup → setup, two registrations of one page and two first reads), the first
+ * setup's read answering 200 after the second's answered 401 does not clear the expiry — the dialog
+ * the page draws stays undrawn. Positive control: 3c4f092 (the answer read the registration current
+ * when it answered) clears it and draws the dialog. Negative control: the second setup's read
+ * answering 200 clears it.
+ *
  * @vitest-environment jsdom
  */
+import React, { StrictMode } from 'react';
+import { render } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
@@ -40,9 +50,18 @@ vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
 }));
 
 import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
-import { handoffStoreSnapshot, resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
+import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
 import {
+  beginHandoffOpening,
+  handoffStoreSnapshot,
+  patchHandoffOpening,
+  resetHandoffStoreForTests,
+} from '@/lib/handoff/close-rule';
+import type { HandoffReadResponse } from '@/lib/handoff/types';
+import {
+  handoffRegistrySnapshot,
   isCurrentHandoffRegistration,
+  reportHandoffPageAuth,
   registerHandoffPage,
   resetHandoffRegistryForTests,
   unregisterHandoffPage,
@@ -54,6 +73,9 @@ const ATTENDED = { ok: true, mode: 'on', features: { popup: true } };
 
 let heldModes: Array<() => void>;
 let holdMode: boolean;
+/** 再指示 1: each detail read held in order, answered with the status its release names. */
+let detailQueued: boolean;
+let detailQueue: Array<(status: number) => void>;
 
 function reply(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -64,6 +86,8 @@ beforeEach(() => {
   resetHandoffStoreForTests();
   heldModes = [];
   holdMode = false;
+  detailQueued = false;
+  detailQueue = [];
   global.fetch = vi.fn((input: unknown) => {
     const url = String(input);
     if (url.includes('/mem/mode')) {
@@ -74,6 +98,13 @@ beforeEach(() => {
     if (url.includes('/messages')) return Promise.resolve(reply(200, []));
     if (url.includes('/auto-yes')) return Promise.resolve(reply(200, { instances: {} }));
     const detail = /\/api\/worktrees\/([^/?]+)$/.exec(url);
+    if (detail && detailQueued) {
+      return new Promise<Response>((resolve) =>
+        detailQueue.push((status) =>
+          resolve(status === 401 ? reply(401, { error: 'unauthorized' }) : reply(200, { id: detail[1], name: detail[1], path: '/p', repositoryPath: '/r', repositoryName: 'R', sessionStatusByInstance: {} })),
+        ),
+      );
+    }
     if (detail) {
       return Promise.resolve(reply(200, { id: detail[1], name: detail[1], path: '/p', repositoryPath: '/r', repositoryName: 'R', sessionStatusByInstance: {} }));
     }
@@ -83,6 +114,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const release of heldModes.splice(0)) release();
+  for (const release of detailQueue.splice(0)) release(200);
   vi.restoreAllMocks();
   window.localStorage.clear();
   resetHandoffStoreForTests();
@@ -159,5 +191,83 @@ describe('[#4317 PR1] openEnd and the page’s registration', () => {
       await newer.result.current.openEnd(TARGET);
     });
     expect(newer.result.current.handoffTarget).toEqual(TARGET);
+  });
+});
+
+describe('[#4317 PR1 再指示 1] a read reports for the registration it started under', () => {
+  let page: ReturnType<typeof useWorktreeDetailController>;
+  /** The page's host as `WorktreeDetailRefactored` draws it (undrawn while `handoffAuthExpired`). */
+  function Page() {
+    page = useWorktreeDetailController({ worktreeId: A });
+    return page.handoffAuthExpired ? null : (
+      <SessionHandoffDialog
+        isOpen={page.handoffTarget !== null}
+        worktreeId={A}
+        target={page.handoffTarget}
+        onClose={page.closeHandoff}
+        onStop={page.stopForHandoff}
+        registration={page.handoffRegistration}
+      />
+    );
+  }
+  const settle = () => act(async () => new Promise((done) => setTimeout(done, 0)));
+
+  /** A's opening taken back by the page (its first render), with its request read. */
+  function openingOfA(): void {
+    const own = beginHandoffOpening(A, TARGET);
+    patchHandoffOpening(own.token, {
+      created: 'done',
+      view: {
+        ok: true,
+        request: {
+          id: 'r1', worktreeId: A, instanceId: 'claude', cliToolId: 'claude', branch: 'feat/x', detached: false,
+          state: 'awaiting_agent', sendState: 'sent', endForced: false, endToken: null, outcome: null, outcomeReason: null,
+          agentDeadlineAt: '2026-11-10T00:05:00.000Z', extensions: 0, expiresAt: '2026-11-10T01:00:00.000Z',
+          agentDoneAt: null, endedAt: null, agentTimedOut: false, version: 1,
+        },
+        proposals: [],
+        direct: [],
+      } as unknown as HandoffReadResponse,
+    });
+  }
+
+  /** The page under StrictMode with its first reads held: one per setup (and per registration). */
+  async function strictPage(): Promise<[(status: number) => void, (status: number) => void]> {
+    detailQueued = true;
+    render(
+      <StrictMode>
+        <Page />
+      </StrictMode>,
+    );
+    await settle();
+    expect(detailQueue.length).toBeGreaterThanOrEqual(2);
+    const [first, second] = detailQueue.splice(0, 2);
+    return [first, second];
+  }
+
+  it('the first setup’s read answers 200 after the second setup’s read answered 401: the expiry stays, the dialog is not drawn', async () => {
+    openingOfA();
+    const [first, second] = await strictPage();
+    await act(async () => second(401));
+    await settle();
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    await act(async () => first(200));
+    await settle();
+    expect(document.querySelector('[data-testid="handoff-dialog"]')).toBeNull();
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+  });
+
+  it('(negative control) expired before; the second setup’s read answers 200: the expiry is cleared, the dialog is drawn', async () => {
+    openingOfA();
+    const earlier = registerHandoffPage(A);
+    reportHandoffPageAuth(earlier, 'expired');
+    unregisterHandoffPage(earlier);
+    const [, second] = await strictPage();
+    expect(document.querySelector('[data-testid="handoff-dialog"]')).toBeNull();
+    await act(async () => second(200));
+    await settle();
+    expect(handoffRegistrySnapshot().authExpired).toBe(false);
+    await waitFor(() => expect(document.querySelector('[data-testid="handoff-dialog"]')).not.toBeNull());
   });
 });
