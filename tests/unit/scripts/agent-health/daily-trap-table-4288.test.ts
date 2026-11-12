@@ -126,6 +126,12 @@ type Drive = {
   mutant?: Mutant;
   /** the controls of the stage check: send without waiting for the child's marks ('child') or for any mark ('all') */
   noWait?: 'child' | 'all';
+  /** pr1b-10: the fake npx waits for a file before it starts (run-ts.started); the file is made after the send, so
+   * "run.ts has not started" at the send is held by a gate, not by the time the send takes */
+  holdRunTs?: boolean;
+  /** pr1b-10: with noWait 'all', the main shell is paused at this earlier stop and the send is made there, so the
+   * stage of the cell (the later stop) cannot have been reached at the send */
+  sendAt?: 'owner-lock-made';
 };
 type Cell =
   /** red: a positive control — the copy of daily.sh with a part taken out must NOT meet `expect` (the R-SIG outcome) */
@@ -479,8 +485,9 @@ const R_SIG_ROWS: Row[] = SIGS.flatMap((signal): Row[] => [
 TRAP_TABLE.push(...R_SIG_ROWS);
 
 // pr1b-9: the controls of the stage check. run.ts starting 3 s late (CM_T_NPX_DELAY): a row that waits for its marks
-// still drives its cell (陰性対照; before pr1b-9, C7p1 sent at the echo with run.ts not started yet: ENOENT fake-out);
-// a send that does not wait for them comes out 判定不能 (陽性対照).
+// still drives its cell (陰性対照; before pr1b-9, C7p1 sent at the echo with run.ts not started yet: ENOENT fake-out).
+// pr1b-10: a send that does not wait for them comes out 判定不能 (陽性対照) by a gate, not by the clock: the fake npx is
+// held (holdRunTs) until after the send, and C4 is sent while the main shell is paused before `tmp` (sendAt).
 const C7_OK_ECHO = 'AGENT_HEALTH_SYNC status=ok*';
 const STAGE_CONTROL_ROWS: Row[] = [
   {
@@ -501,19 +508,19 @@ const STAGE_CONTROL_ROWS: Row[] = [
     point: 'p1',
     column: 'TERM',
     variant: '判定不能の陽性対照: run.ts の起動の印を待たずに送る',
-    cell: undecidable({ stops: ['echo-before'], env: { FAKE_WAIT: '1', CM_T_NPX_DELAY: '3' }, echo: C7_OK_ECHO, noWait: 'child' }, freed(OK, 143, { runTs: 'stopped' })),
+    cell: undecidable({ stops: ['echo-before'], env: { FAKE_WAIT: '1' }, echo: C7_OK_ECHO, noWait: 'child', holdRunTs: true }, freed(OK, 143, { runTs: 'stopped' })),
   },
   {
     section: 'C8',
     column: 'TERM',
     variant: '判定不能の陽性対照: run.ts の起動の印を待たずに送る',
-    cell: undecidable({ stops: ['run-ts'], env: { FAKE_WAIT: '1', CM_T_NPX_DELAY: '3' }, noWait: 'child' }, freed(OK, 143, { runTs: 'stopped' })),
+    cell: undecidable({ stops: ['run-ts'], env: { FAKE_WAIT: '1' }, noWait: 'child', holdRunTs: true }, freed(OK, 143, { runTs: 'stopped' })),
   },
   {
     section: 'C4',
     column: 'TERM',
     variant: '判定不能の陽性対照: どの印も待たずに送る',
-    cell: undecidable({ stops: ['tmp'], noWait: 'all' }, freed(INTERRUPTED(143), 143, { runTs: 'never' })),
+    cell: undecidable({ stops: ['tmp'], noWait: 'all', sendAt: 'owner-lock-made' }, freed(INTERRUPTED(143), 143, { runTs: 'never' })),
   },
 ];
 TRAP_TABLE.push(...STAGE_CONTROL_ROWS);
@@ -798,6 +805,7 @@ describe(`#4288 PR1b, daily.sh driven at every cell of the trap table (bash ${BA
       path.join(root, 'bin', 'npx'),
       `#!/bin/bash
 if [ -n "\${CM_T_NPX_DELAY:-}" ]; then sleep "$CM_T_NPX_DELAY"; fi
+if [ -n "\${CM_T_NPX_HOLD:-}" ]; then i=0; while [ ! -e "$CM_T_NPX_HOLD" ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done; fi
 { echo "TOKEN=$CM_RUN_LOCK_TOKEN"; echo "PID=$$"; } > "$FAKE_OUT"
 : > "$CM_T_GATE/run-ts.started"
 if [ -n "\${FAKE_LEAVE_DEAF:-}" ]; then ( trap '' TERM; exec sleep 3600 ) >/dev/null 2>&1 </dev/null & echo $! > "$FAKE_OUT.member"; : > "$CM_T_GATE/run-ts.ended"; exit \${FAKE_EXIT:-0}; fi
@@ -907,7 +915,10 @@ exit \${FAKE_EXIT:-0}
     env.CM_T_STOP = hookStops.join(',');
     if (d.x0) env.CM_T_X0 = d.x0;
     if (d.echo) env.CM_T_ECHO = d.echo;
-    const pauses = d.stops.filter((stop) => stop === 'tmp' || stop === 'owner-lock-made');
+    const pauses: string[] = d.stops.filter((stop) => stop === 'tmp' || stop === 'owner-lock-made');
+    if (d.sendAt && !pauses.includes(d.sendAt)) pauses.push(d.sendAt);
+    const release = path.join(gate, 'npx.release');
+    if (d.holdRunTs) env.CM_T_NPX_HOLD = release;
     if (pauses.length > 0) {
       env.CM_VERIFY_TEST_HANDOFF = pauses.map((stop) => `pause:${stop}`).join(',');
       env.CM_VERIFY_TEST_HANDOFF_DIR = gate;
@@ -933,7 +944,8 @@ exit \${FAKE_EXIT:-0}
     const stage = firstStage(row);
 
     if (d.noWait === 'all') {
-      // the control: sent at once, before any mark; the run is left to end by itself (or is ended)
+      // the control: sent before the stage of the cell, where the main shell is paused (sendAt); the run is left to end
+      if (d.sendAt) await until(path.join(gate, `${d.sendAt}.reached`));
       send('first', stage, signals);
       const timer = setTimeout(() => child.kill('SIGKILL'), 60_000);
       const { code, signal } = await exited;
@@ -956,6 +968,7 @@ exit \${FAKE_EXIT:-0}
         // the marks of the child that the cell's stage needs (run.ts started / ended) — not waited by the control
         if (stage && d.noWait !== 'child') for (const mark of stage.present) await until(path.join(gate, mark));
         send('first', stage, signals);
+        if (d.holdRunTs) fs.writeFileSync(release, '');
       }
       if (stop !== 'run-ts') fs.writeFileSync(path.join(gate, `${stop}.go`), '');
       // the child's `ack` stays held: it must not exec run.ts while the EXIT trap has not stopped it yet
