@@ -577,6 +577,11 @@ trap() {
   if cm_t_daily && [ -z "$1" ] && [ "\${FUNCNAME[1]:-}" = daily_on_exit ] && [ "\${CM_T_X0:-}" = after ]; then cm_t_hit x0; fi
   return $s
 }
+# not a stop: marks that the main shell is past its AGENT_HEALTH_SYNC line and its mark, at its wait for the child (C8)
+wait() {
+  if cm_t_daily && [ "\${FUNCNAME[1]:-main}" = main ] && [ -n "\${CHILD:-}" ] && [ "$*" = "$CHILD" ]; then : > "$CM_T_GATE/main-wait.reached"; fi
+  builtin wait "$@"
+}
 mkdir() {
   if [ "$0" = cm-daily-child ] && [ -n "\${CM_T_HOLD_ACK:-}" ]; then
     case "$*" in */ack) cm_t_hit ack-hold ;; esac
@@ -775,6 +780,8 @@ exit \${FAKE_EXIT:-0}
         const end = Date.now() + 30_000;
         while (!(fs.existsSync(fakeOut) && fs.readFileSync(fakeOut, 'utf8').includes('PID=')) && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 25));
         expect(fs.existsSync(fakeOut)).toBe(true);
+        // run.ts can be running before the main shell has made its line (its ack loop polls): C8 is the `wait`
+        await until(path.join(gate, 'main-wait.reached'));
       } else {
         await until(path.join(gate, `${stop}.reached`));
       }
