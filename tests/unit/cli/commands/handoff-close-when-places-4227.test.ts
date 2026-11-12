@@ -60,7 +60,8 @@ interface Place {
  * Allow table for the 'paragraph' form (places 8, 9). A paragraph (a block between blank lines) that talks
  * about the rule (`--close-when` / 必須 / required) may hold no list of kinds except the generated line.
  * A list of ANOTHER fact (the six kinds of the chapter, ...) is allowed only when a line equals an entry
- * here EXACTLY, named by the file+heading and the line's content. The table never allows a list of the
+ * here EXACTLY, named by the file+heading and the line's content, AND only in a paragraph that does not talk
+ * about the rule (g-pr4-g9i: next to `--close-when is required for:` the table does not apply). The table never allows a list of the
  * required kinds as the rule: an entry that gets a required word added (or `/ now`) is no longer equal, so
  * it is checked like any other line and is red. Today two lines per chapter are named: the six kinds of the
  * chapter, and the exit-56 row of the limits table (30 for waiting / next / external, 50 for note — a limit,
@@ -113,7 +114,8 @@ function memAddOptionHelp(): string {
   return add.options.find((o) => o.long === '--close-when')!.description;
 }
 
-const TALKS_ABOUT_RULE = /close-when|必須|required/i;
+/** `\brequired\b`: the exit-code name `target_required` (an underscore is a word character) is not the rule. */
+const TALKS_ABOUT_RULE = /close-when|必須|\brequired\b/i;
 
 /** The `## commandmate <name>` chapter, up to the next `## ` heading. */
 function chapter(file: string, name = 'handoff'): string {
@@ -151,11 +153,16 @@ function problems(text: string, generated: string, form: Form, scope?: RegExp, a
     const hits = lines.filter((line) => line === generated).length;
     if (hits !== 1) out.push(`the generated line is there ${hits} times, not once`);
     const allowed = ALLOWED_OTHER_LISTS[allowKey ?? ''] ?? [];
+    // Only a paragraph that talks about the rule is searched (a list of another fact in another paragraph —
+    // the six kinds, the limits and manual_stale rows — is not the rule). Inside a rule paragraph the allow
+    // table does NOT apply: every line but the generated one is searched, so an allowed line cannot be moved
+    // next to the rule to pass. (The table names the lines that are fine in the paragraphs not searched, and
+    // is the reference for what a rule paragraph must not contain; see the (iii) tests.)
+    void allowed;
     rest = text
       .split(/\n[ \t]*\n/)
       .filter((paragraph) => TALKS_ABOUT_RULE.test(paragraph))
-      .flatMap((paragraph) => paragraph.split('\n'))
-      .filter((line) => line !== generated && !allowed.includes(line))
+      .flatMap((paragraph) => paragraph.split('\n').filter((line) => line !== generated))
       .join('\n');
   } else if (form === 'whole') {
     if (text !== generated) out.push(`not the generated string: ${JSON.stringify(text)}`);
@@ -296,7 +303,7 @@ describe('[#4227 G9h] the mem chapters are read by paragraph, not by line', () =
     '(iii) %s: an allowed list stays green as it is, and is red once required kinds are added (the table allows no required list)',
     (_name, place) => {
       const allowed = ALLOWED_OTHER_LISTS[place.allowKey!][0];
-      const asIs = place.read().replace(place.generated, `${place.generated}\n${allowed}`);
+      const asIs = place.read().replace(place.generated, `${place.generated}\n\n${allowed}`);
       expect(problems(asIs, place.generated, place.form, undefined, place.allowKey)).toEqual([]);
       for (const changed of [`${allowed} waiting / next / external`, `${allowed.replace('`note`', '`note` / `later`')}`, allowed.replace('`now` / ', '')]) {
         const mutated = place.read().replace(place.generated, `${place.generated}\n${changed}`);
@@ -304,4 +311,39 @@ describe('[#4227 G9h] the mem chapters are read by paragraph, not by line', () =
       }
     }
   );
+});
+
+describe('[#4227 G9i] the allow table does not apply inside a paragraph that talks about the rule', () => {
+  const MEM_PLACES = PLACES.filter((p) => p.form === 'paragraph');
+  const INTRO: Record<string, string> = {
+    [JA_MEM_KEY]: '--close-when は次の kind で必須:',
+    [EN_MEM_KEY]: '--close-when is required for:',
+  };
+
+  it.each(MEM_PLACES.map((p) => [p.name, p] as const))(
+    '(iii) %s: an allowed line right under a "required for:" line (same paragraph) is red; the same line alone in its paragraph is green',
+    (_name, place) => {
+      for (const allowed of ALLOWED_OTHER_LISTS[place.allowKey!]) {
+        const text = place.read();
+        const same = text.replace(place.generated, `${place.generated}\n${INTRO[place.allowKey!]}\n${allowed}`);
+        const apart = text.replace(place.generated, `${place.generated}\n\n${allowed}`);
+        expect(problems(same, place.generated, place.form, undefined, place.allowKey).join()).toContain('a list not from the generator');
+        expect(problems(apart, place.generated, place.form, undefined, place.allowKey)).toEqual([]);
+      }
+    }
+  );
+
+  it.each(MEM_PLACES.map((p) => [p.name, p] as const))(
+    '(iii) %s: the allowed line placed just before the rule paragraph text is red (moved next to the rule)',
+    (_name, place) => {
+      const allowed = ALLOWED_OTHER_LISTS[place.allowKey!][0];
+      const mutated = place.read().replace(place.generated, `${allowed}\n${place.generated}`);
+      expect(problems(mutated, place.generated, place.form, undefined, place.allowKey)).not.toEqual([]);
+    }
+  );
+
+  it('"required" in an exit-code name (target_required) does not make a paragraph a rule paragraph', () => {
+    expect(TALKS_ABOUT_RULE.test('`target_required`')).toBe(false);
+    expect(TALKS_ABOUT_RULE.test('--close-when is required for:')).toBe(true);
+  });
 });
