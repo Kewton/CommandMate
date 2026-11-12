@@ -335,6 +335,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handoffTarget,
     closeHandoff,
     stopForHandoff,
+    handoffRegistration,
+    handoffAuthExpired,
     isKillPending,
     handleLoadContent,
     handleLoadError,
@@ -743,10 +745,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // unmounted, not hidden with `isOpen={false}` (a hidden dialog closes its opening). The opening
   // and its units stay in the store; once the page recovers (a read succeeds), the dialog mounts
   // again for the same opening and target, and makes or sends nothing again.
+  // Issue #4317 PR1: the expiry is the one held over the pages (`handoffAuthExpired`: a page made
+  // while it is expired, or its Retry, is not a recovery), and the dialog starts nothing (no close,
+  // stop or send) unless this page's registration is the current one (`registration`).
   const withHandoff = (content: React.ReactNode): React.ReactElement => (
     <>
       <Fragment key="content">{content}</Fragment>
-      {!isAuthExpired && (
+      {!handoffAuthExpired && (
         <SessionHandoffDialog
           key="handoff"
           isOpen={handoffTarget !== null}
@@ -754,6 +759,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           target={handoffTarget}
           onClose={closeHandoff}
           onStop={stopForHandoff}
+          registration={handoffRegistration}
         />
       )}
     </>
