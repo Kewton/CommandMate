@@ -64,7 +64,6 @@ import {
   useGatesOfLatestRun,
 } from '@/components/worktree/VerificationStatusChip';
 import { Modal } from '@/components/ui/Modal';
-import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
 import { MoveDialog } from '@/components/worktree/MoveDialog';
 import { NewFileDialog } from '@/components/worktree/NewFileDialog';
@@ -74,7 +73,6 @@ import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import { getCliToolDisplayName, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
-import type { SessionStopResult } from '@/lib/handoff/close-rule';
 import type { AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { Worktree, FileContent } from '@/types/models';
@@ -252,15 +250,6 @@ export interface WorktreeDetailDesktopProps {
   isKillPending: boolean;
   onKillCancel: () => void;
   onKillConfirm: () => void;
-  /**
-   * Issue #4227 (G-4): the hand-off before ending, open while non-null. "End" (the header's
-   * and each split's) opens it instead of the plain confirmation on a branch set to be
-   * attended with mode `on`; the parent decides which (`openEnd`). Absent: never drawn.
-   */
-  handoffTarget?: SessionKillTarget | null;
-  onHandoffClose?: () => void;
-  /** The existing stop for the hand-off's target (the same stop `onKillConfirm` runs). */
-  onHandoffStop?: () => Promise<SessionStopResult>;
 
   // Move dialog
   moveTarget: MoveTarget | null;
@@ -399,9 +388,6 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   isKillPending,
   onKillCancel,
   onKillConfirm,
-  handoffTarget = null,
-  onHandoffClose,
-  onHandoffStop,
   moveTarget,
   isMoveDialogOpen,
   onMoveCancel,
@@ -1246,17 +1232,8 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
             </div>
           </div>
         </Modal>
-        {/* Issue #4227 (G-4): the hand-off before ending. It never kills: its stop
-            button runs `onHandoffStop`, the existing stop, from its handler only. */}
-        {onHandoffClose && onHandoffStop && (
-          <SessionHandoffDialog
-            isOpen={handoffTarget !== null}
-            worktreeId={worktreeId}
-            target={handoffTarget}
-            onClose={onHandoffClose}
-            onStop={onHandoffStop}
-          />
-        )}
+        {/* Issue #4227 (G-4, G10): the hand-off before ending is drawn by the page
+            (`WorktreeDetailRefactored`), once, outside its Loading and its PC / phone branches. */}
         {/* [Issue #162] Move Dialog */}
         {moveTarget && (
           <MoveDialog

@@ -11,47 +11,22 @@
  * @module lib/mem/close-when
  */
 
-import type { MemCloseWhen, MemCloseWhenType, MemKind } from '@/types/mem';
+import {
+  CLOSE_WHEN_ALLOWED,
+  CLOSE_WHEN_DEFAULTS,
+  type MemCloseWhen,
+  type MemKind,
+} from '@/types/mem';
 import { parseIsoWithOffset } from './validate';
 
 export const CLOSE_WHEN_SCHEMA = 1;
 export const CLOSE_WHEN_MAX_LENGTH = 300;
 
-/** Every type the grammar knows, in the order of the table (§2.3). */
-export const CLOSE_WHEN_TYPES: readonly MemCloseWhenType[] = [
-  'replaced',
-  'manual',
-  'issue',
-  'pr',
-  'branch',
-  'relay',
-  'worktree',
-  'session',
-  'at',
-];
-
-/** §2.3: which kind takes which type. The fixture holds the same table. */
-export const CLOSE_WHEN_ALLOWED: Readonly<Record<MemKind, ReadonlySet<MemCloseWhenType>>> = {
-  now: new Set(['replaced', 'issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
-  waiting: new Set(['issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
-  decision: new Set(['issue', 'pr', 'branch', 'at']),
-  next: new Set(['manual', 'issue', 'pr', 'branch', 'relay', 'worktree', 'session', 'at']),
-  external: new Set(['manual', 'issue', 'pr', 'branch', 'at']),
-  note: new Set(['manual', 'at']),
-};
-
 /**
- * What an omitted condition means per kind. `null`: required. `promoted`: the
- * decision default, stored as NULL and closed only by its transitions (§3.2).
+ * The kind × type table and the defaults live in `types/mem` (Issue #4227 G-PR4): the CLI reads them
+ * there without the `@/` alias. Re-exported here under the same names; nothing about them changes.
  */
-export const CLOSE_WHEN_DEFAULTS: Readonly<Record<MemKind, 'replaced' | 'manual' | 'promoted' | null>> = {
-  now: 'replaced',
-  waiting: null,
-  decision: 'promoted',
-  next: null,
-  external: null,
-  note: 'manual',
-};
+export { CLOSE_WHEN_ALLOWED, CLOSE_WHEN_DEFAULTS, CLOSE_WHEN_TYPES } from '@/types/mem';
 
 export interface CloseWhenTarget {
   host: string;

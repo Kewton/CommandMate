@@ -19,7 +19,7 @@ import path from 'node:path';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
-import { REPO, deadPid } from './lock-4288-harness';
+import { REPO, assertWithinLimit, deadPid, faultFn, pinnedObservation, type ObservationRecord } from './lock-4288-harness';
 
 export const LOADER = path.join(REPO, 'scripts/lib/machine-lock.sh');
 export const HOST = os.hostname();
@@ -63,23 +63,28 @@ export function lstartOf(pid: number, tz: string | null): string {
 
 export const iso = (ms: number): string => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace('.000Z', 'Z');
 
+/**
+ * The one fixed reference of a row (#4288 PR1a-f impl-8): every time the row writes into a fixture
+ * (started_at=, mtimes, ticket fields) and the T0 of the injected observation are made from it, so a delay
+ * between building the fixture and driving the call (a loaded machine) cannot move one against the other.
+ * `pinBase()` is the only real clock read of a row's setup (called by the test's root maker); without a pin
+ * (the other test files) `base()` is the real clock at the call, as before.
+ */
+let pinnedBase: number | null = null;
+export const pinBase = (): number => (pinnedBase = Date.now());
+export const unpinBase = (): void => {
+  pinnedBase = null;
+};
+export const base = (): number => pinnedBase ?? Date.now();
+
 export function age(file: string, ageMs: number): void {
-  const t = (Date.now() - ageMs) / 1000;
+  const t = (base() - ageMs) / 1000;
   fs.utimesSync(file, t, t);
 }
 
-/** A `ps` first on PATH that answers `-o etime=` for FAKE_ETIME_PID with FAKE_ETIME (else the real ps). */
-export function psShim(dir: string): string {
-  const real = (spawnSync('sh', ['-c', 'command -v ps'], { encoding: 'utf8' }).stdout ?? '').trim() || '/bin/ps';
-  const bin = path.join(dir, 'shim-bin');
-  fs.mkdirSync(bin, { recursive: true });
-  fs.writeFileSync(
-    path.join(bin, 'ps'),
-    `#!/bin/sh\nlast=""\nfor a in "$@"; do last=$a; done\ncase " $* " in\n  *" etime= "*) if [ -n "\${FAKE_ETIME_PID:-}" ] && [ "$last" = "$FAKE_ETIME_PID" ]; then echo "$FAKE_ETIME"; exit 0; fi;;\nesac\nexec ${real} "$@"\n`,
-    { mode: 0o755 },
-  );
-  return bin;
-}
+/** The ps shim and the injected observation live in the shared harness since impl-10 (PR1c uses them too). */
+export { psShim, slowPsShim, pinnedObservation, drivenDrainClock } from './lock-4288-harness';
+export type { ObservationRecord, PinnedObservation } from './lock-4288-harness';
 
 export interface OwnerRecord {
   pid: number;
@@ -115,7 +120,7 @@ export const queueIn = (root: string): string => path.join(root, 'x.queue');
 export function ticketAhead(root: string): void {
   const q = queueIn(root);
   fs.mkdirSync(q, { recursive: true });
-  const now = Date.now();
+  const now = base();
   fs.writeFileSync(path.join(q, '000000000001'), JSON.stringify({ pid: process.pid, host: HOST, token: 'ahead', createdAt: now, deadline: now + 3_600_000 }));
 }
 
@@ -185,19 +190,37 @@ export interface DriveOptions {
   pathPrefix?: string;
   /** bash: the call itself (default: the acquisition, or the guard). */
   call?: string;
+  /**
+   * The start-time observation (`ps -o etime=` between two clock reads), fully injected (#4288 PR1a-f impl-6/7):
+   * the clock is a fixed base plus a step per etime query (0 for 'fast', 1500 ms for 'slow': the read before ps
+   * and the read after it differ by exactly the step — a 'slow' one is a read of 1 s or more, ECLOCK), and ps
+   * answers a live pid's etime from the shim. Unset: the real clock and ps (the row does not depend on them).
+   * An explicit `hooks.now` / a `bashPre` of its own wins.
+   */
+  observation?: 'fast' | 'slow';
 }
 
-function faultFn(spec?: string): ((point: string, target: string) => string | undefined) | undefined {
-  if (!spec) return undefined;
-  const items = spec
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((item) => {
-      const [key, code] = item.split('=');
-      const [point, sub] = key.split('@');
-      return { point, sub, code };
-    });
-  return (point, target) => items.find((i) => i.point === point && (!i.sub || target.includes(i.sub)))?.code;
+let lastObservationRecord: (() => ObservationRecord) | null = null;
+export const lastObservation = (): ObservationRecord | null => (lastObservationRecord ? lastObservationRecord() : null);
+
+/**
+ * The observation of #4288 PR1a-f impl-7: the clock AND the ps etime of an observation, both injected. The
+ * clock is the fixed base T0 plus `step` for every etime query so far (the shim counts them in a file): a read
+ * before ps and the read after it differ by `step` — 0 ('fast') or 1500 ('slow') — whatever the order of the
+ * calls, the load of the machine or the real time that passes. ps answers CM_OBS_ETIME for a live pid.
+ */
+function withObservation(root: string, o: DriveOptions): DriveOptions {
+  if (!o.observation) return o;
+  // the row's fixed reference: the fixtures' times are made from the same one
+  const p = pinnedObservation(root, { t0: base(), step: o.observation === 'slow' ? 1500 : 0 });
+  lastObservationRecord = p.record;
+  return {
+    ...o,
+    pathPrefix: o.pathPrefix ?? p.pathPrefix,
+    env: { ...p.env, ...(o.env ?? {}) },
+    bashPre: `${p.bashPre}${o.bashPre ?? ''}`,
+    hooks: { now: p.now, ...(o.hooks ?? {}) },
+  };
 }
 
 const BASH_ACQ = 'if lock_acquire_path "$LK" "$(machine_lock_queue_of "$LK")" 0; then echo acquired; else echo "refused $LOCK_HELD_BY"; fi\n';
@@ -247,10 +270,12 @@ function bashOutcome(who: Who, out: string, err: string): Outcome {
 }
 
 /** One call of `who` on the lock under `root`, synchronously (bash and sync) or not (TS). */
-export async function drive(impl: Impl, who: Who, root: string, o: DriveOptions = {}): Promise<Outcome> {
+export async function drive(impl: Impl, who: Who, root: string, o0: DriveOptions = {}): Promise<Outcome> {
+  const o = withObservation(root, o0);
   if (impl === 'bash') {
     const call = o.call ?? (who === 'guard-head' || who === 'guard-behind' ? BASH_GUARD : BASH_ACQ);
     const r = spawnSync('bash', ['-c', `${bashPrelude(who)}${o.bashPre ?? ''}\n${call}`], { encoding: 'utf8', timeout: 60000, env: bashEnv(root, o) });
+    assertWithinLimit(r, `drive (bash ${who})`, 60000);
     return bashOutcome(who, (r.stdout ?? '').trim(), r.stderr ?? '');
   }
   const fault = faultFn(o.fault);

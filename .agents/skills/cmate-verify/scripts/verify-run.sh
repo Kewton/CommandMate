@@ -674,7 +674,14 @@ LOCK_OWNER_CODEC=""
 # from the environment (like the options above): set by the caller after the load, so an exported value
 # never reaches a record nor refuses the verify gate's JSON acquisition.
 LOCK_OWNER_EXTRA=""
-case "${CM_VERIFY_TEST_HANDOFF_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) HANDOFF_WAIT_SEC=$CM_VERIFY_TEST_HANDOFF_WAIT_SEC;; esac
+# Every seam of seconds below is read as decimal (#4288 PR1a-f impl-11): `08` / `010` would otherwise be
+# octal (an error / 8) in the arithmetic of their readers while `sleep` reads 8 / 10.
+case "${CM_VERIFY_TEST_HANDOFF_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) HANDOFF_WAIT_SEC=$(( 10#$CM_VERIFY_TEST_HANDOFF_WAIT_SEC ));; esac
+# Test seams of the drain (#4288 PR1a-f impl-10; unset — the default — changes nothing): the grace
+# between TERM and KILL (KILL_GRACE_SEC, every user of it) and the wait after KILL (LOCK_KILL_WAIT_SEC).
+LOCK_KILL_WAIT_SEC=2
+case "${CM_VERIFY_TEST_KILL_GRACE_SEC:-}" in ''|*[!0-9]*) ;; *) KILL_GRACE_SEC=$(( 10#$CM_VERIFY_TEST_KILL_GRACE_SEC ));; esac
+case "${CM_VERIFY_TEST_KILL_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) LOCK_KILL_WAIT_SEC=$(( 10#$CM_VERIFY_TEST_KILL_WAIT_SEC ));; esac
 
 # Milliseconds since the epoch. `date +%s%3N` where date has it (GNU), else
 # seconds * 1000 (macOS) — the ticket deadline is then whole seconds, which is
@@ -685,6 +692,12 @@ lock_now_ms() {
     ''|*[!0-9]*) echo $(( $(date +%s) * 1000 ));;
     *) echo "$lnm";;
   esac
+}
+
+# Whole seconds since the epoch: the drain's clock (lock_drain_group). A test may redefine it after the
+# load, as lock_now_ms (#4288 PR1a-f impl-10: the waits driven by a fixed clock, not the real one).
+lock_now_sec() {
+  date +%s
 }
 
 # One field out of a JSON record (an owner or a ticket): strings, digits, true /
@@ -812,6 +825,7 @@ lock_test_obs_fault() { # <point> <target>
     ltf_key=${ltf_item%%=*}
     case "$ltf_key" in
       "$1") LTF_CODE=${ltf_item#*=}; return 0;;
+      "$1@@"*) if [ "$2" = "${ltf_key#*@@}" ]; then LTF_CODE=${ltf_item#*=}; return 0; fi;;
       "$1@"*) case "$2" in *"${ltf_key#*@}"*) LTF_CODE=${ltf_item#*=}; return 0;; esac;;
     esac
   done
@@ -824,6 +838,18 @@ lock_test_pause() { # <stage>
   case ",${CM_VERIFY_TEST_HANDOFF:-}," in *",pause:$1,"*) ;; *) return 0;; esac
   : > "$CM_VERIFY_TEST_HANDOFF_DIR/$1.reached"
   while [ ! -e "$CM_VERIFY_TEST_HANDOFF_DIR/$1.go" ]; do sleep 0.05 2>/dev/null || sleep 1; done
+}
+# A mark that does not wait: mark:<stage> in CM_VERIFY_TEST_HANDOFF writes <dir>/<stage>.reached
+# (#4288 PR1a-f impl-10: a test waits for the child's decision instead of a fixed sleep).
+lock_test_mark() { # <stage>
+  [ -n "${CM_VERIFY_TEST_HANDOFF_DIR:-}" ] || return 0
+  case ",${CM_VERIFY_TEST_HANDOFF:-}," in *",mark:$1,"*) : > "$CM_VERIFY_TEST_HANDOFF_DIR/$1.reached";; esac
+  return 0
+}
+# A line per step of the drain into CM_VERIFY_TEST_DRAIN_LOG (unset: nothing written).
+lock_test_drain_note() { # <step>
+  [ -n "${CM_VERIFY_TEST_DRAIN_LOG:-}" ] || return 0
+  printf '%s\n' "$1" >> "$CM_VERIFY_TEST_DRAIN_LOG" 2>/dev/null || true
 }
 lock_test_fault() { # <stage>
   case ",${CM_VERIFY_TEST_HANDOFF:-}," in *",fault:$1,"*) return 0;; esac
@@ -2174,27 +2200,33 @@ lock_release() { # <lock-path> <token>
   return 0
 }
 
-# Empty a gate's process group: TERM (unless sent already), KILL_GRACE_SEC, KILL, 1 s. 0 when it is
+# Empty a gate's process group: TERM (unless sent already), KILL_GRACE_SEC, KILL, LOCK_KILL_WAIT_SEC (2 s). 0 when it is
 # empty (ESRCH), 1 when it is not or cannot be shown to be (EPERM: a member of another user).
 # LDG_SIGNALLED=1 when there was anyone left to signal.
 lock_drain_group() { # <pgid> <term-sent 0|1>
   LDG_SIGNALLED=0
   if lock_test_fault drain; then return 1; fi
-  lock_group_is_empty "$1" && return 0
+  if lock_group_is_empty "$1"; then lock_test_drain_note empty; return 0; fi
   LDG_SIGNALLED=1
-  [ "$2" = 1 ] || kill -s TERM -- "-$1" 2>/dev/null
-  ldg_end=$(( $(date +%s) + KILL_GRACE_SEC ))
-  while [ "$(date +%s)" -lt "$ldg_end" ]; do
-    lock_group_is_empty "$1" && return 0
+  if [ "$2" = 1 ]; then lock_test_drain_note term-sent; else lock_test_drain_note term; kill -s TERM -- "-$1" 2>/dev/null; fi
+  # Test seam (#4288 PR1a-f impl-12; off unless pause:drain-term): the drain held after its TERM, so a
+  # test reads the lock while the drain is known to be in progress. The grace counts from the go.
+  lock_test_pause drain-term
+  ldg_end=$(( $(lock_now_sec) + KILL_GRACE_SEC ))
+  while [ "$(lock_now_sec)" -lt "$ldg_end" ]; do
+    if lock_group_is_empty "$1"; then lock_test_drain_note drained; return 0; fi
     sleep 0.05 2>/dev/null || sleep 1
   done
+  lock_test_drain_note kill
   kill -s KILL -- "-$1" 2>/dev/null
-  ldg_end=$(( $(date +%s) + 2 ))
-  while [ "$(date +%s)" -lt "$ldg_end" ]; do
-    lock_group_is_empty "$1" && return 0
+  ldg_end=$(( $(lock_now_sec) + LOCK_KILL_WAIT_SEC ))
+  while [ "$(lock_now_sec)" -lt "$ldg_end" ]; do
+    if lock_group_is_empty "$1"; then lock_test_drain_note drained; return 0; fi
     sleep 0.05 2>/dev/null || sleep 1
   done
-  lock_group_is_empty "$1"
+  if lock_group_is_empty "$1"; then lock_test_drain_note drained; return 0; fi
+  lock_test_drain_note left
+  return 1
 }
 
 # Stop a gate whose leader this shell has not waited for yet (the EXIT trap): TERM the group, wait
@@ -2523,8 +2555,9 @@ lock_child_wait() { # <go> <ack> <deadline-epoch-s> <parent-pid>
   while :; do
     [ -d "$1" ] && break
     if [ "$(lock_obs_kill0 handoff-self "$4")" != alive ] || [ "$(date +%s)" -ge "$3" ]; then
-      [ "$(lock_obs_mkdir handoff-go "$1")" = created ] && return 1
+      if [ "$(lock_obs_mkdir handoff-go "$1")" = created ]; then lock_test_mark child-withdrew; return 1; fi
       [ -d "$1" ] && break
+      lock_test_mark child-withdrew
       return 1
     fi
     sleep 0.05 2>/dev/null || sleep 1

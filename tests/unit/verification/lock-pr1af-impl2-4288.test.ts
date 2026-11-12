@@ -25,6 +25,10 @@ import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import * as H from './lock-owner-atomic-4288-harness';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { scanRawCalls } from './lock-observation-scan-4288';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["pr1af-impl2-4288-"]);
 
 // The harness imports machine-lock.ts, which imports the logger: kept quiet here (as the table's file does).
 vi.mock('@/lib/logger', () => {
@@ -154,7 +158,7 @@ describe('item 7 (PM Claude P3-8, F53): I3 reading an older tmp pid while the cl
     for (const impl of ['bash', 'sync'] as const) {
       const r = freshRoot();
       const live = oldTmp(r);
-      const out = await H.drive(impl, 'guard-head', r, { pathPrefix: H.psShim(r), env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: 'garbage' } });
+      const out = await H.drive(impl, 'guard-head', r, { pathPrefix: H.psShim(r), env: { FAKE_ETIME_PID: String(live), FAKE_ETIME: 'garbage' }, observation: 'fast' });
       expect([impl, out.code, out.unknown]).toEqual([impl, 'kept', expect.stringMatching(/^point=etime .* errno=EINVAL$/)]);
       fs.rmSync(r, { recursive: true, force: true });
     }
@@ -339,7 +343,7 @@ describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has o
     expect(found).toEqual([['rmQuiet|rmSync', 1]]);
   });
 
-  it('sync release: a delete of the own <lock> that fails is named and answers deferred (not thrown); a second call releases', () => {
+  it('sync release: a delete of the own <lock> that fails is named once and thrown (never deferred); the <lock> and its owner stay', () => {
     const r = freshRoot();
     const warnings: string[] = [];
     const lock = lockSync.acquireMachineLockSync('x', { lockPath: H.lockPathIn(r), timeoutMs: 0, pollMs: 20, warn: (l: string) => warnings.push(l) });
@@ -347,7 +351,7 @@ describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has o
     vi.spyOn(fsMod, 'rmSync').mockImplementation(() => {
       throw Object.assign(new Error('EBUSY: injected'), { code: 'EBUSY' });
     });
-    let first: string = 'threw';
+    let first: string = 'returned';
     try {
       first = lock.release();
     } catch {
@@ -355,9 +359,10 @@ describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has o
     } finally {
       vi.restoreAllMocks();
     }
-    expect(first).toBe('deferred');
-    expect(warnings.join('\n')).toMatch(/machine-lock-release-failed \S+ \(EBUSY; /);
-    expect(lock.release()).toBe('released');
-    expect(fs.existsSync(H.lockPathIn(r))).toBe(false);
+    expect(first).toBe('threw');
+    expect(warnings.filter((l) => /machine-lock-release-failed \S+ \(EBUSY; /.test(l))).toHaveLength(1);
+    expect(warnings.join('\n')).not.toMatch(/deferred/);
+    expect(fs.existsSync(H.lockPathIn(r))).toBe(true);
+    expect(fs.existsSync(path.join(H.lockPathIn(r), 'owner'))).toBe(true);
   });
 });

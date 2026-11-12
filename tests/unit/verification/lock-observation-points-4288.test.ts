@@ -44,6 +44,10 @@ import {
   writeOwner,
   type TakeResult,
 } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-obs-4288-"]);
 
 const SOURCES: Record<Impl, string> = {
   bash: '.claude/skills/cmate-verify/scripts/verify-run.sh',
