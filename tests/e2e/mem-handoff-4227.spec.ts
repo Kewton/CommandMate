@@ -17,6 +17,7 @@
  */
 
 import { test, expect, type BrowserContext, type Page, type Route } from '@playwright/test';
+import { mockStartPreview } from './fixtures/start-preview-helpers';
 
 const WT = 'e2e-handoff-4227';
 /** G10: another worktree, for the switch (the page's Loading). */
@@ -473,6 +474,7 @@ async function stubServer(context: BrowserContext): Promise<Server> {
       return ok({});
     },
   );
+  await mockStartPreview(context);
   return server;
 }
 

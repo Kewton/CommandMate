@@ -16,6 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { Page, Route } from '@playwright/test';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Worktree id scoped to the #2592 specs (must not collide with other specs). */
 export const E2E_AGENT_MODE_WORKTREE = 'e2e-agent-mode-2592';
@@ -203,6 +204,7 @@ export async function mockAgentModeApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 
   return specialKeys;
 }
@@ -349,6 +351,7 @@ export async function mockAgentModeSplitApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /**

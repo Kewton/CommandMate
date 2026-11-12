@@ -30,6 +30,7 @@ import {
   PREVIEW_INSTANCE_ID_MAX,
   type StartPreviewResponse,
 } from '@/lib/handoff/preview';
+import { readStateSource } from '@/lib/brief/sources';
 import type { BriefBuildDeps } from '@/lib/brief/build';
 import type { BriefJson } from '@/types/brief';
 import { BriefWorld, resetBriefMemory } from '../brief/brief-4223-harness';
@@ -236,5 +237,122 @@ describe('the preview’s show conditions (§3.2) and its lines', () => {
   it('an invalid instance is 400', async () => {
     const outcome = await handoffStartPreview(world.db, 'wt-1', 'bad/id', { mem: world.deps() });
     expect(outcome.status).toBe(400);
+  });
+});
+
+// --- G-PR6: the boundary read again after the lines (design §3.1) ---------------------------
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+/** A state reader that stops on its first call until released (the real reader answers). */
+function heldStateReader() {
+  const reached = deferred();
+  const gate = deferred();
+  let calls = 0;
+  const reader: NonNullable<BriefBuildDeps['readers']>['state'] = async (ctx) => {
+    calls += 1;
+    if (calls === 1) {
+      reached.resolve();
+      await gate.promise;
+    }
+    return readStateSource(ctx);
+  };
+  return { reached: reached.promise, release: () => gate.resolve(), calls: () => calls, deps: { readers: { state: reader } } as BriefBuildDeps };
+}
+
+const boundaryState = (id: string): string =>
+  (world.db.prepare('SELECT state FROM session_brief_boundaries WHERE id = ?').get(id) as { state: string }).state;
+
+describe.each(['on', 'derived'] as const)('G-PR6 mode %s: the boundary changes while the lines are read', (mode) => {
+  beforeEach(() => setFeatures({ popup: true, injectOnStart: true }, mode));
+
+  it('A → B under the read: 409 boundary_changed, A’s lines under no id, C built once (#4224 R5)', async () => {
+    const a = openPending();
+    const held = heldStateReader();
+    const running = handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps(held.deps) });
+    await held.reached;
+    const b = openPending();
+    held.release();
+    const outcome = await running;
+    expect(a).not.toBe(b);
+    expect(boundaryState(a)).toBe('superseded');
+    expect(boundaryState(b)).toBe('pending');
+    expect(outcome.status).toBe(409);
+    expect(outcome.body).toMatchObject({ ok: false, code: 'boundary_changed' });
+    expect(JSON.stringify(outcome.body)).not.toContain(a);
+    expect(JSON.stringify(outcome.body)).not.toContain('"show"');
+    expect(held.calls()).toBe(1); // never built again
+    // Read again (the screen's "try again"): B is asked about.
+    expect(await preview()).toMatchObject({ ok: true, show: true, mode, boundary: { id: b } });
+  });
+
+  it('A used under the read (no pending boundary now): a valid show:false, not A', async () => {
+    const a = openPending();
+    const held = heldStateReader();
+    const running = handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps(held.deps) });
+    await held.reached;
+    world.db.prepare("UPDATE session_brief_boundaries SET state = 'sent', settled_at = ? WHERE id = ?").run(Date.now(), a);
+    held.release();
+    const outcome = await running;
+    expect(outcome.status).toBe(200);
+    expect(outcome.body).toEqual({ ok: true, show: false, attended: true, injectOnStart: true, mode });
+  });
+
+  it('the mode changes under the read: 409 boundary_changed (A’s lines were read for the old mode)', async () => {
+    openPending();
+    const held = heldStateReader();
+    const running = handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps(held.deps) });
+    await held.reached;
+    setFeatures({ popup: true, injectOnStart: true }, mode === 'on' ? 'derived' : 'on');
+    held.release();
+    const outcome = await running;
+    expect(outcome.status).toBe(409);
+    expect(outcome.body).toMatchObject({ ok: false, code: 'boundary_changed' });
+    // (C's own re-check before drawing may read its sources again on a mode change — that is C's
+    // rule inside its one pinned request, not the preview building again.)
+  });
+
+  it('A → B while the target is resolved again after the lines (P2-3): 409 boundary_changed, never A', async () => {
+    const a = openPending();
+    const base = world.deps();
+    const inner = base.observe!;
+    let calls = 0;
+    let trigger = Number.POSITIVE_INFINITY;
+    const mem = {
+      ...base,
+      observe: async (path: string) => {
+        calls += 1;
+        if (calls === trigger) openPending(); // B opens while this (the last) observe is awaited
+        return inner(path);
+      },
+    };
+    // Baseline: how many times the preview resolves the target (its last one is the final re-read).
+    const baseline = await handoffStartPreview(world.db, 'wt-1', 'claude', { mem, brief: world.briefDeps() });
+    expect(baseline.body).toMatchObject({ ok: true, show: true, boundary: { id: a } });
+    const total = calls;
+    calls = 0;
+    trigger = total;
+    const outcome = await handoffStartPreview(world.db, 'wt-1', 'claude', { mem, brief: world.briefDeps() });
+    expect(boundaryState(a)).toBe('superseded');
+    expect(outcome.status).toBe(409);
+    expect(outcome.body).toMatchObject({ ok: false, code: 'boundary_changed' });
+    expect(JSON.stringify(outcome.body)).not.toContain(a);
+  });
+
+  it('negative: nothing changes under the read — one build, the boundary as it was', async () => {
+    const a = openPending();
+    const held = heldStateReader();
+    const running = handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps(held.deps) });
+    await held.reached;
+    held.release();
+    const outcome = await running;
+    expect(outcome.body).toMatchObject({ ok: true, show: true, mode, boundary: { id: a } });
+    expect(held.calls()).toBe(1);
   });
 });

@@ -24,6 +24,7 @@ import {
   COMPOSER_HEIGHT_STORAGE_KEY_PREFIX,
 } from '../../../src/config/composer-height';
 import { modeFrame } from './agent-mode-helpers';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Worktree ids scoped to the #2598 specs (must not collide with other specs). */
 export const E2E_COMPOSER_WORKTREE = 'e2e-composer-2598-a';
@@ -206,6 +207,7 @@ export async function mockComposerApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /**

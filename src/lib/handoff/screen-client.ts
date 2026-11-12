@@ -90,7 +90,11 @@ export const START_PREVIEW_TIMEOUT_MS = 2000;
 
 /**
  * G-3's preview of the instance's next send (`GET …/mem/start-preview`). null when it could not
- * be read in time — the screen then sends as it always did (`auto`), never asks on a guess.
+ * be read in time or was not answered (a non-200, e.g. 409 `boundary_changed`: the boundary
+ * moved under the server's read). G-PR6 (design §3.2): a plain send reads this first and on null
+ * sends NOTHING — the draft stays, with the reason and "try again" — never `auto` in place of a
+ * choice it may owe.
+ * A read that says unattended (`show:false`, `attended:false`) sends as it always did.
  */
 export async function fetchStartPreview(worktreeId: string, instanceId: string): Promise<StartPreviewResponse | null> {
   const controller = new AbortController();

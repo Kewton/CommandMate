@@ -27,6 +27,7 @@
 
 import type { Page, Route } from '@playwright/test';
 import { getTerminalSplitsStorageKey } from '../../../src/config/terminal-split-config';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Worktree id scoped to the #2131 specs (must not collide with other specs). */
 export const E2E_DESKTOP_OPENCODE_WORKTREE = 'e2e-opencode-2131';
@@ -156,6 +157,7 @@ export async function mockDesktopOpencodeApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /**

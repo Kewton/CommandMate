@@ -14,6 +14,7 @@
 
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { separateTurnBody } from '@/lib/hooks/sources/turn-body';
+import { mockStartPreview } from './fixtures/start-preview-helpers';
 
 const WORKTREE_ID = 'e2e-chat-reply-head-2820';
 const TOOL = 'codex';
@@ -158,6 +159,7 @@ async function mockApi(page: Page, state: MockState): Promise<void> {
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 async function seedStorage(page: Page): Promise<void> {
