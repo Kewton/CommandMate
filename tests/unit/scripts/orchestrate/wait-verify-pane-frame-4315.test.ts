@@ -143,6 +143,47 @@ describe('the wider read takes nothing it did not take before (Issue #4315)', ()
     expect(h.captures()).toHaveLength(0);
   });
 
+  it('a newer task created while the pane was read wins over the signal on it (#4315 review)', () => {
+    const h = harness();
+    let created = false;
+    const run = (command: string, args: string[]) => {
+      if (args[0] === 'capture') created = true;
+      return h.ctx.run(command, args);
+    };
+    expect(
+      awaitCompletionSignal({ ...h.ctx, run, supersededBy: () => (created ? 'a newer task t-2 was created' : null) })
+    ).toEqual({ seen: false, reason: 'a newer task t-2 was created' });
+  });
+
+  it('a newer task created while the reply was read wins over the signal in it (#4315 review)', () => {
+    const h = harness({ reply: `IMPL_COMPLETED head=${HEAD.slice(0, 10)}` });
+    let created = false;
+    const run = (command: string, args: string[]) => {
+      if (args[0] === 'reply') created = true;
+      return h.ctx.run(command, args);
+    };
+    expect(
+      awaitCompletionSignal({ ...h.ctx, run, supersededBy: () => (created ? 'a newer task t-2 was created' : null) })
+    ).toEqual({ seen: false, reason: 'a newer task t-2 was created' });
+  });
+
+  it('a newer task created while the pane was read wins with no task to date it by (#4315 review)', () => {
+    const h = harness();
+    let created = false;
+    const run = (command: string, args: string[]) => {
+      if (args[0] === 'capture') created = true;
+      return h.ctx.run(command, args);
+    };
+    expect(
+      awaitCompletionSignal({
+        ...h.ctx,
+        since: null,
+        run,
+        supersededBy: () => (created ? 'a newer task t-2 was created' : null),
+      })
+    ).toEqual({ seen: false, reason: 'a newer task t-2 was created' });
+  });
+
   it('a newer task ends the wait unseen', () => {
     const h = harness({ frame: FRAME.replace('  IMPL_COMPLETED head=0a1b2c3d4e', '  still working') });
     expect(awaitCompletionSignal({ ...h.ctx, supersededBy: () => 'superseded by t-2' })).toEqual({

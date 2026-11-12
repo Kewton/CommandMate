@@ -199,7 +199,7 @@ describe('ask: falling back to the pane', () => {
       { data: { id: 1 }, status: 201 },
       { data: { ...completedFrame, cliToolId: 'copilot' } },
       { data: [] },
-      { data: { output: 'copilot said this\n' } },
+      { data: { output: '> hi\ncopilot said this\n' } },
     ]);
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');

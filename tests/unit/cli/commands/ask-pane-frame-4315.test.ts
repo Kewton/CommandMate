@@ -47,25 +47,48 @@ const completedFrame = {
   sessionStatus: 'ready' as const,
 };
 
-async function askWithPane(output: string): Promise<{ source: string; reply: string | null }> {
+const REQUEST = 'Issue 4315 の状況を 1 行で返して';
+const OLD_REQUEST = 'Issue 4315 を実装して DONE を返して';
+
+/** The fixture's rows, without the trailing newline. */
+function rows(): string[] {
+  return FRAME.replace(/\n$/, '').split('\n');
+}
+
+/** The fixture with rows put in place (0-based index → text). */
+function frameWith(put: Record<number, string>): string {
+  const r = rows();
+  for (const [i, text] of Object.entries(put)) r[Number(i)] = text;
+  return `${r.join('\n')}\n`;
+}
+
+/** Rows 991-993 (above the composer at 996) hold this ask's request and its reply. */
+const NEW_TURN = { 990: `❯ ${REQUEST}`, 991: '⏺ 実装は済み、検証待ちです', 992: '' };
+
+async function askWithPane(
+  output: string,
+  message = REQUEST,
+  ledger: unknown[] = [],
+): Promise<{ source: string; reply: string | null }> {
   mockFetchSequence([
     { data: { cliToolId: 'copilot', instanceId: 'copilot', resolvedBy: 'roster', conflict: null } },
     { data: { id: 1 }, status: 201 },
     { data: completedFrame },
-    { data: [] },
+    { data: ledger },
     { data: { output } },
   ]);
   const { createAskCommand } = await import('../../../../src/cli/commands/ask');
-  await createAskCommand().parseAsync(['node', 'ask', 'wt1', 'hi', '--instance', 'copilot', '--json']);
+  await createAskCommand().parseAsync(['node', 'ask', 'wt1', message, '--instance', 'copilot', '--json']);
   return JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
 }
 
 describe('ask: the pane fallback reads the whole frame (Issue #4315)', () => {
   it('recovers a reply drawn at row 305 above hundreds of border rows', async () => {
-    const payload = await askWithPane(FRAME);
+    const payload = await askWithPane(frameWith({ 302: `> ${REQUEST}` }));
     expect(payload.source).toBe('pane');
     expect(payload.reply).toContain('DONE: 4315 0a1b2c3d4e');
     expect(payload.reply).toContain('IMPL_COMPLETED head=0a1b2c3d4e');
+    expect(payload.reply).not.toContain(REQUEST);
   });
 
   it('still answers source=none for a pane with nothing on it', async () => {
@@ -75,8 +98,60 @@ describe('ask: the pane fallback reads the whole frame (Issue #4315)', () => {
   });
 
   it('a frame without the reply does not gain one', async () => {
-    const payload = await askWithPane(FRAME.replace('⏺ DONE: 4315 0a1b2c3d4e', '⏺ working'));
+    const payload = await askWithPane(
+      frameWith({ 302: `> ${REQUEST}`, 303: '⏺ working' })
+    );
     expect(payload.source).toBe('pane');
     expect(payload.reply).not.toContain('DONE:');
+  });
+});
+
+describe('ask: only rows drawn after this request are the reply (Issue #4315 review)', () => {
+  it('takes this turn\'s reply near the end, and not the previous one at row 305', async () => {
+    const payload = await askWithPane(frameWith({ 302: `> ${OLD_REQUEST}`, ...NEW_TURN }));
+    expect(payload.source).toBe('pane');
+    expect(payload.reply).toContain('実装は済み、検証待ちです');
+    expect(payload.reply).not.toContain('DONE: 4315');
+    expect(payload.reply).not.toContain('IMPL_COMPLETED');
+  });
+
+  it('finds the request whatever glyph the tool draws before it', async () => {
+    for (const glyph of ['›', '>', '│ >', '']) {
+      mockConsoleLog.mockClear();
+      const payload = await askWithPane(frameWith({ ...NEW_TURN, 990: `${glyph} ${REQUEST}` }));
+      expect(payload.reply).toContain('実装は済み、検証待ちです');
+      expect(payload.reply).not.toContain('DONE: 4315');
+    }
+  });
+
+  it('(a) a frame that does not show this request gives no reply', async () => {
+    const payload = await askWithPane(frameWith({ 302: `> ${OLD_REQUEST}` }));
+    expect(payload.source).toBe('none');
+    expect(payload.reply).toBeNull();
+    expect(mockConsoleError.mock.calls.flat().join('\n')).toContain('does not show this message');
+  });
+
+  it('(b) a frame with this request only above an earlier request and its reply gives no reply', async () => {
+    const ledger = [
+      { id: 'u0', worktreeId: 'wt1', role: 'user', content: OLD_REQUEST, timestamp: new Date(Date.now() - 600_000).toISOString(), messageType: 'normal', instanceId: 'copilot' },
+    ];
+    const payload = await askWithPane(frameWith({ 200: `> ${REQUEST}`, 302: `> ${OLD_REQUEST}` }), REQUEST, ledger);
+    expect(payload.source).toBe('none');
+    expect(payload.reply).toBeNull();
+  });
+
+  it('a short request does not match inside a word of another row', async () => {
+    const payload = await askWithPane(frameWith({ 302: `> ${OLD_REQUEST}` }), 'hi');
+    expect(payload.source).toBe('none');
+  });
+
+  it('skips the wrapped rest of a long request, and keeps a reply that repeats its words', async () => {
+    const long = `${'x'.repeat(190)} tail-of-request`;
+    const payload = await askWithPane(
+      frameWith({ ...NEW_TURN, 989: `> ${long.slice(0, 190)}`, 990: '  tail-of-request', 991: 'tail-of-request' }),
+      long
+    );
+    expect(payload.reply?.startsWith('tail-of-request')).toBe(true);
+    expect(payload.reply).not.toContain('x'.repeat(40));
   });
 });

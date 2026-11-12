@@ -673,6 +673,35 @@ export function disableAutoYes({ run, sleep, cli, wt, instance, cwd, error }) {
 }
 
 /**
+ * One look for this task's completion signal (see {@link awaitCompletionSignal}):
+ * the result to return when it is seen, else null.
+ */
+function signalSeen({ run, o, cwd, since, sinceIso }) {
+  const head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
+  const replied = sinceIso
+    ? querySafely(run, o.cli, ['reply', o.wt, '--instance', o.instance, '--since', sinceIso, '--json'], cwd)
+    : null;
+  const reply = typeof replied?.reply === 'string' ? replied.reply : null;
+  if (reply !== null) {
+    return hasCompletionSignal(reply, { head }) ? { seen: true, head, note: 'signal=seen(reply)' } : null;
+  }
+  // The whole squeezed frame, not a `--tail` window (#4315): a pane drawn from
+  // the top keeps rows that are not blank (a border's `│` after 110 spaces)
+  // below the transcript, and a window of the last 40 held only those and
+  // the composer while the signal sat on row 305. The checks below, not the
+  // window, are what tie a line to this task.
+  const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane'], { cwd });
+  const screen = pane.status === 0 ? pane.stdout : '';
+  if (!sinceIso) {
+    return hasCompletionSignal(screen, { head }) ? { seen: true, head, note: 'signal=seen signal-task=unknown' } : null;
+  }
+  if (!hasCompletionSignal(screen, { head, requireHead: true })) return null;
+  // The line names this HEAD; it is this task's when this HEAD is a commit of this task.
+  const committedAt = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI', head]).trim());
+  return Number.isFinite(committedAt) && committedAt >= since ? { seen: true, head, note: 'signal=seen(pane,head)' } : null;
+}
+
+/**
  * Wait until the completion signal of this task is seen (3-3, #2605), and
  * name the HEAD it was seen at (#3883 H-6). With a task to date it by
  * (`since`: the task's creation), a signal is this task's only when
@@ -686,7 +715,8 @@ export function disableAutoYes({ run, sleep, cli, wt, instance, cwd, error }) {
  * line of an earlier task stays on the screen, and a turn of this task that
  * ended mid-work (`schedule`, a stop hook) does not make it this task's.
  * Nothing that ties the line to the task is "not yet", until --signal-timeout.
- * A signal that names its HEAD must name the current one. With no task to
+ * A signal that names its HEAD must name the current one. A newer task seen
+ * after the reads wins over a signal they found (#4315 review). With no task to
  * date it by (`since` null: the ledger does not show the task), the pane line
  * is taken as before and noted `signal-task=unknown`.
  *
@@ -696,31 +726,13 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
   const deadline = now().getTime() + Number(o.signalTimeout) * 1000;
   const sinceIso = typeof since === 'number' ? new Date(since).toISOString() : null;
   for (;;) {
-    const head = git(run, o.worktree, ['rev-parse', 'HEAD']).trim();
-    const replied = sinceIso
-      ? querySafely(run, o.cli, ['reply', o.wt, '--instance', o.instance, '--since', sinceIso, '--json'], cwd)
-      : null;
-    const reply = typeof replied?.reply === 'string' ? replied.reply : null;
-    if (reply !== null) {
-      if (hasCompletionSignal(reply, { head })) return { seen: true, head, note: 'signal=seen(reply)' };
-    } else {
-      // The whole squeezed frame, not a `--tail` window (#4315): a pane drawn from
-      // the top keeps rows that are not blank (a border's `│` after 110 spaces)
-      // below the transcript, and a window of the last 40 held only those and
-      // the composer while the signal sat on row 305. The checks below, not the
-      // window, are what tie a line to this task.
-      const pane = run(o.cli, ['capture', o.wt, '--instance', o.instance, '--pane'], { cwd });
-      const screen = pane.status === 0 ? pane.stdout : '';
-      if (!sinceIso) {
-        if (hasCompletionSignal(screen, { head })) return { seen: true, head, note: 'signal=seen signal-task=unknown' };
-      } else if (hasCompletionSignal(screen, { head, requireHead: true })) {
-        // The line names this HEAD; it is this task's when this HEAD is a commit of this task.
-        const committedAt = Date.parse(git(run, o.worktree, ['log', '-1', '--format=%cI', head]).trim());
-        if (Number.isFinite(committedAt) && committedAt >= since) return { seen: true, head, note: 'signal=seen(pane,head)' };
-      }
-    }
+    const found = signalSeen({ run, o, cwd, since, sinceIso });
+    // Asked after the reads, and before a signal is taken (#4315 review): a
+    // task created while the reply or the pane was read makes the line the
+    // older task's, whichever of the three ways it was seen.
     const newer = supersededBy?.();
     if (newer) return { seen: false, reason: newer };
+    if (found) return found;
     if (now().getTime() >= deadline) return { seen: false, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s` };
     sleep(SIGNAL_POLL_SEC * 1000);
   }

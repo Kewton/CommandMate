@@ -321,6 +321,93 @@ function reportWaitFailure(
   process.exit(result.exitCode);
 }
 
+/** Characters of the message's first line that locate it on the pane (Issue #4315). */
+const PANE_REQUEST_KEY_CHARS = 40;
+
+/** A pane row or a message line, compared with its whitespace runs collapsed. */
+function normalizeRow(line: string): string {
+  return line.replace(/\s+/g, ' ').trim();
+}
+
+/** A row from its first letter or digit on: no prompt glyph, bullet or indent (Issue #4315). */
+function fromFirstWord(line: string): string {
+  return normalizeRow(line).replace(/^[^\p{L}\p{N}]+/u, '');
+}
+
+/** The first {@link PANE_REQUEST_KEY_CHARS} characters of a text's first non-empty line, or ''. */
+function requestKey(text: string): string {
+  const first = text.split('\n').map(fromFirstWord).find((line) => line !== '') ?? '';
+  return first.slice(0, PANE_REQUEST_KEY_CHARS);
+}
+
+/** Whether a pane row is where a request with this key was drawn. */
+function rowStartsRequest(row: string, key: string): boolean {
+  return fromFirstWord(row).startsWith(key);
+}
+
+/**
+ * The part of a pane frame that answers this ask, or null when the frame does
+ * not show it (Issue #4315).
+ *
+ * The pane fallback reads the whole frame, so a frame can hold the previous
+ * turn's answer as well as this one. Only rows drawn after this ask's own
+ * request are taken: the request is located by the first
+ * {@link PANE_REQUEST_KEY_CHARS} characters of its first line, at the LAST row
+ * that starts with them once everything before the row's first letter or digit
+ * is dropped — so no tool's prompt glyph (`❯`, `›`, `>`), bullet or indentation
+ * has to be known, and a short message does not match inside a word of another
+ * row (`hi` in `this`); the first characters only, because a long line wraps at the pane width and its head is what stays
+ * on one row; the last occurrence, because a frame that shows this request
+ * also shows it below anything sent before it. The rows right after it that
+ * continue the message itself (its wrapped rest, its further lines) are skipped.
+ *
+ * Narrowed rather than widened: a frame without the request (scrolled away,
+ * not drawn yet, cleared) gives no reply, and so does a frame where a request
+ * sent BEFORE this one (`earlier`, from the ledger) is drawn below the match —
+ * the match is then an older row with the same words, not this ask's. A
+ * request sent after this one is left alone: that is the overlap the warning
+ * (Issue #3955) reports, not a stale row.
+ *
+ * @param frame - The squeezed, sanitized pane
+ * @param message - The message this ask sent
+ * @param earlier - Texts of user messages sent to the instance before this ask
+ */
+export function paneReplyAfterRequest(frame: string, message: string, earlier: readonly string[] = []): string | null {
+  const key = requestKey(message);
+  if (key === '') return null;
+  const rows = frame.split('\n');
+  let at = -1;
+  rows.forEach((row, i) => {
+    if (rowStartsRequest(row, key)) at = i;
+  });
+  if (at === -1) return null;
+  const earlierKeys = earlier.map(requestKey).filter((k) => k !== '' && k !== key);
+  if (rows.slice(at + 1).some((row) => earlierKeys.some((k) => rowStartsRequest(row, k)))) return null;
+  // What of the message the request row did not show yet: its wrapped rest and
+  // further lines, drawn on the rows right below it. Consumed only while they
+  // continue it, so a reply that repeats the request's words is kept.
+  let rest = normalizeRow(message.split('\n').map(fromFirstWord).join(' '));
+  let start = at;
+  for (;;) {
+    const shown = start === at ? fromFirstWord(rows[start]) : normalizeRow(rows[start]);
+    if (!rest.startsWith(shown)) break;
+    rest = rest.slice(shown.length).trim();
+    start += 1;
+    if (rest === '' || start >= rows.length || normalizeRow(rows[start]) === '') break;
+  }
+  const reply = rows.slice(Math.max(start, at + 1)).join('\n').trim();
+  return reply === '' ? null : reply;
+}
+
+/** Texts of the user rows on the instance sent before `askedAt` (Issue #4315). */
+function earlierRequests(messages: PromptMessageResponse[] | null, instanceId: string | undefined, askedAt: number): string[] {
+  return (messages ?? [])
+    .filter((m) => m.role === 'user' && typeof m.content === 'string')
+    .filter((m) => instanceId === undefined || m.instanceId === undefined || m.instanceId === instanceId)
+    .filter((m) => Date.parse(m.timestamp) < askedAt)
+    .map((m) => m.content);
+}
+
 /** Reads the reply from the transcript, falling back to the pane. */
 async function readAskReply(
   client: ApiClient,
@@ -328,6 +415,7 @@ async function readAskReply(
   instanceId: string | undefined,
   askedAt: number,
   agent: string | undefined,
+  message: string,
 ): Promise<{ source: ReplySource; reply: string | null; messages: PromptMessageResponse[] | null }> {
   let source: ReplySource = 'history';
   const latest = await readLatestReply(client, worktreeId, instanceId, askedAt, agent);
@@ -336,7 +424,12 @@ async function readAskReply(
     source = 'pane';
     const pane = await readPaneTail(client, worktreeId, agent, instanceId);
     const cleaned = pane === null ? '' : sanitizeReply(pane);
-    reply = cleaned === '' ? null : cleaned;
+    reply = cleaned === ''
+      ? null
+      : paneReplyAfterRequest(cleaned, message, earlierRequests(latest.messages, instanceId, askedAt));
+    if (cleaned !== '' && reply === null) {
+      console.error('Note: the pane does not show this message followed by a reply, so no reply is taken from it.');
+    }
   }
   if (reply === null) {
     source = 'none';
@@ -710,7 +803,7 @@ a decision about that session's guard rails, not part of asking it a question.
         // Taken before the reply grace: a message sent after the turn ended
         // went to the next turn, and is not an overlap with this one.
         const turnEndedAt = Date.now();
-        const { source, reply, messages } = await readAskReply(client, worktreeId, instanceId, askedAt, agent);
+        const { source, reply, messages } = await readAskReply(client, worktreeId, instanceId, askedAt, agent, message);
 
         // Reported, not acted on (Issue #3955): the exit code and the reply
         // stay as they are; the line says the reply may not be this ask's.
