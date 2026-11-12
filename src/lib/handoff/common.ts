@@ -30,6 +30,7 @@ import { presentMemItem } from '@/lib/mem/present';
 import { findSecretRule, MEM_SECRET_RULES, MEM_SECRET_RULES_VERSION, type MemSecretRule } from '@/lib/mem/secret-scan';
 import { withMemTarget, type MemTargetDeps, type MemTargetResolved } from '@/lib/mem/target';
 import { memError } from '@/lib/mem/service';
+import type { CloseWhenGitAnswers } from '@/lib/mem/close-when';
 import type {
   HandoffErrorCode,
   HandoffProposalView,
@@ -44,6 +45,8 @@ export interface HandoffOutcome {
 
 export interface HandoffDeps extends MemTargetDeps {
   now?: () => number;
+  /** What git answers for a close condition (origin, a ref's tip); the real git when absent. */
+  git?: CloseWhenGitAnswers;
 }
 
 export const nowOf = (deps: HandoffDeps): number => deps.now?.() ?? Date.now();
