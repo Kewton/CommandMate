@@ -110,7 +110,7 @@ import {
 } from '@/lib/handoff/close-rule';
 import {
   handoffRegistrySnapshot,
-  isCurrentHandoffRegistration,
+  handoffPageMayStart,
   registerHandoffPage,
   reportHandoffPageAuth,
   subscribeHandoffRegistry,
@@ -968,7 +968,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       setIsReconnecting(false);
       setIsAuthExpired(false);
       // Issue #4317 PR1: an authenticated read started under the current registration — the only recovery.
-      reportHandoffPageAuth(authRegistration, 'authenticated');
+      reportHandoffPageAuth(authRegistration, 'authenticated', requestSeq);
       setError(null);
       return data;
     } catch (err) {
@@ -988,9 +988,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Issue #2498: session expiry is a re-login, not a retryable error.
       // Branch first so the raw parse message never reaches the screen.
       if (status === 401) {
+        // Issue #4317 PR1 (再指示 2): the 401 is taken in the order the reads left, as a success
+        // is — an older read answering 200 afterwards moves neither this page nor the registry.
+        detailAdoptedSeqRef.current = requestSeq;
         setIsAuthExpired(true);
         // Issue #4317 PR1: held over the pages (a page made next starts with its own false).
-        reportHandoffPageAuth(authRegistration, 'expired');
+        reportHandoffPageAuth(authRegistration, 'expired', requestSeq);
         setIsReconnecting(false);
         setError(null);
         return null;
@@ -2083,9 +2086,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   const openEnd = useCallback(async (target: SessionKillTarget): Promise<void> => {
     if (endReadingRef.current !== null) return;
     // Issue #4317 PR1: the press belongs to this page's registration; a page not registered (yet,
-    // or any more) or not the current one opens nothing.
+    // or any more) or not the current one, or the session expired (再指示 2), opens nothing.
     const registration = handoffRegistrationRef.current;
-    if (!isCurrentHandoffRegistration(registration)) return;
+    if (!handoffPageMayStart(registration)) return;
     // pr2d (PM Claude pr2c P3-2): a hand-off that holds something is not replaced by another
     // "end" (asked again after the read, which may take seconds).
     if (handoffTargetRef.current !== null && askHandoffClose('page-end') !== null) return;
@@ -2108,7 +2111,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (startedFor !== worktreeIdRef.current) return;
     // Issue #4317 PR1: checked again after the mode's read — the worktree id alone does not tell an
     // old page (unmounted, or made again) from the one now registered with the same id.
-    if (!isCurrentHandoffRegistration(registration)) return;
+    if (!handoffPageMayStart(registration)) return;
     if (attended) {
       // pr2d (PM Claude pr2c P3-2 (b)): a kill in flight keeps its confirmation (Issue #1171),
       // and the hand-off does not open over it (before, both were open).
@@ -2669,11 +2672,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     stopForHandoff,
     handoffRegistration,
     /**
-     * Issue #4317 PR1: the dialog is not drawn (unmounted, never hidden with `isOpen={false}`): this
-     * page's own 401, or the expiry the registry holds over the pages until the current page's
-     * authenticated read.
+     * Issue #4317 PR1: the dialog is not drawn (unmounted, never hidden with `isOpen={false}`) while
+     * the registry holds the session expired, until the current page's authenticated read. 再指示 2:
+     * the registry alone — this page's own `isAuthExpired` (an answer of a registration no longer
+     * current included) draws the page's re-login notice only.
      */
-    handoffAuthExpired: isAuthExpired || handoffRegistry.authExpired,
+    handoffAuthExpired: handoffRegistry.authExpired,
     isKillPending,
     handleLoadContent,
     handleLoadError,

@@ -334,4 +334,36 @@ describe('[#4317 PR1] the expiry over the pages: a page made again is not a reco
     expect(document.querySelector('[data-testid="handoff-dialog"]')).toBeNull();
     expect(handoffRegistrySnapshot().authExpired).toBe(true);
   });
+
+  it('(再指示 2) the current page’s 401, then its Retry (back to the foreground): not drawn until the read succeeds, then the same opening and unit', async () => {
+    const { own, sending } = openingWithUnknownDecide();
+    detailStatus = 401;
+    render(<Page id={A} />);
+    await settle();
+    expect(document.querySelector('[data-testid="worktree-detail-session-expired"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="handoff-dialog"]')).toBeNull();
+
+    // The Retry clears the page's own expiry before its read, which is held: still not drawn.
+    detailHeld = true;
+    detailStatus = 200;
+    await act(async () => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(held.length).toBeGreaterThan(0);
+    expect(document.querySelector('[data-testid="handoff-dialog"]')).toBeNull();
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+
+    await act(async () => {
+      for (const release of held.splice(0)) release();
+    });
+    await settle();
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="handoff-dialog"]')).not.toBeNull());
+    expect(handoffRegistrySnapshot().authExpired).toBe(false);
+    expect(handoffStoreSnapshot().opening?.token).toBe(own.token);
+    expect(handoffUnitsOf(A).pending).toBe(sending);
+    expect(creates()).toHaveLength(0);
+    expect(sends()).toHaveLength(0);
+  });
 });

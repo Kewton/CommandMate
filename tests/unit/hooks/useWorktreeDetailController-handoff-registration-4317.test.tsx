@@ -16,6 +16,11 @@
  * when it answered) clears it and draws the dialog. Negative control: the second setup's read
  * answering 200 clears it.
  *
+ * 再指示 2: the dialog is hidden by the registry's expiry alone — the old registration's 401 while
+ * the current one's read is held leaves it drawn (64dc4b6, `isAuthExpired ||`, hid it) — and within
+ * one registration the answers are taken in the order the reads left: ② 401 then ① 200 stays
+ * expired (64dc4b6 cleared it); the pair ② 200 then ① 401 stays authenticated.
+ *
  * @vitest-environment jsdom
  */
 import React, { StrictMode } from 'react';
@@ -261,7 +266,7 @@ describe('[#4317 PR1 再指示 1] a read reports for the registration it started
   it('(negative control) expired before; the second setup’s read answers 200: the expiry is cleared, the dialog is drawn', async () => {
     openingOfA();
     const earlier = registerHandoffPage(A);
-    reportHandoffPageAuth(earlier, 'expired');
+    reportHandoffPageAuth(earlier, 'expired', 1);
     unregisterHandoffPage(earlier);
     const [, second] = await strictPage();
     expect(document.querySelector('[data-testid="handoff-dialog"]')).toBeNull();
@@ -269,5 +274,64 @@ describe('[#4317 PR1 再指示 1] a read reports for the registration it started
     await settle();
     expect(handoffRegistrySnapshot().authExpired).toBe(false);
     await waitFor(() => expect(document.querySelector('[data-testid="handoff-dialog"]')).not.toBeNull());
+  });
+
+  describe('[#4317 PR1 再指示 2] the dialog is hidden by the registry alone, the answers taken in order', () => {
+    const dialog = () => document.querySelector('[data-testid="handoff-dialog"]');
+
+    it('the old registration’s 401 while the current one’s read is held: the dialog stays drawn', async () => {
+      openingOfA();
+      const [first, second] = await strictPage();
+      await waitFor(() => expect(dialog()).not.toBeNull());
+      await act(async () => first(401));
+      await settle();
+      expect(handoffRegistrySnapshot().authExpired).toBe(false);
+      expect(dialog()).not.toBeNull();
+      await act(async () => second(200));
+      await settle();
+      expect(dialog()).not.toBeNull();
+      expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+    });
+
+    /** The page (no StrictMode) with its first read answered 200, then two reads ① ② held. */
+    async function twoReads(): Promise<[(status: number) => void, (status: number) => void]> {
+      openingOfA();
+      detailQueued = true;
+      render(<Page />);
+      await waitFor(() => expect(detailQueue).toHaveLength(1));
+      await act(async () => detailQueue.shift()!(200));
+      await waitFor(() => expect(dialog()).not.toBeNull());
+      act(() => {
+        void page.handleRetry();
+      });
+      act(() => {
+        void page.handleRetry();
+      });
+      await waitFor(() => expect(detailQueue).toHaveLength(2));
+      const [one, two] = detailQueue.splice(0, 2);
+      return [one, two];
+    }
+
+    it('one registration: ② answers 401, then the older ① answers 200 — still expired, the dialog not drawn', async () => {
+      const [one, two] = await twoReads();
+      await act(async () => two(401));
+      await settle();
+      expect(dialog()).toBeNull();
+      await act(async () => one(200));
+      await settle();
+      expect(handoffRegistrySnapshot().authExpired).toBe(true);
+      expect(dialog()).toBeNull();
+      expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+    });
+
+    it('(the pair) one registration: ② answers 200, then the older ① answers 401 — not expired, the dialog drawn', async () => {
+      const [one, two] = await twoReads();
+      await act(async () => two(200));
+      await settle();
+      await act(async () => one(401));
+      await settle();
+      expect(handoffRegistrySnapshot().authExpired).toBe(false);
+      expect(dialog()).not.toBeNull();
+    });
   });
 });

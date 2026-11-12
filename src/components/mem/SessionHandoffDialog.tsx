@@ -33,7 +33,7 @@
  * The page's registration (Issue #4317 PR1, `@/lib/handoff/page-registration`): a page hands the
  * dialog its `registration`. The dialog starts nothing new — no close (×, Escape, the backdrop and
  * the buttons alike), stop, decide, write, text or drop — unless that registration is the current
- * one, checked when pressed and again after each await before anything new begins (the stop after
+ * one and the session is not expired (再指示 2, `handoffPageMayStart`), checked when pressed and again after each await before anything new begins (the stop after
  * `end`'s answer, the close after a cancel's or a plain stop's answer). Meanwhile it is still drawn,
  * its buttons disabled. What was already sent finishes for its own unit and destination: a decide's
  * settle, the answer of `end` / a cancel / a kill adopted into the opening and `end/observe` sent.
@@ -49,9 +49,8 @@ import { useIsMobile } from '@/hooks/useIsMobile';
 import { useMemWriteLock } from '@/components/mem/mem-write-lock';
 import { handoffApi, type HandoffDecision, type HandoffResult } from '@/lib/handoff/screen-client';
 import {
-  handoffPageCurrentFor,
+  handoffPageMayStart,
   handoffRegistrySnapshot,
-  isCurrentHandoffRegistration,
   subscribeHandoffRegistry,
   type HandoffPageRegistration,
 } from '@/lib/handoff/page-registration';
@@ -158,10 +157,13 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const isMobile = useIsMobile();
   const store = useHandoffStore();
   const registry = useSyncExternalStore(subscribeHandoffRegistry, handoffRegistrySnapshot, handoffRegistrySnapshot);
-  /** Issue #4317 PR1: this render may start something (its page's registration is the current one). */
-  const actionable = registration === undefined || isCurrentHandoffRegistration(registration, registry);
+  /**
+   * Issue #4317 PR1: this render may start something — its page's registration is the current one
+   * and (再指示 2) the session is not expired: one condition, `handoffPageMayStart`, for every start.
+   */
+  const actionable = registration === undefined || handoffPageMayStart(registration, registry);
   /** The same, read now (after an await): never the render's value. */
-  const registered = useCallback((): boolean => registration === undefined || isCurrentHandoffRegistration(registration), [registration]);
+  const registered = useCallback((): boolean => registration === undefined || handoffPageMayStart(registration), [registration]);
   const [choices, setChoices] = useState<Readonly<Record<string, { choice: Choice; fingerprint: string }>>>({});
   /** An extend or a rebase is answered (local: nothing is lost when it is drawn again). */
   const [writing, setWriting] = useState(false);
@@ -276,8 +278,9 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     }
     shownRef.current = current.token;
     if (current.created !== 'no') return;
-    // Issue #4317 PR1: the request is made once the page's registration is the current one.
-    if (!actionable) return;
+    // Issue #4317 PR1: the request is made once the page's registration is the current one (and the
+    // session not expired), read again right before it is sent (再指示 2).
+    if (!actionable || !registered()) return;
     const of = current;
     setChoices({});
     setNotice(null);
@@ -288,10 +291,11 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       if (!isLiveHandoffOpening(of.token)) return;
       if (created.ok) {
         patchHandoffOpening(of.token, { created: 'done', view: created.body, text: created.body.text });
-        // Issue #4317 PR1: the text is a new send. It goes while a page of the opening's worktree is the
-        // current registration (this one, or the same page made again); in the gap it is not sent, and
-        // the request stays `unsent` for "send the request again".
-        if (registration !== undefined && !handoffPageCurrentFor(of.worktreeId)) return;
+        // Issue #4317 PR1 (再指示 2): the text is a new send. It goes while the registration the
+        // request was made under is still the current one and the session not expired — not merely
+        // a page of the same worktree. Otherwise it is not sent, and the request stays `unsent` for
+        // the current page's "send the request again".
+        if (!registered()) return;
         await sendText(of, created.body.request.id, created.body.text);
         return;
       }

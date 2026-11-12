@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   handoffPageCurrentFor,
+  handoffPageMayStart,
   handoffRegistrySnapshot,
   isCurrentHandoffRegistration,
   registerHandoffPage,
@@ -75,7 +76,7 @@ describe('[#4317 PR1] registrations', () => {
 describe('[#4317 PR1] the expiry over the pages', () => {
   it('set by the current page’s 401; a new registration and the old one’s cleanup leave it set', () => {
     const old = registerHandoffPage('wt-a');
-    reportHandoffPageAuth(old, 'expired');
+    reportHandoffPageAuth(old, 'expired', 1);
     expect(handoffRegistrySnapshot().authExpired).toBe(true);
     unregisterHandoffPage(old);
     registerHandoffPage('wt-a');
@@ -84,21 +85,76 @@ describe('[#4317 PR1] the expiry over the pages', () => {
 
   it('an old page’s success does not recover; the current page’s authenticated read does', () => {
     const old = registerHandoffPage('wt-a');
-    reportHandoffPageAuth(old, 'expired');
+    reportHandoffPageAuth(old, 'expired', 1);
     unregisterHandoffPage(old);
     const current = registerHandoffPage('wt-a');
-    reportHandoffPageAuth(old, 'authenticated');
+    reportHandoffPageAuth(old, 'authenticated', 2);
     expect(handoffRegistrySnapshot().authExpired).toBe(true);
-    reportHandoffPageAuth(null, 'authenticated');
+    reportHandoffPageAuth(null, 'authenticated', 3);
     expect(handoffRegistrySnapshot().authExpired).toBe(true);
-    reportHandoffPageAuth(current, 'authenticated');
+    reportHandoffPageAuth(current, 'authenticated', 4);
     expect(handoffRegistrySnapshot().authExpired).toBe(false);
   });
 
   it('an old page’s 401 does not expire the current page', () => {
     const old = registerHandoffPage('wt-a');
     registerHandoffPage('wt-b');
-    reportHandoffPageAuth(old, 'expired');
+    reportHandoffPageAuth(old, 'expired', 1);
     expect(handoffRegistrySnapshot().authExpired).toBe(false);
+  });
+});
+
+describe('[#4317 PR1 再指示 2] the order of the answers within one registration', () => {
+  it('② answers 401, then the older ① answers 200: still expired', () => {
+    const a = registerHandoffPage('wt-a');
+    reportHandoffPageAuth(a, 'expired', 2);
+    reportHandoffPageAuth(a, 'authenticated', 1);
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+  });
+
+  it('② answers 200, then the older ① answers 401: still authenticated', () => {
+    const a = registerHandoffPage('wt-a');
+    reportHandoffPageAuth(a, 'expired', 1);
+    reportHandoffPageAuth(a, 'authenticated', 3);
+    reportHandoffPageAuth(a, 'expired', 2);
+    expect(handoffRegistrySnapshot().authExpired).toBe(false);
+  });
+
+  it('(negative control) a newer read moves it either way', () => {
+    const a = registerHandoffPage('wt-a');
+    reportHandoffPageAuth(a, 'expired', 1);
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    reportHandoffPageAuth(a, 'authenticated', 2);
+    expect(handoffRegistrySnapshot().authExpired).toBe(false);
+    reportHandoffPageAuth(a, 'expired', 3);
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+  });
+
+  it('a report that changes nothing is not heard (no drawing again on each poll)', () => {
+    const a = registerHandoffPage('wt-a');
+    let heard = 0;
+    const off = subscribeHandoffRegistry(() => heard++);
+    reportHandoffPageAuth(a, 'authenticated', 1);
+    reportHandoffPageAuth(a, 'authenticated', 2);
+    off();
+    expect(heard).toBe(0);
+  });
+});
+
+describe('[#4317 PR1 再指示 2] one condition starts anything new', () => {
+  it('the current registration with the session expired may start nothing; once recovered it may', () => {
+    const a = registerHandoffPage('wt-a');
+    expect(handoffPageMayStart(a)).toBe(true);
+    reportHandoffPageAuth(a, 'expired', 1);
+    expect(handoffPageMayStart(a)).toBe(false);
+    reportHandoffPageAuth(a, 'authenticated', 2);
+    expect(handoffPageMayStart(a)).toBe(true);
+  });
+
+  it('a registration not current may start nothing, authenticated or not', () => {
+    const a = registerHandoffPage('wt-a');
+    registerHandoffPage('wt-a');
+    expect(handoffPageMayStart(a)).toBe(false);
+    expect(handoffPageMayStart(null)).toBe(false);
   });
 });

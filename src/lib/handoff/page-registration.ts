@@ -18,7 +18,12 @@
  * 3. The session's expiry outlives the pages: it is set by the current registration's 401 and
  *    cleared by the current registration's authenticated read only. A registration's start, its
  *    cleanup, a page's own initial `false`, its Retry and any answer of a registration that is not
- *    the current one leave it as it is.
+ *    the current one leave it as it is. Within one registration the reads are taken in the order
+ *    they left (`seq`), the 401 and the success alike: once a read's answer is taken, an older
+ *    read's answer — 200 or 401 — moves nothing.
+ * 4. (再指示 2) One condition starts anything new for a page's dialog: its registration is the
+ *    current one and the session is not expired ({@link handoffPageMayStart}). A page's dialog is
+ *    hidden for the expiry by {@link HandoffRegistryState.authExpired} only.
  *
  * This module holds no unit, opening nor callback of the store (`@/lib/handoff/close-rule`): it
  * imports nothing of it and writes nothing of it.
@@ -46,6 +51,11 @@ export interface HandoffRegistryState {
 const EMPTY: HandoffRegistryState = { live: [], authExpired: false };
 let state: HandoffRegistryState = EMPTY;
 const listeners = new Set<() => void>();
+/**
+ * 再指示 2: per registration, the `seq` of the newest read whose answer it reported (none: 0). Kept
+ * beside the snapshot, so that a report that changes nothing draws nothing again.
+ */
+const authSeqOf = new WeakMap<HandoffPageRegistration, number>();
 
 function commit(next: HandoffRegistryState): void {
   state = next;
@@ -89,11 +99,22 @@ export function handoffPageCurrentFor(worktreeId: string, snapshot: HandoffRegis
 }
 
 /**
- * A read of the page `id` answered: `expired` (401) or `authenticated` (its detail read succeeded).
- * Taken from the current registration only (invariant 3).
+ * 再指示 2: a page's dialog may start something new — `id` is the current registration and the
+ * session is not expired (invariant 4). Read at the press and again after each await.
  */
-export function reportHandoffPageAuth(id: HandoffPageRegistration | null, outcome: 'expired' | 'authenticated'): void {
-  if (!isCurrentHandoffRegistration(id)) return;
+export function handoffPageMayStart(id: HandoffPageRegistration | null, snapshot: HandoffRegistryState = state): boolean {
+  return isCurrentHandoffRegistration(id, snapshot) && !snapshot.authExpired;
+}
+
+/**
+ * A read of the page `id`, the `seq`-th it sent (increasing within the registration), answered:
+ * `expired` (401) or `authenticated` (its detail read succeeded). Taken from the current
+ * registration only, and only when newer than the read it took last (invariant 3).
+ */
+export function reportHandoffPageAuth(id: HandoffPageRegistration | null, outcome: 'expired' | 'authenticated', seq: number): void {
+  if (id === null || !isCurrentHandoffRegistration(id)) return;
+  if (seq <= (authSeqOf.get(id) ?? 0)) return;
+  authSeqOf.set(id, seq);
   const authExpired = outcome === 'expired';
   if (state.authExpired !== authExpired) commit({ ...state, authExpired });
 }

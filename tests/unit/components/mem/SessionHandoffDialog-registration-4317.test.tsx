@@ -17,6 +17,11 @@
  * - the opening's token swapped under the same registration: the old press stops nothing, the new
  *   opening's stop runs.
  *
+ * 再指示 2: one condition starts anything new — the current registration and the session not
+ * expired. "expired" is a lapse as the overlap and the gap are; the text after create goes for the
+ * registration the request was made under (not any page of the same worktree), else stays unsent.
+ * Positive controls on 64dc4b6: the "expired" cases, and the overlap during create (it sent the text).
+ *
  * Positive controls (the code before #4317 PR1, the page handing no registration): the cases
  * marked "lapsed" fail — the Escape cancels and closes, the kill is started after `end`, the
  * cancel's answer closes the dialog. Negative controls: the same with the registration current.
@@ -57,7 +62,13 @@ import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController
 import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
 import { publishMemWriteLock } from '@/components/mem/mem-write-lock';
 import { beginHandoffOpening, handoffStoreSnapshot, handoffUnitsOf, resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
-import { registerHandoffPage, resetHandoffRegistryForTests, unregisterHandoffPage } from '@/lib/handoff/page-registration';
+import {
+  handoffRegistrySnapshot,
+  registerHandoffPage,
+  reportHandoffPageAuth,
+  resetHandoffRegistryForTests,
+  unregisterHandoffPage,
+} from '@/lib/handoff/page-registration';
 import type { HandoffProposalView, HandoffReadResponse, HandoffRequestView } from '@/lib/handoff/types';
 
 const A = 'wt-a';
@@ -192,15 +203,20 @@ async function opened() {
   await screen.findByTestId('handoff-approve-p1');
 }
 
-type Lapse = 'overlap' | 'gap';
-/** The page's registration lapses: a newer page registered (overlap) or the page's own removed (gap). */
+type Lapse = 'overlap' | 'gap' | 'expired';
+/**
+ * The page may start nothing any more: a newer page registered (overlap), the page's own removed
+ * (gap), or (再指示 2) the session expired under the page's current registration — its newest read
+ * answered 401 (the dialog is still drawn here: this harness draws it whatever the expiry).
+ */
 function lapse(how: Lapse): void {
   act(() => {
     if (how === 'overlap') registerHandoffPage(A);
-    else unregisterHandoffPage(page.handoffRegistration!);
+    else if (how === 'gap') unregisterHandoffPage(page.handoffRegistration!);
+    else reportHandoffPageAuth(page.handoffRegistration!, 'expired', Number.MAX_SAFE_INTEGER);
   });
 }
-const LAPSES: Lapse[] = ['overlap', 'gap'];
+const LAPSES: Lapse[] = ['overlap', 'gap', 'expired'];
 
 describe('[#4317 PR1] a lapsed registration: drawn, nothing starts', () => {
   it.each(LAPSES)('lapsed (%s): the dialog stays drawn, its buttons are disabled, Escape cancels and closes nothing', async (how) => {
@@ -354,5 +370,101 @@ describe('[#4317 PR1] the opening’s token swapped under the same registration'
     await screen.findByTestId('handoff-stop');
     press('handoff-stop');
     await waitFor(() => expect(kills).toHaveLength(1));
+  });
+});
+
+describe('[#4317 PR1 再指示 2] the text after create goes for the registration the request was made under', () => {
+  /** The page presses "end"; the request's create is held until `lapse` (if any) and released. */
+  async function created(how: Lapse | null) {
+    request = { ...request, state: 'awaiting_agent', sendState: 'unsent', agentDoneAt: null };
+    holding.add('create');
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await waitFor(() => expect(holds.create).not.toBeNull());
+    if (how !== null) lapse(how);
+    await act(async () => holds.create!());
+    await settle();
+  }
+
+  it.each(LAPSES)('lapsed (%s) while the create is answered: no text is sent, the request stays unsent on its opening', async (how) => {
+    await created(how);
+    expect(sent('/send')).toHaveLength(0);
+    expect(sent('/sent')).toHaveLength(0);
+    expect(handoffStoreSnapshot().opening?.created).toBe('done');
+    expect(handoffStoreSnapshot().opening?.view?.request.sendState).toBe('unsent');
+    expect(handoffStoreSnapshot().opening?.text).toBe('the request text');
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+  });
+
+  it('(negative control) the registration current and the session authenticated: the text is sent once', async () => {
+    await created(null);
+    await waitFor(() => expect(sent('/sent')).toHaveLength(1));
+    expect(sent('/send')).toHaveLength(1);
+  });
+});
+
+describe('[#4317 PR1 再指示 2] the session expired: the page opens nothing, the dialog starts nothing', () => {
+  it('expired while the plain stop’s kill is answered: “stopped” is kept on its opening, nothing is closed', async () => {
+    createAnswer = 'session_unknown';
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-plain-stop');
+    holding.add('kill');
+    press('handoff-plain-stop');
+    await waitFor(() => expect(holds.kill).not.toBeNull());
+    lapse('expired');
+    await act(async () => holds.kill!());
+    await settle();
+    expect(kills).toHaveLength(1);
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+    expect(handoffStoreSnapshot().opening?.plainStopped).toBe(true);
+    expect(page.handoffTarget).toEqual(TARGET);
+  });
+
+  it('expired while a decide is answered: the decide’s unknown result is kept for its unit', async () => {
+    await opened();
+    holding.add('decide');
+    press('handoff-approve-p1');
+    press('handoff-confirm');
+    await waitFor(() => expect(holds.decide).not.toBeNull());
+    lapse('expired');
+    await act(async () => holds.decide!());
+    await settle();
+    expect(handoffUnitsOf(A).inflight).toBeNull();
+    expect(handoffUnitsOf(A).pending).toMatchObject({ worktreeId: A, requestId: 'r1', ifVersion: 3 });
+  });
+
+  it('expired under the current registration: "end" opens no hand-off and no confirmation', async () => {
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    lapse('expired');
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    expect(page.handoffTarget).toBeNull();
+    expect(page.killTarget).toBeNull();
+    expect(handoffStoreSnapshot().opening).toBeNull();
+  });
+
+  it('expired while the mode is read: no hand-off is opened', async () => {
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+    let pressed: Promise<void> | null = null;
+    act(() => {
+      pressed = page.openEnd(TARGET);
+    });
+    lapse('expired');
+    await act(async () => {
+      await pressed;
+    });
+    expect(page.handoffTarget).toBeNull();
+    expect(handoffStoreSnapshot().opening).toBeNull();
   });
 });
