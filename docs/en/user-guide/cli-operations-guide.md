@@ -60,6 +60,10 @@ node bin/commandmate.js ls
 | [`commandmate sync`](#commandmate-sync) | Make the server rescan its worktrees (the GUI sync button) |
 | [`commandmate send`](#commandmate-send) | Send a message to an agent |
 | [`commandmate wait`](#commandmate-wait) | Wait for agent completion |
+| [`commandmate whoami`](#commandmate-whoami) | Show which worktree and instance this session is |
+| [`commandmate peers`](#commandmate-peers) | List the other sessions in this repository, each with a ready-to-run `ask` line |
+| [`commandmate ask`](#commandmate-ask) | Ask another session and get its reply (`--async` does not wait) |
+| [`commandmate relays`](#commandmate-relays) | List and withdraw the waits `--async` / `--reply-to` create; settle held deliveries |
 | [`commandmate prompt`](#commandmate-prompt) | Observe the screen an agent is stopped on (kind, options, observation token) |
 | [`commandmate respond`](#commandmate-respond) | Respond to a prompt |
 | [`commandmate verify`](#commandmate-verify) | Run the verification gates (`.commandmate/verify.yaml`) and read the run history |
@@ -763,6 +767,220 @@ Waiting: localllm-test-main (status=running, running=true, prompt=false)
 Waiting: localllm-test-main (status=running, running=true, prompt=false)
 Completed: localllm-test-main
 ```
+
+---
+
+## commandmate whoami
+
+Prints **which worktree and which agent instance this session is**. It is the entry point for an agent that wants to `ask`
+another session: it needs its own worktree ID and instance ID first (Issue #2376).
+
+### Usage
+
+```bash
+commandmate whoami [--json] [--token <token>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | JSON output |
+| `--token <token>` | Auth token (visible in the process list; prefer the `CM_AUTH_TOKEN` environment variable) |
+
+### Where the answer comes from
+
+1. The environment: `CM_WORKTREE_ID` / `CM_INSTANCE_ID` / `CM_CLI_TOOL` (or the `CM_AGENT_*` variables on the launch line). `source` is `env`
+2. Otherwise the tmux session name `mcbd-[<ns>-]<tool>-<worktree>[-<n>]`. `source` is `tmux-session`
+
+### Output
+
+```text
+worktree:  commandmate-issue-101
+instance:  claude
+cli_tool:  claude
+alias:     Claude
+source:    env
+tmux:      mcbd-…-claude-commandmate-issue-101
+server:    http://localhost:3000
+```
+
+`--json` returns `worktreeId` / `instanceId` / `cliToolId` / `alias` (`null` when the roster has no row) / `source` /
+`sessionName` / `serverUrl`. When this session's worktree is not in the list of the server the CLI is talking to (a
+different server), it prints a warning on stderr and adds `"serverMismatch": true` to `--json`; the exit code stays 0 (Issue #2404).
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Answered |
+| 3 | **NOT_IN_SESSION**: not inside an agent session started by CommandMate (the reason is on stderr). The number is the same as `ExitCode.START_FAILED`, but it has nothing to do with a server failing to start |
+| 1 / 2 / 99 | Server not running / bad argument / unexpected error (see [Exit Codes](#exit-codes)) |
+
+---
+
+## commandmate peers
+
+Lists the **other agent sessions in this repository**, each with a **ready-to-run `ask` line** (Issue #2376). It does the
+`ls` + `instances` fan-out once.
+
+### Usage
+
+```bash
+commandmate peers [--json] [--token <token>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | JSON output |
+| `--token <token>` | Auth token |
+
+The caller is resolved the way `commandmate whoami` does, and the list is narrowed to the **worktrees of the same repository**.
+Your own row is marked `(you)` and carries no `ask` line.
+
+```text
+commandmate-issue-102 / codex
+  alias: Codex   tool: codex   status: ready
+  commandmate ask commandmate-issue-102 --instance codex "<request>"
+```
+
+`--json` returns `self` (`worktreeId` / `instanceId` / `cliToolId`), `serverUrl` and `peers` (each row has `worktreeId` /
+`instanceId` / `cliTool` / `alias` / `status` / `isSelf` / `ask`; `ask` is `null` on your own row). Against a different server
+it adds `serverMismatch: true` and a stderr warning. With no other session in the repository it prints `No peer sessions found.`
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Listed |
+| 3 | **NOT_IN_SESSION**: run from outside an agent session (same as `whoami`) |
+| 1 / 2 / 99 | Server not running / bad argument / unexpected error |
+
+---
+
+## commandmate ask
+
+Sends a request to another agent session and **gets its reply in one command** (`send` + `wait` + reading the reply;
+Issues #2376 / #2377).
+
+### Usage
+
+```bash
+commandmate ask <worktree-id> "<request>" --instance <id> [--timeout <seconds>] [--json]
+commandmate ask <worktree-id> "<request>" --instance <id> --async [--reply-to <target>] [--allow-relay-chain]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--instance <id>` | Target instance (`<agent>` or `<agent>-<n>`; a roster alias works too). **Name the target with this alone.** Defaults to the tool's primary instance. An alias two rows answer to is exit 2 |
+| `--agent <agent>` | Ad-hoc tool for an instance the roster does not know (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`) |
+| `--timeout <seconds>` | Maximum time to wait for the reply (default 1800) |
+| `--json` | Print the reply as JSON |
+| `--async` | Do not wait: register a relay, print its ID and exit 0. The reply is delivered into `--reply-to`'s composer when the other turn ends |
+| `--reply-to <target>` | Where an `--async` reply goes: `<worktree-id>[@<instance-id\|alias>]`, or `self` (the session running the command; the default) |
+| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops) |
+| `--token <token>` | Auth token |
+
+There is deliberately **no `--auto-yes`**: turning another session's Auto-Yes on is a decision about that session's guard
+rails, not part of asking it a question.
+
+### Wait, or not
+
+| Situation | Use |
+|-----------|-----|
+| The reply is **the next thing you need** (a review verdict, a finding) | `ask` (blocks and prints the reply on stdout) |
+| You want to **end your own turn** without waiting | `ask --async`, or `send --reply-to`. The reply arrives later in your composer, prefixed with `[from <alias> / <worktree>]` |
+
+The stdout of `--async` is the relay ID alone (`--json`: `worktreeId` / `instanceId` / `cliToolId` / `relayId` / `mode: "async"`).
+See the open ones with [`commandmate relays`](#commandmate-relays); withdraw one with `relays cancel`.
+Do **not** answer another session's confirmation dialog with `respond` on its behalf (a wrong number picks the default).
+
+### Output
+
+Stdout is the reply body. `--json` has this shape:
+
+```json
+{
+  "worktreeId": "commandmate-issue-102",
+  "instanceId": "codex",
+  "cliToolId": "codex",
+  "source": "history",
+  "reply": "…",
+  "overlapped": true
+}
+```
+
+`source` is `history` (transcript) / `pane` (screen) / `none`. `overlapped` appears only when an overlap was found
+([Do not stack `ask`s on one instance (Issue #3955)](#commandmate-wait)). When the turn ended but no reply could be read,
+stderr carries a warning and the exit code is 0. On an upstream fault (exit 11), `--json` carries `upstreamFault`.
+
+### Exit codes
+
+`wait`'s exit codes, plus 11 and 32 that `ask` adds.
+
+| Code | Meaning | Next action |
+|:----:|---------|-------------|
+| 0 | The turn ended (`--async`: the relay was registered). Stdout is the reply | — |
+| 1 | Server not running etc. (DEPENDENCY_ERROR) | `commandmate start --daemon` |
+| 2 | Bad argument, ambiguous alias, **a relay refusal** (reason on stderr; same number as CONFIG_ERROR), or the other session is on a prompt and the body was not sent | Read stderr; do not resend |
+| 10 | The other session is waiting on a prompt; stdout carries the prompt JSON | Report it; do not `respond` for it |
+| 11 | **UPSTREAM_FAULT**: the turn never ran. stderr and `--json` carry `id=…` (`ask` always runs with `failOnUpstreamFault: true`). `id=context-limit`: the conversation is over the model's limit — `instances <id> kill <instance>` and ask again in a fresh session. `id=model-capacity`: send to another instance or model (#3936) | Wait a while or change the target, then ask again |
+| 21 | Nothing was running to ask | Check the roster with `instances <id>` |
+| 32 | **ROLE NOT_SENT**: the role condition does not hold; the body was not typed | Review the role settings |
+| 99 | Unexpected error | — |
+| 124 | Timed out. When the send itself returned past the deadline, the message **was sent** (stderr says so) | Look with `capture <id> --instance <id> --pane --tail 60`; **do not resend** |
+
+### Related sections
+
+The finer behaviour of `ask` is in these sections under [`commandmate wait`](#commandmate-wait) (headings unchanged):
+
+- Do not stack `ask`s on one instance (Issue #3955)
+- Relay delivery bound to its send (Issue #3957)
+- `ask` upstream faults and `id=context-limit` (Issue #3011)
+
+---
+
+## commandmate relays
+
+Shows, withdraws and settles the **waits (relays)** that `ask --async` / `send --reply-to` create.
+
+### Usage
+
+```bash
+commandmate relays [--worktree <id>] [--instance <id>] [--id <relay-id>] [--json]
+commandmate relays cancel <relay-id> [--json]
+commandmate relays resolve <relay-id> --payload <id> --attempt <id> (--confirm | --retry | --discard) [--json]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--worktree <id>` | Worktree to list (defaults to the session running the command) |
+| `--instance <id>` | Agent instance inside `--worktree` (id or roster alias) |
+| `--id <relay-id>` | Show one relay, closed ones too (`send=` / `overlap=` / `hold=`) |
+| `--json` | JSON output |
+| `--token <token>` | Auth token (works on `relays` and on its subcommands) |
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `relays cancel <relay-id>` | Withdraw an open relay and stop its later deliveries. A relay being delivered right now is 409 (exit 2); a closed one is exit 2 too. It cannot take back a delivery already held as uncertain, which may have reached the composer |
+| `relays resolve <relay-id>` | Settle a delivery held as **uncertain** after looking at the requester's pane. Needs `--payload <id>` and `--attempt <id>` (`payload=<kind>:<id>` and `attempt=<id>` from `relays --id`) and exactly one of `--confirm` (it arrived), `--retry` (it did not: queue it again) or `--discard` (drop it, send nothing) (Issue #4082; npm 0.49.3 and later) |
+
+The listing's columns are `<relay-id> <state> <requester> <- <worker> hops=<n> expires=<iso>`, followed as needed by `send=` /
+`overlap=` / `hold=` / `delivery=` / `payload=` / `attempt=` / `reason=` / `check=` / `pending=` / `blocked=` (`pending=` /
+`blocked=` are #4105, and the `# closed, notice not delivered yet` group for an expiry notice that is still stopped is #4193;
+both npm 0.50.0 and later). States are `pending` / `prompt` / `delivered` / `expired` / `cancelled`.
+
+Exit codes: 0 on success, 2 (CONFIG_ERROR) for a bad argument or a refused relay operation, 1 when the server is not running, 99 for an unexpected error.
+
+### Related sections
+
+The finer behaviour of relays is in these sections under [`commandmate wait`](#commandmate-wait) (headings unchanged):
+
+- Relay delivery bound to its send (Issue #3957)
+- An uncertain delivery is never resent automatically (Issue #4064)
+- Resolving a hold (Issue #4082)
+- Telling, showing and counting holds (Issue #4082)
+- A delivery stopped by the requester's confirmation dialog (Issue #4105)
 
 ---
 
@@ -3372,10 +3590,14 @@ commandmate ls --token your-token
 | 1 | DEPENDENCY_ERROR | Server not running / no usable remote provider (`remote`) |
 | 2 | CONFIG_ERROR | Validation error (invalid agent, duration, etc.) |
 | 3 | START_FAILED | Failed to start or verify the server (`start` / `update` / `remote`) |
+| 3 | NOT_IN_SESSION | Run from outside an agent session (`whoami` / `peers`); unrelated to START_FAILED |
 | 4 | STOP_FAILED | Failed to stop the server (`stop` / `update`) / the provider session could not be closed (`remote stop`) |
 | 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
 | 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
+| 20 | VERIFY_FAILED | A verification gate failed (`verify`, `wait --verify`) |
+| 21 | NOT_STARTED | Nothing to verify: no commits and no uncommitted changes (`verify`, `wait --verify`); also `ask` when nothing was running |
+| 30 | NO_ACTIVE_SESSIONS | `interrupt` found no running session to interrupt |
 | 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
 | 50–57 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded), and a prompt from `mem check --suggest` (57); see the exit codes of [commandmate mem](#commandmate-mem). `send --note` refused by mem ends in 50–56 too |
