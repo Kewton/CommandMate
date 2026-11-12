@@ -28,7 +28,6 @@ import {
   handoffStartPreview,
   PREVIEW_INSTANCE_ID,
   PREVIEW_INSTANCE_ID_MAX,
-  START_PREVIEW_MAX_BUILDS,
   type StartPreviewResponse,
 } from '@/lib/handoff/preview';
 import { readStateSource } from '@/lib/brief/sources';
@@ -273,7 +272,7 @@ const boundaryState = (id: string): string =>
 describe.each(['on', 'derived'] as const)('G-PR6 mode %s: the boundary changes while the lines are read', (mode) => {
   beforeEach(() => setFeatures({ popup: true, injectOnStart: true }, mode));
 
-  it('A → B under the read: the preview is made again for B (B’s id, never A’s)', async () => {
+  it('A → B under the read: 409 boundary_changed, A’s lines under no id, C built once (#4224 R5)', async () => {
     const a = openPending();
     const held = heldStateReader();
     const running = handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps(held.deps) });
@@ -284,9 +283,13 @@ describe.each(['on', 'derived'] as const)('G-PR6 mode %s: the boundary changes w
     expect(a).not.toBe(b);
     expect(boundaryState(a)).toBe('superseded');
     expect(boundaryState(b)).toBe('pending');
-    expect(outcome.status).toBe(200);
-    expect(outcome.body).toMatchObject({ ok: true, show: true, mode, boundary: { id: b } });
-    expect(held.calls()).toBe(2); // built again
+    expect(outcome.status).toBe(409);
+    expect(outcome.body).toMatchObject({ ok: false, code: 'boundary_changed' });
+    expect(JSON.stringify(outcome.body)).not.toContain(a);
+    expect(JSON.stringify(outcome.body)).not.toContain('"show"');
+    expect(held.calls()).toBe(1); // never built again
+    // Read again (the screen's "try again"): B is asked about.
+    expect(await preview()).toMatchObject({ ok: true, show: true, mode, boundary: { id: b } });
   });
 
   it('A used under the read (no pending boundary now): a valid show:false, not A', async () => {
@@ -301,22 +304,18 @@ describe.each(['on', 'derived'] as const)('G-PR6 mode %s: the boundary changes w
     expect(outcome.body).toEqual({ ok: true, show: false, attended: true, injectOnStart: true, mode });
   });
 
-  it('the boundary keeps changing on every read: not answered (409 boundary_unsettled) past the limit, never the old one', async () => {
+  it('the mode changes under the read: 409 boundary_changed (A’s lines were read for the old mode)', async () => {
     openPending();
-    let calls = 0;
-    const churn: BriefBuildDeps = {
-      readers: {
-        state: (ctx) => {
-          calls += 1;
-          openPending();
-          return readStateSource(ctx);
-        },
-      },
-    };
-    const outcome = await handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps(churn) });
+    const held = heldStateReader();
+    const running = handoffStartPreview(world.db, 'wt-1', 'claude', { mem: world.deps(), brief: world.briefDeps(held.deps) });
+    await held.reached;
+    setFeatures({ popup: true, injectOnStart: true }, mode === 'on' ? 'derived' : 'on');
+    held.release();
+    const outcome = await running;
     expect(outcome.status).toBe(409);
-    expect(outcome.body).toMatchObject({ ok: false, code: 'state_forbids', reason: 'boundary_unsettled' });
-    expect(calls).toBe(START_PREVIEW_MAX_BUILDS);
+    expect(outcome.body).toMatchObject({ ok: false, code: 'boundary_changed' });
+    // (C's own re-check before drawing may read its sources again on a mode change — that is C's
+    // rule inside its one pinned request, not the preview building again.)
   });
 
   it('negative: nothing changes under the read — one build, the boundary as it was', async () => {

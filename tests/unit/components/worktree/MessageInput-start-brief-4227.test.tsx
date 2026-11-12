@@ -364,6 +364,23 @@ describe.each(G6_CASES)('G-PR6 %s (%s, phone %s), mode %s', (_name, path, mobile
     expect(fetchStartPreviewMock).toHaveBeenCalledTimes(2);
   });
 
+  it('(8) the server answers 409 boundary_changed (the boundary moved under its read): nothing sent, draft kept; "try again" asks for B', async () => {
+    // fetchStartPreview turns any non-200 into null (pinned below with the real function).
+    fetchStartPreviewMock.mockResolvedValueOnce(null).mockResolvedValueOnce(SHOWN('b-B', mode));
+    const { onOptimisticSend } = renderComposer(path);
+    typeMessage('hello agent');
+    submit();
+    expect(await screen.findByTestId('session-start-brief-check-failed')).toBeInTheDocument();
+    expect(onOptimisticSend).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(getTextarea().value).toBe('hello agent');
+    fireEvent.click(screen.getByTestId('session-start-brief-check-retry'));
+    fireEvent.click(await screen.findByTestId('session-start-brief-short'));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ briefDetail: 'short', briefBoundary: 'b-B' });
+    expect(onOptimisticSend).not.toHaveBeenCalled();
+  });
+
   it('(7) a second Enter while the read is waiting: sent once, the draft not cleared meanwhile', async () => {
     const read = deferred<unknown>();
     fetchStartPreviewMock.mockReturnValueOnce(read.promise);
@@ -420,6 +437,19 @@ describe.each(G6_CASES)('G-PR6 %s (%s, phone %s), mode %s', (_name, path, mobile
     else await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
     expect(fetchStartPreviewMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
+  });
+});
+
+describe('G-PR6 the real fetchStartPreview on the server’s 409 boundary_changed', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is null (a read that failed: the composer sends nothing)', async () => {
+    const { fetchStartPreview } = await vi.importActual<typeof import('@/lib/handoff/screen-client')>('@/lib/handoff/screen-client');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ ok: false, code: 'boundary_changed' }), { status: 409, headers: { 'Content-Type': 'application/json' } }))
+    );
+    expect(await fetchStartPreview('wt-1', 'claude')).toBeNull();
   });
 });
 

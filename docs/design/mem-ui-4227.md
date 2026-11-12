@@ -218,7 +218,7 @@ C は情報源 `state`・`relay` の「読めない」行にも順位 1 を使�
 - 待ち先の復元は C の出力の欄（`dir`・`peer`）だけから行い、relay の表を直接読まない（C のファイルも変えない）。`peer` の欄は C の `sanitizeBriefField` を通った値で、見えない文字が置き換わっていれば鍵が合わない → その行は形に合わない行として「不明」に倒す
 
 - `boundary` は D1 の `getCurrentBoundary(db, worktreeId, instanceId)`（`src/lib/db/session-brief-db.ts:139`）を読むだけ。`state==='pending'` のときだけ返す。その `id` を画面は選択と一緒に送る（§3.2 の `briefBoundary`）
-- **3 行を読んだ後に境界と対象を読み直す**（G-PR6、§11.22 #3）：3 行の読み（C の build、`derived` では A の list も）は await をまたぐので、その間に境界が開く・使われる・置き換わることがある。読み終えたら境界（id・`pending`）と対象（mode・popup・`injectOnStart`）を読み直し、変わっていれば今の境界でもう一度作る（A の 3 行に B の id を付け替えない）。作り直しは `START_PREVIEW_MAX_BUILDS`（3 回）まで。超えたら答えない（409 `state_forbids`・`reason:'boundary_unsettled'`、画面は取得の失敗として送らない）。境界が無くなったなら有効な `show:false`
+- **3 行を読んだ後に境界と対象を読み直す**（G-PR6、§11.22 #3）：3 行の読み（C の build、`derived` では A の list も）は await をまたぐので、その間に境界が開く・使われる・置き換わることがある。読み終えたら境界（id・`pending`）と対象（mode・popup・`injectOnStart`）を読み直し、変わっていれば A の 3 行をどの id でも返さず 409 `boundary_changed` を返す（画面は取得の失敗として送らず、下書きを残して「もう一度」で読み直す）。境界が無くなった（使われた）だけなら有効な `show:false`。**preview の中で作り直さない**：C の build（要求の寿命の pin を作る呼び手）は 1 回だけで、繰り返しの中に置かない（#4224 の R5、`brief-call-chain-forms-4224`・`brief-retry-paths-4223` の表）
 - `briefForRoute` は `on` で B の条件を評価する（読みのときの評価、D8・B §3.2）。preview が条件の close を起こしうることは list と同じで、新しい書き込みではない［事実：C の route のコメント `src/app/api/worktrees/[id]/mem/brief/route.ts:1-7`］
 - preview の取得は 2 秒で打ち切る（D1 の provider の打ち切り `BRIEF_PROVIDER_TIMEOUT_MS` と同じ値）。取れなければ 3 行の代わりに「preview を取れませんでした」と出し、選択はそのまま出す
 
