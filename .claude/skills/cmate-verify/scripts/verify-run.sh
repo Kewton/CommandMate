@@ -2209,6 +2209,9 @@ lock_drain_group() { # <pgid> <term-sent 0|1>
   if lock_group_is_empty "$1"; then lock_test_drain_note empty; return 0; fi
   LDG_SIGNALLED=1
   if [ "$2" = 1 ]; then lock_test_drain_note term-sent; else lock_test_drain_note term; kill -s TERM -- "-$1" 2>/dev/null; fi
+  # Test seam (#4288 PR1a-f impl-12; off unless pause:drain-term): the drain held after its TERM, so a
+  # test reads the lock while the drain is known to be in progress. The grace counts from the go.
+  lock_test_pause drain-term
   ldg_end=$(( $(lock_now_sec) + KILL_GRACE_SEC ))
   while [ "$(lock_now_sec)" -lt "$ldg_end" ]; do
     if lock_group_is_empty "$1"; then lock_test_drain_note drained; return 0; fi

@@ -344,7 +344,9 @@ describe('§2.3 / §2.4: the gate starts only after its group is on record — a
 
 describe('§2.4 / §2.6: the watchdog counts the timeout from the ack', () => {
   it('a handoff held up past timeoutSec does not kill the waiting child: the gate runs once, then times out (124)', async () => {
-    const run = runAsync([{ command: 'echo ran >> $MARK/side; sleep 5', timeoutSec: 1 }], { CM_VERIFY_TEST_HANDOFF: 'pause:published' });
+    // #4288 PR1a-f impl-12 (codex P2-b): the gate ends only on the watchdog's TERM, which the watchdog sends after
+    // it has put the timeout on record — not a `sleep 5` racing a 1 s watchdog that a loaded machine may delay.
+    const run = runAsync([{ command: "trap 'exit 0' TERM; echo ran >> $MARK/side; while :; do sleep 0.05; done", timeoutSec: 1 }], { CM_VERIFY_TEST_HANDOFF: 'pause:published' });
     await until(() => fs.existsSync(handoff('published.reached')));
     await new Promise((r) => setTimeout(r, 2000));
     fs.writeFileSync(handoff('published.go'), '');
@@ -356,16 +358,26 @@ describe('§2.4 / §2.6: the watchdog counts the timeout from the ack', () => {
 
 describe('§2.5: released only once the gate\'s group is empty', () => {
   const LEAVES_CHILD = { command: "(trap '' TERM; exec sleep 30) & echo $! > $MARK/bg; exit 0" };
+  /** The same child, which sets its TERM trap only when the test arms it, and says so (bg-ready). */
+  const LEAVES_ARMED_CHILD = { command: "(until test -e $MARK/arm; do sleep 0.05; done; trap '' TERM; touch $MARK/bg-ready; exec sleep 30) & echo $! > $MARK/bg; exit 0" };
 
   it('a gate that leaves a TERM-ignoring child: held while it lives, the child stopped (KILL after the grace), then released', async () => {
     const drainLog = mark('drain-steps');
-    const run = runAsync([LEAVES_CHILD], { CM_VERIFY_TEST_DRAIN_LOG: drainLog });
-    await until(() => fs.existsSync(mark('bg')) && fs.readFileSync(mark('bg'), 'utf8').trim() !== '');
+    // #4288 PR1a-f impl-12 (codex P2-a): every step waited for by a mark, both ways —
+    //   1. the leader has exited and the drain has not begun (pause:leader-exited);
+    //   2. the child has set its TERM trap (bg-ready) before the drain may send TERM;
+    //   3. the drain has sent TERM and is held (pause:drain-term) until the reader has looked.
+    const run = runAsync([LEAVES_ARMED_CHILD], { CM_VERIFY_TEST_DRAIN_LOG: drainLog, CM_VERIFY_TEST_HANDOFF: 'pause:leader-exited,pause:drain-term' });
+    await until(() => fs.existsSync(handoff('leader-exited.reached')));
     const bg = Number(fs.readFileSync(mark('bg'), 'utf8'));
-    // The leader has exited; the run drains the group — nobody takes the lock meanwhile. #4288 PR1a-f impl-11:
-    // read once the drain has sent its TERM (its record), not after 300 ms.
-    await until(() => fs.existsSync(drainLog) && fs.readFileSync(drainLog, 'utf8').startsWith('term\n'));
+    fs.writeFileSync(mark('arm'), '');
+    await until(() => fs.existsSync(mark('bg-ready')));
+    fs.writeFileSync(handoff('leader-exited.go'), '');
+    await until(() => fs.existsSync(handoff('drain-term.reached')));
+    // The leader has exited; the run drains the group — nobody takes the lock meanwhile.
+    expect(fs.readFileSync(drainLog, 'utf8')).toBe('term\n');
     expect((await take('ts', locks, 'holder')).acquired).toBe(false);
+    fs.writeFileSync(handoff('drain-term.go'), '');
     await run.wait();
     expect(fs.readFileSync(drainLog, 'utf8')).toBe('term\nkill\ndrained\n');
     expect(run.stdout()).toContain('GATE g PASS exit=0');
