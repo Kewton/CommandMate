@@ -50,7 +50,7 @@ import { sendPromptAnswer, type SendPromptAnswerParams } from './prompt-answer-s
 import { instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import { onTmuxSessionCreated } from './tmux/session-created-signal';
 import { CLIToolManager } from './cli-tools/manager';
-import { detectThinking } from './detection/cli-patterns';
+import { detectThinkingInRows, stripAnsi } from './detection/cli-patterns';
 import { generatePromptKey } from './detection/prompt-key';
 import type { PromptDetectionResult } from './detection/types';
 import type { PromptData } from '@/types/models';
@@ -1083,8 +1083,13 @@ async function pollAutoYes(
         pollerState: generation.pollerState,
         rawOutput,
       });
-      const recentLines = lines.slice(-THINKING_CHECK_LINE_COUNT).join('\n');
-      if (detectThinking(cliToolId, recentLines)) {
+      // opencode reads `Thinking:` by position (Issue #4291, as #4231): the footer's cwd holds the word too.
+      // That rule needs the box drawing (the echoed prompt's rows bound the open turn), which
+      // `cleanOutput` has lost: opencode is handed the same capture with only ANSI stripped,
+      // the form the Enter fallback reads. Other tools keep the cleaned rows.
+      const thinkingRows =
+        cliToolId === 'opencode' ? stripAnsi(rawOutput).split('\n') : lines;
+      if (detectThinkingInRows(cliToolId, thinkingRows.slice(-THINKING_CHECK_LINE_COUNT))) {
         scheduleNextPoll(generation, THINKING_POLLING_INTERVAL_MS);
         return;
       }

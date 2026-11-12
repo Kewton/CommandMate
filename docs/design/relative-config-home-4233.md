@@ -346,7 +346,7 @@ Codex の事前レビュー（`workspace/orchestration/runs/2026-11-08/prereview
 
 ### 8.1 scope の外に残したもの
 
-- `src/app/api/worktrees/[id]/send/send-role.ts`: 送信前のロールの条件確認（`resolveLaunchRole`）は `readLaunchCwd` を渡していない。`cd` した pane へ相対の `XDG_CONFIG_HOME` で送ると、条件確認は worktree を基準に通り、その後の起動（`base.ts`）で拒否される。誤った設定で起動することは無い（安全側）が、拒否が送信の後段で出る。
+- `src/app/api/worktrees/[id]/send/send-role.ts`: 送信前のロールの条件確認（`resolveLaunchRole`）は `readLaunchCwd` を渡していなかった。**Issue #4290 で解消**（§8.3）。
 - `src/app/api/worktrees/[id]/instances/roles/route.ts` は `loadPaneComposition` を通るので、変更が及ぶ（ファイルは変えていない）。
 
 ### 8.2 起動行の直前の再照合（整合性レビュー P2）
@@ -375,7 +375,38 @@ Codex の事前レビュー（`workspace/orchestration/runs/2026-11-08/prereview
 
 - **利用者に見える症状**: OpenCode V2 が worktree 以外の cwd で起動する。相対の `XDG_CONFIG_HOME` / `HOME` を opencode はその cwd で解決するので、合成で読んだのと違う global 設定で起動しうる。ロールが実際の `default_agent` に載らないか、その agent 自身の `system` を消すことがある。
 - **起きる条件**: 次の 3 つが全部そろったとき。(a) `XDG_CONFIG_HOME`（未設定なら `HOME`）が相対で、ロールのある OpenCode V2 を既存の pane で起動し直す。(b) 再照合（`display-message`）が終わってから起動行の `send-keys` までの tmux 呼び出し 1 回分の間に、画面のターミナルから `cd` が入る。(c) または、それより前に打った `cd` の行を、shell がまだ読んでいない（pty に溜まっている）。
-- **直さない理由**:
-  1. 入力の排他: 端末の入力（`ws-server.ts` → `sendInput`）は、決めたうえで入力ロックに入れていない（#3952）。入れるには `ws-server.ts` と transport を変えることになり、この PR の範囲の外になる。入れたとしても、pty にもう溜まっているバイト（(c)）は tmux の側からは見えないので閉じきれない。
-  2. 実行時の cwd の固定: 起動行に `cd <worktree> &&` を足すと、起動行のバイト一致の約束に触れる。`scripts/opencode-v2/launch.sh` の中で固定する方法も範囲の外。
+- **直さない理由**（Issue #4290 の事前レビューで更新）:
+  1. 起動行の互換と wrapper の契約: 起動行に `cd <worktree> &&` を足す案は、起動行のバイト一致の約束（既存のテストと `buildAgentLaunchCommandLine` の出力）に触れる。`scripts/opencode-v2/launch.sh` の中で固定する案も wrapper の契約を変える。どちらも今回は変えない。
+  2. 入力ロックでは解決しない: 端末の入力（`ws-server.ts` → `sendInput`）は、決めたうえで入力ロックに入れていない（#3952）。入れるには `ws-server.ts` と transport を変えることになる。入れたとしても、pty にもう溜まっているバイト（(c)）は tmux の側からは見えないので閉じきれない。
+  3. 影響: 別の global 設定（`default_agent` / `system` の違い）で起動しうる。症状は上の「利用者に見える症状」のとおりで、残る制限として受け入れる。
+  4. §8.3 の送信前の早期拒否（項目 1）は、送信の時点の cwd の不一致を後段より前に止めるだけで、**この競合（照合の後・起動行の前の `cd`、pty に溜まった入力）は解決しない**。この制限が解消したとは読まない。
 - **追跡**: この制限は「本文に無い指摘」としてコミット本文に書き、追跡にする。直し方の候補は、wrapper（`launch.sh`）に起動 cwd を渡して中で `cd` するもの（起動行の約束を見直す Issue として出す）。
+
+### 8.3 送信前の cwd 確認（Issue #4290 項目 1）と、残る制限（項目 2・4）
+
+#### 8.3.1 送信前の cwd 確認（直した）
+
+`send-role.ts` `prepareSendRole` の `resolveLaunchRole` に、環境の読み手（`roleEnvReaderForPane`）と同じ worktree・tool・instance で `roleLaunchCwdReaderForPane` を渡す。独自の cwd の解決は足さない。保存の順と rollback は変えない（`setManagedInstanceRole` は先に保存済み）。
+
+| 条件 | 結果 |
+|---|---|
+| 相対 `XDG_CONFIG_HOME`、または XDG 未設定で相対 `HOME`。pane の cwd が worktree と別・読めない | `ROLE_LAUNCH_REFUSED`（`composition-failed`）、本文は `not_sent`。`role` を送っていれば `roleSettings.saved=true`。起動・本文の送信・artifact の生成はしない |
+| pane が無い（`null`）・worktree と同じ実体の cwd | 通る |
+| 絶対値・ロールなし・role 条件の無い通常の送信 | 既存の経路のまま |
+
+起動直前の再照合・入力 ticket・起動世代の確認（§8.2）は残る。Schedule は実行 cwd が worktree なので変えず、`runningRoleProblem` の保存済み composition に pane の読み取りは足さない。対照: `tests/unit/app/api/worktrees/send-role-launch-cwd-4290.test.ts`（reader factory を明示的にモックする。テスト中の既定は `undefined` を返すので、モックしないと配線漏れが見えない）。
+
+#### 8.3.2 残る制限: OpenCode の global 設定の書き先と検出（項目 2、動かさない）
+
+この生成処理（`opencode-config.ts`）の実際の呼び手は OpenCode V1 の `opencode.ts`。V2 のロール合成とは別に扱う。生成は明示的な opt-in、既存設定があれば生成しない、`wx` で競合時も上書きしない、という仕様で、旧生成物と利用者作成のファイルを安全に識別できないため、書き先を pane 基準へ切り替えるだけでは移行が閉じない。今回は書き先を動かさず、次を**残る制限として明記**する。
+
+- global の生成先と所有設定の検出は、サーバー環境基準。
+- pane の `XDG_CONFIG_HOME` / `HOME` が違うと、生成物がその CLI で使われる保証は無い。
+- `findOwnedOpencodeConfig` もサーバー側の global を見るため、worktree モードでも pane 側の global 設定を見逃しうる。global の書き先だけの問題ではない。
+- 「サーバー基準」を、実際の CLI との一致を確かめた説明として書かない。
+
+既存の `~/.config/opencode` はそのまま残す。移動・コピー・merge・削除や、`OPENCODE_CONFIG` による自動的な読み先変更はしない。したがって今回の移行は無い。将来書き先を変えるなら、旧先と起動先が同じ実体なら内容・mtime を維持／異なり旧先に設定があれば自動移送も新規生成もせず明示して選ばせる／両方にあれば自動 merge も優先順位の変更もしない、を別の契約で決める。所有設定の検出と書き先は同じ起動環境のスナップショットから決め、読めなければ生成を見送って起動は妨げない。
+
+#### 8.3.3 起動行の直前の `cd`（項目 4、見送り）
+
+理由は §8.2.2 のとおり（起動行の互換と wrapper の契約を今回変えない・入力ロックでは pty に溜まった入力は解決しない・別の global 設定で起動しうる・§8.3.1 の早期拒否ではこの競合は解決しない）。
