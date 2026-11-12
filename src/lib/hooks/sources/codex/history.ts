@@ -51,6 +51,7 @@
  * @module lib/hooks/sources/codex/history
  */
 
+import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { readdir } from 'fs/promises';
 import { homedir } from 'os';
@@ -195,9 +196,15 @@ export async function resolveCodexSessionId(target: AgentInstanceRef): Promise<s
  *   so a caller can pass the two variables that matter instead of a whole one
  */
 export function resolveCodexHome(env: Record<string, string | undefined> = process.env): string {
+  // Issue #4290: the same rule as `getCodexHome` (hooks-config): absolute, and a
+  // /proc, /sys or /dev value (or a symlink into one) is refused for the
+  // default rather than walked. No other home is searched.
   const configured = env[CODEX_HOME_ENV_VAR];
-  if (typeof configured === 'string' && configured.length > 0) return configured;
-  return join(homedir(), CODEX_DEFAULT_HOME_SEGMENT);
+  return resolveSafeAbsoluteDirectory(
+    typeof configured === 'string' ? configured : undefined,
+    join(homedir(), CODEX_DEFAULT_HOME_SEGMENT),
+    CODEX_HOME_ENV_VAR
+  );
 }
 
 /** `<codexHome>/sessions`. */

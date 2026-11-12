@@ -21,7 +21,7 @@ CommandMate は、デスクトップとモバイルの両方に最適化され�
 
 | 画面 | レイアウト | 特徴 |
 |------|-----------|------|
-| **デスクトップ** | 1 行のヘッダー + 2 段目の操作バー + 本文（TerminalContainer。ActivityPane は右から重ねて開く） | 道具はヘッダー左の見出しのすぐ右、Verification は 2 段目の札、即時 Tooltip、History は Terminal 領域に内包、ピン留めで横に並ぶペイン |
+| **デスクトップ** | 1 行のヘッダー + 2 段目の操作バー + 本文（TerminalContainer。ActivityPane は既定で右から重ねて開き、左にも置ける） | 道具はヘッダー左の見出しのすぐ右、Verification は 2 段目の札、即時 Tooltip、History は Terminal 領域に内包、ピン留めで横に並ぶペイン |
 | **モバイル** | タブベース | ボトムナビゲーション |
 
 ---
@@ -79,7 +79,7 @@ CommandMate は、デスクトップとモバイルの両方に最適化され�
   - 進み具合（worktree の Status）はここではなく、サイドバーの行の「…」→ Status で変える
 
 #### 2. 道具（HeaderToolBar）と Verification の札
-- 以前の縦型 Activity Bar の中身を、ヘッダー右のアイコン（`HeaderToolBar`）と 2 段目の Verification の札（`VerificationStatusChip`）に分けた (Issue #3591)
+- 以前の縦型 Activity Bar の中身を、ヘッダーの identity（リポジトリ › ブランチ › セッション）のすぐ右のアイコン（`HeaderToolBar`）と 2 段目の Verification の札（`VerificationStatusChip`）に分けた (Issue #3591)
 - 10 Activity。**唯一の出所は `src/config/activity-bar-config.ts` の `ACTIVITIES`** で、下記はその写しです。並び順はヘッダーの道具の表示順であり、←/→ の移動順でもあります（新しい Activity は末尾に追加すること。挿入すると既存のキーボード順序が黙って繰り上がります）。`tests/unit/docs/ui-ux-guide-activities-2062.test.ts` がこの一覧と `ACTIVITIES` の一致を固定しているので、Activity を増やしたらここも直してください。
   1. `files` — ファイルツリー（Issue #2259: 操作バーの「開いているファイル」と区別するため改称。id は `files` のまま）
   2. `git` — Git
@@ -97,7 +97,7 @@ CommandMate は、デスクトップとモバイルの両方に最適化され�
 
 #### 3. ActivityPane (選択 Activity の描画)
 - 選択中の Activity の中身を表示。既定では閉じている（初めて開く worktree も閉じた状態で始まる、Issue #3589）
-- 右から本文の上に重ねて開き、本文の幅は変わらない。Esc・×・同じ道具の再クリック・外側のクリック・ファイルを開く操作で閉じる
+- 既定では右から本文の上に重ねて開き、本文の幅は変わらない。ペインの見出しの［左に移す］／［右に移す］で左右を切り替えられる（左右の別は worktree をまたいで共通。Issue #4219）。Esc・×・同じ道具の再クリック・外側のクリック・ファイルを開く操作で閉じる
 - ピンで固定すると本文の横に並び（以前の形）、境界をドラッグして幅を変えられる。ピンの有無は worktree をまたいで共通
 
 #### 4. TerminalContainer (Right Pane, Issue #730)
@@ -244,7 +244,7 @@ src/components/
 ├── worktree/
 │   ├── WorktreeDetailRefactored.tsx  # メインコンポーネント（PC は WorktreeDetailDesktop へ委譲）
 │   ├── WorktreeDesktopLayout.tsx     # 本文 + ActivityPane（重ねる / ピン留めで横に並ぶ、Issue #3589 / #3591）
-│   ├── HeaderToolBar.tsx             # ヘッダー右の道具 (Issue #3591。旧 ActivityBar.tsx は未マウント)
+│   ├── HeaderToolBar.tsx             # identity のすぐ右の道具 (Issue #3591 / #4218。旧 ActivityBar.tsx は未マウント)
 │   ├── VerificationStatusChip.tsx    # 2 段目の Verification の札 (Issue #1816 / #2064 / #3590)
 │   ├── ActivityPane.tsx              # 選択 Activity の描画コンテナ (Issue #727)
 │   ├── TerminalContainer.tsx         # History + Terminal 内包コンテナ (Issue #730)
