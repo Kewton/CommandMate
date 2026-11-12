@@ -31,7 +31,7 @@ import {
   type HandoffRequestRow,
 } from '@/lib/db/handoff-db';
 import { getMemRecord } from '@/lib/db/mem-db';
-import { parseCloseWhen } from '@/lib/mem/close-when';
+import { checkCloseWhenBindable, parseCloseWhen, type CloseWhenGitAnswers } from '@/lib/mem/close-when';
 import { MEM_SECRET_RULES_VERSION } from '@/lib/mem/secret-scan';
 import { memError } from '@/lib/mem/service';
 import { memTransition } from '@/lib/mem/transitions';
@@ -79,10 +79,28 @@ function itemOfRequest(target: MemTargetResolved, row: HandoffRequestRow, record
   return row.branch !== null || record.owner.worktreeId === row.targetWorktreeId;
 }
 
+/** True when git's answers make the condition unbindable (no origin for `#N`, no tip for `merged`...), as `mem add` finds. */
+type BindRefusal = boolean;
+
+/** Asks git as `mem add` does, before the synchronous checks; false when the condition is not asked about or binds. */
+async function bindRefusalOf(db: Database.Database, worktreeId: string, body: Record<string, unknown>, deps: HandoffDeps): Promise<BindRefusal> {
+  let kind: string | null = null;
+  if (body.op === 'add') kind = isMemKind(body.kind) && body.kind !== 'now' ? body.kind : null;
+  else if (body.op === 'update' && body.closeWhen !== undefined && typeof body.itemId === 'string') kind = getMemRecord(db, body.itemId)?.kind ?? null;
+  if (kind === null || !isMemKind(kind)) return false;
+  const draft = parseCloseWhen(kind, body.closeWhen);
+  const worktree = getWorktreeById(db, worktreeId);
+  if (!draft.ok || !worktree) return false;
+  const observe = deps.git ? null : await import('@/lib/mem/git-observe');
+  const git: CloseWhenGitAnswers = deps.git ?? { originUrl: observe!.readOriginUrl, refTip: observe!.readRefTip };
+  const bound = await checkCloseWhenBindable(draft.draft, worktree.path, git, (id) => getWorktreeById(db, id) !== null);
+  return !bound.ok;
+}
+
 type Checked = { ok: true; itemId: string | null; kind: string; baseVersion: number | null; payload: HandoffPayload } | { ok: false; outcome: HandoffOutcome };
 
 /** A's checks of the proposal (the same ones the confirmation runs again, A §6.4). */
-function checkProposal(db: Database.Database, body: Record<string, unknown>, root: string, target: MemTargetResolved, row: HandoffRequestRow, now: number): Checked {
+function checkProposal(db: Database.Database, body: Record<string, unknown>, root: string, target: MemTargetResolved, row: HandoffRequestRow, now: number, bindRefusal: BindRefusal): Checked {
   const fail = (outcome: HandoffOutcome): Checked => ({ ok: false, outcome });
   const op = body.op as HandoffProposalOp;
   if (op === 'add') {
@@ -92,6 +110,7 @@ function checkProposal(db: Database.Database, body: Record<string, unknown>, roo
     if (!fields.ok) return fail(fieldError(fields.error));
     const draft = parseCloseWhen(kind, body.closeWhen);
     if (!draft.ok) return fail(memError('invalid_close_when', { field: 'closeWhen', reason: draft.reason }));
+    if (bindRefusal) return fail(memError('invalid_close_when', { field: 'closeWhen' }));
     const payload: HandoffPayload = { kind, text: fields.value.text };
     if (typeof body.closeWhen === 'string') payload.closeWhen = body.closeWhen;
     if (fields.value.evidence.length > 0) payload.evidence = fields.value.evidence;
@@ -125,6 +144,7 @@ function checkProposal(db: Database.Database, body: Record<string, unknown>, roo
     if (body.closeWhen !== undefined) {
       const draft = parseCloseWhen(record.kind, body.closeWhen);
       if (!draft.ok) return fail(memError('invalid_close_when', { field: 'closeWhen', reason: draft.reason }));
+      if (bindRefusal) return fail(memError('invalid_close_when', { field: 'closeWhen' }));
       if (typeof body.closeWhen === 'string') payload.closeWhen = body.closeWhen;
     }
     if (Object.keys(payload).length === 0) return fail(invalidRequest('text'));
@@ -147,6 +167,7 @@ export async function handoffPropose(
   if (!PROPOSAL_OPS.includes(body.op as HandoffProposalOp)) return invalidRequest('op');
   const before = requestOf(db, worktreeId, requestId);
   if (!before) return handoffError('not_found');
+  const bindRefusal = await bindRefusalOf(db, worktreeId, body, deps);
   return withBranchMode(db, worktreeId, before.branch, deps, (target) => {
     const refused = modeRefusal(target);
     if (refused) return refused;
@@ -156,7 +177,7 @@ export async function handoffPropose(
     if (closed) return closed;
     const worktree = getWorktreeById(db, worktreeId);
     if (!worktree) return handoffError('session_changed');
-    const checked = checkProposal(db, body, worktree.path, target, row, now);
+    const checked = checkProposal(db, body, worktree.path, target, row, now, bindRefusal);
     if (!checked.ok) return checked.outcome;
     const proposal = insertHandoffProposal(db, {
       id: randomUUID(),

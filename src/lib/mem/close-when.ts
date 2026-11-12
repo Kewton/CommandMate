@@ -301,6 +301,41 @@ export function finalizeCloseWhen(
   }
 }
 
+/** What git answers for a condition (the same two questions `mem add` asks). */
+export interface CloseWhenGitAnswers {
+  originUrl: (worktreePath: string) => Promise<string | null>;
+  refTip: (worktreePath: string, ref: string) => Promise<string | null>;
+}
+
+/**
+ * The entrance check of a condition that `mem add` runs (git's answers, then `finalizeCloseWhen`),
+ * for a caller that stores nothing yet (a hand-off proposal): the same refusal at the same moment.
+ * The worktree's incarnation is only looked up here, never made.
+ */
+export async function checkCloseWhenBindable(
+  draft: CloseWhenDraft,
+  worktreePath: string,
+  git: CloseWhenGitAnswers,
+  worktreeExists: (worktreeId: string) => boolean
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const needs = closeWhenGitNeeds(draft);
+  let tip: string | null = null;
+  if (needs.tipOf !== null) {
+    for (const ref of needs.tipOf) {
+      tip = await git.refTip(worktreePath, ref);
+      if (tip) break;
+    }
+  }
+  const bound = finalizeCloseWhen(draft, {
+    origin: needs.origin ? parseOriginUrl(await git.originUrl(worktreePath)) : null,
+    tip,
+    repositoryId: '',
+    worktreeIncarnation: (worktreeId) => (worktreeExists(worktreeId) ? 'exists' : null),
+    sessionGeneration: null,
+  });
+  return bound.ok ? { ok: true } : { ok: false, reason: bound.reason };
+}
+
 /** Read a stored value back; null for NULL or a shape this version does not know. */
 export function readStoredCloseWhen(json: string | null): MemCloseWhen | null {
   if (!json) return null;
