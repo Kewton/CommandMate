@@ -26,7 +26,9 @@
  * the dialog drawn again (PC ↔ phone, the page's Loading between worktrees, a remount) keeps
  * them and makes no second request. The person's choices not confirmed yet are the opening's too
  * (Issue #4346: kept over another worktree or route, where the host draws no dialog); only the
- * notice and `writing` are local.
+ * notice is local (Issue #4345 1b 再指示 1: the text's send in flight and an extend / rebase in flight
+ * are the opening's too — a 401 unmounts the dialog, and the one drawn again after the recovery
+ * must not send them again before the first is answered).
  *
  * After an await (pr2f, design §4.1.1): every continuation — a decide's settle, a close, a patch
  * of the opening, a notice — carries the sending it started and the opening it was for, and does
@@ -181,11 +183,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const actionable = registration === undefined || handoffPageMayStart(registration, registry);
   /** The same, read now (after an await): never the render's value. */
   const registered = useCallback((): boolean => registration === undefined || handoffPageMayStart(registration), [registration]);
-  /** An extend or a rebase is answered (local: nothing is lost when it is drawn again). */
-  const [writing, setWriting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
-  /** pr2e P3-3 (G-PR3): this instance is sending the text now (no second send from the button meanwhile). */
-  const [textSending, setTextSending] = useState(false);
 
   /** This dialog's opening, once its effect has made (or found) it for the target. */
   const opening: HandoffOpening | null =
@@ -198,8 +196,15 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
    */
   const choices = opening?.choices ?? NO_CHOICES;
   /**
+   * pr2e P3-3 (G-PR3): the text is being sent (no second send from the button meanwhile), and an
+   * extend or a rebase is answered. Issue #4345 1b 再指示 1: the opening's (the store), not this
+   * mount's — kept when a 401 unmounts the dialog and it is drawn again after the recovery.
+   */
+  const textSending = opening?.textSending ?? false;
+  const writing = opening?.writing ?? false;
+  /**
    * Issue #4317 PR2: the host beside the shell keeps this instance (and its DOM) over route and
-   * width changes, so what is local here — the notice, `writing` — is per opening: set afresh when
+   * width changes, so what is local here — the notice — is per opening: set afresh when
    * another opening is shown, kept while the same one is (and while none is). The person's choices
    * moved to the opening itself (Issue #4346): the host draws 0 dialogs on another worktree, and
    * this instance's state does not outlive that.
@@ -207,10 +212,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const [localFor, setLocalFor] = useState<HandoffOpeningToken | null>(token);
   if (token !== null && token !== localFor) {
     setLocalFor(token);
-    if (localFor !== null) {
-      setNotice(null);
-      setWriting(false);
-    }
+    if (localFor !== null) setNotice(null);
   }
   /**
    * The worktree the dialog was opened for (pr2d). The page keeps the dialog over a switch of
@@ -278,7 +280,9 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const sendText = useCallback(
     async (of: HandoffOpening, requestIdToSend: string, body: string) => {
       if (!handoffTextSendable(of.token)) return;
-      setTextSending(true);
+      // Issue #4345 1b 再指示 1: held by the opening until the send is recorded (a remount meanwhile
+      // offers no "send again" and `handoffTextSendable` refuses a second send).
+      patchHandoffOpening(of.token, { textSending: true });
       try {
         const sent = await handoffApi.sendText(of.worktreeId, body, { cliToolId: of.target.cliToolId, instanceId: of.target.instanceId }, registration);
         // Issue #4345 1b: what the send said is recorded for this opening whatever the session's state
@@ -289,7 +293,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         if (marked.ok && marked.body?.request) patchHandoffOpening(of.token, { view: marked.body });
         if (isLiveHandoffOpening(of.token)) setNotice(sent.ok ? null : { tone: 'alert', text: t('mem.handoff.sendFailed') });
       } finally {
-        setTextSending(false);
+        patchHandoffOpening(of.token, { textSending: false });
       }
     },
     [registration, t]
@@ -363,7 +367,10 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     // The request is made once per opening (the store's token) for its target. A switch of
     // worktree while it is open (the page keeps it only while it holds something) makes no request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, target?.instanceId, store.opening?.token, actionable]);
+    // Issue #4345 1b 再指示 1: `created` too — a create answered by a 401 taken goes back to 'no' while
+    // a dialog drawn again after the recovery already found it 'creating' and returned; going back to
+    // 'no' makes the request then (once: 'creating' at once, and the effect returns for anything else).
+  }, [isOpen, target?.instanceId, store.opening?.token, store.opening?.created, actionable]);
 
   // The screen reads again while the agent works (the server keeps no timer; §4.3).
   useEffect(() => {
@@ -463,7 +470,9 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     async (run: () => Promise<HandoffResult<HandoffReadResponse>>, success?: string) => {
       const of = token;
       if (of === null || !isLiveHandoffOpening(of) || handoffUnitsOf(forWorktree).cancelling || !registered()) return;
-      setWriting(true);
+      if (handoffStoreSnapshot().opening?.writing) return;
+      // Issue #4345 1b 再指示 1: the opening's, kept over a remount until this write is answered.
+      patchHandoffOpening(of, { writing: true });
       try {
         const result = await run();
         if (!isLiveHandoffOpening(of)) return;
@@ -475,7 +484,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
           await reload();
         }
       } finally {
-        setWriting(false);
+        patchHandoffOpening(of, { writing: false });
       }
     },
     [adopt, forWorktree, refusal, registered, reload, token]

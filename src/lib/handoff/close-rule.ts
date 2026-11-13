@@ -169,6 +169,15 @@ export interface HandoffOpening {
    * starts with none.
    */
   readonly choices: Readonly<Record<string, HandoffChoice>>;
+  /**
+   * Issue #4345 1b 再指示 1: the request's text is being sent for this opening (from the send to its
+   * `sent` / `send-failed` answered). The opening's, not the dialog's mount: a 401 hides the dialog
+   * (the host unmounts it) and the session may recover before the send's record is answered — the
+   * dialog drawn again must neither offer nor send the text a second time meanwhile.
+   */
+  readonly textSending: boolean;
+  /** Issue #4345 1b 再指示 1: an extend or a rebase of this opening is answered (the same reason). */
+  readonly writing: boolean;
 }
 
 /**
@@ -296,7 +305,7 @@ export function endHandoffCancel(worktreeId: string): void {
 }
 
 function freshOpening(worktreeId: string, target: HandoffOpeningTarget): HandoffOpening {
-  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false, choices: {} };
+  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false, choices: {}, textSending: false, writing: false };
 }
 
 /**
@@ -321,7 +330,7 @@ export function liveHandoffOpeningFor(instanceId: string): HandoffOpening | null
 /** Writes what the opening `token` learnt (nothing once another opening started). */
 export function patchHandoffOpening(
   token: HandoffOpeningToken,
-  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped' | 'choices'>>
+  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped' | 'choices' | 'textSending' | 'writing'>>
 ): void {
   if (state.opening?.token !== token) return;
   commit({ ...state, opening: { ...state.opening, ...patch } });
@@ -335,10 +344,11 @@ export function isLiveHandoffOpening(token: HandoffOpeningToken | null): boolean
 /**
  * The request's text may be sent for `token` (pr2e, PM P3-2): the opening is live and no cancel
  * of its worktree has started (the text after a cancel would ask the agent to propose to a
- * request that is over).
+ * request that is over). Issue #4345 1b 再指示 1: nor while a send of its text has not been
+ * recorded yet (`textSending`, kept over a remount of the dialog).
  */
 export function handoffTextSendable(token: HandoffOpeningToken | null): boolean {
-  return isLiveHandoffOpening(token) && !handoffUnitsOf(state.opening!.worktreeId).cancelling;
+  return isLiveHandoffOpening(token) && !state.opening!.textSending && !handoffUnitsOf(state.opening!.worktreeId).cancelling;
 }
 
 function markClosed(token: HandoffOpeningToken): void {

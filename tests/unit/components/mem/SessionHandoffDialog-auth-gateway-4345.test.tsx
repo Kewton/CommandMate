@@ -150,7 +150,10 @@ beforeEach(() => {
         case undefined:
           return answer('read', () => json(200, view()));
         case '/sent':
-          return answer('sent', () => json(200, view()));
+          return answer('sent', () => {
+            request = { ...request, sendState: 'sent' };
+            return json(200, view());
+          });
         case '/send-failed':
           return answer('send-failed', () => {
             request = { ...request, sendState: 'failed' };
@@ -613,5 +616,129 @@ describe('[#4345 1b] (7) negative controls: not the expiry', () => {
     expect(handoffRegistrySnapshot().authExpired).toBe(false);
     expect(dialog()).not.toBeNull();
     expect(handoffStoreSnapshot().opening?.plainOnly).not.toBeNull();
+  });
+});
+
+/**
+ * 再指示 1 (the review of 8e7f86b, P2 ×2): a 401 unmounts the dialog (the host draws none) and the
+ * session recovers in the same document before the request that answered 401 has finished — its
+ * body held. The dialog drawn again holds, through the opening (the store), what was started: the
+ * text's send is not offered nor sent again before it is recorded, an extend in flight is not
+ * pressed again, and a create taken back to "not made" is made then, once.
+ * Positive controls: red on 8e7f86b (the text's send and `writing` in the dialog's own state, the
+ * create's effect not run again on `created`).
+ */
+describe('[#4345 1b 再指示 1] a remount after the recovery, with the 401’s body still held', () => {
+  it('(a) the text sent, `sent` answers 401 with its body held, recovered: no "send again" and no second send before the record ends; one send in all', async () => {
+    request = { ...request, state: 'awaiting_agent', sendState: 'unsent', agentDoneAt: null };
+    proposals = [];
+    answers.sent = 'stalled-body';
+    render(
+      <>
+        <Page />
+        <HandoffDialogHost />
+      </>,
+    );
+    await waitFor(() => expect(page.loading).toBe(false));
+    holdDetailReads();
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await waitFor(() => expect(stalledBodies).toHaveLength(1));
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    await settle();
+    expect(dialog()).toBeNull();
+    const token = handoffStoreSnapshot().opening?.token;
+    await recover();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(handoffStoreSnapshot().opening?.token).toBe(token);
+    expect(screen.queryByTestId('handoff-resend-text')).toBeNull();
+    expect(calls.send).toBe(1);
+    // The original send's record ends (its 401 body read): the "send again" may show from now on.
+    await act(async () => {
+      for (const release of stalledBodies.splice(0)) release();
+    });
+    await settle();
+    expect(calls.send).toBe(1);
+    expect(calls.sent).toBe(1);
+    expect(handoffStoreSnapshot().opening?.textSending).toBe(false);
+  });
+
+  it('(b) create answers 401 with its body held, recovered, then the body ends: the same opening makes its request once more and sends its text once', async () => {
+    answers.create = 'stalled-body';
+    render(
+      <>
+        <Page />
+        <HandoffDialogHost />
+      </>,
+    );
+    await waitFor(() => expect(page.loading).toBe(false));
+    holdDetailReads();
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await waitFor(() => expect(stalledBodies).toHaveLength(1));
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    await settle();
+    expect(dialog()).toBeNull();
+    const token = handoffStoreSnapshot().opening?.token;
+    delete answers.create;
+    await recover();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect(handoffStoreSnapshot().opening?.created).toBe('creating');
+    expect(calls.create).toBe(1);
+    await act(async () => {
+      for (const release of stalledBodies.splice(0)) release();
+    });
+    await waitFor(() => expect(calls.send).toBe(1));
+    await settle();
+    expect(calls.create).toBe(2);
+    expect(calls.send).toBe(1);
+    expect(handoffStoreSnapshot().opening?.token).toBe(token);
+    expect(handoffStoreSnapshot().opening?.created).toBe('done');
+    expect(screen.queryByTestId('handoff-loading')).toBeNull();
+    expect(screen.queryByTestId('handoff-approve-p1')).not.toBeNull();
+  });
+
+  it('(c) an extend answers 401 with its body held, recovered: the extend stays disabled until it is answered; one extend in all', async () => {
+    request = { ...request, state: 'awaiting_agent', agentTimedOut: true, agentDoneAt: null };
+    await opened();
+    holdDetailReads();
+    answers.extend = 'stalled-body';
+    press('handoff-extend');
+    await waitFor(() => expect(stalledBodies).toHaveLength(1));
+    await settle();
+    expect(dialog()).toBeNull();
+    await recover();
+    await waitFor(() => expect(dialog()).not.toBeNull());
+    expect((screen.getByTestId('handoff-extend') as HTMLButtonElement).disabled).toBe(true);
+    press('handoff-extend');
+    await settle();
+    expect(calls.extend).toBe(1);
+    await act(async () => {
+      for (const release of stalledBodies.splice(0)) release();
+    });
+    await settle();
+    expect(handoffStoreSnapshot().opening?.writing).toBe(false);
+    expect(calls.extend).toBe(1);
+  });
+
+  it('(negative control) no 401: the text is sent once and no "send again" shows; a send that really failed offers "send again"', async () => {
+    request = { ...request, state: 'awaiting_agent', sendState: 'unsent', agentDoneAt: null };
+    proposals = [];
+    await opened();
+    expect(calls.create).toBe(1);
+    expect(calls.send).toBe(1);
+    expect(calls.sent).toBe(1);
+    expect(screen.queryByTestId('handoff-resend-text')).toBeNull();
+    cleanup();
+    resetHandoffStoreForTests();
+    resetHandoffRegistryForTests();
+    answers.send = 500;
+    request = { ...request, sendState: 'unsent' };
+    await opened();
+    await waitFor(() => expect(calls['send-failed']).toBe(1));
+    await waitFor(() => expect(screen.queryByTestId('handoff-resend-text')).not.toBeNull());
+    expect(handoffRegistrySnapshot().authExpired).toBe(false);
   });
 });
