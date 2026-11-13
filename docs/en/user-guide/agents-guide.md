@@ -16,11 +16,15 @@ Agents are sub-processes that operate as specialists for specific tasks. They ar
 
 | Agent | Description | Called From |
 |-------|-------------|------------|
-| `tdd-impl-agent` | TDD implementation specialist | `/tdd-impl`, `/pm-auto-dev` |
-| `progress-report-agent` | Progress report generation | `/progress-report`, `/pm-auto-dev` |
-| `investigation-agent` | Bug investigation specialist | `/bug-fix` |
-| `acceptance-test-agent` | Acceptance testing | `/acceptance-test`, `/pm-auto-dev` |
-| `refactoring-agent` | Refactoring | `/refactoring`, `/pm-auto-dev` |
+| [`tdd-impl-agent`](../../../.claude/agents/tdd-impl-agent.md) | TDD implementation specialist | `/tdd-impl`, `/pm-auto-dev` |
+| [`progress-report-agent`](../../../.claude/agents/progress-report-agent.md) | Progress report generation | `/progress-report`, `/pm-auto-dev` |
+| [`investigation-agent`](../../../.claude/agents/investigation-agent.md) | Bug investigation specialist | `/bug-fix` |
+| [`acceptance-test-agent`](../../../.claude/agents/acceptance-test-agent.md) | Acceptance testing | `/acceptance-test`, `/pm-auto-dev` |
+| [`refactoring-agent`](../../../.claude/agents/refactoring-agent.md) | Refactoring | `/refactoring`, `/pm-auto-dev` |
+| [`architecture-review-agent`](../../../.claude/agents/architecture-review-agent.md) | Architecture review | `/architecture-review`, `/multi-stage-design-review` |
+| [`apply-review-agent`](../../../.claude/agents/apply-review-agent.md) | Applying review findings | `/apply-review`, `/multi-stage-design-review` |
+| [`issue-review-agent`](../../../.claude/agents/issue-review-agent.md) | Issue content review | `/multi-stage-issue-review` |
+| [`apply-issue-review-agent`](../../../.claude/agents/apply-issue-review-agent.md) | Applying Issue review results | `/multi-stage-issue-review` |
 
 ---
 

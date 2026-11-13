@@ -16,11 +16,15 @@ CommandMateで使用できるサブエージェントの詳細ガイドです。
 
 | エージェント | 説明 | 呼び出し元 |
 |-------------|------|-----------|
-| `tdd-impl-agent` | TDD実装専門 | `/tdd-impl`, `/pm-auto-dev` |
-| `progress-report-agent` | 進捗報告生成 | `/progress-report`, `/pm-auto-dev` |
-| `investigation-agent` | バグ調査専門 | `/bug-fix` |
-| `acceptance-test-agent` | 受入テスト | `/acceptance-test`, `/pm-auto-dev` |
-| `refactoring-agent` | リファクタリング | `/refactoring`, `/pm-auto-dev` |
+| [`tdd-impl-agent`](../../.claude/agents/tdd-impl-agent.md) | TDD実装専門 | `/tdd-impl`, `/pm-auto-dev` |
+| [`progress-report-agent`](../../.claude/agents/progress-report-agent.md) | 進捗報告生成 | `/progress-report`, `/pm-auto-dev` |
+| [`investigation-agent`](../../.claude/agents/investigation-agent.md) | バグ調査専門 | `/bug-fix` |
+| [`acceptance-test-agent`](../../.claude/agents/acceptance-test-agent.md) | 受入テスト | `/acceptance-test`, `/pm-auto-dev` |
+| [`refactoring-agent`](../../.claude/agents/refactoring-agent.md) | リファクタリング | `/refactoring`, `/pm-auto-dev` |
+| [`architecture-review-agent`](../../.claude/agents/architecture-review-agent.md) | アーキテクチャレビュー | `/architecture-review`, `/multi-stage-design-review` |
+| [`apply-review-agent`](../../.claude/agents/apply-review-agent.md) | レビュー指摘反映 | `/apply-review`, `/multi-stage-design-review` |
+| [`issue-review-agent`](../../.claude/agents/issue-review-agent.md) | Issue内容レビュー | `/multi-stage-issue-review` |
+| [`apply-issue-review-agent`](../../.claude/agents/apply-issue-review-agent.md) | Issueレビュー結果反映 | `/multi-stage-issue-review` |
 
 ---
 
