@@ -334,6 +334,32 @@ describe('instances command: kill', () => {
     expect(mockConsoleError).toHaveBeenCalledWith('Session killed: claude-2');
   });
 
+  it('tells that Auto-Yes of the killed instance was also disabled and how to resume it (#4313)', async () => {
+    mockFetchResponse({ success: true });
+    const { createInstancesCommand } = await import('../../../../src/cli/commands/instances');
+    const cmd = createInstancesCommand();
+    await cmd.parseAsync(['node', 'instances', 'wt1', 'kill', 'claude-2']);
+
+    const lines = mockConsoleError.mock.calls.map(c => String(c[0]));
+    const notice = lines.find(l => l.includes('Auto-Yes'));
+    expect(notice).toBeDefined();
+    expect(notice).toContain('disabled');
+    expect(notice).toContain('commandmate auto-yes wt1 --instance claude-2 --enable');
+    // stdout is untouched
+    expect(mockConsoleLog).not.toHaveBeenCalled();
+  });
+
+  it('does not print the Auto-Yes notice when the kill fails (#4313)', async () => {
+    mockFetchError(new Error('boom'));
+    const { createInstancesCommand } = await import('../../../../src/cli/commands/instances');
+    const cmd = createInstancesCommand();
+    await cmd.parseAsync(['node', 'instances', 'wt1', 'kill', 'claude-2']);
+
+    const lines = mockConsoleError.mock.calls.map(c => String(c[0]));
+    expect(lines.some(l => l.includes('Auto-Yes'))).toBe(false);
+    expect(lines.some(l => l.includes('Session killed'))).toBe(false);
+  });
+
   it('rejects kill without an instance-id argument', async () => {
     const { createInstancesCommand } = await import('../../../../src/cli/commands/instances');
     const cmd = createInstancesCommand();

@@ -813,7 +813,7 @@ different server), it prints a warning on stderr and adds `"serverMismatch": tru
 |:----:|---------|
 | 0 | Answered |
 | 3 | **NOT_IN_SESSION**: not inside an agent session started by CommandMate (the reason is on stderr). The number is the same as `ExitCode.START_FAILED`, but it has nothing to do with a server failing to start |
-| 1 / 2 / 99 | Server not running / bad argument / unexpected error (see [Exit Codes](#exit-codes)) |
+| 1 / 2 / 99 | Server not running / bad argument / unexpected error (see [Exit Codes](#exit-codes)). whoami resolves the identity from the environment variables or the tmux session name and discards any failed server call (the `-<n>` disambiguation and the alias lookup), so a stopped server alone does not produce 1 — it still answers with 0 and `alias` shows `-` |
 
 ---
 
@@ -2422,6 +2422,7 @@ commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # Sa
 `add`, `remove`, `alias` and `send --register` save with the revision of the roster they read (Issue #4132). If the roster changed after the read, the change is rebuilt on the current roster, up to 2 more times, so another add or change is not erased. The id is one that is free in the current roster. If the roster keeps changing, `add`, `remove` and `alias` end in exit 31 (`roster_changed`) and other changes stay (`remove --kill` stops the session and then saves, so the session may have been stopped). `send --register` has sent its message by then, so this and any other failure to register (Issue #4159) warn, exit 0 and name the command that registers it.
 
 `kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
+A successful `instances <worktree-id> kill <instance-id>` prints one line to stderr saying that Auto-Yes for that instance was also disabled and how to resume it (`commandmate auto-yes <worktree-id> --instance <instance-id> --enable`; the default `--duration` is 1h). It does not query whether Auto-Yes was on before; stdout and the exit code are unchanged.
 A successful `kill` (and `remove --kill`) appends one line to `~/.commandmate/session-kills/<UTC date>.jsonl`
 (kept 30 days): the worktree and instance, the tmux sessions the server says it stopped (`killedSessions`),
 and where it was asked from (cwd and tmux session). The server records its own kills there too — the
