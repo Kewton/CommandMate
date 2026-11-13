@@ -24,12 +24,12 @@
  */
 
 import { Command } from 'commander';
+import { ExitCode } from '../types';
 import type { AgentInstance, WorktreeItem, WorktreeListResponse } from '../types/api-responses';
 import { ApiClient } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { resolveCommandMateBinary } from '../../lib/cli/command-reference';
 import {
-  NOT_IN_SESSION,
   NOT_IN_SESSION_MESSAGE,
   detectServerMismatch,
   formatServerMismatchWarning,
@@ -245,7 +245,7 @@ export function createPeersCommand(): Command {
 
         if (!identity) {
           console.error(NOT_IN_SESSION_MESSAGE);
-          process.exit(NOT_IN_SESSION);
+          process.exit(ExitCode.NOT_IN_SESSION);
           return;
         }
 
