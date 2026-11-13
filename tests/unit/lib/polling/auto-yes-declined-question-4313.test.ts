@@ -256,6 +256,60 @@ describe('[#4313] (c) the current turn, one boundary at a time', () => {
   });
 });
 
+/**
+ * Re-instruction 1 (review P2): the next user row can itself start with a
+ * number (`❯ 1. README を確認して…`). Read by its shape alone it looks like a
+ * dialog's cursor row (`❯ 1. Yes`) and was skipped, so the earlier turn's
+ * decline held the new turn's ordinary permission. What tells the two apart is
+ * the context: a user row is followed by the agent's response (`✻ Thought`,
+ * `⠶ …`); a dialog's cursor sits in the dialog, below everything the agent drew.
+ */
+describe('[#4313] (e) a numbered user row still ends the turn', () => {
+  const declinedOn = (raw: string): boolean => isCommandCodeQuestionDeclinedThisTurn(normalizeFrame(raw, 'command-code'));
+  const rows = DECLINED_PREVIOUS_TURN.split('\n');
+  const userRow = rows.findIndex((row) => row.startsWith('❯ README'));
+  const workedRow = rows.findIndex((row) => row.startsWith('✻ Worked for'));
+  /** Previous turn declined; next user row numbered; no turn summary; then an ordinary shell dialog. */
+  const NUMBERED_USER_ROW = rows
+    .map((row, i) => (i === userRow ? '❯ 1. README を確認して、git log を見せてください。 ' : row))
+    .filter((_, i) => i !== workedRow)
+    .join('\n');
+
+  it('the frame is what it claims', () => {
+    expect(userRow).toBeGreaterThan(0);
+    expect(workedRow).toBeGreaterThan(0);
+    expect(NUMBERED_USER_ROW).toContain('❯ 1. README を確認して');
+    expect(NUMBERED_USER_ROW).not.toContain('✻ Worked for');
+    expect(NUMBERED_USER_ROW).toContain(' └ User declined to answer questions');
+    expect(NUMBERED_USER_ROW).toContain('❯ 1. Yes');
+  });
+
+  it('the reader: the decline is in the previous turn', () => {
+    expect(declinedOn(NUMBERED_USER_ROW)).toBe(false);
+  });
+
+  it('the poller answers the ordinary permission `1`', async () => {
+    expect(await respondTo(NUMBERED_USER_ROW)).toBe('responded');
+    expect(sendPromptAnswer).toHaveBeenCalledTimes(1);
+    expect(sendPromptAnswer.mock.calls[0][0].answer).toBe('1');
+    expect(skipWarnings()).toEqual([]);
+  });
+
+  it('positive control: the decline in this turn is still held, and the dialog cursor does not end the turn', async () => {
+    expect(declinedOn(DECLINED_THIS_TURN)).toBe(true);
+    expect(await respondTo(DECLINED_THIS_TURN)).toBe('no_answer');
+    expect(sendPromptAnswer).not.toHaveBeenCalled();
+  });
+
+  it('positive control: a dialog cursor row with no agent response after it is not a user row, even without the live region', () => {
+    // The dialog's own rows, with its footer (the live region's anchor) cut:
+    // the whole frame is scanned, and `❯ 1. Yes` is the last thing drawn.
+    const noFooter = DECLINED_THIS_TURN.split('\n').filter((row) => !row.startsWith('↑/↓ navigate')).join('\n');
+    expect(normalizeFrame(noFooter, 'command-code').liveRegion.anchor).toBe('none');
+    expect(declinedOn(noFooter)).toBe(true);
+  });
+});
+
 describe('[#4313] (d) cmate wait names the reason', () => {
   it('has its own wording, not the contract’s or an unknown reason’s', () => {
     const line = formatSuppressionNotice(
