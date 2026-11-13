@@ -886,9 +886,14 @@ jobs:
       # playwright.config.ts owns the isolation: it boots its own dev server on
       # port 3177 with CM_DB_PATH/CM_ROOT_DIR pinned to a throwaway state dir, so
       # no server or DB setup is needed here.
+      # [Issue #4308] The shard comes in through env, not as `${{ matrix.shard }}` on the command
+      # line: `verify draft` (src/lib/verification/verify-draft.ts) refuses any command carrying
+      # `${{` as runner-specific before it can say the real reason, long-running E2E
+      # (tests/unit/lib/verification/verify-draft.test.ts).
       - name: Run E2E tests
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/2
+        run: npm run test:e2e -- --shard="$E2E_SHARD/2"
         env:
+          E2E_SHARD: ${{ matrix.shard }}
           CI: 'true'
           # [Issue #4308] The dev webServer that playwright boots inherits this. At 6144 it
           # ran out of heap at ~5.4GB after ~285 specs (PR #4306 x2, PR #4310 x2): about 10%

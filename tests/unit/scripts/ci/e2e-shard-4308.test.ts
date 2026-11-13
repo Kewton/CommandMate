@@ -52,7 +52,9 @@ function e2eShardProblems(workflow: { jobs: Record<string, Job> }): string[] {
 
   const steps = shardJob.steps ?? [];
   const run = steps.find((s) => s.name === 'Run E2E tests');
-  if (run?.run?.trim() !== `npm run test:e2e -- --shard=\${{ matrix.shard }}/${SHARDS}`) problems.push(`Run E2E tests runs ${JSON.stringify(run?.run)}`);
+  // The shard comes through env so the command carries no `${{` (verify-draft would call it runner-specific).
+  if (run?.run?.trim() !== `npm run test:e2e -- --shard="$E2E_SHARD/${SHARDS}"`) problems.push(`Run E2E tests runs ${JSON.stringify(run?.run)}`);
+  if (run?.env?.E2E_SHARD !== '${{ matrix.shard }}') problems.push('Run E2E tests does not take E2E_SHARD from the matrix');
   if (run?.env?.NODE_OPTIONS !== '--max-old-space-size=8192') problems.push('Run E2E tests changed the heap limit');
   if (run?.env?.CM_E2E_HEAP_PROBE_DIR !== '${{ runner.temp }}/e2e-heap') problems.push('Run E2E tests lost the heap probe dir');
   if (!steps.some((s) => s.name === 'E2E heap summary' && s.run?.includes('e2e-heap-probe.cjs summarize'))) problems.push('no per-shard heap summary');

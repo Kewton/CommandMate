@@ -231,7 +231,7 @@ const EXCLUDED: readonly {
     reason:
       'Declared gates run on every `wait --verify`; E2E adds 5m+ per worker to every parallel orchestration (verify.yaml comment). Contracts can still name an `e2e` gate when an Issue needs it.',
     // [Issue #4308] CI splits the suite into two shards, each with its own dev webServer.
-    allow: [{ pattern: /^npm run test:e2e -- --shard=\$\{\{ matrix\.shard \}\}\/2$/, why: 'the excluded check itself, as the CI shard' }],
+    allow: [{ pattern: /^npm run test:e2e -- --shard="\$E2E_SHARD\/2"$/, why: 'the excluded check itself, as the CI shard' }],
   },
   {
     match: { key: 'test-e2e › E2E heap summary' },
