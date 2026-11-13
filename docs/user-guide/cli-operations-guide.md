@@ -475,7 +475,7 @@ commandmate wait <worktree-id> --fail-on-upstream-fault  # 上流障害で compo
 
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
-| `--timeout <sec>` | 最大待機時間（秒）。コマンド開始から数える 1 つの期限で、ポールの前の取得（`--instance` の解決・capabilities、`--verify` / `--require-work` の task 一覧）とポールごとの取得（`current-output` と台帳 messages）を、本文を読み終えるまで含めて打ち切る。サーバーが応答しなくても期限で exit 124 になり、その後のポールや検証は行わない（Issue #3974 / #3983）。完了を検知した後の検証（`--verify` / `--require-work`）は含まない（検証は期限で中断されない）。`ask --timeout` も同じ期限だが、送信の POST（`--async` では relay 登録の POST も）は中断せず、返ってきた時点で期限を過ぎていれば「送信は済んでいる」と書いて exit 124（`--async` は relay ができていれば exit 0）。`--async` の relay の両端の解決は期限に含む。完了後の返答の読み（台帳・画面）も含まず、各取得は返答の猶予（15 秒）で打ち切って画面の読みへ進む | 無制限 |
+| `--timeout <sec>` | 最大待機時間（秒）。コマンド開始から数える 1 つの期限で、ポールの前の取得（`--instance` の解決・capabilities、`--verify` / `--require-work` の task 一覧）とポールごとの取得（`current-output` と台帳 messages）を、本文を読み終えるまで含めて打ち切る。サーバーが応答しなくても期限で exit 124 になり、その後のポールや検証は行わない（Issue #3974 / #3983）。完了を検知した後の検証（`--verify` / `--require-work`）は含まない（検証は期限で中断されない）。`ask --timeout` も同じ期限だが、送信の POST（`--async` では relay 登録の POST も）は中断せず、返ってきた時点で期限を過ぎていれば「送信は済んでいる」と書いて exit 124（`--async` は relay ができていれば exit 0）。`--async` の relay の両端の解決は期限に含む。完了後の返答の読み（この依頼の帰属 `GET /api/asks/:askId`）も含まず、各取得は返答の猶予（15 秒）で打ち切り、そこで決まらなければ `unmatched/grace_expired`（または `turn_incomplete`・`send_unknown`）で exit 0。画面は読まない（Issue #4344）。送信の前の `GET /api/asks/capabilities` は期限に含む | 無制限 |
 | `--on-prompt <mode>` | プロンプト検出時の動作（agent / human） | agent |
 | `--stall-timeout <sec>` | 出力変化なしのタイムアウト（秒）。`--timeout` と同じく、応答しない取得もこの期限で打ち切る（exit 124） | - |
 | `--instance <id>` | 対象インスタンスID（`<agent>` または `<agent>-<n>`）。**送り先指定はこのフラグのみ**（`--agent` は無い） | エージェントのプライマリインスタンス |
@@ -684,6 +684,8 @@ exit 0 で、本文は両方とも届いています（入力欄の問題では�
 `ask` はこの重なりを見つけると、返答と終了コードはそのままに、標準エラーへ `overlapped: …` を 1 行
 出し、`--json` に `"overlapped": true` を足します（重ならなかったときはキーごと出しません）。
 この印が付いた返答は、自分の依頼への返答とは限りません。必要なら 1 本ずつ送り直してください。
+Issue #4344 以降、返答を出すかどうかはこの依頼の帰属が決めます（共有されたターンは `ambiguous/shared_turn` で
+`"reply": null`。[`commandmate ask`](#commandmate-ask)）。この行はその横に出る警告のままです。
 見つけるのは次の 2 つです。
 
 - 送った時点で、そのインスタンスが別のターンの途中だった（後から送った側。ターンの開始を hooks で
@@ -1111,13 +1113,36 @@ commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <ta
   "cliToolId": "codex",
   "source": "history",
   "reply": "…",
+  "askId": "0b6f3c1e-…",
+  "attribution": { "state": "matched", "reason": null, "notified": false },
   "overlapped": true
 }
 ```
 
-`source` は `history`（転写）/ `pane`（画面）/ `none`。`overlapped` は重なりを見つけたときだけ付きます
-（[同じインスタンスへ重ねて `ask` しない（Issue #3955）](#commandmate-wait)）。ターンは終わったが返答を読めなかったときは、
-stderr に警告を出して exit 0 です。上流障害（exit 11）では `--json` に `upstreamFault` を出します。
+`source` は `history`（台帳が返答と結んだ）/ `none`（返答を回収しない）。`overlapped` は重なりを見つけたときだけ付きます
+（[同じインスタンスへ重ねて `ask` しない（Issue #3955）](#commandmate-wait)）。上流障害（exit 11）では `--json` に `upstreamFault` を出します。
+
+### 返答はこの依頼の ID で読む（Issue #4344）
+
+`ask` は依頼ごとに ID を作って送信に付け、ターンが終わった後は**その ID で**返答を読みます（「送信の後のいちばん新しい返答」や画面は読みません）。
+サーバーが `GET /api/asks/capabilities` で対応と答えた tool（いまは `claude` と `codex`。サーバーが観測した版が最低版以上のとき）だけが対象です。
+サーバーの台帳（`GET /api/asks/:askId`）が、transcript の入力とそれに答えた完了ターンを **この依頼だけ** で結べたとき（`attribution.state` が `matched`）に限り、
+返答を出します。それ以外は返答を回収せず、**exit 0・標準出力は空・`--json` は `"reply": null`** で、stderr に `reply not collected (<state>/<reason>): …` を 1 行出します。
+
+| `attribution.state` / `reason` | 意味 | 送信 |
+|---|---|---|
+| `matched` | 返答を出す。`notified: true` は、そのターンがバックグラウンドのタスク完了通知も受け取った（返答が通知に反応していることがある） | ID つき |
+| `unavailable` / `tool_unsupported` | ID で帰属できない tool（`copilot`・`gemini`・`vibe-local`・`opencode`・`antigravity`・`command-code`・`opencode-v2` など） | 今までどおり |
+| `unavailable` / `server_unsupported` | 古いサーバー（`/api/asks/capabilities` が 404） | 今までどおりの body で 1 回 |
+| `unavailable` / `slash_command` | `/`・`!`・`#` で始まる本文（ID を付けると文章になるため付けない） | 本文はそのまま |
+| `ambiguous` / `shared_turn`・`turn_open_at_send` | 答えたターンが別の入力も受け取った、または送信時にターンが開いていた | ID つき |
+| `unmatched` / `absorbed_mid_turn`・`turn_incomplete`・`grace_expired`・`send_unknown`・`body_truncated`・`history_missing` など | この依頼のターンと結べなかった（`grace_expired`・`turn_incomplete`・`send_unknown` は、ターンの終了後 15 秒の待ちで決まらなかったもの。台帳には書かない） | ID つき |
+
+返答を回収しなかったときは、相手の画面を `capture <id> --instance <id> --pane` で見てください（`ask` は画面を返答として読みません）。
+待機の失敗（exit 10・11・21・124）は今までどおりで、台帳は読みません。`--async` は ID を付けず、今までどおりです。
+
+ID を付けた依頼は必ず複数行になるため、`claude` のペインには `[Pasted text …]` と `[cmate-ask v1 <id>]` の 1 行が見えます（設計 §7 (b) の決定。意味は変わりません）。
+チャット画面の履歴には ID の行は出ません。
 
 ### 終了コード
 
@@ -1125,7 +1150,7 @@ stderr に警告を出して exit 0 です。上流障害（exit 11）では `--
 
 | コード | 意味 | 次のアクション |
 |:------:|------|---------------|
-| 0 | ターンが終わった（`--async` は relay を登録できた）。stdout が返答 | — |
+| 0 | ターンが終わった（`--async` は relay を登録できた）。stdout が返答（回収しなかったときは空。上の「返答はこの依頼の ID で読む」） | `reply` が `null` なら stderr の理由を読む |
 | 1 | サーバー未起動など（DEPENDENCY_ERROR） | `commandmate start --daemon` |
 | 2 | 引数エラー、alias の曖昧、**relay の拒否**（理由は stderr。CONFIG_ERROR と同じ番号）、相手が確認待ちで本文を送れなかった | stderr を読む。再送しない |
 | 10 | 相手が確認待ち。stdout にプロンプトの JSON | 報告する。`respond` で代わりに答えない |

@@ -39,6 +39,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { restoreFetch } from '../../../helpers/mock-api';
 
+import { installAskLedger } from './ask-ledger-fake-4344';
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -146,6 +147,19 @@ function mockRoutes(routes: Routes): void {
     if (url.includes('/capture')) return Promise.resolve(json({ output: routes.pane ?? '' }));
     return Promise.resolve(json(completedFrame(routes.cliToolId)));
   }) as unknown as typeof fetch;
+  // Issue #4344: a PR2 server's ask routes. Its reader (modelled by the fake's
+  // default) matches the ask with the newest `<tool>-turn:` row once one lands;
+  // a scrape (no request id) is never matched. copilot / gemini / opencode are
+  // not attributed.
+  installAskLedger();
+}
+
+/** Issue #4344: the pane is never read for a reply, and the reason is in `attribution`. */
+function expectNotCollected(reason = 'tool_unsupported'): void {
+  expect(payload().source).toBe('none');
+  expect(payload().reply).toBeNull();
+  expect((payload() as unknown as { attribution: { reason: string } }).attribution.reason).toBe(reason);
+  expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes('/capture'))).toBe(false);
 }
 
 async function runAsk(argv: string[], advanceMs = 0): Promise<void> {
@@ -297,8 +311,10 @@ describe('ask: the reply carries no control characters (Issue #2386)', () => {
 
     await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
 
-    expect(payload().source).toBe('pane');
-    expect(payload().reply).toBe('copilot said this');
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): copilot has no ask attribution, so the pane is not read at all —
+    // there is no fallback left to strip. Still no escape in the payload.
+    expectNotCollected();
     expect(JSON.stringify(payload())).not.toContain(ESC);
   });
 });
@@ -325,7 +341,9 @@ describe("ask: CommandMate's own rows are not the agent's answer (Issue #2386)",
     await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
 
     expect(payload().reply ?? '').not.toContain('[from codex / wt2]');
-    expect(payload().source).toBe('pane');
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): no pane fallback for copilot (unavailable/tool_unsupported).
+    expectNotCollected();
   });
 
   it('steps over a model-change row, on a tool with no transcript reader', async () => {
@@ -346,8 +364,11 @@ describe("ask: CommandMate's own rows are not the agent's answer (Issue #2386)",
 
     await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
 
-    expect(payload().reply).toBe('copilot said this');
-    expect(payload().source).toBe('pane');
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): the model-change row is still not the answer, and the pane is no
+    // longer read for copilot either (unavailable/tool_unsupported).
+    expect(payload().reply ?? '').not.toContain('モデルを');
+    expectNotCollected();
   });
 });
 
@@ -369,8 +390,10 @@ describe('ask: the tools that keep no transcript are unchanged (Issue #2386)', (
 
     await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
 
-    expect(payload().source).toBe('history');
-    expect(payload().reply).toBe('copilot answered in the ledger');
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): a scraped row is not tied to this ask, so copilot's reply is not
+    // collected. Still no grace spent (real timers) and no pane read.
+    expectNotCollected();
   });
 
   it('answers from gemini\'s scraped ledger row as well', async () => {
@@ -387,8 +410,8 @@ describe('ask: the tools that keep no transcript are unchanged (Issue #2386)', (
 
     await runAsk(['wt1', 'hi', '--instance', 'gemini', '--json']);
 
-    expect(payload().source).toBe('history');
-    expect(payload().reply).toBe('gemini answered in the ledger');
+    // Expected value changed by the human decision of Issue #4344 (design §7, §0.2).
+    expectNotCollected();
   });
 });
 
@@ -432,6 +455,10 @@ describe('ask: the claude path is unchanged (Issue #2386)', () => {
 
     await runAsk(['wt1', '1+1 は？', '--instance', 'opencode']);
 
-    expect(mockConsoleLog).toHaveBeenCalledWith('2');
+    // Expected value changed by the human decision of Issue #4344 (design §0.1,
+    // §7): opencode's reader is not attributed yet (a later Issue, one tool at a
+    // time), so its `oc-turn:` row is not printed as this ask's reply.
+    expect(mockConsoleLog).not.toHaveBeenCalled();
+    expect(mockConsoleError.mock.calls.flat().join('\n')).toContain('reply not collected (unavailable/tool_unsupported)');
   });
 });

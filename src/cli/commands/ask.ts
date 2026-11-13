@@ -21,13 +21,21 @@
  * they said" — and the two guarantees the brief in the GUI promises: `--auto-yes`
  * is not offered, and a prompt is reported rather than answered.
  *
- * ## Where the reply comes from
+ * ## Where the reply comes from (Issue #4344)
  *
- * The chat ledger first (`chat_messages`, what the transcript readers and the
- * structured-history gate write), because that is the agent's reply as text —
- * no box drawing, no composer, no spinner frames. A tool that has no transcript
- * reader falls back to the squeezed pane, and `--json` says which of the two
- * answered in `source` so a caller can tell a real reply from a screen scrape.
+ * The ask's own id, never "the newest reply". Before the send `ask` reads the
+ * server's attribution table (`GET /api/asks/capabilities`); on a tool it marks
+ * true the send names a fresh id, the server stamps an envelope on the typed
+ * text, and after the turn `ask` reads that id's attribution
+ * (`GET /api/asks/:askId`). The reply is printed only when it is `matched` —
+ * the transcript tied this input to the completed turn that answered it alone.
+ * Every other outcome prints `reply: null` with the state and the reason, and
+ * exits 0: a tool the table marks false (`tool_unsupported`), a server with no
+ * table (`server_unsupported`, sent with the old body), a command body
+ * (`slash_command`), a shared or unfinished turn. The pane is never read for a
+ * reply (the human decision of 2026-11-13, design
+ * `docs/design/ask-attribution-4344.md` §0.2・§7): the screen picked another
+ * turn's answer twice (#4315). `--json`'s `source` is `history` or `none`.
  */
 
 import { Command } from 'commander';
@@ -36,16 +44,22 @@ import { ApiClient, isDeadlineExceeded, isValidWorktreeId } from '../utils/api-c
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import type { ChatMessage, PromptMessageResponse } from '../types/api-responses';
 import {
-  TRANSCRIPT_READER_TOOLS,
   fetchPromptRowsSince,
   fetchRecentMessages,
   hasForeignPromptInWindow,
   mayHaveDroppedRowsSince,
   ownPromptInstance,
-  pickLatestReply,
-  replyCandidates,
-  sanitizeReply,
 } from '../utils/reply-ledger';
+import {
+  ASK_PROTOCOL_VERSION,
+  NOTIFIED_NOTE,
+  formatReplyNotCollected,
+  outcomeFromSendAnswer,
+  planAskSend,
+  readAskOutcome,
+  type AskOutcome,
+  type AskSendPlan,
+} from '../utils/ask-reply';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import {
@@ -55,7 +69,6 @@ import {
 } from './instances';
 import { resolveCommandTarget } from './command-target';
 import { pollWorktree } from './wait';
-import { readSqueezedPaneTail } from './capture';
 import {
   ALLOW_RELAY_CHAIN_DESCRIPTION,
   REPLY_TO_OPTION_DESCRIPTION,
@@ -66,27 +79,19 @@ import { postMessage, registerRelayForMessage } from './message-dispatch';
 /** Default `--timeout`, in seconds. Matches the GUI's delegation brief. */
 const DEFAULT_ASK_TIMEOUT_SECONDS = 1800;
 
-/** Squeezed pane lines kept for the fallback reply. */
-const PANE_FALLBACK_TAIL = 80;
-
 /**
- * How long `ask` will hold out for the turn row after the turn ends.
+ * How long `ask` holds out for its own attribution after the turn ends.
  *
- * Issue #2386 measured the gap on codex 0.153.4 at 5.2 s: the scraper writes the
- * idle composer into the ledger in the millisecond BEFORE the send, and the
- * rollout reader writes the real answer five seconds after `wait` has already
- * said `basis=hook_stop`. Reading once at that instant is how the junk got
- * printed as the answer, three times out of three.
+ * Issue #2386 measured the gap between `wait`'s `basis=hook_stop` and the
+ * transcript reader's row on codex 0.153.4 at 5.2 s; this is three times that.
+ * Spent only while the ledger still says `pending` — a settled ask returns on the
+ * first read, and each `pending` read runs the tool's reader once on the server
+ * (design §3.5), so it settles here with no poller.
  *
- * Three times the measured gap, and spent only when the ledger has nothing
- * marked yet — a session that already answered returns on the first read. When
- * it does elapse the existing pane fallback takes over, so the cost of guessing
- * this too low is a screen scrape, never a lost turn.
- *
- * Issue #3983: also the bound of each read after the turn ended (the ledger,
- * the overlap pages, the pane). Those are outside `--timeout` — the turn has
- * already completed in time — so a read that does not answer within the grace
- * moves on to the next fallback rather than ending the ask with 124.
+ * Issue #3983: also the bound of each read after the turn ended (the ledger and
+ * the overlap pages). Those are outside `--timeout` — the turn has already
+ * completed in time — so running out is `unmatched/grace_expired` (Issue #4344,
+ * design §3.6 cell 17), never 124, and is written nowhere.
  */
 const REPLY_TURN_ROW_GRACE_MS = 15_000;
 
@@ -98,8 +103,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Where the printed reply came from. Reported in `--json`. */
-type ReplySource = 'history' | 'pane' | 'none';
+/**
+ * Where the printed reply came from. Reported in `--json`. Issue #4344: `pane`
+ * is no longer produced — a reply is the ledger's (`history`) or none.
+ */
+type ReplySource = 'history' | 'none';
 
 /**
  * Why this ask's turn may have answered somebody else as well (Issue #3955).
@@ -149,96 +157,23 @@ function parseTimeout(raw: string | undefined): number {
 }
 
 /**
- * The newest assistant message this instance wrote after `since`, or null.
- *
- * `since` is captured before the send, so a reply from the PREVIOUS turn cannot
- * be mistaken for this one — the failure a bare `capture` after a `wait` has
- * always had. Prompt rows are excluded: a prompt is reported through the exit
- * code and the JSON payload, and printing its question as if it were an answer
- * is what would teach a caller to answer it.
- *
- * ## Why a timestamp is not enough (Issue #2386)
- *
- * `since` fences off the previous turn; it does nothing about a row written
- * INSIDE this one that is not a reply. codex's screen scraper writes the idle
- * composer into the ledger as an assistant row one millisecond before the send
- * lands — measured 3/3 on codex 0.153.4 — so at the moment `wait` says
- * `basis=hook_stop` the newest row after `since` is a scrape of an empty input
- * box, in raw ANSI, and the rollout reader's real answer is still five seconds
- * away. `ask` printed the box.
- *
- * The separator is the row's own `request_id`, which is why #2386 put it on the
- * wire: a reply a transcript reader wrote is keyed `<tool>-turn:<id>`, a scrape
- * is keyed nothing at all. For a tool that HAS such a reader the marker is
- * therefore required, and this waits {@link REPLY_TURN_ROW_GRACE_MS} for one
- * rather than answering with whatever the screen happened to hold. For a tool
- * that has none — copilot / gemini / vibe-local — the scraper's row is the only
- * record there will ever be, so it is taken as it always was, with no wait.
- *
- * Never throws. A daemon that cannot serve the ledger is a reason to fall back
- * to the pane, not a reason to lose a turn that already completed.
- *
- * @param client - API client
- * @param worktreeId - Worktree ID
- * @param instanceId - Resolved instance ID
- * @param since - Epoch ms taken immediately before the send
- * @param cliToolId - Resolved CLI tool, when one is known
+ * The ledger rows the overlap check reads (Issue #3955), bounded by the reply
+ * grace. Issue #4344: the reply no longer comes from these rows, so they are
+ * read for the check alone; a read that runs out of the grace is "no rows" and
+ * the check then says nothing, like an unreadable ledger.
  */
-async function readLatestReply(
+async function readOverlapRows(
   client: ApiClient,
   worktreeId: string,
   instanceId: string | undefined,
-  since: number,
-  cliToolId: string | undefined,
-): Promise<{ content: string | null; messages: PromptMessageResponse[] | null }> {
-  const requireTurnRow = cliToolId !== undefined && TRANSCRIPT_READER_TOOLS.has(cliToolId);
-  const deadline = Date.now() + (requireTurnRow ? REPLY_TURN_ROW_GRACE_MS : 0);
-  // Issue #3983: every read is bounded by the grace, with or without a turn row
-  // to wait for; one that runs out falls back to the pane like an empty ledger.
+): Promise<PromptMessageResponse[] | null> {
   const graceClient = client.withDeadline(Date.now() + REPLY_TURN_ROW_GRACE_MS);
-
-  for (;;) {
-    let messages: PromptMessageResponse[] | null;
-    try {
-      messages = await fetchRecentMessages(graceClient, worktreeId, instanceId);
-    } catch (error) {
-      if (!isDeadlineExceeded(error)) throw error;
-      return { content: null, messages: null };
-    }
-    // The rules are `reply`'s too (Issue #3039). A tool with no transcript
-    // takes the newest row after the send, marker or not, with no wait.
-    const reply = pickLatestReply(replyCandidates(messages ?? [], since), requireTurnRow);
-    // The rows go back with the answer so the overlap check (Issue #3955)
-    // reads the same ledger the reply came from, with no request of its own.
-    if (reply) return { content: reply.content, messages };
-    if (!requireTurnRow || Date.now() >= deadline) return { content: null, messages };
-    await sleep(REPLY_TURN_ROW_POLL_MS);
+  try {
+    return await fetchRecentMessages(graceClient, worktreeId, instanceId);
+  } catch (error) {
+    if (isDeadlineExceeded(error)) return null;
+    throw error;
   }
-}
-
-/**
- * The squeezed tail of the pane, for a tool that keeps no transcript.
- *
- * copilot / gemini / vibe-local publish no chat rows, so the screen is the only
- * record of what they said. Through `capture`'s own reader — the same route,
- * the same squeeze, the same client-side placement — so nothing that consumes
- * `/capture` sees a different payload because this command exists.
- *
- * @param client - API client
- * @param worktreeId - Worktree ID
- * @param cliToolId - Resolved CLI tool
- * @param instanceId - Resolved instance ID
- */
-async function readPaneTail(
-  client: ApiClient,
-  worktreeId: string,
-  cliToolId: string,
-  instanceId: string | undefined,
-): Promise<string | null> {
-  // Issue #3983: bounded like the ledger reads; a pane that does not answer is
-  // "no readable pane" (readSqueezedPaneTail never throws).
-  const graceClient = client.withDeadline(Date.now() + REPLY_TURN_ROW_GRACE_MS);
-  return readSqueezedPaneTail(graceClient, worktreeId, cliToolId, instanceId, PANE_FALLBACK_TAIL);
 }
 
 /** Argument checks. A mocked `process.exit` returns, so nothing here stops early. */
@@ -317,29 +252,6 @@ function reportWaitFailure(
     }, null, 2));
   }
   process.exit(result.exitCode);
-}
-
-/** Reads the reply from the transcript, falling back to the pane. */
-async function readAskReply(
-  client: ApiClient,
-  worktreeId: string,
-  instanceId: string | undefined,
-  askedAt: number,
-  agent: string | undefined,
-): Promise<{ source: ReplySource; reply: string | null; messages: PromptMessageResponse[] | null }> {
-  let source: ReplySource = 'history';
-  const latest = await readLatestReply(client, worktreeId, instanceId, askedAt, agent);
-  let reply = latest.content;
-  if (reply === null && agent) {
-    source = 'pane';
-    const pane = await readPaneTail(client, worktreeId, agent, instanceId);
-    const cleaned = pane === null ? '' : sanitizeReply(pane);
-    reply = cleaned === '' ? null : cleaned;
-  }
-  if (reply === null) {
-    source = 'none';
-  }
-  return { source, reply, messages: latest.messages };
 }
 
 /**
@@ -483,37 +395,42 @@ function formatOverlapWarning(reason: OverlapReason, target: string): string {
   return `overlapped: ${what} rather than this ask's (send one ask at a time per instance)`;
 }
 
-/** Prints the reply (or its JSON, or the no-reply warning). */
+/**
+ * Prints the reply (or its JSON), and the one stderr line when it was not
+ * collected (Issue #4344, design §0.2).
+ */
 function printAskReply(
   worktreeId: string,
   instanceId: string | undefined,
   agent: string | undefined,
-  source: ReplySource,
-  reply: string | null,
+  outcome: AskOutcome,
   options: AskOptions,
   overlapped: boolean,
 ): void {
+  const source: ReplySource = outcome.state === 'matched' ? 'history' : 'none';
+  if (outcome.state !== 'matched') {
+    // Not an error exit: the turn DID end, and saying so on stderr keeps
+    // stdout empty rather than filling it with an apology a caller would
+    // paste into a report as the agent's answer.
+    console.error(formatReplyNotCollected(outcome, { worktreeId, instanceId, cliToolId: agent }));
+  } else if (outcome.notified) {
+    console.error(NOTIFIED_NOTE);
+  }
   if (options.json) {
-    // `overlapped` only when it is true (Issue #3955): an ask that did not
-    // overlap prints exactly the payload it always did.
+    // `overlapped` only when it is true (Issue #3955). Issue #4344: `askId` and
+    // `attribution` say whose reply this is, or why there is none.
     console.log(JSON.stringify({
       worktreeId,
       instanceId: instanceId ?? null,
       cliToolId: agent ?? null,
       source,
-      reply,
+      reply: outcome.reply,
+      askId: outcome.askId,
+      attribution: { state: outcome.state, reason: outcome.reason, notified: outcome.notified },
       ...(overlapped ? { overlapped: true } : {}),
     }, null, 2));
-  } else if (reply === null) {
-    // Not an error exit: the turn DID end, and saying so on stderr keeps
-    // stdout empty rather than filling it with an apology a caller would
-    // paste into a report as the agent's answer.
-    console.error(
-      'Warning: the turn completed but no reply could be read '
-      + '(no transcript row and no readable pane).'
-    );
-  } else {
-    console.log(reply);
+  } else if (outcome.reply !== null) {
+    console.log(outcome.reply);
   }
 }
 
@@ -532,7 +449,7 @@ export function createAskCommand(): Command {
       '--timeout <seconds>',
       `Maximum time to wait for the reply (default ${DEFAULT_ASK_TIMEOUT_SECONDS})`
     )
-    .option('--json', 'Print the reply as JSON with the target and the reply source')
+    .option('--json', 'Print the reply as JSON with the target, the reply source, the ask id and its attribution')
     .option(
       '--async',
       'Do not wait: register a relay, print its id and exit 0. The reply is '
@@ -548,8 +465,31 @@ its answer into your composer prefixed with \`[from <alias> / <worktree>]\`. Use
 \`commandmate relays\` to see what is outstanding and \`relays cancel <id>\` to
 withdraw one. --reply-to / --allow-relay-chain are only meaningful with it.
 
+Whose reply (Issue #4344). The reply is read by this ask's own id, never as
+"the newest reply" and never off the screen. The send carries an id on the
+tools the server attributes (GET /api/asks/capabilities: claude and codex at
+the versions it names); after the turn the server's ledger says whether the
+transcript tied that input to the turn that answered it alone. Only then
+(attribution.state "matched") is the reply printed. Otherwise stdout is empty,
+--json has "reply": null with "attribution": {state, reason, notified}, one
+"reply not collected (<state>/<reason>)" line goes to stderr, and the exit
+code is still 0 — the turn ended:
+  unavailable/tool_unsupported    the tool has no ask attribution (copilot,
+                                  gemini, vibe-local, opencode, ...); sent as before
+  unavailable/server_unsupported  the server predates it (404); sent with the old body
+  unavailable/slash_command       a body starting with /, ! or # carries no id
+  ambiguous/shared_turn, ambiguous/turn_open_at_send
+                                  the turn that answered also took another input
+  unmatched/<reason>              the turn could not be tied to this ask (e.g.
+                                  absorbed_mid_turn, turn_incomplete, grace_expired)
+The reply may still be on the other session's screen: look with
+\`capture <id> --instance <id> --pane\`. "notified": true on a matched reply means
+the turn also took a background-task notification the reply may react to.
+With an id, the claude pane shows the message as a paste with a
+[cmate-ask v1 <id>] line in front of it; that is expected.
+
 Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
-  0    the turn ended; stdout is the reply body
+  0    the turn ended; stdout is the reply body (empty when not collected, above)
   10   the other session is waiting on a prompt. stdout carries the prompt JSON
        (same shape as \`wait --on-prompt agent\`). Report it; do NOT answer it
        with \`respond\` on the other session's behalf — the number that resolves
@@ -565,8 +505,8 @@ Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
 Send one ask at a time to an instance (Issue #3955). A message sent while the
 instance is mid-turn can be folded into that turn (codex does), and the two
 asks then get one reply between them. When ask sees that, it still exits 0
-with the reply but prints \`overlapped: ...\` on stderr and --json adds
-"overlapped": true — the reply may answer the other message.
+but prints \`overlapped: ...\` on stderr and --json adds "overlapped": true.
+Whether a reply is printed is still the ledger's attribution alone.
 --async relays (and send --reply-to) take only a turn that ended after the
 message went in, and note a proven overlap on the delivered reply's second line
 (\`[CommandMate relay] ... (overlap=later)\`); see \`relays --id <relay-id>\`.
@@ -608,6 +548,14 @@ a decision about that session's guard rails, not part of asking it a question.
         );
         const { agent, instanceId } = commandTarget;
 
+        // Issue #4344: whether this server attributes the reply, read before the
+        // send because the body depends on it. Bounded by `--timeout` like the
+        // resolution (exit 124, nothing sent). Not for `--async`: a relay carries
+        // its own reply (design §0.2), and its send is as it always was.
+        const askPlan: AskSendPlan | null = options.async
+          ? null
+          : await planAskSend(client.withDeadline(deadlineAt), agent);
+
         // Taken BEFORE the send so a reply written by the previous turn cannot
         // be read as this one's. Milliseconds, compared against the row's own
         // timestamp rather than against a re-derived clock.
@@ -634,6 +582,9 @@ a decision about that session's guard rails, not part of asking it a question.
         const sendBody: Record<string, unknown> = { content: message };
         if (agent) sendBody.cliToolId = agent;
         if (instanceId) sendBody.instanceId = instanceId;
+        // Issue #4344: only on a send the server attributes; any other send is
+        // byte for byte the body it was before.
+        if (askPlan?.kind === 'ask') sendBody.ask = { id: askPlan.askId, protocol: ASK_PROTOCOL_VERSION };
 
         // The other session may be sitting on a dialog (Issue #1708): the
         // message would be typed into the dialog's input line instead of
@@ -708,11 +659,29 @@ a decision about that session's guard rails, not part of asking it a question.
         // Taken before the reply grace: a message sent after the turn ended
         // went to the next turn, and is not an overlap with this one.
         const turnEndedAt = Date.now();
-        const { source, reply, messages } = await readAskReply(client, worktreeId, instanceId, askedAt, agent);
+
+        // Issue #4344: the reply is this ask's attribution, read by its id. A
+        // send that was not attributed reads nothing — not the ledger's newest
+        // row, not the pane (design §0.2).
+        const decided: AskOutcome | null = askPlan === null || askPlan.kind === 'unavailable'
+          ? askPlan?.outcome ?? null
+          : outcomeFromSendAnswer(sent?.ask);
+        if (decided !== null || askPlan?.kind !== 'ask') {
+          if (decided !== null) printAskReply(worktreeId, instanceId, agent, decided, options, false);
+          process.exit(ExitCode.SUCCESS);
+          return;
+        }
+        const outcome = await readAskOutcome(client, askPlan.askId, {
+          graceMs: REPLY_TURN_ROW_GRACE_MS,
+          pollMs: REPLY_TURN_ROW_POLL_MS,
+          sleep,
+        });
 
         // Reported, not acted on (Issue #3955): the exit code and the reply
         // stay as they are; the line says the reply may not be this ask's.
+        // Issue #4344: the attribution is the ledger's; this stays a warning.
         const until = overlapWindowEnd(askedAt, turnEndedAt, turn.closedAt ?? record.closedAt);
+        const messages = await readOverlapRows(client, worktreeId, instanceId);
         const ledger = await readOverlapLedger(client, worktreeId, instanceId, message, askedAt, until, messages);
         const overlap = detectOverlap({
           message,
@@ -731,7 +700,7 @@ a decision about that session's guard rails, not part of asking it a question.
           console.error(formatOverlapWarning(overlap, instanceId ?? ledger.instanceId ?? agent ?? worktreeId));
         }
 
-        printAskReply(worktreeId, instanceId, agent, source, reply, options, overlap !== null);
+        printAskReply(worktreeId, instanceId, agent, outcome, options, overlap !== null);
         process.exit(ExitCode.SUCCESS);
       } catch (error) {
         handleCommandError(error);
