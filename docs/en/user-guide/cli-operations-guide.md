@@ -813,7 +813,7 @@ different server), it prints a warning on stderr and adds `"serverMismatch": tru
 |:----:|---------|
 | 0 | Answered |
 | 3 | **NOT_IN_SESSION**: not inside an agent session started by CommandMate (the reason is on stderr). The number is the same as `ExitCode.START_FAILED`, but it has nothing to do with a server failing to start |
-| 1 / 2 / 99 | Server not running / bad argument / unexpected error (see [Exit Codes](#exit-codes)) |
+| 1 / 2 / 99 | Server not running / bad argument / unexpected error (see [Exit Codes](#exit-codes)). whoami resolves the identity from the environment variables or the tmux session name and discards any failed server call (the `-<n>` disambiguation and the alias lookup), so a stopped server alone does not produce 1 — it still answers with 0 and `alias` shows `-` |
 
 ---
 
