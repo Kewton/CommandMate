@@ -850,6 +850,12 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
   const MAX_LATE_MS = 100;
   /** Mutation knob for the judge's own check (G10c): every sample fires this many ms after its schedule. */
   const SKEW_MS = Number(process.env.G10_SAMPLE_SKEW_MS ?? 0);
+  /**
+   * Mutation knob for (d)'s observer (#4317 d, a control only; unset: off): `1` takes the dialog's
+   * node out of the DOM for one task 100ms after the push and puts the same node back, so the
+   * MutationObserver sees a notification with 0 dialogs. Never set by default.
+   */
+  const D_DROP_DIALOG = process.env.G10_D_DROP_DIALOG === '1';
 
   type Sample = { at: number; elapsed: number; dialogs: number; path: string };
   type Summary = {
@@ -1052,7 +1058,9 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
    *
    * Counted two ways from before the push: a MutationObserver (every notification's DOM; it says
    * nothing of a removal and a re-add inside one batch of records) and the 50ms samples of (a)(b)(c)
-   * judged by their measured `elapsed` (late samples: indeterminate, a failure). Asserted: one
+   * judged by their measured `elapsed`. The observer is the judgement; the samples are auxiliary:
+   * judged as (a)(b)(c) when on time, and when late (indeterminate: a slow runner) only recorded as
+   * undecidable in the annotations, the observer's checks deciding the run (#4317 d). Asserted: one
    * dialog at the start, no notification with 0 and none with 2, one at the end, the same DOM node
    * of the dialog all along (one opening: one token); then A's page is back, the foreign notice
    * gone, the unit sent again from it — and the push made no create, send, decide, cancel, end nor
@@ -1105,7 +1113,7 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
 
     holding = true;
     const run = await page.evaluate(
-      async ({ to, every, until, skew }) => {
+      async ({ to, every, until, skew, drop }) => {
         const router = (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router;
         const selector = '[data-testid="handoff-dialog"]';
         const dialogs = () => document.querySelectorAll(selector);
@@ -1133,6 +1141,17 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
         try {
           observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
           router.push(to);
+          if (drop) {
+            // The control's knob (off by default): the same node out for one task, then back.
+            setTimeout(() => {
+              const node = document.querySelector(selector);
+              const parent = node?.parentNode;
+              if (!node || !parent) return;
+              const next = node.nextSibling;
+              parent.removeChild(node);
+              setTimeout(() => parent.insertBefore(node, next && next.parentNode === parent ? next : null), 0);
+            }, 100);
+          }
           await new Promise<void>((resolve) => {
             for (let ms = every; ms <= until; ms += every) {
               setTimeout(() => {
@@ -1154,7 +1173,7 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
         }
         return { start, notes, notifications, sameNode, loadingSeen, samples, pending, final, finalSame };
       },
-      { to: `/worktrees/${WT}`, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS, skew: SKEW_MS },
+      { to: `/worktrees/${WT}`, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS, skew: SKEW_MS, drop: D_DROP_DIALOG },
     );
     holding = false;
     const summary = summarize(run.samples);
@@ -1175,9 +1194,21 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
     expect(Math.max(...run.notes)).toBeLessThanOrEqual(1);
     expect(run.final).toBe(1);
     expect(run.sameNode && run.finalSame, 'the dialog’s DOM node changed within one opening').toBe(true);
-    // The samples, judged as (a)(b)(c) (late samples: indeterminate), and none at 0 from the start.
-    expectStays(summary);
-    expect(summary.samples.filter((sample) => sample.dialogs === 0)).toEqual([]);
+    // The samples are the auxiliary (#4317 d, PM's decision): the observer above is the judgement.
+    // A run whose samples fired late (a slow runner) cannot judge by them: the sample checks are
+    // recorded as undecidable and the observer's verdict stands. On time, they are judged as
+    // (a)(b)(c), and none at 0 from the start.
+    if (summary.indeterminate) {
+      const undecidable =
+        `undecidable (not asserted): a sample fired ${summary.maxLate}ms after its schedule (limit ${MAX_LATE_MS}ms); ` +
+        `expectStays and "no sample at 0" not judged, the MutationObserver's checks above decided this run ` +
+        `(samples at 0: ${summary.samples.filter((sample) => sample.dialogs === 0).length})`;
+      test.info().annotations.push({ type: 'G10 (d) samples', description: undecidable });
+      console.log(`[G10 (d) samples] ${undecidable}`);
+    } else {
+      expectStays(summary);
+      expect(summary.samples.filter((sample) => sample.dialogs === 0)).toEqual([]);
+    }
 
     // A's page is back: its own dialog (not foreign), the unit there to send again.
     await expect(page).toHaveURL(new RegExp(`/worktrees/${WT}(?:$|[?#])`));
