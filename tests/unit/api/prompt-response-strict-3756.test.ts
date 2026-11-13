@@ -58,6 +58,11 @@ vi.mock('@/lib/cli-tools/session-ownership', async (importOriginal) => ({
   checkSessionOwnership: vi.fn().mockResolvedValue({ verdict: 'owned' }),
 }));
 
+// Issue #4303: the agent holds the pane; a strict answer is refused before its first read otherwise.
+vi.mock('@/lib/tmux/tmux', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux')>()),
+  readPaneForeground: vi.fn(async () => 'other' as const),
+}));
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
   // Issue #3788: agy in front unless a test says otherwise.

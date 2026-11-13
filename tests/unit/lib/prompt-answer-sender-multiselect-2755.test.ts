@@ -349,7 +349,7 @@ describe('[#2755] the arm is entered only for what it was measured on', () => {
     });
 
     expect(sendKeys).toHaveBeenCalledTimes(1);
-    expect(sendKeys).toHaveBeenCalledWith(SESSION, '2', false);
+    expect(sendKeys).toHaveBeenCalledWith(SESSION, '2', false, { literal: true });
     expect(sendSpecialKeys).not.toHaveBeenCalled();
     expect(capturePane).not.toHaveBeenCalled();
   });

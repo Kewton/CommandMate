@@ -1022,7 +1022,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     const data = await response.json();
 
     expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalledWith('claude-test-wt', 'yes', false);
+    expect(sendKeys).toHaveBeenCalledWith('claude-test-wt', 'yes', false, { literal: true });
   });
 
   it('selects the default option with useDefault', async () => {

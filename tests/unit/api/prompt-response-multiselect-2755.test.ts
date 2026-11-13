@@ -348,7 +348,7 @@ describe('[#2755] the pre-existing answer shapes are untouched', () => {
     expect(status).toBe(200);
     expect(data.success).toBe(true);
     const keys = await keystrokes();
-    expect(keys.text).toEqual([[SESSION, '2', false]]);
+    expect(keys.text).toEqual([[SESSION, '2', false, { literal: true }]]);
     expect(keys.special).toEqual([]);
   });
 });

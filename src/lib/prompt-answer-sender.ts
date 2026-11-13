@@ -6,8 +6,16 @@
  * the promptType/defaultOptionNumber fallback introduced in Bug1).
  */
 
-import { capturePane, sendKeys, sendSpecialKeys, type KeyDeliveryState } from './tmux/tmux';
+import {
+  capturePane,
+  readPaneForeground,
+  sendKeys,
+  sendSpecialKeys,
+  type KeyDeliveryState,
+  type PaneForeground,
+} from './tmux/tmux';
 import type { CLIToolType } from './cli-tools/types';
+import { AGENT_NOT_IN_FOREGROUND_CODE } from '@/lib/session/send-attempt-types';
 import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { DialogAnswerMode, DialogVerdict } from '@/lib/detection/tools/types';
@@ -665,6 +673,71 @@ async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promis
 }
 
 /**
+ * Who holds the pane's terminal, as an answer reads it right before its first
+ * key (Issue #4303): PR1's `readPaneForeground` (#4300). Never throws.
+ *
+ * `readPaneForeground` itself never throws (every tmux / `ps` failure is its
+ * `unknown`). A reader that throws all the same is not a reading of the pane —
+ * in practice a test double of the tmux module that predates the reader — and
+ * is answered `null` ("no reader"), which goes on as before, as #4300's send
+ * check does (`assertAgentInForeground`). `unknown` is refused.
+ */
+export async function readAnswerTargetForeground(sessionName: string): Promise<PaneForeground | null> {
+  try {
+    return await readPaneForeground(sessionName);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * An answer refused before its first key because the agent is not known to
+ * hold the pane (Issue #4303): its own shell is in the foreground (`shell`,
+ * the agent exited and a digit or `y` typed now would run as a shell command),
+ * or the foreground could not be read (`unknown`). Stricter than a message
+ * send (#4300 goes on at `unknown`): an answer is a bare key or a word with an
+ * Enter, so a wrong guess costs a shell command, while a refusal costs one
+ * retry.
+ *
+ * A {@link PromptAnswerNotDeliveredError} — same name, same `reason`
+ * (`answer_not_delivered`), `keysSent: false` — so every caller already takes
+ * it as "nothing typed, free to send again": `/respond` 409, `/prompt-response`
+ * a 200 refusal, Auto-Yes `no_answer` with the ledger's `no-keys-sent`. Its
+ * `skip` is `recheck-failed` (the pane, read again under the input lock, did
+ * not allow typing); `foreground` and `code` say why.
+ */
+export class PromptAnswerAgentNotInForegroundError extends PromptAnswerNotDeliveredError {
+  readonly code = AGENT_NOT_IN_FOREGROUND_CODE;
+
+  constructor(readonly foreground: Exclude<PaneForeground, 'other'>, sessionName: string) {
+    super('recheck-failed', sessionName);
+    this.message =
+      foreground === 'shell'
+        ? `The answer was not sent to ${sessionName}: the agent is not running — the pane is back at its shell ` +
+          '(agent-not-in-foreground, Issue #4303). Nothing was typed.'
+        : `The answer was not sent to ${sessionName}: who holds the pane could not be read ` +
+          '(agent-not-in-foreground, Issue #4303). Nothing was typed; send it again.';
+    // Kept: Auto-Yes and the routes tell a not-delivered answer by this name.
+    this.name = 'PromptAnswerNotDeliveredError';
+  }
+}
+
+/**
+ * Refuse an answer before its first key unless the agent holds the pane
+ * (Issue #4303): `readPaneForeground` must answer `other` (a reader that
+ * threw is no reading: see {@link readAnswerTargetForeground}). Every answer path
+ * — `respond`, `/prompt-response` (its plan review too), the strict respond
+ * and Auto-Yes — asks this right before its first key.
+ *
+ * @throws {PromptAnswerAgentNotInForegroundError} on `shell` or `unknown`
+ */
+export async function assertAnswerTargetInForeground(sessionName: string): Promise<void> {
+  const foreground = await readAnswerTargetForeground(sessionName);
+  if (foreground === 'other' || foreground === null) return;
+  throw new PromptAnswerAgentNotInForegroundError(foreground, sessionName);
+}
+
+/**
  * How an answer's keys stay inside its hold of the session's input (Issue
  * #3952 review P2), handed to {@link InputWriterSend}.
  */
@@ -725,6 +798,8 @@ async function sendAsInputWriter(
     async (ticket): Promise<PromptAnswerNotDeliveredSkip | void> => {
       // Review P1-b: always, wait or no wait — see `stillAllowedNow`.
       if (!stillAllowedNow(params)) return 'answer-withheld';
+      // Issue #4303: right before the first key, the agent must hold the pane.
+      await assertAnswerTargetInForeground(params.sessionName);
       // Review P2: every key of the answer goes out only while its ticket is
       // current; a session replaced part-way gets none of the rest.
       let lost = false;
@@ -1115,7 +1190,10 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
     const resolvedSubmitMode = resolveSubmitMode(params, dialog);
     const typeText = async (): Promise<void> => {
       // Standard CLI prompt: send text + Enter (y/n, Approve?, etc.)
-      await sendKeys(sessionName, answer, false);
+      // Issue #4303: as TEXT (`-l --`). Without it tmux looks the answer up in
+      // its key table first, so an answer spelled `Enter` / `Escape` / `C-c`
+      // would be that key, and one starting with `-` a flag.
+      await sendKeys(sessionName, answer, false, { literal: true });
       // Issue #3839: the text is on the pane; a failed Enter after it says so.
       if (answer !== '') touch.touched = true;
     };
@@ -1126,6 +1204,8 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // look is still taken right before it (the guard above may have awaited
       // a capture since the caller's own look).
       if (!stillAllowedNow(params)) throw new PromptAnswerNotDeliveredError('answer-withheld', sessionName);
+      // Issue #4303: right before its only key, the agent must hold the pane.
+      await assertAnswerTargetInForeground(sessionName);
       await typeText();
     } else {
       // Issue #3952: text, wait and Enter as one writer, so no send's body can

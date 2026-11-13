@@ -35,6 +35,7 @@ import {
   withInstanceInputLock,
   type InstanceInputTicket,
 } from '@/lib/session/instance-input-lock';
+import { readAnswerTargetForeground } from '@/lib/prompt-answer-sender';
 
 const logger = createLogger('api/prompt-response-strict');
 
@@ -100,6 +101,16 @@ export function createStrictRespondDeps(
     sendKey: async key => {
       if (ticket !== undefined && !ticket.isCurrent()) {
         throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
+      }
+      // Issue #4303: right before each key, the agent must hold the pane (also
+      // asked at admission, `answerStrictlyAsInputWriter`; this closes the window
+      // of the strict read in between, and the waits between keys — an arrow sent
+      // and then the agent gone must not leave an Enter for the shell). Thrown,
+      // `strict-respond` reports it as `send_failed` (exit 41), counting this key
+      // as possibly sent although none reached the pane.
+      const foreground = await readAnswerTargetForeground(sessionName);
+      if (foreground === 'shell' || foreground === 'unknown') {
+        throw new Error(`The agent does not hold session ${sessionName} (${foreground}); no key was sent (Issue #4303)`);
       }
       await sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId);
     },
@@ -174,7 +185,11 @@ export function recordStrictAnswer(
 
 /** Why the session's input lock did not admit a strict answer (Issue #3952). */
 export interface StrictInputLockRefusal {
-  refused: 'input_lock_timeout' | 'session_replaced' | 'input_lock_lost';
+  /**
+   * `agent_not_in_foreground` (Issue #4303): admitted, but the pane's own shell
+   * holds its terminal (`shell`) or who holds it could not be read (`unknown`).
+   */
+  refused: 'input_lock_timeout' | 'session_replaced' | 'input_lock_lost' | 'agent_not_in_foreground';
   message: string;
 }
 
@@ -192,11 +207,18 @@ export async function answerStrictlyAsInputWriter(
   answer: (ticket: InstanceInputTicket) => Promise<StrictRespondResult>
 ): Promise<StrictRespondResult | StrictInputLockRefusal> {
   let admitted = false;
+  let outcome: StrictRespondResult | { notInForeground: 'shell' | 'unknown' };
   try {
-    return await withInstanceInputLock(
+    outcome = await withInstanceInputLock(
       sessionName,
-      ticket => {
+      async ticket => {
         admitted = true;
+        // Issue #4303: before the answer's first read and key, the agent must
+        // hold the pane: on `shell` / `unknown` nothing is read or sent and the
+        // token is not consumed, so the same answer may be sent again.
+        // A reader that threw is no reading (`readAnswerTargetForeground`): goes on.
+        const foreground = await readAnswerTargetForeground(sessionName);
+        if (foreground === 'shell' || foreground === 'unknown') return { notInForeground: foreground };
         return answer(ticket);
       },
       { mode: 'shared' }
@@ -213,4 +235,16 @@ export async function answerStrictlyAsInputWriter(
     logger.info('strict-prompt-response-input-lock-refused', { sessionName, refused });
     return { refused, message: `Nothing was sent: ${error instanceof Error ? error.message : String(error)}` };
   }
+  if ('notInForeground' in outcome) {
+    const foreground = outcome.notInForeground;
+    logger.info('strict-prompt-response-agent-not-in-foreground', { sessionName, foreground });
+    return {
+      refused: 'agent_not_in_foreground',
+      message:
+        foreground === 'shell'
+          ? `Nothing was sent: the agent in session ${sessionName} is not running — the pane is back at its shell (Issue #4303).`
+          : `Nothing was sent: who holds session ${sessionName} could not be read (Issue #4303). Send it again.`,
+    };
+  }
+  return outcome;
 }

@@ -285,6 +285,6 @@ describe('[#2457] POST /prompt-response on a Claude pane', () => {
     const data = await response.json();
 
     expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalledWith(`claude-${WT}`, 'yes', false);
+    expect(sendKeys).toHaveBeenCalledWith(`claude-${WT}`, 'yes', false, { literal: true });
   });
 });

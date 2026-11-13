@@ -161,7 +161,7 @@ describe('[#2522] answering the question screen', () => {
     // 確定仕様 D: exactly one keystroke. The `false` is `sendKeys`'s own
     // "do not append Enter"; `answer_only` is what suppresses the second call
     // the text arm would otherwise make after `TUI_TEXT_INPUT_WAIT_MS`.
-    expect(keys.text).toEqual([[SESSION, '1', false]]);
+    expect(keys.text).toEqual([[SESSION, '1', false, { literal: true }]]);
     expect(keys.special).toEqual([]);
   });
 
@@ -172,7 +172,7 @@ describe('[#2522] answering the question screen', () => {
 
     expect(data.success).toBe(true);
     const keys = await keystrokes();
-    expect(keys.text).toEqual([[SESSION, '2', false]]);
+    expect(keys.text).toEqual([[SESSION, '2', false, { literal: true }]]);
     expect(keys.special).toEqual([]);
   });
 
@@ -210,7 +210,7 @@ describe('[#2522] answering the question screen', () => {
     // resolved against must be the ones on the pane NOW.
     const first = await respond(REPORTED, { answer: '1' });
     expect(first.data.success).toBe(true);
-    expect((await keystrokes()).text).toEqual([[SESSION, '1', false]]);
+    expect((await keystrokes()).text).toEqual([[SESSION, '1', false, { literal: true }]]);
 
     vi.clearAllMocks();
     const second = await respond(f2522('question-description-on-last-option.txt'), {
@@ -256,7 +256,7 @@ describe('[#2522] answering the question screen', () => {
     const { data } = await respond(f2522('question-default-on-free-text.txt'), { answer: '2' });
 
     expect(data.success).toBe(true);
-    expect((await keystrokes()).text).toEqual([[SESSION, '2', false]]);
+    expect((await keystrokes()).text).toEqual([[SESSION, '2', false, { literal: true }]]);
   });
 
   it('sends the operator’s TEXT for the free-text row unchanged', async () => {
@@ -268,7 +268,7 @@ describe('[#2522] answering the question screen', () => {
 
     expect(data.success).toBe(true);
     expect((await keystrokes()).text).toEqual([
-      [SESSION, 'Fix the flaky test first', false],
+      [SESSION, 'Fix the flaky test first', false, { literal: true }],
       [SESSION, '', true],
     ]);
   });
@@ -307,7 +307,7 @@ describe('[#2522] answering the question screen', () => {
     const { data } = await respond(f2522('question-flat-short.txt'), { answer: '2' });
 
     expect(data.success).toBe(true);
-    expect((await keystrokes()).text).toEqual([[SESSION, '2', false]]);
+    expect((await keystrokes()).text).toEqual([[SESSION, '2', false, { literal: true }]]);
   });
 });
 
@@ -368,6 +368,6 @@ describe('[#2522] the existing Command Code dialogs are untouched', () => {
 
     expect(data.success).toBe(true);
     const keys = await keystrokes();
-    expect(keys.text).toEqual([[SESSION, '1', false]]);
+    expect(keys.text).toEqual([[SESSION, '1', false, { literal: true }]]);
   });
 });

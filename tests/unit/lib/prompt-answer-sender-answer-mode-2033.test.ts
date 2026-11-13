@@ -174,7 +174,7 @@ describe('[#2033] the rule is answerMode, not the tool id', () => {
       frame: COPILOT_PERMISSION(),
     });
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt', '2', false);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt', '2', false, { literal: true });
     expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt', '', true);
   });
 });
@@ -189,7 +189,7 @@ describe('[#2033] the numeric paths that were already correct are unchanged', ()
       frame: CODEX_APPROVAL(),
     });
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-wt', '1', false);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-wt', '1', false, { literal: true });
   });
 
   it('claude still navigates with cursor keys on its `numbered` approval', async () => {
@@ -217,7 +217,7 @@ describe('[#2033] the numeric paths that were already correct are unchanged', ()
     });
 
     expect(capturePane).not.toHaveBeenCalled();
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-wt', '1', false);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-wt', '1', false, { literal: true });
   });
 });
 
@@ -233,7 +233,7 @@ describe('[#2033] the guard is scoped to numeric answers and readable panes', ()
     // Not an endorsement of `y` on a button strip — that is #1681's resolver's
     // problem. It is what keeps this guard from being a blanket refusal, which
     // is the shape that would pass the tests above while breaking every tool.
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', 'y', false);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', 'y', false, { literal: true });
   });
 
   it('sends when a frame the tool cannot read is on screen', async () => {
@@ -244,7 +244,7 @@ describe('[#2033] the guard is scoped to numeric answers and readable panes', ()
       frame: frame('opencode-live-1893', 'turn-complete-short'),
     });
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', '1', false);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', '1', false, { literal: true });
   });
 
   it('falls open when the pane cannot be captured at all', async () => {
@@ -260,7 +260,7 @@ describe('[#2033] the guard is scoped to numeric answers and readable panes', ()
       cliToolId: 'opencode',
     });
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', '1', false);
+    expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', '1', false, { literal: true });
   });
 });
 
@@ -303,7 +303,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       frame: COMMAND_CODE_PERMISSION(),
     });
 
-    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '2', false]]);
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '2', false, { literal: true }]]);
     expect(sendSpecialKeys).not.toHaveBeenCalled();
   });
 
@@ -318,7 +318,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
     });
 
     expect(capturePane).toHaveBeenCalledWith('mcbd-command-code-wt', expect.any(Number));
-    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false]]);
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false, { literal: true }]]);
   });
 
   it('holds when the caller has no promptData at all', async () => {
@@ -330,7 +330,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       frame: COMMAND_CODE_PERMISSION(),
     });
 
-    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false]]);
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false, { literal: true }]]);
   });
 
   it('outranks a stale submitMode on promptData, because the dialog is read off the frame being answered', async () => {
@@ -343,7 +343,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       frame: COMMAND_CODE_PERMISSION(),
     });
 
-    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false]]);
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false, { literal: true }]]);
   });
 
   it('still sends the Enter for the same prompt when the frame carries no dialog', async () => {
@@ -358,7 +358,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
-      ['mcbd-command-code-wt', '1', false],
+      ['mcbd-command-code-wt', '1', false, { literal: true }],
       ['mcbd-command-code-wt', '', true],
     ]);
   });
@@ -402,7 +402,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
-      ['mcbd-codex-wt', '1', false],
+      ['mcbd-codex-wt', '1', false, { literal: true }],
       ['mcbd-codex-wt', '', true],
     ]);
   });

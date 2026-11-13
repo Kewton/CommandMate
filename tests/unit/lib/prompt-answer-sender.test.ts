@@ -540,7 +540,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // First call: send text
-      expect(sendKeys).toHaveBeenCalledWith('claude-test', 'y', false);
+      expect(sendKeys).toHaveBeenCalledWith('claude-test', 'y', false, { literal: true });
       // Second call: send Enter
       expect(sendKeys).toHaveBeenCalledWith('claude-test', '', true);
       expect(sendSpecialKeys).not.toHaveBeenCalled();
@@ -601,7 +601,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // submitMode=answer_only: send text only, NO Enter
-      expect(sendKeys).toHaveBeenCalledWith('codex-test', '2', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '2', false, { literal: true });
       // Should NOT have been called with Enter (second call)
       expect(sendKeys).toHaveBeenCalledTimes(1);
       expect(sendSpecialKeys).not.toHaveBeenCalled();
@@ -627,7 +627,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // submitMode=answer_then_enter: send text + Enter (standard behavior)
-      expect(sendKeys).toHaveBeenCalledWith('codex-test', '2', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '2', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
       expect(sendKeys).toHaveBeenCalledTimes(2);
     });
@@ -652,7 +652,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // undefined submitMode -> answer_then_enter fallback -> Enter should be sent
-      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
       expect(sendKeys).toHaveBeenCalledTimes(2);
     });
@@ -678,7 +678,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // fallbackSubmitMode=answer_only: send text only, NO Enter
-      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledTimes(1);
     });
 
@@ -703,7 +703,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // Invalid submitMode -> answer_then_enter fallback -> Enter should be sent
-      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', '1', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
       expect(sendKeys).toHaveBeenCalledTimes(2);
     });
@@ -732,7 +732,7 @@ describe('sendPromptAnswer', () => {
       });
 
       // Non-numeric answer: even with submitMode=answer_only, Enter is sent
-      expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false);
+      expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('codex-test', '', true);
       expect(sendKeys).toHaveBeenCalledTimes(2);
     });
@@ -835,7 +835,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
     it('still sends the option number for the same row (non-vacuity)', async () => {
       await sendPromptAnswer({ sessionName, answer: '3', cliToolId, promptData, frame });
 
-      expect(sendKeys).toHaveBeenCalledWith(sessionName, '3', false);
+      expect(sendKeys).toHaveBeenCalledWith(sessionName, '3', false, { literal: true });
       expect(sendSpecialKeys).not.toHaveBeenCalled();
     });
   });
@@ -903,7 +903,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
       });
 
       expect(vi.mocked(sendKeys).mock.calls).toEqual([
-        ['command-code-test', 'Fix the flaky test first', false],
+        ['command-code-test', 'Fix the flaky test first', false, { literal: true }],
         ['command-code-test', '', true],
       ]);
     });
@@ -940,7 +940,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
       fallbackPromptType: 'multiple_choice',
     });
 
-    expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false);
+    expect(sendKeys).toHaveBeenCalledWith('codex-test', 'custom text', false, { literal: true });
   });
 });
 
@@ -1036,7 +1036,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
           frame,
         });
 
-        expect(sendKeys).toHaveBeenCalledWith(sessionName, '2', false);
+        expect(sendKeys).toHaveBeenCalledWith(sessionName, '2', false, { literal: true });
         expect(sendSpecialKeys).not.toHaveBeenCalled();
       });
     },
@@ -1061,7 +1061,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
-      ['command-code-test', 'UAT-FREETEXT-KIWI', false],
+      ['command-code-test', 'UAT-FREETEXT-KIWI', false, { literal: true }],
       ['command-code-test', '', true],
     ]);
   });
@@ -1086,7 +1086,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
       promptData,
     });
 
-    expect(sendKeys).toHaveBeenCalledWith('antigravity-test', 'feature/x', false);
+    expect(sendKeys).toHaveBeenCalledWith('antigravity-test', 'feature/x', false, { literal: true });
   });
 
   it('leaves #2573 to report a screen with no field at all', async () => {
@@ -1239,7 +1239,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
 
     await sendPromptAnswer({ sessionName: 'gemini-test', answer: 'y', cliToolId: 'gemini', promptData });
 
-    expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'y', false);
+    expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'y', false, { literal: true });
   });
 
   it('leaves a multiple_choice with no options at all alone (#1726’s pin, where it still holds)', async () => {
@@ -1254,7 +1254,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
 
     await sendPromptAnswer({ sessionName: 'gemini-test', answer: 'anything at all', cliToolId: 'gemini', promptData });
 
-    expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'anything at all', false);
+    expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'anything at all', false, { literal: true });
   });
 });
 
