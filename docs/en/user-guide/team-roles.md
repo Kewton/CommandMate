@@ -18,7 +18,7 @@ The person talks to the PM only. The PM asks the development lead. The developme
 
 ## Telling each session its role
 
-Put one section per role in the instructions file, and ask each session to run `commandmate whoami` at the start and compare the instance id with the sections. A session that does not find itself in the file says so and stops, instead of guessing.
+Put one section per role in the instructions file, and ask each session to run `commandmate whoami` at the start (it prints the worktree, the instance id, the tool and the alias, not a role), compare the instance id with the sections, and state its own role. A session that does not find itself in the file says so and stops, instead of guessing.
 
 ## PM section (template)
 

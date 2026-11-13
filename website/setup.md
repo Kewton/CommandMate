@@ -349,7 +349,7 @@ commandmate wait <worktree-id> --instance command-code --verify
 
 Goal: the person talks to one PM session. The PM does not write code: it asks a development lead, the development lead hands one task to a worker under a contract, and the checks decide when it is done. The PM then tells the person, in the first line, whether they have to do anything.
 
-Stages 4 and 5 used one lead session. Here you keep that session as the development lead and add a separate PM next to it. The roles are written into the repository's instructions file, and each session confirms its role with `commandmate whoami`. The role templates are in https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/team-roles.md (Japanese: https://github.com/Kewton/CommandMate/blob/main/docs/user-guide/team-roles.md).
+Stages 4 and 5 used one lead session. Here you keep that session as the development lead and add a separate PM next to it. The roles are written into the repository's instructions file, and each session compares the IDs `commandmate whoami` prints with those sections and states its own role. The role templates are in https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/team-roles.md (Japanese: https://github.com/Kewton/CommandMate/blob/main/docs/user-guide/team-roles.md).
 
 **Out of scope here.** Creating one worktree per issue, `profile-init.mjs` and `commandmate sync` are the full `cmate-orchestrate` workflow. This stage hands one task to a worker in a worktree that already exists, as in Stage 5. For the full workflow, read the `cmate-orchestrate` Skill's own documents after this stage.
 
@@ -388,7 +388,7 @@ Bash(commandmate ask <worktree-id>:*)
 /.agents/skills/cmate-*/
 ```
 
-5. Write the roles into the instructions file that the sessions read (`CLAUDE.md`, `AGENTS.md` and so on). Use the templates in `team-roles.md`: one section each for the PM, the development lead and the worker. Then ask each session to run `commandmate whoami` and say which role it has.
+5. Write the roles into the instructions file that the sessions read (`CLAUDE.md`, `AGENTS.md` and so on). Use the templates in `team-roles.md`: one section each for the PM, the development lead and the worker. Then ask each session to run `commandmate whoami` (it prints the worktree, the instance id, the tool and the alias, not a role), compare the instance id with the role sections, and say in its own words which role it has.
 
 6. Hand one task through the whole chain. From this machine, ask the PM in plain words. The PM asks the development lead with `commandmate ask`; the development lead hands one task to one worker under a contract and waits for the gates, exactly as in Stage 5 (`send --contract`, then `wait --verify`):
 
@@ -417,17 +417,17 @@ commandmate auto-yes <worktree-id> --enable --duration 3h --instance <pm-instanc
 ### Confirm it worked
 
 - `commandmate instances <worktree-id>` lists the PM and the development lead as separate instances.
-- `commandmate whoami` in each session reports the role it was given.
+- In each session, the instance id from `commandmate whoami` matches one role section, and the session states that role itself.
 - The worker's contract run ends with `commandmate wait <worktree-id> --instance <worker-instance> --verify` exiting 0.
 - The PM's report starts with one line that says whether the person has to do anything ("Nothing needs your attention now." or "2 decisions are waiting for you."), and lists each decision with the options to choose from.
 
 ### If it fails
 
-- `ask` or `send` exits 99 (prompt not ready): the other session was not at its prompt, and nothing was sent. Look at it with `commandmate capture <worktree-id> --instance <id>`, then send again after a minute.
+- `ask` or `send` exits 99: first find out whether anything was sent. Read the CLI's stderr (with `--json`, `sendOutcome`) and look at the other session with `commandmate capture <worktree-id> --instance <id>`. Only when it says prompt not ready and nothing was sent, send again after a minute. Exit 99 also comes from a server error, from an unknown send outcome, and from a failure while `ask` waits after it has sent; in those cases the message may already be in, so do not send it again until the screen shows it is not.
 - The PM stops at a permission question for `commandmate send` or `commandmate ask`: the rule from step 3 is missing or does not match the worktree id. Show the person the exact rule.
 - The gates fail every task on files you did not touch: the ignore lines from step 4 are missing.
 - Auto Yes ended before the deadline: `--duration` is shorter than the time left, or the stop pattern matched. Check `commandmate auto-yes <worktree-id>`, tell the person, and do not turn it on again without asking.
-- A role is wrong or missing after `whoami`: the instructions file has no section for it, or the session started before it was written. Restart that session.
+- A session cannot find its instance id in the role sections, or states a different role: the instructions file has no section for that id, or the id in it is wrong. Fix the file and ask the session to read it again; restart it only if it does not pick the file up.
 - Exit 20 or 21 from `wait --verify`: see Stage 5. Report it to the person through the PM; do not weaken the gate.
 
 ## Where to read more
