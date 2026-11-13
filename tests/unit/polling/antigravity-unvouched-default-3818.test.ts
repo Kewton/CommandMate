@@ -52,7 +52,8 @@ vi.mock('@/lib/prompt-answer-sender', async (importOriginal) => {
 });
 
 const captured = vi.fn<() => string>(() => '');
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn(async () => captured()),
   captureSessionOutputFresh: vi.fn(async () => captured()),
   isSessionRunning: vi.fn(async () => true),
@@ -64,7 +65,11 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({

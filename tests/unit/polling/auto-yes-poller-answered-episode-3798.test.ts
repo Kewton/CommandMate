@@ -39,7 +39,8 @@ const capture = vi.hoisted(() => ({
   fail: false,
   during: null as null | (() => void),
 }));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #3798: and tells the observer where the frame came from, as cli-session does.
   captureSessionOutput: vi.fn(async () => {
     if (capture.fail) throw new Error('capture failed');

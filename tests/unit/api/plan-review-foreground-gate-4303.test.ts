@@ -19,7 +19,8 @@ const h = vi.hoisted(() => ({
   events: [] as string[],
 }));
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   readPaneForeground: vi.fn((): Promise<string> => {
     if (h.foreground === 'throws') throw new Error('reader failed (test)');
     if (h.foreground === 'rejects') return Promise.reject(new Error('reader rejected (test)'));
@@ -32,13 +33,18 @@ vi.mock('@/lib/tmux/tmux', () => ({
     h.events.push(...keys);
   }),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 import { answerCommandCodePlanReview, planReviewAnswerError } from '@/app/api/worktrees/[id]/prompt-response/plan-review';
 import { readCommandCodePlanReviewState } from '@/lib/detection/tools/command-code/plan-review-state';
 import { resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
 import { PromptAnswerAgentNotInForegroundError } from '@/lib/prompt-answer-sender';
 import { ANSWER_NOT_DELIVERED_REASON, promptAnswerErrorResponse } from '@/lib/prompt-answer-errors';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const SESSION = 'mcbd-command-code-wt-4303';
 const FIXTURES = path.resolve(__dirname, '../../fixtures/command-code-plan-review-3125');
@@ -46,7 +52,7 @@ const INITIAL = readFileSync(path.join(FIXTURES, 'plan-review-1-74-0-initial.txt
 const state = readCommandCodePlanReviewState(INITIAL)!;
 
 function approve(): ReturnType<typeof answerCommandCodePlanReview> {
-  return answerCommandCodePlanReview({ sessionName: SESSION, state, action: 'approve', answer: undefined, useDefault: false });
+  return answerCommandCodePlanReview({ sessionName: SESSION, state, action: 'approve', answer: undefined, useDefault: false, frame: testBoundFrame(INITIAL) });
 }
 
 beforeEach(() => {

@@ -22,7 +22,12 @@ import {
   type CommandCodePlanReviewState,
 } from '@/lib/detection/tools/command-code/plan-review-state';
 import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
-import { ANSWER_NOT_DELIVERED_REASON, assertAnswerTargetInForeground } from '@/lib/prompt-answer-sender';
+import {
+  ANSWER_NOT_DELIVERED_REASON,
+  assertAnswerTargetGeneration,
+  assertAnswerTargetInForeground,
+} from '@/lib/prompt-answer-sender';
+import type { BoundCapture, BoundFrame, PaneGeneration } from '@/lib/session/cli-session';
 import { PromptAnswerInputLostError, PromptAnswerNotDeliveredError } from '@/lib/prompt-answer-errors';
 
 /** The reason for a plan review action asked of a screen that is not one. */
@@ -50,6 +55,12 @@ function samePlan(a: PlanReviewPlan & { ok: true }, b: PlanReviewPlan): boolean 
  * out only if the same request still plans the same keys on it; otherwise
  * nothing is sent and the body says so (`answer_not_delivered`).
  *
+ * Issue #4304 F1-a: `state` is read off `frame`, a frame bound to its pane
+ * generation G. The re-read is of G only (`recapture(G)`; another pane, even
+ * one showing the same review and the same keys, is not re-read as this one),
+ * and right before the first step the session must still show G — whether or
+ * not the lock was waited for.
+ *
  * @throws whatever the tmux transport throws once keys are being sent, and
  *   `PromptAnswerAgentNotInForegroundError` before any key when the agent does
  *   not hold the pane (Issue #4303)
@@ -61,7 +72,10 @@ export async function answerCommandCodePlanReview(args: {
   answer: string | undefined;
   useDefault: boolean;
   readMark?: number;
-  recapture?: () => Promise<string>;
+  /** Issue #4304 F1-a: the frame `state` was read off, bound to its pane generation. */
+  frame: BoundFrame;
+  /** Re-read the pane `expected` names, bound to it (Issue #4304 F1-a). */
+  recapture?: (expected: PaneGeneration) => Promise<BoundCapture>;
 }): Promise<PlanReviewAnswer> {
   const { sessionName, state, action, answer, useDefault } = args;
   const plan = planCommandCodePlanReviewKeys(state, { action, text: answer, useDefault });
@@ -78,7 +92,9 @@ export async function answerCommandCodePlanReview(args: {
     args.readMark ?? instanceInputReadMark(),
     async () => {
       if (recapture === undefined) return false;
-      const now = readCommandCodePlanReviewState(await recapture());
+      const reread = await recapture(args.frame.generation);
+      if (reread.kind !== 'bound') return false;
+      const now = readCommandCodePlanReviewState(reread.frame);
       return now !== null && now.phase === state.phase &&
         samePlan(plan, planCommandCodePlanReviewKeys(now, { action, text: answer, useDefault }));
     },
@@ -87,6 +103,9 @@ export async function answerCommandCodePlanReview(args: {
       // refused, nothing is typed (`PromptAnswerAgentNotInForegroundError`,
       // answered by the route as `answer_not_delivered`).
       await assertAnswerTargetInForeground(sessionName);
+      // Issue #4304 F1-a: and the pane must be the one `state` was read off —
+      // the last await before the first step, on every path.
+      await assertAnswerTargetGeneration(sessionName, args.frame.generation);
       // Issue #3952 review P2-3: every step is sent only while the ticket is current.
       return sendCommandCodePlanReviewKeys(sessionName, plan.steps, undefined, () => ticket.isCurrent());
     }

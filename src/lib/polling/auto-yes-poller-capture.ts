@@ -10,10 +10,8 @@
  * @module lib/polling/auto-yes-poller-capture
  */
 
-import { AsyncLocalStorage } from 'async_hooks';
 import type { CLIToolType } from '../cli-tools/types';
-import { captureSessionOutput } from '../session/cli-session';
-import { getOrInitGlobal } from '../global-state';
+import { captureBoundFrame, type BoundFrame, type BoundFrameUnknownReason } from '../session/cli-session';
 import { stripAnsi, stripBoxDrawing } from '../detection/cli-patterns';
 import { FULL_CAPTURE_LINES } from '@/config/auto-yes-config';
 
@@ -37,6 +35,12 @@ import { FULL_CAPTURE_LINES } from '@/config/auto-yes-config';
 export interface CapturedPollerFrame {
   /** The capture exactly as tmux returned it: ANSI and box drawing intact. */
   readonly raw: string;
+  /**
+   * Issue #4304 F1-a: `raw`, bound to the pane generation it was read from —
+   * what the tick's answer is sent against (`sendPromptAnswer`'s `frame`), so
+   * its keys go to that pane or are not sent.
+   */
+  readonly bound: BoundFrame;
   /** `stripBoxDrawing(stripAnsi(raw))` — the spelling every other step reads. */
   readonly clean: string;
   /**
@@ -49,13 +53,25 @@ export interface CapturedPollerFrame {
   readonly headCut?: boolean;
 }
 
-/** Where `cli-session` reports whether the capture it runs inside cut the pane's top (Issue #3881 N4). */
-function headCutSink(): AsyncLocalStorage<(headCut: boolean) => void> {
-  return getOrInitGlobal('__captureHeadCutSink', () => new AsyncLocalStorage<(headCut: boolean) => void>());
+/**
+ * A tick's capture that could not be bound to a pane generation (Issue #4304
+ * F1-a, design §4.2): the tick answers nothing. Thrown, so the poller handles
+ * it as it handles a capture that failed — a session that is gone waits for
+ * the session, anything else is the tick's error.
+ */
+export class PollerFrameUnboundError extends Error {
+  constructor(readonly generationCheck: BoundFrameUnknownReason, sessionName: string) {
+    super(`Auto-Yes capture of ${sessionName} could not be bound to its pane (${generationCheck}, Issue #4304)`);
+    this.name = 'PollerFrameUnboundError';
+  }
 }
 
 /**
  * Capture tmux session output once, keeping both spellings (Issue #2522).
+ *
+ * Issue #4304 F1-a: through `captureBoundFrame` — never the 5 s display cache
+ * (design §1.2 (b)(c)(d): a cached, joined or late frame may be of a pane the
+ * session no longer shows) — and bound to the pane it was read from.
  *
  * @internal Exported for testing purposes only.
  * @param worktreeId - Worktree identifier
@@ -63,6 +79,7 @@ function headCutSink(): AsyncLocalStorage<(headCut: boolean) => void> {
  * @param captureLines - Optional number of lines to capture
  * @param instanceId - Optional agent instance ID (Issue #896; defaults to primary session)
  * @returns The tick's raw capture and its cleaned form
+ * @throws {PollerFrameUnboundError} when the capture cannot be bound
  */
 export async function capturePollerFrame(
   worktreeId: string,
@@ -71,14 +88,13 @@ export async function capturePollerFrame(
   instanceId?: string
 ): Promise<CapturedPollerFrame> {
   const lines = captureLines ?? FULL_CAPTURE_LINES;
-  const reported: { headCut?: boolean } = {};
-  const output = await headCutSink().run((headCut) => {
-    reported.headCut = headCut;
-  }, () => captureSessionOutput(worktreeId, cliToolId, lines, instanceId));
+  const bound = await captureBoundFrame({ worktreeId, cliToolId, instanceId }, { lines });
+  if (bound.kind === 'unknown') throw new PollerFrameUnboundError(bound.reason, bound.sessionName);
   return {
-    raw: output,
-    clean: stripBoxDrawing(stripAnsi(output)),
-    ...(reported.headCut !== undefined ? { headCut: reported.headCut } : {}),
+    raw: bound.frame,
+    bound,
+    clean: stripBoxDrawing(stripAnsi(bound.frame)),
+    headCut: bound.headCut,
   };
 }
 

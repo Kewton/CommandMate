@@ -19,7 +19,8 @@ const captureSessionOutput = vi.fn(async () => {
   if (presence === 'absent') throw new Error('capture failed');
   return '$ ';
 });
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: () => captureSessionOutput(),
   captureSessionOutputFresh: vi.fn(async () => ''),
   getSessionPresence: vi.fn(async () => presence),

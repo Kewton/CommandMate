@@ -39,7 +39,8 @@ type Failure = { at: 'text' | 'enter'; delivery: 'not-started' | 'indeterminate'
 /** The next `sendKeys` failure, consumed once; then {@link failAfter}. */
 let failNext: Failure | null = null;
 let failAfter: Failure | null = null;
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   // The sender's own read of the pane (`readGuardFrame` when it is handed no
@@ -79,7 +80,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
 
 /** The frame `/respond` captures right before its send (review P2); `fail` makes that capture throw. */
 const sendScreen = vi.hoisted(() => ({ fail: false }));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn(),
   captureSessionOutputFresh: vi.fn(async () => {
     if (sendScreen.fail) throw new Error('capture failed');
@@ -91,7 +93,11 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
@@ -377,15 +383,20 @@ describe('[#3907 review P2] the send is registered at the screen it goes to, not
     expect(delivered).toEqual(['y']);
   });
 
-  it('the screen cannot be read at the send: held as an unidentified screen, B is not typed at again', async () => {
+  it('the screen cannot be read at the send: refused with nothing typed (409), so nothing is held and the tick answers B (Issue #4304 F1-a)', async () => {
+    // Issue #4304 F1-a (the person's decision of 2026-11-14): a screen that
+    // cannot be bound to its pane is no screen to type at. Before, the answer
+    // was sent without a frame and, its outcome unknown, held the next screen.
     failNext = { at: 'text', delivery: 'indeterminate' };
     sendScreen.fail = true;
     const state = pollerState();
 
-    expect(await personAnswersRow(proceed('npm test'), proceed('npm run build'))).toBe(500);
+    expect(await personAnswersRow(proceed('npm test'), proceed('npm run build'))).toBe(409);
+    expect(delivered).toEqual([]);
+    // The failure was armed for the person's text, which was never typed.
+    failNext = null;
     now += MANUAL_ANSWER_HOLD_MS;
-    expect(await tickOn(state, proceed('npm run build'))).toBe('no_answer');
-    expect(delivered).toEqual(['y']);
+    expect(await tickOn(state, proceed('npm run build'))).toBe('responded');
   });
 
   it('negative: row A, screen B at the send, the answer goes through: B is answered after the hold', async () => {

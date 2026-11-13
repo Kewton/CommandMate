@@ -30,7 +30,8 @@ let onKey: (key: string) => void = () => {};
 /** Awaited between two keys of one `sendSpecialKeys` call (the real one sleeps there). */
 let betweenKeys: () => Promise<void> = async () => {};
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(),
@@ -54,7 +55,11 @@ vi.mock('@/lib/tmux/tmux', () => ({
     },
   ),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 import { PromptAnswerInputLostError, PromptAnswerNotDeliveredError, sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { capturePane } from '@/lib/tmux/tmux';
@@ -66,6 +71,7 @@ import {
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { MultipleChoicePromptData, PromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const SESSION = 'cm-wt-3952-r3';
 
@@ -139,7 +145,7 @@ describe('[#3952 review P1-a] free text is judged again on the screen read after
       answer: 'UAT-FREETEXT-KIWI',
       cliToolId: 'command-code',
       promptData: promptOf(FIELD_FRAME),
-      frame: FIELD_FRAME,
+      frame: testBoundFrame(FIELD_FRAME),
     });
     await flush();
     vi.mocked(capturePane).mockResolvedValue(CURSOR_ON_1_FRAME);
@@ -156,7 +162,7 @@ describe('[#3952 review P1-a] free text is judged again on the screen read after
       answer: 'UAT-FREETEXT-KIWI',
       cliToolId: 'command-code',
       promptData: promptOf(FIELD_FRAME),
-      frame: FIELD_FRAME,
+      frame: testBoundFrame(FIELD_FRAME),
     });
     await flush();
     vi.mocked(capturePane).mockResolvedValue(FIELD_FRAME);
@@ -172,7 +178,7 @@ describe('[#3952 review P1-a] free text is judged again on the screen read after
       answer: 'UAT-FREETEXT-KIWI',
       cliToolId: 'command-code',
       promptData: promptOf(FIELD_FRAME),
-      frame: FIELD_FRAME,
+      frame: testBoundFrame(FIELD_FRAME),
     });
     expect(delivered).toEqual(['UAT-FREETEXT-KIWI', '<Enter>']);
     expect(capturePane).not.toHaveBeenCalled();
@@ -299,7 +305,7 @@ describe('[#3952 review P2] the keys of an answer stop when its input ticket is 
       answer: '3',
       cliToolId: 'claude',
       promptData: PICK,
-      frame: '',
+      frame: testBoundFrame(''),
       stillCurrent: () => true,
     }).catch((e: unknown) => e);
     await firstKey.promise;
@@ -316,7 +322,7 @@ describe('[#3952 review P2] the keys of an answer stop when its input ticket is 
       answer: '3',
       cliToolId: 'claude',
       promptData: PICK,
-      frame: '',
+      frame: testBoundFrame(''),
       stillCurrent: () => true,
     });
     expect(delivered).toEqual(['Down', 'Down', 'Enter']);
@@ -332,7 +338,7 @@ describe('[#3952 review P2] the keys of an answer stop when its input ticket is 
       answer: '3',
       cliToolId: 'claude',
       promptData: PICK,
-      frame: '',
+      frame: testBoundFrame(''),
       stillCurrent: () => current,
     }).catch((e: unknown) => e);
     expect(error).toMatchObject({ name: 'PromptAnswerAbortedError', keysSent: true });
@@ -435,7 +441,7 @@ describe('[#3952 review P2, manual answers] the ticket is checked between keys w
       answer: '3',
       cliToolId: 'claude',
       promptData: PICK3,
-      frame: '',
+      frame: testBoundFrame(''),
     }).catch((e: unknown) => e);
     await firstKey.promise;
     invalidateInstanceInput(SESSION);
@@ -447,7 +453,7 @@ describe('[#3952 review P2, manual answers] the ticket is checked between keys w
   });
 
   it('negative: nothing replaced — every arrow key and the Enter', async () => {
-    await sendPromptAnswer({ sessionName: SESSION, answer: '3', cliToolId: 'claude', promptData: PICK3, frame: '' });
+    await sendPromptAnswer({ sessionName: SESSION, answer: '3', cliToolId: 'claude', promptData: PICK3, frame: testBoundFrame('' )});
     expect(delivered).toEqual(['Down', 'Down', 'Enter']);
   });
 

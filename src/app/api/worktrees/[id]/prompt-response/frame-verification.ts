@@ -7,7 +7,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { captureSessionOutputFresh } from '@/lib/session/cli-session';
+import { captureBoundFrame, type BoundFrame, type BoundCapture } from '@/lib/session/cli-session';
+import { PromptAnswerGenerationUnconfirmedError } from '@/lib/prompt-answer-sender';
 import type { PromptDetectionResult } from '@/lib/detection/prompt-detector';
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import { startPolling } from '@/lib/polling/response-poller';
@@ -32,15 +33,10 @@ interface CapturedFrame {
   /**
    * Issue #2033: kept so the answerMode guard judges the SAME frame this
    * verification passed, rather than taking a second capture of a screen that
-   * may have moved on.
+   * may have moved on. Issue #4304 F1-a: bound to the pane generation it was
+   * read from, which every key of the answer then goes to.
    */
-  verifiedFrame: string | null;
-  /**
-   * Issue #2755: whether the re-verification could not be done at all. Every
-   * other answer keeps the #1699 policy of carrying on (see the catch), and a
-   * checkbox answer is the one exception — see `MULTI_SELECT_UNVERIFIED_MESSAGES`.
-   */
-  verificationFailed: boolean;
+  verifiedFrame: BoundFrame;
   /** Issue #3125: Command Code's plan review overlay, when that is the screen. */
   planReviewState: CommandCodePlanReviewState | null;
   /** Issue #3952: the session's input order, taken right before the capture. */
@@ -50,13 +46,19 @@ interface CapturedFrame {
 /** The verified screen the answer is resolved and sent against. */
 export interface VerifiedPrompt {
   promptCheck: PromptDetectionResult | null;
-  verifiedFrame: string | null;
+  /** Issue #4304 F1-a: the verified frame, bound to its pane generation. */
+  verifiedFrame: BoundFrame;
   /**
    * Issue #2522: whether THIS prompt came from Command Code's question reader —
    * about the frame that was actually verified, not about a screen that may
    * have moved on.
    */
   isCommandCodeQuestion: boolean;
+  /**
+   * Whether the frame could not be READ as a prompt (the reading threw).
+   * Issue #4304 F1-a: no longer set by a failed capture — a capture that
+   * cannot be bound is refused before this (`answer_not_delivered`).
+   */
   verificationFailed: boolean;
   /**
    * Issue #3952 review P2-1: the session's input order, taken right before the
@@ -71,26 +73,41 @@ export interface VerifiedPrompt {
  * This prevents a race condition where the prompt disappears between
  * detection (in current-output API) and sending (here), causing "1" to
  * be typed at the Claude user input prompt instead of a tool permission prompt.
+ *
+ * Issue #4304 F1-a (design §4.2, the person's decision of 2026-11-14): the
+ * capture is bound to its pane generation, and one that cannot be bound is NOT
+ * carried on with any more — the old "If capture fails, proceed with caution -
+ * don't block manual responses" sent the answer at a screen nobody had read.
+ * It is refused with nothing typed (`answer_not_delivered`; send it again).
  */
-async function captureFrame(ctx: PromptResponseContext): Promise<CapturedFrame> {
-  const captured: CapturedFrame = {
-    verifiedFrame: null,
-    verificationFailed: false,
-    planReviewState: null,
-    readMark: instanceInputReadMark(),
-  };
-  try {
-    const currentOutput = await captureSessionOutputFresh(ctx.id, ctx.cliToolId, undefined, ctx.instanceId);
-    captured.verifiedFrame = currentOutput;
-    if (ctx.cliToolId === 'command-code') {
-      captured.planReviewState = readCommandCodePlanReviewState(currentOutput);
-    }
-  } catch {
-    // If capture fails, proceed with caution - don't block manual responses
-    captured.verificationFailed = true;
-    logger.warn('failed-to-verify-prompt');
+async function captureFrame(ctx: PromptResponseContext): Promise<CapturedFrame | { unbound: BoundCapture & { kind: 'unknown' } }> {
+  const readMark = instanceInputReadMark();
+  const bound = await captureBoundFrame({ worktreeId: ctx.id, cliToolId: ctx.cliToolId, instanceId: ctx.instanceId });
+  if (bound.kind === 'unknown') {
+    logger.warn('failed-to-verify-prompt', { generationCheck: bound.reason });
+    return { unbound: bound };
   }
-  return captured;
+  return {
+    verifiedFrame: bound,
+    planReviewState: ctx.cliToolId === 'command-code' ? readCommandCodePlanReviewState(bound.frame) : null,
+    readMark,
+  };
+}
+
+/** The refusal for a frame that could not be bound (Issue #4304 F1-a): nothing typed, send again. */
+function unboundFrameResponse(
+  ctx: PromptResponseContext,
+  answer: string | undefined,
+  unbound: BoundCapture & { kind: 'unknown' },
+): NextResponse {
+  const error = new PromptAnswerGenerationUnconfirmedError(unbound.reason, unbound.sessionName);
+  const mapped = promptAnswerErrorResponse(error, 'prompt-response');
+  if (mapped === null) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  logRefused(ctx, { reason: mapped.body.reason, generationCheck: unbound.reason });
+  mapped.body.answer = answer ?? '';
+  return NextResponse.json(mapped.body, { status: mapped.status });
 }
 
 /**
@@ -110,7 +127,7 @@ async function answerPlanReviewIfShown(
   const { answer, planReviewAction } = request;
   if (planReviewState === null && planReviewAction !== undefined) {
     logRefused(ctx, { reason: 'plan_review_not_active' });
-    return NextResponse.json(planReviewNotActiveBody(answer, captured.verificationFailed));
+    return NextResponse.json(planReviewNotActiveBody(answer, false));
   }
   if (planReviewState === null) return null;
 
@@ -124,7 +141,11 @@ async function answerPlanReviewIfShown(
       useDefault: request.useDefault,
       // Issue #3952: read again, as above, if a send typed after this capture.
       readMark: captured.readMark,
-      recapture: () => captureSessionOutputFresh(ctx.id, ctx.cliToolId, undefined, ctx.instanceId),
+      // Issue #4304 F1-a: the frame the state was read off, whose pane every
+      // step goes to, and a re-read of that pane only.
+      frame: captured.verifiedFrame,
+      recapture: (expected) =>
+        captureBoundFrame({ worktreeId: ctx.id, cliToolId: ctx.cliToolId, instanceId: ctx.instanceId }, { expected }),
     });
   } catch (error: unknown) {
     // Issue #4031: through the same table as every other answer error, so a
@@ -174,12 +195,11 @@ function assessFrame(
     promptCheck: null,
     verifiedFrame: captured.verifiedFrame,
     isCommandCodeQuestion: false,
-    verificationFailed: captured.verificationFailed,
+    verificationFailed: false,
     readMark: captured.readMark,
   };
-  if (verified.verificationFailed || verified.verifiedFrame === null) return { value: verified };
 
-  const currentOutput = verified.verifiedFrame;
+  const currentOutput = verified.verifiedFrame.frame;
   try {
     // Issue #2870: the reading is `assessPromptAnswerability`, the SAME one
     // the status API publishes as `promptAnswerable`, so the UI never offers
@@ -212,7 +232,8 @@ function assessFrame(
       };
     }
   } catch {
-    // Proceed with caution - don't block manual responses
+    // The frame is bound to its pane; only its READING failed. Proceed with
+    // caution (#1699) — what Issue #4304 F1-a stopped is a capture that failed.
     verified.verificationFailed = true;
     logger.warn('failed-to-verify-prompt');
   }
@@ -230,6 +251,7 @@ export async function verifyPromptOnScreen(
   sessionName: string,
 ): Promise<StageResult<VerifiedPrompt>> {
   const captured = await captureFrame(ctx);
+  if ('unbound' in captured) return { response: unboundFrameResponse(ctx, request.answer, captured.unbound) };
   const planReviewResponse = await answerPlanReviewIfShown(ctx, request, sessionName, captured);
   if (planReviewResponse) return { response: planReviewResponse };
   if (request.deferredSelectionError !== null) {

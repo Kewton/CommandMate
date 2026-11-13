@@ -53,15 +53,21 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
-vi.mock('@/lib/session/cli-session', () => ({
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn().mockResolvedValue(''),
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
 }));
@@ -284,8 +290,10 @@ describe('[#2755] the route refuses with nothing sent', () => {
     const { data } = await respond(new Error('no server running'), { answers: [1, 3] });
 
     expect(data.success).toBe(false);
-    expect(data.reason).toBe('multi_select_unverified');
-    expect(data.message).toContain('could not be re-read');
+    // Issue #4304 F1-a: every answer is refused now when the pane cannot be
+    // re-read — before the checkbox exception is even reached.
+    expect(data.reason).toBe('answer_not_delivered');
+    expect(data.message).toContain('could not be confirmed');
     expect(await keystrokes()).toEqual({ text: [], special: [] });
   });
 

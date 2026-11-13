@@ -8,7 +8,7 @@ import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getMessageById, updatePromptData, getWorktreeById } from '@/lib/db';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { PromptAnswerGenerationUnconfirmedError, sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { promptAnswerErrorResponse } from '@/lib/prompt-answer-errors';
 import { startPolling } from '@/lib/polling/response-poller';
 import { getAnswerInput } from '@/lib/detection/prompt-detector';
@@ -312,6 +312,12 @@ export async function POST(
       const atSend = await screenAtSend(id, cliToolId, instanceId);
       noteManualSendStarting(manualAnswer, atSend.promptData);
       try {
+        // Issue #4304 F1-a: a screen that could not be bound to its pane
+        // generation is no screen to type at — refused with nothing typed
+        // (409 `answer_not_delivered`, send again), not sent without a frame.
+        if (atSend.frame === undefined) {
+          throw new PromptAnswerGenerationUnconfirmedError(atSend.unbound ?? 'generation-unreadable', sessionName);
+        }
         await sendPromptAnswer({
           sessionName,
           answer: input,

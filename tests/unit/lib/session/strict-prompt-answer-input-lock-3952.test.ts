@@ -16,7 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 
 const sendSessionAnswerKey = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutputFresh: vi.fn(),
   readSessionPaneCommand: vi.fn(),
   sendSessionAnswerKey,

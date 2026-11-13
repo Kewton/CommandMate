@@ -69,6 +69,14 @@ function tmuxFailsWith(make: () => ExecError): void {
   }) as unknown as typeof execFile);
 }
 
+/** Issue #4304 F1-a: the bound capture's first read, the pane's generation. */
+function generationReads(): number {
+  return vi
+    .mocked(execFile)
+    .mock.calls.filter((c) => (c[1] as string[])[0] === 'display-message' && String((c[1] as string[]).at(-1)).includes('#{pane_id}'))
+    .length;
+}
+
 function hasSessionCalls(): number {
   return vi.mocked(execFile).mock.calls.filter((c) => (c[1] as string[])[0] === 'has-session').length;
 }
@@ -131,8 +139,11 @@ describe('Issue #3329: Auto-Yes over a tmux that cannot be asked', () => {
     expect(state?.enabled).toBe(false);
     expect(state?.stopReason).toBe('consecutive_errors');
     expect(isPollerActive(KEY)).toBe(false);
-    // Two has-session calls per poll (the capture's, then the probe's).
-    expect(hasSessionCalls()).toBe(2 * AUTO_STOP_ERROR_THRESHOLD);
+    // Issue #4304 F1-a: the capture reads the pane's generation
+    // (`display-message`) instead of a has-session, so one has-session per
+    // poll (the probe's) and one generation read before it.
+    expect(hasSessionCalls()).toBe(AUTO_STOP_ERROR_THRESHOLD);
+    expect(generationReads()).toBe(AUTO_STOP_ERROR_THRESHOLD);
   });
 
   it('keeps waiting when tmux says the session does not exist (exit 1)', async () => {

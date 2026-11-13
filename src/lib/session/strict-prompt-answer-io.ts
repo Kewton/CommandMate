@@ -8,6 +8,13 @@
  * it, so a token issued by one is verified against a binding built exactly the
  * way it was issued.
  *
+ * Issue #4304 F1-a (design §4.4 R7 strict / R11-c): that capture is a
+ * `BoundFrame`, and the payload, the observation and the frame are all built
+ * from it (`buildCurrentOutput`'s `boundFrame`) — no longer from the display
+ * cache a `captureSessionOutputFresh` write-back used to fill. The first read
+ * fixes the pane generation G of the answer; every later read is of G only, and
+ * every key goes to G or is not sent.
+ *
  * @module lib/session/strict-prompt-answer-io
  */
 
@@ -15,7 +22,14 @@ import type Database from 'better-sqlite3';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
-import { captureSessionOutputFresh, readSessionPaneCommand, sendSessionAnswerKey } from '@/lib/session/cli-session';
+import {
+  captureBoundFrame,
+  checkPaneGeneration,
+  readSessionPaneCommand,
+  readSessionPaneGeneration,
+  sendSessionAnswerKey,
+  type PaneGeneration,
+} from '@/lib/session/cli-session';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { observeSession } from '@/lib/prompt-observation/session';
 import type { StrictRespondDeps, StrictScreenRead } from '@/lib/prompt-observation/strict-respond';
@@ -75,14 +89,23 @@ export function createStrictRespondDeps(
   ticket?: InstanceInputTicket
 ): StrictRespondDeps {
   const { worktreeId, cliToolId, instanceId, sessionName } = target;
+  // Issue #4304 F1-a: the pane generation this answer's first read was of.
+  let generation: PaneGeneration | undefined;
   return {
     async read(): Promise<StrictScreenRead> {
       let payload;
       try {
-        // Fresh, and written back to the capture cache at the width the payload
-        // builder reads, so the payload below is of this capture.
-        await captureSessionOutputFresh(worktreeId, cliToolId, STATUS_CAPTURE_LINES, instanceId);
-        payload = await buildCurrentOutput(db, worktreeId, cliToolId, instanceId);
+        // Issue #4304 F1-a: bound to its pane generation (G after the first
+        // read), and the payload below is built from this very frame.
+        const bound = await captureBoundFrame(
+          { worktreeId, cliToolId, instanceId },
+          { lines: STATUS_CAPTURE_LINES, ...(generation !== undefined ? { expected: generation } : {}) },
+        );
+        if (bound.kind === 'unknown') {
+          return { ok: false, stage: 'capture', error: `pane generation unconfirmed: ${bound.reason} (Issue #4304)` };
+        }
+        generation ??= bound.generation;
+        payload = await buildCurrentOutput(db, worktreeId, cliToolId, instanceId, undefined, { boundFrame: bound });
       } catch (error) {
         return { ok: false, stage: 'capture', error: describeError(error) };
       }
@@ -98,6 +121,21 @@ export function createStrictRespondDeps(
       }
     },
     sendKey: async key => {
+      if (ticket !== undefined && !ticket.isCurrent()) {
+        throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
+      }
+      // Issue #4304 F1-a: right before the key, the session must still show
+      // the pane the answer's reads were of. (`strict-respond` always reads
+      // before its first key; a key asked for with no read yet fixes the
+      // generation from the pane as it is now, and is refused if it cannot.)
+      if (generation === undefined) {
+        const now = await readSessionPaneGeneration(sessionName);
+        if (now !== null) generation = now.generation;
+      }
+      const check = generation === undefined ? 'generation-unreadable' : await checkPaneGeneration(sessionName, generation);
+      if (check !== 'same') {
+        throw new Error(`The pane of ${sessionName} the strict answer read was not confirmed before a key (${check}, Issue #4304)`);
+      }
       if (ticket !== undefined && !ticket.isCurrent()) {
         throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
       }

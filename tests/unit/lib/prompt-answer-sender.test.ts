@@ -8,7 +8,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock tmux before importing the module under test
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
@@ -28,6 +29,7 @@ import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-c
 import { detectPromptWithOptions } from '@/lib/polling/response-checker';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { MultipleChoicePromptData, PromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 describe('sendPromptAnswer', () => {
   beforeEach(() => {
@@ -821,7 +823,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
     });
 
     it('refuses free text before a single key is sent', async () => {
-      const sent = sendPromptAnswer({ sessionName, answer: REASON, cliToolId, promptData, frame });
+      const sent = sendPromptAnswer({ sessionName, answer: REASON, cliToolId, promptData, frame: testBoundFrame(frame) });
 
       await expect(sent).rejects.toBeInstanceOf(FreeTextAnswerRejectedError);
       await expect(sent).rejects.toMatchObject({
@@ -835,7 +837,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
     });
 
     it('still sends the option number for the same row (non-vacuity)', async () => {
-      await sendPromptAnswer({ sessionName, answer: '3', cliToolId, promptData, frame });
+      await sendPromptAnswer({ sessionName, answer: '3', cliToolId, promptData, frame: testBoundFrame(frame) });
 
       expect(sendKeys).toHaveBeenCalledWith(sessionName, '3', false, { literal: true });
       expect(sendSpecialKeys).not.toHaveBeenCalled();
@@ -879,7 +881,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
         answer: '<script>alert(1)</script>',
         cliToolId: 'command-code',
         promptData,
-        frame,
+        frame: testBoundFrame(frame),
       }),
     ).rejects.toSatisfy((error: Error) => !error.message.includes('script'));
   });
@@ -901,7 +903,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
         answer: 'Fix the flaky test first',
         cliToolId: 'command-code',
         promptData,
-        frame,
+        frame: testBoundFrame(frame),
       });
 
       expect(vi.mocked(sendKeys).mock.calls).toEqual([
@@ -985,7 +987,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
           answer: 'UAT-FREETEXT-KIWI',
           cliToolId: 'command-code',
           promptData,
-          frame,
+          frame: testBoundFrame(frame),
         });
 
         await expect(sent).rejects.toBeInstanceOf(FreeTextAnswerRejectedError);
@@ -1006,7 +1008,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
           answer: 'UAT-FREETEXT-KIWI',
           cliToolId: 'command-code',
           promptData,
-          frame,
+          frame: testBoundFrame(frame),
         });
 
         await expect(sent).rejects.toSatisfy((error: Error) =>
@@ -1021,7 +1023,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
           answer: '<script>alert(1)</script>',
           cliToolId: 'command-code',
           promptData,
-          frame,
+          frame: testBoundFrame(frame),
         });
 
         await expect(sent).rejects.toSatisfy(
@@ -1035,7 +1037,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
           answer: '2',
           cliToolId: 'command-code',
           promptData,
-          frame,
+          frame: testBoundFrame(frame),
         });
 
         expect(sendKeys).toHaveBeenCalledWith(sessionName, '2', false, { literal: true });
@@ -1059,7 +1061,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
       answer: 'UAT-FREETEXT-KIWI',
       cliToolId: 'command-code',
       promptData,
-      frame,
+      frame: testBoundFrame(frame),
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
@@ -1104,7 +1106,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
       answer: REASON,
       cliToolId: 'command-code',
       promptData,
-      frame,
+      frame: testBoundFrame(frame),
     });
 
     await expect(sent).rejects.toMatchObject({ kind: 'menu_row', cursorOptionNumber: null });
@@ -1167,7 +1169,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
     });
 
     it('refuses free text before a single key is sent', async () => {
-      const sent = sendPromptAnswer({ sessionName, answer: REASON, cliToolId, promptData, frame });
+      const sent = sendPromptAnswer({ sessionName, answer: REASON, cliToolId, promptData, frame: testBoundFrame(frame) });
 
       await expect(sent).rejects.toBeInstanceOf(FreeTextAtChoiceOnlyPromptError);
       await expect(sent).rejects.toMatchObject({
@@ -1180,7 +1182,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
     });
 
     it('still answers the same screen by its option number (non-vacuity)', async () => {
-      await sendPromptAnswer({ sessionName, answer: String(denyOption), cliToolId, promptData, frame });
+      await sendPromptAnswer({ sessionName, answer: String(denyOption), cliToolId, promptData, frame: testBoundFrame(frame) });
 
       // claude and agy are the two cursor-navigated tools: the digit becomes
       // Down×(n-1) + Enter rather than typed characters.
@@ -1203,7 +1205,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
         answer: '<script>alert(1)</script>',
         cliToolId: 'claude',
         promptData,
-        frame,
+        frame: testBoundFrame(frame),
       }),
     ).rejects.toSatisfy((error: Error) => !error.message.includes('script'));
   });

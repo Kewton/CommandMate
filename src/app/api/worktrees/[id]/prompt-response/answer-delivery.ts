@@ -37,6 +37,7 @@ import { findTextFollowUp } from './text-follow-up';
 import { logger, logRefused, type PromptResponseContext } from './context';
 import type { ValidatedPromptResponse } from './request-validation';
 import type { ResolvedAnswer } from './answer-resolution';
+import type { BoundFrame } from '@/lib/session/cli-session';
 
 /** The refusal's own evidence, for the log line (Issue #2033, #2573, #2583, #2755, #3952). */
 function logSendRefusal(ctx: PromptResponseContext, error: unknown): void {
@@ -171,7 +172,7 @@ export async function sendResolvedAnswer(
   request: ValidatedPromptResponse,
   sessionName: string,
   resolved: ResolvedAnswer,
-  verifiedFrame: string | null,
+  verifiedFrame: BoundFrame,
   manualAnswer: ManualAnswerTicket,
   screenPromptData?: PromptData | null,
   readMark?: number,
@@ -190,9 +191,9 @@ export async function sendResolvedAnswer(
       fallbackPromptType: request.bodyPromptType,
       fallbackDefaultOptionNumber: request.bodyDefaultOptionNumber,
       fallbackSubmitMode: request.validSubmitMode,
-      // Issue #2033: the frame the prompt was re-verified against, raw. Undefined
-      // only when that capture failed, where the sender reads the pane itself.
-      frame: verifiedFrame ?? undefined,
+      // Issue #2033: the frame the prompt was re-verified against, raw.
+      // Issue #4304 F1-a: bound to its pane generation — every key goes there.
+      frame: verifiedFrame,
       // Issue #3952 review P2-1: taken before that frame's capture, so a send
       // admitted between the capture and the answer's keys makes it read again.
       readMark,
@@ -207,7 +208,8 @@ export async function sendResolvedAnswer(
 
 /**
  * The window `frame-verification`'s `captureFrame` takes the verified frame
- * with: `captureSessionOutputFresh`'s default, which it does not override
+ * with: `captureBoundFrame`'s default (`BOUND_FRAME_DEFAULT_LINES`, the same
+ * 5000 as `captureSessionOutputFresh`'s), which it does not override
  * (pinned by `tests/unit/api/prompt-response-audit-reading-3881.test.ts`).
  */
 const VERIFIED_FRAME_WINDOW_LINES = 5000;
@@ -226,15 +228,15 @@ function auditPromptData(
   ctx: PromptResponseContext,
   promptCheck: PromptDetectionResult,
   effectivePromptData: PromptData,
-  verifiedFrame: string | null,
+  verifiedFrame: BoundFrame | null,
 ): PromptData {
   if (verifiedFrame === null) return effectivePromptData;
   return (
     promptDataForStorage(
       ctx.cliToolId,
-      verifiedFrame,
+      verifiedFrame.frame,
       { ...promptCheck, promptData: effectivePromptData },
-      captureTopOf(verifiedFrame, VERIFIED_FRAME_WINDOW_LINES, ctx.cliToolId),
+      captureTopOf(verifiedFrame.frame, VERIFIED_FRAME_WINDOW_LINES, ctx.cliToolId),
     ) ?? effectivePromptData
   );
 }
@@ -249,7 +251,7 @@ function recordAnswerForAudit(
   ctx: PromptResponseContext,
   promptCheck: PromptDetectionResult | null,
   resolved: ResolvedAnswer,
-  verifiedFrame: string | null,
+  verifiedFrame: BoundFrame | null,
 ): void {
   const { resolution, effectivePromptData } = resolved;
   if (!promptCheck?.isPrompt || !effectivePromptData) return;
@@ -291,7 +293,7 @@ export function finishAnsweredPrompt(
   ctx: PromptResponseContext,
   promptCheck: PromptDetectionResult | null,
   resolved: ResolvedAnswer,
-  verifiedFrame: string | null = null,
+  verifiedFrame: BoundFrame | null = null,
 ): NextResponse {
   const { id, db, cliToolId, instanceId } = ctx;
   const { resolution, structuredResolution, effectivePromptData } = resolved;

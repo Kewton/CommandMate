@@ -17,7 +17,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
   checkWorktreeSessionOwnership: vi.fn(async () => ({ verdict: 'owned', sessionPath: null })),
 }));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn(),
   getSessionPresence: vi.fn(),
 }));
@@ -26,7 +27,9 @@ vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
 // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
-vi.mock('@/lib/tmux/tmux', () => ({ readPaneForeground: async () => 'other' as const, sendKeys: vi.fn(), sendSpecialKeys: vi.fn() }));
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
+  readPaneForeground: async () => 'other' as const, sendKeys: vi.fn(), sendSpecialKeys: vi.fn() }));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({

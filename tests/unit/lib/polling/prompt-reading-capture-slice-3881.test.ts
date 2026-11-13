@@ -41,6 +41,17 @@ const transport = vi.hoisted(() => ({
   captureSnapshot: vi.fn(async () => pane.raw),
 }));
 vi.mock('@/lib/tmux/polling-tmux-transport', () => ({ getPollingTmuxTransport: () => transport }));
+// Issue #4304 F1-a: the poller binds its capture to the pane's generation; the
+// pane is read by id through the same transport double.
+vi.mock('@/lib/tmux/tmux', async (importOriginal) =>
+  (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles(
+    {
+      capturePane: (session: string, lines: number) =>
+        (transport.captureSnapshot as (...args: unknown[]) => Promise<string>)(session, { startLine: -lines }),
+    },
+    await importOriginal(),
+  ),
+);
 vi.mock('@/lib/session/cli-session', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/session/cli-session')>()),
   // The only other cli-session call of the tick: no tmux here.
@@ -194,11 +205,12 @@ describe('[#3881 N4] the capture layer counts rows, not split elements', () => {
     const reduced = await capturePollerFrame(WT, 'claude', REDUCED_CAPTURE_LINES);
     expect(reduced.headCut).toBe(true);
     expect(reduced.raw.startsWith('\n\n     13 +')).toBe(true);
-    // Served from the cache this time: the same answer.
     expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
+    // Issue #4304 F1-a: the poller no longer reads the display cache — each
+    // capture is its own, bound to the pane — and the answer is the same.
     expect((await capturePollerFrame(WT, 'claude', FULL_CAPTURE_LINES)).headCut).toBe(false);
     expect((await capturePollerFrame(WT, 'claude', REDUCED_CAPTURE_LINES)).headCut).toBe(true);
-    expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
+    expect(transport.captureSnapshot).toHaveBeenCalledTimes(3);
   });
 
   it('陽性対照: counted in split elements (the old slice), the first row went', () => {

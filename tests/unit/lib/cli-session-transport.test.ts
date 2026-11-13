@@ -95,10 +95,11 @@ describe('cli-session transport integration', () => {
 
     await expect(captureSessionOutputFresh('wt-1', 'claude', 500)).resolves.toBe('fresh output');
     expect(mockTransport.captureSnapshot).toHaveBeenCalledWith('mcbd-claude-wt-1', { startLine: -500 });
-    expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'fresh output', 500, expect.any(Number));
+    // Issue #4304 F1-a (design §4.5 / §6.4 (iv)): no longer written back to the display cache.
+    expect(setCachedCapture).not.toHaveBeenCalled();
   });
 
-  it('[#3798] a fresh capture writes back the time it started, not the time it came back', async () => {
+  it('[#3798] a fresh capture reports the time it started, not the time it came back — and writes nothing back (#4304)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       const startedAt = 1_800_000_000_000;
@@ -117,7 +118,8 @@ describe('cli-session transport integration', () => {
       finish('slow output');
       await expect(pending).resolves.toBe('slow output');
 
-      expect(setCachedCapture).toHaveBeenCalledWith('mcbd-claude-wt-1', 'slow output', 500, startedAt);
+      // Issue #4304 F1-a (design §4.5): the frame is not written back to the display cache.
+      expect(setCachedCapture).not.toHaveBeenCalled();
       expect(reported).toEqual([{ fetchStartedAt: startedAt, source: 'fetched' }]);
     } finally {
       vi.useRealTimers();

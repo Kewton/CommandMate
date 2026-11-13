@@ -142,21 +142,26 @@ describe('[#3798] a slow fresh capture is dated by its start', () => {
     vi.setSystemTime(T0 + 300);
   }
 
-  it('another observer\'s cache hit on it does not reopen the confirmation the close ended', async () => {
+  it('another observer gets no cache hit on it: the fresh frame is not written back (Issue #4304 F1-a)', async () => {
+    // Before #4304 the slow fresh frame was written back and another observer's
+    // cache hit on it was dated by its start (stale, not reopened). Issue #4304
+    // F1-a (design §4.5) removed the write-back: the observer reads the pane
+    // itself, and its own frame is dated by its own fetch.
     await slowFreshAcrossTheClose(FRAME_A);
 
-    const { plan, frameTime } = await probe(PROMPT_A);
-    expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
-    expect(frameTime).toEqual({ frameCapturedAt: T0, frameFetchedAfterStart: false });
-    expect(plan).toMatchObject({ action: 'ignored', ignoredBecause: 'stale-frame' });
-    expect(getWaitingEpisodeRecord(WT, TOOL, TOOL)).toBeNull();
+    transport.captureSnapshot.mockResolvedValueOnce(FRAME_A);
+    const { frameTime } = await probe(PROMPT_A);
+    expect(transport.captureSnapshot).toHaveBeenCalledTimes(2);
+    expect(frameTime).toEqual({ frameCapturedAt: T0 + 300, frameFetchedAfterStart: true });
   });
 
-  it('control: the same write-back showing another confirmation opens it', async () => {
+  it('control: the same slow fresh capture, then another confirmation read off the pane, opens it', async () => {
     await slowFreshAcrossTheClose(FRAME_B);
 
+    // Issue #4304 F1-a: no write-back, so the probe reads the pane itself.
+    transport.captureSnapshot.mockResolvedValueOnce(FRAME_B);
     const { plan } = await probe(PROMPT_B);
-    expect(transport.captureSnapshot).toHaveBeenCalledTimes(1);
+    expect(transport.captureSnapshot).toHaveBeenCalledTimes(2);
     expect(plan.action).toBe('opened');
     expect(getWaitingEpisodeRecord(WT, TOOL, TOOL)?.promptScreenKey).toBe(promptScreenKey(PROMPT_B));
   });

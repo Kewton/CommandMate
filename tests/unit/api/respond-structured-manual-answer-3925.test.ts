@@ -95,7 +95,8 @@ const SCREEN_PROMPT = vi.hoisted(() => ({
   ],
   status: 'pending' as const,
 }));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn(),
   captureSessionOutputFresh: vi.fn(async () => {
     steps.push('capture');
@@ -120,7 +121,8 @@ vi.mock('@/lib/cli-tools/worktree-session-ownership', async (importOriginal) => 
   return { ...actual, checkWorktreeSessionOwnership: vi.fn(actual.checkWorktreeSessionOwnership) };
 });
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // The session is up (`/prompt-response` answers only a running one); with the
   // name-only ownership above it is this server's.
   hasSession: vi.fn().mockResolvedValue(true),

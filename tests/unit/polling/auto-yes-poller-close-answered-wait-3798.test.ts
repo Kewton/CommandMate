@@ -24,7 +24,8 @@ let db: Database.Database;
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
 const capture = vi.hoisted(() => ({ frame: '' }));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn(async () => {
     globalThis.__captureFrameMetaSink?.getStore()?.({ fetchStartedAt: Date.now(), source: 'fetched' });
     return capture.frame;

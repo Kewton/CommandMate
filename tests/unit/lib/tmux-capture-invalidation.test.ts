@@ -14,7 +14,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock tmux module
 // capturePane returns a Claude prompt pattern so sendMessageToClaude doesn't wait
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   hasSession: vi.fn().mockResolvedValue(true),
@@ -118,6 +119,8 @@ vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
   getCachedCapture: vi.fn().mockReturnValue(null),
   getOrFetchCapture: vi.fn().mockImplementation(async (_name: string, _lines: number, fetchFn: () => Promise<string>) => fetchFn()),
   sliceOutput: vi.fn().mockImplementation((output: string) => output),
+  // Issue #4304 F1-a: read by the bound capture.
+  sliceCutsHead: vi.fn().mockReturnValue(false),
   resetCacheForTesting: vi.fn(),
   CACHE_TTL_MS: 3000,
   CACHE_MAX_ENTRIES: 100,

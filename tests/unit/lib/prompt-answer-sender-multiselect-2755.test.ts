@@ -14,14 +14,17 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(),
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
   invalidateCache: vi.fn(),
 }));
 
@@ -34,6 +37,7 @@ import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import { isMultipleChoicePrompt } from '../../helpers/prompt-type-guards';
 import type { MultipleChoicePromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const SESSION = 'mcbd-command-code-wt';
 const RULE = '─'.repeat(200);
@@ -347,7 +351,7 @@ describe('[#2755] the arm is entered only for what it was measured on', () => {
       answer: '2',
       cliToolId: 'command-code',
       promptData: data,
-      frame: single,
+      frame: testBoundFrame(single),
     });
 
     expect(sendKeys).toHaveBeenCalledTimes(1);
@@ -367,7 +371,7 @@ describe('[#2755] the arm is entered only for what it was measured on', () => {
       answer: '2',
       cliToolId: 'claude',
       promptData: data,
-      frame,
+      frame: testBoundFrame(frame),
     });
 
     expect(keyCalls()).toEqual([['Down', 'Enter']]);

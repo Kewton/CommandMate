@@ -33,7 +33,8 @@ const stubs = vi.hoisted(() => ({
   db: { current: null as Database.Database | null },
 }));
 
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: (...a: unknown[]) => stubs.captureSessionOutput(...a),
   captureSessionOutputFresh: (...a: unknown[]) => stubs.captureSessionOutputFresh(...a),
   isSessionRunning: (...a: unknown[]) => stubs.isSessionRunning(...a),
@@ -56,7 +57,8 @@ vi.mock('@/lib/polling/structured-history-gate', () => ({
 vi.mock('@/lib/tmux/geometry-delegation', () => ({
   probeGeometryDelegation: vi.fn(async () => ({ delegated: false, released: false })),
 }));
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   sendKeys: (...a: unknown[]) => stubs.sendKeys(...(a as [])),
   sendSpecialKeys: (...a: unknown[]) => stubs.sendSpecialKeys(...(a as [])),
   capturePane: vi.fn(async () => ''),

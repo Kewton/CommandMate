@@ -44,7 +44,8 @@ vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 const capturePane = vi.fn(async (_session: string, _lines?: number) => '');
 const sendKeys = vi.fn(async (_session: string, _keys: string, _enter?: boolean) => {});
 const sendSpecialKeys = vi.fn(async (_session: string, _keys: string[]) => {});
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   capturePane: (session: string, lines?: number) => capturePane(session, lines),
@@ -52,12 +53,18 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendSpecialKeys: (session: string, keys: string[]) => sendSpecialKeys(session, keys),
 }));
 
-vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn() }));
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
+  captureSessionOutput: vi.fn() }));
 vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({
@@ -109,6 +116,7 @@ import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { detectAndRespondToPrompt, type AutoYesPollerState } from '@/lib/auto-yes-poller';
 import type { DialogVerdict } from '@/lib/detection/tools/types';
 import type { MultipleChoicePromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const FIXTURE = path.resolve(
   __dirname,
@@ -300,7 +308,7 @@ describe('[#2609] 1. Allow and 3. Cancel are not confused with 2. Always allow',
       answer,
       cliToolId: 'codex',
       promptData: choicesOf(FORM),
-      frame: FORM,
+      frame: testBoundFrame(FORM),
     });
 
     // The `numbered` verdict clears the #2033 guard, and codex takes the digit

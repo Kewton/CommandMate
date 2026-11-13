@@ -64,13 +64,15 @@ vi.mock('@/lib/db/db-instance', () => {
     },
   };
 });
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn().mockResolvedValue(''),
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
 }));
@@ -131,9 +133,16 @@ async function post(body: Record<string, unknown>) {
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
-/** Taken: the capture fails, so the route sends without re-verifying (#161 fallback). */
+/**
+ * Taken: the frame cannot be read as a prompt, so the route sends without
+ * re-verifying (#161 fallback). Issue #4304 F1-a: a capture that fails is no
+ * longer this case — it is refused with nothing typed — so the reading throws
+ * on a frame that was bound instead.
+ */
 function arrangeTaken(): void {
-  vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+  vi.mocked(detectPrompt).mockImplementation(() => {
+    throw new Error('reading failed (test)');
+  });
 }
 
 /** Refused: the prompt is gone by the re-verification (`success: false`). */

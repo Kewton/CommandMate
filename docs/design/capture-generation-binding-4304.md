@@ -434,6 +434,25 @@ T1〜T10・TA〜TF はこの全表の代表の行と位置付ける。実装の 
 | R11-b5（状態の証拠）・R11-f2（起動中）・R11-f3（model のラッチ）の読み手が行動に使うか | 各 `observe*`・`record*` の読み手を全件読む | F1-b の最初。表示だけと分かれば §3.3 の区別を直す |
 | `--issue` の並列サーバーが同じ pane を扱わないこと（§4.7 の保証の範囲の前提） | 並列サーバーのセッション名の作り方と tmux の socket を読む | #4304 PR2a の最初 |
 
+#### 7.1.1 F1-a の最初の実測（2026-11-14、§4.8 E-1〜E-4）
+
+隔離の `tmux -L cm4304f1a-probe -f /dev/null`（tmux 3.5a、macOS）で実測した。本番の tmux server には触っていない。後始末は同じ `-L` の `kill-server`。
+
+| 項目 | 実測 | 判定 |
+|---|---|---|
+| E-1 `start_time` の精度 | `#{start_time}` は `1794589716`（`date +%s` と同じ値）。秒の整数 | 秒。同じ秒の中の server の入れ替わりを `start_time` だけでは区別できない |
+| E-2 pane id の採番・再利用 | `%0`→`%1` を作り `%1` の session を kill → 次は `%2`（`%1` を再利用しない）。`new-window -k` は新しい id（`%3`） | 1 つの server の中で再利用しない（実測）。採番が server 全体の単調増加の 1 つの変数であることは tmux のソースで確かめていない（**未確認**。§4.8 の「実験で増えたことだけで一般化しない」に従い、server の識別を足して閉じる） |
+| E-3 同じ socket の server の入れ替わり | `kill-server` → 同じ `-L` で起動し直すと pane は `%0` から振り直し、`start_time` は新しい値、`#{pid}`（server の PID）も別 | `%N` は server を跨いで衝突する。`start_time` は秒なので同じ秒の再起動は区別できない → **候補 (1) server の PID を足す** |
+| E-4 `respawn-pane -k` | 前後で `%2`→`%2`（保たれる） | §1.5 のとおり、F1 の世代は同じ pane の中の起動し直しを区別しない |
+| dead pane の読み（§7.1 の 2 行目） | `remain-on-exit` の dead pane で `display-message -p -t %N '#{pane_dead}'` は `1`、`capture-pane -p -t %N` は exit 0 で最後の出力と `Pane is dead (status 0, …)` を返す | 読める |
+| 消えた `%N` | `capture-pane -t %N` は exit 1（`can't find pane: %N`）。**`display-message -p -t %N` は exit 0 で空行**（消えた session `=s:` も同じ） | capture は失敗で区別できる。`display-message` は exit code で区別できないので、空行・形の違う出力は null とし、`readPaneGenerationById` は答えの `pane_id` が問うた `%N` と同じことも要求する |
+
+**採った世代の識別子**: `(start_time, pid, pane_id)`（`PaneGeneration = { serverStartTime, serverPid, paneId }`、`src/lib/tmux/tmux.ts`）。`display-message` の書式は `#{start_time}\t#{pid}\t#{pane_id}\t#{pane_dead}` の 1 回。
+
+- 選んだ理由: E-3 で `%N` は再起動で振り直され、`start_time` は秒なので、同じ秒の再起動（TE1 の「同じ pane 番号・同じ start_time の表現」）を区別するには server の PID が要る（候補 (1)）。同じ秒に同じ PID の server が立つことは保証の外（**読み**: PID の再利用が 1 秒の中で起きる場合だけ）。候補 (2) の server option の印は、server へ書き込む（`set-option` をサーバーグローバルに撃つ）ので F1-a では採らない
+- 候補 (3)「server が変わったら持っている期待の世代を全部失効」は、識別子に server を含めたことで自動的に満たす（server が変われば `samePaneGeneration` が false → `generation-mismatch` で unknown）
+- U2 はこの結果でリーダーが確定する（§7.2）。F1-a の実装はこの識別子で書いた
+
 ### 7.2 未決（誰が・何で・いつ決めるか）
 
 | # | 未決 | 誰が | 何で | いつ／決まるまで |

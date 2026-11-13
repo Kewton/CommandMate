@@ -51,7 +51,8 @@ const captureSessionOutputFresh = vi.fn(async () => {
   if (freshGate) await freshGate.promise;
   return pane;
 });
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: () => captureSessionOutput(),
   captureSessionOutputFresh: () => captureSessionOutputFresh(),
   getSessionPresence: vi.fn(async () => 'present'),
@@ -88,9 +89,16 @@ const sendSpecialKeys = vi.fn(
 const sendKeys = vi.fn(async (_session: string, keys: string, enter = true) => {
   keysSent.push(enter ? `${keys}<Enter>` : keys);
 });
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
-  readPaneForeground: async () => 'other' as const,
+  readPaneForeground: async () => {
+      // Issue #4304 F1-a: Auto-Yes hands the sender its tick's bound frame, so the
+      // sender reads no guard frame of its own; the hold before the first key is
+      // the reads right before it (this one, then the pane's generation).
+      if (guardReadGate) await guardReadGate.promise;
+      return 'other' as const;
+  },
   sendSpecialKeys: (s: string, k: string[], o?: { shouldContinue?: () => boolean }) => sendSpecialKeys(s, k, o),
   sendKeys: (s: string, k: string, e?: boolean) => sendKeys(s, k, e),
   capturePane: async () => {

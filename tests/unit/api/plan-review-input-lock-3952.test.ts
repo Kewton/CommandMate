@@ -17,7 +17,8 @@ import path from 'node:path';
 
 let events: string[] = [];
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn(async (_s: string, text: string) => {
@@ -27,7 +28,11 @@ vi.mock('@/lib/tmux/tmux', () => ({
     events.push(...keys);
   }),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 import { answerCommandCodePlanReview } from '@/app/api/worktrees/[id]/prompt-response/plan-review';
 import { readCommandCodePlanReviewState } from '@/lib/detection/tools/command-code/plan-review-state';
@@ -42,6 +47,7 @@ import {
   sendCommandCodePlanReviewKeys,
   type PlanReviewKeyStep,
 } from '@/lib/cli-tools/command-code-plan-review';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const SESSION = 'mcbd-command-code-wt-3952';
 const FIXTURES = path.resolve(__dirname, '../../fixtures/command-code-plan-review-3125');
@@ -82,13 +88,14 @@ describe('[#3952] plan-review keys and the input lock', () => {
   it('positive: the overlay is gone once the send is over — nothing is sent', async () => {
     const readMark = instanceInputReadMark();
     const held = holdSend();
-    const recapture = vi.fn(async () => COMPOSER);
+    const recapture = vi.fn(async () => testBoundFrame(COMPOSER));
     const answering = answerCommandCodePlanReview({
       sessionName: SESSION,
       state,
       action: 'approve',
       answer: undefined,
       useDefault: false,
+      frame: testBoundFrame(INITIAL),
       readMark,
       recapture,
     });
@@ -112,8 +119,9 @@ describe('[#3952] plan-review keys and the input lock', () => {
       action: 'approve',
       answer: undefined,
       useDefault: false,
+      frame: testBoundFrame(INITIAL),
       readMark,
-      recapture: async () => INITIAL,
+      recapture: async () => testBoundFrame(INITIAL),
     });
     await flush();
     held.release();
@@ -131,8 +139,9 @@ describe('[#3952] plan-review keys and the input lock', () => {
       action: 'comment',
       answer: 'please split this step',
       useDefault: false,
+      frame: testBoundFrame(INITIAL),
       readMark: instanceInputReadMark(),
-      recapture: async () => INITIAL,
+      recapture: async () => testBoundFrame(INITIAL),
     });
     await vi.advanceTimersByTimeAsync(10);
     expect(events).toEqual(['Enter']);
@@ -146,13 +155,14 @@ describe('[#3952] plan-review keys and the input lock', () => {
   });
 
   it('negative: nothing holds the composer — sent without a second read', async () => {
-    const recapture = vi.fn(async () => COMPOSER);
+    const recapture = vi.fn(async () => testBoundFrame(COMPOSER));
     const result = await answerCommandCodePlanReview({
       sessionName: SESSION,
       state,
       action: 'cancel',
       answer: undefined,
       useDefault: false,
+      frame: testBoundFrame(INITIAL),
       readMark: instanceInputReadMark(),
       recapture,
     });
@@ -171,8 +181,9 @@ describe('[#3952 review P2-3] a plan review answer whose input was taken mid-key
       action: 'comment',
       answer: 'please split this step',
       useDefault: false,
+      frame: testBoundFrame(INITIAL),
       readMark: instanceInputReadMark(),
-      recapture: async () => INITIAL,
+      recapture: async () => testBoundFrame(INITIAL),
     });
     const settled = answering.then(
       () => null,
@@ -196,8 +207,9 @@ describe('[#3952 review P2-3] a plan review answer whose input was taken mid-key
       action: 'comment',
       answer: 'please split this step',
       useDefault: false,
+      frame: testBoundFrame(INITIAL),
       readMark: instanceInputReadMark(),
-      recapture: async () => INITIAL,
+      recapture: async () => testBoundFrame(INITIAL),
     });
     await vi.runAllTimersAsync();
     await answering;

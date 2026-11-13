@@ -57,8 +57,8 @@ vi.mock('child_process', async (importOriginal) => {
 
 vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tmux/tmux')>();
-  return {
-    ...actual,
+  return (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+    // Issue #4304 F1-a: answers read a pane bound to its generation.
     capturePane: vi.fn(async () => ''),
     sendKeys: vi.fn((...args: Parameters<typeof actual.sendKeys>) =>
       h.realSendKeys ? actual.sendKeys(...args) : Promise.resolve()
@@ -70,9 +70,13 @@ vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
       const foreground = h.foreground;
       return h.hold === null ? Promise.resolve(foreground) : h.hold.then(() => foreground);
     }),
-  };
+  }, actual);
 });
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
 import {

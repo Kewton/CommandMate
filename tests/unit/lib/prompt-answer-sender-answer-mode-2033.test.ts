@@ -47,7 +47,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
@@ -64,6 +65,7 @@ import {
 } from '@/lib/prompt-answer-sender';
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import type { PromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const FIXTURES = path.resolve(__dirname, 'detection/fixtures');
 
@@ -116,7 +118,7 @@ describe('[#2033] a keys-mode dialog refuses a typed number', () => {
       answer: '3',
       cliToolId: 'opencode',
       promptData: MULTIPLE_CHOICE,
-      frame: OPENCODE_PERMISSION(),
+      frame: testBoundFrame(OPENCODE_PERMISSION()),
     });
 
     // The acceptance condition, stated as keys: neither the `3` nor the Enter.
@@ -132,7 +134,7 @@ describe('[#2033] a keys-mode dialog refuses a typed number', () => {
       answer: '1',
       cliToolId: 'opencode',
       promptData: MULTIPLE_CHOICE,
-      frame: OPENCODE_PERMISSION(),
+      frame: testBoundFrame(OPENCODE_PERMISSION()),
     });
     expectNothingSent();
   });
@@ -159,7 +161,7 @@ describe('[#2033] the rule is answerMode, not the tool id', () => {
       answer: '2',
       cliToolId: 'copilot',
       promptData: MULTIPLE_CHOICE,
-      frame: COPILOT_PICKER(),
+      frame: testBoundFrame(COPILOT_PICKER()),
     });
 
     expectNothingSent();
@@ -173,7 +175,7 @@ describe('[#2033] the rule is answerMode, not the tool id', () => {
       answer: '2',
       cliToolId: 'copilot',
       promptData: MULTIPLE_CHOICE,
-      frame: COPILOT_PERMISSION(),
+      frame: testBoundFrame(COPILOT_PERMISSION()),
     });
 
     expect(sendKeys).toHaveBeenCalledWith('mcbd-copilot-wt', '2', false, { literal: true });
@@ -188,7 +190,7 @@ describe('[#2033] the numeric paths that were already correct are unchanged', ()
       answer: '1',
       cliToolId: 'codex',
       promptData: MULTIPLE_CHOICE,
-      frame: CODEX_APPROVAL(),
+      frame: testBoundFrame(CODEX_APPROVAL()),
     });
 
     expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-wt', '1', false, { literal: true });
@@ -200,7 +202,7 @@ describe('[#2033] the numeric paths that were already correct are unchanged', ()
       answer: '2',
       cliToolId: 'claude',
       promptData: MULTIPLE_CHOICE,
-      frame: CLAUDE_APPROVAL(),
+      frame: testBoundFrame(CLAUDE_APPROVAL()),
     });
 
     expect(sendSpecialKeys).toHaveBeenCalledWith('mcbd-claude-wt', ['Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
@@ -229,7 +231,7 @@ describe('[#2033] the guard is scoped to numeric answers and readable panes', ()
       sessionName: 'mcbd-opencode-wt',
       answer: 'y',
       cliToolId: 'opencode',
-      frame: OPENCODE_PERMISSION(),
+      frame: testBoundFrame(OPENCODE_PERMISSION()),
     });
 
     // Not an endorsement of `y` on a button strip — that is #1681's resolver's
@@ -243,26 +245,28 @@ describe('[#2033] the guard is scoped to numeric answers and readable panes', ()
       sessionName: 'mcbd-opencode-wt',
       answer: '1',
       cliToolId: 'opencode',
-      frame: frame('opencode-live-1893', 'turn-complete-short'),
+      frame: testBoundFrame(frame('opencode-live-1893', 'turn-complete-short')),
     });
 
     expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', '1', false, { literal: true });
   });
 
-  it('falls open when the pane cannot be captured at all', async () => {
-    // Deliberate: `/prompt-response` makes the same call for its own pre-send
-    // verification ("If capture fails, proceed with caution - don't block manual
-    // responses"). An unreadable pane is far more often a dead transport than an
-    // open dialog, and refusing there would break the operator's way out.
+  it('no longer falls open when the pane cannot be captured at all: nothing is typed (Issue #4304 F1-a)', async () => {
+    // Issue #4304 F1-a (the person's decision of 2026-11-14): this used to
+    // send — "an unreadable pane is far more often a dead transport than an
+    // open dialog". A digit typed at a pane nobody read is the hole F1-a
+    // closes: refused with nothing typed, free to be sent again.
     vi.mocked(capturePane).mockRejectedValue(new Error('Failed to capture pane: no server'));
 
-    await sendPromptAnswer({
+    const error = await sendPromptAnswer({
       sessionName: 'mcbd-opencode-wt',
       answer: '1',
       cliToolId: 'opencode',
-    });
+    }).then(() => null, (e: unknown) => e);
 
-    expect(sendKeys).toHaveBeenCalledWith('mcbd-opencode-wt', '1', false, { literal: true });
+    expect(error).toMatchObject({ name: 'PromptAnswerNotDeliveredError', keysSent: false, generationCheck: 'capture-failed' });
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
   });
 });
 
@@ -302,7 +306,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       answer: '2',
       cliToolId: 'command-code',
       promptData: PERMISSION_PROMPT,
-      frame: COMMAND_CODE_PERMISSION(),
+      frame: testBoundFrame(COMMAND_CODE_PERMISSION()),
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '2', false, { literal: true }]]);
@@ -329,7 +333,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       sessionName: 'mcbd-command-code-wt',
       answer: '1',
       cliToolId: 'command-code',
-      frame: COMMAND_CODE_PERMISSION(),
+      frame: testBoundFrame(COMMAND_CODE_PERMISSION()),
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false, { literal: true }]]);
@@ -342,7 +346,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       cliToolId: 'command-code',
       promptData: { ...PERMISSION_PROMPT, submitMode: 'answer_then_enter' },
       fallbackSubmitMode: 'answer_then_enter',
-      frame: COMMAND_CODE_PERMISSION(),
+      frame: testBoundFrame(COMMAND_CODE_PERMISSION()),
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-command-code-wt', '1', false, { literal: true }]]);
@@ -356,7 +360,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       answer: '1',
       cliToolId: 'command-code',
       promptData: PERMISSION_PROMPT,
-      frame: COMMAND_CODE_IDLE(),
+      frame: testBoundFrame(COMMAND_CODE_IDLE()),
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
@@ -379,7 +383,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       answer: 'use a background task instead',
       cliToolId: 'command-code',
       promptData: PERMISSION_PROMPT,
-      frame: COMMAND_CODE_PERMISSION(),
+      frame: testBoundFrame(COMMAND_CODE_PERMISSION()),
     });
 
     await expect(sent).rejects.toBeInstanceOf(FreeTextAnswerRejectedError);
@@ -400,7 +404,7 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
       answer: '1',
       cliToolId: 'codex',
       promptData: MULTIPLE_CHOICE,
-      frame: CODEX_APPROVAL(),
+      frame: testBoundFrame(CODEX_APPROVAL()),
     });
 
     expect(vi.mocked(sendKeys).mock.calls).toEqual([

@@ -18,9 +18,6 @@ import type { SessionTransport } from '@/lib/tmux/session-transport';
 import { getPollingTmuxTransport } from '@/lib/tmux/polling-tmux-transport';
 import {
   getOrFetchCapture,
-  getCaptureGeneration,
-  isCaptureGenerationCurrent,
-  setCachedCapture,
   invalidateCache,
   sliceOutput,
   sliceCutsHead,
@@ -42,10 +39,22 @@ import {
   forgetSessionStatus,
   publishSessionStatus,
 } from '@/lib/tmux/session-status-options';
-import { getPaneCurrentCommand, probeSession, sendSpecialKeys, type SessionPresence } from '@/lib/tmux/tmux';
+import {
+  capturePaneById,
+  getPaneCurrentCommand,
+  probeSession,
+  readPaneGeneration,
+  readPaneGenerationById,
+  samePaneGeneration,
+  sendSpecialKeys,
+  type PaneGeneration,
+  type PaneGenerationReading,
+  type SessionPresence,
+} from '@/lib/tmux/tmux';
 import { isLiveAttachEligibleSession } from './tmux-session-surface';
 
 export type { CaptureFrameMeta };
+export type { PaneGeneration, PaneGenerationReading };
 
 const logger = createLogger('cli-session');
 
@@ -189,9 +198,12 @@ export async function captureSessionOutput(
 /**
  * Capture CLI session output bypassing cache (fresh capture).
  *
- * Issue #405: Used by prompt-response endpoint to ensure fresh output
- * for prompt re-verification. Writes back to cache on success, unless the
- * session was invalidated while the capture was in flight (Issue #3734).
+ * Issue #405: a fresh read of the pane for a caller that must not be served a
+ * frame up to 5 s old. Issue #4304 F1-a (design §4.5): it no longer writes its
+ * frame back into the display cache — that frame is keyed by the session's name
+ * only and may be of a pane the session no longer shows. A caller that ACTS on
+ * the frame (an answer, its verification) reads {@link captureBoundFrame}
+ * instead; this one is for readers not yet bound (F1-b).
  *
  * @param worktreeId - Worktree ID
  * @param cliToolId - CLI tool ID
@@ -210,24 +222,18 @@ export async function captureSessionOutputFresh(
   const { cliTool, sessionName } = resolveSessionContext(worktreeId, cliToolId, instanceId);
   const transport = getDefaultTransport();
 
-  // Issue #3734: snapshot the generation before the capture starts
-  const generation = getCaptureGeneration(sessionName);
-  // Issue #3798: and the time, so the cache says when this frame was fetched,
+  // Issue #3798: the time, so the observer says when this frame was fetched,
   // not when a slow capture came back
   const fetchStartedAt = Date.now();
 
   try {
     const output = await transport.captureSnapshot(sessionName, { startLine: -lines });
 
-    // Write back to cache if non-empty [SEC4-007]. Skip it when the session was
-    // invalidated while waiting: the output may predate a send (Issue #3734).
-    if (output.length > 0) {
-      if (isCaptureGenerationCurrent(sessionName, generation)) {
-        setCachedCapture(sessionName, output, lines, fetchStartedAt);
-      }
-    } else {
-      invalidateCache(sessionName);
-    }
+    // Issue #4304 F1-a (§4.5): never written back to the display cache — the
+    // cache is keyed by the session's name, and a frame of a pane the session
+    // has since replaced must not be served to its next reader. An empty one
+    // still drops what the cache holds, as before.
+    if (output.length === 0) invalidateCache(sessionName);
 
     reportFrameMeta({ fetchStartedAt, source: 'fetched' });
     const headCutSink = globalThis.__captureHeadCutSink?.getStore();
@@ -240,6 +246,160 @@ export async function captureSessionOutputFresh(
     log.error('captureSessionOutputFresh:failed', { error: errorMessage });
     throw new Error(`Failed to capture ${cliTool.name} output: ${errorMessage}`);
   }
+}
+
+// ===========================================================================
+// Frames bound to the pane they came from (Issue #4304 F1-a)
+// ===========================================================================
+
+/**
+ * Type-only brand: a {@link BoundFrame} cannot be spelled by hand, only
+ * returned by {@link captureBoundFrame} (design §4.3, "外から世代の値を足しても
+ * 確認済みにならない"). There is no runtime value behind it; the guard
+ * `tests/unit/guards/bound-frame-answer-entry-4304.test.ts` holds every
+ * `as BoundFrame` cast to this module and the test helper.
+ */
+declare const boundFrameBrand: unique symbol;
+
+/**
+ * A frame together with the pane generation it was read from (Issue #4304 F1-a,
+ * design §4.1): the generation was read (①), that pane was captured by its id
+ * (②), and the same generation and the same `dead` were read again (③). The
+ * only value an answer's entry points accept as "the screen" (§4.3).
+ */
+export interface BoundFrame {
+  readonly kind: 'bound';
+  readonly [boundFrameBrand]: true;
+  /** The session the generation was read for. */
+  readonly sessionName: string;
+  /** The raw capture: ANSI and box drawing intact. */
+  readonly frame: string;
+  readonly generation: PaneGeneration;
+  /** `pane_dead`, the same at ① and ③. */
+  readonly dead: boolean;
+  /** Whether the window dropped rows from the top of what tmux returned (#3881 N4). */
+  readonly headCut: boolean;
+}
+
+/** Why {@link captureBoundFrame} could not bind a frame (design §4.2). None allows an action. */
+export type BoundFrameUnknownReason =
+  /** ① or ③ could not be read (tmux failed, timed out, the session is gone, an empty or odd answer). */
+  | 'generation-unreadable'
+  /** ① is not the generation the caller holds: the pane it confirmed is no longer the session's. */
+  | 'generation-mismatch'
+  /** ② failed: the pane is gone, or tmux failed or timed out. */
+  | 'capture-failed'
+  /** ① and ③ differ (generation or `dead`): which pane or state the frame shows cannot be said. */
+  | 'changed-during-capture';
+
+/** A capture that could not be bound to a generation (design §4.2): no key, no save, no "resolved". */
+export interface BoundFrameUnknown {
+  readonly kind: 'unknown';
+  readonly reason: BoundFrameUnknownReason;
+  readonly sessionName: string;
+}
+
+/** What {@link captureBoundFrame} answers. */
+export type BoundCapture = BoundFrame | BoundFrameUnknown;
+
+/** A session named directly, or by its worktree / tool / instance. */
+export type BoundFrameTarget =
+  | { readonly sessionName: string }
+  | { readonly worktreeId: string; readonly cliToolId: CLIToolType; readonly instanceId?: string };
+
+/** The rows {@link captureBoundFrame} reads when the caller names none (`captureSessionOutputFresh`'s default). */
+export const BOUND_FRAME_DEFAULT_LINES = 5000;
+
+function sessionNameOf(target: BoundFrameTarget): string {
+  return 'sessionName' in target
+    ? target.sessionName
+    : resolveSessionContext(target.worktreeId, target.cliToolId, target.instanceId).sessionName;
+}
+
+/**
+ * Capture a session's pane bound to its generation (Issue #4304 F1-a, design
+ * §4.1): ① read the session's current pane generation — when `expected` is
+ * given it must be that one — ② capture THAT pane by its `%N`, ③ read `%N`'s
+ * generation again; the frame is returned only when ① and ③ agree on the
+ * generation and on `dead`. Never reads or writes the display cache (§4.5).
+ * Never throws: every failure is a {@link BoundFrameUnknown}.
+ *
+ * @param target - The session
+ * @param options.lines - Rows to read from the bottom (default {@link BOUND_FRAME_DEFAULT_LINES})
+ * @param options.expected - The generation the caller holds; any other is `generation-mismatch`
+ * @param options.window - `sliced` (default): the rows the cache and
+ *   `captureSessionOutputFresh` hand back, the last `lines` of what tmux
+ *   returned (#3881). `tmux`: what `capture-pane -S -<lines>` returned, whole —
+ *   the visible pane plus `lines` of history, as `capturePane(session, lines)`
+ *   reads it (the answer sender's own reads).
+ */
+export async function captureBoundFrame(
+  target: BoundFrameTarget,
+  options: { lines?: number; expected?: PaneGeneration; window?: 'sliced' | 'tmux' } = {},
+): Promise<BoundCapture> {
+  const sessionName = sessionNameOf(target);
+  const lines = options.lines ?? BOUND_FRAME_DEFAULT_LINES;
+  const unknown = (reason: BoundFrameUnknownReason): BoundFrameUnknown => ({ kind: 'unknown', reason, sessionName });
+
+  const before = await readPaneGeneration(sessionName);
+  if (before === null) return unknown('generation-unreadable');
+  if (options.expected !== undefined && !samePaneGeneration(before.generation, options.expected)) {
+    return unknown('generation-mismatch');
+  }
+  const fetchStartedAt = Date.now();
+  let output: string;
+  try {
+    output = await capturePaneById(before.generation.paneId, lines);
+  } catch {
+    return unknown('capture-failed');
+  }
+  const after = await readPaneGenerationById(before.generation.paneId);
+  if (after === null) return unknown('generation-unreadable');
+  if (!samePaneGeneration(before.generation, after.generation) || before.dead !== after.dead) {
+    return unknown('changed-during-capture');
+  }
+  // Issue #3798: the observer this capture runs for is told it was fetched now.
+  reportFrameMeta({ fetchStartedAt, source: 'fetched' });
+  const sliced = options.window !== 'tmux';
+  const headCut = sliced && sliceCutsHead(output, lines);
+  reportHeadCut(headCut);
+  return {
+    kind: 'bound',
+    sessionName,
+    frame: sliced ? sliceOutput(output, lines) : output,
+    generation: before.generation,
+    dead: before.dead,
+    headCut,
+  } as BoundFrame;
+}
+
+/**
+ * The generation of a session's current pane, with whether it is dead (Issue
+ * #4304 F1-a), or null when it cannot be read. For an answer decided without a
+ * frame of its own (a caller that hands over only the prompt): the pane every
+ * key then goes to, confirmed again right before the first. Never throws.
+ */
+export async function readSessionPaneGeneration(sessionName: string): Promise<PaneGenerationReading | null> {
+  try {
+    return await readPaneGeneration(sessionName);
+  } catch {
+    return null;
+  }
+}
+
+/** A generation check right before a key: `same`, or why it is not (design §4.4 R5). */
+export type PaneGenerationCheck = 'same' | 'generation-unreadable' | 'generation-mismatch' | 'pane-dead';
+
+/**
+ * Whether the session still shows the pane `expected` names, alive (Issue
+ * #4304 F1-a, design §4.4 R5): the look an answer takes right before its first
+ * key, on every path. Never throws.
+ */
+export async function checkPaneGeneration(sessionName: string, expected: PaneGeneration): Promise<PaneGenerationCheck> {
+  const now = await readPaneGeneration(sessionName);
+  if (now === null) return 'generation-unreadable';
+  if (!samePaneGeneration(now.generation, expected)) return 'generation-mismatch';
+  return now.dead ? 'pane-dead' : 'same';
 }
 
 /** The keys the strict `respond` (Issue #3756) answers a screen with. */

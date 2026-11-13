@@ -373,6 +373,120 @@ export async function readPaneForeground(sessionName: string): Promise<PaneForeg
 }
 
 /**
+ * The generation of a pane (Issue #4304 F1-a, design
+ * `docs/design/capture-generation-binding-4304.md` §4.1 / §4.8): which tmux
+ * server it lives in and which pane of that server it is.
+ *
+ * `paneId` (`%N`) is unique for the pane's life inside one server and never
+ * reused there (measured §7.1 E-2: a killed `%1` was followed by `%2`, not `%1`).
+ * It restarts at `%0` when the server is restarted on the same socket (E-3), so
+ * the server is identified too: `start_time` alone is whole seconds (E-1) and
+ * two restarts in one second would share it, which the server's PID tells apart
+ * (§4.8 candidate (1)).
+ */
+export interface PaneGeneration {
+  /** `#{start_time}`: the server's start, epoch seconds. */
+  readonly serverStartTime: string;
+  /** `#{pid}`: the server's process id. */
+  readonly serverPid: string;
+  /** `#{pane_id}`: `%N`. */
+  readonly paneId: string;
+}
+
+/** A pane's generation as one `display-message` read it, with whether the pane is dead then. */
+export interface PaneGenerationReading {
+  readonly generation: PaneGeneration;
+  /** `#{pane_dead}`: the pane's process has exited (`remain-on-exit`). */
+  readonly dead: boolean;
+}
+
+/** The one format both generation reads ask tmux for. */
+const PANE_GENERATION_FORMAT = '#{start_time}\t#{pid}\t#{pane_id}\t#{pane_dead}';
+
+/** A `%N` pane id, the only shape {@link readPaneGenerationById} / {@link capturePaneById} target. */
+const PANE_ID_PATTERN = /^%\d+$/;
+
+/** Parse {@link PANE_GENERATION_FORMAT}'s output; null for anything else (an empty line included). */
+function parsePaneGeneration(stdout: string): PaneGenerationReading | null {
+  const match = /^(\d+)\t(\d+)\t(%\d+)\t([01])\s*$/.exec(stdout);
+  if (match === null) return null;
+  return {
+    generation: { serverStartTime: match[1], serverPid: match[2], paneId: match[3] },
+    dead: match[4] === '1',
+  };
+}
+
+/** Whether two readings name the same pane of the same server (Issue #4304). */
+export function samePaneGeneration(a: PaneGeneration, b: PaneGeneration): boolean {
+  return a.serverStartTime === b.serverStartTime && a.serverPid === b.serverPid && a.paneId === b.paneId;
+}
+
+/**
+ * Read the generation of a session's current pane (Issue #4304 F1-a). One
+ * `display-message`. Null when it cannot be read: tmux failed or timed out,
+ * the session is gone, or the answer is empty or of another shape. Never throws.
+ */
+export async function readPaneGeneration(sessionName: string): Promise<PaneGenerationReading | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', '-t', exactTarget(sessionName), PANE_GENERATION_FORMAT],
+      { timeout: DEFAULT_TIMEOUT }
+    );
+    return parsePaneGeneration(String(stdout));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the generation of one pane by its id (Issue #4304 F1-a), the read after
+ * a capture. Null when it cannot be read — and when tmux answers for another
+ * pane: a `display-message -t %N` whose `%N` is gone exits 0 with an empty line
+ * (measured on tmux 3.5a, §7.1), so the id it answers for must be the one asked.
+ * Never throws.
+ */
+export async function readPaneGenerationById(paneId: string): Promise<PaneGenerationReading | null> {
+  if (!PANE_ID_PATTERN.test(paneId)) return null;
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['display-message', '-p', '-t', paneId, PANE_GENERATION_FORMAT],
+      { timeout: DEFAULT_TIMEOUT }
+    );
+    const reading = parsePaneGeneration(String(stdout));
+    return reading !== null && reading.generation.paneId === paneId ? reading : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Capture one pane by its id (Issue #4304 F1-a), never by the session's name:
+ * a pane that is gone fails here (`can't find pane: %N`, exit 1, measured
+ * §7.1) instead of handing back whatever pane the session shows now. Not
+ * retried against another target.
+ *
+ * @param paneId - `%N`
+ * @param lines - Rows of scrollback to read, counted from the bottom
+ * @throws when the id is malformed or tmux fails
+ */
+export async function capturePaneById(paneId: string, lines: number): Promise<string> {
+  if (!PANE_ID_PATTERN.test(paneId)) throw new Error(`Failed to capture pane: not a pane id: ${paneId}`);
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['capture-pane', '-t', paneId, '-p', '-e', '-S', String(-lines), '-E', '-'],
+      { timeout: DEFAULT_TIMEOUT, maxBuffer: 10 * 1024 * 1024 }
+    );
+    return stdout;
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to capture pane: ${errorMessage}`);
+  }
+}
+
+/**
  * List all tmux sessions
  *
  * @returns Array of tmux session information

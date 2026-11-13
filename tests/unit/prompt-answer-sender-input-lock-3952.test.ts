@@ -28,7 +28,8 @@ let delivered: string[] = [];
 /** Told each time a key lands. */
 let onKey: (key: string) => void = () => {};
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(),
@@ -44,12 +45,17 @@ vi.mock('@/lib/tmux/tmux', () => ({
     }
   }),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 import { PromptAnswerNotDeliveredError, sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { capturePane } from '@/lib/tmux/tmux';
 import { resetInstanceInputLocks, withInstanceInputLock } from '@/lib/session/instance-input-lock';
 import type { PromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const SESSION = 'cm-wt-3952-claude';
 const OTHER_SESSION = 'cm-wt-3952-claude-2';
@@ -191,7 +197,7 @@ describe('[#3952] an answer that arrives during a send', () => {
         { number: 1, label: 'Yes', isDefault: true },
         { number: 2, label: 'No, and tell Claude what to do differently (esc)', requiresTextInput: true },
       ] },
-      frame: choiceFrame('npm test'),
+      frame: testBoundFrame(choiceFrame('npm test')),
     });
     await flush();
     vi.mocked(capturePane).mockResolvedValue(choiceFrame('rm -rf build'));
@@ -211,7 +217,7 @@ describe('[#3952] an answer that arrives during a send', () => {
         { number: 1, label: 'Yes', isDefault: true },
         { number: 2, label: 'No, and tell Claude what to do differently (esc)', requiresTextInput: true },
       ] },
-      frame: choiceFrame('npm test'),
+      frame: testBoundFrame(choiceFrame('npm test')),
     });
     await flush();
     vi.mocked(capturePane).mockResolvedValue(choiceFrame('npm test', 2));
@@ -282,7 +288,7 @@ describe('[#3952] an answer that arrives during a send', () => {
         { number: 1, label: 'A', isDefault: true },
         { number: 2, label: 'B' },
       ] },
-      frame: '',
+      frame: testBoundFrame(''),
     });
     await flush();
     const send = withInstanceInputLock(SESSION, async () => {
@@ -316,7 +322,7 @@ describe('[#3952 review P1-1] cursor keys come from the screen read after the wa
       answer: '2',
       cliToolId: 'claude',
       promptData: choicePrompt(2),
-      frame: choiceFrame('npm test', 2),
+      frame: testBoundFrame(choiceFrame('npm test', 2)),
     });
     await flush();
     vi.mocked(capturePane).mockResolvedValue(choiceFrame('npm test', 1));
@@ -333,7 +339,7 @@ describe('[#3952 review P1-1] cursor keys come from the screen read after the wa
       answer: '2',
       cliToolId: 'claude',
       promptData: choicePrompt(1),
-      frame: choiceFrame('npm test', 1),
+      frame: testBoundFrame(choiceFrame('npm test', 1)),
     });
     await flush();
     vi.mocked(capturePane).mockResolvedValue(choiceFrame('npm test', 1));
@@ -350,7 +356,7 @@ describe('[#3952 review P1-1] cursor keys come from the screen read after the wa
       answer: '2',
       cliToolId: 'claude',
       promptData: choicePrompt(2),
-      frame: choiceFrame('npm test', 2),
+      frame: testBoundFrame(choiceFrame('npm test', 2)),
     });
     expect(delivered).toEqual(['Enter']);
     expect(capturePane).not.toHaveBeenCalled();

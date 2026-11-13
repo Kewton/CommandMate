@@ -68,10 +68,16 @@ function session(name: string): FakeSession {
 
 vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tmux/tmux')>();
-  return {
-    ...actual,
+  return (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+    // Issue #4304 F1-a: answers read a pane bound to its generation.
     // Issue #4303: the agent holds the pane; an answer is refused before its first key otherwise.
-    readPaneForeground: async () => 'other' as const,
+    readPaneForeground: async () => {
+        // Issue #4304 F1-a: Auto-Yes hands the sender its tick's bound frame, so the
+        // sender reads no guard frame of its own; the hold before the first key is
+        // the reads right before it (this one, then the pane's generation).
+        if (guardReadGate) await guardReadGate.promise;
+        return 'other' as const;
+    },
     sendKeys: async (name: string, keys: string, enter = true) => {
       session(name).keys.push(enter ? `${keys}<Enter>` : keys);
       if (!enter && typedKeyGate) await typedKeyGate.promise;
@@ -96,7 +102,7 @@ vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
       if (guardReadGate) await guardReadGate.promise;
       return sessions.get(name)?.pane ?? '';
     },
-  };
+  }, actual);
 });
 
 /** The name the real CLI tool derives, so the poller and the reconcile agree. */
@@ -107,7 +113,8 @@ async function sessionNameOf(worktreeId: string, cliToolId: string, instanceId?:
     .getSessionName(worktreeId, instanceId);
 }
 
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: async (worktreeId: string, cliToolId: string, _lines: number, instanceId?: string) => {
     const name = await sessionNameOf(worktreeId, cliToolId, instanceId);
     captures.set(name, (captures.get(name) ?? 0) + 1);

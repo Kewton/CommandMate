@@ -11,7 +11,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
@@ -23,6 +24,7 @@ import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { capturePane, sendKeys } from '@/lib/tmux/tmux';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const frame = (name: string): string =>
   readFileSync(resolve(__dirname, '../../../fixtures/codex-dialogs-0166', `${name}.txt`), 'utf8');
@@ -47,7 +49,7 @@ async function respond(start: string, answer: string): Promise<{ keys: [string, 
     keys.push([key, current]);
     current = MEASURED[current]?.[key] ?? current;
   });
-  await sendPromptAnswer({ sessionName: 'mcbd-codex-wt4146', answer, cliToolId: 'codex', frame: frame(start) });
+  await sendPromptAnswer({ sessionName: 'mcbd-codex-wt4146', answer, cliToolId: 'codex', frame: testBoundFrame(frame(start) )});
   return { keys, end: current };
 }
 

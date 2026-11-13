@@ -63,7 +63,8 @@ vi.mock('@/lib/cli-tools/manager', () => ({
 const captureSessionOutput = vi.fn<(...a: unknown[]) => Promise<string>>();
 const captureSessionOutputFresh = vi.fn<(...a: unknown[]) => Promise<string>>();
 const isSessionRunning = vi.fn(async () => true);
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: (...a: unknown[]) => captureSessionOutput(...a),
   captureSessionOutputFresh: (...a: unknown[]) => captureSessionOutputFresh(...a),
   isSessionRunning: (...a: unknown[]) => isSessionRunning(...(a as [])),

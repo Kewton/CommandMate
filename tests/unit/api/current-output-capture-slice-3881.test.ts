@@ -29,6 +29,14 @@ vi.mock('@/lib/tmux/polling-tmux-transport', () => ({
     captureSnapshot: async () => pane.raw,
   }),
 }));
+// Issue #4304 F1-a: the poller binds its capture to the pane's generation; the
+// pane is read by id as the transport double reads it.
+vi.mock('@/lib/tmux/tmux', async (importOriginal) =>
+  (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles(
+    { capturePane: async () => pane.raw },
+    await importOriginal(),
+  ),
+);
 vi.mock('@/lib/ws-server', () => ({
   broadcast: vi.fn(),
   broadcastMessage: vi.fn(),

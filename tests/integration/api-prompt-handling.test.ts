@@ -56,7 +56,8 @@ vi.mock('@/lib/db/db-instance', () => {
 // Mock tmux module. sendPromptAnswer (Issue #616) imports both sendKeys and
 // sendSpecialKeys; provide both so multiple-choice answers don't throw
 // "No sendSpecialKeys export" (Issue #1102).
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),

@@ -48,7 +48,8 @@ vi.mock('@/lib/db/db-instance', () => {
 
 // The tmux transport, and the ONLY thing between the route and the terminal:
 // every key the route decides to send lands in one of these two spies.
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
@@ -56,7 +57,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
   capturePane: vi.fn().mockResolvedValue(''),
 }));
 
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn().mockResolvedValue(''),
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
 }));

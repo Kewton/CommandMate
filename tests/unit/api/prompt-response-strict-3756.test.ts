@@ -58,7 +58,8 @@ vi.mock('@/lib/cli-tools/session-ownership', async (importOriginal) => ({
   checkSessionOwnership: vi.fn().mockResolvedValue({ verdict: 'owned' }),
 }));
 
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
   // Issue #3788: agy in front unless a test says otherwise.
   readSessionPaneCommand: vi.fn().mockResolvedValue('agy'),

@@ -45,7 +45,8 @@ import {
 import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
 
 // Mock modules for pollAutoYes testing (Issue #161)
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn(),
 }));
 vi.mock('@/lib/polling/response-poller', () => ({
@@ -54,7 +55,8 @@ vi.mock('@/lib/polling/response-poller', () => ({
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn(),
@@ -1549,7 +1551,9 @@ describe('auto-yes-manager', () => {
 
       vi.mocked(captureSessionOutput).mockRejectedValue(new Error('tmux session not found'));
 
-      await expect(captureAndCleanOutput('test-wt', 'claude')).rejects.toThrow('tmux session not found');
+      // Issue #4304 F1-a: the capture is bound to its pane; one that fails is
+      // `capture-failed`, thrown as the poller's unbound-frame error.
+      await expect(captureAndCleanOutput('test-wt', 'claude')).rejects.toThrow(/could not be bound to its pane \(capture-failed/);
 
       vi.mocked(captureSessionOutput).mockReset();
     });

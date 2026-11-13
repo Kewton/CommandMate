@@ -23,7 +23,8 @@ let failSpecialAt: number | null = null;
 /** Whether the typed text (`'text'`) or its Enter (`'enter'`) fails. */
 let failTyped: 'text' | 'enter' | null = null;
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(),
@@ -47,7 +48,11 @@ vi.mock('@/lib/tmux/tmux', () => ({
     },
   ),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 import {
   MultiSelectAnswerRejectedError,

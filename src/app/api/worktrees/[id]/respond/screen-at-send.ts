@@ -11,7 +11,11 @@
 
 import { createLogger } from '@/lib/logger';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { captureSessionOutputFresh } from '@/lib/session/cli-session';
+import {
+  captureBoundFrame,
+  type BoundFrame,
+  type BoundFrameUnknownReason,
+} from '@/lib/session/cli-session';
 import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 import { instanceInputReadMark } from '@/lib/session/instance-input-lock';
 import type { PromptData } from '@/types/models';
@@ -20,8 +24,14 @@ const logger = createLogger('api/respond');
 
 /** The screen an answer is delivered at: the frame, and the prompt read off it. */
 export interface ScreenAtSend {
-  /** The raw capture, or undefined when it could not be taken. */
-  frame: string | undefined;
+  /**
+   * The raw capture bound to its pane generation (Issue #4304 F1-a), or
+   * undefined when it could not be bound — then `unbound` says why, and the
+   * keystroke answer is not sent at all.
+   */
+  frame: BoundFrame | undefined;
+  /** Why the capture could not be bound (Issue #4304 F1-a); undefined when it was. */
+  unbound?: BoundFrameUnknownReason;
   promptData: PromptData | null;
   /**
    * Issue #3952 review P2-1: the session's input order, taken right before the
@@ -48,8 +58,11 @@ export interface ScreenAtSend {
  * the confirmation an Auto-Yes tick would otherwise answer over it.
  *
  * When the capture fails or no prompt is read, `promptData` is null: the hold
- * is then at an unidentified screen, which covers the next confirmation read
- * (and the sender reads the pane itself when there is no frame). Never throws.
+ * is then at an unidentified screen, which covers the next confirmation read.
+ * Issue #4304 F1-a: the capture is bound to its pane generation, and a capture
+ * that cannot be bound (`unbound`) is no screen for keys — the stored-message
+ * branch refuses the answer with nothing typed (it used to send without a
+ * frame). Never throws.
  */
 export async function screenAtSend(
   worktreeId: string,
@@ -57,15 +70,14 @@ export async function screenAtSend(
   instanceId: string,
 ): Promise<ScreenAtSend> {
   const readMark = instanceInputReadMark();
-  let frame: string;
-  try {
-    frame = await captureSessionOutputFresh(worktreeId, cliToolId, undefined, instanceId);
-  } catch {
-    logger.warn('failed-to-read-screen-before-send');
-    return { frame: undefined, promptData: null, readMark };
+  const captured = await captureBoundFrame({ worktreeId, cliToolId, instanceId });
+  if (captured.kind === 'unknown') {
+    logger.warn('failed-to-read-screen-before-send', { generationCheck: captured.reason });
+    return { frame: undefined, unbound: captured.reason, promptData: null, readMark };
   }
+  const frame = captured;
   try {
-    const { promptCheck } = assessPromptAnswerability(cliToolId, frame);
+    const { promptCheck } = assessPromptAnswerability(cliToolId, frame.frame);
     return { frame, promptData: promptCheck?.isPrompt ? promptCheck.promptData ?? null : null, readMark };
   } catch {
     logger.warn('failed-to-read-screen-before-send');

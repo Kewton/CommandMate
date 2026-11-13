@@ -85,10 +85,13 @@ describe('captureSessionOutputFresh generation check (Issue #3734)', () => {
     expect(getCachedCapture(SESSION, 500)).toBeNull();
   });
 
-  it('negative control: without invalidation the fresh result is cached', async () => {
+  it('contract (Issue #4304 F1-a, design §6.4 (iv)): even without invalidation the fresh result is not written back', async () => {
+    // Before #4304 this was the negative control "the fresh result is cached".
+    // The write-back is what put a frame of a replaced pane into the display
+    // cache under the session's name (design §1.2 (d)); restoring it turns this red.
     captureSnapshot.mockResolvedValueOnce('fresh screen');
 
     await expect(captureSessionOutputFresh('wt-3734', 'claude', 500)).resolves.toBe('fresh screen');
-    expect(getCachedCapture(SESSION, 500)).toBe('fresh screen');
+    expect(getCachedCapture(SESSION, 500)).toBeNull();
   });
 });

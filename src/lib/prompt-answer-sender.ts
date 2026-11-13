@@ -7,7 +7,6 @@
  */
 
 import {
-  capturePane,
   readPaneForeground,
   sendKeys,
   sendSpecialKeys,
@@ -25,6 +24,14 @@ import { readCommandCodeReviewPage } from '@/lib/detection/selection-shape';
 import type { MultipleChoicePromptData, PromptData, PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
 import { invalidateCache } from './tmux/tmux-capture-cache';
+import {
+  captureBoundFrame,
+  checkPaneGeneration,
+  readSessionPaneGeneration,
+  type BoundFrame,
+  type BoundFrameUnknownReason,
+  type PaneGeneration,
+} from '@/lib/session/cli-session';
 import { hasCheckboxOptions } from '@/lib/prompt-answer-semantic';
 import {
   TUI_MESSAGE_PROCESSED_WAIT_MS,
@@ -107,31 +114,55 @@ const TEXT_ANSWERABLE_ANSWER_MODE: DialogAnswerMode = 'numbered';
 const GUARD_CAPTURE_LINES = 200;
 
 /**
- * The pane to judge the tool's own dialog rules against.
- *
- * Prefers the capture the caller already took — `/prompt-response` captures a
- * fresh frame two statements before it calls in, and re-reading the pane there
- * would be a second tmux round trip AND a second, later frame, i.e. a different
- * screen from the one whose prompt was verified.
- *
- * Falls back to reading the pane here so that a caller with no frame (the chat
- * button route, `auto-yes-manager`) is still covered: the point of Issue #2033
- * is that this function must not be dangerous on its own.
- *
- * Returns null when the pane cannot be read at all. That is deliberately
- * fail-OPEN, and it is the same call `/prompt-response` already makes for its
- * own pre-send verification ("If capture fails, proceed with caution - don't
- * block manual responses"): a session whose pane is unreadable is far more often
- * a mocked or racing transport than an open dialog, and turning every such case
- * into a refusal would make the operator's only way out stop working.
+ * The pane an answer goes to, and the frame its guard judges (Issue #4304
+ * F1-a, design §4.4 R5): the generation every key of the answer is checked
+ * against right before it is typed.
  */
-async function readGuardFrame(params: SendPromptAnswerParams): Promise<string | null> {
-  if (params.frame !== undefined) return params.frame;
-  try {
-    return await capturePane(params.sessionName, GUARD_CAPTURE_LINES);
-  } catch {
-    return null;
+interface AnswerTarget {
+  readonly generation: PaneGeneration;
+  /** The frame the dialog guard reads; null when the answer needs none (see {@link resolveAnswerTarget}). */
+  readonly frame: BoundFrame | null;
+}
+
+/**
+ * Whether {@link assertAnswerModeAcceptsNumber} reads a frame for this answer:
+ * a digit, on a tool with dialog rules — and not the checkbox arm, which runs
+ * before that guard and reads the pane after its own keys (Issue #2755).
+ */
+function guardReadsFrame(params: SendPromptAnswerParams): boolean {
+  return (
+    /^\d+$/.test(params.answer) &&
+    getToolStatusDetector(params.cliToolId).hasDialogRules &&
+    readMultiSelectRequest(params) === null
+  );
+}
+
+/**
+ * Where an answer goes (Issue #4304 F1-a): the caller's frame when it gave
+ * one — `/prompt-response` and `/respond` capture one right before they call
+ * in, and Auto-Yes its tick's — and its generation. A caller with no frame
+ * gets one bound here when the dialog guard reads one (Issue #2033), else only
+ * the pane's generation is read: nothing on the screen decides that answer
+ * here, and its keys still go only to that pane.
+ *
+ * A capture or a generation that cannot be read, or a dead pane, is no answer
+ * at all: nothing is typed and it may be sent again
+ * ({@link PromptAnswerGenerationUnconfirmedError}). Before #4304 an unreadable
+ * pane was let through here ("fail-open"); that is what F1-a removes.
+ */
+async function resolveAnswerTarget(params: SendPromptAnswerParams): Promise<AnswerTarget> {
+  if (params.frame !== undefined) return { generation: params.frame.generation, frame: params.frame };
+  if (guardReadsFrame(params)) {
+    const captured = await captureBoundFrame({ sessionName: params.sessionName }, { lines: GUARD_CAPTURE_LINES, window: 'tmux' });
+    if (captured.kind === 'unknown') {
+      throw new PromptAnswerGenerationUnconfirmedError(captured.reason, params.sessionName);
+    }
+    return { generation: captured.generation, frame: captured };
   }
+  const reading = await readSessionPaneGeneration(params.sessionName);
+  if (reading === null) throw new PromptAnswerGenerationUnconfirmedError('generation-unreadable', params.sessionName);
+  if (reading.dead) throw new PromptAnswerGenerationUnconfirmedError('pane-dead', params.sessionName);
+  return { generation: reading.generation, frame: null };
 }
 
 /**
@@ -174,22 +205,22 @@ async function readGuardFrame(params: SendPromptAnswerParams): Promise<string | 
  *   work; this Issue only stops the wrong keystroke.
  *
  * @returns The `numbered` dialog the tool vouched for on this frame, or null when
- *   the guard did not read one (non-numeric answer, no rules, unreadable pane,
- *   or no dialog on screen). Returned so the Enter decision is made off the
+ *   the guard did not read one (non-numeric answer, no rules, or no dialog on
+ *   screen). Returned so the Enter decision is made off the
  *   same reading rather than a second capture (Issue #2574).
  * @throws {PromptAnswerRejectedError} when the tool vouched for a dialog on this
  *   frame whose `answerMode` is not {@link TEXT_ANSWERABLE_ANSWER_MODE}.
  */
-async function assertAnswerModeAcceptsNumber(params: SendPromptAnswerParams): Promise<DialogVerdict | null> {
+function assertAnswerModeAcceptsNumber(params: SendPromptAnswerParams, frame: BoundFrame | null): DialogVerdict | null {
   if (!/^\d+$/.test(params.answer)) return null;
 
   const detector = getToolStatusDetector(params.cliToolId);
   if (!detector.hasDialogRules) return null;
-
-  const frame = await readGuardFrame(params);
+  // Read whenever the guard reads one (`resolveAnswerTarget`); null is never
+  // a pass for a frame that could not be read — that answer was refused there.
   if (frame === null) return null;
 
-  const dialog = detector.detectDialog(normalizeFrame(frame, params.cliToolId));
+  const dialog = detector.detectDialog(normalizeFrame(frame.frame, params.cliToolId));
   if (dialog === null) return null;
   if (dialog.answerMode === TEXT_ANSWERABLE_ANSWER_MODE) return dialog;
 
@@ -395,8 +426,7 @@ function assertFreeTextHasATextField(params: SendPromptAnswerParams): void {
  *   (#1726), and neither changes here.
  * - It does not fire when NO option carries the cursor. agy's picker publishes
  *   its highlight without `isDefault` at all (`#999`), and a screen whose cursor
- *   cannot be read is one this guard has nothing to say about — the same
- *   fail-open {@link readGuardFrame} takes for an unreadable pane.
+ *   cannot be read is one this guard has nothing to say about.
  *
  * @throws {FreeTextAnswerRejectedError} with `kind: 'cursor_elsewhere'` when the
  *   answer is not a number, the prompt has a measured text field, and the cursor
@@ -465,18 +495,16 @@ function sameNumbers(a: readonly number[], b: readonly number[]): boolean {
 /**
  * Re-read the pane after a keystroke, or null when it cannot be read.
  *
- * `capturePane` here rather than the caller's `frame`: the whole point of the
+ * A fresh capture rather than the caller's `frame`: the whole point of the
  * read is that the screen has moved since. {@link TUI_MESSAGE_PROCESSED_WAIT_MS}
  * is the settle the rest of this file already uses for a TUI that has just been
- * typed at.
+ * typed at. Issue #4304 F1-a: of the pane the answer was decided for — a
+ * capture that cannot be bound to `generation` (another pane, or none) is null.
  */
-async function recaptureAfterKeys(sessionName: string): Promise<string | null> {
+async function recaptureAfterKeys(sessionName: string, generation: PaneGeneration): Promise<string | null> {
   await new Promise((resolve) => setTimeout(resolve, TUI_MESSAGE_PROCESSED_WAIT_MS));
-  try {
-    return await capturePane(sessionName, GUARD_CAPTURE_LINES);
-  } catch {
-    return null;
-  }
+  const captured = await captureBoundFrame({ sessionName }, { lines: GUARD_CAPTURE_LINES, expected: generation, window: 'tmux' });
+  return captured.kind === 'bound' ? captured.frame : null;
 }
 
 /**
@@ -524,6 +552,7 @@ async function recaptureAfterKeys(sessionName: string): Promise<string | null> {
  */
 async function sendCommandCodeMultiSelectAnswer(
   sessionName: string,
+  generation: PaneGeneration,
   promptData: MultipleChoicePromptData,
   wanted: readonly number[],
   stillCurrent?: () => boolean,
@@ -551,7 +580,7 @@ async function sendCommandCodeMultiSelectAnswer(
 
   // 2. Read the screen back and refuse unless it is the same question with
   //    exactly the requested boxes ticked.
-  const afterToggle = await recaptureAfterKeys(sessionName);
+  const afterToggle = await recaptureAfterKeys(sessionName, generation);
   assertStillCurrent(stillCurrent, keysSent);
   if (afterToggle === null) {
     throw new MultiSelectAnswerRejectedError('recapture-failed', keysSent, wanted);
@@ -594,7 +623,7 @@ async function sendCommandCodeMultiSelectAnswer(
   // 4. The second stage. `Submit` opens the Review page and the answer is sent
   //    from there; `Next` advances to the following question, which IS the
   //    commit for this one (its tab turns `✔`).
-  const afterConfirm = await recaptureAfterKeys(sessionName);
+  const afterConfirm = await recaptureAfterKeys(sessionName, generation);
   assertStillCurrent(stillCurrent, true);
   if (afterConfirm === null) {
     throw new MultiSelectAnswerRejectedError('recapture-failed', true, wanted);
@@ -662,11 +691,19 @@ function samePromptTarget(target: PromptData, now: PromptData): boolean {
  * read off the caller's frame, else the caller's `promptData`, else any
  * answerable prompt. Returns that fresh reading, or null when it does not.
  */
-async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promise<PromptData | null> {
+async function answerTargetStillOnScreen(params: SendPromptAnswerParams, answerTo: AnswerTarget): Promise<PromptData | null> {
   if (params.stillCurrent && !params.stillCurrent()) return null;
-  const now = readAnswerablePrompt(params.cliToolId, await capturePane(params.sessionName, GUARD_CAPTURE_LINES));
+  // Issue #4304 F1-a: of the pane the answer was decided for. Another pane —
+  // even one showing the same prompt — or none is not the answer's screen: a
+  // re-read that failed (the lock says `recheck-failed`), never a pass.
+  const captured = await captureBoundFrame(
+    { sessionName: params.sessionName },
+    { lines: GUARD_CAPTURE_LINES, expected: answerTo.generation, window: 'tmux' },
+  );
+  if (captured.kind === 'unknown') throw new PromptAnswerGenerationUnconfirmedError(captured.reason, params.sessionName);
+  const now = readAnswerablePrompt(params.cliToolId, captured.frame);
   if (now === null) return null;
-  const target = (params.frame !== undefined ? readAnswerablePrompt(params.cliToolId, params.frame) : null)
+  const target = (params.frame !== undefined ? readAnswerablePrompt(params.cliToolId, params.frame.frame) : null)
     ?? params.promptData
     ?? null;
   return target === null || samePromptTarget(target, now) ? now : null;
@@ -743,6 +780,58 @@ export async function assertAnswerTargetInForeground(sessionName: string): Promi
   throw new PromptAnswerAgentNotInForegroundError(foreground, sessionName);
 }
 
+/** The `code` of {@link PromptAnswerGenerationUnconfirmedError} (Issue #4304 F1-a). */
+export const PANE_GENERATION_UNCONFIRMED_CODE = 'pane-generation-unconfirmed';
+
+/** Why an answer's pane generation was not confirmed (Issue #4304 F1-a, design §4.2 / §4.4). */
+export type AnswerGenerationRefusal = BoundFrameUnknownReason | 'pane-dead';
+
+/**
+ * An answer refused before its first key because the pane it was decided for
+ * could not be confirmed (Issue #4304 F1-a, design §4.2): its frame could not
+ * be bound to a pane generation, or right before the first key the session no
+ * longer showed that pane (`generation-mismatch`), could not be read, or the
+ * pane was dead. Nothing was typed; the answer may be sent again.
+ *
+ * A {@link PromptAnswerNotDeliveredError} — same name, same `reason`
+ * (`answer_not_delivered`), `keysSent: false` — so every caller takes it as it
+ * takes the others: `/respond` 409, `/prompt-response` a 200 refusal, Auto-Yes
+ * `no_answer` with the ledger's `no-keys-sent`. Its `skip` is
+ * `session-replaced` for another pane and `recheck-failed` otherwise;
+ * `generationCheck` and `code` say which.
+ */
+export class PromptAnswerGenerationUnconfirmedError extends PromptAnswerNotDeliveredError {
+  readonly code = PANE_GENERATION_UNCONFIRMED_CODE;
+
+  constructor(readonly generationCheck: AnswerGenerationRefusal, sessionName: string) {
+    super(generationCheck === 'generation-mismatch' ? 'session-replaced' : 'recheck-failed', sessionName);
+    this.message =
+      `The answer was not sent to ${sessionName}: the pane it was decided for could not be confirmed ` +
+      `(${generationCheck}, ${PANE_GENERATION_UNCONFIRMED_CODE}, Issue #4304). Nothing was typed; send it again.`;
+    // Kept: Auto-Yes and the routes tell a not-delivered answer by this name.
+    this.name = 'PromptAnswerNotDeliveredError';
+  }
+}
+
+/**
+ * Refuse an answer before its first key unless the session still shows, alive,
+ * the pane the answer was decided for (Issue #4304 F1-a, design §4.4 R5):
+ * asked on every path — the input writer's (no wait, a wait, joined), the
+ * `answer_only` digit, and the plan review — as the LAST await before the
+ * first key, after the foreground read (#4303).
+ *
+ * @throws {PromptAnswerGenerationUnconfirmedError} when it does not
+ */
+export async function assertAnswerTargetGeneration(sessionName: string, generation: PaneGeneration): Promise<void> {
+  let check;
+  try {
+    check = await checkPaneGeneration(sessionName, generation);
+  } catch {
+    check = 'generation-unreadable' as const;
+  }
+  if (check !== 'same') throw new PromptAnswerGenerationUnconfirmedError(check, sessionName);
+}
+
 /**
  * How an answer's keys stay inside its hold of the session's input (Issue
  * #3952 review P2), handed to {@link InputWriterSend}.
@@ -790,6 +879,7 @@ function stillAllowedNow(params: SendPromptAnswerParams): boolean {
  */
 async function sendAsInputWriter(
   params: SendPromptAnswerParams,
+  target: AnswerTarget,
   readMark: number,
   send: InputWriterSend,
 ): Promise<void> {
@@ -798,12 +888,16 @@ async function sendAsInputWriter(
     params.sessionName,
     readMark,
     async () => {
-      reread = await answerTargetStillOnScreen(params);
+      reread = await answerTargetStillOnScreen(params, target);
       return reread !== null;
     },
     async (ticket): Promise<PromptAnswerNotDeliveredSkip | void> => {
       // Issue #4303: right before the first key, the agent must hold the pane.
       await assertAnswerTargetInForeground(params.sessionName);
+      // Issue #4304 F1-a: and the pane must be the one the answer was decided
+      // for — on this path whether the lock was free, waited for or joined
+      // (`stillApplies` above is asked only after a wait). The last await.
+      await assertAnswerTargetGeneration(params.sessionName, target.generation);
       // Issue #4303 review P1: that read is an await, so what the answer goes
       // out under is looked at after it, right before the first key — the
       // caller's last look (the contract / deny; review P1-b: always, wait or
@@ -980,17 +1074,20 @@ export interface SendPromptAnswerParams {
   /** Fallback submit mode from client (Issue #616) */
   fallbackSubmitMode?: SubmitMode;
   /**
-   * The pane capture to judge the tool's dialog rules against (Issue #2033).
+   * The pane capture to judge the tool's dialog rules against (Issue #2033),
+   * bound to the pane generation it was read from (Issue #4304 F1-a): only a
+   * {@link BoundFrame} from `captureBoundFrame` — a raw string, a cached or
+   * `captureSessionOutputFresh` frame cannot be passed. Every key of the
+   * answer goes to that generation or is not sent.
    *
-   * Pass the RAW capture, ANSI and box drawing intact: opencode's permission
-   * strip is anchored on the input box's own gutter, so a `stripBoxDrawing`ed
-   * spelling reaches `null` instead of `permission` (documented in
-   * `detection/tools/opencode/prompt.ts`). Both answers suppress here, but only
-   * the raw one names the dialog in the refusal.
+   * Its frame is the RAW capture, ANSI and box drawing intact: opencode's
+   * permission strip is anchored on the input box's own gutter, so a
+   * `stripBoxDrawing`ed spelling reaches `null` instead of `permission`
+   * (documented in `detection/tools/opencode/prompt.ts`).
    *
-   * Omit it and the guard reads the pane itself; see {@link readGuardFrame}.
+   * Omit it and the sender reads the pane itself; see {@link resolveAnswerTarget}.
    */
-  frame?: string;
+  frame?: BoundFrame;
   /**
    * Asked after every wait inside the send — the guard's pane read, the delay
    * between two keys, the settle before the Enter, a re-read — and `false`
@@ -1057,6 +1154,9 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber, stillCurrent } =
     params;
   const readMark = params.readMark ?? instanceInputReadMark();
+  // Issue #4304 F1-a: the pane generation every key of this answer goes to,
+  // and the frame its guard judges. Unconfirmed, nothing is typed.
+  const target = await resolveAnswerTarget(params);
 
   // Issue #2755: Command Code's checkbox question, before every guard below.
   // Its answer is a SET (`"1,3"`), which none of them can read — `/^\d+$/` is
@@ -1067,13 +1167,14 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // a two-stage confirm, not a digit and an Enter.
   const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
-    await sendAsInputWriter(params, readMark, async (reread, keys) => {
+    await sendAsInputWriter(params, target, readMark, async (reread, keys) => {
       // Review P1-1: the toggles come from the ticks on the screen they go
       // to — read again after a wait — not from the reading the request saw.
       const shown = reread === null ? multiSelect.promptData : reread;
       if (shown.type !== 'multiple_choice' || shown.multiSelect !== true) return 'target-changed';
       await sendCommandCodeMultiSelectAnswer(
         sessionName,
+        target.generation,
         shown,
         multiSelect.wanted,
         keys.stillCurrent,
@@ -1090,7 +1191,7 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // inside the text arm because the number->offset arithmetic the cursor arm
   // does is just as meaningless on an unnumbered button strip as typing the
   // digit is.
-  const dialog = await assertAnswerModeAcceptsNumber(params);
+  const dialog = assertAnswerModeAcceptsNumber(params, target.frame);
 
   // Issue #2573 / #2583: the same promise for text. The text arm below types
   // whatever it is given and presses Enter, so text aimed at a screen that has
@@ -1191,7 +1292,7 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
         : [...navigationKeys, 'Enter'];
     };
 
-    await sendAsInputWriter(params, readMark, async (reread, writer) => {
+    await sendAsInputWriter(params, target, readMark, async (reread, writer) => {
       // A re-read that is not a choice list says nothing about the cursor:
       // the keys cannot be placed, so none are typed.
       if (reread !== null && reread.type !== 'multiple_choice') return 'target-changed';
@@ -1219,15 +1320,18 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // a capture since the caller's own look).
       // Issue #4303: right before its only key, the agent must hold the pane.
       await assertAnswerTargetInForeground(sessionName);
+      // Issue #4304 F1-a: and the pane must be the one the digit was decided
+      // for — this path takes no input lock, so this is its only look.
+      await assertAnswerTargetGeneration(sessionName, target.generation);
       // Issue #4303 review P1: the last look and the tick's generation are
-      // taken after that await, right before the key.
+      // taken after those awaits, right before the key.
       if (!stillAllowedNow(params)) throw new PromptAnswerNotDeliveredError('answer-withheld', sessionName);
       assertStillCurrent(stillCurrent, false);
       await typeText();
     } else {
       // Issue #3952: text, wait and Enter as one writer, so no send's body can
       // be typed in the wait and submitted by this Enter.
-      await sendAsInputWriter(params, readMark, async (reread, writer) => {
+      await sendAsInputWriter(params, target, readMark, async (reread, writer) => {
         // Review P1-a: free text read again after a wait is judged on that
         // reading — a field still there, and the cursor still on it (#2573 /
         // #2584) — or the Enter after it confirms whatever row the cursor
@@ -1244,6 +1348,16 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
         // Issue #3706: the text is typed; the Enter that submits it is not.
         assertStillCurrent(stillCurrent, true);
         // Review P2: nor by a session that replaced this one in the wait.
+        writer.assertOwned(answer !== '');
+        // Issue #4304 F1-a: nor into another pane. The text may be on the
+        // pane decided for, so a refusal here says keys were sent.
+        try {
+          await assertAnswerTargetGeneration(sessionName, target.generation);
+        } catch (error: unknown) {
+          if (answer === '') throw error;
+          throw new PromptAnswerInputLostError(sessionName);
+        }
+        assertStillCurrent(stillCurrent, answer !== '');
         writer.assertOwned(answer !== '');
 
         // Send Enter

@@ -37,6 +37,17 @@ const transport = vi.hoisted(() => ({
   captureSnapshot: vi.fn(async () => pane.raw),
 }));
 vi.mock('@/lib/tmux/polling-tmux-transport', () => ({ getPollingTmuxTransport: () => transport }));
+// Issue #4304 F1-a: the poller binds its capture to the pane's generation; the
+// pane is read by id through the same transport double.
+vi.mock('@/lib/tmux/tmux', async (importOriginal) =>
+  (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles(
+    {
+      capturePane: (session: string, lines: number) =>
+        (transport.captureSnapshot as (...args: unknown[]) => Promise<string>)(session, { startLine: -lines }),
+    },
+    await importOriginal(),
+  ),
+);
 vi.mock('@/lib/session/cli-session', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/session/cli-session')>()),
   // The only other cli-session call of the tick: no tmux here.

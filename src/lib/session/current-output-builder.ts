@@ -40,7 +40,7 @@ import {
 import { pendingDecisionKind } from '@/lib/hooks/pending-decision-kind';
 import { ensureOpencodeSessionDiff } from '@/lib/hooks/sources/opencode/diff';
 import { questionDecisionOptions } from '@/lib/hooks/structured-decision-response';
-import { captureSessionOutput } from '@/lib/session/cli-session';
+import { captureSessionOutput, type BoundFrame } from '@/lib/session/cli-session';
 import {
   detectSessionStatus,
   STATUS_REASON,
@@ -166,6 +166,10 @@ const logger = createLogger('current-output-builder');
  *   the frame is read off the pane rather than a capture up to 5 s old
  *   (Issue #3956: `/current-output?fresh=1`, the same step as the WS streamer's
  *   `captureFreshPayload`). Absent, the cache answers as before.
+ * @param options.boundFrame - Issue #4304 F1-a (design §4.4 R7 strict / R11-c):
+ *   build the payload from THIS frame, bound to its pane generation, instead of
+ *   capturing — the strict `respond`'s read, so its payload, observation and
+ *   frame are one capture. Neither the display cache nor tmux is read for it.
  */
 export async function buildCurrentOutput(
   db: Database.Database,
@@ -173,12 +177,12 @@ export async function buildCurrentOutput(
   cliToolId: CLIToolType,
   instanceId?: string,
   resolution?: SessionTargetResolution,
-  options?: { freshCapture?: boolean },
+  options?: { freshCapture?: boolean; boundFrame?: BoundFrame },
 ): Promise<CurrentOutputPayload> {
-  if (options?.freshCapture) {
+  if (options?.freshCapture && options.boundFrame === undefined) {
     invalidateCache(CLIToolManager.getInstance().getTool(cliToolId).getSessionName(worktreeId, instanceId));
   }
-  const payload = await buildPayload(db, worktreeId, cliToolId, instanceId);
+  const payload = await buildPayload(db, worktreeId, cliToolId, instanceId, options?.boundFrame);
   // Issue #3705: the payload's own writers asked after their awaits (see
   // `buildPayload`); the progress frame below is one more write, of the turn
   // the payload describes.
@@ -907,6 +911,7 @@ async function buildPayload(
   worktreeId: string,
   cliToolId: CLIToolType,
   instanceId?: string,
+  boundFrame?: BoundFrame,
 ): Promise<CurrentOutputPayload> {
   const resolvedInstanceId = instanceId ?? cliToolId;
   const manager = CLIToolManager.getInstance();
@@ -999,7 +1004,11 @@ async function buildPayload(
   const sessionState = getSessionState(db, worktreeId, resolvedInstanceId);
   const lastCapturedLine = sessionState?.lastCapturedLine || 0;
 
-  const output = await captureSessionOutput(worktreeId, cliToolId, STATUS_CAPTURE_LINES, instanceId);
+  // Issue #4304 F1-a: a caller that bound its frame (the strict read) has the
+  // payload built from it; every other caller reads the display cache as before.
+  const output = boundFrame !== undefined
+    ? boundFrame.frame
+    : await captureSessionOutput(worktreeId, cliToolId, STATUS_CAPTURE_LINES, instanceId);
   // Issue #3705: the last `await` of the build. Everything below it, through
   // `observeStatusEvidence`, runs without one.
   if (!maySnapshotPublish()) throw new RetiredSnapshotError();

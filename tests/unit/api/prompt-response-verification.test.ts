@@ -23,6 +23,8 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import type { Worktree, PromptType } from '@/types/models';
+import { detectPrompt } from '@/lib/detection/prompt-detector';
+import { captureSessionOutputFresh } from '@/lib/session/cli-session';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 
@@ -48,7 +50,8 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 // Mock tmux
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
@@ -56,7 +59,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
 }));
 
 // Mock cli-session (captureSessionOutputFresh - Issue #405: prompt-response uses fresh capture)
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn().mockResolvedValue(''),
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
 }));
@@ -92,6 +96,24 @@ vi.mock('@/lib/cli-tools/manager', () => ({
 }));
 
 // --- Helpers ---
+
+/**
+ * Issue #4304 F1-a: what is left of `promptCheck === null` — a frame bound to
+ * its pane that the reading threw on (`verificationFailed`). A capture that
+ * cannot be bound no longer gets here: it is refused, nothing typed.
+ */
+function failReading(): void {
+  vi.mocked(detectPrompt).mockImplementation(() => {
+    throw new Error('reading failed (test)');
+  });
+}
+
+// Issue #4304 F1-a: `failReading` replaces the implementation, and a test that
+// fails the capture leaves it failing; every test starts from the factory's.
+beforeEach(() => {
+  vi.mocked(detectPrompt).mockReturnValue({ isPrompt: false, cleanContent: '' });
+  vi.mocked(captureSessionOutputFresh).mockResolvedValue('');
+});
 
 interface CreateRequestOptions {
   answer: string;
@@ -204,6 +226,8 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     upsertWorktree(db, worktree);
 
     vi.clearAllMocks();
+    // Issue #4304 F1-a: `failReading` replaces the implementation; back to the factory's.
+    vi.mocked(detectPrompt).mockReturnValue({ isPrompt: false, cleanContent: '' });
   });
 
   it('should send keys when prompt is still active', async () => {
@@ -263,20 +287,24 @@ describe('POST /api/worktrees/:id/prompt-response - Prompt re-verification (Issu
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
-  it('should proceed with send when capture fails (fallback for manual responses)', async () => {
+  it('no longer proceeds with send when capture fails: nothing is typed (Issue #4304 F1-a)', async () => {
     const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
-    const { sendKeys } = await import('@/lib/tmux/tmux');
+    const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
-    // captureSessionOutput fails (e.g., tmux error)
+    // Issue #4304 F1-a (the person's decision of 2026-11-14): a capture that
+    // cannot be bound to its pane is no longer carried on with ("don't block
+    // manual responses"): refused with nothing typed, free to be sent again.
     vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
 
     const request = createRequest('test-wt', '1');
     const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
     const data = await response.json();
 
-    // Should still send keys (don't block manual responses)
-    expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalled();
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('answer_not_delivered');
+    expect(data.keysSent).toBe(false);
+    expect(sendKeys).not.toHaveBeenCalled();
+    expect(sendSpecialKeys).not.toHaveBeenCalled();
   });
 
   it('should return 404 for non-existent worktree', async () => {
@@ -344,14 +372,17 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
     upsertWorktree(db, worktree);
 
     vi.clearAllMocks();
+    // Issue #4304 F1-a: `failReading` replaces the implementation; back to the factory's.
+    vi.mocked(detectPrompt).mockReturnValue({ isPrompt: false, cleanContent: '' });
   });
 
   it('should use cursor-key navigation when promptCheck=null and body.promptType=multiple_choice', async () => {
-    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
 
     // captureSessionOutput fails -> promptCheck remains null
-    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+    // Issue #4304 F1-a: the #287 fallback is reached by a bound frame that could
+    // not be read as a prompt (a capture that cannot be bound is refused first).
+    failReading();
 
     // Request includes promptType and defaultOptionNumber from the UI
     const request = createRequest('test-wt', {
@@ -373,10 +404,11 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use defaultOptionNumber=1 as fallback when defaultOptionNumber is undefined', async () => {
-    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+    // Issue #4304 F1-a: the #287 fallback is reached by a bound frame that could
+    // not be read as a prompt (a capture that cannot be bound is refused first).
+    failReading();
 
     // Request with promptType but NO defaultOptionNumber (old UI scenario)
     const request = createRequest('test-wt', {
@@ -396,10 +428,11 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use text+Enter for yes_no promptType when promptCheck=null', async () => {
-    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+    // Issue #4304 F1-a: the #287 fallback is reached by a bound frame that could
+    // not be read as a prompt (a capture that cannot be bound is refused first).
+    failReading();
 
     const request = createRequest('test-wt', {
       answer: 'y',
@@ -415,10 +448,11 @@ describe('POST /api/worktrees/:id/prompt-response - promptCheck fallback (Issue 
   });
 
   it('should use text+Enter when no promptType is provided (backward compatibility)', async () => {
-    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendKeys, sendSpecialKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+    // Issue #4304 F1-a: the #287 fallback is reached by a bound frame that could
+    // not be read as a prompt (a capture that cannot be bound is refused first).
+    failReading();
 
     // Old client: no promptType or defaultOptionNumber fields
     const request = createRequest('test-wt', '1');
@@ -593,6 +627,8 @@ describe('POST /api/worktrees/:id/prompt-response - Error handling and edge case
     upsertWorktree(db, worktree);
 
     vi.clearAllMocks();
+    // Issue #4304 F1-a: `failReading` replaces the implementation; back to the factory's.
+    vi.mocked(detectPrompt).mockReturnValue({ isPrompt: false, cleanContent: '' });
   });
 
   it('should return 400 when session is not running', async () => {
@@ -998,10 +1034,11 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
   });
 
   it('refuses yes/no when capture failed but the client claims multiple_choice', async () => {
-    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+    // Issue #4304 F1-a: the #287 fallback is reached by a bound frame that could
+    // not be read as a prompt (a capture that cannot be bound is refused first).
+    failReading();
 
     const request = createBodyRequest('test-wt', { answer: 'yes', promptType: 'multiple_choice' });
     const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
@@ -1014,10 +1051,11 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
   });
 
   it('keeps text+Enter for yes/no when capture failed and nothing claims multiple_choice', async () => {
-    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+    // Issue #4304 F1-a: the #287 fallback is reached by a bound frame that could
+    // not be read as a prompt (a capture that cannot be bound is refused first).
+    failReading();
 
     const request = createBodyRequest('test-wt', { answer: 'yes' });
     const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });
@@ -1050,10 +1088,11 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
   });
 
   it('refuses useDefault when no prompt was detected (capture failed)', async () => {
-    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendSpecialKeys, sendKeys } = await import('@/lib/tmux/tmux');
 
-    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
+    // Issue #4304 F1-a: the #287 fallback is reached by a bound frame that could
+    // not be read as a prompt (a capture that cannot be bound is refused first).
+    failReading();
 
     const request = createBodyRequest('test-wt', { useDefault: true });
     const response = await promptResponse(request, { params: Promise.resolve({ id: 'test-wt' }) });

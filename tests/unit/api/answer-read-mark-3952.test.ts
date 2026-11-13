@@ -22,7 +22,8 @@ import path from 'node:path';
 
 /** Every key that reached the pane, in order. */
 let delivered: string[] = [];
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(async () => ''),
@@ -33,14 +34,19 @@ vi.mock('@/lib/tmux/tmux', () => ({
     delivered.push(...keys);
   }),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 /** The route's capture: returns `frame`, after running `during` (a send that comes and goes). */
 const capture = vi.hoisted(() => ({
   frame: '',
   during: null as (() => Promise<void>) | null,
 }));
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutputFresh: vi.fn(async () => {
     if (capture.during) await capture.during();
     return capture.frame;

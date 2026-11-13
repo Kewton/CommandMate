@@ -11,20 +11,26 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(),
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/tmux/tmux-capture-cache', () => ({ invalidateCache: vi.fn() }));
+// Issue #4304 F1-a: the bound capture slices with the real helpers.
+vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tmux/tmux-capture-cache')>()),
+  invalidateCache: vi.fn(),
+}));
 
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { capturePane, sendKeys } from '@/lib/tmux/tmux';
 import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import { resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const fixture = (rel: string): string => readFileSync(resolve(__dirname, '../fixtures', rel), 'utf8');
 
@@ -41,7 +47,7 @@ function keys(): Array<[string, boolean | undefined]> {
 
 async function answer(frame: string, digit: string): Promise<void> {
   vi.mocked(capturePane).mockResolvedValue(frame);
-  await sendPromptAnswer({ sessionName: 'mcbd-codex-wt4161', answer: digit, cliToolId: 'codex', frame });
+  await sendPromptAnswer({ sessionName: 'mcbd-codex-wt4161', answer: digit, cliToolId: 'codex', frame: testBoundFrame(frame) });
 }
 
 beforeEach(() => {
@@ -67,7 +73,7 @@ describe('codex update offer: the digit alone', () => {
       sessionName: 'mcbd-codex-wt4161',
       answer: '2',
       cliToolId: 'codex',
-      frame,
+      frame: testBoundFrame(frame),
       fallbackSubmitMode: 'answer_then_enter',
     });
     expect(keys()).toEqual([['2', false]]);

@@ -15,12 +15,16 @@ import path from 'node:path';
 vi.mock('@/lib/cli-tools/worktree-session-ownership', () => ({
   checkWorktreeSessionOwnership: vi.fn().mockResolvedValue({ ok: true }),
 }));
-vi.mock('@/lib/session/cli-session', () => ({ captureSessionOutput: vi.fn() }));
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
+  captureSessionOutput: vi.fn() }));
 vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/tmux/tmux', () => ({ sendKeys: vi.fn(), sendSpecialKeys: vi.fn() }));
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
+  sendKeys: vi.fn(), sendSpecialKeys: vi.fn() }));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({ getTool: () => ({ getSessionName: (id: string) => `x-${id}`, name: 'x' }) }),

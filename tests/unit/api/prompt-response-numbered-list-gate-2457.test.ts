@@ -55,7 +55,8 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
-vi.mock('@/lib/tmux/tmux', () => ({
+vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
   readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
@@ -63,7 +64,8 @@ vi.mock('@/lib/tmux/tmux', () => ({
   capturePane: vi.fn().mockResolvedValue(''),
 }));
 
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn().mockResolvedValue(''),
   captureSessionOutputFresh: vi.fn().mockResolvedValue(''),
 }));
@@ -272,11 +274,11 @@ describe('[#2457] POST /prompt-response on a Claude pane', () => {
     expect(sendSpecialKeys).toHaveBeenCalled();
   });
 
-  it('leaves the capture-failure path exactly where it was', async () => {
-    // A negative verdict and an unreadable pane are different things: #287's
-    // fallback answers a client-declared prompt when the capture threw, and
-    // #2457 must not turn that into a refusal — the gate is only consulted on a
-    // frame that came back.
+  it('a capture failure is no longer carried on: refused with nothing typed (Issue #4304 F1-a)', async () => {
+    // A negative verdict and an unreadable pane are different things, and #2457
+    // still consults its gate only on a frame that came back. What changed is
+    // the unreadable pane itself (Issue #4304 F1-a, the person's decision of
+    // 2026-11-14): #287's fallback no longer answers it — nothing is typed.
     const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
     const { sendKeys } = await import('@/lib/tmux/tmux');
     vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('tmux capture failed'));
@@ -286,7 +288,8 @@ describe('[#2457] POST /prompt-response on a Claude pane', () => {
     });
     const data = await response.json();
 
-    expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalledWith(`claude-${WT}`, 'yes', false, { literal: true });
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('answer_not_delivered');
+    expect(sendKeys).not.toHaveBeenCalled();
   });
 });

@@ -52,7 +52,8 @@ vi.mock('@/lib/prompt-answer-sender', async (importOriginal) => {
 });
 
 const captured = vi.fn<() => string>(() => '');
-vi.mock('@/lib/session/cli-session', () => ({
+vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
+  // Issue #4304 F1-a: answers read a pane bound to its generation.
   captureSessionOutput: vi.fn(async () => captured()),
   captureSessionOutputFresh: vi.fn(async () => captured()),
   isSessionRunning: vi.fn(async () => true),

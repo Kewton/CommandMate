@@ -140,6 +140,7 @@ import {
 } from './polling/auto-yes-poller-receipt-log';
 import { syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
+import type { BoundFrame } from './session/cli-session';
 import { promptDataForStorage } from './polling/prompt-screen-reading';
 import {
   beginLedgerAttempt,
@@ -603,6 +604,10 @@ function settleFailedTick(
  *   the row count cannot tell. Omitted, judged from the row count as before.
  * @param inputReadMark - Issue #3952: `instanceInputReadMark()` taken before the
  *   tick's capture. Omitted, it is taken when this function is called.
+ * @param boundFrame - Issue #4304 F1-a: the tick's capture bound to its pane
+ *   generation ({@link capturePollerFrame}'s `bound`), handed to the sender so
+ *   the answer's keys go to that pane or are not sent. Omitted (direct
+ *   callers, tests), the sender binds a frame of its own before its first key.
  * @returns 'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'
  */
 export async function detectAndRespondToPrompt(
@@ -618,6 +623,7 @@ export async function detectAndRespondToPrompt(
   captureWindowLines?: number,
   captureHeadCut?: boolean,
   inputReadMark?: number,
+  boundFrame?: BoundFrame,
 ): Promise<'responded' | 'no_prompt' | 'duplicate' | 'no_answer' | 'error'> {
   const compositeKey = buildCompositeKey(worktreeId, cliToolId, instanceId);
   // Issue #3952: where the session's input order stood when the frame was read.
@@ -904,6 +910,8 @@ export async function detectAndRespondToPrompt(
       ...(generation !== undefined ? { stillCurrent: () => isTickCurrent(generation) } : {}),
       // Issue #3952: an answer that had to wait for a send is read again.
       readMark,
+      // Issue #4304 F1-a: the tick's frame, bound to its pane generation.
+      ...(boundFrame !== undefined ? { frame: boundFrame } : {}),
     };
     // Issue #3952 review P1-2: and step 5.5's last look is taken again after
     // that wait, right before the first key — the contract or the grant may
@@ -1024,7 +1032,7 @@ async function pollAutoYes(
     // Issue #3798: dated by where that frame came from — the capture goes
     // through the 5 s cache, so it may predate this tick.
     const {
-      frame: { raw: rawOutput, clean: cleanOutput, headCut },
+      frame: { raw: rawOutput, clean: cleanOutput, headCut, bound: boundFrame },
       frameTime,
     } = await captureObservedFrame(() => capturePollerFrame(worktreeId, cliToolId, captureLines, instanceId));
     if (!isTickCurrent(generation)) {
@@ -1055,6 +1063,8 @@ async function pollAutoYes(
       captureLines,
       headCut,
       inputReadMark,
+      // Issue #4304 F1-a: the same capture, bound to its pane generation.
+      boundFrame,
     );
     if (!isTickCurrent(generation)) {
       endStaleTick(generation);
