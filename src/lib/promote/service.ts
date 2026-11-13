@@ -105,6 +105,7 @@ import {
   type WorktreeDocDestination,
 } from './model';
 import { commentMark, itemFingerprint, renderPromoteBody, sha256 } from './render';
+import { decisionCountsOf } from './decision-counts';
 
 const logger = createLogger('mem-promote');
 
@@ -1081,6 +1082,8 @@ export async function promoteList(db: Database.Database, repositoryId: string, b
             mode: 'ambiguous',
             ambiguous: { reason: target.reason ?? null, roots: target.roots ?? [] },
             branch,
+            // Issue #4355 I6: the roots disagree, so the counts are unknown (null), never 0.
+            counts: decisionCountsOf('ambiguous', []),
             decisions: [],
             unresolved: unresolvedOf(readIdsOf(membership), new Set()),
             worktrees: worktreesOf(membership.members),
@@ -1102,6 +1105,8 @@ export async function promoteList(db: Database.Database, repositoryId: string, b
           ok: true,
           mode: target.mode,
           branch,
+          // Issue #4355 I6: the one count of every reader (CLI, the screen's select, #4354).
+          counts: decisionCountsOf(target.mode, decisions),
           decisions: decisions.map((item) => ({
             item: presentMemItem(item, { now }),
             unreflected: item.state === 'recorded',

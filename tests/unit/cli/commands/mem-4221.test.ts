@@ -56,9 +56,12 @@ async function run(...argv: string[]): Promise<number | undefined> {
 describe('commandmate mem', () => {
   it('has no subcommand or option that changes the mode', () => {
     const mem = createMemCommand();
-    expect(mem.commands.map((command) => command.name())).toEqual(['now', 'add', 'update', 'close', 'list', 'check', 'mode', 'purge']);
+    expect(mem.commands.map((command) => command.name())).toEqual(['now', 'add', 'update', 'close', 'list', 'check', 'mode', 'purge', 'decisions']);
     const mode = mem.commands.find((command) => command.name() === 'mode')!;
     expect(mode.options.map((option) => option.long).sort()).toEqual(['--branch', '--json', '--repository', '--token', '--worktree']);
+    // Issue #4355: decisions reads; none of its options changes the mode.
+    const decisions = mem.commands.find((command) => command.name() === 'decisions')!;
+    expect(decisions.options.map((option) => option.long).sort()).toEqual(['--branch', '--effect', '--json', '--pending', '--repository', '--token', '--worktree']);
   });
 
   it('asks an ordinary shell to name the target (exit 2) and sends nothing', async () => {
