@@ -110,9 +110,11 @@ import {
 import {
   handoffRegistrySnapshot,
   handoffPageMayStart,
+  beginHandoffPageRequest,
   publishHandoffPageView,
   registerHandoffPage,
-  reportHandoffPageAuth,
+  reportHandoffPageAuthenticated,
+  reportHandoffPageResponse,
   subscribeHandoffRegistry,
   unregisterHandoffPage,
   type HandoffPageRegistration,
@@ -842,15 +844,21 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // left, so its reply cannot put back a status changed in the meantime.
     const statusGeneration = currentWorktreeStatusGeneration();
     const requestSeq = ++detailRequestSeqRef.current;
-    // Issue #4317 PR1 (再指示 1): the registration this read started under. Its answer reports the
-    // session's state for that registration only — taken while it is still the current one, never
-    // for the registration current when it answers (StrictMode's second setup, a page made again).
-    const authRegistration = handoffRegistrationRef.current;
+    // Issue #4317 PR1 (再指示 1) / #4345 1a: the registration this read started under and its place in
+    // that registration's one order across entries (the gateway). Its answer reports the session's
+    // state for that registration only — taken while it is still the current one, never for the
+    // registration current when it answers (StrictMode's second setup, a page made again) — and is
+    // taken in that order, apart from `requestSeq` (the order of the detail answers' data).
+    const authRequest = beginHandoffPageRequest(handoffRegistrationRef.current);
     const rosterSaveGeneration = rosterSaveGenerationRef.current;
     const recordSaveGeneration = recordSaveGenerationRef.current;
     const vibeLocalSaveGeneration = vibeLocalSaveGenerationRef.current;
     try {
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}`, POLL_REQUEST_OPTIONS);
+      // Issue #4345 1a: the 401 (or the redirect to /login) reaches the registry before anything
+      // below folds the status into an error — and before the returns for an answer of another
+      // worktree or older than one taken: whether it is taken is the registry's order, not the data's.
+      reportHandoffPageResponse(authRequest, response);
       // Issue #2498: an expired session resolves as the /login HTML page with
       // status 200 — `fetch` transparently follows the middleware's 307 — so
       // `response.json()` threw a SyntaxError that reached the user as
@@ -869,6 +877,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         throw formatError;
       }
       const fetched: Worktree = await response.json();
+      // Issue #4317 PR1 / #4345 1a: an authenticated read started under the current registration —
+      // the only recovery. Taken by the registry in the gateway's order (an older read's success
+      // after a newer 401 of any entry moves nothing), so reported before the returns below.
+      reportHandoffPageAuthenticated(authRequest);
       // Issue #4145: asked by the previous worktree's code after the switch (a kill or a
       // retry finishing). The sequence cannot tell: it left after everything else. Null,
       // so that code does not go on to read the rest for this screen.
@@ -950,8 +962,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       cancelDetailRetry();
       setIsReconnecting(false);
       setIsAuthExpired(false);
-      // Issue #4317 PR1: an authenticated read started under the current registration — the only recovery.
-      reportHandoffPageAuth(authRegistration, 'authenticated', requestSeq);
       setError(null);
       return data;
     } catch (err) {
@@ -975,8 +985,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         // is — an older read answering 200 afterwards moves neither this page nor the registry.
         detailAdoptedSeqRef.current = requestSeq;
         setIsAuthExpired(true);
-        // Issue #4317 PR1: held over the pages (a page made next starts with its own false).
-        reportHandoffPageAuth(authRegistration, 'expired', requestSeq);
+        // Issue #4317 PR1: held over the pages (a page made next starts with its own false) — reported
+        // by the gateway when the response arrived (#4345 1a).
         setIsReconnecting(false);
         setError(null);
         return null;
@@ -2055,6 +2065,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * restart), like {@link openKillConfirm}. The mode is read once per press; a read that
    * fails, answers anything but `on` + `popup`, or takes longer than
    * {@link END_MODE_READ_TIMEOUT_MS} opens the plain confirmation, so "end" never hangs on it.
+   * Issue #4345 1a: but for a 401 the registry takes (the session expired): that opens nothing.
    */
   /**
    * Issue #4227 pr2c (review B P3-5): one read at a time. A press while the mode is being read
@@ -2077,12 +2088,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (handoffTargetRef.current !== null && askHandoffClose('page-end') !== null) return;
     const reading = {};
     endReadingRef.current = reading;
+    // Issue #4345 1a: the read's owner and order, fixed at the press.
+    const authRequest = beginHandoffPageRequest(registration);
     const startedFor = worktreeId;
     let attended = false;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), END_MODE_READ_TIMEOUT_MS);
     try {
       const response = await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/mem/mode`, { signal: controller.signal });
+      // Issue #4345 1a: reported before the body is read. A 401 taken expires the session, and the
+      // check below then opens nothing — not the plain confirmation either (intended). A 401 not
+      // taken (older than an answer taken, another registration's), a 5xx, a 403, a timeout or no
+      // response fall back to the plain confirmation as before.
+      reportHandoffPageResponse(authRequest, response);
       const body = (await response.json()) as { ok?: boolean; mode?: string; features?: { popup?: boolean } };
       attended = response.ok && body.ok === true && body.mode === 'on' && body.features?.popup === true;
     } catch {
