@@ -183,6 +183,10 @@ const EXCLUDED: readonly {
     reason: 'Aggregates the four CI shards into one required check. The `unit` gate is unsharded, so there is nothing to aggregate.',
   },
   {
+    match: { key: 'test-e2e-result › Require every shard to pass' },
+    reason: 'Aggregates the two CI E2E shards into the one required check `E2E Tests` (Issue #4308). E2E is not a local gate, so there is nothing to aggregate.',
+  },
+  {
     match: { key: 'legacy-tmux-readmode › Install tmux' },
     reason: 'legacy-tmux-readmode needs Docker with a pre-3.2 tmux image; the machine running verify may have neither (static-guard-single-source.test.ts NOT_DECLARED).',
   },
@@ -226,7 +230,8 @@ const EXCLUDED: readonly {
     match: { key: 'test-e2e › Run E2E tests' },
     reason:
       'Declared gates run on every `wait --verify`; E2E adds 5m+ per worker to every parallel orchestration (verify.yaml comment). Contracts can still name an `e2e` gate when an Issue needs it.',
-    allow: [{ pattern: /^npm run test:e2e$/, why: 'the excluded check itself' }],
+    // [Issue #4308] CI splits the suite into two shards, each with its own dev webServer.
+    allow: [{ pattern: /^npm run test:e2e -- --shard=\$\{\{ matrix\.shard \}\}\/2$/, why: 'the excluded check itself, as the CI shard' }],
   },
   {
     match: { key: 'test-e2e › E2E heap summary' },
