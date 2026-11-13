@@ -51,3 +51,18 @@ export function decisionCountsOf(mode: DecisionCountsMode, items: readonly Decis
   }
   return { mode, approvable: mode === 'on', open, recorded };
 }
+
+/** One branch of the decision screen's select (PR2, §3.1.2): its name and its counts. */
+export interface DecisionBranchView extends DecisionCounts {
+  branch: string;
+}
+
+/** Where the screen's `?item=` is, as seen from the repository and branch it shows (§3.1.4). */
+export type DecisionItemWhere = 'here' | 'elsewhere' | 'gone';
+
+/** `GET /api/repositories/:id/mem/decisions/branches` (§4.1). */
+export interface DecisionBranchesBody {
+  ok: true;
+  branches: DecisionBranchView[];
+  item?: { id: string; where: DecisionItemWhere };
+}

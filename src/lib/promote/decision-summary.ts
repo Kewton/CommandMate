@@ -9,10 +9,26 @@
 
 import type Database from 'better-sqlite3';
 import { listMem } from '@/lib/db/mem-db';
-import { AgentRoleTargetNotFoundError, MembershipUnsettledError, withSettledRepositoryMembership } from '@/lib/agent-roles/resolve';
+import {
+  AgentRoleTargetNotFoundError,
+  MembershipUnsettledError,
+  withSettledRepositoryMembership,
+  type RoleRepositoryMembership,
+} from '@/lib/agent-roles/resolve';
 import { decideMemTarget } from '@/lib/mem/target';
 import type { MemServiceDeps } from '@/lib/mem/service';
 import { decisionCountsOf, type DecisionCounts } from './decision-counts';
+
+/**
+ * The counts of `branch`'s decisions under a membership already settled (the branch select of
+ * PR2 counts every branch inside one settled stretch). null when no root is a member.
+ */
+export function decisionCountsUnder(db: Database.Database, membership: RoleRepositoryMembership, branch: string): DecisionCounts | null {
+  const target = decideMemTarget(db, membership, branch, { via: 'repository', worktree: null, detached: false, head: null });
+  if (!target.ok) return target.code === 'ambiguous' && membership.members.length > 0 ? decisionCountsOf('ambiguous', []) : null;
+  const items = listMem(db, { storageRepositoryId: target.storageRepositoryId, readRepositoryIds: target.readRepositoryIds, branch, worktreeId: null }, { all: true }).items;
+  return decisionCountsOf(target.mode, items);
+}
 
 /**
  * The counts of `branch`'s decisions in `repositoryId`'s roots, or null when the repository
@@ -25,12 +41,7 @@ export async function summarizeDecisionCounts(
   deps: MemServiceDeps = {}
 ): Promise<DecisionCounts | null> {
   try {
-    return await withSettledRepositoryMembership(db, repositoryId, deps, (_repository, membership): DecisionCounts | null => {
-      const target = decideMemTarget(db, membership, branch, { via: 'repository', worktree: null, detached: false, head: null });
-      if (!target.ok) return target.code === 'ambiguous' && membership.members.length > 0 ? decisionCountsOf('ambiguous', []) : null;
-      const items = listMem(db, { storageRepositoryId: target.storageRepositoryId, readRepositoryIds: target.readRepositoryIds, branch, worktreeId: null }, { all: true }).items;
-      return decisionCountsOf(target.mode, items);
-    });
+    return await withSettledRepositoryMembership(db, repositoryId, deps, (_repository, membership) => decisionCountsUnder(db, membership, branch));
   } catch (error) {
     if (error instanceof AgentRoleTargetNotFoundError || error instanceof MembershipUnsettledError) return null;
     throw error;
