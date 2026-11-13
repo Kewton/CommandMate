@@ -122,6 +122,11 @@ function isTerminal(row: AskCorrelation): boolean {
   return row.attributionState !== 'pending';
 }
 
+/** Whether the send route has saved the send's outcome and its observations (`reserved` until then). */
+function sendSettled(row: AskCorrelation): boolean {
+  return row.sendState !== 'reserved';
+}
+
 /**
  * Record one sighting of an envelope and settle the ask when the turn is
  * complete. Never throws; a failure is logged and answered `unknown`, so the
@@ -162,6 +167,7 @@ function bind(db: Database.Database, sighting: AskTurnSighting): AskSightingOutc
     || (row.nativeInputId === sighting.nativeInputId && (row.nativeSessionId ?? null) === (sighting.nativeSessionId ?? null));
   if (!sameInput) {
     // M6: a terminal row is never rewritten; a second input before it settled is not guessed at.
+    if (!isTerminal(row) && !sendSettled(row)) return 'pending';
     if (isTerminal(row)) {
       logger.info('ask-correlation-duplicate-sighting', {
         askId: row.askId,
@@ -177,6 +183,11 @@ function bind(db: Database.Database, sighting: AskTurnSighting): AskSightingOutc
   if (row.nativeInputId === null) {
     recordAskNativeInput(db, row.askId, { nativeInputId: sighting.nativeInputId, nativeSessionId: sighting.nativeSessionId });
   }
+  // Never terminal before the send route has saved what it observed at the send
+  // (`turnOpenAtSend`, R3): a reader that runs between the input and that save
+  // would otherwise settle `matched` without it. The next read (the poller, or
+  // `GET /api/asks/:askId`'s refresh) settles it once the outcome is in.
+  if (!sendSettled(row)) return 'pending';
   if (!sighting.turnComplete) return 'pending';
   const notified = sighting.notices > 0;
   if (sighting.otherInputs > 0) {
@@ -211,7 +222,7 @@ function bind(db: Database.Database, sighting: AskTurnSighting): AskSightingOutc
 export function markAskAbsorbed(db: Database.Database, askId: string, target: AskSightingTarget): boolean {
   try {
     const row = getAskCorrelation(db, askId);
-    if (!row || isTerminal(row)) return false;
+    if (!row || isTerminal(row) || !sendSettled(row)) return false;
     if (row.worktreeId !== target.worktreeId || row.cliToolId !== target.cliToolId || row.instanceId !== target.instanceId) {
       return false;
     }

@@ -66,7 +66,6 @@
 import { createLogger } from '@/lib/logger';
 import type { AgentInstanceRef } from '@/lib/hooks/sources/types';
 import { currentPollerOwner, mayActForAgentInstance } from '@/lib/polling/poller-owner';
-import { stripAskEnvelope } from '@/lib/ask/envelope';
 
 const logger = createLogger('lib/history/user-turn-recorder');
 
@@ -209,11 +208,6 @@ export async function recordUserTurn(
   options: RecordUserTurnOptions = {}
 ): Promise<RecordedUserTurn> {
   const instanceId = target.instanceId ?? target.cliToolId;
-  // Issue #4344 (M2): an ask's envelope is machinery, not the operator's words — off
-  // before the comparison and the insert, and only when it sits where the send puts
-  // it. Text without one (every other input) is compared exactly as before.
-  const enveloped = stripAskEnvelope(content);
-  if (enveloped) content = enveloped.text;
   const normalized = normalizeUserTurnContent(content);
 
   if (key.length === 0 || normalized.length === 0) {

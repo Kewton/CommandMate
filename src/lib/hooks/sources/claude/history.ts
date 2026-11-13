@@ -882,6 +882,9 @@ async function recordClaudeUserTurn(
   const adoption: RecordUserTurnOptions =
     previousStartedAt > 0 ? { adoptionFromMs: previousStartedAt } : {};
 
+  // Issue #4344 (M2): `promptText` is already without the ask's envelope — taken off
+  // once, by `createClaudeTurn`. `recordUserTurn` compares it as it is, so a body that
+  // itself opens with an envelope-shaped line keeps it.
   const recorded = await recordUserTurn(
     target,
     claudePromptRequestId(turn.promptUuid),

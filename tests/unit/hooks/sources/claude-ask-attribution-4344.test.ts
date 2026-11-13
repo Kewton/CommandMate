@@ -310,3 +310,55 @@ describe('(12) Q1: settled by the read API alone, with no poller reading', () =>
     expect(answer).toMatchObject({ state: 'matched', reply: 'read on demand' });
   });
 });
+
+describe('re-instruction 2 (review P2): never terminal before the send\'s observations are saved', () => {
+  /** The reservation alone: the send route has not saved its outcome yet. */
+  function reservedOnly(askId: string, body: string): void {
+    reserveAsk(db, { askId, worktreeId: WT, instanceId: 'claude', cliToolId: 'claude', bodyDigest: askBodyDigest(body) });
+    createMessage(db, {
+      worktreeId: WT, role: 'user', content: body, messageType: 'normal',
+      timestamp: new Date(T0), cliToolId: 'claude', instanceId: 'claude',
+    });
+  }
+
+  it('a complete turn read before the outcome is saved stays pending; turnOpenAtSend=true saved later → ambiguous', async () => {
+    reservedOnly(A, 'hi');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'hi', 1000)]);
+    await capture();
+    expect(getAskCorrelation(db, A)).toMatchObject({ attributionState: 'pending', nativeInputId: 'p1' });
+    recordAskSendOutcome(db, A, { sendState: 'sent', turnOpenAtSend: true });
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'turn_open_at_send', reply: null });
+  });
+
+  it('read after the outcome is saved: matched as before', async () => {
+    reservedOnly(A, 'hi');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'hi', 1000)]);
+    recordAskSendOutcome(db, A, { sendState: 'sent', turnOpenAtSend: false });
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'hi' });
+  });
+
+  it('an absorbed ask whose send is not saved yet is not settled either', async () => {
+    sentAsk(A, 'review the plan');
+    reservedOnly(B, 'second question');
+    await writeTranscript(await readFile(join(FIXTURES, 'absorbed-ask.jsonl'), 'utf8'));
+    await capture();
+    expect(getAskCorrelation(db, B)?.attributionState).toBe('pending');
+  });
+});
+
+describe('re-instruction 2 (review P2): the envelope comes off once', () => {
+  it('M2 a body that itself opens with another valid envelope keeps it: one History row, the body as sent', async () => {
+    const body = `${formatAskEnvelope(B)}\nquoted envelope first`;
+    sentAsk(A, body);
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\n${body}`), 0), reply('r1', 'ok', 1000)]);
+    await capture();
+    const rows = userRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toBe(body);
+    expect(rows[0].requestId).toBe('claude-prompt:p1');
+    expect(await read(A)).toMatchObject({ state: 'matched' });
+    expect(getAskCorrelation(db, B)).toBeNull();
+  });
+});
