@@ -13,6 +13,10 @@
  */
 
 import type { MultipleChoiceOption, MultipleChoicePromptData, PromptData, PromptType } from '@/types/models';
+import {
+  COMMAND_CODE_REVIEW_PAGE_ANSWERS,
+  isCommandCodeReviewPagePrompt,
+} from '@/lib/detection/tools/command-code/review-page-prompt';
 
 /**
  * Checkbox-style multi-select options have no yes/no semantics.
@@ -205,6 +209,18 @@ export function resolvePromptAnswer(params: ResolvePromptAnswerParams): AnswerRe
   }
 
   const rawAnswer = answer ?? '';
+
+  // Issue #4313 再指示 1: Command Code's Review page takes `1` (Submit) or `2`
+  // (Cancel) and nothing else. Any other digit is not a row on it and used to
+  // pass straight through below (and on to `answer_only`'s bare digit); text is
+  // no row either. Refused here, before any key and before the answer is
+  // recorded as a human's.
+  if (isCommandCodeReviewPagePrompt(promptData) && !COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(rawAnswer)) {
+    throw new PromptAnswerResolutionError(
+      'The Command Code Review page takes 1 (Submit) or 2 (Cancel) and nothing else, so no key was sent.'
+    );
+  }
+
   const semantic = parseSemanticAnswer(rawAnswer);
   if (semantic === null) {
     return { input: rawAnswer };

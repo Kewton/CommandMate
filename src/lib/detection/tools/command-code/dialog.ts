@@ -89,6 +89,7 @@ import {
   type OptionRecommendation,
 } from '../../option-recommendation';
 import type { PromptDetectionResult } from '../../types';
+import { COMMAND_CODE_REVIEW_PAGE_QUESTION } from './review-page-prompt';
 import { truncateRawContent } from '../../truncate-raw-content';
 
 /**
@@ -576,8 +577,11 @@ const REVIEW_CANCEL_ROW_PATTERN = /^[^\S\n]*(❯)?[^\S\n]*2[.)][^\S\n]+Cancel[^\
 /** The tab strip row the Review page is drawn under (`✔ Q | ● Review`). */
 const REVIEW_TAB_ROW_PATTERN = /\|[^\S\n]*●[^\S\n]*Review\b/;
 
-/** The question the Review page prompt is published with (fixed text, no frame content). */
-export const COMMAND_CODE_REVIEW_PAGE_QUESTION = 'Submit your answers?';
+export {
+  COMMAND_CODE_REVIEW_PAGE_ANSWERS,
+  COMMAND_CODE_REVIEW_PAGE_QUESTION,
+  isCommandCodeReviewPagePrompt,
+} from './review-page-prompt';
 
 /**
  * Read Command Code's `AskUserQuestion` Review page as a two-option prompt that

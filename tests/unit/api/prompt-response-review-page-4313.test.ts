@@ -77,6 +77,16 @@ vi.mock('@/lib/hooks/structured-decision-response', () => ({
   }),
 }));
 vi.mock('@/lib/session/agent-event-state', () => ({ getAskUserQuestion: vi.fn(() => null) }));
+// The two records an answer leaves (`prompt_answered_human` and the audit row,
+// `answer-delivery.ts`), spied so a refusal can be shown to leave neither.
+vi.mock('@/lib/tasks/task-transition-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tasks/task-transition-service')>();
+  return { ...actual, applyEventToActiveTask: vi.fn(actual.applyEventToActiveTask) };
+});
+vi.mock('@/lib/db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db')>();
+  return { ...actual, recordAnsweredPrompt: vi.fn(actual.recordAnsweredPrompt) };
+});
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: vi.fn(() => ({
@@ -183,5 +193,42 @@ describe('[#4313] 陰性対照', () => {
 
     expect(data.success).toBe(false);
     expect(await keystrokes()).toEqual({ text: [], special: [] });
+  });
+});
+
+/** How many times an answer was recorded: `prompt_answered_human` and the audit row. */
+async function records() {
+  const { applyEventToActiveTask } = await import('@/lib/tasks/task-transition-service');
+  const { recordAnsweredPrompt } = await import('@/lib/db');
+  return {
+    answeredHuman: vi.mocked(applyEventToActiveTask).mock.calls
+      .filter((call) => call[4] === 'prompt_answered_human').length,
+    audit: vi.mocked(recordAnsweredPrompt).mock.calls.length,
+  };
+}
+
+describe('[#4313 再指示 1] on the Review page the answer is 1 or 2, nothing else', () => {
+  it('陽性対照: answer 1 is recorded once (what the refusals below must not leave)', async () => {
+    const { data } = await respond(REVIEW, { answer: '1' });
+    expect(data.success).toBe(true);
+    expect(await records()).toEqual({ answeredHuman: 1, audit: 1 });
+  });
+
+  it.each(['3', '0', '12'])('answer %s is refused before any key, and nothing is recorded', async (answer) => {
+    const { status, data } = await respond(REVIEW, { answer });
+
+    expect(status).toBe(200);
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unresolvable_answer');
+    expect(await keystrokes()).toEqual({ text: [], special: [] });
+    expect(await records()).toEqual({ answeredHuman: 0, audit: 0 });
+  });
+
+  it('answer 3 with `submitMode: answer_only` is refused the same way', async () => {
+    const { data } = await respond(REVIEW, { answer: '3', submitMode: 'answer_only' });
+
+    expect(data.success).toBe(false);
+    expect(await keystrokes()).toEqual({ text: [], special: [] });
+    expect(await records()).toEqual({ answeredHuman: 0, audit: 0 });
   });
 });

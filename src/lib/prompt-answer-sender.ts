@@ -13,7 +13,8 @@ import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { DialogAnswerMode, DialogVerdict } from '@/lib/detection/tools/types';
 import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
 import {
-  COMMAND_CODE_REVIEW_PAGE_QUESTION,
+  COMMAND_CODE_REVIEW_PAGE_ANSWERS,
+  isCommandCodeReviewPagePrompt,
   readCommandCodeQuestionDialog,
 } from '@/lib/detection/tools/command-code/dialog';
 import { readCommandCodeReviewPage } from '@/lib/detection/selection-shape';
@@ -617,16 +618,19 @@ async function sendCommandCodeMultiSelectAnswer(
 }
 
 /**
- * Is this the Review page payload `readCommandCodeReviewPagePrompt` publishes
- * (Issue #4313 (b))? Judged on the payload's own fixed question and its two
- * labels, so no other prompt of any tool can take the Review arm below.
+ * Refuse anything but `1` / `2` on Command Code's Review page (Issue #4313
+ * 再指示 1), with nothing typed. Reported as the dialog's own refusal
+ * (`PromptAnswerRejectedError`), which every caller already maps to "nothing
+ * was sent" and leaves unrecorded.
  */
-function isCommandCodeReviewPagePrompt(promptData: PromptData | undefined): promptData is MultipleChoicePromptData {
-  return promptData?.type === 'multiple_choice'
-    && promptData.question === COMMAND_CODE_REVIEW_PAGE_QUESTION
-    && promptData.options.length === 2
-    && promptData.options[0].label === 'Submit'
-    && promptData.options[1].label === 'Cancel';
+function assertReviewPageAnswer(params: SendPromptAnswerParams): void {
+  if (params.cliToolId !== 'command-code' || !isCommandCodeReviewPagePrompt(params.promptData)) return;
+  if (COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(params.answer)) return;
+  throw new PromptAnswerRejectedError(params.cliToolId, params.answer, {
+    kind: 'review-page',
+    options: params.promptData.options.map((option) => option.label),
+    answerMode: 'keys',
+  });
 }
 
 /** The prompt a frame shows, read as `/prompt-response` verifies one; null when none is answerable. */
@@ -1014,6 +1018,12 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
     return;
   }
 
+  // Issue #4313 再指示 1: on Command Code's Review page the answer is `1` or
+  // `2` and nothing else — refused here, before any key, for every caller (the
+  // route already refuses it in `resolvePromptAnswer`). Without this a `3`
+  // missed the Review arm below and was typed at the page as a bare digit.
+  assertReviewPageAnswer(params);
+
   // Issue #2033: before ANY key is chosen, let the tool's own dialog rules
   // refuse a digit its dialog cannot take. Placed above the branch rather than
   // inside the text arm because the number->offset arithmetic the cursor arm
@@ -1061,7 +1071,7 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // (1.54.1 nor 1.88.2) and is what `Cancel` from `Submit` takes.
   const isCommandCodeReviewPage = cliToolId === 'command-code'
     && isCommandCodeReviewPagePrompt(promptData)
-    && (answer === '1' || answer === '2');
+    && COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(answer);
   const isCursorNavMultiChoice = isCommandCodeReviewPage || ((cliToolId === 'claude' || cliToolId === 'antigravity')
     && (promptData?.type === 'multiple_choice' || fallbackPromptType === 'multiple_choice')
     && /^\d+$/.test(answer));
