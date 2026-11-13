@@ -54,6 +54,9 @@ const ENTRIES: Entry[] = ['new-file', 'new-dir', 'rename', 'delete', 'move', 'up
 
 let calls: Record<Entry, number>;
 let status: number | undefined;
+/** When set, the next create answers only when this is called (the answer is pending meanwhile). */
+let heldCreates: Array<(status: number) => void>;
+let holdCreate: boolean;
 const json = (code: number, body: unknown) => new Response(JSON.stringify(body), { status: code, headers: { 'content-type': 'application/json' } });
 const detailBody = { id: A, name: A, path: '/p', repositoryPath: '/r', repositoryName: 'R', sessionStatusByInstance: {} };
 
@@ -73,6 +76,8 @@ beforeEach(() => {
   resetHandoffStoreForTests();
   calls = Object.fromEntries(ENTRIES.map((e) => [e, 0])) as Record<Entry, number>;
   status = undefined;
+  heldCreates = [];
+  holdCreate = false;
   toasts.length = 0;
   vi.spyOn(window, 'alert').mockImplementation(() => undefined);
   vi.spyOn(window, 'prompt').mockImplementation(() => 'renamed.md');
@@ -85,6 +90,11 @@ beforeEach(() => {
     const entry = entryOf(rest, init?.method ?? 'GET', init?.body);
     if (entry) {
       calls[entry] += 1;
+      if (entry === 'new-file' && holdCreate) {
+        return new Promise<Response>((resolve) =>
+          heldCreates.push((code) => resolve(code === 200 ? json(200, { success: true }) : json(code, { success: false, error: 'e' }))),
+        );
+      }
       if (status !== undefined) return json(status, { error: `e${status}`, success: false });
       return json(200, { success: true, filename: 'a.png' });
     }
@@ -226,5 +236,47 @@ describe('[#4345 1c-2] (negative controls) an ordinary failure is still told', (
     await drive('move');
     expect(toasts.some(([, type]) => type === 'error')).toBe(true);
     expect(page.isMoveDialogOpen).toBe(false);
+  });
+});
+
+describe('[#4345 1c-2] a create answered after the dialog was cancelled and opened again', () => {
+  const openAndType = async (name: string) => {
+    act(() => page.handleNewFile(''));
+    await settle();
+    fireEvent.change(await screen.findByTestId('new-file-name-input'), { target: { value: name } });
+  };
+
+  it.each([200, 500])('answer %s of an earlier opening: the later opening stays open with its input', async (code) => {
+    await drawn();
+    holdCreate = true;
+    await openAndType('first');
+    fireEvent.click(screen.getByTestId('new-file-confirm-button'));
+    await waitFor(() => expect(heldCreates.length).toBe(1));
+    // Cancelled while the answer is awaited, then a new create is opened and typed into.
+    act(() => page.handleNewFileCancel());
+    await settle();
+    holdCreate = false;
+    await openAndType('second');
+    expect(page.showNewFileDialog).toBe(true);
+    await act(async () => heldCreates[0](code));
+    await settle();
+    await settle();
+    expect(page.showNewFileDialog).toBe(true);
+    expect((screen.getByTestId('new-file-name-input') as HTMLInputElement).value).toBe('second');
+    // The later opening can still send its own create.
+    fireEvent.click(screen.getByTestId('new-file-confirm-button'));
+    await waitFor(() => expect(calls['new-file']).toBe(2));
+  });
+
+  it('(negative) without an opening in between, the answer closes the dialog as before', async () => {
+    await drawn();
+    holdCreate = true;
+    await openAndType('only');
+    fireEvent.click(screen.getByTestId('new-file-confirm-button'));
+    await waitFor(() => expect(heldCreates.length).toBe(1));
+    expect(page.showNewFileDialog).toBe(true);
+    await act(async () => heldCreates[0](200));
+    await settle();
+    expect(page.showNewFileDialog).toBe(false);
   });
 });
