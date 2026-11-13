@@ -6,6 +6,8 @@
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { DetectPromptOptions } from './types';
 import { createLogger } from '@/lib/logger';
+import { THINKING_TAIL_LINE_COUNT } from '@/config/thinking-constants';
+import { isOpenCodeThinkingBelowComposer, isOpenCodeThinkingInOpenTurn } from './tools/opencode/patterns';
 import { isShellPaneCommand } from './shared/shell-pane-command';
 import {
   PASTED_TEXT_PATTERN,
@@ -487,6 +489,22 @@ export function detectThinking(cliToolId: CLIToolType, content: string): boolean
 
   log.debug('detectThinking:result', { isThinking: result });
   return result;
+}
+
+/**
+ * {@link detectThinking} for a screen read as rows (Issue #4291). opencode reads
+ * `Thinking:` by position (Issue #4231, #4209): the footer's cwd also holds the
+ * word (`/tmp/Thinking:demo`), so a word match there is not a running turn. Other
+ * tools keep the word rule over the joined rows. No new rule: the two opencode
+ * readers are the ones the Enter fallback and the response checker already use.
+ *
+ * @param rows - ANSI-stripped rows, box drawing intact
+ */
+export function detectThinkingInRows(cliToolId: CLIToolType, rows: readonly string[]): boolean {
+  if (cliToolId === 'opencode') {
+    return isOpenCodeThinkingBelowComposer(rows) || isOpenCodeThinkingInOpenTurn(rows, THINKING_TAIL_LINE_COUNT);
+  }
+  return detectThinking(cliToolId, rows.join('\n'));
 }
 
 /**

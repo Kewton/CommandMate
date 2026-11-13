@@ -18,6 +18,8 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 import { useTranslations } from 'next-intl';
 import {
   CLI_TOOL_IDS,
@@ -158,6 +160,8 @@ export const OpencodeInstanceSettings = memo(function OpencodeInstanceSettings({
   instances,
 }: OpencodeInstanceSettingsProps) {
   const t = useTranslations('schedule');
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [settings, setSettings] = useState<Record<string, OpencodeInstanceSettingsValue>>({});
   const [catalog, setCatalog] = useState<OpencodeLaunchCatalog>({
     connected: false,
@@ -171,7 +175,8 @@ export const OpencodeInstanceSettings = memo(function OpencodeInstanceSettings({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/worktrees/${worktreeId}/instances/opencode`)
+    // Issue #4345 1c: the 401 reaches the gateway before it is folded into a rejection.
+    fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/instances/opencode`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: OpencodeInstanceSettingsResponse) => {
         if (cancelled) return;
@@ -192,15 +197,19 @@ export const OpencodeInstanceSettings = memo(function OpencodeInstanceSettings({
     return () => {
       cancelled = true;
     };
-  }, [worktreeId, t]);
+  }, [worktreeId, t, handoffOwner]);
 
   const persist = useCallback(
     async (instanceId: string, next: OpencodeInstanceSettingsValue) => {
-      setSettings((current) => ({ ...current, [instanceId]: next }));
+      let previous: OpencodeInstanceSettingsValue | undefined;
+      setSettings((current) => {
+        previous = current[instanceId];
+        return { ...current, [instanceId]: next };
+      });
       setSaving(true);
       setError(null);
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}/instances/opencode`, {
+        const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/instances/opencode`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ instanceId, ...next }),
@@ -215,13 +224,24 @@ export const OpencodeInstanceSettings = memo(function OpencodeInstanceSettings({
         if (body.settings) {
           setSettings((current) => ({ ...current, [instanceId]: body.settings! }));
         }
-      } catch {
+      } catch (err) {
+        // Issue #4345 1c-2: a refusal (nothing sent) is no failure message and must not look saved:
+        // the optimistic value goes back, the sign-in prompt is the person's cue.
+        if (isHandoffPageOperationRefused(err)) {
+          setSettings((current) => {
+            const rest = { ...current };
+            if (previous === undefined) delete rest[instanceId];
+            else rest[instanceId] = previous;
+            return rest;
+          });
+          return;
+        }
         setError(t('opencodeSettingsSaveError'));
       } finally {
         setSaving(false);
       }
     },
-    [worktreeId, t]
+    [worktreeId, t, handoffOwner]
   );
 
   return (
@@ -449,6 +469,8 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
   persistToServer = true,
 }: AgentSettingsPaneProps) {
   const t = useTranslations('schedule');
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
 
   // Clamp selectedAgents to maxAgents (Issue #851)
   const clampedAgents = selectedAgents.length > maxAgents
@@ -506,8 +528,10 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
         }
 
         setSaving(true);
+        let refused = false;
         try {
-          const response = await fetch(`/api/worktrees/${worktreeId}`, {
+          // Issue #4345 1c: the save's 401 reaches the gateway (never a recovery).
+          const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ selectedAgents: pair }),
@@ -519,16 +543,21 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
             // Revert on failure
             setCheckedIds(new Set(clampedAgents));
           }
-        } catch {
+        } catch (err) {
+          // Issue #4345 1c-2: a refusal (nothing sent) keeps the choice and the editing state.
+          if (isHandoffPageOperationRefused(err)) {
+            refused = true;
+            return;
+          }
           // Revert on network error
           setCheckedIds(new Set(clampedAgents));
         } finally {
           setSaving(false);
-          setIsEditing(false);
+          if (!refused) setIsEditing(false);
         }
       }
     },
-    [worktreeId, clampedAgents, onSelectedAgentsChange, persistToServer]
+    [worktreeId, clampedAgents, onSelectedAgentsChange, persistToServer, handoffOwner]
   );
 
   const isMaxSelected = checkedIds.size >= maxAgents;

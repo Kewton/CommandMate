@@ -806,10 +806,14 @@ export function extractCompletedResponse(ctx: ExtractionContext): ExtractionResu
   // located. Its reply keeps the rows quoting the chrome's words by position
   // (`OPENCODE_TRANSCRIPT_SKIP_PATTERNS`), so a reply ending on `Ask anything...
   // is the input box, Thinking: is the progress row` would be read here as a
-  // running turn and the finished reply never saved. There the progress is read
-  // where the TUI draws it while a turn runs: under the composer's bottom border,
-  // as `isOpenCodeComplete` reads the busy hint, and as whole progress rows: the
-  // footer there also draws the cwd, which may hold the word (`/tmp/Thinking:demo`).
+  // running turn and the finished reply never saved. There only the rows under the
+  // composer's bottom border are read, as `isOpenCodeComplete` reads the busy hint,
+  // and as whole progress rows: the footer there also draws the cwd, which may hold
+  // the word (`/tmp/Thinking:demo`). The measured `Thinking:` row of a running turn is
+  // in the transcript, ABOVE the border (`opencode-live-1894/esc-again-after-marker.txt`),
+  // so this save-side reader does not see it; the open turn is the status detector's
+  // (`isOpenCodeThinkingInOpenTurn`), and a frame holding it carries no finished-turn
+  // marker, so there is no reply to save here.
   const stillRunning = cliToolId === 'opencode' && chromeStart >= 0
     ? isOpenCodeProgressBelowComposer(lines.slice(chromeStart).map(stripAnsi))
     : cliToolId !== 'copilot' &&

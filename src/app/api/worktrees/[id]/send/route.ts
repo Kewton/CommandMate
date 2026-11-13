@@ -22,6 +22,12 @@
  * route before it (another server's session, a start still coming up or
  * failed: `not_sent`) — so the CLI can say whether it may be sent again. A 400
  * (the body, `--model`) records none and is answered as before; so is its 201.
+ *
+ * Issue #4344: a body naming `ask` (a synchronous `commandmate ask`) on a tool the
+ * server attributes asks for reserves the ask id before anything is typed, types
+ * its envelope in front of the operator's body, and records how the send ended;
+ * every answer after the field was read carries `ask` (`lib/ask/ask-send`). A
+ * body without `ask` is answered byte for byte as before.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -74,6 +80,8 @@ import {
   takeOpencodeResumeNotice,
 } from './send-role';
 import { getLaunchRoleEvidence } from '@/lib/session/role-launch';
+import { planAskForSend, settleAskSend } from '@/lib/ask/ask-send';
+import type { AskSendAnswer } from '@/types/ask-correlation';
 import type { StoredRoleState } from '@/types/agent-roles';
 
 const logger = createLogger('api/send');
@@ -90,7 +98,11 @@ export async function POST(
   const relay: RouteRelayState = { binding: null, attempt: null, sent: null };
   const role: RouteRoleState = { settings: null };
   const brief: RouteBriefState = { report: null };
-  const answered = await handleSend(request, context, relay, role, brief);
+  const ask: RouteAskState = { askId: null, answer: null, delivering: false, notTyped: false, turnOpenAtSend: null };
+  const sendAnswer = await handleSend(request, context, relay, role, brief, ask);
+  // Issue #4344: a reserved ask learns how its send ended, and every answer after
+  // the field was read says what became of it. No `ask`, nothing added.
+  const answered = ask.answer ? await withBody(sendAnswer, { ask: settleRouteAsk(ask, relay) }) : sendAnswer;
   // Issue #4274: `brief` only when one was attached, a flag asked, or the delivery of
   // a claimed one is unknown — a send with neither answers byte for byte as before.
   const handled = brief.report ? await withBody(answered, { brief: brief.report }) : answered;
@@ -117,6 +129,35 @@ export async function POST(
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
   return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/** Issue #4344: what this request did with the body's `ask`. */
+interface RouteAskState {
+  /** The reserved ask id, when the typed text carries its envelope. */
+  askId: string | null;
+  answer: AskSendAnswer | null;
+  /** Whether the send service was entered (the input may have started). */
+  delivering: boolean;
+  /** The service stopped before any key without recording an attempt (the brief choice). */
+  notTyped: boolean;
+  turnOpenAtSend: boolean | null;
+}
+
+/**
+ * Issue #4344: the reserved ask's send outcome, recorded once, and the `ask` the
+ * answer carries. Sent: the row and the turn reading. Not entered, or recorded
+ * `not-sent`: `not_sent`. Anything else is `send_unknown` — never resent.
+ */
+function settleRouteAsk(ask: RouteAskState, relay: RouteRelayState): AskSendAnswer {
+  const answer = ask.answer as AskSendAnswer;
+  if (!ask.askId) return answer;
+  const db = getDbInstance();
+  const sendState = relay.sent
+    ? settleAskSend(db, ask.askId, { sendState: 'sent', sentMessageId: relay.sent.messageId, turnOpenAtSend: ask.turnOpenAtSend })
+    : settleAskSend(db, ask.askId, {
+        sendState: !ask.delivering || ask.notTyped || relay.attempt === 'not-sent' ? 'not_sent' : 'send_unknown',
+      });
+  return sendState ? { ...answer, sendState } : answer;
 }
 
 /** Issue #4274: what the send service said about this send's brief. */
@@ -154,7 +195,8 @@ async function handleSend(
   { params }: { params: Promise<{ id: string }> },
   relay: RouteRelayState,
   role: RouteRoleState,
-  brief: RouteBriefState
+  brief: RouteBriefState,
+  ask: RouteAskState
 ) {
   // Issue #4065: the input generation counter at the request's outermost
   // entry, before the body is read and before every wait below. A refusal of
@@ -192,6 +234,17 @@ async function handleSend(
     // Issue #4116: in the same step as the resolution, before anything waits.
     const roleRosterMark = readRoleRosterMark(db, id, body);
 
+    // Issue #4344: before any side effect — the reservation, or why there is none.
+    const askPlan = await planAskForSend(db, body.ask, {
+      worktreeId: id,
+      cliToolId,
+      instanceId: instanceId ?? cliToolId,
+      content: trimmedContent,
+    });
+    if (askPlan.kind === 'answered') return NextResponse.json(askPlan.body, { status: askPlan.status });
+    if (askPlan.kind === 'reserved') ask.askId = askPlan.askId;
+    if (askPlan.kind !== 'none') ask.answer = askPlan.answer;
+
     const reserved = reserveRelayForSend(db, body.relayId, {
       worktreeId: id,
       cliToolId,
@@ -212,7 +265,7 @@ async function handleSend(
     // failed start to a phone (`BaseCLITool.startSession`). Removing the copy
     // leaves one gate, and it is the one that notifies.
     //
-    // The 503 is preserved below by mapping SESSION_START_UNAVAILABLE, and the
+    // The 503 is preserved by mapping SESSION_START_UNAVAILABLE (send-session-start.ts), and the
     // body is now the tool's own wording — which for copilot carries its install
     // hint (#1907) that this route's fixed sentence used to discard.
     //
@@ -377,6 +430,7 @@ async function handleSend(
     let ownAttempt: { state: SendAttemptState; reason: string } | null = null;
     const respondAgent = resolveRespondAgent(db, id, requestedCliToolId, instanceId);
 
+    ask.delivering = true;
     const result = await sendUserMessage(db, {
       worktreeId: id,
       content: trimmedContent,
@@ -410,12 +464,15 @@ async function handleSend(
       // Issue #3957: the relay's boundary, required — a refusal stops the send.
       // Issue #4115: the role's condition goes first, re-read at the same moment.
       inputBoundary: roleConditionBoundary(roleGate, roleTarget, relay.binding?.hooks()),
+      // Issue #4344: the reserved ask's envelope goes on the typed text (M3); none without one.
+      askEnvelopeId: ask.askId ?? undefined,
     });
 
     if (!result.ok) {
       // Issue #4227 (S-B, design §3.2): the screen's choice stopped before any key. Not a send
       // failure: the screen asks again with a new preview (the body and the image stay).
       if (result.stage === 'brief_choice') {
+        ask.notTyped = true;
         return NextResponse.json(
           { error: result.code, reason: result.reason, boundary: result.boundary },
           { status: 409 }
@@ -460,6 +517,7 @@ async function handleSend(
       generationAfter,
       reportsTurns(cliToolId),
     );
+    ask.turnOpenAtSend = turnOpenAtSend ?? null;
     const sent: SendMessageResponse =
       turnOpenAtSend !== undefined ? { ...result.message, turnOpenAtSend } : result.message;
     return NextResponse.json(

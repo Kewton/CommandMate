@@ -57,6 +57,8 @@
 
 import { claudeHeadlessTurnId } from '@/types/agent-transcript';
 import { isPlainObject, readStringField } from '../event-mapper';
+import { stripAskEnvelope } from '@/lib/ask/envelope';
+import { CLAUDE_TASK_NOTIFICATION_PREFIX } from './queued-notice';
 import { boundDetail, collapseToLine, separateTurnBody, truncateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
@@ -316,6 +318,28 @@ export interface ClaudeTranscriptRecord {
   /** `message.content`, normalised; empty for records that carry no message. */
   readonly blocks: readonly ClaudeContentBlock[];
   /**
+   * Issue #4344 (M1): `operation` of a `queue-operation` record (`enqueue` /
+   * `dequeue` / `remove`); null on every other record.
+   */
+  readonly queueOperation?: string | null;
+  /** Issue #4344: `reason` of a `queue-operation` record (`absorbed_mid_turn`); null otherwise. */
+  readonly queueReason?: string | null;
+  /**
+   * Issue #4344: the queued input's text — a `queue-operation`'s `content`, or a
+   * `queued_command` attachment's `prompt`; null otherwise. Read only for an ask's
+   * envelope, never written anywhere.
+   */
+  readonly queuedText?: string | null;
+  /** Issue #4344: `attachment.type` of an `attachment` record (`queued_command`); null otherwise. */
+  readonly attachmentType?: string | null;
+  /**
+   * Issue #4344 (design §3.6 I6・I9): set by {@link claudeLogicalRecords} on a prompt
+   * record that repeats an earlier native input (same `uuid` and same own
+   * `sessionId`) after another input came in between. It still opens a turn — what
+   * follows it is not the in-between input's — but nothing is attributed by the id alone.
+   */
+  readonly reappearance?: boolean;
+  /**
    * The record's text with every block concatenated.
    *
    * Only used to decide whether a `user` record is a prompt. Deliberately never
@@ -417,6 +441,53 @@ export interface ClaudeTurnAccumulator {
   stopReasonObserved: boolean;
   /** True once a block had to be dropped for {@link MAX_CLAUDE_TURN_BLOCKS}. */
   overflowed: boolean;
+  /**
+   * Issue #4344: the ask whose envelope the prompt record carried at its
+   * canonical place (`lib/ask/envelope`); null when it carried none.
+   * {@link promptText} keeps the envelope: it comes off only when the ledger has a
+   * reservation of the same destination for `askId` (design §3.6 I3), and then
+   * the text without it is {@link askPromptText}.
+   */
+  askId?: string | null;
+  /** Issue #4344: {@link promptText} with the envelope taken off once (I3); null with no envelope. */
+  askPromptText?: string | null;
+  /**
+   * Issue #4344 (M1): inputs this turn absorbed while it ran — prompts the
+   * operator or another ask typed into it. Each leaves a `queue-operation`
+   * `remove` (`absorbed_mid_turn`) and a `queued_command` attachment and no
+   * prompt record; the larger of the two counts is taken so one input is not
+   * counted twice. A background-task notice (`<task-notification>…`) is not an
+   * input (design §7 (a), decided ②) and is counted in {@link absorbedNotices}.
+   */
+  absorbedInputs?: number;
+  /**
+   * Issue #4344 (§7 (a) ②): background-task notices this turn absorbed. Not
+   * another input, but the reply may react to them — the ask says `notified`.
+   */
+  absorbedNotices?: number;
+  /**
+   * Issue #4344 (M1): the envelopes found on absorbed inputs, each with the
+   * session of the record it was read from (null when that record names none —
+   * never the turn's own session in its place; design §3.6 I6).
+   */
+  absorbedAsks?: { askId: string; sessionId: string | null }[];
+  /**
+   * Issue #4344 (I5・I6): the turn's stop as an ask may read it — {@link closed}, and
+   * the closing assistant record's own `sessionId` is the prompt record's own
+   * (design §0.4: the reply is in the same native session). History reads `closed`.
+   */
+  askClosed?: boolean;
+  /**
+   * Issue #4344 (I9): this turn's prompt is a {@link ClaudeTranscriptRecord.reappearance},
+   * or its native input reappears later after another input. Its id alone does not
+   * say which records answer it, so an ask does not settle from it.
+   */
+  identityUncertain?: boolean;
+  /**
+   * Issue #4344 (I6): the prompt record's own `sessionId`, null when it names none.
+   * Unlike {@link sessionId} it does not fall back to the session the file was read under.
+   */
+  promptSessionId?: string | null;
 }
 
 /** What one rendered turn is. */
@@ -545,6 +616,10 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
   const timestamp = readStringField(value, 'timestamp');
   const parsed = timestamp ? Date.parse(timestamp) : NaN;
   const origin = isPlainObject(value.origin) ? value.origin : null;
+  // Issue #4344 (M1): an input absorbed into a running turn leaves no prompt record —
+  // only these two shapes (`queued-notice.ts`).
+  const attachment = type === 'attachment' && isPlainObject(value.attachment) ? value.attachment : null;
+  const queueOperation = type === 'queue-operation' ? readStringField(value, 'operation') : null;
 
   return {
     type,
@@ -561,6 +636,15 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
     stopReason: message ? readStringField(message, 'stop_reason') : null,
     blocks,
     text,
+    queueOperation,
+    queueReason: queueOperation !== null ? readStringField(value, 'reason') : null,
+    queuedText:
+      queueOperation !== null
+        ? readStringField(value, 'content')
+        : attachment
+          ? readStringField(attachment, 'prompt')
+          : null,
+    attachmentType: attachment ? readStringField(attachment, 'type') : null,
   };
 }
 
@@ -742,14 +826,19 @@ export function isClaudeTurnWritable(turn: ClaudeTurnAccumulator): boolean {
 
 /** A brand-new accumulator for one turn. */
 export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: string): ClaudeTurnAccumulator {
+  // A slash command's record is XML and the operator typed a line; #2265 puts
+  // the line on the turn so that the `user` row reads `/release v0.30.1` and
+  // the `/send` row holding those same bytes is adopted rather than doubled.
+  const command = claudeSlashCommandPrompt(record.text);
+  // Issue #4344 (M3): paste wrapper first, then (inside `stripAskEnvelope`) the brief,
+  // then the envelope — only at its canonical place. A command never carries one.
+  const unwrapped = command ?? claudePastedContentPrompt(record.text);
+  const envelope = command === null ? stripAskEnvelope(unwrapped) : null;
   return {
     sessionId: record.sessionId ?? sessionId,
     promptUuid: record.uuid as string,
     startedAt: record.timestampMs ?? 0,
-    // A slash command's record is XML and the operator typed a line; #2265 puts
-    // the line on the turn so that the `user` row reads `/release v0.30.1` and
-    // the `/send` row holding those same bytes is adopted rather than doubled.
-    promptText: claudeSlashCommandPrompt(record.text) ?? claudePastedContentPrompt(record.text),
+    promptText: unwrapped,
     promptIsOperatorInput: isClaudeOperatorPromptRecord(record),
     blocks: [],
     assistantRecords: 0,
@@ -757,7 +846,74 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     superseded: false,
     stopReasonObserved: false,
     overflowed: false,
+    askId: envelope ? envelope.askId : null,
+    askPromptText: envelope ? envelope.text : null,
+    absorbedInputs: 0,
+    absorbedNotices: 0,
+    absorbedAsks: [],
+    promptSessionId: record.sessionId,
+    askClosed: false,
+    identityUncertain: record.reappearance === true,
   };
+}
+
+/** Issue #4344 (M1): the `queue-operation` reason of an input absorbed into a running turn. */
+export const CLAUDE_ABSORBED_MID_TURN_REASON = 'absorbed_mid_turn';
+
+/** Issue #4344 (M1): the attachment type an absorbed input is recorded under. */
+export const CLAUDE_QUEUED_COMMAND_ATTACHMENT = 'queued_command';
+
+/** Which absorbed-input shape this record is, if any (Issue #4344, M1). */
+function absorbedInputKind(record: ClaudeTranscriptRecord): 'remove' | 'attachment' | null {
+  if (
+    record.type === 'queue-operation'
+    && record.queueOperation === 'remove'
+    && record.queueReason === CLAUDE_ABSORBED_MID_TURN_REASON
+  ) {
+    return 'remove';
+  }
+  if (record.type === 'attachment' && record.attachmentType === CLAUDE_QUEUED_COMMAND_ATTACHMENT) return 'attachment';
+  return null;
+}
+
+/** One native input: the prompt record's `uuid` and its own `sessionId` (Issue #4344, I6). */
+function claudeInputKey(record: ClaudeTranscriptRecord): string {
+  return `${record.uuid ?? ''}\u0000${record.sessionId ?? ''}`;
+}
+
+/**
+ * The records with one native input as one logical input (Issue #4344, design
+ * §3.6 I6・I9) — the single place every turn builder and walker reads them through.
+ *
+ * A prompt record that repeats the native input of the turn it is in (same `uuid`
+ * and same own `sessionId`, no other prompt in between) is the same input written
+ * twice: it is dropped, so the turn is not split into an empty "interrupted" one
+ * and its answer. A repeat after another input came in between is kept (it is a
+ * boundary: what follows is not the in-between input's) and marked
+ * {@link ClaudeTranscriptRecord.reappearance}. Every other record — absorbed
+ * `queue-operation` removes (no uuid) and attachments (their own uuid) included —
+ * passes as it is. Sidechain records are not prompts here and pass as they are.
+ */
+export function claudeLogicalRecords(records: readonly ClaudeTranscriptRecord[]): readonly ClaudeTranscriptRecord[] {
+  const out: ClaudeTranscriptRecord[] = [];
+  const seen = new Set<string>();
+  let current: string | null = null;
+  for (const record of records) {
+    if (record.isSidechain || !isClaudePromptRecord(record)) {
+      out.push(record);
+      continue;
+    }
+    const key = claudeInputKey(record);
+    if (key === current) continue;
+    current = key;
+    if (seen.has(key)) {
+      out.push({ ...record, reappearance: true });
+      continue;
+    }
+    seen.add(key);
+    out.push(record);
+  }
+  return out;
 }
 
 /** What one pass over a transcript's records produced. */
@@ -809,16 +965,53 @@ export function buildClaudeTurns(
   let current: ClaudeTurnAccumulator | null = null;
   let orphanedAssistantRecords = 0;
   let sidechainRecords = 0;
+  // Issue #4344 (M1): one absorbed input writes a `remove` and an attachment;
+  // notices (§7 (a) ②) are counted apart, the same way.
+  let absorbedRemoves = 0;
+  let absorbedAttachments = 0;
+  let noticeRemoves = 0;
+  let noticeAttachments = 0;
 
-  for (const record of records) {
+  // Issue #4344 (I6・I9): one native input is one turn, for every reader of turns.
+  for (const record of claudeLogicalRecords(records)) {
     if (record.isSidechain) {
       sidechainRecords += 1;
       continue;
     }
 
     if (isClaudePromptRecord(record)) {
+      if (record.reappearance) {
+        const key = claudeInputKey(record);
+        for (const earlier of turns) {
+          if (`${earlier.promptUuid}\u0000${earlier.promptSessionId ?? ''}` === key) earlier.identityUncertain = true;
+        }
+      }
       current = createClaudeTurn(record, sessionId);
+      absorbedRemoves = 0;
+      absorbedAttachments = 0;
+      noticeRemoves = 0;
+      noticeAttachments = 0;
       turns.push(current);
+      continue;
+    }
+
+    const absorbed = current ? absorbedInputKind(record) : null;
+    if (current && absorbed) {
+      if ((record.queuedText ?? '').trimStart().startsWith(CLAUDE_TASK_NOTIFICATION_PREFIX)) {
+        if (absorbed === 'remove') noticeRemoves += 1;
+        else noticeAttachments += 1;
+        current.absorbedNotices = Math.max(noticeRemoves, noticeAttachments);
+        continue;
+      }
+      if (absorbed === 'remove') absorbedRemoves += 1;
+      else absorbedAttachments += 1;
+      current.absorbedInputs = Math.max(absorbedRemoves, absorbedAttachments);
+      const envelope = record.queuedText ? stripAskEnvelope(claudePastedContentPrompt(record.queuedText)) : null;
+      const absorbedAsks = current.absorbedAsks ?? (current.absorbedAsks = []);
+      // The record's own session (I6): a `remove` and its attachment are two records of one input.
+      if (envelope && !absorbedAsks.some((seen) => seen.askId === envelope.askId && seen.sessionId === record.sessionId)) {
+        absorbedAsks.push({ askId: envelope.askId, sessionId: record.sessionId });
+      }
       continue;
     }
 
@@ -834,6 +1027,9 @@ export function buildClaudeTurns(
     // an earlier `end_turn` — which is what a turn Claude resumed looks like —
     // is open again, and that is the reading the Issue's census supports.
     current.closed = isClaudeTurnClosingRecord(record);
+    // Issue #4344 (§0.4): an ask's turn closes only on its own session's stop.
+    current.askClosed =
+      current.closed && record.sessionId !== null && record.sessionId === (current.promptSessionId ?? null);
     if (record.stopReason !== null) current.stopReasonObserved = true;
     for (const block of record.blocks) {
       if (current.blocks.length >= MAX_CLAUDE_TURN_BLOCKS) {

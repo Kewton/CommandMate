@@ -33,11 +33,18 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+} from '@/lib/handoff/page-owner';
+import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { AlertTriangle, ArrowUpCircle, RotateCcw } from 'lucide-react';
 import { Button, Card, Spinner } from '@/components/ui';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import { useAgentUpdates, type AgentVersionView } from '@/hooks/useAgentUpdates';
-import { readRunningInstances } from '@/lib/api-client-agent-roles';
 
 /** The deadline `InstanceRolesSection` gives the same request. A kill that outlives it may still have ended the session. */
 const KILL_SESSION_TIMEOUT_MS = 15000;
@@ -70,6 +77,9 @@ function useRunningInstances(
   refreshToken: number
 ): Record<string, boolean> {
   const [running, setRunning] = useState<Record<string, boolean>>({});
+  // Issue #4345 1c: drawn in a worktree page's agents pane, the page's registration holder; on the
+  // settings screen none (no page owns the request: nothing is reported).
+  const handoffOwner = useHandoffPageOwner();
 
   useEffect(() => {
     // No worktree, or no roster: nothing to ask about, and the More screen must
@@ -81,7 +91,7 @@ function useRunningInstances(
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`);
+        const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}`);
         if (!response.ok) return;
         const body: unknown = await response.json();
         if (cancelled) return;
@@ -103,7 +113,7 @@ function useRunningInstances(
     };
     // A single read, re-run when an update finishes (refreshToken) rather than
     // on an interval: this card is not a session monitor.
-  }, [worktreeId, instances, refreshToken]);
+  }, [worktreeId, instances, refreshToken, handoffOwner]);
 
   return running;
 }
@@ -116,6 +126,8 @@ function toolLabel(tool: string): string {
 export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: AgentUpdatesCardProps) {
   const t = useTranslations('common');
   const { versions, isLoading, loadError, run, isUpdating, update } = useAgentUpdates(true);
+  // Issue #4345 1c: see useRunningInstances (the kill below is the page's in its agents pane only).
+  const handoffOwner = useHandoffPageOwner();
 
   const [refreshToken, setRefreshToken] = useState(0);
   const running = useRunningInstances(worktreeId, instances, refreshToken);
@@ -164,6 +176,10 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
   const restart = useCallback(
     async (instance: AgentUpdateInstance): Promise<void> => {
       if (!worktreeId) return;
+      // Issue #4345 1c 再指示 1: no kill once a 401 was taken (or the page was made again) — in the
+      // page's agents pane only; on the settings screen (no page) as before.
+      const operation = beginHandoffPageOperation(handoffOwner);
+      if (!operation.mayStart()) return;
       setRestartError(null);
       setInProgressId(null);
       setRestarting((prev) => ({ ...prev, [instance.id]: true }));
@@ -174,23 +190,33 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
       let outcome: 'ended' | 'refused' | 'errored' | 'silent' = 'ended';
       try {
         const query = new URLSearchParams({ cliTool: instance.cliTool, instance: instance.id });
-        const response = await fetch(
+        const response = await fetchForHandoffPage(
+          handoffOwner,
           `/api/worktrees/${worktreeId}/kill-session?${query.toString()}`,
-          { method: 'POST', signal: controller.signal }
+          { method: 'POST', signal: controller.signal },
+          // Issue #4345 1c 再指示 2 (K1): the press's token goes to the gate.
+          handoffPageOperationOptions(operation),
         );
         // 404 means the session already ended, which is the goal — treat it as
         // success rather than making the user press again.
         if (!response.ok && response.status !== 404) {
           outcome = response.status < 500 ? 'refused' : 'errored';
         }
-      } catch {
+      } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — not a kill's result:
+        // nothing is said or recorded, the button stays.
+        if (isHandoffPageOperationRefused(err)) {
+          clearTimeout(timer);
+          setRestarting((prev) => ({ ...prev, [instance.id]: false }));
+          return;
+        }
         outcome = 'silent';
       } finally {
         clearTimeout(timer);
       }
       if (worktreeIdRef.current !== worktreeId) return;
       if (outcome === 'errored' || outcome === 'silent') {
-        const runningNow = await readRunningInstances(worktreeId);
+        const runningNow = await readRunningInstancesForPage(handoffOwner, worktreeId);
         if (worktreeIdRef.current !== worktreeId) return;
         if (runningNow === null) {
           setRestartError(t('agentUpdates.restartUnknown'));
@@ -213,7 +239,7 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
       }
       setRestarting((prev) => ({ ...prev, [instance.id]: false }));
     },
-    [worktreeId, t]
+    [worktreeId, t, handoffOwner]
   );
 
   const body = (() => {

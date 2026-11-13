@@ -16,7 +16,7 @@
 
 'use client';
 
-import React, { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MoreHorizontal } from 'lucide-react';
 import { Spinner } from '@/components/ui/Spinner';
@@ -45,7 +45,6 @@ import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { Modal } from '@/components/ui/Modal';
-import { SessionHandoffDialog } from '@/components/mem/SessionHandoffDialog';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
@@ -282,6 +281,13 @@ import {
 } from '@/lib/prompt-response-outcome';
 import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
+import { HandoffPageOwnerContext } from '@/hooks/useHandoffPageOwner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+} from '@/lib/handoff/page-owner';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
 }: WorktreeDetailRefactoredProps) {
@@ -332,9 +338,6 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     killTarget,
     openActiveEnd,
     openEnd,
-    handoffTarget,
-    closeHandoff,
-    stopForHandoff,
     isKillPending,
     handleLoadContent,
     handleLoadError,
@@ -420,6 +423,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     worktree,
     worktreeName,
     worktreeStatus,
+    handoffOwner,
   } = useWorktreeDetailController({ worktreeId });
 
   // Issue #3511: New task opened on this screen starts on this worktree and
@@ -661,16 +665,27 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       let outcome: PromptResponseOutcome;
       // Issue #4031: a failure stopped part-way (keys may be on the pane).
       let partial = false;
+      // Issue #4345 1c 再指示 2 (K1): the press's token — the gate reads its registration.
+      const operation = beginHandoffPageOperation(handoffOwner);
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
-          ),
-        });
+        // Issue #4345 1c: the decision's 401 reaches the gateway before the reply is read.
+        const response = await fetchForHandoffPage(
+          handoffOwner,
+          `/api/worktrees/${worktreeId}/respond`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(
+              buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
+            ),
+          },
+          handoffPageOperationOptions(operation),
+        );
         ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
+        // toast, the sheet stays.
+        if (isHandoffPageOperationRefused(err)) return;
         // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error answering a decision:', err);
         outcome = 'failed';
@@ -696,6 +711,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       tWorktree,
       fetchCurrentOutput,
       handlePromptDismiss,
+      handoffOwner,
     ]
   );
 
@@ -734,41 +750,23 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // Render
   // ========================================================================
 
-  // Issue #4227 (G-4, G10): the hand-off before ending, drawn in one place for PC and phone and
-  // kept over the page's Loading (a first read of another worktree, a page made again): keyed
-  // beside the content, it is the same instance whichever branch below draws the content. It
-  // never kills by itself: its stop runs `stopForHandoff`, the existing stop, from its handler.
-  // While the session is expired it is not drawn (G10b, codex P2-1): the modal would cover the
-  // re-login button and trap the focus, and an unknown decide refuses to close. It is left
-  // unmounted, not hidden with `isOpen={false}` (a hidden dialog closes its opening). The opening
-  // and its units stay in the store; once the page recovers (a read succeeds), the dialog mounts
-  // again for the same opening and target, and makes or sends nothing again.
-  const withHandoff = (content: React.ReactNode): React.ReactElement => (
-    <>
-      <Fragment key="content">{content}</Fragment>
-      {!isAuthExpired && (
-        <SessionHandoffDialog
-          key="handoff"
-          isOpen={handoffTarget !== null}
-          worktreeId={worktreeId}
-          target={handoffTarget}
-          onClose={closeHandoff}
-          onStop={stopForHandoff}
-        />
-      )}
-    </>
-  );
+  // Issue #4227 (G-4, G10) / Issue #4317 PR2: the hand-off before ending is not drawn here. Its one
+  // host is beside the shell (`HandoffDialogHost` in `AppShellGate`), outside this route's Loading and
+  // the PC / phone branches below, so a switch of worktree or width never takes it away. This page
+  // only registers and publishes what it shows (`useWorktreeDetailController`: its target, its close
+  // through the rule, its existing stop); the dialog starts nothing unless that registration is the
+  // current one and the session is not expired.
 
   // Handle loading state
   if (loading) {
-    return withHandoff(<LoadingIndicator />);
+    return <LoadingIndicator />;
   }
 
   // Issue #2498: an expired session is a re-login, not an error. It used to
   // reach ErrorDisplay carrying the HTML parse failure, which told the user
   // nothing they could act on.
   if (isAuthExpired) {
-    return withHandoff(
+    return (
       <SessionExpiredNotice
         message={tWorktree('editor.sessionExpired')}
         loginLabel={tAuth('login.submitButton')}
@@ -784,7 +782,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // still the right answer. A poll that fails once a worktree is on screen no
   // longer lands here; it raises `isReconnecting` and the screen stays put.
   if (error) {
-    return withHandoff(<ErrorDisplay message={error} onRetry={handleRetry} />);
+    return <ErrorDisplay message={error} onRetry={handleRetry} />;
   }
 
   // Issue #956: the kill-session confirmation dialog must show the active
@@ -814,10 +812,13 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
 
   // Render desktop layout
   if (!isMobile) {
-    return withHandoff(
+    return (
       // [#2345] The file-link scope wraps the PC layout too: its split builds
       // one frozen prop object for both the chat surface and the History
       // column, so neither can be handed `worktreePath` from here directly.
+      // Issue #4345 1c: what the page draws owns its requests through this page's registration
+      // holder (`HandoffPageOwnerContext`): their 401 reaches the hand-off gateway.
+      <HandoffPageOwnerContext.Provider value={handoffOwner}>
       <ChatFileLinkProvider value={chatFileLinkScope}>
         {/* Issue #2498: overlay, so a poll failing mid-session never reflows
             the split below it. */}
@@ -911,6 +912,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           endLabel={tCommon('end')}
         />
       </ChatFileLinkProvider>
+      </HandoffPageOwnerContext.Provider>
     );
   }
 
@@ -926,7 +928,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // the composer fly off-screen on Android Chrome). Falls back to `100%` (fill
   // the AppShell main) until visualViewport is measured / on unsupported
   // browsers, preserving the pre-#1166 full-height behavior.
-  return withHandoff(
+  return (
+    // Issue #4345 1c: see the PC layout (the page's registration holder for what it draws).
+    <HandoffPageOwnerContext.Provider value={handoffOwner}>
     <ErrorBoundary componentName="WorktreeDetailRefactored">
       {/* Issue #2213: the screen-scoped seam between the chat surface inside the
           terminal tab and the composer docked below it. The surface registers its
@@ -1416,6 +1420,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </ChatFileLinkProvider>
       </WorktreeChatSendProvider>
     </ErrorBoundary>
+    </HandoffPageOwnerContext.Provider>
   );
 });
 

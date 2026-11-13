@@ -19,6 +19,8 @@ import React, { useEffect, useState, memo } from 'react';
 import { useLocale } from 'next-intl';
 import { collectScheduleWarnings, parseCmateContent, type CmateValidationWarning } from '@/lib/cmate-validator';
 import { getCommandCodeWriteToolsWarningText } from './command-code-write-tools-warning';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 export interface ScheduleConfigWarningsProps {
   worktreeId: string;
@@ -37,6 +39,8 @@ export const ScheduleConfigWarnings = memo(function ScheduleConfigWarnings({
 }: ScheduleConfigWarningsProps) {
   const locale = useLocale();
   const [warnings, setWarnings] = useState<CmateValidationWarning[]>([]);
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +53,8 @@ export const ScheduleConfigWarnings = memo(function ScheduleConfigWarnings({
 
     void (async () => {
       try {
-        const res = await fetch(`/api/worktrees/${worktreeId}/files/CMATE.md`);
+        // Issue #4345 1c 再指示 1: the read's 401 reaches the gateway before it is folded into null.
+        const res = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/files/CMATE.md`);
         const data = res.ok ? await res.json() : null;
         const content = typeof data?.content === 'string' ? data.content : '';
         show(collectScheduleWarnings(parseCmateContent(content).get('Schedules') ?? []));
@@ -63,7 +68,7 @@ export const ScheduleConfigWarnings = memo(function ScheduleConfigWarnings({
     return () => {
       cancelled = true;
     };
-  }, [worktreeId]);
+  }, [worktreeId, handoffOwner]);
 
   if (warnings.length === 0) return null;
 

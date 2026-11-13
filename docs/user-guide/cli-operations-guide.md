@@ -68,6 +68,10 @@ CM_PORT=3000 node bin/commandmate.js send abc123 "msg"
 | [`commandmate sync`](#commandmate-sync) | サーバーのworktree再スキャン（GUI同期ボタン相当） |
 | [`commandmate send`](#commandmate-send) | エージェントへのメッセージ送信 |
 | [`commandmate wait`](#commandmate-wait) | エージェント完了の待機 |
+| [`commandmate whoami`](#commandmate-whoami) | このセッションがどの worktree・インスタンスかの表示 |
+| [`commandmate peers`](#commandmate-peers) | 同じリポジトリの他セッションの一覧（そのまま実行できる `ask` 行つき） |
+| [`commandmate ask`](#commandmate-ask) | 他のセッションへ依頼して返答を受け取る（`--async` は待たない） |
+| [`commandmate relays`](#commandmate-relays) | `--async` / `--reply-to` の待ちの一覧・取り下げ・保留の解決 |
 | [`commandmate prompt`](#commandmate-prompt) | 止まっている画面の観測（種類・選択肢・観測トークン） |
 | [`commandmate respond`](#commandmate-respond) | プロンプトへの応答 |
 | [`commandmate interrupt`](#commandmate-interrupt) | 生成中のターンの中断（GUI の中断ボタン相当） |
@@ -967,6 +971,226 @@ Completed: localllm-test-main (basis=hook_stop)
 
 ---
 
+## commandmate whoami
+
+このセッションが**どの worktree のどのエージェントインスタンスか**を表示します。エージェントが他のセッションへ
+`ask` するとき、自分の worktree ID と instance ID を知る入口です（Issue #2376）。
+
+### 使用方法
+
+```bash
+commandmate whoami [--json] [--token <token>]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--json` | JSON で出力 |
+| `--token <token>` | 認証トークン（プロセスリストに見えるため `CM_AUTH_TOKEN` 環境変数を推奨） |
+
+### 何を見て答えるか
+
+1. 環境変数 `CM_WORKTREE_ID` / `CM_INSTANCE_ID` / `CM_CLI_TOOL`（無ければ起動行の `CM_AGENT_*`）。`source` は `env`
+2. 無ければ tmux セッション名 `mcbd-[<ns>-]<tool>-<worktree>[-<n>]`。`source` は `tmux-session`
+
+### 出力
+
+```text
+worktree:  commandmate-issue-101
+instance:  claude
+cli_tool:  claude
+alias:     Claude
+source:    env
+tmux:      mcbd-…-claude-commandmate-issue-101
+server:    http://localhost:3000
+```
+
+`--json` は `worktreeId` / `instanceId` / `cliToolId` / `alias`（roster に無ければ `null`）/ `source` /
+`sessionName` / `serverUrl` を返します。このセッションの worktree が接続先サーバーの一覧に無いとき
+（別のサーバーに接続している）は、stderr に警告を出し、`--json` に `"serverMismatch": true` を足します
+（終了コードは 0 のまま。Issue #2404）。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 答えた |
+| 3 | **NOT_IN_SESSION**: CommandMate が起動したエージェントセッションの中ではない（理由は stderr）。`ExitCode.START_FAILED` と同じ番号だが、サーバー起動の失敗とは無関係 |
+| 1 / 2 / 99 | サーバー未起動・引数エラー・予期しないエラー（[全終了コード一覧](#全終了コード一覧)）。ただし whoami は身元を環境変数か tmux セッション名から決め、サーバーへの問い合わせ（`-<n>` の切り分けと alias の取得）は失敗しても捨てるので、サーバーが落ちているだけでは 1 にならず 0 で答えます（alias は `-`） |
+
+---
+
+## commandmate peers
+
+このリポジトリにいる**他のエージェントセッション**を一覧し、各行に**そのまま実行できる `ask` の行**を付けます
+（Issue #2376）。`ls` と `instances` を組み合わせて探す手間を 1 回にまとめたものです。
+
+### 使用方法
+
+```bash
+commandmate peers [--json] [--token <token>]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--json` | JSON で出力 |
+| `--token <token>` | 認証トークン |
+
+自分のセッションは `commandmate whoami` と同じ方法で決め、**同じリポジトリの worktree** に絞ります。自分の行には
+`(you)` が付き、`ask` の行は付きません。
+
+```text
+commandmate-issue-102 / codex
+  alias: Codex   tool: codex   status: ready
+  commandmate ask commandmate-issue-102 --instance codex "<request>"
+```
+
+`--json` は `self`（`worktreeId` / `instanceId` / `cliToolId`）、`serverUrl`、`peers`（各行に `worktreeId` /
+`instanceId` / `cliTool` / `alias` / `status` / `isSelf` / `ask`。自分の行の `ask` は `null`）を返します。接続先が
+別のサーバーなら `serverMismatch: true` と stderr の警告が付きます。同じリポジトリに他のセッションが無いときは
+`No peer sessions found.` です。
+
+`status`（`waiting` / `running` / `ready` / `idle`。語は `ls` と同じ）は**その行のセッション自身**の状態です（Issue #4346）。
+同じ worktree の別のセッションが動いていても、起動していないセッションの行は `idle` です。各セッションの状態を返さない古い
+サーバーでは、従来どおり worktree 全体の状態を出します。
+
+### 終了コード
+
+| コード | 意味 |
+|:------:|------|
+| 0 | 一覧を出した |
+| 3 | **NOT_IN_SESSION**: エージェントセッションの外から実行した（`whoami` と同じ） |
+| 1 / 2 / 99 | サーバー未起動・引数エラー・予期しないエラー |
+
+---
+
+## commandmate ask
+
+別のエージェントセッションへ依頼を送り、**返答を受け取るまでを 1 コマンドで**行います（`send` + `wait` + 返答の読み取り。
+Issue #2376 / #2377）。
+
+### 使用方法
+
+```bash
+commandmate ask <worktree-id> "<依頼>" --instance <id> [--timeout <秒>] [--json]
+commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <target>] [--allow-relay-chain]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--instance <id>` | 送り先のインスタンス（`<agent>` または `<agent>-<n>`。roster の alias も可）。**送り先はこれ 1 つで指定する**。省略時はそのツールの主インスタンス。alias が 2 行に当たると exit 2 |
+| `--agent <agent>` | roster に無いインスタンスへのアドホック指定（`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`） |
+| `--timeout <秒>` | 返答を待つ上限（既定 1800） |
+| `--json` | 返答を JSON で出力 |
+| `--async` | 待たない。relay を登録して relay ID を出し、exit 0。返答は相手のターンが終わったとき `--reply-to` の入力欄へ届く |
+| `--reply-to <target>` | `--async` の返答の届け先: `<worktree-id>[@<instance-id\|alias>]`、または `self`（このコマンドを実行しているセッション。既定） |
+| `--allow-relay-chain` | relay された依頼に答える途中で開く relay を許可（既定は拒否。連鎖は 3 ホップで止まる） |
+| `--token <token>` | 認証トークン |
+
+`--auto-yes` は**意図的にありません**。他のセッションの Auto-Yes を入れるのは、そのセッションの安全柵の判断であり、質問の一部では
+ありません。
+
+### 待つか、待たないか
+
+| 状況 | 使うもの |
+|------|---------|
+| 返答が**次の一手に要る**（レビューの判定、調査の結果など） | `ask`（ブロックして返答を stdout に出す） |
+| 返答を待たず**自分のターンを終えたい** | `ask --async`、または `send --reply-to`。返答は後で `[from <alias> / <worktree>]` つきで自分の入力欄に届く |
+
+`--async` の標準出力は relay ID だけです（`--json` では `worktreeId` / `instanceId` / `cliToolId` / `relayId` / `mode: "async"`）。
+未解決の relay は [`commandmate relays`](#commandmate-relays) で見て、取り下げは `relays cancel` です。
+別のセッションの確認ダイアログには、`respond` で**代わりに答えない**でください（番号を取り違えると既定が選ばれます）。
+
+### 出力
+
+標準出力は返答の本文です。`--json` は次の形です。
+
+```json
+{
+  "worktreeId": "commandmate-issue-102",
+  "instanceId": "codex",
+  "cliToolId": "codex",
+  "source": "history",
+  "reply": "…",
+  "overlapped": true
+}
+```
+
+`source` は `history`（転写）/ `pane`（画面）/ `none`。`overlapped` は重なりを見つけたときだけ付きます
+（[同じインスタンスへ重ねて `ask` しない（Issue #3955）](#commandmate-wait)）。ターンは終わったが返答を読めなかったときは、
+stderr に警告を出して exit 0 です。上流障害（exit 11）では `--json` に `upstreamFault` を出します。
+
+### 終了コード
+
+`wait` の終了コードに、`ask` 固有の 11 と 32 が加わります。
+
+| コード | 意味 | 次のアクション |
+|:------:|------|---------------|
+| 0 | ターンが終わった（`--async` は relay を登録できた）。stdout が返答 | — |
+| 1 | サーバー未起動など（DEPENDENCY_ERROR） | `commandmate start --daemon` |
+| 2 | 引数エラー、alias の曖昧、**relay の拒否**（理由は stderr。CONFIG_ERROR と同じ番号）、相手が確認待ちで本文を送れなかった | stderr を読む。再送しない |
+| 10 | 相手が確認待ち。stdout にプロンプトの JSON | 報告する。`respond` で代わりに答えない |
+| 11 | **UPSTREAM_FAULT**: ターンが走らなかった。stderr と `--json` に `id=…`（`ask` は常に `failOnUpstreamFault: true`）。`id=context-limit` は文脈上限で、`instances <id> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別のインスタンス・モデルへ送る（#3936） | 時間を置くか送り先を変えて再送 |
+| 21 | 動いているセッションが無い | `instances <id>` で roster を確認 |
+| 32 | **ROLE NOT_SENT**: ロールの条件を満たさず、本文を入力していない | ロールの設定を見直す |
+| 99 | 予期しないエラー | — |
+| 124 | タイムアウト。送信が期限を過ぎて返った場合は**送信済み**（stderr に出る） | `capture <id> --instance <id> --pane --tail 60` で見る。**再送しない** |
+
+### 関連する節
+
+`ask` の細かい挙動は、[`commandmate wait`](#commandmate-wait) の下の次の節にあります（見出しはそのまま）。
+
+- 同じインスタンスへ重ねて `ask` しない（Issue #3955）
+- relay 配送と送信の結合（Issue #3957）
+- `ask` の上流障害と `id=context-limit`（Issue #3011）
+
+---
+
+## commandmate relays
+
+`ask --async` / `send --reply-to` が作った**待ち（relay）**を表示・取り下げ・保留の解決をします。
+
+### 使用方法
+
+```bash
+commandmate relays [--worktree <id>] [--instance <id>] [--id <relay-id>] [--json]
+commandmate relays cancel <relay-id> [--json]
+commandmate relays resolve <relay-id> --payload <id> --attempt <id> (--confirm | --retry | --discard) [--json]
+```
+
+| オプション | 説明 |
+|-----------|------|
+| `--worktree <id>` | 一覧する worktree（既定はこのコマンドを実行しているセッション） |
+| `--instance <id>` | `--worktree` 内のインスタンス（id または alias） |
+| `--id <relay-id>` | 1 本の relay を、閉じたものも含めて表示（`send=` / `overlap=` / `hold=`） |
+| `--json` | JSON で出力 |
+| `--token <token>` | 認証トークン（親の `relays` に付けても、サブコマンドに付けても効く） |
+
+### サブコマンド
+
+| サブコマンド | 説明 |
+|-------------|------|
+| `relays cancel <relay-id>` | 開いている relay を取り下げ、以後の配送を止める。いま配送中の relay は 409（exit 2）。閉じた relay も exit 2。保留として入力欄に届いたかもしれないものは取り戻せない |
+| `relays resolve <relay-id>` | 配送が**不確定**（`uncertain`）で保留になったものを、依頼元の画面を確かめてから片付ける。`--payload <id>` と `--attempt <id>`（`relays --id` の `payload=<種類>:<id>` と `attempt=<id>`）に加え、`--confirm`（届いていた）/ `--retry`（届いていない: もう一度送る）/ `--discard`（送らずに捨てる）のどれか 1 つが必須（Issue #4082。npm 0.49.3 から） |
+
+一覧の列は `<relay-id> <state> <requester> <- <worker> hops=<n> expires=<iso>` に、必要に応じて `send=` / `overlap=` /
+`hold=` / `delivery=` / `payload=` / `attempt=` / `reason=` / `check=` / `pending=` / `blocked=` が付きます
+（`pending=` / `blocked=` は #4105、期限切れの通知が止まっている relay の `# closed, notice not delivered yet` は #4193。
+どちらも npm 0.50.0 から）。状態は `pending` / `prompt` / `delivered` / `expired` / `cancelled` です。
+
+終了コードは、成功が 0、引数・relay の不正と拒否が 2（CONFIG_ERROR）、サーバー未起動が 1、予期しないエラーが 99 です。
+
+### 関連する節
+
+relay の詳しい挙動は、[`commandmate wait`](#commandmate-wait) の下の次の節にあります（見出しはそのまま）。
+
+- relay 配送と送信の結合（Issue #3957）
+- 不確定な配送は自動で再送しない（Issue #4064）
+- 保留を解決する（Issue #4082）
+- 保留の知らせ・表示・件数（Issue #4082）
+- 依頼元の確認の案内で止まった配送（Issue #4105）
+
+---
+
 ## commandmate prompt
 
 止まっている画面を、機械で読める形で 1 回だけ観測します（Issue #3755）。`capture --pane` の画面を読んで推測する代わりに使います。
@@ -1204,7 +1428,7 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 
 `respond` のほかの案内（`prompt_no_longer_active` の `send`、plan review の Next・Note、選んだ行が文字入力を求めるときの `send`）と、`send` の `PROMPT_WAITING`（サーバーが文を返さなかったとき）・送信結果不明時の `capture`、`wait` と `attach` の `capture` も、同じ解決済みの宛先を付けます。ダイアログを読ませる `capture` は `--pane --tail 40` です。
 
-送信を断ったときにサーバーが返す `PROMPT_WAITING` の文（`send` / ターミナル送信の 409 など）は、要求が `--instance` を指定していればその宛先を付けます（Issue #4031。例: `` `commandmate respond <id> <answer> --instance codex-2` ``）。`--instance` を付けず `--agent` だけで worktree の既定と違うツールを指定した要求には ` --agent <tool>` を付けます（Issue #4049。例: `` `commandmate respond <id> <answer> --agent codex` ``。宛先の無い `respond` は既定のツールへ行くため）。宛先を指定しない要求と、既定のツールを指定した要求では従来と同じ文です。構造化プロンプトの案内（hook だけが見たダイアログの `respond <number>`。`/current-output` の structured prompt など）は、この `--agent` の規則の対象外です。`/current-output` はサーバーが解決した instance を渡すので、`--agent` で読んだときも primary を読んだときも、解決済みの instance の `--instance <id>`（例: `` `commandmate respond <id> <number> --instance codex` ``）が付きます（Issue #4031 からの出し分け）。WebSocket の push・Auto-Yes の応答後の push・prompt 履歴の行も同じ文です（Issue #4063。primary の id はツール名）。厳格モード（`--expect-screen`）の失敗時の案内も、解決済みの宛先を付けます（exit 40: `` `commandmate prompt <id> --instance <instance>` ``、exit 41: それに加えて `` `commandmate capture <id> --instance <instance> --pane` ``）。`prompt` は `--agent` を取らないので、`--agent` だけの要求ではそのツールの primary インスタンス（id はツール名）を指します（Issue #4049。例: `` `commandmate prompt <id> --instance codex` `` / `` `commandmate capture <id> --agent codex --pane` ``）。宛先を指定しなければ従来どおり `` `commandmate prompt` `` / `` `capture --pane` `` です。Command Code が plan review（REVIEW）を表示中に `send` を断る文も、実際の worktree id と、primary 以外では ` --instance <id>` を付けます（Issue #4049。例: `` `commandmate respond <id> "<text>" --instance command-code-2` ``）。worktree の既定が Command Code 以外のときの primary には ` --agent command-code` を付けます（Issue #4063。既定が Command Code なら従来どおり宛先なし）。ターミナル送信（`POST /api/worktrees/:id/terminal`）も、この拒否を 500 の固定文ではなく 409・`code: "PLAN_REVIEW_SEND_REFUSED"` で、同じ宛先の文を返します。
+送信を断ったときにサーバーが返す `PROMPT_WAITING` の文（`send` / ターミナル送信の 409 など）は、要求が `--instance` を指定していればその宛先を付けます（Issue #4031。例: `` `commandmate respond <id> <answer> --instance codex-2` ``）。`--instance` を付けず `--agent` だけで worktree の既定と違うツールを指定した要求には ` --agent <tool>` を付けます（Issue #4049。例: `` `commandmate respond <id> <answer> --agent codex` ``。宛先の無い `respond` は既定のツールへ行くため）。宛先を指定しない要求と、既定のツールを指定した要求では従来と同じ文です。構造化プロンプトの案内（hook だけが見たダイアログの `respond <number>`。`/current-output` の structured prompt など）は、この `--agent` の規則の対象外です。`/current-output` はサーバーが解決した instance を渡すので、`--agent` で読んだときも primary を読んだときも、解決済みの instance の `--instance <id>`（例: `` `commandmate respond <id> <number> --instance codex` ``）が付きます（Issue #4031 からの出し分け）。WebSocket の push・Auto-Yes の応答後の push・prompt 履歴の行も同じ文です（Issue #4063。primary の id はツール名）。厳格モード（`--expect-screen`）の失敗時の案内も、解決済みの宛先を付けます（exit 40: `` `commandmate prompt <id> --instance <instance>` ``、exit 41: それに加えて `` `commandmate capture <id> --instance <instance> --pane` ``）。`prompt` は `--agent` を取らないので、`--agent` だけの要求ではそのツールの primary インスタンス（id はツール名）を指します（Issue #4049。例: `` `commandmate prompt <id> --instance codex` `` / `` `commandmate capture <id> --agent codex --pane` ``）。宛先を指定しなければ従来どおり `` `commandmate prompt` `` / `` `capture --pane` `` です。Command Code が plan review（REVIEW）を表示中に `send` を断る文も、実際の worktree id と、primary 以外では ` --instance <id>` を付けます（Issue #4049。例: `` `commandmate respond <id> "<text>" --instance command-code-2` ``）。worktree の既定が Command Code 以外のときの primary には ` --agent command-code` を付けます（Issue #4063。既定が Command Code なら従来どおり宛先なし）。ターミナル送信（`POST /api/worktrees/:id/terminal`）も、この拒否を 500 の固定文ではなく 409・`code: "PLAN_REVIEW_SEND_REFUSED"` で、同じ宛先の文を返します。Codex が `/new` の後に「Where should the new conversation run?」の worktree の選択の画面を出しているときは、本文は送られず、同じ 409・`PROMPT_WAITING` で断られます。人が画面で選択してから送り直してください（そのブランチの mem が `on` / `derived` で `injectOnStart` が有効なとき（上の「セッションの brief」）は、reset の brief はその本文と一緒に届きます。Issue #4313）。
 
 ---
 
@@ -3009,6 +3233,7 @@ commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # �
 `add` / `remove` / `alias` と `send --register` は読んだ名簿の版を付けて保存します（Issue #4132）。読んだ後に名簿が変わっていたら、今の名簿で作り直して最大 2 回やり直すので、別の追加や変更を消しません。ID は今の名簿で空いているものになります。変わり続けて保存できないとき、`add` / `remove` / `alias` は exit 31（`roster_changed`）で終わり、他の変更はそのまま残ります（`remove --kill` は停止の後に保存するので、セッションは停止済みのことがあります）。`send --register` は本文を送った後なので、これも含めて登録のどの失敗でも（Issue #4159）、警告と exit 0 にして、登録だけをやり直すコマンドを案内します。
 
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
+`instances <worktree-id> kill <instance-id>` は成功すると stderr に、そのインスタンスの Auto-Yes も解除したことと、再開のコマンド（`commandmate auto-yes <worktree-id> --instance <instance-id> --enable`。`--duration` の既定は 1h）を 1 行で出します（以前 ON だったかは照会しません。stdout と終了コードは変わりません）。
 `kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスの、どの tmux セッション（サーバーの
 応答の `killedSessions`）を、どこ（cwd と tmux セッション）から止めたかを
 `~/.commandmate/session-kills/<UTC 日付>.jsonl` に 1 行記録します（30 日で削除）。
@@ -3428,6 +3653,8 @@ commandmate mem check --suggest [--instance <id>] [--json]
 commandmate mem check --suggest --quiet [--hook <event>]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+commandmate mem decisions [--worktree <id> [--branch <name>] | --repository <id> --branch <name>] [--pending] [--json]
+commandmate mem decisions <itemId> [--worktree <id> | --repository <id>] [--effect spec|record_only] [--json]
 ```
 
 - 対象は、セッションの中では `whoami` で決まる自分の instance。通常のシェルでは、書き込みに `--worktree <id> --instance <id>`、`list` / `mode` / `purge` に `--worktree <id>` か `--repository <id> --branch <name>` を付ける（無ければ exit 2 `target_required`）
@@ -3506,7 +3733,14 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 
 ### 決定を正本へ記録する（画面だけ、Issue #4225）
 
-`decision` を Issue・PR のコメントか作業木の文書（`promote_to`）へ書くのは、**人が画面で差分を承認したときだけ**です（Repositories の画面の各行の「mem」→「決定を正本へ記録する」、`/repositories/<id>/mem/decisions?branch=<name>`）。**CLI に口はありません**（`commandmate mem` に promote・approve のサブコマンドは無い）。brief・`check`・促し・Schedule など、ほかのどの経路からも書きません。
+`decision` を Issue・PR のコメントか作業木の文書（`promote_to`）へ書くのは、**人が画面で差分を承認したときだけ**です（Repositories の画面の各行の「mem」→「決定を正本へ記録する」、`/repositories/<id>/mem/decisions?branch=<name>`）。**CLI に書く口はありません**（`commandmate mem` に promote・approve のサブコマンドは無い。読むだけの `mem decisions` は次の節）。brief・`check`・促し・Schedule など、ほかのどの経路からも書きません。
+
+画面の上部で **リポジトリ → ブランチ** の順に選びます（Issue #4355）。
+
+- リポジトリの select を選び直すと、そのリポジトリの画面へ移り、ブランチは外れます（同じ名前のブランチが別のリポジトリにあっても持ち越しません）
+- ブランチの select には、そのリポジトリの作業木のブランチ、閉じていない決定を持つブランチ、照合待ち（結果が分からない・書き込み中・反映待ち）の操作が残るブランチ（その決定が閉じた・消えた・作業木が無いときも）が、mode が `on` のものから並びます。各行はブランチの名前だけです（件数は付けません。承認待ちの件数は、選んだブランチの一覧の上の欄で見ます）
+- 選ぶと `/repositories/<id>/mem/decisions?branch=<name>` の同じ形の URL になります。既存のリンクもそのまま開けて、リポジトリとブランチが選ばれた状態で出ます（一覧に無いブランチは「一覧にありません」の印つきで選ばれます）
+- 一覧の上に「承認待ち N 件・反映待ち M 件」を出します（画面に出す件数はこの欄だけで、この一覧から数えます。承認の後に一覧を読み直すと減ります）。記録済み・反映待ちと反映済みの決定はそれぞれ畳んであり（既定は閉じる）、「承認待ちだけ」を入れると畳んだものを隠します。結果が不明・進行中・遷移待ちの操作を持つ決定は、状態にかかわらず畳まず、「承認待ちだけ」でも隠しません
 
 1. 画面で項目と作業木を選び「差分を作る」。書く本文の全文・行き先（解決後の `Issue <host>/<owner>/<repo>#N`、または `<作業木> (<ブランチ>): <パス>`）・投稿するアカウント・効果（「仕様を変える決定」が既定／「記録だけ」）・期限（30 分）が出ます。作業木・効果・引用の確認を変えると、出ていた差分は消えます（作り直してから承認します）。Agent が書いた引用は、その本文をチェックの横に出し「Agent が記録した引用（未確認）」として書きます。原文と照らしてチェックしたときだけ「人が画面で確かめた引用」になります（チェックは項目を選び直すと外れます）。自由入力（決定の文・引用）はコードのブロックに入れ、見えない文字は `[U+XXXX]` に置き換えます
 2. 「承認して書く」。書く直前に、項目の版・行き先（host・repository・番号、または作業木・ブランチ・パス）・差分の基準にした内容の指紋・作業木の世代・mode・投稿者を照合し、どれかが変わっていれば **何も書かずに** 差分の作り直しを求めます（承認の後に別のセッションが文書を変えた・作業木を消した・別のブランチへ切り替えた・同じ項目を並行で承認した、など）
@@ -3523,6 +3757,21 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 - 同じ Git の root の間で項目のブランチの設定が食い違うと、画面は警告を出して決定の一覧と承認を止めますが、結果の確定していない操作は出し続け、照合・無いことを確かめたはできます（項目は設定が揃うまで進みません）
 - 同じ Git のどの root の画面からでも、その Git の root が持つ操作を照合・確定できます（別の Git の root からは届きません）
 - ブランチ名・作成者に見えない文字があるときも警告します。ブランチは本文に省略の形（`(省略 N bytes・理由)`）で書きます
+
+### 決定を読む（`mem decisions`、読むだけ、Issue #4355）
+
+ブランチの決定の一覧と、1 件の差分を CLI で**読めます**。**承認は画面だけ**です（CLI では承認できません。人の決定、2026-11-13）。どちらも GET だけで、DB・GitHub・作業木に何も書きません。
+
+- `commandmate mem decisions`：項目ごとに 1 行（`<id> <状態> v<版> by=<agent|human>(<instance>) to=<行き先|-> quote="<引用の先頭 40 文字>"|- approvals=<人が画面で承認した回数>`）と、承認の操作ごとに字下げの行（`op <id> <状態>[ pending-transition(<理由>)][ concurrent-edit][ unknown(<理由>)] decided-by=<server|human|-> effect=<spec|record_only>`）。最後の行が件数（`counts (before --pending): open=<N|unknown> recorded=<M|unknown> approvable=<yes|no>`）
+  - 「承認された」を 1 つの真偽に畳みません。項目の今の状態（`open`・`recorded`・`promoted`）、人の承認の回数（`approvals`）、外へ書けたか（操作の状態）を分けて出します。外へは書けたが項目が進んでいない操作は `succeeded pending-transition(<理由>)` と出ます（画面の「記録済みとして扱う」で進めます）
+  - 件数は `--pending` の**前**の数です。`open` は承認待ち、`recorded` は反映待ち。mode が `on` でないと `approvable=no`（数えるが承認できない）。同じ Git の root の間で mode が食い違うと `unknown`（0 とは出しません）
+  - `--pending`：`open` の項目と、結果の確定していない操作（不明・進行中・遷移待ち）を持つ項目だけ
+  - 対象：セッションの中では自分の作業木、通常のシェルでは `--worktree <id>`（ブランチは作業木の今のブランチ。`--branch` で別のブランチ）か `--repository <id> --branch <name>`
+- `commandmate mem decisions <itemId>`：その決定を書くとしたら書かれる本文を**参考として**出します。1 行目は必ず `REFERENCE ONLY — cannot be approved; approve on the screen`。**参考の差分は承認に使えません**（画面の差分と違い、操作の ID が空・投稿者が無い・期限が無い・引用は常に「Agent が記録した引用（未確認）」）。行き先が作業木の文書なら `--worktree` の作業木で解きます。作業木が無い（`--repository`）・別のブランチ・detached のときは本文だけを出し、行き先は `unresolved (worktree_required|branch_changed|branch_unresolved)` と出します（作業木を推測しない）
+- 今の規則に当たる欄（本文・引用・evidence・行き先・閉じた理由のどれか）がある項目は、一覧では本文・引用・行き先を出さず `withheld(field=… rule=…)` だけ、差分は exit 2 `secret_like`（欄の名だけ）です
+- 本文・引用・行き先は Agent や人が書いた文字です。文字の出力では端末の制御文字（ESC・C0・C1・`\r`）や見えない文字を `\x1b`・`\u202e` などの形で出します。`--json` は JSON の文字列としてだけ出します
+- `--json` は `schema: 1` の形です（一覧: `schema`・`repositoryId`・`branch`・`mode`・`counts`・`pending`・`decisions[]`・`unresolved[]`。差分: `schema`・`reference: true`・`approvable: false`・`notice`・`item`・`mode`・`effect`・`quoteOrigin`・`destination`・`body`・`bodySha256`・`invisibleReplaced`・`drawnAt`）。キーを消したり型を変えたりはしません（足すことはあります）
+- 終了コード：見つからない（別のリポジトリの項目・作業木を含む）は 52、`secret_like`・`--pending` と `<itemId>` の同時指定・`--effect` だけの指定は 2、サーバに繋がらないときは 1
 
 ### 項目を画面で見る・書く（画面だけ、Issue #4227）
 
@@ -3579,7 +3828,7 @@ propose add の --close-when は kind が waiting / next / external のとき必
 - 引き継ぎは **セッションを止めません**。止めるのは、人がその場で押す既存の停止だけです。画面の「停止する」は、停止の宣言 → 既存の停止 → 止まったことの観測 の順に行い、サーバは止まったかを `isRunning` で確かめて記録します。期限・取り消し・確定・読みからは何も止めません
 - 記録は `confirmed`（Agent の `done`・全提案への判断・確定の全成功・人の停止の後に止まったことを観測、の全部）か `unconfirmed`（理由つき：`forced`・`agent_timeout`・`request_failed`・`undecided_left`・`conflict_left`・`apply_failed`・`session_changed`）です。確定の前に「今すぐ停止」を押した強制終了は、必ず `unconfirmed(forced)` です。止まったことを確かめられないときは記録せず、もう一度停止を押すよう画面が出します
 - 画面の「終了」（PC のヘッダーと各分割の「終了」・スマホの「…」の「終了」）は、押したときに mode を読み、対話の設定がオンで mode が `on` ならこの引き継ぎの画面を、それ以外（無人・mode が `on` でない・読めない・5 秒で答えない）は今までどおりの確認を出します。どちらも開いただけでは止めません。「終了をやめる」はセッションを続けます
-- 引き継ぎの画面は、**確定の送信中・結果が分からない確定・取り消しの応答待ち・停止の途中の間は閉じません**（Esc・×・背景・ボタン・別の「終了」・作業木の切り替えのどれでも。理由が出ます）。結果が分からない確定は「同じ内容で送り直す」か「送り直さずにやめる」を選ぶまで残ります。その間も停止は押せます。作業木を切り替えても画面は残り、その作業木では停止も確定もできず「送り直さずにやめる」だけ押せます。元の作業木に戻ると送り直せます。PC とスマホの表示が切り替わっても（向き・幅の変更）、切り替えの読み込み中に画面が一度消えても、これらは残り、依頼も作り直しません。閉じていない引き継ぎの画面は、別のページへ移ってからその作業木に戻ったときも開いたまま出ます（Agent の提案を待っている間も）。取り消しを押した後は確定も依頼の文も送りません。前の確定・取り消し・停止・依頼の作成の応答が遅れて返っても、その後に始めた確定や、開き直した（または別のページで開いた）引き継ぎの画面には何もしません（閉じたり、結果が分からない扱いにしたり、表示を書き換えたりしません）。依頼を作れず既存の停止だけを出す画面では、止まったときだけ「停止しました」と出し、止められなかった・分からないときは理由を出して停止ボタンを残します（もう一度押せます）
+- 引き継ぎの画面は、**確定の送信中・結果が分からない確定・取り消しの応答待ち・停止の途中の間は閉じません**（Esc・×・背景・ボタン・別の「終了」・作業木の切り替えのどれでも。理由が出ます）。結果が分からない確定は「同じ内容で送り直す」か「送り直さずにやめる」を選ぶまで残ります。その間も停止は押せます。作業木を切り替えても画面は残り、その作業木では停止も確定もできず「送り直さずにやめる」だけ押せます。元の作業木に戻ると送り直せます。PC とスマホの表示が切り替わっても（向き・幅の変更）、切り替えの読み込み中に画面が一度消えても、これらは残り、依頼も作り直しません。閉じていない引き継ぎの画面は、別のページへ移ってからその作業木に戻ったときも開いたまま出ます（Agent の提案を待っている間も）。まだ確定していない提案ごとの「承認」「捨てる」の選択も、同じ引き継ぎの画面に戻れば残ります（別の作業木・別のページへ移って戻っても。Issue #4346）。確定・拒否の応答の後と、開き直した引き継ぎの画面では選び直しです。取り消しを押した後は確定も依頼の文も送りません。前の確定・取り消し・停止・依頼の作成の応答が遅れて返っても、その後に始めた確定や、開き直した（または別のページで開いた）引き継ぎの画面には何もしません（閉じたり、結果が分からない扱いにしたり、表示を書き換えたりしません）。依頼を作れず既存の停止だけを出す画面では、止まったときだけ「停止しました」と出し、止められなかった・分からないときは理由を出して停止ボタンを残します（もう一度押せます）
 - 終了コードは mem と同じです：0 成功・2 入力の誤り・50 mode が on でない・51 版の競合・52 見つからない・55 `not_requested`／`request_closed`／`session_changed`／`state_forbids`
 
 ---
@@ -4396,6 +4645,7 @@ commandmate ls --token your-token
 | 1 | DEPENDENCY_ERROR | サーバー未起動等のインフラエラー／使える remote Provider が無い（`remote`） |
 | 2 | CONFIG_ERROR | バリデーションエラー（不正なagent, duration等）／更新フローの無いツール（`agents update`） |
 | 3 | START_FAILED | サーバーの起動・起動後の確認に失敗（`start` / `update` / `remote`） |
+| 3 | NOT_IN_SESSION | エージェントセッションの外から実行した（`whoami` / `peers`）。`start` 系の START_FAILED とは別の意味 |
 | 4 | STOP_FAILED | サーバーの停止に失敗（`stop` / `update`）／ Provider を閉じきれない（`remote stop`） |
 | 5 | UPDATE_FAILED | 更新に失敗（`update`: registry照会 / `npm install -g` / バージョン検証、`agents update`: エージェント CLI の更新コマンド） |
 | 10 | PROMPT_DETECTED | wait中にプロンプトを検出 |

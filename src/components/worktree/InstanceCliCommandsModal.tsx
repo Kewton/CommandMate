@@ -42,6 +42,8 @@ import {
 import { getCliToolDisplayName, type AgentInstance } from '@/lib/cli-tools/types';
 import type { CliReferenceResponse } from '@/app/api/worktrees/[id]/cli-reference/route';
 import type { ResolveTargetResponse } from '@/app/api/worktrees/[id]/resolve-target/route';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 export interface InstanceCliCommandsModalProps {
   /** Worktree the commands address */
@@ -63,6 +65,8 @@ export function InstanceCliCommandsModal({
 }: InstanceCliCommandsModalProps) {
   const t = useTranslations('worktree');
 
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [reference, setReference] = useState<CliReferenceResponse | null>(null);
@@ -88,8 +92,10 @@ export function InstanceCliCommandsModal({
     const read = async (): Promise<void> => {
       try {
         const [referenceResponse, targetResponse] = await Promise.all([
-          fetch(`/api/worktrees/${worktreeId}/cli-reference`),
-          fetch(
+          // Issue #4345 1c 再指示 1: each read's 401 reaches the gateway before the failure.
+          fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/cli-reference`),
+          fetchForHandoffPage(
+            handoffOwner,
             `/api/worktrees/${worktreeId}/resolve-target?instance=${encodeURIComponent(instance.id)}`
           ),
         ]);
@@ -116,7 +122,7 @@ export function InstanceCliCommandsModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, worktreeId, instance.id, attempt]);
+  }, [isOpen, worktreeId, instance.id, attempt, handoffOwner]);
 
   const commands =
     reference && target

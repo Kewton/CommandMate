@@ -17,6 +17,8 @@ import React, { useState, useCallback, memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatTimestamp, formatDuration } from './format';
 import { ScheduleConfigWarnings } from './ScheduleConfigWarnings';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 // ============================================================================
 // Types
@@ -86,6 +88,8 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
   logs,
 }: ExecutionLogsViewProps) {
   const t = useTranslations('schedule');
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [logDetail, setLogDetail] = useState<ExecutionLogDetail | null>(null);
 
@@ -97,7 +101,8 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
     }
 
     try {
-      const res = await fetch(`/api/worktrees/${worktreeId}/execution-logs/${logId}`);
+      // Issue #4345 1c 再指示 1: the 401 reaches the gateway before the status is folded.
+      const res = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/execution-logs/${logId}`);
       if (res.ok) {
         const data = await res.json();
         setLogDetail(data.log);
@@ -106,7 +111,7 @@ export const ExecutionLogsView = memo(function ExecutionLogsView({
     } catch (err) {
       console.error('Failed to fetch log detail:', err);
     }
-  }, [worktreeId, expandedLogId]);
+  }, [worktreeId, expandedLogId, handoffOwner]);
 
   // Issue #2576: CMATE.md warnings sit above the runs they explain, and show
   // before the first run too.

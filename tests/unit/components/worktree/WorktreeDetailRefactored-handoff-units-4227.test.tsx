@@ -31,9 +31,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 const env = vi.hoisted(() => ({ mobile: false, listeners: new Set<() => void>() }));
 const rule = vi.hoisted(() => ({ perInstance: false }));
 
+// Issue #4317 PR2: the path follows the page drawn (the dialog's host reads the detail route from it).
+const nav = vi.hoisted(() => ({ path: '/worktrees/wt-a' }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
-  usePathname: () => '/worktrees/wt-a',
+  usePathname: () => nav.path,
   useSearchParams: () => new URLSearchParams(),
 }));
 // The width as the browser reports it: a change is told to every reader (the page is memoised,
@@ -163,6 +165,9 @@ vi.mock('@/lib/handoff/close-rule', async (importOriginal) => {
 });
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+// Issue #4317 PR2: the dialog's one host is beside the shell (`AppShellGate`), outside the page Next
+// keys by its `[id]`; drawn here beside the keyed page as the root layout does.
+import { HandoffDialogHost } from '@/components/mem/HandoffDialogHost';
 import { resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
 import { publishMemWriteLock } from '@/components/mem/mem-write-lock';
 
@@ -305,7 +310,18 @@ function Shell({ id, pageKey }: { id: string; pageKey?: string }) {
     },
     () => env.mobile
   );
-  const page = <WorktreeDetailRefactored key={pageKey} worktreeId={id} />;
+  nav.path = `/worktrees/${id}`;
+  // Issue #4317 PR2: in the app the host is beside the shell and is not made anew by a turn. Here it is
+  // drawn under the layout's parent with the page on purpose, so a turn makes the dialog anew as well:
+  // the units must stay in the store over that (and the positive controls, which empty the store when
+  // a reader goes, still lose them). `pageKey` keys the host too: it stands for the page made anew by
+  // Next with its host inside (before PR2), used by the positive control only.
+  const page = (
+    <>
+      <WorktreeDetailRefactored key={pageKey} worktreeId={id} />
+      <HandoffDialogHost key={pageKey === undefined ? undefined : `host-${pageKey}`} />
+    </>
+  );
   return mobile ? <div data-testid="shell-phone">{page}</div> : <section data-testid="shell-pc">{page}</section>;
 }
 

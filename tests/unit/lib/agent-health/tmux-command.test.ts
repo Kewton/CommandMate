@@ -3,7 +3,10 @@
  * `-L cm-agent-health`, and the child environment carries no `TMUX`.
  */
 
-import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   AGENT_HEALTH_TMUX_SOCKET,
   buildChildEnv,
@@ -102,5 +105,48 @@ describe('buildChildEnv', () => {
       CLAUDE_CONFIG_DIR: '/Users/me/.claude',
       CM_PORT: '51234',
     });
+  });
+});
+
+describe('buildChildEnv CODEX_HOME (Issue #4290)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it('(1) unset -> absent in the child', () => {
+    expect('CODEX_HOME' in buildChildEnv({ PATH: '/usr/bin' })).toBe(false);
+  });
+  it('(2) empty string -> passed through as it is today', () => {
+    expect(buildChildEnv({ CODEX_HOME: '' }).CODEX_HOME).toBe('');
+  });
+  it('(3) ordinary absolute path (tmpdir) -> passed through', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-codex-home-'));
+    dirs.push(dir);
+    expect(buildChildEnv({ CODEX_HOME: dir }).CODEX_HOME).toBe(dir);
+  });
+  it('(4a) /proc, /sys, /dev paths -> dropped from the child', () => {
+    for (const v of ['/proc/self/codex', '/sys/codex', '/dev/shm/codex']) {
+      expect('CODEX_HOME' in buildChildEnv({ CODEX_HOME: v })).toBe(false);
+    }
+  });
+  it('(4b) symlink into /dev -> dropped from the child', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-codex-home-'));
+    dirs.push(dir);
+    const link = path.join(dir, 'link');
+    fs.symlinkSync('/dev', link);
+    expect('CODEX_HOME' in buildChildEnv({ CODEX_HOME: link })).toBe(false);
+  });
+  it('(5) relative path -> passed through unchanged (left open in #4290)', () => {
+    expect(buildChildEnv({ CODEX_HOME: 'rel/codex' }).CODEX_HOME).toBe('rel/codex');
+  });
+  it('(6) overrides win, even for a refused inherited value', () => {
+    expect(buildChildEnv({ CODEX_HOME: '/proc/x' }, { CODEX_HOME: '/opt/c' }).CODEX_HOME).toBe('/opt/c');
+    expect(buildChildEnv({ CODEX_HOME: '/opt/a' }, { CODEX_HOME: '/opt/c' }).CODEX_HOME).toBe('/opt/c');
+  });
+  it('does not touch CLAUDE_CONFIG_DIR or the parent env', () => {
+    const base = { CODEX_HOME: '/proc/x', CLAUDE_CONFIG_DIR: '/proc/y' };
+    expect(buildChildEnv(base).CLAUDE_CONFIG_DIR).toBe('/proc/y');
+    expect(base.CODEX_HOME).toBe('/proc/x');
   });
 });

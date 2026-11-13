@@ -23,6 +23,8 @@ import path from 'node:path';
 /** Every key that reached the pane, in order. */
 let delivered: string[] = [];
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(async () => ''),
   sendKeys: vi.fn(async (_session: string, keys: string, enter = true) => {
     delivered.push(enter ? `${keys}<Enter>` : keys);

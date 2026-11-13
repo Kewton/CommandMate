@@ -94,7 +94,9 @@ const PAGE_PATHS: ReadonlySet<HandoffClosePath> = new Set(['worktree-switch', 'p
  * `refused` and `failed` leave the session running, `unknown` says nothing (offline, past the
  * deadline, or another kill in flight). The plain stop says "stopped" for `stopped` only.
  */
-export type SessionStopResult = 'stopped' | 'refused' | 'failed' | 'unknown';
+export type SessionStopResult = 'stopped' | 'refused' | 'failed' | 'unknown' | 'not-sent';
+// Issue #4345 1c 再指示 2 (K1): `not-sent` — the kill was not sent at all (the page's gate refused it:
+// the session expired or the page was left). Not a kill's result: nothing is told nor recorded.
 
 // ---------------------------------------------------------------------------------------------
 // The store
@@ -136,6 +138,15 @@ export interface HandoffOpeningTarget {
   label: string;
 }
 
+/**
+ * Issue #4346: one choice the person made on a proposal and has not confirmed yet, with the
+ * fingerprint of what was shown when it was made (what a confirm sends).
+ */
+export interface HandoffChoice {
+  readonly choice: 'approve' | 'discard';
+  readonly fingerprint: string;
+}
+
 /** One opening of the dialog: its request as read, its text, whether it was closed. */
 export interface HandoffOpening {
   /** The identity of this opening; work started for it answers nothing to another. */
@@ -153,6 +164,22 @@ export interface HandoffOpening {
   readonly plainOnly: string | null;
   /** The plain stop stopped the session but a decide is unknown, so the dialog stayed. */
   readonly plainStopped: boolean;
+  /**
+   * Issue #4346: the person's choices not confirmed yet, by proposal id. The opening's, not the
+   * dialog's mount: the host draws 0 dialogs on another worktree or route and the dialog is
+   * unmounted, so a component state lost them on the way back to the same opening. A new opening
+   * starts with none.
+   */
+  readonly choices: Readonly<Record<string, HandoffChoice>>;
+  /**
+   * Issue #4345 1b 再指示 1: the request's text is being sent for this opening (from the send to its
+   * `sent` / `send-failed` answered). The opening's, not the dialog's mount: a 401 hides the dialog
+   * (the host unmounts it) and the session may recover before the send's record is answered — the
+   * dialog drawn again must neither offer nor send the text a second time meanwhile.
+   */
+  readonly textSending: boolean;
+  /** Issue #4345 1b 再指示 1: an extend or a rebase of this opening is answered (the same reason). */
+  readonly writing: boolean;
 }
 
 /**
@@ -280,7 +307,7 @@ export function endHandoffCancel(worktreeId: string): void {
 }
 
 function freshOpening(worktreeId: string, target: HandoffOpeningTarget): HandoffOpening {
-  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false };
+  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false, choices: {}, textSending: false, writing: false };
 }
 
 /**
@@ -305,7 +332,7 @@ export function liveHandoffOpeningFor(instanceId: string): HandoffOpening | null
 /** Writes what the opening `token` learnt (nothing once another opening started). */
 export function patchHandoffOpening(
   token: HandoffOpeningToken,
-  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped'>>
+  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped' | 'choices' | 'textSending' | 'writing'>>
 ): void {
   if (state.opening?.token !== token) return;
   commit({ ...state, opening: { ...state.opening, ...patch } });
@@ -319,10 +346,11 @@ export function isLiveHandoffOpening(token: HandoffOpeningToken | null): boolean
 /**
  * The request's text may be sent for `token` (pr2e, PM P3-2): the opening is live and no cancel
  * of its worktree has started (the text after a cancel would ask the agent to propose to a
- * request that is over).
+ * request that is over). Issue #4345 1b 再指示 1: nor while a send of its text has not been
+ * recorded yet (`textSending`, kept over a remount of the dialog).
  */
 export function handoffTextSendable(token: HandoffOpeningToken | null): boolean {
-  return isLiveHandoffOpening(token) && !handoffUnitsOf(state.opening!.worktreeId).cancelling;
+  return isLiveHandoffOpening(token) && !state.opening!.textSending && !handoffUnitsOf(state.opening!.worktreeId).cancelling;
 }
 
 function markClosed(token: HandoffOpeningToken): void {

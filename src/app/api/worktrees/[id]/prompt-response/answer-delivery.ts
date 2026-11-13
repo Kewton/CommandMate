@@ -17,6 +17,7 @@ import {
   FreeTextAtChoiceOnlyPromptError,
   MultiSelectAnswerRejectedError,
   PromptAnswerNotDeliveredError,
+  PromptAnswerAgentNotInForegroundError,
 } from '@/lib/prompt-answer-sender';
 import { promptAnswerErrorResponse } from '@/lib/prompt-answer-errors';
 import type { PromptData } from '@/types/models';
@@ -59,7 +60,12 @@ function logSendRefusal(ctx: PromptResponseContext, error: unknown): void {
         : { optionCount: error.optionCount }),
     });
   } else if (error instanceof PromptAnswerNotDeliveredError) {
-    logRefused(ctx, { reason: error.reason, skip: error.skip });
+    logRefused(ctx, {
+      reason: error.reason,
+      skip: error.skip,
+      // Issue #4303: refused before the first key — the agent did not hold the pane.
+      ...(error instanceof PromptAnswerAgentNotInForegroundError ? { foreground: error.foreground } : {}),
+    });
   }
 }
 

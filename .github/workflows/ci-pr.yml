@@ -19,6 +19,8 @@ name: CI
 #
 #   job                                    n   median      max   timeout-minutes
 #   E2E Tests                             12    6.2m    16.2m    30
+#   E2E Tests (shard N/2)                  -       -        -    30
+#   E2E Tests (aggregate)                  -       -        -    10
 #   Unit Tests (shard N/4)                 -       -        -    20
 #   Unit Tests (aggregate)                 -       -        -    10
 #   Build                                 12    2.3m     2.5m    10
@@ -45,6 +47,12 @@ name: CI
 # aggregate job that the `main` branch protection requires. Before the split it
 # measured 12.3m median / 13.2m max (n=12, 2026-08-19) and 15.9-17.1m on the six
 # develop push runs before 2026-09-18. Fill the two rows above from post-split runs.
+#
+# [Issue #4308] `E2E Tests` was split the same way: two matrix shards
+# (`npm run test:e2e -- --shard=N/2`, each booting its own dev webServer) plus
+# the `E2E Tests` aggregate job that the `main` branch protection requires. The
+# `E2E Tests` row above is the pre-split single job; each shard keeps its 30 as
+# an upper bound until post-split runs are measured.
 #
 # The distance to `max` is what keeps a healthy run from being cut. The tightest
 # ratio here is Unit Tests at 2.3x; everything on 10 has 4x or more. Unit Tests
@@ -679,7 +687,7 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=6144'
 
   test-e2e:
-    name: E2E Tests
+    name: E2E Tests (shard ${{ matrix.shard }}/2)
     # [self-hosted] This repository's ephemeral self-hosted runners (labels:
     # self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull request opened
     # from a fork, which falls back to `ubuntu-latest`. CommandMate is public, so
@@ -689,8 +697,18 @@ jobs:
     # ever running them on our machines. See the identical change in
     # Kewton/commandmate-skills#226.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
-    # measured 6.2m median / 16.2m max (n=12) — this is the job that hung for
-    # 88 minutes in run 32218070769. 30 = ~2x the worst healthy run.
+    # [Issue #4308] Two shards, each with its OWN dev webServer. One server for the whole suite
+    # peaked at 6462MB of an 8240MB heap (78.4%, develop push run 43440870882), and the peak sat
+    # at the end of the run: dev-mode compiles accumulate. Splitting the suite halves the routes
+    # each server compiles. Playwright's default split; the union of the two shards is the same
+    # 356 tests as `--list` (no spec, retry or timeout changes). The aggregate `E2E Tests` job
+    # below keeps the required check's name.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    # measured 6.2m median / 16.2m max (n=12) before the split — this is the job that hung for
+    # 88 minutes in run 32218070769. 30 = ~2x the worst healthy run; kept per shard until measured.
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -868,22 +886,65 @@ jobs:
       # playwright.config.ts owns the isolation: it boots its own dev server on
       # port 3177 with CM_DB_PATH/CM_ROOT_DIR pinned to a throwaway state dir, so
       # no server or DB setup is needed here.
+      # [Issue #4308] The shard comes in through env, not as `${{ matrix.shard }}` on the command
+      # line: `verify draft` (src/lib/verification/verify-draft.ts) refuses any command carrying
+      # `${{` as runner-specific before it can say the real reason, long-running E2E
+      # (tests/unit/lib/verification/verify-draft.test.ts).
       - name: Run E2E tests
-        run: npm run test:e2e
+        run: npm run test:e2e -- --shard="$E2E_SHARD/2"
         env:
+          E2E_SHARD: ${{ matrix.shard }}
           CI: 'true'
           # [Issue #4308] The dev webServer that playwright boots inherits this. At 6144 it
           # ran out of heap at ~5.4GB after ~285 specs (PR #4306 x2, PR #4310 x2): about 10%
           # headroom. 8192 is the quick fix; measuring where the heap grows is #4308's rest.
           NODE_OPTIONS: '--max-old-space-size=8192'
+          CM_E2E_HEAP_PROBE_DIR: ${{ runner.temp }}/e2e-heap
+
+      # [Issue #4308] Peak heap of this shard's dev webServer vs its limit, plus the per-second series
+      # (series-<pid>.jsonl) and spec/test times (timeline.jsonl) in the same directory, uploaded
+      # together below as `e2e-heap-<shard>` (one artifact per shard; upload-artifact@v4 rejects a
+      # duplicate name). The 1 s sampling does not guarantee the instantaneous maximum.
+      # Never affects the verdict.
+      - name: E2E heap summary
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: node scripts/ci/e2e-heap-probe.cjs summarize "$RUNNER_TEMP/e2e-heap" || true
+
+      - name: Upload E2E heap record
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-heap-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-heap/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          # [Issue #4308] Per shard, for the same duplicate-name reason as e2e-heap-<shard>.
+          name: playwright-report-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
+
+  test-e2e-result:
+    name: E2E Tests
+    # [Issue #4308] main のブランチ保護の必須チェック `E2E Tests` を、2 本の shard の結果から 1 つにまとめて報告する。
+    # `Unit Tests` の集約と同じ形。checkout も npm ci もしないので、self-hosted の枠を使わずに GitHub-hosted で走らせる。
+    needs: test-e2e
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require every shard to pass
+        env:
+          RESULT: ${{ needs.test-e2e.result }}
+        run: |
+          echo "E2E Tests shards: ${RESULT}"
+          test "${RESULT}" = "success"
 
   build:
     name: Build

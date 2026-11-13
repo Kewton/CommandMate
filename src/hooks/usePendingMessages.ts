@@ -125,6 +125,13 @@ export interface PendingMessage {
    * `retry()` clears it — an explicit retry gets its own budget.
    */
   autoResendAttempted: boolean;
+  /**
+   * Issue #4345 1c 再指示 2 (K1): an automatic resend of this parked message was not sent (the page's
+   * gate refused it: the session expired). It stays parked with its resend not spent, but nothing
+   * resends it on its own again (no recovery round is armed for it): the person retries once the
+   * session is back. `retry()` clears it.
+   */
+  heldNotSent?: boolean;
 }
 
 /**
@@ -175,6 +182,16 @@ export interface UsePendingMessagesOptions {
    * automatic resend. Defaults to DEFAULT_RESEND_GRACE_MS.
    */
   resendGraceMs?: number;
+  /**
+   * Issue #4345 1c 再指示 2 (K1): the send's rejection says it was NOT SENT (the hand-off page's gate
+   * refused it) — not a failure. The row goes back to what it was before this attempt: a retried row
+   * to its failed state, a parked one to parked with its automatic resend not spent (the person
+   * retries after the recovery). A new send leaves no bubble (nothing was sent: no optimistic display
+   * is left to look sent) and its text goes to {@link onNotSent}. Omitted: every rejection is a failure.
+   */
+  isNotSent?: (error: unknown) => boolean;
+  /** Issue #4345 1c 再指示 2: a new send not sent — its text, for the composer to keep. */
+  onNotSent?: (content: string) => void;
 }
 
 export interface UsePendingMessagesResult {
@@ -265,7 +282,10 @@ function toChatMessage(p: PendingMessage, worktreeId: string): ChatMessage {
     archived: false,
     cliToolId: p.options.cliToolId,
     instanceId: p.options.instanceId,
-    optimisticState: p.status,
+    // Issue #4345 1c-2: a parked message whose automatic resend was refused (`heldNotSent`) is
+    // drawn as 'error' so the bubble offers retry / discard (both the PC card and the mobile bubble
+    // show them for 'error' only). Nothing resends it on its own; retry is the person's.
+    optimisticState: p.heldNotSent ? 'error' : p.status,
   };
 }
 
@@ -277,6 +297,8 @@ export function usePendingMessages({
   timeoutMs = DEFAULT_PENDING_TIMEOUT_MS,
   connectivity,
   resendGraceMs = DEFAULT_RESEND_GRACE_MS,
+  isNotSent,
+  onNotSent,
 }: UsePendingMessagesOptions): UsePendingMessagesResult {
   const [pending, setPending] = useState<PendingMessage[]>([]);
 
@@ -295,6 +317,10 @@ export function usePendingMessages({
   onSentRef.current = onSent;
   const sendFnRef = useRef(sendFn);
   sendFnRef.current = sendFn;
+  const isNotSentRef = useRef(isNotSent);
+  isNotSentRef.current = isNotSent;
+  const onNotSentRef = useRef(onNotSent);
+  onNotSentRef.current = onNotSent;
 
   const offlineRef = useRef(offline);
   offlineRef.current = offline;
@@ -363,8 +389,25 @@ export function usePendingMessages({
     [clearTimer, failPending, timeoutMs],
   );
 
+  /**
+   * Issue #4345 1c 再指示 2: the attempt `p` was not sent — the row goes back to `previous` (its state
+   * before this attempt), or, for a new send (none), leaves with its text handed back.
+   */
+  const revertNotSent = useCallback(
+    (p: PendingMessage, previous: PendingMessage | undefined) => {
+      clearTimer(p.tempId);
+      if (previous) {
+        setPending((prev) => prev.map((cur) => (cur.tempId === p.tempId ? previous : cur)));
+        return;
+      }
+      setPending((prev) => prev.filter((cur) => cur.tempId !== p.tempId));
+      onNotSentRef.current?.(p.content);
+    },
+    [clearTimer],
+  );
+
   const dispatchSend = useCallback(
-    async (p: PendingMessage) => {
+    async (p: PendingMessage, previous?: PendingMessage) => {
       startTimer(p.tempId);
       inFlightRef.current.add(p.tempId);
       try {
@@ -381,13 +424,15 @@ export function usePendingMessages({
         void onSentRef.current?.();
         // Stays 'sending' until the server echo reconciles it (or the timeout
         // fires as a fallback if the echo never arrives).
-      } catch {
-        failPending(p.tempId);
+      } catch (error) {
+        // Issue #4345 1c 再指示 2 (K1): not sent — not a failure (no error row, no resend spent).
+        if (isNotSentRef.current?.(error)) revertNotSent(p, previous);
+        else failPending(p.tempId);
       } finally {
         inFlightRef.current.delete(p.tempId);
       }
     },
-    [startTimer, failPending],
+    [startTimer, failPending, revertNotSent],
   );
 
   const sendOptimistic = useCallback(
@@ -425,11 +470,13 @@ export function usePendingMessages({
         queued: false,
         accepted: false,
         autoResendAttempted: false,
+        heldNotSent: false,
       };
       setPending((prev) =>
         prev.map((p) => (p.tempId === tempId ? revived : p)),
       );
-      void dispatchSend(revived);
+      // Issue #4345 1c 再指示 2: not sent, the row goes back to `target` (failed, as it was).
+      void dispatchSend(revived, target);
     },
     [dispatchSend],
   );
@@ -547,7 +594,8 @@ export function usePendingMessages({
   // How many messages are parked for connectivity. A count rather than a
   // boolean so a second message joining the queue is a dependency change too.
   const parkedCount = pending.reduce(
-    (n, p) => (p.queued && p.status === 'sending' ? n + 1 : n),
+    // Issue #4345 1c 再指示 2: a message held as not sent owes no automatic round.
+    (n, p) => (p.queued && p.status === 'sending' && !p.heldNotSent ? n + 1 : n),
     0,
   );
 
@@ -618,12 +666,13 @@ export function usePendingMessages({
         continue;
       if (p.accepted || inFlightRef.current.has(p.tempId)) {
         restart.push(p.tempId);
-      } else if (p.queued) {
+      } else if (p.queued && !p.heldNotSent) {
         // `queued` already carries the budget: nothing parks a message whose
         // automatic resend is spent (see the offline effect and `failPending`),
         // so a parked message is by construction one that has an attempt left.
         resend.push(p);
-      } else if (!timersRef.current.has(p.tempId)) {
+      } else if (!p.heldNotSent && !timersRef.current.has(p.tempId)) {
+        // (Issue #4345 1c 再指示 2: a message held as not sent gets no clock either — it is not failed.)
         restart.push(p.tempId);
       }
     }
@@ -640,8 +689,13 @@ export function usePendingMessages({
     // The baseline is intentionally NOT recomputed (unlike `retry`): the echo
     // this message is waiting for may still be the one the original send
     // produced, and a fresh baseline would make the hook stop recognising it.
+    // Issue #4345 1c 再指示 2: not sent (the page's gate refused it), the row stays parked with its
+    // automatic resend not spent — the person retries after the recovery.
     resend.forEach((p) => {
-      void dispatchSend({ ...p, queued: false, autoResendAttempted: true });
+      void dispatchSend(
+        { ...p, queued: false, autoResendAttempted: true },
+        { ...p, queued: true, autoResendAttempted: false, heldNotSent: true },
+      );
     });
   }, [recoveryToken, startTimer, dispatchSend]);
 

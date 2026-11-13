@@ -29,6 +29,8 @@ import { useFilePolling } from '@/hooks/useFilePolling';
 import { useFileMetadataDisplay } from '@/hooks/useFileMetadataDisplay';
 import { FILE_TREE_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { useFileTreeExpandedState } from '@/hooks/useFileTreeExpandedState';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import { useLocale, useTranslations } from 'next-intl';
 import { FilePlus, FolderPlus, AlertCircle, RefreshCw, RotateCcw } from 'lucide-react';
 import { Button, Skeleton } from '@/components/ui';
@@ -182,6 +184,8 @@ export const FileTreeView = memo(function FileTreeView({
   // to keep the "stable as long as worktreeId is unchanged" invariant intact.
   const tRef = useRef(t);
   tRef.current = t;
+  // Issue #4345 1c: the worktree page's registration holder (a stable ref; none outside a page).
+  const handoffOwner = useHandoffPageOwner();
 
   // [Issue #164] Ref to track in-progress fetches and prevent duplicate requests
   const loadingPathsRef = useRef<Set<string>>(new Set());
@@ -199,7 +203,8 @@ export const FileTreeView = memo(function FileTreeView({
           ? `/api/worktrees/${worktreeId}/tree/${path}`
           : `/api/worktrees/${worktreeId}/tree`;
 
-        const response = await fetch(url);
+        // Issue #4345 1c: the tree read's 401 reaches the gateway before it becomes an Error.
+        const response = await fetchForHandoffPage(handoffOwner, url);
 
         if (!response.ok) {
           throw new Error(tRef.current('fileTree.loadDirectoryError', { status: response.status }));
@@ -211,7 +216,7 @@ export const FileTreeView = memo(function FileTreeView({
         throw err;
       }
     },
-    [worktreeId]
+    [worktreeId, handoffOwner]
   );
 
   // [Issue #706] Mounted ref for the reload function. The ref tracks

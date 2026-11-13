@@ -14,6 +14,8 @@ import { respondAgentFor } from '@/lib/session/respond-target';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { BOUNDARY_TOOLS, isSlashCommandBody } from '@/lib/session/session-boundary';
 import type { SendRoleRequest } from './send-role';
+import { isAskId } from '@/lib/ask/envelope';
+import { ASK_PROTOCOL_VERSION } from '@/types/ask-correlation';
 import {
   validateCopilotModelName,
   validateAntigravityModelName,
@@ -69,6 +71,26 @@ export interface SendMessageRequest extends SendRoleRequest {
    * `boundary_changed` and nothing is typed.
    */
   briefBoundary?: string;
+  /**
+   * Issue #4344: a synchronous `commandmate ask`'s correlation id. On a tool the
+   * server attributes asks for (`ASK_ATTRIBUTION_TOOLS`) and a body that is not a
+   * command, the id is reserved before anything is typed and the typed text carries
+   * its envelope; otherwise the send is exactly as it is without the field, and the
+   * answer's `ask` says why (`unavailable`). Anything but `{ id: <uuid>, protocol: 1 }`
+   * is 400 with nothing recorded.
+   */
+  ask?: { id: string; protocol: number };
+}
+
+/** Issue #4344: the 400 for a malformed `ask`. */
+export const ASK_FIELD_INVALID = 'ask must be { id: <uuid>, protocol: 1 }';
+
+/** Issue #4344: whether the body's `ask` is well formed (absent is). */
+export function isValidAskField(ask: unknown): boolean {
+  if (ask === undefined) return true;
+  if (typeof ask !== 'object' || ask === null || Array.isArray(ask)) return false;
+  const { id, protocol } = ask as Record<string, unknown>;
+  return isAskId(id) && protocol === ASK_PROTOCOL_VERSION;
 }
 
 /** Issue #4227: the longest boundary id accepted (ids are UUIDs). */
@@ -165,6 +187,10 @@ export function validateSendRequest(
         { status: 400 }
       ),
     };
+  }
+  // Issue #4344: the ask field, before anything is resolved (nothing recorded).
+  if (!isValidAskField(body.ask)) {
+    return { ok: false, response: NextResponse.json({ error: ASK_FIELD_INVALID }, { status: 400 }) };
   }
   const strictBrief = isStrictBriefChoice(body);
   if (strictBrief && isSlashCommandBody(trimmedContent)) {
@@ -268,7 +294,7 @@ export function validateSendModel(
   // Issue #2771 adds claude, on antigravity's terms rather than copilot's:
   // `claude --model` is a launch flag, and the in-session switch is the very
   // `/model` trap named above. So it is honoured when this send STARTS the
-  // session and refused when the session is already running — see below.
+  // session and refused when the session is already running — see `refuseModelOnRunningSession` in send-session-start.ts.
   if (model) {
     // model is only supported for copilot, antigravity and claude
     if (cliToolId !== 'copilot' && cliToolId !== 'antigravity' && cliToolId !== 'claude') {

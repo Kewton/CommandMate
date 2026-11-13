@@ -78,6 +78,8 @@ import {
   isValidBoolean,
 } from '@/types/markdown-editor';
 import { safeLocalStorage } from '@/lib/safe-local-storage';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 
 /**
  * Detect file type from file path extension (Issue #646)
@@ -263,6 +265,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const isTextMode = fileType === 'text';
 
   const tWorktree = useTranslations('worktree');
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const confirm = useConfirm();
 
   // State. When the host supplies `initialContent` (Issue #1519) the editor is
@@ -421,7 +425,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     setError(null);
 
     try {
-      const response = await fetch(
+      // Issue #4345 1c: the read's 401 reaches the gateway before its body is read.
+      const response = await fetchForHandoffPage(
+        handoffOwner,
         `/api/worktrees/${worktreeId}/files/${filePath}`
       );
       const data = await response.json();
@@ -449,23 +455,38 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     // tWorktree is intentionally omitted: it is only used for the fallback error
     // message, and re-creating loadContent would re-fetch the file on every
     // locale change (and loop under a non-memoized t).
-  }, [worktreeId, filePath]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [worktreeId, filePath, handoffOwner]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * API save function shared by manual and auto-save.
    * Accepts the value to save as a parameter (not closure state) so that
    * useAutoSave can pass the latest ref value directly.
    */
-  const saveToApi = useCallback(
-    async (valueToSave: string): Promise<void> => {
-      const response = await fetch(
-        `/api/worktrees/${worktreeId}/files/${filePath}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: valueToSave }),
+  // Issue #4345 1c-2: the last save was refused (registration lapsed, nothing sent). Not an error,
+  // not "saved": the text stays dirty, and closing the editor must not drop it.
+  const saveRefusedRef = useRef(false);
+  const saveRaw = useCallback(
+    async (valueToSave: string): Promise<boolean> => {
+      // Issue #4345 1c: the save's 401 reaches the gateway before it becomes the save error.
+      let response: Response;
+      try {
+        response = await fetchForHandoffPage(
+          handoffOwner,
+          `/api/worktrees/${worktreeId}/files/${filePath}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: valueToSave }),
+          }
+        );
+      } catch (err) {
+        if (isHandoffPageOperationRefused(err)) {
+          saveRefusedRef.current = true;
+          return false;
         }
-      );
+        throw err;
+      }
+      saveRefusedRef.current = false;
       // Session expiry detection before JSON parsing
       if (response.status === 401 || response.redirected) {
         throw new Error(tWorktree('editor.sessionExpired'));
@@ -475,8 +496,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         throw new Error(data.error?.message || tWorktree('editor.saveError'));
       }
       setOriginalContent(valueToSave);
+      return true;
     },
-    [worktreeId, filePath, tWorktree]
+    [worktreeId, filePath, tWorktree, handoffOwner]
+  );
+  const saveToApi = useCallback(
+    async (valueToSave: string): Promise<void> => {
+      await saveRaw(valueToSave);
+    },
+    [saveRaw]
   );
 
   // Auto-save integration (dirty state reset is handled inside saveToApi)
@@ -513,7 +541,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     setIsSaving(true);
 
     try {
-      await saveToApi(content);
+      if (!(await saveRaw(content))) return;
       showToast(tWorktree('editor.saveSuccess'), 'success');
 
       if (onSave) {
@@ -525,7 +553,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     } finally {
       setIsSaving(false);
     }
-  }, [saveToApi, content, isDirty, isSaving, onSave, filePath, showToast, tWorktree]);
+  }, [saveRaw, content, isDirty, isSaving, onSave, filePath, showToast, tWorktree]);
 
   /** Line count for line number gutter */
   const lineCount = content.split('\n').length;
@@ -569,6 +597,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     if (isAutoSaveEnabled) {
       if (isDirty || isAutoSaving) {
         await saveNow();
+        // Refused (nothing saved): stay open, the text is kept.
+        if (saveRefusedRef.current) return;
         if (autoSaveError) {
           const confirmed = await confirm({
             description: tWorktree('editor.saveFailedCloseConfirm'),
@@ -646,6 +676,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         if (isAutoSaveEnabled) {
           void (async () => {
             await saveNow();
+            // Issue #4345 1c-2: refused (nothing sent) is not "saved" — no completion notice, so the
+            // viewer does not adopt the unsaved text as the saved content.
+            if (saveRefusedRef.current) return;
             onSave?.(filePath, content);
           })();
         } else {

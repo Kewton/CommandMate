@@ -56,6 +56,8 @@ import {
 import { cronPrompt, messageDraftPrompt } from '@/lib/schedule-ai-prompt-templates';
 import { isCommandCodeDirectWriteToolsDenied } from '@/lib/cmate-validator';
 import { getCommandCodeWriteToolsWarningText } from './command-code-write-tools-warning';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 
 // ============================================================================
 // Types
@@ -273,6 +275,8 @@ export function ScheduleEditDialog({
     [instances]
   );
 
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [form, setForm] = useState<ScheduleFormValues>(DEFAULT_FORM);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
@@ -452,7 +456,8 @@ export function ScheduleEditDialog({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await fetch(`/api/worktrees/${worktreeId}/cmate/schedules`, {
+      // Issue #4345 1c 再指示 1: the 401 reaches the gateway before the status is folded.
+      const res = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/cmate/schedules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -477,7 +482,9 @@ export function ScheduleEditDialog({
       }
       onSaved();
       onClose();
-    } catch {
+    } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) shows no save error; the dialog and its inputs stay.
+      if (isHandoffPageOperationRefused(err)) return;
       setSubmitError(t('edit.saveError'));
     } finally {
       setSubmitting(false);
@@ -494,6 +501,7 @@ export function ScheduleEditDialog({
     onSaved,
     onClose,
     t,
+    handoffOwner,
   ]);
 
   // ----- Accordion header summaries -----

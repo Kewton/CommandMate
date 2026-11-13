@@ -52,6 +52,13 @@ import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { readPromptResponseReply } from '@/lib/prompt-response-outcome';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+} from '@/lib/handoff/page-owner';
 
 export type PlanReviewControlAction = 'comment' | 'submit' | 'approve' | 'cancel';
 
@@ -123,6 +130,8 @@ export function PlanReviewControls({
   compact = false,
 }: PlanReviewControlsProps) {
   const t = useTranslations('worktree');
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [comment, setComment] = useState('');
   const [confirmingApprove, setConfirmingApprove] = useState(false);
   const [pending, setPending] = useState<PlanReviewControlAction | null>(null);
@@ -135,16 +144,21 @@ export function PlanReviewControls({
 
   const post = useCallback(
     async (action: PlanReviewControlAction) => {
+      // Issue #4345 1c 再指示 2 (K1): the press's token — the gate reads its registration.
+      const operation = beginHandoffPageOperation(handoffOwner);
       setPending(action);
       setError(null);
       try {
-        const response = await fetch(
+        // Issue #4345 1c: the answer's 401 reaches the gateway before the reply is read.
+        const response = await fetchForHandoffPage(
+          handoffOwner,
           `/api/worktrees/${encodeURIComponent(worktreeId)}/prompt-response`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(buildPlanReviewRequestBody(action, cliToolId, comment, instanceId)),
           },
+          handoffPageOperationOptions(operation),
         );
         // Issue #3331: read like every other answer to a dialog. A 2xx whose
         // body has no `success` is now taken as delivered (it used to show the
@@ -159,13 +173,16 @@ export function PlanReviewControls({
         }
         if (action === 'comment' || action === 'submit') setComment('');
         onKeysSent?.();
-      } catch {
+      } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened, nothing
+        // is said; the comment stays.
+        if (isHandoffPageOperationRefused(err)) return;
         setError({ reason: null, message: null });
       } finally {
         setPending(null);
       }
     },
-    [worktreeId, cliToolId, comment, instanceId, onKeysSent],
+    [worktreeId, cliToolId, comment, instanceId, onKeysSent, handoffOwner],
   );
 
   const hasComment = comment.trim().length > 0;

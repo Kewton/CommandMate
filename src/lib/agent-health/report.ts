@@ -6,6 +6,7 @@
  * code a run ends with — are pinned by unit tests rather than by a live run.
  */
 
+import path from 'path';
 import { stripAnsi } from '@/lib/detection/ansi';
 import {
   AGENT_HEALTH_CHECK_IDS,
@@ -139,6 +140,20 @@ export function decideExitCode(report: AgentHealthReport): AgentHealthExitCode {
   if (unrestored) return 2;
   const failed = report.tools.some((tool) => tool.checks.some((check) => check.status === 'fail'));
   return failed ? 1 : 0;
+}
+
+/**
+ * Issue #4343: the environment error for a non-empty relative `CODEX_HOME`, or
+ * null. The run chdirs to the repository before anything resolves the value,
+ * so a relative one would point somewhere other than where the caller meant.
+ * It is refused — not absolutised — at the entry of `main` (narrow, not widen).
+ * Absolute (including /proc and the like — handled later by `buildChildEnv`),
+ * empty and unset values are not this function's business: null.
+ */
+export function relativeCodexHomeError(env: Readonly<Record<string, string | undefined>>): string | null {
+  const value = env.CODEX_HOME;
+  if (value === undefined || value === '' || path.isAbsolute(value)) return null;
+  return `環境の誤り: CODEX_HOME が相対パス（${JSON.stringify(value)}）。agent-health は確認の前にリポジトリへ移動するため、相対パスは呼び出し元と違う場所を指す。絶対パスにするか、未設定にして再実行する`;
 }
 
 /** `YYYY-MM-DD` of `now` in JST (the report's file name). */

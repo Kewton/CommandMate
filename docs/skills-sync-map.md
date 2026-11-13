@@ -57,6 +57,15 @@ Issue #1612 の本文は `identical` / `adapted`（= 検知対象から外す）
 | `.claude/skills/cmate-verify/SKILL.md` | `port-required` | `skills/cmate-verify/SKILL.md` |
 | `.claude/skills/orchestrate-monitor/**`（9 ファイル） | `port-required` | `skills/cmate-orchestrate-monitor/**` |
 | `demo-video` / `video-to-gif` / `rebuild` / `release` / `release-post` | `local-only` | — |
+| `.claude/skills/cmate-handoff-dev` / `cmate-delegate-dev` | `generated` | 元は `skills/cmate-handoff`・`skills/cmate-delegate`（pin: `scripts/dev-skills/pin.json`） |
+
+### `generated`（4 つ目。Issue #4323）
+
+公開パッケージを機械的に変換して作る派生。手で直さず `node scripts/dev-skills/generate.mjs generate --source <commandmate-skills>` で作り直す。
+`files` の pin は持たず、ずれは逆変換の sha256 で `tests/unit/skills/dev-skills/generated.test.ts` が検知する
+（`node scripts/dev-skills/generate.mjs check` でも同じ。checkout は要らない）。
+`-dev` は開発ブランチの CLI（`commandmatedev`）で mem を確かめるための派生で、公式 Skill ではない。
+公式の実行経路は ADR #1447（`docs/design/harness-pack-contract.md` §3）のとおり public `commandmate` のまま。
 
 `.md` のみのパッケージ（`cmate-orchestrate` など）を対応表に入れなかった根拠は
 `sync-map.json` の `notMapped` に実測値つきで書いてある（要約: 同名の `.claude/commands/*.md`

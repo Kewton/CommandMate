@@ -57,6 +57,8 @@ import { v69_migrations } from './v69-mem-promote';
 import { v70_migrations } from './v70-suggestion-shown';
 // Issue #4227 (G-PR2): the hand-off of a session that ends (requests, proposals).
 import { v71_migrations } from './v71-mem-handoff';
+// Issue #4344: the ask correlation ledger (askId → native input → completed turn).
+import { v72_migrations } from './v72-ask-correlations';
 
 /**
  * Complete ordered list of all migrations.
@@ -116,4 +118,5 @@ export const migrations: Migration[] = [
   ...v69_migrations,
   ...v70_migrations,
   ...v71_migrations,
+  ...v72_migrations,
 ];

@@ -52,7 +52,7 @@ const EXPECTED_FIND_ROOTS = ['scripts', 'tests/scripts', '.claude/lib'];
  *
  * `.claude/lib` が sync-map の pin 対象外であること（実測）。
  *
- * These 26 files belong to skills under `.agents/skills/` and `.claude/skills/`.
+ * These 28 files belong to skills under `.agents/skills/` and `.claude/skills/`.
  * When a separate Epic resolves exclusions for skills, remove them from this list.
  */
 const EXCLUDED_SHELL_SCRIPTS = [
@@ -82,6 +82,8 @@ const EXCLUDED_SHELL_SCRIPTS = [
   '.claude/skills/orchestrate-monitor/scripts/verify-completion.sh',
   '.claude/skills/orchestrate-monitor/scripts/verify-scope.sh',
   '.claude/skills/video-to-gif/scripts/to-gif.sh',
+  '.agents/skills/cmate-delegate-dev/scripts/ask.sh',
+  '.claude/skills/cmate-delegate-dev/scripts/ask.sh',
 ];
 
 /**

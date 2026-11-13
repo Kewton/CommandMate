@@ -1,3 +1,6 @@
+import { isAbsolute } from 'path';
+import { isVirtualFilesystemPath } from '@/config/system-directories';
+
 /**
  * The only way agent-health builds a tmux command line (Issue #2878).
  *
@@ -82,6 +85,11 @@ export function buildChildEnv(
     if (STRIPPED_CHILD_ENV_VARS.includes(key)) continue;
     const prefixed = STRIPPED_CHILD_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
     if (prefixed && !KEPT_CHILD_ENV_VARS.includes(key)) continue;
+    // Issue #4290: the same rule as `getCodexHome` / `resolveCodexHome` — an
+    // absolute CODEX_HOME inside /proc, /sys, /dev (or a symlink into one) is not
+    // handed on, so the child falls back to its default ~/.codex. Relative and
+    // empty values pass through unchanged (relative stays open in #4290).
+    if (key === 'CODEX_HOME' && value !== '' && isAbsolute(value) && isVirtualFilesystemPath(value)) continue;
     env[key] = value;
   }
   // ProcessEnv (as augmented by Next) declares NODE_ENV required; a child

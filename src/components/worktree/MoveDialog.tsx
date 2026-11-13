@@ -17,6 +17,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Button, Spinner } from '@/components/ui';
 import { useTranslations } from 'next-intl';
 import type { TreeItem } from '@/types/models';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
 
 /**
@@ -90,6 +92,8 @@ export const MoveDialog = memo(function MoveDialog({
 }: MoveDialogProps) {
   const t = useTranslations('worktree');
   const tCommon = useTranslations('common');
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']));
   const [directoryTree, setDirectoryTree] = useState<DirectoryNode[]>([]);
@@ -115,7 +119,8 @@ export const MoveDialog = memo(function MoveDialog({
   const loadRootDirectories = useCallback(async () => {
     setRootLoading(true);
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/tree`);
+      // Issue #4345 1c 再指示 1: the destination tree's 401 reaches the gateway before the return.
+      const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/tree`);
       if (!response.ok) return;
       const data = await response.json();
       const dirs = (data.items as TreeItem[])
@@ -131,12 +136,12 @@ export const MoveDialog = memo(function MoveDialog({
     } finally {
       setRootLoading(false);
     }
-  }, [worktreeId]);
+  }, [worktreeId, handoffOwner]);
 
   const loadSubdirectories = useCallback(async (dirPath: string) => {
     setLoadingDirs((prev) => new Set(prev).add(dirPath));
     try {
-      const response = await fetch(`/api/worktrees/${worktreeId}/tree/${dirPath}`);
+      const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/tree/${dirPath}`);
       if (!response.ok) return;
       const data = await response.json();
       const dirs = (data.items as TreeItem[])
@@ -157,7 +162,7 @@ export const MoveDialog = memo(function MoveDialog({
         return next;
       });
     }
-  }, [worktreeId]);
+  }, [worktreeId, handoffOwner]);
 
   const handleToggleDir = useCallback(async (dirPath: string) => {
     setExpandedDirs((prev) => {

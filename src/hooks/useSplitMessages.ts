@@ -37,6 +37,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ChatMessage } from '@/types/models';
 import { useRealtime } from '@/hooks/useRealtimeConnection';
@@ -197,6 +199,9 @@ export function useSplitMessages({
 }: UseSplitMessagesOptions): UseSplitMessagesReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Issue #4345 1c: the worktree page's registration holder (the PC split's and the phone's
+  // own History poll — the pair of the page's messages poll; none in the sessions view).
+  const handoffOwner = useHandoffPageOwner();
 
   // Issue #1171: realtime access so a targeted kill (matching scoped stop event)
   // refreshes THIS split's history immediately instead of waiting for the poll.
@@ -278,7 +283,9 @@ export function useSplitMessages({
       if (includeArchived) {
         params.set('includeArchived', 'true');
       }
-      const response = await fetch(
+      // Issue #4345 1c: the 401 reaches the gateway before the non-2xx return.
+      const response = await fetchForHandoffPage(
+        handoffOwner,
         `/api/worktrees/${worktreeId}/messages?${params.toString()}`,
       );
       if (!response.ok) return;
@@ -300,7 +307,7 @@ export function useSplitMessages({
       console.error('[useSplitMessages] fetch error:', err);
       setIsLoading(false);
     }
-  }, [worktreeId, cliToolId, resolvedInstanceId, limit, includeArchived]);
+  }, [worktreeId, cliToolId, resolvedInstanceId, limit, includeArchived, handoffOwner]);
 
   // When (worktreeId, cliToolId, instanceId) changes, clear stale messages so
   // the new instance starts from an empty state and re-enters the loading phase.

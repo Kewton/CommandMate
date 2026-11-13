@@ -267,7 +267,47 @@ export interface ApiRequestOptions extends RequestInit {
    * site's confidence.
    */
   retries?: number;
+  /**
+   * Issue #4345 1c: called with the response {@link fetchApiResponse} is about to return — before
+   * anything reads its body or folds its status into an {@link ApiError}. Not called for a response
+   * discarded for a retry, nor when no response came (a transport error, a timeout, an abort). Not
+   * passed on to `fetch`.
+   */
+  onResponse?: (response: Response) => void;
+  /**
+   * Issue #4345 1c 再指示 2: called right before each `fetch` (every attempt of a retry). What it
+   * throws ends the request with nothing sent and reaches the caller as it was thrown (never folded
+   * into an {@link ApiError}): the hand-off page's gate refusing an operation. Not passed on to `fetch`.
+   */
+  beforeFetch?: () => void;
 }
+
+/**
+ * Issue #4345 1c 再指示 2: what a `beforeFetch` threw — passed through untouched by every wrapper here
+ * (a request that was not sent is not a transport error nor an HTTP error).
+ */
+const notSentErrors = new WeakSet<object>();
+
+function runBeforeFetch(beforeFetch: (() => void) | undefined): void {
+  if (!beforeFetch) return;
+  try {
+    beforeFetch();
+  } catch (error) {
+    if (typeof error === 'object' && error !== null) notSentErrors.add(error);
+    throw error;
+  }
+}
+
+/** Issue #4345 1c 再指示 2: `error` came from a `beforeFetch` (nothing was sent). */
+function isNotSentError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && notSentErrors.has(error);
+}
+
+/**
+ * Issue #4345 1c: what a caller of {@link worktreeApi.sendMessage} / {@link worktreeApi.uploadImageFile}
+ * may hand on about its request: its response observer (the hand-off page's gateway).
+ */
+export type ApiResponseObserver = Pick<ApiRequestOptions, 'onResponse' | 'beforeFetch'>;
 
 /**
  * Last reachability verdict pushed to `useConnectivity`, and when.
@@ -466,7 +506,7 @@ export async function fetchApiResponse(
   url: string,
   options?: ApiRequestOptions
 ): Promise<Response> {
-  const { timeoutMs, retries, ...init } = options ?? {};
+  const { timeoutMs, retries, onResponse, beforeFetch, ...init } = options ?? {};
   const method = (init.method ?? 'GET').toUpperCase();
   // Non-idempotent methods are pinned to zero regardless of what was asked for.
   // This is the guard behind "a send is never duplicated": see
@@ -484,6 +524,9 @@ export async function fetchApiResponse(
 
   for (let attempt = 0; ; attempt++) {
     assertOnline();
+    // Issue #4345 1c 再指示 2: before each attempt, outside the transport's catch (what it throws is
+    // not a transport error and is never retried).
+    runBeforeFetch(beforeFetch);
     try {
       const response = await fetchOnce(url, init, effectiveTimeout);
       noteReachability(true);
@@ -492,6 +535,7 @@ export async function fetchApiResponse(
         await delay(computeRetryDelayMs(attempt));
         continue;
       }
+      onResponse?.(response);
       return response;
     } catch (error) {
       const apiError = normalizeTransportError(error);
@@ -549,7 +593,8 @@ async function fetchApi<T>(url: string, options?: ApiRequestOptions): Promise<T>
 
     return response.json();
   } catch (error) {
-    if (error instanceof ApiError) {
+    // Issue #4345 1c 再指示 2: not sent (a `beforeFetch` refused it) — passed through as it is.
+    if (error instanceof ApiError || isNotSentError(error)) {
       throw error;
     }
     throw new ApiError(
@@ -704,7 +749,9 @@ export const worktreeApi = {
   async sendMessage(
     id: string,
     content: string,
-    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string } & SendBriefChoice
+    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string } & SendBriefChoice,
+    // Issue #4345 1c: the response's observer (the hand-off page's gateway), before the body is read.
+    request?: ApiResponseObserver
   ): Promise<ChatMessage & { brief?: SendBriefReport }> {
     const body: { content: string; cliToolId?: string; instanceId?: string; imagePath?: string } & SendBriefChoice = { content };
     if (options?.cliToolId) {
@@ -727,6 +774,8 @@ export const worktreeApi = {
       body: JSON.stringify(body),
       // Issue #3194: with no session the server launches the agent inside this request.
       timeoutMs: getSendTimeoutMs(),
+      ...(request?.onResponse ? { onResponse: request.onResponse } : {}),
+      ...(request?.beforeFetch ? { beforeFetch: request.beforeFetch } : {}),
     });
     return reviveMessageTimestamp(created) as ChatMessage & { brief?: SendBriefReport };
   },
@@ -741,18 +790,23 @@ export const worktreeApi = {
    */
   async uploadImageFile(
     worktreeId: string,
-    file: File
+    file: File,
+    // Issue #4345 1c: the response's observer (the hand-off page's gateway), before the body is read.
+    request?: ApiResponseObserver
   ): Promise<{ path: string }> {
     const timestamp = Date.now();
     const filename = `${timestamp}-${file.name}`;
     const uploadPath = `.commandmate/attachments`;
     const formData = new FormData();
     formData.append('file', new File([file], filename, { type: file.type }));
+    // Issue #4345 1c 再指示 2: the gate before the one attempt (what it throws is not sent).
+    runBeforeFetch(request?.beforeFetch);
 
     const response = await fetch(`/api/worktrees/${worktreeId}/upload/${uploadPath}`, {
       method: 'POST',
       body: formData,
     });
+    request?.onResponse?.(response);
 
     if (!response.ok) {
       const errorBody = await safeParseJson<{ error?: { message?: string } }>(

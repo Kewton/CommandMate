@@ -23,6 +23,12 @@
  * the two variable names the route happens to use. The calls that are not the
  * tool's are listed with what they are ({@link OTHER_KILL_SESSION_CALLS}).
  *
+ * Issue #4345 1b: the browser's and the CLI's stops reach the kill-session route by its URL, and
+ * the page's stop no longer goes through `worktreeApi.killSession(…)` (it sends the same POST
+ * itself, to report a 401 to the hand-off's gateway first). So the requests are counted by the
+ * URL they compose — every `/api/worktrees/${id}/kill-session` literal in src, each listed with
+ * its site ({@link KILL_ROUTE_REQUESTS}) — and the route they reach is the one that forgets.
+ *
  * @vitest-environment node
  */
 
@@ -33,6 +39,7 @@ import { REPO_ROOT } from '../guards/route-tmux-reach';
 import {
   candidateFiles,
   scanKeyWriters,
+  scanLiterals,
   scanMemberCalls,
   scanRawTmuxCommands,
   srcFiles,
@@ -101,13 +108,45 @@ function scanKills(): Array<{ file: string; site: string }> {
  * tool's, so a new caller cannot hide behind a name.
  */
 const OTHER_KILL_SESSION_CALLS: readonly { file: string; site: string; receiver: string; calls: string }[] = [
+  // Issue #4345 1b: the page's `worktreeApi.killSession(…)` (useWorktreeDetailController) was the one
+  // row. The page now sends that POST itself (`killSessionThroughGateway`); it and api-client's
+  // `killSession` are counted by their URL in {@link KILL_ROUTE_REQUESTS}.
+];
+
+/**
+ * Issue #4345 1b: every request composed for the kill-session route in src (by its URL: a string or
+ * template `/api/worktrees/${id}/kill-session[?…]`), with what sends it. Each reaches
+ * {@link KILL_ROUTE}, the one that forgets the launch. A new one fails until it is listed.
+ */
+const KILL_ROUTE_REQUESTS: readonly { file: string; site: string; sends: string }[] = [
+  { file: 'src/cli/commands/instances.ts', site: 'removeInstance', sends: 'the CLI’s `instances remove` (client.post)' },
+  { file: 'src/cli/commands/instances.ts', site: 'killInstance', sends: 'the CLI’s instance kill (client.post)' },
+  { file: 'src/components/roles/InstanceRolesSection.tsx', site: 'InstanceRoleRow', sends: 'the roles screen’s restart (fetch POST)' },
+  { file: 'src/components/settings/AgentUpdatesCard.tsx', site: 'AgentUpdatesCard', sends: 'the settings’ restart after an update (fetch POST)' },
   {
     file: 'src/hooks/useWorktreeDetailController.ts',
-    site: 'useWorktreeDetailController',
-    receiver: 'worktreeApi',
-    calls: 'the browser’s api-client, which POSTs to the kill-session route (the route is the one that forgets)',
+    site: 'killSessionThroughGateway',
+    sends: 'the detail page’s stop (fetchApiResponse POST, its 401 reported to the hand-off’s gateway first)',
   },
+  { file: 'src/lib/api-client.ts', site: 'killSession', sends: '`worktreeApi.killSession` (fetchApi POST)' },
 ];
+
+const KILL_ROUTE_URL = /^\/api\/worktrees\/\u0000\/kill-session(?:$|[?\u0000])/;
+
+/** The kill-session route's URL composed in src (and in `extra`, the controls' fixtures). */
+function scanKillRouteRequests(extra: ReadonlyArray<{ file: string; text: string }> = []): Array<{ file: string; site: string }> {
+  const files = [...srcFiles().map((f) => ({ file: f, text: read(f) })), ...extra];
+  return files.flatMap(({ file, text }) => scanLiterals(file, text, (literal) => KILL_ROUTE_URL.test(literal)));
+}
+
+function reconcileKillRouteRequests(found: readonly { file: string; site: string }[]): string[] {
+  const problems: string[] = [];
+  const listed = new Set(KILL_ROUTE_REQUESTS.map(keyOf));
+  const seen = new Set(found.map(keyOf));
+  for (const key of [...seen].sort()) if (!listed.has(key)) problems.push(`request to the kill-session route not in the table: ${key}`);
+  for (const key of [...listed].sort()) if (!seen.has(key)) problems.push(`table row with no request behind it: ${key}`);
+  return problems;
+}
 
 /** Every `x.killSession(…)` in src, but a tool calling its own (`this` / `super` inside `src/lib/cli-tools/`). */
 function scanKillSessionCalls(extra: ReadonlyArray<{ file: string; text: string }> = []): MemberCall[] {
@@ -218,5 +257,39 @@ describe('[#4050] a kill or a tool kill written in a shape #4032’s table did n
     for (const other of OTHER_KILL_SESSION_CALLS) {
       expect(calls.some((c) => c.file === other.file && c.site === other.site && c.receiver === other.receiver), other.file).toBe(true);
     }
+  });
+});
+
+describe('[#4345 1b] every request to the kill-session route, whatever sends it', () => {
+  it('negative control: the requests composed for the route in src are the table, and the route is a POST that forgets', () => {
+    expect(reconcileKillRouteRequests(scanKillRouteRequests())).toEqual([]);
+    const route = codeOf(read(KILL_ROUTE));
+    expect(route).toMatch(/export async function POST\(/);
+    expect(route).toMatch(/clearSessionStarting\(id, cliToolId, instanceId\)/);
+  }, FULL_SCAN_TIMEOUT_MS);
+
+  it('the page’s stop is one of them: sent by killSessionThroughGateway, which the stop calls', () => {
+    const controller = codeOf(read('src/hooks/useWorktreeDetailController.ts'));
+    expect(controller).toMatch(/await killSessionThroughGateway\(worktreeId, target, killAuthRequest\)/);
+    expect(controller).toMatch(/method: 'POST'/);
+  });
+
+  it('positive: a new request to the route fails until it is listed', () => {
+    for (const [text, site] of [
+      ["export async function stopIt(id: string) { await fetch(`/api/worktrees/${id}/kill-session`, { method: 'POST' }); }\n", 'stopIt'],
+      ["export async function stopOne(id: string, q: string) { await fetch(`/api/worktrees/${id}/kill-session?${q}`, { method: 'POST' }); }\n", 'stopOne'],
+    ] as const) {
+      expect(reconcileKillRouteRequests(scanKillRouteRequests([{ file: 'src/lib/stopper.ts', text }])), text).toEqual([
+        `request to the kill-session route not in the table: src/lib/stopper.ts :: ${site}`,
+      ]);
+    }
+  }, FULL_SCAN_TIMEOUT_MS);
+
+  it('negative: a comment, a log label and another route are not requests to it', () => {
+    const text =
+      '// POST /api/worktrees/:id/kill-session\n' +
+      "logger.error('kill-session-failed', {});\n" +
+      'export const u = (id: string) => `/api/worktrees/${id}/kill-session-ledger`;\n';
+    expect(scanLiterals('src/lib/x.ts', text, (literal) => KILL_ROUTE_URL.test(literal))).toEqual([]);
   });
 });

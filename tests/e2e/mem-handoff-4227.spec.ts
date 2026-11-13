@@ -832,8 +832,12 @@ test.describe('G10: the hand-off dialog stays over the layout switch and the Loa
  * `toBeVisible`, which would wait a gap away). The invariant asserted in (a)(b)(c): after the first
  * sample with a dialog there is no sample without one (0 transitions 1→0), one dialog at most, and
  * one by 1s. G10c (codex-2 P2-2): that is judged by each sample's MEASURED `elapsed`, not by the
- * `at` it was scheduled for (a timer that fires late cannot pass as "on time"); a run in which any
- * sample fired more than 100ms after its schedule is indeterminate and fails. The value at 100ms is **recorded, not asserted** in (a) and (c): it is a known gap
+ * `at` it was scheduled for (a timer that fires late cannot pass as "on time"). #4345 (as (d) in
+ * #4317 d): in (a)(b)(c)(d) a MutationObserver attached before the push is the judgement and the
+ * samples are auxiliary — a run in which any sample fired more than 100ms after its schedule
+ * (indeterminate: a slow runner) only records the sample checks as undecidable in the annotations
+ * and the console, the observer deciding the run; on time, the samples are judged too. An observer
+ * that saw nothing (no notification, or no dialog ever) fails. The value at 100ms is **recorded, not asserted** in (a) and (c): it is a known gap
  * (in dev the route's load and its Suspense come before the page exists), noted in the test's
  * annotations — if it becomes 1 the note changes, so it is noticed. (b) is the same since G10d: its 100ms is recorded too, not asserted (it wavers on a
  * loaded dev machine: 0 with the first dialog at ~400ms in most runs, 1 in some).
@@ -846,10 +850,27 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
 
   /** A sample is judged by the `elapsed` it was really taken at, never by the `at` it was scheduled for. */
   const DEADLINE_MS = 1000;
-  /** A sample that fires later than this after its schedule makes the run indeterminate (a failure, never green). */
+  /**
+   * A sample that fires later than this after its schedule makes the run indeterminate: its sample
+   * checks are recorded as undecidable (never asserted, never green by themselves) and the
+   * MutationObserver's checks decide the run, in (a)(b)(c) and (d) alike (#4317 d, #4345).
+   */
   const MAX_LATE_MS = 100;
   /** Mutation knob for the judge's own check (G10c): every sample fires this many ms after its schedule. */
   const SKEW_MS = Number(process.env.G10_SAMPLE_SKEW_MS ?? 0);
+  /**
+   * Mutation knob for (d)'s observer (#4317 d, a control only; unset: off): `1` takes the dialog's
+   * node out of the DOM for one task 100ms after the push and puts the same node back, so the
+   * MutationObserver sees a notification with 0 dialogs. Never set by default.
+   */
+  const D_DROP_DIALOG = process.env.G10_D_DROP_DIALOG === '1';
+  /**
+   * The same knob for (a)(b)(c)'s observer (#4345, a control only; unset: off): `1` takes the
+   * dialog's node out of the DOM for one task {@link ABC_DROP_AT_MS}ms after the push (once drawn:
+   * the first is by 1s) and puts the same node back. Never set by default.
+   */
+  const ABC_DROP_DIALOG = process.env.G10_ABC_DROP_DIALOG === '1';
+  const ABC_DROP_AT_MS = 1500;
 
   type Sample = { at: number; elapsed: number; dialogs: number; path: string };
   type Summary = {
@@ -860,7 +881,7 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
     /** How many times a sample without a dialog follows one with a dialog (in the order taken). */
     backToZero: number;
     maxDialogs: number;
-    /** The largest `elapsed - at`; above {@link MAX_LATE_MS} the run proves nothing. */
+    /** The largest `elapsed - at`; above {@link MAX_LATE_MS} the samples prove nothing (the observer decides). */
     maxLate: number;
     indeterminate: boolean;
     /** The dialogs of the last sample really taken by {@link DEADLINE_MS} (-1: none was). */
@@ -899,32 +920,138 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
     };
   }
 
-  /** Pushes to `to` and counts the dialogs every {@link SAMPLE_EVERY_MS}ms to {@link SAMPLE_UNTIL_MS}, in the page. */
-  async function pushAndSample(page: Page, to: string): Promise<Summary> {
-    const samples = await page.evaluate(
-      async ({ to, every, until, skew }) => {
+  /** What (a)(b)(c)'s MutationObserver saw, from before the push to the end of the samples. */
+  type Observed = {
+    /** Dialogs at the push (0: B does not show A's opening without a unit). */
+    start: number;
+    notifications: number;
+    /** The dialogs in every notification (and the records not delivered yet), in order. */
+    notes: number[];
+    /** The `elapsed` (ms from the push) of the first notification with a dialog (null: never). */
+    firstOneElapsed: number | null;
+    /** Notifications with 0 dialogs after the first with one (once drawn it stays: 0 expected). */
+    zerosAfterFirst: number;
+    /** The node first drawn is the one in every later notification and at the end. */
+    sameNode: boolean;
+    pending: number;
+    final: number;
+  };
+
+  /**
+   * (a)(b)(c) as (d) (#4345): pushes to `to` with a MutationObserver attached before the push and
+   * counts the dialogs in the page every {@link SAMPLE_EVERY_MS}ms to {@link SAMPLE_UNTIL_MS} (no
+   * `toBeVisible`, which would wait a gap away). The observer is always disconnected, also on a throw.
+   */
+  async function pushObserveAndSample(page: Page, to: string): Promise<{ observed: Observed; summary: Summary }> {
+    const run = await page.evaluate(
+      async ({ to, every, until, skew, drop, dropAt }) => {
         const router = (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router;
-        const out: { at: number; elapsed: number; dialogs: number; path: string }[] = [];
-        const start = performance.now();
-        router.push(to);
-        await new Promise<void>((resolve) => {
-          for (let ms = every; ms <= until; ms += every) {
-            setTimeout(() => {
-              out.push({
-                at: ms,
-                elapsed: Math.round(performance.now() - start),
-                dialogs: document.querySelectorAll('[data-testid="handoff-dialog"]').length,
-                path: location.pathname,
-              });
-              if (ms === until) resolve();
-            }, ms + skew);
+        const selector = '[data-testid="handoff-dialog"]';
+        const dialogs = () => document.querySelectorAll(selector);
+        const start = dialogs().length;
+        const notes: number[] = [];
+        let notifications = 0;
+        let firstNode: Element | null = null;
+        let firstOneElapsed: number | null = null;
+        let zerosAfterFirst = 0;
+        let sameNode = true;
+        let t0 = performance.now();
+        const look = (): void => {
+          const found = dialogs();
+          notes.push(found.length);
+          if (firstNode === null) {
+            if (found.length >= 1) {
+              firstNode = found[0];
+              firstOneElapsed = Math.round(performance.now() - t0);
+              if (found.length !== 1) sameNode = false;
+            }
+            return;
           }
+          if (found.length === 0) zerosAfterFirst++;
+          if (found.length !== 1 || found[0] !== firstNode) sameNode = false;
+        };
+        const observer = new MutationObserver(() => {
+          notifications++;
+          look();
         });
-        return out;
+        const samples: { at: number; elapsed: number; dialogs: number; path: string }[] = [];
+        let pending = 0;
+        let final = -1;
+        try {
+          observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+          t0 = performance.now();
+          router.push(to);
+          if (drop) {
+            // The control's knob (off by default): the same node out for one task, then back.
+            setTimeout(() => {
+              const node = document.querySelector(selector);
+              const parent = node?.parentNode;
+              if (!node || !parent) return;
+              const next = node.nextSibling;
+              parent.removeChild(node);
+              setTimeout(() => parent.insertBefore(node, next && next.parentNode === parent ? next : null), 0);
+            }, dropAt);
+          }
+          await new Promise<void>((resolve) => {
+            for (let ms = every; ms <= until; ms += every) {
+              setTimeout(() => {
+                samples.push({ at: ms, elapsed: Math.round(performance.now() - t0), dialogs: dialogs().length, path: location.pathname });
+                if (ms === until) resolve();
+              }, ms + skew);
+            }
+          });
+          // The records not delivered yet, then the DOM as it is now.
+          const records = observer.takeRecords();
+          pending = records.length;
+          if (pending > 0) look();
+          final = dialogs().length;
+          if (firstNode !== null && (final !== 1 || dialogs()[0] !== firstNode)) sameNode = false;
+        } finally {
+          observer.disconnect();
+        }
+        return { observed: { start, notifications, notes, firstOneElapsed, zerosAfterFirst, sameNode, pending, final }, samples };
       },
-      { to, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS, skew: SKEW_MS },
+      { to, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS, skew: SKEW_MS, drop: ABC_DROP_DIALOG, dropAt: ABC_DROP_AT_MS },
     );
-    return summarize(samples);
+    return { observed: run.observed as Observed, summary: summarize(run.samples) };
+  }
+
+  /**
+   * The invariant of (a)(b)(c) by the MutationObserver (#4345, the judgement as in (d)): none at the
+   * push, it saw notifications (an observer that saw nothing fails), the first dialog by 1s, after
+   * it no notification with 0, one dialog at most, one at the end, the same node all along.
+   */
+  function expectObservedStays(name: string, observed: Observed): void {
+    const line =
+      `start=${observed.start} notifications=${observed.notifications} first=${observed.firstOneElapsed}ms(elapsed) ` +
+      `zerosAfterFirst=${observed.zerosAfterFirst} max=${Math.max(0, ...observed.notes)} pending=${observed.pending} ` +
+      `final=${observed.final} sameNode=${observed.sameNode}`;
+    test.info().annotations.push({ type: `G10 ${name} observer`, description: line });
+    console.log(`[G10 ${name} observer] ${line}`);
+    expect(observed.start).toBe(0);
+    expect(observed.notifications, 'the MutationObserver saw no notification (it proves nothing)').toBeGreaterThan(0);
+    expect(observed.firstOneElapsed, 'the MutationObserver never saw the dialog').not.toBeNull();
+    expect(observed.firstOneElapsed as number).toBeLessThanOrEqual(DEADLINE_MS);
+    expect(observed.zerosAfterFirst, 'a notification with 0 dialogs after the first was drawn').toBe(0);
+    expect(Math.max(...observed.notes)).toBeLessThanOrEqual(1);
+    expect(observed.final).toBe(1);
+    expect(observed.sameNode, 'the dialog’s DOM node changed after it was drawn').toBe(true);
+  }
+
+  /**
+   * The samples of (a)(b)(c), the auxiliary (#4345, as (d)): on time judged by {@link expectStays};
+   * late (indeterminate: a slow runner) only recorded as undecidable, the observer having decided.
+   */
+  function expectSamplesOrUndecidable(name: string, summary: Summary): void {
+    if (summary.indeterminate) {
+      const undecidable =
+        `undecidable (not asserted): a sample fired ${summary.maxLate}ms after its schedule (limit ${MAX_LATE_MS}ms); ` +
+        `expectStays not judged, the MutationObserver's checks decided this run`;
+      test.info().annotations.push({ type: `G10 ${name} samples`, description: undecidable });
+      console.log(`[G10 ${name} samples] ${undecidable}`);
+    } else {
+      expectStays(summary);
+    }
   }
 
   /** A waiting for the agent, then B for 4 seconds (no unit: B does not show A's), then back. */
@@ -949,9 +1076,10 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
   }
 
   /**
-   * The invariant of (a)(b)(c), judged by the measured `elapsed`: a run whose samples fired more than
-   * {@link MAX_LATE_MS} after their schedule is indeterminate (it fails, never green); once drawn it
-   * stays (0 transitions 1→0); one dialog at most; a dialog seen by 1s, and the last sample really
+   * The invariant of the samples, judged by the measured `elapsed`: a run whose samples fired more
+   * than {@link MAX_LATE_MS} after their schedule is indeterminate and never reaches this (the callers
+   * record it as undecidable and the MutationObserver decides; the first line keeps it from passing
+   * should one call it then); once drawn it stays (0 transitions 1→0); one dialog at most; a dialog seen by 1s, and the last sample really
    * taken by 1s (and the last of all) shows one.
    */
   function expectStays(summary: Summary): void {
@@ -984,10 +1112,11 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
     const server = await stubServer(context);
     server.second = true;
     await waitingThenAway(page, server);
-    const summary = await pushAndSample(page, `/worktrees/${WT}`);
+    const { observed, summary } = await pushObserveAndSample(page, `/worktrees/${WT}`);
     record('(a) cache hit', summary);
     noteKnownGap('(a) cache hit', summary);
-    expectStays(summary);
+    expectObservedStays('(a) cache hit', observed);
+    expectSamplesOrUndecidable('(a) cache hit', summary);
     nothingMadeAgain(server);
   });
 
@@ -1011,12 +1140,18 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
     hold = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const summary = await pushAndSample(page, `/worktrees/${WT}`);
+    let pushed: { observed: Observed; summary: Summary };
+    try {
+      pushed = await pushObserveAndSample(page, `/worktrees/${WT}`);
+    } finally {
+      release();
+      hold = null;
+    }
+    const { observed, summary } = pushed;
     record('(b) cache miss, first read held', summary);
     noteKnownGap('(b) cache miss, first read held', summary);
-    release();
-    hold = null;
-    expectStays(summary);
+    expectObservedStays('(b) cache miss, first read held', observed);
+    expectSamplesOrUndecidable('(b) cache miss, first read held', summary);
     await expect(page.getByTestId('handoff-state')).toBeVisible();
     nothingMadeAgain(server);
   });
@@ -1034,11 +1169,193 @@ test.describe('G10 (G-PR4): back on the worktree, sampled every 50ms to 3s after
     );
     await waitingThenAway(page, server);
     holding = true;
-    const summary = await pushAndSample(page, `/worktrees/${WT}`);
+    const { observed, summary } = await pushObserveAndSample(page, `/worktrees/${WT}`);
     holding = false;
     record(`(c) route held ${ROUTE_HOLD_MS}ms`, summary);
     noteKnownGap(`(c) route held ${ROUTE_HOLD_MS}ms`, summary);
-    expectStays(summary);
+    expectObservedStays(`(c) route held ${ROUTE_HOLD_MS}ms`, observed);
+    expectSamplesOrUndecidable(`(c) route held ${ROUTE_HOLD_MS}ms`, summary);
     nothingMadeAgain(server);
+  });
+
+  /**
+   * Issue #4317 PR2 (d): the host of the dialog is outside the route (`AppShellGate`, beside the
+   * shell), so the route's Loading between two worktrees with a unit never takes it away. The start
+   * is the cause's: A's unknown unit shown on B as A's (foreign, one dialog); then B → A by
+   * `router.push` with the route's RSC request held {@link ROUTE_HOLD_MS}ms, so A's page does not
+   * exist for that time and the route's `loading.tsx` is drawn (checked: a run whose request was
+   * not held, or whose Loading was never committed, proves nothing and fails).
+   *
+   * Counted two ways from before the push: a MutationObserver (every notification's DOM; it says
+   * nothing of a removal and a re-add inside one batch of records) and the 50ms samples of (a)(b)(c)
+   * judged by their measured `elapsed`. The observer is the judgement; the samples are auxiliary:
+   * judged as (a)(b)(c) when on time, and when late (indeterminate: a slow runner) only recorded as
+   * undecidable in the annotations, the observer's checks deciding the run (#4317 d). Asserted: one
+   * dialog at the start, no notification with 0 and none with 2, one at the end, the same DOM node
+   * of the dialog all along (one opening: one token); then A's page is back, the foreign notice
+   * gone, the unit sent again from it — and the push made no create, send, decide, cancel, end nor
+   * kill. Before the fix (the host inside the page) this counts 0 dialogs during the Loading (2
+   * notifications with 0, the node changed; the 50ms samples missed both). B settles 4s before the
+   * push, as in (a)(b)(c) (a push while B was still loading was seen not to navigate at all).
+   */
+  test(`(d) B shows A's unknown unit (foreign); B → A with the route held ${ROUTE_HOLD_MS}ms: one dialog, the same node, in every notification`, async ({ context, page }) => {
+    const server = await stubServer(context);
+    server.second = true;
+    let holding = false;
+    let held = 0;
+    await context.route(
+      (url) => url.pathname === `/worktrees/${WT}`,
+      async (route) => {
+        if (holding && route.request().headers()['rsc'] === '1') {
+          held++;
+          await new Promise((done) => setTimeout(done, ROUTE_HOLD_MS));
+        }
+        return route.fallback();
+      },
+    );
+    // A: the hand-off with an unknown decide (as G10's switch test).
+    await openHandoff(page, server);
+    agent.proposeUpdate(server, 'note-1', 'proposed by the agent');
+    agent.done(server);
+    await readAgain(page);
+    await page.getByTestId('handoff-approve-p-1').click();
+    const decidePath = `${BASE}/${RID}/decide`;
+    const isDecide = (url: URL) => url.pathname === decidePath;
+    let cut: Record<string, unknown> | null = null;
+    await page.route(isDecide, (route) => {
+      cut = route.request().postDataJSON() as Record<string, unknown>;
+      return route.abort('connectionreset');
+    });
+    await page.getByTestId('handoff-confirm').click();
+    await expect(page.getByTestId('handoff-pending')).toBeVisible();
+    await page.unroute(isDecide);
+    expect(cut).not.toBeNull();
+    // B: A's unit shown as A's (one dialog).
+    await page.evaluate((to) => (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router.push(to), `/worktrees/${WT2}`);
+    await expect(page).toHaveURL(new RegExp(`/worktrees/${WT2}`));
+    await expect(page.getByTestId('handoff-foreign')).toBeVisible();
+    await expect(page.getByTestId('handoff-pending')).toBeVisible();
+    // As (a)(b)(c): B settles before the push back.
+    await page.waitForTimeout(4000);
+    await expect(page.getByTestId('handoff-foreign')).toBeVisible();
+    const writesBefore = server.writes.map((write) => write.path);
+    const sendsBefore = server.sends.length;
+
+    holding = true;
+    const run = await page.evaluate(
+      async ({ to, every, until, skew, drop }) => {
+        const router = (window as unknown as { next: { router: { push: (href: string) => void } } }).next.router;
+        const selector = '[data-testid="handoff-dialog"]';
+        const dialogs = () => document.querySelectorAll(selector);
+        const startNode = document.querySelector(selector);
+        const start = dialogs().length;
+        const notes: number[] = [];
+        let notifications = 0;
+        let sameNode = true;
+        let loadingSeen = false;
+        const look = (): void => {
+          const found = dialogs();
+          notes.push(found.length);
+          if (found.length !== 1 || found[0] !== startNode) sameNode = false;
+          if (document.querySelector('[data-testid="route-loading"]')) loadingSeen = true;
+        };
+        const observer = new MutationObserver(() => {
+          notifications++;
+          look();
+        });
+        const samples: { at: number; elapsed: number; dialogs: number; path: string }[] = [];
+        let pending = 0;
+        let final = -1;
+        let finalSame = false;
+        const t0 = performance.now();
+        try {
+          observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+          router.push(to);
+          if (drop) {
+            // The control's knob (off by default): the same node out for one task, then back.
+            setTimeout(() => {
+              const node = document.querySelector(selector);
+              const parent = node?.parentNode;
+              if (!node || !parent) return;
+              const next = node.nextSibling;
+              parent.removeChild(node);
+              setTimeout(() => parent.insertBefore(node, next && next.parentNode === parent ? next : null), 0);
+            }, 100);
+          }
+          await new Promise<void>((resolve) => {
+            for (let ms = every; ms <= until; ms += every) {
+              setTimeout(() => {
+                const count = dialogs().length;
+                samples.push({ at: ms, elapsed: Math.round(performance.now() - t0), dialogs: count, path: location.pathname });
+                if (document.querySelector('[data-testid="route-loading"]')) loadingSeen = true;
+                if (ms === until) resolve();
+              }, ms + skew);
+            }
+          });
+          // The records not delivered yet, then the DOM as it is now.
+          const records = observer.takeRecords();
+          pending = records.length;
+          if (pending > 0) look();
+          final = dialogs().length;
+          finalSame = final === 1 && dialogs()[0] === startNode;
+        } finally {
+          observer.disconnect();
+        }
+        return { start, notes, notifications, sameNode, loadingSeen, samples, pending, final, finalSame };
+      },
+      { to: `/worktrees/${WT}`, every: SAMPLE_EVERY_MS, until: SAMPLE_UNTIL_MS, skew: SKEW_MS, drop: D_DROP_DIALOG },
+    );
+    holding = false;
+    const summary = summarize(run.samples);
+    record(`(d) B→A foreign, route held ${ROUTE_HOLD_MS}ms`, summary);
+    const line =
+      `start=${run.start} notifications=${run.notifications} zeros=${run.notes.filter((n) => n === 0).length} ` +
+      `max=${Math.max(0, ...run.notes)} pending=${run.pending} final=${run.final} sameNode=${run.sameNode && run.finalSame} ` +
+      `loadingSeen=${run.loadingSeen} held=${held} paths=${[...new Set(run.samples.map((sample) => sample.path))].join('>')}`;
+    test.info().annotations.push({ type: 'G10 (d) observer', description: line });
+    console.log(`[G10 (d) observer] ${line}`);
+
+    // The run proves something only if the route's request was held and its Loading was committed.
+    expect(held, 'the route’s RSC request was not made (a cached run proves nothing)').toBeGreaterThan(0);
+    expect(run.loadingSeen, 'the route’s Loading was never committed').toBe(true);
+    expect(run.start).toBe(1);
+    expect(run.notifications).toBeGreaterThan(0);
+    expect(run.notes.filter((n) => n === 0)).toEqual([]);
+    expect(Math.max(...run.notes)).toBeLessThanOrEqual(1);
+    expect(run.final).toBe(1);
+    expect(run.sameNode && run.finalSame, 'the dialog’s DOM node changed within one opening').toBe(true);
+    // The samples are the auxiliary (#4317 d, PM's decision): the observer above is the judgement.
+    // A run whose samples fired late (a slow runner) cannot judge by them: the sample checks are
+    // recorded as undecidable and the observer's verdict stands. On time, they are judged as
+    // (a)(b)(c), and none at 0 from the start.
+    if (summary.indeterminate) {
+      const undecidable =
+        `undecidable (not asserted): a sample fired ${summary.maxLate}ms after its schedule (limit ${MAX_LATE_MS}ms); ` +
+        `expectStays and "no sample at 0" not judged, the MutationObserver's checks above decided this run ` +
+        `(samples at 0: ${summary.samples.filter((sample) => sample.dialogs === 0).length})`;
+      test.info().annotations.push({ type: 'G10 (d) samples', description: undecidable });
+      console.log(`[G10 (d) samples] ${undecidable}`);
+    } else {
+      expectStays(summary);
+      expect(summary.samples.filter((sample) => sample.dialogs === 0)).toEqual([]);
+    }
+
+    // A's page is back: its own dialog (not foreign), the unit there to send again.
+    await expect(page).toHaveURL(new RegExp(`/worktrees/${WT}(?:$|[?#])`));
+    await expect(page.getByTestId('desktop-kill-session')).toBeVisible();
+    await expect(page.getByTestId('handoff-foreign')).toHaveCount(0);
+    await expect(page.getByTestId('handoff-pending-resend')).toBeEnabled();
+    // The push made nothing: no create, send, decide, cancel, end nor kill.
+    expect(server.writes.map((write) => write.path)).toEqual(writesBefore);
+    expect(server.sends).toHaveLength(sendsBefore);
+    expect(server.kills).toEqual([]);
+    expect(server.proposals[0].state).toBe('proposed');
+    // Sent again by the person, as it was cut: to A's request, with its version and decisions.
+    await page.getByTestId('handoff-pending-resend').click();
+    await expect.poll(() => server.proposals[0].state).toBe('applied');
+    const decides = server.writes.filter((write) => write.path === `/${RID}/decide`);
+    expect(decides).toHaveLength(1);
+    expect(decides[0].body).toEqual(cut);
+    expect(server.kills).toEqual([]);
   });
 });

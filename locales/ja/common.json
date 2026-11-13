@@ -19,6 +19,15 @@
       "list": "リスト表示",
       "tile": "タイル表示"
     },
+    "relativeTime": {
+      "now": "たった今",
+      "minutes": "{count}分前",
+      "hours": "{count}時間前",
+      "days": "{count}日前",
+      "weeks": "{count}週間前",
+      "months": "{count}か月前",
+      "years": "{count}年前"
+    },
     "tileAriaLabel": "{branch} のセッションタイル",
     "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
   },
@@ -568,7 +577,23 @@
       "pending": "書けたが項目は進んでいません（{reason}）",
       "concurrent": "書いている間に他の変更がありました。文書を確かめてください",
       "reapproval": "承認の後に変わりました（{reason}）。差分を作り直してください",
-      "failed": "できませんでした（{code}）"
+      "failed": "できませんでした（{code}）",
+      "repository": "リポジトリ",
+      "chooseBranch": "ブランチを選ぶ",
+      "branchesLoading": "ブランチを読み込み中…",
+      "branchesError": "ブランチの一覧を読み込めませんでした",
+      "noBranches": "決定を持つブランチ・作業木がありません",
+      "branchOption": {
+        "notListed": "{branch}（一覧にありません・mem が on でない）"
+      },
+      "counts": {
+        "line": "承認待ち {open} 件・反映待ち {recorded} 件",
+        "notApprovable": "承認できない（mode {mode}）",
+        "unknown": "承認待ち・反映待ちの件数は不明です（mode がルートの間で食い違っています）"
+      },
+      "pendingOnly": "承認待ちだけ",
+      "foldRecorded": "記録済み・反映待ち（{count} 件）",
+      "foldPromoted": "反映済み（{count} 件）"
     },
     "modeHelp": {
       "off": "何も評価せず、書かず、差し込みもしません。項目は消えずに残ります。",

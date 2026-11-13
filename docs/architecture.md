@@ -862,14 +862,14 @@ useWorktreesCache() ── 唯一のworktree一覧取得元
 
 ### 12.1 コンポーネントの責務と状態所有
 
-> **注（Issue #3589 / #3591）**: 縦 48px の全高 ActivityBar は PC から外れた。Activity の入口はヘッダー右の道具（`HeaderToolBar`）と 2 段目の Verification チップ、ActivityPane は右から本文の上に重ねて開く（ピン留めで横に並ぶ）。下記はこの構成で書いている。
+> **注（Issue #3589 / #3591）**: 縦 48px の全高 ActivityBar は PC から外れた。Activity の入口はヘッダーの identity（リポジトリ › ブランチ › セッション）のすぐ右の道具（`HeaderToolBar`、Issue #4218）と 2 段目の Verification チップ、ActivityPane は既定で右から本文の上に重ねて開き（Issue #4219 で左にも置ける）、ピン留めで横に並ぶ。下記はこの構成で書いている。
 
-- **HeaderToolBar** (`src/components/worktree/HeaderToolBar.tsx`, Issue #3591): Activity 選択状態を**所有しない**制御コンポーネント。`active` / `onToggle` を props で受け取り、`@/config/activity-bar-config` の `HEADER_TOOLS`（`ACTIVITIES` から `verification` を除いたもの）を PC ヘッダー（`DesktopHeader`）の右にアイコンで並べる。ヘッダーが狭いと末尾の道具から「…」の一覧へ畳む（畳む数は `useDesktopHeaderFit` が決める）。
+- **HeaderToolBar** (`src/components/worktree/HeaderToolBar.tsx`, Issue #3591): Activity 選択状態を**所有しない**制御コンポーネント。`active` / `onToggle` を props で受け取り、`@/config/activity-bar-config` の `HEADER_TOOLS`（`ACTIVITIES` から `verification` を除いたもの）を PC ヘッダー（`DesktopHeader`）の identity のすぐ右にアイコンで並べる（Issue #4218）。ヘッダーが狭いと末尾の道具から「…」の一覧へ畳む（畳む数は `useDesktopHeaderFit` が決める）。
 - **VerificationStatusChip** (`VerificationStatusChip.tsx`, Issue #1816 / #2064 / #3590): `verification` Activity の PC での入口（`CHIP_ACTIVITY_ID`）。2 段目の操作バーに置かれ、押すと Verification ペインを開閉する。実行契約が無いブランチでも「未検証」として常に描く（#2064）。
 - **ActivityBar** (`src/components/worktree/ActivityBar.tsx`): 旧・縦 48px の Activity Bar。Issue #3591 以降どの画面にもマウントされていない（サイドバーの開閉は #3512 の `SidebarPanelToggle` へ移った）。
 - **ActivityPane** (`ActivityPane.tsx`): 状態を持たない table-driven のディスパッチャ。親が構築した `ActivityContentMap`（`Partial<Record<ActivityId, ReactNode>>`）から `activities[active]` を 1 つだけ選び `ErrorBoundary` 経由で描画する。単一の `active` キーで 1 ノードのみを描画するため、**多 Activity 同時表示は構造的に不可能**。
 - **TerminalContainer** (`TerminalContainer.tsx`, Issue #730): `terminal` スロット（常時）と `history` スロット（任意）を内包する。Issue #744 以降、PC では最上位 History カラムを描画せず、History は各ターミナル split 内へ移管された（後述 §13）。`history` prop と `useHistoryPaneState` 配線は #730 単一カラムレイアウトとの後方互換として残置している。
-- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730 / #3589 / #3591): Right ペイン（本文）と ActivityPane の構成。ActivityPane は**右側**に出る（#3591）。ピン留めしていない既定では Right ペインの上に重ねて描き、本文の幅を変えない（#3589）。ピン留め（`activityPanePinned`）したときだけ横に並ぶカラムと境界の PaneResizer を持つ。ペインの枠（見出し・ピン・×・Esc / 外側クリックで閉じる）は同ファイルの `PaneOverlayFrame`。`activityPane === null` のときはペインも PaneResizer も描かない。
+- **WorktreeDesktopLayout** (`WorktreeDesktopLayout.tsx`, Issue #730 / #3589 / #3591): Right ペイン（本文）と ActivityPane の構成。ActivityPane は既定で**右側**に出る（#3591）。`usePaneSide` の設定で左側にもでき（#4219、worktree をまたいで共通）、ペイン見出しの［左に移す］／［右に移す］で切り替える。ピン留めしていない既定では Right ペインの上に重ねて描き、本文の幅を変えない（#3589）。ピン留め（`activityPanePinned`）したときだけ横に並ぶカラムと境界の PaneResizer を持つ。ペインの枠（見出し・ピン・×・Esc / 外側クリックで閉じる）は同ファイルの `PaneOverlayFrame`。`activityPane === null` のときはペインも PaneResizer も描かない。
 - **PaneResizer** (`PaneResizer.tsx`): 一過性のドラッグ状態のみを持つ汎用リサイザ。**ピクセル差分を `onResize(delta)` で親へ通知するのみ**で、ペイン幅の確定は親が行う（ピン留め時の WorktreeDesktopLayout の Right↔Activity 境界、TerminalContainer の History↔Terminal 境界の両方で再利用）。
 
 ### 12.2 状態の所有者（カスタムフック）

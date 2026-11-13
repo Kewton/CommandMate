@@ -14,6 +14,11 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import {
+  fetchForHandoffPage,
+  isHandoffPageOperationRefused,
+  type HandoffPageOwner,
+} from '@/lib/handoff/page-owner';
 
 /**
  * Represents the target of a move operation.
@@ -48,12 +53,15 @@ interface UseFileOperationsReturn {
  * @param onRefresh - Callback to refresh the file tree after operations
  * @param onSuccess - Optional callback for success notification
  * @param onError - Optional callback for error notification
+ * @param handoffOwner - Issue #4345 1c: the worktree page's registration holder; the move's 401
+ *   reaches the hand-off gateway under it before its body is read. Omitted: reports nothing.
  */
 export function useFileOperations(
   worktreeId: string,
   onRefresh: () => void,
   onSuccess?: (message: string) => void,
-  onError?: (message: string) => void
+  onError?: (message: string) => void,
+  handoffOwner?: HandoffPageOwner
 ): UseFileOperationsReturn {
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
@@ -65,9 +73,13 @@ export function useFileOperations(
 
   const handleMoveConfirm = useCallback(async (destinationDir: string) => {
     if (!moveTarget) return;
+    // Issue #4345 1c-2: a refusal (registration lapsed, nothing sent) is "nothing happened" — no
+    // failure toast, and the dialog (the chosen destination) stays for the person to retry.
+    let refused = false;
 
     try {
-      const response = await fetch(
+      const response = await fetchForHandoffPage(
+        handoffOwner,
         `/api/worktrees/${worktreeId}/files/${moveTarget.path}`,
         {
           method: 'PATCH',
@@ -89,13 +101,19 @@ export function useFileOperations(
 
       onSuccess?.('Moved successfully');
       onRefresh();
-    } catch {
+    } catch (err) {
+      if (isHandoffPageOperationRefused(err)) {
+        refused = true;
+        return;
+      }
       onError?.('Failed to move');
     } finally {
-      setMoveTarget(null);
-      setIsMoveDialogOpen(false);
+      if (!refused) {
+        setMoveTarget(null);
+        setIsMoveDialogOpen(false);
+      }
     }
-  }, [moveTarget, worktreeId, onRefresh, onSuccess, onError]);
+  }, [moveTarget, worktreeId, onRefresh, onSuccess, onError, handoffOwner]);
 
   const handleMoveCancel = useCallback(() => {
     setMoveTarget(null);

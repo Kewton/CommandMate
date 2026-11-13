@@ -56,9 +56,13 @@ export function readMap(mapPath = MAP_PATH) {
   return JSON.parse(readFileSync(mapPath, 'utf8'));
 }
 
-/** Packages that declare a counterpart (i.e. everything but `local-only`). */
+/**
+ * Packages whose files are pinned against a counterpart. `local-only` has no
+ * counterpart and `generated` (Issue #4323) is checked by its generator's test,
+ * so neither carries `files`.
+ */
 export function mappedPackages(map) {
-  return map.packages.filter((pkg) => pkg.policy !== 'local-only');
+  return map.packages.filter((pkg) => pkg.policy === 'mapped');
 }
 
 /**

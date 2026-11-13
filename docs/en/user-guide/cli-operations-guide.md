@@ -60,6 +60,10 @@ node bin/commandmate.js ls
 | [`commandmate sync`](#commandmate-sync) | Make the server rescan its worktrees (the GUI sync button) |
 | [`commandmate send`](#commandmate-send) | Send a message to an agent |
 | [`commandmate wait`](#commandmate-wait) | Wait for agent completion |
+| [`commandmate whoami`](#commandmate-whoami) | Show which worktree and instance this session is |
+| [`commandmate peers`](#commandmate-peers) | List the other sessions in this repository, each with a ready-to-run `ask` line |
+| [`commandmate ask`](#commandmate-ask) | Ask another session and get its reply (`--async` does not wait) |
+| [`commandmate relays`](#commandmate-relays) | List and withdraw the waits `--async` / `--reply-to` create; settle held deliveries |
 | [`commandmate prompt`](#commandmate-prompt) | Observe the screen an agent is stopped on (kind, options, observation token) |
 | [`commandmate respond`](#commandmate-respond) | Respond to a prompt |
 | [`commandmate verify`](#commandmate-verify) | Run the verification gates (`.commandmate/verify.yaml`) and read the run history |
@@ -766,6 +770,224 @@ Completed: localllm-test-main
 
 ---
 
+## commandmate whoami
+
+Prints **which worktree and which agent instance this session is**. It is the entry point for an agent that wants to `ask`
+another session: it needs its own worktree ID and instance ID first (Issue #2376).
+
+### Usage
+
+```bash
+commandmate whoami [--json] [--token <token>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | JSON output |
+| `--token <token>` | Auth token (visible in the process list; prefer the `CM_AUTH_TOKEN` environment variable) |
+
+### Where the answer comes from
+
+1. The environment: `CM_WORKTREE_ID` / `CM_INSTANCE_ID` / `CM_CLI_TOOL` (or the `CM_AGENT_*` variables on the launch line). `source` is `env`
+2. Otherwise the tmux session name `mcbd-[<ns>-]<tool>-<worktree>[-<n>]`. `source` is `tmux-session`
+
+### Output
+
+```text
+worktree:  commandmate-issue-101
+instance:  claude
+cli_tool:  claude
+alias:     Claude
+source:    env
+tmux:      mcbd-…-claude-commandmate-issue-101
+server:    http://localhost:3000
+```
+
+`--json` returns `worktreeId` / `instanceId` / `cliToolId` / `alias` (`null` when the roster has no row) / `source` /
+`sessionName` / `serverUrl`. When this session's worktree is not in the list of the server the CLI is talking to (a
+different server), it prints a warning on stderr and adds `"serverMismatch": true` to `--json`; the exit code stays 0 (Issue #2404).
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Answered |
+| 3 | **NOT_IN_SESSION**: not inside an agent session started by CommandMate (the reason is on stderr). The number is the same as `ExitCode.START_FAILED`, but it has nothing to do with a server failing to start |
+| 1 / 2 / 99 | Server not running / bad argument / unexpected error (see [Exit Codes](#exit-codes)). whoami resolves the identity from the environment variables or the tmux session name and discards any failed server call (the `-<n>` disambiguation and the alias lookup), so a stopped server alone does not produce 1 — it still answers with 0 and `alias` shows `-` |
+
+---
+
+## commandmate peers
+
+Lists the **other agent sessions in this repository**, each with a **ready-to-run `ask` line** (Issue #2376). It does the
+`ls` + `instances` fan-out once.
+
+### Usage
+
+```bash
+commandmate peers [--json] [--token <token>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--json` | JSON output |
+| `--token <token>` | Auth token |
+
+The caller is resolved the way `commandmate whoami` does, and the list is narrowed to the **worktrees of the same repository**.
+Your own row is marked `(you)` and carries no `ask` line.
+
+```text
+commandmate-issue-102 / codex
+  alias: Codex   tool: codex   status: ready
+  commandmate ask commandmate-issue-102 --instance codex "<request>"
+```
+
+`--json` returns `self` (`worktreeId` / `instanceId` / `cliToolId`), `serverUrl` and `peers` (each row has `worktreeId` /
+`instanceId` / `cliTool` / `alias` / `status` / `isSelf` / `ask`; `ask` is `null` on your own row). Against a different server
+it adds `serverMismatch: true` and a stderr warning. With no other session in the repository it prints `No peer sessions found.`
+
+`status` (`waiting` / `running` / `ready` / `idle`, the words `ls` uses) is **that row's own session** (Issue #4346): a session that
+is not running reads `idle` even while another session of the same worktree is up. Against an older server that does not send each
+session's status, it is the worktree's overall status, as before.
+
+### Exit codes
+
+| Code | Meaning |
+|:----:|---------|
+| 0 | Listed |
+| 3 | **NOT_IN_SESSION**: run from outside an agent session (same as `whoami`) |
+| 1 / 2 / 99 | Server not running / bad argument / unexpected error |
+
+---
+
+## commandmate ask
+
+Sends a request to another agent session and **gets its reply in one command** (`send` + `wait` + reading the reply;
+Issues #2376 / #2377).
+
+### Usage
+
+```bash
+commandmate ask <worktree-id> "<request>" --instance <id> [--timeout <seconds>] [--json]
+commandmate ask <worktree-id> "<request>" --instance <id> --async [--reply-to <target>] [--allow-relay-chain]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--instance <id>` | Target instance (`<agent>` or `<agent>-<n>`; a roster alias works too). **Name the target with this alone.** Defaults to the tool's primary instance. An alias two rows answer to is exit 2 |
+| `--agent <agent>` | Ad-hoc tool for an instance the roster does not know (`claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` / `command-code` / `opencode-v2`) |
+| `--timeout <seconds>` | Maximum time to wait for the reply (default 1800) |
+| `--json` | Print the reply as JSON |
+| `--async` | Do not wait: register a relay, print its ID and exit 0. The reply is delivered into `--reply-to`'s composer when the other turn ends |
+| `--reply-to <target>` | Where an `--async` reply goes: `<worktree-id>[@<instance-id\|alias>]`, or `self` (the session running the command; the default) |
+| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops) |
+| `--token <token>` | Auth token |
+
+There is deliberately **no `--auto-yes`**: turning another session's Auto-Yes on is a decision about that session's guard
+rails, not part of asking it a question.
+
+### Wait, or not
+
+| Situation | Use |
+|-----------|-----|
+| The reply is **the next thing you need** (a review verdict, a finding) | `ask` (blocks and prints the reply on stdout) |
+| You want to **end your own turn** without waiting | `ask --async`, or `send --reply-to`. The reply arrives later in your composer, prefixed with `[from <alias> / <worktree>]` |
+
+The stdout of `--async` is the relay ID alone (`--json`: `worktreeId` / `instanceId` / `cliToolId` / `relayId` / `mode: "async"`).
+See the open ones with [`commandmate relays`](#commandmate-relays); withdraw one with `relays cancel`.
+Do **not** answer another session's confirmation dialog with `respond` on its behalf (a wrong number picks the default).
+
+### Output
+
+Stdout is the reply body. `--json` has this shape:
+
+```json
+{
+  "worktreeId": "commandmate-issue-102",
+  "instanceId": "codex",
+  "cliToolId": "codex",
+  "source": "history",
+  "reply": "…",
+  "overlapped": true
+}
+```
+
+`source` is `history` (transcript) / `pane` (screen) / `none`. `overlapped` appears only when an overlap was found
+([Do not stack `ask`s on one instance (Issue #3955)](#commandmate-wait)). When the turn ended but no reply could be read,
+stderr carries a warning and the exit code is 0. On an upstream fault (exit 11), `--json` carries `upstreamFault`.
+
+### Exit codes
+
+`wait`'s exit codes, plus 11 and 32 that `ask` adds.
+
+| Code | Meaning | Next action |
+|:----:|---------|-------------|
+| 0 | The turn ended (`--async`: the relay was registered). Stdout is the reply | — |
+| 1 | Server not running etc. (DEPENDENCY_ERROR) | `commandmate start --daemon` |
+| 2 | Bad argument, ambiguous alias, **a relay refusal** (reason on stderr; same number as CONFIG_ERROR), or the other session is on a prompt and the body was not sent | Read stderr; do not resend |
+| 10 | The other session is waiting on a prompt; stdout carries the prompt JSON | Report it; do not `respond` for it |
+| 11 | **UPSTREAM_FAULT**: the turn never ran. stderr and `--json` carry `id=…` (`ask` always runs with `failOnUpstreamFault: true`). `id=context-limit`: the conversation is over the model's limit — `instances <id> kill <instance>` and ask again in a fresh session. `id=model-capacity`: send to another instance or model (#3936) | Wait a while or change the target, then ask again |
+| 21 | Nothing was running to ask | Check the roster with `instances <id>` |
+| 32 | **ROLE NOT_SENT**: the role condition does not hold; the body was not typed | Review the role settings |
+| 99 | Unexpected error | — |
+| 124 | Timed out. When the send itself returned past the deadline, the message **was sent** (stderr says so) | Look with `capture <id> --instance <id> --pane --tail 60`; **do not resend** |
+
+### Related sections
+
+The finer behaviour of `ask` is in these sections under [`commandmate wait`](#commandmate-wait) (headings unchanged):
+
+- Do not stack `ask`s on one instance (Issue #3955)
+- Relay delivery bound to its send (Issue #3957)
+- `ask` upstream faults and `id=context-limit` (Issue #3011)
+
+---
+
+## commandmate relays
+
+Shows, withdraws and settles the **waits (relays)** that `ask --async` / `send --reply-to` create.
+
+### Usage
+
+```bash
+commandmate relays [--worktree <id>] [--instance <id>] [--id <relay-id>] [--json]
+commandmate relays cancel <relay-id> [--json]
+commandmate relays resolve <relay-id> --payload <id> --attempt <id> (--confirm | --retry | --discard) [--json]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--worktree <id>` | Worktree to list (defaults to the session running the command) |
+| `--instance <id>` | Agent instance inside `--worktree` (id or roster alias) |
+| `--id <relay-id>` | Show one relay, closed ones too (`send=` / `overlap=` / `hold=`) |
+| `--json` | JSON output |
+| `--token <token>` | Auth token (works on `relays` and on its subcommands) |
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `relays cancel <relay-id>` | Withdraw an open relay and stop its later deliveries. A relay being delivered right now is 409 (exit 2); a closed one is exit 2 too. It cannot take back a delivery already held as uncertain, which may have reached the composer |
+| `relays resolve <relay-id>` | Settle a delivery held as **uncertain** after looking at the requester's pane. Needs `--payload <id>` and `--attempt <id>` (`payload=<kind>:<id>` and `attempt=<id>` from `relays --id`) and exactly one of `--confirm` (it arrived), `--retry` (it did not: queue it again) or `--discard` (drop it, send nothing) (Issue #4082; npm 0.49.3 and later) |
+
+The listing's columns are `<relay-id> <state> <requester> <- <worker> hops=<n> expires=<iso>`, followed as needed by `send=` /
+`overlap=` / `hold=` / `delivery=` / `payload=` / `attempt=` / `reason=` / `check=` / `pending=` / `blocked=` (`pending=` /
+`blocked=` are #4105, and the `# closed, notice not delivered yet` group for an expiry notice that is still stopped is #4193;
+both npm 0.50.0 and later). States are `pending` / `prompt` / `delivered` / `expired` / `cancelled`.
+
+Exit codes: 0 on success, 2 (CONFIG_ERROR) for a bad argument or a refused relay operation, 1 when the server is not running, 99 for an unexpected error.
+
+### Related sections
+
+The finer behaviour of relays is in these sections under [`commandmate wait`](#commandmate-wait) (headings unchanged):
+
+- Relay delivery bound to its send (Issue #3957)
+- An uncertain delivery is never resent automatically (Issue #4064)
+- Resolving a hold (Issue #4082)
+- Telling, showing and counting holds (Issue #4082)
+- A delivery stopped by the requester's confirmation dialog (Issue #4105)
+
+---
+
 ## commandmate prompt
 
 Observe, once and in a machine-readable form, the screen an agent is stopped on (Issue #3755). Use it instead of guessing from `capture --pane`.
@@ -965,7 +1187,7 @@ An answer that waited while a send or another answer held the input lock ([input
 
 The other hints `respond` prints (`send` after `prompt_no_longer_active`, the plan review Next / Note, `send` when the chosen row asks for text, and the option-number hint after `unresolvable_answer`), `send`'s `PROMPT_WAITING` fallback (when the server sent no sentence) and its "check the pane before resending" `capture`, and the `capture` hints of `wait` and `attach` all name the same resolved target: an `--instance` alias as the id it resolved to, `--agent` alone as given, nothing when neither was named. A `capture` that is there to read a dialog is `--pane --tail 40`.
 
-The server's own `PROMPT_WAITING` sentence returned when a send is refused (`send` and the terminal send, e.g. their 409) names the target when the request named an `--instance` (Issue #4031, e.g. `` `commandmate respond <id> <answer> --instance codex-2` ``); a request that named only a tool other than the worktree default with `--agent` gets ` --agent <tool>` (Issue #4049, e.g. `` `commandmate respond <id> <answer> --agent codex` ``, since a `respond` with no target goes to the default tool). A request that named none, or named the default tool, gets the sentence as before. The structured prompt's guidance (the `respond <number>` for a dialog only the hooks saw, e.g. the structured prompt of `/current-output`) is outside this `--agent` rule: `/current-output` passes the instance the server resolved, so whether it is read with `--agent` or for the primary, the guidance carries that resolved instance as `--instance <id>` (e.g. `` `commandmate respond <id> <number> --instance codex` ``), as it has since Issue #4031. The WebSocket push, the push after an Auto-Yes answer and the prompt history row carry the same sentence (Issue #4063; the primary's id is the tool name). The strict respond's (`--expect-screen`) failure hints name the resolved target too (exit 40: `` `commandmate prompt <id> --instance <instance>` ``; exit 41: that plus `` `commandmate capture <id> --instance <instance> --pane` ``). `prompt` takes no `--agent`, so after an `--agent`-only request they name that tool's primary instance, whose id is the tool name (Issue #4049, e.g. `` `commandmate prompt <id> --instance codex` `` / `` `commandmate capture <id> --agent codex --pane` ``); with no target named they stay `` `commandmate prompt` `` / `` `capture --pane` ``. The sentence with which `send` is refused while Command Code shows a plan review (REVIEW) names the real worktree id and, for an instance other than the primary, ` --instance <id>` (Issue #4049, e.g. `` `commandmate respond <id> "<text>" --instance command-code-2` ``). For the primary on a worktree whose default is not Command Code it names ` --agent command-code` (Issue #4063; on a Command Code worktree it names no target, as before). The terminal send (`POST /api/worktrees/:id/terminal`) answers this refusal with the same sentence as a 409 with `code: "PLAN_REVIEW_SEND_REFUSED"`, not the fixed 500.
+The server's own `PROMPT_WAITING` sentence returned when a send is refused (`send` and the terminal send, e.g. their 409) names the target when the request named an `--instance` (Issue #4031, e.g. `` `commandmate respond <id> <answer> --instance codex-2` ``); a request that named only a tool other than the worktree default with `--agent` gets ` --agent <tool>` (Issue #4049, e.g. `` `commandmate respond <id> <answer> --agent codex` ``, since a `respond` with no target goes to the default tool). A request that named none, or named the default tool, gets the sentence as before. The structured prompt's guidance (the `respond <number>` for a dialog only the hooks saw, e.g. the structured prompt of `/current-output`) is outside this `--agent` rule: `/current-output` passes the instance the server resolved, so whether it is read with `--agent` or for the primary, the guidance carries that resolved instance as `--instance <id>` (e.g. `` `commandmate respond <id> <number> --instance codex` ``), as it has since Issue #4031. The WebSocket push, the push after an Auto-Yes answer and the prompt history row carry the same sentence (Issue #4063; the primary's id is the tool name). The strict respond's (`--expect-screen`) failure hints name the resolved target too (exit 40: `` `commandmate prompt <id> --instance <instance>` ``; exit 41: that plus `` `commandmate capture <id> --instance <instance> --pane` ``). `prompt` takes no `--agent`, so after an `--agent`-only request they name that tool's primary instance, whose id is the tool name (Issue #4049, e.g. `` `commandmate prompt <id> --instance codex` `` / `` `commandmate capture <id> --agent codex --pane` ``); with no target named they stay `` `commandmate prompt` `` / `` `capture --pane` ``. The sentence with which `send` is refused while Command Code shows a plan review (REVIEW) names the real worktree id and, for an instance other than the primary, ` --instance <id>` (Issue #4049, e.g. `` `commandmate respond <id> "<text>" --instance command-code-2` ``). For the primary on a worktree whose default is not Command Code it names ` --agent command-code` (Issue #4063; on a Command Code worktree it names no target, as before). The terminal send (`POST /api/worktrees/:id/terminal`) answers this refusal with the same sentence as a 409 with `code: "PLAN_REVIEW_SEND_REFUSED"`, not the fixed 500. When Codex answers `/new` with the "Where should the new conversation run?" worktree picker, the next body is not typed: `send` is refused with the same 409 `PROMPT_WAITING` until a person has chosen in the picker, then send it again (when the branch's mem is `on` / `derived` and `injectOnStart` is enabled (see "Session brief" above), the reset brief is sent with that body, not before; Issue #4313).
 
 ---
 
@@ -2204,6 +2426,7 @@ commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # Sa
 `add`, `remove`, `alias` and `send --register` save with the revision of the roster they read (Issue #4132). If the roster changed after the read, the change is rebuilt on the current roster, up to 2 more times, so another add or change is not erased. The id is one that is free in the current roster. If the roster keeps changing, `add`, `remove` and `alias` end in exit 31 (`roster_changed`) and other changes stay (`remove --kill` stops the session and then saves, so the session may have been stopped). `send --register` has sent its message by then, so this and any other failure to register (Issue #4159) warn, exit 0 and name the command that registers it.
 
 `kill` also disables Auto-Yes for the instances it stops (Auto-Yes of instances it did not stop is kept).
+A successful `instances <worktree-id> kill <instance-id>` prints one line to stderr saying that Auto-Yes for that instance was also disabled and how to resume it (`commandmate auto-yes <worktree-id> --instance <instance-id> --enable`; the default `--duration` is 1h). It does not query whether Auto-Yes was on before; stdout and the exit code are unchanged.
 A successful `kill` (and `remove --kill`) appends one line to `~/.commandmate/session-kills/<UTC date>.jsonl`
 (kept 30 days): the worktree and instance, the tmux sessions the server says it stopped (`killedSessions`),
 and where it was asked from (cwd and tmux session). The server records its own kills there too — the
@@ -2565,6 +2788,8 @@ commandmate mem check --suggest [--instance <id>] [--json]
 commandmate mem check --suggest --quiet [--hook <event>]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+commandmate mem decisions [--worktree <id> [--branch <name>] | --repository <id> --branch <name>] [--pending] [--json]
+commandmate mem decisions <itemId> [--worktree <id> | --repository <id>] [--effect spec|record_only] [--json]
 ```
 
 - Inside a session the target is your own instance (`whoami`). In an ordinary shell, writes need `--worktree <id> --instance <id>`, and `list` / `mode` / `purge` need `--worktree <id>` or `--repository <id> --branch <name>` (otherwise exit 2 `target_required`)
@@ -2643,7 +2868,14 @@ Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checke
 
 ### Recording a decision in its canonical place (screen only, Issue #4225)
 
-A `decision` is written to an Issue / PR comment or a worktree document (`promote_to`) **only when a person approves the diff on the screen** (the "mem" of each row of the Repositories screen → "Record decisions in their canonical place", `/repositories/<id>/mem/decisions?branch=<name>`). **The CLI has no way to do it** (`commandmate mem` has no promote / approve sub-command). No other path — the brief, `check`, prompts, Schedules — writes.
+A `decision` is written to an Issue / PR comment or a worktree document (`promote_to`) **only when a person approves the diff on the screen** (the "mem" of each row of the Repositories screen → "Record decisions in their canonical place", `/repositories/<id>/mem/decisions?branch=<name>`). **The CLI has no way to write it** (`commandmate mem` has no promote / approve sub-command; `mem decisions`, which only reads, is the next section). No other path — the brief, `check`, prompts, Schedules — writes.
+
+At the top of the screen you choose **the repository, then the branch** (Issue #4355).
+
+- Choosing another repository moves to that repository's screen and drops the branch (a branch of the same name in another repository is not carried over)
+- The branch select lists the repository's worktrees' branches, the branches holding a decision not closed, and the branches still holding an operation to reconcile (unknown, in flight, or waiting for its transition — even when its decision was closed or purged, or the branch has no worktree), those whose mode is `on` first. Each row is the branch's name only (no count; the count of decisions awaiting approval is the line above the chosen branch's list)
+- Choosing gives the URL of the same shape, `/repositories/<id>/mem/decisions?branch=<name>`. Existing links still open, with the repository and the branch chosen (a branch the list does not hold is chosen with the mark "not in the list")
+- Above the list, "N awaiting approval · M awaiting reflection" is shown (the only count on the screen, counted from this list; it goes down when the list is read again after an approval). The recorded (awaiting reflection) and the reflected decisions are each folded (closed by default); "Awaiting approval only" hides the folded ones. A decision with an operation whose outcome is unknown, in flight or waiting for its transition is never folded, and "Awaiting approval only" does not hide it
 
 1. Choose the item and a worktree and press "Make the diff". The whole body, the destination as resolved (`Issue <host>/<owner>/<repo>#N`, or `<worktree> (<branch>): <path>`), the account that posts, the effect ("changes the specification" by default / "record only") and the expiry (30 minutes) are shown. Changing the worktree, the effect or the quote's check drops the diff shown (make it again before approving). A quote an agent wrote is shown beside its check and written as "recorded by the agent (unchecked)"; it becomes "checked by a person on the screen" only when you tick the check after comparing it with the original (the check is cleared when you choose another item). Free text (the decision, the quote) goes inside code blocks, and invisible characters are shown as `[U+XXXX]`
 2. Press "Approve and write". Right before writing, the item's version, the destination (host, repository and number, or worktree, branch and path), the fingerprint of the content the diff was made from, the worktree's lifetime, the mode and the poster are checked again; if any changed, **nothing is written** and a new diff is asked for (another session changed the document after the approval, the worktree was deleted or switched to another branch, the same item was approved in parallel, …)
@@ -2660,6 +2892,21 @@ A `decision` is written to an Issue / PR comment or a worktree document (`promot
 - When the roots of the same Git disagree on the setting of the item's branch, the screen warns and stops listing and approving decisions, but keeps showing the operations whose outcome is not settled; they can still be reconciled or checked as not there (the item does not move until the roots agree)
 - The screen of any root of the same Git reconciles and settles the operations of that Git's roots (a root of another Git does not reach them)
 - Invisible characters in the branch or the author are warned about too. A branch is written in its omitted form (`(省略 N bytes・reason)`)
+
+### Reading the decisions (`mem decisions`, read only, Issue #4355)
+
+The CLI can **read** a branch's decisions and one decision's diff. **Approving is on the screen only** (the CLI cannot approve; the person's decision of 2026-11-13). Both use GET only and write nothing to the database, GitHub or a worktree.
+
+- `commandmate mem decisions`: one line per item (`<id> <state> v<version> by=<agent|human>(<instance>) to=<destination|-> quote="<first 40 characters of the quote>"|- approvals=<times a person approved it on the screen>`) and an indented line per approval operation (`op <id> <state>[ pending-transition(<reason>)][ concurrent-edit][ unknown(<reason>)] decided-by=<server|human|-> effect=<spec|record_only>`). The last line is the counts (`counts (before --pending): open=<N|unknown> recorded=<M|unknown> approvable=<yes|no>`)
+  - "Approved" is not folded into one flag: the item's state now (`open` / `recorded` / `promoted`), how many times a person approved it (`approvals`) and whether the write outside succeeded (the operation's state) are shown apart. An operation that wrote outside while the item did not move shows as `succeeded pending-transition(<reason>)` (moved with "treat as recorded" on the screen)
+  - The counts are taken **before** `--pending`. `open` waits for approval, `recorded` waits for the reflection. When the mode is not `on`, `approvable=no` (counted, but not approvable). When the roots of the same git disagree on the mode, `unknown` (never 0)
+  - `--pending`: only the `open` items and the items with an unsettled operation (unknown, in progress, or its move pending)
+  - Target: inside a session your own worktree; in an ordinary shell `--worktree <id>` (the worktree's current branch, or another with `--branch`) or `--repository <id> --branch <name>`
+- `commandmate mem decisions <itemId>`: the body a promote of that decision would write, **as a reference**. The first line is always `REFERENCE ONLY — cannot be approved; approve on the screen`. **A reference diff cannot be used to approve** (unlike the screen's diff it has an empty operation id, no poster, no expiry, and the quote is always "the agent's quote (unconfirmed)"). A worktree document destination is resolved through the `--worktree` worktree. With no worktree (`--repository`), another branch or a detached HEAD, only the body is shown and the destination reads `unresolved (worktree_required|branch_changed|branch_unresolved)` (the worktree is never guessed)
+- An item with a field that matches a current rule (the text, quote, evidence, destination or close note) shows only `withheld(field=… rule=…)` in the list, with no text, quote or destination; the diff exits 2 `secret_like` (the field name only)
+- The text, quote and destination were typed by an agent or a person. The text output shows the terminal's controls (ESC, C0, C1, `\r`) and invisible characters as `\x1b`, `\u202e` and so on; `--json` carries them as JSON strings only
+- `--json` is `schema: 1` (list: `schema`, `repositoryId`, `branch`, `mode`, `counts`, `pending`, `decisions[]`, `unresolved[]`; diff: `schema`, `reference: true`, `approvable: false`, `notice`, `item`, `mode`, `effect`, `quoteOrigin`, `destination`, `body`, `bodySha256`, `invisibleReplaced`, `drawnAt`). Keys are never removed or retyped (some may be added)
+- Exit codes: not found (including another repository's item or worktree) 52; `secret_like`, `--pending` with `<itemId>`, or `--effect` without `<itemId>` 2; the server not running 1
 
 ### Viewing and writing items on the screen (screen only, Issue #4227)
 
@@ -2716,7 +2963,7 @@ commandmate handoff done --request <id>
 - The hand-off **never stops a session**. Only the existing stop a person presses does. The screen's "Stop" declares the stop, runs the existing stop, then asks the server to observe it; the server checks with `isRunning` and records it. Nothing stops anything from a deadline, a cancel, a confirmation or a read
 - The record is `confirmed` (the agent's `done`, every proposal decided, every confirmation in, and the stop observed after the person's press — all of them) or `unconfirmed` with a reason: `forced`, `agent_timeout`, `request_failed`, `undecided_left`, `conflict_left`, `apply_failed`, `session_changed`. "Stop now" before confirming is always `unconfirmed(forced)`. When the stop cannot be confirmed nothing is recorded and the screen asks to press Stop again
 - The screen's "end" (the PC header's and each split's, the phone's "…" → End) reads the mode when pressed: with attended on and mode `on` it opens this hand-off; otherwise (unattended, mode not `on`, the mode not readable or not answered in 5 seconds) the usual confirmation as before. Opening either stops nothing. "Don't end" keeps the session
-- The hand-off screen **does not close while a confirmation is being sent, a confirmation's result is unknown, a cancel waits for its answer, or the stop is in progress** — by Esc, ×, the backdrop, a button, another "end" or a switch of worktree (it says why). A confirmation whose result is unknown stays until you send it again or drop it; the stop can still be pressed meanwhile. Switching worktree keeps the screen: on the other worktree nothing can be stopped or confirmed and the confirmation can only be dropped; back on its own worktree it can be sent again. These stay, and no request is made again, when the screen switches between PC and phone (a turn of the device, a change of width) or disappears for a moment while a switch of worktree loads. A hand-off screen not closed is shown open again when you come back to its worktree from another page (also while the agent's proposals are awaited). After cancelling, neither a confirmation nor the request's text is sent. An earlier confirmation, cancel, stop or request whose answer comes back late does nothing to a confirmation sent since, nor to a hand-off screen opened again (or opened on another page): it does not close it, mark it unknown or rewrite what it shows. Where no request could be made and only the existing stop is offered, it says "stopped" only when the session stopped; when it could not be stopped, or it is not known, it says why and the stop button stays (press it again)
+- The hand-off screen **does not close while a confirmation is being sent, a confirmation's result is unknown, a cancel waits for its answer, or the stop is in progress** — by Esc, ×, the backdrop, a button, another "end" or a switch of worktree (it says why). A confirmation whose result is unknown stays until you send it again or drop it; the stop can still be pressed meanwhile. Switching worktree keeps the screen: on the other worktree nothing can be stopped or confirmed and the confirmation can only be dropped; back on its own worktree it can be sent again. These stay, and no request is made again, when the screen switches between PC and phone (a turn of the device, a change of width) or disappears for a moment while a switch of worktree loads. A hand-off screen not closed is shown open again when you come back to its worktree from another page (also while the agent's proposals are awaited). The approve / discard choices on proposals not yet confirmed stay too when you come back to the same hand-off screen (from another worktree or another page; Issue #4346). After a confirmation's answer or refusal, and on a hand-off screen opened again, you choose afresh. After cancelling, neither a confirmation nor the request's text is sent. An earlier confirmation, cancel, stop or request whose answer comes back late does nothing to a confirmation sent since, nor to a hand-off screen opened again (or opened on another page): it does not close it, mark it unknown or rewrite what it shows. Where no request could be made and only the existing stop is offered, it says "stopped" only when the session stopped; when it could not be stopped, or it is not known, it says why and the stop button stays (press it again)
 - The exit codes are mem's: 0 done, 2 invalid input, 50 mode not on, 51 version conflict, 52 not found, 55 `not_requested` / `request_closed` / `session_changed` / `state_forbids`
 
 ---
@@ -3372,10 +3619,14 @@ commandmate ls --token your-token
 | 1 | DEPENDENCY_ERROR | Server not running / no usable remote provider (`remote`) |
 | 2 | CONFIG_ERROR | Validation error (invalid agent, duration, etc.) |
 | 3 | START_FAILED | Failed to start or verify the server (`start` / `update` / `remote`) |
+| 3 | NOT_IN_SESSION | Run from outside an agent session (`whoami` / `peers`); unrelated to START_FAILED |
 | 4 | STOP_FAILED | Failed to stop the server (`stop` / `update`) / the provider session could not be closed (`remote stop`) |
 | 5 | UPDATE_FAILED | Update failed (`update`: registry query / `npm install -g` / version verification) |
 | 10 | PROMPT_DETECTED | Prompt detected during wait |
 | 11 | UPSTREAM_FAULT | An upstream API fault was on the screen when the turn ended (`wait --fail-on-upstream-fault`; `ask` always). stderr / `--json` carry `id=...`; `id=context-limit` means the conversation is over the model's context limit — kill the instance (`commandmate instances <wt> kill <instance>`) and send again in a fresh session; `id=model-capacity` means the selected model is at capacity and will not answer — send to another instance or model (#3936) |
+| 20 | VERIFY_FAILED | A verification gate failed (`verify`, `wait --verify`) |
+| 21 | NOT_STARTED | Nothing to verify: no commits and no uncommitted changes (`verify`, `wait --verify`); also `ask` when nothing was running |
+| 30 | NO_ACTIVE_SESSIONS | `interrupt` found no running session to interrupt |
 | 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
 | 50–57 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded), and a prompt from `mem check --suggest` (57); see the exit codes of [commandmate mem](#commandmate-mem). `send --note` refused by mem ends in 50–56 too |

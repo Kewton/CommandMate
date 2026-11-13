@@ -45,6 +45,8 @@ vi.mock('@/lib/db/db-instance', () => {
 // The tmux transport, and the ONLY thing between the route and the terminal:
 // every key the route decides to send lands in one of these two spies.
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),
