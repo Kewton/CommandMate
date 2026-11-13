@@ -305,7 +305,40 @@ const REQUIRED_IN_REV7: readonly string[] = [
   'token・operation の保存・初回の応答・再送の一致',
   '未決（誰が・何で・いつ決めるか）',
   '改訂 7 の承認の後',
+  // follow-up: the human answers Q5・Q6 and the 2-4-4 conditions K1〜K3
+  '保証の除外 (c)',
+  'Q5',
+  'Q6',
+  '`answer_not_delivered`',
+  'K1',
+  'K2',
+  'K3',
+  '`PaneGeneration`',
+  '必ず保存されるとは約束しない',
+  'PR の順の唯一の置き場所',
 ];
+
+/** K1: the R7.6 table lists the PRs in this order (and nowhere else decides it). */
+const REV7_PR_ORDER: readonly string[] = ['| CG F1-a', '| CG F1-b', '| **PR2a**', '| strict PR', '| **PR2b**'];
+
+function prOrderProblems(section: string): string[] {
+  const start = section.search(/^### R7\.6 /m);
+  if (start < 0) return ['### R7.6'];
+  const rest = section.slice(start + 1);
+  const next = rest.search(/^### /m);
+  const sub = next < 0 ? rest : rest.slice(0, next);
+  const positions = REV7_PR_ORDER.map(row => sub.indexOf(row));
+  const problems: string[] = [];
+  REV7_PR_ORDER.forEach((row, i) => {
+    if (positions[i] < 0) problems.push(`R7.6 の行 ${row}`);
+  });
+  for (let i = 1; i < positions.length; i++) {
+    if (positions[i - 1] >= 0 && positions[i] >= 0 && positions[i - 1] > positions[i]) {
+      problems.push(`R7.6 の順 ${REV7_PR_ORDER[i - 1]} → ${REV7_PR_ORDER[i]}`);
+    }
+  }
+  return problems;
+}
 
 /** Rows the closing table must carry, one per finding of the 改訂 6 re-review. */
 const REV6_REVIEW_ROWS: readonly RegExp[] = [/^\| A（P2）/m, /^\| B（P2）/m, /^\| D4・/m, /^\| D5・/m];
@@ -324,6 +357,7 @@ function auditRev7(text: string): string[] {
   for (const label of REQUIRED_IN_REV7) {
     if (!section.includes(label)) missing.push(label);
   }
+  missing.push(...prOrderProblems(section));
   const closing = lastSubsection(section);
   if (!/^### .*prereview-4304-rev6-reply\.md/m.test(closing)) missing.push('末尾の処置の表');
   for (const row of REV6_REVIEW_ROWS) {
@@ -355,6 +389,8 @@ describe('send-foreground-check-4300.md 改訂 7 (#4304)', () => {
       '',
       '## 改訂 7（x）',
       ...REQUIRED_IN_REV7,
+      '### R7.6 PR の順',
+      ...REV7_PR_ORDER.map(row => `${row} | x |`),
       ...closing,
       '',
       '## 0. next',
@@ -398,6 +434,12 @@ describe('send-foreground-check-4300.md 改訂 7 (#4304)', () => {
     const noD5 = auditRev7(tmpDoc(minimal(closingTable.slice(0, -1))));
     expect(noD5).toContain('末尾の表の行 ^\\| D5・');
     expect(noD5).not.toContain('末尾の処置の表');
+  });
+
+  it('positive control (K1): strict before PR2a in the R7.6 table is reported', () => {
+    const swapped = minimal(closingTable).replace('| **PR2a** | x |\n| strict PR | x |', '| strict PR | x |\n| **PR2a** | x |');
+    expect(swapped).not.toBe(minimal(closingTable));
+    expect(auditRev7(tmpDoc(swapped))).toContain('R7.6 の順 | **PR2a** → | strict PR');
   });
 
   it('negative control: a minimal document with every label and the closing table passes', () => {
