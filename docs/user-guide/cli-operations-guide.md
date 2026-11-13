@@ -3653,6 +3653,8 @@ commandmate mem check --suggest [--instance <id>] [--json]
 commandmate mem check --suggest --quiet [--hook <event>]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+commandmate mem decisions [--worktree <id> [--branch <name>] | --repository <id> --branch <name>] [--pending] [--json]
+commandmate mem decisions <itemId> [--worktree <id> | --repository <id>] [--effect spec|record_only] [--json]
 ```
 
 - 対象は、セッションの中では `whoami` で決まる自分の instance。通常のシェルでは、書き込みに `--worktree <id> --instance <id>`、`list` / `mode` / `purge` に `--worktree <id>` か `--repository <id> --branch <name>` を付ける（無ければ exit 2 `target_required`）
@@ -3731,7 +3733,7 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 
 ### 決定を正本へ記録する（画面だけ、Issue #4225）
 
-`decision` を Issue・PR のコメントか作業木の文書（`promote_to`）へ書くのは、**人が画面で差分を承認したときだけ**です（Repositories の画面の各行の「mem」→「決定を正本へ記録する」、`/repositories/<id>/mem/decisions?branch=<name>`）。**CLI に口はありません**（`commandmate mem` に promote・approve のサブコマンドは無い）。brief・`check`・促し・Schedule など、ほかのどの経路からも書きません。
+`decision` を Issue・PR のコメントか作業木の文書（`promote_to`）へ書くのは、**人が画面で差分を承認したときだけ**です（Repositories の画面の各行の「mem」→「決定を正本へ記録する」、`/repositories/<id>/mem/decisions?branch=<name>`）。**CLI に書く口はありません**（`commandmate mem` に promote・approve のサブコマンドは無い。読むだけの `mem decisions` は次の節）。brief・`check`・促し・Schedule など、ほかのどの経路からも書きません。
 
 1. 画面で項目と作業木を選び「差分を作る」。書く本文の全文・行き先（解決後の `Issue <host>/<owner>/<repo>#N`、または `<作業木> (<ブランチ>): <パス>`）・投稿するアカウント・効果（「仕様を変える決定」が既定／「記録だけ」）・期限（30 分）が出ます。作業木・効果・引用の確認を変えると、出ていた差分は消えます（作り直してから承認します）。Agent が書いた引用は、その本文をチェックの横に出し「Agent が記録した引用（未確認）」として書きます。原文と照らしてチェックしたときだけ「人が画面で確かめた引用」になります（チェックは項目を選び直すと外れます）。自由入力（決定の文・引用）はコードのブロックに入れ、見えない文字は `[U+XXXX]` に置き換えます
 2. 「承認して書く」。書く直前に、項目の版・行き先（host・repository・番号、または作業木・ブランチ・パス）・差分の基準にした内容の指紋・作業木の世代・mode・投稿者を照合し、どれかが変わっていれば **何も書かずに** 差分の作り直しを求めます（承認の後に別のセッションが文書を変えた・作業木を消した・別のブランチへ切り替えた・同じ項目を並行で承認した、など）
@@ -3748,6 +3750,21 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 - 同じ Git の root の間で項目のブランチの設定が食い違うと、画面は警告を出して決定の一覧と承認を止めますが、結果の確定していない操作は出し続け、照合・無いことを確かめたはできます（項目は設定が揃うまで進みません）
 - 同じ Git のどの root の画面からでも、その Git の root が持つ操作を照合・確定できます（別の Git の root からは届きません）
 - ブランチ名・作成者に見えない文字があるときも警告します。ブランチは本文に省略の形（`(省略 N bytes・理由)`）で書きます
+
+### 決定を読む（`mem decisions`、読むだけ、Issue #4355）
+
+ブランチの決定の一覧と、1 件の差分を CLI で**読めます**。**承認は画面だけ**です（CLI では承認できません。人の決定、2026-11-13）。どちらも GET だけで、DB・GitHub・作業木に何も書きません。
+
+- `commandmate mem decisions`：項目ごとに 1 行（`<id> <状態> v<版> by=<agent|human>(<instance>) to=<行き先|-> quote="<引用の先頭 40 文字>"|- approvals=<人が画面で承認した回数>`）と、承認の操作ごとに字下げの行（`op <id> <状態>[ pending-transition(<理由>)][ concurrent-edit][ unknown(<理由>)] decided-by=<server|human|-> effect=<spec|record_only>`）。最後の行が件数（`counts (before --pending): open=<N|unknown> recorded=<M|unknown> approvable=<yes|no>`）
+  - 「承認された」を 1 つの真偽に畳みません。項目の今の状態（`open`・`recorded`・`promoted`）、人の承認の回数（`approvals`）、外へ書けたか（操作の状態）を分けて出します。外へは書けたが項目が進んでいない操作は `succeeded pending-transition(<理由>)` と出ます（画面の「記録済みとして扱う」で進めます）
+  - 件数は `--pending` の**前**の数です。`open` は承認待ち、`recorded` は反映待ち。mode が `on` でないと `approvable=no`（数えるが承認できない）。同じ Git の root の間で mode が食い違うと `unknown`（0 とは出しません）
+  - `--pending`：`open` の項目と、結果の確定していない操作（不明・進行中・遷移待ち）を持つ項目だけ
+  - 対象：セッションの中では自分の作業木、通常のシェルでは `--worktree <id>`（ブランチは作業木の今のブランチ。`--branch` で別のブランチ）か `--repository <id> --branch <name>`
+- `commandmate mem decisions <itemId>`：その決定を書くとしたら書かれる本文を**参考として**出します。1 行目は必ず `REFERENCE ONLY — cannot be approved; approve on the screen`。**参考の差分は承認に使えません**（画面の差分と違い、操作の ID が空・投稿者が無い・期限が無い・引用は常に「Agent が記録した引用（未確認）」）。行き先が作業木の文書なら `--worktree` の作業木で解きます。作業木が無い（`--repository`）・別のブランチ・detached のときは本文だけを出し、行き先は `unresolved (worktree_required|branch_changed|branch_unresolved)` と出します（作業木を推測しない）
+- 今の規則に当たる欄（本文・引用・evidence・行き先・閉じた理由のどれか）がある項目は、一覧では本文・引用・行き先を出さず `withheld(field=… rule=…)` だけ、差分は exit 2 `secret_like`（欄の名だけ）です
+- 本文・引用・行き先は Agent や人が書いた文字です。文字の出力では端末の制御文字（ESC・C0・C1・`\r`）や見えない文字を `\x1b`・`\u202e` などの形で出します。`--json` は JSON の文字列としてだけ出します
+- `--json` は `schema: 1` の形です（一覧: `schema`・`repositoryId`・`branch`・`mode`・`counts`・`pending`・`decisions[]`・`unresolved[]`。差分: `schema`・`reference: true`・`approvable: false`・`notice`・`item`・`mode`・`effect`・`quoteOrigin`・`destination`・`body`・`bodySha256`・`invisibleReplaced`・`drawnAt`）。キーを消したり型を変えたりはしません（足すことはあります）
+- 終了コード：見つからない（別のリポジトリの項目・作業木を含む）は 52、`secret_like`・`--pending` と `<itemId>` の同時指定・`--effect` だけの指定は 2、サーバに繋がらないときは 1
 
 ### 項目を画面で見る・書く（画面だけ、Issue #4227）
 
