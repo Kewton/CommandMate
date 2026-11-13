@@ -325,6 +325,22 @@
 - 採らない案: PR2a まで交代の後の保存を拒否する（上の (1)）。受け入れた世代を DB に持つ（初回の保証の外を閉じるが、DB の migration が要り、この設計の範囲を超える。必要なら別 Issue。§7.2 U7）。
 - 回収の権利の「生前に見た」印（§4.7）は、この受け入れた世代の記録と同じ領域に書く。
 
+### 4.12 回答の由来を最後まで運ぶ（F1-a の §6-6 の後の契約、2026-11-14）
+
+F1-a の 2 回の再レビューで「世代（pane の由来）が epoch・bool・例外名に畳まれ、失敗の枝・await の後・別の拒否の枝へ届かない」が同じ種類として出た（`enabler-return-4304-f1a-cause.md` の §1 の全読者の表・§2 の共通の原因）。その契約で、BoundFrame を送る入口だけでなく、送信の成功・失敗・記録・再開まで由来を値として運ぶ形にした。
+
+| 境界 | 形（`src/lib/session/pane-answer-context.ts` ほか） | 守ること |
+|---|---|---|
+| 回答コンテキスト | `PaneAnswerContext`（`paneAnswerContextOf(BoundFrame, session)` でだけ作る。G・session・frame） | 後から H へ差し替えない。手書き・生の frame・bool は型で通らない |
+| 配送の結果 | `AnswerDelivery`（`deliverAnswer(origin, send)` でだけ作る）: `not-sent`／`sent`／`partial`／`indeterminate`（`transport: indeterminate｜unreported`）。origin は `pane`（context）か `sender-bound`（frame を持たない直接の呼び手＝単体試験の入口。tick は必ず `pane`、guard で固定） | sender の `void`・throw（`keysSent`・`answerDelivery`・名前）を読むのはここだけ。unconfirmed の origin は無いので未確認から `sent`・`partial` を作れない。非 Error の throw は `indeterminate` |
+| strict の 1 キー | `deliverStrictKey` → `sent`／`not-sent`（札の失効・pane・読みの前・tmux の not-started）／`indeterminate` | 送る前の拒否はどれもキーに数えない。キー 0 は code 40 |
+| 今の状態への作用 | `applyWhilePaneIsCurrent(context, { allowDead, owned }, effect)`／`applyWhileAnswerPaneIsCurrent(origin, …)`。effect は `() => undefined`（async は通らない） | 最後の await の後に G を照合し、照合の後に既存の所有の条件（tick・grant・epoch）を聞き、同期に作用する。dedup・task・待ちの解決・応答 poll の再開・push はここからだけ |
+| 共有の状態 | 部分送信の記録・送信中の attempt・Auto-Yes の decision・重複の guard に `HoldOrigin`／`TickPane`（`pane`（G）／`agent-api`／`sender-bound`／`unconfirmed`） | G のキーは G だけを抑止する。人の回答の解放も自分の pane（か API）の hold だけ。origin の無い旧いレコード（hot reload）は `unconfirmed` で H のものとして読まない |
+| キーの間 | `sendSpecialKeys` の `beforeNextKey`（cursor・checkbox）、plan-review の step の間の待ちの後の照合 | 札と epoch が同じでも pane が替わったら次のキーを送らない（`PromptAnswerInputLostError`／`PlanReviewInputLostError`） |
+| 履歴 | 監査の行・ledger・strict の operation・`/respond` の固定した行 | pane が替わっても書く（G への送信の事実）。ただし H の pending 行を解決しない（`pendingSavedAtOrBefore`） |
+
+受入（§3.4 の T1〜T12 のうち F1-a の分）は `tests/unit/api/strict-answer-delivery-4304.test.ts`・`tests/unit/api/answer-origin-shared-state-4304.test.ts`・`tests/unit/session/answer-delivery-4304.test.ts`・`tests/unit/session/pane-answer-context-4304.test.ts`・`tests/unit/guards/answer-delivery-boundary-4304.test.ts`。この形で残るもの（表示の経路の frame に G が無いので decision の公開の読みは epoch のまま、strict の `paneCommand` はセッション名の読み）は F1-b で扱う。
+
 ## 5. PR の分け方（第 2 版で引き直した、レビュー F）
 
 どちらも **#4304 の PR2a より前**。各 PR は「取得の API・実際の呼び手・消費する入口・unknown の return・型とガード」まで閉じる単位にする（team.md §6-4: API は呼び手と同じ PR）。表示の見た目・画面の読み方・送るキーやロックの新しい仕様は混ぜず、**由来の保持と拒否だけ**を入れる。team.md §6-3 の目安（数百行・20 ファイル程度）は目安でゲートではない。

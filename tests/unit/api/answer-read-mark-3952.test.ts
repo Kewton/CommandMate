@@ -127,7 +127,8 @@ async function verifyAndDeliver(): Promise<Record<string, unknown> | null> {
     promptData,
     verified.readMark,
   );
-  return failure === null ? null : ((await failure.json()) as Record<string, unknown>);
+  // Issue #4304 F1-a: the send returns what went out, or the response to return.
+  return 'sent' in failure ? null : ((await failure.response.json()) as Record<string, unknown>);
 }
 
 const ORIGINAL_DIALOG_GATE_ENV = process.env.CM_AUTOYES_DIALOG_GATE;

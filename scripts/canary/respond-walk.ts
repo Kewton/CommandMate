@@ -35,6 +35,7 @@ import { evaluateDialogPresence, judgePromptResponse } from '@/lib/polling/auto-
 import { resolvePromptAnswer } from '@/lib/prompt-answer-semantic';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { captureBoundFrame } from '@/lib/session/cli-session';
+import { deliverAnswer, paneAnswerContextOf } from '@/lib/session/pane-answer-context';
 import type { PromptData } from '@/types/models';
 import { ScenarioStepError, type Observation, type ScenarioDriver } from './types';
 
@@ -136,15 +137,27 @@ export async function walkWithRespond(
           at
         );
       }
-      await sendPromptAnswer({
-        sessionName,
-        answer: onFrame.input,
-        cliToolId: WALK_TOOL,
-        promptData: onFrame.promptData,
-        frame: captured,
-      });
+      // Issue #4304 F1-a (S9): what the send did, with the pane it went to —
+      // the log says that, not a bare "sent" after a `void`.
+      const context = paneAnswerContextOf(captured, sessionName);
+      const delivery = await deliverAnswer({ kind: 'pane', context }, () =>
+        sendPromptAnswer({
+          sessionName,
+          answer: onFrame.input,
+          cliToolId: WALK_TOOL,
+          promptData: onFrame.promptData,
+          frame: context.frame,
+        })
+      );
+      if (delivery.kind !== 'sent') {
+        const why = delivery.error instanceof Error ? delivery.error.message : String(delivery.error);
+        throw new ScenarioStepError(
+          `${step.screen}: \`respond "${step.answer}"\` ${delivery.kind} on pane ${context.generation.paneId} — ${why}`,
+          at
+        );
+      }
+      driver.log(`  ${step.screen}: respond "${step.answer}" sent to pane ${context.generation.paneId}`);
     });
-    driver.log(`  ${step.screen}: respond "${step.answer}" sent`);
 
     await driver.waitFor(step.next.reached, {
       timeoutMs: NEXT_SCREEN_TIMEOUT_MS,

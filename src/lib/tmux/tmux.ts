@@ -956,6 +956,14 @@ export interface SendSpecialKeysOptions {
    * it and every key is sent, as before.
    */
   shouldContinue?: () => boolean;
+  /**
+   * Issue #4304 F1-a (S6): awaited after each delay between two keys, before
+   * `shouldContinue` — so the sync checks are the last look before the next
+   * key. An answer passes its pane look (the generation it was decided for,
+   * read again): `false` stops before the next key, as `shouldContinue` does.
+   * A throw is `false`. Omit it and nothing more is asked.
+   */
+  beforeNextKey?: () => Promise<boolean>;
 }
 
 /**
@@ -1011,6 +1019,9 @@ export async function sendSpecialKeys(
       // Delay between key presses (skip after the last key)
       if (i < keys.length - 1) {
         await new Promise(resolve => setTimeout(resolve, SPECIAL_KEY_DELAY_MS));
+        if (options?.beforeNextKey && !(await options.beforeNextKey().catch(() => false))) {
+          throw new SpecialKeysAbortedError(i + 1);
+        }
         if (options?.shouldContinue && !options.shouldContinue()) {
           throw new SpecialKeysAbortedError(i + 1);
         }

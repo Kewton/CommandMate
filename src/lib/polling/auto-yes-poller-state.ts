@@ -15,6 +15,7 @@ import { getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
 import type { LedgerAttemptHandle } from './auto-yes-confirmation-ledger';
 import { approvalTargetWithOptionRowsAligned } from '../prompt-observation/appearance';
 import { promptScreenKey } from '../detection/prompt-screen-key';
+import type { PaneGeneration } from '../session/cli-session';
 
 const logger = createLogger('auto-yes-poller');
 
@@ -61,6 +62,15 @@ export interface AutoYesPollerState {
   lastAnsweredPromptKey: string | null;
   /** Timestamp when lastAnsweredPromptKey was set (for retry expiry) */
   lastAnsweredAt: number | null;
+  /**
+   * Issue #4304 F1-a (A8): the pane the answer behind `lastAnsweredPromptKey`
+   * went to. The duplicate guard holds back only that pane's prompt: another
+   * pane H showing the same question never received the answer. Absent (a
+   * hand-built state, a direct caller with no frame, a state from before
+   * #4304): the guard compares the key alone, as before — it holds back, the
+   * side that sends nothing.
+   */
+  lastAnsweredPane?: TickPane;
   /**
    * Issue #3791 (review N1): the duplicate guard actually held back the prompt
    * on screen on the last tick that read it — see `reserveDuplicateRetry` —
@@ -200,6 +210,69 @@ export function warnOncePerFrame(
 // =============================================================================
 
 /**
+ * Where the keys a hold (or a send in flight) is about went (Issue #4304 F1-a,
+ * §3.3-2): kept with the record, never補 from the pane as it is now.
+ *
+ * - `pane`: the generation G the keys went to. It holds only a tick that reads
+ *   the same G; another pane H showing the same question was never typed at.
+ * - `agent-api`: a person's verdict delivered over the agent's API
+ *   (`structured-decision`): no pane was typed at, so it is matched by the
+ *   session epoch and the screen as before.
+ * - `sender-bound`: a direct caller of the Auto-Yes step with no frame (unit
+ *   tests; the tick always has its pane): matched as before.
+ *
+ * A record with no origin (one a hot reload kept from before #4304) is
+ * {@link UNCONFIRMED_HOLD_ORIGIN}: whose pane it is about is not known, so it
+ * holds no tick that knows its pane, and is never taken for H's.
+ */
+export type HoldOrigin =
+  | { readonly kind: 'pane'; readonly generation: PaneGeneration }
+  | { readonly kind: 'agent-api' }
+  | { readonly kind: 'sender-bound' }
+  | { readonly kind: 'unconfirmed' };
+
+/** A record's origin when it carries none (kept across a hot reload from before #4304). */
+export const UNCONFIRMED_HOLD_ORIGIN: HoldOrigin = Object.freeze({ kind: 'unconfirmed' as const });
+
+/** The pane a tick read its frame from: its bound frame's G, or none for a direct caller. */
+export type TickPane =
+  | { readonly kind: 'pane'; readonly generation: PaneGeneration }
+  | { readonly kind: 'sender-bound' };
+
+function sameGeneration(a: PaneGeneration, b: PaneGeneration): boolean {
+  return a.serverStartTime === b.serverStartTime && a.serverPid === b.serverPid && a.paneId === b.paneId;
+}
+
+/** The origin a record carries, read through a record that may predate the field. */
+export function holdOriginOf(record: { readonly origin?: HoldOrigin }): HoldOrigin {
+  return record.origin ?? UNCONFIRMED_HOLD_ORIGIN;
+}
+
+/**
+ * Whether a hold (or a send in flight) with `origin` is about the pane a tick
+ * reads (Issue #4304 F1-a, §3.4 T3): G's keys hold G only; an unconfirmed one
+ * holds no tick that knows its pane.
+ */
+export function holdAppliesToPane(origin: HoldOrigin, pane: TickPane): boolean {
+  if (pane.kind === 'sender-bound') return true;
+  if (origin.kind === 'pane') return sameGeneration(origin.generation, pane.generation);
+  return origin.kind !== 'unconfirmed';
+}
+
+/**
+ * Whether a person's answer that ended with `releaser` speaks for a hold with
+ * `held` (Issue #4304 F1-a, T4): a person's answer at G does not release a
+ * hold about another pane H. A verdict over the agent's API names no pane and
+ * releases as before.
+ */
+function releaserCoversHold(releaser: HoldOrigin, held: HoldOrigin): boolean {
+  if (releaser.kind === 'unconfirmed') return false;
+  if (releaser.kind === 'pane' && held.kind === 'pane') return sameGeneration(releaser.generation, held.generation);
+  if (releaser.kind === 'pane' && held.kind === 'unconfirmed') return false;
+  return true;
+}
+
+/**
  * An Auto-Yes answer whose send was stopped after some of its keys reached the
  * pane (Issue #3706): a `y` typed with its Enter withheld, a cursor moved with
  * its Enter withheld. Keyed by composite key and NOT kept on the poller state,
@@ -225,6 +298,12 @@ export interface PartialAutoYesAnswer {
    * gated reading no longer sees it; `logIfWithheldForWantOfReceipt`).
    */
   byPerson?: true;
+  /**
+   * Issue #4304 F1-a: where the keys went ({@link HoldOrigin}). Written on
+   * every record; one kept across a hot reload from before it has none and is
+   * read as {@link UNCONFIRMED_HOLD_ORIGIN} ({@link holdOriginOf}).
+   */
+  origin: HoldOrigin;
 }
 
 /**
@@ -236,6 +315,17 @@ export interface PartialAutoYesAnswer {
  * through — and before then by a frame with no prompt on it.
  */
 export const UNIDENTIFIED_SCREEN_KEY = '\u0000unidentified-screen';
+
+/**
+ * Whether the duplicate guard's answer is about the pane a tick reads (Issue
+ * #4304 F1-a, A8): an answer to G is not a duplicate of H's prompt. A guard
+ * with no pane recorded (or a tick with none) compares the key alone.
+ */
+export function answeredPaneIsTicks(pollerState: AutoYesPollerState, pane: TickPane): boolean {
+  const answered = pollerState.lastAnsweredPane;
+  if (answered === undefined || answered.kind !== 'pane' || pane.kind !== 'pane') return true;
+  return sameGeneration(answered.generation, pane.generation);
+}
 
 /** Whether a hold (or a send) at `heldScreenKey` covers the confirmation at `screenKey`. */
 export function partialAnswerCovers(heldScreenKey: string, screenKey: string): boolean {
@@ -350,6 +440,18 @@ export function getPartialAnswer(compositeKey: string, epoch: number): PartialAu
   return partial;
 }
 
+/**
+ * {@link getPartialAnswer} as a tick reads it (Issue #4304 F1-a, §3.4 T3): only
+ * a hold about the pane the tick read (`pane`) holds it. A hold about another
+ * pane — G's, when the session now shows H — is not H's and is left as it is;
+ * one with no origin is not taken for H's either.
+ */
+export function getPartialAnswerFor(compositeKey: string, epoch: number, pane: TickPane): PartialAutoYesAnswer | null {
+  const partial = getPartialAnswer(compositeKey, epoch);
+  if (partial === null) return null;
+  return holdAppliesToPane(holdOriginOf(partial), pane) ? partial : null;
+}
+
 const NO_ATTEMPTS: ReadonlySet<AutoYesSendAttempt> = new Set();
 
 /**
@@ -430,9 +532,12 @@ export function forgetPartialAnswersByWorktree(worktreeId: string): void {
  * when it comes back. Not called when a person's own send may have left keys
  * on the pane, nor at the START of their answer.
  */
-export function releasePartialAnswerToHuman(compositeKey: string, before: number): void {
+export function releasePartialAnswerToHuman(compositeKey: string, before: number, releaser: HoldOrigin): void {
   const recorded = partialAnswers.get(compositeKey);
-  if (recorded !== undefined && recorded.seq < before) partialAnswers.delete(compositeKey);
+  if (recorded === undefined || recorded.seq >= before) return;
+  // Issue #4304 F1-a (T4): a person's answer at G does not release H's hold.
+  if (!releaserCoversHold(releaser, holdOriginOf(recorded))) return;
+  partialAnswers.delete(compositeKey);
 }
 
 /**
@@ -520,6 +625,12 @@ export interface AutoYesSendAttempt {
    * Null when the ledger had no confirmation (or failed).
    */
   readonly ledger: LedgerAttemptHandle | null;
+  /**
+   * Issue #4304 F1-a (§3.3-2): where this send's keys go — fixed at
+   * registration, from the same context the send is made with, and written on
+   * the hold it records. A worktree ID move re-points `recordKey`, never this.
+   */
+  readonly origin: HoldOrigin;
 }
 
 /** The sends in flight. globalThis for hot reload (#153), like the Map above. */
@@ -535,6 +646,7 @@ export function beginSendAttempt(
   compositeKey: string,
   screenKey: string,
   epoch: number,
+  origin: HoldOrigin,
   ledger: LedgerAttemptHandle | null = null,
 ): AutoYesSendAttempt {
   const attempt: AutoYesSendAttempt = {
@@ -545,6 +657,7 @@ export function beginSendAttempt(
     moved: false,
     state: 'pending',
     ledger,
+    origin,
   };
   sendAttempts.add(attempt);
   return attempt;
@@ -560,7 +673,7 @@ export function beginSendAttempt(
  * hold only for the session the keys went to, never over a hold of a send
  * registered after it, and not at all once the screen it typed at was seen gone.
  */
-export function beginManualSendAttempt(compositeKey: string, screenKey: string): AutoYesSendAttempt {
+export function beginManualSendAttempt(compositeKey: string, screenKey: string, origin: HoldOrigin): AutoYesSendAttempt {
   const attempt: AutoYesSendAttempt = {
     seq: ++sendAttemptSeq.last,
     screenKey,
@@ -570,6 +683,7 @@ export function beginManualSendAttempt(compositeKey: string, screenKey: string):
     state: 'pending',
     byPerson: true,
     ledger: null,
+    origin,
   };
   sendAttempts.add(attempt);
   return attempt;
@@ -601,6 +715,9 @@ export function settleSendAttempt(attempt: AutoYesSendAttempt, keysSent: boolean
     at,
     seq: attempt.seq,
     ...(attempt.byPerson ? { byPerson: true as const } : {}),
+    // Issue #4304 F1-a: the pane the keys went to, as the send was registered
+    // (an attempt kept by a hot reload from before #4304: unconfirmed).
+    origin: holdOriginOf(attempt),
   });
 }
 
@@ -616,13 +733,16 @@ function expireSendAttempt(attempt: AutoYesSendAttempt): void {
  * it comes back. Sends that were not moved are not counted: the paths without a
  * move stay as they were.
  */
-export function hasMovedSendInFlight(compositeKey: string, epoch: number, screenKey: string): boolean {
+export function hasMovedSendInFlight(compositeKey: string, epoch: number, screenKey: string, pane: TickPane): boolean {
   for (const attempt of sendAttempts) {
     if (
       attempt.moved &&
       attempt.recordKey === compositeKey &&
       attempt.recordEpoch === epoch &&
-      partialAnswerCovers(attempt.screenKey, screenKey)
+      partialAnswerCovers(attempt.screenKey, screenKey) &&
+      // Issue #4304 F1-a: a send to another pane is not this pane's (one kept
+      // by a hot reload from before #4304 has no origin: unconfirmed).
+      holdAppliesToPane(holdOriginOf(attempt), pane)
     ) {
       return true;
     }

@@ -27,7 +27,7 @@ import {
   assertAnswerTargetGeneration,
   assertAnswerTargetInForeground,
 } from '@/lib/prompt-answer-sender';
-import type { BoundCapture, BoundFrame, PaneGeneration } from '@/lib/session/cli-session';
+import { checkPaneGeneration, type BoundCapture, type BoundFrame, type PaneGeneration } from '@/lib/session/cli-session';
 import { PromptAnswerInputLostError, PromptAnswerNotDeliveredError } from '@/lib/prompt-answer-errors';
 
 /** The reason for a plan review action asked of a screen that is not one. */
@@ -107,7 +107,21 @@ export async function answerCommandCodePlanReview(args: {
       // the last await before the first step, on every path.
       await assertAnswerTargetGeneration(sessionName, args.frame.generation);
       // Issue #3952 review P2-3: every step is sent only while the ticket is current.
-      return sendCommandCodePlanReviewKeys(sessionName, plan.steps, undefined, () => ticket.isCurrent());
+      // Issue #4304 F1-a (N8 / T7): and while the session still shows the pane
+      // `state` was read off — looked at after each step's wait (the wait's own
+      // last await), so the step after a pane replaced in the wait is not sent.
+      // A pane lost there stops the steps as a lost ticket does
+      // (`PlanReviewInputLostError` with the steps sent so far).
+      let paneStill = true;
+      const sleepThenLookAtPane = async (ms: number): Promise<void> => {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        try {
+          paneStill = (await checkPaneGeneration(sessionName, args.frame.generation)) === 'same';
+        } catch {
+          paneStill = false;
+        }
+      };
+      return sendCommandCodePlanReviewKeys(sessionName, plan.steps, sleepThenLookAtPane, () => paneStill && ticket.isCurrent());
     }
   );
   if (!outcome.answered) {

@@ -103,12 +103,15 @@ import {
   beginSendAttempt,
   clearPartialAnswers,
   forgetPartialAnswersByWorktree,
+  answeredPaneIsTicks,
   ledgerScreenKey,
   partialAnswerScreenKey,
   promptFrameKey,
   settleSendAttempt,
   type AutoYesPollerState,
   type AutoYesSendAttempt,
+  type HoldOrigin,
+  type TickPane,
 } from './polling/auto-yes-poller-state';
 import {
   suppressIfNotOursToAnswer,
@@ -140,7 +143,15 @@ import {
 } from './polling/auto-yes-poller-receipt-log';
 import { syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
-import { checkPaneGeneration, type BoundFrame } from './session/cli-session';
+import type { BoundFrame } from './session/cli-session';
+import {
+  applyWhileAnswerPaneIsCurrent,
+  deliverAnswer,
+  deliveryMayBeOnPane,
+  paneAnswerContextOf,
+  type AnswerDelivery,
+  type AnswerOrigin,
+} from './session/pane-answer-context';
 import { PollerFrameUnboundError } from './polling/auto-yes-poller-capture';
 import { promptDataForStorage } from './polling/prompt-screen-reading';
 import {
@@ -350,55 +361,71 @@ export function processStopConditionDelta(
  * ran. Awaited inside that function's `try`, so a throw here still ends the
  * tick as `error`.
  *
+ * Issue #4304 F1-a (the contract after §6-6, §3.3-3 / -5): what the answer
+ * did is `delivery` — `sent`, with the pane its keys went to — and everything
+ * that stands for "this instance's prompt was just answered" acts on the
+ * instance as it is NOW only through `applyWhileAnswerPaneIsCurrent`: after
+ * every await, the session must still show that pane (alive, or dead by the
+ * answer) AND the tick must still own its session (#3706). That is looked at
+ * twice — for the waiting episode, the dedup key, the poller's times and the
+ * task event, and again after the dynamic imports for the response-poll
+ * restart and the terminal push — never carried as a bool across an await.
+ * The audit row is history: written either way, and when the instance no
+ * longer shows the answered pane it adopts no pending row saved after the tick
+ * began (the new pane's).
+ *
  * @param promptDetection - The detection `prompt.promptData` was read from; its
  *   content becomes the audit row's
  * @param answer - The answer that was sent
- * @param generation - The tick's generation (Issue #3706). The keys are out, so
- *   the task event and the audit row are always written: they record what the
- *   agent actually received. What belongs to the poller is written to the
- *   tick's own poller state only, never to a successor under the same key, and
- *   the response poller restart and the terminal push are skipped when the
- *   session was relaunched meanwhile.
+ * @param generation - The tick's generation (Issue #3706)
  * @param capture - Issue #3881 (review P2-2): the tick's frame and its capture
  *   window, so an audit row this answer creates carries the same reading the
  *   response poller's save gives a row (`promptDataForStorage`)
- * @param samePane - Issue #4304 F1-a (review P2-3 of e662dba): whether the
- *   session still shows the pane the answer was sent to. A pane replaced while
- *   the keys were out (the session epoch unchanged — an outside `new-window`)
- *   is treated as a relaunch is: the audit row records what the old pane
- *   received, nothing of the new pane's state (dedup, task event, poller
- *   times, response poller restart) is written from this answer.
+ * @param answered - The waiting episode the answer went to, observed as
+ *   answered (Issue #3798) inside the same look
  */
 async function finishAnsweredPrompt(
   prompt: JudgedPrompt,
   promptDetection: PromptDetectionResult,
   answer: string,
-  generation?: AutoYesTickGeneration,
-  capture?: { frame: ReturnType<typeof normalizeFrame>; captureTop: CaptureTop | undefined },
-  samePane = true,
+  delivery: AnswerDelivery & { kind: 'sent' },
+  generation: AutoYesTickGeneration | undefined,
+  capture: { frame: ReturnType<typeof normalizeFrame>; captureTop: CaptureTop | undefined },
+  answered: () => void,
 ): Promise<void> {
   const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, promptKey } =
     prompt;
+  // Issue #3706: the tick's own session — a relaunch (`beginAgentSession`)
+  // makes the new process the one these writes would be about.
+  const owned = (): boolean => generation === undefined || isSameSession(generation);
+  // Issue #4304 F1-a (A8): the pane the duplicate guard's answer went to.
+  const answeredPane: TickPane =
+    delivery.origin.kind === 'pane' ? { kind: 'pane', generation: delivery.origin.context.generation } : { kind: 'sender-bound' };
 
-  // Issue #3706: the keys went to the session the tick started on. When a new
-  // one was begun while they were being sent, the new process never received
-  // this answer, so nothing that stands for "this instance's prompt was just
-  // answered" is written: not the dedup key (it would keep Auto-Yes off the new
-  // process's identical question), not the poller's response time, not the
-  // task event (the task looked up now may be the new session's). Only the
-  // audit row is, and it may not adopt a pending row saved after the tick began.
-  const sameSession = (generation === undefined || isSameSession(generation)) && samePane;
-
-  if (sameSession) {
+  // 6., 7. and the task event: the instance's current state, in one look.
+  const verdict = await applyWhileAnswerPaneIsCurrent(delivery.origin, { allowDead: true, owned }, () => {
+    // Issue #3798: the wait this answer went to — only by a tick that still
+    // acts for this instance (#3706: one that lost its grant or session writes
+    // nothing that says "answered").
+    if (generation === undefined || isTickCurrent(generation)) answered();
     // 6. Update timestamp and reset error count
     updateLastServerResponseTimestamp(compositeKey, Date.now(), generation?.pollerState);
     resetErrorCount(compositeKey, generation?.pollerState);
-
     // 7. Record answered prompt key and timestamp
     pollerState.lastAnsweredPromptKey = promptKey;
     pollerState.lastAnsweredAt = Date.now();
+    pollerState.lastAnsweredPane = answeredPane;
     pollerState.lastSkipWarnKey = null;
-  }
+    // Issue #1548: the prompt was answered without a human. Raised only after
+    // the keys actually reached tmux. No-ops when this instance is not running
+    // a contract. Undefined means the primary instance, which the task lookup
+    // identifies by the tool id itself (see getActiveTaskForInstance).
+    applyEventToActiveTask(getDbInstance(), worktreeId, cliToolId, instanceId ?? cliToolId, 'prompt_answered_auto', {
+      promptType: promptData.type,
+    });
+    return undefined;
+  });
+  const sameSession = verdict === 'applied';
 
   // Issue #3748: what was answered and with what — the question (cut to
   // MAX_LOGGED_QUESTION_LENGTH, never the full text) and the answer sent (the
@@ -409,31 +436,16 @@ async function finishAnsweredPrompt(
     cliToolId,
     instanceId,
     sameSession,
+    ...(sameSession ? {} : { notCurrent: verdict }),
     promptType: promptData.type,
     question: truncateForLog(promptData.question),
     answer,
   });
 
-  // Issue #1548: the prompt was answered without a human. Raised only after
-  // the keys actually reached tmux, so a send that threw is not logged as an
-  // answer. No-ops when this instance is not running a contract.
-  if (sameSession) {
-    applyEventToActiveTask(
-      getDbInstance(),
-      worktreeId,
-      cliToolId,
-      // Undefined means the primary instance, which the task lookup identifies
-      // by the tool id itself (see getActiveTaskForInstance).
-      instanceId ?? cliToolId,
-      'prompt_answered_auto',
-      { promptType: promptData.type }
-    );
-  }
-
   // Issue #1685: persist question/options/answer to chat history so the audit
   // trail survives even when the answer landed inside the response poller's
   // interval and the prompt was never saved as a pending message. Must never
-  // fail the answer that already reached tmux.
+  // fail the answer that already reached tmux. History: written either way.
   let auditRecord: RecordAnsweredPromptResult | null = null;
   try {
     auditRecord = recordAnsweredPrompt(getDbInstance(), {
@@ -463,7 +475,8 @@ async function finishAnsweredPrompt(
     // Fire-and-forget on purpose: the WS push is advisory, and awaiting a
     // cold ws-server module load inside the poll path would make its
     // completion timing nondeterministic for a side effect it doesn't
-    // depend on (the audit row is already committed above).
+    // depend on (the audit row is already committed above). It announces the
+    // committed history row, so it is not gated on the current pane.
     void import('@/lib/ws-server')
       .then(({ broadcastMessage }) => {
         broadcastMessage(record.created ? 'message' : 'message_updated', {
@@ -473,6 +486,7 @@ async function finishAnsweredPrompt(
       })
       .catch(() => {});
   }
+  if (!sameSession) return;
 
   // Dynamic imports avoid a module cycle through terminal-broadcast ->
   // current-output-builder -> auto-yes-manager -> this poller.
@@ -481,11 +495,13 @@ async function finishAnsweredPrompt(
       import('@/lib/polling/response-poller'),
       import('@/lib/realtime/terminal-broadcast'),
     ]);
-  // Re-read after the await, not the `sameSession` taken before the audit: a
-  // relaunch while the modules loaded makes the restart about the new process.
-  if (!sameSession || (generation !== undefined && !isSameSession(generation))) return;
-  startResponsePolling(worktreeId, cliToolId, instanceId);
-  void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
+  // Issue #4304 F1-a (review P2-3 of 5cce4a6): looked at again after that
+  // await — the pane and the tick's session — not the look taken before it.
+  await applyWhileAnswerPaneIsCurrent(delivery.origin, { allowDead: true, owned }, () => {
+    startResponsePolling(worktreeId, cliToolId, instanceId);
+    void broadcastTerminalSnapshotAfterInteraction(worktreeId, cliToolId, instanceId);
+    return undefined;
+  });
 }
 
 /**
@@ -508,11 +524,39 @@ function auditPromptData(
 }
 
 /**
- * The `catch` of `detectAndRespondToPrompt`: settles the send in flight and
- * tells an abandoned tick from a failed one.
+ * How a tick ended without an answer: its send came back with a delivery
+ * other than `sent` (Issue #4304 F1-a), or something else threw.
+ */
+type TickFailure =
+  | { readonly kind: 'delivery'; readonly delivery: AnswerDelivery }
+  | { readonly kind: 'thrown'; readonly error: unknown };
+
+/** The ledger's word for a send that did not finish (Issue #3820), from its delivery. */
+function ledgerResultOfDelivery(delivery: AnswerDelivery): ReturnType<typeof attemptResultOfThrow> {
+  switch (delivery.kind) {
+    case 'sent':
+      return 'ok';
+    case 'not-sent':
+      return attemptResultOfThrow(false);
+    case 'partial':
+      return attemptResultOfThrow(true);
+    case 'indeterminate':
+      return attemptResultOfThrow(delivery.keysOnPane ? true : null);
+  }
+}
+
+/**
+ * The end of `detectAndRespondToPrompt` without an answer: settles the send in
+ * flight and tells an abandoned tick from a failed one.
+ *
+ * Issue #4304 F1-a (§3.3-1 / -2): a send's end is read off its delivery, not
+ * off the error's `keysSent` / `answerDelivery` / name. A hold it records is
+ * written with the pane its keys went to (the attempt's origin, fixed as it was
+ * registered), so it holds only that pane — a tick reading another pane H with
+ * the same question is not held by G's keys.
  */
 function settleFailedTick(
-  error: unknown,
+  failure: TickFailure,
   tick: {
     worktreeId: string;
     cliToolId: CLIToolType;
@@ -526,18 +570,21 @@ function settleFailedTick(
 ): 'no_answer' | 'error' {
   const { worktreeId, cliToolId, instanceId, compositeKey, generation, attempt, sendInFlight, receiptEpisode } =
     tick;
-  const keysSent = error instanceof Error && 'keysSent' in error ? Boolean(error.keysSent) : null;
-  // Issue #3880: a tmux call that ended without an exit status may have left
-  // the answer on the pane though no key is known to be there (`keysSent` is
-  // not true, and the ledger counts it `failed`). Held as a partial answer is:
-  // the next tick does not send it again at the same confirmation (step 2.5).
-  // Read off the error like `keysSent` (`AnswerDelivery` in prompt-answer-sender).
-  const delivery = error instanceof Error && 'answerDelivery' in error ? error.answerDelivery : null;
-  const mayBeOnPane = keysSent === true || delivery === 'indeterminate';
+  const delivery = failure.kind === 'delivery' ? failure.delivery : null;
+  // Issue #3839 / #3880: keys on the pane, or a tmux call that ended without an
+  // exit status (its keys may be there): held as a partial answer — the next
+  // tick does not send it again at the same confirmation (step 2.5).
+  const mayBeOnPane = delivery !== null && deliveryMayBeOnPane(delivery);
+  const keysSent =
+    delivery === null ? null
+      : delivery.kind === 'not-sent' ? false
+        : delivery.kind === 'partial' || (delivery.kind === 'indeterminate' && delivery.keysOnPane) ? true
+          : null;
+  const transport = delivery?.kind === 'indeterminate' ? delivery.transport : null;
   // Issue #3820: the send that was cut short, in the ledger — before the send
   // record below is settled, whose state says whether it had expired.
-  if (attempt !== null && sendInFlight) {
-    settleLedgerAttempt(attempt.ledger, attemptResultOfThrow(keysSent), { expired: attempt.state === 'expired' });
+  if (attempt !== null && sendInFlight && delivery !== null) {
+    settleLedgerAttempt(attempt.ledger, ledgerResultOfDelivery(delivery), { expired: attempt.state === 'expired' });
   }
   // Issue #3706: a tick that lost its generation — the send stopped part-way
   // (`PromptAnswerAbortedError`), or failed after the grant went — is not a
@@ -548,22 +595,22 @@ function settleFailedTick(
     // it is now — the new one when a worktree ID move carried it (#3713).
     if (attempt !== null) settleSendAttempt(attempt, mayBeOnPane);
     if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
-    logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent, delivery });
+    logger.info('poller:auto-yes-answer-abandoned', { worktreeId, cliToolId, instanceId, keysSent, delivery: transport });
     return 'no_answer';
   }
   // Issue #3952: the answer waited for a send holding the session's input and
-  // was then not typed — the prompt moved, or the wait ran out. Nothing is on
-  // the pane and the poller did nothing wrong: the next tick reads the screen
-  // afresh and decides again, without counting an error. By name, as the
-  // transport's errors are read: test doubles of the sender need not export it.
-  if (error instanceof Error && error.name === 'PromptAnswerNotDeliveredError') {
+  // was then not typed — the prompt moved, or the wait ran out. Issue #4303 /
+  // #4304: or the pane was not the agent's, or not the one decided for. Nothing
+  // is on the pane and the poller did nothing wrong: the next tick reads the
+  // screen afresh and decides again, without counting an error.
+  if (delivery?.kind === 'not-sent' && isNotDeliveredRefusal(delivery.error)) {
     if (attempt !== null) settleSendAttempt(attempt, false);
     if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
     logger.info('poller:auto-yes-answer-not-delivered', {
       worktreeId,
       cliToolId,
       instanceId,
-      skip: (error as { skip?: unknown }).skip,
+      skip: (delivery.error as { skip?: unknown }).skip,
     });
     return 'no_answer';
   }
@@ -574,8 +621,17 @@ function settleFailedTick(
   if (attempt !== null) settleSendAttempt(attempt, mayBeOnPane);
   if (sendInFlight) noteAnswerSent(cliToolId, worktreeId, instanceId, true, receiptEpisode);
   incrementErrorCount(compositeKey, generation?.pollerState);
-  logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId, delivery });
+  logger.warn('poller:detect-respond-error', { worktreeId, cliToolId, instanceId, delivery: transport });
   return 'error';
+}
+
+/**
+ * A refusal that typed nothing and is the poller's to retry on the next tick
+ * (Issue #3952 / #4303 / #4304): by name, as the sender's test doubles need not
+ * export the class.
+ */
+function isNotDeliveredRefusal(error: unknown): boolean {
+  return error instanceof Error && error.name === 'PromptAnswerNotDeliveredError';
 }
 
 /**
@@ -664,6 +720,14 @@ export async function detectAndRespondToPrompt(
   // and in `finally` for everything else — withheld, failed, stopped, or
   // answered (the new answer restarts the hold).
   let keepDuplicateRetry = false;
+  // Issue #4304 F1-a: the pane this tick's frame was read from, carried as the
+  // answer's context to its send, its holds and everything after it. The tick
+  // always has one (`capturePollerFrame`); a direct caller with no frame is
+  // `sender-bound` (the sender confirms a pane of its own).
+  const holdOrigin: HoldOrigin =
+    boundFrame !== undefined ? { kind: 'pane', generation: boundFrame.generation } : { kind: 'sender-bound' };
+  const tickPane: TickPane =
+    boundFrame !== undefined ? { kind: 'pane', generation: boundFrame.generation } : { kind: 'sender-bound' };
   try {
     // 1. Detect prompt.
     //
@@ -746,6 +810,7 @@ export async function detectAndRespondToPrompt(
           epoch,
           generation,
           startedAt: tickStartedAt,
+          pane: tickPane,
         }).withheld(withheldPastGate.reason);
       }
       return 'no_prompt';
@@ -775,6 +840,7 @@ export async function detectAndRespondToPrompt(
       epoch,
       generation,
       startedAt: tickStartedAt,
+      pane: tickPane,
     });
 
     // 1.5. Issue #3821 (review 2): a person began answering on this instance
@@ -788,7 +854,9 @@ export async function detectAndRespondToPrompt(
     // 2. Check for duplicate prompt (Issue #306)
     const promptKey = generatePromptKey(promptDetection.promptData);
     const frameKey = promptFrameKey(promptDetection.promptData);
-    if (isDuplicatePrompt(pollerState, promptKey)) {
+    // Issue #4304 F1-a (A8): the answer the guard counts from went to the pane
+    // this tick reads — another pane's identical question never got it.
+    if (isDuplicatePrompt(pollerState, promptKey) && answeredPaneIsTicks(pollerState, tickPane)) {
       // Issue #3791 (review N1): the push gate holds this wait until the retry.
       reserveDuplicateRetry(pollerState, promptKey, tickStartedAt);
       keepDuplicateRetry = true;
@@ -827,7 +895,7 @@ export async function detectAndRespondToPrompt(
     // (`partialAnswerScreenKey`: options and approvalTarget count, the cursor
     // does not), or the session is relaunched. Recorded as a suppression, so
     // the prompt Push and `cmate wait` see "withheld", not "answering".
-    if (withheldForEarlierSend(judged, screenKey, epoch)) {
+    if (withheldForEarlierSend(judged, screenKey, epoch, tickPane)) {
       decision.withheld('moved-send-in-flight');
       return 'no_answer';
     }
@@ -876,6 +944,12 @@ export async function detectAndRespondToPrompt(
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
     const sessionName = cliTool.getSessionName(worktreeId, instanceId);
+    // Issue #4304 F1-a: the answer's context — the tick's bound frame, and the
+    // session its keys go to.
+    const origin: AnswerOrigin =
+      boundFrame !== undefined
+        ? { kind: 'pane', context: paneAnswerContextOf(boundFrame, sessionName) }
+        : { kind: 'sender-bound', sessionName };
 
     // Issue #2865: never auto-answer a same-named session another CommandMate
     // server created. The poller keeps running; it just does not type.
@@ -900,6 +974,8 @@ export async function detectAndRespondToPrompt(
       compositeKey,
       screenKey,
       generation?.sessionEpoch ?? epoch,
+      // Issue #4304 F1-a: the pane the keys go to, from the same context the send is made with.
+      holdOrigin,
       // Issue #3820: an agy prompt read past the gate is one a hook receipt let through.
       beginLedgerAttempt(ledgerScope, answerBasisOf(judged, cleanOutput), {
         receiptAccepted: cliToolId === 'antigravity',
@@ -919,7 +995,7 @@ export async function detectAndRespondToPrompt(
       // Issue #3952: an answer that had to wait for a send is read again.
       readMark,
       // Issue #4304 F1-a: the tick's frame, bound to its pane generation.
-      ...(boundFrame !== undefined ? { frame: boundFrame } : {}),
+      ...(origin.kind === 'pane' ? { frame: origin.context.frame } : {}),
     };
     // Issue #3952 review P1-2: and step 5.5's last look is taken again after
     // that wait, right before the first key — the contract or the grant may
@@ -931,42 +1007,61 @@ export async function detectAndRespondToPrompt(
       value: () => !withheldAtSend(judged, generation !== undefined),
       enumerable: false,
     });
+    // Issue #4304 F1-a (§3.3-1): what the send did, with the pane its keys
+    // went to — read once, here, and carried to everything after it.
+    let delivery: AnswerDelivery;
     try {
-      await sendPromptAnswer(answerParams);
+      delivery = await deliverAnswer(origin, () => sendPromptAnswer(answerParams));
     } finally {
       invalidateCache(sessionName);
     }
     sendInFlight = false;
+    if (delivery.kind !== 'sent') {
+      // Issue #3821: a tick that failed has decided nothing the next one will
+      // not decide again; until then the prompt is not "being answered".
+      if (generation === undefined || isTickCurrent(generation)) forgetAutoYesDecision(compositeKey);
+      // Issue #3796: the send was cut short — `sendInFlight` is still true for the settle.
+      return settleFailedTick({ kind: 'delivery', delivery }, {
+        worktreeId,
+        cliToolId,
+        instanceId,
+        compositeKey,
+        generation,
+        attempt,
+        sendInFlight: true,
+        receiptEpisode,
+      });
+    }
+    // The send's own record — history, whatever the session shows now.
     settleLedgerAttempt(attempt.ledger, 'ok', { expired: attempt.state === 'expired' });
     settleSendAttempt(attempt, false);
     // Issue #3796 review E: the episode the send began for, as on the failure side.
     noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
-    // Issue #4304 F1-a (review P2-3): the keys went to the tick's pane; whether
-    // the session still shows it decides what of the new state is written.
-    const samePane = await answeredPaneIsCurrent(sessionName, boundFrame);
-    // Issue #3798: the wait this answer went to — opened if none is open — so
-    // the frame that shows the confirmation gone closes it. Once the keys are
-    // out, only by a tick that still acts for this instance (#3706: one that
-    // lost its grant or session writes nothing that says "answered"), and only
-    // for the wait fixed as the send began. Issue #4304: and only while the
-    // session shows the pane answered.
-    if (samePane && (generation === undefined || isTickCurrent(generation))) {
-      observeAnsweredPrompt(judged, screenKey, tickObservation, answerTarget);
-    }
 
-    // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`.
-    await finishAnsweredPrompt(judged, promptDetection, answer, generation, {
-      // The tick's one normalised frame (#3183), not the capture again.
-      frame,
-      captureTop: captureTopOf(rawOutput ?? cleanOutput, captureExtent, cliToolId),
-    }, samePane);
+    // 6., 7. The answer reached tmux: see `finishAnsweredPrompt`. The waiting
+    // episode (Issue #3798), the dedup key, the task and the restart act on the
+    // instance only while it still shows the answered pane, looked at there.
+    const sent = delivery;
+    await finishAnsweredPrompt(
+      judged,
+      promptDetection,
+      answer,
+      sent,
+      generation,
+      {
+        // The tick's one normalised frame (#3183), not the capture again.
+        frame,
+        captureTop: captureTopOf(rawOutput ?? cleanOutput, captureExtent, cliToolId),
+      },
+      () => observeAnsweredPrompt(judged, screenKey, tickObservation, answerTarget),
+    );
 
     return 'responded';
   } catch (error) {
     // Issue #3821: a tick that failed has decided nothing the next one will not
     // decide again; until then the prompt is not "being answered".
     if (generation === undefined || isTickCurrent(generation)) forgetAutoYesDecision(compositeKey);
-    return settleFailedTick(error, {
+    return settleFailedTick({ kind: 'thrown', error }, {
       worktreeId,
       cliToolId,
       instanceId,
@@ -979,22 +1074,6 @@ export async function detectAndRespondToPrompt(
   } finally {
     endLedgerTick(ledgerScope, ledgerTick);
     if (!keepDuplicateRetry) releaseDuplicateRetry(pollerState);
-  }
-}
-
-/**
- * Whether the session still shows the pane an answer was sent to (Issue #4304
- * F1-a, review P2-3): the tick's bound generation, alive or dead (an answer
- * that ends the agent leaves its own pane dead). No bound frame (direct
- * callers): nothing to compare, as before. Never throws; unreadable is "not".
- */
-async function answeredPaneIsCurrent(sessionName: string, boundFrame: BoundFrame | undefined): Promise<boolean> {
-  if (boundFrame === undefined) return true;
-  try {
-    const check = await checkPaneGeneration(sessionName, boundFrame.generation);
-    return check === 'same' || check === 'pane-dead';
-  } catch {
-    return false;
   }
 }
 

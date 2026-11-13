@@ -285,7 +285,10 @@ describe('[#4304 F1-a] R5 — no key reaches a pane other than the one the answe
 
   it('T7 negative: the same pane throughout — the same keys as before (text, then Enter)', async () => {
     const g = fakePaneTmux.addSession(S, PROMPT_G);
-    await sendPromptAnswer({ sessionName: S, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
+    // Issue #4304 F1-a (5cce4a6): a `promptData` handed over without a frame is
+    // read again off the bound frame, and this hand-made one is not what PROMPT_G
+    // reads as — so the text answer goes without one (nothing on the screen decides it).
+    await sendPromptAnswer({ sessionName: S, answer: 'y', cliToolId: 'claude' });
     const sent = fakePaneTmux.keysTo(g).map((k) => k.argv.slice(k.argv.indexOf('-t') + 2));
     expect(sent).toEqual([['-l', '--', 'y'], ['', 'C-m']]);
   });
@@ -305,7 +308,10 @@ describe('[#4304 F1-a] R5 — no key reaches a pane other than the one the answe
 
   it('T7 negative (Enter omitted): the same pane — the digit alone, as before', async () => {
     const g = fakePaneTmux.addSession(CC, COMMAND_CODE_PERMISSION);
-    await sendPromptAnswer({ sessionName: CC, answer: '1', cliToolId: 'command-code', promptData: PERMISSION_PROMPT });
+    // Issue #4304 F1-a (5cce4a6): the prompt as the frame reads it — a hand-made
+    // one is read again off the bound frame and refused when it differs.
+    const onFrame = assessPromptAnswerability('command-code', COMMAND_CODE_PERMISSION).promptCheck?.promptData as PromptData;
+    await sendPromptAnswer({ sessionName: CC, answer: '1', cliToolId: 'command-code', promptData: onFrame });
     const sent = fakePaneTmux.keysTo(g).map((k) => k.argv.slice(k.argv.indexOf('-t') + 2));
     expect(sent).toEqual([['-l', '--', '1']]);
   });

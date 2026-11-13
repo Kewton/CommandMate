@@ -169,6 +169,9 @@ import {
   movePartialAnswers,
   settleSendAttempt,
 } from '@/lib/polling/auto-yes-poller-state';
+
+/** Issue #4304 F1-a: these state-level sends name no pane (a direct caller's). */
+const SENDER_BOUND = { kind: 'sender-bound' } as const;
 import { clearPolicySuppressions, getLastPolicySuppression } from '@/lib/polling/auto-yes-suppression-state';
 import {
   reconcileWorktreeSessions,
@@ -851,7 +854,7 @@ describe('[#3713] 11: an attempt ends only itself', () => {
     expect(globalThis.__autoYesSendAttempts?.size ?? 0).toBe(0);
     expect(partialAt(A)).toBeNull();
 
-    const attempt = beginSendAttempt(keyOf(B), 'screen', getEnterFallbackSessionEpoch(keyOf(B)));
+    const attempt = beginSendAttempt(keyOf(B), 'screen', getEnterFallbackSessionEpoch(keyOf(B)), SENDER_BOUND);
     settleSendAttempt(attempt, false);
     expect(globalThis.__autoYesSendAttempts?.size ?? 0).toBe(0);
     expect(globalThis.__autoYesPartialAnswers?.has(keyOf(B))).toBe(false);
@@ -859,12 +862,12 @@ describe('[#3713] 11: an attempt ends only itself', () => {
 
   it("the old attempt's settling does not end the successor's attempt", async () => {
     const epoch = getEnterFallbackSessionEpoch(keyOf(B));
-    const old = beginSendAttempt(keyOf(A), 'screen', getEnterFallbackSessionEpoch(keyOf(A)));
+    const old = beginSendAttempt(keyOf(A), 'screen', getEnterFallbackSessionEpoch(keyOf(A)), SENDER_BOUND);
     movePartialAnswers([{ oldKey: keyOf(A), newKey: keyOf(B), sourceEpoch: getEnterFallbackSessionEpoch(keyOf(A)) }]);
-    const successor = beginSendAttempt(keyOf(B), 'screen', epoch);
+    const successor = beginSendAttempt(keyOf(B), 'screen', epoch, SENDER_BOUND);
     settleSendAttempt(old, false);
     expect(globalThis.__autoYesSendAttempts?.has(successor)).toBe(true);
-    expect(hasMovedSendInFlight(keyOf(B), epoch, 'screen')).toBe(false);
+    expect(hasMovedSendInFlight(keyOf(B), epoch, 'screen', SENDER_BOUND)).toBe(false);
     settleSendAttempt(successor, false);
   });
 
@@ -1112,8 +1115,8 @@ describe('[#3713] re-instruction P2-2: a late old send does not overwrite a late
   it('registry: a send begun earlier does not overwrite what a send begun later recorded', () => {
     const key = keyOf(B);
     const epoch = getEnterFallbackSessionEpoch(key);
-    const earlier = beginSendAttempt(key, 'X', epoch);
-    const later = beginSendAttempt(key, 'Y', epoch);
+    const earlier = beginSendAttempt(key, 'X', epoch, SENDER_BOUND);
+    const later = beginSendAttempt(key, 'Y', epoch, SENDER_BOUND);
     settleSendAttempt(later, true);
     settleSendAttempt(earlier, true);
     expect(getPartialAnswer(key, epoch)?.screenKey).toBe('Y');
@@ -1122,8 +1125,8 @@ describe('[#3713] re-instruction P2-2: a late old send does not overwrite a late
   it('negative: a memory recorded before the send began is replaced by its stop', () => {
     const key = keyOf(B);
     const epoch = getEnterFallbackSessionEpoch(key);
-    settleSendAttempt(beginSendAttempt(key, 'Y', epoch), true);
-    settleSendAttempt(beginSendAttempt(key, 'X', epoch), true);
+    settleSendAttempt(beginSendAttempt(key, 'Y', epoch, SENDER_BOUND), true);
+    settleSendAttempt(beginSendAttempt(key, 'X', epoch, SENDER_BOUND), true);
     expect(getPartialAnswer(key, epoch)?.screenKey).toBe('X');
   });
 });
@@ -1137,7 +1140,7 @@ describe('[#3713] re-instruction P2-3: a memory the move left out stays at the s
         if (newName.startsWith('cmate-renaming-')) {
           beginEnterFallbackSession(A, 'claude');
           const epoch = getEnterFallbackSessionEpoch(keyOf(A));
-          settleSendAttempt(beginSendAttempt(keyOf(A), 'Z', epoch), true);
+          settleSendAttempt(beginSendAttempt(keyOf(A), 'Z', epoch, SENDER_BOUND), true);
           newGeneration = getPartialAnswer(keyOf(A), epoch);
         }
         return undefined;
@@ -1285,8 +1288,8 @@ describe('[#3713] re-instruction 3: forgetting an old screen keeps the send in f
     const { forgetPartialAnswer } = await import('@/lib/polling/auto-yes-poller-state');
     const key = keyOf(C);
     const epoch = getEnterFallbackSessionEpoch(key);
-    const atX = beginSendAttempt(key, 'X', epoch);
-    const atY = beginSendAttempt(key, 'Y', epoch);
+    const atX = beginSendAttempt(key, 'X', epoch, SENDER_BOUND);
+    const atY = beginSendAttempt(key, 'Y', epoch, SENDER_BOUND);
     forgetPartialAnswer(key, 'X');
     expect(atX.state).toBe('expired');
     expect(atY.state).toBe('pending');

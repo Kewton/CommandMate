@@ -40,6 +40,7 @@ import {
   partialAnswerScreenKey,
   personSendsInFlight,
   type AutoYesPollerState,
+  type TickPane,
 } from './polling/auto-yes-poller-state';
 import { suppressAntigravityTrustScreen, type JudgedPrompt } from './polling/auto-yes-prompt-suppression';
 import { isTickCurrent, type AutoYesTickGeneration } from './polling/auto-yes-poller-generation';
@@ -279,17 +280,19 @@ export function tickDecisionRecorder(tick: {
   epoch: number;
   generation: AutoYesTickGeneration | undefined;
   startedAt: number;
+  /** Issue #4304 F1-a (A3): the pane the tick read the prompt from, kept with the decision. */
+  pane: TickPane;
 }): {
   answering: () => void;
   reaffirmAnswering: () => void;
   withheld: (fallback: AutoYesDecisionReason) => void;
 } {
-  const { worktreeId, cliToolId, instanceId, compositeKey, promptData, epoch, generation, startedAt } = tick;
+  const { worktreeId, cliToolId, instanceId, compositeKey, promptData, epoch, generation, startedAt, pane } = tick;
   const grantOf = () => generation?.grant ?? getAutoYesState(worktreeId, cliToolId, instanceId);
   const callId = ledgerCallOf(cliToolId, worktreeId, instanceId).callId ?? null;
   const record = (state: 'answering' | 'withheld', reason: AutoYesDecisionReason | null): void => {
     if (generation !== undefined && !isTickCurrent(generation)) return;
-    recordAutoYesDecision(compositeKey, { state, reason, promptData, callId, grant: grantOf(), epoch });
+    recordAutoYesDecision(compositeKey, { state, reason, promptData, callId, grant: grantOf(), epoch, pane });
   };
   return {
     answering: () => record('answering', null),
@@ -302,7 +305,7 @@ export function tickDecisionRecorder(tick: {
         forgetAutoYesDecision(compositeKey);
         return;
       }
-      reaffirmAutoYesAnswering(compositeKey, { promptData, callId, grant: grantOf(), epoch });
+      reaffirmAutoYesAnswering(compositeKey, { promptData, callId, grant: grantOf(), epoch, pane });
     },
     // The reason the step that withheld it recorded on this tick (the #1684
     // record), else the step's own: a stop the policy record never carries.

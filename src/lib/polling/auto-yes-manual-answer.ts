@@ -36,9 +36,12 @@ import {
   releasePartialAnswerToHuman,
   settleSendAttempt,
   UNIDENTIFIED_SCREEN_KEY,
+  holdOriginOf,
   type AutoYesSendAttempt,
+  type HoldOrigin,
 } from './auto-yes-poller-state';
 import type { PromptData } from '@/types/models';
+import { deliveryMayBeOnPane, type AnswerDelivery, type PaneAnswerContext } from '@/lib/session/pane-answer-context';
 
 /** How long a manual answer keeps the poller off the instance's confirmations. */
 export const MANUAL_ANSWER_HOLD_MS = DUPLICATE_RETRY_EXPIRY_MS;
@@ -88,9 +91,55 @@ export function noteManualAnswerStarted(compositeKey: string, at: number = Date.
  * before it ends keeps its end from recording a hold.
  */
 export function noteManualSendStarting(ticket: ManualAnswerTicket, promptData: PromptData | null | undefined): void {
+  noteSendStarting(ticket, promptData, AGENT_API_ORIGIN);
+}
+
+/** A verdict over the agent's API names no pane (Issue #4304 F1-a). */
+const AGENT_API_ORIGIN: HoldOrigin = Object.freeze({ kind: 'agent-api' as const });
+
+function noteSendStarting(ticket: ManualAnswerTicket, promptData: PromptData | null | undefined, origin: HoldOrigin): void {
   if (ticket.attempt !== null) return;
   const screenKey = promptData ? partialAnswerScreenKey(promptData) : UNIDENTIFIED_SCREEN_KEY;
-  ticket.attempt = beginManualSendAttempt(ticket.compositeKey, screenKey);
+  ticket.attempt = beginManualSendAttempt(ticket.compositeKey, screenKey, origin);
+}
+
+/**
+ * The person's KEYS are about to go out to the pane `context` names (Issue
+ * #4304 F1-a, §3.3-2): {@link noteManualSendStarting} for a keystroke answer,
+ * the send registered with that pane's generation, so the hold its end may
+ * record is G's — never applied to another pane H, and never releasing H's.
+ * `noteManualSendStarting` (no context) is the verdict over the agent's API.
+ */
+export function noteManualPaneSendStarting(
+  ticket: ManualAnswerTicket,
+  promptData: PromptData | null | undefined,
+  context: PaneAnswerContext,
+): void {
+  noteSendStarting(ticket, promptData, { kind: 'pane', generation: context.generation });
+}
+
+/**
+ * A person's keystroke answer ended (Issue #4304 F1-a): settled by what its
+ * delivery says — `sent` and `not-sent` are `answered` / `not-sent`, a delivery
+ * that may have left keys on the pane is `may-be-on-pane`, one that says
+ * nothing of its keys is only abandoned. The hold it records or releases is
+ * the pane the delivery's keys went to ({@link noteManualPaneSendStarting}).
+ */
+export function settleManualPaneAnswer(ticket: ManualAnswerTicket, delivery: AnswerDelivery, at: number = Date.now()): void {
+  if (delivery.kind === 'sent') settleManualAnswer(ticket, 'answered', at);
+  else if (delivery.kind === 'not-sent') settleManualAnswer(ticket, 'not-sent', at);
+  else if (deliveryMayBeOnPane(delivery)) settleManualAnswer(ticket, 'may-be-on-pane', at);
+  else abandonManualSend(ticket);
+}
+
+/**
+ * A person's keystroke answer refused on the frame it was decided on, before
+ * any send (Issue #4304 F1-a): `not-sent`, releasing only a hold about that
+ * pane (or one over the agent's API).
+ */
+export function settleManualPaneRefusal(ticket: ManualAnswerTicket, context: PaneAnswerContext, at: number = Date.now()): void {
+  if (ticket.attempt !== null) settleSendAttempt(ticket.attempt, false, at);
+  releasePartialAnswerToHuman(ticket.compositeKey, ticket.order, { kind: 'pane', generation: context.generation });
 }
 
 /**
@@ -136,7 +185,9 @@ export function settleManualAnswer(
   const { compositeKey, attempt } = ticket;
   if (outcome !== 'may-be-on-pane') {
     if (attempt !== null) settleSendAttempt(attempt, false, at);
-    releasePartialAnswerToHuman(compositeKey, ticket.order);
+    // Issue #4304 F1-a (T4): only a hold this answer speaks for — its pane's,
+    // or any for a verdict over the agent's API (or one with no send at all).
+    releasePartialAnswerToHuman(compositeKey, ticket.order, attempt === null ? AGENT_API_ORIGIN : holdOriginOf(attempt));
     return;
   }
   if (attempt !== null) settleSendAttempt(attempt, true, at);

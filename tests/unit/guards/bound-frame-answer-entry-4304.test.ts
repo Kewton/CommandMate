@@ -76,7 +76,7 @@ describe('[#4304 F1-a] T10 — the answer entries take a BoundFrame only', () =>
     expect(planReview).toMatch(/\n\s*frame: BoundFrame;/);
     expect(planReview).toMatch(/recapture\?: \(expected: PaneGeneration\) => Promise<BoundCapture>;/);
     expect(code('src/app/api/worktrees/[id]/prompt-response/frame-verification.ts')).toMatch(/verifiedFrame: BoundFrame;/);
-    expect(code('src/app/api/worktrees/[id]/respond/screen-at-send.ts')).toMatch(/frame: BoundFrame \| undefined;/);
+    expect(code('src/app/api/worktrees/[id]/respond/screen-at-send.ts')).toMatch(/kind: 'bound';[\s\S]{0,120}?readonly frame: BoundFrame;/);
   });
 
   it('negative control: the scan sees a call when there is one', () => {

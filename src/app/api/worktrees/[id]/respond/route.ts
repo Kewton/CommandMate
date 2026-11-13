@@ -22,11 +22,12 @@ import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/
 import { isAnswerablePromptData } from '@/types/models';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import {
+  abandonManualSend,
   noteManualAnswerStarted,
-  noteManualSendStarting,
-  settleManualAnswer,
+  noteManualPaneSendStarting,
+  settleManualPaneAnswer,
 } from '@/lib/polling/auto-yes-manual-answer';
-import { settleManualSendError } from '../prompt-response/answer-delivery';
+import { applyWhilePaneIsCurrent, deliverAnswer, paneAnswerContextOf } from '@/lib/session/pane-answer-context';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
 import { screenAtSend } from './screen-at-send';
 
@@ -298,7 +299,7 @@ export async function POST(
       // (#3821 / #3880): before the first key a poller tick under way sends no
       // further key and the next ticks leave the screen to the person, and how
       // this answer ENDS decides what becomes of an answer Auto-Yes holds at the
-      // confirmation (`settleManualAnswer` below). Without it a send here that
+      // confirmation (`settleManualPaneAnswer` below). Without it a send here that
       // timed out with its keys on the pane left the confirmation free for
       // Auto-Yes to type at again, and one that went through left Auto-Yes's own
       // unknown send held.
@@ -310,26 +311,36 @@ export async function POST(
       // that same frame is what the sender judges the answer against, so the
       // screen registered is the screen the keys go to.
       const atSend = await screenAtSend(id, cliToolId, instanceId);
-      noteManualSendStarting(manualAnswer, atSend.promptData);
-      try {
-        // Issue #4304 F1-a: a screen that could not be bound to its pane
-        // generation is no screen to type at — refused with nothing typed
-        // (409 `answer_not_delivered`, send again), not sent without a frame.
-        if (atSend.frame === undefined) {
-          throw new PromptAnswerGenerationUnconfirmedError(atSend.unbound ?? 'generation-unreadable', sessionName);
-        }
-        await sendPromptAnswer({
+      // Issue #4304 F1-a: a screen that could not be bound to its pane
+      // generation is no screen to type at — refused with nothing typed
+      // (409 `answer_not_delivered`, send again), not sent without a frame. No
+      // send was begun, so no hold is recorded or released: a pane that was
+      // never confirmed is no pane's answer.
+      if (atSend.kind === 'unknown') {
+        abandonManualSend(manualAnswer);
+        const refusal = new PromptAnswerGenerationUnconfirmedError(atSend.unbound, sessionName);
+        const mapped = promptAnswerErrorResponse(refusal, 'respond');
+        return NextResponse.json(mapped?.body ?? { error: refusal.message }, { status: mapped?.status ?? 409 });
+      }
+      // Issue #4304 F1-a: the answer's context — the frame read right before
+      // the first key, the generation every key, the hold and the current-state
+      // writes below are about.
+      const context = paneAnswerContextOf(atSend.frame, sessionName);
+      noteManualPaneSendStarting(manualAnswer, atSend.promptData, context);
+      const delivery = await deliverAnswer({ kind: 'pane', context }, () =>
+        sendPromptAnswer({
           sessionName,
           answer: input,
           cliToolId,
           promptData: promptData,
-          frame: atSend.frame,
+          frame: context.frame,
           // Issue #3952 review P2-1: the mark taken before that frame's capture.
           readMark: atSend.readMark,
-        });
-        logger.info('prompt-answer-sent');
-      } catch (error: unknown) {
-        settleManualSendError(manualAnswer, error);
+        })
+      );
+      settleManualPaneAnswer(manualAnswer, delivery);
+      if (delivery.kind !== 'sent') {
+        const error = delivery.error;
         // Issue #3982: the table `/prompt-response` answers by too, so both
         // routes give every answer error the same `reason` and `keysSent`.
         // Issue #3952: waited for a send holding the session's input, then not
@@ -346,7 +357,7 @@ export async function POST(
           { status: 500 }
         );
       }
-      settleManualAnswer(manualAnswer, 'answered');
+      logger.info('prompt-answer-sent');
 
       // Update prompt data — only now that every key of the answer went out
       // (Issue #3975), as `/prompt-response` records its answer after the send. A
@@ -372,20 +383,7 @@ export async function POST(
       };
       updatePromptData(db, messageId, updatedPromptData);
 
-      // Issue #1548: a person answered. This branch needs a stored messageId, so
-      // unlike /prompt-response it has no automated caller to be confused with.
-      // Issue #2200 retired the legacy chat prompt buttons that were its only
-      // caller: the composer's `PromptPanel` reaches this route on the
-      // `decisionId` shape and `commandmate respond` on the id-less one, and
-      // neither comes through here.
-      // Issue #3907: kept rather than retired — it is the public body shape the
-      // route's suites and integration tests post — and so it reports its end to
-      // Auto-Yes (`settleManualAnswer` above) like `/prompt-response` does.
-      applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
-        promptType: promptData.type,
-      });
-
-      // Broadcast updated message
+      // Broadcast updated message — the fixed row's history, announced either way.
       const updatedMessage = {
         ...message,
         promptData: updatedPromptData,
@@ -396,9 +394,29 @@ export async function POST(
         message: updatedMessage,
       });
 
-      // Resume polling for CLI tool's next response
-      startPolling(id, cliToolId, instanceId);
-      void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+      // Issue #4304 F1-a (N7): the row above is this answer's own (fixed by its
+      // id), so it is updated either way. The task event and the poll restart
+      // act on the instance as it is NOW — named by the instance, not the row —
+      // so only while it still shows the pane the keys went to, looked at after
+      // every await.
+      await applyWhilePaneIsCurrent(context, { allowDead: true, owned: () => true }, () => {
+        // Issue #1548: a person answered. This branch needs a stored messageId, so
+        // unlike /prompt-response it has no automated caller to be confused with.
+        // Issue #2200 retired the legacy chat prompt buttons that were its only
+        // caller: the composer's `PromptPanel` reaches this route on the
+        // `decisionId` shape and `commandmate respond` on the id-less one, and
+        // neither comes through here.
+        // Issue #3907: kept rather than retired — it is the public body shape the
+        // route's suites and integration tests post — and so it reports its end to
+        // Auto-Yes (`settleManualPaneAnswer` above) like `/prompt-response` does.
+        applyEventToActiveTask(db, id, cliToolId, instanceId, 'prompt_answered_human', {
+          promptType: promptData.type,
+        });
+        // Resume polling for CLI tool's next response
+        startPolling(id, cliToolId, instanceId);
+        void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+        return undefined;
+      });
 
       logger.info('polling-resumed-after-answer');
 

@@ -29,11 +29,12 @@ import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/au
 import type { CLIToolType } from '../cli-tools/types';
 import {
   forgetPartialAnswer,
-  getPartialAnswer,
+  getPartialAnswerFor,
   hasMovedSendInFlight,
   identifyPartialAnswerScreen,
   partialAnswerCovers,
   warnOncePerFrame,
+  type TickPane,
 } from './auto-yes-poller-state';
 import { suppressAndWarnOnce, truncateForLog, type JudgedPrompt } from './auto-yes-prompt-suppression';
 import { withholdLedgerConfirmation } from './auto-yes-confirmation-ledger';
@@ -42,11 +43,16 @@ import { withholdLedgerConfirmation } from './auto-yes-confirmation-ledger';
  * Step 2.5 of `detectAndRespondToPrompt`: whether an earlier send to this
  * screen keeps the prompt from being answered now.
  *
+ * Issue #4304 F1-a (§3.4 T3): only an earlier send to the pane this tick read
+ * (`pane`) holds it. Keys typed at G, the session now showing H with the same
+ * question, never reached H: H's prompt is answered, and G's record is left
+ * as it is (not taken for H's, not forgotten as "another prompt").
+ *
  * @returns true when the prompt is withheld (the caller returns `no_answer`)
  */
-export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, epoch: number): boolean {
+export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, epoch: number, pane: TickPane): boolean {
   const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, frameKey } = judged;
-  const partial = getPartialAnswer(compositeKey, epoch);
+  const partial = getPartialAnswerFor(compositeKey, epoch, pane);
   if (partial !== null) {
     if (partialAnswerCovers(partial.screenKey, screenKey)) {
       // Issue #3880: a person's send made with no prompt read (the capture
@@ -73,7 +79,7 @@ export function withheldForEarlierSend(judged: JudgedPrompt, screenKey: string, 
   // this session's key. Its keys may already be on the pane, and how its send
   // ends is not known yet — so this screen gets no keys until it comes back
   // (recorded as a partial answer above, or gone).
-  if (hasMovedSendInFlight(compositeKey, epoch, screenKey)) {
+  if (hasMovedSendInFlight(compositeKey, epoch, screenKey, pane)) {
     // Issue #3820: a stop the policy record never carries — the ledger's own reason.
     withholdLedgerConfirmation(judged, 'moved-send-in-flight');
     warnOncePerFrame(

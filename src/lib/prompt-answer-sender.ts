@@ -600,7 +600,7 @@ async function sendCommandCodeMultiSelectAnswer(
   ].sort((a, b) => a - b);
   if (toggles.length > 0) {
     assertOwned(false);
-    await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent, touch);
+    await sendSpecialKeysWhileCurrent(sessionName, toggles.map(String), stillCurrent, touch, generation);
   }
   const keysSent = toggles.length > 0;
 
@@ -644,6 +644,7 @@ async function sendCommandCodeMultiSelectAnswer(
     [...downKeys(verified.options.length - cursorNow.number + 1), 'Enter'],
     stillCurrent,
     touch,
+    generation,
   );
 
   // 4. The second stage. `Submit` opens the Review page and the answer is sent
@@ -662,7 +663,7 @@ async function sendCommandCodeMultiSelectAnswer(
       throw new MultiSelectAnswerRejectedError('review-unanswered', true, wanted);
     }
     assertOwned(true);
-    await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent, touch);
+    await sendSpecialKeysWhileCurrent(sessionName, ['Enter'], stillCurrent, touch, generation);
     return;
   }
 
@@ -1043,6 +1044,7 @@ async function sendSpecialKeysWhileCurrent(
   keys: string[],
   stillCurrent: (() => boolean) | undefined,
   touch?: PaneTouch,
+  generation?: PaneGeneration,
 ): Promise<void> {
   if (!stillCurrent) {
     try {
@@ -1059,8 +1061,27 @@ async function sendSpecialKeysWhileCurrent(
   // times it was asked are the keys known to have reached the pane when a
   // later one fails.
   let delivered = 0;
+  // Issue #4304 F1-a (S6 / T7): between two keys the session must still show
+  // the pane the answer was decided for — a delay is an await the pane can be
+  // replaced across while the ticket and the epoch stay the same.
+  let paneLost = false;
   try {
     await sendSpecialKeys(sessionName, keys, {
+      ...(generation !== undefined
+        ? {
+            beforeNextKey: async () => {
+              let check;
+              try {
+                check = await checkPaneGeneration(sessionName, generation);
+              } catch {
+                check = 'generation-unreadable' as const;
+              }
+              if (check === 'same') return true;
+              paneLost = true;
+              return false;
+            },
+          }
+        : {}),
       shouldContinue: () => {
         delivered++;
         return stillCurrent();
@@ -1070,6 +1091,12 @@ async function sendSpecialKeysWhileCurrent(
     // By name rather than `instanceof`: test doubles of `./tmux/tmux` need not
     // export the class.
     if (error instanceof Error && error.name === 'SpecialKeysAbortedError') {
+      // The pane went between two keys: the keys before are on it, the rest
+      // were not sent — as the text arm's Enter refused after its text.
+      if (paneLost) {
+        if (touch) touch.touched = true;
+        throw new PromptAnswerInputLostError(sessionName);
+      }
       throw new PromptAnswerAbortedError(true);
     }
     if (touch && Math.max(delivered, keysDeliveredOf(error)) > 0) touch.touched = true;
@@ -1326,7 +1353,7 @@ async function sendPromptAnswerKeys(requested: SendPromptAnswerParams, touch: Pa
       if (reread !== null && reread.type !== 'multiple_choice') return 'target-changed';
       const keys = cursorKeys(reread ?? promptData);
       writer.assertOwned(false);
-      await sendSpecialKeysWhileCurrent(sessionName, keys, writer.stillCurrent, touch);
+      await sendSpecialKeysWhileCurrent(sessionName, keys, writer.stillCurrent, touch, target.generation);
     });
   } else {
     // Issue #616: Resolve submitMode and determine whether to suppress Enter

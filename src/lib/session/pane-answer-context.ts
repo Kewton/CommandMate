@@ -112,3 +112,120 @@ export async function applyWhilePaneIsCurrent(
   effect();
   return 'applied';
 }
+
+// ===========================================================================
+// What a send did (§3.3-1): one boundary for every way it ends
+// ===========================================================================
+
+/**
+ * Where a keystroke answer's pane comes from.
+ *
+ * - `pane`: the caller decided the answer on a bound frame — every production
+ *   answer path (`/prompt-response`, `/respond`, the Auto-Yes tick, the canary).
+ * - `sender-bound`: a direct caller of the Auto-Yes step with no frame of its
+ *   own (unit tests of `detectAndRespondToPrompt`; the poller's tick always
+ *   hands its bound frame over). The sender binds the answer to the pane it
+ *   confirms itself, and keys go only there, but the caller holds no G: what it
+ *   does to the current state is not looked at again, as before #4304. A
+ *   guard holds the tick to `pane`.
+ */
+export type AnswerOrigin =
+  | { readonly kind: 'pane'; readonly context: PaneAnswerContext }
+  | { readonly kind: 'sender-bound'; readonly sessionName: string };
+
+/** Type-only brand: a delivery is made by {@link deliverAnswer} and nowhere else. */
+declare const answerDeliveryBrand: unique symbol;
+
+/**
+ * What a keystroke answer did to its pane (§3.3-1), carried with its
+ * {@link AnswerOrigin} to everything after it:
+ *
+ * - `not-sent`: known to have typed nothing (every refusal before the first
+ *   key — the pane, the foreground, the input ticket, the contract, the
+ *   dialog's own rules — and a transport refusal before it started).
+ * - `sent`: every key went out.
+ * - `partial`: some keys are on the pane and the rest were not sent.
+ * - `indeterminate`: a tmux call ended without an exit status (its key may be
+ *   there: `transport: 'indeterminate'`), or the failure said nothing of what
+ *   it did (`transport: 'unreported'`, a non-Error throw among them).
+ *
+ * Only an `AnswerOrigin` reaches `sent` / `partial` / `indeterminate`: there is
+ * no "unconfirmed" origin, so a pane that was never confirmed cannot produce
+ * one. The refusal of an answer that never got a context (its capture could
+ * not be bound) is answered before any delivery and is not one.
+ */
+export type AnswerDelivery = { readonly [answerDeliveryBrand]: true; readonly origin: AnswerOrigin } & (
+  | { readonly kind: 'not-sent'; readonly error: unknown }
+  | { readonly kind: 'sent' }
+  | { readonly kind: 'partial'; readonly error: unknown }
+  | {
+      readonly kind: 'indeterminate';
+      readonly transport: 'indeterminate' | 'unreported';
+      /** A key is known to be on the pane before the failure whose outcome is not known. */
+      readonly keysOnPane: boolean;
+      readonly error: unknown;
+    }
+);
+
+/** The answer refusals that are known to have typed nothing, whatever they carry. */
+const REFUSED_BEFORE_ANY_KEY = new Set([
+  'PromptAnswerRejectedError',
+  'FreeTextAnswerRejectedError',
+  'FreeTextAtChoiceOnlyPromptError',
+]);
+
+function classify(origin: AnswerOrigin, error: unknown): AnswerDelivery {
+  const make = (fields: object): AnswerDelivery => Object.freeze({ origin, ...fields }) as AnswerDelivery;
+  if (!(error instanceof Error)) {
+    return make({ kind: 'indeterminate', transport: 'unreported', keysOnPane: false, error });
+  }
+  const keysSent = 'keysSent' in error ? (error as { keysSent?: unknown }).keysSent : undefined;
+  const transport = 'answerDelivery' in error ? (error as { answerDelivery?: unknown }).answerDelivery : undefined;
+  if (transport === 'indeterminate') {
+    return make({ kind: 'indeterminate', transport: 'indeterminate', keysOnPane: keysSent === true, error });
+  }
+  if (keysSent === true) return make({ kind: 'partial', error });
+  if (keysSent === false || REFUSED_BEFORE_ANY_KEY.has(error.name)) return make({ kind: 'not-sent', error });
+  return make({ kind: 'indeterminate', transport: 'unreported', keysOnPane: false, error });
+}
+
+/**
+ * Send an answer and say what it did — the one place a send's `void` or its
+ * throw is read (§3.3-1: "全 throw を一つの内部境界で正規化"). Never throws.
+ * The sender's `keysSent` / `answerDelivery` are read here and nowhere after:
+ * every later step reads the delivery.
+ */
+export async function deliverAnswer(origin: AnswerOrigin, send: () => Promise<void>): Promise<AnswerDelivery> {
+  try {
+    await send();
+  } catch (error: unknown) {
+    return classify(origin, error);
+  }
+  return Object.freeze({ origin, kind: 'sent' as const }) as AnswerDelivery;
+}
+
+/** Whether a delivery may have left keys on the pane: a hold must be kept. */
+export function deliveryMayBeOnPane(delivery: AnswerDelivery): boolean {
+  return delivery.kind === 'partial' || (delivery.kind === 'indeterminate' && delivery.transport === 'indeterminate');
+}
+
+/** The generation a delivery's keys went to; null for `sender-bound` (the caller holds none). */
+export function deliveryGeneration(delivery: AnswerDelivery): PaneGeneration | null {
+  return delivery.origin.kind === 'pane' ? delivery.origin.context.generation : null;
+}
+
+/**
+ * {@link applyWhilePaneIsCurrent} for an answer's origin. `sender-bound` (a
+ * direct caller with no frame, never the tick) is not looked at again, as
+ * before #4304: only the caller's own conditions are asked.
+ */
+export async function applyWhileAnswerPaneIsCurrent(
+  origin: AnswerOrigin,
+  options: CurrentPaneOptions,
+  effect: CurrentPaneEffect,
+): Promise<CurrentPaneVerdict> {
+  if (origin.kind === 'pane') return applyWhilePaneIsCurrent(origin.context, options, effect);
+  if (!options.owned()) return 'not-owned';
+  effect();
+  return 'applied';
+}

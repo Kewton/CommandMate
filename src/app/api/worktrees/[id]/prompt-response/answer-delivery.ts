@@ -23,11 +23,19 @@ import { promptAnswerErrorResponse } from '@/lib/prompt-answer-errors';
 import type { PromptData } from '@/types/models';
 import {
   abandonManualSend,
-  noteManualSendStarting,
+  noteManualPaneSendStarting,
   settleManualAnswer,
+  settleManualPaneAnswer,
   type ManualAnswerOutcome,
   type ManualAnswerTicket,
 } from '@/lib/polling/auto-yes-manual-answer';
+import {
+  applyWhilePaneIsCurrent,
+  deliverAnswer,
+  paneAnswerContextOf,
+  type AnswerDelivery,
+  type PaneAnswerContext,
+} from '@/lib/session/pane-answer-context';
 import type { AnswerResolution } from '@/lib/prompt-answer-semantic';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
@@ -109,9 +117,11 @@ function sendErrorResponse(
 }
 
 /**
- * What a failed manual send left on the pane, for the answer Auto-Yes holds
- * there (Issue #3880). The refusals are before any key; a transport failure
- * says what it did (`keysSent`, `answerDelivery` from `sendPromptAnswer`).
+ * What a failed manual verdict over the agent's API left, for the answer
+ * Auto-Yes holds there (Issue #3880 / #3925): the structured branches' thrown
+ * delivery. A keystroke answer is read off its {@link AnswerDelivery} instead
+ * (Issue #4304 F1-a, `settleManualPaneAnswer`). The refusals are before any
+ * key; a transport failure says what it did (`keysSent`, `answerDelivery`).
  * Null for an error that says neither: the hold is left as it was.
  */
 export function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | null {
@@ -131,10 +141,10 @@ export function manualOutcomeOfSendError(error: unknown): ManualAnswerOutcome | 
 }
 
 /**
- * A person's send threw (Issue #3880): settled by what the error says of it
- * ({@link manualOutcomeOfSendError}), or only abandoned when it says nothing.
- * Shared by every manual send (Issue #3925): this route's keystrokes,
- * `/respond`'s stored-message branch and both structured stages.
+ * A person's verdict over the agent's API threw (Issue #3880 / #3925): settled
+ * by what the error says of it ({@link manualOutcomeOfSendError}), or only
+ * abandoned when it says nothing. The structured stages of both routes; a
+ * keystroke answer settles through its delivery (Issue #4304 F1-a).
  */
 export function settleManualSendError(manualAnswer: ManualAnswerTicket, error: unknown): void {
   const outcome = manualOutcomeOfSendError(error);
@@ -155,17 +165,30 @@ export function settleManualVerdictReceipt(manualAnswer: ManualAnswerTicket, del
 }
 
 /**
- * Send the resolved answer to tmux. Null once it was sent; otherwise the
- * refusal or the transport failure to return.
+ * A keystroke answer that went out in full (Issue #4304 F1-a): its delivery,
+ * with the pane its keys went to, for {@link finishAnsweredPrompt}.
+ */
+export interface SentManualAnswer {
+  readonly delivery: AnswerDelivery & { kind: 'sent' };
+  readonly context: PaneAnswerContext;
+  /** When the send began: an audit row adopts no pending row saved after it once the pane moved. */
+  readonly startedAt: number;
+}
+
+/**
+ * Send the resolved answer to tmux. The sent answer once it went out;
+ * otherwise the refusal or the transport failure to return.
  *
  * Issue #3880: how the send ended is reported to Auto-Yes
- * (`settleManualAnswer`), so a manual send that may have left keys on the pane
- * keeps the confirmation off Auto-Yes's hands after the manual hold, as one of
- * Auto-Yes's own would. `screenPromptData` is the prompt the fresh capture
- * read — the screen such a hold is recorded at, fixed with the session epoch
- * right before the first key (`noteManualSendStarting`); with neither it nor
- * the resolved prompt (the capture failed) the hold is at an unidentified
- * screen.
+ * (`settleManualPaneAnswer`), so a manual send that may have left keys on the
+ * pane keeps the confirmation off Auto-Yes's hands after the manual hold, as
+ * one of Auto-Yes's own would. `screenPromptData` is the prompt the fresh
+ * capture read — the screen such a hold is recorded at, fixed with the session
+ * epoch right before the first key.
+ *
+ * Issue #4304 F1-a (§3.3-1 / -2): the answer's context is the verified frame
+ * (`PaneAnswerContext`): the send, the hold it records or releases and its
+ * delivery all carry that pane's generation.
  */
 export async function sendResolvedAnswer(
   ctx: PromptResponseContext,
@@ -176,14 +199,16 @@ export async function sendResolvedAnswer(
   manualAnswer: ManualAnswerTicket,
   screenPromptData?: PromptData | null,
   readMark?: number,
-): Promise<NextResponse | null> {
+): Promise<{ response: NextResponse } | { sent: SentManualAnswer }> {
   const { resolution, effectivePromptData } = resolved;
-  noteManualSendStarting(manualAnswer, screenPromptData ?? effectivePromptData);
+  const context = paneAnswerContextOf(verifiedFrame, sessionName);
+  noteManualPaneSendStarting(manualAnswer, screenPromptData ?? effectivePromptData, context);
+  const startedAt = Date.now();
   // Send answer to tmux
   // Issue #287 Bug2: Uses shared sendPromptAnswer() to unify logic
   // with auto-yes-manager.ts, including fallback handling.
-  try {
-    await sendPromptAnswer({
+  const delivery = await deliverAnswer({ kind: 'pane', context }, () =>
+    sendPromptAnswer({
       sessionName,
       answer: resolution.input,
       cliToolId: ctx.cliToolId,
@@ -193,17 +218,17 @@ export async function sendResolvedAnswer(
       fallbackSubmitMode: request.validSubmitMode,
       // Issue #2033: the frame the prompt was re-verified against, raw.
       // Issue #4304 F1-a: bound to its pane generation — every key goes there.
-      frame: verifiedFrame,
+      frame: context.frame,
       // Issue #3952 review P2-1: taken before that frame's capture, so a send
       // admitted between the capture and the answer's keys makes it read again.
       readMark,
-    });
-  } catch (error: unknown) {
-    settleManualSendError(manualAnswer, error);
-    return sendErrorResponse(ctx, error, request.answer, resolution);
+    })
+  );
+  settleManualPaneAnswer(manualAnswer, delivery);
+  if (delivery.kind !== 'sent') {
+    return { response: sendErrorResponse(ctx, delivery.error, request.answer, resolution) };
   }
-  settleManualAnswer(manualAnswer, 'answered');
-  return null;
+  return { sent: { delivery, context, startedAt } };
 }
 
 /**
@@ -252,6 +277,7 @@ function recordAnswerForAudit(
   promptCheck: PromptDetectionResult | null,
   resolved: ResolvedAnswer,
   verifiedFrame: BoundFrame | null,
+  pendingSavedAtOrBefore: number | null,
 ): void {
   const { resolution, effectivePromptData } = resolved;
   if (!promptCheck?.isPrompt || !effectivePromptData) return;
@@ -269,6 +295,9 @@ function recordAnswerForAudit(
       answer: resolution.input,
       answeredBy: 'human',
       content: promptCheck.rawContent || promptCheck.cleanContent,
+      // Issue #4304 F1-a: the pane answered is no longer the session's — the
+      // row recorded is this answer's, not a pending row the new pane saved.
+      ...(pendingSavedAtOrBefore === null ? {} : { pendingSavedAtOrBefore }),
     });
     broadcastMessage(record.created ? 'message' : 'message_updated', {
       worktreeId: ctx.id,
@@ -285,36 +314,46 @@ function recordAnswerForAudit(
 /**
  * Everything after the answer reached tmux, ending in the success body.
  *
- * @param verifiedFrame - The frame the prompt was re-verified against, raw
- *   (null when that capture failed): the audit row's reading is read off it
- *   (Issue #3881 second review N2)
+ * Issue #4304 F1-a (§3.3-3 / -5): the task event, the response-poll restart
+ * and the terminal push act on the instance as it is NOW — through
+ * `applyWhilePaneIsCurrent`, after every await, only while the session still
+ * shows the pane the keys went to (alive, or dead by the answer). The audit row
+ * is this answer's history and is written either way; once the pane moved it
+ * adopts no pending row saved after the answer began.
+ *
+ * @param sent - The answer as it went out ({@link sendResolvedAnswer}); its
+ *   context's frame is the frame the prompt was re-verified against, raw — the
+ *   audit row's reading is read off it (Issue #3881 second review N2)
  */
-export function finishAnsweredPrompt(
+export async function finishAnsweredPrompt(
   ctx: PromptResponseContext,
   promptCheck: PromptDetectionResult | null,
   resolved: ResolvedAnswer,
-  verifiedFrame: BoundFrame | null = null,
-): NextResponse {
+  sent: SentManualAnswer,
+): Promise<NextResponse> {
   const { id, db, cliToolId, instanceId } = ctx;
   const { resolution, structuredResolution, effectivePromptData } = resolved;
-  // Issue #1548: a person answered. Attributed to the instance that was asked
-  // — `instanceId` is undefined for the primary, which `getActiveTaskForInstance`
-  // expects to be named by the tool id.
-  //
-  // Caveat: a tab loaded before #3820 still runs the browser-side Auto-Yes
-  // (`useAutoYes`), which sends no `origin` and is recorded as human. Issue
-  // #3821 retired it: the route refuses the `origin` a later tab sends, and a
-  // reload ends the older ones.
-  applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
-    promptType: effectivePromptData?.type,
+  const verdict = await applyWhilePaneIsCurrent(sent.context, { allowDead: true, owned: () => true }, () => {
+    // Issue #1548: a person answered. Attributed to the instance that was
+    // asked — `instanceId` is undefined for the primary, which
+    // `getActiveTaskForInstance` expects to be named by the tool id.
+    //
+    // Caveat: a tab loaded before #3820 still runs the browser-side Auto-Yes
+    // (`useAutoYes`), which sends no `origin` and is recorded as human. Issue
+    // #3821 retired it: the route refuses the `origin` a later tab sends, and a
+    // reload ends the older ones.
+    applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {
+      promptType: effectivePromptData?.type,
+    });
+    // The prompt poller normally stops while waiting for input. Resume response
+    // persistence and independently push the TUI redraw after this interaction.
+    startPolling(id, cliToolId, instanceId);
+    void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+    return undefined;
   });
+  if (verdict !== 'applied') logger.info('prompt-answered-pane-moved', { verdict });
 
-  recordAnswerForAudit(ctx, promptCheck, resolved, verifiedFrame);
-
-  // The prompt poller normally stops while waiting for input. Resume response
-  // persistence and independently push the TUI redraw after this interaction.
-  startPolling(id, cliToolId, instanceId);
-  void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+  recordAnswerForAudit(ctx, promptCheck, resolved, sent.context.frame, verdict === 'applied' ? null : sent.startedAt);
 
   // Issue #3093: a "No, tell … what to do differently" row continues as text
   // in the composer, which only `send` reaches — say so in the answer itself.

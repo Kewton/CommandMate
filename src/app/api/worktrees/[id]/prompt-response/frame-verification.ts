@@ -6,6 +6,7 @@
  * @module app/api/worktrees/[id]/prompt-response/frame-verification
  */
 
+import { applyWhilePaneIsCurrent, paneAnswerContextOf } from '@/lib/session/pane-answer-context';
 import { NextResponse } from 'next/server';
 import { captureBoundFrame, type BoundFrame, type BoundCapture } from '@/lib/session/cli-session';
 import { PromptAnswerGenerationUnconfirmedError } from '@/lib/prompt-answer-sender';
@@ -172,13 +173,24 @@ async function answerPlanReviewIfShown(
     return NextResponse.json(planReview.body);
   }
   const { id, db, cliToolId, instanceId } = ctx;
-  // A comment leaves the agent waiting on the same review; every other
-  // action is the human's decision about the plan.
-  if (planReview.action !== 'comment') {
-    applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {});
-  }
-  startPolling(id, cliToolId, instanceId);
-  void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+  // Issue #4304 F1-a (N9 / T6): the task event, the poll restart and the push
+  // act on the instance only while it still shows the pane the steps went to,
+  // looked at after the steps' last await.
+  const action = planReview.action;
+  await applyWhilePaneIsCurrent(
+    paneAnswerContextOf(captured.verifiedFrame, sessionName),
+    { allowDead: true, owned: () => true },
+    () => {
+      // A comment leaves the agent waiting on the same review; every other
+      // action is the human's decision about the plan.
+      if (action !== 'comment') {
+        applyEventToActiveTask(db, id, cliToolId, instanceId ?? cliToolId, 'prompt_answered_human', {});
+      }
+      startPolling(id, cliToolId, instanceId);
+      void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+      return undefined;
+    },
+  );
   return NextResponse.json(planReview.body);
 }
 

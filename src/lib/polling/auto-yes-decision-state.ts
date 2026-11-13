@@ -59,7 +59,8 @@ import {
 } from '@/types/auto-yes-decision';
 import { getOrInitGlobal } from '../global-state';
 import { enterFallbackScreenKey, getEnterFallbackSessionEpoch } from './auto-yes-enter-fallback-state';
-import { approvalTargetWithoutCursor } from './auto-yes-poller-state';
+import { approvalTargetWithoutCursor, type TickPane } from './auto-yes-poller-state';
+import type { PaneGeneration } from '../session/cli-session';
 import { createHash } from 'crypto';
 
 /**
@@ -80,8 +81,33 @@ export interface AutoYesDecisionRecord {
   grant: AutoYesState | null;
   /** The session epoch the tick read under. */
   epoch: number;
+  /**
+   * Issue #4304 F1-a (A3): the pane the tick read the confirmation from — its
+   * bound frame's generation, `sender-bound` for a direct caller with no frame,
+   * `unconfirmed` for a record written without one (a test seam, or kept by a
+   * hot reload from before #4304). A record about G is not reaffirmed by a tick
+   * reading H.
+   */
+  pane: TickPane | { readonly kind: 'unconfirmed' };
   /** Epoch ms of the tick. */
   at: number;
+}
+
+function sameGeneration(a: PaneGeneration, b: PaneGeneration): boolean {
+  return a.serverStartTime === b.serverStartTime && a.serverPid === b.serverPid && a.paneId === b.paneId;
+}
+
+/**
+ * Whether a record's pane is the pane a tick reads (Issue #4304 F1-a): G's
+ * record is not H's; a record whose pane is not known is not taken for the
+ * pane of a tick that knows its own. A direct caller (`sender-bound`) knows no
+ * pane, and compares as before.
+ */
+function recordIsAboutPane(record: AutoYesDecisionRecord, pane: TickPane): boolean {
+  if (pane.kind === 'sender-bound') return true;
+  const recorded = (record as { pane?: AutoYesDecisionRecord['pane'] }).pane ?? { kind: 'unconfirmed' as const };
+  if (recorded.kind === 'pane') return sameGeneration(recorded.generation, pane.generation);
+  return recorded.kind === 'sender-bound';
 }
 
 /** What identifies a confirmation, as {@link matchesConfirmation} compares it. */
@@ -146,6 +172,8 @@ export function recordAutoYesDecision(
     callId?: string | null;
     grant: AutoYesState | null;
     epoch: number;
+    /** Issue #4304 F1-a: the tick's pane. A record written without one is `unconfirmed`. */
+    pane?: TickPane;
   },
   at: number = Date.now(),
 ): void {
@@ -155,6 +183,7 @@ export function recordAutoYesDecision(
     confirmation: autoYesConfirmationKey(decision),
     grant: decision.grant,
     epoch: decision.epoch,
+    pane: decision.pane ?? { kind: 'unconfirmed' },
     at,
   });
 }
@@ -171,7 +200,7 @@ export function recordAutoYesDecision(
  */
 export function reaffirmAutoYesAnswering(
   compositeKey: string,
-  tick: AutoYesConfirmationIdentity & { grant: AutoYesState | null; epoch: number },
+  tick: AutoYesConfirmationIdentity & { grant: AutoYesState | null; epoch: number; pane: TickPane },
   at: number = Date.now(),
 ): boolean {
   const record = decisions.get(compositeKey);
@@ -180,7 +209,10 @@ export function reaffirmAutoYesAnswering(
     record.state !== 'answering' ||
     record.grant !== tick.grant ||
     record.epoch !== tick.epoch ||
-    !matchesConfirmation(record, tick)
+    !matchesConfirmation(record, tick) ||
+    // Issue #4304 F1-a (A3): the send this `answering` stands for went to the
+    // pane the record was read from — another pane's identical question is not it.
+    !recordIsAboutPane(record, tick.pane)
   ) {
     decisions.delete(compositeKey);
     return false;

@@ -22,24 +22,35 @@ import type { PromptData } from '@/types/models';
 
 const logger = createLogger('api/respond');
 
-/** The screen an answer is delivered at: the frame, and the prompt read off it. */
-export interface ScreenAtSend {
-  /**
-   * The raw capture bound to its pane generation (Issue #4304 F1-a), or
-   * undefined when it could not be bound — then `unbound` says why, and the
-   * keystroke answer is not sent at all.
-   */
-  frame: BoundFrame | undefined;
-  /** Why the capture could not be bound (Issue #4304 F1-a); undefined when it was. */
-  unbound?: BoundFrameUnknownReason;
-  promptData: PromptData | null;
-  /**
-   * Issue #3952 review P2-1: the session's input order, taken right before the
-   * capture — handed to `sendPromptAnswer` so a send admitted after this read
-   * makes the answer read the screen again.
-   */
-  readMark: number;
-}
+/**
+ * The screen an answer is delivered at: the frame, and the prompt read off it.
+ *
+ * Issue #4304 F1-a (N5): bound or not, as one discriminated value — a bound
+ * frame always comes with its prompt reading, an unbound capture never has a
+ * frame — so a keystroke answer cannot be sent off a screen it did not bind.
+ */
+export type ScreenAtSend =
+  | {
+      readonly kind: 'bound';
+      /** The raw capture bound to its pane generation. */
+      readonly frame: BoundFrame;
+      readonly unbound?: undefined;
+      readonly promptData: PromptData | null;
+      /**
+       * Issue #3952 review P2-1: the session's input order, taken right before
+       * the capture — handed to `sendPromptAnswer` so a send admitted after
+       * this read makes the answer read the screen again.
+       */
+      readonly readMark: number;
+    }
+  | {
+      readonly kind: 'unknown';
+      readonly frame?: undefined;
+      /** Why the capture could not be bound: the keystroke answer is not sent at all. */
+      readonly unbound: BoundFrameUnknownReason;
+      readonly promptData: null;
+      readonly readMark: number;
+    };
 
 /**
  * The screen the answer is about to go to (Issue #3907, review P2), for the
@@ -73,14 +84,14 @@ export async function screenAtSend(
   const captured = await captureBoundFrame({ worktreeId, cliToolId, instanceId });
   if (captured.kind === 'unknown') {
     logger.warn('failed-to-read-screen-before-send', { generationCheck: captured.reason });
-    return { frame: undefined, unbound: captured.reason, promptData: null, readMark };
+    return { kind: 'unknown', unbound: captured.reason, promptData: null, readMark };
   }
   const frame = captured;
   try {
     const { promptCheck } = assessPromptAnswerability(cliToolId, frame.frame);
-    return { frame, promptData: promptCheck?.isPrompt ? promptCheck.promptData ?? null : null, readMark };
+    return { kind: 'bound', frame, promptData: promptCheck?.isPrompt ? promptCheck.promptData ?? null : null, readMark };
   } catch {
     logger.warn('failed-to-read-screen-before-send');
-    return { frame, promptData: null, readMark };
+    return { kind: 'bound', frame, promptData: null, readMark };
   }
 }

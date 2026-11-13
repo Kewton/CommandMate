@@ -183,8 +183,9 @@ async function postPromptResponse(): Promise<{ status: number; body: Record<stri
     testBoundFrame(''),
     noteManualAnswerStarted(`${WT}:claude`),
   );
-  if (response === null) throw new Error('the send was not expected to go through');
-  return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  // Issue #4304 F1-a: the send returns what went out, or the response to return.
+  if ('sent' in response) throw new Error('the send was not expected to go through');
+  return { status: response.response.status, body: (await response.response.json()) as Record<string, unknown> };
 }
 
 beforeEach(async () => {

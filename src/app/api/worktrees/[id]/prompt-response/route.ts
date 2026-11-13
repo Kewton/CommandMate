@@ -42,7 +42,8 @@ import { finishAnsweredPrompt, sendResolvedAnswer } from './answer-delivery';
 import { notePromptResponseInLedger } from './ledger-record';
 import type { ValidatedPromptResponse } from './request-validation';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
-import { noteManualAnswerStarted, settleManualAnswer } from '@/lib/polling/auto-yes-manual-answer';
+import { noteManualAnswerStarted, settleManualPaneRefusal } from '@/lib/polling/auto-yes-manual-answer';
+import { paneAnswerContextOf } from '@/lib/session/pane-answer-context';
 import { AUTO_YES_BROWSER_ORIGIN } from '@/lib/prompt-response-body-builder';
 
 /** Issue #3821: the `reason` of the 409 a browser Auto-Yes answer is refused with. */
@@ -155,11 +156,12 @@ export async function POST(
     const resolution = resolveAnswerToSend(ctx, request, verified);
     if ('response' in resolution) {
       // Issue #3880: refused before any key — nothing of the person's answer is on the pane.
-      settleManualAnswer(manualAnswer, 'not-sent');
+      // Issue #4304 F1-a: a refusal on the verified frame releases only that pane's hold.
+      settleManualPaneRefusal(manualAnswer, paneAnswerContextOf(verified.verifiedFrame, sessionName));
       return noted(resolution.response);
     }
 
-    const sendFailure = await sendResolvedAnswer(
+    const send = await sendResolvedAnswer(
       ctx,
       request,
       sessionName,
@@ -169,9 +171,11 @@ export async function POST(
       verified.promptCheck?.isPrompt ? verified.promptCheck.promptData : null,
       verified.readMark,
     );
-    if (sendFailure) return noted(sendFailure);
+    if ('response' in send) return noted(send.response);
 
-    return noted(finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value, verified.verifiedFrame));
+    // Issue #4304 F1-a: what follows acts on the instance only while it still
+    // shows the pane the keys went to (`finishAnsweredPrompt`).
+    return noted(await finishAnsweredPrompt(ctx, verified.promptCheck, resolution.value, send.sent));
   } catch (error: unknown) {
     logger.error('failed-to-respond-to-prompt:', { error: error instanceof Error ? error.message : String(error) });
     const errorMessage = error instanceof Error ? error.message : 'Internal server error';
