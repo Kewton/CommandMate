@@ -753,6 +753,39 @@ export function scanMemberCalls(file: string, text: string, name: string): Membe
   return found;
 }
 
+/** A string or template literal of one file, its text read as {@link literalText} reads it. */
+export interface LiteralSite {
+  file: string;
+  /** Innermost named function holding it (as for {@link KeySite.site}). */
+  site: string;
+  line: number;
+}
+
+/**
+ * Issue #4345 1b: every string or template literal in one file whose text — each substitution
+ * written as one `\u0000` — passes `test` (a request URL composed in code; a comment is not one).
+ * A template nested in another's substitution is read on its own.
+ */
+export function scanLiterals(file: string, text: string, test: (literal: string) => boolean): LiteralSite[] {
+  const source = ts.createSourceFile(
+    file,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  );
+  const found: LiteralSite[] = [];
+  const visit = (node: ts.Node): void => {
+    const literal = literalText(node);
+    if (literal !== null && test(literal)) {
+      found.push({ file, site: siteName(node), line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1 });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
 let repositoryRawWrites: RawKeyWrite[] | null = null;
 /** Every raw key write in `src` outside the tmux module (read once per run). */
 export function scanRepositoryRawWrites(): RawKeyWrite[] {
