@@ -65,6 +65,8 @@ vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutputFresh: vi.fn(),
 }));
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),
@@ -271,7 +273,7 @@ describe('[#2522] one capture, one question, every surface', () => {
     const { sendKeys } = await import('@/lib/tmux/tmux');
     // 確定仕様 D: the digit alone advances one operation.
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
-      [`cm-${WORKTREE_ID}-command-code`, '2', false],
+      [`cm-${WORKTREE_ID}-command-code`, '2', false, { literal: true }],
     ]);
 
     const rows = db
