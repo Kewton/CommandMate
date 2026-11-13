@@ -69,7 +69,10 @@ import {
   detectAntigravityNumberedDialogPrompt,
   isAntigravityUnansweredNumberedScreen,
 } from '@/lib/detection/tools/antigravity/dialog';
-import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
+import {
+  readCommandCodeQuestionDialog,
+  readCommandCodeReviewPagePrompt,
+} from '@/lib/detection/tools/command-code/dialog';
 import type { PromptData, PromptType } from '@/types/models';
 import { selectAllowOnceOption } from './auto-yes-option-effect';
 import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
@@ -619,6 +622,20 @@ export const COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE =
   'A Command Code question is on screen, but its option list could not be read, so no key was ' +
   'sent. Answer it in the terminal, or retry once the screen has settled.';
 
+/**
+ * The refusal text for Command Code's `AskUserQuestion` Review page reached
+ * with questions still unanswered (`⚠ You have not answered all questions`,
+ * Issue #4313 (b)).
+ *
+ * {@link COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE} says to retry once the
+ * screen settles, which never helps here: the page is read, and confirming it
+ * would send `No answer` for questions nobody was shown (#2755 §7). Fixed text
+ * (SEC-003).
+ */
+export const COMMAND_CODE_REVIEW_PAGE_UNANSWERED_MESSAGE =
+  'A Command Code Review page is on screen with questions still unanswered, so no key was sent. ' +
+  'Go back and answer them in the terminal.';
+
 /** What {@link assessPromptAnswerability} read off a frame (Issue #2870). */
 export interface PromptAnswerability {
   /** The prompt read off the frame (the route builds its answer from this). */
@@ -661,15 +678,28 @@ export function assessPromptAnswerability(
     ? readCommandCodeQuestionDialog(frame)
     : { kind: 'none' as const };
 
+  // Issue #4313 (b): the `AskUserQuestion` Review page is declined by the
+  // reader above (#2755 §7), which is what keeps it from Auto-Yes and the
+  // status payload (#3497). A human answering it here is the one reader that
+  // takes it — `Submit` / `Cancel`, sent as the cursor and one Enter by
+  // `prompt-answer-sender`. The page reached with answers missing reads `null`
+  // and is refused below as before.
+  const commandCodeReviewPage = commandCodeQuestion.kind === 'unsupported'
+    && commandCodeQuestion.reason === 'review-page'
+    ? readCommandCodeReviewPagePrompt(frame)
+    : null;
+
   // Plainly up and unreadable: refuse before the generic parser, whose partial
   // list is exactly what must not reach a keystroke.
-  if (commandCodeQuestion.kind === 'unsupported') {
+  if (commandCodeQuestion.kind === 'unsupported' && commandCodeReviewPage === null) {
     return {
       promptCheck: { isPrompt: false, cleanContent: cleanOutput },
       isCommandCodeQuestion: false,
       refusal: {
         reason: UNSUPPORTED_DIALOG_LAYOUT_REASON,
-        message: COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE,
+        message: commandCodeQuestion.reason === 'review-page'
+          ? COMMAND_CODE_REVIEW_PAGE_UNANSWERED_MESSAGE
+          : COMMAND_CODE_UNSUPPORTED_QUESTION_MESSAGE,
       },
       presence: {
         present: false,
@@ -689,6 +719,7 @@ export function assessPromptAnswerability(
 
   const isCommandCodeQuestion = commandCodeQuestion.kind === 'prompt';
   const candidate: PromptDetectionResult = (commandCodeQuestion.kind === 'prompt' ? commandCodeQuestion.prompt : null)
+    ?? commandCodeReviewPage
     ?? toolDialog
     ?? (declinedAgyScreen
       ? { isPrompt: false, cleanContent: cleanOutput }

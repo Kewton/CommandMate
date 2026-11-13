@@ -569,6 +569,104 @@ function readCommandCodeOptionRecommendations(
   return titles.map((rows) => isRecommendedTitle(rows.join(' ')));
 }
 
+/** `1. Submit` on the Review page, the `❯` optional (same shape as `selection-shape`'s). */
+const REVIEW_SUBMIT_ROW_PATTERN = /^[^\S\n]*(❯)?[^\S\n]*1[.)][^\S\n]+Submit[^\S\n]*$/;
+/** `2. Cancel` on the Review page, the `❯` optional. */
+const REVIEW_CANCEL_ROW_PATTERN = /^[^\S\n]*(❯)?[^\S\n]*2[.)][^\S\n]+Cancel[^\S\n]*$/;
+/** The tab strip row the Review page is drawn under (`✔ Q | ● Review`). */
+const REVIEW_TAB_ROW_PATTERN = /\|[^\S\n]*●[^\S\n]*Review\b/;
+
+/** The question the Review page prompt is published with (fixed text, no frame content). */
+export const COMMAND_CODE_REVIEW_PAGE_QUESTION = 'Submit your answers?';
+
+/**
+ * Read Command Code's `AskUserQuestion` Review page as a two-option prompt that
+ * only a HUMAN answers (Issue #4313 (b), B-1).
+ *
+ * The Review page (`❯ 1. Submit` / `2. Cancel` over `← to go back and edit`)
+ * is declined by {@link readCommandCodeQuestionDialog} as `review-page`
+ * (#2755 §7), and that decline is what keeps it away from Auto-Yes: the status
+ * path and the Auto-Yes poller publish no payload for it (#3497 — `Submit`
+ * commits whatever stands as the answers, and Auto-Yes's own `1` there would be
+ * the worker's proposal presented as the human's approval). It also left
+ * `/prompt-response` with nothing to answer, so after Auto-Yes had answered a
+ * single-select question with its digit (`answer_only`), a human could not
+ * finish the question from CommandMate either (#4228 UAT: eight minutes on the
+ * page, `respond` refused with `unsupported_dialog_layout`).
+ *
+ * This reading is that missing half, and it is deliberately NOT folded into
+ * {@link readCommandCodeQuestionDialog}: its ONLY caller is
+ * `assessPromptAnswerability` (`/prompt-response`, a human's answer), so the
+ * status verdict, the Auto-Yes poller and the push notification read the page
+ * exactly as before.
+ *
+ * `null` unless the frame is the Review page, it carries no
+ * `⚠ You have not answered all questions` (that page must never be confirmed;
+ * see `prompt-answer-sender`'s multi-select arm), and exactly one of the two
+ * rows carries the `❯` — the default a `--default` resolves to, and the row the
+ * keys are counted from.
+ *
+ * Measured on 1.54.1 (`tests/fixtures/command-code-askuserquestion-2754/`):
+ * `Enter` on `❯ 1. Submit` sends the answers. 1.88.2 is not captured (UAT).
+ *
+ * @param frame - a capture with its box drawing intact (ANSI optional)
+ */
+export function readCommandCodeReviewPagePrompt(
+  frame: string | null | undefined,
+): PromptDetectionResult | null {
+  if (!frame) return null;
+  const page = readCommandCodeReviewPage(frame);
+  if (page === null || page.hasUnansweredWarning) return null;
+
+  const lines = frame.replace(/\r\n/g, '\n').split('\n').map(stripAnsi);
+  // The page's own rows: from the last tab strip naming `● Review` down to the
+  // last row carrying content. `readCommandCodeReviewPage` has already proved
+  // the strip sits under the frame's last rule row.
+  let tabLineIndex = -1;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (REVIEW_TAB_ROW_PATTERN.test(lines[i])) {
+      tabLineIndex = i;
+      break;
+    }
+  }
+  if (tabLineIndex < 0) return null;
+  let last = lines.length - 1;
+  while (last > tabLineIndex && lines[last].trim() === '') last -= 1;
+  const pageRows = lines.slice(tabLineIndex, last + 1);
+
+  const submitIndex = pageRows.findIndex((row) => REVIEW_SUBMIT_ROW_PATTERN.test(row));
+  const cancelIndex = pageRows.findIndex((row) => REVIEW_CANCEL_ROW_PATTERN.test(row));
+  if (submitIndex < 0 || cancelIndex !== submitIndex + 1) return null;
+  const cursorOnSubmit = REVIEW_SUBMIT_ROW_PATTERN.exec(pageRows[submitIndex])?.[1] !== undefined;
+  const cursorOnCancel = REVIEW_CANCEL_ROW_PATTERN.exec(pageRows[cancelIndex])?.[1] !== undefined;
+  if (cursorOnSubmit === cursorOnCancel) return null;
+
+  // What is being submitted — the answers the page lists between the tab strip
+  // and `1. Submit` — is what the human is shown; nothing above the rule.
+  const summary = pageRows
+    .slice(1, submitIndex)
+    .map((row) => row.trim())
+    .filter((row) => row !== '')
+    .join('\n');
+
+  return buildMultipleChoiceResult(
+    COMMAND_CODE_REVIEW_PAGE_QUESTION,
+    [
+      { number: 1, label: 'Submit', isDefault: cursorOnSubmit },
+      { number: 2, label: 'Cancel', isDefault: cursorOnCancel },
+    ],
+    { instructionText: summary, approvalTarget: summary },
+    pageRows.join('\n'),
+    truncateRawContent,
+    // The sender confirms this page with the cursor and ONE Enter
+    // (`prompt-answer-sender`'s Review arm). Should that arm ever not engage,
+    // `answer_only` keeps the fallback to the digit alone, never a digit and an
+    // Enter that would land on whatever the tool draws next.
+    'answer_only',
+    true,
+  );
+}
+
 /**
  * The same reading as a `PromptDetectionResult | null`, for the call sites whose
  * only question is "is there an answerable prompt here?".

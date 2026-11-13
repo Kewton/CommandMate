@@ -12,7 +12,10 @@ import { normalizeFrame } from '@/lib/detection/tools/frame';
 import { getToolStatusDetector } from '@/lib/detection/tools/registry';
 import type { DialogAnswerMode, DialogVerdict } from '@/lib/detection/tools/types';
 import { isTypedTextFieldOption } from '@/lib/detection/prompt-detect-multiple-choice';
-import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
+import {
+  COMMAND_CODE_REVIEW_PAGE_QUESTION,
+  readCommandCodeQuestionDialog,
+} from '@/lib/detection/tools/command-code/dialog';
 import { readCommandCodeReviewPage } from '@/lib/detection/selection-shape';
 import type { MultipleChoicePromptData, PromptData, PromptType, SubmitMode } from '@/types/models';
 import { isValidSubmitMode } from '@/types/models';
@@ -613,6 +616,19 @@ async function sendCommandCodeMultiSelectAnswer(
   }
 }
 
+/**
+ * Is this the Review page payload `readCommandCodeReviewPagePrompt` publishes
+ * (Issue #4313 (b))? Judged on the payload's own fixed question and its two
+ * labels, so no other prompt of any tool can take the Review arm below.
+ */
+function isCommandCodeReviewPagePrompt(promptData: PromptData | undefined): promptData is MultipleChoicePromptData {
+  return promptData?.type === 'multiple_choice'
+    && promptData.question === COMMAND_CODE_REVIEW_PAGE_QUESTION
+    && promptData.options.length === 2
+    && promptData.options[0].label === 'Submit'
+    && promptData.options[1].label === 'Cancel';
+}
+
 /** The prompt a frame shows, read as `/prompt-response` verifies one; null when none is answerable. */
 function readAnswerablePrompt(cliToolId: CLIToolType, frame: string): PromptData | null {
   const { promptCheck, refusal } = assessPromptAnswerability(cliToolId, frame);
@@ -1034,9 +1050,21 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // `detectDialog` what the dialog ON SCREEN takes. This condition is now only
   // about which INPUT METHOD to use for a dialog that was already cleared as
   // answerable by number.
-  const isCursorNavMultiChoice = (cliToolId === 'claude' || cliToolId === 'antigravity')
+  //
+  // Issue #4313 (b): and Command Code's `AskUserQuestion` Review page, which
+  // only `/prompt-response` publishes (a human's answer; the status path and
+  // Auto-Yes read no prompt there, #3497). `Enter` on `❯ 1. Submit` is the
+  // keystroke measured to send the answers (1.54.1,
+  // `docs/design/command-code-1541-askuserquestion.md` §4 — the multi-select
+  // arm confirms the same page the same way); a digit there is not measured,
+  // so none is typed. `↓` / `↑` between its two rows is not measured either
+  // (1.54.1 nor 1.88.2) and is what `Cancel` from `Submit` takes.
+  const isCommandCodeReviewPage = cliToolId === 'command-code'
+    && isCommandCodeReviewPagePrompt(promptData)
+    && (answer === '1' || answer === '2');
+  const isCursorNavMultiChoice = isCommandCodeReviewPage || ((cliToolId === 'claude' || cliToolId === 'antigravity')
     && (promptData?.type === 'multiple_choice' || fallbackPromptType === 'multiple_choice')
-    && /^\d+$/.test(answer);
+    && /^\d+$/.test(answer));
 
   if (isCursorNavMultiChoice) {
     const targetNum = parseInt(answer, 10);
@@ -1095,8 +1123,11 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // the Up/Down navigation already engages the cursor, so no extra nudge is
       // needed. Old-format numbered prompts (isAskUserQuestion unset) keep their
       // exact prior key sequence, so their response behavior is unchanged.
+      // Not on Command Code's Review page (#4313): the nudge is Claude's and
+      // agy's measurement, and on that page it is an unmeasured `↓` off Submit.
       const isAskUserQuestionPicker = shown?.type === 'multiple_choice'
-        && shown.isAskUserQuestion === true;
+        && shown.isAskUserQuestion === true
+        && !isCommandCodeReviewPage;
       return (isAskUserQuestionPicker && offset === 0)
         ? ['Down', 'Up', 'Enter']
         : [...navigationKeys, 'Enter'];
@@ -1106,6 +1137,8 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // A re-read that is not a choice list says nothing about the cursor:
       // the keys cannot be placed, so none are typed.
       if (reread !== null && reread.type !== 'multiple_choice') return 'target-changed';
+      // #4313: the Review page's keys are counted from ITS cursor, on that page only.
+      if (isCommandCodeReviewPage && reread !== null && !isCommandCodeReviewPagePrompt(reread)) return 'target-changed';
       const keys = cursorKeys(reread ?? promptData);
       writer.assertOwned(false);
       await sendSpecialKeysWhileCurrent(sessionName, keys, writer.stillCurrent, touch);
