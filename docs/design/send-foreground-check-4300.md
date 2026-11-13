@@ -347,7 +347,7 @@ H4（#4303 の小さな直しを先に出す）は R4.4、H5（tmux の最低版
 
 ## 改訂 7（2026-11-14、Issue #4304）: D4・D5 の処分、行の証拠を capture の世代結合の設計へ委ね、strict の担当を決める
 
-- 材料（全部読んだ）: 改訂 6（`bd55f8469`）の再確認 `workspace/orchestration/runs/2026-11-13/prereview-4304-rev6-reply.md`（codex-2、**承認保留**。A: 返された capture の世代帰属、B: strict の担当 PR、D4・D5 への意見）、人の承認（2026-11-14 00:1x、PM 追補 1 の 7 `2026-11-14/pm-brief-stage1-addendum1.md`）、A の原因調査 `2026-11-14/enabler-return-4304-A-cause.md`、そこから切り出した設計 `docs/design/capture-generation-binding-4304.md`（以下 **CG**。PR #4376、ブランチ `docs/4304-capture-generation`、第 3 版 `807a329f0`、2-4-4 を 3 回で**条件つき承認** `2026-11-14/prereview-4304-capgen-3-reply.md`）。
+- 材料（全部読んだ）: 改訂 6（`bd55f8469`）の再確認 `workspace/orchestration/runs/2026-11-13/prereview-4304-rev6-reply.md`（codex-2、**承認保留**。A: 返された capture の世代帰属、B: strict の担当 PR、D4・D5 への意見）、人の承認（2026-11-14 00:1x、PM 追補 1 の 7 `2026-11-14/pm-brief-stage1-addendum1.md`）、A の原因調査 `2026-11-14/enabler-return-4304-A-cause.md`、そこから切り出した設計 [`docs/design/capture-generation-binding-4304.md`](./capture-generation-binding-4304.md)（以下 **CG**。同じ develop にある文書。第 3 版で、develop へのマージは `7677abe5d`。2-4-4 を 3 回で**条件つき承認** `2026-11-14/prereview-4304-capgen-3-reply.md`）。
 - **この節が置き換えるもの**: R6.2 の要決定 D4・D5（処分済み）と D4 の表の E1 の「配送の後の再観測で `indeterminate` と言うだけ」・「PM が受け入れない場合、#4304 の受入基準を満たす案は E4 だけ」、R6.1・R6.2 の世代の識別子 `(pane_id, nonce)`、R6.5 の全部、R6.6 の 4 の「argv だけを外す対照」と 9、R6.7 の順の表（#4303-A の行の strict を含む）と PR2b の受入の「保証の外」。改訂 6 の他の行（V1・V2、証拠の表の観測ごとの行、R6.3、R6.4、対照の 1〜3・5〜8・10、補完）は残す。
 - **実装は今日は入れない。PR2a・PR2b は改訂 7 の承認の後**（加えて R7.6 の順のとおり）。
 - 基準: file:line はこの worktree の src（改訂 6 と同じ基準。名前で探して取り直した）。改訂 6 の見出しの「最後の改訂」は、A を同じ種類の 3 回目として CG へ切り出したので守れなかった（改訂 7 は処分と参照の書き直しが主で、新しい観測の仕組みを足さない）。
