@@ -82,7 +82,7 @@ import {
   type CLIToolType,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
-import { worktreeApi, ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
+import { ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
 import { readRunningInstances } from '@/lib/api-client-agent-roles';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
@@ -118,6 +118,7 @@ import {
   subscribeHandoffRegistry,
   unregisterHandoffPage,
   type HandoffPageRegistration,
+  type HandoffPageRequest,
 } from '@/lib/handoff/page-registration';
 import { handoffTakeBackOf } from '@/lib/handoff/take-back';
 import {
@@ -346,6 +347,52 @@ function classifyKillFailure(err: unknown): 'ended' | 'refused' | 'errored' | 's
   if (err.status === 404) return 'ended';
   if (err.status >= 500) return 'errored';
   return err.status >= 400 ? 'refused' : 'silent';
+}
+
+/**
+ * Issue #4345 1b: the kill-session POST, as `worktreeApi.killSession` sends it (the same request
+ * through `fetchApiResponse`, the same `ApiError`s: the redirect to /login, a non-2xx with the
+ * error body's message, a non-JSON body, a body that does not parse), with its answer reported
+ * through the hand-off gateway (`reportHandoffPageResponse`) for `authRequest` — the registration
+ * the kill left under — as soon as the response is in hand, before its body is read and before
+ * its status is folded into an `ApiError`. The kill's classification ({@link classifyKillFailure})
+ * and what it records are unchanged.
+ */
+async function killSessionThroughGateway(
+  worktreeId: string,
+  target: SessionKillTarget,
+  authRequest: HandoffPageRequest
+): Promise<void> {
+  const query = new URLSearchParams();
+  if (target.cliToolId) query.set('cliTool', target.cliToolId);
+  if (target.instanceId) query.set('instance', target.instanceId);
+  const queryString = query.toString();
+  try {
+    const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/kill-session${queryString ? `?${queryString}` : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    reportHandoffPageResponse(authRequest, response);
+    const redirectError = detectAuthRedirect(response);
+    if (redirectError) throw redirectError;
+    if (!response.ok) {
+      let errorBody: { error?: string } = {};
+      if ((response.headers?.get('content-type') ?? '').includes('application/json')) {
+        try {
+          errorBody = (await response.json()) as { error?: string };
+        } catch {
+          errorBody = {};
+        }
+      }
+      throw new ApiError(errorBody.error || `HTTP error ${response.status}`, response.status, errorBody);
+    }
+    const formatError = detectNonJsonBody(response);
+    if (formatError) throw formatError;
+    await response.json();
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0, error);
+  }
 }
 
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
@@ -1900,6 +1947,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (!target || isKillPendingRef.current) return 'unknown';
     isKillPendingRef.current = true;
     setIsKillPending(true);
+    // Issue #4345 1b: the kill's owner and order, fixed as it leaves (this page's registration then).
+    const killAuthRequest = beginHandoffPageRequest(handoffRegistrationRef.current);
 
     // Issue #1171: only wipe the GLOBAL (mobile-consumed / active-scoped) message
     // + prompt state when the killed target IS the active instance. A PC split
@@ -1932,7 +1981,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Issue #874/#875: always scope the kill to the target agent instance. The
       // primary instance uses instanceId === cliToolId (byte-identical session
       // name); alias instances terminate only that instance's session.
-      await worktreeApi.killSession(worktreeId, target.cliToolId, target.instanceId);
+      // Issue #4345 1b: its 401 reaches the registry before it becomes a "refused" (the toast and
+      // the kept target as before); what the kill did is still recorded for its own target.
+      await killSessionThroughGateway(worktreeId, target, killAuthRequest);
       await finishEnded();
       return 'stopped';
     } catch (err) {
