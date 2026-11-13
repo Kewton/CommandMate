@@ -73,7 +73,12 @@ export function operationNeedsReconcile(operation: Pick<PromoteOperationView, 's
   return operation.transitionPending || operation.state === 'unknown' || operation.state === 'in_flight' || operation.state === 'approved';
 }
 
-function operationJson(operation: PromoteOperationView): MemDecisionOperationJsonV1 {
+/**
+ * One operation as `--json` prints it. `itemWithheld`: its item matches a current rule (I5),
+ * so where it was written (the destination, and the comment's URL that names it) is withheld
+ * too — the reconcile's state (I8) is kept as it is.
+ */
+function operationJson(operation: PromoteOperationView, itemWithheld: boolean): MemDecisionOperationJsonV1 {
   return {
     id: operation.id,
     state: operation.state,
@@ -83,8 +88,9 @@ function operationJson(operation: PromoteOperationView): MemDecisionOperationJso
     unknownReason: operation.unknownReason,
     decidedBy: operation.decidedBy,
     effect: operation.effect,
-    destination: operation.destination,
-    resultRef: operation.resultRef,
+    destination: itemWithheld ? null : operation.destination,
+    destinationWithheld: itemWithheld,
+    resultRef: itemWithheld ? null : operation.resultRef,
     approvedAt: operation.approvedAt,
     settledAt: operation.settledAt,
   };
@@ -107,7 +113,7 @@ function decisionJson(entry: PromoteListWire['decisions'][number]): MemDecisionJ
     author: { instanceId: item.owner.instanceId, worktreeId: item.owner.worktreeId },
     withheld,
     stale: item.stale,
-    operations: entry.operations.map(operationJson),
+    operations: entry.operations.map((operation) => operationJson(operation, withheld !== null)),
   };
 }
 
@@ -132,7 +138,8 @@ export function toDecisionsJson(repositoryId: string, list: PromoteListWire, pen
       itemId: entry.operation.itemId,
       itemVersion: entry.itemVersion,
       itemState: entry.item ? entry.item.state : null,
-      operation: operationJson(entry.operation),
+      // A closed item's operation too (I5): its item, when still there, says whether it is withheld.
+      operation: operationJson(entry.operation, Boolean(entry.item?.withheld)),
     })),
   };
 }
@@ -143,7 +150,8 @@ function operationLine(operation: MemDecisionOperationJsonV1): string {
     operation.concurrentEdit ? ' concurrent-edit' : '',
     operation.state === 'unknown' || operation.unknownReason ? ` unknown(${operation.unknownReason ?? '-'})` : '',
   ].join('');
-  return `op ${operation.id} ${operation.state}${flags} decided-by=${operation.decidedBy ?? '-'} effect=${operation.effect}`;
+  const withheld = operation.destinationWithheld ? ' destination-withheld' : '';
+  return `op ${operation.id} ${operation.state}${flags} decided-by=${operation.decidedBy ?? '-'} effect=${operation.effect}${withheld}`;
 }
 
 /** The text output (design §3.4.1): one head line per decision, an indented line per operation. */

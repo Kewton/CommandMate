@@ -38,7 +38,10 @@ export interface MemDecisionOperationJsonV1 {
   unknownReason: string | null;
   decidedBy: 'server' | 'human' | null;
   effect: PromoteOperationView['effect'];
-  destination: PromoteOperationView['destination'];
+  /** null when its item is withheld (I5): where it was written is not printed. */
+  destination: PromoteOperationView['destination'] | null;
+  /** The item matches a current rule, so `destination` and `resultRef` are withheld. */
+  destinationWithheld: boolean;
   resultRef: string | null;
   approvedAt: string;
   settledAt: string | null;

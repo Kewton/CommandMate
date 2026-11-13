@@ -87,7 +87,7 @@ import { GET as getDecisions } from '@/app/api/repositories/[id]/mem/decisions/r
 import { GET as getDiff } from '@/app/api/repositories/[id]/mem/decisions/[itemId]/diff/route';
 import { createRepository } from '@/lib/db/db-repository';
 import { getMemSettings, saveMemSettings } from '@/lib/db/mem-db';
-import { memAddItem } from '@/lib/mem/service';
+import { memAddItem, memCloseItem } from '@/lib/mem/service';
 import { promoteApprove, promotePreview, type PromoteDeps } from '@/lib/promote/service';
 import { summarizeDecisionCounts } from '@/lib/promote/decision-summary';
 import { decisionCountsOf } from '@/lib/promote/decision-counts';
@@ -319,7 +319,7 @@ describe('I8・I7: the operations of the list, from the route to what the CLI pr
       ['author', 'createdBy', 'humanApprovals', 'id', 'operations', 'promoteTo', 'quote', 'quoteAt', 'stale', 'state', 'text', 'version', 'withheld'].sort()
     );
     expect(Object.keys(all.decisions[0].operations[0]).sort()).toEqual(
-      ['approvedAt', 'concurrentEdit', 'decidedBy', 'destination', 'effect', 'id', 'resultRef', 'settledAt', 'state', 'transitionPending', 'transitionReason', 'unknownReason'].sort()
+      ['approvedAt', 'concurrentEdit', 'decidedBy', 'destination', 'destinationWithheld', 'effect', 'id', 'resultRef', 'settledAt', 'state', 'transitionPending', 'transitionReason', 'unknownReason'].sort()
     );
     expect(all.counts).toEqual({ open: 3, recorded: 1, approvable: true });
 
@@ -417,6 +417,66 @@ describe('I5: a match anywhere in the item withholds all of it', () => {
     expect(json.decisions[0]).toMatchObject({ text: null, quote: null, promoteTo: null, quoteAt: null, withheld: { code: 'secret_like', field } });
     const printed = `${JSON.stringify(json)}\n${decisionsLines(json).join('\n')}`;
     for (const leaked of [GHP, '方針を A にする', '無害な引用']) expect(printed).not.toContain(leaked);
+  });
+
+  /** The JSON and the text of the list, from the route's real answer. */
+  async function printed(): Promise<{ json: ReturnType<typeof toDecisionsJson>; all: string }> {
+    const json = toDecisionsJson(repoA, (await listRoute()).body as PromoteListWire, false);
+    return { json, all: `${JSON.stringify(json)}\n${decisionsLines(json).join('\n')}` };
+  }
+  /** What names where an operation wrote: the comment's repository and URL. */
+  const WRITTEN_AT = ['"owner":"o"', '"repo":"r"', 'issuecomment', 'issue_comment"'];
+
+  it('an item with approvals that a current rule withholds: no operation says where it was written; its reconcile state stays (I5・I8)', async () => {
+    const made = await addDecision(WT);
+    const op = await approveOnScreen(made.id, { transition: () => ({ status: 409, body: { code: 'version_conflict' } }) });
+    // (control) before the rule matches, the operation's destination is printed.
+    const before = await printed();
+    expect(before.json.decisions[0].operations[0]).toMatchObject({ destinationWithheld: false, destination: { kind: 'issue_comment', owner: 'o', repo: 'r' } });
+    expect(before.json.decisions[0].operations[0].resultRef).toEqual(expect.any(String));
+
+    storeOld(made.id, 'quote', `引用 ${GHP}`);
+    const after = await printed();
+    expect(after.json.decisions[0].withheld).toMatchObject({ field: 'quote' });
+    expect(after.json.decisions[0].operations).toEqual([
+      expect.objectContaining({
+        id: op.id,
+        state: 'succeeded',
+        transitionPending: true,
+        transitionReason: 'version_conflict',
+        concurrentEdit: false,
+        destination: null,
+        destinationWithheld: true,
+        resultRef: null,
+      }),
+    ]);
+    for (const leaked of [GHP, ...WRITTEN_AT]) expect(after.all).not.toContain(leaked);
+    expect(after.all).toContain(`op ${op.id} succeeded pending-transition(version_conflict) decided-by=`);
+    expect(after.all).toContain('destination-withheld');
+  });
+
+  it('the same for an unsettled operation of a closed item (the unresolved side)', async () => {
+    const made = await addDecision(WT);
+    gh.postAnswer = () => failed('', { code: null, timedOut: true });
+    const op = await approveOnScreen(made.id);
+    gh.postAnswer = undefined;
+    expect((await memCloseItem(db, WT, made.id, { instanceId: 'claude' })).status).toBeLessThan(300);
+    // (control) closed, not withheld: the unresolved operation names where it was sent.
+    const before = await printed();
+    expect(before.json.decisions).toEqual([]);
+    expect(before.json.unresolved[0].operation).toMatchObject({ id: op.id, state: 'unknown', destinationWithheld: false, destination: { owner: 'o' } });
+
+    storeOld(made.id, 'evidence', JSON.stringify([`url:https://example.invalid/${GHP}`]));
+    const after = await printed();
+    expect(after.json.unresolved).toEqual([
+      expect.objectContaining({
+        itemId: made.id,
+        itemState: 'closed',
+        operation: expect.objectContaining({ id: op.id, state: 'unknown', unknownReason: 'timeout', destination: null, destinationWithheld: true, resultRef: null }),
+      }),
+    ]);
+    for (const leaked of [GHP, ...WRITTEN_AT]) expect(after.all).not.toContain(leaked);
+    expect(after.all).toContain(`unresolved op ${op.id} unknown unknown(timeout) decided-by=`);
   });
 
   it('(control) the same item under the rule set it was checked with is drawn', async () => {
