@@ -46,7 +46,18 @@ beforeEach(() => {
   world.setMode('on');
   boot = 'boot-1';
 });
-afterEach(() => world.close());
+afterEach(() => {
+  vi.useRealTimers();
+  world.close();
+});
+
+// #4336: the item's createdAt (service `deps.now ?? Date.now`) and the roster's createdAt
+// (`setAgentInstances` → `Date.now()`) both read the same clock; pin it so "same millisecond" is decided here.
+const T = Date.UTC(2026, 10, 13, 0, 0, 0);
+function pinClock(at: number): void {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(at);
+}
 
 function target(): MemTargetResolved {
   return {
@@ -166,9 +177,11 @@ describe('who receives it when the author is gone (§3.3)', () => {
 
   it('2nd review ①: the first roster save of a derived worktree copies its primary as lazy (no successor); the new id is roster', async () => {
     world.worktree('wt-3', null);
+    pinClock(T);
     const item = await world.add('next', PAST);
     await check();
     removeAgentInstance(world.db, 'wt-1', 'claude');
+    pinClock(T + 1);
     // The first save, as `createInstanceWithRole` makes it: the derived primary plus a new instance.
     setAgentInstances(world.db, 'wt-3', [
       { id: 'claude', cliTool: 'claude', alias: '', order: 0 },
@@ -181,6 +194,35 @@ describe('who receives it when the author is gone (§3.3)', () => {
     // (control) a primary added to a worktree that already has rows is roster.
     addAgentInstance(world.db, 'wt-3', { id: 'codex', cliTool: 'codex', alias: '', order: 2 });
     expect(getInstanceIncarnationRow(world.db, 'wt-3', 'codex')?.issuedBy).toBe('roster');
+  });
+
+  it('#4336 boundary: a roster saved in the same millisecond as the item is not a successor (strict >), T+1 is, lazy never is', async () => {
+    const run = async (saveAt: number, lazy: boolean) => {
+      world.worktree('wt-3', null);
+      pinClock(T);
+      const item = await world.add('next', PAST);
+      await check();
+      removeAgentInstance(world.db, 'wt-1', 'claude');
+      pinClock(saveAt);
+      setAgentInstances(world.db, 'wt-3', [
+        { id: 'claude', cliTool: 'claude', alias: '', order: 0 },
+        { id: 'codex-2', cliTool: 'codex', alias: '', order: 1 },
+      ]);
+      expect(getInstanceIncarnationRow(world.db, 'wt-3', 'codex-2')?.issuedBy).toBe('roster');
+      const id = lazy ? 'claude' : 'codex-2';
+      return listFor('wt-3', id).filter((n) => n.itemId === item.id).map((n) => n.audience);
+    };
+    expect(await run(T, false)).toEqual([]); // same T: the old expectation goes red
+    world.close();
+    world.open('mem-notices-4222-b-');
+    world.worktree('wt-1', [{ id: 'claude', cliTool: 'claude' }, { id: 'codex-2', cliTool: 'codex' }]);
+    world.setMode('on');
+    expect(await run(T + 1, false)).toEqual(['successor']);
+    world.close();
+    world.open('mem-notices-4222-c-');
+    world.worktree('wt-1', [{ id: 'claude', cliTool: 'claude' }, { id: 'codex-2', cliTool: 'codex' }]);
+    world.setMode('on');
+    expect(await run(T + 1000, true)).toEqual([]); // lazy, even later
   });
 
   it('nobody may take it → it stays in the screen’s list, and a person takes it there', async () => {
