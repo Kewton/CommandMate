@@ -9,7 +9,9 @@
 import { screenRequestHeaders } from '@/lib/security/screen-request';
 import type { MemItemView } from '@/types/mem';
 import type { PromoteEffect, PromoteOperationView, PromotePreviewView } from './model';
-import type { DecisionCounts } from './decision-counts';
+import type { DecisionBranchesBody, DecisionCounts } from './decision-counts';
+
+export type { DecisionBranchesBody, DecisionBranchView } from './decision-counts';
 
 export const PROMOTE_SCREEN_TIMEOUT_MS = 30000;
 
@@ -77,6 +79,8 @@ export interface PromoteFindingView {
 type OperationBody = { ok: true; operation: PromoteOperationView; item: MemItemView | null; finding?: PromoteFindingView };
 
 export const promoteApi = {
+  /** Issue #4355 §3.1.2: the branches to choose from (the screen shows their names only). */
+  branches: (repositoryId: string) => call<DecisionBranchesBody>(`${base(repositoryId)}/branches`),
   list: (repositoryId: string, branch: string) => call<PromoteListBody>(`${base(repositoryId)}?branch=${encodeURIComponent(branch)}`),
   preview: (
     repositoryId: string,

@@ -577,7 +577,23 @@
       "pending": "Written, but the item did not move ({reason})",
       "concurrent": "Something else changed the document while writing. Check the document",
       "reapproval": "Changed since the approval ({reason}). Make the diff again",
-      "failed": "Could not do it ({code})"
+      "failed": "Could not do it ({code})",
+      "repository": "Repository",
+      "chooseBranch": "Choose a branch",
+      "branchesLoading": "Loading branches…",
+      "branchesError": "Could not load the branches",
+      "noBranches": "No branch or worktree holds a decision",
+      "branchOption": {
+        "notListed": "{branch} (not in the list; mem is not on)"
+      },
+      "counts": {
+        "line": "{open} awaiting approval · {recorded} awaiting reflection",
+        "notApprovable": "cannot approve (mode {mode})",
+        "unknown": "The counts are unknown (the roots disagree on the mode)"
+      },
+      "pendingOnly": "Awaiting approval only",
+      "foldRecorded": "Recorded, awaiting reflection ({count})",
+      "foldPromoted": "Reflected ({count})"
     },
     "modeHelp": {
       "off": "Nothing is evaluated, written or inserted. The items are kept.",
