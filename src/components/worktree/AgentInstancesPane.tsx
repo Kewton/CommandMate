@@ -16,6 +16,8 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useMemo, memo } from 'react';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import { useLocale, useTranslations } from 'next-intl';
 import {
   GripVertical,
@@ -215,6 +217,8 @@ function useAgentSourceByInstance(
   provided?: Readonly<Partial<Record<string, AgentEventSourceView>>>,
 ): Readonly<Partial<Record<string, AgentEventSourceView>>> {
   const [fetched, setFetched] = useState<Partial<Record<string, AgentEventSourceView>>>({});
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   // A primitive, not the array: `instances` is a fresh array on every render of
   // every parent, and depending on it directly would restart the interval each
   // time. What the effect actually depends on is whether there is anything to
@@ -233,7 +237,9 @@ function useAgentSourceByInstance(
     const read = async (): Promise<void> => {
       const requestSeq = ++lastRequestSeq;
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`);
+        // Issue #4345 1c: the pane's own detail read reports its 401 (never a recovery: only the
+        // page's detail read recovers) before the non-2xx return.
+        const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}`);
         if (!response.ok) return;
         const body: Worktree = await response.json();
         if (cancelled) return;
@@ -270,7 +276,7 @@ function useAgentSourceByInstance(
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [worktreeId, hasSubscriptionSource, provided]);
+  }, [worktreeId, hasSubscriptionSource, provided, handoffOwner]);
 
   return provided ?? fetched;
 }

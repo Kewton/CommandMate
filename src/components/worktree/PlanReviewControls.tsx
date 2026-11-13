@@ -52,6 +52,8 @@ import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { readPromptResponseReply } from '@/lib/prompt-response-outcome';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 export type PlanReviewControlAction = 'comment' | 'submit' | 'approve' | 'cancel';
 
@@ -123,6 +125,8 @@ export function PlanReviewControls({
   compact = false,
 }: PlanReviewControlsProps) {
   const t = useTranslations('worktree');
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [comment, setComment] = useState('');
   const [confirmingApprove, setConfirmingApprove] = useState(false);
   const [pending, setPending] = useState<PlanReviewControlAction | null>(null);
@@ -138,7 +142,9 @@ export function PlanReviewControls({
       setPending(action);
       setError(null);
       try {
-        const response = await fetch(
+        // Issue #4345 1c: the answer's 401 reaches the gateway before the reply is read.
+        const response = await fetchForHandoffPage(
+          handoffOwner,
           `/api/worktrees/${encodeURIComponent(worktreeId)}/prompt-response`,
           {
             method: 'POST',
@@ -165,7 +171,7 @@ export function PlanReviewControls({
         setPending(null);
       }
     },
-    [worktreeId, cliToolId, comment, instanceId, onKeysSent],
+    [worktreeId, cliToolId, comment, instanceId, onKeysSent, handoffOwner],
   );
 
   const hasComment = comment.trim().length > 0;

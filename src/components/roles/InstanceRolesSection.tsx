@@ -13,6 +13,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
@@ -60,6 +62,9 @@ function InstanceRoleRow({
 }): React.ReactElement {
   const confirm = useConfirm();
   const tSchedule = useTranslations('schedule');
+  // Issue #4345 1c: drawn in a worktree page's agents pane, the page's registration holder (the
+  // kill below is the page's); elsewhere none, and nothing is reported.
+  const handoffOwner = useHandoffPageOwner();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Issue #4160: past the deadline with the session still there. Not a failure, and it
@@ -108,7 +113,7 @@ function InstanceRoleRow({
     try {
       // The query scopes it: without both, this route ends every session of the worktree.
       const query = new URLSearchParams({ cliTool: entry.cliToolId, instance: id });
-      const response = await fetch(`/api/worktrees/${worktreeId}/kill-session?${query.toString()}`, {
+      const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/kill-session?${query.toString()}`, {
         method: 'POST',
         signal: controller.signal,
       });
@@ -137,7 +142,7 @@ function InstanceRoleRow({
     }
     if (failed) setError(t('agentRoles.instances.restartError'));
     onChanged();
-  }, [entry.cliToolId, id, onChanged, t, worktreeId]);
+  }, [entry.cliToolId, id, onChanged, t, worktreeId, handoffOwner]);
 
   const handleRestart = useCallback(async () => {
     if (restartingRef.current) return;
