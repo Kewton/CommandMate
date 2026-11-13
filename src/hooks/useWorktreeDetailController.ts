@@ -83,6 +83,7 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 import { ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
+import { beginHandoffPageResponseReport, fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import { readRunningInstances } from '@/lib/api-client-agent-roles';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
@@ -837,7 +838,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   } = useDiffViewerState(isMobile);
 
   // [Issue #21] File search state
-  const fileSearch = useFileSearch({ worktreeId });
+  // Issue #4345 1c: the search's 401 reaches the gateway, owned by this page's registration.
+  const fileSearch = useFileSearch({ worktreeId, handoffOwner: handoffRegistrationRef });
 
   // Track if initial load has completed to prevent re-triggering
   const initialLoadCompletedRef = useRef(false);
@@ -1104,10 +1106,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // Issue #701: include user-selected history display limit
       params.set('limit', String(historyDisplayLimitRef.current));
+      // Issue #4345 1c: owned by the registration this read left under, numbered in its one order
+      // across entries (not `requestId`, this poller's own), reported before the status is an Error.
+      const reportAuth = beginHandoffPageResponseReport(handoffRegistrationRef);
       const response = await fetchApiResponse(
         `/api/worktrees/${worktreeId}/messages?${params.toString()}`,
         POLL_REQUEST_OPTIONS,
       );
+      reportAuth?.(response);
       if (!response.ok) {
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
@@ -1144,7 +1150,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       const outputUrl = onMobile
         ? `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}&instance=${encodeURIComponent(requestedInstance)}`
         : `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`;
+      // Issue #4345 1c: see fetchMessages (reported before the 409 body is read or the return).
+      const reportAuth = beginHandoffPageResponseReport(handoffRegistrationRef);
       const response = await fetchApiResponse(outputUrl, POLL_REQUEST_OPTIONS);
+      reportAuth?.(response);
       if (!response.ok) {
         // Issue #3334: the one refusal that will not go away on the next poll —
         // the session under this name is another CommandMate server's (#2865).
@@ -1310,7 +1319,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (worktreeId !== worktreeIdRef.current) return;
     const requestId = ++latestAutoYesRequestIdRef.current;
     try {
+      // Issue #4345 1c: see fetchMessages (reported before the non-2xx return).
+      const reportAuth = beginHandoffPageResponseReport(handoffRegistrationRef);
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/auto-yes`, POLL_REQUEST_OPTIONS);
+      reportAuth?.(response);
       if (!response.ok) return;
       const data = await response.json();
       // Latest-request guard: only the newest refetch may write the map.
@@ -1743,7 +1755,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           isMobileRef.current ? activeInstanceIdRef.current : undefined,
         );
 
-        const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
+        // Issue #4345 1c: the answer's 401 reaches the gateway before the reply is read.
+        const response = await fetchForHandoffPage(handoffRegistrationRef, `/api/worktrees/${worktreeId}/prompt-response`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
@@ -1815,7 +1828,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       async (params: AutoYesToggleParams): Promise<void> => {
         const effectiveInstanceId = instanceId ?? cliToolId;
         try {
-          const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
+          // Issue #4345 1c: the toggle's 401 reaches the gateway before the failure is told.
+          const response = await fetchForHandoffPage(handoffRegistrationRef, `/api/worktrees/${worktreeId}/auto-yes`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2235,7 +2249,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const newPath = newFileParentPath ? `${newFileParentPath}/${finalName}` : finalName;
 
     try {
-      const response = await fetch(
+      // Issue #4345 1c: the file operations' 401 reaches the gateway before the alert.
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(newPath)}`,
         {
           method: 'POST',
@@ -2266,7 +2282,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const newPath = parentPath ? `${parentPath}/${dirName}` : dirName;
 
     try {
-      const response = await fetch(
+      // Issue #4345 1c: the file operations' 401 reaches the gateway before the alert.
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(newPath)}`,
         {
           method: 'POST',
@@ -2292,7 +2310,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (!newName || newName === currentName) return;
 
     try {
-      const response = await fetch(
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(path)}`,
         {
           method: 'PATCH',
@@ -2320,7 +2339,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (!(await confirm({ description: tCommon('confirmDelete', { name }), variant: 'danger' }))) return;
 
     try {
-      const response = await fetch(
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(path)}?recursive=true`,
         {
           method: 'DELETE',
@@ -2361,7 +2381,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     worktreeId,
     () => setFileTreeRefresh(prev => prev + 1),
     (msg) => showToast(msg, 'success'),
-    (msg) => showToast(msg, 'error')
+    (msg) => showToast(msg, 'error'),
+    // Issue #4345 1c: the move's 401 reaches the gateway, owned by this page's registration.
+    handoffRegistrationRef
   );
 
   // Hidden file input ref for upload
@@ -2404,7 +2426,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // Upload API call [API-004] Using /upload/:path endpoint
     try {
       const uploadPath = targetDir || '.';
-      const response = await fetch(
+      // Issue #4345 1c: the upload's 401 reaches the gateway before its error body is read.
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/upload/${encodePathForUrl(uploadPath)}`,
         {
           method: 'POST',
@@ -2746,6 +2770,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     closeHandoff,
     stopForHandoff,
     handoffRegistration,
+    /**
+     * Issue #4345 1c: this page's registration holder, for what the page draws
+     * (`HandoffPageOwnerContext`): its requests report their 401 under the registration held when
+     * each leaves.
+     */
+    handoffOwner: handoffRegistrationRef,
     /**
      * Issue #4317 PR1: the dialog is not drawn (unmounted, never hidden with `isOpen={false}`) while
      * the registry holds the session expired, until the current page's authenticated read. 再指示 2:

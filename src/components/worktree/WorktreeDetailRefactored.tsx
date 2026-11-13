@@ -281,6 +281,8 @@ import {
 } from '@/lib/prompt-response-outcome';
 import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
+import { HandoffPageOwnerContext } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
 }: WorktreeDetailRefactoredProps) {
@@ -416,6 +418,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     worktree,
     worktreeName,
     worktreeStatus,
+    handoffOwner,
   } = useWorktreeDetailController({ worktreeId });
 
   // Issue #3511: New task opened on this screen starts on this worktree and
@@ -658,7 +661,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // Issue #4031: a failure stopped part-way (keys may be on the pane).
       let partial = false;
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}/respond`, {
+        // Issue #4345 1c: the decision's 401 reaches the gateway before the reply is read.
+        const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/respond`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(
@@ -692,6 +696,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       tWorktree,
       fetchCurrentOutput,
       handlePromptDismiss,
+      handoffOwner,
     ]
   );
 
@@ -796,6 +801,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       // [#2345] The file-link scope wraps the PC layout too: its split builds
       // one frozen prop object for both the chat surface and the History
       // column, so neither can be handed `worktreePath` from here directly.
+      // Issue #4345 1c: what the page draws owns its requests through this page's registration
+      // holder (`HandoffPageOwnerContext`): their 401 reaches the hand-off gateway.
+      <HandoffPageOwnerContext.Provider value={handoffOwner}>
       <ChatFileLinkProvider value={chatFileLinkScope}>
         {/* Issue #2498: overlay, so a poll failing mid-session never reflows
             the split below it. */}
@@ -889,6 +897,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           endLabel={tCommon('end')}
         />
       </ChatFileLinkProvider>
+      </HandoffPageOwnerContext.Provider>
     );
   }
 
@@ -905,6 +914,8 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   // the AppShell main) until visualViewport is measured / on unsupported
   // browsers, preserving the pre-#1166 full-height behavior.
   return (
+    // Issue #4345 1c: see the PC layout (the page's registration holder for what it draws).
+    <HandoffPageOwnerContext.Provider value={handoffOwner}>
     <ErrorBoundary componentName="WorktreeDetailRefactored">
       {/* Issue #2213: the screen-scoped seam between the chat surface inside the
           terminal tab and the composer docked below it. The surface registers its
@@ -1394,6 +1405,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
         </ChatFileLinkProvider>
       </WorktreeChatSendProvider>
     </ErrorBoundary>
+    </HandoffPageOwnerContext.Provider>
   );
 });
 

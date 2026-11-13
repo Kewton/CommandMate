@@ -267,7 +267,20 @@ export interface ApiRequestOptions extends RequestInit {
    * site's confidence.
    */
   retries?: number;
+  /**
+   * Issue #4345 1c: called with the response {@link fetchApiResponse} is about to return — before
+   * anything reads its body or folds its status into an {@link ApiError}. Not called for a response
+   * discarded for a retry, nor when no response came (a transport error, a timeout, an abort). Not
+   * passed on to `fetch`.
+   */
+  onResponse?: (response: Response) => void;
 }
+
+/**
+ * Issue #4345 1c: what a caller of {@link worktreeApi.sendMessage} / {@link worktreeApi.uploadImageFile}
+ * may hand on about its request: its response observer (the hand-off page's gateway).
+ */
+export type ApiResponseObserver = Pick<ApiRequestOptions, 'onResponse'>;
 
 /**
  * Last reachability verdict pushed to `useConnectivity`, and when.
@@ -466,7 +479,7 @@ export async function fetchApiResponse(
   url: string,
   options?: ApiRequestOptions
 ): Promise<Response> {
-  const { timeoutMs, retries, ...init } = options ?? {};
+  const { timeoutMs, retries, onResponse, ...init } = options ?? {};
   const method = (init.method ?? 'GET').toUpperCase();
   // Non-idempotent methods are pinned to zero regardless of what was asked for.
   // This is the guard behind "a send is never duplicated": see
@@ -492,6 +505,7 @@ export async function fetchApiResponse(
         await delay(computeRetryDelayMs(attempt));
         continue;
       }
+      onResponse?.(response);
       return response;
     } catch (error) {
       const apiError = normalizeTransportError(error);
@@ -704,7 +718,9 @@ export const worktreeApi = {
   async sendMessage(
     id: string,
     content: string,
-    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string } & SendBriefChoice
+    options?: { cliToolId?: CLIToolType; instanceId?: string; imagePath?: string } & SendBriefChoice,
+    // Issue #4345 1c: the response's observer (the hand-off page's gateway), before the body is read.
+    request?: ApiResponseObserver
   ): Promise<ChatMessage & { brief?: SendBriefReport }> {
     const body: { content: string; cliToolId?: string; instanceId?: string; imagePath?: string } & SendBriefChoice = { content };
     if (options?.cliToolId) {
@@ -727,6 +743,7 @@ export const worktreeApi = {
       body: JSON.stringify(body),
       // Issue #3194: with no session the server launches the agent inside this request.
       timeoutMs: getSendTimeoutMs(),
+      ...(request?.onResponse ? { onResponse: request.onResponse } : {}),
     });
     return reviveMessageTimestamp(created) as ChatMessage & { brief?: SendBriefReport };
   },
@@ -741,7 +758,9 @@ export const worktreeApi = {
    */
   async uploadImageFile(
     worktreeId: string,
-    file: File
+    file: File,
+    // Issue #4345 1c: the response's observer (the hand-off page's gateway), before the body is read.
+    request?: ApiResponseObserver
   ): Promise<{ path: string }> {
     const timestamp = Date.now();
     const filename = `${timestamp}-${file.name}`;
@@ -753,6 +772,7 @@ export const worktreeApi = {
       method: 'POST',
       body: formData,
     });
+    request?.onResponse?.(response);
 
     if (!response.ok) {
       const errorBody = await safeParseJson<{ error?: { message?: string } }>(
