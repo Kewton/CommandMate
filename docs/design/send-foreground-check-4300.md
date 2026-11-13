@@ -4,6 +4,72 @@
 - 改訂 2 の主筋（起動行に `exec` を足して打つ）は §2.1 に「採らない（新 P1）」として残す。改訂 1 の案 E も同じ表に残す
 - 基準: develop `ed9b89eac`（この worktree の src。develop の先頭 `46cbe7699` との差は mem・handoff だけで、この設計が触る所は同じ）。行番号はこの時点のもの。「事実」は file:line、「見立て」「未確認」は明記する
 - 実装は 2 段: **PR1**（確かな証拠のときだけ止める小さな直し。別の worktree で実装中、`0ca482d3d`、未マージ。この文書は書かない）、**PR2**（この文書の本体。PR1 のマージ後、develop から別の契約で。§8 で 2 本に分ける）
+- **改訂 4（2026-11-13、Issue #4304）が最新**。下の「## 改訂 4」の節は、§0〜§12 の同じ論点の記述より優先する（食い違う箇所は節の中で名指しする）。§0〜§12 の本文と行番号は改訂 3 の時点のまま残す
+
+## 改訂の履歴
+
+- 改訂 1（2026-11-09）: 前面の判定を「CLI がいる積極的な証拠」に改め、打鍵の各段・読み手・復旧の方針を固めた（`7901c149e`）
+- 改訂 2（2026-11-10）: CLI を exec で起動してシェルを残さない方式へ PR2 の主筋を替えた（`b317577ee`）。§12 で #4303 の回答経路を整理（`84bf2824e`）
+- 改訂 3（2026-11-10）: 起動も復旧もペインのコマンドとして CLI を直接起動する形に替えた（`f02cd6f55`）。再確認（`review-4300d.md`）で P1 1・P2 6 が残り、PM の決定 (b) で PR2 を止めて #4304 へ
+- 改訂 4（2026-11-13、#4304）: P1（rc が別の対話シェルへ exec する）を H1-a（復旧の瞬間だけ入力ロックで直列化し、準備完了の証拠を新しい世代に限る）で閉じ、残りの 9 項目（P2 6 件・#4304 のコメントの 3 経路・行番号・Auto-Yes と世代）を決め、H2・H3 の人の決定を書いた（下の「## 改訂 4」）
+
+## 改訂 4（2026-11-13、Issue #4304）: P1 の閉じ方と残りの 9 項目
+
+- 材料: イネーブラーの具体化（`workspace/orchestration/runs/2026-11-13/enabler-return-4303-4304-design.md` の #4304 の節。§2.1 の H1〜H5、§2.2 の 9 項目）と、人の決定（2026-11-13 14:47、「推奨で」）: **H1-a**、**H2 は受け入れる**、**H3 は PR2b で既存の期待を変えてよい**。
+- 基準: develop **`10232442d`**（2026-11-13 に `git fetch` した `origin/develop`）。この節の file:line はすべてこの版で、名前で探して取り直した。設計ブランチ `fix/4300-design-rev` は develop を取り込んでいない（この worktree の `src` は `ed9b89eac` のまま）。
+- **実装（PR2a・PR2b）は改訂 4 の承認の後**に、develop から別の契約で始める。改訂 4 は codex-2 の差分の再確認（イネーブラー §3 の順 2）を受けてから承認を求める。
+
+### R4.1 人の決定
+
+| # | 決定 | この文書での扱い |
+|---|---|---|
+| **H1-a** | P1（`review-4300d.md` ①）は「**復旧（respawn）の瞬間だけ入力ロックの `exclusive` で直列化し、準備完了の証拠を新しい世代に限る**」で閉じる。H1-b（rc をペインの外で走らせる）・H1-c（残りとして受け入れる）は採らない | R4.2。§4.5 の「復旧を入力ロックの中で行う形は採らない」と §2.5 の「入力ロックの起動の番を外す」は、**respawn／new-window の 1 回の tmux 呼び出しに限って取り消す**（起動行を打つ番は外したまま） |
+| **H2** | 終わったペインで `claude --resume <id>` 等を**打てなくなる**こと（dead pane は入力を捨てる）、tmux の `default-command` を**使わなくなる**ことを受け入れる | §6.1・§10 の記述どおり。PR2b の利用者向け文書（`docs/user-guide/cli-operations-guide.md` と en）に、終わったペインは次の send で作り直されること・前の画面（`Resume this session with:` を含む）は履歴に残ることを書く。fish をログインシェルにした起動は PR2b の UAT の行に残す（未確認） |
+| **H3** | PR2b の契約で、起動行を固定する既存テストの**期待を変えてよい** | §8.3 の例外を確定。数え直し（`10232442d`、§8.3 と同じ grep）: `clear 2>/dev/null\|withLaunchScreenCleared\|LAUNCH_SCREEN_CLEAR_PREFIX` 14 ファイル、`renderAgentLaunchCommand\|buildAgentLaunchCommandLine` 28 ファイル、`typeLaunchLines\|launch-keys` 5 ファイル（改訂 3 と同数）。契約にはこの grep を書き、変えるのは起動の形を固定する期待だけに限る（`it`／`describe` の削除・改名は契約で個別に許す） |
+
+H4（#4303 の小さな直しを先に出す）は R4.4、H5（tmux の最低版）は決めずに §10 の残りのまま。
+
+### R4.2 H1-a: 復旧の瞬間の直列化と、新しい世代の証拠（P1 の閉じ方）
+
+**今の骨組みを使う。** `session-launch-flight.ts` は「起動の single-flight は外、入力ロックは内」（同ファイルの冒頭の説明、R1・R2）で、今は起動行を打つ `typeLaunchLines`（`base.ts:914`）が `exclusive` の 1 回の番を取る。改訂 4 はこの番を残し、**番の中身を「起動行を打つ」から「spawn の 1 回の tmux 呼び出し」に替える**。
+
+1. 復旧する側 B: 起動の single-flight を取る（今どおり）→ `withInstanceInputLock(sessionName, …, { mode: 'exclusive' })`（`instance-input-lock.ts:542`）を取る → 番の中で `readPaneState` を読み直し、まだ dead なら `beginAgentSession`（その中の `invalidateInstanceInput`、`agent-session-lifecycle.ts:114`。B 以外の ticket を失効させる）→ **R4.3 ②の世代の印を読む呼び出しと `respawn-pane -c <cwd> <コマンド> \; set-option -p … remain-on-exit on` を 1 回の tmux 呼び出しで** → 番を返す。準備待ちは番の外（#3975 と同じ）。
+2. 送信 A（`exclusive`）・回答と Auto-Yes（`shared`、`prompt-answer-sender.ts:712` の `sendAsInputWriter`）はどちらも B の `exclusive` と同時に持てない。だから **A が出したキーは、B の respawn より前に tmux へ出終わっている**（`send-keys` は tmux がペインへ書いてから戻る）。届く先は dead pane（捨てる）か、終わる前の古い CLI。B の respawn の後に A がキーを出すことは、A の ticket が失効している（`invalidateInstanceInput`）ので無い。
+3. respawn の後に送る人（A の再試行・C）は、**新しい世代の入力欄**（R4.3 ②）が見えるまで本文を打たない。rc が別の対話シェルへ exec した場合（P1 の構成）は入力欄が出ないので準備待ちが時間切れになり、§5.3 のとおり新方式のペインを kill して not-sent。その間、端末を読む対話シェルにキーを出す主体は無い（送信・回答は準備待ち、Auto-Yes は R4.3 の「Auto-Yes と世代」と⑦で止まる）。
+4. デッドロック: R1（ロックを持つ側は他の起動を待たず `SessionLaunchInFlightError` で断られる）を保つので、「single-flight → ロック」の向きだけになり循環しない。A 自身の send が自分のペインを復旧する場合（codex の `requireSession({ relaunch: true })`）は R2 のとおり A の番に合流し、`invalidateInstanceInput` も呼び手の ticket を残す（同ファイル `:795` の説明）。
+5. 受け入れた残り（H1-a を決めたときの前提）: **UI の生の入力（`direct-input.ts:26` の `sendDirectInput`、WS の `terminal_input`）は入力ロックを通らない**。人が画面を見て打つ入力なので直列化の外に置く。dead pane では捨てられ、起動中は端末のバッファ（s6）。rc が対話シェルへ exec した構成で、人がそのシェルの画面を見て打つ入力は実行されうる。#4304 の受入基準案の「生の入力のキーが 1 バイトも」は、PR2b の受入で「dead pane・起動中（rc の読み込み中）」に絞る。
+6. 見立て（PR2b の実測で確かめる）: `respawn-pane` は新しい pty を作るので、古い CLI が読まずに終わった入力は新しい世代へ持ち越されない。
+
+**赤になる試験**（イネーブラー §3.1 の PR2a の 5、PR2b の 2 を確定）:
+- PR2a（単体）: 送信 A が `exclusive` を持つ間に B の復旧を起こす → B の `respawn-pane` の呼び出しは A の解放の後。B が番を取った後、A の失効した ticket でのキー送信は 0 回。陽性対照: 番を外すと respawn が A の本文と Enter の間に入る。
+- PR2b（実 tmux、`-L` の私設ソケット、`process.env.TMUX` を私設に向けたことを assert）: 仮の HOME の rc の末尾に `exec zsh -i`（`bash -i` も）を置き、A を本文の直前・本文の後・Enter の直前で止めて B の復旧を差す → 3 つとも `touch <f>` のファイルが作られず、B は準備待ちの時間切れ → kill → not-sent。陽性対照: 改訂 3 の形（番なし・世代の印なし）では作られる。
+
+### R4.3 残りの 9 項目
+
+| 項目 | 決定 | 根拠の場所（`10232442d`） |
+|---|---|---|
+| **② 準備の証拠の世代** | spawn と**同じ tmux 呼び出し**の先頭で `display-message -p '#{history_size} #{cursor_y}'` を読み、絶対行（`history_size + cursor_y`）を世代の印として起動の記録に持つ。準備待ちと起動中の答え（trust の Enter など）は、`capture-pane -S` を「印の絶対行 − 今の `history_size`」から取った行だけで入力欄・ダイアログを探す。履歴の上限で印より前が流れていたら全体を新しい世代とみなす（古い行はもう無い）。印の行そのもの（`Pane is dead` の行）を含めるかは PR2b の実測で決め、テストで固定する。clear はしない（履歴を残す、改訂 3 のまま）。対象は全 CLI の準備待ち: claude `waitForPrompt`（`claude-session.ts:832`）、codex `waitForReady`（`codex.ts:382`）、gemini（`gemini.ts:207`）、copilot `waitForReady`（`copilot.ts:687`）と `waitForPrompt`（`:767`）、antigravity（`antigravity.ts:362`）、command-code（`command-code.ts:325`）、opencode（`opencode.ts:600`）、opencode V2（`opencode-v2.ts:331`）。試験: 旧い入力欄を履歴に残し、新しい rc を 2 秒眠らせる → その間は準備完了にならない（本文 0・Auto-Yes 0）。陽性対照: 印を外すと gemini・copilot で準備完了と読む | 印の読み方は tmux の format。`capture-pane -S` の負の行は履歴の中 |
+| **③ cwd** | `-c` の文字列を `<代入> cd -- <cwd> \|\| exit 97; exec <cli> <引数>` にする（rc の後、exec の直前に cwd を確かめる）。**全 CLI に付ける**: ロールの cwd の再確認は opencode V2 だけでなく `base.ts:339`（全 driver の起動）と `send-role.ts:219` でも使われている（`launchCwdRecheck`、`role-launch.ts:478`）。cd の失敗はペインが dead（状態 97）になり、§5.3 の早い失敗が「cwd に入れない」として返す。tmux の `-c <cwd>` は残す（rc が相対パスを読む場合の起点） | `opencode-v2.ts:301-306` の今の再確認 |
+| **④ ps の不明** | 旧方式の置換（§5.2 の 3）は、「ps が成功し、取れた一覧に `pane_pid` の行がある」ときだけ判定する。ps の失敗・空・`pane_pid` の行が無い（対象不一致）は**不明**として置換しない（起動 0・kill 0・not-sent、理由 `agent-foreground-unknown`）。試験: 3 つの不明それぞれで `respawn-pane -k` 0 回 | `readPaneForeground`（`tmux.ts:347`）と同じ ps の読み方 |
+| **⑤ 最後の画面の世代** | 応答の poll の回収（§3.2 の (11)）は、capture の前と後で `pane_pid` と `pane_dead` を読み、**両方とも同じ（同じ世代の dead）ときだけ**保存する。保存の直前にもう一度読み、違えば保存しない（後継の世代の画面を古い応答として保存しない）。試験: capture と保存の間に `pane_pid` を変える → 保存 0 回 | `src/lib/polling/response-checker.ts` |
+| **⑥ prompt-response の API 配送** | 入口×配送×結果を次のとおりにする（§12.3 の API 回答の列と §12.4 の「常に indeterminate」を置き換える）: (a) 入口 `route.ts:117` の `isRunning` は PR2a で `agentAlive` になり、**dead では API 回答の分岐（`:140` の `answerViaStructuredDecision`）に入る前に 400 で断る**（未送信。dead の世代のダイアログへの答えを、TUI と別のサーバーが受け取る opencode V2 でも送らない。受領の有無が未確認なので断る側に倒す）。(b) strict の終了回答（答えた後に CLI が終わる）は `strict-respond.ts:349` の `session-ended`（成功、`:314`）を保つ。判定は `agentExitedToShell`（`:318`、前面の名前）に、新方式では `readPaneState` の dead を足す（dead pane の `pane_current_command` はシェルの名前なので名前だけに頼らない）。(c) 通常キー・strict キーの dead は最初のキーの前で未送信（§12.3 のまま） | `route.ts:117,140`、`strict-respond.ts:304,314,318,349` |
+| **⑦ 開始窓の前倒し** | copilot の `beginLaunchWindow`（`copilot.ts:532`）と antigravity の `beginStartupWindow`（`antigravity.ts:327`）を、**spawn（`createLaunchPane`／respawn）の前**に開く。今は `createLaunchPane`（`copilot.ts:526`）の後・起動行の前に開いており、改訂 3 で起動が spawn に前倒しになると、spawn と窓の間に trust 画面へ Auto-Yes が先に答えうる。窓を閉じる `finally` は今どおり準備待ちの後。試験: spawn の直後に trust 画面を出して Auto-Yes の tick を差す → Auto-Yes の回答 0、起動側だけが答える | `createLaunchPane`（`base.ts:926`） |
+| **#4304 のコメントの 3 経路** | 準備待ちがダイアログに打つキー: codex の trust・hooks の答え（`codex.ts:382` の `waitForReady` の中）、copilot の folder trust（`answerFolderTrustDialog`、`copilot.ts:593`。呼ぶ所は `:702`・`:804`）、antigravity の trust の Enter（`antigravity.ts:362` の `waitForReady`、`isTrustPressStill` `:444`）。**新方式**: ②の印より後の行だけで trust 画面を読むので、P1 の構成（対話シェル）では画面が出ず、キーは出ない。dead では捨てられる。**旧方式**: 各キーの前に PR1 の D（`readPaneForeground`）を通す（#4303-A と同じ部品、R4.4）。これらの答えは `shared` の番で打つので、R4.2 の `exclusive` の respawn とは直列 | コードの読み。#4304 のコメント（2026-11-10T19:31:57Z）の行（978・804・500 付近）は、今は上の行 |
+| **行番号の取り直し** | この節の file:line は `10232442d`。§0〜§12 の行番号は改訂 3（`ed9b89eac`）のまま残す。PR1（`5055c4d27`、#4306）の後で設計が引く所: `readPaneForeground` `tmux.ts:347`、`recheckComposerBeforeInput` `composer-clear.ts:273`（前面の判定 `:308-331`）、`AGENT_NOT_IN_FOREGROUND_CODE` `send-attempt-types.ts:135`、`respawnLoginShell` `tmux.ts:434`。変わらなかった所: `relaunchIfToolExited` `base.ts:780`、`requireSession` `:814`、`resolveLaunchPane` `:878`、`typeLaunchLines` `:914`、`ensureHealthySession` `claude-session.ts:708`、`isClaudeRunning` `:802`、`sendPromptAnswer` `prompt-answer-sender.ts:959`、`transportDeliveryOf` `:783`、文字の答え `:1118`。PR2a・PR2b の契約は、この節の名前で探し直す | `git grep -n` を `10232442d` で |
+| **Auto-Yes と世代** | Auto-Yes の 1 tick の画面（`capturePollerFrame`、`auto-yes-poller-capture.ts:67`）にも②の印を当てる: 起動の記録に印がある間（新方式の spawn の後、準備完了まで）は、**印より後の行だけ**でダイアログを探す。respawn が履歴に残した前の世代のダイアログに、新しいプロセス（P1 の構成では対話シェル）へ答えない。準備完了の後は今どおり（CLI が画面を描き直すので印は要らない）。世代の切り替えで記録を失効させる今の `beginEnterFallbackSession`（`agent-session-lifecycle.ts:104`）はそのまま。試験: 前の世代のダイアログを履歴に残して respawn → 準備完了までの tick の回答 0。陽性対照: 印を外すと答える | §3.2 の Auto-Yes の行（dead・unknown）に「起動中の世代」を足す |
+
+### R4.4 #4303-A との関係
+
+#4303-A（回答経路の前景の判定: 通常キー `sendPromptAnswer` と strict キーの最初のキーの前に PR1 の `readPaneForeground` を通し、`shell`・`unknown` なら未送信）は、確認の時点（`10232442d`、`gh pr list --search 4303` と `git log origin/develop --grep=4303` で該当なし）では **develop にマージされておらず、作業中の PR も無い**。改訂 4 はこれを前提にせず、独立に先行してよい（イネーブラー §3 の順 1、H4 の推奨）。関係は次のとおり: 旧方式のペインは PR2b の後も強制の移行をしないので、#4303-A の判定はその守りとして残り（§12.3 の「移行期間の旧方式」の行を塞ぐ）、#4304 のコメントの 3 経路（R4.3）の旧方式の側も同じ部品で塞ぐ。PR2a は回答経路の判定点を #4303-A と同じ所（最初のキーの前）に置き、**方式で分ける**（旧方式は #4303-A の D、新方式は `readPaneState`。新方式に D を当てると起動中の `-c` のシェルを `shell` と誤る、§0.2）。#4303-A が PR2a より後に入る場合も、PR2a はその判定点に方式の分岐を足すだけで、どちらの順でも衝突しない。dead・世代交代の扱い（#4303-B）は PR2b の後。
+
+### R4.5 PR の順（確定）
+
+1. 改訂 4 の承認（codex-2 の差分の再確認の後）。
+2. **PR2a**（読み手・復旧・通知）: R4.2 の番の中の respawn、④⑤⑥、#4303-A との方式の分岐。G-PR3 は develop に入った（`fd2f4a589`）ので §8.2 の直列の条件は満たす。
+3. **PR2b**（起動の形）: ②③⑦、Auto-Yes と世代、#4304 のコメントの 3 経路の新方式の側、H3 の期待の変更、H2 の利用者向け文書、R4.2 の実 tmux の試験。
+4. #4303-B（dead・世代交代の回答経路）。
+
+#4303-A はこの順の外で、いつ入ってもよい。
 
 ## 0. 改訂 3 の要約と PR1 との関係
 
