@@ -34,6 +34,9 @@ const STOPS = new Set(['src/lib/session/session-brief.ts:SendBrief.plan']);
 /** Every caller of the chain of `buildBrief` in src, and whether it repeats a build. */
 const TABLE: Record<string, { retries: boolean }> = {
   'src/app/api/worktrees/[id]/mem/brief/route.ts:GET': { retries: false },
+  // Issue #4227 G-PR3 (G-3): the start preview builds C's JSON once (briefForRoute's own rule inside).
+  'src/app/api/worktrees/[id]/mem/start-preview/route.ts:GET': { retries: false },
+  'src/lib/handoff/preview.ts:handoffStartPreview': { retries: false },
   'src/lib/brief/provider.ts:build': { retries: false },
   'src/lib/brief/service.ts:briefForRoute': { retries: true },
   'src/lib/session/session-brief.ts:SendBrief.plan': { retries: false },
@@ -43,6 +46,9 @@ const TABLE: Record<string, { retries: boolean }> = {
 /** R5: every caller that makes a pin, none in a repetition. */
 const PIN_TABLE: Record<string, { retries: boolean }> = {
   'src/app/api/worktrees/[id]/mem/brief/route.ts:GET': { retries: false },
+  // Issue #4227 G-PR3 (G-3): through briefForRoute, once.
+  'src/app/api/worktrees/[id]/mem/start-preview/route.ts:GET': { retries: false },
+  'src/lib/handoff/preview.ts:handoffStartPreview': { retries: false },
   'src/app/api/worktrees/[id]/send/route.ts:POST': { retries: false },
   'src/app/api/worktrees/[id]/send/route.ts:handleSend': { retries: false },
   'src/lib/brief/service.ts:briefForRoute': { retries: false },

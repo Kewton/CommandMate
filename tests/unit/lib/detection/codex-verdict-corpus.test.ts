@@ -96,6 +96,7 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/codex-multiline-composer-3205/idle-composer-two-lines.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-multiline-composer-3205/running-composer-two-lines.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
   ['fixtures/codex-multiline-composer-3205/tc104-raw-pane.txt', 'ready/input_prompt', 'waiting/prompt_detected/prompt'],
+  ['fixtures/codex-new-0167/worktree-picker.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/codex-quoted-footer-2774/idle-after-quoted-picker-footer.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-send-burst-3366/body-landed.capture', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-send-burst-3366/stuck-after-enter-in-burst.capture', 'ready/input_prompt', 'ready/input_prompt'],

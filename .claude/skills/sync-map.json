@@ -27,6 +27,11 @@
       "meaning": "counterpart が存在しない CommandMate 専用パッケージ。",
       "onChange": "何もしなくてよい。検知対象外。",
       "detected": "検知しない。counterpart が出来たらこの分類から外すこと。"
+    },
+    "generated": {
+      "meaning": "公開パッケージを機械的に変換して作る派生。手で直さず、生成器（scripts/dev-skills/generate.mjs）で作り直す。counterpart への移植は不要（向きは counterpart → CommandMate の一方向）。",
+      "onChange": "生成物を直接編集しない。変換規則は scripts/dev-skills/transform.mjs、元の ref は scripts/dev-skills/pin.json を直し、`node scripts/dev-skills/generate.mjs generate --source <commandmate-skills>` で作り直す。",
+      "detected": "逆変換の sha256 が pin の upstreamSha256 と一致すること、順変換し直すと今のファイルになること（tests/unit/skills/dev-skills/generated.test.ts）。files の pin は持たない。"
     }
   },
   "policyRationale": "Issue #1612 本文は identical / adapted の 2 分類を提案していたが、この 2 分類では #1613 と同じドリフトが再発する。orchestrate-monitor の scripts は「バイト一致ではない」（コメント中の Issue 番号がリポジトリごとに違う）が「検知対象から外してはいけない」（コメントを除くコード差分は 8 ファイルすべて 0 行で、機能変更は必ず両側へ移植しなければならない）。adapted として除外すると、まさに #1613 で起きた無検知が再現する。そのため adapted を port-required（移植必須・バイト不問）と local-only（対応先なし）へ分割し、3 分類とした。",
@@ -35,7 +40,7 @@
       "local": ".claude/skills/cmate-verify",
       "counterpart": "skills/cmate-verify",
       "policy": "mapped",
-      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f、skills #223 / #224）を取り込み、verify-run.sh を再び byte-identical にした。 なお counterpart は fixture と run-tests.sh を package の外（`tests/fixtures/cmate-verify/`）に置いているため、対応する `scripts/tests/fixtures/**` と `scripts/tests/run-tests.sh` の各 file エントリに `counterpartPath` でその実体を指定してある（Issue #2904。以前は `check --counterpart` がこれを MISSING と誤報告していた）。CommandMate 側は Node の無い導入先でも suite を回せるよう package 内に同梱している。fixture 47 本は byte-identical のまま（2026-09-27 実測: cmp で無差分）。run-tests.sh はヘッダのコメントと RUNNER 解決パスの前提が異なるため port-required に変更した。 同日（Issue #1864）に counterpart PR #230（9604e8f、skills #228 —— run の途中で $WORKDIR が消える欠陥の修正）も取り込み、verify-run.sh のバイト一致を維持している。 2026-11-09（Issue #4277）に verify-run.sh・run-tests.sh・SKILL.md へ先着順の札の規約（`<name>.queue/` の札・先頭だけが mkdir と回収・退かしてから確かめる回収・pgid）を足し、pin を再計算した。同じ規約を counterpart PR #314（7b87d3f、cmate-verify 0.7.0 として 2026-11-09 に公開）で skills 側へ移植し、verify-run.sh は再び byte-identical（cmp 一致）になった。 2026-11-09（Issue #4288）に verify-run.sh と SKILL.md へ、mutex 付きのゲートの起動前に owner を pgid（ゲートのプロセスグループ）付き・新しい token で書き直し、グループが空になってから解放する規約・戻せずに残った `<name>.lock.gone-*` を保有中と読む規約・観測の 3 値（不明は取らない・消さない・解放しない）を足して pin を再計算した。同日のレビューの直し（owner の判定を 1 回の読みから・kill -0 を LC_ALL=C で読む・途中の戻しが不明なら退避を残す・held by に pgid・owner の書き込みの失敗で <lock> を戻す）でも、再レビューの直し（観測の内側の段＝欄の取り出し・pgid の数値の検査の失敗を不明に・空の <lock> の rmdir の失敗に点・パス・errno）でも、lock_reclaim_gone のコメントの 1 行抜けの補い（動作は不変）でも pin を再計算した。同じ規約を counterpart PR #315（f3e469e、cmate-verify 0.8.0 として 2026-11-09 に公開）で skills 側へ移植し、verify-run.sh は再び byte-identical（cmp 一致）になった。",
+      "rationale": "CommandMate が開発元。scripts は #1586 で byte-identical に移植された（2026-08-01 実測: diff -r 無差分）。SKILL.md だけは移植時に適応が入っている。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f、skills #223 / #224）を取り込み、verify-run.sh を再び byte-identical にした。 なお counterpart は fixture と run-tests.sh を package の外（`tests/fixtures/cmate-verify/`）に置いているため、対応する `scripts/tests/fixtures/**` と `scripts/tests/run-tests.sh` の各 file エントリに `counterpartPath` でその実体を指定してある（Issue #2904。以前は `check --counterpart` がこれを MISSING と誤報告していた）。CommandMate 側は Node の無い導入先でも suite を回せるよう package 内に同梱している。fixture 47 本は byte-identical のまま（2026-09-27 実測: cmp で無差分）。run-tests.sh はヘッダのコメントと RUNNER 解決パスの前提が異なるため port-required に変更した。 同日（Issue #1864）に counterpart PR #230（9604e8f、skills #228 —— run の途中で $WORKDIR が消える欠陥の修正）も取り込み、verify-run.sh のバイト一致を維持している。 2026-11-09（Issue #4277）に verify-run.sh・run-tests.sh・SKILL.md へ先着順の札の規約（`<name>.queue/` の札・先頭だけが mkdir と回収・退かしてから確かめる回収・pgid）を足し、pin を再計算した。同じ規約を counterpart PR #314（7b87d3f、cmate-verify 0.7.0 として 2026-11-09 に公開）で skills 側へ移植し、verify-run.sh は再び byte-identical（cmp 一致）になった。 2026-11-09（Issue #4288）に verify-run.sh と SKILL.md へ、mutex 付きのゲートの起動前に owner を pgid（ゲートのプロセスグループ）付き・新しい token で書き直し、グループが空になってから解放する規約・戻せずに残った `<name>.lock.gone-*` を保有中と読む規約・観測の 3 値（不明は取らない・消さない・解放しない）を足して pin を再計算した。同日のレビューの直し（owner の判定を 1 回の読みから・kill -0 を LC_ALL=C で読む・途中の戻しが不明なら退避を残す・held by に pgid・owner の書き込みの失敗で <lock> を戻す）でも、再レビューの直し（観測の内側の段＝欄の取り出し・pgid の数値の検査の失敗を不明に・空の <lock> の rmdir の失敗に点・パス・errno）でも、lock_reclaim_gone のコメントの 1 行抜けの補い（動作は不変）でも pin を再計算した。同じ規約を counterpart PR #315（f3e469e、cmate-verify 0.8.0 として 2026-11-09 に公開）で skills 側へ移植し、verify-run.sh は再び byte-identical（cmp 一致）になった。 2026-11-10（Issue #4288 の 2 番 PR1a）に verify-run.sh のロックの節へ、run-lock・supervisor.lock を載せるための既定で働かない関数（パスで渡す取得 lock_acquire_path・owner の codec・owner の無い <lock> の猶予・引渡し lock_hand_off・持ち主でない者の解放 lock_release_as_head・回収だけ lock_recover_only・子の待ち lock_child_wait）と owner の排他作成（set -C＋読み直し）を足し、KILL_GRACE_SEC を節の中へ移して pin を再計算した（ゲートの振る舞いは不変。scripts/lib/machine-lock.sh がこの節を読み込む）。skills 側への移植は別の PR（それまで verify-run.sh は byte-identical でない）。 2026-11-11（Issue #4288 の 2 番 PR1a-f）に verify-run.sh のロックの節の owner の書き込みを tmp（`<lock>/.owner-<token>`）→ `/bin/link` の公開・`.undo-<token>` への rename の戻しに替え、owner の無い `<lock>` の一時ファイルだけの片付け（I3）・0 バイトの owner の回収（I4）・put-back の link・記録の `v`・予約の鍵の拒否・札の etime の厳しい解き方を足して pin を再計算した（docs/design/machine-lock-owner-atomic-4288.md）。skills 側への移植は別の PR（それまで verify-run.sh は byte-identical でない）。",
       "mirrors": [
         ".agents/skills/cmate-verify"
       ],
@@ -394,8 +399,8 @@
         {
           "path": "scripts/verify-run.sh",
           "policy": "byte-identical",
-          "sha256": "5b221a5b62158a2ffc0bfdbddfb8c79151bb08e4e514459011a6aa805eea5a84",
-          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f）から逐語コピーした。 2026-08-20（Issue #1864）に counterpart PR #230（9604e8f、skills #228）から逐語コピーした。 2026-10-27（Issue #3944）に set -m … set +m を { … } 2>>$rga_log.jobctl で囲んだ（demo-video/env-up.sh の #3935 と同じ形）。2026-10-28 に counterpart（cmate-verify 0.6.2、skills PR #312）へ移植済み。"
+          "sha256": "c9f24872e8c3bd88aeea3607654335519746313babc57b9612713e48d26d5d97",
+          "note": "ランナー本体。#1586 で byte-identical に移植され、#1607 が CommandMate 側だけを直して 4 日間ドリフトした（#1611 で復旧）。この Issue の直接の発端。 Issue #1639 で追加。 2026-08-03 に counterpart（cmate-verify 0.2.0、skills PR #41）へ移植済み。 2026-08-03 に Issue #1651 の変更も counterpart（cmate-verify 0.3.0、skills PR #42）へ移植済み。 2026-08-20（Issue #1861）に counterpart PR #225（6faa33f）から逐語コピーした。 2026-08-20（Issue #1864）に counterpart PR #230（9604e8f、skills #228）から逐語コピーした。 2026-10-27（Issue #3944）に set -m … set +m を { … } 2>>$rga_log.jobctl で囲んだ（demo-video/env-up.sh の #3935 と同じ形）。2026-10-28 に counterpart（cmate-verify 0.6.2、skills PR #312）へ移植済み。 2026-11-09（Issue #4277）に先着順の札の規約を足し、counterpart（cmate-verify 0.7.0、skills PR #314）へ移植済み。 2026-11-09（Issue #4288 の 1 番）に owner の pgid・退避の読み・観測の 3 値を足し、counterpart（cmate-verify 0.8.0、skills PR #315）へ移植済み。 2026-11-10（Issue #4288 の 2 番 PR1a）にロックの節へ run-lock・supervisor.lock 用の既定で働かない関数と owner の排他作成を足して pin を再計算した（scripts/lib/machine-lock.sh がこの節を読み込む）。【未移植 #4288】skills 側への移植は PR1a のマージ後の別の PR で、それまで counterpart の 0.8.0 とは byte-identical でない（プロトコルは同じなので互換には影響しない）。 2026-11-12（Issue #4288 PR1a-f impl-10）にロックの節へ既定では働かない試験の口（`<点>@@<対象>`・`CM_VERIFY_TEST_KILL_GRACE_SEC`／`CM_VERIFY_TEST_KILL_WAIT_SEC`・`CM_VERIFY_TEST_DRAIN_LOG`・`lock_now_sec`・`mark:child-withdrew`）を足して pin を再計算した（判定は不変）。同日（impl-11）に秒の口 3 つ（`CM_VERIFY_TEST_HANDOFF_WAIT_SEC`・`CM_VERIFY_TEST_KILL_GRACE_SEC`・`CM_VERIFY_TEST_KILL_WAIT_SEC`）を 10 進に正規化して（`08`・`010` が算術と sleep で別の値にならない）pin を再計算した（未設定・空・非数字は不変）。同日（impl-12）に drain の TERM の後で止まる試験の口 `pause:drain-term`（既定では働かない）を足して pin を再計算した。"
         }
       ]
     },
@@ -515,6 +520,30 @@
       "policy": "local-only",
       "reason": "CommandMate 同梱の組み込みスラッシュコマンドカタログ（src/config/slash-commands-catalog.json と locales/{en,ja}/worktree.json）を各 CLI の権威ソースへ合わせる手順。CommandMate 固有のファイル構成・ガードテストに密着しており、他リポジトリでは成立しない。",
       "mirrors": []
+    },
+    {
+      "local": ".claude/skills/cmate-delegate-dev",
+      "counterpart": null,
+      "policy": "generated",
+      "source": "skills/cmate-delegate",
+      "generator": "scripts/dev-skills/generate.mjs",
+      "guard": "tests/unit/skills/dev-skills/generated.test.ts",
+      "reason": "開発ブランチの CLI（commandmatedev）で mem を確かめるための派生。公式 Skill ではなく、公式の実行経路は ADR #1447（docs/design/harness-pack-contract.md §3）のとおり public commandmate のまま。",
+      "mirrors": [
+        ".agents/skills/cmate-delegate-dev"
+      ]
+    },
+    {
+      "local": ".claude/skills/cmate-handoff-dev",
+      "counterpart": null,
+      "policy": "generated",
+      "source": "skills/cmate-handoff",
+      "generator": "scripts/dev-skills/generate.mjs",
+      "guard": "tests/unit/skills/dev-skills/generated.test.ts",
+      "reason": "開発ブランチの CLI（commandmatedev）で mem を確かめるための派生。公式 Skill ではなく、公式の実行経路は ADR #1447（docs/design/harness-pack-contract.md §3）のとおり public commandmate のまま。",
+      "mirrors": [
+        ".agents/skills/cmate-handoff-dev"
+      ]
     }
   ],
   "notMapped": [

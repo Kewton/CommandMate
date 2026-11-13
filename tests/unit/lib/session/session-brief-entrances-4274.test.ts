@@ -75,6 +75,7 @@ import {
 import { addAgentInstance, removeAgentInstance } from '@/lib/db/agent-instances-db';
 import { startInstanceIncarnation } from '@/lib/mem/incarnation';
 import { resetLiveBriefClaimsForTest } from '@/lib/session/session-brief';
+import { getCurrentBoundary } from '@/lib/db/session-brief-db';
 import { EMPTY_BRIEF_PROVIDER, setBriefProviderForTest, type BriefRequest } from '@/lib/session/brief-provider';
 import { getLastSendAttempt, sendMessageDigest } from '@/lib/session/send-attempt-state';
 
@@ -283,6 +284,17 @@ const ENTRANCES: Record<string, Entrance> = {
     // waits at its entrance, not here — the plan compares the pinned lifetime before this
     // write and leaves the row alone (T0g's claimed control in session-brief-worktree-lifetime-4224).
     stale: 'compared with the entrance’s pinned instance lifetime before the write, in the plan’s synchronous stretch; it attaches nothing',
+  },
+  // Issue #4227 (S-B): the screen's "don't read" (G-3) reserves the row it showed and uses it up.
+  'screen decline uses the shown row up as declined': {
+    writes: ['settleDeclinedClaim'],
+    run: async () => {
+      launch('claude');
+      const shown = getCurrentBoundary(world.db, WT, 'claude');
+      await send('claude', 'x', { brief: 'decline', ...(shown ? { briefBoundary: shown.id } : {}) });
+    },
+    briefs: 0,
+    stale: 'a decline attaches nothing to overtake: its claim compares the pinned lifetime in the claim’s synchronous stretch (claim.row) and its settlement is the `same` guard’s',
   },
   'send that relaunched inside copies its delivery': {
     writes: ['copyDeliveryToRelaunchBoundaries'],

@@ -19,6 +19,15 @@
       "list": "リスト表示",
       "tile": "タイル表示"
     },
+    "relativeTime": {
+      "now": "たった今",
+      "minutes": "{count}分前",
+      "hours": "{count}時間前",
+      "days": "{count}日前",
+      "weeks": "{count}週間前",
+      "months": "{count}か月前",
+      "years": "{count}年前"
+    },
     "tileAriaLabel": "{branch} のセッションタイル",
     "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
   },
@@ -568,7 +577,23 @@
       "pending": "書けたが項目は進んでいません（{reason}）",
       "concurrent": "書いている間に他の変更がありました。文書を確かめてください",
       "reapproval": "承認の後に変わりました（{reason}）。差分を作り直してください",
-      "failed": "できませんでした（{code}）"
+      "failed": "できませんでした（{code}）",
+      "repository": "リポジトリ",
+      "chooseBranch": "ブランチを選ぶ",
+      "branchesLoading": "ブランチを読み込み中…",
+      "branchesError": "ブランチの一覧を読み込めませんでした",
+      "noBranches": "決定を持つブランチ・作業木がありません",
+      "branchOption": {
+        "notListed": "{branch}（一覧にありません・mem が on でない）"
+      },
+      "counts": {
+        "line": "承認待ち {open} 件・反映待ち {recorded} 件",
+        "notApprovable": "承認できない（mode {mode}）",
+        "unknown": "承認待ち・反映待ちの件数は不明です（mode がルートの間で食い違っています）"
+      },
+      "pendingOnly": "承認待ちだけ",
+      "foldRecorded": "記録済み・反映待ち（{count} 件）",
+      "foldPromoted": "反映済み（{count} 件）"
     },
     "modeHelp": {
       "off": "何も評価せず、書かず、差し込みもしません。項目は消えずに残ります。",
@@ -578,7 +603,7 @@
     "featureHelp": {
       "injectOnStart": "セッションの境界（起動・reset・resume）の最初の送信に、短い要約（brief）を付けます。",
       "promptOnEvents": "操作（PR・マージなど）の後に、mem を更新するよう Agent に促します。",
-      "popup": "対話：オン・オフを保存します。この版では保存だけで、開始・終了の確認の画面はまだ出ません。オフ（既定）は無人です。auto-yes とは別の設定です。"
+      "popup": "対話：オンで mode が on のブランチでは、「終了」が引き継ぎ（Agent の提案を承認してから人が停止を押す）を出します。mode が on か derived で injectOnStart がオンのブランチでは、境界（起動・reset・resume）の後の最初の通常の送信の前に、引き継ぎをどれだけ読むかを聞きます（画面を開いただけでは出ません。コマンドの送信では聞きません）。オフ（既定）は無人です。auto-yes とは別の設定です。"
     },
     "items": {
       "open": "項目を見る",
@@ -705,6 +730,7 @@
       "pendingDiscard": "送り直さずにやめる（一覧で書けたかを確かめる）",
       "lockedSending": "送信中です。答えが返るまで、ほかの書き込み（追加・編集・close）はできず、送った欄は変えられません。",
       "lockedUnknown": "結果が分からない要求があります。その要求を「同じ内容で送り直す」か「送り直さずにやめる」まで、ほかの書き込み（追加・編集・close・載せ直し・閉じ直す）はできず、その要求の欄は変えられません（二重や取り違えを防ぐため）。読み直しと作業木・instance の選択の変更はできます。",
+      "lockedElsewhere": "ほかの画面（終了の前の引き継ぎ）に、送信中か結果が分からない項目の書き込みがあります。それが決着するまで、ここでは書き込めません（読み直しと選択の変更はできます）。",
       "closeWhenKeep": "閉じる条件（空なら今の {type} のまま。書くと置き換え）",
       "closeWhenRequired": "閉じる条件（必須。例 issue:#123・pr:#45）",
       "closeWhenRequiredHelp": "{kind} には閉じる条件が要ります（waiting・next・external は必須。例 issue:#123・pr:#45・branch:feature/x?merged=develop）。",
@@ -712,6 +738,129 @@
         "title": "閉じる前に他で変更されていました。読んだときと今を見比べて、閉じるかどうかを選び直してください。",
         "again": "今の値を見たうえで閉じ直す"
       }
+    },
+    "handoff": {
+      "title": "終了の前の引き継ぎ（{label}）",
+      "creating": "引き継ぎの依頼を作っています…",
+      "reload": "読み直す",
+      "sessionUnknown": "このセッションの会話の記録が無いため、引き継ぎの依頼を作れません。停止はできます（引き継ぎは記録されません）。",
+      "sessionChanged": "依頼の後にセッションが入れ替わりました。停止は今のセッションに効きます（引き継ぎは記録されません）。",
+      "keepSession": "やめる",
+      "stop": "停止する",
+      "stopNow": "今すぐ停止",
+      "cancel": "終了をやめる",
+      "close": "閉じる",
+      "confirm": "確定する",
+      "approve": "承認",
+      "discard": "捨てる",
+      "rebase": "今の版に載せ替える",
+      "resend": "同じ内容で送り直す",
+      "drop": "送り直さずにやめる",
+      "unknown": "確定の結果が分かりません。同じ内容で送り直すか、送り直さずにやめてください。その間、ほかの項目の書き込みはできません。",
+      "decided": "確定しました。",
+      "someNotApplied": "確定できなかった提案があります（競合・失敗）。一覧を見てください。",
+      "extended": "Agent の時間を 5 分延ばしました。",
+      "sendFailed": "依頼を送れませんでした。送り直すか、提案なしで停止するか、終了をやめてください。",
+      "resendText": "依頼を送り直す",
+      "agentTimeout": "Agent が期限までに「終わった」を返していません。待つ（+5 分）・ここまでの提案で進む・提案なしで停止・終了をやめる、から選んでください。",
+      "doneEmpty": "Agent は提案を 1 件も出さずに「終わった」を返しました。提案しようとして失敗した場合、その提案は届いていません（done の後の提案は受け付けません）。依頼し直すには「終了をやめる」を押してから、もう一度「終了する」を押してください。",
+      "extend": "待つ（+5 分）",
+      "goOn": "ここまでの提案で進む",
+      "direct": "提案を経ずに確定した更新（読むだけ、巻き戻しません）",
+      "notStopped": "停止を確かめられませんでした。もう一度「停止する」を押してください。",
+      "forcedMark": "（強制）",
+      "lockedElsewhere": "ほかの画面に、送信中か結果が分からない項目の書き込みがあります。それが決着するまで、承認・捨てる・載せ替えはできません。",
+      "lockedSending": "確定を送信中です。答えが返るまで、ほかの項目の書き込みはできません。",
+      "lockedUnknown": "結果が分からない確定があります。送り直すかやめるまで、ほかの項目の書き込みはできません。",
+      "withheld": "本文は表示しません（{field} が規則 {rule} に当たりました）",
+      "withheldShort": "（表示しません）",
+      "closeProposal": "閉じる（理由：{reason}）",
+      "currentValue": "今の値（v{version}）",
+      "state": {
+        "awaiting_agent": "Agent の提案を待っています。",
+        "reviewing": "提案を見て、承認するものを選んでください。",
+        "applying": "確定しています…",
+        "ending": "停止を確かめています…",
+        "ended": "終わりました。",
+        "cancelled": "終了をやめました。",
+        "expired": "依頼は期限切れか、セッションが入れ替わりました。"
+      },
+      "proposalState": {
+        "proposed": "提案",
+        "approved": "承認済み",
+        "applied": "確定済み",
+        "conflict": "競合",
+        "discarded": "捨てた",
+        "failed": "失敗",
+        "expired": "期限切れ"
+      },
+      "op": {
+        "add": "追加",
+        "update": "更新",
+        "close": "close"
+      },
+      "outcome": {
+        "confirmed": "終わる前の更新を確かめて終わりました。",
+        "unconfirmed": "終わる前の更新を確認できませんでした（{reason}）。次のセッションにはその旨が残ります。"
+      },
+      "refusal": {
+        "disabled": "このブランチの mem は on ではありません。",
+        "session_changed": "依頼の後にセッションが入れ替わりました。",
+        "request_closed": "この依頼は、もうこの操作を受けません。",
+        "version_conflict": "依頼が読んだときから進みました。今の状態を見て、選び直してください。",
+        "proposal_changed": "提案が、見たときから変わりました。",
+        "state_forbids": "今の状態では、この操作はできません。",
+        "extend_limit": "これ以上は延ばせません。",
+        "not_stopped": "停止を確かめられませんでした。",
+        "end_token_changed": "この停止は、宣言したものではありません。",
+        "already_recorded": "終わり方は既に記録されています。",
+        "screen_only": "この操作は画面からだけできます。",
+        "not_found": "依頼が見つかりません。",
+        "other": "できませんでした（{code}）。"
+      },
+      "closeWhileStopping": "停止の途中です。終わるまで閉じられません（終了をやめることもできません）。",
+      "closeWhileUnknown": "確定の送信中か、結果が分からない確定があります。「同じ内容で送り直す」か「送り直さずにやめる」を選んでから閉じてください。",
+      "closeWhileCancelling": "終了の取り消しを送っています。応答が来るまで閉じられず、確定も送りません。",
+      "pendingElsewhere": "これは作業木 {worktree} の確定です。送り直すには、その作業木で開いてください（ここでは送り直さずにやめることだけできます）。",
+      "pendingOtherWorktree": "別の作業木（{worktree}）の確定で、結果が分からないものがあります（ページを開き直す前のもの）。ここでは送り直さずにやめることだけできます。送り直すには、その作業木で開いてください。",
+      "foreign": "このダイアログは作業木 {worktree} の終了の引き継ぎです。この作業木では停止も確定もできません。元の作業木に戻ると続けられます。",
+      "plainStopped": "停止しました。結果が分からない確定を「同じ内容で送り直す」か「送り直さずにやめる」を選んでから閉じてください。",
+      "plainStopFailed": "停止できませんでした。セッションは動いたままです。もう一度「停止」を押せます。",
+      "plainStopUnknown": "停止できたかどうか分かりません。もう一度「停止」を押せます（止まっていれば何も起きません）。",
+      "field": {
+        "label": {
+          "text": "本文",
+          "closeWhen": "終わる条件",
+          "evidence": "根拠",
+          "promoteTo": "昇格先",
+          "reason": "close の理由"
+        },
+        "current": "今",
+        "keep": "変えない（今の値のまま）",
+        "unset": "指定なし",
+        "cleared": "空にする",
+        "empty": "（空）",
+        "none": "なし"
+      }
+    },
+    "startBrief": {
+      "title": "前回の引き継ぎを読む",
+      "open": "開いている項目：{count} 件（うち未反映の決定 {unreflected} 件）",
+      "questionsNone": "人への質問：なし",
+      "questions": "人への質問：{count} 件",
+      "questionsUnknown": "人への質問：{count} 件（{sources} を読めず不明）",
+      "updated": "最終更新：{at}",
+      "updatedNone": "最終更新：記録なし",
+      "previewFailed": "preview を取れませんでした。",
+      "checkFailed": "引き継ぎを読むかどうかの確認を取れなかったため、送っていません（本文は入力欄に残しています）。",
+      "retry": "もう一度",
+      "short": "短い要約を読む",
+      "full": "全文を読む",
+      "decline": "今回は読まない",
+      "declineNote": "読まないと、前回の終わり方の注意も届きません。閉じると送らずに入力欄へ戻ります。",
+      "askAgain": "引き継ぎの境界が変わりました（{reason}）。本文は送っていません。もう一度選んでください。",
+      "claimed": "別の送信が引き継ぎを渡しています。",
+      "consumed": "この区切りの引き継ぎは使い済みでした（別の送信で渡されたか、サーバーの再起動の前に結果の分からない送信がありました）。本文だけを送りました。"
     }
   }
 }

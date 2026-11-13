@@ -1,6 +1,5 @@
 {
   "agentStatus": {
-    "overflowTrigger": "More agents",
     "sessions": "Sessions {count}",
     "sessionsLabel": "Sessions: {count}",
     "sessionsWaitingLabel": "Sessions: {count}, {waiting} waiting for your answer",

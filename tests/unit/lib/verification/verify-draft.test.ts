@@ -108,7 +108,8 @@ describe('draftVerifyGates against this repository (Issue #2061)', () => {
     expect(reasons.get('npm ci')).toBe('setup');
     expect(reasons.get('npm audit --audit-level=critical')).toBe('network');
     expect(reasons.get('npm publish --provenance --access public')).toBe('release');
-    expect(reasons.get('npm run test:e2e')).toBe('long-running');
+    // [Issue #4308] CI runs E2E as two shards; the shard comes through env so the command has no `${{`.
+    expect(reasons.get('npm run test:e2e -- --shard="$E2E_SHARD/2"')).toBe('long-running');
     // Nothing refused may also be drafted: the two lists partition the scan.
     for (const item of draft.excluded) {
       expect(draft.gates.some((gate) => gate.command === item.command)).toBe(false);

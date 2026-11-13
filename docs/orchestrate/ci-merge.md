@@ -145,7 +145,7 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 全チェックの合格は `judgeChecks` の判定そのもの: すべての `bucket` が `pass` か `skipping`。`skipping` は CI が条件で飛ばしたジョブで、待っても結果は変わらないので合格に数える。`pending` は待ち、`fail` / `cancel` はマージしない。
 
-`gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS` のすべてが登録されるまで待つ。一覧は `.github/workflows/ci-pr.yml` の全ジョブ（matrix の展開後の `Unit Tests (shard 1/4)`〜`(4/4)` を含む 17 件）で、ジョブを足す・名前を変えるときは一覧も直す。食い違うと `merge-pr.test.ts` が両方向で落ちる。一覧に無いチェック（ほかのワークフローなど）は、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
+`gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS` のすべてが登録されるまで待つ。一覧は `.github/workflows/ci-pr.yml` の全ジョブ（matrix の展開後の `Unit Tests (shard 1/4)`〜`(4/4)` と `E2E Tests (shard 1/2)`・`(2/2)` を含む 19 件。`Unit Tests`・`E2E Tests` は shard をまとめる集約ジョブ）で、ジョブを足す・名前を変えるときは一覧も直す。食い違うと `merge-pr.test.ts` が両方向で落ちる。一覧に無いチェック（ほかのワークフローなど）は、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
 
 対象は `ci-pr.yml` だけでよい（#4148 で見送り。追跡は不要）。PR に対して走るほかのワークフローは `cancel-pr-runs-on-close.yml` だけで、PR を閉じたとき（`types: [closed]`）にしか動かない。`pages.yml` は main への push、`publish.yml` はリリースで走る。PR の開いている間に別のワークフローを足すと `merge-pr.test.ts` が落ちるので、そのときに一覧へ足すかを決める。
 
@@ -228,7 +228,7 @@ node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$D
   `pos=` `attempt=` `exit=` `pr=`）。`queue` の行は HEAD を持たず進捗に数えない（docs/orchestrate/run-log.md）。`run-log.mjs status` が `queue:` に出す。
 
 `cpu.heavy` などの検証のロックも同じ札の規約で先着順になった（`machine-lock.ts` と `machine-lock-sync.mjs`。docs/design/verification-config.md §9.2）。
-standalone の `verify-run.sh`（`.claude` と `.agents`）も同じ札の規約に追従した。`commandmate-skills` の写しへの移植は未（別途。それまでその写しは札を知らない旧版）。
+standalone の `verify-run.sh`（`.claude` と `.agents`）も同じ札の規約に追従した。`commandmate-skills` の写しへは #4277 の札の規約を cmate-verify 0.7.0（skills PR #314）、#4288 の 1 番（pgid・退避の読み・観測の 3 値）を 0.8.0（skills PR #315）で移植済み。#4288 の 2 番 PR1a でロックの節に足した run-lock・supervisor.lock 用の関数（既定で働かない）と owner の排他作成は未移植で、それまで写しの 0.8.0 とはバイト一致しない（プロトコルは同じなので、混在しても取り合いの規則は変わらない）。
 
 ## 6-3 落ちたジョブの再実行と run の完走
 

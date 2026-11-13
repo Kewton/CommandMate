@@ -66,8 +66,9 @@ DEFAULT_TIMEOUT_SEC=600
 MAX_TIMEOUT_SEC=7200
 DEFAULT_MAX_LOG_TAIL_BYTES=8192
 MAX_LOG_TAIL_BYTES_LIMIT=1048576
-# Grace period between SIGTERM and SIGKILL for a timed-out gate.
-KILL_GRACE_SEC=5
+# KILL_GRACE_SEC (the grace between SIGTERM and SIGKILL) is set in the machine-wide lock section
+# below: lock_drain_group / lock_stop_gate read it, and scripts/lib/machine-lock.sh loads that
+# section alone (#4288 PR1a).
 
 CONFIG=""
 CWD=""
@@ -603,6 +604,11 @@ LOCK_ROOT=${CM_VERIFY_LOCK_ROOT:-}
 if [ -z "$LOCK_ROOT" ]; then LOCK_ROOT="${HOME:-/tmp}/.commandmate/locks"; fi
 # How often a waiter re-tries the claim. Matches DEFAULT_LOCK_POLL_INTERVAL_MS.
 LOCK_POLL_SEC=0.25
+# Grace period between SIGTERM and SIGKILL for a timed-out gate — and for a group the lock waits on
+# to empty (lock_drain_group). Set inside this section because scripts/lib/machine-lock.sh loads the
+# section alone, and a loader that did not set it would stop on `set -u` or drain with no grace
+# (#4288 PR1a, Codex review-4288h P2-1).
+KILL_GRACE_SEC=5
 LOCK_HOST=$(hostname 2>/dev/null || echo unknown)
 
 # Waiters are served in the order they came (CommandMate #4277). A waiter takes
@@ -618,16 +624,22 @@ LOCK_SAME_HOST_GRACE_MS=60000
 LOCK_OTHER_HOST_GRACE_MS=600000
 LOCK_PID_REUSE_SLACK_MS=2000
 LOCK_LINK_TRIES=32
+# An owner of 0 bytes older than this is taken out by the head (#4288 PR1a-f I4; fixed, for every head:
+# an older writer's `: >` and its write are microseconds apart).
+LOCK_EMPTY_OWNER_GRACE_MS=600000
 # The pid whose own tickets are never judged "reused" (it is this process).
 LOCK_SELF_PID=$$
+# The lock last acquired (lock_acquire_path sets them; empty until then, so a loaded section's
+# operations run under `set -u` before any acquisition — #4288 PR1a).
+LOCK_PATH=""
+LOCK_TOKEN=""
+LOCK_WAITED=0
+LOCK_HELD_BY=""
 # A live ticket / a held lock of this process, so the EXIT trap can hand them back.
 LOCK_TICKET=""
 LOCK_HELD_PATH=""
 LOCK_HELD_TOKEN=""
 LOCK_GONE_SERIAL=0
-lock_start_cache_pid=""
-lock_start_cache_val=""
-lock_start_cache_at=0
 # The gate's process group published to the owner (#4288, docs/design/verify-lock-holder-group-4288.md):
 # LOCK_PENDING_TOKEN is the token of an owner being published (T1) before the gate is signalled,
 # LOCK_GATE_GROUP / LOCK_GATE_LEADER / LOCK_GATE_WATCHDOG the running gate's group, its leader and
@@ -645,7 +657,31 @@ LOCK_WARNED=""
 LOCK_TAB=$(printf '\t')
 # How long a gate's child waits for the signal that its group is on the owner record (§2.4).
 HANDOFF_WAIT_SEC=30
-case "${CM_VERIFY_TEST_HANDOFF_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) HANDOFF_WAIT_SEC=$CM_VERIFY_TEST_HANDOFF_WAIT_SEC;; esac
+# Options for the callers that load this section through scripts/lib/machine-lock.sh — run-lock and
+# supervisor.lock (#4288 PR1a, docs/design/lock-reservation-rest-4288.md §1.6). Every one is off
+# here and set by the caller after the load: verify-run.sh's own gates use none of them.
+#   LOCK_WANT_TOKEN          the token to acquire under (empty: a new one)
+#   LOCK_OWNER_PID           empty or $$ (#4288 PR1a-f I1-b: the first acquisition records its own pid
+#                            only; another pid is refused before the ticket — the hand-off records others)
+#   LOCK_OWNERLESS_GRACE_MS  an owner-less, empty <lock> older than this is taken out by the head (D3)
+#   LOCK_OWNER_CODEC         non-empty: the owner is read by lock_parse_owner_text (D1)
+LOCK_WANT_TOKEN=""
+LOCK_OWNER_PID=""
+LOCK_OWNERLESS_GRACE_MS=""
+LOCK_OWNER_CODEC=""
+# The caller's own lines of a kv record (scripts/lib/machine-lock.sh's codec: label=, run_dir=, lstart=).
+# A key the section writes itself is refused (#4288 PR1a-f I1-c, lock_owner_extra_reserved). Not taken
+# from the environment (like the options above): set by the caller after the load, so an exported value
+# never reaches a record nor refuses the verify gate's JSON acquisition.
+LOCK_OWNER_EXTRA=""
+# Every seam of seconds below is read as decimal (#4288 PR1a-f impl-11): `08` / `010` would otherwise be
+# octal (an error / 8) in the arithmetic of their readers while `sleep` reads 8 / 10.
+case "${CM_VERIFY_TEST_HANDOFF_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) HANDOFF_WAIT_SEC=$(( 10#$CM_VERIFY_TEST_HANDOFF_WAIT_SEC ));; esac
+# Test seams of the drain (#4288 PR1a-f impl-10; unset — the default — changes nothing): the grace
+# between TERM and KILL (KILL_GRACE_SEC, every user of it) and the wait after KILL (LOCK_KILL_WAIT_SEC).
+LOCK_KILL_WAIT_SEC=2
+case "${CM_VERIFY_TEST_KILL_GRACE_SEC:-}" in ''|*[!0-9]*) ;; *) KILL_GRACE_SEC=$(( 10#$CM_VERIFY_TEST_KILL_GRACE_SEC ));; esac
+case "${CM_VERIFY_TEST_KILL_WAIT_SEC:-}" in ''|*[!0-9]*) ;; *) LOCK_KILL_WAIT_SEC=$(( 10#$CM_VERIFY_TEST_KILL_WAIT_SEC ));; esac
 
 # Milliseconds since the epoch. `date +%s%3N` where date has it (GNU), else
 # seconds * 1000 (macOS) — the ticket deadline is then whole seconds, which is
@@ -656,6 +692,12 @@ lock_now_ms() {
     ''|*[!0-9]*) echo $(( $(date +%s) * 1000 ));;
     *) echo "$lnm";;
   esac
+}
+
+# Whole seconds since the epoch: the drain's clock (lock_drain_group). A test may redefine it after the
+# load, as lock_now_ms (#4288 PR1a-f impl-10: the waits driven by a fixed clock, not the real one).
+lock_now_sec() {
+  date +%s
 }
 
 # One field out of a JSON record (an owner or a ticket): strings, digits, true /
@@ -710,6 +752,7 @@ lock_owner_field() { # <lock-path> <key>
 # The errno name a failed command's message stands for (messages are read under LC_ALL=C).
 lock_errno_of() { # <message>
   case "$1" in
+    *cannot\ overwrite\ existing\ file*) echo EEXIST;;
     *[Nn]o\ such\ process*) echo ESRCH;;
     *[Oo]peration\ not\ permitted*) echo EPERM;;
     *[Pp]ermission\ denied*) echo EACCES;;
@@ -744,6 +787,28 @@ lock_errno_text() { # <errno>
   esac
 }
 
+# An errno carried in an exit code (lock_obs_create answers from a pipeline's last element): its
+# index in LOCK_ERRNOS (LEI_INDEX; a name not listed is EUNKNOWN's), and back. The bands of
+# lock_obs_create (10+i, 40+i, 70+i, 85+i, 100+i; 99 is F11's ENOENT) hold for at most 14 names:
+# a 15th would make 85+14 read as 99 (tests/unit/verification/lock-pr1af-impl2-4288.test.ts fixes it).
+LOCK_ERRNOS="ESRCH EPERM EACCES ENOENT EEXIST EIO EISDIR ENOTDIR ENOTEMPTY ENOSPC ELOOP EROFS EINVAL EUNKNOWN"
+lock_errno_index() { # <errno>
+  LEI_INDEX=0
+  for lei_e in $LOCK_ERRNOS; do
+    [ "$lei_e" = "$1" ] && return 0
+    LEI_INDEX=$(( LEI_INDEX + 1 ))
+  done
+  LEI_INDEX=$(( LEI_INDEX - 1 ))
+}
+lock_errno_at() { # <index>
+  lea_i=0
+  for lea_e in $LOCK_ERRNOS; do
+    if [ "$lea_i" = "$1" ]; then echo "$lea_e"; return 0; fi
+    lea_i=$(( lea_i + 1 ))
+  done
+  echo EUNKNOWN
+}
+
 # Test seam only: CM_VERIFY_TEST_OBS_FAULT (and the file CM_VERIFY_TEST_OBS_FAULT_FILE, read at
 # every call so a test can change it while a run waits) holds `<point>=<ERRNO>` or
 # `<point>@<substring of the target>=<ERRNO>` items, separated by blanks or newlines. A matching
@@ -760,6 +825,7 @@ lock_test_obs_fault() { # <point> <target>
     ltf_key=${ltf_item%%=*}
     case "$ltf_key" in
       "$1") LTF_CODE=${ltf_item#*=}; return 0;;
+      "$1@@"*) if [ "$2" = "${ltf_key#*@@}" ]; then LTF_CODE=${ltf_item#*=}; return 0; fi;;
       "$1@"*) case "$2" in *"${ltf_key#*@}"*) LTF_CODE=${ltf_item#*=}; return 0;; esac;;
     esac
   done
@@ -772,6 +838,18 @@ lock_test_pause() { # <stage>
   case ",${CM_VERIFY_TEST_HANDOFF:-}," in *",pause:$1,"*) ;; *) return 0;; esac
   : > "$CM_VERIFY_TEST_HANDOFF_DIR/$1.reached"
   while [ ! -e "$CM_VERIFY_TEST_HANDOFF_DIR/$1.go" ]; do sleep 0.05 2>/dev/null || sleep 1; done
+}
+# A mark that does not wait: mark:<stage> in CM_VERIFY_TEST_HANDOFF writes <dir>/<stage>.reached
+# (#4288 PR1a-f impl-10: a test waits for the child's decision instead of a fixed sleep).
+lock_test_mark() { # <stage>
+  [ -n "${CM_VERIFY_TEST_HANDOFF_DIR:-}" ] || return 0
+  case ",${CM_VERIFY_TEST_HANDOFF:-}," in *",mark:$1,"*) : > "$CM_VERIFY_TEST_HANDOFF_DIR/$1.reached";; esac
+  return 0
+}
+# A line per step of the drain into CM_VERIFY_TEST_DRAIN_LOG (unset: nothing written).
+lock_test_drain_note() { # <step>
+  [ -n "${CM_VERIFY_TEST_DRAIN_LOG:-}" ] || return 0
+  printf '%s\n' "$1" >> "$CM_VERIFY_TEST_DRAIN_LOG" 2>/dev/null || true
 }
 lock_test_fault() { # <stage>
   case ",${CM_VERIFY_TEST_HANDOFF:-}," in *",fault:$1,"*) return 0;; esac
@@ -849,6 +927,9 @@ lock_obs_lstat() { # <point> <path>
 # empty pgid means "no group", and a dead runner's lock would be recovered past its live gate. A
 # pgid key that is there but is not a number of digits is unknown (EINVAL) for the same reason.
 # Only a record read whole and WITHOUT a pgid key (an older owner) is judged by its pid alone.
+# #4288 PR1a-f: LOB_EMPTY=1 when the owner read is of 0 bytes (corrupt: the head takes it out past
+# LOCK_EMPTY_OWNER_GRACE_MS, I4), LOB_V the writer's version (I9; empty on an older copy's record) and
+# LOB_STARTED_AT the kv record's started_at= (D7). Every one is emptied on every read (F40).
 lock_obs_owner_fail() { # <errno>
   LOB_CLASS=unknown
   LOB_CODE=$1
@@ -856,6 +937,10 @@ lock_obs_owner_fail() { # <errno>
   LOB_HOST=""
   LOB_TOKEN=""
   LOB_PGID=""
+  LOB_LSTART=""
+  LOB_STARTED_AT=""
+  LOB_V=""
+  LOB_EMPTY=""
 }
 lock_obs_owner() { # <point> <dir>
   lock_obs_owner_fail ""
@@ -864,7 +949,9 @@ lock_obs_owner() { # <point> <dir>
     lob_out=$(lock_errno_text "$LTF_CODE")
     lob_rc=1
   else
-    lob_out=$(LC_ALL=C cat -- "$2/owner" 2>&1)
+    # The `.` keeps the trailing newlines `$(…)` would drop: an owner of only newlines is not of 0
+    # bytes (corrupt and named, as the JS reads it; never I4's to take out).
+    lob_out=$(LC_ALL=C cat -- "$2/owner" 2>&1 && echo .)
     lob_rc=$?
   fi
   if [ "$lob_rc" -ne 0 ]; then
@@ -872,10 +959,41 @@ lock_obs_owner() { # <point> <dir>
     if [ "$LOB_CODE" = ENOENT ] && [ ! -L "$2/owner" ]; then LOB_CLASS=missing; fi
     return 0
   fi
+  lob_out=${lob_out%.}
+  if [ -z "$lob_out" ]; then
+    LOB_CLASS=corrupt
+    LOB_EMPTY=1
+    return 0
+  fi
+  while [ "${lob_out%$'\n'}" != "$lob_out" ]; do lob_out=${lob_out%$'\n'}; done
+  if [ -z "$lob_out" ]; then
+    LOB_CLASS=corrupt
+    return 0
+  fi
+  # A caller's own record format (#4288 PR1a D1: run-lock / supervisor.lock keep key=value lines). The
+  # codec reads the same one read, and answers an extraction it could not make as unknown too.
+  if [ -n "$LOCK_OWNER_CODEC" ]; then
+    lock_parse_owner_text "$lob_out"
+    case $? in
+      0) ;;
+      2) lock_obs_owner_fail EINVAL; return 0;;
+      *) lock_obs_owner_fail EUNKNOWN; return 0;;
+    esac
+    LOB_PID=$LPO_PID
+    LOB_HOST=$LPO_HOST
+    LOB_TOKEN=$LPO_TOKEN
+    LOB_PGID=$LPO_PGID
+    LOB_LSTART=$LPO_LSTART
+    LOB_STARTED_AT=${LPO_STARTED_AT:-}
+    LOB_V=${LPO_V:-}
+    if [ -n "$LOB_PID" ] && [ -n "$LOB_TOKEN" ]; then LOB_CLASS=record; else LOB_CLASS=corrupt; fi
+    return 0
+  fi
   LOB_PID=$(lock_json_text_field "$lob_out" pid) || { lock_obs_owner_fail EUNKNOWN; return 0; }
   LOB_HOST=$(lock_json_text_field "$lob_out" host) || { lock_obs_owner_fail EUNKNOWN; return 0; }
   LOB_TOKEN=$(lock_json_text_field "$lob_out" token) || { lock_obs_owner_fail EUNKNOWN; return 0; }
   LOB_PGID=$(lock_json_text_field "$lob_out" pgid) || { lock_obs_owner_fail EUNKNOWN; return 0; }
+  if ! LOB_V=$(lock_json_text_field "$lob_out" v); then lock_obs_owner_fail EUNKNOWN; return 0; fi
   if [ -n "$LOB_PID" ] && [ -n "$LOB_TOKEN" ]; then LOB_CLASS=record; else LOB_CLASS=corrupt; fi
   if [ "$LOB_CLASS" = record ] && ! lock_pgid_field_ok "$lob_out" "$LOB_PGID"; then lock_obs_owner_fail EINVAL; fi
 }
@@ -889,6 +1007,26 @@ lock_pgid_field_ok() { # <record text> <extracted pgid>
     *[!0-9]*) return 1;;
   esac
   return 0
+}
+
+# The owner codec (#4288 PR1a D1). verify-run.sh's own owner is the JSON record: lock_format_owner
+# writes it and lock_obs_owner reads it inline, so every step of that one read stays in the observer
+# (§2.8). A caller that keeps another record format (scripts/lib/machine-lock.sh: key=value lines for
+# run-lock and supervisor.lock) sets LOCK_OWNER_CODEC and redefines both after loading this section:
+#   lock_parse_owner_text <text>  sets LPO_PID LPO_HOST LPO_TOKEN LPO_PGID LPO_LSTART (and, #4288
+#     PR1a-f, LPO_STARTED_AT LPO_V) from the one read; 0 = parsed, 1 = an extraction failed (unknown,
+#     EUNKNOWN), 2 = a pgid that is there and is not a number (unknown, EINVAL)
+#   lock_format_owner <pid> <token> <acquiredAt-ms> [<pgid>]  prints the record, with the writer's
+#     version (`"v":1` / `v=1`, #4288 PR1a-f I9: published whole with link, the own pid, the rename undo)
+lock_parse_owner_text() { # <text>
+  return 1
+}
+lock_format_owner() { # <pid> <token> <acquiredAt-ms> [<pgid>]
+  if [ -n "${4:-}" ]; then
+    printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s,"pgid":%s,"v":1}\n' "$1" "$LOCK_HOST" "$2" "$3" "$4"
+  else
+    printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s,"v":1}\n' "$1" "$LOCK_HOST" "$2" "$3"
+  fi
 }
 
 # created | exists (EEXIST) | unknown:<errno>
@@ -915,6 +1053,194 @@ lock_obs_mv() { # <point> <from> <to>
   fi
   lmv_code=$(lock_errno_of "$lmv_out")
   if [ "$lmv_code" = ENOENT ]; then echo absent; else echo "unknown:$lmv_code"; fi
+}
+
+# link(2) of <from> as <to> (#4288 PR1a-f I2): linked | exists (EEXIST — whatever is there: a file, a
+# directory, a symlink to either; nothing is made inside it, as `ln` would) | absent (ENOENT) |
+# unknown:<errno>. /bin/link calls link(2) as it is (macOS and coreutils).
+lock_obs_link() { # <point> <from> <to>
+  lock_test_obs_fault "$1" "$3"
+  if [ -n "$LTF_CODE" ]; then
+    lok_out=$(lock_errno_text "$LTF_CODE")
+  elif lok_out=$(LC_ALL=C /bin/link -- "$2" "$3" 2>&1); then
+    echo linked
+    return 0
+  fi
+  lok_code=$(lock_errno_of "$lok_out")
+  case "$lok_code" in
+    EEXIST) echo exists;;
+    ENOENT) echo absent;;
+    *) echo "unknown:$lok_code";;
+  esac
+}
+
+# unlink of one name (never a directory, never -f): removed | absent (ENOENT) | unknown:<errno>.
+lock_obs_unlink() { # <point> <file>
+  lock_test_obs_fault "$1" "$2"
+  if [ -n "$LTF_CODE" ]; then
+    lou_out=$(lock_errno_text "$LTF_CODE")
+  elif lou_out=$(LC_ALL=C rm -- "$2" 2>&1 </dev/null); then
+    echo removed
+    return 0
+  fi
+  lou_code=$(lock_errno_of "$lou_out")
+  if [ "$lou_code" = ENOENT ]; then echo absent; else echo "unknown:$lou_code"; fi
+}
+
+# The entry itself (a symlink is not followed): "<kind> <size> <mtime-ms>" with kind file | link | dir |
+# other — or absent | unknown:<errno>. GNU stat first (-c), then BSD (-f); mtime in whole seconds.
+lock_obs_stat() { # <point> <path>
+  lock_test_obs_fault "$1" "$2"
+  if [ -n "$LTF_CODE" ]; then
+    los_out=$(lock_errno_text "$LTF_CODE")
+  elif los_out=$(LC_ALL=C stat -c '%F|%s|%Y' -- "$2" 2>/dev/null) && [ -n "$los_out" ]; then
+    lock_stat_line "$los_out"
+    return 0
+  elif los_out=$(LC_ALL=C stat -f '%HT|%z|%m' -- "$2" 2>&1) && [ -n "$los_out" ]; then
+    lock_stat_line "$los_out"
+    return 0
+  fi
+  los_code=$(lock_errno_of "$los_out")
+  if [ "$los_code" = ENOENT ]; then echo absent; else echo "unknown:$los_code"; fi
+}
+lock_stat_line() { # <type|size|mtime-s>
+  lsl_type=${1%%|*}
+  lsl_rest=${1#*|}
+  lsl_size=${lsl_rest%%|*}
+  lsl_m=${lsl_rest#*|}
+  case "$lsl_type" in
+    [Rr]egular*) lsl_type=file;;
+    [Ss]ymbolic*) lsl_type=link;;
+    [Dd]irectory) lsl_type=dir;;
+    *) lsl_type=other;;
+  esac
+  case "$lsl_size$lsl_m" in ''|*[!0-9]*) echo unknown:EINVAL; return 0;; esac
+  echo "$lsl_type $lsl_size $(( lsl_m * 1000 ))"
+}
+
+# The owner, published whole (#4288 PR1a D3, PR1a-f I1): the record on stdin is read once
+# (`$(cat)`), written with printf into <lock>/.owner-<token> created exclusively (`set -C`), read
+# back the same way and compared (a short write is caught there), then published with link(2)
+# (lock_obs_link: an owner there — a file, a directory, a symlink — is never written over or into)
+# and read back (point owner-readback): the lock is taken only when it is this acquisition's record.
+# <lock>/owner is never seen empty or half written. The tmp is removed after the read-back. What a
+# failure removes is only this call's own (design §3): its tmp; when the read-back cannot be judged,
+# the owner it published is renamed to its own name .undo-<token> and removed only when that is the
+# tmp's inode (`[ ! -L ] && [ -ef ]`), else linked back (I2-b). It runs as the last element of a
+# pipeline, so it answers by its exit code — i is lock_errno_index's:
+#   0 taken | 3 exists (the link met an owner; own tmp removed) | 6 another record read back (own tmp
+#   removed) | 10+i the tmp not created (nothing of ours: the caller's rmdir removes the <lock> only
+#   when empty) | 40+i opened, the write failed or read back short (the tmp removed unless that
+#   failed too) | 70+i published, the read-back unknown, the own owner undone (the caller rmdir-s) |
+#   85+i the link failed (owner-publish; the tmp removed, the caller rmdir-s) | 99 the link answered
+#   ENOENT (F11: no rmdir — a <lock> there now is not ours) | 100+i the read-back unknown and the owner
+#   not shown to be ours (linked back, or the undo failed: no rmdir).
+# Test seams: CM_VERIFY_TEST_HANDOFF=fault:owner-write / fault:owner-unlink and the pauses of §2.6
+# (owner-tmp-opened, owner-tmp-written, owner-linked, owner-tmp-removed; owner-lock-made is the
+# caller's); CM_VERIFY_TEST_OBS_FAULT at owner-create, owner-write, owner-write-short, owner-publish,
+# owner-readback, owner-unlink, owner-undo-rename, owner-undo-lstat, owner-undo-link.
+lock_obs_create() { # <point> <file> <token>
+  lco_lock=${2%/*}
+  lco_tmp="$lco_lock/.owner-$3"
+  lco_undo="$lco_lock/.undo-$3"
+  if ! lco_text=$(cat); then
+    lock_errno_index EIO
+    return $(( 10 + LEI_INDEX ))
+  fi
+  lock_test_obs_fault "$1" "$2"
+  if [ -n "$LTF_CODE" ]; then
+    lock_errno_index "$LTF_CODE"
+    return $(( 10 + LEI_INDEX ))
+  fi
+  if ! lco_out=$(export LC_ALL=C; set -C; : 2>&1 > "$lco_tmp"); then
+    lock_errno_index "$(lock_errno_of "$lco_out")"
+    return $(( 10 + LEI_INDEX ))
+  fi
+  lock_test_pause owner-tmp-opened
+  lco_fail=""
+  if lock_test_fault owner-write; then lco_fail=EIO; fi
+  if [ -z "$lco_fail" ]; then
+    lock_test_obs_fault owner-write "$2"
+    lco_fail=$LTF_CODE
+  fi
+  if [ -z "$lco_fail" ]; then
+    lock_test_obs_fault owner-write-short "$2"
+    lco_short=$LTF_CODE
+    if [ -n "$lco_short" ]; then lco_write=${lco_text%?}; else lco_write=$lco_text; fi
+    if ! lco_out=$(export LC_ALL=C; { printf '%s\n' "$lco_write" >> "$lco_tmp"; } 2>&1); then
+      lco_fail=$(lock_errno_of "$lco_out")
+    elif ! lco_back=$(LC_ALL=C cat -- "$lco_tmp" 2>&1); then
+      lco_fail=$(lock_errno_of "$lco_back")
+    elif [ "$lco_back" != "$lco_text" ]; then
+      lco_fail=${lco_short:-EIO}
+    fi
+  fi
+  if [ -n "$lco_fail" ]; then
+    if ! lock_test_fault owner-unlink; then lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""; fi
+    lock_errno_index "$lco_fail"
+    return $(( 40 + LEI_INDEX ))
+  fi
+  lock_test_pause owner-tmp-written
+  lco_ln=$(lock_obs_link owner-publish "$lco_tmp" "$2") || lco_ln=unknown:EUNKNOWN
+  case "$lco_ln" in
+    linked) ;;
+    exists) lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""; return 3;;
+    absent) lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""; return 99;;
+    *)
+      lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""
+      lock_errno_index "${lco_ln#unknown:}"
+      return $(( 85 + LEI_INDEX ));;
+  esac
+  lock_test_pause owner-linked
+  lock_obs_owner owner-readback "$lco_lock"
+  if [ "$LOB_CLASS" = record ] && [ "$LOB_TOKEN" = "$3" ]; then
+    if ! lock_test_fault owner-unlink; then lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""; fi
+    lock_test_pause owner-tmp-removed
+    return 0
+  fi
+  if [ "$LOB_CLASS" != unknown ]; then
+    lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""
+    return 6
+  fi
+  lock_errno_index "$LOB_CODE"
+  lco_i=$LEI_INDEX
+  # I2-b: never removed by its name after a check — renamed to this call's own name first.
+  lco_mv=$(lock_obs_mv owner-undo-rename "$2" "$lco_undo") || lco_mv=unknown:EUNKNOWN
+  if [ "$lco_mv" != moved ]; then
+    lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""
+    return $(( 100 + lco_i ))
+  fi
+  lock_test_obs_fault owner-undo-lstat "$lco_undo"
+  if [ -z "$LTF_CODE" ] && [ ! -L "$lco_undo" ] && [ "$lco_undo" -ef "$lco_tmp" ]; then
+    lco_rm=$(lock_obs_unlink owner-unlink "$lco_undo") || lco_rm=""
+    lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""
+    return $(( 70 + lco_i ))
+  fi
+  lco_back=$(lock_obs_link owner-undo-link "$lco_undo" "$2") || lco_back=unknown:EUNKNOWN
+  lco_rm=$(lock_obs_unlink owner-unlink "$lco_tmp") || lco_rm=""
+  if [ "$lco_back" = linked ]; then
+    lco_rm=$(lock_obs_unlink owner-unlink "$lco_undo") || lco_rm=""
+  else
+    echo "verify-run: machine-lock-undo-restore-failed $lco_lock kept=$lco_undo ($lco_back)" >&2
+  fi
+  return $(( 100 + lco_i ))
+}
+
+# The modification time of <path> itself (not followed) in ms — <ms> | absent | unknown:<errno>.
+# GNU stat first (-c %Y), then BSD (-f %m); whole seconds, like lock_now_ms on macOS.
+lock_obs_mtime() { # <point> <path>
+  lock_test_obs_fault "$1" "$2"
+  if [ -n "$LTF_CODE" ]; then
+    lot_out=$(lock_errno_text "$LTF_CODE")
+  elif lot_out=$(LC_ALL=C stat -c %Y -- "$2" 2>/dev/null) && [ -n "$lot_out" ] && [ -z "${lot_out//[0-9]/}" ]; then
+    echo $(( lot_out * 1000 ))
+    return 0
+  elif lot_out=$(LC_ALL=C stat -f %m -- "$2" 2>&1) && [ -n "$lot_out" ] && [ -z "${lot_out//[0-9]/}" ]; then
+    echo $(( lot_out * 1000 ))
+    return 0
+  fi
+  lot_code=$(lock_errno_of "$lot_out")
+  if [ "$lot_code" = ENOENT ]; then echo absent; else echo "unknown:$lot_code"; fi
 }
 
 # The process group of <pid> (`ps -o pgid=`), or unknown:<errno> when ps cannot say.
@@ -990,29 +1316,37 @@ lock_record_gone() { # <pid> <host> <pgid>, from one read of the record
   [ "$(lock_holder_state "$1" "$2" "$3")" = gone ]
 }
 
-# When <pid> started (ms), from `ps -o etime=` (`[[dd-]hh:]mm:ss`); empty when ps
-# cannot say. One answer is trusted for 10 s, like the TS runner's cache.
-lock_pid_start_ms() { # <pid> <now-ms>
-  if [ "$lock_start_cache_pid" = "$1" ] && [ $(( $2 - lock_start_cache_at )) -lt 10000 ]; then
-    echo "$lock_start_cache_val"
-    return 0
-  fi
-  lps_et=$(ps -o etime= -p "$1" 2>/dev/null) || lps_et=""
-  lps_val=$(printf '%s\n' "$lps_et" | awk -v now="$2" '
-    NF == 1 {
-      s = $1; d = 0
-      if (index(s, "-") > 0) { split(s, a, "-"); d = a[1]; s = a[2] }
-      n = split(s, p, ":")
-      if (n == 3) { h = p[1]; m = p[2]; x = p[3] }
-      else if (n == 2) { h = 0; m = p[1]; x = p[2] }
-      else exit
-      printf "%.0f\n", now - (((d * 24 + h) * 60 + m) * 60 + x) * 1000
-      exit
-    }') || lps_val=""
-  lock_start_cache_pid=$1
-  lock_start_cache_val=$lps_val
-  lock_start_cache_at=$2
-  echo "$lps_val"
+# `ps -o etime=` (`[[dd-]hh:]mm:ss`) in ms, or return 1 (#4288 PR1a-f, design §4.1): only
+# `^([0-9]+-)?([0-9]{1,2}:)?[0-9]{1,2}:[0-9]{2}$` (a day field only with an hour field), hours < 24,
+# minutes and seconds < 60 — a malformed answer is never read as "just started" (E7). Pure arithmetic.
+# scripts/lib/machine-lock.sh's machine_lock_etime_ms is this function.
+LOCK_ETIME_RE='^(([0-9]+)-)?(([0-9]{1,2}):)?([0-9]{1,2}):([0-9]{2})$'
+lock_etime_ms() { # <etime text>
+  let_s=${1#"${1%%[![:space:]]*}"}
+  let_s=${let_s%"${let_s##*[![:space:]]}"}
+  [[ $let_s =~ $LOCK_ETIME_RE ]] || return 1
+  let_d=${BASH_REMATCH[2]}
+  let_h=${BASH_REMATCH[4]}
+  if [ -n "$let_d" ] && [ -z "$let_h" ]; then return 1; fi
+  let_h=$(( 10#${let_h:-0} ))
+  let_m=$(( 10#${BASH_REMATCH[5]} ))
+  let_x=$(( 10#${BASH_REMATCH[6]} ))
+  if [ "$let_h" -ge 24 ] || [ "$let_m" -ge 60 ] || [ "$let_x" -ge 60 ]; then return 1; fi
+  echo $(( (((10#${let_d:-0} * 24 + let_h) * 60 + let_m) * 60 + let_x) * 1000 ))
+}
+
+# When <pid> started (ms), from `ps -o etime=`; empty when ps cannot say. The clock is read before ps
+# and again after it (#4288 PR1a-f, P1's observation window): a step back in between, or a read of 1 s
+# or more, is empty too (a step inside it cannot be told; the ticket is not retired, an older tmp not
+# taken out) and returns 3, so I3 names it ECLOCK (F53); ps that cannot say is empty with 0. The start
+# is <before> − etime. No cache: a command substitution cannot keep one.
+lock_pid_start_ms() { # <pid>
+  lps_before=$(lock_now_ms) || return 0
+  if ! lps_et=$(ps -o etime= -p "$1" 2>/dev/null); then return 0; fi
+  lps_after=$(lock_now_ms) || return 0
+  if [ "$lps_after" -lt "$lps_before" ] || [ $(( lps_after - lps_before )) -ge 1000 ]; then return 3; fi
+  lps_ms=$(lock_etime_ms "$lps_et") || return 0
+  echo $(( lps_before - lps_ms ))
 }
 
 # Why another waiter's ticket may be retired (printed), or return 1 — never by
@@ -1034,7 +1368,7 @@ lock_ticket_retirable() { # <file> <now-ms>
   if [ "$ltr_host" = "$LOCK_HOST" ]; then
     if lock_record_gone "$ltr_pid" "$ltr_host" "$ltr_pgid"; then echo gone; return 0; fi
     if [ -n "$ltr_pid" ] && [ "$ltr_pid" != "$LOCK_SELF_PID" ] && [ -n "$ltr_created" ]; then
-      ltr_start=$(lock_pid_start_ms "$ltr_pid" "$2") || ltr_start=""
+      ltr_start=$(lock_pid_start_ms "$ltr_pid") || ltr_start=""
       if [ -n "$ltr_start" ] && [ "$ltr_start" -gt $(( ltr_created + LOCK_PID_REUSE_SLACK_MS )) ]; then
         echo pid-reused
         return 0
@@ -1171,17 +1505,23 @@ lock_ownerless_empty() { # <lock-path>
   esac
 }
 
-# Move a moved-aside owner back into <lock> and drop the moved-aside directory. LMO_RESULT:
-# restored | absent (ENOENT) | restore-failed (the empty <lock> is taken out again and the
-# moved-aside directory kept: it goes on holding the lock).
+# Put a moved-aside owner back into <lock> and drop the moved-aside directory. The put-back is a
+# link(2) (#4288 PR1a-f I2-c): an owner published between the caller's check (created / an
+# owner-less, empty <lock>) and the put-back is never written over — EEXIST keeps the moved-aside
+# directory and the <lock> (it holds the publisher's owner), named. LMO_RESULT: restored | absent
+# (ENOENT) | restore-failed (EEXIST; or any other failure: the empty <lock> is taken out again and the
+# moved-aside directory kept — it goes on holding the lock).
 lock_move_owner_in() { # <lock-path> <gone>
-  lmo_mv=$(lock_obs_mv restore-rename "$2/owner" "$1/owner")
+  lmo_mv=$(lock_obs_link restore-rename "$2/owner" "$1/owner")
   case "$lmo_mv" in
-    moved)
+    linked)
       lock_test_pause restore-owner
       rm -rf "$2" 2>/dev/null
       LMO_RESULT=restored;;
     absent) LMO_RESULT=absent;;
+    exists)
+      echo "verify-run: machine-lock-restore-failed $1: kept $2 (EEXIST)" >&2
+      LMO_RESULT=restore-failed;;
     *)
       rmdir "$1" 2>/dev/null
       echo "verify-run: machine-lock-restore-failed $1: kept $2 (${lmo_mv#unknown:})" >&2
@@ -1266,7 +1606,10 @@ lock_settle_gone() { # <lock-path>
       missing) rmdir "$lsg_g" 2>/dev/null; continue;;
       corrupt) continue;;
     esac
-    lsg_state=$(lock_holder_state "$LOB_PID" "$LOB_HOST" "$LOB_PGID")
+    lock_note_legacy "$1"
+    # The same judgement as the lock's own record (lock_record_state over this one read), so a check a
+    # loader wraps around it — supervisor.lock's lstart (#4288 PR1a D7) — reaches the moved-aside ones.
+    lsg_state=$(lock_record_state)
     if [ "$lsg_state" = gone ]; then
       if ! lock_reclaim_gone "$1" "$lsg_g" "$LOB_TOKEN" 1; then
         lsg_rc=1
@@ -1284,7 +1627,10 @@ lock_settle_gone() { # <lock-path>
     lsg_rc=1
     [ -n "$LOCK_GONE_PENDING" ] || LOCK_GONE_PENDING=$lsg_g
     case "$lsg_state" in
-      unknown:*) lsg_u=${lsg_state#unknown:}; lock_note_unknown "${lsg_u%%:*}" "$lsg_g" "${lsg_u#*:}";;
+      unknown:*)
+        lock_note_mismatch "$lsg_g" "$lsg_state"
+        lsg_u=${lsg_state#unknown:}
+        lock_note_unknown "${lsg_u%%:*}" "$lsg_g" "${lsg_u#*:}";;
     esac
     lock_restore_from_gone "$1" "$lsg_g"
   done <<LSG_EOF
@@ -1323,46 +1669,312 @@ LRO_EOF
 lock_recover() { # <lock-path> <dead-token> <dead-pid>
   LOCK_GONE_SERIAL=$(( LOCK_GONE_SERIAL + 1 ))
   lrc_gone="$1.gone-$LOCK_TOKEN-$LOCK_GONE_SERIAL"
-  [ "$(lock_obs_mv rename-aside "$1" "$lrc_gone")" = moved ] || return 0
+  LRC_RESULT=""
+  lrc_aside=$(lock_obs_mv rename-aside "$1" "$lrc_gone")
+  case "$lrc_aside" in
+    moved) ;;
+    absent) LRC_RESULT=absent; return 0;;
+    *) LRC_RESULT=unknown; return 0;;
+  esac
   lock_test_pause recover-moved
   lock_obs_owner recover-owner "$lrc_gone"
   if [ "$LOB_CLASS" = record ] && [ "$LOB_TOKEN" = "$2" ]; then
     rm -rf "$lrc_gone" 2>/dev/null || true
-    echo "verify-run: broke a stale lock at $1 (recorded holder pid $3 on this host no longer exists)" >&2
+    lock_note_recovered "$1" "$3"
+    LRC_RESULT=recovered
     return 0
   fi
   lrc_m=$(lock_obs_mkdir restore-mkdir "$1")
   if [ "$lrc_m" != created ]; then
     echo "verify-run: machine-lock-restore-failed $1: kept $lrc_gone" >&2
+    LRC_RESULT=restore-failed
     return 0
   fi
   lock_test_pause restore-mkdir
   lock_move_owner_in "$1" "$lrc_gone"
-  # ENOENT: the moved lock had no owner yet — its holder writes it into the restored path.
-  if [ "$LMO_RESULT" = absent ]; then rm -rf "$lrc_gone" 2>/dev/null || true; fi
+  LRC_RESULT=$LMO_RESULT
+  # ENOENT: the moved lock had no owner — a new writer's temporaries were in it (they went with the
+  # move), and that writer's link answers ENOENT (F11: it refuses and removes nothing else).
+  if [ "$LMO_RESULT" = absent ]; then rm -rf "$lrc_gone" 2>/dev/null || true; LRC_RESULT=restored; fi
+}
+
+# The line a recovery prints (a caller with its own wording — run-lock's — redefines it after the load).
+lock_note_recovered() { # <lock-path> <dead-pid>
+  echo "verify-run: broke a stale lock at $1 (recorded holder pid $2 on this host no longer exists)" >&2
+}
+
+# I3's predicate (#4288 PR1a-f), called by the clean-up (lock_expire_ownerless) only: <lock> has no
+# owner and holds nothing but temporaries — `.owner-<token>` (the new writers' and the hand-off's) or
+# an older run-lock / supervisor.lock writer's `owner.tmp.<digits>` — each a regular file. Sets LOTO:
+# no | absent | empty | temps | stray:<name> | unknown:<point>:<path>:<errno>, and LOTO_TEMPS (one
+# "<name> <mtime-ms> <pid or ->" per line). lock_ownerless_empty keeps its meaning (the put-back's).
+lock_ownerless_temps_only() { # <lock-path>
+  LOTO=""
+  LOTO_TEMPS=""
+  lock_obs_owner lock-owner "$1"
+  case "$LOB_CLASS" in
+    unknown) LOTO="unknown:lock-owner:$1/owner:$LOB_CODE"; return 0;;
+    missing) ;;
+    *) LOTO=no; return 0;;
+  esac
+  lock_obs_list lock-list "$1"
+  case "$LOL_STATE" in
+    absent) LOTO=absent; return 0;;
+    unknown) LOTO="unknown:lock-list:$1:$LOL_CODE"; return 0;;
+  esac
+  while IFS= read -r loto_n; do
+    [ -n "$loto_n" ] || continue
+    loto_pid=-
+    case "$loto_n" in
+      .owner-*) case "${loto_n#.owner-}" in ''|*[!A-Za-z0-9-]*) LOTO="stray:$loto_n"; return 0;; esac;;
+      owner.tmp.*)
+        loto_pid=${loto_n#owner.tmp.}
+        case "$loto_pid" in ''|*[!0-9]*) LOTO="stray:$loto_n"; return 0;; esac;;
+      *) LOTO="stray:$loto_n"; return 0;;
+    esac
+    loto_st=$(lock_obs_stat ownerless-tmp-lstat "$1/$loto_n")
+    case "$loto_st" in
+      absent) continue;;
+      unknown:*) LOTO="unknown:ownerless-tmp-lstat:$1/$loto_n:${loto_st#unknown:}"; return 0;;
+      file\ *) ;;
+      *) LOTO="stray:$loto_n"; return 0;;
+    esac
+    LOTO_TEMPS="$LOTO_TEMPS$loto_n ${loto_st##* } $loto_pid
+"
+  done <<LOTO_EOF
+$LOL_NAMES
+LOTO_EOF
+  if [ -n "$LOTO_TEMPS" ]; then LOTO=temps; else LOTO=empty; fi
+}
+
+# D3 (#4288 PR1a) and I3 (PR1a-f): with LOCK_OWNERLESS_GRACE_MS set, the head takes out a <lock> that
+# has no owner and holds nothing or only temporaries (lock_ownerless_temps_only), when the <lock> and
+# every temporary are older than the grace and every older `owner.tmp.<pid>` is shown not to be its
+# writer's: the pid is gone (ESRCH), or alive and started after the tmp's mtime + LOCK_PID_REUSE_SLACK_MS
+# (reused, F52). Only those names are unlinked (ENOENT: gone already, F23) and then the <lock> rmdir'd —
+# never the name `owner`: an owner published meanwhile makes the rmdir fail (ENOTEMPTY: `published`,
+# F24). A name that is not a temporary is `stray`, an older writer that may be stopped mid-way
+# `old-taker` — named once, not taken (I3). Only the head calls this. The ages are compared in ms.
+# LEO_RESULT: none | young | removed | stray | old-taker | published | unknown. Returns 1 — no mkdir
+# this poll — only on an unknown (noted for the timeout's report).
+lock_expire_ownerless() { # <lock-path>
+  LEO_RESULT=none
+  [ -n "$LOCK_OWNERLESS_GRACE_MS" ] || return 0
+  lock_ownerless_temps_only "$1"
+  case "$LOTO" in
+    empty|temps) ;;
+    unknown:*)
+      leo_u=${LOTO#unknown:}
+      leo_p=${leo_u%%:*}
+      leo_u=${leo_u#*:}
+      lock_note_unknown "$leo_p" "${leo_u%:*}" "${leo_u##*:}"
+      LEO_RESULT=unknown
+      return 1;;
+    stray:*)
+      lock_warn_once "machine-lock-ownerless-stray $1 (${LOTO#stray:} is not a temporary of an owner: nobody takes the <lock> out; look at it and remove it by hand)"
+      LEO_RESULT=stray
+      return 0;;
+    *) return 0;;
+  esac
+  while IFS=' ' read -r leo_n leo_t leo_pid; do
+    [ -n "$leo_n" ] && [ "$leo_pid" != - ] || continue
+    lock_warn_once "machine-lock-legacy-writer $1 pid=$leo_pid"
+  done <<LEO_EOF
+$LOTO_TEMPS
+LEO_EOF
+  leo_m=$(lock_obs_mtime ownerless-mtime "$1")
+  case "$leo_m" in
+    absent) return 0;;
+    unknown:*) lock_note_unknown ownerless-mtime "$1" "${leo_m#unknown:}"; LEO_RESULT=unknown; return 1;;
+  esac
+  leo_now=$(lock_now_ms)
+  leo_age=$(( leo_now - leo_m ))
+  if [ "$leo_age" -le "$LOCK_OWNERLESS_GRACE_MS" ]; then LEO_RESULT=young; return 0; fi
+  while IFS=' ' read -r leo_n leo_t leo_pid; do
+    [ -n "$leo_n" ] || continue
+    if [ $(( leo_now - leo_t )) -le "$LOCK_OWNERLESS_GRACE_MS" ]; then LEO_RESULT=young; return 0; fi
+  done <<LEO_EOF
+$LOTO_TEMPS
+LEO_EOF
+  while IFS=' ' read -r leo_n leo_t leo_pid; do
+    [ -n "$leo_n" ] && [ "$leo_pid" != - ] || continue
+    leo_k=$(lock_obs_kill0 owner-tmp-pid "$leo_pid")
+    case "$leo_k" in
+      gone) continue;;
+      unknown:*)
+        leo_k=${leo_k#unknown:}
+        lock_note_unknown owner-tmp-pid "$1/$leo_n" "${leo_k#*:}"
+        LEO_RESULT=unknown
+        return 1;;
+    esac
+    leo_why=EINVAL
+    leo_start=$(lock_pid_start_ms "$leo_pid") || { [ "$?" = 3 ] && leo_why=ECLOCK; leo_start=""; }
+    if [ -z "$leo_start" ]; then
+      lock_note_unknown etime "$1/$leo_n" "$leo_why"
+      LEO_RESULT=unknown
+      return 1
+    fi
+    [ "$leo_start" -gt $(( leo_t + LOCK_PID_REUSE_SLACK_MS )) ] && continue
+    lock_warn_once "machine-lock-ownerless-old-taker $1 pid=$leo_pid (an older writer that may be stopped before its rename: not taken out)"
+    LEO_RESULT=old-taker
+    return 0
+  done <<LEO_EOF
+$LOTO_TEMPS
+LEO_EOF
+  while IFS=' ' read -r leo_n leo_t leo_pid; do
+    [ -n "$leo_n" ] || continue
+    leo_r=$(lock_obs_unlink ownerless-tmp-unlink "$1/$leo_n")
+    case "$leo_r" in
+      removed|absent) ;;
+      *) lock_note_unknown ownerless-tmp-unlink "$1/$leo_n" "${leo_r#unknown:}"; LEO_RESULT=unknown; return 1;;
+    esac
+  done <<LEO_EOF
+$LOTO_TEMPS
+LEO_EOF
+  leo_err=$(lock_rmdir_errno ownerless-rmdir "$1")
+  case "$leo_err" in
+    '') ;;
+    ENOTEMPTY|EEXIST) LEO_RESULT=published; return 0;;
+    *) lock_note_unknown ownerless-rmdir "$1" "$leo_err"; LEO_RESULT=unknown; return 1;;
+  esac
+  echo "verify-run: machine-lock-ownerless-removed $1 (no owner for ${leo_age} ms)" >&2
+  LEO_RESULT=removed
+  return 0
+}
+
+# I4 (#4288 PR1a-f): an owner of 0 bytes older than LOCK_EMPTY_OWNER_GRACE_MS is the head's to take out
+# — any head, with or without a grace (an older copy's writer killed between `: >` and its write, or a
+# power loss after the link). The <lock> is moved to this caller's own name `<lock>.gone-<token>-<serial>`
+# and removed only when the owner moved is still of 0 bytes and old; one that was written meanwhile is
+# kept aside, and the next pass of lock_settle_gone judges it as a record (§2.7). LREO_RESULT: none |
+# young | removed | kept (LREO_ASIDE) | unknown (noted).
+lock_reclaim_empty_owner() { # <lock-path>
+  LREO_RESULT=none
+  LREO_ASIDE=""
+  lreo_st=$(lock_obs_stat lock-owner "$1/owner")
+  case "$lreo_st" in
+    unknown:*) lock_note_unknown lock-owner "$1/owner" "${lreo_st#unknown:}"; LREO_RESULT=unknown; return 0;;
+    'file 0 '*) ;;
+    *) return 0;;
+  esac
+  if [ $(( $(lock_now_ms) - ${lreo_st##* } )) -le "$LOCK_EMPTY_OWNER_GRACE_MS" ]; then LREO_RESULT=young; return 0; fi
+  LOCK_GONE_SERIAL=$(( LOCK_GONE_SERIAL + 1 ))
+  lreo_aside="$1.gone-${LOCK_TOKEN:-$$}-$LOCK_GONE_SERIAL"
+  lreo_mv=$(lock_obs_mv empty-owner-move "$1" "$lreo_aside")
+  case "$lreo_mv" in
+    moved) ;;
+    absent) return 0;;
+    *) lock_note_unknown empty-owner-move "$1" "${lreo_mv#unknown:}"; LREO_RESULT=unknown; return 0;;
+  esac
+  lock_test_pause empty-owner-moved
+  lreo_st=$(lock_obs_stat reclaim-owner "$lreo_aside/owner")
+  case "$lreo_st" in
+    'file 0 '*)
+      if [ $(( $(lock_now_ms) - ${lreo_st##* } )) -gt "$LOCK_EMPTY_OWNER_GRACE_MS" ]; then
+        rm -rf "$lreo_aside" 2>/dev/null || true
+        echo "verify-run: machine-lock-empty-owner-removed $1 (an owner of 0 bytes, older than ${LOCK_EMPTY_OWNER_GRACE_MS} ms)" >&2
+        LREO_RESULT=removed
+        return 0
+      fi;;
+  esac
+  echo "verify-run: machine-lock-empty-owner-kept $1: kept $lreo_aside (no longer an old empty owner: judged as a record next)" >&2
+  LREO_RESULT=kept
+  LREO_ASIDE=$lreo_aside
+}
+
+# I4: an unparsable owner is never removed by anyone; it is named (once).
+lock_note_corrupt() { # <lock-path>
+  lock_warn_once "machine-lock-owner-corrupt $1/owner unparsable (nobody removes it: look at it and remove the <lock> by hand)"
+}
+
+# A holder D7 cannot judge (scripts/lib/machine-lock.sh, #4288 PR1a-f F38): a record without started_at=
+# whose lstart string differs from the process under its pid — another time zone or a reused pid cannot
+# be told, so the lock is kept until that pid ends. Named once, with what to do by hand. Reads LOB_PID.
+lock_note_mismatch() { # <lock-path> <state>
+  [ "$2" = unknown:lstart:EMISMATCH ] || return 0
+  lock_warn_once "machine-lock-holder-unknown $1 pid=$LOB_PID lstart:EMISMATCH (no started_at= in the record and another lstart under its pid: a time zone or a reused pid cannot be told, so the lock is kept until pid $LOB_PID ends. By hand: if the command of pid $LOB_PID is not the holder the record names, the record is an older one: remove $1 by hand)"
+}
+
+# I9 (#4288 PR1a-f): a record without the writer's version (an older copy's) is named once per process
+# and lock — the observation that ends the mixed period (design §6.1 (b)). Reads LOB_V / LOB_PID.
+lock_note_legacy() { # <lock-path>
+  [ -n "$LOB_V" ] || lock_warn_once "machine-lock-legacy-writer $1 pid=$LOB_PID"
+}
+
+# I1-c (#4288 PR1a-f): the first key of LOCK_OWNER_EXTRA the section writes itself (pid host token
+# started_at pgid v), or a second lstart= line — printed; return 1 when there is none. lstart= once is
+# the caller's (supervisor.lock gives D7 its start; the section never writes it).
+lock_owner_extra_reserved() {
+  [ -n "$LOCK_OWNER_EXTRA" ] || return 1
+  lor_lstart=0
+  while IFS= read -r lor_line; do
+    case "$lor_line" in
+      pid=*|host=*|token=*|started_at=*|pgid=*|v=*) echo "${lor_line%%=*}"; return 0;;
+      lstart=*)
+        lor_lstart=$(( lor_lstart + 1 ))
+        if [ "$lor_lstart" -gt 1 ]; then echo lstart; return 0; fi;;
+    esac
+  done <<LOR_EOF
+$LOCK_OWNER_EXTRA
+LOR_EOF
+  return 1
 }
 
 # lock_acquire <name> <budget-seconds>
 # Sets LOCK_PATH / LOCK_TOKEN / LOCK_WAITED / LOCK_HELD_BY.
 # Returns 0 when the lock is held by this process, 1 when the budget ran out.
 lock_acquire() {
-  la_name=$1
-  la_budget=$2
-  LOCK_PATH="$LOCK_ROOT/$la_name.lock"
-  la_queue="$LOCK_ROOT/$la_name.queue"
-  LOCK_TOKEN="$$-$(date +%s)-${RANDOM}${RANDOM}"
+  lock_acquire_path "$LOCK_ROOT/$1.lock" "$LOCK_ROOT/$1.queue" "$2"
+}
+
+# The same over a lock named by its path (#4288 PR1a D2: run-lock's directory is a full path, and
+# need not end in `.lock`). The queue of tickets is the caller's (`${lock%.lock}.queue` by the
+# convention of scripts/lib/machine-lock.sh), the moved-aside records are `<lock>.gone-*` beside it.
+lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
+  la_budget=$3
+  LOCK_PATH=$1
+  la_queue=$2
+  LOCK_WAITED=0
+  LOCK_HELD_BY=""
+  # I1-b / I1-c (#4288 PR1a-f): refused before the ticket and the mkdir — nothing is made. The first
+  # acquisition records this shell's own pid only (another pid is recorded by the hand-off, D4), and the
+  # caller's lines never carry a key the section writes (F56, F68).
+  LOCK_UNKNOWN=""
+  lock_test_obs_fault owner-pid "$1"
+  if [ -n "$LTF_CODE" ] || { [ -n "$LOCK_OWNER_PID" ] && [ "$LOCK_OWNER_PID" != "$$" ]; }; then
+    echo "verify-run: machine-lock-owner-pid-not-self $1 pid=$LOCK_OWNER_PID" >&2
+    lock_note_unknown owner-pid "$1" "${LTF_CODE:-EINVAL}"
+    echo "verify-run: machine-lock-unknown $LOCK_UNKNOWN (not taken: unknown is never read as free)" >&2
+    return 1
+  fi
+  lock_test_obs_fault owner-fields "$1"
+  la_key=$(lock_owner_extra_reserved) || la_key=""
+  if [ -n "$LTF_CODE" ] || [ -n "$la_key" ]; then
+    echo "verify-run: machine-lock-owner-field-reserved $1 key=$la_key" >&2
+    lock_note_unknown owner-fields "$1" "${LTF_CODE:-EINVAL}"
+    echo "verify-run: machine-lock-unknown $LOCK_UNKNOWN (not taken: unknown is never read as free)" >&2
+    return 1
+  fi
+  if [ -n "$LOCK_WANT_TOKEN" ]; then
+    LOCK_TOKEN=$LOCK_WANT_TOKEN
+  else
+    LOCK_TOKEN="$$-$(date +%s)-${RANDOM}${RANDOM}"
+  fi
   LOCK_WAITED=0
   LOCK_HELD_BY=""
   LOCK_TICKET=""
-  mkdir -p "$LOCK_ROOT" 2>/dev/null || true
+  mkdir -p "${LOCK_PATH%/*}" 2>/dev/null || true
   la_start=$(date +%s)
   la_start_ms=$(lock_now_ms)
   la_deadline=$(( la_start_ms + la_budget * 1000 ))
   la_tmp="$la_queue/.t-$LOCK_TOKEN"
   la_broken=""
+  la_emptied=0
   while :; do
     LOCK_UNKNOWN=""
     LOCK_GONE_PENDING=""
+    la_seen_pid=""
+    la_seen_host=""
     if [ -n "$LOCK_TICKET" ]; then
       if [ "$(lock_json_field "$LOCK_TICKET" token)" != "$LOCK_TOKEN" ] || [ "$(lock_json_field "$LOCK_TICKET" done)" = "true" ]; then
         echo "verify-run: machine-lock-ticket-lost $LOCK_TICKET: taking a new ticket at the end of the queue" >&2
@@ -1406,31 +2018,87 @@ lock_acquire() {
         lock_note_unknown list-queue "$la_queue" "$LOL_CODE"
       fi
       if [ -z "$la_blocker" ] && [ -z "$LOCK_UNKNOWN" ] && lock_settle_gone "$LOCK_PATH"; then
-        la_made=$(lock_obs_mkdir mkdir-lock "$LOCK_PATH")
+        # An owner-less, empty <lock> older than the caller's grace is the head's to take out first (D3).
+        if lock_expire_ownerless "$LOCK_PATH"; then la_made=$(lock_obs_mkdir mkdir-lock "$LOCK_PATH"); else la_made=not-tried; fi
         case "$la_made" in
           created)
             LOCK_ACQUIRED_AT=$(lock_now_ms)
-            # An owner that could not be written (ENOSPC, EIO) is not a lock taken: the <lock> this
-            # mkdir made is taken out again, so no <lock> without an owner is left for every reader
-            # to wait on (#4288 PM review P3-2). Test seam: CM_VERIFY_TEST_HANDOFF=fault:owner.
-            if ! lock_test_fault owner && printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s}\n' \
-              "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$LOCK_ACQUIRED_AT" > "$LOCK_PATH/owner"; then
+            lock_test_pause owner-lock-made
+            # The owner is published whole (#4288 PR1a D3, PR1a-f I1, lock_obs_create): written into
+            # <lock>/.owner-<token> and linked to <lock>/owner — a name that is there is never written
+            # over, and only the record read back as this acquisition's is a lock taken. What a failure
+            # removes is only this acquisition's own (design §3): lock_obs_create removes its tmp (and an
+            # owner it published and showed to be its own); the <lock> this mkdir made is taken out with
+            # rmdir, which removes it only when empty — never after the link answered ENOENT or an owner
+            # not shown to be ours was linked back (PM review P3-2; F11, F14). Test seams:
+            # CM_VERIFY_TEST_HANDOFF=fault:owner (the write fails), fault:owner-write, fault:owner-unlink,
+            # fault:lock-rmdir, the pauses of §2.6; CM_VERIFY_TEST_OBS_FAULT owner-create … owner-undo-link.
+            if ! lock_test_fault owner && printf '%s\n' "$(lock_format_owner "$$" "$LOCK_TOKEN" "$LOCK_ACQUIRED_AT")" |
+              lock_obs_create owner-create "$LOCK_PATH/owner" "$LOCK_TOKEN"; then
               LOCK_HELD_PATH=$LOCK_PATH
               LOCK_HELD_TOKEN=$LOCK_TOKEN
               lock_retire_own_ticket
               lock_collect_garbage "$la_queue"
               LOCK_WAITED=$(( $(date +%s) - la_start ))
               return 0
-            fi
-            rm -f "$LOCK_PATH/owner" 2>/dev/null
-            if rmdir "$LOCK_PATH" 2>/dev/null; then
-              echo "verify-run: machine-lock-owner-write-failed $LOCK_PATH (taken out again; not acquired)" >&2
             else
-              echo "verify-run: machine-lock-owner-write-failed $LOCK_PATH (and it could not be taken out again)" >&2
+              la_rc=$?
+            fi
+            la_rmdir=1
+            case "$la_rc" in
+              3) la_rmdir=0; echo "verify-run: machine-lock-owner-exists $LOCK_PATH (not acquired; nothing removed)" >&2;;
+              6) la_rmdir=0; echo "verify-run: machine-lock-owner-not-ours $LOCK_PATH (another record read back; not acquired, nothing removed)" >&2;;
+              1) la_what=owner-write-failed;;
+              99) la_rmdir=0; la_what=owner-publish-failed; lock_note_unknown owner-publish "$LOCK_PATH/owner" ENOENT;;
+              *)
+                if [ "$la_rc" -ge 10 ] && [ "$la_rc" -lt 40 ]; then
+                  la_what=owner-create-failed
+                  lock_note_unknown owner-create "$LOCK_PATH/owner" "$(lock_errno_at $(( la_rc - 10 )))"
+                elif [ "$la_rc" -ge 40 ] && [ "$la_rc" -lt 70 ]; then
+                  la_what=owner-write-failed
+                  lock_note_unknown owner-write "$LOCK_PATH/owner" "$(lock_errno_at $(( la_rc - 40 )))"
+                elif [ "$la_rc" -ge 70 ] && [ "$la_rc" -lt 85 ]; then
+                  la_what=owner-readback-unknown
+                  lock_note_unknown owner-readback "$LOCK_PATH/owner" "$(lock_errno_at $(( la_rc - 70 )))"
+                elif [ "$la_rc" -ge 85 ] && [ "$la_rc" -lt 99 ]; then
+                  la_what=owner-publish-failed
+                  lock_note_unknown owner-publish "$LOCK_PATH/owner" "$(lock_errno_at $(( la_rc - 85 )))"
+                else
+                  la_rmdir=0
+                  la_what=owner-readback-unknown
+                  lock_note_unknown owner-readback "$LOCK_PATH/owner" "$(lock_errno_at $(( la_rc - 100 )))"
+                fi;;
+            esac
+            if [ "$la_rmdir" = 1 ]; then
+              la_err=EUNKNOWN
+              if ! lock_test_fault lock-rmdir; then la_err=$(lock_rmdir_errno lock-rmdir "$LOCK_PATH"); fi
+              if [ -z "$la_err" ]; then
+                echo "verify-run: machine-lock-$la_what $LOCK_PATH (taken out again; not acquired)" >&2
+              else
+                echo "verify-run: machine-lock-$la_what $LOCK_PATH (and it could not be taken out again)" >&2
+              fi
+            elif [ "$la_rc" != 3 ] && [ "$la_rc" != 6 ]; then
+              echo "verify-run: machine-lock-$la_what $LOCK_PATH (not acquired; the <lock> is not shown to be ours: nothing else removed)" >&2
             fi;;
+          not-tried) ;;
           exists)
             lock_obs_owner lock-owner "$LOCK_PATH"
             if [ "$LOB_CLASS" = unknown ]; then lock_note_unknown lock-owner "$LOCK_PATH/owner" "$LOB_CODE"; fi
+            if [ "$LOB_CLASS" = corrupt ] && [ -z "$LOB_EMPTY" ]; then lock_note_corrupt "$LOCK_PATH"; fi
+            if [ "$LOB_CLASS" = corrupt ] && [ -n "$LOB_EMPTY" ]; then
+              # I4: an owner of 0 bytes past the fixed grace is the head's to take out; the mkdir follows
+              # in the same poll (a few times at most).
+              lock_reclaim_empty_owner "$LOCK_PATH"
+              case "$LREO_RESULT" in
+                removed) if [ "$la_emptied" -lt 3 ]; then la_emptied=$(( la_emptied + 1 )); continue; fi;;
+                kept) LOCK_GONE_PENDING=$LREO_ASIDE;;
+              esac
+            fi
+            if [ "$LOB_CLASS" = record ]; then
+              lock_note_legacy "$LOCK_PATH"
+              la_seen_pid=$LOB_PID
+              la_seen_host=$LOB_HOST
+            fi
             la_token=$LOB_TOKEN
             la_pid=$LOB_PID
             # A stale record is broken at most once per token, so a directory nobody can
@@ -1443,6 +2111,7 @@ lock_acquire() {
                   lock_recover "$LOCK_PATH" "$la_token" "$la_pid"
                   continue;;
                 unknown:*)
+                  lock_note_mismatch "$LOCK_PATH" "$la_state"
                   la_u=${la_state#unknown:}
                   lock_note_unknown "${la_u%%:*}" "$LOCK_PATH" "${la_u#*:}";;
               esac
@@ -1461,6 +2130,9 @@ lock_acquire() {
       # The gate's group (#4288): with the runner killed, the pid is dead and the group is what holds.
       la_held_pgid=$(lock_owner_field "$LOCK_PATH" pgid)
       if [ -n "$la_held_pgid" ]; then LOCK_HELD_BY="$LOCK_HELD_BY (pgid $la_held_pgid)"; fi
+    elif [ -n "$la_seen_pid" ]; then
+      # A record in another format (scripts/lib/machine-lock.sh's key=value), from this poll's one read.
+      LOCK_HELD_BY="pid $la_seen_pid on $la_seen_host"
     elif [ -n "$la_blocker" ]; then
       if [ -n "$(lock_json_field "$la_blocker" token)" ]; then
         LOCK_HELD_BY="queue ticket $la_blocker (pid $(lock_json_field "$la_blocker" pid) on $(lock_json_field "$la_blocker" host))"
@@ -1503,9 +2175,13 @@ lock_release() { # <lock-path> <token>
     unknown)
       echo "verify-run: machine-lock-release-deferred $1 point=release-owner errno=$LOB_CODE" >&2
       return 1;;
-    missing)
-      # The lock was moved aside (or never had an owner): this run's own records are cleaned.
-      rm -rf "$1" 2>/dev/null || true
+    missing|corrupt)
+      # The lock was moved aside (or never had an owner): this run's own records are cleaned. The
+      # <lock> is NOT removed (#4288 PR1a-f §3.1, as lock_release_held): an owner-less <lock> is not
+      # shown to be ours (an older head's move-aside, a put-back half way, another taker's K1); the
+      # clean-up (I3) and the take-back-half deal with one left empty. Nor is one whose owner cannot be
+      # parsed or is of 0 bytes (corrupt, I4: nobody removes an owner it cannot read by its name; an
+      # empty one past its grace is the head's, through lock_reclaim_empty_owner).
       lock_release_own_gone "$1" "$2"
       lock_forget_held "$1" "$2"
       return 0;;
@@ -1524,27 +2200,33 @@ lock_release() { # <lock-path> <token>
   return 0
 }
 
-# Empty a gate's process group: TERM (unless sent already), KILL_GRACE_SEC, KILL, 1 s. 0 when it is
+# Empty a gate's process group: TERM (unless sent already), KILL_GRACE_SEC, KILL, LOCK_KILL_WAIT_SEC (2 s). 0 when it is
 # empty (ESRCH), 1 when it is not or cannot be shown to be (EPERM: a member of another user).
 # LDG_SIGNALLED=1 when there was anyone left to signal.
 lock_drain_group() { # <pgid> <term-sent 0|1>
   LDG_SIGNALLED=0
   if lock_test_fault drain; then return 1; fi
-  lock_group_is_empty "$1" && return 0
+  if lock_group_is_empty "$1"; then lock_test_drain_note empty; return 0; fi
   LDG_SIGNALLED=1
-  [ "$2" = 1 ] || kill -s TERM -- "-$1" 2>/dev/null
-  ldg_end=$(( $(date +%s) + KILL_GRACE_SEC ))
-  while [ "$(date +%s)" -lt "$ldg_end" ]; do
-    lock_group_is_empty "$1" && return 0
+  if [ "$2" = 1 ]; then lock_test_drain_note term-sent; else lock_test_drain_note term; kill -s TERM -- "-$1" 2>/dev/null; fi
+  # Test seam (#4288 PR1a-f impl-12; off unless pause:drain-term): the drain held after its TERM, so a
+  # test reads the lock while the drain is known to be in progress. The grace counts from the go.
+  lock_test_pause drain-term
+  ldg_end=$(( $(lock_now_sec) + KILL_GRACE_SEC ))
+  while [ "$(lock_now_sec)" -lt "$ldg_end" ]; do
+    if lock_group_is_empty "$1"; then lock_test_drain_note drained; return 0; fi
     sleep 0.05 2>/dev/null || sleep 1
   done
+  lock_test_drain_note kill
   kill -s KILL -- "-$1" 2>/dev/null
-  ldg_end=$(( $(date +%s) + 2 ))
-  while [ "$(date +%s)" -lt "$ldg_end" ]; do
-    lock_group_is_empty "$1" && return 0
+  ldg_end=$(( $(lock_now_sec) + LOCK_KILL_WAIT_SEC ))
+  while [ "$(lock_now_sec)" -lt "$ldg_end" ]; do
+    if lock_group_is_empty "$1"; then lock_test_drain_note drained; return 0; fi
     sleep 0.05 2>/dev/null || sleep 1
   done
-  lock_group_is_empty "$1"
+  if lock_group_is_empty "$1"; then lock_test_drain_note drained; return 0; fi
+  lock_test_drain_note left
+  return 1
 }
 
 # Stop a gate whose leader this shell has not waited for yet (the EXIT trap): TERM the group, wait
@@ -1621,6 +2303,268 @@ lock_cleanup_on_exit() {
     fi
   fi
   LOCK_PENDING_TOKEN=""
+}
+
+# --- operations for the callers that load this section (#4288 PR1a) -------------------------------
+# scripts/lib/machine-lock.sh loads this section for run-lock and supervisor.lock
+# (docs/design/lock-reservation-rest-4288.md §1.6–§1.8). verify-run.sh's own gates use none of the
+# functions below except lock_child_wait (through lock_handoff_wait) and lock_hand_off (through
+# lock_publish_group).
+
+# Take a ticket in <queue-dir> and wait to be the head of the queue (the smallest live ticket), with
+# the same ticket rules as lock_acquire_path (#4277: never by age alone). 0 = the head (LOCK_TICKET is
+# this shell's ticket; the caller retires it), 1 = not the head within <budget-seconds> (the ticket is
+# retired). LWH_BLOCKER names the ticket ahead. The ticket is LOCK_TOKEN's.
+lock_wait_head() { # <queue-dir> <budget-seconds>
+  lwh_queue=$1
+  lwh_start_ms=$(lock_now_ms)
+  lwh_deadline=$(( lwh_start_ms + $2 * 1000 ))
+  lwh_tmp="$lwh_queue/.t-$LOCK_TOKEN"
+  LOCK_TICKET=""
+  while :; do
+    LOCK_UNKNOWN=""
+    LWH_BLOCKER=""
+    if [ -n "$LOCK_TICKET" ]; then
+      if [ "$(lock_json_field "$LOCK_TICKET" token)" != "$LOCK_TOKEN" ] || [ "$(lock_json_field "$LOCK_TICKET" done)" = "true" ]; then
+        echo "verify-run: machine-lock-ticket-lost $LOCK_TICKET: taking a new ticket at the end of the queue" >&2
+        LOCK_TICKET=""
+      fi
+    fi
+    if [ -z "$LOCK_TICKET" ]; then
+      mkdir -p "$lwh_queue" 2>/dev/null || true
+      printf '{"pid":%s,"host":"%s","token":"%s","createdAt":%s,"deadline":%s}\n' \
+        "$$" "$LOCK_HOST" "$LOCK_TOKEN" "$lwh_start_ms" "$lwh_deadline" > "$lwh_tmp" 2>/dev/null
+      if ! lock_take_ticket "$lwh_queue" "$lwh_tmp"; then
+        rm -f "$lwh_tmp" 2>/dev/null
+        echo "verify-run: cannot publish a ticket in $lwh_queue (ln failed)" >&2
+        return 1
+      fi
+      rm -f "$lwh_tmp" 2>/dev/null
+    fi
+    if [ -n "$LOCK_TICKET" ]; then
+      lwh_mine=${LOCK_TICKET##*/}
+      lwh_now=$(lock_now_ms)
+      lock_obs_list list-queue "$lwh_queue"
+      if [ "$LOL_STATE" != unknown ]; then
+        lwh_names=$(printf '%s\n' "$LOL_NAMES" | grep -E '^[0-9]{12}$' | sort)
+        for lwh_entry in $lwh_names; do
+          [ "$lwh_entry" \< "$lwh_mine" ] || break
+          [ "$(lock_json_field "$lwh_queue/$lwh_entry" done)" = "true" ] && continue
+          if lwh_why=$(lock_ticket_retirable "$lwh_queue/$lwh_entry" "$lwh_now"); then
+            if lock_mark_done "$lwh_queue/$lwh_entry" "$(lock_json_field "$lwh_queue/$lwh_entry" token)"; then
+              echo "verify-run: machine-lock-ticket-retired $lwh_queue/$lwh_entry ($lwh_why)" >&2
+            fi
+            continue
+          fi
+          LWH_BLOCKER="$lwh_queue/$lwh_entry"
+          break
+        done
+        [ -n "$LWH_BLOCKER" ] || return 0
+      else
+        lock_note_unknown list-queue "$lwh_queue" "$LOL_CODE"
+      fi
+    fi
+    if [ "$(lock_now_ms)" -ge "$lwh_deadline" ]; then
+      lock_retire_own_ticket
+      return 1
+    fi
+    sleep "$LOCK_POLL_SEC" 2>/dev/null || sleep 1
+  done
+}
+
+# D4 (#4288 PR1a): hand the lock over, within the same acquisition, to <pid> and its process group
+# <pgid> — a NEW token T1=<T0>-g<pgid> (the naming of the gate's publish, §2.2 of #4288's 1st item: a
+# waiter that judged the record without the group never deletes the one with it). Only the live
+# holder calls it, before the process it protects starts (the D9 form: the child waits for a signal).
+# LOCK_PENDING_TOKEN is set to T1 first, so a trap that comes between the mv and the signal knows the
+# record is this run's. LHO_STAGE is empty on success (the owner on record is T1 with <pid> and
+# <pgid>), else the stage that failed (token: the record is not T0's, missing or unreadable — nothing
+# written | tmp | mv | verify); LHO_TOKEN is T1.
+lock_hand_off() { # <lock-path> <T0> <pid> <pgid>
+  LHO_STAGE=""
+  LHO_TOKEN="$2-g$4"
+  # I1-c / I5 (#4288 PR1a-f): the caller's lines never carry a key the section writes (fields), and
+  # never an lstart= — the pid becomes a child started later, and D7 would read its start against
+  # another process's lstart (lstart). Nothing is written.
+  lho_key=$(lock_owner_extra_reserved) || lho_key=""
+  if [ -n "$lho_key" ]; then
+    echo "verify-run: machine-lock-owner-field-reserved $1 key=$lho_key" >&2
+    LHO_STAGE=fields
+    return 0
+  fi
+  case "
+$LOCK_OWNER_EXTRA" in *"
+lstart="*) LHO_STAGE=lstart; return 0;; esac
+  LOCK_PENDING_TOKEN=$LHO_TOKEN
+  lock_obs_owner handoff-token "$1"
+  if [ "$LOB_CLASS" != record ] || [ "$LOB_TOKEN" != "$2" ]; then LHO_STAGE=token; return 0; fi
+  lho_tmp="$1/.owner-$LHO_TOKEN"
+  if lock_test_fault tmp || ! printf '%s\n' "$(lock_format_owner "$3" "$LHO_TOKEN" "$LOCK_ACQUIRED_AT" "$4")" > "$lho_tmp" 2>/dev/null; then
+    rm -f "$lho_tmp" 2>/dev/null
+    LHO_STAGE=tmp
+    return 0
+  fi
+  lock_test_pause tmp
+  if [ "$(lock_obs_mv handoff-publish "$lho_tmp" "$1/owner")" != moved ]; then
+    rm -f "$lho_tmp" 2>/dev/null
+    LHO_STAGE='mv'
+    return 0
+  fi
+  lock_obs_owner handoff-verify "$1"
+  if [ "$LOB_CLASS" != record ] || [ "$LOB_TOKEN" != "$LHO_TOKEN" ] || [ "$LOB_PGID" != "$4" ]; then LHO_STAGE=verify; fi
+}
+
+# D5 (#4288 PR1a): the release by someone who is not the holder (UAT's `down`, and the failure trap
+# after a handover: the holder — the server — was stopped first). Between reading the token and the
+# rm, a head could recover the dead holder's lock and take it; so this takes a ticket and releases
+# only as the head, when nobody of this implementation mkdirs, recovers or rmdirs. As the head: one
+# read of the owner; a record under one of <token>… whose holder (pid, and the group when it names
+# one) is gone is removed; a holder still there or unknown is left (`release-deferred`: never under a
+# group that did not empty); a missing owner cleans only this caller's own moved-aside records;
+# another token, a corrupt record or an unreadable owner is left. The ticket is done on every path.
+# Not the head within <budget-seconds>: nothing is done (the holder is dead; the next head recovers).
+# LRAH_RESULT: released | missing | deferred | kept | unknown | not-head. 0 for released / missing.
+lock_release_as_head() { # <lock-path> <queue-dir> <budget-seconds> <token>…
+  lrah_lock=$1
+  lrah_queue=$2
+  lrah_budget=$3
+  shift 3
+  LRAH_RESULT=""
+  lrah_saved=$LOCK_TOKEN
+  LOCK_TOKEN="$$-$(date +%s)-${RANDOM}${RANDOM}"
+  if ! lock_wait_head "$lrah_queue" "$lrah_budget"; then
+    LRAH_RESULT=not-head
+    echo "verify-run: machine-lock-release-skipped $lrah_lock (not the head of $lrah_queue within ${lrah_budget}s; the next head recovers it)" >&2
+    LOCK_TOKEN=$lrah_saved
+    return 1
+  fi
+  lock_test_pause release-head-read
+  lock_obs_owner release-owner "$lrah_lock"
+  case "$LOB_CLASS" in
+    unknown)
+      LRAH_RESULT=unknown
+      echo "verify-run: machine-lock-release-deferred $lrah_lock point=release-owner errno=$LOB_CODE" >&2;;
+    missing)
+      LRAH_RESULT=missing
+      for lrah_t in "$@"; do lock_release_own_gone "$lrah_lock" "$lrah_t"; done;;
+    corrupt) LRAH_RESULT=kept;;
+    record)
+      LRAH_RESULT=kept
+      for lrah_t in "$@"; do
+        [ "$LOB_TOKEN" = "$lrah_t" ] || continue
+        lrah_state=$(lock_record_state)
+        case "$lrah_state" in
+          gone)
+            # Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name and the token
+            # checked — a successor that took the lock while this stopped past its ticket is put back.
+            lock_test_pause release-head-judged
+            lock_recover "$lrah_lock" "$LOB_TOKEN" "$LOB_PID"
+            if [ "$LRC_RESULT" = recovered ]; then LRAH_RESULT=released; else LRAH_RESULT=kept; fi;;
+          *)
+            LRAH_RESULT=deferred
+            echo "verify-run: machine-lock-release-deferred $lrah_lock (holder pid $LOB_PID${LOB_PGID:+ pgid $LOB_PGID} is $lrah_state)" >&2;;
+        esac
+        break
+      done
+      if [ "$LRAH_RESULT" = released ]; then
+        for lrah_t in "$@"; do lock_release_own_gone "$lrah_lock" "$lrah_t"; done
+      fi;;
+  esac
+  lock_retire_own_ticket
+  LOCK_TOKEN=$lrah_saved
+  case "$LRAH_RESULT" in released|missing) return 0;; esac
+  return 1
+}
+
+# D6 (#4288 PR1a): recover a dead holder's lock without taking it (supervisor.lock's deadline guard).
+# As the head: settle the moved-aside records (§2.7), read the owner once, and recover the lock when
+# its holder is gone (moved aside, its token checked, put back when it differs: lock_recover); an
+# owner-less, empty <lock> older than LOCK_OWNERLESS_GRACE_MS is taken out. Never a mkdir of the lock.
+# The ticket is done on every path. LRO_RESULT: removed | kept (alive, unknown, corrupt, young) |
+# restore-failed (the moved-aside record is kept and goes on holding) | absent | not-head; LRO_UNKNOWN
+# names an unknown (point=… path=… errno=…). The caller's exit code does not depend on it.
+lock_recover_only() { # <lock-path> <queue-dir> <budget-seconds>
+  LRO_RESULT=""
+  LRO_UNKNOWN=""
+  lro_saved=$LOCK_TOKEN
+  LOCK_TOKEN="$$-$(date +%s)-${RANDOM}${RANDOM}"
+  if ! lock_wait_head "$2" "$3"; then
+    LRO_RESULT=not-head
+    LRO_UNKNOWN=$LOCK_UNKNOWN
+    LOCK_TOKEN=$lro_saved
+    return 0
+  fi
+  LOCK_UNKNOWN=""
+  lro_held=0
+  lock_settle_gone "$1" || lro_held=1
+  lock_obs_owner lock-owner "$1"
+  case "$LOB_CLASS" in
+    unknown) LRO_RESULT=kept; lock_note_unknown lock-owner "$1/owner" "$LOB_CODE";;
+    corrupt)
+      LRO_RESULT=kept
+      if [ -n "$LOB_EMPTY" ]; then
+        # I4: an owner of 0 bytes past the fixed grace.
+        lock_reclaim_empty_owner "$1"
+        if [ "$LREO_RESULT" = removed ]; then LRO_RESULT=removed; fi
+      else
+        lock_note_corrupt "$1"
+      fi;;
+    missing)
+      LRO_RESULT=kept
+      case "$(lock_ownerless_empty "$1")" in
+        absent) LRO_RESULT=absent;;
+        *)
+          # A moved-aside record that holds (alive or unknown) keeps the owner-less <lock>: the
+          # put-back is its (§2.7), not the clean-up's.
+          if [ "$lro_held" = 0 ] && lock_expire_ownerless "$1" && [ "$LEO_RESULT" = removed ]; then LRO_RESULT=removed; fi;;
+      esac;;
+    record)
+      lock_note_legacy "$1"
+      lro_state=$(lock_record_state)
+      case "$lro_state" in
+        gone)
+          lock_test_pause recover-only-judged
+          lock_recover "$1" "$LOB_TOKEN" "$LOB_PID"
+          case "$LRC_RESULT" in
+            recovered) LRO_RESULT=removed;;
+            restore-failed) LRO_RESULT=restore-failed;;
+            absent) LRO_RESULT=absent;;
+            *) LRO_RESULT=kept;;
+          esac;;
+        unknown:*)
+          lock_note_mismatch "$1" "$lro_state"
+          lro_u=${lro_state#unknown:}
+          lock_note_unknown "${lro_u%%:*}" "$1" "${lro_u#*:}"
+          LRO_RESULT=kept;;
+        *) LRO_RESULT=kept;;
+      esac;;
+  esac
+  LRO_UNKNOWN=$LOCK_UNKNOWN
+  lock_retire_own_ticket
+  LOCK_TOKEN=$lro_saved
+  return 0
+}
+
+# D9 (#4288 PR1a): the child's side of a handover — a process that must not start its work before
+# its group is on the owner record. 0 after it saw "$go" and made "$ack"; 1 when it must not run: it
+# withdrew (<parent-pid> is not known to be alive, or <deadline> passed — whoever makes "$go" first
+# wins), or it could make neither "$go" nor "$ack". The gate's child calls it through
+# lock_handoff_wait with this shell's pid; run-lock's children (UAT's server, daily's run) with their
+# parent's.
+lock_child_wait() { # <go> <ack> <deadline-epoch-s> <parent-pid>
+  while :; do
+    [ -d "$1" ] && break
+    if [ "$(lock_obs_kill0 handoff-self "$4")" != alive ] || [ "$(date +%s)" -ge "$3" ]; then
+      if [ "$(lock_obs_mkdir handoff-go "$1")" = created ]; then lock_test_mark child-withdrew; return 1; fi
+      [ -d "$1" ] && break
+      lock_test_mark child-withdrew
+      return 1
+    fi
+    sleep 0.05 2>/dev/null || sleep 1
+  done
+  [ "$(lock_obs_mkdir handoff-ack "$2")" = created ] || return 1
+  lock_test_pause acked
+  return 0
 }
 
 # --- gate execution -----------------------------------------------------------
@@ -1828,44 +2772,16 @@ run_gate_attempt() {
 # its ack; 1 when it must not run: it withdrew (the body is not known to be alive, or the handoff
 # deadline passed — whoever makes "$go" first wins), or it could make neither "$go" nor "$ack".
 lock_handoff_wait() { # <go> <ack> <deadline-epoch-s>
-  while :; do
-    [ -d "$1" ] && break
-    if [ "$(lock_obs_kill0 handoff-self "$LOCK_SELF_PID")" != alive ] || [ "$(date +%s)" -ge "$3" ]; then
-      [ "$(lock_obs_mkdir handoff-go "$1")" = created ] && return 1
-      [ -d "$1" ] && break
-      return 1
-    fi
-    sleep 0.05 2>/dev/null || sleep 1
-  done
-  [ "$(lock_obs_mkdir handoff-ack "$2")" = created ] || return 1
-  lock_test_pause acked
-  return 0
+  lock_child_wait "$1" "$2" "$3" "$LOCK_SELF_PID"
 }
 
 # Step 3. LPG_STAGE is empty on success (the owner on record is T1 with pgid G), else the stage
 # that failed; LPG_T1 the new token. LOCK_PENDING_TOKEN is set first, so an EXIT trap that comes
 # between the mv and the signal still knows the record is this run's.
 lock_publish_group() { # <lock-path> <T0> <G>
-  LPG_STAGE=""
   LPG_T1="$2-g$3"
-  LOCK_PENDING_TOKEN=$LPG_T1
-  lock_obs_owner handoff-token "$1"
-  if [ "$LOB_CLASS" != record ] || [ "$LOB_TOKEN" != "$2" ]; then LPG_STAGE=token; return 0; fi
-  lpg_tmp="$1/.owner-$LPG_T1"
-  if lock_test_fault tmp || ! printf '{"pid":%s,"host":"%s","token":"%s","acquiredAt":%s,"pgid":%s}\n' \
-    "$$" "$LOCK_HOST" "$LPG_T1" "$LOCK_ACQUIRED_AT" "$3" > "$lpg_tmp" 2>/dev/null; then
-    rm -f "$lpg_tmp" 2>/dev/null
-    LPG_STAGE=tmp
-    return 0
-  fi
-  lock_test_pause tmp
-  if [ "$(lock_obs_mv handoff-publish "$lpg_tmp" "$1/owner")" != moved ]; then
-    rm -f "$lpg_tmp" 2>/dev/null
-    LPG_STAGE='mv'
-    return 0
-  fi
-  lock_obs_owner handoff-verify "$1"
-  if [ "$LOB_CLASS" != record ] || [ "$LOB_TOKEN" != "$LPG_T1" ] || [ "$LOB_PGID" != "$3" ]; then LPG_STAGE=verify; fi
+  lock_hand_off "$1" "$2" "$$" "$3"
+  LPG_STAGE=$LHO_STAGE
 }
 
 # The gate did not start: stop the waiting child, give the lock back under whichever of this run's

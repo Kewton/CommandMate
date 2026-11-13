@@ -61,6 +61,12 @@ export type SendAttemptReason =
   /** `not-sent`: the pane could not be re-read under the input lock, so nothing was typed (#3945). */
   | 'recheck-failed'
   /**
+   * `not-sent`: the agent is not in the pane's foreground — its shell is
+   * (`pane_current_command` is a shell and `tpgid == pane_pid`), so nothing
+   * was typed (#4300). The agent exited; the body would have run as a command.
+   */
+  | 'agent-not-in-foreground'
+  /**
    * `not-sent`: a body sent as one paste could not be loaded into the tmux
    * buffer (`load-buffer` failed), so `paste-buffer` never ran and nothing of
    * the body reached the pane (#4011/#4031).
@@ -120,3 +126,10 @@ export const PASTE_NOT_STARTED_CODE = 'PASTE_NOT_STARTED';
  */
 export const INPUT_RECHECK_PROMPT_WAITING_CODE = 'INPUT_RECHECK_PROMPT_WAITING';
 export const INPUT_RECHECK_FAILED_CODE = 'INPUT_RECHECK_FAILED';
+
+/**
+ * `code` on the error the input re-check throws when the pane's foreground is
+ * its own shell, not the agent (`recheckComposerBeforeInput`, Issue #4300).
+ * Read by `classifySendFailure` by code, never by wording.
+ */
+export const AGENT_NOT_IN_FOREGROUND_CODE = 'AGENT_NOT_IN_FOREGROUND';

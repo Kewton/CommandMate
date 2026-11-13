@@ -89,11 +89,19 @@ import {
   withInstanceInputLock,
   type InputBoundaryHooks,
 } from '@/lib/session/instance-input-lock';
-import { SendBrief, type BriefReport, type BriefRequestPin, type BriefSendMode } from '@/lib/session/session-brief';
+import {
+  BriefChoiceAbortedError,
+  SendBrief,
+  type BriefDetail,
+  type BriefReport,
+  type BriefRequestPin,
+  type BriefSendMode,
+} from '@/lib/session/session-brief';
 import { runInSendScope } from '@/lib/session/session-boundary';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
+import { insertAskEnvelope } from '@/lib/ask/envelope';
 
 const logger = createLogger('session/send-user-message');
 
@@ -172,6 +180,13 @@ export interface SendUserMessageParams {
   observedInputGeneration?: number;
   /** Issue #4274: what became of the brief, when there is something to say (the route's `brief`). */
   onBrief?: (report: BriefReport) => void;
+  /**
+   * Issue #4344: the reserved ask whose envelope this send types (design
+   * `docs/design/ask-attribution-4344.md` §3.2 M3). Put after a claimed brief and
+   * right before the operator's body; the history row keeps the body alone.
+   * Omitted (every caller but the send route's ask), the typed text is unchanged.
+   */
+  askEnvelopeId?: string;
 }
 
 /**
@@ -189,11 +204,29 @@ export interface SendUserMessageParams {
  * would be read across. `never` (the default) and `skip` need none.
  */
 export type SendBriefParams =
-  | { brief?: Exclude<BriefSendMode, 'auto' | 'force'>; briefPin?: BriefRequestPin }
-  | { brief: 'auto' | 'force'; briefPin: BriefRequestPin };
+  | { brief?: Exclude<BriefSendMode, 'auto' | 'force' | 'decline'>; briefPin?: BriefRequestPin }
+  | {
+      brief: 'auto' | 'force' | 'decline';
+      briefPin: BriefRequestPin;
+      /**
+       * Issue #4227 (S-B, design §3.2): the screen's choice for the boundary its preview showed
+       * (`briefBoundary`). `full` (with `auto`) asks the whole brief; `decline` uses the boundary
+       * up unbriefed. Either acts on that boundary only, else the send stops before any key
+       * (`stage: 'brief_choice'`).
+       */
+      briefDetail?: BriefDetail;
+      briefBoundary?: string;
+    };
 
 /** What {@link sendUserMessage} takes: the parameters and the brief's. */
 export type SendUserMessageRequest = SendUserMessageParams & SendBriefParams;
+
+/**
+ * Issue #4227 (pr3f, PM decision 5): a caller whose type names a strict choice (`brief: 'decline'`,
+ * `briefDetail: 'full'`) names the boundary it was chosen for too (`briefBoundary`), or it does not
+ * compile. The route's body is validated at run time instead (`validateBriefChoice`: 400).
+ */
+export type StrictBriefNamesBoundary<P> = P extends { brief: 'decline' } | { briefDetail: 'full' } ? { briefBoundary: string } : unknown;
 
 /** Result of {@link sendUserMessage}. */
 export type SendUserMessageResult =
@@ -222,6 +255,19 @@ export type SendUserMessageResult =
       stage: 'model' | 'send' | 'prompt_waiting' | 'foreign_session';
       error: string;
       code?: typeof SESSION_STARTING_CODE;
+    }
+  /**
+   * Issue #4227 (S-B, design §3.2): a `full` / `decline` send stopped before any key — the
+   * boundary the screen showed is not the one it would act on, or the brief chosen could not
+   * be made. Nothing was typed and nothing recorded as an attempt; the route answers 409.
+   */
+  | {
+      ok: false;
+      stage: 'brief_choice';
+      code: 'boundary_changed';
+      reason: string;
+      boundary: { id: string; state: string } | null;
+      error: string;
     };
 
 function getErrorMessage(error: unknown): string {
@@ -316,9 +362,9 @@ function typedBodyFor(cliTool: ICLITool, content: string, absoluteImagePath: str
  * result with the failing stage; the caller decides how to surface the error.
  * DB record failures throw (same as before the extraction).
  */
-export async function sendUserMessage(
+export async function sendUserMessage<P extends SendUserMessageRequest>(
   db: Database.Database,
-  params: SendUserMessageRequest
+  params: P & StrictBriefNamesBoundary<P>
 ): Promise<SendUserMessageResult> {
   const { worktreeId, content, cliToolId, instanceId, absoluteImagePath, copilotModel, respondAgent } = params;
   // Issue #4065: read once, before the first await — a send granted while this
@@ -371,6 +417,8 @@ export async function sendUserMessage(
     instanceId: resolvedInstanceId,
     mode: params.brief ?? 'never',
     pin: params.briefPin ?? null,
+    ...('briefDetail' in params && params.briefDetail ? { detail: params.briefDetail } : {}),
+    ...('briefBoundary' in params && params.briefBoundary ? { boundaryId: params.briefBoundary } : {}),
     content,
     typedBody: (text) => typedBodyFor(cliTool, text, absoluteImagePath),
   });
@@ -686,9 +734,24 @@ export async function sendUserMessage(
   // stretch under the input lock, so the lock is released only once the boundary
   // says how this send ended (a send queued behind reads it settled), and a reset
   // this send typed has opened its row (2nd review A).
-  async function deliverWithBrief(): ReturnType<typeof deliver> {
+  async function deliverWithBrief(): Promise<Awaited<ReturnType<typeof deliver>> | { aborted: BriefChoiceAbortedError }> {
     try {
-      typedText = await sendBrief.claim();
+      try {
+        typedText = await sendBrief.claim();
+      } catch (error) {
+        // Issue #4227 (S-B, design §3.2 (3)): read by its type only — the value `claim()` threw,
+        // before any key. Never `classifySendFailure` (a tmux error quoting the body is not this).
+        if (error instanceof BriefChoiceAbortedError) return { aborted: error };
+        throw error;
+      }
+      // Issue #4344 (M3): the envelope after the brief, before the body. Recomputing
+      // `typedContent` below is what keeps the composer read, the attempt record and
+      // its digest on the text actually typed.
+      if (params.askEnvelopeId) {
+        const enveloped = insertAskEnvelope(typedText, content, params.askEnvelopeId);
+        if (enveloped !== null) typedText = enveloped;
+        else logger.warn('ask-envelope-not-placed', { worktreeId, instanceId: resolvedInstanceId });
+      }
       if (typedText !== content) typedContent = typedBodyFor(cliTool, typedText, absoluteImagePath);
       const deliverStartedAt = Date.now();
       const result = await runInSendScope(sendBrief.claimTokenForScope(), deliver);
@@ -722,6 +785,12 @@ export async function sendUserMessage(
     : await deliverWithBrief();
   // Issue #4274: the provider hears how its text ended, outside the lock.
   await sendBrief.afterLock();
+  // Issue #4227 (S-B): the screen's choice stopped the send before any key — not a send
+  // failure (no attempt, no relay hold, no prompt branch). The boundary is as it was.
+  if ('aborted' in delivery) {
+    const { reason, boundary } = delivery.aborted;
+    return { ok: false, stage: 'brief_choice', code: 'boundary_changed', reason, boundary, error: delivery.aborted.message };
+  }
   const briefReport = sendBrief.reportForResponse();
   if (briefReport) params.onBrief?.(briefReport);
   if (!('sent' in delivery)) {

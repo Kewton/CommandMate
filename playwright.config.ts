@@ -112,7 +112,14 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
+  // [Issue #4308] CI-only timeline reporter (spec/test start/end times); inert locally.
+  reporter: process.env.CI
+    ? [
+        ['github'],
+        ['html', { open: 'never' }],
+        ...(process.env.CM_E2E_HEAP_PROBE_DIR ? [['./scripts/ci/e2e-timeline-reporter.cjs'] as [string]] : []),
+      ]
+    : 'html',
 
   use: {
     baseURL: BASE_URL,
@@ -174,6 +181,18 @@ export default defineConfig({
       GIT_CEILING_DIRECTORIES,
       CM_SESSION_KILL_LEDGER_ROOT: E2E_SESSION_KILL_LEDGER_ROOT,
       CM_LOG_LEVEL: 'warn',
+      // [Issue #4308] CI-only heap probe: loaded into the dev server (and its node
+      // children) via NODE_OPTIONS. Without CM_E2E_HEAP_PROBE_DIR nothing changes.
+      ...(process.env.CM_E2E_HEAP_PROBE_DIR
+        ? {
+            NODE_OPTIONS: [
+              process.env.NODE_OPTIONS,
+              `--require ${path.resolve(__dirname, 'scripts/ci/e2e-heap-probe.cjs')}`,
+            ]
+              .filter(Boolean)
+              .join(' '),
+          }
+        : {}),
     },
   },
 });

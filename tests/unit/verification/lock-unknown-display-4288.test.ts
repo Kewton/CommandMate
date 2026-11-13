@@ -34,6 +34,10 @@ import {
   main,
 } from '../../../scripts/orchestrate/precheck.mjs';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-unknown-display-4288-"]);
 
 declare module '@/lib/db/db-instance' {
   export function setMockDb(db: Database.Database): void;

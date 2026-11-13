@@ -7,7 +7,10 @@
 
 import React, { memo, useState, useCallback, FormEvent, useRef, useEffect, useLayoutEffect } from 'react';
 import { useTranslations } from 'next-intl';
-import { worktreeApi, handleApiError } from '@/lib/api-client';
+import { worktreeApi, handleApiError, isBriefBoundaryChanged, type SendBriefChoice } from '@/lib/api-client';
+import { fetchStartPreview, isCommandBody, START_PREVIEW_TIMEOUT_MS } from '@/lib/handoff/screen-client';
+import type { StartPreviewResponse } from '@/lib/handoff/preview';
+import { SessionStartBriefDialog, type StartBriefChoice } from '@/components/mem/SessionStartBriefDialog';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ChatMessage } from '@/types/models';
 import { Button, Spinner } from '@/components/ui';
@@ -177,6 +180,33 @@ export interface MessageInputProps {
  * <MessageInput worktreeId="main" onMessageSent={handleRefresh} cliToolId="claude" />
  * ```
  */
+/**
+ * Issue #4227 G-PR3 (G-3): how stale the cached start preview may be before a focus reads it
+ * again in the background. G-PR6: the cache is never what decides a send — every plain send
+ * reads the preview afresh first (bounded by `START_PREVIEW_TIMEOUT_MS`), so this throttle
+ * applies to the focus read only.
+ */
+const START_PREVIEW_REFRESH_MS = 10_000;
+
+/** The preview read, cut at `ms` (a read that does not settle in time is a read that failed). */
+function withinPreviewLimit<T>(read: Promise<T | null>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    read.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+
+type ShownStartPreview = Extract<StartPreviewResponse, { show: true }>;
+
 /** localStorage key prefix for draft message persistence */
 const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
 
@@ -252,6 +282,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
 
 export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false }: MessageInputProps) {
   const t = useTranslations('worktree');
+  const tc = useTranslations('common');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +349,96 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     removeAttachment,
     resetAfterSend,
   } = useImageAttachment(worktreeId, uploadFn);
+
+  // Issue #4227 G-PR3 (G-3, design §3): the start preview of this composer's instance.
+  // G-PR6 (design §3.2): a plain send reads it afresh and waits (at most
+  // START_PREVIEW_TIMEOUT_MS) before anything is sent; the background read (focus, after a send)
+  // only warms the cache and never decides a send.
+  //
+  // One generation rule for every read (background, before a send, after a 409): each read takes
+  // a number; its result is adopted into the cache only when it is newer than the adopted one, the
+  // composer is still mounted and still on the same worktree/instance. A send attempt has its own
+  // number: a target change, an unmount or a newer attempt makes the older one's answer void.
+  const briefInstance = instanceId || cliToolId || 'claude';
+  const previewKey = `${worktreeId}\u0000${briefInstance}`;
+  const startPreviewRef = useRef<{ key: string; at: number; value: StartPreviewResponse | null } | null>(null);
+  const previewSeqRef = useRef(0);
+  const previewAdoptedSeqRef = useRef(0);
+  const previewKeyRef = useRef(previewKey);
+  const mountedRef = useRef(true);
+  const sendAttemptRef = useRef(0);
+  const briefCheckingRef = useRef(false);
+  const messageRef = useRef('');
+  const [briefChecking, setBriefChecking] = useState(false);
+  const [briefCheckFailed, setBriefCheckFailed] = useState(false);
+  const [briefAsk, setBriefAsk] = useState<{ preview: ShownStartPreview; notice: string | null } | null>(null);
+  const [briefSending, setBriefSending] = useState(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      sendAttemptRef.current += 1;
+    };
+  }, []);
+  useEffect(() => {
+    previewKeyRef.current = previewKey;
+    return () => {
+      // The target changes (or the composer goes): a send waiting on the old target's preview is void.
+      sendAttemptRef.current += 1;
+      briefCheckingRef.current = false;
+      setBriefChecking(false);
+      setBriefCheckFailed(false);
+    };
+  }, [previewKey]);
+  useEffect(() => {
+    messageRef.current = message;
+  }, [message]);
+  // G-PR6 (codex P2-1・P2-5): what a send waiting on its preview checks again after the wait —
+  // the attached image (removed, replaced, added) and a plan review that began meanwhile.
+  const attachedImagePathRef = useRef<string | null>(null);
+  const planReviewActiveRef = useRef(false);
+  useEffect(() => {
+    attachedImagePathRef.current = attachedImage?.path ?? null;
+  }, [attachedImage]);
+  useEffect(() => {
+    planReviewActiveRef.current = !!planReviewActive;
+  }, [planReviewActive]);
+  /**
+   * Read the preview of this composer's target now. `current` is false when the target changed or
+   * the composer went away while it was read; the cache takes the value only under the rule above.
+   */
+  const readStartPreview = useCallback(async (): Promise<{ value: StartPreviewResponse | null; current: boolean }> => {
+    const key = previewKey;
+    const seq = ++previewSeqRef.current;
+    const value = await withinPreviewLimit(fetchStartPreview(worktreeId, briefInstance), START_PREVIEW_TIMEOUT_MS);
+    const current = mountedRef.current && previewKeyRef.current === key;
+    if (current && seq > previewAdoptedSeqRef.current) {
+      previewAdoptedSeqRef.current = seq;
+      startPreviewRef.current = { key, at: Date.now(), value };
+    }
+    return { value, current };
+  }, [worktreeId, briefInstance, previewKey]);
+  const refreshStartPreview = useCallback(
+    (force: boolean) => {
+      const cached = startPreviewRef.current;
+      if (!force && cached && cached.key === previewKey && Date.now() - cached.at < START_PREVIEW_REFRESH_MS) return;
+      // Stamp the start (the focus throttle); the value stays until a newer read is adopted.
+      startPreviewRef.current = { key: previewKey, at: Date.now(), value: cached?.key === previewKey ? cached.value : null };
+      void readStartPreview().catch(() => undefined);
+    },
+    [previewKey, readStartPreview],
+  );
+  const handleComposerFocus = useCallback(() => {
+    refreshStartPreview(false);
+    onFocus?.();
+  }, [refreshStartPreview, onFocus]);
+  /** After a send: the boundary may be used up (or a new one opened) — warm the cache again on an attended branch only. */
+  const afterSendStartPreview = useCallback(() => {
+    const cached = startPreviewRef.current?.value;
+    const attended = !!cached && (cached.show || cached.attended === true);
+    if (attended) refreshStartPreview(true);
+    else if (startPreviewRef.current) startPreviewRef.current = { ...startPreviewRef.current, value: null };
+  }, [refreshStartPreview]);
 
   // Restore draft message from localStorage on mount or (worktreeId, splitIndex) change.
   // Issue #728: also runs the legacy-key migration for splitIndex=0.
@@ -395,6 +516,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (isComposing || (!message.trim() && !attachedImage) || sending) {
       return;
     }
+    // Issue #4227 G-PR6: a send already waiting on its preview takes no second press (Enter or button).
+    if (briefCheckingRef.current) return;
     // Issue #3999: the door both the button and a PC's Enter come through.
     // Before the optimistic hand-off, so no pending row is made and the draft
     // (state and localStorage) is left exactly as typed.
@@ -414,6 +537,54 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       options.imagePath = attachedImage.path;
     }
 
+    // Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): an attended branch with a pending boundary
+    // asks before the first send — BEFORE the draft is cleared or handed to the optimistic
+    // layer. A command carries no brief (D1 §4.1) and is never asked about.
+    // G-PR6: the preview is read afresh for this send and waited for (mode on and derived alike;
+    // the server alone says whether to ask). The cached one never decides it. A read that fails
+    // or runs over the limit sends nothing: the draft stays, with the reason and "try again".
+    if (!isCommandBody(trimmed)) {
+      const attempt = ++sendAttemptRef.current;
+      briefCheckingRef.current = true;
+      setBriefChecking(true);
+      setBriefCheckFailed(false);
+      setError(null);
+      let read: { value: StartPreviewResponse | null; current: boolean };
+      try {
+        read = await readStartPreview();
+      } finally {
+        if (attempt === sendAttemptRef.current) {
+          briefCheckingRef.current = false;
+          setBriefChecking(false);
+        }
+      }
+      // Superseded (the target changed, the composer went, a newer attempt) — or the draft (its
+      // text or its image) was changed while the preview was read: nothing is sent, the draft is
+      // as it is now.
+      if (
+        !read.current ||
+        attempt !== sendAttemptRef.current ||
+        messageRef.current.trim() !== trimmed ||
+        attachedImagePathRef.current !== (attachedImage?.path ?? null)
+      ) {
+        return;
+      }
+      // A plan review that began while the preview was read stops the send, as one up before it
+      // does (Issue #3999): the draft stays.
+      if (planReviewActiveRef.current) {
+        setPlanReviewStopped(true);
+        return;
+      }
+      if (!read.value) {
+        setBriefCheckFailed(true);
+        return;
+      }
+      if (read.value.show) {
+        setBriefAsk({ preview: read.value, notice: null });
+        return;
+      }
+    }
+
     // Issue #1121: optimistic path. Hand the send to the history layer (which
     // shows a pending bubble and fires the API in the background) and clear the
     // composer immediately rather than blocking on the API. Send failures surface
@@ -430,6 +601,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       }
       onMessageSent?.(effectiveCliTool);
+      afterSendStartPreview();
       return;
     }
 
@@ -451,12 +623,88 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // path with nothing else to reconcile against — the optimistic path above
       // has `usePendingMessages` for that and passes nothing.
       onMessageSent?.(effectiveCliTool, created);
+      afterSendStartPreview();
     } catch (err) {
       setError(handleApiError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview]);
+
+  /**
+   * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
+   * boundary the preview showed. Awaited (not the optimistic layer): the draft — text and image —
+   * is cleared only once the server took it, so a 409 `boundary_changed` (nothing typed) asks
+   * again with a fresh preview and the draft as it was. Never sent again on its own.
+   */
+  const sendWithBriefChoice = useCallback(async (choice: StartBriefChoice) => {
+    const asked = briefAsk;
+    if (!asked || briefSending) return;
+    const trimmed = message.trim();
+    if (!trimmed && !attachedImage) {
+      setBriefAsk(null);
+      return;
+    }
+    const effectiveCliTool: CLIToolType = cliToolId || 'claude';
+    const choiceOptions: SendBriefChoice =
+      choice === 'decline'
+        ? { brief: 'decline', briefBoundary: asked.preview.boundary.id }
+        : { briefDetail: choice, briefBoundary: asked.preview.boundary.id };
+    const options: { cliToolId: CLIToolType; instanceId?: string; imagePath?: string } & SendBriefChoice = {
+      cliToolId: effectiveCliTool,
+      ...(instanceId && instanceId !== effectiveCliTool ? { instanceId } : {}),
+      ...(attachedImage ? { imagePath: attachedImage.path } : {}),
+      ...choiceOptions,
+    };
+    setBriefSending(true);
+    setSending(true);
+    setError(null);
+    try {
+      const created = await worktreeApi.sendMessage(worktreeId, trimmed, options);
+      setBriefAsk(null);
+      setMessage('');
+      setIsFreeInputMode(false);
+      resetAfterSend();
+      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
+      else if (isProcessing) showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
+      onMessageSent?.(effectiveCliTool, created);
+      refreshStartPreview(true);
+    } catch (err) {
+      if (isBriefBoundaryChanged(err)) {
+        const reason = typeof err.data.reason === 'string' ? err.data.reason : '';
+        const notice = `${tc('mem.startBrief.askAgain', { reason })}${reason === 'claimed' ? ` ${tc('mem.startBrief.claimed')}` : ''}`;
+        // G-PR6: through the same generation rule as every read — an older background read that
+        // lands later cannot put the old boundary back; a target change voids this answer.
+        const { value: fresh, current } = await readStartPreview();
+        if (!current) return;
+        if (fresh === null) {
+          // The read failed (or the boundary moved again under it, 409 → null): the same as a failed
+          // read before a send — nothing is sent, the draft stays, "try again" reads anew.
+          setBriefAsk(null);
+          setBriefCheckFailed(true);
+        } else if (fresh.show) {
+          setBriefAsk({ preview: fresh, notice });
+        } else {
+          // Nothing to ask any more (used up, or the branch changed): the draft stays for a plain send.
+          setBriefAsk(null);
+          setError(notice);
+        }
+      } else {
+        setBriefAsk(null);
+        setError(handleApiError(err));
+      }
+    } finally {
+      setBriefSending(false);
+      setSending(false);
+    }
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, splitIndex, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview]);
+
+  const closeBriefAsk = useCallback(() => {
+    if (briefSending) return;
+    // Nothing is sent; the draft (text and image) stays in the composer.
+    setBriefAsk(null);
+  }, [briefSending]);
 
   const handleSubmit = useCallback(async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -679,6 +927,25 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         </div>
       )}
 
+      {/* Issue #4227 G-PR6: the preview for this send could not be read — nothing was sent. */}
+      {briefCheckFailed && (
+        <div
+          data-testid="session-start-brief-check-failed"
+          role="alert"
+          className="rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs leading-5 text-foreground"
+        >
+          {tc('mem.startBrief.checkFailed')}{' '}
+          <button
+            type="button"
+            data-testid="session-start-brief-check-retry"
+            onClick={() => void submitMessage()}
+            className="inline rounded-sm font-medium text-warning-foreground underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+          >
+            {tc('mem.startBrief.retry')}
+          </button>
+        </div>
+      )}
+
       {/* Issue #3999: why nothing is sent while the plan review is up, and
           the way to the controls that do answer it. */}
       {planReviewActive && (
@@ -838,7 +1105,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               onKeyDown={handleKeyDown}
               onCompositionStart={handleCompositionStart}
               onCompositionEnd={handleCompositionEnd}
-              onFocus={onFocus}
+              onFocus={handleComposerFocus}
               placeholder={t('composer.placeholder')}
               disabled={sending}
               rows={1}
@@ -861,7 +1128,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             <ComposerSendButton
               message={message}
               hasAttachment={!!attachedImage}
-              sending={sending}
+              sending={sending || briefChecking}
               ariaLabel={t('composer.sendMessage')}
             />
           </div>
@@ -874,6 +1141,18 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           newlineHint={t('composer.newlineHint')}
         />
       </form>
+
+      {/* Issue #4227 G-PR3 (G-3): how much of the hand-off the agent reads, asked before the send. */}
+      {briefAsk ? (
+        <SessionStartBriefDialog
+          isOpen
+          preview={briefAsk.preview.preview}
+          notice={briefAsk.notice}
+          busy={briefSending}
+          onChoose={(choice) => void sendWithBriefChoice(choice)}
+          onClose={closeBriefAsk}
+        />
+      ) : null}
 
       {/* Slash Command Selector */}
       <SlashCommandSelector

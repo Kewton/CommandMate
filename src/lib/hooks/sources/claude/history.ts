@@ -87,9 +87,11 @@ import {
   selectUnwrittenTurns,
 } from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
+import { bindClaudeAskTurns, reservedClaudeAskIds } from './ask-attribution';
 import {
   buildClaudeTurns,
   buildHeadlessClaudeTurn,
+  claudeLogicalRecords,
   claudeProjectSlug,
   CLAUDE_PROJECTS_DIR_SEGMENTS,
   CLAUDE_TURN_TRUNCATION_MARKER,
@@ -464,6 +466,8 @@ export async function captureClaudeTranscriptTurn(
       // Issue #2437: this turn is already History's Markdown, so the pane rows
       // behind it must stop being "unsaved output" the pre-send flush can pick up.
       await advanceCapturedLineForTranscriptTurn(target);
+      // Issue #4344: an ask whose turn is already a row is settled against it.
+      await bindClaudeAskTurns(target, built.turns, sessionId);
       return true;
     }
 
@@ -491,11 +495,13 @@ export async function captureClaudeTranscriptTurn(
     // still running, so its instant is only knowable once that row has been
     // recorded. With one turn pending — the ordinary case — this is the single
     // call it always was.
+    // Issue #4344 (I3): the prompts whose envelope has a reservation here lose it, once.
+    const reservedAsks = await reservedClaudeAskIds(target, pending.turns);
     const userRows: RecordedUserTurn[] = [];
     for (let index = 0; index < pending.turns.length; index += 1) {
       const previousStartedAt =
         index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
-      userRows.push(await recordClaudeUserTurn(target, pending.turns[index], previousStartedAt));
+      userRows.push(await recordClaudeUserTurn(target, pending.turns[index], previousStartedAt, reservedAsks));
     }
 
     const lastRecordAt = lastClaudeAssistantRecordAt(parsed.records);
@@ -523,6 +529,9 @@ export async function captureClaudeTranscriptTurn(
       // a second time.
       await advanceCapturedLineForTranscriptTurn(target);
     }
+    // Issue #4344: after the rows are written, so a complete turn's ask is settled
+    // against the row this call just wrote (never before it exists).
+    await bindClaudeAskTurns(target, built.turns, sessionId);
     return captured;
   } catch (error) {
     logger.error('claude-transcript-capture-failed', {
@@ -859,7 +868,8 @@ export async function readClaudeTurnProgress(
 async function recordClaudeUserTurn(
   target: AgentInstanceRef,
   turn: ClaudeTurnAccumulator,
-  previousStartedAt = 0
+  previousStartedAt = 0,
+  reservedAsks: ReadonlySet<string> = new Set()
 ): Promise<RecordedUserTurn> {
   const instanceId = target.instanceId ?? target.cliToolId;
 
@@ -876,10 +886,18 @@ async function recordClaudeUserTurn(
   const adoption: RecordUserTurnOptions =
     previousStartedAt > 0 ? { adoptionFromMs: previousStartedAt } : {};
 
+  // Issue #4344 (M2, I3): the envelope comes off only for a prompt whose ask has a
+  // reservation of this destination, and only once (`askPromptText`, taken off by
+  // `createClaudeTurn`). `recordUserTurn` compares the text as it is, so a body that
+  // itself opens with an envelope-shaped line keeps it, and so does a send with no ask.
+  const promptText =
+    turn.askId && turn.askPromptText !== null && turn.askPromptText !== undefined && reservedAsks.has(turn.askId)
+      ? turn.askPromptText
+      : turn.promptText;
   const recorded = await recordUserTurn(
     target,
     claudePromptRequestId(turn.promptUuid),
-    turn.promptText,
+    promptText,
     turn.startedAt,
     adoption
   );
@@ -918,7 +936,8 @@ function lastClaudeAssistantRecordAt(
   const at = new Map<string, number>();
   let key: string | null = null;
 
-  for (const record of records) {
+  // Issue #4344: the same logical records `buildClaudeTurns` reads, so the walks agree.
+  for (const record of claudeLogicalRecords(records)) {
     if (record.isSidechain) continue;
     if (isClaudePromptRecord(record)) {
       key = record.uuid;

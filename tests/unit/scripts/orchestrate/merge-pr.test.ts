@@ -112,6 +112,12 @@ describe('judgeChecks (6-3)', () => {
       expect(names.filter((name) => !LAST_REQUIRED_CHECKS.includes(name))).toEqual([]);
     });
 
+    it('the E2E shards and their aggregate `E2E Tests` are required (#4308)', () => {
+      const names = checkNamesOfWorkflow();
+      expect(names).toEqual(expect.arrayContaining(['E2E Tests (shard 1/2)', 'E2E Tests (shard 2/2)', 'E2E Tests']));
+      expect(LAST_REQUIRED_CHECKS).toEqual(expect.arrayContaining(['E2E Tests (shard 1/2)', 'E2E Tests (shard 2/2)', 'E2E Tests']));
+    });
+
     it('every required check is one the workflow registers, or --last would wait for it until the timeout', () => {
       const names = checkNamesOfWorkflow();
       expect(LAST_REQUIRED_CHECKS.filter((name) => !names.includes(name))).toEqual([]);

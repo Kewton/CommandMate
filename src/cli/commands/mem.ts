@@ -10,6 +10,7 @@
  *   commandmate mem check --suggest [--quiet] [--hook <event>] [--instance <id>] [--json]  (Issue #4226)
  *   commandmate mem mode [--json]
  *   commandmate mem purge --branch <name> [--closed-only] --confirm
+ *   commandmate mem decisions [<itemId>] [--pending] [--json]   (Issue #4355, read only: mem-decisions.ts)
  *
  * A thin client over `/api/worktrees/:id/mem/*` and `/api/repositories/:id/mem*`. The
  * rules are the server's. **There is no way to change the mode here** (D3): `mode`
@@ -27,6 +28,7 @@ import type { WorktreeListResponse } from '../types/api-responses';
 import { parseSessionName } from '../../lib/cli-tools/session-name';
 import { TOKEN_WARNING } from '../utils/command-helpers';
 import { resolveSessionIdentity, type SessionIdentity } from './whoami';
+import { addMemDecisionsCommand } from './mem-decisions';
 import {
   MEM_EXIT_BY_CODE,
   MEM_KINDS,
@@ -39,6 +41,7 @@ import {
   type MemPurgeResponse,
   type MemWriteResponse,
 } from '../../types/mem';
+import { closeWhenKindsText } from '../../lib/handoff/close-when-kinds';
 import { isMemSuggestHookEvent, MEM_SUGGEST_HOOK_EVENTS, type MemSuggestResponse } from '../../types/mem-suggest';
 
 const MEM_HELP = `
@@ -49,7 +52,7 @@ Target: inside a CommandMate session, your own instance (whoami). In an ordinary
 name it: --worktree <id> --instance <id> for writes; --worktree <id>, or
 --repository <id> --branch <name>, for list / mode / purge.
 
---close-when (required for waiting / next / external):
+${closeWhenKindsText().memHelp}
   manual | replaced (now only) | issue:[host/owner/repo]#N | pr:[host/owner/repo]#N[?state=merged|closed]
   branch:<name>?merged=<ref>[&scope=local|remote] | branch:<name>?deleted
   relay:<id> | worktree:<id> | session:task:<id> | session:verify:<run id> |
@@ -86,6 +89,10 @@ for the same state (one line, exit 0 whatever happens) and records them; the rec
 outlives a server restart. A prompt whose answer did not reach the CLI in time may
 not be shown. Records of a removed instance go at the next --quiet or with the
 worktree.
+
+decisions (Issue #4355) reads the branch's decisions (state, destination, quote, the
+approvals and the state of each write) and, with an item id, a reference diff that cannot
+be approved. It only reads: approving a decision is on the screen only.
 
 What is not prevented: a process with your OS rights can write the database or
 call the API directly. The author check stops mistakes, not intent.
@@ -419,7 +426,7 @@ export function createMemCommand(): Command {
       .requiredOption('--kind <kind>', MEM_KINDS.filter((kind) => kind !== 'now').join(' | '))
       .option('--text <text>', 'The text')
       .option('--stdin', 'Read the text from stdin')
-      .option('--close-when <cond>', 'When it closes (required for waiting / next / external)')
+      .option('--close-when <cond>', closeWhenKindsText().option)
       .option('--promote-to <dest>', 'Where a decision is to be recorded: path:<rel> | issue:#N | pr:#N')
       .option('--quote <words>', "An agent's quotation of what was said (with --quote-at)")
       .option('--quote-at <ts>', 'When it was said: ISO 8601 with an offset')
@@ -637,6 +644,14 @@ export function createMemCommand(): Command {
       });
     }
   );
+
+  // Issue #4355: reading the decisions lives in its own file (design §3.4.1); only registered here.
+  addMemDecisionsCommand(mem, {
+    run,
+    usage,
+    sessionWorktreeId: async (client) => (await identityOf(client))?.worktreeId,
+    withTargetOptions,
+  });
 
   return mem;
 }

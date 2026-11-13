@@ -337,7 +337,7 @@ the same button; that strip is **gone**, and the terminal takes the width back
 The arrow in the History column's header points the way it **folds** (left).
 Bring it back with [History] in the action bar.
 
-Note that the **"File Tree"** among the tools at the right of the header
+Note that the **"File Tree"** among the tools right after the header's identity group (repository › branch › session)
 is for browsing the worktree, and is a different thing from the action bar's
 **"Open Files"** (the panel showing files you opened).
 
@@ -360,6 +360,11 @@ Indicators displayed on each worktree in the sidebar show the current state.
 | Blue spinner | running | Claude is processing |
 | Yellow dot | waiting | Waiting for user input (yes/no confirmations, etc.) |
 | Blue spinner | generating | Generating response |
+
+The green **"Ready for work"** badge (the agent finished its turn and is waiting for your next instruction) appears on the sidebar row
+and in the PC header. Both are **per worktree**: one badge when any one session of the worktree is waiting for an instruction
+(Issue #4346). In the header it sits right after the pill of the session on screen, but it is not that session's state: shown next to
+"Codex: Idle" with a split maximized, it means another session (Claude, say) is waiting.
 
 > **Details**: See [Status Indicator Details](../../features/sidebar-status-indicator.md) for how status detection works.
 
@@ -416,7 +421,7 @@ The same agent can appear more than once under different names (e.g. "Claude" an
 3. Choose the agent (installed ones), a name (optional) and **where to open it** (a new split / replace the current split / add only), then click **[Add]**
 4. Adding does not start a session: it starts when you send the first message from that split
 
-Rename, reorder and delete in the **"Agent"** tool at the right of the header.
+Rename, reorder and delete in the **"Agent"** tool right after the header's identity group.
 
 ### Adding and Managing (Mobile)
 
@@ -631,8 +636,9 @@ surface switch): it acts on the **split that holds focus**. With focus outside e
 the first split answers — except while you are typing in a field outside the splits.
 
 The hidden splits **keep their sessions and keep polling** while they are off screen, so
-restoring shows the output that arrived in the meantime. The action bar's `2 / 3 splits`
-label reads "Split 2 maximized" while one is maximized.
+restoring shows the output that arrived in the meantime. While a split is maximized, the
+label "Split 2 maximized" appears next to the action bar's layout icons (1 / 2 / 3 / 4),
+which stay visible.
 
 Because it is **temporary**, the layout comes back on its own when you:
 
@@ -669,7 +675,7 @@ chip) with the task title, its `TaskStatus`, and the `RESULT` of the most recent
 
 | Screen  | How to open |
 |---------|-------------|
-| Desktop | Press the Verification chip (the chip with the shield icon) on the second row. The pane opens from the right, over the body |
+| Desktop | Press the Verification chip (the chip with the shield icon) on the second row. The pane opens from the right by default, over the body (the pane title's "Move to left" puts it on the left) |
 | Mobile  | **Tools** tab in the bottom bar → **Verification** sub-tab |
 
 The pane has three sections, top to bottom.

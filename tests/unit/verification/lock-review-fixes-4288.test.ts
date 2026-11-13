@@ -38,6 +38,10 @@ import {
   take,
   writeOwner,
 } from './lock-4288-harness';
+import { guardTmpDirCount } from './tmp-leak-guard-4288';
+
+// Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
+guardTmpDirCount(["lock-review-4288-"]);
 
 let root: string;
 beforeEach(() => {

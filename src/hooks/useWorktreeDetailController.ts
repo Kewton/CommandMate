@@ -18,7 +18,7 @@
  * Based on Issue #13 UX Improvement design specification.
  */
 
-import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useCallback, useMemo, useState, useRef, useSyncExternalStore } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
@@ -82,7 +82,7 @@ import {
   type CLIToolType,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
-import { worktreeApi, ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
+import { ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
 import { readRunningInstances } from '@/lib/api-client-agent-roles';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
@@ -98,6 +98,29 @@ import { useHistoryFilters } from '@/hooks/useHistoryFilters';
 import { useDiffViewerState } from '@/hooks/useDiffViewerState';
 import { useVisibilityRecovery } from '@/hooks/useVisibilityRecovery';
 import { SESSION_INSTANCE_QUERY_PARAM } from '@/lib/sidebar-utils';
+import {
+  askHandoffClose,
+  beginHandoffOpening,
+  closeHandoffOpening,
+  handoffStoreSnapshot,
+  type HandoffClosePath,
+  type HandoffOpeningToken,
+  type SessionStopResult,
+} from '@/lib/handoff/close-rule';
+import {
+  handoffRegistrySnapshot,
+  handoffPageMayStart,
+  beginHandoffPageRequest,
+  publishHandoffPageView,
+  registerHandoffPage,
+  reportHandoffPageAuthenticated,
+  reportHandoffPageResponse,
+  subscribeHandoffRegistry,
+  unregisterHandoffPage,
+  type HandoffPageRegistration,
+  type HandoffPageRequest,
+} from '@/lib/handoff/page-registration';
+import { handoffTakeBackOf } from '@/lib/handoff/take-back';
 import {
   isAutoYesEnterSentToCurrentPrompt,
   type AutoYesEnterFallbackReading,
@@ -266,6 +289,12 @@ export const DETAIL_LOAD_RETRY_DELAYS_MS = [2000, 5000, 10000] as const;
 export const STALE_BANNER_FAILURE_THRESHOLD = 3;
 
 /**
+ * Issue #4227 (G-4): how long "end" waits for the mem mode before it opens the plain
+ * confirmation instead. The read only chooses the dialog; it must not make "end" hang.
+ */
+export const END_MODE_READ_TIMEOUT_MS = 5000;
+
+/**
  * Issue #2499: transport options every poll on this screen uses.
  *
  * **Who owns the retry.** #2498 put the retry ladder above and the consecutive-
@@ -320,6 +349,52 @@ function classifyKillFailure(err: unknown): 'ended' | 'refused' | 'errored' | 's
   return err.status >= 400 ? 'refused' : 'silent';
 }
 
+/**
+ * Issue #4345 1b: the kill-session POST, as `worktreeApi.killSession` sends it (the same request
+ * through `fetchApiResponse`, the same `ApiError`s: the redirect to /login, a non-2xx with the
+ * error body's message, a non-JSON body, a body that does not parse), with its answer reported
+ * through the hand-off gateway (`reportHandoffPageResponse`) for `authRequest` — the registration
+ * the kill left under — as soon as the response is in hand, before its body is read and before
+ * its status is folded into an `ApiError`. The kill's classification ({@link classifyKillFailure})
+ * and what it records are unchanged.
+ */
+async function killSessionThroughGateway(
+  worktreeId: string,
+  target: SessionKillTarget,
+  authRequest: HandoffPageRequest
+): Promise<void> {
+  const query = new URLSearchParams();
+  if (target.cliToolId) query.set('cliTool', target.cliToolId);
+  if (target.instanceId) query.set('instance', target.instanceId);
+  const queryString = query.toString();
+  try {
+    const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/kill-session${queryString ? `?${queryString}` : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    reportHandoffPageResponse(authRequest, response);
+    const redirectError = detectAuthRedirect(response);
+    if (redirectError) throw redirectError;
+    if (!response.ok) {
+      let errorBody: { error?: string } = {};
+      if ((response.headers?.get('content-type') ?? '').includes('application/json')) {
+        try {
+          errorBody = (await response.json()) as { error?: string };
+        } catch {
+          errorBody = {};
+        }
+      }
+      throw new ApiError(errorBody.error || `HTTP error ${response.status}`, response.status, errorBody);
+    }
+    const formatError = detectNonJsonBody(response);
+    if (formatError) throw formatError;
+    await response.json();
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0, error);
+  }
+}
+
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
   const isMobile = useIsMobile();
   // Issue #874: ref mirror so the message/output fetchers (which read state via
@@ -327,8 +402,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   // without being recreated on every isMobile change.
   const isMobileRef = useRef(isMobile);
   isMobileRef.current = isMobile;
-  // Issue #747: the sidebar toggle moved into the ActivityBar (which reads
-  // SidebarContext directly), so DesktopHeader no longer needs `toggle` here.
+  // Issue #747: the sidebar toggle left DesktopHeader (it is the sidebar's own
+  // button since #3512, which reads SidebarContext directly), so DesktopHeader
+  // no longer needs `toggle` here.
   const { openMobileDrawer } = useSidebarContext();
   const router = useRouter();
   const pathname = usePathname();
@@ -407,6 +483,29 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * the /login HTML ("Unexpected token <").
    */
   const [isAuthExpired, setIsAuthExpired] = useState(false);
+  /**
+   * Issue #4317 PR1 (`@/lib/handoff/page-registration`): this page's registration for the hand-off
+   * dialog — a new identity per mount and per worktree (StrictMode's setup → cleanup → setup makes
+   * two), apart from the opening's token. Its cleanup removes its own only. `null` until the
+   * effect has run: the dialog is drawn but starts nothing meanwhile.
+   */
+  const [handoffRegistration, setHandoffRegistration] = useState<HandoffPageRegistration | null>(null);
+  const handoffRegistrationRef = useRef<HandoffPageRegistration | null>(null);
+  useEffect(() => {
+    const registration = registerHandoffPage(worktreeId);
+    handoffRegistrationRef.current = registration;
+    setHandoffRegistration(registration);
+    return () => {
+      unregisterHandoffPage(registration);
+      if (handoffRegistrationRef.current === registration) handoffRegistrationRef.current = null;
+    };
+  }, [worktreeId]);
+  /**
+   * Issue #4317 PR1: the session's expiry as the registry holds it over the pages. A page mounted
+   * while it is expired starts with its own `isAuthExpired` false (and its Retry sets it false
+   * before reading); neither is a recovery. Only the current page's authenticated read clears it.
+   */
+  const handoffRegistry = useSyncExternalStore(subscribeHandoffRegistry, handoffRegistrySnapshot, handoffRegistrySnapshot);
   /**
    * Bumped at the end of every poll cycle (Issue #1816).
    *
@@ -792,11 +891,21 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // left, so its reply cannot put back a status changed in the meantime.
     const statusGeneration = currentWorktreeStatusGeneration();
     const requestSeq = ++detailRequestSeqRef.current;
+    // Issue #4317 PR1 (再指示 1) / #4345 1a: the registration this read started under and its place in
+    // that registration's one order across entries (the gateway). Its answer reports the session's
+    // state for that registration only — taken while it is still the current one, never for the
+    // registration current when it answers (StrictMode's second setup, a page made again) — and is
+    // taken in that order, apart from `requestSeq` (the order of the detail answers' data).
+    const authRequest = beginHandoffPageRequest(handoffRegistrationRef.current);
     const rosterSaveGeneration = rosterSaveGenerationRef.current;
     const recordSaveGeneration = recordSaveGenerationRef.current;
     const vibeLocalSaveGeneration = vibeLocalSaveGenerationRef.current;
     try {
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}`, POLL_REQUEST_OPTIONS);
+      // Issue #4345 1a: the 401 (or the redirect to /login) reaches the registry before anything
+      // below folds the status into an error — and before the returns for an answer of another
+      // worktree or older than one taken: whether it is taken is the registry's order, not the data's.
+      reportHandoffPageResponse(authRequest, response);
       // Issue #2498: an expired session resolves as the /login HTML page with
       // status 200 — `fetch` transparently follows the middleware's 307 — so
       // `response.json()` threw a SyntaxError that reached the user as
@@ -815,6 +924,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         throw formatError;
       }
       const fetched: Worktree = await response.json();
+      // Issue #4317 PR1 / #4345 1a: an authenticated read started under the current registration —
+      // the only recovery. Taken by the registry in the gateway's order (an older read's success
+      // after a newer 401 of any entry moves nothing), so reported before the returns below.
+      reportHandoffPageAuthenticated(authRequest);
       // Issue #4145: asked by the previous worktree's code after the switch (a kill or a
       // retry finishing). The sequence cannot tell: it left after everything else. Null,
       // so that code does not go on to read the rest for this screen.
@@ -915,7 +1028,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Issue #2498: session expiry is a re-login, not a retryable error.
       // Branch first so the raw parse message never reaches the screen.
       if (status === 401) {
+        // Issue #4317 PR1 (再指示 2): the 401 is taken in the order the reads left, as a success
+        // is — an older read answering 200 afterwards moves neither this page nor the registry.
+        detailAdoptedSeqRef.current = requestSeq;
         setIsAuthExpired(true);
+        // Issue #4317 PR1: held over the pages (a page made next starts with its own false) — reported
+        // by the gateway when the response arrived (#4345 1a).
         setIsReconnecting(false);
         setError(null);
         return null;
@@ -1819,12 +1937,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setKillTarget({ cliToolId, instanceId, label });
   }, []);
 
-  /** Issue #1171: execute the kill for the snapshotted target only. */
-  const handleKillConfirm = useCallback(async (): Promise<void> => {
-    const target = killTarget;
-    if (!target || isKillPendingRef.current) return;
+  /**
+   * Issue #1171: execute the kill for the snapshotted target only. Issue #4227: the body is
+   * the existing stop as it was, taken out as `stopSession(target)` so the hand-off's stop
+   * button (G-4) runs the same one — not a copy — for the target it snapshotted. pr2e (codex
+   * P2-2): it says how it ended, so the hand-off's plain stop says "stopped" only when it did.
+   */
+  const stopSession = useCallback(async (target: SessionKillTarget | null): Promise<SessionStopResult> => {
+    if (!target || isKillPendingRef.current) return 'unknown';
     isKillPendingRef.current = true;
     setIsKillPending(true);
+    // Issue #4345 1b: the kill's owner and order, fixed as it leaves (this page's registration then).
+    const killAuthRequest = beginHandoffPageRequest(handoffRegistrationRef.current);
 
     // Issue #1171: only wipe the GLOBAL (mobile-consumed / active-scoped) message
     // + prompt state when the killed target IS the active instance. A PC split
@@ -1857,17 +1981,22 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Issue #874/#875: always scope the kill to the target agent instance. The
       // primary instance uses instanceId === cliToolId (byte-identical session
       // name); alias instances terminate only that instance's session.
-      await worktreeApi.killSession(worktreeId, target.cliToolId, target.instanceId);
+      // Issue #4345 1b: its 401 reaches the registry before it becomes a "refused" (the toast and
+      // the kept target as before); what the kill did is still recorded for its own target.
+      await killSessionThroughGateway(worktreeId, target, killAuthRequest);
       await finishEnded();
+      return 'stopped';
     } catch (err) {
       // Issue #1171: a 404 means the session already ended (natural-termination
       // race). The goal is achieved, so re-sync and close rather than error.
       const failure = classifyKillFailure(err);
       if (failure === 'ended') {
         await finishEnded();
+        return 'stopped';
       } else if (failure === 'refused') {
         // Keep the target so the user can retry; surface a failure toast.
         showToast(tWorktree('session.failedToKill'), 'error');
+        return 'refused';
       } else {
         // Issue #4160: this answer says nothing about the session, so what is running
         // now decides. Another worktree is on screen after a switch and this one's
@@ -1875,22 +2004,214 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         const running = isStillOnScreen() ? await readRunningInstances(worktreeId) : null;
         if (running === null) {
           showToast(tCommon('sessionKill.outcomeUnknown', { label: target.label }), 'warning');
+          return 'unknown';
         } else if (running[target.instanceId] !== true) {
           await finishEnded();
+          return 'stopped';
         } else if (failure === 'errored') {
           showToast(tWorktree('session.failedToKill'), 'error');
+          return 'failed';
         } else {
           // Issue #4160: past the deadline the kill may still be working (a tool's
           // graceful exit takes seconds), so this is not called a failure. Pressing
           // again is safe: a session that has gone by then answers 404.
           showToast(tCommon('sessionKill.inProgress', { label: target.label }), 'warning');
+          return 'unknown';
         }
       }
     } finally {
       isKillPendingRef.current = false;
       setIsKillPending(false);
     }
-  }, [killTarget, worktreeId, actions, fetchWorktree, showToast, tWorktree, tCommon]);
+  }, [worktreeId, actions, fetchWorktree, showToast, tWorktree, tCommon]);
+
+  const handleKillConfirm = useCallback(async (): Promise<void> => {
+    await stopSession(killTarget);
+  }, [killTarget, stopSession]);
+
+  /**
+   * Issue #4227 (G-4, design `mem-ui-4227.md` §4.1): "end" on a branch set to be attended
+   * (`popup`) with mode `on` opens the hand-off dialog for the snapshotted target instead
+   * of the plain confirmation; anything else (unattended, mode not `on`, or the mode not
+   * readable) opens the plain confirmation as before. The hand-off never kills: its stop
+   * button runs {@link stopForHandoff}, the existing stop, from its handler only.
+   */
+  /**
+   * G10 (G-PR4, the UAT of G-PR3 (差し戻し 4)): a page made anew (Next keys it by `[id]`, AppShell
+   * draws it under another parent for PC and phone) starts from the opening it would take back
+   * ({@link handoffTakeBackOf}, the effect's own condition) instead of from nothing, so the dialog
+   * is drawn by the first render rather than after the effect. Read once per mount (React's
+   * StrictMode may run it twice: it reads only — nothing begins, closes or patches in render).
+   */
+  const [initialHandoff] = useState(() => handoffTakeBackOf(worktreeId, isCliToolType));
+  const [handoffTarget, setHandoffTarget] = useState<SessionKillTarget | null>(initialHandoff?.target ?? null);
+  /** Mirrors `handoffTarget` for the paths below, read in the same tick. */
+  const handoffTargetRef = useRef<SessionKillTarget | null>(initialHandoff?.target ?? null);
+  /** pr2f: the opening {@link openHandoff} began; the page's closes name it (never a newer one). */
+  const handoffOpeningRef = useRef<HandoffOpeningToken | null>(initialHandoff?.token ?? null);
+  /**
+   * Issue #4227 pr2d (design §4.1.1): the page's only way of closing the hand-off. It asks the
+   * one rule (`closeHandoffOpening`, which asks `askHandoffClose`) with the path's name: while the
+   * dialog stops, sends or holds an unknown decide, or waits for its cancel's answer, it stays
+   * (and says why). The rule reads the store of `@/lib/handoff/close-rule` (pr2e), so a dialog
+   * not drawn at the moment (the page's Loading) holds as much as one drawn. The guard
+   * `handoff-close-paths-4227` keeps `setHandoffTarget(null)` here only. pr2f: it names the
+   * opening it began; `stale` (another opening began since, e.g. another page's) means its own is
+   * over already — its target goes, and the other opening is not touched (its units stay in the store).
+   */
+  const closeHandoffBy = useCallback((path: HandoffClosePath): boolean => {
+    if (handoffTargetRef.current === null) return true;
+    const opening = handoffOpeningRef.current;
+    const answer = opening === null ? null : closeHandoffOpening(opening, path);
+    if (answer !== null && answer !== 'stale') return false;
+    handoffOpeningRef.current = null;
+    handoffTargetRef.current = null;
+    setHandoffTarget(null);
+    return true;
+  }, []);
+  const openHandoff = useCallback((target: SessionKillTarget, resumed: HandoffOpeningToken | null = null): void => {
+    // pr2e: a new opening in the store (the request is made by the dialog for it); the units of
+    // the worktree are not touched. G10: `resumed` is the store's live opening taken back by a
+    // page made again (no new opening: the dialog finds it and makes nothing again).
+    handoffOpeningRef.current = resumed ?? beginHandoffOpening(worktreeId, target).token;
+    handoffTargetRef.current = target;
+    setHandoffTarget(target);
+  }, [worktreeId]);
+  /**
+   * pr3c (review B P2-1): the worktree the effect below last ran for. A new mount starts at null,
+   * so only a change of `worktreeId` on a mounted page is a switch — not the page made again, nor
+   * React's StrictMode running a new mount's effects twice (dev, the e2e's `npm run dev`).
+   */
+  const handoffEffectWorktreeRef = useRef<string | null>(null);
+  useEffect(() => {
+    // G10 (design §4.1.1, the UAT of G-PR1+G-PR2): the page itself is made again when the layout
+    // switches (AppShell draws its children under another parent for PC and phone) and when the
+    // worktree changes (Next keys the page by its `[id]`), so this hook mounts anew with no target
+    // while the store keeps the opening. Taken back here, the dialog is drawn open again without a
+    // person's press: this worktree's live opening (with or without a unit), and another
+    // worktree's while it holds a decide being sent or unknown (the invariant's units: they wait
+    // for the person's choice) — asked as a switch below, the rule keeps it (foreign). Another
+    // worktree's stop or cancel ends by its own answer and is not taken back (its page may begin
+    // its own opening meanwhile, pr2f).
+    const switched = handoffEffectWorktreeRef.current !== null && handoffEffectWorktreeRef.current !== worktreeId;
+    handoffEffectWorktreeRef.current = worktreeId;
+    const live = handoffStoreSnapshot().opening;
+    // pr3c: this worktree's live opening, already taken back by this page (StrictMode's second
+    // run, or back on the opening's own worktree; G10: or by the first render's initial state):
+    // nothing to do — never closed by the rerun.
+    if (live !== null && !live.closed && live.worktreeId === worktreeId && handoffTargetRef.current !== null && handoffOpeningRef.current === live.token) return;
+    const back = handoffTakeBackOf(worktreeId, isCliToolType);
+    if (handoffTargetRef.current === null && back !== null) {
+      if (!closeHandoffBy('page-end')) return;
+      openHandoff(back.target, back.token);
+      if (back.worktreeId === worktreeId) return;
+    }
+    // pr2d: a switch of worktree asks the rule too. Kept, the dialog shows that it is another
+    // worktree's and runs nothing of it here but the unit's drop and closing. pr3c: asked only
+    // when the worktree did change on this page (a page made again starts with no target).
+    if (switched) closeHandoffBy('worktree-switch');
+  }, [worktreeId, closeHandoffBy, openHandoff]);
+  /**
+   * The hand-off's "end" for an explicit target snapshot: the PC split's own End (and its
+   * restart), like {@link openKillConfirm}. The mode is read once per press; a read that
+   * fails, answers anything but `on` + `popup`, or takes longer than
+   * {@link END_MODE_READ_TIMEOUT_MS} opens the plain confirmation, so "end" never hangs on it.
+   * Issue #4345 1a: but for a 401 the registry takes (the session expired): that opens nothing.
+   */
+  /**
+   * Issue #4227 pr2c (review B P3-5): one read at a time. A press while the mode is being read
+   * is ignored, so two answers that differ (one past its deadline, one `on`) cannot open both
+   * the plain confirmation and the hand-off; and whichever opens closes the other.
+   */
+  const endReadingRef = useRef<object | null>(null);
+  useEffect(() => {
+    // Another worktree's read answers nothing here (`startedFor` below): it holds no press.
+    endReadingRef.current = null;
+  }, [worktreeId]);
+  const openEnd = useCallback(async (target: SessionKillTarget): Promise<void> => {
+    if (endReadingRef.current !== null) return;
+    // Issue #4317 PR1: the press belongs to this page's registration; a page not registered (yet,
+    // or any more) or not the current one, or the session expired (再指示 2), opens nothing.
+    const registration = handoffRegistrationRef.current;
+    if (!handoffPageMayStart(registration)) return;
+    // pr2d (PM Claude pr2c P3-2): a hand-off that holds something is not replaced by another
+    // "end" (asked again after the read, which may take seconds).
+    if (handoffTargetRef.current !== null && askHandoffClose('page-end') !== null) return;
+    const reading = {};
+    endReadingRef.current = reading;
+    // Issue #4345 1a: the read's owner and order, fixed at the press.
+    const authRequest = beginHandoffPageRequest(registration);
+    const startedFor = worktreeId;
+    let attended = false;
+    // Issue #4345 1a 再指示 1: this press's own 401 was taken — kept for the press, so a recovery
+    // (a newer detail read's success) while the body is read does not reopen the plain confirmation.
+    let expiredTaken = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), END_MODE_READ_TIMEOUT_MS);
+    try {
+      const response = await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/mem/mode`, { signal: controller.signal });
+      // Issue #4345 1a: reported before the body is read. A 401 taken expires the session, and this
+      // press then opens nothing — not the plain confirmation either (intended), even if the session
+      // recovers before the press ends (再指示 1). A 401 not
+      // taken (older than an answer taken, another registration's), a 5xx, a 403, a timeout or no
+      // response fall back to the plain confirmation as before.
+      expiredTaken = reportHandoffPageResponse(authRequest, response);
+      const body = (await response.json()) as { ok?: boolean; mode?: string; features?: { popup?: boolean } };
+      attended = response.ok && body.ok === true && body.mode === 'on' && body.features?.popup === true;
+    } catch {
+      attended = false;
+    } finally {
+      clearTimeout(timer);
+      if (endReadingRef.current === reading) endReadingRef.current = null;
+    }
+    if (expiredTaken) return;
+    if (startedFor !== worktreeIdRef.current) return;
+    // Issue #4317 PR1: checked again after the mode's read — the worktree id alone does not tell an
+    // old page (unmounted, or made again) from the one now registered with the same id.
+    if (!handoffPageMayStart(registration)) return;
+    if (attended) {
+      // pr2d (PM Claude pr2c P3-2 (b)): a kill in flight keeps its confirmation (Issue #1171),
+      // and the hand-off does not open over it (before, both were open).
+      if (isKillPendingRef.current) return;
+      if (!closeHandoffBy('page-end')) return;
+      setKillTarget(null);
+      openHandoff(target);
+    } else {
+      if (!closeHandoffBy('page-end')) return;
+      setKillTarget(target);
+    }
+  }, [worktreeId, closeHandoffBy, openHandoff]);
+  /** The DesktopHeader / mobile End: the active instance, snapshotted at press time. */
+  const openActiveEnd = useCallback(async (): Promise<void> => {
+    const instanceId = activeInstanceIdRef.current;
+    const cliToolId = activeCliTabRef.current;
+    const label = getActiveInstanceLabel(agentInstancesRef.current, instanceId, cliToolId);
+    await openEnd({ cliToolId, instanceId, label });
+  }, [openEnd]);
+  /** The dialog's `onClose`: the dialog asked the rule already; the page asks again. */
+  const closeHandoff = useCallback((): void => {
+    closeHandoffBy('dialog');
+  }, [closeHandoffBy]);
+  /**
+   * The existing stop for the hand-off's target (G-4's stop button), and how it ended. Issue #4317
+   * PR2: stable (it reads the target and the stop as they are when pressed), since it is published
+   * on the registration — a new identity per render would publish, and draw the page, again.
+   */
+  const stopSessionRef = useRef(stopSession);
+  stopSessionRef.current = stopSession;
+  const stopForHandoff = useCallback(async (): Promise<SessionStopResult> => stopSessionRef.current(handoffTargetRef.current), []);
+  /**
+   * Issue #4317 PR2: the dialog's host is beside the shell (`HandoffDialogHost`, outside the route and
+   * the PC / phone branches), not in this page. The page publishes on its registration what the
+   * dialog shows — its target, its close through the rule and its existing stop — and the host draws
+   * the current registration's. Runs after the registration's effect (declared before), in the same
+   * flush; a registration gone takes its view with it.
+   */
+  useEffect(() => {
+    const registration = handoffRegistrationRef.current;
+    if (registration === null) return;
+    publishHandoffPageView(registration, { target: handoffTarget, onClose: closeHandoff, onStop: stopForHandoff });
+  }, [handoffRegistration, handoffTarget, closeHandoff, stopForHandoff]);
 
   /** Issue #1171: cancel — a no-op while a kill POST is in flight (keeps target). */
   const handleKillCancel = useCallback((): void => {
@@ -2418,6 +2739,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     openKillConfirm,
     openActiveKillConfirm,
     killTarget,
+    // Issue #4227 (G-4): the hand-off before ending, for the screens that render it.
+    openActiveEnd,
+    openEnd,
+    handoffTarget,
+    closeHandoff,
+    stopForHandoff,
+    handoffRegistration,
+    /**
+     * Issue #4317 PR1: the dialog is not drawn (unmounted, never hidden with `isOpen={false}`) while
+     * the registry holds the session expired, until the current page's authenticated read. 再指示 2:
+     * the registry alone — this page's own `isAuthExpired` (an answer of a registration no longer
+     * current included) draws the page's re-login notice only.
+     */
+    handoffAuthExpired: handoffRegistry.authExpired,
     isKillPending,
     handleLoadContent,
     handleLoadError,

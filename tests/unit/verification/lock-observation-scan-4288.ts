@@ -95,13 +95,26 @@ export function scanRawCalls(impl: Impl, source: string): Map<string, number> {
 /**
  * The observation points an implementation names. The errno-keeping rmdir (bash `lock_rmdir_errno`,
  * TS / sync JS `obs.rmdir`) is one too: its failure keeps a poll from the mkdir (#4288 Codex 2nd
- * re-review P2), so a new rmdir point must be in the table and get its injected failure.
+ * re-review P2), so a new rmdir point must be in the table and get its injected failure. So are the
+ * owner's exclusive create (bash `lock_obs_create`, TS / sync JS `obs.create`) and the age of an
+ * owner-less lock (bash `lock_obs_mtime`) the options of #4288 PR1a added (D3).
  */
 export function scanObservationPoints(impl: Impl, source: string): Set<string> {
   const points = new Set<string>();
+  // #4288 PR1a-f: the publish's link / unlink / stat observers, and the points an observer names for
+  // its own steps (bash `lock_test_obs_fault <point>`, TS / sync JS `attempt('<point>'`: the write, a
+  // short write, the close, the undo's inode check, the option checks owner-pid / owner-fields).
   const patterns = impl === 'bash'
-    ? [/\block_(?:obs_(?:kill0|list|lstat|owner|mkdir|mv|pgid)|rmdir_errno) ([a-z][a-z0-9-]*)\b/g, /\block_gone_candidates ([a-z][a-z0-9-]*)\b/g]
-    : [/\bobs\.(?:pid|group|list|lstat|owner|mkdir|rename|rmdir)\('([a-z][a-z0-9-]*)'/g, /\bgoneCandidates\(ctx, '([a-z][a-z0-9-]*)'/g];
+    ? [
+        /\block_(?:obs_(?:kill0|list|lstat|owner|mkdir|mv|pgid|create|mtime|link|unlink|stat)|rmdir_errno|test_obs_fault) ([a-z][a-z0-9-]*)\b/g,
+        /\block_gone_candidates ([a-z][a-z0-9-]*)\b/g,
+      ]
+    : [
+        /\bobs\.(?:pid|group|list|lstat|owner|mkdir|rename|rmdir|create|link|unlink)\('([a-z][a-z0-9-]*)'/g,
+        /\bgoneCandidates\(ctx, '([a-z][a-z0-9-]*)'/g,
+        /\battempt\('([a-z][a-z0-9-]*)'/g,
+        /\brefuse\('([a-z][a-z0-9-]*)'/g,
+      ];
   for (const { line } of linesWithFunction(impl, source)) {
     for (const re of patterns) for (const m of line.matchAll(re)) points.add(m[1]);
   }

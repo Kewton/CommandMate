@@ -10,6 +10,13 @@
  * destination and the poster are shown with the body, and a preview made under other
  * choices (the item, the worktree, the effect, the quote's check) is dropped as soon as
  * one of them changes. The checks a person ticks belong to one item or one operation.
+ *
+ * Issue #4355 PR2 (design `docs/design/mem-decisions-ux-4355.md` §3.2・I9): a line of
+ * the counts above the list (the shared count, I6), the recorded and the reflected folded
+ * away, an "awaiting approval only" switch (`?item=`, §3.1.4, is not in PR2). The counts
+ * line is the screen's one count of decisions awaiting approval (the branch select carries
+ * none), read from this panel's one list read. An item whose
+ * operation is unknown, in flight or waiting for its transition is never folded nor filtered.
  */
 
 'use client';
@@ -18,7 +25,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui';
 import type { PromoteDestination, PromoteEffect, PromoteOperationView, PromotePreviewView } from '@/lib/promote/model';
-import { promoteApi, type PromoteCallResult, type PromoteFindingView, type PromoteListBody } from '@/lib/promote/screen-client';
+import {
+  promoteApi,
+  type PromoteCallResult,
+  type PromoteDecisionEntry,
+  type PromoteFindingView,
+  type PromoteListBody,
+} from '@/lib/promote/screen-client';
+import { decisionCountsOf, type DecisionCounts, type DecisionCountsMode } from '@/lib/promote/decision-counts';
 
 const INPUT_CLASS =
   'rounded border border-border bg-surface px-2 py-1 text-xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -37,8 +51,33 @@ function destinationText(destination: PromoteDestination, worktrees: PromoteList
   return `${worktree?.name ?? destination.worktreeId} (${destination.branch ?? '-'}): ${destination.path}`;
 }
 
-export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: string; branch: string }): React.ReactElement {
+/** I9: an operation a person still has to reconcile or that is still on its way (never hidden). */
+export function operationNeedsAttention(operation: PromoteOperationView): boolean {
+  return operation.state === 'unknown' || operation.state === 'in_flight' || operation.state === 'approved' || operation.transitionPending;
+}
+
+/** I9: the entry is kept unfolded and shown under "awaiting approval only" whatever its state. */
+export function entryNeedsAttention(entry: PromoteDecisionEntry): boolean {
+  return entry.operations.some(operationNeedsAttention);
+}
+
+/** I6: the list's counts, or the same shared function over the list when an older server sent none. */
+export function countsOfList(list: PromoteListBody): DecisionCounts {
+  return list.counts ?? decisionCountsOf(list.mode as DecisionCountsMode, list.decisions.map((entry) => entry.item));
+}
+
+type FoldState = 'recorded' | 'promoted';
+
+export function DecisionPromotePanel({
+  repositoryId,
+  branch,
+}: {
+  repositoryId: string;
+  branch: string;
+}): React.ReactElement {
   const t = useTranslations('common');
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [openFolds, setOpenFolds] = useState<Record<FoldState, boolean>>({ recorded: false, promoted: false });
   const [list, setList] = useState<PromoteListBody | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [worktreeId, setWorktreeId] = useState('');
@@ -244,7 +283,130 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
       </li>
     );
   };
+  /** One decision's card (unchanged from #4225, shared by the list and the folds). */
+  const decisionCard = ({ item, unreflected, operations }: PromoteDecisionEntry) => (
+      <li key={item.id} className="space-y-2 rounded border border-border p-2" data-testid={`decision-${item.id}`}>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-medium text-foreground">{t(`mem.decisions.state.${item.state}`)}</span>
+          <span className="text-muted-foreground">v{item.version}</span>
+        </div>
+        <p className="whitespace-pre-wrap break-words text-xs text-foreground">{item.text}</p>
+        <p className="break-all text-xs text-muted-foreground">
+          {t('mem.decisions.destination')}: {item.promoteTo ?? t('mem.decisions.noDestination')}
+        </p>
+        {unreflected && (
+          <p role="status" className="text-xs text-danger-foreground" data-testid={`decision-unreflected-${item.id}`}>
+            {t('mem.decisions.unreflected')}
+          </p>
+        )}
+        {operations.length > 0 && <ul className="space-y-1">{operations.map((operation) => operationLine(operation, item.version, 'movable'))}</ul>}
+        <div className="flex flex-wrap gap-1">
+          {item.state === 'open' && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setSelected(selected === item.id ? null : item.id)}
+              data-testid={`decision-select-${item.id}`}
+            >
+              {t('mem.decisions.makePreview')}
+            </Button>
+          )}
+          {item.state === 'recorded' && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || !worktreeId}
+              onClick={() => void run(() => promoteApi.confirmReflected(repositoryId, item.id, worktreeId, item.version))}
+            >
+              {t('mem.decisions.confirmReflected')}
+            </Button>
+          )}
+        </div>
+        {selected === item.id && item.state === 'open' && (
+          <div className="space-y-2">
+            <label className="flex flex-wrap items-center gap-2 text-xs text-foreground">
+              {t('mem.decisions.effect.label')}
+              <select className={INPUT_CLASS} value={effect} onChange={(e) => setEffect(e.target.value as PromoteEffect)}>
+                <option value="spec">{t('mem.decisions.effect.spec')}</option>
+                <option value="record_only">{t('mem.decisions.effect.record_only')}</option>
+              </select>
+            </label>
+            {item.quote && (
+              <div className="space-y-1">
+                <blockquote
+                  className="whitespace-pre-wrap break-words border-l-2 border-border pl-2 text-xs text-foreground"
+                  data-testid={`decision-quote-${item.id}`}
+                >
+                  {item.quote}
+                </blockquote>
+                <label className="flex items-center gap-2 text-xs text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={quoteConfirmed}
+                    onChange={(e) => setQuoteConfirmed(e.target.checked)}
+                    data-testid={`decision-quote-confirmed-${item.id}`}
+                  />
+                  {t('mem.decisions.quoteConfirmed')}
+                </label>
+              </div>
+            )}
+            <Button
+              size="sm"
+              disabled={busy || !worktreeId || !item.promoteTo}
+              onClick={() => void makePreview(item.id)}
+              data-testid={`decision-make-preview-${item.id}`}
+            >
+              {t('mem.decisions.makePreview')}
+            </Button>
+            {preview && preview.itemId === item.id && (
+              <div className="space-y-2" data-testid={`decision-preview-${item.id}`}>
+                <h4 className="text-xs font-medium text-foreground">{t('mem.decisions.preview')}</h4>
+                <p className="break-all text-xs text-foreground" data-testid={`decision-preview-destination-${item.id}`}>
+                  {t('mem.decisions.previewDestination', { destination: destinationText(preview.destination, list.worktrees) })}
+                </p>
+                {preview.poster && (
+                  <p className="break-all text-xs text-foreground" data-testid={`decision-preview-poster-${item.id}`}>
+                    {t('mem.decisions.poster', { login: preview.poster.login })}
+                  </p>
+                )}
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-surface p-2 text-xs text-foreground">
+                  {preview.body}
+                </pre>
+                <p className="text-xs text-muted-foreground">{t('mem.decisions.expires', { time: preview.expiresAt })}</p>
+                {preview.invisibleReplaced && <p className="text-xs text-danger-foreground">{t('mem.decisions.invisible')}</p>}
+                <div className="flex flex-wrap gap-1">
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    data-testid={`decision-approve-${item.id}`}
+                    onClick={async () => {
+                      const shown = preview;
+                      setPreview(null);
+                      await run(() => promoteApi.approve(repositoryId, shown));
+                    }}
+                  >
+                    {t('mem.decisions.approve')}
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPreview(null)}>
+                    {t('mem.decisions.cancel')}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </li>
+  );
   const ambiguous = list.mode === 'ambiguous';
+  const counts = countsOfList(list);
+  // §3.2・I9: open decisions and any whose operation needs a person stay in the list; the
+  // recorded and the reflected are folded (closed by default) and hidden by "awaiting approval only".
+  const listed = list.decisions.filter((entry) => entry.item.state === 'open' || entryNeedsAttention(entry));
+  const folds: Array<{ state: FoldState; entries: PromoteDecisionEntry[] }> = (['recorded', 'promoted'] as const).map((state) => ({
+    state,
+    entries: list.decisions.filter((entry) => entry.item.state === state && !entryNeedsAttention(entry)),
+  }));
 
   return (
     <div className="space-y-3" data-testid="decision-promote-panel">
@@ -261,6 +423,27 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
           </p>
         )
       )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" data-testid="decision-counts-bar">
+        <p
+          role="status"
+          className="font-medium text-foreground"
+          data-testid="decision-counts"
+          data-open={counts.open ?? 'unknown'}
+          data-recorded={counts.recorded ?? 'unknown'}
+          data-approvable={counts.approvable ? 'yes' : 'no'}
+        >
+          {counts.open === null || counts.recorded === null
+            ? t('mem.decisions.counts.unknown')
+            : t('mem.decisions.counts.line', { open: counts.open, recorded: counts.recorded })}
+          {counts.open !== null && !counts.approvable && (
+            <span className="ml-2 text-danger-foreground">{t('mem.decisions.counts.notApprovable', { mode: counts.mode })}</span>
+          )}
+        </p>
+        <label className="flex items-center gap-1 text-foreground">
+          <input type="checkbox" checked={pendingOnly} onChange={(e) => setPendingOnly(e.target.checked)} data-testid="decision-pending-only" />
+          {t('mem.decisions.pendingOnly')}
+        </label>
+      </div>
       <label className="flex flex-wrap items-center gap-2 text-xs text-foreground">
         {t('mem.decisions.worktree')}
         {list.worktrees.length === 0 ? (
@@ -277,111 +460,30 @@ export function DecisionPromotePanel({ repositoryId, branch }: { repositoryId: s
         )}
       </label>
       {list.decisions.length === 0 && !ambiguous && <p className="text-xs text-muted-foreground">{t('mem.decisions.none')}</p>}
-      <ul className="space-y-3">
-        {list.decisions.map(({ item, unreflected, operations }) => (
-          <li key={item.id} className="space-y-2 rounded border border-border p-2" data-testid={`decision-${item.id}`}>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-medium text-foreground">{t(`mem.decisions.state.${item.state}`)}</span>
-              <span className="text-muted-foreground">v{item.version}</span>
-            </div>
-            <p className="whitespace-pre-wrap break-words text-xs text-foreground">{item.text}</p>
-            <p className="break-all text-xs text-muted-foreground">
-              {t('mem.decisions.destination')}: {item.promoteTo ?? t('mem.decisions.noDestination')}
-            </p>
-            {unreflected && (
-              <p role="status" className="text-xs text-danger-foreground" data-testid={`decision-unreflected-${item.id}`}>
-                {t('mem.decisions.unreflected')}
-              </p>
-            )}
-            {operations.length > 0 && <ul className="space-y-1">{operations.map((operation) => operationLine(operation, item.version, 'movable'))}</ul>}
-            <div className="flex flex-wrap gap-1">
-              {item.state === 'open' && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => setSelected(selected === item.id ? null : item.id)}
-                  data-testid={`decision-select-${item.id}`}
-                >
-                  {t('mem.decisions.makePreview')}
-                </Button>
-              )}
-              {item.state === 'recorded' && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy || !worktreeId}
-                  onClick={() => void run(() => promoteApi.confirmReflected(repositoryId, item.id, worktreeId, item.version))}
-                >
-                  {t('mem.decisions.confirmReflected')}
-                </Button>
-              )}
-            </div>
-            {selected === item.id && item.state === 'open' && (
-              <div className="space-y-2">
-                <label className="flex flex-wrap items-center gap-2 text-xs text-foreground">
-                  {t('mem.decisions.effect.label')}
-                  <select className={INPUT_CLASS} value={effect} onChange={(e) => setEffect(e.target.value as PromoteEffect)}>
-                    <option value="spec">{t('mem.decisions.effect.spec')}</option>
-                    <option value="record_only">{t('mem.decisions.effect.record_only')}</option>
-                  </select>
-                </label>
-                {item.quote && (
-                  <div className="space-y-1">
-                    <blockquote
-                      className="whitespace-pre-wrap break-words border-l-2 border-border pl-2 text-xs text-foreground"
-                      data-testid={`decision-quote-${item.id}`}
-                    >
-                      {item.quote}
-                    </blockquote>
-                    <label className="flex items-center gap-2 text-xs text-foreground">
-                      <input type="checkbox" checked={quoteConfirmed} onChange={(e) => setQuoteConfirmed(e.target.checked)} />
-                      {t('mem.decisions.quoteConfirmed')}
-                    </label>
-                  </div>
-                )}
-                <Button size="sm" disabled={busy || !worktreeId || !item.promoteTo} onClick={() => void makePreview(item.id)}>
-                  {t('mem.decisions.makePreview')}
-                </Button>
-                {preview && preview.itemId === item.id && (
-                  <div className="space-y-2" data-testid={`decision-preview-${item.id}`}>
-                    <h4 className="text-xs font-medium text-foreground">{t('mem.decisions.preview')}</h4>
-                    <p className="break-all text-xs text-foreground" data-testid={`decision-preview-destination-${item.id}`}>
-                      {t('mem.decisions.previewDestination', { destination: destinationText(preview.destination, list.worktrees) })}
-                    </p>
-                    {preview.poster && (
-                      <p className="break-all text-xs text-foreground" data-testid={`decision-preview-poster-${item.id}`}>
-                        {t('mem.decisions.poster', { login: preview.poster.login })}
-                      </p>
-                    )}
-                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-surface p-2 text-xs text-foreground">
-                      {preview.body}
-                    </pre>
-                    <p className="text-xs text-muted-foreground">{t('mem.decisions.expires', { time: preview.expiresAt })}</p>
-                    {preview.invisibleReplaced && <p className="text-xs text-danger-foreground">{t('mem.decisions.invisible')}</p>}
-                    <div className="flex flex-wrap gap-1">
-                      <Button
-                        size="sm"
-                        disabled={busy}
-                        onClick={async () => {
-                          const shown = preview;
-                          setPreview(null);
-                          await run(() => promoteApi.approve(repositoryId, shown));
-                        }}
-                      >
-                        {t('mem.decisions.approve')}
-                      </Button>
-                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPreview(null)}>
-                        {t('mem.decisions.cancel')}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </li>
-        ))}
+      <ul className="space-y-3" data-testid="decision-list">
+        {listed.map(decisionCard)}
       </ul>
+      {!pendingOnly &&
+        folds.map(
+          ({ state, entries }) =>
+            entries.length > 0 && (
+              <details
+                key={state}
+                className="rounded border border-border p-2"
+                open={openFolds[state]}
+                onToggle={(e) => {
+                  const open = (e.currentTarget as HTMLDetailsElement).open;
+                  setOpenFolds((current) => (current[state] === open ? current : { ...current, [state]: open }));
+                }}
+                data-testid={`decision-fold-${state}`}
+              >
+                <summary className="cursor-pointer text-xs font-medium text-foreground">
+                  {t(state === 'recorded' ? 'mem.decisions.foldRecorded' : 'mem.decisions.foldPromoted', { count: entries.length })}
+                </summary>
+                <ul className="mt-2 space-y-3">{entries.map(decisionCard)}</ul>
+              </details>
+            )
+        )}
       {(list.unresolved ?? []).length > 0 && (
         <div className="space-y-2 rounded border border-border p-2" data-testid="decision-unresolved">
           <h4 className="text-xs font-medium text-foreground">{t(ambiguous ? 'mem.decisions.unresolvedAmbiguous' : 'mem.decisions.unresolved')}</h4>

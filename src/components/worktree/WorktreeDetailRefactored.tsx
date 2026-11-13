@@ -45,6 +45,7 @@ import { MobileContent } from '@/components/worktree/WorktreeDetailMobile';
 import { WorktreeDetailDesktop } from '@/components/worktree/WorktreeDetailDesktop';
 import { UPLOADABLE_EXTENSIONS } from '@/config/uploadable-extensions';
 import { Modal } from '@/components/ui/Modal';
+import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import { AutoYesToggle } from '@/components/worktree/AutoYesToggle';
 import { AgentModeControl } from '@/components/worktree/AgentModeControl';
 import { BranchMismatchAlert } from '@/components/worktree/BranchMismatchAlert';
@@ -327,9 +328,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     handleInsertToSplit,
     handleKillCancel,
     handleKillConfirm,
-    openKillConfirm,
-    openActiveKillConfirm,
     killTarget,
+    openActiveEnd,
+    openEnd,
     isKillPending,
     handleLoadContent,
     handleLoadError,
@@ -713,8 +714,28 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     setDirectInputOpen(true);
   }, [worktreeId, handleMobileTabChange]);
 
+  // Issue #4227 (G-4): every "end" — the PC header's, each split's own (and its restart),
+  // the phone's actions sheet — goes through the mem mode read: the hand-off on a branch
+  // set to be attended with mode `on`, the plain confirmation (as before) otherwise.
+  const handleActiveEnd = useCallback((): void => {
+    void openActiveEnd();
+  }, [openActiveEnd]);
+  const handleSplitEnd = useCallback(
+    (target: SessionKillTarget): void => {
+      void openEnd(target);
+    },
+    [openEnd],
+  );
+
   // Render
   // ========================================================================
+
+  // Issue #4227 (G-4, G10) / Issue #4317 PR2: the hand-off before ending is not drawn here. Its one
+  // host is beside the shell (`HandoffDialogHost` in `AppShellGate`), outside this route's Loading and
+  // the PC / phone branches below, so a switch of worktree or width never takes it away. This page
+  // only registers and publishes what it shows (`useWorktreeDetailController`: its target, its close
+  // through the rule, its existing stop); the dialog starts nothing unless that registration is the
+  // current one and the session is not expired.
 
   // Handle loading state
   if (loading) {
@@ -846,8 +867,10 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           onWorktreeUpdate={setWorktree}
           fileInputRef={fileInputRef}
           onFileInputChange={handleFileInputChange}
-          onKillSession={openActiveKillConfirm}
-          onRequestSessionEnd={openKillConfirm}
+          // Issue #4227 (G-4): "end" reads the mem mode and opens the hand-off on a branch
+          // set to be attended with mode `on`, the plain confirmation otherwise.
+          onKillSession={handleActiveEnd}
+          onRequestSessionEnd={handleSplitEnd}
           killTarget={killTarget}
           isKillPending={isKillPending}
           onKillCancel={handleKillCancel}
@@ -1275,8 +1298,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
             )}
 
             {/* Issue #1080: terminal secondary actions (search + End) bottom sheet.
-                Issue #1171: End defers to openActiveKillConfirm, which snapshots the
-                active instance as the kill target and opens the confirm dialog.
+                Issue #1171: End snapshots the active instance as the kill target.
+                Issue #4227 (G-4): through openActiveEnd, which opens the hand-off on a
+                branch set to be attended with mode `on` and the confirm dialog otherwise.
                 Issue #2823: on the chat surface `TerminalDisplay` is not mounted,
                 so the row searches the conversation through `chat-search-open`,
                 which only the phone's transcript hears (`openSearchOnWindowEvent`).
@@ -1290,7 +1314,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   new CustomEvent(isMobileChatSurface ? 'chat-search-open' : 'terminal-search-open'),
                 )
               }
-              onEnd={openActiveKillConfirm}
+              onEnd={handleActiveEnd}
               endDisabled={!activeSessionRunning}
               onDirectInput={openDirectInput}
               directInputUnavailableReason={directInputUnavailableReason}

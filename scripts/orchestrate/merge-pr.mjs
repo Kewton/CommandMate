@@ -162,6 +162,8 @@ export const LAST_REQUIRED_CHECKS = [
   'Unit Tests (shard 4/4)',
   UNIT_CHECK,
   'Integration Tests',
+  'E2E Tests (shard 1/2)',
+  'E2E Tests (shard 2/2)',
   'E2E Tests',
   BUILD_CHECK,
   'Security Audit',

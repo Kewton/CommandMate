@@ -26,6 +26,8 @@ import Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
 
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),

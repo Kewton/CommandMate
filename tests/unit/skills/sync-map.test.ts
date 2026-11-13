@@ -60,8 +60,11 @@ interface MappedFile {
 interface SyncPackage {
   local: string;
   counterpart: string | null;
-  policy: 'mapped' | 'local-only';
+  policy: 'mapped' | 'local-only' | 'generated';
   reason?: string;
+  source?: string;
+  generator?: string;
+  guard?: string;
   rationale?: string;
   mirrors?: string[];
   counterpartOnly?: string[];
@@ -142,6 +145,7 @@ const sha256 = (absolute: string) =>
 
 const mapped = () => map.packages.filter((p) => p.policy === 'mapped');
 const localOnly = () => map.packages.filter((p) => p.policy === 'local-only');
+const generated = () => map.packages.filter((p) => p.policy === 'generated');
 
 /**
  * The message a drifting file produces. It has to answer the only two questions
@@ -182,6 +186,7 @@ describe('skills sync map: shape and coverage', () => {
     expect(map.counterpart.lastSyncedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(Object.keys(map.policies).sort()).toEqual([
       'byte-identical',
+      'generated',
       'local-only',
       'port-required',
     ]);
@@ -225,6 +230,26 @@ describe('skills sync map: shape and coverage', () => {
       expect(pkg.counterpart, `${pkg.local} is local-only but names a counterpart`).toBeNull();
       expect((pkg.reason ?? '').length, `${pkg.local}.reason`).toBeGreaterThan(10);
       expect(pkg.files, `${pkg.local} is local-only but carries pins`).toBeUndefined();
+    }
+  });
+
+  it('gives every generated package a source, a generator and a guard that exist, and no pins (Issue #4323)', () => {
+    expect(generated().map((p) => p.local).sort()).toEqual([
+      '.claude/skills/cmate-delegate-dev',
+      '.claude/skills/cmate-handoff-dev',
+    ]);
+    for (const pkg of generated()) {
+      expect(pkg.counterpart, `${pkg.local} is generated but names a counterpart`).toBeNull();
+      expect(pkg.source, `${pkg.local}.source`).toMatch(/^skills\/[a-z0-9-]+$/);
+      expect((pkg.reason ?? '').length, `${pkg.local}.reason`).toBeGreaterThan(10);
+      expect(pkg.files, `${pkg.local} is generated but carries pins`).toBeUndefined();
+      for (const rel of [pkg.generator, pkg.guard]) {
+        expect(rel, `${pkg.local} generator/guard`).toBeTruthy();
+        expect(fs.existsSync(path.join(REPO_ROOT, rel!)), `${rel} must exist`).toBe(true);
+      }
+      for (const mirror of pkg.mirrors ?? []) {
+        expect(fs.existsSync(path.join(REPO_ROOT, mirror)), `${mirror} must exist`).toBe(true);
+      }
     }
   });
 

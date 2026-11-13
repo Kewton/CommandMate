@@ -17,7 +17,8 @@
  * Strategy reference: Issue #735 work-plan "テストフィクスチャ戦略 (API モック優先)".
  */
 
-import type { Page, Route } from '@playwright/test';
+import type { Locator, Page, Route } from '@playwright/test';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Unique worktree IDs scoped to these specs (must not collide with other
  *  e2e specs that reuse generic IDs like `test-worktree`). */
@@ -214,6 +215,7 @@ export async function mockWorktreeApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /** sessionStorage guard key: ensures the localStorage clear runs only on the
@@ -299,4 +301,46 @@ export async function ensureFilesActivityVisible(page: Page): Promise<void> {
   if (!visible) {
     await page.click('[data-testid="header-tool-files"]');
   }
+}
+
+/**
+ * Issue #4219: `data-testid` of `document.activeElement` (`null` when it has
+ * none, e.g. <body>). For `expect.poll`: focus moves asynchronously (the Files
+ * pane's search box takes it ~100ms after mounting — `SearchBar`'s mount
+ * effect — and Esc hands it back to the header icon), so specs wait for the
+ * state instead of reading it once.
+ */
+export async function activeTestId(page: Page): Promise<string | null> {
+  return page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? null);
+}
+
+/**
+ * Issue #4219: whether the element's box is the same across two animation
+ * frames — i.e. a layout change (a pane swapping sides) has settled. For
+ * `expect.poll(...).toBe(true)` before measuring the element. `false` while
+ * the element is not attached.
+ */
+export async function isBoxSettled(locator: Locator): Promise<boolean> {
+  return locator
+    .evaluate(
+      (el) =>
+        new Promise<boolean>((resolve) => {
+          const a = el.getBoundingClientRect();
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const b = el.getBoundingClientRect();
+              resolve(
+                a.width > 0 &&
+                  a.left === b.left &&
+                  a.top === b.top &&
+                  a.width === b.width &&
+                  a.height === b.height,
+              );
+            }),
+          );
+        }),
+      undefined,
+      { timeout: 1_000 },
+    )
+    .catch(() => false);
 }

@@ -42,11 +42,22 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui';
 import { RepositoryMemSettings } from '@/components/mem/RepositoryMemSettings';
+import { memWriteLockOfOthers, useMemWriteLock } from '@/components/mem/mem-write-lock';
+import {
+  dropMemItemsUnit,
+  handoffStoreSnapshot,
+  handoffUnitsLock,
+  memItemsUnitsAll,
+  settleMemItemsWrite,
+  startMemItemsWrite,
+  subscribeHandoffStore,
+  type SentMemItemsWrite,
+} from '@/lib/handoff/close-rule';
 import {
   memItemsApi,
   type MemItemsResult,
@@ -68,6 +79,9 @@ const ADDABLE_KINDS: ReadonlyArray<Exclude<MemKind, 'now'>> = ['waiting', 'decis
 const SECTION_KINDS: ReadonlyArray<Exclude<MemKind, 'now'>> = ['waiting', 'decision', 'next', 'external', 'note'];
 
 /** The refusals the screen names; anything else is shown with its code. */
+/** This panel's name in the screens' shared write lock (`mem-write-lock.ts`). */
+const MEM_ITEMS_LOCK_OWNER = 'mem-items';
+
 const KNOWN_CODES = new Set([
   'disabled',
   'version_conflict',
@@ -226,12 +240,28 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
   // The comparisons, one per item (rule (4)(d)): another item's operation does not drop them.
   const [conflicts, setConflicts] = useState<Readonly<Record<string, Conflict>>>({});
   const [closeConflicts, setCloseConflicts] = useState<Readonly<Record<string, CloseConflict>>>({});
-  const [pendings, setPendings] = useState<Readonly<Record<string, Pending>>>({});
+  /**
+   * G-PR3 (design §4.1.1・§2.4.1 (4e), one rule for the whole screen): the units — the write being
+   * sent and the writes whose result is unknown — are the hand-off's store's (keyed by the worktree
+   * each was sent to), not this component's: they outlive a remount or a page left and come back
+   * to, as the dialog's do, and both screens read one lock from them.
+   */
+  const store = useSyncExternalStore(subscribeHandoffStore, handoffStoreSnapshot, handoffStoreSnapshot);
+  const storeUnits = useMemo(() => memItemsUnitsAll(store), [store]);
+  const unitBySlot = useMemo<Readonly<Record<string, SentMemItemsWrite>>>(
+    () => Object.fromEntries(storeUnits.unknown.map((unit) => [unit.slot, unit])),
+    [storeUnits]
+  );
+  const pendings = useMemo<Readonly<Record<string, Pending>>>(
+    () => Object.fromEntries(storeUnits.unknown.map((unit) => [unit.slot, unit.request as Pending])),
+    [storeUnits]
+  );
   const [adding, setAdding] = useState({ kind: 'note' as Exclude<MemKind, 'now'>, text: '', closeWhen: '', evidence: '', promoteTo: '' });
   const [busy, setBusy] = useState(false);
   /** The request being sent now (rule (4)(e)): its fields are read-only until it is answered. */
-  const [inflight, setInflight] = useState<Pending | null>(null);
-  const sendingRef = useRef(false);
+  const inflight = (storeUnits.sending?.request as Pending | undefined) ?? null;
+  /** The sending this panel started and has not settled (its answer names it). */
+  const sendingRef = useRef<SentMemItemsWrite | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const requestRef = useRef(0);
   const versionsRef = useRef<Map<string, number>>(new Map());
@@ -314,7 +344,14 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
    * why (shown to the person); `otherPending(slot)` is true when a unit other than `slot` waits, so
    * only that unit's own resend is left.
    */
-  const lock: 'sending' | 'unknown' | null = inflight !== null ? 'sending' : Object.keys(pendings).length > 0 ? 'unknown' : null;
+  const ownLock: 'sending' | 'unknown' | null = inflight !== null ? 'sending' : Object.keys(pendings).length > 0 ? 'unknown' : null;
+  /**
+   * Issue #4227 G-PR2 (PM P3-3): the hand-off's approval writes items too, so its unit (being
+   * sent, or unknown) locks this panel as this panel's own does, and the other way round.
+   */
+  // G-PR3: the hand-off's units are the store's too — they hold this panel even while no dialog is drawn.
+  const otherLock = useMemWriteLock(MEM_ITEMS_LOCK_OWNER, ownLock) ?? handoffUnitsLock(store);
+  const lock = ownLock ?? otherLock;
   const otherPending = (slot: string) => Object.keys(pendings).some((key) => key !== slot);
   /** The add's unit (unknown or being sent): the add's fields show it and are read-only. */
   const addUnit = pendingAdd?.op === 'add' ? pendingAdd : inflight?.op === 'add' ? inflight : null;
@@ -330,9 +367,14 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
   const changeAdding = (next: Partial<typeof adding>) => {
     if (!addUnit) setAdding({ ...adding, ...next });
   };
-  const dropPending = useCallback((slot: string) => {
-    setPendings((current) => without(current, slot));
-  }, []);
+  /** The person's "drop it without sending it again" (rule (4)(b)): that slot's unit only. */
+  const dropPending = useCallback(
+    (slot: string) => {
+      const unit = unitBySlot[slot];
+      if (unit) dropMemItemsUnit(unit);
+    },
+    [unitBySlot]
+  );
   /** Ends this item's open edit or close only; another item's is left as it is. */
   const endEdit = useCallback((itemId: string) => setEdit((current) => (current?.itemId === itemId ? null : current)), []);
   const endClosing = useCallback((itemId: string) => setClosing((current) => (current?.itemId === itemId ? null : current)), []);
@@ -373,16 +415,20 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
    */
   const settle = useCallback(
     (result: MemItemsResult<unknown>, request: Pending): boolean => {
-      const slot = slotOf(request);
-      if (isUnknown(result)) {
-        setPendings((current) => ({ ...current, [slot]: request }));
+      const unknown = isUnknown(result);
+      const sending = sendingRef.current;
+      if (sending) {
+        // G-PR3: the store keeps the unit (unknown) or clears its slot (answered).
+        settleMemItemsWrite(sending, unknown ? 'unknown' : 'answered');
+        sendingRef.current = null;
+      }
+      if (unknown) {
         setNotice({ tone: 'alert', text: t(request.op === 'add' ? 'mem.items.unknown' : 'mem.items.unknownVersioned') });
         return true;
       }
-      dropPending(slot);
       return false;
     },
-    [dropPending, t]
+    [t]
   );
 
   /**
@@ -393,19 +439,32 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
     async <R,>(request: Pending, run: () => Promise<R>): Promise<R | null> => {
       if (sendingRef.current) return null;
       if (Object.keys(pendings).some((key) => key !== slotOf(request))) return null;
-      sendingRef.current = true;
-      setInflight(request);
+      // Another screen's write of items is sent or unknown (rule (4)(e) across screens, PM P3-3).
+      if (memWriteLockOfOthers(MEM_ITEMS_LOCK_OWNER) !== null) return null;
+      // G-PR3: the store refuses too (another unit, a decide of the hand-off being sent or unknown).
+      const sending = startMemItemsWrite({ worktreeId: request.worktreeId, slot: slotOf(request), request });
+      if (!sending) return null;
+      sendingRef.current = sending;
       setBusy(true);
       setNotice(null);
       try {
         return await run();
+      } catch {
+        // pr3c (review A P3-3): a throw before the answer was settled says nothing of whether the
+        // write went in — unknown, as the dialog's decide (its finally): the unit is kept for the
+        // person's resend or drop, and an earlier unknown of its slot is not dropped as answered.
+        if (sendingRef.current === sending) {
+          settleMemItemsWrite(sending, 'unknown');
+          setNotice({ tone: 'alert', text: t(request.op === 'add' ? 'mem.items.unknown' : 'mem.items.unknownVersioned') });
+        }
+        return null;
       } finally {
-        sendingRef.current = false;
-        setInflight(null);
+        if (sendingRef.current === sending) settleMemItemsWrite(sending, 'unknown');
+        sendingRef.current = null;
         setBusy(false);
       }
     },
-    [pendings]
+    [pendings, t]
   );
 
   const add = useCallback(async () => {
@@ -953,7 +1012,7 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
       )}
       {lock && (
         <p role="status" className="text-xs text-warning-foreground" data-testid="mem-items-write-locked">
-          {lock === 'sending' ? t('mem.items.lockedSending') : t('mem.items.lockedUnknown')}
+          {ownLock === null ? t('mem.items.lockedElsewhere') : lock === 'sending' ? t('mem.items.lockedSending') : t('mem.items.lockedUnknown')}
         </p>
       )}
 
@@ -1165,7 +1224,8 @@ export function MemItemsPanel({ repositoryId, branch, worktreeId: initialWorktre
             <li key={entry.id} className="flex flex-wrap items-center gap-2 text-xs text-foreground" data-testid={`mem-notice-${entry.id}`}>
               <span>{t('mem.items.notices.line', { item: entry.itemId, reason: entry.endReason, outcome: entry.outcome })}</span>
               {entry.uncertain && <span className="text-warning-foreground">{t('mem.items.notices.uncertain')}</span>}
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void acknowledge(entry)}>
+              {/* Outside the lock (PM P3-3): taking a notice writes no item. */}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void acknowledge(entry)} data-testid={`mem-notice-take-${entry.id}`}>
                 {t('mem.items.notices.take')}
               </Button>
             </li>

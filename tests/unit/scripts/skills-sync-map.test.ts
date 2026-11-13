@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { counterpartPathOf, updateMap } from '../../../scripts/skills-sync-map.mjs';
+import { counterpartPathOf, mappedPackages, updateMap } from '../../../scripts/skills-sync-map.mjs';
 
 describe('counterpartPathOf', () => {
   const pkg = { local: '.claude/skills/cmate-verify', counterpart: 'skills/cmate-verify' };
@@ -23,6 +23,24 @@ describe('counterpartPathOf', () => {
   it('falls back to `${pkg.counterpart}/${file.path}` when counterpartPath is absent', () => {
     const file = { path: 'scripts/monitor.sh', policy: 'port-required', sha256: 'x' };
     expect(counterpartPathOf(pkg, file)).toBe('skills/cmate-verify/scripts/monitor.sh');
+  });
+});
+
+describe('mappedPackages (Issue #4323)', () => {
+  const map = {
+    packages: [
+      { local: 'a', policy: 'mapped', files: [] },
+      { local: 'b', policy: 'local-only' },
+      { local: 'c', policy: 'generated', counterpart: null },
+    ],
+  };
+
+  it('returns only mapped packages — generated and local-only carry no pins', () => {
+    expect(mappedPackages(map).map((p: { local: string }) => p.local)).toEqual(['a']);
+  });
+
+  it('keeps iterating pkg.files safe: every returned package has files', () => {
+    for (const pkg of mappedPackages(map)) expect(Array.isArray(pkg.files)).toBe(true);
   });
 });
 

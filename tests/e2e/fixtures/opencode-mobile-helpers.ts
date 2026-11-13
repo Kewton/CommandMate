@@ -14,6 +14,7 @@
  */
 
 import type { Page, Route } from '@playwright/test';
+import { mockStartPreview } from './start-preview-helpers';
 
 /** Worktree id scoped to the #2106 specs (must not collide with other specs). */
 export const E2E_OPENCODE_WORKTREE = 'e2e-opencode-2106';
@@ -124,6 +125,7 @@ export async function mockOpencodeWorktreeApi(
       return fulfillJson(route, {});
     },
   );
+  await mockStartPreview(page);
 }
 
 /**

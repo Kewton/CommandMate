@@ -29,6 +29,7 @@ import {
 } from '../../../../scripts/orchestrate/merge-pr.mjs';
 import { acquireMachineLockSync, lockPathOf } from '../../../../scripts/orchestrate/machine-lock-sync.mjs';
 import { HEAD_A, type Check, fakeGit, openPr } from './pr-fake';
+import { mutatedSync } from '../../verification/lock-4288-harness';
 
 const REPO = path.resolve(__dirname, '../../../..');
 const SCRIPT = path.join(REPO, 'scripts/orchestrate/merge-pr.mjs');
@@ -572,5 +573,32 @@ describe('5-2b review P2-2: a verify.yaml mutex cannot reach the merge lock', ()
     expect(held.acquired).toBe(true);
     expect((await acquireMachineLock(LOCK, { root: machineRoot, timeoutMs: 30, pollIntervalMs: 5 })).acquired).toBe(false);
     if (held.acquired) held.handle.release();
+  });
+});
+
+describe('#4288 PR1a-d: the own-group exception of the holder\'s release keeps the queue from stopping', () => {
+  /**
+   * merge-pr's inner process leads its own group (pgid: process.pid) and is a member of it by
+   * definition, so the group never reads empty while it runs. Without the exception (design D12, "the
+   * limit of the exception") its release would be deferred and the lock would stay: a second queue in
+   * the same process, or the next merge, waits for the lock its own run still holds.
+   * The group reads alive here as it does for the real inner process (a detached group leader).
+   */
+  const takeWith = (sync: { acquireMachineLockSync: typeof acquireMachineLockSync }) => (name: string, options: Parameters<typeof acquireMachineLockSync>[1]) =>
+    sync.acquireMachineLockSync(name, { ...options, hooks: { ...options.hooks, groupAlive: () => true } });
+
+  it('positive control: a queue run by a group leader releases its lock at the end, so the next queue starts', () => {
+    const w = world([{ issue: 4245, pr: 4263 }]);
+    const r = runQueue(w, '4245', [], { pgid: process.pid, acquireMergeLock: takeWith({ acquireMachineLockSync }) });
+    expect(r.code, r.err).toBe(0);
+    expect(fs.existsSync(lockPathOf(lockRoot, LOCK))).toBe(false);
+  });
+
+  it('mutation: without the exception the lock stays after the queue (a next run would wait for it)', async () => {
+    const without = await mutatedSync(tmp, (source) => source.replace('const ownGroup = mine && current.owner.pid === process.pid && current.owner.pgid === process.pid;', () => 'const ownGroup = false;'));
+    const w = world([{ issue: 4245, pr: 4263 }]);
+    const r = runQueue(w, '4245', [], { pgid: process.pid, acquireMergeLock: takeWith(without as never) });
+    expect(r.code, r.err).toBe(0);
+    expect(fs.existsSync(lockPathOf(lockRoot, LOCK)), 'the lock stays: the queue would stop the next run').toBe(true);
   });
 });

@@ -13,16 +13,29 @@
 1. 最新の develop に同期して確認を実行する（12 分ほどかかることがある）
    ```bash
    REPORT="$HOME/.commandmate/agent-health/reports/$(TZ=Asia/Tokyo date +%F).json"
+   RUN_STARTED="$(node -e 'console.log(new Date().toISOString())')"
    bash scripts/agent-health/daily.sh --out "$REPORT"; echo "EXIT=$?"
    ```
    - 出力の `AGENT_HEALTH_SYNC …` の行を、最後の報告に含める
    - 出力の終わりにある要約（1 行目が `pass N・fail N・skip N（…）` の行から、表と「未実施の理由:」まで）を、最後の報告に含める。
      skip は「確かめていない」という意味で、pass ではない。「全項目 pass」「すべて合格」とは書かない
    - `EXIT=2` のとき: スクリプト自体の異常（同期の失敗を含む）。`$REPORT` の `scriptErrors` を証拠にして、後の手順の「スクリプトの異常」として扱う。確認のやり直しはしない
+   - `scriptErrors` に `環境の誤り: CODEX_HOME が相対パス` があるとき: 確認は始まっていない（ツールを起動していない）。スクリプトの異常として扱い、再実行しない（手順 2 のやり直しもしない）。
+     `daily.sh` 自身の同期・ロックは `run.ts` より前に動くので、それが動かなかったとは書かない（この拒否の対象外）
+   - **今回保存できたレポートか確かめてから読む。** 出力に `could not write the report to` の行があれば、保存に失敗している。
+     そのときは `$REPORT` を読まない（以前の同日ファイルが残っていても読まない）。証拠は、どこが書けなかったかで分ける:
+     - `[agent-health] could not write the report to …` の行（`run.ts` のレポートの保存失敗）: 直後に今回の JSON が印字される。
+       今回の出力に JSON が印字されている場合だけ、その JSON と保存失敗のログの行を証拠にする
+     - `daily.sh: could not write the report to …` の行（同期の失敗などで `daily.sh` が書く最小のレポートの保存失敗）: JSON は印字されない。
+       保存失敗のログの行と `AGENT_HEALTH_SYNC` の行の理由（`reason=…`）を証拠にし、件数は `-` とする
+     - どちらでも JSON が印字されていなければ、件数は推測せず `-` とする
+     行が無くても、手順 2 で `completedAt` が `$RUN_STARTED` より前なら以前の同日ファイルなので読まない（同じ扱い）
 2. `$REPORT` を読む。まず要約と skip の内訳を出す（手順 1 の出力から要約が読み取れないときも、これで読める）
    ```bash
-   node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); for (const l of r.summary ?? ["(summary が無い)"]) console.log(l); const c=r.coverage?.counts; console.log("COUNTS=" + (c ? `pass=${c.pass} fail=${c.fail} skip=${c.skip}` : "-")); console.log("SKIP_KINDS=" + (Object.entries(c?.skipByKind ?? {}).map(([k,n])=>k+":"+n).join(",") || "-"))' "$REPORT"
+   node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log("THIS_RUN=" + (typeof r.completedAt === "string" && r.completedAt >= process.argv[2] ? "yes" : "no")); for (const l of r.summary ?? ["(summary が無い)"]) console.log(l); const c=r.coverage?.counts; console.log("COUNTS=" + (c ? `pass=${c.pass} fail=${c.fail} skip=${c.skip}` : "-")); console.log("SKIP_KINDS=" + (Object.entries(c?.skipByKind ?? {}).map(([k,n])=>k+":"+n).join(",") || "-")); for (const e of r.scriptErrors ?? []) console.log("SCRIPT_ERROR=" + e)' "$REPORT" "$RUN_STARTED"
    ```
+   - `THIS_RUN=no` のときは、以前の同日ファイルなので以降を読まない（手順 1 の保存失敗と同じ扱い）
+   - `summary`・`coverage` が無いレポート（`COUNTS=-`。同期の失敗・相対の `CODEX_HOME` の拒否・引数の誤りなど）は、確認を未実施として扱い、pass・fail・skip の件数を推測しない。fail のやり直しもしない
    次に、`tools[].checks[]` のうち `status` が `fail` のものを並べる
    - 各 fail について、次で 1 回だけやり直す。やり直しで `pass` になったものは「一時的な失敗」とし、Issue にしない
      ```bash
@@ -51,5 +64,7 @@
    ```
    AGENT_HEALTH date=<YYYY-MM-DD> pass=<数> fail=<数> flaky=<数> skip=<数> skip_kinds=<種類>:<数>,… issues_created=<番号をカンマ区切り> issues_commented=<番号をカンマ区切り> sync=<AGENT_HEALTH_SYNC の status>
    ```
+   - 同じ `AGENT_HEALTH_SYNC` の行の重複は 1 本と数える（出力の直後の中断で 2 本並びうる。`status` は 1 通りに決まる）
    - `pass`・`fail`・`skip` は手順 2 の `COUNTS=`（レポートの `coverage.counts`。9 ツール × 7 項目）の数。`skip_kinds` は `SKIP_KINDS=` の値をそのまま書く
-     （例: `no-definition:5,not-shown:2,signed-out:6,unsupported:12`）。`coverage` が無いレポート（`EXIT=2` の同期失敗など）は `skip_kinds=-`
+     （例: `no-definition:5,not-shown:2,signed-out:6,unsupported:12`）。`coverage` が無いレポート（`EXIT=2` の同期失敗・相対の `CODEX_HOME` の拒否など）と、
+     今回のレポートを保存できなかったとき（`THIS_RUN=no` を含む）は、件数を推測せず `pass=- fail=- skip=- skip_kinds=-` と書く（`flaky` も `-`）

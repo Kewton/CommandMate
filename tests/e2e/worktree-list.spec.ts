@@ -26,9 +26,18 @@
  */
 
 import { test, expect } from '@playwright/test';
+import {
+  installFocusObserver,
+  readFocusRecord,
+  releaseRadixKeyboardListener,
+  waitForRadixKeyboardListener,
+} from './helpers/focus-observer';
 
 test.describe('Home Page', () => {
   test.beforeEach(async ({ page }) => {
+    // [Issue #4335] Records keyboard / focus order and the Radix menus' keyboard listener (an
+    // init script, so before the page's own code). Observes only; nothing is held.
+    await installFocusObserver(page);
     // Navigate to home page
     await page.goto('/');
   });
@@ -96,11 +105,22 @@ test.describe('Home Page', () => {
 
   test('[Issue #3575] changes View and Sort from the keyboard and returns focus on Escape', async ({ page }) => {
     const optionsTrigger = page.getByTestId('sidebar-list-options');
+    // [Issue #4335] The client side of the menu is ready: its Radix root's keyboard listener is on
+    // document (a useEffect after hydration). A visible page is not that — an Enter before it opens
+    // the menu with the first item inactive (CI 43193373237 / 43197516072, the initial focus below).
+    await waitForRadixKeyboardListener(page);
     await optionsTrigger.focus();
     await page.keyboard.press('Enter');
     const menu = page.getByTestId('sidebar-list-options-menu');
     await expect(menu).toBeVisible();
-    await expect(menu.getByRole('menuitemradio', { name: 'Repository', exact: true })).toBeFocused();
+    await expect(
+      menu.getByRole('menuitemradio', { name: 'Repository', exact: true }),
+      'initial focus; the recorded order is in the FOCUS-4335 log line',
+    ).toBeFocused().catch(async (error) => {
+      // eslint-disable-next-line no-console -- the recorded order of this failure
+      console.log('FOCUS-4335', JSON.stringify(await readFocusRecord(page)));
+      throw error;
+    });
 
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitemradio', { name: 'Branch', exact: true })).toBeFocused();
@@ -194,5 +214,69 @@ test.describe('Home Page', () => {
     const footer = page.locator('footer');
     await expect(footer).toBeVisible();
     await expect(footer).toContainText(/CommandMate/i);
+  });
+});
+
+test.describe('[Issue #4335] the first Enter and the Radix menu keyboard listener (control)', () => {
+  test('an Enter before the menu root registers its keyboard listener opens the menu with the first item inactive; after it, focused', async ({ page }) => {
+    // The CI failure's condition, put there on purpose: the menu root's keyboard listener is held
+    // back (the effect has not run yet), the trigger is hydrated, the first Enter goes in.
+    await installFocusObserver(page, { deferRadixKeyboardListener: true });
+    await page.goto('/');
+    const optionsTrigger = page.getByTestId('sidebar-list-options');
+    const menu = page.getByTestId('sidebar-list-options-menu');
+    const repository = menu.getByRole('menuitemradio', { name: 'Repository', exact: true });
+    // Hydrated: the deferred registration exists only once the menu root's effect has run.
+    await expect.poll(async () => (await readFocusRecord(page))?.listeners.some((l) => l.op === 'deferred') ?? false).toBe(true);
+
+    await optionsTrigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(menu).toBeVisible();
+    const before = await readFocusRecord(page);
+    // eslint-disable-next-line no-console -- the recorded order of the control
+    console.log('FOCUS-4335 control', JSON.stringify(before));
+    expect(before!.events.filter((e) => e.type === 'keydown').map((e) => e.radixArmed)).toEqual([0]);
+    // line 103's failure: the menu is open, Repository is not the active element.
+    await expect(repository).not.toBeFocused();
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('role'))).toBe('menu');
+
+    // Negative: the same menu once the listener is there — the same one Enter focuses Repository.
+    await releaseRadixKeyboardListener(page);
+    await waitForRadixKeyboardListener(page);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(optionsTrigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(menu).toBeVisible();
+    await expect(repository).toBeFocused();
+  });
+
+  test('the observer releases only the held registrations still current at release (add A → remove A → add B)', async ({ page }) => {
+    // The StrictMode shape (setup → cleanup → setup): a held registration that was removed before
+    // the release must not be attached by it; the count is the registrations attached.
+    await installFocusObserver(page, { deferRadixKeyboardListener: true });
+    await page.goto('/');
+    await expect.poll(async () => (await readFocusRecord(page))?.listeners.some((l) => l.op === 'deferred') ?? false).toBe(true);
+    const result = await page.evaluate(() => {
+      const calls = { a: 0, b: 0 };
+      // Sources name isUsingKeyboardRef, as the Radix menu root's listener does.
+      const a = () => {
+        calls.a += 1; // isUsingKeyboardRef
+      };
+      const b = () => {
+        calls.b += 1; // isUsingKeyboardRef
+      };
+      document.addEventListener('keydown', a, { capture: true });
+      document.removeEventListener('keydown', a, { capture: true });
+      document.addEventListener('keydown', b, { capture: true });
+      const heldPageRoots = document.querySelectorAll('[aria-haspopup="menu"][data-state]').length;
+      window.__focus4335!.release();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
+      const armed = window.__focus4335!.radixArmed;
+      document.removeEventListener('keydown', b, { capture: true });
+      return { calls, armed, heldPageRoots };
+    });
+    expect(result.calls).toEqual({ a: 0, b: 1 });
+    expect(result.armed).toBe(result.heldPageRoots + 1);
   });
 });
