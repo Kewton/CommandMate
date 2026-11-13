@@ -1,0 +1,74 @@
+{
+  "version": "0.51.1",
+  "date": "2026-11-14",
+  "highlight": {
+    "ja": "mem の決定の画面をリポジトリとブランチから選べるようにし、決定を読む CLI を足しました。ask の返答を依頼ごとに正しく結ぶようにし、終わった CLI へ回答のキーを送らないようにしました。",
+    "en": "You can now pick the mem decisions screen by repository and branch, and read decisions from the CLI. Replies to ask are now tied to each request, and answer keys are no longer sent to a CLI that has exited."
+  },
+  "added": [
+    {
+      "ja": "mem の決定の画面で、リポジトリとブランチを一覧から選べるようになりました。",
+      "en": "On the mem decisions screen, you can now choose the repository and branch from a list."
+    },
+    {
+      "ja": "PC の mem の決定の画面に承認待ちの件数が出て、一覧を畳めるようになりました。",
+      "en": "The mem decisions screen on PC now shows how many items await approval, and the list can be collapsed."
+    },
+    {
+      "ja": "CLI の mem decisions コマンドで、決定と承認待ちを読めるようになりました（承認は画面だけです）。",
+      "en": "The mem decisions command in the CLI now lets you read decisions and pending approvals (approval stays on the screen only)."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "インスタンスを kill したとき、Auto-Yes も解除されたことと、再び有効にする手順が表示されるようになりました。",
+      "en": "When you kill an instance, you are now told that Auto-Yes was turned off as well, and how to turn it back on."
+    },
+    {
+      "ja": "日本語の Sessions の画面で、相対時刻が「8分前」のように日本語で表示されるようになりました。",
+      "en": "On the Sessions screen in Japanese, relative times are now shown in Japanese."
+    },
+    {
+      "ja": "Claude の起動待ちが時間切れになったとき、画面を読めなかったなど実際の理由が表示されるようになりました。",
+      "en": "When waiting for Claude to start times out, the actual reason, such as an unreadable screen, is now shown."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "ask の返答が、別の依頼への返事を読んでしまうことがある問題を直しました（Claude と Codex）。",
+      "en": "Fixed ask sometimes reading a reply that belonged to a different request (Claude and Codex)."
+    },
+    {
+      "ja": "CLI が終わってシェルに戻ったペインへ、回答や Auto-Yes のキーが送られることがある問題を直しました。",
+      "en": "Fixed answers and Auto-Yes keys being sent to a pane where the CLI had exited back to the shell."
+    },
+    {
+      "ja": "Command Code で質問への回答を断った同じターンの許可に、Auto-Yes が答えてしまう問題を直しました。",
+      "en": "Fixed Auto-Yes answering a permission prompt in the same turn where you declined to answer a Command Code question."
+    },
+    {
+      "ja": "peers コマンドで、起動していないセッションの行が ready と表示されることがある問題を直しました。",
+      "en": "Fixed the peers command sometimes showing a session that was not started as ready."
+    },
+    {
+      "ja": "作業木を切り替えたとき、引き継ぎのダイアログが一瞬消えることがある問題を直しました。",
+      "en": "Fixed the handoff dialog briefly disappearing when switching between worktrees."
+    },
+    {
+      "ja": "opencode で、フォルダ名に Thinking を含むと Auto-Yes の確認が遅くなる問題を直しました。",
+      "en": "Fixed Auto-Yes checking more slowly in opencode when the folder name contained Thinking."
+    },
+    {
+      "ja": "設定の場所が相対パスのとき、ロール付きの送信が途中まで進んでから断られていた問題を、送る前に断るように直しました。",
+      "en": "Sending with a role when the config location is a relative path is now refused before sending, not partway through."
+    },
+    {
+      "ja": "Codex の起動時の確認に、問題のある CODEX_HOME を渡さないようにしました。",
+      "en": "A problematic CODEX_HOME is no longer passed to the Codex startup check."
+    },
+    {
+      "ja": "ブラウザがファビコンを読み込めなかった問題を直しました。",
+      "en": "Fixed the browser failing to load the favicon."
+    }
+  ]
+}
