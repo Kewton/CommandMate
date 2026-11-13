@@ -431,3 +431,64 @@ describe('[#4317 PR2 再指示 1] the host reports the path’s detail route (th
     expect(handoffRegistrySnapshot().route).toBeNull();
   });
 });
+
+/**
+ * Issue #4346 (6): the person's choices not yet confirmed belong to the opening, not to the
+ * dialog's mount. A switch to another worktree (no unit there: the host draws 0, the dialog is
+ * unmounted) and back to the same opening kept the dialog, the request and the proposals but
+ * dropped the "approve" (`aria-pressed`). Before the fix the choices were the component's state,
+ * so the round trip through 0 dialogs lost them (red); the opening swapped still starts afresh.
+ */
+describe('[#4346] the choices are the opening’s, kept over a round trip through 0 dialogs', () => {
+  it('A → B (another worktree, 0 dialogs) → A: the approve stays pressed, held by the opening in the store', async () => {
+    openingOn(A);
+    const view = render(<Root page={<StandInPage key={A} id={A} />} />);
+    await settle();
+    fireEvent.click(screen.getByTestId('handoff-approve-p1'));
+    expect(screen.getByTestId('handoff-approve-p1')).toHaveAttribute('aria-pressed', 'true');
+
+    nav.path = `/worktrees/${B}`;
+    view.rerender(<Root page={<StandInPage key={B} id={B} target={null} />} />);
+    await settle();
+    expect(dialogs()).toHaveLength(0);
+
+    nav.path = `/worktrees/${A}`;
+    view.rerender(<Root page={<StandInPage key={`${A}-back`} id={A} />} />);
+    await settle();
+    expect(dialogs()).toHaveLength(1);
+    expect(screen.getByTestId('handoff-approve-p1')).toHaveAttribute('aria-pressed', 'true');
+    expect(handoffStoreSnapshot().opening?.choices).toEqual({ p1: { choice: 'approve', fingerprint: 'fp-p1' } });
+  });
+
+  it('away from the detail route (/sessions) and back: kept as well', async () => {
+    openingOn(A);
+    const view = render(<Root page={<StandInPage key={A} id={A} />} />);
+    await settle();
+    fireEvent.click(screen.getByTestId('handoff-discard-p1'));
+    nav.path = '/sessions';
+    view.rerender(<Root page={<div data-testid="sessions" />} />);
+    await settle();
+    expect(dialogs()).toHaveLength(0);
+    nav.path = `/worktrees/${A}`;
+    view.rerender(<Root page={<StandInPage key={`${A}-back`} id={A} />} />);
+    await settle();
+    expect(screen.getByTestId('handoff-discard-p1')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('handoff-approve-p1')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('(negative control) a choice pressed again is taken back, and a new opening starts with none', async () => {
+    const first = openingOn(A);
+    render(<Root page={<StandInPage key={A} id={A} />} />);
+    await settle();
+    fireEvent.click(screen.getByTestId('handoff-approve-p1'));
+    fireEvent.click(screen.getByTestId('handoff-approve-p1'));
+    expect(screen.getByTestId('handoff-approve-p1')).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByTestId('handoff-approve-p1'));
+    act(() => {
+      closeHandoffOpening(first.token, 'person');
+      openingOn(A);
+    });
+    await settle();
+    expect(screen.getByTestId('handoff-approve-p1')).toHaveAttribute('aria-pressed', 'false');
+  });
+});
