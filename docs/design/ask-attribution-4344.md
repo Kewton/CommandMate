@@ -181,6 +181,118 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 - 設計: 台帳の確定（`recordNativeAskInput`・`bindCompletedTurn`）はこの reader の中で行う。加えて、`GET /api/asks/:askId` が `pending` の行を読んだときは、その宛先の reader を 1 回だけ同期で呼んでから答える（冪等。M6）。これで poller の持ち主（`poller-owner`）が別プロセスでも、15 秒の grace の中で確定する経路がある。
 - 未確認: poller が止まっている状態（tick の間隔・持ち主の不在）で同期の 1 回が間に合うか。PR1 の integration で「poller を止めた状態で API の読み取りだけで `matched` になる」を確かめる。
 
+### 3.6 台帳の状態遷移表（PM の処分・案 1、2026-11-13）
+
+材料: リーダー経由の具体化（`state-table-4344-reply.md`、リポジトリ外）を設計の言葉で写した。推測では足していない。file:line は HEAD `32b91fa4d` 時点。略号: C＝`src/lib/ask/ask-correlation.ts`、D＝`src/lib/db/ask-correlation-db.ts`、A＝`src/lib/hooks/sources/claude/ask-attribution.ts`、T＝`src/lib/hooks/sources/claude/transcript.ts`、R＝`src/app/api/worktrees/[id]/send/route.ts`、S＝`src/lib/ask/ask-send.ts`。「赤」はコードを読んだうえでの見込み（未実行）。
+
+#### 3.6.1 状態
+
+台帳の行の状態は `send_state`（`reserved`／`sent`／`not_sent`／`send_unknown`）と `attribution_state`（`pending`／`matched`／`ambiguous`／`unmatched`）の組、加えて native の入力を記録済みか（`native_input_id IS NOT NULL`）で決まる。
+
+| 記号 | 台帳の値 | 意味 | 終端か |
+|---|---|---|---|
+| ∅ | 行なし | 予約が無い（貼られた封筒など） | — |
+| **R** | `reserved`/`pending`、入力なし | 予約した。送信の結果はまだ保存していない | いいえ |
+| **R+** | `reserved`/`pending`、入力あり | 送信の結果の保存より前に、reader が封筒を見た | いいえ |
+| **P** | `sent` または `send_unknown`/`pending`、入力なし | 送った（または送れたか不明）。封筒はまだ見ていない | いいえ |
+| **P+** | 同上、入力あり | 封筒を見たが、まだ確定していない | いいえ |
+| **N** | `not_sent`/`pending` | 何も打っていない。読むと `unmatched/not_sent` に見える（C:265） | 保存上はいいえ |
+| **M** | `matched` | 確定した | はい |
+| **Am** | `ambiguous`（`shared_turn`・`turn_open_at_send`） | 共有の turn | はい |
+| **U** | `unmatched`（`envelope_duplicated`・`absorbed_mid_turn`・`body_truncated`） | 確定しないことが確定した | はい（C:121-123 が pending 以外を終端と扱う） |
+
+**保存しない状態**（読み取りか計画の時に決まる）:
+- `unavailable`（`tool_unsupported`・`slash_command`）: S:46-52。行を作らない。
+- `unmatched/history_missing`: C:274。
+- `unmatched/not_sent`: C:265。
+- `grace_expired`・`turn_incomplete`・`send_unknown`・`envelope_lost`・`generation_changed`: CLI 側（PR3）。今の台帳には書かない。
+
+**設計にあって実装に無い状態**: `buffered`（設計 §3.4・§4）。予約の無い封筒は `unknown` と答えてログに残すだけ（C:149-153）。
+
+**状態でなく、結果として返るもの**: `rejected`・`duplicate`・`unknown`（C:112-119）。
+
+#### 3.6.2 観測
+
+| 記号 | 観測 |
+|---|---|
+| O1 | 送信の結果の保存（R:149-161 → D:140-156）。`sent`（turnOpenAtSend が true／false／null）・`not_sent`・`send_unknown` |
+| O2 | 封筒入りの native record の出現（本人の prompt record。T:803-818） |
+| O3a | 同じ封筒の再出現: 同じ input id・同じ session |
+| O3b | 同じ封筒の再出現: 別の input id |
+| O3c | 同じ封筒の再出現: 別の session |
+| O4 | この ask が、別の turn に吸収された（`queue-operation` remove・`queued_command` に封筒がある。T:916-929） |
+| O5 | turn の完了の証拠（今は `isClaudeTurnWritable`、T:786-793） |
+| O6 | session の違い（現在の session と record の session）、または宛先の違い |
+| O7 | History の更新（assistant 行の作成・成長・削除） |
+| O8 | 期限切れ（CLI の grace、保持の掃除） |
+
+#### 3.6.3 状態×観測 → 次の状態
+
+各セルの「終端化の前提条件」がそろうまで終端にしない。「試験」の ○ は既存、★ は新規（直す前に赤）。「守られているか」は HEAD `32b91fa4d` の実装について: ○ 守られている、✗ 守られていない、△ 未確認。
+
+| # | 今の状態 | 観測 | 次の状態 | 終端化の前提条件（そろうまで終端にしない） | 試験（○＝既存、★＝新規。直す前に赤） | 守られているか |
+|---|---|---|---|---|---|---|
+| 1 | R | O1 sent／send_unknown | P（R+ なら P+） | `send_state='reserved'` の行だけが受け取る（1 回だけ） | ○ migration-v72「records the send outcome once and never rewrites a terminal attribution (M6)」、○ send-ask「reserves before the send…」「…send_unknown (never resent)」 | ○ D:150-152 |
+| 2 | R | O1 not_sent | N | 同上 | ○ send-ask「a send refused before any key records not_sent…」 | ○ R:155-158 |
+| 3 | R | O2（宛先も session も一致） | R+ | **終端にしない**（送信時の観測、特に turnOpenAtSend の保存の前だから） | ○「a complete turn read before the outcome is saved stays pending; turnOpenAtSend=true saved later → ambiguous」 | ○ C:183-190 |
+| 4 | R+ | O3b（2 つ目の別 input） | **R+（重複の証拠を保存）** → O1 の後に U/envelope_duplicated | 証拠を持ち越す。O1 の後、どの完了判定より先に重複を判定する | ★「M6 a second envelope input seen while reserved is carried: after the outcome is saved it is unmatched/envelope_duplicated, never matched」 | ✗ **C:170**（証拠を保存せず `pending` を返す）。pr1b の 4 |
+| 5 | R／P | O4（自分が吸収された） | R なら証拠を保存して O1 の後に U/absorbed_mid_turn。P なら U/absorbed_mid_turn | 宛先**と session** が一致すること。送信の結果が保存済みであること。R の間は証拠を持ち越す | ○ M1「an absorbed ask: A is ambiguous/shared_turn and B unmatched/absorbed_mid_turn」、○「an absorbed ask whose send is not saved yet is not settled either」、★「M5 an absorbed envelope in a stale session never settles the pending row」、★「an absorbed ask seen while reserved is settled absorbed after the outcome is saved」 | ✗ **A:61・C:222-229**（session を照合しない。pr1b の 5）、✗ C:225（R の間の証拠を捨てる。読み直しで再び見えるかは△） |
+| 6 | P | O2、完了の証拠なし | P+ | — | ○ (3)「stays pending (turn_incomplete for the CLI) and never takes the previous turn」 | ○ C:183-191 |
+| 7 | P／P+ | O6 宛先の違い | 変化なし（rejected） | — | △ 宛先の不一致だけの試験は見つからない。★「M5 a sighting under another instance is rejected and leaves the row pending」 | ○ C:156-159 |
+| 8 | P／P+ | O6 session の違い（両方とも読めた） | 変化なし（rejected） | — | ○ (8)「M5 a record of the session before /clear is rejected」 | ○ C:161-164 |
+| 8b | P／P+ | O6 **session が読めない**（`currentSessionId` か `nativeSessionId` が null） | **変化なし（pending のまま）** | session が確認できるまで、入力の記録も終端化もしない（設計の不変条件 2「世代が不明なら確認済みと扱わない」） | ★「M5 a sighting whose current session cannot be read never settles (stays pending)」 | ✗ **C:161**（どちらかが null なら照合を丸ごと飛ばす）。今回の新しい指摘 |
+| 9 | P+ | O5 完了・`otherInputs>0` | Am/shared_turn | **完了の証拠が本物の閉じ**であること（下の I5）、session が確認済みであること | ○ M1「A is ambiguous/shared_turn…」 | ✗ **A:65・T:786-793**（History の救済条件を完了とみなす）。pr1b の 2 |
+| 10 | P+ | O5 完了・turnOpenAtSend=true | Am/turn_open_at_send | 同上 | ○ (11)「turnOpenAtSend=true → ambiguous/turn_open_at_send」 | ○ C:198-201（完了の証拠は 9 と同じ ✗） |
+| 10b | P+ | O5 完了・turnOpenAtSend=null（送信時に読めなかった） | **人の判断（H1）** | — | ★（H1 の決定に合わせる） | 今は「開いていない」と同じに扱う（C:198、R:520） |
+| 11 | P+ | O5 完了・O7 assistant 行あり・切れていない | M | 本物の閉じ・session 確認済み・**本文を固定する**（I2） | ○ (1)「a 305-line reply comes back in full…」、○ (2)「ask `hi` answered `hi` is matched with exactly `hi`」、★「a turn with no stop_reason observed is never matched (History's rescue is not completion)」 | ✗ 完了の判定は A:65（pr1b の 2） |
+| 12 | P+ | O5 完了・O7 assistant 行あり・切れている | U/body_truncated | 同上 | ★「a truncated row settles unmatched/body_truncated」（試験は見つからない） | ○ C:203-206 |
+| 13 | P+ | O5 完了・O7 行がまだ無い | P+ | — | △ 試験は見つからない | ○ C:202 |
+| 14 | P+ | O3a | 変化なし（冪等） | — | ○ (9)「M6 reading the same input twice changes nothing」 | ○ C:165-167・182 |
+| 15 | P+ | O3b（終端の前） | U/envelope_duplicated | 送信の結果が保存済みであること | ★「a second input of the same envelope after the send is saved → unmatched/envelope_duplicated」（直接の試験は見つからない） | ○ C:179 |
+| 16 | P+ | O3c（現在の session が新しい側） | U/envelope_duplicated（古い側は 8 で rejected） | session がどちらも読めていること（8b） | ★「resume into a new session before the turn settled → envelope_duplicated」 | △ 静的には C:165-179 で成り立つ |
+| 17 | P／P+ | O8 CLI の grace | **変化なし**（CLI が `unmatched/grace_expired` を出す。台帳には書かない） | 期限切れでは台帳を終端にしない（後から来た正しい証拠を捨てない） | ★（PR3）「grace expiry prints unmatched/grace_expired and leaves the row pending」 | ○ 書いていない |
+| 18 | M | O3a／O3b／O3c／O4 | 変化なし（ログ `ask-correlation-duplicate-sighting`） | — | ○ (9)「…another session after matched (resume / fork) leaves it as it was」。ただしこの試験は session の不一致で 8 を通って rejected になり、終端の分岐（C:171）までは届かない。★「same session, another input id after matched → duplicate, unchanged」 | ○ C:171-177・182、D:202 |
+| 19 | M | O7 同じ行が成長する（turn の再開・修復） | **M のまま、返す本文は確定時のまま** | 確定時の本文（またはその digest）を持ち、違えば返さない | ★「M6 a matched reply whose History row later grows is returned as settled (or flagged), never the grown body」 | ✗ **C:271-278**（毎回いまの本文を読む）。pr1b の 3 |
+| 20 | M | O7 行の削除 | 読むと `unmatched/history_missing`（台帳は M のまま） | — | ○ (9)「M6 a reply row deleted from History reads unmatched/history_missing; the ledger stays matched」 | ○ C:274-277 |
+| 21 | Am／U | すべての観測 | 変化なし | — | ○ migration-v72 の M6 | ○ D:202、C:182 |
+| 22 | N | O2（封筒が見えた。分類と矛盾） | **人の判断（H2）** | — | ★（H2 の決定に合わせる） | 今は `sendSettled` が真なので M にもなりうる（C:126-128・190） |
+| 23 | N | 読み取り（GET） | `unmatched/not_sent` に見える。refresh しない | — | ○ send-ask「…records not_sent, and the answer says so」 | ○ C:251・265 |
+| 24 | R | O8 サーバーが送信の途中で落ち、O1 が来ない | **人の判断（H3）** | — | ★ | 今は R のまま。保持（7 日・500 行）で消えるだけ |
+| 25 | 任意 | O8 保持の掃除 | 行が消える（GET は 404） | — | ○ migration-v72「prunes by age…」 | ○ D:124-134 |
+| 26 | ∅ | O2（予約の無い封筒の形の行） | 行は作らない。**History の本文から封筒を外さない** | 封筒を外すのは、同じ宛先の予約行がある本文だけ（I3） | ★「M2 negative: a send without ask whose body opens with an envelope-shaped line keeps it; the /send row is adopted as one row」 | ✗ **T:803-809**（形だけで外す）。pr1b の 1。台帳側は ○ C:149-153 |
+
+#### 3.6.4 不変条件（14）
+
+| # | 不変条件 | 覆う指摘 |
+|---|---|---|
+| I1 | 終端（matched・ambiguous・unmatched）は、どの観測でも上書きしない。 | M6 |
+| I2 | matched で返す本文は確定した時のものと同じで、History がその後に変わっても変わらない（変わったら返さない）。 | pr1b の 3 |
+| I3 | 封筒を外すのは、同じ宛先の予約行がある本文だけで、1 回だけ外す（本文の中の別の封筒は残す）。 | pr1b の 1、pr1 の 2、M2 |
+| I4 | 送信時の観測（送信の結果と turnOpenAtSend）が保存されるまで、どの行も終端にしない。 | pr1 の 1 |
+| I5 | 完了の証拠は turn の閉じ（stop の観測）だけで、History の書込みの救済条件（stop が一度も観測されない・superseded）は完了の証拠に使わない。 | pr1b の 2 |
+| I6 | session の照合は、すべての観測（本人の封筒・吸収・再出現）に当てる。どちらかの session が読めないときは、何も記録せず何も確定しない。 | pr1b の 5、M5、8b |
+| I7 | 宛先（worktree・tool・instance）の照合も、すべての観測に当てる。 | M5 |
+| I8 | 再出現と吸収の証拠は、保留（reserved）の間も持ち越し、送信の結果を保存した後に、完了の判定より先に判定する。 | pr1b の 4 |
+| I9 | 1 つの ask の native の入力は 1 つ。2 つ目は推定でつながず、終端の前なら `unmatched/envelope_duplicated`、終端の後ならログだけにする。 | M6 |
+| I10 | 吸収された入力（バックグラウンドの通知を除く）がある turn の封筒入力は matched にしない。吸収された側の ask は `unmatched/absorbed_mid_turn` にする。 | M1 |
+| I11 | 送信時に turn が開いていた（turnOpenAtSend=true）ask は matched にしない。 | R3 |
+| I12 | `history_missing` は読み取りのときに判定し、台帳に保存しない。期限切れ（CLI の grace）も台帳に書かない。 | R1 |
+| I13 | コマンド本文（`/`・`!`・`#`）には封筒を付けず、行も作らない（`unavailable/slash_command`）。 | M4 |
+| I14 | 封筒は brief の閉じフェンスの直後・利用者の本文の直前に置き、打った本文で `typedContent` を計算し直す。 | M3 |
+
+M7（consistency-review が止まる）は CLI（PR3）の話なので、この表の外。
+
+#### 3.6.5 表の外で、設計の改訂で決めるもの（人の判断は不要）
+
+- **`buffered` を設計から外す**。予約は必ず入力より前（R:237-246）なので、予約の無い封筒は貼られたものだけで、行を作る理由が無い。表の 26（台帳は作らず、本文も外さない）で足りる。§3.4・§4・§5 の `buffered` の記述はこの節が優先する。
+- **別プロセスの同時書込み**。bind は 1 プロセスの中では同期で割り込まれないが、poller の持ち主が別プロセスだと、2 つのプロセスがそれぞれ別の input で `native_input_id IS NULL` の同じ行を読み、片方の `recordAskNativeInput` が 0 行の更新でも戻り値を見ずに確定へ進みうる（C:184。静的な読み、未確認）。対策: 確定の UPDATE の条件に `native_input_id = ?` を足し、記録に失敗したら確定しない。試験は 2 つの DB 接続で順序を差して作る。
+- 表の 7・12・13・15・16 には対応する試験が無い（実装は静的には守っている）。
+
+#### 3.6.6 未確認
+
+- 表の 5 で、reserved の間に捨てた吸収の証拠が、次の読み直しでもう一度見えるか（History の reader が transcript をどこから読み直すか、`selectUnwrittenTurns` の進み方は未読）。
+- 試験の実行と、修正前の赤の実測。
+
 ## 4. return・throw・書き込みの表
 
 | 関数（候補） | return | throw | 書き込み／順序 |
@@ -239,7 +351,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 
 | PR | 書くもの | 直す前に赤の試験（今の実装で落ちる理由） | 陰性対照 |
 |---|---|---|---|
-| **PR1: claude を縦に** | migration（番号は着手時）・`ask-correlation-db.ts`・型・`ask-correlation.ts`・send の route／`send-request.ts`／`send-user-message.ts` の ask 分岐（予約・封筒・`typedContent` の再計算）・claude の reader（封筒の回収と外し・M1 の入力の集合・完了 turn の対応）・reader による封筒の外し（1 回だけ。`recordUserTurn` は変えない）・`GET /api/asks/*`（capability は claude だけ true）・`ask` の CLI（capability が true の tool だけ台帳で読む。**ほかの tool は今の経路のまま**） | (1) claude で上寄せ 305 行目の返答 → reply の全文一致（今は末尾 80 行を返すか返答が無い）、(2) `hi` と旧 `⏺ history` だけの画面・対応なし → none（今は pane を採る）、`> hi`／`⏺ hi` と対応済み本文 `hi` → `hi`、(3) 前 turn が send 後に終わり今回分は未完了 → none（今は時刻窓で旧 turn を選ぶ）、(4) M1: 吸収 1 件の fixture で A・B → `ambiguous`／`unmatched`（今は A の reply を返す）、通知（`<task-notification>`）だけの吸収 → `matched`・`notified:true`（§7 (a) ②）、(5) M2: 封筒入り record＋send 行 → 1 行・封筒なし・`overlapped` なし、(6) M3: brief 付き／無し × 複数行／1 行、(7) M4: `/compact` → 本文不変・`unavailable`、(8) M5: 再起動後の最初の ask が `matched`、`/clear` 前の session の record は `rejected`、(9) M6: `matched` 後の別 session の再出現で不変、(10) 同じ askId の再 POST は入力 0、別本文は 409、(11) R3: `turnOpenAtSend=true` → `ambiguous`、(12) Q1: poller を止めて API の読み取りだけで確定 | 封筒の無い send・relay・brief だけの行の採用は不変、`<tool>-turn:` の行と重複防止は不変、exit 10／20／21／124・upstream fault・instance の別名・`--async`・`overlapped`・`capture --tail`／`--follow`・一般の `reply` は不変、claude 以外の tool の `ask` は不変 |
+| **PR1: claude を縦に** | migration（番号は着手時）・`ask-correlation-db.ts`・型・`ask-correlation.ts`・send の route／`send-request.ts`／`send-user-message.ts` の ask 分岐（予約・封筒・`typedContent` の再計算）・claude の reader（封筒の回収と外し・M1 の入力の集合・完了 turn の対応）・reader による封筒の外し（1 回だけ。`recordUserTurn` は変えない）・`GET /api/asks/*`（capability は claude だけ true）・**§3.6 の状態遷移表の全セルの試験を置く**・`ask` の CLI（capability が true の tool だけ台帳で読む。**ほかの tool は今の経路のまま**） | (1) claude で上寄せ 305 行目の返答 → reply の全文一致（今は末尾 80 行を返すか返答が無い）、(2) `hi` と旧 `⏺ history` だけの画面・対応なし → none（今は pane を採る）、`> hi`／`⏺ hi` と対応済み本文 `hi` → `hi`、(3) 前 turn が send 後に終わり今回分は未完了 → none（今は時刻窓で旧 turn を選ぶ）、(4) M1: 吸収 1 件の fixture で A・B → `ambiguous`／`unmatched`（今は A の reply を返す）、通知（`<task-notification>`）だけの吸収 → `matched`・`notified:true`（§7 (a) ②）、(5) M2: 封筒入り record＋send 行 → 1 行・封筒なし・`overlapped` なし、(6) M3: brief 付き／無し × 複数行／1 行、(7) M4: `/compact` → 本文不変・`unavailable`、(8) M5: 再起動後の最初の ask が `matched`、`/clear` 前の session の record は `rejected`、(9) M6: `matched` 後の別 session の再出現で不変、(10) 同じ askId の再 POST は入力 0、別本文は 409、(11) R3: `turnOpenAtSend=true` → `ambiguous`、(12) Q1: poller を止めて API の読み取りだけで確定 | 封筒の無い send・relay・brief だけの行の採用は不変、`<tool>-turn:` の行と重複防止は不変、exit 10／20／21／124・upstream fault・instance の別名・`--async`・`overlapped`・`capture --tail`／`--follow`・一般の `reply` は不変、claude 以外の tool の `ask` は不変 |
 | **PR2: codex** | `codex/history.ts`（と parser）の封筒の回収と外し・完了 turn の対応、capability を codex で true | (1) 1 turn に 2 つの prompt → 両方 `ambiguous`（今は reply を返す）、(2) 単独 turn の全文一致、(3) M2〜M6 を codex の fixture で同じ名前のケースとして、(4) Q3: 大きな paste を `[Pasted Content …]` に畳んだ入力の rollout に封筒と展開後の本文が残るか（残らなければ capability は false のまま、PR2 は reader だけで止める） | codex の既存の user 行・`codex-prompt:`／`codex-turn:` の行は不変 |
 | **PR3: 回収しない tool への切り替えと docs** | `ask` の CLI で capability が false の tool を `unavailable/tool_unsupported`、旧サーバーを `server_unsupported`（pane へ降りない）、`ask` の help、`src/cli/docs/agent-operations.ts`、`docs/user-guide/cli-operations-guide.md` と `docs/en/user-guide/cli-operations-guide.md` の `## commandmate ask` 節 | (1) `copilot` → `unavailable`・画面を読まない・exit 0（今は pane を返す）、(2) capabilities が 404 → `server_unsupported`・旧 body で 1 回送る | PR1 の陰性対照すべて |
 
@@ -264,6 +376,18 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 | (b) capture の見え方の変化を受け入れるか（ask の本文が必ず複数行になり、claude のペインに `[Pasted text …]` と封筒が出る） | ① 受け入れる ② 1 行の本文では封筒を本文と同じ行の末尾に付ける（paste を避けるが、M3 の外し方と brief の流儀が変わる。未検討） | **① 受け入れる**。意味・API は変わらず、帰属の根拠を保てる。UAT・demo-video の手順に注記する |
 | (c) 公開版 skill の `ask.sh`・`SKILL.md` と出す順番 | ① 公開版 skill を先に直して publish してから PR3 をマージ ② PR3 を先にマージし、公開版を追って直す（その間、未対応の tool で「空の返答で完了」と読まれうる） | **①**。公開版 skill を先に直して publish してから PR3（commandmate-skills の Issue と publish は PM が人に伺う。PR3 はリーダーが止める）。`reply:null` と `attribution` の読み方・context-limit の救済の扱いを直す |
 | (d) codex の上限で Antigravity に振り替えたときの 5-2b（M7 の残り） | ① antigravity の adapter が対応するまで、振り替え先は claude にする ② `consistency-review.mjs` に `attribution.state` の分岐を足す（このとき書いてよいファイルに足す） | **① 振り替え先は claude**。運用の手順の変更で済み、スクリプトを変えない |
+
+### 7.1 要決定（人）: 状態遷移表（§3.6）から出たもの
+
+PM が人に伺う。**決まるまで PR1 は作り直さない**（§3.6 の ✗ のセルの修正と、全セルの試験は決定の後に入れる）。推奨は材料のとおり。
+
+| 決めること | 選択肢 | 推奨 |
+|---|---|---|
+| H1. `turnOpenAtSend` が読めなかったとき（null）の扱い（表の 10b） | ① 今どおり「開いていなかった」と同じに扱う（R:520 の `?? null`、C:198 は `=== true` だけを見る） ② true 側（`ambiguous`）に倒す | 材料に推奨の明記なし。R3 は安全弁なので ② の向きが不変条件に合うが、読めない頻度しだいで ask が ambiguous ばかりになりうる（頻度は未確認） |
+| H2. `not_sent` の後に封筒が見えたとき（表の 22） | (a) `not_sent` を保存の時点で `unmatched/not_sent` の終端にし、後の観測はログだけ（I1 と一貫） (b) 証拠を採って普通に確定まで進める | **(a)**（今はどちらでもなく、M になりうる） |
+| H3. 送信の途中でサーバーが落ち、送信の結果が来ない（R が残る。表の 24） | ① 一定時間たった R を読み取りの時に `send_unknown` とみなす（表の 3・4 の R+ が先に進めるようになる） ② 保持の掃除まで放置する（CLI は grace で `unmatched` を出す） | 材料に推奨の明記なし |
+| H4. I2（matched の本文を確定時のまま返す）の実現方法（表の 19） | (a) 確定時に本文を台帳に持つ（v72 の注記「Holds no body」と保存量に反する） (b) digest と長さを持ち、違えば新しい理由（例 `history_changed`）で返さない（API の理由の一覧が増える） | 材料に推奨の明記なし |
+| H5. 中断された turn（superseded）の扱い（I5） | ① 完了とみなさず永久に `pending` ② 新しい理由（例 `turn_interrupted`）の `unmatched` | 材料に推奨の明記なし。stop_reason を書かない claude の版では ask が常に未確定になるので、capability を版で絞るか（§8 Q2）も合わせて決める |
 
 ## 8. 質問への答え
 
@@ -298,3 +422,16 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 | R3 `turnOpenAtSend` | §3.2 R3、§3.3、§6 PR1 (11) |
 | Q1〜Q3 | §8 |
 | 不変条件 7 に History の採用・capture の見え方 | §2 の 7、§7 (b) |
+
+### 10.1 今の PR1 の実装で守られていない所（§3.6 より。HEAD `32b91fa4d`）
+
+| # | 場所 | 守られていない条件 | 表のセル | 出典 |
+|---|---|---|---|---|
+| 1 | T:803-809 | 予約の無い封筒の形の行も形だけで外す（I3: 外すのは同じ宛先の予約行がある本文だけ） | 26 | review-4344-pr1b の 1 |
+| 2 | A:65・T:786-793 | History の書込みの救済条件（`isClaudeTurnWritable`: stop 未観測・superseded）を完了の証拠に使う（I5） | 9・10・11 | pr1b の 2 |
+| 3 | C:271-278 | matched の返答を毎回いまの History から読む。行が成長すると本文が変わる（I2） | 19 | pr1b の 3 |
+| 4 | C:170 | reserved の間に見えた 2 つ目の別 input の証拠を保存せず `pending` を返す（I8） | 4 | pr1b の 4 |
+| 5 | A:61・C:222-229 | 吸収の観測で session を照合しない。reserved の間の吸収の証拠を捨てる（I6・I8） | 5 | pr1b の 5 |
+| 6 | C:161 | `currentSessionId` か `nativeSessionId` が null だと session の照合を丸ごと飛ばす（I6） | 8b | 状態遷移表の具体化で新しく見つけた |
+
+修正は §7.1 の決定の後（PR1 を作り直すときに、全セルの試験と一緒に入れる）。
