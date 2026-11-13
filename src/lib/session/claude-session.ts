@@ -15,6 +15,7 @@ import {
 } from '@/lib/tmux/tmux';
 import {
   CLAUDE_PROMPT_PATTERN,
+  CLAUDE_TRUST_DIALOG_PATTERN,
   isClaudeAutoDefaultNudgeOpen,
   isClaudeTrustDialogOpen,
   isShellPaneCommand,
@@ -240,7 +241,30 @@ class ClaudeStartupDialogStalledError extends SessionStartTimeoutError {
  *
  * @param lastScreen - The last pane output read, or null when none could be
  */
-function startTimeoutError(sessionName: string, lastScreen: string | null, trust: TrustDialogState): SessionStartTimeoutError {
+function startTimeoutError(
+  sessionName: string,
+  lastScreen: string | null,
+  trust: TrustDialogState,
+  watch: StartWatch
+): SessionStartTimeoutError {
+  if (lastScreen === null && watch.captureFailures > 0) {
+    // Issue #4149 F2 (S1): every read failed, so nothing is known about the screen.
+    return new ClaudeStartupDialogStalledError(
+      sessionName,
+      CLAUDE_INIT_TIMEOUT,
+      `a screen that could not be read (${watch.captureFailures} of ${watch.polls} captures failed).`,
+      'Run `commandmate capture <worktree-id>` to see it, then send the message again.'
+    );
+  }
+  if (lastScreen !== null && !isClaudeTrustDialogOpen(lastScreen) && watch.trustTextPolls > 0 && CLAUDE_TRUST_DIALOG_PATTERN.test(lastScreen)) {
+    // Issue #4149 F2 (S2): the trust text is there but was not read as an open dialog.
+    return new ClaudeStartupDialogStalledError(
+      sessionName,
+      CLAUDE_INIT_TIMEOUT,
+      `a screen that shows the folder-trust text but was not read as an open dialog (read as one in ${watch.trustOpenPolls} of ${watch.polls} polls; ${trust.answers + trust.moves} keys sent).`,
+      'Run `commandmate capture <worktree-id>` to see it, clear it with `commandmate attach <worktree-id>`, then send the message again.'
+    );
+  }
   if (lastScreen !== null && isClaudeTrustDialogOpen(lastScreen)) {
     const keys = trust.answers + trust.moves;
     const fate =
@@ -288,6 +312,18 @@ function noteTrustKeySkipped(
 ): void {
   noteLaunchAnswerSkipped(logger, state.skips, TRUST_KEY_SKIPPED, { sessionName, key, reason }, startedIn);
   state.lastSkip = reason;
+}
+
+/** What one start's polls saw, for the log and the budget's sentence (Issue #4149 F2). */
+interface StartWatch {
+  polls: number;
+  captureFailures: number;
+  /** A capture failure was already warned and no read has succeeded since. */
+  failureWarned: boolean;
+  /** Polls whose screen carried the trust dialog's text, read as open or not. */
+  trustTextPolls: number;
+  /** Polls whose screen was read as the open trust dialog. */
+  trustOpenPolls: number;
 }
 
 /** The trust dialog's progress during one session start (Issue #3078 / #3089). */
@@ -985,6 +1021,7 @@ export async function startClaudeSession(
     const trust: TrustDialogState = { pollsSinceAnswer: null, pollsSinceMove: null, answers: 0, moves: 0, lastSkip: null, skips: newLaunchAnswerSkips(), seen: false, shellTellsExit: false };
     // Issue #4149: what the budget ran out on.
     let lastScreen: string | null = null;
+    const watch: StartWatch = { polls: 0, captureFailures: 0, failureWarned: false, trustTextPolls: 0, trustOpenPolls: 0 };
     while (Date.now() - startTime < maxWaitTime) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
@@ -996,13 +1033,29 @@ export async function startClaudeSession(
       const screenLife = instanceInputAnswerSkipLife(sessionName);
       try {
         cleanOutput = await getCleanPaneOutput(sessionName);
-      } catch {
-        // Ignore capture errors during initialization
+      } catch (error: unknown) {
+        // Capture errors during initialization do not end the wait (Issue #4149 F2: but
+        // they are no longer silent; once per run of failures, never the error's text).
+        watch.captureFailures += 1;
+        if (!watch.failureWarned) {
+          watch.failureWarned = true;
+          logger.warn('start-capture-failed', {
+            sessionName,
+            errorName: error instanceof Error ? error.name : typeof error,
+            poll: watch.polls + 1,
+          });
+        }
       }
+      watch.polls += 1;
       if (cleanOutput === null) {
         continue;
       }
+      watch.failureWarned = false;
       lastScreen = cleanOutput;
+      if (CLAUDE_TRUST_DIALOG_PATTERN.test(cleanOutput)) {
+        watch.trustTextPolls += 1;
+        if (isClaudeTrustDialogOpen(cleanOutput)) watch.trustOpenPolls += 1;
+      }
 
       // Issue #201 / #3078 / #3089: answer the folder-trust dialog. Checked
       // BEFORE the prompt: the dialog's cursor row (`❯ No, exit`) wears the
@@ -1056,7 +1109,23 @@ export async function startClaudeSession(
     // carried to the caller by the error type rather than lost in a generic
     // message (CONS-005, IMP-001).
     if (!initialized) {
-      throw startTimeoutError(sessionName, lastScreen, trust);
+      if (lastScreen !== null) {
+        // Issue #4149 F2: what the polls saw, never the screen's text (SEC-SF-002).
+        logger.warn('start-budget-exhausted', {
+          sessionName,
+          polls: watch.polls,
+          captureFailures: watch.captureFailures,
+          trustTextPolls: watch.trustTextPolls,
+          trustOpenPolls: watch.trustOpenPolls,
+          keysSent: trust.answers + trust.moves,
+          lastScreenKind: isClaudeTrustDialogOpen(lastScreen)
+            ? 'trust-dialog'
+            : CLAUDE_TRUST_DIALOG_PATTERN.test(lastScreen)
+              ? 'trust-text-unread'
+              : 'other',
+        });
+      }
+      throw startTimeoutError(sessionName, lastScreen, trust, watch);
     }
 
     logger.info('started-claude-session');
