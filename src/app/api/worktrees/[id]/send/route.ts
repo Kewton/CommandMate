@@ -464,8 +464,8 @@ async function handleSend(
       // Issue #3957: the relay's boundary, required — a refusal stops the send.
       // Issue #4115: the role's condition goes first, re-read at the same moment.
       inputBoundary: roleConditionBoundary(roleGate, roleTarget, relay.binding?.hooks()),
-      // Issue #4344: the reserved ask's envelope goes on the typed text (M3).
-      ...(ask.askId ? { askEnvelopeId: ask.askId } : {}),
+      // Issue #4344: the reserved ask's envelope goes on the typed text (M3); none without one.
+      askEnvelopeId: ask.askId ?? undefined,
     });
 
     if (!result.ok) {

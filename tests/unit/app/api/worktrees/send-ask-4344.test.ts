@@ -144,14 +144,14 @@ describe('POST /send: ask (Issue #4344)', () => {
     expect(await response.json()).toMatchObject({ ask: { id: null, state: 'unavailable', reason: 'slash_command' } });
     const params = sendUserMessage.mock.calls[0][1] as Params;
     expect(params.content).toBe('/compact');
-    expect(params).not.toHaveProperty('askEnvelopeId');
+    expect(params.askEnvelopeId).toBeUndefined();
     expect(getAskCorrelation(db, ASK)).toBeNull();
   });
 
   it('a tool the server does not attribute is sent as it is (unavailable/tool_unsupported)', async () => {
     const response = await post({ content: 'hi', cliToolId: 'codex', ask: { id: ASK, protocol: 1 } });
     expect(await response.json()).toMatchObject({ ask: { id: null, state: 'unavailable', reason: 'tool_unsupported' } });
-    expect(sendUserMessage.mock.calls[0][1]).not.toHaveProperty('askEnvelopeId');
+    expect((sendUserMessage.mock.calls[0][1] as Params).askEnvelopeId).toBeUndefined();
     expect(getAskCorrelation(db, ASK)).toBeNull();
   });
 
@@ -185,7 +185,7 @@ describe('POST /send: ask (Issue #4344)', () => {
     setAskVersionProbeForTest(probe as () => Promise<string | null>);
     const response = await post({ content: 'hi', cliToolId: 'claude', ask: { id: ASK, protocol: 1 } });
     expect(await response.json()).toMatchObject({ ask: { id: null, state: 'unavailable', reason: 'tool_unsupported' } });
-    expect(sendUserMessage.mock.calls[0][1]).not.toHaveProperty('askEnvelopeId');
+    expect((sendUserMessage.mock.calls[0][1] as Params).askEnvelopeId).toBeUndefined();
     expect(getAskCorrelation(db, ASK)).toBeNull();
   });
 
@@ -199,7 +199,7 @@ describe('POST /send: ask (Issue #4344)', () => {
     const response = await post({ content: 'hi', cliToolId: 'claude' });
     expect(response.status).toBe(201);
     expect(await response.json()).not.toHaveProperty('ask');
-    expect(sendUserMessage.mock.calls[0][1]).not.toHaveProperty('askEnvelopeId');
+    expect((sendUserMessage.mock.calls[0][1] as Params).askEnvelopeId).toBeUndefined();
     expect((db.prepare('SELECT COUNT(*) AS n FROM ask_correlations').get() as { n: number }).n).toBe(0);
   });
 });
