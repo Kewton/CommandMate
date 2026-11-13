@@ -200,3 +200,122 @@ describe('§3.1.4: `?item=` asks where the item is', () => {
     expect(calls).toContain('/api/repositories/repo-a/mem/decisions/branches?item=d-else&branch=feature%2Fx');
   });
 });
+
+describe('5-2b P2: the branch select and the panel take their counts in one order of reads', () => {
+  const item = (state: 'open' | 'recorded') => ({
+    id: 'd-1',
+    kind: 'decision',
+    state,
+    text: '決定 d-1',
+    closeWhen: null,
+    promoteTo: 'issue:#1',
+    quote: null,
+    quoteAt: null,
+    evidence: [],
+    closeNote: null,
+    owner: {},
+    createdBy: 'agent',
+    updatedBy: 'agent',
+    version: state === 'open' ? 1 : 2,
+    createdAt: '2026-11-13T00:00:00.000Z',
+    updatedAt: '2026-11-13T00:00:00.000Z',
+    closedAt: null,
+    closeReason: null,
+    stale: false,
+    frozen: false,
+  });
+  const countsFor = (state: 'open' | 'recorded') => ({ mode: 'on', approvable: true, open: state === 'open' ? 1 : 0, recorded: state === 'recorded' ? 1 : 0 });
+
+  it('(positive control) the branches answered late (read before the approval) do not overwrite the count read after it', async () => {
+    let state: 'open' | 'recorded' = 'open';
+    let releaseBranches: () => void = () => undefined;
+    answers['/api/repositories/repo-a/mem/decisions/branches'] = () => {
+      // The answer is what the server read when the request came: before the approval.
+      const body = { ok: true, branches: [{ branch: 'feature/x', ...countsFor(state) }] };
+      return new Promise<Answer>((resolve) => (releaseBranches = () => resolve({ body })));
+    };
+    answers['/api/repositories/repo-a/mem/decisions'] = () =>
+      Promise.resolve({
+        body: {
+          ok: true,
+          mode: 'on',
+          branch: 'feature/x',
+          counts: countsFor(state),
+          decisions: [{ item: item(state), unreflected: state === 'recorded', operations: [] }],
+          unresolved: [],
+          worktrees: [{ id: 'wt', path: '/w', name: 'wt', branch: 'feature/x' }],
+        },
+      });
+    answers['/api/repositories/repo-a/mem/decisions/d-1/preview'] = {
+      status: 201,
+      body: {
+        ok: true,
+        preview: {
+          id: 'p-1',
+          operationId: 'op-1',
+          itemId: 'd-1',
+          itemVersion: 1,
+          destination: { kind: 'issue_comment', ref: 'issue', host: 'github.com', owner: 'o', repo: 'r', number: 1 },
+          baseFingerprint: 'b',
+          body: 'body',
+          bodySha256: 's',
+          effect: 'spec',
+          quoteOrigin: 'human',
+          invisibleReplaced: false,
+          acknowledgedOperationIds: [],
+          poster: null,
+          createdAt: '2026-11-13T00:00:00.000Z',
+          expiresAt: '2026-11-13T00:30:00.000Z',
+        },
+      },
+    };
+    answers['/api/repositories/repo-a/mem/decisions/d-1/approve'] = () => {
+      state = 'recorded';
+      return Promise.resolve({ body: { ok: true, operation: { id: 'op-1', state: 'succeeded' }, item: item('recorded') } });
+    };
+    nav.search = 'branch=feature%2Fx';
+    render(<MemDecisionsPage />);
+    await waitFor(() => expect(calls).toContain('/api/repositories/repo-a/mem/decisions/branches'));
+
+    fireEvent.click(await screen.findByTestId('decision-select-d-1'));
+    fireEvent.click(await screen.findByTestId('decision-make-preview-d-1'));
+    fireEvent.click(await screen.findByTestId('decision-approve-d-1'));
+    await waitFor(() => expect(screen.getByTestId('decision-counts')).toHaveAttribute('data-open', '0'));
+
+    await act(async () => {
+      releaseBranches();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(branchSelect().disabled).toBe(false));
+    expect(optionTexts()).toEqual(['feature/x（承認待ち 0）']);
+    expect(screen.getByTestId('decision-counts')).toHaveAttribute('data-open', '0');
+  });
+
+  it('(negative control) branches sent after the panel’s list are taken as they come, even when answered late', async () => {
+    let releaseBranches: () => void = () => undefined;
+    let first = true;
+    answers['/api/repositories/repo-a/mem/decisions/branches'] = () => {
+      if (first) {
+        first = false;
+        return new Promise<Answer>((resolve) => (releaseBranches = () => resolve({ body: { ok: true, branches: BRANCHES_A } })));
+      }
+      return Promise.resolve({ body: { ok: true, branches: BRANCHES_A } });
+    };
+    nav.search = 'branch=feature%2Fx';
+    render(<MemDecisionsPage />);
+    await screen.findByTestId('decision-counts');
+    await act(async () => {
+      releaseBranches();
+      await Promise.resolve();
+    });
+    // The panel's list is sent first (a child's effect runs before its page's), so the branches
+    // read after it are the newer read: their rows are taken as answered, feature/x's 3 too.
+    await waitFor(() => expect(branchSelect().disabled).toBe(false));
+    expect(screen.getByTestId('decision-counts')).toHaveAttribute('data-open', '0');
+    expect(optionTexts()).toEqual([
+      'feature/x（承認待ち 3）',
+      'feature/off（open 2・承認できない: mode off）',
+      'feature/amb（件数不明: mode が root で食い違う）',
+    ]);
+  });
+});

@@ -209,6 +209,36 @@ describe('§3.1.4: `?item=`', () => {
     expect(calls.every((call) => call.url.includes('branch=feature%2Fx'))).toBe(true);
   });
 
+  it('(positive control, 5-2b P2) `?item=` changed to another item on the same branch opens that one too', async () => {
+    const shown = render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-open', where: 'here' }} />);
+    await screen.findByTestId('decision-make-preview-d-open');
+    fireEvent.click(screen.getByTestId('decision-pending-only'));
+    expect(fold('recorded')).toBeNull();
+    // The same panel (its key is repository + branch), only `?item=` changed: A → B.
+    shown.rerender(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec', where: 'here' }} />);
+    await waitFor(() => expect(fold('recorded')?.open).toBe(true));
+    expect((screen.getByTestId('decision-pending-only') as HTMLInputElement).checked).toBe(false);
+    expect(inFold('recorded', 'd-rec')).toBe(true);
+  });
+
+  it('(negative control) a redraw with the same `?item=` does not scroll again', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrolled.push((this as HTMLElement).dataset.decisionId ?? '');
+    };
+    try {
+      const shown = render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec', where: 'here' }} />);
+      await waitFor(() => expect(scrolled).toEqual(['d-rec']));
+      shown.rerender(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec', where: 'here' }} />);
+      shown.rerender(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec' }} />);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(scrolled).toEqual(['d-rec']);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('(negative control) without `?item=` nothing is said and nothing is opened', async () => {
     render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
     await screen.findByTestId('decision-d-open');

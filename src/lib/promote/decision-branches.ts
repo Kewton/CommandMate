@@ -4,9 +4,11 @@
  * /api/repositories/:id/mem/decisions/branches`. Read only — nothing here writes the
  * database, `gh` or a worktree, and no screen mark is asked.
  *
- * - The set of branches is the union of the repository's worktrees' branches and the
- *   branches that hold a decision not closed (a worktree removed does not hide what still
- *   waits for a person).
+ * - The set of branches is the union of the repository's worktrees' branches, the
+ *   branches that hold a decision not closed, and the branches that hold an unsettled
+ *   operation whatever became of its item (closed or purged; the list route's
+ *   `listUnresolvedPromoteOperations` set) — a worktree removed or an item closed does not
+ *   hide what still waits for a person's reconcile.
  * - Each branch is counted with the one shared count (I6, `decisionCountsUnder` →
  *   `decisionCountsOf`): `ambiguous` answers null counts, never 0.
  * - `?item=<id>&branch=<name>` (§3.1.4): where that item is as seen from this repository and
@@ -54,6 +56,24 @@ function decisionBranchesOf(db: Database.Database, repositoryIds: readonly strin
   return rows.map((row) => row.branch);
 }
 
+/**
+ * The branches holding an unsettled operation (approved, in flight, unknown, or written with
+ * the item's transition pending), whatever became of its item — the same set the list route
+ * reads with `listUnresolvedPromoteOperations` (`src/lib/db/mem-promote-db.ts`). A read only.
+ */
+function unresolvedOperationBranchesOf(db: Database.Database, repositoryIds: readonly string[]): string[] {
+  if (repositoryIds.length === 0) return [];
+  const marks = repositoryIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT branch FROM mem_promote_operations
+        WHERE repository_id IN (${marks}) AND branch IS NOT NULL
+          AND (state IN ('approved','in_flight','unknown') OR (state = 'succeeded' AND transition_pending = 1))`
+    )
+    .all(...repositoryIds) as Array<{ branch: string }>;
+  return rows.map((row) => row.branch);
+}
+
 /** The worktrees' branches of the member roots (detached worktrees have none). */
 function worktreeBranchesOf(db: Database.Database, members: readonly Repository[]): string[] {
   return members.flatMap((root) =>
@@ -86,7 +106,12 @@ export async function listDecisionBranches(
   try {
     return await withSettledRepositoryMembership(db, repositoryId, deps, (_repository, membership): MemOutcome => {
       const roots = rootsOf(membership);
-      const names = new Set<string>([...worktreeBranchesOf(db, membership.members), ...decisionBranchesOf(db, roots.map((root) => root.id))]);
+      const rootIds = roots.map((root) => root.id);
+      const names = new Set<string>([
+        ...worktreeBranchesOf(db, membership.members),
+        ...decisionBranchesOf(db, rootIds),
+        ...unresolvedOperationBranchesOf(db, rootIds),
+      ]);
       const branches: DecisionBranchView[] = [];
       for (const branch of names) {
         const counts = decisionCountsUnder(db, membership, branch);

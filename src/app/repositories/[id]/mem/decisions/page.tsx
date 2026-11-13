@@ -37,6 +37,19 @@ interface BranchesRead {
   where?: DecisionItemWhere;
 }
 
+/** The newest counts the panel read for one branch, with the order its read was sent in. */
+interface CountsRead {
+  order: number;
+  counts: DecisionCounts;
+}
+
+const countsKey = (repositoryId: string, branch: string) => JSON.stringify([repositoryId, branch]);
+
+/** The branch's row with the counts a read answered (the branch's name and the rest kept). */
+function withCounts(entry: DecisionBranchView, counts: DecisionCounts): DecisionBranchView {
+  return { ...entry, ...counts };
+}
+
 const decisionsPath = (repositoryId: string, branch?: string) =>
   `/repositories/${encodeURIComponent(repositoryId)}/mem/decisions${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`;
 
@@ -72,6 +85,18 @@ function DecisionsContent(): React.ReactElement {
   const [read, setRead] = useState<BranchesRead | null>(null);
   const [failedFor, setFailedFor] = useState<string | null>(null);
   const requestRef = useRef(0);
+  /**
+   * 5-2b P2: one order for every read that carries counts — the branch select's and the
+   * panel's list (approvals re-read it). A count is adopted only from a read sent later
+   * than the one that set it, so a late answer of an earlier read never overwrites it.
+   */
+  const orderRef = useRef(0);
+  const nextReadOrder = useCallback(() => {
+    orderRef.current += 1;
+    return orderRef.current;
+  }, []);
+  /** The newest counts the panel read, per repository + branch. */
+  const countsReadRef = useRef(new Map<string, CountsRead>());
   // Where `?item=` is depends on the branch shown; otherwise the branch does not change the list.
   const itemBranch = item ? branch : '';
 
@@ -79,33 +104,49 @@ function DecisionsContent(): React.ReactElement {
     if (!repositoryId) return;
     requestRef.current += 1;
     const request = requestRef.current;
+    const order = nextReadOrder();
     setFailedFor(null);
     void promoteApi.branches(repositoryId, item ? { item, branch: itemBranch } : {}).then((result) => {
       // An answer for an earlier choice (another repository, or another `?item=`) is not shown.
       if (request !== requestRef.current) return;
-      if (result.ok) setRead({ repositoryId, item, branches: result.body.branches, where: result.body.item?.where });
-      else setFailedFor(repositoryId);
+      if (!result.ok) {
+        setFailedFor(repositoryId);
+        return;
+      }
+      // A branch whose list was read after this request keeps that newer count.
+      const branches = result.body.branches.map((entry) => {
+        const newer = countsReadRef.current.get(countsKey(repositoryId, entry.branch));
+        return newer && newer.order > order ? withCounts(entry, newer.counts) : entry;
+      });
+      setRead({ repositoryId, item, branches, where: result.body.item?.where });
     });
     return () => {
       requestRef.current += 1;
     };
-  }, [repositoryId, item, itemBranch]);
+  }, [repositoryId, item, itemBranch, nextReadOrder]);
 
-  // The branch select follows the counts the panel reads after each approval.
+  // The branch select follows the counts the panel reads (after each approval too), newest read first.
   const onCounts = useCallback(
-    (counts: DecisionCounts) => {
+    (counts: DecisionCounts, order?: number) => {
+      const key = countsKey(repositoryId, branch);
+      const readOrder = order ?? nextReadOrder();
+      const before = countsReadRef.current.get(key);
+      if (before && before.order > readOrder) return;
+      countsReadRef.current.set(key, { order: readOrder, counts });
       setRead((current) => {
         if (!current || current.repositoryId !== repositoryId) return current;
         const index = current.branches.findIndex((entry) => entry.branch === branch);
         if (index < 0) return current;
-        const before = current.branches[index];
-        if (before.open === counts.open && before.recorded === counts.recorded && before.mode === counts.mode) return current;
+        const entry = current.branches[index];
+        if (entry.open === counts.open && entry.recorded === counts.recorded && entry.mode === counts.mode && entry.approvable === counts.approvable) {
+          return current;
+        }
         const branches = current.branches.slice();
-        branches[index] = { ...before, ...counts };
+        branches[index] = withCounts(entry, counts);
         return { ...current, branches };
       });
     },
-    [branch, repositoryId]
+    [branch, nextReadOrder, repositoryId]
   );
 
   const current = read && read.repositoryId === repositoryId ? read : null;
@@ -190,6 +231,7 @@ function DecisionsContent(): React.ReactElement {
           branch={branch}
           focusItem={item ? { id: item, where: current && current.item === item ? current.where : undefined } : undefined}
           onCounts={onCounts}
+          nextReadOrder={nextReadOrder}
         />
       )}
     </div>

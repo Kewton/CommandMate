@@ -81,6 +81,15 @@ function insertWorktree(id: string, worktreePath: string, repositoryPath: string
     branch
   );
 }
+/** An operation row as the promote path leaves it (its item may be closed or gone). */
+function insertOperation(id: string, itemId: string, branch: string, state: string, pending = 0): void {
+  db.prepare(
+    `INSERT INTO mem_promote_operations (id, preview_id, item_id, item_version, item_fingerprint, context_worktree_id,
+       context_worktree_incarnation, repository_id, branch, destination_kind, destination, base_fingerprint, body, body_sha256,
+       effect, quote_origin, state, transition_pending, approved_at, updated_at)
+     VALUES (?, 'p', ?, 1, 'f', ?, 'inc', ?, ?, 'issue_comment', '{}', 'b', 'body', 'sha', 'spec', 'agent', ?, ?, 1, 1)`
+  ).run(id, itemId, WT, repoA, branch, state, pending);
+}
 function setRules(repositoryId: string, rules: MemBranchRule[]): void {
   const current = getMemSettings(db, repositoryId);
   saveMemSettings(db, repositoryId, { version: current.version, features: current.features, rules });
@@ -170,6 +179,23 @@ describe('§3.1.2: the branches to choose from', () => {
     const note = await add(WT, 'note');
     db.prepare('UPDATE mem_items SET branch = ? WHERE id = ?').run('notes/only', note.id);
     expect((await branchesOf()).map((entry) => entry.branch)).toEqual([BRANCH]);
+  });
+
+  it('(positive control, 5-2b P2) a branch whose item is closed but whose operation is unsettled is listed, with no worktree too', async () => {
+    const closed = await add(WT);
+    expect((await memCloseItem(db, WT, closed.id, { instanceId: 'claude', ifVersion: closed.version, reason: 'done' })).status).toBe(201);
+    db.prepare('UPDATE mem_items SET branch = ? WHERE id = ?').run('reconcile/only', closed.id);
+    insertOperation('op-unknown', closed.id, 'reconcile/only', 'unknown');
+    // A purged item (no row in mem_items) whose write is still in flight, on a branch with no worktree.
+    insertOperation('op-purged', 'purged-item', 'purged/only', 'in_flight');
+    // (negative control) a settled operation does not keep its branch listed.
+    insertOperation('op-done', 'done-item', 'settled/only', 'succeeded');
+    expect((await branchesOf()).map((entry) => entry.branch).sort()).toEqual([BRANCH, 'purged/only', 'reconcile/only'].sort());
+    // The list route reaches the same branch's reconcile (the same set).
+    const listResponse = await getDecisions(req(`http://localhost:3000/api/repositories/${repoA}/mem/decisions?branch=purged%2Fonly`), {
+      params: Promise.resolve({ id: repoA }),
+    });
+    expect(((await listResponse.json()) as { unresolved: Array<{ operation: { id: string } }> }).unresolved.map((entry) => entry.operation.id)).toEqual(['op-purged']);
   });
 
   it('I6: the counts are the shared count’s — the same as summarizeDecisionCounts and the list route', async () => {
