@@ -45,7 +45,7 @@ Put one section per role in the instructions file, and ask each session to run `
 ## Worker section (template)
 
 ```markdown
-## Role: worker
+## Role: worker (worktree `<worktree-id>`, instance `<worker-instance>`)
 
 - Do the one task in your contract, only inside its scope. Commit when it is done.
 - If the task needs a file outside the scope, do not change it. Write what you found in the commit message and stop.

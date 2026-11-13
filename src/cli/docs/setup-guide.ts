@@ -436,7 +436,7 @@ commandmate auto-yes <worktree-id> --enable --duration 3h --instance <pm-instanc
 
 ### If it fails
 
-- \`ask\` or \`send\` exits 99: first find out whether anything was sent. Read the CLI's stderr (with \`--json\`, \`sendOutcome\`) and look at the other session with \`commandmate capture <worktree-id> --instance <id>\`. Only when it says prompt not ready and nothing was sent, send again after a minute. Exit 99 also comes from a server error, from an unknown send outcome, and from a failure while \`ask\` waits after it has sent; in those cases the message may already be in, so do not send it again until the screen shows it is not.
+- \`ask\` or \`send\` exits 99: first find out whether anything was sent. Read what the CLI printed to stderr: it states when nothing was sent (for example a prompt that was not ready) and when the message may already be in. Then look at the other session with \`commandmate capture <worktree-id> --instance <id>\`. Send again after a minute only when stderr says nothing was sent. Exit 99 also comes from a server error, from a send whose outcome is unknown, and from a failure while \`ask\` waits after it has sent. If neither stderr nor the screen settles it, treat it as unconfirmed and do not send again; tell the person.
 - The PM stops at a permission question for \`commandmate send\` or \`commandmate ask\`: the rule from step 3 is missing or does not match the worktree id. Show the person the exact rule.
 - The gates fail every task on files you did not touch: the ignore lines from step 4 are missing.
 - Auto Yes ended before the deadline: \`--duration\` is shorter than the time left, or the stop pattern matched. Check \`commandmate auto-yes <worktree-id>\`, tell the person, and do not turn it on again without asking.
