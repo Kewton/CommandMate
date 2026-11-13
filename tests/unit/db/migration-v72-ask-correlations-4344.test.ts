@@ -13,7 +13,9 @@ import {
   ASK_CORRELATION_MAX_ROWS_PER_WORKTREE,
   ASK_CORRELATION_RETENTION_MS,
   getAskCorrelation,
+  noteAskEvidence,
   pruneAskCorrelations,
+  recordAskNativeInput,
   recordAskSendOutcome,
   reserveAsk,
   settleAskAttribution,
@@ -58,6 +60,30 @@ describe('migration v72: ask correlations', () => {
     expect(settleAskAttribution(db, ASK, { state: 'matched', reason: null, assistantMessageIds: ['a1'], notified: true })).toBe(true);
     expect(settleAskAttribution(db, ASK, { state: 'ambiguous', reason: 'shared_turn' })).toBe(false);
     expect(getAskCorrelation(db, ASK)).toMatchObject({ attributionState: 'matched', assistantMessageIds: ['a1'], notified: true });
+  });
+
+  it('H2: not_sent is terminal in the same statement (unmatched/not_sent)', () => {
+    reserve();
+    recordAskSendOutcome(db, ASK, { sendState: 'not_sent' });
+    expect(getAskCorrelation(db, ASK)).toMatchObject({ sendState: 'not_sent', attributionState: 'unmatched', reason: 'not_sent' });
+    expect(settleAskAttribution(db, ASK, { state: 'matched', reason: null })).toBe(false);
+  });
+
+  it('I8: carried evidence is kept on a pending row only', () => {
+    reserve();
+    expect(noteAskEvidence(db, ASK, 'duplicate')).toBe(true);
+    expect(noteAskEvidence(db, ASK, 'absorbed')).toBe(true);
+    expect(getAskCorrelation(db, ASK)).toMatchObject({ duplicateSeen: true, absorbedSeen: true });
+    settleAskAttribution(db, ASK, { state: 'unmatched', reason: 'envelope_duplicated' });
+    expect(noteAskEvidence(db, ASK, 'absorbed')).toBe(false);
+  });
+
+  it('§3.6.5: a settlement for one native input does not take a row that names another (another process recorded it)', () => {
+    reserve();
+    recordAskNativeInput(db, ASK, { nativeInputId: 'p-other', nativeSessionId: 's' });
+    expect(settleAskAttribution(db, ASK, { state: 'matched', reason: null, expectedInputId: 'p-mine' })).toBe(false);
+    expect(settleAskAttribution(db, ASK, { state: 'matched', reason: null, replyDigest: 'd', replyLength: 1, expectedInputId: 'p-other' })).toBe(true);
+    expect(getAskCorrelation(db, ASK)).toMatchObject({ attributionState: 'matched', replyDigest: 'd', replyLength: 1 });
   });
 
   it('goes with its worktree', () => {

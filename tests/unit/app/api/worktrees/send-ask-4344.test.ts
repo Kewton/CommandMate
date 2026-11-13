@@ -62,6 +62,7 @@ vi.mock('@/lib/db/db-instance', () => {
 
 import { POST as sendMessage } from '@/app/api/worktrees/[id]/send/route';
 import { getAskCorrelation } from '@/lib/db/ask-correlation-db';
+import { setAskVersionProbeForTest } from '@/lib/ask/ask-correlation';
 
 const WT = 'wt-4344-send';
 const ASK = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -94,6 +95,8 @@ describe('POST /send: ask (Issue #4344)', () => {
     setMockDb(db);
     vi.clearAllMocks();
     succeeds();
+    // H5: an installed claude that writes stop_reason (no `--version` is spawned).
+    setAskVersionProbeForTest(async (tool) => (tool === 'claude' ? '2.1.293 (Claude Code)' : null));
     upsertWorktree(db, {
       id: WT, name: 'Ask', path: `/path/to/${WT}`, repositoryPath: '/path/to/repo', repositoryName: 'repo', cliToolId: 'claude',
     } as Worktree);
@@ -103,6 +106,7 @@ describe('POST /send: ask (Issue #4344)', () => {
     const { closeDbInstance } = (await import('@/lib/db/db-instance')) as unknown as { closeDbInstance: () => void };
     closeDbInstance();
     db.close();
+    setAskVersionProbeForTest(null);
   });
 
   it('reserves before the send, hands the envelope id to the service, and records the send as sent', async () => {
@@ -159,7 +163,8 @@ describe('POST /send: ask (Issue #4344)', () => {
     const response = await post({ content: 'hi', cliToolId: 'claude', ask: { id: ASK, protocol: 1 } });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: 'PROMPT_WAITING', ask: { id: ASK, sendState: 'not_sent' } });
-    expect(getAskCorrelation(db, ASK)?.sendState).toBe('not_sent');
+    // H2 (cell 2 → N): terminal at the save.
+    expect(getAskCorrelation(db, ASK)).toMatchObject({ sendState: 'not_sent', attributionState: 'unmatched', reason: 'not_sent' });
   });
 
   it('a send whose outcome is not known is send_unknown (never resent)', async () => {
@@ -170,6 +175,18 @@ describe('POST /send: ask (Issue #4344)', () => {
     await post({ content: 'hi', cliToolId: 'claude', ask: { id: ASK, protocol: 1 } });
     expect(getAskCorrelation(db, ASK)?.sendState).toBe('send_unknown');
     expect(sendUserMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['older than the minimum', async () => '2.1.200'],
+    ['unreadable', async () => null],
+    ['a probe that throws', async () => { throw new Error('spawn failed'); }],
+  ])('H5: claude whose version is %s is sent as it is (unavailable/tool_unsupported, no envelope)', async (_name, probe) => {
+    setAskVersionProbeForTest(probe as () => Promise<string | null>);
+    const response = await post({ content: 'hi', cliToolId: 'claude', ask: { id: ASK, protocol: 1 } });
+    expect(await response.json()).toMatchObject({ ask: { id: null, state: 'unavailable', reason: 'tool_unsupported' } });
+    expect(sendUserMessage.mock.calls[0][1]).not.toHaveProperty('askEnvelopeId');
+    expect(getAskCorrelation(db, ASK)).toBeNull();
   });
 
   it.each([{ id: 'nope', protocol: 1 }, { id: ASK, protocol: 2 }, 'x', [ASK]])('a malformed ask (%j) is 400 with nothing sent', async (ask) => {

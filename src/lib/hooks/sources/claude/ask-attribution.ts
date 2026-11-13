@@ -19,13 +19,57 @@
 import type { AgentInstanceRef } from '../types';
 import { createLogger } from '@/lib/logger';
 import { claudeTurnRequestId } from '@/types/agent-transcript';
-import {
-  CLAUDE_TURN_TRUNCATION_MARKER,
-  isClaudeTurnWritable,
-  type ClaudeTurnAccumulator,
-} from './transcript';
+import { CLAUDE_TURN_TRUNCATION_MARKER, type ClaudeTurnAccumulator } from './transcript';
+import type { AskTurnState } from '@/lib/ask/ask-correlation';
 
 const logger = createLogger('lib/hooks/sources/claude/ask-attribution');
+
+/**
+ * Where a claude turn stands for an ask (design §3.6 I5・H5). Only an observed
+ * stop completes it — not History's write rule (`isClaudeTurnWritable`, which also
+ * takes a superseded turn and one whose version writes no `stop_reason`).
+ */
+export function claudeAskTurnState(turn: ClaudeTurnAccumulator): AskTurnState {
+  if (turn.closed) return 'closed';
+  if (turn.superseded) return 'interrupted';
+  return 'open';
+}
+
+/**
+ * The askIds in `turns` the ledger has a reservation for under this destination
+ * (I3): only their prompts lose the envelope on the way to History. Any failure
+ * reads as "none" — the text then stays as the agent recorded it.
+ */
+export async function reservedClaudeAskIds(
+  target: AgentInstanceRef,
+  turns: readonly ClaudeTurnAccumulator[],
+): Promise<ReadonlySet<string>> {
+  const ids = turns.map((turn) => turn.askId).filter((id): id is string => Boolean(id));
+  if (ids.length === 0) return new Set();
+  try {
+    const [{ getDbInstance }, { getAskCorrelation }] = await Promise.all([
+      import('@/lib/db/db-instance'),
+      import('@/lib/db/ask-correlation-db'),
+    ]);
+    const db = getDbInstance();
+    const instanceId = target.instanceId ?? target.cliToolId;
+    return new Set(
+      ids.filter((id) => {
+        const row = getAskCorrelation(db, id);
+        return row !== null
+          && row.worktreeId === target.worktreeId
+          && row.cliToolId === target.cliToolId
+          && row.instanceId === instanceId;
+      }),
+    );
+  } catch (error) {
+    logger.warn('claude-ask-reservation-lookup-failed', {
+      worktreeId: target.worktreeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return new Set();
+  }
+}
 
 /** Whether any turn here has an ask to bind; the cheap check before any import. */
 export function hasClaudeAskEvidence(turns: readonly ClaudeTurnAccumulator[]): boolean {
@@ -56,22 +100,32 @@ export async function bindClaudeAskTurns(
       cliToolId: target.cliToolId,
       instanceId: target.instanceId ?? target.cliToolId,
     };
+    // I8・I9: an envelope on two inputs in this one read is judged a duplicate before
+    // either turn's completion — the earlier sighting only records its input.
+    const sightings = new Map<string, number>();
+    for (const turn of turns) if (turn.askId) sightings.set(turn.askId, (sightings.get(turn.askId) ?? 0) + 1);
+    const seen = new Set<string>();
     for (const turn of turns) {
+      const nativeSessionId = turn.sessionId || null;
       for (const absorbedAskId of turn.absorbedAskIds ?? []) {
-        if (absorbedAskId !== turn.askId) markAskAbsorbed(db, absorbedAskId, destination);
+        if (absorbedAskId !== turn.askId) {
+          markAskAbsorbed(db, absorbedAskId, destination, { nativeSessionId, currentSessionId });
+        }
       }
       if (!turn.askId) continue;
       const turnKey = claudeTurnRequestId(turn.promptUuid);
-      const complete = isClaudeTurnWritable(turn);
-      const row = complete ? findMessageByRequestId(db, target.worktreeId, turnKey) : null;
+      const firstOfSeveral = (sightings.get(turn.askId) ?? 0) > 1 && !seen.has(turn.askId);
+      seen.add(turn.askId);
+      const turnState = firstOfSeveral ? 'open' : claudeAskTurnState(turn);
+      const row = turnState === 'closed' ? findMessageByRequestId(db, target.worktreeId, turnKey) : null;
       const outcome = bindAskSighting(db, {
         askId: turn.askId,
         target: destination,
         nativeInputId: turn.promptUuid,
-        nativeSessionId: turn.sessionId || null,
+        nativeSessionId,
         currentSessionId,
         nativeTurnKey: turnKey,
-        turnComplete: complete,
+        turnState,
         otherInputs: turn.absorbedInputs ?? 0,
         notices: turn.absorbedNotices ?? 0,
         assistantMessage: row && row.role === 'assistant' ? { id: row.id, content: row.content } : null,

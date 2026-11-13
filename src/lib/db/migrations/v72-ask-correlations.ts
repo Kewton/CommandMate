@@ -10,7 +10,10 @@
  *
  * A new table only — nothing is backfilled. `worktree_id` follows the convention
  * `getWorktreeChildTables()` looks for, so a row follows a worktree id rename and
- * goes with its worktree. Holds no body: `body_digest` is a hash.
+ * goes with its worktree. Holds no body: `body_digest` and `reply_digest` are
+ * hashes (H4: the matched reply is checked against its digest and length when
+ * it is read, design §3.6). `duplicate_seen` / `absorbed_seen` carry evidence
+ * seen while the send's outcome was not saved yet (I8).
  *
  * The rollback drops the table, which forgets every reservation (an `ask` in
  * flight then reads `unmatched`).
@@ -39,6 +42,10 @@ export const v72_migrations: Migration[] = [
           assistant_message_ids TEXT NOT NULL DEFAULT '[]',
           turn_open_at_send INTEGER,
           notified INTEGER NOT NULL DEFAULT 0,
+          duplicate_seen INTEGER NOT NULL DEFAULT 0,
+          absorbed_seen INTEGER NOT NULL DEFAULT 0,
+          reply_digest TEXT,
+          reply_length INTEGER,
           attribution_state TEXT NOT NULL DEFAULT 'pending'
             CHECK (attribution_state IN ('pending', 'matched', 'ambiguous', 'unmatched')),
           reason TEXT,

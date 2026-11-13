@@ -7,8 +7,10 @@
  * table (`ASK_ATTRIBUTION_TOOLS`): the CLI is to ask here (design §6 PR3) instead of keeping a copy,
  * and an older server answers 404, which it reads as "not attributed".
  *
- * Inert like `/api/capabilities`: a fixed table compiled into the build, no
- * database, under the same middleware auth as every other API route.
+ * A fixed table compiled into the build, narrowed by each tool's installed version
+ * (H5: below `ASK_ATTRIBUTION_MIN_VERSIONS`, or unreadable, is false; the probe is
+ * `lib/updates/agent-versions`, cached). No database. Under the same middleware
+ * auth as every other API route.
  */
 
 import { NextResponse } from 'next/server';
@@ -17,7 +19,7 @@ import { getAskCapabilities } from '@/lib/ask/ask-correlation';
 export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse> {
-  return NextResponse.json(getAskCapabilities(), {
+  return NextResponse.json(await getAskCapabilities(), {
     status: 200,
     headers: { 'Cache-Control': 'no-store' },
   });

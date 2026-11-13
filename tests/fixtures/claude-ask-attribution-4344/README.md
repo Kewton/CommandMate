@@ -13,4 +13,5 @@ ask の帰属（`docs/design/ask-attribution-4344.md` §3.2 M1・§7 (a)）の�
 | `absorbed-ask.jsonl` | ask A（封筒つき・paste）のターン中に ask B（封筒つき）が吸収された | A は `ambiguous/shared_turn`、B は `unmatched/absorbed_mid_turn` |
 | `absorbed-notice.jsonl` | ask A のターン中にバックグラウンドの `<task-notification>` だけが吸収された | A は `matched`、`notified: true`（§7 (a) の決定 ②） |
 
+- `user`・`assistant`・`attachment` の記録に `version: "2.1.293"`（3430 の採取元と同じ版）。ガード `tests/unit/guards/ask-capability-controls-4344.test.ts` が最小版（`ASK_ATTRIBUTION_MIN_VERSIONS`）以上と assistant 記録の `stop_reason` を確かめる
 - session id は `00000000-0000-4000-8000-000000004344`、`cwd` は `<CWD>`（試験が一時ディレクトリに置き換える）

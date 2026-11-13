@@ -38,7 +38,11 @@ export type AskAttributionReason =
   | 'body_truncated'
   | 'send_unknown'
   | 'not_sent'
-  | 'grace_expired';
+  | 'grace_expired'
+  /** H5: the turn was superseded without its stop being observed. Stored. */
+  | 'turn_interrupted'
+  /** H4: the matched reply's History row is no longer the body it was settled with. Read-time only. */
+  | 'history_changed';
 
 /** How the send of a reserved ask ended (§3.2). */
 export type AskSendState = 'reserved' | 'sent' | 'not_sent' | 'send_unknown';
@@ -67,6 +71,13 @@ export interface AskCorrelation {
    * not another input, but the reply may react to it).
    */
   notified: boolean;
+  /** I8: a second native input of this envelope was seen before the send's outcome was saved. */
+  duplicateSeen: boolean;
+  /** I8: this ask was seen absorbed into another turn before the send's outcome was saved. */
+  absorbedSeen: boolean;
+  /** H4: sha256 and length of the reply as it was settled `matched`; null otherwise. */
+  replyDigest: string | null;
+  replyLength: number | null;
   attributionState: AskAttributionState;
   reason: AskAttributionReason | null;
   createdAt: number;

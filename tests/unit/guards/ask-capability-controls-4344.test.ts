@@ -8,11 +8,15 @@
  * M1〜M6 — so each `true` row needs the adapter's control file
  * (`tests/unit/hooks/sources/<tool>-ask-attribution-4344.test.ts`), and that file
  * has to name every M case.
+ *
+ * H5 (§0.1 版の判定): each `true` tool has a minimum version, and its control
+ * fixtures (`tests/fixtures/<tool>-ask-attribution-4344/`) are records of that
+ * version or later whose assistant records all carry `stop_reason`.
  */
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { ASK_ATTRIBUTION_TOOLS } from '@/lib/ask/ask-correlation';
+import { ASK_ATTRIBUTION_MIN_VERSIONS, ASK_ATTRIBUTION_TOOLS, versionAtLeast } from '@/lib/ask/ask-correlation';
 
 const M_CASES = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6'] as const;
 
@@ -39,6 +43,24 @@ describe('ask capability controls (Issue #4344)', () => {
   it('M4 is pinned on the send side', () => {
     for (const path of M4_CONTROLS) {
       expect(readFileSync(join(process.cwd(), path), 'utf8')).toMatch(/M4/);
+    }
+  });
+
+  it.each(enabled)('%s has a minimum version, and its control fixtures are at least that version with stop_reason on every assistant record (H5)', (tool) => {
+    const minimum = (ASK_ATTRIBUTION_MIN_VERSIONS as Record<string, string | undefined>)[tool];
+    expect(minimum, `${tool}: minimum version`).toBeDefined();
+    const dir = join(process.cwd(), 'tests/fixtures', `${tool}-ask-attribution-4344`);
+    expect(existsSync(dir)).toBe(true);
+    const files = readdirSync(dir).filter((name) => name.endsWith('.jsonl'));
+    expect(files.length).toBeGreaterThan(0);
+    for (const name of files) {
+      for (const line of readFileSync(join(dir, name), 'utf8').split('\n').filter((l) => l.trim())) {
+        const record = JSON.parse(line) as { type: string; version?: string; message?: { stop_reason?: string } };
+        if (record.type === 'user' || record.type === 'assistant') {
+          expect(record.version && versionAtLeast(record.version, minimum!), `${name}: version ${record.version}`).toBe(true);
+        }
+        if (record.type === 'assistant') expect(record.message?.stop_reason, `${name}: stop_reason`).toBeTruthy();
+      }
     }
   });
 });

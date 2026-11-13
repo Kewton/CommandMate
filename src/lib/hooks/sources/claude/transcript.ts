@@ -436,10 +436,14 @@ export interface ClaudeTurnAccumulator {
   overflowed: boolean;
   /**
    * Issue #4344: the ask whose envelope the prompt record carried at its
-   * canonical place (`lib/ask/envelope`); null when it carried none. The envelope
-   * is already off {@link promptText}.
+   * canonical place (`lib/ask/envelope`); null when it carried none.
+   * {@link promptText} keeps the envelope: it comes off only when the ledger has a
+   * reservation of the same destination for `askId` (design §3.6 I3), and then
+   * the text without it is {@link askPromptText}.
    */
   askId?: string | null;
+  /** Issue #4344: {@link promptText} with the envelope taken off once (I3); null with no envelope. */
+  askPromptText?: string | null;
   /**
    * Issue #4344 (M1): inputs this turn absorbed while it ran — prompts the
    * operator or another ask typed into it. Each leaves a `queue-operation`
@@ -806,7 +810,7 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     sessionId: record.sessionId ?? sessionId,
     promptUuid: record.uuid as string,
     startedAt: record.timestampMs ?? 0,
-    promptText: envelope ? envelope.text : unwrapped,
+    promptText: unwrapped,
     promptIsOperatorInput: isClaudeOperatorPromptRecord(record),
     blocks: [],
     assistantRecords: 0,
@@ -815,6 +819,7 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     stopReasonObserved: false,
     overflowed: false,
     askId: envelope ? envelope.askId : null,
+    askPromptText: envelope ? envelope.text : null,
     absorbedInputs: 0,
     absorbedNotices: 0,
     absorbedAskIds: [],

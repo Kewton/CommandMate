@@ -17,7 +17,7 @@ import {
 } from '@/lib/db/ask-correlation-db';
 import { createLogger } from '@/lib/logger';
 import type { AskSendAnswer, AskSendState } from '@/types/ask-correlation';
-import { askBodyDigest, isAskCommandBody, supportsAskAttribution } from './ask-correlation';
+import { applyCarriedAskEvidence, askAttributionCapable, askBodyDigest, isAskCommandBody } from './ask-correlation';
 
 const logger = createLogger('lib/ask/ask-send');
 
@@ -35,15 +35,17 @@ export type AskSendPlan =
 /**
  * Decide and, when attributed, reserve (§4 `reserveAsk`). Before any side
  * effect of the send; a database failure throws (the route answers 500 and
- * types nothing).
+ * types nothing). Async only for the version probe (H5); the reservation itself
+ * is one synchronous statement.
  */
-export function planAskForSend(
+export async function planAskForSend(
   db: Database.Database,
   ask: { id: string } | undefined,
   target: { worktreeId: string; cliToolId: string; instanceId: string; content: string },
-): AskSendPlan {
+): Promise<AskSendPlan> {
   if (!ask) return { kind: 'none' };
-  if (!supportsAskAttribution(target.cliToolId)) {
+  // H5: the table and the installed version (a version that cannot be read is false).
+  if (!(await askAttributionCapable(target.cliToolId))) {
     return { kind: 'unavailable', answer: { id: null, state: 'unavailable', reason: 'tool_unsupported' } };
   }
   // M4: a command is typed as it is — an envelope in front would make it text.
@@ -98,6 +100,8 @@ export function settleAskSend(
 ): AskSendState | null {
   try {
     recordAskSendOutcome(db, askId, outcome);
+    // I8: evidence carried through the reservation is judged now (cells 4・5).
+    applyCarriedAskEvidence(db, askId);
     return getAskCorrelation(db, askId)?.sendState ?? null;
   } catch (error) {
     logger.warn('ask-correlation-send-outcome-failed', { askId, error: error instanceof Error ? error.message : String(error) });

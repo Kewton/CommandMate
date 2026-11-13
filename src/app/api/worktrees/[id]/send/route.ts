@@ -235,7 +235,7 @@ async function handleSend(
     const roleRosterMark = readRoleRosterMark(db, id, body);
 
     // Issue #4344: before any side effect — the reservation, or why there is none.
-    const askPlan = planAskForSend(db, body.ask, {
+    const askPlan = await planAskForSend(db, body.ask, {
       worktreeId: id,
       cliToolId,
       instanceId: instanceId ?? cliToolId,

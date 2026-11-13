@@ -41,6 +41,10 @@ interface RawAskCorrelation {
   assistant_message_ids: string;
   turn_open_at_send: number | null;
   notified: number;
+  duplicate_seen: number;
+  absorbed_seen: number;
+  reply_digest: string | null;
+  reply_length: number | null;
   attribution_state: Exclude<AskAttributionState, 'unavailable'>;
   reason: AskAttributionReason | null;
   created_at: number;
@@ -71,6 +75,10 @@ function toRow(raw: RawAskCorrelation): AskCorrelation {
     assistantMessageIds: parseIds(raw.assistant_message_ids),
     turnOpenAtSend: raw.turn_open_at_send === null ? null : raw.turn_open_at_send === 1,
     notified: raw.notified === 1,
+    duplicateSeen: raw.duplicate_seen === 1,
+    absorbedSeen: raw.absorbed_seen === 1,
+    replyDigest: raw.reply_digest,
+    replyLength: raw.reply_length,
     attributionState: raw.attribution_state,
     reason: raw.reason,
     createdAt: raw.created_at,
@@ -136,6 +144,9 @@ export function pruneAskCorrelations(db: Database.Database, worktreeId: string, 
 /**
  * How the send ended (§4 `recordSendOutcome`), after the input. Only a row still
  * `reserved` takes it, so a re-POST cannot rewrite a settled send.
+ *
+ * H2 (design §3.6, N): `not_sent` is terminal in the same statement — a pending
+ * row becomes `unmatched/not_sent`, and no later sighting settles it otherwise.
  */
 export function recordAskSendOutcome(
   db: Database.Database,
@@ -148,10 +159,12 @@ export function recordAskSendOutcome(
     db
       .prepare(
         `UPDATE ask_correlations
-            SET send_state = ?, sent_message_id = ?, turn_open_at_send = ?, updated_at = ?
+            SET send_state = ?, sent_message_id = ?, turn_open_at_send = ?, updated_at = ?,
+                attribution_state = CASE WHEN ? = 'not_sent' AND attribution_state = 'pending' THEN 'unmatched' ELSE attribution_state END,
+                reason = CASE WHEN ? = 'not_sent' AND attribution_state = 'pending' THEN 'not_sent' ELSE reason END
           WHERE ask_id = ? AND send_state = 'reserved'`,
       )
-      .run(outcome.sendState, outcome.sentMessageId ?? null, turnOpen, now, askId).changes === 1
+      .run(outcome.sendState, outcome.sentMessageId ?? null, turnOpen, now, outcome.sendState, outcome.sendState, askId).changes === 1
   );
 }
 
@@ -190,6 +203,14 @@ export function settleAskAttribution(
     assistantMessageIds?: readonly string[];
     /** The turn absorbed a background-task notice (§7 (a) ②). */
     notified?: boolean;
+    /** H4: the reply's digest and length when `matched`. */
+    replyDigest?: string | null;
+    replyLength?: number | null;
+    /**
+     * The native input this settlement is for: the UPDATE takes the row only while
+     * it still names that input (another process may have recorded another one).
+     */
+    expectedInputId?: string;
   },
   now = Date.now(),
 ): boolean {
@@ -198,8 +219,9 @@ export function settleAskAttribution(
       .prepare(
         `UPDATE ask_correlations
             SET attribution_state = ?, reason = ?, native_turn_key = COALESCE(?, native_turn_key),
-                assistant_message_ids = ?, notified = ?, updated_at = ?
-          WHERE ask_id = ? AND attribution_state = 'pending'`,
+                assistant_message_ids = ?, notified = ?, reply_digest = ?, reply_length = ?, updated_at = ?
+          WHERE ask_id = ? AND attribution_state = 'pending'
+            AND (? IS NULL OR native_input_id = ?)`,
       )
       .run(
         settled.state,
@@ -207,8 +229,31 @@ export function settleAskAttribution(
         settled.nativeTurnKey ?? null,
         JSON.stringify(settled.assistantMessageIds ?? []),
         settled.notified ? 1 : 0,
+        settled.replyDigest ?? null,
+        settled.replyLength ?? null,
         now,
         askId,
+        settled.expectedInputId ?? null,
+        settled.expectedInputId ?? null,
       ).changes === 1
+  );
+}
+
+/**
+ * I8: keep evidence seen while the send's outcome is not saved yet, for the
+ * judgment after it (`duplicate`: a second native input of the envelope;
+ * `absorbed`: the ask was absorbed into another turn). Pending rows only.
+ */
+export function noteAskEvidence(
+  db: Database.Database,
+  askId: string,
+  kind: 'duplicate' | 'absorbed',
+  now = Date.now(),
+): boolean {
+  const column = kind === 'duplicate' ? 'duplicate_seen' : 'absorbed_seen';
+  return (
+    db
+      .prepare(`UPDATE ask_correlations SET ${column} = 1, updated_at = ? WHERE ask_id = ? AND attribution_state = 'pending'`)
+      .run(now, askId).changes === 1
   );
 }

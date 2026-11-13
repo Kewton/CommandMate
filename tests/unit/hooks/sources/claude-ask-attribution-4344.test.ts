@@ -52,6 +52,9 @@ import { refreshClaudeAsk } from '@/lib/hooks/sources/claude/ask-refresh';
 import { readAskAttribution, askBodyDigest } from '@/lib/ask/ask-correlation';
 import { formatAskEnvelope } from '@/lib/ask/envelope';
 import { getAskCorrelation, recordAskSendOutcome, reserveAsk } from '@/lib/db/ask-correlation-db';
+import { settleAskSend } from '@/lib/ask/ask-send';
+import { ASK_RESERVED_STALE_MS, bindAskSighting } from '@/lib/ask/ask-correlation';
+import { claudeTranscriptPath as transcriptPathOf } from '@/lib/hooks/sources/claude/history';
 import type { Worktree } from '@/types/models';
 
 const WT = 'wt-4344';
@@ -107,13 +110,29 @@ function toolUse(uuid: string, at: number, session = SESSION): object {
 }
 
 /** What the send route leaves behind for a sent ask: the reservation, the outcome, the `/send` user row. */
-function sentAsk(askId: string, body: string, options: { turnOpenAtSend?: boolean; at?: number } = {}): void {
-  reserveAsk(db, { askId, worktreeId: WT, instanceId: 'claude', cliToolId: 'claude', bodyDigest: askBodyDigest(body) });
-  const row = createMessage(db, {
+function sentAsk(
+  askId: string,
+  body: string,
+  options: { turnOpenAtSend?: boolean | null; at?: number; outcome?: 'sent' | 'not_sent'; instanceId?: string } = {},
+): void {
+  reserveOnly(askId, body, { at: options.at, instanceId: options.instanceId });
+  const turnOpenAtSend = 'turnOpenAtSend' in options ? options.turnOpenAtSend : false;
+  // Through the route's own settlement (carried evidence is judged there).
+  settleAskSend(db, askId, options.outcome === 'not_sent'
+    ? { sendState: 'not_sent' }
+    : { sendState: 'sent', sentMessageId: null, turnOpenAtSend });
+}
+
+/** The reservation and the /send row only: the send route has not saved the outcome yet. */
+function reserveOnly(askId: string, body: string, options: { at?: number; instanceId?: string; now?: number } = {}): void {
+  reserveAsk(db, {
+    askId, worktreeId: WT, instanceId: options.instanceId ?? 'claude', cliToolId: 'claude', bodyDigest: askBodyDigest(body),
+    ...(options.now !== undefined ? { now: options.now } : {}),
+  });
+  createMessage(db, {
     worktreeId: WT, role: 'user', content: body, messageType: 'normal',
     timestamp: new Date(T0 + (options.at ?? 0)), cliToolId: 'claude', instanceId: 'claude',
   });
-  recordAskSendOutcome(db, askId, { sendState: 'sent', sentMessageId: row.id, turnOpenAtSend: options.turnOpenAtSend ?? false });
 }
 
 const read = (askId: string) => readAskAttribution(db, askId);
@@ -209,6 +228,7 @@ describe('(5) M2: the envelope and History\'s adoption', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].content).toBe('review the plan');
     expect(rows[0].requestId).toBe('claude-prompt:p1');
+    expect(getAskCorrelation(db, A)?.sentMessageId).toBeNull();
   });
 
   it('M2 negative control: a prompt with no envelope is adopted as before and touches no ledger row', async () => {
@@ -360,5 +380,178 @@ describe('re-instruction 2 (review P2): the envelope comes off once', () => {
     expect(rows[0].requestId).toBe('claude-prompt:p1');
     expect(await read(A)).toMatchObject({ state: 'matched' });
     expect(getAskCorrelation(db, B)).toBeNull();
+  });
+});
+
+/**
+ * The state table (design §3.6.3), cell by cell. The ✗ cells are red on
+ * 32b91fa (the version before the rebuild); the ○ cells pin what it already held.
+ */
+describe('§3.6 state table: the cells', () => {
+  const env = (askId: string, body: string) => paste(`${formatAskEnvelope(askId)}\n${body}`);
+
+  it('cell 4 (I8): a second input of the envelope while reserved is carried — after the outcome it is envelope_duplicated, never matched', async () => {
+    reserveOnly(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), toolUse('t1', 500), prompt('p2', env(A, 'hi'), 1_000), reply('r2', 'hi', 2_000)]);
+    await capture();
+    expect(getAskCorrelation(db, A)).toMatchObject({ attributionState: 'pending', duplicateSeen: true });
+    settleAskSend(db, A, { sendState: 'sent', turnOpenAtSend: false });
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'envelope_duplicated', reply: null });
+  });
+
+  it('cell 5 (I8): an absorbed ask seen while reserved is settled absorbed after the outcome is saved', async () => {
+    sentAsk(A, 'review the plan');
+    reserveOnly(B, 'second question', { at: 1_500 });
+    await writeTranscript(await readFile(join(FIXTURES, 'absorbed-ask.jsonl'), 'utf8'));
+    await capture();
+    expect(getAskCorrelation(db, B)).toMatchObject({ attributionState: 'pending', absorbedSeen: true });
+    settleAskSend(db, B, { sendState: 'sent', turnOpenAtSend: false });
+    expect(await read(B)).toMatchObject({ state: 'unmatched', reason: 'absorbed_mid_turn' });
+  });
+
+  it('cell 5 / M5 (I6): an absorbed envelope in a stale session never settles the pending row', async () => {
+    sentAsk(B, 'second question', { at: 1_500 });
+    getLastAgentEvent.mockReturnValue({ sessionId: OTHER_SESSION });
+    // The file the instance follows now holds the absorption, stamped with the old session.
+    await writeTranscript(await readFile(join(FIXTURES, 'absorbed-ask.jsonl'), 'utf8'), OTHER_SESSION);
+    await capture();
+    expect(getAskCorrelation(db, B)?.attributionState).toBe('pending');
+  });
+
+  it('cell 7 (I7): M5 a sighting under another instance is rejected and leaves the row pending', async () => {
+    sentAsk(A, 'hi', { instanceId: 'claude-2' });
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 1_000)]);
+    await capture();
+    expect(getAskCorrelation(db, A)).toMatchObject({ attributionState: 'pending', nativeInputId: null });
+  });
+
+  it('cell 8b (I6): M5 a sighting whose current session cannot be read never settles (stays pending)', async () => {
+    sentAsk(A, 'hi');
+    getLastAgentEvent.mockReturnValue({ sessionId: null });
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 1_000)]);
+    const hint = transcriptPathOf(home, worktreePath, SESSION);
+    await captureClaudeTranscriptTurn(
+      { worktreeId: WT, cliToolId: 'claude', instanceId: 'claude' },
+      { worktreePath, homeDir: home, transcriptPathHint: hint },
+    );
+    expect(getAskCorrelation(db, A)).toMatchObject({ attributionState: 'pending', nativeInputId: null });
+  });
+
+  it('cell 10b (H1): turnOpenAtSend unknown at the send → ambiguous/turn_open_at_send', async () => {
+    sentAsk(A, 'hi', { turnOpenAtSend: null });
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 1_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'turn_open_at_send', reply: null });
+  });
+
+  it('cell 11b (H5): an interrupted turn (superseded, no stop) settles unmatched/turn_interrupted', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), toolUse('t1', 500), prompt('p2', 'something else', 1_000), reply('r2', 'other', 2_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'turn_interrupted', reply: null });
+  });
+
+  it('cell 11c (I5): a turn with no stop_reason observed is never matched (History\'s rescue is not completion)', async () => {
+    sentAsk(A, 'hi');
+    const noStop = {
+      type: 'assistant', isSidechain: false, uuid: 'r1', timestamp: iso(1_000), cwd: '<CWD>',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] }, sessionId: SESSION,
+    };
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), noStop]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', nativeInputSeen: true });
+  });
+
+  it('cell 12: a truncated row settles unmatched/body_truncated', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'x'.repeat(250_000), 1_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'body_truncated' });
+  });
+
+  it('cell 13: a closed turn whose row is not written yet stays pending', () => {
+    sentAsk(A, 'hi');
+    const outcome = bindAskSighting(db, {
+      askId: A, target: { worktreeId: WT, cliToolId: 'claude', instanceId: 'claude' },
+      nativeInputId: 'p1', nativeSessionId: SESSION, currentSessionId: SESSION, nativeTurnKey: 'claude-turn:p1',
+      turnState: 'closed', otherInputs: 0, notices: 0, assistantMessage: null, truncated: false,
+    });
+    expect(outcome).toBe('pending');
+    expect(getAskCorrelation(db, A)).toMatchObject({ attributionState: 'pending', nativeInputId: 'p1' });
+  });
+
+  it('cell 15 (I9): a second input of the same envelope after the send is saved → unmatched/envelope_duplicated', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), toolUse('t1', 500)]);
+    await capture();
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), toolUse('t1', 500), prompt('p2', env(A, 'hi'), 1_000), reply('r2', 'hi', 2_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'envelope_duplicated' });
+  });
+
+  it('cell 16: resume into a new session before the turn settled → envelope_duplicated', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), toolUse('t1', 500)]);
+    await capture();
+    getLastAgentEvent.mockReturnValue({ sessionId: OTHER_SESSION });
+    resetClaudeTranscriptSessions();
+    await writeTranscript([prompt('p9', env(A, 'hi'), 5_000, OTHER_SESSION), reply('r9', 'hi', 6_000, OTHER_SESSION)], OTHER_SESSION);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'envelope_duplicated' });
+  });
+
+  it('cell 18 (I1): same session, another input id after matched → unchanged', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'first', 1_000)]);
+    await capture();
+    const settled = getAskCorrelation(db, A);
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'first', 1_000), prompt('p2', env(A, 'hi'), 2_000), reply('r2', 'second', 3_000)]);
+    await capture();
+    expect(getAskCorrelation(db, A)).toEqual(settled);
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'first' });
+  });
+
+  it('cell 19 (I2, H4): M6 a matched reply whose History row later changes reads unmatched/history_changed', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'short', 1_000)]);
+    await capture();
+    const [id] = getAskCorrelation(db, A)!.assistantMessageIds;
+    db.prepare('UPDATE chat_messages SET content = ? WHERE id = ?').run('short, and grown', id);
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'history_changed', reply: null });
+    expect(getAskCorrelation(db, A)?.attributionState).toBe('matched');
+  });
+
+  it('cell 22 (H2): an envelope seen after not_sent leaves unmatched/not_sent', async () => {
+    sentAsk(A, 'hi', { outcome: 'not_sent' });
+    expect(getAskCorrelation(db, A)).toMatchObject({ attributionState: 'unmatched', reason: 'not_sent' });
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 1_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'not_sent', reply: null });
+  });
+
+  it('cell 24 (H3): a reservation older than ASK_RESERVED_STALE_MS is read as send_unknown and can settle', async () => {
+    reserveOnly(A, 'hi', { now: Date.now() - ASK_RESERVED_STALE_MS - 1 });
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 1_000)]);
+    await capture();
+    // Settled, and by H1 (no turnOpenAtSend was saved) never matched.
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'turn_open_at_send', sendState: 'send_unknown' });
+  });
+
+  it('cell 24 (H3) negative: a fresh reservation is still waiting for its outcome', async () => {
+    reserveOnly(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 1_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', sendState: 'reserved' });
+  });
+
+  it('cell 26 (I3): M2 negative — a send without ask whose body opens with an envelope-shaped line keeps it; the /send row is adopted as one row', async () => {
+    const body = `${formatAskEnvelope(A)}\nnot an ask`;
+    createMessage(db, { worktreeId: WT, role: 'user', content: body, messageType: 'normal', timestamp: new Date(T0), cliToolId: 'claude', instanceId: 'claude' });
+    await writeTranscript([prompt('p1', paste(body), 0), reply('r1', 'ok', 1_000)]);
+    await capture();
+    const rows = userRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toBe(body);
+    expect(getAskCorrelation(db, A)).toBeNull();
   });
 });

@@ -87,7 +87,7 @@ import {
   selectUnwrittenTurns,
 } from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
-import { bindClaudeAskTurns } from './ask-attribution';
+import { bindClaudeAskTurns, reservedClaudeAskIds } from './ask-attribution';
 import {
   buildClaudeTurns,
   buildHeadlessClaudeTurn,
@@ -494,11 +494,13 @@ export async function captureClaudeTranscriptTurn(
     // still running, so its instant is only knowable once that row has been
     // recorded. With one turn pending — the ordinary case — this is the single
     // call it always was.
+    // Issue #4344 (I3): the prompts whose envelope has a reservation here lose it, once.
+    const reservedAsks = await reservedClaudeAskIds(target, pending.turns);
     const userRows: RecordedUserTurn[] = [];
     for (let index = 0; index < pending.turns.length; index += 1) {
       const previousStartedAt =
         index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
-      userRows.push(await recordClaudeUserTurn(target, pending.turns[index], previousStartedAt));
+      userRows.push(await recordClaudeUserTurn(target, pending.turns[index], previousStartedAt, reservedAsks));
     }
 
     const lastRecordAt = lastClaudeAssistantRecordAt(parsed.records);
@@ -865,7 +867,8 @@ export async function readClaudeTurnProgress(
 async function recordClaudeUserTurn(
   target: AgentInstanceRef,
   turn: ClaudeTurnAccumulator,
-  previousStartedAt = 0
+  previousStartedAt = 0,
+  reservedAsks: ReadonlySet<string> = new Set()
 ): Promise<RecordedUserTurn> {
   const instanceId = target.instanceId ?? target.cliToolId;
 
@@ -882,13 +885,18 @@ async function recordClaudeUserTurn(
   const adoption: RecordUserTurnOptions =
     previousStartedAt > 0 ? { adoptionFromMs: previousStartedAt } : {};
 
-  // Issue #4344 (M2): `promptText` is already without the ask's envelope — taken off
-  // once, by `createClaudeTurn`. `recordUserTurn` compares it as it is, so a body that
-  // itself opens with an envelope-shaped line keeps it.
+  // Issue #4344 (M2, I3): the envelope comes off only for a prompt whose ask has a
+  // reservation of this destination, and only once (`askPromptText`, taken off by
+  // `createClaudeTurn`). `recordUserTurn` compares the text as it is, so a body that
+  // itself opens with an envelope-shaped line keeps it, and so does a send with no ask.
+  const promptText =
+    turn.askId && turn.askPromptText !== null && turn.askPromptText !== undefined && reservedAsks.has(turn.askId)
+      ? turn.askPromptText
+      : turn.promptText;
   const recorded = await recordUserTurn(
     target,
     claudePromptRequestId(turn.promptUuid),
-    turn.promptText,
+    promptText,
     turn.startedAt,
     adoption
   );
