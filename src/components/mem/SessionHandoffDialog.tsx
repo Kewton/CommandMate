@@ -119,7 +119,8 @@ export interface SessionHandoffDialogProps {
    * The existing stop (kill-session). Called from the stop buttons' handlers only. It says how
    * it ended (pr2e, codex P2-2): the plain stop says "stopped" for `stopped` only.
    */
-  onStop: () => Promise<SessionStopResult>;
+  /** Issue #4345 1c: `operation`, the stop's token, goes with the kill to the gate (see `stop`). */
+  onStop: (operation?: HandoffPageOperation) => Promise<SessionStopResult>;
   /**
    * Issue #4317 PR1: the page's registration (`null`: the page has none yet). While it is not the
    * current one nothing new starts here. Left out (`undefined`), the dialog is used without a page
@@ -648,11 +649,13 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         // adopted above; the kill, not started, is the person's to press again).
         if (stopped() || !registered()) return;
         // Issue #4345 1c 再指示 2: the kill not sent (the page's gate refused it) — nothing to observe.
-        if ((await onStop()) === 'not-sent') return;
+        // 1c (review-1cc P2-1): the kill carries the stop's token to the gate. Resumed from `ending`
+        // (no `end` sent), the kill is the operation's first request: its being allowed to leave is
+        // what makes the record capability for its observation.
+        if ((await onStop(operation)) === 'not-sent') return;
         // Issue #4345 1b: the kill was sent — its observation is recorded for this request whatever
         // the session's state or the page registered now (the kill's own 401 included).
-        // 再指示 2: on the capability of the stop's operation (an `end` sent before — a resumed
-        // `ending` — hands none: the observation is then gated like a new request).
+        // 再指示 2: on the capability of the operation that started it (`end`, or the kill itself).
         const recordOwner = operation ? (operation.record() ?? registration) : registration;
         const observed = await handoffApi.observe(forWorktree, view.request.id, endToken, recordOwner);
         if (observed.ok) {

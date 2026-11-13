@@ -83,8 +83,12 @@ export interface HandoffPageView {
   readonly target: { readonly cliToolId: string; readonly instanceId: string; readonly label: string } | null;
   /** The page's close of the hand-off (through the rule: `closeHandoffBy('dialog')`). */
   readonly onClose: () => void;
-  /** The page's existing stop for the target. */
-  readonly onStop: () => Promise<SessionStopResult>;
+  /**
+   * The page's existing stop for the target. Issue #4345 1c: `operation` — the stop's token of the
+   * dialog — goes with the kill to the gate, so that the kill, once allowed to leave, is what makes
+   * the operation's record capability (its observation's).
+   */
+  readonly onStop: (operation?: HandoffPageOperation) => Promise<SessionStopResult>;
 }
 
 export interface RegistrationEntry {

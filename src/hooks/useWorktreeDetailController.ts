@@ -125,6 +125,7 @@ import {
   reportHandoffPageResponse,
   subscribeHandoffRegistry,
   unregisterHandoffPage,
+  type HandoffPageOperation,
   type HandoffPageRegistration,
   type HandoffPageRequest,
 } from '@/lib/handoff/page-registration';
@@ -1987,13 +1988,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * button (G-4) runs the same one — not a copy — for the target it snapshotted. pr2e (codex
    * P2-2): it says how it ended, so the hand-off's plain stop says "stopped" only when it did.
    */
-  const stopSession = useCallback(async (target: SessionKillTarget | null): Promise<SessionStopResult> => {
+  const stopSession = useCallback(async (target: SessionKillTarget | null, operation?: HandoffPageOperation): Promise<SessionStopResult> => {
     if (!target || isKillPendingRef.current) return 'unknown';
     isKillPendingRef.current = true;
     setIsKillPending(true);
     // Issue #4345 1b: the kill's owner and order, fixed as it leaves (this page's registration then).
-    // 再指示 2 (K1): an operation of the page (gated before it is sent: the registration held now).
-    const killAuthRequest = beginHandoffPageRequest(handoffRegistrationRef.current, { kind: 'operation', inside: true });
+    // 再指示 2 (K1): an operation of the page (gated before it is sent: the registration held now, or
+    // — from the hand-off's stop — the stop's token, whose record capability the kill's leaving makes).
+    const killAuthRequest = beginHandoffPageRequest(operation ? operation.registration : handoffRegistrationRef.current, {
+      kind: 'operation',
+      inside: true,
+      operation: operation ?? null,
+    });
 
     // Issue #1171: only wipe the GLOBAL (mobile-consumed / active-scoped) message
     // + prompt state when the killed target IS the active instance. A PC split
@@ -2248,7 +2254,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    */
   const stopSessionRef = useRef(stopSession);
   stopSessionRef.current = stopSession;
-  const stopForHandoff = useCallback(async (): Promise<SessionStopResult> => stopSessionRef.current(handoffTargetRef.current), []);
+  const stopForHandoff = useCallback(
+    async (operation?: HandoffPageOperation): Promise<SessionStopResult> => stopSessionRef.current(handoffTargetRef.current, operation),
+    []
+  );
   /**
    * Issue #4317 PR2: the dialog's host is beside the shell (`HandoffDialogHost`, outside the route and
    * the PC / phone branches), not in this page. The page publishes on its registration what the
