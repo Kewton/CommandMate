@@ -119,7 +119,8 @@ export async function walkWithRespond(
         answer: verdict.input,
         cliToolId: WALK_TOOL,
         promptData: verdict.promptData,
-        frame: at.frame,
+        // Issue #4304 F1-a: no raw frame — the sender binds its own read to the
+        // pane's generation and sends only to that pane.
       })
     );
     driver.log(`  ${step.screen}: respond "${step.answer}" sent`);
