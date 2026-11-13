@@ -176,6 +176,11 @@ import { createMessage, getMessageById } from '@/lib/db/chat-db';
 import { getLastPolicySuppression, clearPolicySuppressions } from '@/lib/polling/auto-yes-suppression-state';
 import { decidePromptPush } from '@/lib/push/prompt-push-gate';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import {
+  TEST_PANE_GENERATION,
+  resetTestPaneGenerations,
+  setTestPaneGeneration,
+} from '@tests/unit/session/bound-frame-test-helper';
 
 const WT = 'wt-3706';
 const KEY = `${WT}:claude`;
@@ -821,5 +826,35 @@ describe('[#3706] re-review P2-4: a prompt left for a human is published as with
     expect(
       decidePromptPush({ worktreeId: WT, cliToolId: 'claude', waitingSince: Date.now() - 1 }),
     ).toMatchObject({ suppress: true, reason: 'auto-yes-answering' });
+  });
+});
+
+describe('[#4304 F1-a review P2-3] a pane replaced while the answer was being sent (the session epoch unchanged)', () => {
+  afterEach(() => resetTestPaneGenerations());
+
+  it("keeps the audit but leaves the new pane's prompt row, the dedup key, the task and the poller restart alone", async () => {
+    const oldRow = savePendingPrompt(Date.now() - 1_000);
+    enable();
+    sendSpecialKeys.mockImplementationOnce(async (_s, keys) => {
+      keysSent.push(...keys);
+      // An outside `new-window -k`: another pane, no relaunch the poller knows of.
+      setTestPaneGeneration(SESSION, { generation: { ...TEST_PANE_GENERATION, paneId: '%99' }, dead: false });
+    });
+    await firstTick();
+
+    expect(keysSent).toEqual(['Enter']);
+    expect(recordAnsweredPrompt).toHaveBeenCalledTimes(1);
+    expect(promptStatus(oldRow)).toBe('answered');
+    expect((await pollerStateOf(KEY))?.lastAnsweredPromptKey).toBeNull();
+    expect(taskEvents).not.toHaveBeenCalledWith('prompt_answered_auto');
+    expect(startResponsePolling).not.toHaveBeenCalled();
+  });
+
+  it('negative: the same pane — the dedup key, the task event and the restart are written, as before', async () => {
+    enable();
+    await firstTick();
+    expect((await pollerStateOf(KEY))?.lastAnsweredPromptKey).not.toBeNull();
+    expect(taskEvents).toHaveBeenCalledWith('prompt_answered_auto');
+    expect(startResponsePolling).toHaveBeenCalledTimes(1);
   });
 });

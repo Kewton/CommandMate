@@ -90,6 +90,7 @@ import { attemptResultOfThrow } from '@/lib/auto-yes-poller-tick';
 import { capturePane, readPaneForeground, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import type { MultipleChoicePromptData, PromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const RULE = '─'.repeat(200);
 
@@ -145,11 +146,11 @@ interface Row {
 
 const textRow = (cliToolId: CLIToolType): Row => ({
   shape: 'text+Enter',
-  params: (sessionName) => ({ sessionName, answer: 'y', cliToolId, promptData: YES_NO }),
+  params: (sessionName) => ({ sessionName, answer: 'y', cliToolId, promptData: YES_NO, frame: testBoundFrame('') }),
 });
 const arrowRow = (cliToolId: CLIToolType): Row => ({
   shape: 'arrows+Enter',
-  params: (sessionName) => ({ sessionName, answer: '2', cliToolId, promptData: CHOICE }),
+  params: (sessionName) => ({ sessionName, answer: '2', cliToolId, promptData: CHOICE, frame: testBoundFrame('') }),
 });
 
 /** Every tool, with the shape its answer takes. */
@@ -163,6 +164,7 @@ const ROWS: Record<CLIToolType, Row> = {
       answer: '1,3',
       cliToolId: 'command-code',
       promptData: commandCodeCheckboxPayload(),
+      frame: testBoundFrame(''),
     }),
   },
   codex: textRow('codex'),
@@ -247,7 +249,7 @@ describe.each(['throws', 'rejects'] as const)('[#4303 review P2] a reader that %
   it('answer_only: the digit is not typed', async () => {
     h.foreground = failure;
     await expect(
-      sendPromptAnswer({
+      sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'mcbd-codex-wt-4303',
         answer: '1',
         cliToolId: 'codex',
@@ -280,6 +282,7 @@ describe('[#4303 review P1] what was checked before the foreground read is check
     answer: '1',
     cliToolId: 'codex',
     promptData: { ...CHOICE, submitMode: 'answer_only' } as PromptData,
+    frame: testBoundFrame(''),
   });
   const CASES = [
     ['claude arrows + Enter', ROWS.claude.params],
@@ -345,6 +348,7 @@ describe('[#4303] the answer_only digit (no Enter, typed outside the input write
     answer: '1',
     cliToolId: 'codex',
     promptData: { ...CHOICE, submitMode: 'answer_only' } as PromptData,
+    frame: testBoundFrame(''),
   });
 
   it('shell: no key', async () => {
@@ -416,7 +420,7 @@ describe('[#4303] the refusal is the not-delivered one on every caller', () => {
 describe('[#4303] the text of an answer is typed as text, not as a tmux key name', () => {
   it.each(['Enter', 'Escape', 'C-c', '-l'])('%s reaches tmux as `send-keys -l -- <text>`', async (answer) => {
     h.realSendKeys = true;
-    await sendPromptAnswer({ sessionName: 'mcbd-gemini-wt-4303', answer, cliToolId: 'gemini', promptData: YES_NO });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: 'mcbd-gemini-wt-4303', answer, cliToolId: 'gemini', promptData: YES_NO });
     const sends = h.execCalls.filter((call) => call.file === 'tmux' && call.args[0] === 'send-keys');
     // The text, as text; then the Enter that submits it, as a key.
     expect(sends[0].args).toEqual(['send-keys', '-t', expect.any(String), '-l', '--', answer]);

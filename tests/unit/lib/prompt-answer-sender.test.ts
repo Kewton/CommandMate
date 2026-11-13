@@ -51,7 +51,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '2',
         cliToolId: 'claude',
@@ -75,7 +75,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '2',
         cliToolId: 'claude',
@@ -95,7 +95,7 @@ describe('sendPromptAnswer', () => {
   // =========================================================================
   describe('Claude + undefined promptData + fallbackPromptType=multiple_choice', () => {
     it('should use cursor-key navigation via fallback when promptData is undefined', async () => {
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '3',
         cliToolId: 'claude',
@@ -110,7 +110,7 @@ describe('sendPromptAnswer', () => {
     });
 
     it('should default to defaultOptionNumber=1 when fallbackDefaultOptionNumber is undefined', async () => {
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '3',
         cliToolId: 'claude',
@@ -130,7 +130,7 @@ describe('sendPromptAnswer', () => {
   // =========================================================================
   describe('Claude + undefined promptData + no fallback', () => {
     it('should use text send when neither promptData nor fallback indicates multiple_choice', async () => {
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -157,7 +157,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'codex-test',
         answer: '2',
         cliToolId: 'codex',
@@ -169,7 +169,7 @@ describe('sendPromptAnswer', () => {
     });
 
     it('should use text send for gemini even with fallbackPromptType=multiple_choice', async () => {
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'gemini-test',
         answer: '1',
         cliToolId: 'gemini',
@@ -199,7 +199,7 @@ describe('sendPromptAnswer', () => {
       };
 
       // Select option 2: offset=2-1=1 Down, Space, then 3-2+1=2 Downs to "Next", Enter
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '2',
         cliToolId: 'claude',
@@ -226,7 +226,7 @@ describe('sendPromptAnswer', () => {
       };
 
       // Select option 1: offset=1-3=-2 -> 2 Up, Space, then 3-1+1=3 Downs, Enter
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -252,7 +252,7 @@ describe('sendPromptAnswer', () => {
       };
 
       // Select option 1 (default): offset=0 -> no navigation, Space, 2-1+1=2 Downs, Enter
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -282,7 +282,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -312,7 +312,7 @@ describe('sendPromptAnswer', () => {
         isAskUserQuestion: true,
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -337,7 +337,7 @@ describe('sendPromptAnswer', () => {
         isAskUserQuestion: true,
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '3',
         cliToolId: 'claude',
@@ -360,7 +360,7 @@ describe('sendPromptAnswer', () => {
         // isAskUserQuestion intentionally omitted (legacy numbered confirmation)
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -382,7 +382,7 @@ describe('sendPromptAnswer', () => {
         isAskUserQuestion: true,
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -420,7 +420,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'agy-test',
         answer: '1',
         cliToolId: 'antigravity',
@@ -441,7 +441,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'agy-test',
         answer: '4',
         cliToolId: 'antigravity',
@@ -454,7 +454,7 @@ describe('sendPromptAnswer', () => {
     });
 
     it('uses cursor nav via fallbackPromptType when promptData is undefined', async () => {
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'agy-test',
         answer: '1',
         cliToolId: 'antigravity',
@@ -484,7 +484,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '3',
         cliToolId: 'claude',
@@ -512,7 +512,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -536,7 +536,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: 'y',
         cliToolId: 'claude',
@@ -567,7 +567,7 @@ describe('sendPromptAnswer', () => {
         status: 'pending',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: 'custom text',
         cliToolId: 'claude',
@@ -597,7 +597,7 @@ describe('sendPromptAnswer', () => {
         submitMode: 'answer_only',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'codex-test',
         answer: '2',
         cliToolId: 'codex',
@@ -623,7 +623,7 @@ describe('sendPromptAnswer', () => {
         submitMode: 'answer_then_enter',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'codex-test',
         answer: '2',
         cliToolId: 'codex',
@@ -648,7 +648,7 @@ describe('sendPromptAnswer', () => {
         // submitMode intentionally omitted
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'codex-test',
         answer: '1',
         cliToolId: 'codex',
@@ -673,7 +673,7 @@ describe('sendPromptAnswer', () => {
         // submitMode intentionally omitted
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'codex-test',
         answer: '1',
         cliToolId: 'codex',
@@ -699,7 +699,7 @@ describe('sendPromptAnswer', () => {
         submitMode: 'invalid' as 'answer_only',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'codex-test',
         answer: '1',
         cliToolId: 'codex',
@@ -728,7 +728,7 @@ describe('sendPromptAnswer', () => {
         submitMode: 'answer_only',
       };
 
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'codex-test',
         answer: 'custom text',
         cliToolId: 'codex',
@@ -758,7 +758,7 @@ describe('sendPromptAnswer', () => {
       };
 
       // Body says defaultOptionNumber=1 (stale), but promptData says default=2
-      await sendPromptAnswer({
+      await sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: 'claude-test',
         answer: '1',
         cliToolId: 'claude',
@@ -865,7 +865,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
     };
 
     await expect(
-      sendPromptAnswer({ sessionName: 'antigravity-test', answer: 'stop', cliToolId: 'antigravity', promptData }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: 'antigravity-test', answer: 'stop', cliToolId: 'antigravity', promptData }),
     ).rejects.toMatchObject({ optionNumbers: [2] });
     expect(sendKeys).not.toHaveBeenCalled();
     expect(sendSpecialKeys).not.toHaveBeenCalled();
@@ -929,7 +929,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
     };
 
     await expect(
-      sendPromptAnswer({ sessionName: 'codex-test', answer: 'custom text', cliToolId: 'codex', promptData }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: 'codex-test', answer: 'custom text', cliToolId: 'codex', promptData }),
     ).rejects.toBeInstanceOf(FreeTextAtChoiceOnlyPromptError);
 
     expect(sendKeys).not.toHaveBeenCalled();
@@ -937,7 +937,7 @@ describe('Issue #2573: free text aimed at a menu row', () => {
   });
 
   it('does not judge a call with no promptData', async () => {
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: 'codex-test',
       answer: 'custom text',
       cliToolId: 'codex',
@@ -1083,7 +1083,7 @@ describe('Issue #2584: free text while the cursor is on another row', () => {
       status: 'pending',
     };
 
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: 'antigravity-test',
       answer: 'feature/x',
       cliToolId: 'antigravity',
@@ -1226,7 +1226,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
     };
 
     await expect(
-      sendPromptAnswer({ sessionName: 'gemini-test', answer: 'please stop', cliToolId: 'gemini', promptData }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: 'gemini-test', answer: 'please stop', cliToolId: 'gemini', promptData }),
     ).rejects.toThrow(/option number/);
   });
 
@@ -1241,7 +1241,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
       status: 'pending',
     };
 
-    await sendPromptAnswer({ sessionName: 'gemini-test', answer: 'y', cliToolId: 'gemini', promptData });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: 'gemini-test', answer: 'y', cliToolId: 'gemini', promptData });
 
     expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'y', false, { literal: true });
   });
@@ -1256,7 +1256,7 @@ describe('Issue #2583: free text at a dialog with no text field', () => {
       status: 'pending',
     };
 
-    await sendPromptAnswer({ sessionName: 'gemini-test', answer: 'anything at all', cliToolId: 'gemini', promptData });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: 'gemini-test', answer: 'anything at all', cliToolId: 'gemini', promptData });
 
     expect(sendKeys).toHaveBeenCalledWith('gemini-test', 'anything at all', false, { literal: true });
   });

@@ -12,7 +12,7 @@
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
 
@@ -110,6 +110,12 @@ import { applyEventToActiveTask } from '@/lib/tasks/task-transition-service';
 import { clearStrictRespondState } from '@/lib/prompt-observation/strict-respond';
 import type { CurrentOutputPayload } from '@/lib/session/current-output-types';
 import { clearAllAutoYesStates, setAutoYesEnabled } from '@/lib/auto-yes-state';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
+import {
+  TEST_PANE_GENERATION,
+  resetTestPaneGenerations,
+  setTestPaneGeneration,
+} from '@tests/unit/session/bound-frame-test-helper';
 
 const FIXTURES = path.resolve(__dirname, '../../fixtures');
 const read = (rel: string): string => readFileSync(path.join(FIXTURES, rel), 'utf8');
@@ -338,5 +344,35 @@ describe('[#3788] the route answers "No, exit" as session-ended through the serv
     const result = await (await post(await body())).json();
     expect(result).toMatchObject({ code: 0, outcome: 'advanced' });
     expect(readSessionPaneCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#4304 F1-a review P2-2] a key refused before it was sent is not sent', () => {
+  /** The session the route answers (what `checkPaneGeneration` is asked about before each key). */
+  function routeSession(): string {
+    return CLIToolManager.getInstance().getTool('antigravity').getSessionName(WT, 'antigravity');
+  }
+
+  afterEach(() => resetTestPaneGenerations());
+
+  it('positive: the pane is replaced between the last read and the first key — code 40, keysSent 0, no task record', async () => {
+    const request = await body();
+    // The reads bound the answer to G; right before the first key the session shows another pane.
+    setTestPaneGeneration(routeSession(), {
+      generation: { ...TEST_PANE_GENERATION, paneId: '%99' },
+      dead: false,
+    });
+    const result = await (await post(request)).json();
+
+    expect(result).toMatchObject({ code: 40, reason: 'capture_failed', delivery: 'not-sent', keysSent: 0 });
+    expect(sendSessionAnswerKey).not.toHaveBeenCalled();
+    expect(applyEventToActiveTask).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('api/prompt-response-strict', 'strict-prompt-response-refused', expect.anything());
+  });
+
+  it('negative: the same pane — the Enter goes out and the answer is recorded, as before', async () => {
+    const result = await (await post(await body())).json();
+    expect(result).toMatchObject({ code: 0, keysSent: 1 });
+    expect(applyEventToActiveTask).toHaveBeenCalledTimes(1);
   });
 });

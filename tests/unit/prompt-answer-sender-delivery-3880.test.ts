@@ -70,6 +70,7 @@ vi.mock('@/lib/tmux/tmux-capture-cache', async (importOriginal) => ({
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { capturePane } from '@/lib/tmux/tmux';
 import type { PromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const SESSION = 'cm-wt-3880-claude';
 const stillCurrent = (): boolean => true;
@@ -114,7 +115,7 @@ describe('[#3880] the text path', () => {
   it('the typed text times out after landing: indeterminate, and not keysSent', async () => {
     failTyped = { at: 'text', delivery: 'indeterminate' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
     );
     expect(delivered).toEqual(['y']);
     expect(error?.answerDelivery).toBe('indeterminate');
@@ -125,7 +126,7 @@ describe('[#3880] the text path', () => {
   it('the Enter after the text times out: indeterminate, and keysSent: true (#3839)', async () => {
     failTyped = { at: 'enter', delivery: 'indeterminate' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
     );
     expect(delivered).toEqual(['y', '<Enter>']);
     expect(error?.answerDelivery).toBe('indeterminate');
@@ -135,7 +136,7 @@ describe('[#3880] the text path', () => {
   it('negative: tmux refused the text: not-started and keysSent: false (retryable)', async () => {
     failTyped = { at: 'text', delivery: 'not-started' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
     );
     expect(delivered).toEqual([]);
     expect(error?.answerDelivery).toBe('not-started');
@@ -145,7 +146,7 @@ describe('[#3880] the text path', () => {
   it('negative: tmux refused the Enter after the text: delivered (the text) and keysSent: true', async () => {
     failTyped = { at: 'enter', delivery: 'not-started' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO }),
     );
     expect(delivered).toEqual(['y']);
     expect(error?.answerDelivery).toBe('delivered');
@@ -157,7 +158,7 @@ describe('[#3880] the text path', () => {
     const { sendKeys } = await import('@/lib/tmux/tmux');
     vi.mocked(sendKeys).mockRejectedValueOnce(new Error('tmux send-keys failed'));
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
     );
     expect(error?.message).toBe('tmux send-keys failed');
     expect(error !== null && 'answerDelivery' in error).toBe(false);
@@ -169,7 +170,7 @@ describe('[#3880] the cursor path: several keys', () => {
   it('the first key times out after landing: indeterminate, and not keysSent', async () => {
     failSpecial = { at: 0, delivery: 'indeterminate' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent }),
     );
     expect(delivered).toEqual(['Down']);
     expect(error?.answerDelivery).toBe('indeterminate');
@@ -179,7 +180,7 @@ describe('[#3880] the cursor path: several keys', () => {
   it('the second key times out: indeterminate, and keysSent: true', async () => {
     failSpecial = { at: 1, delivery: 'indeterminate' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent }),
     );
     expect(delivered).toEqual(['Down', 'Enter']);
     expect(error?.answerDelivery).toBe('indeterminate');
@@ -190,7 +191,7 @@ describe('[#3880] the cursor path: several keys', () => {
     // #3839 counted them through `shouldContinue` only; the error's count covers this path.
     failSpecial = { at: 1, delivery: 'not-started' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE }),
     );
     expect(delivered).toEqual(['Down']);
     expect(error?.answerDelivery).toBe('delivered');
@@ -200,7 +201,7 @@ describe('[#3880] the cursor path: several keys', () => {
   it('negative: the first key refused: not-started and keysSent: false', async () => {
     failSpecial = { at: 0, delivery: 'not-started' };
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent }),
     );
     expect(delivered).toEqual([]);
     expect(error?.answerDelivery).toBe('not-started');
@@ -208,7 +209,7 @@ describe('[#3880] the cursor path: several keys', () => {
   });
 
   it('negative: a send that goes through throws nothing', async () => {
-    await sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHOICE, stillCurrent });
     expect(delivered).toEqual(['Down', 'Enter']);
   });
 });

@@ -141,9 +141,10 @@ function guardReadsFrame(params: SendPromptAnswerParams): boolean {
  * Where an answer goes (Issue #4304 F1-a): the caller's frame when it gave
  * one — `/prompt-response` and `/respond` capture one right before they call
  * in, and Auto-Yes its tick's — and its generation. A caller with no frame
- * gets one bound here when the dialog guard reads one (Issue #2033), else only
- * the pane's generation is read: nothing on the screen decides that answer
- * here, and its keys still go only to that pane.
+ * gets one bound here when it hands over a `promptData` (read again off this
+ * frame, {@link bindPromptDataToFrame}) or when the dialog guard reads one
+ * (Issue #2033); else only the pane's generation is read: nothing on the
+ * screen decides that answer here, and its keys still go only to that pane.
  *
  * A capture or a generation that cannot be read, or a dead pane, is no answer
  * at all: nothing is typed and it may be sent again
@@ -152,7 +153,7 @@ function guardReadsFrame(params: SendPromptAnswerParams): boolean {
  */
 async function resolveAnswerTarget(params: SendPromptAnswerParams): Promise<AnswerTarget> {
   if (params.frame !== undefined) return { generation: params.frame.generation, frame: params.frame };
-  if (guardReadsFrame(params)) {
+  if (params.promptData !== undefined || guardReadsFrame(params)) {
     const captured = await captureBoundFrame({ sessionName: params.sessionName }, { lines: GUARD_CAPTURE_LINES, window: 'tmux' });
     if (captured.kind === 'unknown') {
       throw new PromptAnswerGenerationUnconfirmedError(captured.reason, params.sessionName);
@@ -163,6 +164,31 @@ async function resolveAnswerTarget(params: SendPromptAnswerParams): Promise<Answ
   if (reading === null) throw new PromptAnswerGenerationUnconfirmedError('generation-unreadable', params.sessionName);
   if (reading.dead) throw new PromptAnswerGenerationUnconfirmedError('pane-dead', params.sessionName);
   return { generation: reading.generation, frame: null };
+}
+
+/**
+ * The answer's request, read against the pane it goes to (Issue #4304 F1-a,
+ * review P2-1 of e662dba): a caller that hands over a `promptData` but no frame
+ * (the canary walk, a direct caller) decided it on a screen the sender cannot
+ * tie to any pane. Its cursor, its rows and its ticks would then drive keys at
+ * whatever pane the sender confirmed — another one, after a replacement. So
+ * the prompt is read again off the sender's own bound frame and that reading
+ * is what the keys are built from; a frame that does not show the same prompt
+ * (or none) is refused with nothing typed (`target-changed`, send it again).
+ * A caller's frame is its own proof and is taken as it is.
+ */
+function bindPromptDataToFrame(params: SendPromptAnswerParams, target: AnswerTarget): SendPromptAnswerParams {
+  if (params.frame !== undefined || params.promptData === undefined || target.frame === null) return params;
+  const onScreen = readAnswerablePrompt(params.cliToolId, target.frame.frame);
+  if (onScreen === null || !samePromptTarget(params.promptData, onScreen)) {
+    throw new PromptAnswerNotDeliveredError('target-changed', params.sessionName);
+  }
+  const bound: SendPromptAnswerParams = { ...params, promptData: onScreen };
+  // Not enumerable on Auto-Yes's params (see `detectAndRespondToPrompt`): kept as it is.
+  if (params.stillAllowedAtSend !== undefined) {
+    Object.defineProperty(bound, 'stillAllowedAtSend', { value: params.stillAllowedAtSend, enumerable: false });
+  }
+  return bound;
 }
 
 /**
@@ -1150,13 +1176,15 @@ export async function sendPromptAnswer(params: SendPromptAnswerParams): Promise<
 }
 
 /** {@link sendPromptAnswer}, noting in `touch` each key that reached the pane. */
-async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneTouch): Promise<void> {
+async function sendPromptAnswerKeys(requested: SendPromptAnswerParams, touch: PaneTouch): Promise<void> {
+  const readMark = requested.readMark ?? instanceInputReadMark();
+  // Issue #4304 F1-a: the pane generation every key of this answer goes to,
+  // and the frame its guard judges. Unconfirmed, nothing is typed. A prompt
+  // handed over without a frame is read again off that frame (review P2-1).
+  const target = await resolveAnswerTarget(requested);
+  const params = bindPromptDataToFrame(requested, target);
   const { sessionName, answer, cliToolId, promptData, fallbackPromptType, fallbackDefaultOptionNumber, stillCurrent } =
     params;
-  const readMark = params.readMark ?? instanceInputReadMark();
-  // Issue #4304 F1-a: the pane generation every key of this answer goes to,
-  // and the frame its guard judges. Unconfirmed, nothing is typed.
-  const target = await resolveAnswerTarget(params);
 
   // Issue #2755: Command Code's checkbox question, before every guard below.
   // Its answer is a SET (`"1,3"`), which none of them can read — `/^\d+$/` is

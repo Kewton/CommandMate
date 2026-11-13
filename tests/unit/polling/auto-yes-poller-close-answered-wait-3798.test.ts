@@ -219,3 +219,23 @@ describe('[#3798] an answered prompt followed by a screen only a person can driv
     expect(edges.at(-1)).toMatchObject({ cause: 'closed', previousEpisodeId: opened.episodeId });
   });
 });
+
+describe('[#4304 F1-a review P2-3] a capture that could not be bound is not "the session is gone"', () => {
+  it('positive: the capture is unknown and the session reads absent — the answered wait stays open', async () => {
+    const { captureSessionOutput, getSessionPresence } = await import('@/lib/session/cli-session');
+    const opened = openWait();
+    answered(opened.episodeId);
+    vi.mocked(captureSessionOutput).mockRejectedValueOnce(new Error('capture-pane timed out (test)'));
+    vi.mocked(getSessionPresence).mockResolvedValueOnce('absent');
+    await pollerTick(IDLE);
+    expect(record()?.episodeId).toBe(opened.episodeId);
+    expect(edges.map((e) => e.cause)).toEqual(['opened']);
+  });
+
+  it('negative: the same answered wait and a bound idle frame — it closes, as before', async () => {
+    const opened = openWait();
+    answered(opened.episodeId);
+    await pollerTick(IDLE);
+    expect(record()).toBeNull();
+  });
+});

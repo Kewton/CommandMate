@@ -231,9 +231,12 @@ export async function captureSessionOutputFresh(
 
     // Issue #4304 F1-a (§4.5): never written back to the display cache — the
     // cache is keyed by the session's name, and a frame of a pane the session
-    // has since replaced must not be served to its next reader. An empty one
-    // still drops what the cache holds, as before.
-    if (output.length === 0) invalidateCache(sessionName);
+    // has since replaced must not be served to its next reader. Review P2-4 of
+    // e662dba: nor may the display keep showing what it held from before this
+    // read. What the cache holds, and a capture in flight (not written back,
+    // not joined from now on), is dropped, so the next display reader reads the
+    // pane itself — never a frame older than this one (empty or not).
+    invalidateCache(sessionName);
 
     reportFrameMeta({ fetchStartedAt, source: 'fetched' });
     const headCutSink = globalThis.__captureHeadCutSink?.getStore();

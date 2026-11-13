@@ -217,6 +217,7 @@ import {
   resetAutoYesConfirmationLedgerForTests,
   setAutoYesLedgerClockTimersForTests,
 } from '@/lib/polling/auto-yes-confirmation-ledger';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const WORKTREE_ID = 'wt-3880-order';
 const KEY = buildCompositeKey(WORKTREE_ID, 'claude', 'claude');
@@ -259,7 +260,7 @@ async function tickOn(
     ['pane'],
     state.instanceId,
     undefined,
-    generation,
+    generation, undefined, undefined, undefined, undefined, testBoundFrame('')
   );
   now += 2_000;
   return result;

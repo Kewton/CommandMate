@@ -30,10 +30,15 @@ let onKey: (key: string) => void = () => {};
 /** Awaited between two keys of one `sendSpecialKeys` call (the real one sleeps there). */
 let betweenKeys: () => Promise<void> = async () => {};
 
+/** Issue #4304 F1-a: run during the foreground read, an await right before the first key. */
+const foregroundRead = vi.hoisted(() => ({ hook: (): void => {} }));
 vi.mock('@/lib/tmux/tmux', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withPaneGenerationTmuxDoubles({
   // Issue #4304 F1-a: answers read a pane bound to its generation.
   // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
-  readPaneForeground: async () => 'other' as const,
+  readPaneForeground: async () => {
+    foregroundRead.hook();
+    return 'other' as const;
+  },
   capturePane: vi.fn(),
   sendKeys: vi.fn(async (_session: string, keys: string, enter = true) => {
     const key = enter ? `${keys}<Enter>` : keys;
@@ -98,6 +103,7 @@ function holdSend(): { release: () => void; done: Promise<void> } {
 }
 
 beforeEach(() => {
+  foregroundRead.hook = () => {};
   delivered = [];
   onKey = () => {};
   betweenKeys = async () => {};
@@ -204,25 +210,27 @@ describe('[#3952 review P1-b] the last look is taken right before the first key,
   it('positive: the contract turned off during the guard’s own capture — nothing is typed', async () => {
     let allowed = true;
     const stillAllowedAtSend = vi.fn(() => allowed);
-    // No frame: the number's guard captures the pane itself (an await, and no send in the way).
-    vi.mocked(capturePane).mockImplementation(async () => {
+    // Issue #4304 F1-a: the answer comes with its frame (a prompt handed over
+    // without one is read again off the pane), so the await the contract
+    // changes across is the foreground read right before the first key — no
+    // send in the way, as before.
+    foregroundRead.hook = () => {
       allowed = false;
-      return '';
-    });
+    };
     await expect(
-      sendPromptAnswer({ sessionName: SESSION, answer: '1', cliToolId: 'codex', promptData: CODEX_PROMPT, stillAllowedAtSend }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '1', cliToolId: 'codex', promptData: CODEX_PROMPT, stillAllowedAtSend }),
     ).rejects.toMatchObject({ name: 'PromptAnswerNotDeliveredError', skip: 'answer-withheld', keysSent: false });
     expect(delivered).toEqual([]);
   });
 
   it('positive: an answer_only digit (no Enter, not a writer) is not typed either', async () => {
     let allowed = true;
-    vi.mocked(capturePane).mockImplementation(async () => {
+    // Issue #4304 F1-a: the await before the key is the foreground read (see above).
+    foregroundRead.hook = () => {
       allowed = false;
-      return '';
-    });
+    };
     await expect(
-      sendPromptAnswer({
+      sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: SESSION,
         answer: '1',
         cliToolId: 'codex',
@@ -236,14 +244,14 @@ describe('[#3952 review P1-b] the last look is taken right before the first key,
   it('negative: still allowed — the answer goes out as before, asked once', async () => {
     vi.mocked(capturePane).mockResolvedValue('');
     const stillAllowedAtSend = vi.fn(() => true);
-    await sendPromptAnswer({ sessionName: SESSION, answer: '1', cliToolId: 'codex', promptData: CODEX_PROMPT, stillAllowedAtSend });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '1', cliToolId: 'codex', promptData: CODEX_PROMPT, stillAllowedAtSend });
     expect(delivered).toEqual(['1', '<Enter>']);
     expect(stillAllowedAtSend).toHaveBeenCalledTimes(1);
   });
 
   it('negative: no last look given (manual answers) — typed as before', async () => {
     vi.mocked(capturePane).mockResolvedValue('');
-    await sendPromptAnswer({ sessionName: SESSION, answer: '1', cliToolId: 'codex', promptData: CODEX_PROMPT });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '1', cliToolId: 'codex', promptData: CODEX_PROMPT });
     expect(delivered).toEqual(['1', '<Enter>']);
   });
 });
@@ -268,7 +276,7 @@ describe('[#3952 review P2] the keys of an answer stop when its input ticket is 
     onKey = (key) => {
       if (key === 'y') typed.resolve();
     };
-    const answering = sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO }).catch(
+    const answering = sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO }).catch(
       (e: unknown) => e,
     );
     await typed.promise;
@@ -280,7 +288,7 @@ describe('[#3952 review P2] the keys of an answer stop when its input ticket is 
   });
 
   it('negative: nothing replaced — the text and its Enter', async () => {
-    await sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
     expect(delivered).toEqual(['y', '<Enter>']);
   });
 
@@ -388,7 +396,7 @@ describe('[#3952 review P2] Command Code’s checkbox answer: the second stage n
       await gate.promise;
       return checkboxFrame([1]);
     });
-    const answering = sendPromptAnswer({
+    const answering = sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',
@@ -404,7 +412,7 @@ describe('[#3952 review P2] Command Code’s checkbox answer: the second stage n
 
   it('negative: nothing replaced — the toggle, then the walk to Submit and its Enter', async () => {
     vi.mocked(capturePane).mockResolvedValueOnce(checkboxFrame([1])).mockResolvedValueOnce(checkboxFrame([1]));
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',
@@ -462,7 +470,7 @@ describe('[#3952 review P2, manual answers] the ticket is checked between keys w
     const gate = deferred();
     onKey = () => firstKey.resolve();
     betweenKeys = () => gate.promise;
-    const answering = sendPromptAnswer({
+    const answering = sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1,3',
       cliToolId: 'command-code',
@@ -490,7 +498,7 @@ describe('[#3952 review P2, manual answers] the ticket is checked between keys w
     betweenKeys = async () => {
       if (delivered.includes('Down')) await gate.promise;
     };
-    const answering = sendPromptAnswer({
+    const answering = sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',
@@ -506,7 +514,7 @@ describe('[#3952 review P2, manual answers] the ticket is checked between keys w
 
   it('negative: Command Code’s toggles, nothing replaced — both go out', async () => {
     vi.mocked(capturePane).mockResolvedValue(checkboxFrame([1, 3]));
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1,3',
       cliToolId: 'command-code',

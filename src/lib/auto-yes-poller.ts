@@ -140,7 +140,8 @@ import {
 } from './polling/auto-yes-poller-receipt-log';
 import { syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
-import type { BoundFrame } from './session/cli-session';
+import { checkPaneGeneration, type BoundFrame } from './session/cli-session';
+import { PollerFrameUnboundError } from './polling/auto-yes-poller-capture';
 import { promptDataForStorage } from './polling/prompt-screen-reading';
 import {
   beginLedgerAttempt,
@@ -361,6 +362,12 @@ export function processStopConditionDelta(
  * @param capture - Issue #3881 (review P2-2): the tick's frame and its capture
  *   window, so an audit row this answer creates carries the same reading the
  *   response poller's save gives a row (`promptDataForStorage`)
+ * @param samePane - Issue #4304 F1-a (review P2-3 of e662dba): whether the
+ *   session still shows the pane the answer was sent to. A pane replaced while
+ *   the keys were out (the session epoch unchanged — an outside `new-window`)
+ *   is treated as a relaunch is: the audit row records what the old pane
+ *   received, nothing of the new pane's state (dedup, task event, poller
+ *   times, response poller restart) is written from this answer.
  */
 async function finishAnsweredPrompt(
   prompt: JudgedPrompt,
@@ -368,6 +375,7 @@ async function finishAnsweredPrompt(
   answer: string,
   generation?: AutoYesTickGeneration,
   capture?: { frame: ReturnType<typeof normalizeFrame>; captureTop: CaptureTop | undefined },
+  samePane = true,
 ): Promise<void> {
   const { worktreeId, cliToolId, instanceId, compositeKey, pollerState, promptData, promptKey } =
     prompt;
@@ -379,7 +387,7 @@ async function finishAnsweredPrompt(
   // process's identical question), not the poller's response time, not the
   // task event (the task looked up now may be the new session's). Only the
   // audit row is, and it may not adopt a pending row saved after the tick began.
-  const sameSession = generation === undefined || isSameSession(generation);
+  const sameSession = (generation === undefined || isSameSession(generation)) && samePane;
 
   if (sameSession) {
     // 6. Update timestamp and reset error count
@@ -439,7 +447,7 @@ async function finishAnsweredPrompt(
       answer,
       answeredBy: 'auto',
       content: promptDetection.rawContent || promptDetection.cleanContent,
-      ...(sameSession ? {} : { pendingSavedAtOrBefore: generation!.startedAt }),
+      ...(sameSession || generation === undefined ? {} : { pendingSavedAtOrBefore: generation.startedAt }),
     });
   } catch (recordError) {
     logger.warn('poller:prompt-audit-record-failed', {
@@ -933,12 +941,16 @@ export async function detectAndRespondToPrompt(
     settleSendAttempt(attempt, false);
     // Issue #3796 review E: the episode the send began for, as on the failure side.
     noteAnswerSent(cliToolId, worktreeId, instanceId, false, receiptEpisode);
+    // Issue #4304 F1-a (review P2-3): the keys went to the tick's pane; whether
+    // the session still shows it decides what of the new state is written.
+    const samePane = await answeredPaneIsCurrent(sessionName, boundFrame);
     // Issue #3798: the wait this answer went to — opened if none is open — so
     // the frame that shows the confirmation gone closes it. Once the keys are
     // out, only by a tick that still acts for this instance (#3706: one that
     // lost its grant or session writes nothing that says "answered"), and only
-    // for the wait fixed as the send began.
-    if (generation === undefined || isTickCurrent(generation)) {
+    // for the wait fixed as the send began. Issue #4304: and only while the
+    // session shows the pane answered.
+    if (samePane && (generation === undefined || isTickCurrent(generation))) {
       observeAnsweredPrompt(judged, screenKey, tickObservation, answerTarget);
     }
 
@@ -947,7 +959,7 @@ export async function detectAndRespondToPrompt(
       // The tick's one normalised frame (#3183), not the capture again.
       frame,
       captureTop: captureTopOf(rawOutput ?? cleanOutput, captureExtent, cliToolId),
-    });
+    }, samePane);
 
     return 'responded';
   } catch (error) {
@@ -967,6 +979,22 @@ export async function detectAndRespondToPrompt(
   } finally {
     endLedgerTick(ledgerScope, ledgerTick);
     if (!keepDuplicateRetry) releaseDuplicateRetry(pollerState);
+  }
+}
+
+/**
+ * Whether the session still shows the pane an answer was sent to (Issue #4304
+ * F1-a, review P2-3): the tick's bound generation, alive or dead (an answer
+ * that ends the agent leaves its own pane dead). No bound frame (direct
+ * callers): nothing to compare, as before. Never throws; unreadable is "not".
+ */
+async function answeredPaneIsCurrent(sessionName: string, boundFrame: BoundFrame | undefined): Promise<boolean> {
+  if (boundFrame === undefined) return true;
+  try {
+    const check = await checkPaneGeneration(sessionName, boundFrame.generation);
+    return check === 'same' || check === 'pane-dead';
+  } catch {
+    return false;
   }
 }
 
@@ -1117,16 +1145,21 @@ async function pollAutoYes(
     if (sessionMissing) {
       // Issue #3791 (review N1): no screen for the duplicate guard to hold back.
       releaseDuplicateRetry(generation.pollerState);
-      // Issue #3798: a session that is gone is waiting for nobody.
-      observeWaitingFromTick({
-        worktreeId,
-        cliToolId,
-        instanceId,
-        start: observationStart,
-        frameTime: { frameCapturedAt: 0, frameFetchedAfterStart: false },
-        pollerState: generation.pollerState,
-        rawOutput: null,
-      });
+      // Issue #3798: a session that is gone is waiting for nobody. Issue #4304
+      // F1-a (review P2-3): not from a capture that could not be bound — a
+      // frame nobody could read is not "gone" (`rawOutput: null`); the wait is
+      // left for an observer that read the session's absence itself.
+      if (!(error instanceof PollerFrameUnboundError)) {
+        observeWaitingFromTick({
+          worktreeId,
+          cliToolId,
+          instanceId,
+          start: observationStart,
+          frameTime: { frameCapturedAt: 0, frameFetchedAfterStart: false },
+          pollerState: generation.pollerState,
+          rawOutput: null,
+        });
+      }
       if (!pollerState!.waitingForSession) {
         pollerState!.waitingForSession = true;
         logger.info('poller:waiting-for-session', { worktreeId, cliToolId, instanceId });

@@ -124,7 +124,7 @@ describe('[#3952] an Enter-sending answer and a message send do not interleave',
     onKey = (key) => {
       if (key === 'y') typed.resolve();
     };
-    const answer = sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
+    const answer = sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
     // Started from this (the test's) context, as another request would be —
     // not from inside the answer's own async context, which would join it.
     await typed.promise;
@@ -139,7 +139,7 @@ describe('[#3952] an Enter-sending answer and a message send do not interleave',
   it('negative: answer_only — one digit, no Enter, and nothing to wait for', async () => {
     vi.mocked(capturePane).mockResolvedValue('');
     const held = holdSend();
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'codex',
@@ -163,7 +163,7 @@ describe('[#3952] an Enter-sending answer and a message send do not interleave',
 describe('[#3952] an answer that arrives during a send', () => {
   it('waits for the send, reads the same prompt again, and answers (negative control)', async () => {
     const held = holdSend();
-    const answer = sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
+    const answer = sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
     await flush();
     expect(delivered).toEqual(['<send>']);
     vi.mocked(capturePane).mockClear();
@@ -176,7 +176,7 @@ describe('[#3952] an answer that arrives during a send', () => {
 
   it('positive: the prompt is gone after the send — nothing is typed', async () => {
     const held = holdSend();
-    const answer = sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
+    const answer = sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
     await flush();
     vi.mocked(capturePane).mockResolvedValue('❯ ');
     held.release();
@@ -231,7 +231,7 @@ describe('[#3952] an answer that arrives during a send', () => {
 
   it('positive: the screen cannot be read after the send — nothing is typed', async () => {
     const held = holdSend();
-    const answer = sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
+    const answer = sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
     await flush();
     vi.mocked(capturePane).mockRejectedValue(new Error('no server running'));
     held.release();
@@ -243,7 +243,7 @@ describe('[#3952] an answer that arrives during a send', () => {
   it('positive: Auto-Yes lost its grant while it waited — nothing is typed, nothing read', async () => {
     let current = true;
     const held = holdSend();
-    const answer = sendPromptAnswer({
+    const answer = sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: 'y',
       cliToolId: 'claude',
@@ -263,7 +263,7 @@ describe('[#3952] an answer that arrives during a send', () => {
   it('negative: a send to another instance is not waited for', async () => {
     const held = holdSend(OTHER_SESSION);
     vi.mocked(capturePane).mockClear();
-    await sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO });
     expect(delivered).toEqual(['<send>', 'y', '<Enter>']);
     expect(capturePane).not.toHaveBeenCalled();
     held.release();
@@ -369,7 +369,7 @@ describe('[#3952 review P1-2] the caller’s last look is taken again right befo
     const stillAllowedAtSend = vi.fn(() => allowed);
     vi.mocked(capturePane).mockResolvedValue(YES_NO_FRAME);
     const held = holdSend();
-    const answer = sendPromptAnswer({
+    const answer = sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: 'y',
       cliToolId: 'claude',
@@ -391,7 +391,7 @@ describe('[#3952 review P1-2] the caller’s last look is taken again right befo
     const stillAllowedAtSend = vi.fn(() => true);
     vi.mocked(capturePane).mockResolvedValue(YES_NO_FRAME);
     const held = holdSend();
-    const answer = sendPromptAnswer({
+    const answer = sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: 'y',
       cliToolId: 'claude',
@@ -413,7 +413,7 @@ describe('[#3952 review P1-2] the caller’s last look is taken again right befo
   it('no wait — still asked once, right before the first key; false types nothing', async () => {
     const stillAllowedAtSend = vi.fn(() => false);
     await expect(
-      sendPromptAnswer({
+      sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: SESSION,
         answer: 'y',
         cliToolId: 'claude',

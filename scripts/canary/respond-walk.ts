@@ -12,7 +12,9 @@
  *   frame — `detectPrompt` over the box-stripped capture, `evaluateDialogPresence`
  *   over the raw one, `judgePromptResponse` over both — resolves the answer with
  *   `resolvePromptAnswer`, and hands it to `sendPromptAnswer` together with the
- *   frame it verified. {@link verifyLikePromptResponse} is those calls in that
+ *   frame it verified — bound to the pane's generation (Issue #4304 F1-a), so
+ *   the walk captures that frame itself right before the answer and verifies
+ *   and resolves on it. {@link verifyLikePromptResponse} is those calls in that
  *   order with nothing of its own. The keystrokes go through the PRODUCTION
  *   `sendPromptAnswer` → `src/lib/tmux/tmux.ts`, with `$TMUX` pointed at the
  *   canary's private server by `ScenarioDriver.withProductionTmux`, which asserts
@@ -32,6 +34,7 @@ import { STATUS_REASON } from '@/lib/detection/status-detector';
 import { evaluateDialogPresence, judgePromptResponse } from '@/lib/polling/auto-yes-dialog-gate';
 import { resolvePromptAnswer } from '@/lib/prompt-answer-semantic';
 import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
+import { captureBoundFrame } from '@/lib/session/cli-session';
 import type { PromptData } from '@/types/models';
 import { ScenarioStepError, type Observation, type ScenarioDriver } from './types';
 
@@ -113,16 +116,34 @@ export async function walkWithRespond(
       );
     }
 
-    await driver.withProductionTmux(sessionName =>
-      sendPromptAnswer({
+    // Issue #4304 F1-a (review P2-1): the answer goes out on the frame it was
+    // decided on. The route captures a frame bound to the pane's generation,
+    // verifies and resolves on it, and sends that frame; the walk does the same
+    // — the observation above only says `wait` would stop. A pane replaced
+    // since then is read here, and the keys go to the pane read, or none.
+    await driver.withProductionTmux(async sessionName => {
+      const captured = await captureBoundFrame({ sessionName });
+      if (captured.kind === 'unknown') {
+        throw new ScenarioStepError(
+          `${step.screen}: \`respond "${step.answer}"\` refused — answer_not_delivered (${captured.reason})`,
+          at
+        );
+      }
+      const onFrame = verifyLikePromptResponse(captured.frame, step.answer);
+      if (!onFrame.ok) {
+        throw new ScenarioStepError(
+          `${step.screen}: \`respond "${step.answer}"\` refused on the bound frame — ${onFrame.reason}`,
+          at
+        );
+      }
+      await sendPromptAnswer({
         sessionName,
-        answer: verdict.input,
+        answer: onFrame.input,
         cliToolId: WALK_TOOL,
-        promptData: verdict.promptData,
-        // Issue #4304 F1-a: no raw frame — the sender binds its own read to the
-        // pane's generation and sends only to that pane.
-      })
-    );
+        promptData: onFrame.promptData,
+        frame: captured,
+      });
+    });
     driver.log(`  ${step.screen}: respond "${step.answer}" sent`);
 
     await driver.waitFor(step.next.reached, {

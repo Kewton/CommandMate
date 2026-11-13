@@ -66,6 +66,7 @@ import {
 import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import type { PromptData } from '@/types/models';
 import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
+import { assessPromptAnswerability } from '@/lib/polling/auto-yes-dialog-gate';
 
 const FIXTURES = path.resolve(__dirname, 'detection/fixtures');
 
@@ -213,7 +214,7 @@ describe('[#2033] the numeric paths that were already correct are unchanged', ()
     // gemini has no tool module (`createGenericStatusDetector`). Gating it on
     // rules that do not exist would silence it — the rollout mistake
     // `auto-yes-dialog-gate` documents — so the guard must not even capture.
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: 'mcbd-gemini-wt',
       answer: '1',
       cliToolId: 'gemini',
@@ -316,11 +317,16 @@ describe('[#2574] a digit that commits the dialog is not followed by an Enter', 
   it('reads the pane itself on the Auto-Yes path, which passes no frame', async () => {
     vi.mocked(capturePane).mockResolvedValue(COMMAND_CODE_PERMISSION());
 
+    // Issue #4304 F1-a (review P2-1): a prompt handed over without a frame is
+    // read again off the pane the sender captures, so what it hands over is
+    // that pane's reading — as a caller with no frame of its own now must.
+    const onPane = assessPromptAnswerability('command-code', COMMAND_CODE_PERMISSION()).promptCheck?.promptData;
+    expect(onPane).toBeDefined();
     await sendPromptAnswer({
       sessionName: 'mcbd-command-code-wt',
       answer: '1',
       cliToolId: 'command-code',
-      promptData: PERMISSION_PROMPT,
+      promptData: onPane,
     });
 
     expect(capturePane).toHaveBeenCalledWith('mcbd-command-code-wt', expect.any(Number));

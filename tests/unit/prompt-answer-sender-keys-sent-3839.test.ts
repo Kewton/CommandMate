@@ -63,6 +63,7 @@ import { capturePane } from '@/lib/tmux/tmux';
 import { readCommandCodeQuestionDialog } from '@/lib/detection/tools/command-code/dialog';
 import { isMultipleChoicePrompt } from '../helpers/prompt-type-guards';
 import type { MultipleChoicePromptData, PromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const SESSION = 'cm-wt-3839-claude';
 const stillCurrent = (): boolean => true;
@@ -109,7 +110,7 @@ describe('[#3839] the text path: the typed answer, then its Enter', () => {
   it('an Enter that fails after the text is typed carries keysSent: true', async () => {
     failTyped = 'enter';
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
     );
     expect(delivered).toEqual(['y']);
     expect(error?.message).toBe('tmux send-keys failed');
@@ -119,7 +120,7 @@ describe('[#3839] the text path: the typed answer, then its Enter', () => {
   it('the same without stillCurrent (a manual answer): the text is on the pane all the same', async () => {
     failTyped = 'enter';
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO }),
     );
     expect(error?.keysSent).toBe(true);
   });
@@ -127,7 +128,7 @@ describe('[#3839] the text path: the typed answer, then its Enter', () => {
   it('negative: a failure typing the text itself says nothing about keys', async () => {
     failTyped = 'text';
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent }),
     );
     expect(delivered).toEqual([]);
     expect(error?.message).toBe('tmux send-keys failed');
@@ -135,7 +136,7 @@ describe('[#3839] the text path: the typed answer, then its Enter', () => {
   });
 
   it('negative: a send that goes through throws nothing', async () => {
-    await sendPromptAnswer({ sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: 'y', cliToolId: 'claude', promptData: YES_NO, stillCurrent });
     expect(delivered).toEqual(['y', '<Enter>']);
   });
 });
@@ -145,7 +146,7 @@ describe("[#3839] claude's checkbox list: Space, then down to Next, then Enter",
     // answer 2: Down, Space, Down, Down, Enter — the third key fails.
     failSpecialAt = 2;
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHECKBOX, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHECKBOX, stillCurrent }),
     );
     expect(delivered).toEqual(['Down', 'Space']);
     expect(error?.message).toMatch(/Failed to send special keys/);
@@ -155,7 +156,7 @@ describe("[#3839] claude's checkbox list: Space, then down to Next, then Enter",
   it('negative: a failure on the first key says nothing about keys', async () => {
     failSpecialAt = 0;
     const error = await thrownBy(
-      sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHECKBOX, stillCurrent }),
+      sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHECKBOX, stillCurrent }),
     );
     expect(delivered).toEqual([]);
     expect(error !== null && 'keysSent' in error).toBe(false);
@@ -164,7 +165,7 @@ describe("[#3839] claude's checkbox list: Space, then down to Next, then Enter",
   it('negative: a stop between the keys is still the stop, keysSent: true', async () => {
     let asked = 0;
     const error = await thrownBy(
-      sendPromptAnswer({
+      sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: SESSION,
         answer: '2',
         cliToolId: 'claude',
@@ -177,7 +178,7 @@ describe("[#3839] claude's checkbox list: Space, then down to Next, then Enter",
   });
 
   it('negative: the keys and the call are as before', async () => {
-    await sendPromptAnswer({ sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHECKBOX, stillCurrent });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: SESSION, answer: '2', cliToolId: 'claude', promptData: CHECKBOX, stillCurrent });
     expect(delivered).toEqual(['Down', 'Space', 'Down', 'Down', 'Enter']);
   });
 });
@@ -222,7 +223,7 @@ describe("[#3839] Command Code's checkbox question", () => {
     // toggles: '1' (index 0); then Down, Down, Down, Enter — the first Down fails.
     failSpecialAt = 1;
     const error = await thrownBy(
-      sendPromptAnswer({
+      sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: SESSION,
         answer: '1,3',
         cliToolId: 'command-code',
@@ -239,7 +240,7 @@ describe("[#3839] Command Code's checkbox question", () => {
     // Nothing to toggle, and the read-back fails: refused before any key.
     vi.mocked(capturePane).mockRejectedValueOnce(new Error('capture failed'));
     const error = await thrownBy(
-      sendPromptAnswer({
+      sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: SESSION,
         answer: '3',
         cliToolId: 'command-code',

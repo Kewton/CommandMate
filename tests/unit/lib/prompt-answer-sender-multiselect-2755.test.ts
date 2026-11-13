@@ -151,7 +151,7 @@ describe('[#2755] the key sequence, per #2754’s measured semantics', () => {
     vi.mocked(capturePane)
       .mockResolvedValueOnce(afterToggle)
       .mockResolvedValueOnce(afterConfirm);
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: wanted,
       cliToolId: 'command-code',
@@ -237,7 +237,7 @@ describe('[#2755] the key sequence, per #2754’s measured semantics', () => {
         questionFrame({ ticked: [], question: 'Which files should I update?', confirm: 'Submit' }),
       );
 
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',
@@ -258,7 +258,7 @@ describe('[#2755] it refuses rather than confirm something it did not verify', (
     vi.mocked(capturePane).mockResolvedValueOnce(questionFrame({ ticked: [3] }));
 
     await expect(
-      sendPromptAnswer({
+      sendPromptAnswer({ frame: testBoundFrame(''),
         sessionName: SESSION,
         answer: '1,2,3',
         cliToolId: 'command-code',
@@ -273,7 +273,7 @@ describe('[#2755] it refuses rather than confirm something it did not verify', (
   it('does not press the confirm row when the question has gone', async () => {
     vi.mocked(capturePane).mockResolvedValueOnce('# Command Code v1.54.1\n\n❯ Ask anything\n');
 
-    const error = await sendPromptAnswer({
+    const error = await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',
@@ -291,7 +291,7 @@ describe('[#2755] it refuses rather than confirm something it did not verify', (
   it('does not press the confirm row when the pane cannot be re-read', async () => {
     vi.mocked(capturePane).mockRejectedValueOnce(new Error('no server running'));
 
-    const error = await sendPromptAnswer({
+    const error = await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',
@@ -309,7 +309,7 @@ describe('[#2755] it refuses rather than confirm something it did not verify', (
       .mockResolvedValueOnce(questionFrame({ ticked: [1] }))
       .mockResolvedValueOnce(reviewFrame(true));
 
-    const error = await sendPromptAnswer({
+    const error = await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',
@@ -325,7 +325,7 @@ describe('[#2755] it refuses rather than confirm something it did not verify', (
       .mockResolvedValueOnce(questionFrame({ ticked: [1] }))
       .mockResolvedValueOnce(questionFrame({ ticked: [1] }));
 
-    const error = await sendPromptAnswer({
+    const error = await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: SESSION,
       answer: '1',
       cliToolId: 'command-code',

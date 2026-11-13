@@ -23,6 +23,7 @@ import { sendPromptAnswer } from '@/lib/prompt-answer-sender';
 import { hasCheckboxOptions, isMultiSelectPrompt } from '@/lib/prompt-answer-semantic';
 import { sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import type { MultipleChoicePromptData } from '@/types/models';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 function list(labels: string[]): MultipleChoicePromptData {
   return {
@@ -57,14 +58,14 @@ describe('[#3397] the sender reads [X] / [✔] boxes as a checkbox list', () => 
     ['[✔]', ['[✔] Option A', '[✔] Option B', '[✔] Option C']],
     ['mixed [ ] / [✔]', ['[✔] Option A', '[ ] Option B', '[ ] Option C']],
   ])('%s: Space on the option, then down to Next and Enter', async (_label, labels) => {
-    await sendPromptAnswer({ sessionName: 'claude-test', answer: '2', cliToolId: 'claude', promptData: list(labels) });
+    await sendPromptAnswer({ frame: testBoundFrame(''), sessionName: 'claude-test', answer: '2', cliToolId: 'claude', promptData: list(labels) });
 
     expect(sendSpecialKeys).toHaveBeenCalledWith('claude-test', ['Down', 'Space', 'Down', 'Down', 'Enter'], expect.objectContaining({ shouldContinue: expect.any(Function) }));
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
   it('control: a list without boxes is still single-select', async () => {
-    await sendPromptAnswer({
+    await sendPromptAnswer({ frame: testBoundFrame(''),
       sessionName: 'claude-test',
       answer: '2',
       cliToolId: 'claude',

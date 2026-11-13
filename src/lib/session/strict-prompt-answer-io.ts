@@ -79,6 +79,25 @@ export function describeError(error: unknown): string {
 }
 
 /**
+ * A strict key refused before it was sent (Issue #4304 F1-a, review P2-2 of
+ * e662dba): the session no longer shows, alive, the pane the answer's reads
+ * were of. Nothing of THIS key reached tmux — `keysSent: false` says so to
+ * `strict-respond`, which then does not count it as sent: no key at all is a
+ * refusal (code 40, `capture_failed`, no `prompt_answered_human`, the launch's
+ * trust debt kept), keys before it end `screen_moved_mid_send` with their count
+ * as it was. A transport failure (`sendSessionAnswerKey` throwing) stays what it
+ * is: a key that may have gone.
+ */
+export class StrictKeyNotSentError extends Error {
+  readonly keysSent = false as const;
+
+  constructor(sessionName: string, readonly generationCheck: string) {
+    super(`The pane of ${sessionName} the strict answer read was not confirmed before a key (${generationCheck}, Issue #4304)`);
+    this.name = 'StrictKeyNotSentError';
+  }
+}
+
+/**
  * @param ticket - The session's input ticket the answer runs under
  *   ({@link answerStrictlyAsInputWriter}, Issue #3952). Given, a key is sent
  *   only while it is current: a session replaced mid-answer gets none.
@@ -133,9 +152,7 @@ export function createStrictRespondDeps(
         if (now !== null) generation = now.generation;
       }
       const check = generation === undefined ? 'generation-unreadable' : await checkPaneGeneration(sessionName, generation);
-      if (check !== 'same') {
-        throw new Error(`The pane of ${sessionName} the strict answer read was not confirmed before a key (${check}, Issue #4304)`);
-      }
+      if (check !== 'same') throw new StrictKeyNotSentError(sessionName, check);
       if (ticket !== undefined && !ticket.isCurrent()) {
         throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
       }

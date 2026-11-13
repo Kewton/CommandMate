@@ -409,6 +409,15 @@ async function checkBeforeSending(
   };
 }
 
+/**
+ * Whether `sendKey` refused a key before sending it (Issue #4304 F1-a): the
+ * error says `keysSent: false` (`StrictKeyNotSentError`). Read by shape, so
+ * this module does not import the session I/O that implements `sendKey`.
+ */
+function isKeyNotSent(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { keysSent?: unknown }).keysSent === false;
+}
+
 /** One strict answer, under the session's lock. */
 async function answerStrictly(
   request: StrictRespondRequest,
@@ -445,7 +454,13 @@ async function answerStrictly(
       facts.highlight = null;
       try {
         await deps.sendKey(keys[i]);
-      } catch {
+      } catch (error: unknown) {
+        // Issue #4304 F1-a: refused before the key (the pane the reads were of
+        // is no longer the session's) — nothing of it reached tmux. With no
+        // key sent it is a refusal; after some, the rest were not sent.
+        if (isKeyNotSent(error)) {
+          return facts.keysSent === 0 ? resultOf(facts, 40, 'capture_failed') : resultOf(facts, 41, 'screen_moved_mid_send');
+        }
         // tmux may have delivered it: counted, so this is never "not sent".
         facts.keysSent++;
         return resultOf(facts, 41, 'send_failed');

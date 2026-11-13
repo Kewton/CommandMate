@@ -111,6 +111,7 @@ import {
   setAutoYesLedgerClockTimersForTests,
 } from '@/lib/polling/auto-yes-confirmation-ledger';
 import { AUTO_YES_LEDGER_EVENTS as EV } from '@/lib/polling/auto-yes-confirmation-ledger-types';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 const WORKTREE_ID = 'wt-3839';
 const T0 = new Date('2026-10-23T10:00:00.000Z').getTime();
@@ -143,7 +144,7 @@ function pollerState(): AutoYesPollerState {
 /** One tick over a pane whose reading is given; ticks are 2 seconds apart. */
 async function tickOn(state: AutoYesPollerState, prompt: PromptData | null): Promise<string> {
   screen.prompt = prompt;
-  const result = await detectAndRespondToPrompt(WORKTREE_ID, state, 'claude', 'pane', ['pane'], 'claude');
+  const result = await detectAndRespondToPrompt(WORKTREE_ID, state, 'claude', 'pane', ['pane'], 'claude', undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame(''));
   now += 2_000;
   return result;
 }

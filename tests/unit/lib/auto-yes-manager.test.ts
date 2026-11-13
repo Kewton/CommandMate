@@ -43,6 +43,7 @@ import {
   AUTO_STOP_ERROR_THRESHOLD,
 } from '@/config/auto-yes-config';
 import { buildClaude1000RowPermissionFrame } from '../../fixtures/claude-1000-row-prompt';
+import { testBoundFrame } from '@tests/unit/session/bound-frame-test-helper';
 
 // Mock modules for pollAutoYes testing (Issue #161)
 vi.mock('@/lib/session/cli-session', async () => (await import('@tests/unit/session/bound-frame-test-helper')).withBoundCaptureCliSessionDoubles({
@@ -1695,9 +1696,9 @@ describe('auto-yes-manager', () => {
       globalThis.__autoYesPollerStates?.set('test-wt-1167:claude', pollerState);
       const frame = buildClaude1000RowPermissionFrame();
 
-      expect(await detectAndRespondToPrompt('test-wt-1167', pollerState, 'claude', frame))
+      expect(await detectAndRespondToPrompt('test-wt-1167', pollerState, 'claude', frame, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')))
         .toBe('responded');
-      expect(await detectAndRespondToPrompt('test-wt-1167', pollerState, 'claude', frame))
+      expect(await detectAndRespondToPrompt('test-wt-1167', pollerState, 'claude', frame, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')))
         .toBe('duplicate');
       expect(sendSpecialKeys).toHaveBeenCalledTimes(1);
       expect(startPolling).toHaveBeenCalledTimes(1);
@@ -1717,7 +1718,7 @@ describe('auto-yes-manager', () => {
         'test-wt-noprompt',
         pollerState,
         'claude',
-        'Processing...'
+        'Processing...', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')
       );
 
       expect(result).toBe('no_prompt');
@@ -1738,7 +1739,7 @@ describe('auto-yes-manager', () => {
         'test-wt-dup',
         pollerState,
         'claude',
-        promptOutput
+        promptOutput, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')
       );
 
       expect(result).toBe('duplicate');
@@ -1763,7 +1764,7 @@ describe('auto-yes-manager', () => {
         'test-wt-retry',
         pollerState,
         'claude',
-        promptOutput
+        promptOutput, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')
       );
 
       expect(result).toBe('responded');
@@ -1791,7 +1792,7 @@ describe('auto-yes-manager', () => {
         'test-wt-respond',
         pollerState,
         'claude',
-        promptOutput
+        promptOutput, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')
       );
 
       expect(result).toBe('responded');
@@ -1819,7 +1820,7 @@ describe('auto-yes-manager', () => {
         'test-wt-mc-respond',
         pollerState,
         'claude',
-        promptOutput
+        promptOutput, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')
       );
 
       expect(result).toBe('responded');
@@ -1847,7 +1848,7 @@ describe('auto-yes-manager', () => {
         'test-wt-err',
         pollerState,
         'claude',
-        promptOutput
+        promptOutput, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')
       );
 
       expect(result).toBe('error');
@@ -1869,7 +1870,7 @@ describe('auto-yes-manager', () => {
         'test-wt-reset',
         pollerState,
         'claude',
-        'Just some output with no prompt'
+        'Just some output with no prompt', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame('')
       );
 
       expect(result).toBe('no_prompt');
@@ -2167,7 +2168,7 @@ describe('auto-yes-manager', () => {
 
       // Now call detectAndRespondToPrompt (should NOT call stripBoxDrawing again)
       const pollerState = createTestPollerState();
-      await detectAndRespondToPrompt('test-wt-item1', pollerState, 'claude', cleanOutput);
+      await detectAndRespondToPrompt('test-wt-item1', pollerState, 'claude', cleanOutput, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, testBoundFrame(''));
 
       // stripBoxDrawing should be called exactly once (in captureAndCleanOutput only)
       expect(stripBoxDrawingSpy).toHaveBeenCalledTimes(1);
