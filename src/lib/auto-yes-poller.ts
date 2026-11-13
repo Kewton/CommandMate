@@ -141,12 +141,10 @@ import {
 import { syncEnterFallbackEpoch } from './polling/auto-yes-poller-enter-fallback';
 import { capturePollerFrame } from './polling/auto-yes-poller-capture';
 import { promptDataForStorage } from './polling/prompt-screen-reading';
-import { readCommandCodeQuestionDialog } from './detection/tools/command-code/dialog';
 import {
   beginLedgerAttempt,
   beginLedgerTick,
   endLedgerTick,
-  holdLedgerConfirmationOnFollowUpPage,
   noteLedgerPollerStopped,
   noteLedgerWorktreeStopped,
   observeLedgerScreen,
@@ -572,17 +570,6 @@ function settleFailedTick(
 }
 
 /**
- * Is `raw` Command Code's `AskUserQuestion` Review page (Issue #4313 再指示 1)?
- * The reader's own decline (`review-page`, #2755 §7) — with or without the
- * unanswered-questions warning — so the ledger and the status path agree on
- * what the page is.
- */
-function isCommandCodeReviewPageFrame(raw: string): boolean {
-  const reading = readCommandCodeQuestionDialog(raw);
-  return reading.kind === 'unsupported' && reading.reason === 'review-page';
-}
-
-/**
  * Detect prompt in terminal output, resolve auto-answer, and send response.
  *
  * @internal Exported for testing purposes only.
@@ -735,12 +722,6 @@ export async function detectAndRespondToPrompt(
         captureExtent,
         detectPromptOnCleanFrame,
       });
-      // Issue #4313 再指示 1: Command Code's Review page is no prompt to
-      // Auto-Yes (#3497), but the question answered before it is not sent
-      // until a human confirms the page — keep its ledger entry open.
-      if (cliToolId === 'command-code' && isCommandCodeReviewPageFrame(frame.raw)) {
-        holdLedgerConfirmationOnFollowUpPage(ledgerScope);
-      }
       if (withheldPastGate !== null && withheldPastGate.reason !== null) {
         tickDecisionRecorder({
           worktreeId,

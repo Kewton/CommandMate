@@ -16,6 +16,7 @@ import {
   COMMAND_CODE_REVIEW_PAGE_ANSWERS,
   isCommandCodeReviewPagePrompt,
   readCommandCodeQuestionDialog,
+  readCommandCodeReviewPagePrompt,
 } from '@/lib/detection/tools/command-code/dialog';
 import { readCommandCodeReviewPage } from '@/lib/detection/selection-shape';
 import type { MultipleChoicePromptData, PromptData, PromptType, SubmitMode } from '@/types/models';
@@ -619,16 +620,30 @@ async function sendCommandCodeMultiSelectAnswer(
 
 /**
  * Refuse anything but `1` / `2` on Command Code's Review page (Issue #4313
- * 再指示 1), with nothing typed. Reported as the dialog's own refusal
- * (`PromptAnswerRejectedError`), which every caller already maps to "nothing
- * was sent" and leaves unrecorded.
+ * 再指示 1・2), with nothing typed and nothing recorded. Reported as the
+ * dialog's own refusal (`PromptAnswerRejectedError`), which every caller
+ * already maps to "nothing was sent" and leaves unrecorded.
+ *
+ * 再指示 2: judged on the screen the keys are about to go to (the caller's
+ * frame, else the pane read here), whatever payload the caller brought. A
+ * stored row from the question before the page (`/respond`'s `messageId`
+ * shape: the question's own three options) let a `3` through the payload-only
+ * check and on to the page as a bare digit. The payload still counts too, for
+ * a caller whose frame is unreadable.
  */
-function assertReviewPageAnswer(params: SendPromptAnswerParams): void {
-  if (params.cliToolId !== 'command-code' || !isCommandCodeReviewPagePrompt(params.promptData)) return;
+async function assertReviewPageAnswer(params: SendPromptAnswerParams): Promise<void> {
+  if (params.cliToolId !== 'command-code') return;
   if (COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(params.answer)) return;
+  let onReviewPage = isCommandCodeReviewPagePrompt(params.promptData);
+  if (!onReviewPage) {
+    const frame = await readGuardFrame(params);
+    const reading = frame === null ? null : readCommandCodeQuestionDialog(frame);
+    onReviewPage = reading?.kind === 'unsupported' && reading.reason === 'review-page';
+  }
+  if (!onReviewPage) return;
   throw new PromptAnswerRejectedError(params.cliToolId, params.answer, {
     kind: 'review-page',
-    options: params.promptData.options.map((option) => option.label),
+    options: ['Submit', 'Cancel'],
     answerMode: 'keys',
   });
 }
@@ -991,6 +1006,14 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
     params;
   const readMark = params.readMark ?? instanceInputReadMark();
 
+  // Issue #4313 再指示 1・2: on Command Code's Review page the answer is `1` or
+  // `2` and nothing else — refused here, before any key and before every arm
+  // (the checkbox arm included), for every caller and whatever payload it
+  // brought (the route already refuses it in `resolvePromptAnswer` when the
+  // payload is the page's). Without this a `3` missed the Review arm below and
+  // was typed at the page as a bare digit.
+  await assertReviewPageAnswer(params);
+
   // Issue #2755: Command Code's checkbox question, before every guard below.
   // Its answer is a SET (`"1,3"`), which none of them can read — `/^\d+$/` is
   // how all three ask "is this a number?", so a set would be judged as free
@@ -1017,12 +1040,6 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
     invalidateCache(sessionName);
     return;
   }
-
-  // Issue #4313 再指示 1: on Command Code's Review page the answer is `1` or
-  // `2` and nothing else — refused here, before any key, for every caller (the
-  // route already refuses it in `resolvePromptAnswer`). Without this a `3`
-  // missed the Review arm below and was typed at the page as a bare digit.
-  assertReviewPageAnswer(params);
 
   // Issue #2033: before ANY key is chosen, let the tool's own dialog rules
   // refuse a digit its dialog cannot take. Placed above the branch rather than
@@ -1069,8 +1086,21 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // arm confirms the same page the same way); a digit there is not measured,
   // so none is typed. `↓` / `↑` between its two rows is not measured either
   // (1.54.1 nor 1.88.2) and is what `Cancel` from `Submit` takes.
+  //
+  // 再指示 2: the page is taken off the caller's frame (the screen read right
+  // before the send) as well as off the payload, so `/respond`'s stored row
+  // from the question before the page (its own options) answers the page as
+  // the page — `1` an Enter on `❯ 1. Submit`, not a digit typed at it. The
+  // page's own payload then counts the cursor keys.
+  const reviewPageOnFrame = cliToolId === 'command-code'
+    && !isCommandCodeReviewPagePrompt(promptData)
+    && COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(answer)
+    && params.frame !== undefined
+    ? readCommandCodeReviewPagePrompt(params.frame)?.promptData ?? null
+    : null;
+  const answerPromptData = reviewPageOnFrame ?? promptData;
   const isCommandCodeReviewPage = cliToolId === 'command-code'
-    && isCommandCodeReviewPagePrompt(promptData)
+    && isCommandCodeReviewPagePrompt(answerPromptData)
     && COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(answer);
   const isCursorNavMultiChoice = isCommandCodeReviewPage || ((cliToolId === 'claude' || cliToolId === 'antigravity')
     && (promptData?.type === 'multiple_choice' || fallbackPromptType === 'multiple_choice')
@@ -1149,7 +1179,7 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       if (reread !== null && reread.type !== 'multiple_choice') return 'target-changed';
       // #4313: the Review page's keys are counted from ITS cursor, on that page only.
       if (isCommandCodeReviewPage && reread !== null && !isCommandCodeReviewPagePrompt(reread)) return 'target-changed';
-      const keys = cursorKeys(reread ?? promptData);
+      const keys = cursorKeys(reread ?? answerPromptData);
       writer.assertOwned(false);
       await sendSpecialKeysWhileCurrent(sessionName, keys, writer.stillCurrent, touch);
     });

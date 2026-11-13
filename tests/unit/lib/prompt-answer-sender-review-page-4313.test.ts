@@ -73,3 +73,64 @@ describe('[#4313 再指示 1] sendPromptAnswer on the Review page', () => {
     expect(vi.mocked(sendSpecialKeys)).not.toHaveBeenCalled();
   });
 });
+
+/** The question the page follows, as a stored row carries it: its own three rows. */
+const QUESTION_BEFORE_PAGE: PromptData = {
+  type: 'multiple_choice',
+  question: 'Which option?',
+  options: [
+    { number: 1, label: 'Alpha', isDefault: true },
+    { number: 2, label: 'Beta', isDefault: false },
+    { number: 3, label: 'Gamma', isDefault: false },
+  ],
+  status: 'pending',
+} as PromptData;
+
+describe('[#4313 再指示 2] the screen decides, whatever payload the caller brought', () => {
+  it.each(['3', '0', 'yes'])('refuses %s with the stored question payload and the page as the frame', async (answer) => {
+    await expect(sendPromptAnswer({
+      sessionName: SESSION,
+      answer,
+      cliToolId: 'command-code',
+      promptData: QUESTION_BEFORE_PAGE,
+      frame: REVIEW,
+    })).rejects.toBeInstanceOf(PromptAnswerRejectedError);
+    expect(vi.mocked(sendKeys)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendSpecialKeys)).not.toHaveBeenCalled();
+  });
+
+  it('refuses 3 with no frame from the caller (the pane read here is the page), answer_only included', async () => {
+    await expect(sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '3',
+      cliToolId: 'command-code',
+      promptData: { ...QUESTION_BEFORE_PAGE, submitMode: 'answer_only' } as PromptData,
+    })).rejects.toBeInstanceOf(PromptAnswerRejectedError);
+    expect(vi.mocked(sendKeys)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendSpecialKeys)).not.toHaveBeenCalled();
+  });
+
+  it('陰性対照: 1 with the stored question payload answers the page — one Enter, no digit', async () => {
+    await sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '1',
+      cliToolId: 'command-code',
+      promptData: QUESTION_BEFORE_PAGE,
+      frame: REVIEW,
+    });
+    expect(vi.mocked(sendKeys)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendSpecialKeys).mock.calls.map((call) => call[1])).toEqual([['Enter']]);
+  });
+
+  it('陰性対照: 3 on a frame that is not the page is not refused by this rule', async () => {
+    vi.mocked(capturePane).mockResolvedValue('');
+    await sendPromptAnswer({
+      sessionName: SESSION,
+      answer: '3',
+      cliToolId: 'command-code',
+      promptData: QUESTION_BEFORE_PAGE,
+      frame: '',
+    });
+    expect(vi.mocked(sendKeys)).toHaveBeenCalled();
+  });
+});

@@ -637,25 +637,6 @@ function callLink(
 }
 
 /**
- * The tick reads no confirmation, but a page that still holds the instance's
- * current one: Command Code's `AskUserQuestion` Review page (Issue #4313
- * 再指示 1). An answered question there is not sent until the page is
- * confirmed — by a human only (#3497) — so the entry stays open, as if seen
- * this tick, rather than closing as `resolved-after-answer` at
- * {@link endLedgerTick}. Opens nothing: a page with no open entry before it is
- * not a confirmation of its own. When the page goes, the next tick that reads
- * neither closes the entry as before.
- */
-export function holdLedgerConfirmationOnFollowUpPage(scope: LedgerScope): void {
-  guarded(undefined, (state) => {
-    const compositeKey = keyOf(scope);
-    const entry = currentEntry(state, compositeKey);
-    if (entry === undefined || entry.epoch !== getEnterFallbackSessionEpoch(compositeKey)) return;
-    entry.observedTick = state.ticks.get(compositeKey) ?? entry.observedTick;
-  });
-}
-
-/**
  * Auto-Yes leaves the instance's current confirmation alone for `reason`:
  * opens a withheld interval, or records the reason changing inside one.
  */
