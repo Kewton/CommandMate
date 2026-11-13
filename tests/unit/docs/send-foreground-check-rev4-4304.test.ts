@@ -199,3 +199,77 @@ describe('send-foreground-check-4300.md 改訂 5 (#4304)', () => {
     expect(auditRev5(doc)).toEqual([]);
   });
 });
+
+/**
+ * 改訂 6 (Issue #4304, last revision): the two invariants that replace I1〜I4,
+ * the evidence table with the open mechanisms (D4・D5), the per-operation
+ * screen conditions, D2=(b)+(c), the dead-generation collection and the ten
+ * per-defence controls have to be in the 改訂 6 section. Presence only.
+ */
+const REQUIRED_IN_REV6: readonly string[] = [
+  'V1',
+  'V2',
+  '確認の後の再 exec',
+  'D4',
+  'D5',
+  '狭めて拒否',
+  'opencode-v2',
+  'vibe-local',
+  'composer は要求しない',
+  'copilot.ts:637',
+  'D2 = (b)+(c)',
+  'キャッシュを置かない',
+  '最後の画面の回収',
+  '1 つずつ外して',
+  'PR2a',
+  'PR2b',
+  '改訂 6 の承認',
+];
+
+function auditRev6(text: string): string[] {
+  const missing: string[] = [];
+  const history = sectionStartingWith(text, /^## 改訂の履歴/);
+  if (history === null || !/^- 改訂 6/m.test(history)) missing.push('## 改訂の履歴 に 改訂 6 の行');
+  const section = sectionStartingWith(text, /^## 改訂 6/);
+  if (section === null) return [...missing, '## 改訂 6'];
+  for (const label of REQUIRED_IN_REV6) {
+    if (!section.includes(label)) missing.push(label);
+  }
+  return missing;
+}
+
+describe('send-foreground-check-4300.md 改訂 6 (#4304)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function tmpDoc(text: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'rev6-4304-'));
+    dirs.push(dir);
+    const path = join(dir, 'doc.md');
+    writeFileSync(path, text);
+    return readFileSync(path, 'utf8');
+  }
+
+  it('names the invariants, the evidence decisions, the per-operation conditions and the controls inside the 改訂 6 section', () => {
+    expect(auditRev6(readFileSync(DOC, 'utf8'))).toEqual([]);
+  });
+
+  it('positive control: the document without the 改訂 6 section and history line is reported', () => {
+    const text = readFileSync(DOC, 'utf8');
+    const section = sectionStartingWith(text, /^## 改訂 6/);
+    expect(section).not.toBeNull();
+    const stripped = tmpDoc(text.replace(section as string, '').replace(/^- 改訂 6.*\n/m, ''));
+    const missing = auditRev6(stripped);
+    expect(missing).toContain('## 改訂 6');
+    expect(missing).toContain('## 改訂の履歴 に 改訂 6 の行');
+  });
+
+  it('negative control: a minimal document with every label in the section passes', () => {
+    const doc = tmpDoc(
+      ['# t', '', '## 改訂の履歴', '- 改訂 6: x', '', '## 改訂 6（x）', ...REQUIRED_IN_REV6, '', '## 0. next', ''].join('\n')
+    );
+    expect(auditRev6(doc)).toEqual([]);
+  });
+});
