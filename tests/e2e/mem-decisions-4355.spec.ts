@@ -11,8 +11,9 @@
  * store holds a branch with mem `on` and one decision (with a quote and a destination), so
  * nothing reaches the server's database, gh or a worktree. The server's own answers are
  * fixed in the unit tables (`tests/unit/lib/promote/decision-branches-4355.test.ts`). Two
- * repositories share the branch's name, so a count read for the other repository would
- * show. No default layout or width is assumed beyond the viewport set here, and no header
+ * repositories share the branch's name, so a branch list read for the other repository
+ * would show (B also has a branch of its own). The branch select shows names only; the one
+ * count awaiting approval is the panel's list's (5-2b, PM's disposal). `?item=` is not in PR2. No default layout or width is assumed beyond the viewport set here, and no header
  * tool is read.
  */
 
@@ -23,6 +24,12 @@ const REPO_B = 'repo-e2e-4355-b';
 const BRANCH = 'feat/e2e-4355';
 const ITEM = 'dec-e2e-4355';
 const WT = 'wt-e2e-4355';
+/**
+ * A client navigation (router.push) on the dev server fetches the route's RSC payload, which
+ * took over the default 5 s under load (the URL stayed on the earlier repository); the wait
+ * is longer, the assertion is the same.
+ */
+const NAVIGATION_TIMEOUT_MS = 30_000;
 
 interface Store {
   /** The decision's state in repository A. */
@@ -79,8 +86,14 @@ async function stubDecisions(context: BrowserContext): Promise<Store> {
       }
       if (method !== 'GET') store.writes.push({ url: url.pathname, mark: request.headers()['x-commandmate-client'] ?? null });
       if (url.pathname === `/api/repositories/${REPO_B}/mem/decisions/branches`) {
-        // Repository B has a branch of the same name with other counts (never shown for A).
-        return json(route, 200, { ok: true, branches: [{ branch: BRANCH, mode: 'on', approvable: true, open: 5, recorded: 0 }] });
+        // Repository B has a branch of the same name with other counts, and one of its own (never shown for A).
+        return json(route, 200, {
+          ok: true,
+          branches: [
+            { branch: BRANCH, mode: 'on', approvable: true, open: 5, recorded: 0 },
+            { branch: 'only/in-b', mode: 'on', approvable: true, open: 2, recorded: 0 },
+          ],
+        });
       }
       if (url.pathname === `/api/repositories/${REPO_A}/mem/decisions/branches`) {
         return json(route, 200, { ok: true, branches: [{ branch: BRANCH, ...countsOf(store) }] });
@@ -143,20 +156,24 @@ test.describe('decision screen: repository → branch (PC)', () => {
 
     const repositorySelect = page.getByTestId('decision-repository-select');
     await expect(repositorySelect).toHaveValue(REPO_B);
+    // Both repositories listed: the page is hydrated and has read /api/repositories (the server's
+    // HTML already shows the chosen one, and a choice made before hydration is lost).
+    await expect(repositorySelect.locator('option')).toHaveCount(2);
     await expectNoSidewaysScroll(page);
 
     // 1. The repository: the branch is not carried over.
     await repositorySelect.selectOption(REPO_A);
-    await expect(page).toHaveURL(new RegExp(`/repositories/${REPO_A}/mem/decisions$`));
+    await expect(page).toHaveURL(new RegExp(`/repositories/${REPO_A}/mem/decisions$`), { timeout: NAVIGATION_TIMEOUT_MS });
     const branchSelect = page.getByTestId('decision-branch-select');
     const option = branchSelect.locator(`option[value="${BRANCH}"]`);
-    // The count shown is repository A's (1), not B's same-named branch (5).
-    await expect(option).toHaveText(new RegExp(`${BRANCH}.*\\b1\\b`));
+    // Repository A's branches only (B's own branch is not there); the row is the name only.
+    await expect(option).toHaveText(BRANCH);
+    await expect(branchSelect.locator('option[value="only/in-b"]')).toHaveCount(0);
     await expectNoSidewaysScroll(page);
 
     // 2. The branch (I4: the URL keeps `?branch=`).
     await branchSelect.selectOption(BRANCH);
-    await expect(page).toHaveURL(new RegExp(`/repositories/${REPO_A}/mem/decisions\\?branch=${encodeURIComponent(BRANCH)}$`));
+    await expect(page).toHaveURL(new RegExp(`/repositories/${REPO_A}/mem/decisions\\?branch=${encodeURIComponent(BRANCH)}$`), { timeout: NAVIGATION_TIMEOUT_MS });
     const counts = page.getByTestId('decision-counts');
     await expect(counts).toHaveAttribute('data-open', '1');
     await expectNoSidewaysScroll(page);
@@ -169,10 +186,10 @@ test.describe('decision screen: repository → branch (PC)', () => {
     await expectNoSidewaysScroll(page);
     await page.getByTestId(`decision-approve-${ITEM}`).click();
 
-    // 4. The count goes down, in the line and in the branch select; the recorded one is folded.
+    // 4. The count goes down in the one count line (the select keeps the name only); the recorded one is folded.
     await expect(counts).toHaveAttribute('data-open', '0');
     await expect(counts).toHaveAttribute('data-recorded', '1');
-    await expect(option).toHaveText(new RegExp(`${BRANCH}.*\\b0\\b`));
+    await expect(option).toHaveText(BRANCH);
     await expect(page.getByTestId('decision-fold-recorded')).not.toHaveAttribute('open', /.*/);
     await expectNoSidewaysScroll(page);
 

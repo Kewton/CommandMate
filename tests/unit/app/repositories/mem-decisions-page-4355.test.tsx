@@ -6,7 +6,10 @@
  *   opens with that repository and branch chosen; a branch the list does not hold is shown
  *   marked and chosen; a link without `branch` opens too.
  * - Choosing a repository goes to it without the branch; choosing a branch adds `?branch=`.
- * - The branch select's rows carry the shared counts; unknown is never 0.
+ * - The branch select's rows carry the branch names only (5-2b, PM's disposal): the one count
+ *   of decisions awaiting approval on the screen is the panel's, from its one list read — a
+ *   late branches answer never shows another read's count.
+ * - `?item=` (§3.1.4) is not in PR2: the page does not read it.
  * - §7.1: two repositories share a branch's name; the earlier repository's list answered
  *   after the switch is not shown (the response order is reversed here).
  *
@@ -142,15 +145,10 @@ describe('§3.1.1: choosing', () => {
     expect(nav.push).toHaveBeenCalledWith('/repositories/repo-a/mem/decisions?branch=feature%2Foff');
   });
 
-  it('I6: each row carries the shared counts; `on` approvable, `off` cannot approve, unknown never 0', async () => {
+  it('5-2b: each row is the branch’s name only, in the answer’s order (no count from the branches read)', async () => {
     render(<MemDecisionsPage />);
     await waitFor(() => expect(branchSelect().disabled).toBe(false));
-    expect(optionTexts()).toEqual([
-      'ブランチを選ぶ',
-      'feature/x（承認待ち 3）',
-      'feature/off（open 2・承認できない: mode off）',
-      'feature/amb（件数不明: mode が root で食い違う）',
-    ]);
+    expect(optionTexts()).toEqual(['ブランチを選ぶ', 'feature/x', 'feature/off', 'feature/amb']);
   });
 
   it('the branches that cannot be read: said, not shown as none', async () => {
@@ -162,7 +160,7 @@ describe('§3.1.1: choosing', () => {
 });
 
 describe('§7.1: a list answered for a repository no longer chosen is not shown', () => {
-  it('A’s branches answered after the switch to B (same branch name): only B’s counts', async () => {
+  it('A’s branches answered after the switch to B (same branch name): only B’s branches', async () => {
     let releaseA: (answer: Answer) => void = () => undefined;
     answers['/api/repositories/repo-a/mem/decisions/branches'] = () => new Promise<Answer>((resolve) => (releaseA = resolve));
     nav.search = 'branch=feature%2Fx';
@@ -171,13 +169,13 @@ describe('§7.1: a list answered for a repository no longer chosen is not shown'
 
     nav.id = 'repo-b';
     view.rerender(<MemDecisionsPage />);
-    await waitFor(() => expect(optionTexts()).toEqual(['feature/x（承認待ち 7）']));
+    await waitFor(() => expect(optionTexts()).toEqual(['feature/x']));
 
     await act(async () => {
       releaseA({ body: { ok: true, branches: BRANCHES_A } });
       await Promise.resolve();
     });
-    expect(optionTexts()).toEqual(['feature/x（承認待ち 7）']);
+    expect(optionTexts()).toEqual(['feature/x']);
     expect(repositorySelect().value).toBe('repo-b');
   });
 
@@ -191,17 +189,18 @@ describe('§7.1: a list answered for a repository no longer chosen is not shown'
   });
 });
 
-describe('§3.1.4: `?item=` asks where the item is', () => {
-  it('the branches are read with the item and the branch, and an item of another branch is said', async () => {
+describe('§3.1.4: `?item=` is not in PR2 (5-2b, PM\'s disposal: moved to PR3 or another PR)', () => {
+  it('(negative control) a link with `?item=` opens the branch as without it: the branches are read without the item', async () => {
     nav.search = 'branch=feature%2Fx&item=d-else';
-    answers['/api/repositories/repo-a/mem/decisions/branches'] = { body: { ok: true, branches: BRANCHES_A, item: { id: 'd-else', where: 'elsewhere' } } };
     render(<MemDecisionsPage />);
-    expect(await screen.findByTestId('decision-focus-missing')).toHaveTextContent('このブランチの決定ではありません（d-else）');
-    expect(calls).toContain('/api/repositories/repo-a/mem/decisions/branches?item=d-else&branch=feature%2Fx');
+    expect(await screen.findByTestId('decision-promote-panel')).toBeInTheDocument();
+    expect(branchSelect().value).toBe('feature/x');
+    expect(calls.filter((url) => url.includes('/branches'))).toEqual(['/api/repositories/repo-a/mem/decisions/branches']);
+    expect(calls.some((url) => url.includes('item='))).toBe(false);
   });
 });
 
-describe('5-2b P2: the branch select and the panel take their counts in one order of reads', () => {
+describe('5-2b: the count awaiting approval is the panel’s list’s only (one read)', () => {
   const item = (state: 'open' | 'recorded') => ({
     id: 'd-1',
     kind: 'decision',
@@ -226,7 +225,7 @@ describe('5-2b P2: the branch select and the panel take their counts in one orde
   });
   const countsFor = (state: 'open' | 'recorded') => ({ mode: 'on', approvable: true, open: state === 'open' ? 1 : 0, recorded: state === 'recorded' ? 1 : 0 });
 
-  it('(positive control) the branches answered late (read before the approval) do not overwrite the count read after it', async () => {
+  it('(positive control) approved: the list says 0, the count says 0; a branches answer read before the approval and returned late changes nothing', async () => {
     let state: 'open' | 'recorded' = 'open';
     let releaseBranches: () => void = () => undefined;
     answers['/api/repositories/repo-a/mem/decisions/branches'] = () => {
@@ -287,35 +286,38 @@ describe('5-2b P2: the branch select and the panel take their counts in one orde
       await Promise.resolve();
     });
     await waitFor(() => expect(branchSelect().disabled).toBe(false));
-    expect(optionTexts()).toEqual(['feature/x（承認待ち 0）']);
+    // The one count is the list's: 0, and no other read's count (the branches said open 1) is on the screen.
     expect(screen.getByTestId('decision-counts')).toHaveAttribute('data-open', '0');
+    expect(screen.getByTestId('decision-counts')).toHaveTextContent('承認待ち 0 件・反映待ち 1 件');
+    expect(optionTexts()).toEqual(['feature/x']);
+    expect(document.body.textContent).not.toMatch(/承認待ち 1/);
   });
 
-  it('(negative control) branches sent after the panel’s list are taken as they come, even when answered late', async () => {
+  it('the other order: a branches answer read after the list (other counts) returned late does not change the count either', async () => {
     let releaseBranches: () => void = () => undefined;
-    let first = true;
-    answers['/api/repositories/repo-a/mem/decisions/branches'] = () => {
-      if (first) {
-        first = false;
-        return new Promise<Answer>((resolve) => (releaseBranches = () => resolve({ body: { ok: true, branches: BRANCHES_A } })));
-      }
-      return Promise.resolve({ body: { ok: true, branches: BRANCHES_A } });
-    };
+    let releaseList: () => void = () => undefined;
+    answers['/api/repositories/repo-a/mem/decisions/branches'] = () =>
+      new Promise<Answer>((resolve) => (releaseBranches = () => resolve({ body: { ok: true, branches: BRANCHES_A } })));
+    answers['/api/repositories/repo-a/mem/decisions'] = () =>
+      new Promise<Answer>((resolve) => (releaseList = () => resolve({ body: listOf('feature/x') })));
     nav.search = 'branch=feature%2Fx';
     render(<MemDecisionsPage />);
-    await screen.findByTestId('decision-counts');
+    await waitFor(() => expect(calls).toContain('/api/repositories/repo-a/mem/decisions/branches'));
+    await waitFor(() => expect(calls).toContain('/api/repositories/repo-a/mem/decisions?branch=feature%2Fx'));
+    await act(async () => {
+      releaseList();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByTestId('decision-counts')).toHaveAttribute('data-open', '0'));
     await act(async () => {
       releaseBranches();
       await Promise.resolve();
     });
-    // The panel's list is sent first (a child's effect runs before its page's), so the branches
-    // read after it are the newer read: their rows are taken as answered, feature/x's 3 too.
     await waitFor(() => expect(branchSelect().disabled).toBe(false));
+    // The branches said feature/x has 3 awaiting; the screen shows only the list's 0.
     expect(screen.getByTestId('decision-counts')).toHaveAttribute('data-open', '0');
-    expect(optionTexts()).toEqual([
-      'feature/x（承認待ち 3）',
-      'feature/off（open 2・承認できない: mode off）',
-      'feature/amb（件数不明: mode が root で食い違う）',
-    ]);
+    expect(screen.getByTestId('decision-counts')).toHaveTextContent('承認待ち 0 件・反映待ち 0 件');
+    expect(optionTexts()).toEqual(['feature/x', 'feature/off', 'feature/amb']);
+    expect(document.body.textContent).not.toMatch(/承認待ち 3|open 2/);
   });
 });

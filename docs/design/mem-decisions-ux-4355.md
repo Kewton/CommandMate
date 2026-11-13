@@ -95,7 +95,7 @@ PR1〜PR3 のどれも、次を崩さない。各 PR の試験はこの表のど
 
 - 文字入力（§1.1）を、**リポジトリの select → ブランチの select** に替える
   - リポジトリの select: 既存の `GET /api/repositories`（`src/app/api/repositories/route.ts:51`）の一覧。選び直すと `router.push('/repositories/<新しい id>/mem/decisions')`（ブランチは外す。別のリポジトリに同名があっても持ち越さない［見立て: 持ち越すと違うリポジトリの決定を同じものと読み違える］）
-  - ブランチの select: 新しい読みの API（§3.1.2）が返す、そのリポジトリのブランチ。mode が `on` のものを上に、各行に承認待ちの件数（§3.1.2 の表示の形。不明は 0 と出さない）。選ぶと `?branch=` を付けた同じ形の URL へ（I4）
+  - ブランチの select: 新しい読みの API（§3.1.2）が返す、そのリポジトリのブランチ。mode が `on` のものを上に、各行に承認待ちの件数（§3.1.2 の表示の形。不明は 0 と出さない）。選ぶと `?branch=` を付けた同じ形の URL へ（I4）。**PR2 の 5-2b（PM の処分）で各行の件数は出さないことにした**（画面の承認待ちの件数はパネルの一覧の 1 つの読みからだけ。§10）
   - URL の `branch` が一覧に無い（mode が `on` でない・作業木が消えた）ときも、その名前を select の先頭に「（mem が on でない）」の印つきで出して選ばれた状態にする。古いリンクで開いた人が何も見えなくならないため（I4）
 - 文字入力は残さない［見立て: 一覧に無いブランチは上の印つきの行で開ける。手で打つ口は打ち間違いで空の画面を出すだけだった（§1.1 の設定からの入口）］
 - 案 B（§3.5）の `?item=<id>` を読むのは PR2（§3.1.4）
@@ -121,6 +121,8 @@ PR1〜PR3 のどれも、次を崩さない。各 PR の試験はこの表のど
 - 依存: PR2（ブランチの select と PC の件数）と #4354 の件数の表示（ヘッダー・サイドバーの全リポジトリの合計）は、**所有者の PR のマージの後**に始める。§6 の「PR1 と PR2 を並列にできる」は、この関数のファイルを PR2 が書かない限りで成り立つ（PR2 は所有者の PR の後に切る）
 
 #### 3.1.4 `?item=<id>` で開く（PR2、案 B を採ったとき）
+
+> **2026-11-13 PM の処分（PR2 の 5-2b、案 1: 狭めて塞ぐ）: `?item=` は PR2 から外し、PR3 か別 PR で入れる。** PR2 のページは `?item=` を読まず、branches の route も `item` を返さない。以下はその PR の設計として残す。
 
 案 B は CLI がその項目へ直接開く URL を出す。今のページは `repositoryId` と `branch` しか読まない（`page.tsx:19-20`）ので、PR2 が `?item=` を読む。
 
@@ -497,3 +499,4 @@ PC とスマホの両方で TM1〜TM5 を守る（同じ部品を両方から使
 - 2026-11-13 第 5 版: Tools の mem（§11）に事前レビュー（2-4-4、claude-5）の必須 2（1440 で畳まれない #3591 の約束と 1280 の経路・幅の実測、PR4 の書くファイルに `schedule.json`・`ActivityPane.tsx`・`SubTab` の型、並び・数を固定する試験の表）と推奨 2・3（mode の読みを 1 つに・`repositoryIds` が 2 つ以上、390 のサブタブの列の中のスクロール）を反映。PM の処分 3 点（Tools は作業木固定・mode は設定へのリンクだけ／`derived` は読むだけ／`off` に open の決定があれば件数とリンク）を §11.0 に決定として書き、D2 を (b) に。§6 を確定版に（PR1 → (PR2 → PR3) と PR4 を並列、`header-tool-*` に依存する e2e の PR は PR4 の後）
 - 2026-11-13 PR2 の実装: branches の route は `src/lib/promote/decision-branches.ts` の `listDecisionBranches`（ブランチの集合＝member の root の作業木のブランチ ∪ 閉じていない `decision` を持つブランチ ∪ 未解決の operation を持つブランチ（項目が閉じた・削除済み・作業木なしでも。一覧の route の `listUnresolvedPromoteOperations` と同じ集合、5-2b P2）。件数は PR1 の `summarizeDecisionCounts` から切り出した `decisionCountsUnder`＝`decisionCountsOf`、`on` を上に名前順）。§3.1.4 の「別のブランチ・別のリポジトリ」と「閉じた・削除済み」を画面が分けられるよう、同じ route が `?item=<id>&branch=<name>` で `item: { id, where: here|elsewhere|gone }` を返す（読みだけ。別のリポジトリの項目は何も返さず `elsewhere`）。PC の「承認待ちだけ」の既定は切（§3.3 の「既定で入」はスマホの PR3）。I9 で畳まない・隠さない operation は `unknown`・`in_flight`・`approved`・`transitionPending`。e2e（`tests/e2e/mem-decisions-4355.spec.ts`）は `mem-ui-4227.spec.ts` と同じく決定の API を browser context で stub する（隔離サーバの DB・gh・作業木に触らない。サーバの答えは単体の表 `tests/unit/lib/promote/decision-branches-4355.test.ts` で固定）
 - 2026-11-13 PR2 の 5-2b（P2 3 件）: 画面の「ブランチの候補・件数・開いた項目」は同じ 1 つの最新の読みから決める。(1) 候補に未解決の operation だけが残るブランチを足す。(2) ページの branches の読みとパネルの一覧の読み（承認の後の再取得を含む）に送った順の番号を 1 本で振り、後から返った古い branches の件数で新しい件数を上書きしない（`page.tsx` の `nextReadOrder`）。(3) `?item=` の処理済みの印を repository＋branch＋item の単位にし、同じ key のまま item だけ変えても展開・絞り込みの解除・スクロールをする（同じ item の再描画では二度しない）
+- 2026-11-13 PR2 の 5-2b 2 回目（PM の処分 案 1: 狭めて塞ぐ）: 不変条件「画面に出す承認待ちの件数は、パネルの一覧（1 つの読み）からだけ決める」。ブランチの select の行はブランチの名前だけにし、branches の応答は候補の集合を決めるだけにした（route は件数を返したまま、画面は出さない）。上の (2) の読みの順番（`nextReadOrder`・件数の Map）と (3) の `?item=` は外した（`?item=` は §3.1.4 の注のとおり PR3 か別 PR）。(1) の候補の集合は残す

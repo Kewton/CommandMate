@@ -584,9 +584,6 @@
       "branchesError": "ブランチの一覧を読み込めませんでした",
       "noBranches": "決定を持つブランチ・作業木がありません",
       "branchOption": {
-        "pending": "{branch}（承認待ち {open}）",
-        "notApprovable": "{branch}（open {open}・承認できない: mode {mode}）",
-        "unknown": "{branch}（件数不明: mode が root で食い違う）",
         "notListed": "{branch}（一覧にありません・mem が on でない）"
       },
       "counts": {
@@ -596,9 +593,7 @@
       },
       "pendingOnly": "承認待ちだけ",
       "foldRecorded": "記録済み・反映待ち（{count} 件）",
-      "foldPromoted": "反映済み（{count} 件）",
-      "itemElsewhere": "このブランチの決定ではありません（{itemId}）",
-      "itemGone": "見つかりません（閉じたか削除されました: {itemId}）"
+      "foldPromoted": "反映済み（{count} 件）"
     },
     "modeHelp": {
       "off": "何も評価せず、書かず、差し込みもしません。項目は消えずに残ります。",

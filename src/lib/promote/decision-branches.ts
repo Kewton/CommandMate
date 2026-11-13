@@ -11,15 +11,13 @@
  *   hide what still waits for a person's reconcile.
  * - Each branch is counted with the one shared count (I6, `decisionCountsUnder` →
  *   `decisionCountsOf`): `ambiguous` answers null counts, never 0.
- * - `?item=<id>&branch=<name>` (§3.1.4): where that item is as seen from this repository and
- *   branch — `here`, `elsewhere` (another branch or repository; nothing of it is returned),
- *   or `gone` (closed, purged, or not a decision).
+ * - The screen shows the names only; the count it shows is its panel's list's (5-2b).
+ *   `?item=` (§3.1.4) is not in PR2.
  *
  * @module lib/promote/decision-branches
  */
 
 import type Database from 'better-sqlite3';
-import { getMemRecord } from '@/lib/db/mem-db';
 import { getWorktreeById, getWorktreesByRepository } from '@/lib/db/worktree-db';
 import type { Repository } from '@/lib/db/db-repository';
 import {
@@ -29,16 +27,9 @@ import {
   type RoleRepositoryMembership,
 } from '@/lib/agent-roles/resolve';
 import type { MemOutcome, MemServiceDeps } from '@/lib/mem/service';
-import type { DecisionBranchesBody, DecisionBranchView, DecisionItemWhere } from './decision-counts';
+import type { DecisionBranchesBody, DecisionBranchView } from './decision-counts';
 import { decisionCountsUnder } from './decision-summary';
 import { promoteError } from './service';
-
-export interface DecisionBranchesQuery {
-  /** `?item=`: the item the screen was opened on. */
-  item?: string | null;
-  /** `?branch=`: the branch the screen shows (with `item`). */
-  branch?: string | null;
-}
 
 /** Every root judged to be this repository (disabled ones included), as the list reads them. */
 const rootsOf = (membership: RoleRepositoryMembership): Repository[] =>
@@ -89,18 +80,10 @@ function byApprovableThenName(a: DecisionBranchView, b: DecisionBranchView): num
   return a.branch < b.branch ? -1 : a.branch > b.branch ? 1 : 0;
 }
 
-function whereOf(db: Database.Database, roots: readonly Repository[], itemId: string, branch: string | null): DecisionItemWhere {
-  const record = getMemRecord(db, itemId);
-  if (!record || record.kind !== 'decision' || record.state === 'closed') return 'gone';
-  if (!roots.some((root) => root.id === record.owner.repositoryId)) return 'elsewhere';
-  return branch !== null && record.owner.branch === branch ? 'here' : 'elsewhere';
-}
-
 /** `GET /api/repositories/:id/mem/decisions/branches` — read only (design §4.1). */
 export async function listDecisionBranches(
   db: Database.Database,
   repositoryId: string,
-  query: DecisionBranchesQuery = {},
   deps: MemServiceDeps = {}
 ): Promise<MemOutcome> {
   try {
@@ -119,9 +102,6 @@ export async function listDecisionBranches(
       }
       branches.sort(byApprovableThenName);
       const body: DecisionBranchesBody = { ok: true, branches };
-      if (typeof query.item === 'string' && query.item.length > 0) {
-        body.item = { id: query.item, where: whereOf(db, roots, query.item, query.branch ?? null) };
-      }
       return { status: 200, body };
     });
   } catch (error) {

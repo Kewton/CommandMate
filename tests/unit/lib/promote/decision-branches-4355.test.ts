@@ -9,7 +9,8 @@
  * - The branches are the worktrees' and those holding a decision not closed; `on` first.
  * - I6: each branch's counts are the shared count's (`summarizeDecisionCounts` and the list
  *   route answer the same numbers); `ambiguous` is null, never 0.
- * - §3.1.4: where `?item=` is — here, elsewhere (another branch or repository), gone.
+ * - The branches with an unsettled operation only (its item closed or purged, no worktree) are listed (5-2b).
+ * - §3.1.4 `?item=` is not in PR2: the answer never carries an item.
  * - A read writes nothing (every row of every table, before and after).
  *
  * @vitest-environment node
@@ -218,7 +219,7 @@ describe('§3.1.2: the branches to choose from', () => {
     mkdirSync(rootB);
     const repoB = createRepository(db, { name: 'root-b', path: rootB, cloneSource: 'local' }).id;
     setRules(repoB, [{ match: 'glob', pattern: '**', mode: 'off' }]);
-    const outcome = await listDecisionBranches(db, repoA, {}, { resolveCommonDir: async () => '/common/.git' });
+    const outcome = await listDecisionBranches(db, repoA, { resolveCommonDir: async () => '/common/.git' });
     expect(outcome.status).toBe(200);
     expect((outcome.body as DecisionBranchesBody).branches).toEqual([{ branch: BRANCH, mode: 'ambiguous', approvable: false, open: null, recorded: null }]);
   });
@@ -239,30 +240,12 @@ describe('§3.1.2: the branches to choose from', () => {
   });
 });
 
-describe('§3.1.4: where `?item=` is, as seen from the branch the screen shows', () => {
-  const whereOf = async (item: string, branch = BRANCH, repositoryId = repoA) =>
-    (await branchesRoute(repositoryId, `?item=${encodeURIComponent(item)}&branch=${encodeURIComponent(branch)}`)).body.item;
-
-  it('here, on another branch, closed, and unknown', async () => {
+describe('§3.1.4: `?item=` is not in PR2 (5-2b, PM\'s disposal: moved to PR3 or another PR)', () => {
+  it('(negative control) asked with `?item=` or not, the answer has no item and the same branches', async () => {
     const open = await add(WT);
-    const closed = await add(WT);
-    expect((await memCloseItem(db, WT, closed.id, { instanceId: 'claude', ifVersion: closed.version, reason: 'done' })).status).toBe(201);
-    expect(await whereOf(open.id)).toEqual({ id: open.id, where: 'here' });
-    expect(await whereOf(open.id, 'feature/other')).toEqual({ id: open.id, where: 'elsewhere' });
-    expect(await whereOf(closed.id)).toEqual({ id: closed.id, where: 'gone' });
-    expect(await whereOf('no-such-item')).toEqual({ id: 'no-such-item', where: 'gone' });
-  });
-
-  it('another repository’s item is elsewhere (nothing of it is answered)', async () => {
-    const other = makeRepository('root-c', 'wt-c');
-    const theirs = await add('wt-c');
-    const answer = await branchesRoute(repoA, `?item=${theirs.id}&branch=${encodeURIComponent(BRANCH)}`);
-    expect(answer.body.item).toEqual({ id: theirs.id, where: 'elsewhere' });
-    expect(JSON.stringify(answer.body)).not.toContain('decision の本文');
-    expect(other.id).not.toBe(repoA);
-  });
-
-  it('(negative control) without `?item=` the answer has no item', async () => {
-    expect((await branchesRoute()).body).not.toHaveProperty('item');
+    const plain = (await branchesRoute()).body;
+    const asked = (await branchesRoute(repoA, `?item=${open.id}&branch=${encodeURIComponent(BRANCH)}`)).body;
+    expect(plain).not.toHaveProperty('item');
+    expect(asked).toEqual(plain);
   });
 });

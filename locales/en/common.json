@@ -584,9 +584,6 @@
       "branchesError": "Could not load the branches",
       "noBranches": "No branch or worktree holds a decision",
       "branchOption": {
-        "pending": "{branch} ({open} awaiting approval)",
-        "notApprovable": "{branch} ({open} open, cannot approve: mode {mode})",
-        "unknown": "{branch} (count unknown: the roots disagree on the mode)",
         "notListed": "{branch} (not in the list; mem is not on)"
       },
       "counts": {
@@ -596,9 +593,7 @@
       },
       "pendingOnly": "Awaiting approval only",
       "foldRecorded": "Recorded, awaiting reflection ({count})",
-      "foldPromoted": "Reflected ({count})",
-      "itemElsewhere": "Not a decision of this branch ({itemId})",
-      "itemGone": "Not found (closed or deleted: {itemId})"
+      "foldPromoted": "Reflected ({count})"
     },
     "modeHelp": {
       "off": "Nothing is evaluated, written or inserted. The items are kept.",

@@ -7,18 +7,17 @@
  * - the recorded and the reflected folded (closed by default), the open never folded;
  * - "awaiting approval only" hides the folds, never an item whose operation is unknown, in
  *   flight or waiting for its transition (I9);
- * - `?item=` opens that item without choosing anything for it (no preview is made), unfolds
- *   a folded one, and says when the item is not this branch's or is gone.
+ * - `?item=` (§3.1.4) is not in PR2 (5-2b, PM's disposal: moved to PR3 or another PR).
  *
- * Positive control: before PR2 the panel had no counts line, no folds, no switch and no
- * `focusItem`, so each of these fails there. Negative control: the open item's buttons and
+ * Positive control: before PR2 the panel had no counts line, no folds and no switch,
+ * so each of these fails there. Negative control: the open item's buttons and
  * the #4225 tests (`DecisionPromotePanel-4225.test.tsx`) are unchanged.
  *
  * @vitest-environment jsdom
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { DecisionPromotePanel } from '@/components/mem/DecisionPromotePanel';
 
 vi.mock('next-intl', async () => {
@@ -123,10 +122,11 @@ describe('§3.2: the counts above the list', () => {
     const { counts: _dropped, ...rest } = listBody;
     void _dropped;
     listBody = rest;
-    const seen: unknown[] = [];
-    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" onCounts={(counts) => seen.push(counts)} />);
-    expect(await screen.findByTestId('decision-counts')).toHaveTextContent('承認待ち 1 件・反映待ち 1 件');
-    expect(seen).toEqual([{ mode: 'on', approvable: true, open: 1, recorded: 1 }]);
+    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
+    const counts = await screen.findByTestId('decision-counts');
+    expect(counts).toHaveTextContent('承認待ち 1 件・反映待ち 1 件');
+    expect(counts).toHaveAttribute('data-open', '1');
+    expect(counts).toHaveAttribute('data-recorded', '1');
   });
 });
 
@@ -182,67 +182,5 @@ describe('§3.2: folds and "awaiting approval only"', () => {
     render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
     fireEvent.click(await screen.findByTestId('decision-pending-only'));
     expect(screen.getByTestId('decision-operation-op-gone')).toBeInTheDocument();
-  });
-});
-
-describe('§3.1.4: `?item=`', () => {
-  it('an open item of this branch is opened, and nothing is chosen or made for it', async () => {
-    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-open', where: 'here' }} />);
-    expect(await screen.findByTestId('decision-make-preview-d-open')).toBeInTheDocument();
-    expect(screen.queryByTestId('decision-preview-d-open')).toBeNull();
-    expect(calls.filter((call) => call.method !== 'GET')).toHaveLength(0);
-  });
-
-  it('a folded item is unfolded, with "awaiting approval only" lifted', async () => {
-    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec', where: 'here' }} />);
-    await screen.findByTestId('decision-d-rec');
-    await waitFor(() => expect(fold('recorded')!.open).toBe(true));
-    expect(fold('promoted')!.open).toBe(false);
-  });
-
-  it.each([
-    ['elsewhere', 'このブランチの決定ではありません（d-else）'],
-    ['gone', '見つかりません（閉じたか削除されました: d-else）'],
-  ] as const)('an item that is %s is not shown and the screen says so (the branch is not switched)', async (where, text) => {
-    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-else', where }} />);
-    expect(await screen.findByTestId('decision-focus-missing')).toHaveTextContent(text);
-    expect(calls.every((call) => call.url.includes('branch=feature%2Fx'))).toBe(true);
-  });
-
-  it('(positive control, 5-2b P2) `?item=` changed to another item on the same branch opens that one too', async () => {
-    const shown = render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-open', where: 'here' }} />);
-    await screen.findByTestId('decision-make-preview-d-open');
-    fireEvent.click(screen.getByTestId('decision-pending-only'));
-    expect(fold('recorded')).toBeNull();
-    // The same panel (its key is repository + branch), only `?item=` changed: A → B.
-    shown.rerender(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec', where: 'here' }} />);
-    await waitFor(() => expect(fold('recorded')?.open).toBe(true));
-    expect((screen.getByTestId('decision-pending-only') as HTMLInputElement).checked).toBe(false);
-    expect(inFold('recorded', 'd-rec')).toBe(true);
-  });
-
-  it('(negative control) a redraw with the same `?item=` does not scroll again', async () => {
-    const scrolled: string[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
-      scrolled.push((this as HTMLElement).dataset.decisionId ?? '');
-    };
-    try {
-      const shown = render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec', where: 'here' }} />);
-      await waitFor(() => expect(scrolled).toEqual(['d-rec']));
-      shown.rerender(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec', where: 'here' }} />);
-      shown.rerender(<DecisionPromotePanel repositoryId="repo" branch="feature/x" focusItem={{ id: 'd-rec' }} />);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(scrolled).toEqual(['d-rec']);
-    } finally {
-      Element.prototype.scrollIntoView = original;
-    }
-  });
-
-  it('(negative control) without `?item=` nothing is said and nothing is opened', async () => {
-    render(<DecisionPromotePanel repositoryId="repo" branch="feature/x" />);
-    await screen.findByTestId('decision-d-open');
-    expect(screen.queryByTestId('decision-focus-missing')).toBeNull();
-    expect(screen.queryByTestId('decision-make-preview-d-open')).toBeNull();
   });
 });

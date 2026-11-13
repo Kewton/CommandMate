@@ -11,9 +11,11 @@
  * choices (the item, the worktree, the effect, the quote's check) is dropped as soon as
  * one of them changes. The checks a person ticks belong to one item or one operation.
  *
- * Issue #4355 PR2 (design `docs/design/mem-decisions-ux-4355.md` §3.1.4・§3.2・I9): a line of
+ * Issue #4355 PR2 (design `docs/design/mem-decisions-ux-4355.md` §3.2・I9): a line of
  * the counts above the list (the shared count, I6), the recorded and the reflected folded
- * away, an "awaiting approval only" switch, and `?item=` opening that item. An item whose
+ * away, an "awaiting approval only" switch (`?item=`, §3.1.4, is not in PR2). The counts
+ * line is the screen's one count of decisions awaiting approval (the branch select carries
+ * none), read from this panel's one list read. An item whose
  * operation is unknown, in flight or waiting for its transition is never folded nor filtered.
  */
 
@@ -25,7 +27,6 @@ import { Button } from '@/components/ui';
 import type { PromoteDestination, PromoteEffect, PromoteOperationView, PromotePreviewView } from '@/lib/promote/model';
 import {
   promoteApi,
-  type DecisionItemWhere,
   type PromoteCallResult,
   type PromoteDecisionEntry,
   type PromoteFindingView,
@@ -65,39 +66,18 @@ export function countsOfList(list: PromoteListBody): DecisionCounts {
   return list.counts ?? decisionCountsOf(list.mode as DecisionCountsMode, list.decisions.map((entry) => entry.item));
 }
 
-/** `?item=` (§3.1.4): the item the screen was opened on and, once known, where it is. */
-export interface DecisionFocusItem {
-  id: string;
-  where?: DecisionItemWhere;
-}
-
 type FoldState = 'recorded' | 'promoted';
 
 export function DecisionPromotePanel({
   repositoryId,
   branch,
-  focusItem,
-  onCounts,
-  nextReadOrder,
 }: {
   repositoryId: string;
   branch: string;
-  focusItem?: DecisionFocusItem;
-  /**
-   * Called with the counts of every list read (the page keeps its branch select in step), with
-   * the read's order from `nextReadOrder` (5-2b P2: the page's own reads and the panel's take
-   * one order, so a later answer of an earlier read never overwrites a newer count).
-   */
-  onCounts?: (counts: DecisionCounts, order?: number) => void;
-  /** The page's one order of reads, taken when a list read is sent. */
-  nextReadOrder?: () => number;
 }): React.ReactElement {
   const t = useTranslations('common');
   const [pendingOnly, setPendingOnly] = useState(false);
   const [openFolds, setOpenFolds] = useState<Record<FoldState, boolean>>({ recorded: false, promoted: false });
-  const [scrollTo, setScrollTo] = useState<string | null>(null);
-  /** 5-2b P2: the `?item=` already handled, by repository + branch + item (a new item is handled again). */
-  const focusedRef = useRef<string | null>(null);
   const [list, setList] = useState<PromoteListBody | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [worktreeId, setWorktreeId] = useState('');
@@ -112,10 +92,6 @@ export function DecisionPromotePanel({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const requestRef = useRef(0);
-  const onCountsRef = useRef(onCounts);
-  onCountsRef.current = onCounts;
-  const nextReadOrderRef = useRef(nextReadOrder);
-  nextReadOrderRef.current = nextReadOrder;
   /** P2: moves on every change of what a preview is made under; the answer of an older request is not shown. */
   const previewInputsRef = useRef(0);
 
@@ -132,12 +108,10 @@ export function DecisionPromotePanel({
   const load = useCallback(async () => {
     requestRef.current += 1;
     const request = requestRef.current;
-    const order = nextReadOrderRef.current?.();
     const result = await promoteApi.list(repositoryId, branch);
     if (request !== requestRef.current) return;
     if (result.ok) {
       setList(result.body);
-      onCountsRef.current?.(countsOfList(result.body), order);
       setWorktreeId((current) => {
         if (current && result.body.worktrees.some((w) => w.id === current)) return current;
         return (result.body.worktrees.find((w) => w.branch === branch) ?? result.body.worktrees[0])?.id ?? '';
@@ -152,39 +126,6 @@ export function DecisionPromotePanel({
       requestRef.current += 1;
     };
   }, [load]);
-
-  // §3.1.4: open the item `?item=` names once, without choosing anything for it (no effect,
-  // no quote check, no preview). A folded or filtered item is unfolded and the filter lifted.
-  // "Once" is per repository + branch + item (5-2b P2): `?item=` changed to another item on
-  // the same branch (the panel keeps its key) is opened too; a redraw with the same item is not.
-  const focusId = focusItem?.id ?? null;
-  useEffect(() => {
-    if (!focusId) {
-      focusedRef.current = null;
-      return;
-    }
-    if (!list) return;
-    const focusKey = JSON.stringify([repositoryId, branch, focusId]);
-    if (focusedRef.current === focusKey) return;
-    const entry = list.decisions.find((candidate) => candidate.item.id === focusId);
-    if (!entry) return;
-    focusedRef.current = focusKey;
-    if (entry.item.state === 'open') setSelected(entry.item.id);
-    else {
-      setPendingOnly(false);
-      if (entry.item.state === 'recorded' || entry.item.state === 'promoted') {
-        const fold: FoldState = entry.item.state;
-        setOpenFolds((current) => ({ ...current, [fold]: true }));
-      }
-    }
-    setScrollTo(entry.item.id);
-  }, [branch, focusId, list, repositoryId]);
-  useEffect(() => {
-    if (!scrollTo) return;
-    const element = Array.from(document.querySelectorAll<HTMLElement>('[data-decision-id]')).find((candidate) => candidate.dataset.decisionId === scrollTo);
-    if (element && typeof element.scrollIntoView === 'function') element.scrollIntoView({ block: 'start' });
-    setScrollTo(null);
-  }, [scrollTo]);
 
   const report = useCallback(
     (result: PromoteCallResult<unknown>) => {
@@ -344,7 +285,7 @@ export function DecisionPromotePanel({
   };
   /** One decision's card (unchanged from #4225, shared by the list and the folds). */
   const decisionCard = ({ item, unreflected, operations }: PromoteDecisionEntry) => (
-      <li key={item.id} className="space-y-2 rounded border border-border p-2" data-testid={`decision-${item.id}`} data-decision-id={item.id}>
+      <li key={item.id} className="space-y-2 rounded border border-border p-2" data-testid={`decision-${item.id}`}>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="font-medium text-foreground">{t(`mem.decisions.state.${item.state}`)}</span>
           <span className="text-muted-foreground">v{item.version}</span>
@@ -466,8 +407,6 @@ export function DecisionPromotePanel({
     state,
     entries: list.decisions.filter((entry) => entry.item.state === state && !entryNeedsAttention(entry)),
   }));
-  const focusMissing =
-    focusItem && focusItem.where !== undefined && !list.decisions.some((entry) => entry.item.id === focusItem.id) ? focusItem : null;
 
   return (
     <div className="space-y-3" data-testid="decision-promote-panel">
@@ -505,13 +444,6 @@ export function DecisionPromotePanel({
           {t('mem.decisions.pendingOnly')}
         </label>
       </div>
-      {focusMissing && (
-        <p role="status" className="text-xs text-danger-foreground" data-testid="decision-focus-missing">
-          {focusMissing.where === 'elsewhere'
-            ? t('mem.decisions.itemElsewhere', { itemId: focusMissing.id })
-            : t('mem.decisions.itemGone', { itemId: focusMissing.id })}
-        </p>
-      )}
       <label className="flex flex-wrap items-center gap-2 text-xs text-foreground">
         {t('mem.decisions.worktree')}
         {list.worktrees.length === 0 ? (
