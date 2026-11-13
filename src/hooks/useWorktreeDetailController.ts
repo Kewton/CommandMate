@@ -2283,13 +2283,24 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
   /** Handle new file creation - open NewFileDialog (Issue #646) */
   const handleNewFile = useCallback((parentPath: string) => {
+    newFileGenRef.current += 1;
     setNewFileParentPath(parentPath);
     setShowNewFileDialog(true);
   }, []);
 
+  // Issue #4345 1c-2: which opening of the dialog a create request belongs to. Opening and
+  // cancelling each start a new one; a request's outcome closes the dialog only while it is still
+  // the opening that sent it (a later opening, and what is typed in it, is never touched).
+  const newFileGenRef = useRef(0);
+  const newFileInFlightGenRef = useRef<number | null>(null);
   /** Handle new file creation confirmation from NewFileDialog (Issue #646) */
   const handleNewFileConfirm = useCallback(async (finalName: string) => {
-    setShowNewFileDialog(false);
+    // Issue #4345 1c-2: the dialog stays open while the request is out; a refusal (nothing sent)
+    // leaves it open with the name and extension as typed, any other outcome closes it as before.
+    const gen = newFileGenRef.current;
+    if (newFileInFlightGenRef.current === gen) return;
+    newFileInFlightGenRef.current = gen;
+    const isCurrent = () => newFileGenRef.current === gen;
     const newPath = newFileParentPath ? `${newFileParentPath}/${finalName}` : finalName;
 
     try {
@@ -2308,13 +2319,20 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // File created successfully - trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
-    } catch {
+      if (isCurrent()) setShowNewFileDialog(false);
+    } catch (err) {
+      // A refusal (nothing sent) is no failure alert.
+      if (isHandoffPageOperationRefused(err)) return;
+      if (isCurrent()) setShowNewFileDialog(false);
       window.alert(tError('fileOps.failedToCreateFile'));
+    } finally {
+      if (newFileInFlightGenRef.current === gen) newFileInFlightGenRef.current = null;
     }
   }, [worktreeId, newFileParentPath, tError]);
 
   /** Handle new file dialog cancel (Issue #646) */
   const handleNewFileCancel = useCallback(() => {
+    newFileGenRef.current += 1;
     setShowNewFileDialog(false);
   }, []);
 
@@ -2342,6 +2360,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Directory created successfully - trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no alert.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to create directory:', err);
       window.alert(tError('fileOps.failedToCreateDirectory'));
     }
@@ -2372,6 +2392,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no alert.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to rename:', err);
       window.alert(tError('fileOps.failedToRename'));
     }
@@ -2398,6 +2420,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no alert.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
@@ -2493,6 +2517,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Refresh file tree [IMPACT-004]
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no toast.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to upload:', err);
       showToast('Upload failed. Please try again.', 'error');
     }

@@ -19,7 +19,7 @@
 
 import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 import { useTranslations } from 'next-intl';
 import {
   CLI_TOOL_IDS,
@@ -201,7 +201,11 @@ export const OpencodeInstanceSettings = memo(function OpencodeInstanceSettings({
 
   const persist = useCallback(
     async (instanceId: string, next: OpencodeInstanceSettingsValue) => {
-      setSettings((current) => ({ ...current, [instanceId]: next }));
+      let previous: OpencodeInstanceSettingsValue | undefined;
+      setSettings((current) => {
+        previous = current[instanceId];
+        return { ...current, [instanceId]: next };
+      });
       setSaving(true);
       setError(null);
       try {
@@ -220,7 +224,18 @@ export const OpencodeInstanceSettings = memo(function OpencodeInstanceSettings({
         if (body.settings) {
           setSettings((current) => ({ ...current, [instanceId]: body.settings! }));
         }
-      } catch {
+      } catch (err) {
+        // Issue #4345 1c-2: a refusal (nothing sent) is no failure message and must not look saved:
+        // the optimistic value goes back, the sign-in prompt is the person's cue.
+        if (isHandoffPageOperationRefused(err)) {
+          setSettings((current) => {
+            const rest = { ...current };
+            if (previous === undefined) delete rest[instanceId];
+            else rest[instanceId] = previous;
+            return rest;
+          });
+          return;
+        }
         setError(t('opencodeSettingsSaveError'));
       } finally {
         setSaving(false);
@@ -513,6 +528,7 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
         }
 
         setSaving(true);
+        let refused = false;
         try {
           // Issue #4345 1c: the save's 401 reaches the gateway (never a recovery).
           const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}`, {
@@ -527,12 +543,17 @@ export const AgentSettingsPane = memo(function AgentSettingsPane({
             // Revert on failure
             setCheckedIds(new Set(clampedAgents));
           }
-        } catch {
+        } catch (err) {
+          // Issue #4345 1c-2: a refusal (nothing sent) keeps the choice and the editing state.
+          if (isHandoffPageOperationRefused(err)) {
+            refused = true;
+            return;
+          }
           // Revert on network error
           setCheckedIds(new Set(clampedAgents));
         } finally {
           setSaving(false);
-          setIsEditing(false);
+          if (!refused) setIsEditing(false);
         }
       }
     },

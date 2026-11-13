@@ -13,7 +13,7 @@
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 import { useTranslations } from 'next-intl';
 import { ScheduleEditDialog, type ScheduleFormValues } from '@/components/worktree/schedules/ScheduleEditDialog';
 import { ExecutionLogsView, type ExecutionLog } from '@/components/worktree/schedules/ExecutionLogsView';
@@ -238,6 +238,8 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         });
         if (res.ok) await fetchData();
       } catch (err) {
+        // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — not a logged failure.
+        if (isHandoffPageOperationRefused(err)) return;
         console.error('Failed to delete schedule:', err);
       }
     },
@@ -254,6 +256,8 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         });
         if (res.ok) await fetchData();
       } catch (err) {
+        // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — not a logged failure.
+        if (isHandoffPageOperationRefused(err)) return;
         console.error('Failed to toggle schedule:', err);
       }
     },

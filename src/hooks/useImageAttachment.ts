@@ -9,6 +9,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { ATTACHABLE_IMAGE_ACCEPT, ATTACHABLE_IMAGE_EXTENSIONS, IMAGE_MAX_SIZE_BYTES } from '@/config/image-extensions';
 import { normalizeExtension } from '@/config/image-extensions';
+import { isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 
 /**
  * Attached image state
@@ -107,6 +108,8 @@ export function useImageAttachment(
       const result = await uploadFn(worktreeId, file);
       setAttachedImage({ file, path: result.path });
     } catch (e) {
+      // Issue #4345 1c-2: a refusal (nothing uploaded) shows no upload error.
+      if (isHandoffPageOperationRefused(e)) return;
       setError(e instanceof Error ? e.message : 'Upload failed');
     } finally {
       setIsUploading(false);

@@ -57,7 +57,7 @@ import { cronPrompt, messageDraftPrompt } from '@/lib/schedule-ai-prompt-templat
 import { isCommandCodeDirectWriteToolsDenied } from '@/lib/cmate-validator';
 import { getCommandCodeWriteToolsWarningText } from './command-code-write-tools-warning';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 
 // ============================================================================
 // Types
@@ -482,7 +482,9 @@ export function ScheduleEditDialog({
       }
       onSaved();
       onClose();
-    } catch {
+    } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) shows no save error; the dialog and its inputs stay.
+      if (isHandoffPageOperationRefused(err)) return;
       setSubmitError(t('edit.saveError'));
     } finally {
       setSubmitting(false);

@@ -282,7 +282,10 @@ function toChatMessage(p: PendingMessage, worktreeId: string): ChatMessage {
     archived: false,
     cliToolId: p.options.cliToolId,
     instanceId: p.options.instanceId,
-    optimisticState: p.status,
+    // Issue #4345 1c-2: a parked message whose automatic resend was refused (`heldNotSent`) is
+    // drawn as 'error' so the bubble offers retry / discard (both the PC card and the mobile bubble
+    // show them for 'error' only). Nothing resends it on its own; retry is the person's.
+    optimisticState: p.heldNotSent ? 'error' : p.status,
   };
 }
 
