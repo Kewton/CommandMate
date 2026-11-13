@@ -32,9 +32,11 @@ const trace = vi.hoisted(() => ({
   cacheHit: false,
 }));
 
+// Issue #4317 PR2: the path follows the page drawn (the dialog's host reads the detail route from it).
+const nav = vi.hoisted(() => ({ path: '/worktrees/wt-a' }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
-  usePathname: () => '/worktrees/wt-a',
+  usePathname: () => nav.path,
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false, MOBILE_BREAKPOINT: 768 }));
@@ -128,6 +130,9 @@ vi.mock('@/hooks/useWorktreeDetailController', async (importOriginal) => {
 });
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
+// Issue #4317 PR2: the dialog's one host is beside the shell (`AppShellGate`), outside the page Next
+// keys by its `[id]`; drawn here beside the keyed page as the root layout does.
+import { HandoffDialogHost } from '@/components/mem/HandoffDialogHost';
 import {
   beginHandoffOpening,
   handoffStoreSnapshot,
@@ -229,9 +234,11 @@ afterEach(async () => {
 
 /** The page as Next draws it (StrictMode, keyed by its `[id]`), no Profiler. */
 function Page({ id }: { id: string }) {
+  nav.path = `/worktrees/${id}`;
   return (
     <StrictMode>
       <WorktreeDetailRefactored key={id} worktreeId={id} />
+      <HandoffDialogHost />
     </StrictMode>
   );
 }

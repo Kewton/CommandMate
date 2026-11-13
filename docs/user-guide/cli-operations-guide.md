@@ -1015,7 +1015,7 @@ server:    http://localhost:3000
 |:------:|------|
 | 0 | 答えた |
 | 3 | **NOT_IN_SESSION**: CommandMate が起動したエージェントセッションの中ではない（理由は stderr）。`ExitCode.START_FAILED` と同じ番号だが、サーバー起動の失敗とは無関係 |
-| 1 / 2 / 99 | サーバー未起動・引数エラー・予期しないエラー（[全終了コード一覧](#全終了コード一覧)） |
+| 1 / 2 / 99 | サーバー未起動・引数エラー・予期しないエラー（[全終了コード一覧](#全終了コード一覧)）。ただし whoami は身元を環境変数か tmux セッション名から決め、サーバーへの問い合わせ（`-<n>` の切り分けと alias の取得）は失敗しても捨てるので、サーバーが落ちているだけでは 1 にならず 0 で答えます（alias は `-`） |
 
 ---
 
@@ -3229,6 +3229,7 @@ commandmate instances <worktree-id> set-role <instance-id> --role reviewer  # �
 `add` / `remove` / `alias` と `send --register` は読んだ名簿の版を付けて保存します（Issue #4132）。読んだ後に名簿が変わっていたら、今の名簿で作り直して最大 2 回やり直すので、別の追加や変更を消しません。ID は今の名簿で空いているものになります。変わり続けて保存できないとき、`add` / `remove` / `alias` は exit 31（`roster_changed`）で終わり、他の変更はそのまま残ります（`remove --kill` は停止の後に保存するので、セッションは停止済みのことがあります）。`send --register` は本文を送った後なので、これも含めて登録のどの失敗でも（Issue #4159）、警告と exit 0 にして、登録だけをやり直すコマンドを案内します。
 
 `kill` は止めたインスタンスの Auto-Yes も無効にします（止めていない別インスタンスの Auto-Yes は残ります）。
+`instances <worktree-id> kill <instance-id>` は成功すると stderr に、そのインスタンスの Auto-Yes も解除したことと、再開のコマンド（`commandmate auto-yes <worktree-id> --instance <instance-id> --enable`。`--duration` の既定は 1h）を 1 行で出します（以前 ON だったかは照会しません。stdout と終了コードは変わりません）。
 `kill`（`remove --kill` も）が成功すると、どの worktree・インスタンスの、どの tmux セッション（サーバーの
 応答の `killedSessions`）を、どこ（cwd と tmux セッション）から止めたかを
 `~/.commandmate/session-kills/<UTC 日付>.jsonl` に 1 行記録します（30 日で削除）。

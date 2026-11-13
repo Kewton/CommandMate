@@ -26,6 +26,13 @@
  * marked "lapsed" fail — the Escape cancels and closes, the kill is started after `end`, the
  * cancel's answer closes the dialog. Negative controls: the same with the registration current.
  *
+ * PR2 再指示 1: the route takes part in that condition. The page's registration stays the current
+ * one while the path turns to another worktree's (B → A on the dev server: B's page still
+ * registered while A's route is loading): a create, an `end` or the mode's read answered then
+ * starts no text, kill nor opening; what was sent is recorded. Positive control: on a8a2ef0 (the
+ * route not in `handoffPageMayStart`) the "route turned" cases send, kill and open. Negative
+ * control: the path still the page's — they go on.
+ *
  * @vitest-environment jsdom
  */
 import React from 'react';
@@ -66,6 +73,7 @@ import {
   handoffRegistrySnapshot,
   registerHandoffPage,
   reportHandoffPageAuth,
+  reportHandoffRoute,
   resetHandoffRegistryForTests,
   unregisterHandoffPage,
 } from '@/lib/handoff/page-registration';
@@ -80,7 +88,7 @@ let posts: Post[];
 let kills: string[];
 let request: HandoffRequestView;
 let proposals: HandoffProposalView[];
-let holds: Record<'end' | 'cancel' | 'decide' | 'kill' | 'create', (() => void) | null>;
+let holds: Record<'end' | 'cancel' | 'decide' | 'kill' | 'create' | 'mode', (() => void) | null>;
 let holding: Set<keyof typeof holds>;
 let createAnswer: 'ok' | 'session_unknown';
 
@@ -95,7 +103,7 @@ beforeEach(() => {
   resetHandoffStoreForTests();
   posts = [];
   kills = [];
-  holds = { end: null, cancel: null, decide: null, kill: null, create: null };
+  holds = { end: null, cancel: null, decide: null, kill: null, create: null, mode: null };
   holding = new Set();
   createAnswer = 'ok';
   request = {
@@ -117,7 +125,10 @@ beforeEach(() => {
     const worktree = match ? decodeURIComponent(match[1]) : '';
     const rest = match ? match[2] : url;
     if (method === 'POST') posts.push({ worktree, path: rest });
-    if (rest.startsWith('/mem/mode')) return reply(200, ATTENDED);
+    if (rest.startsWith('/mem/mode')) {
+      await hold('mode');
+      return reply(200, ATTENDED);
+    }
     if (rest.startsWith('/kill-session')) {
       kills.push(url);
       await hold('kill');
@@ -466,5 +477,118 @@ describe('[#4317 PR1 再指示 2] the session expired: the page opens nothing, t
     });
     expect(page.handoffTarget).toBeNull();
     expect(handoffStoreSnapshot().opening).toBeNull();
+  });
+});
+
+describe('[#4317 PR2 再指示 1] the path turns to another worktree while the page is still registered', () => {
+  const B = 'wt-b';
+  /** The host's report of the path's detail route (as `HandoffDialogHost` makes it). */
+  const route = (worktreeId: string) => act(() => reportHandoffRoute(worktreeId));
+
+  beforeEach(() => {
+    reportHandoffRoute(A);
+  });
+
+  async function rendered() {
+    render(<Page worktreeId={A} />);
+    await waitFor(() => expect(page.loading).toBe(false));
+  }
+
+  it.each([
+    ['turned to B', B],
+    ['(negative control) still A', A],
+  ])('the create answered with the path %s: the text is sent only on the page’s route; the request is recorded either way', async (_, to) => {
+    request = { ...request, state: 'awaiting_agent', sendState: 'unsent', agentDoneAt: null };
+    holding.add('create');
+    await rendered();
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await waitFor(() => expect(holds.create).not.toBeNull());
+    route(to);
+    await act(async () => holds.create!());
+    await settle();
+    expect(handoffStoreSnapshot().opening?.created).toBe('done');
+    expect(handoffStoreSnapshot().opening?.text).toBe('the request text');
+    expect(handoffStoreSnapshot().opening?.closed).toBe(false);
+    if (to === A) {
+      await waitFor(() => expect(sent('/sent')).toHaveLength(1));
+      expect(sent('/send')).toHaveLength(1);
+    } else {
+      expect(sent('/send')).toHaveLength(0);
+      expect(sent('/sent')).toHaveLength(0);
+      expect(handoffStoreSnapshot().opening?.view?.request.sendState).toBe('unsent');
+    }
+  });
+
+  it.each([
+    ['turned to B', B],
+    ['(negative control) still A', A],
+  ])('`end` answered with the path %s: the kill starts only on the page’s route; `end`’s answer is adopted either way', async (_, to) => {
+    await rendered();
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-approve-p1');
+    holding.add('end');
+    press('handoff-stop');
+    await waitFor(() => expect(holds.end).not.toBeNull());
+    route(to);
+    await act(async () => holds.end!());
+    await settle();
+    expect(handoffStoreSnapshot().opening?.view?.request.endToken).toBe('tok-1');
+    if (to === A) {
+      await waitFor(() => expect(sent('/end/observe')).toHaveLength(1));
+      expect(kills).toHaveLength(1);
+    } else {
+      expect(kills).toHaveLength(0);
+      expect(sent('/end/observe')).toHaveLength(0);
+      expect(handoffStoreSnapshot().opening?.view?.request.state).toBe('ending');
+      expect(handoffUnitsOf(A).stopping).toBe(false);
+    }
+  });
+
+  it('the path turns to B while the kill already sent is answered: it is observed (recorded for its request)', async () => {
+    await rendered();
+    await act(async () => {
+      await page.openEnd(TARGET);
+    });
+    await screen.findByTestId('handoff-approve-p1');
+    holding.add('kill');
+    press('handoff-stop');
+    await waitFor(() => expect(holds.kill).not.toBeNull());
+    route(B);
+    await act(async () => holds.kill!());
+    await waitFor(() => expect(sent('/end/observe')).toHaveLength(1));
+    expect(kills).toHaveLength(1);
+    expect(handoffStoreSnapshot().opening?.view?.request.state).toBe('ended');
+  });
+
+  it.each([
+    ['turned to B', B],
+    ['(negative control) still A', A],
+  ])('the mode read answered with the path %s: the hand-off opens only on the page’s route', async (_, to) => {
+    await rendered();
+    holding.add('mode');
+    let pressed: Promise<void> | null = null;
+    act(() => {
+      pressed = page.openEnd(TARGET);
+    });
+    await waitFor(() => expect(holds.mode).not.toBeNull());
+    route(to);
+    await act(async () => {
+      holds.mode!();
+      await pressed;
+    });
+    await settle();
+    if (to === A) {
+      expect(page.handoffTarget).toEqual(TARGET);
+      expect(handoffStoreSnapshot().opening).not.toBeNull();
+    } else {
+      expect(page.handoffTarget).toBeNull();
+      expect(page.killTarget).toBeNull();
+      expect(handoffStoreSnapshot().opening).toBeNull();
+      expect(sent('/mem/handoff/requests')).toHaveLength(0);
+    }
   });
 });
