@@ -619,3 +619,66 @@ describe('F5: GET /api/asks/:askId reads the codex rollout by itself (Q1 of the 
     expect(getAskCorrelation(db, A)).toMatchObject({ attributionState: 'matched', nativeInputId: 'u1' });
   });
 });
+
+/**
+ * Re-instruction 1 (consistency review of d19c5c8, P2 ×3): the session read at
+ * the start must still be the followed one when the ledger is written; every
+ * session-bearing record of the window counts (the response_item stream too);
+ * an input with no id is its own in each turn.
+ */
+describe('re-instruction 1: the session at the write, the whole window, id-less inputs', () => {
+  it('M5 /new during the read (pointer S → T before the ledger is written): the old turn is not matched and no input is recorded', async () => {
+    sentAsk(A, 'hi');
+    await writeRollout([meta(), ...turnOf('t1', 'u1', env(A, 'hi'), 'hi')]);
+    let calls = 0;
+    getLastAgentEvent.mockImplementation(() => ({ sessionId: (calls += 1) === 1 ? SESSION : OTHER_SESSION }));
+    await capture();
+    expect(calls).toBeGreaterThan(1);
+    expect(await read(A)).toMatchObject({ state: 'pending', reply: null, nativeInputSeen: false });
+    expect(getAskCorrelation(db, A)).toMatchObject({ nativeInputId: null, nativeSessionId: null });
+  });
+
+  it('negative: no change of session during the read → matched as before', async () => {
+    sentAsk(A, 'hi');
+    await writeRollout([meta(), ...turnOf('t1', 'u1', env(A, 'hi'), 'hi')]);
+    await capture();
+    expect(getLastAgentEvent.mock.calls.length).toBeGreaterThan(1);
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'hi' });
+  });
+
+  it('M5 a response_item naming another session (Q1: a window of two sessions): the sessionless task_complete is no close', async () => {
+    sentAsk(A, 'hi');
+    const foreign = { timestamp: iso(500), type: 'response_item', payload: { type: 'message', role: 'assistant', thread_id: OTHER_SESSION, content: [{ type: 'output_text', text: 'x' }] } };
+    await writeRollout([meta(), started('t1'), user('t1', 'u1', env(A, 'hi')), foreign, agent('t1', 'hi'), complete('t1')]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', reply: null, nativeInputSeen: true });
+    // History's double-stream exclusion is unchanged: one reply row, the response_item not rendered.
+    expect(rowsOf('assistant').map((row) => [row.requestId, row.content])).toEqual([[codexTurnRequestId('t1'), 'hi']]);
+  });
+
+  it('negative: response_items naming the followed session (or none) keep the window whole → matched', async () => {
+    sentAsk(A, 'hi');
+    const own = { timestamp: iso(500), type: 'response_item', payload: { type: 'message', role: 'assistant', thread_id: SESSION, content: [{ type: 'output_text', text: 'hi' }] } };
+    await writeRollout([meta(), started('t1'), user('t1', 'u1', env(A, 'hi')), responseUser('t1', env(A, 'hi')), own, agent('t1', 'hi'), complete('t1')]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'hi' });
+  });
+
+  it('M1 an ask with an id-less input in turn 1, and another id-less input in turn 2: turn 1 is ambiguous/shared_turn', async () => {
+    sentAsk(A, 'hi');
+    await writeRollout([
+      meta(),
+      started('t1'), user('t1', 'u1', env(A, 'hi'), 10), user('t1', null, 'typed', 500), agent('t1', 'hi'), complete('t1'),
+      started('t2', 5_000), user('t2', null, 'typed again', 5_010), agent('t2', 'later', 6_000), complete('t2', 7_000),
+    ]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'shared_turn', reply: null });
+  });
+
+  it('negative: an id-less input in one turn only → ambiguous/shared_turn as before', async () => {
+    sentAsk(A, 'hi');
+    await writeRollout([meta(), started('t1'), user('t1', 'u1', env(A, 'hi'), 10), user('t1', null, 'typed', 500), agent('t1', 'hi'), complete('t1')]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'shared_turn', reply: null });
+  });
+});

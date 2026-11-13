@@ -87,8 +87,10 @@ function distinctInputs(turn: CodexTurnAccumulator): { inputs: CodexInputIdentit
   for (const input of turn.askInputs ?? []) {
     const key = identityKey(input);
     if (key === null) {
+      // An input with no id is its own, in this turn only: the key carries the
+      // turn, so it never meets another turn's id-less input as "the same".
       anonymous += 1;
-      inputs.push({ key: `${NUL}anonymous${NUL}${anonymous}`, input });
+      inputs.push({ key: `${NUL}anonymous${NUL}${turn.turnId}${NUL}${anonymous}`, input });
       lastKey = null;
       continue;
     }
@@ -187,13 +189,21 @@ export async function reservedCodexAskIds(
  * all of them, not only those History still has to write (F3), so a turn read
  * before the send's outcome was saved settles on a later read of the same file.
  *
- * @param currentSessionId - The session the instance follows now
- *   (`resolveCodexSessionId`); a record of another session is rejected (M5)
+ * The session the read began with must still be the one the instance follows
+ * when the ledger is written: `rereadSession` is asked after the last `await`,
+ * and from there to the last write nothing yields. A `/new` that moved the
+ * pointer while the file was read leaves every row as it was — no input
+ * recorded, nothing settled (I6; review of d19c5c8, P2 1).
+ *
+ * @param currentSessionId - The session the instance followed when the read
+ *   began (`resolveCodexSessionId`); a record of another session is rejected (M5)
+ * @param rereadSession - Reads the pointer again; null or another id stops the write
  */
 export async function bindCodexAskTurns(
   target: AgentInstanceRef,
   window: CodexAskWindow,
   currentSessionId: string | null,
+  rereadSession?: () => Promise<string | null>,
 ): Promise<void> {
   if (!hasCodexAskEvidence(window.turns)) return;
   try {
@@ -202,6 +212,17 @@ export async function bindCodexAskTurns(
       import('@/lib/db/chat-db'),
       import('@/lib/ask/ask-correlation'),
     ]);
+    // The last await before the ledger is written: everything below is synchronous.
+    const sessionAtWrite = rereadSession ? await rereadSession() : currentSessionId;
+    if (!currentSessionId || sessionAtWrite !== currentSessionId) {
+      logger.info('codex-ask-session-changed', {
+        worktreeId: target.worktreeId,
+        instanceId: target.instanceId ?? target.cliToolId,
+        readWith: currentSessionId,
+        now: sessionAtWrite,
+      });
+      return;
+    }
     const db = getDbInstance();
     const destination = {
       worktreeId: target.worktreeId,

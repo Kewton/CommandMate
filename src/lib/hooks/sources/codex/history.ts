@@ -433,7 +433,7 @@ export async function captureCodexTranscriptTurn(
       // behind it must stop being "unsaved output" the pre-send flush can pick up.
       await advanceCapturedLineForTranscriptTurn(target);
       // Issue #4344: an ask whose turn is already a row is settled against it.
-      await bindCodexAskTurns(target, askWindow, sessionId);
+      await bindCodexAskTurns(target, askWindow, sessionId, () => resolveCodexSessionId(target));
       return true;
     }
 
@@ -499,7 +499,7 @@ export async function captureCodexTranscriptTurn(
     }
     // Issue #4344: after the rows are written, so a complete turn's ask is settled
     // against the row this call just wrote (never before it exists).
-    await bindCodexAskTurns(target, askWindow, sessionId);
+    await bindCodexAskTurns(target, askWindow, sessionId, () => resolveCodexSessionId(target));
     return captured;
   } catch (error) {
     logger.error('codex-transcript-capture-failed', {

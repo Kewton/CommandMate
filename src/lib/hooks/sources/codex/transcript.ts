@@ -538,8 +538,9 @@ export interface CodexTurnBuild {
    */
   readonly turnlessRecords: number;
   /**
-   * Issue #4344: every session id a record of the window named (the
-   * `response_item` stream names none). More than one — or one that is not the
+   * Issue #4344: every session id a record of the window named, the
+   * `response_item` stream included (History skips that stream; this does
+   * not). More than one — or one that is not the
    * session the instance follows — is a window the ask adapter takes no turn's
    * close from (design §3.6 Q1, the human decision of 2026-11-14).
    */
@@ -570,12 +571,14 @@ export function buildCodexTurns(
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index];
     if (record.type === 'session_meta' && record.sessionId) fileSessionId = record.sessionId;
+    // Issue #4344 (Q1): every record that names a session counts for the window,
+    // the `response_item` stream included — before it is skipped below.
+    if (record.sessionId) windowSessionIds.add(record.sessionId);
 
     if (record.type === 'response_item') {
       duplicateStreamRecords += 1;
       continue;
     }
-    if (record.sessionId) windowSessionIds.add(record.sessionId);
 
     const turnId = record.turnId;
     if (!turnId) {
