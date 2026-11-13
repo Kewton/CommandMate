@@ -56,6 +56,8 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),
@@ -285,6 +287,6 @@ describe('[#2457] POST /prompt-response on a Claude pane', () => {
     const data = await response.json();
 
     expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalledWith(`claude-${WT}`, 'yes', false);
+    expect(sendKeys).toHaveBeenCalledWith(`claude-${WT}`, 'yes', false, { literal: true });
   });
 });

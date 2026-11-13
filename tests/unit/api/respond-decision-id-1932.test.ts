@@ -49,6 +49,8 @@ vi.mock('@/lib/hooks/sources/opencode/client', async (importOriginal) => {
 // The route imports the keystroke sender; nothing on the decision path calls
 // it, and that is asserted rather than assumed (`sendKeys` never called).
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));

@@ -22,7 +22,7 @@ import {
   type CommandCodePlanReviewState,
 } from '@/lib/detection/tools/command-code/plan-review-state';
 import { answerUnderInstanceInputLock, instanceInputReadMark } from '@/lib/session/instance-input-lock';
-import { ANSWER_NOT_DELIVERED_REASON } from '@/lib/prompt-answer-sender';
+import { ANSWER_NOT_DELIVERED_REASON, assertAnswerTargetInForeground } from '@/lib/prompt-answer-sender';
 import { PromptAnswerInputLostError, PromptAnswerNotDeliveredError } from '@/lib/prompt-answer-errors';
 
 /** The reason for a plan review action asked of a screen that is not one. */
@@ -50,7 +50,9 @@ function samePlan(a: PlanReviewPlan & { ok: true }, b: PlanReviewPlan): boolean 
  * out only if the same request still plans the same keys on it; otherwise
  * nothing is sent and the body says so (`answer_not_delivered`).
  *
- * @throws whatever the tmux transport throws once keys are being sent
+ * @throws whatever the tmux transport throws once keys are being sent, and
+ *   `PromptAnswerAgentNotInForegroundError` before any key when the agent does
+ *   not hold the pane (Issue #4303)
  */
 export async function answerCommandCodePlanReview(args: {
   sessionName: string;
@@ -80,8 +82,14 @@ export async function answerCommandCodePlanReview(args: {
       return now !== null && now.phase === state.phase &&
         samePlan(plan, planCommandCodePlanReviewKeys(now, { action, text: answer, useDefault }));
     },
-    // Issue #3952 review P2-3: every step is sent only while the ticket is current.
-    (ticket) => sendCommandCodePlanReviewKeys(sessionName, plan.steps, undefined, () => ticket.isCurrent())
+    async (ticket) => {
+      // Issue #4303: right before the first step, the agent must hold the pane;
+      // refused, nothing is typed (`PromptAnswerAgentNotInForegroundError`,
+      // answered by the route as `answer_not_delivered`).
+      await assertAnswerTargetInForeground(sessionName);
+      // Issue #3952 review P2-3: every step is sent only while the ticket is current.
+      return sendCommandCodePlanReviewKeys(sessionName, plan.steps, undefined, () => ticket.isCurrent());
+    }
   );
   if (!outcome.answered) {
     return {

@@ -54,6 +54,8 @@ vi.mock('@/lib/db/db-instance', () => {
 });
 
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),
@@ -348,7 +350,7 @@ describe('[#2755] the pre-existing answer shapes are untouched', () => {
     expect(status).toBe(200);
     expect(data.success).toBe(true);
     const keys = await keystrokes();
-    expect(keys.text).toEqual([[SESSION, '2', false]]);
+    expect(keys.text).toEqual([[SESSION, '2', false, { literal: true }]]);
     expect(keys.special).toEqual([]);
   });
 });

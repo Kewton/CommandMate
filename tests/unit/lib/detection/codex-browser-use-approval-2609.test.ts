@@ -45,6 +45,8 @@ const capturePane = vi.fn(async (_session: string, _lines?: number) => '');
 const sendKeys = vi.fn(async (_session: string, _keys: string, _enter?: boolean) => {});
 const sendSpecialKeys = vi.fn(async (_session: string, _keys: string[]) => {});
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   capturePane: (session: string, lines?: number) => capturePane(session, lines),
   sendKeys: (session: string, keys: string, enter?: boolean) => sendKeys(session, keys, enter),
   sendSpecialKeys: (session: string, keys: string[]) => sendSpecialKeys(session, keys),
