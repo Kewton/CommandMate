@@ -13,6 +13,7 @@ import {
   handoffPageMayStart,
   handoffRegistrySnapshot,
   isCurrentHandoffRegistration,
+  reportHandoffRoute,
   registerHandoffPage,
   reportHandoffPageAuth,
   resetHandoffRegistryForTests,
@@ -156,5 +157,20 @@ describe('[#4317 PR1 再指示 2] one condition starts anything new', () => {
     registerHandoffPage('wt-a');
     expect(handoffPageMayStart(a)).toBe(false);
     expect(handoffPageMayStart(null)).toBe(false);
+  });
+});
+
+describe('[#4317 PR2 再指示 1] the route takes part in the one condition', () => {
+  it('once the host reported a route, the current registration may start only while it is the route’s', () => {
+    const b = registerHandoffPage('wt-b');
+    expect(handoffPageMayStart(b)).toBe(true);
+    reportHandoffRoute('wt-b');
+    expect(handoffPageMayStart(b)).toBe(true);
+    reportHandoffRoute('wt-a');
+    expect(handoffPageMayStart(b)).toBe(false);
+    reportHandoffRoute(null);
+    expect(handoffPageMayStart(b)).toBe(false);
+    reportHandoffRoute('wt-b');
+    expect(handoffPageMayStart(b)).toBe(true);
   });
 });

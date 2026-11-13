@@ -25,20 +25,48 @@
  *    current one and the session is not expired ({@link handoffPageMayStart}). A page's dialog is
  *    hidden for the expiry by {@link HandoffRegistryState.authExpired} only.
  *
+ * 5. (PR2) A page publishes what its dialog shows — its target and its `onClose` / `onStop` (the
+ *    page's own close through the rule and its existing stop) — on its registration
+ *    ({@link publishHandoffPageView}). The one host beside the shell (`HandoffDialogHost`) draws
+ *    the current registration's; a registration gone takes its view with it (the host never uses
+ *    the last callback of a page that is not registered any more).
+ *
+ * 6. (PR2 再指示 1) The route takes part in that one condition: once the host beside the shell has
+ *    reported the path's detail route ({@link reportHandoffRoute}), a registration may start
+ *    something new only while its worktree is that route's ({@link handoffRegistrationOnRoute}) —
+ *    the same test the host draws by. A continuation that awaited under B's page, B still registered
+ *    while the path is already A's, starts no send, kill nor opening; what was sent still finishes
+ *    for its own unit and destination. Before any host has reported (`route` `undefined`: a page
+ *    driven without the shell, as in its unit tests) the route takes no part; `AppShellGate` mounts
+ *    the host always.
+ *
  * This module holds no unit, opening nor callback of the store (`@/lib/handoff/close-rule`): it
- * imports nothing of it and writes nothing of it.
+ * imports nothing of it as a value and writes nothing of it.
  *
  * @module lib/handoff/page-registration
  */
+
+import type { SessionStopResult } from '@/lib/handoff/close-rule';
 
 declare const REGISTRATION_BRAND: unique symbol;
 
 /** The identity of one page's registration: made by {@link registerHandoffPage} only. */
 export type HandoffPageRegistration = { readonly [REGISTRATION_BRAND]: true };
 
-interface RegistrationEntry {
+/** PR2: what a page's dialog shows, as the page publishes it (its target `null`: nothing open). */
+export interface HandoffPageView {
+  readonly target: { readonly cliToolId: string; readonly instanceId: string; readonly label: string } | null;
+  /** The page's close of the hand-off (through the rule: `closeHandoffBy('dialog')`). */
+  readonly onClose: () => void;
+  /** The page's existing stop for the target. */
+  readonly onStop: () => Promise<SessionStopResult>;
+}
+
+export interface RegistrationEntry {
   readonly id: HandoffPageRegistration;
   readonly worktreeId: string;
+  /** PR2: `null` until the page has published one. */
+  readonly view: HandoffPageView | null;
 }
 
 export interface HandoffRegistryState {
@@ -46,9 +74,14 @@ export interface HandoffRegistryState {
   readonly live: readonly RegistrationEntry[];
   /** The session expired (a 401 of the current page) and no authenticated read has answered since. */
   readonly authExpired: boolean;
+  /**
+   * PR2 再指示 1: the worktree whose detail route the path is, as the host reported it (`null`: not
+   * a detail route, or the path not known; `undefined`: no host has reported yet).
+   */
+  readonly route?: string | null;
 }
 
-const EMPTY: HandoffRegistryState = { live: [], authExpired: false };
+const EMPTY: HandoffRegistryState = { live: [], authExpired: false, route: undefined };
 let state: HandoffRegistryState = EMPTY;
 const listeners = new Set<() => void>();
 /**
@@ -77,8 +110,25 @@ export function handoffRegistrySnapshot(): HandoffRegistryState {
 /** A page of `worktreeId` mounted: a new registration, the current one from now on. */
 export function registerHandoffPage(worktreeId: string): HandoffPageRegistration {
   const id = {} as HandoffPageRegistration;
-  commit({ ...state, live: [...state.live, { id, worktreeId }] });
+  commit({ ...state, live: [...state.live, { id, worktreeId, view: null }] });
   return id;
+}
+
+/**
+ * PR2: the page of the live registration `id` publishes what its dialog shows. Nothing for a
+ * registration not live (a late publish of a page left never comes back).
+ */
+export function publishHandoffPageView(id: HandoffPageRegistration, view: HandoffPageView): void {
+  const entry = state.live.find((candidate) => candidate.id === id);
+  if (!entry) return;
+  const old = entry.view;
+  if (old && old.target === view.target && old.onClose === view.onClose && old.onStop === view.onStop) return;
+  commit({ ...state, live: state.live.map((candidate) => (candidate.id === id ? { ...candidate, view } : candidate)) });
+}
+
+/** PR2: the current registration (the newest live one), or `null` while none is live. */
+export function currentHandoffPage(snapshot: HandoffRegistryState = state): RegistrationEntry | null {
+  return snapshot.live.length > 0 ? snapshot.live[snapshot.live.length - 1] : null;
 }
 
 /** The page's cleanup: its own registration goes; any other (a newer one) stays. */
@@ -99,11 +149,31 @@ export function handoffPageCurrentFor(worktreeId: string, snapshot: HandoffRegis
 }
 
 /**
- * 再指示 2: a page's dialog may start something new — `id` is the current registration and the
- * session is not expired (invariant 4). Read at the press and again after each await.
+ * PR2 再指示 1: the host reports the detail route of the path (`null`: none). Nothing changes for the
+ * same route reported again.
+ */
+export function reportHandoffRoute(route: string | null): void {
+  if (state.route === route) return;
+  commit({ ...state, route });
+}
+
+/**
+ * PR2 再指示 1: a registration of `worktreeId` belongs to the route `route` (the host's test of what
+ * it draws as the route's page, and part of {@link handoffPageMayStart}). `undefined`: no host has
+ * reported, the route takes no part (invariant 6).
+ */
+export function handoffRegistrationOnRoute(worktreeId: string, route: string | null | undefined): boolean {
+  return route === undefined || worktreeId === route;
+}
+
+/**
+ * 再指示 2: a page's dialog may start something new — `id` is the current registration, the
+ * session is not expired (invariant 4) and (PR2 再指示 1) its worktree is the route's (invariant 6).
+ * Read at the press and again after each await.
  */
 export function handoffPageMayStart(id: HandoffPageRegistration | null, snapshot: HandoffRegistryState = state): boolean {
-  return isCurrentHandoffRegistration(id, snapshot) && !snapshot.authExpired;
+  if (!isCurrentHandoffRegistration(id, snapshot) || snapshot.authExpired) return false;
+  return handoffRegistrationOnRoute(snapshot.live[snapshot.live.length - 1].worktreeId, snapshot.route);
 }
 
 /**

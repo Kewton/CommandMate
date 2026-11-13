@@ -35,9 +35,10 @@
 
 'use client';
 
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppShell } from '@/components/layout/AppShell';
+import { HandoffDialogHost } from '@/components/mem/HandoffDialogHost';
 
 /**
  * Route prefixes that render no shell. Matched as a prefix, on a segment
@@ -64,9 +65,20 @@ export function shouldRenderShell(pathname: string): boolean {
 
 /**
  * Wraps the root layout's children in the shell, except on the paths above.
+ *
+ * Issue #4317 PR2: the hand-off dialog's one host (`HandoffDialogHost`) sits beside the shell, at
+ * the same position on every path, so neither this branch, the route (its Loading, the page Next
+ * keys by `[id]`) nor the page's PC / phone branches make it anew. It decides from the path itself
+ * whether it draws anything (the worktree's detail route only; `shouldRenderShell()` is not its
+ * permission).
  */
 export function AppShellGate({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (!shouldRenderShell(pathname ?? '')) return <>{children}</>;
-  return <AppShell>{children}</AppShell>;
+  const body = shouldRenderShell(pathname ?? '') ? <AppShell key="shell">{children}</AppShell> : <Fragment key="bare">{children}</Fragment>;
+  return (
+    <>
+      {body}
+      <HandoffDialogHost key="handoff" />
+    </>
+  );
 }
