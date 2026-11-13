@@ -273,3 +273,134 @@ describe('send-foreground-check-4300.md 改訂 6 (#4304)', () => {
     expect(auditRev6(doc)).toEqual([]);
   });
 });
+
+/**
+ * 改訂 7 (Issue #4304): the human decisions on D4 (E1 as a limited guarantee
+ * with the exclusions (a)(b)) and D5 (L1 plus three acceptance items), the
+ * hand-off of the row evidence and the last-screen collection to
+ * `capture-generation-binding-4304.md` (by reference, with F1-a・F1-b before
+ * PR2a), the strict PR's scope, the open items and the per-finding table for
+ * `prereview-4304-rev6-reply.md` (A, B, D4, D5). The table has to be the last
+ * subsection of the 改訂 7 section. Presence only.
+ */
+const REQUIRED_IN_REV7: readonly string[] = [
+  'D4 = E1',
+  '限定された保証',
+  '(a) 前後の観測の間の変化',
+  '(b) `tpgid` は前景のプロセスグループの証拠でしかない',
+  'E2（exec の通知）は候補止まり',
+  'E4（中継プロセス）だけで受入を満たす扱いにはしない',
+  'D5 = L1',
+  '履歴の喪失の受入',
+  'geometry の再適用の対照',
+  'capture-generation-binding-4304.md',
+  'captureBoundFrame',
+  '回収の権利',
+  '札',
+  'G0',
+  'F1-a・F1-b は #4304 PR2a より前に入る',
+  '回収の権利の最初の呼び手は PR2a',
+  '作り直し（`new-window -k`）が回収の終端を待つ順は PR2b',
+  'strict PR',
+  'token・operation の保存・初回の応答・再送の一致',
+  '未決（誰が・何で・いつ決めるか）',
+  '改訂 7 の承認の後',
+];
+
+/** Rows the closing table must carry, one per finding of the 改訂 6 re-review. */
+const REV6_REVIEW_ROWS: readonly RegExp[] = [/^\| A（P2）/m, /^\| B（P2）/m, /^\| D4・/m, /^\| D5・/m];
+
+function lastSubsection(section: string): string {
+  const parts = section.split(/^(?=### )/m);
+  return parts[parts.length - 1];
+}
+
+function auditRev7(text: string): string[] {
+  const missing: string[] = [];
+  const history = sectionStartingWith(text, /^## 改訂の履歴/);
+  if (history === null || !/^- 改訂 7/m.test(history)) missing.push('## 改訂の履歴 に 改訂 7 の行');
+  const section = sectionStartingWith(text, /^## 改訂 7/);
+  if (section === null) return [...missing, '## 改訂 7'];
+  for (const label of REQUIRED_IN_REV7) {
+    if (!section.includes(label)) missing.push(label);
+  }
+  const closing = lastSubsection(section);
+  if (!/^### .*prereview-4304-rev6-reply\.md/m.test(closing)) missing.push('末尾の処置の表');
+  for (const row of REV6_REVIEW_ROWS) {
+    if (!row.test(closing)) missing.push(`末尾の表の行 ${row.source}`);
+  }
+  return missing;
+}
+
+describe('send-foreground-check-4300.md 改訂 7 (#4304)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function tmpDoc(text: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'rev7-4304-'));
+    dirs.push(dir);
+    const path = join(dir, 'doc.md');
+    writeFileSync(path, text);
+    return readFileSync(path, 'utf8');
+  }
+
+  const minimal = (closing: string[]): string =>
+    [
+      '# t',
+      '',
+      '## 改訂の履歴',
+      '- 改訂 7: x',
+      '',
+      '## 改訂 7（x）',
+      ...REQUIRED_IN_REV7,
+      ...closing,
+      '',
+      '## 0. next',
+      '',
+    ].join('\n');
+
+  const closingTable = [
+    '### R7.8 改訂 6 の再確認の指摘ごとの処置（`prereview-4304-rev6-reply.md`）',
+    '| 指摘 | 処置 |',
+    '|---|---|',
+    '| A（P2）: x | y |',
+    '| B（P2）: x | y |',
+    '| D4・E1: x | y |',
+    '| D5・L1: x | y |',
+  ];
+
+  it('names the decisions, the reference to the capture-generation design, the strict PR and the closing table inside the 改訂 7 section', () => {
+    expect(auditRev7(readFileSync(DOC, 'utf8'))).toEqual([]);
+  });
+
+  it('keeps 改訂 4〜6 passing alongside 改訂 7', () => {
+    const text = readFileSync(DOC, 'utf8');
+    expect(auditRev4(text)).toEqual([]);
+    expect(auditRev5(text)).toEqual([]);
+    expect(auditRev6(text)).toEqual([]);
+  });
+
+  it('positive control: the document without the 改訂 7 section and history line is reported', () => {
+    const text = readFileSync(DOC, 'utf8');
+    const section = sectionStartingWith(text, /^## 改訂 7/);
+    expect(section).not.toBeNull();
+    const stripped = tmpDoc(text.replace(section as string, '').replace(/^- 改訂 7.*\n/m, ''));
+    const missing = auditRev7(stripped);
+    expect(missing).toContain('## 改訂 7');
+    expect(missing).toContain('## 改訂の履歴 に 改訂 7 の行');
+  });
+
+  it('positive control: a closing table that is not the last subsection, or lacks the D5 row, is reported', () => {
+    const notLast = auditRev7(tmpDoc(minimal([...closingTable, '### R7.9 after', 'x'])));
+    expect(notLast).toContain('末尾の処置の表');
+    const noD5 = auditRev7(tmpDoc(minimal(closingTable.slice(0, -1))));
+    expect(noD5).toContain('末尾の表の行 ^\\| D5・');
+    expect(noD5).not.toContain('末尾の処置の表');
+  });
+
+  it('negative control: a minimal document with every label and the closing table passes', () => {
+    expect(auditRev7(tmpDoc(minimal(closingTable)))).toEqual([]);
+  });
+});
