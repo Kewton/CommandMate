@@ -131,6 +131,8 @@ import { buildPaneSessionLabels } from '@/components/worktree/pane-session-label
 import { Tooltip } from '@/components/common/Tooltip';
 import { SplitRoleStatus } from '@/components/roles/SplitRoleStatus';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import {
   sessionStartingScopeKey,
   useSessionStartingGate,
@@ -628,6 +630,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
 
   const handleDiscardPending = useDiscardPending(discardPending, onHistoryInsertToMessage);
 
+  // Issue #4345 1c: the page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const handlePromptRespond = useCallback(
     async (answer: string, decisionId?: string | null): Promise<void> => {
       // Issue #2869: remember which window this Send was made from, so the
@@ -663,7 +667,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
               isAnswerablePromptData(prompt.data) ? prompt.data : null,
               resolvedInstanceId,
             );
-        const response = await fetch(
+        // Issue #4345 1c: the answer's 401 reaches the gateway before the reply is read.
+        const response = await fetchForHandoffPage(
+          handoffOwner,
           decisionId
             ? `/api/worktrees/${worktreeId}/respond`
             : `/api/worktrees/${worktreeId}/prompt-response`,
@@ -699,7 +705,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
         setPromptAnswering(false);
       }
     },
-    [worktreeId, cliToolId, resolvedInstanceId, prompt.data, setPromptAnswering, clearPrompt, refresh, showToast, t, markPromptSubmitted],
+    [worktreeId, cliToolId, resolvedInstanceId, prompt.data, setPromptAnswering, clearPrompt, refresh, showToast, t, markPromptSubmitted, handoffOwner],
   );
 
   const handlePromptDismiss = useCallback(() => {

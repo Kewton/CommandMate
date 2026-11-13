@@ -54,6 +54,8 @@ import {
   type AutoYesEnterFallbackReading,
 } from '@/lib/polling/auto-yes-enter-sent';
 import { laterAutoYesDecision, type AutoYesDecisionPublished } from '@/types/auto-yes-decision';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import {
   DETAIL_PANE_POLLING_CADENCE,
   isGeneratingStatus,
@@ -415,6 +417,9 @@ export function useTerminalPanePolling({
 }: UseTerminalPanePollingOptions): UseTerminalPanePollingReturn {
   // Resolve to the primary instance when omitted (instanceId === cliToolId).
   const resolvedInstanceId = instanceId ?? cliToolId;
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page: the
+  // sessions view's tiles report nothing).
+  const handoffOwner = useHandoffPageOwner();
   const [terminal, setTerminal] = useState<PaneTerminalState>(() => ({
     output: '',
     realtimeSnippet: '',
@@ -681,7 +686,11 @@ export function useTerminalPanePolling({
       inFlightCliToolRef.current !== requestedCli ||
       inFlightInstanceRef.current !== requestedInstance;
     try {
-      const response = await fetch(
+      // Issue #4345 1c: the pane's own poll (PC split, phone) — its 401 reaches the gateway under the
+      // page's registration, numbered in that registration's order (not `requestId`), before the
+      // non-2xx return.
+      const response = await fetchForHandoffPage(
+        handoffOwner,
         `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCli}&instance=${encodeURIComponent(requestedInstance)}`,
       );
       if (!response.ok) {
@@ -730,7 +739,7 @@ export function useTerminalPanePolling({
       // Network errors are swallowed; next interval will retry.
       console.error('[useTerminalPanePolling] fetch error:', err);
     }
-  }, [worktreeId, cliToolId, resolvedInstanceId, applySnapshot]);
+  }, [worktreeId, cliToolId, resolvedInstanceId, applySnapshot, handoffOwner]);
 
   // When (worktreeId, cliToolId) changes, treat it like a fresh attach.
   // We reset attaching=true and clear stale output/prompt so the new CLI starts

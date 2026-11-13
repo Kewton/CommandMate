@@ -10,6 +10,8 @@ import {
   isConnectionKnownDown,
 } from '@/hooks/useConnectivity';
 import { worktreeApi } from '@/lib/api-client';
+import { beginHandoffPageObserver } from '@/lib/handoff/page-owner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import type { ChatMessage } from '@/types/models';
 
 export interface UseOptimisticPaneMessagesArgs {
@@ -39,10 +41,18 @@ export function useOptimisticPaneMessages({
   serverMessages,
   onSent,
 }: UseOptimisticPaneMessagesArgs): UsePendingMessagesResult {
+  // Issue #4345 1c: the worktree page's registration holder (PC split, phone). Each send — a resend
+  // included — is owned by the registration held when it leaves; its 401 reaches the gateway before
+  // it becomes an ApiError. Outside a worktree page nothing changes in the call.
+  const handoffOwner = useHandoffPageOwner();
   const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktreeId, content, options),
-    [worktreeId],
+    (content: string, options: OptimisticSendOptions) => {
+      const observer = beginHandoffPageObserver(handoffOwner);
+      return observer
+        ? worktreeApi.sendMessage(worktreeId, content, options, observer)
+        : worktreeApi.sendMessage(worktreeId, content, options);
+    },
+    [worktreeId, handoffOwner],
   );
   // Issue #2503: the same connection verdict the header pill renders (#2501),
   // read here so a send made in a tunnel is held as "waiting" and resent once
