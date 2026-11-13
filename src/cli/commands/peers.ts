@@ -49,6 +49,20 @@ import {
 interface PeerWorktreeItem extends WorktreeItem {
   repositoryPath?: string;
   repositoryName?: string;
+  /**
+   * Issue #4346: the un-aggregated status of each instance, which the list API
+   * sends next to `sessionStatusByCli` (the map `ls`'s AUTO_YES column reads
+   * through `LsWorktreeItem`). Optional: a server that predates it, or answered
+   * `?includeStatus=0`, sends none.
+   */
+  sessionStatusByInstance?: Partial<Record<string, PeerStatusEntry>>;
+}
+
+/** The three booleans of one status entry, per instance or per tool. */
+interface PeerStatusEntry {
+  isRunning: boolean;
+  isWaitingForResponse: boolean;
+  isProcessing: boolean;
 }
 
 /** One session in the listing. */
@@ -57,7 +71,10 @@ interface PeerRow {
   instanceId: string;
   cliTool: string;
   alias: string;
-  /** The worktree's aggregate STATUS word, as `commandmate ls` prints it. */
+  /**
+   * The instance's own STATUS word, in the vocabulary `commandmate ls` prints
+   * (Issue #4346: no longer the worktree's aggregate — see {@link instanceStatus}).
+   */
   status: string;
   /** True for the session running this command. */
   isSelf: boolean;
@@ -81,6 +98,27 @@ function deriveStatus(wt: WorktreeItem): string {
   if (wt.isWaitingForResponse) return 'waiting';
   if (wt.isProcessing) return 'running';
   if (wt.isSessionRunning) return 'ready';
+  return 'idle';
+}
+
+/**
+ * The status word of one instance of `wt` (Issue #4346).
+ *
+ * Every row used to print the worktree's aggregate, so once any session in the
+ * worktree was up, a codex / antigravity that was not running at all read
+ * `ready` — and the `ask` line next to it would type into a session that was
+ * never started. The instance's own entry decides, with the same precedence as
+ * {@link deriveStatus}: its `sessionStatusByInstance` entry, else its tool's
+ * `sessionStatusByCli` entry (a map that lacks the alias), else — a row with
+ * neither map — the worktree's aggregate, as before.
+ */
+function instanceStatus(wt: PeerWorktreeItem, inst: AgentInstance): string {
+  const entry: PeerStatusEntry | undefined =
+    wt.sessionStatusByInstance?.[inst.id] ?? wt.sessionStatusByCli?.[inst.cliTool];
+  if (!entry) return deriveStatus(wt);
+  if (entry.isWaitingForResponse) return 'waiting';
+  if (entry.isProcessing) return 'running';
+  if (entry.isRunning) return 'ready';
   return 'idle';
 }
 
@@ -155,8 +193,8 @@ export function buildPeerRows(
 
   const rows: PeerRow[] = [];
   for (const wt of scoped) {
-    const status = deriveStatus(wt);
     for (const inst of rosterOf(wt)) {
+      const status = instanceStatus(wt, inst);
       const isSelf = wt.id === identity.worktreeId && inst.id === identity.instanceId;
       rows.push({
         worktreeId: wt.id,
