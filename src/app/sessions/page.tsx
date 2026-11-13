@@ -21,7 +21,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
 import { SessionTileGrid, SessionsViewModeSelector } from '@/components/sessions';
@@ -135,6 +135,51 @@ function CliDot({
   );
 }
 
+/**
+ * Compact relative time ("8m ago" / "8分前") for the Sessions row (Issue #4346).
+ *
+ * `formatRelativeTimeShort` only knows English, so every other locale reads its
+ * units from `common.sessions.relativeTime.*`. English keeps calling the shared
+ * helper so its wording and thresholds stay in one place. The thresholds below
+ * mirror that helper's.
+ */
+function formatSessionRelativeTime(
+  isoString: string,
+  locale: string,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  if (locale === 'en') {
+    return formatRelativeTimeShort(isoString);
+  }
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) {
+    return '';
+  }
+  const diffSeconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (diffSeconds < 45) {
+    return t('sessions.relativeTime.now');
+  }
+  const minutes = Math.round(diffSeconds / 60);
+  if (minutes < 60) {
+    return t('sessions.relativeTime.minutes', { count: minutes });
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return t('sessions.relativeTime.hours', { count: hours });
+  }
+  const days = Math.round(hours / 24);
+  if (days < 7) {
+    return t('sessions.relativeTime.days', { count: days });
+  }
+  if (days < 30) {
+    return t('sessions.relativeTime.weeks', { count: Math.round(days / 7) });
+  }
+  if (days < 365) {
+    return t('sessions.relativeTime.months', { count: Math.round(days / 30) });
+  }
+  return t('sessions.relativeTime.years', { count: Math.round(days / 365) });
+}
+
 /** Whether any selected agent is actively working (running/generating). */
 function isWorktreeActive(wt: Worktree, agents: readonly CLIToolType[]): boolean {
   return agents.some((agent) => {
@@ -162,6 +207,7 @@ const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 export default function SessionsPage() {
   const tCommon = useTranslations('common');
   const tWorktree = useTranslations('worktree');
+  const locale = useLocale();
   const isMobile = useIsMobile();
   const { worktrees, isLoading, error, refresh } = useWorktreesCacheContext();
   // [Issue #1050] Whether we have any data to keep mounted. Based on the raw
@@ -382,7 +428,7 @@ export default function SessionsPage() {
                     ? sanitizePreview(wt.lastUserMessage)
                     : null;
                   const relativeTime = wt.lastUserMessageAt
-                    ? formatRelativeTimeShort(String(wt.lastUserMessageAt))
+                    ? formatSessionRelativeTime(String(wt.lastUserMessageAt), locale, tCommon)
                     : null;
                   // [Issue #1078] Only actively-working agents (running/waiting)
                   // get a labelled chip; the idle group collapses to a "+N" counter

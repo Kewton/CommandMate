@@ -1049,6 +1049,10 @@ commandmate-issue-102 / codex
 別のサーバーなら `serverMismatch: true` と stderr の警告が付きます。同じリポジトリに他のセッションが無いときは
 `No peer sessions found.` です。
 
+`status`（`waiting` / `running` / `ready` / `idle`。語は `ls` と同じ）は**その行のセッション自身**の状態です（Issue #4346）。
+同じ worktree の別のセッションが動いていても、起動していないセッションの行は `idle` です。各セッションの状態を返さない古い
+サーバーでは、従来どおり worktree 全体の状態を出します。
+
 ### 終了コード
 
 | コード | 意味 |
@@ -3649,6 +3653,8 @@ commandmate mem check --suggest [--instance <id>] [--json]
 commandmate mem check --suggest --quiet [--hook <event>]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+commandmate mem decisions [--worktree <id> [--branch <name>] | --repository <id> --branch <name>] [--pending] [--json]
+commandmate mem decisions <itemId> [--worktree <id> | --repository <id>] [--effect spec|record_only] [--json]
 ```
 
 - 対象は、セッションの中では `whoami` で決まる自分の instance。通常のシェルでは、書き込みに `--worktree <id> --instance <id>`、`list` / `mode` / `purge` に `--worktree <id>` か `--repository <id> --branch <name>` を付ける（無ければ exit 2 `target_required`）
@@ -3727,7 +3733,7 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 
 ### 決定を正本へ記録する（画面だけ、Issue #4225）
 
-`decision` を Issue・PR のコメントか作業木の文書（`promote_to`）へ書くのは、**人が画面で差分を承認したときだけ**です（Repositories の画面の各行の「mem」→「決定を正本へ記録する」、`/repositories/<id>/mem/decisions?branch=<name>`）。**CLI に口はありません**（`commandmate mem` に promote・approve のサブコマンドは無い）。brief・`check`・促し・Schedule など、ほかのどの経路からも書きません。
+`decision` を Issue・PR のコメントか作業木の文書（`promote_to`）へ書くのは、**人が画面で差分を承認したときだけ**です（Repositories の画面の各行の「mem」→「決定を正本へ記録する」、`/repositories/<id>/mem/decisions?branch=<name>`）。**CLI に書く口はありません**（`commandmate mem` に promote・approve のサブコマンドは無い。読むだけの `mem decisions` は次の節）。brief・`check`・促し・Schedule など、ほかのどの経路からも書きません。
 
 1. 画面で項目と作業木を選び「差分を作る」。書く本文の全文・行き先（解決後の `Issue <host>/<owner>/<repo>#N`、または `<作業木> (<ブランチ>): <パス>`）・投稿するアカウント・効果（「仕様を変える決定」が既定／「記録だけ」）・期限（30 分）が出ます。作業木・効果・引用の確認を変えると、出ていた差分は消えます（作り直してから承認します）。Agent が書いた引用は、その本文をチェックの横に出し「Agent が記録した引用（未確認）」として書きます。原文と照らしてチェックしたときだけ「人が画面で確かめた引用」になります（チェックは項目を選び直すと外れます）。自由入力（決定の文・引用）はコードのブロックに入れ、見えない文字は `[U+XXXX]` に置き換えます
 2. 「承認して書く」。書く直前に、項目の版・行き先（host・repository・番号、または作業木・ブランチ・パス）・差分の基準にした内容の指紋・作業木の世代・mode・投稿者を照合し、どれかが変わっていれば **何も書かずに** 差分の作り直しを求めます（承認の後に別のセッションが文書を変えた・作業木を消した・別のブランチへ切り替えた・同じ項目を並行で承認した、など）
@@ -3744,6 +3750,21 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 - 同じ Git の root の間で項目のブランチの設定が食い違うと、画面は警告を出して決定の一覧と承認を止めますが、結果の確定していない操作は出し続け、照合・無いことを確かめたはできます（項目は設定が揃うまで進みません）
 - 同じ Git のどの root の画面からでも、その Git の root が持つ操作を照合・確定できます（別の Git の root からは届きません）
 - ブランチ名・作成者に見えない文字があるときも警告します。ブランチは本文に省略の形（`(省略 N bytes・理由)`）で書きます
+
+### 決定を読む（`mem decisions`、読むだけ、Issue #4355）
+
+ブランチの決定の一覧と、1 件の差分を CLI で**読めます**。**承認は画面だけ**です（CLI では承認できません。人の決定、2026-11-13）。どちらも GET だけで、DB・GitHub・作業木に何も書きません。
+
+- `commandmate mem decisions`：項目ごとに 1 行（`<id> <状態> v<版> by=<agent|human>(<instance>) to=<行き先|-> quote="<引用の先頭 40 文字>"|- approvals=<人が画面で承認した回数>`）と、承認の操作ごとに字下げの行（`op <id> <状態>[ pending-transition(<理由>)][ concurrent-edit][ unknown(<理由>)] decided-by=<server|human|-> effect=<spec|record_only>`）。最後の行が件数（`counts (before --pending): open=<N|unknown> recorded=<M|unknown> approvable=<yes|no>`）
+  - 「承認された」を 1 つの真偽に畳みません。項目の今の状態（`open`・`recorded`・`promoted`）、人の承認の回数（`approvals`）、外へ書けたか（操作の状態）を分けて出します。外へは書けたが項目が進んでいない操作は `succeeded pending-transition(<理由>)` と出ます（画面の「記録済みとして扱う」で進めます）
+  - 件数は `--pending` の**前**の数です。`open` は承認待ち、`recorded` は反映待ち。mode が `on` でないと `approvable=no`（数えるが承認できない）。同じ Git の root の間で mode が食い違うと `unknown`（0 とは出しません）
+  - `--pending`：`open` の項目と、結果の確定していない操作（不明・進行中・遷移待ち）を持つ項目だけ
+  - 対象：セッションの中では自分の作業木、通常のシェルでは `--worktree <id>`（ブランチは作業木の今のブランチ。`--branch` で別のブランチ）か `--repository <id> --branch <name>`
+- `commandmate mem decisions <itemId>`：その決定を書くとしたら書かれる本文を**参考として**出します。1 行目は必ず `REFERENCE ONLY — cannot be approved; approve on the screen`。**参考の差分は承認に使えません**（画面の差分と違い、操作の ID が空・投稿者が無い・期限が無い・引用は常に「Agent が記録した引用（未確認）」）。行き先が作業木の文書なら `--worktree` の作業木で解きます。作業木が無い（`--repository`）・別のブランチ・detached のときは本文だけを出し、行き先は `unresolved (worktree_required|branch_changed|branch_unresolved)` と出します（作業木を推測しない）
+- 今の規則に当たる欄（本文・引用・evidence・行き先・閉じた理由のどれか）がある項目は、一覧では本文・引用・行き先を出さず `withheld(field=… rule=…)` だけ、差分は exit 2 `secret_like`（欄の名だけ）です
+- 本文・引用・行き先は Agent や人が書いた文字です。文字の出力では端末の制御文字（ESC・C0・C1・`\r`）や見えない文字を `\x1b`・`\u202e` などの形で出します。`--json` は JSON の文字列としてだけ出します
+- `--json` は `schema: 1` の形です（一覧: `schema`・`repositoryId`・`branch`・`mode`・`counts`・`pending`・`decisions[]`・`unresolved[]`。差分: `schema`・`reference: true`・`approvable: false`・`notice`・`item`・`mode`・`effect`・`quoteOrigin`・`destination`・`body`・`bodySha256`・`invisibleReplaced`・`drawnAt`）。キーを消したり型を変えたりはしません（足すことはあります）
+- 終了コード：見つからない（別のリポジトリの項目・作業木を含む）は 52、`secret_like`・`--pending` と `<itemId>` の同時指定・`--effect` だけの指定は 2、サーバに繋がらないときは 1
 
 ### 項目を画面で見る・書く（画面だけ、Issue #4227）
 
@@ -3800,7 +3821,7 @@ propose add の --close-when は kind が waiting / next / external のとき必
 - 引き継ぎは **セッションを止めません**。止めるのは、人がその場で押す既存の停止だけです。画面の「停止する」は、停止の宣言 → 既存の停止 → 止まったことの観測 の順に行い、サーバは止まったかを `isRunning` で確かめて記録します。期限・取り消し・確定・読みからは何も止めません
 - 記録は `confirmed`（Agent の `done`・全提案への判断・確定の全成功・人の停止の後に止まったことを観測、の全部）か `unconfirmed`（理由つき：`forced`・`agent_timeout`・`request_failed`・`undecided_left`・`conflict_left`・`apply_failed`・`session_changed`）です。確定の前に「今すぐ停止」を押した強制終了は、必ず `unconfirmed(forced)` です。止まったことを確かめられないときは記録せず、もう一度停止を押すよう画面が出します
 - 画面の「終了」（PC のヘッダーと各分割の「終了」・スマホの「…」の「終了」）は、押したときに mode を読み、対話の設定がオンで mode が `on` ならこの引き継ぎの画面を、それ以外（無人・mode が `on` でない・読めない・5 秒で答えない）は今までどおりの確認を出します。どちらも開いただけでは止めません。「終了をやめる」はセッションを続けます
-- 引き継ぎの画面は、**確定の送信中・結果が分からない確定・取り消しの応答待ち・停止の途中の間は閉じません**（Esc・×・背景・ボタン・別の「終了」・作業木の切り替えのどれでも。理由が出ます）。結果が分からない確定は「同じ内容で送り直す」か「送り直さずにやめる」を選ぶまで残ります。その間も停止は押せます。作業木を切り替えても画面は残り、その作業木では停止も確定もできず「送り直さずにやめる」だけ押せます。元の作業木に戻ると送り直せます。PC とスマホの表示が切り替わっても（向き・幅の変更）、切り替えの読み込み中に画面が一度消えても、これらは残り、依頼も作り直しません。閉じていない引き継ぎの画面は、別のページへ移ってからその作業木に戻ったときも開いたまま出ます（Agent の提案を待っている間も）。取り消しを押した後は確定も依頼の文も送りません。前の確定・取り消し・停止・依頼の作成の応答が遅れて返っても、その後に始めた確定や、開き直した（または別のページで開いた）引き継ぎの画面には何もしません（閉じたり、結果が分からない扱いにしたり、表示を書き換えたりしません）。依頼を作れず既存の停止だけを出す画面では、止まったときだけ「停止しました」と出し、止められなかった・分からないときは理由を出して停止ボタンを残します（もう一度押せます）
+- 引き継ぎの画面は、**確定の送信中・結果が分からない確定・取り消しの応答待ち・停止の途中の間は閉じません**（Esc・×・背景・ボタン・別の「終了」・作業木の切り替えのどれでも。理由が出ます）。結果が分からない確定は「同じ内容で送り直す」か「送り直さずにやめる」を選ぶまで残ります。その間も停止は押せます。作業木を切り替えても画面は残り、その作業木では停止も確定もできず「送り直さずにやめる」だけ押せます。元の作業木に戻ると送り直せます。PC とスマホの表示が切り替わっても（向き・幅の変更）、切り替えの読み込み中に画面が一度消えても、これらは残り、依頼も作り直しません。閉じていない引き継ぎの画面は、別のページへ移ってからその作業木に戻ったときも開いたまま出ます（Agent の提案を待っている間も）。まだ確定していない提案ごとの「承認」「捨てる」の選択も、同じ引き継ぎの画面に戻れば残ります（別の作業木・別のページへ移って戻っても。Issue #4346）。確定・拒否の応答の後と、開き直した引き継ぎの画面では選び直しです。取り消しを押した後は確定も依頼の文も送りません。前の確定・取り消し・停止・依頼の作成の応答が遅れて返っても、その後に始めた確定や、開き直した（または別のページで開いた）引き継ぎの画面には何もしません（閉じたり、結果が分からない扱いにしたり、表示を書き換えたりしません）。依頼を作れず既存の停止だけを出す画面では、止まったときだけ「停止しました」と出し、止められなかった・分からないときは理由を出して停止ボタンを残します（もう一度押せます）
 - 終了コードは mem と同じです：0 成功・2 入力の誤り・50 mode が on でない・51 版の競合・52 見つからない・55 `not_requested`／`request_closed`／`session_changed`／`state_forbids`
 
 ---
