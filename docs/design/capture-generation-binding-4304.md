@@ -1,9 +1,10 @@
 # capture の frame を取得元の世代（pane）へ結び付ける（Issue #4304 の前提）設計
 
-- 段: 設計（この文書だけ。コードは書かない）。第 2 版（§9）。実装は §5 の 2 本の PR（F1-a・F1-b）で、どちらも #4304 の PR2a より前に入れる。最後の画面の回収の権利（§4.7）と作り直しの順は #4304 の PR2a・PR2b が初めて実装する
+- 段: 設計（この文書だけ。コードは書かない）。第 3 版（§9）。実装は §5 の 2 本の PR（F1-a・F1-b）で、どちらも #4304 の PR2a より前に入れる。最後の画面の回収の権利（§4.7）と作り直しの順は #4304 の PR2a・PR2b が初めて実装する
 - 経緯: #4304 の設計（`commandmate-issue-4300-design` の `docs/design/send-foreground-check-4300.md`、改訂 6）の事前レビューで、「使う frame が取得元の世代に結び付かない」同じ種類の指摘が 3 回出た（改訂 6 の再確認 `prereview-4304-rev6-reply.md` の A、P2）。`docs/orchestrate/team.md` §6-6 に従い、作業に関わっていないイネーブラーが共通の原因を調べた（`enabler-return-4304-A-cause.md`、2026-11-14）。人の承認（2026-11-14、PM 追補 1 の 7）: A の共通の原因を「frame を取得元の世代へ結び付ける」小さな設計として切り出し、#4304 の実装より先に入れる
 - リーダーの決定（この文書の前提）: **F1 を採る**（pane id を的にした capture＋frame に世代＋行動する読者はキャッシュを使わない＝狭めて塞ぐ）。F2 は F1 の後に capture の回数を測って必要なときだけ（**この設計では採らない**）。F3 は**採らない**。世代の識別子は `(server の start_time, pane_id)`（成立条件は §4.8）。`sweepStalePendingPrompts` は DB を書き換えるので**行動する読者**に入れる
 - 第 2 版の材料: 第 1 版（`e1f92c211`）の 2-4-4 事前レビュー `prereview-4304-capgen-reply.md`（codex-2、**承認保留**。F1 には賛成、指摘 A〜F）と、リーダーの再指示 `reinstruct-4304-capgen-1.md`。指摘ごとの処置は §9 の後の表
+- 第 3 版の材料: 第 2 版（`7c40b4afc`）の 2 回目の事前レビュー `prereview-4304-capgen-2-reply.md`（codex-2、**承認保留**。前回の主要な指摘は反映済み、N1〜N4 の確定が要る）と、リーダーの再指示 `reinstruct-4304-capgen-2.md`。N1〜N4 は未決に回さず、守る条件と処分を設計として決めた（§4.10・§4.7・§4.11）。「一部未対応」の行の閉じ方は §9 の後の表
 - 基準: develop `a21776371`（`origin/develop` と同じ）。file:line はこの版で取り直した。実装の着手時は名前で探し直す
 - 材料（リポジトリ外。`MyCodeBranchDesk/workspace/orchestration/runs/`）: `2026-11-14/enabler-return-4304-A-cause.md`（原因の正本）、`2026-11-14/lead-request-enabler-4304-A-cause.md`、`2026-11-13/prereview-4304-rev6-reply.md` の A、`2026-11-14/prereview-4304-capgen-reply.md`、`2026-11-14/reinstruct-4304-capgen-1.md`
 - 表記: **事実**＝file:line・man の行がある文。**読み**＝そこからの推論（明記する）。**未確認**・**未決**は §7 に集め、未決には誰が・何で・いつ決めるかを書く
@@ -185,8 +186,8 @@
 
 | 操作 | 期待する世代をどこで取るか | どこまで持つか | いつ取り直すか／照合するか | 合わないとき |
 |---|---|---|---|---|
-| R1 応答 poll の tick | tick の `captureBoundFrame`（期待なし）で G。前の tick の世代を poller の状態に持つ | その tick の保存・カーソル・待ちの観測まで（`response-checker.ts` の capture の後は await を挟まない、#3705） | 毎 tick。前の tick と世代が違えば、その tick は保存しない（新しい世代のカーソルの扱いは #4304 PR2a の relaunched） | 保存 0・カーソル不変 |
-| R2 transcript の後のカーソル・送信の前の flush | poller の状態に持つ世代を期待として `captureBoundFrame(…, G)` | dynamic import の await の後、カーソルを書く直前まで | 書く直前に poller の状態の世代がまだ G か（同期の照合） | 書かない。dead の flush は最後の画面の回収（§4.6・§4.7）へ回し、ここで最後として保存しない |
+| R1 応答 poll の tick | tick の `captureBoundFrame`（期待なし）で観測した世代を、インスタンスの**受け入れた世代**（§4.11）と比べる | その tick の保存・カーソル・待ちの観測まで（`response-checker.ts` の capture の後は await を挟まない、#3705） | 毎 tick。初回・同じ世代・交代の扱いは §4.11（第 3 版。第 2 版の「交代は #4304 PR2a の relaunched」は取り消す） | §4.11 の表 |
+| R2 transcript の後のカーソル・送信の前の flush | インスタンスの受け入れた世代（§4.11）を期待として `captureBoundFrame(…, G)`。受け入れた世代が無ければ取得しない | dynamic import の await の後、カーソルを書く直前まで | 書く直前に、受け入れた世代がまだ G で、tick の所有と回収の権利の札（§4.7）が有効か（同期の照合と同期の書き込み） | 書かない（保存 0・カーソル不変）。dead の flush は最後の画面の回収（§4.6・§4.7）へ回し、ここで最後として保存しない |
 | R4 Auto-Yes の tick → R5 → 回答の完了 | tick の `captureBoundFrame` で G | 判定・回答の内容・`sendPromptAnswer`（BoundFrame を渡す）・`finishAnsweredPrompt`・カーソルまで同じ G | tick の中では取り直さない。次の tick で新しく取る | 回答しない。旧 G の成功を新しい世代の「答え済み」・カーソルへ書かない |
 | R5 回答の送信（Auto-Yes・respond・prompt-response 共通） | 呼び手の BoundFrame の G（呼び手が frame を持たないときは自分の `captureBoundFrame` で G） | 最初のキーの直前まで。番の中の `stillApplies` の再読は `captureBoundFrame(…, G)` | **最初のキーの直前に、番の経路（非競合・番の待ち・joined）と Enter 省略の経路のどれでも、`readPaneGeneration` が G であることを照合する**（#4303 の前景の確認と同じ所。条件つきの `stillApplies` に頼らない）。キーの後の再読（`:476`）も `captureBoundFrame(…, G)` | 最初のキーの前ならキー 0・未送信。キーの一部の後なら既に送ったキーの数を保ち（`keysSent`）、完了として保存しない（`indeterminate`） |
 | R6 prompt-response | 最初の `captureBoundFrame` で G | 検証・plan-review の再読（`captureBoundFrame(…, G)`）・R5 へ渡すまで | plan-review の `stillApplies` と R5 の最初のキーの直前 | 未送信（409 系、再送してよい）。同じ phase・同じキーの計画でも G→H ならキー 0 |
@@ -194,8 +195,8 @@
 | R7 strict | その操作の最初の read の `captureBoundFrame` で G。payload と観測は同じ BoundFrame から作る（R11-c） | その操作の全キー・各キーの後の read まで | 各 read は `captureBoundFrame(…, G)` | read を `capture` の失敗として返す（キー 0、またはキーの一部の後なら strict の既存の扱い）。token・保存・再送の一致は #4304 の strict の PR の範囲 |
 | R8 送信の前の判定 | 判定の `captureBoundFrame` で G | 判定 → R9 の送信の最初のキーの直前まで | R9 の最初のキーの直前に G を照合 | 送らない（保留・未送信） |
 | R9 入力欄の読み・クリア | R8 の G（クリアの `initialCapture` は BoundFrame） | 本文・Enter・クリアの各周 | 各周の読みは `captureBoundFrame(…, G)` | 最初のキーの前なら未送信。後なら送信済みの prefix の記録を保ち `indeterminate` |
-| R10 起動・準備完了 | F1-b: `launchSession` が戻った直後の `readPaneGeneration` で G。#4304 PR2b の後: spawn が同じ呼び出しで返す pane id | 準備完了の待ち・trust・update・nudge のキー・`settleLaunchRole`（capture と kill の判断）・起動直後の生存の confirm（2 回の読み）まで同じ G | 各読みは `captureBoundFrame(…, G)`。読みのたびに新しい世代を受け直さない | 起動の失敗（準備待ちの時間切れと同じ扱い）。trust 等のキーを送らない。後継の pane を kill しない |
-| R10 起動の外の生存の確認（`relaunchIfToolExited`・拒否の解除 `base.ts:410`） | 呼び出しの `captureBoundFrame` で G | その判断まで | — | unknown は「生きている」でも「終わった」でもない: 起動し直さない・拒否を解除しない |
+| R10 起動・準備完了 | **起動の入口で、最初の frame の読み・最初のキーの決定より前**に G を確定する（§4.10。第 2 版の「`launchSession` が戻った直後」は driver の中の待ちと trust の回答より後なので取り消す）。作成は pane を作った直後、再利用・起動し直しは既存の pane の最初の読みの前。#4304 PR2b の後は spawn が同じ呼び出しで返す pane id | 起動の入口 → driver の `resolveLaunchPane` → 起動の行のキー → driver の中の準備完了の待ち・trust・update・nudge のキー → `settleLaunchRole`（capture と kill の判断）→ 起動直後の生存の confirm（2 回の読み）まで同じ G を渡す | 各読みは `captureBoundFrame(…, G)`、各キーの直前に G を照合。途中で新しい世代を受け直さない | 起動の失敗（準備待ちの時間切れと同じ扱い）。trust 等のキーを送らない。ready の成功を返さない。後継の pane を kill しない。G を作れない入口は起動の確認・自動の回答を拒否する |
+| R10 起動の外の生存の確認（`relaunchIfToolExited`・拒否の解除 `base.ts:410`） | 呼び出しの `captureBoundFrame` で G。`relaunchIfToolExited` はその G を起動の入口へ期待として渡す（§4.10） | その判断と、続く起動まで | 起動の入口の G の確定で一致を要求 | unknown は「生きている」でも「終わった」でもない: 起動し直さない・拒否を解除しない。G と違う pane には起動し直さない |
 | R11-b・c・d・e・f2・f4・s | builder・probe の `captureBoundFrame` で G（bound な経路のとき） | その副作用を書くまで（同期） | — | 副作用を行わない（解決・消去・終了・記録を作らない） |
 
 ### 4.5 キャッシュの扱い
@@ -210,27 +211,40 @@
 - 最後の画面として保存してよい frame は、**dead を確かめた後に、その同じ世代を的に取得した frame** だけ: ① `%G` が dead（`pane_dead=1`）→ ② `capture-pane -t %G` → ③ `%G` がまだ dead で同じ世代。
 - **alive → dead**（①alive・③dead）: frame は `unknown`（§4.2「取得中に変わった」）。通常の frame としても最後の画面としても使わない。最後の画面は、dead を確かめた後の別の回収（上の手順）で取る。死ぬ直前に CLI が書いた最後の行を落とさないため。
 - **dead → alive**（①dead・③alive）: 最後の回収の成功にしない（同じ pane への外部の `respawn-pane` 等を含む）。`unknown`。
-- 回収の期待の世代は、**生前（alive の bound な取得）に持った世代**だけ（#4304 R6.5 の「生前の識別子を持たない（サーバーの再起動の後など）capture は保存しない」を継ぐ）。生前の世代を持たない dead の pane は回収しない（保存 0、診断にだけ残してよい）。
+- 回収の期待の世代は、**生前（alive の bound な取得）に持った世代**だけで、それは §4.7 の `globalThis` の記録に書いたもの（closure が持つ旧い G は根拠にならない。第 3 版）（#4304 R6.5 の「生前の識別子を持たない（サーバーの再起動の後など）capture は保存しない」を継ぐ）。生前の世代を持たない dead の pane は回収しない（保存 0、診断にだけ残してよい）。
 - これはプロセスの実体の判定を F1 に足す要求ではない。「最後の画面」を名乗る条件だけ。
 
-### 4.7 回収の権利（第 2 版、レビュー D）
+### 4.7 回収の権利（第 2 版、レビュー D。第 3 版で N2・N3 を閉じた）
+
+**置き場所と寿命（N2）**:
+
+- 回収の権利の表は、**同じプロセスの全 bundle で 1 つ**にする: `globalThis` の 1 つの領域に置く（`src/lib/polling/response-poller-core.ts:92-108`・`:143-169` の `__responsePollerCoordinator` と同じ置き方。`next start` ではこの module が custom server の graph と route の bundle ごとに別に評価され、module の Map では 1 つにならない、`:96-102`）。R1・R2・R3 と作り直しの側は、どの bundle からもこの 1 つを読む。領域の名前は実装で決める（U3 と同じ扱い）。
+- **生前の世代と権利を同じ記録に入れる**: 世代ごとの記録 1 件が `{ 状態, 札, 生前に bound で alive を見た印 }` を持つ。「生前に見た」は、R1・R4 などの bound な取得が alive の G を返したとき、この記録へ書く（§4.11 の受け入れた世代の記録と同じ領域）。
+- **最後の回収は、この記録からしか始められない**: 回収を始める者は、権利を取る同じ同期の区間で、その世代の記録を領域から引き、「生前に見た」印があることを確かめる。closure や tick の状態が持っている旧い G は、回収の開始の根拠にならない（記録が無ければ始めない）。
+- だから表と生前の世代は**同時にしか失われない**: プロセスの再起動では両方が消え、生前の世代が無いので回収しない（§4.6、保存 0）。HMR では `globalThis` の領域が残るので両方が残る（新しく評価された module は既存の領域を使う。足した欄は `??=` で埋める、`response-poller-core.ts:160-169` と同じ）。仮に領域が作り直されても、記録が無ければ旧い closure の G から回収は始まらない（保存 0）。どの場合も再保存は起きない。
+- 保証の範囲は**1 つのサーバープロセスの中で**「成功の保存が高々 1 回」。複数の CommandMate サーバーが同じ pane を扱う構成は保証の外（今の `--issue` の並列サーバーはそれぞれ自分のセッションを扱う、の前提。**読み**。§7.1 で確かめる）。記録は、その世代の pane が無くなったことを読んだ後に消す（数の上限は実装で決める）。
 
 **状態**（世代ごと）:
 
 | 状態 | 意味 | 遷移 |
 |---|---|---|
-| 無し | 誰も回収を始めていない | 回収の開始で → 進行中（所有者つき） |
-| 進行中 | 所有者が §4.6 の取得または保存の途中 | 保存の完了で → 完了。unknown・throw・所有の失効・時間切れで → 失敗 |
+| 無し | 誰も回収を始めていない | 回収の開始で → 進行中（所有者の札つき） |
+| 進行中 | 所有者が §4.6 の取得の途中、または保存の前の await の途中 | 保存（同期の区間）の成立で → 完了。所有者の unknown・throw・所有の失効、または待つ側の期限切れで → 失敗（札を失効） |
+| 保存中 | 保存が同期の区間に収まらない実装のときだけ置く（下の N3 の規則）。結果が確定していない | 結果の確定で → 完了か失敗。**期限切れでは移さない** |
 | 完了 | 成功の保存が 1 回済んだ | 終端 |
-| 失敗（打ち切り） | 回収できなかった。保存 0 | 終端。**取り直さない**（二人目が回収しない） |
+| 失敗（打ち切り） | 回収できなかった。札は失効し、以後その所有者は書けない。保存 0 | 終端。**取り直さない**（二人目が回収しない） |
 
-- 権利は **await の前に同期で取る**（表を見て「無し」なら「進行中」を set、までを 1 つの同期の区間で）。権利は**世代ごとに 1 回**。「無し」以外を見た者は回収しない。
-- 所有者は、どの終わり方でも（unknown・throw・tick の所有の失効・入力の所有の失効）`finally` で終端（完了か失敗）へ移す。進行中のまま残さない。
+**終端の意味と遅れた結果（N3）**:
+
+- 作り直しの側が通ってよい終端は「**その所有者が今後、保存・カーソル等を書かないと確定した状態**」だけ: 完了、または札を失効させた失敗。
+- それを確定させる仕組みは**札（fencing token）**: 権利を取るときに札を発行し、所有者の保存・カーソルの書き込みは「記録の状態が進行中で、札が自分のもの」を確かめる同期の照合と、DB への書き込み（`better-sqlite3` の同期の transaction）と、状態を完了へ移すことを、**await を挟まない 1 つの同期の区間**で行う。失敗へ移すこと（札の失効）も同期で行う。だから失敗の後に元の Promise が resolve しても、その保存は照合で捨てられる（遅れた結果は捨てる）。
+- 保存の直前の照合: 取得の後・dynamic import 等の await の後、書く直前に必ず上の照合をする。その間に待つ側が期限で失敗にしていれば書かない。
+- **保存が成立した／成立が不明な場合を「保存 0 の失敗」にしない**: 同期の区間で保存するので、区間の外では「成立した（完了）」か「していない（進行中・失敗）」のどちらかしか無い。区間の中の throw は transaction が戻すので保存 0 が確かで、失敗へ移す。実装の都合で保存を同期の区間に収められない場合は「保存中」の状態を置き、結果が確定するまで期限で失敗へ移さず、作り直しを拒否する（復旧の失敗として返し、次の機会に再試行）。待つ側の期限を短くして済ませる解決は採らない。
+- 所有者は、どの終わり方でも（unknown・throw・tick の所有の失効・入力の所有の失効）`finally` で終端へ移す（自分の札がまだ有効なら失敗へ）。
 - 回収の取得と保存は**入力の番（`withInstanceInputLock`）を取らない**（tmux の読みと DB の書き込みだけ）。だから作り直しの側が exclusive の番を持って待っても、所有者がその番を待って詰まる順序は無い。
-- 回収の取得と保存はそれぞれ時間の上限を持つ（tmux の呼び出しの timeout、DB の書き込み）。上限を超えたら所有者は失敗へ移す。
-- **作り直し（#4304 L1 の `new-window -k`）の順**: exclusive の番の中で、その世代の状態を見る → 「無し」なら自分が権利を取り、回収してから作り直す → 「進行中」なら終端を待つ（上限つき。上限は回収の上限の和より長くする）→ 終端なら作り直す → 待ちが上限を超えたら**作り直さない**（復旧の失敗として返し、次の機会に再試行。作り直してから回収、の順にはしない）。
-- R1・R2 が dead を読んだときの保存も、同じ最後の保存として数え、同じ権利を通す（R3 だけの表にしない）。
-- **寿命と保証の範囲**: 表は CommandMate のサーバーのプロセスのメモリにだけ置く。保証は**1 つのサーバープロセスの中で**「成功の保存が高々 1 回」。サーバーの再起動・HMR で表が空になったら、生前の世代を持たない dead の pane は回収しない（§4.6）ので、再起動をまたいだ二度目の保存は起きない。複数の CommandMate サーバーが同じ pane を扱う構成は保証の外（今の `--issue` の並列サーバーはそれぞれ自分のセッションを扱う、の前提。**読み**）。表の行は、その世代の pane が無くなったことを読んだ後に消す（数の上限は実装で決める）。
+- 権利は **await の前に同期で取る**（記録を引き、「無し」で生前の印があれば「進行中」と札を set、までを 1 つの同期の区間で）。権利は**世代ごとに 1 回**。「無し」以外を見た者は回収しない。
+- **作り直し（#4304 L1 の `new-window -k`）の順**: exclusive の番の中で、その世代の記録を見る → 「無し」なら自分が権利を取り、回収してから作り直す → 「進行中」なら終端を待つ（上限つき。上限は回収の取得の上限より長くする）→ 上限を超えても進行中なら、待つ側が**札を失効させて失敗へ移し**（同期）、それから作り直す（失効の後の所有者の書き込みは照合で捨てられるので、作り直しの後に旧い世代の保存は起きない）→ 「保存中」なら作り直さない（復旧の失敗として返す）→ 完了・失敗なら作り直す。
+- R1・R2 が dead を読んだときの保存も、同じ最後の保存として数え、同じ権利と札を通す（R3 だけの表にしない）。
 - G2 の言い方: 「成功の保存は高々 1 回。失敗した世代は 0 回」。
 
 ### 4.8 世代の識別子の成立条件（第 2 版、レビュー E）
@@ -252,6 +266,65 @@
 - **F2「キャッシュのキーに世代を入れる」**: この設計では採らない。F1 の後に capture の回数を測り（§7）、負荷が問題になったときだけ別に考える。キャッシュの命中の frame は「確認の後に取得した」（G1 の後半）を満たさず、満たすには取得の開始時刻の規則（#3798）と重なり、組み合わせ（命中・合流・自分の取得 × 世代の一致・不一致 × 確認の前・後）が F1 の約 3 倍になる（読み）。
 - **F3「行動は番の中で取り直した frame だけ」**: 採らない。番を取らない作り直し（CommandMate の外の tmux 操作・CLI の終了）には (a) が残り、番の中の capture も文字列だけなので、確認と使用がまだ別の観測（原因の A が残る）。
 
+### 4.10 起動の世代 G を確定する時点（第 3 版、N1）
+
+**事実（なぜ第 2 版の「`launchSession` が戻った直後」では遅いか）**: 起動の準備完了の待ちと trust の回答は driver の `launchSession` の**中**で行われる。基底は `launchSession` を待ってから role の capture と kill の判断をする（`src/lib/cli-tools/base.ts:413-418`）。たとえば gemini は起動の行の後に `waitForReady` の中で capture して trust に Enter を送る（`src/lib/cli-tools/gemini.ts:178-185` → `:207-246`）、copilot は `waitForReady` の中で folder trust に答える（`src/lib/cli-tools/copilot.ts:687-702` → `:593-608`）、command-code は `waitForReady` で ready を確定する（`src/lib/cli-tools/command-code.ts:293-307` → `:325-332`）。戻った後に取った G は、それより前に起きた ready・trust のキーを拘束できない。
+
+**守る条件**: 起動で**最初に frame を読む・最初のキーを決める前に**、その起動の対象（作成・再利用・起動し直し）の G を確定する。起動の入口から driver の中の待ち・各回答・role の確認・kill の判断まで**同じ G を渡し**、途中で H を採り直さない。G を作れない（§4.2 の unknown）入口は、起動の確認・自動の回答を拒否する（起動の失敗）。
+
+**形**: 起動の文脈（名前は U3）が G を持ち、基底の `startSession`（`launchSessionWithRole`）から driver の `launchSession`・各 `waitForReady`／`waitForPrompt`（起動の中で呼ぶもの）・trust・update・nudge の回答・`settleLaunchRole`・`isToolLive` の confirm へ引数で渡す。G の決め方:
+
+| 入口 | G を確定する時点 | 確定の後 |
+|---|---|---|
+| 作成（pane が無い） | pane を作った呼び出しの直後、最初の capture・起動の行のキーより前（F1-b: `createLaunchPane`／`createSession` の直後の `readPaneGeneration`。#4304 PR2b の後は spawn が同じ呼び出しで返す pane id） | 起動の行のキーの直前に G を照合 |
+| 再利用（pane があり、ツールが生きている） | 既存の pane の最初の読み（`resolveLaunchPane` の `isToolLive` の confirm）の**前**に `readPaneGeneration` で G | confirm の 2 回の読みは `captureBoundFrame(…, G)`。生きていれば G のまま role の確認へ |
+| 起動し直し（pane があり、ツールが終わっている。#2070 の同じ pane への再送） | 同上 | 起動の行のキーの直前に G を照合（同じ pane なので G は変わらない。プロセスの区別は #4304 の範囲、§1.5） |
+| `relaunchIfToolExited` からの起動 | その判断の `captureBoundFrame` の G を、起動の入口へ**期待として**渡す | 起動の入口の確定で一致を要求。違えば起動しない |
+| 拒否の解除（`launchSessionWithRole` の refusal の判断、`base.ts:408-412`） | 判断の前の `readPaneGeneration` の G。その G を driver へ期待として渡す | driver の確定で一致を要求 |
+| 並行の読み手（claude の nudge は start と並行に走る、`src/lib/cli-tools/claude.ts:88-90`） | 起動の文脈の G が決まるまで読まない（G は作成・再利用の判断の後に決まる約束として持つ） | 以後の読み・キーは同じ G |
+
+**全経路**（各 driver の起動の分岐。前後の処理の全状態は §7.1 で F1-b の最初に読み直すが、G を渡す時点の規則はこの表で決まっている）:
+
+| 起動の経路 | 作成／再利用の判断 | pane の作成 | 起動の中の待ち・回答（G で拘束） |
+|---|---|---|---|
+| 基底 | `base.ts:878-903`（`resolveLaunchPane`） | `base.ts:926-937`（`createLaunchPane`） | `settleLaunchRole`（`base.ts:413-418`）、confirm（`:718-728`） |
+| claude | `src/lib/session/claude-session.ts:921` | `claude-session.ts:999` | 起動の prompt の待ちと trust の回答（`claude-session.ts:677`・`:1222`）、nudge（`claude-auto-default-nudge.ts:47`・`:67`・`:97`・`:144`） |
+| codex | `codex.ts:279` | `codex.ts:323` | `waitForReady`（`codex.ts:354`・`:382`、capture `:436`・`:732`・`:781`・`:860`） |
+| gemini | `gemini.ts:124` | `gemini.ts:148` | `waitForReady`（`gemini.ts:185`・`:207-246`） |
+| copilot | `copilot.ts:475` | `copilot.ts:526` | `waitForReady`（`copilot.ts:687-702`）、folder trust（`:593-608`） |
+| command-code | `command-code.ts:269` | `command-code.ts:293` | `waitForReady`（`command-code.ts:307`・`:325-332`） |
+| opencode | `opencode.ts:366-399` | `opencode.ts:440` | `waitForReady`（`opencode.ts:507`・`:600`） |
+| opencode-v2 | `opencode-v2.ts:263-268` | `opencode-v2.ts:280` | `waitForReady`（`opencode-v2.ts:309`・`:331`）、`waitForComposer`（`:361`） |
+| antigravity | `antigravity.ts:273` | `antigravity.ts:322` | `waitForReady`（`antigravity.ts:337`・`:362`） |
+| vibe-local | `vibe-local.ts:114` | `vibe-local.ts:136` | `waitForPrompt`（`vibe-local.ts:196`・`:249`） |
+
+（パスは `src/lib/cli-tools/` のもの。claude だけ `src/lib/session/`）
+
+- 送信の時の `waitForPrompt`（例: `codex.ts:1029`、`gemini.ts:337`）は起動ではなく送信（R8）で、期待の世代は送信の G（§4.4 の R8）。
+- 起動の中で G と違う世代を読んだ（unknown）ら、その起動は失敗: trust 等のキー 0、ready の成功を返さない、role の確認をしない、**H を kill しない**（kill の判断は G に対してだけ。G の pane が無ければ kill しない）。
+
+### 4.11 応答 poll の世代とカーソル（第 3 版、N4）
+
+**事実**: R1 は DB の `lastCapturedLine` を先に読み、capture の抽出へ渡す（`src/lib/polling/response-checker.ts:1744-1766`）。バッファの作り直しの検出は行数の縮小などの推定で、pane の世代ではない（同 `:511-513`）。R2 の transcript の後のカーソルも同じインスタンスの状態を書き換える（`src/lib/assistant-response-saver.ts:279-309`）。
+
+**守る条件**: インスタンスごとに**受け入れた世代**を持ち、カーソル（`lastCapturedLine`）と frame から作った状態（重複の抑止・TUI の蓄積など）は**受け入れた世代のものとしてだけ**使う。受け入れた世代とカーソルは一緒に変える（同期の区間で、受け入れた世代の更新と DB のカーソルの書き込みを行う）。G のカーソルを H に流用しない。勝手に G を H と名付けない。
+
+**採る規則（候補 1 を採る。F1-b で閉じる）**:
+
+| 場面 | 規則 | 保存 |
+|---|---|---|
+| 初回（このプロセスに受け入れた世代が無い: プロセスの起動の直後） | 観測した世代 G を受け入れ、DB のカーソルを G のものとして使う（develop と同じ）。**保証の外**: プロセスの再起動を挟んだ pane の交代は、DB のカーソルが世代を持たないので検出できず、既存の行数の推定（`response-checker.ts:511-513`）だけが残る | 今どおり |
+| 同じ世代 | 今どおり | 今どおり |
+| 交代（受け入れた G、観測した H） | その tick で G のカーソルと frame 由来の状態を失効させ、H を受け入れ、カーソルの基準を H の今の行数にする（DB に書く）。**H の最初の tick は保存しない** | その tick は 0。次の tick から基準より後だけ |
+| 受け入れた世代が無いときの R2 | 取得も書き込みもしない（R1 の tick が受け入れるまで待つ。カーソルが進まないので、R1 が後で保存する） | 0 |
+| R2 が受け入れた世代と違う世代を読んだ | 書かない（交代は R1 が扱う） | 0 |
+| HMR | 受け入れた世代は `globalThis` の領域（§4.7 と同じ、poller の coordinator と同じ置き方）にあるので残る。初回にはならない | 今どおり |
+| unknown | 受け入れた世代もカーソルも変えない | 0 |
+
+- 採る理由: (1) PR2a まで交代の後の保存を止めると、F1-b から PR2a までの間、外部の作り直しの後の応答が保存されない中間の状態ができ、T8 を F1-b で満たせない (2) 交代の tick で基準だけ取れば、G のカーソル（例 100）を H の画面（例 200 行）へ流用して途中から保存する誤りが起きない (3) 失うのは「H を最初に観測するより前に H に出た出力」だけで、新しい世代の起動の画面がほとんど（**読み**）。#4304 PR2a の relaunched の通知はこの上に足す（交代の検出の場所は同じ）。
+- 採らない案: PR2a まで交代の後の保存を拒否する（上の (1)）。受け入れた世代を DB に持つ（初回の保証の外を閉じるが、DB の migration が要り、この設計の範囲を超える。必要なら別 Issue。§7.2 U7）。
+- 回収の権利の「生前に見た」印（§4.7）は、この受け入れた世代の記録と同じ領域に書く。
+
 ## 5. PR の分け方（第 2 版で引き直した、レビュー F）
 
 どちらも **#4304 の PR2a より前**。各 PR は「取得の API・実際の呼び手・消費する入口・unknown の return・型とガード」まで閉じる単位にする（team.md §6-4: API は呼び手と同じ PR）。表示の見た目・画面の読み方・送るキーやロックの新しい仕様は混ぜず、**由来の保持と拒否だけ**を入れる。team.md §6-3 の目安（数百行・20 ファイル程度）は目安でゲートではない。
@@ -259,11 +332,12 @@
 | PR | 閉じる単位 | 中身 | 目安（読み） |
 |---|---|---|---|
 | **F1-a**（回答の経路） | 回答のキーの入口（R5）とその全呼び手 | §4.8 の成立条件の確認（最初）→ `readPaneGeneration`・`readPaneGenerationById`・`capturePaneById`・`captureBoundFrame`・unknown の型。R4（`auto-yes-poller-capture.ts`・`auto-yes-poller.ts` の frame の受け渡しと完了の記録）、R5（`prompt-answer-sender.ts`。最初のキーの直前の世代の照合を番の経路と Enter 省略の両方に、`params.frame` を BoundFrame に）、R6（`frame-verification.ts`・`plan-review.ts` の `recapture`・prompt-response の route）、R7 通常（`screen-at-send.ts`・respond の route）、R7 strict の read（`strict-prompt-answer-io.ts`）と、そのために `buildCurrentOutput` が**与えられた BoundFrame から** payload を作る入口（strict だけが使う）、Fresh の書き戻しの削除（strict の read と同じ PR、§4.5）。境界のガード（T10）は回答の入口を対象に | 15〜20 ファイル、本体 300〜500 行＋試験 400〜700 行。R5 の呼び手の前後と strict の builder の改修量は未確認 |
-| **F1-b**（保存・送信・起動・状態の経路） | 残りの行動の入口（応答の保存・送信・起動・状態の副作用） | R1（`response-checker.ts`）、R2（`assistant-response-saver.ts` の 2 経路と `hooks/sources/*/history.ts` の 4 呼び手）、R8（4 ファイル）、R9（`submit-verified-sender*.ts`・`composer-clear.ts` の `capture`／`initialCapture` の境界・`session-key-sender.ts`）、**R10（全 CLI の起動・`session-liveness.ts`・`base.ts`・`claude-session.ts`。入れ先は F1-b に決めた）**、R11-b〜f の副作用を bound な frame でだけ行う分け方（`current-output-builder.ts`・`worktree-status-helper.ts`・current-output の route・`terminal-broadcast.ts`）、R11-s。境界のガードの対象を全行動の入口へ広げる | 30 ファイル前後（取得元だけで 24、レビューの §2 の内訳）＋型・試験。§6-3 の目安を超えるので、R10 を F1-b2 に分けるかを未決 U4 とする |
+| **F1-b**（保存・送信・起動・状態の経路） | 残りの行動の入口（応答の保存・送信・起動・状態の副作用） | R1（`response-checker.ts`。受け入れた世代とカーソルの規則、§4.11）、R2（`assistant-response-saver.ts` の 2 経路と `hooks/sources/*/history.ts` の 4 呼び手。受け入れた世代が無ければ書かない、§4.11）、R8（4 ファイル）、R9（`submit-verified-sender*.ts`・`composer-clear.ts` の `capture`／`initialCapture` の境界・`session-key-sender.ts`）、**R10（全 CLI の起動・`session-liveness.ts`・`base.ts`・`claude-session.ts`。起動の入口で G を確定して driver の中まで渡す起動の文脈、§4.10。入れ先は F1-b に決めた）**、R11-b〜f の副作用を bound な frame でだけ行う分け方（`current-output-builder.ts`・`worktree-status-helper.ts`・current-output の route・`terminal-broadcast.ts`）、R11-s。境界のガードの対象を全行動の入口へ広げる | 30 ファイル前後（取得元だけで 24、レビューの §2 の内訳）＋型・試験。§6-3 の目安を超えるので、R10 を F1-b2 に分けるかを未決 U4 とする |
 
 - **R10 の入れ先は F1-b**（第 1 版の「#4304 PR2b でもよい」は取り消す）。F1-b の後に「全行動の読者は bound だけ」が成り立つことを、#4304 PR2a の前提にするため。PR2b は R10 の期待の世代の取り方を「`launchSession` の後の読み」から「spawn が返す pane id」へ替えるだけ。
 - **F1-a の後の中間の状態**: 回答の経路は全部 bound。R1・R2・R8〜R10・R11 は develop と同じ（cache・Fresh・direct のまま）で、悪くはならない。Fresh の書き戻しを消しても、表示用の読者は自分で取得するので表示は変わらない。strict は同じ PR で BoundFrame に移るので、「書き戻しの削除だけが入った中間版」は作らない。F1-a は R6・R7 の旧い入口を受け入れる互換の道を足さない（呼び手を同じ PR に入れる）。
-- **回収の権利（§4.7）と最後の回収（§4.6）は #4304 PR2a に入れる**（呼び手 R3 と R1・R2 の dead の保存が初めて現れる PR。未使用のモジュールを F1 に先に入れない、team.md §6-4）。この設計はその形と順序の契約を決める。**作り直しが終端を待つ順は #4304 PR2b**（`new-window -k` を初めて実装する PR）。PR2a の回収の入口が共有の権利を通ることは PR2a の試験で確かめる。
+- **F1-b の後の中間の状態（第 3 版）**: 交代の後の応答は §4.11 の規則で保存する（PR2a まで止めない）。T8 は F1-b で満たす。
+- **回収の権利（§4.7。`globalThis` の 1 つの記録・札・終端の意味を含む）と最後の回収（§4.6）は #4304 PR2a に入れる**（呼び手 R3 と R1・R2 の dead の保存が初めて現れる PR。未使用のモジュールを F1 に先に入れない、team.md §6-4）。この設計はその形と順序の契約を決める。**作り直しが終端を待つ順は #4304 PR2b**（`new-window -k` を初めて実装する PR）。PR2a の回収の入口が共有の権利を通ることは PR2a の試験で確かめる。
 - `captureBoundFrame` の `expected` の最初の呼び手は F1-a の R5（呼び手の G で再読・照合）と R6 の plan-review の再読。
 
 ## 6. 試験
@@ -290,7 +364,7 @@
 | # | 指摘 | 状態の作り方 | 期待 | 陽性（同じ世代） |
 |---|---|---|---|---|
 | TA1 | A | キャッシュに旧 G の画面、新 H の capture を返す → strict の read | strict が旧 G でキーを出さない。payload・観測・frame が同じ BoundFrame | 同じ G なら同じ観測を strict へ渡し 1 回送る |
-| TA2 | A | 同上 → current-output（R11-a・b）を読む | 旧 G を根拠に prompt 待ちを消さない・ターンを閉じない・未分類／構造化の記録を作らない | bound な同じ G では今どおり消す・閉じる・記録する |
+| TA2 | A | 同上 → current-output（R11-a・b）を読む。同じ旧 G を WS の定期の push（`terminal-broadcast.ts:74`）と操作の後の fresh な push（`:164`。初回と各 retry）の両方へも渡す | 旧 G を根拠に prompt 待ちを消さない・ターンを閉じない・未分類／構造化の記録を作らない。`freshCapture: true` だけを確認済みの印にしない | bound な同じ G では今どおり消す・閉じる・記録する |
 | TA3 | A | 状態の probe が旧 G の cache・取得の失敗を読む | sweep・待ちの観測・証拠の更新が 0。unknown を not-waiting にしない | bound な同じ G でプロンプトが無ければ sweep 1 回 |
 | TA4 | A・F | F1-a だけを入れた版で、新しい証拠を読んだ後に旧 cache で strict が回答しない（Fresh の書き戻しの削除と strict の read が同じ版にある） | キー 0 | 同じ G は 1 回 |
 | TB1 | B | G で判定 → await の間に H へ交代 → 同じ文面のプロンプト。これを非競合・番の待ち・joined・Enter 省略・plan-review・クリアの初回 frame のそれぞれで | 元の G の判断を H へ引き継がずキー 0 | 交代なしで 1 回 |
@@ -302,12 +376,25 @@
 | TC3 | C | dead の回収の①・②・③の失敗 | 成功の回収にしない（保存 0、状態は失敗） | 同上 |
 | TD1 | D | 所有者 A を権利の取得の直後・取得の直後・保存の直前でそれぞれ止め、B が作り直しを要求 | B の作り直しは A の終端より後。二重の回収なし | A が終わってから作り直す |
 | TD2 | D | A が unknown・throw・入力の所有の失効・時間切れで終わる | 保存 0・状態は失敗・永久の待ちなし・取り直しなし。B は終端を見て作り直す | — |
+| TD2a | N3 | A の取得の後で B が期限切れで札を失効 → 作り直し → A の元の Promise が resolve | A の保存 0（照合で捨てる）。失敗から完了への遅れた書き換えなし | A の保存が完了 → 完了 → B が作り直す |
+| TD2b | N3 | A が保存の直前の await（dynamic import 等）の間に札を失効 → その後 A が書こうとする | 保存 0・カーソル不変 | 同上 |
+| TD2c | N3 | 保存を同期の区間に収められない実装（「保存中」）で、結果が確定する前に B が期限に達する | B は作り直さない（復旧の失敗）。保存中を期限で失敗へ移さない | 結果が完了で確定した後に作り直す |
 | TD3 | D | R1・R2・R3 が同じ dead の G に同時に到着 | 成功の保存 1 回 | 別の世代 G・H はそれぞれ 1 回 |
-| TD4 | D | 表が空（サーバーの再起動・HMR を模す）で dead の G を読む | 生前の世代を持たないので回収しない（保存 0） | 生前の G を持てば 1 回 |
+| TD4a | N2 | 全部の状態を失う再起動（`globalThis` の領域も無い）で dead の G を読む | 生前の世代の記録が無いので回収しない（保存 0） | 生前の G の記録があれば 1 回 |
+| TD4b | N2 | 生前の G を closure・tick の状態に残し、権利の表だけを失う（HMR を模す。dead の G は保存済み） | 旧い closure の G から回収を始めない（記録が無ければ始めない）。再保存 0 | 同じ共有の記録で通常の G を 1 回 |
+| TD4c | N2 | 同じプロセスの別の bundle（custom server の graph と route の bundle）から同じ dead の G に同時に到着 | 合計 1 回（1 つの `globalThis` の記録） | — |
 | TD5 | D | B が exclusive の番を持って待つ間、A の回収が番を要求しない | 詰まらない（A は番を取らない） | — |
 | TE1 | E | server が違うのに pane 番号が同じ、start_time の表現も同じ、という偽の transport の行 | §4.8 で選んだ識別が区別できなければ、この行は保証の外として承認しない。区別できる識別なら unknown | 同じ server・同じ pane は使える |
 | TE2 | E | 同じ server で pane を G→H→G と切り替え、取得は `%G` 固定 | `%G` が同じ寿命なら H の frame にはならない。失敗を要求しない（陽性） | — |
 | TE3 | E | start_time が違う別の server | unknown。期待の世代を失効 | — |
+| TN1a | N1 | 作成と再利用のそれぞれで G を確定 → driver の中の最初の capture の前に H へ交代 → H に同じ形の trust・ready を出す（公開の起動の経路で capture と send を偽にする） | trust のキー 0・ready の成功なし・H の kill なし（起動の失敗） | 同じ G で trust 1 回 → ready → role の確認 |
+| TN1b | N1 | `relaunchIfToolExited` が G で「終わった」と読んだ後、起動の入口までに H へ交代 | H へ起動し直さない | 交代なしで起動し直す |
+| TN1c | N1 | 起動の入口で G を作れない（読みの失敗） | 起動の確認・自動の回答を拒否（起動の失敗） | — |
+| TN1d | N1 | claude の nudge が start と並行に走り、G が決まる前に読もうとする | G が決まるまで読まない。決まった後は G で拘束 | 同じ G で nudge 1 回 |
+| TN4a | N4 | F1-a＋b の版で、初回の G（このプロセスに受け入れた世代が無い） | G を受け入れ、DB のカーソルで今どおり保存 | — |
+| TN4b | N4 | 同じ G の 2 tick | 2 tick 目は新しい行だけ保存（今どおり） | — |
+| TN4c | N4 | 受け入れた G のカーソル 100 → 新しい H の 200 行 → H の次の tick | 交代の tick は保存 0・基準 200。次の tick は 200 より後だけを 1 回保存。G のカーソルを H に流用しない | — |
+| TN4d | N4 | R1 の最初の tick より前に R2（送信の前の flush・transcript の後のカーソル）が呼ばれる | 取得も書き込みもしない。R1 の tick の後は今どおり | — |
 | TF1 | F | F1-a 単独と F1-a＋F1-b の両方で、実際の API の入口を通し「新しい証拠を読んだ後に旧 cache で回答しない」 | キー 0 | 同じ G は 1 回 |
 | TF2 | F | F1-b の後、R10 に生の capture が残っていない。#4304 PR2a の回収の入口が共有の権利を通る | 0 件・通る | — |
 
@@ -318,10 +405,10 @@ T1〜T10・TA〜TF はこの全表の代表の行と位置付ける。実装の 
 | 軸 | 値 |
 |---|---|
 | 取得源 | bound な direct／表示の cache の命中／joined／遅れた取得／旧い Fresh／transport の代わり／呼び手の frame／注入の callback |
-| 世代 | 同じ G／expected と不一致／取得中の交代／取得の後の受け渡し中の交代／同名のセッションの作り直し／server の交代／識別の値の衝突 |
+| 世代 | 同じ G／expected と不一致／取得中の交代／取得の後の受け渡し中の交代／同名のセッションの作り直し／server の交代／識別の値の衝突／初回（受け入れた世代なし）・受け入れ・交代（§4.11）／起動の入口の確定の前後（§4.10）／HMR の部分的なリセット |
 | 生存 | alive→alive／alive→dead／dead→dead／dead→alive／absent／unknown |
-| 失敗点 | ①の読み／②の取得／③の読み／型・受け渡しの欠落／保存／所有の失効 |
-| 所有と競合 | 非競合／番の待ち／joined／Enter 省略／回収の権利の競合／権利の所有者の失敗／権利の状態の寿命切れ |
+| 失敗点 | ①の読み／②の取得／③の読み／型・受け渡しの欠落／保存／所有の失効／期限・失効の後の遅れた resolve（取得の後・保存の直前・保存の結果待ち） |
+| 所有と競合 | 非競合／番の待ち／joined／Enter 省略／回収の権利の競合／権利の所有者の失敗／権利の状態の寿命切れ／HMR で表だけ失う／別 bundle の同時到着 |
 | 副作用 | キーの数と順序／本文・回答の保存／カーソル／prompt の sweep／prompt 待ち・ターンの終了／strict の観測／最後の保存／`new-window` の順序 |
 
 ### 6.4 防御を 1 つずつ外す対照（F1 を入れた後、1 つだけ戻して赤を確かめる）
@@ -340,9 +427,9 @@ T1〜T10・TA〜TF はこの全表の代表の行と位置付ける。実装の 
 |---|---|---|
 | §4.8 の E-1〜E-4（start_time の精度、pane id の採番・再利用・wrap、同じ socket の server の入れ替わり、`respawn-pane` での `pane_id`） | §4.8 の表のとおり。tmux 3.5a のソースと隔離の server | F1-a の最初（基盤を書く前） |
 | remain-on-exit の dead pane を `capture-pane -t %N`・`display-message -t %N` で読めること、消えた `%N` への capture が失敗（exit≠0）になること | 隔離の server で 1 回ずつ | F1-a の最初 |
-| capture の回数の増え方（R1・R4 の bound 化、`display-message`×2 の追加） | `worktree-status-helper.ts:107` の `captureCount` と同じ数え方を bound な取得に足し、隔離のサーバーで 1 時間、F1-a の前後を測る | F1-a のマージの後、F1-b の契約の前（U1・F2 の判断の材料） |
+| capture の回数の増え方（bound 化と `display-message`×2 の追加） | `worktree-status-helper.ts:107` の `captureCount` と同じ数え方を bound な取得に足し、隔離のサーバーで 1 時間測る。F1-a の前後で実測できるのは F1-a が bound にする R4〜R7 の分。R1・R11 を bound にした場合の分は F1-b の試作で見積もり、F1-b の後に実測する（第 3 版で区別した） | F1-a のマージの後、F1-b の契約の前（U1・F2 の判断の材料） |
 | pane を作り直す全操作が exclusive の番を取るか（`kill-session` API・`session-cleanup.ts`・CLI 自身の終了） | `withInstanceInputLock(…, { mode: 'exclusive' })` の呼び手を全件 grep し、`new-window`・`respawn-pane`・`kill-session` の呼び手と突き合わせる（F3 を捨てる理由の裏取り。F1 はこれに依らない） | 任意 |
-| R10 の各 CLI の capture の前後の処理（ready の return・trust・update・nudge のキー・再読の callback・`command-code.ts:325-390` の待ちの回数） | 各 `waitForPrompt`・起動時の回答の関数を読み、§4.4 の R10 の行（起動時の世代に拘束）で書けるかを確かめる | F1-b の最初 |
+| R10 の各 CLI の capture の前後の全状態（ready の return・trust・update・nudge のキー・再読の callback・`command-code.ts:325-390` の待ちの回数） | 各関数を読み、§4.10 の起動の文脈（G を渡す時点は決めた）で全状態を書けるかを確かめる。書けない分岐は起動の失敗へ狭める | F1-b の最初 |
 | T6・TA4・TB2 が develop で本当に赤になるか | 試験を書いて develop で 1 本ずつ動かす（`CM_DB_PATH=$PWD/data/test.db`、単一ファイル） | 各 PR の最初 |
 | R11-b5（状態の証拠）・R11-f2（起動中）・R11-f3（model のラッチ）の読み手が行動に使うか | 各 `observe*`・`record*` の読み手を全件読む | F1-b の最初。表示だけと分かれば §3.3 の区別を直す |
 | `--issue` の並列サーバーが同じ pane を扱わないこと（§4.7 の保証の範囲の前提） | 並列サーバーのセッション名の作り方と tmux の socket を読む | #4304 PR2a の最初 |
@@ -351,11 +438,12 @@ T1〜T10・TA〜TF はこの全表の代表の行と位置付ける。実装の 
 
 | # | 未決 | 誰が | 何で | いつ／決まるまで |
 |---|---|---|---|---|
-| U1 | 表示の経路にしか bound な駆動元の無い副作用（R11-b2 ターンの終了、R11-b3・b4 の記録、R11-b5・f2 の観測、R11-s の sweep）を、(p) その経路の取得を bound にする（cache を外す）か、(q) bound の読者（R1・R8）へ移すか。どちらでも「表示用の frame では行わない」は変わらない | リーダー（数字で決まらなければ PM に上げる） | §7.1 の capture の回数の計測 | F1-b の契約の前。決まるまで F1-b を送らない。develop はそれまで今のまま |
+| U1 | 表示の経路にしか bound な駆動元の無い副作用（R11-b2 ターンの終了、R11-b3・b4 の記録、R11-b5・f2 の観測、R11-s の sweep）を、(p) その経路の取得を bound にする（cache を外す）か、(q) bound の読者（R1・R8）へ移すか。どちらでも「表示用の frame では行わない」は変わらない | リーダー（数字で決まらなければ PM に上げる） | §7.1 の capture の回数の計測に加え、通常の poll・WS の定期・操作の後の retry・購読者なし・応答 poll の停止中のそれぞれで必要な副作用が進むか。R11-e を bound な駆動元に数えるなら、実際に bound で取得する契約にする。§4.11 と整合させる | F1-b の契約の前。決まるまで F1-b を送らない。develop はそれまで今のまま |
 | U2 | 世代の識別子に足すもの（§4.8 の E-3 の候補 (1)〜(3)、E-2 の不十分なときの代わり） | 実装者が §4.8 の結果を書き、リーダーが選ぶ。保証の範囲を狭める（server の入れ替わりを保証の外にする）なら PM の承認 | §4.8 の確かめの結果 | F1-a の基盤を書く前。決まるまで基盤をマージしない |
 | U3 | BoundFrame・表示用の frame・unknown の型の名前、unknown を値で返すか例外で返すか、unknown の理由の識別子 | F1-a の実装者（レビューで確かめる） | §4.3 の境界を満たすこと（境界そのものはこの設計で決めた） | F1-a の中 |
 | U4 | F1-b を R10 で F1-b1・F1-b2 に分けるか（R10 の入れ先が F1 の中であることは決めた） | リーダー | F1-b の差分の見積り（team.md §6-3 の目安） | F1-b の契約の時 |
 | U5 | F2 を入れるか | リーダー | §7.1 の capture の回数 | F1-b の後 |
+| U7 | 受け入れた世代を DB に持ち、プロセスの再起動を挟んだ pane の交代も検出するか（§4.11 の初回の保証の外を閉じる。DB の migration が要る） | リーダー（別 Issue にするかを含む） | F1-b の後の運用での取りこぼしの有無 | F1-b の後。それまでは §4.11 の初回の規則（保証の外を明記） |
 | U6 | 利用者から見える挙動の変更（§4.2: 手の回答が capture の失敗で未送信になる、relay・prompt guard が判定できないとき保留する）を受け入れるか | **人**（PM 経由。2-4-4 の承認のときに確かめる） | §4.2 の一覧 | F1-a の契約の前。受け入れない項目は、その入口を F1 の保証の外として明記する |
 
 ## 8. #4304 の設計書との関係
@@ -366,7 +454,7 @@ T1〜T10・TA〜TF はこの全表の代表の行と位置付ける。実装の 
 |---|---|---|
 | R6.1・R6.2 の世代の識別子 | `(pane_id, pane_start_command の nonce)` | grid の識別はこの設計の `(server の start_time, pane_id)`（§4.8 の U2 の結果を足した形）に置き換える。nonce は同じ grid の中で rc の出力と CLI の出力を分ける補助だけに残す |
 | R6.5 dead の後の最後の画面の回収 | 「同じ `display-message` で `pane_dead=1` と識別子を読み、生前と同じならその capture を 1 回保存」（識別子の読みと capture が別の呼び出し＝T4 の穴、dead の読みと frame が同時でない＝TC1 の穴） | §4.6（dead を確かめた後に同じ世代を的に取った frame だけ）と §4.7（回収の権利の状態・寿命・作り直しの順）で書き直す。R1・R2 の dead の保存も同じ権利を通す |
-| R6.6 の 9（同じ dead の世代の最後の回収／回収の途中の世代交代） | R6.5 の識別子の照合 | この設計の T4・T5・TC1〜TC3・TD1〜TD5 と、対照 (i)・(ii)・(iii) |
+| R6.6 の 9（同じ dead の世代の最後の回収／回収の途中の世代交代） | R6.5 の識別子の照合 | この設計の T4・T5・TC1〜TC3・TD1〜TD5（TD2a〜c・TD4a〜c を含む）と、対照 (i)・(ii)・(iii) |
 | R6.3 の操作ごとの条件・R6.4 の生の入力 | 画面を読む所は今の capture | 行動する読者として BoundFrame だけを使う（§3.2・§4.4）。配送の直前の世代の照合（§4.4 の R5・R8）と、#4304 のプロセスの証拠（E1）・番は別の保証として並べる（§1.5） |
 | R6.7 の PR の順 | #4303-A → PR2a → PR2b → #4303-B | PR2a の前に F1-a・F1-b を置く（§5）。R10 は F1-b（PR2b は期待の世代の取り方を spawn の pane id へ替えるだけ）。回収の権利と最後の回収は PR2a、作り直しが回収の終端を待つ順は PR2b |
 | 改訂 6 の再確認の A（P2） | 未解決 | この設計の G0〜G2 と F1 で閉じる |
@@ -375,6 +463,30 @@ T1〜T10・TA〜TF はこの全表の代表の行と位置付ける。実装の 
 
 - 第 1 版（2026-11-14、`e1f92c211`）: 共通の原因・G1・G2・R1〜R11・F1・F1-a/b・T1〜T10 を書いた
 - 第 2 版（2026-11-14）: 2-4-4 事前レビュー（`prereview-4304-capgen-reply.md`、承認保留、A〜F）とリーダーの再指示 1 を反映。G0 を最上位に置き、R11 を関数・副作用の単位で分け（§3.3・§3.4）、操作ごとの世代の寿命と行動の入口の境界（§4.3・§4.4）、最後の回収の条件（§4.6）、回収の権利の状態と作り直しの順（§4.7）、世代の識別子の成立条件（§4.8）を決め、F1-a/b を閉じる単位で引き直し（R10 は F1-b、回収の権利は #4304 PR2a）、T10 を境界の検査に替え、指摘ごとの対照 TA〜TF と全組み合わせの軸を足した。未決は U1〜U6 として誰が・何で・いつを書いた
+
+- 第 3 版（2026-11-14）: 2 回目の事前レビュー（`prereview-4304-capgen-2-reply.md`、承認保留、N1〜N4）とリーダーの再指示 2 を反映。起動の G を driver の中の最初の読み・キーより前に確定して全段へ渡す（§4.10）、回収の権利を `globalThis` の 1 つの記録にし生前の世代と同じ寿命にする（§4.7）、札で遅れた結果を捨て作り直してよい終端を定義（§4.7）、応答 poll の受け入れた世代とカーソルの規則を F1-b で閉じる（§4.11、候補 1 を採用）。試験 TN1a〜d・TD2a〜c・TD4a〜c・TN4a〜d、未決 U7 を足し、計測の時点を F1-a と F1-b で分けた
+
+### 第 3 版で「一部未対応」の行を閉じた先
+
+2 回目の事前レビューの §1 で「一部未対応」とされた行と、それを閉じた節。
+
+| レビューの行 | 残っていたもの | 閉じた先 |
+|---|---|---|
+| A〜F の B | R10 の G の取得が遅い、R1・R2 の初回・交代の基準 | N1 → §4.10・§4.4 の R10 の行。N4 → §4.11・§4.4 の R1・R2 の行 |
+| A〜F の D | HMR で権利の表だけ消える、期限・失効の後の未終了の処理 | N2 → §4.7 の置き場所と寿命。N3 → §4.7 の終端の意味と遅れた結果 |
+| A〜F の F | F1-b から PR2a までの R1・R2 の世代の切り替え | N4 → §4.11、§5 の F1-b の後の中間の状態 |
+| R1 response-checker | 初回の G・交代の H への移行 | N4 → §4.11（初回・同じ世代・交代・unknown の表） |
+| R2 の 2 経路 | poller の状態が無い・古い場合 | N4 → §4.11（受け入れた世代が無ければ書かない、違えば書かない） |
+| R2 の history の 4 呼び手 | 期待の世代の元の初期化 | N4 → §4.11（受け入れた世代を期待にする。無ければ書かない） |
+| R3 最後の回収 | 寿命・終端 | N2・N3 → §4.7 |
+| R10 base／liveness／claude-session | 起動の最初の G が遅い | N1 → §4.10（入口ごとの確定の時点・拒否の解除・relaunch・並行の nudge） |
+| R10 各 CLI・起動時の回答 | driver の中の順序に合わない | N1 → §4.10 の全経路の表（9 CLI と基底） |
+| 順序表: 取得の成功 → 受け渡しの await → 世代交代 | 起動の入口・カーソルの基準の移行 | N1 → §4.10、N4 → §4.11 |
+| 順序表: 権利 A 進行中 → B exclusive → 作り直し | 「処理も終わった終端」が未定義 | N3 → §4.7（完了か札を失効させた失敗だけ。保存中は作り直さない） |
+| 順序表: 所有者の失敗・CommandMate の再起動 | HMR と再起動の区別、遅れた処理 | N2・N3 → §4.7、TD4a〜c・TD2a〜c |
+| 試験の軸: 世代 | 初回・受け入れ・部分的なリセット | §6.3 の世代の軸、TN4a〜d・TD4b |
+| 試験の軸: 失敗点 | 期限の後で元の処理が完了 | §6.3 の失敗点の軸、TD2a〜c |
+| 試験の軸: 所有と競合 | HMR で表だけ失う | §6.3 の所有と競合の軸、TD4b・TD4c |
 
 ### 第 2 版の指摘ごとの処置
 

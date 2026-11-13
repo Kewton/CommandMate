@@ -5,7 +5,9 @@
  * effect (with `sweepStalePendingPrompts` as an acting one), the F1 design including the
  * action-entry boundary, the per-operation generation lifetime, the final-collection
  * condition, the claim states and the identifier preconditions (second edition, after the
- * 2-4-4 review A〜F), the PR split before #4304 PR2a, the tests T1〜T10, TA〜TF and the
+ * 2-4-4 review A〜F), the launch generation, the claim's lifetime and fencing and the
+ * response poll's generation and cursor (third edition, after the second review N1〜N4),
+ * the PR split before #4304 PR2a, the tests T1〜T10, TA〜TF and the
  * defence-removal controls (i)〜(v), the undecided items with who decides them, and how
  * #4304's own design is rewritten in its revision 7.
  *
@@ -44,9 +46,15 @@ const REQUIRED: ReadonlyArray<readonly [string, string]> = [
   ['generation identifier preconditions (review E)', '### 4.8 世代の識別子の成立条件'],
   ['top-level invariant G0', '**G0'],
   ['R10 goes to F1-b', '入れ先は F1-b に決めた'],
-  ['claim lands with #4304 PR2a', '回収の権利（§4.7）と最後の回収（§4.6）は #4304 PR2a に入れる'],
+  ['claim lands with #4304 PR2a', 'と最後の回収（§4.6）は #4304 PR2a に入れる'],
   ['unknown never permits an action', 'どれも行動を許可しない'],
   ['claim states', '失敗（打ち切り）'],
+  ['launch generation is fixed before the driver reads (N1)', '### 4.10 起動の世代 G を確定する時点'],
+  ['response poll generation and cursor (N4)', '### 4.11 応答 poll の世代とカーソル'],
+  ['claim table is one per process across bundles (N2)', '同じプロセスの全 bundle で 1 つ'],
+  ['late results are fenced (N3)', '札（fencing token）'],
+  ['candidate 1 is adopted for N4', '候補 1 を採る'],
+  ['partial-review rows are mapped to their closure', '### 第 3 版で「一部未対応」の行を閉じた先'],
   ['invariant G1', '**G1**'],
   ['invariant G2', '**G2**'],
   ['generation identifier', '`(server の start_time, pane_id)`'],
@@ -77,11 +85,11 @@ const REQUIRED: ReadonlyArray<readonly [string, string]> = [
     (t) => [`test ${t}`, `| ${t} |`] as const,
   ),
   ...['(i)', '(ii)', '(iii)', '(iv)', '(v)'].map((c) => [`control ${c}`, `**${c}**`] as const),
-  ...['TA1', 'TA4', 'TB1', 'TB2', 'TB3', 'TC1', 'TC2', 'TD1', 'TD2', 'TD4', 'TE1', 'TF1', 'TF2'].map(
+  ...['TA1', 'TA4', 'TB1', 'TB2', 'TB3', 'TC1', 'TC2', 'TD1', 'TD2', 'TD2a', 'TD2b', 'TD2c', 'TD4a', 'TD4b', 'TD4c', 'TE1', 'TF1', 'TF2', 'TN1a', 'TN1b', 'TN1c', 'TN1d', 'TN4a', 'TN4b', 'TN4c', 'TN4d'].map(
     (t) => [`review control ${t}`, `| ${t} |`] as const,
   ),
   ...['E-1', 'E-2', 'E-3', 'E-4'].map((e) => [`identifier precondition ${e}`, `| ${e} `] as const),
-  ...['U1', 'U2', 'U3', 'U4', 'U5', 'U6'].map((u) => [`undecided ${u} with owner`, `| ${u} |`] as const),
+  ...['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'].map((u) => [`undecided ${u} with owner`, `| ${u} |`] as const),
 ];
 
 /** The reasons a design text falls short of the contract (empty: it does not). */
@@ -131,6 +139,7 @@ describe('design doc of #4304 prerequisite (capture generation binding)', () => 
     expect(findings).toContain('test T10');
     expect(findings).toContain('control (v)');
     expect(findings).toContain('review control TC1');
+    expect(findings).toContain('review control TN4c');
   });
 
   it('(negative control) a text naming every required part is not flagged', () => {
