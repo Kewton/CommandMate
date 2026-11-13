@@ -10,6 +10,7 @@
  *   commandmate mem check --suggest [--quiet] [--hook <event>] [--instance <id>] [--json]  (Issue #4226)
  *   commandmate mem mode [--json]
  *   commandmate mem purge --branch <name> [--closed-only] --confirm
+ *   commandmate mem decisions [<itemId>] [--pending] [--json]   (Issue #4355, read only: mem-decisions.ts)
  *
  * A thin client over `/api/worktrees/:id/mem/*` and `/api/repositories/:id/mem*`. The
  * rules are the server's. **There is no way to change the mode here** (D3): `mode`
@@ -27,6 +28,7 @@ import type { WorktreeListResponse } from '../types/api-responses';
 import { parseSessionName } from '../../lib/cli-tools/session-name';
 import { TOKEN_WARNING } from '../utils/command-helpers';
 import { resolveSessionIdentity, type SessionIdentity } from './whoami';
+import { addMemDecisionsCommand } from './mem-decisions';
 import {
   MEM_EXIT_BY_CODE,
   MEM_KINDS,
@@ -87,6 +89,10 @@ for the same state (one line, exit 0 whatever happens) and records them; the rec
 outlives a server restart. A prompt whose answer did not reach the CLI in time may
 not be shown. Records of a removed instance go at the next --quiet or with the
 worktree.
+
+decisions (Issue #4355) reads the branch's decisions (state, destination, quote, the
+approvals and the state of each write) and, with an item id, a reference diff that cannot
+be approved. It only reads: approving a decision is on the screen only.
 
 What is not prevented: a process with your OS rights can write the database or
 call the API directly. The author check stops mistakes, not intent.
@@ -638,6 +644,14 @@ export function createMemCommand(): Command {
       });
     }
   );
+
+  // Issue #4355: reading the decisions lives in its own file (design §3.4.1); only registered here.
+  addMemDecisionsCommand(mem, {
+    run,
+    usage,
+    sessionWorktreeId: async (client) => (await identityOf(client))?.worktreeId,
+    withTargetOptions,
+  });
 
   return mem;
 }

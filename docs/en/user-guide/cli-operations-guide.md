@@ -2784,6 +2784,8 @@ commandmate mem check --suggest [--instance <id>] [--json]
 commandmate mem check --suggest --quiet [--hook <event>]
 commandmate mem mode [--json]
 commandmate mem purge --branch <name> [--closed-only] [--kind <kind>] [--before <ts>] [--include-decisions] --confirm
+commandmate mem decisions [--worktree <id> [--branch <name>] | --repository <id> --branch <name>] [--pending] [--json]
+commandmate mem decisions <itemId> [--worktree <id> | --repository <id>] [--effect spec|record_only] [--json]
 ```
 
 - Inside a session the target is your own instance (`whoami`). In an ordinary shell, writes need `--worktree <id> --instance <id>`, and `list` / `mode` / `purge` need `--worktree <id>` or `--repository <id> --branch <name>` (otherwise exit 2 `target_required`)
@@ -2862,7 +2864,7 @@ Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checke
 
 ### Recording a decision in its canonical place (screen only, Issue #4225)
 
-A `decision` is written to an Issue / PR comment or a worktree document (`promote_to`) **only when a person approves the diff on the screen** (the "mem" of each row of the Repositories screen → "Record decisions in their canonical place", `/repositories/<id>/mem/decisions?branch=<name>`). **The CLI has no way to do it** (`commandmate mem` has no promote / approve sub-command). No other path — the brief, `check`, prompts, Schedules — writes.
+A `decision` is written to an Issue / PR comment or a worktree document (`promote_to`) **only when a person approves the diff on the screen** (the "mem" of each row of the Repositories screen → "Record decisions in their canonical place", `/repositories/<id>/mem/decisions?branch=<name>`). **The CLI has no way to write it** (`commandmate mem` has no promote / approve sub-command; `mem decisions`, which only reads, is the next section). No other path — the brief, `check`, prompts, Schedules — writes.
 
 1. Choose the item and a worktree and press "Make the diff". The whole body, the destination as resolved (`Issue <host>/<owner>/<repo>#N`, or `<worktree> (<branch>): <path>`), the account that posts, the effect ("changes the specification" by default / "record only") and the expiry (30 minutes) are shown. Changing the worktree, the effect or the quote's check drops the diff shown (make it again before approving). A quote an agent wrote is shown beside its check and written as "recorded by the agent (unchecked)"; it becomes "checked by a person on the screen" only when you tick the check after comparing it with the original (the check is cleared when you choose another item). Free text (the decision, the quote) goes inside code blocks, and invisible characters are shown as `[U+XXXX]`
 2. Press "Approve and write". Right before writing, the item's version, the destination (host, repository and number, or worktree, branch and path), the fingerprint of the content the diff was made from, the worktree's lifetime, the mode and the poster are checked again; if any changed, **nothing is written** and a new diff is asked for (another session changed the document after the approval, the worktree was deleted or switched to another branch, the same item was approved in parallel, …)
@@ -2879,6 +2881,21 @@ A `decision` is written to an Issue / PR comment or a worktree document (`promot
 - When the roots of the same Git disagree on the setting of the item's branch, the screen warns and stops listing and approving decisions, but keeps showing the operations whose outcome is not settled; they can still be reconciled or checked as not there (the item does not move until the roots agree)
 - The screen of any root of the same Git reconciles and settles the operations of that Git's roots (a root of another Git does not reach them)
 - Invisible characters in the branch or the author are warned about too. A branch is written in its omitted form (`(省略 N bytes・reason)`)
+
+### Reading the decisions (`mem decisions`, read only, Issue #4355)
+
+The CLI can **read** a branch's decisions and one decision's diff. **Approving is on the screen only** (the CLI cannot approve; the person's decision of 2026-11-13). Both use GET only and write nothing to the database, GitHub or a worktree.
+
+- `commandmate mem decisions`: one line per item (`<id> <state> v<version> by=<agent|human>(<instance>) to=<destination|-> quote="<first 40 characters of the quote>"|- approvals=<times a person approved it on the screen>`) and an indented line per approval operation (`op <id> <state>[ pending-transition(<reason>)][ concurrent-edit][ unknown(<reason>)] decided-by=<server|human|-> effect=<spec|record_only>`). The last line is the counts (`counts (before --pending): open=<N|unknown> recorded=<M|unknown> approvable=<yes|no>`)
+  - "Approved" is not folded into one flag: the item's state now (`open` / `recorded` / `promoted`), how many times a person approved it (`approvals`) and whether the write outside succeeded (the operation's state) are shown apart. An operation that wrote outside while the item did not move shows as `succeeded pending-transition(<reason>)` (moved with "treat as recorded" on the screen)
+  - The counts are taken **before** `--pending`. `open` waits for approval, `recorded` waits for the reflection. When the mode is not `on`, `approvable=no` (counted, but not approvable). When the roots of the same git disagree on the mode, `unknown` (never 0)
+  - `--pending`: only the `open` items and the items with an unsettled operation (unknown, in progress, or its move pending)
+  - Target: inside a session your own worktree; in an ordinary shell `--worktree <id>` (the worktree's current branch, or another with `--branch`) or `--repository <id> --branch <name>`
+- `commandmate mem decisions <itemId>`: the body a promote of that decision would write, **as a reference**. The first line is always `REFERENCE ONLY — cannot be approved; approve on the screen`. **A reference diff cannot be used to approve** (unlike the screen's diff it has an empty operation id, no poster, no expiry, and the quote is always "the agent's quote (unconfirmed)"). A worktree document destination is resolved through the `--worktree` worktree. With no worktree (`--repository`), another branch or a detached HEAD, only the body is shown and the destination reads `unresolved (worktree_required|branch_changed|branch_unresolved)` (the worktree is never guessed)
+- An item with a field that matches a current rule (the text, quote, evidence, destination or close note) shows only `withheld(field=… rule=…)` in the list, with no text, quote or destination; the diff exits 2 `secret_like` (the field name only)
+- The text, quote and destination were typed by an agent or a person. The text output shows the terminal's controls (ESC, C0, C1, `\r`) and invisible characters as `\x1b`, `\u202e` and so on; `--json` carries them as JSON strings only
+- `--json` is `schema: 1` (list: `schema`, `repositoryId`, `branch`, `mode`, `counts`, `pending`, `decisions[]`, `unresolved[]`; diff: `schema`, `reference: true`, `approvable: false`, `notice`, `item`, `mode`, `effect`, `quoteOrigin`, `destination`, `body`, `bodySha256`, `invisibleReplaced`, `drawnAt`). Keys are never removed or retyped (some may be added)
+- Exit codes: not found (including another repository's item or worktree) 52; `secret_like`, `--pending` with `<itemId>`, or `--effect` without `<itemId>` 2; the server not running 1
 
 ### Viewing and writing items on the screen (screen only, Issue #4227)
 
