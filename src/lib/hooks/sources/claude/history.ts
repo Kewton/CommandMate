@@ -87,6 +87,7 @@ import {
   selectUnwrittenTurns,
 } from '../transcript-history';
 import type { StructuredHistoryCaptureReport } from '@/lib/polling/structured-history-gate';
+import { bindClaudeAskTurns } from './ask-attribution';
 import {
   buildClaudeTurns,
   buildHeadlessClaudeTurn,
@@ -464,6 +465,8 @@ export async function captureClaudeTranscriptTurn(
       // Issue #2437: this turn is already History's Markdown, so the pane rows
       // behind it must stop being "unsaved output" the pre-send flush can pick up.
       await advanceCapturedLineForTranscriptTurn(target);
+      // Issue #4344: an ask whose turn is already a row is settled against it.
+      await bindClaudeAskTurns(target, built.turns, sessionId);
       return true;
     }
 
@@ -523,6 +526,9 @@ export async function captureClaudeTranscriptTurn(
       // a second time.
       await advanceCapturedLineForTranscriptTurn(target);
     }
+    // Issue #4344: after the rows are written, so a complete turn's ask is settled
+    // against the row this call just wrote (never before it exists).
+    await bindClaudeAskTurns(target, built.turns, sessionId);
     return captured;
   } catch (error) {
     logger.error('claude-transcript-capture-failed', {

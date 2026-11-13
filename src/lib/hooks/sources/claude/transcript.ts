@@ -57,6 +57,8 @@
 
 import { claudeHeadlessTurnId } from '@/types/agent-transcript';
 import { isPlainObject, readStringField } from '../event-mapper';
+import { stripAskEnvelope } from '@/lib/ask/envelope';
+import { CLAUDE_TASK_NOTIFICATION_PREFIX } from './queued-notice';
 import { boundDetail, collapseToLine, separateTurnBody, truncateTurnBody, type TurnRenderBlock } from '../turn-body';
 
 /**
@@ -316,6 +318,21 @@ export interface ClaudeTranscriptRecord {
   /** `message.content`, normalised; empty for records that carry no message. */
   readonly blocks: readonly ClaudeContentBlock[];
   /**
+   * Issue #4344 (M1): `operation` of a `queue-operation` record (`enqueue` /
+   * `dequeue` / `remove`); null on every other record.
+   */
+  readonly queueOperation?: string | null;
+  /** Issue #4344: `reason` of a `queue-operation` record (`absorbed_mid_turn`); null otherwise. */
+  readonly queueReason?: string | null;
+  /**
+   * Issue #4344: the queued input's text — a `queue-operation`'s `content`, or a
+   * `queued_command` attachment's `prompt`; null otherwise. Read only for an ask's
+   * envelope, never written anywhere.
+   */
+  readonly queuedText?: string | null;
+  /** Issue #4344: `attachment.type` of an `attachment` record (`queued_command`); null otherwise. */
+  readonly attachmentType?: string | null;
+  /**
    * The record's text with every block concatenated.
    *
    * Only used to decide whether a `user` record is a prompt. Deliberately never
@@ -417,6 +434,28 @@ export interface ClaudeTurnAccumulator {
   stopReasonObserved: boolean;
   /** True once a block had to be dropped for {@link MAX_CLAUDE_TURN_BLOCKS}. */
   overflowed: boolean;
+  /**
+   * Issue #4344: the ask whose envelope the prompt record carried at its
+   * canonical place (`lib/ask/envelope`); null when it carried none. The envelope
+   * is already off {@link promptText}.
+   */
+  askId?: string | null;
+  /**
+   * Issue #4344 (M1): inputs this turn absorbed while it ran — prompts the
+   * operator or another ask typed into it. Each leaves a `queue-operation`
+   * `remove` (`absorbed_mid_turn`) and a `queued_command` attachment and no
+   * prompt record; the larger of the two counts is taken so one input is not
+   * counted twice. A background-task notice (`<task-notification>…`) is not an
+   * input (design §7 (a), decided ②) and is counted in {@link absorbedNotices}.
+   */
+  absorbedInputs?: number;
+  /**
+   * Issue #4344 (§7 (a) ②): background-task notices this turn absorbed. Not
+   * another input, but the reply may react to them — the ask says `notified`.
+   */
+  absorbedNotices?: number;
+  /** Issue #4344 (M1): the askIds of envelopes found on absorbed inputs. */
+  absorbedAskIds?: string[];
 }
 
 /** What one rendered turn is. */
@@ -545,6 +584,10 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
   const timestamp = readStringField(value, 'timestamp');
   const parsed = timestamp ? Date.parse(timestamp) : NaN;
   const origin = isPlainObject(value.origin) ? value.origin : null;
+  // Issue #4344 (M1): an input absorbed into a running turn leaves no prompt record —
+  // only these two shapes (`queued-notice.ts`).
+  const attachment = type === 'attachment' && isPlainObject(value.attachment) ? value.attachment : null;
+  const queueOperation = type === 'queue-operation' ? readStringField(value, 'operation') : null;
 
   return {
     type,
@@ -561,6 +604,15 @@ export function readClaudeTranscriptRecord(value: unknown): ClaudeTranscriptReco
     stopReason: message ? readStringField(message, 'stop_reason') : null,
     blocks,
     text,
+    queueOperation,
+    queueReason: queueOperation !== null ? readStringField(value, 'reason') : null,
+    queuedText:
+      queueOperation !== null
+        ? readStringField(value, 'content')
+        : attachment
+          ? readStringField(attachment, 'prompt')
+          : null,
+    attachmentType: attachment ? readStringField(attachment, 'type') : null,
   };
 }
 
@@ -742,14 +794,19 @@ export function isClaudeTurnWritable(turn: ClaudeTurnAccumulator): boolean {
 
 /** A brand-new accumulator for one turn. */
 export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: string): ClaudeTurnAccumulator {
+  // A slash command's record is XML and the operator typed a line; #2265 puts
+  // the line on the turn so that the `user` row reads `/release v0.30.1` and
+  // the `/send` row holding those same bytes is adopted rather than doubled.
+  const command = claudeSlashCommandPrompt(record.text);
+  // Issue #4344 (M3): paste wrapper first, then (inside `stripAskEnvelope`) the brief,
+  // then the envelope — only at its canonical place. A command never carries one.
+  const unwrapped = command ?? claudePastedContentPrompt(record.text);
+  const envelope = command === null ? stripAskEnvelope(unwrapped) : null;
   return {
     sessionId: record.sessionId ?? sessionId,
     promptUuid: record.uuid as string,
     startedAt: record.timestampMs ?? 0,
-    // A slash command's record is XML and the operator typed a line; #2265 puts
-    // the line on the turn so that the `user` row reads `/release v0.30.1` and
-    // the `/send` row holding those same bytes is adopted rather than doubled.
-    promptText: claudeSlashCommandPrompt(record.text) ?? claudePastedContentPrompt(record.text),
+    promptText: envelope ? envelope.text : unwrapped,
     promptIsOperatorInput: isClaudeOperatorPromptRecord(record),
     blocks: [],
     assistantRecords: 0,
@@ -757,7 +814,30 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     superseded: false,
     stopReasonObserved: false,
     overflowed: false,
+    askId: envelope ? envelope.askId : null,
+    absorbedInputs: 0,
+    absorbedNotices: 0,
+    absorbedAskIds: [],
   };
+}
+
+/** Issue #4344 (M1): the `queue-operation` reason of an input absorbed into a running turn. */
+export const CLAUDE_ABSORBED_MID_TURN_REASON = 'absorbed_mid_turn';
+
+/** Issue #4344 (M1): the attachment type an absorbed input is recorded under. */
+export const CLAUDE_QUEUED_COMMAND_ATTACHMENT = 'queued_command';
+
+/** Which absorbed-input shape this record is, if any (Issue #4344, M1). */
+function absorbedInputKind(record: ClaudeTranscriptRecord): 'remove' | 'attachment' | null {
+  if (
+    record.type === 'queue-operation'
+    && record.queueOperation === 'remove'
+    && record.queueReason === CLAUDE_ABSORBED_MID_TURN_REASON
+  ) {
+    return 'remove';
+  }
+  if (record.type === 'attachment' && record.attachmentType === CLAUDE_QUEUED_COMMAND_ATTACHMENT) return 'attachment';
+  return null;
 }
 
 /** What one pass over a transcript's records produced. */
@@ -809,6 +889,12 @@ export function buildClaudeTurns(
   let current: ClaudeTurnAccumulator | null = null;
   let orphanedAssistantRecords = 0;
   let sidechainRecords = 0;
+  // Issue #4344 (M1): one absorbed input writes a `remove` and an attachment;
+  // notices (§7 (a) ②) are counted apart, the same way.
+  let absorbedRemoves = 0;
+  let absorbedAttachments = 0;
+  let noticeRemoves = 0;
+  let noticeAttachments = 0;
 
   for (const record of records) {
     if (record.isSidechain) {
@@ -818,7 +904,28 @@ export function buildClaudeTurns(
 
     if (isClaudePromptRecord(record)) {
       current = createClaudeTurn(record, sessionId);
+      absorbedRemoves = 0;
+      absorbedAttachments = 0;
+      noticeRemoves = 0;
+      noticeAttachments = 0;
       turns.push(current);
+      continue;
+    }
+
+    const absorbed = current ? absorbedInputKind(record) : null;
+    if (current && absorbed) {
+      if ((record.queuedText ?? '').trimStart().startsWith(CLAUDE_TASK_NOTIFICATION_PREFIX)) {
+        if (absorbed === 'remove') noticeRemoves += 1;
+        else noticeAttachments += 1;
+        current.absorbedNotices = Math.max(noticeRemoves, noticeAttachments);
+        continue;
+      }
+      if (absorbed === 'remove') absorbedRemoves += 1;
+      else absorbedAttachments += 1;
+      current.absorbedInputs = Math.max(absorbedRemoves, absorbedAttachments);
+      const envelope = record.queuedText ? stripAskEnvelope(claudePastedContentPrompt(record.queuedText)) : null;
+      const absorbedAskIds = current.absorbedAskIds ?? (current.absorbedAskIds = []);
+      if (envelope && !absorbedAskIds.includes(envelope.askId)) absorbedAskIds.push(envelope.askId);
       continue;
     }
 

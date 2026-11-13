@@ -1,6 +1,6 @@
 # ask の返答を依頼に結ぶ — 送信 ID と native transcript の対応（Issue #4344）設計
 
-- 段: 設計（この文書だけ。コードは書かない）。実装は §7 の「要決定（人）」が決まった後、§6 の PR の並びで行う
+- 段: 設計（この文書だけ。コードは書かない）。§7 は 2026-11-13 13:51 に人が決めた。実装は §6 の PR の並びで行う（PR1 は claude）
 - 人の決定: **案 A を採る**（2026-11-13 13:14 JST、Issue #4344 のコメント）。対応する CLI から順に広げ、未対応の CLI（native transcript を持たない pane-only の tool）と旧サーバーでは `ask` が返答を自動で回収しない挙動の変更を受け入れる
 - 基準: develop `a823cdd2b`。行番号はこの時点のもの（実装の着手時は名前で探し直す）。「事実」は file:line、「見立て」「未確認」は明記する
 - 材料: Issue #4344 本文（不変条件 1〜7）、イネーブラーの設計調査（`workspace/orchestration/runs/2026-11-13/enabler-return-4315-ask-design.md`。リポジトリ外）、#4315 のレビュー 2 回（同 `review-4315.md`・`review-4315b.md`）
@@ -53,8 +53,8 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 
 - `scripts/orchestrate/consistency-review.mjs` は `ask --json` に返答の文字列が無いと `no-reply` で exit 1 にする（`:159`・`:782`。`ask` の起動は `:744`）。5-2b（Codex の整合性レビュー）がこれを通る。
 - **決定（リーダーの推奨を採る）: 未対応の tool で回収をやめる変更（§6 の PR3）は、codex の capability が true になった後（PR2 のマージ後）にマージする。`consistency-review.mjs` は変えない。**
-- 残る影響: codex の利用上限で Antigravity に振り替えた場合、antigravity が対応するまで 5-2b は `no-reply` で止まる。これは §7 の要決定（人）に入れた。
-- `.claude/skills/cmate-delegate-dev/scripts/ask.sh`（と `.agents/skills/...` の写し）は JSON と exit code をそのまま通すので壊れない（`ask.sh:210-221`、レビューの読み）。ただし未対応の tool で exit 0・reply null を「空の返答で完了」と読みうる、context-limit の救済（`has_context_limit_error`）は reply の本文を読むので働かない、`SKILL.md:227` は `source` の説明を前提にしている。公開版 skill（commandmate-skills）と出す順番は §7 の要決定（人）。ask.sh・SKILL.md はこの Issue では触らない。
+- 残る影響: codex の利用上限で Antigravity に振り替えた場合、antigravity が対応するまで 5-2b は `no-reply` で止まる。§7 (d) の決定: 振り替え先は claude。
+- `.claude/skills/cmate-delegate-dev/scripts/ask.sh`（と `.agents/skills/...` の写し）は JSON と exit code をそのまま通すので壊れない（`ask.sh:210-221`、レビューの読み）。ただし未対応の tool で exit 0・reply null を「空の返答で完了」と読みうる、context-limit の救済（`has_context_limit_error`）は reply の本文を読むので働かない、`SKILL.md:227` は `source` の説明を前提にしている。公開版 skill（commandmate-skills）と出す順番は §7 (c) の決定（skill を先に publish してから PR3）。ask.sh・SKILL.md はこの Issue では触らない。
 
 ## 1. 今の経路（事実）と、画面で 2 回失敗した経緯
 
@@ -90,7 +90,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 5. **確定しないものは空欄**: 読めない・対応なし・欠損・未完了・曖昧は `source=none, reply=null`。画面や別 turn で穴埋めしない。結果不明の send を再送しない。
 6. **完了と回収は別**: wait の成功は処理の終了であって帰属の証拠ではない。既存の終了コードを保ち、返答が無くても終了済みなら exit 0。理由は JSON の `attribution.reason` と stderr の 1 行で言う。
 7. **既存の読者を変えない**: `capture`（raw・`--tail`・`--follow`）・`transcript-squeeze`・capture API・`wait-verify`・一般の `reply`（「最新の返答を読む」）・async relay・**History の user 行の採用（`recordUserTurn`。封筒の無い入力では何も変えない）** の振る舞いを変えない。封筒を外す処理は「封筒があるときだけ」動く（§3.2 M2）。共有 helper を変える必要が出たら、その全読者を列挙し直してから決める。公開版 skill の `ask.sh`（`.claude/skills/cmate-delegate-dev/scripts/ask.sh`・`.agents/skills/...` の写し）と `SKILL.md` には触れない — 旧経路の修正と publish は人へ（commandmate-skills 側。§7）。
-   - **見え方は変わる（意味は変わらない）**: 封筒を付けると ask の本文は必ず 2 行以上になる。claude は複数行の入力を paste として扱うので、claude のペインには本文の代わりに `[Pasted text …]` と封筒が出る。capture の出力の意味・API・squeeze は変わらないが、利用者・UAT・demo-video の見え方は変わる。受け入れるかは §7 の要決定（人）。
+   - **見え方は変わる（意味は変わらない）**: 封筒を付けると ask の本文は必ず 2 行以上になる。claude は複数行の入力を paste として扱うので、claude のペインには本文の代わりに `[Pasted text …]` と封筒が出る。capture の出力の意味・API・squeeze は変わらないが、利用者・UAT・demo-video の見え方は変わる。§7 (b) の決定: 受け入れる。
 
 ## 3. 仕組み（案 A）
 
@@ -119,7 +119,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 - claude の turn の入力は、prompt record に加えて、**同じ turn の中の `queue-operation`（remove）と `queued_command` の attachment**まで数える（`queued-notice.ts:10-18`。fixture は `tests/fixtures/claude-self-resume-3430/`）。turn の入力が 2 つ以上なら、封筒の付いた入力を含めて全員 `ambiguous/shared_turn`。
 - 吸収された入力には封筒が乗らない（吸収された ask B は B 自身の user record を持たない）。B は B の turn が見つからないので `unmatched`（`absorbed_mid_turn`）。A は上の規則で `ambiguous`。
 - 数えられない限り claude の capability は true にしない（§0.1）。
-- `<task-notification>` の吸収（バックグラウンドのタスク完了通知）を「別の入力」に数えるかは §7 の要決定（人）。決まるまでの暫定は「数える」（安全側＝`matched` を出さない側）。
+- `<task-notification>` の吸収（バックグラウンドのタスク完了通知）は「別の入力」に数えない（§7 (a) の決定 ②）。代わりに `attribution` に `notified:true` を出す（通知への反応が返答に混ざりうることを言う）。手入力・ask の吸収は数える。
 
 **R3 — 送信時の手がかり `turnOpenAtSend` は安全弁**
 
@@ -153,7 +153,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 
 | `attribution.state` | 意味 | reply |
 |---|---|---|
-| `matched` | 連鎖が完結し、turn に他の入力が無い（終端） | 本文 |
+| `matched` | 連鎖が完結し、turn に他の入力が無い（終端）。通知の吸収だけなら `notified:true` を添える（§7 (a)） | 本文 |
 | `ambiguous` | 連鎖は完結したが、turn に他の入力がある、または turn が送信時に開いていた（終端） | null |
 | `unmatched` | 対応済みの tool で、期限までに連鎖が完結しなかった | null |
 | `unavailable` | tool・サーバーが未対応、またはコマンド本文で、台帳を使っていない | null |
@@ -208,7 +208,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 | A と B が同じ codex turn に合流／手入力が同じ turn に追加 | 共有 turn | 両方 `ambiguous/shared_turn`、reply=null |
 | claude の ask A の turn 中に、手入力か ask B が吸収された（`queue-operation` remove） | 共有 turn（M1） | A は `ambiguous/shared_turn`、B は `unmatched/absorbed_mid_turn` |
 | claude で送信時に turn が開いていた（`turnOpenAtSend=true`）、吸収は見えない | 安全弁（R3） | `ambiguous/turn_open_at_send` |
-| `<task-notification>` の吸収だけを含む claude の turn | §7 の要決定 | 暫定は `ambiguous/shared_turn` |
+| `<task-notification>` の吸収だけを含む claude の turn | §7 (a) の決定 ② | `matched`、`attribution.notified: true` |
 | 前 turn が send の後に終わり history に入る、今回分は未完了 | 今回の turn 未完了 | `unmatched`（`turn_incomplete`）。前 turn を採らない |
 | 別 instance の返答／`/clear` 前の session の record | 宛先・session の不一致（M5） | 採らない（reader が `rejected`） |
 | サーバー再起動後の最初の ask | 世代は reader が観測（M5） | 単独 turn なら `matched` |
@@ -239,7 +239,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 
 | PR | 書くもの | 直す前に赤の試験（今の実装で落ちる理由） | 陰性対照 |
 |---|---|---|---|
-| **PR1: claude を縦に** | migration（番号は着手時）・`ask-correlation-db.ts`・型・`ask-correlation.ts`・send の route／`send-request.ts`／`send-user-message.ts` の ask 分岐（予約・封筒・`typedContent` の再計算）・claude の reader（封筒の回収と外し・M1 の入力の集合・完了 turn の対応）・`recordUserTurn` の封筒の外し・`GET /api/asks/*`（capability は claude だけ true）・`ask` の CLI（capability が true の tool だけ台帳で読む。**ほかの tool は今の経路のまま**） | (1) claude で上寄せ 305 行目の返答 → reply の全文一致（今は末尾 80 行を返すか返答が無い）、(2) `hi` と旧 `⏺ history` だけの画面・対応なし → none（今は pane を採る）、`> hi`／`⏺ hi` と対応済み本文 `hi` → `hi`、(3) 前 turn が send 後に終わり今回分は未完了 → none（今は時刻窓で旧 turn を選ぶ）、(4) M1: 吸収 1 件の fixture で A・B → `ambiguous`／`unmatched`（今は A の reply を返す）、(5) M2: 封筒入り record＋send 行 → 1 行・封筒なし・`overlapped` なし、(6) M3: brief 付き／無し × 複数行／1 行、(7) M4: `/compact` → 本文不変・`unavailable`、(8) M5: 再起動後の最初の ask が `matched`、`/clear` 前の session の record は `rejected`、(9) M6: `matched` 後の別 session の再出現で不変、(10) 同じ askId の再 POST は入力 0、別本文は 409、(11) R3: `turnOpenAtSend=true` → `ambiguous`、(12) Q1: poller を止めて API の読み取りだけで確定 | 封筒の無い send・relay・brief だけの行の採用は不変、`<tool>-turn:` の行と重複防止は不変、exit 10／20／21／124・upstream fault・instance の別名・`--async`・`overlapped`・`capture --tail`／`--follow`・一般の `reply` は不変、claude 以外の tool の `ask` は不変 |
+| **PR1: claude を縦に** | migration（番号は着手時）・`ask-correlation-db.ts`・型・`ask-correlation.ts`・send の route／`send-request.ts`／`send-user-message.ts` の ask 分岐（予約・封筒・`typedContent` の再計算）・claude の reader（封筒の回収と外し・M1 の入力の集合・完了 turn の対応）・`recordUserTurn` の封筒の外し・`GET /api/asks/*`（capability は claude だけ true）・`ask` の CLI（capability が true の tool だけ台帳で読む。**ほかの tool は今の経路のまま**） | (1) claude で上寄せ 305 行目の返答 → reply の全文一致（今は末尾 80 行を返すか返答が無い）、(2) `hi` と旧 `⏺ history` だけの画面・対応なし → none（今は pane を採る）、`> hi`／`⏺ hi` と対応済み本文 `hi` → `hi`、(3) 前 turn が send 後に終わり今回分は未完了 → none（今は時刻窓で旧 turn を選ぶ）、(4) M1: 吸収 1 件の fixture で A・B → `ambiguous`／`unmatched`（今は A の reply を返す）、通知（`<task-notification>`）だけの吸収 → `matched`・`notified:true`（§7 (a) ②）、(5) M2: 封筒入り record＋send 行 → 1 行・封筒なし・`overlapped` なし、(6) M3: brief 付き／無し × 複数行／1 行、(7) M4: `/compact` → 本文不変・`unavailable`、(8) M5: 再起動後の最初の ask が `matched`、`/clear` 前の session の record は `rejected`、(9) M6: `matched` 後の別 session の再出現で不変、(10) 同じ askId の再 POST は入力 0、別本文は 409、(11) R3: `turnOpenAtSend=true` → `ambiguous`、(12) Q1: poller を止めて API の読み取りだけで確定 | 封筒の無い send・relay・brief だけの行の採用は不変、`<tool>-turn:` の行と重複防止は不変、exit 10／20／21／124・upstream fault・instance の別名・`--async`・`overlapped`・`capture --tail`／`--follow`・一般の `reply` は不変、claude 以外の tool の `ask` は不変 |
 | **PR2: codex** | `codex/history.ts`（と parser）の封筒の回収と外し・完了 turn の対応、capability を codex で true | (1) 1 turn に 2 つの prompt → 両方 `ambiguous`（今は reply を返す）、(2) 単独 turn の全文一致、(3) M2〜M6 を codex の fixture で同じ名前のケースとして、(4) Q3: 大きな paste を `[Pasted Content …]` に畳んだ入力の rollout に封筒と展開後の本文が残るか（残らなければ capability は false のまま、PR2 は reader だけで止める） | codex の既存の user 行・`codex-prompt:`／`codex-turn:` の行は不変 |
 | **PR3: 回収しない tool への切り替えと docs** | `ask` の CLI で capability が false の tool を `unavailable/tool_unsupported`、旧サーバーを `server_unsupported`（pane へ降りない）、`ask` の help、`src/cli/docs/agent-operations.ts`、`docs/user-guide/cli-operations-guide.md` と `docs/en/user-guide/cli-operations-guide.md` の `## commandmate ask` 節 | (1) `copilot` → `unavailable`・画面を読まない・exit 0（今は pane を返す）、(2) capabilities が 404 → `server_unsupported`・旧 body で 1 回送る | PR1 の陰性対照すべて |
 
@@ -253,14 +253,16 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 
 当初の契約の分け方。PR1 が「誰も送らない `ask` フィールド」と「全 tool が false の capabilities」だけになり、未使用の API を先に足すことになる。M2 の採用の試験も封筒を出し始める PR に置けない（PR1 で封筒を出すなら reader が無く、出さないなら試験の対象が無い）。PR の大きさを優先する事情が出たときだけ使う。
 
-## 7. 要決定（人）
+## 7. 決定（2026-11-13 13:51、人）
 
-| 決めること | 選択肢 | 推奨 |
+すべて推奨どおりに決まった（Issue #4344 のコメント）。
+
+| 決めること | 選択肢 | 決定 |
 |---|---|---|
-| (a) claude の `<task-notification>` の吸収（バックグラウンドのタスク完了通知）を「別の入力」に数えるか（M1 の付記） | ① 数える（そうした turn の ask は `ambiguous`。バックグラウンドを使う claude の ask の多くが回収されない）② 数えない（通知は利用者の入力ではないとみなし、手入力・ask の吸収だけを数える。通知に答えた本文が返答に混ざりうる） | **②**。通知は `queued-notice.ts` が内容（`<task-notification>` 始まり）で区別できる（`:10-18`、188 件中 178 件が通知）。ただし「通知への反応が返答に混ざる」ことを `attribution` に `notified:true` として出す。決まるまでの実装の暫定は ① |
-| (b) capture の見え方の変化を受け入れるか（ask の本文が必ず複数行になり、claude のペインに `[Pasted text …]` と封筒が出る） | ① 受け入れる ② 1 行の本文では封筒を本文と同じ行の末尾に付ける（paste を避けるが、M3 の外し方と brief の流儀が変わる。未検討） | **①**。意味・API は変わらず、帰属の根拠を保てる。UAT・demo-video の手順に注記する |
-| (c) 公開版 skill の `ask.sh`・`SKILL.md` と出す順番 | ① 公開版 skill を先に直して publish してから PR3 をマージ ② PR3 を先にマージし、公開版を追って直す（その間、未対応の tool で「空の返答で完了」と読まれうる） | **①**。PR3 の前に commandmate-skills へ Issue を立てて、`reply:null` と `attribution` の読み方・context-limit の救済の扱いを直す。publish は人 |
-| (d) codex の上限で Antigravity に振り替えたときの 5-2b（M7 の残り） | ① antigravity の adapter が対応するまで、振り替え先は claude にする ② `consistency-review.mjs` に `attribution.state` の分岐を足す（このとき書いてよいファイルに足す） | **①**。運用の手順の変更で済み、スクリプトを変えない |
+| (a) claude の `<task-notification>` の吸収（バックグラウンドのタスク完了通知）を「別の入力」に数えるか（M1 の付記） | ① 数える（そうした turn の ask は `ambiguous`。バックグラウンドを使う claude の ask の多くが回収されない）② 数えない（通知は利用者の入力ではないとみなし、手入力・ask の吸収だけを数える。通知に答えた本文が返答に混ざりうる） | **②**。通知は `queued-notice.ts` が内容（`<task-notification>` 始まり）で区別できる（`:10-18`、188 件中 178 件が通知）。「通知への反応が返答に混ざる」ことを `attribution` に `notified:true` として出す（PR1 で実装） |
+| (b) capture の見え方の変化を受け入れるか（ask の本文が必ず複数行になり、claude のペインに `[Pasted text …]` と封筒が出る） | ① 受け入れる ② 1 行の本文では封筒を本文と同じ行の末尾に付ける（paste を避けるが、M3 の外し方と brief の流儀が変わる。未検討） | **① 受け入れる**。意味・API は変わらず、帰属の根拠を保てる。UAT・demo-video の手順に注記する |
+| (c) 公開版 skill の `ask.sh`・`SKILL.md` と出す順番 | ① 公開版 skill を先に直して publish してから PR3 をマージ ② PR3 を先にマージし、公開版を追って直す（その間、未対応の tool で「空の返答で完了」と読まれうる） | **①**。公開版 skill を先に直して publish してから PR3（commandmate-skills の Issue と publish は PM が人に伺う。PR3 はリーダーが止める）。`reply:null` と `attribution` の読み方・context-limit の救済の扱いを直す |
+| (d) codex の上限で Antigravity に振り替えたときの 5-2b（M7 の残り） | ① antigravity の adapter が対応するまで、振り替え先は claude にする ② `consistency-review.mjs` に `attribution.state` の分岐を足す（このとき書いてよいファイルに足す） | **① 振り替え先は claude**。運用の手順の変更で済み、スクリプトを変えない |
 
 ## 8. 質問への答え
 

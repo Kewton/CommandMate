@@ -1,0 +1,312 @@
+/**
+ * claude's ask attribution adapter — the §6 PR1 controls (Issue #4344, design
+ * `docs/design/ask-attribution-4344.md`).
+ *
+ * Driven through the reader's public entrance (`captureClaudeTranscriptTurn`,
+ * what the poller calls when a turn ends) and the read API's function
+ * (`readAskAttribution`), on a transcript written into a `mkdtemp` home. The
+ * ledger rows are reserved the way the send route reserves them.
+ *
+ * This file is the capability control the guard
+ * `tests/unit/guards/ask-capability-controls-4344.test.ts` holds claude's
+ * `ASK_ATTRIBUTION_TOOLS` entry to: every M1〜M6 case below is named.
+ *
+ * @vitest-environment node
+ */
+
+import Database from 'better-sqlite3';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/db/db-instance', () => {
+  let mockDb: Database.Database | null = null;
+  return {
+    getDbInstance: () => {
+      if (!mockDb) throw new Error('Mock database not initialized');
+      return mockDb;
+    },
+    setMockDb: (value: Database.Database | null) => {
+      mockDb = value;
+    },
+  };
+});
+
+vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
+
+const getLastAgentEvent = vi.fn<(...a: unknown[]) => { sessionId: string | null } | null>();
+vi.mock('@/lib/session/agent-event-state', () => ({
+  getLastAgentEvent: (...a: unknown[]) => getLastAgentEvent(...a),
+}));
+
+import { runMigrations } from '@/lib/db/db-migrations';
+import { createMessage, deleteMessageById, getMessages, upsertWorktree } from '@/lib/db';
+import {
+  captureClaudeTranscriptTurn,
+  claudeTranscriptPath,
+  resetClaudeTranscriptSessions,
+} from '@/lib/hooks/sources/claude/history';
+import { claudeProjectSlug } from '@/lib/hooks/sources/claude/transcript';
+import { refreshClaudeAsk } from '@/lib/hooks/sources/claude/ask-refresh';
+import { readAskAttribution, askBodyDigest } from '@/lib/ask/ask-correlation';
+import { formatAskEnvelope } from '@/lib/ask/envelope';
+import { getAskCorrelation, recordAskSendOutcome, reserveAsk } from '@/lib/db/ask-correlation-db';
+import type { Worktree } from '@/types/models';
+
+const WT = 'wt-4344';
+const SESSION = '00000000-0000-4000-8000-000000004344';
+const OTHER_SESSION = '00000000-0000-4000-8000-00000000c1ea';
+const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const FIXTURES = join(process.cwd(), 'tests/fixtures/claude-ask-attribution-4344');
+const BRIEF = '<<<cmate-brief:0123abcd\nnotice\nstate\ncmate-brief:0123abcd>>>';
+const T0 = Date.parse('2026-11-13T04:00:00.000Z');
+
+let db: Database.Database;
+let home: string;
+let worktreePath: string;
+
+async function setMockDb(value: Database.Database | null): Promise<void> {
+  const module = (await import('@/lib/db/db-instance')) as unknown as { setMockDb: (v: Database.Database | null) => void };
+  module.setMockDb(value);
+}
+
+/** The transcript of `session`, as Claude would leave it under the home. */
+async function writeTranscript(records: readonly object[] | string, session = SESSION): Promise<void> {
+  const path = claudeTranscriptPath(home, worktreePath, session);
+  await mkdir(join(home, '.claude', 'projects', claudeProjectSlug(worktreePath)), { recursive: true });
+  const text = typeof records === 'string' ? records : records.map((record) => JSON.stringify(record)).join('\n') + '\n';
+  await writeFile(path, text.replaceAll('<CWD>', worktreePath), 'utf8');
+}
+
+const capture = (): Promise<boolean> =>
+  captureClaudeTranscriptTurn({ worktreeId: WT, cliToolId: 'claude', instanceId: 'claude' }, { worktreePath, homeDir: home });
+
+const iso = (offsetMs: number): string => new Date(T0 + offsetMs).toISOString();
+const paste = (body: string): string => `<pasted_content id="1">\n${body}\n</pasted_content id="1">`;
+
+function prompt(uuid: string, text: string, at: number, session = SESSION): object {
+  return {
+    type: 'user', isSidechain: false, uuid, timestamp: iso(at), promptSource: 'typed', origin: { kind: 'human' },
+    cwd: '<CWD>', message: { role: 'user', content: text }, sessionId: session,
+  };
+}
+function reply(uuid: string, text: string, at: number, session = SESSION): object {
+  return {
+    type: 'assistant', isSidechain: false, uuid, timestamp: iso(at), cwd: '<CWD>',
+    message: { role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' }, sessionId: session,
+  };
+}
+function toolUse(uuid: string, at: number, session = SESSION): object {
+  return {
+    type: 'assistant', isSidechain: false, uuid, timestamp: iso(at), cwd: '<CWD>',
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${uuid}`, name: 'Bash', input: {} }], stop_reason: 'tool_use' },
+    sessionId: session,
+  };
+}
+
+/** What the send route leaves behind for a sent ask: the reservation, the outcome, the `/send` user row. */
+function sentAsk(askId: string, body: string, options: { turnOpenAtSend?: boolean; at?: number } = {}): void {
+  reserveAsk(db, { askId, worktreeId: WT, instanceId: 'claude', cliToolId: 'claude', bodyDigest: askBodyDigest(body) });
+  const row = createMessage(db, {
+    worktreeId: WT, role: 'user', content: body, messageType: 'normal',
+    timestamp: new Date(T0 + (options.at ?? 0)), cliToolId: 'claude', instanceId: 'claude',
+  });
+  recordAskSendOutcome(db, askId, { sendState: 'sent', sentMessageId: row.id, turnOpenAtSend: options.turnOpenAtSend ?? false });
+}
+
+const read = (askId: string) => readAskAttribution(db, askId);
+const userRows = () => getMessages(db, WT, { limit: 200 }).filter((m) => m.role === 'user');
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  resetClaudeTranscriptSessions();
+  getLastAgentEvent.mockReturnValue({ sessionId: SESSION });
+  home = await mkdtemp(join(tmpdir(), 'cmate-4344-'));
+  worktreePath = join(home, 'wt');
+  db = new Database(':memory:');
+  runMigrations(db);
+  await setMockDb(db);
+  const worktree: Worktree = { id: WT, name: 'wt', path: worktreePath, repositoryPath: '/repos', repositoryName: 'CommandMate' };
+  upsertWorktree(db, worktree);
+});
+
+afterEach(async () => {
+  resetClaudeTranscriptSessions();
+  await setMockDb(null);
+  db.close();
+  await rm(home, { recursive: true, force: true });
+});
+
+describe('(1) the reply is the enveloped turn\'s whole body, wherever it would be on a screen', () => {
+  it('a 305-line reply comes back in full (the pane read kept the last 80 lines)', async () => {
+    const long = Array.from({ length: 305 }, (_, i) => `line ${i + 1}`).join('\n');
+    sentAsk(A, 'write 305 lines');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nwrite 305 lines`), 0), reply('r1', long, 1000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: long, notified: false });
+  });
+});
+
+describe('(2) same text as the ask, and no correspondence', () => {
+  it('ask `hi` answered `hi` is matched with exactly `hi`', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'hi', 1000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'hi' });
+  });
+
+  it('an older reply with no envelope in front of it is never this ask\'s', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p0', 'history', -60_000), reply('r0', 'history', -59_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', reply: null, nativeInputSeen: false });
+  });
+});
+
+describe('(3) the previous turn ended after the send, this one did not', () => {
+  it('stays pending (turn_incomplete for the CLI) and never takes the previous turn', async () => {
+    sentAsk(A, 'second');
+    await writeTranscript([
+      prompt('p0', 'first', -5_000),
+      reply('r0', 'first answer', 500),
+      prompt('p1', paste(`${formatAskEnvelope(A)}\nsecond`), 1_000),
+      toolUse('t1', 2_000),
+    ]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', reply: null, nativeInputSeen: true });
+  });
+});
+
+describe('(4) M1: inputs absorbed into the running turn', () => {
+  it('M1 an absorbed ask: A is ambiguous/shared_turn and B unmatched/absorbed_mid_turn', async () => {
+    sentAsk(A, 'review the plan');
+    sentAsk(B, 'second question', { at: 1_500 });
+    await writeTranscript(await readFile(join(FIXTURES, 'absorbed-ask.jsonl'), 'utf8'));
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'shared_turn', reply: null });
+    expect(await read(B)).toMatchObject({ state: 'unmatched', reason: 'absorbed_mid_turn', reply: null });
+  });
+
+  it('M1 a background-task notice only: matched with notified (§7 (a) ②)', async () => {
+    sentAsk(A, 'review the plan');
+    await writeTranscript(await readFile(join(FIXTURES, 'absorbed-notice.jsonl'), 'utf8'));
+    await capture();
+    const answer = await read(A);
+    expect(answer).toMatchObject({ state: 'matched', notified: true });
+    // The row History holds for the turn (its prose, and the tool call drawn under it).
+    expect(answer?.reply?.startsWith('The plan is fine.')).toBe(true);
+  });
+});
+
+describe('(5) M2: the envelope and History\'s adoption', () => {
+  it('M2 the /send row is adopted: one user row, no envelope in it', async () => {
+    sentAsk(A, 'review the plan');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nreview the plan`), 0), reply('r1', 'ok', 1000)]);
+    await capture();
+    const rows = userRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toBe('review the plan');
+    expect(rows[0].requestId).toBe('claude-prompt:p1');
+  });
+
+  it('M2 negative control: a prompt with no envelope is adopted as before and touches no ledger row', async () => {
+    createMessage(db, { worktreeId: WT, role: 'user', content: 'plain', messageType: 'normal', timestamp: new Date(T0), cliToolId: 'claude', instanceId: 'claude' });
+    await writeTranscript([prompt('p1', 'plain', 0), reply('r1', 'ok', 1000)]);
+    await capture();
+    expect(userRows()).toHaveLength(1);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM ask_correlations').get() as { n: number }).n).toBe(0);
+  });
+});
+
+describe('(6) M3: brief with / without × multi-line / one-line', () => {
+  it.each([
+    ['M3 no brief, one line', '', 'hi there'],
+    ['M3 no brief, multi-line', '', 'line one\nline two'],
+    ['M3 brief, one line', `${BRIEF}\n\n`, 'hi there'],
+    ['M3 brief, multi-line', `${BRIEF}\n\n`, 'line one\nline two'],
+  ])('%s', async (_name, brief, body) => {
+    sentAsk(A, body);
+    await writeTranscript([prompt('p1', paste(`${brief}${formatAskEnvelope(A)}\n${body}`), 0), reply('r1', 'done', 1000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'done' });
+    const rows = userRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toBe(body);
+  });
+});
+
+describe('(8) M5: the generation is the session the reader saw', () => {
+  it('M5 the first ask after a restart is matched (nothing in memory is needed)', async () => {
+    sentAsk(A, 'hi');
+    resetClaudeTranscriptSessions();
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'after restart', 1000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'after restart' });
+  });
+
+  it('M5 a record of the session before /clear is rejected', async () => {
+    sentAsk(A, 'hi');
+    getLastAgentEvent.mockReturnValue({ sessionId: OTHER_SESSION });
+    // The file the instance follows now holds a record stamped with the old session.
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0, SESSION), reply('r1', 'old', 1000, SESSION)], OTHER_SESSION);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', nativeInputSeen: false });
+  });
+});
+
+describe('(9) M6: terminal states and idempotency', () => {
+  it('M6 reading the same input twice changes nothing', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'hi', 1000)]);
+    await capture();
+    const first = getAskCorrelation(db, A);
+    await capture();
+    expect(getAskCorrelation(db, A)).toEqual(first);
+  });
+
+  it('M6 the same envelope seen again in another session after matched (resume / fork) leaves it as it was', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'the answer', 1000)]);
+    await capture();
+    getLastAgentEvent.mockReturnValue({ sessionId: OTHER_SESSION });
+    resetClaudeTranscriptSessions();
+    await writeTranscript(
+      [prompt('p9', paste(`${formatAskEnvelope(A)}\nhi`), 5_000, OTHER_SESSION), reply('r9', 'another', 6_000, OTHER_SESSION)],
+      OTHER_SESSION,
+    );
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'the answer' });
+    expect(getAskCorrelation(db, A)?.nativeInputId).toBe('p1');
+  });
+
+  it('M6 a reply row deleted from History reads unmatched/history_missing; the ledger stays matched', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'hi', 1000)]);
+    await capture();
+    const [id] = getAskCorrelation(db, A)!.assistantMessageIds;
+    deleteMessageById(db, id);
+    expect(await read(A)).toMatchObject({ state: 'unmatched', reason: 'history_missing', reply: null });
+    expect(getAskCorrelation(db, A)?.attributionState).toBe('matched');
+  });
+});
+
+describe('(11) R3: a turn open at the send is never matched', () => {
+  it('turnOpenAtSend=true → ambiguous/turn_open_at_send', async () => {
+    sentAsk(A, 'hi', { turnOpenAtSend: true });
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'hi', 1000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'turn_open_at_send', reply: null });
+  });
+});
+
+describe('(12) Q1: settled by the read API alone, with no poller reading', () => {
+  it('a pending ask is refreshed once from the transcript and comes back matched', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', paste(`${formatAskEnvelope(A)}\nhi`), 0), reply('r1', 'read on demand', 1000)]);
+    // No capture(): the poller is not running.
+    const answer = await readAskAttribution(db, A, (row) => refreshClaudeAsk(db, row, { homeDir: home }));
+    expect(answer).toMatchObject({ state: 'matched', reply: 'read on demand' });
+  });
+});

@@ -28,13 +28,31 @@
  * no box drawing, no composer, no spinner frames. A tool that has no transcript
  * reader falls back to the squeezed pane, and `--json` says which of the two
  * answered in `source` so a caller can tell a real reply from a screen scrape.
+ *
+ * ## By the ask's own id, where the server can (Issue #4344)
+ *
+ * Neither the newest row nor the screen says which input a reply answers. For a
+ * tool the server attributes asks for (`GET /api/asks/capabilities`; claude
+ * first), `ask` makes an id, the send types it in an envelope the tool's own
+ * transcript keeps, and the reply is read back by that id
+ * (`GET /api/asks/:askId`): the completed turn that the enveloped input opened,
+ * and nothing else. A turn shared with another input, an unfinished one or none
+ * at all is `reply: null` with `attribution.state` / `reason` — never the pane.
+ * Every other tool, and a server without the endpoint, takes the path above.
  */
 
 import { Command } from 'commander';
+import { randomUUID } from 'node:crypto';
 import { ExitCode, WaitExitCode } from '../types';
-import { ApiClient, isDeadlineExceeded, isValidWorktreeId } from '../utils/api-client';
+import { ApiClient, ApiError, isDeadlineExceeded, isValidWorktreeId } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
-import type { ChatMessage, PromptMessageResponse } from '../types/api-responses';
+import type {
+  AskAttributionApiResponse,
+  AskAttributionStateResponse,
+  AskCapabilitiesApiResponse,
+  ChatMessage,
+  PromptMessageResponse,
+} from '../types/api-responses';
 import {
   TRANSCRIPT_READER_TOOLS,
   fetchPromptRowsSince,
@@ -93,6 +111,19 @@ const REPLY_TURN_ROW_GRACE_MS = 15_000;
 /** How often the grace above re-reads the ledger. */
 const REPLY_TURN_ROW_POLL_MS = 1_000;
 
+/** Issue #4344: the ask envelope protocol this CLI speaks (`GET /api/asks/capabilities`). */
+const ASK_PROTOCOL_VERSION = 1;
+
+/**
+ * Issue #4344: the tools `ask` asks the server about before the send. Not the
+ * capability table — that is the server's (`/api/asks/capabilities`), and a tool
+ * here the server answers false for takes the old path. It keeps the request
+ * sequence of every other tool's ask exactly as it was while the adapters are
+ * added one by one (design §6: PR1 claude; PR2 adds codex; PR3 asks for every
+ * tool and stops reading the pane).
+ */
+const ASK_ATTRIBUTION_PROBE_TOOLS: ReadonlySet<string> = new Set(['claude']);
+
 /** Sleep, for the grace window above. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -100,6 +131,114 @@ function sleep(ms: number): Promise<void> {
 
 /** Where the printed reply came from. Reported in `--json`. */
 type ReplySource = 'history' | 'pane' | 'none';
+
+/**
+ * Issue #4344: what the ledger said about this ask, in `--json` as `askId` and
+ * `attribution`. Never `pending`: the grace turns that into `unmatched`.
+ */
+interface AskAttribution {
+  askId: string | null;
+  state: Exclude<AskAttributionStateResponse, 'pending'>;
+  reason: string | null;
+  /** The answering turn also absorbed a background-task notice: the reply may react to it. */
+  notified?: boolean;
+}
+
+/** Issue #4344: how this ask's reply is read, decided before the send. */
+type AskReadMode =
+  | { kind: 'legacy' }
+  | { kind: 'ledger'; askId: string };
+
+/**
+ * Issue #4344: whether the server attributes `agent`'s asks by the ledger.
+ *
+ * Asked only for {@link ASK_ATTRIBUTION_PROBE_TOOLS}. A 404 (a server before
+ * #4344) or an answer that is not the table (a proxy, a mock) is "no" — the old
+ * path. A refused request (auth, a redirect) is the command's error like any
+ * other request it makes, never a silent fall back.
+ */
+async function serverAttributesAsk(client: ApiClient, agent: string | undefined): Promise<boolean> {
+  if (!agent || !ASK_ATTRIBUTION_PROBE_TOOLS.has(agent)) return false;
+  const response = await client.rawGet('/api/asks/capabilities');
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    throw new ApiError(`Unexpected HTTP status: ${response.status}`, ExitCode.UNEXPECTED_ERROR, response.status);
+  }
+  let body: Partial<AskCapabilitiesApiResponse> | null = null;
+  try {
+    body = (await response.json()) as Partial<AskCapabilitiesApiResponse>;
+  } catch (error) {
+    // Issue #3983: the deadline is `--timeout`'s (exit 124), not an unreadable body.
+    if (isDeadlineExceeded(error)) throw error;
+    return false;
+  }
+  return body?.protocol === ASK_PROTOCOL_VERSION
+    && typeof body.tools === 'object'
+    && body.tools !== null
+    && body.tools[agent] === true;
+}
+
+/** Issue #4344: the states the ledger does not change any more. */
+function isSettled(state: AskAttributionStateResponse): state is AskAttribution['state'] {
+  return state !== 'pending';
+}
+
+/**
+ * Issue #4344: this ask's attribution, read by its id until it settles or the
+ * reply grace ({@link REPLY_TURN_ROW_GRACE_MS}) runs out. Running out is not an
+ * error: `unmatched` with `turn_incomplete` (the input was seen, its turn did not
+ * end), `send_unknown` (the send's answer was lost) or `grace_expired`. Never
+ * falls back to the pane or to "the newest row".
+ */
+async function readAskAttribution(
+  client: ApiClient,
+  askId: string,
+): Promise<{ attribution: AskAttribution; reply: string | null }> {
+  const deadline = Date.now() + REPLY_TURN_ROW_GRACE_MS;
+  const graceClient = client.withDeadline(deadline);
+  let last: AskAttributionApiResponse | null = null;
+  for (;;) {
+    try {
+      last = await graceClient.get<AskAttributionApiResponse>(`/api/asks/${encodeURIComponent(askId)}`);
+    } catch (error) {
+      if (!isDeadlineExceeded(error) && !(error instanceof ApiError && error.statusCode === 404)) throw error;
+      break;
+    }
+    if (last && isSettled(last.state)) {
+      return {
+        attribution: {
+          askId,
+          state: last.state,
+          reason: last.state === 'matched' ? null : last.reason,
+          ...(last.notified === true ? { notified: true } : {}),
+        },
+        reply: last.state === 'matched' && typeof last.reply === 'string' ? last.reply : null,
+      };
+    }
+    if (Date.now() >= deadline) break;
+    await sleep(REPLY_TURN_ROW_POLL_MS);
+  }
+  const reason = last?.nativeInputSeen
+    ? 'turn_incomplete'
+    : last?.sendState === 'send_unknown'
+      ? 'send_unknown'
+      : 'grace_expired';
+  return { attribution: { askId, state: 'unmatched', reason }, reply: null };
+}
+
+/** Issue #4344: the stderr line for an ask whose reply was not collected. */
+function formatNotCollected(
+  attribution: AskAttribution,
+  agent: string | undefined,
+  worktreeId: string,
+  instanceId: string | undefined,
+): string {
+  const look = `look with \`capture ${worktreeId}${instanceId ? ` --instance ${instanceId}` : ''} --pane\``;
+  const why = attribution.state === 'unavailable'
+    ? `${agent ?? 'this tool'} has no ask attribution (${attribution.reason ?? 'unavailable'})`
+    : `${attribution.state}${attribution.reason ? ` (${attribution.reason})` : ''}`;
+  return `reply not collected: ${why}; ${look}`;
+}
 
 /**
  * Why this ask's turn may have answered somebody else as well (Issue #3955).
@@ -319,6 +458,31 @@ function reportWaitFailure(
   process.exit(result.exitCode);
 }
 
+/**
+ * Issue #4344: the reply by the mode decided before the send. The ledger mode
+ * and an unavailable ask never read the pane; the rows the overlap check reads
+ * are fetched once, bounded by the grace, as the legacy read hands them back.
+ */
+async function readReplyFor(
+  mode: AskReadMode,
+  unavailable: AskAttribution | null,
+  input: { client: ApiClient; worktreeId: string; instanceId: string | undefined; askedAt: number; agent: string | undefined },
+): Promise<{ source: ReplySource; reply: string | null; messages: PromptMessageResponse[] | null; attribution: AskAttribution | null }> {
+  const { client, worktreeId, instanceId, askedAt, agent } = input;
+  if (mode.kind === 'legacy' && !unavailable) {
+    return { ...(await readAskReply(client, worktreeId, instanceId, askedAt, agent)), attribution: null };
+  }
+  const read = mode.kind === 'ledger'
+    ? await readAskAttribution(client, mode.askId)
+    : { attribution: unavailable as AskAttribution, reply: null };
+  const graceClient = client.withDeadline(Date.now() + REPLY_TURN_ROW_GRACE_MS);
+  const messages = await fetchRecentMessages(graceClient, worktreeId, instanceId).catch((error: unknown) => {
+    if (isDeadlineExceeded(error)) return null;
+    throw error;
+  });
+  return { source: read.reply === null ? 'none' : 'history', reply: read.reply, messages, attribution: read.attribution };
+}
+
 /** Reads the reply from the transcript, falling back to the pane. */
 async function readAskReply(
   client: ApiClient,
@@ -492,18 +656,36 @@ function printAskReply(
   reply: string | null,
   options: AskOptions,
   overlapped: boolean,
+  attribution: AskAttribution | null = null,
 ): void {
+  if (attribution && reply === null) {
+    // Issue #4344: the one line that says why, in both modes (stdout stays empty).
+    console.error(formatNotCollected(attribution, agent, worktreeId, instanceId));
+  }
   if (options.json) {
     // `overlapped` only when it is true (Issue #3955): an ask that did not
     // overlap prints exactly the payload it always did.
+    // Issue #4344: `askId` / `attribution` only for an ask the ledger answered.
     console.log(JSON.stringify({
       worktreeId,
       instanceId: instanceId ?? null,
       cliToolId: agent ?? null,
       source,
       reply,
+      ...(attribution
+        ? {
+            askId: attribution.askId,
+            attribution: {
+              state: attribution.state,
+              ...(attribution.reason ? { reason: attribution.reason } : {}),
+              ...(attribution.notified ? { notified: true } : {}),
+            },
+          }
+        : {}),
       ...(overlapped ? { overlapped: true } : {}),
     }, null, 2));
+  } else if (attribution) {
+    if (reply !== null) console.log(reply);
   } else if (reply === null) {
     // Not an error exit: the turn DID end, and saying so on stderr keeps
     // stdout empty rather than filling it with an apology a caller would
@@ -571,6 +753,13 @@ with the reply but prints \`overlapped: ...\` on stderr and --json adds
 message went in, and note a proven overlap on the delivered reply's second line
 (\`[CommandMate relay] ... (overlap=later)\`); see \`relays --id <relay-id>\`.
 
+Where the server attributes asks for the tool (claude), the reply is the one
+the enveloped message's own completed turn wrote, read by the ask's id (Issue
+#4344). A turn shared with another input, one that did not end, or a /command
+body leaves stdout empty with a \`reply not collected: ...\` line on stderr;
+--json adds "askId" and "attribution": {"state", "reason"}; "notified": true when
+the turn also took a background-task notice. Exit codes are unchanged.
+
 There is deliberately no --auto-yes: turning another session's Auto-Yes on is
 a decision about that session's guard rails, not part of asking it a question.
 `)
@@ -608,6 +797,11 @@ a decision about that session's guard rails, not part of asking it a question.
         );
         const { agent, instanceId } = commandTarget;
 
+        // Issue #4344: before the send — whether this ask is read back by its own id.
+        // `--async` is the relay's path and is left as it is.
+        const attributed = !options.async && (await serverAttributesAsk(client.withDeadline(deadlineAt), agent));
+        const askId = attributed ? randomUUID() : null;
+
         // Taken BEFORE the send so a reply written by the previous turn cannot
         // be read as this one's. Milliseconds, compared against the row's own
         // timestamp rather than against a re-derived clock.
@@ -634,6 +828,7 @@ a decision about that session's guard rails, not part of asking it a question.
         const sendBody: Record<string, unknown> = { content: message };
         if (agent) sendBody.cliToolId = agent;
         if (instanceId) sendBody.instanceId = instanceId;
+        if (askId) sendBody.ask = { id: askId, protocol: ASK_PROTOCOL_VERSION };
 
         // The other session may be sitting on a dialog (Issue #1708): the
         // message would be typed into the dialog's input line instead of
@@ -646,6 +841,16 @@ a decision about that session's guard rails, not part of asking it a question.
           promptWaitingFallback: `${worktreeId} is waiting on a prompt; the message was not sent.`,
           target: commandTarget,
         });
+
+        // Issue #4344: what the server did with the ask — reserved (read by id),
+        // unavailable (a command body: sent as it is, the reply is not collected),
+        // or nothing said (the old path).
+        const readMode: AskReadMode = askId && sent?.ask?.state === 'pending' && sent.ask.id === askId
+          ? { kind: 'ledger', askId }
+          : { kind: 'legacy' };
+        const unavailable: AskAttribution | null = askId && sent?.ask?.state === 'unavailable'
+          ? { askId: null, state: 'unavailable', reason: sent.ask.reason ?? null }
+          : null;
 
         // Issue #2377: the whole point of `--async`. Nothing is waited on, so
         // the caller's own turn ends here and the answer arrives later, in their
@@ -708,7 +913,11 @@ a decision about that session's guard rails, not part of asking it a question.
         // Taken before the reply grace: a message sent after the turn ended
         // went to the next turn, and is not an overlap with this one.
         const turnEndedAt = Date.now();
-        const { source, reply, messages } = await readAskReply(client, worktreeId, instanceId, askedAt, agent);
+        const { source, reply, messages, attribution } = await readReplyFor(
+          readMode,
+          unavailable,
+          { client, worktreeId, instanceId, askedAt, agent },
+        );
 
         // Reported, not acted on (Issue #3955): the exit code and the reply
         // stay as they are; the line says the reply may not be this ask's.
@@ -731,7 +940,7 @@ a decision about that session's guard rails, not part of asking it a question.
           console.error(formatOverlapWarning(overlap, instanceId ?? ledger.instanceId ?? agent ?? worktreeId));
         }
 
-        printAskReply(worktreeId, instanceId, agent, source, reply, options, overlap !== null);
+        printAskReply(worktreeId, instanceId, agent, source, reply, options, overlap !== null, attribution);
         process.exit(ExitCode.SUCCESS);
       } catch (error) {
         handleCommandError(error);
