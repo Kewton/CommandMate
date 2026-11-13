@@ -40,6 +40,8 @@ import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { useInlinedHtmlImages } from '@/hooks/useInlinedHtmlImages';
 import { useFileContentSearch } from '@/hooks/useFileContentSearch';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.css';
 import {
@@ -373,6 +375,9 @@ export interface FileViewerProps {
  * ```
  */
 export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId, filePath, onFileSaved, onOpenFile }: FileViewerProps) {
+  // Issue #4345 1c: the worktree page's registration holder (the phone's file read, the pair of the
+  // PC's FilePanelContent; none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [content, setContent] = useState<FileContent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -545,7 +550,9 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
       setError(null);
 
       try {
-        const response = await fetch(
+        // Issue #4345 1c: the read's 401 reaches the gateway before its error body is read.
+        const response = await fetchForHandoffPage(
+          handoffOwner,
           `/api/worktrees/${worktreeId}/files/${encodePathForUrl(filePath)}`
         );
 
@@ -568,7 +575,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
 
     fetchFile();
   // eslint-disable-next-line react-hooks/exhaustive-deps -- closeSearch and resetContentCopied are stable (they only reset state)
-  }, [isOpen, worktreeId, filePath]);
+  }, [isOpen, worktreeId, filePath, handoffOwner]);
 
   // Fetch MARP slides when content is a MARP markdown file
   useEffect(() => {
@@ -580,7 +587,9 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
 
     const fetchMarpSlides = async () => {
       try {
-        const response = await fetch(
+        // Issue #4345 1c: the render's 401 reaches the gateway (the fallback to text stays).
+        const response = await fetchForHandoffPage(
+          handoffOwner,
           `/api/worktrees/${worktreeId}/marp-render`,
           {
             method: 'POST',
@@ -598,7 +607,7 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
     };
 
     fetchMarpSlides();
-  }, [content, worktreeId]);
+  }, [content, worktreeId, handoffOwner]);
 
   /** Whether the current file is a MARP presentation */
   const isMarp = Boolean(marpSlides && marpSlides.length > 0);

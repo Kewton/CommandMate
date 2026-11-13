@@ -26,6 +26,8 @@ import { ImageViewer } from './ImageViewer';
 import { VideoViewer } from './VideoViewer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import { fetchApiResponse } from '@/lib/api-client';
+import { beginHandoffPageResponseReport } from '@/lib/handoff/page-owner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import { encodePathForUrl } from '@/lib/url-path-encoder';
 import { isEditableExtension } from '@/config/editable-extensions';
 import { VIEWER_OVERSCAN_LINES, VIEWER_CHUNK_LINE_SIZE } from '@/config/file-viewer-config';
@@ -274,8 +276,10 @@ function FileToolbar({ filePath, isMaximized, onToggleMaximize, copyableContent,
  * The hook is a no-op whenever `worktreeId`, `filePath`, or
  * `onLineRangeFetched` is missing — that is, the consumer is showing a full
  * (non-paginated) file.
+ *
+ * Exported for its unit test only (Issue #4345 1c: the partial read's 401).
  */
-function useLazyChunkFetcher({
+export function useLazyChunkFetcher({
   virtualItems,
   worktreeId,
   filePath,
@@ -296,6 +300,8 @@ function useLazyChunkFetcher({
   loadedLineCount: number;
 }) {
   const inflightChunksRef = useRef<Set<number>>(new Set());
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   useEffect(() => {
     if (!worktreeId || !filePath || !onLineRangeFetched) return;
     if (virtualItems.length === 0) return;
@@ -323,8 +329,13 @@ function useLazyChunkFetcher({
     // a stuttering signal stays a blank stretch of file until the user happens
     // to scroll across it a second time. `fetchApiResponse` rather than
     // `fetchApi` to keep `res.ok ? … : null` instead of a throw.
+    // Issue #4345 1c: the partial read's 401 reaches the gateway before it is folded into `null`.
+    const reportAuth = beginHandoffPageResponseReport(handoffOwner);
     fetchApiResponse(url)
-      .then(async (res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        reportAuth?.(res);
+        return res.ok ? res.json() : null;
+      })
       .then((data) => {
         inflightChunksRef.current.delete(chunkKey);
         if (!data || data.success !== true) return;
@@ -338,7 +349,7 @@ function useLazyChunkFetcher({
       .catch(() => {
         inflightChunksRef.current.delete(chunkKey);
       });
-  }, [virtualItems, worktreeId, filePath, onLineRangeFetched, loadedStart, loadedLineCount]);
+  }, [virtualItems, worktreeId, filePath, onLineRangeFetched, loadedStart, loadedLineCount, handoffOwner]);
 }
 
 /**
@@ -877,6 +888,8 @@ export const FilePanelContent = memo(function FilePanelContent({
 
   // [Issue #469] File content polling for auto-update
   useFileContentPolling({ tab, worktreeId, onLoadContent });
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
 
   // Wrap onDirtyChange to bind tab.path (DRY: used by HtmlPreview, MarpEditor, MarkdownEditor)
   const handleDirtyChange = useMemo(
@@ -918,9 +931,12 @@ export const FilePanelContent = memo(function FilePanelContent({
         // weak link had no deadline at all, so a stalled request left
         // `tab.loading` true forever — and `fetchingRef` stayed latched, so
         // even closing and reopening the tab could not retry it.
+        // Issue #4345 1c: the read's 401 reaches the gateway before its error body is read.
+        const reportAuth = beginHandoffPageResponseReport(handoffOwner);
         const response = await fetchApiResponse(
           `/api/worktrees/${worktreeId}/files/${encodePathForUrl(tab.path)}`,
         );
+        reportAuth?.(response);
 
         // [Issue #469] Defensive 304 check for future-proofing
         if (response.status === 304) return;
@@ -947,7 +963,7 @@ export const FilePanelContent = memo(function FilePanelContent({
     };
 
     fetchContent();
-  }, [tab.content, tab.loading, tab.error, tab.path, worktreeId, onLoadContent, onLoadError, onSetLoading]);
+  }, [tab.content, tab.loading, tab.error, tab.path, worktreeId, onLoadContent, onLoadError, onSetLoading, handoffOwner]);
 
   // Fetch MARP slides when content is loaded and is a MARP file
   // Depend on content text (not object reference) to avoid re-fetching on polling updates
@@ -976,6 +992,8 @@ export const FilePanelContent = memo(function FilePanelContent({
         // rendering spawns a server-side pipeline, and a hung one used to hold
         // this promise — and the effect's `cancelled` closure — for the life of
         // the tab.
+        // Issue #4345 1c: the render's 401 reaches the gateway (the fallback to text stays).
+        const reportAuth = beginHandoffPageResponseReport(handoffOwner);
         const response = await fetchApiResponse(
           `/api/worktrees/${worktreeId}/marp-render`,
           {
@@ -984,6 +1002,7 @@ export const FilePanelContent = memo(function FilePanelContent({
             body: JSON.stringify({ markdownContent: contentText }),
           },
         );
+        reportAuth?.(response);
         if (response.ok) {
           const data = await response.json();
           if (!cancelled) {
@@ -999,7 +1018,7 @@ export const FilePanelContent = memo(function FilePanelContent({
     return () => {
       cancelled = true;
     };
-  }, [contentText, contentExtension, worktreeId]);
+  }, [contentText, contentExtension, worktreeId, handoffOwner]);
 
   // Loading state
   if (tab.loading) {
