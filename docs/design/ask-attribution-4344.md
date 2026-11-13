@@ -453,3 +453,16 @@ PM 経由で人が決めた。PR1 はこの決定と §3.6 の全セル・不変
 | 6 | C:161 | `currentSessionId` か `nativeSessionId` が null だと session の照合を丸ごと飛ばす（I6） | 8b | 状態遷移表の具体化で新しく見つけた |
 
 §7.1 は 2026-11-13 14:55 に決まった。PR1 を作り直すときに、全セルの試験と一緒に直す。
+
+### 10.2 PR2（codex）の実装で決めたこと（2026-11-14、事前レビュー prereview-4344-pr2 の F1〜F6 と人の決定 Q1・Q2、Q3 の実測）
+
+| 項目 | 決めたこと | 置き場所 |
+|---|---|---|
+| F1・I6 session | 入力の session は `UserMessage` の record 自身の `thread_id` だけ（turn・ファイル・ポインタで補わない）。null・別 session は記録しない | `codex/transcript.ts` の `CodexAskInput`、`codex/ask-attribution.ts` |
+| Q1 閉じ | `task_complete`（`thread_id` なし）は、窓の session を名乗る record がすべて今の session のときだけ閉じと認める。混在する窓では認めない | `codexAskTurnState` |
+| F2・Q2 入力集合 | session＋item id で重複を除いた `UserMessage` の数。2 つ以上で全員 `ambiguous/shared_turn`（id・本文の無い入力も 1 つと数える）。同じ id が別の入力を挟んで・別の turn に再登場したら確定しない。`markAskAbsorbed` は呼ばない。`turn_aborted` は閉じにしない（`pending`） | `distinctInputs`・`bindCodexAskTurns` |
+| F3 窓の全 turn | 帰属は History の未保存 turn の選択と独立に、早期 return を含む全経路で窓の全 turn を読む。同じ封筒の別入力が窓に 2 つあれば先の方は入力の記録だけ（完了より先に重複） | `codex/history.ts` |
+| F4 完全性 | `task_started` が窓にない（headless）・turn の範囲に壊れた行・session を名乗らない item がある turn は `open`。item の上限超え（overflow）と長さ上限は `body_truncated`。History の保存規則は変えない | `codexAskTurnState`、`parseCodexRollout.malformedAfter` |
+| F5 refresh | `GET /api/asks/:askId` の pending 時の読み取りを `refreshAskFromReader`（`lib/ask/ask-refresh.ts`）で tool ごとに振り分ける | route、`codex/ask-refresh.ts` |
+| F6・Q3 capability | Q3 の実記録（0.167.2、9,428 bytes の封筒つき貼り付け、本文が全文一致）を fixture にし、`ASK_ATTRIBUTION_TOOLS.codex=true`・最低版 `0.167.2`。ガードは codex の必須 record（版・封筒つき `UserMessage` の `thread_id`・同じ turn の `task_started`／`AgentMessage`／`task_complete`・user の `response_item` との全文一致と末尾の行）の欠落を検出する | `tests/fixtures/codex-ask-attribution-4344/`、`tests/unit/guards/ask-capability-controls-4344.test.ts` |
+| 再指示 1（整合性レビュー d19c5c8 の P2 ×3） | (1) 台帳へ書く直前（adapter の最後の await の後）に pointer を読み直し、読み始めの session と違えば入力の記録も確定もしない（Stop・polling・GET はどれも `captureCodexTranscriptTurn` を通る）。(2) 窓の session の集計は History の二重ストリームの除外より前に行い、session を名乗る `response_item` も混在の検査に入れる。(3) id の無い入力の仮の key に turn の id を含め、turn をまたいで同じ入力と見なさない | `bindCodexAskTurns`・`buildCodexTurns`・`distinctInputs` |
