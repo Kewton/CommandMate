@@ -3,6 +3,8 @@
  *
  * @vitest-environment node
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 
@@ -98,7 +100,8 @@ describe('[#4149 F2] start observability', () => {
     expect(logged.warn).toHaveLength(1);
     expect(logged.warn[0].event).toBe('start-capture-failed');
     expect(JSON.stringify(logged.warn)).not.toContain('secret detail');
-    expect(error.message).not.toContain('is a slow start');
+    expect(error.message).not.toContain('slow start');
+    expect(error.message).not.toContain('is stopped');
     expect(error.message).toContain('could not be read');
     expect(isSessionStartTimeoutError(error)).toBe(true);
   });
@@ -138,5 +141,24 @@ describe('[#4149 F2] start observability', () => {
     expect(budget?.data.lastScreenKind).toBe('trust-text-unread');
     expect(error.message).not.toContain('is a slow start');
     expect(sendKeys).not.toHaveBeenCalledWith(expect.anything(), '', true);
+  });
+
+  it('S2 does not take a trust text left in history above an input box: a nudge stays a nudge', async () => {
+    const nudge = readFileSync(join(__dirname, '../../fixtures/claude-auto-default-nudge-4134/cursor-yes.txt'), 'utf-8');
+    vi.mocked(capturePane).mockResolvedValue('Yes, I trust this folder\n' + '─'.repeat(20) + '\n' + nudge);
+
+    const error = await runOut();
+
+    expect(error.message).toContain('Make auto mode your default');
+    expect(error.message).not.toContain('folder-trust text');
+  });
+
+  it('S2 does not take a start that answered the dialog and then only drew an input box', async () => {
+    let n = 0;
+    vi.mocked(capturePane).mockImplementation(async () => (++n <= 2 ? OPEN : 'Yes, I trust this folder\n' + '─'.repeat(20) + '\nloading\n'));
+
+    const error = await runOut();
+
+    expect(error.message).not.toContain('folder-trust text');
   });
 });

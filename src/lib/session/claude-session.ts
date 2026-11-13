@@ -236,6 +236,18 @@ class ClaudeStartupDialogStalledError extends SessionStartTimeoutError {
   }
 }
 
+/** The start budget ran out and not one screen could be read (Issue #4149 F2, S1). */
+class ClaudeStartScreenUnreadError extends SessionStartTimeoutError {
+  constructor(sessionName: string, timeoutMs: number, failures: number, polls: number) {
+    super('Claude Code', sessionName, timeoutMs);
+    this.message =
+      `Claude Code did not reach its input prompt within ${Math.round(timeoutMs / 1000)}s (initialization timeout): ` +
+      `the screen of the tmux session '${sessionName}' could not be read (${failures} of ${polls} captures failed). ` +
+      'The message was not delivered. Run `commandmate capture <worktree-id>` to see it, then send the message again.';
+    this.name = 'ClaudeStartScreenUnreadError';
+  }
+}
+
 /**
  * The error for a start whose budget ran out, by what its last screen shows.
  *
@@ -248,22 +260,9 @@ function startTimeoutError(
   watch: StartWatch
 ): SessionStartTimeoutError {
   if (lastScreen === null && watch.captureFailures > 0) {
-    // Issue #4149 F2 (S1): every read failed, so nothing is known about the screen.
-    return new ClaudeStartupDialogStalledError(
-      sessionName,
-      CLAUDE_INIT_TIMEOUT,
-      `a screen that could not be read (${watch.captureFailures} of ${watch.polls} captures failed).`,
-      'Run `commandmate capture <worktree-id>` to see it, then send the message again.'
-    );
-  }
-  if (lastScreen !== null && !isClaudeTrustDialogOpen(lastScreen) && watch.trustTextPolls > 0 && CLAUDE_TRUST_DIALOG_PATTERN.test(lastScreen)) {
-    // Issue #4149 F2 (S2): the trust text is there but was not read as an open dialog.
-    return new ClaudeStartupDialogStalledError(
-      sessionName,
-      CLAUDE_INIT_TIMEOUT,
-      `a screen that shows the folder-trust text but was not read as an open dialog (read as one in ${watch.trustOpenPolls} of ${watch.polls} polls; ${trust.answers + trust.moves} keys sent).`,
-      'Run `commandmate capture <worktree-id>` to see it, clear it with `commandmate attach <worktree-id>`, then send the message again.'
-    );
+    // Issue #4149 F2 (S1): every read failed. Nothing is known about the screen, so it is
+    // neither called stopped nor slow; the sentence says only what is known.
+    return new ClaudeStartScreenUnreadError(sessionName, CLAUDE_INIT_TIMEOUT, watch.captureFailures, watch.polls);
   }
   if (lastScreen !== null && isClaudeTrustDialogOpen(lastScreen)) {
     const keys = trust.answers + trust.moves;
@@ -288,6 +287,15 @@ function startTimeoutError(
       '"Make auto mode your default permission mode?", which did not take its keys. No keeps the current mode.',
       // A send answers this one first (answerClaudeAutoDefaultNudgeBeforeSend).
       'Send it again, or run `commandmate capture <worktree-id>` to see the dialog.'
+    );
+  }
+  if (lastScreen !== null && trust.answers + trust.moves === 0 && watch.trustOpenPolls === 0 && watch.trustTextPolls > 0 && CLAUDE_TRUST_DIALOG_PATTERN.test(lastScreen)) {
+    // Issue #4149 F2 (S2): the trust text is there but was not read as an open dialog.
+    return new ClaudeStartupDialogStalledError(
+      sessionName,
+      CLAUDE_INIT_TIMEOUT,
+      `a screen that shows the folder-trust text but was not read as an open dialog (read as one in ${watch.trustOpenPolls} of ${watch.polls} polls; ${trust.answers + trust.moves} keys sent).`,
+      'Run `commandmate capture <worktree-id>` to see it, clear it with `commandmate attach <worktree-id>`, then send the message again.'
     );
   }
   return new SessionStartTimeoutError('Claude Code', sessionName, CLAUDE_INIT_TIMEOUT);
