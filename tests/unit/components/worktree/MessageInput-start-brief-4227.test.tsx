@@ -139,6 +139,60 @@ function submit() {
   fireEvent.submit(getTextarea().closest('form')!);
 }
 
+/**
+ * Issue #4335: a send whose preview read is already answered (a resolved mock), taken through
+ * to its dialog inside one async act — the submit, the read's microtasks (a 0 ms macrotask drains
+ * them), the commit AND its passive effects. The Modal registers its Escape listener on
+ * `document` in a passive effect (src/components/ui/Modal.tsx), separate from the commit that
+ * puts the dialog in the DOM; `findByTestId` resolves on the DOM alone, so an Escape sent right
+ * after it can land before the listener exists and is lost (CI 43269058375 / 43304060448, line
+ * "Escape 後もダイアログが残る"). After this, the dialog is in the DOM with its effects run.
+ */
+async function submitAndSettle() {
+  await act(async () => {
+    submit();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+/**
+ * Issue #4335: records, in order, every `keydown` listener added to / removed from `document`
+ * and every Escape a test sends, so a test can say whether the dialog's listener was there when
+ * its one Escape went out (a listener added AFTER the Escape is the CI failure's condition).
+ */
+type KeydownEvent = { kind: 'add' | 'remove' | 'escape'; seq: number };
+function recordDocumentKeydown() {
+  const log: KeydownEvent[] = [];
+  let seq = 0;
+  const add = document.addEventListener.bind(document);
+  const remove = document.removeEventListener.bind(document);
+  const addSpy = vi.spyOn(document, 'addEventListener').mockImplementation(((type: string, ...rest: unknown[]) => {
+    if (type === 'keydown') log.push({ kind: 'add', seq: ++seq });
+    return (add as (...a: unknown[]) => void)(type, ...rest);
+  }) as typeof document.addEventListener);
+  const removeSpy = vi.spyOn(document, 'removeEventListener').mockImplementation(((type: string, ...rest: unknown[]) => {
+    if (type === 'keydown') log.push({ kind: 'remove', seq: ++seq });
+    return (remove as (...a: unknown[]) => void)(type, ...rest);
+  }) as typeof document.removeEventListener);
+  return {
+    log,
+    /** Send ONE Escape to document, marked in the log. */
+    escape() {
+      log.push({ kind: 'escape', seq: ++seq });
+      fireEvent.keyDown(document, { key: 'Escape' });
+    },
+    /** keydown listeners added after the first Escape was sent. */
+    addedAfterEscape() {
+      const at = log.find((e) => e.kind === 'escape');
+      return at ? log.filter((e) => e.kind === 'add' && e.seq > at.seq) : [];
+    },
+    restore() {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    },
+  };
+}
+
 const marks = globalThis as { __cmDefaultStartPreviewCalls?: number };
 
 beforeEach(() => {
@@ -162,18 +216,64 @@ describe.each(PATHS)('H19 %s', (_name, path, mobile) => {
     const { onOptimisticSend } = renderComposer(path);
     await focusAndRead();
     typeMessage('hello agent');
-    submit();
-    expect(await screen.findByTestId('session-start-brief-dialog')).toBeInTheDocument();
-    expect(screen.getByTestId('session-start-brief-open').textContent).toContain('3');
-    expect(screen.getByTestId('session-start-brief-questions').textContent).toMatch(/unknown/);
-    expect(getTextarea().value).toBe('hello agent');
-    expect(onOptimisticSend).not.toHaveBeenCalled();
-    expect(sendMessageMock).not.toHaveBeenCalled();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull());
+    // Issue #4335: recorded from before the dialog exists, so its listener's add is in the log.
+    const keys = recordDocumentKeydown();
+    try {
+      // Issue #4335: the dialog and its effects (the Escape listener) settle before the Escape.
+      await submitAndSettle();
+      expect(screen.getByTestId('session-start-brief-dialog')).toBeInTheDocument();
+      expect(screen.getByTestId('session-start-brief-open').textContent).toContain('3');
+      expect(screen.getByTestId('session-start-brief-questions').textContent).toMatch(/unknown/);
+      expect(getTextarea().value).toBe('hello agent');
+      expect(onOptimisticSend).not.toHaveBeenCalled();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(keys.log.some((e) => e.kind === 'add')).toBe(true);
+      keys.escape();
+      await waitFor(() => expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull());
+      // The one Escape closed it, with the listener already there (none came after it).
+      expect(keys.addedAfterEscape()).toEqual([]);
+    } finally {
+      keys.restore();
+    }
     expect(getTextarea().value).toBe('hello agent');
     expect(resetAfterSendMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('(a) control (#4335): an Escape sent when the dialog is in the DOM but before its effects ran is lost — the CI failure', async () => {
+    // The old (a) sent its Escape right after findByTestId saw the DOM; nothing ordered that after
+    // the Modal's passive effect. This control sends it at the earliest such point (the mutation
+    // that inserts the dialog, before React runs the commit's passive effects) and records the
+    // order: the listener is added after the Escape, and the dialog stays — line 173's failure.
+    fetchStartPreviewMock.mockResolvedValue(SHOWN());
+    renderComposer(path);
+    await focusAndRead();
+    typeMessage('hello agent');
+    const keys = recordDocumentKeydown();
+    let observer: MutationObserver | null = null;
+    try {
+      const sent = new Promise<void>((resolve) => {
+        observer = new MutationObserver(() => {
+          if (!document.querySelector('[data-testid="session-start-brief-dialog"]')) return;
+          observer?.disconnect();
+          keys.escape();
+          resolve();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+      submit();
+      await sent;
+      // Let everything settle (the effects run now, after the Escape).
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(keys.addedAfterEscape().length).toBeGreaterThan(0);
+      expect(screen.getByTestId('session-start-brief-dialog')).toBeInTheDocument();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+    } finally {
+      (observer as MutationObserver | null)?.disconnect();
+      keys.restore();
+    }
   });
 
   it.each([
@@ -360,13 +460,27 @@ describe.each(G6_CASES)('G-PR6 %s (%s, phone %s), mode %s', (_name, path, mobile
     fireEvent.focus(getTextarea());
     typeMessage('hello agent');
     submit();
-    fireEvent.click(await screen.findByTestId('session-start-brief-full'));
-    expect(await screen.findByTestId('session-start-brief-notice')).toBeInTheDocument();
-    // The older background read lands last.
-    await act(async () => background.resolve(SHOWN('b-A', mode)));
-    // Closed and sent again: asked for B.
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull());
+    const full = await screen.findByTestId('session-start-brief-full');
+    // Issue #4335 (the same boundary as H19 (a)): the 409's re-read, the notice's commit and its
+    // passive effects run inside one act. The Modal re-registers its Escape listener when
+    // `onClose` changes (briefSending true → false); until that effect runs, the listener on
+    // `document` is the old one, whose closure still sees a send in flight and ignores Escape.
+    const keys = recordDocumentKeydown();
+    try {
+      await act(async () => {
+        fireEvent.click(full);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(screen.getByTestId('session-start-brief-notice')).toBeInTheDocument();
+      // The older background read lands last.
+      await act(async () => background.resolve(SHOWN('b-A', mode)));
+      // Closed and sent again: asked for B.
+      keys.escape();
+      await waitFor(() => expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull());
+      expect(keys.addedAfterEscape()).toEqual([]);
+    } finally {
+      keys.restore();
+    }
     submit();
     fireEvent.click(await screen.findByTestId('session-start-brief-decline'));
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));

@@ -7,107 +7,39 @@
  * この E2E テストはその再発を実寸で防ぐ。
  *
  * `loading.tsx` のフォールバックはクライアント遷移のときだけ描画される。
- * 通常の遷移では Next.js の高速な処理や先読みによって表示窓が非常に短いため、
- * `page.route` で RSC 取得（`_rsc`）を遅延させて窓を作り、その間に実寸を測定する。
+ *
+ * [Issue #4335] 窓の作り方を変えた。以前は RSC 取得（`_rsc`）を固定 3 秒遅らせ、クリック後に
+ * Node から 50ms ごとに採取していたが、実測（helpers/route-loading-observer.ts の冒頭）では
+ * RSC を止めている間フォールバックは一度も挿入されない（先読みが無いと、router は応答が来るまで
+ * その segment に loading.tsx があることを知らない）。フォールバックは RSC の応答の後、遷移先の
+ * page の client chunk を読む間だけ出る。そこで遷移先の chunk を止めて窓を作り、ブラウザ内の
+ * 観測で挿入を捉えて実寸を測ってから chunk を解放する。固定の待ち時間は使わない。
+ * 最後の control は、以前の固定 RSC 遅延ではフォールバックが止めている間に出ないことを記録する。
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import {
+  armFixedRscDelay,
+  observeHeldRouteLoading,
+  type LoadingObservation,
+} from './helpers/route-loading-observer';
 
-interface LoadingObservation {
-  loadingRect: {
-    top: number;
-    bottom: number;
-    height: number;
-  };
-  mainRect: {
-    top: number;
-    bottom: number;
-    height: number;
-  };
-  navRect: {
-    top: number;
-    bottom: number;
-    height: number;
-  } | null;
-  paddingTop: number;
-  paddingBottom: number;
-  className: string;
-  minHeight: string;
-}
+/** The client chunk of the destination page (/sessions); holding it keeps the fallback up. */
+const SESSIONS_PAGE_CHUNK = (url: URL) => url.pathname.includes('/_next/static/chunks/app/sessions/');
 
 /**
- * ページを開き終えてから武装する（初回ロードの RSC まで遅らせない）。
- * 先読みは abort して、クリック時にネットワーク取得（RSC）を起こして窓を作る。
+ * Click the sidebar's Sessions link with the fallback held, and return its measurement. A null
+ * shot fails with the recorded facts (which request was caught, insertion / removal, document).
  */
-async function armRouteDelay(page: Page, delayMs = 3000): Promise<void> {
-  await page.route(
-    (url) => url.searchParams.has('_rsc'),
-    async (route) => {
-      if (route.request().headers()['next-router-prefetch'] === '1') {
-        return route.abort();
-      }
-      await new Promise((r) => setTimeout(r, delayMs));
-      return route.continue();
-    },
+async function captureRouteLoading(page: Page): Promise<LoadingObservation> {
+  const { shot, diagnostics } = await observeHeldRouteLoading(page, SESSIONS_PAGE_CHUNK, () =>
+    page.getByTestId('sidebar-nav-sessions').click(),
   );
-}
-
-/**
- * 窓の中で、フォールバックが現れるまで短い間隔（50〜60ms）でポーリングする。
- * waitForSelector は現れた瞬間の寸法を取り逃しうるので、page.evaluate で矩形ごと取る。
- */
-async function captureRouteLoading(page: Page, timeoutMs = 6000): Promise<LoadingObservation | null> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const observation = await page.evaluate(() => {
-        const loading = document.querySelector('[data-testid="route-loading"]');
-        const main = document.querySelector('main[data-view-transition="content"]');
-        if (!loading || !main) return null;
-
-        const loadingRect = loading.getBoundingClientRect();
-        if (loadingRect.height === 0) return null;
-
-        const mainRect = main.getBoundingClientRect();
-        const nav = document.querySelector('[data-testid="global-mobile-nav"]');
-        const navRect = nav ? nav.getBoundingClientRect() : null;
-        const cs = window.getComputedStyle(main);
-        const loadingCs = window.getComputedStyle(loading);
-
-        return {
-          loadingRect: {
-            top: loadingRect.top,
-            bottom: loadingRect.bottom,
-            height: loadingRect.height,
-          },
-          mainRect: {
-            top: mainRect.top,
-            bottom: mainRect.bottom,
-            height: mainRect.height,
-          },
-          navRect: navRect
-            ? {
-                top: navRect.top,
-                bottom: navRect.bottom,
-                height: navRect.height,
-              }
-            : null,
-          paddingTop: parseFloat(cs.paddingTop) || 0,
-          paddingBottom: parseFloat(cs.paddingBottom) || 0,
-          className: loading.className,
-          minHeight: loadingCs.minHeight,
-        };
-      });
-
-      if (observation) {
-        return observation;
-      }
-    } catch {
-      // ナビゲーション中の一時的なコンテキスト破棄を無視して再試行
-    }
-    await page.waitForTimeout(50);
-  }
-  return null;
+  // eslint-disable-next-line no-console -- the recorded facts of this transition
+  console.log('ROUTE-LOADING-4335', JSON.stringify(diagnostics));
+  expect(diagnostics.held, `the destination page chunk was not requested: ${JSON.stringify(diagnostics)}`).toBeGreaterThan(0);
+  expect(shot, `route-loading was not observed during the held transition: ${JSON.stringify(diagnostics)}`).not.toBeNull();
+  return shot!;
 }
 
 test.describe.serial('[#2693] route-loading fallback height and centering', () => {
@@ -118,12 +50,7 @@ test.describe.serial('[#2693] route-loading fallback height and centering', () =
     await page.goto('/repositories');
     await expect(page.getByTestId('app-shell')).toBeVisible();
 
-    await armRouteDelay(page, 3000);
-    await page.getByTestId('sidebar-nav-sessions').click();
-
     const shot = await captureRouteLoading(page);
-    expect(shot, 'route-loading was not observed during the delayed transition').not.toBeNull();
-    if (!shot) return;
 
     const { loadingRect, mainRect } = shot;
 
@@ -160,12 +87,7 @@ test.describe.serial('[#2693] route-loading fallback height and centering', () =
     await openSidebarBtn.click();
     await expect(page.getByTestId('sidebar-container')).toBeVisible();
 
-    await armRouteDelay(page, 3000);
-    await page.getByTestId('sidebar-nav-sessions').click();
-
     const shot = await captureRouteLoading(page);
-    expect(shot, 'route-loading was not observed during the delayed transition').not.toBeNull();
-    if (!shot) return;
 
     const { loadingRect, mainRect, navRect, paddingTop, paddingBottom } = shot;
 
@@ -198,12 +120,7 @@ test.describe.serial('[#2693] route-loading fallback height and centering', () =
     await page.goto('/repositories');
     await expect(page.getByTestId('app-shell')).toBeVisible();
 
-    await armRouteDelay(page, 3000);
-    await page.getByTestId('sidebar-nav-sessions').click();
-
     const shot = await captureRouteLoading(page);
-    expect(shot, 'route-loading was not observed during the delayed transition').not.toBeNull();
-    if (!shot) return;
 
     // 窓の中で、フォールバックの className をそのまま読み取ってから
     const height = await page.evaluate((cls) => {
@@ -224,5 +141,30 @@ test.describe.serial('[#2693] route-loading fallback height and centering', () =
 
     // あわせて、描かれたフォールバックの getComputedStyle(el).minHeight が '192px' であることも確かめる
     expect(shot.minHeight).toBe('192px');
+  });
+
+  test('control (#4335): a fixed RSC delay never shows the fallback while it holds', async ({ page }) => {
+    // The old arming, recorded: the fallback's insertions are all after the RSC was released, so
+    // a window made by holding the RSC has no fallback in it (the old spec's null at line 125).
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/repositories');
+    await expect(page.getByTestId('app-shell')).toBeVisible();
+
+    const old = await armFixedRscDelay(page, 3000);
+    await page.getByTestId('sidebar-nav-sessions').click();
+    await expect.poll(() => old.releasedAt().length, { timeout: 45_000 }).toBeGreaterThan(0);
+    await expect(page).toHaveURL(/\/sessions/, { timeout: 45_000 });
+    await expect(page.getByTestId('route-loading')).toHaveCount(0, { timeout: 15_000 });
+
+    const record = await old.read();
+    // eslint-disable-next-line no-console -- the recorded facts of the old arming
+    console.log('ROUTE-LOADING-4335 control', JSON.stringify({ releasedAt: old.releasedAt(), record }));
+    const facts = JSON.stringify({ released: old.releasedAt().length, releasedAt: old.releasedAt(), record });
+    expect(record?.sameDocument, `not the clicked document: ${facts}`).toBe(true);
+    // The comparison below says something only if the fallback was seen at all: an empty record
+    // would pass it vacuously (no insertion is "after the release" by default).
+    expect(record!.inserted.length, `route-loading was never inserted, so nothing to compare: ${facts}`).toBeGreaterThan(0);
+    const [releasedAt] = old.releasedAt();
+    for (const insertedAt of record!.inserted) expect(insertedAt, facts).toBeGreaterThan(releasedAt);
   });
 });
