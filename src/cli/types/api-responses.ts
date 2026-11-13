@@ -1724,47 +1724,6 @@ export interface ChatMessage {
     reason?: string;
     boundaryId?: string;
   };
-  /**
-   * Issue #4344: present when the send named `ask` (a synchronous `commandmate ask`
-   * on a server that attributes asks). `pending` — reserved, the typed text carries
-   * the envelope; `unavailable` — sent as without it (`tool_unsupported`,
-   * `slash_command`). Mirrors: src/types/ask-correlation.ts AskSendAnswer.
-   */
-  ask?: AskSendAnswerResponse;
-}
-
-// =============================================================================
-// Ask attribution [Issue #4344]
-// Mirrors: src/types/ask-correlation.ts
-// =============================================================================
-
-/** `attribution.state` of an ask. `pending` is the API's in-between state only. */
-export type AskAttributionStateResponse = 'pending' | 'matched' | 'ambiguous' | 'unmatched' | 'unavailable';
-
-/** The `ask` field of a send's answer. */
-export interface AskSendAnswerResponse {
-  id: string | null;
-  state: AskAttributionStateResponse;
-  reason: string | null;
-  sendState?: 'reserved' | 'sent' | 'not_sent' | 'send_unknown';
-}
-
-/** `GET /api/asks/capabilities`. */
-export interface AskCapabilitiesApiResponse {
-  protocol: number;
-  tools: Record<string, boolean>;
-}
-
-/** `GET /api/asks/:askId`. */
-export interface AskAttributionApiResponse {
-  askId: string;
-  state: AskAttributionStateResponse;
-  reason: string | null;
-  reply: string | null;
-  sendState: 'reserved' | 'sent' | 'not_sent' | 'send_unknown';
-  nativeInputSeen: boolean;
-  /** The answering turn also absorbed a background-task notice. Absent on a server before it. */
-  notified?: boolean;
 }
 
 // =============================================================================

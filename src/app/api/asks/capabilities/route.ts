@@ -4,8 +4,8 @@
  *
  * The protocol version of the ask envelope and, per tool, whether this server
  * attributes an ask's reply by the correlation ledger. The one source of that
- * table (`ASK_ATTRIBUTION_TOOLS`): the CLI asks here instead of keeping a copy,
- * and an older server answers 404, which the CLI reads as "not attributed".
+ * table (`ASK_ATTRIBUTION_TOOLS`): the CLI is to ask here (design §6 PR3) instead of keeping a copy,
+ * and an older server answers 404, which it reads as "not attributed".
  *
  * Inert like `/api/capabilities`: a fixed table compiled into the build, no
  * database, under the same middleware auth as every other API route.

@@ -9,7 +9,7 @@
  * what the transcript reader saw.
  *
  * The capability table is here and only here (§3.2): `GET /api/asks/capabilities`
- * publishes it, the send route consults it, and the CLI asks the server rather
+ * publishes it, the send route consults it, and the CLI (from PR3) asks the server rather
  * than keeping a copy.
  */
 

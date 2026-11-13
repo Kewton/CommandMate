@@ -246,6 +246,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 - **PR3 のマージは PR2 のマージ後（codex の capability が true になった後）**。`consistency-review.mjs` は変えない（§0.5、M7）。
 - 既存の pane を前提にした ask の試験（`tests/unit/cli/commands/ask-*.test.ts` の pane 採用）は消さず、期待値の変更理由（人の決定による挙動の変更）を各試験に書く。PR1 では claude に関わる分、PR3 では残り。
 - `readSqueezedPaneTail`（`capture.ts:384`）は PR3 で ask から呼ばれなくなるが、`capture.ts` は変えない（不変条件 7）。
+- **PM の処分（2026-11-13、再指示 1）: PR1 はサーバー側だけ**（台帳・send の予約と封筒・claude の reader・History の採用・`/api/asks/*`）。`ask` の CLI が `ask` を指定して台帳で読む切り替えは、利用者に見える変化なので §7 (c) のとおり公開版 skill の後の PR3 に回す。PR1 の時点では誰も `ask` を指定しない（未使用の API を先に足す形を受け入れる）。
 - PR1 は大きい（DB・send・reader・CLI を含む）。レビューの往復が増えるなら、PR1 の中のコミットを「台帳と send」「reader と採用」「CLI」に分けて読む順を示す（PR は分けない）。
 - capability の機械判定（§0.1）のガードの試験は PR1 で置き、PR2 で codex の行を足す。
 

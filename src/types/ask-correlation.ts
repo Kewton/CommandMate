@@ -9,7 +9,8 @@
  * `askId`, never by "the newest row".
  *
  * Shared by the server (`lib/ask`, `lib/db/ask-correlation-db`, `/api/asks/*`)
- * and mirrored for the CLI in `src/cli/types/api-responses.ts`.
+ * and mirrored for the CLI in `src/cli/types/api-responses.ts` when `ask` starts
+ * using it (design §6 PR3).
  */
 
 /** The envelope protocol version both sides speak. */
