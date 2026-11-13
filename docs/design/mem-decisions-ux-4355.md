@@ -1,7 +1,7 @@
 # 決定の画面を「リポジトリ → ブランチ」で選べるようにし、スマホ・PC の操作を直し、決定を読む CLI を足す（Issue #4355）設計
 
 - 段: 設計（この文書だけ）。コードは書かない。実装は PM の確認の後、§6 の PR ごとに別の契約で行う
-- 版: 第 4 版（2026-11-13）。第 4 版は作業木の Tools の mem（§11）を追加。第 2 版は事前レビュー（2-4-4、codex、設計 HEAD `e5e7739`）の反映（処置は §9）。第 3 版は CLI の承認を案 B に決定（人、2026-11-13）。履歴は §10
+- 版: 第 5 版（2026-11-13）。第 5 版は Tools の mem の 2-4-4 と PM の処分の反映、第 4 版は作業木の Tools の mem（§11）を追加。第 2 版は事前レビュー（2-4-4、codex、設計 HEAD `e5e7739`）の反映（処置は §9）。第 3 版は CLI の承認を案 B に決定（人、2026-11-13）。履歴は §10
 - 基準: develop `10232442d`（2026-11-13）。行番号はこの時点のもの。「事実」は file:line、「見立て」「未確認」は明記する
 - 正: Issue #4355 の本文（直すこと 1〜5・受入条件）。上流の 4 つ（`docs/orchestrate/team.md` §6 の 1〜4）は §2・§4・§5・§6
 - 関連: #4354（承認の導線: 承認待ちの件数・行き先の必須化・二重の検知）、#4225（決定の画面。設計 `docs/design/mem-promote-4225.md`）、#4353、#4220
@@ -15,7 +15,7 @@
 | 書くもの | この設計書だけ。コードは書かない |
 | CLI の読み | `commandmate mem decisions`（一覧・状態・行き先・引用・作成者・承認の有無）と 1 件の差分を読む口は、**先に入れてよい**（PR1） |
 | CLI の承認 | 今の安全の前提「エージェントは人の決定を作れない（画面だけ・`screen_only`）」を崩す。入れるなら **TTY での対話の確認を必須**にする案（非対話＝パイプ・エージェントの実行では断る、引用を打ち返す等）を §3.5 に書き、**事前レビュー（2-4-4）で安全を見てから入れるかを決める**とした。この設計では入れると決めない。2-4-4 の答え（§9）: 案 A は人の操作と区別できないので入れず、案 B（画面への案内だけ）を推奨。**案 B に決定（人、2026-11-13）**: CLI は読むだけ、承認は画面。案 A の実装はこの設計から外す。案 B の URL の出力は PR2 のマージの後に足す（§3.1.4） |
-| PR の分け方 | PR1 読みの CLI ／ PR2 画面のリポジトリ → ブランチの選択と PC の件数・畳み ／ PR3 スマホのカード・シート・4 手の流れ（e2e 390・1280）／ PR4 作業木の Tools の mem（PC・スマホ、e2e 1280・390、§11。人の追加の要望 2026-11-13 16:2x）／ 承認の CLI は入れない（案 B、§3.5）（§6） |
+| PR の分け方 | PR1 読みの CLI ／ PR2 画面のリポジトリ → ブランチの選択と PC の件数・畳み ／ PR3 スマホのカード・シート・4 手の流れ（e2e 390・1280）／ PR4 作業木の Tools の mem（PC・スマホ、e2e 1280・1440・390、§11。人の追加の要望 2026-11-13 16:2x）／ 承認の CLI は入れない（案 B、§3.5）。順は PR1 → (PR2 → PR3) と PR4 を並列（§6、確定版） |
 | 試験 | 各 PR は直す前に赤の試験を置く。UI の PR（PR2・PR3）は e2e を契約に入れ、`--last` でマージする |
 
 ### 0.2 止める点
@@ -307,12 +307,15 @@ mode・項目の状態・行き先・引用の組み合わせで、カード（�
 | PR1 読みの CLI | `mem decisions`（一覧・`--json` の `schema: 1`）、`<itemId>` の参考の差分、diff の route、件数の共有関数（所有者のとき、§3.1.3）。読みのモジュールは `mem.ts` から分ける | 新しいコマンドが**実際の応答**から一覧・差分・安定した JSON を返す（今はコマンドも route も無いので赤）。operation が `failed`・`unknown`・`succeeded`・`succeeded`＋`transitionPending` の表で文字と JSON を固定（I8）。`--pending` の有無で `counts` が同じ（I7）。diff が作業木なし・別ブランチで `resolved: false`。件数の関数の mode の表（I6） | 差し止め: 本文は無害で引用だけ／evidence だけ／行き先だけが今の規則に当たる 3 つで、本文・引用・行き先が返らない（I5）。無書き込み: 成功・失敗の両方で行の内容・version が同じで、書き込みの関数と `gh` の呼び出しが 0 回（I2）。別のリポジトリの項目の id で 404。既存ガード `mem-promote-screen-only-4225` が緑（I1） | I1・I2・I5・I6・I7・I8 | lint・tsc・unit（`tests/unit/guards` を含む） |
 | PR2 画面の選択と PC | リポジトリ → ブランチの select、branches の route、件数（所有者の関数を使う）、`recorded`・`promoted` の畳み、「承認待ちだけ」、`?item=`（§3.1.4）。案 B の URL を CLI に足すのは PR2 のマージの後 | select と件数（不明の表示を含む）、既存の URL で選ばれた状態で開く（I4）、**応答の逆転**（同名のブランチを持つ 2 リポジトリで、切り替えの前の一覧が後から返っても今の選択だけを出す）、照合待ちが絞り込み・畳みで隠れない（I9）、`?item=` の表（§3.1.4）、e2e 1280: **この PR の時点の操作の手順**で承認まで通り件数が減る | 既存の repository＋branch の key で状態を捨てる（`page.tsx:47`）。P2・P3-1 の既存試験 | I3・I4・I6・I9 | 上に加え **e2e を契約に入れる**。マージは `--last` |
 | PR3 スマホ | カード・全画面のシート・4 手・押し場所・文言の分離 | e2e 390: カード → 引用の確認 → 効果 → 差分 → 承認、押し場所 44px、横のはみ出しが無い（`scrollWidth <= clientWidth`）、シートの中だけがスクロールし閉じられる。preview の待ちの間に選択を変える・シートを閉じると古い応答を採らない | 既存 `DecisionPromotePanel-4225.test.tsx` の P2・P3-1（選択が変われば preview を捨てる・引用の確認を別の項目へ持ち越さない）。承認の要求の最中に閉じても再送しない | I3・I9 | 上に加え **e2e を契約に入れる**。マージは `--last` |
-| PR4 作業木の Tools の mem（§11） | Tools（PC のヘッダーの道具・スマホの「ツール」のサブタブ）の**末尾**に `mem` を 1 つ。その作業木のブランチの項目を `MemItemsPanel` の再利用で出し、承認待ちの件数（PR1 の `counts`）と決定の画面へのリンク。mode が `on` でなければ「mem は off」と設定への案内だけ | 今の Tools に `mem` が無いので赤: PC 1280・スマホ 390 の e2e で、作業木の Tools から mem を開き、そのブランチの項目と承認待ちの件数が見え、決定の画面（`?branch=` つき）へ 1 回の押下で行ける。mode `off`・`derived`・`ambiguous`・detached の表（§11.5） | 既存の道具の並びと ←/→（PC）の順・スマホのサブタブの並びが末尾の追加の前と同じ（`mem` を除いた列が今の列と一致）。`MemItemsPanel` の既存試験（`MemItemsPanel-4227`・`MemItemsPanel-write-lock-4227`）が緑。決定の承認の route を Tools の側から呼ばない（I1・T1） | I1・I6・TM1〜TM5（§11.2） | lint・tsc・unit（guards を含む）に加え **e2e 1280・390 を契約に入れる**。マージは `--last` |
+| PR4 作業木の Tools の mem（§11） | Tools（PC のヘッダーの道具・スマホの「ツール」のサブタブ）の**末尾**に `mem` を 1 つ。その作業木のブランチだけを、作業木を固定した `MemItemsPanel`（props で絞る、§11.3）で出す。mode は変えさせず設定への案内だけ。承認待ちの件数（PR1 の `counts`）と決定の画面へのリンク。`derived` は読むだけ（凍結の印）、`off` は案内だけ（open の決定があれば件数とリンクを添える） | 今の Tools に `mem` が無いので赤: e2e 1280・390 で作業木の Tools から mem を開き、そのブランチの項目と承認待ちの件数が見え、決定の画面（`?branch=` つき）へ行ける（1280 は `mem` が見えていれば 1 回、畳まれていれば「…」から 2 回、390 はサブタブの列の中でスクロールしてから 1 回）。既存の `tests/e2e/header-tools-3591.spec.ts` の `TOOL_IDS` に `mem` を足し、1440 のサイドバーの開閉どちらでも 10 個すべてが見え「…」が 0 個（#3591、TM1）。mode `off`・`derived`・`ambiguous`・detached・読みの間の mode の変化の表（§11.5） | 既存の道具の並びと ←/→（PC）の順・スマホのサブタブの並びが末尾の追加の前と同じ（`mem` を除いた列が今の列と一致）。`MemItemsPanel` の既存試験（`MemItemsPanel-4227`・`MemItemsPanel-write-lock-4227`）が props を渡さない今の使い方で緑。Tools から別の作業木への書き込み・リポジトリの mem の設定の書き込み・決定の承認に届かない（TM2） | I1・I6・TM1〜TM5（§11.2） | lint・tsc・unit（guards を含む）に加え **e2e 1280・1440・390 を契約に入れる**。マージは `--last`。PR4 の前に幅の余りを測る（§11.7） |
 
 - PR2 の受入に、PR3 で作るカード・シートを求めない
 - 依存と並列: 件数の共有関数の所有者（PR1、または先行する #4354）のマージの後に PR2 を切る（§3.1.3）。PR1 と PR2 は、PR2 が共有関数のファイルを書かない限り書くファイルが重ならない（PR1 は `src/cli/commands/` の新しい読みのモジュール・diff の route・`src/lib/promote/` の件数の関数、PR2 は `page.tsx`・branches の route・`DecisionPromotePanel.tsx` の上部）。PR3 は PR2 と同じ `DecisionPromotePanel.tsx` を書くので PR2 の後
-- PR4 の依存: PR1 のマージの後（件数を PR1 が足した一覧の route の `counts` で読むため。新しい件数の route は作らない）。PR2・PR3 とは**並列にできる**: PR4 が書くのは `src/config/activity-bar-config.ts`・`src/components/worktree/WorktreeDetailDesktop.tsx` の activities の表・`src/components/worktree/NotesAndLogsPane.tsx` の `SUB_TABS`・新しい部品（例 `src/components/mem/` の下の新しいファイル `WorktreeMemPane`、まだ無い）・`locales/*/worktree.json`・`docs/UI_UX_GUIDE.md` の Activity Bar の一覧で、PR2・PR3 の `page.tsx`（決定の画面）・`DecisionPromotePanel.tsx`・branches の route と重ならない。重なりうるのは `MemItemsPanel.tsx`（§11.3 の要決定 D2 で「中身を変えない」を採れば重ならない）と `locales/*/common.json` の `mem.*`（PR2・PR3 も足す。同じファイルの別のキーなので、後にマージする方が rebase で解く）
-- PR4 の e2e も PR2・PR3 と同じく **`--last`** でマージする。PR4 はヘッダーの道具の数を 9 → 10 に変えるので、並行する PR の e2e が道具の位置・数に依存していないか、契約に「既定に依存しない書き方」を入れる
+- **順（確定版）**: PR1 → (PR2 → PR3) と PR4 を並列。PR2 と PR3 は同じ `DecisionPromotePanel.tsx` を書くので直列。PR4 は PR1 のマージの後（件数を PR1 が足した一覧の route の `counts` で読む。新しい件数の route は作らない）に始め、PR2・PR3 と並列にできる
+- **PR4 が書くファイル**: `src/config/activity-bar-config.ts`（`ActivityId` と `ACTIVITIES` の末尾）、`src/components/worktree/ActivityPane.tsx`（`ERROR_BOUNDARY_NAMES` は `Record<ActivityId, string>` なので `mem` の行が要る、`:51`）、`src/components/worktree/WorktreeDetailDesktop.tsx`（activities の表）、`src/components/worktree/NotesAndLogsPane.tsx`（`SubTab` の型 `:38` と `SUB_TABS` の末尾）、`src/components/mem/MemItemsPanel.tsx`（Tools 用の props、§11.3）、新しい部品（例 `src/components/mem/` の下の新しいファイル `WorktreeMemPane`、まだ無い）、`locales/*/worktree.json`（PC の道具の名 `activityBar.mem`）、`locales/*/schedule.json`（スマホのサブタブの名 `memTab`。サブタブは `useTranslations('schedule')`、`NotesAndLogsPane.tsx:187`）、`locales/*/common.json`（`mem.*` の Tools の文言）、`docs/UI_UX_GUIDE.md`（Activity Bar の一覧）、利用者向けの画面の説明（ja・en）と、§11.1 の並び・数を固定する試験
+- **PR2・PR3 との重なり**: PR2・PR3 が書くのは決定の画面の `page.tsx`・`DecisionPromotePanel.tsx`・branches の route で、PR4 と重ならない。`MemItemsPanel.tsx` は PR2・PR3 が書かない（§8.1、PR2 は設定の入口を直さない）。重なるのは `locales/*/common.json` の `mem.*`（別のキー）だけで、後にマージする方が rebase で解く
+- **既存の期待値の変更を契約で許す範囲（PR4）**: §11.1 の「並び・数を固定する試験」の表の行に限る（道具の数 9 → 10・末尾の id・サブタブの列・i18n のキー）。並び・数以外の期待値は変えない
+- **`header-tool-*` に依存する e2e の PR は PR4 の後にマージする**: PR4 は道具の数を 9 → 10 に変え、狭い幅で畳み方が変わる。並行する PR の e2e のうち `header-tool-*` を読むもの（§11.1 の表）を持つ PR は PR4 のマージの後に回すか、契約に「`mem` の有無・畳みに依存しない書き方」を入れる
 - e2e は既定（レイアウト・幅）に依存しない書き方にする（記憶: 既定・レイアウトを変える Issue は並行 PR の e2e を壊す）
 - 利用者向けの文書（`docs/user-guide/cli-operations-guide.md:3728` と en）は、PR1 で `mem decisions` を、PR2・PR3 で画面の手順を、それぞれ同じ PR で ja・en の両方に書く。PR4 は `docs/UI_UX_GUIDE.md` の Activity Bar の一覧（`tests/unit/docs/ui-ux-guide-activities-2062.test.ts` が `ACTIVITIES` と同じ並びを求める）と、利用者向けの画面の説明（ja・en）に Tools の mem を書く
 
@@ -380,77 +383,115 @@ mode・項目の状態・行き先・引用の組み合わせで、カード（�
 
 ## 11. 作業木の Tools の mem（PR4、人の追加の要望 2026-11-13 16:2x）
 
-出典: Issue #4355 の最後のコメント（人の追加の要望と PM の具体化）。「mem を、リポジトリの画面だけでなく、作業木の Tools（Notes などと同じ並び）からも確認できるようにしてほしい」。受入: 作業木の Tools から mem を開き、そのブランチの項目と承認待ちの件数が見え、決定の画面へ 1 タップで行ける（PC 1280・スマホ 390 の e2e）。
+出典: Issue #4355 の最後のコメント（人の追加の要望と PM の具体化）。「mem を、リポジトリの画面だけでなく、作業木の Tools（Notes などと同じ並び）からも確認できるようにしてほしい」。受入: 作業木の Tools から mem を開き、そのブランチの項目と承認待ちの件数が見え、決定の画面へ行ける（PC 1280・スマホ 390 の e2e）。事前レビュー（2-4-4、claude-5、`prereview-4355-tools-reply.md`）の必須 2・推奨 3・質問 2 と PM の処分（2026-11-13）を反映した（第 5 版）。
+
+### 11.0 決定（PM の処分、2026-11-13）
+
+| # | 問い | 決定 |
+|---|---|---|
+| P1 | 2-4-4 の推奨 1: `MemItemsPanel` をそのまま使うと、Tools から別の作業木の選択と「mode を変える」（`RepositoryMemSettings`、リポジトリ全体の設定の書き込み）に届く | **(b)**: Tools では作業木を固定する（その作業木のブランチだけ。作業木の選択を出さない）。mode は変えさせず、設定への案内（リンク）だけ。人の要望は「確認できるように」 |
+| P2 | 質問 1: `derived` のブランチ | **項目を読むだけで出す**。書く操作は出さず、凍結の印を付ける |
+| P3 | 質問 2: `off` のブランチに open の決定があるとき | **件数と決定の画面へのリンクを添える**（項目の一覧は出さない） |
 
 ### 11.1 今の作り（事実）
 
-- **PC の Tools**: `src/config/activity-bar-config.ts:61-82` の `ACTIVITIES`（`files`・`git`・`notes`・`schedules`・`agent`・`timer`・`todo`・`skills`・`verification`・`env` の 10 個）。ヘッダーの右に出る道具は `HEADER_TOOLS`（`:99-101`、`verification` を除いた 9 個。`verification` はチップから開く `:91`）。並びは ←/→ キーの順（`src/components/worktree/HeaderToolBar.tsx:103-108`）。狭いヘッダーでは**末尾から**「…」の後ろに畳む（`HeaderToolBar.tsx:77-79`）。`verification`・`env` は「位置で番号を数える利用者と試験があるので、挿入でなく末尾に足した」（`activity-bar-config.ts:74-81`。当時の説明は ArrowUp/ArrowDown、#3591 からは ←/→）
-- 各道具の中身は `src/components/worktree/WorktreeDetailDesktop.tsx` の activities の表（`:1010` の `env` ほか）で、`ActivityPane`（`src/components/worktree/ActivityPane.tsx`）が選ぶ。開いた道具は作業木ごとに localStorage に残る（`activity-bar-config.ts` の `ACTIVITY_BAR_STORAGE_KEY_PREFIX`）
-- **スマホの Tools**: 下のタブ `src/components/mobile/MobileTabBar.tsx:18` の `memo`（表示名は「ツール」、`locales/ja/worktree.json:895`）。中身は `src/components/worktree/NotesAndLogsPane.tsx` のサブタブ `SUB_TABS`（`:136-153`: `notes`・`logs`・`agent`・`timer`・`todo`・`skills`・`verification`・`env`、型は `:38`）。PC の `ACTIVITIES` とは**別の一覧**で、並びも違う（`activity-bar-config.ts:58-59` が明記）。深いリンク `?pane=` の値（`src/types/ui-state.ts:49` の `DeepLinkPane`）にサブタブの多くは無い
-- **mem の部品**: `src/components/mem/MemItemsPanel.tsx`。props は `repositoryId`・`branch`・`worktreeId`（`:218-225`）。読みは `memItemsApi.mode`・`list`・`notices`（`:281-291`、`src/lib/mem/screen-client.ts:150-185`）、書き込み（追加・編集・閉じる）は #4227 の画面の印つきの route だけ。決定の行には決定の画面へのリンク（`:931`、`?branch=` つき）。mode の行と「mode を変える」の切り替えで `RepositoryMemSettings` を開く（`:961-971`）。承認待ちの**件数**は出さない
+- **PC の Tools**: `src/config/activity-bar-config.ts:61-82` の `ACTIVITIES`（`files`・`git`・`notes`・`schedules`・`agent`・`timer`・`todo`・`skills`・`verification`・`env` の 10 個）。ヘッダーの右に出る道具は `HEADER_TOOLS`（`:99-101`、`verification` を除いた 9 個。`verification` はチップから開く `:91`）。並びは ←/→ キーの順（`src/components/worktree/HeaderToolBar.tsx:103-108`）。畳みは実際の幅を測って決め（`src/components/worktree/WorktreeDetailSubComponents.tsx:1133-1134` が `useDesktopHeaderFit` に `HEADER_TOOLS.length` を渡す）、**末尾から**「…」（`header-tool-more`）の後ろに畳む（`HeaderToolBar.tsx:77-79`）。`verification`・`env` は「位置で番号を数える利用者と試験があるので、挿入でなく末尾に足した」（`activity-bar-config.ts:74-81`。当時の説明は ArrowUp/ArrowDown、#3591 からは ←/→）
+- **#3591 の約束**: `tests/e2e/header-tools-3591.spec.ts:113-131` が、1440×900 でサイドバーを開いた場合と閉じた場合の両方で `TOOL_IDS`（`:91`）のすべてが見え、`header-tool-more` が 0 個であることを求める。1280 で畳まれないかを確かめた e2e は無い（未確認）
+- 各道具の中身は `src/components/worktree/WorktreeDetailDesktop.tsx` の activities の表（`:1010` の `env` ほか）で、`ActivityPane`（`src/components/worktree/ActivityPane.tsx`、`ERROR_BOUNDARY_NAMES: Record<ActivityId, string>` が `:51`）が選ぶ
+- **スマホの Tools**: 下のタブ `src/components/mobile/MobileTabBar.tsx:18` の `memo`（表示名は「ツール」、`locales/ja/worktree.json:895`）。中身は `src/components/worktree/NotesAndLogsPane.tsx` のサブタブ `SUB_TABS`（`:136-153`: `notes`・`logs`・`agent`・`timer`・`todo`・`skills`・`verification`・`env`、型は `:38`）。ラベルは `useTranslations('schedule')`（`:187`）で `locales/*/schedule.json` から引く。サブタブの列は横にスクロールし（`overflow-x-auto`、`:222-228`）、選んだサブタブを見える位置へ寄せる（`:215`）。PC の `ACTIVITIES` とは**別の一覧**で、並びも違う（`activity-bar-config.ts:58-59`）
+- **mem の部品**: `src/components/mem/MemItemsPanel.tsx`。props は `repositoryId`・`branch`・`worktreeId`（`:218-225`）。読みは `memItemsApi.mode`・`list`・`notices`（`:281-291`）で、mode を**自分で**読む（`:285`）。作業木の選択（`:974-990`、リポジトリの全作業木から選べる）、mode の行と「mode を変える」で `RepositoryMemSettings` を開く（`:961-971`）。`derived` は書き込みを凍結し `off` は何も並べない（`:5-6`）、凍結の印（`:898`）。書き込み（追加・編集・閉じる）は #4227 の画面の印つきの route だけ。決定の行には決定の画面へのリンク（`:931`）。承認待ちの**件数**は出さない
 - **使っているページ**: `src/app/repositories/[id]/mem/page.tsx`（`/repositories/<id>/mem?branch=<name>[&worktree=<id>]`）。ブランチは文字入力（`:22-24`）、部品は `:55`
-- **作業木からリポジトリ・ブランチを解く既存の口**: `GET /api/worktrees/:id/mem/mode`（`src/app/api/worktrees/[id]/mem/mode/route.ts`、本体は `src/lib/mem/service.ts:903-919` の `memMode`）が `repositoryIds`（同じ Git の root）・`branch`（detached なら null）・`mode` を返す。root の間で mode が食い違うと 409 `ambiguous`。PR1 の CLI（`src/cli/commands/mem-decisions.ts`）も同じ口でリポジトリ・ブランチを解いている
-- **承認待ちの件数**: PR1 が一覧の route（`GET /api/repositories/:id/mem/decisions?branch=`）の応答に `counts`（`decisionCountsOf`、`src/lib/promote/decision-counts.ts`）を足した。画面の読み `promoteApi.list`（`src/lib/promote/screen-client.ts`）で読める
-- **並びを固定している試験**（PR4 で期待値が変わる。既存の期待値の変更は契約で PM が許すこと）: `tests/unit/components/worktree/HeaderToolBar-3591.test.tsx:48`・`:61`・`:245`（道具は 9 個）・`:206`（末尾は `env`）、`tests/e2e/header-tools-3591.spec.ts:91`（道具の id の列）、`tests/unit/docs/ui-ux-guide-activities-2062.test.ts`（文書の一覧＝`ACTIVITIES`）、`tests/unit/components/worktree/NotesAndLogsPane.test.tsx`（サブタブ）、`tests/unit/i18n/worktree-git-panels-keys.test.ts`
+- **作業木からリポジトリ・ブランチを解く既存の口**: `GET /api/worktrees/:id/mem/mode`（`src/app/api/worktrees/[id]/mem/mode/route.ts`、本体は `src/lib/mem/service.ts:903-919` の `memMode`）が `repositoryIds`（同じ Git の root。2 つ以上ありうる）・`branch`（detached なら null）・`mode` を返す。root の間で mode が食い違うと 409 `ambiguous`。PR1 の CLI（`src/cli/commands/mem-decisions.ts`）も同じ口で解く
+- **承認待ちの件数**: PR1 が一覧の route（`GET /api/repositories/:id/mem/decisions?branch=`）の応答に `counts`（`decisionCountsOf`、`src/lib/promote/decision-counts.ts`。`counts.mode` を含む）を足した
+- **並び・数を固定する試験**（`git grep` で `HEADER_TOOLS`・`ACTIVITIES`・`SUB_TABS`・`header-tool-` を探した結果、2026-11-13）:
+
+| 試験 | 固定しているもの | PR4 で |
+|---|---|---|
+| `tests/unit/components/worktree/HeaderToolBar-3591.test.tsx` | 道具は 9 個（`:48`・`:61`・`:245`）、末尾は `env`（`:206`） | 10 個・末尾 `mem` に変える（契約で許す） |
+| `tests/unit/components/worktree/DesktopHeader-tools-3591.test.tsx` | 見える道具の数＝`HEADER_TOOLS.length`（`:137`）、`focusActivityEntry('env')`（`:245`） | 数は追従。末尾を使う箇所は `mem` を許す |
+| `tests/unit/components/worktree/DesktopHeader-layout-4218.test.tsx` | 畳み無しで `HEADER_TOOLS` すべてが見える（`:421` 付近） | そのまま緑を求める |
+| `tests/unit/config/activity-bar-icons-3632.test.ts` | アイコンの重複の禁止 | `mem` のアイコンは既存 10 個と別のもの。緑を求める |
+| `tests/unit/components/worktree/verification-surface-parity-2064.test.tsx` | PC とスマホの対応 | `mem` を両方に足して緑 |
+| `tests/unit/components/worktree/NotesAndLogsPane.test.tsx` | サブタブの列 | 末尾に `mem` |
+| `tests/unit/docs/ui-ux-guide-activities-2062.test.ts` | `docs/UI_UX_GUIDE.md` の一覧＝`ACTIVITIES` | 文書に `mem` を足して緑 |
+| `tests/unit/i18n/worktree-git-panels-keys.test.ts`、`tests/unit/i18n/skills-tab-keys.test.ts`（サブタブの名の ja・en の型） | 辞書のキー | `activityBar.mem`（worktree）・`memTab`（schedule）の ja・en を求める試験を足す |
+| `tests/e2e/header-tools-3591.spec.ts` | `TOOL_IDS`（`:91`）、1440 で畳まれない（`:113-131`） | `TOOL_IDS` に `mem` を足し緑を求める（TM1） |
+| `header-tool-*` を読むほかの e2e: `activity-pane-overlay-3589`・`activity-pane-side-4219`・`file-maximize-portal-2294`・`file-tree-operations`・`markdown-editor`・`recursive-delete`・`split-header-in-bar-3592`・`verification-pane`・`worktree-header-one-row-3590` の各 spec と `tests/e2e/fixtures/terminal-split-helpers.ts` | 特定の道具を押す。狭い幅では畳みに依存 | 変えない。PR4 の後もそのまま緑を求める（§6: これらに触れる並行の PR は PR4 の後） |
+
+（2-4-4 は「`header-tool-more` を読む e2e は 10 本」とした。こちらの検索では `header-tool-more` の文字は e2e では `header-tools-3591.spec.ts` だけで、`header-tool-` を読む e2e が上の 11 ファイル。`action-bar-overflow-sidebar-3651.spec.ts` は分割の操作の列の畳み（`split-action-bar-items-overflow`）を見るもので、ヘッダーの道具の畳みは読まない）
 
 ### 11.2 不変条件（PR4）
 
 | # | 不変条件 | なぜ | 固定する試験 |
 |---|---|---|---|
-| TM1 | 既存の道具の並びと番号を変えない: `mem` は `ACTIVITIES` と `SUB_TABS` の**末尾**に足す（`env` の後）。PC の ←/→ の順で既存の道具の位置が変わらない | 位置で数える利用者と試験がある（`activity-bar-config.ts:74-81`） | `mem` を除いた `ACTIVITIES`・`HEADER_TOOLS`・`SUB_TABS` の id の列が今の列と一致。`mem` の位置は末尾 |
-| TM2 | 書き込みの経路を増やさない: Tools の mem は `MemItemsPanel` を再利用し、新しい書き込みの route・印・承認の口を作らない。**決定の承認は決定の画面だけ**（I1） | エージェントが人の決定を作れない前提（#4225 D9）と、#4227 の画面の書き込みの規則（ロック・照合）を 1 か所に保つ | Tools の部品のソースに `mem/decisions` の書き込み（preview・approve 他）の呼び出しが無い。新しい route のファイルが無い。`MemItemsPanel-4227` の既存試験が緑 |
-| TM3 | 承認待ちの件数は PR1 の共有関数の値（一覧の route の `counts`）を出す。`approvable: false` は「承認できない（mode）」を添え、`null` は「不明」と出して 0 と出さない（I6） | 画面ごとに数が違うと「承認し終えた」と誤る | 同じ fixture で CLI（`mem decisions --json` の `counts`）と Tools の件数の表示が一致。`ambiguous` で「不明」 |
-| TM4 | mode が `on` でないブランチ（`off`・`derived`）では、項目の一覧と件数の代わりに「mem は off（または derived）」と設定への案内（`/repositories/<id>/mem`）だけを出す。`ambiguous`・detached・未登録も、それぞれの理由と案内だけ（§11.5） | 人の要望（PM の具体化）。off のブランチで空の一覧を出すと「項目が無い」と読み違える | §11.5 の表の行ごとの部品の試験 |
-| TM5 | 決定の画面へのリンクは、リポジトリとブランチが選ばれた URL（`/repositories/<id>/mem/decisions?branch=<name>`、I4）。PR2 のマージの後は項目の行から `&item=<id>`（§3.1.4）も使える。リンクを押しても何も選ばない・作らない | 1 タップで承認の場所へ行ける（受入）。`?item=` は開いただけで preview を作らない（§3.1.4） | e2e 1280・390 で 1 回の押下で決定の画面に着き、そのブランチが選ばれている |
+| TM1 | 既存の道具の並びと番号を変えない: `mem` は `ACTIVITIES` と `SUB_TABS` の**末尾**に足す（`env` の後）。PC の ←/→ の順で既存の道具の位置が変わらない。**1440 ではサイドバーの開閉どちらでも 10 個すべてが見え、畳まれない（#3591）**。1280 の経路は「`mem` が見えていれば 1 回、畳まれていれば『…』から 2 回」（どちらも許す） | 位置で数える利用者と試験がある（`activity-bar-config.ts:74-81`）。#3591 の約束 | `mem` を除いた `ACTIVITIES`・`HEADER_TOOLS`・`SUB_TABS` の id の列が今の列と一致。`tests/e2e/header-tools-3591.spec.ts` の `TOOL_IDS` に `mem` を足して緑（赤なら PR4 に幅の対策を入れる） |
+| TM2 | 書き込みの経路を増やさない: Tools の mem は `MemItemsPanel` を再利用し、新しい書き込みの route・印・承認の口を作らない。**決定の承認は決定の画面だけ**（I1）。P1 により、Tools からは**別の作業木への書き込み**と**リポジトリの mem の設定の書き込み**に届かない（作業木は固定、mode は設定への案内のリンクだけ）。その作業木での項目の追加・編集・閉じる（mode `on`）は #4227 の既存の route のまま | エージェントが人の決定を作れない前提（#4225 D9）。人の要望は「確認」で、Tools を設定の書き込みの入口にしない | 新しい部品のソースに書き込みの呼び出しが無い（§11.7）。Tools の表示に作業木の選択（`mem-items-worktree`）と `RepositoryMemSettings` が無い |
+| TM3 | 承認待ちの件数は PR1 の共有関数の値（一覧の route の `counts`）を出す。`approvable: false` は「承認できない（mode）」を添え、`null` は「不明」と出して 0 と出さない（I6）。**mode は 1 つの読みに揃える**: 件数の行は、`MemItemsPanel` が読んだ mode（パネルの読みを正とする）と `counts.mode` が一致したときだけ数を出し、食い違えば「不明」にして読み直しを待つ | 画面ごとに数が違うと「承認し終えた」と誤る。読みの間に mode が変わると件数の行とパネルの mode の行が食い違う（2-4-4 推奨 2） | 同じ fixture で CLI（`mem decisions --json` の `counts`）と Tools の件数の表示が一致。mode の読みが 1 回目 `on`・2 回目 `off` を返す偽の fetch で、件数の行が数を出さない（「不明」） |
+| TM4 | mode ごとの表示（P2・P3）: `on` は項目・件数・リンク。`derived` は項目を**読むだけ**（追加・編集・閉じるを出さない、凍結の印）と件数・リンク。`off` は「mem は off」と設定への案内、open の決定があれば件数と決定の画面へのリンクを添える（項目の一覧は出さない）。`ambiguous`・detached・未登録は理由と案内だけ（§11.5） | 人の要望「確認できるように」と PM の具体化。off のブランチで空の一覧を出すと「項目が無い」と読み違える | §11.5 の表の行ごとの部品の試験 |
+| TM5 | 決定の画面へのリンクは、リポジトリとブランチが選ばれた URL（`/repositories/<id>/mem/decisions?branch=<name>`、I4）。PR2 のマージの後は項目の行から `&item=<id>`（§3.1.4）も使える。リンクを押しても何も選ばない・作らない | 承認の場所へ行ける（受入）。`?item=` は開いただけで preview を作らない（§3.1.4） | e2e 1280・390 で決定の画面に着き、そのブランチが選ばれている |
 
 PC とスマホの両方で TM1〜TM5 を守る（同じ部品を両方から使う）。
 
 ### 11.3 設計
 
-- **入口**: PC は `ACTIVITIES` の末尾に `{ id: 'mem', labelKey: 'activityBar.mem', icon: <lucide の 1 つ> }`。`HEADER_TOOLS` に入る（`verification` だけが除かれる規則は変えない）。スマホは `SUB_TABS` の末尾に `{ id: 'mem', labelKey: 'memTab' }`。どちらも中身は同じ新しい部品 `WorktreeMemPane`（`worktreeId` を受ける）
+- **入口**: PC は `ACTIVITIES` の末尾に `{ id: 'mem', labelKey: 'activityBar.mem', icon: <lucide の 1 つ、既存 10 個と別> }`。`HEADER_TOOLS` に入る（`verification` だけが除かれる規則は変えない）。スマホは `SUB_TABS` の末尾に `{ id: 'mem', labelKey: 'memTab' }`（`schedule.json`）。どちらも中身は同じ新しい部品 `WorktreeMemPane`（`worktreeId` を受ける）
 - **部品の中身**（上から）:
-  1. `GET /api/worktrees/:id/mem/mode` で `repositoryIds[0]`・`branch`・`mode` を解く（既存の口。新しい route は作らない）
-  2. mode が `on`: 1 行の件数（`承認待ち N 件・反映待ち M 件`。PR1 の `counts`）と「決定の画面へ」のリンク（TM5）。その下に `MemItemsPanel`（`repositoryId`・`branch`・`worktreeId` をそのまま渡す）
-  3. mode が `on` でない・解けない: §11.5 の表のとおり、理由の 1 行と設定・決定の画面への案内だけ
-- **要決定**（PM・人）:
+  1. `GET /api/worktrees/:id/mem/mode` で `repositoryIds`・`branch`・`mode` を解く（既存の口。新しい route は作らない）
+  2. 件数の行: 一覧の route の `counts`（`repositoryIds[0]` で読む。一覧は同じ Git の root すべてを読むので、どの root の id でも同じ数）。TM3 のとおり、パネルが読んだ mode と `counts.mode` が一致したときだけ数を出す
+  3. 決定の画面へのリンク（TM5）と、`MemItemsPanel`（作業木を固定）
+  4. mode が `off`・解けない: §11.5 の表のとおり、理由の 1 行と案内だけ
+- **`MemItemsPanel` を props で絞る**（P1。包むだけでは中の作業木の選択と設定の切り替えを隠せない）: 例 `fixedWorktree: true`（作業木の選択を出さず `worktreeId` に固定）、`settingsHref: string`（「mode を変える」の切り替えと `RepositoryMemSettings` の代わりに設定へのリンク）、`onModeRead(mode)`（パネルが読んだ mode を外へ渡す、TM3）。props を渡さない今の使い方（`/repositories/[id]/mem`）は何も変わらない（既存試験が緑）。`derived` で書く操作を出さないのは今の部品の動き（`:5-6`）で、Tools でも同じ
+- **`repositoryIds` が 2 つ以上のとき**: 読み（mode・一覧・件数）は同じ Git の root すべてを読むので `repositoryIds[0]` でよい。設定への案内は**root ごとのリンクを並べ**、「同じ Git の root の設定は揃えること（1 つだけ変えると `ambiguous` になる）」を添える（2-4-4 推奨 2）
+- **スマホ 390**（2-4-4 推奨 3）: サブタブが 9 個になり `mem` は列の末尾。はみ出しはサブタブの列の中の横スクロールだけに限り（今の `overflow-x-auto`）、ページ全体は `scrollWidth <= clientWidth` を保つ。押す場所は 44px 以上
+- **要決定**（PM・人、残り）:
   - D1 スマホの置き場所: (a) **「ツール」のサブタブの末尾**（推奨。Notes などと同じ並び＝人の言葉どおり、下のタブの数を変えない）／(b) 下のタブに `mem` を足す（タブが 6 つになり 390 幅で押し場所が狭くなる。`MobileTab` と `DeepLinkPane` の変更も要る）
-  - D2 `MemItemsPanel` を変えるか: (a) **変えずに外側の部品で件数とリンクを足す**（推奨。PR2・PR3 と書くファイルが重ならない。mode の行の「mode を変える」もそのまま）／(b) props で件数・リンク・設定の切り替えの有無を選べるようにする（中身を 1 か所に寄せられるが、#4227 の試験と PR2・PR3 との重なりが増える）
-  - D3 ヘッダーの道具に件数のバッジを出すか: (a) **出さない**（推奨。件数は部品の中だけ。ヘッダー・サイドバーの全体の件数は #4354 の担当で、そちらと二重にしない）／(b) 道具のアイコンに承認待ちの数を出す（#4354 と同じ関数を使い、表示の重複を #4354 と決める）
-  - D4 狭い PC のヘッダー: 末尾の道具から「…」に畳む（`HeaderToolBar.tsx:77-79`）ので、`mem` は最初に畳まれる。(a) **そのまま**（推奨。「…」から開ける。e2e 1280 は畳まれない幅）／(b) `mem` を畳まない例外にする（畳みの規則が 2 つになる）
+  - D2 `MemItemsPanel` を変えるか → **P1 により (b) props で絞るに決定**
+  - D3 ヘッダーの道具に件数のバッジを出すか: (a) **出さない**（推奨。件数は部品の中だけ。ヘッダー・サイドバーの全体の件数は #4354 の担当で、そちらと二重にしない）／(b) 道具のアイコンに承認待ちの数を出す
+  - D4 狭い PC のヘッダー: 末尾の道具から「…」に畳むので `mem` は最初に畳まれる。(a) **そのまま**（推奨。1280 は TM1 の 2 つの経路を許す）／(b) `mem` を畳まない例外にする。どちらでも **1440 で畳まれない**（TM1）は必須で、測った結果が足りなければ PR4 に幅の対策を入れる（§11.7）
 - 深いリンク（`?pane=mem`）は PR4 では足さない［見立て: `DeepLinkPane` に Tools のサブタブの多くが無く、今のサブタブと同じ扱いで足りる］
 
 ### 11.4 return・throw・書き込みの表（`WorktreeMemPane`）
 
 | 入力・状態 | 呼ぶ API | 出すもの | 書き込み |
 |---|---|---|---|
-| 作業木の mode の読みが 200・mode `on` | `GET …/worktrees/:id/mem/mode`、`GET …/repositories/:id/mem/decisions?branch=`（件数）、`MemItemsPanel` の既存の読み | 件数の行・決定の画面へのリンク・`MemItemsPanel` | 無し（`MemItemsPanel` の中の人の操作だけが #4227 の既存の画面の route で書く） |
-| mode `off`・`derived` | mode の読みだけ | 「mem は off（derived）」と設定（`/repositories/<id>/mem`）への案内 | 無し |
-| mode の読みが 409 `ambiguous` | 同上 | 「root の間で mode が食い違う」と設定への案内。件数は出さない（不明） | 無し |
+| 作業木の mode の読みが 200・mode `on` | `GET …/worktrees/:id/mem/mode`、`GET …/repositories/:id/mem/decisions?branch=`（件数）、`MemItemsPanel` の既存の読み | 件数の行・決定の画面へのリンク・`MemItemsPanel`（作業木固定・設定はリンク） | 無し（`MemItemsPanel` の中の人の操作だけが #4227 の既存の画面の route で、その作業木へ書く） |
+| mode `derived` | 同上 | 件数の行・リンク・`MemItemsPanel`（読むだけ、凍結の印） | 無し |
+| mode `off`・open の決定あり | mode の読み・件数 | 「mem は off」と設定への案内、件数と決定の画面へのリンク | 無し |
+| mode `off`・open の決定なし | 同上 | 「mem は off」と設定への案内だけ | 無し |
+| mode の読みが 409 `ambiguous` | mode の読み | 「root の間で mode が食い違う」と root ごとの設定への案内。件数は「不明」 | 無し |
 | detached（`branch: null`） | 同上 | 「ブランチが無い（detached）」だけ | 無し |
 | 404（未登録・作業木が無い） | 同上 | 「mem の対象のリポジトリではない」だけ | 無し |
-| 件数の読みだけが失敗（mode は `on`） | 件数の route | 件数の行を「不明」にし、`MemItemsPanel` とリンクは出す（0 と出さない、TM3） | 無し |
+| 件数の読みだけが失敗 | 件数の route | 件数の行を「不明」にし、`MemItemsPanel` とリンクは出す（0 と出さない、TM3） | 無し |
+| 読みの間に mode が変わった（パネルの mode ≠ `counts.mode`） | — | 件数の行を「不明」にし、次の読みで揃うのを待つ（TM3） | 無し |
 | 読みの途中で作業木を切り替えた | — | 古い応答を採らない（作業木の id で捨てる） | 無し |
 
 ### 11.5 入力×状態の表（PC・スマホ共通）
 
 | mode | ブランチ | 決定 | 件数の行 | 決定の画面へのリンク | `MemItemsPanel` |
 |---|---|---|---|---|---|
-| `on` | 名前あり | open あり | `承認待ち N 件・反映待ち M 件` | 出す | 出す |
+| `on` | 名前あり | open あり | `承認待ち N 件・反映待ち M 件` | 出す | 出す（作業木固定・設定はリンク） |
 | `on` | 名前あり | 無し | `承認待ち 0 件` | 出す | 出す |
-| `off`／`derived` | 名前あり | 何でも | 出さない（「mem は off／derived」） | 出さない［見立て: 承認できないブランチへ誘わない。open の決定があれば設定の案内に件数を添えるかは PR4 の契約で決める］ | 出さない |
+| `derived` | 名前あり | 何でも | `open N 件・承認できない（mode derived）` | 出す | 読むだけ（凍結の印、書く操作なし）（P2） |
+| `off` | 名前あり | open あり | `open N 件・承認できない（mode off）` と設定への案内 | 出す（P3） | 出さない |
+| `off` | 名前あり | 無し | 出さない（「mem は off」と設定への案内） | 出さない | 出さない |
 | `ambiguous` | 名前あり | — | 「件数不明」 | 出さない | 出さない |
 | — | detached | — | 出さない | 出さない | 出さない |
+| 読みの間に変化 | — | — | 「不明」 | 前の表示のまま | 新しい読みのとおり |
 
 ### 11.6 PR の分け方の中の位置
 
-§6 の表の PR4 の行。依存は PR1 のマージの後、PR2・PR3 とは並列にできる（§6 の箇条）。
+§6 の表の PR4 の行。PR1 のマージの後、PR2・PR3 と並列（§6 の「順（確定版）」）。
 
 ### 11.7 試験の設計（PR4）
 
-- e2e 1280・390（隔離したサーバ・DB、§7 と同じ作り）: mode `on` のブランチに `decision` を 1 件作り、作業木の画面の Tools（PC はヘッダーの末尾の道具、スマホは「ツール」→ 末尾のサブタブ）から mem を開く → そのブランチの項目と `承認待ち 1 件` が見える → 「決定の画面へ」を 1 回押すと `/repositories/<id>/mem/decisions?branch=<name>` に着く。各段で横スクロール無し（`scrollWidth <= clientWidth`）
-- 単体: §11.5 の表の行ごと（mode の応答を返す偽の fetch。陽性対照: 今の `ACTIVITIES` に `mem` が無く赤）。TM1 は `mem` を除いた列が今の列と一致（陰性対照）。TM2 は Tools の部品のソースを読み、書き込みのメソッドと `mem/decisions/…/preview|approve` が無い
+- **PR4 の前に幅を測る**: 隔離した環境（§7 と同じ作り）で、作業木の画面を 1280×800 と 1440×900、サイドバーの開閉それぞれで開き、ヘッダーの道具の列の幅の余り（`useDesktopHeaderFit` が使う幅と、道具 1 つの幅）を測り、10 個目が畳まれずに入るかを記録する。1440 で入らなければ、PR4 の契約に幅の対策（道具の間隔・アイコンの大きさ等）を入れる
+- **e2e 1440**（TM1）: 既存の `tests/e2e/header-tools-3591.spec.ts` の `TOOL_IDS` に `mem` を足し、サイドバーの開閉どちらでも 10 個すべてが見え、`header-tool-more` が 0 個
+- **e2e 1280・390**（隔離したサーバ・DB）: mode `on` のブランチに `decision` を 1 件作り、作業木の画面の Tools から mem を開く → そのブランチの項目と `承認待ち 1 件` が見える → 「決定の画面へ」を押すと `/repositories/<id>/mem/decisions?branch=<name>` に着く。1280 は `header-tool-mem` が見えているか（`header-tool-more` があるか）を**読んで分岐**し、見えていれば 1 回、畳まれていれば「…」→ `mem` の 2 回で開く（既定の幅に依存しない）。390 はサブタブの列の中で `mem` を見える位置へスクロールしてから押し、押す場所が 44px 以上、ページ全体の `scrollWidth <= clientWidth`
+- **単体**: §11.5 の表の行ごと（mode の応答を返す偽の fetch。陽性対照: 今の `ACTIVITIES` に `mem` が無く赤）。TM1 は `mem` を除いた列が今の列と一致（陰性対照）。TM3 は mode の読みを 2 回とも返す偽の fetch で 1 回目 `on`・2 回目 `off` を返し、件数の行が数を出さない（「不明」）。i18n は `activityBar.mem`（worktree）・`memTab`（schedule）の ja・en。アイコンの重複の試験に `mem` を含めて緑
+- **TM2（書き込みに届かない）**: (1) 新しい部品（`WorktreeMemPane` 等、Tools のために足したファイル）**だけ**を対象に、ソースに書き込みのメソッドと `mem/decisions/…/preview|approve` の呼び出しが無い（`MemItemsPanel` は #4227 の書き込みを含むので対象にしない。含めると常に赤）。(2) P1 の試験: Tools の表示に作業木の選択（`mem-items-worktree`）と「mode を変える」の切り替え・`RepositoryMemSettings` が無く、設定は `<a href>` のリンクだけ。`derived` で追加・編集・閉じるのボタンが無い。(3) 陰性対照: props を渡さない `/repositories/[id]/mem` では作業木の選択と設定の切り替えが今のまま出る
 
 ## 10. 改訂の履歴
 
 - 2026-11-13 第 3 版: CLI の承認を案 B に決定（人、2026-11-13 16:03）。§0.1・§0.2 の 1・§3.5 を書き換え。PR1 は読みの CLI だけ（`src/cli/commands/mem-decisions.ts`、件数の共有関数は `src/lib/promote/decision-counts.ts`）、URL の出力は PR2 のマージの後。実装で §3.4 に足したもの（I7 の「足すのは可」の範囲）: 一覧の JSON に `text`・`stale`・`pending`、項目の `operations[]` に `resultRef`、diff の `destination` の `reason` に `invalid_destination`（作業木の文書のパスが今の検査に当たる）、一覧の route（`promoteList`）の応答に `counts`
 - 2026-11-13 第 4 版: 人の追加の要望（作業木の Tools から mem を確認する、Issue #4355 のコメント 2026-11-13 16:2x）を §11 に足し、§0.1・§6 の PR の分け方に PR4（作業木の Tools の mem、PC・スマホ、e2e 1280・390、`--last`、PR1 の後・PR2・PR3 と並列）を加えた。要決定 D1〜D4 は PM・人の確認待ち
+- 2026-11-13 第 5 版: Tools の mem（§11）に事前レビュー（2-4-4、claude-5）の必須 2（1440 で畳まれない #3591 の約束と 1280 の経路・幅の実測、PR4 の書くファイルに `schedule.json`・`ActivityPane.tsx`・`SubTab` の型、並び・数を固定する試験の表）と推奨 2・3（mode の読みを 1 つに・`repositoryIds` が 2 つ以上、390 のサブタブの列の中のスクロール）を反映。PM の処分 3 点（Tools は作業木固定・mode は設定へのリンクだけ／`derived` は読むだけ／`off` に open の決定があれば件数とリンク）を §11.0 に決定として書き、D2 を (b) に。§6 を確定版に（PR1 → (PR2 → PR3) と PR4 を並列、`header-tool-*` に依存する e2e の PR は PR4 の後）
