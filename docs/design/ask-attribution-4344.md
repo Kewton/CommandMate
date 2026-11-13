@@ -19,6 +19,8 @@
 
 capability は **adapter ごとに、§6 の表の対照（封筒を含む実入力 → native 入力 ID → 完了 turn の assistant 行、と M1〜M6 の試験）がすべて通ったものだけ true** にする。判定は機械で行う: capability の表（サーバーの 1 か所）を true にする行は、その tool の adapter 対照の試験ファイルが存在し、§6 の M1〜M6 の各ケースを名前で含むことをガードの試験で確かめる（PR1 で claude、PR2 で codex の分を足す）。
 
+**版の判定（H5、2026-11-13 14:55 の人の決定）**: stop_reason を書かない版では turn の完了が観測できない（I5）ので capability を false に絞る。表（`ASK_ATTRIBUTION_MIN_VERSIONS`）に tool ごとの最小版を持ち、サーバーが観測した導入済みの版（`--version`）がそれ以上のときだけ、capabilities API と send の入口で true にする。版が読めないときは false。ガードの試験は、true の tool に最小版があり、その tool の対照の fixture の記録がすべて最小版以上で、assistant 記録がすべて stop_reason を持つことを確かめる（§3.6.3a）。
+
 ### 0.2 未対応の CLI・旧サーバー・コマンド本文での `ask` の出力
 
 送信と待機は今までどおり行い（送信回数を変えない・終了コードを変えない＝不変条件 6）、**返答の回収だけをやめる**。画面へは降りない。
@@ -196,7 +198,7 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 | **R+** | `reserved`/`pending`、入力あり | 送信の結果の保存より前に、reader が封筒を見た | いいえ |
 | **P** | `sent` または `send_unknown`/`pending`、入力なし | 送った（または送れたか不明）。封筒はまだ見ていない | いいえ |
 | **P+** | 同上、入力あり | 封筒を見たが、まだ確定していない | いいえ |
-| **N** | `not_sent`/`pending` | 何も打っていない。読むと `unmatched/not_sent` に見える（C:265） | 保存上はいいえ |
+| **N** | `not_sent` | 何も打っていない。送信結果の保存の時点で `unmatched/not_sent` の終端（H2） | はい（H2） |
 | **M** | `matched` | 確定した | はい |
 | **Am** | `ambiguous`（`shared_turn`・`turn_open_at_send`） | 共有の turn | はい |
 | **U** | `unmatched`（`envelope_duplicated`・`absorbed_mid_turn`・`body_truncated`） | 確定しないことが確定した | はい（C:121-123 が pending 以外を終端と扱う） |
@@ -204,7 +206,8 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 **保存しない状態**（読み取りか計画の時に決まる）:
 - `unavailable`（`tool_unsupported`・`slash_command`）: S:46-52。行を作らない。
 - `unmatched/history_missing`: C:274。
-- `unmatched/not_sent`: C:265。
+- （`unmatched/not_sent` は H2 で保存する終端になった。表の N）
+- `unmatched/send_unknown`（H3。古い予約の読み取り）・`unmatched/history_changed`（H4。読み取りで判定）
 - `grace_expired`・`turn_incomplete`・`send_unknown`・`envelope_lost`・`generation_changed`: CLI 側（PR3）。今の台帳には書かない。
 
 **設計にあって実装に無い状態**: `buffered`（設計 §3.4・§4）。予約の無い封筒は `unknown` と答えてログに残すだけ（C:149-153）。
@@ -241,10 +244,12 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 | 7 | P／P+ | O6 宛先の違い | 変化なし（rejected） | — | △ 宛先の不一致だけの試験は見つからない。★「M5 a sighting under another instance is rejected and leaves the row pending」 | ○ C:156-159 |
 | 8 | P／P+ | O6 session の違い（両方とも読めた） | 変化なし（rejected） | — | ○ (8)「M5 a record of the session before /clear is rejected」 | ○ C:161-164 |
 | 8b | P／P+ | O6 **session が読めない**（`currentSessionId` か `nativeSessionId` が null） | **変化なし（pending のまま）** | session が確認できるまで、入力の記録も終端化もしない（設計の不変条件 2「世代が不明なら確認済みと扱わない」） | ★「M5 a sighting whose current session cannot be read never settles (stays pending)」 | ✗ **C:161**（どちらかが null なら照合を丸ごと飛ばす）。今回の新しい指摘 |
-| 9 | P+ | O5 完了・`otherInputs>0` | Am/shared_turn | **完了の証拠が本物の閉じ**であること（下の I5）、session が確認済みであること | ○ M1「A is ambiguous/shared_turn…」 | ✗ **A:65・T:786-793**（History の救済条件を完了とみなす）。pr1b の 2 |
+| 9 | P+ | O5 完了・`otherInputs>0` | Am/shared_turn | **完了の証拠が本物の閉じ**（stop の観測。I5）であること、session が確認済みであること | ○ M1「A is ambiguous/shared_turn…」 | ✗ **A:65・T:786-793**（History の救済条件を完了とみなす）。pr1b の 2 |
 | 10 | P+ | O5 完了・turnOpenAtSend=true | Am/turn_open_at_send | 同上 | ○ (11)「turnOpenAtSend=true → ambiguous/turn_open_at_send」 | ○ C:198-201（完了の証拠は 9 と同じ ✗） |
-| 10b | P+ | O5 完了・turnOpenAtSend=null（送信時に読めなかった） | **人の判断（H1）** | — | ★（H1 の決定に合わせる） | 今は「開いていない」と同じに扱う（C:198、R:520） |
+| 10b | P+ | O5 完了・turnOpenAtSend=null（送信時に読めなかった） | **Am/turn_open_at_send**（H1） | 本物の閉じ・session 確認済み | ★「H1 turnOpenAtSend unknown at the send → ambiguous/turn_open_at_send」 | ✗ 今は「開いていない」と同じに扱う（C:198、R:520） |
 | 11 | P+ | O5 完了・O7 assistant 行あり・切れていない | M | 本物の閉じ・session 確認済み・**本文を固定する**（I2） | ○ (1)「a 305-line reply comes back in full…」、○ (2)「ask `hi` answered `hi` is matched with exactly `hi`」、★「a turn with no stop_reason observed is never matched (History's rescue is not completion)」 | ✗ 完了の判定は A:65（pr1b の 2） |
+| 11b | P+ | O5 の代わりに superseded（後の prompt が来た）で、stop の観測が無い（中断された turn） | **U/turn_interrupted**（H5） | — | ★「H5 an interrupted turn (superseded, no stop) settles unmatched/turn_interrupted」 | ✗ A:65（History の救済条件で完了とみなし matched にしうる） |
+| 11c | P+ | stop_reason が一度も観測されず、superseded でもない | P+（変化なし） | 完了の証拠が無いので終端にしない（I5）。この版は §0.1 の版の判定で capability が false になる（H5） | ★「a turn with no stop_reason observed is never matched (History's rescue is not completion)」 | ✗ A:65 |
 | 12 | P+ | O5 完了・O7 assistant 行あり・切れている | U/body_truncated | 同上 | ★「a truncated row settles unmatched/body_truncated」（試験は見つからない） | ○ C:203-206 |
 | 13 | P+ | O5 完了・O7 行がまだ無い | P+ | — | △ 試験は見つからない | ○ C:202 |
 | 14 | P+ | O3a | 変化なし（冪等） | — | ○ (9)「M6 reading the same input twice changes nothing」 | ○ C:165-167・182 |
@@ -252,14 +257,21 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 | 16 | P+ | O3c（現在の session が新しい側） | U/envelope_duplicated（古い側は 8 で rejected） | session がどちらも読めていること（8b） | ★「resume into a new session before the turn settled → envelope_duplicated」 | △ 静的には C:165-179 で成り立つ |
 | 17 | P／P+ | O8 CLI の grace | **変化なし**（CLI が `unmatched/grace_expired` を出す。台帳には書かない） | 期限切れでは台帳を終端にしない（後から来た正しい証拠を捨てない） | ★（PR3）「grace expiry prints unmatched/grace_expired and leaves the row pending」 | ○ 書いていない |
 | 18 | M | O3a／O3b／O3c／O4 | 変化なし（ログ `ask-correlation-duplicate-sighting`） | — | ○ (9)「…another session after matched (resume / fork) leaves it as it was」。ただしこの試験は session の不一致で 8 を通って rejected になり、終端の分岐（C:171）までは届かない。★「same session, another input id after matched → duplicate, unchanged」 | ○ C:171-177・182、D:202 |
-| 19 | M | O7 同じ行が成長する（turn の再開・修復） | **M のまま、返す本文は確定時のまま** | 確定時の本文（またはその digest）を持ち、違えば返さない | ★「M6 a matched reply whose History row later grows is returned as settled (or flagged), never the grown body」 | ✗ **C:271-278**（毎回いまの本文を読む）。pr1b の 3 |
+| 19 | M | O7 同じ行が成長・変化する（turn の再開・修復） | **M のまま。読むと `unmatched/history_changed`**（H4） | 確定時に本文の digest（sha256）と長さを台帳に持ち、読むときに違えば返さない（本文は持たない＝v72 の「Holds no body」を保つ） | ★「M6 a matched reply whose History row later changes reads unmatched/history_changed」 | ✗ **C:271-278**（毎回いまの本文を読む）。pr1b の 3 |
 | 20 | M | O7 行の削除 | 読むと `unmatched/history_missing`（台帳は M のまま） | — | ○ (9)「M6 a reply row deleted from History reads unmatched/history_missing; the ledger stays matched」 | ○ C:274-277 |
 | 21 | Am／U | すべての観測 | 変化なし | — | ○ migration-v72 の M6 | ○ D:202、C:182 |
-| 22 | N | O2（封筒が見えた。分類と矛盾） | **人の判断（H2）** | — | ★（H2 の決定に合わせる） | 今は `sendSettled` が真なので M にもなりうる（C:126-128・190） |
+| 22 | N | O2（封筒が見えた。分類と矛盾） | **変化なし**（N は終端。観測はログだけ。H2） | — | ★「H2 an envelope seen after not_sent leaves unmatched/not_sent」 | ✗ 今は `sendSettled` が真なので M にもなりうる（C:126-128・190） |
 | 23 | N | 読み取り（GET） | `unmatched/not_sent` に見える。refresh しない | — | ○ send-ask「…records not_sent, and the answer says so」 | ○ C:251・265 |
-| 24 | R | O8 サーバーが送信の途中で落ち、O1 が来ない | **人の判断（H3）** | — | ★ | 今は R のまま。保持（7 日・500 行）で消えるだけ |
+| 24 | R | O8 サーバーが送信の途中で落ち、O1 が来ない | **`ASK_RESERVED_STALE_MS`（10 分）を過ぎた R は、読み取り（reader・API）の時に `send_unknown` とみなす**（H3）。R+ は表の 3・4 の先へ進める | 予約からの経過時間だけで判定（台帳の `send_state` は書き換えない） | ★「H3 a reservation older than ASK_RESERVED_STALE_MS is read as send_unknown and can settle」 | ✗ 今は R のまま。保持（7 日・500 行）で消えるだけ |
 | 25 | 任意 | O8 保持の掃除 | 行が消える（GET は 404） | — | ○ migration-v72「prunes by age…」 | ○ D:124-134 |
 | 26 | ∅ | O2（予約の無い封筒の形の行） | 行は作らない。**History の本文から封筒を外さない** | 封筒を外すのは、同じ宛先の予約行がある本文だけ（I3） | ★「M2 negative: a send without ask whose body opens with an envelope-shaped line keeps it; the /send row is adopted as one row」 | ✗ **T:803-809**（形だけで外す）。pr1b の 1。台帳側は ○ C:149-153 |
+
+#### 3.6.3a 人の決定（2026-11-13 14:55）に合わせた定数と規則
+
+- `ASK_RESERVED_STALE_MS` = 10 分（600,000 ms）。H3: 予約からこれだけたっても送信結果の無い行（`reserved`）は、読み取りの時に `send_unknown` とみなす。送信の経路（入力のロック待ち・セッションの起動）の上限より十分長い値
+- `ASK_ATTRIBUTION_MIN_VERSIONS.claude` = `2.1.239`。H5: stop_reason を書かない claude の版では capability を false に絞る。この値はリポジトリにある実記録で stop_reason を持つ最古の版（`tests/fixtures/turn-separation-2234/claude-tool-first-turn.jsonl`）。それより古い版・版が読めないときは false（§0.1）
+- 新しい理由: `turn_interrupted`（H5。保存する終端）、`history_changed`（H4。読み取りで判定、保存しない）、`send_unknown`（H3。古い予約の読み取りで判定、保存しない）、`not_sent`（H2。保存する終端）
+- 台帳に足す列（v72 の中で）: 本文の digest と長さ（H4）、予約中に見えた重複・吸収の証拠（I8）
 
 #### 3.6.4 不変条件（14）
 
@@ -377,17 +389,17 @@ M7（consistency-review が止まる）は CLI（PR3）の話なので、この�
 | (c) 公開版 skill の `ask.sh`・`SKILL.md` と出す順番 | ① 公開版 skill を先に直して publish してから PR3 をマージ ② PR3 を先にマージし、公開版を追って直す（その間、未対応の tool で「空の返答で完了」と読まれうる） | **①**。公開版 skill を先に直して publish してから PR3（commandmate-skills の Issue と publish は PM が人に伺う。PR3 はリーダーが止める）。`reply:null` と `attribution` の読み方・context-limit の救済の扱いを直す |
 | (d) codex の上限で Antigravity に振り替えたときの 5-2b（M7 の残り） | ① antigravity の adapter が対応するまで、振り替え先は claude にする ② `consistency-review.mjs` に `attribution.state` の分岐を足す（このとき書いてよいファイルに足す） | **① 振り替え先は claude**。運用の手順の変更で済み、スクリプトを変えない |
 
-### 7.1 要決定（人）: 状態遷移表（§3.6）から出たもの
+### 7.1 決定（2026-11-13 14:55、人）: 状態遷移表（§3.6）から出たもの
 
-PM が人に伺う。**決まるまで PR1 は作り直さない**（§3.6 の ✗ のセルの修正と、全セルの試験は決定の後に入れる）。推奨は材料のとおり。
+PM 経由で人が決めた。PR1 はこの決定と §3.6 の全セル・不変条件 14 に沿って作り直す（PM の処分）。
 
-| 決めること | 選択肢 | 推奨 |
+| 決めること | 選択肢 | 決定 |
 |---|---|---|
-| H1. `turnOpenAtSend` が読めなかったとき（null）の扱い（表の 10b） | ① 今どおり「開いていなかった」と同じに扱う（R:520 の `?? null`、C:198 は `=== true` だけを見る） ② true 側（`ambiguous`）に倒す | 材料に推奨の明記なし。R3 は安全弁なので ② の向きが不変条件に合うが、読めない頻度しだいで ask が ambiguous ばかりになりうる（頻度は未確認） |
-| H2. `not_sent` の後に封筒が見えたとき（表の 22） | (a) `not_sent` を保存の時点で `unmatched/not_sent` の終端にし、後の観測はログだけ（I1 と一貫） (b) 証拠を採って普通に確定まで進める | **(a)**（今はどちらでもなく、M になりうる） |
-| H3. 送信の途中でサーバーが落ち、送信の結果が来ない（R が残る。表の 24） | ① 一定時間たった R を読み取りの時に `send_unknown` とみなす（表の 3・4 の R+ が先に進めるようになる） ② 保持の掃除まで放置する（CLI は grace で `unmatched` を出す） | 材料に推奨の明記なし |
-| H4. I2（matched の本文を確定時のまま返す）の実現方法（表の 19） | (a) 確定時に本文を台帳に持つ（v72 の注記「Holds no body」と保存量に反する） (b) digest と長さを持ち、違えば新しい理由（例 `history_changed`）で返さない（API の理由の一覧が増える） | 材料に推奨の明記なし |
-| H5. 中断された turn（superseded）の扱い（I5） | ① 完了とみなさず永久に `pending` ② 新しい理由（例 `turn_interrupted`）の `unmatched` | 材料に推奨の明記なし。stop_reason を書かない claude の版では ask が常に未確定になるので、capability を版で絞るか（§8 Q2）も合わせて決める |
+| H1. `turnOpenAtSend` が読めなかったとき（null）の扱い（表の 10b） | ① 今どおり「開いていなかった」と同じに扱う ② true 側（`ambiguous`）に倒す | **② `ambiguous/turn_open_at_send`** |
+| H2. `not_sent` の後に封筒が見えたとき（表の 22） | (a) `not_sent` を保存の時点で `unmatched/not_sent` の終端にし、後の観測はログだけ (b) 証拠を採って普通に確定まで進める | **(a)** |
+| H3. 送信の途中でサーバーが落ち、送信の結果が来ない（表の 24） | ① 一定時間たった R を読み取りの時に `send_unknown` とみなす ② 保持の掃除まで放置する | **①**。時間は `ASK_RESERVED_STALE_MS`（§3.6.3a） |
+| H4. I2（matched の本文を確定時のまま返す）の実現方法（表の 19） | (a) 確定時に本文を台帳に持つ (b) digest と長さを持ち、違えば `history_changed` で返さない | **(b)**。本文は持たない（v72 の「Holds no body」を保つ） |
+| H5. 中断された turn（superseded）の扱い（I5） | ① 永久に `pending` ② `turn_interrupted` の `unmatched` | **② `unmatched/turn_interrupted`**。stop_reason を書かない claude の版では capability を false に絞る（版の判定は §0.1） |
 
 ## 8. 質問への答え
 
@@ -434,4 +446,4 @@ PM が人に伺う。**決まるまで PR1 は作り直さない**（§3.6 の �
 | 5 | A:61・C:222-229 | 吸収の観測で session を照合しない。reserved の間の吸収の証拠を捨てる（I6・I8） | 5 | pr1b の 5 |
 | 6 | C:161 | `currentSessionId` か `nativeSessionId` が null だと session の照合を丸ごと飛ばす（I6） | 8b | 状態遷移表の具体化で新しく見つけた |
 
-修正は §7.1 の決定の後（PR1 を作り直すときに、全セルの試験と一緒に入れる）。
+§7.1 は 2026-11-13 14:55 に決まった。PR1 を作り直すときに、全セルの試験と一緒に直す。
