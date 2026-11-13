@@ -2,8 +2,8 @@
   "version": "0.51.1",
   "date": "2026-11-14",
   "highlight": {
-    "ja": "mem の決定の画面をリポジトリとブランチから選べるようにし、決定を読む CLI を足しました。ask の返答を依頼ごとに正しく結ぶようにし、終わった CLI へ回答のキーを送らないようにしました。",
-    "en": "You can now pick the mem decisions screen by repository and branch, and read decisions from the CLI. Replies to ask are now tied to each request, and answer keys are no longer sent to a CLI that has exited."
+    "ja": "mem の決定の画面をリポジトリとブランチから選べるようにし、決定を読む CLI を足しました。終わった CLI へ回答のキーを送らないようにしました。",
+    "en": "You can now pick the mem decisions screen by repository and branch, and read decisions from the CLI. Answer keys are no longer sent to a CLI that has exited."
   },
   "added": [
     {
@@ -34,10 +34,6 @@
     }
   ],
   "fixed": [
-    {
-      "ja": "ask の返答が、別の依頼への返事を読んでしまうことがある問題を直しました（Claude と Codex）。",
-      "en": "Fixed ask sometimes reading a reply that belonged to a different request (Claude and Codex)."
-    },
     {
       "ja": "CLI が終わってシェルに戻ったペインへ、回答や Auto-Yes のキーが送られることがある問題を直しました。",
       "en": "Fixed answers and Auto-Yes keys being sent to a pane where the CLI had exited back to the shell."
