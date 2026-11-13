@@ -15,6 +15,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { SearchMode, SearchResult, TreeItem } from '@/types/models';
 import { debounce, computeMatchedPaths } from '@/lib/utils';
+import { fetchForHandoffPage, type HandoffPageOwner } from '@/lib/handoff/page-owner';
 
 // ============================================================================
 // Constants
@@ -36,6 +37,11 @@ export interface UseFileSearchOptions {
   initialMode?: SearchMode;
   /** Debounce delay in ms (default: 300) */
   debounceMs?: number;
+  /**
+   * Issue #4345 1c: the worktree page's registration holder (`@/lib/handoff/page-owner`); the
+   * search's 401 reaches the hand-off gateway under it. Omitted: reports nothing.
+   */
+  handoffOwner?: HandoffPageOwner;
 }
 
 export interface UseFileSearchReturn {
@@ -80,7 +86,7 @@ export interface UseFileSearchReturn {
  * ```
  */
 export function useFileSearch(options: UseFileSearchOptions): UseFileSearchReturn {
-  const { worktreeId, initialMode = 'name', debounceMs = SEARCH_DEBOUNCE_MS } = options;
+  const { worktreeId, initialMode = 'name', debounceMs = SEARCH_DEBOUNCE_MS, handoffOwner } = options;
 
   // State
   const [query, setQueryState] = useState('');
@@ -189,7 +195,9 @@ export function useFileSearch(options: UseFileSearchOptions): UseFileSearchRetur
       setError(null);
 
       try {
-        const response = await fetch(
+        // Issue #4345 1c: reported before the error body is read.
+        const response = await fetchForHandoffPage(
+          handoffOwner,
           `/api/worktrees/${encodeURIComponent(worktreeId)}/search?q=${encodeURIComponent(debouncedQuery)}&mode=content`,
           { signal: controller.signal }
         );
@@ -232,7 +240,7 @@ export function useFileSearch(options: UseFileSearchOptions): UseFileSearchRetur
     return () => {
       controller.abort();
     };
-  }, [mode, debouncedQuery, worktreeId]);
+  }, [mode, debouncedQuery, worktreeId, handoffOwner]);
 
   // Clear results when switching to name mode
   useEffect(() => {

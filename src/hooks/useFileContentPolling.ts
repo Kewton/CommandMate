@@ -12,6 +12,8 @@
 import { useRef } from 'react';
 import { useFilePolling } from '@/hooks/useFilePolling';
 import { fetchApiResponse } from '@/lib/api-client';
+import { beginHandoffPageResponseReport } from '@/lib/handoff/page-owner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import { FILE_CONTENT_POLL_INTERVAL_MS } from '@/config/file-polling-config';
 import { POLLING_DISABLED_THRESHOLD_BYTES } from '@/config/file-viewer-config';
@@ -69,6 +71,8 @@ export function useFileContentPolling({
   onLoadContentRef.current = onLoadContent;
   const tabPathRef = useRef(tab.path);
   tabPathRef.current = tab.path;
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
 
   // Polling is enabled only when the tab is in a "settled" state and the file
   // is small enough to refetch cheaply. See {@link isPollingEnabled}.
@@ -92,11 +96,14 @@ export function useFileContentPolling({
         // cannot carry them, and could still be retrying when the following
         // tick fires. `fetchApiResponse` (not `fetchApi`) because a 304 carries
         // no body at all, and reading `Last-Modified` off it is the whole point.
+        // Issue #4345 1c: reported before the non-2xx return (the 304 and the 200 say nothing).
+        const reportAuth = beginHandoffPageResponseReport(handoffOwner);
         const response = await fetchApiResponse(url, {
           headers,
           timeoutMs: API_POLL_TIMEOUT_MS,
           retries: 0,
         });
+        reportAuth?.(response);
 
         if (response.status === 304) return; // No changes
         if (!response.ok) return; // Ignore errors in polling

@@ -94,7 +94,9 @@ const PAGE_PATHS: ReadonlySet<HandoffClosePath> = new Set(['worktree-switch', 'p
  * `refused` and `failed` leave the session running, `unknown` says nothing (offline, past the
  * deadline, or another kill in flight). The plain stop says "stopped" for `stopped` only.
  */
-export type SessionStopResult = 'stopped' | 'refused' | 'failed' | 'unknown';
+export type SessionStopResult = 'stopped' | 'refused' | 'failed' | 'unknown' | 'not-sent';
+// Issue #4345 1c 再指示 2 (K1): `not-sent` — the kill was not sent at all (the page's gate refused it:
+// the session expired or the page was left). Not a kill's result: nothing is told nor recorded.
 
 // ---------------------------------------------------------------------------------------------
 // The store

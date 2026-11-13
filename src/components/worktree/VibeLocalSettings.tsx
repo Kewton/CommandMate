@@ -21,6 +21,8 @@ import {
   VIBE_LOCAL_CONTEXT_WINDOW_MAX,
 } from '@/lib/cli-tools/types';
 import { Spinner } from '@/components/ui/Spinner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 // ============================================================================
 // Types
@@ -61,6 +63,8 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
   const t = useTranslations('schedule');
 
   // Ollama model state
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [ollamaModels, setOllamaModels] = useState<OllamaModelInfo[]>([]);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -83,7 +87,8 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
     let cancelled = false;
     setLoadingModels(true);
 
-    fetch('/api/ollama/models')
+    // Issue #4345 1c 再指示 1: the 401 reaches the gateway before it is folded into the error.
+    fetchForHandoffPage(handoffOwner, '/api/ollama/models')
       .then((res) => res.json())
       .then((data: { models: OllamaModelInfo[]; error?: string }) => {
         if (cancelled) return;
@@ -100,7 +105,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
       });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [handoffOwner]);
 
   const handleModelChange = useCallback(
     async (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -108,7 +113,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
       const model = value === '' ? null : value;
       setSavingModel(true);
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`, {
+        const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ vibeLocalModel: model }),
@@ -122,7 +127,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
         setSavingModel(false);
       }
     },
-    [worktreeId, onVibeLocalModelChange]
+    [worktreeId, onVibeLocalModelChange, handoffOwner]
   );
 
   const handleContextWindowInput = useCallback(
@@ -145,7 +150,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
 
       setSavingContextWindow(true);
       try {
-        const response = await fetch(`/api/worktrees/${worktreeId}`, {
+        const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ vibeLocalContextWindow: ctxWindow }),
@@ -167,7 +172,7 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
         setSavingContextWindow(false);
       }
     },
-    [contextWindowInput, vibeLocalContextWindow, worktreeId, onVibeLocalContextWindowChange]
+    [contextWindowInput, vibeLocalContextWindow, worktreeId, onVibeLocalContextWindowChange, handoffOwner]
   );
 
   return (

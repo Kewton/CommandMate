@@ -151,13 +151,14 @@ import { MobileSurfaceModeToggle } from '@/components/worktree/MobileSurfaceMode
 export { MODEL_CHANGE_HIGHLIGHT_MS };
 import { OPENCODE_LEADER_KEY } from '@/types/terminal-keys';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
-import { worktreeApi } from '@/lib/api-client';
 import { getTerminalDisplayCompaction } from '@/config/terminal-display-compaction';
 import { getMobileSurfaceModeStorageKey } from '@/config/surface-mode-config';
 import { useSurfaceMode } from '@/hooks/useSurfaceMode';
 import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
 import type { SurfaceMode } from '@/types/ui-state';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { beginHandoffPageOperation, sendMessageForHandoffPage } from '@/lib/handoff/page-owner';
 
 export interface MobileTerminalTabProps {
   worktreeId: string;
@@ -486,6 +487,8 @@ const MobileChatSurface = memo(function MobileChatSurface({
     instanceId,
   });
 
+  // Issue #4345 1c 再指示 2: the composer's insert, for a send not sent (set below once known).
+  const insertToComposerRef = useRef<((content: string) => void) | undefined>(undefined);
   const {
     messages,
     sendOptimistic,
@@ -495,6 +498,8 @@ const MobileChatSurface = memo(function MobileChatSurface({
     worktreeId,
     serverMessages,
     onSent: refresh,
+    // Issue #4345 1c 再指示 2: a send not sent (the page's gate refused it) goes back to the composer.
+    onNotSent: (content) => insertToComposerRef.current?.(content),
   });
 
   // Publish the send for the docked composer. Released on unmount, i.e. the
@@ -511,6 +516,7 @@ const MobileChatSurface = memo(function MobileChatSurface({
   // dropping it — PC does this through `onHistoryInsertToMessage`; here the
   // screen's own insert callback arrives over the same context.
   const insertToComposer = useChatComposerInsert();
+  insertToComposerRef.current = insertToComposer;
   const handleDiscardPending = useDiscardPending(discardPending, insertToComposer);
 
   return (
@@ -640,6 +646,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // (#2254) or the terminal shows it without waiting for the next tick.
   const sendPickerChord = useSpecialKeys(worktreeId, cliToolId, instanceId, refresh);
   const optimisticSend = useChatOptimisticSend({ cliToolId, instanceId });
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -648,15 +656,21 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
     []
   );
   const openModelPicker = useCallback(() => {
+    // Issue #4345 1c 再指示 1・2: a send of the page — not once a 401 was taken. Checked before the
+    // tool's branch (OpenCode's chord included), and the press's token goes to the gate.
+    const operation = beginHandoffPageOperation(handoffOwner);
+    if (!operation.mayStart()) return;
     if (cliToolId === 'opencode') {
-      sendPickerChord([...OPENCODE_MODEL_PICKER_KEYS]);
+      sendPickerChord([...OPENCODE_MODEL_PICKER_KEYS], operation);
       return;
     }
     const options: OptimisticSendOptions = { cliToolId, instanceId };
     if (optimisticSend) {
       optimisticSend(MODEL_PICKER_COMMAND, options);
     } else {
-      void worktreeApi.sendMessage(worktreeId, MODEL_PICKER_COMMAND, options).catch(() => {
+      // Issue #4345 1c 再指示 1: the direct send's 401 reaches the gateway before it is swallowed (not
+      // sent, refused by the gate: swallowed alike — nothing happened).
+      void sendMessageForHandoffPage(handoffOwner, worktreeId, MODEL_PICKER_COMMAND, options, operation).catch(() => {
         // Advisory: the pane's next poll shows whether the picker opened.
       });
     }
@@ -665,7 +679,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       refreshTimerRef.current = null;
       void refresh();
     }, NAV_KEY_REFRESH_DELAY_MS);
-  }, [cliToolId, instanceId, optimisticSend, refresh, sendPickerChord, worktreeId]);
+  }, [cliToolId, instanceId, optimisticSend, refresh, sendPickerChord, worktreeId, handoffOwner]);
 
   // Issue #2193: one preference per worktree here (the phone shows one pane at
   // a time), against one per split on PC. SSR-safe default first, then the

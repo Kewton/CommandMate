@@ -12,6 +12,8 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, memo } from 'react';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 import { useTranslations } from 'next-intl';
 import { ScheduleEditDialog, type ScheduleFormValues } from '@/components/worktree/schedules/ScheduleEditDialog';
 import { ExecutionLogsView, type ExecutionLog } from '@/components/worktree/schedules/ExecutionLogsView';
@@ -103,6 +105,8 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   instances,
 }: ExecutionLogPaneProps) {
   const t = useTranslations('schedule');
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const confirm = useConfirm();
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -125,9 +129,10 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
 
     try {
       const [logsRes, schedulesRes, activeRes] = await Promise.all([
-        fetch(`/api/worktrees/${worktreeId}/execution-logs`),
-        fetch(`/api/worktrees/${worktreeId}/schedules`),
-        fetch(`/api/worktrees/${worktreeId}/schedules/active`),
+        // Issue #4345 1c: each read's 401 reaches the gateway before the non-2xx is skipped.
+        fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/execution-logs`),
+        fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/schedules`),
+        fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/schedules/active`),
       ]);
 
       if (logsRes.ok) {
@@ -151,7 +156,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
     } finally {
       setIsLoading(false);
     }
-  }, [worktreeId]);
+  }, [worktreeId, handoffOwner]);
 
   useEffect(() => {
     void fetchData();
@@ -169,7 +174,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
   const buildInitialFromCmate = useCallback(
     async (name: string): Promise<Partial<ScheduleFormValues> | null> => {
       try {
-        const res = await fetch(`/api/worktrees/${worktreeId}/files/CMATE.md`);
+        const res = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/files/CMATE.md`);
         if (!res.ok) return null;
         const data = await res.json();
         const content: string = typeof data.content === 'string' ? data.content : '';
@@ -191,7 +196,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         return null;
       }
     },
-    [worktreeId],
+    [worktreeId, handoffOwner],
   );
 
   const handleNewSchedule = useCallback(() => {
@@ -226,7 +231,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         return;
       }
       try {
-        const res = await fetch(`/api/worktrees/${worktreeId}/cmate/schedules`, {
+        const res = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/cmate/schedules`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name }),
@@ -236,13 +241,13 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         console.error('Failed to delete schedule:', err);
       }
     },
-    [worktreeId, t, fetchData, confirm],
+    [worktreeId, t, fetchData, confirm, handoffOwner],
   );
 
   const handleToggleSchedule = useCallback(
     async (schedule: Schedule) => {
       try {
-        const res = await fetch(`/api/worktrees/${worktreeId}/cmate/schedules`, {
+        const res = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/cmate/schedules`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: schedule.name, enabled: schedule.enabled !== 1 }),
@@ -252,7 +257,7 @@ export const ExecutionLogPane = memo(function ExecutionLogPane({
         console.error('Failed to toggle schedule:', err);
       }
     },
-    [worktreeId, fetchData],
+    [worktreeId, fetchData, handoffOwner],
   );
 
   if (isLoading) {

@@ -14,6 +14,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { fetchForHandoffPage, type HandoffPageOwner } from '@/lib/handoff/page-owner';
 
 /**
  * Represents the target of a move operation.
@@ -48,12 +49,15 @@ interface UseFileOperationsReturn {
  * @param onRefresh - Callback to refresh the file tree after operations
  * @param onSuccess - Optional callback for success notification
  * @param onError - Optional callback for error notification
+ * @param handoffOwner - Issue #4345 1c: the worktree page's registration holder; the move's 401
+ *   reaches the hand-off gateway under it before its body is read. Omitted: reports nothing.
  */
 export function useFileOperations(
   worktreeId: string,
   onRefresh: () => void,
   onSuccess?: (message: string) => void,
-  onError?: (message: string) => void
+  onError?: (message: string) => void,
+  handoffOwner?: HandoffPageOwner
 ): UseFileOperationsReturn {
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
@@ -67,7 +71,8 @@ export function useFileOperations(
     if (!moveTarget) return;
 
     try {
-      const response = await fetch(
+      const response = await fetchForHandoffPage(
+        handoffOwner,
         `/api/worktrees/${worktreeId}/files/${moveTarget.path}`,
         {
           method: 'PATCH',
@@ -95,7 +100,7 @@ export function useFileOperations(
       setMoveTarget(null);
       setIsMoveDialogOpen(false);
     }
-  }, [moveTarget, worktreeId, onRefresh, onSuccess, onError]);
+  }, [moveTarget, worktreeId, onRefresh, onSuccess, onError, handoffOwner]);
 
   const handleMoveCancel = useCallback(() => {
     setMoveTarget(null);

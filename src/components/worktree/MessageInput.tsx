@@ -7,8 +7,15 @@
 
 import React, { memo, useState, useCallback, FormEvent, useRef, useEffect, useLayoutEffect } from 'react';
 import { useTranslations } from 'next-intl';
-import { worktreeApi, handleApiError, isBriefBoundaryChanged, type SendBriefChoice } from '@/lib/api-client';
+import { handleApiError, isBriefBoundaryChanged, type SendBriefChoice } from '@/lib/api-client';
 import { fetchStartPreview, isCommandBody, START_PREVIEW_TIMEOUT_MS } from '@/lib/handoff/screen-client';
+import {
+  beginHandoffPageOperation,
+  isHandoffPageOperationRefused,
+  sendMessageForHandoffPage,
+  uploadImageFileForHandoffPage,
+} from '@/lib/handoff/page-owner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import type { StartPreviewResponse } from '@/lib/handoff/preview';
 import { SessionStartBriefDialog, type StartBriefChoice } from '@/components/mem/SessionStartBriefDialog';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -333,10 +340,18 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // so it docks above the software keyboard without any transform. This keeps
   // the composer a plain in-flow element on every surface (mobile / PC / chat).
 
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page: the
+  // sessions view's composer reports nothing and calls the API exactly as before).
+  const handoffOwner = useHandoffPageOwner();
+
   // Issue #474: Image attachment hook
   const uploadFn = useCallback(
-    (wId: string, file: File) => worktreeApi.uploadImageFile(wId, file),
-    []
+    (wId: string, file: File) => {
+      // Issue #4345 1c: the upload's 401 reaches the gateway before it becomes an Error (再指示 2: an
+      // operation of the page — not sent once a 401 was taken).
+      return uploadImageFileForHandoffPage(handoffOwner, wId, file);
+    },
+    [handoffOwner]
   );
   const {
     attachedImage,
@@ -410,14 +425,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const readStartPreview = useCallback(async (): Promise<{ value: StartPreviewResponse | null; current: boolean }> => {
     const key = previewKey;
     const seq = ++previewSeqRef.current;
-    const value = await withinPreviewLimit(fetchStartPreview(worktreeId, briefInstance), START_PREVIEW_TIMEOUT_MS);
+    // Issue #4345 1c: owned by the page's registration held now (1b made the gateway's side; this is
+    // its caller's): the 401 reaches the gateway before the preview is `null`.
+    const owner = handoffOwner.current;
+    const value = await withinPreviewLimit(
+      owner ? fetchStartPreview(worktreeId, briefInstance, owner) : fetchStartPreview(worktreeId, briefInstance),
+      START_PREVIEW_TIMEOUT_MS,
+    );
     const current = mountedRef.current && previewKeyRef.current === key;
     if (current && seq > previewAdoptedSeqRef.current) {
       previewAdoptedSeqRef.current = seq;
       startPreviewRef.current = { key, at: Date.now(), value };
     }
     return { value, current };
-  }, [worktreeId, briefInstance, previewKey]);
+  }, [worktreeId, briefInstance, previewKey, handoffOwner]);
   const refreshStartPreview = useCallback(
     (force: boolean) => {
       const cached = startPreviewRef.current;
@@ -525,6 +546,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setPlanReviewStopped(true);
       return;
     }
+    // Issue #4345 1c 再指示 1: a send of a worktree page starts only while the page's registration
+    // (fixed now) may start — not once a 401 was taken (the registry's expiry). Nothing is sent and
+    // the draft stays; checked again after the preview's await below. Outside a page: as before.
+    const operation = beginHandoffPageOperation(handoffOwner);
+    if (!operation.mayStart()) return;
 
     const trimmed = message.trim();
     const effectiveCliTool: CLIToolType = cliToolId || 'claude';
@@ -565,7 +591,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         !read.current ||
         attempt !== sendAttemptRef.current ||
         messageRef.current.trim() !== trimmed ||
-        attachedImagePathRef.current !== (attachedImage?.path ?? null)
+        attachedImagePathRef.current !== (attachedImage?.path ?? null) ||
+        // Issue #4345 1c 再指示 1: another entry's 401 taken while the preview was read (its own 200
+        // recovers nothing): nothing is sent, the draft stays.
+        !operation.mayStart()
       ) {
         return;
       }
@@ -608,7 +637,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     try {
       setSending(true);
       setError(null);
-      const created = await worktreeApi.sendMessage(worktreeId, trimmed, options);
+      // Issue #4345 1c: the send's 401 reaches the gateway before it becomes an ApiError. 再指示 2 (K1):
+      // with the press's token — the gate reads the registration the press fixed.
+      const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
@@ -625,11 +656,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       onMessageSent?.(effectiveCliTool, created);
       afterSendStartPreview();
     } catch (err) {
+      // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
+      // error, the draft stays.
+      if (isHandoffPageOperationRefused(err)) return;
       setError(handleApiError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -640,6 +674,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const sendWithBriefChoice = useCallback(async (choice: StartBriefChoice) => {
     const asked = briefAsk;
     if (!asked || briefSending) return;
+    // Issue #4345 1c 再指示 1: see the plain send (nothing is sent, the draft and the question stay).
+    const operation = beginHandoffPageOperation(handoffOwner);
+    if (!operation.mayStart()) return;
     const trimmed = message.trim();
     if (!trimmed && !attachedImage) {
       setBriefAsk(null);
@@ -660,7 +697,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setSending(true);
     setError(null);
     try {
-      const created = await worktreeApi.sendMessage(worktreeId, trimmed, options);
+      // Issue #4345 1c: see the plain send.
+      const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
       setBriefAsk(null);
       setMessage('');
       setIsFreeInputMode(false);
@@ -671,6 +709,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       onMessageSent?.(effectiveCliTool, created);
       refreshStartPreview(true);
     } catch (err) {
+      // Issue #4345 1c 再指示 2 (K1): not sent — nothing happened: the question and the draft stay.
+      if (isHandoffPageOperationRefused(err)) return;
       if (isBriefBoundaryChanged(err)) {
         const reason = typeof err.data.reason === 'string' ? err.data.reason : '';
         const notice = `${tc('mem.startBrief.askAgain', { reason })}${reason === 'claimed' ? ` ${tc('mem.startBrief.claimed')}` : ''}`;
@@ -698,7 +738,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, splitIndex, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, splitIndex, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner]);
 
   const closeBriefAsk = useCallback(() => {
     if (briefSending) return;

@@ -18,7 +18,7 @@
  * Based on Issue #13 UX Improvement design specification.
  */
 
-import React, { useEffect, useCallback, useMemo, useState, useRef, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useCallback, useMemo, useState, useRef, useSyncExternalStore } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
@@ -83,7 +83,13 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 import { ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
-import { readRunningInstances } from '@/lib/api-client-agent-roles';
+import {
+  beginHandoffPageOperation,
+  beginHandoffPageResponseReport,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+} from '@/lib/handoff/page-owner';
+import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import {
@@ -110,13 +116,16 @@ import {
 import {
   handoffRegistrySnapshot,
   handoffPageMayStart,
+  assertHandoffPageRequestMayLeave,
   beginHandoffPageRequest,
+  isHandoffPageOperationRefused,
   publishHandoffPageView,
   registerHandoffPage,
   reportHandoffPageAuthenticated,
   reportHandoffPageResponse,
   subscribeHandoffRegistry,
   unregisterHandoffPage,
+  type HandoffPageOperation,
   type HandoffPageRegistration,
   type HandoffPageRequest,
 } from '@/lib/handoff/page-registration';
@@ -371,6 +380,9 @@ async function killSessionThroughGateway(
     const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/kill-session${queryString ? `?${queryString}` : ''}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      // Issue #4345 1c 再指示 2 (K1): the gate, right before the fetch — a kill the page may not start
+      // is not sent (`HandoffPageOperationRefusedError`, passed through below untouched).
+      beforeFetch: () => assertHandoffPageRequestMayLeave(authRequest),
     });
     reportHandoffPageResponse(authRequest, response);
     const redirectError = detectAuthRedirect(response);
@@ -390,10 +402,13 @@ async function killSessionThroughGateway(
     if (formatError) throw formatError;
     await response.json();
   } catch (error) {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError || isHandoffPageOperationRefused(error)) throw error;
     throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0, error);
   }
 }
+
+/** Issue #4345 1c 再指示 1: the layout phase in the browser; `useEffect` where there is no DOM (SSR). */
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
   const isMobile = useIsMobile();
@@ -491,7 +506,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    */
   const [handoffRegistration, setHandoffRegistration] = useState<HandoffPageRegistration | null>(null);
   const handoffRegistrationRef = useRef<HandoffPageRegistration | null>(null);
-  useEffect(() => {
+  // Issue #4345 1c 再指示 1: registered in the layout phase, so before any passive effect of what the
+  // page draws — on a cache hit the split's and the phone's first polls leave in the same commit, and
+  // a request that left before the registration would be owned by none (its 401 never taken).
+  // Children's layout effects run first, but none of them sends a request.
+  useIsomorphicLayoutEffect(() => {
     const registration = registerHandoffPage(worktreeId);
     handoffRegistrationRef.current = registration;
     setHandoffRegistration(registration);
@@ -837,7 +856,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   } = useDiffViewerState(isMobile);
 
   // [Issue #21] File search state
-  const fileSearch = useFileSearch({ worktreeId });
+  // Issue #4345 1c: the search's 401 reaches the gateway, owned by this page's registration.
+  const fileSearch = useFileSearch({ worktreeId, handoffOwner: handoffRegistrationRef });
 
   // Track if initial load has completed to prevent re-triggering
   const initialLoadCompletedRef = useRef(false);
@@ -1104,10 +1124,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // Issue #701: include user-selected history display limit
       params.set('limit', String(historyDisplayLimitRef.current));
+      // Issue #4345 1c: owned by the registration this read left under, numbered in its one order
+      // across entries (not `requestId`, this poller's own), reported before the status is an Error.
+      const reportAuth = beginHandoffPageResponseReport(handoffRegistrationRef);
       const response = await fetchApiResponse(
         `/api/worktrees/${worktreeId}/messages?${params.toString()}`,
         POLL_REQUEST_OPTIONS,
       );
+      reportAuth?.(response);
       if (!response.ok) {
         throw new Error(`Failed to fetch messages: ${response.status}`);
       }
@@ -1144,7 +1168,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       const outputUrl = onMobile
         ? `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}&instance=${encodeURIComponent(requestedInstance)}`
         : `/api/worktrees/${worktreeId}/current-output?cliTool=${requestedCliTool}`;
+      // Issue #4345 1c: see fetchMessages (reported before the 409 body is read or the return).
+      const reportAuth = beginHandoffPageResponseReport(handoffRegistrationRef);
       const response = await fetchApiResponse(outputUrl, POLL_REQUEST_OPTIONS);
+      reportAuth?.(response);
       if (!response.ok) {
         // Issue #3334: the one refusal that will not go away on the next poll —
         // the session under this name is another CommandMate server's (#2865).
@@ -1310,7 +1337,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (worktreeId !== worktreeIdRef.current) return;
     const requestId = ++latestAutoYesRequestIdRef.current;
     try {
+      // Issue #4345 1c: see fetchMessages (reported before the non-2xx return).
+      const reportAuth = beginHandoffPageResponseReport(handoffRegistrationRef);
       const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/auto-yes`, POLL_REQUEST_OPTIONS);
+      reportAuth?.(response);
       if (!response.ok) return;
       const data = await response.json();
       // Latest-request guard: only the newest refetch may write the map.
@@ -1718,6 +1748,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Handle prompt response submission */
   const handlePromptRespond = useCallback(
     async (answer: string): Promise<void> => {
+      // Issue #4345 1c 再指示 2 (K1): the press's token — the gate reads its registration.
+      const operation = beginHandoffPageOperation(handoffRegistrationRef);
       actions.setPromptAnswering(true);
       let outcome: PromptResponseOutcome;
       // Issue #4031: a failure stopped part-way (keys may be on the pane).
@@ -1743,13 +1775,25 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
           isMobileRef.current ? activeInstanceIdRef.current : undefined,
         );
 
-        const response = await fetch(`/api/worktrees/${worktreeId}/prompt-response`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-        });
+        // Issue #4345 1c: the answer's 401 reaches the gateway before the reply is read.
+        const response = await fetchForHandoffPage(
+          handoffRegistrationRef,
+          `/api/worktrees/${worktreeId}/prompt-response`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+          },
+          handoffPageOperationOptions(operation),
+        );
         ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
+        // toast, the card stays as it was.
+        if (isHandoffPageOperationRefused(err)) {
+          actions.setPromptAnswering(false);
+          return;
+        }
         // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
         outcome = 'failed';
@@ -1815,7 +1859,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       async (params: AutoYesToggleParams): Promise<void> => {
         const effectiveInstanceId = instanceId ?? cliToolId;
         try {
-          const response = await fetch(`/api/worktrees/${worktreeId}/auto-yes`, {
+          // Issue #4345 1c: the toggle's 401 reaches the gateway before the failure is told.
+          const response = await fetchForHandoffPage(handoffRegistrationRef, `/api/worktrees/${worktreeId}/auto-yes`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1943,12 +1988,18 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    * button (G-4) runs the same one — not a copy — for the target it snapshotted. pr2e (codex
    * P2-2): it says how it ended, so the hand-off's plain stop says "stopped" only when it did.
    */
-  const stopSession = useCallback(async (target: SessionKillTarget | null): Promise<SessionStopResult> => {
+  const stopSession = useCallback(async (target: SessionKillTarget | null, operation?: HandoffPageOperation): Promise<SessionStopResult> => {
     if (!target || isKillPendingRef.current) return 'unknown';
     isKillPendingRef.current = true;
     setIsKillPending(true);
     // Issue #4345 1b: the kill's owner and order, fixed as it leaves (this page's registration then).
-    const killAuthRequest = beginHandoffPageRequest(handoffRegistrationRef.current);
+    // 再指示 2 (K1): an operation of the page (gated before it is sent: the registration held now, or
+    // — from the hand-off's stop — the stop's token, whose record capability the kill's leaving makes).
+    const killAuthRequest = beginHandoffPageRequest(operation ? operation.registration : handoffRegistrationRef.current, {
+      kind: 'operation',
+      inside: true,
+      operation: operation ?? null,
+    });
 
     // Issue #1171: only wipe the GLOBAL (mobile-consumed / active-scoped) message
     // + prompt state when the killed target IS the active instance. A PC split
@@ -1987,6 +2038,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       await finishEnded();
       return 'stopped';
     } catch (err) {
+      // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — not a kill's result:
+      // no toast, nothing recorded, the target kept. Told apart before it is classified.
+      if (isHandoffPageOperationRefused(err)) return 'not-sent';
       // Issue #1171: a 404 means the session already ended (natural-termination
       // race). The goal is achieved, so re-sync and close rather than error.
       const failure = classifyKillFailure(err);
@@ -2001,7 +2055,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         // Issue #4160: this answer says nothing about the session, so what is running
         // now decides. Another worktree is on screen after a switch and this one's
         // dialog is gone: not worth a read, and the toast names the session.
-        const running = isStillOnScreen() ? await readRunningInstances(worktreeId) : null;
+        // Issue #4345 1c 再指示 1: the page's read (its 401 reaches the gateway; the kill's record goes on).
+        const running = isStillOnScreen() ? await readRunningInstancesForPage(handoffRegistrationRef, worktreeId) : null;
         if (running === null) {
           showToast(tCommon('sessionKill.outcomeUnknown', { label: target.label }), 'warning');
           return 'unknown';
@@ -2199,7 +2254,10 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    */
   const stopSessionRef = useRef(stopSession);
   stopSessionRef.current = stopSession;
-  const stopForHandoff = useCallback(async (): Promise<SessionStopResult> => stopSessionRef.current(handoffTargetRef.current), []);
+  const stopForHandoff = useCallback(
+    async (operation?: HandoffPageOperation): Promise<SessionStopResult> => stopSessionRef.current(handoffTargetRef.current, operation),
+    []
+  );
   /**
    * Issue #4317 PR2: the dialog's host is beside the shell (`HandoffDialogHost`, outside the route and
    * the PC / phone branches), not in this page. The page publishes on its registration what the
@@ -2235,7 +2293,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const newPath = newFileParentPath ? `${newFileParentPath}/${finalName}` : finalName;
 
     try {
-      const response = await fetch(
+      // Issue #4345 1c: the file operations' 401 reaches the gateway before the alert.
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(newPath)}`,
         {
           method: 'POST',
@@ -2266,7 +2326,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const newPath = parentPath ? `${parentPath}/${dirName}` : dirName;
 
     try {
-      const response = await fetch(
+      // Issue #4345 1c: the file operations' 401 reaches the gateway before the alert.
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(newPath)}`,
         {
           method: 'POST',
@@ -2292,7 +2354,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (!newName || newName === currentName) return;
 
     try {
-      const response = await fetch(
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(path)}`,
         {
           method: 'PATCH',
@@ -2320,7 +2383,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     if (!(await confirm({ description: tCommon('confirmDelete', { name }), variant: 'danger' }))) return;
 
     try {
-      const response = await fetch(
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/files/${encodePathForUrl(path)}?recursive=true`,
         {
           method: 'DELETE',
@@ -2361,7 +2425,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     worktreeId,
     () => setFileTreeRefresh(prev => prev + 1),
     (msg) => showToast(msg, 'success'),
-    (msg) => showToast(msg, 'error')
+    (msg) => showToast(msg, 'error'),
+    // Issue #4345 1c: the move's 401 reaches the gateway, owned by this page's registration.
+    handoffRegistrationRef
   );
 
   // Hidden file input ref for upload
@@ -2404,7 +2470,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     // Upload API call [API-004] Using /upload/:path endpoint
     try {
       const uploadPath = targetDir || '.';
-      const response = await fetch(
+      // Issue #4345 1c: the upload's 401 reaches the gateway before its error body is read.
+      const response = await fetchForHandoffPage(
+        handoffRegistrationRef,
         `/api/worktrees/${worktreeId}/upload/${encodePathForUrl(uploadPath)}`,
         {
           method: 'POST',
@@ -2746,6 +2814,12 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     closeHandoff,
     stopForHandoff,
     handoffRegistration,
+    /**
+     * Issue #4345 1c: this page's registration holder, for what the page draws
+     * (`HandoffPageOwnerContext`): its requests report their 401 under the registration held when
+     * each leaves.
+     */
+    handoffOwner: handoffRegistrationRef,
     /**
      * Issue #4317 PR1: the dialog is not drawn (unmounted, never hidden with `isOpen={false}`) while
      * the registry holds the session expired, until the current page's authenticated read. 再指示 2:

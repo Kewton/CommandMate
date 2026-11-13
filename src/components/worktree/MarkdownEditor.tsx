@@ -78,6 +78,8 @@ import {
   isValidBoolean,
 } from '@/types/markdown-editor';
 import { safeLocalStorage } from '@/lib/safe-local-storage';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 
 /**
  * Detect file type from file path extension (Issue #646)
@@ -263,6 +265,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   const isTextMode = fileType === 'text';
 
   const tWorktree = useTranslations('worktree');
+  // Issue #4345 1c: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const confirm = useConfirm();
 
   // State. When the host supplies `initialContent` (Issue #1519) the editor is
@@ -421,7 +425,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     setError(null);
 
     try {
-      const response = await fetch(
+      // Issue #4345 1c: the read's 401 reaches the gateway before its body is read.
+      const response = await fetchForHandoffPage(
+        handoffOwner,
         `/api/worktrees/${worktreeId}/files/${filePath}`
       );
       const data = await response.json();
@@ -449,7 +455,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     // tWorktree is intentionally omitted: it is only used for the fallback error
     // message, and re-creating loadContent would re-fetch the file on every
     // locale change (and loop under a non-memoized t).
-  }, [worktreeId, filePath]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [worktreeId, filePath, handoffOwner]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * API save function shared by manual and auto-save.
@@ -458,7 +464,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
    */
   const saveToApi = useCallback(
     async (valueToSave: string): Promise<void> => {
-      const response = await fetch(
+      // Issue #4345 1c: the save's 401 reaches the gateway before it becomes the save error.
+      const response = await fetchForHandoffPage(
+        handoffOwner,
         `/api/worktrees/${worktreeId}/files/${filePath}`,
         {
           method: 'PUT',
@@ -476,7 +484,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       }
       setOriginalContent(valueToSave);
     },
-    [worktreeId, filePath, tWorktree]
+    [worktreeId, filePath, tWorktree, handoffOwner]
   );
 
   // Auto-save integration (dirty state reset is handled inside saveToApi)

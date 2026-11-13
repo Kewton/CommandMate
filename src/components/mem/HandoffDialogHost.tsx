@@ -47,6 +47,7 @@ import {
   handoffRegistrySnapshot,
   reportHandoffRoute,
   subscribeHandoffRegistry,
+  type HandoffPageOperation,
   type HandoffPageRegistration,
   type HandoffRegistryState,
 } from '@/lib/handoff/page-registration';
@@ -73,7 +74,7 @@ export interface HandoffHostView {
   readonly worktreeId: string;
   readonly target: SessionHandoffTarget;
   readonly onClose: () => void;
-  readonly onStop: () => Promise<SessionStopResult>;
+  readonly onStop: (operation?: HandoffPageOperation) => Promise<SessionStopResult>;
   /** The page's registration; `null` while no page is registered (the dialog starts nothing). */
   readonly registration: HandoffPageRegistration | null;
 }
