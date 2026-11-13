@@ -162,9 +162,7 @@ export async function POST(
     // Issue #3952: as the session's input writer, so a send cannot type between
     // the answer's read and its keys. Not admitted: a 409 with nothing sent,
     // which the CLI reads as exit 40 (`session_conflict`).
-    // Issue #4303 review: the gate records a refusal right before a key, so a
-    // refusal with nothing typed comes back as one (409), never as exit 41.
-    const result = await answerStrictlyAsInputWriter(sessionName, (ticket, gate) =>
+    const result = await answerStrictlyAsInputWriter(sessionName, ticket =>
       respondStrictly(
         {
           worktreeId: id,
@@ -175,7 +173,7 @@ export async function POST(
           expectTarget: request.expectTarget,
           operationId: request.operationId,
         },
-        createStrictRespondDeps(db, target, ticket, gate)
+        createStrictRespondDeps(db, target, ticket)
       )
     );
     if ('refused' in result) return refuse(409, result.refused, result.message);

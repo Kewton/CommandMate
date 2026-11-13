@@ -683,7 +683,7 @@ async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promis
  * #4300's message send, there is no "no reader, go on" branch — test doubles
  * of the tmux module give the reader an explicit `other`.
  */
-export async function readAnswerTargetForeground(sessionName: string): Promise<PaneForeground> {
+async function readAnswerTargetForeground(sessionName: string): Promise<PaneForeground> {
   try {
     return await readPaneForeground(sessionName);
   } catch {
@@ -727,8 +727,9 @@ export class PromptAnswerAgentNotInForegroundError extends PromptAnswerNotDelive
  * Refuse an answer before its first key unless the agent holds the pane
  * (Issue #4303): `readPaneForeground` must answer `other` (a reader that
  * threw is `unknown`: see {@link readAnswerTargetForeground}). Every answer path
- * — `respond`, `/prompt-response` (its plan review too), the strict respond
- * and Auto-Yes — asks this right before its first key.
+ * — `respond`, `/prompt-response` (its plan review too) and Auto-Yes — asks
+ * this right before its first key. The strict respond does not yet (a known
+ * remainder of Issue #4303, a separate PR).
  *
  * It awaits: whatever the caller checked before it (the contract, the tick's
  * generation, the input ticket) is checked again after it, before the first

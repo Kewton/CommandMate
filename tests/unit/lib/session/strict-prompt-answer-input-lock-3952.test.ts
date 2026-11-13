@@ -16,11 +16,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 
 const sendSessionAnswerKey = vi.hoisted(() => vi.fn(async () => undefined));
-// Issue #4303: the agent holds the pane; a strict answer is refused before its first read otherwise.
-vi.mock('@/lib/tmux/tmux', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/tmux/tmux')>()),
-  readPaneForeground: vi.fn(async () => 'other' as const),
-}));
 vi.mock('@/lib/session/cli-session', () => ({
   captureSessionOutputFresh: vi.fn(),
   readSessionPaneCommand: vi.fn(),
