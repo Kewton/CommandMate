@@ -106,6 +106,8 @@ describe('[#1843] AutoYesSuppressionReason cross-validation', () => {
       'startup-trust-unhandled',
       // Issue #3748: an AskUserQuestion confirm page, left to a human.
       'question-confirm-page',
+      // Issue #4313: a prompt after a question declined in the same turn, left to a human.
+      'declined-question',
       // Issue #3767: agy's dialog with no matching hook question.
       'no-hook-receipt',
       // Issue #3822: the contract lookup failed, so nothing was answered.

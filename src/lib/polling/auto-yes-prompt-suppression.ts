@@ -26,7 +26,9 @@ import {
 } from '../cli-tools/launch-dialog';
 import { isLaunchDialogPressSettling, isLaunchWindowOpen } from '../cli-tools/launch-window';
 import { resolveSessionName } from '../cli-tools/session-name';
+import { isCommandCodeQuestionDeclinedThisTurn } from '../detection/tools/command-code/declined-question';
 import {
+  DECLINED_QUESTION_SUPPRESSION_REASON,
   QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
   STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON,
 } from './auto-yes-suppression-reason';
@@ -228,7 +230,7 @@ function isCopilotTrustDialogLeftToLaunch(prompt: JudgedPrompt, frame: Normalize
 }
 
 /**
- * Issue #3214: steps 3, 3.2, 3.3 (Issue #3497) and 3.5 of
+ * Issue #3214: steps 3, 3.2, 3.3 (Issue #3497), 3.4 (Issue #4313) and 3.5 of
  * `detectAndRespondToPrompt` -- the frames that read as a prompt and are still
  * not Auto-Yes's to answer, judged in the order they always were. "The
  * detection above" in the comments below is that function's step 1.
@@ -337,6 +339,35 @@ export function suppressIfNotOursToAnswer(prompt: JudgedPrompt, frame: Normalize
       'poller:auto-yes-skipped-question-confirm',
       {
         reason: QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON,
+        promptType: promptData.type,
+        question: truncateForLog(promptData.question),
+        options:
+          promptData.type === 'multiple_choice'
+            ? promptData.options.map((option) => `${option.number}. ${option.label}`)
+            : [...promptData.options],
+      },
+    );
+    return { kind: 'left-alone' };
+  }
+
+  // 3.4. Issue #4313 (D-1): Command Code, a question declined earlier in this
+  // turn (`└ User declined to answer questions`). The decline reaches the agent
+  // as "no answer", and on #4228's UAT it went on with its own recommendation
+  // ("回答がなかったので、推奨案で進めます") — and Auto-Yes answered the
+  // `git add` / `git commit` permissions that followed with `1`, carrying out
+  // the commit the operator had just declined to approve. Until the turn ends
+  // (a later user row, or the turn summary), every prompt is left to a human.
+  // A decline in an earlier turn does not hold (see
+  // `isCommandCodeQuestionDeclinedThisTurn`), and a dialog with no decline
+  // above it is answered as before.
+  if (cliToolId === 'command-code' && isCommandCodeQuestionDeclinedThisTurn(frame)) {
+    suppressAndWarnOnce(
+      prompt,
+      { reason: DECLINED_QUESTION_SUPPRESSION_REASON, mode: null, promptType: promptData.type },
+      `${frameKey}\u0000declined-question`,
+      'poller:auto-yes-skipped-declined-question',
+      {
+        reason: DECLINED_QUESTION_SUPPRESSION_REASON,
         promptType: promptData.type,
         question: truncateForLog(promptData.question),
         options:
