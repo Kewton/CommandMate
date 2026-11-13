@@ -73,7 +73,7 @@ export async function reservedClaudeAskIds(
 
 /** Whether any turn here has an ask to bind; the cheap check before any import. */
 export function hasClaudeAskEvidence(turns: readonly ClaudeTurnAccumulator[]): boolean {
-  return turns.some((turn) => Boolean(turn.askId) || (turn.absorbedAskIds?.length ?? 0) > 0);
+  return turns.some((turn) => Boolean(turn.askId) || (turn.absorbedAsks?.length ?? 0) > 0);
 }
 
 /**
@@ -100,22 +100,37 @@ export async function bindClaudeAskTurns(
       cliToolId: target.cliToolId,
       instanceId: target.instanceId ?? target.cliToolId,
     };
-    // I8・I9: an envelope on two inputs in this one read is judged a duplicate before
-    // either turn's completion — the earlier sighting only records its input.
-    const sightings = new Map<string, number>();
-    for (const turn of turns) if (turn.askId) sightings.set(turn.askId, (sightings.get(turn.askId) ?? 0) + 1);
-    const seen = new Set<string>();
+    // I6: every observation is checked against its own record's session — a record
+    // that names none, or names another than the one the instance follows, counts
+    // for nothing (the binding below rejects it too).
+    const inSession = (sessionId: string | null | undefined): sessionId is string =>
+      Boolean(sessionId) && Boolean(currentSessionId) && sessionId === currentSessionId;
+    // I8・I9: an envelope on two distinct native inputs (uuid + session) of this read
+    // that passed the check is judged a duplicate before either turn's completion —
+    // the earlier sighting only records its input. Repeated records of one input are one.
+    const inputKey = (turn: ClaudeTurnAccumulator): string => `${turn.promptUuid}\u0000${turn.promptSessionId}`;
+    const inputs = new Map<string, Set<string>>();
+    const firstInput = new Map<string, string>();
     for (const turn of turns) {
-      const nativeSessionId = turn.sessionId || null;
-      for (const absorbedAskId of turn.absorbedAskIds ?? []) {
-        if (absorbedAskId !== turn.askId) {
-          markAskAbsorbed(db, absorbedAskId, destination, { nativeSessionId, currentSessionId });
+      if (!turn.askId || !inSession(turn.promptSessionId)) continue;
+      const set = inputs.get(turn.askId) ?? new Set<string>();
+      set.add(inputKey(turn));
+      inputs.set(turn.askId, set);
+      if (!firstInput.has(turn.askId)) firstInput.set(turn.askId, inputKey(turn));
+    }
+    for (const turn of turns) {
+      const nativeSessionId = turn.promptSessionId ?? null;
+      for (const absorbed of turn.absorbedAsks ?? []) {
+        if (absorbed.askId !== turn.askId) {
+          markAskAbsorbed(db, absorbed.askId, destination, { nativeSessionId: absorbed.sessionId, currentSessionId });
         }
       }
       if (!turn.askId) continue;
       const turnKey = claudeTurnRequestId(turn.promptUuid);
-      const firstOfSeveral = (sightings.get(turn.askId) ?? 0) > 1 && !seen.has(turn.askId);
-      seen.add(turn.askId);
+      const firstOfSeveral =
+        inSession(turn.promptSessionId)
+        && (inputs.get(turn.askId)?.size ?? 0) > 1
+        && firstInput.get(turn.askId) === inputKey(turn);
       const turnState = firstOfSeveral ? 'open' : claudeAskTurnState(turn);
       const row = turnState === 'closed' ? findMessageByRequestId(db, target.worktreeId, turnKey) : null;
       const outcome = bindAskSighting(db, {

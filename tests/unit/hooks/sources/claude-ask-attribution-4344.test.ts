@@ -555,3 +555,62 @@ describe('§3.6 state table: the cells', () => {
     expect(getAskCorrelation(db, A)).toBeNull();
   });
 });
+
+/**
+ * Re-review (pr1c) P2: every observation is checked against its own record's
+ * session, and only the observations that pass are counted, once per native
+ * input (uuid + session). Red on de750be.
+ */
+describe('§3.6 I6・I9: each observation by its own record\'s session', () => {
+  const env = (askId: string, body: string) => paste(`${formatAskEnvelope(askId)}\n${body}`);
+
+  /** The absorbed-ask fixture with the absorbed records' own session replaced (null: removed). */
+  async function absorbedWithSession(session: string | null): Promise<string> {
+    const lines = (await readFile(join(FIXTURES, 'absorbed-ask.jsonl'), 'utf8')).split('\n').filter((l) => l.trim());
+    return lines.map((line) => {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      if (record.type === 'queue-operation' || record.type === 'attachment') {
+        if (session === null) delete record.sessionId;
+        else record.sessionId = session;
+      }
+      return JSON.stringify(record);
+    }).join('\n') + '\n';
+  }
+
+  it.each([
+    ['an older session', OTHER_SESSION],
+    ['no session', null],
+  ])('an absorbed envelope whose own record names %s is rejected, though its turn is in the current session', async (_name, session) => {
+    sentAsk(A, 'review the plan');
+    sentAsk(B, 'second question', { at: 1_500 });
+    await writeTranscript(await absorbedWithSession(session));
+    await capture();
+    expect(getAskCorrelation(db, B)).toMatchObject({ attributionState: 'pending', absorbedSeen: false });
+    // The absorbing turn still took another input: A is never matched (safe side, M1).
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'shared_turn' });
+  });
+
+  // The History row of p1 is written while p1 is the newest turn (as the poller does at
+  // its end), with the send's outcome not saved yet; the outcome is then saved and the
+  // next read holds the extra record after it.
+  async function completedThenRead(extra: object): Promise<void> {
+    reserveOnly(A, 'hi');
+    const done = [prompt('p1', env(A, 'hi'), 0), reply('r1', 'the answer', 1_000)];
+    await writeTranscript(done);
+    await capture();
+    settleAskSend(db, A, { sendState: 'sent', turnOpenAtSend: false });
+    await writeTranscript([...done, extra]);
+    await capture();
+  }
+
+  it('a completed turn followed by the same envelope stamped with an older session settles on its completion', async () => {
+    await completedThenRead(prompt('p9', env(A, 'hi'), 2_000, OTHER_SESSION));
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'the answer' });
+  });
+
+  it('repeated records of one native input are one input, not a reappearance', async () => {
+    await completedThenRead(prompt('p1', env(A, 'hi'), 0));
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'the answer' });
+    expect(getAskCorrelation(db, A)).toMatchObject({ duplicateSeen: false, nativeInputId: 'p1' });
+  });
+});

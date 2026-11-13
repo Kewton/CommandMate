@@ -458,8 +458,17 @@ export interface ClaudeTurnAccumulator {
    * another input, but the reply may react to them — the ask says `notified`.
    */
   absorbedNotices?: number;
-  /** Issue #4344 (M1): the askIds of envelopes found on absorbed inputs. */
-  absorbedAskIds?: string[];
+  /**
+   * Issue #4344 (M1): the envelopes found on absorbed inputs, each with the
+   * session of the record it was read from (null when that record names none —
+   * never the turn's own session in its place; design §3.6 I6).
+   */
+  absorbedAsks?: { askId: string; sessionId: string | null }[];
+  /**
+   * Issue #4344 (I6): the prompt record's own `sessionId`, null when it names none.
+   * Unlike {@link sessionId} it does not fall back to the session the file was read under.
+   */
+  promptSessionId?: string | null;
 }
 
 /** What one rendered turn is. */
@@ -822,7 +831,8 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     askPromptText: envelope ? envelope.text : null,
     absorbedInputs: 0,
     absorbedNotices: 0,
-    absorbedAskIds: [],
+    absorbedAsks: [],
+    promptSessionId: record.sessionId,
   };
 }
 
@@ -929,8 +939,11 @@ export function buildClaudeTurns(
       else absorbedAttachments += 1;
       current.absorbedInputs = Math.max(absorbedRemoves, absorbedAttachments);
       const envelope = record.queuedText ? stripAskEnvelope(claudePastedContentPrompt(record.queuedText)) : null;
-      const absorbedAskIds = current.absorbedAskIds ?? (current.absorbedAskIds = []);
-      if (envelope && !absorbedAskIds.includes(envelope.askId)) absorbedAskIds.push(envelope.askId);
+      const absorbedAsks = current.absorbedAsks ?? (current.absorbedAsks = []);
+      // The record's own session (I6): a `remove` and its attachment are two records of one input.
+      if (envelope && !absorbedAsks.some((seen) => seen.askId === envelope.askId && seen.sessionId === record.sessionId)) {
+        absorbedAsks.push({ askId: envelope.askId, sessionId: record.sessionId });
+      }
       continue;
     }
 
