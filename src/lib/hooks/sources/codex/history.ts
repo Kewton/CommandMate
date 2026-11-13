@@ -87,6 +87,7 @@ import {
   type CodexRolloutRecord,
   type CodexTurnAccumulator,
 } from './transcript';
+import { bindCodexAskTurns, reservedCodexAskIds, type CodexAskWindow } from './ask-attribution';
 
 const logger = createLogger('lib/hooks/sources/codex/history');
 
@@ -413,6 +414,14 @@ export async function captureCodexTranscriptTurn(
       });
     }
 
+    // Issue #4344 (F3): ask attribution reads every turn of the window, not only
+    // the ones History still has to write, so it is bound on every path below.
+    const askWindow: CodexAskWindow = {
+      turns: built.turns,
+      windowSessionIds: built.windowSessionIds ?? [],
+      malformedAfter: parsed.malformedAfter ?? [],
+    };
+
     const pending = await selectUnwrittenCodexTurns(target, built.turns);
     if (pending.turns.length === 0) {
       logger.debug('codex-transcript-turns-already-saved', {
@@ -423,6 +432,8 @@ export async function captureCodexTranscriptTurn(
       // Issue #2437: this turn is already History's Markdown, so the pane rows
       // behind it must stop being "unsaved output" the pre-send flush can pick up.
       await advanceCapturedLineForTranscriptTurn(target);
+      // Issue #4344: an ask whose turn is already a row is settled against it.
+      await bindCodexAskTurns(target, askWindow, sessionId, () => resolveCodexSessionId(target));
       return true;
     }
 
@@ -443,11 +454,15 @@ export async function captureCodexTranscriptTurn(
     // running, so its instant is only knowable once that row has been recorded.
     // With one turn pending — the ordinary case — this is the single call it
     // always was.
+    // Issue #4344 (I3): the prompts whose envelope has a reservation here lose it, once.
+    const reservedAsks = await reservedCodexAskIds(target, pending.turns);
     const userRows: RecordedUserTurn[] = [];
     for (let index = 0; index < pending.turns.length; index += 1) {
       const previousStartedAt =
         index === 0 ? pending.previousStartedAt : pending.turns[index - 1].startedAt;
-      userRows.push(await recordCodexUserTurns(target, pending.turns[index], previousStartedAt));
+      userRows.push(
+        await recordCodexUserTurns(target, pending.turns[index], previousStartedAt, reservedAsks)
+      );
     }
 
     const windowFacts: CodexWindowFacts = {
@@ -482,6 +497,9 @@ export async function captureCodexTranscriptTurn(
       // a second time.
       await advanceCapturedLineForTranscriptTurn(target);
     }
+    // Issue #4344: after the rows are written, so a complete turn's ask is settled
+    // against the row this call just wrote (never before it exists).
+    await bindCodexAskTurns(target, askWindow, sessionId, () => resolveCodexSessionId(target));
     return captured;
   } catch (error) {
     logger.error('codex-transcript-capture-failed', {
@@ -625,7 +643,8 @@ async function locateCodexRollout(codexHome: string, sessionId: string): Promise
 async function recordCodexUserTurns(
   target: AgentInstanceRef,
   turn: CodexTurnAccumulator,
-  previousStartedAt = 0
+  previousStartedAt = 0,
+  reservedAsks: ReadonlySet<string> = new Set()
 ): Promise<RecordedUserTurn> {
   const instanceId = target.instanceId ?? target.cliToolId;
   let last: RecordedUserTurn = { outcome: 'skipped', messageId: null, timestampMs: null };
@@ -636,10 +655,18 @@ async function recordCodexUserTurns(
     previousStartedAt > 0 ? { adoptionFromMs: previousStartedAt } : {};
 
   for (const prompt of turn.prompts) {
+    // Issue #4344 (M2, I3): the envelope comes off only for a prompt whose ask has a
+    // reservation of this destination, and only once (`askText`, taken off by
+    // `buildCodexTurns`). A body that itself opens with an envelope-shaped line
+    // keeps it, and so does a send with no ask.
+    const text =
+      prompt.askId && typeof prompt.askText === 'string' && reservedAsks.has(prompt.askId)
+        ? prompt.askText
+        : prompt.text;
     const recorded = await recordUserTurn(
       target,
       codexPromptRequestId(prompt.itemId),
-      prompt.text,
+      text,
       prompt.timestampMs,
       adoption
     );

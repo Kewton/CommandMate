@@ -56,11 +56,11 @@ export interface AskCorrelation {
   bodyDigest: string;
   sendState: AskSendState;
   sentMessageId: string | null;
-  /** The native session the envelope was seen in (claude's transcript session id). Written by the reader (§0.4). */
+  /** The native session the envelope was seen in (claude's transcript session id / codex's `thread_id`). Written by the reader (§0.4). */
   nativeSessionId: string | null;
-  /** The native input that carried the envelope (claude's prompt record uuid). */
+  /** The native input that carried the envelope (claude's prompt record uuid / codex's `UserMessage` item id). */
   nativeInputId: string | null;
-  /** The turn's key in History (`claude-turn:<uuid>`). */
+  /** The turn's key in History (`claude-turn:<uuid>` / `codex-turn:<turn_id>`). */
   nativeTurnKey: string | null;
   /** The assistant rows the reply is, in order. */
   assistantMessageIds: string[];
