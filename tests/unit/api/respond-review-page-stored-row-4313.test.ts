@@ -31,6 +31,8 @@ import Database from 'better-sqlite3';
 import type { NextRequest } from 'next/server';
 
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 (merged from develop): the agent holds the pane.
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),
@@ -184,5 +186,74 @@ describe('[#4313 再指示 2] /respond { messageId } with the Review page on scr
     expect(vi.mocked(sendSpecialKeys).mock.calls[0][1]).toEqual(['Down', 'Enter']);
     expect(getMessageById(db, message.id)?.promptData).toMatchObject({ status: 'answered', answer: '2' });
     expect(humanAnswerEvents()).toBe(1);
+  });
+});
+
+/** The stored row of an old checkbox question (`multiSelect: true`), still pending. */
+const CHECKBOX_QUESTION: PromptData = {
+  type: 'multiple_choice',
+  question: 'Which files should I update?',
+  multiSelect: true,
+  options: [
+    { number: 1, label: '[ ] calc.js', isDefault: true, checked: false },
+    { number: 2, label: '[ ] README.md', isDefault: false, checked: false },
+    { number: 3, label: '[ ] docs', isDefault: false, checked: false },
+  ],
+  status: 'pending',
+} as PromptData;
+
+function stored(promptData: PromptData): ChatMessage {
+  return createMessage(db, {
+    worktreeId: WT,
+    cliToolId: 'command-code',
+    role: 'assistant',
+    content: promptData.question,
+    messageType: 'prompt',
+    promptData,
+    timestamp: new Date(),
+  } as unknown as ChatMessage);
+}
+
+/** The live capture with the `❯` taken off `1. Submit`: the page, its cursor unreadable. */
+function withoutCursor(raw: string): string {
+  return raw.replace(/❯ 1\. Submit/, '  1. Submit');
+}
+
+const REVIEW_UNANSWERED = readFileSync(path.join(DIR, 'review-page-unanswered-warning.txt'), 'utf8');
+
+describe('[#4313 B-1] /respond { messageId }: the combinations refused at the page leave the row pending and record nothing', () => {
+  async function expectRefusedAndUnrecorded(message: ChatMessage, answer: string): Promise<void> {
+    const response = await post({ messageId: message.id, answer });
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(vi.mocked(sendKeys)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendSpecialKeys)).not.toHaveBeenCalled();
+    expect(getMessageById(db, message.id)?.promptData?.status).toBe('pending');
+    expect(humanAnswerEvents()).toBe(0);
+  }
+
+  it('an old checkbox row (`multiSelect`) and 1 on the page: no toggle, no Enter', async () => {
+    const message = stored(CHECKBOX_QUESTION);
+    await expectRefusedAndUnrecorded(message, '1');
+    const body = await (await post({ messageId: message.id, answer: '1' })).json();
+    expect(JSON.stringify(body)).toContain('/prompt-response');
+  });
+
+  it('the page with the unanswered warning and 1', async () => {
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(REVIEW_UNANSWERED);
+    vi.mocked(capturePane).mockResolvedValue(REVIEW_UNANSWERED);
+    await expectRefusedAndUnrecorded(storedQuestion(), '1');
+  });
+
+  it('the page with no readable cursor and 2', async () => {
+    vi.mocked(captureSessionOutputFresh).mockResolvedValue(withoutCursor(REVIEW));
+    vi.mocked(capturePane).mockResolvedValue(withoutCursor(REVIEW));
+    await expectRefusedAndUnrecorded(storedQuestion(), '2');
+  });
+
+  it('the route could not read the screen and only the sender’s own read saw the page', async () => {
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('capture failed'));
+    vi.mocked(capturePane).mockResolvedValue(REVIEW);
+    await expectRefusedAndUnrecorded(storedQuestion(), '1');
   });
 });

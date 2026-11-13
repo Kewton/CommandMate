@@ -627,33 +627,171 @@ async function sendCommandCodeMultiSelectAnswer(
 }
 
 /**
- * Refuse anything but `1` / `2` on Command Code's Review page (Issue #4313
- * 再指示 1・2), with nothing typed and nothing recorded. Reported as the
- * dialog's own refusal (`PromptAnswerRejectedError`), which every caller
- * already maps to "nothing was sent" and leaves unrecorded.
+ * Why an answer meant for Command Code's Review page was refused (Issue #4313
+ * B-1, 候補 1). Every one of them is refused before the first key, and the
+ * caller records nothing (it is a {@link PromptAnswerRejectedError}).
  *
- * 再指示 2: judged on the screen the keys are about to go to (the caller's
- * frame, else the pane read here), whatever payload the caller brought. A
- * stored row from the question before the page (`/respond`'s `messageId`
- * shape: the question's own three options) let a `3` through the payload-only
- * check and on to the page as a bare digit. The payload still counts too, for
- * a caller whose frame is unreadable.
+ * - `answer` — the page takes `1` (Submit) or `2` (Cancel), nothing else.
+ * - `blocked-page` — the page is up but may not be confirmed from here: it
+ *   carries `⚠ You have not answered all questions`, or its cursor cannot be
+ *   read (no `❯`, two of them, the two rows not adjacent).
+ * - `checkbox-payload` — the caller's payload is a checkbox question (an old
+ *   `multiSelect` row, or `[ ]` labels): its digits are toggles, and nothing
+ *   about them is the page's `1` / `2`.
+ * - `unverified` — the page's keys cannot be counted from a screen the caller
+ *   read: the page was only seen by this module's own fallback read, the
+ *   payload says nothing about which question it was (none, or not a choice
+ *   list), or a Review payload meets a screen that is not the page (or no
+ *   screen at all).
  */
-async function assertReviewPageAnswer(params: SendPromptAnswerParams): Promise<void> {
-  if (params.cliToolId !== 'command-code') return;
-  if (COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(params.answer)) return;
-  let onReviewPage = isCommandCodeReviewPagePrompt(params.promptData);
-  if (!onReviewPage) {
-    const frame = await readGuardFrame(params);
-    const reading = frame === null ? null : readCommandCodeQuestionDialog(frame);
-    onReviewPage = reading?.kind === 'unsupported' && reading.reason === 'review-page';
+export type CommandCodeReviewRefusal = 'answer' | 'blocked-page' | 'checkbox-payload' | 'unverified';
+
+const REVIEW_REFUSAL_SENTENCES: Readonly<Record<CommandCodeReviewRefusal, string>> = {
+  answer: 'The Command Code Review page takes 1 (Submit) or 2 (Cancel) and nothing else.',
+  'blocked-page':
+    'The Command Code Review page on screen cannot be confirmed from CommandMate (questions are still ' +
+    'unanswered, or its cursor could not be read). Go back and answer them in the terminal.',
+  'checkbox-payload':
+    'The Command Code Review page is on screen, but the answer was given for a checkbox question. ' +
+    'Answer the page with `commandmate respond <worktree-id> 1|2` (POST /prompt-response), which reads it again.',
+  unverified:
+    'The Command Code Review page could not be verified on the screen read before the send. ' +
+    'Answer it again with `commandmate respond <worktree-id> 1|2` (POST /prompt-response), which reads it again.',
+};
+
+/**
+ * A refusal at Command Code's Review page (Issue #4313 B-1). A
+ * {@link PromptAnswerRejectedError} — same name, same `reason`, so every caller
+ * already answers it as "nothing was sent" and records nothing — with its own
+ * sentence and {@link CommandCodeReviewRefusal}.
+ */
+export class CommandCodeReviewPageAnswerRejectedError extends PromptAnswerRejectedError {
+  constructor(answer: string, readonly refusal: CommandCodeReviewRefusal) {
+    super('command-code', answer, { kind: 'review-page', options: ['Submit', 'Cancel'], answerMode: 'keys' });
+    this.message = `Refused to send "${answer}" to command-code: ${REVIEW_REFUSAL_SENTENCES[refusal]} Nothing was sent.`;
+    // Kept: the routes and Auto-Yes tell a refusal by this name.
+    this.name = 'PromptAnswerRejectedError';
   }
-  if (!onReviewPage) return;
-  throw new PromptAnswerRejectedError(params.cliToolId, params.answer, {
-    kind: 'review-page',
-    options: ['Submit', 'Cancel'],
-    answerMode: 'keys',
-  });
+}
+
+/**
+ * What one read of the pane says about Command Code's Review page (Issue #4313
+ * B-1): the page with its cursor read (`review`), the page that may not be
+ * confirmed (`blocked`: the unanswered warning, or a cursor that cannot be
+ * read), something else (`other`), or no screen at all (`unread`).
+ */
+type CommandCodeReviewScreen =
+  | { kind: 'review'; prompt: MultipleChoicePromptData }
+  | { kind: 'blocked' }
+  | { kind: 'other' }
+  | { kind: 'unread' };
+
+/** {@link CommandCodeReviewScreen} for one frame (null: not read). */
+function readCommandCodeReviewScreen(frame: string | null): CommandCodeReviewScreen {
+  if (frame === null) return { kind: 'unread' };
+  if (readCommandCodeReviewPage(frame) === null) return { kind: 'other' };
+  const prompt = readCommandCodeReviewPagePrompt(frame)?.promptData;
+  return isCommandCodeReviewPagePrompt(prompt) ? { kind: 'review', prompt } : { kind: 'blocked' };
+}
+
+/**
+ * The screen an answer is judged against, read ONCE (Issue #4313 B-1): the
+ * caller's frame, else this module's own read of the pane (`fallback`), else
+ * none. `frame` is handed on to the number guard so it judges the same
+ * screen, not a second, later capture.
+ */
+interface AnswerScreen {
+  source: 'caller' | 'fallback' | 'none';
+  frame: string | null;
+}
+
+/**
+ * Read the screen for Command Code's Review rule (Issue #4313 B-1).
+ *
+ * `capture` false is the checkbox arm without a caller frame, which takes no
+ * capture before its toggles (#2755: the route re-verified its payload a
+ * moment ago) — it stays that way, and its screen is `none`.
+ */
+async function readAnswerScreen(params: SendPromptAnswerParams, capture: boolean): Promise<AnswerScreen> {
+  if (params.frame !== undefined) return { source: 'caller', frame: params.frame };
+  if (!capture) return { source: 'none', frame: null };
+  const frame = await readGuardFrame(params);
+  return frame === null ? { source: 'none', frame: null } : { source: 'fallback', frame };
+}
+
+/** A plain single-select payload: a choice list that is not a checkbox question. */
+function isPlainSingleSelect(promptData: PromptData | undefined): boolean {
+  return promptData?.type === 'multiple_choice'
+    && promptData.multiSelect !== true
+    && !hasCheckboxOptions(promptData.options);
+}
+
+/**
+ * Decide an answer at Command Code's Review page (Issue #4313 B-1, 候補 1) off
+ * the ONE screen read for it, before the checkbox arm and every other arm.
+ *
+ * The invariant: when the screen read is the Review page, the only answers that
+ * type anything are the ones allowed below, and their keys come from THAT
+ * page's cursor and the answer (`1` | `2`) alone — never from the caller's
+ * payload (an old Review payload's cursor, a checkbox payload's ticks, a
+ * `submitMode`). Everything else throws before the first key.
+ *
+ * Allowed: the caller's own frame shows the page with its cursor read (no
+ * warning), the payload is the page's (fresh or stale) or a plain
+ * single-select row (`/respond`'s stored question before the page), and the
+ * answer is `1` or `2`.
+ *
+ * Refused (nothing typed, nothing recorded): any other answer on the page; the
+ * page with the unanswered warning or an unreadable cursor, whatever the
+ * payload; a checkbox payload on the page; the page only seen by this module's
+ * fallback read, or with no payload / a payload that is not a choice list; a
+ * Review payload with a screen that is not the page, or with no screen.
+ *
+ * Not decided here (returns null): a screen that is not the page with any
+ * other payload, and no screen with any other payload — the existing guards
+ * and their fail-open stay exactly as they were (#2033).
+ *
+ * @returns the page as read, whose cursor counts the keys; null when the
+ *   Review rule has nothing to say about this answer
+ * @throws {CommandCodeReviewPageAnswerRejectedError}
+ */
+function planCommandCodeReviewAnswer(
+  params: SendPromptAnswerParams,
+  screen: AnswerScreen,
+  checkboxArm: boolean,
+): MultipleChoicePromptData | null {
+  const { answer, promptData } = params;
+  const payloadIsReview = isCommandCodeReviewPagePrompt(promptData);
+  const reading = readCommandCodeReviewScreen(screen.frame);
+  const refuse = (refusal: CommandCodeReviewRefusal): never => {
+    throw new CommandCodeReviewPageAnswerRejectedError(answer, refusal);
+  };
+
+  if (reading.kind === 'unread' || reading.kind === 'other') {
+    // A Review payload is only ever answered on the page it describes.
+    if (payloadIsReview) refuse('unverified');
+    return null;
+  }
+  if (!COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(answer)) refuse('answer');
+  if (reading.kind === 'blocked') refuse('blocked-page');
+  if (checkboxArm || (promptData?.type === 'multiple_choice' && !payloadIsReview && !isPlainSingleSelect(promptData))) {
+    refuse('checkbox-payload');
+  }
+  if (screen.source !== 'caller') refuse('unverified');
+  if (!payloadIsReview && !isPlainSingleSelect(promptData)) refuse('unverified');
+  return (reading as { kind: 'review'; prompt: MultipleChoicePromptData }).prompt;
+}
+
+/**
+ * `Enter` on the row the cursor rests on, else the one `↓` / `↑` to the other
+ * row and `Enter` (Issue #4313 B-1). Counted from `page`'s own cursor. No digit
+ * and no `Down`+`Up` nudge (that one is Claude's and agy's measurement). The
+ * `↓` / `↑` between the two rows is not measured (1.54.1 nor 1.88.2); `Enter`
+ * on `❯ 1. Submit` is (1.54.1, `docs/design/command-code-1541-askuserquestion.md` §4).
+ */
+function reviewPageKeys(page: MultipleChoicePromptData, answer: string): string[] {
+  const cursor = page.options.find((o) => o.isDefault)?.number ?? 1;
+  return [...buildNavigationKeys(parseInt(answer, 10) - cursor), 'Enter'];
 }
 
 /** The prompt a frame shows, read as `/prompt-response` verifies one; null when none is answerable. */
@@ -1093,13 +1231,21 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
     params;
   const readMark = params.readMark ?? instanceInputReadMark();
 
-  // Issue #4313 再指示 1・2: on Command Code's Review page the answer is `1` or
-  // `2` and nothing else — refused here, before any key and before every arm
-  // (the checkbox arm included), for every caller and whatever payload it
-  // brought (the route already refuses it in `resolvePromptAnswer` when the
-  // payload is the page's). Without this a `3` missed the Review arm below and
-  // was typed at the page as a bare digit.
-  await assertReviewPageAnswer(params);
+  // Issue #4313 B-1 (候補 1): Command Code's Review page is decided off ONE
+  // read of the screen, before the checkbox arm and every other arm: the
+  // answers it allows are sent here from that page's cursor, and every other
+  // answer meeting the page is refused before any key. The checkbox arm takes
+  // no capture of its own when the caller gave no frame (#2755), so it is only
+  // judged on the caller's frame.
+  const multiSelect = readMultiSelectRequest(params);
+  let guardParams = params;
+  let reviewPage: MultipleChoicePromptData | null = null;
+  if (cliToolId === 'command-code') {
+    const screen = await readAnswerScreen(params, multiSelect === null);
+    reviewPage = planCommandCodeReviewAnswer(params, screen, multiSelect !== null);
+    // The number guard below judges the same screen, not a second capture.
+    if (screen.source === 'fallback') guardParams = { ...params, frame: screen.frame ?? undefined };
+  }
 
   // Issue #2755: Command Code's checkbox question, before every guard below.
   // Its answer is a SET (`"1,3"`), which none of them can read — `/^\d+$/` is
@@ -1108,7 +1254,6 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // reading that says `multiSelect: true`, so nothing else's path moves, and it
   // returns rather than falling through: what this screen needs is toggles and
   // a two-stage confirm, not a digit and an Enter.
-  const multiSelect = readMultiSelectRequest(params);
   if (multiSelect !== null) {
     await sendAsInputWriter(params, readMark, async (reread, keys) => {
       // Review P1-1: the toggles come from the ticks on the screen they go
@@ -1133,7 +1278,7 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // inside the text arm because the number->offset arithmetic the cursor arm
   // does is just as meaningless on an unnumbered button strip as typing the
   // digit is.
-  const dialog = await assertAnswerModeAcceptsNumber(params);
+  const dialog = await assertAnswerModeAcceptsNumber(guardParams);
 
   // Issue #2573 / #2583: the same promise for text. The text arm below types
   // whatever it is given and presses Enter, so text aimed at a screen that has
@@ -1167,31 +1312,11 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // about which INPUT METHOD to use for a dialog that was already cleared as
   // answerable by number.
   //
-  // Issue #4313 (b): and Command Code's `AskUserQuestion` Review page, which
-  // only `/prompt-response` publishes (a human's answer; the status path and
-  // Auto-Yes read no prompt there, #3497). `Enter` on `❯ 1. Submit` is the
-  // keystroke measured to send the answers (1.54.1,
-  // `docs/design/command-code-1541-askuserquestion.md` §4 — the multi-select
-  // arm confirms the same page the same way); a digit there is not measured,
-  // so none is typed. `↓` / `↑` between its two rows is not measured either
-  // (1.54.1 nor 1.88.2) and is what `Cancel` from `Submit` takes.
-  //
-  // 再指示 2: the page is taken off the caller's frame (the screen read right
-  // before the send) as well as off the payload, so `/respond`'s stored row
-  // from the question before the page (its own options) answers the page as
-  // the page — `1` an Enter on `❯ 1. Submit`, not a digit typed at it. The
-  // page's own payload then counts the cursor keys.
-  const reviewPageOnFrame = cliToolId === 'command-code'
-    && !isCommandCodeReviewPagePrompt(promptData)
-    && COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(answer)
-    && params.frame !== undefined
-    ? readCommandCodeReviewPagePrompt(params.frame)?.promptData ?? null
-    : null;
-  const answerPromptData = reviewPageOnFrame ?? promptData;
-  const isCommandCodeReviewPage = cliToolId === 'command-code'
-    && isCommandCodeReviewPagePrompt(answerPromptData)
-    && COMMAND_CODE_REVIEW_PAGE_ANSWERS.includes(answer);
-  const isCursorNavMultiChoice = isCommandCodeReviewPage || ((cliToolId === 'claude' || cliToolId === 'antigravity')
+  // Issue #4313 B-1: and Command Code's Review page when
+  // `planCommandCodeReviewAnswer` above allowed the answer (`reviewPage`): its
+  // keys are counted from that page's cursor only (`reviewPageKeys`), never
+  // from the caller's payload.
+  const isCursorNavMultiChoice = reviewPage !== null || ((cliToolId === 'claude' || cliToolId === 'antigravity')
     && (promptData?.type === 'multiple_choice' || fallbackPromptType === 'multiple_choice')
     && /^\d+$/.test(answer));
 
@@ -1252,11 +1377,8 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // the Up/Down navigation already engages the cursor, so no extra nudge is
       // needed. Old-format numbered prompts (isAskUserQuestion unset) keep their
       // exact prior key sequence, so their response behavior is unchanged.
-      // Not on Command Code's Review page (#4313): the nudge is Claude's and
-      // agy's measurement, and on that page it is an unmeasured `↓` off Submit.
       const isAskUserQuestionPicker = shown?.type === 'multiple_choice'
-        && shown.isAskUserQuestion === true
-        && !isCommandCodeReviewPage;
+        && shown.isAskUserQuestion === true;
       return (isAskUserQuestionPicker && offset === 0)
         ? ['Down', 'Up', 'Enter']
         : [...navigationKeys, 'Enter'];
@@ -1266,9 +1388,15 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // A re-read that is not a choice list says nothing about the cursor:
       // the keys cannot be placed, so none are typed.
       if (reread !== null && reread.type !== 'multiple_choice') return 'target-changed';
-      // #4313: the Review page's keys are counted from ITS cursor, on that page only.
-      if (isCommandCodeReviewPage && reread !== null && !isCommandCodeReviewPagePrompt(reread)) return 'target-changed';
-      const keys = cursorKeys(reread ?? answerPromptData);
+      // #4313 B-1: read again under the lock, the screen is judged as before
+      // the wait — the page with its cursor read, or nothing is typed (the page
+      // with the warning or an unreadable cursor is no prompt to
+      // `answerTargetStillOnScreen`, so the lock has already refused it) — and
+      // the keys are counted from THAT reading's cursor.
+      if (reviewPage !== null && reread !== null && !isCommandCodeReviewPagePrompt(reread)) return 'target-changed';
+      const keys = reviewPage !== null
+        ? reviewPageKeys(reread ?? reviewPage, answer)
+        : cursorKeys(reread ?? promptData);
       writer.assertOwned(false);
       await sendSpecialKeysWhileCurrent(sessionName, keys, writer.stillCurrent, touch);
     });

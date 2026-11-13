@@ -19,6 +19,8 @@ import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 (merged from develop): the agent holds the pane.
+  readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(),
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),

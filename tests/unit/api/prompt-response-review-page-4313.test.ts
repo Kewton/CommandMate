@@ -56,6 +56,8 @@ vi.mock('@/lib/db/db-instance', () => {
 // The tmux transport, and the ONLY thing between the route and the terminal:
 // every key the route decides to send lands in one of these two spies.
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 (merged from develop): the agent holds the pane.
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
   capturePane: vi.fn().mockResolvedValue(''),
@@ -228,6 +230,32 @@ describe('[#4313 再指示 1] on the Review page the answer is 1 or 2, nothing e
     const { data } = await respond(REVIEW, { answer: '3', submitMode: 'answer_only' });
 
     expect(data.success).toBe(false);
+    expect(await keystrokes()).toEqual({ text: [], special: [] });
+    expect(await records()).toEqual({ answeredHuman: 0, audit: 0 });
+  });
+});
+
+describe('[#4313 B-1] /prompt-response: the page seen only by the sender’s own read is refused and recorded nowhere', () => {
+  it('the first capture failed, the sender’s read is the page, answer 1: no key, no task event, no audit row', async () => {
+    const { captureSessionOutputFresh } = await import('@/lib/session/cli-session');
+    const { capturePane } = await import('@/lib/tmux/tmux');
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('capture failed'));
+    vi.mocked(capturePane).mockResolvedValue(REVIEW);
+
+    const response = await promptResponse(createRequest({ answer: '1' }), { params: Promise.resolve({ id: WT }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.success).toBe(false);
+    expect(await keystrokes()).toEqual({ text: [], special: [] });
+    expect(await records()).toEqual({ answeredHuman: 0, audit: 0 });
+  });
+
+  it('the page with no readable cursor, answer 1: refused before the sender, nothing recorded', async () => {
+    const { data } = await respond(REVIEW.replace(/❯ 1\. Submit/, '  1. Submit'), { answer: '1' });
+
+    expect(data.success).toBe(false);
+    expect(data.reason).toBe('unsupported_dialog_layout');
     expect(await keystrokes()).toEqual({ text: [], special: [] });
     expect(await records()).toEqual({ answeredHuman: 0, audit: 0 });
   });
