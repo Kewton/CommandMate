@@ -19,6 +19,15 @@
       "list": "List view",
       "tile": "Tile view"
     },
+    "relativeTime": {
+      "now": "now",
+      "minutes": "{count}m ago",
+      "hours": "{count}h ago",
+      "days": "{count}d ago",
+      "weeks": "{count}w ago",
+      "months": "{count}mo ago",
+      "years": "{count}y ago"
+    },
     "tileAriaLabel": "Session tile for {branch}",
     "tileInstanceAriaLabel": "Agent instance shown in this tile"
   },
