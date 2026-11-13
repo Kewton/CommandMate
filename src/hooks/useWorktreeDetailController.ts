@@ -83,7 +83,12 @@ import {
   type AgentInstance,
 } from '@/lib/cli-tools/types';
 import { ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
-import { beginHandoffPageResponseReport, fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import {
+  beginHandoffPageOperation,
+  beginHandoffPageResponseReport,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+} from '@/lib/handoff/page-owner';
 import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
@@ -111,7 +116,9 @@ import {
 import {
   handoffRegistrySnapshot,
   handoffPageMayStart,
+  assertHandoffPageRequestMayLeave,
   beginHandoffPageRequest,
+  isHandoffPageOperationRefused,
   publishHandoffPageView,
   registerHandoffPage,
   reportHandoffPageAuthenticated,
@@ -372,6 +379,9 @@ async function killSessionThroughGateway(
     const response = await fetchApiResponse(`/api/worktrees/${worktreeId}/kill-session${queryString ? `?${queryString}` : ''}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      // Issue #4345 1c 再指示 2 (K1): the gate, right before the fetch — a kill the page may not start
+      // is not sent (`HandoffPageOperationRefusedError`, passed through below untouched).
+      beforeFetch: () => assertHandoffPageRequestMayLeave(authRequest),
     });
     reportHandoffPageResponse(authRequest, response);
     const redirectError = detectAuthRedirect(response);
@@ -391,7 +401,7 @@ async function killSessionThroughGateway(
     if (formatError) throw formatError;
     await response.json();
   } catch (error) {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError || isHandoffPageOperationRefused(error)) throw error;
     throw new ApiError(error instanceof Error ? error.message : 'Unknown error', 0, error);
   }
 }
@@ -1737,6 +1747,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
   /** Handle prompt response submission */
   const handlePromptRespond = useCallback(
     async (answer: string): Promise<void> => {
+      // Issue #4345 1c 再指示 2 (K1): the press's token — the gate reads its registration.
+      const operation = beginHandoffPageOperation(handoffRegistrationRef);
       actions.setPromptAnswering(true);
       let outcome: PromptResponseOutcome;
       // Issue #4031: a failure stopped part-way (keys may be on the pane).
@@ -1763,13 +1775,24 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         );
 
         // Issue #4345 1c: the answer's 401 reaches the gateway before the reply is read.
-        const response = await fetchForHandoffPage(handoffRegistrationRef, `/api/worktrees/${worktreeId}/prompt-response`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-        });
+        const response = await fetchForHandoffPage(
+          handoffRegistrationRef,
+          `/api/worktrees/${worktreeId}/prompt-response`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+          },
+          handoffPageOperationOptions(operation),
+        );
         ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
+        // toast, the card stays as it was.
+        if (isHandoffPageOperationRefused(err)) {
+          actions.setPromptAnswering(false);
+          return;
+        }
         // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error sending prompt response:', err);
         outcome = 'failed';
@@ -1969,7 +1992,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     isKillPendingRef.current = true;
     setIsKillPending(true);
     // Issue #4345 1b: the kill's owner and order, fixed as it leaves (this page's registration then).
-    const killAuthRequest = beginHandoffPageRequest(handoffRegistrationRef.current);
+    // 再指示 2 (K1): an operation of the page (gated before it is sent: the registration held now).
+    const killAuthRequest = beginHandoffPageRequest(handoffRegistrationRef.current, { kind: 'operation', inside: true });
 
     // Issue #1171: only wipe the GLOBAL (mobile-consumed / active-scoped) message
     // + prompt state when the killed target IS the active instance. A PC split
@@ -2008,6 +2032,9 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       await finishEnded();
       return 'stopped';
     } catch (err) {
+      // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — not a kill's result:
+      // no toast, nothing recorded, the target kept. Told apart before it is classified.
+      if (isHandoffPageOperationRefused(err)) return 'not-sent';
       // Issue #1171: a 404 means the session already ended (natural-termination
       // race). The goal is achieved, so re-sync and close rather than error.
       const failure = classifyKillFailure(err);

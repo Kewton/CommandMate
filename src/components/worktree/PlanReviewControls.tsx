@@ -53,7 +53,12 @@ import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { readPromptResponseReply } from '@/lib/prompt-response-outcome';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+} from '@/lib/handoff/page-owner';
 
 export type PlanReviewControlAction = 'comment' | 'submit' | 'approve' | 'cancel';
 
@@ -139,6 +144,8 @@ export function PlanReviewControls({
 
   const post = useCallback(
     async (action: PlanReviewControlAction) => {
+      // Issue #4345 1c 再指示 2 (K1): the press's token — the gate reads its registration.
+      const operation = beginHandoffPageOperation(handoffOwner);
       setPending(action);
       setError(null);
       try {
@@ -151,6 +158,7 @@ export function PlanReviewControls({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(buildPlanReviewRequestBody(action, cliToolId, comment, instanceId)),
           },
+          handoffPageOperationOptions(operation),
         );
         // Issue #3331: read like every other answer to a dialog. A 2xx whose
         // body has no `success` is now taken as delivered (it used to show the
@@ -165,7 +173,10 @@ export function PlanReviewControls({
         }
         if (action === 'comment' || action === 'submit') setComment('');
         onKeysSent?.();
-      } catch {
+      } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened, nothing
+        // is said; the comment stays.
+        if (isHandoffPageOperationRefused(err)) return;
         setError({ reason: null, message: null });
       } finally {
         setPending(null);

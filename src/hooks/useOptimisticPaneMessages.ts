@@ -9,8 +9,7 @@ import {
   isServerConfirmedReachable,
   isConnectionKnownDown,
 } from '@/hooks/useConnectivity';
-import { worktreeApi } from '@/lib/api-client';
-import { beginHandoffPageObserver } from '@/lib/handoff/page-owner';
+import { isHandoffPageOperationRefused, sendMessageForHandoffPage } from '@/lib/handoff/page-owner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import type { ChatMessage } from '@/types/models';
 
@@ -20,6 +19,11 @@ export interface UseOptimisticPaneMessagesArgs {
   serverMessages: ChatMessage[];
   /** Refetch after a send resolves, so reconciliation is prompt. */
   onSent: () => void | Promise<void>;
+  /**
+   * Issue #4345 1c 再指示 2: a new send the page's gate refused (not sent) — its text, for the
+   * composer to keep (no bubble is left).
+   */
+  onNotSent?: (content: string) => void;
 }
 
 /**
@@ -40,18 +44,16 @@ export function useOptimisticPaneMessages({
   worktreeId,
   serverMessages,
   onSent,
+  onNotSent,
 }: UseOptimisticPaneMessagesArgs): UsePendingMessagesResult {
   // Issue #4345 1c: the worktree page's registration holder (PC split, phone). Each send — a resend
   // included — is owned by the registration held when it leaves; its 401 reaches the gateway before
   // it becomes an ApiError. Outside a worktree page nothing changes in the call.
   const handoffOwner = useHandoffPageOwner();
   const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) => {
-      const observer = beginHandoffPageObserver(handoffOwner);
-      return observer
-        ? worktreeApi.sendMessage(worktreeId, content, options, observer)
-        : worktreeApi.sendMessage(worktreeId, content, options);
-    },
+    // 再指示 2 (K1): gated as it leaves (no press: the registration held then) — a retry and an
+    // automatic resend included; refused, it rejects "not sent" (`isNotSent` below).
+    (content: string, options: OptimisticSendOptions) => sendMessageForHandoffPage(handoffOwner, worktreeId, content, options),
     [worktreeId, handoffOwner],
   );
   // Issue #2503: the same connection verdict the header pill renders (#2501),
@@ -82,6 +84,8 @@ export function useOptimisticPaneMessages({
     sendFn: sendMessageFn,
     onSent,
     connectivity: pendingConnectivity,
+    isNotSent: isHandoffPageOperationRefused,
+    onNotSent,
   });
 }
 

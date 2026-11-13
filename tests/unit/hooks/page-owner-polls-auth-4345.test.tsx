@@ -88,6 +88,7 @@ const CASES: Record<string, EntryCase> = {
     ui: () => <SplitHistory />,
   },
   'optimistic send (useOptimisticPaneMessages)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/send` && method === 'POST',
     ok: () => json(201, { id: 'm1', role: 'user', content: 'hi', timestamp: '2026-11-14T00:00:00.000Z' }),
     ui: () => <OptimisticSend />,

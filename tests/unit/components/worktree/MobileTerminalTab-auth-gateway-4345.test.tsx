@@ -30,7 +30,10 @@ vi.mock('@/components/worktree/ChatTranscript', () => ({
 }));
 vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
   useOptionalWorktreesCacheContext: () => ({
-    worktrees: [{ id: 'wt-a', name: 'a', sessionStatusByInstance: { claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false, model: 'claude-opus-5' } } }],
+    worktrees: [{ id: 'wt-a', name: 'a', sessionStatusByInstance: {
+      claude: { isRunning: true, isWaitingForResponse: false, isProcessing: false, model: 'claude-opus-5' },
+      opencode: { isRunning: true, isWaitingForResponse: false, isProcessing: false, model: 'claude-sonnet-4.6' },
+    } }],
     refresh: () => Promise.resolve(),
   }),
   useWorktreesCacheContext: () => null,
@@ -70,6 +73,7 @@ afterEach(() => {
 });
 
 const tab = () => <MobileTerminalTab worktreeId={A} cliToolId="claude" />;
+const opencodeTab = () => <MobileTerminalTab worktreeId={A} cliToolId="opencode" />;
 const pick = () => fireEvent.click(screen.getByTestId('mobile-session-model'));
 
 const CASES: Record<string, EntryCase> = {
@@ -78,7 +82,15 @@ const CASES: Record<string, EntryCase> = {
     ok: () => json(201, { id: 'm1', role: 'user', content: '/model', timestamp: '2026-11-14T00:00:00.000Z' }),
     ui: tab,
     trigger: pick,
-    startsOnlyWhileCurrent: true,
+    operation: true,
+  },
+  // 再指示 2 (review-1cb P2-2): OpenCode's branch sends a chord through /special-keys — gated alike.
+  'model picker chord (MobileTerminalTab, OpenCode → useSpecialKeys)': {
+    matches: (url, method) => url === `/api/worktrees/${A}/special-keys` && method === 'POST',
+    operation: true,
+    ok: () => json(200, {}),
+    ui: opencodeTab,
+    trigger: pick,
   },
 };
 describeEntryCases('the phone’s model picker', CASES, () => json(200, {}));

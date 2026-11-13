@@ -55,6 +55,16 @@
  *    (the detail read that recovers it) or off the route is still taken — only the current
  *    registration and the order decide (invariant 3).
  *
+ * 8. (Issue #4345 1c 再指示 2, K1) The same gateway is the gate. A request is a `read`, an
+ *    `operation` or a `record` ({@link HandoffPageRequestKind}). An operation is fetched only while
+ *    the registration of its operation — the press's token ({@link beginHandoffPageOperationFor}) or,
+ *    with no press, the one it leaves under — may start ({@link handoffPageMayStart});
+ *    {@link assertHandoffPageRequestMayLeave} is called right before each fetch (each attempt of a
+ *    retry) and throws {@link HandoffPageOperationRefusedError} (no status: nothing was sent).
+ *    A record of what was sent leaves — while expired too — only with the capability an operation
+ *    that was allowed to leave hands over (`record()`), never by its method or its URL. A read is
+ *    never stopped. Outside a page (`inside` false) nothing is gated.
+ *
  * This module holds no unit, opening nor callback of the store (`@/lib/handoff/close-rule`): it
  * imports nothing of it as a value and writes nothing of it.
  *
@@ -207,12 +217,115 @@ export function reportHandoffPageAuth(id: HandoffPageRegistration | null, outcom
 }
 
 /**
+ * Issue #4345 1c 再指示 2 (K1): what a request of a page is, for the gate.
+ * - `read`: asks and changes nothing (a GET, a HEAD, a POST that only renders — MARP). Never stopped.
+ * - `operation`: starts something new (a send, a kill, a write). It leaves only while its registration
+ *   may start ({@link handoffPageMayStart}); otherwise it is not sent at all.
+ * - `record`: records what an operation already sent (the hand-off's `sent` / `send-failed` /
+ *   `end/observe`). It leaves even while the session is expired — but only with the record capability
+ *   an operation that was allowed to start handed over ({@link HandoffPageOperation.record}); named
+ *   `record` without one it is gated as an operation (never by its method or its URL).
+ */
+export type HandoffPageRequestKind = 'read' | 'operation' | 'record';
+
+/**
+ * Issue #4345 1c 再指示 2 (K1): an operation of the page was not sent — the registration it was owned
+ * by may not start anything new (the session's expiry was taken, the page was made again or left,
+ * not registered yet). Nothing left: no status, nothing to record as a failure. Not an `ApiError`.
+ */
+export class HandoffPageOperationRefusedError extends Error {
+  constructor() {
+    super('Not sent: the page may not start a new operation (the session expired or the page was left)');
+    this.name = 'HandoffPageOperationRefusedError';
+  }
+}
+
+/** Issue #4345 1c 再指示 2: `error` says the operation was not sent (the gate refused it). */
+export function isHandoffPageOperationRefused(error: unknown): error is HandoffPageOperationRefusedError {
+  return error instanceof HandoffPageOperationRefusedError;
+}
+
+declare const RECORD_BRAND: unique symbol;
+/** Issue #4345 1c 再指示 2: what lets a record leave while expired; made by an allowed operation only. */
+export type HandoffPageRecordCapability = { readonly [RECORD_BRAND]: true };
+
+/**
+ * Issue #4345 1c 再指示 2: a new operation of a page, its registration fixed when it was pressed (the
+ * token the press hands to the gate). `null`: no page registered (nothing new starts).
+ */
+export interface HandoffPageOperation {
+  readonly registration: HandoffPageRegistration | null;
+  /** The operation may start now: its registration is current, not expired, on its route. */
+  mayStart(): boolean;
+  /**
+   * The record capability, once a request of this operation was allowed to leave (`null` before, and
+   * for an operation never allowed): what was sent goes on being recorded, whatever happens next.
+   */
+  record(): HandoffPageRecordCapability | null;
+}
+
+const operationTokens = new WeakSet<object>();
+const startedOperations = new WeakSet<object>();
+/** Each record capability, with the registration of the operation that made it (its reports' owner). */
+const recordCapabilities = new WeakMap<object, HandoffPageRegistration | null>();
+
+/** Issue #4345 1c 再指示 2: an operation pressed now, owned by `registration` (the page's then). */
+export function beginHandoffPageOperationFor(registration: HandoffPageRegistration | null): HandoffPageOperation {
+  let capability: HandoffPageRecordCapability | null = null;
+  const operation: HandoffPageOperation = {
+    registration,
+    mayStart: () => handoffPageMayStart(registration),
+    record: () => {
+      if (!startedOperations.has(operation)) return null;
+      if (capability === null) {
+        capability = Object.freeze({}) as HandoffPageRecordCapability;
+        recordCapabilities.set(capability, registration);
+      }
+      return capability;
+    },
+  };
+  operationTokens.add(operation);
+  return Object.freeze(operation);
+}
+
+export function isHandoffPageOperation(value: unknown): value is HandoffPageOperation {
+  return typeof value === 'object' && value !== null && operationTokens.has(value);
+}
+
+export function isHandoffPageRecordCapability(value: unknown): value is HandoffPageRecordCapability {
+  return typeof value === 'object' && value !== null && recordCapabilities.has(value);
+}
+
+/** 再指示 2: the registration of the operation that made `capability` (a record's reports are its). */
+export function handoffPageRecordRegistration(capability: HandoffPageRecordCapability): HandoffPageRegistration | null {
+  return recordCapabilities.get(capability) ?? null;
+}
+
+/**
  * Issue #4345 1a: one request of a page, as it left — its owner (the page's registration then;
  * `null`: none, nothing is taken) and its number in that registration's one count across entries.
+ * 再指示 2 (K1): and what it is for the gate.
  */
 export interface HandoffPageRequest {
   readonly registration: HandoffPageRegistration | null;
   readonly seq: number;
+  /** 再指示 2: `read` unless named (the gate never stops a read). */
+  readonly kind: HandoffPageRequestKind;
+  /** 再指示 2: drawn inside a page (the gate applies); `false`: no page owns it, nothing is gated. */
+  readonly inside: boolean;
+  /** 再指示 2: the press's token (its registration decides); none: the request's own registration. */
+  readonly operation: HandoffPageOperation | null;
+  /** 再指示 2: for a `record`, the capability an allowed operation handed over. */
+  readonly record: HandoffPageRecordCapability | null;
+}
+
+/** Issue #4345 1c 再指示 2: what a request is, as {@link beginHandoffPageRequest} takes it. */
+export interface HandoffPageRequestHow {
+  readonly kind?: HandoffPageRequestKind;
+  /** The request is a page's (default: when it has a registration). */
+  readonly inside?: boolean;
+  readonly operation?: HandoffPageOperation | null;
+  readonly record?: HandoffPageRecordCapability | null;
 }
 
 /** Issue #4345 1a: per registration, the number of the last request that left (any entry). */
@@ -221,12 +334,33 @@ const startedSeqOf = new WeakMap<HandoffPageRegistration, number>();
 /**
  * Issue #4345 1a: a request of the page registered as `id` leaves now — call it before the request
  * is sent, with the registration the page holds at that moment (never one read when it answers).
+ * 再指示 2 (K1): `how` names what it is; check it with {@link assertHandoffPageRequestMayLeave}
+ * right before each `fetch` of it.
  */
-export function beginHandoffPageRequest(id: HandoffPageRegistration | null): HandoffPageRequest {
-  if (id === null) return { registration: null, seq: 0 };
+export function beginHandoffPageRequest(id: HandoffPageRegistration | null, how: HandoffPageRequestHow = {}): HandoffPageRequest {
+  const kind = how.kind ?? 'read';
+  const inside = how.inside ?? id !== null;
+  const operation = how.operation ?? null;
+  const record = how.record ?? null;
+  if (id === null) return { registration: null, seq: 0, kind, inside, operation, record };
   const seq = (startedSeqOf.get(id) ?? 0) + 1;
   startedSeqOf.set(id, seq);
-  return { registration: id, seq };
+  return { registration: id, seq, kind, inside, operation, record };
+}
+
+/**
+ * Issue #4345 1c 再指示 2 (K1): the gate, right before each `fetch` of `request` (a retry's included).
+ * A read always leaves; a record with an allowed operation's capability always leaves; an operation
+ * (or a record without one) leaves only while the press's registration — or, with no press, the
+ * request's own — may start ({@link handoffPageMayStart}). Otherwise throws
+ * {@link HandoffPageOperationRefusedError} and nothing is sent. Outside a page nothing is gated.
+ */
+export function assertHandoffPageRequestMayLeave(request: HandoffPageRequest): void {
+  if (request.kind === 'read' || !request.inside) return;
+  if (request.kind === 'record' && request.record !== null && recordCapabilities.has(request.record)) return;
+  const registration = request.operation ? request.operation.registration : request.registration;
+  if (!handoffPageMayStart(registration)) throw new HandoffPageOperationRefusedError();
+  if (request.operation) startedOperations.add(request.operation);
 }
 
 /** What the gateway reads of a response: never its body. */

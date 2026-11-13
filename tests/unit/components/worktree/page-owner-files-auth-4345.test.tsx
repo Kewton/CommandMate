@@ -91,6 +91,7 @@ const CASES: Record<string, EntryCase> = {
     ui: () => <MarkdownEditor worktreeId={A} filePath="docs/a.md" />,
   },
   'editor save (MarkdownEditor)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/files/docs/a.md` && method === 'PUT',
     ok: () => json(200, { success: true }),
     ui: () => <MarkdownEditor worktreeId={A} filePath="docs/a.md" />,

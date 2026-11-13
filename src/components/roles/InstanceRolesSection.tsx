@@ -14,7 +14,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { beginHandoffPageOperation, fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+  type HandoffPageOperation,
+} from '@/lib/handoff/page-owner';
 import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
@@ -101,7 +107,7 @@ function InstanceRoleRow({
     [worktreeId, id, rosterRevision, onChanged, t, tSchedule],
   );
 
-  const endSession = useCallback(async () => {
+  const endSession = useCallback(async (operation: HandoffPageOperation) => {
     setError(null);
     setKillInProgress(false);
     const controller = new AbortController();
@@ -114,16 +120,25 @@ function InstanceRoleRow({
     try {
       // The query scopes it: without both, this route ends every session of the worktree.
       const query = new URLSearchParams({ cliTool: entry.cliToolId, instance: id });
-      const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/kill-session?${query.toString()}`, {
-        method: 'POST',
-        signal: controller.signal,
-      });
+      // Issue #4345 1c 再指示 2 (K1): the press's token goes to the gate.
+      const response = await fetchForHandoffPage(
+        handoffOwner,
+        `/api/worktrees/${worktreeId}/kill-session?${query.toString()}`,
+        { method: 'POST', signal: controller.signal },
+        handoffPageOperationOptions(operation),
+      );
       // 404: already ended, which is the goal.
       if (!response.ok && response.status !== 404) {
         failed = response.status < 500;
         if (!failed) saidNothing = 'errored';
       }
-    } catch {
+    } catch (err) {
+      // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — not a kill's result:
+      // nothing is said, nothing read again.
+      if (isHandoffPageOperationRefused(err)) {
+        clearTimeout(timer);
+        return;
+      }
       saidNothing = 'silent';
     } finally {
       clearTimeout(timer);
@@ -157,7 +172,7 @@ function InstanceRoleRow({
       if (!(await confirm({ description: t('agentRoles.instances.restartConfirm', { alias: entry.alias }) }))) return;
       if (!operation.mayStart()) return;
       setRestarting(true);
-      await endSession();
+      await endSession(operation);
     } finally {
       restartingRef.current = false;
       setRestarting(false);

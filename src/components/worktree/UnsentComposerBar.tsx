@@ -42,7 +42,7 @@ import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { clearTargetKey } from '@/components/worktree/clear-notice';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 
 /** Why the last Clear did not empty the composer (Issue #3954). */
 export type ClearComposerNotice = 'busy' | 'otherServer' | 'notCleared' | 'failed';
@@ -207,6 +207,8 @@ export function UnsentComposerBar({
         if (onActionSent) setTimeout(onActionSent, NAV_KEY_REFRESH_DELAY_MS);
       })
       .catch((err) => {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened.
+        if (isHandoffPageOperationRefused(err)) return;
         console.error('Failed to clear composer:', err);
         setClearError('failed', generation);
       })

@@ -90,6 +90,7 @@ const CASES: Record<string, EntryCase> = {
     ui: () => <OpencodeInstanceSettings worktreeId={A} instances={[{ id: 'opencode', label: 'OpenCode' }]} />,
   },
   'OpenCode settings write (AgentSettingsPane)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/instances/opencode` && method === 'PUT',
     ok: () => json(200, { settings: { agent: 'build', providerId: null, modelId: null, variant: null } }),
     ui: () => <OpencodeInstanceSettings worktreeId={A} instances={[{ id: 'opencode', label: 'OpenCode' }]} />,
@@ -98,6 +99,7 @@ const CASES: Record<string, EntryCase> = {
     },
   },
   'agents PATCH (AgentSettingsPane)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}` && method === 'PATCH',
     ok: () => json(200, {}),
     ui: () => (
@@ -131,18 +133,21 @@ const CASES: Record<string, EntryCase> = {
     trigger: async () => fireEvent.click(await screen.findByTestId('schedule-edit-nightly')),
   },
   'schedule toggle (ExecutionLogPane)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/cmate/schedules` && method === 'PATCH',
     ok: () => json(200, {}),
     ui: () => <ExecutionLogPane worktreeId={A} />,
     trigger: async () => fireEvent.click(await screen.findByTestId('schedule-toggle-nightly')),
   },
   'schedule delete (ExecutionLogPane)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/cmate/schedules` && method === 'DELETE',
     ok: () => json(200, {}),
     ui: () => <ExecutionLogPane worktreeId={A} />,
     trigger: async () => fireEvent.click(await screen.findByTestId('schedule-delete-nightly')),
   },
   'plan review answer (PlanReviewControls)': {
+    operation: true,
     matches: (url) => url === `/api/worktrees/${A}/prompt-response`,
     ok: () => json(200, { success: true }),
     ui: () => <PlanReviewControls worktreeId={A} cliToolId="command-code" instanceId="command-code" />,
@@ -161,7 +166,7 @@ const CASES: Record<string, EntryCase> = {
       fireEvent.click(await screen.findByTestId('agent-updates-update-codex'));
       fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
     },
-    startsOnlyWhileCurrent: true,
+    operation: true,
   },
   'role row kill (InstanceRolesSection)': {
     matches: (url) => url.startsWith(`/api/worktrees/${A}/kill-session`),
@@ -171,7 +176,7 @@ const CASES: Record<string, EntryCase> = {
       fireEvent.click(screen.getByTestId('instance-roles-toggle'));
       fireEvent.click(await screen.findByTestId('instance-role-restart-claude'));
     },
-    startsOnlyWhileCurrent: true,
+    operation: true,
   },
 };
 

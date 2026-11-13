@@ -34,7 +34,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { beginHandoffPageOperation, fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+} from '@/lib/handoff/page-owner';
 import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { AlertTriangle, ArrowUpCircle, RotateCcw } from 'lucide-react';
 import { Button, Card, Spinner } from '@/components/ui';
@@ -173,7 +178,8 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
       if (!worktreeId) return;
       // Issue #4345 1c 再指示 1: no kill once a 401 was taken (or the page was made again) — in the
       // page's agents pane only; on the settings screen (no page) as before.
-      if (!beginHandoffPageOperation(handoffOwner).mayStart()) return;
+      const operation = beginHandoffPageOperation(handoffOwner);
+      if (!operation.mayStart()) return;
       setRestartError(null);
       setInProgressId(null);
       setRestarting((prev) => ({ ...prev, [instance.id]: true }));
@@ -187,14 +193,23 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
         const response = await fetchForHandoffPage(
           handoffOwner,
           `/api/worktrees/${worktreeId}/kill-session?${query.toString()}`,
-          { method: 'POST', signal: controller.signal }
+          { method: 'POST', signal: controller.signal },
+          // Issue #4345 1c 再指示 2 (K1): the press's token goes to the gate.
+          handoffPageOperationOptions(operation),
         );
         // 404 means the session already ended, which is the goal — treat it as
         // success rather than making the user press again.
         if (!response.ok && response.status !== 404) {
           outcome = response.status < 500 ? 'refused' : 'errored';
         }
-      } catch {
+      } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — not a kill's result:
+        // nothing is said or recorded, the button stays.
+        if (isHandoffPageOperationRefused(err)) {
+          clearTimeout(timer);
+          setRestarting((prev) => ({ ...prev, [instance.id]: false }));
+          return;
+        }
         outcome = 'silent';
       } finally {
         clearTimeout(timer);

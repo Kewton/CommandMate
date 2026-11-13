@@ -282,7 +282,12 @@ import {
 import { showsPromptUnderAutoYes } from '@/components/worktree/prompt-answer';
 import { useNewOutputIndicator } from '@/hooks/useNewOutputIndicator';
 import { HandoffPageOwnerContext } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+} from '@/lib/handoff/page-owner';
 export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
   worktreeId,
 }: WorktreeDetailRefactoredProps) {
@@ -660,17 +665,27 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
       let outcome: PromptResponseOutcome;
       // Issue #4031: a failure stopped part-way (keys may be on the pane).
       let partial = false;
+      // Issue #4345 1c 再指示 2 (K1): the press's token — the gate reads its registration.
+      const operation = beginHandoffPageOperation(handoffOwner);
       try {
         // Issue #4345 1c: the decision's 401 reaches the gateway before the reply is read.
-        const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/respond`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
-          ),
-        });
+        const response = await fetchForHandoffPage(
+          handoffOwner,
+          `/api/worktrees/${worktreeId}/respond`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(
+              buildDecisionRespondBody(mobilePromptDecisionId, answer, activeCliTab, activeInstanceId),
+            ),
+          },
+          handoffPageOperationOptions(operation),
+        );
         ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
+        // toast, the sheet stays.
+        if (isHandoffPageOperationRefused(err)) return;
         // The request got no reply at all.
         console.error('[WorktreeDetailRefactored] Error answering a decision:', err);
         outcome = 'failed';

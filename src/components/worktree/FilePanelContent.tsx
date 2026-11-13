@@ -993,7 +993,7 @@ export const FilePanelContent = memo(function FilePanelContent({
         // this promise — and the effect's `cancelled` closure — for the life of
         // the tab.
         // Issue #4345 1c: the render's 401 reaches the gateway (the fallback to text stays).
-        const reportAuth = beginHandoffPageResponseReport(handoffOwner);
+        const reportAuth = beginHandoffPageResponseReport(handoffOwner, { kind: 'read' }); // 再指示 2: a POST that only renders (a read)
         const response = await fetchApiResponse(
           `/api/worktrees/${worktreeId}/marp-render`,
           {

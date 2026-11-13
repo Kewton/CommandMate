@@ -67,6 +67,8 @@ import {
   handoffPageMayStart,
   handoffRegistrySnapshot,
   subscribeHandoffRegistry,
+  beginHandoffPageOperationFor,
+  type HandoffPageOperation,
   type HandoffPageRegistration,
 } from '@/lib/handoff/page-registration';
 import {
@@ -184,6 +186,15 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   /** The same, read now (after an await): never the render's value. */
   const registered = useCallback((): boolean => registration === undefined || handoffPageMayStart(registration), [registration]);
   const [notice, setNotice] = useState<Notice>(null);
+  /**
+   * Issue #4345 1c 再指示 2 (K1): an operation pressed now — the token the gate reads (this dialog's
+   * registration, fixed at the press). Its record capability lets the records of what it sent leave
+   * even once the session expired. Drawn without a page (`registration` undefined): nothing is gated.
+   */
+  const pressOperation = useCallback(
+    (): HandoffPageOperation | undefined => (registration === undefined ? undefined : beginHandoffPageOperationFor(registration)),
+    [registration]
+  );
 
   /** This dialog's opening, once its effect has made (or found) it for the target. */
   const opening: HandoffOpening | null =
@@ -284,19 +295,30 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       // offers no "send again" and `handoffTextSendable` refuses a second send).
       patchHandoffOpening(of.token, { textSending: true });
       try {
-        const sent = await handoffApi.sendText(of.worktreeId, body, { cliToolId: of.target.cliToolId, instanceId: of.target.instanceId }, registration);
+        const operation = pressOperation();
+        const sent = await handoffApi.sendText(
+          of.worktreeId,
+          body,
+          { cliToolId: of.target.cliToolId, instanceId: of.target.instanceId },
+          operation ?? registration
+        );
+        // Issue #4345 1c 再指示 2: not sent (the gate refused it) — nothing happened: no record of a
+        // failure, no notice; the request stays `unsent` for "send again".
+        if (sent.refused) return;
         // Issue #4345 1b: what the send said is recorded for this opening whatever the session's state
         // now (an expiry taken meanwhile, this send's own 401 included) — a record, not a new send.
+        // 再指示 2: with the capability the allowed send handed over.
+        const recordOwner = operation ? (operation.record() ?? registration) : registration;
         const marked = sent.ok
-          ? await handoffApi.sent(of.worktreeId, requestIdToSend, registration)
-          : await handoffApi.sendFailed(of.worktreeId, requestIdToSend, registration);
+          ? await handoffApi.sent(of.worktreeId, requestIdToSend, recordOwner)
+          : await handoffApi.sendFailed(of.worktreeId, requestIdToSend, recordOwner);
         if (marked.ok && marked.body?.request) patchHandoffOpening(of.token, { view: marked.body });
         if (isLiveHandoffOpening(of.token)) setNotice(sent.ok ? null : { tone: 'alert', text: t('mem.handoff.sendFailed') });
       } finally {
         patchHandoffOpening(of.token, { textSending: false });
       }
     },
-    [registration, t]
+    [pressOperation, registration, t]
   );
 
   /**
@@ -335,6 +357,11 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       const created = await handoffApi.create(of.worktreeId, of.target.instanceId, registration);
       // The answer belongs to the opening, not to this component: drawn again meanwhile, it lands.
       if (!isLiveHandoffOpening(of.token)) return;
+      // Issue #4345 1c 再指示 2: not sent (the gate refused it): nothing was made — as before the create.
+      if (created.refused) {
+        patchHandoffOpening(of.token, { created: 'no' });
+        return;
+      }
       // Issue #4345 1b: the create's own 401 taken — nothing was made. The opening is left as it was
       // before the create (not "the plain stop only"): the dialog is hidden, and drawn again once the
       // page's detail read recovers the session, it makes the request then (once).
@@ -398,6 +425,12 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
           { ifVersion: sending.ifVersion, decisions: sending.decisions },
           registration
         );
+        // Issue #4345 1c 再指示 2: not sent (the gate refused it) — nothing was asked: the sending is let
+        // go (no unknown unit to send again, no notice), the person's choices stay.
+        if (result.refused) {
+          settleHandoffDecide(sending, 'answered');
+          return;
+        }
         if (!result.ok && result.status === 0) {
           // Rule (4): not known whether it was written. Kept as it was, to send again.
           settleHandoffDecide(sending, 'unknown');
@@ -476,6 +509,8 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       try {
         const result = await run();
         if (!isLiveHandoffOpening(of)) return;
+        // Issue #4345 1c 再指示 2: not sent (the gate refused it) — nothing happened, nothing is said.
+        if (result.refused) return;
         if (result.ok) {
           adopt(result.body);
           setNotice(success ? { tone: 'status', text: success } : null);
@@ -584,13 +619,18 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       setNotice(null);
       try {
         let endToken = view.request.state === 'ending' ? view.request.endToken : null;
+        // Issue #4345 1c 再指示 2: the stop's operation (fixed at the press). The observation of the
+        // kill it sends is a record, on the capability the allowed `end` hands over.
+        const operation = pressOperation();
         if (!endToken) {
           const ended = await handoffApi.end(
             forWorktree,
             view.request.id,
             { ifVersion: view.request.version, ...(force ? { force: true } : {}) },
-            registration
+            operation ?? registration
           );
+          // Not sent (the gate refused it): nothing happened, nothing is said.
+          if (ended.refused) return;
           if (!ended.ok) {
             if (ended.code === 'session_changed') {
               patchHandoffOpening(token, { plainOnly: t('mem.handoff.sessionChanged') });
@@ -607,10 +647,14 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         // Issue #4317 PR1: nor once the page's registration lapsed meanwhile (`end`'s answer is
         // adopted above; the kill, not started, is the person's to press again).
         if (stopped() || !registered()) return;
-        await onStop();
+        // Issue #4345 1c 再指示 2: the kill not sent (the page's gate refused it) — nothing to observe.
+        if ((await onStop()) === 'not-sent') return;
         // Issue #4345 1b: the kill was sent — its observation is recorded for this request whatever
         // the session's state or the page registered now (the kill's own 401 included).
-        const observed = await handoffApi.observe(forWorktree, view.request.id, endToken, registration);
+        // 再指示 2: on the capability of the stop's operation (an `end` sent before — a resumed
+        // `ending` — hands none: the observation is then gated like a new request).
+        const recordOwner = operation ? (operation.record() ?? registration) : registration;
+        const observed = await handoffApi.observe(forWorktree, view.request.id, endToken, recordOwner);
         if (observed.ok) {
           adopt(observed.body);
         } else {
@@ -621,7 +665,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         endHandoffStop(forWorktree);
       }
     },
-    [adopt, foreign, forWorktree, onStop, refusal, registered, registration, reload, stopped, t, token, view]
+    [adopt, foreign, forWorktree, onStop, pressOperation, refusal, registered, registration, reload, stopped, t, token, view]
   );
 
   /**
@@ -643,6 +687,8 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     }
     // pr2f (codex P2-2): the opening this stop was pressed in is over — nothing more of it here.
     if (!isLiveHandoffOpening(of)) return;
+    // Issue #4345 1c 再指示 2: the kill was not sent (the page's gate refused it): nothing is said.
+    if (result === 'not-sent') return;
     if (result !== 'stopped') {
       setNotice({ tone: 'alert', text: t(result === 'unknown' ? 'mem.handoff.plainStopUnknown' : 'mem.handoff.plainStopFailed') });
       return;

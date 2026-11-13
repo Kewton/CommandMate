@@ -132,7 +132,12 @@ import { Tooltip } from '@/components/common/Tooltip';
 import { SplitRoleStatus } from '@/components/roles/SplitRoleStatus';
 import { SessionStartingNotice } from '@/components/worktree/SessionStartingNotice';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import {
+  beginHandoffPageOperation,
+  fetchForHandoffPage,
+  handoffPageOperationOptions,
+  isHandoffPageOperationRefused,
+} from '@/lib/handoff/page-owner';
 import {
   sessionStartingScopeKey,
   useSessionStartingGate,
@@ -577,6 +582,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     worktreeId,
     serverMessages: splitMessages,
     onSent: refreshSplitMessages,
+    // Issue #4345 1c 再指示 2: a send not sent (the page's gate refused it) goes back to the composer.
+    onNotSent: onHistoryInsertToMessage,
   });
 
   // Issue #744: History visible/width. MVP keeps this common across splits
@@ -634,6 +641,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   const handoffOwner = useHandoffPageOwner();
   const handlePromptRespond = useCallback(
     async (answer: string, decisionId?: string | null): Promise<void> => {
+      // Issue #4345 1c 再指示 2 (K1): the press's token — the gate reads its registration.
+      const operation = beginHandoffPageOperation(handoffOwner);
       // Issue #2869: remember which window this Send was made from, so the
       // next display can tell whether it changed anything.
       markPromptSubmitted();
@@ -678,9 +687,16 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody),
           },
+          handoffPageOperationOptions(operation),
         );
         ({ outcome, partial } = await readPromptResponseReply(response));
       } catch (err) {
+        // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
+        // toast, the card stays.
+        if (isHandoffPageOperationRefused(err)) {
+          setPromptAnswering(false);
+          return;
+        }
         // The request got no reply at all.
         console.error('[TerminalSplitPaneContent] prompt response error:', err);
         outcome = 'failed';

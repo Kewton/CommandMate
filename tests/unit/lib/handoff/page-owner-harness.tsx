@@ -16,6 +16,7 @@ import { HandoffPageOwnerContext } from '@/hooks/useHandoffPageOwner';
 import { beginHandoffOpening, handoffStoreSnapshot, patchHandoffOpening, type HandoffOpeningToken } from '@/lib/handoff/close-rule';
 import {
   beginHandoffPageRequest,
+  reportHandoffPageResponse,
   handoffRegistrySnapshot,
   publishHandoffPageView,
   registerHandoffPage,
@@ -103,10 +104,11 @@ export interface EntryCase {
    */
   trigger?: () => unknown;
   /**
-   * 再指示 1: a new operation of the page (a send, a kill) that starts only while the registration held
-   * at the press may start — under an older registration nothing leaves at all.
+   * 再指示 1・2 (K1): a new operation of the page (a send, a kill, a write) — gated: it leaves only while
+   * its registration may start. Under an older registration (T8) or after another entry's 401 (T2)
+   * nothing leaves at all; outside a page (T9) it leaves as before.
    */
-  startsOnlyWhileCurrent?: boolean;
+  operation?: boolean;
 }
 
 /** What the entry under test answers: a status, or `0` for no response. */
@@ -147,6 +149,8 @@ export async function runEntryCase(
   status: number | undefined,
   owner: OwnerKind = 'page',
   expectRequest = true,
+  /** 再指示 2 (T2・T9): the page's session expired by another entry's 401 right before the press. */
+  expireBeforeTrigger = false,
 ): Promise<StandInPage> {
   const page = standInPage();
   let held: HandoffPageOwner | null = page.owner;
@@ -163,6 +167,11 @@ export async function runEntryCase(
   answer.status = status;
   rerender(<PageTree owner={held}>{entry.ui()}</PageTree>);
   await settle();
+  if (expireBeforeTrigger) {
+    act(() => {
+      reportHandoffPageResponse(beginHandoffPageRequest(page.registration), { status: 401 });
+    });
+  }
   // Not wrapped in one act: a trigger presses through `fireEvent` (each its own act, so a render
   // lands between two presses) or wraps its own calls.
   if (entry.trigger) await entry.trigger();
@@ -218,7 +227,7 @@ export function describeEntryCases(
 
     it.each(names)('%s: a 401 of a request that left under an older registration', async (name) => {
       const answer = arm(name);
-      const gated = cases[name].startsOnlyWhileCurrent === true;
+      const gated = cases[name].operation === true;
       await runEntryCase(cases[name], answer, 401, 'old', !gated);
       // 再指示 1: an operation of a page made again does not even start under the old registration.
       if (gated) expect(answer.calls).toBe(0);
@@ -231,6 +240,26 @@ export function describeEntryCases(
       await runEntryCase(cases[name], answer, 401, 'none');
       expect(sessionExpired()).toBe(false);
       expect(handoffDialog()).not.toBeNull();
+    });
+  });
+
+  const operations = names.filter((name) => cases[name].operation === true);
+  if (operations.length === 0) return;
+  describe(`[#4345 1c 再指示 2 (K1)] ${label}: the operations are gated`, () => {
+    it.each(operations)('T2 %s after another entry’s 401: not sent (fetch 0), the opening kept, nothing drawn', async (name) => {
+      const answer = arm(name);
+      const page = await runEntryCase(cases[name], answer, undefined, 'page', false, true);
+      await settle();
+      expect(answer.calls).toBe(0);
+      expect(sessionExpired()).toBe(true);
+      expect(handoffDialog()).toBeNull();
+      expectOpeningKept(page.token);
+    });
+
+    it.each(operations)('T9 %s outside any page, a page expired meanwhile: sent as before', async (name) => {
+      const answer = arm(name);
+      await runEntryCase(cases[name], answer, undefined, 'none', true, true);
+      expect(answer.calls).toBeGreaterThan(0);
     });
   });
 }

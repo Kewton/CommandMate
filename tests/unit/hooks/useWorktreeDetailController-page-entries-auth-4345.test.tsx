@@ -41,6 +41,12 @@ vi.mock('@/contexts/SidebarContext', () => ({
 vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
   useOptionalWorktreesCacheContext: () => ({ worktrees: [], repositories: [], isLoading: false, error: null, refresh: vi.fn() }),
 }));
+// 再指示 2: what the page tells the person (a toast) is written down.
+const { toasts } = vi.hoisted(() => ({ toasts: [] as Array<[string, string | undefined]> }));
+vi.mock('@/components/common/Toast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/common/Toast')>();
+  return { ...actual, useToast: () => ({ showToast: (message: string, type?: string) => toasts.push([message, type]), toasts: [], removeToast: () => undefined }) };
+});
 // The delete asks first; the person says yes.
 vi.mock('@/components/ui/ConfirmDialog', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/ui/ConfirmDialog')>();
@@ -70,11 +76,18 @@ const ENTRIES: Entry[] = [
   'messages', 'current-output', 'auto-yes-get', 'auto-yes-post', 'prompt-response',
   'new-file', 'new-dir', 'rename', 'delete', 'move', 'upload', 'search',
 ];
+/**
+ * 再指示 2 (K1): the entries reached by a new operation of the page (the auto-yes GET is the re-read of
+ * an allowed toggle): after another entry's 401 they are not sent at all (T2).
+ */
+const OPERATIONS: Entry[] = ['auto-yes-get', 'auto-yes-post', 'prompt-response', 'new-file', 'new-dir', 'rename', 'delete', 'move', 'upload'];
+const READS = ENTRIES.filter((entry) => !OPERATIONS.includes(entry));
 
 let answers: Partial<Record<Entry, number>>;
 let calls: Record<Entry, number>;
 let detailQueued: boolean;
 let detailQueue: Array<(status: number) => void>;
+let kills: number;
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const detailBody = { id: A, name: A, path: '/p', repositoryPath: '/r', repositoryName: 'R', sessionStatusByInstance: {} };
@@ -127,6 +140,8 @@ beforeEach(() => {
   resetHandoffStoreForTests();
   answers = {};
   calls = Object.fromEntries(ENTRIES.map((e) => [e, 0])) as Record<Entry, number>;
+  toasts.length = 0;
+  kills = 0;
   detailQueued = false;
   detailQueue = [];
   vi.spyOn(window, 'alert').mockImplementation(() => undefined);
@@ -139,6 +154,10 @@ beforeEach(() => {
     const rest = match ? match[2] : url;
     if (rest.startsWith('/mem/mode')) return json(200, ATTENDED);
     if (rest.startsWith('/mem/handoff/requests/r1')) return json(200, readView);
+    if (rest.startsWith('/kill-session')) {
+      kills += 1;
+      return json(200, { success: true, message: 'ok' });
+    }
     const entry = entryOf(rest, method, init?.body);
     if (entry) {
       calls[entry] += 1;
@@ -283,7 +302,7 @@ describe('[#4345 1c] (negative controls) 403, 409 and no response leave the sess
     expect(handoffStoreSnapshot().opening?.token).toBe(token);
   });
 
-  it.each(ENTRIES)('%s answering 200 after a 401 recovers nothing', async (entry) => {
+  it.each(READS)('%s answering 200 after a 401 recovers nothing', async (entry) => {
     await shown();
     detailQueued = true;
     // Expired by another entry's 401 (through the gateway itself, under the page's registration).
@@ -306,5 +325,74 @@ describe('[#4345 1c] (negative controls) the existing failure is still told', ()
       await drive(entry);
       expect(window.alert).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+/** Another entry of the page answers 401 (taken through the gateway under the page's registration). */
+function anotherEntryAnswers401(): void {
+  act(() => {
+    reportHandoffPageResponse(beginHandoffPageRequest(currentHandoffPage()!.id), { status: 401 });
+  });
+}
+
+describe('[#4345 1c 再指示 2 (K1)] the page’s operations are not sent once a 401 was taken', () => {
+  it.each(OPERATIONS)('T2 %s: fetch 0, the opening kept, nothing drawn', async (entry) => {
+    const token = await shown();
+    detailQueued = true;
+    anotherEntryAnswers401();
+    const before = calls[entry];
+    const prepare = PREPARE[entry];
+    if (prepare) {
+      act(() => prepare());
+      await settle();
+    }
+    await act(async () => DRIVE[entry]());
+    await settle();
+    await settle();
+    expect(calls[entry]).toBe(before);
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    expect(dialog()).toBeNull();
+    expect(handoffStoreSnapshot().opening?.token).toBe(token);
+  });
+
+  it('T1 (negative control) with no 401 every operation is sent', async () => {
+    await shown();
+    for (const entry of OPERATIONS) await drive(entry);
+    for (const entry of OPERATIONS) expect(calls[entry]).toBeGreaterThan(0);
+  });
+
+  it('T4 the prompt answer not sent tells nothing (no toast) and keeps answering possible', async () => {
+    await shown();
+    anotherEntryAnswers401();
+    await act(async () => page.handlePromptRespond('1'));
+    await settle();
+    expect(calls['prompt-response']).toBe(0);
+    expect(toasts).toEqual([]);
+    expect(page.state.prompt.answering).toBe(false);
+  });
+
+  it('T3 (#16) the end confirmed after a 401 taken while the confirmation was open: no kill, no toast, the target kept', async () => {
+    await shown();
+    act(() => page.openKillConfirm(TARGET));
+    await settle();
+    anotherEntryAnswers401();
+    let result: unknown;
+    await act(async () => {
+      result = await page.stopForHandoff();
+    });
+    await act(async () => page.handleKillConfirm());
+    await settle();
+    expect(kills).toBe(0);
+    expect(result).toBe('not-sent');
+    expect(toasts).toEqual([]);
+    expect(page.killTarget).toEqual(TARGET);
+  });
+
+  it('T3 (negative control) the end confirmed with no 401: killed once', async () => {
+    await shown();
+    act(() => page.openKillConfirm(TARGET));
+    await settle();
+    await act(async () => page.handleKillConfirm());
+    await waitFor(() => expect(kills).toBe(1));
   });
 });

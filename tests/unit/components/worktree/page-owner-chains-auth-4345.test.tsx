@@ -106,6 +106,7 @@ const CASES: Record<string, EntryCase> = {
     trigger: () => fireEvent.click(screen.getByTestId('execution-log-row').querySelector('button')!),
   },
   'schedule save (ScheduleEditDialog)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/cmate/schedules` && method === 'POST',
     ok: () => json(200, {}),
     ui: () => (
@@ -130,6 +131,7 @@ const CASES: Record<string, EntryCase> = {
     ui: () => <VibeLocalSettings worktreeId={A} vibeLocalModel={null} onVibeLocalModelChange={noop} />,
   },
   'vibe-local model save (VibeLocalSettings)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}` && method === 'PATCH',
     ok: () => json(200, {}),
     ui: () => <VibeLocalSettings worktreeId={A} vibeLocalModel={null} onVibeLocalModelChange={noop} />,
@@ -145,24 +147,28 @@ const CASES: Record<string, EntryCase> = {
     ui: () => <HtmlImages />,
   },
   'interrupt (InterruptButton)': {
+    operation: true,
     matches: (url) => url === `/api/worktrees/${A}/interrupt`,
     ok: () => json(200, {}),
     ui: () => <InterruptButton worktreeId={A} cliToolId="claude" />,
     trigger: () => fireEvent.click(screen.getByTestId('interrupt-button')),
   },
   'direct input (useDirectInput)': {
+    operation: true,
     matches: (url) => url === `/api/worktrees/${A}/direct-input`,
     ok: () => json(200, {}),
     ui: () => <DirectInput />,
     trigger: () => act(() => sendDirect?.()),
   },
   'special keys (useSpecialKeys)': {
+    operation: true,
     matches: (url) => url === `/api/worktrees/${A}/special-keys`,
     ok: () => json(200, {}),
     ui: () => <SpecialKeys />,
     trigger: () => act(() => sendKeys?.()),
   },
   'clear composer (UnsentComposerBar)': {
+    operation: true,
     matches: (url) => url === `/api/worktrees/${A}/clear-composer`,
     ok: () => json(200, { cleared: true }),
     ui: () => <UnsentComposerBar worktreeId={A} cliToolId="claude" composerText="left over" />,

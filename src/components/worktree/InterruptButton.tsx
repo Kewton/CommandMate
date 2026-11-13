@@ -18,7 +18,7 @@ import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { Spinner } from '@/components/ui/Spinner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 
 export interface InterruptButtonProps {
   worktreeId: string;
@@ -100,6 +100,8 @@ export const InterruptButton = memo(function InterruptButton({
         onInterrupt?.();
       }
     } catch (error) {
+      // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened.
+      if (isHandoffPageOperationRefused(error)) return;
       console.error('[InterruptButton] Error sending interrupt:', error);
     } finally {
       setIsLoading(false);

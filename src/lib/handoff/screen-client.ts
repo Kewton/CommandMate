@@ -21,10 +21,20 @@
 
 import { screenRequestHeaders } from '@/lib/security/screen-request';
 import {
+  assertHandoffPageRequestMayLeave,
   beginHandoffPageRequest,
   isHandoffAuthExpiry,
+  isHandoffPageOperation,
+  isHandoffPageOperationRefused,
+  isHandoffPageRecordCapability,
+  handoffPageRecordRegistration,
   reportHandoffPageResponse,
+  type HandoffPageOperation,
+  type HandoffPageOperationRefusedError,
+  type HandoffPageRecordCapability,
   type HandoffPageRegistration,
+  type HandoffPageRequest,
+  type HandoffPageRequestKind,
 } from '@/lib/handoff/page-registration';
 import type {
   HandoffCreateResponse,
@@ -37,7 +47,7 @@ import type { StartPreviewResponse } from './preview';
 export const HANDOFF_SCREEN_TIMEOUT_MS = 30000;
 
 export type HandoffResult<T> =
-  | { ok: true; status: number; body: T }
+  | { ok: true; status: number; body: T; refused?: undefined }
   | {
       ok: false;
       status: number;
@@ -45,19 +55,53 @@ export type HandoffResult<T> =
       body?: Record<string, unknown>;
       /** Issue #4345 1b: the answer was the session's expiry and the registry took it for `owner`. */
       expired?: boolean;
+      refused?: undefined;
+    }
+  | {
+      ok: false;
+      /**
+       * Issue #4345 1c 再指示 2 (K1): not sent — the page may not start a new operation. No status, no
+       * answer: nothing to record as a failure, nothing that was written.
+       */
+      refused: HandoffPageOperationRefusedError;
+      status?: undefined;
+      code?: undefined;
+      body?: undefined;
+      expired?: undefined;
     };
 
 /**
  * Issue #4345 1b: the page registration a request belongs to (the dialog's `registration`).
- * `undefined` / `null`: none — the answer is not reported.
+ * `undefined`: none — the answer is not reported and nothing is gated (the dialog drawn without a
+ * page). `null`: a page without a registration (nothing new starts).
+ * 再指示 2 (K1): or the press's operation token (its registration, the gate's), or — for the records
+ * `sent` / `sendFailed` / `observe` — the record capability an allowed operation handed over.
  */
-export type HandoffRequestOwner = HandoffPageRegistration | null | undefined;
+export type HandoffRequestOwner = HandoffPageRegistration | HandoffPageOperation | HandoffPageRecordCapability | null | undefined;
 
-async function call<T>(url: string, init: RequestInit | undefined, owner: HandoffRequestOwner): Promise<HandoffResult<T>> {
+/** 再指示 2: the request of `owner`, as it leaves, with what it is for the gate. */
+function beginOwnedRequest(owner: HandoffRequestOwner, kind: HandoffPageRequestKind): HandoffPageRequest {
+  if (owner === undefined) return beginHandoffPageRequest(null, { kind, inside: false });
+  if (isHandoffPageOperation(owner)) return beginHandoffPageRequest(owner.registration, { kind, inside: true, operation: owner });
+  if (isHandoffPageRecordCapability(owner)) {
+    // A record leaves on its capability, reported under the registration of the operation that made it.
+    return beginHandoffPageRequest(handoffPageRecordRegistration(owner), { kind: 'record', inside: true, record: owner });
+  }
+  return beginHandoffPageRequest(owner, { kind, inside: true });
+}
+
+async function call<T>(url: string, init: RequestInit | undefined, owner: HandoffRequestOwner, kind: HandoffPageRequestKind): Promise<HandoffResult<T>> {
+  // Issue #4345 1b: the owner and the order are fixed as the request leaves.
+  const authRequest = beginOwnedRequest(owner, kind);
+  // 再指示 2 (K1): the gate, right before the fetch — refused, nothing is sent (no timer either).
+  try {
+    assertHandoffPageRequestMayLeave(authRequest);
+  } catch (error) {
+    if (isHandoffPageOperationRefused(error)) return { ok: false, refused: error };
+    throw error;
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HANDOFF_SCREEN_TIMEOUT_MS);
-  // Issue #4345 1b: the owner and the order are fixed as the request leaves.
-  const authRequest = beginHandoffPageRequest(owner ?? null);
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
     // Issue #4345 1b: reported before the body is read (a body that is not JSON or never ends
@@ -107,29 +151,29 @@ export interface HandoffDecision {
  */
 export const handoffApi = {
   create: (worktreeId: string, instanceId: string, owner?: HandoffRequestOwner) =>
-    call<HandoffCreateResponse>(base(worktreeId), post({ instanceId }), owner),
-  read: (worktreeId: string, requestId: string, owner?: HandoffRequestOwner) => call<HandoffReadResponse>(one(worktreeId, requestId), undefined, owner),
+    call<HandoffCreateResponse>(base(worktreeId), post({ instanceId }), owner, 'operation'),
+  read: (worktreeId: string, requestId: string, owner?: HandoffRequestOwner) => call<HandoffReadResponse>(one(worktreeId, requestId), undefined, owner, 'read'),
   sent: (worktreeId: string, requestId: string, owner?: HandoffRequestOwner) =>
-    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/sent`, post(), owner),
+    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/sent`, post(), owner, 'record'),
   sendFailed: (worktreeId: string, requestId: string, owner?: HandoffRequestOwner) =>
-    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/send-failed`, post(), owner),
+    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/send-failed`, post(), owner, 'record'),
   extend: (worktreeId: string, requestId: string, ifVersion: number, owner?: HandoffRequestOwner) =>
-    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/extend`, post({ ifVersion }), owner),
+    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/extend`, post({ ifVersion }), owner, 'operation'),
   decide: (worktreeId: string, requestId: string, input: { ifVersion: number; decisions: HandoffDecision[] }, owner?: HandoffRequestOwner) =>
-    call<HandoffDecideResponse>(`${one(worktreeId, requestId)}/decide`, post(input), owner),
+    call<HandoffDecideResponse>(`${one(worktreeId, requestId)}/decide`, post(input), owner, 'operation'),
   rebase: (
     worktreeId: string,
     requestId: string,
     proposalId: string,
     input: { ifVersion: number; fingerprint: string },
     owner?: HandoffRequestOwner
-  ) => call<HandoffReadResponse>(`${one(worktreeId, requestId)}/proposals/${encodeURIComponent(proposalId)}/rebase`, post(input), owner),
+  ) => call<HandoffReadResponse>(`${one(worktreeId, requestId)}/proposals/${encodeURIComponent(proposalId)}/rebase`, post(input), owner, 'operation'),
   cancel: (worktreeId: string, requestId: string, owner?: HandoffRequestOwner) =>
-    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/cancel`, post(), owner),
+    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/cancel`, post(), owner, 'operation'),
   end: (worktreeId: string, requestId: string, input: { ifVersion: number; force?: boolean }, owner?: HandoffRequestOwner) =>
-    call<HandoffEndResponse>(`${one(worktreeId, requestId)}/end`, post(input), owner),
+    call<HandoffEndResponse>(`${one(worktreeId, requestId)}/end`, post(input), owner, 'operation'),
   observe: (worktreeId: string, requestId: string, endToken: string, owner?: HandoffRequestOwner) =>
-    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/end/observe`, post({ endToken }), owner),
+    call<HandoffReadResponse>(`${one(worktreeId, requestId)}/end/observe`, post({ endToken }), owner, 'record'),
   /**
    * The request's text, sent as any message of the screen is (the send route), with
    * `brief: 'skip'`: a conversation that ends gets no brief and its boundary stays (§4.2).
@@ -142,7 +186,8 @@ export const handoffApi = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: text, cliToolId: target.cliToolId, instanceId: target.instanceId, brief: 'skip' }),
       },
-      owner
+      owner,
+      'operation'
     ),
 };
 
@@ -163,7 +208,8 @@ export const START_PREVIEW_TIMEOUT_MS = 2000;
 export async function fetchStartPreview(worktreeId: string, instanceId: string, owner?: HandoffRequestOwner): Promise<StartPreviewResponse | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), START_PREVIEW_TIMEOUT_MS);
-  const authRequest = beginHandoffPageRequest(owner ?? null);
+  // 再指示 2: a read (never gated).
+  const authRequest = beginOwnedRequest(owner, 'read');
   try {
     const url = `/api/worktrees/${encodeURIComponent(worktreeId)}/mem/start-preview?instance=${encodeURIComponent(instanceId)}`;
     const response = await fetch(url, { signal: controller.signal });

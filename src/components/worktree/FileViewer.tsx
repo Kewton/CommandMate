@@ -596,6 +596,8 @@ export const FileViewer = memo(function FileViewer({ isOpen, onClose, worktreeId
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ markdownContent: content.content }),
           },
+          // Issue #4345 1c 再指示 2 (K1): a POST that only renders — a read, never stopped by the gate.
+          { kind: 'read' },
         );
         if (response.ok) {
           const data = await response.json();

@@ -52,7 +52,7 @@ vi.mock('@/components/worktree/PromptPanel', () => ({
 
 import { TerminalSplitPaneContent } from '@/components/worktree/TerminalSplitPaneContent';
 import { resetHandoffStoreForTests } from '@/lib/handoff/close-rule';
-import { resetHandoffRegistryForTests } from '@/lib/handoff/page-registration';
+import { beginHandoffPageRequest, reportHandoffPageResponse, resetHandoffRegistryForTests } from '@/lib/handoff/page-registration';
 import { describeEntryCases, json, PAGE_WORKTREE as A, PageTree, standInPage, type EntryCase } from '../../lib/handoff/page-owner-harness';
 
 beforeAll(() => installRadixJsdomPolyfills());
@@ -111,6 +111,7 @@ const answer = async () => fireEvent.click(await screen.findByTestId('prompt-pan
 
 const CASES: Record<string, EntryCase> = {
   'the decision answer (/respond)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/respond` && method === 'POST',
     ok: () => json(200, { success: true }),
     ui: () => {
@@ -120,6 +121,7 @@ const CASES: Record<string, EntryCase> = {
     trigger: answer,
   },
   'the prompt answer (/prompt-response)': {
+    operation: true,
     matches: (url, method) => url === `/api/worktrees/${A}/prompt-response` && method === 'POST',
     ok: () => json(200, { success: true }),
     ui: () => {
@@ -154,5 +156,26 @@ describe('[#4345 1c] (negative controls) the split’s refusal is still told', (
       await waitFor(() => expect(showToast).toHaveBeenCalled());
       expect(screen.getByTestId('prompt-panel')).toBeInTheDocument();
     }
+  });
+});
+
+describe('[#4345 1c 再指示 2] (T4) the split’s answer not sent tells nothing', () => {
+  it('after another entry’s 401: no request, no toast, the card stays', async () => {
+    withDecision = true;
+    showToast.mockClear();
+    const posts: string[] = [];
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (init?.method === 'POST') posts.push(String(input));
+      return fallback(String(input));
+    }) as unknown as typeof fetch;
+    const page = standInPage();
+    render(<PageTree owner={page.owner}>{split()}</PageTree>);
+    const panel = await screen.findByTestId('prompt-panel');
+    reportHandoffPageResponse(beginHandoffPageRequest(page.registration), { status: 401 });
+    fireEvent.click(panel);
+    await new Promise((done) => setTimeout(done, 30));
+    expect(posts).toEqual([]);
+    expect(showToast).not.toHaveBeenCalled();
+    expect(screen.getByTestId('prompt-panel')).toBeInTheDocument();
   });
 });
