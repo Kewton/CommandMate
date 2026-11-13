@@ -47,7 +47,7 @@ import {
   claudeTranscriptPath,
   resetClaudeTranscriptSessions,
 } from '@/lib/hooks/sources/claude/history';
-import { claudeProjectSlug } from '@/lib/hooks/sources/claude/transcript';
+import { buildClaudeTurns, claudeProjectSlug, parseClaudeTranscript } from '@/lib/hooks/sources/claude/transcript';
 import { refreshClaudeAsk } from '@/lib/hooks/sources/claude/ask-refresh';
 import { readAskAttribution, askBodyDigest } from '@/lib/ask/ask-correlation';
 import { formatAskEnvelope } from '@/lib/ask/envelope';
@@ -612,5 +612,131 @@ describe('§3.6 I6・I9: each observation by its own record\'s session', () => {
     await completedThenRead(prompt('p1', env(A, 'hi'), 0));
     expect(await read(A)).toMatchObject({ state: 'matched', reply: 'the answer' });
     expect(getAskCorrelation(db, A)).toMatchObject({ duplicateSeen: false, nativeInputId: 'p1' });
+  });
+});
+
+/**
+ * Re-instruction (last): one native input (uuid + its record's own session) is one
+ * logical input before any turn is opened (`claudeLogicalRecords`), for History and
+ * the ask alike. Through the public reader (`captureClaudeTranscriptTurn` → `read`).
+ */
+describe('§3.6 I6・I9: one native input is one logical turn', () => {
+  const env = (askId: string, body: string) => paste(`${formatAskEnvelope(askId)}\n${body}`);
+  const assistantRows = () => getMessages(db, WT, { limit: 200 }).filter((m) => m.role === 'assistant');
+  function partial(uuid: string, text: string, at: number, session: string | null = SESSION): object {
+    return {
+      type: 'assistant', isSidechain: false, uuid, timestamp: iso(at), cwd: '<CWD>',
+      message: { role: 'assistant', content: [{ type: 'text', text }, { type: 'tool_use', id: `toolu_${uuid}`, name: 'Bash', input: {} }], stop_reason: 'tool_use' },
+      ...(session ? { sessionId: session } : {}),
+    };
+  }
+  async function absorbedRecords(fixture: string): Promise<object[]> {
+    return (await readFile(join(FIXTURES, fixture), 'utf8')).split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l) as object);
+  }
+
+  it('turn building: the same prompt twice then its answer is one closed turn, not superseded', () => {
+    const records = parseClaudeTranscript(
+      [prompt('p1', env(A, 'hi'), 0), prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 1_000)].map((r) => JSON.stringify(r)).join('\n'),
+    ).records;
+    const { turns } = buildClaudeTurns(records, SESSION);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ closed: true, superseded: false, askClosed: true });
+  });
+
+  it('count and state: read at once after the send is saved → matched, no duplicate', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), prompt('p1', env(A, 'hi'), 0), reply('r1', 'the answer', 1_000)]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'the answer' });
+    expect(getAskCorrelation(db, A)).toMatchObject({ duplicateSeen: false });
+  });
+
+  it('order with the send outcome: pending before it is saved, matched after', async () => {
+    reserveOnly(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), prompt('p1', env(A, 'hi'), 0), reply('r1', 'the answer', 1_000)]);
+    await capture();
+    expect(getAskCorrelation(db, A)?.attributionState).toBe('pending');
+    settleAskSend(db, A, { sendState: 'sent', turnOpenAtSend: false });
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'the answer' });
+  });
+
+  it('a completed input repeated, read at once with no earlier capture: one History reply, matched', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), reply('r1', 'the answer', 1_000), prompt('p1', env(A, 'hi'), 0)]);
+    await capture();
+    expect(assistantRows().map((m) => m.content)).toEqual(['the answer']);
+    expect(await read(A)).toMatchObject({ state: 'matched', reply: 'the answer' });
+  });
+
+  it('the body is kept whole: the partial text and the final text are one reply', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([
+      prompt('p1', env(A, 'hi'), 0),
+      partial('a1', 'part one', 500),
+      prompt('p1', env(A, 'hi'), 0),
+      reply('a2', 'final part', 1_000),
+    ]);
+    await capture();
+    const answer = await read(A);
+    expect(answer).toMatchObject({ state: 'matched' });
+    expect(answer?.reply).toContain('part one');
+    expect(answer?.reply).toContain('final part');
+  });
+
+  it('an absorbed ask in a turn whose prompt is repeated: A shared_turn, B absorbed_mid_turn', async () => {
+    sentAsk(A, 'review the plan');
+    sentAsk(B, 'second question', { at: 1_500 });
+    const records = await absorbedRecords('absorbed-ask.jsonl');
+    const [promptA] = records;
+    await writeTranscript([...records.slice(0, -1), promptA, records[records.length - 1]]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'ambiguous', reason: 'shared_turn' });
+    expect(await read(B)).toMatchObject({ state: 'unmatched', reason: 'absorbed_mid_turn' });
+  });
+
+  it('a notice in a turn whose prompt is repeated: matched with notified', async () => {
+    sentAsk(A, 'review the plan');
+    const records = await absorbedRecords('absorbed-notice.jsonl');
+    const [promptA] = records;
+    await writeTranscript([...records.slice(0, -1), promptA, records[records.length - 1]]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'matched', notified: true });
+  });
+
+  it.each([
+    ['another session', OTHER_SESSION],
+    ['no session', null],
+  ])('the completing assistant record of %s does not close the ask\'s turn (§0.4)', async (_name, session) => {
+    sentAsk(A, 'hi');
+    const closing = {
+      type: 'assistant', isSidechain: false, uuid: 'r1', timestamp: iso(1_000), cwd: '<CWD>',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' },
+      ...(session ? { sessionId: session } : {}),
+    };
+    await writeTranscript([prompt('p1', env(A, 'hi'), 0), closing]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', reply: null });
+  });
+
+  it('a repeat after another input came in between is not attributed by its id (stays pending)', async () => {
+    sentAsk(A, 'hi');
+    await writeTranscript([
+      prompt('p1', env(A, 'hi'), 0),
+      toolUse('t1', 500),
+      prompt('pv', 'another input', 1_000),
+      prompt('p1', env(A, 'hi'), 0),
+      reply('r1', 'which one?', 2_000),
+    ]);
+    await capture();
+    expect(await read(A)).toMatchObject({ state: 'pending', reply: null });
+  });
+
+  it('negative: the same uuid in another session is another input (not merged)', () => {
+    const records = parseClaudeTranscript(
+      [prompt('p1', env(A, 'hi'), 0), reply('r1', 'hi', 500), prompt('p1', env(A, 'hi'), 1_000, OTHER_SESSION)]
+        .map((r) => JSON.stringify(r)).join('\n'),
+    ).records;
+    expect(buildClaudeTurns(records, SESSION).turns).toHaveLength(2);
   });
 });

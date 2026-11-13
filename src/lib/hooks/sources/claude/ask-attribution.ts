@@ -30,7 +30,11 @@ const logger = createLogger('lib/hooks/sources/claude/ask-attribution');
  * takes a superseded turn and one whose version writes no `stop_reason`).
  */
 export function claudeAskTurnState(turn: ClaudeTurnAccumulator): AskTurnState {
-  if (turn.closed) return 'closed';
+  // I9: an input repeated after another input — its id alone does not say which
+  // records answer it, so it never settles from this turn.
+  if (turn.identityUncertain) return 'open';
+  // §0.4: closed by a stop of the prompt's own session only.
+  if (turn.askClosed) return 'closed';
   if (turn.superseded) return 'interrupted';
   return 'open';
 }

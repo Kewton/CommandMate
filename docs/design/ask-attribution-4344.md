@@ -292,6 +292,12 @@ capability は **adapter ごとに、§6 の表の対照（封筒を含む実入
 | I13 | コマンド本文（`/`・`!`・`#`）には封筒を付けず、行も作らない（`unavailable/slash_command`）。 | M4 |
 | I14 | 封筒は brief の閉じフェンスの直後・利用者の本文の直前に置き、打った本文で `typedContent` を計算し直す。 | M3 |
 
+**入力の同一性（最後の再指示、PM の処分）**: transcript の record から turn を開く前の 1 か所（`claudeLogicalRecords`）で「同じ native 入力（uuid＋その record 自身の session）」を 1 つの論理入力にまとめ、通常の capture・拡張読取り・進行中の表示・時刻を組み立てる走査・ask の帰属のすべてが同じ論理 turn を受け取る。状態（closed／interrupted／superseded／shared_turn／notified）はまとめた後の turn からだけ決める。
+- 同じ turn の中で同じ入力が再び書かれた prompt record は落とす（turn を分けない）。別の入力を挟んだ再掲は境界として残し、その turn と元の turn は id だけで帰属を推定しない（ask は確定しない）
+- 吸収の remove（uuid なし）・attachment（別の uuid）は別の観測としてそのまま残す
+- ask の完了の証拠（I5）は、閉じる assistant 記録の session が prompt record 自身の session と同じときだけ（§0.4。異 session・null では閉じない）。History の `closed` は変えない
+- 台帳側（保存済み入力との比較・送信結果待ち・持越し・終端不変）は今のまま。History の request_id は変えない
+
 M7（consistency-review が止まる）は CLI（PR3）の話なので、この表の外。
 
 #### 3.6.5 表の外で、設計の改訂で決めるもの（人の判断は不要）

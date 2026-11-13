@@ -91,6 +91,7 @@ import { bindClaudeAskTurns, reservedClaudeAskIds } from './ask-attribution';
 import {
   buildClaudeTurns,
   buildHeadlessClaudeTurn,
+  claudeLogicalRecords,
   claudeProjectSlug,
   CLAUDE_PROJECTS_DIR_SEGMENTS,
   CLAUDE_TURN_TRUNCATION_MARKER,
@@ -935,7 +936,8 @@ function lastClaudeAssistantRecordAt(
   const at = new Map<string, number>();
   let key: string | null = null;
 
-  for (const record of records) {
+  // Issue #4344: the same logical records `buildClaudeTurns` reads, so the walks agree.
+  for (const record of claudeLogicalRecords(records)) {
     if (record.isSidechain) continue;
     if (isClaudePromptRecord(record)) {
       key = record.uuid;

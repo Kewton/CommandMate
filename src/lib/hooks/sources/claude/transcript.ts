@@ -333,6 +333,13 @@ export interface ClaudeTranscriptRecord {
   /** Issue #4344: `attachment.type` of an `attachment` record (`queued_command`); null otherwise. */
   readonly attachmentType?: string | null;
   /**
+   * Issue #4344 (design §3.6 I6・I9): set by {@link claudeLogicalRecords} on a prompt
+   * record that repeats an earlier native input (same `uuid` and same own
+   * `sessionId`) after another input came in between. It still opens a turn — what
+   * follows it is not the in-between input's — but nothing is attributed by the id alone.
+   */
+  readonly reappearance?: boolean;
+  /**
    * The record's text with every block concatenated.
    *
    * Only used to decide whether a `user` record is a prompt. Deliberately never
@@ -464,6 +471,18 @@ export interface ClaudeTurnAccumulator {
    * never the turn's own session in its place; design §3.6 I6).
    */
   absorbedAsks?: { askId: string; sessionId: string | null }[];
+  /**
+   * Issue #4344 (I5・I6): the turn's stop as an ask may read it — {@link closed}, and
+   * the closing assistant record's own `sessionId` is the prompt record's own
+   * (design §0.4: the reply is in the same native session). History reads `closed`.
+   */
+  askClosed?: boolean;
+  /**
+   * Issue #4344 (I9): this turn's prompt is a {@link ClaudeTranscriptRecord.reappearance},
+   * or its native input reappears later after another input. Its id alone does not
+   * say which records answer it, so an ask does not settle from it.
+   */
+  identityUncertain?: boolean;
   /**
    * Issue #4344 (I6): the prompt record's own `sessionId`, null when it names none.
    * Unlike {@link sessionId} it does not fall back to the session the file was read under.
@@ -833,6 +852,8 @@ export function createClaudeTurn(record: ClaudeTranscriptRecord, sessionId: stri
     absorbedNotices: 0,
     absorbedAsks: [],
     promptSessionId: record.sessionId,
+    askClosed: false,
+    identityUncertain: record.reappearance === true,
   };
 }
 
@@ -853,6 +874,46 @@ function absorbedInputKind(record: ClaudeTranscriptRecord): 'remove' | 'attachme
   }
   if (record.type === 'attachment' && record.attachmentType === CLAUDE_QUEUED_COMMAND_ATTACHMENT) return 'attachment';
   return null;
+}
+
+/** One native input: the prompt record's `uuid` and its own `sessionId` (Issue #4344, I6). */
+function claudeInputKey(record: ClaudeTranscriptRecord): string {
+  return `${record.uuid ?? ''}\u0000${record.sessionId ?? ''}`;
+}
+
+/**
+ * The records with one native input as one logical input (Issue #4344, design
+ * §3.6 I6・I9) — the single place every turn builder and walker reads them through.
+ *
+ * A prompt record that repeats the native input of the turn it is in (same `uuid`
+ * and same own `sessionId`, no other prompt in between) is the same input written
+ * twice: it is dropped, so the turn is not split into an empty "interrupted" one
+ * and its answer. A repeat after another input came in between is kept (it is a
+ * boundary: what follows is not the in-between input's) and marked
+ * {@link ClaudeTranscriptRecord.reappearance}. Every other record — absorbed
+ * `queue-operation` removes (no uuid) and attachments (their own uuid) included —
+ * passes as it is. Sidechain records are not prompts here and pass as they are.
+ */
+export function claudeLogicalRecords(records: readonly ClaudeTranscriptRecord[]): readonly ClaudeTranscriptRecord[] {
+  const out: ClaudeTranscriptRecord[] = [];
+  const seen = new Set<string>();
+  let current: string | null = null;
+  for (const record of records) {
+    if (record.isSidechain || !isClaudePromptRecord(record)) {
+      out.push(record);
+      continue;
+    }
+    const key = claudeInputKey(record);
+    if (key === current) continue;
+    current = key;
+    if (seen.has(key)) {
+      out.push({ ...record, reappearance: true });
+      continue;
+    }
+    seen.add(key);
+    out.push(record);
+  }
+  return out;
 }
 
 /** What one pass over a transcript's records produced. */
@@ -911,13 +972,20 @@ export function buildClaudeTurns(
   let noticeRemoves = 0;
   let noticeAttachments = 0;
 
-  for (const record of records) {
+  // Issue #4344 (I6・I9): one native input is one turn, for every reader of turns.
+  for (const record of claudeLogicalRecords(records)) {
     if (record.isSidechain) {
       sidechainRecords += 1;
       continue;
     }
 
     if (isClaudePromptRecord(record)) {
+      if (record.reappearance) {
+        const key = claudeInputKey(record);
+        for (const earlier of turns) {
+          if (`${earlier.promptUuid}\u0000${earlier.promptSessionId ?? ''}` === key) earlier.identityUncertain = true;
+        }
+      }
       current = createClaudeTurn(record, sessionId);
       absorbedRemoves = 0;
       absorbedAttachments = 0;
@@ -959,6 +1027,9 @@ export function buildClaudeTurns(
     // an earlier `end_turn` — which is what a turn Claude resumed looks like —
     // is open again, and that is the reading the Issue's census supports.
     current.closed = isClaudeTurnClosingRecord(record);
+    // Issue #4344 (§0.4): an ask's turn closes only on its own session's stop.
+    current.askClosed =
+      current.closed && record.sessionId !== null && record.sessionId === (current.promptSessionId ?? null);
     if (record.stopReason !== null) current.stopReasonObserved = true;
     for (const block of record.blocks) {
       if (current.blocks.length >= MAX_CLAUDE_TURN_BLOCKS) {
