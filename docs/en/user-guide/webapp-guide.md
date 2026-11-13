@@ -631,8 +631,9 @@ surface switch): it acts on the **split that holds focus**. With focus outside e
 the first split answers — except while you are typing in a field outside the splits.
 
 The hidden splits **keep their sessions and keep polling** while they are off screen, so
-restoring shows the output that arrived in the meantime. The action bar's layout icons (1 / 2 / 3 / 4)
-are replaced by the label "Split 2 maximized" while one is maximized.
+restoring shows the output that arrived in the meantime. While a split is maximized, the
+label "Split 2 maximized" appears next to the action bar's layout icons (1 / 2 / 3 / 4),
+which stay visible.
 
 Because it is **temporary**, the layout comes back on its own when you:
 
