@@ -100,20 +100,39 @@ export function createStrictRespondDeps(
 ): StrictRespondDeps {
   const { worktreeId, cliToolId, instanceId, sessionName } = target;
   /**
-   * Issue #4303 review: the screen read before the first key ended with the
-   * agent in front and the ticket current. `strict-respond` consumes the token
-   * after that read and sends the first key with no I/O in between, so that
-   * key does not read the foreground again (a refusal there, after the token
-   * is spent, could not be "not sent").
+   * Issue #4303 review: the last read before a key ended with the agent in
+   * front and the ticket current. `strict-respond` sends that key with no await
+   * in between (the token consumed, the startup gate asked — all synchronous),
+   * so the key does not read the foreground again: a refusal thrown by
+   * `sendKey` is counted there as a key that may have gone and kept with the
+   * operation (exit 41, `send_failed`), which a key never typed is not.
    */
-  let confirmedForFirstKey = false;
+  let confirmedForNextKey = false;
+  /**
+   * Set once the Enter is handed to tmux: the reads after it are of the
+   * outcome, where a shell in front is the agent having exited (#3788) — not a
+   * reason to refuse a key, since none is left.
+   */
+  let enterSent = false;
   /** Refuse with nothing typed: recorded, then thrown for `strict-respond`. */
   const refuseKey = (refused: NonNullable<StrictAnswerGate['refusedBeforeKey']>, why: string): never => {
     gate.refusedBeforeKey = refused;
     throw new Error(why);
   };
+  /**
+   * The ticket, synchronously: lost, recorded as the refusal. Asked by the
+   * startup gate, which `strict-respond` consults right before consuming the
+   * token and right before every later key.
+   */
+  const refusedForTicketNow = (): boolean => {
+    if (gate.refusedBeforeKey === null && ticket !== undefined && !ticket.isCurrent()) {
+      gate.refusedBeforeKey = { refused: 'session_replaced' };
+    }
+    return gate.refusedBeforeKey !== null;
+  };
   return {
     async read(): Promise<StrictScreenRead> {
+      if (!enterSent) confirmedForNextKey = false;
       let payload;
       try {
         // Fresh, and written back to the capture cache at the width the payload
@@ -134,32 +153,42 @@ export function createStrictRespondDeps(
       } catch (error) {
         return { ok: false, stage: 'observation', error: describeError(error) };
       }
-      // Issue #4303 review: the read before the first key — the last await
-      // before the token is consumed — ends by asking who holds the pane, and
-      // then whether the ticket is still current (that read awaits). Refused,
-      // the answer stops as a failed read: nothing typed, the token unspent.
-      if (gate.keysSent === 0 && gate.refusedBeforeKey === null) {
-        confirmedForFirstKey = false;
+      // Issue #4303 review: a read before a key — the last await before the
+      // token is consumed, or before a later key — ends by asking who holds the
+      // pane, and then whether the ticket is still current (that read awaits).
+      // Refused before the first key, the answer stops as a failed read:
+      // nothing typed, the token unspent, the operation not kept. Refused
+      // between keys, the read is returned as it was and the startup gate
+      // (`startup.isWindowOpen`, asked next) stops the answer with the keys
+      // actually sent — the count `strict-respond` keeps with the operation,
+      // replays, and returns, so response, record and replay agree.
+      if (!enterSent && gate.refusedBeforeKey === null) {
         const foreground = await readAnswerTargetForeground(sessionName);
         if (foreground !== 'other') {
           gate.refusedBeforeKey = { refused: 'agent_not_in_foreground', foreground };
-          return { ok: false, stage: 'capture', error: `agent not in foreground (${foreground}, Issue #4303)` };
+          if (gate.keysSent === 0) {
+            return { ok: false, stage: 'capture', error: `agent not in foreground (${foreground}, Issue #4303)` };
+          }
+          return read;
         }
         if (ticket !== undefined && !ticket.isCurrent()) {
           gate.refusedBeforeKey = { refused: 'session_replaced' };
-          return { ok: false, stage: 'capture', error: 'session replaced (Issue #4303)' };
+          if (gate.keysSent === 0) return { ok: false, stage: 'capture', error: 'session replaced (Issue #4303)' };
+          return read;
         }
-        confirmedForFirstKey = true;
+        confirmedForNextKey = true;
       }
       return read;
     },
     sendKey: async key => {
       // Issue #4303: right before each key, the agent must hold the pane — the
       // waits between keys (an arrow sent and then the agent gone must not
-      // leave an Enter for the shell). The first key after the strict read was
-      // confirmed by that read (`confirmedForFirstKey`). Review P1: the ticket
-      // is checked after that await, right before the key.
-      if (!confirmedForFirstKey) {
+      // leave an Enter for the shell). A key right after a read that confirmed
+      // it (`confirmedForNextKey`) does not ask again; one sent without such a
+      // read asks here, and a refusal is thrown (counted by `strict-respond`,
+      // so the gate's reads are the path that keeps the count). Review P1: the
+      // ticket is checked after that await, right before the key.
+      if (!confirmedForNextKey) {
         const foreground = await readAnswerTargetForeground(sessionName);
         if (foreground !== 'other') {
           refuseKey(
@@ -168,13 +197,14 @@ export function createStrictRespondDeps(
           );
         }
       }
-      confirmedForFirstKey = false;
+      confirmedForNextKey = false;
       if (ticket !== undefined && !ticket.isCurrent()) {
         refuseKey(
           { refused: 'session_replaced' },
           `Session ${sessionName} was replaced while the strict answer held its input (Issue #3952); no key was sent`
         );
       }
+      if (key === 'Enter') enterSent = true;
       await sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId);
       gate.keysSent++;
     },
@@ -184,7 +214,12 @@ export function createStrictRespondDeps(
     // Issue #3788: a shell in front after the Enter is agy having exited.
     paneCommand: () => readSessionPaneCommand(worktreeId, cliToolId, instanceId),
     startup: {
-      isWindowOpen: () => isStartupWindowOpen(sessionName),
+      // Issue #4303 review: also the stop for a refusal recorded by a read or
+      // a ticket lost since — `strict-respond` asks this synchronously right
+      // before the token is consumed (a refusal there: exit 40, token unspent,
+      // operation not kept) and right before each later key (exit 41 with the
+      // keys actually sent, `screen_moved_mid_send`).
+      isWindowOpen: () => refusedForTicketNow() || isStartupWindowOpen(sessionName),
       claimedWithin: ms => wasStartupTrustClaimedWithin(sessionName, ms),
       hold: () => holdStartupTrust(sessionName),
       discardDebt: () => forgetStartupTrust(sessionName),
@@ -332,6 +367,13 @@ function replacedRefusal(sessionName: string): StrictInputLockRefusal {
  * `send_failed`, counted). With no key typed it is the refusal it was —
  * nothing sent, so no `prompt_answered_human` row and the CLI's exit 40. With
  * keys typed before it, the result stands with the keys actually sent.
+ *
+ * Re-instruction 2: `strict-respond` keeps its result with the operation before
+ * this runs, so the deps stop a refused answer where that result already
+ * carries the right count — a refused read before the token (exit 40, the
+ * operation not kept) or the startup gate between keys (exit 41, the keys
+ * actually sent). The correction below is then a no-op; it stays for a key
+ * refused by `sendKey` itself, which no read confirmed.
  */
 function settleRefusalBeforeKey(
   sessionName: string,
