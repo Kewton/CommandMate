@@ -250,4 +250,33 @@ test.describe('[Issue #4335] the first Enter and the Radix menu keyboard listene
     await expect(menu).toBeVisible();
     await expect(repository).toBeFocused();
   });
+
+  test('the observer releases only the held registrations still current at release (add A → remove A → add B)', async ({ page }) => {
+    // The StrictMode shape (setup → cleanup → setup): a held registration that was removed before
+    // the release must not be attached by it; the count is the registrations attached.
+    await installFocusObserver(page, { deferRadixKeyboardListener: true });
+    await page.goto('/');
+    await expect.poll(async () => (await readFocusRecord(page))?.listeners.some((l) => l.op === 'deferred') ?? false).toBe(true);
+    const result = await page.evaluate(() => {
+      const calls = { a: 0, b: 0 };
+      // Sources name isUsingKeyboardRef, as the Radix menu root's listener does.
+      const a = () => {
+        calls.a += 1; // isUsingKeyboardRef
+      };
+      const b = () => {
+        calls.b += 1; // isUsingKeyboardRef
+      };
+      document.addEventListener('keydown', a, { capture: true });
+      document.removeEventListener('keydown', a, { capture: true });
+      document.addEventListener('keydown', b, { capture: true });
+      const heldPageRoots = document.querySelectorAll('[aria-haspopup="menu"][data-state]').length;
+      window.__focus4335!.release();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
+      const armed = window.__focus4335!.radixArmed;
+      document.removeEventListener('keydown', b, { capture: true });
+      return { calls, armed, heldPageRoots };
+    });
+    expect(result.calls).toEqual({ a: 0, b: 1 });
+    expect(result.armed).toBe(result.heldPageRoots + 1);
+  });
 });

@@ -18,6 +18,8 @@
  *    Radix menu root's (its source names `isUsingKeyboardRef` — the dev build is not minified);
  *  - with `deferRadixKeyboardListener`, holds that listener's registration back until
  *    `releaseRadixKeyboardListener` — the control that puts the first Enter before it on purpose.
+ *    A held registration removed before the release is cancelled, not released (only the
+ *    registrations current at the release are attached; `radixArmed` counts exactly those).
  */
 
 import type { Page } from '@playwright/test';
@@ -34,7 +36,7 @@ export interface FocusEvent4335 {
 
 export interface FocusRecord {
   events: FocusEvent4335[];
-  listeners: Array<{ op: 'add' | 'remove' | 'deferred' | 'released'; radix: boolean; at: number }>;
+  listeners: Array<{ op: 'add' | 'remove' | 'deferred' | 'cancelled' | 'released'; radix: boolean; at: number }>;
   radixArmed: number;
 }
 
@@ -69,13 +71,15 @@ export async function installFocusObserver(
       typeof listener === 'function' && Function.prototype.toString.call(listener).includes('isUsingKeyboardRef');
     const add = Document.prototype.addEventListener;
     const remove = Document.prototype.removeEventListener;
-    const pending: Array<() => void> = [];
+    // Held registrations still current: a remove before the release cancels its own (the
+    // StrictMode setup → cleanup → setup), so the release attaches only what is still registered.
+    const pending: Array<{ listener: unknown; attach: () => void }> = [];
     const radixAttached = new Set<unknown>();
     let released = !defer;
     record.release = () => {
       released = true;
       record.listeners.push({ op: 'released', radix: true, at: performance.now() });
-      while (pending.length) pending.shift()!();
+      while (pending.length) pending.shift()!.attach();
     };
     Document.prototype.addEventListener = function (this: Document, type: string, listener: unknown, options?: unknown) {
       if (this === document && type === 'keydown' && isCapture(options)) {
@@ -90,7 +94,7 @@ export async function installFocusObserver(
         };
         if (radix && !released) {
           record.listeners.push({ op: 'deferred', radix, at: performance.now() });
-          pending.push(attach);
+          pending.push({ listener, attach });
           return;
         }
         attach();
@@ -101,6 +105,12 @@ export async function installFocusObserver(
     Document.prototype.removeEventListener = function (this: Document, type: string, listener: unknown, options?: unknown) {
       if (this === document && type === 'keydown' && isCapture(options)) {
         const radix = isRadix(listener);
+        const held = pending.findIndex((p) => p.listener === listener);
+        if (held >= 0) {
+          pending.splice(held, 1);
+          record.listeners.push({ op: 'cancelled', radix, at: performance.now() });
+          return;
+        }
         if (radix) {
           radixAttached.delete(listener);
           record.radixArmed = radixAttached.size;

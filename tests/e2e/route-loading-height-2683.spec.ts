@@ -159,8 +159,12 @@ test.describe.serial('[#2693] route-loading fallback height and centering', () =
     const record = await old.read();
     // eslint-disable-next-line no-console -- the recorded facts of the old arming
     console.log('ROUTE-LOADING-4335 control', JSON.stringify({ releasedAt: old.releasedAt(), record }));
-    expect(record?.sameDocument).toBe(true);
+    const facts = JSON.stringify({ released: old.releasedAt().length, releasedAt: old.releasedAt(), record });
+    expect(record?.sameDocument, `not the clicked document: ${facts}`).toBe(true);
+    // The comparison below says something only if the fallback was seen at all: an empty record
+    // would pass it vacuously (no insertion is "after the release" by default).
+    expect(record!.inserted.length, `route-loading was never inserted, so nothing to compare: ${facts}`).toBeGreaterThan(0);
     const [releasedAt] = old.releasedAt();
-    for (const insertedAt of record!.inserted) expect(insertedAt).toBeGreaterThan(releasedAt);
+    for (const insertedAt of record!.inserted) expect(insertedAt, facts).toBeGreaterThan(releasedAt);
   });
 });
