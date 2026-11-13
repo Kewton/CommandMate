@@ -132,7 +132,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       // the answer is sent first without Enter (answer_then_enter), then a
       // separate Enter keystroke is sent.
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', 'y', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', 'y', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', '', true);
     });
   });
@@ -185,7 +185,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
 
       // Verify tmux sendKeys was called with correct session name (answer then Enter, Issue #616)
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '1', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '', true);
     });
   });
@@ -235,7 +235,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
 
       // Verify tmux sendKeys was called with correct session name (answer then Enter, Issue #616)
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', 'n', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', 'n', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', '', true);
     });
   });

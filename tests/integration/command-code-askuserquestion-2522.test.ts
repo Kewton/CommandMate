@@ -271,7 +271,7 @@ describe('[#2522] one capture, one question, every surface', () => {
     const { sendKeys } = await import('@/lib/tmux/tmux');
     // 確定仕様 D: the digit alone advances one operation.
     expect(vi.mocked(sendKeys).mock.calls).toEqual([
-      [`cm-${WORKTREE_ID}-command-code`, '2', false],
+      [`cm-${WORKTREE_ID}-command-code`, '2', false, { literal: true }],
     ]);
 
     const rows = db

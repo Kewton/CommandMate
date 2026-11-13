@@ -219,7 +219,7 @@ describe('POST /api/worktrees/:id/respond', () => {
 
       // Session name comes from the CLI tool (mcbd-<cliToolId>-<worktreeId>), and
       // the answer is sent first without Enter, then a separate Enter (Issue #616/#1102).
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'y', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'y', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', '', true);
     });
 
@@ -252,7 +252,7 @@ describe('POST /api/worktrees/:id/respond', () => {
       await respondToPrompt(request as unknown as import('next/server').NextRequest, { params: Promise.resolve({ id: 'test-worktree' }) });
 
       // Answer sent without Enter, then a separate Enter (Issue #616/#1102).
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'n', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', 'n', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-test-worktree', '', true);
     });
 
