@@ -22,7 +22,7 @@ import {
 } from '@/lib/cli-tools/types';
 import { Spinner } from '@/components/ui/Spinner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 
 // ============================================================================
 // Types
@@ -163,7 +163,9 @@ export const VibeLocalSettings = memo(function VibeLocalSettings({
             currentValue != null ? String(currentValue) : ''
           );
         }
-      } catch {
+      } catch (err) {
+        // Issue #4345 1c-2: a refusal (nothing sent) keeps what the person typed.
+        if (isHandoffPageOperationRefused(err)) return;
         // Revert input on network error
         setContextWindowInput(
           currentValue != null ? String(currentValue) : ''

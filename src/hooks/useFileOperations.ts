@@ -14,7 +14,11 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { fetchForHandoffPage, type HandoffPageOwner } from '@/lib/handoff/page-owner';
+import {
+  fetchForHandoffPage,
+  isHandoffPageOperationRefused,
+  type HandoffPageOwner,
+} from '@/lib/handoff/page-owner';
 
 /**
  * Represents the target of a move operation.
@@ -69,6 +73,9 @@ export function useFileOperations(
 
   const handleMoveConfirm = useCallback(async (destinationDir: string) => {
     if (!moveTarget) return;
+    // Issue #4345 1c-2: a refusal (registration lapsed, nothing sent) is "nothing happened" — no
+    // failure toast, and the dialog (the chosen destination) stays for the person to retry.
+    let refused = false;
 
     try {
       const response = await fetchForHandoffPage(
@@ -94,11 +101,17 @@ export function useFileOperations(
 
       onSuccess?.('Moved successfully');
       onRefresh();
-    } catch {
+    } catch (err) {
+      if (isHandoffPageOperationRefused(err)) {
+        refused = true;
+        return;
+      }
       onError?.('Failed to move');
     } finally {
-      setMoveTarget(null);
-      setIsMoveDialogOpen(false);
+      if (!refused) {
+        setMoveTarget(null);
+        setIsMoveDialogOpen(false);
+      }
     }
   }, [moveTarget, worktreeId, onRefresh, onSuccess, onError, handoffOwner]);
 

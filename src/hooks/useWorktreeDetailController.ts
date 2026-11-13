@@ -2308,7 +2308,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // File created successfully - trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
-    } catch {
+    } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is no failure alert; the dialog comes back so the
+      // name is not lost and the person can try again after signing in.
+      if (isHandoffPageOperationRefused(err)) {
+        setShowNewFileDialog(true);
+        return;
+      }
       window.alert(tError('fileOps.failedToCreateFile'));
     }
   }, [worktreeId, newFileParentPath, tError]);
@@ -2342,6 +2348,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Directory created successfully - trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no alert.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to create directory:', err);
       window.alert(tError('fileOps.failedToCreateDirectory'));
     }
@@ -2372,6 +2380,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no alert.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to rename:', err);
       window.alert(tError('fileOps.failedToRename'));
     }
@@ -2398,6 +2408,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no alert.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to delete:', err);
       window.alert(tError('fileOps.failedToDelete'));
     }
@@ -2493,6 +2505,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       // Refresh file tree [IMPACT-004]
       setFileTreeRefresh(prev => prev + 1);
     } catch (err) {
+      // Issue #4345 1c-2: a refusal (nothing sent) is "nothing happened" — no toast.
+      if (isHandoffPageOperationRefused(err)) return;
       console.error('[WorktreeDetailRefactored] Failed to upload:', err);
       showToast('Upload failed. Please try again.', 'error');
     }

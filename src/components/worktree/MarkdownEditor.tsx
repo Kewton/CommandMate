@@ -78,7 +78,7 @@ import {
   isValidBoolean,
 } from '@/types/markdown-editor';
 import { safeLocalStorage } from '@/lib/safe-local-storage';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { fetchForHandoffPage, isHandoffPageOperationRefused } from '@/lib/handoff/page-owner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 
 /**
@@ -462,18 +462,31 @@ export const MarkdownEditor = memo(function MarkdownEditor({
    * Accepts the value to save as a parameter (not closure state) so that
    * useAutoSave can pass the latest ref value directly.
    */
-  const saveToApi = useCallback(
-    async (valueToSave: string): Promise<void> => {
+  // Issue #4345 1c-2: the last save was refused (registration lapsed, nothing sent). Not an error,
+  // not "saved": the text stays dirty, and closing the editor must not drop it.
+  const saveRefusedRef = useRef(false);
+  const saveRaw = useCallback(
+    async (valueToSave: string): Promise<boolean> => {
       // Issue #4345 1c: the save's 401 reaches the gateway before it becomes the save error.
-      const response = await fetchForHandoffPage(
-        handoffOwner,
-        `/api/worktrees/${worktreeId}/files/${filePath}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: valueToSave }),
+      let response: Response;
+      try {
+        response = await fetchForHandoffPage(
+          handoffOwner,
+          `/api/worktrees/${worktreeId}/files/${filePath}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: valueToSave }),
+          }
+        );
+      } catch (err) {
+        if (isHandoffPageOperationRefused(err)) {
+          saveRefusedRef.current = true;
+          return false;
         }
-      );
+        throw err;
+      }
+      saveRefusedRef.current = false;
       // Session expiry detection before JSON parsing
       if (response.status === 401 || response.redirected) {
         throw new Error(tWorktree('editor.sessionExpired'));
@@ -483,8 +496,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         throw new Error(data.error?.message || tWorktree('editor.saveError'));
       }
       setOriginalContent(valueToSave);
+      return true;
     },
     [worktreeId, filePath, tWorktree, handoffOwner]
+  );
+  const saveToApi = useCallback(
+    async (valueToSave: string): Promise<void> => {
+      await saveRaw(valueToSave);
+    },
+    [saveRaw]
   );
 
   // Auto-save integration (dirty state reset is handled inside saveToApi)
@@ -521,7 +541,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     setIsSaving(true);
 
     try {
-      await saveToApi(content);
+      if (!(await saveRaw(content))) return;
       showToast(tWorktree('editor.saveSuccess'), 'success');
 
       if (onSave) {
@@ -533,7 +553,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     } finally {
       setIsSaving(false);
     }
-  }, [saveToApi, content, isDirty, isSaving, onSave, filePath, showToast, tWorktree]);
+  }, [saveRaw, content, isDirty, isSaving, onSave, filePath, showToast, tWorktree]);
 
   /** Line count for line number gutter */
   const lineCount = content.split('\n').length;
@@ -577,6 +597,8 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     if (isAutoSaveEnabled) {
       if (isDirty || isAutoSaving) {
         await saveNow();
+        // Refused (nothing saved): stay open, the text is kept.
+        if (saveRefusedRef.current) return;
         if (autoSaveError) {
           const confirmed = await confirm({
             description: tWorktree('editor.saveFailedCloseConfirm'),
