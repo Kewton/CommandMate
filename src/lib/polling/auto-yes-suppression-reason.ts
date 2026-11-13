@@ -78,6 +78,16 @@ export type AutoYesSuppressionReason =
    */
   | 'question-confirm-page'
   /**
+   * Issue #4313: Command Code's `AskUserQuestion` was declined in the turn on
+   * screen (`└ User declined to answer questions`), and a prompt followed it.
+   * The decline reaches the agent as "no answer", and it may go on with its own
+   * recommendation; answering the permissions that follow would carry that
+   * through as though the operator had approved it. So until the turn ends (a
+   * later user row or the turn summary), Auto-Yes leaves every prompt to a
+   * human. A decline in an earlier turn does not hold.
+   */
+  | 'declined-question'
+  /**
    * Issue #3822: a question the tool asks the operator (an `AskUserQuestion`
    * picker, OpenCode V2's question form) is on the pane. Auto-Yes answers
    * permissions only; the question is the human's, so nothing is sent. Not a
@@ -148,6 +158,9 @@ export const STARTUP_TRUST_UNHANDLED_SUPPRESSION_REASON = 'startup-trust-unhandl
 
 /** Issue #3748: the reason the poller records over an `AskUserQuestion` confirm page. */
 export const QUESTION_CONFIRM_PAGE_SUPPRESSION_REASON = 'question-confirm-page' satisfies AutoYesSuppressionReason;
+
+/** Issue #4313: the reason the poller records over a prompt that follows a question declined in the same turn. */
+export const DECLINED_QUESTION_SUPPRESSION_REASON = 'declined-question' satisfies AutoYesSuppressionReason;
 
 /** Issue #3822: the reason the poller records over a question the tool asks the operator. */
 export const QUESTION_LEFT_TO_HUMAN_SUPPRESSION_REASON = 'question-left-to-human' satisfies AutoYesSuppressionReason;

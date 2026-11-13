@@ -15,6 +15,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(),
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
@@ -349,7 +351,7 @@ describe('[#2755] the arm is entered only for what it was measured on', () => {
     });
 
     expect(sendKeys).toHaveBeenCalledTimes(1);
-    expect(sendKeys).toHaveBeenCalledWith(SESSION, '2', false);
+    expect(sendKeys).toHaveBeenCalledWith(SESSION, '2', false, { literal: true });
     expect(sendSpecialKeys).not.toHaveBeenCalled();
     expect(capturePane).not.toHaveBeenCalled();
   });

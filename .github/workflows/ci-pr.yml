@@ -878,7 +878,10 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=8192'
           CM_E2E_HEAP_PROBE_DIR: ${{ runner.temp }}/e2e-heap
 
-      # [Issue #4308] Peak heap of the dev webServer vs its limit. Never affects the verdict.
+      # [Issue #4308] Peak heap of the dev webServer vs its limit, plus the per-second series
+      # (series-<pid>.jsonl) and spec/test times (timeline.jsonl) in the same directory, uploaded
+      # together below. The 1 s sampling does not guarantee the instantaneous maximum.
+      # Never affects the verdict.
       - name: E2E heap summary
         if: ${{ !cancelled() }}
         continue-on-error: true

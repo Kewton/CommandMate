@@ -17,6 +17,8 @@ import { v69_migrations } from '@/lib/db/migrations/v69-mem-promote';
 import { v70_migrations } from '@/lib/db/migrations/v70-suggestion-shown';
 // Issue #4227 (G-PR2): v71 (mem_handoff_*) sits above them all and goes back first.
 import { v71_migrations } from '@/lib/db/migrations/v71-mem-handoff';
+// Issue #4344: v72 (ask_correlations) sits above them all and goes back first.
+import { v72_migrations } from '@/lib/db/migrations/v72-ask-correlations';
 
 describe('migration v66: mem store', () => {
   let db: Database.Database;
@@ -47,6 +49,8 @@ describe('migration v66: mem store', () => {
     try {
       fresh.pragma('foreign_keys = ON');
       runMigrations(fresh);
+      v72_migrations[0].down!(fresh);
+      fresh.prepare('DELETE FROM schema_version WHERE version = 72').run();
       v71_migrations[0].down!(fresh);
       fresh.prepare('DELETE FROM schema_version WHERE version = 71').run();
       v70_migrations[0].down!(fresh);

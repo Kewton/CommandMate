@@ -303,6 +303,10 @@ const PRE_FIX_VERDICTS: Record<string, string> = {
   'command-code-askuserquestion-2754/singleselect-initial-unanswered-tabs.txt': 'waiting prompt_detected',
   'command-code-askuserquestion-2754/tabs-single-question.txt': 'waiting prompt_detected',
 
+  // command-code-declined-question-4313 (a real declined turn + a synthetic shell dialog, Issue #4313; see its README)
+  'command-code-declined-question-4313/declined-previous-turn-shell-permission.txt': 'waiting prompt_detected',
+  'command-code-declined-question-4313/declined-this-turn-shell-permission.txt': 'waiting prompt_detected',
+
   // command-code-live-2250
   'command-code-live-2250/boot-idle-1490.txt': 'ready input_prompt',
   'command-code-live-2250/boot-idle.txt': 'ready input_prompt',

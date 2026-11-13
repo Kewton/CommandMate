@@ -19,6 +19,8 @@ import type { Worktree, ChatMessage } from '@/types/models';
 // sendSpecialKeys from this module; both must be provided or vitest throws
 // "No sendSpecialKeys export" and the route returns 500 (Issue #1102).
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn(() => Promise.resolve()),
   sendSpecialKeys: vi.fn(() => Promise.resolve()),
 }));
@@ -132,7 +134,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
       // the answer is sent first without Enter (answer_then_enter), then a
       // separate Enter keystroke is sent.
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', 'y', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', 'y', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-claude-claude-test', '', true);
     });
   });
@@ -185,7 +187,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
 
       // Verify tmux sendKeys was called with correct session name (answer then Enter, Issue #616)
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '1', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '1', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-codex-codex-test', '', true);
     });
   });
@@ -235,7 +237,7 @@ describe('POST /api/worktrees/:id/respond - CLI Tool Support', () => {
 
       // Verify tmux sendKeys was called with correct session name (answer then Enter, Issue #616)
       const { sendKeys } = await import('@/lib/tmux/tmux');
-      expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', 'n', false);
+      expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', 'n', false, { literal: true });
       expect(sendKeys).toHaveBeenCalledWith('mcbd-gemini-gemini-test', '', true);
     });
   });

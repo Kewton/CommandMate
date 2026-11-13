@@ -25,7 +25,7 @@ The four most-used commands, with their full descriptions further down this page
 | `/progress-report` | Progress report generation | High |
 | `/tdd-impl` | TDD implementation | High |
 
-### All 27 Commands
+### All 26 Commands
 
 Every command in `.claude/commands/`. Follow the link for the full definition of each one.
 

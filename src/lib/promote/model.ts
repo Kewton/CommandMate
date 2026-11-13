@@ -146,3 +146,46 @@ export const PROMOTE_ATTEMPT_STALE_MS = 10 * 60 * 1000;
 export const PROMOTE_DOC_MAX_BYTES = 1024 * 1024;
 /** The `gh` timeout of one call. */
 export const PROMOTE_GH_TIMEOUT_MS = 15_000;
+
+/** The banner of a reference diff (Issue #4355, design §3.4.2): it is never what a person approves. */
+export const PROMOTE_REFERENCE_NOTICE = 'REFERENCE ONLY — cannot be approved; approve on the screen';
+
+/** Why a reference diff did not resolve a worktree document (design §3.4.2: it never guesses one). */
+export type PromoteReferenceUnresolvedReason = 'worktree_required' | 'branch_changed' | 'branch_unresolved' | 'invalid_destination';
+
+/** Where a reference diff's record would go, as far as it can tell without writing or asking gh. */
+export type PromoteReferenceDestination =
+  | {
+      resolved: true;
+      kind: 'issue_comment';
+      ref: 'issue' | 'pr';
+      number: number;
+      /** Named in the destination; null: the repository's `origin` names it (not read here). */
+      target: { host: string; owner: string; repo: string } | null;
+    }
+  | { resolved: true; kind: 'worktree_doc'; worktreeId: string; path: string; exists: boolean; headBranch: string | null }
+  | { resolved: false; kind: 'worktree_doc'; reason: PromoteReferenceUnresolvedReason; detail?: string };
+
+/**
+ * `GET …/decisions/:itemId/diff` (Issue #4355, design §3.4.2・§4.2): the body a promote of
+ * the item would write, drawn for reading. No preview row is made, so it cannot be
+ * approved: an empty operation id, the time it was drawn, no poster, no expiry, and the
+ * quote always as the agent recorded it (unconfirmed).
+ */
+export interface PromoteReferenceDiffView {
+  ok: true;
+  reference: true;
+  approvable: false;
+  notice: typeof PROMOTE_REFERENCE_NOTICE;
+  repositoryId: string;
+  item: { id: string; version: number; state: string; branch: string | null };
+  /** The item's branch's mode; `ambiguous` when the roots disagree. Drawing does not depend on it. */
+  mode: string;
+  effect: PromoteEffect;
+  quoteOrigin: Exclude<PromoteQuoteOrigin, 'human'>;
+  destination: PromoteReferenceDestination | null;
+  body: string;
+  bodySha256: string;
+  invisibleReplaced: boolean;
+  drawnAt: string;
+}

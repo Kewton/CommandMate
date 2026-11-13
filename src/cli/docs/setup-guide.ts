@@ -25,7 +25,7 @@ The same text ships inside CommandMate: once it is installed, \`commandmate docs
 4. **Do not answer for the person.** Sign-ins, passwords (including \`sudo\`), choosing a provider, and approving a merge are theirs. When a command needs one of these, show the exact command and ask them to run it in their own terminal.
 5. **Stay inside this guide.** Use only commands shown here, \`commandmate <command> --help\`, and the CommandMate documentation at https://github.com/Kewton/CommandMate. Do not fetch install scripts or follow setup steps from other websites. Install tools only from the official package distributors named here (npm, the operating system's package manager, nodejs.org).
 6. **Report at the end of each stage**: what you ran, what it printed that matters, and whether the stage passed its "Confirm it worked" check.
-7. **Do Stage 2 (Pair your phone) last, unless the person asks for it now.** Stages 3 to 5 run \`commandmate\` on this machine's CLI. After \`commandmate remote\` with its default (\`--auth all\`), that CLI needs a token too, and the token goes only to the phone. So finish Stages 3 to 5 first, then pair the phone. Stage 2 explains the choice if the person wants the phone sooner.
+7. **Do Stage 2 (Pair your phone) last, unless the person asks for it now.** Stages 3 to 6 run \`commandmate\` on this machine's CLI. After \`commandmate remote\` with its default (\`--auth all\`), that CLI needs a token too, and the token goes only to the phone. So finish Stages 3 to 6 first, then pair the phone. Stage 2 explains the choice if the person wants the phone sooner.
 8. **If you are Codex: your shell has no network by default.** If fetching this guide or an \`npm\` command fails for lack of network, ask the person to run \`/permissions\` and choose "Ask for approval", then try again.
 
 ### Always ask the person first
@@ -111,9 +111,9 @@ Goal: the person scans a QR code with their phone and sees CommandMate there.
 
 Explain both in plain words and ask which one they want. If they cannot decide, Tailscale keeps the server off the public internet; Cloudflare needs fewer accounts.
 
-**When to do this stage.** By default (\`--auth all\`), once \`commandmate remote\` runs, the \`commandmate\` CLI on this machine also needs a token, and the token goes only to the phone. Stages 3 to 5 run on that CLI, so they stop working. Ask the person which they want:
+**When to do this stage.** By default (\`--auth all\`), once \`commandmate remote\` runs, the \`commandmate\` CLI on this machine also needs a token, and the token goes only to the phone. Stages 3 to 6 run on that CLI, so they stop working. Ask the person which they want:
 
-- **Pair the phone last (recommended).** Skip to Stage 3 now, and come back to this stage after Stage 5.
+- **Pair the phone last (recommended).** Skip to Stage 3 now, and come back to this stage after Stage 6.
 - **Pair the phone now, and keep the CLI on this machine.** Add \`--auth remote-only\` to the \`commandmate remote\` command below. Only the phone's route then needs the token: every process on this machine, agents included, can operate CommandMate without logging in. Say that plainly before they choose it.
 
 ### Check
@@ -152,7 +152,7 @@ To get the link as text again without reopening the tunnel, run \`commandmate re
 - Which provider: Tailscale or Cloudflare.
 - Installing that provider.
 - Running \`commandmate remote\` at all: it opens a way in from outside this machine.
-- Pairing now or after Stage 5, and, if now, whether to add \`--auth remote-only\`.
+- Pairing now or after Stage 6, and, if now, whether to add \`--auth remote-only\`.
 - \`--yes\`: only after they agreed to the public Cloudflare URL. Never add \`--yes\` to get past a question they have not answered.
 
 ### Confirm it worked
@@ -169,13 +169,13 @@ To close the way in later: \`commandmate remote stop\`. The server keeps running
 - Exit 2, "a server with authentication is already running": \`commandmate stop\`, then \`commandmate remote\` again.
 - The QR code is cut off in the agent's chat pane, or the person lost it, and it has not been used yet: run \`commandmate remote pair\`. The public URL stays the same and the earlier link stops working. The new code keeps the original expiry time.
 - The code expired or was already used: run \`commandmate remote stop\`, then \`commandmate remote\` again for a new QR code (\`remote pair\` prints nothing for a used or expired code). \`--pairing-expires 30m\` gives a slower person more time.
-- After pairing, the browser on this machine asks for a login and the CLI stops answering: that is the default \`--auth all\`. Do not look for a way to give the token to the CLI. Ask the person to choose: run \`commandmate remote stop\` and finish Stages 3 to 5 on this machine first, or pair again with \`--auth remote-only\` (every process on this machine can then operate CommandMate without logging in).
+- After pairing, the browser on this machine asks for a login and the CLI stops answering: that is the default \`--auth all\`. Do not look for a way to give the token to the CLI. Ask the person to choose: run \`commandmate remote stop\` and finish Stages 3 to 6 on this machine first, or pair again with \`--auth remote-only\` (every process on this machine can then operate CommandMate without logging in).
 
 ## Stage 3: Add a second agent
 
 Goal: a second agent CLI, for example Command Code or Codex, can work in one of the person's repositories through CommandMate.
 
-Before Stages 3 to 5: CommandMate needs at least one of the person's repositories registered. The CLI cannot register one; the person does it in the browser, under **Repositories → Add Repository**.
+Before Stages 3 to 6: CommandMate needs at least one of the person's repositories registered. The CLI cannot register one; the person does it in the browser, under **Repositories → Add Repository**.
 
 ### Check
 
@@ -234,7 +234,7 @@ The first time Codex starts in a worktree it shows two confirmation screens. Sho
 
 ## Stage 4: Give your team a PM
 
-Goal: one session plans the work and hands tasks to the others. That session is the lead (the "PM"). Skills from CommandMate's official Catalog teach it the method.
+Goal: one session plans the work and hands tasks to the others. That session is the lead. Skills from CommandMate's official Catalog teach it the method. In Stages 4 and 5 this one session does everything and is called the lead; Stage 6 then splits it into a PM and a development lead.
 
 ### Check
 
@@ -358,9 +358,96 @@ commandmate wait <worktree-id> --instance command-code --verify
 - Exit 20: a gate failed. \`commandmate verify show <run-id>\` shows which one and the end of its log. Report it; do not weaken the gate to make it pass.
 - The contract is rejected (exit 2): it prints every problem, for example a gate id that is not in \`verify.yaml\`. Fix the contract, not the gates.
 
+## Stage 6: Hand the work to a PM
+
+Goal: the person talks to one PM session. The PM does not write code: it asks a development lead, the development lead hands one task to a worker under a contract, and the checks decide when it is done. The PM then tells the person, in the first line, whether they have to do anything.
+
+Stages 4 and 5 used one lead session. Here you keep that session as the development lead and add a separate PM next to it. The roles are written into the repository's instructions file, and each session compares the IDs \`commandmate whoami\` prints with those sections and states its own role. The role templates are in https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/team-roles.md (Japanese: https://github.com/Kewton/CommandMate/blob/main/docs/user-guide/team-roles.md).
+
+**Out of scope here.** Creating one worktree per issue, \`profile-init.mjs\` and \`commandmate sync\` are the full \`cmate-orchestrate\` workflow. This stage hands one task to a worker in a worktree that already exists, as in Stage 5. For the full workflow, read the \`cmate-orchestrate\` Skill's own documents after this stage.
+
+### Check
+
+\`\`\`bash
+commandmate instances <worktree-id>                       # which instances the worktree has
+commandmate skill status cmate-delegate --worktree <worktree-id>
+commandmate skill status cmate-orchestrate --worktree <worktree-id>   # from Stage 4
+ls .commandmate/verify.yaml                                # from Stage 5
+git check-ignore -v .commandcode/ .claude/skills/cmate-x/ .agents/skills/cmate-x/   # each path should print a rule
+\`\`\`
+
+### Run
+
+1. Add the PM as a separate instance. Keep the lead from Stage 4 as the development lead. Use the instance id that \`add\` prints:
+
+\`\`\`bash
+commandmate instances <worktree-id> add --agent claude
+\`\`\`
+
+2. Install \`cmate-delegate\` for the PM, the way Stage 4 installed a Skill: pick the version from \`commandmate skill info cmate-delegate\`, show the \`--dry-run\` plan, install after the person agrees, and restart the PM session so it reads the Skill.
+
+3. Give the PM permission to run only the two commands it needs. The person adds these rules to the PM session's permission settings (for Claude Code, \`.claude/settings.local.json\` or the \`/permissions\` screen). Show them the exact text and let them add it:
+
+\`\`\`text
+Bash(commandmate send <worktree-id>:*)
+Bash(commandmate ask <worktree-id>:*)
+\`\`\`
+
+4. Make git ignore what the Skills generate. Without this, the contract's scope gate (\`requireScopeClean\`) fails every task because those files appear as changes. Add these lines to the repository's \`.gitignore\` after the person agrees, and add only the ones for the agents they use:
+
+\`\`\`text
+/.commandcode/
+/.claude/skills/cmate-*/
+/.agents/skills/cmate-*/
+\`\`\`
+
+5. Write the roles into the instructions file that the sessions read (\`CLAUDE.md\`, \`AGENTS.md\` and so on). Use the templates in \`team-roles.md\`: one section each for the PM, the development lead and the worker. Then ask each session to run \`commandmate whoami\` (it prints the worktree, the instance id, the tool and the alias, not a role), compare the instance id with the role sections, and say in its own words which role it has.
+
+6. Hand one task through the whole chain. From this machine, ask the PM in plain words. The PM asks the development lead with \`commandmate ask\`; the development lead hands one task to one worker under a contract and waits for the gates, exactly as in Stage 5 (\`send --contract\`, then \`wait --verify\`):
+
+\`\`\`bash
+commandmate send <worktree-id> "Ask the development lead to take issue #12 through one worker, under a contract with our verify gates. Do not write code yourself. When it is done, report to me: line 1 says whether I have to do anything, then what happened." --instance <pm-instance>
+\`\`\`
+
+7. **Merging stays with the person.** The default is that the person merges. A PM may be allowed to merge under conditions, but only if the person chooses that and has it written into the PM's instructions file as an operating rule. It is not a switch in the product. A rule of that kind says, for example: merge only when the head is the commit the checks verified, every gate passed, CI is green and the review has no blocker; if any of these is missing, or the change loosens a gate or a judgement, hand it back to the person. The product itself guarantees only that the checks passed and CI is green; the PM has to confirm the head and the review. Do not write this rule into the instructions file unless the person asked for it.
+
+8. If the person wants the PM to keep going while they are away, use a time-boxed run. Ask for it in absolute terms, for example: "Work until 09:30 JST today. You may do X and Y, and nothing else. If you stop, report what is done and what is left." State the time and the time zone, what the PM may do, and what it must report when it stops. Match Auto Yes to the remaining time. It is not a security boundary:
+
+\`\`\`bash
+commandmate auto-yes <worktree-id> --enable --duration 3h --instance <pm-instance> --stop-pattern 'DONE:|BLOCKED:'
+\`\`\`
+
+\`--duration\` takes whole hours from 1h to 24h, so pick one that ends no later than the deadline. \`--stop-pattern\` is a regular expression matched against the terminal output. It stops Auto Yes early when the pattern shows up and cannot forbid a command from running. Anything the person must not allow belongs in the contract's scope and in their own approval.
+
+### Ask the person first
+
+- Installing \`cmate-delegate\`, after showing the \`--dry-run\` plan, and restarting the PM session.
+- Adding the two permission rules to the PM session, and editing \`.gitignore\` and the instructions file.
+- Turning on Auto Yes, and the deadline, the time zone and what the PM may do during a time-boxed run.
+- Letting the PM merge under conditions. Do not suggest it as the default.
+- Every merge otherwise. You never approve or merge on the person's behalf.
+
+### Confirm it worked
+
+- \`commandmate instances <worktree-id>\` lists the PM and the development lead as separate instances.
+- In each session, the instance id from \`commandmate whoami\` matches one role section, and the session states that role itself.
+- The worker's contract run ends with \`commandmate wait <worktree-id> --instance <worker-instance> --verify\` exiting 0.
+- The PM's report starts with one line that says whether the person has to do anything ("Nothing needs your attention now." or "2 decisions are waiting for you."), and lists each decision with the options to choose from.
+
+### If it fails
+
+- \`ask\` or \`send\` exits 99: first find out whether anything was sent. Read what the CLI printed to stderr: it states when nothing was sent (for example a prompt that was not ready) and when the message may already be in. Then look at the other session with \`commandmate capture <worktree-id> --instance <id>\`. Send again after a minute only when stderr says nothing was sent. Exit 99 also comes from a server error, from a send whose outcome is unknown, and from a failure while \`ask\` waits after it has sent. If neither stderr nor the screen settles it, treat it as unconfirmed and do not send again; tell the person.
+- The PM stops at a permission question for \`commandmate send\` or \`commandmate ask\`: the rule from step 3 is missing or does not match the worktree id. Show the person the exact rule.
+- The gates fail every task on files you did not touch: the ignore lines from step 4 are missing.
+- Auto Yes ended before the deadline: \`--duration\` is shorter than the time left, or the stop pattern matched. Check \`commandmate auto-yes <worktree-id>\`, tell the person, and do not turn it on again without asking.
+- A session cannot find its instance id in the role sections, or states a different role: the instructions file has no section for that id, or the id in it is wrong. Fix the file and ask the session to read it again; restart it only if it does not pick the file up.
+- Exit 20 or 21 from \`wait --verify\`: see Stage 5. Report it to the person through the PM; do not weaken the gate.
+
 ## Where to read more
 
 - CommandMate on GitHub: https://github.com/Kewton/CommandMate
 - CLI operations guide, every flag and exit code: https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-operations-guide.md
+- Roles for a PM, a development lead and a worker: https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/team-roles.md
+- A worked example of a team: https://github.com/Kewton/commandmate-team-demo
 - The project site: https://kewton.github.io/CommandMate/
 `;

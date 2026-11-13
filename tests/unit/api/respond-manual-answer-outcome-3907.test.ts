@@ -40,6 +40,8 @@ type Failure = { at: 'text' | 'enter'; delivery: 'not-started' | 'indeterminate'
 let failNext: Failure | null = null;
 let failAfter: Failure | null = null;
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   // The sender's own read of the pane (`readGuardFrame` when it is handed no
   // frame). `guardRead.switchTo` models the screen changing during that await.
   capturePane: vi.fn(async () => {

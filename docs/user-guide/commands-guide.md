@@ -15,6 +15,39 @@ CommandMateで使用できるスラッシュコマンドの詳細ガイドです
 | `/progress-report` | 進捗報告書作成 | 高 |
 | `/tdd-impl` | TDD実装 | 高 |
 
+### 全コマンド（26 件）
+
+`.claude/commands/` にあるコマンドの全件です。各コマンドの定義はリンク先を参照してください。
+
+| コマンド | 説明 |
+|---------|------|
+| [`/acceptance-test`](../../.claude/commands/acceptance-test.md) | Issue要件に基づく自動受入テスト実行 |
+| [`/apply-review`](../../.claude/commands/apply-review.md) | レビュー指摘事項を実装に反映 |
+| [`/architecture-review`](../../.claude/commands/architecture-review.md) | 設計レビュー、リスク評価、改善提案 |
+| [`/bug-fix`](../../.claude/commands/bug-fix.md) | 不具合の調査・対策案提示・修正実施を完全自動化 |
+| [`/cause-analysis`](../../.claude/commands/cause-analysis.md) | Issue記載の事象から根本原因を分析し原因と対策案をIssueに追記 |
+| [`/create-pr`](../../.claude/commands/create-pr.md) | Pull Request自動作成、タイトル・説明自動生成 |
+| [`/current-situation`](../../.claude/commands/current-situation.md) | 不具合事象を正確に整理し新規Issueに登録 |
+| [`/design-policy`](../../.claude/commands/design-policy.md) | アーキテクチャ設計、技術選定、設計判断を支援 |
+| [`/issue-create`](../../.claude/commands/issue-create.md) | Issue分割計画書からGitHub Issueを一括作成 |
+| [`/issue-enhance`](../../.claude/commands/issue-enhance.md) | Issue内容を分析し、ユーザーに質問しながら不足情報を補完・更新 |
+| [`/issue-split`](../../.claude/commands/issue-split.md) | FeatureをIssueに分割、依存関係整理 |
+| [`/issues-exec-plan`](../../.claude/commands/issues-exec-plan.md) | 複数Issueの並列作業可否を分析し、実行計画をまとめるエピックIssueを作成 |
+| [`/multi-stage-design-review`](../../.claude/commands/multi-stage-design-review.md) | 設計書の4段階レビュー（通常→整合性→影響分析→セキュリティ）と指摘対応を自動実行 |
+| [`/multi-stage-issue-review`](../../.claude/commands/multi-stage-issue-review.md) | Issue記載内容の多段階レビュー（通常→影響範囲）×2回と指摘対応を自動実行 |
+| [`/orchestrate`](../../.claude/commands/orchestrate.md) | 複数Issueを並列オーケストレーション（準備→開発→PR→マージ→UAT→修正ループ→完了） |
+| [`/pm-auto-design2dev`](../../.claude/commands/pm-auto-design2dev.md) | 設計レビューから実装完了まで完全自動化（設計レビュー→作業計画→TDD実装） |
+| [`/pm-auto-dev`](../../.claude/commands/pm-auto-dev.md) | Issue開発を完全自動化（TDD→テスト→報告） |
+| [`/pm-auto-issue2dev`](../../.claude/commands/pm-auto-issue2dev.md) | Issueレビューから実装完了まで完全自動化（Issueレビュー→設計レビュー→作業計画→TDD実装） |
+| [`/progress-report`](../../.claude/commands/progress-report.md) | 開発進捗サマリ作成、ブロッカー報告 |
+| [`/refactoring`](../../.claude/commands/refactoring.md) | コード品質改善、設計パターン適用、技術的負債解消 |
+| [`/tdd-impl`](../../.claude/commands/tdd-impl.md) | テスト駆動開発で高品質コードを実装 |
+| [`/uat`](../../.claude/commands/uat.md) | 実機受入テスト（UAT）の計画・レビュー・実行・報告を自動化 |
+| [`/uat-fix-loop`](../../.claude/commands/uat-fix-loop.md) | UAT不合格→featureブランチ修正→再PR→再マージ→再UATの修正ループを自動化 |
+| [`/work-plan`](../../.claude/commands/work-plan.md) | Issue単位の具体的な作業計画立案 |
+| [`/worktree-cleanup`](../../.claude/commands/worktree-cleanup.md) | 指定したIssue番号のGit Worktree環境をクリーンアップ |
+| [`/worktree-setup`](../../.claude/commands/worktree-setup.md) | 指定したIssue番号のGit Worktree環境を自動構築 |
+
 ---
 
 ## /work-plan

@@ -88,6 +88,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { resolveSafeAbsoluteDirectory } from '@/config/safe-directory';
+import { isVirtualFilesystemPath } from '@/config/system-directories';
 import {
   getUatIsolationMode,
   isUatIsolationEnabled,
@@ -202,7 +203,13 @@ const noDaemonSupportCache = new Map<string, boolean>();
  *
  * Synchronous because `prepareLaunch` is. The child gets the sanitised
  * environment: `executablePath` may be a bare name resolved off the server's
- * `PATH`, and a `--help` probe has no use for CommandMate's credentials.
+ * `PATH`, and a `--help` probe has no use for CommandMate's credentials. See
+ * {@link buildCodexHelpProbeEnv} for the one variable taken out on top of that.
+ *
+ * The cache is keyed by the executable path alone, not by the environment
+ * (Issue #4343): a false learned while the server's `CODEX_HOME` was one the
+ * child could not use is not asked again for the life of this process, even
+ * after the environment rule below would have let it through.
  */
 export function codexSupportsNoDaemon(executablePath: string): boolean {
   const cached = noDaemonSupportCache.get(executablePath);
@@ -213,7 +220,7 @@ export function codexSupportsNoDaemon(executablePath: string): boolean {
     const result = spawnSync(executablePath, ['--help'], {
       encoding: 'utf8',
       timeout: CODEX_HELP_PROBE_TIMEOUT_MS,
-      env: sanitizeEnvForChildProcess(),
+      env: buildCodexHelpProbeEnv(),
     });
     supported =
       !result.error &&
@@ -224,6 +231,35 @@ export function codexSupportsNoDaemon(executablePath: string): boolean {
   }
   noDaemonSupportCache.set(executablePath, supported);
   return supported;
+}
+
+/**
+ * The environment for the `codex --help` child of {@link codexSupportsNoDaemon}
+ * (Issue #4343).
+ *
+ * A copy of {@link sanitizeEnvForChildProcess} — the parent's environment, the
+ * credentials already stripped — with one more removal: a `CODEX_HOME` inside
+ * `/proc`, `/sys` or `/dev`, or a symlink into one, is not inherited, so the
+ * child falls back to its own default `~/.codex`. The reason is not to hand a
+ * child an environment it may fail in; whether a real codex `--help` fails
+ * under such a value has not been measured.
+ *
+ * Unlike the agent-health `buildChildEnv` rule this is not limited to absolute
+ * values: the child is spawned without a `cwd`, so it resolves a relative
+ * `CODEX_HOME` against this process's cwd — the same base
+ * {@link isVirtualFilesystemPath} uses — and a relative value that reaches
+ * `/proc` (directly or through a symlink) is removed too. Anything else — a
+ * safe absolute or relative value, `''`, unset — is passed on unchanged, as is
+ * `CLAUDE_CONFIG_DIR`. The check is deliberately narrow: `/tmp`, `/var` and the
+ * other system directories are not refused here.
+ */
+export function buildCodexHelpProbeEnv(): NodeJS.ProcessEnv {
+  const env = sanitizeEnvForChildProcess();
+  const codexHome = env[CODEX_HOME_ENV_VAR];
+  if (codexHome && isVirtualFilesystemPath(codexHome)) {
+    delete env[CODEX_HOME_ENV_VAR];
+  }
+  return env;
 }
 
 /** Forget what {@link codexSupportsNoDaemon} has learned. Tests only. */

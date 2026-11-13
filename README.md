@@ -75,6 +75,8 @@ Talk to one PM agent instead of to every agent. Send it one message: it plans th
 
 Your role: the owner. You set the direction, answer the PM, and approve.
 
+To set this up, follow Stages 4 to 6 of the [setup guide](https://kewton.github.io/CommandMate/setup.md): a PM, a development lead and a worker, with the role templates in [Team Roles](./docs/en/user-guide/team-roles.md). Approval stays with you, and by default you merge. A recorded example is [commandmate-team-demo](https://github.com/Kewton/commandmate-team-demo).
+
 ### Next — Learn
 
 Not built yet, and only a direction: use the record each piece of work leaves behind to improve how the next one is done.

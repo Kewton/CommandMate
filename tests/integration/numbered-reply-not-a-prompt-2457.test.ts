@@ -60,6 +60,10 @@ vi.mock('@/lib/tmux/tmux', () => ({
   sendKeys: (...a: unknown[]) => stubs.sendKeys(...(a as [])),
   sendSpecialKeys: (...a: unknown[]) => stubs.sendSpecialKeys(...(a as [])),
   capturePane: vi.fn(async () => ''),
+  // Issue #4303: the answer path asks who holds the pane before its first key;
+  // a missing reader is `unknown` (refused). The live claude is in front here.
+  // A plain function, so a mock reset cannot make it undefined.
+  readPaneForeground: async () => 'other' as const,
 }));
 vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
 vi.mock('@/lib/hooks/structured-decision-response', () => ({

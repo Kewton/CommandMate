@@ -6,7 +6,7 @@
  * package, so the CLI carries the same guide as a string constant. What is
  * pinned here is that the two are the same bytes — an agent that read the page
  * and one that ran `docs --section setup` must be told the same thing — and
- * that the guide keeps the shape the Issue asks for: five stages, each with the
+ * that the guide keeps the shape the Issue asks for: six stages, each with the
  * same five headings, and the operations a person must approve named up front.
  */
 
@@ -95,13 +95,14 @@ describe('the setup guide has the shape the Issue asks for', () => {
     expect(intro).toMatch(/Check the machine; do not assume it/);
   });
 
-  it('has the five stages, in order', () => {
+  it('has the six stages, in order', () => {
     expect(stages().map((stage) => stage.title)).toEqual([
       'Stage 1: Install and start',
       'Stage 2: Pair your phone',
       'Stage 3: Add a second agent',
       'Stage 4: Give your team a PM',
       "Stage 5: Let checks decide what's done",
+      'Stage 6: Hand the work to a PM',
     ]);
   });
 
@@ -138,6 +139,7 @@ describe('the setup guide has the shape the Issue asks for', () => {
   it('links only to this project and to official package distributors', () => {
     const allowed = [
       'https://github.com/Kewton/CommandMate',
+      'https://github.com/Kewton/commandmate-team-demo',
       'https://kewton.github.io/CommandMate/',
       'https://nodejs.org/',
       'http://localhost:',

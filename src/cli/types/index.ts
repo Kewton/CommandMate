@@ -11,7 +11,23 @@ export enum ExitCode {
   SUCCESS = 0,
   DEPENDENCY_ERROR = 1,
   CONFIG_ERROR = 2,
+  /**
+   * Server failed to start (`start` / `restart` family).
+   *
+   * Shares the number 3 with {@link ExitCode.NOT_IN_SESSION}; the two never come
+   * from the same command. Neither value may be renumbered.
+   */
   START_FAILED = 3,
+  /**
+   * `whoami` / `peers` run outside a CommandMate agent session (Issue #4346).
+   *
+   * Same number as {@link ExitCode.START_FAILED} but a different meaning: "this
+   * shell is not inside a session CommandMate started", unrelated to a server
+   * failing to start. The number 3 is a contract with callers and must not move.
+   * Written as `= START_FAILED` (not a second literal 3) so the shared number is
+   * explicit and `no-duplicate-enum-values` stays satisfied.
+   */
+  NOT_IN_SESSION = START_FAILED,
   STOP_FAILED = 4,
   /** Update failed (npm install / version verification / registry query) - Issue #1194 (D-1) */
   UPDATE_FAILED = 5,

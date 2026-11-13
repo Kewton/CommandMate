@@ -75,6 +75,8 @@ Issues → Task contracts → Worktrees → Agents × N → Checks → PR
 
 あなたの役割: Owner。方向を決め、PM に応え、承認する。
 
+設定するには、[セットアップガイド](https://kewton.github.io/CommandMate/setup.md)の Stage 4〜6 に沿って進めます。PM・開発リーダー・ワーカーを置き、役割のテンプレートは[チームの役割](../user-guide/team-roles.md)にあります。承認はあなたのままで、既定はあなたがマージします。記録された例は [commandmate-team-demo](https://github.com/Kewton/commandmate-team-demo) です。
+
 ### Next — Learn
 
 まだ作っていない。方向だけを示す: 1 つひとつの作業が残す記録を使って、次の作業の進め方を良くしていく。

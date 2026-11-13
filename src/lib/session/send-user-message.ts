@@ -101,6 +101,7 @@ import { runInSendScope } from '@/lib/session/session-boundary';
 import type { CopilotTool } from '@/lib/cli-tools/copilot';
 import { formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import type { ChatMessage, MessageType } from '@/types/models';
+import { insertAskEnvelope } from '@/lib/ask/envelope';
 
 const logger = createLogger('session/send-user-message');
 
@@ -179,6 +180,13 @@ export interface SendUserMessageParams {
   observedInputGeneration?: number;
   /** Issue #4274: what became of the brief, when there is something to say (the route's `brief`). */
   onBrief?: (report: BriefReport) => void;
+  /**
+   * Issue #4344: the reserved ask whose envelope this send types (design
+   * `docs/design/ask-attribution-4344.md` §3.2 M3). Put after a claimed brief and
+   * right before the operator's body; the history row keeps the body alone.
+   * Omitted (every caller but the send route's ask), the typed text is unchanged.
+   */
+  askEnvelopeId?: string;
 }
 
 /**
@@ -735,6 +743,14 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
         // before any key. Never `classifySendFailure` (a tmux error quoting the body is not this).
         if (error instanceof BriefChoiceAbortedError) return { aborted: error };
         throw error;
+      }
+      // Issue #4344 (M3): the envelope after the brief, before the body. Recomputing
+      // `typedContent` below is what keeps the composer read, the attempt record and
+      // its digest on the text actually typed.
+      if (params.askEnvelopeId) {
+        const enveloped = insertAskEnvelope(typedText, content, params.askEnvelopeId);
+        if (enveloped !== null) typedText = enveloped;
+        else logger.warn('ask-envelope-not-placed', { worktreeId, instanceId: resolvedInstanceId });
       }
       if (typedText !== content) typedContent = typedBodyFor(cliTool, typedText, absoluteImagePath);
       const deliverStartedAt = Date.now();

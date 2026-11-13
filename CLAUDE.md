@@ -250,48 +250,11 @@ npm run db:reset      # DBリセット
 
 ### 利用可能なコマンド
 
-| コマンド | 説明 |
-|---------|------|
-| `/work-plan` | Issue単位の作業計画立案 |
-| `/create-pr` | PR自動作成 |
-| `/progress-report` | 進捗報告書作成 |
-| `/tdd-impl` | TDD実装 |
-| `/pm-auto-dev` | 自動開発フロー |
-| `/bug-fix` | バグ修正ワークフロー |
-| `/refactoring` | リファクタリング実行 |
-| `/acceptance-test` | 受け入れテスト |
-| `/uat` | 実機受入テスト（UAT）計画・レビュー・実行・報告 |
-| `/issue-create` | Issue一括作成 |
-| `/issue-enhance` | Issueの対話的補完（不足情報をユーザーに質問して補完） |
-| `/issue-split` | Issue分割計画 |
-| `/architecture-review` | アーキテクチャレビュー（サブエージェント対応） |
-| `/apply-review` | レビュー指摘事項の実装反映 |
-| `/multi-stage-design-review` | 設計書の4段階レビュー（通常→整合性→影響分析→セキュリティ） |
-| `/multi-stage-issue-review` | Issueの多段階レビュー（通常→影響範囲）×2回 |
-| `/design-policy` | 設計方針策定 |
-| `/worktree-setup` | Worktree環境の自動構築 |
-| `/worktree-cleanup` | Worktree環境のクリーンアップ |
-| `/orchestrate` | 複数Issueの並列オーケストレーション |
-| `/cause-analysis` | Issueの事象から根本原因を分析し対策案を追記 |
-| `/current-situation` | 不具合事象を整理して新規Issueに登録 |
-| `/issues-exec-plan` | 複数Issueの並列作業可否を分析し実行計画のエピックを作成 |
-| `/pm-auto-design2dev` | 設計レビューから実装完了まで自動化 |
-| `/pm-auto-issue2dev` | Issueレビューから実装完了まで自動化 |
-| `/uat-fix-loop` | UAT不合格→修正→再PR→再UATのループ |
+`.claude/commands/` の全件と説明は [コマンド利用ガイド](./docs/user-guide/commands-guide.md) を参照。
 
 ### 利用可能なエージェント
 
-| エージェント | 説明 |
-|-------------|------|
-| `tdd-impl-agent` | TDD実装専門 |
-| `progress-report-agent` | 進捗報告生成 |
-| `investigation-agent` | バグ調査専門 |
-| `acceptance-test-agent` | 受入テスト |
-| `refactoring-agent` | リファクタリング |
-| `architecture-review-agent` | アーキテクチャレビュー |
-| `apply-review-agent` | レビュー指摘反映 |
-| `issue-review-agent` | Issue内容レビュー |
-| `apply-issue-review-agent` | Issueレビュー結果反映 |
+`.claude/agents/` の全件と説明は [エージェント利用ガイド](./docs/user-guide/agents-guide.md) を参照。
 
 ### 利用可能なスキル
 

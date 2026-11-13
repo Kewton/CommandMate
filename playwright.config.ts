@@ -112,7 +112,14 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
+  // [Issue #4308] CI-only timeline reporter (spec/test start/end times); inert locally.
+  reporter: process.env.CI
+    ? [
+        ['github'],
+        ['html', { open: 'never' }],
+        ...(process.env.CM_E2E_HEAP_PROBE_DIR ? [['./scripts/ci/e2e-timeline-reporter.cjs'] as [string]] : []),
+      ]
+    : 'html',
 
   use: {
     baseURL: BASE_URL,

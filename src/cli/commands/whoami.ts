@@ -33,29 +33,18 @@
  *    to the binary the same way.
  *
  * Neither one answering means this is not a CommandMate-started session, and
- * that is {@link NOT_IN_SESSION} rather than a guess.
+ * that is {@link ExitCode.NOT_IN_SESSION} rather than a guess.
  */
 
 import { spawnSync } from 'child_process';
 import { Command } from 'commander';
+import { ExitCode } from '../types';
 import type { AgentInstance, WorktreeItem, WorktreeListResponse } from '../types/api-responses';
 import { ApiClient, rethrowIfDeadlineExceeded } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { isCliToolId } from '../config/cli-tool-ids';
 import { fetchAgentInstances } from '../utils/agent-instances';
 import { parseSessionName, type ParsedSessionName } from '../../lib/cli-tools/session-name';
-
-/**
- * Exit code for "this shell is not inside a CommandMate agent session".
- *
- * 3 by the Issue's contract. It is the numeric slot `ExitCode.START_FAILED`
- * occupies for the server-lifecycle commands, and it is spelled here as its own
- * constant rather than reused from that enum because the two mean nothing alike:
- * a caller branching on `whoami` exiting 3 is asking "am I inside a session",
- * not "did a server fail to start". `src/cli/types/index.ts` is where the shared
- * enum lives; adding a name to it is a separate change from this one.
- */
-export const NOT_IN_SESSION = 3;
 
 /** Environment names CommandMate sets, newest spelling first. */
 const WORKTREE_ENV_VARS = ['CM_WORKTREE_ID', 'CM_AGENT_WORKTREE_ID'] as const;
@@ -368,7 +357,7 @@ export function createWhoamiCommand(): Command {
 
         if (!identity) {
           console.error(NOT_IN_SESSION_MESSAGE);
-          process.exit(NOT_IN_SESSION);
+          process.exit(ExitCode.NOT_IN_SESSION);
           return;
         }
 

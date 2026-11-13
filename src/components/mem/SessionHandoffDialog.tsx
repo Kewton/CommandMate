@@ -24,7 +24,9 @@
  * What it holds (pr2e, design §4.1.1): the units and the opening live in the store of
  * `@/lib/handoff/close-rule`, keyed by the worktree id — not in this component's state — so
  * the dialog drawn again (PC ↔ phone, the page's Loading between worktrees, a remount) keeps
- * them and makes no second request. Only the person's choices and the notice are local.
+ * them and makes no second request. The person's choices not confirmed yet are the opening's too
+ * (Issue #4346: kept over another worktree or route, where the host draws no dialog); only the
+ * notice and `writing` are local.
  *
  * After an await (pr2f, design §4.1.1): every continuation — a decide's settle, a close, a patch
  * of the opening, a notice — carries the sending it started and the opening it was for, and does
@@ -78,6 +80,7 @@ import {
   subscribeHandoffStore,
   type HandoffCloseBlock,
   type HandoffClosePath,
+  type HandoffChoice,
   type HandoffDecideUnit,
   type HandoffOpening,
   type HandoffOpeningToken,
@@ -131,7 +134,10 @@ const REFUSAL_CODES = new Set([
   'not_found',
 ]);
 
-type Choice = 'approve' | 'discard';
+type Choice = HandoffChoice['choice'];
+
+/** No choice made (the value for no opening; one object, so the render reads a stable value). */
+const NO_CHOICES: Readonly<Record<string, HandoffChoice>> = {};
 type Notice = { tone: 'status' | 'alert'; text: string } | null;
 
 /**
@@ -164,7 +170,6 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const actionable = registration === undefined || handoffPageMayStart(registration, registry);
   /** The same, read now (after an await): never the render's value. */
   const registered = useCallback((): boolean => registration === undefined || handoffPageMayStart(registration), [registration]);
-  const [choices, setChoices] = useState<Readonly<Record<string, { choice: Choice; fingerprint: string }>>>({});
   /** An extend or a rebase is answered (local: nothing is lost when it is drawn again). */
   const [writing, setWriting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -176,15 +181,22 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     isOpen && target && store.opening && !store.opening.closed && store.opening.target.instanceId === target.instanceId ? store.opening : null;
   const token = opening?.token ?? null;
   /**
+   * Issue #4346: the person's choices are the opening's (in the store), not this mount's: the host
+   * draws 0 dialogs on another worktree or route, so a state here was lost on the way back to the
+   * same opening. A new opening starts with none.
+   */
+  const choices = opening?.choices ?? NO_CHOICES;
+  /**
    * Issue #4317 PR2: the host beside the shell keeps this instance (and its DOM) over route and
-   * width changes, so what is local here — the person's choices, the notice, `writing` — is per
-   * opening: set afresh when another opening is shown, kept while the same one is (and while none is).
+   * width changes, so what is local here — the notice, `writing` — is per opening: set afresh when
+   * another opening is shown, kept while the same one is (and while none is). The person's choices
+   * moved to the opening itself (Issue #4346): the host draws 0 dialogs on another worktree, and
+   * this instance's state does not outlive that.
    */
   const [localFor, setLocalFor] = useState<HandoffOpeningToken | null>(token);
   if (token !== null && token !== localFor) {
     setLocalFor(token);
     if (localFor !== null) {
-      setChoices({});
       setNotice(null);
       setWriting(false);
     }
@@ -297,7 +309,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
     // session not expired), read again right before it is sent (再指示 2).
     if (!actionable || !registered()) return;
     const of = current;
-    setChoices({});
+    patchHandoffOpening(of.token, { choices: {} });
     setNotice(null);
     patchHandoffOpening(of.token, { created: 'creating' });
     void (async () => {
@@ -363,7 +375,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         if (!isLiveHandoffOpening(of)) return;
         if (result.ok) {
           adopt(result.body);
-          setChoices({});
+          patchHandoffOpening(of, { choices: {} });
           const failed = result.body.results.filter((entry) => entry.result !== 'applied' && entry.result !== 'discarded');
           setNotice({ tone: failed.length > 0 ? 'alert' : 'status', text: failed.length > 0 ? t('mem.handoff.someNotApplied') : t('mem.handoff.decided') });
           return;
@@ -371,7 +383,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         // Rule (4)(c): a refusal (a resend's version conflict included) is not read as success:
         // what the server holds now is shown, and the person chooses again.
         adopt(result.body as unknown as HandoffReadResponse);
-        setChoices({});
+        patchHandoffOpening(of, { choices: {} });
         setNotice({ tone: 'alert', text: refusal(result) });
         if (!result.body?.request) await reload();
       } finally {
@@ -381,6 +393,27 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
       }
     },
     [adopt, otherLock, refusal, registered, reload, t, token]
+  );
+
+  /**
+   * Issue #4346: the person chooses (or, pressing the same again, takes it back) on the opening
+   * this render shows — written to the store, read back through it.
+   */
+  const choose = useCallback(
+    (proposal: HandoffProposalView, choice: Choice) => {
+      if (token === null) return;
+      const current = handoffStoreSnapshot().opening;
+      if (current === null || current.token !== token) return;
+      const was = current.choices;
+      if (was[proposal.id]?.choice === choice) {
+        const rest = { ...was };
+        delete rest[proposal.id];
+        patchHandoffOpening(token, { choices: rest });
+        return;
+      }
+      patchHandoffOpening(token, { choices: { ...was, [proposal.id]: { choice, fingerprint: proposal.fingerprint } } });
+    },
+    [token]
   );
 
   const confirm = useCallback(() => {
@@ -727,16 +760,7 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
                     proposal={proposal}
                     choice={choices[proposal.id]?.choice ?? null}
                     disabled={busy || cancelling || lock !== null || request.state !== 'reviewing'}
-                    onChoose={(choice) =>
-                      setChoices((current) => {
-                        if (current[proposal.id]?.choice === choice) {
-                          const rest = { ...current };
-                          delete rest[proposal.id];
-                          return rest;
-                        }
-                        return { ...current, [proposal.id]: { choice, fingerprint: proposal.fingerprint } };
-                      })
-                    }
+                    onChoose={(choice) => choose(proposal, choice)}
                     onRebase={() => rebase(proposal)}
                     rebaseDisabled={busy || lock !== null || request.state !== 'reviewing' || !actionable}
                     t={t}

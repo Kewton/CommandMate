@@ -3,7 +3,7 @@
  * CommandMate (Issue #2878). Entry point is `run.ts`; this is the run.
  *
  * Order of a run:
- *   1. parse arguments, take the shared run lock (Issue #3359), start the hook listener
+ *   1. parse arguments, refuse a relative CODEX_HOME (Issue #4343), take the shared run lock (Issue #3359), start the hook listener
  *   2. per tool: `--version` → snapshot machine-singleton files →
  *      `prepareLaunch` → private tmux session → screens and turns → kill →
  *      restore the snapshots (sha256-proved) → scan the production log
@@ -45,6 +45,7 @@ import {
   nextState,
   parseState,
   previousVersionOf,
+  relativeCodexHomeError,
   reportDateJst,
   type AgentHealthExitCode,
 } from '@/lib/agent-health/report';
@@ -177,10 +178,26 @@ export async function main(argv: readonly string[]): Promise<AgentHealthExitCode
     process.stdout.write(`${parsed.error}\n`);
     return 0;
   }
-  if (!parsed.ok) {
-    log(parsed.error);
-    const report = emptyReport(startedAt, [`引数の誤り: ${parsed.error}`]);
-    writeReportOrPrint(path.join(DEFAULT_DIR, 'reports', `${reportDateJst(startedAt)}.json`), report);
+  // Issue #4343: before both the argument-error report and the run (role file,
+  // lock, chdir, listener, version, snapshots, prepareLaunch). Only the
+  // diagnostic report is written; the state is not touched.
+  const environmentError = relativeCodexHomeError(process.env);
+  if (!parsed.ok || environmentError !== null) {
+    const errors: string[] = [];
+    if (!parsed.ok) {
+      log(parsed.error);
+      errors.push(`引数の誤り: ${parsed.error}`);
+    }
+    if (environmentError !== null) {
+      log(environmentError);
+      errors.push(environmentError);
+    }
+    // A parsed --out resolves against the cwd at startup (no chdir has happened).
+    const out =
+      parsed.ok && parsed.options.out !== null
+        ? path.resolve(parsed.options.out)
+        : path.join(DEFAULT_DIR, 'reports', `${reportDateJst(startedAt)}.json`);
+    writeReportOrPrint(out, emptyReport(startedAt, errors, parsed.ok ? parsed.options.syncedFrom : null));
     return 2;
   }
   const options = parsed.options;

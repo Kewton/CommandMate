@@ -49,6 +49,8 @@ vi.mock('@/lib/db/db-instance', () => {
 
 // Mock tmux
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn().mockResolvedValue(undefined),
   sendSpecialKeys: vi.fn().mockResolvedValue(undefined),
 }));
@@ -1022,7 +1024,7 @@ describe('POST /api/worktrees/:id/prompt-response - Semantic yes/no resolution (
     const data = await response.json();
 
     expect(data.success).toBe(true);
-    expect(sendKeys).toHaveBeenCalledWith('claude-test-wt', 'yes', false);
+    expect(sendKeys).toHaveBeenCalledWith('claude-test-wt', 'yes', false, { literal: true });
   });
 
   it('selects the default option with useDefault', async () => {

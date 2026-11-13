@@ -37,7 +37,7 @@ describe('db-migrations', () => {
 
   describe('CURRENT_SCHEMA_VERSION', () => {
     it('should be 61 after Migration #61 (session notes, #2427)', () => {
-      expect(CURRENT_SCHEMA_VERSION).toBe(71);
+      expect(CURRENT_SCHEMA_VERSION).toBe(72);
     });
   });
 

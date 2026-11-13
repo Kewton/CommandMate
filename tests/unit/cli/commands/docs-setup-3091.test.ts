@@ -2,7 +2,7 @@
  * The setup guide and the CLI's own token (Issue #3091).
  *
  * After `commandmate remote` with its default `--auth all`, this machine's CLI
- * needs a token too, and the token goes only to the phone, so Stages 3 to 5
+ * needs a token too, and the token goes only to the phone, so Stages 3 to 6
  * (all CLI) could not be done after Stage 2. The stage order is pinned by the
  * landing page, so what is pinned here is that the guide tells the agent to
  * pair the phone last, and puts the `--auth remote-only` choice in Stage 2
@@ -27,7 +27,7 @@ describe('the setup guide pairs the phone after the CLI stages', () => {
   it('tells the agent, up front, to do Stage 2 last and why', () => {
     expect(intro).toMatch(/Do Stage 2 \(Pair your phone\) last/);
     expect(intro).toContain('`--auth all`');
-    expect(intro).toMatch(/finish Stages 3 to 5 first, then pair the phone/);
+    expect(intro).toMatch(/finish Stages 3 to 6 first, then pair the phone/);
   });
 
   it('asks the person, inside Stage 2, when to pair and whether to use --auth remote-only', () => {
@@ -45,10 +45,10 @@ describe('the setup guide pairs the phone after the CLI stages', () => {
     expect(intro).toContain('"Ask for approval"');
   });
 
-  it('says a repository is registered in the browser before Stages 3 to 5', () => {
+  it('says a repository is registered in the browser before Stages 3 to 6', () => {
     const add = section('Stage 3: Add a second agent');
 
-    expect(add).toMatch(/Before Stages 3 to 5/);
+    expect(add).toMatch(/Before Stages 3 to 6/);
     expect(add).toContain('**Repositories → Add Repository**');
   });
 });

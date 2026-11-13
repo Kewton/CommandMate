@@ -136,6 +136,15 @@ export interface HandoffOpeningTarget {
   label: string;
 }
 
+/**
+ * Issue #4346: one choice the person made on a proposal and has not confirmed yet, with the
+ * fingerprint of what was shown when it was made (what a confirm sends).
+ */
+export interface HandoffChoice {
+  readonly choice: 'approve' | 'discard';
+  readonly fingerprint: string;
+}
+
 /** One opening of the dialog: its request as read, its text, whether it was closed. */
 export interface HandoffOpening {
   /** The identity of this opening; work started for it answers nothing to another. */
@@ -153,6 +162,13 @@ export interface HandoffOpening {
   readonly plainOnly: string | null;
   /** The plain stop stopped the session but a decide is unknown, so the dialog stayed. */
   readonly plainStopped: boolean;
+  /**
+   * Issue #4346: the person's choices not confirmed yet, by proposal id. The opening's, not the
+   * dialog's mount: the host draws 0 dialogs on another worktree or route and the dialog is
+   * unmounted, so a component state lost them on the way back to the same opening. A new opening
+   * starts with none.
+   */
+  readonly choices: Readonly<Record<string, HandoffChoice>>;
 }
 
 /**
@@ -280,7 +296,7 @@ export function endHandoffCancel(worktreeId: string): void {
 }
 
 function freshOpening(worktreeId: string, target: HandoffOpeningTarget): HandoffOpening {
-  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false };
+  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false, choices: {} };
 }
 
 /**
@@ -305,7 +321,7 @@ export function liveHandoffOpeningFor(instanceId: string): HandoffOpening | null
 /** Writes what the opening `token` learnt (nothing once another opening started). */
 export function patchHandoffOpening(
   token: HandoffOpeningToken,
-  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped'>>
+  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped' | 'choices'>>
 ): void {
   if (state.opening?.token !== token) return;
   commit({ ...state, opening: { ...state.opening, ...patch } });

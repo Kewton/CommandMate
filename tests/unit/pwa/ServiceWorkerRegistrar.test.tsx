@@ -228,3 +228,81 @@ describe('ServiceWorkerRegistrar', () => {
     });
   });
 });
+
+// ==========================================================================
+// A fresh browser profile (Issue #4346, item 2)
+// ==========================================================================
+/**
+ * The UAT saw "アプリの更新を適用できます" stay on screen. The question was whether a
+ * new profile (a new Playwright context: no Service Worker installed) shows it.
+ * It cannot: the prompt needs a worker waiting WHILE another controls the page,
+ * and the first install in a profile has no controller. So a new profile only
+ * installs; the prompt is what a profile that kept an older worker sees (the
+ * UAT's persistent Playwright profile) until the update is applied — its × puts
+ * it away for that load only (Issue #4103). Recorded, not changed.
+ */
+describe('ServiceWorkerRegistrar in a fresh profile (Issue #4346)', () => {
+  type Listener = () => void;
+
+  /** A registration whose first worker installs while `controller` is what the profile has. */
+  function installFirstWorker(controller: object | null) {
+    const installing = {
+      state: 'installing',
+      postMessage: vi.fn(),
+      listeners: [] as Listener[],
+      addEventListener(_: string, listener: Listener) {
+        this.listeners.push(listener);
+      },
+    };
+    const registrationListeners: Listener[] = [];
+    const registration = {
+      waiting: null,
+      installing,
+      addEventListener: (_: string, listener: Listener) => registrationListeners.push(listener),
+    };
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        register: vi.fn(() => Promise.resolve(registration)),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        controller,
+      },
+    });
+    return {
+      finishInstall: () =>
+        act(() => {
+          registrationListeners.forEach((listener) => listener());
+          installing.state = 'installed';
+          installing.listeners.forEach((listener) => listener());
+        }),
+    };
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'production');
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
+
+  it('a new profile (no controller) installs its first worker without the update prompt', async () => {
+    const sw = installFirstWorker(null);
+    render(<ServiceWorkerRegistrar />);
+    await waitFor(() => expect(navigator.serviceWorker.register).toHaveBeenCalledWith('/sw.js'));
+    await act(async () => {});
+    sw.finishInstall();
+    expect(screen.queryByTestId('pwa-update-toast')).toBeNull();
+  });
+
+  it('(positive control) a profile that already has a controlling worker does get the prompt', async () => {
+    const sw = installFirstWorker({});
+    render(<ServiceWorkerRegistrar />);
+    await waitFor(() => expect(navigator.serviceWorker.register).toHaveBeenCalledWith('/sw.js'));
+    await act(async () => {});
+    sw.finishInstall();
+    await waitFor(() => expect(screen.getByTestId('pwa-update-toast')).toBeInTheDocument());
+  });
+});

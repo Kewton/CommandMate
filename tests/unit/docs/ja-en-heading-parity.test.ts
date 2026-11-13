@@ -74,6 +74,12 @@ const PAIRS: ReadonlyArray<{ name: string; ja: string; en: string }> = [
     ja: 'docs/user-guide/uat-isolation.md',
     en: 'docs/en/user-guide/uat-isolation.md',
   },
+  {
+    // Issue #4196: the PM / development lead / worker role templates.
+    name: 'team-roles',
+    ja: 'docs/user-guide/team-roles.md',
+    en: 'docs/en/user-guide/team-roles.md',
+  },
 ];
 
 /** Placeholders a translation must never ship with. */

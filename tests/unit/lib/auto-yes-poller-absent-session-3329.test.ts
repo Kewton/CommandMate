@@ -25,7 +25,8 @@ vi.mock('@/lib/polling/response-poller', () => ({ startPolling: vi.fn() }));
 vi.mock('@/lib/realtime/terminal-broadcast', () => ({
   broadcastTerminalSnapshotAfterInteraction: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('@/lib/tmux/tmux', () => ({ sendKeys: vi.fn(), sendSpecialKeys: vi.fn() }));
+// Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+vi.mock('@/lib/tmux/tmux', () => ({ readPaneForeground: async () => 'other' as const, sendKeys: vi.fn(), sendSpecialKeys: vi.fn() }));
 vi.mock('@/lib/cli-tools/manager', () => ({
   CLIToolManager: {
     getInstance: () => ({

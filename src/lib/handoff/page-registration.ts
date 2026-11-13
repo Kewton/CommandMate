@@ -40,6 +40,21 @@
  *    driven without the shell, as in its unit tests) the route takes no part; `AppShellGate` mounts
  *    the host always.
  *
+ * 7. (Issue #4345 1a) One gateway takes a page's requests' answers to the session's expiry
+ *    ({@link beginHandoffPageRequest} → {@link reportHandoffPageResponse} /
+ *    {@link reportHandoffPageAuthenticated}). The owner and the order are fixed when a request
+ *    leaves: the registration current for the page then, and the next number of that registration's
+ *    one count — across every entry (the detail read, the end's mode read), so a 401 of one entry
+ *    and a 200 of another compare. A response is reported before its body is read or its status
+ *    folded into anything else (an `ApiError`, a fallback, `null`), and only its status, `redirected`
+ *    and `url` are looked at. A 401 (or a redirect to `/login`) is the expiry; nothing else is —
+ *    a 403, a 409, a 5xx, no response (status 0, an abort) say nothing of the session. The only
+ *    recovery stays the detail read's success, reported by that read itself
+ *    ({@link reportHandoffPageAuthenticated}); another entry's 200 recovers nothing. Taking a report
+ *    is apart from {@link handoffPageMayStart}: a request that left while the session was expired
+ *    (the detail read that recovers it) or off the route is still taken — only the current
+ *    registration and the order decide (invariant 3).
+ *
  * This module holds no unit, opening nor callback of the store (`@/lib/handoff/close-rule`): it
  * imports nothing of it as a value and writes nothing of it.
  *
@@ -179,14 +194,72 @@ export function handoffPageMayStart(id: HandoffPageRegistration | null, snapshot
 /**
  * A read of the page `id`, the `seq`-th it sent (increasing within the registration), answered:
  * `expired` (401) or `authenticated` (its detail read succeeded). Taken from the current
- * registration only, and only when newer than the read it took last (invariant 3).
+ * registration only, and only when newer than the read it took last (invariant 3). Answers
+ * whether it was taken.
  */
-export function reportHandoffPageAuth(id: HandoffPageRegistration | null, outcome: 'expired' | 'authenticated', seq: number): void {
-  if (id === null || !isCurrentHandoffRegistration(id)) return;
-  if (seq <= (authSeqOf.get(id) ?? 0)) return;
+export function reportHandoffPageAuth(id: HandoffPageRegistration | null, outcome: 'expired' | 'authenticated', seq: number): boolean {
+  if (id === null || !isCurrentHandoffRegistration(id)) return false;
+  if (seq <= (authSeqOf.get(id) ?? 0)) return false;
   authSeqOf.set(id, seq);
   const authExpired = outcome === 'expired';
   if (state.authExpired !== authExpired) commit({ ...state, authExpired });
+  return true;
+}
+
+/**
+ * Issue #4345 1a: one request of a page, as it left — its owner (the page's registration then;
+ * `null`: none, nothing is taken) and its number in that registration's one count across entries.
+ */
+export interface HandoffPageRequest {
+  readonly registration: HandoffPageRegistration | null;
+  readonly seq: number;
+}
+
+/** Issue #4345 1a: per registration, the number of the last request that left (any entry). */
+const startedSeqOf = new WeakMap<HandoffPageRegistration, number>();
+
+/**
+ * Issue #4345 1a: a request of the page registered as `id` leaves now — call it before the request
+ * is sent, with the registration the page holds at that moment (never one read when it answers).
+ */
+export function beginHandoffPageRequest(id: HandoffPageRegistration | null): HandoffPageRequest {
+  if (id === null) return { registration: null, seq: 0 };
+  const seq = (startedSeqOf.get(id) ?? 0) + 1;
+  startedSeqOf.set(id, seq);
+  return { registration: id, seq };
+}
+
+/** What the gateway reads of a response: never its body. */
+export type HandoffAuthResponse = Pick<Response, 'status'> & Partial<Pick<Response, 'redirected' | 'url'>>;
+
+/**
+ * Issue #4345 1a: the response says the session expired — a 401, or the middleware's redirect to
+ * `/login` that `fetch` followed (the same test as `detectAuthRedirect` in `@/lib/api-client`).
+ */
+export function isHandoffAuthExpiry(response: HandoffAuthResponse): boolean {
+  if (response.status === 401) return true;
+  return response.redirected === true && (response.url ?? '').includes('/login');
+}
+
+/**
+ * Issue #4345 1a: the request `request` answered `response`. Call it as soon as the response is in
+ * hand — before its body is read and before its status is turned into anything else. Its expiry is
+ * taken under the request's own registration and number (invariant 7); any other status changes
+ * nothing. Answers whether the response was the expiry and the registry took it (再指示 1: the
+ * caller keeps that verdict for the rest of its own operation, since a later recovery does not
+ * undo what this request saw).
+ */
+export function reportHandoffPageResponse(request: HandoffPageRequest, response: HandoffAuthResponse): boolean {
+  if (!isHandoffAuthExpiry(response)) return false;
+  return reportHandoffPageAuth(request.registration, 'expired', request.seq);
+}
+
+/**
+ * Issue #4345 1a: the page's detail read `request` succeeded (its body read) — the one recovery
+ * (invariant 3). No other entry calls it.
+ */
+export function reportHandoffPageAuthenticated(request: HandoffPageRequest): void {
+  reportHandoffPageAuth(request.registration, 'authenticated', request.seq);
 }
 
 /** Tests only: the registry as at load. */

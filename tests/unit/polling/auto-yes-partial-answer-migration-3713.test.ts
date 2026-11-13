@@ -70,6 +70,8 @@ vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/tmux/tmux')>();
   return {
     ...actual,
+    // Issue #4303: the agent holds the pane; an answer is refused before its first key otherwise.
+    readPaneForeground: async () => 'other' as const,
     sendKeys: async (name: string, keys: string, enter = true) => {
       session(name).keys.push(enter ? `${keys}<Enter>` : keys);
       if (!enter && typedKeyGate) await typedKeyGate.promise;

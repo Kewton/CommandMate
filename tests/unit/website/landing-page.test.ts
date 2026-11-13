@@ -1858,12 +1858,12 @@ describe('Issue #3060: three levels and setup with your agent', () => {
     expect(text(section('level-3'))).toContain('It is not a switch in the product.');
   });
 
-  it('walks the five stages of setup.md, in its order and under its names, each with what the agent checks', () => {
+  it('walks the six stages of setup.md, in its order and under its names, each with what the agent checks', () => {
     const guide = fs.readFileSync(path.join(WEBSITE_DIR, 'setup.md'), 'utf-8');
     const stagesInGuide = Array.from(guide.matchAll(/^## Stage \d+: (.+)$/gm), ([, name]) => name);
     const stages = Array.from(section('setup').matchAll(/<li class="stage">([\s\S]*?)<\/li>/g), ([, inner]) => inner);
 
-    expect(stagesInGuide).toHaveLength(5);
+    expect(stagesInGuide).toHaveLength(6);
     expect(stages.map((stage) => text(/<h3>([\s\S]*?)<\/h3>/.exec(stage)?.[1] ?? ''))).toEqual(stagesInGuide);
     for (const stage of stages) {
       expect(text(stage)).toMatch(/Your agent checks:/);

@@ -134,6 +134,7 @@ const CONTRACT_POLICY_CAUSE = 'by contract policy';
  * the poller's stopped-answer branch (`partial-answer`, Issue #3706 / #3713),
  * and the poller's agy trust-screen branch (`startup-trust-unhandled`, Issue #3757),
  * and the poller's question confirm-page branch (`question-confirm-page`, Issue #3748),
+ * and the poller's declined-question branch (`declined-question`, Issue #4313),
  * and the poller's question branch (`question-left-to-human`, Issue #3822),
  * and the resolver's permission-row reading (`allow-once-unidentified`, Issue #3822),
  * and the resolver's choice of a question's recommended option
@@ -180,6 +181,10 @@ const SUPPRESSION_CAUSE: Record<AutoYesSuppressionReason, string> = {
   // whose wording above says the opposite (nothing recognised the frame).
   'question-confirm-page':
     "because the question's Submit/Cancel confirmation commits the answers as they stand, so Auto-Yes leaves it to a human",
+  // Issue #4313. Command Code: the operator declined a question earlier in this
+  // turn, and the agent went on; what it asks next is the operator's to approve.
+  'declined-question':
+    'because a question was declined earlier in this turn (User declined to answer questions), and the agent may be going on without the answer; Auto-Yes leaves the prompts of this turn to a human, so answer it at the pane (prompt --json, respond)',
   // Issue #3822. A question the agent asks the operator (an AskUserQuestion
   // picker, OpenCode V2's question form): Auto-Yes answers permissions only,
   // and no contract setting delegates the question. Issue #3863: since the

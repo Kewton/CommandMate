@@ -9,6 +9,9 @@
 import { screenRequestHeaders } from '@/lib/security/screen-request';
 import type { MemItemView } from '@/types/mem';
 import type { PromoteEffect, PromoteOperationView, PromotePreviewView } from './model';
+import type { DecisionBranchesBody, DecisionCounts } from './decision-counts';
+
+export type { DecisionBranchesBody, DecisionBranchView } from './decision-counts';
 
 export const PROMOTE_SCREEN_TIMEOUT_MS = 30000;
 
@@ -35,6 +38,8 @@ export interface PromoteListBody {
   mode: string;
   ambiguous?: { reason: string | null; roots: Array<{ repositoryId: string; name: string }> };
   branch: string;
+  /** Issue #4355 I6: the counts of the branch's decisions (before any filter of a reader). */
+  counts?: DecisionCounts;
   decisions: PromoteDecisionEntry[];
   unresolved: PromoteUnresolvedEntry[];
   worktrees: Array<{ id: string; path: string; name: string; branch: string | null }>;
@@ -74,6 +79,8 @@ export interface PromoteFindingView {
 type OperationBody = { ok: true; operation: PromoteOperationView; item: MemItemView | null; finding?: PromoteFindingView };
 
 export const promoteApi = {
+  /** Issue #4355 §3.1.2: the branches to choose from (the screen shows their names only). */
+  branches: (repositoryId: string) => call<DecisionBranchesBody>(`${base(repositoryId)}/branches`),
   list: (repositoryId: string, branch: string) => call<PromoteListBody>(`${base(repositoryId)}?branch=${encodeURIComponent(branch)}`),
   preview: (
     repositoryId: string,

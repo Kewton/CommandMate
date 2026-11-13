@@ -89,6 +89,8 @@ const sendKeys = vi.fn(async (_session: string, keys: string, enter = true) => {
   keysSent.push(enter ? `${keys}<Enter>` : keys);
 });
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendSpecialKeys: (s: string, k: string[], o?: { shouldContinue?: () => boolean }) => sendSpecialKeys(s, k, o),
   sendKeys: (s: string, k: string, e?: boolean) => sendKeys(s, k, e),
   capturePane: async () => {

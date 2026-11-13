@@ -32,6 +32,8 @@ let delivered: string[] = [];
 /** The next `sendKeys` failure, consumed once: the typed text, its Enter, or a given error. */
 let failNext: 'text' | 'enter' | Error | null = null;
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   capturePane: vi.fn(async () => ''),
   sendKeys: vi.fn(async (_session: string, keys: string, enter = true) => {
     const fail = failNext;
