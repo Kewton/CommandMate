@@ -1662,6 +1662,66 @@ export interface DailySummaryStatusResponse {
 }
 
 // Mirrors: src/types/models.ts ChatMessage (subset for send response)
+/**
+ * Issue #4344: the ask correlation ledger as the CLI reads it (design
+ * `docs/design/ask-attribution-4344.md` §3.3・§4).
+ * Mirrors: src/types/ask-correlation.ts (held equal by
+ * tests/unit/cli/types/ask-attribution-mirror-4344.test.ts).
+ */
+export type AskAttributionState = 'pending' | 'matched' | 'ambiguous' | 'unmatched' | 'unavailable';
+
+/** Issue #4344: why an ask ended where it did. Mirrors src/types/ask-correlation.ts. */
+export type AskAttributionReason =
+  | 'tool_unsupported'
+  | 'server_unsupported'
+  | 'slash_command'
+  | 'shared_turn'
+  | 'turn_open_at_send'
+  | 'envelope_lost'
+  | 'absorbed_mid_turn'
+  | 'envelope_duplicated'
+  | 'turn_incomplete'
+  | 'generation_changed'
+  | 'history_missing'
+  | 'body_truncated'
+  | 'send_unknown'
+  | 'not_sent'
+  | 'grace_expired'
+  | 'turn_interrupted'
+  | 'history_changed';
+
+/** Issue #4344: how the send of a reserved ask ended. Mirrors src/types/ask-correlation.ts. */
+export type AskSendState = 'reserved' | 'sent' | 'not_sent' | 'send_unknown';
+
+/** Issue #4344: `GET /api/asks/capabilities`. Mirrors src/types/ask-correlation.ts. */
+export interface AskCapabilitiesResponse {
+  protocol: number;
+  /** Per tool: whether the server attributes an ask's reply by the ledger. */
+  tools: Record<string, boolean>;
+}
+
+/** Issue #4344: `GET /api/asks/:askId`. Mirrors src/types/ask-correlation.ts. */
+export interface AskAttributionResponse {
+  askId: string;
+  state: AskAttributionState;
+  reason: AskAttributionReason | null;
+  /** The reply, only when `state === 'matched'`. */
+  reply: string | null;
+  sendState: AskSendState;
+  /** Whether the reader has seen the native input that carried the envelope. */
+  nativeInputSeen: boolean;
+  /** The answering turn also absorbed a background-task notice. */
+  notified: boolean;
+}
+
+/** Issue #4344: the `ask` field of a send's answer. Mirrors src/types/ask-correlation.ts. */
+export interface AskSendAnswer {
+  id: string | null;
+  state: AskAttributionState;
+  reason: AskAttributionReason | null;
+  sendState?: AskSendState;
+}
+
 export interface ChatMessage {
   id?: number;
   worktreeId: string;
@@ -1691,6 +1751,13 @@ export interface ChatMessage {
    * Mirrors: src/app/api/worktrees/[id]/send/route.ts SendMessageResponse.
    */
   turnOpenAtSend?: boolean;
+  /**
+   * Issue #4344: present when the send named `ask` (a synchronous `commandmate
+   * ask`) on a server that attributes asks: `pending` with the reserved id, or
+   * `unavailable` with why (`tool_unsupported` / `slash_command`) and no id.
+   * Mirrors: src/types/ask-correlation.ts AskSendAnswer.
+   */
+  ask?: AskSendAnswer;
   /**
    * Issue #3957: present when the send named a bound relay (`relayId`). What
    * the CLI may do with the relay: `not_sent` — nothing reached the worker,

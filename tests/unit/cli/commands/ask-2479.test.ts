@@ -39,6 +39,7 @@ import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { restoreFetch } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
+import { installAskLedger } from './ask-ledger-fake-4344';
 
 const store = vi.hoisted(() => ({
   /** The worktree's own CLI tool — what an instance-less request falls to. */
@@ -205,7 +206,22 @@ function startServer(sessions: Record<string, ScriptedSession>): void {
     }
     return Promise.resolve(json({ error: `unexpected ${url.pathname}` }, 404));
   }) as unknown as typeof fetch;
+  // Issue #4344: the ask routes of a PR2 server. The ledger matches the asked
+  // session's reply once its turn is done (the session the send resolved to).
+  installAskLedger({
+    answer: () => {
+      const send = requestsTo('/send').at(-1)?.body;
+      const instance = typeof send?.instanceId === 'string' ? send.instanceId : resolve(null, null).instanceId;
+      const session = sessions[instance];
+      return session?.reply !== undefined && Date.now() >= session.doneAt
+        ? { state: 'matched', reply: session.reply, nativeInputSeen: true }
+        : { state: 'pending' };
+    },
+  });
 }
+
+/** Issue #4344: an ask id on the send body. */
+const ASK_FIELD = { id: expect.any(String), protocol: 1 };
 
 const requestsTo = (suffix: string): Seen[] => seen.filter((r) => r.path.endsWith(suffix));
 
@@ -260,8 +276,13 @@ describe('ask --agent <tool> alone: the send, the wait and the read all address 
     const polls = requestsTo('/current-output').map((r) => r.params.get('instance'));
     expect(polls.length).toBeGreaterThan(1);
     expect(new Set(polls)).toEqual(new Set(['command-code']));
-    const reads = requestsTo('/messages').map((r) => r.params.get('instance'));
-    expect(new Set(reads)).toEqual(new Set(['command-code']));
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): command-code has no ask attribution, so after the wait nothing is
+    // read — no ledger rows, no pane — and the reply is not collected
+    // (unavailable/tool_unsupported, exit 0). The targeting, this test's
+    // subject, is unchanged: the send and every poll address command-code.
+    expect(requestsTo('/messages')).toHaveLength(0);
+    expect(requestsTo('/capture')).toHaveLength(0);
 
     expect(stderr()).not.toContain('Not started');
     expect(mockExit).toHaveBeenCalledTimes(1);
@@ -270,8 +291,10 @@ describe('ask --agent <tool> alone: the send, the wait and the read all address 
       worktreeId: 'wt1',
       instanceId: 'command-code',
       cliToolId: 'command-code',
-      source: 'history',
-      reply: 'OK short',
+      source: 'none',
+      reply: null,
+      askId: null,
+      attribution: { state: 'unavailable', reason: 'tool_unsupported', notified: false },
     });
   });
 
@@ -289,7 +312,11 @@ describe('ask --agent <tool> alone: the send, the wait and the read all address 
     expect(polls.length).toBeGreaterThan(1);
     expect(new Set(polls)).toEqual(new Set(['command-code']));
     expect(mockExit).toHaveBeenCalledWith(ExitCode.SUCCESS);
-    expect(mockConsoleLog.mock.calls).toEqual([['OK short']]);
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): command-code's reply is not collected (tool_unsupported), so
+    // stdout is empty; the wait on command-code's own turn is unchanged.
+    expect(mockConsoleLog.mock.calls).toEqual([]);
+    expect(stderr()).toContain('reply not collected (unavailable/tool_unsupported)');
   });
 
   it('falls back to command-code\'s own pane, not the default\'s, when no turn row lands', async () => {
@@ -300,16 +327,19 @@ describe('ask --agent <tool> alone: the send, the wait and the read all address 
 
     await runAsk(['Reply with exactly: OK short', '--agent', 'command-code', '--json']);
 
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): the pane is never read for a reply — neither command-code's nor
+    // the default's. The stderr line points at command-code's own pane.
     const captures = requestsTo('/capture').map((r) => r.body);
-    expect(captures).toHaveLength(1);
-    expect(captures[0]).toMatchObject({ cliToolId: 'command-code', instanceId: 'command-code' });
+    expect(captures).toHaveLength(0);
     const payload = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
     expect(payload).toMatchObject({
       instanceId: 'command-code',
       cliToolId: 'command-code',
-      source: 'pane',
+      source: 'none',
+      reply: null,
     });
-    expect(payload.reply).toContain('OK short');
+    expect(stderr()).toContain('capture wt1 --instance command-code --pane');
   });
 });
 
@@ -320,7 +350,10 @@ describe('ask: the targeting that Issue #2479 leaves alone', () => {
     await runAsk(['hello']);
 
     expect(requestsTo('/resolve-target')).toHaveLength(0);
-    expect(requestsTo('/send').map((r) => r.body)).toEqual([{ content: 'hello' }]);
+    // Expected value changed by Issue #4344 (design §0.2, PR3): with no tool
+    // resolved the send names an ask id and the server decides by the tool it
+    // resolves (claude here: attributed).
+    expect(requestsTo('/send').map((r) => r.body)).toEqual([{ content: 'hello', ask: ASK_FIELD }]);
     const polls = requestsTo('/current-output');
     expect(polls.length).toBeGreaterThan(0);
     expect(polls.every((r) => !r.params.has('instance'))).toBe(true);
@@ -339,8 +372,10 @@ describe('ask: the targeting that Issue #2479 leaves alone', () => {
     expect(resolutions).toHaveLength(1);
     expect(resolutions[0].params.get('instance')).toBe('codex-2');
     expect(resolutions[0].params.get('cliTool')).toBe('codex');
+    // Expected value changed by Issue #4344 (design §3.2, PR3): codex is
+    // attributed, so the send names an ask id.
     expect(requestsTo('/send').map((r) => r.body)).toEqual([
-      { content: '1+1は？', cliToolId: 'codex', instanceId: 'codex-2' },
+      { content: '1+1は？', cliToolId: 'codex', instanceId: 'codex-2', ask: ASK_FIELD },
     ]);
     expect(new Set(requestsTo('/current-output').map((r) => r.params.get('instance'))))
       .toEqual(new Set(['codex-2']));

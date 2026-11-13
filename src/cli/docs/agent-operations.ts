@@ -202,8 +202,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   send + wait + read the reply, in one command. Name the target with --instance
   alone (--agent is for an instance the roster does not know).
     --timeout <seconds>   Maximum wait for the reply (default 1800)
-    --json                worktreeId, instanceId, cliToolId, source (history|pane|none),
-                          reply, overlapped (only when true)
+    --json                worktreeId, instanceId, cliToolId, source (history|none),
+                          reply (null when not collected), askId, attribution
+                          {state, reason, notified}, overlapped (only when true)
     --async               Do not wait: register a relay, print its id, exit 0. The reply
                           is typed into --reply-to's composer when the turn ends.
     --reply-to <target>   <worktree-id>[@<instance-id|alias>], or 'self' (default)
@@ -216,6 +217,11 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
                         id=model-capacity: ask another instance or model
     32  ROLE NOT_SENT   the role condition does not hold; nothing was typed
     2   a relay refusal (reason on stderr), a bad argument, or the target is on a prompt
+  The reply is read by the ask's own id (Issue #4344): printed only when the
+  server ties it to this ask (attribution.state "matched"; claude and codex).
+  Otherwise exit 0, empty stdout, reply null and one 'reply not collected' line
+  on stderr (unavailable: tool_unsupported / server_unsupported / slash_command;
+  ambiguous; unmatched). The pane is never read for a reply.
   Full guide: 'commandmate docs --section delegation'.
 
 ### commandmate relays
@@ -971,15 +977,33 @@ same CommandMate server, and you can hand work to them.
   withheld the answer (autoYesSuppression in the JSON) or 30 s passed. Rule 1
   below applies to it like to any other prompt.
 
-  --json adds the target and a 'source' field saying whether the reply came
-  from the chat transcript ("history") or from the pane ("pane"). copilot,
-  gemini and vibe-local keep no transcript, so their replies are pane reads.
+  Whose reply it is (Issue #4344): ask puts an id on the message and reads the
+  reply back by that id, so a reply is never another turn's. It is printed
+  only when the server ties the transcript's input to the turn that answered
+  it alone (--json: "attribution": {"state": "matched"}, "source": "history").
+  Otherwise ask still exits 0, stdout is empty, --json has "reply": null and
+  the attribution's state and reason, and stderr has one 'reply not collected'
+  line:
+    unavailable/tool_unsupported    the tool has no ask attribution (copilot,
+                                    gemini, vibe-local, opencode, antigravity,
+                                    command-code today); sent as before
+    unavailable/server_unsupported  an older server; sent with the old body
+    unavailable/slash_command       a body starting with /, ! or #
+    ambiguous/...                   the answering turn also took another input
+                                    (shared_turn) or was open at the send
+    unmatched/...                   not tied to this ask (absorbed_mid_turn,
+                                    turn_incomplete, grace_expired, ...)
+  Look at their screen yourself then ('capture <id> --instance <id> --pane');
+  ask never reads the pane for a reply. "notified": true on a matched reply:
+  the turn also took a background-task notification the reply may react to.
+  With an id the message is always multi-line, so a claude pane shows it as a
+  paste with a '[cmate-ask v1 <id>]' line in front; that is expected.
 
   Ask one instance one thing at a time (Issue #3955): a request sent while it
   is mid-turn can be folded into that turn (codex does) and answered with one
-  reply for both. ask then still exits 0 with the reply, but prints
-  'overlapped: ...' on stderr and --json adds "overlapped": true -- the reply
-  may answer the other request.
+  reply for both. ask then still exits 0, but prints 'overlapped: ...' on
+  stderr and --json adds "overlapped": true; whether a reply is printed is
+  still decided by the attribution alone.
   Relay delivery (ask --async / send --reply-to) delivers only a turn that
   ended after the message went in, and notes a proven overlap on the reply's
   second line ('[CommandMate relay] ... (overlap=later)'; unknown is never
