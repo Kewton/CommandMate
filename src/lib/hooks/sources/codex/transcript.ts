@@ -90,6 +90,7 @@
  * @module lib/hooks/sources/codex/transcript
  */
 
+import { stripAskEnvelope } from '@/lib/ask/envelope';
 import { isPlainObject, readStringField } from '../event-mapper';
 import { boundDetail, collapseToLine, separateTurnBody, truncateTurnBody, type TurnRenderBlock } from '../turn-body';
 
@@ -199,6 +200,31 @@ export interface CodexPrompt {
   readonly text: string;
   /** When codex recorded it, epoch ms. */
   readonly timestampMs: number;
+  /**
+   * Issue #4344: the askId of the envelope at the text's canonical place (M3),
+   * or null. Read off the text only; whether it comes off for History is the
+   * reader's decision (I3: only under a reservation of the same destination).
+   */
+  readonly askId?: string | null;
+  /** Issue #4344: the text with that envelope taken off once (M2), or null. */
+  readonly askText?: string | null;
+}
+
+/**
+ * Issue #4344: one `UserMessage` the turn took, as the ask adapter reads it —
+ * every one of them, including those {@link CodexTurnAccumulator.prompts} drops
+ * for a missing id or text, and with the session **its own record** named
+ * (design §3.6 I6: never the turn's, the file's or the caller's).
+ */
+export interface CodexAskInput {
+  /** `item.id`, or null when the record carried none. */
+  readonly itemId: string | null;
+  /** The record's own `thread_id` / `session_id`, or null. No fallback. */
+  readonly sessionId: string | null;
+  /** The item's text, or null. */
+  readonly text: string | null;
+  /** The envelope's askId at the canonical place, or null. */
+  readonly askId: string | null;
 }
 
 /** One turn: everything one `turn_id` produced. */
@@ -232,6 +258,21 @@ export interface CodexTurnAccumulator {
   closed: boolean;
   /** True once an item had to be dropped for {@link MAX_CODEX_TURN_ITEMS}. */
   overflowed: boolean;
+  /**
+   * Issue #4344: every `UserMessage` of the turn in file order, for the ask
+   * adapter (`./ask-attribution`). History reads {@link prompts}, unchanged.
+   */
+  askInputs?: CodexAskInput[];
+  /**
+   * Issue #4344: `item_completed` records of the turn that named no session.
+   * The ask adapter cannot check them against the session (I6), so a turn
+   * with any is never complete for an ask.
+   */
+  sessionlessItems?: number;
+  /** Issue #4344: index in `records` of the turn's first record. */
+  firstRecordIndex?: number;
+  /** Issue #4344: index in `records` of the turn's last record. */
+  lastRecordIndex?: number;
 }
 
 /** What one rendered turn is. */
@@ -274,6 +315,14 @@ export interface CodexRolloutParse {
    * failure costs one record rather than the file.
    */
   readonly malformedLines: number;
+  /**
+   * Issue #4344: where each of {@link malformedLines} sat — the number of
+   * records parsed before it. A turn whose records span one of them may have
+   * lost an input or a part of its reply, so the ask adapter never takes it as
+   * complete; one after the turn's last record (the fragment of a file being
+   * appended to) costs that turn nothing.
+   */
+  readonly malformedAfter?: readonly number[];
 }
 
 /**
@@ -444,6 +493,7 @@ export function readCodexRolloutRecord(value: unknown): CodexRolloutRecord | nul
 export function parseCodexRollout(text: string): CodexRolloutParse {
   const records: CodexRolloutRecord[] = [];
   let malformedLines = 0;
+  const malformedAfter: number[] = [];
 
   for (const line of text.split('\n')) {
     if (line.trim().length === 0) continue;
@@ -452,14 +502,18 @@ export function parseCodexRollout(text: string): CodexRolloutParse {
       parsed = JSON.parse(line);
     } catch {
       malformedLines += 1;
+      malformedAfter.push(records.length);
       continue;
     }
     const record = readCodexRolloutRecord(parsed);
     if (record) records.push(record);
-    else malformedLines += 1;
+    else {
+      malformedLines += 1;
+      malformedAfter.push(records.length);
+    }
   }
 
-  return { records, malformedLines };
+  return { records, malformedLines, malformedAfter };
 }
 
 /** What one pass over a rollout's records produced. */
@@ -483,6 +537,13 @@ export interface CodexTurnBuild {
    * everything codex writes without a `turn_id`. Counted for the same reason.
    */
   readonly turnlessRecords: number;
+  /**
+   * Issue #4344: every session id a record of the window named (the
+   * `response_item` stream names none). More than one — or one that is not the
+   * session the instance follows — is a window the ask adapter takes no turn's
+   * close from (design §3.6 Q1, the human decision of 2026-11-14).
+   */
+  readonly windowSessionIds?: readonly string[];
 }
 
 /**
@@ -504,14 +565,17 @@ export function buildCodexTurns(
   let duplicateStreamRecords = 0;
   let turnlessRecords = 0;
   let fileSessionId: string | null = null;
+  const windowSessionIds = new Set<string>();
 
-  for (const record of records) {
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
     if (record.type === 'session_meta' && record.sessionId) fileSessionId = record.sessionId;
 
     if (record.type === 'response_item') {
       duplicateStreamRecords += 1;
       continue;
     }
+    if (record.sessionId) windowSessionIds.add(record.sessionId);
 
     const turnId = record.turnId;
     if (!turnId) {
@@ -530,8 +594,16 @@ export function buildCodexTurns(
         started: false,
         closed: false,
         overflowed: false,
+        askInputs: [],
+        sessionlessItems: 0,
+        firstRecordIndex: index,
+        lastRecordIndex: index,
       };
       turns.set(turnId, turn);
+    }
+    turn.lastRecordIndex = index;
+    if (record.payloadType === 'item_completed' && !record.sessionId) {
+      turn.sessionlessItems = (turn.sessionlessItems ?? 0) + 1;
     }
 
     if (record.payloadType === 'task_started') {
@@ -551,11 +623,21 @@ export function buildCodexTurns(
     if (!item) continue;
 
     if (item.type === 'UserMessage') {
+      // Issue #4344 (M3): the envelope is read off the text at its canonical place only.
+      const envelope = item.text ? stripAskEnvelope(item.text) : null;
+      (turn.askInputs ?? (turn.askInputs = [])).push({
+        itemId: item.id,
+        sessionId: record.sessionId,
+        text: item.text,
+        askId: envelope ? envelope.askId : null,
+      });
       if (item.id && item.text) {
         turn.prompts.push({
           itemId: item.id,
           text: item.text,
           timestampMs: record.timestampMs ?? turn.startedAt,
+          askId: envelope ? envelope.askId : null,
+          askText: envelope ? envelope.text : null,
         });
       }
       continue;
@@ -568,7 +650,12 @@ export function buildCodexTurns(
     turn.items.push(item);
   }
 
-  return { turns: [...turns.values()], duplicateStreamRecords, turnlessRecords };
+  return {
+    turns: [...turns.values()],
+    duplicateStreamRecords,
+    turnlessRecords,
+    windowSessionIds: [...windowSessionIds],
+  };
 }
 
 /**
