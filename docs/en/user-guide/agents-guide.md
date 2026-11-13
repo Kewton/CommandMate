@@ -16,12 +16,12 @@ Agents are sub-processes that operate as specialists for specific tasks. They ar
 
 | Agent | Description | Called From |
 |-------|-------------|------------|
-| [`tdd-impl-agent`](../../../.claude/agents/tdd-impl-agent.md) | TDD implementation specialist | `/tdd-impl`, `/pm-auto-dev` |
-| [`progress-report-agent`](../../../.claude/agents/progress-report-agent.md) | Progress report generation | `/progress-report`, `/pm-auto-dev` |
+| [`tdd-impl-agent`](../../../.claude/agents/tdd-impl-agent.md) | TDD implementation specialist | `/tdd-impl`, `/pm-auto-dev`, `/bug-fix` |
+| [`progress-report-agent`](../../../.claude/agents/progress-report-agent.md) | Progress report generation | `/progress-report`, `/pm-auto-dev`, `/bug-fix` |
 | [`investigation-agent`](../../../.claude/agents/investigation-agent.md) | Bug investigation specialist | `/bug-fix` |
-| [`acceptance-test-agent`](../../../.claude/agents/acceptance-test-agent.md) | Acceptance testing | `/acceptance-test`, `/pm-auto-dev` |
+| [`acceptance-test-agent`](../../../.claude/agents/acceptance-test-agent.md) | Acceptance testing | `/acceptance-test`, `/pm-auto-dev`, `/bug-fix` |
 | [`refactoring-agent`](../../../.claude/agents/refactoring-agent.md) | Refactoring | `/refactoring`, `/pm-auto-dev` |
-| [`architecture-review-agent`](../../../.claude/agents/architecture-review-agent.md) | Architecture review | `/architecture-review`, `/multi-stage-design-review` |
+| [`architecture-review-agent`](../../../.claude/agents/architecture-review-agent.md) | Architecture review | `/multi-stage-design-review` |
 | [`apply-review-agent`](../../../.claude/agents/apply-review-agent.md) | Applying review findings | `/apply-review`, `/multi-stage-design-review` |
 | [`issue-review-agent`](../../../.claude/agents/issue-review-agent.md) | Issue content review | `/multi-stage-issue-review` |
 | [`apply-issue-review-agent`](../../../.claude/agents/apply-issue-review-agent.md) | Applying Issue review results | `/multi-stage-issue-review` |
@@ -272,16 +272,24 @@ Output file: dev-reports/bug-fix/20251205_120000/investigation-result.json
 ```
 .claude/
 ├── agents/
-│   ├── tdd-impl-agent.md
-│   ├── progress-report-agent.md
-│   ├── investigation-agent.md
 │   ├── acceptance-test-agent.md
-│   └── refactoring-agent.md
+│   ├── apply-issue-review-agent.md
+│   ├── apply-review-agent.md
+│   ├── architecture-review-agent.md
+│   ├── investigation-agent.md
+│   ├── issue-review-agent.md
+│   ├── progress-report-agent.md
+│   ├── refactoring-agent.md
+│   └── tdd-impl-agent.md
 └── prompts/
-    ├── tdd-impl-core.md
+    ├── acceptance-test-core.md
+    ├── apply-issue-review-core.md
+    ├── apply-review-core.md
+    ├── architecture-review-core.md
+    ├── issue-review-core.md
     ├── progress-report-core.md
     ├── refactoring-core.md
-    └── acceptance-test-core.md
+    └── tdd-impl-core.md
 
 dev-reports/
 ├── issue/{issue_number}/

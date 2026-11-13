@@ -84,6 +84,14 @@ describe('Issue #3754: command / agent lists match the definition files', () => 
         });
         const entries = listEntries(section ?? '', g.prefix);
         perLang[lang] = entries.map((e) => e.key).sort();
+        it('heading count equals the number of listed keys', () => {
+          const headingLine = doc.split('\n').find((l) => spec.heading.test(l)) ?? '';
+          const n = /\d+/.exec(headingLine);
+          if (g.kind === 'commands') {
+            expect(n).not.toBeNull();
+            expect(Number(n![0])).toBe(perLang[lang].length);
+          }
+        });
         it('has no duplicate', () => {
           expect(new Set(perLang[lang]).size).toBe(perLang[lang].length);
         });
@@ -127,6 +135,13 @@ describe('Issue #3754: command / agent lists match the definition files', () => 
       const doc = '### 全コマンド\n\n| c | d |\n|--|--|\n| [`/a`](x/a.md) | A |\n\n---\n';
       const keys = listEntries(sectionBody(doc, /^### 全コマンド/) ?? '', '/').map((e) => e.key);
       expect(keys).not.toEqual(['a', 'b']);
+    });
+    it('positive: a heading count that differs from the listed keys is detected', () => {
+      const doc = '### 全コマンド（3 件）\n\n| [`/a`](x/a.md) | A |\n';
+      const heading = /^### 全コマンド/;
+      const line = doc.split('\n').find((l) => heading.test(l)) ?? '';
+      const n = Number(/\d+/.exec(line)![0]);
+      expect(n).not.toBe(listEntries(sectionBody(doc, heading) ?? '', '/').length);
     });
     it('negative: an example /foo outside the list section is not counted', () => {
       const doc =
