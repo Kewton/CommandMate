@@ -257,3 +257,19 @@ describe('[#4313 B-1] /respond { messageId }: the combinations refused at the pa
     await expectRefusedAndUnrecorded(storedQuestion(), '1');
   });
 });
+
+describe('[#4313 B-1 再指示 1] /respond { messageId }: a checkbox row when the route could not read the screen', () => {
+  it('multiSelect row, answer 1, the capture before the send failed: no key, row pending, nothing recorded', async () => {
+    vi.mocked(captureSessionOutputFresh).mockRejectedValue(new Error('capture failed'));
+    vi.mocked(capturePane).mockResolvedValue(REVIEW);
+    const message = stored(CHECKBOX_QUESTION);
+
+    const response = await post({ messageId: message.id, answer: '1' });
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(vi.mocked(sendKeys)).not.toHaveBeenCalled();
+    expect(vi.mocked(sendSpecialKeys)).not.toHaveBeenCalled();
+    expect(getMessageById(db, message.id)?.promptData?.status).toBe('pending');
+    expect(humanAnswerEvents()).toBe(0);
+  });
+});

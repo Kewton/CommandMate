@@ -178,6 +178,8 @@ async function readGuardFrame(params: SendPromptAnswerParams): Promise<string | 
  *   two ←/→ presses that reach `Reject` is Issue P1-7's structured-decision
  *   work; this Issue only stops the wrong keystroke.
  *
+ * @param screen - the one read already taken for this answer (Issue #4313
+ *   B-1); omitted or not taken (`none`), the guard reads the pane itself
  * @returns The `numbered` dialog the tool vouched for on this frame, or null when
  *   the guard did not read one (non-numeric answer, no rules, unreadable pane,
  *   or no dialog on screen). Returned so the Enter decision is made off the
@@ -185,13 +187,22 @@ async function readGuardFrame(params: SendPromptAnswerParams): Promise<string | 
  * @throws {PromptAnswerRejectedError} when the tool vouched for a dialog on this
  *   frame whose `answerMode` is not {@link TEXT_ANSWERABLE_ANSWER_MODE}.
  */
-async function assertAnswerModeAcceptsNumber(params: SendPromptAnswerParams): Promise<DialogVerdict | null> {
+async function assertAnswerModeAcceptsNumber(
+  params: SendPromptAnswerParams,
+  screen?: AnswerScreen,
+): Promise<DialogVerdict | null> {
   if (!/^\d+$/.test(params.answer)) return null;
 
   const detector = getToolStatusDetector(params.cliToolId);
   if (!detector.hasDialogRules) return null;
 
-  const frame = await readGuardFrame(params);
+  // Issue #4313 B-1 (再指示 1): the screen already read for this answer —
+  // read, or read and failed (`unread`) — is the one judged here; the pane is
+  // not captured again, so a later capture can never decide the keys of an
+  // answer whose first read failed. `unread` stays fail-open as before.
+  const frame = screen !== undefined && screen.source !== 'none'
+    ? screen.frame
+    : await readGuardFrame(params);
   if (frame === null) return null;
 
   const dialog = detector.detectDialog(normalizeFrame(frame, params.cliToolId));
@@ -643,8 +654,18 @@ async function sendCommandCodeMultiSelectAnswer(
  *   payload says nothing about which question it was (none, or not a choice
  *   list), or a Review payload meets a screen that is not the page (or no
  *   screen at all).
+ * - `unread-checkbox` — the caller could not read the screen right before the
+ *   send (`screenUnread`) and its payload is a checkbox question: the arm would
+ *   type toggles worked out from the stored ticks at a screen nobody read —
+ *   the Review page among them (Issue #4313 B-1 再指示 1, `/respond`'s
+ *   `messageId` shape).
  */
-export type CommandCodeReviewRefusal = 'answer' | 'blocked-page' | 'checkbox-payload' | 'unverified';
+export type CommandCodeReviewRefusal =
+  | 'answer'
+  | 'blocked-page'
+  | 'checkbox-payload'
+  | 'unverified'
+  | 'unread-checkbox';
 
 const REVIEW_REFUSAL_SENTENCES: Readonly<Record<CommandCodeReviewRefusal, string>> = {
   answer: 'The Command Code Review page takes 1 (Submit) or 2 (Cancel) and nothing else.',
@@ -657,6 +678,11 @@ const REVIEW_REFUSAL_SENTENCES: Readonly<Record<CommandCodeReviewRefusal, string
   unverified:
     'The Command Code Review page could not be verified on the screen read before the send. ' +
     'Answer it again with `commandmate respond <worktree-id> 1|2` (POST /prompt-response), which reads it again.',
+  'unread-checkbox':
+    'The screen could not be read right before the send, and the answer is for a checkbox question: ' +
+    'its toggles would be worked out from the stored ticks at a screen nobody read, so the question was not ' +
+    'submitted. Answer it with `commandmate respond <worktree-id> ...` (POST /prompt-response), which reads the ' +
+    'screen again.',
 };
 
 /**
@@ -701,7 +727,13 @@ function readCommandCodeReviewScreen(frame: string | null): CommandCodeReviewScr
  * screen, not a second, later capture.
  */
 interface AnswerScreen {
-  source: 'caller' | 'fallback' | 'none';
+  /**
+   * `caller`: the caller's frame. `fallback`: this module's read. `unread`:
+   * this module's read failed — shared as such by every check after it, none
+   * of which captures again (Issue #4313 B-1 再指示 1). `none`: not read (the
+   * checkbox arm without a caller frame).
+   */
+  source: 'caller' | 'fallback' | 'unread' | 'none';
   frame: string | null;
 }
 
@@ -716,7 +748,7 @@ async function readAnswerScreen(params: SendPromptAnswerParams, capture: boolean
   if (params.frame !== undefined) return { source: 'caller', frame: params.frame };
   if (!capture) return { source: 'none', frame: null };
   const frame = await readGuardFrame(params);
-  return frame === null ? { source: 'none', frame: null } : { source: 'fallback', frame };
+  return frame === null ? { source: 'unread', frame: null } : { source: 'fallback', frame };
 }
 
 /** A plain single-select payload: a choice list that is not a checkbox question. */
@@ -766,6 +798,12 @@ function planCommandCodeReviewAnswer(
   const refuse = (refusal: CommandCodeReviewRefusal): never => {
     throw new CommandCodeReviewPageAnswerRejectedError(answer, refusal);
   };
+
+  // 再指示 1: the checkbox arm with no screen read at all — the caller's read
+  // failed and the arm takes none (#2755) — would type the stored ticks'
+  // toggles blind. Refused only for a caller that says its read failed; the
+  // arm's own callers with no frame keep #2755's path.
+  if (checkboxArm && params.screenUnread === true && screen.source === 'none') refuse('unread-checkbox');
 
   if (reading.kind === 'unread' || reading.kind === 'other') {
     // A Review payload is only ever answered on the page it describes.
@@ -1191,6 +1229,15 @@ export interface SendPromptAnswerParams {
    * nothing more is asked.
    */
   stillAllowedAtSend?: () => boolean;
+  /**
+   * The caller tried to read the screen right before the send and could not,
+   * so `frame` is undefined (Issue #4313 B-1 再指示 1: `/respond`'s
+   * `messageId` shape when `screenAtSend` failed). On Command Code a checkbox
+   * payload is then refused before any key (`unread-checkbox`): its arm takes
+   * no read of its own (#2755) and would type the stored ticks' toggles at an
+   * unread screen. Nothing else changes.
+   */
+  screenUnread?: boolean;
 }
 
 /**
@@ -1238,13 +1285,13 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // no capture of its own when the caller gave no frame (#2755), so it is only
   // judged on the caller's frame.
   const multiSelect = readMultiSelectRequest(params);
-  let guardParams = params;
+  let screen: AnswerScreen | undefined;
   let reviewPage: MultipleChoicePromptData | null = null;
   if (cliToolId === 'command-code') {
-    const screen = await readAnswerScreen(params, multiSelect === null);
+    screen = await readAnswerScreen(params, multiSelect === null);
     reviewPage = planCommandCodeReviewAnswer(params, screen, multiSelect !== null);
-    // The number guard below judges the same screen, not a second capture.
-    if (screen.source === 'fallback') guardParams = { ...params, frame: screen.frame ?? undefined };
+    // The number guard below judges the same read (`unread` included), not a
+    // second capture (再指示 1).
   }
 
   // Issue #2755: Command Code's checkbox question, before every guard below.
@@ -1278,7 +1325,7 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   // inside the text arm because the number->offset arithmetic the cursor arm
   // does is just as meaningless on an unnumbered button strip as typing the
   // digit is.
-  const dialog = await assertAnswerModeAcceptsNumber(guardParams);
+  const dialog = await assertAnswerModeAcceptsNumber(params, screen);
 
   // Issue #2573 / #2583: the same promise for text. The text arm below types
   // whatever it is given and presses Enter, so text aimed at a screen that has

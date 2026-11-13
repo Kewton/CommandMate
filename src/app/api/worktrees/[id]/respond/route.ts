@@ -318,6 +318,11 @@ export async function POST(
           cliToolId,
           promptData: promptData,
           frame: atSend.frame,
+          // Issue #4313 B-1 再指示 1: the read right before the send failed. A
+          // Command Code checkbox row is then refused by the sender before any
+          // key (its arm would type the stored ticks' toggles at an unread
+          // screen); every other answer goes on as before.
+          screenUnread: atSend.frame === undefined,
           // Issue #3952 review P2-1: the mark taken before that frame's capture.
           readMark: atSend.readMark,
         });

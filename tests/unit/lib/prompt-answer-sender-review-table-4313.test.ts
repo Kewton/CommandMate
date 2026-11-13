@@ -23,7 +23,9 @@
  * V/W/U on screen; R / stale R with O or X. Unchanged (the Review rule says
  * nothing; the existing guards decide, X's fail-open included): every other
  * payload with O or X — and M with B, which takes no read before its toggles
- * (#2755, a known limit stated in the commit).
+ * (#2755); 再指示 1 refuses it only when the caller says its own read failed
+ * (`screenUnread`, `/respond`'s `messageId` shape). A failed first read is
+ * `unread` for every check after it: nothing captures again.
  *
  * Built on the 1.54.1 live capture (1.88.2 is not captured: UAT); the other
  * screens are derived from it in memory, no fixture file.
@@ -333,5 +335,94 @@ describe('[#4313 B-1] the screen read again under the input lock is judged the s
     expect(error).toBeInstanceOf(PromptAnswerNotDeliveredError);
     expect(error).toMatchObject({ keysSent: false });
     expect(delivered).toEqual(['<send>']);
+  });
+});
+
+describe('[#4313 B-1 再指示 1] one read, shared: a failed first read is `unread` for every check after it', () => {
+  /** The first capture fails, the next one would show the Review page. */
+  function failThenReview(): void {
+    vi.mocked(capturePane)
+      .mockRejectedValueOnce(new Error('no server running'))
+      .mockResolvedValue(V1);
+  }
+
+  it.each([
+    ['S', '1', ['1', '<Enter>']],
+    ['S', '3', ['3', '<Enter>']],
+    ['S+AO', '2', ['2']],
+    ['Ø', '1', ['1', '<Enter>']],
+  ] as const)('%s / %s: captured once, and sent as with no screen (the later capture decides nothing)', async (payload, answer, keys) => {
+    failThenReview();
+    await sendPromptAnswer({ sessionName: SESSION, answer, cliToolId: 'command-code', promptData: PAYLOADS[payload] });
+    expect(vi.mocked(capturePane)).toHaveBeenCalledTimes(1);
+    expect(delivered).toEqual(keys);
+  });
+
+  it('R / 1: captured once and refused as unverified (the later capture is not used to send it)', async () => {
+    failThenReview();
+    const error = await sendPromptAnswer({
+      sessionName: SESSION, answer: '1', cliToolId: 'command-code', promptData: PAYLOADS.R,
+    }).then(() => null, (e: unknown) => e);
+    expect(error).toMatchObject({ refusal: 'unverified' });
+    expect(vi.mocked(capturePane)).toHaveBeenCalledTimes(1);
+    expect(delivered).toEqual([]);
+  });
+});
+
+describe('[#4313 B-1 再指示 1] a checkbox row the caller could not read the screen for (`screenUnread`)', () => {
+  it('Command Code, multiSelect payload, no frame, 1: refused before any toggle, nothing captured', async () => {
+    vi.mocked(capturePane).mockResolvedValue(V1);
+    const error = await sendPromptAnswer({
+      sessionName: SESSION, answer: '1', cliToolId: 'command-code', promptData: PAYLOADS.M, screenUnread: true,
+    }).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(PromptAnswerRejectedError);
+    expect(error).toMatchObject({ refusal: 'unread-checkbox' });
+    expect((error as Error).message).toContain('/prompt-response');
+    expect(vi.mocked(capturePane)).not.toHaveBeenCalled();
+    expect(delivered).toEqual([]);
+  });
+
+  it('陰性対照: the same payload with no `screenUnread` keeps #2755’s arm (its toggle is typed)', async () => {
+    vi.mocked(capturePane).mockResolvedValue(O);
+    await sendPromptAnswer({
+      sessionName: SESSION, answer: '1', cliToolId: 'command-code', promptData: PAYLOADS.M,
+    }).catch(() => undefined);
+    expect(delivered[0]).toBe('1');
+  });
+
+  it('陰性対照: another CLI’s checkbox payload with `screenUnread` is sent as before', async () => {
+    vi.mocked(capturePane).mockRejectedValue(new Error('no server running'));
+    const error = await sendPromptAnswer({
+      sessionName: 'cm-wt-4313-table-claude',
+      answer: '1',
+      cliToolId: 'claude',
+      promptData: { ...(PAYLOADS.M as PromptData), isAskUserQuestion: true } as PromptData,
+      screenUnread: true,
+    }).then(() => null, (e: unknown) => e);
+    expect(error).toBeNull();
+    expect(delivered.length).toBeGreaterThan(0);
+  });
+});
+
+describe('[#4313 B-1 再指示 1] 陰性対照: every capture fails (X02〜X07) — sent as before (fail-open)', () => {
+  it.each([
+    ['S', '1', ['1', '<Enter>']],
+    ['S+AO', '1', ['1']],
+    ['C', '2', ['2', '<Enter>']],
+    ['Ø', '2', ['2', '<Enter>']],
+  ] as const)('%s / %s', async (payload, answer, keys) => {
+    vi.mocked(capturePane).mockRejectedValue(new Error('no server running'));
+    await sendPromptAnswer({ sessionName: SESSION, answer, cliToolId: 'command-code', promptData: PAYLOADS[payload] });
+    expect(delivered).toEqual(keys);
+  });
+
+  it('M / 1 (X06): the toggle is typed as before, and the unread check after it stops the confirm', async () => {
+    vi.mocked(capturePane).mockRejectedValue(new Error('no server running'));
+    const error = await sendPromptAnswer({
+      sessionName: SESSION, answer: '1', cliToolId: 'command-code', promptData: PAYLOADS.M,
+    }).then(() => null, (e: unknown) => e);
+    expect(error).not.toBeNull();
+    expect(error).not.toBeInstanceOf(CommandCodeReviewPageAnswerRejectedError);
+    expect(delivered).toEqual(['1']);
   });
 });
