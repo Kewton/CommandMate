@@ -1,6 +1,6 @@
 # マシンの資源の受付と配分（Issue #4370）— 設計
 
-- 状態: 設計（第 3 版。2-4-4 事前レビュー・再レビュー・原因調査と段 3 の突き合わせ〔`s3-crosscheck.md` X1〜X10〕を反映。末尾の改訂の履歴）。実装は未着手。この run で実装するのは §9.2 の PR1a（設定・純関数・読み取りだけの `status`）だけ
+- 状態: 設計（第 3 版。2-4-4 事前レビュー・再レビュー・原因調査と段 3 の突き合わせ〔`s3-crosscheck.md` X1〜X10〕を反映。末尾の改訂の履歴）。§9.2 の PR1a（設定・純関数・読み取りだけの `status`）を実装した（実装で合わせた点は §10）。PR1b 以降は未着手
 - 最上位の不変条件は §3.1 の U1〜U3（観測から決める・足すときだけ判定する・枠は最も内側）
 - 親: Epic #4371（流れの計測と制御）の子 4。共通の枠は段 3 のリーダーの決定（`workspace/orchestration/runs/2026-11-14/s3-common-frame.md`、以下「共通の枠」）に従う
 - 前提の Issue: #1917（`cpu.heavy`）、#3884（precheck の重い段・待ちの記録）、#4265（`--heavy-to-ci`）、#4277（札の先着順）、#4288（lease の規則と前提 P0・P1）
@@ -111,6 +111,8 @@ C = S − ci_vm.cpus − weights.cpu_heavy          セマフォが数えるホ�
 
 `<root>` は machine-lock と同じ（`CM_VERIFY_LOCK_ROOT` で移る。`tests/setup.ts:287` が試験の既定を一時 dir にしている）。PR1a はこの形を**読むだけ**で、作るのは PR1b。
 
+**名前の規則（事前レビュー 3 の H1）**: 参加者のファイルは保有者 `holders/<token>.json`（token は UUID。`^[0-9a-f-]{36}\.json$`）、待ち手 `waiters/<P>-<12 桁>.json`（`^[0-3]-\d{12}\.json$`）だけ。書き途中の tmp は先頭を `.` にした名前（例 `.tmp-<token>`）にし、規則に合わないので一覧の対象外（machine-lock の札が `TICKET_PATTERN` で tmp `.t-<token>` を外すのと同じ形）。`resource-sem.mjs` の `HOLDER_NAME_PATTERN`・`WAITER_NAME_PATTERN`。
+
 容量の 2 つの値（C2 の原因調査 §3.3 の区別）:
 
 - **`ownCapacity`**: その参加者が自分の設定から計算した C。**公開する設定上の制約**で、記録に書いた時点（待ち手・保有者の `link`）から他の参加者の受付に効く
@@ -211,6 +213,8 @@ exit 3 はこの CLI だけの値で、launch-worker・publish-pr へは伝え�
 | どちらも | 別の host の記録 | 保有者は消さない（生きているとみなす）。待ち手は期限＋`OTHER_HOST_GRACE_MS` |
 | どちらも | 読めない・壊れた JSON | 消さない。保有者なら C を占めるとみなす。**どちらでも `ownCapacity` が分からないので有効な C は `unknown`＝受付を止める**（U1）。人が `status` の名指しを見て消す |
 | どちらも | 観測が不明（EPERM・`ps` の失敗） | 消さない。保有者は生きているとして数える |
+
+**公開済みの参加者はファイルの水準で決める（事前レビュー 3 の H1）**: 読み手が参加者として数えるのは、§2.2 の名前の規則に合い、`link`（使用済みは `rename`）を終えたファイルだけ。書き途中・落ちた書き手の tmp（規則に合わない名前）は参加者にも壊れた記録にも数えず、`status` が警告で名指すだけ（古い tmp の回収は PR1b が受付のロックの中で行う。`TEMP_MAX_AGE_MS` と同じ考え）。一覧の後に読むまでに消えた記録（`readFile` の ENOENT）は「去った」として扱い、壊れた記録にしない。ENOENT 以外の読みの失敗（EIO・EACCES）と、名前が規則に合うのに JSON として読めない記録が「壊れた記録」。
 
 記録は tmp → `link` で公開するので、公開された記録が途中で切れることは通常の経路では無い。壊れた記録は手で書き換えた・ディスクの故障などの外の出来事で、受付を止めて人へ渡す（第 2 版の「壊れた待ち手は並べに入れず続ける」は、`ownCapacity` を読めないまま有効な C を決めることになり U1 に反するので撤回した）。
 
@@ -440,7 +444,7 @@ runners:                             # PR4
 
 | 相手 | 提供するもの | 形 | いつから |
 |---|---|---|---|
-| #4367（計測） | 今の状態 | `resource.mjs status --json` → `{ S, ownC, effectiveC: { state, capacity?, point? }, gateSaved, gateNext, load1, used, holders: [...], waiters: [...], warnings: [...] }`。別の時点の写しで、取得の許可ではない | **PR1a** |
+| #4367（計測） | 今の状態 | `resource.mjs status --json` → `{ S, ownC, effectiveC: { state, capacity?, point? }, participantsMin: { state, capacity?, point? }, gateSaved, gateNext, load1, used, holders: [...], waiters: [...], order, next, warnings: [...] }`（`participantsMin` は `status` を動かしたプロセスの設定を入れない参加者だけの最小。参加者が無ければ `capacity: null`。事前レビュー 3 の P3-1）。別の時点の写しで、取得の許可ではない | **PR1a** |
 | #4367 | 出来事 | `<root>/cpu.sem/events.jsonl`（と回転した `.1`）の 1 行: `{ at, kind: 'admit'\|'release'\|'reclaim'\|'cancel'\|'refused'\|'gate'\|'capacity'\|'corrupt'\|'unknown'\|'health', priority?, weight?, waitedMs?, heldMs?, load1?, capacity?, reason?, repo? }`。#4367 が読む（X3）。**回転は `rename` なので、読み手は `.1` と今のファイルの両方を読み、読んだ位置は inode と offset の組で持つ**（再レビュー P3-8） | **PR1b**（PR1a では書かない） |
 | #4369（merge train） | 枠の取得 | 同期 JS `acquireSlots({ priority, weight, reason, repo?, timeoutMs })` → 入れた `{ acquired:true, token, waitedMs, capacity, release() }`／入れない `{ acquired:false, reason: 'refused' \| 'timeout' \| 'unknown', ... }`。throw しない。CLI `resource.mjs run --priority P0 ...` | **PR1b**。#4369 は PR1a の完了だけでは取得へ移れない。PR2b までは merge のロックと `cpu.heavy` のまま |
 | #4369 | 優先度の使い方（X10） | **P0 ＝ train・base の、ホストで走る組み合わせ確認（tsc＋影響テスト）の実行区間だけ**。CI（VM の中）・merge のロック・再試行の待ちの間は枠を持たない（U3）。#4369 の契約に「CI 待ち・merge のロックの待ちの間に `cpu.sem/holders` に自分の記録が無い」行を入れてほしい | PR1b |
@@ -522,7 +526,7 @@ runners:                             # PR4
 4. 門: `gateNext` の揺れ止めと、読めない前の状態の closed、`[0,0,0]` の open
 5. 並べ: `orderWaiters` は優先度 → 番号、`done` と同じ token の保有者を持つ待ち手を除く
 6. 回収の判定: `holderRetirable` はグループが空か番号の再利用だけで真、pid だけの死・再利用・観測不明では偽。`waiterRetirable` は `ticketRetirable` と同じ
-7. `status` は読み取りだけ: 試験の前後で一時の root の中身（ファイルの一覧・内容・mtime）が変わらず、root が無ければ作らない。一覧が読めなければ「不明」で exit 3（空と表示しない）。警告（`ci_vm.cpus` 未設定・予約の縮小・pid が死にグループが生きる保有者・写しとの食い違いなど）を出す
+7. `status` は読み取りだけ: 試験の前後で一時の root の中身（ファイルの一覧・内容・mtime）が変わらず、root が無ければ作らない。一覧が読めなければ「不明」で exit 3（空と表示しない）。tmp（規則に合わない名前）と一覧の後に消えた記録は壊れた記録にせず、有効な C を `unknown` にしない（§2.5）。警告（`ci_vm.cpus` 未設定・予約の縮小・pid が死にグループが生きる保有者・写しとの食い違いなど）を出す
 8. 既存を弱めない: `cpu.heavy.lock` の中身・札は `status` の前後で同じ（I9）
 
 **試験の表**（`it.each` の行の形。陽性の対照は **1 回限りの変異の確認**〔素朴な版を一時に作って赤を見たことをコミットの本文に記録し、製品のコードに切り替えを残さない〕で示す。原因調査 §7 の C01〜C07・G03・G04 を純関数の水準で入れた）:
@@ -562,16 +566,18 @@ runners:                             # PR4
 | W1 | `waiterRetirable` | gone／pid-reused／expired／別 host の猶予内 | 真・真・真・偽 | — |
 | S1 | `status` | 一時の root に保有者 2・待ち手 2・`state.json` | 表示に S・own・有効な C・保存の門と `gateNext`・並べの順・回収の候補・次に入れる待ち手。前後で root の一覧・内容・mtime が同じ | — |
 | S2 | 同 | root が無い | 「参加者なし」、root を作らない、exit 0 | — |
-| S3 | 同 | holders を読めない（0000） | 「不明」、exit 3 | 陽性: 一覧の失敗を空と読む変異で「参加者なし」＝赤 |
+| S3 | 同 | holders を読めない（`readdir` の注入で EACCES。権限 0000 は root で読めるので使わない。事前レビュー 3 の P3-2） | 「不明」、exit 3 | 陽性: 一覧の失敗を空と読む変異で「参加者なし」＝赤 |
 | S4 | 同 | 壊れた記録／別の host／`leaderStart: null`／pid 死・グループ生 の保有者 | それぞれ警告で名指す。有効な C は壊れた記録で「不明」 | — |
 | S5 | 同 | `state.json` の `copy.capacity` = 3、観測した有効な C = 2 | 両方を出し、食い違いを警告 | — |
 | S6 | 同 | `cpu.heavy.lock` を別に置く | `status` の前後で中身・札が同じ | 陰性（I9） |
 | S7 | 同 | 壊れた YAML | exit 2・`resource: refused` | — |
 | S8 | setup | `CM_RESOURCE_CONFIG` を外の値にして setup を通す | 一時パス（`PINNED` の既存の試験が固定） | — |
+| S9 | `status` | `holders/.tmp-x` に半端な JSON（tmp が残っている） | 参加者に数えず、有効な C は `ok`、tmp は警告だけ。root は変わらない | 陽性: 名前で外さない変異で `unknown`＝赤 |
+| S10 | `status` | 一覧と読みの間に記録が消える（`readFile` の注入で ENOENT） | 去ったとして扱い、壊れた記録にしない。exit 0（ENOENT 以外の EIO は壊れた記録＝`unknown`） | 陽性: ENOENT を壊れたと読む変異で `unknown`＝赤 |
 
 試験は `fs.mkdtempSync(os.tmpdir())` の root（`CM_VERIFY_LOCK_ROOT`）と `CM_RESOURCE_CONFIG` で隔離し、`afterEach` で消す（S3 は権限を戻してから消す）。論理 CPU 数は設定の `ncpu` で決める。`status` の観測（`kill -0`・`ps`）は注入点 `hooks`（`pidAlive`・`groupAlive`・`startOf`・`loadavg`・`now`）で置き換え、実プロセスを起こさない。
 
-**gates**: `lint`・`typecheck`・`unit-related`（scope は上のファイル）、加えて `work-evidence`・`scope`・`env-clean`。確かめのコマンドは `npx vitest run tests/unit/scripts/orchestrate/resource-*-4370.test.ts tests/unit/config/codex-home-isolation-4146.test.ts tests/unit/guards tests/unit/docs`。
+**gates**: `lint`・`typecheck`・`unit`（`tests/setup.ts` を変えるので全体。共通の枠 §2。事前レビュー 3 の H2 で `unit-related` から直した）、加えて `work-evidence`・`scope`・`env-clean`。確かめのコマンドは `npx vitest run tests/unit/scripts/orchestrate/resource-*-4370.test.ts tests/unit/config/codex-home-isolation-4146.test.ts tests/unit/guards tests/unit/docs`。
 
 **未決（誰が決めるか）**: `commandmate_share` を 0.5 にするか（人）、`weights.cpu_heavy` の 4（#4367 の計測の後にリーダー）、`reserve_p0`（人。計測の後）。どれも PR1a の実装を止めない。
 
@@ -610,7 +616,27 @@ runners:                             # PR4
 
 ---
 
+## 10. 実装（PR1a）で合わせた点と事前レビュー 3 の処分
+
+実装で決めた・実コードに合わせた点:
+
+- `gateNext` は `prev` が読めなければ load に依らず closed を返す（§4.2 の「読めない｜どれでも｜closed」と GT4 に合わせた。§2.4 の文は「closed とみなして揺れ止めを当てる」とも読めたが、表と試験を正とした）。全欄 0 の load だけは prev に依らず open（GT5）
+- `effectiveCapacity({ own, participants, complete })`: `complete` が `true` 以外は `unknown`（`point: 'list'`）。参加者は `{ name, record }` で、`record` が null（読めない）か `ownCapacity` が 1 以上の整数でなければ `unknown`（`point: 'ownCapacity'`・`name`）
+- `admissible` は和の計算を `heldWeight` に分けた（`status` の `used` と同じ計算）。`weight` が 1 以上の整数でない保有者も C を占める。`priority` が P0〜P3 でない・`weight` が不正な要求は偽
+- `orderWaiters` は優先度と番号を**ファイル名**（`<P>-<12 桁>`）から取る。読めない待ち手は並べから外さず `corrupt: true` で残す（生きた札と同じく塞ぐ。どのみち有効な C が `unknown` で誰も入らない）
+- `holderRetirable` は `'group-gone' | 'leader-reused' | null`、`waiterRetirable` は `ticketRetirable` をそのまま呼ぶ（`gone`・`pid-reused`・`expired`）。`groupAlive` は三値（`alive`・`gone`・`unknown`）か真偽を受ける
+- `loadResourceConfig` は試験用に `availableParallelism` の注入を受ける（`ncpu: auto` の値）。読みの失敗は ENOENT だけが既定、それ以外（EISDIR・EACCES）は誤り。`runners`・`health`・`idle` は対応表であることだけ確かめ、中身は PR4・PR7
+- `status` は待ち手の回収の候補に `done`（使用済み）・`admitted`（同じ token の保有者あり）も出す。観測の注入点は `hooks`（`readdir`・`readFile`・`pidAlive`・`groupAlive`・`startOf`・`loadavg`・`now`・`host`・`availableParallelism`）
+
+事前レビュー 3 の P3 の処分（1 行ずつ）:
+
+- P3-1（`status` の有効な C に `status` 自身の `own` が入る）: PR1a で入れた。`--json` に参加者だけの最小 `participantsMin` を別の欄で出す（`effectiveC` は「今この設定で要求したら」の値のまま）
+- P3-2（S3 を権限 0000 で作ると root で読める）: PR1a で入れた。S3 は `readdir` の注入で EACCES を作る
+- P3-3（他の参加者の小さい制約による拒否が設定の誤りと同じ exit 2・`refused`）: PR1b の条件へ送る（`refused reason=capacity-lowered by=<token>` と区別し、`status` がその参加者を名指す）。PR1a には拒否の口が無い
+- P3-4（門が閉じている間、P2 が `cpu.heavy` を持ったまま枠を待つ）: PR2a の着手条件へ送る（門が閉じているときに `cpu.heavy` を返して待ち直すか、待ちの上限を決める行を PR2a の表に入れる）
+
 ## 改訂の履歴
 
 - 第 2 版（2026-11-14）: 2-4-4 事前レビュー（claude-5、P2 7・P3 14）とリーダーの突き合わせ（X1〜X7）を反映。A 消し損ねた待ち手を先頭の前に除く、B `run` の子を呼び手のグループに残し記録をグループと先頭の起動時刻で 1 回で書く、C 有効な C を `state.json` で一致させる、D 既定値の表とどの ncpu でも C ≥ 1、E CI 待ちは枠の外、F・G は I13・I14 と PR2a/2b/3a/3b/3c の条件、P3 は PR1 の範囲と試験 T25〜T39 へ（飢えは仕様として受け入れ、PR7 の kill の条件は §9.1）、コントローラーの置き場所を `scripts/orchestrate/` へ（X1）、events は #4367 が読む（X3）
 - 第 3 版（2026-11-14）: 再レビュー（C2・G2 が同じ種類の 2 回目）と codex の原因調査（`enabler-return-4370-cause.md`）を反映。最上位の不変条件 U1〜U3 を置き、容量を `ownCapacity`（公開する制約）と `admittedCapacity`（採用値）に分けて有効な C を同じ臨界区間で一覧した参加者の `ownCapacity` の最小から作る（`state.json` は写し、欠損・不明は受付を止める）、I1 を新規の判定と縮小の後の 2 文に、保持区間の規則（枠は最も内側・持ったまま待たない・最初に返す）で I14 と §7.1 の順を「merge のロック → `cpu.heavy` → 枠」に直した。`reserve_p0` は採らず人の判断へ（P0 の優先は始める順だけ）。PR1 を PR1a（設定・純関数・読み取りだけの `status`）と PR1b（取得・`run`）に分け、PR1a の契約と C01〜C08・G03・G04 の対照を書いた。再レビューの P3（解放の順・F7 の名指し・SIGTERM の exit・ncpu 4 の予約 0・実プロセスの試験の安全・events の回転）は PR1b の条件と §2〜§7 へ。壊れた待ち手を並べから外して続ける第 2 版の方針は U1 に反するので撤回した
+- PR1a の実装（2026-11-14）: 事前レビュー 3 の H1（公開済みの参加者をファイルの名前の規則で決め、tmp と一覧の後に消えた記録を壊れた記録にしない。§2.2・§2.5・S9・S10）・H2（gates を `unit` に）を入れ、§10 に実装で合わせた点と P3 4 件の処分を書いた
