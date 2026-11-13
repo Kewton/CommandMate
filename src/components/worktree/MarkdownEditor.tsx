@@ -676,6 +676,9 @@ export const MarkdownEditor = memo(function MarkdownEditor({
         if (isAutoSaveEnabled) {
           void (async () => {
             await saveNow();
+            // Issue #4345 1c-2: refused (nothing sent) is not "saved" — no completion notice, so the
+            // viewer does not adopt the unsaved text as the saved content.
+            if (saveRefusedRef.current) return;
             onSave?.(filePath, content);
           })();
         } else {

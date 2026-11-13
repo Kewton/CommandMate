@@ -136,6 +136,44 @@ describe('[#4345 1c-2] MarkdownEditor save', () => {
   });
 });
 
+describe('[#4345 1c-2] MarkdownEditor auto-save ON, Ctrl/Cmd+S', () => {
+  const setup = async (onSave: () => void) => {
+    const page = await drawn(<MarkdownEditor worktreeId={A} filePath="docs/a.md" onSave={onSave} />);
+    const textarea = (await screen.findByTestId('markdown-editor-textarea')) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('auto-save-toggle'));
+    });
+    return { page, textarea };
+  };
+  const shortcut = async (textarea: HTMLTextAreaElement) => {
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 's', ctrlKey: true });
+    });
+    await settle();
+    await settle();
+  };
+
+  it('refused: nothing sent, no completion notice (onSave), the text is kept', async () => {
+    const onSave = vi.fn();
+    const { page, textarea } = await setup(onSave);
+    lapse(page);
+    fireEvent.change(textarea, { target: { value: 'changed' } });
+    await shortcut(textarea);
+    expect(writes()).toBe(0);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(textarea.value).toBe('changed');
+  });
+
+  it('(negative) no lapse: saved and the completion notice is given', async () => {
+    const onSave = vi.fn();
+    const { textarea } = await setup(onSave);
+    fireEvent.change(textarea, { target: { value: 'changed' } });
+    await shortcut(textarea);
+    expect(writes()).toBeGreaterThan(0);
+    expect(onSave).toHaveBeenCalledWith('docs/a.md', 'changed');
+  });
+});
+
 describe('[#4345 1c-2] VibeLocalSettings context window', () => {
   const type = async () => {
     const input = (await screen.findByTestId('vibe-local-context-window-input')) as HTMLInputElement;

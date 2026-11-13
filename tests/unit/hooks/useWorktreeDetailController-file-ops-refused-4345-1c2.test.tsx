@@ -12,7 +12,8 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { NewFileDialog } from '@/components/worktree/NewFileDialog';
 
 vi.mock('next-intl', async () => {
   const { createRealIntlMock } = await import('@tests/helpers/real-intl');
@@ -102,7 +103,15 @@ afterEach(() => {
 let page: ReturnType<typeof useWorktreeDetailController>;
 function Page() {
   page = useWorktreeDetailController({ worktreeId: A });
-  return null;
+  // The real dialog, wired as the page wires it (PC and phone draw the same one with these props).
+  return (
+    <NewFileDialog
+      isOpen={page.showNewFileDialog}
+      parentPath={page.newFileParentPath}
+      onConfirm={page.handleNewFileConfirm}
+      onCancel={page.handleNewFileCancel}
+    />
+  );
 }
 const settle = () => act(async () => new Promise((done) => setTimeout(done, 0)));
 
@@ -147,13 +156,43 @@ describe('[#4345 1c-2] a refused file operation shows no failure and sends nothi
     expect(toasts).toEqual([]);
   });
 
-  it('new file: the dialog comes back so the name is not lost', async () => {
+  it('new file (real NewFileDialog): refused, the dialog stays with the typed name and extension', async () => {
     await drawn();
     act(() => page.handleNewFile(''));
     await settle();
+    fireEvent.change(await screen.findByTestId('new-file-name-input'), { target: { value: 'notes' } });
+    fireEvent.change(screen.getByTestId('new-file-ext-select'), { target: { value: '.txt' } });
     lapse();
-    await drive('new-file');
+    fireEvent.click(screen.getByTestId('new-file-confirm-button'));
+    await settle();
+    await settle();
+    expect(calls['new-file']).toBe(0);
+    expect(window.alert).not.toHaveBeenCalled();
     expect(page.showNewFileDialog).toBe(true);
+    expect((screen.getByTestId('new-file-name-input') as HTMLInputElement).value).toBe('notes');
+    expect((screen.getByTestId('new-file-ext-select') as HTMLSelectElement).value).toBe('.txt');
+  });
+
+  it('(negative) new file with no lapse: created and the dialog closes', async () => {
+    await drawn();
+    act(() => page.handleNewFile(''));
+    await settle();
+    fireEvent.change(await screen.findByTestId('new-file-name-input'), { target: { value: 'notes' } });
+    fireEvent.click(screen.getByTestId('new-file-confirm-button'));
+    await waitFor(() => expect(calls['new-file']).toBe(1));
+    await settle();
+    expect(page.showNewFileDialog).toBe(false);
+  });
+
+  it('(negative) new file answering 500: the alert and the dialog closes', async () => {
+    await drawn();
+    act(() => page.handleNewFile(''));
+    await settle();
+    fireEvent.change(await screen.findByTestId('new-file-name-input'), { target: { value: 'notes' } });
+    status = 500;
+    fireEvent.click(screen.getByTestId('new-file-confirm-button'));
+    await waitFor(() => expect(window.alert).toHaveBeenCalledTimes(1));
+    expect(page.showNewFileDialog).toBe(false);
   });
 
   it('move: the dialog stays for the person to retry', async () => {

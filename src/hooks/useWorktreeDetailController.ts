@@ -2287,9 +2287,13 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     setShowNewFileDialog(true);
   }, []);
 
+  const newFileInFlightRef = useRef(false);
   /** Handle new file creation confirmation from NewFileDialog (Issue #646) */
   const handleNewFileConfirm = useCallback(async (finalName: string) => {
-    setShowNewFileDialog(false);
+    // Issue #4345 1c-2: the dialog stays open while the request is out; a refusal (nothing sent)
+    // leaves it open with the name and extension as typed, any other outcome closes it as before.
+    if (newFileInFlightRef.current) return;
+    newFileInFlightRef.current = true;
     const newPath = newFileParentPath ? `${newFileParentPath}/${finalName}` : finalName;
 
     try {
@@ -2308,14 +2312,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       }
       // File created successfully - trigger FileTreeView refresh
       setFileTreeRefresh(prev => prev + 1);
+      setShowNewFileDialog(false);
     } catch (err) {
-      // Issue #4345 1c-2: a refusal (nothing sent) is no failure alert; the dialog comes back so the
-      // name is not lost and the person can try again after signing in.
-      if (isHandoffPageOperationRefused(err)) {
-        setShowNewFileDialog(true);
-        return;
-      }
+      // A refusal (nothing sent) is no failure alert.
+      if (isHandoffPageOperationRefused(err)) return;
+      setShowNewFileDialog(false);
       window.alert(tError('fileOps.failedToCreateFile'));
+    } finally {
+      newFileInFlightRef.current = false;
     }
   }, [worktreeId, newFileParentPath, tError]);
 
