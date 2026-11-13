@@ -50,6 +50,7 @@ import {
   type SessionStopResult,
 } from '@/lib/handoff/close-rule';
 import {
+  handoffPageMayStart,
   handoffRegistrySnapshot,
   publishHandoffPageView,
   registerHandoffPage,
@@ -399,5 +400,34 @@ describe('[#4317 PR2] negative controls', () => {
     });
     await settle();
     expect(screen.getByTestId('handoff-approve-p1')).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
+describe('[#4317 PR2 再指示 1] the host reports the path’s detail route (the route in `handoffPageMayStart`)', () => {
+  it('B’s page still registered while the path turns to A: not drawn as the route’s page, and it may start nothing; back on B it may', () => {
+    openingOn(B);
+    nav.path = `/worktrees/${B}`;
+    const { rerender, unmount } = render(<HandoffDialogHost />);
+    let b: HandoffPageRegistration | null = null;
+    act(() => {
+      b = registerHandoffPage(B);
+      publishHandoffPageView(b, { target: TARGET, onClose: () => undefined, onStop: stop });
+    });
+    expect(handoffRegistrySnapshot().route).toBe(B);
+    expect(handoffPageMayStart(b)).toBe(true);
+    nav.path = `/worktrees/${A}`;
+    rerender(<HandoffDialogHost />);
+    expect(handoffRegistrySnapshot().route).toBe(A);
+    expect(handoffPageMayStart(b)).toBe(false);
+    expect(handoffHostView(nav.path, handoffRegistrySnapshot(), handoffStoreSnapshot())?.registration ?? null).toBeNull();
+    nav.path = '/worktrees';
+    rerender(<HandoffDialogHost />);
+    expect(handoffRegistrySnapshot().route).toBeNull();
+    expect(handoffPageMayStart(b)).toBe(false);
+    nav.path = `/worktrees/${B}`;
+    rerender(<HandoffDialogHost />);
+    expect(handoffPageMayStart(b)).toBe(true);
+    unmount();
+    expect(handoffRegistrySnapshot().route).toBeNull();
   });
 });

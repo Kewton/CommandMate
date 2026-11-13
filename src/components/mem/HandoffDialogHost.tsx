@@ -26,6 +26,10 @@
  * dialog sets it afresh when another opening (token) is shown, and keeps it — and its DOM — while the
  * same opening is shown over a route or width change (it is never keyed, so never made anew here).
  *
+ * The host reports the path's detail route to the registry (`reportHandoffRoute`): a registration
+ * not on the route (B still registered while the path is A's) is not drawn as the route's page and
+ * — the same test, in `handoffPageMayStart` — starts nothing new after its awaits either.
+ *
  * This host writes nothing of the store: it reads the opening (`handoffStoreSnapshot`) and the
  * registry; every start and close is the dialog's, under its registration and the existing rule.
  *
@@ -33,13 +37,15 @@
  */
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useLayoutEffect, useSyncExternalStore } from 'react';
 import { usePathname } from 'next/navigation';
 import { SessionHandoffDialog, type SessionHandoffTarget } from '@/components/mem/SessionHandoffDialog';
 import { handoffStoreSnapshot, subscribeHandoffStore, type HandoffStoreState, type SessionStopResult } from '@/lib/handoff/close-rule';
 import {
   currentHandoffPage,
+  handoffRegistrationOnRoute,
   handoffRegistrySnapshot,
+  reportHandoffRoute,
   subscribeHandoffRegistry,
   type HandoffPageRegistration,
   type HandoffRegistryState,
@@ -81,7 +87,9 @@ export function handoffHostView(pathname: string | null | undefined, registry: H
   if (route === null || registry.authExpired) return null;
   // The current registration, when it is the route's page (a page being left is not the route's).
   const current = currentHandoffPage(registry);
-  if (current !== null && current.view !== null && current.worktreeId === route) {
+  // The same test as `handoffPageMayStart`'s (the route reported below): one condition for what is
+  // drawn as the route's page and for what its dialog may start.
+  if (current !== null && current.view !== null && handoffRegistrationOnRoute(current.worktreeId, route)) {
     const { target, onClose, onStop } = current.view;
     if (target === null) return null;
     return { worktreeId: current.worktreeId, target, onClose, onStop, registration: current.id };
@@ -97,6 +105,16 @@ export function HandoffDialogHost() {
   const pathname = usePathname();
   const registry = useSyncExternalStore(subscribeHandoffRegistry, handoffRegistrySnapshot, handoffRegistrySnapshot);
   const store = useSyncExternalStore(subscribeHandoffStore, handoffStoreSnapshot, handoffStoreSnapshot);
+  const route = handoffHostWorktreeOf(pathname);
+  /**
+   * PR2 再指示 1: the route takes part in `handoffPageMayStart` — a continuation of a page that is not
+   * the route's (B still registered, the path A's) starts nothing new. Reported in the commit (a
+   * layout effect: before any awaited continuation runs on), and `null` once the host is gone.
+   */
+  useLayoutEffect(() => {
+    reportHandoffRoute(route);
+    return () => reportHandoffRoute(null);
+  }, [route]);
   const view = handoffHostView(pathname, registry, store);
   if (view === null) return null;
   return (
