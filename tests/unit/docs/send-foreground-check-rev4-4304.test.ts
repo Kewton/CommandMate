@@ -120,3 +120,82 @@ describe('send-foreground-check-4300.md 改訂 4 (#4304)', () => {
     expect(auditRev4(doc)).toEqual([]);
   });
 });
+
+/**
+ * 改訂 5 (Issue #4304, the 2-4-4 re-review of 改訂 4 by codex-2): the four
+ * invariants, the decisions on the remaining P1 and P2s, the 要決定 rows and
+ * the per-defence red tests have to be in the 改訂 5 section. Presence only.
+ */
+const REQUIRED_IN_REV5: readonly string[] = [
+  'I1',
+  'I2',
+  'I3',
+  'I4',
+  'ps -o args= -p <pane_pid>',
+  'Enter 省略',
+  '#4303-A',
+  'nonce',
+  'vibe-local.ts:249',
+  'D1',
+  'D2',
+  'D3',
+  '防御を 1 つずつ外した',
+  '改訂 5 の承認の後',
+];
+
+function sectionStartingWith(text: string, heading: RegExp): string | null {
+  const lines = text.split('\n');
+  const start = lines.findIndex(line => heading.test(line));
+  if (start < 0) return null;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex(line => /^## /.test(line));
+  return lines.slice(start, end < 0 ? undefined : start + 1 + end).join('\n');
+}
+
+function auditRev5(text: string): string[] {
+  const missing: string[] = [];
+  const history = sectionStartingWith(text, /^## 改訂の履歴/);
+  if (history === null || !/^- 改訂 5/m.test(history)) missing.push('## 改訂の履歴 に 改訂 5 の行');
+  const section = sectionStartingWith(text, /^## 改訂 5/);
+  if (section === null) return [...missing, '## 改訂 5'];
+  for (const label of REQUIRED_IN_REV5) {
+    if (!section.includes(label)) missing.push(label);
+  }
+  return missing;
+}
+
+describe('send-foreground-check-4300.md 改訂 5 (#4304)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function tmpDoc(text: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'rev5-4304-'));
+    dirs.push(dir);
+    const path = join(dir, 'doc.md');
+    writeFileSync(path, text);
+    return readFileSync(path, 'utf8');
+  }
+
+  it('names the invariants, the decisions, the open choices and the red tests inside the 改訂 5 section', () => {
+    expect(auditRev5(readFileSync(DOC, 'utf8'))).toEqual([]);
+  });
+
+  it('positive control: the document without the 改訂 5 section and history line is reported', () => {
+    const text = readFileSync(DOC, 'utf8');
+    const section = sectionStartingWith(text, /^## 改訂 5/);
+    expect(section).not.toBeNull();
+    const stripped = tmpDoc(text.replace(section as string, '').replace(/^- 改訂 5.*\n/m, ''));
+    const missing = auditRev5(stripped);
+    expect(missing).toContain('## 改訂 5');
+    expect(missing).toContain('## 改訂の履歴 に 改訂 5 の行');
+  });
+
+  it('negative control: a minimal document with every label in the section passes', () => {
+    const doc = tmpDoc(
+      ['# t', '', '## 改訂の履歴', '- 改訂 5: x', '', '## 改訂 5（x）', ...REQUIRED_IN_REV5, '', '## 0. next', ''].join('\n')
+    );
+    expect(auditRev5(doc)).toEqual([]);
+  });
+});

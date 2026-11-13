@@ -4,7 +4,7 @@
 - 改訂 2 の主筋（起動行に `exec` を足して打つ）は §2.1 に「採らない（新 P1）」として残す。改訂 1 の案 E も同じ表に残す
 - 基準: develop `ed9b89eac`（この worktree の src。develop の先頭 `46cbe7699` との差は mem・handoff だけで、この設計が触る所は同じ）。行番号はこの時点のもの。「事実」は file:line、「見立て」「未確認」は明記する
 - 実装は 2 段: **PR1**（確かな証拠のときだけ止める小さな直し。別の worktree で実装中、`0ca482d3d`、未マージ。この文書は書かない）、**PR2**（この文書の本体。PR1 のマージ後、develop から別の契約で。§8 で 2 本に分ける）
-- **改訂 4（2026-11-13、Issue #4304）が最新**。下の「## 改訂 4」の節は、§0〜§12 の同じ論点の記述より優先する（食い違う箇所は節の中で名指しする）。§0〜§12 の本文と行番号は改訂 3 の時点のまま残す
+- **改訂 5（2026-11-13、Issue #4304）が最新**。優先の順は「## 改訂 5」→「## 改訂 4」→ §0〜§12（食い違う箇所は新しい節の中で名指しする）。§0〜§12 の本文と行番号は改訂 3 の時点のまま残す
 
 ## 改訂の履歴
 
@@ -12,6 +12,7 @@
 - 改訂 2（2026-11-10）: CLI を exec で起動してシェルを残さない方式へ PR2 の主筋を替えた（`b317577ee`）。§12 で #4303 の回答経路を整理（`84bf2824e`）
 - 改訂 3（2026-11-10）: 起動も復旧もペインのコマンドとして CLI を直接起動する形に替えた（`f02cd6f55`）。再確認（`review-4300d.md`）で P1 1・P2 6 が残り、PM の決定 (b) で PR2 を止めて #4304 へ
 - 改訂 4（2026-11-13、#4304）: P1（rc が別の対話シェルへ exec する）を H1-a（復旧の瞬間だけ入力ロックで直列化し、準備完了の証拠を新しい世代に限る）で閉じ、残りの 9 項目（P2 6 件・#4304 のコメントの 3 経路・行番号・Auto-Yes と世代）を決め、H2・H3 の人の決定を書いた（下の「## 改訂 4」）
+- 改訂 5（2026-11-13、#4304）: 改訂 4 の再確認（`prereview-4304-rev4-reply.md`、codex-2、承認保留）を反映。準備完了の証拠を「新しい行」から「CLI へ exec した積極的な証拠（pane_pid の argv）＋その世代の印（nonce の行）」に替え、Enter 省略の回答を含む全キー経路をロックに載せ、世代の印の寿命と全読者・cwd と環境の同時の維持・PR2a/PR2b の依存の境界・対照の試験を決めた。決めきれない 3 点は要決定として選択肢と推奨を書いた（下の「## 改訂 5」）
 
 ## 改訂 4（2026-11-13、Issue #4304）: P1 の閉じ方と残りの 9 項目
 
@@ -36,7 +37,7 @@ H4（#4303 の小さな直しを先に出す）は R4.4、H5（tmux の最低版
 1. 復旧する側 B: 起動の single-flight を取る（今どおり）→ `withInstanceInputLock(sessionName, …, { mode: 'exclusive' })`（`instance-input-lock.ts:542`）を取る → 番の中で `readPaneState` を読み直し、まだ dead なら `beginAgentSession`（その中の `invalidateInstanceInput`、`agent-session-lifecycle.ts:114`。B 以外の ticket を失効させる）→ **R4.3 ②の世代の印を読む呼び出しと `respawn-pane -c <cwd> <コマンド> \; set-option -p … remain-on-exit on` を 1 回の tmux 呼び出しで** → 番を返す。準備待ちは番の外（#3975 と同じ）。
 2. 送信 A（`exclusive`）・回答と Auto-Yes（`shared`、`prompt-answer-sender.ts:712` の `sendAsInputWriter`）はどちらも B の `exclusive` と同時に持てない。だから **A が出したキーは、B の respawn より前に tmux へ出終わっている**（`send-keys` は tmux がペインへ書いてから戻る）。届く先は dead pane（捨てる）か、終わる前の古い CLI。B の respawn の後に A がキーを出すことは、A の ticket が失効している（`invalidateInstanceInput`）ので無い。
 3. respawn の後に送る人（A の再試行・C）は、**新しい世代の入力欄**（R4.3 ②）が見えるまで本文を打たない。rc が別の対話シェルへ exec した場合（P1 の構成）は入力欄が出ないので準備待ちが時間切れになり、§5.3 のとおり新方式のペインを kill して not-sent。その間、端末を読む対話シェルにキーを出す主体は無い（送信・回答は準備待ち、Auto-Yes は R4.3 の「Auto-Yes と世代」と⑦で止まる）。
-4. デッドロック: R1（ロックを持つ側は他の起動を待たず `SessionLaunchInFlightError` で断られる）を保つので、「single-flight → ロック」の向きだけになり循環しない。A 自身の send が自分のペインを復旧する場合（codex の `requireSession({ relaunch: true })`）は R2 のとおり A の番に合流し、`invalidateInstanceInput` も呼び手の ticket を残す（同ファイル `:795` の説明）。
+4. デッドロック: R1（ロックを持つ側は他の起動を待たず `SessionLaunchInFlightError` で断られる）を保つので、「single-flight → ロック」の向きだけになり循環しない。A 自身の send が自分のペインを復旧する場合（codex の `requireSession({ relaunch: true })`）は R2 のとおり A の番に合流し、`invalidateInstanceInput` も呼び手の ticket を残す（`instance-input-lock.ts:795` の `invalidateInstanceInput` の説明。改訂 5 で参照を直した）。
 5. 受け入れた残り（H1-a を決めたときの前提）: **UI の生の入力（`direct-input.ts:26` の `sendDirectInput`、WS の `terminal_input`）は入力ロックを通らない**。人が画面を見て打つ入力なので直列化の外に置く。dead pane では捨てられ、起動中は端末のバッファ（s6）。rc が対話シェルへ exec した構成で、人がそのシェルの画面を見て打つ入力は実行されうる。#4304 の受入基準案の「生の入力のキーが 1 バイトも」は、PR2b の受入で「dead pane・起動中（rc の読み込み中）」に絞る。
 6. 見立て（PR2b の実測で確かめる）: `respawn-pane` は新しい pty を作るので、古い CLI が読まずに終わった入力は新しい世代へ持ち越されない。
 
@@ -70,6 +71,128 @@ H4（#4303 の小さな直しを先に出す）は R4.4、H5（tmux の最低版
 4. #4303-B（dead・世代交代の回答経路）。
 
 #4303-A はこの順の外で、いつ入ってもよい。
+
+## 改訂 5（2026-11-13、Issue #4304）: 準備完了の積極的な証拠・全キー経路・世代の寿命・環境・PR の境界
+
+- 材料: 改訂 4（`b1dd9e04e`）の再確認 `workspace/orchestration/runs/2026-11-13/prereview-4304-rev4-reply.md`（codex-2、**承認保留**）。判定は、改訂 3 の 7 件のうち解消 5（③④⑤⑥⑦）・一部未対応 2（① P1、② 世代）。残る P1 が 1、P2 が 3、PR の分け方の依存の穴が 1。
+- 基準: develop `10232442d`（改訂 4 と同じ。2026-11-13 に `git fetch` し直して先頭が同じことを確かめた）。この節の file:line はこの版で、名前で探して確かめた。
+- 改訂 4 の次の箇所は、この節が置き換える: R4.2 の 2・3・5、R4.3 の「② 準備の証拠の世代」「③ cwd」の `-c` の文字列の形、「Auto-Yes と世代」の寿命、R4.5 の PR の順。ほかの改訂 4 の決定（④⑤⑥⑦、行番号、H2・H3）はそのまま。
+- **実装（PR2a・PR2b）は改訂 5 の承認の後**。R5.6 の要決定 3 点は、承認のときに PM が決める。
+
+### R5.1 守るべき条件（不変条件）
+
+実装・試験はすべて、次の 4 つを満たすかで判定する。
+
+| # | 条件 | 破れる例（反例） |
+|---|---|---|
+| **I1** | 新方式のペインへ CommandMate が出すキー（本文・回答・起動時の答え・停止の行）は、**そのペインの今の `pane_pid` が CLI へ exec した積極的な証拠**（R5.2）を、そのキーの直前の判定で持つときだけ出す | rc が `exec zsh -i` し、PS1 が `> ` か `❯ `。画面の型だけで準備完了と読むと、B 自身の本文がシェルで実行される（再確認 (3)-1） |
+| **I2** | 自動で出すキー（本文・回答・Auto-Yes・起動時の答え・停止の行）は、Enter 省略を含め**すべて入力ロックを通り**、respawn の `exclusive` の番と直列になる | Enter 省略の回答（`prompt-answer-sender.ts:1123-1129`）が番の外で、読んだ後・出す前に respawn が入る（(3)-2） |
+| **I3** | 画面を操作の根拠にするときは、**その画面の行が今の世代のものだと確かめられる行だけ**を使う。確かめられない間は旧画面を根拠にしない（準備待ち・trust の再読・Auto-Yes・送信直前の readiness の全部、準備完了の後も） | 履歴に残った旧世代のダイアログに、準備完了の後の Auto-Yes の tick が答える（(3)-3） |
+| **I4** | 新方式の起動は、rc の後の cwd と、CLI へ渡す環境（`CM_*`・ロールの代入・秘密の代入）を**同時に**保つ | `<代入> cd …; exec …` で代入が `cd` にだけ効き、CLI に届かない（(3)-4） |
+
+### R5.2 P1: 準備完了は「CLI へ exec した積極的な証拠」で決める（I1・I3）
+
+改訂 4 R4.2 の 3 の「対話シェルでは入力欄が出ない」は**成立しない**。画面の型は、シェルの PS1 で満たせる（`10232442d` で確かめた）:
+
+| CLI | 準備・入力欄の型 | シェルの PS1 で満たせるか |
+|---|---|---|
+| gemini | `GEMINI_PROMPT_PATTERN` `/^[>❯]\s*$\|…/m`（`detection/tools/gemini/patterns.ts:22`、読むのは `gemini.ts:222`） | **満たせる**（`> `・`❯ ` だけの行） |
+| claude | `CLAUDE_PROMPT_PATTERN` `/^[>❯](\s*$\|\s+\S)/m`（`detection/tools/claude/patterns.ts:166`） | **満たせる**（pure・starship の既定の `❯`） |
+| copilot | `COPILOT_PROMPT_PATTERN`（`detection/tools/copilot/patterns.ts:17`）、`COPILOT_COMPOSER_ROW_PATTERN`（`copilot.ts:148`） | **満たせる** |
+| command-code | `COMMAND_CODE_PROMPT_PATTERN` `/^❯(\s*$\|\s+\S)/m`（`detection/tools/command-code/patterns.ts:38`） | **満たせる** |
+| codex | `CODEX_PROMPT_PATTERN` `/^›\s*/m`（`detection/tools/codex/patterns.ts:165`） | PS1 を `›` にすれば満たせる |
+| opencode・antigravity・vibe-local | `Ask anything…`・`? for shortcuts`・`ctx:\d+%\s*[>❯]` | 型は固有だが、PS1 に同じ文字列を置けば満たせる（起こりにくい） |
+
+**決定: 画面の型は「CLI の画面か」の判定に使わない。** 新方式のペインの準備完了と、各キーの直前の判定は、次の 3 つが**すべて**真のときだけ真（積極的な証拠、改訂 1 の原則に戻る）:
+
+1. `readPaneState` が alive で、`pane_pid` が起動の記録の世代（R5.4 の印を出した `pane_pid`）と同じ。
+2. **`ps -o args= -p <pane_pid>` の argv に、起動の計画の実行ファイル（`executablePath` の basename、vibe-local は `vibe-local`）が語として現れる**。`-c` のシェルは `exec` で同じ pid のまま CLI に置き換わるので、exec が済んでいれば pane_pid の argv は CLI のもの（node の CLI は `node …/<cli>`）。rc が別のシェルへ exec した場合は `zsh -i`・`-zsh`・`fish` などで、CLI の名前が無い → 偽。ps の失敗・空・行なしも偽（④と同じ読み方）。
+3. その上で、R5.4 で今の世代と確かめられる行に、各 CLI の入力欄の型がある（今の型のまま。型は「どの画面か」の判定にだけ使う）。
+
+- 1・2 は `readPaneForeground` と同じ `display-message` 1 回＋`ps` 1 回で読む。キーの直前ごとに読み直す（exec の後に pid は変わらないが、CLI がさらに別のプロセスへ exec する場合を拾う）。
+- P1 の構成（rc が対話シェルへ exec）は 2 が偽のまま → 準備待ちは時間切れ → §5.3 のとおり新方式のペインを kill して not-sent。本文・回答・起動時の答えは 0。
+- 非 exec のラッパー（argv が `bash /path/wrapper`）: 2 はラッパーの名前が実行ファイルの basename と同じなら真（`bash /usr/local/bin/claude …`）。違う名前のラッパー（`executablePath` が別名の symlink の先を指すなど）は偽になり起動に失敗する。これは要決定 D1（R5.6）。
+- **対照の試験**（PR2b、私設 tmux）: 仮の HOME の rc の末尾に `exec zsh -i`（PS1=`'> '`）と `exec bash -i`（PS1=`'❯ '`）を置く。(a) 復旧の後の**新しい送信 B・C**と、回答・Auto-Yes・起動時の答えを通す → 本文・回答とも 0、kill・`not_sent`。(b) 陽性対照: 2 を外す（画面の型だけで判定する）と gemini・claude・copilot の準備待ちが真になり、B の本文がシェルに届く（`touch <f>` が作られる）。(c) 陰性対照: 本物の CLI の代わり（argv に名前のある `exec` の偽 CLI）では準備完了になり、送信が届く。
+
+### R5.3 全キー経路をロックに載せる（I2）と #4303-A
+
+改訂 4 R4.2 の 2「回答と Auto-Yes はすべて `sendAsInputWriter` を通る」は**誤り**だった。`10232442d` の全キー経路:
+
+| 経路 | 今 | 改訂 5 の決定 |
+|---|---|---|
+| 送信の本文・Enter | `withInstanceInputLock`（`submit-verified-sender.ts:691`、`exclusive`） | 今のまま。最初のキーの前に R5.2 の判定 |
+| 通常の回答: 矢印・複数選択 | `sendAsInputWriter`（`prompt-answer-sender.ts:712`、`shared`）。`:1105` | 今のまま＋最初のキーの前に R5.2 |
+| 通常の回答: 文字＋Enter | `sendAsInputWriter`（`:1133`） | 同上 |
+| **通常の回答: Enter 省略（数字 1 つ）** | **ロックの外**（`:1123-1129`、`stillAllowedNow` の後に `typeText`）。Auto-Yes もこの経路を通る | **`sendAsInputWriter`（`shared`）に入れる**。`shared` 同士は並ぶので回答どうしの順は今と変わらず、`exclusive` の respawn・本文とだけ直列になる。番の中で画面を読み直し（`answerTargetStillOnScreen`、`:657`）、R5.2 を通してから出す |
+| strict の回答 | `answerStrictlyAsInputWriter`（`strict-prompt-answer-io.ts:190`）→ `sendSessionAnswerKey`（`cli-session.ts:264`） | 今のまま＋キーごとに R5.2（キーの間に画面を読み直す今の流れに載せる） |
+| 起動時の答え（trust・hooks・update・nudge） | `answerUnderInstanceInputLock`（`instance-input-lock.ts:662`）: codex `:630,:671,:696,:728,:856`、copilot `:604`、gemini `:236`、antigravity `:399,:500`、claude `sendTrustDialogKey`（`claude-session.ts:429`）、`claude-auto-default-nudge.ts:140` | 今のまま（ロックの中）。**`stillApplies` の再読にも I3 を当てる**（今は `capturePane(sessionName, 50)` の生の画面。再確認 (2) の指摘） |
+| plan-review | `answerUnderInstanceInputLock`（`prompt-response/plan-review.ts:74`） | 今のまま＋R5.2 |
+| 停止の行（`/exit`・`/quit`） | command-code `:467-469`、copilot `:1205-1207`、gemini `:374`（claude の kill の `/exit` は #4304 本文の列挙。`10232442d` の `claude-session.ts` では打つ所を見つけられなかった、未確認） | 新方式のペインでは R5.2 が偽なら**打たずに** `kill-session` へ進む（シェルに `/quit` を実行させない） |
+| interrupt（Escape） | `base.ts:627` の `sendSpecialKey` | Escape 単独はシェルで実行されないので対象外（受け入れる） |
+| UI の生の入力 | `direct-input`（`cli-tools/direct-input.ts:26`）・`special-keys` ルート・WS の `terminal_input` | **要決定 D2**（R5.6） |
+
+- **対照の試験**（PR2a）: Enter 省略の回答を「画面を読んだ後・キーを出す前」で止めて B の respawn を差す → 旧世代へのキー 0、respawn は回答の後。陽性対照: 回答をロックの外に戻すと respawn が間に入る。陰性対照: 生きた今の世代への Enter 省略の回答は 1 回で届く（Auto-Yes を含む）。
+- **#4303-A との合わせ**: #4303-A（未着手。`10232442d` で `gh pr list --search 4303`・`git log --grep=4303` とも該当なし、2026-11-13 に再確認）が判定を `sendAsInputWriter` の中だけに置くと、**Enter 省略の経路（`:1123-1129`）を取りこぼす**。#4303-A の契約には「上の表の通常の回答 3 行と strict の全部で、最初のキーの前」と書く（Enter 省略の経路を名指しする）。判定は旧方式では PR1 の D（`readPaneForeground`）、新方式では R5.2（PR2b から）。改訂 4 R4.4 の「方式で分ける」はそのまま。#4303-A が先に入れば、PR2a は Enter 省略をロックに入れるときに #4303-A の判定点ごと番の中へ移す。
+
+### R5.4 世代の印・寿命・全読者（I3）
+
+改訂 4 の `history_size + cursor_y` は**採らない**（`history_size` は履歴の上限で頭打ちになり、通算の位置ではない。脱落を検出できない）。
+
+**決定: 世代の印は「`-c` の文字列が exec の直前に出す nonce の行」**。
+
+- `-c` の文字列（R5.5）の exec の直前で `printf '\n%s\n' 'commandmate:<nonce>'` を出す。nonce は起動ごとの乱数（16 進 16 文字）。nonce は `#{pane_start_command}` の中にもあるので、サーバーの再起動の後も tmux から読み直せる（メモリに持たない）。
+- 読み方（すべての読者で同じ補助関数）: capture した窓の中で**最後の nonce の行を探し、その行と上を捨てる**。
+  - 窓に nonce がある → nonce より下だけが今の世代。
+  - 窓に nonce が無く、R5.2 の 2 が真（exec が済んだ＝nonce は出た）→ nonce は窓より上にある（履歴の上限で流れたか、窓が狭い）。旧世代の行は nonce より上にしか無いので、**窓の全部が今の世代**。
+  - 窓に nonce が無く、R5.2 の 2 が偽（まだ rc の中、または P1 の構成）→ **世代を確かめられない。画面を根拠にしない**（I3）。
+  - CLI が代替画面（`#{alternate_on}`=1）にいる → capture は代替画面だけで、旧世代の行を含まない。R5.2 の 2 が真なら全部が今の世代。
+- 寿命: **世代の全体**（spawn から dead・absent まで）。改訂 4 の「準備完了の後は印が要らない（CLI が描き直す）」は根拠が無いので取り消す。準備完了の後も、すべての読者は上の読み方を通る。
+- 全読者（`10232442d`）: 準備待ち（claude `waitForPrompt` `claude-session.ts:832`、codex `:382`、gemini `:207`、copilot `:687`・`waitForPrompt` `:767`、antigravity `:362`、command-code `:325`、opencode `:600`、opencode V2 `:331`、**vibe-local `waitForPrompt` `vibe-local.ts:249`**）、送信直前の readiness（**vibe-local `:212`**、opencode `:940`）、起動時の答えの `stillApplies`（R5.3 の表）、Auto-Yes の tick（`capturePollerFrame` `auto-yes-poller-capture.ts:67`、`captureAndCleanOutput` `:99`）、回答の再読（`answerTargetStillOnScreen` `prompt-answer-sender.ts:657`）、strict の画面の読み、応答の poll の最後の画面（⑤）。読者の一覧は PR2b の契約で `capturePane(`／`captureSessionOutput` の呼び手を `git grep` して表にし、漏れを無くす（R5.7 の試験 6）。
+- 旧方式のペインは nonce を持たない（`pane_start_command` が新方式の形でない）。読み方は今のまま（§8.4）。
+- **対照の試験**（PR2b）: (1) 履歴の上限: `history-limit` を小さくし、nonce が流れた後の窓で、今の世代の入力欄を読める／流れる前の旧世代のダイアログは読まない。(2) 再描画: 準備完了の後、旧世代のダイアログを履歴に残したまま CLI が画面を描き直す → Auto-Yes の tick の回答 0。(3) 準備完了の後の tick: 同上を準備完了から数 tick 後に差す。(4) vibe-local: `waitForPrompt` と送信直前の readiness が旧世代の `ctx:NN% >` を読まない。陽性対照: 補助関数を外すと (2)〜(4) が答える・準備完了と読む。
+
+### R5.5 cwd と環境を同時に保つ（I4）
+
+`-c` の文字列を次の順にする（改訂 4 の `<代入> cd … ; exec …` を置き換える。§2.2 の「代入は exec の直前」の約束に戻す）:
+
+```
+[unset CLAUDECODE; ]cd -- <cwd> || exit 97; printf '\n%s\n' 'commandmate:<nonce>'; <代入> exec <cli> <引数>
+```
+
+- 代入（`CM_*`・ロールの代入・`OPENCODE_CONFIG_CONTENT="$(cat '<file>')"` の秘密、`agent-roles/adapters.ts:246`）は **`exec` の直前**に置き、CLI の環境に入る（§2.2、表 3 の n）。`cd` の後なので、代入の中の相対パスは cwd から解決される（ロールの相対設定の対応が保たれる）。
+- 適用先: 新規の起動（new-window）・復旧（respawn）・旧方式の置換（`respawn-pane -k`）・codex の #2068 の起動し直し・opencode V1/V2 の再利用の作り直しの**全部**が、同じ補助関数で文字列を作る（予備の経路だけ別の形にしない）。
+- **対照の試験**（PR2b、私設 tmux）: 親の環境（tmux の大域と CommandMate の `process.env`）に対象の変数が無い状態で、偽 CLI が (a) `pwd` が `<cwd>`、(b) `CM_*` とロールの代入の変数を受け取る、の両方を記録する。rc が `cd /` しても (a) が保たれる。(c) cd の失敗（存在しない cwd）では偽 CLI は起動せず、ペインは dead（状態 97）、§5.3 の早い失敗が「cwd に入れない」で返る。陽性対照: 改訂 4 の形（代入を cd の前）では (b) が落ちる。
+
+### R5.6 要決定（PM が承認のときに決める）
+
+| # | 論点 | 選択肢 | 推奨 |
+|---|---|---|---|
+| **D1** | R5.2 の 2（argv に CLI の名前）を満たさない非 exec ラッパー | (a) 起動の失敗にする（理由を出す。利用者は exec するラッパーに直す）／(b) argv の照合を「シェルの名前でない」に緩める（rc が `exec tmux`・`exec screen` する構成を通す）／(c) 設定で照合する名前を足せる | **(a)**。安全の条件（I1）を緩めない。既知のラッパー（nvm・asdf・volta は exec する見立て）は PR2b の UAT で確かめる |
+| **D2** | UI の生の入力（`direct-input`・`special-keys`・WS の `terminal_input`） | (a) ロックの外のまま。受入基準を「dead pane・起動中」に絞る（改訂 4 R4.2 の 5、PM 未確定）／(b) 新方式のペインでは R5.2 の 1・2 を入力のまとまりごとに確かめ、偽なら捨てて画面に理由を出す（`pane_pid` ごとに結果を覚えて ps を減らす）／(c) `shared` の番に載せる | **(b)**。#4304 の受入基準案（生の入力も 1 バイトも届かない）を保てる。旧方式のペインは今のまま（人が CLI の終わった後のシェルで打つのは今の使い方） |
+| **D3** | PR2a で新方式の復旧（dead → コマンド付きの respawn）を有効にするか（R5.7） | (a) PR2a では有効にしない（dead は未送信で返すだけ。respawn は PR2b で ②③⑦・R5.2〜R5.5・早い失敗と一緒に）／(b) PR2a で有効にし、R5.2〜R5.5 と⑦・§5.3 を PR2a へ移す | **(a)**。PR2a の時点の通常の起動は旧方式なので dead pane は生まれず、有効にしなくても利用者の振る舞いは変わらない |
+
+### R5.7 PR の境界と「直す前に赤」の試験（改訂 4 R4.5 を置き換える。D3 は推奨 (a) で書く）
+
+| 順 | PR | 中身 | 新方式の起動 |
+|---|---|---|---|
+| 1 | #4303-A（独立、いつでも） | 旧方式の回答経路の D。R5.3 の表の通常の回答 3 行（Enter 省略を含む）と strict | 生まない |
+| 2 | **PR2a** 読み手・旧方式の復旧の守り・通知 | `readPaneState`・§3 の読み手、④（旧方式の置換の ps の不明）、⑤、⑥、`relaunched`、**Enter 省略の回答をロックへ（R5.3、I2）**。dead は読めるが**復旧はしない**（未送信で返す、D3 (a)） | 生まない（dead はテストで作るものだけ） |
+| 3 | **PR2b** 起動の形 | spawn（new-window／respawn＋remain-on-exit）、R4.2 の番、R5.2（積極的な証拠）、R5.4（nonce と全読者）、R5.5（cwd と環境）、⑦、§5.3 の早い失敗、dead → respawn の復旧、停止の行（R5.3）、H3・H2、D2 | **ここで初めて生む** |
+| 4 | #4303-B | 新方式の回答経路の dead・世代交代 | — |
+
+**直す前に赤（各防御を個別に外す）**:
+
+- PR2a ④: 実際の旧方式の relaunch の経路（`relaunchIfToolExited` `base.ts:780` → `startSession`）で、ps の失敗・空・行なしの 3 つで **起動 0・起動行の入力 0・kill 0**（改訂 4 の「respawn 0 回」だけでは旧版も通る）。陰性対照: 有効な ps（シェル以外のプロセス無し）では今どおり復旧する。
+- PR2a ⑤⑥・ロックの順序: 改訂 4 R4.2・R4.3 の試験のまま。⑤は「世代が変わらなければ保存 1 回」も陰性対照に置く。
+- PR2a I2: R5.3 の Enter 省略の試験。
+- PR2b（私設 tmux。`-L` のソケットと `process.env.TMUX` を私設に向けたことを assert）: 防御は 4 つ（**ロックの番**・**R5.2 の argv の証拠**・**R5.4 の世代の読み方**・**R5.5 の順**）。試験は R5.2・R5.3・R5.4・R5.5 の各対照に加え、**防御を 1 つずつ外した 4 通り**でそれぞれ赤になることを確かめる（同時に外すだけでは各防御を検証できない）:
+  1. ロックだけ外す: A を本文の途中で止めて B の respawn を差す → 改訂 4 R4.2 の試験が赤。
+  2. argv の証拠だけ外す: rc の `exec zsh -i`（PS1=`> `）で B の新規送信が届く → 赤。
+  3. 世代の読み方だけ外す: 旧世代のダイアログに準備完了の後の Auto-Yes が答える → 赤。
+  4. 順だけ戻す（代入を cd の前）: 偽 CLI に代入の変数が届かない → 赤。
+  5. 正常系: 4 つとも有効で、本物の代わりの偽 CLI に本文・回答が 1 回ずつ届く。
+  6. 読者の網羅: `capturePane(`・`captureSessionOutput(` の新方式の呼び手が、すべて R5.4 の補助関数を通る（静的なガード、`tests/unit/guards` に置く）。
+- 文書の試験（`tests/unit/docs`）は節と項目の存在だけを見る。安全の証明ではない（再確認 (4) の指摘のとおり）。上の赤は実装の PR で初めて確かめる（**未確認**）。
 
 ## 0. 改訂 3 の要約と PR1 との関係
 
