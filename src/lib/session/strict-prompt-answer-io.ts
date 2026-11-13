@@ -26,10 +26,14 @@ import {
   captureBoundFrame,
   checkPaneGeneration,
   readSessionPaneCommand,
-  readSessionPaneGeneration,
   sendSessionAnswerKey,
-  type PaneGeneration,
 } from '@/lib/session/cli-session';
+import {
+  applyWhilePaneIsCurrent,
+  paneAnswerContextOf,
+  type PaneAnswerContext,
+} from '@/lib/session/pane-answer-context';
+import { StrictKeyNotSentError } from '@/lib/prompt-observation/strict-key-delivery';
 import { buildCurrentOutput } from '@/lib/session/current-output-builder';
 import { observeSession } from '@/lib/prompt-observation/session';
 import type { StrictRespondDeps, StrictScreenRead } from '@/lib/prompt-observation/strict-respond';
@@ -79,23 +83,22 @@ export function describeError(error: unknown): string {
 }
 
 /**
- * A strict key refused before it was sent (Issue #4304 F1-a, review P2-2 of
- * e662dba): the session no longer shows, alive, the pane the answer's reads
- * were of. Nothing of THIS key reached tmux — `keysSent: false` says so to
- * `strict-respond`, which then does not count it as sent: no key at all is a
- * refusal (code 40, `capture_failed`, no `prompt_answered_human`, the launch's
- * trust debt kept), keys before it end `screen_moved_mid_send` with their count
- * as it was. A transport failure (`sendSessionAnswerKey` throwing) stays what it
- * is: a key that may have gone.
+ * The session I/O of a strict answer: what `respondStrictly` reads and sends
+ * with, and the pane the answer's first read was of.
  */
-export class StrictKeyNotSentError extends Error {
-  readonly keysSent = false as const;
-
-  constructor(sessionName: string, readonly generationCheck: string) {
-    super(`The pane of ${sessionName} the strict answer read was not confirmed before a key (${generationCheck}, Issue #4304)`);
-    this.name = 'StrictKeyNotSentError';
-  }
+export interface StrictRespondSessionDeps extends StrictRespondDeps {
+  /**
+   * The pane the answer's first read was of (Issue #4304 F1-a), as the context
+   * {@link settleStrictAnswer} acts on the current state with; `never-read`
+   * when no read bound one (then no key was sent either).
+   */
+  answerPane(): StrictAnswerPane;
 }
+
+/** The pane a strict answer was decided for (Issue #4304 F1-a). */
+export type StrictAnswerPane =
+  | { readonly kind: 'pane'; readonly context: PaneAnswerContext }
+  | { readonly kind: 'never-read' };
 
 /**
  * @param ticket - The session's input ticket the answer runs under
@@ -106,10 +109,11 @@ export function createStrictRespondDeps(
   db: Database.Database,
   target: StrictAnswerTarget,
   ticket?: InstanceInputTicket
-): StrictRespondDeps {
+): StrictRespondSessionDeps {
   const { worktreeId, cliToolId, instanceId, sessionName } = target;
-  // Issue #4304 F1-a: the pane generation this answer's first read was of.
-  let generation: PaneGeneration | undefined;
+  // Issue #4304 F1-a: the pane this answer's first read was of — the frame it
+  // was decided on fixes it, and every later read and key is of it only.
+  let context: PaneAnswerContext | null = null;
   return {
     async read(): Promise<StrictScreenRead> {
       let payload;
@@ -118,12 +122,12 @@ export function createStrictRespondDeps(
         // read), and the payload below is built from this very frame.
         const bound = await captureBoundFrame(
           { worktreeId, cliToolId, instanceId },
-          { lines: STATUS_CAPTURE_LINES, ...(generation !== undefined ? { expected: generation } : {}) },
+          { lines: STATUS_CAPTURE_LINES, ...(context !== null ? { expected: context.generation } : {}) },
         );
         if (bound.kind === 'unknown') {
           return { ok: false, stage: 'capture', error: `pane generation unconfirmed: ${bound.reason} (Issue #4304)` };
         }
-        generation ??= bound.generation;
+        context ??= paneAnswerContextOf(bound, sessionName);
         payload = await buildCurrentOutput(db, worktreeId, cliToolId, instanceId, undefined, { boundFrame: bound });
       } catch (error) {
         return { ok: false, stage: 'capture', error: describeError(error) };
@@ -139,25 +143,25 @@ export function createStrictRespondDeps(
         return { ok: false, stage: 'observation', error: describeError(error) };
       }
     },
+    // Issue #4304 F1-a (§3.3-1): every refusal before the key is the same
+    // `StrictKeyNotSentError` — the ticket's before and after the pane look,
+    // the pane look itself, and a key asked for before any read fixed the pane
+    // (there is no pane to send it to: it is refused, not bound to the pane as
+    // it is now). Only `sendSessionAnswerKey` throwing is a key that may have gone.
     sendKey: async key => {
-      if (ticket !== undefined && !ticket.isCurrent()) {
-        throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
+      if (ticket !== undefined && !ticket.isCurrent()) throw new StrictKeyNotSentError(sessionName, 'input-ticket-lost');
+      if (context === null) throw new StrictKeyNotSentError(sessionName, 'no-read');
+      let check;
+      try {
+        check = await checkPaneGeneration(sessionName, context.generation);
+      } catch {
+        check = 'generation-unreadable' as const;
       }
-      // Issue #4304 F1-a: right before the key, the session must still show
-      // the pane the answer's reads were of. (`strict-respond` always reads
-      // before its first key; a key asked for with no read yet fixes the
-      // generation from the pane as it is now, and is refused if it cannot.)
-      if (generation === undefined) {
-        const now = await readSessionPaneGeneration(sessionName);
-        if (now !== null) generation = now.generation;
-      }
-      const check = generation === undefined ? 'generation-unreadable' : await checkPaneGeneration(sessionName, generation);
       if (check !== 'same') throw new StrictKeyNotSentError(sessionName, check);
-      if (ticket !== undefined && !ticket.isCurrent()) {
-        throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
-      }
+      if (ticket !== undefined && !ticket.isCurrent()) throw new StrictKeyNotSentError(sessionName, 'input-ticket-lost');
       await sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId);
     },
+    answerPane: () => (context === null ? { kind: 'never-read' } : { kind: 'pane', context }),
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     now: () => Date.now(),
     autoYesActive: () => getAutoYesState(worktreeId, cliToolId, instanceId)?.enabled === true,
@@ -225,6 +229,63 @@ export function recordStrictAnswer(
   } catch (error) {
     logger.warn('strict-prompt-answer-record-failed', { error: describeError(error) });
   }
+}
+
+/**
+ * What a strict answer leaves once it is done (Issue #4304 F1-a, §3.3-3 / -5).
+ *
+ * A refusal, a replayed operation and an answer with no key sent leave the
+ * server.log line only ({@link recordStrictAnswer}), as before. An answer whose
+ * keys reached the pane its reads were of acts on the instance's current state
+ * — the task's `prompt_answered_human` row, the response poll restarted, the
+ * terminal pushed (`resume`) — only through {@link applyWhilePaneIsCurrent}:
+ * after every await, the session must still show that pane (alive, or dead by
+ * the answer: agy's `No, exit`). A pane replaced meanwhile (the session epoch
+ * unchanged — an outside `new-window`) gets none of it: the answer's history
+ * is the log line, written with `paneMoved`.
+ *
+ * @param pane - {@link StrictRespondSessionDeps.answerPane}: required, so no
+ *   caller can settle an answer without the pane it was decided for
+ * @param resume - The route's restart of the response poll and the terminal
+ *   push, run synchronously inside the entry
+ */
+export async function settleStrictAnswer(
+  db: Database.Database,
+  target: StrictAnswerTarget,
+  result: StrictRespondResult,
+  answeredBy: string,
+  pane: StrictAnswerPane,
+  resume: () => undefined,
+): Promise<void> {
+  if (result.code === 40 || result.replayed || result.keysSent === 0) {
+    recordStrictAnswer(db, target, result, answeredBy);
+    return;
+  }
+  // Keys went out, so a read fixed the pane: `never-read` cannot have sent any.
+  // Taken as a pane that moved — the history only — should it ever happen.
+  const verdict =
+    pane.kind === 'pane'
+      ? await applyWhilePaneIsCurrent(pane.context, { allowDead: true, owned: () => true }, () => {
+          recordStrictAnswer(db, target, result, answeredBy);
+          resume();
+          return undefined;
+        })
+      : 'pane-moved';
+  if (verdict === 'applied') return;
+  logger.info('strict-prompt-answered', {
+    worktreeId: target.worktreeId,
+    cliToolId: target.cliToolId,
+    instanceId: target.instanceId ?? target.cliToolId,
+    answeredBy,
+    operationId: result.operationId,
+    code: result.code,
+    delivery: result.delivery,
+    reason: result.reason,
+    keysSent: result.keysSent,
+    outcome: result.outcome,
+    replayed: result.replayed,
+    paneMoved: true,
+  });
 }
 
 /** Why the session's input lock did not admit a strict answer (Issue #3952). */

@@ -134,6 +134,8 @@ describe('[#3952] strict respond as a writer of the session input', () => {
     let secondKey: unknown = null;
     const outcome = answerStrictlyAsInputWriter(SESSION, async (ticket) => {
       const deps = createStrictRespondDeps(db, TARGET, ticket);
+      // Issue #4304 F1-a: a key goes only to the pane a read fixed.
+      await deps.read();
       await deps.sendKey('Down');
       afterFirstKey();
       await replaced;
@@ -153,6 +155,8 @@ describe('[#3952] strict respond as a writer of the session input', () => {
 
   it('negative: deps made without a ticket send as before', async () => {
     const deps = createStrictRespondDeps({} as Database.Database, TARGET);
+    // Issue #4304 F1-a: a key goes only to the pane a read fixed.
+    await deps.read();
     await deps.sendKey('Enter');
     expect(sendSessionAnswerKey).toHaveBeenCalledTimes(1);
   });

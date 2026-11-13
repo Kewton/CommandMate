@@ -255,6 +255,10 @@ export type StrictRespondReason =
   | 'token_mismatch'
   | 'token_consumed'
   | 'token_consumed_store_full'
+  /** Issue #4304 F1-a: the session's input was taken over (a relaunch) before the first key. */
+  | 'input_lock_lost'
+  /** Issue #4304 F1-a: tmux refused the first key before it started typing it. */
+  | 'send_not_started'
   // 40, decided by the CLI: the server has no strict endpoint / refused the session (409)
   | 'strict_endpoint_missing'
   | 'session_conflict'

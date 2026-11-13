@@ -36,7 +36,8 @@ import {
   answerStrictlyAsInputWriter,
   createStrictRespondDeps,
   describeError,
-  recordStrictAnswer,
+  settleStrictAnswer,
+  type StrictRespondSessionDeps,
 } from '@/lib/session/strict-prompt-answer-io';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
@@ -162,8 +163,12 @@ export async function POST(
     // Issue #3952: as the session's input writer, so a send cannot type between
     // the answer's read and its keys. Not admitted: a 409 with nothing sent,
     // which the CLI reads as exit 40 (`session_conflict`).
-    const result = await answerStrictlyAsInputWriter(sessionName, ticket =>
-      respondStrictly(
+    // Issue #4304 F1-a: the deps are kept, so the pane the answer's first read
+    // was of reaches the settle below.
+    let deps: StrictRespondSessionDeps | null = null;
+    const result = await answerStrictlyAsInputWriter(sessionName, ticket => {
+      deps = createStrictRespondDeps(db, target, ticket);
+      return respondStrictly(
         {
           worktreeId: id,
           sessionName,
@@ -173,15 +178,26 @@ export async function POST(
           expectTarget: request.expectTarget,
           operationId: request.operationId,
         },
-        createStrictRespondDeps(db, target, ticket)
-      )
-    );
+        deps
+      );
+    });
     if ('refused' in result) return refuse(409, result.refused, result.message);
-    recordStrictAnswer(db, target, result, request.answeredBy);
-    if (result.keysSent > 0 && !result.replayed) {
-      startPolling(id, cliToolId, instanceId);
-      void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
-    }
+    // Issue #4304 F1-a: the task row, the poll restart and the push act on the
+    // instance as it is NOW — only while it still shows the pane the keys went
+    // to (`settleStrictAnswer`). A replayed operation sends nothing and acts on nothing.
+    const answered: StrictRespondSessionDeps | null = deps;
+    await settleStrictAnswer(
+      db,
+      target,
+      result,
+      request.answeredBy,
+      answered === null ? { kind: 'never-read' } : (answered as StrictRespondSessionDeps).answerPane(),
+      () => {
+        startPolling(id, cliToolId, instanceId);
+        void broadcastTerminalSnapshotAfterInteraction(id, cliToolId, instanceId);
+        return undefined;
+      }
+    );
     return NextResponse.json(result, { status: 200 });
   } catch (error: unknown) {
     logger.error('strict-prompt-response-failed', { error: describeError(error) });

@@ -69,6 +69,7 @@ import { isDecisionKind, isExitingStrictAnswer, isStrictRespondKind, type Prompt
 import { observationBindingOf } from './observe';
 import { consumeObservationToken, type ObservationTokenBinding } from './token';
 import { isScreenOpenAtBottom, resolveStrictChoice, sameApprovalTarget, strictAnswerKeys } from './strict-choice';
+import { deliverStrictKey, type StrictKeyRefusal } from './strict-key-delivery';
 import type {
   PromptObservation,
   StrictRespondOutcome,
@@ -184,6 +185,8 @@ const MESSAGES: Record<StrictRespondReason, string> = {
   token_mismatch: 'The screen is not the one the observation token was issued on (moved, reopened, or relaunched).',
   token_consumed: 'This appearance of the screen was already answered with a token.',
   token_consumed_store_full: 'Too many screens were answered recently to record one more.',
+  input_lock_lost: "The session's input was taken over (relaunched or replaced) before the first key; nothing was sent.",
+  send_not_started: 'tmux refused the first key before typing it; nothing was sent.',
   send_failed: 'A key could not be delivered; some may have reached the pane.',
   screen_moved_mid_send: 'The screen changed between two keys; the rest were not sent.',
   highlight_not_reached: 'The highlight did not reach the option; the Enter was not sent.',
@@ -410,12 +413,21 @@ async function checkBeforeSending(
 }
 
 /**
- * Whether `sendKey` refused a key before sending it (Issue #4304 F1-a): the
- * error says `keysSent: false` (`StrictKeyNotSentError`). Read by shape, so
- * this module does not import the session I/O that implements `sendKey`.
+ * The result of a key refused before it was sent (Issue #4304 F1-a, §3.3-1):
+ * every refusal is the same delivery — nothing of this key is on the pane — so
+ * none of them is counted. With no key sent the answer is a refusal (code 40,
+ * nothing recorded, the launch's trust debt kept); after some, the rest were
+ * not sent and the count stays what it was. The reason says which refusal.
  */
-function isKeyNotSent(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { keysSent?: unknown }).keysSent === false;
+function refusedKeyResult(facts: Facts, refusal: StrictKeyRefusal): StrictRespondResult {
+  if (facts.keysSent === 0) {
+    const reason: StrictRespondReason =
+      refusal === 'input-ticket-lost' ? 'input_lock_lost'
+        : refusal === 'transport-not-started' ? 'send_not_started'
+          : 'capture_failed';
+    return resultOf(facts, 40, reason);
+  }
+  return resultOf(facts, 41, refusal === 'transport-not-started' ? 'send_failed' : 'screen_moved_mid_send');
 }
 
 /** One strict answer, under the session's lock. */
@@ -452,20 +464,15 @@ async function answerStrictly(
       }
       // Where the highlight is, is not known again until a read shows it.
       facts.highlight = null;
-      try {
-        await deps.sendKey(keys[i]);
-      } catch (error: unknown) {
-        // Issue #4304 F1-a: refused before the key (the pane the reads were of
-        // is no longer the session's) — nothing of it reached tmux. With no
-        // key sent it is a refusal; after some, the rest were not sent.
-        if (isKeyNotSent(error)) {
-          return facts.keysSent === 0 ? resultOf(facts, 40, 'capture_failed') : resultOf(facts, 41, 'screen_moved_mid_send');
-        }
-        // tmux may have delivered it: counted, so this is never "not sent".
-        facts.keysSent++;
-        return resultOf(facts, 41, 'send_failed');
-      }
+      // Issue #4304 F1-a: every way the key can end, as one delivery.
+      const key = keys[i];
+      const delivery = await deliverStrictKey(() => deps.sendKey(key));
+      // Refused before the key — the pane, the input ticket, no read, tmux not
+      // started: nothing of it reached tmux, and it is not counted.
+      if (delivery.kind === 'not-sent') return refusedKeyResult(facts, delivery.refusal);
+      // tmux may have delivered it: counted, so this is never "not sent".
       facts.keysSent++;
+      if (delivery.kind === 'indeterminate') return resultOf(facts, 41, 'send_failed');
     }
   } finally {
     // Once any key reached the trust screen the launch owes it nothing: its
