@@ -161,6 +161,7 @@ const CASES: Record<string, EntryCase> = {
       fireEvent.click(await screen.findByTestId('agent-updates-update-codex'));
       fireEvent.click(await screen.findByTestId('agent-updates-restart-codex-2'));
     },
+    startsOnlyWhileCurrent: true,
   },
   'role row kill (InstanceRolesSection)': {
     matches: (url) => url.startsWith(`/api/worktrees/${A}/kill-session`),
@@ -170,6 +171,7 @@ const CASES: Record<string, EntryCase> = {
       fireEvent.click(screen.getByTestId('instance-roles-toggle'));
       fireEvent.click(await screen.findByTestId('instance-role-restart-claude'));
     },
+    startsOnlyWhileCurrent: true,
   },
 };
 

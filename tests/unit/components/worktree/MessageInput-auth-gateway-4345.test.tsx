@@ -70,12 +70,14 @@ const CASES: Record<string, EntryCase> = {
     ok: () => json(200, NOT_SHOWN),
     ui: composer,
     trigger: send,
+    startsOnlyWhileCurrent: true,
   },
   'awaited send (MessageInput → worktreeApi.sendMessage)': {
     matches: (url, method) => url === `/api/worktrees/${A}/send` && method === 'POST',
     ok: () => json(201, { id: 'm1', role: 'user', content: 'hello', timestamp: '2026-11-14T00:00:00.000Z' }),
     ui: composer,
     trigger: send,
+    startsOnlyWhileCurrent: true,
   },
   'image upload (MessageInput → worktreeApi.uploadImageFile)': {
     matches: (url) => url.startsWith(`/api/worktrees/${A}/upload/`),

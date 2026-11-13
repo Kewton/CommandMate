@@ -9,7 +9,7 @@ import React, { memo, useState, useCallback, FormEvent, useRef, useEffect, useLa
 import { useTranslations } from 'next-intl';
 import { worktreeApi, handleApiError, isBriefBoundaryChanged, type SendBriefChoice } from '@/lib/api-client';
 import { fetchStartPreview, isCommandBody, START_PREVIEW_TIMEOUT_MS } from '@/lib/handoff/screen-client';
-import { beginHandoffPageObserver } from '@/lib/handoff/page-owner';
+import { beginHandoffPageObserver, beginHandoffPageOperation } from '@/lib/handoff/page-owner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import type { StartPreviewResponse } from '@/lib/handoff/preview';
 import { SessionStartBriefDialog, type StartBriefChoice } from '@/components/mem/SessionStartBriefDialog';
@@ -541,6 +541,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setPlanReviewStopped(true);
       return;
     }
+    // Issue #4345 1c 再指示 1: a send of a worktree page starts only while the page's registration
+    // (fixed now) may start — not once a 401 was taken (the registry's expiry). Nothing is sent and
+    // the draft stays; checked again after the preview's await below. Outside a page: as before.
+    const operation = beginHandoffPageOperation(handoffOwner);
+    if (!operation.mayStart()) return;
 
     const trimmed = message.trim();
     const effectiveCliTool: CLIToolType = cliToolId || 'claude';
@@ -581,7 +586,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         !read.current ||
         attempt !== sendAttemptRef.current ||
         messageRef.current.trim() !== trimmed ||
-        attachedImagePathRef.current !== (attachedImage?.path ?? null)
+        attachedImagePathRef.current !== (attachedImage?.path ?? null) ||
+        // Issue #4345 1c 再指示 1: another entry's 401 taken while the preview was read (its own 200
+        // recovers nothing): nothing is sent, the draft stays.
+        !operation.mayStart()
       ) {
         return;
       }
@@ -660,6 +668,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const sendWithBriefChoice = useCallback(async (choice: StartBriefChoice) => {
     const asked = briefAsk;
     if (!asked || briefSending) return;
+    // Issue #4345 1c 再指示 1: see the plain send (nothing is sent, the draft and the question stay).
+    if (!beginHandoffPageOperation(handoffOwner).mayStart()) return;
     const trimmed = message.trim();
     if (!trimmed && !attachedImage) {
       setBriefAsk(null);

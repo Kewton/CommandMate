@@ -50,6 +50,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
 import { MAX_DIRECT_INPUT_EVENTS, type DirectInputEvent } from '@/types/direct-input';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 /**
  * The single message a failure produces, as an i18n key under the `worktree`
@@ -100,6 +102,8 @@ export function useDirectInput(
   instanceId?: string,
   onSent?: () => void,
 ): UseDirectInputResult {
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
 
@@ -159,7 +163,8 @@ export function useDirectInput(
         ? { cliToolId, events, instanceId }
         : { cliToolId, events };
 
-      fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/direct-input`, {
+      // Issue #4345 1c 再指示 1: the 401 reaches the gateway before the status is folded.
+      fetchForHandoffPage(handoffOwner, `/api/worktrees/${encodeURIComponent(worktreeId)}/direct-input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -204,7 +209,7 @@ export function useDirectInput(
     };
 
     run();
-  }, [worktreeId, cliToolId, instanceId, settleTicket]);
+  }, [worktreeId, cliToolId, instanceId, settleTicket, handoffOwner]);
 
   const send = useCallback(
     (events: readonly DirectInputEvent[]) => {

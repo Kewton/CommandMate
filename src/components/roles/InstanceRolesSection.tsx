@@ -14,11 +14,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { beginHandoffPageOperation, fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { getCliToolDisplayName } from '@/lib/cli-tools/types';
-import { readRunningInstances, roleApi } from '@/lib/api-client-agent-roles';
+import { roleApi } from '@/lib/api-client-agent-roles';
 import {
   clearRosterSnapshot,
   useInstanceRoleSettings,
@@ -128,7 +129,8 @@ function InstanceRoleRow({
       clearTimeout(timer);
     }
     if (saidNothing) {
-      const running = await readRunningInstances(worktreeId);
+      // Issue #4345 1c 再指示 1: the running read is the page's too (its 401 reaches the gateway).
+      const running = await readRunningInstancesForPage(handoffOwner, worktreeId);
       if (running === null) {
         // Issue #4145: a read that failed cannot say either way, and the screen says that.
         setError(t('agentRoles.instances.restartUnknown'));
@@ -147,15 +149,20 @@ function InstanceRoleRow({
   const handleRestart = useCallback(async () => {
     if (restartingRef.current) return;
     restartingRef.current = true;
+    // Issue #4345 1c 再指示 1: the page's registration when pressed. A 401 taken while the person
+    // confirms (or the page made again) starts no kill: checked at the press and after the answer.
+    const operation = beginHandoffPageOperation(handoffOwner);
     try {
+      if (!operation.mayStart()) return;
       if (!(await confirm({ description: t('agentRoles.instances.restartConfirm', { alias: entry.alias }) }))) return;
+      if (!operation.mayStart()) return;
       setRestarting(true);
       await endSession();
     } finally {
       restartingRef.current = false;
       setRestarting(false);
     }
-  }, [confirm, endSession, entry.alias, t]);
+  }, [confirm, endSession, entry.alias, t, handoffOwner]);
 
   const view = isRunning === undefined ? null : roleApplicationView(entry, isRunning, t);
   const inherited = entry.stored.state === 'inherit';
@@ -252,6 +259,8 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
   const [readToken, setReadToken] = useState(0);
   const [catalogToken, setCatalogToken] = useState(0);
   const [rolesFailed, setRolesFailed] = useState(false);
+  // Issue #4345 1c 再指示 1: the running read below is the page's when drawn in its agents pane.
+  const handoffOwner = useHandoffPageOwner();
 
   const onCatalogChanged = useCallback(() => setCatalogToken((token) => token + 1), []);
   useRoleCatalogChanged(onCatalogChanged);
@@ -273,13 +282,13 @@ function OpenInstanceRoles({ worktreeId, rosterKey }: { worktreeId: string; rost
   useEffect(() => {
     if (!settings) return;
     let cancelled = false;
-    void readRunningInstances(worktreeId).then((next) => {
+    void readRunningInstancesForPage(handoffOwner, worktreeId).then((next) => {
       if (!cancelled) setRunning(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [worktreeId, rosterKey, readToken, settings]);
+  }, [worktreeId, rosterKey, readToken, settings, handoffOwner]);
 
   const onChanged = useCallback(() => {
     setReadToken((token) => token + 1);

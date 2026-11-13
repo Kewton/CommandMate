@@ -18,7 +18,7 @@
  * Based on Issue #13 UX Improvement design specification.
  */
 
-import React, { useEffect, useCallback, useMemo, useState, useRef, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useCallback, useMemo, useState, useRef, useSyncExternalStore } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AGENT_MODE_UNKNOWN } from '@/types/cli-tool-contracts';
 import { useWorktreeUIState } from '@/hooks/useWorktreeUIState';
@@ -84,7 +84,7 @@ import {
 } from '@/lib/cli-tools/types';
 import { ApiError, detectAuthRedirect, detectNonJsonBody, fetchApiResponse } from '@/lib/api-client';
 import { beginHandoffPageResponseReport, fetchForHandoffPage } from '@/lib/handoff/page-owner';
-import { readRunningInstances } from '@/lib/api-client-agent-roles';
+import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { API_POLL_TIMEOUT_MS } from '@/config/api-timeout-config';
 import type { SessionKillTarget } from '@/types/terminal-split-pane';
 import {
@@ -396,6 +396,9 @@ async function killSessionThroughGateway(
   }
 }
 
+/** Issue #4345 1c 再指示 1: the layout phase in the browser; `useEffect` where there is no DOM (SSR). */
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
 export function useWorktreeDetailController({ worktreeId }: { worktreeId: string }) {
   const isMobile = useIsMobile();
   // Issue #874: ref mirror so the message/output fetchers (which read state via
@@ -492,7 +495,11 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
    */
   const [handoffRegistration, setHandoffRegistration] = useState<HandoffPageRegistration | null>(null);
   const handoffRegistrationRef = useRef<HandoffPageRegistration | null>(null);
-  useEffect(() => {
+  // Issue #4345 1c 再指示 1: registered in the layout phase, so before any passive effect of what the
+  // page draws — on a cache hit the split's and the phone's first polls leave in the same commit, and
+  // a request that left before the registration would be owned by none (its 401 never taken).
+  // Children's layout effects run first, but none of them sends a request.
+  useIsomorphicLayoutEffect(() => {
     const registration = registerHandoffPage(worktreeId);
     handoffRegistrationRef.current = registration;
     setHandoffRegistration(registration);
@@ -2015,7 +2022,8 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
         // Issue #4160: this answer says nothing about the session, so what is running
         // now decides. Another worktree is on screen after a switch and this one's
         // dialog is gone: not worth a read, and the toast names the session.
-        const running = isStillOnScreen() ? await readRunningInstances(worktreeId) : null;
+        // Issue #4345 1c 再指示 1: the page's read (its 401 reaches the gateway; the kill's record goes on).
+        const running = isStillOnScreen() ? await readRunningInstancesForPage(handoffRegistrationRef, worktreeId) : null;
         if (running === null) {
           showToast(tCommon('sessionKill.outcomeUnknown', { label: target.label }), 'warning');
           return 'unknown';

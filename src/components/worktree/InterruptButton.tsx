@@ -17,6 +17,8 @@ import React, { memo, useState, useCallback, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { Spinner } from '@/components/ui/Spinner';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 export interface InterruptButtonProps {
   worktreeId: string;
@@ -61,6 +63,8 @@ export const InterruptButton = memo(function InterruptButton({
   onInterrupt,
 }: InterruptButtonProps) {
   const t = useTranslations('worktree');
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [isLoading, setIsLoading] = useState(false);
   const lastClickTimeRef = useRef<number>(0);
 
@@ -80,7 +84,8 @@ export const InterruptButton = memo(function InterruptButton({
       const body = instanceId && instanceId !== cliToolId
         ? { cliToolId, instanceId }
         : { cliToolId };
-      const response = await fetch(`/api/worktrees/${worktreeId}/interrupt`, {
+      // Issue #4345 1c 再指示 1: the 401 reaches the gateway before the status is folded.
+      const response = await fetchForHandoffPage(handoffOwner, `/api/worktrees/${worktreeId}/interrupt`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -99,7 +104,7 @@ export const InterruptButton = memo(function InterruptButton({
     } finally {
       setIsLoading(false);
     }
-  }, [worktreeId, cliToolId, instanceId, onInterrupt]);
+  }, [worktreeId, cliToolId, instanceId, onInterrupt, handoffOwner]);
 
   return (
     <button

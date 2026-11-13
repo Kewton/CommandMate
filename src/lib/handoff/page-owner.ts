@@ -15,11 +15,18 @@
  * settings screen — or a page not registered yet), for a rejected request (status 0, an abort) or for
  * any status but the expiry (`isHandoffAuthExpiry`). The recovery stays the detail read's success only.
  *
+ * 再指示 1: taking a 401 is apart from what the page may start. A new operation of the page — a
+ * send, a kill, a confirmation that clears the draft — fixes its registration when it is pressed
+ * ({@link beginHandoffPageOperation}) and starts only while that registration may start
+ * (`handoffPageMayStart`: current, the session not expired, on its route), checked at the press and
+ * again after each await before it starts. What was already sent goes on recording as before.
+ *
  * @module lib/handoff/page-owner
  */
 
 import {
   beginHandoffPageRequest,
+  handoffPageMayStart,
   reportHandoffPageResponse,
   type HandoffAuthResponse,
   type HandoffPageRegistration,
@@ -54,13 +61,18 @@ export function beginHandoffPageResponseReport(owner: HandoffPageOwner | null | 
 /**
  * `fetch` for a request owned by `owner`: the same call (the same arguments — no `init` when none was
  * given), its response reported before it is returned. A rejection (no response) reports nothing and
- * rejects as before.
+ * rejects as before. A `fetch` that throws synchronously (a broken mock) throws as before.
  */
-export async function fetchForHandoffPage(owner: HandoffPageOwner | null | undefined, input: string, init?: RequestInit): Promise<Response> {
+export function fetchForHandoffPage(owner: HandoffPageOwner | null | undefined, input: string, init?: RequestInit): Promise<Response> {
   const report = beginHandoffPageResponseReport(owner);
-  const response = init === undefined ? await fetch(input) : await fetch(input, init);
-  report?.(response);
-  return response;
+  const sent = init === undefined ? fetch(input) : fetch(input, init);
+  // 再指示 1: with no owner, `fetch`'s own promise — the same call and the same timing (no extra
+  // microtask), so a caller drawn outside a page behaves exactly as before.
+  if (!report) return sent;
+  return sent.then((response) => {
+    report(response);
+    return response;
+  });
 }
 
 /**
@@ -71,4 +83,25 @@ export async function fetchForHandoffPage(owner: HandoffPageOwner | null | undef
 export function beginHandoffPageObserver(owner: HandoffPageOwner | null | undefined): { onResponse: (response: Response) => void } | undefined {
   const report = beginHandoffPageResponseReport(owner);
   return report ? { onResponse: (response) => report(response) } : undefined;
+}
+
+/** 再指示 1: a new operation of the page, its registration fixed when it was pressed. */
+export interface HandoffPageOperation {
+  /** The operation may start now (read at the press and again after each await). */
+  readonly mayStart: () => boolean;
+}
+
+const OUTSIDE_A_PAGE: HandoffPageOperation = Object.freeze({ mayStart: () => true });
+
+/**
+ * 再指示 1: an operation owned by `owner` is pressed now. Outside a worktree page (no owner: the
+ * settings screen, the sessions view) it is as before — always allowed. Inside one it may start
+ * while the registration held at the press may (`handoffPageMayStart`): not once a 401 was taken (the
+ * registry's expiry, whatever the page's own `isAuthExpired` says), not after the page was made again,
+ * not while no registration is held.
+ */
+export function beginHandoffPageOperation(owner: HandoffPageOwner | null | undefined): HandoffPageOperation {
+  if (!owner || owner === NO_HANDOFF_PAGE_OWNER) return OUTSIDE_A_PAGE;
+  const registration = owner.current;
+  return { mayStart: () => handoffPageMayStart(registration) };
 }

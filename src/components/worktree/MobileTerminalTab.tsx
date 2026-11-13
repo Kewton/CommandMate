@@ -158,6 +158,8 @@ import { useSurfaceMode } from '@/hooks/useSurfaceMode';
 import { buildPaneSessionLabels } from '@/components/worktree/pane-session-labels';
 import type { SurfaceMode } from '@/types/ui-state';
 import { getInstanceLabel, type AgentInstance, type CLIToolType } from '@/lib/cli-tools/types';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { beginHandoffPageObserver, beginHandoffPageOperation } from '@/lib/handoff/page-owner';
 
 export interface MobileTerminalTabProps {
   worktreeId: string;
@@ -640,6 +642,8 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
   // (#2254) or the terminal shows it without waiting for the next tick.
   const sendPickerChord = useSpecialKeys(worktreeId, cliToolId, instanceId, refresh);
   const optimisticSend = useChatOptimisticSend({ cliToolId, instanceId });
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -652,11 +656,18 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       sendPickerChord([...OPENCODE_MODEL_PICKER_KEYS]);
       return;
     }
+    // Issue #4345 1c 再指示 1: a send of the page — not once a 401 was taken.
+    if (!beginHandoffPageOperation(handoffOwner).mayStart()) return;
     const options: OptimisticSendOptions = { cliToolId, instanceId };
     if (optimisticSend) {
       optimisticSend(MODEL_PICKER_COMMAND, options);
     } else {
-      void worktreeApi.sendMessage(worktreeId, MODEL_PICKER_COMMAND, options).catch(() => {
+      // Issue #4345 1c 再指示 1: the direct send's 401 reaches the gateway before it is swallowed.
+      const observer = beginHandoffPageObserver(handoffOwner);
+      void (observer
+        ? worktreeApi.sendMessage(worktreeId, MODEL_PICKER_COMMAND, options, observer)
+        : worktreeApi.sendMessage(worktreeId, MODEL_PICKER_COMMAND, options)
+      ).catch(() => {
         // Advisory: the pane's next poll shows whether the picker opened.
       });
     }
@@ -665,7 +676,7 @@ export const MobileTerminalTab = memo(function MobileTerminalTab({
       refreshTimerRef.current = null;
       void refresh();
     }, NAV_KEY_REFRESH_DELAY_MS);
-  }, [cliToolId, instanceId, optimisticSend, refresh, sendPickerChord, worktreeId]);
+  }, [cliToolId, instanceId, optimisticSend, refresh, sendPickerChord, worktreeId, handoffOwner]);
 
   // Issue #2193: one preference per worktree here (the phone shows one pane at
   // a time), against one per split on PC. SSR-safe default first, then the

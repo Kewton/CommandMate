@@ -16,6 +16,8 @@
 import { useCallback } from 'react';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 /**
  * Returns a stable `sendKeys(keys)` callback that POSTs the given tmux key names
@@ -28,12 +30,15 @@ export function useSpecialKeys(
   instanceId?: string,
   onKeysSent?: () => void,
 ): (keys: string[]) => void {
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   return useCallback(
     (keys: string[]) => {
       const body = instanceId && instanceId !== cliToolId
         ? { cliToolId, keys, instanceId }
         : { cliToolId, keys };
-      fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/special-keys`, {
+      // Issue #4345 1c 再指示 1: the 401 reaches the gateway before the status is folded.
+      fetchForHandoffPage(handoffOwner, `/api/worktrees/${encodeURIComponent(worktreeId)}/special-keys`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -48,6 +53,6 @@ export function useSpecialKeys(
           console.error('Failed to send special keys:', err);
         });
     },
-    [worktreeId, cliToolId, instanceId, onKeysSent],
+    [worktreeId, cliToolId, instanceId, onKeysSent, handoffOwner],
   );
 }

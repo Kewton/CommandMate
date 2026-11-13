@@ -102,6 +102,11 @@ export interface EntryCase {
    * or wraps its own calls in `act`.
    */
   trigger?: () => unknown;
+  /**
+   * 再指示 1: a new operation of the page (a send, a kill) that starts only while the registration held
+   * at the press may start — under an older registration nothing leaves at all.
+   */
+  startsOnlyWhileCurrent?: boolean;
 }
 
 /** What the entry under test answers: a status, or `0` for no response. */
@@ -136,7 +141,13 @@ export type OwnerKind = 'page' | 'old' | 'none';
  * The host drawn with the page's dialog shown; then the surface drawn under the owner and its entry
  * pressed, answering `status`. Answers the page (the current registration's when `owner` is `old`).
  */
-export async function runEntryCase(entry: EntryCase, answer: EntryAnswer, status: number | undefined, owner: OwnerKind = 'page'): Promise<StandInPage> {
+export async function runEntryCase(
+  entry: EntryCase,
+  answer: EntryAnswer,
+  status: number | undefined,
+  owner: OwnerKind = 'page',
+  expectRequest = true,
+): Promise<StandInPage> {
   const page = standInPage();
   let held: HandoffPageOwner | null = page.owner;
   let current = page;
@@ -155,7 +166,7 @@ export async function runEntryCase(entry: EntryCase, answer: EntryAnswer, status
   // Not wrapped in one act: a trigger presses through `fireEvent` (each its own act, so a render
   // lands between two presses) or wraps its own calls.
   if (entry.trigger) await entry.trigger();
-  await waitFor(() => expect(answer.calls).toBeGreaterThan(0), { timeout: 4000 });
+  if (expectRequest) await waitFor(() => expect(answer.calls).toBeGreaterThan(0), { timeout: 4000 });
   await settle();
   await settle();
   return current;
@@ -207,7 +218,10 @@ export function describeEntryCases(
 
     it.each(names)('%s: a 401 of a request that left under an older registration', async (name) => {
       const answer = arm(name);
-      await runEntryCase(cases[name], answer, 401, 'old');
+      const gated = cases[name].startsOnlyWhileCurrent === true;
+      await runEntryCase(cases[name], answer, 401, 'old', !gated);
+      // 再指示 1: an operation of a page made again does not even start under the old registration.
+      if (gated) expect(answer.calls).toBe(0);
       expect(sessionExpired()).toBe(false);
       expect(handoffDialog()).not.toBeNull();
     });

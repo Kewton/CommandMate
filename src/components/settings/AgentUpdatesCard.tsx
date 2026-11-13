@@ -34,12 +34,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { beginHandoffPageOperation, fetchForHandoffPage } from '@/lib/handoff/page-owner';
+import { readRunningInstancesForPage } from '@/hooks/page-owned-reads';
 import { AlertTriangle, ArrowUpCircle, RotateCcw } from 'lucide-react';
 import { Button, Card, Spinner } from '@/components/ui';
 import { getCliToolDisplayName, type CLIToolType } from '@/lib/cli-tools/types';
 import { useAgentUpdates, type AgentVersionView } from '@/hooks/useAgentUpdates';
-import { readRunningInstances } from '@/lib/api-client-agent-roles';
 
 /** The deadline `InstanceRolesSection` gives the same request. A kill that outlives it may still have ended the session. */
 const KILL_SESSION_TIMEOUT_MS = 15000;
@@ -171,6 +171,9 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
   const restart = useCallback(
     async (instance: AgentUpdateInstance): Promise<void> => {
       if (!worktreeId) return;
+      // Issue #4345 1c 再指示 1: no kill once a 401 was taken (or the page was made again) — in the
+      // page's agents pane only; on the settings screen (no page) as before.
+      if (!beginHandoffPageOperation(handoffOwner).mayStart()) return;
       setRestartError(null);
       setInProgressId(null);
       setRestarting((prev) => ({ ...prev, [instance.id]: true }));
@@ -198,7 +201,7 @@ export function AgentUpdatesCard({ worktreeId, instances, variant = 'card' }: Ag
       }
       if (worktreeIdRef.current !== worktreeId) return;
       if (outcome === 'errored' || outcome === 'silent') {
-        const runningNow = await readRunningInstances(worktreeId);
+        const runningNow = await readRunningInstancesForPage(handoffOwner, worktreeId);
         if (worktreeIdRef.current !== worktreeId) return;
         if (runningNow === null) {
           setRestartError(t('agentUpdates.restartUnknown'));

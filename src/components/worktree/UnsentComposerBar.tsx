@@ -41,6 +41,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { useSpecialKeys } from '@/hooks/useSpecialKeys';
 import { clearTargetKey } from '@/components/worktree/clear-notice';
 import { NAV_KEY_REFRESH_DELAY_MS } from '@/config/ui-feedback-config';
+import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
+import { fetchForHandoffPage } from '@/lib/handoff/page-owner';
 
 /** Why the last Clear did not empty the composer (Issue #3954). */
 export type ClearComposerNotice = 'busy' | 'otherServer' | 'notCleared' | 'failed';
@@ -145,6 +147,8 @@ export function UnsentComposerBar({
   onClearNoticeChange,
 }: UnsentComposerBarProps) {
   const t = useTranslations('worktree');
+  // Issue #4345 1c 再指示 1: the worktree page's registration holder (none outside a worktree page).
+  const handoffOwner = useHandoffPageOwner();
   const [clearing, setClearing] = useState(false);
   const [ownNotice, setOwnNotice] = useState<ClearComposerNotice | null>(null);
   const controlled = onClearNoticeChange !== undefined;
@@ -178,7 +182,8 @@ export function UnsentComposerBar({
     const body = instanceId && instanceId !== cliToolId
       ? { cliToolId, instanceId }
       : { cliToolId };
-    fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/clear-composer`, {
+    // Issue #4345 1c 再指示 1: the 401 reaches the gateway before the status is folded.
+    fetchForHandoffPage(handoffOwner, `/api/worktrees/${encodeURIComponent(worktreeId)}/clear-composer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -208,7 +213,7 @@ export function UnsentComposerBar({
       .finally(() => {
         setClearing(false);
       });
-  }, [worktreeId, cliToolId, instanceId, onActionSent, setClearError]);
+  }, [worktreeId, cliToolId, instanceId, onActionSent, setClearError, handoffOwner]);
 
   // The single display gate, and it reads the text only. Nothing here consults
   // isUnclassifiedActive / isSelectionListActive / isPromptWaiting.
