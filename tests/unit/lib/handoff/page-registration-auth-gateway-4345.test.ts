@@ -81,14 +81,24 @@ describe('[#4345 1a] the gateway', () => {
     expect(expired()).toBe(false);
   });
 
+  it('再指示 1: the answer is whether the expiry was taken — a 401 older than an answer taken says false', () => {
+    const id = registerHandoffPage('wt-a');
+    const older = beginHandoffPageRequest(id);
+    reportHandoffPageAuthenticated(beginHandoffPageRequest(id));
+    expect(reportHandoffPageResponse(older, res(401))).toBe(false);
+    expect(expired()).toBe(false);
+    expect(reportHandoffPageResponse(beginHandoffPageRequest(id), res(401))).toBe(true);
+    expect(expired()).toBe(true);
+  });
+
   it('an older registration’s 401 and a request with no owner expire nothing of the current one', () => {
     const old = registerHandoffPage('wt-a');
     const oldRequest = beginHandoffPageRequest(old);
     unregisterHandoffPage(old);
     registerHandoffPage('wt-a');
-    reportHandoffPageResponse(oldRequest, res(401));
+    expect(reportHandoffPageResponse(oldRequest, res(401))).toBe(false);
     expect(expired()).toBe(false);
-    reportHandoffPageResponse(beginHandoffPageRequest(null), res(401));
+    expect(reportHandoffPageResponse(beginHandoffPageRequest(null), res(401))).toBe(false);
     expect(expired()).toBe(false);
   });
 

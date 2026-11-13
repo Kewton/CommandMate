@@ -66,6 +66,9 @@ let modeQueued: boolean;
 let modeQueue: Array<() => void>;
 let detailQueued: boolean;
 let detailQueue: Array<(status: number) => void>;
+/** 再指示 1: when set, the mode read's response is in hand but its body is held until released. */
+let modeBodyHeld: boolean;
+let modeBodyQueue: Array<() => void>;
 
 function reply(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -74,6 +77,12 @@ const detailBody = { id: A, name: A, path: '/p', repositoryPath: '/r', repositor
 
 function modeAnswer(): Promise<Response> {
   if (modeStatus === 0) return Promise.reject(new TypeError('Failed to fetch'));
+  if (modeBodyHeld) {
+    const status = modeStatus;
+    const held = reply(status, status === 200 ? ATTENDED : { error: String(status) });
+    held.json = () => new Promise((resolve) => modeBodyQueue.push(() => resolve(status === 200 ? ATTENDED : { error: String(status) })));
+    return Promise.resolve(held);
+  }
   return Promise.resolve(modeStatus === 200 ? reply(200, ATTENDED) : reply(modeStatus, { error: String(modeStatus) }));
 }
 
@@ -85,6 +94,8 @@ beforeEach(() => {
   modeQueue = [];
   detailQueued = false;
   detailQueue = [];
+  modeBodyHeld = false;
+  modeBodyQueue = [];
   global.fetch = vi.fn((input: unknown) => {
     const url = String(input);
     if (url.includes('/mem/mode')) {
@@ -106,6 +117,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const release of modeQueue.splice(0)) release();
+  for (const release of modeBodyQueue.splice(0)) release();
   for (const release of detailQueue.splice(0)) release(200);
   cleanup();
   vi.restoreAllMocks();
@@ -241,6 +253,40 @@ describe('[#4345 1a] the end’s mode read reports through the gateway', () => {
     });
     await settle();
     expect(handoffRegistrySnapshot().authExpired).toBe(false);
+    expect(page.killTarget).toEqual(TARGET);
+  });
+
+  it('再指示 1: the mode read’s 401 taken, its body held, a detail read’s success recovers meanwhile: that press still opens nothing; a new press opens as usual', async () => {
+    await mounted();
+    modeStatus = 401;
+    modeBodyHeld = true;
+    let pressed: Promise<void> | null = null;
+    act(() => {
+      pressed = page.openEnd(TARGET);
+    });
+    await waitFor(() => expect(modeBodyQueue).toHaveLength(1));
+    expect(handoffRegistrySnapshot().authExpired).toBe(true);
+    // A newer detail read succeeds while the press's body is still being read: recovered.
+    detailQueued = true;
+    act(() => {
+      void page.handleRetry();
+    });
+    await waitFor(() => expect(detailQueue).toHaveLength(1));
+    await act(async () => detailQueue.shift()!(200));
+    await settle();
+    expect(handoffRegistrySnapshot().authExpired).toBe(false);
+    await act(async () => {
+      modeBodyQueue.shift()!();
+      await pressed;
+    });
+    await settle();
+    // The press whose 401 was taken ends there: no plain confirmation, no hand-off.
+    expect(page.killTarget).toBeNull();
+    expect(page.handoffTarget).toBeNull();
+    // (negative control) a press after the recovery opens as usual.
+    modeBodyHeld = false;
+    modeStatus = 500;
+    await pressEnd();
     expect(page.killTarget).toEqual(TARGET);
   });
 

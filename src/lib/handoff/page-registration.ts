@@ -194,14 +194,16 @@ export function handoffPageMayStart(id: HandoffPageRegistration | null, snapshot
 /**
  * A read of the page `id`, the `seq`-th it sent (increasing within the registration), answered:
  * `expired` (401) or `authenticated` (its detail read succeeded). Taken from the current
- * registration only, and only when newer than the read it took last (invariant 3).
+ * registration only, and only when newer than the read it took last (invariant 3). Answers
+ * whether it was taken.
  */
-export function reportHandoffPageAuth(id: HandoffPageRegistration | null, outcome: 'expired' | 'authenticated', seq: number): void {
-  if (id === null || !isCurrentHandoffRegistration(id)) return;
-  if (seq <= (authSeqOf.get(id) ?? 0)) return;
+export function reportHandoffPageAuth(id: HandoffPageRegistration | null, outcome: 'expired' | 'authenticated', seq: number): boolean {
+  if (id === null || !isCurrentHandoffRegistration(id)) return false;
+  if (seq <= (authSeqOf.get(id) ?? 0)) return false;
   authSeqOf.set(id, seq);
   const authExpired = outcome === 'expired';
   if (state.authExpired !== authExpired) commit({ ...state, authExpired });
+  return true;
 }
 
 /**
@@ -243,12 +245,13 @@ export function isHandoffAuthExpiry(response: HandoffAuthResponse): boolean {
  * Issue #4345 1a: the request `request` answered `response`. Call it as soon as the response is in
  * hand — before its body is read and before its status is turned into anything else. Its expiry is
  * taken under the request's own registration and number (invariant 7); any other status changes
- * nothing. Answers whether the response was the expiry (taken or not).
+ * nothing. Answers whether the response was the expiry and the registry took it (再指示 1: the
+ * caller keeps that verdict for the rest of its own operation, since a later recovery does not
+ * undo what this request saw).
  */
 export function reportHandoffPageResponse(request: HandoffPageRequest, response: HandoffAuthResponse): boolean {
-  const expired = isHandoffAuthExpiry(response);
-  if (expired) reportHandoffPageAuth(request.registration, 'expired', request.seq);
-  return expired;
+  if (!isHandoffAuthExpiry(response)) return false;
+  return reportHandoffPageAuth(request.registration, 'expired', request.seq);
 }
 
 /**

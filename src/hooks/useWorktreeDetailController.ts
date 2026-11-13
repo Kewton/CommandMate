@@ -2092,15 +2092,19 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     const authRequest = beginHandoffPageRequest(registration);
     const startedFor = worktreeId;
     let attended = false;
+    // Issue #4345 1a 再指示 1: this press's own 401 was taken — kept for the press, so a recovery
+    // (a newer detail read's success) while the body is read does not reopen the plain confirmation.
+    let expiredTaken = false;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), END_MODE_READ_TIMEOUT_MS);
     try {
       const response = await fetch(`/api/worktrees/${encodeURIComponent(worktreeId)}/mem/mode`, { signal: controller.signal });
-      // Issue #4345 1a: reported before the body is read. A 401 taken expires the session, and the
-      // check below then opens nothing — not the plain confirmation either (intended). A 401 not
+      // Issue #4345 1a: reported before the body is read. A 401 taken expires the session, and this
+      // press then opens nothing — not the plain confirmation either (intended), even if the session
+      // recovers before the press ends (再指示 1). A 401 not
       // taken (older than an answer taken, another registration's), a 5xx, a 403, a timeout or no
       // response fall back to the plain confirmation as before.
-      reportHandoffPageResponse(authRequest, response);
+      expiredTaken = reportHandoffPageResponse(authRequest, response);
       const body = (await response.json()) as { ok?: boolean; mode?: string; features?: { popup?: boolean } };
       attended = response.ok && body.ok === true && body.mode === 'on' && body.features?.popup === true;
     } catch {
@@ -2109,6 +2113,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
       clearTimeout(timer);
       if (endReadingRef.current === reading) endReadingRef.current = null;
     }
+    if (expiredTaken) return;
     if (startedFor !== worktreeIdRef.current) return;
     // Issue #4317 PR1: checked again after the mode's read — the worktree id alone does not tell an
     // old page (unmounted, or made again) from the one now registered with the same id.
