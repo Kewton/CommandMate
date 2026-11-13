@@ -45,6 +45,7 @@ import type {
 } from '../types/api-responses';
 // Issue #2317: the tmux session name each instance runs in, so `commandmate
 // attach` / `tmux attach` need no hand-assembly of `mcbd-<tool>-<wt>[-<suffix>]`.
+import { DEFAULT_DURATION_FLAG } from '../config/duration-constants';
 import { resolveSessionName } from '../../lib/cli-tools/session-name';
 import { validateSessionName } from '../../lib/cli-tools/validation';
 import type { CLIToolType } from '../../lib/cli-tools/types';
@@ -940,6 +941,11 @@ async function killInstance(
   const killResponse = await client.post<unknown>(`/api/worktrees/${worktreeId}/kill-session?instance=${encodeURIComponent(instanceId)}`);
   recordSessionKill(worktreeId, instanceId, killResponse);
   console.error(`Session killed: ${instanceId}`);
+  // Issue #4313: the server turns this instance's Auto-Yes off on kill (by design); say so, and how to resume.
+  // The enable-state is not queried, so this does not claim it was on before.
+  console.error(
+    `Auto-Yes for ${instanceId} was also disabled. To resume it, run: commandmate auto-yes ${worktreeId} --instance ${instanceId} --enable (default --duration ${DEFAULT_DURATION_FLAG})`
+  );
 }
 
 /**
