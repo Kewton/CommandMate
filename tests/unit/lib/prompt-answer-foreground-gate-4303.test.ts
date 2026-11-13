@@ -17,9 +17,14 @@
  *
  * - positive control: the same rows with the foreground `other` send keys on
  *   EVERY row (no row merely stuck before its first key).
- * - preservation: `other` delivers the answer once, exactly as before. A
- *   reader that throws (never the real one; a tmux double that predates it) is
- *   no reading and goes on, as #4300's send check does.
+ * - preservation: `other` delivers the answer once, exactly as before.
+ * - review P2: a reader that throws or rejects has not shown who holds the
+ *   pane: refused like `unknown`, no key, on every path (inverted from the
+ *   first version, which let such a reader go on as "no reader").
+ * - review P1: the foreground read is an await. The caller's last look
+ *   (`stillAllowedAtSend`, the contract / deny) or its generation
+ *   (`stillCurrent`) turned false while it is held: released `other`, no key.
+ *   Unchanged, one answer (negative control).
  *
  * Also (PM decision, same PR): the text of an answer is typed as TEXT
  * (`send-keys -l --`), so an answer spelled like a tmux key name (`Enter`,
@@ -31,7 +36,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
-  foreground: 'other' as 'shell' | 'other' | 'unknown' | 'throws',
+  foreground: 'other' as 'shell' | 'other' | 'unknown' | 'throws' | 'rejects',
+  /** Review P1: when set, the foreground read waits for it. */
+  hold: null as Promise<void> | null,
   /** Run the real `sendKeys` (its tmux call lands in the `execFile` mock). */
   realSendKeys: false,
   execCalls: [] as Array<{ file: string; args: string[] }>,
@@ -57,9 +64,11 @@ vi.mock('@/lib/tmux/tmux', async (importOriginal) => {
       h.realSendKeys ? actual.sendKeys(...args) : Promise.resolve()
     ),
     sendSpecialKeys: vi.fn(async () => undefined),
-    readPaneForeground: vi.fn(async () => {
+    readPaneForeground: vi.fn((): Promise<'shell' | 'other' | 'unknown'> => {
       if (h.foreground === 'throws') throw new Error('reader failed (test)');
-      return h.foreground;
+      if (h.foreground === 'rejects') return Promise.reject(new Error('reader rejected (test)'));
+      const foreground = h.foreground;
+      return h.hold === null ? Promise.resolve(foreground) : h.hold.then(() => foreground);
     }),
   };
 });
@@ -170,6 +179,7 @@ function keyCalls(): number {
 beforeEach(() => {
   vi.clearAllMocks();
   h.foreground = 'other';
+  h.hold = null;
   h.realSendKeys = false;
   h.execCalls = [];
   vi.mocked(capturePane).mockResolvedValue('');
@@ -202,11 +212,126 @@ describe.each(['shell', 'unknown'] as const)('[#4303] foreground %s: no key, not
   });
 });
 
-describe('[#4303] a reader that throws is no reading (a tmux double without it): the answer goes on', () => {
-  it('claude: Down + Enter as before', async () => {
+describe('[#4303] a reader that throws is no reading of the pane: refused as unknown (review P2, inverted)', () => {
+  // Review P2 (inverted): a reader that throws has not shown who holds the
+  // pane — refused as `unknown`, nothing typed. Was: Down + Enter as before.
+  it('claude: no Down + Enter', async () => {
     h.foreground = 'throws';
-    await sendPromptAnswer(ROWS.claude.params('mcbd-claude-wt-4303'));
+    const error = await sendPromptAnswer(ROWS.claude.params('mcbd-claude-wt-4303')).then(
+      () => null,
+      (e: unknown) => e
+    );
+    expect(keyCalls()).toBe(0);
+    expect(error).toBeInstanceOf(PromptAnswerAgentNotInForegroundError);
+    expect((error as PromptAnswerAgentNotInForegroundError).foreground).toBe('unknown');
+  });
+});
+
+describe.each(['throws', 'rejects'] as const)('[#4303 review P2] a reader that %s: refused, no key, on every path', (failure) => {
+  it.each(TOOLS)('%s: no key, not delivered (unknown)', async (tool) => {
+    h.foreground = failure;
+    const error = await sendPromptAnswer(ROWS[tool].params(`mcbd-${tool}-wt-4303`)).then(
+      () => null,
+      (e: unknown) => e
+    );
+    expect(keyCalls()).toBe(0);
+    expect(error).toBeInstanceOf(PromptAnswerAgentNotInForegroundError);
+    expect((error as PromptAnswerAgentNotInForegroundError).foreground).toBe('unknown');
+    expect((error as PromptAnswerAgentNotInForegroundError).keysSent).toBe(false);
+  });
+
+  it('answer_only: the digit is not typed', async () => {
+    h.foreground = failure;
+    await expect(
+      sendPromptAnswer({
+        sessionName: 'mcbd-codex-wt-4303',
+        answer: '1',
+        cliToolId: 'codex',
+        promptData: { ...CHOICE, submitMode: 'answer_only' } as PromptData,
+      })
+    ).rejects.toBeInstanceOf(PromptAnswerAgentNotInForegroundError);
+    expect(keyCalls()).toBe(0);
+  });
+});
+
+/** Hold the foreground read until released (review P1). */
+function holdForeground(): { release: () => void } {
+  let release: () => void = () => {};
+  h.hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { release };
+}
+
+async function untilForegroundAsked(): Promise<void> {
+  for (let i = 0; i < 50 && vi.mocked(readPaneForeground).mock.calls.length === 0; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  expect(readPaneForeground).toHaveBeenCalledTimes(1);
+}
+
+describe('[#4303 review P1] what was checked before the foreground read is checked again after it', () => {
+  const ANSWER_ONLY = (sessionName: string): SendPromptAnswerParams => ({
+    sessionName,
+    answer: '1',
+    cliToolId: 'codex',
+    promptData: { ...CHOICE, submitMode: 'answer_only' } as PromptData,
+  });
+  const CASES = [
+    ['claude arrows + Enter', ROWS.claude.params],
+    ['codex text + Enter', ROWS.codex.params],
+    ['command-code toggles', ROWS['command-code'].params],
+    ['answer_only digit', ANSWER_ONLY],
+  ] as const;
+
+  it.each(CASES)('%s: the last look turned false while held — no key, answer-withheld', async (_label, build) => {
+    let allowed = true;
+    const params = build('mcbd-wt-4303-p1');
+    Object.defineProperty(params, 'stillAllowedAtSend', { value: () => allowed, enumerable: false });
+    const held = holdForeground();
+    const answering = sendPromptAnswer(params).then(() => null, (e: unknown) => e);
+    await untilForegroundAsked();
+    allowed = false;
+    held.release();
+    const error = await answering;
+    expect(keyCalls()).toBe(0);
+    expect(error).toBeInstanceOf(PromptAnswerNotDeliveredError);
+    expect((error as PromptAnswerNotDeliveredError).skip).toBe('answer-withheld');
+  });
+
+  it.each(CASES)('%s: the generation lost while held — no key', async (_label, build) => {
+    let current = true;
+    const params = { ...build('mcbd-wt-4303-p1'), stillCurrent: () => current };
+    const held = holdForeground();
+    const answering = sendPromptAnswer(params).then(() => null, (e: unknown) => e);
+    await untilForegroundAsked();
+    current = false;
+    held.release();
+    const error = await answering;
+    expect(keyCalls()).toBe(0);
+    expect(error).toMatchObject({ keysSent: false });
+  });
+
+  it('negative control: nothing changed while held — claude answers once', async () => {
+    const params = { ...ROWS.claude.params('mcbd-claude-wt-4303'), stillCurrent: () => true };
+    Object.defineProperty(params, 'stillAllowedAtSend', { value: () => true, enumerable: false });
+    const held = holdForeground();
+    const answering = sendPromptAnswer(params);
+    await untilForegroundAsked();
+    held.release();
+    await answering;
     expect(vi.mocked(sendSpecialKeys).mock.calls.map((call) => call[1])).toEqual([['Down', 'Enter']]);
+  });
+
+  it('negative control: nothing changed while held — the answer_only digit once', async () => {
+    const params = ANSWER_ONLY('mcbd-codex-wt-4303');
+    Object.defineProperty(params, 'stillAllowedAtSend', { value: () => true, enumerable: false });
+    const held = holdForeground();
+    const answering = sendPromptAnswer(params);
+    await untilForegroundAsked();
+    held.release();
+    await answering;
+    expect(vi.mocked(sendKeys).mock.calls).toEqual([['mcbd-codex-wt-4303', '1', false, { literal: true }]]);
   });
 });
 

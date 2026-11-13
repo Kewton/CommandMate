@@ -13,8 +13,14 @@
  *   that key is not sent.
  *
  * Positive control: with the agent in the foreground (`other`) the answer runs
- * and its keys reach the pane. A reader that throws (never the real one; a
- * tmux double that predates it) is no reading and goes on.
+ * and its keys reach the pane.
+ *
+ * Review P2: a reader that throws has not shown who holds the pane — refused
+ * as `unknown` (the first version let it go on; `throws` moved from the
+ * positive control to the refusals). A key refused after keys went out leaves
+ * the answer's count at the keys actually sent (`strict-respond` counts the
+ * refused one as possibly sent). The route end to end:
+ * `tests/unit/api/prompt-response-strict-foreground-4303.test.ts`.
  *
  * @vitest-environment node
  */
@@ -66,7 +72,7 @@ beforeEach(() => {
 });
 
 describe('[#4303] strict respond: refused at admission unless the agent holds the pane', () => {
-  it.each(['shell', 'unknown'] as const)(
+  it.each(['shell', 'unknown', 'throws'] as const)(
     '%s: nothing runs, no key, refusal agent_not_in_foreground',
     async (foreground) => {
       h.foreground = foreground;
@@ -80,7 +86,7 @@ describe('[#4303] strict respond: refused at admission unless the agent holds th
     }
   );
 
-  it.each(['other', 'throws'] as const)('positive control: %s — the answer runs', async (foreground) => {
+  it.each(['other'] as const)('positive control: %s — the answer runs', async (foreground) => {
     h.foreground = foreground;
     const answer = vi.fn(async () => RESULT);
     await expect(answerStrictlyAsInputWriter(SESSION, answer)).resolves.toBe(RESULT);
@@ -113,5 +119,44 @@ describe('[#4303] strict respond: each key is gated too', () => {
     h.foreground = 'shell';
     await expect(deps.sendKey('Enter')).rejects.toThrow(/no key was sent/);
     expect(vi.mocked(sendSessionAnswerKey).mock.calls.map((call) => call[2])).toEqual(['Down']);
+  });
+});
+
+describe('[#4303 review P2] a key refused after keys went out: the count is the keys actually sent', () => {
+  it('Down sent, then the shell: the gate says 1 key, and the result is settled to 1', async () => {
+    // What strict-respond returns for a throw of sendKey: the refused key counted.
+    const counted = { strictRespond: 1, code: 41, keysSent: 2, replayed: false } as unknown as StrictRespondResult;
+    const result = await answerStrictlyAsInputWriter(SESSION, async (ticket, gate) => {
+      const deps = createStrictRespondDeps(DB, TARGET, ticket, gate);
+      await deps.sendKey('Down');
+      h.foreground = 'shell';
+      await expect(deps.sendKey('Enter')).rejects.toThrow(/no key was sent/);
+      expect(gate).toEqual({ refusedBeforeKey: { refused: 'agent_not_in_foreground', foreground: 'shell' }, keysSent: 1 });
+      return counted;
+    });
+    expect(result).toMatchObject({ code: 41, keysSent: 1 });
+    expect(vi.mocked(sendSessionAnswerKey).mock.calls.map((call) => call[2])).toEqual(['Down']);
+  });
+
+  it('the first key refused with none sent: a refusal, not a result (nothing sent)', async () => {
+    const counted = { strictRespond: 1, code: 41, keysSent: 1, replayed: false } as unknown as StrictRespondResult;
+    const result = await answerStrictlyAsInputWriter(SESSION, async (ticket, gate) => {
+      const deps = createStrictRespondDeps(DB, TARGET, ticket, gate);
+      h.foreground = 'unknown';
+      await expect(deps.sendKey('Enter')).rejects.toThrow(/no key was sent/);
+      return counted;
+    });
+    expect(result).toEqual({ refused: 'agent_not_in_foreground', message: expect.stringContaining('Nothing was sent') });
+    expect(sendSessionAnswerKey).not.toHaveBeenCalled();
+  });
+
+  it('negative control: no refusal — the result as strict-respond gave it', async () => {
+    const result = await answerStrictlyAsInputWriter(SESSION, async (ticket, gate) => {
+      const deps = createStrictRespondDeps(DB, TARGET, ticket, gate);
+      await deps.sendKey('Enter');
+      expect(gate).toEqual({ refusedBeforeKey: null, keysSent: 1 });
+      return RESULT;
+    });
+    expect(result).toBe(RESULT);
   });
 });

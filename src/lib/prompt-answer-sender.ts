@@ -677,16 +677,17 @@ async function answerTargetStillOnScreen(params: SendPromptAnswerParams): Promis
  * key (Issue #4303): PR1's `readPaneForeground` (#4300). Never throws.
  *
  * `readPaneForeground` itself never throws (every tmux / `ps` failure is its
- * `unknown`). A reader that throws all the same is not a reading of the pane —
- * in practice a test double of the tmux module that predates the reader — and
- * is answered `null` ("no reader"), which goes on as before, as #4300's send
- * check does (`assertAgentInForeground`). `unknown` is refused.
+ * `unknown`). A reader that throws or rejects all the same has not shown who
+ * holds the pane, so it is `unknown` too and the answer is refused (#4303
+ * review P2): a pane that could not be checked is never typed into. Unlike
+ * #4300's message send, there is no "no reader, go on" branch — test doubles
+ * of the tmux module give the reader an explicit `other`.
  */
-export async function readAnswerTargetForeground(sessionName: string): Promise<PaneForeground | null> {
+export async function readAnswerTargetForeground(sessionName: string): Promise<PaneForeground> {
   try {
     return await readPaneForeground(sessionName);
   } catch {
-    return null;
+    return 'unknown';
   }
 }
 
@@ -725,15 +726,19 @@ export class PromptAnswerAgentNotInForegroundError extends PromptAnswerNotDelive
 /**
  * Refuse an answer before its first key unless the agent holds the pane
  * (Issue #4303): `readPaneForeground` must answer `other` (a reader that
- * threw is no reading: see {@link readAnswerTargetForeground}). Every answer path
+ * threw is `unknown`: see {@link readAnswerTargetForeground}). Every answer path
  * — `respond`, `/prompt-response` (its plan review too), the strict respond
  * and Auto-Yes — asks this right before its first key.
+ *
+ * It awaits: whatever the caller checked before it (the contract, the tick's
+ * generation, the input ticket) is checked again after it, before the first
+ * key (#4303 review P1).
  *
  * @throws {PromptAnswerAgentNotInForegroundError} on `shell` or `unknown`
  */
 export async function assertAnswerTargetInForeground(sessionName: string): Promise<void> {
   const foreground = await readAnswerTargetForeground(sessionName);
-  if (foreground === 'other' || foreground === null) return;
+  if (foreground === 'other') return;
   throw new PromptAnswerAgentNotInForegroundError(foreground, sessionName);
 }
 
@@ -796,10 +801,16 @@ async function sendAsInputWriter(
       return reread !== null;
     },
     async (ticket): Promise<PromptAnswerNotDeliveredSkip | void> => {
-      // Review P1-b: always, wait or no wait — see `stillAllowedNow`.
-      if (!stillAllowedNow(params)) return 'answer-withheld';
       // Issue #4303: right before the first key, the agent must hold the pane.
       await assertAnswerTargetInForeground(params.sessionName);
+      // Issue #4303 review P1: that read is an await, so what the answer goes
+      // out under is looked at after it, right before the first key — the
+      // caller's last look (the contract / deny; review P1-b: always, wait or
+      // no wait, see `stillAllowedNow`), the tick's generation and the ticket —
+      // with nothing typed if any changed.
+      if (!stillAllowedNow(params)) return 'answer-withheld';
+      assertStillCurrent(params.stillCurrent, false);
+      if (!ticket.isCurrent()) throw new PromptAnswerNotDeliveredError('input-lock-lost', params.sessionName);
       // Review P2: every key of the answer goes out only while its ticket is
       // current; a session replaced part-way gets none of the rest.
       let lost = false;
@@ -1094,7 +1105,9 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
   assertFreeTextCursorIsOnTheField(params);
 
   // Issue #3706: the guard above may have read the pane; nothing is typed yet.
-  assertStillCurrent(stillCurrent, false);
+  // Issue #4303 review P1: asked right before the first key instead — after
+  // the input lock and the foreground read, both awaits — on every path below
+  // (`sendAsInputWriter`, the answer_only digit).
 
   // Determine if this is an arrow-key-navigated multiple-choice prompt.
   // Claude Code and Antigravity (agy) both render selection menus that only
@@ -1203,9 +1216,12 @@ async function sendPromptAnswerKeys(params: SendPromptAnswerParams, touch: PaneT
       // not a writer of the session's input. Review P1-b: the caller's last
       // look is still taken right before it (the guard above may have awaited
       // a capture since the caller's own look).
-      if (!stillAllowedNow(params)) throw new PromptAnswerNotDeliveredError('answer-withheld', sessionName);
       // Issue #4303: right before its only key, the agent must hold the pane.
       await assertAnswerTargetInForeground(sessionName);
+      // Issue #4303 review P1: the last look and the tick's generation are
+      // taken after that await, right before the key.
+      if (!stillAllowedNow(params)) throw new PromptAnswerNotDeliveredError('answer-withheld', sessionName);
+      assertStillCurrent(stillCurrent, false);
       await typeText();
     } else {
       // Issue #3952: text, wait and Enter as one writer, so no send's body can

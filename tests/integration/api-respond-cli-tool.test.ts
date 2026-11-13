@@ -19,6 +19,8 @@ import type { Worktree, ChatMessage } from '@/types/models';
 // sendSpecialKeys from this module; both must be provided or vitest throws
 // "No sendSpecialKeys export" and the route returns 500 (Issue #1102).
 vi.mock('@/lib/tmux/tmux', () => ({
+  // Issue #4303 review P2: the agent holds the pane (a reader that cannot be read is refused).
+  readPaneForeground: async () => 'other' as const,
   sendKeys: vi.fn(() => Promise.resolve()),
   sendSpecialKeys: vi.fn(() => Promise.resolve()),
 }));

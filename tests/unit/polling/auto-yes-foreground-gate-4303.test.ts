@@ -11,6 +11,9 @@
  *   (`lastAnsweredPromptKey` stays null), so a later tick may answer it.
  * - positive control: the agent back in the foreground — the same prompt is
  *   answered, once.
+ * - review P1: the foreground read is an await. The contract turned off, or a
+ *   deny pattern added, while it is held: released `other`, still no key and
+ *   `no_answer`. Unchanged, the answer goes out once (negative control).
  *
  * @vitest-environment node
  */
@@ -26,10 +29,18 @@ import type { PromptData } from '@/types/models';
 let db: Database.Database;
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
 
-const h = vi.hoisted(() => ({ foreground: 'other' as 'shell' | 'other' | 'unknown', delivered: [] as string[] }));
+const h = vi.hoisted(() => ({
+  foreground: 'other' as 'shell' | 'other' | 'unknown',
+  delivered: [] as string[],
+  /** Review P1: when set, the foreground read waits for it. */
+  hold: null as Promise<void> | null,
+}));
 
 vi.mock('@/lib/tmux/tmux', () => ({
-  readPaneForeground: vi.fn(async () => h.foreground),
+  readPaneForeground: vi.fn(async () => {
+    if (h.hold !== null) await h.hold;
+    return h.foreground;
+  }),
   capturePane: vi.fn(async () => ''),
   sendKeys: vi.fn(async (_session: string, keys: string, enter = true) => {
     h.delivered.push(enter ? `${keys}<Enter>` : keys);
@@ -60,6 +71,18 @@ vi.mock('@/lib/polling/response-checker', async (importOriginal) => ({
   detectPromptOnCleanFrame: () =>
     screen.prompt === null ? { isPrompt: false } : { isPrompt: true, promptData: screen.prompt },
 }));
+
+/** Review P1: the contract as the fresh lookup reads it; null passes through. */
+const contract = vi.hoisted(() => ({ override: null as unknown }));
+vi.mock('@/lib/polling/auto-yes-policy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/polling/auto-yes-policy')>();
+  return {
+    ...actual,
+    getSessionAutoYesPolicy: (...args: Parameters<typeof actual.getSessionAutoYesPolicy>) =>
+      (contract.override as ReturnType<typeof actual.getSessionAutoYesPolicy> | null) ??
+      actual.getSessionAutoYesPolicy(...args),
+  };
+});
 
 const mockLogger = vi.hoisted(() => {
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), withContext: vi.fn() };
@@ -131,6 +154,8 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   h.delivered = [];
   h.foreground = 'other';
+  h.hold = null;
+  contract.override = null;
   clearAllPollerStates();
   clearPolicySuppressions();
   clearAutoYesPolicyCache();
@@ -175,4 +200,53 @@ describe('[#4303] Auto-Yes and the pane foreground', () => {
       expect(h.delivered).toEqual(['y', '<Enter>']);
     }
   );
+});
+
+/** Hold the foreground read until released (review P1). */
+function holdForeground(): { release: () => void } {
+  let release: () => void = () => {};
+  h.hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { release };
+}
+
+/** Let the tick run up to the held read. */
+async function untilForegroundAsked(): Promise<void> {
+  for (let i = 0; i < 50 && vi.mocked(readPaneForeground).mock.calls.length === 0; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  expect(readPaneForeground).toHaveBeenCalledTimes(1);
+}
+
+describe('[#4303 review P1] the contract is read again after the foreground read', () => {
+  it.each([
+    ['turned off', { mode: 'off', allowPromptTypes: [], denyPatterns: [] }],
+    ['a deny pattern added', { mode: 'safe', allowPromptTypes: [], denyPatterns: ['proceed'] }],
+  ] as const)('%s while the read was held, released other: no key, no_answer', async (_label, changed) => {
+    const state = pollerState();
+    const held = holdForeground();
+    const tick = tickOn(state, YES_NO);
+    await untilForegroundAsked();
+    contract.override = changed;
+    held.release();
+    expect(await tick).toBe('no_answer');
+    expect(h.delivered).toEqual([]);
+    expect(state.consecutiveErrors).toBe(0);
+    expect(state.lastAnsweredPromptKey).toBeNull();
+    expect(lines(EV.attemptSettled)).toEqual([expect.objectContaining({ result: 'no-keys-sent' })]);
+    expect(lines('poller:auto-yes-answer-not-delivered')).toEqual([
+      expect.objectContaining({ skip: 'answer-withheld' }),
+    ]);
+  });
+
+  it('negative control: nothing changed while the read was held — one answer', async () => {
+    const state = pollerState();
+    const held = holdForeground();
+    const tick = tickOn(state, YES_NO);
+    await untilForegroundAsked();
+    held.release();
+    expect(await tick).toBe('responded');
+    expect(h.delivered).toEqual(['y', '<Enter>']);
+  });
 });

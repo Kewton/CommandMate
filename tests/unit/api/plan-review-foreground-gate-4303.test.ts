@@ -5,6 +5,7 @@
  * `readPaneForeground` (#4300); `shell` / `unknown` throw the not-delivered
  * refusal, which the route answers as `answer_not_delivered` with
  * `keysSent: false`. `other` (positive control) sends the keys as before.
+ * Review P2: a reader that throws or rejects is `unknown` — refused, no key.
  *
  * @vitest-environment node
  */
@@ -13,10 +14,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const h = vi.hoisted(() => ({ foreground: 'other' as 'shell' | 'other' | 'unknown', events: [] as string[] }));
+const h = vi.hoisted(() => ({
+  foreground: 'other' as 'shell' | 'other' | 'unknown' | 'throws' | 'rejects',
+  events: [] as string[],
+}));
 
 vi.mock('@/lib/tmux/tmux', () => ({
-  readPaneForeground: vi.fn(async () => h.foreground),
+  readPaneForeground: vi.fn((): Promise<string> => {
+    if (h.foreground === 'throws') throw new Error('reader failed (test)');
+    if (h.foreground === 'rejects') return Promise.reject(new Error('reader rejected (test)'));
+    return Promise.resolve(h.foreground);
+  }),
   sendKeys: vi.fn(async (_s: string, text: string) => {
     h.events.push(`text:${text}`);
   }),
@@ -65,6 +73,17 @@ describe('[#4303] plan-review answer and the pane foreground', () => {
       status: 200,
       body: expect.objectContaining({ success: false, reason: ANSWER_NOT_DELIVERED_REASON, keysSent: false }),
     });
+  });
+
+  it.each(['throws', 'rejects'] as const)('review P2: a reader that %s — no key, refused as unknown', async (failure) => {
+    h.foreground = failure;
+    const error = await approve().then(
+      () => null,
+      (e: unknown) => e
+    );
+    expect(h.events).toEqual([]);
+    expect(error).toBeInstanceOf(PromptAnswerAgentNotInForegroundError);
+    expect((error as PromptAnswerAgentNotInForegroundError).foreground).toBe('unknown');
   });
 
   it('positive control: other — the keys go out', async () => {

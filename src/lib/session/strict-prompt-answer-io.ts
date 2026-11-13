@@ -66,16 +66,52 @@ export function describeError(error: unknown): string {
 }
 
 /**
+ * What a strict answer's keys were refused for before they reached the pane
+ * (Issue #4303 review), kept by {@link createStrictRespondDeps} for
+ * {@link answerStrictlyAsInputWriter}: `strict-respond` counts every throw of
+ * `sendKey` as a key that may have gone (exit 41, `send_failed`), and a read
+ * that failed as `capture_failed`, so a refusal decided here with nothing typed
+ * is told apart by this record, not by the result alone.
+ */
+export interface StrictAnswerGate {
+  /** Set when a check right before a key refused it: that key was not typed. */
+  refusedBeforeKey: { refused: 'agent_not_in_foreground' | 'session_replaced'; foreground?: 'shell' | 'unknown' } | null;
+  /** The keys this answer handed to tmux and saw come back. */
+  keysSent: number;
+}
+
+/** A fresh {@link StrictAnswerGate}: nothing refused, no key sent. */
+export function newStrictAnswerGate(): StrictAnswerGate {
+  return { refusedBeforeKey: null, keysSent: 0 };
+}
+
+/**
  * @param ticket - The session's input ticket the answer runs under
  *   ({@link answerStrictlyAsInputWriter}, Issue #3952). Given, a key is sent
  *   only while it is current: a session replaced mid-answer gets none.
+ * @param gate - Where a refusal right before a key is recorded (Issue #4303
+ *   review); {@link answerStrictlyAsInputWriter} hands one to its answer.
  */
 export function createStrictRespondDeps(
   db: Database.Database,
   target: StrictAnswerTarget,
-  ticket?: InstanceInputTicket
+  ticket?: InstanceInputTicket,
+  gate: StrictAnswerGate = newStrictAnswerGate()
 ): StrictRespondDeps {
   const { worktreeId, cliToolId, instanceId, sessionName } = target;
+  /**
+   * Issue #4303 review: the screen read before the first key ended with the
+   * agent in front and the ticket current. `strict-respond` consumes the token
+   * after that read and sends the first key with no I/O in between, so that
+   * key does not read the foreground again (a refusal there, after the token
+   * is spent, could not be "not sent").
+   */
+  let confirmedForFirstKey = false;
+  /** Refuse with nothing typed: recorded, then thrown for `strict-respond`. */
+  const refuseKey = (refused: NonNullable<StrictAnswerGate['refusedBeforeKey']>, why: string): never => {
+    gate.refusedBeforeKey = refused;
+    throw new Error(why);
+  };
   return {
     async read(): Promise<StrictScreenRead> {
       let payload;
@@ -87,32 +123,60 @@ export function createStrictRespondDeps(
       } catch (error) {
         return { ok: false, stage: 'capture', error: describeError(error) };
       }
+      let read: StrictScreenRead;
       try {
         const observation = observeSession(
           worktreeId,
           { cliToolId, instanceId, resolvedBy: target.resolvedBy },
           payload
         );
-        return { ok: true, observation, frame: payload.fullOutput ?? '' };
+        read = { ok: true, observation, frame: payload.fullOutput ?? '' };
       } catch (error) {
         return { ok: false, stage: 'observation', error: describeError(error) };
       }
+      // Issue #4303 review: the read before the first key — the last await
+      // before the token is consumed — ends by asking who holds the pane, and
+      // then whether the ticket is still current (that read awaits). Refused,
+      // the answer stops as a failed read: nothing typed, the token unspent.
+      if (gate.keysSent === 0 && gate.refusedBeforeKey === null) {
+        confirmedForFirstKey = false;
+        const foreground = await readAnswerTargetForeground(sessionName);
+        if (foreground !== 'other') {
+          gate.refusedBeforeKey = { refused: 'agent_not_in_foreground', foreground };
+          return { ok: false, stage: 'capture', error: `agent not in foreground (${foreground}, Issue #4303)` };
+        }
+        if (ticket !== undefined && !ticket.isCurrent()) {
+          gate.refusedBeforeKey = { refused: 'session_replaced' };
+          return { ok: false, stage: 'capture', error: 'session replaced (Issue #4303)' };
+        }
+        confirmedForFirstKey = true;
+      }
+      return read;
     },
     sendKey: async key => {
-      if (ticket !== undefined && !ticket.isCurrent()) {
-        throw new Error(`Session ${sessionName} was replaced while the strict answer held its input (Issue #3952)`);
+      // Issue #4303: right before each key, the agent must hold the pane — the
+      // waits between keys (an arrow sent and then the agent gone must not
+      // leave an Enter for the shell). The first key after the strict read was
+      // confirmed by that read (`confirmedForFirstKey`). Review P1: the ticket
+      // is checked after that await, right before the key.
+      if (!confirmedForFirstKey) {
+        const foreground = await readAnswerTargetForeground(sessionName);
+        if (foreground !== 'other') {
+          refuseKey(
+            { refused: 'agent_not_in_foreground', foreground },
+            `The agent does not hold session ${sessionName} (${foreground}); no key was sent (Issue #4303)`
+          );
+        }
       }
-      // Issue #4303: right before each key, the agent must hold the pane (also
-      // asked at admission, `answerStrictlyAsInputWriter`; this closes the window
-      // of the strict read in between, and the waits between keys — an arrow sent
-      // and then the agent gone must not leave an Enter for the shell). Thrown,
-      // `strict-respond` reports it as `send_failed` (exit 41), counting this key
-      // as possibly sent although none reached the pane.
-      const foreground = await readAnswerTargetForeground(sessionName);
-      if (foreground === 'shell' || foreground === 'unknown') {
-        throw new Error(`The agent does not hold session ${sessionName} (${foreground}); no key was sent (Issue #4303)`);
+      confirmedForFirstKey = false;
+      if (ticket !== undefined && !ticket.isCurrent()) {
+        refuseKey(
+          { refused: 'session_replaced' },
+          `Session ${sessionName} was replaced while the strict answer held its input (Issue #3952); no key was sent`
+        );
       }
       await sendSessionAnswerKey(worktreeId, cliToolId, key, instanceId);
+      gate.keysSent++;
     },
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     now: () => Date.now(),
@@ -204,22 +268,24 @@ export interface StrictInputLockRefusal {
  */
 export async function answerStrictlyAsInputWriter(
   sessionName: string,
-  answer: (ticket: InstanceInputTicket) => Promise<StrictRespondResult>
+  answer: (ticket: InstanceInputTicket, gate: StrictAnswerGate) => Promise<StrictRespondResult>
 ): Promise<StrictRespondResult | StrictInputLockRefusal> {
   let admitted = false;
-  let outcome: StrictRespondResult | { notInForeground: 'shell' | 'unknown' };
+  const gate = newStrictAnswerGate();
+  let outcome: StrictRespondResult | { notInForeground: 'shell' | 'unknown' } | { replaced: true };
   try {
     outcome = await withInstanceInputLock(
       sessionName,
       async ticket => {
         admitted = true;
         // Issue #4303: before the answer's first read and key, the agent must
-        // hold the pane: on `shell` / `unknown` nothing is read or sent and the
-        // token is not consumed, so the same answer may be sent again.
-        // A reader that threw is no reading (`readAnswerTargetForeground`): goes on.
+        // hold the pane: on `shell` / `unknown` (a reader that threw included)
+        // nothing is read or sent and the token is not consumed, so the same
+        // answer may be sent again. Review P1: the ticket, again after that await.
         const foreground = await readAnswerTargetForeground(sessionName);
-        if (foreground === 'shell' || foreground === 'unknown') return { notInForeground: foreground };
-        return answer(ticket);
+        if (foreground !== 'other') return { notInForeground: foreground };
+        if (!ticket.isCurrent()) return { replaced: true as const };
+        return answer(ticket, gate);
       },
       { mode: 'shared' }
     );
@@ -235,16 +301,49 @@ export async function answerStrictlyAsInputWriter(
     logger.info('strict-prompt-response-input-lock-refused', { sessionName, refused });
     return { refused, message: `Nothing was sent: ${error instanceof Error ? error.message : String(error)}` };
   }
-  if ('notInForeground' in outcome) {
-    const foreground = outcome.notInForeground;
-    logger.info('strict-prompt-response-agent-not-in-foreground', { sessionName, foreground });
-    return {
-      refused: 'agent_not_in_foreground',
-      message:
-        foreground === 'shell'
-          ? `Nothing was sent: the agent in session ${sessionName} is not running — the pane is back at its shell (Issue #4303).`
-          : `Nothing was sent: who holds session ${sessionName} could not be read (Issue #4303). Send it again.`,
-    };
+  if ('notInForeground' in outcome) return notInForegroundRefusal(sessionName, outcome.notInForeground);
+  if ('replaced' in outcome) return replacedRefusal(sessionName);
+  return settleRefusalBeforeKey(sessionName, outcome, gate);
+}
+
+function notInForegroundRefusal(sessionName: string, foreground: 'shell' | 'unknown'): StrictInputLockRefusal {
+  logger.info('strict-prompt-response-agent-not-in-foreground', { sessionName, foreground });
+  return {
+    refused: 'agent_not_in_foreground',
+    message:
+      foreground === 'shell'
+        ? `Nothing was sent: the agent in session ${sessionName} is not running — the pane is back at its shell (Issue #4303).`
+        : `Nothing was sent: who holds session ${sessionName} could not be read (Issue #4303). Send it again.`,
+  };
+}
+
+function replacedRefusal(sessionName: string): StrictInputLockRefusal {
+  logger.info('strict-prompt-response-input-lock-refused', { sessionName, refused: 'session_replaced' });
+  return {
+    refused: 'session_replaced',
+    message: `Nothing was sent: session ${sessionName} was replaced while the strict answer waited (Issue #4303).`,
+  };
+}
+
+/**
+ * The answer's result, told apart from a refusal right before a key (Issue
+ * #4303 review P2): `strict-respond` reads that refusal as a failed read
+ * (exit 40, `capture_failed`) or a key that may have gone (exit 41,
+ * `send_failed`, counted). With no key typed it is the refusal it was —
+ * nothing sent, so no `prompt_answered_human` row and the CLI's exit 40. With
+ * keys typed before it, the result stands with the keys actually sent.
+ */
+function settleRefusalBeforeKey(
+  sessionName: string,
+  result: StrictRespondResult,
+  gate: StrictAnswerGate
+): StrictRespondResult | StrictInputLockRefusal {
+  const refusal = gate.refusedBeforeKey;
+  if (refusal === null || result.replayed) return result;
+  if (gate.keysSent === 0) {
+    return refusal.refused === 'agent_not_in_foreground'
+      ? notInForegroundRefusal(sessionName, refusal.foreground ?? 'unknown')
+      : replacedRefusal(sessionName);
   }
-  return outcome;
+  return { ...result, keysSent: gate.keysSent };
 }
