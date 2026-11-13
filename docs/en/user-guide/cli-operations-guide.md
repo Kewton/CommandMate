@@ -389,7 +389,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--timeout <sec>` | Maximum time to wait (seconds). One deadline counted from the command's start: it cuts the reads before the poll (`--instance` resolution and the capabilities probe, the task list of `--verify` / `--require-work`) and each poll's reads (`current-output` and the messages ledger), up to the end of the body. A server that does not answer still ends in exit 124 at the deadline, with no poll or verification after it (Issue #3974 / #3983). Verification after a detected completion (`--verify` / `--require-work`) is not part of it and is not cut. `ask --timeout` is the same deadline, except that the send POST (and, with `--async`, the relay POST) is not cut: if it returns past the deadline, ask exits 124 saying the message was sent (`--async` exits 0 once the relay exists). Resolving the two ends of an `--async` relay is inside the deadline. Reading the reply after completion (ledger, pane) is not part of it either: each read is cut at the reply grace (15 s) and falls back to the pane | unlimited |
+| `--timeout <sec>` | Maximum time to wait (seconds). One deadline counted from the command's start: it cuts the reads before the poll (`--instance` resolution and the capabilities probe, the task list of `--verify` / `--require-work`) and each poll's reads (`current-output` and the messages ledger), up to the end of the body. A server that does not answer still ends in exit 124 at the deadline, with no poll or verification after it (Issue #3974 / #3983). Verification after a detected completion (`--verify` / `--require-work`) is not part of it and is not cut. `ask --timeout` is the same deadline, except that the send POST (and, with `--async`, the relay POST) is not cut: if it returns past the deadline, ask exits 124 saying the message was sent (`--async` exits 0 once the relay exists). Resolving the two ends of an `--async` relay is inside the deadline. Reading the reply after completion (the ask's attribution, `GET /api/asks/:askId`) is not part of it either: each read is cut at the reply grace (15 s), and a reply still undecided then is `unmatched/grace_expired` (or `turn_incomplete` / `send_unknown`) with exit 0; the pane is never read (Issue #4344). The read of `GET /api/asks/capabilities` before the send is inside the deadline | unlimited |
 | `--on-prompt <mode>` | What to do when a prompt is detected (agent / human) | agent |
 | `--stall-timeout <sec>` | Timeout on "no output change" (seconds). Like `--timeout`, it also cuts a read that does not answer (exit 124) | - |
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
@@ -548,7 +548,9 @@ a composer problem).
 When `ask` sees such an overlap it keeps the reply and the exit code as they are, prints one
 `overlapped: …` line on stderr, and adds `"overlapped": true` to `--json` (the key is absent when
 nothing overlapped). A reply marked this way is not necessarily the answer to your request; send
-the requests again one at a time if it matters. Two things are detected:
+the requests again one at a time if it matters. Since Issue #4344 whether a reply is printed at all is
+decided by the ask's attribution (a shared turn is `ambiguous/shared_turn` with `"reply": null`; see
+[`commandmate ask`](#commandmate-ask)); the overlap line stays a warning beside it. Two things are detected:
 
 - the instance was already in another turn when the message was sent (the later sender; only for
   tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
@@ -908,13 +910,36 @@ Stdout is the reply body. `--json` has this shape:
   "cliToolId": "codex",
   "source": "history",
   "reply": "…",
+  "askId": "0b6f3c1e-…",
+  "attribution": { "state": "matched", "reason": null, "notified": false },
   "overlapped": true
 }
 ```
 
-`source` is `history` (transcript) / `pane` (screen) / `none`. `overlapped` appears only when an overlap was found
-([Do not stack `ask`s on one instance (Issue #3955)](#commandmate-wait)). When the turn ended but no reply could be read,
-stderr carries a warning and the exit code is 0. On an upstream fault (exit 11), `--json` carries `upstreamFault`.
+`source` is `history` (the ledger tied the reply to this ask) / `none` (the reply was not collected). `overlapped` appears only when an overlap was found
+([Do not stack `ask`s on one instance (Issue #3955)](#commandmate-wait)). On an upstream fault (exit 11), `--json` carries `upstreamFault`.
+
+### The reply is read by this ask's id (Issue #4344)
+
+`ask` makes an id for each request, puts it on the send, and after the turn reads the reply **by that id** (never "the newest reply after the send", never the screen).
+It applies to the tools the server reports in `GET /api/asks/capabilities` (today `claude` and `codex`, at or above the versions the server observes).
+The reply is printed only when the server's ledger (`GET /api/asks/:askId`) ties the transcript's input to the completed turn that answered **this request alone**
+(`attribution.state` is `matched`). Otherwise the reply is not collected: **exit 0, empty stdout, `"reply": null` in `--json`**, and one `reply not collected (<state>/<reason>): …` line on stderr.
+
+| `attribution.state` / `reason` | Meaning | Send |
+|---|---|---|
+| `matched` | The reply is printed. `notified: true`: the turn also took a background-task notification (the reply may react to it) | with the id |
+| `unavailable` / `tool_unsupported` | A tool asks cannot be attributed on (`copilot`, `gemini`, `vibe-local`, `opencode`, `antigravity`, `command-code`, `opencode-v2`, …) | as before |
+| `unavailable` / `server_unsupported` | An older server (`/api/asks/capabilities` answers 404) | once, with the old body |
+| `unavailable` / `slash_command` | A body starting with `/`, `!` or `#` (an id in front would turn the command into text) | body as it is |
+| `ambiguous` / `shared_turn`, `turn_open_at_send` | The answering turn also took another input, or a turn was open at the send | with the id |
+| `unmatched` / `absorbed_mid_turn`, `turn_incomplete`, `grace_expired`, `send_unknown`, `body_truncated`, `history_missing`, … | The turn could not be tied to this request (`grace_expired`, `turn_incomplete` and `send_unknown` are what was still undecided 15 s after the turn ended; nothing is written to the ledger) | with the id |
+
+When the reply was not collected, look at the other session's screen with `capture <id> --instance <id> --pane` (`ask` never reads the screen as a reply).
+Wait failures (exit 10, 11, 21, 124) are as before and read no ledger. `--async` carries no id and is unchanged.
+
+A request with an id is always multi-line, so a `claude` pane shows `[Pasted text …]` and a `[cmate-ask v1 <id>]` line (design §7 (b); the meaning is unchanged).
+The chat History does not show the id line.
 
 ### Exit codes
 
@@ -922,7 +947,7 @@ stderr carries a warning and the exit code is 0. On an upstream fault (exit 11),
 
 | Code | Meaning | Next action |
 |:----:|---------|-------------|
-| 0 | The turn ended (`--async`: the relay was registered). Stdout is the reply | — |
+| 0 | The turn ended (`--async`: the relay was registered). Stdout is the reply (empty when it was not collected; see "The reply is read by this ask's id" above) | When `reply` is `null`, read the reason on stderr |
 | 1 | Server not running etc. (DEPENDENCY_ERROR) | `commandmate start --daemon` |
 | 2 | Bad argument, ambiguous alias, **a relay refusal** (reason on stderr; same number as CONFIG_ERROR), or the other session is on a prompt and the body was not sent | Read stderr; do not resend |
 | 10 | The other session is waiting on a prompt; stdout carries the prompt JSON | Report it; do not `respond` for it |

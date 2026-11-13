@@ -26,6 +26,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { restoreFetch } from '../../../helpers/mock-api';
 import { hasForeignPromptInWindow } from '../../../../src/cli/utils/reply-ledger';
 import type { PromptMessageResponse } from '../../../../src/cli/types/api-responses';
+import { installAskLedger, type AskLedgerOptions } from './ask-ledger-fake-4344';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -150,6 +151,8 @@ interface Scenario {
   /** Ledger rows, resolved at read time. */
   messages: () => unknown[];
   pane?: string;
+  /** Issue #4344: the ask routes (default: matched with the newest `<tool>-turn:` row). */
+  ledger?: AskLedgerOptions;
 }
 
 function mockServer(scenario: Scenario): void {
@@ -175,7 +178,15 @@ function mockServer(scenario: Scenario): void {
     if (url.includes('/capture')) return Promise.resolve(json({ output: scenario.pane ?? '' }));
     return Promise.resolve(json(frame(scenario.cliToolId, scenario.done(), scenario.turn())));
   }) as unknown as typeof fetch;
+  // Issue #4344: the reply is read by the ask's id since PR3.
+  installAskLedger(scenario.ledger);
 }
+
+/** Issue #4344: the `--json` keys a matched reply now adds. */
+const matchedKeys = {
+  askId: expect.any(String),
+  attribution: { state: 'matched', reason: null, notified: false },
+};
 
 async function runAsk(argv: string[], advanceMs = 60_000): Promise<void> {
   const { createAskCommand } = await import('../../../../src/cli/commands/ask');
@@ -203,18 +214,26 @@ describe('ask: two asks folded into one codex turn are reported (Issue #3955)', 
         userRow('ub', BODY_B, NOW + 2_000),
         ...(Date.now() >= DONE_AT ? [replyRow('ACK-B', DONE_AT)] : []),
       ],
+      // Issue #4344 (PR2): codex's reader sees two inputs in one turn.
+      ledger: { answer: () => ({ state: 'ambiguous', reason: 'shared_turn', nativeInputSeen: true }) },
     });
 
     await runAsk(['wt1', BODY_A, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledTimes(1);
     expect(mockExit).toHaveBeenCalledWith(0);
+    // Expected value changed by the human decision of Issue #4344 (design §7, §0.2):
+    // the folded turn's one reply (B's `ACK-B`) is no longer printed as A's — the
+    // ledger says ambiguous/shared_turn, so `reply` is null. The overlap line and
+    // key, this test's subject, are unchanged.
     expect(payload()).toEqual({
       worktreeId: 'wt1',
       instanceId: 'codex',
       cliToolId: 'codex',
-      source: 'history',
-      reply: 'ACK-B',
+      source: 'none',
+      reply: null,
+      askId: expect.any(String),
+      attribution: { state: 'ambiguous', reason: 'shared_turn', notified: false },
       overlapped: true,
     });
     const lines = stderr().split('\n').filter((l) => l.startsWith('overlapped: '));
@@ -238,6 +257,10 @@ describe('ask: two asks folded into one codex turn are reported (Issue #3955)', 
 
     await runAsk(['wt1', BODY_A, '--instance', 'codex']);
 
+    // Issue #4344: the fake ledger says matched here, so this pins that the
+    // overlap line stays a warning beside a printed reply (the attribution is
+    // the ledger's; the overlap does not suppress it). A real codex shared turn
+    // is ambiguous — the test above.
     expect(mockExit).toHaveBeenCalledWith(0);
     expect(mockConsoleLog.mock.calls).toEqual([['ACK-B']]);
     expect(stderr()).toMatch(/^overlapped: /m);
@@ -258,13 +281,21 @@ describe('ask: two asks folded into one codex turn are reported (Issue #3955)', 
         userRow('ub', BODY_B, NOW + 1),
         ...(Date.now() >= DONE_AT ? [replyRow('ACK-A', DONE_AT)] : []),
       ],
+      // Issue #4344: the send landed in an open turn (R3).
+      ledger: { answer: () => ({ state: 'ambiguous', reason: 'turn_open_at_send', nativeInputSeen: true }) },
     });
 
     await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledTimes(1);
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toMatchObject({ reply: 'ACK-A', overlapped: true });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): A's `ACK-A` is no longer printed as B's reply (ambiguous/turn_open_at_send).
+    expect(payload()).toMatchObject({
+      reply: null,
+      attribution: { state: 'ambiguous', reason: 'turn_open_at_send' },
+      overlapped: true,
+    });
     expect(stderr()).toMatch(/^overlapped: codex was already in a turn/m);
   });
 });
@@ -292,14 +323,17 @@ describe('ask: an ask that did not overlap is unchanged (Issue #3955)', () => {
     await runAsk(['wt1', BODY_A, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
+    // Issue #4344: a matched reply adds `askId` and `attribution` (design §0.2);
+    // still no `overlapped` key.
     expect(payload()).toEqual({
       worktreeId: 'wt1',
       instanceId: 'codex',
       cliToolId: 'codex',
       source: 'history',
       reply: 'ACK-A',
+      ...matchedKeys,
     });
-    expect(Object.keys(payload())).toEqual(['worktreeId', 'instanceId', 'cliToolId', 'source', 'reply']);
+    expect(Object.keys(payload())).toEqual(['worktreeId', 'instanceId', 'cliToolId', 'source', 'reply', 'askId', 'attribution']);
     expect(stderr()).not.toContain('overlapped');
   });
 
@@ -371,13 +405,21 @@ describe('ask: an ask that did not overlap is unchanged (Issue #3955)', () => {
     await runAsk(['wt1', BODY_A, '--instance', tool, '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toEqual({
-      worktreeId: 'wt1',
-      instanceId: tool,
-      cliToolId: tool,
-      source: 'history',
-      reply: 'ACK-A',
-    });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): copilot / gemini have no ask attribution, so their scraped row is
+    // no longer printed (unavailable/tool_unsupported, reply null). claude's
+    // matched reply adds `askId` and `attribution`.
+    expect(payload()).toEqual(hasTranscript
+      ? { worktreeId: 'wt1', instanceId: tool, cliToolId: tool, source: 'history', reply: 'ACK-A', ...matchedKeys }
+      : {
+        worktreeId: 'wt1',
+        instanceId: tool,
+        cliToolId: tool,
+        source: 'none',
+        reply: null,
+        askId: null,
+        attribution: { state: 'unavailable', reason: 'tool_unsupported', notified: false },
+      });
     expect(stderr()).not.toContain('overlapped');
   });
 });

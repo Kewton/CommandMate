@@ -15,6 +15,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchSequence, restoreFetch } from '../../../helpers/mock-api';
 import { WaitExitCode } from '../../../../src/cli/types';
+import { installAskLedger } from './ask-ledger-fake-4344';
+
+/** Issue #4344: the ledger matched this ask with `reply`. */
+const matched = (reply: string) => () => ({ state: 'matched' as const, reply, nativeInputSeen: true });
+/** Issue #4344: the ledger never settled this ask (no turn of its own was seen). */
+const pending = () => ({ state: 'pending' as const });
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -101,6 +107,8 @@ describe('ask: the successful round trip', () => {
       { data: completedFrame },
       { data: [chatRow()] },
     ]);
+    // Issue #4344: the reply is the ledger's answer for this ask's id.
+    installAskLedger({ answer: matched('2 です') });
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
     await createAskCommand().parseAsync(
@@ -119,6 +127,7 @@ describe('ask: the successful round trip', () => {
       { data: completedFrame },
       { data: [chatRow()] },
     ]);
+    installAskLedger({ answer: matched('2 です') });
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
     await createAskCommand().parseAsync(
@@ -126,10 +135,13 @@ describe('ask: the successful round trip', () => {
     );
 
     const [sendCall] = callsTo('/send');
+    // Expected value changed by Issue #4344 (design §3.2, PR3): on a tool the
+    // server attributes (codex) the send also names this ask's id.
     expect(JSON.parse(sendCall[1].body ?? '{}')).toEqual({
       content: 'hello',
       cliToolId: 'codex',
       instanceId: 'codex-2',
+      ask: { id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/), protocol: 1 },
     });
     // …and the alias reached the one endpoint that knows how to read one.
     // `+` for the space: URLSearchParams serializes form-encoded, and
@@ -155,16 +167,20 @@ describe('ask: the successful round trip', () => {
       { data: completedFrame },
       { data: [stale] },
     ]);
+    // Issue #4344: the ledger never sees this ask's turn (only the previous one).
+    installAskLedger({ answer: pending });
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
-    const pending = createAskCommand().parseAsync(
+    const run = createAskCommand().parseAsync(
       ['node', 'ask', 'wt1', 'hi', '--instance', 'codex']
     );
     await vi.advanceTimersByTimeAsync(20_000);
-    await pending;
+    await run;
 
     expect(mockConsoleLog).not.toHaveBeenCalled();
-    expect(mockConsoleError.mock.calls.flat().join('\n')).toContain('no reply could be read');
+    // Expected value changed by Issue #4344 (design §0.2・§3.6 cell 17): the
+    // stderr line is now the attribution's reason, not the pane-era warning.
+    expect(mockConsoleError.mock.calls.flat().join('\n')).toContain('reply not collected (unmatched/grace_expired)');
   });
 
   it('never prints a prompt row as if it were an answer', async () => {
@@ -180,13 +196,14 @@ describe('ask: the successful round trip', () => {
       { data: completedFrame },
       { data: [promptRow] },
     ]);
+    installAskLedger({ answer: pending });
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
-    const pending = createAskCommand().parseAsync(
+    const run = createAskCommand().parseAsync(
       ['node', 'ask', 'wt1', 'hi', '--instance', 'codex']
     );
     await vi.advanceTimersByTimeAsync(20_000);
-    await pending;
+    await run;
 
     expect(mockConsoleLog).not.toHaveBeenCalled();
   });
@@ -201,6 +218,7 @@ describe('ask: falling back to the pane', () => {
       { data: [] },
       { data: { output: 'copilot said this\n' } },
     ]);
+    installAskLedger();
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
     await createAskCommand().parseAsync(
@@ -208,8 +226,13 @@ describe('ask: falling back to the pane', () => {
     );
 
     const payload = JSON.parse(mockConsoleLog.mock.calls[0][0] as string);
-    expect(payload.source).toBe('pane');
-    expect(payload.reply).toContain('copilot said this');
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): copilot has no ask attribution, so the pane is no longer read for a
+    // reply — `source` is none, `reply` null, and the reason is in `attribution`.
+    expect(payload.source).toBe('none');
+    expect(payload.reply).toBeNull();
+    expect(payload.attribution).toEqual({ state: 'unavailable', reason: 'tool_unsupported', notified: false });
+    expect(callsTo('/capture')).toHaveLength(0);
     expect(payload.instanceId).toBe('copilot');
     expect(payload.cliToolId).toBe('copilot');
   });
@@ -221,6 +244,7 @@ describe('ask: falling back to the pane', () => {
       { data: completedFrame },
       { data: [chatRow()] },
     ]);
+    installAskLedger({ answer: matched('2 です') });
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
     await createAskCommand().parseAsync(
@@ -250,6 +274,7 @@ describe('ask: exit codes are wait\'s exit codes', () => {
       { data: { id: 1 }, status: 201 },
       { data: promptFrame },
     ]);
+    installAskLedger();
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
     await createAskCommand().parseAsync(['node', 'ask', 'wt1', 'hi', '--instance', 'codex']);
@@ -273,6 +298,7 @@ describe('ask: exit codes are wait\'s exit codes', () => {
         status: 409,
       },
     ]);
+    installAskLedger();
 
     const { createAskCommand } = await import('../../../../src/cli/commands/ask');
     await createAskCommand().parseAsync(['node', 'ask', 'wt1', 'hi', '--instance', 'codex']);
