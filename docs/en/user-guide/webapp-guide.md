@@ -361,6 +361,11 @@ Indicators displayed on each worktree in the sidebar show the current state.
 | Yellow dot | waiting | Waiting for user input (yes/no confirmations, etc.) |
 | Blue spinner | generating | Generating response |
 
+The green **"Ready for work"** badge (the agent finished its turn and is waiting for your next instruction) appears on the sidebar row
+and in the PC header. Both are **per worktree**: one badge when any one session of the worktree is waiting for an instruction
+(Issue #4346). In the header it sits right after the pill of the session on screen, but it is not that session's state: shown next to
+"Codex: Idle" with a split maximized, it means another session (Claude, say) is waiting.
+
 > **Details**: See [Status Indicator Details](../../features/sidebar-status-indicator.md) for how status detection works.
 
 ---

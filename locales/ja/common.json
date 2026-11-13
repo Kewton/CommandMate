@@ -19,6 +19,15 @@
       "list": "リスト表示",
       "tile": "タイル表示"
     },
+    "relativeTime": {
+      "now": "たった今",
+      "minutes": "{count}分前",
+      "hours": "{count}時間前",
+      "days": "{count}日前",
+      "weeks": "{count}週間前",
+      "months": "{count}か月前",
+      "years": "{count}年前"
+    },
     "tileAriaLabel": "{branch} のセッションタイル",
     "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
   },
