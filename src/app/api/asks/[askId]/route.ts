@@ -5,15 +5,15 @@
  * One ask's attribution, by its id — never "the newest reply". `matched`
  * carries the reply (the assistant rows the ledger names); every other state
  * carries `reply: null` and its reason. A `pending` row is refreshed once from
- * its tool's transcript reader before it is answered (§3.5), so the ask can
- * settle while no poller is reading.
+ * its tool's transcript reader (claude's or codex's, `refreshAskFromReader`)
+ * before it is answered (§3.5), so the ask can settle while no poller is reading.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { readAskAttribution } from '@/lib/ask/ask-correlation';
 import { isAskId } from '@/lib/ask/envelope';
-import { refreshClaudeAsk } from '@/lib/hooks/sources/claude/ask-refresh';
+import { refreshAskFromReader } from '@/lib/ask/ask-refresh';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('api/asks');
@@ -30,7 +30,7 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid ask ID format' }, { status: 400 });
     }
     const db = getDbInstance();
-    const answer = await readAskAttribution(db, askId, (row) => refreshClaudeAsk(db, row));
+    const answer = await readAskAttribution(db, askId, (row) => refreshAskFromReader(db, row));
     if (!answer) {
       return NextResponse.json({ error: 'Ask not found' }, { status: 404 });
     }

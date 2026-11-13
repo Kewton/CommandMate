@@ -39,11 +39,13 @@ const logger = createLogger('lib/ask/ask-correlation');
  * Per tool: whether its transcript reader binds an ask's envelope to the
  * completed turn (§0.1). True only for a tool whose adapter passes the §6
  * controls — the guard test `tests/unit/guards/ask-capability-controls-4344.test.ts`
- * holds every `true` here to its control file. PR1: claude.
+ * holds every `true` here to its control file. PR1: claude. PR2: codex (its
+ * control fixture is the real Q3 record of a 9,428-byte enveloped paste,
+ * `tests/fixtures/codex-ask-attribution-4344/`).
  */
 export const ASK_ATTRIBUTION_TOOLS: Readonly<Record<CLIToolType, boolean>> = {
   claude: true,
-  codex: false,
+  codex: true,
   gemini: false,
   'vibe-local': false,
   opencode: false,
@@ -55,13 +57,19 @@ export const ASK_ATTRIBUTION_TOOLS: Readonly<Record<CLIToolType, boolean>> = {
 
 /**
  * H5 (§0.1・§3.6.3a): the oldest version of each attributed tool whose turns end
- * with an observable stop. claude: `2.1.239`, the oldest version with a real
+ * with an observable stop (and, for codex, whose rollout is shown to keep the
+ * envelope — Q3). claude: `2.1.239`, the oldest version with a real
  * record carrying `stop_reason` in the repository
  * (`tests/fixtures/turn-separation-2234/claude-tool-first-turn.jsonl`). Older,
  * or a version that cannot be read: the capability is false.
  */
 export const ASK_ATTRIBUTION_MIN_VERSIONS: Readonly<Partial<Record<CLIToolType, string>>> = {
   claude: '2.1.239',
+  // codex: `0.167.2`, the version of the only real record showing that an
+  // enveloped input keeps the envelope and its whole text in the rollout's
+  // `UserMessage` (Q3, 2026-11-14) and closes with a `task_complete` of the same
+  // `turn_id` (`tests/fixtures/codex-ask-attribution-4344/`). Older: false.
+  codex: '0.167.2',
 };
 
 /**
@@ -162,13 +170,13 @@ export type AskTurnState = 'closed' | 'interrupted' | 'open';
 export interface AskTurnSighting {
   askId: string;
   target: AskSightingTarget;
-  /** The native input (claude: the prompt record's uuid). */
+  /** The native input (claude: the prompt record's uuid; codex: the `UserMessage` item id). */
   nativeInputId: string;
   /** The session the record was in; null when it cannot be read. */
   nativeSessionId: string | null;
-  /** The session the instance follows now (claude: `resolveClaudeSessionId`); null when it cannot be read. */
+  /** The session the instance follows now (`resolveClaudeSessionId` / `resolveCodexSessionId`); null when it cannot be read. */
   currentSessionId: string | null;
-  /** The turn's History key (`claude-turn:<uuid>`). */
+  /** The turn's History key (`claude-turn:<uuid>` / `codex-turn:<turn_id>`). */
   nativeTurnKey: string;
   turnState: AskTurnState;
   /** Inputs the turn took besides this one (M1: absorbed prompts and asks). */
