@@ -3,8 +3,12 @@
  * §2.1・§6.1). `.commandmate/flow.yaml` is optional; the scope is `repo` + `base`.
  *
  * Only identification git is called, through the shared runner (V3). A key that no caller
- * reads is refused (P-11): `alerts` / `wip` / `train` / `ledger` / `intervalSec` belong to
- * later PRs or to the other children of Epic #4371 and are named as such.
+ * reads is refused (P-11): `alerts` / `train` / `ledger` / `intervalSec` belong to later PRs or
+ * to the other children of Epic #4371 and are named as such.
+ *
+ * `wip` (Issue #4368 PR1, docs/design/flow-wip-4368.md §7, X9) is read by
+ * scripts/orchestrate/flow-wip.mjs: only `wip.total` (an integer 1..1000) is accepted;
+ * `wip.active` is named as a key PR2a adds, and any other key under `wip` is refused.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -15,16 +19,18 @@ export const CONFIG_FILE = path.join('.commandmate', 'flow.yaml');
 export const CONFIG_MAX_BYTES = 64 * 1024;
 export const EXCLUDE_MAX = 64;
 export const GIT_CAP_MS = 10_000;
-export const ALLOWED_KEYS = ['version', 'repo', 'base', 'exclude', 'tz'];
+export const ALLOWED_KEYS = ['version', 'repo', 'base', 'exclude', 'tz', 'wip'];
 /** Keys that exist in the design but not in PR1a: refused, with who adds them. */
 export const LATER_KEYS = {
   alerts: 'a later PR of #4367 (PR-A)',
-  wip: '#4368 adds it',
   train: '#4369 adds it',
   ledger: 'a later PR of #4367 (PR-L)',
   intervalSec: 'a later PR of #4367 (PR-S)',
 };
 const ALWAYS_EXCLUDED = ['main', 'master'];
+/** The limit section (#4368 PR1). Not exported: no module of scripts/flow/ exports a WIP reader (cli-4367). */
+const LIMIT_TOTAL_MAX = 1000;
+const LIMIT_LATER_KEYS = { active: 'PR2a of #4368 adds it' };
 const BRANCH = /^[A-Za-z0-9._/-]+$/;
 const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
@@ -128,11 +134,51 @@ export function readSettingsFile(repoRoot, options = {}) {
     }
   }
   if ('tz' in doc && !isValidTimeZone(doc.tz)) return { error: `${CONFIG_FILE}: tz is not a time zone Intl accepts` };
+  if ('wip' in doc) {
+    const problem = limitSectionProblem(doc.wip);
+    if (problem) return { error: `${CONFIG_FILE}: ${problem}` };
+  }
   return { settings: doc };
 }
 
 /**
- * The scope and settings: `{ repo, slug, base, exclude, tz }` or `{ error }`.
+ * What is wrong with the `wip` section, or null (#4368 PR1, design §7).
+ * @param {unknown} section
+ * @returns {string | null}
+ */
+function limitSectionProblem(section) {
+  if (section === null || typeof section !== 'object' || Array.isArray(section)) {
+    return 'wip must be a mapping like { total: 8 } (#4368)';
+  }
+  for (const key of Object.keys(section)) {
+    if (Object.prototype.hasOwnProperty.call(LIMIT_LATER_KEYS, key)) {
+      return `key "wip.${key}" is not accepted by this version (${LIMIT_LATER_KEYS[key]})`;
+    }
+    if (key !== 'total') return `unknown key "wip.${key}"`;
+  }
+  const total = /** @type {{ total?: unknown }} */ (section).total;
+  if (!Number.isInteger(total) || /** @type {number} */ (total) < 1 || /** @type {number} */ (total) > LIMIT_TOTAL_MAX) {
+    return `wip.total must be an integer from 1 to ${LIMIT_TOTAL_MAX}`;
+  }
+  return null;
+}
+
+/**
+ * The settings file only — YAML and the `wip` section checked, no git, no GitHub (#4368 P6).
+ * `{ settings, wip }` (wip: `{ total }` or null when the section is absent) or `{ error }`.
+ * @param {string} repoRoot
+ * @param {{ fs?: typeof fs }} [options]
+ */
+export function readRawFlowConfig(repoRoot, options = {}) {
+  const read = readSettingsFile(repoRoot, options);
+  if ('error' in read) return { error: read.error };
+  const section = read.settings.wip;
+  return { settings: read.settings, wip: section ? { total: section.total } : null };
+}
+
+/**
+ * The scope and settings: `{ repo, slug, base, exclude, tz }` (plus `wip: { total }` when
+ * flow.yaml has the section, #4368) or `{ error }`.
  * Calls only identification git, each through `runBounded` against `deadlineMono`.
  * @param {string} repoRoot
  * @param {{ runBounded: Function, env?: Record<string, string | undefined>, deadlineMono: number, tz?: string, fs?: typeof fs }} options
@@ -179,5 +225,7 @@ export function readFlowConfig(repoRoot, options) {
   const tz = options.tz ?? settings.tz ?? processTimeZone(env);
   if (!isValidTimeZone(tz)) return { error: `tz "${tz}" is not a time zone Intl accepts` };
   const exclude = [...new Set([...(settings.exclude ?? []), base, ...ALWAYS_EXCLUDED])];
-  return { repo, slug: repoSlug(repo), base, exclude, tz };
+  const scope = { repo, slug: repoSlug(repo), base, exclude, tz };
+  // Only when the section is there, so a #4367-only flow.yaml reads exactly as before (F1).
+  return settings.wip ? { ...scope, wip: { total: settings.wip.total } } : scope;
 }

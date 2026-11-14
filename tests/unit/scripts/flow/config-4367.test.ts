@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeRunBounded } from '../../../../scripts/flow/runner.mjs';
-import { parseGithubRemote, readFlowConfig } from '../../../../scripts/flow/config.mjs';
+import { parseGithubRemote, readFlowConfig, readRawFlowConfig } from '../../../../scripts/flow/config.mjs';
 import { TempDirs, fakeRun, type Call, type FakeGit } from './flow-fakes';
 
 const temps = new TempDirs();
@@ -85,7 +85,8 @@ describe('T-I: settings and identification (§7.4)', () => {
   it.each([
     ['unknownKey', 'unknown key "unknownKey"'],
     ['alerts', 'PR-A'],
-    ['wip', '#4368 adds it'],
+    // X9 (#4368 PR1): `wip` is a known key now; a non-mapping is still refused and named.
+    ['wip', '#4368'],
     ['train', '#4369 adds it'],
     ['ledger', 'PR-L'],
     ['intervalSec', 'PR-S'],
@@ -170,5 +171,56 @@ describe('T-I: settings and identification (§7.4)', () => {
     const fromMain = scopeOf(main);
     expect(fromMain).toMatchObject({ repo: 'Kewton/CommandMate', base: 'develop', slug: 'kewton.commandmate' });
     expect(scopeOf(linked)).toEqual(fromMain);
+  });
+});
+
+describe('#4368 PR1: the wip section in the shared reader (X9, flow-wip-4368.md §11.7)', () => {
+  it('F1 a #4367-only flow.yaml reads exactly as before (no wip key in the result)', () => {
+    const { result } = identify(withYaml('base: develop\nexclude: [release]\n'));
+    expect(result).not.toHaveProperty('wip');
+    expect(result).toMatchObject({ repo: 'Kewton/CommandMate', base: 'develop' });
+  });
+
+  it('F2 wip: { total: 8 } is accepted and carried as wip.total', () => {
+    const { result } = identify(withYaml('wip:\n  total: 8\n'));
+    expect(result).toMatchObject({ base: 'develop', wip: { total: 8 } });
+  });
+
+  it('F3 wip.active is refused and names PR2a', () => {
+    const { result } = identify(withYaml('wip:\n  total: 8\n  active: 5\n'));
+    expect((result as { error: string }).error).toContain('wip.active');
+    expect((result as { error: string }).error).toContain('PR2a');
+  });
+
+  it.each([
+    ['an unknown key', 'wip:\n  totl: 8\n'],
+    ['0', 'wip:\n  total: 0\n'],
+    ['1.5', 'wip:\n  total: 1.5\n'],
+    ['a string', 'wip:\n  total: "8"\n'],
+    ['.inf', 'wip:\n  total: .inf\n'],
+    ['1001', 'wip:\n  total: 1001\n'],
+    ['empty', 'wip:\n'],
+    ['a list', 'wip: [8]\n'],
+  ])('F4 wip %s: error', (_name, text) => {
+    expect(identify(withYaml(text)).result).toHaveProperty('error');
+  });
+
+  it('F4 (negative) the bounds 1 and 1000 are accepted', () => {
+    expect(identify(withYaml('wip:\n  total: 1\n')).result).toMatchObject({ wip: { total: 1 } });
+    expect(identify(withYaml('wip:\n  total: 1000\n')).result).toMatchObject({ wip: { total: 1000 } });
+  });
+
+  it.each([
+    ['alerts', 'PR-A'],
+    ['train', '#4369 adds it'],
+  ])('F5 %s is still refused', (key, said) => {
+    expect((identify(withYaml(`${key}: 1\n`)).result as { error: string }).error).toContain(said);
+  });
+
+  it('F6 readRawFlowConfig reads the file only: no git, and off when the section is absent', () => {
+    expect(readRawFlowConfig(withYaml(null))).toEqual({ settings: {}, wip: null });
+    expect(readRawFlowConfig(withYaml('base: develop\n'))).toMatchObject({ wip: null });
+    expect(readRawFlowConfig(withYaml('wip:\n  total: 3\n'))).toMatchObject({ wip: { total: 3 } });
+    expect(readRawFlowConfig(withYaml('wip:\n  active: 3\n'))).toEqual({ error: expect.stringContaining('PR2a') });
   });
 });
