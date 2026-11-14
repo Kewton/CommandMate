@@ -335,7 +335,7 @@ git merge-base --is-ancestor origin/main origin/develop && echo "祖先切れ解
 
 ### ワークフローの内容
 
-`npm ci` → `npm audit --audit-level=critical` → **タグのコミットで CI の `Unit Tests` と `Build` が success であることの確認**（`scripts/check-release-ci.mjs`。main への push の CI が終わるまで最大 20 分待つ）→ `npm run build` → `npm run build:cli` → `npm run build:server` → パッケージサイズ確認 → `npm publish --provenance --access public`
+`npm ci` → `npm audit --audit-level=critical` → **タグのコミットで CI の `Unit Tests` と `Build` が success であることの確認**（`scripts/check-release-ci.mjs`。main への push の CI が終わるまで最大 45 分待つ）→ `npm run build` → `npm run build:cli` → `npm run build:server` → パッケージサイズ確認 → `npm publish --provenance --access public`
 
 ---
 
