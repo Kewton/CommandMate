@@ -33,6 +33,8 @@ ${ISSUE_BODY}
 done
 ```
 
+症状しか書かれていない bug を委任するときは、契約の手順 1 に「実機で再現し、原因を 1 変数ずつ切り分ける（推測で直さない）。変数ごとに実フレームを採り、どのガードで落ちるかを記録してから直す」を入れる。委任の前に、サーバログで拒否・失敗した判定を特定し、当時の会話の記録（エージェントの transcript の tool_use）から実際の入力を取り出して Issue に書かれていない変数を探す。タイトルの見立てどおりに直すと別の変数が原因のまま残ることがある。
+
 ## 3-1 assign.tsv を stdin で読んで止まった実測
 
 その run では 1 件目の `send` の前でループが止まり、**約 90 分、ワーカーが 1 人も起動していないのに「送信中」と報告した**
@@ -79,6 +81,10 @@ done
 | 31 | `RoleExitCode.CONFLICT` | 名簿やロールが読んだ後に動いた（`roster_changed` など）。本文は打っていない。ふつうは保存もしていないが、`--contract --role` で保存の応答からツールの変更に気づいたときは、設定を保存したまま 31 を返す（出力に `roleSettings.saved: true`） | `instances <WT>` で今の名簿と設定を確かめてから送り直す |
 | 32 | `RoleExitCode.NOT_SENT` | `--role` などの条件が成り立たない、またはロールが原因で起動を断られた。本文は打っていない | ロールの状態を読み、セッションを止めて送り直す |
 | 99 | `ExitCode.UNEXPECTED_ERROR` | 送れていない（冷間起動など） | docs/orchestrate/exit-codes.md の「3-1 冷間起動の失敗」 |
+
+**依頼文を `/` で始めない。** 依頼文のパスは相対で書くか、文の途中に置く。
+
+送信の結果: 本文の最初の語が空白を含まない `/…`（または `!…`）だと、CommandMate はそれを slash コマンドとして扱う（`src/lib/session/session-boundary.ts` の `isSlashCommandBody`）。brief を付けず、セッションの境界も消費せずに、本文をそのまま相手の CLI へ打つ（`session-brief.ts` の `plan()`。`tests/unit/lib/session/session-boundary-slash-4224.test.ts` が固定）。絶対パスで始めた依頼も同じ扱いになり、相手の CLI はコマンドとして読むので、依頼としては届かない。`send` の exit code はこの区別をしない。何が起きたかは相手の CLI と画面によって違うので、exit code で判断せず `capture` で画面を見る。
 
 ### `launch-worker.mjs send`
 
@@ -153,6 +159,15 @@ MONITOR_WORKTREE_ROOT=.. MONITOR_HOOKS_BASE=origin/develop \
 走り続けたのはこれが理由である。`alive` が途切れた所が最後に生きていたポーリングで、
 異常終了時は `caught SIG…` / `exiting on poll round …` が stderr に出る。
 
+## 3-2 自作の監視ガードと poller の作り方
+
+- 監視ガード・バックグラウンドの poller を自作したら、武装する前に陽性対照を 1 回流す（実在する名前と存在しない偽の名前を混ぜ、偽だけが報告されることを確かめる）
+- Monitor ツールのインラインのコマンドが zsh で走るときは、複数の名前を改行区切りにして `printf '%s\n' "$VAR" | while IFS= read -r x; do …; done` で回す（zsh の罠は「3-3 zsh で待ち・監視のコマンドを組む」）。`PIPESTATUS` は zsh では `pipestatus`（小文字）
+- poller の parser はファイル（引用した heredoc）に書き、ループの前に実データへ 1 回通して形を確かめる。parser の stderr を `/dev/null` に捨てない（空の結果と「読めなかった」が区別できなくなる）
+- ペインのテキストではなく結果を見張る（例: 守るべきセッションが生きているかを `tmux ls -F '#{session_name}' | grep -qx <名前>` で見る）。ワーカーのペインには契約文の禁止事項がそのまま映るので、テキスト照合は引用と実行を区別できない
+- `monitor.sh` を止めるときは起動時の PID を指定する（`kill <pid>`）。`pkill -f orchestrate-monitor/scripts/monitor.sh` は、同じマシンで別セッションが回している monitor まで止める。起動前に `ps` で同じワーカーへの monitor が無いことを確かめる。ログの追従は `tail -n 0 -F`（`-f` は truncate 後に BSD tail が追従をやめる）
+- worktree は `origin/develop` から切る（`git fetch origin develop` の後に `git worktree add -b <branch> <path> origin/develop`。本体 2-2 の手動の例と `/worktree-setup` も同じ形）。ローカルの `develop` は直前のマージを pull していないことがあり、その上に切ると直前に入った修正が worktree に無い。古い base で切ってしまったら worktree の中で `git merge origin/develop` する
+
 ## 3-3 完了検出が壊れた実例
 
 2026-08-24 に #2011（`isUnclassifiedActive`
@@ -224,6 +239,8 @@ exit 10 にもならない）。
   一覧の照会は 15 秒で打ち切り、読めない・時間切れ・起動の失敗のときはその回の確認を飛ばす（待機と timeout の判定は止めない）。
   確認が例外で落ちたときも待機中の `wait` は止めてから終わる
 
+- **composer に残ったテキストを消そうとしない**: 契約で PR を禁じても、ワーカーが `/create-pr` などを composer に打ち込んだまま止まることがある。`C-u`・`BSpace`・`Escape` を送っても戻ってくるので、Auto-Yes が切れていることを確かめて放置する（キーを撃つと確定させるおそれがある）。同じペインへ後で送ると、残ったテキストに追記される。検出するときは `❯` の直後が NBSP（U+00A0）であることに注意する（`grep -E '^❯ [^ ]'` は 0 件になる）
+
 ## 3-3 完了検出が壊れたときの退避
 
 退避手順:
@@ -239,6 +256,28 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 このとき `work-evidence` と `scope` は落ちるので、**オーケストレーターが手で照合する**
 （commits ≥ 1 かつ作業ツリークリーン／`git diff --name-only origin/develop...HEAD` を契約の
 `allow` と `deny` に突き合わせる）。ワーカーが完了しているかは commits と作業ツリーの状態で見る。
+
+## 3-3 CLI 自身のダイアログで待ちが止まったとき
+
+作業を終えた後に CLI 自身の案内のダイアログ（例 `Teach auto mode about your environment?` の 1. Yes / 2. Not now / 3. Don't show again）が出ると、選択の一覧として検出され `wait --on-prompt human` は待ち続ける（Auto-Yes も答えない）。並列のワーカーには monitor を必ず張る。
+
+- `wait` が長く沈黙したら、capture より先に `git -C <worktree> rev-list --count origin/develop..HEAD` を見る。1 以上なら「止まっている」ではなく「終わったのに検知が塞がれている」
+- `respond` が `prompt_no_longer_active` で効かないときは、tmux へ番号で直接送る（`tmux send-keys -t <session> -l -- "2"` の後に `Enter`）。timeout の後も成果物は無事なので、待ち直さず上の退避（`verify --gates …` と work-evidence・scope の手照合）に切り替える
+
+## 3-3 zsh で待ち・監視のコマンドを組む
+
+オーケストレーターのシェルが zsh のとき（Claude Code の Bash ツールなど）、bash の常識が成り立たない箇所で、待ちや監視が黙って空振りする。
+
+- **クォートしない変数を単語分割しない**: `CM="node bin/commandmate.js"; $CM wait …` はコマンド名が丸ごと 1 語になり exit 127 で即座に終わる。最終行が `echo` のラッパーは exit 0 になるので、完了の通知が「ワーカーが終わった」に見える。実行ファイルのパスだけを変数にし（`node "$CMJS" wait …`）、待ちの exit code はファイルに残して読む。`npx vitest run $FILES` も 1 引数になる。一覧は `printf '%s\n' … | xargs …` で渡し、複数の値は `read a b <<<"$(cmd)"` で受ける。1 件だけでは再現しないので、件数を変えて確かめる
+- **特殊な名前を変数にしない**: `path` は `PATH` に結び付いた配列で、`for path in …` は以後の `curl` などを command not found にする。`status` は read-only で、代入した監視スクリプトは起動直後に落ちる。`route`・`wt_state` のように別の名前にする
+- **裸のリダイレクトは `cat` を走らせる**: 行頭の `> file` は `NULLCMD`（`cat`）になり stdin を待って止まる。ファイルを空にするのは `: > file`。ループが進まないときは `pgrep -P <シェルの pid>` で子プロセスを見る
+- **`echo` は `\n` を展開する**: ファイルの中身を変数に入れて `echo` すると行数が変わる。数えるときは直接パイプするか `printf '%s\n' "$M"` を使う
+- **日本語の直前の変数は `${VAR}`**: `$VAR` の直後に多バイト文字が来るとロケールによって変数名に食われ、`set -u` で落ちる（workflow の `run:` も同じ）。`bash -n` では出ない
+- **張った直後に 1 回読む**: 背景の待ち・Monitor は、起動の直後に出力を読み、エラー行や `failed` が無いことを確かめてから任せる
+
+## 3-3 ワーカーが動いている worktree で stash しない
+
+サブエージェントやワーカーがファイルを書いている worktree で `git stash push`（特に `--include-untracked`）をしない。作業ツリーが HEAD に戻った瞬間にエージェントが自分の差分だけを書き込み、コンパイルできないファイルができ、pop も綺麗に戻らない。基準と比べたいときは `git show HEAD:<file>` か別の worktree で測る。どうしても要るなら全エージェントの完了を待ち、戻すときは `git checkout stash@{0} -- <paths>`（untracked は `git show stash@{0}^3:<path>`）で戻して件数を確かめてから drop する。stash の出力を `/dev/null` に捨てない。
 
 ## 3-1 モデルの確認結果ごとの扱い
 
@@ -280,3 +319,7 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 
 修正指示は**契約を作り直さない**（契約は Issue 単位の宣言であり、1往復の指摘ではない）。
 指示の反映は、3-4 の同じ手順（`wait` → `verify --task "$TASK_ID"`）で裁定する。
+
+## 4-3 隣の Issue のファイルに及んだ差分
+
+ワーカーの差分が隣の Issue のファイルに及んでいて、それが同じ修正の別の面（PC とスマホ、など）なら、revert して分け直さずに 1 本の PR にまとめる。PR で両方の Issue を Closes にし、もう一方の Issue は「#N にまとめた」とコメントして閉じ、後ろの波を縮める。まとめる前に、まとめた先が実際にマウント・配線されていることを `git grep` で確かめる。依存の分析は、Issue 本文が挙げたファイルではなく実際の差分（`git show --name-only`）を正とする。
