@@ -16,6 +16,7 @@ import { parseArgs as parseWaitVerifyArgs } from '../../../../scripts/orchestrat
 import { parseArgs as parsePrecheckArgs } from '../../../../scripts/orchestrate/precheck.mjs';
 import { parseArgs as parsePublishArgs } from '../../../../scripts/orchestrate/publish-pr.mjs';
 import { parseArgs as parseMergeArgs } from '../../../../scripts/orchestrate/merge-pr.mjs';
+import { parseArgs as parseFlowWipArgs } from '../../../../scripts/orchestrate/flow-wip.mjs';
 
 const orchestrate = fs.readFileSync(path.resolve(__dirname, '../../../../.claude/commands/orchestrate.md'), 'utf8');
 
@@ -206,5 +207,68 @@ describe('Phase 6 after the review of PR 3 (#3477)', () => {
   it('6-2 waits for Unit Tests on a contract that did not run the whole suite', () => {
     expect(section('6-2')).toContain('整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ');
     expect(section('6-2')).toContain('`vitest related --dir tests/unit`');
+  });
+});
+
+describe('1-5 asks flow-wip once, before assign.tsv takes a new lane (#4368 PR1, R7)', () => {
+  const docs = (file: string) => fs.readFileSync(path.resolve(__dirname, '../../../../docs/orchestrate', file), 'utf8');
+  /** The `## <heading>` section of a document, up to the next `## `. */
+  const docSection = (text: string, heading: string): string => {
+    const start = text.indexOf(`\n## ${heading}\n`);
+    expect(start, `no ## ${heading}`).toBeGreaterThanOrEqual(0);
+    const end = text.indexOf('\n## ', start + 1);
+    return text.slice(start, end === -1 ? undefined : end);
+  };
+  const plan = section('1-5');
+  const block = bashBlocks(plan).find((b) => b.includes('scripts/orchestrate/flow-wip.mjs')) ?? '';
+  const workers = docSection(docs('workers.md'), '1-5 WIP の照会');
+  /** The flags up to the redirection of stdout. */
+  const flags = (b: string) => {
+    const all = scriptArgs(b, 'scripts/orchestrate/flow-wip.mjs');
+    const end = all.indexOf('>');
+    return end === -1 ? all : all.slice(0, end);
+  };
+  const exitCodes = docSection(docs('exit-codes.md'), '1-5 flow-wip check の 60 / 61 / 2');
+
+  it('has a bash block in 1-5 that calls check and parses', () => {
+    expect(block).not.toBe('');
+    parses(block);
+  });
+
+  it('passes flags flow-wip.mjs accepts: check, --worktree ., --json', () => {
+    const parsed = parseFlowWipArgs(flags(block));
+    expect('error' in parsed).toBe(false);
+    expect(parsed).toEqual({ options: expect.objectContaining({ command: 'check', worktree: '.', json: true }) });
+  });
+
+  it('1-5 is the only reader: 2-2, 3-1 and 3-3 do not call it, and no run-log record stands for it', () => {
+    for (const id of ['2-2', '3-1', '3-3']) expect(section(id), id).not.toContain('flow-wip');
+    expect(orchestrate.split('flow-wip.mjs check').length - 1).toBe(1);
+    expect(orchestrate).not.toMatch(/--note "wip=/);
+    expect(workers).not.toMatch(/run-log\.mjs append/);
+  });
+
+  it('1-5 says anything but 0 keeps every new lane out of assign.tsv and into plan.md 見送り', () => {
+    expect(plan).toContain('assign.tsv に入れる前に 1 回だけ');
+    expect(plan).toContain('0 は助言（許可・予約ではない）。0 以外は新しいレーンを入れず plan.md の「見送り」へ');
+    expect(section('2-2')).toContain('assign.tsv の各 Issue（見送りは除く）');
+  });
+
+  it('workers.md: the block parses, any non-zero exit is no room, and the guarantee is stated', () => {
+    const wblock = bashBlocks(workers).find((b) => b.includes('flow-wip.mjs check')) ?? '';
+    parses(wblock);
+    expect(wblock).toContain('ROOM=0');
+    expect(parseFlowWipArgs(flags(wblock))).not.toHaveProperty('error');
+    expect(workers).toContain('**助言で、許可・予約ではない**');
+    expect(workers).toContain('**同時の照会の上限は保証しない**');
+    expect(workers).toContain('Issue・担当・モデル');
+    expect(workers).toContain('次の計画（1-5）で、`check` をやり直してから');
+    expect(workers).toContain('**すべて** `assign.tsv` に入れない');
+  });
+
+  it('exit-codes.md has a row for 0, 60, 61, 2 and the rest', () => {
+    for (const code of ['0', '60', '61', '2', '1']) {
+      expect(exitCodes.split('\n').some((line) => line.startsWith(`| \`${code}\``)), code).toBe(true);
+    }
   });
 });

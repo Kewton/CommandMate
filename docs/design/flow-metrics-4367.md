@@ -348,7 +348,7 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 | I3 | 無し・どちらも無い | exit 2「base を決められない」 |
 | I4 | `base: trunk`・`exclude: [release]` | `base=trunk`・`{release, trunk, main, master}` |
 | I5 | 壊れた YAML／64 KB 超／EACCES／`version: 2` | exit 2、記録・ロック 0 |
-| I6 | 知らないキー・`alerts`・`wip`・`train`・`ledger`・`intervalSec` | exit 2、キーを名指す（`wip` は「#4368 が足す」） |
+| I6 | 知らないキー・`alerts`・`wip`・`train`・`ledger`・`intervalSec` | exit 2、キーを名指す（`wip` は「#4368 が足す」。#4368 PR1 の後は、形の誤りの `wip: 1` を `#4368` と名指して拒む） |
 | I7 | `exclude` が配列でない・65 件・要素が数 | exit 2 |
 | I8 | origin `git@github.com:Kewton/CommandMate.git`／`https://github.com/Kewton/CommandMate(.git)` | `Kewton/CommandMate`・slug `kewton.commandmate` |
 | I9 | origin が GitHub でない・origin 無し | exit 2、記録・ロック 0 |
@@ -475,7 +475,7 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 
 | 相手 | 提供／利用 | 形 | 単位・意味 |
 |---|---|---|---|
-| #4368（WIP） | #4367 が**提供** | `scripts/flow/config.mjs` の `readFlowConfig`（`repo`・`base`・`exclude`・`tz`）。#4368 PR1 は #4367 PR1a のブランチから切り、`wip` 節を同じ読み手の許可へ足す（X1・X6） | scope は `repo`＋`base`。PR1a は `wip` を exit 2 で拒み、その試験の行（T-I の I6）は **#4368 PR1 が `wip` を許可する時に同じ PR で直す**（X9。#4368 の scope に入れる） |
+| #4368（WIP） | #4367 が**提供** | `scripts/flow/config.mjs` の `readFlowConfig`（`repo`・`base`・`exclude`・`tz`）。#4368 PR1 は #4367 PR1a のブランチから切り、`wip` 節を同じ読み手の許可へ足す（X1・X6） | scope は `repo`＋`base`。PR1a は `wip` を exit 2 で拒み、その試験の行（T-I の I6）は **#4368 PR1 が `wip` を許可する時に同じ PR で直す**（X9。#4368 の scope に入れる）。#4368 PR1 で反映: `wip.total`（整数 1〜1000）を許可し、`wip.active` は「PR2a」と名指して拒む。`readFlowConfig` の結果は `wip` 節があるときだけ `wip: { total }` を足す。I6 の `wip` の行は `wip: 1`（形の誤り）を `#4368` と名指して拒む期待に変えた |
 | #4368 | #4367 が**利用**（PR-W） | `countWip` の配列（`unmerged`・`active`・`unknown`・`excluded`）と `complete` | X8: `complete` が真の時だけ本数を確定値、偽は `null`。上側の数は別のフィールドで警報に使わない。`active: null` を 0 にしない |
 | #4369（merge train） | #4367 が**提供**（記録の書き手） | `kind: train` は **#4369 PR3 が呼び手と同じ PR で `record.mjs` に足す**（X2）。語彙は #4369 の語彙（`created`・`pushed`・`ci`・`merged`・`dropped`・`rebuilt`・`stopped`） | 書き手の行の境界は §2.4 と同じ（改行で終わらない末尾があれば追記しない・補修しない）。**書けなくても train は止めない**。計測の記録を train の判定に使わない（V3） |
 | #4370（資源） | #4367 が**利用**（PR-R） | #4370 の `<lock root>/cpu.sem/events.jsonl` を読む（X3） | 壊れた行・改行の無い末尾は未知。#4370 の書き手に flow の行の境界の規則を仮定しない |

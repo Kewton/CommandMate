@@ -22,6 +22,7 @@ run のたびには読まない手順（exit code ごとの対処・担当の切
 - 送り先は `--instance` で指定し、send / wait / capture / respond で同じ値を渡す（Phase 0）
 - ワーカーに `/model` を送らない。Claude のモデルは起動時に `.claude/settings.local.json` で決める（Phase 0）
 - 迷ったら難（opus）にする。迷ったら Claude に回す（1-2b）
+- WIP の照会が 0 でなければ新しいレーンを assign.tsv に入れない（1-5）
 - worktree の `npm install` では `--include=dev` を省かない（2-2）
 - `requireCommit: true` を外さない（2-4）
 - 同じブランチに契約を積むときは、`scope.allow` を前の契約の allow との和集合にする（2-4）
@@ -295,6 +296,13 @@ node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/r
 
 - `workspace/orchestration/runs/$DATE/assign.tsv` も同時に書く。1 行 = `<issue>\t<claude|command-code>\t<opus|sonnet|->`
   （3 列目は Claude のモデル。command-code は `-`。`--assign 123=claude-sonnet` は `123\tclaude\tsonnet` になる）
+- **WIP の照会**（#4368）: 新しいレーン（worktree の無い Issue）を assign.tsv に入れる前に 1 回だけ。2-2・3-1・run の記録では呼ばない
+
+```bash
+node scripts/orchestrate/flow-wip.mjs check --worktree . --json > "workspace/orchestration/runs/$DATE/wip.json"; WIP=$?
+```
+
+  0 は助言（許可・予約ではない）。0 以外は新しいレーンを入れず plan.md の「見送り」へ。docs/orchestrate/workers.md#1-5-wip-の照会 を読む
 - 依存関係グラフ
 - 並列実行グループ
 - マージ推奨順序
@@ -311,24 +319,13 @@ commandmatedev ls --branch feature/
 
 ### 2-2. 不足worktreeの作成
 
-各Issueについて、対応するworktreeが存在しない場合は作成：
+assign.tsv の各 Issue（見送りは除く）に worktree が無ければ作成：
 
 ```bash
-# /worktree-setup を使用
 /worktree-setup {issue_numbers}
 ```
 
-または手動で:
-
-```bash
-git worktree add -b "feature/{N}-worktree" "../commandmate-issue-{N}" develop
-cd "../commandmate-issue-{N}" && npm install --include=dev
-```
-
-`--include=dev` は省かないこと。シェルが `NODE_ENV=production` だと devDependencies（vitest / eslint など）が入らない。
-そうなると、ワーカーの確認コマンドも検証ゲートも動かない。
-
-根拠: docs/orchestrate/contract.md#2-2-devdependencies-を入れる理由
+手動で作るときは docs/orchestrate/workers.md#2-2-worktree-を手動で作る を読む。`npm install` の `--include=dev` は省かない。
 
 ### 2-3. CommandMateへの登録確認
 
@@ -756,10 +753,7 @@ send の後に task が `cliToolId` / `instanceId` = 担当に紐づいている
 
 根拠: docs/orchestrate/workers.md#3-1-goal-に手順を書き下す理由
 
-- **冷間起動の失敗**: send が exit 99 で、stderr に `prompt not ready` と出たら、メッセージは送られていない
-  （Codex / Command Code で実測。Antigravity は 2026-09-20 の run、#2770 で再発）。
-  **待つ前に画面を見る。** 待ってから再送する手順だと、新規 worktree でほぼ必ず出る信頼ダイアログに
-  2 分を払ったうえで 2 回目も同じ exit 99 になる（#2770 で実測）。
+- **冷間起動の失敗**: send が exit 99 で、stderr に `prompt not ready` と出たら、メッセージは送られていない。**待つ前に画面を見る。**
 
   exit 99 を受けたら docs/orchestrate/exit-codes.md#3-1-冷間起動の失敗-exit-99 を読み、画面ごとの表（信頼ダイアログ・既にプロンプト・まだ起動中）で分岐して再送する。
 

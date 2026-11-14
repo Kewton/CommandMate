@@ -4,7 +4,7 @@
 - 正本: Issue #4368 の本文、Epic #4371 の本文（背景の実測）、段 3 の共通の枠と突き合わせの決定 X1〜X10（開発リーダー、2026-11-14）
 - 事実の出典: `origin/develop` = `a334a013f`（2026-11-14 時点）。`file:line` はすべてこのコミットで取った。行番号は古くなるので、実装では名前で探し直すこと
 - 改訂 2 は、再レビュー（P2 6 件、うち 5 件が同じ種類の 2 回目）と原因調査（`enabler-return-4368-cause.md`）を受けたリーダーの処分（推奨 M1 を採る）を反映した。対応の一覧は §15
-- この文書はコードを変えない
+- 改訂 3 は、再レビュー 3 の R7（見送りが後段・再開で送信の対象へ戻る）と R8（二つの不在は不成立の証明にならない）へのリーダーの処分（狭めて塞ぐ）と、PR1 の実装で分かった実コードとの差を反映した。対応の一覧は §15.1a
 
 ## 0. 目的と結論（先に）
 
@@ -75,9 +75,9 @@
 4. **P4 数えられないときに 0 と言わない。** 全体の取得の失敗は `count` / `check` とも 61（`count` の JSON は `ok: false`）。取得の失敗を空の一覧に畳まない
 5. **P5 1 本ずつの不明は数える側。** 1 本のマージの判定だけが不明なら、C に入れて `unknown` に載せ、`complete: false`
 6. **P6 off の `check` は何も解決しない。** `flow.yaml` が無い・`wip` 節が無いとき、`check` は git の共通 dir と設定ファイルを読む以外に何もしない（GitHub・サーバー・base の解決を呼ばない）。`count` は明示の計数の要求なので、off でも repo / base を解決して数えてよい（解決できなければ 2）
-7. **P7 期限。** すべての自前の外部呼び出しは、同じ絶対の締め切り（`deadlineAt`）から計算した残りを **整数 ms に切り下げ、1 以上のときだけ**開始する（`spawnSync` は `timeout` が正のときだけタイマーを張る。原因調査 §3.4）。0 以下なら呼ばずに時間切れ。締め切りを延ばさない（呼び手がより短い締め切りを渡したらそれ）。締め切りの後に返った結果は捨てる。読みの再試行は 0 回
+7. **P7 期限。** すべての自前の外部呼び出しは、同じ絶対の締め切り（単調時計の `deadlineMono`）から計算した残りを **整数 ms に切り下げ、1 以上のときだけ**開始する（`spawnSync` は `timeout` が正のときだけタイマーを張る。原因調査 §3.4）。0 以下なら呼ばずに時間切れ。締め切りを延ばさない（呼び手がより短い締め切りを渡したらそれ）。締め切りの後に返った結果は捨てる。読みの再試行は 0 回
 8. **P8 設定は root から。** 設定は root の `.commandmate/flow.yaml` だけから読む（対象の作業ツリーの設定を読まない）
-9. **P9 手順は 60 / 61 / 2 で新しいレーンを始めない。** orchestrate の手順は、`check` が 0 以外のとき、その Issue の worktree の作成・launch・登録・tasks.tsv の行・wait を始めない。冷間起動の再送・停止にも落とさない（§4.2）
+9. **P9 手順は 0 以外で新しいレーンを始めない。** orchestrate の手順は、計画の段（1-5）で `check` が 0 以外のとき、その Issue と worktree の無い残りの新しいレーンの候補すべてを `assign.tsv` に入れない。よって worktree の作成・launch・登録・tasks.tsv の行・wait は始まらない。run の記録（`run-log.mjs`）に見送りを書かない（`contract` の `skip` は通過扱いで、`status` が `next=send` と読む。R7）。冷間起動の再送・停止にも落とさない（§4.2）
 10. **P10 既存を弱めない。** launch-worker・publish-pr・merge-pr・`/worktree-setup`・検証ゲートは PR1 で変えない（共通の枠 §5）
 11. **P11 数え方は 1 つ。** C を数える純関数は 1 つで、`check` と計測（#4367）が同じものを呼ぶ（X8）
 
@@ -104,42 +104,51 @@
 | 有効 | 取れた | `complete`、`|C| ≥ total` | full | 60 | 数・上限・古い順の枝 |
 | 有効 | 取れた | `complete`、`|C| < total` | room | 0 | 数・上限・「助言で、許可・予約ではない」 |
 
-### 3.2 手順（orchestrate 2-2）の 1 レーンの状態
+### 3.2 手順（orchestrate 1-5 の計画）の新しいレーンの状態
+
+改訂 3（R7 の処分）: 照会は計画の段（1-5、`assign.tsv` を書く前）で **1 回だけ**行う。2-2 の bash・`assign.tsv` の後の書き換え・run の記録には組み込まない。
 
 | 今の状態 | 出来事 | 次の状態 | 手順がすること |
 |---|---|---|---|
-| 新しいレーン候補（worktree が無い Issue） | `check` = 0（room / off） | 作成へ | 既存の 2-2 のとおり worktree を作る（`/worktree-setup` か手動）。続いて既存の 2-3 以降 |
-| 新しいレーン候補 | `check` = 60 | 見送り | worktree を作らない。`assign.tsv` からその Issue の行を外す。run の記録に `--stage contract --result skip --note "wip=60"`。**残りの新しいレーン候補も見送る**（ループを止める）。既存の在庫の消化（3-3 以降・6-x のマージ）は続ける |
-| 新しいレーン候補 | `check` = 61 | 保留 | 同上の見送り（`--note "wip=61 <source>"`）。`source` の読み（GitHub・git）が戻ったのを確かめてから、同じ `check` で照会し直す |
-| 新しいレーン候補 | `check` = 2 | 保留 | 同上の見送り（`--note "wip=2"`）。`flow.yaml` を人が直してから照会し直す |
-| 既存の worktree がある Issue（再開・2 本目の契約） | — | 既存の手順 | `check` を呼ばない（増分 0） |
+| 新しいレーン候補（worktree が無い Issue） | `check` = 0（room）、残りの空き `total − |unmerged|` > 0 | 計画に入る | `assign.tsv` に入れ、空きを 1 減らす。続いて既存の 2-2 以降 |
+| 新しいレーン候補 | `check` = 0（off） | 計画に入る | `assign.tsv` に入れる（上限なし） |
+| 新しいレーン候補 | `check` = 0 だが空きを使い切った | 見送り | `assign.tsv` に入れない。plan.md の「見送り」に Issue・担当・モデル・理由（`room 使い切り`） |
+| 新しいレーン候補 | `check` = 60 | 見送り | その Issue と **残りの新しいレーン候補すべて**を `assign.tsv` に入れない。plan.md の「見送り」に Issue・担当・モデル・理由（`wip=60 n/total`） |
+| 新しいレーン候補 | `check` = 61 | 見送り | 同上（理由 `wip=61 <source>: <reason>`）。`source` の読みが戻ってから次の計画で照会し直す |
+| 新しいレーン候補 | `check` = 2・1・コマンドが動かない | 見送り | 同上（理由 `wip=<exit> …`）。0 以外を作る側へ落とさない |
+| 見送り | 次の計画（1-5） | 新しいレーン候補 | `check` をやり直してから候補へ戻す。run の記録の `next` からは戻さない |
+| 既存の worktree がある Issue（再開・2 本目の契約） | — | 既存の手順 | 照会の結果にかかわらず `assign.tsv` に入れる（増分 0） |
+
+- 見送った Issue は `assign.tsv` に無いので、2-2 は worktree を作らず、3-1 は launch せず tasks.tsv に行を書かず、3-3 は待たない（3-1・3-3 は `assign.tsv`・tasks.tsv の全行を読む、§4.1）
+- run の記録に見送りを書かないので、`run-log.mjs status` は見送った Issue を `next=send` と読まない（記録が無い Issue は run の対象に現れない）
 
 ## 4. 照会の置き場所と手順
 
-### 4.1 なぜ 2-2 だけか
+### 4.1 なぜ 1-5 だけか
 
 - 未マージのブランチ（在庫）が増えるのは、新しいレーンの worktree を作る時（W に 1 本足す）。3-1 の契約の送信は、既に W にある worktree に送るので C を増やさない。6-1 の PR の作成も、既に W にあるブランチの PR なので C を増やさない
-- よって `check` の読み手は orchestrate の **2-2（不足 worktree の作成）** だけにする。新しいレーンを 1 本作る直前ごとに 1 回照会する（作った worktree は次の照会の W に現れるので、1 本ずつ作れば次の照会が数える）
+- よって `check` の読み手は orchestrate の **1-5（計画の記録、`assign.tsv` を書く前）** だけにする（改訂 3、R7）。計画の段では worktree をまだ作らないので、1 回の照会の `total − |unmerged|` を、この計画で入れてよい新しいレーンの本数の上限にする（同じ計画の中で照会を繰り返しても、まだ作っていない worktree は W に現れないため）
 - 3-1・6-1 は変えない（launch-worker・publish-pr は 60 / 61 を返さない）。改訂 1 で 3-1 の分岐に書く予定だった 60 / 61 の扱いは、PR1 では要らない（再送に読み替えられる入口が無い）
-- 事実: 2-2 は `.claude/commands/orchestrate.md:312-331`（`/worktree-setup` か手動の `git worktree add`、`:324`）。`assign.tsv` は 1-2b で書かれ（`:296`）、3-1 のループが読む（`:707-728`）。3-1 は RC にかかわらず tasks.tsv に行を書き（`:727`）、3-3 は tasks.tsv の全行を wait-verify へ渡す（`:799-805`）。よって **見送った Issue を `assign.tsv` から外さないと、3-1 が worktree の無い Issue を launch し、tasks.tsv に行ができ、3-3 が待つ**。P9 の「行を作らない」は `assign.tsv` から外すことで満たす
+- 事実: 2-2 は `.claude/commands/orchestrate.md:312-331`（`/worktree-setup` か手動の `git worktree add`、`:324`）。`assign.tsv` は 1-2b で書かれ（`:296`）、3-1 のループが読む（`:707-728`）。3-1 は RC にかかわらず tasks.tsv に行を書き（`:727`）、3-3 は tasks.tsv の全行を wait-verify へ渡す（`:799-805`）。よって **見送った Issue を `assign.tsv` から外さないと、3-1 が worktree の無い Issue を launch し、tasks.tsv に行ができ、3-3 が待つ**。P9 の「行を作らない」は、見送る Issue を最初から `assign.tsv` に入れないことで満たす（改訂 2 の「2-2 で外す」は、外し忘れた候補が 3-1 に残る経路があった。R7 の反例 B）
 
-### 4.2 orchestrate.md 2-2 に書くこと（案）
+### 4.2 orchestrate.md 1-5 に書くこと
 
 ```bash
-# 新しいレーンを 1 本作る直前ごとに照会する（助言。許可・予約ではない。docs/orchestrate/workers.md#2-2-wip-の照会）
-node scripts/orchestrate/flow-wip.mjs check --worktree . ; WIP=$?
-# 0 → 作る。60 / 61 / 2 → 作らず、assign.tsv から外し、run の記録に skip。残りの新しいレーンも見送る（再送・stop・wait をしない）
+node scripts/orchestrate/flow-wip.mjs check --worktree . --json > "workspace/orchestration/runs/$DATE/wip.json"; WIP=$?
 ```
 
-- 本体は上の 3 行と、60 / 61 / 2 の扱いを 1 行（§3.2 の表への参照）だけにし、詳細（`assign.tsv` から外す bash、run の記録の書き方、61 のときの確かめ方、保証の範囲）は `docs/orchestrate/workers.md` の新しい節「2-2 WIP の照会」に書く。終了コードは `docs/orchestrate/exit-codes.md` に「2-2 flow-wip check の 60 / 61 / 2」の節を足す
-- **バイト数**: orchestrate.md は 107,998 バイトで、目標 108,000 バイト（`tests/unit/docs/orchestrate-size-headroom-4276.test.ts:19`）まで残り 2 バイト。2-2 の手動の代替（`:321-331`。`git worktree add` と `npm install --include=dev` と根拠の行）を `docs/orchestrate/workers.md` の同じ新しい節へ移して空ける（`--include=dev` の注意は `/worktree-setup` の Phase 4 にも既にある）。PR1 の後も 108,000 バイト以下（受入基準 9）
+- 本体は、照会の 1 行と「新しいレーンを `assign.tsv` に入れる前に 1 回だけ。2-2・3-1・run の記録では呼ばない」「0 は助言（許可・予約ではない）。0 以外は新しいレーンを入れず plan.md の『見送り』へ」と参照だけにする。`必ず守ること` に 1 行（1-5）。2-2 は「`assign.tsv` の各 Issue（見送りは除く）」と書き直す
+- 詳細（空きの計算の bash、入れ方、見送りの書き方、再開、保証の範囲、設定）は `docs/orchestrate/workers.md` の節「1-5 WIP の照会」に、終了コードは `docs/orchestrate/exit-codes.md` の節「1-5 flow-wip check の 60 / 61 / 2」に書く
+- **バイト数**: orchestrate.md は 107,998 バイトで、目標 108,000 バイト（`tests/unit/docs/orchestrate-size-headroom-4276.test.ts`）まで残り 2 バイト。2-2 の手動の代替（`git worktree add` と `npm install --include=dev` と根拠の行）を `docs/orchestrate/workers.md` の節「2-2 worktree を手動で作る」へ、3-1 の冷間起動の実測の文を `docs/orchestrate/exit-codes.md` の「3-1 冷間起動の失敗 exit 99」へ移して空けた（実装後 107,934 バイト）
 - `.claude/commands/` の写し（`.agents/`）は無い（2026-11-14 に `find` で確認）
 
 ### 4.3 手順に書かないこと
 
+- 2-2 の worktree の作成の前の照会と、`assign.tsv` の後からの書き換え（改訂 3。計画の段で入れないことに一本化する）
+- run の記録への見送りの行（`--stage contract --result skip` は通過扱い。R7 の反例 A）
 - 3-1 の launch-worker の前の照会（3-1 は在庫を増やさない）
 - 6-1 の publish の前の照会（同上）
-- `/worktree-setup` の中の照会（`/worktree-setup` は 2-2 の照会の後に呼ばれる。中に置くと手順の外で使ったときの強制のように読まれるが、強制ではない）
+- `/worktree-setup` の中の照会（`/worktree-setup` は 1-5 の照会の後の 2-2 で呼ばれる。中に置くと手順の外で使ったときの強制のように読まれるが、強制ではない）
 
 ## 5. 終了コードと出力
 
@@ -173,7 +182,7 @@ PR1 では 60 / 61 を返すのは `flow-wip.mjs` だけで、launch-worker・pu
 ### 5.2 出力
 
 - 標準エラー（人と手順が読む。英語）:
-  - 60: `WIP full for <repo> (base <base>): <n>/<total> unmerged branches, observed <start>–<end>. Advisory only — not a permit or reservation. Do not start a new lane; merge existing work first. Oldest: <古い順に最大 5 本: branch (#PR)>.`
+  - 60: `WIP full for <repo> (base <base>): <n>/<total> unmerged branches, observed <start>–<end>. Advisory only — not a permit or reservation. Do not start a new lane; merge existing work first. Unmerged: <最大 5 本の枝の名前>.`（改訂 3: 古さの順は W・P に時刻が無いので断定しない。観測の順で並べる）
   - 61: `WIP could not be judged for <repo> (base <base>): <source>: <reason>. Advisory only. Do not start a new lane; check <source>, then run check again.`
   - 0（room）: `WIP room for <repo> (base <base>): <n>/<total>, observed <start>–<end>. Advisory only — not a permit or reservation; another lane may take it.`
 - 標準出力（`--json` のときだけ、1 行）: `{ verdict, advisory: true, repo, base, total, unmerged, unknown, excluded, complete, observedFrom, observedTo, source?, reason? }`。`count --json` は `{ ok, repo, base, unmerged, active: null, unknown, excluded, complete, observedFrom, observedTo }`
@@ -182,13 +191,13 @@ PR1 では 60 / 61 を返すのは `flow-wip.mjs` だけで、launch-worker・pu
 
 ### 6.1 読みの許可表と倒れ方
 
-締め切り: `--deadline-sec`（既定 120 秒、§12 U3）か呼び手の `deadlineAt`。各コマンドの上限は `git` 10 秒・`gh` 30 秒で、残りとの短い方を整数 ms に切り下げ、1 以上のときだけ開始（P7）。`spawnSync` に `timeout` と `killSignal: 'SIGKILL'`。`pr-common.mjs` の `defaultRun`（`:58-67`、時間切れなし）と `withGhRetry`（`:143`、再試行あり）は使わない。
+締め切り: `--deadline-sec`（整数 1〜3600、既定 120 秒、§12 U3）か呼び手の `deadlineMono`（単調時計 `performance.now()` の絶対の締め切り。#4367 の読み手と同じ時計。改訂 3）の短い方。各コマンドの上限は `git` 10 秒・`gh` 30 秒で、残りとの短い方を整数 ms に切り下げ、1 以上のときだけ開始（P7）。`spawnSync` に `timeout` と `killSignal: 'SIGKILL'`。`pr-common.mjs` の `defaultRun`（`:58-67`、時間切れなし）と `withGhRetry`（`:143`、再試行あり）は使わない。
 
 | 呼び出し | 呼ぶ者 | 使う所 | 失敗・時間切れ | 部分的な成功 | 倒れ方 |
 |---|---|---|---|---|---|
 | `git rev-parse --path-format=absolute --git-common-dir` | flow-wip | root | exit 2 | — | 止める |
 | `flow.yaml` の生の読み（`readRawFlowConfig`） | config.mjs | off の判定 | 無い → off。EACCES・壊れた YAML・64 KB 超 → 2 | — | 無い = 何もしない |
-| `readFlowConfig`（`git remote get-url`・`symbolic-ref` などは読み手の中） | config.mjs | repo・base・exclude | 2 | — | 止める（設定の誤り） |
+| `readFlowConfig`（`git remote get-url`・`symbolic-ref` などは読み手の中。#4367 の `runBounded` を同じ `deadlineMono` で渡す） | config.mjs | repo・base・exclude | 2。読み手の時間切れ（`identification timed out`）は 61 | — | 止める（設定の誤り） |
 | `git worktree list --porcelain` | flow-wip | W | 61 | `branch` 行の無い塊（detached）→ 数えない。`worktree` 行の無い塊 → 61 | fail-closed |
 | `git rev-parse HEAD`（各 W、照会の前後 2 回） | flow-wip | tip | その枝は `unknown` | 前後で違う → `unknown` | 数える側 |
 | `gh api repos/<repo>/branches/<base>`（GET） | flow-wip | 祖先の鮮度 | 祖先の証明を使わない | — | 数える側 |
@@ -218,7 +227,7 @@ wip:
 # active は PR2a まで受け付けない
 ```
 
-- 読む順: (1) root を決める → (2) `readRawFlowConfig(root)`（YAML の解析と `wip` の形の検査だけ。remote・base・GitHub を呼ばない）。無い・`wip` が無い → `check` は off → (3) `wip` が有る（または `count`）ときだけ `readFlowConfig(root, { run, env })`
+- 読む順: (1) root を決める → (2) `readRawFlowConfig(root)`（YAML の解析と `wip` の形の検査だけ。remote・base・GitHub を呼ばない）。無い・`wip` が無い → `check` は off → (3) `wip` が有る（または `count`）ときだけ `readFlowConfig(root, { runBounded, env, deadlineMono })`（#4367 PR1a の実際の API。改訂 3）
 - 検査: `wip.total` は整数 1〜1000（小数・文字列・`NaN`・`Infinity`・0 以下・範囲外は 2）。`wip.active` は「PR2a で足すキー」として名指しで 2。`wip` の中の知らないキーは 2
 - 値は既定に持たない（このリポジトリの値は §12 H1。コードに埋めない）
 
@@ -230,7 +239,7 @@ wip:
 | `scripts/orchestrate/pr-common.mjs` の `isGhRead`（`:119`） | 使う | 読みだけの検査 |
 | 同 `withGhRetry`・`defaultRun`・`prsOfBranch`・`DEFAULT_REPO`・`DEFAULT_BASE_BRANCH` | 使わない | 再試行・時間切れなし・最新 1 本だけ・固有の値（§6.1・§1.1） |
 | `scripts/orchestrate/machine-lock-sync.mjs` | **PR1 では使わない** | PR1 にロックを入れない。PR2 の強制の受付で、子のプロセスグループ（`pgid`、`holderState` `:349-355`）と未確定の操作の記録と一緒に使う（§9） |
-| `scripts/orchestrate/run-log.mjs` | 手順から使う（既存の `append`） | 見送りを `--stage contract --result skip` で残す（`RESULTS`、`run-log.mjs:72`） |
+| `scripts/orchestrate/run-log.mjs` | **使わない**（改訂 3） | `contract` の `skip` は通過扱いで、`summarize` が `next=send` を返す（R7 の反例 A）。見送りは plan.md の「見送り」に書く |
 | `scripts/orchestrate/launch-worker.mjs`・`publish-pr.mjs`・`merge-pr.mjs` | 変えない | P10 |
 | `src/lib/metrics/vibe-metrics.ts`・`commandmate report metrics` | 使わない | ブランチ・PR を見ない |
 | `GET /api/worktrees`（`isSessionRunning`） | 使わない | §1.2 |
@@ -241,7 +250,7 @@ wip:
 
 | PR | 中身 | 依存 |
 |---|---|---|
-| **PR1（この run）** | `flow-wip.mjs`（`count`・助言の `check`）、`config.mjs` の `wip.total` と `readRawFlowConfig`、#4367 の読み手の試験の更新（X9）、読み手の手順（orchestrate.md 2-2・`docs/orchestrate/workers.md`・`exit-codes.md`） | #4367 PR1a のブランチから切る（X6） |
+| **PR1（この run）** | `flow-wip.mjs`（`count`・助言の `check`）、`config.mjs` の `wip.total` と `readRawFlowConfig`、#4367 の読み手の試験の更新（X9）、読み手の手順（orchestrate.md 1-5・`docs/orchestrate/workers.md`・`exit-codes.md`） | #4367 PR1a のブランチから切る（X6） |
 | PR2a | セッションの生死の完全な読み（`listSessions` の失敗を区別）と `wip.active` | PR1 |
 | PR2b | **強制の受付のプロトコル**（§9.2〜§9.6）と、その最初の入口 1 つ。Issue の受入条件（上限ちょうどで断られ、マージで 1 本減ると通る）をここで満たす | PR1。§9.6 の再開条件 |
 | PR2c | 残りの入口（送信・PR の作成）と製品の `POST /api/worktrees/[id]/tasks`・`send` の 60 / 61・`FlowExitCode` | PR2b |
@@ -266,10 +275,20 @@ PR1 は 1 本（改訂 1 の 1a / 1b の分割は、launch / publish を外し�
 | 開始済み | 子のコマンドを始めた（持ち主に子の `pgid` を記録） | 未確定として数える | 子の終了 |
 | 外部の結果待ち | 子が戻った（成功・失敗・不明） | 未確定として数える | C に現れた／不成立が証明された |
 | 反映済み | 同じ占有が C に現れた（同じ repo・base・ブランチ・SHA） | C の側で数える（二重に数えない） | 終わり |
-| 不成立 | 操作が行われなかったことが証明された（例: PR の一覧に head SHA の PR が無く、push もされていない、を締め切り内に完全に読めた） | 数えない | 終わり |
+| 不成立 | 当該の操作・受付 ID に対応する **確定した拒否・不実行の結果**があり、その作用が今後成立しないと示せる（改訂 3、R8） | 数えない | 終わり |
 | 不明 | 上のどちらも証明できない | 未確定として数える。次の受付は 61 に狭めてよい | 人の確認か、反映・不成立の証明 |
 
 - 親の死・子の死・一覧に無いことだけでは受付を外さない。ロックの回収（持ち主の死）と受付の解放は別の判断
+- **二つの不在は不成立の証明にならない**（R8）。PR の一覧に head SHA の PR が無い・remote の参照に push が無い、を締め切り内に完全に読めても、それは観測した時点で結果が見えないことの証拠であり、要求が確定して拒否されたこと・今後成立しないことの証拠ではない。この場合は「不明」に残して数え、次の受付は 61 に狭めてよい
+
+| 観測 | 分類 | 数え方 |
+|---|---|---|
+| 一覧・参照が完全に読めて陰性（今の不在） | 不明 | 未確定として数える |
+| 子が終わった・親が死んだ | 不明（生死と要求の状態は別の軸） | 未確定として数える |
+| 当該の受付 ID の操作が確定して拒否された（例: 締め切りで止めて子を起こしていない記録、操作のコマンドが副作用の前に失敗を返した記録） | 不成立 | 数えない |
+| 同じ占有が C に現れた | 反映済み | C の側で数える |
+
+- PR2b の対照: 結果不明の要求があり、照合の時点の一覧・参照はまだ陰性、その後に外部の結果が見えてくる順序を与え、完全な陰性の応答だけで未確定分を消す版を赤にする。陰性対照は、当該の要求について確定した不成立を得て枠を解放できる場合
 - 判定の式: `|C| + |未確定のうち C に現れていないもの| + Δ > total` なら断る（`Δ` は §9.2 の対象と世代で決める）
 
 ### 9.4 PR2b の結果の分け方と期限（最上位の 3 文目）
@@ -302,23 +321,22 @@ PR2b の試験は原因調査 §6 の T1〜T9 を全部含める: 親 gone・子
 
 ## 10. この run で実装する PR1 の範囲（実装の契約にできる粒度）
 
-### 10.1 変更するファイル（scope.allow の案）
+### 10.1 変更するファイル（scope.allow）
 
-| ファイル | 新規 / 変更 | 内容 | 見積り（行） |
-|---|---|---|---|
-| `scripts/orchestrate/flow-wip.mjs` | 新規 | 10.2 の関数と CLI（`count`・`check`） | 400 |
-| `scripts/flow/config.mjs` | 変更 | `wip.total` の許可と検査、`wip.active` を名指しで拒む、`readRawFlowConfig(root)` | 70 |
-| `tests/unit/scripts/flow/config-4367.test.ts` | 変更 | T1 の 8 行目（`wip` を拒む）の期待を「`wip.total` は許可・`wip.active` と `alerts` / `train` は拒む」に更新（X9）。行は消さない | 30 |
-| `tests/unit/scripts/orchestrate/flow-wip-4368.test.ts` | 新規 | §11.1〜§11.5・§11.7 | 800 |
-| `tests/unit/scripts/orchestrate/orchestrate-wip-2-2-4368.test.ts` | 新規 | §11.6（2-2 の bash を偽のコマンドで実行し、3-1・3-3 へ流す） | 300 |
-| `tests/unit/scripts/orchestrate/orchestrate-md-calls.test.ts` | 変更（追加のみ） | 2-2 の `flow-wip.mjs` の呼び出しを `flow-wip.mjs` の `parseArgs` に通す | 30 |
-| `.claude/commands/orchestrate.md` | 変更 | 2-2 に §4.2 の 3 行と扱いの 1 行、手動の代替（`:321-331`）を workers.md へ移す。108,000 バイト以下 | ±0 |
-| `docs/orchestrate/workers.md` | 変更 | 新しい節「2-2 WIP の照会」（`assign.tsv` から外す bash・run の記録・61 の確かめ・保証の範囲）と、移した手動の代替 | 60 |
-| `docs/orchestrate/exit-codes.md` | 変更 | 「2-2 flow-wip check の 60 / 61 / 2」 | 15 |
-| `changelog.d/4368.md` | 変更 | 既存の 1 項目へ統合 | — |
+| ファイル | 新規 / 変更 | 内容 |
+|---|---|---|
+| `scripts/orchestrate/flow-wip.mjs` | 新規 | 10.2 の関数と CLI（`count`・`check`） |
+| `scripts/flow/config.mjs` | 変更 | `wip` をキーとして許可し `wip.total`（整数 1〜1000）を検査、`wip.active` を「PR2a」と名指しで拒む、`readRawFlowConfig(root)`。`readFlowConfig` の結果に `wip` を足すのは節があるときだけ（F1）。WIP の名前を export しない（`cli-4367.test.ts` の「scripts/flow/ は WIP の読み手を export しない」を保つ） |
+| `tests/unit/scripts/flow/config-4367.test.ts` | 変更 | I6 の `wip` の行の期待を「`wip: 1` は形の誤りとして `#4368` を名指して拒む」に更新（X9。行は消さない）。F1〜F6 を足す |
+| `tests/unit/scripts/orchestrate/flow-wip-4368.test.ts` | 新規 | §11.1〜§11.5 |
+| `tests/unit/scripts/orchestrate/orchestrate-md-calls.test.ts` | 変更（追加のみ） | §11.6（1-5 の呼び出しを `parseArgs` に通す、読み手が 1-5 だけ、文の固定） |
+| `.claude/commands/orchestrate.md` | 変更 | 1-5 に照会、`必ず守ること` に 1 行、2-2 を「見送りは除く」に、2-2 の手動の代替と 3-1 の冷間起動の実測を docs へ移す。108,000 バイト以下 |
+| `docs/orchestrate/workers.md` | 変更 | 節「1-5 WIP の照会」と、移した節「2-2 worktree を手動で作る」 |
+| `docs/orchestrate/exit-codes.md` | 変更 | 節「1-5 flow-wip check の 60 / 61 / 2」と、移した冷間起動の実測 |
+| `changelog.d/4368.md` | 変更 | 既存の 1 項目へ統合 |
 
-- 変えないもの: `scripts/orchestrate/launch-worker.mjs`・`publish-pr.mjs`・`merge-pr.mjs`・`machine-lock-sync.mjs`・`.claude/commands/worktree-setup.md`・`src/**`・`tests/setup.ts`。ロックの root・`~/.commandmate` の下へ書かない
-- 規模の見立て: 本体 約 470 行、試験 約 1150 行、手順・文書 約 75 行
+- 改訂 3 で、改訂 2 の `tests/unit/scripts/orchestrate/orchestrate-wip-2-2-4368.test.ts`（2-2 の bash を偽のコマンドで動かす試験）は作らない（R7 の処分。読み手を 1-5 に移し、2-2 に bash を置かないため）。文と呼び出しの試験で固定する
+- 変えないもの: `scripts/orchestrate/launch-worker.mjs`・`publish-pr.mjs`・`merge-pr.mjs`・`run-log.mjs`・`machine-lock-sync.mjs`・`.claude/commands/worktree-setup.md`・`src/**`・`tests/setup.ts`。ロックの root・`~/.commandmate` の下へ書かない
 
 ### 10.2 `flow-wip.mjs` の形（JSDoc の型。scripts は TS を import しない）
 
@@ -330,10 +348,10 @@ PR2b の試験は原因調査 §6 の T1〜T9 を全部含める: 親 gone・子
 /** @typedef {{ unmerged: string[], active: null, unknown: string[], excluded: string[], complete: boolean }} WipCount */
 
 export function countWip(input)                  // 純関数（X8）
-export function readWipInput(root, { run, now, deadlineAt, repo, base, exclude })
+export function readWipInput(root, { run, deadlineMono, wallNow, repo, base, exclude })
                                                  // { ok: true, input } | { ok: false, source, reason }。例外を投げない（生の git / gh の出力を自分で解析する）
 export function decideCheck({ count, total })    // { verdict: 'room'|'full'|'unknown', exit }（P2）。off は呼び手が先に決める
-export function makeRunner({ spawnSync, now })   // (cmd, args, { capMs, deadlineAt }) → { status, stdout, stderr, timedOut, skipped }。残り < 1 ms なら呼ばずに skipped（P7）
+export function makeRunner({ spawnSync, monoNow }) // (cmd, args, { capMs, deadlineMono, cwd }) → { status, code, stdout, stderr, called, timedOut, skipped }。残り < 1 ms なら呼ばずに skipped（P7）。許可表（isAllowedWipCall）の外は呼ばずに refused
 export function parseArgs(argv)
 export function main(argv, deps = {})            // exit code
 export const EXIT_WIP_FULL = 60
@@ -361,15 +379,15 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 6. `count` / `check` はファイル・ロックを書かず、`git worktree add`・`push`・`gh pr create`・`commandmate send` を呼ばない（呼び出しの列と、一時 HOME・一時ロックの root の dir が空のままであることで確かめる）
 7. マージの証明（§11.2 の E 行）がすべて生の出力から判定される
 8. 期限（§11.4 の D 行）: 残りが 1 ms 未満では子を始めない
-9. `.claude/commands/orchestrate.md` が 108,000 バイト以下。2-2 の bash を偽のコマンドで動かすと、60 / 61 / 2 で worktree の作成・`npm install`・launch-worker・tasks.tsv の行・wait-verify が 0 回、`assign.tsv` からその Issue が外れ、run の記録に `skip` が 1 行
-10. `wip.active` は 2（「PR2a」）。#4367 の読み手の試験の 8 行目は `wip.total` を許可する期待に変わり、`alerts` / `train` は今までどおり拒む
+9. `.claude/commands/orchestrate.md` が 108,000 バイト以下。照会の呼び出しは 1-5 の 1 か所だけで `parseArgs` を通り、2-2・3-1・3-3 に無い。0 以外で新しいレーンを `assign.tsv` に入れず plan.md の「見送り」に Issue・担当・モデル・理由を書くこと、run の記録に見送りを書かないこと、再開は次の計画の照会から、が本体・workers.md・exit-codes.md に書かれている（改訂 3）
+10. `wip.active` は 2（「PR2a」）。#4367 の読み手の試験の I6 の `wip` の行は「形の誤りとして名指して拒む」期待に変わり（`wip.total` の許可は F2）、`alerts` / `train` は今までどおり拒む
 11. launch-worker・publish-pr・`/worktree-setup` のファイルが PR1 の差分に無い
 12. `Kewton/CommandMate`・`develop` が `flow-wip.mjs` に無い（grep 0 件）
 
 ### 10.4 gates
 
 - `lint`・`typecheck`・`unit-related`（`node scripts/run-related-unit-tests.mjs --base origin/develop`、mutex `cpu.heavy`）。`cpu.heavy` の裁定を省かない。`src/` を触らないので `build-server` は要らない。`tests/setup.ts` は変えない
-- ワーカーの確認（ゲートの代わりにしない）: `npx vitest run tests/unit/scripts/orchestrate/flow-wip-4368.test.ts tests/unit/scripts/orchestrate/orchestrate-wip-2-2-4368.test.ts tests/unit/scripts/orchestrate/orchestrate-md-calls.test.ts tests/unit/scripts/flow tests/unit/guards tests/unit/docs`
+- ワーカーの確認（ゲートの代わりにしない）: `npx vitest run tests/unit/scripts/orchestrate/flow-wip-4368.test.ts tests/unit/scripts/orchestrate/orchestrate-md-calls.test.ts tests/unit/scripts/flow tests/unit/guards tests/unit/docs`、`node scripts/check-orchestrate-size.mjs`
 - 試験は `run` を差し替え、**生の** `git worktree list --porcelain`・`gh … --json` の出力を与える（完成した verdict を純関数に渡すだけの試験で済ませない）。一時 dir は `fs.mkdtempSync(os.tmpdir())`、`HOME`・`CM_VERIFY_LOCK_ROOT` を一時 dir へ向けて `afterEach` で消し、変えた env は戻す
 - 既存の試験の期待の反転は X9 の 1 行だけ（plan に「行の削除ではなく期待の更新」と書く）
 
@@ -433,7 +451,7 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 | D4 | 残り 1 ms | 子 1 回、`timeout: 1` | — |
 | D5 | `gh` が戻らない（`timedOut: true`） | 61、`source` と `timeout` | 時間切れを渡さない |
 | D6 | 締め切りの後に返った成功 | 捨てて 61 | 遅れた結果で room |
-| D7 | 呼び手の `deadlineAt` が `--deadline-sec` より短い | 呼び手の締め切り | 取り直す・延ばす |
+| D7 | 呼び手の `deadlineMono` が `--deadline-sec` より短い | 呼び手の締め切り | 取り直す・延ばす |
 | D8 | 全体の取得が 61 の後 | 再試行の呼び出し 0 回 | 再試行する |
 
 ### 11.5 読むだけ・同時の限界
@@ -443,20 +461,19 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 | T10 | 2 つの `check` が同じ観測（C 2 本、total 3）を見る | 両方 0。**保証の範囲の限界を固定する行**で、強制の合格試験ではない |
 | T10b | `count` / `check` を 1 回ずつ | 一時 HOME・一時ロックの root の下にファイルが 0、呼び出しの列に書く操作（`worktree add`・`push`・`pr create`・`send`）が 0 |
 
-### 11.6 手順（偽のコマンドで bash を実際に動かす）
+### 11.6 手順（文と呼び出しの試験。改訂 3）
 
-行の順の正規表現だけで代わりにしない。orchestrate.md 2-2 と `docs/orchestrate/workers.md` の新しい節の bash を取り出し、`PATH` の先頭に偽の `node`（`flow-wip.mjs`・`run-log.mjs`・`launch-worker.mjs`・`wait-verify.mjs` の振る舞いを引数で分ける）・`git`・`npm`・`commandmatedev`・`curl`・`jq` を置いた一時 dir で、書かれたとおりの bash で動かし、呼び出しの記録と `assign.tsv`・`tasks.tsv` を見る。
+R7 の処分で、照会の読み手を 1-5 の計画の段だけにし、2-2 の bash・`assign.tsv` の後の書き換え・run の記録に組み込まない。2-2 の bash を偽のコマンドで動かす試験（改訂 2 の T11a〜T11f）は作らず、`orchestrate-md-calls.test.ts` に次を足す。
 
-| # | `check` の答え | 期待 |
+| # | 対象 | 期待 |
 |---|---|---|
-| T11a | 0（room） | その Issue の worktree の作成と `npm install` が 1 回（陰性対照）。既存の 2-3 以降へ |
-| T11b | 0（off） | 同上。`off` の表示が残る |
-| T11c | 60 | `git worktree add`・`npm install` 0 回、`assign.tsv` からその Issue の行が消え、run の記録 `--stage contract --result skip --note "wip=60"` が 1 行。**後の新しいレーン候補も照会・作成 0 回** |
-| T11d | 61 | 同上（`wip=61`） |
-| T11e | 2 | 同上（`wip=2`） |
-| T11f | 60 の後、続けて 3-1・3-3 の雛形を同じ一時 dir で動かす | launch-worker の呼び出しにその Issue が無い、tasks.tsv にその行が無い、wait-verify にその Issue が無い。stop / kill・冷間起動の再送 0 回 |
-| T11g | 既存の worktree がある Issue だけ | `check` の呼び出し 0 回 |
-| T11h | 文書 | workers.md の節に「助言で、許可・予約ではない」「同時の照会の上限は保証しない」が書かれている |
+| T11a | 1-5 の bash | `bash -n` が通り、`flow-wip.mjs` の引数が `parseArgs` を通る（`check`・`--worktree .`・`--json`） |
+| T11b | 本体 | `flow-wip.mjs check` の呼び出しは本体に 1 か所。2-2・3-1・3-3 に `flow-wip` が無い。`--note "wip=` が無い |
+| T11c | 1-5・2-2 の文 | 「`assign.tsv` に入れる前に 1 回だけ」「0 以外は新しいレーンを入れず plan.md の『見送り』へ」、2-2 が「見送りは除く」 |
+| T11d | workers.md の節 | bash が通り、0 以外で `ROOM=0`。「助言で、許可・予約ではない」「同時の照会の上限は保証しない」「Issue・担当・モデル」「次の計画（1-5）で `check` をやり直してから」「すべて `assign.tsv` に入れない」。run の記録への追記が無い |
+| T11e | exit-codes.md の節 | 0・60・61・2・1 の行がある |
+
+- 見送りの再開の実際の読み手（`run-log.mjs status`）は、見送りの記録を持たないので `next=send` を返さない。記録の行を足さないこと自体を T11b・T11d で固定する
 
 ### 11.7 設定の共有（#4367 の読み手）
 
@@ -466,7 +483,7 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 | F2 | `wip: { total: 8 }` | 許可、結果に `wip.total = 8` | — |
 | F3 | `wip: { total: 8, active: 5 }` | 2、「PR2a」を名指す | `active` を黙って無視 |
 | F4 | `wip: { totl: 8 }`・`total: 0`・`1.5`・`"8"`・`.inf` | 2 | — |
-| F5 | `alerts`・`train`（#4367 PR1a の時点） | 今までどおり 2 | 「wip を拒む」行を消して済ませる |
+| F5 | `alerts`・`train`（#4367 PR1a の時点） | 今までどおり 2 | 「wip を拒む」行を消して済ませる（改訂 3: I6 の行は残し、`wip: 1` を形の誤りとして拒む期待に変えた） |
 | F6 | `readRawFlowConfig` | git の remote・GitHub を呼ばない | — |
 
 ## 12. 人の操作・人の判断（未決）
@@ -503,7 +520,7 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 ### 13.1 提供する（#4368 → #4367）
 
 - **WIP の数**（共通の枠 §3、X8）: `scripts/orchestrate/flow-wip.mjs` の
-  - `readWipInput(root, { run, now, deadlineAt, repo, base, exclude })` → `{ ok: true, input } | { ok: false, source, reason }`。例外を投げない。`deadlineAt` は呼び手の残りの予算（#4367 の頼み）。再試行 0 回。残り 1 ms 未満では子を始めない
+  - `readWipInput(root, { run, deadlineMono, wallNow, repo, base, exclude })` → `{ ok: true, input } | { ok: false, source, reason }`。使えない答えで例外を投げない。`deadlineMono` は呼び手の単調時計の絶対の締め切り（#4367 の `runBounded` と同じ時計。Date 系の時刻を渡さない）。`run` は `makeRunner` の戻り値。再試行 0 回。残り 1 ms 未満では子を始めない
   - `countWip(input)` → `{ unmerged: string[], active: null, unknown: string[], excluded: string[], complete: boolean }`
   - 単位は **repo × base**。#4367 は `complete` が真のときだけ `unmerged.length` を確定値として記録し、偽なら `null`（上側の数は別の欄で、警報の入力にしない）。`active` は PR2a まで常に `null`
   - `complete` は定義した取得の範囲の完全性で、同じ瞬間の写しでも予約でもない。計測の値を受付の許可に使わない
@@ -513,10 +530,10 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 
 ### 13.2 利用する（#4367 → #4368）
 
-- `scripts/flow/config.mjs` の `readFlowConfig(repoRoot, { run, env })`（X1）。#4367 PR1a の承認された版に固定して依存する。#4368 PR1 が変えること（X9、#4368 の scope に入れる）:
+- `scripts/flow/config.mjs` の `readFlowConfig(repoRoot, { runBounded, env, deadlineMono })`（X1。#4367 改訂 2 の確定版の API。改訂 2 までの `{ run, env }` は旧版 9240bff の形）。#4367 PR1a の承認された版に固定して依存する。#4368 PR1 が変えること（X9、#4368 の scope に入れる）:
   1. `wip` を名指しで拒む扱いをやめ、`wip.total` を許可、`wip.active` を「PR2a で足す」として名指しで拒む
   2. `readRawFlowConfig(root)` を足す（YAML の解析と `wip` の形の検査だけ）
-  3. `tests/unit/scripts/flow/config-4367.test.ts` の T1 の 8 行目の期待を同じ PR で更新（行は消さない。`alerts`・`train` を拒む期待は残す）
+  3. `tests/unit/scripts/flow/config-4367.test.ts` の I6 の `wip` の行の期待を同じ PR で更新（行は消さない。`alerts`・`train` を拒む期待は残す）
 - `flow` の記録の書き手（#4367）: PR1 では呼ばない
 
 ### 13.3 #4369・#4370 へ
@@ -535,17 +552,27 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 - `listSessions`（`src/lib/tmux/tmux.ts:386-415`）は例外を空の一覧にする
 - `machine-lock-sync.mjs` の release はロックの dir の削除に失敗すると例外を投げる（`:1269-1275`）。`holderState` は `pgid` があればグループの生死も見る（`:349-355`）。`processStartMs` の `ps` は時間切れを持たない（`:118-119`）。launch-worker の `catch` は通常の例外を exit 1 にする（`launch-worker.mjs:639-641`）
 - `.claude/commands/orchestrate.md` は 107,998 バイト、目標は 108,000 バイト（`tests/unit/docs/orchestrate-size-headroom-4276.test.ts:19`）
-- #4367 の設計（改訂 1 の 9240bff）: 読み手は `scripts/flow/config.mjs` の `readFlowConfig(repoRoot, { run, env })`、PR1a は `wip` を exit 2 で拒み、その試験は `tests/unit/scripts/flow/config-4367.test.ts` の T1 の 8 行目
+- #4367 の設計（改訂 1 の 9240bff）: 読み手は `scripts/flow/config.mjs` の `readFlowConfig(repoRoot, { run, env })`、PR1a は `wip` を exit 2 で拒み、その試験は `tests/unit/scripts/flow/config-4367.test.ts` の T1 の 8 行目（実装の時点では I6 の `wip` の行。API は改訂 2 の 8b3d5b1 で `{ runBounded, env, deadlineMono }` に変わった）
 - Node の `spawnSync` は `timeout` が正のときだけタイマーを張る（原因調査 §3.4 が一次資料を確認。この設計ではその報告として引く）
 - 2026-11-14 の実測（再取得していない）: このリポジトリの `git worktree list` は 24 行、develop へ向いた開いた PR は 1 本
 
 ### 14.2 見立て（未確認）
 
 - `gh pr list --state merged` の `headRefOid` は、マージの時点の head の SHA（squash でも head ブランチの SHA）と見ている。PR1 の最初に、squash でマージした PR 1 本で確かめる（`gh pr view <N> --json headRefOid,mergeCommit`）。確かめるまで、この証拠だけで枝を C から外す実装を受け入れない
-- 2-2 で 1 本ずつ照会して作れば、1 つの run の中では上限を超えない。超えるのは複数の run・リーダーが同時に 2-2 を進めたとき（§2.3）
+- 1-5 で 1 回照会し、空きの本数までしか新しいレーンを入れなければ、1 つの run の中では上限を超えない。超えるのは複数の run・リーダーが同時に計画したとき（§2.3）
 - 枝ごとのマージの照会は W の本数だけ増える（このリポジトリで 20 本前後）。窓で多くが見つかると見ている
 
 ## 15. 改訂の対応
+
+### 15.1a 改訂 3（再レビュー 3 の R7・R8、リーダーの処分「狭めて塞ぐ」、PR1 の実装）
+
+| 指摘 | 処分 | 反映先 |
+|---|---|---|
+| R7 見送りが後段・再開で送信の対象へ戻る | 照会の読み手を 1-5 の計画の段だけにする。0 以外ならその Issue と worktree の無い残りの新しい候補すべてを `assign.tsv` に入れず、plan.md の「見送り」に Issue・担当・モデル・理由。run の記録（`contract` の `skip`）は使わない。再開は次の計画で照会し直してから。2-2 の bash の試験は作らず、文と呼び出しの試験で固定 | §2.2 P9、§3.2、§4、§8、§10.1、§10.3、§11.6 |
+| R8 二つの不在は不成立の証明にならない（PR2b） | 不成立は当該の操作・受付 ID の確定した拒否・不実行の結果だけ。今の不在は不明に残す。表と対照を足す | §9.3 |
+| 実装で分かった差: #4367 の読み手の API | `readFlowConfig(root, { runBounded, env, deadlineMono })`（単調時計）。`flow-wip` も同じ時計の `deadlineMono` で締め切りを持つ | §6.1、§7、§10.2、§13 |
+| 実装で分かった差: full の表示の「古い順」 | W・P に古さの根拠の時刻が無いので、観測の順に最大 5 本の名前を出し、古さを断定しない | §5.2 |
+| 実装で分かった差: 識別の時間切れ | 読み手の `identification timed out` は設定の誤り（2）ではなく判定できない（61） | §6.1 |
 
 ### 15.1 改訂 2（再レビューの R1〜R6、原因調査、リーダーの処分 M1）
 
@@ -563,4 +590,4 @@ node scripts/orchestrate/flow-wip.mjs check [--worktree <path>] [--deadline-sec 
 
 W3（active を PR1 から外す）・W4（マージの存在の証明）・W5（root と off）・W6（手順の 60 / 61 の扱い）・W7（期限）・X8・X9 は改訂 2 でも保つ。W1・W2・W8 の強制の部分は PR2 へ移した。
 
-改訂の履歴: 2026-11-14 改訂 1 — 2-4-4 事前レビュー（P2 8 件）とリーダーの処分を反映。2026-11-14 改訂 2 — 再レビュー（P2 6 件）と原因調査を受けたリーダーの処分（M1）を反映し、PR1 を count と助言の check と orchestrate の手順に絞り、強制の受付を PR2 の条件と表へ移した。
+改訂の履歴: 2026-11-14 改訂 3 — 再レビュー 3 の R7・R8 の処分と PR1 の実装の差を反映（§15.1a）。2026-11-14 改訂 1 — 2-4-4 事前レビュー（P2 8 件）とリーダーの処分を反映。2026-11-14 改訂 2 — 再レビュー（P2 6 件）と原因調査を受けたリーダーの処分（M1）を反映し、PR1 を count と助言の check と orchestrate の手順に絞り、強制の受付を PR2 の条件と表へ移した。
