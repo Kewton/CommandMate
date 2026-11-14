@@ -244,6 +244,13 @@ npm run db:reset      # DBリセット
 
 ---
 
+## 記憶の書き場所
+
+- 許可・決定・作業の状態・次の一手・人への質問は CommandMate の mem に書く（決定の行き先は該当する Issue）。Claude Code の auto memory（`~/.claude/projects/.../memory/`）には書かない
+- auto memory に書くのは、期限の無い罠・教訓・利用者の好みだけ
+
+---
+
 ## Claude Code コマンド・エージェント
 
 本プロジェクトではClaude Code用のスラッシュコマンドとサブエージェントを整備しています。
