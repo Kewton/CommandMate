@@ -261,6 +261,26 @@ describe("the moved text agrees with the code (#4403 review)", () => {
   it("a short transition may be missed between captures, not always invisible", () => {
     const arch = read("docs/architecture.md");
     expect(arch).not.toContain("5 秒未満で始まって終わる遷移は API にも UI にも現れない");
-    expect(arch).toContain("キャプチャの採取と採取の間に完結すると見逃しうる");
+    expect(arch).toContain("採取と採取の間に始まって終わる遷移は**見逃しうる**");
+  });
+
+  it("the miss window depends on both the TTL and the fetch interval, without a guaranteed hold time", () => {
+    const arch = read("docs/architecture.md");
+    expect(arch).not.toContain("ポーリング間隔を縮めても見逃しは減らない");
+    expect(arch).not.toContain("8 秒程度以上保つ");
+    expect(arch).toContain("見逃しは TTL と取得の周期の両方で決まる");
+    expect(arch).toContain("次の要求が来たときに");
+  });
+
+  it("the cold-start table in exit-codes.md does not confirm the trust dialog with a bare Enter", () => {
+    const exitCodes = read("docs/orchestrate/exit-codes.md");
+    expect(exitCodes).not.toContain(':" Enter` で確定');
+    expect(exitCodes).toContain("Enter だけで確定しない");
+    expect(exitCodes).toContain("../internal/TESTING_GUIDE.md#実-tui-と-tmux-を使う検証");
+    expect(
+      headingAnchors(read("docs/internal/TESTING_GUIDE.md")).has(
+        githubSlug("実 TUI と tmux を使う検証"),
+      ),
+    ).toBe(true);
   });
 });

@@ -10,7 +10,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 
 | 画面 | 対応 |
 |---|---|
-| 信頼ダイアログ（`Do you trust the contents of this project?`） | `tmux send-keys -t "=mcbd-<agent>-<worktree-id>:" Enter` で確定 → **待たずに再送** |
+| 信頼ダイアログ（`Do you trust the contents of this project?`） | Enter だけで確定しない（既定のカーソルが `No, exit` の画面では Enter で Claude が終わる）。capture でカーソルの行を確かめ、`Yes, I trust this folder` まで `tmux send-keys -t "=mcbd-<agent>-<worktree-id>:" Up`（または `Down`）で移ってから `Enter` で確定 → **待たずに再送**（手順は [TESTING_GUIDE の「実 TUI と tmux を使う検証」](../internal/TESTING_GUIDE.md#実-tui-と-tmux-を使う検証)） |
 | 既にプロンプト（入力欄の枠が出ている） | **待たずに再送**（送信枠に間に合わなかっただけ） |
 | まだ起動中（バナーも入力欄も無い） | 約 2 分待ってから 1 回だけ再送する |
 

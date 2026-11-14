@@ -1015,7 +1015,8 @@ graph TD
 ### 14.6 status のキャプチャキャッシュ
 
 - `GET /api/worktrees` などの status（`isProcessing` / `isSessionRunning`）は `src/lib/tmux/tmux-capture-cache.ts` のキャッシュ（`CACHE_TTL_MS = 5000`）越しの `capture-pane` から求める（`worktree-status-helper.ts` → `captureSessionOutput`）。キャッシュを通らないのは `captureSessionOutputFresh` だけ
-- そのため、キャッシュの有効な間（最大 5 秒）に始まって終わる遷移は、**キャプチャの採取と採取の間に完結すると見逃しうる**（`getOrFetchCapture` は期限内ならキャッシュを返し、期限切れのときだけ採り直す）。いつも見えないわけではなく、採取がたまたま遷移の最中に当たれば現れる。クライアントのポーリング間隔を縮めても見逃しは減らない。デモやテストで確実に観測させたい状態は 8 秒程度以上保つ
+- 採取は要求に引かれて起きる。TTL（5 秒）の内の再要求は前の採取をそのまま返し（`getOrFetchCapture` → `getCachedCapture`）、期限を過ぎたエントリは捨てられて、**次の要求が来たときに**採り直す（自分で採り直すタイマーは無い）。要求の周期はクライアントのポーリング（`useWorktreesCache` の `setInterval`。間隔は稼働中のセッションの有無で変わる）などで決まる
+- そのため、採取と採取の間に始まって終わる遷移は**見逃しうる**。採取の間隔はおよそ「TTL と要求の周期の長いほう」なので、見逃しは TTL と取得の周期の両方で決まる。取得の周期を TTL より短くしても採取の間隔は TTL より縮まらず、TTL より長い周期なら周期のほうが効く。いつも見えないわけではなく、採取が遷移の最中に当たれば現れる。デモやテストで観測させたい状態は、TTL と取得の周期の長いほうより十分長く保つ
 - `detectSessionStatus` を直接呼ぶと running なのに UI が変わらないときは、検出器より先にこのキャッシュの窓を疑う
 
 ⸻
