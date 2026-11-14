@@ -86,6 +86,9 @@ logs/
 # である（生成物ではない）。run の成果物は report_dir 側（既定 .commandmate/uat/）に出るので、
 # 上の /.commandmate/* で除外されたままになる。
 !/.commandmate/uat.yaml
+# 流れの設定（Issue #4368 の wip.total。scripts/flow/config.mjs が読む）。人が書く宣言なので追跡する。
+# 記録は ~/.commandmate/flow（リポジトリの外）に出るので、ここには生成物が無い。
+!/.commandmate/flow.yaml
 # 実行契約（Issue #1545 / Phase 2-1）。「誰がどんな制約で作業させたか」の記録なので
 # レビュー可能な形で追跡する。.yaml 以外（ログ等の副産物）は除外したままにする。
 !/.commandmate/tasks/
