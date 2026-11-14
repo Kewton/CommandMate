@@ -57,7 +57,6 @@ import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
 import {
   AGENT_ROLE_CLI_TOOLS,
   agentRoleReplacesDefaultInstructions,
-  isAgentRoleAdapterEnabled,
   isAgentRoleCliTool,
   type EffectiveRole,
   type InstanceRoleEntry,
@@ -79,6 +78,12 @@ import {
   toEffectiveRole,
   type RoleResolverDeps,
 } from './resolve';
+
+/**
+ * Every D3 adapter is on (Antigravity since Issue #4385). Still answered, so an
+ * older client or script that reads it keeps working.
+ */
+const ADAPTER_ENABLED = true;
 
 /** The refusals a route turns into a status. */
 export class InstanceRoleRequestError extends Error {
@@ -226,7 +231,7 @@ export async function buildInstanceRoleSettings(
         cliToolId: instance.cliTool,
         alias: instance.alias,
         supported: isAgentRoleCliTool(instance.cliTool),
-        adapterEnabled: isAgentRoleCliTool(instance.cliTool) && isAgentRoleAdapterEnabled(instance.cliTool),
+        adapterEnabled: isAgentRoleCliTool(instance.cliTool),
         stored,
         application: {
           effectiveNext,
@@ -241,7 +246,7 @@ export async function buildInstanceRoleSettings(
 
     const toolDefaults: WorktreeToolRoleDefault[] = AGENT_ROLE_CLI_TOOLS.map((cliToolId) => ({
       cliToolId,
-      adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
+      adapterEnabled: ADAPTER_ENABLED,
       effective: toEffectiveRole(resolveDefaultsForTool(db, cliToolId, membership)),
     }));
 
@@ -404,7 +409,7 @@ export function buildSystemRoleDefaults(db: Database.Database): SystemRoleDefaul
     const entry = stored[cliToolId];
     return {
       cliToolId,
-      adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
+      adapterEnabled: ADAPTER_ENABLED,
       stored: entry ? { state: 'role', roleId: entry.roleId, roleName: entry.roleName } : { state: 'unset' },
     };
   });
@@ -425,7 +430,7 @@ export function buildRepositoryRoleDefaults(
     const defaults = AGENT_ROLE_CLI_TOOLS.map(
       (cliToolId): RepositoryRoleDefaultEntry => ({
         cliToolId,
-        adapterEnabled: isAgentRoleAdapterEnabled(cliToolId),
+        adapterEnabled: ADAPTER_ENABLED,
         stored: stored[cliToolId] ?? { state: 'inherit' },
         effective: toEffectiveRole(
           attributeToRepository(resolveDefaultsForTool(db, cliToolId, membership), repository.id)

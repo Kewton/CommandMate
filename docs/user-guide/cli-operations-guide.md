@@ -3553,7 +3553,9 @@ commandmate roles default codex --repo . --role reviewer
 
 - `<role>` は ID か名前です。完全一致を優先し、無ければ大文字小文字と Unicode の正規形を無視して照合します。候補が 2 つあれば候補を示して exit 2 です（自動では選びません）
 - 予約語はありません。「ロールなし」と「既定に従う」は `--none` / `--no-role` / `--inherit` のフラグなので、`none` という名前のロールも作れます
-- 対象のツールは claude、codex、command-code、opencode、opencode-v2、copilot、antigravity です。それ以外は exit 2（`tool_not_supported`）。Antigravity は設定を保存できますが、有効になるまでそのロールでの起動は拒否され、警告が出ます
+- 対象のツールは claude、codex、command-code、opencode、opencode-v2、copilot、antigravity です。それ以外は exit 2（`tool_not_supported`）
+- Antigravity（Issue #4385）: ロールが設定されると `~/.gemini/config/agents/<名前>/agent.md` に定義（agy 1.5.8 で確かめた 13 個の `tools` つき）を書き、新しいプロセスを起こす前に `agy agent` の一覧にその名前があるかを確かめてから `--agent <名前>` で起動します。一覧にあったときだけ、起動した後に agy の画面でロールを確かめ、確かめるまで CommandMate からの本文を送りません。一覧に無い・`agy agent` が答えない・確かめられない（`CM_UAT_ISOLATION=1` では `agy agent` を起こしません）ときも起動はしますが（`CM_UAT_ISOLATION=1` では、共有ホームにロールの定義と agy の hook の設定がこの build の書くものとして既にあるときだけ。定義が無ければ書かずに起動を拒否します。#3360）、そのプロセスへの本文はいつも未送信になり、どれに当たったかを理由に出します。確かめられない・確かめた記録が無い（サーバーの再起動・再ビルドの後や、ロールなしで動いていたセッションに後からロールを設定した場合を含む）ときは「ロールを確認できないため未送信」で理由を出し、未送信 exit 32 です（`roleRefusal` は `not-confirmed` か `not-applied`）。プロセスは残るので、`commandmate instances <worktree-id> kill <instance-id>` で止めてから送り直します。Auto-Yes の応答キーと `respond` は本文ではないので止めません
+- `adapterEnabled` は全ツールで常に `true` です（互換のために残しています）。ロールを設定したときの「roles are not enabled」の警告は、`false` を返す旧いサーバーにつないだときだけ出ます
 
 ### `--repo` の形式と優先順位
 

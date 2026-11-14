@@ -44,8 +44,6 @@ import type { SendAttemptReason } from '@/lib/session/send-attempt-types';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import {
   agentRoleReplacesDefaultInstructions,
-  isAgentRoleAdapterEnabled,
-  isAgentRoleCliTool,
   type StoredRoleState,
 } from '@/types/agent-roles';
 import type { Worktree } from '@/types/models';
@@ -184,11 +182,6 @@ export async function prepareSendRole(
     const input = parseRoleAssignmentInput(body.role);
     if (!input) {
       return refuse('role must be inherit, none or a role id', 'invalid_request', untouched(), recordNotSent, 'role-launch-refused', 400);
-    }
-    if (input.state === 'role' && isAgentRoleCliTool(cliToolId) && !isAgentRoleAdapterEnabled(cliToolId)) {
-      return refuse(`Roles are not enabled for ${cliToolId} yet`, ROLE_LAUNCH_REFUSED_CODE, untouched(), recordNotSent, 'role-launch-refused', 409, {
-        roleRefusal: 'adapter-disabled',
-      });
     }
     try {
       setManagedInstanceRole(db, worktree, rosterInstanceId, input);

@@ -52,7 +52,6 @@ import { fixedEnvReader } from '@/lib/agent-roles/composition';
 import { readRoleLaunchRefusal, RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
 import { BaseCLITool } from '@/lib/cli-tools/base';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import { AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR } from '@/types/agent-roles';
 import { parse as parseToml } from 'smol-toml';
 import { parse as parseYaml } from 'yaml';
 
@@ -210,7 +209,6 @@ describe('the launch line of each adapter', () => {
   ];
 
   it.each(cases)('%s names the file and never the body', async (cliTool, check) => {
-    vi.stubEnv(AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR, '1');
     setSystemRoleDefault(db, cliTool, roleId);
     const instance = tool(cliTool);
     await instance.startSession(WT, worktreePath);
@@ -293,7 +291,6 @@ describe('generated content', () => {
   });
 
   it.each(['copilot', 'antigravity'] as const)('%s: `---` in the body does not end the frontmatter', async (cliTool) => {
-    vi.stubEnv(AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR, '1');
     setSystemRoleDefault(db, cliTool, roleId);
     await tool(cliTool).startSession(WT, worktreePath);
     const text = artifactOf(cliTool);
@@ -420,19 +417,23 @@ describe('the env the user set', () => {
 });
 
 describe('refusals send nothing and record nothing as applied', () => {
-  it('Antigravity is off by default: a role refuses, and no role still starts', async () => {
+  // Issue #4385 PR2 (§8.5): was "Antigravity is off by default: a role refuses, and no
+  // role still starts". There is no switch now (P4); the listing refusals (P5) run
+  // through the real driver in tests/unit/cli-tools/antigravity-role-gate-4385.test.ts.
+  it('Antigravity is on by default: a role starts with its agent, and no role still starts', async () => {
     const plain = tool('antigravity');
     setSystemRoleDefault(db, 'claude', roleId);
     await plain.startSession(WT, worktreePath);
     expect(plain.lines).toHaveLength(1);
+    expect(plain.lines[0]).not.toContain('--agent');
 
     pane.exists = false;
     setSystemRoleDefault(db, 'antigravity', roleId);
-    const refused = tool('antigravity');
-    await expect(refused.startSession(WT, worktreePath)).rejects.toSatisfy(
-      (error) => readRoleLaunchRefusal(error) === 'adapter-disabled'
-    );
-    expect(refused.launches).toBe(0);
+    const withRole = tool('antigravity');
+    await withRole.startSession(WT, worktreePath);
+    expect(withRole.launches).toBe(1);
+    expect(withRole.lines[0]).toMatch(/ --agent cm-role-[a-z0-9-]+$/);
+    expect(records('antigravity').requested?.adapterVersion).toBe('2');
   });
 
   it('a home that cannot be written refuses before any pane exists', async () => {
@@ -551,7 +552,6 @@ describe('launched: only on the evidence the adapter has', () => {
   });
 
   it('Command Code and a disabled-then-enabled Antigravity stay unknown: nothing confirms them', async () => {
-    vi.stubEnv(AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR, '1');
     for (const cliTool of ['command-code', 'antigravity'] as const) {
       setSystemRoleDefault(db, cliTool, roleId);
       pane.exists = false;

@@ -21,8 +21,25 @@ import { shellQuote } from '@/lib/hooks/hook-settings-generator';
 import type { AgentRoleCliTool, ResolvedRole } from '@/types/agent-roles';
 import { computeBodyFingerprint, computeFingerprint } from './fingerprint';
 
-/** Moves when what an adapter generates for the same input changes. */
-const ADAPTER_VERSION = '1';
+/**
+ * Moves when what an adapter generates for the same input changes, for that
+ * adapter only: another adapter's fingerprints must not move with it.
+ * Antigravity's `2` (Issue #4385 D5) adds `tools` to its definition.
+ */
+const ADAPTER_VERSIONS: Readonly<Record<AgentRoleCliTool, string>> = {
+  claude: '1',
+  codex: '1',
+  'command-code': '1',
+  opencode: '1',
+  'opencode-v2': '1',
+  copilot: '1',
+  antigravity: '2',
+};
+
+/** What {@link computeRoleInjection} records as the adapter's version (Issue #4385 D5). */
+export function roleAdapterVersion(adapter: AgentRoleCliTool): string {
+  return ADAPTER_VERSIONS[adapter];
+}
 
 /** The wrapper every adapter puts around a body. Moves with its text. */
 export const ROLE_WRAPPER_VERSION = '1';
@@ -111,9 +128,10 @@ export function computeRoleInjection(
       : null;
   const effectiveAgent = adapter === 'opencode-v2' ? (composition.opencodeV2EffectiveAgent ?? null) : null;
   const explicitAgent = composition.explicitAgent ?? null;
+  const adapterVersion = roleAdapterVersion(adapter);
   const canonical = JSON.stringify({
     adapter,
-    adapterVersion: ADAPTER_VERSION,
+    adapterVersion,
     wrapperVersion,
     bodyFingerprint: role.bodyFingerprint,
     codexDeveloperInstructions: codexSource,
@@ -122,7 +140,7 @@ export function computeRoleInjection(
   });
   return {
     adapter,
-    adapterVersion: ADAPTER_VERSION,
+    adapterVersion,
     wrapperVersion,
     injectionFingerprint: computeFingerprint(Buffer.from(canonical, 'utf8')),
     instructions: buildInstructions(adapter, role.body, composition),

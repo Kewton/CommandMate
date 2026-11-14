@@ -182,17 +182,25 @@ describe('prepareSendRole', () => {
     expect(new Set(refused)).toEqual(new Set(['role-launch-refused']));
   });
 
-  it('refuses a role on a disabled adapter, saving nothing', async () => {
+  // Issue #4385 PR2 (§8.5): was "refuses a role on a disabled adapter, saving nothing".
+  // Antigravity is on by default, so the role is saved and the send goes on to the
+  // driver's gate.
+  it('saves a role on Antigravity, on by default, and goes on', async () => {
+    db.prepare('UPDATE worktrees SET selected_agents = ? WHERE id = ?').run(
+      JSON.stringify(['claude', 'codex', 'antigravity']),
+      WT
+    );
     const prepared = await prepareSendRole(
       db,
       { role: { state: 'role', roleId: a } },
       { worktree: worktree(), cliToolId: 'antigravity', rosterInstanceId: 'antigravity', instanceId: undefined },
       recordNotSent as never
     );
-    if (prepared.ok) throw new Error('expected a refusal');
-    const answer = await bodyOf(prepared.response);
-    expect(answer).toMatchObject({ code: ROLE_LAUNCH_REFUSED_CODE, roleRefusal: 'adapter-disabled' });
-    expect(getInstanceRoleState(db, WT, 'antigravity')).toEqual({ state: 'inherit' });
+    if (!prepared.ok) throw new Error(`refused: ${JSON.stringify(await bodyOf(prepared.response))}`);
+    expect(prepared.value?.saved).toBe(true);
+    expect(prepared.value?.condition?.injectionFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(getInstanceRoleState(db, WT, 'antigravity')).toMatchObject({ state: 'role', roleId: a });
+    expect(refused).toEqual([]);
   });
 
   it('a pin that the settings no longer answer refuses, and says what is saved', async () => {

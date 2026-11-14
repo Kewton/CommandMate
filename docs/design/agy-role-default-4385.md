@@ -30,7 +30,7 @@
 1. 生成物（`~/.gemini/config/agents/<name>/agent.md`）の frontmatter に `tools` を足す。1.5.8 で確かめた 13 個の定数で、出典を書く（D1）
 2. `CM_AGENT_ROLE_ANTIGRAVITY_ENABLED` と `isAgentRoleAdapterEnabled` を消し、既定で有効にする。API の `adapterEnabled` は常に `true` で残し、CLI の警告は旧いサーバー向けに残す（D4）
 3. **版の範囲で起動を止めない。** 登録に無い道具の名前は agy 自身が exit 3 で止まる（実測）。CommandMate はその結果のプロセスへ本文を送らない（D2）
-4. **起動前に `agy agent` の一覧と照合する**（新しいプロセスを起こす分岐だけ、D3）
+4. **起動前に `agy agent` の一覧と照合する**（新しいプロセスを起こす分岐だけ、D3）。起動は拒否しない。一覧にあったときだけ起動後の確認で正の記録へ進め、それ以外（一覧に無い・失敗・確認できない）は本文を未送信で止める（2026-11-15 の人の決定、PM の結論 A）
 5. **送信の門は §0.1 の 1 文。** 門は driver の中（通常の send にも）と、本文を実際に入れる境界の両方に置く（D2）
 6. **CommandMate はセッションを自動では止めない。** 不適用・猶予切れ・正の記録が無いときは、本文を未送信で拒否して理由を見せる。プロセスは残し、止めるのは人の既存の停止（D2）
 7. 正の記録は、新しく起こした世代を確認したときにだけ作られ、その世代が今の生きている世代である間だけ有効（D7）
@@ -63,7 +63,7 @@ Antigravity のロールは今まで既定で無効だったので、既存の�
 | 1 | 定義の置き場所は `~/.gemini/agents/<name>/agent.md` | `src/lib/agent-roles/artifacts.ts:290` の `resolveArtifactLocation` は `~/.gemini/config/agents/<name>/agent.md`（`artifacts.ts:257`、`src/lib/hooks/sources/antigravity/hooks-config.ts:213`） | 実コードを保つ。1.4.12 では両方とも一覧に出た（`agent-roles-adapters.md:255`）。**1.5.8 で `config/agents` が出るかは未確認**。D3 が毎回確かめる。PR2 の受入で一時ホームで確かめる |
 | 2 | 生成物に足すのは `tools` だけ | `src/lib/agent-roles/adapters.ts:25` の `ADAPTER_VERSION` は 7 adapter で 1 つ。同じ名前に別の中身は `content-mismatch`（`artifacts.ts:690`） | Antigravity だけ adapter の版を `'2'` に（D5） |
 | 3 | （記述なし）起動後の確認 | `src/lib/session/role-launch.ts:724` の `settleLaunchRole` は Antigravity で何もしない。`src/lib/cli-tools/antigravity.ts:374` の `waitForReady` は 30 回（`antigravity.ts:87`）の待ちが尽きても throw しない（`antigravity.ts:427`）。61 秒の起動の実測（`antigravity.ts:355`、`:106`） | 起動中・取得不明を別の状態にし、次の send のプロンプト待ちまで確認を続ける（D2） |
-| 4 | 「起動前に `agy agent` の一覧と照合して止める」 | `agy help agent` は名前の一覧だけ（1.5.8）。1 行に 1 つ（`evidence/1-list.txt`） | 行ごとの完全一致（D3） |
+| 4 | 「起動前に `agy agent` の一覧と照合して止める」（2026-11-15 に「起動はして本文を止める」へ。D3） | `agy help agent` は名前の一覧だけ（1.5.8）。1 行に 1 つ（`evidence/1-list.txt`） | 行ごとの完全一致（D3） |
 | 5 | 「登録に無い名前を 1 つでも書くと exit 3」 | 一覧は登録に無い道具を書いた定義も**出す**（`evidence/r2-1-list.txt`） | D3 では拾えない。D2 が拾う |
 | 6 | （記述なし）本文を送ってよい条件 | ロール条件の検査（`src/app/api/worktrees/[id]/send/send-role.ts:263`・`:297`）は fingerprint と generation だけ。証拠は `requested` でできる（`role-launch.ts:556`）。条件の無い send は何も見ない（`antigravity.ts:565`） | 門は §0.1。`requested` を確認の代わりにしない |
 | 7 | （記述なし）再接続 | 再利用は `antigravity.ts:278`（`if (live) return;`）。`src/lib/cli-tools/base.ts:410` は生成物の拒否があっても動いているプロセスへ再接続する | D3 は再利用の return の後。再接続でも送信の門は通る（対象は設定で決まる） |
@@ -171,11 +171,17 @@ read_file, run_command, manage_task, send_message, schedule, invoke_subagent, de
 - 今の起動の scope（`role-launch.ts:445` の `runWithLaunchRole`）にロールの注入があるときだけ照合する
 - 再接続（`live`）は照合しない（既存の例外 `base.ts:410` もそのまま）。別のサーバーのセッションは `resolveLaunchPane`（`base.ts:878`）が触らずに拒否する
 - headless（Schedule、`role-launch.ts:861` → `src/lib/session/claude-executor.ts:202`）には入れない。未知の名前で exit 1、登録に無い道具で exit 3、実行記録は `failed`（`src/lib/job-executor.ts:285`）
-- 判定: 出力の行に生成物の名前と完全に一致する行があれば通る。無い・非 0・時間切れ・起動できない → `RoleLaunchRefusedError('artifact-failed', …)`。理由は名前・パス・exit code・時間切れだけ
+- 判定: 出力の行に生成物の名前と完全に一致する行があれば「一覧にある」。結果は 4 つで、**起動はどれでも拒否しない**（2026-11-15 の人の決定「壊れた定義・未知の名前では本文を未送信で止めて理由を見せ、CLI のプロセスは残す」。Codex の 5-2b P1 と PM の結論 A で、起動前の拒否から書き換えた）
+  - 一覧にある → 世代は `starting` で生まれ、起動後の確認（D2）が正の記録を作れる
+  - 一覧に無い → 世代は `refused(not-applied)`（原因 `agent-not-listed`）で生まれる
+  - `agy agent` の失敗（非 0・10 秒の時間切れ・64 KiB 超・起動できない）→ `refused(not-confirmed)`（`agent-list-failed`。理由に exit code・上限・時間切れだけを出す）
+  - 確認できない（`CM_UAT_ISOLATION=1` で子を起こさない、または照合が走らなかった）→ `refused(not-confirmed)`（`agent-list-unchecked`）
+- **fail-closed:** 「確認できない」を「一覧にある」と同じに扱わない。`refused` はその世代で最終なので、画面に名前が出ても正の記録にならない。本文は PR1 の門が未送信で止め（409 の `roleRefusal`、文面は「The role could not be confirmed for this Antigravity session, so nothing was sent. Stop the session and start it again.」に原因を足したもの）、プロセスは残す（CommandMate は止めない）
 - **D3 の成功は正の記録ではない**
 - 子の環境: cwd は worktree。`PATH`・`HOME` はペインが受け取る tmux の環境（`src/lib/agent-roles/pane-env.ts`）にあればそれ、無ければサーバーのもの。上限は 10 秒で SIGKILL、標準出力 64 KiB、標準エラー 4 KiB（理由に出さない）
-- 副作用（事実）: `agy agent` は `~/.gemini/antigravity-cli/` のログを 1 本増やす。ログ以外の変更が無いのは 1.4.12 の観測で、1.5.8 以後の保証ではない
-- `CM_UAT_ISOLATION=1`（`src/config/uat-isolation.ts`）: 子を起こす前に拒否する。`own-home` では照合する。`--log-file` が `agy agent` に効くかは**未確認**（§9 Q6）
+- 副作用（事実）: `agy agent` は `~/.gemini/antigravity-cli/` のログを 1 本増やす。ログ以外の変更が無いのは 1.4.12 の観測で、1.5.8 以後の保証ではない。**PR2 の受入（agy 1.5.9、一時ホーム、§13）:** 2 回目以後の `agy agent` も `antigravity-cli/log/cli-<時刻>.log` の追加に加えて `cli.log`・`conversation_summaries.db-shm`・`updater/update_status.json` を変える。空のホームでの初回は `builtin/` と `config/config.json`・`config/mcp_config.json`・`config/projects/default-cli-project.json`・`config/.migrated` を作る（agy 自身の初期化）
+- `CM_UAT_ISOLATION=1`（`src/config/uat-isolation.ts`）: 子を起こさない（「確認できない」。起動はするが正の記録は作らない）。**前提（Codex の再レビュー 4385-pr2b P2-2）:** 「起動はする」は、共有ホームが準備済み（ロールの生成物 `~/.gemini/config/agents/<name>/agent.md` と agy の hook の設定 `~/.gemini/config/hooks.json` が、この build の書くものと一致して既にある）の場合に限る。生成物が欠けていれば、既存の保護（#3360。`src/lib/agent-roles/artifacts.ts` の `writeRoleArtifact` が書かずに `UatIsolationLaunchRefusedError`、`role-launch.ts` の `prepareRoleLaunch` がそれを `artifact-failed` に、`base.ts` の `launchSessionWithRole` の `gateLaunchRole`）で、D3 より前・ペインを作る前に起動が拒否される（hook の設定が合わないときは D3 の後、ペインを作る前の起動行の組み立てで拒否される。`src/lib/hooks/sources/antigravity/source.ts` の `prepareLaunch`、#3360）。この保護は変えない。`own-home` では照合する。`--log-file` は `agy agent` のログを指定のファイルへ移すが、`conversation_summaries.db-shm` は変わる（PR2 の受入、agy 1.5.9。§9 Q6 の拒否を保つ）
+- **実装（PR2、再指示 2 で改訂）:** D3 の判定はすべて `role-launch.ts` の `checkLaunchRoleAgentListed` 1 つが行い、結果を起動の scope に置く。`openGeneration` が新しい世代の適用をそこから作る（`listed` のときだけ `starting`、結果が無いときも `refused`）。driver（`antigravity.ts` の `launchSession`）は `agy agent` を走らせて答えを渡すだけ。D3 が起動を止めるのは、照合の待ちの間にセッションが停止された・別の起動に取られたとき（D6 の `session-stopped`）だけ。照合しない分岐（`CM_UAT_ISOLATION=1`）も、その前の await（インストールの確認・ペインの確認）の間に停止されていれば同じ `session-stopped` で止める（Codex の再レビュー 4385-pr2b P2-1。ペイン・プロセス・起動行 0）。新規の起動・終わったペインでの起こし直し・send からの自動起動（`send-session-start.ts`）はどれも同じ `launchSession` を通る
 
 ### D4 有効化のスイッチを消す（PR2）
 
@@ -196,6 +202,7 @@ read_file, run_command, manage_task, send_message, schedule, invoke_subagent, de
 | 場所 | 前の await | 照合 | 外れたとき |
 |---|---|---|---|
 | D3 の直後、`beginAgentSession` の前 | `agy agent`（10 秒まで） | 起動の scope の epoch が今の epoch、かつ別の起動が世代を開いていない | `RoleLaunchRefusedError('session-stopped')`。ペイン・起動のキー・記録 0 |
+| D3 の照合しない分岐（`CM_UAT_ISOLATION=1`）、`beginAgentSession` の前 | 起動の scope を作った後の await（インストールの確認・ペインの確認） | 起動の scope の epoch が今の epoch（`isStale`） | 同上 |
 | 状態を変える直前（起動の中・門の中） | 画面の取得・`isToolLive`・`agy --version` | **世代と、観測を始めたときの状態の版**の両方が今と同じ（compare-and-set。状態に単調に増える番号を持つ） | 何も変えない。古い観測は捨てる |
 | `launched` を書く直前 | 同上 | 世代が今のもの（既存の `isStale`、`role-launch.ts:438`） | 書かない |
 | 本文の境界 | sender の中の全 await | D2 の境界の確認 (a)〜(c) | 本文 0 |
@@ -239,10 +246,12 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | written | 読み直しの検査（`tools` を含む）に落ちる | 拒否（ペイン前） | なし | `format-invalid` |
 | written | driver が動いているプロセスを見つけた | reused | なし（世代を開かない） | 今と同じ |
 | written | 別のサーバーのセッション | 拒否（既存） | なし | 既存 |
-| written | 新しいプロセス、`CM_UAT_ISOLATION=1` | 拒否（ペイン前） | なし（子を起こさない） | UAT の理由 |
+| written | 新しいプロセス、`CM_UAT_ISOLATION=1` | unchecked | なし（子を起こさない） | なし |
 | written | 新しいプロセス、一覧に名前がある | listed | agy のログ 1 本 | なし |
-| written | 一覧に無い・非 0・時間切れ | 拒否（ペイン前、`artifact-failed`） | agy のログ | 理由 |
-| listed | 照合の待ちの間に停止 | 拒否（`session-stopped`） | なし | 既存の文面 |
+| written | 一覧に無い | not-listed | agy のログ | なし |
+| written | 非 0・時間切れ・64 KiB 超・起動できない | list-failed | agy のログ | なし |
+| unchecked / not-listed / list-failed | 起動を続ける | refused（新しい世代 G、`not-listed` は `not-applied`、他は `not-confirmed`） | ペイン・起動行・`requested`・証拠（G、`refused`） | 起動は返る。次の send で未送信と理由。プロセスは残る |
+| listed / unchecked 以外の照合の後 | 照合の待ちの間に停止 | 拒否（`session-stopped`） | なし | 既存の文面 |
 | listed | 照合が合う | starting（新しい世代 G） | ペイン・起動行・`requested`・証拠（G、`starting`） | 起動中 |
 | starting | 画面に名前（信頼の画面でも可） | confirmed（正の記録） | `launched` | 適用済み |
 | starting | 明確な不適用 | refused(`not-applied`) | 状態だけ | 起動は返る。次の send で理由 |
@@ -273,7 +282,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | 呼び出し | 成功 | 失敗のとき | 倒れる側 |
 |---|---|---|---|
 | `~/.gemini/config/agents/` への書き込み | 0600 の新規、または同じバイトの再利用 | 書けない・別の中身・symlink・権限 → `artifact-failed` | **起動を止める**（既存。ペインの前） |
-| `agy agent`（一覧） | exit 0 で名前の行 | 無い／非 0／10 秒／64 KiB 超／`agy` が無い → `artifact-failed` | **起動を止める**（ペインの前） |
+| `agy agent`（一覧） | exit 0 で名前の行 | 無い／非 0／10 秒／64 KiB 超／`agy` が無い／UAT で起こさない | **起動はする**。その世代は `refused` で生まれ、本文を未送信で止める（再指示 2） |
 | 設定の解決（門の対象の判定） | `role`／`none` | DB の失敗・曖昧・拒否 → `unreadable` | **本文を止める** |
 | 設定の読み直し（`none` の送信の本文の直前、同期） | `none` のまま | 変わった・読めない | **本文を止める**（次の send に委ねる） |
 | agy の起動（TUI） | 状態の行に名前 → 正の記録 | 明確な不適用・猶予切れ | **本文を止める。プロセスは残す** |
@@ -359,11 +368,11 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | P2 | 陽性 | 定数の出典 | コメントに `1.5.8` と実機の記録のパス | 落ちる |
 | P3 | 陽性 | `tools` の無い（1 個違う）定義の読み直し | `format-invalid` | 落ちる |
 | P4 | 陽性 | 環境変数なしでロールつきの起動 | 起動行に `--agent <name>`。PR1 の門を通って確認の後に本文 1 回 | 落ちる |
-| P5 | 陽性 | 新しいプロセス、一覧に名前が無い | ペイン・`beginAgentSession`・起動のキー 0、`artifact-failed` | 落ちる |
-| P6 | 陽性 | 一覧が非 0・時間切れ・64 KiB 超 | 同じく 0。時間切れで子が止められる | 落ちる |
+| P5 | 陽性 | 新しいプロセス、一覧に名前が無い | （再指示 2）起動する・正の記録 0（画面に名前があっても）・本文は未送信で `not-applied`、プロセスは残る | 落ちる |
+| P6 | 陽性 | 一覧が非 0・時間切れ・64 KiB 超 | （再指示 2）起動する・正の記録 0・未送信で `not-confirmed` と原因。時間切れで子が止められる | 落ちる |
 | P7 | 陽性 | 照合を保留 → 停止 → 照合が成功 | ペイン・起動行・旧い依頼の記録 0（`session-stopped`） | 落ちる |
-| P8 | 陽性 | `CM_UAT_ISOLATION=1` | 子を起こさずに拒否 | 落ちる |
-| P9 | 陽性 | 一覧に接頭辞の違う名前だけ | 通らない | 落ちる |
+| P8 | 陽性 | `CM_UAT_ISOLATION=1` | （再指示 2）子を起こさない。起動する・正の記録 0・未送信で `not-confirmed` | 落ちる |
+| P9 | 陽性 | 一覧に接頭辞の違う名前だけ | 一覧に無いと同じ（正の記録 0） | 落ちる |
 | P10 | 陽性 | `git grep -n 'CM_AGENT_ROLE_ANTIGRAVITY_ENABLED\|isAgentRoleAdapterEnabled' -- src locales docs/user-guide docs/en tests` | 0 件 | 落ちる |
 | P11 | 陽性 | CLI が `adapterEnabled: false`（旧いサーバー）を受けた | 今と同じ警告 | 通る（残すことの固定） |
 | P12 | 陽性 | スイッチが無い状態で Z1〜Z10 を再び | すべて本文 0（門の対象が設定だけになったこと） | — |
@@ -371,11 +380,15 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | N2 | 陰性 | Schedule（headless） | 一覧も門も呼ばない。引数は `-p … --dangerously-skip-permissions --agent <name>` | 通る |
 | N3 | 陰性 | 他の 6 adapter の注入 fingerprint と生成物のバイト | 直す前と同じ値（試験に値を書く） | 通る |
 | N4 | 陰性 | 動いているプロセス、一覧の依存は呼ばれたら throw | 再接続が成功、照合 0（送信の門は別に効く） | 通る |
-| N5 | 陰性 | 既存のペインで tool が終わっている | 照合 1 回。失敗なら起動行 0 | — |
+| N5 | 陰性 | 既存のペインで tool が終わっている | 照合 1 回。（再指示 2）失敗でも起動行 1、新しい世代は正の記録 0、本文は未送信 | — |
+| P13 | 陽性 | 3 経路（新規の起動・終わったペインでの起こし直し・send からの自動起動）× 照合の 4 結果（一覧にある・無い・失敗・確認できない） | 4 結果とも起動する。一覧にあるときだけ正の記録と本文 1 回、他は正の記録 0・未送信と原因の文。kill・Ctrl-D 0 | 落ちる（「確認できない」を「一覧にある」扱いにする変異で赤） |
+| P14 | 陽性 | `CM_UAT_ISOLATION=1`（D3 が読む値）で、起動の scope を作った後の await（インストールの確認）の間に停止 | `session-stopped`。ペイン・起動行・記録 0、`agy agent` 0。対照（停止しない）は P8 と同じ | 落ちる（照合しない分岐が停止を見ない。再レビュー 4385-pr2b P2-1） |
+| P15 | 陽性 | 本物の `CM_UAT_ISOLATION=1`（環境変数）、共有ホーム（`os.tmpdir()` 下）は UAT の外の起動で生成物と hook の設定を準備済み | 起動する・`agy agent` 0・正の記録 0・未送信で `not-confirmed` と `CM_UAT_ISOLATION=1`。共有ホームは 1 バイトも変わらない | 通る（経路の固定。再レビュー 4385-pr2b P2-2） |
+| P16 | 陰性 | 本物の `CM_UAT_ISOLATION=1`、生成物が無い | D3 より前に `artifact-failed`（#3360）。ペイン・起動行・記録 0、`agy agent` 0、何も書かない | 通る（#3360 の保護を変えないことの固定） |
 | N6 | 陰性 | API の `adapterEnabled` | 7 ツールとも `true` | Antigravity だけ落ちる |
 | N7 | 陰性 | 子の環境 | cwd が worktree、`PATH`・`HOME` がペインの環境の値（あれば） | — |
 
-番号は欠番なし（P1〜P12、N1〜N7、Z1〜Z10、C1・C2・C4・C5・C7〜C13。C3・C6 は上の注のとおり移した）。
+番号は欠番なし（P1〜P16、N1〜N7、Z1〜Z10、C1・C2・C4・C5・C7〜C13。C3・C6 は上の注のとおり移した）。
 
 ### 8.5 古い動きを固定している試験（実装の契約で変更を許す）
 
@@ -427,7 +440,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 - 試験: `tests/unit/agent-roles/**`、`tests/unit/cli-tools/antigravity*.test.ts`、`tests/unit/session/role-launch-4115.test.ts`、`tests/unit/session/role-schedule-4115.test.ts`、`tests/unit/app/api/worktrees/send-role-4115.test.ts`、`tests/unit/config/codex-home-isolation-4146.test.ts`、`tests/unit/components/roles/agent-roles-*.test.tsx`、`tests/unit/cli/utils/agent-roles-4116.test.ts`、`tests/setup.ts`、`tests/integration/api-agent-roles-4114.test.ts`、`tests/integration/fixtures/agent-roles-api-examples.ts`、`tests/unit/docs/**`
 - CLI の `src/cli/commands/roles.ts`・`instances.ts` は変えない
 - 受入:
-  1. P1〜P12・N1〜N7 が合格。P10 の grep が 0 件
+  1. P1〜P16・N1〜N7 が合格。P10 の grep が 0 件
   2. 一時ホーム（`os.tmpdir()` の下、`HOME` を差し替え）で agy 1.5.8 の `agy agent` が `~/.gemini/config/agents/<dir>/agent.md` を一覧に出すこと、`--log-file` が `agy agent` のログを動かすかを 1 回ずつ確かめ、出力をコミットメッセージの本文に書く（認証は要らない。本物の `~/.gemini` には書かない）。出なければ止めて PM に返す
   3. CHANGELOG の断片（`changelog.d/4385.md` に統合、1 項目・1 行）に挙動の変更: Antigravity でロールが既定で有効、`~/.gemini/config/agents/` に定義を書く、確かめた agy の版 1.5.8、起動前の一覧の照合、ロールを確かめた記録があるときだけ本文を送り、無ければ未送信で理由を出す（プロセスは残る。サーバーの再起動の後も起動し直しが要る）、CLI の警告は旧いサーバーのときだけ
   4. （マージの後、PM）信頼済みの worktree の TUI で、ロールつきの起動でロールの本文が守られ、編集・実行ができ、適用状態が「適用済み」になる。存在しない名前の定義では起動が理由つきで止まり、別の名前・未適用では本文が未送信になって理由が見え、プロセスは残る。**信頼の後の状態の行に名前があること**（D2 の見立て）と、**サーバーの再起動の後に未送信になること**をここで確かめる
@@ -471,8 +484,20 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 - `~/.gemini/config/agents`・`~/.gemini/agents` は今は無い
 - 第 3・4 版で読んだ実コード: `instance-input-lock.ts:795`・`:825`、`submit-verified-sender.ts:269`・`:779`、`submit-verified-sender-shared.ts:112`、`kill-session/route.ts:151`・`:198`、`send-user-message.ts:654`・`:677`、`send-failure.ts:82`、`role-launch.ts:157`（`launchRoleDatabase`）・`:769`（`settingsGiveRole`）
 
+### PR2 の受入 2（一時ホーム、2026-11-15）
+
+`os.tmpdir()` の下に一時ホームを作り（`HOME` を差し替え）、`~/.gemini/config/agents/cm-role-accept4385/agent.md`（この PR の生成物と同じ形、13 個の `tools`）を置いて 1 回ずつ実行した。本物の `~/.gemini` には書いていない。
+
+- `agy --version` → `1.5.9`（**手元の版は 1.5.8 ではなかった**。定数 `ANTIGRAVITY_ROLE_TOOLS_VERIFIED_ON` は 1.5.8 のまま。§9 Q1 のとおり版では止めない）
+- `HOME=<tmp> agy agent` → exit 0、標準出力 `cm-role-accept4385`（`config/agents` は 1.5.9 でも一覧に出る。§2 の #1 と Q4 の確認）
+- `HOME=<tmp> agy --log-file <tmp>/agy-list.log agent` → exit 0、同じ一覧。ログは指定のファイル（約 9.7 KB）に出て `antigravity-cli/log/` は増えず `cli.log` も変わらない。`conversation_summaries.db-shm` は変わる
+
 ## 改訂の履歴
 
+- 2026-11-15 PR2 の続き（pr2c）: Codex の再レビュー 4385-pr2b の P2 2 件。照合しない分岐（`CM_UAT_ISOLATION=1`）にも停止の再検査を当てた（D3・D6）。UAT で「起動はする」の前提（共有ホームが準備済み、欠けていれば #3360 の保護で D3 より前に `artifact-failed`）を D3 に書き、§8.4 に P14〜P16 を足した
+- 2026-11-15 PR2 再指示 2: Codex の 5-2b P1 と PM の結論 A で D3 を「起動前の拒否」から「起動はして、照合が一覧にあるときだけ正の記録へ進む。それ以外は本文を止める」へ。§1・§2 #4・D3・§5.1・§7・§8.4（P5・P6・P8・P9・N5 の期待、P13 を追加）を直した
+
+- 2026-11-15 PR2: D1・D3・D4・D5 の実装の注（D3 の拒否の 1 か所）、受入 2 の実測（agy 1.5.9）と `agy agent` の副作用・`--log-file` の結果を D3 と §13 に足した
 - 2026-11-14 第 2 版: 1 回目の事前レビュー（P2 4・P3 3）を反映。適用の 4 状態と送信の門、D3 を新しいプロセスの分岐へ、D6、診断と子の範囲、CLI の警告を残す
 - 2026-11-14 第 3 版: 再レビュー（R1・R2）と原因調査の推奨 A を採用。自動の kill を外す、拒否の寿命、境界の同期の確認、記録と許可の分離、保証の境界 E1、受入の言い換え、試験の C1〜C11、PR を 2 本に
 - 2026-11-14 第 5 版（再指示 1）: 5-2b の整合性レビューの P2 2 件。`none` の読み直しを解決の入力すべて（ルートの登録とリポジトリの既定を含む）の比較に、生成中の入力欄の状態行でも適用を確認する（ready と分ける）。Z8・C7 に行を足した

@@ -39,7 +39,7 @@ import {
   setSystemRoleDefault,
   updateAgentRole,
 } from '@/lib/db/agent-roles-db';
-import { AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR, isAgentRoleAdapterEnabled, type RoleLaunchRecord } from '@/types/agent-roles';
+import type { RoleLaunchRecord } from '@/types/agent-roles';
 
 function role(body: string) {
   return { body, bodyFingerprint: computeBodyFingerprint(body) };
@@ -293,12 +293,8 @@ describe('reading the user\'s settings', () => {
     expect(fs.existsSync(path.join(dir, 'data', 'launch-env'))).toBe(false);
   });
 
-  it('Antigravity is on only when someone says so', () => {
-    expect(isAgentRoleAdapterEnabled('antigravity')).toBe(false);
-    vi.stubEnv(AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR, '1');
-    expect(isAgentRoleAdapterEnabled('antigravity')).toBe(true);
-    expect(isAgentRoleAdapterEnabled('claude')).toBe(true);
-  });
+  // Issue #4385 PR2 (§8.5): 'Antigravity is on only when someone says so' moved to P4
+  // (tests/unit/cli-tools/antigravity-role-gate-4385.test.ts); no switch is left.
 });
 
 describe('restart pending', () => {

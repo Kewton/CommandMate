@@ -248,8 +248,6 @@ process.env.CM_AGENT_ROLE_ARTIFACTS_DIR = join(
   'commandmate-test-agent-roles',
   String(process.pid)
 );
-// Issue #4115: a shell that enabled the adapter does not enable it for the suite.
-delete process.env.CM_AGENT_ROLE_ANTIGRAVITY_ENABLED;
 process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR = join(
   tmpdir(),
   'commandmate-test-agent-roles-antigravity',

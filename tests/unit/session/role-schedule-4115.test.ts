@@ -20,6 +20,7 @@ import {
 import { resolveScheduleRole } from '@/lib/session/role-launch';
 import { buildCliArgs } from '@/lib/session/claude-executor';
 import { executeSchedule, type ScheduleState } from '@/lib/job-executor';
+import { setAgyAgentListerForTest } from '@/lib/cli-tools/antigravity';
 
 const executeClaudeCommand = vi.hoisted(() => vi.fn());
 const dbHolder = vi.hoisted(() => ({ db: null as unknown }));
@@ -112,9 +113,33 @@ describe('resolveScheduleRole', () => {
     await expect(resolve()).resolves.toMatchObject({ kind: 'refused', refusal: { reason: 'artifact-failed' } });
   });
 
-  it('the disabled adapter refuses', async () => {
-    setSystemRoleDefault(db, 'antigravity', a);
-    await expect(resolve('antigravity')).resolves.toMatchObject({ kind: 'refused', refusal: { reason: 'adapter-disabled' } });
+  // Issue #4385 PR2 (§8.5, N2): was "the disabled adapter refuses". Antigravity is on by
+  // default; a Schedule runs headless, so `agy agent` is not asked and no send gate applies
+  // (agy -p itself exits 1 on an unknown agent and 3 on an unregistered tool).
+  it('Antigravity hands its agent to a headless run, with no listing and no gate (N2)', async () => {
+    vi.stubEnv('CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR', path.join(dir, 'agy-agents'));
+    const lister = vi.fn(async () => {
+      throw new Error('a Schedule must not list agents');
+    });
+    setAgyAgentListerForTest(lister);
+    try {
+      setSystemRoleDefault(db, 'antigravity', a);
+      const resolved = await resolve('antigravity');
+      if (resolved.kind !== 'role') throw new Error(resolved.kind);
+      const name = resolved.role.args[1];
+      expect(resolved.role.args).toEqual(['--agent', name]);
+      expect(name).toMatch(/^cm-role-[a-z0-9-]+$/);
+      expect(buildCliArgs('M', 'antigravity', undefined, { role: resolved.role })).toEqual([
+        '-p',
+        'M',
+        '--dangerously-skip-permissions',
+        '--agent',
+        name,
+      ]);
+      expect(lister).not.toHaveBeenCalled();
+    } finally {
+      setAgyAgentListerForTest(null);
+    }
   });
 
   it('a tool outside D3 has no role, and no database question is asked', async () => {

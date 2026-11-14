@@ -34,20 +34,6 @@ export function isAgentRoleCliTool(value: unknown): value is AgentRoleCliTool {
   return typeof value === 'string' && (AGENT_ROLE_CLI_TOOLS as readonly string[]).includes(value);
 }
 
-/** Turns Antigravity's adapter on, once its check under a dedicated OS user has passed (§6.6). */
-export const AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR = 'CM_AGENT_ROLE_ANTIGRAVITY_ENABLED';
-
-/**
- * Whether a launch may apply a role through this tool's adapter yet. Antigravity
- * can hold settings and its adapter is built, but stays off until the check under
- * a dedicated OS user has passed (D3). A role resolved for a tool that is off
- * refuses the launch; it never starts without it.
- */
-export function isAgentRoleAdapterEnabled(tool: AgentRoleCliTool): boolean {
-  if (tool !== 'antigravity') return true;
-  return typeof process !== 'undefined' && process.env?.[AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR] === '1';
-}
-
 /**
  * Whether a role through this tool replaces its default instructions instead of
  * adding to them: OpenCode V2 overrides the agent's `system`, which removes the
@@ -302,6 +288,7 @@ export interface AgentRoleDeleteConflictResponse extends AgentRoleErrorResponse 
 
 export interface SystemRoleDefaultEntry {
   cliToolId: AgentRoleCliTool;
+  /** Always true since #4385 (Antigravity is on by default); kept for older clients and scripts. */
   adapterEnabled: boolean;
   stored: StoredSystemRoleState;
 }
@@ -313,6 +300,7 @@ export interface SystemRoleDefaultsResponse {
 
 export interface RepositoryRoleDefaultEntry {
   cliToolId: AgentRoleCliTool;
+  /** Always true since #4385 (Antigravity is on by default); kept for older clients and scripts. */
   adapterEnabled: boolean;
   /** What this root holds. */
   stored: StoredRoleState;
@@ -332,6 +320,7 @@ export interface InstanceRoleEntry {
   alias: string;
   /** False for a tool outside D3: it can hold no setting and always resolves to no role. */
   supported: boolean;
+  /** Whether a role reaches this tool: `supported`. Every D3 tool is on since #4385; kept for older clients. */
   adapterEnabled: boolean;
   stored: StoredRoleState;
   application: RoleApplicationState;
@@ -339,6 +328,7 @@ export interface InstanceRoleEntry {
 
 export interface WorktreeToolRoleDefault {
   cliToolId: AgentRoleCliTool;
+  /** Always true since #4385 (Antigravity is on by default); kept for older clients and scripts. */
   adapterEnabled: boolean;
   /** What a new instance of this tool would get, before it exists. */
   effective: EffectiveRole;
