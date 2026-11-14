@@ -6,6 +6,8 @@
  * tools verified on agy 1.5.8 and leaves `swarm` out, and every file it cites exists.
  * Revision 2 (2-4-4 pre-review): the four application states, the send gate that holds
  * the body until the role is confirmed, and the generation re-check after each await.
+ * Revision 3 (cause analysis, option A): the top invariant, no automatic kill, the refusal
+ * kept apart from the evidence a forget removes, and the restart boundary.
  *
  * Line numbers are not pinned: the implementation this design asks for moves them,
  * and a design test that goes red on the PR it describes would block that PR.
@@ -57,6 +59,13 @@ const REQUIRED: ReadonlyArray<readonly [string, string]> = [
   ['generation re-check after awaits', '### D6'],
   ['the listing runs only for a new process', 'if (live) return;'],
   ['revision history', '## 改訂の履歴'],
+  ['the top invariant', '## 0. 最上位の不変条件'],
+  ['the refusal outlives a forget', '### D7'],
+  ['no automatic kill', '自動では止めない'],
+  ['the restart boundary is stated', '例外 E1'],
+  ['the acceptance is restated', '受入の言い換え'],
+  ['doc tests and driver tests are told apart', '実の driver を通す試験'],
+  ['the failed-stop counterexample', 'C3'],
 ];
 
 /** The reasons a design text falls short of the contract (empty: it does not). */
