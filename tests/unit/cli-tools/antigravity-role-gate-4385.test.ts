@@ -234,6 +234,10 @@ type Outcome = { ok: true } | { ok: false; error: Error };
 
 /** The real `setImmediate`, taken before any test fakes the clock. */
 const realSetImmediate = setImmediate;
+/** The real clock, taken before any test fakes the clock (vi.useFakeTimers() fakes hrtime too). */
+const realHrtimeBigint = process.hrtime.bigint.bind(process.hrtime);
+const realNow = (): bigint => realHrtimeBigint();
+const realElapsedMs = (since: bigint): number => Number((realNow() - since) / 1_000_000n);
 const yieldToRealLoop = (): Promise<void> => new Promise((resolve) => realSetImmediate(resolve));
 /** Only a guard against a hang; the loop below ends on the work's own state. */
 const REAL_TIME_GUARD_MS = 120_000;
@@ -250,11 +254,11 @@ const FAKE_STEP_MS = 250;
  * work's state; wall time only guards against a hang.
  */
 async function driveFakeClockUntil(isDone: () => boolean): Promise<void> {
-  const started = process.hrtime.bigint();
+  const started = realNow();
   while (!isDone()) {
     for (let i = 0; i < 3 && !isDone(); i += 1) await yieldToRealLoop();
     if (isDone()) return;
-    if (Number((process.hrtime.bigint() - started) / 1_000_000n) > REAL_TIME_GUARD_MS) {
+    if (realElapsedMs(started) > REAL_TIME_GUARD_MS) {
       throw new Error('the work never settled');
     }
     if (vi.getTimerCount() === 0) continue;
@@ -948,5 +952,16 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     await launchWithRole('idle', 'none');
     await setRoleThroughApi({ state: 'none' });
     expectSent(await send());
+  });
+});
+
+describe('guard clock is the real one', () => {
+  it('G1 the guard does not move when the fake clock is advanced by 10 minutes', async () => {
+    const started = realNow();
+    const fakeStarted = process.hrtime.bigint();
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+    // the faked hrtime moved by the whole 10 minutes (so reading it would trip the guard)
+    expect(Number((process.hrtime.bigint() - fakeStarted) / 1_000_000n)).toBeGreaterThanOrEqual(600_000);
+    expect(realElapsedMs(started)).toBeLessThan(5_000);
   });
 });
