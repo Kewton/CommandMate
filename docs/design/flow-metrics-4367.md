@@ -1,6 +1,6 @@
 # Issue #4367: チームの流れの計測・警報と人向けのダッシュボード（設計）
 
-- 状態: **設計（上流の 3 回目、改訂 2）**。この文書だけを書き、`src/`・`scripts/`・`tests/` の試験は変えない。実装はこの文書のレビューの後、§6 の PR1a の契約から始める
+- 状態: **設計（上流の 3 回目、改訂 3）＋ PR1a の実装**。改訂 3 は、改訂 2（`8b3d5b1d0`）への再レビュー 3（`prereview-4367-3-reply.md`: P2 1 件 R7、F1→R1 と同じ種類の 3 回目）の開発リーダーの処分（狭めて塞ぐ）を、PR1a の実装と同じ PR で反映した。**PR の作成数・マージ数は「検索で観測できた件数」（`coverage: "search-observed"`）と定義し、`complete`（V1 の意味の母集団の完全性）は PR1a では常に false**。処置は §14.0
 - 改訂 2 は、改訂 1（`9240bffd0`）への再レビュー（codex-2 `prereview-4367-2-reply.md`: 承認保留、P2 6 件 R1〜R6。F1・F3・F4・F5 が同じ種類の 2 回目）と、それを受けた原因調査（codex `enabler-return-4367-cause.md`）、開発リーダーの処分（`reinstruct-4367-design-2.md`: 原因調査 §8 をそのまま採る）を反映した。**PR1a を「期間を明示した PR の作成・マージの件数」の計測と記録と読み取りだけに狭めた**。外した経路（今の CI・過去の CI・台帳・警報・通知・資源・DB と API・常駐・公開）は §5.2 に、後の PR で満たす条件として残した。指摘ごとの処置は §14
 - 改訂 1 は、1 回目（`b1e84d224`）への事前レビュー（`prereview-4367-reply.md`、P2 6 件 F1〜F6）と再指示 1・突き合わせの決定 X1〜X7 を反映した（§14.2）
 - 正本: Issue #4367 の本文、Epic #4371 の本文（背景の実測）、段 3 の共通の枠（`workspace/orchestration/runs/2026-11-14/s3-common-frame.md`。以下「共通の枠」）と突き合わせの決定（同じ dir の `s3-crosscheck.md`。以下「X1」〜「X10」）。共通の枠に無いことを新しく決めたものは §11 に集めた
@@ -13,7 +13,7 @@
 | 段 | 中身 | 節 |
 |---|---|---|
 | 最上位の不変条件 | 原因調査 §5 の 3 文（**V1 確定は証拠がそろった時だけ**・**V2 確定の境界は全員で共通**・**V3 外部の呼び出しは正の予算がある時だけ、終わりは 1 回**）。改訂 1 の I-0 はこの 3 文に置き換えた | §1 |
-| PR1a の中身 | 指標は **PR の作成数とマージ数の 2 つだけ**（repo／base・取得時刻・窓 `[from, to)` を保存）。`tick` は既定で直前 24 時間の 1 つの窓、`reconstruct` は指定した窓の同じ 2 列を時ごとに。`report` は記録した観測と窓をそのまま表示（重なる窓を合算しない）、`status` は最新の観測の時刻・scope・不明／不完全・記録なし・未確定の末尾を区別。警報の状態は表示しない | §2・§6 |
+| PR1a の中身 | 指標は **PR の作成数とマージ数の 2 つだけ**で、意味は**検索で観測できた件数**（`coverage: "search-observed"`・`complete: false`。母集団の完全な 0 と同一視しない。改訂 3）（repo／base・取得時刻・窓 `[from, to)` を保存）。`tick` は既定で直前 24 時間の 1 つの窓、`reconstruct` は指定した窓の同じ 2 列を時ごとに。`report` は記録した観測と窓をそのまま表示（重なる窓を合算しない）、`status` は最新の観測の時刻・scope・不明／不完全・記録なし・未確定の末尾を区別。警報の状態は表示しない | §2・§6 |
 | 記録 | `flow.<repo-slug>` の排他（既存の `machine-lock-sync.mjs` の部品）で tick の全体を直列化し、`kind: tick` の改行つき 1 行だけを書く。**自動の復旧・改行の補修・rename の退避・checkpoint は入れない**。改行の無い末尾があれば追記を止め、警告して exit 1。読み手は改行の無い末尾を未確定として除き、そう表示する | §2.4・§3 |
 | 取得と期限 | PR の照会の範囲・上限・応答の型を固定し、**正の予算を強制する runner を全部の外部の呼び出しで共有**（残り ≤ 0 なら呼ばない）。`report`／`status` は識別のための時間制限つきの読み取りの git だけ | §2.3・§3.2 |
 | 外した経路 | 今の CI・過去の CI・台帳（WIP・着手→マージ）・開いた PR の数・警報（評価・回復・確定）・通知・資源・DB／API・常駐・公開。未使用の取得の API と設定キーを先に許可しない。各々に後の PR で満たす条件を書いた | §5.2 |
@@ -58,7 +58,7 @@ V2 は電源断の後の永続性までは言わない。対象はプロセス�
 | # | 条件 | 守る場所 | 上位 |
 |---|---|---|---|
 | P-1 | 指標は 2 つだけ: `prCreated`（`createdAt ∈ [from, to)`）と `prMerged`（`mergedAt ∈ [from, to)`）。どちらも「照会した時に repo／base に属する PR」（過去の時点の base の所属や、過去の開いた状態を再現したとは呼ばない） | §2.1 | V1 |
-| P-2 | 各指標は自分の照会だけから確定する（`complete` は指標ごと）。照会の成功だけで確定にしない: exit 0・JSON の配列・全要素の形の検査・件数 < 上限・同じ番号の矛盾が無い、を全部満たしたときだけ。完全な空集合だけが 0 | §2.3。T-P | V1 |
+| P-2 | 各指標は自分の照会だけから値を出す。値を出すのは exit 0・JSON の配列・全要素の形の検査・件数 < 上限・同じ番号の矛盾が無い、を全部満たしたときだけで、その値は**検索で観測できた件数**（`coverage: "search-observed"`）。正常な応答は検索の索引に載った集合しか覆わないので、**`complete`（母集団の完全性）は PR1a では常に false**。観測の 0 を「母集団の完全な 0」と表示しない（改訂 3・R7） | §2.3。T-P・R7 | V1 |
 | P-3 | 記録に無い指標（開いた PR・CI・台帳・WIP・資源）は「非対応」で、読み手は 0・ok・緑に化けさせない | §2.2・§2.5 | V1 |
 | P-4 | 書き手は排他の中で、ファイルの最後のバイトが改行（または空のファイル）であることを確かめてから 1 行を 1 回だけ追記する。改行で終わらなければ追記せず、元のバイトを変えず、警告して exit 1。補修・退避・回復をしない | 表 S1。T-L | V2 |
 | P-5 | 読み手は改行で終わる行だけを確定した記録として読み、改行の無い末尾は（完全な JSON でも）未確定として除き、あることを表示する | §2.4。T-L | V2 |
@@ -90,26 +90,29 @@ V2 は電源断の後の永続性までは言わない。対象はプロセス�
   "repo": "Kewton/CommandMate", "base": "develop",
   "window": { "from": "2026-11-12T10:00:00.000Z", "to": "2026-11-13T10:00:00.000Z" },  // [from, to)
   "metrics": {                                 // PR1a の指標はこの 2 つだけ（P-1・P-3）
-    "prCreated": { "value": 7, "complete": true, "fetchedAt": "…", "limit": 1000 },
-    "prMerged":  { "value": null, "complete": false, "why": "timeout", "fetchedAt": null, "limit": 1000 }
+    "prCreated": { "value": 7, "coverage": "search-observed", "complete": false, "fetchedAt": "…", "limit": 1000 },
+    "prMerged":  { "value": null, "coverage": "search-observed", "complete": false, "why": "timeout", "fetchedAt": null, "limit": 1000 }
   },
   "durationMs": 8123
 }
 ```
 
-- `why` は `timeout`・`fail`（exit ≠ 0。理由の分類は `pr-common.mjs` の `GH_TRANSIENT_PATTERN` を写す）・`denied`（403・404）・`truncated`（件数 = 上限）・`schema`（形の検査に落ちた）・`conflict`（同じ番号で時刻が食い違う）
-- tick の窓: `to` は `at` を分に切り下げた時刻、`from = to − 24 時間`（既定。変える設定は置かない: P-11）
+- `value` は検索で観測できた件数（`coverage: "search-observed"`）か `null`。`complete` は PR1a では常に `false`（V1 の意味の母集団の完全性は主張しない。改訂 3・R7）
+- `why` は `timeout`・`fail`（exit ≠ 0。呼び直さないので一時的な失敗も `fail`。実装は `GH_TRANSIENT_PATTERN` を写していない: 分類が要るのは呼び直す時だけ）・`denied`（`HTTP 403`・`HTTP 404`）・`truncated`（件数 ≥ 上限）・`schema`（形の検査に落ちた）・`conflict`（同じ番号で時刻が食い違う）
+- tick の窓: `to` は `at` を分に切り下げた時刻から**猶予 10 分を引いた時刻**、`from = to − 24 時間`（既定。変える設定は置かない: P-11）。猶予は検索の索引の遅れに対する**見立てであって保証ではない**（10 分待っても索引に載っていない PR は観測の外。それでも値は「観測できた件数」のまま。改訂 3・U2）
 - 後の PR が足すキーは `metrics.<名前>` に限る（§5.2）。足すだけで v1 の既存のキーの意味は変えない。**読み手は `metrics` に無い名前を「非対応」と表示し、0 と読まない**（P-3）
 
 ### 2.3 照会と完全性（PR1a の取得は 2 本だけ）
 
-| 指標 | 照会（runner 経由） | 時刻の絞り込み | 完全である条件（全部） |
+| 指標 | 照会（runner 経由） | 時刻の絞り込み | 値を出す条件（全部。満たしても `complete` は false） |
 |---|---|---|---|
 | `prCreated` | `gh pr list --repo R --base B --state all --search "created:<D1>..<D2>" --limit 1000 --json number,createdAt,baseRefName` | `D1`・`D2` は `from`・`to` を UTC の日付に広げたもの（`to` が 0 時ちょうどなら前日）。返った `createdAt` で `[from, to)` に絞る | exit 0・JSON の配列・各要素が `number`（正の整数）・`createdAt`（ISO の時刻）・`baseRefName === B` を持つ・件数 < 1000・同じ `number` が 2 回出たら時刻が同じ（違えば `conflict`）。重複は 1 つにする |
 | `prMerged` | `gh pr list --repo R --base B --state merged --search "merged:<D1>..<D2>" --limit 1000 --json number,mergedAt,baseRefName` | 返った `mergedAt` で `[from, to)` | 同じ（`mergedAt` が null の要素は `schema`） |
 
 - 窓の幅は tick が 24 時間、`reconstruct`・`report` は 31 日以内（日付に広げた照会が上限 1000 を超えにくくするため。超えたら `truncated` で `null`）
-- **未確認**: GitHub の検索の索引の遅れ（作られた直後の PR が検索に出るまでの時間）。窓の終わりの直前の PR を落とす恐れがある。PR1a の契約の中で 1 回確かめ、遅れがあれば窓の `to` を後ろへずらす値を未決 U2 で決める
+- **未確認**: GitHub の検索の索引の遅れ（作られた直後の PR が検索に出るまでの時間）とその上限。窓の終わりの直前の PR を落とす恐れがある
+- **R7 の処分（改訂 3、開発リーダーの決定: 狭めて塞ぐ）**: 正常な応答（exit 0・配列・型・件数 < 上限・矛盾なし）は「検索がその時に返した集合」の証拠であって、repo／base の全 PR イベントを覆った証拠ではない（索引の遅れで、窓の終わりの直前の PR が `[]` の中に居ないことがある）。そこで PR1a の 2 指標は**検索で観測できた件数**と定義し、記録と出力に `coverage: "search-observed"` を持たせ、`complete` は常に `false` にする。`report`・`status` は「観測した件数（検索） — 母集団の完全な数ではない」と書き、母集団の完全な 0 と同一視しない。取得の失敗・上限・型の誤りはその指標を `null`（`why`）。母集団を覆う取得（例: 一覧の全ページと照合）を入れて `complete` を真にするのは後の PR で、その証拠と終了条件を設計の上流で閉じてから
+- 猶予: tick の既定の `to` は観測時刻の分の切り下げ − 10 分（§2.2）。見立てであって保証ではない。`reconstruct` は指定の窓をそのまま照会する（過去の日を後から照会する使い方なので猶予を足さない）
 
 ### 2.4 書き手と読み手（行の境界）
 
@@ -121,9 +124,9 @@ V2 は電源断の後の永続性までは言わない。対象はプロセス�
 
 | cmd | 読むもの | 出すもの | 呼ぶ外部 |
 |---|---|---|---|
-| `reconstruct --date <YYYY-MM-DD>` か `--from`・`--to` | GitHub（§2.3 の照会を窓で） | 時ごと（`tz`）の `prCreated`・`prMerged` の 2 列と、各列の `complete`・`why`。記録は書かない | 識別の git、gh 2 本 |
-| `report --from --to` | 記録（窓に `at` が入る tick） | 観測ごとに `at`・`window`・2 つの値（`null` は「不明（理由）」）。**重なる窓を合算しない**。ほかの指標は「非対応」。`corruptLines`・未確定の末尾を末尾に | 識別の git だけ |
-| `status` | 記録（最新の tick） | 最新の観測の `at`・scope・2 つの値と完全性、「記録が無い」、未確定の末尾がある、壊れた行がある、を区別して出す。警報の状態は出さない | 識別の git だけ |
+| `reconstruct --date <YYYY-MM-DD>` か `--from`・`--to` | GitHub（§2.3 の照会を窓で） | 時ごと（`tz`）の `prCreated`・`prMerged` の 2 列（観測できた件数）と、各列の `coverage`・`complete`（常に false）・`why`。時の鍵は `YYYY-MM-DDTHH±hh:mm`（夏時間の日は 23・25 行、重なる時はオフセットで分ける）。記録は書かない。取得の締め切りは識別の後の単調時計 + 200 秒（tick の T0 と同じ扱い） | 識別の git、gh 2 本 |
+| `report --from --to` | 記録（窓に `at` が入る tick） | 観測ごとに `at`・`window`・2 つの値（「観測した件数（検索）」、`null` は「不明（理由）」）。**重なる窓を合算しない**。ほかの指標は「非対応」。`corruptLines`・未確定の末尾・上限で読まなかったファイルを末尾に。記録の dir を読めない（EACCES 等）は exit 1 で「記録が無い」と分ける | 識別の git だけ |
+| `status` | 記録（最新の tick） | 最新の観測の `at`・scope・2 つの値（観測した件数（検索））、「記録が無い」、未確定の末尾だけがある、壊れた行がある、上限で読まなかった新しいファイルがある（その時は最新を出さない）、を区別して出す（`--json` の `state`: `observed`・`unfinished-only`・`truncated`・`no-records`）。警報の状態は出さない | 識別の git だけ |
 
 `--json` で同じ内容を JSON に。`report`・`status` は記録の dir を作らない（無ければ「記録が無い」）。
 
@@ -221,10 +224,11 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 |---|---|---|---|
 | `scripts/flow/flow.mjs` | 新規 | 入口。`main(argv, deps)` を export（`deps`: `run`（runner の下の同期の呼び出し）・`monoNow`・`now`（壁時計）・`env`・`home`・`lock`（排他の部品の差し替え口）・`stdout`・`stderr`）。cmd は `tick`・`reconstruct`・`report`・`status` | 220 |
 | `scripts/flow/runner.mjs` | 新規 | `runBounded`（§3.2）と、許可した外部のコマンドの検査 `isAllowedCall(cmd, args)`（§7 の T-I） | 80 |
-| `scripts/flow/config.mjs` | 新規 | `readFlowConfig(repoRoot, { runBounded, env, deadlineMono })` → `{ repo, slug, base, exclude, tz }` か `{ error }`。許可するキーは `version`（1）・`repo`・`base`・`exclude`（文字列の配列、64 件以内。base と main／master を常に足す）・`tz`（IANA）。`alerts`・`wip`・`train`・`ledger` は「後の PR／他の子のキー」と名指して exit 2、ほかの知らないキーも exit 2 | 160 |
-| `scripts/flow/record.mjs` | 新規 | `flowDirOf(env, home)`・`repoSlug(repo)`・`appendTick(dir, tick)`（§2.4）・`readTicks(dir, scope, { from, to })`（§2.4） | 140 |
-| `scripts/flow/sources.mjs` | 新規 | `readPrCounts(runBounded, { repo, base, window, deadlineMono })` → `{ prCreated, prMerged }`（§2.3。例外を投げない） | 150 |
-| `scripts/flow/aggregate.mjs` | 新規 | 純関数: `hourlyPrCounts(prs, { from, to, tz })`（`reconstruct` の 2 列）・形の検査 | 90 |
+| `scripts/flow/config.mjs` | 新規 | `readFlowConfig(repoRoot, { runBounded, env, deadlineMono, tz? })` → `{ repo, slug, base, exclude, tz }` か `{ error }`（`deadlineMono` は単調時計の絶対の締め切り。`tz` は `--tz`）。`repoSlug` もここ（`slug` を返すため。`record.mjs` が re-export）。許可するキーは `version`（1）・`repo`・`base`・`exclude`（文字列の配列、64 件以内。base と main／master を常に足す）・`tz`（IANA）。`alerts`・`wip`・`train`・`ledger` は「後の PR／他の子のキー」と名指して exit 2、ほかの知らないキーも exit 2 | 160 |
+| `scripts/flow/record.mjs` | 新規 | `flowDirOf(env, home)`・`repoSlug(repo)`（re-export）・`appendTick(dir, tick, { tz })`（§2.4。ファイル名は `tz` での `at` の日付）・`readTicks(dir, scope, { from?, to?, maxFileBytes?, maxTotalBytes? })`（§2.4。`unfinishedFiles`・`corruptLines`・`truncatedFiles`・`unreadable` を返す） | 140 |
+| `scripts/flow/sources.mjs` | 新規 | `readPrCounts(runBounded, { repo, base, window, deadlineMono, now? })` → `{ prCreated, prMerged, events }`（§2.3。例外を投げない）。`events` は各指標の窓の中の時刻の配列（失敗した指標は `null`）で、`tick` は使わず `reconstruct` が `hourlyPrCounts` に渡す（gh 2 本の結果から両 cmd への経路を 1 つにする） | 150 |
+| `scripts/flow/aggregate.mjs` | 新規 | 純関数: `hourlyPrCounts(events, { from, to, tz })`（`reconstruct` の 2 列）・形の検査 `validatePrList`・窓（`tickWindow`・`dayWindow`・`searchDateRange`） | 90 |
+| `tests/unit/scripts/flow/flow-fakes.ts` | 新規 | 試験の共通の差し替え（identification の git の表・gh の応答・時計・一時 dir） | — |
 | `tests/unit/scripts/flow/config-4367.test.ts` | 新規 | T-I の設定と識別の行 | — |
 | `tests/unit/scripts/flow/sources-4367.test.ts` | 新規 | T-P | — |
 | `tests/unit/scripts/flow/record-4367.test.ts` | 新規 | T-L | — |
@@ -251,18 +255,19 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 
 ### 6.3 受入基準
 
-1. `reconstruct --date 2026-11-13 --tz Asia/Tokyo` を fixture（`deps.run` が `meta.json` の照会に対応する応答を返す）で動かした出力が、§8.3 の表の 2 列の全セルと一致し、§8.4 の証人が全部成り立つ
+1. `reconstruct --date 2026-11-13 --tz Asia/Tokyo` を fixture（`deps.run` が `meta.json` の照会に対応する応答を返す）で動かした出力が、§8.3 の表の 2 列の全セルと一致し、§8.4 の証人が全部成り立つ（値は観測できた件数、`complete: false`）
 2. 実際の GitHub に対して同じ `reconstruct` を手で 1 回動かし、§8.3 と一致する（PR の説明に出力を貼る。CI では動かさない）
-3. `tick` は排他を取り、`CM_FLOW_DIR` の下の `<repo-slug>/<日付>.jsonl` に §2.2 の形の 1 行だけを書く
+3. `tick` は排他を取り、`CM_FLOW_DIR` の下の `<repo-slug>/<日付>.jsonl` に §2.2 の形の 1 行だけを書く（窓の `to` は観測時刻の分の切り下げ − 10 分）
 4. T-P・T-L・T-D・T-I の全行が通り、T-M の各変異が対応する行を赤にする（変異は試験の中の差し替えで作り、実装のファイルを書き換えない）
 5. `report`・`status` は識別の git の外の外部を呼ばず、記録の dir を作らない
 6. `src/`・`scripts/orchestrate/`・`.commandmate/verify.yaml`・`.github/` に変更が無い
 7. Issue の受入のうち **WIP と CI の待ちの再現は PR1a では満たさない**（PR-L・PR-C）。PR の説明にそう書く
+8. （改訂 3・R7）2 指標の記録と `reconstruct`・`report`・`status` の出力は `coverage: "search-observed"` を持ち、`complete` は常に false。正常な空の応答と 999 件の応答で `complete: true` を出す版が P1(b)・P3 で赤になる（created・merged の両方）
 
 ### 6.4 gates・scope・試験の隔離
 
 - gates: `lint`・`typecheck`・`unit`（`tests/setup.ts` を変えるため）。手元の確かめ（`npx vitest run tests/unit/scripts/flow tests/unit/guards tests/unit/docs`・`npm run lint`・`npx tsc --noEmit`）は `unit` の代わりにならない
-- scope.allow: `scripts/flow/**`・`tests/unit/scripts/flow/**`・`tests/fixtures/flow/**`・`tests/setup.ts`・`changelog.d/4367.md`
+- scope.allow: `docs/design/flow-metrics-4367.md`（改訂 3 を同じ PR で）・`tests/unit/docs/**`・`scripts/flow/**`・`tests/unit/scripts/flow/**`・`tests/fixtures/flow/**`・`tests/setup.ts`・`changelog.d/4367.md`
 - fixture を足すので、契約の生成の `touchesFixtures` の文に従う
 - 隔離: 各 case は `fs.mkdtempSync(os.tmpdir())` の dir を `CM_FLOW_DIR`・`CM_VERIFY_LOCK_ROOT` として `deps.env` に渡し、`process.env` を変えたら `afterEach` で戻す。既定の home を試す case は `deps.home` も一時 dir にし、本物の home へ落とさない。実際の `gh`・`git` は呼ばない（`deps.run` の差し替え。linked worktree の行だけ一時 dir に `git init`・`git worktree add` してよい）
 
@@ -276,21 +281,22 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 
 | # | 入力 | 期待 | 種 |
 |---|---|---|---|
-| P1 | 照会が exit 0・`[]` | `value: 0`・`complete: true` | 陰性（完全な空＝0） |
-| P2 | 3 件、全部窓の中 | 3・true | 陰性 |
-| P3 | 件数 999 | 窓の中の件数・true | 陰性（上限未満） |
+| P1(a) | 照会が exit 0・`[]`、かつ対象の集合を覆う証拠がある | PR1a には (a) の証拠の取り口が無いので到達しない（`complete: true` は出さない）。後の PR で証拠を足す時に陰性（本当の空＝0）として置く | — |
+| P1(b) | 照会が exit 0・`[]`（索引の反映待ちを否定できない） | `value: 0`（観測した 0）・`coverage: "search-observed"`・`complete: false`。**`complete: true` を出す版は赤**（R7） | 陽性（R7）・陰性（観測値 0 は残る） |
+| P2 | 3 件、全部窓の中 | 3・`complete: false` | 陰性 |
+| P3 | 件数 999 | 窓の中の件数・`complete: false`。`complete: true` を出す版は赤（R7。既知の非空集合の対照） | 陽性（R7）・陰性（上限未満で値は出る） |
 | P4 | 件数 1000（上限ちょうど） | `null`・`truncated` | 陽性 |
 | P5 | exit 1（`HTTP 502`） | `null`・`fail` | 陽性 |
 | P6 | exit 1（`HTTP 404`） | `null`・`denied` | 陽性 |
 | P7 | 予算切れ（T-D） | `null`・`timeout` | 陽性 |
 | P8 | JSON でない・配列でない | `null`・`schema` | 陽性 |
 | P9 | 1 要素の `createdAt` が時刻でない／`number` が文字列／`baseRefName` が別の base | `null`・`schema` | 陽性（1 つでも落ちたら全体を確定しない） |
-| P10 | 同じ `number` が 2 回、時刻が同じ | 1 つに数える・true | 陽性 |
+| P10 | 同じ `number` が 2 回、時刻が同じ | 1 つに数える | 陽性 |
 | P11 | 同じ `number` が 2 回、時刻が違う | `null`・`conflict` | 陽性 |
 | P12 | 日付に広げた照会が窓の外の PR を返す（`from` の 1 ms 前・`to` ちょうど） | 数えない（`[from, to)`） | 陽性 |
 | P13 | `from` ちょうど・`to` の 1 ms 前 | 数える | 陽性 |
 | P14 | `prCreated` は ok、`prMerged` は fail | `prCreated` だけ確定・`prMerged` は `null` | 陰性（片方の故障で他方は残る） |
-| P15 | `--tz UTC` と `Asia/Tokyo` | 時の分け方だけ変わり、窓の合計は同じ | 陰性 |
+| P15 | 同じ絶対の `from`・`to` を `tz` だけ変えて（UTC と Asia/Tokyo） | 時の分け方だけ変わり、窓の合計は同じ（`--date` を別の tz で評価すると窓そのものが違うので、この行は絶対の窓で比べる）。夏時間の日は 23・25 行 | 陰性 |
 | P16（C1） | 記録・`report`・`status` に開いた PR・CI・台帳の列を求める | 「非対応」。0 にならない。取得の関数そのものが無い | 陽性 |
 | P17 | 窓の前に作られ窓の中でマージされた PR（合成） | `prMerged` に入る（照会のキーは `merged`） | 陽性 |
 
@@ -307,7 +313,9 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 | L5 | `A\nB`、B は途中で切れた JSON | 同上 | 同上 |
 | L6 | `B`（1 行目から改行無し） | 同上 | 記録 0・未確定の末尾あり（「記録が無い」と区別） |
 | L7 | `A\nX\n`、X は JSON でない | 1 行追記（X は改行で終わるので境界は確定） | A と C・壊れた行 1 |
-| L8 | `A\n` で `appendFileSync` が ENOSPC | exit 1・要約を出さない | A だけ |
+| L8 | `A\n` で `appendFileSync` が書く前に ENOSPC | exit 1・要約を出さない | A だけ |
+| L8b | 前半だけ書けてから ENOSPC | 書き手は補修しない。次の書き手は未確定の末尾として追記しない | A だけ・未確定の末尾あり |
+| L8c | 改行つきの 1 行が書けてから例外（close 等） | 書き手は `ok: false`（exit 1）。補修・再追記しない | A と C（V2: 改行で終わる行は確定） |
 | L9 | L4 のあと人が直した（`A\n`） | 1 行追記 | A・C |
 | L10 | 別の base の行 `A'\n` | 1 行追記 | 自分の scope の行だけ |
 | L11 | 書き手の追記の後に解放が例外（F7） | 行は残る（消さない）・要約なし・exit 1 | 次の読み手はその行を確定として読む |
@@ -357,6 +365,7 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 
 | # | 外す防御 | 赤になる行 |
 |---|---|---|
+| M0（R7） | 正常な応答で `complete: true` を出す | P1(b)・P3 |
 | M1 | 上限ちょうどでも値を出す | P4 |
 | M2 | 失敗を 0 にする | P5〜P9 |
 | M3 | 形の検査を全体でなく要素ごとに飛ばす | P9 |
@@ -399,6 +408,8 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 - WIP・CI の待ち・開いた PR の再現は PR1a の範囲外（§5.2 の PR-L・PR-C・PR-O）。改訂 1 の表のそれらの列は外した（その値は改訂 1 の §8.3 に残る。後の PR がそれぞれの完全性の条件を閉じてから、改めて期待値にする）
 
 ### 8.2 期待値の出し方と fixture への結び付け
+
+**PR1a の fixture の出どころ（改訂 3、実装の段の事実）**: PR1a のワーカーは実際の `gh` を呼ばない契約だったため、`tests/fixtures/flow/2026-11-13/` は §2.3 の 2 本の照会の応答では**なく**、手元の記録からの組み立て（`meta.json` の `provenance`）。`merged.json` は develop の first-parent の squash コミット（件名の末尾 `(#N)`、committer 時刻。gh の `mergedAt` と 1 秒ほどずれうる: W2）、`created.json` は orchestrate の run-log の `stage: pr`・`pr=#N created` の `at`。run-log に無い #4327・#4337 は PR 番号の単調性から区間を決め、時は §8.3 の値に拠った（`meta.json` の `inferred`。観測ではない）。`meta.json` の `queries` は §2.3 の照会そのもので、`fetchedAt` は null。**受入 2 の前に開発リーダーが 2 本の照会で取り直して両ファイルを差し替える**（下の 4 に従い、食い違いは定義の読みを先に確かめる）
 
 1. 期待値は計測の実装とは別の実装で出し、製品の集計で作り直さない。§8.3 は設計の段で Python の短いスクリプト（§2.3 の定義を直接書いたもの）で出した。このスクリプトと母集団の証跡は設計の PR に入っていない（scope の外）。独立した正しさは §8.4 の手計算の証人で補う
 2. fixture に写すのは `number`・`createdAt`・`mergedAt`・`baseRefName` だけ（題名・ブランチ名は写さない）
@@ -508,7 +519,7 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 | # | 未決 | 決める人 | 本書の仮の値 |
 |---|---|---|---|
 | U1 | GitHub でない origin の識別 | 開発リーダー（必要になった時に別の Issue で） | exit 2 |
-| U2 | 検索の索引の遅れに合わせて窓の `to` を後ろへずらすか・その値 | PR1a の実装の契約で遅れを 1 回確かめてから開発リーダー | ずらさない（`at` の分の切り下げ） |
+| U2 | 検索の索引の遅れに合わせて窓の `to` を後ろへずらすか・その値 | **決定（改訂 3、開発リーダー）**: tick の既定の `to` は観測時刻の分の切り下げ − 10 分。見立てであって保証ではない（値は観測できた件数のまま） | − 10 分 |
 | U3 | 警報の意味（変化の時だけの遷移か、毎回の状態のスナップショットか。原因調査 §6 の N2） | PM／開発リーダー（PR-A の上流の前に） | 決めない。PR1a に警報は無い |
 | U4 | 落ちた後の末尾の自動の修復を入れるか | 開発リーダー（別の Issue で設計） | 入れない。人が直す（H8） |
 | U5 | CI の順番待ちを attempt の最新だけで数えるか | PM（PR-C で） | 決めない |
@@ -522,6 +533,19 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 ---
 
 ## 14. 処置の記録
+
+### 14.0 改訂 3（再レビュー 3 `prereview-4367-3-reply.md`・開発リーダーの R7 の処分。PR1a の実装と同じ PR）
+
+| 指摘 | 処分 | 反映した場所 |
+|---|---|---|
+| R7（検索で返った集合の正常性を母集団の完全性へ進める。F1→R1 と同じ種類の 3 回目） | **狭めて塞ぐ**: 2 指標を「検索で観測できた件数」と定義し、`coverage: "search-observed"` を記録と出力に持たせ、`complete` は常に false。表示は「観測した件数（検索） — 母集団の完全な数ではない」。失敗・上限・型の誤りは `null` | P-2・§2.2・§2.3・§2.5・§6.3 の 8・§7.1 の P1(a)(b)・P3・M0 |
+| R7 の猶予 | tick の既定の `to` を観測時刻の分の切り下げ − 10 分。見立てであって保証ではないと書いた | §2.2・§2.3・U2 |
+| P3 補記: reconstruct のデータと期限 | `readPrCounts` が窓の中の時刻（`events`）も返し、`hourlyPrCounts` へ渡す。`reconstruct` の取得の締め切りは識別の後の単調時計 + 200 秒 | §2.5・§6.1 |
+| P3 補記: 部分 append と一度の終端 | L8b（前半だけ書けた）・L8c（1 行書けてから例外）を足した。段 5・6 が exit 1 を選んだ後の解放の成功で exit 0 にしない対照を足した | §7.2・試験 |
+| P3 補記: 読み手の不明 | 記録の dir を読めない（EACCES 等）は exit 1 で「記録が無い」と分ける。上限で読まなかったファイルを JSON と表示に残し、それより新しい観測があり得る時は最新を出さない。16 MB・64 MB の対照は上限を差し替えて試す | §2.5・試験 |
+| P3 補記: 日時 | P15 を絶対の窓で比べる行にした。時の鍵にオフセットを持たせ、夏時間の 23・25 行を試験に置いた | §2.5・§7.1 P15 |
+| P3 補記: 共有の読み手の引渡し | `readFlowConfig` の引数に `deadlineMono`（単調時計の絶対の締め切り）と `tz` を明記した | §6.1 |
+| P3 補記: fixture | 実際の gh を呼べなかったので、手元の記録からの組み立てと推定の 2 件を `meta.json` に明記し、取り直しを開発リーダーへ残した | §8.2 |
 
 ### 14.1 改訂 2（再レビュー `prereview-4367-2-reply.md`・原因調査 `enabler-return-4367-cause.md`・再指示 2）
 
@@ -549,3 +573,4 @@ F1〜F6 と P3 を、完全性・scope・排他と tick ID・取得元の健康�
 
 - 改訂 1（2026-11-14）: 事前レビュー（codex-2、P2 6 件）と再指示 1・突き合わせの決定 X1〜X7 を反映。I-0 を最上位に、PR1 を PR1a（計測）・PR1b（警報）に分け、完全性・scope・排他と tick ID・取得元の健康・期限・通知の試行の記録を決め、変異の対照と再現の証人を足した
 - 改訂 2（2026-11-14）: 再レビュー（P2 6 件、同じ種類の 2 回目）と原因調査・再指示 2 を反映。原因調査 §5 の 3 文を最上位に置き、PR1a を PR の作成数・マージ数の計測と記録と読み取りへ狭め（改行を確定の境界にして補修しない・正の予算を強制する runner・`report`／`status` は識別の git だけ）、外した経路の条件を §5.2 に残し、試験の表を原因調査 §7 の軸で作り直した
+- 改訂 3（2026-11-14）: 再レビュー 3 の R7 の処分（2 指標を検索で観測できた件数に限り `complete` を常に false、猶予 10 分は見立て）と P3 の補記を、PR1a の実装と同じ PR で反映（§14.0）
