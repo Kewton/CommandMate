@@ -217,7 +217,7 @@ npm run start
 |-------------|---------|--------|
 | `.env` だけ変えた（ビルドの入力は変えていない）、クラッシュから復帰したい | `./scripts/restart-nobuild.sh` | **しない** |
 | 停止中のサーバーをバックグラウンドで起こしたい | `./scripts/start.sh --daemon` | **しない** |
-| ビルドの入力（コード・`package.json` の版・`next.config.*` など。下記）が変わった | `./scripts/stop-server.sh && ./scripts/build-and-start.sh --daemon` | する |
+| ビルドの入力（下記の規則。`src/`・`server.ts`・`package.json` の版など）が変わった | `./scripts/stop-server.sh && ./scripts/build-and-start.sh --daemon` | する |
 
 ```bash
 # ビルドせずに再起動（.env の変更を反映する標準手段）
@@ -240,7 +240,7 @@ CM_PORT=3011 ./scripts/restart-nobuild.sh
 
 > **Note**: 起動時に `.env` が存在するのに 1 変数も読み込めていない場合、サーバーは起動ログに `[env] ...` の警告を出します（Issue #2132）。この警告が出たら環境変数が全滅しているので、Web Push・DB パス・worktree ルートがすべて既定値になっています。
 
-**ビルドの要否はビルドの入力の差分で決めます。** `src/` だけを見ないでください。`next.config.js` は `package.json` の版を `NEXT_PUBLIC_APP_VERSION` としてバンドルへ焼き込むので、版を上げただけ（`src/` の差分が 0 件）でもビルドが要ります。`package.json` / `next.config.*` / `tsconfig*.json` / `locales/` / `public/` / `src/` のどれかが `.next/BUILD_ID` より新しければビルドする、と判定します。画面に出る版は、バンドルを直接見て確かめます（`grep -rl '<新しい版>' .next/static/chunks/` が 1 件以上、旧版が 0 件）。`/api/app/update-check` の `currentVersion` は `package.json` を実行時に読む値なので、バンドルの中身の証拠になりません。ビルドの後は `BUILD_ID` が変わるので、開いているタブはハードリロードしてもらいます。
+**ビルドの要否はビルドの入力の差分で決めます。** `src/` だけを見ないでください。`next.config.js` は `package.json` の版を `NEXT_PUBLIC_APP_VERSION` としてバンドルへ焼き込むので、版を上げただけ（`src/` の差分が 0 件）でもビルドが要ります。規則: `next build`（`npm run build`）・`build:cli`・`build:server` の入力が前のビルド（`.next/BUILD_ID`・`dist/server/`・`dist/cli/`）より新しければビルドする。入力は一覧で閉じず、各 `tsconfig*.json` の `include` が拾うファイル（`src/`、ルートの `server.ts` など）、`tsconfig*.json` 自体、`package.json` の版番号と依存、`next.config.js`、`locales/`・`public/` を含めて見る（`npm start` は `dist/server/server.js` を動かすので、`server.ts` の変更も `build:server` が要る）。画面に出る版は、バンドルを直接見て確かめます（`grep -rl '<新しい版>' .next/static/chunks/` が 1 件以上、旧版が 0 件）。`/api/app/update-check` の `currentVersion` は `package.json` を実行時に読む値なので、バンドルの中身の証拠になりません。ビルドの後は `BUILD_ID` が変わるので、開いているタブはハードリロードしてもらいます。
 
 **再起動の前に、このサーバーへつながっている待機を確かめます。** `commandmate wait` / `verify` はサーバーへの接続が切れると（ECONNREFUSED）その場で失敗として終わるので、ほかのエージェントや別の作業が張っている待機を再起動で落とします。`ps -axo pid,lstart,command | grep -E 'commandmate[a-z]* (wait|verify)'` で、再起動するサーバーのポートへつながる待機が残っていないかを見て、終わるのを待ってから再起動します（別のサーバーへつながる待機は待たなくてよい）。
 

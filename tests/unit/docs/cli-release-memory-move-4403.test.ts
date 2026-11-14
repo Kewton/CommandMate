@@ -325,3 +325,28 @@ describe("the moved text agrees with the code (#4403 third PR review)", () => {
     expect(read("src/lib/error/chunk-reload.ts")).toContain("return onLine ? 'build' : 'network';");
   });
 });
+
+describe("the build-input rule names every build's inputs (#4403 third PR re-review)", () => {
+  const RULE =
+    "`next build`（`npm run build`）・`build:cli`・`build:server` の入力が前のビルド（`.next/BUILD_ID`・`dist/server/`・`dist/cli/`）より新しければビルドする。";
+
+  it("the rebuild skill and DEPLOYMENT.md state the same rule, including server.ts", () => {
+    for (const rel of [".claude/skills/rebuild/SKILL.md", "docs/DEPLOYMENT.md"]) {
+      const doc = read(rel);
+      expect(doc).toContain(RULE);
+      expect(doc).toContain("ルートの `server.ts`");
+      expect(doc).not.toContain("`tsconfig*.json` のどれかが `.next/BUILD_ID` より新しければ");
+    }
+    expect(read("docs/DEPLOYMENT.md")).not.toContain(
+      "`package.json` / `next.config.*` / `tsconfig*.json` / `locales/` / `public/` / `src/` のどれかが `.next/BUILD_ID` より新しければビルドする",
+    );
+  });
+
+  it("server.ts is a build:server input that npm start runs from dist/server", () => {
+    // tsconfig.server.json carries comments, so it is matched as text rather than parsed.
+    expect(read("tsconfig.server.json")).toMatch(/"include":\s*\[\s*"server\.ts",/);
+    const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
+    expect(pkg.scripts["build:server"]).toContain("tsconfig.server.json");
+    expect(pkg.scripts.start).toContain("dist/server/server.js");
+  });
+});

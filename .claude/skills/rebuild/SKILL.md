@@ -10,15 +10,15 @@ allowed-tools: Bash(./scripts/*), Bash(git worktree list)
 
 ## ⚠️ 最初に決めること: ビルドは要るのか（Issue #2132）
 
-**ビルドは「ビルドの入力が変わったとき」だけ必要です。** ビルドの入力は `src/`・`locales/`・`public/`・`package.json`・`next.config.*`・`tsconfig*.json` で、
-どれかが `.next/BUILD_ID` より新しければビルドします。`src/` の差分だけを見ないこと: `package.json` の版は `next.config.js` が
+**ビルドは「ビルドの入力が変わったとき」だけ必要です。** 規則: `next build`（`npm run build`）・`build:cli`・`build:server` の入力が前のビルド（`.next/BUILD_ID`・`dist/server/`・`dist/cli/`）より新しければビルドする。入力は一覧で閉じず、各 `tsconfig*.json` の `include` が拾うファイル（`src/`、ルートの `server.ts` など）、`tsconfig*.json` 自体、`package.json` の版番号と依存、`next.config.js`、`locales/`・`public/` を含めて見る（`npm start` は `dist/server/server.js` を動かすので、`server.ts` の変更も `build:server` が要る）。
+`src/` の差分だけを見ないこと: `package.json` の版は `next.config.js` が
 `NEXT_PUBLIC_APP_VERSION` としてバンドルへ焼き込むので、版を上げただけでもビルドが要ります（詳しくは docs/DEPLOYMENT.md の再起動の節）。
 `npm run build` は `.next/BUILD_ID` を書き換えるため、**開いているブラウザタブが chunk を取得できなくなって壊れます**
 （`.commandmate/verify.yaml` が `skipInPrimaryCheckout: true` でビルドを外しているのと同じ理由）。
 
 | 状況 | 使うもの | ビルド |
 |------|---------|--------|
-| ビルドの入力（`src/`・`locales/`・`public/`・`package.json` の版や依存・`next.config.*`・`tsconfig*.json`）を変えた | このスキル（`build-and-start.sh --daemon`） | する |
+| ビルドの入力（上の規則。`src/`・`server.ts`・`package.json` の版など）を変えた | このスキル（`build-and-start.sh --daemon`） | する |
 | `.env` だけ変えた（ビルドの入力は変えていない） | `./scripts/restart-nobuild.sh` | **しない** |
 | クラッシュしたサーバーを復帰させたい | `./scripts/restart-nobuild.sh` | **しない** |
 | 停止中のサーバーを起こすだけ | `./scripts/start.sh --daemon` | **しない** |
