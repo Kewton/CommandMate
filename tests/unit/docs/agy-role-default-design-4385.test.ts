@@ -8,6 +8,8 @@
  * the body until the role is confirmed, and the generation re-check after each await.
  * Revision 3 (cause analysis, option A): the top invariant, no automatic kill, the refusal
  * kept apart from the evidence a forget removes, and the restart boundary.
+ * Revision 4 (third review, R3): the gate inverted to a positive record, its target taken
+ * from the persistent role settings, so no forget, failed stop or restart exempts a send.
  *
  * Line numbers are not pinned: the implementation this design asks for moves them,
  * and a design test that goes red on the PR it describes would block that PR.
@@ -59,13 +61,18 @@ const REQUIRED: ReadonlyArray<readonly [string, string]> = [
   ['generation re-check after awaits', '### D6'],
   ['the listing runs only for a new process', 'if (live) return;'],
   ['revision history', '## 改訂の履歴'],
-  ['the top invariant', '## 0. 最上位の不変条件'],
+  ['the top rule', '## 0. 最上位の規則'],
+  ['the send gate in one sentence', '### 0.1 送信の門（1 文）'],
+  ['the gate target comes from persistent settings', '永続のロールの設定'],
+  ['permission is a positive record', '正の記録'],
   ['the refusal outlives a forget', '### D7'],
   ['no automatic kill', '自動では止めない'],
-  ['the restart boundary is stated', '例外 E1'],
+  ['the impact section', '### 影響'],
   ['the acceptance is restated', '受入の言い換え'],
   ['doc tests and driver tests are told apart', '実の driver を通す試験'],
-  ['the failed-stop counterexample', 'C3'],
+  ['the no-positive-record table', '正の記録が無いすべての状態で本文 0'],
+  ['the forget-before-refusal counterexample', 'Z5'],
+  ['the params type source is in scope', 'submit-verified-sender-shared.ts'],
 ];
 
 /** The reasons a design text falls short of the contract (empty: it does not). */
