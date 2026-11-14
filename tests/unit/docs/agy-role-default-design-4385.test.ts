@@ -4,6 +4,8 @@
  * table, how each external call fails, the PR split, the test table, the open
  * questions with a recommendation, and the implementation scope. It names the 13
  * tools verified on agy 1.5.8 and leaves `swarm` out, and every file it cites exists.
+ * Revision 2 (2-4-4 pre-review): the four application states, the send gate that holds
+ * the body until the role is confirmed, and the generation re-check after each await.
  *
  * Line numbers are not pinned: the implementation this design asks for moves them,
  * and a design test that goes red on the PR it describes would block that PR.
@@ -47,6 +49,14 @@ const REQUIRED: ReadonlyArray<readonly [string, string]> = [
   ['unverified things say so', '未確認'],
   ['positive controls', '陽性'],
   ['negative controls', '陰性'],
+  ['application state: starting', '起動中'],
+  ['application state: confirmed', '適用を確認済み'],
+  ['application state: not applied', '明確な不適用'],
+  ['application state: unknown', '取得不明'],
+  ['the body waits for the confirmation', '送信の門'],
+  ['generation re-check after awaits', '### D6'],
+  ['the listing runs only for a new process', 'if (live) return;'],
+  ['revision history', '## 改訂の履歴'],
 ];
 
 /** The reasons a design text falls short of the contract (empty: it does not). */
