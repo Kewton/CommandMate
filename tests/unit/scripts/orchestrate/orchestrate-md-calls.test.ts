@@ -248,10 +248,9 @@ describe('1-5 asks flow-wip once, before assign.tsv takes a new lane (#4368 PR1,
     expect(workers).not.toMatch(/run-log\.mjs append/);
   });
 
-  it('1-5 says anything but 0 keeps every new lane out of assign.tsv and into plan.md 見送り', () => {
+  it('1-5 says anything but 0 takes the new lane out of the run itself and keeps it in plan.md 見送り', () => {
     expect(plan).toContain('assign.tsv に入れる前に 1 回だけ');
-    expect(plan).toContain('0 は助言（許可・予約ではない）。0 以外は新しいレーンを入れず plan.md の「見送り」へ');
-    expect(section('2-2')).toContain('assign.tsv の各 Issue（見送りは除く）');
+    expect(plan).toContain('入れない新しいレーンは **run の対象**（`{issue_numbers}`・`BUG_ISSUES`・plan.md）**から外し**、plan.md の「見送り」に残す。以後の段は対象だけを使う');
   });
 
   it('workers.md: the block parses, any non-zero exit is no room, and the guarantee is stated', () => {
@@ -266,25 +265,39 @@ describe('1-5 asks flow-wip once, before assign.tsv takes a new lane (#4368 PR1,
     expect(workers).toContain('**すべて** `assign.tsv` に入れない');
   });
 
-  it('2-2 creates worktrees only for the first column of assign.tsv, not for the whole issue_numbers (review P2)', () => {
-    const setup = bashBlocks(section('2-2')).find((b) => b.includes('/worktree-setup')) ?? '';
-    expect(setup).toContain('/worktree-setup $(cut -f1 "workspace/orchestration/runs/$DATE/assign.tsv")');
-    expect(section('2-2')).not.toContain('{issue_numbers}');
-    parses(setup);
-    expect(section('2-4')).toContain('assign.tsv の各 Issue について');
-  });
-
-  it('Phase 2.5 sends the analysis only for bug Issues still in assign.tsv (review P3)', () => {
+  it('one rule, not one per stage: the later stages take {issue_numbers} as narrowed in 1-5 (review 2 N1/N2)', () => {
+    // The rule lives in workers.md 1-5 and names every list the later stages read.
+    expect(workers).toContain('**この run の対象の並びそのものから外す**');
+    for (const list of ['`{issue_numbers}`', '`BUG_ISSUES`', 'plan.md の対象 Issue の表']) expect(workers).toContain(list);
+    expect(workers).toContain('段ごとに「見送りを除く」を書かない');
+    // The stages say nothing of their own about 見送り; they take the narrowed list.
+    for (const id of ['2-2', '2-4', '3-1']) expect(section(id), id).not.toContain('見送り');
     const phase25 = orchestrate.slice(orchestrate.indexOf('## Phase 2.5'), orchestrate.indexOf('### 2.5-1.'));
-    expect(phase25).toContain('分類されたIssue（見送りは除く）');
-    // The block holds `## Issue内容` inside the fence, so read it from the whole document.
+    expect(phase25).not.toContain('見送り');
+    expect(bashBlocks(section('2-2')).find((b) => b.includes('/worktree-setup'))).toContain('/worktree-setup {issue_numbers}');
+    expect(bashBlocks(section('7-1')).find((b) => b.includes('/uat'))).toContain('/uat {issue_numbers}');
+    // workers.md 2.5-1 no longer narrows BUG_ISSUES itself.
     const send = bashBlocks(docs('workers.md')).find((b) => b.includes('for bug_issue in $BUG_ISSUES')) ?? '';
     expect(send).not.toBe('');
-    parses(send);
-    const filter = send.indexOf('cut -f1 "workspace/orchestration/runs/$DATE/assign.tsv"');
-    expect(filter).toBeGreaterThan(-1);
-    expect(filter).toBeLessThan(send.indexOf('for bug_issue in $BUG_ISSUES'));
-    expect(workers).toContain('2.5 の分析の送信・3-1・3-3）に入らない');
+    expect(send).not.toContain('assign.tsv');
+  });
+
+  it('a slash-command line never relies on shell expansion in its arguments (review 2 N2)', () => {
+    // `/worktree-setup $(cut …)` is typed by the orchestrator, not run by a shell: `bash -n` passing proves nothing.
+    const lines = [orchestrate, docs('workers.md')]
+      .flatMap((text) => bashBlocks(text))
+      .flatMap((b) => b.split('\n'))
+      .filter((line) => /^\/[a-z][a-z-]*\b/.test(line.trim()));
+    expect(lines.some((line) => line.startsWith('/worktree-setup '))).toBe(true);
+    expect(lines.some((line) => line.startsWith('/uat '))).toBe(true);
+    expect(lines.filter((line) => /\$\(|\$\{?[A-Za-z_]|`/.test(line))).toEqual([]);
+  });
+
+  it('the completion check counts the run targets, not every Issue (review 2 N3)', () => {
+    const done = orchestrate.slice(orchestrate.indexOf('\n## 完了条件\n'));
+    expect(done).toContain('- [ ] 対象の Issue（見送りは除く）の開発が完了している');
+    expect(done).toContain('- [ ] 対象の Issue（見送りは除く）のPRがdevelopにマージ済み');
+    expect(done).not.toContain('全Issueの');
   });
 
   it('exit-codes.md has a row for 0, 60, 61, 2 and the rest', () => {
