@@ -1405,6 +1405,12 @@ Error: invalid task contract:
   - scope.allow: at least one pattern is required while success.requireScopeClean is true
 ```
 
+Pass the `--contract` path **relative to the worktree root**. The server joins it onto the worktree path, so an absolute
+path exits 2 with `contract file not found in <worktree>` even when the file exists (`loadTaskContract` in
+`src/lib/tasks/contract-parser.ts`). If `ls` shows the file and you still get this, suspect the form of the path first.
+The contract's `goal` is a YAML block scalar, so continuation lines need an indent of two spaces or more. Pouring shared text
+in through shell variable expansion drops it to column 0 and makes it a YAML syntax error.
+
 ### `verify.gateDefinitions`: Gates the Contract Carries Itself (Issue #1791)
 
 `gates` **selects**; `gateDefinitions` **defines**. They play different roles, and the meaning of

@@ -1971,6 +1971,12 @@ Error: invalid task contract:
   - scope.allow: at least one pattern is required while success.requireScopeClean is true
 ```
 
+`--contract` のパスは **worktree のルートからの相対パス**で渡します。サーバーが worktree のパスにつないで読むので、
+絶対パスを渡すと、ファイルが在っても `contract file not found in <worktree>` で exit 2 になります
+（`src/lib/tasks/contract-parser.ts` の `loadTaskContract`）。`ls` で在るのにこれが出たら、まずパスの形を疑ってください。
+契約の `goal` は YAML のブロックスカラーなので、継続行は 2 スペース以上の字下げが要ります。共通の文をシェルの変数展開で
+流し込むと行頭に落ちて YAML の構文エラーになります。
+
 ### 無人実行の Auto-Yes ポリシーは allow-listed を使う（Issue #1684）
 
 契約の `autoYes.mode: safe` は **`yes_no` 型のプロンプトしか自動応答しません**。
