@@ -93,10 +93,20 @@ jobs:
     # so the script gives up at 20 (8.4 x 2, rounded) and its step is capped at
     # 25 as a backstop.
     #
-    # 40 = the gate's 25 + about 3x the ~4m the remaining steps take. A healthy
-    # run waits at most ~9 minutes, so it sits far below this cap; a run near it
+    # [Issue #4397] The 20-minute wait was too short on a loaded day: v0.51.1
+    # and v0.51.2 (2026-11-14) both gave up while main's CI was still running
+    # and passed only on rerun. Re-measured 2026-11-15 on the 11 most recent
+    # main-push ci-pr.yml runs that ran in one attempt (run start -> `Unit
+    # Tests`/`Build` completed; ids 38824451496 ... 43603908117): max 27.7m
+    # (v0.51.2, run 43603908117), median 12.6m. Two more runs (38425164979,
+    # 43524869825) only finished after a rerun, 22.8m / 37.8m by wall clock, and
+    # are left out of the max. The gate now gives up at 45 (27.7 x 1.5, rounded)
+    # and its step is capped at 50. Past 45 it still exits 1 and fails the job.
+    #
+    # 65 = the gate's 50 + about 3x the ~4m the remaining steps take (rounded).
+    # A healthy run waits at most ~28 minutes, far below this cap; a run near it
     # means CI on main is stuck, which the gate reports by name.
-    timeout-minutes: 40
+    timeout-minutes: 65
     steps:
       # [self-hosted] Toolchain and OIDC preflight, deliberately the FIRST step of
       # the only job that can publish. On a GitHub-hosted image node/npm/git are
@@ -148,11 +158,11 @@ jobs:
       # require that run's verdict: the latest github-actions check runs named
       # `Unit Tests` and `Build` (main's required checks) on the tag commit must
       # be completed/success. A failure, a check that never appears or never
-      # finishes within 20 minutes, or a `gh` error all exit 1 here, before
+      # finishes within 45 minutes, or a `gh` error all exit 1 here, before
       # anything is built or published. Logic and tests:
       # scripts/check-release-ci.mjs, tests/unit/scripts/release/.
       - name: Require CI to have passed on the tag commit
-        timeout-minutes: 25 # the script gives up at 20; this only backstops a hung `gh`
+        timeout-minutes: 50 # the script gives up at 45; this only backstops a hung `gh`
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -160,7 +170,7 @@ jobs:
           --repo "${{ github.repository }}"
           --sha "${{ github.sha }}"
           --checks "Unit Tests,Build"
-          --timeout-minutes 20
+          --timeout-minutes 45
           --interval-seconds 30
 
       - name: Build Next.js
