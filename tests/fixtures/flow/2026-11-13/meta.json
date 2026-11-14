@@ -1,0 +1,65 @@
+{
+  "issue": 4367,
+  "scope": {
+    "repo": "Kewton/CommandMate",
+    "base": "develop"
+  },
+  "window": {
+    "date": "2026-11-13",
+    "tz": "Asia/Tokyo",
+    "from": "2026-11-12T15:00:00.000Z",
+    "to": "2026-11-13T15:00:00.000Z"
+  },
+  "queries": {
+    "created": {
+      "cmd": "gh",
+      "args": [
+        "pr",
+        "list",
+        "--repo",
+        "Kewton/CommandMate",
+        "--base",
+        "develop",
+        "--state",
+        "all",
+        "--search",
+        "created:2026-11-12..2026-11-13",
+        "--limit",
+        "1000",
+        "--json",
+        "number,createdAt,baseRefName"
+      ],
+      "file": "created.json",
+      "count": 49,
+      "numbersSha256": "fc3cf82b9bf2ea8d90458a3834877019c2fdfa2c7860c2a5490ff6544a9a5686"
+    },
+    "merged": {
+      "cmd": "gh",
+      "args": [
+        "pr",
+        "list",
+        "--repo",
+        "Kewton/CommandMate",
+        "--base",
+        "develop",
+        "--state",
+        "merged",
+        "--search",
+        "merged:2026-11-12..2026-11-13",
+        "--limit",
+        "1000",
+        "--json",
+        "number,mergedAt,baseRefName"
+      ],
+      "file": "merged.json",
+      "count": 49,
+      "numbersSha256": "5a2b1c6cc2cd8c05fbd04c617084dc18cc2fe7bcfcce1902e0f3d3fc4059539e"
+    }
+  },
+  "numbersSha256Of": "sha256 of the PR numbers in file order (the order gh returned them), joined by \",\"",
+  "fetchedAt": "2026-11-14T01:22:28Z",
+  "provenance": {
+    "status": "the answers of the two gh queries above, verbatim: the leader (claude-3) ran them with the real gh at fetchedAt and replaced the local reconstruction the worker had built (re-instruction 1 of #4367 PR1a). Acceptance 2 (reconstruct --date 2026-11-13 --tz Asia/Tokyo against the real GitHub, workspace/orchestration/runs/2026-11-14/reconstruct-4367-real-2026-11-13.txt) matched every cell of design §8.3.",
+    "fields": "only number, createdAt / mergedAt and baseRefName are kept (design §8.2-2)."
+  }
+}

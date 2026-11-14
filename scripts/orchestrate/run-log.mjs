@@ -40,7 +40,8 @@
  * records (LOG_STAGES). They are not progress: they carry no HEAD, readRecords
  * returns them apart (`logRecords`), and `records` — what headsOf, summarize,
  * latestByStage and envCleanShared read — never holds one. `status` shows them
- * after the summary (`queue` in `--json`).
+ * after the summary (`queue` in `--json`). merge-train.mjs (Issue #4369) writes its `train` lines the
+ * same way (TRAIN_LOG_STAGES, read with LOG_STAGES): no HEAD, never progress; `status` shows the latest one (`train` in `--json`, only when there is one).
  *
  * Usage:
  *   node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N>
@@ -67,6 +68,13 @@ export const STAGES = ['contract', 'send', 'verify', 'review', 'findings', 'prec
  * reader — headsOf, latestByStage, summarize, envCleanShared — sees them.
  */
 export const LOG_STAGES = ['queue'];
+/**
+ * merge-train.mjs's `train` (Issue #4369): a log stage like LOG_STAGES, kept in a list of its own so
+ * LOG_STAGES stays the merge-pr queue's (run-log-queue-4277.test.ts fixes it). Every reader below
+ * takes ANY_LOG_STAGES, so a `train` line is never progress either.
+ */
+export const TRAIN_LOG_STAGES = ['train'];
+export const ANY_LOG_STAGES = [...LOG_STAGES, ...TRAIN_LOG_STAGES];
 /** Stages whose result holds only for the HEAD it was taken on; a new HEAD needs them again. */
 export const HEAD_BOUND_STAGES = ['verify', 'review', 'findings', 'precheck', 'ci', 'merge'];
 export const RESULTS = ['ok', 'fail', 'skip'];
@@ -114,8 +122,8 @@ export function makeRecord(input, now = new Date()) {
   const problems = [];
   const issue = Number(input.issue);
   if (!Number.isInteger(issue) || issue <= 0) problems.push(`issue: must be a positive integer (got ${input.issue})`);
-  if (!STAGES.includes(input.stage) && !LOG_STAGES.includes(input.stage)) {
-    problems.push(`stage: must be one of ${[...STAGES, ...LOG_STAGES].join(' / ')} (got ${input.stage})`);
+  if (!STAGES.includes(input.stage) && !ANY_LOG_STAGES.includes(input.stage)) {
+    problems.push(`stage: must be one of ${[...STAGES, ...ANY_LOG_STAGES].join(' / ')} (got ${input.stage})`);
   }
   if (!RESULTS.includes(input.result)) problems.push(`result: must be one of ${RESULTS.join(' / ')} (got ${input.result})`);
   const head = optionalString(input.head);
@@ -123,7 +131,7 @@ export function makeRecord(input, now = new Date()) {
   const workHead = optionalString(input.workHead);
   if (workHead !== null && !/^[0-9a-f]{7,40}$/.test(workHead)) problems.push(`work-head: must be a commit sha (got ${workHead})`);
   if (workHead !== null && head === null) problems.push('work-head: needs --head (the published HEAD built on it)');
-  if (LOG_STAGES.includes(input.stage) && (head !== null || workHead !== null)) {
+  if (ANY_LOG_STAGES.includes(input.stage) && (head !== null || workHead !== null)) {
     // headsOf reads `head` from every record it is given; a log line must never name one (#4277).
     problems.push(`head: a ${input.stage} record holds no HEAD (it logs, it does not move progress)`);
   }
@@ -211,7 +219,7 @@ export function readRecords(runDir, issues) {
       try {
         const parsed = JSON.parse(line);
         if (!Number.isInteger(parsed.issue)) throw new Error('not a record');
-        if (LOG_STAGES.includes(parsed.stage) && !parsed.head && !parsed.workHead) logRecords.push(parsed);
+        if (ANY_LOG_STAGES.includes(parsed.stage) && !parsed.head && !parsed.workHead) logRecords.push(parsed);
         else if (STAGES.includes(parsed.stage)) records.push(parsed);
         else throw new Error('not a record');
       } catch {
@@ -263,6 +271,22 @@ export function queueSummary(logRecords) {
 export const formatQueueLine = (entry) =>
   `queue #${entry.issue}${entry.item ? `/${entry.item}` : ''}\tstate=${entry.state ?? '-'}\tpos=${entry.pos ?? '-'}\tattempt=${entry.attempt ?? '-'}` +
   `${entry.exit !== null ? `\texit=${entry.exit}` : ''}\tpr=${entry.pr ?? '-'}`;
+
+/**
+ * The latest `train` record (merge-train.mjs, #4369), or null: what `status` shows of the trains.
+ * Read from `logRecords`, never `records`.
+ *
+ * @returns {{ issue: number, state: string | null, train: string | null, base: string | null, at: string | null, result: string } | null}
+ */
+export function trainSummary(logRecords) {
+  const latest = [...(logRecords ?? [])].reverse().find((record) => record.stage === 'train');
+  if (!latest) return null;
+  const fields = noteFields(latest.note);
+  return { issue: latest.issue, state: fields.state ?? null, train: fields.train ?? null, base: fields.base ?? null, at: latest.at ?? null, result: latest.result };
+}
+
+export const formatTrainLine = (train) =>
+  `train: ${train.state ?? '-'}\ttrain=${train.train ?? '-'}\tbase=${train.base ?? '-'}\tat=${train.at ?? '-'}`;
 
 /** The work item a record belongs to: its `item`, or null for the Issue itself (every record before #3883). */
 export const itemOf = (record) => record.item ?? null;
@@ -430,7 +454,7 @@ export function envCleanShared(records) {
 export const formatEnvCleanShared = ({ item, workItems }) =>
   `env-clean: ${item} in ${workItems.join(', ')} — candidate for an outside cause (attribute it: 3-4)`;
 
-function formatStatus(summary, skipped, shared = [], queue = []) {
+function formatStatus(summary, skipped, shared = [], queue = [], train = null) {
   const lines = [];
   for (const item of summary) {
     const stageText = STAGES.filter((stage) => item.stages[stage])
@@ -443,12 +467,13 @@ function formatStatus(summary, skipped, shared = [], queue = []) {
   }
   lines.push(...shared.map(formatEnvCleanShared));
   if (queue.length > 0) lines.push('queue:', ...queue.map(formatQueueLine));
+  if (train) lines.push(formatTrainLine(train));
   if (skipped.length > 0) lines.push(`skipped unreadable line(s): ${skipped.join(', ')}`);
   return lines.join('\n');
 }
 
 const USAGE = `Usage:
-  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${[...STAGES, ...LOG_STAGES].join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>] [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
+  node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${[...STAGES, ...ANY_LOG_STAGES].join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>] [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]`;
 
 const FLAGS = {
@@ -505,8 +530,9 @@ export function main(argv, now = new Date()) {
     const summary = summarize(records);
     const shared = envCleanShared(records);
     const queue = queueSummary(logRecords);
-    if (options.json) console.log(JSON.stringify({ file, summary, skipped, envCleanShared: shared, queue }, null, 2));
-    else console.log(records.length === 0 && queue.length === 0 ? `no records in ${file}` : formatStatus(summary, skipped, shared, queue));
+    const train = trainSummary(logRecords);
+    if (options.json) console.log(JSON.stringify({ file, summary, skipped, envCleanShared: shared, queue, ...(train ? { train } : {}) }, null, 2));
+    else console.log(records.length === 0 && queue.length === 0 && !train ? `no records in ${file}` : formatStatus(summary, skipped, shared, queue, train));
     return 0;
   } catch (error) {
     console.error(error.message);

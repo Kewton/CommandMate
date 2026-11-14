@@ -285,10 +285,15 @@ process.env.CM_OPENCODE_LAUNCH_SETTINGS_FILE = join(
 // path here for a pool nobody uses; add it when the pool changes.
 process.env.CM_AGENT_HOOKS_DIR = join(tmpdir(), 'commandmate-test-agent-hooks', String(process.pid));
 process.env.CM_VERIFY_LOCK_ROOT = join(tmpdir(), 'commandmate-test-locks', String(process.pid));
+// Issue #4370: `~/.commandmate/resource.yaml` (scripts/orchestrate/resource-config.mjs). Left absent:
+// the defaults are what a test reads unless it writes its own file and points here.
+process.env.CM_RESOURCE_CONFIG = join(tmpdir(), 'commandmate-test-resource-config', String(process.pid), 'resource.yaml');
 process.env.CM_LOG_DIR = join(tmpdir(), 'commandmate-test-logs', String(process.pid));
 process.env.CM_RUN_LOCK_DIR = join(tmpdir(), 'commandmate-test-run-lock', String(process.pid));
 process.env.CM_UAT_SOCK_BASE = join(tmpdir(), 'commandmate-test-uat-sock', String(process.pid));
 process.env.CM_PRODUCT_PUBLISH_DIR = join(tmpdir(), 'commandmate-test-product-publish', String(process.pid));
+// Issue #4367: the flow record (`~/.commandmate/flow`, scripts/flow/record.mjs flowDirOf).
+process.env.CM_FLOW_DIR = join(tmpdir(), 'commandmate-test-flow', String(process.pid));
 // Issue #4176: the scripts the running server's tmux hooks execute
 // (`~/.commandmate/bin`). `tests/unit/tmux/session-hooks-2317.test.ts` turns
 // the live-attach and auto-popup options on, and each turn materializes them.
