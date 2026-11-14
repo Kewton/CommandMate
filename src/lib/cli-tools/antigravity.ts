@@ -60,7 +60,7 @@ import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
 import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputReadMark } from '@/lib/session/instance-input-lock';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import {
   findUnknownToolName,
   judgeAntigravityRoleFrame,
@@ -71,17 +71,20 @@ import { RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
 import {
   antigravityRoleRefusal,
   applyRoleApplicationObservation,
+  checkLaunchRoleAgentListed,
   assertRoleSendBoundary,
   expireRoleApplication,
   observeLaunchRoleApplication,
   readRoleApplication,
   resolveRoleSendTarget,
   startRoleApplicationGrace,
+  type AgentListOutcome,
   type LaunchRoleTarget,
   type RoleApplicationObservation,
   type RoleApplicationView,
 } from '@/lib/session/role-launch';
 import { isUnderTest } from '@/lib/test-run-detection';
+import { roleEnvReaderForPane } from '@/lib/agent-roles/pane-env';
 
 const logger = createLogger('cli-tools/antigravity');
 
@@ -330,6 +333,97 @@ async function readAgyVersion(): Promise<string | null> {
   return readAgyVersionFromProcess();
 }
 
+/** `agy agent`'s limits (Issue #4385 D3): SIGKILL after 10 s, 64 KiB of stdout, 4 KiB of stderr read. */
+export const AGY_AGENT_LIST_TIMEOUT_MS = 10_000;
+export const AGY_AGENT_LIST_MAX_STDOUT_BYTES = 64 * 1024;
+const AGY_AGENT_LIST_MAX_STDERR_BYTES = 4 * 1024;
+
+/** One run of `agy agent`. */
+export interface AgyAgentListOptions {
+  /** The executable (`agy`), looked up on {@link env}'s `PATH`. */
+  command: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+  maxStdoutBytes?: number;
+}
+
+/**
+ * Run `agy agent` once and say what it listed (D3). Never rejects. stderr is
+ * read up to 4 KiB and dropped: no row of agy's output reaches a reason. The
+ * child is killed (SIGKILL) on the time limit and on the stdout limit.
+ */
+export function runAgyAgentList(options: AgyAgentListOptions): Promise<AgentListOutcome> {
+  const timeoutMs = options.timeoutMs ?? AGY_AGENT_LIST_TIMEOUT_MS;
+  const maxStdout = options.maxStdoutBytes ?? AGY_AGENT_LIST_MAX_STDOUT_BYTES;
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (outcome: AgentListOutcome): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      resolve(outcome);
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(options.command, ['agent'], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch {
+      finish({ kind: 'failed', why: 'agy could not be started' });
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish({ kind: 'failed', why: `no answer within ${timeoutMs / 1000} s` });
+    }, timeoutMs);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > maxStdout) {
+        child.kill('SIGKILL');
+        finish({ kind: 'failed', why: `the list was longer than ${maxStdout} bytes` });
+        return;
+      }
+      chunks.push(chunk);
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      // Read so agy never blocks on a full pipe; kept nowhere.
+      stderrBytes = Math.min(stderrBytes + chunk.length, AGY_AGENT_LIST_MAX_STDERR_BYTES);
+    });
+    child.on('error', () => finish({ kind: 'failed', why: 'agy could not be started' }));
+    child.on('close', (code, signal) => {
+      if (code === 0) finish({ kind: 'listed', stdout: Buffer.concat(chunks).toString('utf8') });
+      else finish({ kind: 'failed', why: signal ? `stopped by ${signal}` : `exit code ${code}` });
+    });
+  });
+}
+
+type AgyAgentLister = (options: AgyAgentListOptions) => Promise<AgentListOutcome>;
+
+let agyAgentLister: AgyAgentLister | null = null;
+
+/** Replace how a launch runs `agy agent`. Test-only; a test run starts no agy otherwise. */
+export function setAgyAgentListerForTest(lister: AgyAgentLister | null): void {
+  agyAgentLister = lister;
+}
+
+/**
+ * The environment `agy agent` runs with (D3, N7): `PATH` and `HOME` as the pane
+ * will have them (its tmux environment), else this server's.
+ */
+async function agyAgentListEnv(target: LaunchRoleTarget): Promise<NodeJS.ProcessEnv> {
+  const read = roleEnvReaderForPane(target);
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of ['PATH', 'HOME'] as const) {
+    const value = await read(name).catch(() => undefined);
+    if (value !== undefined && value !== '') env[name] = value;
+  }
+  return env;
+}
+
 /** What a send's role gate decided before the wait (Issue #4385). */
 type AntigravityRoleGate =
   | { kind: 'none'; beforeBody: () => void }
@@ -372,6 +466,21 @@ export class AntigravityTool extends BaseCLITool {
       relaunchAction: 'antigravity-session-relaunch',
     });
     if (live) return;
+
+    // Issue #4385 D3: before a new process with a role, ask agy whether it lists
+    // the agent (agy's TUI runs on its default agent otherwise). The process
+    // starts either way; a generation whose agent was not seen listed can never
+    // be confirmed, so the send gate holds the body back with the reason. A
+    // reconnect (returned above) is not listed. Every D3 decision is made by
+    // `checkLaunchRoleAgentListed`; a launch without a role returns there at once.
+    await checkLaunchRoleAgentListed(async () => {
+      const target = { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId };
+      const options: AgyAgentListOptions = { command: this.command, cwd: worktreePath, env: await agyAgentListEnv(target) };
+      if (agyAgentLister !== null) return agyAgentLister(options);
+      // No test starts agy: one that launches with a role says what agy lists.
+      if (isUnderTest()) return { kind: 'failed', why: 'agy is not run in a test' };
+      return runAgyAgentList(options);
+    });
 
     // Issue #1762: fence this instance's structured events off from the process
     // that used to hold the same (worktree, tool, instance) key. Creation path
@@ -818,20 +927,22 @@ export class AntigravityTool extends BaseCLITool {
   }
 
   private refusalFromView(view: RoleApplicationView): Promise<RoleLaunchRefusedError> {
-    return this.refusalOf(view.refusal?.cause ?? 'grace-expired', view, view.refusal?.toolName ?? null);
+    return this.refusalOf(view.refusal?.cause ?? 'grace-expired', view, view.refusal?.toolName ?? null, view.refusal?.listProblem ?? null);
   }
 
   /** The refusal's words, with agy's version read only now (D2). */
   private async refusalOf(
     cause: AntigravityRoleCause,
     view: RoleApplicationView | null = null,
-    toolName: string | null = null
+    toolName: string | null = null,
+    listProblem: string | null = null
   ): Promise<RoleLaunchRefusedError> {
     const runningVersion = await readAgyVersion();
     logger.warn('antigravity-role-not-confirmed', { cause, ...(toolName !== null ? { toolName } : {}) });
     return antigravityRoleRefusal({
       cause,
       toolName,
+      listProblem,
       runningVersion,
       artifactName: view?.artifactName ?? null,
       artifactPath: view?.artifactPath ?? null,

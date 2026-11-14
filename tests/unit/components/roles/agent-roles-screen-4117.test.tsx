@@ -161,11 +161,14 @@ describe('[#4117] the add dialog', () => {
     expect(server.writes('POST', '/instances/roles')[0].role).toEqual({ state: 'inherit' });
   });
 
-  it('warns that a tool whose adapter is off refuses a resolved role', async () => {
+  // Issue #4385 PR2 (§8.5): was "warns that a tool whose adapter is off refuses a resolved role".
+  it('says no tool is off: Antigravity takes a role by default', async () => {
     render(<Desktop />);
     await openAdd();
     fireEvent.change(select('agent-add-tool'), { target: { value: 'antigravity' } });
-    expect(screen.getByTestId('agent-add-role-adapter-off')).toBeInTheDocument();
+    expect(select('agent-add-role')).not.toBeDisabled();
+    expect(screen.queryByTestId('agent-add-role-adapter-off')).toBeNull();
+    expect(screen.queryByText(/not enabled yet|まだ有効ではありません/)).toBeNull();
   });
 
   it('creates through the role route, with the role and the revision it read', async () => {

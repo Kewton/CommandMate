@@ -380,7 +380,6 @@
     "personaNote": "OpenCode's persona (build, plan, …) is not a role. A persona is the agent you switch inside OpenCode; a role is instructions CommandMate gives at startup.",
     "replacesDefaultNote": "On OpenCode V2 a role replaces the agent's default instructions rather than adding to them.",
     "resumedAcrossRoleNote": "This start continued an earlier conversation, so replies from another role are still in its history. A new conversation can be started at the next start.",
-    "adapterDisabledNote": "Applying a role to this tool is not enabled yet. A start that resolves to a role is refused.",
     "unsupportedNote": "Roles do not apply to this tool.",
     "choice": {
       "inherit": "Use the default",

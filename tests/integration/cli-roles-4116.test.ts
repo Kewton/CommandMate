@@ -604,10 +604,15 @@ describe('roles default', () => {
     expect(inherit.stderr).toContain('--repo');
   });
 
-  it('warns when the tool is not enabled yet', async () => {
+  // Issue #4385 PR2: was 'warns when the tool is not enabled yet'. The server now answers
+  // adapterEnabled: true for antigravity, so no warning; the warning against an older server that
+  // answers false stays pinned in tests/unit/cli/utils/agent-roles-4116.test.ts.
+  it('does not warn for antigravity now that the adapter is enabled', async () => {
     const result = await roles('default', 'antigravity', '--role', 'reviewer');
     expect(result.code).toBe(0);
-    expect(result.stderr).toContain('not enabled');
+    expect(result.stderr).not.toContain('not enabled');
+    const saved = (await roles('defaults', '--tool', 'antigravity', '--json')).json().system[0];
+    expect(saved).toMatchObject({ cliToolId: 'antigravity', adapterEnabled: true, stored: { state: 'role', roleId: reviewer } });
   });
 });
 

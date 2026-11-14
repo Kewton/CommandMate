@@ -207,7 +207,7 @@ export class FakeRoleServer {
       ['claude', 'codex', 'command-code', 'opencode', 'opencode-v2', 'copilot', 'antigravity'] as const
     ).map((cliToolId) => ({
       cliToolId,
-      adapterEnabled: cliToolId !== 'antigravity',
+      adapterEnabled: true,
       effective: TOOL_DEFAULTS[cliToolId] ?? NO_DEFAULT,
     }));
     return {
@@ -224,7 +224,7 @@ export class FakeRoleServer {
     return (['claude', 'antigravity'] as const).map((cliToolId) => ({
       ...template,
       cliToolId,
-      adapterEnabled: cliToolId !== 'antigravity',
+      adapterEnabled: true,
       stored: this.system[cliToolId] ?? { state: 'unset' },
     }));
   }

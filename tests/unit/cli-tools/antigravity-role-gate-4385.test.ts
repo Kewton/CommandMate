@@ -15,6 +15,10 @@
  *
  * Every refusal is counted as: body 0, Enter after a body 0, Ctrl-D 0, kill 0.
  *
+ * PR2 (§8.4): no switch is set anywhere; the gate applies from the settings
+ * alone, and `agy agent` (replaced here by a lister that reads the generated
+ * agents directory) is asked before a new process starts.
+ *
  * @vitest-environment node
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -164,6 +168,18 @@ vi.mock('child_process', async (importOriginal) => ({
   }),
 }));
 vi.mock('@/lib/ws-server', () => ({ broadcast: vi.fn() }));
+/**
+ * The UAT mode as D3 reads it (`getUatIsolationMode`). Setting the real
+ * `CM_UAT_ISOLATION=1` here would refuse the launch earlier, on the shared hook
+ * config and the artifact (#3360, the existing UAT rules), before D3 is reached;
+ * those read the environment through `sharedHookWritePolicy` / `isUatIsolationEnabled`
+ * and stay as they are.
+ */
+const uat = vi.hoisted(() => ({ mode: null as null | 'shared-read-only' }));
+vi.mock('@/config/uat-isolation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/config/uat-isolation')>();
+  return { ...actual, getUatIsolationMode: () => uat.mode ?? actual.getUatIsolationMode() };
+});
 /** Which paths git would say share a repository (their common dir). None by default. */
 const gitDirs = vi.hoisted(() => new Map<string, string>());
 vi.mock('@/lib/git/git-common-dir', async (importOriginal) => ({
@@ -194,7 +210,10 @@ import { createAgentRole, getLatestRoleLaunchRecords, setRepositoryRoleState, se
 import { setRepositoryEnabled } from '@/lib/db/db-repository';
 import {
   applyRoleApplicationObservation,
+  checkLaunchRoleAgentListed,
   expireRoleApplication,
+  forgetLaunchRoleEvidence,
+  gateLaunchRole,
   getLaunchRoleEvidence,
   readRoleApplication,
   resetLaunchRoleStateForTest,
@@ -208,12 +227,12 @@ import { fixedEnvReader } from '@/lib/agent-roles/composition';
 import { readRoleLaunchRefusal, ROLE_LAUNCH_REFUSED_CODE } from '@/lib/agent-roles/launch-errors';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { AntigravityTool, setAgyVersionReaderForTest } from '@/lib/cli-tools/antigravity';
+import { AntigravityTool, setAgyAgentListerForTest, setAgyVersionReaderForTest } from '@/lib/cli-tools/antigravity';
 import { clearStartupTrust } from '@/lib/cli-tools/antigravity-startup-trust';
-import { AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR } from '@/types/agent-roles';
 import { POST as killSessionRoute } from '@/app/api/worktrees/[id]/kill-session/route';
 import { PUT as putInstanceRole } from '@/app/api/worktrees/[id]/instances/roles/route';
 import { answerSendFailure } from '@/app/api/worktrees/[id]/send/send-failure';
+import { startSessionForSend } from '@/app/api/worktrees/[id]/send/send-session-start';
 import { PUT as putRepository } from '@/app/api/repositories/[id]/route';
 import { PUT as putRepositoryRoleDefault } from '@/app/api/repositories/[id]/role-defaults/route';
 
@@ -231,6 +250,12 @@ let tool: AntigravityTool;
 let rootId: string;
 
 type Outcome = { ok: true } | { ok: false; error: Error };
+
+/** What `agy agent` would print: one agent directory per row (the generated name is the directory's). */
+function listAgentsDir(): string {
+  const agents = path.join(dir, 'agy-agents');
+  return fs.existsSync(agents) ? fs.readdirSync(agents).map((name) => `${name}\n`).join('') : '';
+}
 
 /** The real `setImmediate`, taken before any test fakes the clock. */
 const realSetImmediate = setImmediate;
@@ -347,6 +372,9 @@ async function setRoleThroughApi(role: Record<string, unknown>): Promise<void> {
 async function openSuccessor(revokeInput = true): Promise<void> {
   const snapshot = await resolveLaunchRole(db, { ...TARGET, worktreePath, readEnv: fixedEnvReader({}) });
   await runWithLaunchRole(snapshot, async () => {
+    // As the driver does (D3): the successor's agent is listed, so it may be confirmed.
+    expect(gateLaunchRole()).toBeNull();
+    await checkLaunchRoleAgentListed(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
     if (revokeInput) beginAgentSession(TARGET);
     buildAgentLaunchCommandLine({ target: TARGET, executablePath: 'agy', worktreePath });
   });
@@ -391,6 +419,7 @@ beforeEach(async () => {
   resetSessionLaunchFlightsForTest();
   clearStartupTrust();
   setAgyVersionReaderForTest(async () => '1.5.9');
+  uat.mode = null;
   Object.assign(pane, {
     exists: false,
     live: true,
@@ -405,7 +434,9 @@ beforeEach(async () => {
     events: [],
     name: () => readRoleApplication(TARGET)?.artifactName ?? 'cm-role-unknown',
   });
-  vi.stubEnv(AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR, '1');
+  // PR2 (P12): no switch is set; the gate applies from the settings alone. agy's
+  // list is the agents directory, as agy reads it (D3).
+  setAgyAgentListerForTest(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR', path.join(dir, 'agy-agents'));
@@ -419,6 +450,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
   setAgyVersionReaderForTest(null);
+  setAgyAgentListerForTest(null);
   resetLaunchRoleStateForTest();
   resetSessionLaunchFlightsForTest();
   clearStartupTrust();
@@ -924,10 +956,10 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     expect(await answer.json()).toMatchObject({ code: ROLE_LAUNCH_REFUSED_CODE, roleRefusal: 'not-confirmed' });
   });
 
-  it('C12 switch off (the PR1 default): with a role set or not, sends are as before', async () => {
-    vi.unstubAllEnvs();
-    vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
-    vi.stubEnv('HOME', path.join(dir, 'home'));
+  // PR2 (D4): was "C12 switch off (the PR1 default): with a role set or not, sends are as
+  // before". The switch is gone, so what was its "off" is now the gate from the settings
+  // alone: no role set is as before, a role set afterwards is refused (§1, the impact table).
+  it('C12 (PR2) no switch: with no role sends are as before, a role set afterwards gates them', async () => {
     pane.afterLaunch = () => {
       pane.kind = 'idle';
       pane.agent = 'none';
@@ -935,11 +967,11 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     expect((await launch()).ok).toBe(true);
     pane.events = [];
     expectSent(await send(), 1);
-    // A role set afterwards does not gate it while the switch is off.
+    expect(readRoleApplication(TARGET)).toBeNull();
     setSystemRoleDefault(db, 'antigravity', roleId);
     pane.onCapture = async () => undefined;
-    expectSent(await send(), 2);
-    expect(readRoleApplication(TARGET)).toBeNull();
+    const error = expectNothingSent(await send(), 'not-confirmed', 1);
+    expect(error.message).toContain('no record');
   });
 
   it('C13 the role changed to another one while confirmed: the body goes (the running role waits for a restart)', async () => {
@@ -953,6 +985,453 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     await setRoleThroughApi({ state: 'none' });
     expectSent(await send());
   });
+});
+
+/**
+ * PR2 (§8.4): on by default, and `agy agent` asked before a new process starts.
+ * The list is replaced per test; the real child (`runAgyAgentList`: its exit
+ * code, time limit and size limit) runs in
+ * `tests/unit/agent-roles/antigravity-role-enable-4385.test.ts`.
+ */
+describe('P/N: on by default, listed before a new process (§8.4)', () => {
+  const lines = () => pane.events.filter((e) => e.type === 'line').map((e) => e.text);
+  type ListOptions = { command: string; cwd: string; env: NodeJS.ProcessEnv };
+  const lister = (answer: () => Promise<{ kind: 'listed'; stdout: string } | { kind: 'failed'; why: string }>) => {
+    const fn = vi.fn((_options: ListOptions) => answer());
+    setAgyAgentListerForTest(fn);
+    return fn;
+  };
+  /** Nothing of a launch was left: no pane, no line, no generation, no new record. */
+  function expectNoLaunch(outcome: Outcome, reason: string, requestedBefore: string | null = null): Error {
+    expect(outcome.ok, 'the launch must be refused').toBe(false);
+    const error = (outcome as { error: Error }).error;
+    expect(readRoleLaunchRefusal(error)).toBe(reason);
+    expect(pane.exists).toBe(false);
+    expect(lines()).toEqual([]);
+    expect(getLaunchRoleEvidence(TARGET)).toBeNull();
+    expect(getLatestRoleLaunchRecords(db, WT, 'antigravity').requested?.sessionGeneration ?? null).toBe(requestedBefore);
+    expect(error.message).not.toContain(BODY);
+    return error;
+  }
+
+  /** Launch with the role, the screen then naming the role: only D3 can hold the body back. */
+  async function launchShowingRole(): Promise<Outcome> {
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    pane.afterLaunch = () => {
+      pane.live = true;
+      pane.kind = 'idle';
+      pane.agent = 'role';
+    };
+    return launch();
+  }
+
+  /**
+   * The process was started and left running, no positive record was made (the
+   * screen naming the role notwithstanding), and a send is not sent with the reason.
+   */
+  async function expectStartedButHeld(outcome: Outcome, reason: 'not-applied' | 'not-confirmed'): Promise<Error> {
+    if (!outcome.ok) throw outcome.error;
+    expect(pane.exists).toBe(true);
+    expect(lines()).toHaveLength(1);
+    const view = readRoleApplication(TARGET);
+    expect(lines()[0]).toContain(`--agent ${view?.artifactName}`);
+    expect(view?.state).toBe('refused');
+    const records = getLatestRoleLaunchRecords(db, WT, 'antigravity');
+    expect(records.requested?.sessionGeneration).toBe(view?.generation);
+    expect(records.launched?.sessionGeneration ?? null).not.toBe(view?.generation);
+    pane.events = [];
+    const error = expectNothingSent(await send(), reason);
+    expect(error.message).not.toContain(BODY);
+    expect(error.message).not.toMatch(/stopped the session|停止した/);
+    expect(pane.exists).toBe(true);
+    return error;
+  }
+
+  it('P4 no switch set: a role launches with `--agent <name>`, confirmed, then the body goes once', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    pane.afterLaunch = () => {
+      pane.kind = 'idle';
+    };
+    const outcome = await launch();
+    if (!outcome.ok) throw outcome.error;
+    const name = readRoleApplication(TARGET)?.artifactName as string;
+    expect(name).toMatch(/^cm-role-[a-z0-9-]+$/);
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]).toContain(`--agent ${name}`);
+    expect(lines()[0]).not.toContain(BODY);
+    expect(listed).toHaveBeenCalledTimes(1);
+    expect(readRoleApplication(TARGET)?.state).toBe('confirmed');
+    expect(getLatestRoleLaunchRecords(db, WT, 'antigravity').requested?.adapterVersion).toBe('2');
+    pane.events = [];
+    expectSent(await send());
+  });
+
+  // Re-instruction 2 (PM's decision A, review 5-2b P1): D3 no longer refuses the launch.
+  // Was "P5 … no pane, no line, no record, artifact-failed": the human decision keeps the
+  // process and holds the body back, so P5 / P6 / P9 now expect a started process with
+  // no positive record, and a send not sent with the reason.
+  it('P5 a new process whose agent agy does not list: started, never confirmed, the body not sent with the reason', async () => {
+    lister(async () => ({ kind: 'listed', stdout: 'some-other-agent\n' }));
+    const error = await expectStartedButHeld(await launchShowingRole(), 'not-applied');
+    expect(error.message).toContain('did not list the agent');
+  });
+
+  it.each([
+    ['a non-zero exit', 'exit code 1'],
+    ['a timeout', 'no answer within 10 s'],
+    ['a list over 64 KiB', 'the list was longer than 65536 bytes'],
+    ['agy missing', 'agy could not be started'],
+  ])('P6 %s: started, never confirmed, the body not sent, and only the cause is said', async (_case, why) => {
+    lister(async () => ({ kind: 'failed', why }));
+    const error = await expectStartedButHeld(await launchShowingRole(), 'not-confirmed');
+    expect(error.message).toContain('did not answer before the start');
+    expect(error.message).toContain(why);
+  });
+
+  it('P6 a lister that throws is "did not answer" too, never a confirmation', async () => {
+    lister(async () => {
+      throw new Error('spawn ENOENT: SECRET_PATH_IN_ERROR');
+    });
+    const error = await expectStartedButHeld(await launchShowingRole(), 'not-confirmed');
+    expect(error.message).toContain('agy could not be started');
+    expect(error.message).not.toContain('SECRET_PATH_IN_ERROR');
+  });
+
+  it('P7 the session stopped while agy listed: session-stopped, no pane, no line, no record of the old request', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let asked = false;
+    lister(async () => {
+      asked = true;
+      await held;
+      return { kind: 'listed', stdout: listAgentsDir() };
+    });
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    let outcome: Outcome | null = null;
+    tool.startSession(WT, worktreePath, 'antigravity').then(
+      () => {
+        outcome = { ok: true };
+      },
+      (error: Error) => {
+        outcome = { ok: false, error };
+      }
+    );
+    await driveFakeClockUntil(() => asked || outcome !== null);
+    expect(asked).toBe(true);
+    // The human's stop, as the stop API ends: what was known is forgotten.
+    forgetLaunchRoleEvidence(TARGET);
+    release();
+    await driveFakeClockUntil(() => outcome !== null);
+    expectNoLaunch(outcome as unknown as Outcome, 'session-stopped');
+  });
+
+  it('P8 CM_UAT_ISOLATION=1 (as D3 reads it): agy agent is not run; started, never confirmed, the body not sent', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle');
+    expect(listed).toHaveBeenCalledTimes(1);
+    // A person stops it; the next launch is a new process in UAT isolation.
+    pane.exists = false;
+    forgetLaunchRoleEvidence(TARGET);
+    pane.events = [];
+    uat.mode = 'shared-read-only';
+    const error = await expectStartedButHeld(await launchShowingRole(), 'not-confirmed');
+    expect(error.message).toContain('was not checked before the start');
+    expect(error.message).toContain('CM_UAT_ISOLATION=1');
+    expect(listed).toHaveBeenCalledTimes(1);
+  });
+
+  it('P9 only names that share a prefix or a suffix: not listed, so never confirmed', async () => {
+    lister(async () => {
+      const name = fs.readdirSync(path.join(dir, 'agy-agents'))[0];
+      return { kind: 'listed', stdout: `${name}x\nx${name}\n${name}-2\n` };
+    });
+    await expectStartedButHeld(await launchShowingRole(), 'not-applied');
+  });
+
+  // Review 4385-pr2b P2-1: the branch that does not run agy (UAT) must lose to a stop
+  // as the listing branch does (P7). The stop lands in the launch's own await before
+  // D3 (agy's install check), after the launch's scope took the session's epoch.
+  it('P14 CM_UAT_ISOLATION=1 (as D3 reads it), the session stopped while the launch awaited: session-stopped, no pane, no line, agy not asked', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    uat.mode = 'shared-read-only';
+    let stopped = false;
+    vi.mocked(tool.isInstalled).mockImplementation(async () => {
+      if (!stopped) {
+        stopped = true;
+        // The human's stop, as the stop API ends: what was known is forgotten.
+        forgetLaunchRoleEvidence(TARGET);
+      }
+      return true;
+    });
+    const outcome = await launchShowingRole();
+    expect(stopped).toBe(true);
+    expectNoLaunch(outcome, 'session-stopped');
+    expect(listed).not.toHaveBeenCalled();
+  });
+
+  it('P14 control: CM_UAT_ISOLATION=1 (as D3 reads it), not stopped: started, never confirmed (P8 unchanged)', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    uat.mode = 'shared-read-only';
+    // The agent file is prepared by a launch outside UAT; this one only checks D3.
+    const error = await expectStartedButHeld(await launchShowingRole(), 'not-confirmed');
+    expect(error.message).toContain('CM_UAT_ISOLATION=1');
+    expect(listed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Review 4385-pr2b P2-2: the real `CM_UAT_ISOLATION=1` (the environment, not the
+   * replaced mode). The shared home under `os.tmpdir()` is prepared by this build
+   * first, as a UAT runs it: the role's agent file and agy's hook config exist and
+   * match. A shared home without them is refused earlier, before D3 (#3360).
+   */
+  describe('the real CM_UAT_ISOLATION=1', () => {
+    const hooksFile = () => path.join(dir, 'home', '.gemini', 'config', 'hooks.json');
+    const agentsDir = () => path.join(dir, 'agy-agents');
+    function readTree(root: string): Record<string, string> {
+      const out: Record<string, string> = {};
+      if (!fs.existsSync(root)) return out;
+      for (const entry of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const file = path.join(entry.parentPath, entry.name);
+        out[path.relative(root, file)] = fs.readFileSync(file, 'utf8');
+      }
+      return out;
+    }
+
+    it('P15 a prepared shared home: agy agent is not run; started, never confirmed, the body not sent with the reason, nothing written', async () => {
+      // Hooks on, so agy's shared hook config is part of what the UAT reads.
+      vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+      const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+      // The preparation, outside UAT: this build writes the agent and the hook config.
+      await launchWithRole('idle');
+      expect(fs.existsSync(hooksFile())).toBe(true);
+      const name = readRoleApplication(TARGET)?.artifactName as string;
+      expect(fs.existsSync(path.join(agentsDir(), name, 'agent.md'))).toBe(true);
+      const home = readTree(path.join(dir, 'home'));
+      const agents = readTree(agentsDir());
+      // A person stops it; the next launch is a new process under the real switch.
+      pane.exists = false;
+      forgetLaunchRoleEvidence(TARGET);
+      pane.events = [];
+      vi.stubEnv('CM_UAT_ISOLATION', '1');
+      const error = await expectStartedButHeld(await launchShowingRole(), 'not-confirmed');
+      expect(error.message).toContain('was not checked before the start');
+      expect(error.message).toContain('CM_UAT_ISOLATION=1');
+      expect(getLatestRoleLaunchRecords(db, WT, 'antigravity').launched?.sessionGeneration ?? null).not.toBe(
+        readRoleApplication(TARGET)?.generation
+      );
+      expect(listed).toHaveBeenCalledTimes(1);
+      // Read-only: the shared home is as the preparation left it.
+      expect(readTree(path.join(dir, 'home'))).toEqual(home);
+      expect(readTree(agentsDir())).toEqual(agents);
+    });
+
+    it('P16 the role\'s agent not prepared: artifact-failed before D3 (#3360), no pane, no line, agy not asked, nothing written', async () => {
+      const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+      vi.stubEnv('CM_UAT_ISOLATION', '1');
+      const error = expectNoLaunch(await launchShowingRole(), 'artifact-failed');
+      expect(error.message).toContain('CM_UAT_ISOLATION=1');
+      expect(listed).not.toHaveBeenCalled();
+      expect(readTree(agentsDir())).toEqual({});
+    });
+  });
+
+  it('P12 no switch anywhere: the gate applies from the settings alone (Z7 once more)', async () => {
+    await launchWithRole('idle');
+    expectSent(await send());
+    // A server restart: the record is gone, the settings still give the role.
+    resetLaunchRoleStateForTest();
+    setLaunchRoleDatabaseForTest(db);
+    const error = expectNothingSent(await send(), 'not-confirmed', 1);
+    expect(error.message).toContain('no record');
+  });
+
+  it('N1 no role set: the launch line is the plain one, agy is not asked, the body goes', async () => {
+    const listed = lister(async () => {
+      throw new Error('no role: agy must not be asked');
+    });
+    pane.afterLaunch = () => {
+      pane.kind = 'idle';
+      pane.agent = 'none';
+    };
+    expect((await launch()).ok).toBe(true);
+    const plain = lines();
+    // Settings for another tool: the full resolution, still no role for this one.
+    pane.exists = false;
+    forgetLaunchRoleEvidence(TARGET);
+    pane.events = [];
+    setSystemRoleDefault(db, 'claude', roleId);
+    expect((await launch()).ok).toBe(true);
+    expect(lines()).toEqual(plain);
+    expect(plain[0]).not.toContain('--agent');
+    pane.events = [];
+    expectSent(await send());
+    expect(listed).not.toHaveBeenCalled();
+  });
+
+  it('N4 a live process is reconnected, and agy is not asked (the send gate still applies)', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle', 'none');
+    expect(listed).toHaveBeenCalledTimes(1);
+    const reconnect = lister(async () => {
+      throw new Error('a reconnect must not list');
+    });
+    expect((await launch()).ok).toBe(true);
+    expect(reconnect).not.toHaveBeenCalled();
+    expect(lines()).toEqual([]);
+    expectNothingSent(await send(), 'not-applied');
+  });
+
+  // Re-instruction 2: was "N5 … refused there, the line is not typed". The relaunch now
+  // happens; the failed list keeps the new generation from ever being confirmed.
+  it('N5 a pane whose agy has ended: asked once; relaunched, never confirmed, the body not sent', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle');
+    const first = readRoleApplication(TARGET)?.generation;
+    pane.live = false;
+    const failing = lister(async () => ({ kind: 'failed', why: 'exit code 1' }));
+    pane.afterLaunch = () => {
+      pane.live = true;
+      pane.kind = 'idle';
+      pane.agent = 'role';
+    };
+    const outcome = await launch();
+    if (!outcome.ok) throw outcome.error;
+    expect(listed).toHaveBeenCalledTimes(1);
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(lines()).toHaveLength(1);
+    expect(readRoleApplication(TARGET)?.generation).not.toBe(first);
+    pane.events = [];
+    expectNothingSent(await send(), 'not-confirmed');
+  });
+
+  it('N7 agy is asked in the worktree, with the PATH and HOME the pane gets', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle');
+    const options = listed.mock.calls[0][0];
+    expect(options.command).toBe('agy');
+    expect(options.cwd).toBe(worktreePath);
+    expect(options.env.HOME).toBe(path.join(dir, 'home'));
+    expect(options.env.PATH).toBe(process.env.PATH);
+  });
+});
+
+/**
+ * Re-instruction 2 (PM's decision A): D3 starts the process on every path, and only
+ * an agent seen listed may go on to the screen's confirmation. Each path runs with
+ * the screen naming the role, so nothing but D3's verdict holds the body back; the
+ * listed case is the control (the body goes).
+ */
+describe('D3 on every path: started, and only "listed" leads to a positive record', () => {
+  type Reason = 'listed' | 'not-listed' | 'list-failed' | 'unchecked';
+  const lines = () => pane.events.filter((e) => e.type === 'line').map((e) => e.text);
+  const showRole = () => {
+    pane.afterLaunch = () => {
+      pane.live = true;
+      pane.kind = 'idle';
+      pane.agent = 'role';
+    };
+  };
+  /** Make the next `agy agent` answer as `reason` says. */
+  function answer(reason: Reason): ReturnType<typeof vi.fn> {
+    const fn = vi.fn(async () => {
+      if (reason === 'list-failed') return { kind: 'failed' as const, why: 'no answer within 10 s' };
+      if (reason === 'not-listed') return { kind: 'listed' as const, stdout: 'some-other-agent\n' };
+      return { kind: 'listed' as const, stdout: listAgentsDir() };
+    });
+    setAgyAgentListerForTest(fn);
+    uat.mode = reason === 'unchecked' ? 'shared-read-only' : null;
+    return fn;
+  }
+
+  /** Each path brings up a new process under `reason` and then sends one body. */
+  const paths: Record<'new launch' | 'relaunch of an ended pane' | 'the send route starting it', (reason: Reason) => Promise<Outcome>> = {
+    'new launch': async (reason) => {
+      answer(reason);
+      const started = await launch();
+      if (!started.ok) throw started.error;
+      expect(pane.exists).toBe(true);
+      expect(lines()).toHaveLength(1);
+      pane.events = [];
+      return send();
+    },
+    'relaunch of an ended pane': async (reason) => {
+      // The first process: listed, confirmed, a body sent (the control inside this path).
+      answer('listed');
+      const started = await launch();
+      if (!started.ok) throw started.error;
+      pane.events = [];
+      expectSent(await send());
+      const first = readRoleApplication(TARGET)?.generation;
+      // agy ends; the next send relaunches it in the same pane (#2070).
+      pane.live = false;
+      pane.events = [];
+      answer(reason);
+      const outcome = await send();
+      expect(lines()).toHaveLength(1);
+      expect(readRoleApplication(TARGET)?.generation).not.toBe(first);
+      pane.events = pane.events.filter((e) => e.type !== 'line');
+      return outcome;
+    },
+    'the send route starting it': async (reason) => {
+      answer(reason);
+      let step: Awaited<ReturnType<typeof startSessionForSend>> | null = null;
+      const recordNotSent = vi.fn();
+      void startSessionForSend({
+        db,
+        cliTool: tool,
+        cliToolId: 'antigravity',
+        worktreeId: WT,
+        worktreePath,
+        instanceId: 'antigravity',
+        model: undefined,
+        recordNotSent,
+      }).then((answered) => {
+        step = answered;
+      });
+      await driveFakeClockUntil(() => step !== null);
+      expect((step as unknown as { ok: boolean }).ok).toBe(true);
+      expect(recordNotSent).not.toHaveBeenCalled();
+      expect(pane.exists).toBe(true);
+      expect(lines()).toHaveLength(1);
+      pane.events = [];
+      return send();
+    },
+  };
+
+  const reasons: Array<[Reason, 'not-applied' | 'not-confirmed' | null, string]> = [
+    ['listed', null, ''],
+    ['not-listed', 'not-applied', 'did not list the agent'],
+    ['list-failed', 'not-confirmed', 'no answer within 10 s'],
+    ['unchecked', 'not-confirmed', 'CM_UAT_ISOLATION=1'],
+  ];
+
+  for (const [pathName, run] of Object.entries(paths)) {
+    it.each(reasons)(`${pathName}, %s: the process starts; the body goes only when listed`, async (reason, refusal, said) => {
+      setSystemRoleDefault(db, 'antigravity', roleId);
+      showRole();
+      const outcome = await run(reason);
+      const view = readRoleApplication(TARGET);
+      const launched = getLatestRoleLaunchRecords(db, WT, 'antigravity').launched?.sessionGeneration ?? null;
+      expect(count('kill')).toBe(0);
+      expect(count('key', 'C-d')).toBe(0);
+      expect(pane.exists).toBe(true);
+      if (refusal === null) {
+        expectSent(outcome);
+        expect(view?.state).toBe('confirmed');
+        expect(launched).toBe(view?.generation);
+        return;
+      }
+      expect(view?.state).toBe('refused');
+      expect(launched).not.toBe(view?.generation);
+      const error = expectNothingSent(outcome, refusal);
+      expect(error.message).toContain(said);
+      expect(error.message).not.toMatch(/stopped the session|停止した/);
+    });
+  }
 });
 
 describe('guard clock is the real one', () => {

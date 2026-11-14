@@ -332,9 +332,21 @@ describe('role API', () => {
       });
     });
 
-    it('antigravity is settable but marked as not enabled', async () => {
-      const antigravity = (await get()).defaults.find((d: { cliToolId: string }) => d.cliToolId === 'antigravity');
-      expect(antigravity.adapterEnabled).toBe(false);
+    // Issue #4385 PR2 (§8.5, N6): was "antigravity is settable but marked as not enabled".
+    it('every tool, antigravity included, answers adapterEnabled: true (N6)', async () => {
+      const defaults = (await get()).defaults as Array<{ cliToolId: string; adapterEnabled: boolean }>;
+      expect(defaults.map((d) => d.cliToolId)).toEqual([
+        'claude',
+        'codex',
+        'command-code',
+        'opencode',
+        'opencode-v2',
+        'copilot',
+        'antigravity',
+      ]);
+      expect(defaults.every((d) => d.adapterEnabled === true)).toBe(true);
+      const role = await createRole();
+      expect((await put({ cliToolId: 'antigravity', roleId: role.id })).status).toBe(200);
     });
 
     it('refuses an unsupported tool, an unknown tool and an unknown role', async () => {

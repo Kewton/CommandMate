@@ -85,6 +85,7 @@ import {
 } from '@/lib/agent-roles/composition';
 import { RoleLaunchRefusedError, type RoleLaunchRefusalReason } from '@/lib/agent-roles/launch-errors';
 import {
+  agentListNames,
   describeAntigravityRoleRefusal,
   type AntigravityRoleCause,
   type AntigravityRoleRefusalDetail,
@@ -96,12 +97,11 @@ import {
   type RoleRepositoryMembership,
   type RoleResolverDeps,
 } from '@/lib/agent-roles/resolve';
-import { UatIsolationLaunchRefusedError } from '@/config/uat-isolation';
+import { getUatIsolationMode, UatIsolationLaunchRefusedError } from '@/config/uat-isolation';
 import type { HeadlessRoleArguments } from '@/lib/session/claude-executor';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isUnderTest } from '@/lib/test-run-detection';
 import {
-  isAgentRoleAdapterEnabled,
   isAgentRoleCliTool,
   type AgentRoleCliTool,
   type RoleLaunchPhase,
@@ -149,7 +149,13 @@ interface RoleApplication {
   state: RoleApplicationState;
   /** Moves on every change, so an observation begun before a change changes nothing (D6). */
   version: number;
-  refusal: { reason: 'not-applied' | 'not-confirmed'; cause: AntigravityRoleCause; toolName: string | null } | null;
+  refusal: {
+    reason: 'not-applied' | 'not-confirmed';
+    cause: AntigravityRoleCause;
+    toolName: string | null;
+    /** D3: what `agy agent` did, in CommandMate's words. */
+    listProblem?: string | null;
+  } | null;
   /** When the first send of this generation reached the gate; the grace counts from here. */
   graceStartedAt: number | null;
 }
@@ -327,15 +333,6 @@ export async function resolveLaunchRole(
   }
 
   const adapter = input.cliToolId as AgentRoleCliTool;
-  if (!isAgentRoleAdapterEnabled(adapter)) {
-    return refused(
-      db,
-      target,
-      'adapter-disabled',
-      `Roles are not enabled for ${adapter} yet; it has a role "${resolution.role.name}", so it was not started without it`,
-      resolution
-    );
-  }
 
   let composition: RoleComposition;
   try {
@@ -445,6 +442,12 @@ interface LaunchRoleStore {
   epoch: number;
   /** What the launch before this one injected, read before this one's record. OpenCode V1's notice. */
   previousFingerprint: string | null;
+  /**
+   * Antigravity (D3): what `agy agent` said before this launch's new process.
+   * Only `listed` lets the generation go on to the screen's confirmation; null
+   * (no check ran) is treated as not checked (fail-closed).
+   */
+  agentListing: AgentListVerdict | null;
 }
 
 function scope(): AsyncLocalStorage<LaunchRoleStore> {
@@ -487,6 +490,7 @@ export async function runWithLaunchRole<T>(snapshot: LaunchRoleSnapshot, fn: () 
     generation: null,
     epoch: epochMap().get(evidenceKey(snapshot.target)) ?? 0,
     previousFingerprint: null,
+    agentListing: null,
   };
   try {
     return await scope().run(store, fn);
@@ -550,6 +554,92 @@ export function gateLaunchRole(): RoleLaunchRefusedError | null {
   }
 }
 
+/** What `agy agent` answered (D3). Its stderr is never kept: it can quote anything. */
+export type AgentListOutcome =
+  | { kind: 'listed'; stdout: string }
+  /** Exit code, signal or limit only: never a row of agy's output. */
+  | { kind: 'failed'; why: string };
+
+/** What D3 decided for one launch. Only `listed` may lead to a positive record. */
+export type AgentListVerdict =
+  | { kind: 'listed' }
+  | { kind: 'not-listed' | 'list-failed' | 'unchecked'; problem: string | null };
+
+const LISTING_CAUSE: Record<Exclude<AgentListVerdict['kind'], 'listed'>, AntigravityRoleCause> = {
+  'not-listed': 'agent-not-listed',
+  'list-failed': 'agent-list-failed',
+  unchecked: 'agent-list-unchecked',
+};
+
+/**
+ * Antigravity (Issue #4385 D3, as the human decision of 2026-11-15 reads it): before a
+ * new process is started for a launch with a role, ask `agy agent` whether it lists
+ * the generated agent, and keep the answer for the generation this launch opens.
+ * agy's TUI starts on its default agent when `--agent` names one it does not find.
+ *
+ * The launch is not refused for it: the process starts, and a generation whose
+ * agent was not seen listed is born `refused` (never `confirmed`), so the send gate
+ * holds every body back with the reason, and the process is left running for a
+ * person to stop. Not listed, `agy agent` failing (non-zero, time limit, size limit,
+ * not started) and not checked (`CM_UAT_ISOLATION=1`: agy would write its log into the
+ * shared home) are all "not listed" here (fail-closed); only `listed` lets the
+ * screen's confirmation make the positive record. Passing is not a confirmation.
+ *
+ * Every D3 decision is made here, and only here: the driver runs `agy agent` and
+ * hands the answer in. Called by the driver after its reuse branch has returned (a
+ * reconnect is not listed) and before `beginAgentSession`.
+ *
+ * @param list - Runs `agy agent` for this launch (cwd, env, limits are the driver's)
+ * @throws {RoleLaunchRefusedError} `session-stopped` only, when the session was
+ *   stopped or taken while agy ran, or (`CM_UAT_ISOLATION=1`, agy not run) before
+ *   this check (that launch no longer speaks for the session)
+ */
+export async function checkLaunchRoleAgentListed(list: () => Promise<AgentListOutcome>): Promise<void> {
+  const store = scope().getStore();
+  const prepared = store?.prepared ?? null;
+  if (!store || prepared === null || store.snapshot.injection?.adapter !== 'antigravity') return;
+  if (getUatIsolationMode() === 'shared-read-only') {
+    // Review 4385-pr2b P2-1: agy is not run here, but the launch's awaits before
+    // this point (the install check, the pane) can have outlived it all the same.
+    // The same stop that ends the listing branch below ends this one: a stopped
+    // launch makes no pane, no process and no line.
+    if (isStale(store)) {
+      throw new RoleLaunchRefusedError('session-stopped', 'The session was stopped before the launch started its process');
+    }
+    store.agentListing = { kind: 'unchecked', problem: 'not run under CM_UAT_ISOLATION=1' };
+    return;
+  }
+  const key = evidenceKey(store.snapshot.target);
+  const generationBefore = evidenceMap().get(key)?.sessionGeneration ?? null;
+  let outcome: AgentListOutcome;
+  try {
+    outcome = await list();
+  } catch {
+    outcome = { kind: 'failed', why: 'agy could not be started' };
+  }
+  // D6: the wait may have outlived this launch (a stop, or another launch that
+  // opened a generation). Nothing of it may reach the session.
+  if (isStale(store) || (evidenceMap().get(key)?.sessionGeneration ?? null) !== generationBefore) {
+    throw new RoleLaunchRefusedError('session-stopped', 'The session was stopped while agy listed its agents');
+  }
+  if (outcome.kind === 'failed') store.agentListing = { kind: 'list-failed', problem: outcome.why };
+  else if (!agentListNames(outcome.stdout, prepared.artifact.name)) store.agentListing = { kind: 'not-listed', problem: null };
+  else store.agentListing = { kind: 'listed' };
+}
+
+/** A new Antigravity generation's application: `starting` only when D3 saw the agent listed. */
+function newApplication(listing: AgentListVerdict | null): RoleApplication {
+  if (listing?.kind === 'listed') return { state: 'starting', version: 0, refusal: null, graceStartedAt: null };
+  const verdict = listing ?? { kind: 'unchecked' as const, problem: null };
+  const cause = LISTING_CAUSE[verdict.kind];
+  return {
+    state: 'refused',
+    version: 0,
+    refusal: { reason: reasonOf(cause), cause, toolName: null, listProblem: verdict.problem },
+    graceStartedAt: null,
+  };
+}
+
 function sameTarget(a: LaunchRoleTarget, b: LaunchRoleTarget): boolean {
   return a.worktreeId === b.worktreeId && a.cliToolId === b.cliToolId && (a.instanceId ?? a.cliToolId) === (b.instanceId ?? b.cliToolId);
 }
@@ -609,8 +699,9 @@ function openGeneration(store: LaunchRoleStore): void {
     composition: store.snapshot.composition,
     resumedAcrossRole: false,
     resumeNoticeTaken: false,
-    // Issue #4385: a new generation starts unconfirmed. Opening it is not a confirmation.
-    application: antigravity ? { state: 'starting', version: 0, refusal: null, graceStartedAt: null } : null,
+    // Issue #4385: a new generation starts unconfirmed. Opening it is not a confirmation,
+    // and one whose agent D3 did not see listed can never be confirmed (fail-closed).
+    application: antigravity ? newApplication(store.agentListing) : null,
     artifactName: antigravity ? store.prepared?.artifact.name ?? null : null,
     artifactPath: antigravity ? store.prepared?.artifact.path ?? null : null,
     launch: antigravity ? store : null,
@@ -936,7 +1027,9 @@ export async function observeLaunchRoleApplication(
 
 /** Which of the refusal's two reasons a cause is. */
 function reasonOf(cause: AntigravityRoleCause): 'not-applied' | 'not-confirmed' {
-  return cause === 'unknown-tool' || cause === 'not-started' || cause === 'role-not-selected' ? 'not-applied' : 'not-confirmed';
+  return cause === 'unknown-tool' || cause === 'not-started' || cause === 'role-not-selected' || cause === 'agent-not-listed'
+    ? 'not-applied'
+    : 'not-confirmed';
 }
 
 /** The refusal of an Antigravity send for `cause`; nothing was typed. */
@@ -963,16 +1056,11 @@ const ALWAYS_NONE: RoleSendTarget = { kind: 'none', stillNone: () => true };
  * Whether the send gate covers `target`, from the persistent role settings and
  * never from what is remembered about the process (evidence, a refusal): those
  * go away on a stop, a failed stop or a server restart, and their absence must
- * not take the target out of the gate (§0.1).
- *
- * PR1: only while Antigravity's switch is on. With it off a role cannot be
- * launched at all, and sends stay as they were.
+ * not take the target out of the gate (§0.1). The settings alone decide (PR2,
+ * D4: no switch is read).
  */
 export async function resolveRoleSendTarget(target: LaunchRoleTarget): Promise<RoleSendTarget> {
   if (!isAgentRoleCliTool(target.cliToolId)) return ALWAYS_NONE;
-  const adapter = target.cliToolId;
-  const enabled = (): boolean => isAgentRoleAdapterEnabled(adapter);
-  if (!enabled()) return { kind: 'none', stillNone: () => !enabled() };
   let db: Database.Database | null;
   try {
     db = launchRoleDatabase();
@@ -997,7 +1085,7 @@ export async function resolveRoleSendTarget(target: LaunchRoleTarget): Promise<R
     if (snapshot.resolution?.kind === 'role') return { kind: 'role' };
     if (snapshot.refusal === null && snapshot.resolution?.kind === 'none') {
       const settled = db;
-      return { kind: 'none', stillNone: () => !enabled() || readResolutionInputs(settled, target) === before };
+      return { kind: 'none', stillNone: () => readResolutionInputs(settled, target) === before };
     }
     return { kind: 'unreadable' };
   }
@@ -1063,6 +1151,7 @@ export function assertRoleSendBoundary(
     throw antigravityRoleRefusal({
       cause: view.refusal?.cause ?? 'grace-expired',
       toolName: view.refusal?.toolName ?? null,
+      listProblem: view.refusal?.listProblem ?? null,
       ...named,
     });
   }

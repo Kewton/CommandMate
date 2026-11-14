@@ -16,6 +16,44 @@
 /** The agy version the role's screen and refusal were checked on (2026-11-14). */
 export const ANTIGRAVITY_ROLE_VERIFIED_VERSION = '1.5.8';
 
+/**
+ * The tools a generated agent definition names (D1), in this order. Without a
+ * `tools` list agy 1.5.8 starts the agent with none of them; with a name it does
+ * not register (`swarm`, for one) it stops with `unknown component: tool "x"`,
+ * exit 3. These 13 are the ones agy 1.5.8 registered, measured on 2026-11-14:
+ * `dev-reports/issue/agy-role-2026-11-14/report.md` (the 再確認 section),
+ * `evidence/r2-3-tool-registry-probe.txt` and `evidence/r2-4-dev-tools13.txt`.
+ * Narrowing them per role is out of scope (Q3).
+ */
+export const ANTIGRAVITY_ROLE_TOOLS = [
+  'read_file',
+  'run_command',
+  'manage_task',
+  'send_message',
+  'schedule',
+  'invoke_subagent',
+  'define_subagent',
+  'manage_subagents',
+  'write_file',
+  'edit_file',
+  'search_web',
+  'run_workflow',
+  'ask_question',
+] as const;
+
+/** The agy version {@link ANTIGRAVITY_ROLE_TOOLS} was measured on (2026-11-14). */
+export const ANTIGRAVITY_ROLE_TOOLS_VERIFIED_ON = '1.5.8';
+
+/**
+ * Whether `agy agent`'s answer lists `name` (D3): one agent per row (agy 1.5.8
+ * prints the names and nothing else), compared whole, so a name that only
+ * shares a prefix or a suffix does not count. A row's surrounding blanks are ignored.
+ */
+export function agentListNames(stdout: string, name: string): boolean {
+  if (name === '') return false;
+  return stdout.split(/\r?\n/).some((row) => row.trim() === name);
+}
+
 /** Which screen the driver found, with the status row it read on it. */
 export interface AntigravityRoleFrame {
   /**
@@ -47,7 +85,13 @@ export type AntigravityRoleCause =
   /** The role settings changed while the send was on its way. */
   | 'settings-changed'
   /** Another process took the session while the send waited. */
-  | 'replaced';
+  | 'replaced'
+  /** D3: `agy agent` answered before the start, and its list has no row with the agent's name. */
+  | 'agent-not-listed'
+  /** D3: `agy agent` did not answer before the start (non-zero, time limit, size limit, not started). */
+  | 'agent-list-failed'
+  /** D3: the list was not checked before the start (`CM_UAT_ISOLATION=1`, or no check ran). */
+  | 'agent-list-unchecked';
 
 /** What one screen proves. */
 export type AntigravityRoleVerdict =
@@ -111,6 +155,8 @@ export interface AntigravityRoleRefusalDetail {
   runningVersion?: string | null;
   artifactName?: string | null;
   artifactPath?: string | null;
+  /** D3: what `agy agent` did, in CommandMate's own words (an exit code, a limit); never agy's output. */
+  listProblem?: string | null;
 }
 
 const CAUSE_TEXT: Record<AntigravityRoleCause, string> = {
@@ -122,7 +168,13 @@ const CAUSE_TEXT: Record<AntigravityRoleCause, string> = {
   'settings-unreadable': 'the role settings could not be read',
   'settings-changed': 'the role settings changed while this send was on its way',
   replaced: 'another process took the session while this send waited',
+  'agent-not-listed': 'agy agent did not list the agent before the start, so agy runs without the role',
+  'agent-list-failed': 'agy agent did not answer before the start, so the role could not be checked',
+  'agent-list-unchecked': 'the agent list was not checked before the start, so the role could not be checked',
 };
+
+/** What a `listProblem` may look like: CommandMate's own short words, nothing quoted. */
+const LIST_PROBLEM = /^[A-Za-z0-9 .,=()_-]{1,120}$/;
 
 /**
  * The refusal's message: fixed words, the cause, and only names, a path and
@@ -131,6 +183,7 @@ const CAUSE_TEXT: Record<AntigravityRoleCause, string> = {
 export function describeAntigravityRoleRefusal(detail: AntigravityRoleRefusalDetail): string {
   const parts = [CAUSE_TEXT[detail.cause]];
   if (detail.toolName && TOOL_NAME.test(detail.toolName)) parts.push(`tool "${detail.toolName}"`);
+  if (detail.listProblem && LIST_PROBLEM.test(detail.listProblem)) parts.push(`agy agent: ${detail.listProblem}`);
   if (detail.artifactName) parts.push(`agent ${detail.artifactName}`);
   if (detail.artifactPath) parts.push(`file ${detail.artifactPath}`);
   const running = detail.runningVersion && VERSION.test(detail.runningVersion) ? detail.runningVersion : 'unknown';
