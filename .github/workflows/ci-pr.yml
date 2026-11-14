@@ -97,9 +97,13 @@ name: CI
 # `Cache Playwright browsers` in the E2E job is deliberately NOT changed; the
 # reason is at that step.
 
+# [Issue #4369] `train/**`: scripts/orchestrate/merge-train.mjs pushes its throwaway train
+# ref there and waits for that one push run (docs/orchestrate/ci-merge.md, merge train). A train
+# run is a diagnosis: nothing merges on it, and the `concurrency` below keeps it in a group of its
+# own like every push run.
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, 'train/**']
   pull_request:
     branches: [main, develop]
 

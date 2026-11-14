@@ -1,6 +1,6 @@
 # merge train — 複数の PR を 1 回の CI で確かめてマージする（Issue #4369）
 
-- 状態: 設計（実装前）。第 3 版（事前レビュー、再レビュー N1・N2、原因調査、リーダーの再指示 1・2 を反映。改訂の履歴は末尾）
+- 状態: **PR1 実装済み**（`scripts/orchestrate/merge-train.mjs`）。第 4 版（第 3 版に、事前レビュー 3 回目の処分 K1・P3-1〜P3-3 と、実装で実コードに合わせた点を反映。改訂の履歴は末尾）
 - 正本: Issue #4369 の本文と Epic #4371 の本文（背景の実測）。共通の枠（`s3-common-frame.md`）と突き合わせの決定（`s3-crosscheck.md` X1〜X10）に従う
 - この run で実装するのは **PR1（公開の権限の無い診断。train の作成・確認・報告だけで、base へは書かない）** まで。マージの段は PR1b で、§12 の前提（人の判断）が決まってから。Issue の受入条件 1・3（N 本を CI 1 回でマージ・base が動いたら古い train でマージしない）は PR1b、受入条件 2（二分探索）は PR2 で満たす
 
@@ -60,7 +60,7 @@ GitHub 側（`gh api` の読み取り、2026-11-14。この版では再取得し
 - `P_1..P_N`: 候補の PR（渡された順）。`h_k` はその `headRefOid`
 - `T_0 = B0`、`T_k = commit-tree(tree = merge-tree(--merge-base=mb(B0, h_k), T_{k-1}, h_k), parent = T_{k-1})`
 - **train ID**: `<UTC の時刻 YYYYMMDDTHHMMSSmmmZ>-<pid>-<乱数 6 桁の hex>`。再利用しない。ref は `train/<base>/<train ID>`、記録・報告のファイルは `<run-dir>/train/<train ID>.json`
-- **train の worktree はリポジトリの作業ツリーの外**: `<os.tmpdir()>/cm-train-<repo-slug>-<train ID>`。run-dir（`workspace/orchestration/runs/<日付>`）は作業ツリーの中なので、置くと CommandMate の worktree の読み（`src/lib/git/worktrees.ts:130-139` は detached の worktree も拾う）が本番の DB と画面に一時の worktree を出しうる。また `vitest.config.ts` に `include` が無く、作業ツリーの直下の vitest が入れ子の `tests/**` を拾う（再レビュー P3-2）。消えた worktree の行をサーバーの同期が DB から消すかは未確認（V10）
+- **train の作業ツリーは `git clone --shared` で、リポジトリの作業ツリーの外**: `<os.tmpdir()>/cm-train-<repo-slug>-<train ID>`（事前レビュー 3 回目 K1）。`git worktree add` は置き場所によらず元のリポジトリの `git worktree list` に載り、CommandMate の同期（`src/lib/git/worktrees.ts`）はそこを読むので、置き場所では直らない。clone は元のリポジトリの `.git/worktrees` に何も足さない（object は alternates で共有）。run-dir（`workspace/orchestration/runs/<日付>`）は作業ツリーの中なので、置くと CommandMate の worktree の読み（`src/lib/git/worktrees.ts:130-139` は detached の worktree も拾う）が本番の DB と画面に一時の worktree を出しうる。また `vitest.config.ts` に `include` が無く、作業ツリーの直下の vitest が入れ子の `tests/**` を拾う（再レビュー P3-2）。消えた worktree の行をサーバーの同期が DB から消すかは未確認（V10）
 - **train の manifest**（作成時に固定し、以後書き換えない）: `{ id, repo, base, B0, ref, entries: [{ issue, item, pr, headRepo, h, baseRef, workHead }], chain: [{ pr, T, tree }] }`。CI の判定・再実行・取消・片付けは、この manifest の `id`・`ref`・`T_N` に一致するものにだけ働く
 
 ### 2.2 squash の再現の鎖と、その成立条件（F03）
@@ -106,7 +106,7 @@ entry は `merge-pr.mjs --queue` と同じ形 `<issue>[/<item>][@<pr>]`。`resol
 
 ### 2.4 組み合わせの確認（手元）
 
-train の worktree（`git worktree add --detach <os.tmpdir()>/cm-train-<repo-slug>-<ID> T_N`、§2.1）で:
+train の作業ツリー（`git clone --shared --no-checkout <repo> <os.tmpdir()>/cm-train-<repo-slug>-<ID>` → `git checkout --detach T_N`、§2.1。`T_N` と `B0` は alternates で見える）で:
 
 1. **依存（F05）**: 候補を鎖に積む前に、`h_k` の差分が `package-lock.json`・`package.json` を変える候補は外す（`dropped reason=deps-changed`。その PR は merge-pr で 1 本ずつ）。1 本のために他の候補の診断まで止めないため（再レビュー P3-5。全体を止める案より、残りの報告が得られる）。そのうえで `package-lock.json` の blob が `T_N`・`B0`・`--source <worktree>`（既定は先頭の候補の worktree）の HEAD で同じで、`<source>/node_modules` が在るときだけ、train の worktree に `node_modules` → `<source>/node_modules` の symlink を作る（source の worktree には何も書かない）。source の側が違う・不明（読めない・source の tree が dirty・`node_modules` が無い）なら **push の前に exit 2**（`deps=unknown`。全候補に共通の環境の問題なので全体を止める）。CI への委譲は採らない（tsc・ESLint・guards は heavy でないので `--heavy-to-ci` では外れず、委譲には precheck の変更が要る）
 2. 衝突の印の全追跡ファイル走査（`markerFiles`）
@@ -122,7 +122,7 @@ train の worktree（`git worktree add --detach <os.tmpdir()>/cm-train-<repo-slu
 
 最上位の U1〜U3 の下に置く。
 
-1. **I1** PR1 は base・PR の head・Issue・PR の状態のどれにも書かない。PR を作らない。外へ書くのは `train/<base>/<自分の ID>` の ref の作成・削除（と I13 の自分の古い ref の削除）と、manifest の run の再実行・取消だけ。成功・失敗・再実行・取消・片付け・作り直しのどの経路でも、判定の後の代わりの経路（fallback）で別の公開の口を呼ばない
+1. **I1** PR1 は base・PR の head・Issue・PR の状態のどれにも書かない。PR を作らない。外へ書くのは `train/<base>/<自分の ID>` の ref の作成・削除（lease つき）と、`pruneOwnRefs` が報告から選んだ古い ID の lease つきの削除（I13）と、manifest の run の再実行・取消だけ。それ以外（base・他人の ID の作成・lease の無い削除）は 0（事前レビュー 3 回目 P3-1）。成功・失敗・再実行・取消・片付け・作り直しのどの経路でも、判定の後の代わりの経路（fallback）で別の公開の口を呼ばない
 2. **I2** train の tree は §2.2 の G1〜G4 を満たす候補だけから作る。満たさない候補は理由つきで外し、黙って外さない
 3. **I3** 組み合わせの確認の条件は全候補の条件の和で、テストの削除の許可は train へ移さない
 4. **I4** 依存が `B0`・`T_N`・source で一致しないか確かめられないとき、train を push しない
@@ -130,11 +130,11 @@ train の worktree（`git worktree add --detach <os.tmpdir()>/cm-train-<repo-slu
 6. **I6** 緑の判定は、それを読んだ**後**の fetch で base が `B0` のままであるときだけ有効（merge-pr `:695-704` と同じ順）。動いていたら「緑」にせず `stale` と報告する。作り直しは既定で 0 回（`--rebuild-max 0`、上限 1）。PR1 の運用では merge-pr のマージのたびに base が動くので、作り直すと全体の CI が余分に走るため（再レビュー P3-6）
 7. **I7** 再実行・取消は manifest の run id にだけ、ref の削除は `--force-with-lease=refs/heads/<ref>:<T_N>` 付きでだけ行う。片付けは train のロックを持っている間に行う
 8. **I8** train は base ごとに 1 本（train のロック `train.<owner>.<repo>.<base>`、置き場は `<lock root>/train/`。merge-train だけが読み書きする）。merge のロックは取らない（base へ書かないので merge-pr を止めない）
-9. **I9** `merge=ok` などの各 Issue の進捗の記録を書かない。書くのは `train` の行（`LOG_STAGES`、HEAD を持たず進捗に数えない）と `<run-dir>/train/<ID>.json` の報告だけ
+9. **I9** `merge=ok` などの各 Issue の進捗の記録を書かない。書くのは `train` の行（`TRAIN_LOG_STAGES`。`LOG_STAGES` と同じく HEAD を持たず進捗に数えない）と `<run-dir>/train/<ID>.json` の報告だけ
 10. **I10** 対象リポジトリに固有の値（base・repo・必須チェックの一覧・workflow のファイル名）はコードに埋め込まない。必須チェックの既定は `repo == DEFAULT_REPO` のときだけ `LAST_REQUIRED_CHECKS`、それ以外は `--required-checks` が無ければ exit 2
 11. **I11** 報告は採用・外した・CI の結果を集合として残す。exit 0 は「この train の `T_N` の 1 回の CI が緑」であって、外した entry を含む全 entry の完了でも、`T_1..T_{N-1}` の CI の合格でもない
 12. **I12（U2）** 報告（人向けの文・`--json` の標準出力・保存する JSON）は、`verdict` が green・red・empty・stale・stopped・timeout のどれでも、作り直しや再実行の後でも、`publishable: false` と次の注意の文を持つ: 「この結果は、`B0` の上の `T_N` の tree の 1 回の CI の結果だけを意味する。マージの根拠にも、merge-pr の確認（取り込み・precheck・必須の CI・`--last`）を省いたり引数を変えたりする根拠にもならない。train の ref を base へ入れたり、その ref から PR を作ったりしない」。報告を作れない初期のエラーでも、base・PR・Issue への書込みは 0。古い報告に `publishable` が無くても、読み手はそれを公開の許可へ読み替えない（既定は false）
-13. **I13** 残した ref の保持: green／red の ref は報告から人が見られるように残すが、次の train の作成のときに、同じ base の自分の名前空間（`train/<base>/`）の ref のうち新しい順で 3 本を超えるものを、報告に記録した SHA との lease 付きで消す（`--keep-refs 3`、0 で全部消す）。SHA が違う ref・報告の無い ref には触らず、報告に出す。残した ref は公開の許可ではない（I12）
+13. **I13** 残した ref の保持: green／red の ref は報告から人が見られるように残すが、次の train の作成のときに、同じ base の自分の名前空間（`train/<base>/`）の ref のうち新しい順で 3 本を超えるものを、報告に記録した SHA との lease 付きで消す（`--keep-refs 3`、0 で全部消す）。SHA が違う ref・報告の無い ref には触らず、報告に出す。残る ref の数は報告の `refs.remaining` に出し、消せなかったもの（前の日の run-dir の ref など）は人が消す運用を `ci-merge.md` に書く（事前レビュー 3 回目 P3-2）。残した ref は公開の許可ではない（I12）
 
 ## 4. 状態と遷移（PR1）
 
@@ -163,7 +163,7 @@ train の worktree（`git worktree add --detach <os.tmpdir()>/cm-train-<repo-slu
 | `pushed` | `--ci-timeout` 超過 | `stopped(124)` | |
 | `rebuild` | やり直しが上限（`--rebuild-max`、既定 0・最大 1）未満 | `locked`（新しい train ID で候補から） | |
 | `rebuild` | 上限（既定では最初の `base-moved`） | `stopped(4)` | 報告 `verdict=stale` |
-| すべての終わり | — | — | train のロックを持ったまま、worktree を消し、green／red の ref は I13 のとおり残し、報告を `publishable: false` で書き、それから解放 |
+| すべての終わり | — | — | train のロックを持ったまま、clone を消し、green／red の ref は I13 のとおり残し、報告を `publishable: false` で書き、それから解放 |
 
 exit code: 0 緑（または 0 本）・1 赤／条件／コマンドの失敗／再実行の後の未確認の緑・2 使い方／不適格・3 precheck の保留・4 base が動いた（作り直しの上限）・124 時間切れ。どの exit でも報告は `publishable: false`。
 
@@ -211,7 +211,7 @@ PR1b で弱くなりうる点（§12 で人が決める）: 途中の base が C
 | `git fetch origin <base>`（作成時） | `stopped(1)` | — | fail-closed |
 | `git fetch`（CI 待ち） | その回は緑にしない、次の回に読み直す | — | fail-closed |
 | `git merge-base --all`・`merge-tree` | 衝突（exit 1）は外す。他の非 0 は `stopped(1)` | — | 衝突は外す、異常は止まる |
-| `git commit-tree`・`git worktree add` | `stopped(1)` | worktree だけ残る → 終わりの片付けで消す。消せなければ警告 | fail-closed |
+| `git commit-tree`・`git clone --shared` | `stopped(1)` | clone だけ残る → 終わりの片付けで消す。消せなければ警告 | fail-closed |
 | `node_modules` の symlink | `stopped(2)` | — | fail-closed（source には書かない） |
 | precheck | 1 → `stopped(1)`、3 → `stopped(3)` | — | fail-closed |
 | `git ls-remote origin <ref>`（ref が無いこと） | 読めない・在る → `stopped(1)` | — | fail-closed（他人の ref を上書きしない） |
@@ -273,6 +273,7 @@ PR1b で弱くなりうる点（§12 で人が決める）: 途中の base が C
 | T9 | `.gitattributes` に `merge=` | exit 2 `unsupported=merge-attribute` | G2 を外すと push まで進んで赤 |
 | T10 | gitlink の変更を含む PR | 外す | — |
 | T11 | rename・mode の変更・binary | `git merge --squash` と同じ tree（R03 陰性） | — |
+| T12（K1） | 実行の前・precheck の最中・後で、元のリポジトリの `git worktree list --porcelain` | 変わらない。train の作業ツリーは `os.tmpdir()` の下の clone（alternates あり）で、終わりに消える | `git worktree add` にすると行が増えて赤 |
 
 ### T-E entry の解決と候補 — R18・R23・R24
 
@@ -345,8 +346,8 @@ gh 2.86.0 の `pr checks` の対応（`pkg/cmd/pr/checks/aggregate.go`）に合�
 
 | # | 入力・状態・変化 | 期待する観測 | 防御を外すと |
 |---|---|---|---|
-| X1 | verdict が green・red・empty・stale・stopped・timeout・`green-after-rerun-unverified` の各経路、再実行・作り直しの後 | 人向けの文・`--json`・保存する JSON のすべてに `publishable: false` と I12 の注意の文。green の検証の対象は `T_N` だけで、`T_1..T_{N-1}` は「CI を通していない」と出る | green のときだけ true／欠落にする変異で赤 |
-| X2 | 正常、取得・CI・記録の失敗、取消・片付けの失敗、書込みを求める引数、報告を作れない初期のエラー | 偽の git／gh の呼び出しの記録に、base への push・`gh pr create`・`gh pr merge`・`gh pr close`・`gh issue close` が 0 回。push の宛先はすべて `refs/heads/train/<base>/<自分の ID>`、取消・再実行は manifest の run id だけ | 失敗の後の fallback に base への push を足すと赤 |
+| X1 | verdict が green・red・empty・stale・stopped・timeout・`green-after-rerun-unverified` の各経路、再実行・作り直しの後 | 人向けの文・`--json`・保存する JSON のすべてに `publishable: false` と I12 の注意の文。`green-after-rerun-unverified` の人向けの文は、その前の先頭の行に「赤ではない（再実行の後の緑。未確認）」（exit 1 を赤と読ませない。事前レビュー 3 回目 P3-3）。green の検証の対象は `T_N` だけで、`T_1..T_{N-1}` は「CI を通していない」と出る | green のときだけ true／欠落にする変異で赤 |
+| X2 | 正常、取得・CI・記録の失敗、取消・片付けの失敗、書込みを求める引数、報告を作れない初期のエラー | git／gh の呼び出しの記録に、base への push・`gh pr create`・`gh pr merge`・`gh pr close`・`gh issue close` が 0 回。push は「自分の ID の作成と（lease つきの）削除」と「`pruneOwnRefs` が報告から選んだ古い ID の lease つきの削除」だけで、それ以外（base・他人の ID の作成・lease の無い削除）は 0（P3-1）。取消・再実行は manifest の run id だけ | 失敗の後の fallback に base への push を足すと赤 |
 | X3 | push の宛先の検査に `refs/heads/develop`・`refs/heads/train/develop/<他の ID>` を渡す（内部の関数を直接） | push を呼ばずに例外 | 検査を外すと base へ push して赤 |
 | X4 | train の有無で、merge-pr の呼び方を比べる（merge-train は merge-pr を呼ばない） | merge-train は merge-pr を起動せず、merge-pr が読む run の記録（`ci`・`precheck`・`merge` の段）を書かない。merge-pr の `last` の決まり方は train の有無で変わらない | train の緑を記録の `ci=ok` として書く変異で赤（merge-pr の待ちが変わる） |
 | X5 | 既存の queue（陰性の対照） | `merge-pr-queue-4277.test.ts:235-246`（`--last` 無しは最後の entry だけ `last`、有りは全 entry）が変わらず緑。merge-pr.mjs は変更しない | — |
@@ -416,13 +417,13 @@ PR2 の R22（単調でない列）は §5。
 | ファイル | 変更 |
 |---|---|
 | `scripts/orchestrate/merge-train.mjs`（新規） | §2〜§4・§7。export: `parseArgs`・`trainId`・`classifyEntries`・`buildTrain`・`depsState`・`precheckArgs`・`assertTrainRef`（push の宛先の検査）・`bucketOf`・`collectCiEvidence`・`judgeTrain`・`readEligibility`・`buildReport`（常に `publishable: false`）・`pruneOwnRefs`・`main`・`runOuter` |
-| `scripts/orchestrate/run-log.mjs` | `LOG_STAGES` に `'train'`（`queue` と同じく HEAD を持たず進捗に数えない）。`status` に `train:` の最新の行 |
+| `scripts/orchestrate/run-log.mjs` | `TRAIN_LOG_STAGES = ['train']` と、読み手が使う `ANY_LOG_STAGES`（`queue` と同じく HEAD を持たず進捗に数えない）。`status` に `train:` の最新の行（`--json` は train の行があるときだけ `train`）。実装で変えた点: `LOG_STAGES` そのものに足すと既存の試験 `run-log-queue-4277.test.ts` の `LOG_STAGES` の期待値と `status --json` のキーの期待値が変わるので、別の一覧にした |
 | `.github/workflows/ci-pr.yml` | `on.push.branches` に `'train/**'` |
 | `tests/unit/scripts/orchestrate/merge-train-4369.test.ts`（新規） | §10 の T-E・T-C・T-B・T-A・T-R（X1〜X6）・T-L と T-P の P8 |
 | `tests/unit/scripts/orchestrate/merge-train-git-4369.test.ts`（新規） | §10 の T-T・T-P（P1〜P7・P9） |
 | `tests/unit/scripts/orchestrate/ci-pr-train-trigger-4369.test.ts`（新規） | §10 の T-W |
 | `tests/unit/docs/ci-merge-train-4369.test.ts`（新規） | §10 の T-R X7（ci-merge.md の 4 つの文） |
-| `tests/unit/scripts/orchestrate/` の run-log の試験 | `train` の行が進捗に混ざらないこと（E10）を足す。既存の `it` は消さない |
+| `tests/unit/scripts/orchestrate/run-log-train-4369.test.ts`（新規） | `train` の行が進捗に混ざらないこと（E10）。既存の run-log の試験は変えない |
 | `docs/orchestrate/ci-merge.md` | 節「6-2 merge train の診断（merge-train.mjs）」: 使い方・exit・報告の読み方と、次の 4 つの文（T-R X7 が固定する）: ①報告は常に `publishable: false` ②緑は `B0` の上の `T_N` の 1 回の CI の結果だけで、マージの根拠にも merge-pr の確認（取り込み・precheck・必須の CI・`--last`）を省く根拠にもならない ③train の ref を base へ入れない・その ref から PR を作らない ④マージは train が無いときと同じ引数・同じ方法で merge-pr を回す（`--queue` の最後の entry の自動の `last` もそのまま）。#4370 PR1 も同じ文書に別の節を足すので、後に入る方が develop を取り込んで足す（X5） |
 | `docs/design/merge-train-4369.md` | 状態を「PR1 実装済み」に、実装で実コードに合わせた点を追記 |
 | `changelog.d/4369.md` | 既存の 1 項目へ統合 |
@@ -450,7 +451,7 @@ node scripts/orchestrate/merge-train.mjs --run-dir <dir> --issues <range> --queu
 6. base・PR・Issue に書かない。`gh pr merge`・`gh issue close`・base への push を 1 回も呼ばない（全試験の呼び出しの記録で確かめる）。書込みを求める引数は exit 2（T-A）
 7. `ci-pr.yml` の push に `train/**` があり、既存の `merge-pr.test.ts` が緑のまま（T-W）
 8. **公開の権限の無い診断（U2・I12）**: どの verdict・どの exit・作り直しや再実行の後でも、報告（人向けの文・`--json`・保存する JSON）に `publishable: false` と注意の文がある。train の ref を base へ入れる操作（push・merge・fast-forward・PR の作成）は引数でも経路でも拒否され、偽の gh・git の呼び出しの記録に 1 回も現れない。merge-train は merge-pr を呼ばず、merge-pr が読む記録を書かない。`ci-merge.md` に 4 つの文がある（T-R、T-A）
-9. train の worktree はリポジトリの作業ツリーの外（`os.tmpdir()` の下）に作り、終わりに消す（T-T の試験で置き場所を固定）
+9. 元のリポジトリの `git worktree list` が実行の前後（と precheck の最中）で変わらない。train の作業ツリーは `os.tmpdir()` の下の `git clone --shared` で、終わりに消す（T-T T12。事前レビュー 3 回目 K1）
 10. 再実行の後の緑は、V9 を実際の API で確かめるまで `green-after-rerun-unverified`（exit 1）として出す（T-C C5）
 11. train のロックで同じ base の train を直列にし、親だけ死んで子が生きている間は回収しない（T-L）
 
@@ -578,10 +579,11 @@ GitHub の設定・launchd・Docker・ランナーの変更はどれも要らな
 - **V7** 2 親の `T_k`（§12.3 C1）を base へ push すると、GitHub が PR を自動で `MERGED` にする
 - **V8** ruleset で人とエージェントの書込みを区別できない（同じアカウント）
 - **V9** `rerun --failed` の後の `actions/runs/<id>/attempts/<n>/jobs` が、前の attempt から成功を引き継いだジョブを含む。含まなければ必須の 19 件がそろわない。確かめるまで再実行の後の緑は出さない（I5）
-- **V10** CommandMate のサーバーの worktree の同期は、消えた detached の worktree の行を DB から消す（train の worktree は作業ツリーの外に置くので PR1 は依らない）
+- **V10** CommandMate のサーバーの worktree の同期は、消えた detached の worktree の行を DB から消す（train の作業ツリーは clone で `git worktree list` に載らないので PR1 は依らない。K1）
 - **V11** 親だけ違う同じ tree のコミットで、今の CI の結果が変わるか（未確認。変わらなくても、U1 により証拠は SHA に結ぶ）
 
 ## 改訂の履歴
 
 - 2026-11-14 第 2 版: 事前レビュー（P1 2・P2 7）と再指示 1 を反映。PR1 を作成・確認・報告に狭めて base への書込みを PR1b へ移し、F01・F02 の選択肢と推奨（§12）、F03 の形の制限、F04 の条件の和、F05 の依存の拒否、F06 の train ID と CI の証拠、F07・F08 の PR1b の条件、F09 の PR2 の規則、R01〜R24 の試験の表への割り当てを足した
 - 2026-11-14 第 3 版: 再レビューの N1（F06 の 2 回目）・N2（F02 の 2 回目）と原因調査を反映。最上位の不変条件 U1〜U3 を置き、PR1 を公開の権限の無い診断に固定（`publishable: false`・注意の文・公開の引数と経路の拒否・ci-merge.md の 4 つの文）、`--queue` の最後の entry の自動の `last` を反映して merge-pr に例外を足さないと明記、PR1b に「公開するコミットの SHA を先に検証」「期待値つきの更新（fast-forward ≠ `B0` との一致）」を足し、Q8〜Q10 を PR1b の前の判断に。原因調査 §5 の表を T-R と PR1b の Y1〜Y7 へ、再レビューの P3（worktree を作業ツリーの外・`filter=latest` と `check_suite_id`・V9・依存の候補を外す・作り直し既定 0・ref の保持・属性の条件・T-L）を反映
+- 2026-11-14 第 4 版（PR1 の実装）: 事前レビュー 3 回目の処分を反映。K1: train の作業ツリーを `git worktree add` から `git clone --shared`（`os.tmpdir()` の下）へ。実装の最初に一時 dir で clone の上の precheck（`--base <SHA>`・`markerFiles`・ESLint・tsc・`vitest related`・guards/docs）が動くことを確かめた。受入基準 9 を「元のリポジトリの `git worktree list` が変わらない」に置き換え、T-T に T12。P3-1: I1・X2 の許される push を「自分の ID の作成と削除」と「`pruneOwnRefs` が報告から選んだ古い ID の lease つきの削除」に分けた。P3-2: 残る ref の数（`refs.remaining`）と人が消す運用（ci-merge.md）。P3-3: 再実行の後の未確認の緑の人向けの文の先頭に「赤ではない（再実行の後の緑。未確認）」。実コードに合わせた点: `train` は `LOG_STAGES` ではなく `TRAIN_LOG_STAGES`（既存の試験の期待値を変えないため）、`status --json` の `train` は行があるときだけ。T-B の対応は gh v2.86.0 の `pkg/cmd/pr/checks/aggregate.go` と一致（`startup_failure` などは既定の pending）
