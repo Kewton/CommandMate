@@ -452,13 +452,25 @@ export const VOLATILE_ENTRY_PATTERNS = [/-wal$/, /-shm$/, /-journal$/, /^\.DS_St
 export const ENV_SNAPSHOT_DIR_NAME = 'env-snapshots';
 
 /**
+ * Directory under `~/.commandmate` the flow record writes into (Issue #4367).
+ *
+ * The name is `scripts/flow/record.mjs`'s: `CM_FLOW_DIR`, or
+ * `<home>/.commandmate/flow`, with one day file per repository below it. A
+ * `.mjs` script cannot be imported from here, so this is a copy of that name
+ * rather than the same constant.
+ */
+export const FLOW_DIR_NAME = 'flow';
+
+/**
  * Coordination directories the verification runner itself creates under
  * `~/.commandmate` (Issue #1771): the gate mutex locks and the worktree index
  * registry. Neither is a side effect of the delegation — the first mutexed gate
  * on a machine creates them — so counting them would report the runner's own
  * bookkeeping as pollution the agent left behind. The session-kill ledger
  * (Issue #3993) is the same kind of bookkeeping: the first recorded
- * `instances <wt> kill` on a machine creates it.
+ * `instances <wt> kill` on a machine creates it. The flow record (Issue #4367)
+ * belongs for the same reason, though the ticks of the measurement, not the
+ * runner's own verify, are what create it.
  *
  * Scoped to the `~/.commandmate` probe rather than added to
  * {@link isIgnoredEntry}: a `~/locks` directory in `$HOME` is not ours, and
@@ -469,6 +481,7 @@ const COMMANDMATE_RUNTIME_ENTRY_NAMES = [
   MACHINE_LOCK_DIR_NAME,
   WORKTREE_INDEX_DIR_NAME,
   SESSION_KILL_LEDGER_DIR_NAME,
+  FLOW_DIR_NAME,
 ];
 
 function isIgnoredEntry(name: string): boolean {
