@@ -85,7 +85,13 @@ export type AntigravityRoleCause =
   /** The role settings changed while the send was on its way. */
   | 'settings-changed'
   /** Another process took the session while the send waited. */
-  | 'replaced';
+  | 'replaced'
+  /** D3: `agy agent` answered before the start, and its list has no row with the agent's name. */
+  | 'agent-not-listed'
+  /** D3: `agy agent` did not answer before the start (non-zero, time limit, size limit, not started). */
+  | 'agent-list-failed'
+  /** D3: the list was not checked before the start (`CM_UAT_ISOLATION=1`, or no check ran). */
+  | 'agent-list-unchecked';
 
 /** What one screen proves. */
 export type AntigravityRoleVerdict =
@@ -149,6 +155,8 @@ export interface AntigravityRoleRefusalDetail {
   runningVersion?: string | null;
   artifactName?: string | null;
   artifactPath?: string | null;
+  /** D3: what `agy agent` did, in CommandMate's own words (an exit code, a limit); never agy's output. */
+  listProblem?: string | null;
 }
 
 const CAUSE_TEXT: Record<AntigravityRoleCause, string> = {
@@ -160,7 +168,13 @@ const CAUSE_TEXT: Record<AntigravityRoleCause, string> = {
   'settings-unreadable': 'the role settings could not be read',
   'settings-changed': 'the role settings changed while this send was on its way',
   replaced: 'another process took the session while this send waited',
+  'agent-not-listed': 'agy agent did not list the agent before the start, so agy runs without the role',
+  'agent-list-failed': 'agy agent did not answer before the start, so the role could not be checked',
+  'agent-list-unchecked': 'the agent list was not checked before the start, so the role could not be checked',
 };
+
+/** What a `listProblem` may look like: CommandMate's own short words, nothing quoted. */
+const LIST_PROBLEM = /^[A-Za-z0-9 .,=()_-]{1,120}$/;
 
 /**
  * The refusal's message: fixed words, the cause, and only names, a path and
@@ -169,6 +183,7 @@ const CAUSE_TEXT: Record<AntigravityRoleCause, string> = {
 export function describeAntigravityRoleRefusal(detail: AntigravityRoleRefusalDetail): string {
   const parts = [CAUSE_TEXT[detail.cause]];
   if (detail.toolName && TOOL_NAME.test(detail.toolName)) parts.push(`tool "${detail.toolName}"`);
+  if (detail.listProblem && LIST_PROBLEM.test(detail.listProblem)) parts.push(`agy agent: ${detail.listProblem}`);
   if (detail.artifactName) parts.push(`agent ${detail.artifactName}`);
   if (detail.artifactPath) parts.push(`file ${detail.artifactPath}`);
   const running = detail.runningVersion && VERSION.test(detail.runningVersion) ? detail.runningVersion : 'unknown';

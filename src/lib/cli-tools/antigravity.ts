@@ -71,7 +71,7 @@ import { RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
 import {
   antigravityRoleRefusal,
   applyRoleApplicationObservation,
-  assertLaunchRoleAgentListed,
+  checkLaunchRoleAgentListed,
   assertRoleSendBoundary,
   expireRoleApplication,
   observeLaunchRoleApplication,
@@ -467,12 +467,13 @@ export class AntigravityTool extends BaseCLITool {
     });
     if (live) return;
 
-    // Issue #4385 D3: a new process with a role starts only when agy lists its
-    // agent; otherwise agy's TUI would run on its default agent. A reconnect
-    // (returned above) is not listed. Before `beginAgentSession`, so a refusal
-    // leaves no pane, no launch line and no record. Every refusal is made by
-    // `assertLaunchRoleAgentListed`; a launch without a role returns there at once.
-    await assertLaunchRoleAgentListed(async () => {
+    // Issue #4385 D3: before a new process with a role, ask agy whether it lists
+    // the agent (agy's TUI runs on its default agent otherwise). The process
+    // starts either way; a generation whose agent was not seen listed can never
+    // be confirmed, so the send gate holds the body back with the reason. A
+    // reconnect (returned above) is not listed. Every D3 decision is made by
+    // `checkLaunchRoleAgentListed`; a launch without a role returns there at once.
+    await checkLaunchRoleAgentListed(async () => {
       const target = { worktreeId, cliToolId: ANTIGRAVITY_CLI_TOOL_ID, instanceId };
       const options: AgyAgentListOptions = { command: this.command, cwd: worktreePath, env: await agyAgentListEnv(target) };
       if (agyAgentLister !== null) return agyAgentLister(options);
@@ -926,20 +927,22 @@ export class AntigravityTool extends BaseCLITool {
   }
 
   private refusalFromView(view: RoleApplicationView): Promise<RoleLaunchRefusedError> {
-    return this.refusalOf(view.refusal?.cause ?? 'grace-expired', view, view.refusal?.toolName ?? null);
+    return this.refusalOf(view.refusal?.cause ?? 'grace-expired', view, view.refusal?.toolName ?? null, view.refusal?.listProblem ?? null);
   }
 
   /** The refusal's words, with agy's version read only now (D2). */
   private async refusalOf(
     cause: AntigravityRoleCause,
     view: RoleApplicationView | null = null,
-    toolName: string | null = null
+    toolName: string | null = null,
+    listProblem: string | null = null
   ): Promise<RoleLaunchRefusedError> {
     const runningVersion = await readAgyVersion();
     logger.warn('antigravity-role-not-confirmed', { cause, ...(toolName !== null ? { toolName } : {}) });
     return antigravityRoleRefusal({
       cause,
       toolName,
+      listProblem,
       runningVersion,
       artifactName: view?.artifactName ?? null,
       artifactPath: view?.artifactPath ?? null,

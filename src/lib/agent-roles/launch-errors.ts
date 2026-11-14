@@ -32,8 +32,9 @@ export type RoleLaunchRefusalReason =
   /** The user's settings the role has to be composed with could not be read or combined. */
   | 'composition-failed'
   /**
-   * The generated file could not be written or did not pass its inspection, or
-   * (Antigravity, Issue #4385 D3) `agy agent` did not list it before the launch.
+   * The generated file could not be written or did not pass its inspection.
+   * (Antigravity's `agy agent` list does not refuse a launch, Issue #4385 D3: a
+   * generation it did not see listed is never confirmed, and its sends are refused.)
    */
   | 'artifact-failed'
   /**

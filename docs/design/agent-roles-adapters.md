@@ -15,7 +15,7 @@
 | Command Code | 生成した mod + `--mod <abs>`（`appendSystemPrompt`） | system | 残る（追加） | **要求への到達まで成立**。BYOK 経路で確認 |
 | OpenCode V1 | `OPENCODE_CONFIG_CONTENT={"instructions":[<abs>]}`（利用者の env と合成） | system | 残る（追加） | **要求への到達まで成立**。独自プロバイダ経路で確認 |
 | OpenCode V2 | `OPENCODE_CONFIG_CONTENT={"agents":{<実効 agent>:{"system":"{file:<abs>}"}}}`。利用者の env と合成。本文は「共通指示 + ロール」 | system | **provider の基礎プロンプトは置換される** | **条件つき成立**（§7。判断 1） |
-| Antigravity | `~/.gemini/config/agents/cm-role-<id>/agent.md`（`tools` 13 個）+ `--agent` | 未確認 | 未確認 | **既定で有効**（Issue #4385。起動前の `agy agent` の照合と、画面でロールを確かめるまで本文を送らない門。[agy-role-default-4385.md](./agy-role-default-4385.md)） |
+| Antigravity | `~/.gemini/config/agents/cm-role-<id>/agent.md`（`tools` 13 個）+ `--agent` | 未確認 | 未確認 | **既定で有効**（Issue #4385。起動前の `agy agent` の照合（一覧に無い・確かめられないときも起動はし、本文を止める）と、画面でロールを確かめるまで本文を送らない門。[agy-role-default-4385.md](./agy-role-default-4385.md)） |
 | Copilot CLI | `$COPILOT_HOME/agents/cm-role-<id>.agent.md`（`infer: false`）+ `--agent` | system | 残る（追加）。ツールが 1 つ増える | **要求への到達まで成立**。BYOK 経路で確認 |
 
 「要求への到達まで成立」は、実 CLI が本文をモデルへの要求に載せ、ツールの実行まで動いたことを指す。本物のモデルが従うかは別で、§9・§12 のとおり局所モデルでしか見ていない。
