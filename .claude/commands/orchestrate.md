@@ -321,12 +321,13 @@ commandmatedev ls --branch feature/
 または手動で:
 
 ```bash
-git worktree add -b "feature/{N}-worktree" "../commandmate-issue-{N}" develop
+git fetch origin develop
+git worktree add -b "feature/{N}-worktree" "../commandmate-issue-{N}" origin/develop
 cd "../commandmate-issue-{N}" && npm install --include=dev
 ```
 
 `--include=dev` は省かないこと。シェルが `NODE_ENV=production` だと devDependencies（vitest / eslint など）が入らない。
-そうなると、ワーカーの確認コマンドも検証ゲートも動かない。
+ワーカーの確認も検証ゲートも動かない。
 
 根拠: docs/orchestrate/contract.md#2-2-devdependencies-を入れる理由
 
