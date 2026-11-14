@@ -246,8 +246,9 @@ npm run db:reset      # DBリセット
 
 ## 記憶の書き場所
 
-- 許可・決定・作業の状態・次の一手・人への質問は CommandMate の mem に書く（決定の行き先は該当する Issue）。Claude Code の auto memory（`~/.claude/projects/.../memory/`）には書かない
-- auto memory に書くのは、期限の無い罠・教訓・利用者の好みだけ
+- Claude Code の auto memory（`~/.claude/projects/.../memory/`）は使わない（`.claude/settings.json` で `autoMemoryEnabled: false`）
+- 許可・決定・作業の状態・次の一手・人への質問は CommandMate の mem に書く（決定の行き先は該当する Issue）
+- 罠・教訓・手順は docs（運用は `docs/orchestrate/`）に書き、全員が踏む規則だけ AGENTS.md・CLAUDE.md に 1 行で足す
 
 ---
 
