@@ -11,6 +11,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { randomUUID } from 'crypto';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -21,6 +22,7 @@ import {
 import {
   ENV_SNAPSHOT_VERSION,
   FLOW_DIR_NAME,
+  loadEnvSnapshot,
   probeCommandmateEntries,
   probeHomeEntries,
   type EnvProbeDeps,
@@ -139,5 +141,65 @@ describe('diffEnvSnapshots: the flow record is not this task’s pollution (#439
     const homeProbe = result.probes.find((p) => p.probeId === 'home-entries')!;
     expect(result.status).toBe('violated');
     expect(homeProbe.added.map((c) => c.key)).toEqual([FLOW_DIR_NAME]);
+  });
+});
+
+describe('a baseline saved before the roster knew `flow` (#4396)', () => {
+  /** A v1 snapshot as the older build wrote it: `commandmate-entries` still lists the runtime names. */
+  function storedBaseline(home: string, commandmateKeys: string[]): EnvSnapshot {
+    const current = snapshot(home, STARTED);
+    return {
+      ...current,
+      probes: {
+        ...current.probes,
+        'commandmate-entries': {
+          status: 'ok',
+          entries: commandmateKeys.map((key) => ({ key, detail: null, anchor: null })),
+          reason: null,
+        },
+      },
+    };
+  }
+
+  /** Save it under a real UUID file name and read it back the way the gate does. */
+  function loadedBaseline(home: string, commandmateKeys: string[]): EnvSnapshot {
+    const dir = mkdtempSync(join(tmpdir(), 'cm-env-clean-flow-4396-saved-'));
+    roots.push(dir);
+    const taskId = randomUUID();
+    writeFileSync(
+      join(dir, `${taskId}.json`),
+      JSON.stringify(storedBaseline(home, commandmateKeys))
+    );
+    const loaded = loadEnvSnapshot(taskId, dir);
+    expect(loaded).not.toBeNull();
+    return loaded!;
+  }
+
+  it('does not read the now-ignored flow as a removal when the filesystem is unchanged (positive)', () => {
+    const home = makeHome();
+    mkdirSync(join(home, '.commandmate', 'flow'), { recursive: true });
+    const baseline = loadedBaseline(home, ['flow']);
+
+    const result = diffEnvSnapshots(baseline, snapshot(home, VERIFIED), CONTEXT, {
+      resolvePidCwd: () => null,
+      sessionKills: [],
+    });
+    expect(result.status).toBe('clean');
+    expect(formatEnvCleanReport(result)).not.toContain('flow');
+  });
+
+  it('still reports a genuinely removed entry beside flow (negative)', () => {
+    const home = makeHome();
+    mkdirSync(join(home, '.commandmate', 'flow'), { recursive: true });
+    const baseline = loadedBaseline(home, ['flow', 'foo']);
+
+    const result = diffEnvSnapshots(baseline, snapshot(home, VERIFIED), CONTEXT, {
+      resolvePidCwd: () => null,
+      sessionKills: [],
+    });
+    const probe = result.probes.find((p) => p.probeId === 'commandmate-entries')!;
+    expect(result.status).toBe('violated');
+    expect(probe.removed.map((c) => c.key)).toEqual(['foo']);
+    expect(formatEnvCleanReport(result)).toContain('- foo');
   });
 });

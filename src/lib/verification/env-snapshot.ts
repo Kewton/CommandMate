@@ -640,6 +640,31 @@ export function saveEnvSnapshot(
 }
 
 /**
+ * Compare a stored baseline under today's roster, not the roster of its day.
+ *
+ * A name added to {@link COMMANDMATE_RUNTIME_ENTRY_NAMES} since the baseline was
+ * written is absent from the final capture because the current probe ignores it,
+ * so `before=['flow'] → after=[]` would read as a removal even though nothing on
+ * the filesystem changed (Issue #4396). Dropping the roster from a loaded
+ * `commandmate-entries` gives both sides the same rules. Only that probe: a
+ * `~/flow` entry in `$HOME` is still the violation it always was.
+ */
+function applyRuntimeEntryRoster(snapshot: EnvSnapshot): EnvSnapshot {
+  const probe = snapshot.probes['commandmate-entries'];
+  const entries = probe.entries.filter(
+    (entry) => !COMMANDMATE_RUNTIME_ENTRY_NAMES.includes(entry.key)
+  );
+  if (entries.length === probe.entries.length) return snapshot;
+  return {
+    ...snapshot,
+    probes: {
+      ...snapshot.probes,
+      'commandmate-entries': { ...probe, entries },
+    },
+  };
+}
+
+/**
  * Read the baseline for `taskId`.
  *
  * @returns the snapshot, or null when there is none — which the gate reports as
@@ -654,7 +679,7 @@ export function loadEnvSnapshot(
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (!isEnvSnapshot(parsed)) return null;
-    return parsed;
+    return applyRuntimeEntryRoster(parsed);
   } catch {
     return null;
   }
