@@ -265,6 +265,34 @@ node scripts/orchestrate/merge-pr.mjs --run-dir "workspace/orchestration/runs/$D
 `cpu.heavy` などの検証のロックも同じ札の規約で先着順になった（`machine-lock.ts` と `machine-lock-sync.mjs`。docs/design/verification-config.md §9.2）。
 standalone の `verify-run.sh`（`.claude` と `.agents`）も同じ札の規約に追従した。`commandmate-skills` の写しへは #4277 の札の規約を cmate-verify 0.7.0（skills PR #314）、#4288 の 1 番（pgid・退避の読み・観測の 3 値）を 0.8.0（skills PR #315）で移植済み。#4288 の 2 番 PR1a でロックの節に足した run-lock・supervisor.lock 用の関数（既定で働かない）と owner の排他作成は未移植で、それまで写しの 0.8.0 とはバイト一致しない（プロトコルは同じなので、混在しても取り合いの規則は変わらない）。
 
+## 6-2 merge train の診断（merge-train.mjs）
+
+（#4369 PR1。設計: docs/design/merge-train-4369.md。マージの段は PR1b で、この節の道具はまだマージしない）
+
+```bash
+node scripts/orchestrate/merge-train.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --queue "$MERGE_ISSUES"   # entry は --queue と同じ <issue>[/<item>][@<pr>]
+  # [--base develop] [--max-prs 5] [--rebuild-max 0|1] [--keep-refs 3] [--json] ほか（--help 相当は usage）
+```
+
+- **何をするか**: 候補の PR を選び（PR 自身の CI が全緑・記録と断片がそろう・precheck の条件が読める・依存のファイルを変えない など。外した PR は理由つきで報告）、
+  `origin/<base>` の先端 `B0` の上に GitHub の squash を手元で再現した単一親の鎖 `T_1..T_N` を作り、組み合わせを確かめ（衝突の印・全候補の条件の和の precheck、
+  `--heavy-to-ci`）、`train/<base>/<train ID>` へ push して、その ref の push run（`ci-pr.yml`）1 回の結果を待って報告する。
+  作業用のツリーは `os.tmpdir()` の下の `git clone --shared` で、リポジトリの `git worktree list` には載らない（終わりに消す）。
+- **報告**: `<run-dir>/train/<train ID>.json`（`--json` で標準出力にも）と、run の記録の `train` の行（HEAD を持たず進捗に数えない。`run-log.mjs status` の `train:`）。
+  precheck の記録は `<run-dir>/train/` に書き、merge-pr が読む run の記録には書かない。
+- **exit**: 0 緑（または候補 0 本）・1 赤／条件・コマンドの失敗／再実行の後の緑（`green-after-rerun-unverified`。人向けの文の先頭に「赤ではない（再実行の後の緑。未確認）」）・
+  2 使い方／不適格（依存が違う・`merge=` の属性 など）・3 precheck の保留・4 CI 待ちの間に base が動いた・124 ロック／CI の登録／CI の時間切れ。
+- **4 つの決まり**（`tests/unit/docs/ci-merge-train-4369.test.ts` が固定する）:
+  1. 報告は常に `publishable: false`。どの verdict でも、作り直しや再実行の後でも変わらない
+  2. 緑は `B0` の上の `T_N` の 1 回の CI の結果だけで、マージの根拠にも merge-pr の確認（取り込み・precheck・必須の CI・`--last`）を省く根拠にもならない
+  3. train の ref を base へ入れない・その ref から PR を作らない（merge-train 自身も base・PR・Issue へは書かない）
+  4. マージは train が無いときと同じ引数・同じ方法で merge-pr を回す（`--queue` の最後の entry の自動の `last` もそのまま）
+- **ロック**: base ごとの `train.<owner>.<repo>.<base>`（lock root の下の `train/`）。merge のロックは取らないので merge-pr を止めない。
+- **残る ref**: 緑・赤の train の ref は報告から見られるよう remote に残る。次の実行が、同じ run-dir の報告に記録した SHA と一致する古い ref だけを、新しい順で
+  `--keep-refs`（既定 3）本を超えた分、lease つきで消す。報告の `refs.remaining` が残っている本数。前の日の run-dir の ref など、消せなかったものは人が消す:
+  `git ls-remote origin 'refs/heads/train/*'` で一覧し、1 本ずつ `git push --force-with-lease=refs/heads/train/<base>/<ID>:<SHA> origin :refs/heads/train/<base>/<ID>`。
+
 ## 6-3 落ちたジョブの再実行と run の完走
 
 （#4162。1 ジョブが早く落ちると、同じ run の残りが走っている間は `gh run rerun` が `already running` で拒まれ、`merge-pr.mjs` が exit 1 で止まっていた。#3783・#4149 で実測。）
