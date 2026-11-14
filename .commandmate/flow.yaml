@@ -1,0 +1,7 @@
+# Flow settings for this repository (scripts/flow/config.mjs, docs/design/flow-wip-4368.md §7).
+# wip.total: upper bound on unmerged branches (worktree branches + open PRs to the base).
+# Advisory only: `node scripts/orchestrate/flow-wip.mjs check` exits 60 when the count reaches it.
+# 8 = 5 active lanes + 3 waiting on PR (design H1). Revisit after a week of #4367 measurements.
+version: 1
+wip:
+  total: 8
