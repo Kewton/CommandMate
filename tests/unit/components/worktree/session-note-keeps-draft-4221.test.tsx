@@ -66,6 +66,15 @@ async function settle(): Promise<void> {
   });
 }
 
+/**
+ * The reopened editor fixes the version its draft names in a mount effect. Seeing its
+ * error in the DOM does not mean that passive effect has run (under load it may not
+ * have): flush it inside act before the next Enter reads that version.
+ */
+async function flushMountEffects(): Promise<void> {
+  await act(async () => {});
+}
+
 const codex: AgentInstance = { id: 'codex', cliTool: 'codex', alias: 'codex', order: 1 };
 
 function pcPane(instance: AgentInstance = claude) {
@@ -539,6 +548,7 @@ describe('3rd review P2-1: a draft restored after another deleted the note saves
     deletedByAnother();
     typeAndEnter('mobile-session-note-input', 'スマホの下書き');
     await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました'));
+    await flushMountEffects();
     typeAndEnter('mobile-session-note-input', 'スマホの下書き');
     await settle();
     expect(sentBase(1)).toBe(0);
@@ -552,6 +562,7 @@ describe('3rd review P2-1: a draft restored after another deleted the note saves
     deletedByAnother();
     typeAndEnter('mobile-session-note-input', 'スマホの下書き');
     await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error')).toBeTruthy());
+    await flushMountEffects();
     expect(store('他の人が書き直した', 0).ok).toBe(true);
     typeAndEnter('mobile-session-note-input', 'スマホの下書き');
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
