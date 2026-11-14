@@ -36,6 +36,8 @@ exit 45 を受けたら、利用者に `permissions.defaultMode` を `ask` 以�
 send が exit 99（`prompt not ready`）なら、メッセージは送られていない（Codex / Command Code で実測）。待つ前に画面を見る。
 手順は docs/orchestrate/exit-codes.md#3-1-冷間起動の失敗-exit-99 の表（信頼ダイアログ・既にプロンプト・まだ起動中）に従う。
 
+起動の直後に `? for shortcuts` が一瞬出てから、コーディングの好みを学ぶ画面（`Learning your coding taste` → `Press Enter to continue`）に切り替わることがある（`.commandcode/` が既にある作業ディレクトリで観測）。この間に打った依頼は消える。tmux で直に起動して依頼を打つときは、`Press Enter to continue` を見つけ次第 Enter で閉じ、学習の画面が見えている間は打たず、入力欄が数回続けて見えてから打つ。
+
 ## 3-3 完了の合図が要る理由
 
 Command Code は、前のターンの `hook_stop` が、生成中のターンより先に完了として読まれることがある（#2429）。
