@@ -591,13 +591,21 @@ const LISTING_CAUSE: Record<Exclude<AgentListVerdict['kind'], 'listed'>, Antigra
  *
  * @param list - Runs `agy agent` for this launch (cwd, env, limits are the driver's)
  * @throws {RoleLaunchRefusedError} `session-stopped` only, when the session was
- *   stopped or taken while agy ran (that launch no longer speaks for the session)
+ *   stopped or taken while agy ran, or (`CM_UAT_ISOLATION=1`, agy not run) before
+ *   this check (that launch no longer speaks for the session)
  */
 export async function checkLaunchRoleAgentListed(list: () => Promise<AgentListOutcome>): Promise<void> {
   const store = scope().getStore();
   const prepared = store?.prepared ?? null;
   if (!store || prepared === null || store.snapshot.injection?.adapter !== 'antigravity') return;
   if (getUatIsolationMode() === 'shared-read-only') {
+    // Review 4385-pr2b P2-1: agy is not run here, but the launch's awaits before
+    // this point (the install check, the pane) can have outlived it all the same.
+    // The same stop that ends the listing branch below ends this one: a stopped
+    // launch makes no pane, no process and no line.
+    if (isStale(store)) {
+      throw new RoleLaunchRefusedError('session-stopped', 'The session was stopped before the launch started its process');
+    }
     store.agentListing = { kind: 'unchecked', problem: 'not run under CM_UAT_ISOLATION=1' };
     return;
   }

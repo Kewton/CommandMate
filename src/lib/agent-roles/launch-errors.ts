@@ -32,8 +32,9 @@ export type RoleLaunchRefusalReason =
   /** The user's settings the role has to be composed with could not be read or combined. */
   | 'composition-failed'
   /**
-   * The generated file could not be written or did not pass its inspection.
-   * (Antigravity's `agy agent` list does not refuse a launch, Issue #4385 D3: a
+   * The generated file could not be written or did not pass its inspection, or
+   * (`CM_UAT_ISOLATION=1`, #3360) it is not in the shared home and this run may not
+   * write it. Refused before any pane. (Antigravity's `agy agent` list does not refuse a launch, Issue #4385 D3: a
    * generation it did not see listed is never confirmed, and its sends are refused.)
    */
   | 'artifact-failed'
@@ -51,7 +52,11 @@ export type RoleLaunchRefusalReason =
   | 'not-confirmed'
   /** The role could not be resolved at all. */
   | 'resolve-failed'
-  /** The session was stopped while this start was still resolving its role. */
+  /**
+   * The session was stopped while this start was still on its way: resolving its
+   * role, checking the pane's cwd, or (Antigravity, Issue #4385 D3/D6) before its new
+   * process, whether `agy agent` was run or not (`CM_UAT_ISOLATION=1`). Nothing was typed.
+   */
   | 'session-stopped';
 
 const MARK = /\(role launch refused: ([a-z-]+)\)/;

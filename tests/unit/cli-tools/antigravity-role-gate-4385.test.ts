@@ -1151,6 +1151,94 @@ describe('P/N: on by default, listed before a new process (§8.4)', () => {
     await expectStartedButHeld(await launchShowingRole(), 'not-applied');
   });
 
+  // Review 4385-pr2b P2-1: the branch that does not run agy (UAT) must lose to a stop
+  // as the listing branch does (P7). The stop lands in the launch's own await before
+  // D3 (agy's install check), after the launch's scope took the session's epoch.
+  it('P14 CM_UAT_ISOLATION=1 (as D3 reads it), the session stopped while the launch awaited: session-stopped, no pane, no line, agy not asked', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    uat.mode = 'shared-read-only';
+    let stopped = false;
+    vi.mocked(tool.isInstalled).mockImplementation(async () => {
+      if (!stopped) {
+        stopped = true;
+        // The human's stop, as the stop API ends: what was known is forgotten.
+        forgetLaunchRoleEvidence(TARGET);
+      }
+      return true;
+    });
+    const outcome = await launchShowingRole();
+    expect(stopped).toBe(true);
+    expectNoLaunch(outcome, 'session-stopped');
+    expect(listed).not.toHaveBeenCalled();
+  });
+
+  it('P14 control: CM_UAT_ISOLATION=1 (as D3 reads it), not stopped: started, never confirmed (P8 unchanged)', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    uat.mode = 'shared-read-only';
+    // The agent file is prepared by a launch outside UAT; this one only checks D3.
+    const error = await expectStartedButHeld(await launchShowingRole(), 'not-confirmed');
+    expect(error.message).toContain('CM_UAT_ISOLATION=1');
+    expect(listed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Review 4385-pr2b P2-2: the real `CM_UAT_ISOLATION=1` (the environment, not the
+   * replaced mode). The shared home under `os.tmpdir()` is prepared by this build
+   * first, as a UAT runs it: the role's agent file and agy's hook config exist and
+   * match. A shared home without them is refused earlier, before D3 (#3360).
+   */
+  describe('the real CM_UAT_ISOLATION=1', () => {
+    const hooksFile = () => path.join(dir, 'home', '.gemini', 'config', 'hooks.json');
+    const agentsDir = () => path.join(dir, 'agy-agents');
+    function readTree(root: string): Record<string, string> {
+      const out: Record<string, string> = {};
+      if (!fs.existsSync(root)) return out;
+      for (const entry of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const file = path.join(entry.parentPath, entry.name);
+        out[path.relative(root, file)] = fs.readFileSync(file, 'utf8');
+      }
+      return out;
+    }
+
+    it('P15 a prepared shared home: agy agent is not run; started, never confirmed, the body not sent with the reason, nothing written', async () => {
+      // Hooks on, so agy's shared hook config is part of what the UAT reads.
+      vi.stubEnv('CM_AGENT_HOOKS_INJECT', '1');
+      const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+      // The preparation, outside UAT: this build writes the agent and the hook config.
+      await launchWithRole('idle');
+      expect(fs.existsSync(hooksFile())).toBe(true);
+      const name = readRoleApplication(TARGET)?.artifactName as string;
+      expect(fs.existsSync(path.join(agentsDir(), name, 'agent.md'))).toBe(true);
+      const home = readTree(path.join(dir, 'home'));
+      const agents = readTree(agentsDir());
+      // A person stops it; the next launch is a new process under the real switch.
+      pane.exists = false;
+      forgetLaunchRoleEvidence(TARGET);
+      pane.events = [];
+      vi.stubEnv('CM_UAT_ISOLATION', '1');
+      const error = await expectStartedButHeld(await launchShowingRole(), 'not-confirmed');
+      expect(error.message).toContain('was not checked before the start');
+      expect(error.message).toContain('CM_UAT_ISOLATION=1');
+      expect(getLatestRoleLaunchRecords(db, WT, 'antigravity').launched?.sessionGeneration ?? null).not.toBe(
+        readRoleApplication(TARGET)?.generation
+      );
+      expect(listed).toHaveBeenCalledTimes(1);
+      // Read-only: the shared home is as the preparation left it.
+      expect(readTree(path.join(dir, 'home'))).toEqual(home);
+      expect(readTree(agentsDir())).toEqual(agents);
+    });
+
+    it('P16 the role\'s agent not prepared: artifact-failed before D3 (#3360), no pane, no line, agy not asked, nothing written', async () => {
+      const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+      vi.stubEnv('CM_UAT_ISOLATION', '1');
+      const error = expectNoLaunch(await launchShowingRole(), 'artifact-failed');
+      expect(error.message).toContain('CM_UAT_ISOLATION=1');
+      expect(listed).not.toHaveBeenCalled();
+      expect(readTree(agentsDir())).toEqual({});
+    });
+  });
+
   it('P12 no switch anywhere: the gate applies from the settings alone (Z7 once more)', async () => {
     await launchWithRole('idle');
     expectSent(await send());
