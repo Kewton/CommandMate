@@ -29,6 +29,7 @@ import {
 } from '../detection/cli-patterns';
 import { normalizeFrame } from '../detection/tools/frame';
 import {
+  ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN,
   ANTIGRAVITY_TRUST_DIALOG_PATTERN,
   isAntigravityTrustScreen,
 } from '../detection/tools/antigravity/patterns';
@@ -59,6 +60,28 @@ import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { withLaunchScreenCleared } from '@/lib/session/launch-screen';
 import { getErrorMessage } from '@/lib/errors';
 import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputReadMark } from '@/lib/session/instance-input-lock';
+import { execFile } from 'child_process';
+import {
+  findUnknownToolName,
+  judgeAntigravityRoleFrame,
+  type AntigravityRoleCause,
+  type AntigravityRoleFrame,
+} from '@/lib/agent-roles/antigravity';
+import { RoleLaunchRefusedError } from '@/lib/agent-roles/launch-errors';
+import {
+  antigravityRoleRefusal,
+  applyRoleApplicationObservation,
+  assertRoleSendBoundary,
+  expireRoleApplication,
+  observeLaunchRoleApplication,
+  readRoleApplication,
+  resolveRoleSendTarget,
+  startRoleApplicationGrace,
+  type LaunchRoleTarget,
+  type RoleApplicationObservation,
+  type RoleApplicationView,
+} from '@/lib/session/role-launch';
+import { isUnderTest } from '@/lib/test-run-detection';
 
 const logger = createLogger('cli-tools/antigravity');
 
@@ -247,6 +270,79 @@ export function isAntigravityReady(output: string): boolean {
 }
 
 /**
+ * Which screen a frame is, with its current status row, for the role's check
+ * (Issue #4385). Read by structure, as {@link isAntigravityReady} reads the box:
+ * the row under the input box (ready or still generating), or the row agy draws
+ * under the trust question's `↑/↓ Navigate` footer. Nothing above them is read.
+ */
+export function readAntigravityRoleFrame(output: string): AntigravityRoleFrame {
+  const frame = normalizeFrame(output, 'antigravity');
+  if (isAntigravityTrustScreen(frame.lastLines)) {
+    const rows = frame.contentLines.map((row) => row.trim());
+    let footer = -1;
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      if (ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN.test(rows[i])) {
+        footer = i;
+        break;
+      }
+    }
+    const below = footer < 0 ? [] : rows.slice(footer + 1).filter((row) => row !== '');
+    return { kind: 'trust', statusRow: below.length === 1 ? below[0] : '' };
+  }
+  // The box's status row is read the same way whether agy is idle or still
+  // generating: which agent runs is said apart from whether a body could go now.
+  const statusRow = readInputBoxStatusRow(frame.contentLines);
+  if (statusRow === null || ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) return { kind: 'other', statusRow: null };
+  return { kind: isAntigravityReady(output) ? 'input-box' : 'busy', statusRow };
+}
+
+/** `agy --version`'s limits, for the refusal's words only (D2). */
+const AGY_VERSION_TIMEOUT_MS = 5000;
+const AGY_VERSION_MAX_BYTES = 256;
+
+type AgyVersionReader = () => Promise<string | null>;
+
+function readAgyVersionFromProcess(): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      execFile(
+        'agy',
+        ['--version'],
+        { timeout: AGY_VERSION_TIMEOUT_MS, maxBuffer: AGY_VERSION_MAX_BYTES },
+        (error, stdout) => resolve(error ? null : String(stdout).trim())
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+let agyVersionReader: AgyVersionReader | null = null;
+
+/** Replace how the refusal reads agy's version. Test-only; a test run reads none otherwise. */
+export function setAgyVersionReaderForTest(reader: AgyVersionReader | null): void {
+  agyVersionReader = reader;
+}
+
+async function readAgyVersion(): Promise<string | null> {
+  if (agyVersionReader !== null) return agyVersionReader().catch(() => null);
+  if (isUnderTest()) return null;
+  return readAgyVersionFromProcess();
+}
+
+/** What a send's role gate decided before the wait (Issue #4385). */
+type AntigravityRoleGate =
+  | { kind: 'none'; beforeBody: () => void }
+  | {
+    kind: 'role';
+    target: LaunchRoleTarget;
+    generation: string;
+    injectionFingerprint: string | null;
+    graceStartedAt: number;
+    beforeBody: () => void;
+  };
+
+/**
  * Antigravity CLI tool implementation.
  * Manages `agy` sessions using tmux.
  */
@@ -338,6 +434,11 @@ export class AntigravityTool extends BaseCLITool {
       } finally {
         endStartupWindow(sessionName);
       }
+
+      // Issue #4385: with a role, read the screen once more and keep what it
+      // proves. Nothing is stopped and the launch does not throw on it; a
+      // screen that proves nothing is left to the next send's gate.
+      await observeLaunchRoleApplication((name) => this.observeRole(sessionName, name));
 
       logger.info('started-antigravity-session');
     } catch (error: unknown) {
@@ -461,11 +562,15 @@ export class AntigravityTool extends BaseCLITool {
    *
    * @throws Error when the input prompt is not detected within the timeout
    */
-  private async waitForPrompt(sessionName: string): Promise<void> {
+  private async waitForPrompt(sessionName: string, gate: AntigravityRoleGate = { kind: 'none', beforeBody: () => undefined }): Promise<void> {
     const startTime = Date.now();
     let deadline = startTime + (isStartupTrustPending(sessionName)
       ? ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS
       : ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS);
+    // Issue #4385: an unconfirmed role waits in this same wait, up to its grace
+    // (counted from the first send of the generation), not in a second one.
+    if (gate.kind === 'role') deadline = Math.max(deadline, gate.graceStartedAt + ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS);
+    let roleConfirmed = gate.kind === 'none';
     const pollInterval = 500;
     const loggedTrustDecisions = new Set<string>();
     const answerSkips = newLaunchAnswerSkips();
@@ -478,7 +583,8 @@ export class AntigravityTool extends BaseCLITool {
         const rawOutput = await capturePane(sessionName, 50);
         const output = stripAnsi(rawOutput);
         lastOutput = rawOutput;
-        if (isAntigravityReady(output)) {
+        if (gate.kind === 'role' && !roleConfirmed) roleConfirmed = await this.advanceRoleGate(gate, sessionName, output);
+        if (isAntigravityReady(output) && roleConfirmed) {
           forgetStartupTrust(sessionName);
           return;
         }
@@ -526,11 +632,20 @@ export class AntigravityTool extends BaseCLITool {
           continue;
         }
       } catch (error: unknown) {
+        // Issue #4385: the role gate's refusal is final for this send.
+        if (error instanceof RoleLaunchRefusedError) throw error;
         // Capture may fail - continue polling
         captureErrors++;
         lastCaptureError = getErrorMessage(error);
+        if (gate.kind === 'role' && !roleConfirmed) roleConfirmed = await this.advanceRoleGate(gate, sessionName, null);
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    }
+    // Issue #4385: the grace ran out with the role still unconfirmed.
+    if (gate.kind === 'role' && !roleConfirmed) {
+      const view = readRoleApplication(gate.target);
+      const after = view !== null && view.generation === gate.generation ? expireRoleApplication(gate.target, view) : view;
+      throw await this.refusalFor(gate, after);
     }
     const trustPending = isStartupTrustPending(sessionName);
     const seen = describeScreen(lastOutput);
@@ -573,8 +688,13 @@ export class AntigravityTool extends BaseCLITool {
     await this.requireSession('Antigravity', worktreeId, instanceId, { relaunch: true });
 
     try {
+      // Issue #4385: with a role set, a body goes only to a generation whose
+      // role was seen applied; decided here, waited for below, and checked
+      // again right before the body.
+      const gate = await this.openRoleGate({ worktreeId, cliToolId: 'antigravity', instanceId });
+
       // Verify agy is at a ready prompt before sending
-      await this.waitForPrompt(sessionName);
+      await this.waitForPrompt(sessionName, gate);
 
       // Issue #1471: Body/Enter separation + read-back submit verification via the
       // shared helper (replaces the old type -> C-m -> `\n`-gated paste recovery).
@@ -583,6 +703,7 @@ export class AntigravityTool extends BaseCLITool {
         message,
         cliToolId: 'antigravity',
         composer: this.describeComposer(),
+        beforeBody: gate.beforeBody,
       });
 
       // Invalidate cache after sending message (required so the poller re-reads)
@@ -594,6 +715,127 @@ export class AntigravityTool extends BaseCLITool {
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to Antigravity: ${errorMessage}`, { cause: error });
     }
+  }
+
+  /**
+   * What one read of the pane proves about the role named `name` (Issue #4385).
+   * A screen that proves nothing asks whether agy still holds the pane: a pane
+   * back at the shell plainly runs no role.
+   *
+   * @param output - The capture, already read; null to read one here
+   */
+  private async observeRole(sessionName: string, name: string, output: string | null = null): Promise<RoleApplicationObservation> {
+    let screen = output;
+    if (screen === null) {
+      try {
+        screen = stripAnsi(await capturePane(sessionName, 50));
+      } catch {
+        return { kind: 'unreadable' };
+      }
+    }
+    const verdict = judgeAntigravityRoleFrame(readAntigravityRoleFrame(screen), name);
+    if (verdict.kind !== 'undetermined') return verdict;
+    if (await this.isToolLive(sessionName).catch(() => true)) return { kind: 'undetermined' };
+    const toolName = findUnknownToolName(screen, name);
+    return toolName !== null
+      ? { kind: 'not-applied', cause: 'unknown-tool', toolName }
+      : { kind: 'not-applied', cause: 'not-started' };
+  }
+
+  /**
+   * Decide whether this send is under the role gate, and refuse at once what
+   * can never be sent: settings that could not be read, no record for the
+   * process now running, a generation already refused (Issue #4385, §0.1).
+   *
+   * @throws {RoleLaunchRefusedError} Nothing is typed
+   */
+  private async openRoleGate(target: LaunchRoleTarget): Promise<AntigravityRoleGate> {
+    const decided = await resolveRoleSendTarget(target);
+    if (decided.kind === 'none') {
+      return {
+        kind: 'none',
+        // R4: "no role" was decided before the waits; a role set meanwhile refuses this body.
+        beforeBody: () => {
+          if (!decided.stillNone()) throw antigravityRoleRefusal({ cause: 'settings-changed' });
+        },
+      };
+    }
+    if (decided.kind === 'unreadable') throw await this.refusalOf('settings-unreadable');
+    const view = readRoleApplication(target);
+    if (view === null) throw await this.refusalOf('no-record');
+    if (view.state === 'refused') throw await this.refusalFromView(view);
+    const graceStartedAt = startRoleApplicationGrace(target, view.generation, Date.now()) ?? Date.now();
+    const expected = { generation: view.generation, injectionFingerprint: view.injectionFingerprint };
+    return {
+      kind: 'role',
+      target,
+      generation: view.generation,
+      injectionFingerprint: view.injectionFingerprint,
+      graceStartedAt,
+      beforeBody: () => assertRoleSendBoundary(target, expected),
+    };
+  }
+
+  /**
+   * One step of the gate inside the prompt wait: read what the screen proves
+   * and keep it (compare-and-set), refuse what is final.
+   *
+   * @param output - This poll's capture, or null when it failed
+   * @returns Whether the gate's generation is confirmed
+   * @throws {RoleLaunchRefusedError} Refused, replaced, gone, or past the grace
+   */
+  private async advanceRoleGate(
+    gate: Extract<AntigravityRoleGate, { kind: 'role' }>,
+    sessionName: string,
+    output: string | null
+  ): Promise<boolean> {
+    const view = readRoleApplication(gate.target);
+    if (view === null || view.generation !== gate.generation) throw await this.refusalFor(gate, view);
+    if (view.state === 'confirmed') return true;
+    if (view.state === 'refused') throw await this.refusalFromView(view);
+    const observation = output === null || view.artifactName === null
+      ? { kind: 'unreadable' as const }
+      : await this.observeRole(sessionName, view.artifactName, output);
+    const after = applyRoleApplicationObservation(gate.target, view, observation);
+    if (after === null || after.generation !== gate.generation) throw await this.refusalFor(gate, after);
+    if (after.state === 'confirmed') return true;
+    if (after.state === 'refused') throw await this.refusalFromView(after);
+    if (Date.now() >= gate.graceStartedAt + ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS) {
+      throw await this.refusalFor(gate, expireRoleApplication(gate.target, after));
+    }
+    return false;
+  }
+
+  /** The refusal for a gate whose generation is gone, replaced, refused or unconfirmed. */
+  private async refusalFor(
+    gate: Extract<AntigravityRoleGate, { kind: 'role' }>,
+    view: RoleApplicationView | null
+  ): Promise<RoleLaunchRefusedError> {
+    if (view === null) return this.refusalOf('no-record');
+    if (view.generation !== gate.generation) return this.refusalOf('replaced', view);
+    if (view.state === 'refused') return this.refusalFromView(view);
+    return this.refusalOf('grace-expired', view);
+  }
+
+  private refusalFromView(view: RoleApplicationView): Promise<RoleLaunchRefusedError> {
+    return this.refusalOf(view.refusal?.cause ?? 'grace-expired', view, view.refusal?.toolName ?? null);
+  }
+
+  /** The refusal's words, with agy's version read only now (D2). */
+  private async refusalOf(
+    cause: AntigravityRoleCause,
+    view: RoleApplicationView | null = null,
+    toolName: string | null = null
+  ): Promise<RoleLaunchRefusedError> {
+    const runningVersion = await readAgyVersion();
+    logger.warn('antigravity-role-not-confirmed', { cause, ...(toolName !== null ? { toolName } : {}) });
+    return antigravityRoleRefusal({
+      cause,
+      toolName,
+      runningVersion,
+      artifactName: view?.artifactName ?? null,
+      artifactPath: view?.artifactPath ?? null,
+    });
   }
 
   /**

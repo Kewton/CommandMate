@@ -41,7 +41,16 @@ import { buildCompositeKey, COMPOSITE_KEY_SEPARATOR } from '@/lib/auto-yes-state
 import { getOrInitGlobal } from '@/lib/global-state';
 import { createLogger } from '@/lib/logger';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getInstanceRoleState, getLatestRoleLaunchRecords, hasAnyRoleSetting, recordRoleLaunch } from '@/lib/db/agent-roles-db';
+import {
+  getInstanceRoleState,
+  getLatestRoleLaunchRecords,
+  getRepositoryRoleStates,
+  getSystemRoleDefaults,
+  hasAnyRoleSetting,
+  recordRoleLaunch,
+} from '@/lib/db/agent-roles-db';
+import { getAllRepositories } from '@/lib/db/db-repository';
+import { getWorktreeById } from '@/lib/db';
 import { renderAgentLaunchCommand } from '@/lib/hooks/sources/launch-command';
 import type { AgentLaunchContext, AgentLaunchPlan } from '@/lib/hooks/sources/types';
 import { computeFingerprint } from '@/lib/agent-roles/fingerprint';
@@ -75,6 +84,11 @@ import {
   type RoleLaunchCwdReader,
 } from '@/lib/agent-roles/composition';
 import { RoleLaunchRefusedError, type RoleLaunchRefusalReason } from '@/lib/agent-roles/launch-errors';
+import {
+  describeAntigravityRoleRefusal,
+  type AntigravityRoleCause,
+  type AntigravityRoleRefusalDetail,
+} from '@/lib/agent-roles/antigravity';
 import {
   AgentRoleTargetNotFoundError,
   resolveDefaultsForTool,
@@ -124,6 +138,22 @@ export interface LaunchRoleEvidence {
   injectionFingerprint: string | null;
 }
 
+/**
+ * Whether the role was seen applied to this generation (Issue #4385, Antigravity
+ * only). The positive record is `confirmed`; every other state, and no record at
+ * all, is "not confirmed" and the send gate refuses on it.
+ */
+export type RoleApplicationState = 'starting' | 'unknown' | 'confirmed' | 'refused';
+
+interface RoleApplication {
+  state: RoleApplicationState;
+  /** Moves on every change, so an observation begun before a change changes nothing (D6). */
+  version: number;
+  refusal: { reason: 'not-applied' | 'not-confirmed'; cause: AntigravityRoleCause; toolName: string | null } | null;
+  /** When the first send of this generation reached the gate; the grace counts from here. */
+  graceStartedAt: number | null;
+}
+
 /** With what the launch composed from, which may hold the user's values and stays in here. */
 interface StoredLaunchRoleEvidence extends LaunchRoleEvidence {
   composition: RoleComposition | null;
@@ -131,6 +161,13 @@ interface StoredLaunchRoleEvidence extends LaunchRoleEvidence {
   resumedAcrossRole: boolean;
   /** Whether a send's answer has said so already. */
   resumeNoticeTaken: boolean;
+  /** Issue #4385: Antigravity with a role only; null for everything else. */
+  application: RoleApplication | null;
+  /** The agent's name and file this generation was launched with (Antigravity). */
+  artifactName: string | null;
+  artifactPath: string | null;
+  /** The launch that opened this generation, so a late confirmation records `launched` for it (C10). */
+  launch: LaunchRoleStore | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -565,12 +602,18 @@ function openGeneration(store: LaunchRoleStore): void {
     store.previousFingerprint = getLatestRoleLaunchRecords(db, target.worktreeId, instanceId).requested?.injectionFingerprint ?? null;
   }
   store.generation = randomUUID();
+  const antigravity = store.snapshot.injection?.adapter === 'antigravity';
   evidenceMap().set(evidenceKey(store.snapshot.target), {
     sessionGeneration: store.generation,
     injectionFingerprint: store.snapshot.injectionFingerprint,
     composition: store.snapshot.composition,
     resumedAcrossRole: false,
     resumeNoticeTaken: false,
+    // Issue #4385: a new generation starts unconfirmed. Opening it is not a confirmation.
+    application: antigravity ? { state: 'starting', version: 0, refusal: null, graceStartedAt: null } : null,
+    artifactName: antigravity ? store.prepared?.artifact.name ?? null : null,
+    artifactPath: antigravity ? store.prepared?.artifact.path ?? null : null,
+    launch: antigravity ? store : null,
   });
   recordPhase(store, 'requested');
 }
@@ -722,10 +765,308 @@ export async function settleLaunchRole(checks: LaunchRoleChecks): Promise<void> 
       return;
     }
     case 'command-code':
-    case 'antigravity':
       // No way to confirm yet (§14), so `launched` stays unknown.
       return;
+    case 'antigravity':
+      // Issue #4385: the driver reads its own screen at the end of its launch
+      // ({@link observeLaunchRoleApplication}) and a send's gate keeps reading
+      // it; `launched` is written when one of them sees the role.
+      return;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity: the positive record and the send gate (Issue #4385)
+// ---------------------------------------------------------------------------
+
+/** What one read of the screen says about the role. */
+export type RoleApplicationObservation =
+  | { kind: 'confirmed' }
+  | { kind: 'not-applied'; cause: AntigravityRoleCause; toolName?: string | null }
+  /** The screen could not be read. */
+  | { kind: 'unreadable' }
+  /** Read, and it proves nothing yet. */
+  | { kind: 'undetermined' };
+
+/** A copy of one generation's application, to compare against later. */
+export interface RoleApplicationView {
+  generation: string;
+  injectionFingerprint: string | null;
+  state: RoleApplicationState;
+  version: number;
+  refusal: RoleApplication['refusal'];
+  graceStartedAt: number | null;
+  artifactName: string | null;
+  artifactPath: string | null;
+}
+
+function viewOf(stored: StoredLaunchRoleEvidence): RoleApplicationView | null {
+  const { application } = stored;
+  if (application === null) return null;
+  return {
+    generation: stored.sessionGeneration,
+    injectionFingerprint: stored.injectionFingerprint,
+    state: application.state,
+    version: application.version,
+    refusal: application.refusal === null ? null : { ...application.refusal },
+    graceStartedAt: application.graceStartedAt,
+    artifactName: stored.artifactName,
+    artifactPath: stored.artifactPath,
+  };
+}
+
+/**
+ * The application of the process now known for `target`, or null when there is
+ * none: no evidence (a stop, a server restart) or a generation launched without
+ * the role. Null is never a permission.
+ */
+export function readRoleApplication(target: LaunchRoleTarget): RoleApplicationView | null {
+  const stored = evidenceMap().get(evidenceKey(target));
+  return stored ? viewOf(stored) : null;
+}
+
+/**
+ * Change one generation's application from what an observation saw, only when
+ * the generation and the version are still those the observation began with
+ * (compare-and-set). `confirmed` and `refused` are final for a generation: a
+ * late positive reading never turns a refusal back into a confirmation.
+ *
+ * @returns The application after the call (the current one when nothing changed), or null
+ */
+export function applyRoleApplicationObservation(
+  target: LaunchRoleTarget,
+  seen: { generation: string; version: number },
+  observation: RoleApplicationObservation
+): RoleApplicationView | null {
+  const stored = evidenceMap().get(evidenceKey(target));
+  if (!stored) return null;
+  const application = stored.application;
+  if (
+    application === null ||
+    stored.sessionGeneration !== seen.generation ||
+    application.version !== seen.version ||
+    (application.state !== 'starting' && application.state !== 'unknown')
+  ) {
+    return viewOf(stored);
+  }
+  switch (observation.kind) {
+    case 'confirmed':
+      application.state = 'confirmed';
+      application.version += 1;
+      // What the launch resolved and wrote, and never the latest settings (C10).
+      // A record that cannot be written changes nothing about the permission.
+      if (stored.launch !== null && stored.launch.generation === seen.generation) recordPhase(stored.launch, 'launched');
+      break;
+    case 'not-applied':
+      application.state = 'refused';
+      application.version += 1;
+      application.refusal = { reason: 'not-applied', cause: observation.cause, toolName: observation.toolName ?? null };
+      break;
+    case 'unreadable':
+      if (application.state !== 'unknown') {
+        application.state = 'unknown';
+        application.version += 1;
+      }
+      break;
+    case 'undetermined':
+      break;
+  }
+  return viewOf(stored);
+}
+
+/**
+ * Start this generation's grace with the first send that reaches the gate.
+ *
+ * @returns When it started, or null when `generation` is not the current one
+ */
+export function startRoleApplicationGrace(target: LaunchRoleTarget, generation: string, now: number): number | null {
+  const stored = evidenceMap().get(evidenceKey(target));
+  if (!stored?.application || stored.sessionGeneration !== generation) return null;
+  stored.application.graceStartedAt ??= now;
+  return stored.application.graceStartedAt;
+}
+
+/** The grace ran out: `refused(not-confirmed)`, by the same compare-and-set. */
+export function expireRoleApplication(
+  target: LaunchRoleTarget,
+  seen: { generation: string; version: number }
+): RoleApplicationView | null {
+  const stored = evidenceMap().get(evidenceKey(target));
+  if (!stored) return null;
+  const application = stored.application;
+  if (
+    application !== null &&
+    stored.sessionGeneration === seen.generation &&
+    application.version === seen.version &&
+    (application.state === 'starting' || application.state === 'unknown')
+  ) {
+    application.state = 'refused';
+    application.version += 1;
+    application.refusal = { reason: 'not-confirmed', cause: 'grace-expired', toolName: null };
+  }
+  return viewOf(stored);
+}
+
+/**
+ * Read the screen once at the end of an Antigravity launch, in its scope, and
+ * keep what it proves (D2 "起動の中"). Does nothing for a reused process, a stale
+ * launch or a launch without the role. Never throws and never stops anything:
+ * a screen that proves nothing leaves the generation `starting` / `unknown` for
+ * the next send's gate.
+ *
+ * @param observe - Reads the pane and judges it against the agent's name
+ */
+export async function observeLaunchRoleApplication(
+  observe: (artifactName: string) => Promise<RoleApplicationObservation>
+): Promise<void> {
+  const store = scope().getStore();
+  if (!store || store.generation === null || isStale(store)) return;
+  const target = store.snapshot.target;
+  const view = readRoleApplication(target);
+  if (view === null || view.generation !== store.generation || view.artifactName === null) return;
+  let observation: RoleApplicationObservation;
+  try {
+    observation = await observe(view.artifactName);
+  } catch {
+    observation = { kind: 'unreadable' };
+  }
+  if (isStale(store)) return;
+  applyRoleApplicationObservation(target, view, observation);
+}
+
+/** Which of the refusal's two reasons a cause is. */
+function reasonOf(cause: AntigravityRoleCause): 'not-applied' | 'not-confirmed' {
+  return cause === 'unknown-tool' || cause === 'not-started' || cause === 'role-not-selected' ? 'not-applied' : 'not-confirmed';
+}
+
+/** The refusal of an Antigravity send for `cause`; nothing was typed. */
+export function antigravityRoleRefusal(detail: AntigravityRoleRefusalDetail): RoleLaunchRefusedError {
+  return new RoleLaunchRefusedError(reasonOf(detail.cause), describeAntigravityRoleRefusal(detail));
+}
+
+/** Whether the send gate covers a target, from the persistent role settings (D2). */
+export type RoleSendTarget =
+  /** The settings give it a role: a body goes only on a confirmed generation. */
+  | { kind: 'role' }
+  /** The settings could not be read: refused. */
+  | { kind: 'unreadable' }
+  /**
+   * No role, so the gate does not apply. `stillNone` reads the settings again,
+   * synchronously, right before the body (R4): a role set meanwhile refuses that
+   * body, and the next send is gated.
+   */
+  | { kind: 'none'; stillNone: () => boolean };
+
+const ALWAYS_NONE: RoleSendTarget = { kind: 'none', stillNone: () => true };
+
+/**
+ * Whether the send gate covers `target`, from the persistent role settings and
+ * never from what is remembered about the process (evidence, a refusal): those
+ * go away on a stop, a failed stop or a server restart, and their absence must
+ * not take the target out of the gate (§0.1).
+ *
+ * PR1: only while Antigravity's switch is on. With it off a role cannot be
+ * launched at all, and sends stay as they were.
+ */
+export async function resolveRoleSendTarget(target: LaunchRoleTarget): Promise<RoleSendTarget> {
+  if (!isAgentRoleCliTool(target.cliToolId)) return ALWAYS_NONE;
+  const adapter = target.cliToolId;
+  const enabled = (): boolean => isAgentRoleAdapterEnabled(adapter);
+  if (!enabled()) return { kind: 'none', stillNone: () => !enabled() };
+  let db: Database.Database | null;
+  try {
+    db = launchRoleDatabase();
+    if (db === null) return ALWAYS_NONE;
+    if (!hasAnyRoleSetting(db)) {
+      // The one input of this answer: no setting exists anywhere.
+      const settled = db;
+      return { kind: 'none', stillNone: () => noRoleSettingNow(settled) };
+    }
+  } catch (error) {
+    logger.warn('role-send-target-unreadable', { error: error instanceof Error ? error.message : String(error) });
+    return { kind: 'unreadable' };
+  }
+  const unread: RoleEnvReader = async () => undefined;
+  for (let attempt = 0; attempt < SEND_TARGET_ATTEMPTS; attempt += 1) {
+    const before = readResolutionInputs(db, target);
+    if (before === null) return { kind: 'unreadable' };
+    // The worktree is looked up by id; the path is read only to compose, and nothing is composed here.
+    const snapshot = await resolveLaunchRole(db, { ...target, worktreePath: '', readEnv: unread, composition: {} });
+    // What the answer was read from moved during the wait: ask again.
+    if (readResolutionInputs(db, target) !== before) continue;
+    if (snapshot.resolution?.kind === 'role') return { kind: 'role' };
+    if (snapshot.refusal === null && snapshot.resolution?.kind === 'none') {
+      const settled = db;
+      return { kind: 'none', stillNone: () => !enabled() || readResolutionInputs(settled, target) === before };
+    }
+    return { kind: 'unreadable' };
+  }
+  return { kind: 'unreadable' };
+}
+
+/** How many times the gate asks again when the settings moved while it resolved them. */
+const SEND_TARGET_ATTEMPTS = 3;
+
+function noRoleSettingNow(db: Database.Database): boolean {
+  try {
+    return !hasAnyRoleSetting(db);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Everything the resolution of `target` is read from, in one synchronous read
+ * (review 5-2b of PR1): the instance's own setting, the system default, every
+ * registered root (id, path, enabled: what membership is built from, as
+ * `resolve.ts` compares it) with its default for the tool, and the worktree's
+ * paths. Git's own answers cannot be read without waiting; everything this
+ * server can change is here. Null when it cannot be read.
+ */
+function readResolutionInputs(db: Database.Database, target: LaunchRoleTarget): string | null {
+  try {
+    const worktree = getWorktreeById(db, target.worktreeId);
+    const instanceId = target.instanceId ?? target.cliToolId;
+    return JSON.stringify([
+      worktree ? [worktree.path, worktree.repositoryPath] : null,
+      getInstanceRoleState(db, target.worktreeId, instanceId),
+      getSystemRoleDefaults(db)[target.cliToolId]?.roleId ?? null,
+      getAllRepositories(db).map((root) => [
+        root.id,
+        root.path,
+        root.enabled,
+        getRepositoryRoleStates(db, root.id)[target.cliToolId] ?? null,
+      ]),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The check right before the body of a gated send (D2 門の置き場所 3): the
+ * generation the gate decided on is still the current one, is `confirmed`, and
+ * injected what the gate saw. Synchronous, so nothing can change in between.
+ * The absence of a refusal is never a condition here.
+ *
+ * @throws {RoleLaunchRefusedError} Anything else; the body is not typed
+ */
+export function assertRoleSendBoundary(
+  target: LaunchRoleTarget,
+  expected: { generation: string; injectionFingerprint: string | null }
+): void {
+  const view = readRoleApplication(target);
+  if (view === null) throw antigravityRoleRefusal({ cause: 'no-record' });
+  const named = { artifactName: view.artifactName, artifactPath: view.artifactPath };
+  if (view.generation !== expected.generation) throw antigravityRoleRefusal({ cause: 'replaced', ...named });
+  if (view.state !== 'confirmed') {
+    throw antigravityRoleRefusal({
+      cause: view.refusal?.cause ?? 'grace-expired',
+      toolName: view.refusal?.toolName ?? null,
+      ...named,
+    });
+  }
+  if (view.injectionFingerprint !== expected.injectionFingerprint) throw antigravityRoleRefusal({ cause: 'replaced', ...named });
 }
 
 // ---------------------------------------------------------------------------
