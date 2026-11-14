@@ -2,7 +2,7 @@
 
 - 正本: Issue #4385 の本文、実機の記録 `dev-reports/issue/agy-role-2026-11-14/report.md`（主のチェックアウトにある。初回と「再確認」の節、`evidence/` の各ファイル）
 - 前の設計: [agent-roles-adapters.md](./agent-roles-adapters.md) §6.6（agy 1.4.12 の一時ホームでの実測）
-- 事前レビュー（2-4-4）と原因調査（主のチェックアウトの `workspace/orchestration/runs/2026-11-14/`）: 1 回目 `prereview-4385-reply.md`、2 回目 `prereview-4385-2-reply.md`（R1・R2）、原因調査 `enabler-return-4385-cause.md`（codex-2、推奨 A）、3 回目 `prereview-4385-3-reply.md`（R3。「不在を免除に変える」の同じ種類の 3 回目）。第 4 版はリーダーの処分（再指示 3）で、送信の判定を「拒否の記録」から「許可の記録」へ反転した（§12）
+- 事前レビュー（2-4-4）と原因調査（主のチェックアウトの `workspace/orchestration/runs/2026-11-14/`）: 1 回目 `prereview-4385-reply.md`、2 回目 `prereview-4385-2-reply.md`（R1・R2）、原因調査 `enabler-return-4385-cause.md`（codex-2、推奨 A）、3 回目 `prereview-4385-3-reply.md`（R3。「不在を免除に変える」の同じ種類の 3 回目）、4 回目 `prereview-4385-4-reply.md`（R4）。第 4 版はリーダーの処分（再指示 3）で、送信の判定を「拒否の記録」から「許可の記録」へ反転した（§12）。第 5 版は PR1 の実装の契約で、R4 の処分（対象外の判定も本文の直前で読み直す）と P3 の補足を入れた
 - この文書の書き方: **事実**（実測・実コード・agy の同梱文書で確かめたもの）と**見立て**（確かめていないもの）を分けて書く。見立てには「見立て」「未確認」と書く
 - この設計ではコードを書かず、agy のセッションも起動していない。読んだのは `agy --version`・`agy --help`・`agy help agent`・`agy changelog` の出力と、`~/.gemini` の一覧（読むだけ）
 - 行番号は develop `ff13eeace` の時点
@@ -101,7 +101,8 @@ read_file, run_command, manage_task, send_message, schedule, invoke_subagent, de
 - 新しい関数（例 `resolveRoleSendTarget(target, worktreePath)`）が 3 値を返す: `role`（設定がロールを与える）／`none`（与えない）／`unreadable`（DB が読めない、所属が曖昧、解決の拒否）
 - 中身は既存の解決（`role-launch.ts:235` の `resolveLaunchRole`、`settingsGiveRole` と同じ入力）。ロールの設定が DB のどこにも無ければ同期に `none`（`role-launch.ts:348` の `hasAnyRoleSetting` の速い道と同じ）
 - `role` と `unreadable` は門の対象。`none` だけが対象外
-- PR1 の間だけ、対象は「`role` かつスイッチが有効」とする（スイッチが無効なら Antigravity はロールつきで起動できないので、今の動きを変えない）。PR2 でスイッチを消すと、対象は §0.1 の形（設定だけ）になる
+- PR1 の間だけ、対象は **`enabled && (role || unreadable)`** とする（`enabled` はスイッチが有効なこと。無効なら設定の有無にかかわらず今の動きのまま。スイッチが無効なら Antigravity はロールつきで起動できないので、今の動きを変えない）。PR2 でスイッチを消すと、対象は §0.1 の形（設定だけ）になる
+- **対象外（`none`）の判定にも有効期間がある（R4、第 5 版）:** `none` と決めた送信も、本文を入れる直前（下の「門の置き場所」の 2 の境界）で、判定に使った永続の設定を同期に読み直す（ロールの設定がどこにも無かったか、読んだ所属で解決し直して `none` のままか）。設定が変わっていれば（読めないときも）その送信は未送信で拒否し（分類「送信の途中で設定が変わった」、理由 `not-confirmed`）、次の send に委ねる（次の send は門の対象として判定される）。設定を変えなければロールなしで本文 1（今と同じ）。設定の書き込みを入力のロックに入れる改修はしない
 
 #### 正の記録
 
@@ -130,7 +131,7 @@ read_file, run_command, manage_task, send_message, schedule, invoke_subagent, de
 
 #### 猶予（60 秒）
 
-- 起動の中（`settleLaunchRole`、`role-launch.ts:687`）: `waitForReady` が返った後に画面を 1 回読み、決められれば `confirmed` か `refused(not-applied)`。決められなければ `starting`／`unknown` のまま起動を返す。起動は throw しない。追加の待ちは足さない
+- 起動の中（`settleLaunchRole`、`role-launch.ts:687`）: `waitForReady` が返った後に画面を 1 回読み、決められれば `confirmed` か `refused(not-applied)`。決められなければ `starting`／`unknown` のまま起動を返す。起動は throw しない。追加の待ちは足さない。**実装（第 5 版）:** 画面の判定は driver が持つ（入力欄の構造の読み取りは `antigravity.ts` にあり、`role-launch.ts` から読むと循環する。`settleLaunchRole` に読み手を渡す `base.ts` は PR1 の範囲の外）ので、driver の `launchSession` の最後（`waitForReady` の後、同じ起動の scope の中）で `role-launch.ts` の `observeLaunchRoleApplication` を呼ぶ。時点と規則は同じ
 - 送信の門（`antigravity.ts:565` の `sendMessage`、`waitForPrompt` の中）: `starting`／`unknown` なら、`waitForPrompt` と**同じ待ちの中で**（足し算にしない）1 秒ごとに読み直す。猶予は `ANTIGRAVITY_STARTUP_PROMPT_WAIT_TIMEOUT_MS`（60 秒、`antigravity.ts:109`）で、**この世代で最初に門に来た send の開始から数える**。切れたら `refused(not-confirmed)`
 - 繰り越した信頼の Enter は既存のとおり 1 回だけ打ち、その後の画面で判定を続ける
 - `confirmed` でも、信頼の画面・生成中・モデルの選択の画面なら本文は送らない。ready になってから 1 回
@@ -139,7 +140,7 @@ read_file, run_command, manage_task, send_message, schedule, invoke_subagent, de
 
 1. **driver の中:** `sendMessage` の `requireSession`（`antigravity.ts:573`）の後、`waitForPrompt` の前と中。まず対象を判定し（`none` なら今と同じ）、対象なら上の状態で待つか拒否する。通常の send・契約の送信・ロール条件つきの send・起こし直しの後の send がすべて通る
 2. **本文を実際に入れる境界:** 共有の sender の本文の直前、`noteInputStart()` を呼ぶ 2 か所（打鍵 `src/lib/cli-tools/submit-verified-sender.ts:779`、長文の貼り付け `submit-verified-sender.ts:269`）。引数 `SubmitVerifiedSendParams`（定義は `src/lib/cli-tools/submit-verified-sender-shared.ts:112`。二重に定義しない）に省略可能な同期の確認 `beforeBody` を足し、`noteInputStart()` の直前で呼ぶ。throw したら本文を入れない（長文は buffer を捨ててから上げる）。driver が自分で渡すので、`src/lib/session/send-user-message.ts:654` の `observeInputStart` を通らない直接の呼び出しでも効く。既存の入力の ticket・ロール条件の境界（`send-role.ts:297`、`instance-input-lock.ts:825`）は残す
-3. **境界の確認（同期）:** driver が門で決めた世代 G について、(a) 今の証拠があり generation が G、(b) G の `application` が `confirmed`、(c) G の注入 fingerprint が門で見たものと同じ。1 つでも外れたら本文 0 で未送信の拒否。**「拒否の記録が無い」はどこにも条件に入れない**
+3. **境界の確認（同期）:** driver が門で決めた世代 G について、(a) 今の証拠があり generation が G、(b) G の `application` が `confirmed`、(c) G の注入 fingerprint が門で見たものと同じ。1 つでも外れたら本文 0 で未送信の拒否。**「拒否の記録が無い」はどこにも条件に入れない**。門が `none`（対象外）と決めた送信では、同じ境界で設定を同期に読み直し、`none` のままでなければ本文 0 で未送信（R4、上の「門の対象の判定」）。最初の判定を閉包に残して境界で使わない
 4. **Auto-Yes の応答キーと `respond` は本文ではないので門の外**（決定。§9 Q7）。「本文 0」は「全キー・全操作 0」ではない
 
 #### 設定の変更と門
@@ -147,6 +148,7 @@ read_file, run_command, manage_task, send_message, schedule, invoke_subagent, de
 - 動いている間にロールの設定が**無くなった**（`none`）: 門の対象外になり送れる（利用者が外した。プロセスが旧いロールを持っていても害は無い）
 - 動いている間に**別のロール**に変わった: 正の記録は起動したときの注入に対するものなので、門は通す。既存のとおり「再起動待ち」と表示する（他の adapter と同じ）
 - ロールなしで動いていたセッションに、後からロールを設定した: 正の記録が無いので拒否（§1 の影響の表）
+- 送信の途中（門が `none` と決めた後、本文の前の await の間）にロールが設定された: その送信は未送信で拒否し、次の send に委ねる（R4）。本文が設定の変更より前に既に入っていた送信は、送信済みのまま（未送信に書き換えない）
 
 #### 未送信の拒否の文面と届く先
 
@@ -262,6 +264,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | role | 旧い世代の証拠 → 確実な停止 → 新しい起動 H | H で確認の後にある | send | 確認の後に 1 回 | 新しい |
 | unreadable | 任意 | — | send | 0（設定を読めなかった） | 残す |
 | none | 任意 | — | send | 今と同じ | 今と同じ |
+| none → 本文の前に role | 任意 | — | `none` の判定の後の await の間に設定が完了 | 0（設定が変わった。次の send に委ねる） | 残す |
 | 任意 | 待ちの間に世代が入れ替わった | — | — | 0（既存の「入れ替わった」） | 後継に触らない |
 
 ## 6. 外部の呼び出しごとの失敗の倒れ方
@@ -271,6 +274,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | `~/.gemini/config/agents/` への書き込み | 0600 の新規、または同じバイトの再利用 | 書けない・別の中身・symlink・権限 → `artifact-failed` | **起動を止める**（既存。ペインの前） |
 | `agy agent`（一覧） | exit 0 で名前の行 | 無い／非 0／10 秒／64 KiB 超／`agy` が無い → `artifact-failed` | **起動を止める**（ペインの前） |
 | 設定の解決（門の対象の判定） | `role`／`none` | DB の失敗・曖昧・拒否 → `unreadable` | **本文を止める** |
+| 設定の読み直し（`none` の送信の本文の直前、同期） | `none` のまま | 変わった・読めない | **本文を止める**（次の send に委ねる） |
 | agy の起動（TUI） | 状態の行に名前 → 正の記録 | 明確な不適用・猶予切れ | **本文を止める。プロセスは残す** |
 | 画面の取得 | 画面 | 取れない → `unknown`、猶予の中で読み直す | **本文を止める** |
 | `agy --version` | `x.y.z` | 非 0・5 秒・形が違う → 「不明」 | **進める**（文面だけ） |
@@ -317,7 +321,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | Z5 | forget の後（`starting`／`unknown` から） | Z1・Z2 の後に人が停止 → kill が throw してペインは生きている → API が forget と起動中の解除 → 動いているプロセスへ再接続して send（R3 の中心） |
 | Z6 | forget の後（`refused` から） | Z3 の後に同じ停止の失敗（R1） |
 | Z7 | サーバーの再起動の後 | 証拠のメモリを空にして（試験用のリセット）、動いているプロセスへ send |
-| Z8 | ロールなしで動いていたセッションに後からロールを設定 | ロールなしで起動 → 設定 → send |
+| Z8 | ロールなしで動いていたセッションに後からロールを設定 | ロールなしで起動 → 実の roles API で設定 → send。**R4:** `none` の判定の後の await の間（共有の sender の画面の取得、長文の `load-buffer`）に実の roles API で設定が完了 → 実の driver → 共有の sender。短文・長文とも本文 0・本文の Enter 0・未送信（`not_sent`）。ロールの設定がどこにも無い（速い道）と、別の所に設定がある（所属を読む）の両方。設定を変えなければ本文 1 |
 | Z9 | 設定が読めない | DB の失敗・所属の曖昧を差し替え |
 | Z10 | 世代の入れ替わり | 門で G を見た後、本文の境界の前に起こし直して H にする（短文と長文の両方） |
 
@@ -326,6 +330,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 - 「正の記録が**ある**ことを、拒否の記録が**無い**ことに置き換える」 → Z5・Z7・Z8 が赤になる
 - 「門の対象を証拠の有無で決める」 → Z5・Z6・Z7 が赤になる
 - 「境界の同期の確認を外す」 → Z10 が赤になる
+- 「対象外という最初の判定を閉包に残す」（`none` の送信の境界で設定を読み直さない） → Z8 の R4 の行が赤になる
 
 ### 8.3 PR1: 正の記録がある場合と、その他の対照
 
@@ -340,7 +345,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | C9 | 一覧に名前あり＋登録に無い道具、状態の行の引用・古い scrollback・接頭辞の違う名前、画面に `error: <本文の印>` | 確認としない。本文 0。診断に本文の印が無い | 「200 行から名前を探す」「error 行をそのまま出す」 |
 | C10 | 遅い確認（門の中で `confirmed`） | `launched` が元の起動の `requested` と同じ世代・fingerprint で 1 行。DB の書き込みを失敗させても本文の可否は変わらない | 「最新の設定で記録を作る」 |
 | C11 | 未送信の拒否が応答に届く | send の応答に `roleRefusal`（`not-applied`／`not-confirmed`）と `sendOutcome: not_sent`、CLI の表示 | — |
-| C12 | 設定が `none`（ロールなし）、スイッチが無効（PR1 の既定） | 今と同じ（門も照合も呼ばない）。本文 1 | 「スイッチによらず門をかける」 |
+| C12 | スイッチが無効（PR1 の既定）で、設定が `none` と `role` の両方（ロールなしで動いているセッションに後から `role` を設定した場合を含む） | 今と同じ（門の対象外。正の記録を作らない）。どちらも本文 1。常に拒否する実装・スイッチを無視する実装は落ちる | 「スイッチによらず門をかける」 |
 | C13 | 動いている間に設定を別のロールに変える（正の記録あり） | 本文 1、「再起動待ち」の表示 | — |
 
 （第 3 版の C3 は Z5・Z6 に、C6 は PR2 の P7 に移した）
@@ -409,7 +414,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
   1. Z1〜Z10 がすべて本文 0・本文の Enter 0・未送信の理由あり・自動の Ctrl-D と kill 0。§8.2 の 3 つの変異でそれぞれ赤
   2. C1・C2・C4・C5・C7〜C13 が合格し、各変異で赤
   3. 正の記録があり ready なら本文 1（C7・C8・C10・C13）。常に拒否する実装では落ちる
-  4. スイッチが無効（既定）のとき、ロールの設定の有無にかかわらず今と同じ（C12、N1・N3 を PR1 でも走らせる）
+  4. スイッチが無効（既定）のとき、ロールの設定の有無にかかわらず今と同じ（C12 で `role`／`none` × 無効を展開する。有効の側は Z・C の各行。N1・N3 を PR1 でも走らせる）。PR1 で有効化済みの利用者に拒否が始まることと、サーバーの再起動の後に起動し直しが要ることは、§1 の影響の表のとおり「無影響」とは扱わず、PR1 の説明と CHANGELOG にも残す
   5. 自動の Ctrl-D・kill を足していない（`git diff` で `killSession`・`requestExit` の新しい呼び出し 0）
   6. 既存の試験の期待値は §8.5 の PR1 の 1 件の扱いを除いて変えない
 - 規模（見立て）: src 6・試験 5〜7 本、数百行
@@ -453,6 +458,8 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | 同: PR1 の影響の記述 | 4 | §1 の影響の表、§7 |
 | 同: 試験の番号の欠番 | 4 | §8 を振り直した（P1〜P12、N1〜N7、Z1〜Z10、C の移動の注） |
 | 再起動の例外 E1 | 3・4 | 第 3 版で例外として明記、第 4 版で無くなった（代償は §1 の影響の表と Q8） |
+| R4 対象外（`none`）の判定が本文の前の設定の変更を越えて残る | 5 | D2 の門の対象の判定・門の置き場所 3・設定の変更と門、§5.2、§6、Z8 と必須の変異（リーダーの処分: 本文の直前で同期に読み直し、変わっていれば未送信で次の send へ） |
+| 再レビュー 4 §6 の P3: 対象の表現・C12 の展開・PR1 の影響 | 5 | D2 の門の対象の判定（`enabled && (role \|\| unreadable)`）、C12、§10 PR1 の受入 4 |
 
 ## 13. この設計で確かめたこと
 
@@ -467,4 +474,5 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 
 - 2026-11-14 第 2 版: 1 回目の事前レビュー（P2 4・P3 3）を反映。適用の 4 状態と送信の門、D3 を新しいプロセスの分岐へ、D6、診断と子の範囲、CLI の警告を残す
 - 2026-11-14 第 3 版: 再レビュー（R1・R2）と原因調査の推奨 A を採用。自動の kill を外す、拒否の寿命、境界の同期の確認、記録と許可の分離、保証の境界 E1、受入の言い換え、試験の C1〜C11、PR を 2 本に
+- 2026-11-14 第 5 版: PR1 の実装の契約。再レビュー 4 の R4 をリーダーの処分で反映（`none` の送信も本文の直前で設定を読み直す。Z8 の割込みと変異）、P3 の補足（対象の表現の統一、C12 の展開、PR1 の影響）、起動の中の確認を driver の `launchSession` の最後で行う実装の注
 - 2026-11-14 第 4 版: 再レビュー 3（R3、同じ種類の 3 回目）にリーダーの処分で対応。送信の判定を正の記録の存在へ反転し（§0.1）、門の対象を永続の設定で決める。拒否の表と E1 を消し、影響の表・PR1 の影響・`SubmitVerifiedSendParams` の定義元・解除の時点の 1 表現・試験の Z1〜Z10 と変異・番号の振り直し（§12）
