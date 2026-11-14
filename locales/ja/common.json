@@ -380,7 +380,6 @@
     "personaNote": "OpenCode のペルソナ（build / plan など）とロールは別のものです。ペルソナは OpenCode の画面で切り替えるエージェントで、ロールは CommandMate が起動時に渡す指示です。",
     "replacesDefaultNote": "OpenCode V2 では、ロールがエージェントの既定の指示を置き換えます（足すのではありません）。",
     "resumedAcrossRoleNote": "前の会話を続けて起動したため、別のロールでの返答が履歴に残っています。新しい会話は次の起動時に始められます。",
-    "adapterDisabledNote": "このツールへのロールの適用はまだ有効ではありません。ロールが解決されると起動は拒否されます。",
     "unsupportedNote": "このツールはロールの対象外です。",
     "choice": {
       "inherit": "既定を使う",

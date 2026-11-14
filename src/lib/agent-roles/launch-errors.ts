@@ -24,11 +24,17 @@ export type RoleLaunchRefusalReason =
   | 'root-settings-differ'
   /** Git could not say whether a root that would disagree belongs to this repository. */
   | 'membership-undetermined'
-  /** A role was resolved, and this tool's adapter is not enabled (Antigravity, D3). */
+  /**
+   * A role was resolved, and this tool's adapter was not enabled (Antigravity before
+   * #4385). This server no longer says it; kept to read an older server's answer.
+   */
   | 'adapter-disabled'
   /** The user's settings the role has to be composed with could not be read or combined. */
   | 'composition-failed'
-  /** The generated file could not be written or did not pass its inspection. */
+  /**
+   * The generated file could not be written or did not pass its inspection, or
+   * (Antigravity, Issue #4385 D3) `agy agent` did not list it before the launch.
+   */
   | 'artifact-failed'
   /**
    * The CLI said it did not take the role (Copilot's `✗`), or Antigravity's

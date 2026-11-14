@@ -121,7 +121,7 @@ export const systemDefaultsExample: SystemRoleDefaultsResponse = {
       adapterEnabled: true,
       stored: { state: 'role', roleId: summary.id, roleName: summary.name },
     },
-    { cliToolId: 'antigravity', adapterEnabled: false, stored: { state: 'unset' } },
+    { cliToolId: 'antigravity', adapterEnabled: true, stored: { state: 'unset' } },
   ],
 };
 

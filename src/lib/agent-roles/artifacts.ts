@@ -56,6 +56,7 @@ import { getAntigravityHooksConfigPath } from '@/lib/hooks/sources/antigravity/h
 import { getCodexHome } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCopilotHomeDirectory } from '@/lib/hooks/sources/copilot/hook-settings';
 import type { AgentRoleCliTool } from '@/types/agent-roles';
+import { ANTIGRAVITY_ROLE_TOOLS } from './antigravity';
 import { computeFingerprint } from './fingerprint';
 import { renderTomlBasicDocument } from './toml-basic';
 
@@ -324,6 +325,9 @@ export function resolveArtifactLocation(
  */
 const DEFINITION_DESCRIPTION = 'CommandMate role';
 
+/** Antigravity's `tools` (Issue #4385 D1), one `  - <name>` row each. */
+const ANTIGRAVITY_TOOLS_BLOCK = `tools:\n${ANTIGRAVITY_ROLE_TOOLS.map((tool) => `  - ${tool}\n`).join('')}`;
+
 const COMMAND_CODE_PREFIX = 'export default function (cmd) {\n  cmd.hooks({ appendSystemPrompt: () => ';
 const COMMAND_CODE_SUFFIX = ' });\n}\n';
 
@@ -342,8 +346,9 @@ export function renderRoleArtifact(adapter: AgentRoleCliTool, name: string, inst
         'utf8'
       );
     case 'antigravity':
+      // `tools` as agy 1.5.8 was measured to take it (Issue #4385 D1): a block list.
       return Buffer.from(
-        `---\nname: ${name}\ndescription: ${DEFINITION_DESCRIPTION}\nsubagent: false\n---\n${instructions}`,
+        `---\nname: ${name}\ndescription: ${DEFINITION_DESCRIPTION}\nsubagent: false\n${ANTIGRAVITY_TOOLS_BLOCK}---\n${instructions}`,
         'utf8'
       );
     case 'command-code': {
@@ -367,6 +372,15 @@ function parseDefinition(text: string): { data: unknown; body: string } | null {
   } catch {
     return null;
   }
+}
+
+/** Whether `tools` is exactly {@link ANTIGRAVITY_ROLE_TOOLS}, in order (Issue #4385 D1). */
+function isAntigravityToolList(tools: unknown): boolean {
+  return (
+    Array.isArray(tools) &&
+    tools.length === ANTIGRAVITY_ROLE_TOOLS.length &&
+    tools.every((tool, index) => tool === ANTIGRAVITY_ROLE_TOOLS[index])
+  );
 }
 
 /** Why these bytes would not carry a role through this adapter, or null when they would. */
@@ -394,6 +408,9 @@ function formatProblem(adapter: AgentRoleCliTool, name: string, bytes: Buffer): 
       if (data.name !== name) return 'the frontmatter name is not this artifact';
       if (adapter === 'copilot' && data.infer !== false) return 'infer: false is missing';
       if (adapter === 'antigravity' && data.subagent !== false) return 'subagent: false is missing';
+      if (adapter === 'antigravity' && !isAntigravityToolList(data.tools)) {
+        return 'tools is not the list this build gives Antigravity';
+      }
       return definition.body.trim() === '' ? 'the definition has no body' : null;
     }
     case 'command-code': {

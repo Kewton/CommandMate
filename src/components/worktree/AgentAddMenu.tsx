@@ -462,11 +462,6 @@ export const AgentAddMenu = memo(function AgentAddMenu({
                 {roleSourceText(toolDefault.effective, true, tCommon)}
               </p>
             )}
-            {toolDefault && !toolDefault.adapterEnabled && (
-              <p data-testid="agent-add-role-adapter-off" className="text-xs text-warning">
-                {tCommon('agentRoles.adapterDisabledNote')}
-              </p>
-            )}
             {roleSettings && !toolDefault && (
               <p data-testid="agent-add-role-unsupported" className="text-xs text-muted-foreground">
                 {t('agentAdd.roleUnsupported')}

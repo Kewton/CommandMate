@@ -149,7 +149,6 @@ describe('[#4163] tests/setup.ts keeps no CM_* path from outside', () => {
     'CM_HOOK_PORT',
     'CM_REMOTE_PAIRING_FILE',
     'CM_OPENCODE_LOCAL_PROVIDER_CONFIG',
-    'CM_AGENT_ROLE_ANTIGRAVITY_ENABLED',
     // Issue #4176
     'CM_PORT',
     'MCBD_PORT',

@@ -123,7 +123,6 @@ export function RepositoryRoleDefaults({ repositoryId }: { repositoryId: string 
             >
               {roleSourceText(entry.effective, entry.stored.state === 'inherit', t)}
             </p>
-            {!entry.adapterEnabled && <p className="text-xs text-warning">{t('agentRoles.adapterDisabledNote')}</p>}
             {roleToolNoteKeys(entry.cliToolId).map((key) => (
               <p key={key} className="text-xs text-muted-foreground">
                 {t(key)}

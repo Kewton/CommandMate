@@ -16,6 +16,44 @@
 /** The agy version the role's screen and refusal were checked on (2026-11-14). */
 export const ANTIGRAVITY_ROLE_VERIFIED_VERSION = '1.5.8';
 
+/**
+ * The tools a generated agent definition names (D1), in this order. Without a
+ * `tools` list agy 1.5.8 starts the agent with none of them; with a name it does
+ * not register (`swarm`, for one) it stops with `unknown component: tool "x"`,
+ * exit 3. These 13 are the ones agy 1.5.8 registered, measured on 2026-11-14:
+ * `dev-reports/issue/agy-role-2026-11-14/report.md` (the 再確認 section),
+ * `evidence/r2-3-tool-registry-probe.txt` and `evidence/r2-4-dev-tools13.txt`.
+ * Narrowing them per role is out of scope (Q3).
+ */
+export const ANTIGRAVITY_ROLE_TOOLS = [
+  'read_file',
+  'run_command',
+  'manage_task',
+  'send_message',
+  'schedule',
+  'invoke_subagent',
+  'define_subagent',
+  'manage_subagents',
+  'write_file',
+  'edit_file',
+  'search_web',
+  'run_workflow',
+  'ask_question',
+] as const;
+
+/** The agy version {@link ANTIGRAVITY_ROLE_TOOLS} was measured on (2026-11-14). */
+export const ANTIGRAVITY_ROLE_TOOLS_VERIFIED_ON = '1.5.8';
+
+/**
+ * Whether `agy agent`'s answer lists `name` (D3): one agent per row (agy 1.5.8
+ * prints the names and nothing else), compared whole, so a name that only
+ * shares a prefix or a suffix does not count. A row's surrounding blanks are ignored.
+ */
+export function agentListNames(stdout: string, name: string): boolean {
+  if (name === '') return false;
+  return stdout.split(/\r?\n/).some((row) => row.trim() === name);
+}
+
 /** Which screen the driver found, with the status row it read on it. */
 export interface AntigravityRoleFrame {
   /**

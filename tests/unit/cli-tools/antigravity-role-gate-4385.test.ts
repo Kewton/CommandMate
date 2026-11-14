@@ -15,6 +15,10 @@
  *
  * Every refusal is counted as: body 0, Enter after a body 0, Ctrl-D 0, kill 0.
  *
+ * PR2 (§8.4): no switch is set anywhere; the gate applies from the settings
+ * alone, and `agy agent` (replaced here by a lister that reads the generated
+ * agents directory) is asked before a new process starts.
+ *
  * @vitest-environment node
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -195,6 +199,7 @@ import { setRepositoryEnabled } from '@/lib/db/db-repository';
 import {
   applyRoleApplicationObservation,
   expireRoleApplication,
+  forgetLaunchRoleEvidence,
   getLaunchRoleEvidence,
   readRoleApplication,
   resetLaunchRoleStateForTest,
@@ -208,9 +213,8 @@ import { fixedEnvReader } from '@/lib/agent-roles/composition';
 import { readRoleLaunchRefusal, ROLE_LAUNCH_REFUSED_CODE } from '@/lib/agent-roles/launch-errors';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
-import { AntigravityTool, setAgyVersionReaderForTest } from '@/lib/cli-tools/antigravity';
+import { AntigravityTool, setAgyAgentListerForTest, setAgyVersionReaderForTest } from '@/lib/cli-tools/antigravity';
 import { clearStartupTrust } from '@/lib/cli-tools/antigravity-startup-trust';
-import { AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR } from '@/types/agent-roles';
 import { POST as killSessionRoute } from '@/app/api/worktrees/[id]/kill-session/route';
 import { PUT as putInstanceRole } from '@/app/api/worktrees/[id]/instances/roles/route';
 import { answerSendFailure } from '@/app/api/worktrees/[id]/send/send-failure';
@@ -231,6 +235,12 @@ let tool: AntigravityTool;
 let rootId: string;
 
 type Outcome = { ok: true } | { ok: false; error: Error };
+
+/** What `agy agent` would print: one agent directory per row (the generated name is the directory's). */
+function listAgentsDir(): string {
+  const agents = path.join(dir, 'agy-agents');
+  return fs.existsSync(agents) ? fs.readdirSync(agents).map((name) => `${name}\n`).join('') : '';
+}
 
 /** The real `setImmediate`, taken before any test fakes the clock. */
 const realSetImmediate = setImmediate;
@@ -405,7 +415,9 @@ beforeEach(async () => {
     events: [],
     name: () => readRoleApplication(TARGET)?.artifactName ?? 'cm-role-unknown',
   });
-  vi.stubEnv(AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR, '1');
+  // PR2 (P12): no switch is set; the gate applies from the settings alone. agy's
+  // list is the agents directory, as agy reads it (D3).
+  setAgyAgentListerForTest(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR', path.join(dir, 'agy-agents'));
@@ -419,6 +431,7 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
   setAgyVersionReaderForTest(null);
+  setAgyAgentListerForTest(null);
   resetLaunchRoleStateForTest();
   resetSessionLaunchFlightsForTest();
   clearStartupTrust();
@@ -924,10 +937,10 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     expect(await answer.json()).toMatchObject({ code: ROLE_LAUNCH_REFUSED_CODE, roleRefusal: 'not-confirmed' });
   });
 
-  it('C12 switch off (the PR1 default): with a role set or not, sends are as before', async () => {
-    vi.unstubAllEnvs();
-    vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
-    vi.stubEnv('HOME', path.join(dir, 'home'));
+  // PR2 (D4): was "C12 switch off (the PR1 default): with a role set or not, sends are as
+  // before". The switch is gone, so what was its "off" is now the gate from the settings
+  // alone: no role set is as before, a role set afterwards is refused (§1, the impact table).
+  it('C12 (PR2) no switch: with no role sends are as before, a role set afterwards gates them', async () => {
     pane.afterLaunch = () => {
       pane.kind = 'idle';
       pane.agent = 'none';
@@ -935,11 +948,11 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     expect((await launch()).ok).toBe(true);
     pane.events = [];
     expectSent(await send(), 1);
-    // A role set afterwards does not gate it while the switch is off.
+    expect(readRoleApplication(TARGET)).toBeNull();
     setSystemRoleDefault(db, 'antigravity', roleId);
     pane.onCapture = async () => undefined;
-    expectSent(await send(), 2);
-    expect(readRoleApplication(TARGET)).toBeNull();
+    const error = expectNothingSent(await send(), 'not-confirmed', 1);
+    expect(error.message).toContain('no record');
   });
 
   it('C13 the role changed to another one while confirmed: the body goes (the running role waits for a restart)', async () => {
@@ -952,6 +965,205 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     await launchWithRole('idle', 'none');
     await setRoleThroughApi({ state: 'none' });
     expectSent(await send());
+  });
+});
+
+/**
+ * PR2 (§8.4): on by default, and `agy agent` asked before a new process starts.
+ * The list is replaced per test; the real child (`runAgyAgentList`: its exit
+ * code, time limit and size limit) runs in
+ * `tests/unit/agent-roles/antigravity-role-enable-4385.test.ts`.
+ */
+describe('P/N: on by default, listed before a new process (§8.4)', () => {
+  const lines = () => pane.events.filter((e) => e.type === 'line').map((e) => e.text);
+  type ListOptions = { command: string; cwd: string; env: NodeJS.ProcessEnv };
+  const lister = (answer: () => Promise<{ kind: 'listed'; stdout: string } | { kind: 'failed'; why: string }>) => {
+    const fn = vi.fn((_options: ListOptions) => answer());
+    setAgyAgentListerForTest(fn);
+    return fn;
+  };
+  /** Nothing of a launch was left: no pane, no line, no generation, no new record. */
+  function expectNoLaunch(outcome: Outcome, reason: string, requestedBefore: string | null = null): Error {
+    expect(outcome.ok, 'the launch must be refused').toBe(false);
+    const error = (outcome as { error: Error }).error;
+    expect(readRoleLaunchRefusal(error)).toBe(reason);
+    expect(pane.exists).toBe(false);
+    expect(lines()).toEqual([]);
+    expect(getLaunchRoleEvidence(TARGET)).toBeNull();
+    expect(getLatestRoleLaunchRecords(db, WT, 'antigravity').requested?.sessionGeneration ?? null).toBe(requestedBefore);
+    expect(error.message).not.toContain(BODY);
+    return error;
+  }
+
+  it('P4 no switch set: a role launches with `--agent <name>`, confirmed, then the body goes once', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    pane.afterLaunch = () => {
+      pane.kind = 'idle';
+    };
+    const outcome = await launch();
+    if (!outcome.ok) throw outcome.error;
+    const name = readRoleApplication(TARGET)?.artifactName as string;
+    expect(name).toMatch(/^cm-role-[a-z0-9-]+$/);
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0]).toContain(`--agent ${name}`);
+    expect(lines()[0]).not.toContain(BODY);
+    expect(listed).toHaveBeenCalledTimes(1);
+    expect(readRoleApplication(TARGET)?.state).toBe('confirmed');
+    expect(getLatestRoleLaunchRecords(db, WT, 'antigravity').requested?.adapterVersion).toBe('2');
+    pane.events = [];
+    expectSent(await send());
+  });
+
+  it('P5 a new process whose agent agy does not list: no pane, no line, no record, artifact-failed', async () => {
+    lister(async () => ({ kind: 'listed', stdout: 'some-other-agent\n' }));
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    const error = expectNoLaunch(await launch(), 'artifact-failed');
+    expect(error.message).toContain('does not list agent cm-role-');
+  });
+
+  it.each([
+    ['a non-zero exit', 'exit code 1'],
+    ['a timeout', 'no answer within 10 s'],
+    ['a list over 64 KiB', 'the list was longer than 65536 bytes'],
+    ['agy missing', 'agy could not be started'],
+  ])('P6 %s: no launch, artifact-failed, and only the cause is said', async (_case, why) => {
+    lister(async () => ({ kind: 'failed', why }));
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    const error = expectNoLaunch(await launch(), 'artifact-failed');
+    expect(error.message).toContain(why);
+  });
+
+  it('P6 a lister that throws is a refusal too, never a launch', async () => {
+    lister(async () => {
+      throw new Error('spawn ENOENT: SECRET_PATH_IN_ERROR');
+    });
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    const error = expectNoLaunch(await launch(), 'artifact-failed');
+    expect(error.message).not.toContain('SECRET_PATH_IN_ERROR');
+  });
+
+  it('P7 the session stopped while agy listed: session-stopped, no pane, no line, no record of the old request', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let asked = false;
+    lister(async () => {
+      asked = true;
+      await held;
+      return { kind: 'listed', stdout: listAgentsDir() };
+    });
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    let outcome: Outcome | null = null;
+    tool.startSession(WT, worktreePath, 'antigravity').then(
+      () => {
+        outcome = { ok: true };
+      },
+      (error: Error) => {
+        outcome = { ok: false, error };
+      }
+    );
+    await driveFakeClockUntil(() => asked || outcome !== null);
+    expect(asked).toBe(true);
+    // The human's stop, as the stop API ends: what was known is forgotten.
+    forgetLaunchRoleEvidence(TARGET);
+    release();
+    await driveFakeClockUntil(() => outcome !== null);
+    expectNoLaunch(outcome as unknown as Outcome, 'session-stopped');
+  });
+
+  it('P8 CM_UAT_ISOLATION=1: refused without running agy (the definition already there)', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle');
+    expect(listed).toHaveBeenCalledTimes(1);
+    // A person stops it; the next launch is a new process in UAT isolation.
+    const before = getLatestRoleLaunchRecords(db, WT, 'antigravity').requested?.sessionGeneration ?? null;
+    expect(before).not.toBeNull();
+    pane.exists = false;
+    forgetLaunchRoleEvidence(TARGET);
+    vi.stubEnv('CM_UAT_ISOLATION', '1');
+    const error = expectNoLaunch(await launch(), 'artifact-failed', before);
+    expect(error.message).toContain('CM_UAT_ISOLATION=1');
+    expect(listed).toHaveBeenCalledTimes(1);
+  });
+
+  it('P9 only names that share a prefix or a suffix: not listed', async () => {
+    lister(async () => {
+      const name = fs.readdirSync(path.join(dir, 'agy-agents'))[0];
+      return { kind: 'listed', stdout: `${name}x\nx${name}\n${name}-2\n` };
+    });
+    setSystemRoleDefault(db, 'antigravity', roleId);
+    expectNoLaunch(await launch(), 'artifact-failed');
+  });
+
+  it('P12 no switch anywhere: the gate applies from the settings alone (Z7 once more)', async () => {
+    await launchWithRole('idle');
+    expectSent(await send());
+    // A server restart: the record is gone, the settings still give the role.
+    resetLaunchRoleStateForTest();
+    setLaunchRoleDatabaseForTest(db);
+    const error = expectNothingSent(await send(), 'not-confirmed', 1);
+    expect(error.message).toContain('no record');
+  });
+
+  it('N1 no role set: the launch line is the plain one, agy is not asked, the body goes', async () => {
+    const listed = lister(async () => {
+      throw new Error('no role: agy must not be asked');
+    });
+    pane.afterLaunch = () => {
+      pane.kind = 'idle';
+      pane.agent = 'none';
+    };
+    expect((await launch()).ok).toBe(true);
+    const plain = lines();
+    // Settings for another tool: the full resolution, still no role for this one.
+    pane.exists = false;
+    forgetLaunchRoleEvidence(TARGET);
+    pane.events = [];
+    setSystemRoleDefault(db, 'claude', roleId);
+    expect((await launch()).ok).toBe(true);
+    expect(lines()).toEqual(plain);
+    expect(plain[0]).not.toContain('--agent');
+    pane.events = [];
+    expectSent(await send());
+    expect(listed).not.toHaveBeenCalled();
+  });
+
+  it('N4 a live process is reconnected, and agy is not asked (the send gate still applies)', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle', 'none');
+    expect(listed).toHaveBeenCalledTimes(1);
+    const reconnect = lister(async () => {
+      throw new Error('a reconnect must not list');
+    });
+    expect((await launch()).ok).toBe(true);
+    expect(reconnect).not.toHaveBeenCalled();
+    expect(lines()).toEqual([]);
+    expectNothingSent(await send(), 'not-applied');
+  });
+
+  it('N5 a pane whose agy has ended: asked once; refused there, the line is not typed', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle');
+    pane.live = false;
+    const failing = lister(async () => ({ kind: 'failed', why: 'exit code 1' }));
+    const outcome = await launch();
+    expect(outcome.ok).toBe(false);
+    expect(readRoleLaunchRefusal((outcome as { error: Error }).error)).toBe('artifact-failed');
+    expect(listed).toHaveBeenCalledTimes(1);
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(lines()).toEqual([]);
+  });
+
+  it('N7 agy is asked in the worktree, with the PATH and HOME the pane gets', async () => {
+    const listed = lister(async () => ({ kind: 'listed', stdout: listAgentsDir() }));
+    await launchWithRole('idle');
+    const options = listed.mock.calls[0][0];
+    expect(options.command).toBe('agy');
+    expect(options.cwd).toBe(worktreePath);
+    expect(options.env.HOME).toBe(path.join(dir, 'home'));
+    expect(options.env.PATH).toBe(process.env.PATH);
   });
 });
 

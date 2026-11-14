@@ -174,8 +174,9 @@ read_file, run_command, manage_task, send_message, schedule, invoke_subagent, de
 - 判定: 出力の行に生成物の名前と完全に一致する行があれば通る。無い・非 0・時間切れ・起動できない → `RoleLaunchRefusedError('artifact-failed', …)`。理由は名前・パス・exit code・時間切れだけ
 - **D3 の成功は正の記録ではない**
 - 子の環境: cwd は worktree。`PATH`・`HOME` はペインが受け取る tmux の環境（`src/lib/agent-roles/pane-env.ts`）にあればそれ、無ければサーバーのもの。上限は 10 秒で SIGKILL、標準出力 64 KiB、標準エラー 4 KiB（理由に出さない）
-- 副作用（事実）: `agy agent` は `~/.gemini/antigravity-cli/` のログを 1 本増やす。ログ以外の変更が無いのは 1.4.12 の観測で、1.5.8 以後の保証ではない
-- `CM_UAT_ISOLATION=1`（`src/config/uat-isolation.ts`）: 子を起こす前に拒否する。`own-home` では照合する。`--log-file` が `agy agent` に効くかは**未確認**（§9 Q6）
+- 副作用（事実）: `agy agent` は `~/.gemini/antigravity-cli/` のログを 1 本増やす。ログ以外の変更が無いのは 1.4.12 の観測で、1.5.8 以後の保証ではない。**PR2 の受入（agy 1.5.9、一時ホーム、§13）:** 2 回目以後の `agy agent` も `antigravity-cli/log/cli-<時刻>.log` の追加に加えて `cli.log`・`conversation_summaries.db-shm`・`updater/update_status.json` を変える。空のホームでの初回は `builtin/` と `config/config.json`・`config/mcp_config.json`・`config/projects/default-cli-project.json`・`config/.migrated` を作る（agy 自身の初期化）
+- `CM_UAT_ISOLATION=1`（`src/config/uat-isolation.ts`）: 子を起こす前に拒否する。`own-home` では照合する。`--log-file` は `agy agent` のログを指定のファイルへ移すが、`conversation_summaries.db-shm` は変わる（PR2 の受入、agy 1.5.9。§9 Q6 の拒否を保つ）
+- **実装（PR2）:** D3 の拒否はすべて `role-launch.ts` の `assertLaunchRoleAgentListed` 1 つが行う（UAT・一覧に無い・非 0・時間切れ・64 KiB 超・起動できない・待ちの間の停止）。driver（`antigravity.ts` の `launchSession`）は `agy agent` を走らせて答えを渡すだけ。D3 がプロセスを起こさずに拒否するのは、ロールの注入がある起動で、再利用の分岐を抜けた（新しいペイン、またはペインに agy がいない）ときに限る
 
 ### D4 有効化のスイッチを消す（PR2）
 
@@ -471,8 +472,17 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 - `~/.gemini/config/agents`・`~/.gemini/agents` は今は無い
 - 第 3・4 版で読んだ実コード: `instance-input-lock.ts:795`・`:825`、`submit-verified-sender.ts:269`・`:779`、`submit-verified-sender-shared.ts:112`、`kill-session/route.ts:151`・`:198`、`send-user-message.ts:654`・`:677`、`send-failure.ts:82`、`role-launch.ts:157`（`launchRoleDatabase`）・`:769`（`settingsGiveRole`）
 
+### PR2 の受入 2（一時ホーム、2026-11-15）
+
+`os.tmpdir()` の下に一時ホームを作り（`HOME` を差し替え）、`~/.gemini/config/agents/cm-role-accept4385/agent.md`（この PR の生成物と同じ形、13 個の `tools`）を置いて 1 回ずつ実行した。本物の `~/.gemini` には書いていない。
+
+- `agy --version` → `1.5.9`（**手元の版は 1.5.8 ではなかった**。定数 `ANTIGRAVITY_ROLE_TOOLS_VERIFIED_ON` は 1.5.8 のまま。§9 Q1 のとおり版では止めない）
+- `HOME=<tmp> agy agent` → exit 0、標準出力 `cm-role-accept4385`（`config/agents` は 1.5.9 でも一覧に出る。§2 の #1 と Q4 の確認）
+- `HOME=<tmp> agy --log-file <tmp>/agy-list.log agent` → exit 0、同じ一覧。ログは指定のファイル（約 9.7 KB）に出て `antigravity-cli/log/` は増えず `cli.log` も変わらない。`conversation_summaries.db-shm` は変わる
+
 ## 改訂の履歴
 
+- 2026-11-15 PR2: D1・D3・D4・D5 の実装の注（D3 の拒否の 1 か所）、受入 2 の実測（agy 1.5.9）と `agy agent` の副作用・`--log-file` の結果を D3 と §13 に足した
 - 2026-11-14 第 2 版: 1 回目の事前レビュー（P2 4・P3 3）を反映。適用の 4 状態と送信の門、D3 を新しいプロセスの分岐へ、D6、診断と子の範囲、CLI の警告を残す
 - 2026-11-14 第 3 版: 再レビュー（R1・R2）と原因調査の推奨 A を採用。自動の kill を外す、拒否の寿命、境界の同期の確認、記録と許可の分離、保証の境界 E1、受入の言い換え、試験の C1〜C11、PR を 2 本に
 - 2026-11-14 第 5 版（再指示 1）: 5-2b の整合性レビューの P2 2 件。`none` の読み直しを解決の入力すべて（ルートの登録とリポジトリの既定を含む）の比較に、生成中の入力欄の状態行でも適用を確認する（ready と分ける）。Z8・C7 に行を足した

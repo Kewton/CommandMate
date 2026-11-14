@@ -85,6 +85,7 @@ import {
 } from '@/lib/agent-roles/composition';
 import { RoleLaunchRefusedError, type RoleLaunchRefusalReason } from '@/lib/agent-roles/launch-errors';
 import {
+  agentListNames,
   describeAntigravityRoleRefusal,
   type AntigravityRoleCause,
   type AntigravityRoleRefusalDetail,
@@ -96,12 +97,11 @@ import {
   type RoleRepositoryMembership,
   type RoleResolverDeps,
 } from '@/lib/agent-roles/resolve';
-import { UatIsolationLaunchRefusedError } from '@/config/uat-isolation';
+import { getUatIsolationMode, UatIsolationLaunchRefusedError } from '@/config/uat-isolation';
 import type { HeadlessRoleArguments } from '@/lib/session/claude-executor';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isUnderTest } from '@/lib/test-run-detection';
 import {
-  isAgentRoleAdapterEnabled,
   isAgentRoleCliTool,
   type AgentRoleCliTool,
   type RoleLaunchPhase,
@@ -327,15 +327,6 @@ export async function resolveLaunchRole(
   }
 
   const adapter = input.cliToolId as AgentRoleCliTool;
-  if (!isAgentRoleAdapterEnabled(adapter)) {
-    return refused(
-      db,
-      target,
-      'adapter-disabled',
-      `Roles are not enabled for ${adapter} yet; it has a role "${resolution.role.name}", so it was not started without it`,
-      resolution
-    );
-  }
 
   let composition: RoleComposition;
   try {
@@ -547,6 +538,65 @@ export function gateLaunchRole(): RoleLaunchRefusedError | null {
   } catch (error) {
     if (error instanceof RoleLaunchRefusedError) return error;
     throw error;
+  }
+}
+
+/** What `agy agent` answered (D3). Its stderr is never kept: it can quote anything. */
+export type AgentListOutcome =
+  | { kind: 'listed'; stdout: string }
+  /** Exit code, signal or limit only: never a row of agy's output. */
+  | { kind: 'failed'; why: string };
+
+/**
+ * Antigravity (Issue #4385 D3): before a new process is started for a launch with
+ * a role, `agy agent` has to list the generated agent. agy's TUI starts on its
+ * default agent when `--agent` names one it does not find, so without this a
+ * missing definition would run without the role.
+ *
+ * Every refusal D3 makes before a new process is made here, and only here: the
+ * driver runs `agy agent` and hands the answer in. Called by the driver after its
+ * reuse branch has returned (a reconnect is not listed) and before
+ * `beginAgentSession`, so a refusal leaves no pane, no launch line and no record.
+ * Under `CM_UAT_ISOLATION=1` agy is not run at all: it would write its log into
+ * the real home (Q6). Passing is not a confirmation of the role (the send gate
+ * still waits for the screen).
+ *
+ * @param list - Runs `agy agent` for this launch (cwd, env, limits are the driver's)
+ * @throws {RoleLaunchRefusedError} `artifact-failed` when it is not listed, or
+ *   `session-stopped` when the session was stopped or taken while agy ran
+ */
+export async function assertLaunchRoleAgentListed(list: () => Promise<AgentListOutcome>): Promise<void> {
+  const store = scope().getStore();
+  const prepared = store?.prepared ?? null;
+  if (!store || prepared === null || store.snapshot.injection?.adapter !== 'antigravity') return;
+  const { name, path } = prepared.artifact;
+  if (getUatIsolationMode() === 'shared-read-only') {
+    throw new RoleLaunchRefusedError(
+      'artifact-failed',
+      `CM_UAT_ISOLATION=1: agy is not asked to list agent ${name} (${path}), because it would write its log into the shared home`
+    );
+  }
+  const key = evidenceKey(store.snapshot.target);
+  const generationBefore = evidenceMap().get(key)?.sessionGeneration ?? null;
+  let outcome: AgentListOutcome;
+  try {
+    outcome = await list();
+  } catch {
+    outcome = { kind: 'failed', why: 'agy could not be started' };
+  }
+  // D6: the wait may have outlived this launch (a stop, or another launch that
+  // opened a generation). Nothing of it may reach the session.
+  if (isStale(store) || (evidenceMap().get(key)?.sessionGeneration ?? null) !== generationBefore) {
+    throw new RoleLaunchRefusedError('session-stopped', 'The session was stopped while agy listed its agents');
+  }
+  if (outcome.kind === 'failed') {
+    throw new RoleLaunchRefusedError('artifact-failed', `agy agent did not answer for agent ${name} (${path}): ${outcome.why}`);
+  }
+  if (!agentListNames(outcome.stdout, name)) {
+    throw new RoleLaunchRefusedError(
+      'artifact-failed',
+      `agy agent does not list agent ${name} (${path}), so agy would start without the role`
+    );
   }
 }
 
@@ -963,16 +1013,11 @@ const ALWAYS_NONE: RoleSendTarget = { kind: 'none', stillNone: () => true };
  * Whether the send gate covers `target`, from the persistent role settings and
  * never from what is remembered about the process (evidence, a refusal): those
  * go away on a stop, a failed stop or a server restart, and their absence must
- * not take the target out of the gate (§0.1).
- *
- * PR1: only while Antigravity's switch is on. With it off a role cannot be
- * launched at all, and sends stay as they were.
+ * not take the target out of the gate (§0.1). The settings alone decide (PR2,
+ * D4: no switch is read).
  */
 export async function resolveRoleSendTarget(target: LaunchRoleTarget): Promise<RoleSendTarget> {
   if (!isAgentRoleCliTool(target.cliToolId)) return ALWAYS_NONE;
-  const adapter = target.cliToolId;
-  const enabled = (): boolean => isAgentRoleAdapterEnabled(adapter);
-  if (!enabled()) return { kind: 'none', stillNone: () => !enabled() };
   let db: Database.Database | null;
   try {
     db = launchRoleDatabase();
@@ -997,7 +1042,7 @@ export async function resolveRoleSendTarget(target: LaunchRoleTarget): Promise<R
     if (snapshot.resolution?.kind === 'role') return { kind: 'role' };
     if (snapshot.refusal === null && snapshot.resolution?.kind === 'none') {
       const settled = db;
-      return { kind: 'none', stillNone: () => !enabled() || readResolutionInputs(settled, target) === before };
+      return { kind: 'none', stillNone: () => readResolutionInputs(settled, target) === before };
     }
     return { kind: 'unreadable' };
   }
