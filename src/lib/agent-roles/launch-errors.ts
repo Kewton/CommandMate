@@ -30,8 +30,18 @@ export type RoleLaunchRefusalReason =
   | 'composition-failed'
   /** The generated file could not be written or did not pass its inspection. */
   | 'artifact-failed'
-  /** The CLI said it did not take the role (Copilot's `✗`). */
+  /**
+   * The CLI said it did not take the role (Copilot's `✗`), or Antigravity's
+   * screen showed plainly that it runs without it (Issue #4385).
+   */
   | 'not-applied'
+  /**
+   * Antigravity (Issue #4385): nothing confirms the role on the process now
+   * running, so the body was not sent. Its grace ran out, the record of the
+   * confirmation is gone (a stop, a server restart, a role set afterwards), the
+   * settings could not be read, or they changed while the send was on its way.
+   */
+  | 'not-confirmed'
   /** The role could not be resolved at all. */
   | 'resolve-failed'
   /** The session was stopped while this start was still resolving its role. */
