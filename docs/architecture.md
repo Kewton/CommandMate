@@ -180,7 +180,10 @@ graph TD
   上端に来るツールでカードが空になる（`capture-pane` は `TUI_PANE_HEIGHT` = 1000 行を
   そのまま返す。実測は `tests/fixtures/chat-dialog-card-2254/README.md`）。
   `frame` に渡すのは `PaneTerminalState.output` で、`realtimeSnippet`（末尾 100 行）は
-  同じ理由で使えない
+  同じ理由で使えない。上端か下端かは alternate screen の有無で決まる: `ALTERNATE_SCREEN_CLI_TOOLS`
+  （`src/lib/cli-tools/types.ts`。claude / opencode / copilot / opencode-v2）は画面下端に描き、
+  使わない codex / gemini / vibe-local / antigravity / command-code は上から書くので、1000 行を
+  埋めていないペインでは内容の下に空行が残る
 - **答えが「方向」でなく「文字」の待ちのために `NAVIGATION_KEY_VALUES` へ `1`〜`9` / `y` / `n`
   を追加**（Issue #2254、`ANSWER_KEY_VALUES`）。`/special-keys` は宣言したツールの語彙で
   検証するので（Issue #2046）全ツールが受け付ける。自由文字列は通さず、`/send` の
@@ -967,5 +970,53 @@ graph TD
 ```
 
 > **補足**: History ペインの表示 / 幅は MVP では全 split 共通の `useHistoryPaneState` を参照する（per-split 独立の開閉・幅は将来の拡張余地）。
+
+⸻
+
+## 14. 実装上の制約と罠
+
+テストや型検査では見えず、実サーバ・実ペインでだけ表に出る制約をまとめる。個々のモジュールの詳細は [module-reference.md](./module-reference.md) を見る。
+
+### 14.1 server.ts の import
+
+- `server.ts` の top-level の静的 import に内部モジュールのグラフを足さない。`tsx server.ts`（`npm run dev`・E2E の webServer）で Next の AsyncLocalStorage の bootstrap より先に app-render 側が読まれ、middleware をコンパイルする**最初のリクエスト**で `Invariant: AsyncLocalStorage accessed in runtime where it is not available` により落ちる
+- 起動時処理が重い依存を引くときは、呼び出し点で `await import()` する（`app.prepare()` の後なので bootstrap を乱さない）。`runSkillStartupReconciliation`・`initSessionNamespace`・`resolveWorktreeAliasRedirect` が使う `worktree-redirect` などがこの形で、各所に「静的 import に戻さない」コメントがある。小さな処理は import せずインラインで書く（`x-cm-raw-url` の付け替えがこの形）
+- unit / integration / build / lint はこの経路を通らないので緑のまま。"Ready" まで起動しただけでも再現せず、`curl /` などリクエストを 1 本送って初めて落ちる。`server.ts` を触る PR の E2E 失敗は flaky と決めつけない
+
+### 14.2 dist/server に入るコードと ESM-only 依存
+
+- `server.ts` から import 連鎖でたどれる `src/lib/**`（例: `polling/response-poller` → `response-checker` → `push/push-sender`）は `tsconfig.server.json` で **CommonJS として `dist/server`** に出力され、`npm start` はそれを実行する
+- そのため ESM-only のパッケージ（`next-intl` など）を import できない。`require(esm)` は Node 22.12 以降で、`engines` が許す 22.0〜22.11 では `ERR_REQUIRE_ESM` でサーバ全体が起動しない（CI の最新 22.x では緑のまま通る）
+- 背景処理（poller から送る push 通知など）はリクエストスコープも持たないので、`next-intl/server` の `getTranslations` も使えない。文言は `locales/<lang>/*.json` を静的 import し、`{param}` を自前で置換する（`push-sender.ts`・`model-change-push-notifier.ts`）。JSON は `resolveJsonModule: true` で `dist/server/locales/` へ出力され、それが配布物に入る（リポジトリ直下の `locales/` は `package.json` の `files` に無い）
+- あるモジュールが連鎖上にあるかは、`npm run build:server` 後に `dist/server/src/lib/<mod>` の有無で確かめる
+
+### 14.3 route handler に届く URL
+
+- App Router の route handler が受け取る `request.url` は、**クエリ文字列だけ Next.js が `URLSearchParams` で再シリアライズ済み**（`?q=a%20b` → `?q=a+b`、`?bare` → `?bare=`）。パスは受信したバイトのまま届く
+- クエリのバイト一致が要るとき（署名つき URL を上流へ渡す `/proxy/` など）は、`server.ts` の `requestHandler` が `handle()` の前に生の `req.url` を `x-cm-raw-url` に入れ、route handler が読み戻す（`PROXY_RAW_URL_HEADER`、`src/lib/proxy/`）。ヘッダは全リクエストで先に無条件 `delete` して偽装を防ぎ、上流へは送らない
+- `server.ts` で `/proxy/` を横取りして Next を迂回しない。`src/middleware.ts` の認証・IP 制限と `next.config.js` のセキュリティヘッダが外れる
+- 自前で `Request` を組み立てる unit test はこの正規化を通らない。バイト一致は実サーバでしか確かめられない
+
+### 14.4 i18n（next-intl）
+
+- 辞書はリポジトリ直下の `locales/{en,ja}/<namespace>.json`（`src/` の外）で、`src/i18n.ts` が読み込む。ロケールは `src/config/i18n-config.ts`（`SUPPORTED_LOCALES` / `DEFAULT_LOCALE = 'en'`）で、cookie → Accept-Language → 既定の順に決まる
+- UI 文言はコンポーネントや定数に直書きせず、`en` と `ja` の両方に同じキーを足して `useTranslations(ns)` で引く
+- `tests/setup.ts` は `next-intl` をグローバルにモックし、`t('a.b')` は訳さず `'<ns>.a.b'` を返す（`{name}` の置換だけ行う）。実辞書にキーが無くてもコンポーネントテストは緑になるので、キーの有無と EN/JA の揃いは実 JSON を読む `tests/unit/i18n/*-keys.test.ts` で守る。文言を足したら対応する keys テストも更新する
+- 表示文言そのものを確かめるテストは `tests/helpers/real-intl.ts` の `createRealIntlMock()` をテストファイル側の `vi.mock('next-intl', …)` で使う（未知キーは throw）
+- モックの `useTranslations` は呼ぶたびに新しい関数を返す（実物は安定参照）。`t` を `useCallback` / `useEffect` の依存に入れると、テストでだけ effect が毎レンダ走る。マウント時の副作用は `worktreeId` など実際のトリガで key する
+
+### 14.5 プロンプトの読み手
+
+- 同じ tmux フレームを 4 者が読み、同じ結論を出す必要がある: status（`detectSessionStatus`。`/current-output`・チャット面・`wait`）、response poller（保存される `prompt` 行と push）、`/prompt-response`（PromptPanel / MobilePromptSheet の Submit）、Auto-Yes poller（`detectAndRespondToPrompt`）
+- 汎用の `detectPrompt` を直接呼んでよいファイルは `tests/unit/guards/prompt-detector-single-entry-2368.test.ts` が固定している。poller 側は `detectPromptOnCleanFrame`（`polling/response-checker.ts`）を、`/prompt-response`・`/respond`（`respond/screen-at-send.ts`）・status API の `promptAnswerable` は `assessPromptAnswerability`（`polling/auto-yes-dialog-gate.ts`）を通す。ツール専用のダイアログ読み取りを足すときはこの入口に足し、直呼びを増やさない
+- Auto-Yes の応答判定は `detectSessionStatus` の分類（`claude_selection_list` などの先取り）を通らない。CLI のオーバーレイを status 側で選択リストに分類しても UI の表示が直るだけで、Auto-Yes の誤応答は止まらない。止めるにはプロンプト読み取り（`detectMultipleChoicePrompt` など）の側で `isPrompt: false` にする
+- `/prompt-response` は送信前に `captureSessionOutputFresh` で読み直して判定し、読めなければ何も送らず `prompt_no_longer_active` を返す（UI には何も出ず、ダイアログが残るだけに見える）。読み手を変えたら、実機の確認は API を直接叩くだけでなく UI の Submit でも行う
+
+### 14.6 status のキャプチャキャッシュ
+
+- `GET /api/worktrees` などの status（`isProcessing` / `isSessionRunning`）は `src/lib/tmux/tmux-capture-cache.ts` のキャッシュ（`CACHE_TTL_MS = 5000`）越しの `capture-pane` から求める（`worktree-status-helper.ts` → `captureSessionOutput`）。キャッシュを通らないのは `captureSessionOutputFresh` だけ
+- 採取は要求に引かれて起きる。TTL（5 秒）の内の再要求は前の採取をそのまま返し（`getOrFetchCapture` → `getCachedCapture`）、期限を過ぎたエントリは捨てられて、**次の要求が来たときに**採り直す（自分で採り直すタイマーは無い）。要求の周期はクライアントのポーリング（`useWorktreesCache` の `setInterval`。間隔は稼働中のセッションの有無で変わる）などで決まる
+- そのため、採取と採取の間に始まって終わる遷移は**見逃しうる**。採取の間隔はおよそ「TTL と要求の周期の長いほう」なので、見逃しは TTL と取得の周期の両方で決まる。取得の周期を TTL より短くしても採取の間隔は TTL より縮まらず、TTL より長い周期なら周期のほうが効く。いつも見えないわけではなく、採取が遷移の最中に当たれば現れる。デモやテストで観測させたい状態は、TTL と取得の周期の長いほうより十分長く保つ
+- `detectSessionStatus` を直接呼ぶと running なのに UI が変わらないときは、検出器より先にこのキャッシュの窓を疑う
 
 ⸻

@@ -95,6 +95,14 @@ CM_AGENT_INSTANCE_ID=codex-2 codex exec --dangerously-bypass-hook-trust "…"
 
 ---
 
+### 3.6 共有デーモンでは hook がデーモンの環境で動く（0.157 以降）
+
+codex-cli 0.157.1 で観測。feature `daemon_auto_start`（既定で有効）のもとで、TUI は共有デーモン（`codex app-server --managed-daemon`）にセッションをつなぎ、**hook はデーモンのプロセス内で実行される**。そのため `CM_AGENT_INSTANCE_ID` などの `CM_AGENT_*` は、最初にデーモンを起動したセッションの値に固定され、別インスタンスの codex の通知が 1 つのインスタンスに化ける。
+
+- 起動行に `-c` / `--enable` / `--disable` が 1 つでもあると埋め込みモード（警告 `requires embedded mode`）になり、hook は各セッションの環境で動く。CommandMate は `-c features.daemon_auto_start=false`（`CODEX_EMBEDDED_MODE_ARGS`、`src/lib/hooks/sources/codex/hooks-config.ts`）を付ける。既にデーモンへつながったセッションは再起動しないと直らない。
+- 見分け方: TUI 側プロセスの環境は正しいので、そこを見ても分からない。デーモンの pid の環境を読む（`ps eww -o command= -p <daemon pid> | tr ' ' '\n' | grep ^CM_`）。
+- 実機で確かめるときは、私設 tmux（`-L`）で起動し、`CM_HOOK_URL` / `CM_PERMISSION_HOOK_URL` を使い捨ての listener に向け、cwd は未登録の一時ディレクトリにする。`SessionStart` は起動しただけでは来ず、最初のプロンプトで発火する。
+
 ## 4. `AgentEventSource` I/F で表現できなかったこと
 
 **codex 固有の抜け道（`if (tool === 'codex')` 等）は 1 つも足していない。** I/F 自体の変更も無い。ただし 1 点だけ、I/F の形が codex に対して不足していた:

@@ -179,6 +179,7 @@ agy の `PreToolUse` は応答の `decision` が**必須**で、#1757 P10 が「
 - **書き込みは常にマージ。** JSON を読み、CommandMate のキーだけ差し替え、残りをそのまま書き戻す（`gemini/shared-config-tree.ts`。antigravity 側も同じ実装を import する）。
 - 新規作成時のみ file 0600 / dir 0700。**既存ファイルの permission は変えない**（利用者のファイルであってこちらのものではない）。
 - 両方向の非破壊は `tests/unit/hooks/sources/shared-config-tree-1762.test.ts` が sha256 で固定している（gemini 注入後に agy 設定が不変、agy 注入後に gemini 設定が不変。最悪ケースとして「worktree の `.gemini` が共有ツリーそのもの」でも検証）。
+- **ユニットテストは `HOME` を差し替える。** `AntigravityTool.startSession` は起動のたびに `~/.gemini/config/hooks.json` を**実際に**書く。`os.homedir()` は POSIX では `$HOME` を読み、`tests/setup.ts` は `HOME` を差し替えないので、startSession を通るテストは `beforeEach` で `vi.stubEnv('HOME', <tmp>)` を置く。置かないと開発者自身の agy 設定を書き換える。
 
 ### 5.1 既知の副作用 — gemini の設定は利用者のリポジトリに書かれる
 

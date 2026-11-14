@@ -243,6 +243,70 @@ After completing all test scenarios, verify:
 - Verify server is running and accessible
 - Check that port 3000 is not blocked by firewall
 
+## 実機の UAT の罠
+
+### 検出の修正は空虚な合格に注意する
+
+- 「修正後に偽の行が保存されなかった」は、修正前も保存されなかったなら証拠にならない。刺激が修正した判定まで届いたかを、`CM_LOG_LEVEL=debug` のログ（その判定自身のログの行）で確かめる。
+- 決定的な証拠は、保存済みの実フレームを出荷のコードに通すオフラインの再現で取る（クォータを使わない）。prompt の行の `content` にはペインの末尾が残るので、本番の DB を `mode=ro` で開いて対象の行を取り出す。再現は確かめたいものに合わせて 2 段に分ける。
+  - 汎用のパーサ単体の確認: 直したのが汎用の `detectPrompt` そのものなら、それだけを通す。箱の枠のダイアログは素のままだと `isPrompt=false` なので `stripBoxDrawing` を先に通す。これは Auto-Yes と同じ結果ではない。
+
+    ```ts
+    const det = detectPrompt(stripBoxDrawing(stripAnsi(raw)), buildDetectPromptOptions('claude'));
+    ```
+
+  - Auto-Yes・poller と同じ判定の確認: 実経路は `src/lib/auto-yes-poller-tick.ts` が受け取る `detectPromptOnCleanFrame`（`src/lib/polling/response-checker.ts`）で、汎用のパーサの後に、生きている領域で引用された番号リストを棄却する（`isQuotedNumberedPrompt`）などのツール別の判定が入る。「Auto-Yes が答えない」ことを示すにはこの共通の入口にフレームを通す。汎用の `detectPrompt` の結果で代用しない。
+
+  `npx tsx --tsconfig <worktree>/tsconfig.json <script>.ts` で `@/` が解決する（`.mts` は export を解決できない）。どちらの段でも、本物のダイアログが残ることを陽性対照として必ず並べる（何でも棄却しているだけでないことを示す）。
+- 実機のターンは、再現で示せない経路（実ペインを実 poller が読む経路など）にだけ使い、刺激を候補が生じる形（質問の行と番号の選択肢）にする。
+- ターンの完了は画面の `❯` の文字の一致で判定しない（送った本文がエコーされた行に当たる）。DB の assistant の行が出たことで見る。ペインの grep も、自分の依頼文に含まれる語に当たるので、着手の判定に使わない。
+
+### 入力欄と配置の UAT
+
+- 入力欄や本文の配置を変える UAT は、高さ・面積の数字だけで合格にしない。3〜5 行の文を実際に入力し、入力できる幅と道具の位置をスクリーンショットで見る。モックにも入力中の場面を描く。
+- スラッシュコマンドのパレットは、入力欄の `onChange` が値を見て開く（値が `/` で始まり空白を含まないとき。codex では `$` も）。`fill()` でも `pressSequentially` でも開くので、`/` で始まる値を入れたら開いたことを前提に操作する（下の「Playwright のハーネスの罠」）。キーごとの動き（矢印での選択・Enter での確定）を確かめるときは実キー（`pressSequentially` / `press`）を使う。
+- モバイルの詳細画面の入力欄では Enter は改行。送るのは `[data-testid=send-message-button]`。
+- セーフエリア（`env(safe-area-inset-*)`）は Chromium の CDP で再現できる。`reload` しないと既存の算出値に乗らない。効いていることを probe で先に確かめる（無視されたまま測ると全部緑になる）。
+
+  ```js
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { bottom: 34 } });
+  await page.reload();
+  // probe: padding-bottom: env(safe-area-inset-bottom, 0px) の算出値が '34px' になること
+  ```
+
+- 「修正前に戻すと崩れる」対照は、クラスを差し替えて作らない。Tailwind は使われなくなったクラスを配信の CSS から削るので、戻したクラスが効かない。修正前の算出値を inline style で再現し、測った後は空に戻して再測する。
+
+### ブラウザの自動操作
+
+- Chrome の拡張から開いたタブは `document.visibilityState === 'hidden'` のことがあり、`visibilitychange` を待つ取得が走らず、チャットや History がスケルトンのまま止まる（製品は正しい）。ナビゲーションのたびに次を入れる。
+
+  ```js
+  Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => 'visible' });
+  Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => false });
+  document.dispatchEvent(new Event('visibilitychange'));
+  ```
+
+- Chrome の拡張が Service Worker のキャッシュで古い画面を配って固まるときは、Playwright MCP（別のブラウザ）を使う。Playwright MCP がほかのセッションのプロファイルのロックで使えないときは、worktree の `node_modules/playwright` を Node のスクリプトから直接使う（`devices['iPhone 13']` などの context も自由に作れる）。
+- Playwright MCP の `[ref=…]` は次の操作で失効しやすい。CSS / role の selector（`[data-testid=…]`、`[role="menuitemradio"]:has-text(…)`）か `browser_evaluate` で操作する。
+- `browser_run_code_unsafe` の中には `setTimeout` と `URL` が無い（待つのは `page.waitForTimeout`）。落ちても直前の操作は実行済みなので、送信の後で落ちたら再実行の前にサーバーのログで到達の回数を確かめる。`filename` はコードを読むファイルの引数で、結果の保存先ではない。route のハンドラが throw しても要求はサーバーへ素通りする。
+- ネットワーク・コンソールの記録は呼んだときから取られる。先に記録を始めてから再読み込みする。
+
+### Playwright のハーネスの罠
+
+1 回目の fail がハーネスの誤りのことがある。実装を疑う前に次を確かめる。
+
+- `page.addInitScript` は再読み込みのたびに走る。「保存して再読み込みで残る」型の検査で保存値を initScript で入れると、毎回初期値に戻る。ページを開いて origin を作ってから `page.evaluate` で 1 回だけ `localStorage.setItem` し、`reload` する。計測のヘルパー（`window.__uat` など）を残したいときは逆に initScript に置く。
+- 削除などの確認はブラウザの `confirm()` ではなくアプリ内の `[data-testid="confirm-dialog-confirm"]`。`page.once('dialog', …)` では確定しない。
+- 前の UAT が置いた `package.json` の版より新しい `release-notes/*.json` が残っていると、`tests/unit/release-notes/release-notes-files.test.ts` が落ちる。退避して再実行し、両方の結果を残す。
+- 仮想リストは画面の外や最後の行のマウントが遅れ、`querySelectorAll` が見落とす。「ボタンが 0 個」と判定する前に、行までスクロールして行が在ることを陽性対照として記録する。testid で見つからないときは、表示の文字列からテキストのノードを逆引きして `closest()` で辿る。
+- セッションが終わった worktree のチャットは、行を「Previous session (N)」の畳みに入れる（seed しただけの隔離 worktree はいつもこの状態）。`[data-testid="chat-previous-session-toggle"]` を開いてから探す。
+- 同じ役の要素でも面によって testid が違う（例: pending のバブルは、チャット面が `chat-pending-retry`、PC 詳細の History が `pending-retry`）。片方だけで探さない。
+- `context.setOffline(true)` は loopback の WebSocket を切らない。
+- 入力欄に `fill('/model')` のような `/` で始まる文字列を入れると、スラッシュコマンドのパレットが開いたまま残り、後から出るカードやダイアログに被る。送る前に Escape で閉じる。
+- クリップボードは `context.grantPermissions(['clipboard-read','clipboard-write'])` の後、クリックの前に `writeText('__SENTINEL__')` を入れ、クリックの後に `readText()` で読む。センチネルが残れば書かれていない。
+- グループの見出しなどは CSS で大文字にしているので、テキストの一致で数えない。表示の設定は外から入れられる: 言語は cookie `locale`（`ja` / `en`）、テーマは `localStorage.theme`、サイドバーの幅は `localStorage['mcbd-sidebar-width']`、`/sessions` のタイル表示は `localStorage['mcbd-sessions-view-mode']='tile'`。
+
 ## Next Steps (Phase 2)
 
 Future enhancements to test:

@@ -39,7 +39,10 @@ npm install -g @opencode/cli               # OpenCode V2 (opencode2)
   起動します（Issue #2952）。
 - ポート・パスワードファイル・起動スクリプトのどれかが用意できないときだけ `opencode2 --standalone` で起動します。
   この形では CommandMate に構造化イベントが届かず、状態表示・承認の回答は使えません。
-- セッションを止めると、TUI と専用サーバーの両方が止まり、ポートも閉じます。
+- セッションを止めると、TUI と専用サーバーの両方が止まり、ポートも閉じます。そのインスタンスのパスワードと
+  `ports.json` の行も消すので、`~/.commandmate/opencode-v2/` が空になっていても異常とは限りません。原因を探すときは、
+  まずサーバーログの同じ時刻に `api/kill-session` / `stopped-opencode-v2-session` が無いかを見てください（正常な後始末です）。
+  テストがこのディレクトリを消すことはありません（`tests/setup.ts` が `CM_OPENCODE_V2_DIR` を一時ディレクトリに向けています）。
 
 ---
 

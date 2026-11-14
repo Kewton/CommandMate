@@ -37,6 +37,78 @@ env -i HOME="$RUN_DIR/client-home" PATH="$PATH" CM_UAT_ISOLATION=1 \
 - HOME を分けるのは、CLI が `$HOME/.commandmate-security.log` を書くことがあるのと、グローバルの CLI が `$HOME/.commandmate/` を作るため。
 - `--base-url` という CLI のオプションは無い。送り先を決める既存の口は `CM_PORT` と `CM_BIND`（エクスポートした値が `.env` より優先）。
 
+### run-server.sh を通さずに手で立てるとき
+
+`scripts/uat/run-server.sh up` は以下の隔離をすべて済ませている。probe などで、サーバー・tmux・CLI を手で立てるときだけ読む。
+
+#### 環境は `env -i` で全部渡し、動いているプロセスで確かめる
+
+- 作業のシェルには本番の `CM_PORT`・`CM_DB_PATH`・`CM_ROOT_DIR`・`NODE_ENV` などが export されていることがある。最初に `env | grep '^CM_'` を見る。`scripts/load-env.sh` も dotenv も既にある変数を上書きしないので、worktree に `.env` を書いても本番の値が勝つ。「別のポートで動いた」は別の DB の証拠にならない。
+- 起動は要る変数を全部書く（`env -i HOME="$HOME" PATH="$PATH" … CM_PORT=<port> CM_BIND=127.0.0.1 CM_DB_PATH=<run>/uat.db CM_ROOT_DIR=<run>/root node dist/server/server.js`）。`dist/server/server.js` は `npm run build:all` で作られる（`npm run build` だけでは無く、起動してすぐ落ちる）。dev モード（`tsx server.ts`）は `NODE_ENV=development` を明示する（シェルの `NODE_ENV=production` を拾うと production の build を探して落ちる）。隔離の worktree の `npm install` には `--include=dev` を付ける。
+- `CM_DB_PATH` は、worktree のビルドでは `/tmp` などのシステムディレクトリだと起動が失敗する（グローバルの CLI では HOME の下でないと失敗する）。run の下（worktree の中）に置く。
+- 確かめるのは設定ではなくプロセス。`ps eww -p <pid> | tr ' ' '\n' | grep -E '^(CM_|TMUX|HOME|NODE_ENV)'` で渡った値を、`lsof -p <pid> | grep -E '\.(db|sqlite)'` で開いている DB を見る。`GET /api/repositories` が使い捨てのリポジトリだけを返すことも確かめる。起動ログの `scheduleCount: 0` は DB が開けずに落ちたときにも出るので証拠にしない。本番の DB の mtime は WAL のため書き込みがあっても動かないことがあり、弱い証拠にとどまる。
+- YAML に複数行の shell を書くとき、`>-`（折り畳み）で継続の行を深く字下げすると改行が残る。`env -i …` が単独の行になり、以降が呼び出し側の環境で動く（元から export 済みの `CM_*` で DB は隔離されて見え、`TMUX` などだけが本番に漏れる）。`|` と明示の `\` 継続で書き、先頭に `set -e` を置く。
+
+#### 本番の DB を UAT のサーバーに読ませない
+
+- 本番の DB を丸ごとコピーして読ませない。起動時の同期がコピーの中のリポジトリを走査して本番の worktree を復活させ、保存されたタイマーのメッセージが同じ名前の tmux セッションへ送られうる。
+- 実データで画面を確かめたいときは、空の DB で起動し、使い捨てのリポジトリ（`<run>/root` の下に `git init`。稼働中の tmux セッションと名前が衝突しないもの）を scan する。止めてから本番の DB を `mode=ro` で開き、対象の行だけを worktree id を付け替えてコピーし、起動し直す。元の worktree id を名乗らせない（tmux のセッション名が稼働中のものと一致する）。
+- `CM_ROOT_DIR` の外のリポジトリは scan が拒否する（`outside-roots`）。本番のリポジトリに `git worktree add` して使わない（本番の同期に拾われ、同じ worktree id・同じ tmux セッション名になる）。
+
+#### tmux は私設のサーバーを通常の環境で起こす
+
+- 私設の tmux サーバー（`tmux -S <sock>`）を呼び出し側の通常の環境で起こし、CommandMate のサーバーには `TMUX=<sock>,<tmux の pid>,0` を渡す。ペインは tmux サーバーの環境を継ぐ（[opencode-server-live-verification.md](../design/opencode-server-live-verification.md) §4.6）ので、`env -i` で起こした tmux サーバーのペインでは claude が Keychain の資格情報に届かず、ログアウトした状態で上がる。
+- `tmux kill-session -t ""` は直近のセッションを消す。keepalive のセッションが消えると私設のサーバーごと落ち、CommandMate のサーバーが作り直した tmux は `env -i` の環境になる。`run-server.sh down` → `up` でやり直す。
+- `kill-server` の後もソケットのファイルは残る。`tmux -S <sock> ls` が失敗するのを確かめてから、自分のものだけ消す。
+- 新しく `git init` したディレクトリでは claude のフォルダの信頼の画面が出て、既定のカーソルが `❯ No, exit` にある。そのまま `send` すると本文の Enter で claude が終わる。先に私設の tmux で claude を 1 回起動し、カーソルの位置を確かめてから Down → Enter で信頼させる。信頼はパスごと（clone を移したらやり直す）。`~/.claude.json` は手で編集しない（稼働中の claude が同時に書く）。
+
+#### codex をサーバーを通さずに測る
+
+`CM_UAT_ISOLATION=1` のサーバーは、本番が書いた codex の relay がそのビルドと違うと起動を拒否する（上の skip の表）。本番を同じビルドにできないときは、私設の tmux で codex を直接起動する。
+
+- 資格情報（`auth.json` など）を使い捨ての `CODEX_HOME` へ複製しない。利用者の `CODEX_HOME` のまま、hook と記録を止め、送り先を閉じたポートへ向けて起動する。フォルダの信頼は `-c projects.<実パス>.trust_level=trusted`（メモリの上だけで `config.toml` に書かない。パスにドットが無いこと）で越える。
+
+  ```bash
+  tmux -L <label> -f /dev/null new-session -d -x 200 -y 1000 -c <repo> \
+    'CM_PORT=9 CM_HOOK_URL=http://127.0.0.1:9/none CM_PERMISSION_HOOK_URL=http://127.0.0.1:9/none codex --disable hooks -c "notify=[]" -c history.persistence=none'
+  ```
+
+  起動の行を直接渡すとシェルを挟まない（シェルの履歴にも残らない）。
+- アイドルのときの C-c で codex が終わり、私設の tmux サーバーごと消える。入力欄を消すのは C-u。
+- 残るもの: フォルダの信頼（`-c` で越えなかったとき）、`/model` で選んだモデルと effort（その場で `config.toml` に保存され、後から起動する本番の codex が拾う）、ターンを送ったときの `sessions/` の rollout。利用者全体のファイル（`config.toml`、copilot の `config.json` など）は始める前に控え、終わった後の差分が UAT 由来だけのときに限って戻す（途中で本番が書いた変更を消さない）。
+
+### UAT の組み方
+
+#### CLI の対話を実機で測る
+
+- 対話（`init` など）は stdin が TTY のときだけ動く。パイプで流すと readline が EOF で先に閉じ、対話が途中で黙って終わる（`.env` が作られない）。本物の PTY が要るときは `expect` を使う。
+- `start` は、設定の `.env` の値をシェルの export に重ねて子のサーバーに渡す（dotenv はシェルの値を上書きしないが、子には `.env` が勝つ）。表示の URL と実際に待ち受けるポートが食い違いうるので、ポート・URL を触ったら `.env` とシェルの値をわざと食い違わせて実行し、`lsof -nP -iTCP:<port> -sTCP:LISTEN` で待ち受けを確かめる。
+- CLI を書き換えたら `npm run build:cli` する（`bin/commandmate.js` は `dist/` を読む）。
+
+#### 公開版（npm）の CLI を測る
+
+- グローバルを上書きしないよう `npm install commandmate@<版> --prefix <dir>` で入れ、`<dir>/node_modules/.bin/commandmate` を呼ぶ（`npm i -g` は稼働中のサーバーの足元を差し替える）。
+- 公開版は `$HOME/.commandmate/.env` を読み、`start` ではその値が export した値に勝つ。`HOME=<dir>/home` にして、その下に `.env` を自分で書く。`CM_DB_PATH` は HOME の下でないと失敗するので、HOME を分けたら指定しない（既定がその HOME の下になる）。本番を指して export されていることの多い `CM_ROOT_DIR` は `env -u` で落とす。
+- 止めるときは待ち受けの pid を拾い、`lsof -a -p <pid> -d cwd` で cwd を確かめてから止める。`pkill -f commandmate` は使わない（サーバーの cmdline は `node dist/server/server.js` で当たらず、ほかの worktree のサーバーを巻き込みうる）。
+
+#### 振る舞いを変えない変更は変更前のビルドと比べる
+
+整理（refactor）の UAT は「動いた」だけでは弱い。変更前のコミットを別の作業場所でビルドし、2 台目の隔離サーバー（別のポート・別の run）にして同じ操作を流し、出力を文字列で比べる。
+
+- 比べられるもの: `wait` の標準出力の JSON、`send` / `respond` / `wait` の終了コードと文言、`capture --json` のキーと型、画面から送る要求の本文（Playwright の `page.on('request')`）、`/messages` の行（時刻・パス・ANSI をそろえる）。
+- 画面の判定は、`tmux capture-pane -e -p` で保存した画面を両方のビルドに通す（各作業場所で `npx tsx <script>.ts` から `detectSessionStatus` を呼ぶ）。タイミングの差が消える。
+- 比べられないもの: モデルの文面、共有の資源を取り合うもの（同じローカルモデルなど）。こういうケースは 1 台ずつ順に流す。
+
+#### Skill を開発版の CLI で確かめる
+
+- 親のエージェントが呼ぶ `commandmate` を開発版にするには、`exec node <worktree>/bin/commandmate.js "$@"` の shim を置き、対象リポジトリの `.claude/settings.local.json` の `env.PATH` に、shim の場所を先頭にした PATH を全文で書く（値は展開されない）。親の Bash で `command -v commandmate` が shim を指すことを確かめる。
+- 対象のリポジトリは本番の `CM_ROOT_DIR` の外に独立の clone で置き、隔離サーバーの `CM_ROOT_DIR` の下で scan させる。
+
+#### 本物に頼らず状態を作る
+
+- proxy: CLI の `CM_PORT` を小さな HTTP proxy に向け、特定の要求にだけ決まった応答（例: 409）を返すと、並列でしか起きにくい失敗の経路を確実に作れる。
+- 偽の TUI: run の `PATH` の先頭にエージェントの CLI と同じ名前の shim を置き、決めたフォルダでだけ偽の画面を出して受けたキーを記録する。「Enter を押さない」ことを実測で示せる。`--version` だけ答えて本物を起動しない shim は、セッションが消えたときに送信が本物の CLI を起動する事故も防ぐ。shim が当たらない CLI もあるので、起動したプロセスを確かめる。
+
 ## 測定の結果（2026-10-05、claude 2.1.289 / codex-cli 0.160.0）
 
 私設の tmux（`tmux -L`）と使い捨ての場所（`/tmp`）で測った。利用者の `~/.claude*`・`~/.codex`・`~/.commandmate` を書き換えるおそれのある測り方はしていない。その場合は「測れない」と書いた。

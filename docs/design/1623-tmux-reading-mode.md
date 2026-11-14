@@ -293,3 +293,31 @@ popup への `resize-window` 混入 / CLI 側 `lines` の変更）。
   `display-popup` の有無は tmux 本体の機能なのでプラットフォーム差は想定しないが、実測はしていない
 - popup の**目視**確認は 3.3a では行っていない（クライアント非 attach のため）。
   目視は #1623 の 3.5a ネストクライアント検証が担保する
+
+## attach の可視域と tmux hook の実測（tmux 3.5a）
+
+私設 tmux サーバ（`-L`）と使い捨てセッションで観測。利用者向けの `--live` / `@cm_*` の説明は
+[cli-operations-guide](../user-guide/cli-operations-guide.md#--live-attach-中だけ端末サイズを借りるclaude-限定) にある。
+
+- **200x1000・`window-size manual` の窓に 160x45 の人間のクライアントが attach すると、見えるのは下端 44 行・左 160 桁だけ**
+  （status 行にオフセット `[0,956]` が出る）。alt-screen のツール（claude など）は transcript が上端にあるので 0 行しか見えない。
+  inline のツール（codex など）は末尾まで詰まっているので最新の transcript が見え、実用になる。
+- `attach -r`（read-only）のクライアントでは detach / switch-client 以外の key binding が効かない（`prefix+g` の popup も開かない）。
+- **hook は attach 側しか使えない。** `set-hook -t <session> client-attached` は発火し、`#{session_name}` は当該セッション、
+  `#{client_control_mode}` は人間なら `0`。control-mode クライアントの attach では発火しない。
+  `set-hook -t <session> client-detached` は**一度も発火しない**。`-g` なら発火するが `#{session_name}` はクライアントの別のセッションを指し、
+  `#{client_control_mode}` は空になる。hook は張れてしまうので、復帰を hook に頼る設計は**動かないまま緑になる**。
+  設計の前に、ログを書くだけの hook で発火を陽性対照として確かめる。
+- hook 名に index を書かないと `[0]` になる。同じ edge に 2 つ張るなら `client-attached[0]` / `client-attached[1]` と明示する
+  （両方発火し、`set-hook -u` で個別に外せる）。
+- hook の本体は `run-shell -b '<script> #{session_name} #{client_control_mode}'` の形にする。`if-shell -F` を hook の文字列に
+  ネストしたものは無言で不発だった。hook は tmux **サーバ**の環境で動き `TMUX` を持つので、素の `tmux` は発火元と同じサーバ（私設 socket を含む）に届く。
+- **user option の読み方。** 未設定の user option を `show-options -v -t <s> @cm_x` で読むと、空文字 ＋ exit 0 ではなく
+  **非 0 ＋ `invalid option:`** になる。読む側は必ず失敗を受け止める。`status-right` を利用者が自分で設定したかは
+  `show-options -t <s> status-right`（`-v` **なし**）でしか判別できない（未設定なら空の stdout ＋ exit 0、設定済みなら `status-right "…"`。`-v` だと未設定でも空行）。
+- **ジオメトリの委譲は往復で失われない。** attach 中に `set-window-option -t <s>: window-size latest` で窓がクライアントのサイズに追従し、
+  detach 後に `window-size manual` ＋ `resize-window -x 200 -y 1000` で戻る（どちらも SIGWINCH が届く）。control-mode クライアントは
+  `list-clients -F '#{client_control_mode}'` で除外できる。detach は hook で拾えないので、復帰はポーリング側で「委譲中かつ人間のクライアント 0」を見る。
+- `reconcileSessionGeometry` が走るのは startSession（セッションの作成と、既存セッションの引き継ぎ）のときだけ（send / route は `isRunning()` が false のときだけ startSession する）。
+  「send のたびに 200x1000 へ戻る」わけではない。
+- zsh ではターゲット `-t '=name:'` のクォートが必須。
