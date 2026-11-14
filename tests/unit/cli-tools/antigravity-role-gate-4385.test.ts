@@ -17,7 +17,7 @@
  *
  * @vitest-environment node
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -232,8 +232,38 @@ let rootId: string;
 
 type Outcome = { ok: true } | { ok: false; error: Error };
 
+/** The real `setImmediate`, taken before any test fakes the clock. */
+const realSetImmediate = setImmediate;
+const yieldToRealLoop = (): Promise<void> => new Promise((resolve) => realSetImmediate(resolve));
+/** Only a guard against a hang; the loop below ends on the work's own state. */
+const REAL_TIME_GUARD_MS = 120_000;
+const FAKE_STEP_MS = 250;
+
+/**
+ * Drive the fake clock until `isDone()` (re-instruction 2 of PR1: the CI shard
+ * ran out of a fixed number of steps while the work still waited on real I/O).
+ *
+ * The clock moves only when nothing real is left to finish: the real event loop
+ * is let run first, and when no fake timer is pending the work is waiting on
+ * real I/O (a module loading, a file), so the loop waits for that instead of
+ * moving the clock past a deadline the work has not reached yet. The end is the
+ * work's state; wall time only guards against a hang.
+ */
+async function driveFakeClockUntil(isDone: () => boolean): Promise<void> {
+  const started = process.hrtime.bigint();
+  while (!isDone()) {
+    for (let i = 0; i < 3 && !isDone(); i += 1) await yieldToRealLoop();
+    if (isDone()) return;
+    if (Number((process.hrtime.bigint() - started) / 1_000_000n) > REAL_TIME_GUARD_MS) {
+      throw new Error('the work never settled');
+    }
+    if (vi.getTimerCount() === 0) continue;
+    await vi.advanceTimersByTimeAsync(FAKE_STEP_MS);
+  }
+}
+
 /** Run `work` on the fake clock until it settles. */
-async function settle(work: Promise<unknown>, maxMs = 240_000): Promise<Outcome> {
+async function settle(work: Promise<unknown>): Promise<Outcome> {
   let outcome: Outcome | null = null;
   work.then(
     () => {
@@ -243,11 +273,8 @@ async function settle(work: Promise<unknown>, maxMs = 240_000): Promise<Outcome>
       outcome = { ok: false, error };
     }
   );
-  for (let waited = 0; waited < maxMs && outcome === null; waited += 250) {
-    await vi.advanceTimersByTimeAsync(250);
-  }
-  if (outcome === null) throw new Error('still running');
-  return outcome;
+  await driveFakeClockUntil(() => outcome !== null);
+  return outcome as unknown as Outcome;
 }
 
 const launch = () => settle(tool.startSession(WT, worktreePath, 'antigravity'));
@@ -304,13 +331,8 @@ async function setRoleThroughApi(role: Record<string, unknown>): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ instanceId: 'antigravity', role }),
   });
-  let response: Response | null = null;
-  const done = (async () => {
-    response = await putInstanceRole(request, { params: Promise.resolve({ id: WT }) });
-  })();
-  for (let i = 0; i < 400 && response === null; i += 1) await vi.advanceTimersByTimeAsync(50);
-  await done;
-  expect(response!.status).toBe(200);
+  const response = await callRoute(() => putInstanceRole(request, { params: Promise.resolve({ id: WT }) }) as Promise<Response>);
+  expect(response.status).toBe(200);
 }
 
 /**
@@ -325,6 +347,18 @@ async function openSuccessor(revokeInput = true): Promise<void> {
     buildAgentLaunchCommandLine({ target: TARGET, executablePath: 'agy', worktreePath });
   });
 }
+
+/**
+ * Load, before any clock is faked, the modules the paths under test load with
+ * `await import()` (git's common dir for the role's membership, the poller a
+ * stop ends): their loading is real I/O, and under load it must not overlap a
+ * test's fake deadlines.
+ */
+beforeAll(async () => {
+  await import('@/lib/git/git-common-dir');
+  await import('@/lib/polling/response-poller');
+  await import('@/lib/cli-tools/start-availability');
+});
 
 beforeEach(async () => {
   vi.useFakeTimers();
@@ -393,12 +427,18 @@ afterEach(async () => {
 /** A route handler called on the fake clock until it answers. */
 async function callRoute(call: () => Promise<Response>): Promise<Response> {
   let response: Response | null = null;
-  const done = (async () => {
-    response = await call();
-  })();
-  for (let i = 0; i < 400 && response === null; i += 1) await vi.advanceTimersByTimeAsync(50);
-  await done;
-  return response!;
+  let failure: unknown = null;
+  call().then(
+    (answer) => {
+      response = answer;
+    },
+    (error: unknown) => {
+      failure = error ?? new Error('the route failed');
+    }
+  );
+  await driveFakeClockUntil(() => response !== null || failure !== null);
+  if (failure !== null) throw failure;
+  return response as unknown as Response;
 }
 
 function jsonRequest(url: string, body: Record<string, unknown>): NextRequest {
