@@ -669,6 +669,36 @@ export function depsState(run, { repoDir, B0, T, source }) {
 }
 
 /**
+ * The top-level entries of `<source>/node_modules` that start with `.` and are still linked: npm's own
+ * (the command shims and the hidden lockfile). Every other dot entry is a tool's cache or temp dir.
+ */
+export const LINKED_DOT_ENTRIES = ['.bin', '.package-lock.json'];
+
+/**
+ * Borrow `<source>/node_modules` without writing to it (#4369 review P2): `<dir>/node_modules` is a
+ * real directory whose entries link one by one to the source's packages. The tools' caches that
+ * resolve to `<root>/node_modules/.<name>` — vitest's `node_modules/.vite/vitest/<hash>/results.json`
+ * (VitestCache.resolveCacheDir), vite's `.vite` / `.vite-temp`, `node_modules/.cache` — are then made
+ * inside the clone and removed with it; the source's own dot entries are not linked. What this cannot
+ * keep out is a write into a package's own directory (`node_modules/<pkg>/…`), which goes through the
+ * link to the source (none of the precheck's steps is known to do it).
+ *
+ * @returns {string[]} the linked entry names
+ */
+export function linkNodeModules(source, dir) {
+  const from = path.join(source, 'node_modules');
+  const to = path.join(dir, 'node_modules');
+  fs.mkdirSync(to);
+  const linked = [];
+  for (const name of fs.readdirSync(from).sort()) {
+    if (name.startsWith('.') && !LINKED_DOT_ENTRIES.includes(name)) continue;
+    fs.symlinkSync(path.join(from, name), path.join(to, name));
+    linked.push(name);
+  }
+  return linked;
+}
+
+/**
  * The precheck of the train (§2.4 3): the train's own run-dir, `--base <B0 SHA>`, `--heavy-to-ci`, and the
  * union of every candidate's conditions. `--allow-removed-tests` is never given (C5, I3).
  */
@@ -951,7 +981,7 @@ function oneTrain(o, deps) {
     git(run, repoDir, ['clone', '--quiet', '--shared', '--no-checkout', repoDir, trainDir]);
     git(run, trainDir, ['checkout', '--quiet', '--detach', T]);
     try {
-      fs.symlinkSync(path.join(source, 'node_modules'), path.join(trainDir, 'node_modules'), 'dir');
+      linkNodeModules(source, trainDir);
     } catch (err) {
       throw new TrainStop(2, `node_modules link failed: ${describeError(err)}`);
     }

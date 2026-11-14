@@ -456,6 +456,8 @@ describe('T-E entries and candidates', () => {
 describe('受入基準 9 (K1): the train tree is a shared clone, never a worktree of the repository', () => {
   it('the repository\'s git worktree list is the same before, during (the precheck) and after the run; the clone is removed', () => {
     const w = world([{ issue: 4401, pr: 5401 }, { issue: 4402, pr: 5402 }]);
+    fs.mkdirSync(path.join(w.wts[0].wt, 'node_modules', 'pkg'));
+    fs.mkdirSync(path.join(w.wts[0].wt, 'node_modules', '.cache'));
     const before = fixtureCount(w);
     let during = '';
     let trainDir = '';
@@ -463,7 +465,10 @@ describe('受入基準 9 (K1): the train tree is a shared clone, never a worktre
       during = fixtureCount(w);
       trainDir = args[args.indexOf('--worktree') + 1];
       expect(fs.existsSync(path.join(trainDir, '.git', 'objects', 'info', 'alternates'))).toBe(true);
-      expect(fs.lstatSync(path.join(trainDir, 'node_modules')).isSymbolicLink()).toBe(true);
+      // A real directory of per-entry links (review P2): the caches tools make under node_modules/.<name> stay in the clone.
+      expect(fs.lstatSync(path.join(trainDir, 'node_modules')).isDirectory()).toBe(true);
+      expect(fs.realpathSync(path.join(trainDir, 'node_modules', 'pkg'))).toBe(fs.realpathSync(path.join(w.wts[0].wt, 'node_modules', 'pkg')));
+      expect(fs.existsSync(path.join(trainDir, 'node_modules', '.cache'))).toBe(false);
       return 0;
     };
     expect(w.go('4401,4402').code).toBe(0);

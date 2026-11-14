@@ -108,7 +108,7 @@ entry は `merge-pr.mjs --queue` と同じ形 `<issue>[/<item>][@<pr>]`。`resol
 
 train の作業ツリー（`git clone --shared --no-checkout <repo> <os.tmpdir()>/cm-train-<repo-slug>-<ID>` → `git checkout --detach T_N`、§2.1。`T_N` と `B0` は alternates で見える）で:
 
-1. **依存（F05）**: 候補を鎖に積む前に、`h_k` の差分が `package-lock.json`・`package.json` を変える候補は外す（`dropped reason=deps-changed`。その PR は merge-pr で 1 本ずつ）。1 本のために他の候補の診断まで止めないため（再レビュー P3-5。全体を止める案より、残りの報告が得られる）。そのうえで `package-lock.json` の blob が `T_N`・`B0`・`--source <worktree>`（既定は先頭の候補の worktree）の HEAD で同じで、`<source>/node_modules` が在るときだけ、train の worktree に `node_modules` → `<source>/node_modules` の symlink を作る（source の worktree には何も書かない）。source の側が違う・不明（読めない・source の tree が dirty・`node_modules` が無い）なら **push の前に exit 2**（`deps=unknown`。全候補に共通の環境の問題なので全体を止める）。CI への委譲は採らない（tsc・ESLint・guards は heavy でないので `--heavy-to-ci` では外れず、委譲には precheck の変更が要る）
+1. **依存（F05）**: 候補を鎖に積む前に、`h_k` の差分が `package-lock.json`・`package.json` を変える候補は外す（`dropped reason=deps-changed`。その PR は merge-pr で 1 本ずつ）。1 本のために他の候補の診断まで止めないため（再レビュー P3-5。全体を止める案より、残りの報告が得られる）。そのうえで `package-lock.json` の blob が `T_N`・`B0`・`--source <worktree>`（既定は先頭の候補の worktree）の HEAD で同じで、`<source>/node_modules` が在るときだけ、train の作業ツリーに `node_modules` を**実のディレクトリ**として作り、`<source>/node_modules` の各項目へ 1 つずつ link する（`linkNodeModules`。`.` で始まる項目は npm の `.bin`・`.package-lock.json` だけ link し、ほかはツールのキャッシュなので link しない）。`node_modules` を丸ごと link すると、vitest の結果のキャッシュ（`<root>/node_modules/.vite/vitest/<hash>/results.json`、vitest 4.1.2 の `VitestCache.resolveCacheDir`）や vite の `.vite`・`.vite-temp`、`node_modules/.cache` が source に書かれる（PR1 の整合性レビュー P2）。項目ごとの link なら、それらは clone の中に作られて clone と一緒に消える。隔離できないのは、パッケージ自身のディレクトリ（`node_modules/<pkg>/…`）への書込みで、link を通って source に届く（precheck の段でそうするものは知られていない）。source の側が違う・不明（読めない・source の tree が dirty・`node_modules` が無い）なら **push の前に exit 2**（`deps=unknown`。全候補に共通の環境の問題なので全体を止める）。CI への委譲は採らない（tsc・ESLint・guards は heavy でないので `--heavy-to-ci` では外れず、委譲には precheck の変更が要る）
 2. 衝突の印の全追跡ファイル走査（`markerFiles`）
 3. `precheck.mjs main` を train 専用の記録の置き場で呼ぶ: `--run-dir <run-dir>/train --issues <run の range> --issue <先頭の候補の Issue> --worktree <train の worktree> --base <B0 の SHA> --heavy-to-ci`、加えて**全候補の条件の和**（F04）:
    - どれかが `kind=refactor` なら `--kind refactor`、どれかが `metrics` なら `--metrics`（suppressions を train の差分全体で数える）
@@ -212,7 +212,7 @@ PR1b で弱くなりうる点（§12 で人が決める）: 途中の base が C
 | `git fetch`（CI 待ち） | その回は緑にしない、次の回に読み直す | — | fail-closed |
 | `git merge-base --all`・`merge-tree` | 衝突（exit 1）は外す。他の非 0 は `stopped(1)` | — | 衝突は外す、異常は止まる |
 | `git commit-tree`・`git clone --shared` | `stopped(1)` | clone だけ残る → 終わりの片付けで消す。消せなければ警告 | fail-closed |
-| `node_modules` の symlink | `stopped(2)` | — | fail-closed（source には書かない） |
+| `node_modules` の項目ごとの link（`linkNodeModules`） | `stopped(2)` | — | fail-closed（source には書かない。キャッシュは clone の中） |
 | precheck | 1 → `stopped(1)`、3 → `stopped(3)` | — | fail-closed |
 | `git ls-remote origin <ref>`（ref が無いこと） | 読めない・在る → `stopped(1)` | — | fail-closed（他人の ref を上書きしない） |
 | push の宛先の検査（I1） | 宛先が `refs/heads/train/<base>/<自分の ID>` でなければ push を呼ばずに `stopped(1)` | — | fail-closed（どの経路でも base・PR の head へ push しない。`pushHead` を呼ぶ前の 1 か所で検査） |
@@ -298,7 +298,8 @@ PR1b で弱くなりうる点（§12 で人が決める）: 途中の base が C
 | P2 | 全部 bug | suppressions は走らない（陰性） | — |
 | P3 | 1 本が `build` | `--build` で build の 3 段 | — |
 | P4 | A は削除を許された（C5 で外れる）、B は許されていない削除を含む | A は外れ、B を含む train は removed-tests で exit 1、push しない（R16 陽性） | 許可を OR すると push まで進んで赤 |
-| P5 | lockfile が `B0`・`T_N`・source で同じ、`node_modules` あり | symlink を作り precheck を走らせる。source の worktree の中身は変わらない（R17 陰性） | — |
+| P5 | lockfile が `B0`・`T_N`・source で同じ、`node_modules` あり | 項目ごとの link を作り precheck を走らせる。source の worktree の中身は変わらない（R17 陰性） | — |
+| P5b（PR1 のレビュー P2） | clone の中で実の vitest を走らせる（キャッシュの置き場所は vitest 自身が解決） | 結果のキャッシュは clone の `node_modules/.vite/vitest/` にでき、source の `node_modules` の項目と mtime は変わらない | `node_modules` を丸ごと link すると source に `.vite/vitest/<hash>/results.json` ができて赤 |
 | P6 | train が lockfile を変える | push の前に exit 2 `deps=changed`、`npm` を 1 回も起動しない、precheck の記録を書かない（R17 陽性） | 依存の判定を外すと precheck が起動して赤 |
 | P7 | source に `node_modules` が無い／source の lockfile が違う | exit 2 `deps=unknown`／`deps=changed` | — |
 | P8 | precheck が exit 3 | exit 3、push しない | — |
@@ -575,7 +576,7 @@ GitHub の設定・launchd・Docker・ランナーの変更はどれも要らな
 - **V3** `bucketOf` の対応が gh 2.86.0 と同じ（§10 T-B）
 - **V4** train の run の所要は PR の run と同程度（中央値 22 分、最長 78 分）
 - **V5** `precheck.mjs main` を train 専用の run-dir と先頭の候補の Issue 番号で呼んで、各 Issue の記録を汚さずに動く。動かなければ PR1 で precheck の段の実行部の切り出しが要り、scope が広がる（そのときはリーダーへ返す）
-- **V6** `node_modules` の symlink で train の worktree の tsc・vitest が動く（lockfile が同じとき）
+- **V6** `node_modules` の項目ごとの link で train の作業ツリーの tsc・vitest が動く（lockfile が同じとき。PR1 の実装で、このリポジトリの clone で `tsc --noEmit` と `vitest related` が通り、source の `node_modules` が変わらないことを確かめた）
 - **V7** 2 親の `T_k`（§12.3 C1）を base へ push すると、GitHub が PR を自動で `MERGED` にする
 - **V8** ruleset で人とエージェントの書込みを区別できない（同じアカウント）
 - **V9** `rerun --failed` の後の `actions/runs/<id>/attempts/<n>/jobs` が、前の attempt から成功を引き継いだジョブを含む。含まなければ必須の 19 件がそろわない。確かめるまで再実行の後の緑は出さない（I5）
@@ -587,3 +588,4 @@ GitHub の設定・launchd・Docker・ランナーの変更はどれも要らな
 - 2026-11-14 第 2 版: 事前レビュー（P1 2・P2 7）と再指示 1 を反映。PR1 を作成・確認・報告に狭めて base への書込みを PR1b へ移し、F01・F02 の選択肢と推奨（§12）、F03 の形の制限、F04 の条件の和、F05 の依存の拒否、F06 の train ID と CI の証拠、F07・F08 の PR1b の条件、F09 の PR2 の規則、R01〜R24 の試験の表への割り当てを足した
 - 2026-11-14 第 3 版: 再レビューの N1（F06 の 2 回目）・N2（F02 の 2 回目）と原因調査を反映。最上位の不変条件 U1〜U3 を置き、PR1 を公開の権限の無い診断に固定（`publishable: false`・注意の文・公開の引数と経路の拒否・ci-merge.md の 4 つの文）、`--queue` の最後の entry の自動の `last` を反映して merge-pr に例外を足さないと明記、PR1b に「公開するコミットの SHA を先に検証」「期待値つきの更新（fast-forward ≠ `B0` との一致）」を足し、Q8〜Q10 を PR1b の前の判断に。原因調査 §5 の表を T-R と PR1b の Y1〜Y7 へ、再レビューの P3（worktree を作業ツリーの外・`filter=latest` と `check_suite_id`・V9・依存の候補を外す・作り直し既定 0・ref の保持・属性の条件・T-L）を反映
 - 2026-11-14 第 4 版（PR1 の実装）: 事前レビュー 3 回目の処分を反映。K1: train の作業ツリーを `git worktree add` から `git clone --shared`（`os.tmpdir()` の下）へ。実装の最初に一時 dir で clone の上の precheck（`--base <SHA>`・`markerFiles`・ESLint・tsc・`vitest related`・guards/docs）が動くことを確かめた。受入基準 9 を「元のリポジトリの `git worktree list` が変わらない」に置き換え、T-T に T12。P3-1: I1・X2 の許される push を「自分の ID の作成と削除」と「`pruneOwnRefs` が報告から選んだ古い ID の lease つきの削除」に分けた。P3-2: 残る ref の数（`refs.remaining`）と人が消す運用（ci-merge.md）。P3-3: 再実行の後の未確認の緑の人向けの文の先頭に「赤ではない（再実行の後の緑。未確認）」。実コードに合わせた点: `train` は `LOG_STAGES` ではなく `TRAIN_LOG_STAGES`（既存の試験の期待値を変えないため）、`status --json` の `train` は行があるときだけ。T-B の対応は gh v2.86.0 の `pkg/cmd/pr/checks/aggregate.go` と一致（`startup_failure` などは既定の pending）
+- 2026-11-14 第 4 版の追記（PR1 の整合性レビュー P2）: `node_modules` を丸ごとの symlink から、実のディレクトリと項目ごとの link（`linkNodeModules`）へ。vitest・vite のキャッシュ（`node_modules/.vite` ほか）を clone の中へ隔離した。隔離できない書込み（パッケージ自身のディレクトリへの書込み）は §2.4 の 1 に名指した。試験は T-P P5b

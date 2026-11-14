@@ -14,7 +14,9 @@ import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { main as precheck } from '../../../../scripts/orchestrate/precheck.mjs';
 import { readRecords } from '../../../../scripts/orchestrate/run-log.mjs';
-import { TrainStop, buildTrain, depsState, precheckArgs } from '../../../../scripts/orchestrate/merge-train.mjs';
+import { LINKED_DOT_ENTRIES, TrainStop, buildTrain, depsState, linkNodeModules, precheckArgs } from '../../../../scripts/orchestrate/merge-train.mjs';
+
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
 
 const GIT_ENV = { GIT_ALLOW_PROTOCOL: 'file', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 const ID = '20261114T000000000Z-1-000001';
@@ -363,3 +365,61 @@ describe('T-P the combination check — R15・R16・R17', () => {
     expect(calls.some((c) => c.command === 'npx' && c.args[0] === 'eslint' && c.args.includes('src/x.ts'))).toBe(true);
   });
 });
+
+describe('review P2: the train borrows node_modules without writing to the source (real vitest)', () => {
+  /** A source whose node_modules is a real directory (so a write into it shows), its packages those of this repository. */
+  function source(): string {
+    const dir = path.join(tmp, 'source');
+    fs.mkdirSync(path.join(dir, 'node_modules'), { recursive: true });
+    for (const name of fs.readdirSync(path.join(REPO_ROOT, 'node_modules'))) {
+      if (name.startsWith('.') && !LINKED_DOT_ENTRIES.includes(name)) continue;
+      fs.symlinkSync(path.join(REPO_ROOT, 'node_modules', name), path.join(dir, 'node_modules', name));
+    }
+    return dir;
+  }
+  /** The source's node_modules as a snapshot: every top entry (lstat), with the directory's own mtime. */
+  function snapshot(dir: string) {
+    const nm = path.join(dir, 'node_modules');
+    return { mtime: fs.statSync(nm).mtimeMs, entries: fs.readdirSync(nm).sort().map((name) => `${name}:${fs.lstatSync(path.join(nm, name)).mtimeMs}`) };
+  }
+  /** A clone with one test, and vitest run in it: the cache dir is resolved by vitest itself (<root>/node_modules/.vite/vitest/<hash>). */
+  function runVitest(clone: string) {
+    fs.mkdirSync(path.join(clone, 'tests', 'unit'), { recursive: true });
+    fs.writeFileSync(path.join(clone, 'package.json'), '{"name":"train-clone","type":"module"}\n');
+    fs.writeFileSync(path.join(clone, 'tests', 'unit', 'one.test.ts'), "import { expect, it } from 'vitest';\nit('one', () => expect(1).toBe(1));\n");
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(VITEST|VITE_|NODE_OPTIONS$|TEST$)/.test(key))) as NodeJS.ProcessEnv;
+    return spawnSync(process.execPath, [path.join(clone, 'node_modules', 'vitest', 'vitest.mjs'), 'run', '--dir', 'tests/unit'], { cwd: clone, env, encoding: 'utf8' });
+  }
+  const resultsIn = (nm: string) => {
+    const base = path.join(nm, '.vite', 'vitest');
+    return fs.existsSync(base) ? fs.readdirSync(base).filter((h) => fs.existsSync(path.join(base, h, 'results.json'))) : [];
+  };
+
+  it('vitest\'s results cache is made inside the clone; the source\'s node_modules (entries, mtimes) is unchanged', () => {
+    const src = source();
+    const clone = path.join(tmp, 'clone');
+    fs.mkdirSync(clone);
+    const linked = linkNodeModules(src, clone);
+    expect(linked).toContain('vitest');
+    expect(linked.filter((name) => name.startsWith('.'))).toEqual(LINKED_DOT_ENTRIES.filter((name) => fs.existsSync(path.join(src, 'node_modules', name))));
+    const before = snapshot(src);
+    const out = runVitest(clone);
+    expect(out.status, `${out.stdout}\n${out.stderr}`).toBe(0);
+    expect(resultsIn(path.join(clone, 'node_modules'))).toHaveLength(1);
+    expect(snapshot(src)).toEqual(before);
+    expect(fs.existsSync(path.join(src, 'node_modules', '.vite'))).toBe(false);
+  }, 60000);
+
+  it('positive control: the whole node_modules linked as one (the isolation taken out) makes vitest write its cache into the source', () => {
+    const src = source();
+    const clone = path.join(tmp, 'clone');
+    fs.mkdirSync(clone);
+    fs.symlinkSync(path.join(src, 'node_modules'), path.join(clone, 'node_modules'), 'dir');
+    const before = snapshot(src);
+    const out = runVitest(clone);
+    expect(out.status, `${out.stdout}\n${out.stderr}`).toBe(0);
+    expect(resultsIn(path.join(src, 'node_modules'))).toHaveLength(1);
+    expect(snapshot(src)).not.toEqual(before);
+  }, 60000);
+});
+
