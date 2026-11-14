@@ -2,49 +2,9 @@
 
 Phase 3（並列開発）の規則は本体にある。ここには、monitor の手順と、送信・完了待ちの根拠を移した（#3481）。
 
-## 1-5 WIP の照会
-
-本体の 1-5 が、新しいレーン（worktree の無い Issue）を `assign.tsv` に入れる前に 1 回だけ呼ぶ（#4368 PR1、設計は `docs/design/flow-wip-4368.md`）。
-読み手は **この計画の段だけ**。2-2 の bash・`assign.tsv` の後の書き換え・3-1・run の記録（`run-log.mjs`）には組み込まない。
-
-```bash
-WIP_JSON="workspace/orchestration/runs/$DATE/wip.json"
-node scripts/orchestrate/flow-wip.mjs check --worktree . --json > "$WIP_JSON"; WIP=$?
-# 0 のときだけ新しいレーンを入れてよい。off は制限なし、room は total − unmerged の本数まで
-if [ "$WIP" = 0 ]; then
-  ROOM=$(jq -r 'if .verdict == "off" then "unlimited" else (.total - (.unmerged | length)) end' "$WIP_JSON")
-else
-  ROOM=0   # 60 / 61 / 2 / 1 / コマンドが動かない — どれも 0 本（作る側へ落とさない）
-fi
-echo "wip exit=$WIP room=$ROOM"
-```
-
-- **数え方**: 未マージのブランチ＝（ディスク上の worktree のブランチ ∪ base へ向いた開いた PR の head）−除外−マージ済み。マージ済みは、同じリポジトリ・同じ base・観測した先端と `headRefOid` が一致する MERGED の PR か、GitHub の今の base と一致する `origin/<base>` の祖先で証明できたものだけ。証明の手続きが失敗した枝は数えたうえで `unknown` にし、`check` は 61
-- **入れ方**: 計画の Issue を順に見て、worktree のある Issue は今までどおり `assign.tsv` に入れる（照会しない。在庫を増やさない）。worktree の無い Issue は、`ROOM` が残っている間だけ入れて 1 つ減らす。`ROOM` が 0 になった後の新しいレーンと、`WIP` が 0 でないときの新しいレーンは **すべて** `assign.tsv` に入れない
-- **見送りの書き方**: 入れなかった Issue は plan.md の「見送り」の節に 1 行ずつ書く。列は Issue・担当・モデル（1-2b の判定のまま）・理由（`wip=60 3/3`・`wip=61 gh pr list --state open: timeout`・`wip=2 <設定の誤り>`・`room 使い切り` など、`wip.json` と標準エラーから写す）。run の記録には何も書かない（`contract` の `skip` は通過扱いで、`status` が `next=send` と読むため）
-- **対象から外す（1 つの規則）**: `assign.tsv` に入れなかった Issue は、**この run の対象の並びそのものから外す**。外す先は `{issue_numbers}`（本体の各段が差し込む並び）・1-2 の `BUG_ISSUES` / `FEATURE_ISSUES`・plan.md の対象 Issue の表の 3 つで、1-5 のうちに確定する。以後の全段（2-2・2-4・2.5・3・5・6・7・8）はこの対象の並びだけを使うので、段ごとに「見送りを除く」を書かない。確定した並びは plan.md の対象表と `assign.tsv` の 1 列目が同じになる
-- **再開**: 見送った Issue は、この run のどの段にも入らない。戻すのは次の計画（1-5）で、`check` をやり直してから。60 はマージで 1 本減ってから、61 は `source` の読み（GitHub・git）が戻ってから、2 は `.commandmate/flow.yaml` を人が直してから
-- **保証の範囲**: `check` の 0 は **助言で、許可・予約ではない**。同じ空きを見た 2 つの計画（2 人のリーダー、並べた run）はどちらも 0 を受け取り、上限を超えうる（**同時の照会の上限は保証しない**）。照会の後に誰かがブランチを足す・マージする交代も見ない。手順を通らない操作（普通の `send`、直接の `git worktree add`・`gh pr create`）は止めない。強制の受付は #4368 の PR2 以降
-- **設定**: root（主 worktree）の `.commandmate/flow.yaml` の `wip.total`（整数 1〜1000）。無い・`wip` 節が無いと off（何も解決しない）。`wip.active` は PR2a まで受け付けない（exit 2）。共通の `base`・`exclude` は `scripts/flow/config.mjs` が読む
-- 終了コードの意味は docs/orchestrate/exit-codes.md#1-5-flow-wip-check-の-60--61--2
-
-## 2-2 worktree を手動で作る
-
-`/worktree-setup` を使わないときは、対象の Issue（1-5 で確定した並び）ごとに:
-
-```bash
-git worktree add -b "feature/{N}-worktree" "../commandmate-issue-{N}" develop
-cd "../commandmate-issue-{N}" && npm install --include=dev
-```
-
-`--include=dev` は省かないこと。シェルが `NODE_ENV=production` だと devDependencies（vitest / eslint など）が入らない。
-そうなると、ワーカーの確認コマンドも検証ゲートも動かない。
-
-根拠: docs/orchestrate/contract.md#2-2-devdependencies-を入れる理由
-
 ## 2.5-1 分析の依頼の送り方
 
-develop worktree上でバグIssueごとに根本原因分析を実行する（`BUG_ISSUES` は 1-5 で確定した対象の並び。docs/orchestrate/workers.md#1-5-wip-の照会）：
+develop worktree上でバグIssueごとに根本原因分析を実行する：
 
 ```bash
 WORKTREE_ID="mycodebranchdesk-develop"

@@ -2,25 +2,7 @@
 
 本体の 3-1・3-4 から、exit code ごとの詳しい対処を移した（#3481）。いつ読むかは本体の各節に書いてある。
 
-## 1-5 flow-wip check の 60 / 61 / 2
-
-`node scripts/orchestrate/flow-wip.mjs check` の終了コード（#4368 PR1）。どれも **助言** で、`check` は何も書かず何も始めない。読み手は本体の 1-5 だけ（docs/orchestrate/workers.md#1-5-wip-の照会）。
-
-| exit | 意味 | 1-5 ですること |
-|---|---|---|
-| `0` | room（完全な観測で 未マージ < `wip.total`）か off（設定が無い） | room は `total − unmerged` 本まで新しいレーンを入れる。off は制限なし。許可・予約ではない |
-| `60` | full（完全な観測で 未マージ ≥ `wip.total`。上限ちょうどを含む） | 新しいレーンを 1 本も入れず、plan.md の「見送り」へ。先にマージを進める |
-| `61` | 判定できない（取得の失敗・時間切れ・切り詰め・形の誤り・マージの証明が不明な枝がある） | 同上。`source` の読みが戻ってから、次の計画で照会し直す。上側の数を満杯・余裕と読まない |
-| `2` | 引数・設定の誤り（`wip.total` が 1〜1000 の整数でない、`wip.active` がある、repo / base を決められない） | 同上。`.commandmate/flow.yaml` を人が直してから照会し直す |
-| `1` / その他 | 想定外の例外・コマンドが動かない | 同上（0 以外はどれも新しいレーンを作る側へ落とさない） |
-
-`count` は同じ番号で、数えた（0）・数えられない（61）・設定の誤り（2）。60 は返さない。launch-worker・publish-pr・merge-pr は 60 / 61 を返さない（PR1 では変えていない）。
-
 ## 3-1 冷間起動の失敗 exit 99
-
-Codex / Command Code で実測（Antigravity は 2026-09-20 の run、#2770 で再発）。
-**待つ前に画面を見る。** 待ってから再送する手順だと、新規 worktree でほぼ必ず出る信頼ダイアログに
-2 分を払ったうえで 2 回目も同じ exit 99 になる（#2770 で実測）。
 
 ```bash
 SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)

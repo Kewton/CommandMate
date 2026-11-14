@@ -22,7 +22,6 @@ run のたびには読まない手順（exit code ごとの対処・担当の切
 - 送り先は `--instance` で指定し、send / wait / capture / respond で同じ値を渡す（Phase 0）
 - ワーカーに `/model` を送らない。Claude のモデルは起動時に `.claude/settings.local.json` で決める（Phase 0）
 - 迷ったら難（opus）にする。迷ったら Claude に回す（1-2b）
-- WIP の照会が 0 でなければ新しいレーンを run の対象から外す（1-5）
 - worktree の `npm install` では `--include=dev` を省かない（2-2）
 - `requireCommit: true` を外さない（2-4）
 - 同じブランチに契約を積むときは、`scope.allow` を前の契約の allow との和集合にする（2-4）
@@ -296,13 +295,6 @@ node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/r
 
 - `workspace/orchestration/runs/$DATE/assign.tsv` も同時に書く。1 行 = `<issue>\t<claude|command-code>\t<opus|sonnet|->`
   （3 列目は Claude のモデル。command-code は `-`。`--assign 123=claude-sonnet` は `123\tclaude\tsonnet` になる）
-- **WIP の照会**: 新しいレーン（worktree の無い Issue）を assign.tsv に入れる前に 1 回だけ。ほかの段では呼ばない
-
-```bash
-node scripts/orchestrate/flow-wip.mjs check --worktree . --json > "workspace/orchestration/runs/$DATE/wip.json"; WIP=$?
-```
-
-  0 は助言（許可・予約ではない）。入れない新しいレーンは **run の対象**（`{issue_numbers}`・`BUG_ISSUES`・plan.md）**から外し**、plan.md の「見送り」に残す。以後の段は対象だけを使う。docs/orchestrate/workers.md#1-5-wip-の照会 を読む
 - 依存関係グラフ
 - 並列実行グループ
 - マージ推奨順序
@@ -322,10 +314,21 @@ commandmatedev ls --branch feature/
 各Issueについて、対応するworktreeが存在しない場合は作成：
 
 ```bash
+# /worktree-setup を使用
 /worktree-setup {issue_numbers}
 ```
 
-手動は docs/orchestrate/workers.md#2-2-worktree-を手動で作る を読む（`npm install` の `--include=dev` は省かない）。
+または手動で:
+
+```bash
+git worktree add -b "feature/{N}-worktree" "../commandmate-issue-{N}" develop
+cd "../commandmate-issue-{N}" && npm install --include=dev
+```
+
+`--include=dev` は省かないこと。シェルが `NODE_ENV=production` だと devDependencies（vitest / eslint など）が入らない。
+そうなると、ワーカーの確認コマンドも検証ゲートも動かない。
+
+根拠: docs/orchestrate/contract.md#2-2-devdependencies-を入れる理由
 
 ### 2-3. CommandMateへの登録確認
 
@@ -753,7 +756,10 @@ send の後に task が `cliToolId` / `instanceId` = 担当に紐づいている
 
 根拠: docs/orchestrate/workers.md#3-1-goal-に手順を書き下す理由
 
-- **冷間起動の失敗**: send が exit 99 で、stderr に `prompt not ready` と出たら、メッセージは送られていない。**待つ前に画面を見る。**
+- **冷間起動の失敗**: send が exit 99 で、stderr に `prompt not ready` と出たら、メッセージは送られていない
+  （Codex / Command Code で実測。Antigravity は 2026-09-20 の run、#2770 で再発）。
+  **待つ前に画面を見る。** 待ってから再送する手順だと、新規 worktree でほぼ必ず出る信頼ダイアログに
+  2 分を払ったうえで 2 回目も同じ exit 99 になる（#2770 で実測）。
 
   exit 99 を受けたら docs/orchestrate/exit-codes.md#3-1-冷間起動の失敗-exit-99 を読み、画面ごとの表（信頼ダイアログ・既にプロンプト・まだ起動中）で分岐して再送する。
 
@@ -773,7 +779,7 @@ send の後に task が `cliToolId` / `instanceId` = 担当に紐づいている
 commandmatedev ls --branch feature/
 ```
 
-より詳細な監視は orchestrate-monitor skill を使う。monitor を起動するときは docs/orchestrate/workers.md#3-2-monitor-の起動と読み方 を読み、その手順（`hooks-task.sh`・`<worktree-id>@command-code`・起動直後の `monitor hooks ERROR`・絞るときも `ERROR|WARN|alive`）で動かす。
+より詳細な監視は orchestrate-monitor skill を使う。monitor を起動するときは docs/orchestrate/workers.md#3-2-monitor-の起動と読み方 を読み、その手順（`hooks-task.sh` を付ける・Command Code のワーカーは `<worktree-id>@command-code` で渡す・起動直後に `monitor hooks ERROR` が無いことを確かめる・ログを絞るときは `ERROR|WARN|alive` を含める）で動かす。
 
 **monitor の COMPLETE 判定をマージ可否の裁定に使わないこと。** 裁定は 3-3 の
 `wait --verify` の exit code である。
@@ -1347,9 +1353,9 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 
 ## 完了条件
 
-- [ ] 対象の Issue（見送りは除く）の開発が完了している（契約付き委任は `wait --verify` が exit 0）
+- [ ] 全Issueの開発が完了している（契約付き委任は `wait --verify` が exit 0）
 - [ ] 品質チェック全パス（ESLint, TypeScript, テスト, ビルド）
-- [ ] 対象の Issue（見送りは除く）のPRがdevelopにマージ済み
+- [ ] 全IssueのPRがdevelopにマージ済み
 - [ ] 各Issueの `changelog.d/<N>.md` がコミットに含まれ（`check` が exit 0）、module-reference の注記が本体に一本化されている（6-4）
 - [ ] developブランチでの統合ビルド・テストが全パス
 - [ ] （--full時）UAT全テストPASS

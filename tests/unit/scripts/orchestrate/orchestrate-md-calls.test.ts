@@ -16,7 +16,6 @@ import { parseArgs as parseWaitVerifyArgs } from '../../../../scripts/orchestrat
 import { parseArgs as parsePrecheckArgs } from '../../../../scripts/orchestrate/precheck.mjs';
 import { parseArgs as parsePublishArgs } from '../../../../scripts/orchestrate/publish-pr.mjs';
 import { parseArgs as parseMergeArgs } from '../../../../scripts/orchestrate/merge-pr.mjs';
-import { parseArgs as parseFlowWipArgs } from '../../../../scripts/orchestrate/flow-wip.mjs';
 
 const orchestrate = fs.readFileSync(path.resolve(__dirname, '../../../../.claude/commands/orchestrate.md'), 'utf8');
 
@@ -207,102 +206,5 @@ describe('Phase 6 after the review of PR 3 (#3477)', () => {
   it('6-2 waits for Unit Tests on a contract that did not run the whole suite', () => {
     expect(section('6-2')).toContain('整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ');
     expect(section('6-2')).toContain('`vitest related --dir tests/unit`');
-  });
-});
-
-describe('1-5 asks flow-wip once, before assign.tsv takes a new lane (#4368 PR1, R7)', () => {
-  const docs = (file: string) => fs.readFileSync(path.resolve(__dirname, '../../../../docs/orchestrate', file), 'utf8');
-  /** The `## <heading>` section of a document, up to the next `## `. */
-  const docSection = (text: string, heading: string): string => {
-    const start = text.indexOf(`\n## ${heading}\n`);
-    expect(start, `no ## ${heading}`).toBeGreaterThanOrEqual(0);
-    const end = text.indexOf('\n## ', start + 1);
-    return text.slice(start, end === -1 ? undefined : end);
-  };
-  const plan = section('1-5');
-  const block = bashBlocks(plan).find((b) => b.includes('scripts/orchestrate/flow-wip.mjs')) ?? '';
-  const workers = docSection(docs('workers.md'), '1-5 WIP の照会');
-  /** The flags up to the redirection of stdout. */
-  const flags = (b: string) => {
-    const all = scriptArgs(b, 'scripts/orchestrate/flow-wip.mjs');
-    const end = all.indexOf('>');
-    return end === -1 ? all : all.slice(0, end);
-  };
-  const exitCodes = docSection(docs('exit-codes.md'), '1-5 flow-wip check の 60 / 61 / 2');
-
-  it('has a bash block in 1-5 that calls check and parses', () => {
-    expect(block).not.toBe('');
-    parses(block);
-  });
-
-  it('passes flags flow-wip.mjs accepts: check, --worktree ., --json', () => {
-    const parsed = parseFlowWipArgs(flags(block));
-    expect('error' in parsed).toBe(false);
-    expect(parsed).toEqual({ options: expect.objectContaining({ command: 'check', worktree: '.', json: true }) });
-  });
-
-  it('1-5 is the only reader: 2-2, 3-1 and 3-3 do not call it, and no run-log record stands for it', () => {
-    for (const id of ['2-2', '3-1', '3-3']) expect(section(id), id).not.toContain('flow-wip');
-    expect(orchestrate.split('flow-wip.mjs check').length - 1).toBe(1);
-    expect(orchestrate).not.toMatch(/--note "wip=/);
-    expect(workers).not.toMatch(/run-log\.mjs append/);
-  });
-
-  it('1-5 says anything but 0 takes the new lane out of the run itself and keeps it in plan.md 見送り', () => {
-    expect(plan).toContain('assign.tsv に入れる前に 1 回だけ');
-    expect(plan).toContain('入れない新しいレーンは **run の対象**（`{issue_numbers}`・`BUG_ISSUES`・plan.md）**から外し**、plan.md の「見送り」に残す。以後の段は対象だけを使う');
-  });
-
-  it('workers.md: the block parses, any non-zero exit is no room, and the guarantee is stated', () => {
-    const wblock = bashBlocks(workers).find((b) => b.includes('flow-wip.mjs check')) ?? '';
-    parses(wblock);
-    expect(wblock).toContain('ROOM=0');
-    expect(parseFlowWipArgs(flags(wblock))).not.toHaveProperty('error');
-    expect(workers).toContain('**助言で、許可・予約ではない**');
-    expect(workers).toContain('**同時の照会の上限は保証しない**');
-    expect(workers).toContain('Issue・担当・モデル');
-    expect(workers).toContain('次の計画（1-5）で、`check` をやり直してから');
-    expect(workers).toContain('**すべて** `assign.tsv` に入れない');
-  });
-
-  it('one rule, not one per stage: the later stages take {issue_numbers} as narrowed in 1-5 (review 2 N1/N2)', () => {
-    // The rule lives in workers.md 1-5 and names every list the later stages read.
-    expect(workers).toContain('**この run の対象の並びそのものから外す**');
-    for (const list of ['`{issue_numbers}`', '`BUG_ISSUES`', 'plan.md の対象 Issue の表']) expect(workers).toContain(list);
-    expect(workers).toContain('段ごとに「見送りを除く」を書かない');
-    // The stages say nothing of their own about 見送り; they take the narrowed list.
-    for (const id of ['2-2', '2-4', '3-1']) expect(section(id), id).not.toContain('見送り');
-    const phase25 = orchestrate.slice(orchestrate.indexOf('## Phase 2.5'), orchestrate.indexOf('### 2.5-1.'));
-    expect(phase25).not.toContain('見送り');
-    expect(bashBlocks(section('2-2')).find((b) => b.includes('/worktree-setup'))).toContain('/worktree-setup {issue_numbers}');
-    expect(bashBlocks(section('7-1')).find((b) => b.includes('/uat'))).toContain('/uat {issue_numbers}');
-    // workers.md 2.5-1 no longer narrows BUG_ISSUES itself.
-    const send = bashBlocks(docs('workers.md')).find((b) => b.includes('for bug_issue in $BUG_ISSUES')) ?? '';
-    expect(send).not.toBe('');
-    expect(send).not.toContain('assign.tsv');
-  });
-
-  it('a slash-command line never relies on shell expansion in its arguments (review 2 N2)', () => {
-    // `/worktree-setup $(cut …)` is typed by the orchestrator, not run by a shell: `bash -n` passing proves nothing.
-    const lines = [orchestrate, docs('workers.md')]
-      .flatMap((text) => bashBlocks(text))
-      .flatMap((b) => b.split('\n'))
-      .filter((line) => /^\/[a-z][a-z-]*\b/.test(line.trim()));
-    expect(lines.some((line) => line.startsWith('/worktree-setup '))).toBe(true);
-    expect(lines.some((line) => line.startsWith('/uat '))).toBe(true);
-    expect(lines.filter((line) => /\$\(|\$\{?[A-Za-z_]|`/.test(line))).toEqual([]);
-  });
-
-  it('the completion check counts the run targets, not every Issue (review 2 N3)', () => {
-    const done = orchestrate.slice(orchestrate.indexOf('\n## 完了条件\n'));
-    expect(done).toContain('- [ ] 対象の Issue（見送りは除く）の開発が完了している');
-    expect(done).toContain('- [ ] 対象の Issue（見送りは除く）のPRがdevelopにマージ済み');
-    expect(done).not.toContain('全Issueの');
-  });
-
-  it('exit-codes.md has a row for 0, 60, 61, 2 and the rest', () => {
-    for (const code of ['0', '60', '61', '2', '1']) {
-      expect(exitCodes.split('\n').some((line) => line.startsWith(`| \`${code}\``)), code).toBe(true);
-    }
   });
 });
