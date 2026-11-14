@@ -12,7 +12,7 @@
 
 | 種類 | 例 | Git 追跡 | 理由 |
 |---|---|:---:|---|
-| **設定**（人が書く宣言） | `verify.yaml`、`uat.yaml`、`tasks/*.yaml` | ✅ **する** | チーム全員・全 worktree で同じ判定基準／同じ契約を共有する必要がある。レビュー対象でもある |
+| **設定**（人が書く宣言） | `verify.yaml`、`uat.yaml`、`flow.yaml`、`tasks/*.yaml` | ✅ **する** | チーム全員・全 worktree で同じ判定基準／同じ契約を共有する必要がある。レビュー対象でもある |
 | **ランタイムデータ**（アプリが書く） | `attachments/`、キャッシュ類、`uat/`（UAT run の成果物） | ❌ しない | アプリや run が動くたびに増え続ける生成物。`dev-reports/` と同じ扱い |
 
 **`uat.yaml` と `uat/` は名前が似ているが、表の行が違う。** 前者は「この製品はどう起動し・どう止め・
@@ -32,6 +32,7 @@
 /.commandmate/*
 !/.commandmate/verify.yaml
 !/.commandmate/uat.yaml
+!/.commandmate/flow.yaml
 !/.commandmate/tasks/
 /.commandmate/tasks/*
 !/.commandmate/tasks/*.yaml
@@ -43,9 +44,10 @@
 2. `!/.commandmate/verify.yaml` — 検証ゲートの宣言だけ例外
 3. `!/.commandmate/uat.yaml` — UAT 環境の宣言だけ例外。**ファイル 1 本を名指している**ので、
    run の成果物（既定 `.commandmate/uat/`）は 1 の除外に残る
-4. `!/.commandmate/tasks/` — **`tasks` ディレクトリ自体**の除外を解除
-5. `/.commandmate/tasks/*` — その中身は改めて全部除外
-6. `!/.commandmate/tasks/*.yaml` — 契約ファイル（`.yaml`）だけ例外
+4. `!/.commandmate/flow.yaml` — 流れの設定（#4368 の `wip.total`）だけ例外。記録はリポジトリの外（`~/.commandmate/flow`）に出る
+5. `!/.commandmate/tasks/` — **`tasks` ディレクトリ自体**の除外を解除
+6. `/.commandmate/tasks/*` — その中身は改めて全部除外
+7. `!/.commandmate/tasks/*.yaml` — 契約ファイル（`.yaml`）だけ例外
 
 ---
 

@@ -197,6 +197,15 @@ export interface SubmitVerifiedSendParams {
    * (`not-sent` / `prompt-not-ready`). Omitted, nothing changes.
    */
   readiness?: InputReadiness;
+  /**
+   * A synchronous last check right before the body's first key or paste
+   * (Issue #4385): Antigravity's role gate, handed in by the driver itself so a
+   * direct call of the sender is checked as well as the send service's. It runs
+   * after every await of the send, right before `noteInputStart()`; a throw
+   * types nothing (a loaded paste buffer is dropped first). Omitted, nothing
+   * changes.
+   */
+  beforeBody?: () => void;
 }
 
 /** A tool's readiness test for the frames read under the input lock (Issue #4040). */
