@@ -66,6 +66,26 @@ async function settle(): Promise<void> {
   });
 }
 
+/**
+ * Enter, and the whole answer to it, inside one awaited act. The request is observed
+ * (the fetch call), then one macrotask passes: the fake route answers through
+ * microtasks only, so the save has settled and has handed the draft back by then.
+ * Updates queued in an act are rendered and their effects flushed when it exits — the
+ * reopened editor's mount effect (which fixes `phoneNoteEditBase`, the version its
+ * draft names) has run before this returns, and only then is the error awaited. The
+ * next Enter therefore follows that version being fixed by the order of the steps,
+ * not by a guessed number of ticks.
+ */
+async function enterAndAwaitError(testId: string, text: string): Promise<void> {
+  const calls = fetchMock.mock.calls.length;
+  await act(async () => {
+    typeAndEnter(testId, text);
+    await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBe(calls + 1));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+  await waitFor(() => expect(screen.getByTestId(`${testId}-error`)).toBeTruthy());
+}
+
 const codex: AgentInstance = { id: 'codex', cliTool: 'codex', alias: 'codex', order: 1 };
 
 function pcPane(instance: AgentInstance = claude) {
@@ -537,8 +557,8 @@ describe('3rd review P2-1: a draft restored after another deleted the note saves
     render(<Phone />);
     fireEvent.click(screen.getByTestId('open'));
     deletedByAnother();
-    typeAndEnter('mobile-session-note-input', 'スマホの下書き');
-    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました'));
+    await enterAndAwaitError('mobile-session-note-input', 'スマホの下書き');
+    expect(screen.getByTestId('mobile-session-note-input-error').textContent).toContain('他で更新されました');
     typeAndEnter('mobile-session-note-input', 'スマホの下書き');
     await settle();
     expect(sentBase(1)).toBe(0);
@@ -550,8 +570,7 @@ describe('3rd review P2-1: a draft restored after another deleted the note saves
     render(<Phone />);
     fireEvent.click(screen.getByTestId('open'));
     deletedByAnother();
-    typeAndEnter('mobile-session-note-input', 'スマホの下書き');
-    await waitFor(() => expect(screen.getByTestId('mobile-session-note-input-error')).toBeTruthy());
+    await enterAndAwaitError('mobile-session-note-input', 'スマホの下書き');
     expect(store('他の人が書き直した', 0).ok).toBe(true);
     typeAndEnter('mobile-session-note-input', 'スマホの下書き');
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
