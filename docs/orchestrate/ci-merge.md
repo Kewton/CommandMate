@@ -129,6 +129,41 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **待ち切った verify**: `reason=mutex-wait` の SKIP だけで exit 99 になった検証は、`wait-verify.mjs` が `--mutex-retries`（既定 2）回まで
   自動で並び直す（#3938）。手順と記録の読み方は docs/orchestrate/exit-codes.md#3-4-99-の対応
 
+## 6-1-1 マシンの資源の枠（resource.yaml と status）
+
+（#4370 PR1a。設計は docs/design/resource-4370.md）`cpu.heavy` の上に、マシン全体の枠を数えるセマフォを段階的に足す。
+**PR1a は設定の読み手・判定の純関数・読み取りだけの `status` で、枠はまだ取らない**（precheck・merge-pr・verify は今までどおり
+`cpu.heavy` だけ。取得と `run` は PR1b、呼び手への組み込みは PR2 以降）。
+
+- **設定**: `~/.commandmate/resource.yaml`（`CM_RESOURCE_CONFIG` で移せる。試験は tests/setup.ts が一時の場所にする）。
+  無ければ既定。全体の枠 S = max(1, floor(ncpu × `commandmate_share`))、ホストの枠 C = S − `ci_vm.cpus` − `weights.cpu_heavy`
+
+  | 鍵 | 既定 | 検査 |
+  |---|---|---|
+  | `version` | 1 | 1 以外は誤り |
+  | `ncpu` | `auto`（論理 CPU 数） | 1 以上の整数か `auto` |
+  | `commandmate_share` | 0.4 | 0 < x ≤ 1 |
+  | `load_ceiling` | 1.0（× ncpu） | > 0 |
+  | `load_resume` | 0.85（× `load_ceiling`） | 0 < x < 1 |
+  | `weights.cpu_heavy` | `min(4, max(0, S − ci_vm.cpus − 1))` | 0 以上の整数 |
+  | `ci_vm.cpus` | 0（不明） | 0 以上の整数 |
+
+  既定だけなら、どの論理 CPU 数でも C ≥ 1（ncpu 4 → C 1、8 → 1、28 → 7）。読めない・形が違う・範囲の外・違う `version`・
+  明示した値で C < 1 は誤りで、既定に倒さない。同じ版の知らない鍵は警告だけ
+- **読み方**: `node scripts/orchestrate/resource.mjs status [--json]`。S・自分の C・観測した有効な C（`<root>/cpu.sem/` の公開済みの
+  参加者の `ownCapacity` と自分の C の最小。`--json` の `participantsMin` は参加者だけの最小）・保存された門と load から計算した門・
+  保有の和・保有者と待ち手（並べの順・回収の候補・次に入れる待ち手）・警告を出す。`<root>` は machine-lock と同じ
+  （`CM_VERIFY_LOCK_ROOT`、既定 `~/.commandmate/locks`）
+- **読み取りだけ**: ディレクトリ・記録・`state.json`・events を作らず、消さず、回収もしない。`cpu.heavy.lock` も読まない。
+  `cpu.sem/` が無ければ「参加者なし」、一覧が読めなければ「不明」で exit 3（空と表示しない）。設定の誤りは exit 2
+  （`resource: refused config …`）。表示は別の時点の写しで、取得の許可ではない
+- **参加者の数え方**: `holders/<uuid>.json`・`waiters/<P>-<12 桁>.json` の名前に合うファイルだけを数える。書き途中・落ちた書き手の
+  tmp（`.` で始まる名前）は数えず警告だけ、一覧の後に消えた記録は去ったとして扱う。名前に合うのに読めない記録は有効な C を
+  「不明」にする（人が `status` の名指しを見て消す）
+- **警告の主なもの**: `ci_vm.cpus` を書いていない（Docker Desktop の割り当てを書く）／`weights.cpu_heavy` が既定で縮んだ（ncpu 4 では
+  0 で、`cpu.heavy` の保有者は帳簿の外）／壊れた記録・別の host の記録・`leaderStart: null`・pid が死にグループが生きる保有者／
+  `state.json` の写し（`copy.capacity`）と観測した有効な C の食い違い
+
 ## 6-2 統合破壊の実測
 
 2026-08-22 に、単独でどちらも全ゲート緑・CI 11/11 の

@@ -137,6 +137,8 @@ describe('[#4163] tests/setup.ts keeps no CM_* path from outside', () => {
     'CM_PRODUCT_PUBLISH_DIR',
     // Issue #4176
     'CM_TMUX_SCRIPT_DIR',
+    // Issue #4370
+    'CM_RESOURCE_CONFIG',
   ];
   const REMOVED = [
     'CM_ROOT_DIR',
