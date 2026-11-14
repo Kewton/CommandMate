@@ -38,6 +38,8 @@ docs/orchestrate/ci-merge.md#6-1-1-重い検証の資源制御と待ちの記録
 `logRecords` に返すので、`next`・`head`・unit の一覧・env-clean の集計には入らない。`status` は要約の後に `queue:` の段落（`--json` は `queue`）を出す
 （docs/orchestrate/ci-merge.md#6-2-マージの列--queue）。
 
+同じ日に複数の run が `workspace/orchestration/runs/$DATE/` を使うので、run のファイルは `plan-$RUN_ISSUES.md`・`summary-$RUN_ISSUES.md` のように Issue 番号の接尾辞を付けて書く。ディレクトリを作るときに `ls` で既存を確かめ、`>`・`cat >`・ファイルを書く道具は既存を確かめた後だけ使う（`workspace/` は gitignore なので git から戻せない）。
+
 ## 1-5 同じ Issue の複数の PR（work item）
 
 1 つの Issue に PR が 2 本以上あるとき（PR 1a と PR 2 など）は、PR ごとに **`--item <名前>`**（英数字・`-`・`_`、32 文字まで）を付けて記録する（#3883）。

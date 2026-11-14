@@ -100,6 +100,8 @@ node scripts/orchestrate/consistency-review.mjs --run-dir "workspace/orchestrati
 **再レビューでは、前回の指摘が解消したかを先に確かめる。** 新しい指摘を探す前に、前回の指摘を 1 件ずつ「解消／一部未対応／未対応」に判定して記録する。
 続けて、**前回の指摘への修正で変わった共通の規則（共有状態・関数・定数・型）の全読者**を、一覧と呼び出しの連鎖の両方で再確認させる（雛形 `consistency-review-rereview.md` の (0b)。#3884）。再レビューの上限（自動は 3 回まで）は変えない。
 
+- **レビューの待ち中にサーバーを再起動しない**（`/rebuild` を含む）。再起動すると走っているターンの追跡が失われ、`wait` が偽の完了を返し、`reply` は前のターンの返事を返す。再起動してしまったら、依頼文のファイル名で Codex の rollout（`~/.codex/sessions/**/*.jsonl`）を探し、その依頼の後の assistant の発言に `DONE:` が出るまで待って本文を取る。画面を grep するなら `sed 's/\x1b\[[0-9;]*m//g'` で色を落としてから
+
 ### 5-2b 終了コードと記録の条件表
 
 `scripts/orchestrate/consistency-review.mjs` の `OUTCOMES` の写し（#3984）。写しはここ 1 か所だけで、テストが行・列ごとに `OUTCOMES` と照合する（script のヘッダ・orchestrate.md 5-2b・module-reference はここを指す）。

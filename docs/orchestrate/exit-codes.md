@@ -17,6 +17,10 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 再送では task が作り直されるので、tasks.tsv の task id を差し替える。
 再送も exit 99 なら、もう一度画面を見る（同じ表で分岐する）。再指示回数には数えない（3-4）。
 
+## 3-3 wait が signal で終わったとき（exit 128 以上）
+
+`wait` の exit が 128 以上（143 = SIGTERM など）なら、`wait` 自身が signal で終わった印で、裁定ではない。裁定したかどうかはログに `GATE …` / `RESULT …` の行があるかで見る。無ければワーカーを止めたり差し戻したりせず、capture で状態を確かめてから待ち直す。長い run の途中で自動 update が挟まると Auto-Yes が切れていることがあるので、`capture --json` の `autoYes.enabled` も見る。
+
 ## 3-4 20 の対応
 
 - **ワーカー起因**: `lint` / `typecheck` / `unit` など宣言ゲートの失敗、`scope` 違反、`work-evidence` の不足、
@@ -28,6 +32,9 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   （2026-09-20 の #2771 で実測。原因は 2-4-2 の「差し替えの条件」にある mutex の非対称）
 - **ワーカー起因ではない**: `scope` の違反が、すべて同じブランチの前の契約のコミットで入ったファイルであるもの
   （契約の書き方の誤り。`git show --name-only <この契約のコミット>` がすべて allow の中なら、ワーカー起因ではない。2-4 の和集合を参照）
+- **ワーカー起因ではない**: 依存先の未マージのブランチ（`origin/feature/<依存先>`）から worktree を切った item の `scope` 違反。scope は `origin/develop...HEAD` で裁定するので、依存先の変更ファイルが差分に入り、squash でマージされても develop を取り込むまで消えない。先に切るなら契約の `scope.allow` に依存先の変更ファイルも入れる。入れていなければ develop を取り込んでから `git diff --name-only origin/develop...HEAD` を allow と突き合わせて裁定し、再指示の回数に数えない
+- **ワーカー起因ではない**: `.commandmate/verify.yaml` の `options.*`（`requireEnvClean` など）を有効にする Issue で、その組み込みゲートだけが落ちたもの。task は変更の前に作られたのでベースラインが無く、`env-clean ERROR (UNKNOWN)` になる。契約の `verify.gates` を絞っても組み込みゲートは独立に走る（OR）。残りのゲートが PASS なら差し戻さずに合格として扱い、PR 本文に経緯を書く。影響はマージの時点で作成済みの task だけ
+- **申告の確かめ**: ワーカーの「develop の時点で既に赤だった（範囲外）」という申告は、そのテストファイルを `npx vitest run <file>` で単独に実行して exit code で確かめてから受け入れる
 - **ワーカー起因ではない**: `env-clean` の違反のうち、ワーカーの作業と結び付かないもの。
   2026-09-17 のパイロットでは、`env-clean` だけが FAIL して exit 20 になった。違反は次の 3 件で、いずれもワーカーと無関係だった:
   - 別リポジトリの orchestrate が消した `mcbd-*` セッション（`-`）
@@ -49,6 +56,8 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   - ワーカーが実行したコマンド: `capture --prompts --limit 100` の `Run this command?` と、そこに書かれた `start with '<cmd>'`
   - 最初のツール呼び出しの時刻
   - 違反項目の時刻（`~/.commandmate-test-<ms>` の `<ms>` など）
+
+  tmux セッションが消えた（`- mcbd-…`）だけの違反は、再指示の前に次も確かめる: `git worktree list` にその worktree があるか（無ければ削除済み worktree の残骸）、その時間帯のサーバログに `kill-session` があるか、PR の差分に tmux の操作（`kill-session` / `kill-server`）が無いか、`tmux ls` で他の `mcbd-*` が残っている（一斉に消えたのではない）か。同じ `-` 行は同じ run の別のタスクでも出る（ベースラインに残り続ける）。
 
   ワーカー起因でないと判定した場合の扱い:
   - 残りのゲートがすべて PASS なら、オーケストレーターの裁定で合格として扱う
@@ -73,6 +82,10 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 - `wait --verify` は進行中（running / waiting_input / verifying）の task にしか紐づかない（`IN_FLIGHT_TASK_STATUSES`）。1 回目の検証で task は終了済みになる
 - 紐づかないと scope は SKIP、env-clean は「ベースライン無し」の ERROR で exit 20 になり、ゲートも契約ではなく verify.yaml 全部になる
 - 2026-10-03 #3099 の実測: 宣言ゲートは unit 全体 1283 秒を含めて全 PASS なのに exit 20 になった
+
+## 3-3 検証の run を cancel すると task も終わる
+
+検証の run を cancel（`POST /api/worktrees/:id/verify/runs/:runId/cancel`）すると、紐づいた task も `cancelled` で終わる。それ以後の検証は task に紐づかず、scope は SKIP、env-clean はベースライン無しの ERROR、ゲートは verify.yaml 全部になって exit 20 になる。途中の状態を見た検証は cancel せずに終わらせ、裁定に使わない。cancel したら、scope（`git diff --name-only origin/develop...HEAD` を allow / deny と照合）と env-clean は手で照合すると決めてから進める。CLI の `wait` や `verify` を止めてもサーバー側の run は止まらない（同じ worktree の次の検証は `already in progress` になる）。
 
 ## 3-4 3 の対応
 
@@ -150,6 +163,10 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 別の worktree の `unit` / `integration` / `unit-related` が終わってから、同じ行の precheck を走らせ直す（`skip` は再利用されない）。
 しきい値と待ちの記録は [ci-merge.md の 6-1-1](./ci-merge.md) を見る。
 `merge-pr.mjs` が自分で取り込んだ HEAD の precheck では起きない（重い段はロックを取らずに `<段>=ci` と記録し、PR の CI に任せる。#4265、[ci-merge.md の 6-2 取り込み後の重い段](./ci-merge.md)）。
+
+## 6-1-1 precheck の負荷による timeout
+
+precheck のうち全ファイルを走査するガードのテスト（`tests/unit/guards` の下）が `Test timed out in 5000ms` で落ちるのは、多くの場合マシンの負荷（同じマシンの CI ランナーなど）によるもので、作業とは関係しない。ワーカーへ再指示しない。すぐに再実行しても同じ負荷で落ちる。1 分の load average が論理 CPU 数の目安を下回るまで待ってから、同じ HEAD で precheck を再実行する。
 
 ## エラーハンドリング表の個別の行
 
