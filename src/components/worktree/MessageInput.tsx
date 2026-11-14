@@ -8,6 +8,7 @@
 import React, { memo, useState, useCallback, FormEvent, useRef, useEffect, useLayoutEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { handleApiError, isBriefBoundaryChanged, type SendBriefChoice } from '@/lib/api-client';
+import { readSendRoleRefusal, sendRoleRefusalMessageKey } from '@/components/worktree/role-refusal-notice';
 import { fetchStartPreview, isCommandBody, START_PREVIEW_TIMEOUT_MS } from '@/lib/handoff/screen-client';
 import {
   beginHandoffPageOperation,
@@ -531,6 +532,16 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   }, [pendingInsertText, onInsertConsumed]);
 
   /**
+   * Issue #4385: the sentence of a failed (awaited) send. A 409 the server refused because of the
+   * role (`roleRefusal`, nothing typed) says why and what to do, in the screen's language — the
+   * same meaning as the CLI's `send` exit 32; the draft stays, as for every failed send here.
+   */
+  const describeSendError = useCallback((err: unknown): string => {
+    const roleRefusal = readSendRoleRefusal(err);
+    return roleRefusal !== null ? t(sendRoleRefusalMessageKey(roleRefusal)) : handleApiError(err);
+  }, [t]);
+
+  /**
    * Handle message submission
    */
   const submitMessage = useCallback(async () => {
@@ -659,11 +670,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
       // error, the draft stays.
       if (isHandoffPageOperationRefused(err)) return;
-      setError(handleApiError(err));
+      setError(describeSendError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -732,13 +743,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         }
       } else {
         setBriefAsk(null);
-        setError(handleApiError(err));
+        setError(describeSendError(err));
       }
     } finally {
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, splitIndex, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, splitIndex, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError]);
 
   const closeBriefAsk = useCallback(() => {
     if (briefSending) return;

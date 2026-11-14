@@ -57,6 +57,12 @@
     "assistant": "Assistant",
     "sending": "Sending…",
     "failedToSend": "Failed to send",
+    "roleRefusal": {
+      "notApplied": "The role is not applied to this session, so nothing was sent (the agent runs without it). Stop the session and start it again.",
+      "notConfirmed": "The role could not be confirmed for this session, so nothing was sent. Stop the session and start it again.",
+      "artifactFailed": "The role's file could not be prepared, so the session was not started and nothing was sent. Check the role settings and send again.",
+      "other": "Nothing was sent because the session's role condition did not hold. Check the role settings and, if needed, stop the session and start it again."
+    },
     "retrySending": "Retry sending message",
     "discard": "Discard",
     "discardMessage": "Discard message",

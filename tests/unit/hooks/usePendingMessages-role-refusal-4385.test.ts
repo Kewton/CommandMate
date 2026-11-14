@@ -1,0 +1,113 @@
+/**
+ * Issue #4385 (A4 差し戻し): the optimistic layer and a send the server refused because of the role
+ * (409 `roleRefusal`, nothing typed). The row fails at once with the reason (never parked, even
+ * while the network is measured down — the server answered), `onRoleRefused` hears it with
+ * `firstAttempt` (a new send's text goes back to the composer), and `discard()` does not hand the
+ * text back a second time. Negative controls: without `readRoleRefusal` (the hook's other users,
+ * e.g. the sessions tile) a 409 is a failure as before, and a failure that is not a role refusal
+ * carries no reason and is handed back on discard as before.
+ *
+ * @vitest-environment jsdom
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { renderHook, act } from '@testing-library/react';
+import { usePendingMessages, type PendingConnectivity, type SendFn } from '@/hooks/usePendingMessages';
+import { ApiError } from '@/lib/api-client';
+import { readSendRoleRefusal } from '@/components/worktree/role-refusal-notice';
+
+const ONLINE: PendingConnectivity = { offline: false, reachable: true };
+const OFFLINE: PendingConnectivity = { offline: true, reachable: false };
+const flush = () => act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+const refusal = (roleRefusal: string) =>
+  new ApiError('refused', 409, { error: 'refused', code: 'ROLE_LAUNCH_REFUSED', roleRefusal, sendOutcome: 'not_sent' });
+
+function renderPending(sendFn: SendFn, opts: { connectivity?: PendingConnectivity; withReason?: boolean; handBack?: boolean } = {}) {
+  const onRoleRefused = vi.fn(() => opts.handBack ?? true);
+  const hook = renderHook(() =>
+    usePendingMessages({
+      worktreeId: 'w1',
+      serverMessages: [],
+      sendFn,
+      connectivity: opts.connectivity ?? ONLINE,
+      ...(opts.withReason === false ? {} : { readRoleRefusal: readSendRoleRefusal, onRoleRefused }),
+    }),
+  );
+  return { ...hook, onRoleRefused };
+}
+
+describe('[#4385 A4] the optimistic layer and a role refusal', () => {
+  it.each(['not-applied', 'not-confirmed', 'artifact-failed'] as const)('%s: the row fails with the reason', async (reason) => {
+    const { result, onRoleRefused } = renderPending(vi.fn().mockRejectedValue(refusal(reason)));
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('error');
+    expect(result.current.messages[0].optimisticRoleRefusal).toBe(reason);
+    expect(onRoleRefused).toHaveBeenCalledWith('hello', reason, { firstAttempt: true });
+    let restored: string | undefined = 'unset';
+    act(() => {
+      restored = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(restored).toBeUndefined();
+  });
+
+  it('is never parked while the network is measured down (the server answered)', async () => {
+    const { result } = renderPending(vi.fn().mockRejectedValue(refusal('not-confirmed')), { connectivity: OFFLINE });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(result.current.pending[0].queued).toBe(false);
+    expect(result.current.messages[0].optimisticState).toBe('error');
+  });
+
+  it('a retry clears the reason while it is on its way, and is heard as not the first attempt', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    const sendFn = vi
+      .fn()
+      .mockRejectedValueOnce(refusal('not-applied'))
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { answer = reject; }));
+    const { result, onRoleRefused } = renderPending(sendFn);
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    act(() => result.current.retry(result.current.pending[0].tempId));
+    expect(result.current.messages[0].optimisticState).toBe('sending');
+    expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
+    await act(async () => answer(refusal('not-confirmed')));
+    await flush();
+    expect(result.current.messages[0].optimisticRoleRefusal).toBe('not-confirmed');
+    expect(onRoleRefused).toHaveBeenLastCalledWith('hello', 'not-confirmed', { firstAttempt: false });
+  });
+
+  it('when the text was not handed back, discard hands it back as before', async () => {
+    const { result } = renderPending(vi.fn().mockRejectedValue(refusal('not-applied')), { handBack: false });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    let restored: string | undefined;
+    act(() => {
+      restored = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(restored).toBe('hello');
+  });
+});
+
+describe('[#4385 A4] (negative controls) the hook as before', () => {
+  it('without readRoleRefusal a 409 is a plain failure, handed back on discard', async () => {
+    const { result } = renderPending(vi.fn().mockRejectedValue(refusal('not-applied')), { withReason: false });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('error');
+    expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
+    let restored: string | undefined;
+    act(() => {
+      restored = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(restored).toBe('hello');
+  });
+
+  it('a 500 carries no reason and is not heard as a role refusal', async () => {
+    const { result, onRoleRefused } = renderPending(vi.fn().mockRejectedValue(new ApiError('boom', 500, { error: 'boom' })));
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'claude' }));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('error');
+    expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
+    expect(onRoleRefused).not.toHaveBeenCalled();
+  });
+});

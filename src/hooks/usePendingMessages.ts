@@ -63,7 +63,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, OptimisticSendState } from '@/types/models';
+import type { ChatMessage, OptimisticSendState, SendRoleRefusalReason } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /** Default: mark an unconfirmed 'sending' message as errored after this long. */
@@ -132,6 +132,17 @@ export interface PendingMessage {
    * session is back. `retry()` clears it.
    */
   heldNotSent?: boolean;
+  /**
+   * Issue #4385: the last attempt was refused by the server because of the role (409
+   * `roleRefusal`, nothing typed) — the reason the failed row shows. Cleared by `retry()`.
+   */
+  roleRefusal?: SendRoleRefusalReason;
+  /**
+   * Issue #4385: this message's text was already handed back to the composer by
+   * {@link UsePendingMessagesOptions.onRoleRefused} (its first attempt was refused), so
+   * `discard()` does not hand it back a second time.
+   */
+  returnedToComposer?: boolean;
 }
 
 /**
@@ -192,6 +203,19 @@ export interface UsePendingMessagesOptions {
   isNotSent?: (error: unknown) => boolean;
   /** Issue #4345 1c 再指示 2: a new send not sent — its text, for the composer to keep. */
   onNotSent?: (content: string) => void;
+  /**
+   * Issue #4385: the role reason of a rejection the server answered with 409 `roleRefusal`
+   * (nothing typed), or null. Such a rejection fails the row at once (the server answered, so it
+   * is never parked for connectivity) and the row carries the reason. Omitted: no reason is read.
+   */
+  readRoleRefusal?: (error: unknown) => SendRoleRefusalReason | null;
+  /**
+   * Issue #4385: a send was refused because of its role — for the screen to say why right away.
+   * `firstAttempt` is true for a new send (not a retry): its text is the composer's to keep, as
+   * the composer clears only what the server took. Returns whether it handed the text back to the
+   * composer (then `discard()` does not hand it back again).
+   */
+  onRoleRefused?: (content: string, reason: SendRoleRefusalReason, info: { firstAttempt: boolean }) => boolean;
 }
 
 export interface UsePendingMessagesResult {
@@ -200,7 +224,10 @@ export interface UsePendingMessagesResult {
   pending: PendingMessage[];
   sendOptimistic: (content: string, options: OptimisticSendOptions) => void;
   retry: (tempId: string) => void;
-  /** Removes the pending and returns its content (for draft restore). */
+  /**
+   * Removes the pending and returns its content (for draft restore) — undefined when the text was
+   * already handed back to the composer by `onRoleRefused` (Issue #4385).
+   */
   discard: (tempId: string) => string | undefined;
 }
 
@@ -286,6 +313,7 @@ function toChatMessage(p: PendingMessage, worktreeId: string): ChatMessage {
     // drawn as 'error' so the bubble offers retry / discard (both the PC card and the mobile bubble
     // show them for 'error' only). Nothing resends it on its own; retry is the person's.
     optimisticState: p.heldNotSent ? 'error' : p.status,
+    ...(p.status === 'error' && p.roleRefusal ? { optimisticRoleRefusal: p.roleRefusal } : {}),
   };
 }
 
@@ -299,6 +327,8 @@ export function usePendingMessages({
   resendGraceMs = DEFAULT_RESEND_GRACE_MS,
   isNotSent,
   onNotSent,
+  readRoleRefusal,
+  onRoleRefused,
 }: UsePendingMessagesOptions): UsePendingMessagesResult {
   const [pending, setPending] = useState<PendingMessage[]>([]);
 
@@ -321,6 +351,10 @@ export function usePendingMessages({
   isNotSentRef.current = isNotSent;
   const onNotSentRef = useRef(onNotSent);
   onNotSentRef.current = onNotSent;
+  const readRoleRefusalRef = useRef(readRoleRefusal);
+  readRoleRefusalRef.current = readRoleRefusal;
+  const onRoleRefusedRef = useRef(onRoleRefused);
+  onRoleRefusedRef.current = onRoleRefused;
 
   const offlineRef = useRef(offline);
   offlineRef.current = offline;
@@ -426,13 +460,39 @@ export function usePendingMessages({
         // fires as a fallback if the echo never arrives).
       } catch (error) {
         // Issue #4345 1c 再指示 2 (K1): not sent — not a failure (no error row, no resend spent).
-        if (isNotSentRef.current?.(error)) revertNotSent(p, previous);
-        else failPending(p.tempId);
+        if (isNotSentRef.current?.(error)) {
+          revertNotSent(p, previous);
+          return;
+        }
+        // Issue #4385: refused because of the role (409, nothing typed). The server answered, so
+        // the row fails now (never parked) with the reason; a new send's text goes back to the
+        // composer, which clears only what the server took.
+        const roleRefusal = readRoleRefusalRef.current?.(error) ?? null;
+        if (roleRefusal !== null) {
+          clearTimer(p.tempId);
+          const firstAttempt = previous === undefined;
+          const handedBack = onRoleRefusedRef.current?.(p.content, roleRefusal, { firstAttempt }) === true;
+          setPending((prev) =>
+            prev.map((cur) =>
+              cur.tempId === p.tempId && cur.status === 'sending'
+                ? {
+                    ...cur,
+                    status: 'error',
+                    queued: false,
+                    roleRefusal,
+                    returnedToComposer: cur.returnedToComposer || handedBack,
+                  }
+                : cur,
+            ),
+          );
+          return;
+        }
+        failPending(p.tempId);
       } finally {
         inFlightRef.current.delete(p.tempId);
       }
     },
-    [startTimer, failPending, revertNotSent],
+    [startTimer, failPending, revertNotSent, clearTimer],
   );
 
   const sendOptimistic = useCallback(
@@ -471,6 +531,7 @@ export function usePendingMessages({
         accepted: false,
         autoResendAttempted: false,
         heldNotSent: false,
+        roleRefusal: undefined,
       };
       setPending((prev) =>
         prev.map((p) => (p.tempId === tempId ? revived : p)),
@@ -487,7 +548,8 @@ export function usePendingMessages({
       clearTimer(tempId);
       inFlightRef.current.delete(tempId);
       setPending((prev) => prev.filter((p) => p.tempId !== tempId));
-      return target?.content;
+      // Issue #4385: a text already handed back to the composer is not handed back twice.
+      return target?.returnedToComposer ? undefined : target?.content;
     },
     [clearTimer],
   );
