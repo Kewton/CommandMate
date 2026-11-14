@@ -236,7 +236,7 @@ npm run db:reset      # DBリセット
 サブコマンドの一覧は `commandmate --help`。起動・停止・`--issue` による並列サーバーは [cli-setup-guide.md](./docs/user-guide/cli-setup-guide.md)、その他の詳細と終了コードは [cli-operations-guide.md](./docs/user-guide/cli-operations-guide.md)（remote は [webapp-guide.md](./docs/user-guide/webapp-guide.md) も）を参照。踏むと事故になる規則だけをここに残す。
 
 - **送り先**: `send` / `wait` / `respond` / `capture` / `reply` は `--instance <id>` 単独で指定する（例: `commandmate send <worktree-id> "メッセージ" --instance codex`）。`--agent` は roster 外のアドホック起動用
-- **本文の先頭**: `send` / `ask` の本文を `/` で始めない（slash コマンドとして扱われ未送信 exit 99。パスは相対か文の途中に）
+- **本文の先頭**: `send` / `ask` の依頼文を `/` で始めない（slash コマンドとして打たれ依頼にならない。パスは相対か文の途中に）
 - **`--model`**: `send` で copilot/antigravity/claude に効く。antigravity/claude は新規起動時のみで、稼働中へ指定すると 400
 - **wait**: `--timeout <秒>` 超過は exit 124。`--on-prompt human` でプロンプト検出後も待機継続。`wait` に `--agent` は無い。`--verify` は完了検知後に検証ゲートを実行し、不合格 exit 20 / 作業証跡ゼロ exit 21
 - **verify**: `commandmate verify <worktree-id> [--gates lint,unit] [--json]`。合格 0 / 不合格 20 / 作業証跡ゼロ 21（`.commandmate/verify.yaml`）

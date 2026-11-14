@@ -77,8 +77,9 @@ WORKTREE_DIR="../commandmate-issue-${ISSUE_NO}"
 if git worktree list | grep -q "$WORKTREE_DIR"; then
   echo "Worktree already exists: $WORKTREE_DIR"
 else
-  # Worktree作成（developブランチから派生）
-  git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" develop
+  # Worktree作成（origin/develop から派生。ローカルの develop は直前のマージを取り込んでいないことがある）
+  git fetch origin develop
+  git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" origin/develop
 fi
 ```
 

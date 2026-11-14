@@ -150,6 +150,8 @@ describe("docs/orchestrate after the memory move (#4403)", () => {
     ["plan-check.md", "1-3 並列にするときの落とし穴"],
     ["team.md", "8. 依頼ごとの完了の見張り"],
     ["report.md", "8 後の worktree の片付け"],
+    ["difficulty.md", "1-2b 委任する Issue で起票側がやること"],
+    ["difficulty.md", "1-2b 易の Issue を起票するときの書き方"],
   ];
 
   it.each(SECTIONS)('%s has the section "%s"', (file, heading) => {
@@ -164,5 +166,54 @@ describe("docs/orchestrate after the memory move (#4403)", () => {
     expect(agents).toContain("git worktree add");
     expect(agents).toContain("positive control");
     expect(agents).toContain("act on exactly that list");
+  });
+});
+
+/** The moved text, as corrected by the consistency review: each claim matches the code it names. */
+describe("the moved text agrees with the code and the runbook (#4403 review)", () => {
+  const read = (rel: string): string =>
+    fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
+
+  it("a body that starts with / is described as a slash command, not as an exit code", () => {
+    const workers = read("docs/orchestrate/workers.md");
+    expect(workers).toContain("**依頼文を `/` で始めない。**");
+    expect(workers).toContain("isSlashCommandBody");
+    expect(workers).not.toContain("未送信の exit 99 になる");
+    const claude = read("CLAUDE.md");
+    expect(claude).toContain("依頼文を `/` で始めない");
+    expect(claude).not.toContain("slash コマンドとして扱われ未送信 exit 99");
+  });
+
+  it("search hits are candidates for scope.allow, bounded by MAX_SCOPE_PATTERNS", () => {
+    const contract = read("docs/orchestrate/contract.md");
+    expect(contract).not.toContain("ヒットしたファイルをそのまま allow に入れる");
+    expect(contract).toContain("MAX_SCOPE_PATTERNS");
+  });
+
+  it("the easy-issue writing rules do not split by file count", () => {
+    const difficulty = read("docs/orchestrate/difficulty.md");
+    expect(difficulty).not.toContain("4 つ以上になるなら Issue を分ける");
+    expect(difficulty).toContain("この節は判定を変えない");
+  });
+
+  it("worktrees are cut from origin/develop in the runbook and /worktree-setup", () => {
+    expect(read(".claude/commands/orchestrate.md")).toContain(
+      'git worktree add -b "feature/{N}-worktree" "../commandmate-issue-{N}" origin/develop',
+    );
+    expect(read(".claude/commands/worktree-setup.md")).toContain(
+      'git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" origin/develop',
+    );
+  });
+
+  it("the watch rule gives the real reason --tail misses DONE", () => {
+    const team = read("docs/orchestrate/team.md");
+    expect(team).not.toContain("空行しか読まない");
+    expect(team).not.toContain("末尾が空行だけになる");
+  });
+
+  it("report.md notes that /worktree-cleanup misreads squash merges", () => {
+    expect(read("docs/orchestrate/report.md")).toContain(
+      "入口の `/worktree-cleanup` は `git branch --merged` で判定する",
+    );
   });
 });

@@ -82,7 +82,9 @@ done
 | 32 | `RoleExitCode.NOT_SENT` | `--role` などの条件が成り立たない、またはロールが原因で起動を断られた。本文は打っていない | ロールの状態を読み、セッションを止めて送り直す |
 | 99 | `ExitCode.UNEXPECTED_ERROR` | 送れていない（冷間起動など） | docs/orchestrate/exit-codes.md の「3-1 冷間起動の失敗」 |
 
-send / ask の本文を `/` で始めない。絶対パスで始めると slash コマンドとして扱われ、未送信の exit 99 になる。依頼文のパスは相対で書くか、文の途中に置く。
+**依頼文を `/` で始めない。** 依頼文のパスは相対で書くか、文の途中に置く。
+
+送信の結果: 本文の最初の語が空白を含まない `/…`（または `!…`）だと、CommandMate はそれを slash コマンドとして扱う（`src/lib/session/session-boundary.ts` の `isSlashCommandBody`）。brief を付けず、セッションの境界も消費せずに、本文をそのまま相手の CLI へ打つ（`session-brief.ts` の `plan()`。`tests/unit/lib/session/session-boundary-slash-4224.test.ts` が固定）。絶対パスで始めた依頼も同じ扱いになり、相手の CLI はコマンドとして読むので、依頼としては届かない。`send` の exit code はこの区別をしない。何が起きたかは相手の CLI と画面によって違うので、exit code で判断せず `capture` で画面を見る。
 
 ### `launch-worker.mjs send`
 
@@ -164,7 +166,7 @@ MONITOR_WORKTREE_ROOT=.. MONITOR_HOOKS_BASE=origin/develop \
 - poller の parser はファイル（引用した heredoc）に書き、ループの前に実データへ 1 回通して形を確かめる。parser の stderr を `/dev/null` に捨てない（空の結果と「読めなかった」が区別できなくなる）
 - ペインのテキストではなく結果を見張る（例: 守るべきセッションが生きているかを `tmux ls -F '#{session_name}' | grep -qx <名前>` で見る）。ワーカーのペインには契約文の禁止事項がそのまま映るので、テキスト照合は引用と実行を区別できない
 - `monitor.sh` を止めるときは起動時の PID を指定する（`kill <pid>`）。`pkill -f orchestrate-monitor/scripts/monitor.sh` は、同じマシンで別セッションが回している monitor まで止める。起動前に `ps` で同じワーカーへの monitor が無いことを確かめる。ログの追従は `tail -n 0 -F`（`-f` は truncate 後に BSD tail が追従をやめる）
-- worktree は `origin/develop` から切る（`git fetch origin` の後に `git worktree add -b <branch> <path> origin/develop`）。ローカルの `develop` は直前のマージを pull していないことがあり、その上に切ると直前に入った修正が worktree に無い。古い base で切ってしまったら worktree の中で `git merge origin/develop` する
+- worktree は `origin/develop` から切る（`git fetch origin develop` の後に `git worktree add -b <branch> <path> origin/develop`。本体 2-2 の手動の例と `/worktree-setup` も同じ形）。ローカルの `develop` は直前のマージを pull していないことがあり、その上に切ると直前に入った修正が worktree に無い。古い base で切ってしまったら worktree の中で `git merge origin/develop` する
 
 ## 3-3 完了検出が壊れた実例
 

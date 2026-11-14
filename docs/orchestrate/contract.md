@@ -283,7 +283,7 @@ Issue 本文の原因が実測していない仮説なら、goal に「本文の
 - `tests/unit/` には `lib/` の有無で同じモジュールのツリーが 2 つある（`tests/unit/hooks` と `tests/unit/lib/hooks`、`detection`・`polling`・`cli-tools` も）。`find tests -path '*<module>*'` で全部拾い、書いた glob が 0 件でないことも確かめる
 - 定数の正本（`src/config/*.ts` など）を入れたら `tests/unit/config/<同名>.test.ts` を無条件で入れる（配列の identity を固定していることがあり、値を保った差し替えでも落ちる）
 - 受入条件が「表示される・答えられる」のように層をまたぐときは、`grep -rl "<検出層の関数名>" src/` で既存の消費者を全部見て、同じ判断を通すべきものを入れる
-- 列挙値（CLI tool id・hook の種類・権限モードなど）を足す Issue は、同種の既存の値で `grep -rln '<既存の値>' src tests docs .claude scripts` を回し、ヒットしたファイルをそのまま allow に入れる（`Record<…>` の型・一覧を固定するテスト・docs のツール一覧が一斉に赤になる）
+- 列挙値（CLI tool id・hook の種類・権限モードなど）を足す Issue は、同種の既存の値で `grep -rln '<既存の値>' src tests docs .claude scripts` を回して候補を出す（`Record<…>` の型・一覧を固定するテスト・docs のツール一覧が一斉に赤になる）。ヒットを全部 allow に入れるのではなく、ヒットを読んで、新しい値のために変える必要がある生産者・消費者・試験だけを選び、上の「Issue が触ると宣言した範囲」に足す（値を読むだけで変えなくてよいファイルは入れない）。allow は広すぎると scope ゲートが効かなくなり、`contract.mjs` は 200 パターン（`MAX_SCOPE_PATTERNS`）を超える契約を作らない
 - `docs/<path>.md` を入れたら `docs/en/<path>.md` も入れる（`tests/unit/docs/ja-en-heading-parity.test.ts` が見出しの対応を強制する）
 - 範囲の漏れで落ちたら、まず自分の allow を疑い、違反ファイルごとにそれを強制したテスト・ガードを実測で特定する。再指示の回数に数えず、scope を広げた契約を `--contract` で送り直す（scope は送信時のスナップショットで、yaml を直すだけでは変わらない）
 

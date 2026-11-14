@@ -68,6 +68,7 @@ summary.md に書く節（`### 実行フェーズ結果` から `### 成果物` 
 
 run が終わっても worktree を削除しない。マージの後に障害の修正が要ることがあり、残しておけばすぐ作業に入れる。削除は利用者が `/worktree-cleanup` を頼んだときだけ行う。CLAUDE.md の恒久 worktree は頼まれても消さない。
 
+- 入口の `/worktree-cleanup` は `git branch --merged` で判定するため、squash でマージ済みのブランチも未マージと出す。PR の state を正とする
 - このリポジトリは squash マージなので、マージ済みのブランチも `git log origin/develop..HEAD` に元のコミットが並び、`git branch --merged` にも出ない。マージ済みかは PR の state で判定する（`gh pr list --head <branch> --state all --json number,state` が `MERGED`）。`git branch -d` は拒まれるので `-D` が要るが、その前に PR の state を引き、`git branch --format='%(refname:short) %(objectname)'` で SHA を控える
 - 未コミットの変更は中身を見てから判断する（ツールの生成物や develop と同じ版上げのことがある）。`git worktree list` に無い残骸のディレクトリは `git worktree prune` では消えない
 - 消す対象は、承認を受けたときに列挙した名前の配列をそのままループに渡す。番号の前方一致の glob に畳み直すと承認の範囲を超える（`26*` は `264` にも当たる）。リモートのブランチを消す前に head の SHA を控えておけば `git push origin <sha>:refs/heads/<branch>` で戻せる
