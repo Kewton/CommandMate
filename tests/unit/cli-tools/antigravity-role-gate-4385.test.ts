@@ -164,6 +164,15 @@ vi.mock('child_process', async (importOriginal) => ({
   }),
 }));
 vi.mock('@/lib/ws-server', () => ({ broadcast: vi.fn() }));
+/** Which paths git would say share a repository (their common dir). None by default. */
+const gitDirs = vi.hoisted(() => new Map<string, string>());
+vi.mock('@/lib/git/git-common-dir', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/git/git-common-dir')>()),
+  probeGitCommonDir: vi.fn(async (repoPath: string) => {
+    const commonDir = gitDirs.get(repoPath);
+    return commonDir === undefined ? { kind: 'not-repository' } : { kind: 'repository', commonDir };
+  }),
+}));
 vi.mock('@/lib/db/db-instance', () => {
   const holder: { db: Database.Database | null } = { db: null };
   return {
@@ -181,7 +190,8 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import { createRepository } from '@/lib/db/db-repository';
 import { setAgentInstances } from '@/lib/db/agent-instances-db';
-import { createAgentRole, getLatestRoleLaunchRecords, setSystemRoleDefault } from '@/lib/db/agent-roles-db';
+import { createAgentRole, getLatestRoleLaunchRecords, setRepositoryRoleState, setSystemRoleDefault } from '@/lib/db/agent-roles-db';
+import { setRepositoryEnabled } from '@/lib/db/db-repository';
 import {
   applyRoleApplicationObservation,
   expireRoleApplication,
@@ -204,6 +214,8 @@ import { AGENT_ROLE_ANTIGRAVITY_ENABLED_ENV_VAR } from '@/types/agent-roles';
 import { POST as killSessionRoute } from '@/app/api/worktrees/[id]/kill-session/route';
 import { PUT as putInstanceRole } from '@/app/api/worktrees/[id]/instances/roles/route';
 import { answerSendFailure } from '@/app/api/worktrees/[id]/send/send-failure';
+import { PUT as putRepository } from '@/app/api/repositories/[id]/route';
+import { PUT as putRepositoryRoleDefault } from '@/app/api/repositories/[id]/role-defaults/route';
 
 const WT = 'wt-4385';
 const TARGET = { worktreeId: WT, cliToolId: 'antigravity' as const, instanceId: 'antigravity' };
@@ -216,6 +228,7 @@ let db: Database.Database;
 let roleId: string;
 let otherRoleId: string;
 let tool: AntigravityTool;
+let rootId: string;
 
 type Outcome = { ok: true } | { ok: false; error: Error };
 
@@ -332,7 +345,8 @@ beforeEach(async () => {
     cliToolId: 'antigravity',
   } as Worktree);
   setAgentInstances(db, WT, [{ id: 'antigravity', cliTool: 'antigravity', alias: 'Agy', order: 0 }]);
-  createRepository(db, { name: 'repo', path: path.join(dir, 'root'), cloneSource: 'local' });
+  rootId = createRepository(db, { name: 'repo', path: path.join(dir, 'root'), cloneSource: 'local' }).id;
+  gitDirs.clear();
   roleId = createAgentRole(db, { name: 'Tester', body: BODY }).id;
   otherRoleId = createAgentRole(db, { name: 'Writer', body: 'OTHER BODY' }).id;
   setLaunchRoleDatabaseForTest(db);
@@ -375,6 +389,21 @@ afterEach(async () => {
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+/** A route handler called on the fake clock until it answers. */
+async function callRoute(call: () => Promise<Response>): Promise<Response> {
+  let response: Response | null = null;
+  const done = (async () => {
+    response = await call();
+  })();
+  for (let i = 0; i < 400 && response === null; i += 1) await vi.advanceTimersByTimeAsync(50);
+  await done;
+  return response!;
+}
+
+function jsonRequest(url: string, body: Record<string, unknown>): NextRequest {
+  return new NextRequest(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
 
 /** Launch with the role, the pane then showing `kind` (and the agent as `agent`). */
 async function launchWithRole(kind: typeof pane.kind, agent: typeof pane.agent = 'role'): Promise<void> {
@@ -504,6 +533,74 @@ describe('Z: no positive record, no body (§8.2)', () => {
       pane.onCapture = async () => undefined;
       expectSent(await send());
       expect(bodyEnters()).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('Z8 (review 5-2b): the other inputs of "no role" change while the send waits', () => {
+    let otherRootId: string;
+
+    /**
+     * Two registered roots of one git (the worktree's own root A, enabled and
+     * inheriting; root B, disabled, with a role for Antigravity): only A counts,
+     * so the decision is "no role".
+     */
+    async function launchWithDisabledRoleRoot(): Promise<void> {
+      const rootB = path.join(dir, 'root-b');
+      fs.mkdirSync(rootB);
+      for (const where of [path.join(dir, 'root'), rootB, worktreePath]) gitDirs.set(where, path.join(dir, 'root', '.git'));
+      otherRootId = createRepository(db, { name: 'repo-b', path: rootB, cloneSource: 'local' }).id;
+      setRepositoryRoleState(db, otherRootId, 'antigravity', { state: 'role', roleId });
+      setRepositoryEnabled(db, otherRootId, false);
+      pane.afterLaunch = () => {
+        pane.kind = 'idle';
+        pane.agent = 'none';
+      };
+      expect((await launch()).ok).toBe(true);
+      expect(readRoleApplication(TARGET)).toBeNull();
+      pane.events = [];
+    }
+
+    const enableRootB = async (): Promise<void> => {
+      const response = await callRoute(() =>
+        putRepository(jsonRequest(`http://localhost:3000/api/repositories/${otherRootId}`, { enabled: true }), {
+          params: Promise.resolve({ id: otherRootId }),
+        }) as Promise<Response>
+      );
+      expect(response.status).toBe(200);
+    };
+    const setRootADefault = async (): Promise<void> => {
+      const response = await callRoute(() =>
+        putRepositoryRoleDefault(
+          jsonRequest(`http://localhost:3000/api/repositories/${rootId}/role-defaults`, {
+            cliToolId: 'antigravity',
+            role: { state: 'role', roleId: otherRoleId },
+          }),
+          { params: Promise.resolve({ id: rootId }) }
+        ) as Promise<Response>
+      );
+      expect(response.status).toBe(200);
+    };
+
+    it.each([
+      ['a root enabled (repositories API)', 'short', enableRootB],
+      ['a root enabled (repositories API)', 'long', enableRootB],
+      ['a repository default set (role-defaults API)', 'short', setRootADefault],
+      ['a repository default set (role-defaults API)', 'long', setRootADefault],
+    ] as const)('%s, %s body: nothing typed, not_sent', async (_label, size, change) => {
+      await launchWithDisabledRoleRoot();
+      if (size === 'short') pane.onCapture = change;
+      else pane.onLoadBuffer = change;
+      const error = expectNothingSent(await send(size === 'short' ? 'hello' : LONG), 'not-confirmed');
+      expect(error.message).toContain('settings changed');
+    });
+
+    it('control: the roots and defaults left alone, the body goes once', async () => {
+      await launchWithDisabledRoleRoot();
+      pane.onCapture = async () => undefined;
+      expectSent(await send());
+      // And once the root is enabled, the next send is gated (no record for this process).
+      await enableRootB();
+      expectNothingSent(await send(), 'not-confirmed', 1);
     });
   });
 
@@ -644,6 +741,31 @@ describe('C: with a positive record, and the other controls (§8.3)', () => {
     await vi.advanceTimersByTimeAsync(4_000);
     expect(bodies()).toBe(0);
     pane.kind = 'idle';
+    expectSent(await outcome);
+  });
+
+  it('C7 (review 5-2b) the role named while agy is still generating from the start: confirmed, not refused when the box is slow', async () => {
+    await launchWithRole('generating');
+    // The launch's own read saw the name on the busy box's status row.
+    expect(readRoleApplication(TARGET)?.state).toBe('confirmed');
+    // Still generating past the whole wait: not ready, and not a role refusal.
+    const first = await send();
+    expect(first.ok).toBe(false);
+    expect(readRoleLaunchRefusal((first as { error: Error }).error)).toBeNull();
+    expect(bodies()).toBe(0);
+    expect(readRoleApplication(TARGET)?.state).toBe('confirmed');
+    pane.kind = 'idle';
+    expectSent(await send());
+  });
+
+  it('C7 (review 5-2b) a busy box without the name proves nothing: still waiting, confirmed once the name shows', async () => {
+    await launchWithRole('generating', 'none');
+    expect(readRoleApplication(TARGET)?.state).toBe('starting');
+    const outcome = settle(tool.sendMessage(WT, 'hello', 'antigravity'));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(readRoleApplication(TARGET)?.state).toBe('starting');
+    pane.kind = 'idle';
+    pane.agent = 'role';
     expectSent(await outcome);
   });
 

@@ -272,8 +272,8 @@ export function isAntigravityReady(output: string): boolean {
 /**
  * Which screen a frame is, with its current status row, for the role's check
  * (Issue #4385). Read by structure, as {@link isAntigravityReady} reads the box:
- * the row under the input box, or the row agy draws under the trust question's
- * `↑/↓ Navigate` footer. Nothing above them is read.
+ * the row under the input box (ready or still generating), or the row agy draws
+ * under the trust question's `↑/↓ Navigate` footer. Nothing above them is read.
  */
 export function readAntigravityRoleFrame(output: string): AntigravityRoleFrame {
   const frame = normalizeFrame(output, 'antigravity');
@@ -289,10 +289,11 @@ export function readAntigravityRoleFrame(output: string): AntigravityRoleFrame {
     const below = footer < 0 ? [] : rows.slice(footer + 1).filter((row) => row !== '');
     return { kind: 'trust', statusRow: below.length === 1 ? below[0] : '' };
   }
-  if (isAntigravityReady(output)) {
-    return { kind: 'input-box', statusRow: readInputBoxStatusRow(frame.contentLines) ?? '' };
-  }
-  return { kind: 'other', statusRow: null };
+  // The box's status row is read the same way whether agy is idle or still
+  // generating: which agent runs is said apart from whether a body could go now.
+  const statusRow = readInputBoxStatusRow(frame.contentLines);
+  if (statusRow === null || ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) return { kind: 'other', statusRow: null };
+  return { kind: isAntigravityReady(output) ? 'input-box' : 'busy', statusRow };
 }
 
 /** `agy --version`'s limits, for the refusal's words only (D2). */

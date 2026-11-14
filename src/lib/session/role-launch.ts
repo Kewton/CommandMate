@@ -41,7 +41,16 @@ import { buildCompositeKey, COMPOSITE_KEY_SEPARATOR } from '@/lib/auto-yes-state
 import { getOrInitGlobal } from '@/lib/global-state';
 import { createLogger } from '@/lib/logger';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { getInstanceRoleState, getLatestRoleLaunchRecords, hasAnyRoleSetting, recordRoleLaunch } from '@/lib/db/agent-roles-db';
+import {
+  getInstanceRoleState,
+  getLatestRoleLaunchRecords,
+  getRepositoryRoleStates,
+  getSystemRoleDefaults,
+  hasAnyRoleSetting,
+  recordRoleLaunch,
+} from '@/lib/db/agent-roles-db';
+import { getAllRepositories } from '@/lib/db/db-repository';
+import { getWorktreeById } from '@/lib/db';
 import { renderAgentLaunchCommand } from '@/lib/hooks/sources/launch-command';
 import type { AgentLaunchContext, AgentLaunchPlan } from '@/lib/hooks/sources/types';
 import { computeFingerprint } from '@/lib/agent-roles/fingerprint';
@@ -969,40 +978,68 @@ export async function resolveRoleSendTarget(target: LaunchRoleTarget): Promise<R
     db = launchRoleDatabase();
     if (db === null) return ALWAYS_NONE;
     if (!hasAnyRoleSetting(db)) {
+      // The one input of this answer: no setting exists anywhere.
       const settled = db;
-      return { kind: 'none', stillNone: () => resolvesToNoRoleNow(settled, target, null) };
+      return { kind: 'none', stillNone: () => noRoleSettingNow(settled) };
     }
   } catch (error) {
     logger.warn('role-send-target-unreadable', { error: error instanceof Error ? error.message : String(error) });
     return { kind: 'unreadable' };
   }
   const unread: RoleEnvReader = async () => undefined;
-  // The worktree is looked up by id; the path is read only to compose, and nothing is composed here.
-  const snapshot = await resolveLaunchRole(db, { ...target, worktreePath: '', readEnv: unread, composition: {} });
-  if (snapshot.resolution?.kind === 'role') return { kind: 'role' };
-  if (snapshot.refusal === null && snapshot.resolution?.kind === 'none') {
-    return { kind: 'none', stillNone: () => !enabled() || resolvesToNoRoleNow(snapshot.db, target, snapshot.membership) };
+  for (let attempt = 0; attempt < SEND_TARGET_ATTEMPTS; attempt += 1) {
+    const before = readResolutionInputs(db, target);
+    if (before === null) return { kind: 'unreadable' };
+    // The worktree is looked up by id; the path is read only to compose, and nothing is composed here.
+    const snapshot = await resolveLaunchRole(db, { ...target, worktreePath: '', readEnv: unread, composition: {} });
+    // What the answer was read from moved during the wait: ask again.
+    if (readResolutionInputs(db, target) !== before) continue;
+    if (snapshot.resolution?.kind === 'role') return { kind: 'role' };
+    if (snapshot.refusal === null && snapshot.resolution?.kind === 'none') {
+      const settled = db;
+      return { kind: 'none', stillNone: () => !enabled() || readResolutionInputs(settled, target) === before };
+    }
+    return { kind: 'unreadable' };
   }
   return { kind: 'unreadable' };
 }
 
-/**
- * The settings still give `target` no role: one synchronous read, for the moment
- * right before the body. A membership not read (no setting existed anywhere) is
- * not guessed: any setting appearing counts as a change.
- */
-function resolvesToNoRoleNow(
-  db: Database.Database,
-  target: LaunchRoleTarget,
-  membership: RoleRepositoryMembership | null
-): boolean {
+/** How many times the gate asks again when the settings moved while it resolved them. */
+const SEND_TARGET_ATTEMPTS = 3;
+
+function noRoleSettingNow(db: Database.Database): boolean {
   try {
-    if (!hasAnyRoleSetting(db)) return true;
-    if (membership === null) return false;
-    const instanceId = target.instanceId ?? target.cliToolId;
-    return resolveDefaultsForTool(db, target.cliToolId, membership, getInstanceRoleState(db, target.worktreeId, instanceId)).kind === 'none';
+    return !hasAnyRoleSetting(db);
   } catch {
     return false;
+  }
+}
+
+/**
+ * Everything the resolution of `target` is read from, in one synchronous read
+ * (review 5-2b of PR1): the instance's own setting, the system default, every
+ * registered root (id, path, enabled: what membership is built from, as
+ * `resolve.ts` compares it) with its default for the tool, and the worktree's
+ * paths. Git's own answers cannot be read without waiting; everything this
+ * server can change is here. Null when it cannot be read.
+ */
+function readResolutionInputs(db: Database.Database, target: LaunchRoleTarget): string | null {
+  try {
+    const worktree = getWorktreeById(db, target.worktreeId);
+    const instanceId = target.instanceId ?? target.cliToolId;
+    return JSON.stringify([
+      worktree ? [worktree.path, worktree.repositoryPath] : null,
+      getInstanceRoleState(db, target.worktreeId, instanceId),
+      getSystemRoleDefaults(db)[target.cliToolId]?.roleId ?? null,
+      getAllRepositories(db).map((root) => [
+        root.id,
+        root.path,
+        root.enabled,
+        getRepositoryRoleStates(db, root.id)[target.cliToolId] ?? null,
+      ]),
+    ]);
+  } catch {
+    return null;
   }
 }
 

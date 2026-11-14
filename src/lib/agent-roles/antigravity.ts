@@ -20,10 +20,12 @@ export const ANTIGRAVITY_ROLE_VERIFIED_VERSION = '1.5.8';
 export interface AntigravityRoleFrame {
   /**
    * - `input-box`: agy's input box is live (`isAntigravityReady`)
+   * - `busy`: the input box is drawn and agy is still working (generating); its
+   *   status row is the current one, but the box takes no body yet
    * - `trust`: the folder-trust question
-   * - `other`: anything else (not drawn yet, generating, a dialog, a shell)
+   * - `other`: anything else (not drawn yet, a dialog or picker, a shell)
    */
-  kind: 'input-box' | 'trust' | 'other';
+  kind: 'input-box' | 'busy' | 'trust' | 'other';
   /** The current status row (ANSI stripped), '' when none is drawn; null for `other`. */
   statusRow: string | null;
 }
@@ -63,13 +65,16 @@ export function statusRowNamesAgent(statusRow: string, name: string): boolean {
 }
 
 /**
- * What a screen proves about the role named `name`. A screen agy has finished
- * drawing (its input box or the trust question) either names it or plainly runs
- * without it; anything else proves nothing yet.
+ * What a screen proves about the role named `name`. Whether the role is applied
+ * is read apart from whether a body could be typed now (D2): the current status
+ * row naming the agent confirms on any screen that has one, a busy box included.
+ * Plainly without it is said only by a screen agy has finished drawing (its
+ * ready input box or the trust question); anything else proves nothing yet.
  */
 export function judgeAntigravityRoleFrame(frame: AntigravityRoleFrame, name: string): AntigravityRoleVerdict {
   if (frame.kind === 'other' || frame.statusRow === null) return { kind: 'undetermined' };
   if (statusRowNamesAgent(frame.statusRow, name)) return { kind: 'confirmed' };
+  if (frame.kind === 'busy') return { kind: 'undetermined' };
   return { kind: 'not-applied', cause: 'role-not-selected' };
 }
 
