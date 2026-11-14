@@ -292,6 +292,8 @@ process.env.CM_LOG_DIR = join(tmpdir(), 'commandmate-test-logs', String(process.
 process.env.CM_RUN_LOCK_DIR = join(tmpdir(), 'commandmate-test-run-lock', String(process.pid));
 process.env.CM_UAT_SOCK_BASE = join(tmpdir(), 'commandmate-test-uat-sock', String(process.pid));
 process.env.CM_PRODUCT_PUBLISH_DIR = join(tmpdir(), 'commandmate-test-product-publish', String(process.pid));
+// Issue #4367: the flow record (`~/.commandmate/flow`, scripts/flow/record.mjs flowDirOf).
+process.env.CM_FLOW_DIR = join(tmpdir(), 'commandmate-test-flow', String(process.pid));
 // Issue #4176: the scripts the running server's tmux hooks execute
 // (`~/.commandmate/bin`). `tests/unit/tmux/session-hooks-2317.test.ts` turns
 // the live-attach and auto-popup options on, and each turn materializes them.
