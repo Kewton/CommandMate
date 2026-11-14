@@ -45,6 +45,12 @@ This document provides repository-level guidance for coding agents (including Co
   - `src/lib/env-sanitizer.ts`
   - `src/lib/ip-restriction.ts`
 
+## Memory And Handoff
+
+- Work state, decisions, permissions, next steps and questions for the human go to CommandMate `mem` (a decision's destination is its Issue). Do not keep them in a tool-private memory (e.g. Claude Code auto memory, which this repo turns off).
+- Lessons, pitfalls and procedures go to `docs/` (operations: `docs/orchestrate/`); add one line here or in `CLAUDE.md` only for rules every agent must follow.
+- Reply to the repository owner in Japanese; keep code, commands and identifiers as they are.
+
 ## Validation Checklist
 
 Before finishing, run relevant checks for changed scope:
