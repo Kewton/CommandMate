@@ -72,6 +72,9 @@ npm run lint
 
 For small fixes, run targeted tests first, then expand only if needed.
 
+- Judge pass/fail by the command's own exit code (`cmd > log 2>&1; echo $?`); piping into `grep` replaces it with grep's.
+- Run Playwright as `CI=true npx playwright test <spec> --reporter=line`; without `CI` a failure starts the HTML report server and the process never returns.
+
 ## Change Policy For Agent Docs
 
 - Keep `AGENTS.md` concise and execution-oriented.
