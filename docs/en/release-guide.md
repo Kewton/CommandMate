@@ -320,7 +320,7 @@ If the workflow fails, fix the cause -- do not work around it with a local publi
 
 ### What the workflow does
 
-`npm ci` → `npm audit --audit-level=critical` → **check that CI's `Unit Tests` and `Build` succeeded on the tag commit** (`scripts/check-release-ci.mjs`; waits up to 20 minutes for the main-push CI to finish) → `npm run build` → `npm run build:cli` → `npm run build:server` → package size check → `npm publish --provenance --access public`
+`npm ci` → `npm audit --audit-level=critical` → **check that CI's `Unit Tests` and `Build` succeeded on the tag commit** (`scripts/check-release-ci.mjs`; waits up to 45 minutes for the main-push CI to finish) → `npm run build` → `npm run build:cli` → `npm run build:server` → package size check → `npm publish --provenance --access public`
 
 ---
 
