@@ -56,7 +56,7 @@ feature/*, fix/*, hotfix/* (作業ブランチ)
 
 | worktree | ブランチ | 用途 |
 |----------|----------|------|
-| `../commandmate-main` | `main` | main の参照用 |
+| `../commandmate-main` | `main` | main の参照用（サーバーの停止・起動・ビルドをここでしない） |
 | `../commandmate-agent-health` | `agent-health-runner` | 日次確認の Schedule 実行場所（`CMATE.md` あり。docs/user-guide/agent-health.md） |
 
 ---

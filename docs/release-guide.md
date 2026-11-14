@@ -113,6 +113,12 @@ main を develop へマージバック（-s ours・祖先復元）
    > exit 0 でも `tasks.total` が 0（`successRate` が `null`）なら同じくスキップ。
    > タスク成功率・検証 pass 率・`gateFailBreakdown` 上位・人間介入回数をリリース PR 本文の
    > 「Vibe Metrics」節に貼ります。詳細は [`.claude/skills/release/SKILL.md`](../.claude/skills/release/SKILL.md) の 1-4 を参照。
+   > **worktree の掃除より先に採る。** worktree を削除して `POST /api/repositories/sync` で片付けると、
+   > その worktree の `tasks` / `verification_runs` の行も一緒に消えます（孤児を残さない設計。
+   > `src/lib/db/migrations/v52-orphaned-worktree-children.ts`）。メトリクスはこの表を数えるので、
+   > 掃除の後に採ると期間の記録が 0 件になり、取り消せません。実績を残したい run は、掃除の前に
+   > `commandmate report metrics --json` をファイルへ保存しておきます。掃除を先にしてしまったら、
+   > PR 本文に「掃除で記録が消えた」と書きます（「対象期間に記録なし」とだけ書かない）。
 
 ### Step 0.5: スラッシュコマンドカタログのリコンサイル
 
@@ -297,6 +303,10 @@ gh run list --repo Kewton/CommandMate --workflow=publish.yml --limit 1
 npm view commandmate version    # 新バージョンになること
 ```
 
+- **publish ジョブは長い。** 公開の前にテスト全体を 1 本で走らせるので、Release の作成から success まで数十分かかります。`Run tests` が 20 分を超えて `in_progress` でも正常です。待ちのループは `publish.yml` の `timeout-minutes` まで取ります。
+- **success の後も、registry に出るまで数分かかります。** その間は `npm view commandmate version` も旧版を返します（版を指定すると E404）。失敗と読まず、ジョブのログの `+ commandmate@<版>` を確かめてから、数分おきに `npm view` を撃ち直します。待ちを 3 分程度で打ち切ると、反映の遅れを「未公開」と誤読します。
+- ジョブが `cancelled` / `failure` で終わったときは、[publish ワークフローが失敗した場合](#publish-ワークフローが失敗した場合) を先に読みます（公開済みのことがあります）。
+
 ### Step 9: main を develop へマージバック（祖先復元）
 
 **必須。** squash により main のコミットは develop の祖先ではなくなっています。放置すると次回の develop → main PR で幻コンフリクトが出ます。
@@ -318,6 +328,8 @@ git push origin develop
 git fetch origin
 git merge-base --is-ancestor origin/main origin/develop && echo "祖先切れ解消 OK"
 ```
+
+**版を上げない同期の PR でも同じことが要ります。** 「develop の変更を main へ反映するだけ」の PR も squash されるので、マージしたら毎回この手順でマージバックします。忘れると、次の develop → main の PR は `gh pr view <N> --json mergeStateStatus` が `DIRTY` になってマージできません（merge-base が前のタグまで戻るため）。PR を作ったら `mergeStateStatus` を見て、`DIRTY` なら中身より先に祖先切れを疑います。PR を開いたまま上の `-s ours` を develop に push すれば `CLEAN` に戻ります（CI は走り直します）。`-s ours` の前の tree の一致の確認は省きません。一致しないときは main に固有の変更があるので、通常のマージで解決します。
 
 ---
 
@@ -357,6 +369,8 @@ cd $(mktemp -d) && npx --yes commandmate@latest --version
 ```
 
 > `npx` の検証は**リポジトリ外の中立ディレクトリ**で行ってください。CommandMate のリポジトリ内で実行すると、npx がローカルの `bin` を解決してしまい、公開物を検証したことになりません。
+
+> README の npm の版の表示はバッジの画像で、GitHub が外部画像をキャッシュして配るため、公開後しばらく旧版のまま見えることがあります。版の正は `npm view` の結果で、バッジの遅れは放っておけば直ります。
 
 ---
 
@@ -427,6 +441,14 @@ gh run view <run-id> --repo Kewton/CommandMate --log-failed
 ```
 
 原因を修正し、新しいパッチバージョンでリリースし直してください。**同一バージョン番号での再公開はできません。**
+
+**`cancelled` / `failure` は「未公開」の証拠ではありません。** `npm publish` が registry に受理された直後にジョブが打ち切られることがあり、その場合は数分遅れて版が公開されます。再実行・タグの付け直し・Issue 化を決める前に、次を確かめます。
+
+1. ログの最後の `npm notice` が `Publishing to …` 以降まで進んでいたら、公開済みを疑う
+2. 打ち切りから 10 分ほど待ってから `npm view commandmate@<版>` を撃つ（打ち切り直後の E404 は「未公開」を意味しない）
+3. 出ていたら、`npm view commandmate@<版> dist.shasum` がログの `npm notice shasum` と一致すること、`https://registry.npmjs.org/-/npm/v1/attestations/commandmate@<版>` の provenance が指す run と attempt を確かめる
+
+公開済みなのにタグや Release を消して別のコミットに付け直すと、公開された版と同じ名前のタグが別の内容を指します。公開済みなら、そのまま Step 9 以降へ進みます。
 
 `Require CI to have passed on the tag commit` で止まった場合は、**npm にはまだ何も出ていません**（ビルドより前の手順）。タグのコミットの CI（main への push の `ci-pr.yml`）が失敗・未完了だったということなので、`npm view commandmate version` で未公開を確かめたうえで、CI を直す（または一時的な失敗なら main の CI を再実行して success にする）→ `gh run rerun <run-id>` で publish を再実行できます。版番号を進める必要はありません。
 
