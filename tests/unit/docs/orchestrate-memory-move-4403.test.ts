@@ -200,9 +200,14 @@ describe("the moved text agrees with the code and the runbook (#4403 review)", (
     expect(read(".claude/commands/orchestrate.md")).toContain(
       'git worktree add -b "feature/{N}-worktree" "../commandmate-issue-{N}" origin/develop',
     );
-    expect(read(".claude/commands/worktree-setup.md")).toContain(
+    const setup = read(".claude/commands/worktree-setup.md");
+    expect(setup).toContain(
       'git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR" origin/develop',
     );
+    // The precondition checks the same base it cuts from: no local develop is required.
+    expect(setup).toContain("refs/remotes/origin/develop");
+    expect(setup).not.toContain("refs/heads/develop");
+    expect(setup).toContain("| origin/develop not found |");
   });
 
   it("the watch rule gives the real reason --tail misses DONE", () => {

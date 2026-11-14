@@ -52,15 +52,15 @@ fi
 ### Phase 2: 前提条件チェック
 
 1. 現在のディレクトリがGitリポジトリであることを確認
-2. developブランチが存在することを確認
+2. `git fetch origin develop` の後に、作成元の `origin/develop` が存在することを確認（ローカルの develop は要らない）
 3. git worktreeコマンドが利用可能であることを確認
 
 ```bash
 # Gitリポジトリチェック
 git rev-parse --git-dir > /dev/null 2>&1 || { echo "Error: Not a git repository"; exit 1; }
 
-# developブランチ存在チェック
-git show-ref --verify --quiet refs/heads/develop || { echo "Error: develop branch not found"; exit 1; }
+# 作成元（origin/develop）の存在チェック。ローカルの develop が無い clone でも通る
+git fetch origin develop && git show-ref --verify --quiet refs/remotes/origin/develop || { echo "Error: origin/develop not found"; exit 1; }
 ```
 
 ### Phase 3: Worktree作成
@@ -263,7 +263,7 @@ fi
 |--------|------|
 | Invalid issue number | 正の整数（1-2147483647）を指定してください |
 | Not a git repository | Gitリポジトリ内で実行してください |
-| develop branch not found | developブランチを作成してください |
+| origin/develop not found | remote `origin` に develop ブランチがあるか、`git fetch origin develop` が通るか（認証・ネットワーク）を確認してください |
 | Worktree already exists | 既存のWorktreeを使用するか、cleanupしてください |
 | No project found / missing scopes | `gh auth refresh -s read:project,project` を実行してください |
 | 'In Progress' option not found | GitHub ProjectのStatusフィールドに "In Progress" オプションを追加してください |
