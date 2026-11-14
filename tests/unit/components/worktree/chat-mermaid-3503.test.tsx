@@ -393,14 +393,12 @@ describe('[#3503] search highlights reach the folded source', () => {
     const before = registry.get(name);
 
     // A redraw (late load, theme switch) settles: the frame announces it.
-    // The frame and its listener are observed (not assumed) before announcing; the
-    // announcement repeats until the marks are visibly re-applied.
-    await waitFor(() => expect(frames().length).toBeGreaterThan(0));
-    await waitFor(() => {
-      fireEvent(frames()[0], new CustomEvent(MERMAID_BLOCK_SETTLED_EVENT, { bubbles: true }));
-      expect(registry.get(name)).not.toBe(before);
-    });
-
+    // The search's first marks (awaited above) come from the same commit that registers
+    // the settled listener, so the receiver is ready. Announce exactly once, as the
+    // product does per finished drawing; only the assertions wait.
+    const [frame] = frames();
+    fireEvent(frame, new CustomEvent(MERMAID_BLOCK_SETTLED_EVENT, { bubbles: true }));
+    await waitFor(() => expect(registry.get(name)).not.toBe(before));
     await waitFor(() => {
       expect(markedTexts(name)).toEqual(['sentinel']);
       expectSourceHit(name);
