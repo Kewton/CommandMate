@@ -1015,7 +1015,7 @@ graph TD
 ### 14.6 status のキャプチャキャッシュ
 
 - `GET /api/worktrees` などの status（`isProcessing` / `isSessionRunning`）は `src/lib/tmux/tmux-capture-cache.ts` のキャッシュ（`CACHE_TTL_MS = 5000`）越しの `capture-pane` から求める（`worktree-status-helper.ts` → `captureSessionOutput`）。キャッシュを通らないのは `captureSessionOutputFresh` だけ
-- そのため **5 秒未満で始まって終わる遷移は API にも UI にも現れない**。クライアントのポーリング間隔を縮めても変わらない。デモやテストで観測させたい状態は 8 秒程度以上保つ
+- そのため、キャッシュの有効な間（最大 5 秒）に始まって終わる遷移は、**キャプチャの採取と採取の間に完結すると見逃しうる**（`getOrFetchCapture` は期限内ならキャッシュを返し、期限切れのときだけ採り直す）。いつも見えないわけではなく、採取がたまたま遷移の最中に当たれば現れる。クライアントのポーリング間隔を縮めても見逃しは減らない。デモやテストで確実に観測させたい状態は 8 秒程度以上保つ
 - `detectSessionStatus` を直接呼ぶと running なのに UI が変わらないときは、検出器より先にこのキャッシュの窓を疑う
 
 ⸻

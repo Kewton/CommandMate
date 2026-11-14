@@ -248,20 +248,23 @@ After completing all test scenarios, verify:
 ### 検出の修正は空虚な合格に注意する
 
 - 「修正後に偽の行が保存されなかった」は、修正前も保存されなかったなら証拠にならない。刺激が修正した判定まで届いたかを、`CM_LOG_LEVEL=debug` のログ（その判定自身のログの行）で確かめる。
-- 決定的な証拠は、保存済みの実フレームを出荷のコードに通すオフラインの再現で取る（クォータを使わない）。prompt の行の `content` にはペインの末尾が残るので、本番の DB を `mode=ro` で開いて対象の行を取り出す。
+- 決定的な証拠は、保存済みの実フレームを出荷のコードに通すオフラインの再現で取る（クォータを使わない）。prompt の行の `content` にはペインの末尾が残るので、本番の DB を `mode=ro` で開いて対象の行を取り出す。再現は確かめたいものに合わせて 2 段に分ける。
+  - 汎用のパーサ単体の確認: 直したのが汎用の `detectPrompt` そのものなら、それだけを通す。箱の枠のダイアログは素のままだと `isPrompt=false` なので `stripBoxDrawing` を先に通す。これは Auto-Yes と同じ結果ではない。
 
-  ```ts
-  const det = detectPrompt(stripBoxDrawing(stripAnsi(raw)), buildDetectPromptOptions('claude'));
-  ```
+    ```ts
+    const det = detectPrompt(stripBoxDrawing(stripAnsi(raw)), buildDetectPromptOptions('claude'));
+    ```
 
-  `npx tsx --tsconfig <worktree>/tsconfig.json <script>.ts` で `@/` が解決する（`.mts` は export を解決できない）。Auto-Yes と同じ結果を見るには `stripBoxDrawing` を通す（箱の枠のダイアログは素のままだと `isPrompt=false`）。本物のダイアログが残ることを陽性対照として必ず並べる（何でも棄却しているだけでないことを示す）。
+  - Auto-Yes・poller と同じ判定の確認: 実経路は `src/lib/auto-yes-poller-tick.ts` が受け取る `detectPromptOnCleanFrame`（`src/lib/polling/response-checker.ts`）で、汎用のパーサの後に、生きている領域で引用された番号リストを棄却する（`isQuotedNumberedPrompt`）などのツール別の判定が入る。「Auto-Yes が答えない」ことを示すにはこの共通の入口にフレームを通す。汎用の `detectPrompt` の結果で代用しない。
+
+  `npx tsx --tsconfig <worktree>/tsconfig.json <script>.ts` で `@/` が解決する（`.mts` は export を解決できない）。どちらの段でも、本物のダイアログが残ることを陽性対照として必ず並べる（何でも棄却しているだけでないことを示す）。
 - 実機のターンは、再現で示せない経路（実ペインを実 poller が読む経路など）にだけ使い、刺激を候補が生じる形（質問の行と番号の選択肢）にする。
 - ターンの完了は画面の `❯` の文字の一致で判定しない（送った本文がエコーされた行に当たる）。DB の assistant の行が出たことで見る。ペインの grep も、自分の依頼文に含まれる語に当たるので、着手の判定に使わない。
 
 ### 入力欄と配置の UAT
 
 - 入力欄や本文の配置を変える UAT は、高さ・面積の数字だけで合格にしない。3〜5 行の文を実際に入力し、入力できる幅と道具の位置をスクリーンショットで見る。モックにも入力中の場面を描く。
-- スラッシュコマンドのパレットは実キーの入力（`pressSequentially`）でしか開かない。`fill()` は値を入れるだけで、キーのハンドラが動かない。
+- スラッシュコマンドのパレットは、入力欄の `onChange` が値を見て開く（値が `/` で始まり空白を含まないとき。codex では `$` も）。`fill()` でも `pressSequentially` でも開くので、`/` で始まる値を入れたら開いたことを前提に操作する（下の「Playwright のハーネスの罠」）。キーごとの動き（矢印での選択・Enter での確定）を確かめるときは実キー（`pressSequentially` / `press`）を使う。
 - モバイルの詳細画面の入力欄では Enter は改行。送るのは `[data-testid=send-message-button]`。
 - セーフエリア（`env(safe-area-inset-*)`）は Chromium の CDP で再現できる。`reload` しないと既存の算出値に乗らない。効いていることを probe で先に確かめる（無視されたまま測ると全部緑になる）。
 

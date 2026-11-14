@@ -329,9 +329,13 @@ npm run test:e2e -- --project=webkit
 
 ### CI だけで落ちるテスト
 
-- `vitest.config.ts` は `CI=true` のときだけ `fileParallelism: false`・`maxConcurrency: 1`・`testTimeout` 20 秒になる。全ファイルが 1 プロセスで順に走るので、module の状態や `globalThis` の registry を汚したテストは後ろの全ファイルに波及する。ローカルの再現は `CI=true npx vitest run <file>`
+- `vitest.config.ts` は `CI=true` のときだけ `fileParallelism: false`・`maxConcurrency: 1`・`testTimeout` 20 秒になる。これはファイルを並べず 1 本ずつ順に回す**直列化**で、ファイル間で module や `globalThis` を共有する設定ではない（`isolate` は既定の `true` のままで、ファイルごとに module のグラフを作り直す）。CI でだけ変わるのは次の 3 つを分けて見る
+  - 順序とタイミング: 直列なので待ちが長くなり、時間で待つテストが `testTimeout` や `waitFor` の既定の時間に当たる
+  - 同じファイルの中の状態: module scope の変数・registry・モックは、そのファイルの後続のテストに残る（ファイルを越えては残らない）
+  - 外部の共有資源: ディスクのファイル・DB・ポート・tmux・`process.env` を書き換えた子プロセスなどは、`isolate` の外なので後から走るファイルに残る
+  ローカルの再現は `CI=true npx vitest run <file>`
 - RTL の `waitFor` を「要素がある」のようなデータに依らない条件で抜け、直後の assertion が `fetch → setState → 再描画` と競走する形は、React の Scheduler と `waitFor` のドレインの順序が未規定なので、同じコードでも PR によって赤になる。再現はモックの fetch を 10ms 遅らせるプローブ（`mockImplementation(() => new Promise((r) => setTimeout(() => r(res), 10)))`）。直し方は assertion を `waitFor` の内側に入れる（データで待つ）。再実行で通すのは直したことにならない
-- 「未登録のツール」の例に、実装予定のあるツール名を使わない（後でそのツールが着地した瞬間に壊れる）。stub を `register` するテストは `finally` で `unregister` せず本物を復元する。本物を消しても assert は通り、CI の 1 プロセス実行では後続のスイート全体の registry が壊れる
+- 「未登録のツール」の例に、実装予定のあるツール名を使わない（後でそのツールが着地した瞬間に壊れる）。stub を `register` するテストは `finally` で `unregister` せず本物を復元する。本物を消してもそのテストの assert は通り、同じファイルの後続のテストが壊れた registry で走る（ファイルを越えては残らないが、どのテストが壊したかが見えにくい）
 - OS 依存のパスを fixture にしない。`/proc` 配下を「書けない dir」に使うと、Linux では `mkdirSync(..., { recursive: true })` が同期の無限ループになり、`testTimeout` すら発火しないまま CI が沈黙する（macOS は即 throw して緑）。書けない dir は「親が通常ファイルのパス」（`join(<一時ファイル>, 'sub')`、全 OS で ENOTDIR）にする
 - Linux は環境変数・引数 1 本あたり 128KB の上限があり（`spawn E2BIG`）、macOS には無い。大きなデータは子プロセスの stdin か一時ファイルで渡す
 - タイムアウトが一度も発火しない長い沈黙は、非同期のハングではなく同期のブロック（ネイティブのループ・`execSync`）。最小の再現は `docker run node:<版> timeout 30 node -e ...` で作る
@@ -408,7 +412,7 @@ npm run test:e2e -- --project=webkit
 - 私設サーバで `history-limit` を上げるときはサーバ全体のオプションではなくセッション単位で: 空の `new-session` → `set-option -t '=<名>:' history-limit N` → `new-window` で中身のペイン → 最初のウィンドウを `kill-window`
 - 実 TUI のキャプチャは本番と同じペインの大きさ（200x1000）で採る。既定の 120x40 では、ダイアログと画面最下部に固定されるパネル・composer が同じ画面に載らず、検出層のバグが再現しない。`new-session -x 200 -y 1000` の後に `set-option -t '=<名>:' window-size manual` と `resize-window` で大きさを固定し、`capture-pane -p -S -1200` で採る
 - 起動直後はシェルがまだプロンプトを出しておらず、送った起動コマンドが食われることがある（`#{pane_current_command}` がシェルのまま）。プロンプトの行が出るまで待ってから送るか、Enter を送り直す。1000 行のペインで `capture-pane -S -40` は空に見えることがあるので、`-S -200` 以上を採って空行を落とす
-- 初回の信頼の確認（trust）ダイアログは Enter で通す。設定を変えるコマンド（`/model` など）は送らない。ダイアログの表示中は `send-keys` の文字列がどこにも現れず飲まれる
+- 初回の信頼の確認（trust）ダイアログは Enter だけで通さない。claude には既定のカーソルが `No, exit` にある画面があり、そのまま Enter を送ると claude が終わる（`resolveClaudeTrustDialogKeys` が画面からカーソルと `Yes` の行の距離を読むのと同じ理由）。キャプチャでカーソルの行を確かめ、`Yes, I trust this folder` まで Up / Down で移ってから Enter で確定する（[uat-isolation.md](../user-guide/uat-isolation.md) の「tmux は私設のサーバーを通常の環境で起こす」と同じ手順）。設定を変えるコマンド（`/model` など）は送らない。ダイアログの表示中は `send-keys` の文字列がどこにも現れず飲まれる
 - 検出パーサの fixture を Issue 本文の記述から起こすと、fixture とパーサが互いに合わせて作られ、unit も e2e も緑のまま実機で壊れる（行の並び・CLI の版の違い）。fixture の出所（実機採取か）を PR の前に確かめ、本文由来ならマージの前に実機で確かめる。実機のフレームを渡すときはメールアドレスなどを伏せ字にする
 - `tests/` の下には fixture のディレクトリを再帰で走査して件数・名前を固定するスイートがあり、fixture を置くだけで別のスイートが赤になる。置く前に `grep -rln readdirSync tests/ | xargs grep -ln fixtures` で走査するスイートを挙げ、何を assert するかを読む（契約の書き方は [contract.md 2-4](../orchestrate/contract.md)）
 - 修正前（HEAD）の対照は、repo のファイルを書き換えずに `git archive HEAD src tsconfig.json package.json | tar -x -C <scratch>/baseline` で取り出し、`node_modules` を symlink して同じドライバを走らせる（unit の対照なら `vitest.config.ts`・`tests/setup.ts`・`tests/helpers` も取り出す）。本物のモジュールは `./node_modules/.bin/tsx --tsconfig <root>/tsconfig.json driver.mts` から `await import()` で読む。hook のイベントは、サーバを立てずに小さな http の listener で受けて確かめられる。CLI が自分の設定ファイル（最近使ったモデルなど）を書き換えることがあるので、始める前に退避して後で戻す

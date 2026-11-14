@@ -216,3 +216,51 @@ describe("docs after the testing / tmux memory move (#4403)", () => {
     expect(agents).toContain("CI=true npx playwright test");
   });
 });
+
+/** The moved text, as corrected by the review: each claim matches the code it names. */
+describe("the moved text agrees with the code (#4403 review)", () => {
+  const read = (rel: string): string =>
+    fs.readFileSync(path.join(REPO_ROOT, rel), "utf8");
+
+  it("the trust dialog is answered by moving to Yes, not by a bare Enter", () => {
+    const guide = read("docs/internal/TESTING_GUIDE.md");
+    expect(guide).not.toContain("ダイアログは Enter で通す");
+    expect(guide).toContain("Enter だけで通さない");
+    expect(guide).toContain("resolveClaudeTrustDialogKeys");
+    // The code this rule mirrors: some claude versions default the cursor to "No, exit".
+    expect(read("src/lib/detection/tools/claude/patterns.ts")).toContain(
+      "Enter EXITS Claude Code",
+    );
+  });
+
+  it("the generic detectPrompt is not presented as the Auto-Yes path", () => {
+    const manual = read("docs/internal/MANUAL_TESTING_GUIDE.md");
+    expect(manual).not.toContain("Auto-Yes と同じ結果を見るには `stripBoxDrawing` を通す");
+    expect(manual).toContain("detectPromptOnCleanFrame");
+    expect(manual).toContain("汎用の `detectPrompt` の結果で代用しない");
+    expect(read("src/lib/auto-yes-poller-tick.ts")).toContain(
+      "detectPromptOnCleanFrame",
+    );
+  });
+
+  it("fileParallelism=false is described as serialisation, not shared module state", () => {
+    const guide = read("docs/internal/TESTING_GUIDE.md");
+    expect(guide).not.toContain("全ファイルが 1 プロセスで順に走るので");
+    expect(guide).not.toContain("後続のスイート全体の registry が壊れる");
+    expect(guide).toContain("**直列化**");
+    expect(guide).toContain("`isolate` は既定の `true` のまま");
+    expect(read("vitest.config.ts")).not.toMatch(/isolate:\s*false/);
+  });
+
+  it("the slash palette opens on the value, so fill() opens it too", () => {
+    const manual = read("docs/internal/MANUAL_TESTING_GUIDE.md");
+    expect(manual).not.toContain("でしか開かない");
+    expect(manual).toContain("`fill()` でも `pressSequentially` でも開く");
+  });
+
+  it("a short transition may be missed between captures, not always invisible", () => {
+    const arch = read("docs/architecture.md");
+    expect(arch).not.toContain("5 秒未満で始まって終わる遷移は API にも UI にも現れない");
+    expect(arch).toContain("キャプチャの採取と採取の間に完結すると見逃しうる");
+  });
+});
