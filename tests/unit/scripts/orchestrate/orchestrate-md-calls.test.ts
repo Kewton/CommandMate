@@ -266,6 +266,27 @@ describe('1-5 asks flow-wip once, before assign.tsv takes a new lane (#4368 PR1,
     expect(workers).toContain('**すべて** `assign.tsv` に入れない');
   });
 
+  it('2-2 creates worktrees only for the first column of assign.tsv, not for the whole issue_numbers (review P2)', () => {
+    const setup = bashBlocks(section('2-2')).find((b) => b.includes('/worktree-setup')) ?? '';
+    expect(setup).toContain('/worktree-setup $(cut -f1 "workspace/orchestration/runs/$DATE/assign.tsv")');
+    expect(section('2-2')).not.toContain('{issue_numbers}');
+    parses(setup);
+    expect(section('2-4')).toContain('assign.tsv の各 Issue について');
+  });
+
+  it('Phase 2.5 sends the analysis only for bug Issues still in assign.tsv (review P3)', () => {
+    const phase25 = orchestrate.slice(orchestrate.indexOf('## Phase 2.5'), orchestrate.indexOf('### 2.5-1.'));
+    expect(phase25).toContain('分類されたIssue（見送りは除く）');
+    // The block holds `## Issue内容` inside the fence, so read it from the whole document.
+    const send = bashBlocks(docs('workers.md')).find((b) => b.includes('for bug_issue in $BUG_ISSUES')) ?? '';
+    expect(send).not.toBe('');
+    parses(send);
+    const filter = send.indexOf('cut -f1 "workspace/orchestration/runs/$DATE/assign.tsv"');
+    expect(filter).toBeGreaterThan(-1);
+    expect(filter).toBeLessThan(send.indexOf('for bug_issue in $BUG_ISSUES'));
+    expect(workers).toContain('2.5 の分析の送信・3-1・3-3）に入らない');
+  });
+
   it('exit-codes.md has a row for 0, 60, 61, 2 and the rest', () => {
     for (const code of ['0', '60', '61', '2', '1']) {
       expect(exitCodes.split('\n').some((line) => line.startsWith(`| \`${code}\``)), code).toBe(true);

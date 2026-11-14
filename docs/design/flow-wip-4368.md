@@ -137,7 +137,7 @@
 node scripts/orchestrate/flow-wip.mjs check --worktree . --json > "workspace/orchestration/runs/$DATE/wip.json"; WIP=$?
 ```
 
-- 本体は、照会の 1 行と「新しいレーンを `assign.tsv` に入れる前に 1 回だけ。2-2・3-1・run の記録では呼ばない」「0 は助言（許可・予約ではない）。0 以外は新しいレーンを入れず plan.md の『見送り』へ」と参照だけにする。`必ず守ること` に 1 行（1-5）。2-2 は「`assign.tsv` の各 Issue（見送りは除く）」と書き直す
+- 本体は、照会の 1 行と「新しいレーンを `assign.tsv` に入れる前に 1 回だけ。2-2・3-1・run の記録では呼ばない」「0 は助言（許可・予約ではない）。0 以外は新しいレーンを入れず plan.md の『見送り』へ」と参照だけにする。`必ず守ること` に 1 行（1-5）。2-2 は「`assign.tsv` の各 Issue（見送りは除く）」と書き直し、`/worktree-setup` の引数を run の `issue_numbers` ではなく `assign.tsv` の 1 列目にする。2-4 の契約の起案と Phase 2.5 の分析の送信も同じく `assign.tsv` の Issue だけを対象にする（整合性レビューの P2・P3）
 - 詳細（空きの計算の bash、入れ方、見送りの書き方、再開、保証の範囲、設定）は `docs/orchestrate/workers.md` の節「1-5 WIP の照会」に、終了コードは `docs/orchestrate/exit-codes.md` の節「1-5 flow-wip check の 60 / 61 / 2」に書く
 - **バイト数**: orchestrate.md は 107,998 バイトで、目標 108,000 バイト（`tests/unit/docs/orchestrate-size-headroom-4276.test.ts`）まで残り 2 バイト。2-2 の手動の代替（`git worktree add` と `npm install --include=dev` と根拠の行）を `docs/orchestrate/workers.md` の節「2-2 worktree を手動で作る」へ、3-1 の冷間起動の実測の文を `docs/orchestrate/exit-codes.md` の「3-1 冷間起動の失敗 exit 99」へ移して空けた（実装後 107,934 バイト）
 - `.claude/commands/` の写し（`.agents/`）は無い（2026-11-14 に `find` で確認）
@@ -572,6 +572,7 @@ R7 の処分で、照会の読み手を 1-5 の計画の段だけにし、2-2 �
 | R8 二つの不在は不成立の証明にならない（PR2b） | 不成立は当該の操作・受付 ID の確定した拒否・不実行の結果だけ。今の不在は不明に残す。表と対照を足す | §9.3 |
 | 実装で分かった差: #4367 の読み手の API | `readFlowConfig(root, { runBounded, env, deadlineMono })`（単調時計）。`flow-wip` も同じ時計の `deadlineMono` で締め切りを持つ | §6.1、§7、§10.2、§13 |
 | 実装で分かった差: full の表示の「古い順」 | W・P に古さの根拠の時刻が無いので、観測の順に最大 5 本の名前を出し、古さを断定しない | §5.2 |
+| 整合性レビュー P2・P3（2-2 の `/worktree-setup {issue_numbers}`・Phase 2.5 が見送りを除かない） | 2-2 の引数を `assign.tsv` の 1 列目に、2-4 を「`assign.tsv` の各 Issue」に、2.5 を「見送りは除く」にし、workers.md の 2.5-1 で `BUG_ISSUES` を `assign.tsv` で絞る。試験は orchestrate-md-calls | §4.2 |
 | 実装で分かった差: 識別の時間切れ | 読み手の `identification timed out` は設定の誤り（2）ではなく判定できない（61） | §6.1 |
 
 ### 15.1 改訂 2（再レビューの R1〜R6、原因調査、リーダーの処分 M1）

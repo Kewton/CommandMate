@@ -22,7 +22,7 @@ echo "wip exit=$WIP room=$ROOM"
 - **数え方**: 未マージのブランチ＝（ディスク上の worktree のブランチ ∪ base へ向いた開いた PR の head）−除外−マージ済み。マージ済みは、同じリポジトリ・同じ base・観測した先端と `headRefOid` が一致する MERGED の PR か、GitHub の今の base と一致する `origin/<base>` の祖先で証明できたものだけ。証明の手続きが失敗した枝は数えたうえで `unknown` にし、`check` は 61
 - **入れ方**: 計画の Issue を順に見て、worktree のある Issue は今までどおり `assign.tsv` に入れる（照会しない。在庫を増やさない）。worktree の無い Issue は、`ROOM` が残っている間だけ入れて 1 つ減らす。`ROOM` が 0 になった後の新しいレーンと、`WIP` が 0 でないときの新しいレーンは **すべて** `assign.tsv` に入れない
 - **見送りの書き方**: 入れなかった Issue は plan.md の「見送り」の節に 1 行ずつ書く。列は Issue・担当・モデル（1-2b の判定のまま）・理由（`wip=60 3/3`・`wip=61 gh pr list --state open: timeout`・`wip=2 <設定の誤り>`・`room 使い切り` など、`wip.json` と標準エラーから写す）。run の記録には何も書かない（`contract` の `skip` は通過扱いで、`status` が `next=send` と読むため）
-- **再開**: 見送った Issue は、この run の後段（2-2・3-1・3-3）に入らない。戻すのは次の計画（1-5）で、`check` をやり直してから。60 はマージで 1 本減ってから、61 は `source` の読み（GitHub・git）が戻ってから、2 は `.commandmate/flow.yaml` を人が直してから
+- **再開**: 見送った Issue は、この run の後段（2-2 の `/worktree-setup`・2-4 の契約・2.5 の分析の送信・3-1・3-3）に入らない。どれも assign.tsv の 1 列目だけを対象にする（run の `issue_numbers` をそのまま渡さない）。戻すのは次の計画（1-5）で、`check` をやり直してから。60 はマージで 1 本減ってから、61 は `source` の読み（GitHub・git）が戻ってから、2 は `.commandmate/flow.yaml` を人が直してから
 - **保証の範囲**: `check` の 0 は **助言で、許可・予約ではない**。同じ空きを見た 2 つの計画（2 人のリーダー、並べた run）はどちらも 0 を受け取り、上限を超えうる（**同時の照会の上限は保証しない**）。照会の後に誰かがブランチを足す・マージする交代も見ない。手順を通らない操作（普通の `send`、直接の `git worktree add`・`gh pr create`）は止めない。強制の受付は #4368 の PR2 以降
 - **設定**: root（主 worktree）の `.commandmate/flow.yaml` の `wip.total`（整数 1〜1000）。無い・`wip` 節が無いと off（何も解決しない）。`wip.active` は PR2a まで受け付けない（exit 2）。共通の `base`・`exclude` は `scripts/flow/config.mjs` が読む
 - 終了コードの意味は docs/orchestrate/exit-codes.md#1-5-flow-wip-check-の-60--61--2
@@ -43,10 +43,12 @@ cd "../commandmate-issue-{N}" && npm install --include=dev
 
 ## 2.5-1 分析の依頼の送り方
 
-develop worktree上でバグIssueごとに根本原因分析を実行する：
+develop worktree上でバグIssue（見送りは除く）ごとに根本原因分析を実行する。`BUG_ISSUES` は 1-2 の分類のうち、assign.tsv の 1 列目にある Issue だけにする（1-5 で見送った Issue へは送らない）：
 
 ```bash
 WORKTREE_ID="mycodebranchdesk-develop"
+# 1-5 で見送った Issue を除く（assign.tsv に無い Issue は送らない）
+BUG_ISSUES=$(for n in $BUG_ISSUES; do cut -f1 "workspace/orchestration/runs/$DATE/assign.tsv" | grep -qx "$n" && echo "$n"; done)
 
 for bug_issue in $BUG_ISSUES; do
   ISSUE_BODY=$(gh issue view "$bug_issue" --repo Kewton/CommandMate --json body -q '.body')

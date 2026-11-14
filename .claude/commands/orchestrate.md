@@ -296,7 +296,7 @@ node scripts/orchestrate/run-log.mjs status --run-dir "workspace/orchestration/r
 
 - `workspace/orchestration/runs/$DATE/assign.tsv` も同時に書く。1 行 = `<issue>\t<claude|command-code>\t<opus|sonnet|->`
   （3 列目は Claude のモデル。command-code は `-`。`--assign 123=claude-sonnet` は `123\tclaude\tsonnet` になる）
-- **WIP の照会**（#4368）: 新しいレーン（worktree の無い Issue）を assign.tsv に入れる前に 1 回だけ。2-2・3-1・run の記録では呼ばない
+- **WIP の照会**: 新しいレーン（worktree の無い Issue）を assign.tsv に入れる前に 1 回だけ。2-2・3-1・run の記録では呼ばない
 
 ```bash
 node scripts/orchestrate/flow-wip.mjs check --worktree . --json > "workspace/orchestration/runs/$DATE/wip.json"; WIP=$?
@@ -322,10 +322,10 @@ commandmatedev ls --branch feature/
 assign.tsv の各 Issue（見送りは除く）に worktree が無ければ作成：
 
 ```bash
-/worktree-setup {issue_numbers}
+/worktree-setup $(cut -f1 "workspace/orchestration/runs/$DATE/assign.tsv")
 ```
 
-手動で作るときは docs/orchestrate/workers.md#2-2-worktree-を手動で作る を読む。`npm install` の `--include=dev` は省かない。
+手動は docs/orchestrate/workers.md#2-2-worktree-を手動で作る を読む（`npm install` の `--include=dev` は省かない）。
 
 ### 2-3. CommandMateへの登録確認
 
@@ -338,7 +338,7 @@ commandmatedev ls --branch feature/
 
 ### 2-4. 実行契約の起案
 
-各Issueについて、オーケストレーターが実行契約 `.commandmate/tasks/issue-<N>.yaml` を起案し、
+assign.tsv の各 Issue について、オーケストレーターが実行契約 `.commandmate/tasks/issue-<N>.yaml` を起案し、
 **対象 worktree の中に**配置する。正準仕様は `docs/design/task-contract.md`（v1）、見本は
 `.commandmate/tasks/example.yaml`。
 
@@ -631,7 +631,7 @@ PR の前の確認（6-1-1 の `scripts/orchestrate/precheck.mjs`）を `--kind 
 
 ## Phase 2.5: 根本原因分析（バグIssueのみ）
 
-Phase 1-2 で `bug` ラベルと分類されたIssueに対して、他エージェント経由で根本原因分析を実行する。
+Phase 1-2 で `bug` ラベルと分類されたIssue（見送りは除く）に対して、他エージェント経由で根本原因分析を実行する。
 機能Issue（FEATURE_ISSUES）はこのフェーズをスキップする。
 
 **`bug` ラベルでも、本文に原因（`file:line`）と対策が既に書かれているならスキップする。**
