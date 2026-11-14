@@ -4,9 +4,8 @@
  * hand-computed witnesses W1〜W8 of §8.4 hold.
  *
  * The expected table is written here from the design, not computed by the product
- * (§8.2-1). The fixture's provenance is in tests/fixtures/flow/2026-11-13/meta.json: it is a
- * local reconstruction (develop's squash commits and the orchestrate run-log), not yet the
- * answer of the two gh queries — the leader re-fetches it before acceptance 2.
+ * (§8.2-1). The fixture is the verbatim answer of the two gh queries meta.json names,
+ * fetched by the leader with the real gh (meta.json `fetchedAt`, `provenance`).
  *
  * @vitest-environment node
  */

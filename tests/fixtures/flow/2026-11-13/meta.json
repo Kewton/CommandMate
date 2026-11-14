@@ -1,32 +1,65 @@
 {
   "issue": 4367,
-  "scope": { "repo": "Kewton/CommandMate", "base": "develop" },
-  "window": { "date": "2026-11-13", "tz": "Asia/Tokyo", "from": "2026-11-12T15:00:00.000Z", "to": "2026-11-13T15:00:00.000Z" },
+  "scope": {
+    "repo": "Kewton/CommandMate",
+    "base": "develop"
+  },
+  "window": {
+    "date": "2026-11-13",
+    "tz": "Asia/Tokyo",
+    "from": "2026-11-12T15:00:00.000Z",
+    "to": "2026-11-13T15:00:00.000Z"
+  },
   "queries": {
     "created": {
       "cmd": "gh",
-      "args": ["pr", "list", "--repo", "Kewton/CommandMate", "--base", "develop", "--state", "all", "--search", "created:2026-11-12..2026-11-13", "--limit", "1000", "--json", "number,createdAt,baseRefName"],
+      "args": [
+        "pr",
+        "list",
+        "--repo",
+        "Kewton/CommandMate",
+        "--base",
+        "develop",
+        "--state",
+        "all",
+        "--search",
+        "created:2026-11-12..2026-11-13",
+        "--limit",
+        "1000",
+        "--json",
+        "number,createdAt,baseRefName"
+      ],
       "file": "created.json",
-      "count": 47,
-      "numbersSha256": "a084df59f02c62825c23f7cff0509065272d9f402ff4f881466261d78720a0b7"
+      "count": 49,
+      "numbersSha256": "fc3cf82b9bf2ea8d90458a3834877019c2fdfa2c7860c2a5490ff6544a9a5686"
     },
     "merged": {
       "cmd": "gh",
-      "args": ["pr", "list", "--repo", "Kewton/CommandMate", "--base", "develop", "--state", "merged", "--search", "merged:2026-11-12..2026-11-13", "--limit", "1000", "--json", "number,mergedAt,baseRefName"],
+      "args": [
+        "pr",
+        "list",
+        "--repo",
+        "Kewton/CommandMate",
+        "--base",
+        "develop",
+        "--state",
+        "merged",
+        "--search",
+        "merged:2026-11-12..2026-11-13",
+        "--limit",
+        "1000",
+        "--json",
+        "number,mergedAt,baseRefName"
+      ],
       "file": "merged.json",
       "count": 49,
-      "numbersSha256": "7dc584d73748119b1d61ad68ef6b1c8fb728cf5f04b1bab05132a1df68bf7a89"
+      "numbersSha256": "5a2b1c6cc2cd8c05fbd04c617084dc18cc2fe7bcfcce1902e0f3d3fc4059539e"
     }
   },
-  "numbersSha256Of": "sha256 of the PR numbers in file order (ascending), joined by \",\"",
-  "fetchedAt": null,
+  "numbersSha256Of": "sha256 of the PR numbers in file order (the order gh returned them), joined by \",\"",
+  "fetchedAt": "2026-11-14T01:22:28Z",
   "provenance": {
-    "status": "local-reconstruction: NOT the answer of the gh queries above. The worker of PR1a was not allowed to call gh; the leader re-fetches with the two queries before acceptance 2 and replaces both files (design §8.2 step 4: a difference is resolved by checking the definitions, not by editing the table).",
-    "merged": "develop's first-parent commits whose subject ends in (#N), committer time in [2026-11-12T00:00Z, 2026-11-14T00:00Z), read with git log on 2026-11-14. The committer time of a squash merge can differ from gh's mergedAt by about a second (design W2: #4340 10:59:22 JST, git 10:59:21). Commits without (#N) (the release commits of v0.51.0 on 2026-11-12 JST and v0.51.1) are not in it.",
-    "created": "the earliest orchestrate run-log record `stage: pr` with note `pr=#N created` per PR (workspace/orchestration/runs/*/run-*.jsonl), its `at` in [2026-11-12T00:00Z, 2026-11-14T00:00Z). `at` is written after `gh pr create` returns, so it is at or just after createdAt. The 2026-11-12 JST part is outside the window and its coverage was not checked.",
-    "inferred": {
-      "4327": "no run-log record (made by hand). Placed at 2026-11-12T16:34:00Z: PR numbers grow with creation, so it is after #4326 (16:33:59Z) and before #4328 (17:06:35Z); the hour (01 JST) is the design's §8.3 count, not observed here.",
-      "4337": "no run-log record (made by hand). Placed at 2026-11-12T23:23:38Z: after #4334 (23:23:37Z) and before #4338 (00:11:25Z); the hour (08 JST) is the design's §8.3 count, not observed here."
-    }
+    "status": "the answers of the two gh queries above, verbatim: the leader (claude-3) ran them with the real gh at fetchedAt and replaced the local reconstruction the worker had built (re-instruction 1 of #4367 PR1a). Acceptance 2 (reconstruct --date 2026-11-13 --tz Asia/Tokyo against the real GitHub, workspace/orchestration/runs/2026-11-14/reconstruct-4367-real-2026-11-13.txt) matched every cell of design §8.3.",
+    "fields": "only number, createdAt / mergedAt and baseRefName are kept (design §8.2-2)."
   }
 }

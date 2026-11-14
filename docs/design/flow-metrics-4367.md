@@ -404,12 +404,12 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 
 - 期間: 2026-11-13 00:00〜24:00 JST（`tz=Asia/Tokyo`、時ごと）
 - 設計の段の取得（2026-11-14、読み取りだけ）: `gh pr list --repo Kewton/CommandMate --base develop --state all --search "created:2026-11-12..2026-11-14" --limit 200 --json number,createdAt,mergedAt,closedAt,state`（49 本）と、`--search "created:<2026-11-12 closed:>=2026-11-12"`（1 本、#4312。11-12 13:24 JST に閉じたので 11-13 の値には効かない）。11-13 にマージされた PR はすべて 11-13 の作成で、マージされずに残った 11-13 作成の PR は無かった
-- **PR1a の fixture は §2.3 の 2 本の照会（`created:2026-11-12..2026-11-13`・`merged:2026-11-12..2026-11-13`）で取り直す**（設計の段の照会は作成日で切っていて、窓の前に作られ窓の中でマージされた PR を一般には拾えない。この日は 0 本だったので値は同じになる見込み: **見立て**）
+- **PR1a の fixture は §2.3 の 2 本の照会（`created:2026-11-12..2026-11-13`・`merged:2026-11-12..2026-11-13`）の応答**（設計の段の照会は作成日で切っていて、窓の前に作られ窓の中でマージされた PR を一般には拾えない。この日は 0 本で、取り直した応答でも §8.3 の値は同じだった: **事実**、§8.2）
 - WIP・CI の待ち・開いた PR の再現は PR1a の範囲外（§5.2 の PR-L・PR-C・PR-O）。改訂 1 の表のそれらの列は外した（その値は改訂 1 の §8.3 に残る。後の PR がそれぞれの完全性の条件を閉じてから、改めて期待値にする）
 
 ### 8.2 期待値の出し方と fixture への結び付け
 
-**PR1a の fixture の出どころ（改訂 3、実装の段の事実）**: PR1a のワーカーは実際の `gh` を呼ばない契約だったため、`tests/fixtures/flow/2026-11-13/` は §2.3 の 2 本の照会の応答では**なく**、手元の記録からの組み立て（`meta.json` の `provenance`）。`merged.json` は develop の first-parent の squash コミット（件名の末尾 `(#N)`、committer 時刻。gh の `mergedAt` と 1 秒ほどずれうる: W2）、`created.json` は orchestrate の run-log の `stage: pr`・`pr=#N created` の `at`。run-log に無い #4327・#4337 は PR 番号の単調性から区間を決め、時は §8.3 の値に拠った（`meta.json` の `inferred`。観測ではない）。`meta.json` の `queries` は §2.3 の照会そのもので、`fetchedAt` は null。**受入 2 の前に開発リーダーが 2 本の照会で取り直して両ファイルを差し替える**（下の 4 に従い、食い違いは定義の読みを先に確かめる）
+**PR1a の fixture の出どころ（改訂 3、実装の段の事実）**: `tests/fixtures/flow/2026-11-13/` の `created.json`・`merged.json` は §2.3 の 2 本の照会の実際の `gh` の応答そのもの（開発リーダーが 2026-11-14T01:22:28Z に取得し、ワーカーが手元の記録から組み立てた仮のものを再指示 1 で差し替えた。`meta.json` の `fetchedAt`・`count`・`numbersSha256`・`provenance`）。受入 2（実際の GitHub に対する `reconstruct --date 2026-11-13 --tz Asia/Tokyo`）の出力は §8.3 と全セル一致し、差し替えた fixture でも T-R（§8.3 の全セル・§8.4 の証人）が通る
 
 1. 期待値は計測の実装とは別の実装で出し、製品の集計で作り直さない。§8.3 は設計の段で Python の短いスクリプト（§2.3 の定義を直接書いたもの）で出した。このスクリプトと母集団の証跡は設計の PR に入っていない（scope の外）。独立した正しさは §8.4 の手計算の証人で補う
 2. fixture に写すのは `number`・`createdAt`・`mergedAt`・`baseRefName` だけ（題名・ブランチ名は写さない）
@@ -545,7 +545,7 @@ runBounded(cmd, args, { deadlineMono, capMs }):
 | P3 補記: 読み手の不明 | 記録の dir を読めない（EACCES 等）は exit 1 で「記録が無い」と分ける。上限で読まなかったファイルを JSON と表示に残し、それより新しい観測があり得る時は最新を出さない。16 MB・64 MB の対照は上限を差し替えて試す | §2.5・試験 |
 | P3 補記: 日時 | P15 を絶対の窓で比べる行にした。時の鍵にオフセットを持たせ、夏時間の 23・25 行を試験に置いた | §2.5・§7.1 P15 |
 | P3 補記: 共有の読み手の引渡し | `readFlowConfig` の引数に `deadlineMono`（単調時計の絶対の締め切り）と `tz` を明記した | §6.1 |
-| P3 補記: fixture | 実際の gh を呼べなかったので、手元の記録からの組み立てと推定の 2 件を `meta.json` に明記し、取り直しを開発リーダーへ残した | §8.2 |
+| P3 補記: fixture | 開発リーダーが §2.3 の 2 本の照会の実際の gh の応答を取り、ワーカーの組み立て（推定 2 件を含む）を差し替えた（再指示 1）。受入 2 の実出力と §8.3 は全セル一致 | §8.2 |
 
 ### 14.1 改訂 2（再レビュー `prereview-4367-2-reply.md`・原因調査 `enabler-return-4367-cause.md`・再指示 2）
 
