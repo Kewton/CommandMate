@@ -117,6 +117,7 @@ const SECTIONS: Readonly<Record<string, readonly string[]>> = {
 /** Every doc this PR wrote into (headings or bullets). */
 const RECEIVING_DOCS: readonly string[] = [
   ...Object.keys(SECTIONS),
+  ".claude/skills/rebuild/SKILL.md",
   "docs/release-guide.md",
   "docs/en/release-guide.md",
   "docs/DEPLOYMENT.md",
@@ -278,5 +279,49 @@ describe("docs after the CLI / release memory move (#4403)", () => {
     expect(read("src/lib/hooks/sources/command-code/hooks-config.ts")).toContain(
       '`matcher` must be the EMPTY STRING, and `"*"` silently kills two events',
     );
+  });
+});
+
+/** The moved text, as corrected by the review: each claim matches the code it names. */
+describe("the moved text agrees with the code (#4403 third PR review)", () => {
+  it("publish waits for main's CI instead of running the tests itself (ja and en)", () => {
+    const ja = read("docs/release-guide.md");
+    const en = read("docs/en/release-guide.md");
+    expect(ja).not.toContain("公開の前にテスト全体を 1 本で走らせる");
+    expect(en).not.toContain("It runs the whole test suite in one job before publishing");
+    expect(ja).toContain("`Require CI to have passed on the tag commit`（`scripts/check-release-ci.mjs`）");
+    expect(en).toContain("`Require CI to have passed on the tag commit` (`scripts/check-release-ci.mjs`)");
+    const workflow = read(".github/workflows/publish.yml");
+    expect(workflow).toContain("- name: Require CI to have passed on the tag commit");
+    expect(workflow).toContain("--timeout-minutes 45");
+    expect(workflow).not.toMatch(/run: npm run test:unit/);
+  });
+
+  it("the rebuild skill decides the build from the build inputs, like DEPLOYMENT.md", () => {
+    const skill = read(".claude/skills/rebuild/SKILL.md");
+    expect(skill).not.toContain("| `.env` / 設定だけ変えた |");
+    expect(skill).toContain("**ビルドは「ビルドの入力が変わったとき」だけ必要です。**");
+    expect(skill).toContain("`NEXT_PUBLIC_APP_VERSION` としてバンドルへ焼き込む");
+    const deploy = read("docs/DEPLOYMENT.md");
+    expect(deploy).not.toContain("| `.env` / 設定を変えた、");
+    expect(deploy).toContain("| `.env` だけ変えた（ビルドの入力は変えていない）、クラッシュから復帰したい |");
+  });
+
+  it("a dialog is drawn while the prompt is still waiting, not only on pages open at the time", () => {
+    const demo = read("docs/user-guide/demo-video.md");
+    expect(demo).not.toContain("そのプロンプトが出た時点で開いていたページ");
+    expect(demo).toContain("**そのプロンプトがまだ待機中**");
+    // A page opened later reads current-output in its initial fetch.
+    expect(read("src/hooks/useWorktreeDetailController.ts")).toContain("fetchCurrentOutput(),");
+  });
+
+  it("the stale-build section keeps the connection as a cause to rule out first (ja and en)", () => {
+    const ja = read("docs/user-guide/troubleshooting.md");
+    const en = read("docs/en/user-guide/troubleshooting.md");
+    expect(ja).not.toContain("ディスク上の `.next` が食い違うと起きます。");
+    expect(en).not.toContain("This happens when the build the running server loaded at start-up");
+    expect(ja).toContain("まず**通信の状態**を切り分けます");
+    expect(en).toContain("first rule out **the connection**");
+    expect(read("src/lib/error/chunk-reload.ts")).toContain("return onLine ? 'build' : 'network';");
   });
 });

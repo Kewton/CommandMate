@@ -303,7 +303,7 @@ gh run list --repo Kewton/CommandMate --workflow=publish.yml --limit 1
 npm view commandmate version    # 新バージョンになること
 ```
 
-- **publish ジョブは長い。** 公開の前にテスト全体を 1 本で走らせるので、Release の作成から success まで数十分かかります。`Run tests` が 20 分を超えて `in_progress` でも正常です。待ちのループは `publish.yml` の `timeout-minutes` まで取ります。
+- **publish ジョブは main の CI を待つので長くなることがあります。** publish の中ではテストを走らせず、`Require CI to have passed on the tag commit`（`scripts/check-release-ci.mjs`）が、タグのコミット（= リリース PR のマージコミット）への main の push で走る `ci-pr.yml` の `Unit Tests` と `Build` が success になるまで最大 45 分待ちます。main の CI がまだ走っている間、この step が `in_progress` のままでも正常です。待ちのループはこの 45 分とビルド・公開の時間を足した長さ（`publish.yml` の `timeout-minutes`）まで取ります。
 - **success の後も、registry に出るまで数分かかります。** その間は `npm view commandmate version` も旧版を返します（版を指定すると E404）。失敗と読まず、ジョブのログの `+ commandmate@<版>` を確かめてから、数分おきに `npm view` を撃ち直します。待ちを 3 分程度で打ち切ると、反映の遅れを「未公開」と誤読します。
 - ジョブが `cancelled` / `failure` で終わったときは、[publish ワークフローが失敗した場合](#publish-ワークフローが失敗した場合) を先に読みます（公開済みのことがあります）。
 

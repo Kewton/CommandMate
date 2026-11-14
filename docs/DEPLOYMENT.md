@@ -215,9 +215,9 @@ npm run start
 
 | やりたいこと | コマンド | ビルド |
 |-------------|---------|--------|
-| `.env` / 設定を変えた、クラッシュから復帰したい | `./scripts/restart-nobuild.sh` | **しない** |
+| `.env` だけ変えた（ビルドの入力は変えていない）、クラッシュから復帰したい | `./scripts/restart-nobuild.sh` | **しない** |
 | 停止中のサーバーをバックグラウンドで起こしたい | `./scripts/start.sh --daemon` | **しない** |
-| アプリケーションのコードが変わった | `./scripts/stop-server.sh && ./scripts/build-and-start.sh --daemon` | する |
+| ビルドの入力（コード・`package.json` の版・`next.config.*` など。下記）が変わった | `./scripts/stop-server.sh && ./scripts/build-and-start.sh --daemon` | する |
 
 ```bash
 # ビルドせずに再起動（.env の変更を反映する標準手段）

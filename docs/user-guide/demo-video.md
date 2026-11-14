@@ -93,7 +93,7 @@ Playwright の `recordVideo` は、ページの移動（`page.goto`・クリッ�
 
 - assistant の行の `request_id` は `claude-turn:<uuid>` の形にする（`src/types/agent-transcript.ts` の `AGENT_MARKDOWN_REQUEST_ID_PREFIXES`）。無いと `isAgentAuthoredMarkdown` が false になり、本文が Markdown でなく生のテキストで描かれる
 - 偽エージェントのセッションが落ちた後に送信すると、サーバーが**本物の CLI を起動**して信頼の確認で止まり、hook の設定も残る。撮影スクリプトの先頭でセッションを起こし直し、その run の中で撮り切る
-- ダイアログは**そのプロンプトが出た時点で開いていたページ**にしか描かれない（待ちの始まりはメモリにしか無い）。PC とスマホの両方に出すなら、送信より前に両方の context を開いておく
+- ダイアログは、撮るときに**そのプロンプトがまだ待機中**のときだけ描かれる（後から開いたページも初期取得で current-output を読むので、開いた順番は問わない）。撮る前に `commandmate capture <worktree-id> --json` などで今も待機中かを確かめる。Auto-Yes が有効だとプロンプトはすぐ答えられて消え、答えた表示の出方も変わるので、ダイアログを撮るときは Auto-Yes を切っておく
 - 番号付きの選択肢は `PromptPanel`（スマホは `MobilePromptSheet`）に出て、PC では吹き出しの列をほぼ隠す。吹き出しの列とダイアログを 1 枚に収めたいときは、`ChatDialogCard` に出る形のプロンプト（選択リストなど）を作る
 - `?view=chat` で出力面を固定できる（`src/config/surface-mode-config.ts` の `SURFACE_MODE_VIEW_PARAM`）。仮想リストはしばらく skeleton を描くので、本文のテキストが出るまで待ってから撮る
 

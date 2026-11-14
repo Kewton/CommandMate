@@ -135,13 +135,18 @@ commandmate start --daemon
 
 ## The screen stays on "Updating to the latest version" / breaks when you move between screens?
 
-This happens when the build the running server loaded at start-up and the `.next` on disk disagree. It is not a code defect.
-The page catches the ChunkLoadError and reloads once by itself; if it recurs within 30 seconds it stops reloading and
-leaves "Updating to the latest version" on the screen (`CHUNK_RELOAD_GUARD_MS` in `src/lib/error/chunk-reload.ts`).
+This screen appears when part of the page (a chunk) could not be loaded. The page reloads once by itself; if it recurs within 30 seconds
+it stops reloading and leaves the message on the screen (`CHUNK_RELOAD_GUARD_MS` in `src/lib/error/chunk-reload.ts`).
+There is more than one possible cause. When the device is known to be offline, the "You're offline" screen appears instead and retries once the
+connection is back (`src/app/error.tsx`). But `navigator.onLine` being true does not prove the network works (a Wi-Fi that needs sign-in, a route
+that does not reach the server), so even when "Updating to the latest version" appears, first rule out **the connection**: check whether other pages
+or the server's URL open from the same device, and whether the server is running.
+
+When the connection is fine, one candidate cause is that the build the running server loaded at start-up and the `.next` on disk disagree (not a code defect).
 It also shows up as a home page that renders while moving to another screen gives `Application error`, or as only the
 not-yet-opened APIs returning 500. The PWA service worker serves `/_next/static/` from its cache first, so devices can look broken in different ways.
 
-Main causes and fixes:
+Main causes of a build mismatch and fixes:
 
 | Cause | Fix |
 |---|---|
@@ -151,7 +156,7 @@ Main causes and fixes:
 
 How to confirm:
 
-- Compare the server's start time (`ps -o lstart= -p <pid>`) with the modification time of `.next/BUILD_ID`. If the build is newer, this is the cause
+- Compare the server's start time (`ps -o lstart= -p <pid>`) with the modification time of `.next/BUILD_ID`. If the build is newer, the builds disagree
 - Check that every static file the served HTML references exists on disk:
   match each path from `curl -s localhost:3000/ | grep -oE '/_next/static/[^"]+\.(js|css)'` against `.next/static/`. One missing file confirms it
 - **Do not take a route returning 200 as proof of health.** The HTML can render while one CSS file or chunk it references is missing

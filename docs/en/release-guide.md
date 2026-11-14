@@ -290,7 +290,7 @@ gh run list --repo Kewton/CommandMate --workflow=publish.yml --limit 1
 npm view commandmate version    # should be the new version
 ```
 
-- **The publish job is long.** It runs the whole test suite in one job before publishing, so it takes tens of minutes from creating the Release to success. `Run tests` still `in_progress` after 20 minutes is normal. Let the wait loop run up to the `timeout-minutes` of `publish.yml`.
+- **The publish job can take long because it waits for main's CI.** It runs no tests itself: `Require CI to have passed on the tag commit` (`scripts/check-release-ci.mjs`) waits up to 45 minutes for `Unit Tests` and `Build` of the `ci-pr.yml` run triggered by the main push of the tag commit (= the release PR's merge commit) to succeed. That step staying `in_progress` while main's CI is still running is normal. Let the wait loop run for those 45 minutes plus the build and publish time (the `timeout-minutes` of `publish.yml`).
 - **Even after success, the registry takes a few minutes to show the version.** Meanwhile `npm view commandmate version` returns the old version (E404 when you name the new one). Do not read that as a failure: confirm `+ commandmate@<version>` in the job log, then retry `npm view` every few minutes. Giving up after about 3 minutes mistakes the propagation delay for "not published".
 - If the job ended `cancelled` / `failure`, read [The publish workflow failed](#the-publish-workflow-failed) first (the version may already be out).
 
