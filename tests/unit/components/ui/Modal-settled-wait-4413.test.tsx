@@ -34,7 +34,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import React, { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { EXIT_ANIMATION_DURATION_MS } from '@/config/ui-feedback-config';
-import { isModalSettled, waitForModalSettled } from '@tests/helpers/modal-settled';
+import { isModalSettled, ModalSettledAmbiguousError, waitForModalSettled } from '@tests/helpers/modal-settled';
 
 const onClose = vi.fn();
 
@@ -82,11 +82,61 @@ function renderAndOpen(props: { autoFocusInside?: boolean; deferred?: boolean } 
   return opener;
 }
 
-/** Resolves in the microtask right after the commit that inserts the panel. */
-function atPanelCommit<T>(read: (panel: HTMLElement) => T): Promise<T> {
+const outerOnClose = vi.fn();
+
+/**
+ * A Modal already open (and settled, inside act()) over which a second one
+ * opens a task later, outside act() — a ConfirmDialog raised from a dialog.
+ * The inner one's child takes focus itself, as ConfirmDialog's buttons do.
+ * The inner Modal is mounted only while open: a closed Modal that mounts after
+ * the outer one runs its scroll-lock effect with `isOpen=false` and sets the
+ * body back to `unset` (see the commit body), which would hide the overlap.
+ */
+function StackedHost() {
+  const [inner, setInner] = useState(false);
+  return (
+    <>
+      <Modal isOpen onClose={outerOnClose} title="Outer">
+        <button
+          type="button"
+          data-testid="open-inner"
+          onClick={() => setTimeout(() => queueMicrotask(() => setInner(true)), 0)}
+        >
+          open inner
+        </button>
+      </Modal>
+      {inner && (
+        <Modal
+          isOpen
+          onClose={() => {
+            onClose();
+            setInner(false);
+          }}
+          title="Inner"
+          size="sm"
+        >
+          {/* eslint-disable-next-line jsx-a11y/no-autofocus -- ConfirmDialog's shape */}
+          <button type="button" autoFocus data-testid="inner-confirm">
+            confirm
+          </button>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/**
+ * Resolves in the microtask right after the commit that inserts the panel
+ * (the one holding `contentTestId`, when given).
+ */
+function atPanelCommit<T>(read: (panel: HTMLElement) => T, contentTestId?: string): Promise<T> {
   return new Promise((resolve) => {
     const observer = new MutationObserver(() => {
-      const panel = document.querySelector<HTMLElement>('[data-testid="modal-panel"]');
+      const panel = contentTestId
+        ? document
+            .querySelector(`[data-testid="${contentTestId}"]`)
+            ?.closest<HTMLElement>('[data-testid="modal-panel"]')
+        : document.querySelector<HTMLElement>('[data-testid="modal-panel"]');
       if (!panel) return;
       observer.disconnect();
       resolve(read(panel));
@@ -97,6 +147,7 @@ function atPanelCommit<T>(read: (panel: HTMLElement) => T): Promise<T> {
 
 afterEach(() => {
   onClose.mockClear();
+  outerOnClose.mockClear();
 });
 
 describe('Modal opened outside act() under load (Issue #4413)', () => {
@@ -167,5 +218,56 @@ describe('Modal opened outside act() under load (Issue #4413)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(document.activeElement).toBe(opener));
     await waitFor(() => expect(screen.queryByTestId('modal-panel')).toBeNull());
+  });
+});
+
+describe('a modal opened over another one (review of #4413)', () => {
+  function renderStackedAndOpenInner(): void {
+    render(<StackedHost />);
+    // The outer Modal opened inside render's act(), so it is settled already.
+    expect(isModalSettled(screen.getByTestId('open-inner').closest('[data-testid="modal-panel"]')!)).toBe(true);
+    fireEvent.click(screen.getByTestId('open-inner'));
+  }
+
+  it('positive control: the three signals already hold at the inner commit, and an Escape then reaches only the outer one', async () => {
+    const commit = atPanelCommit((panel) => {
+      const settled = isModalSettled(panel);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      return settled;
+    }, 'inner-confirm');
+    renderStackedAndOpenInner();
+
+    // The outer lock and the inner autoFocus make the inner look settled
+    // before its own effects ran — the helper before this fix resolved here.
+    expect(await commit).toBe(true);
+    expect(outerOnClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('waitForModalSettled refuses it instead of resolving early', async () => {
+    renderStackedAndOpenInner();
+
+    await expect(waitForModalSettled({ contentTestId: 'inner-confirm' })).rejects.toBeInstanceOf(
+      ModalSettledAmbiguousError,
+    );
+    await expect(waitForModalSettled()).rejects.toThrow(/one modal at a time/);
+    expect(outerOnClose).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Only that the inner listener is there: the outer Modal registered its own
+  // listener earlier and hears the same Escape — stacked Modals are not this
+  // issue's to change (see the commit body).
+  it('the way it points to: settled inside act(), the inner Modal hears the Escape', async () => {
+    render(<StackedHost />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('open-inner'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByTestId('inner-confirm')).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
