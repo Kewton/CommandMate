@@ -120,6 +120,7 @@ import {
   type OptimisticSendOptions,
   type PendingConnectivity,
 } from '@/hooks/usePendingMessages';
+import { useRoleRefusalNotice } from '@/hooks/useRoleRefusalNotice';
 import { usePendingConnectivity } from '@/hooks/usePendingConnectivity';
 import { useSessionTileAutoYes } from '@/hooks/useSessionTileAutoYes';
 import {
@@ -472,6 +473,15 @@ function SessionTileCard({
       worktreeApi.sendMessage(worktree.id, content, options),
     [worktree.id],
   );
+  // Text headed for the composer: a discarded send (so it can be edited and
+  // sent again), a send refused because of its role (Issue #4385) or a previous
+  // prompt picked from the transcript. Consumed by `MessageInput`, which appends
+  // rather than overwrites a draft.
+  const [composerInsert, setComposerInsert] = useState<string | null>(null);
+  // Issue #4385: the worktree screen's handling of a send refused because of its
+  // role — the app's toast says why, the failed row carries the reason, and the
+  // text goes back to the composer.
+  const roleRefusalNotice = useRoleRefusalNotice(setComposerInsert);
   const {
     messages: mergedMessages,
     sendOptimistic,
@@ -483,16 +493,14 @@ function SessionTileCard({
     sendFn: sendMessageFn,
     onSent: refreshMessages,
     connectivity,
+    readRoleRefusal: roleRefusalNotice.readRoleRefusal,
+    onRoleRefused: roleRefusalNotice.onRoleRefused,
   });
   const messages = useMemo(
     () => messagesForTileInstance(mergedMessages, resolvedInstanceId),
     [mergedMessages, resolvedInstanceId],
   );
 
-  // Text headed for the composer: a discarded send (so it can be edited and
-  // sent again) or a previous prompt picked from the transcript. Consumed by
-  // `MessageInput`, which appends rather than overwrites a draft.
-  const [composerInsert, setComposerInsert] = useState<string | null>(null);
   const clearComposerInsert = useCallback(() => setComposerInsert(null), []);
   const handleDiscardPending = useCallback(
     (tempId: string) => {
