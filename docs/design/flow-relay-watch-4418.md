@@ -65,10 +65,20 @@ relayWatch:
 
 ## 5. 知らせ先と繰り返さないこと
 
-- PM の入力欄へ relay の返事と同じ形（`[from <alias> / <worktree>]` の見出し）で **1 行**: `[from flow-watch / <pm の worktree>] relay の見張り（flow tick）で新しく N 件: …（記録: <file>）`。5 件まで名前を出し、残りは件数。`POST /api/worktrees/:pm/send`（既存の送信。配送の安全は既存の `send` に任せる）
-- 各件は鍵（`no-relay:<行 id>`・`stall:<relay id>`・`stall-long:<relay id>`・`held:…`・`hold:…`・`expired:<relay id>`）を持つ。記録の `reported` にある鍵は送らない（同じ件を tick ごとに繰り返さない）。今も続く鍵だけを `reported` に残す（消えてまた出たら、もう一度知らせる）
-- 送る前に見張りの行（試行の印）を書く。書けなければ送らない。結果が分からない送信も送ったものとして繰り返さない（#4367 の PR-N の条件に合わせた）
-- PM のセッションが動いていない（`current-output` の `isRunning` が真でない）ときは送らず、鍵を `reported` に入れない（次の tick で送る）。送信でセッションを起こさない
+- PM の入力欄へ relay の返事と同じ形（`[from <alias> / <worktree>]` の見出し）で **1 行**: `[from flow-watch / <pm の worktree>] relay の見張り（flow tick）で新しく N 件: …（記録: <file>）`。5 件まで名前を出し、残りは件数。`POST /api/worktrees/:pm/send`（既存の送信。配送の安全は既存の `send` に任せる。今動いている PM の世代に固定して送る: §5.2）
+- 各件は鍵（`no-relay:<行 id>`・`stall:<relay id>`・`stall-long:<relay id>`・`held:…`・`hold:…`・`expired:<relay id>`）を持つ。記録の `reported` にある鍵は送らない（同じ件を tick ごとに繰り返さない）。今も続く鍵と、**その tick で読めずに決められなかった鍵**を `reported` に残す。忘れるのは「読めて、条件を外れた」（解消）ときだけ（消えてまた出たら、もう一度知らせる）
+- 読めなかった（unknown）と解消を分ける: 受け手の画面だけが読めない（`current-output` の 500 など）ときは、その画面の hash と「いつから同じか」を前の tick から引き継いで `unread` の印を付け、その受け手への relay の STALL はその tick では決めない（`stall` は `unknown`。`stall:<id>`・`stall-long:<id>` を残す）。受け手の履歴が読めなければ `no-relay:*`、保留・期限切れの一覧が読めなければ `held:*`・`expired:*`、id で読めなかった relay（上限 50 件を超えた分を含む）は `expired:<id>` を残す。子全体の失敗は今までどおり前の状態をそのまま引き継ぐ
+- 送る前に見張りの行（試行の印）を書く。書けなければ送らない。結果が分からない送信（時間切れ・サーバー停止）も送ったものとして繰り返さない（#4367 の PR-N の条件に合わせた）。サーバーが送らなかったと答えた送信（`not_sent`: PM が止まった・入れ替わった・固定の根拠が無い）は、次の tick がその `relay-watch-notice` 行を読んで鍵を `reported` から外し、もう一度送る
+- PM のセッションが動いていない（`current-output` の `isRunning` が真でない）ときは送らず、鍵を `reported` に入れない（次の tick で送る）。送信でセッションを起こさない（§5.2）
+
+### 5.2 送信で PM を起こさない（Codex レビュー P2-1）
+
+- 問題: `isRunning` を読んでから送るまでに PM が止まると、素の `POST /send` は停止中のセッションを起動する（`src/app/api/worktrees/[id]/send/route.ts` の `if (!running)` → `startSessionForSend`）
+- 既存の API だけで閉じる経路: send の `expectedRole: { injectionFingerprint, sessionGeneration }`（#4116。何も保存しない条件）。`sessionGeneration` を付けた送信は、PM が動いていなければ起動の**前**に `refuseGonePinnedProcess` が 409 `role_condition_unmet` で断り（何も打たず、起動もしない）、別の世代に入れ替わっていれば最初のキーの直前（`roleConditionBoundary`）で断る
+- 手順（`relay-io.mjs notify`）: `GET /api/worktrees/:pm/instances/roles` で PM の `application.launched`（今の世代と一致するときだけ返る起動の記録）を読み、その `sessionGeneration`・`injectionFingerprint` を `expectedRole` に入れて送る。409 等は `not_sent`（次の tick で再送）
+- claude だけに送る: claude の送信（`sendMessageToClaude`）はセッションを起動・再起動しない。ほかの多くの tool の送信は `requireSession({ relaunch: true })` で、route の確認とサービスの間に tool が終わると再起動しうる（キーは打たれないが起動は起きる）。そのため PM の tool が claude でなければ送らない（`pm-tool-not-pinnable`）
+- 送らない（`not_sent`、次の tick で再び試す）とき: roles API が読めない（`pin-<why>`）・PM が roster に無い・`launched` が無い（`pm-launch-unknown`。**サーバーの再起動の後は、PM を CommandMate から起動し直すまで知らせは届かない**。記録には残る）・PM の役割の設定が起動時と変わった（サーバーが 409 で断る。PM を起動し直すまで届かない）
+- 本体（API・relay・DB）は変えていない。この保証は上の既存の振る舞いに依る。試験はその振る舞いの置き場所（route の順序・send-role の条件・claude の送信）を読んで、変わったら落ちるようにした
 
 ### 5.1 検査 1 は #4420 まで記録だけ（人の決定・PM 経由）
 
@@ -87,9 +97,16 @@ relayWatch:
 - 送った後: `{ v: 1, kind: "relay-watch-notice", tickId, at, repo, base, keys, outcome: "sent" | "not_sent" | "unknown" | "fail", why }`
 - 次の tick の状態は、最新の 3 ファイルの最後の `relay-watch` 行から読む（読めなければ空から。そのときは同じ件をもう一度知らせうる）
 
+### 6.1 記録の上限をまたいでも状態を読む（Codex レビュー P2-3）
+
+- 問題: 書き手はサイズによらず追記するが、状態の読み手は 16 MiB（`MAX_FILE_BYTES`）を超えた日のファイルを丸ごと飛ばしていた。受け手 32 × 履歴 100 行を毎 tick 記録できる設定では、正常な記録だけで超えうる。飛ばすと状態が空になり、続いている件を毎 tick 知らせ直す
+- 方式: **末尾から読む**。ファイルの最後の 256 KiB を読み、`relay-watch` 行が無ければ窓を 4 倍ずつ広げ、末尾 16 MiB まで探す（ファイル全体は読まない）。窓の先頭の切れた行と、改行で終わらない末尾は行として読まない。記録は消さない・上書きしない・書き手は変えない
+- 限界: 最新の状態の行がファイルの末尾 16 MiB より前にしか無いとき（1 行がそれ以上の大きさ）は読めず、1 つ前のファイルへ進む
+- 計測の記録の読み手（`readTicks`：`reconstruct`・`report`・`status`）は変えていない（tick の行の扱いは不変。上限を超えた日は今までどおり `truncatedFiles`）
+
 ## 7. 変えないもの・時間・失敗
 
 - launchd の常駐の動き（15 分ごと・1 回動いて終わる・記録を消さない）、tick の 2 つの値とその行、ロック（見張りは同じ排他の中、計測の行を書いた後）
 - 見張りの読みは子プロセス 1 本（`node scripts/flow/relay-io.mjs read '<json>'`）を共有の runner で起こす（上限 45 秒・SIGKILL）。送信は 1 本（上限 15 秒）。見張り全体の締め切りは開始から 60 秒。各要求は 10 秒で打ち切る。runner は「この Node・このファイル・`read`／`notify`・JSON の 1 引数」だけを許す
 - 見張りの失敗（時間切れ・子の失敗・サーバー停止・形の誤り）は `status: "unknown"` の行と stderr の 1 行に残し、前の状態（`screens`・`relays`・`reported`）を引き継ぐ。計測の行と tick の exit は変わらない
-- 試験（`relay-watch-4418.test.ts`）: 1〜3 の検出と陽性対照（relay あり・画面が進んでいる・閉じた relay）、画面が不変でも背景の待ち・処理中・最近の hook・検証の実行中なら鳴らない（陰性）と、終わった直後の `stop`・証拠の欄が無いときは鳴る（陽性対照）、長い待機の 2 段目、検査 1 は記録されるが知らせない（既定）・`notifyNoRelay: true` で知らせる、0 件で `unobserved`、2 回目の tick で繰り返さない、検査の失敗でも計測の行が書かれる、設定の誤りは exit 2、`relay-io.mjs` は偽の `fetch` で。本物のサーバー・`~/.commandmate`・DB・tmux は使わない
+- 試験（`relay-watch-4418.test.ts`）: 1〜3 の検出と陽性対照（relay あり・画面が進んでいる・閉じた relay）、画面が不変でも背景の待ち・処理中・最近の hook・検証の実行中なら鳴らない（陰性）と、終わった直後の `stop`・証拠の欄が無いときは鳴る（陽性対照）、長い待機の 2 段目、検査 1 は記録されるが知らせない（既定）・`notifyNoRelay: true` で知らせる、0 件で `unobserved`、2 回目の tick で繰り返さない、画面だけの取得失敗（500）を挟んでも同じ STALL を知らせ直さない（陽性対照: 閉じた relay は忘れる）、16 MiB を超えた日のファイルでも重複しない、送信は世代に固定し、根拠が無ければ POST しない、検査の失敗でも計測の行が書かれる、設定の誤りは exit 2、`relay-io.mjs` は偽の `fetch` で。本物のサーバー・`~/.commandmate`・DB・tmux は使わない

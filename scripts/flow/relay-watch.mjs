@@ -34,6 +34,12 @@ export const NOTICE_ITEMS_MAX = 5;
 /** A relay waiting with evidence of work is told after this many × `pendingMinutes` (design §4.2 (B)). */
 export const LONG_WAIT_FACTOR = 4;
 const PREVIOUS_FILES_MAX = 3;
+/**
+ * The state is read from the end of a day file, never the whole file (design §6.1): the first
+ * window is this big and grows ×4 up to `MAX_FILE_BYTES` of tail. A file over the limit is still
+ * read (its last lines are the newest state); nothing is removed or rewritten.
+ */
+export const TAIL_FIRST_BYTES = 256 * 1024;
 const OPEN_STATES = new Set(['pending', 'prompt']);
 const MINUTE = 60_000;
 
@@ -51,12 +57,68 @@ export function emptyState() {
 }
 
 /**
- * The state of the last `relay-watch` line of this scope (newest file first, up to 3 files).
- * A file over the size limit or unreadable is skipped; an unfinished tail is not a line.
+ * The complete lines of the last `bytes` of `file`, newest first (an unfinished tail is not a
+ * line; the first, cut line of a window that does not start at 0 is not read).
+ * @returns {{ lines: string[], whole: boolean } | null}
+ */
+function tailLines(fd, size, bytes) {
+  const length = Math.min(size, bytes);
+  const start = size - length;
+  const buffer = Buffer.alloc(length);
+  let got = 0;
+  while (got < length) {
+    const n = fs.readSync(fd, buffer, got, length - got, start + got);
+    if (n <= 0) break;
+    got += n;
+  }
+  const text = buffer.subarray(0, got).toString('utf8');
+  const end = text.lastIndexOf('\n');
+  if (end < 0) return { lines: [], whole: start === 0 };
+  const lines = text.slice(0, end).split('\n');
+  if (start > 0) lines.shift();
+  return { lines: lines.reverse(), whole: start === 0 };
+}
+
+/** The state in one window of lines (newest first), or null when it has no `relay-watch` line. */
+function stateIn(lines, scope) {
+  const notSent = [];
+  for (const line of lines) {
+    let rec;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!rec || rec.v !== 1 || rec.repo !== scope.repo || rec.base !== scope.base) continue;
+    // A notice the server answered as not sent (the PM stopped or replaced): not told, so the
+    // next tick tries again (design §5). An unknown outcome stays told.
+    if (rec.kind === 'relay-watch-notice') {
+      if (rec.outcome === 'not_sent' && Array.isArray(rec.keys)) notSent.push({ tickId: rec.tickId, keys: rec.keys });
+      continue;
+    }
+    if (rec.kind !== 'relay-watch') continue;
+    const dropped = new Set(notSent.filter((n) => n.tickId === rec.tickId).flatMap((n) => n.keys));
+    return {
+      screens: rec.screens && typeof rec.screens === 'object' ? rec.screens : {},
+      relays: rec.relays && typeof rec.relays === 'object' ? rec.relays : {},
+      reported: Array.isArray(rec.reported) ? rec.reported.filter((k) => typeof k === 'string' && !dropped.has(k)) : [],
+      previousAt: typeof rec.at === 'string' ? rec.at : null,
+    };
+  }
+  return null;
+}
+
+/**
+ * The state of the last `relay-watch` line of this scope (newest file first, up to 3 files),
+ * read from the end of each file (design §6.1), so a file past the record size limit still gives
+ * its newest state. An unreadable file is skipped; an unfinished tail is not a line.
  * @param {string} dir  `<recordDir>/relay-watch`
  * @param {{ repo: string, base: string }} scope
+ * @param {{ firstBytes?: number, maxBytes?: number }} [options]
  */
-export function readLastWatch(dir, scope) {
+export function readLastWatch(dir, scope, options = {}) {
+  const firstBytes = options.firstBytes ?? TAIL_FIRST_BYTES;
+  const maxBytes = options.maxBytes ?? MAX_FILE_BYTES;
   let names;
   try {
     names = fs.readdirSync(dir);
@@ -65,31 +127,20 @@ export function readLastWatch(dir, scope) {
   }
   const files = names.filter((n) => FILE_PATTERN.test(n)).sort().reverse().slice(0, PREVIOUS_FILES_MAX);
   for (const name of files) {
-    let text;
+    let fd;
     try {
-      const file = path.join(dir, name);
-      if (fs.statSync(file).size > MAX_FILE_BYTES) continue;
-      text = fs.readFileSync(file, 'utf8');
-    } catch {
-      continue;
-    }
-    const end = text.lastIndexOf('\n');
-    if (end < 0) continue;
-    const lines = text.slice(0, end).split('\n').reverse();
-    for (const line of lines) {
-      let rec;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
+      fd = fs.openSync(path.join(dir, name), 'r');
+      const size = fs.fstatSync(fd).size;
+      for (let bytes = firstBytes; ; bytes *= 4) {
+        const window = tailLines(fd, size, Math.min(bytes, maxBytes));
+        const state = window ? stateIn(window.lines, scope) : null;
+        if (state) return state;
+        if (!window || window.whole || bytes >= maxBytes) break;
       }
-      if (!rec || rec.v !== 1 || rec.kind !== 'relay-watch' || rec.repo !== scope.repo || rec.base !== scope.base) continue;
-      return {
-        screens: rec.screens && typeof rec.screens === 'object' ? rec.screens : {},
-        relays: rec.relays && typeof rec.relays === 'object' ? rec.relays : {},
-        reported: Array.isArray(rec.reported) ? rec.reported.filter((k) => typeof k === 'string') : [],
-        previousAt: typeof rec.at === 'string' ? rec.at : null,
-      };
+    } catch {
+      // unreadable: the next file
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
     }
   }
   return emptyState();
@@ -171,17 +222,23 @@ export function evaluateWatch({ snapshot, previous, settings, nowMs }) {
   for (const r of shown) if (fromPm(r) && typeof r.id === 'string') relays[r.id] = remember(r);
 
   // Screens: since when the hash has been the same (only ticks observe it).
-  /** @type {Record<string, { hash: string | null, since: string | null, isRunning: boolean | null }>} */
+  // A screen that could not be read this tick is not a change: its hash and "since" are carried,
+  // marked `unread`, and nothing is decided from it (design §4.2, §5).
+  /** @type {Record<string, { hash: string | null, since: string | null, isRunning: boolean | null, unread?: true }>} */
   const screens = {};
   for (const [key, s] of Object.entries(snapshot.screens ?? {})) {
     const before = previous.screens?.[key];
     if (!s || !s.hash) {
-      screens[key] = { hash: null, since: null, isRunning: s?.isRunning ?? null };
+      screens[key] = { hash: before?.hash ?? null, since: before?.since ?? null, isRunning: s?.isRunning ?? null, unread: true };
       continue;
     }
     const since = before && before.hash === s.hash && typeof before.since === 'string' ? before.since : iso(nowMs);
     screens[key] = { hash: s.hash, since, isRunning: s.isRunning ?? null };
   }
+
+  // Keys this tick could not decide (not read, as opposed to read and gone): a key told before
+  // stays told while it is undecided (design §5).
+  const undecided = { keys: /** @type {string[]} */ ([]), prefixes: /** @type {string[]} */ ([]) };
 
   // 1. requests with no relay.
   const noRelay = [];
@@ -189,6 +246,7 @@ export function evaluateWatch({ snapshot, previous, settings, nowMs }) {
   for (const receiver of snapshot.receivers ?? []) {
     if (!Array.isArray(receiver.messages)) {
       noRelayUnknown = true;
+      undecided.prefixes.push('no-relay:');
       continue;
     }
     for (const m of receiver.messages) {
@@ -209,8 +267,9 @@ export function evaluateWatch({ snapshot, previous, settings, nowMs }) {
     const start = timeOf(r.inputBoundaryAt) ?? timeOf(r.createdAt);
     if (start === null || nowMs - start < settings.pendingMinutes * MINUTE) continue;
     const screen = screens[keyOf(r.to)];
-    if (!screen || !screen.since) {
+    if (!screen || !screen.since || screen.unread) {
       stallUnknown = true;
+      undecided.keys.push(`stall:${r.id}`, `stall-long:${r.id}`);
       continue;
     }
     const unchanged = nowMs - Date.parse(screen.since);
@@ -257,6 +316,9 @@ export function evaluateWatch({ snapshot, previous, settings, nowMs }) {
     if (r.state === 'expired' && (r.expiresAt ?? 0) >= nowMs - LOOKBACK_MS) add({ key: `expired:${id}`, relayId: id, to: r.to, kind: 'expired', reason: null });
   }
 
+  if (!Array.isArray(snapshot.held) || !Array.isArray(snapshot.closedBlocked)) undecided.prefixes.push('held:', 'expired:');
+  for (const id of snapshot.lookupFailed ?? []) undecided.keys.push(`expired:${id}`);
+
   const checks = {
     noRelay: check(noRelay, noRelayUnknown),
     stall: { ...check(stall, stallUnknown), waiting },
@@ -270,6 +332,7 @@ export function evaluateWatch({ snapshot, previous, settings, nowMs }) {
     relays,
     current: all.map((i) => i.key),
     fresh: all.filter((i) => !told.has(i.key)),
+    undecided,
   };
 }
 
@@ -364,8 +427,14 @@ function watchOnce({ settings, scope, recordDir, tz, tickId, atMs, runBounded, m
     pmRunning = read.screens?.[`${pm.worktreeId}/${pm.instanceId}`]?.isRunning ?? null;
     const attempt = fresh.length > 0 && pmRunning === true;
     const keep = new Set(previous.reported);
-    // A key is told once: kept while it is current; a new one only when this tick tries to send it.
-    const reported = result.current.filter((k) => keep.has(k) || (attempt && fresh.some((i) => i.key === k)));
+    // A key is told once: kept while it is current or undecided (not read this tick); a new one
+    // only when this tick tries to send it. Read and gone is the only way a told key is forgotten.
+    const current = new Set(result.current);
+    const undecided = (k) => result.undecided.keys.includes(k) || result.undecided.prefixes.some((p) => k.startsWith(p));
+    const reported = [
+      ...result.current.filter((k) => keep.has(k) || (attempt && fresh.some((i) => i.key === k))),
+      ...[...keep].filter((k) => !current.has(k) && undecided(k)),
+    ];
     Object.assign(line, {
       status: 'ok',
       checks: result.checks,

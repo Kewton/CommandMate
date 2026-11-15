@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { main } from '../../../../scripts/flow/flow.mjs';
 import { RELAY_IO_FILE, isAllowedCall, makeRunBounded } from '../../../../scripts/flow/runner.mjs';
 import { NO_RELAY_TOLD_BY_DEFAULT, readRawFlowConfig } from '../../../../scripts/flow/config.mjs';
-import { evaluateWatch, emptyState } from '../../../../scripts/flow/relay-watch.mjs';
+import { evaluateWatch, emptyState, readLastWatch } from '../../../../scripts/flow/relay-watch.mjs';
 import { activityOf, footerShowsBackground, readSnapshot, relayIdOfRequest, screenHash, sendNotice } from '../../../../scripts/flow/relay-io.mjs';
 import { TempDirs, fakeRun, ghByKind, io, ok, type Call, type RunAnswer } from './flow-fakes';
 
@@ -34,6 +34,21 @@ const WATCH_YAML = `relayWatch:
     - { worktreeId: mycodebranchdesk, instanceId: claude-3 }
     - { worktreeId: mycodebranchdesk, instanceId: claude-2 }
 `;
+function rolesWith(over: { launched?: Record<string, unknown> | null; cliToolId?: string; instanceId?: string } = {}) {
+  return {
+    '/api/worktrees/mycodebranchdesk/instances/roles': {
+      success: true,
+      instances: [
+        {
+          instanceId: over.instanceId ?? 'claude',
+          cliToolId: over.cliToolId ?? 'claude',
+          application: { launched: over.launched === undefined ? { sessionGeneration: 'gen-1', injectionFingerprint: 'fp-1' } : over.launched },
+        },
+      ],
+    },
+  };
+}
+const ROLES_OK = rolesWith();
 /** Check 1 told (the switch back after #4420, design §5.1); the default only records it. */
 const TELL_YAML = `${WATCH_YAML}  notifyNoRelay: true\n`;
 const R1 = '11111111-1111-4111-8111-111111111111';
@@ -596,6 +611,87 @@ describe('#4418 the measurement is kept', () => {
   });
 });
 
+describe('#4418 a read that failed is not a resolution (design §5)', () => {
+  const pending = relay({ id: R1, createdAt: AT - 100 * MIN, inputBoundaryAt: AT - 100 * MIN });
+  const leaderDown = (s: Snapshot): Snapshot => ({ ...s, screens: { ...s.screens, 'mycodebranchdesk/claude-3': { isRunning: null, hash: null } } });
+
+  it('only current-output failing (500) for one tick between: the same STALL is not told again', () => {
+    const w = world();
+    w.tick(AT - 30 * MIN, snapshot({ awaiting: [pending] }));
+    w.tick(AT - 15 * MIN, snapshot({ awaiting: [pending] }));
+    w.tick(AT, snapshot({ awaiting: [pending] }));
+    expect(notices(w)).toHaveLength(1);
+    w.tick(AT + 15 * MIN, leaderDown(snapshot({ awaiting: [pending] })));
+    const failed = lastWatch(w);
+    expect(failed.checks.stall.state).toBe('unknown');
+    expect(failed.reported).toContain(`stall:${R1}`);
+    for (const k of [30, 45, 60]) w.tick(AT + k * MIN, snapshot({ awaiting: [pending] }));
+    expect(notices(w)).toHaveLength(1);
+    expect(lastWatch(w).checks.stall).toMatchObject({ state: 'found', items: [{ key: `stall:${R1}` }] });
+  });
+
+  it('(control) read and resolved — the relay closed — forgets it; a later STALL of the same relay is told again', () => {
+    const w = world();
+    w.tick(AT - 30 * MIN, snapshot({ awaiting: [pending] }));
+    w.tick(AT, snapshot({ awaiting: [pending] }));
+    expect(notices(w)).toHaveLength(1);
+    w.tick(AT + 15 * MIN, snapshot({ awaiting: [] }));
+    expect(lastWatch(w).reported).toEqual([]);
+    w.tick(AT + 30 * MIN, snapshot({ awaiting: [pending] }));
+    expect(notices(w)).toHaveLength(2);
+  });
+
+  it('a receiver history or the held list that could not be read keeps their told keys', () => {
+    const w = world({ yaml: TELL_YAML });
+    const held = relay({ id: R2, deliveryHold: { state: 'uncertain', payloadId: 'p1', reason: 'timeout' } });
+    w.tick(AT - 15 * MIN, snapshot({ leader: [msg('m1', AT - 40 * MIN)], held: [held] }));
+    expect(notices(w)).toHaveLength(1);
+    w.tick(AT, snapshot({ leader: null, held: null }));
+    expect([...(lastWatch(w).reported as string[])].sort()).toEqual([`held:${R2}:p1`, 'no-relay:m1'].sort());
+    w.tick(AT + 15 * MIN, snapshot({ leader: [msg('m1', AT - 40 * MIN)], held: [held] }));
+    expect(notices(w)).toHaveLength(1);
+  });
+
+  it('a notice the server refused (not_sent: the PM stopped) is tried again on the next tick; unknown is not', () => {
+    const w = world({ notify: ok('{"outcome":"not_sent","why":"role_condition_unmet"}\n') });
+    const held = relay({ id: R2, deliveryHold: { state: 'uncertain', payloadId: 'p1', reason: 'timeout' } });
+    w.tick(AT - 15 * MIN, snapshot({ held: [held] }));
+    w.tick(AT, snapshot({ held: [held] }));
+    expect(notices(w)).toHaveLength(2);
+    expect(w.watch().filter((l) => l.kind === 'relay-watch-notice').map((l) => l.outcome)).toEqual(['not_sent', 'not_sent']);
+  });
+});
+
+describe('#4418 the state past the record size limit (design §6.1)', () => {
+  it('a day file over 16 MiB: the newest state is read from its end; nothing is told twice, nothing removed', () => {
+    const w = world();
+    const held = relay({ id: R2, deliveryHold: { state: 'uncertain', payloadId: 'p1', reason: 'timeout' } });
+    w.tick(AT - 30 * MIN, snapshot());
+    const dir = path.join(w.flowDir, SLUG, 'relay-watch');
+    const [name] = fs.readdirSync(dir);
+    const file = path.join(dir, name);
+    fs.appendFileSync(file, `${JSON.stringify({ v: 1, kind: 'relay-watch-notice', pad: 'x'.repeat(17 * 1024 * 1024) })}\n`);
+    w.tick(AT - 15 * MIN, snapshot({ held: [held] }));
+    expect(fs.statSync(file).size).toBeGreaterThan(16 * 1024 * 1024);
+    w.tick(AT, snapshot({ held: [held] }));
+    expect(notices(w)).toHaveLength(1);
+    expect(lastWatch(w).reported).toEqual([`held:${R2}:p1`]);
+    expect(fs.readdirSync(dir)).toEqual([name]);
+    expect(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)).toHaveLength(5);
+  });
+
+  it('readLastWatch grows its window from the end until a state line is in it', () => {
+    const dir = temps.make('flow-4418-tail-');
+    const scope = { repo: 'kewton/commandmate', base: 'develop' };
+    const state = { v: 1, kind: 'relay-watch', ...scope, tickId: 't1', at: iso(AT), screens: {}, relays: {}, reported: ['held:x:p'] };
+    const notice = (i: number) => JSON.stringify({ v: 1, kind: 'relay-watch-notice', ...scope, tickId: `n${i}`, outcome: 'sent', keys: [] });
+    const lines = [JSON.stringify({ ...state, reported: ['old'] }), JSON.stringify(state), ...Array.from({ length: 40 }, (_, i) => notice(i))];
+    fs.writeFileSync(path.join(dir, '2026-11-13.jsonl'), `${lines.join('\n')}\n{"unfinished":`);
+    expect(readLastWatch(dir, scope, { firstBytes: 64, maxBytes: 1 << 20 }).reported).toEqual(['held:x:p']);
+    expect(readLastWatch(dir, scope, { firstBytes: 64, maxBytes: 256 }).reported).toEqual([]);
+  });
+});
+
 describe('#4418 settings', () => {
   const tickWith = (yaml: string) => {
     const w = world({ yaml });
@@ -648,6 +744,8 @@ describe('#4418 relay-io.mjs (fake fetch, no server)', () => {
       seen.push({ url, init });
       const key = Object.keys(routes).find((k) => url.endsWith(k));
       if (!key) return new Response(JSON.stringify({ error: 'nf' }), { status: 404 });
+      const value = routes[key] as { __status?: number; body?: unknown };
+      if (value && typeof value === 'object' && '__status' in value) return new Response(JSON.stringify(value.body), { status: value.__status });
       return new Response(JSON.stringify(routes[key]), { status: 200 });
     };
   }
@@ -688,11 +786,63 @@ describe('#4418 relay-io.mjs (fake fetch, no server)', () => {
 
   it('notify: one POST to the PM send API, one line', async () => {
     const seen: Array<{ url: string; init: RequestInit }> = [];
-    const result = await sendNotice({ pm: PM, text: 'a\nb' }, { fetch: fakeFetch({ '/api/worktrees/mycodebranchdesk/send': { sendOutcome: 'sent' } }, seen) as never, env: { CM_PORT: '3015' } });
+    const result = await sendNotice({ pm: PM, text: 'a\nb' }, { fetch: fakeFetch({ ...ROLES_OK, '/api/worktrees/mycodebranchdesk/send': { sendOutcome: 'sent' } }, seen) as never, env: { CM_PORT: '3015' } });
     expect(result).toEqual({ outcome: 'sent' });
-    expect(seen).toHaveLength(1);
-    expect(seen[0].url).toBe('http://localhost:3015/api/worktrees/mycodebranchdesk/send');
-    expect(JSON.parse(String(seen[0].init.body))).toEqual({ content: 'a b', instanceId: 'claude' });
+    const posts = seen.filter((c) => c.init.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(posts[0].url).toBe('http://localhost:3015/api/worktrees/mycodebranchdesk/send');
+    expect(JSON.parse(String(posts[0].init.body))).toEqual({ content: 'a b', instanceId: 'claude', expectedRole: { injectionFingerprint: 'fp-1', sessionGeneration: 'gen-1' } });
+  });
+
+  describe('notify never starts a stopped PM (design §5.2)', () => {
+    const post = (seen: Array<{ init: RequestInit }>) => seen.filter((c) => c.init.method === 'POST');
+
+    it('the send is pinned to the running generation read from the roles API (GET first, then POST)', async () => {
+      const seen: Array<{ url: string; init: RequestInit }> = [];
+      await sendNotice({ pm: PM, text: 'x' }, { fetch: fakeFetch({ ...ROLES_OK, '/api/worktrees/mycodebranchdesk/send': { sendOutcome: 'sent' } }, seen) as never, env: {} });
+      expect(seen.map((c) => `${c.init.method} ${c.url.replace('http://localhost:3000', '')}`)).toEqual([
+        'GET /api/worktrees/mycodebranchdesk/instances/roles',
+        'POST /api/worktrees/mycodebranchdesk/send',
+      ]);
+    });
+
+    it('the PM stopped after the check: the API refuses the pinned send (409), not_sent with its code, nothing started', async () => {
+      const seen: Array<{ url: string; init: RequestInit }> = [];
+      const result = await sendNotice(
+        { pm: PM, text: 'x' },
+        { fetch: fakeFetch({ ...ROLES_OK, '/api/worktrees/mycodebranchdesk/send': { __status: 409, body: { error: 'gone', code: 'role_condition_unmet' } } }, seen) as never, env: {} },
+      );
+      expect(result).toEqual({ outcome: 'not_sent', why: 'role_condition_unmet' });
+    });
+
+    it.each([
+      ['no launch evidence (after a server restart)', rolesWith({ launched: null }), 'pm-launch-unknown'],
+      ['a tool whose send may relaunch', rolesWith({ cliToolId: 'codex' }), 'pm-tool-not-pinnable'],
+      ['the PM not in the roster', rolesWith({ instanceId: 'other' }), 'pm-not-in-roster'],
+      ['the roles API failing', { '/api/worktrees/mycodebranchdesk/instances/roles': { __status: 500, body: {} } }, 'pin-http-500'],
+    ])('%s: no POST at all (an unpinned send could start the PM)', async (_name, routes, why) => {
+      const seen: Array<{ url: string; init: RequestInit }> = [];
+      const result = await sendNotice({ pm: PM, text: 'x' }, { fetch: fakeFetch({ ...routes, '/api/worktrees/mycodebranchdesk/send': { sendOutcome: 'sent' } }, seen) as never, env: {} });
+      expect(result).toEqual({ outcome: 'not_sent', why });
+      expect(post(seen)).toEqual([]);
+    });
+
+    it('what the guarantee rests on, in the unchanged server: a pinned send is refused before a start; claude sends never relaunch', () => {
+      const root = path.resolve(__dirname, '../../../..');
+      const route = fs.readFileSync(path.join(root, 'src/app/api/worktrees/[id]/send/route.ts'), 'utf8');
+      const notRunning = route.indexOf('if (!running) {');
+      expect(notRunning).toBeGreaterThan(0);
+      const refuse = route.indexOf('refuseGonePinnedProcess(roleGate', notRunning);
+      const start = route.indexOf('startSessionForSend({', notRunning);
+      expect(refuse).toBeGreaterThan(notRunning);
+      expect(refuse).toBeLessThan(start);
+      const role = fs.readFileSync(path.join(root, 'src/app/api/worktrees/[id]/send/send-role.ts'), 'utf8');
+      expect(role).toMatch(/if \(!gate \|\| \(gate\.condition\?\.sessionGeneration \?\? null\) === null\) return null;/);
+      expect(role).toMatch(/sessionGeneration: sessionGeneration \?\? null/);
+      const claude = fs.readFileSync(path.join(root, 'src/lib/session/claude-session.ts'), 'utf8');
+      const body = claude.slice(claude.indexOf('export async function sendMessageToClaude('), claude.indexOf('export async function captureClaudeOutput('));
+      expect(body).not.toMatch(/startSession|relaunch|startClaude/);
+    });
   });
 
   it('footerShowsBackground reads only the bottom lines', () => {

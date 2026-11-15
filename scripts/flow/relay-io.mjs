@@ -9,8 +9,10 @@
  *   the PM's history names (`relay:<id>` / `relay-sys:<id>:…` request ids) and those the caller
  *   asks for (`GET /api/relays/:id`), the receivers' recent messages, and a hash of each watched
  *   screen (`current-output`; the screen itself is not passed on).
- * - `notify` sends one line to the PM's composer (`POST /api/worktrees/:pm/send`), the way any
- *   CLI send does. Nothing else is written; the relay, API and DB are not changed.
+ * - `notify` sends one line to the PM's composer (`POST /api/worktrees/:pm/send`), pinned to the
+ *   PM process that is running now (`expectedRole` with its `sessionGeneration`, read from
+ *   `GET /api/worktrees/:pm/instances/roles`), so the send API refuses instead of starting a
+ *   stopped PM (design §5.2). Nothing else is written; the relay, API and DB are not changed.
  *
  * The token is `CM_AUTH_TOKEN` from the environment (never an argument). Prints one JSON line
  * on stdout and exits 0; a failure is `{ "error": … }` in that line.
@@ -164,11 +166,14 @@ export async function readSnapshot(input, deps = {}) {
   }
   const lookedUp = [];
   const lookupFailed = [];
-  for (const id of [...lookup].slice(0, LOOKUP_MAX)) {
+  const ids = [...lookup];
+  for (const id of ids.slice(0, LOOKUP_MAX)) {
     const one = await call('GET', `/api/relays/${q(id)}`);
     if (one.ok && one.body?.relay) lookedUp.push(one.body.relay);
     else lookupFailed.push(id);
   }
+  // Past the cap: not read this tick, which the watch treats as a failed read (undecided).
+  lookupFailed.push(...ids.slice(LOOKUP_MAX));
 
   const receivers = [];
   for (const r of input.receivers) {
@@ -211,8 +216,17 @@ export async function readSnapshot(input, deps = {}) {
   };
 }
 
+/** The PM tools whose send path never starts or relaunches a session once the route found it running (design §5.2). */
+export const PINNABLE_TOOLS = new Set(['claude']);
+
 /**
- * `notify`: one line to the PM's composer (design §5).
+ * `notify`: one line to the PM's composer (design §5), never starting the PM (§5.2).
+ *
+ * The send is pinned to the running PM process: `expectedRole: { injectionFingerprint,
+ * sessionGeneration }` from the roles API's `application.launched`. The send API then refuses a
+ * stopped PM before it would start one (`refuseGonePinnedProcess`), and a replaced one before the
+ * first key (`roleConditionBoundary`) — `not_sent`, nothing typed, nothing started. Without that
+ * evidence (after a server restart, or a tool whose send may relaunch) nothing is sent.
  * @param {{ url?: string, pm: { worktreeId: string, instanceId: string }, text: string }} input
  * @param {{ fetch?: typeof fetch, env?: Record<string, string | undefined> }} [deps]
  */
@@ -220,8 +234,25 @@ export async function sendNotice(input, deps = {}) {
   const call = client(input, deps);
   const text = String(input.text ?? '').replace(/[\r\n]+/g, ' ').trim();
   if (text === '') return { error: 'empty' };
-  const sent = await call('POST', `/api/worktrees/${q(input.pm.worktreeId)}/send`, { content: text, instanceId: input.pm.instanceId });
-  if (!sent.ok) return { outcome: sent.why === 'timeout' || sent.why === 'server-down' ? 'unknown' : 'not_sent', why: sent.why };
+  const pm = input.pm;
+  const roles = await call('GET', `/api/worktrees/${q(pm.worktreeId)}/instances/roles`);
+  if (!roles.ok) return { outcome: 'not_sent', why: `pin-${roles.why}` };
+  const entry = Array.isArray(roles.body?.instances) ? roles.body.instances.find((i) => i?.instanceId === pm.instanceId) : undefined;
+  if (!entry) return { outcome: 'not_sent', why: 'pm-not-in-roster' };
+  if (!PINNABLE_TOOLS.has(entry.cliToolId)) return { outcome: 'not_sent', why: 'pm-tool-not-pinnable' };
+  const launched = entry.application?.launched;
+  if (!launched || typeof launched.sessionGeneration !== 'string' || launched.sessionGeneration === '') {
+    return { outcome: 'not_sent', why: 'pm-launch-unknown' };
+  }
+  const expectedRole = {
+    injectionFingerprint: typeof launched.injectionFingerprint === 'string' ? launched.injectionFingerprint : null,
+    sessionGeneration: launched.sessionGeneration,
+  };
+  const sent = await call('POST', `/api/worktrees/${q(pm.worktreeId)}/send`, { content: text, instanceId: pm.instanceId, expectedRole });
+  if (!sent.ok) {
+    const code = typeof sent.body?.code === 'string' ? sent.body.code : null;
+    return { outcome: sent.why === 'timeout' || sent.why === 'server-down' ? 'unknown' : 'not_sent', why: code ?? sent.why };
+  }
   return { outcome: sent.body?.sendOutcome ?? 'sent' };
 }
 
