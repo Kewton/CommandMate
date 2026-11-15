@@ -15,9 +15,12 @@
  * - **Inspected.** Many CLIs run on with no role when a file is missing or broken
  *   (§8), so the writer reads back what it wrote, and {@link inspectRoleArtifact}
  *   is the same check for the moment before a launch.
- * - **Never deleted.** A running process or a resumable conversation may still
- *   read one. Copilot's `/agent` and `agy agent` therefore list them; `infer:
- *   false` and `subagent: false` narrow the candidates, not the list.
+ * - **Not deleted while it may be read.** A running process or a resumable
+ *   conversation may still read one. Copilot's `/agent` and `agy agent` therefore
+ *   list them; `infer: false` and `subagent: false` narrow the candidates, not the
+ *   list. The one removal is {@link removeRoleArtifact}: an Antigravity definition
+ *   of a role that was deleted, proven ours byte for byte, and no longer the
+ *   definition of a live session (Issue #4419, `./artifact-cleanup.ts`).
  *
  * Errors carry paths, never file content: the content is the role's body.
  *
@@ -36,7 +39,9 @@ import {
   chmodSync,
   openSync,
   readFileSync,
+  readdirSync,
   realpathSync,
+  rmdirSync,
   unlinkSync,
   writeSync,
 } from 'fs';
@@ -757,4 +762,78 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
   // its bytes are ours.
   inspect();
   return written(!published);
+}
+
+// ---------------------------------------------------------------------------
+// Removal (Issue #4419)
+// ---------------------------------------------------------------------------
+
+/** Why a definition was left where it is. */
+export type RoleArtifactKeptReason =
+  /** Nothing is there (already gone, or the agents directory does not exist). */
+  | 'missing'
+  /** Only Antigravity's definitions are removed. */
+  | 'unsupported-adapter'
+  /** The recorded path is not where this build keeps that name. */
+  | 'unexpected-location'
+  /** A symlink, another owner, loose permissions, or not a regular file. */
+  | 'not-ours'
+  /** The bytes are not the ones CommandMate recorded writing. */
+  | 'content-mismatch'
+  /** Its directory holds something besides `agent.md`. */
+  | 'foreign-entries'
+  /** `CM_UAT_ISOLATION=1`: this run does not change the shared home. */
+  | 'read-only';
+
+export type RoleArtifactRemoval =
+  | { kind: 'removed'; path: string }
+  | { kind: 'kept'; path: string; reason: RoleArtifactKeptReason }
+  /** It was ours to remove and the filesystem refused (a permission, a race). Only the error code, never content. */
+  | { kind: 'failed'; path: string; reason: string };
+
+/**
+ * Remove one generated Antigravity definition (`<agents>/<name>/agent.md` and its
+ * own directory), only when every byte is the one recorded at launch and nothing
+ * else is in its directory. Whether the role is gone and no live session runs on
+ * it is the caller's to decide (`./artifact-cleanup.ts`). Never throws: the role's
+ * deletion does not depend on it.
+ *
+ * @param options - The same options the file was written with
+ */
+export function removeRoleArtifact(
+  input: { adapter: AgentRoleCliTool; name: string; path: string; expectedFingerprint: string },
+  options: ArtifactOptions = {}
+): RoleArtifactRemoval {
+  const { adapter, name, path, expectedFingerprint } = input;
+  const kept = (reason: RoleArtifactKeptReason): RoleArtifactRemoval => ({ kind: 'kept', path, reason });
+  if (adapter !== 'antigravity') return kept('unsupported-adapter');
+  let location: ArtifactLocation;
+  try {
+    location = resolveArtifactLocation(adapter, name, options);
+  } catch {
+    return kept('unexpected-location');
+  }
+  if (location.path !== path) return kept('unexpected-location');
+  if (sharedHookWritePolicy(adapter, [path], options.env ?? process.env) === 'read-only') return kept('read-only');
+  const own = dirname(path);
+  try {
+    checkDirectories(location, false);
+    inspectFile(adapter, name, path, expectedFingerprint);
+  } catch (error) {
+    if (error instanceof RoleArtifactError) {
+      if (error.code === 'missing') return kept('missing');
+      if (error.code === 'content-mismatch' || error.code === 'format-invalid') return kept('content-mismatch');
+      return kept('not-ours');
+    }
+    return { kind: 'failed', path, reason: (error as NodeJS.ErrnoException).code ?? 'unknown error' };
+  }
+  try {
+    const entries = readdirSync(own);
+    if (entries.length !== 1 || entries[0] !== basename(path)) return kept('foreign-entries');
+    unlinkSync(path);
+    rmdirSync(own);
+  } catch (error) {
+    return { kind: 'failed', path, reason: (error as NodeJS.ErrnoException).code ?? 'unknown error' };
+  }
+  return { kind: 'removed', path };
 }
