@@ -78,6 +78,19 @@ relayWatch:
 - 手順（`relay-io.mjs notify`）: `GET /api/worktrees/:pm/instances/roles` で PM の `application.launched`（今の世代と一致するときだけ返る起動の記録）を読み、その `sessionGeneration`・`injectionFingerprint` を `expectedRole` に入れて送る。409 等は `not_sent`（次の tick で再送）
 - claude だけに送る: claude の送信（`sendMessageToClaude`）はセッションを起動・再起動しない。ほかの多くの tool の送信は `requireSession({ relaunch: true })` で、route の確認とサービスの間に tool が終わると再起動しうる（キーは打たれないが起動は起きる）。そのため PM の tool が claude でなければ送らない（`pm-tool-not-pinnable`）
 - 送らない（`not_sent`、次の tick で再び試す）とき: roles API が読めない（`pin-<why>`）・PM が roster に無い・`launched` が無い（`pm-launch-unknown`。**サーバーの再起動の後は、PM を CommandMate から起動し直すまで知らせは届かない**。記録には残る）・PM の役割の設定が起動時と変わった（サーバーが 409 で断る。PM を起動し直すまで届かない）
+- **送信の結果の分け方**（Codex 再レビュー P2。`relay-io.mjs` の `sendAnswerOutcome`）: API が明示した結果を尊重する。「何も打っていない」と API が言うときだけ `not_sent`（次の tick で再送）にし、届いたかもしれない送信は `unknown`（送ったものとして繰り返さない）にする。send API は記録した試行の失敗に `sendOutcome` を付ける（`route.ts` の `unboundSendOutcome`: 試行が `not-sent` なら `not_sent`、それ以外は `unknown`）。試行を記録しない断り（入力の誤りの 400 など）には付けない
+
+| API の答え | 分け方 | 理由 |
+|---|---|---|
+| 2xx（`sendOutcome` 無し・`sent`） | `sent` | 送った |
+| 状態によらず `sendOutcome: "not_sent"`（例: 409 `role_condition_unmet`。PM が止まった・入れ替わった） | `not_sent`・再送 | API が何も打っていないと言う |
+| 状態によらず `sendOutcome: "unknown"`（例: 500。本文を打った後の確認に失敗） | `unknown`・再送しない | 届いたかもしれない |
+| 4xx・読める JSON の本文・`sendOutcome` 無し（入力の誤り・見つからない・認証） | `not_sent`・再送 | キーより前の断り（試行を記録しない） |
+| 5xx・`sendOutcome` 無し（本文が無い・読めないを含む） | `unknown`・再送しない | 何が起きたか分からない |
+| 本文が読めない 4xx（間の proxy 等） | `unknown`・再送しない | API の答えと確かめられない |
+| 時間切れ・接続できない・子の失敗 | `unknown`（子の失敗は `fail`）・再送しない | 届いたかもしれない |
+| POST の前に止めたもの（roles が読めない・`launched` 無し・claude 以外・roster に無い） | `not_sent`・再送 | POST していない |
+
 - 本体（API・relay・DB）は変えていない。この保証は上の既存の振る舞いに依る。試験はその振る舞いの置き場所（route の順序・send-role の条件・claude の送信）を読んで、変わったら落ちるようにした
 
 ### 5.1 検査 1 は #4420 まで記録だけ（人の決定・PM 経由）
@@ -109,4 +122,4 @@ relayWatch:
 - launchd の常駐の動き（15 分ごと・1 回動いて終わる・記録を消さない）、tick の 2 つの値とその行、ロック（見張りは同じ排他の中、計測の行を書いた後）
 - 見張りの読みは子プロセス 1 本（`node scripts/flow/relay-io.mjs read '<json>'`）を共有の runner で起こす（上限 45 秒・SIGKILL）。送信は 1 本（上限 15 秒）。見張り全体の締め切りは開始から 60 秒。各要求は 10 秒で打ち切る。runner は「この Node・このファイル・`read`／`notify`・JSON の 1 引数」だけを許す
 - 見張りの失敗（時間切れ・子の失敗・サーバー停止・形の誤り）は `status: "unknown"` の行と stderr の 1 行に残し、前の状態（`screens`・`relays`・`reported`）を引き継ぐ。計測の行と tick の exit は変わらない
-- 試験（`relay-watch-4418.test.ts`）: 1〜3 の検出と陽性対照（relay あり・画面が進んでいる・閉じた relay）、画面が不変でも背景の待ち・処理中・最近の hook・検証の実行中なら鳴らない（陰性）と、終わった直後の `stop`・証拠の欄が無いときは鳴る（陽性対照）、長い待機の 2 段目、検査 1 は記録されるが知らせない（既定）・`notifyNoRelay: true` で知らせる、0 件で `unobserved`、2 回目の tick で繰り返さない、画面だけの取得失敗（500）を挟んでも同じ STALL を知らせ直さない（陽性対照: 閉じた relay は忘れる）、16 MiB を超えた日のファイルでも重複しない、送信は世代に固定し、根拠が無ければ POST しない、検査の失敗でも計測の行が書かれる、設定の誤りは exit 2、`relay-io.mjs` は偽の `fetch` で。本物のサーバー・`~/.commandmate`・DB・tmux は使わない
+- 試験（`relay-watch-4418.test.ts`）: 1〜3 の検出と陽性対照（relay あり・画面が進んでいる・閉じた relay）、画面が不変でも背景の待ち・処理中・最近の hook・検証の実行中なら鳴らない（陰性）と、終わった直後の `stop`・証拠の欄が無いときは鳴る（陽性対照）、長い待機の 2 段目、検査 1 は記録されるが知らせない（既定）・`notifyNoRelay: true` で知らせる、0 件で `unobserved`、2 回目の tick で繰り返さない、画面だけの取得失敗（500）を挟んでも同じ STALL を知らせ直さない（陽性対照: 閉じた relay は忘れる）、16 MiB を超えた日のファイルでも重複しない、送信は世代に固定し、根拠が無ければ POST しない、送信の結果は上の表で分け、500＋`sendOutcome: unknown` は再送しない（陽性対照: 409 は再送する）、検査の失敗でも計測の行が書かれる、設定の誤りは exit 2、`relay-io.mjs` は偽の `fetch` で。本物のサーバー・`~/.commandmate`・DB・tmux は使わない

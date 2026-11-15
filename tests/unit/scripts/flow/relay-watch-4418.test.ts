@@ -744,8 +744,10 @@ describe('#4418 relay-io.mjs (fake fetch, no server)', () => {
       seen.push({ url, init });
       const key = Object.keys(routes).find((k) => url.endsWith(k));
       if (!key) return new Response(JSON.stringify({ error: 'nf' }), { status: 404 });
-      const value = routes[key] as { __status?: number; body?: unknown };
-      if (value && typeof value === 'object' && '__status' in value) return new Response(JSON.stringify(value.body), { status: value.__status });
+      const value = routes[key] as { __status?: number; body?: unknown; raw?: string };
+      if (value && typeof value === 'object' && '__status' in value) {
+        return new Response(value.raw !== undefined ? value.raw : JSON.stringify(value.body), { status: value.__status });
+      }
       return new Response(JSON.stringify(routes[key]), { status: 200 });
     };
   }
@@ -813,6 +815,35 @@ describe('#4418 relay-io.mjs (fake fetch, no server)', () => {
         { fetch: fakeFetch({ ...ROLES_OK, '/api/worktrees/mycodebranchdesk/send': { __status: 409, body: { error: 'gone', code: 'role_condition_unmet' } } }, seen) as never, env: {} },
       );
       expect(result).toEqual({ outcome: 'not_sent', why: 'role_condition_unmet' });
+    });
+
+    // design §5.2 table: only an answer saying nothing was typed is sent again.
+    it.each([
+      ['500 with sendOutcome unknown (typed, then the check failed)', { __status: 500, body: { error: 'x', sendOutcome: 'unknown' } }, { outcome: 'unknown', why: 'http-500' }],
+      ['500 with no body', { __status: 500, raw: '' }, { outcome: 'unknown', why: 'http-500' }],
+      ['502 with an unreadable body', { __status: 502, raw: '<html>bad gateway</html>' }, { outcome: 'unknown', why: 'http-502' }],
+      ['409 with an unreadable body', { __status: 409, raw: 'conflict' }, { outcome: 'unknown', why: 'http-409' }],
+      ['200 with sendOutcome unknown', { __status: 200, body: { sendOutcome: 'unknown' } }, { outcome: 'unknown', why: 'answered' }],
+      ['409 role_condition_unmet with sendOutcome not_sent', { __status: 409, body: { code: 'role_condition_unmet', sendOutcome: 'not_sent' } }, { outcome: 'not_sent', why: 'role_condition_unmet' }],
+      ['500 with sendOutcome not_sent', { __status: 500, body: { error: 'x', sendOutcome: 'not_sent' } }, { outcome: 'not_sent', why: 'http-500' }],
+      ['400 validation (no attempt recorded)', { __status: 400, body: { error: 'bad' } }, { outcome: 'not_sent', why: 'http-400' }],
+      ['200 sent', { __status: 200, body: { success: true } }, { outcome: 'sent' }],
+    ])('send answer %s', async (_name, answer, expected) => {
+      const seen: Array<{ url: string; init: RequestInit }> = [];
+      const result = await sendNotice({ pm: PM, text: 'x' }, { fetch: fakeFetch({ ...ROLES_OK, '/api/worktrees/mycodebranchdesk/send': answer }, seen) as never, env: {} });
+      expect(result).toEqual(expected);
+    });
+
+    it.each([
+      ['500 + sendOutcome unknown: told once, never again (it may have reached the PM)', { __status: 500, body: { error: 'x', sendOutcome: 'unknown' } }, 1],
+      ['(positive control) 409 role_condition_unmet: nothing typed, sent again on the next tick', { __status: 409, body: { code: 'role_condition_unmet', sendOutcome: 'not_sent' } }, 2],
+    ])('through the tick: %s', async (_name, answer, times) => {
+      const child = await sendNotice({ pm: PM, text: 'x' }, { fetch: fakeFetch({ ...ROLES_OK, '/api/worktrees/mycodebranchdesk/send': answer }, []) as never, env: {} });
+      const w = world({ notify: ok(`${JSON.stringify(child)}\n`) });
+      const held = relay({ id: R2, deliveryHold: { state: 'uncertain', payloadId: 'p1', reason: 'timeout' } });
+      w.tick(AT - 15 * MIN, snapshot({ held: [held] }));
+      w.tick(AT, snapshot({ held: [held] }));
+      expect(notices(w)).toHaveLength(times);
     });
 
     it.each([

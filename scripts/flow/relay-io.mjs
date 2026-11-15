@@ -249,11 +249,34 @@ export async function sendNotice(input, deps = {}) {
     sessionGeneration: launched.sessionGeneration,
   };
   const sent = await call('POST', `/api/worktrees/${q(pm.worktreeId)}/send`, { content: text, instanceId: pm.instanceId, expectedRole });
-  if (!sent.ok) {
-    const code = typeof sent.body?.code === 'string' ? sent.body.code : null;
-    return { outcome: sent.why === 'timeout' || sent.why === 'server-down' ? 'unknown' : 'not_sent', why: code ?? sent.why };
+  return sendAnswerOutcome(sent);
+}
+
+/**
+ * What the send API's answer says about the notice (design §5.2, the table). Only an answer
+ * that says nothing was typed is `not_sent` (the watch sends it again on the next tick); a
+ * send that may have reached the PM is `unknown` and never repeated.
+ * - the API's own `sendOutcome` wins (`not_sent` / `unknown` / `sent`), whatever the status;
+ * - no `sendOutcome`: a 4xx with a readable JSON body is a refusal before any key (the API
+ *   records no attempt for those) → `not_sent`; a 5xx, an unreadable body, a timeout or no
+ *   answer → `unknown`.
+ * @param {{ ok: boolean, why?: string, body?: any }} sent
+ * @returns {{ outcome: 'sent' | 'not_sent' | 'unknown', why?: string }}
+ */
+export function sendAnswerOutcome(sent) {
+  const body = sent.body && typeof sent.body === 'object' && !Array.isArray(sent.body) ? sent.body : null;
+  const said = body?.sendOutcome;
+  const code = typeof body?.code === 'string' ? body.code : null;
+  if (sent.ok) {
+    if (said === 'not_sent' || said === 'unknown') return { outcome: said, why: 'answered' };
+    return { outcome: 'sent' };
   }
-  return { outcome: sent.body?.sendOutcome ?? 'sent' };
+  const why = code ?? sent.why ?? 'unknown';
+  if (said === 'not_sent' || said === 'unknown') return { outcome: said, why };
+  if (said === 'sent') return { outcome: 'sent' };
+  const status = /^http-(\d{3})$/.exec(String(sent.why ?? ''));
+  if (status && Number(status[1]) >= 400 && Number(status[1]) < 500 && body !== null) return { outcome: 'not_sent', why };
+  return { outcome: 'unknown', why };
 }
 
 async function cli(argv) {
