@@ -30,6 +30,13 @@ describe('docs/orchestrate/team.md (#4418)', () => {
     expect(s3).toContain('WAIT: <了承・判断待ちの内容>');
   });
 
+  it('§3: the re-request after a relayed answer is named as not working today (Codex P1)', () => {
+    const s3 = section(team, '## 3. PM から開発リーダーへのブリーフ');
+    expect(s3).toContain('RELAY_CHAIN_BLOCKED');
+    expect(s3).toContain('人が PM に 1 行入れると戻る');
+    expect(read('docs/design/pm-send-relay-4418.md')).toContain('## 返事を受けた後の再依頼');
+  });
+
   it('§4 step 2: claude-3 is sent to through pm-send.ts with the token, not claude3-reserve send directly', () => {
     const s4 = section(team, '## 4. agent-health の依頼とブリーフが重なったとき');
     const step2 = s4.split('\n').find((l) => l.startsWith('2. **送信**')) ?? '';

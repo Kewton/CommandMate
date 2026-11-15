@@ -13,15 +13,20 @@
  *
  * claude-3 of `mycodebranchdesk` is sent to only under PM's reservation
  * (docs/orchestrate/team.md §4): such a send needs `--token` and goes through
- * `claude3-reserve.ts send`, which adds the same relay. The selector is
- * resolved first (an alias of claude-3 is claude-3), so the rule does not
- * depend on how the instance is named.
+ * `claude3-reserve.ts send`, which adds the same relay. The worktree id is
+ * made current first (a former id of mycodebranchdesk is mycodebranchdesk,
+ * through the server's `GET /api/worktrees/:id`), and on mycodebranchdesk the
+ * selector is resolved (an alias of claude-3 is claude-3), so the rule does not
+ * depend on how either is named. The send goes to the RESOLVED pair — the one
+ * the rule was checked against — never to the strings PM typed. Either
+ * resolution failing sends nothing (exit 2).
  *
- * Exit: 2 bad arguments / the instance could not be resolved; otherwise the
+ * Exit: 2 bad arguments / the worktree or the instance could not be resolved; otherwise the
  * exit of `commandmate send` (or of `claude3-reserve.ts send`) as it is.
  */
 
 import { spawnSync } from 'child_process';
+import { ApiClient } from '@/cli/utils/api-client';
 import { DISPATCH_INSTANCE_ID, DISPATCH_WORKTREE_ID, pmRelayFlags } from '@/lib/agent-health/dispatch';
 import { main as reserveMain, type Exec, type ReserveDeps } from '../agent-health/claude3-reserve-main';
 
@@ -31,6 +36,8 @@ export type Spawn = (command: string, args: readonly string[]) => { status: numb
 export interface PmSendDeps {
   /** A captured run (only the instance resolution uses it). */
   exec: Exec;
+  /** The current id of a worktree id (a former id maps to its worktree's current one). */
+  resolveWorktree: (worktreeId: string) => Promise<string | { error: string }>;
   /** The send itself. */
   spawn: Spawn;
   stderr: (line: string) => void;
@@ -45,7 +52,7 @@ export const PM_SEND_USAGE = [
   '  target\'s turn ends. No --note (or an empty one): exit 2, nothing sent.',
   '  claude-3 of mycodebranchdesk needs --token (the claude-3 reservation, docs/orchestrate/team.md §4).',
   '',
-  'Exit: 2 bad arguments / the instance could not be resolved; otherwise the exit of commandmate send.',
+  'Exit: 2 bad arguments / the worktree or the instance could not be resolved; otherwise the exit of commandmate send.',
 ].join('\n');
 
 /** A `--since` no reply can be at or after (scripts/orchestrate/resolve-instance.mjs). */
@@ -113,9 +120,21 @@ const defaultSpawn: Spawn = (command, args) => {
   return { status: result.error ? null : result.status };
 };
 
+/** `GET /api/worktrees/:id` answers with the worktree, whose `id` is the current one (Issue #1621). */
+const defaultResolveWorktree: PmSendDeps['resolveWorktree'] = async (worktreeId) => {
+  try {
+    const worktree = await new ApiClient().get<{ id?: unknown }>(`/api/worktrees/${encodeURIComponent(worktreeId)}`);
+    if (typeof worktree.id === 'string' && worktree.id !== '') return worktree.id;
+    return { error: 'no id in the answer' };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
 function defaultDeps(): PmSendDeps {
   return {
     exec: defaultExec,
+    resolveWorktree: defaultResolveWorktree,
     spawn: defaultSpawn,
     stderr: (line) => process.stderr.write(`[pm-send] ${line}\n`),
   };
@@ -147,14 +166,24 @@ export async function main(argv: readonly string[], overrides: Partial<PmSendDep
   }
   const command = parsed.command;
 
+  // The current worktree id: a former id of mycodebranchdesk must meet the same rule (Codex P2-1).
+  const worktreeId = await deps.resolveWorktree(command.worktreeId);
+  if (typeof worktreeId !== 'string') {
+    deps.stderr(`worktree ${command.worktreeId} を解決できなかった（${worktreeId.error}）。何も送っていない`);
+    return 2;
+  }
+
   // claude-3 lives only on mycodebranchdesk (the reservation's target).
+  let instance = command.instance;
   let toClaude3 = false;
-  if (command.worktreeId === DISPATCH_WORKTREE_ID) {
-    const resolved = resolveInstance(deps, command.worktreeId, command.instance);
+  if (worktreeId === DISPATCH_WORKTREE_ID) {
+    const resolved = resolveInstance(deps, worktreeId, command.instance);
     if (typeof resolved !== 'string') {
       deps.stderr(`--instance ${command.instance} を解決できなかった（${resolved.error}）。何も送っていない`);
       return 2;
     }
+    // The send names the instance the rule was checked against, not the alias (Codex P2-2).
+    instance = resolved;
     toClaude3 = resolved === DISPATCH_INSTANCE_ID;
   }
 
@@ -172,5 +201,5 @@ export async function main(argv: readonly string[], overrides: Partial<PmSendDep
     deps.stderr('--token は claude-3 宛てにだけ使う。何も送っていない');
     return 2;
   }
-  return deps.spawn('commandmate', pmSendCommandArgv(command)).status ?? 2;
+  return deps.spawn('commandmate', pmSendCommandArgv({ ...command, worktreeId, instance })).status ?? 2;
 }

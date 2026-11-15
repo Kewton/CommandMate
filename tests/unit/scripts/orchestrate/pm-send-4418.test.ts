@@ -16,6 +16,9 @@ import { pmRelayFlags, pmSendArgv, sendArgv } from '@/lib/agent-health/dispatch'
 let root: string;
 let execCalls: Array<[string, string[]]>;
 let spawnCalls: Array<[string, string[]]>;
+let worktreeCalls: string[];
+/** Former worktree ids and what the server makes of them (`GET /api/worktrees/:id` → `id`). */
+let formerIds: Record<string, string>;
 let reserveCalls: Array<[string, string[]]>;
 let err: string[];
 /** What `commandmate reply mycodebranchdesk --instance <sel> --json` resolves each selector to. */
@@ -27,9 +30,11 @@ beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-pm-send-4418-'));
   execCalls = [];
   spawnCalls = [];
+  worktreeCalls = [];
+  formerIds = { 'mcbd-old': 'mycodebranchdesk', 'wt-x-old': 'wt-x' };
   reserveCalls = [];
   err = [];
-  roster = { codex: 'codex', 'claude-2': 'claude-2', 'claude-3': 'claude-3', leader: 'claude-3' };
+  roster = { codex: 'codex', 'claude-2': 'claude-2', 'claude-3': 'claude-3', leader: 'claude-3', reviewer: 'claude-2' };
 });
 
 afterEach(() => {
@@ -77,6 +82,11 @@ const reserveDeps = () => ({
 function run(argv: string[], status = 0): Promise<number> {
   const deps: Partial<PmSendDeps> = {
     exec,
+    resolveWorktree: async (id) => {
+      worktreeCalls.push(id);
+      if (id === 'gone') return { error: 'HTTP 404' };
+      return formerIds[id] ?? id;
+    },
     spawn: (command, args) => {
       spawnCalls.push([command, [...args]]);
       return { status };
@@ -89,6 +99,7 @@ function run(argv: string[], status = 0): Promise<number> {
 
 const reserveSends = () => reserveCalls.filter(([, a]) => a[0] === 'send').map(([, a]) => a);
 const nothingRan = () => {
+  expect(worktreeCalls).toEqual([]);
   expect(execCalls).toEqual([]);
   expect(spawnCalls).toEqual([]);
   expect(reserveCalls).toEqual([]);
@@ -187,6 +198,48 @@ describe('pm-send: claude-3 keeps the reservation rule (team.md §4)', () => {
     expect(reserveSends()).toEqual([
       ['send', 'mycodebranchdesk', 'ブリーフ', '--instance', 'claude-3', '--reply-to', 'self', '--note', 'リーダーの DONE:'],
     ]);
+  });
+});
+
+describe('pm-send: the rule and the send use the same resolved target (Codex P2-1 / P2-2)', () => {
+  it('a former id of mycodebranchdesk is mycodebranchdesk: claude-3 still needs --token', async () => {
+    expect(await run(['mcbd-old', '--instance', 'claude-3', '--note', 'n', 'ブリーフ'])).toBe(2);
+    expect(await run(['mcbd-old', '--instance', 'leader', '--note', 'n', 'ブリーフ'])).toBe(2);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveSends()).toEqual([]);
+    // The instance was resolved against the current id, not the former one.
+    expect(execCalls.map(([, a]) => a[1])).toEqual(['mycodebranchdesk', 'mycodebranchdesk']);
+  });
+
+  it('positive control: a former id with PM\'s token goes through the reservation', async () => {
+    let token = '';
+    expect(await reserveMain(['reserve', '--label', '#4418'], { ...reserveDeps(), stdout: (l) => { token = l; } })).toBe(0);
+    reserveCalls = [];
+    expect(await run(['mcbd-old', '--instance', 'claude-3', '--token', token, '--note', 'n', 'ブリーフ'])).toBe(0);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveSends()).toEqual([
+      ['send', 'mycodebranchdesk', 'ブリーフ', '--instance', 'claude-3', '--reply-to', 'self', '--note', 'n'],
+    ]);
+  });
+
+  it('the send names the resolved worktree and instance, not what PM typed', async () => {
+    expect(await run(['mcbd-old', '--instance', 'reviewer', '--note', 'n', 'UAT して'])).toBe(0);
+    expect(spawnCalls).toEqual([
+      ['commandmate', ['send', 'mycodebranchdesk', 'UAT して', '--instance', 'claude-2', '--reply-to', 'self', '--note', 'n']],
+    ]);
+    // An alias that changes after the check cannot redirect the send: the argv carries no alias.
+    roster.reviewer = 'claude-3';
+    expect(spawnCalls[0][1]).not.toContain('reviewer');
+    expect(await run(['wt-x-old', '--instance', 'codex', '--note', 'n', 'x'])).toBe(0);
+    expect(spawnCalls[1][1].slice(0, 2)).toEqual(['send', 'wt-x']);
+  });
+
+  it('a worktree id the server cannot resolve: exit 2, nothing resolved or sent (fail-closed)', async () => {
+    expect(await run(['gone', '--instance', 'claude-3', '--token', 't', '--note', 'n', 'x'])).toBe(2);
+    expect(await run(['gone', '--instance', 'codex', '--note', 'n', 'x'])).toBe(2);
+    expect(execCalls).toEqual([]);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveCalls).toEqual([]);
   });
 });
 

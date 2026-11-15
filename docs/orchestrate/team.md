@@ -41,6 +41,8 @@ npx tsx scripts/orchestrate/pm-send.ts mycodebranchdesk --instance claude-3 --to
 - 常に `--reply-to self --note "<待つもの>"` が付く。受け手が送り返さずに手番を終えても、その手番の終わりに返事が PM の入力欄へ届き、mem の `waiting` も relay が閉じれば閉じる。relay を外す旗は無い
 - `--note` が無い・空なら exit 2 で何も送らない（commandmate を起動しない）。それ以外は `commandmate send` の終了コードをそのまま返す
 - 素の `commandmate send` / `ask` / `cmate-delegate` で PM から送らない（返しが受け手の記憶頼みになり、約 8 時間止まった。#4418）
+- relay で届いた返事を読んだ直後の再指示・次の依頼は、今は送れない（relay の連鎖の防止で exit 2・`RELAY_CHAIN_BLOCKED`）。人が PM に 1 行入れると戻る。`--allow-relay-chain` を付けても 3 ホップ目の次で止まる。未解決（設計メモ §「返事を受けた後の再依頼」）
+- 送り先は解決済みの worktree（旧 ID は今の ID）とインスタンス（別名は ID）に送る。解決できなければ exit 2 で何も送らない
 
 ブリーフには次の 4 点を含める。
 
