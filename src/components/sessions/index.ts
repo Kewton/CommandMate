@@ -15,3 +15,5 @@ export {
   SessionsViewModeSelector,
   type SessionsViewModeSelectorProps,
 } from '@/components/sessions/SessionsViewModeSelector';
+export { SessionsFilterPanel } from './SessionsFilterPanel';
+export { SessionsFilterSheet } from './SessionsFilterSheet';

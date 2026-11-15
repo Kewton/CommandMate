@@ -8,6 +8,7 @@
  * #4389 fill it in); it is accepted and not used yet.
  */
 
+import safeRegex from 'safe-regex2';
 import type { Worktree } from '@/types/models';
 
 export const SESSIONS_BRANCH_PATTERN_MAX_LENGTH = 200;
@@ -23,7 +24,7 @@ export interface SessionsFilterConditions {
   role?: SessionsRoleCondition;
 }
 
-export type SessionsFilterError = 'too_long' | 'invalid_regex';
+export type SessionsFilterError = 'too_long' | 'invalid_regex' | 'unsafe_regex';
 
 export interface SessionsFilterVerdict {
   show: boolean;
@@ -39,7 +40,10 @@ export interface SessionsFilterResult {
   activeCount: number;
 }
 
-type FilterTarget = Pick<Worktree, 'id' | 'name' | 'gitStatus' | 'agentInstances' | 'selectedAgents'>;
+export type FilterTarget = Pick<Worktree, 'id' | 'name' | 'gitStatus' | 'agentInstances' | 'selectedAgents'>;
+
+/** Resolves a worktree's roster (instance ids, roster order). Keeps this module pure. */
+export type SessionsRosterResolver = (wt: FilterTarget) => string[];
 
 function rosterIds(wt: FilterTarget): string[] {
   if (wt.agentInstances && wt.agentInstances.length > 0) {
@@ -57,16 +61,22 @@ export function compileBranchPattern(
   if (source.length > SESSIONS_BRANCH_PATTERN_MAX_LENGTH) {
     return { regex: null, error: 'too_long' };
   }
+  let regex: RegExp;
   try {
-    return { regex: new RegExp(source, 'i'), error: null };
+    regex = new RegExp(source, 'i');
   } catch {
     return { regex: null, error: 'invalid_regex' };
   }
+  // Same rule as the auto-yes stop pattern (src/config/auto-yes-config.ts):
+  // nested quantifiers such as (a+)+$ can freeze the page on a long name.
+  if (!safeRegex(source)) return { regex: null, error: 'unsafe_regex' };
+  return { regex, error: null };
 }
 
 export function evaluateSessionsFilter(
   worktrees: readonly FilterTarget[],
-  conditions: SessionsFilterConditions
+  conditions: SessionsFilterConditions,
+  resolveRoster: SessionsRosterResolver = rosterIds
 ): SessionsFilterResult {
   const { regex, error } = compileBranchPattern(conditions.branchPattern);
   const verdicts = new Map<string, SessionsFilterVerdict>();
@@ -74,7 +84,7 @@ export function evaluateSessionsFilter(
     const show = regex
       ? regex.test(wt.name) || regex.test(wt.gitStatus?.currentBranch ?? '')
       : true;
-    verdicts.set(wt.id, { show, instanceIds: show ? rosterIds(wt) : [] });
+    verdicts.set(wt.id, { show, instanceIds: show ? resolveRoster(wt) : [] });
   }
   return { verdicts, error, activeCount: regex ? 1 : 0 };
 }

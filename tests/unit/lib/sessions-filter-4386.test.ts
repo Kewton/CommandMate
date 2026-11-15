@@ -48,4 +48,15 @@ describe('[#4386] evaluateSessionsFilter', () => {
       expect([...r.verdicts.values()].every((v) => v.show)).toBe(true);
     }
   });
+  it('treats nested quantifiers (a+)+$ as invalid and keeps all', () => {
+    const r = evaluateSessionsFilter(list, { branchPattern: '(a+)+$' });
+    expect(r.error).toBe('unsafe_regex');
+    expect(r.activeCount).toBe(0);
+    expect([...r.verdicts.values()].every((v) => v.show)).toBe(true);
+  });
+  it('uses the injected roster resolver', () => {
+    const r = evaluateSessionsFilter(list, { branchPattern: 'main' }, () => ['x', 'y']);
+    expect(r.verdicts.get('b')?.instanceIds).toEqual(['x', 'y']);
+    expect(r.verdicts.get('a')?.instanceIds).toEqual([]);
+  });
 });

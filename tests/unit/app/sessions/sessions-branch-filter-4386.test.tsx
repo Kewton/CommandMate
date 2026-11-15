@@ -24,7 +24,8 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href, ...props }, children),
 }));
 
-vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false, MOBILE_BREAKPOINT: 768 }));
+let mockIsMobile = false;
+vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => mockIsMobile, MOBILE_BREAKPOINT: 768 }));
 
 let mockWorktrees: Array<Record<string, unknown>> = [];
 vi.mock('@/components/providers/WorktreesCacheProvider', () => ({
@@ -47,6 +48,7 @@ const row = (id: string, name: string, current?: string) => ({
 });
 
 beforeEach(() => {
+  mockIsMobile = false;
   mockWorktrees = [row('1', 'feature/1-a'), row('2', 'main'), row('3', 'other', 'feature/3-c')];
 });
 afterEach(() => cleanup());
@@ -86,4 +88,26 @@ describe('[#4386] /sessions branch filter', () => {
     expect(screen.getByText('main')).toBeTruthy();
     expect(screen.queryByTestId('sessions-filter-count')).toBeNull();
   });
+
+  it('(a+)+$ is treated as invalid: error shown, all kept', () => {
+    const input = open();
+    fireEvent.change(input, { target: { value: '(a+)+$' } });
+    expect(screen.getByTestId('sessions-branch-filter-error')).toBeTruthy();
+    expect(screen.getByText('main')).toBeTruthy();
+  });
+
+  for (const mobile of [false, true]) {
+    it(`${mobile ? 'mobile bottom sheet' : 'PC modal'}: field, error, count, clear`, () => {
+      mockIsMobile = mobile;
+      const input = open();
+      expect(Boolean(screen.queryByTestId('sessions-filter-sheet'))).toBe(mobile);
+      fireEvent.change(input, { target: { value: '(' } });
+      expect(screen.getByTestId('sessions-branch-filter-error')).toBeTruthy();
+      fireEvent.change(input, { target: { value: '^feature/' } });
+      expect(screen.getByTestId('sessions-filter-count')).toHaveTextContent('1');
+      expect(screen.queryByText('main')).toBeNull();
+      fireEvent.click(screen.getByTestId('sessions-filter-clear'));
+      expect(screen.getByText('main')).toBeTruthy();
+    });
+  }
 });
