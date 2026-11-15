@@ -291,6 +291,11 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
+/** Issue #4419: text added to a draft — the whole draft when it is empty, else after a blank line. */
+function appendDraftText(draft: string, text: string): string {
+  return draft.trim() === '' ? text : `${draft}\n\n${text}`;
+}
+
 /** Write a draft (an empty one removes the key). Best effort — `localStorage` may be unavailable. */
 function writeDraft(key: string, message: string): void {
   try {
@@ -522,10 +527,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4419: text the `/sessions` tile put back into this key's stored draft (a 409 for an
   // instance its own composer is not showing) reaches this composer too when it shows that key —
   // otherwise its state, unaware of it, would overwrite it with the next keystroke's save.
+  // The waiting save for this key takes the text at once, too: the state update is only scheduled,
+  // and a switch committed together with it writes the waiting save back under this key (the
+  // restore effect) — which, still holding the text before the append, would erase it.
   useEffect(
     () =>
       subscribeDraftAppend(draftKey, (text) => {
-        setMessage((prev) => (prev.trim() === '' ? text : `${prev}\n\n${text}`));
+        const pendingSave = pendingDraftSaveRef.current;
+        if (pendingSave && pendingSave.key === draftKey) {
+          pendingDraftSaveRef.current = { key: draftKey, message: appendDraftText(pendingSave.message, text) };
+        }
+        setMessage((prev) => appendDraftText(prev, text));
       }),
     [draftKey],
   );
@@ -536,8 +548,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
     pendingDraftSaveRef.current = { key: draftKey, message };
     draftSaveTimerRef.current = setTimeout(() => {
+      // Issue #4419: the ref, not this render's `message` — an append may have updated it since.
+      const pendingSave = pendingDraftSaveRef.current;
       pendingDraftSaveRef.current = null;
-      writeDraft(draftKey, message);
+      if (pendingSave) writeDraft(pendingSave.key, pendingSave.message);
     }, 500);
   }, [message, draftKey]);
 
@@ -552,12 +566,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   /**
    * Issue #4419: an awaited send was taken. When the composer still shows the draft it sent, clear
    * it as before; when it switched meanwhile (the tile's instance, its roster), only the sent
-   * draft's stored copy goes — the draft on screen, its state and its waiting save are another
-   * instance's. Returns whether the sent draft is still the one on screen.
+   * draft's stored copy (and the sent image, if still attached) goes — the draft on screen, its
+   * state and its waiting save are another instance's. Returns whether the sent draft is still the one on screen.
    */
-  const clearSentDraft = useCallback((sentKey: string): boolean => {
+  const clearSentDraft = useCallback((sentKey: string, sentImagePath: string | null): boolean => {
     if (draftKeyRef.current !== sentKey) {
       try { window.localStorage.removeItem(sentKey); } catch { /* ignore */ }
+      // The attachment is not per instance: the image that went with the send is still attached
+      // and would go again with the next Send — take it off (the text on screen stays).
+      if (sentImagePath !== null && attachedImagePathRef.current === sentImagePath) resetAfterSend();
       return false;
     }
     setMessage('');
@@ -722,8 +739,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // Issue #4345 1c: the send's 401 reaches the gateway before it becomes an ApiError. 再指示 2 (K1):
       // with the press's token — the gate reads the registration the press fixed.
       const sentKey = draftKey;
+      const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
-      clearSentDraft(sentKey);
+      clearSentDraft(sentKey, sentImagePath);
       // Issue #806: when the session is busy, the CLI queues this message behind
       // the running task. Surface a toast so the (successful) send doesn't look
       // like a no-op. Idle sessions are unchanged (no toast).
@@ -779,9 +797,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     try {
       // Issue #4345 1c: see the plain send.
       const sentKey = draftKey;
+      const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
       // Issue #4419: a switch meanwhile already closed the question (the previewKey change).
-      if (clearSentDraft(sentKey)) setBriefAsk(null);
+      if (clearSentDraft(sentKey, sentImagePath)) setBriefAsk(null);
       if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
       else if (isProcessing) showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       onMessageSent?.(effectiveCliTool, created);

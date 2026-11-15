@@ -20,6 +20,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
+import { appendToStoredDraft } from '@/lib/drafts/message-draft';
 import { mockCommandGroups, getTextarea, typeMessage } from '@tests/helpers/message-input-test-utils';
 
 vi.mock('next-intl', async () => {
@@ -57,6 +58,32 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   })),
 }));
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
+
+// 再指示 2 (P3-1): the attachment is the hook's state, as in MessageInput-start-brief-4227 — one
+// image attached from the start; `resetAfterSend` takes it off, as the real hook does.
+const { resetAfterSendMock } = vi.hoisted(() => ({ resetAfterSendMock: vi.fn() }));
+vi.mock('@/hooks/useImageAttachment', async () => {
+  const { useState } = await import('react');
+  return {
+    useImageAttachment: () => {
+      const [path, setPath] = useState<string | null>('.commandmate/attachments/shot.png');
+      return {
+        attachedImage: path ? { path, file: new File(['x'], 'shot.png') } : null,
+        fileInputRef: { current: null },
+        isUploading: false,
+        error: null,
+        acceptAttribute: 'image/*',
+        openFileDialog: vi.fn(),
+        handleFileSelect: vi.fn(),
+        removeAttachment: vi.fn(),
+        resetAfterSend: () => {
+          resetAfterSendMock();
+          setPath(null);
+        },
+      };
+    },
+  };
+});
 
 const WT = 'wt-1';
 const AGY_KEY = `commandmate:draft-message:${WT}:instance:antigravity`;
@@ -128,6 +155,11 @@ describe('[#4419 再指示 1] a G-3 send and an instance switch', () => {
 
     expect(getTextarea().value).toBe(CLAUDE_DRAFT);
     expect(window.localStorage.getItem(AGY_KEY)).toBeNull();
+    // 再指示 2 (P3-1): the image that went with the antigravity send is off the composer, so the
+    // next Send cannot take it to claude.
+    expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ imagePath: '.commandmate/attachments/shot.png' });
+    expect(resetAfterSendMock).toHaveBeenCalled();
+    expect(screen.queryByTestId('image-attachment-preview')).toBeNull();
     // Past the debounce: the claude draft's save was not cancelled into an empty one.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 650));
@@ -154,6 +186,32 @@ describe('[#4419 再指示 1] a G-3 send and an instance switch', () => {
     expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ cliToolId: 'antigravity', briefDetail: 'full', briefBoundary: 'b-agy' });
     await waitFor(() => expect(getTextarea().value).toBe(''));
     expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
+  });
+});
+
+describe('[#4419 再指示 2] text appended to the shown draft and a switch in the same commit', () => {
+  it('the switch writes the waiting save back with the appended text, so it is not erased', async () => {
+    const view = render(tileComposer('antigravity'));
+    typeMessage('typing');
+    // The keystroke's save is still waiting (500 ms) when the append and the switch land together.
+    act(() => {
+      appendToStoredDraft(AGY_KEY, AGY_DRAFT);
+      view.rerender(tileComposer('claude'));
+    });
+    expect(window.localStorage.getItem(AGY_KEY)).toBe(`typing\n\n${AGY_DRAFT}`);
+    await waitFor(() => expect(getTextarea().value).toBe(''));
+    view.rerender(tileComposer('antigravity'));
+    await waitFor(() => expect(getTextarea().value).toBe(`typing\n\n${AGY_DRAFT}`));
+  });
+
+  it('negative control: an append with no switch reaches the composer and its save', async () => {
+    render(tileComposer('antigravity'));
+    typeMessage('typing');
+    act(() => {
+      appendToStoredDraft(AGY_KEY, AGY_DRAFT);
+    });
+    expect(getTextarea().value).toBe(`typing\n\n${AGY_DRAFT}`);
+    await waitFor(() => expect(window.localStorage.getItem(AGY_KEY)).toBe(`typing\n\n${AGY_DRAFT}`), { timeout: 2000 });
   });
 });
 

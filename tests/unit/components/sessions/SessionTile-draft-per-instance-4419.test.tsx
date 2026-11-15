@@ -246,7 +246,7 @@ describe('[#4419] a /sessions tile keeps one draft per instance', () => {
     );
   });
 
-  it('two tiles showing the same instance share its draft; the old split-0 draft shows on neither', async () => {
+  it('a second tile showing the same instance reads its saved draft when it mounts (each keeps its own state; the later save wins); the old split-0 draft shows on neither', async () => {
     window.localStorage.setItem('commandmate:draft-message:wt-1:0', 'typed before #4419');
     const first = renderTile();
     expect(first.textarea().value).toBe('');
