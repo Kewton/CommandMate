@@ -1,0 +1,243 @@
+/**
+ * Issue #4418: PM's one way to send (scripts/orchestrate/pm-send-main.ts) and
+ * `claude3-reserve.ts send`. commandmate never runs: `exec` / `spawn` are
+ * stubs that record their calls; the reservation lives under os.tmpdir() and
+ * is removed after each test.
+ */
+
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { main, parsePmSendArgs, type PmSendDeps } from '../../../../scripts/orchestrate/pm-send-main';
+import { main as reserveMain, type Exec } from '../../../../scripts/agent-health/claude3-reserve-main';
+import { pmRelayFlags, pmSendArgv, sendArgv } from '@/lib/agent-health/dispatch';
+
+let root: string;
+let execCalls: Array<[string, string[]]>;
+let spawnCalls: Array<[string, string[]]>;
+let reserveCalls: Array<[string, string[]]>;
+let err: string[];
+/** What `commandmate reply mycodebranchdesk --instance <sel> --json` resolves each selector to. */
+let roster: Record<string, string>;
+
+const READY = { isRunning: true, isProcessing: false, isWaitingForResponse: false };
+
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-pm-send-4418-'));
+  execCalls = [];
+  spawnCalls = [];
+  reserveCalls = [];
+  err = [];
+  roster = { codex: 'codex', 'claude-2': 'claude-2', 'claude-3': 'claude-3', leader: 'claude-3' };
+});
+
+afterEach(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+const exec: Exec = (command, args) => {
+  execCalls.push([command, [...args]]);
+  if (command === 'commandmate' && args[0] === 'reply') {
+    const id = roster[args[3]];
+    return id ? { status: 0, stdout: JSON.stringify({ instanceId: id, reply: null }) } : { status: 2, stdout: '' };
+  }
+  return { status: null, stdout: '' };
+};
+
+/** The reservation side's commandmate (ls for reserve, send for the send). */
+const reserveExec: Exec = (command, args) => {
+  reserveCalls.push([command, [...args]]);
+  if (command === 'commandmate' && args[0] === 'ls') {
+    return {
+      status: 0,
+      stdout: JSON.stringify([
+        {
+          id: 'mycodebranchdesk',
+          agentInstances: [{ id: 'claude-3', cliTool: 'claude' }],
+          sessionStatusByInstance: { 'claude-3': READY },
+        },
+      ]),
+    };
+  }
+  if (command === 'commandmate' && args[0] === 'send') return { status: 0, stdout: '' };
+  return { status: null, stdout: '' };
+};
+
+const reserveDeps = () => ({
+  exec: reserveExec,
+  now: () => new Date('2026-11-15T00:00:00Z'),
+  pid: 700,
+  isAlive: () => false,
+  reservationDir: path.join(root, 'reservation'),
+  stdout: () => {},
+  stderr: (line: string) => err.push(line),
+});
+
+function run(argv: string[], status = 0): Promise<number> {
+  const deps: Partial<PmSendDeps> = {
+    exec,
+    spawn: (command, args) => {
+      spawnCalls.push([command, [...args]]);
+      return { status };
+    },
+    stderr: (line) => err.push(line),
+    reserve: reserveDeps(),
+  };
+  return main(argv, deps);
+}
+
+const reserveSends = () => reserveCalls.filter(([, a]) => a[0] === 'send').map(([, a]) => a);
+const nothingRan = () => {
+  expect(execCalls).toEqual([]);
+  expect(spawnCalls).toEqual([]);
+  expect(reserveCalls).toEqual([]);
+};
+
+describe('pm-send: --note is required (exit 2, commandmate never starts)', () => {
+  it('no --note: exit 2 and no commandmate', async () => {
+    expect(await run(['wt-x', '--instance', 'codex', 'レビューして'])).toBe(2);
+    nothingRan();
+    expect(err.join('\n')).toMatch(/--note/);
+  });
+
+  it('an empty or blank --note: exit 2 and no commandmate', async () => {
+    expect(await run(['wt-x', '--instance', 'codex', '--note', '', 'レビューして'])).toBe(2);
+    expect(await run(['wt-x', '--instance', 'codex', '--note', '   ', 'レビューして'])).toBe(2);
+    nothingRan();
+  });
+
+  it('a --note with no value (the next flag) is refused the same way', async () => {
+    expect(await run(['wt-x', '--note', '--instance', 'codex', 'レビューして'])).toBe(2);
+    nothingRan();
+  });
+
+  it('no --note to claude-3 either: exit 2 before the instance is resolved or the reservation is read', async () => {
+    expect(await run(['mycodebranchdesk', '--instance', 'claude-3', '--token', 't', 'ブリーフ'])).toBe(2);
+    nothingRan();
+  });
+
+  it('there is no flag that drops the relay', async () => {
+    expect(await run(['wt-x', '--instance', 'codex', '--note', 'n', '--no-reply-to', 'x'])).toBe(2);
+    expect(await run(['wt-x', '--instance', 'codex', '--note', 'n', '--reply-to', 'wt-y', 'x'])).toBe(2);
+    nothingRan();
+  });
+});
+
+describe('pm-send: what is sent (positive control)', () => {
+  it('always adds --reply-to self --note <note>', async () => {
+    expect(await run(['wt-x', '--instance', 'codex', '--note', '設計レビューの DONE:', 'レビューして'])).toBe(0);
+    expect(spawnCalls).toEqual([
+      ['commandmate', ['send', 'wt-x', 'レビューして', '--instance', 'codex', '--reply-to', 'self', '--note', '設計レビューの DONE:']],
+    ]);
+    // Another worktree has no claude-3: nothing is resolved.
+    expect(execCalls).toEqual([]);
+  });
+
+  it('returns commandmate send\'s exit as it is', async () => {
+    expect(await run(['wt-x', '--instance', 'codex', '--note', 'n', 'x'], 50)).toBe(50);
+    expect(await run(['wt-x', '--instance', 'codex', '--note', 'n', 'x'], 124)).toBe(124);
+  });
+
+  it('a non-claude-3 instance of mycodebranchdesk is resolved, then sent plainly with the relay', async () => {
+    expect(await run(['mycodebranchdesk', '--instance', 'claude-2', '--note', 'UAT の DONE:', 'UAT して'])).toBe(0);
+    expect(execCalls.map(([, a]) => a[0])).toEqual(['reply']);
+    expect(spawnCalls[0][1]).toEqual([
+      'send', 'mycodebranchdesk', 'UAT して', '--instance', 'claude-2', '--reply-to', 'self', '--note', 'UAT の DONE:',
+    ]);
+  });
+
+  it('an instance that cannot be resolved on mycodebranchdesk: exit 2, nothing sent', async () => {
+    expect(await run(['mycodebranchdesk', '--instance', 'nobody', '--note', 'n', 'x'])).toBe(2);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveCalls).toEqual([]);
+  });
+
+  it('--token to anything but claude-3: exit 2, nothing sent', async () => {
+    expect(await run(['wt-x', '--instance', 'codex', '--note', 'n', '--token', 't', 'x'])).toBe(2);
+    expect(spawnCalls).toEqual([]);
+  });
+});
+
+describe('pm-send: claude-3 keeps the reservation rule (team.md §4)', () => {
+  it('claude-3 without --token: exit 2, nothing sent', async () => {
+    expect(await run(['mycodebranchdesk', '--instance', 'claude-3', '--note', 'n', 'ブリーフ'])).toBe(2);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveSends()).toEqual([]);
+  });
+
+  it('an alias of claude-3 is claude-3 (resolved, so --token is still required)', async () => {
+    expect(await run(['mycodebranchdesk', '--instance', 'leader', '--note', 'n', 'ブリーフ'])).toBe(2);
+    expect(spawnCalls).toEqual([]);
+  });
+
+  it('a wrong token: the reservation refuses (exit 3) and nothing is sent', async () => {
+    expect(await run(['mycodebranchdesk', '--instance', 'claude-3', '--token', 'pm-guess', '--note', 'n', 'ブリーフ'])).toBe(3);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveSends()).toEqual([]);
+  });
+
+  it('with PM\'s token it goes through claude3-reserve send, with the relay', async () => {
+    expect(await reserveMain(['reserve', '--label', '#4418'], { ...reserveDeps(), stdout: (l) => err.push(`TOKEN ${l}`) })).toBe(0);
+    const token = (err.find((l) => l.startsWith('TOKEN ')) ?? '').slice(6);
+    expect(token).toMatch(/^pm-/);
+    reserveCalls = [];
+    expect(await run(['mycodebranchdesk', '--instance', 'claude-3', '--token', token, '--note', 'リーダーの DONE:', 'ブリーフ'])).toBe(0);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveSends()).toEqual([
+      ['send', 'mycodebranchdesk', 'ブリーフ', '--instance', 'claude-3', '--reply-to', 'self', '--note', 'リーダーの DONE:'],
+    ]);
+  });
+});
+
+describe('claude3-reserve send: --note is required (Issue #4418)', () => {
+  async function reserveToken(): Promise<string> {
+    let token = '';
+    expect(await reserveMain(['reserve', '--label', '#4418'], { ...reserveDeps(), stdout: (l) => { token = l; } })).toBe(0);
+    reserveCalls = [];
+    return token;
+  }
+
+  it('no --note, or a blank one: exit 2 and commandmate send never runs, even with the right token', async () => {
+    const token = await reserveToken();
+    expect(await reserveMain(['send', '--token', token, 'ブリーフ'], reserveDeps())).toBe(2);
+    expect(await reserveMain(['send', '--token', token, '--note', '', 'ブリーフ'], reserveDeps())).toBe(2);
+    expect(await reserveMain(['send', '--token', token, '--note', ' ', 'ブリーフ'], reserveDeps())).toBe(2);
+    expect(reserveCalls).toEqual([]);
+  });
+
+  it('with --note: the argv carries --reply-to self --note (positive control)', async () => {
+    const token = await reserveToken();
+    expect(await reserveMain(['send', '--token', token, '--note', 'DONE:', 'ブリーフ'], reserveDeps())).toBe(0);
+    expect(reserveSends()).toEqual([
+      ['send', 'mycodebranchdesk', 'ブリーフ', '--instance', 'claude-3', '--reply-to', 'self', '--note', 'DONE:'],
+    ]);
+  });
+});
+
+describe('the daily dispatch\'s argv does not change (negative control)', () => {
+  it('sendArgv carries no relay; pmSendArgv is sendArgv plus the relay flags', () => {
+    expect(sendArgv('/clear', false)).toEqual(['send', 'mycodebranchdesk', '/clear', '--instance', 'claude-3']);
+    expect(sendArgv('msg', true)).toEqual(['send', 'mycodebranchdesk', 'msg', '--instance', 'claude-3', '--auto-yes', '--duration', '8h']);
+    expect(sendArgv('msg', true)).not.toContain('--reply-to');
+    expect(pmSendArgv('msg', 'n')).toEqual([...sendArgv('msg', false), ...pmRelayFlags('n')]);
+    expect(pmRelayFlags('n')).toEqual(['--reply-to', 'self', '--note', 'n']);
+  });
+
+  it('dispatch-main builds its sends from sendArgv, not from the PM argv', () => {
+    const src = fs.readFileSync(path.join(process.cwd(), 'scripts/agent-health/dispatch-main.ts'), 'utf8');
+    expect(src).toMatch(/sendArgv\(message, withAutoYes\)/);
+    expect(src).not.toMatch(/pmSendArgv|pmRelayFlags|--reply-to/);
+  });
+});
+
+describe('parsePmSendArgs', () => {
+  it('needs a worktree id and a message', () => {
+    expect(parsePmSendArgs(['--instance', 'codex', '--note', 'n', 'x']).ok).toBe(false);
+    expect(parsePmSendArgs(['wt', '--note', 'n', 'x']).ok).toBe(false);
+    expect(parsePmSendArgs(['wt', '--instance', 'codex', '--note', 'n', 'x'])).toEqual({
+      ok: true,
+      command: { worktreeId: 'wt', instance: 'codex', note: 'n', token: null, message: 'x' },
+    });
+  });
+});

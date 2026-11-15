@@ -105,15 +105,15 @@ describe('claude3-reserve: PM operations', () => {
   // 6.3 negative
   it('send with the right token runs commandmate send once to claude-3', async () => {
     const token = await reserve();
-    expect(await run(['send', '--token', token, 'ブリーフ本文'])).toBe(0);
-    expect(sends()).toEqual([['send', 'mycodebranchdesk', 'ブリーフ本文', '--instance', 'claude-3']]);
+    expect(await run(['send', '--token', token, '--note', 'DONE を待つ', 'ブリーフ本文'])).toBe(0);
+    expect(sends()).toEqual([['send', 'mycodebranchdesk', 'ブリーフ本文', '--instance', 'claude-3', '--reply-to', 'self', '--note', 'DONE を待つ']]);
     expect(current().sending).toBeNull();
   });
 
   it('send records the child pid while it runs', async () => {
     const token = await reserve();
     let during: ReservationGeneration | null = null;
-    const code = await run(['send', '--token', token, 'x'], {
+    const code = await run(['send', '--token', token, '--note', 'DONE を待つ', 'x'], {
       spawnExec: async (_c, _a, onChild) => {
         onChild?.(31337);
         during = current();
@@ -130,7 +130,7 @@ describe('claude3-reserve: PM operations', () => {
     expect(await run(['release', '--token', a])).toBe(0);
     const b = await reserve('b');
     calls = [];
-    expect(await run(['send', '--token', a, 'x'])).toBe(3);
+    expect(await run(['send', '--token', a, '--note', 'DONE を待つ', 'x'])).toBe(3);
     expect(await run(['renew', '--token', a])).toBe(3);
     expect(await run(['release', '--token', a])).toBe(3);
     expect(sends()).toEqual([]);
@@ -152,7 +152,7 @@ describe('claude3-reserve: PM operations', () => {
     const b = out[0];
     expect(b).not.toBe(a);
     expect(current()).toMatchObject({ token: b, previousToken: a });
-    expect(await run(['send', '--token', a, 'x'])).toBe(3);
+    expect(await run(['send', '--token', a, '--note', 'DONE を待つ', 'x'])).toBe(3);
   });
 
   it('release --force --from frees the generation a person looked at', async () => {
@@ -184,7 +184,7 @@ describe('claude3-reserve: the dispatch run’s reservation (R1)', () => {
   it('positive: while dispatch holds it after the request, PM cannot reserve or send', async () => {
     const d = holdDispatch();
     expect(await run(['reserve', '--label', 'x'])).toBe(3);
-    expect(await run(['send', '--token', 'pm-guess', 'x'])).toBe(3);
+    expect(await run(['send', '--token', 'pm-guess', '--note', 'DONE を待つ', 'x'])).toBe(3);
     expect(sends()).toEqual([]);
     expect(current().token).toBe(d);
   });
@@ -234,7 +234,7 @@ describe('claude3-reserve: the dispatch run’s reservation (R1)', () => {
 
   it('positive (P2-2): PM’s send with the dispatch token does not send', async () => {
     const d = holdDispatch();
-    expect(await run(['send', '--token', d, 'ブリーフ'])).toBe(3);
+    expect(await run(['send', '--token', d, '--note', 'DONE を待つ', 'ブリーフ'])).toBe(3);
     expect(sends()).toEqual([]);
     expect(current()).toMatchObject({ holder: 'dispatch', token: d, sending: null });
   });
@@ -258,7 +258,7 @@ describe('claude3-reserve: location and arguments (R6)', () => {
       })
     );
     expect(await run(['reserve', '--label', 'x'])).toBe(2);
-    expect(await run(['send', '--token', 't', 'x'])).toBe(2);
+    expect(await run(['send', '--token', 't', '--note', 'DONE を待つ', 'x'])).toBe(2);
     expect(sends()).toEqual([]);
   });
 

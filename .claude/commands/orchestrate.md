@@ -31,6 +31,7 @@ run のたびには読まない手順（exit code ごとの対処・担当の切
 - tmux・セッションに触れる Issue は、2-5 の 4 項目を契約に転記する（2-5）
 - 実機でエージェント CLI・サーバーを動かす Issue は、隔離の項目を契約に転記する（2-6）
 - 2.5 の分析の依頼は契約を使わない（素の send）（2.5-1）
+- 依頼の締めは「最後の行は `DONE:` / `WAIT:`（了承・判断待ち）/ `STOP:` のどれか」（4-3）
 - assign.tsv / tasks.tsv を stdin で読まない（fd 3 から読む）（3-1）
 - send が exit 99 なら、待つ前に画面を見る（3-1）
 - send の stdout はパイプで切らずファイルに落とし、送信後に `started=1` を確かめる（3-1）
@@ -647,9 +648,7 @@ Phase 1-2 で `bug` ラベルと分類されたIssueに対して、他エージ�
 
 ### 2.5-1. 他エージェントに分析依頼
 
-**このフェーズは契約を使わない（素の send のまま）。** 分析はコードを変更しない依頼であり、
-`--verify` は必ず `work-evidence` ゲートを含む（`--gates` で外そうとしても `wait --verify` は
-全ゲート要求になる）ため、成功した分析ほど exit 21 になる。契約付き委任は**変更を伴う委任**にだけ使う。
+**このフェーズは契約を使わない（素の send のまま）。** 契約付き委任は**変更を伴う委任**にだけ使う（理由は下の workers.md）。
 
 バグ Issue ごとの分析の依頼は、develop worktree の上で 1 本ずつ送る。送るときは docs/orchestrate/workers.md#25-1-分析の依頼の送り方 を読み、その送り方（`--agent copilot --model claude-sonnet-5`・モデル表記の確認・`wait --on-prompt agent`）で送る。
 
@@ -947,7 +946,7 @@ commandmatedev capture <worktree-id>
 該当ワーカーに修正指示を送信：
 
 ```bash
-commandmatedev send <worktree-id> "設計書の以下の点を修正してください: {具体的な指摘}" \
+commandmatedev send <worktree-id> "設計書の以下の点を修正してください: {具体的な指摘}。最後の行は DONE: / WAIT: / STOP: のどれか" \
   --instance "$AGENT" --auto-yes --duration 1h
 ```
 
@@ -1207,7 +1206,7 @@ grep '^| `' docs/module-reference.md | cut -d'|' -f2 | sort | uniq -d
 
 ## Phase 7: UAT（--full時のみ）
 
-体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送り、結果はジャッジ→PM→開発リーダーの順で返る。7-2 の修正ループは開発リーダーが回す。1 人で回す場合は以下のまま。根拠: docs/orchestrate/team.md#5-uat-の結果の返し方phase-7
+体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送り、結果はジャッジ→PM→開発リーダーの順で返る。PM は `pm-send.ts` で送る（team.md §3）。7-2 の修正ループは開発リーダーが回す。1 人で回す場合は以下のまま。根拠: docs/orchestrate/team.md#5-uat-の結果の返し方phase-7
 
 ### 7-1. 受入テスト実行
 

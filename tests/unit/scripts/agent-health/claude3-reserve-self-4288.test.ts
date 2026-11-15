@@ -151,7 +151,7 @@ describe('reserve --self (#4288)', () => {
   it('send --token <leader token> exits 3 and sends nothing (claude-3 does not send to itself)', async () => {
     expect(await run(['reserve', '--self', '--label', 'x'])).toBe(0);
     const token = out[0];
-    expect(await run(['send', '--token', token, 'hi'])).toBe(3);
+    expect(await run(['send', '--token', token, '--note', 'DONE を待つ', 'hi'])).toBe(3);
     expect(sends()).toEqual([]);
   });
 

@@ -229,6 +229,26 @@ export function sendArgv(message: string, withAutoYes: boolean): string[] {
 }
 
 /**
+ * The relay part of every PM send (Issue #4418): the answer comes back to the
+ * sender's composer when the target's turn ends, whatever the target writes,
+ * and the note waits in the sender's mem until the relay closes. There is no
+ * form without it — PM sends only through `scripts/orchestrate/pm-send.ts`
+ * (and `claude3-reserve.ts send` for claude-3), and both require the note.
+ */
+export function pmRelayFlags(note: string): string[] {
+  return ['--reply-to', 'self', '--note', note];
+}
+
+/**
+ * argv of PM's `commandmate send` to Claude 3 under PM's reservation
+ * (`claude3-reserve.ts send`). Kept apart from {@link sendArgv}, which the
+ * daily dispatch uses unchanged (its run is not waited on by a session).
+ */
+export function pmSendArgv(message: string, note: string): string[] {
+  return [...sendArgv(message, false), ...pmRelayFlags(note)];
+}
+
+/**
  * Where the run's terms are written: `workspace/agent-health/<date>/dispatch-terms-<runSuffix>.md`
  * under the repository this runs in (absolute, so Claude 3 in another worktree can read it).
  */

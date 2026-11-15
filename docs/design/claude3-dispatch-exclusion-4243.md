@@ -131,7 +131,7 @@
 | 操作 | 誰が | 通る条件（現在の世代に対して） | 作る世代 |
 |---|---|---|---|
 | `reserve --label <s> [--hours 1-24]` | PM | `released`、かつ `claude-3` が `ready`／`not-running` | `held`・`holder: pm`・新しい token（標準出力に出す）・`reviewAfter` = 今＋既定 8h |
-| `send --token <t> "<本文>"` | PM | `held`・`holder: pm`・token が一致・`sending: null` | 送信前に `sending` 付きの世代 → 送信 → `sending: null` の世代（3.5） |
+| `send --token <t> --note "<待つもの>" "<本文>"`（#4418: `--note` 必須、`--reply-to self --note` つきで送る。無ければ exit 2・送らない。PM は `scripts/orchestrate/pm-send.ts` 経由で呼ぶ） | PM | `held`・`holder: pm`・token が一致・`sending: null` | 送信前に `sending` 付きの世代 → 送信 → `sending: null` の世代（3.5） |
 | `renew --token <t> [--hours n]` | PM | `held`・token が一致・`sending: null` | `reviewAfter` だけを進めた世代（token は同じ） |
 | `release --token <t>` | PM、dispatch の run の最後の claude-3 | `held`・token が一致・`sending: null` | `released` |
 | `takeover --from <t> --reason restart` | 再起動後の PM | `held`・`holder: pm`・token が `<t>` と一致・送信中でない（3.5） | `held`・`holder: pm`・新しい token・`previousToken: <t>` |
@@ -204,7 +204,7 @@
 | 経路 | 予約に対して | 失敗・例外の出口 |
 |---|---|---|
 | PM: `reserve` | `released` から `held(pm)` | 別の持ち主 exit 3／claude-3 busy exit 4／設定不一致・I/O exit 2。どれも世代を作らない |
-| PM: ブリーフ・途中の返事の `send --token` | 3.5 の送信中の世代を挟む | token 不一致・予約無し exit 3（`commandmate` を呼ばない）。送信の失敗は `commandmate send` の exit を返し、`sending: null` に戻す |
+| PM: ブリーフ・途中の返事の `send --token --note`（#4418） | 3.5 の送信中の世代を挟む | token 不一致・予約無し exit 3（`commandmate` を呼ばない）。送信の失敗は `commandmate send` の exit を返し、`sending: null` に戻す |
 | PM: `renew` | token 一致で `reviewAfter` だけ | 不一致・送信中 exit 3 |
 | PM: `DONE:` の後の `release` | `released` | 不一致・送信中 exit 3 |
 | PM: 再起動後の `takeover --reason restart` | 新しい token | 不一致・dispatch の予約・送信中 exit 3 |

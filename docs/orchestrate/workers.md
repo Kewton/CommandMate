@@ -4,6 +4,8 @@ Phase 3（並列開発）の規則は本体にある。ここには、monitor �
 
 ## 2.5-1 分析の依頼の送り方
 
+分析に契約を使わない理由: 分析はコードを変更しない依頼であり、`--verify` は必ず `work-evidence` ゲートを含む（`--gates` で外そうとしても `wait --verify` は全ゲート要求になる）ため、成功した分析ほど exit 21 になる。
+
 develop worktree上でバグIssueごとに根本原因分析を実行する：
 
 ```bash
@@ -21,7 +23,9 @@ ${ISSUE_BODY}
 ## 分析要求
 1. 事象の再現パスをコード上で特定
 2. 根本原因を特定（直接原因、設計上の問題、類似リスク）
-3. 対策案を策定（即座対策、恒久対策、予防策）" \
+3. 対策案を策定（即座対策、恒久対策、予防策）
+
+最後の行は DONE: <要約> / WAIT: <了承・判断待ちの内容> / STOP: <理由> のどれか" \
     --agent copilot --model claude-sonnet-5 --auto-yes --duration 1h
 
   # この send は launch-worker.mjs を通さない: 読むだけの分析で契約を使わず、claude のワーカーではなく copilot に送るため。

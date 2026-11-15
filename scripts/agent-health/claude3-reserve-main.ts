@@ -5,7 +5,7 @@
  *
  *   reserve --label <s> [--hours 1-24]            → prints the token
  *   reserve --self --label <s> [--hours 1-24]     (from inside claude-3 only: holder leader, no state check)
- *   send --token <t> <message>                    → commandmate send mycodebranchdesk <message> --instance claude-3
+ *   send --token <t> --note <s> <message>         → commandmate send mycodebranchdesk <message> --instance claude-3 --reply-to self --note <s>
  *   renew --token <t> [--hours 1-24]
  *   release --token <t>
  *   release --force --from <t>                    (a person)
@@ -45,7 +45,7 @@ import {
   type ReservationResult,
   type TakeoverReason,
 } from '@/lib/agent-health/claude3-reservation';
-import { judgeAgentState, sendArgv } from '@/lib/agent-health/dispatch';
+import { judgeAgentState, pmSendArgv } from '@/lib/agent-health/dispatch';
 import { defaultSpawnExec, spawnExecFromSync, type SpawnExec } from './spawn-exec';
 
 export interface ExecResult {
@@ -72,7 +72,8 @@ export const RESERVE_USAGE = [
   '',
   '  reserve --label <s> [--hours 1-24]   reserve claude-3 for PM; prints the token (review after 8h by default)',
   '  reserve --self --label <s> [--hours 1-24]  claude-3 reserves itself (only from inside claude-3; skips the busy check)',
-  '  send --token <t> <message>           send to claude-3 under the reservation',
+  '  send --token <t> --note <s> <message>  send to claude-3 under the reservation, with a relay back to you',
+  '                                       (--reply-to self --note <s>; <s> is what you wait for. No --note: exit 2, nothing sent)',
   '  renew --token <t> [--hours 1-24]     move the review time',
   '  release --token <t>                  give claude-3 back',
   '  release --force --from <t>           a person releases the reservation they looked at',
@@ -107,7 +108,7 @@ function defaultDeps(): ReserveDeps {
 
 type Command =
   | { kind: 'reserve'; label: string; hours: number; self: boolean }
-  | { kind: 'send'; token: string; message: string }
+  | { kind: 'send'; token: string; note: string; message: string }
   | { kind: 'renew'; token: string; hours: number }
   | { kind: 'release'; token: string }
   | { kind: 'finish'; token: string }
@@ -123,7 +124,7 @@ export function parseReserveArgs(argv: readonly string[]): ReserveParse {
   const values: Record<string, string> = {};
   const flags = new Set<string>();
   const positional: string[] = [];
-  const VALUED = ['--label', '--hours', '--token', '--from', '--reason'];
+  const VALUED = ['--label', '--hours', '--token', '--from', '--reason', '--note'];
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === '-h' || arg === '--help') return { ok: false, error: RESERVE_USAGE, help: true };
@@ -163,10 +164,12 @@ export function parseReserveArgs(argv: readonly string[]): ReserveParse {
       return { ok: true, command: { kind: 'reserve', label: values['--label'], hours: h, self: flags.has('--self') } };
     }
     case 'send': {
-      const bad = failWith(allowed(['--token'], [], 1) ?? need('--token'));
+      // Issue #4418: PM's send always opens a relay; without what it waits for, nothing is sent.
+      const bad = failWith(allowed(['--token', '--note'], [], 1) ?? need('--token') ?? need('--note'));
       if (bad) return bad;
+      if (values['--note'].trim().length === 0) return { ok: false, error: 'send needs a non-empty --note (what you wait for)' };
       if (positional[0].length === 0) return { ok: false, error: 'send needs a message' };
-      return { ok: true, command: { kind: 'send', token: values['--token'], message: positional[0] } };
+      return { ok: true, command: { kind: 'send', token: values['--token'], note: values['--note'], message: positional[0] } };
     }
     case 'renew': {
       const bad = failWith(allowed(['--token', '--hours']) ?? need('--token'));
@@ -359,7 +362,7 @@ async function run(command: Command, env: ReservationEnv, deps: ReserveDeps, spa
     }
     case 'send': {
       const sent = await sendUnderReservation(env, command.token, (onChild) =>
-        spawnExec('commandmate', sendArgv(command.message, false), onChild),
+        spawnExec('commandmate', pmSendArgv(command.message, command.note), onChild),
         'pm'
       );
       if (!sent.sent) {
