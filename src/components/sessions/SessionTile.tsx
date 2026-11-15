@@ -44,14 +44,17 @@
  *
  * Mounted only while the tile is on screen, like the body: `MessageInput`
  * fetches its slash-command catalog when it mounts, and an off-screen tile must
- * not cost a request (#2509). A half-typed draft survives that — it is persisted
- * per instance (`draftScope="instance"`, Issue #4419): the tile switches its
- * instance in place, so a draft kept per worktree (the worktree screen's split-0
- * key, as before #4419) showed what was typed for one instance in another's
- * composer, and sent it there. Text handed back to the composer (a discarded
- * send, a send refused because of its role) goes to the instance it was sent to:
- * into the composer when that instance is on screen, otherwise into its stored
- * draft, which the composer restores when the instance is shown again.
+ * not cost a request (#2509). A half-typed draft mostly survives that: it is
+ * saved 500ms after the last keystroke, so what was typed in the last half second
+ * before the tile left the screen is lost. It is persisted per instance
+ * (`draftScope="instance"`, Issue #4419): the tile switches its instance in
+ * place, so a draft kept per worktree (the worktree screen's split-0 key, as
+ * before #4419) showed what was typed for one instance in another's composer,
+ * and sent it there. Text handed back to the composer (a discarded send, a send
+ * refused because of its role) goes to the instance it was sent to: into the
+ * composer when that instance is on screen, otherwise into its stored draft,
+ * which the composer restores when the instance is shown again (and which a
+ * second tile showing that instance takes in at once — `subscribeDraftAppend`).
  *
  * ## Auto-Yes (Issue #2512)
  *

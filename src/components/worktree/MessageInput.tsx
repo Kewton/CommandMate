@@ -43,6 +43,7 @@ import {
   DRAFT_STORAGE_KEY_PREFIX,
   getInstanceDraftKey,
   getSplitDraftKey,
+  subscribeDraftAppend,
   type DraftScope,
 } from '@/lib/drafts/message-draft';
 
@@ -328,6 +329,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     draftScope === 'instance'
       ? getInstanceDraftKey(worktreeId, instanceId || cliToolId || 'claude')
       : getSplitDraftKey(worktreeId, splitIndex);
+  // Issue #4419: the draft on screen now — an awaited send checks it after the wait, so a send's
+  // success never clears the draft of an instance the tile switched to meanwhile.
+  const draftKeyRef = useRef(draftKey);
 
   // Hooks for slash command functionality
   // Issue #4: Pass cliToolId to filter commands by CLI tool
@@ -424,6 +428,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       briefCheckingRef.current = false;
       setBriefChecking(false);
       setBriefCheckFailed(false);
+      // Issue #4419: the question is the old target's (its boundary id): never answered with the
+      // next target's draft — the `/sessions` tile switches instances under the same composer.
+      setBriefAsk(null);
     };
   }, [previewKey]);
   useEffect(() => {
@@ -486,11 +493,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // ((worktreeId, splitIndex), or for the tile (worktreeId, instance) — Issue #4419).
   // Issue #728: also runs the legacy-key migration for splitIndex=0 (split scope only).
   useEffect(() => {
-    // Issue #4419: the key changed with a save still waiting — write it under the key it was
-    // typed for (an unmount writes nothing, as before).
+    draftKeyRef.current = draftKey;
+    // Issue #4419: the tile switched instance with a save still waiting — write it under the key it
+    // was typed for. Instance scope only: the worktree screen's split scope drops it as before, and
+    // an unmount writes nothing on either.
     const pendingSave = pendingDraftSaveRef.current;
     pendingDraftSaveRef.current = null;
-    if (pendingSave && pendingSave.key !== draftKey) writeDraft(pendingSave.key, pendingSave.message);
+    if (draftScope === 'instance' && pendingSave && pendingSave.key !== draftKey) {
+      writeDraft(pendingSave.key, pendingSave.message);
+    }
     try {
       if (draftScope === 'split' && splitIndex === 0) {
         migrateLegacyDraftKey(worktreeId);
@@ -507,6 +518,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       draftSaveTimerRef.current = null;
     };
   }, [draftKey, draftScope, worktreeId, splitIndex]);
+
+  // Issue #4419: text the `/sessions` tile put back into this key's stored draft (a 409 for an
+  // instance its own composer is not showing) reaches this composer too when it shows that key —
+  // otherwise its state, unaware of it, would overwrite it with the next keystroke's save.
+  useEffect(
+    () =>
+      subscribeDraftAppend(draftKey, (text) => {
+        setMessage((prev) => (prev.trim() === '' ? text : `${prev}\n\n${text}`));
+      }),
+    [draftKey],
+  );
 
   // Debounced save of draft message to localStorage (per-split key, Issue #728; per-instance key
   // for the tile, Issue #4419)
@@ -526,6 +548,24 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     pendingDraftSaveRef.current = null;
     try { window.localStorage.removeItem(draftKey); } catch { /* ignore */ }
   }, [draftKey]);
+
+  /**
+   * Issue #4419: an awaited send was taken. When the composer still shows the draft it sent, clear
+   * it as before; when it switched meanwhile (the tile's instance, its roster), only the sent
+   * draft's stored copy goes — the draft on screen, its state and its waiting save are another
+   * instance's. Returns whether the sent draft is still the one on screen.
+   */
+  const clearSentDraft = useCallback((sentKey: string): boolean => {
+    if (draftKeyRef.current !== sentKey) {
+      try { window.localStorage.removeItem(sentKey); } catch { /* ignore */ }
+      return false;
+    }
+    setMessage('');
+    setIsFreeInputMode(false);
+    resetAfterSend();
+    clearStoredDraft();
+    return true;
+  }, [resetAfterSend, clearStoredDraft]);
 
   /**
    * Auto-resize textarea based on content.
@@ -681,11 +721,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setError(null);
       // Issue #4345 1c: the send's 401 reaches the gateway before it becomes an ApiError. 再指示 2 (K1):
       // with the press's token — the gate reads the registration the press fixed.
+      const sentKey = draftKey;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
-      setMessage('');
-      setIsFreeInputMode(false);
-      resetAfterSend();
-      clearStoredDraft();
+      clearSentDraft(sentKey);
       // Issue #806: when the session is busy, the CLI queues this message behind
       // the running task. Surface a toast so the (successful) send doesn't look
       // like a no-op. Idle sessions are unchanged (no toast).
@@ -705,7 +743,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -740,12 +778,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setError(null);
     try {
       // Issue #4345 1c: see the plain send.
+      const sentKey = draftKey;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
-      setBriefAsk(null);
-      setMessage('');
-      setIsFreeInputMode(false);
-      resetAfterSend();
-      clearStoredDraft();
+      // Issue #4419: a switch meanwhile already closed the question (the previewKey change).
+      if (clearSentDraft(sentKey)) setBriefAsk(null);
       if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
       else if (isProcessing) showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       onMessageSent?.(effectiveCliTool, created);
@@ -780,7 +816,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, clearStoredDraft, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError]);
 
   const closeBriefAsk = useCallback(() => {
     if (briefSending) return;

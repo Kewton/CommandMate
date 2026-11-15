@@ -199,16 +199,68 @@ describe('[#4419] a /sessions tile keeps one draft per instance', () => {
   });
 
   it('a 409 on the instance still on screen comes back into that composer (as in #4385)', async () => {
-    installFetch(() =>
-      json(409, { error: 'refused', code: 'ROLE_LAUNCH_REFUSED', roleRefusal: 'not-confirmed', sendOutcome: 'not_sent' }),
-    );
+    // 再指示 1: the answer is held until the send was made and the composer cleared, so the
+    // check below can only pass by the text coming back (not by the draft not yet being sent).
+    let answer!: (r: Response) => void;
+    installFetch(() => new Promise<Response>((resolve) => { answer = resolve; }));
     const tile = renderTile();
     tile.show('claude');
     tile.type(CLAUDE_DRAFT);
     tile.send();
+    await waitFor(() => expect(sendBodies).toHaveLength(1));
+    expect(sendBodies[0]).toMatchObject({ content: CLAUDE_DRAFT, cliToolId: 'claude' });
+    await waitFor(() => expect(tile.textarea().value).toBe(''));
+    await act(async () => {
+      answer(json(409, { error: 'refused', code: 'ROLE_LAUNCH_REFUSED', roleRefusal: 'not-confirmed', sendOutcome: 'not_sent' }));
+    });
+    await waitFor(() => expect(within(document.body).getByTestId('toast-container')).toHaveTextContent(NOT_CONFIRMED));
     await waitFor(() => expect(tile.textarea().value).toBe(CLAUDE_DRAFT));
     tile.show('antigravity');
     await waitFor(() => expect(tile.textarea().value).toBe(''));
+    tile.show('claude');
+    await waitFor(() => expect(tile.textarea().value).toBe(CLAUDE_DRAFT));
+  });
+
+  it('a late 409 for an instance another tile is showing goes into that tile\'s composer and survives its next keystroke', async () => {
+    let answer!: (r: Response) => void;
+    installFetch(() => new Promise<Response>((resolve) => { answer = resolve; }));
+    const sender = renderTile();
+    const watcher = renderTile();
+    sender.type(AGY_DRAFT);
+    sender.send();
+    await waitFor(() => expect(sendBodies).toHaveLength(1));
+    sender.show('claude');
+    watcher.type('watching');
+    await act(async () => {
+      answer(json(409, { error: 'refused', code: 'ROLE_LAUNCH_REFUSED', roleRefusal: 'not-confirmed', sendOutcome: 'not_sent' }));
+    });
+    await waitFor(() => expect(watcher.textarea().value).toBe(`watching\n\n${AGY_DRAFT}`));
+    expect(sender.textarea().value).toBe('');
+    watcher.type(`watching\n\n${AGY_DRAFT} more`);
+    await waitFor(
+      () =>
+        expect(window.localStorage.getItem('commandmate:draft-message:wt-1:instance:antigravity')).toBe(
+          `watching\n\n${AGY_DRAFT} more`,
+        ),
+      { timeout: 2000 },
+    );
+  });
+
+  it('two tiles showing the same instance share its draft; the old split-0 draft shows on neither', async () => {
+    window.localStorage.setItem('commandmate:draft-message:wt-1:0', 'typed before #4419');
+    const first = renderTile();
+    expect(first.textarea().value).toBe('');
+    first.type(AGY_DRAFT);
+    await waitFor(
+      () => expect(window.localStorage.getItem('commandmate:draft-message:wt-1:instance:antigravity')).toBe(AGY_DRAFT),
+      { timeout: 2000 },
+    );
+    const second = renderTile();
+    expect(second.textarea().value).toBe(AGY_DRAFT);
+    second.show('claude');
+    expect(second.textarea().value).toBe('');
+    // Left for the worktree screen's split 0, where it was typed.
+    expect(window.localStorage.getItem('commandmate:draft-message:wt-1:0')).toBe('typed before #4419');
   });
 
   it('negative control: the worktree screen\'s composer keeps its draft under the split key', async () => {
