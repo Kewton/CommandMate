@@ -46,4 +46,10 @@ describe('[#4385 A4] role refusal wording', () => {
       expect(resolve(load('ja'), key)).toContain('セッションを停止して起動し直してください');
     }
   });
+
+  it('not-applied says nothing about whether the agent runs (it also covers a stopped agy)', () => {
+    // 再指示 1: `not-applied` also stands for agy stopped on an unknown tool and agy not in the pane.
+    expect(resolve(load('en'), SEND_ROLE_REFUSAL_KEYS['not-applied'])).not.toMatch(/runs without|running/i);
+    expect(resolve(load('ja'), SEND_ROLE_REFUSAL_KEYS['not-applied'])).not.toMatch(/動いて/);
+  });
 });

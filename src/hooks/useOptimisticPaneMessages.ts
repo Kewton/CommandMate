@@ -1,5 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
-import { useTranslations } from 'next-intl';
+import { useCallback, useMemo } from 'react';
 import {
   usePendingMessages,
   type OptimisticSendOptions,
@@ -12,9 +11,8 @@ import {
 } from '@/hooks/useConnectivity';
 import { isHandoffPageOperationRefused, sendMessageForHandoffPage } from '@/lib/handoff/page-owner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
-import type { ChatMessage, SendRoleRefusalReason } from '@/types/models';
-import { readSendRoleRefusal, sendRoleRefusalMessageKey } from '@/components/worktree/role-refusal-notice';
-import { useToast } from '@/components/common/Toast';
+import type { ChatMessage } from '@/types/models';
+import { useRoleRefusalNotice } from '@/hooks/useRoleRefusalNotice';
 
 export interface UseOptimisticPaneMessagesArgs {
   worktreeId: string;
@@ -82,22 +80,9 @@ export function useOptimisticPaneMessages({
     [connectivity.signals],
   );
   // Issue #4385: a send the server refused because of its role (409 `roleRefusal`, nothing typed)
-  // says why right away (the app's toast, the one the composer's other notices use) and on its
-  // failed row; a new send's text goes back to the composer (the same insert as `onNotSent`).
-  const t = useTranslations('worktree');
-  const { showToast } = useToast();
-  const onNotSentRef = useRef(onNotSent);
-  onNotSentRef.current = onNotSent;
-  const onRoleRefused = useCallback(
-    (content: string, reason: SendRoleRefusalReason, info: { firstAttempt: boolean }): boolean => {
-      showToast(t(sendRoleRefusalMessageKey(reason)), 'error');
-      const insert = onNotSentRef.current;
-      if (!info.firstAttempt || !insert) return false;
-      insert(content);
-      return true;
-    },
-    [showToast, t],
-  );
+  // says why right away (the app's toast) and on its failed row; a new send's text goes back to the
+  // composer (the same insert as `onNotSent`). Shared with the `/sessions` tile.
+  const { readRoleRefusal, onRoleRefused } = useRoleRefusalNotice(onNotSent);
   return usePendingMessages({
     worktreeId,
     serverMessages,
@@ -106,7 +91,7 @@ export function useOptimisticPaneMessages({
     connectivity: pendingConnectivity,
     isNotSent: isHandoffPageOperationRefused,
     onNotSent,
-    readRoleRefusal: readSendRoleRefusal,
+    readRoleRefusal,
     onRoleRefused,
   });
 }

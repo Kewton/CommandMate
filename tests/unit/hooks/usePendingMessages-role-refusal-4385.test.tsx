@@ -10,10 +10,12 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import React from 'react';
+import { renderHook, act, render, screen } from '@testing-library/react';
+import { ConversationPairCard } from '@/components/worktree/ConversationPairCard';
 import { usePendingMessages, type PendingConnectivity, type SendFn } from '@/hooks/usePendingMessages';
 import { ApiError } from '@/lib/api-client';
-import { readSendRoleRefusal } from '@/components/worktree/role-refusal-notice';
+import { readSendRoleRefusal, sendRoleRefusalMessageKey } from '@/components/worktree/role-refusal-notice';
 
 const ONLINE: PendingConnectivity = { offline: false, reachable: true };
 const OFFLINE: PendingConnectivity = { offline: true, reachable: false };
@@ -21,7 +23,7 @@ const flush = () => act(async () => new Promise((resolve) => setTimeout(resolve,
 const refusal = (roleRefusal: string) =>
   new ApiError('refused', 409, { error: 'refused', code: 'ROLE_LAUNCH_REFUSED', roleRefusal, sendOutcome: 'not_sent' });
 
-function renderPending(sendFn: SendFn, opts: { connectivity?: PendingConnectivity; withReason?: boolean; handBack?: boolean } = {}) {
+function renderPending(sendFn: SendFn, opts: { connectivity?: PendingConnectivity; withReason?: boolean; handBack?: boolean; timeoutMs?: number } = {}) {
   const onRoleRefused = vi.fn(() => opts.handBack ?? true);
   const hook = renderHook(() =>
     usePendingMessages({
@@ -29,6 +31,7 @@ function renderPending(sendFn: SendFn, opts: { connectivity?: PendingConnectivit
       serverMessages: [],
       sendFn,
       connectivity: opts.connectivity ?? ONLINE,
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       ...(opts.withReason === false ? {} : { readRoleRefusal: readSendRoleRefusal, onRoleRefused }),
     }),
   );
@@ -109,5 +112,69 @@ describe('[#4385 A4] (negative controls) the hook as before', () => {
     expect(result.current.messages[0].optimisticState).toBe('error');
     expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
     expect(onRoleRefused).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#4385 A4 再指示 1] a role refusal that lands after the clock failed the row', () => {
+  function deferredSend() {
+    const answers: Array<(e: unknown) => void> = [];
+    const sendFn = vi.fn(() => new Promise((_resolve, reject) => { answers.push(reject); }));
+    return { sendFn, answers };
+  }
+
+  it.each(['not-applied', 'not-confirmed', 'artifact-failed'] as const)(
+    '%s: the failed row still takes the reason and the record, so discard hands nothing back twice',
+    async (reason) => {
+      const { sendFn, answers } = deferredSend();
+      const { result, onRoleRefused } = renderPending(sendFn, { timeoutMs: 5 });
+      act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+      await flush();
+      // The clock failed it first (the 30 s window, shortened here).
+      expect(result.current.messages[0].optimisticState).toBe('error');
+      expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
+      await act(async () => answers[0](refusal(reason)));
+      await flush();
+      expect(onRoleRefused).toHaveBeenCalledWith('hello', reason, { firstAttempt: true });
+      expect(result.current.messages[0].optimisticState).toBe('error');
+      expect(result.current.messages[0].optimisticRoleRefusal).toBe(reason);
+      // The history row shows it, next to "Failed to send".
+      const row = result.current.messages[0];
+      render(<ConversationPairCard pair={{ id: row.id, userMessage: row, assistantMessages: [], status: 'pending' }} onFilePathClick={() => undefined} />);
+      expect(screen.getByTestId('optimistic-error-reason')).toHaveTextContent(sendRoleRefusalMessageKey(reason));
+      let restored: string | undefined = 'unset';
+      act(() => {
+        restored = result.current.discard(result.current.pending[0].tempId);
+      });
+      expect(restored).toBeUndefined();
+    },
+  );
+
+  it('a late answer to the attempt before a retry does not touch the retried row', async () => {
+    const { sendFn, answers } = deferredSend();
+    const { result, onRoleRefused } = renderPending(sendFn, { timeoutMs: 5 });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('error');
+    act(() => result.current.retry(result.current.pending[0].tempId));
+    expect(result.current.messages[0].optimisticState).toBe('sending');
+    // The first attempt's 409 arrives while the retry is on its way.
+    await act(async () => answers[0](refusal('not-applied')));
+    expect(onRoleRefused).not.toHaveBeenCalled();
+    expect(result.current.messages[0].optimisticState).toBe('sending');
+    expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
+    expect(result.current.pending[0].returnedToComposer).toBeFalsy();
+  });
+
+  it('a late answer to a discarded row changes nothing', async () => {
+    const { sendFn, answers } = deferredSend();
+    const { result, onRoleRefused } = renderPending(sendFn, { timeoutMs: 5 });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    act(() => {
+      result.current.discard(result.current.pending[0].tempId);
+    });
+    await act(async () => answers[0](refusal('not-applied')));
+    expect(onRoleRefused).not.toHaveBeenCalled();
+    expect(result.current.pending).toEqual([]);
   });
 });

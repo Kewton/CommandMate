@@ -25,7 +25,7 @@ export const ROLE_CASES = [
   {
     label: 'A4: agy agent did not list the agent (not-applied)',
     roleRefusal: 'not-applied',
-    sentence: 'The role is not applied to this session, so nothing was sent (the agent runs without it). Stop the session and start it again.',
+    sentence: 'The role is not applied to this session, so nothing was sent. Stop the session and start it again.',
   },
   {
     label: 'A5: agy agent failed / could not be checked (not-confirmed)',

@@ -377,6 +377,10 @@ export function usePendingMessages({
   // the prune decided, read rather than recomputed. One short string per
   // confirmed send, for the life of the mount.
   const reconciledTempIdsRef = useRef<Set<string>>(new Set());
+  // Issue #4385 再指示 1: each row's latest attempt (the object `dispatchSend` sent), so a late
+  // answer is applied only to the attempt it answers. Removed when the row is discarded or
+  // confirmed.
+  const attemptsRef = useRef<Map<string, PendingMessage>>(new Map());
 
   const clearTimer = useCallback((tempId: string) => {
     const timer = timersRef.current.get(tempId);
@@ -434,6 +438,7 @@ export function usePendingMessages({
         setPending((prev) => prev.map((cur) => (cur.tempId === p.tempId ? previous : cur)));
         return;
       }
+      attemptsRef.current.delete(p.tempId);
       setPending((prev) => prev.filter((cur) => cur.tempId !== p.tempId));
       onNotSentRef.current?.(p.content);
     },
@@ -442,6 +447,7 @@ export function usePendingMessages({
 
   const dispatchSend = useCallback(
     async (p: PendingMessage, previous?: PendingMessage) => {
+      attemptsRef.current.set(p.tempId, p);
       startTimer(p.tempId);
       inFlightRef.current.add(p.tempId);
       try {
@@ -466,15 +472,22 @@ export function usePendingMessages({
         }
         // Issue #4385: refused because of the role (409, nothing typed). The server answered, so
         // the row fails now (never parked) with the reason; a new send's text goes back to the
-        // composer, which clears only what the server took.
+        // composer, which clears only what the server took. Also when the answer is late — the
+        // clock already failed this very attempt (再指示 1): the row still takes the reason and the
+        // record that its text went back, so a discard does not hand it back again. Only the row's
+        // latest attempt (`attemptsRef`) counts: a late answer to an older attempt (after a retry
+        // or an automatic resend) or to a row that was discarded or confirmed changes nothing.
         const roleRefusal = readRoleRefusalRef.current?.(error) ?? null;
         if (roleRefusal !== null) {
+          if (attemptsRef.current.get(p.tempId) !== p) return;
+          const sameAttempt = (cur: PendingMessage) =>
+            cur.tempId === p.tempId && (cur.status === 'sending' || cur.status === 'error');
           clearTimer(p.tempId);
           const firstAttempt = previous === undefined;
           const handedBack = onRoleRefusedRef.current?.(p.content, roleRefusal, { firstAttempt }) === true;
           setPending((prev) =>
             prev.map((cur) =>
-              cur.tempId === p.tempId && cur.status === 'sending'
+              sameAttempt(cur)
                 ? {
                     ...cur,
                     status: 'error',
@@ -547,6 +560,7 @@ export function usePendingMessages({
       const target = pendingRef.current.find((p) => p.tempId === tempId);
       clearTimer(tempId);
       inFlightRef.current.delete(tempId);
+      attemptsRef.current.delete(tempId);
       setPending((prev) => prev.filter((p) => p.tempId !== tempId));
       // Issue #4385: a text already handed back to the composer is not handed back twice.
       return target?.returnedToComposer ? undefined : target?.content;
@@ -578,6 +592,7 @@ export function usePendingMessages({
     if (reconciledTempIds.size === 0) return;
     reconciledTempIds.forEach((id) => reconciledTempIdsRef.current.add(id));
     reconciledTempIds.forEach(clearTimer);
+    reconciledTempIds.forEach((id) => attemptsRef.current.delete(id));
     setPending((cur) => cur.filter((p) => !reconciledTempIds.has(p.tempId)));
   }, [serverMessages, clearTimer]);
 
