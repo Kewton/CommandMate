@@ -2576,6 +2576,7 @@ Auto-Yes が OFF の instance で、止まった理由があれば入ります�
 - 再起動で許可は**戻りません**（`enabled: false`）。理由の表示は元の許可の期限まで残り、
   期限内にもう一度再起動しても残ります。`--enable` か `--disable` で消えます
 - SIGKILL やクラッシュでは記録されず、理由の無い `off` で戻ります
+- `commandmate update` も旧サーバーを止めてから入れ替えるので、稼働中の Auto-Yes はそこで解放されます。update のあとに自動応答を続けたいときは、Auto-Yes を有効にし直してください
 - 同じ理由が `commandmate ls` の `off(restart)`、`commandmate instances` の `no(restart)`、
   画面の「再起動で解除」に出ます。`commandmate wait` は exit 10 のときに stderr に 1 行足し、
   再有効化のコマンドを待機対象の `--instance` 付きで示します
