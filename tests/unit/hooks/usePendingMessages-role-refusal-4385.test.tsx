@@ -178,3 +178,76 @@ describe('[#4385 A4 再指示 1] a role refusal that lands after the clock faile
     expect(result.current.pending).toEqual([]);
   });
 });
+
+describe('[#4385 A4 再指示 2] a discarded late answer and a not-sent retry keep the row’s attempt straight', () => {
+  const NOT_SENT = new Error('not sent (the page gate refused it)');
+
+  function renderWithConnectivity(sendFn: SendFn) {
+    const onRoleRefused = vi.fn(() => true);
+    const hook = renderHook(
+      ({ connectivity }: { connectivity: PendingConnectivity }) =>
+        usePendingMessages({
+          worktreeId: 'w1',
+          serverMessages: [],
+          sendFn,
+          connectivity,
+          timeoutMs: 5,
+          resendGraceMs: 0,
+          isNotSent: (error) => error === NOT_SENT,
+          readRoleRefusal: readSendRoleRefusal,
+          onRoleRefused,
+        }),
+      { initialProps: { connectivity: ONLINE } },
+    );
+    return { ...hook, onRoleRefused };
+  }
+
+  it('A times out → retry B → A’s 409 → offline → recovery: B (still unanswered) is not resent', async () => {
+    const answers: Array<(e: unknown) => void> = [];
+    const sendFn = vi.fn(() => new Promise<void>((_resolve, reject) => { answers.push(reject); }));
+    const { result, rerender } = renderWithConnectivity(sendFn);
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('error');
+    await act(async () => {
+      result.current.retry(result.current.pending[0].tempId);
+      // A's 409 lands while B is on its way; A's answer is set aside.
+      answers[0](refusal('not-applied'));
+    });
+    expect(sendFn).toHaveBeenCalledTimes(2);
+    expect(result.current.messages[0].optimisticState).toBe('sending');
+    rerender({ connectivity: OFFLINE });
+    expect(result.current.pending[0].queued).toBe(true);
+    rerender({ connectivity: ONLINE });
+    await flush();
+    // B's outcome is unknown (still in flight): never sent a second time.
+    expect(sendFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('A times out → retry B not sent (row back to A) → A’s 409: the row takes A’s reason and the text goes back', async () => {
+    const answers: Array<(e: unknown) => void> = [];
+    const sendFn = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { answers.push(reject); }))
+      .mockRejectedValueOnce(NOT_SENT);
+    const { result, onRoleRefused } = renderWithConnectivity(sendFn as unknown as SendFn);
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('error');
+    act(() => result.current.retry(result.current.pending[0].tempId));
+    await flush();
+    // Not sent: the row is back as it was (failed, no reason yet).
+    expect(sendFn).toHaveBeenCalledTimes(2);
+    expect(result.current.messages[0].optimisticState).toBe('error');
+    expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
+    await act(async () => answers[0](refusal('not-confirmed')));
+    await flush();
+    expect(onRoleRefused).toHaveBeenCalledWith('hello', 'not-confirmed', { firstAttempt: true });
+    expect(result.current.messages[0].optimisticRoleRefusal).toBe('not-confirmed');
+    let restored: string | undefined = 'unset';
+    act(() => {
+      restored = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(restored).toBeUndefined();
+  });
+});

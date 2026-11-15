@@ -364,7 +364,10 @@ export function usePendingMessages({
   // Issue #2503: tempIds whose send request has not settled. A request in
   // flight has an unknown outcome, and `POST /send` is not idempotent, so these
   // are never resend candidates however long the network has been back.
-  const inFlightRef = useRef<Set<string>>(new Set());
+  // Issue #4385 再指示 2: kept per attempt (the object `dispatchSend` sent), so an older attempt
+  // settling — a late answer after a retry — does not clear the in-flight mark of the attempt that
+  // is still travelling. A tempId is in flight while any of its attempts is.
+  const inFlightRef = useRef<Map<string, Set<PendingMessage>>>(new Map());
   // Server ids already claimed by reconciled (and pruned) pendings. Persisted
   // across renders so a single echo can only ever confirm one pending. Bounded
   // to ids still present in serverMessages so it does not grow unbounded.
@@ -432,9 +435,16 @@ export function usePendingMessages({
    * before this attempt), or, for a new send (none), leaves with its text handed back.
    */
   const revertNotSent = useCallback(
-    (p: PendingMessage, previous: PendingMessage | undefined) => {
+    (p: PendingMessage, previous: PendingMessage | undefined, priorAttempt: PendingMessage | undefined) => {
       clearTimer(p.tempId);
       if (previous) {
+        // Issue #4385 再指示 2: the row goes back, and so does which attempt it belongs to — the one
+        // before this attempt (say a timed-out send whose answer is still to come), so its late
+        // answer is still applied to the row. Only when this attempt is still the row's latest.
+        if (attemptsRef.current.get(p.tempId) === p) {
+          if (priorAttempt) attemptsRef.current.set(p.tempId, priorAttempt);
+          else attemptsRef.current.delete(p.tempId);
+        }
         setPending((prev) => prev.map((cur) => (cur.tempId === p.tempId ? previous : cur)));
         return;
       }
@@ -447,9 +457,12 @@ export function usePendingMessages({
 
   const dispatchSend = useCallback(
     async (p: PendingMessage, previous?: PendingMessage) => {
+      const priorAttempt = attemptsRef.current.get(p.tempId);
       attemptsRef.current.set(p.tempId, p);
       startTimer(p.tempId);
-      inFlightRef.current.add(p.tempId);
+      const attemptsInFlight = inFlightRef.current.get(p.tempId) ?? new Set<PendingMessage>();
+      attemptsInFlight.add(p);
+      inFlightRef.current.set(p.tempId, attemptsInFlight);
       try {
         await sendFnRef.current(p.content, p.options);
         // Issue #2503: the server took it. A request parked by the offline edge
@@ -467,7 +480,7 @@ export function usePendingMessages({
       } catch (error) {
         // Issue #4345 1c 再指示 2 (K1): not sent — not a failure (no error row, no resend spent).
         if (isNotSentRef.current?.(error)) {
-          revertNotSent(p, previous);
+          revertNotSent(p, previous, priorAttempt);
           return;
         }
         // Issue #4385: refused because of the role (409, nothing typed). The server answered, so
@@ -502,7 +515,10 @@ export function usePendingMessages({
         }
         failPending(p.tempId);
       } finally {
-        inFlightRef.current.delete(p.tempId);
+        // Issue #4385 再指示 2: only this attempt stops being in flight; a newer one may still be.
+        const attemptsLeft = inFlightRef.current.get(p.tempId);
+        attemptsLeft?.delete(p);
+        if (attemptsLeft && attemptsLeft.size === 0) inFlightRef.current.delete(p.tempId);
       }
     },
     [startTimer, failPending, revertNotSent, clearTimer],
