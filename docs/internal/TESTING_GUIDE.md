@@ -166,7 +166,7 @@ curl -s "http://localhost:3000/api/worktrees/${WORKTREE_ID}/logs" | jq .
 
 `POST /api/worktrees/:id/kill-session` は、対象を **query** の `cliTool` と `instance` で絞る。body は読まない
 （body に `cliToolId` を入れても対象は絞れない）。query が無いと、その worktree の**全 CLI のセッション**が対象になる。
-単一のセッションだけ終わらせるときは必ず query で指定する。
+`cliTool` だけを渡すと、そのツールの登録済みインスタンスがすべて対象になる。1 本だけ止めるには `instance` も要る。
 
 ```bash
 curl -X POST "http://localhost:3000/api/worktrees/${WORKTREE_ID}/kill-session?cliTool=codex&instance=codex"

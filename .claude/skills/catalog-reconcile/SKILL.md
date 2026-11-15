@@ -298,26 +298,32 @@ v0.21.2 では `/sandbox-add-read-dir` の説明が `<absolute_path>` を含ん�
 ✓ サンドボックスに読み取り可能なディレクトリを追加: /sandbox-add-read-dir [絶対パス]
 ```
 
-### 4-2. 説明がコマンド名そのものになっている衝突を直す
+### 4-2. 同名のコマンドの説明がツール間で食い違う衝突を直す
 
 **仕組み**: 説明は `slashCommands.descriptions.<name>` という**名前由来の 1 キー**に
 解決される。claude と codex が同名で別の意味を持つと、両者が同じキーを共有してしまう。
-`engine.ts` は先勝ちで片方の文を出荷することを拒み、**両方を捨てて
-「コマンド名そのもの」をプレースホルダに置く**。結果、パレットには `/btw — btw` と出る。
+`engine.ts` は先勝ちで片方の文を出荷することを拒む。両方がこの回で追加された新規なら、
+**自分でツール別のキーへ分割**して各ツールの文を残す。共有のキーがすでに翻訳済みの辞書の文を持つときは
+分割すると訳が孤児になるので、**共有のまま報告だけして人手の分割を待つ**。
+（以前は両方を捨てて「コマンド名そのもの」を置き、パレットに `/btw — btw` と出ていた。v0.21.2 の残骸は下の検出で探す）
 
 `--check` / `--write` の出力では `[description-conflict]` カテゴリに現れる:
 
 ```
 [description-conflict] (1)
-  - /btw: tools disagree on the description ("..." vs "..."); left as a review placeholder
+  - /btw: tools disagree on the description ("..." vs "..."); split into per-tool keys (claude, codex)
+```
+
+共有のキーが翻訳済みのときは、同じカテゴリに次の形で出る（この場合は人手で分ける）:
+
+```
+  - /btw: tools disagree on the description ("..." vs "..."), but slashCommands.descriptions.btw is already translated; split it by hand
 ```
 
 **直し方**: ツール別のキー（`slashCommands.descriptions.<name>.<tool>`）へ分割し、
 各ツールに自分の文を持たせる。片方の文をコピーしないこと（もう一方のツールで嘘になる）。
-`engine.ts` は両方がこの回で追加された新規のときに自分で分割する。共有のキーが**翻訳済み**の
-辞書の文に支えられているとき（`... is already translated; split it by hand`）は、分割で
-ja の訳が孤児になるので機械では分けず、人手で分ける（既存の文は片方のツールのキーへ移し、
-もう片方に新しい文を足す）。分割すると、分割したキーの一覧を固定している試験
+機械が分割した分はそのまま確認する。`is already translated; split it by hand` の分は、
+人手で分ける（既存の文は片方のツールのキーへ移し、もう片方に新しい文を足す）。分割すると、分割したキーの一覧を固定している試験
 （`tests/unit/lib/slash-command-description-override.test.ts`）が赤くなるので、これも変更対象に含める。
 また attestation の `issue` は正の整数でなければローダが拒否する。どの番号を書くかは、
 worker へ委任する前に決めて契約に書いておく（ローダは番号の意味を検証しない）。

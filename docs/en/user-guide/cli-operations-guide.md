@@ -1755,7 +1755,7 @@ absent): `expired`, `stop_pattern_matched`, `consecutive_errors`, and **`server-
 - A restart **never turns the grant back on** (`enabled: false`). The reason stays until the original
   grant's deadline, including across another restart inside it, and goes on `--enable` or `--disable`
 - A SIGKILL or a crash records nothing; those grants come back as a plain off
-- `commandmate update` also stops the old server before swapping it, so a live Auto-Yes is released there. What returns on the next start is only the disabled state and the `server-restart` reason; neither the grant nor the poller comes back. After an update or a restart, enable Auto-Yes again if you want automatic answers to continue
+- `commandmate update` also stops the old server before swapping it, so a live Auto-Yes is released there. After an update, enable Auto-Yes again if you want automatic answers to continue
 - The same reason reads `off(restart)` in `commandmate ls`, `no(restart)` in `commandmate instances`,
   and "Released by restart" in the UI. On exit 10, `commandmate wait` adds one stderr line naming the
   re-enable command with the waited-on `--instance`

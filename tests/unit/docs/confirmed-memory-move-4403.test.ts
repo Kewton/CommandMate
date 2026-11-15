@@ -20,34 +20,55 @@ const PRIVATE_RE =
 const RULES: ReadonlyArray<{ file: string; needles: readonly string[] }> = [
   {
     file: "docs/user-guide/cli-operations-guide.md",
-    needles: ["`commandmate update` も旧サーバーを止めてから", "有効にし直してください"],
+    needles: [
+      "`commandmate update` も旧サーバーを止めてから入れ替える",
+      "update のあとに自動応答を続けたいときは、Auto-Yes を有効にし直してください",
+    ],
   },
   {
     file: "docs/en/user-guide/cli-operations-guide.md",
-    needles: ["`commandmate update` also stops the old server", "enable Auto-Yes again"],
+    needles: [
+      "`commandmate update` also stops the old server before swapping it",
+      "After an update, enable Auto-Yes again",
+    ],
   },
   {
     file: ".claude/skills/catalog-reconcile/SKILL.md",
     needles: [
-      "ツール別のキー（`slashCommands.descriptions.<name>.<tool>`）へ分割",
-      "slash-command-description-override.test.ts",
-      "委任する前に決めて",
+      "ツール別のキー（`slashCommands.descriptions.<name>.<tool>`）へ分割し、",
+      "分割したキーの一覧を固定している試験",
+      "attestation の `issue` は正の整数でなければローダが拒否する",
+      "worker へ委任する前に決めて契約に書いておく",
+      "**自分でツール別のキーへ分割**",
+      "split into per-tool keys (claude, codex)",
+      "は、\n人手で分ける",
       "`cliTools` を省略した行は Claude 向け",
-      "`frequentlyUsed.<tool>`",
+      "`frequentlyUsed.<tool>` に同じ名前",
       "**ツール単位**で除く",
     ],
   },
   {
     file: "docs/internal/TESTING_GUIDE.md",
-    needles: ["probe は確保ではない", "body は読まない", "全 CLI のセッション"],
+    needles: [
+      "probe は確保ではない",
+      "body は読まない",
+      "1 本だけ止めるには `instance` も要る",
+    ],
   },
   {
     file: "docs/en/internal/TESTING_GUIDE.md",
-    needles: ["does not read the body", "every CLI"],
+    needles: [
+      "It does not read the body",
+      "pass `instance` as well",
+    ],
   },
   {
     file: "docs/reference/skill-agent-compatibility.md",
-    needles: ["skills-agent-discovery-probe.test.ts", "未計測を固定している対の fixture"],
+    needles: [
+      "未計測を固定している fixture も同じ変更で直す",
+      "tests/unit/lib/skills/compatibility-matrix.test.ts",
+      "gemini の行ならさらに",
+    ],
   },
 ];
 
@@ -58,6 +79,12 @@ describe("confirmed memory move (#4403, 4th)", () => {
       for (const n of needles) expect(text).toContain(n);
     });
   }
+
+  it("the catalog-reconcile 4-2 section no longer teaches the old placeholder behaviour", () => {
+    const skill = read(".claude/skills/catalog-reconcile/SKILL.md");
+    expect(skill).not.toContain("left as a review placeholder");
+    expect(skill).not.toContain("説明がコマンド名そのものになっている衝突を直す");
+  });
 
   it("the catalog-reconcile split description no longer says to write one sentence for both tools", () => {
     expect(read(".claude/skills/catalog-reconcile/SKILL.md")).not.toContain(
