@@ -39,6 +39,12 @@ import {
 import type { SlashCommand } from '@/types/slash-commands';
 import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 import type { ShowToast } from '@/types/markdown-editor';
+import {
+  DRAFT_STORAGE_KEY_PREFIX,
+  getInstanceDraftKey,
+  getSplitDraftKey,
+  type DraftScope,
+} from '@/lib/drafts/message-draft';
 
 export interface MessageInputProps {
   worktreeId: string;
@@ -77,6 +83,13 @@ export interface MessageInputProps {
    * Defaults to 0 for backward compatibility (mobile / single-terminal usage).
    */
   splitIndex?: number;
+  /**
+   * Issue #4419: which draft this composer keeps. `'split'` (default) is the worktree screen's
+   * per-(worktree, split) draft (#728). `'instance'` is the `/sessions` tile's: one draft per
+   * (worktree, instance), so switching the instance shows that instance's draft and text typed
+   * for one instance never shows in another's composer.
+   */
+  draftScope?: DraftScope;
   /**
    * Issue #728: invoked when the textarea gains focus.
    * TerminalSplitContainer wires this to setFocusedSplitIndex so HistoryPane /
@@ -215,9 +228,6 @@ function withinPreviewLimit<T>(read: Promise<T | null>, ms: number): Promise<T |
 
 type ShownStartPreview = Extract<StartPreviewResponse, { show: true }>;
 
-/** localStorage key prefix for draft message persistence */
-const DRAFT_STORAGE_KEY_PREFIX = 'commandmate:draft-message:';
-
 /**
  * Issue #806: shown when a message is successfully sent to a session that is
  * already busy with another task. The send itself succeeds (200) and the CLI
@@ -260,14 +270,6 @@ function composerHeightPercent(height: number | null, maxHeight: number | null |
 }
 
 /**
- * Issue #728: Per-(worktree, split) draft key. Falls back to the legacy
- * worktree-only key path during migration (see migrateLegacyDraftKey).
- */
-function getDraftKey(worktreeId: string, splitIndex: number): string {
-  return `${DRAFT_STORAGE_KEY_PREFIX}${worktreeId}:${splitIndex}`;
-}
-
-/**
  * Issue #728: Best-effort migration of the legacy draft key.
  * If `commandmate:draft-message:${worktreeId}` exists and the new
  * `${...}:0` key is empty, copy the value over and delete the legacy entry.
@@ -278,7 +280,7 @@ function migrateLegacyDraftKey(worktreeId: string): void {
     const legacyKey = `${DRAFT_STORAGE_KEY_PREFIX}${worktreeId}`;
     const legacyValue = window.localStorage.getItem(legacyKey);
     if (legacyValue === null) return;
-    const newKey = getDraftKey(worktreeId, 0);
+    const newKey = getSplitDraftKey(worktreeId, 0);
     if (window.localStorage.getItem(newKey) === null) {
       window.localStorage.setItem(newKey, legacyValue);
     }
@@ -288,7 +290,18 @@ function migrateLegacyDraftKey(worktreeId: string): void {
   }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false }: MessageInputProps) {
+/** Write a draft (an empty one removes the key). Best effort — `localStorage` may be unavailable. */
+function writeDraft(key: string, message: string): void {
+  try {
+    if (message) {
+      window.localStorage.setItem(key, message);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  } catch { /* localStorage unavailable */ }
+}
+
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false }: MessageInputProps) {
   const t = useTranslations('worktree');
   const tc = useTranslations('common');
   const [message, setMessage] = useState('');
@@ -308,6 +321,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const justFinishedComposingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Issue #4419: the save the debounce has not written yet, written when the draft's key changes
+  // (the tile switched instance) so the last keystrokes stay with the instance they were typed for.
+  const pendingDraftSaveRef = useRef<{ key: string; message: string } | null>(null);
+  const draftKey =
+    draftScope === 'instance'
+      ? getInstanceDraftKey(worktreeId, instanceId || cliToolId || 'claude')
+      : getSplitDraftKey(worktreeId, splitIndex);
 
   // Hooks for slash command functionality
   // Issue #4: Pass cliToolId to filter commands by CLI tool
@@ -462,14 +482,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     else if (startPreviewRef.current) startPreviewRef.current = { ...startPreviewRef.current, value: null };
   }, [refreshStartPreview]);
 
-  // Restore draft message from localStorage on mount or (worktreeId, splitIndex) change.
-  // Issue #728: also runs the legacy-key migration for splitIndex=0.
+  // Restore draft message from localStorage on mount or when the draft's key changes
+  // ((worktreeId, splitIndex), or for the tile (worktreeId, instance) — Issue #4419).
+  // Issue #728: also runs the legacy-key migration for splitIndex=0 (split scope only).
   useEffect(() => {
+    // Issue #4419: the key changed with a save still waiting — write it under the key it was
+    // typed for (an unmount writes nothing, as before).
+    const pendingSave = pendingDraftSaveRef.current;
+    pendingDraftSaveRef.current = null;
+    if (pendingSave && pendingSave.key !== draftKey) writeDraft(pendingSave.key, pendingSave.message);
     try {
-      if (splitIndex === 0) {
+      if (draftScope === 'split' && splitIndex === 0) {
         migrateLegacyDraftKey(worktreeId);
       }
-      const saved = window.localStorage.getItem(getDraftKey(worktreeId, splitIndex));
+      const saved = window.localStorage.getItem(draftKey);
       if (saved) {
         setMessage(saved);
       } else {
@@ -478,23 +504,28 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } catch { /* localStorage unavailable */ }
     return () => {
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
     };
-  }, [worktreeId, splitIndex]);
+  }, [draftKey, draftScope, worktreeId, splitIndex]);
 
-  // Debounced save of draft message to localStorage (per-split key, Issue #728)
+  // Debounced save of draft message to localStorage (per-split key, Issue #728; per-instance key
+  // for the tile, Issue #4419)
   useEffect(() => {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    pendingDraftSaveRef.current = { key: draftKey, message };
     draftSaveTimerRef.current = setTimeout(() => {
-      try {
-        const key = getDraftKey(worktreeId, splitIndex);
-        if (message) {
-          window.localStorage.setItem(key, message);
-        } else {
-          window.localStorage.removeItem(key);
-        }
-      } catch { /* localStorage unavailable */ }
+      pendingDraftSaveRef.current = null;
+      writeDraft(draftKey, message);
     }, 500);
-  }, [message, worktreeId, splitIndex]);
+  }, [message, draftKey]);
+
+  /** The draft was sent: forget it (and any save still waiting, so it is not written back). */
+  const clearStoredDraft = useCallback(() => {
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    draftSaveTimerRef.current = null;
+    pendingDraftSaveRef.current = null;
+    try { window.localStorage.removeItem(draftKey); } catch { /* ignore */ }
+  }, [draftKey]);
 
   /**
    * Auto-resize textarea based on content.
@@ -636,7 +667,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
-      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      clearStoredDraft();
       if (isProcessing) {
         showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       }
@@ -654,7 +685,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
-      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      clearStoredDraft();
       // Issue #806: when the session is busy, the CLI queues this message behind
       // the running task. Surface a toast so the (successful) send doesn't look
       // like a no-op. Idle sessions are unchanged (no toast).
@@ -674,7 +705,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, splitIndex, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -714,7 +745,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
-      try { window.localStorage.removeItem(getDraftKey(worktreeId, splitIndex)); } catch { /* ignore */ }
+      clearStoredDraft();
       if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
       else if (isProcessing) showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       onMessageSent?.(effectiveCliTool, created);
@@ -749,7 +780,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, splitIndex, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, resetAfterSend, clearStoredDraft, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError]);
 
   const closeBriefAsk = useCallback(() => {
     if (briefSending) return;

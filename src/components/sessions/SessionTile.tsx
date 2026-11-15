@@ -45,8 +45,13 @@
  * Mounted only while the tile is on screen, like the body: `MessageInput`
  * fetches its slash-command catalog when it mounts, and an off-screen tile must
  * not cost a request (#2509). A half-typed draft survives that — it is persisted
- * under the worktree's first split key, which is also what the worktree screen
- * restores, so a reply started here can be finished there.
+ * per instance (`draftScope="instance"`, Issue #4419): the tile switches its
+ * instance in place, so a draft kept per worktree (the worktree screen's split-0
+ * key, as before #4419) showed what was typed for one instance in another's
+ * composer, and sent it there. Text handed back to the composer (a discarded
+ * send, a send refused because of its role) goes to the instance it was sent to:
+ * into the composer when that instance is on screen, otherwise into its stored
+ * draft, which the composer restores when the instance is shown again.
  *
  * ## Auto-Yes (Issue #2512)
  *
@@ -96,7 +101,7 @@
  * @module components/sessions/SessionTile
  */
 
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { History, MessageSquare, TerminalSquare } from 'lucide-react';
@@ -131,6 +136,7 @@ import { useSessionTileSurfaceMode } from '@/hooks/useSessionTileSurfaceMode';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import { SESSION_TILE_COMPOSER_HEIGHT_SCOPE } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
+import { appendToStoredDraft, getInstanceDraftKey } from '@/lib/drafts/message-draft';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -468,20 +474,64 @@ function SessionTileCard({
   // Issue #2512: the worktree screen's optimistic layer, wired the way
   // `TerminalSplitPaneContent` wires it — same send, same refetch, and the
   // connection verdict so a send from a dead network is parked, not failed.
+  //
+  // Issue #4419: a failed send's error remembers the instance it was sent to, so
+  // text handed back by a late answer (a 409 role refusal after the tile switched
+  // instance) goes to that instance's draft, not to the one on screen.
+  const sendTargetsRef = useRef(new WeakMap<object, string>());
   const sendMessageFn = useCallback(
-    (content: string, options: OptimisticSendOptions) =>
-      worktreeApi.sendMessage(worktree.id, content, options),
+    async (content: string, options: OptimisticSendOptions) => {
+      try {
+        return await worktreeApi.sendMessage(worktree.id, content, options);
+      } catch (error) {
+        if (error !== null && typeof error === 'object') {
+          sendTargetsRef.current.set(error, options.instanceId ?? options.cliToolId);
+        }
+        throw error;
+      }
+    },
     [worktree.id],
   );
   // Text headed for the composer: a discarded send (so it can be edited and
   // sent again), a send refused because of its role (Issue #4385) or a previous
   // prompt picked from the transcript. Consumed by `MessageInput`, which appends
-  // rather than overwrites a draft.
-  const [composerInsert, setComposerInsert] = useState<string | null>(null);
+  // rather than overwrites a draft. Issue #4419: tagged with the instance it is
+  // for; the composer takes it only while that instance is on screen.
+  const [composerInsert, setComposerInsert] = useState<{ text: string; target: string } | null>(null);
+  const shownInstanceRef = useRef(resolvedInstanceId);
+  shownInstanceRef.current = resolvedInstanceId;
+  const insertIntoComposer = useCallback(
+    (text: string, target: string = shownInstanceRef.current) => {
+      if (target === shownInstanceRef.current) {
+        setComposerInsert({ text, target });
+      } else {
+        appendToStoredDraft(getInstanceDraftKey(worktree.id, target), text);
+      }
+    },
+    [worktree.id],
+  );
+  // A previous prompt picked from the transcript: the transcript is the shown instance's.
+  const insertIntoShownComposer = useCallback(
+    (content: string) => insertIntoComposer(content),
+    [insertIntoComposer],
+  );
   // Issue #4385: the worktree screen's handling of a send refused because of its
   // role — the app's toast says why, the failed row carries the reason, and the
-  // text goes back to the composer.
-  const roleRefusalNotice = useRoleRefusalNotice(setComposerInsert);
+  // text goes back to the composer — of the instance it was sent to (Issue #4419:
+  // `usePendingMessages` reads the refusal and hands the text back in one
+  // synchronous step, so the target read here is that send's).
+  const refusedTargetRef = useRef<string | undefined>(undefined);
+  const roleRefusalNotice = useRoleRefusalNotice(
+    useCallback((content: string) => insertIntoComposer(content, refusedTargetRef.current), [insertIntoComposer]),
+  );
+  const readRoleRefusal = useCallback(
+    (error: unknown) => {
+      refusedTargetRef.current =
+        error !== null && typeof error === 'object' ? sendTargetsRef.current.get(error) : undefined;
+      return roleRefusalNotice.readRoleRefusal(error);
+    },
+    [roleRefusalNotice],
+  );
   const {
     messages: mergedMessages,
     sendOptimistic,
@@ -493,7 +543,7 @@ function SessionTileCard({
     sendFn: sendMessageFn,
     onSent: refreshMessages,
     connectivity,
-    readRoleRefusal: roleRefusalNotice.readRoleRefusal,
+    readRoleRefusal,
     onRoleRefused: roleRefusalNotice.onRoleRefused,
   });
   const messages = useMemo(
@@ -505,9 +555,9 @@ function SessionTileCard({
   const handleDiscardPending = useCallback(
     (tempId: string) => {
       const content = discardPending(tempId);
-      if (content) setComposerInsert(content);
+      if (content) insertIntoComposer(content);
     },
-    [discardPending],
+    [discardPending, insertIntoComposer],
   );
   const handleMessageSent = useCallback(() => {
     // The pane, not the transcript: `usePendingMessages` refetches that itself
@@ -605,9 +655,9 @@ function SessionTileCard({
       isLoading,
       onRetryPending: retryPending,
       onDiscardPending: handleDiscardPending,
-      onInsertToMessage: setComposerInsert,
+      onInsertToMessage: insertIntoShownComposer,
     }),
-    [isLoading, retryPending, handleDiscardPending],
+    [isLoading, retryPending, handleDiscardPending, insertIntoShownComposer],
   );
 
   // The same per-tool display policy both worktree-screen surfaces read, so one
@@ -826,7 +876,7 @@ function SessionTileCard({
                   cliToolId={cliToolId}
                   isLoading={isLoading}
                   onFilePathClick={noopFilePathClick}
-                  onInsertToMessage={setComposerInsert}
+                  onInsertToMessage={insertIntoShownComposer}
                   onRetryPending={retryPending}
                   onDiscardPending={handleDiscardPending}
                   className="h-full"
@@ -871,14 +921,16 @@ function SessionTileCard({
             worktreeId={worktree.id}
             cliToolId={cliToolId}
             instanceId={resolvedInstanceId}
+            // Issue #4419: one draft per instance — the tile switches instances in place.
+            draftScope="instance"
             isSessionRunning={terminal.isRunning}
             isSessionStarting={startingGate.starting}
             onOptimisticSend={sendOptimistic}
             onMessageSent={handleMessageSent}
-            pendingInsertText={composerInsert}
+            pendingInsertText={composerInsert?.target === resolvedInstanceId ? composerInsert.text : null}
             onInsertConsumed={clearComposerInsert}
-            // Issue #2598: the tile's own height scope — not split 0's, whose
-            // draft it shares: the tile's body is a fixed card's, not a pane's.
+            // Issue #2598: the tile's own height scope — not split 0's: the
+            // tile's body is a fixed card's, not a pane's.
             heightScope={SESSION_TILE_COMPOSER_HEIGHT_SCOPE}
             maxHeight={composerMaxHeight}
             // Issue #3999: no send into this tile's plan review.
