@@ -122,6 +122,8 @@ CM_SKILL_DISCOVERY_PROBE=1 npx vitest run tests/integration/skills-agent-discove
 
 CLI が未導入の場合、プローブは失敗ではなく `unknown` と skip 理由を記録する。
 
+互換性の matrix の測定の行を `unmeasured` から変えるときは、未計測を固定している対の fixture も同じ変更で直す。`tests/integration/skills-agent-discovery-probe.test.ts` は導入済みの CLI でも `unknown` を期待し、`tests/unit/lib/skills/compatibility.test.ts` も未計測を期待する。matrix だけを変えると、この 2 つが赤くなる。
+
 ---
 
 ## 7. 関連

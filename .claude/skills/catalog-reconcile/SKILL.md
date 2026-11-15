@@ -55,6 +55,7 @@ argument-hint: "[--codex-ref <tag>] (任意。codex のソースを特定の rel
 | `src/config/slash-commands-exclusions.json` | 人間（除外の**意図**＝「ソースに在るが載せない」。engine はここを読んで再提案をやめる） |
 | `src/config/slash-commands-attestations.json` | **人間だけ**（Issue #2026。「ソースが列挙した集合そのもの」＋版＋採取日。`--write` は触らない） |
 | `tests/unit/lib/standard-commands.test.ts` | 原則**触らない**（Issue #2026 で件数 pin は撤去され、期待値は attestation から導出される）。禁止系ガードは絶対に触らない |
+| `tests/unit/lib/slash-command-description-override.test.ts` | 人間（ツール別のキーへ分割したとき、分割の一覧の pin を更新する） |
 | `tests/unit/lib/slash-command-catalog.test.ts` | 人間（attestation の `version` を上げたときだけ。`verifiedAgainst` リテラルを持つ箇所） |
 
 ---
@@ -311,8 +312,16 @@ v0.21.2 では `/sandbox-add-read-dir` の説明が `<absolute_path>` を含ん�
   - /btw: tools disagree on the description ("..." vs "..."); left as a review placeholder
 ```
 
-**直し方**: 両ツールの意味を含む 1 文に書き直す。片方の文をコピーしないこと
-（もう一方のツールで嘘になる）。v0.21.2 では 6 件（`/btw` `/copy` `/ide` `/rename`
+**直し方**: ツール別のキー（`slashCommands.descriptions.<name>.<tool>`）へ分割し、
+各ツールに自分の文を持たせる。片方の文をコピーしないこと（もう一方のツールで嘘になる）。
+`engine.ts` は両方がこの回で追加された新規のときに自分で分割する。共有のキーが**翻訳済み**の
+辞書の文に支えられているとき（`... is already translated; split it by hand`）は、分割で
+ja の訳が孤児になるので機械では分けず、人手で分ける（既存の文は片方のツールのキーへ移し、
+もう片方に新しい文を足す）。分割すると、分割したキーの一覧を固定している試験
+（`tests/unit/lib/slash-command-description-override.test.ts`）が赤くなるので、これも変更対象に含める。
+また attestation の `issue` は正の整数でなければローダが拒否する。どの番号を書くかは、
+worker へ委任する前に決めて契約に書いておく（ローダは番号の意味を検証しない）。
+v0.21.2 では 6 件（`/btw` `/copy` `/ide` `/rename`
 `/stop` `/theme`）がこれに該当した。
 
 ```bash
@@ -348,6 +357,17 @@ grep -n "does not add\|must not be\|must stay off\|must be gone\|NOT expose" tes
 # 4) 過去のリコンサイル commit の本文
 git log --format="%h %s%n%b" --grep="リコンサイル\|reconcile\|幻コマンド" -i -- src/config/slash-commands-catalog.json
 ```
+
+**消す候補を調べるとき**は `name` の一致だけで決めない。カタログ JSON は
+`{ "frequentlyUsed": { <tool>: [name, ...] }, "commands": [ { name, descriptionKey, cliTools, ... } ] }`
+の構造で、`cliTools` を省略した行は Claude 向け（`src/lib/standard-commands.ts`）、
+複数ツールが同じ名前の行を共有していることもある。次を実際の JSON を読んで確かめ、
+**ツール単位**で除く（他のツールが使っている行まで消さない）:
+
+- 該当の行の `cliTools`（省略は Claude）。除くのは対象のツールだけで、残るツールがあれば行は残す
+- `frequentlyUsed.<tool>` に同じ名前が入っていないか（入っていれば同時に外す）
+- `descriptionKey` を共有している他の行があるか。無くなった行のキーが辞書に残ると、
+  未使用キーの検査（`tests/unit/lib/standard-commands.test.ts`）が赤くなる。使う行が残るなら辞書は消さない
 
 `kind` の 2 値は再判断コストが桁違いなので混ぜない:
 
