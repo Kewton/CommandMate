@@ -162,6 +162,16 @@ WORKTREE_ID="your-worktree-id"
 curl -s "http://localhost:3000/api/worktrees/${WORKTREE_ID}/logs" | jq .
 ```
 
+### 5. セッションの終了（kill-session）
+
+`POST /api/worktrees/:id/kill-session` は、対象を **query** の `cliTool` と `instance` で絞る。body は読まない
+（body に `cliToolId` を入れても対象は絞れない）。query が無いと、その worktree の**全 CLI のセッション**が対象になる。
+`cliTool` だけを渡すと、そのツールの登録済みインスタンスがすべて対象になる。1 本だけ止めるには `instance` も要る。
+
+```bash
+curl -X POST "http://localhost:3000/api/worktrees/${WORKTREE_ID}/kill-session?cliTool=codex&instance=codex"
+```
+
 ## WebSocket のテスト
 
 ### Node.js スクリプトを使用
@@ -352,6 +362,7 @@ npm run test:e2e -- --project=webkit
 - `cpu.heavy` の mutex はゲート同士しか直列化しない。ワーカー自身が起動した `npm run test:unit` は数えられないので、mutex があっても同時に何本も走る
 - 止まって見える run は、`ps -o pid,etime,time,%cpu -p <pid>` を時間をあけて 2 回撮り、CPU time が動かなければハングとみなす。止めた後は、他の vitest が 0 本になってから直列で回し直す
 - 固定名の共有リソース（tmux の socket 名・ポート・`/tmp` のパス・ロック名）を掴むテストは、別の checkout の同じテストと衝突する。リソースはマシン全体のスコープにあり worktree ごとに分かれていない。新しく書くテストは名前に pid や一時ディレクトリを含める
+- 空きポートを探して（probe）いったん閉じ、あとで bind し直すテストは、その間に別のテストや並列の worktree に同じポートを取られうる。probe は確保ではない。bind を保持したまま渡すか、bind の失敗を再試行で受ける形にする
 - フルスイートの走行中にソースを編集しない。vitest は transform が遅延するので「新しいテスト × 古いソース」の組で走り、もっともらしい赤が 1〜2 件出る。`git merge` による取り込みも編集であり、`CHANGELOG.md`・`docs/module-reference.md` などテストが読む文書も含む（`grep -rln 'CHANGELOG\.md\|module-reference\.md' tests/unit/`）。1〜2 件だけ赤なら、サマリの `Start at` と自分の編集時刻を突き合わせる
 - 最終の判定は編集を挟まない 1 回の通しで取る（lint → typecheck → test:unit を 1 本のコマンドにつなぐと途中で触れない）
 - 競合（race）を仕込むテストが高負荷で「競合が起きなかった」と落ちたら、攪乱側（writer）のスレッドを増やす。負荷が奪うのは CPU の総量ではなく 1 本のスレッドの連続性で、回数や木の大きさを増やしても弱い。競合を観測できなかったことは失敗にせず報告して skip し、競合に依らない決定的な経路（例: `chmod 0o000` の子で走査を確実に妨げる）を別に用意する。その経路が root では効かず CI で skip されていないかも確かめる（`<file> (N tests)` に `| N skipped` が付いていないか）
