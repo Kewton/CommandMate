@@ -36,7 +36,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
+import { randomBytes } from 'crypto';
 import { tmpdir } from 'os';
 import path from 'path';
 import { TMUX_HISTORY_LIMIT } from '@/config/tmux-pane-config';
@@ -50,8 +51,14 @@ const TMUX_BUILTIN_HISTORY_LIMIT = 2000;
 /**
  * Socket name of this file's private tmux server. Anything but `default`, which
  * is where every interactive session and every CommandMate agent lives.
+ *
+ * Issue #4413: unique per run (pid + random), not a fixed name. Two runs at once
+ * — two worktrees, a verify gate beside a hand run — used to share one server:
+ * one run's `afterAll` kill-server took the other's sessions away mid-assertion,
+ * and a run could start on the other's stale options. The socket file is removed
+ * in `afterAll`, so per-run names do not pile up in tmux's socket directory.
  */
-const SOCKET = 'cm1624-live-test';
+const SOCKET = `cm1624-live-${process.pid}-${randomBytes(4).toString('hex')}`;
 
 /** Keeps the private server alive between tests so `-L` never races startup. */
 const HOLDER_SESSION = 'cm1624-holder';
@@ -102,11 +109,8 @@ beforeAll(async () => {
 
   workDir = mkdtempSync(path.join(tmpdir(), 'cm-1624-work-'));
 
-  // A leftover server from an aborted run would carry stale options into these
-  // assertions. `-L` makes this reachable only on the private socket.
-  await execFileAsync('tmux', ['-L', SOCKET, 'kill-server'], { timeout: 5000 }).catch(
-    () => undefined,
-  );
+  // No leftover server to clear first: SOCKET is new to this run (Issue #4413),
+  // so an aborted run's server cannot carry stale options into these assertions.
 
   await tmuxctl(['new-session', '-d', '-s', HOLDER_SESSION, '-c', workDir, '-x', '80', '-y', '24']);
   socketPath = await tmuxctl(['display-message', '-p', '#{socket_path}']);
@@ -132,6 +136,9 @@ afterAll(async () => {
   await execFileAsync('tmux', ['-L', SOCKET, 'kill-server'], { timeout: 5000 }).catch(
     () => undefined,
   );
+  // Issue #4413: drop this run's socket file. Only a path that beforeAll read off
+  // the private server and checked to end in this run's unique name.
+  if (socketPath?.endsWith(`/${SOCKET}`)) rmSync(socketPath, { force: true });
 
   if (previousTmux === undefined) delete process.env.TMUX;
   else process.env.TMUX = previousTmux;
