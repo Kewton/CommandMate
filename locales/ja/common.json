@@ -29,7 +29,16 @@
       "years": "{count}年前"
     },
     "tileAriaLabel": "{branch} のセッションタイル",
-    "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
+    "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス",
+    "branchFilter": {
+      "button": "絞り込み",
+      "title": "絞り込み",
+      "label": "ブランチ名（正規表現）",
+      "placeholder": "例: ^feature/",
+      "errorInvalid": "正規表現が正しくありません。この条件は使っていません。",
+      "errorTooLong": "200 文字までです。この条件は使っていません。",
+      "clear": "クリア"
+    }
   },
   "nav": {
     "sessions": "セッション",

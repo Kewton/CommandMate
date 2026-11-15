@@ -22,7 +22,9 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, Filter } from 'lucide-react';
+import { Modal } from '@/components/ui/Modal';
+import { evaluateSessionsFilter } from '@/lib/sessions-filter';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
 import { SessionTileGrid, SessionsViewModeSelector } from '@/components/sessions';
 import { useIsMobile } from '@/hooks/useIsMobile';
@@ -214,6 +216,8 @@ export default function SessionsPage() {
   // (unfiltered) list so an active text filter never unmounts the list.
   const hasWorktrees = worktrees.length > 0;
   const [filterText, setFilterText] = useState('');
+  const [branchPattern, setBranchPattern] = useState('');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   // Issue #2509. Resolved from localStorage in an effect, so the first render is
@@ -243,6 +247,10 @@ export default function SessionsPage() {
           (wt.repositoryDisplayName?.toLowerCase().includes(lower) ?? false)
       );
     }
+
+    // Issue #4386: branch filter. An unusable pattern keeps everything.
+    const verdict = evaluateSessionsFilter(result, { branchPattern });
+    result = result.filter((wt) => verdict.verdicts.get(wt.id)?.show ?? true);
 
     // Sort
     const sorted = [...result];
@@ -291,7 +299,15 @@ export default function SessionsPage() {
     });
 
     return sorted;
-  }, [worktrees, filterText, sortKey, sortDirection]);
+  }, [worktrees, filterText, branchPattern, sortKey, sortDirection]);
+
+  const branchFilter = useMemo(
+    () => evaluateSessionsFilter([], { branchPattern }),
+    [branchPattern]
+  );
+  const activeFilterCount = branchFilter.activeCount;
+  const branchFilterError = branchFilter.error;
+  const clearFilters = useCallback(() => setBranchPattern(''), []);
 
   const handleFilterChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setFilterText(e.target.value);
@@ -342,6 +358,23 @@ export default function SessionsPage() {
             inputMode="search"
             enterKeyHint="search"
           />
+          <button
+            type="button"
+            onClick={() => setIsFilterOpen(true)}
+            data-testid="sessions-filter-button"
+            className="inline-flex items-center gap-1 rounded-md border border-input bg-surface px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Filter size={16} aria-hidden="true" />
+            {tCommon('sessions.branchFilter.button')}
+            {activeFilterCount > 0 && (
+              <span
+                data-testid="sessions-filter-count"
+                className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground"
+              >
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
           <Select value={sortKey} onValueChange={handleSortKeyChange}>
             <SelectTrigger
               className="w-40"
@@ -380,6 +413,44 @@ export default function SessionsPage() {
               feed both layouts unchanged. */}
           <SessionsViewModeSelector value={viewMode} onChange={setViewMode} />
         </div>
+
+        <Modal
+          isOpen={isFilterOpen}
+          onClose={() => setIsFilterOpen(false)}
+          title={tCommon('sessions.branchFilter.title')}
+          size="sm"
+        >
+          <div className="space-y-3" data-testid="sessions-filter-panel">
+            <label className="block text-sm text-foreground" htmlFor="sessions-branch-filter">
+              {tCommon('sessions.branchFilter.label')}
+            </label>
+            <Input
+              id="sessions-branch-filter"
+              type="text"
+              value={branchPattern}
+              onChange={(e) => setBranchPattern(e.target.value)}
+              placeholder={tCommon('sessions.branchFilter.placeholder')}
+              data-testid="sessions-branch-filter"
+              aria-invalid={branchFilterError ? true : undefined}
+              className={branchFilterError ? 'border-danger-border focus-visible:ring-danger' : undefined}
+            />
+            {branchFilterError && (
+              <p className="text-sm text-danger-foreground" role="alert" data-testid="sessions-branch-filter-error">
+                {tCommon(branchFilterError === 'too_long' ? 'sessions.branchFilter.errorTooLong' : 'sessions.branchFilter.errorInvalid')}
+              </p>
+            )}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={clearFilters}
+                data-testid="sessions-filter-clear"
+                className="rounded-md border border-input bg-surface px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+              >
+                {tCommon('sessions.branchFilter.clear')}
+              </button>
+            </div>
+          </div>
+        </Modal>
 
         {/*
           * [Issue #1050] Keep the list mounted across transient polling errors.
