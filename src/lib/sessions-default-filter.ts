@@ -9,6 +9,7 @@
  * intentionally mirrors the /sessions filter of #4386; a candidate for sharing later.
  */
 
+import { validateStopPattern } from '@/config/auto-yes-config';
 import {
   EMPTY_SESSIONS_FILTER,
   SESSIONS_FILTER_BRANCH_PATTERN_MAX,
@@ -51,6 +52,10 @@ export function validateSessionsFilter(input: unknown): SessionsFilterValidation
     new RegExp(branchPattern, 'i');
   } catch {
     return { ok: false, error: '"branchPattern" is not a valid regular expression' };
+  }
+  // Same ReDoS guard (safe-regex2) as the auto-yes stop pattern.
+  if (!validateStopPattern(branchPattern).valid) {
+    return { ok: false, error: '"branchPattern" may cause performance issues (catastrophic backtracking)' };
   }
   if (!Array.isArray(roleIds)) {
     return { ok: false, error: '"roleIds" must be an array' };

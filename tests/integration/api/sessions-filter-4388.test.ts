@@ -76,6 +76,15 @@ describe('/api/settings/sessions-filter (Issue #4388)', () => {
     expect((await (await GET()).json()).configured).toBe(false);
   });
 
+  it('rejects a catastrophic-backtracking pattern, accepts a plain one (control)', async () => {
+    for (const p of ['(a+)+$', '(a+)+b']) {
+      const res = await put({ ...valid, branchPattern: p });
+      expect(res.status, p).toBe(400);
+    }
+    expect((await GET().then((r) => r.json())).configured).toBe(false);
+    expect((await put({ ...valid, branchPattern: '^(feature|fix)/[a-z0-9-]+$' })).status).toBe(200);
+  });
+
   it('rejects malformed role ids', async () => {
     for (const bad of ['', 'UPPER', 'a b', '../x', 'a--b', 'x'.repeat(65), 5, null]) {
       expect((await put({ ...valid, roleIds: [bad] })).status, String(bad)).toBe(400);
