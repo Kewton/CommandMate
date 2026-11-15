@@ -22,6 +22,7 @@ import { SidebarRail } from '@/components/layout/SidebarRail';
 import { Modal } from '@/components/ui/Modal';
 import { SettingsDialogProvider, useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { waitForModalSettled } from '@tests/helpers/modal-settled';
 
 // The menu item is matched by its rendered English label, so resolve wording
 // through the real dictionary rather than the key-echoing global mock.
@@ -107,7 +108,9 @@ describe('Icon-rail settings menu opens the settings modal (Issue #2709, moved f
     const gear = openMenu();
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
-    await waitFor(() => expect(screen.getByTestId('modal-panel')).toBeInTheDocument());
+    // Issue #4413: the panel is in the DOM before Modal listens for Escape (the
+    // modal opens outside act()); an Escape sent then is lost. Wait for its effects.
+    await waitForModalSettled();
 
     fireEvent.keyDown(document, { key: 'Escape' });
 
