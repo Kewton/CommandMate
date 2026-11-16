@@ -6,6 +6,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 
@@ -28,8 +29,10 @@ export function SessionsFilterSheet({ isOpen, onClose, children }: SessionsFilte
     return () => document.removeEventListener('keydown', onKey);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-  return (
+  if (!isOpen || typeof document === 'undefined') return null;
+  // Portal to body: the page's PullToRefresh container listens for touches and
+  // applies a transform to its subtree, so the sheet must live outside it.
+  return createPortal(
     <>
       <div
         className="fixed inset-0 bg-black/50 z-50"
@@ -47,6 +50,7 @@ export function SessionsFilterSheet({ isOpen, onClose, children }: SessionsFilte
       >
         {children}
       </div>
-    </>
+    </>,
+    document.body
   );
 }
