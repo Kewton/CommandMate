@@ -2,7 +2,7 @@
  * Positive controls for useSessionsDefaultFilter (Issue #4388), without touching the
  * repository: the hook's source is copied into a fresh `os.tmpdir()` directory with
  * one guard removed, and the scenario of useSessionsDefaultFilter-4388.test.ts must
- * then break its invariant (I1 / I2 / I3 and I3' / I6 / I7). The temp directory is removed after each case.
+ * then break its invariant (I1 / I2 / I3 and I3' / I3'' / I6 / I6' / I7 / I8). The temp directory is removed after each case.
  *
  * Runs in the node environment (a module outside the project can only be imported
  * there) with vitest's own jsdom environment set up on the global by hand.
@@ -74,26 +74,31 @@ afterAll(async () => {
 });
 
 let dir: string | null = null;
+let loaded: typeof HookModule | null = null;
 beforeEach(() => {
   getCalls.length = 0;
   putCalls.length = 0;
 });
 afterEach(() => {
   rtl.cleanup();
+  loaded?.resetSessionsDefaultFilterSaveQueueForTests();
+  loaded = null;
   if (dir) fs.rmSync(dir, { recursive: true, force: true });
   dir = null;
 });
 
-async function loadHook(mutate?: { from: string; to: string }): Promise<typeof HookModule> {
+type Mutation = { from: string; to: string };
+async function loadHook(mutate?: Mutation | Mutation[]): Promise<typeof HookModule> {
   let src = fs.readFileSync(HOOK_SOURCE, 'utf8');
-  if (mutate) {
-    expect(src).toContain(mutate.from);
-    src = src.replace(mutate.from, mutate.to);
+  for (const m of mutate === undefined ? [] : Array.isArray(mutate) ? mutate : [mutate]) {
+    expect(src).toContain(m.from);
+    src = src.replace(m.from, m.to);
   }
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4388-mutant-'));
   const file = path.join(dir, 'useSessionsDefaultFilter.ts');
   fs.writeFileSync(file, src);
-  return import(/* @vite-ignore */ file);
+  loaded = (await import(/* @vite-ignore */ file)) as typeof HookModule;
+  return loaded;
 }
 
 interface Props {
@@ -118,17 +123,27 @@ function mount(useHook: typeof HookModule.useSessionsDefaultFilter, initial: Pro
 
 const MUTANTS = {
   I1: { from: '    if (touched.current) return;\n', to: '' },
+  // Judge deleted roles from whatever list is passed, even when roles are unavailable.
   I2: {
-    from: "if (rolesReadiness === 'ready' && existingRoleIds) {\n      const result",
-    to: 'if (existingRoleIds) {\n      const result',
+    from: "const roleIdsForDefault = rolesReadiness === 'ready' && existingRoleIds ? existingRoleIds : knownRoleIds;",
+    to: 'const roleIdsForDefault = existingRoleIds ? existingRoleIds : knownRoleIds;',
   },
   // I3 / I3': send every save at once instead of waiting for the one that is out.
-  I3: { from: '    if (saveInFlight.current) {\n', to: '    if (false) {\n' },
-  I6: {
-    from: 'if (result.droppedRoleIds.length > 0 && isEmptyCondition(result.condition)) {',
-    to: 'if (false) {',
+  I3: { from: '    if (target.busy) {\n', to: '    if (false) {\n' },
+  // I3'': the wait belongs to one mount (a lane per mount), as before the module queue.
+  I3pp: [
+    { from: '  const saveSeq = useRef(0);\n', to: '  const saveSeq = useRef(0);\n  const [laneOfMount] = useState(() => Math.random().toString(36));\n' },
+    { from: 'sendSerially(SESSIONS_DEFAULT_FILTER_PATH, ', to: 'sendSerially(SESSIONS_DEFAULT_FILTER_PATH + laneOfMount, ' },
+  ],
+  I6: { from: 'if (result.droppedRoleIds.length > 0 && isEmptyFilter', to: 'if (false && isEmptyFilter' },
+  // I6': a second "empty" judgement that does not trim.
+  I6p: {
+    from: '&& isEmptyFilter(result.condition)) {',
+    to: "&& !(result.condition.branchPattern !== '' || result.condition.roleIds.length > 0 || result.condition.includeNoRole || result.condition.includeAmbiguous)) {",
   },
   I7: { from: '      if (!active) return;\n', to: '      if (!mounted.current) return;\n' },
+  // I8: the saved default's deleted ids shown whatever the page shows now.
+  I8: { from: 'if (stored && !differs) for', to: 'if (stored) for' },
 };
 
 /** The server handles every PUT that reached it, newest first; returns what it holds last. */
@@ -169,6 +184,35 @@ async function scenarioI3(
   rtl.act(() => void result.current.df.saveAsDefault());
   const server = await serverHandlesNewestFirst();
   return { server, shown: result.current.df.defaults?.branchPattern };
+}
+
+async function scenarioI3pp(
+  useHook: typeof HookModule.useSessionsDefaultFilter
+): Promise<{ server: string | null; shown: string | undefined }> {
+  const first = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: [] });
+  await rtl.act(async () => getCalls[0].resolve({ success: true, filter: EMPTY, configured: false }));
+  rtl.act(() => first.result.current.userSets(cond({ branchPattern: 'A' })));
+  rtl.act(() => void first.result.current.df.saveAsDefault());
+  first.unmount();
+  const second = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: [] });
+  await rtl.act(async () => getCalls[1].resolve({ success: true, filter: EMPTY, configured: false }));
+  rtl.act(() => second.result.current.userSets(cond({ branchPattern: 'B' })));
+  rtl.act(() => void second.result.current.df.saveAsDefault());
+  const server = await serverHandlesNewestFirst();
+  return { server, shown: second.result.current.df.defaults?.branchPattern };
+}
+
+async function scenarioI6p(useHook: typeof HookModule.useSessionsDefaultFilter): Promise<string[]> {
+  const { result } = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: [] });
+  await rtl.act(async () => getCalls[0].resolve(stored(cond({ branchPattern: '  ', roleIds: ['gone'] }))));
+  return result.current.current.roleIds;
+}
+
+async function scenarioI8(useHook: typeof HookModule.useSessionsDefaultFilter): Promise<string[]> {
+  const { result } = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: ['review'] });
+  await rtl.act(async () => getCalls[0].resolve(stored(cond({ roleIds: ['gone'] }))));
+  rtl.act(() => result.current.userSets(cond({ roleIds: ['review'] })));
+  return result.current.df.droppedRoleIds;
 }
 
 async function scenarioI6(useHook: typeof HookModule.useSessionsDefaultFilter): Promise<string[]> {
@@ -227,5 +271,30 @@ describe('[#4388] useSessionsDefaultFilter guards (positive / negative controls)
     rtl.cleanup();
     getCalls.length = 0;
     expect(await scenarioI7((await loadHook(MUTANTS.I7)).useSessionsDefaultFilter)).toBe(false);
+  });
+
+  const reload = () => {
+    fs.rmSync(dir!, { recursive: true, force: true });
+    rtl.cleanup();
+    getCalls.length = 0;
+    putCalls.length = 0;
+  };
+
+  it("I3'': the unmodified copy waits across a remount; with a lane per mount the earlier visit's PUT is written last", async () => {
+    expect(await scenarioI3pp((await loadHook()).useSessionsDefaultFilter)).toEqual({ server: 'B', shown: 'B' });
+    reload();
+    expect(await scenarioI3pp((await loadHook(MUTANTS.I3pp)).useSessionsDefaultFilter)).toEqual({ server: 'A', shown: 'B' });
+  });
+
+  it("I6': the unmodified copy treats a whitespace-only pattern as empty; a judgement of its own widens to everything", async () => {
+    expect(await scenarioI6p((await loadHook()).useSessionsDefaultFilter)).toEqual(['gone']);
+    reload();
+    expect(await scenarioI6p((await loadHook(MUTANTS.I6p)).useSessionsDefaultFilter)).toEqual([]);
+  });
+
+  it('I8: the unmodified copy drops the notice once the deleted id leaves the condition; showing the saved one regardless keeps it', async () => {
+    expect(await scenarioI8((await loadHook()).useSessionsDefaultFilter)).toEqual([]);
+    reload();
+    expect(await scenarioI8((await loadHook(MUTANTS.I8)).useSessionsDefaultFilter)).toEqual(['gone']);
   });
 });

@@ -1507,6 +1507,9 @@ export const appApi = {
 /**
  * `/sessions` reads (Issue #4389).
  */
+/** Where the /sessions default filter is read and saved (Issue #4388); also the key its saves are queued by. */
+export const SESSIONS_DEFAULT_FILTER_PATH = '/api/settings/sessions-filter';
+
 export const sessionsApi = {
   /**
    * The role of every instance on the server (`GET /api/sessions/roles`, #4387).
@@ -1525,7 +1528,7 @@ export const sessionsApi = {
    * @throws ApiError on a non-2xx response or a transport failure
    */
   async getDefaultFilter(): Promise<SessionsDefaultFilterResponse> {
-    return fetchApi<SessionsDefaultFilterResponse>('/api/settings/sessions-filter');
+    return fetchApi<SessionsDefaultFilterResponse>(SESSIONS_DEFAULT_FILTER_PATH);
   },
 
   /**
@@ -1534,7 +1537,7 @@ export const sessionsApi = {
    * @throws ApiError — status 400 with the server's reason when the condition is rejected
    */
   async putDefaultFilter(filter: SessionsFilterCondition): Promise<SessionsDefaultFilterResponse> {
-    return fetchApi<SessionsDefaultFilterResponse>('/api/settings/sessions-filter', {
+    return fetchApi<SessionsDefaultFilterResponse>(SESSIONS_DEFAULT_FILTER_PATH, {
       method: 'PUT',
       body: JSON.stringify(filter),
     });

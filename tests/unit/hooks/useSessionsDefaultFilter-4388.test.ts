@@ -8,6 +8,21 @@
  * guard of I1–I3 is what keeps its case green. Negative control: with nothing saved or a failed read the
  * page's condition is left alone (I4), which is how the page behaved before.
  *
+ * Re-instruction 3 (I3'' / I6' / I8) — each fact is held in one place:
+ * - I3'' guards the order of saves within one tab: the wait (the PUT that is out and
+ *   the last click held back) lives in module state, one per destination (the PUT
+ *   URL), so leaving /sessions and coming back still waits for the earlier PUT.
+ *   Another destination is never held back, and the module state is reset after
+ *   every test (the reset is for tests only).
+ * - I6' guards the "is the condition empty" judgement: it is the one in
+ *   src/lib/sessions-filter.ts (whitespace-only branch pattern = no condition).
+ * - I8 guards how the deleted-role notice is derived: from the current condition
+ *   (and the saved default while it is what the page shows) against the roles that
+ *   exist, every render — never a separate state that a save clears.
+ * Out of scope: two tabs saving at once can still overwrite each other in the
+ * order the server receives them; telling that apart needs a version on the
+ * server (PR1's API), which this PR does not change.
+ *
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -58,8 +73,12 @@ import { ApiError } from '@/lib/api-client';
 import { differsFromDefault } from '@/lib/sessions-default-filter';
 import {
   useSessionsDefaultFilter,
+  sendSerially,
+  resetSessionsDefaultFilterSaveQueueForTests,
   type SessionsRolesReadiness,
 } from '@/hooks/useSessionsDefaultFilter';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const EMPTY: SessionsFilterCondition = { branchPattern: '', roleIds: [], includeNoRole: false, includeAmbiguous: false };
 const cond = (over: Partial<SessionsFilterCondition>): SessionsFilterCondition => ({ ...EMPTY, ...over });
@@ -104,6 +123,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  resetSessionsDefaultFilterSaveQueueForTests();
 });
 
 describe('[#4388] useSessionsDefaultFilter', () => {
@@ -461,6 +481,136 @@ describe('[#4388] useSessionsDefaultFilter', () => {
       expect(result.current.df.defaults).toEqual(cond({ branchPattern: '^feature/' }));
       expect(result.current.df.differs).toBe(false);
       expect(applied).toEqual([cond({ branchPattern: '^feature/' })]);
+    });
+  });
+
+  describe("I3'': the save queue outlives the page — one per destination", () => {
+    /** The server writes a PUT's body when it handles it; handles the newest first. */
+    function makeServer() {
+      const server = { value: null as SessionsFilterCondition | null };
+      const handled = new Set<number>();
+      const handleNewestFirst = async () => {
+        for (;;) {
+          const waiting = putCalls.map((_, i) => i).filter((i) => !handled.has(i));
+          if (waiting.length === 0) return;
+          for (const i of waiting.reverse()) {
+            handled.add(i);
+            server.value = putCalls[i].body;
+            await act(async () => putCalls[i].d.resolve(stored(putCalls[i].body)));
+          }
+        }
+      };
+      return { server, handleNewestFirst };
+    }
+
+    it('A is out, the page is left and opened again, B is saved: B goes out after A answered; server and page end on B', async () => {
+      const { server, handleNewestFirst } = makeServer();
+      const first = setup();
+      await act(async () => getCalls[0].resolve({ success: true, filter: EMPTY, configured: false }));
+      act(() => first.result.current.userSets(cond({ branchPattern: 'A' })));
+      act(() => void first.result.current.df.saveAsDefault());
+      first.unmount();
+
+      const second = setup();
+      // The server has not handled A yet, so the read still says "nothing saved".
+      await act(async () => getCalls[1].resolve({ success: true, filter: EMPTY, configured: false }));
+      act(() => second.result.current.userSets(cond({ branchPattern: 'B' })));
+      act(() => void second.result.current.df.saveAsDefault());
+      await handleNewestFirst();
+
+      expect(putCalls.map((c) => c.body.branchPattern)).toEqual(['A', 'B']);
+      expect(second.result.current.df.defaults).toEqual(server.value);
+      expect(server.value?.branchPattern).toBe('B');
+      expect(second.result.current.df.saved).toBe(true);
+    });
+
+    it('control: a save to another destination is not held back', async () => {
+      const a = deferred<string>();
+      const sendA = vi.fn(() => a.promise);
+      const sendOther = vi.fn(async () => 'other');
+      const outA = sendSerially('/api/settings/sessions-filter', sendA);
+      const other = await sendSerially('/api/settings/elsewhere', sendOther);
+      expect(sendOther).toHaveBeenCalledTimes(1);
+      expect(other).toEqual({ status: 'fulfilled', value: 'other' });
+      a.resolve('a');
+      expect(await outA).toEqual({ status: 'fulfilled', value: 'a' });
+    });
+
+    it('control: the same destination waits; a click held back is replaced by a later one', async () => {
+      const a = deferred<string>();
+      const sends: string[] = [];
+      const send = (v: string) => () => {
+        sends.push(v);
+        return v === 'a' ? a.promise : Promise.resolve(v);
+      };
+      const outA = sendSerially('/k', send('a'));
+      const outB = sendSerially('/k', send('b'));
+      const outC = sendSerially('/k', send('c'));
+      expect(sends).toEqual(['a']);
+      a.resolve('a');
+      expect(await outA).toEqual({ status: 'fulfilled', value: 'a' });
+      expect(await outB).toEqual({ status: 'superseded' });
+      expect(await outC).toEqual({ status: 'fulfilled', value: 'c' });
+      expect(sends).toEqual(['a', 'c']);
+    });
+
+    it('control: the reset empties the queue — a PUT left out does not hold the next one', async () => {
+      const never = deferred<string>();
+      void sendSerially('/k', () => never.promise);
+      resetSessionsDefaultFilterSaveQueueForTests();
+      const next = vi.fn(async () => 'next');
+      expect(await sendSerially('/k', next)).toEqual({ status: 'fulfilled', value: 'next' });
+    });
+
+    it('the reset is called from tests only (no production file uses it)', () => {
+      const root = path.resolve(__dirname, '../../../src');
+      const users: string[] = [];
+      const walk = (dir: string) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (/\.(ts|tsx)$/.test(entry.name) && fs.readFileSync(full, 'utf8').includes('resetSessionsDefaultFilterSaveQueueForTests')) {
+            users.push(path.relative(root, full));
+          }
+        }
+      };
+      walk(root);
+      // Only where it is defined.
+      expect(users).toEqual([path.join('hooks', 'useSessionsDefaultFilter.ts')]);
+    });
+  });
+
+  describe("I6': one judgement of an empty condition (sessions-filter's, whitespace trimmed)", () => {
+    it('whitespace-only branch pattern and every role deleted: the deleted ids are kept (0 rows), notice, no mark', async () => {
+      const { result } = setup({ rolesReadiness: 'ready', existingRoleIds: [] });
+      await act(async () => getCalls[0].resolve(stored(cond({ branchPattern: '  ', roleIds: ['gone'] }))));
+      expect(result.current.current).toEqual(cond({ branchPattern: '  ', roleIds: ['gone'] }));
+      expect(result.current.df.droppedRoleIds).toEqual(['gone']);
+      expect(result.current.df.differs).toBe(false);
+    });
+  });
+
+  describe('I8: the deleted-role notice is derived, not a separate state', () => {
+    it('a default whose roles are all deleted, saved again unchanged: the notice stays', async () => {
+      const { result } = setup({ rolesReadiness: 'ready', existingRoleIds: ['review'] });
+      await act(async () => getCalls[0].resolve(stored(cond({ roleIds: ['gone'] }))));
+      expect(result.current.df.droppedRoleIds).toEqual(['gone']);
+      act(() => void result.current.df.saveAsDefault());
+      expect(putCalls[0].body).toEqual(cond({ roleIds: ['gone'] }));
+      await act(async () => putCalls[0].d.resolve(stored(putCalls[0].body)));
+      expect(result.current.df.saved).toBe(true);
+      expect(result.current.current).toEqual(cond({ roleIds: ['gone'] }));
+      expect(result.current.df.droppedRoleIds).toEqual(['gone']);
+    });
+
+    it('control: choosing an existing role instead takes the deleted id out of the condition, and the notice goes', async () => {
+      const { result } = setup({ rolesReadiness: 'ready', existingRoleIds: ['review'] });
+      await act(async () => getCalls[0].resolve(stored(cond({ roleIds: ['gone'] }))));
+      act(() => result.current.userSets(cond({ roleIds: ['review'] })));
+      expect(result.current.df.droppedRoleIds).toEqual([]);
+      // Back to the default: the notice comes back with it.
+      act(() => result.current.df.resetToDefault());
+      expect(result.current.df.droppedRoleIds).toEqual(['gone']);
     });
   });
 });

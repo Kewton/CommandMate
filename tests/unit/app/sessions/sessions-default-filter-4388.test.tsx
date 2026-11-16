@@ -7,6 +7,12 @@
  * Positive control: red before #4388 (the page never read the default; no buttons, no mark).
  * Negative control: nothing saved / the read failed → the page is as before (I4).
  *
+ * Re-instruction 3: I6' guards the "is the condition empty" judgement (the one in
+ * src/lib/sessions-filter.ts, whitespace trimmed), I8 guards how the deleted-role
+ * notice is derived (from the condition and the roles that exist, never cleared by a
+ * save). The order of saves within one tab (I3'') is in the hook's test. Out of
+ * scope: two tabs saving at once (needs a version on the server, PR1's API).
+ *
  * @vitest-environment jsdom
  */
 
@@ -87,6 +93,7 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 
 import { ApiError } from '@/lib/api-client';
 import SessionsPage from '@/app/sessions/page';
+import { resetSessionsDefaultFilterSaveQueueForTests } from '@/hooks/useSessionsDefaultFilter';
 
 const EMPTY: SessionsFilterCondition = { branchPattern: '', roleIds: [], includeNoRole: false, includeAmbiguous: false };
 const cond = (over: Partial<SessionsFilterCondition>): SessionsFilterCondition => ({ ...EMPTY, ...over });
@@ -126,7 +133,10 @@ beforeEach(() => {
   putBodies.length = 0;
   getQueue = null;
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  resetSessionsDefaultFilterSaveQueueForTests();
+});
 
 async function renderPage() {
   const view = render(<SessionsPage />);
@@ -400,6 +410,41 @@ describe('[#4388] /sessions default filter on the page', () => {
       const queue = await openStrictWithTwoReads();
       await act(async () => queue[0].resolve(saved(cond({ branchPattern: 'main' })).body));
       expectSecondReadKept();
+    });
+  });
+
+  describe("I6' / I8 on the page", () => {
+    const notice = () => screen.queryByTestId('sessions-default-filter-dropped-roles');
+
+    it("I6': whitespace-only branch pattern and every role deleted: 0 rows, notice, no mark", async () => {
+      getReply = saved(cond({ branchPattern: '   ', roleIds: ['gone'] }));
+      await renderPage();
+      expect(shown()).toEqual([]);
+      expect(notice()).not.toBeNull();
+      expect(mark()).toBeNull();
+    });
+
+    it('I8: saving the all-deleted default again unchanged keeps the notice (and the 0 rows)', async () => {
+      getReply = saved(cond({ roleIds: ['gone'] }));
+      await renderPage();
+      expect(notice()).not.toBeNull();
+      openPanel();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('sessions-default-filter-save'));
+      });
+      expect(putBodies).toEqual([cond({ roleIds: ['gone'] })]);
+      expect(screen.getByTestId('sessions-default-filter-saved')).toBeTruthy();
+      expect(notice()).not.toBeNull();
+      expect(shown()).toEqual([]);
+    });
+
+    it('I8 control: choosing an existing role takes the deleted id out, and the notice goes', async () => {
+      getReply = saved(cond({ roleIds: ['gone'] }));
+      await renderPage();
+      openPanel();
+      fireEvent.click(screen.getByTestId('sessions-role-filter-role-review'));
+      expect(shown()).toEqual(['1', '3']);
+      expect(notice()).toBeNull();
     });
   });
 });
