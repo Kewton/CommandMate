@@ -929,14 +929,33 @@ The reply is printed only when the server's ledger (`GET /api/asks/:askId`) ties
 | `attribution.state` / `reason` | Meaning | Send |
 |---|---|---|
 | `matched` | The reply is printed. `notified: true`: the turn also took a background-task notification (the reply may react to it) | with the id |
-| `unavailable` / `tool_unsupported` | A tool asks cannot be attributed on (`copilot`, `gemini`, `vibe-local`, `opencode`, `antigravity`, `command-code`, `opencode-v2`, …) | as before |
-| `unavailable` / `server_unsupported` | An older server (`/api/asks/capabilities` answers 404) | once, with the old body |
+| `unavailable` / `tool_unsupported` | A tool asks cannot be attributed on (`copilot`, `gemini`, `vibe-local`, `opencode`, `antigravity`, `command-code`, `opencode-v2`, …). Also `claude` / `codex` when they are off for their version: then `--json` adds `attribution.toolVersion` (below) | as before |
+| `unavailable` / `server_unsupported` | An older server (`/api/asks/capabilities` answers 404). Usually the CLI was updated (`npm i -g`) but the running server was not restarted: restart it with `commandmate stop` then `commandmate start --daemon`, or update with `commandmate update` | once, with the old body |
 | `unavailable` / `slash_command` | A body starting with `/`, `!` or `#` (an id in front would turn the command into text) | body as it is |
 | `ambiguous` / `shared_turn`, `turn_open_at_send` | The answering turn also took another input, or a turn was open at the send | with the id |
 | `unmatched` / `absorbed_mid_turn`, `turn_incomplete`, `grace_expired`, `send_unknown`, `body_truncated`, `history_missing`, … | The turn could not be tied to this request (`grace_expired`, `turn_incomplete` and `send_unknown` are what was still undecided 15 s after the turn ended; nothing is written to the ledger) | with the id |
 
 When the reply was not collected, look at the other session's screen with `capture <id> --instance <id> --pane` (`ask` never reads the screen as a reply).
 Wait failures (exit 10, 11, 21, 124) are as before and read no ledger. `--async` carries no id and is unchanged.
+
+**Why a tool is `tool_unsupported`** (stderr says which; `--json` has `attribution.toolVersion` only for the version cases):
+
+| Cause | stderr (after `<tool>: `) | `attribution.toolVersion` | What to do |
+|---|---|---|---|
+| The tool has no ask attribution (not in the server's table) | `this tool has no ask attribution` | absent | Use one of the alternatives below |
+| `claude` / `codex` older than the server's minimum (`claude` 2.1.239, `codex` 0.167.2) | `its version <installed> is older than <minimum>, the minimum for ask attribution` | `{ "state": "too_old", "minimum": "2.1.239", "installed": "2.1.200" }` | Update the tool. The server re-reads versions within 30 s |
+| `claude` / `codex` whose installed version the server could not read (not reported, not `x.y.z`, or the probe failed) | `its installed version could not be read (ask attribution needs <minimum> or newer)` | `{ "state": "unreadable", "minimum": "2.1.239", "installed": null }` | Check that the tool runs with `--version` where the server runs. A failed probe is retried after 30 s |
+
+`attribution.reason` stays `tool_unsupported` in every case (its value and the other keys are unchanged). The table's version readings come from `GET /api/asks/capabilities`'s
+`versions` (`{ "<tool>": { minimum, installed, state: "ok" | "too_old" | "unreadable" } }`); a server without it (before this change) gives only `this tool has no ask attribution`.
+
+**Getting the reply of a tool `ask` does not attribute.** `ask` still sends, it only does not print the reply. To have the reply:
+
+| Way | Commands | What comes back |
+|---|---|---|
+| A relay (no wait) | `commandmate ask <worktree-id> "<request>" --instance <id> --async` | When their turn ends, the reply arrives in your composer as `[from <alias> / <worktree>]`. The transcript turn row for `claude`, `codex`, `antigravity`, `command-code`, `opencode`, `opencode-v2`; the screen scraper's row for `copilot`, `gemini`, `vibe-local`. Not tied by an id: send one at a time (overlaps are noted as `overlap=`) |
+| Send, wait, read the ledger | `commandmate send <worktree-id> "<request>" --instance <id>` → `commandmate wait <worktree-id> --instance <id>` → `commandmate reply <worktree-id> --instance <id> --since <ISO time taken before the send>` | The newest transcript turn row after `--since` for `claude`, `codex`, `antigravity`, `command-code`, `opencode`, `opencode-v2`. Always empty for `copilot`, `gemini`, `vibe-local` |
+| Look at the screen | `commandmate capture <worktree-id> --instance <id> --pane --tail 60` | What is on their screen (all tools; you judge which turn it is) |
 
 A request with an id is always multi-line, so a `claude` pane shows `[Pasted text …]` and a `[cmate-ask v1 <id>]` line (design §7 (b); the meaning is unchanged).
 The chat History does not show the id line.

@@ -1132,14 +1132,33 @@ commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <ta
 | `attribution.state` / `reason` | 意味 | 送信 |
 |---|---|---|
 | `matched` | 返答を出す。`notified: true` は、そのターンがバックグラウンドのタスク完了通知も受け取った（返答が通知に反応していることがある） | ID つき |
-| `unavailable` / `tool_unsupported` | ID で帰属できない tool（`copilot`・`gemini`・`vibe-local`・`opencode`・`antigravity`・`command-code`・`opencode-v2` など） | 今までどおり |
-| `unavailable` / `server_unsupported` | 古いサーバー（`/api/asks/capabilities` が 404） | 今までどおりの body で 1 回 |
+| `unavailable` / `tool_unsupported` | ID で帰属できない tool（`copilot`・`gemini`・`vibe-local`・`opencode`・`antigravity`・`command-code`・`opencode-v2` など）。`claude`・`codex` も版のせいで対象外のときはここ（`--json` に `attribution.toolVersion`。下の表） | 今までどおり |
+| `unavailable` / `server_unsupported` | 古いサーバー（`/api/asks/capabilities` が 404）。多くは CLI を更新（`npm i -g`）したのに動いているサーバーを再起動していないとき。`commandmate stop` の後 `commandmate start --daemon` で再起動するか、`commandmate update` で更新する | 今までどおりの body で 1 回 |
 | `unavailable` / `slash_command` | `/`・`!`・`#` で始まる本文（ID を付けると文章になるため付けない） | 本文はそのまま |
 | `ambiguous` / `shared_turn`・`turn_open_at_send` | 答えたターンが別の入力も受け取った、または送信時にターンが開いていた | ID つき |
 | `unmatched` / `absorbed_mid_turn`・`turn_incomplete`・`grace_expired`・`send_unknown`・`body_truncated`・`history_missing` など | この依頼のターンと結べなかった（`grace_expired`・`turn_incomplete`・`send_unknown` は、ターンの終了後 15 秒の待ちで決まらなかったもの。台帳には書かない） | ID つき |
 
 返答を回収しなかったときは、相手の画面を `capture <id> --instance <id> --pane` で見てください（`ask` は画面を返答として読みません）。
 待機の失敗（exit 10・11・21・124）は今までどおりで、台帳は読みません。`--async` は ID を付けず、今までどおりです。
+
+**`tool_unsupported` の理由**（stderr がどれかを言います。`--json` の `attribution.toolVersion` は版の理由のときだけ付きます）:
+
+| 理由 | stderr（`<tool>: ` の後） | `attribution.toolVersion` | 手当て |
+|---|---|---|---|
+| tool が非対応（サーバーの表に無い） | `this tool has no ask attribution` | 無し | 下の「代わりの手順」を使う |
+| `claude`・`codex` の版がサーバーの最低版より古い（`claude` 2.1.239、`codex` 0.167.2） | `its version <installed> is older than <minimum>, the minimum for ask attribution` | `{ "state": "too_old", "minimum": "2.1.239", "installed": "2.1.200" }` | tool を更新する。サーバーは 30 秒以内に版を読み直す |
+| `claude`・`codex` の版をサーバーが読めない（版が報告されない・`x.y.z` でない・probe の失敗） | `its installed version could not be read (ask attribution needs <minimum> or newer)` | `{ "state": "unreadable", "minimum": "2.1.239", "installed": null }` | サーバーの動く環境で tool が `--version` に答えるか確かめる。probe の失敗は 30 秒後に読み直す |
+
+どの理由でも `attribution.reason` は `tool_unsupported` のままです（値と他の欄は変えていません）。版の読みは `GET /api/asks/capabilities` の
+`versions`（`{ "<tool>": { minimum, installed, state: "ok" | "too_old" | "unreadable" } }`）から来ます。これを返さない（この変更より前の）サーバーでは `this tool has no ask attribution` だけです。
+
+**帰属できない tool の返答を受け取る代わりの手順。** `ask` は送信はしており、返答を出さないだけです。返答が要るときは次のどれかを使います。
+
+| 手順 | 命令 | 返るもの |
+|---|---|---|
+| relay（待たない） | `commandmate ask <worktree-id> "<依頼>" --instance <id> --async` | 相手のターンが終わると、返答が `[from <alias> / <worktree>]` つきで自分の入力欄に届く。`claude`・`codex`・`antigravity`・`command-code`・`opencode`・`opencode-v2` は transcript のターンの行、`copilot`・`gemini`・`vibe-local` は画面から拾った行。ID の帰属ではないので 1 本ずつ送る（重なりは `overlap=` で注記される） |
+| 送って待って台帳を読む | `commandmate send <worktree-id> "<依頼>" --instance <id>` → `commandmate wait <worktree-id> --instance <id>` → `commandmate reply <worktree-id> --instance <id> --since <送信の前に取った ISO 時刻>` | `--since` 以降のいちばん新しい transcript のターンの行（`claude`・`codex`・`antigravity`・`command-code`・`opencode`・`opencode-v2`）。`copilot`・`gemini`・`vibe-local` では常に空 |
+| 画面を見る | `commandmate capture <worktree-id> --instance <id> --pane --tail 60` | 相手の画面（全 tool。どのターンのものかは自分で見分ける） |
 
 ID を付けた依頼は必ず複数行になるため、`claude` のペインには `[Pasted text …]` と `[cmate-ask v1 <id>]` の 1 行が見えます（設計 §7 (b) の決定。意味は変わりません）。
 チャット画面の履歴には ID の行は出ません。

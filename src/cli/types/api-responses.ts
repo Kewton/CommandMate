@@ -1700,6 +1700,28 @@ export interface AskCapabilitiesResponse {
   tools: Record<string, boolean>;
 }
 
+/**
+ * Issue #4344 (PR3 review): why an attributed tool is on or off for its version.
+ * Mirrors src/lib/ask/ask-correlation.ts AskToolVersionState.
+ */
+export type AskToolVersionState = 'ok' | 'too_old' | 'unreadable';
+
+/** Issue #4344 (PR3 review): one attributed tool's version. Mirrors src/lib/ask/ask-correlation.ts AskToolVersion. */
+export interface AskToolVersion {
+  minimum: string;
+  installed: string | null;
+  state: AskToolVersionState;
+}
+
+/**
+ * Issue #4344 (PR3 review): `GET /api/asks/capabilities` with the version
+ * readings. `versions` is optional here: a PR1/PR2 server does not send it.
+ * Mirrors src/lib/ask/ask-correlation.ts AskCapabilitiesBody.
+ */
+export interface AskCapabilitiesBody extends AskCapabilitiesResponse {
+  versions?: Record<string, AskToolVersion>;
+}
+
 /** Issue #4344: `GET /api/asks/:askId`. Mirrors src/types/ask-correlation.ts. */
 export interface AskAttributionResponse {
   askId: string;

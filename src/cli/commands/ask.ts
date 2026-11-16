@@ -56,6 +56,7 @@ import {
   formatReplyNotCollected,
   outcomeFromSendAnswer,
   planAskSend,
+  toolVersionNote,
   readAskOutcome,
   type AskOutcome,
   type AskSendPlan,
@@ -406,13 +407,16 @@ function printAskReply(
   outcome: AskOutcome,
   options: AskOptions,
   overlapped: boolean,
+  sentTo?: string,
 ): void {
   const source: ReplySource = outcome.state === 'matched' ? 'history' : 'none';
   if (outcome.state !== 'matched') {
     // Not an error exit: the turn DID end, and saying so on stderr keeps
     // stdout empty rather than filling it with an apology a caller would
     // paste into a report as the agent's answer.
-    console.error(formatReplyNotCollected(outcome, { worktreeId, instanceId, cliToolId: agent }));
+    // `sentTo`: the tool the send answer named, for the line only (`--json`'s
+    // `cliToolId` stays the command's own).
+    console.error(formatReplyNotCollected(outcome, { worktreeId, instanceId, cliToolId: agent ?? sentTo }));
   } else if (outcome.notified) {
     console.error(NOTIFIED_NOTE);
   }
@@ -426,7 +430,14 @@ function printAskReply(
       source,
       reply: outcome.reply,
       askId: outcome.askId,
-      attribution: { state: outcome.state, reason: outcome.reason, notified: outcome.notified },
+      attribution: {
+        state: outcome.state,
+        reason: outcome.reason,
+        notified: outcome.notified,
+        // Issue #4344 (PR3 review): only for a tool in the table that is off
+        // for its version; every other answer keeps its three keys.
+        ...(outcome.toolVersion ? { toolVersion: outcome.toolVersion } : {}),
+      },
       ...(overlapped ? { overlapped: true } : {}),
     }, null, 2));
   } else if (outcome.reply !== null) {
@@ -475,16 +486,26 @@ transcript tied that input to the turn that answered it alone. Only then
 "reply not collected (<state>/<reason>)" line goes to stderr, and the exit
 code is still 0 — the turn ended:
   unavailable/tool_unsupported    the tool has no ask attribution (copilot,
-                                  gemini, vibe-local, opencode, ...); sent as before
-  unavailable/server_unsupported  the server predates it (404); sent with the old body
+                                  gemini, vibe-local, opencode, ...); sent as before.
+                                  claude/codex below the server's minimum version,
+                                  or with a version it could not read, too:
+                                  --json adds attribution.toolVersion
+                                  {state: too_old|unreadable, minimum, installed}
+  unavailable/server_unsupported  the server predates it (404); sent with the old
+                                  body. Restart it (\`stop\`, then \`start --daemon\`)
+                                  or \`update\` so it runs the installed version
   unavailable/slash_command       a body starting with /, ! or # carries no id
   ambiguous/shared_turn, ambiguous/turn_open_at_send
                                   the turn that answered also took another input
   unmatched/<reason>              the turn could not be tied to this ask (e.g.
                                   absorbed_mid_turn, turn_incomplete, grace_expired)
 The reply may still be on the other session's screen: look with
-\`capture <id> --instance <id> --pane\`. "notified": true on a matched reply means
-the turn also took a background-task notification the reply may react to.
+\`capture <id> --instance <id> --pane\`. To get the reply of a tool that is not
+attributed: \`ask <id> "..." --instance <id> --async\` (a relay brings it back),
+or \`send\` + \`wait\` and then \`reply <id> --instance <id> --since <iso>\`
+(transcript tools; copilot, gemini and vibe-local have only the pane).
+"notified": true on a matched reply means the turn also took a
+background-task notification the reply may react to.
 With an id, the claude pane shows the message as a paste with a
 [cmate-ask v1 <id>] line in front of it; that is expected.
 
@@ -665,9 +686,11 @@ a decision about that session's guard rails, not part of asking it a question.
         // row, not the pane (design §0.2).
         const decided: AskOutcome | null = askPlan === null || askPlan.kind === 'unavailable'
           ? askPlan?.outcome ?? null
-          : outcomeFromSendAnswer(sent?.ask);
+          : outcomeFromSendAnswer(sent?.ask, toolVersionNote(askPlan.versions, agent ?? sent?.cliToolId));
         if (decided !== null || askPlan?.kind !== 'ask') {
-          if (decided !== null) printAskReply(worktreeId, instanceId, agent, decided, options, false);
+          if (decided !== null) {
+            printAskReply(worktreeId, instanceId, agent, decided, options, false, sent?.cliToolId);
+          }
           process.exit(ExitCode.SUCCESS);
           return;
         }

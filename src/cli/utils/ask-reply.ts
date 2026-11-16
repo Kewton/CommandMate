@@ -15,6 +15,10 @@
  * - Which tools are attributed comes from the server (`GET /api/asks/capabilities`),
  *   never a copy of the table here (§3.2). A server that predates the endpoint
  *   (404) is `server_unsupported`: the send goes out with the old body.
+ * - A tool in the table that is off for its version (older than the minimum, or
+ *   a version the server could not read) is still `tool_unsupported`, but the
+ *   outcome carries `toolVersion` from the table's `versions`, so the line says
+ *   that rather than "this tool has no ask attribution" (PR3 review).
  * - Running out of the reply grace with the row still `pending` is decided here
  *   (`grace_expired` / `turn_incomplete` / `send_unknown`) and written nowhere:
  *   the ledger is not made terminal by a client's patience (§3.6 cell 17, I12).
@@ -25,8 +29,9 @@ import { ExitCode } from '../types';
 import type {
   AskAttributionReason,
   AskAttributionResponse,
-  AskCapabilitiesResponse,
+  AskCapabilitiesBody,
   AskSendAnswer,
+  AskToolVersion,
 } from '../types/api-responses';
 import { ApiError, isDeadlineExceeded, type ApiClient } from './api-client';
 import { stripReplyControls } from './reply-ledger';
@@ -50,12 +55,28 @@ export interface AskOutcome {
   notified: boolean;
   /** The reply body, only when `state === 'matched'`. */
   reply: string | null;
+  /**
+   * `tool_unsupported` only: the tool IS in the server's table but is off for
+   * its version (`--json`'s `attribution.toolVersion`; absent otherwise).
+   */
+  toolVersion?: AskToolVersionNote;
+}
+
+/** Why an attributed tool is off for its version: older than `minimum`, or its version could not be read. */
+export interface AskToolVersionNote {
+  state: 'too_old' | 'unreadable';
+  minimum: string;
+  installed: string | null;
 }
 
 /** How `ask` treats the send, decided before it. */
 export type AskSendPlan =
-  /** The server attributes (or, with no tool known, may attribute) this ask: the send names `askId`. */
-  | { kind: 'ask'; askId: string }
+  /**
+   * The server attributes (or, with no tool known, may attribute) this ask: the
+   * send names `askId`. `versions` reads a refusal of the send (the default tool
+   * off for its version) the way the table would have.
+   */
+  | { kind: 'ask'; askId: string; versions: Record<string, AskToolVersion> }
   /** Not attributed: the send goes out as it did before #4344, and the reply is not collected. */
   | { kind: 'unavailable'; outcome: AskOutcome };
 
@@ -65,13 +86,52 @@ export function unavailableOutcome(reason: AskAttributionReason): AskOutcome {
 }
 
 /**
+ * The version note of a tool the table names with a reading that is not `ok`,
+ * or undefined (a tool off the table, a server that sends no `versions`).
+ */
+export function toolVersionNote(
+  versions: Record<string, AskToolVersion> | undefined,
+  cliToolId: string | undefined,
+): AskToolVersionNote | undefined {
+  if (!versions || cliToolId === undefined) return undefined;
+  const version = Object.prototype.hasOwnProperty.call(versions, cliToolId) ? versions[cliToolId] : undefined;
+  if (!version || (version.state !== 'too_old' && version.state !== 'unreadable')) return undefined;
+  return { state: version.state, minimum: version.minimum, installed: version.installed };
+}
+
+/** `unavailable/tool_unsupported`, with the version note when there is one. */
+function toolUnsupportedOutcome(note: AskToolVersionNote | undefined): AskOutcome {
+  const outcome = unavailableOutcome('tool_unsupported');
+  return note ? { ...outcome, toolVersion: note } : outcome;
+}
+
+/** The well-formed entries of a capabilities answer's `versions` (an annotation: a bad entry is dropped, not fatal). */
+function readToolVersions(raw: unknown): Record<string, AskToolVersion> {
+  const versions: Record<string, AskToolVersion> = {};
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return versions;
+  for (const [tool, value] of Object.entries(raw as Record<string, unknown>)) {
+    const entry = value as Partial<AskToolVersion> | null;
+    if (
+      entry !== null
+      && typeof entry === 'object'
+      && typeof entry.minimum === 'string'
+      && (entry.installed === null || typeof entry.installed === 'string')
+      && (entry.state === 'ok' || entry.state === 'too_old' || entry.state === 'unreadable')
+    ) {
+      versions[tool] = { minimum: entry.minimum, installed: entry.installed, state: entry.state };
+    }
+  }
+  return versions;
+}
+
+/**
  * The server's attribution table, or null for a server that predates it (a
  * 404). Any other failure is the command's: the send goes to the same server,
  * so it is not quietly turned into a send without the ledger (§0.2).
  *
  * @throws ApiError on anything but a 404 or a well-formed answer (a deadline stays 124)
  */
-export async function readAskCapabilities(client: ApiClient): Promise<AskCapabilitiesResponse | null> {
+export async function readAskCapabilities(client: ApiClient): Promise<AskCapabilitiesBody | null> {
   let body: unknown;
   try {
     body = await client.get<unknown>(ASK_CAPABILITIES_PATH);
@@ -79,7 +139,7 @@ export async function readAskCapabilities(client: ApiClient): Promise<AskCapabil
     if (error instanceof ApiError && error.statusCode === 404 && !isDeadlineExceeded(error)) return null;
     throw error;
   }
-  const record = body as Partial<AskCapabilitiesResponse> | null;
+  const record = body as Partial<AskCapabilitiesBody> | null;
   if (
     record === null
     || typeof record !== 'object'
@@ -93,7 +153,11 @@ export async function readAskCapabilities(client: ApiClient): Promise<AskCapabil
       ExitCode.UNEXPECTED_ERROR,
     );
   }
-  return { protocol: record.protocol, tools: record.tools as Record<string, boolean> };
+  return {
+    protocol: record.protocol,
+    tools: record.tools as Record<string, boolean>,
+    versions: readToolVersions(record.versions),
+  };
 }
 
 /**
@@ -109,10 +173,11 @@ export async function planAskSend(client: ApiClient, cliToolId: string | undefin
   if (capabilities === null || capabilities.protocol !== ASK_PROTOCOL_VERSION) {
     return { kind: 'unavailable', outcome: unavailableOutcome('server_unsupported') };
   }
+  const versions = capabilities.versions ?? {};
   if (cliToolId !== undefined && capabilities.tools[cliToolId] !== true) {
-    return { kind: 'unavailable', outcome: unavailableOutcome('tool_unsupported') };
+    return { kind: 'unavailable', outcome: toolUnsupportedOutcome(toolVersionNote(versions, cliToolId)) };
   }
-  return { kind: 'ask', askId: randomUUID() };
+  return { kind: 'ask', askId: randomUUID(), versions };
 }
 
 /**
@@ -120,13 +185,20 @@ export async function planAskSend(client: ApiClient, cliToolId: string | undefin
  * tool the server turned down) is final; an answer with no `ask` at all means
  * the server did not read the field. Null: the ledger is to be read after the
  * turn.
+ *
+ * @param toolVersion - The table's version note for the tool the send reached
+ *   (the send answer names no version; a `tool_unsupported` is read with it)
  */
-export function outcomeFromSendAnswer(answer: AskSendAnswer | undefined): AskOutcome | null {
+export function outcomeFromSendAnswer(
+  answer: AskSendAnswer | undefined,
+  toolVersion?: AskToolVersionNote,
+): AskOutcome | null {
   if (answer === undefined || answer === null || typeof answer !== 'object') {
     return unavailableOutcome('server_unsupported');
   }
   if (answer.state === 'unavailable') {
-    return unavailableOutcome(answer.reason ?? 'tool_unsupported');
+    const reason = answer.reason ?? 'tool_unsupported';
+    return reason === 'tool_unsupported' ? toolUnsupportedOutcome(toolVersion) : unavailableOutcome(reason);
   }
   return null;
 }
@@ -196,7 +268,7 @@ export async function readAskOutcome(
 /** What each reason means, for the one stderr line (§0.2). */
 const REASON_TEXT: Readonly<Record<AskAttributionReason, string>> = {
   tool_unsupported: 'this tool has no ask attribution',
-  server_unsupported: 'the server predates ask attribution',
+  server_unsupported: 'the server predates ask attribution (an older CommandMate is still running: restart it with `commandmate stop` then `commandmate start --daemon`, or update it with `commandmate update`)',
   slash_command: 'a command body carries no ask id',
   shared_turn: 'the turn that answered also took another input',
   turn_open_at_send: 'the instance was already in a turn when this ask was sent',
@@ -214,10 +286,20 @@ const REASON_TEXT: Readonly<Record<AskAttributionReason, string>> = {
   history_changed: 'the reply rows changed after the reply was settled',
 };
 
+/** Why a tool in the table is off for its version (PR3 review): the version and the minimum. */
+function toolVersionText(note: AskToolVersionNote): string {
+  return note.state === 'too_old' && note.installed !== null
+    ? `its version ${note.installed} is older than ${note.minimum}, the minimum for ask attribution (update it; the server re-reads versions within 30s)`
+    : `its installed version could not be read (ask attribution needs ${note.minimum} or newer)`;
+}
+
 /**
  * The one stderr line for an ask whose reply is not printed (§0.2), with where
  * to look instead. The reply may still exist — it is not this command's to
- * pick off the screen.
+ * pick off the screen. For a tool the server cannot attribute, the line also
+ * names the commands that still bring its reply back (PR3 review): a relay
+ * (`ask --async`) and `reply` after the turn (`docs/user-guide/cli-operations-guide.md`
+ * says which tools each one answers for).
  */
 export function formatReplyNotCollected(
   outcome: AskOutcome,
@@ -225,8 +307,17 @@ export function formatReplyNotCollected(
 ): string {
   const reason = outcome.reason ?? 'grace_expired';
   const who = reason === 'tool_unsupported' && target.cliToolId ? `${target.cliToolId}: ` : '';
+  const why = reason === 'tool_unsupported' && outcome.toolVersion
+    ? toolVersionText(outcome.toolVersion)
+    : REASON_TEXT[reason] ?? reason;
+  const scope = target.instanceId
+    ? ` --instance ${target.instanceId}`
+    : target.cliToolId ? ` --agent ${target.cliToolId}` : '';
   const look = `capture ${target.worktreeId}${target.instanceId ? ` --instance ${target.instanceId}` : ''} --pane`;
-  return `reply not collected (${outcome.state}/${reason}): ${who}${REASON_TEXT[reason] ?? reason}; look with \`${look}\``;
+  const instead = reason === 'tool_unsupported'
+    ? `; for its reply use \`ask ${target.worktreeId} "<message>"${scope} --async\` (relayed back) or \`reply ${target.worktreeId}${scope}\` after the turn`
+    : '';
+  return `reply not collected (${outcome.state}/${reason}): ${who}${why}${instead}; look with \`${look}\``;
 }
 
 /** The note for a matched reply whose turn also took a background-task notice (§7 (a) ②). */

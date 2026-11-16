@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import type * as Cli from '@/cli/types/api-responses';
 import type * as Server from '@/types/ask-correlation';
+import type * as ServerAsk from '@/lib/ask/ask-correlation';
 import { ASK_PROTOCOL_VERSION as SERVER_PROTOCOL } from '@/types/ask-correlation';
 import { ASK_PROTOCOL_VERSION as CLI_PROTOCOL } from '@/cli/utils/ask-reply';
 
@@ -24,6 +25,10 @@ type _SendState = AssertNever<Same<Cli.AskSendState, Server.AskSendState>>;
 type _Answer = AssertNever<Same<keyof Cli.AskAttributionResponse, keyof Server.AskAttributionResponse>>;
 type _SendAnswer = AssertNever<Same<keyof Cli.AskSendAnswer, keyof Server.AskSendAnswer>>;
 type _Capabilities = AssertNever<Same<keyof Cli.AskCapabilitiesResponse, keyof Server.AskCapabilitiesResponse>>;
+// PR3 review: the capabilities body's version readings (served from lib/ask).
+type _CapabilitiesBody = AssertNever<Same<keyof Cli.AskCapabilitiesBody, keyof ServerAsk.AskCapabilitiesBody>>;
+type _ToolVersion = AssertNever<Same<keyof Cli.AskToolVersion, keyof ServerAsk.AskToolVersion>>;
+type _ToolVersionState = AssertNever<Same<Cli.AskToolVersionState, ServerAsk.AskToolVersionState>>;
 
 describe('the CLI mirror of the ask ledger types (Issue #4344)', () => {
   it('speaks the server\'s envelope protocol', () => {
@@ -36,5 +41,15 @@ describe('the CLI mirror of the ask ledger types (Issue #4344)', () => {
     };
     const asCli: Cli.AskAttributionResponse = answer;
     expect(asCli.reply).toBe('hi');
+  });
+
+  it('a capabilities body with version readings type-checks as the CLI\'s (PR3 review)', () => {
+    const body: ServerAsk.AskCapabilitiesBody = {
+      protocol: 1,
+      tools: { claude: false },
+      versions: { claude: { minimum: '2.1.239', installed: '2.1.200', state: 'too_old' } },
+    };
+    const asCli: Cli.AskCapabilitiesBody = body;
+    expect(asCli.versions?.claude.state).toBe('too_old');
   });
 });

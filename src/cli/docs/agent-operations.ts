@@ -986,15 +986,29 @@ same CommandMate server, and you can hand work to them.
   line:
     unavailable/tool_unsupported    the tool has no ask attribution (copilot,
                                     gemini, vibe-local, opencode, antigravity,
-                                    command-code today); sent as before
-    unavailable/server_unsupported  an older server; sent with the old body
+                                    command-code today); sent as before. claude
+                                    or codex older than the server's minimum
+                                    version, or whose version could not be
+                                    read, land here too: --json adds
+                                    "toolVersion": {state: too_old|unreadable,
+                                    minimum, installed} and stderr says which
+    unavailable/server_unsupported  an older server (installed CommandMate is
+                                    newer than the running one); sent with the
+                                    old body. Restart ('commandmate stop' then
+                                    'commandmate start --daemon') or update it
     unavailable/slash_command       a body starting with /, ! or #
     ambiguous/...                   the answering turn also took another input
                                     (shared_turn) or was open at the send
     unmatched/...                   not tied to this ask (absorbed_mid_turn,
                                     turn_incomplete, grace_expired, ...)
   Look at their screen yourself then ('capture <id> --instance <id> --pane');
-  ask never reads the pane for a reply. "notified": true on a matched reply:
+  ask never reads the pane for a reply. To get the reply of a tool ask cannot
+  attribute: 'ask <id> "..." --instance <id> --async' (the relay brings the
+  reply back: transcript turn rows for claude, codex, antigravity,
+  command-code, opencode and opencode-v2; the screen's row for copilot, gemini
+  and vibe-local), or 'send' + 'wait' then 'reply <id> --instance <id> --since
+  <time before the send>' (transcript tools only; empty for copilot, gemini
+  and vibe-local, whose reply is only on 'capture --pane'). "notified": true on a matched reply:
   the turn also took a background-task notification the reply may react to.
   With an id the message is always multi-line, so a claude pane shows it as a
   paste with a '[cmate-ask v1 <id>]' line in front; that is expected.
