@@ -47,6 +47,7 @@ This document provides repository-level guidance for coding agents (including Co
 - Never switch branches in a shared checkout (`git checkout <branch>`); create a separate `git worktree add` directory instead. The main checkout is the running server's cwd and is shared by other agent sessions.
 - Do not `git stash` in a worktree where another agent is writing files; compare against `git show HEAD:<file>` or a separate worktree instead.
 - When a destructive operation was approved for a listed set of names, act on exactly that list; never re-derive it with a glob or pattern (`26*` also matches `264`).
+- Do not drive Antigravity (`agy`) from an agent: no `send`/`ask`/`respond`/relay/`/orchestrate`, Schedule, Auto-Yes or `agy` commands targeting it (Google Antigravity Additional Terms §6, consumer plan). Details: `docs/orchestrate/team.md` "Antigravity の扱い".
 - Before concluding "zero matches" or "no precedent" from a search, run a positive control (a term known to exist, same command shape); search literals with `grep -F`.
 
 ## Memory And Handoff

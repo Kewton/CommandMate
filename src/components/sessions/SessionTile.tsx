@@ -362,6 +362,13 @@ export interface SessionTileProps {
    * own verdict, so a tile mounted outside the grid is never left unwired.
    */
   connectivity?: PendingConnectivity;
+  /**
+   * Issue #4389: when the page filters by role, the instances that matched (roster
+   * order). The instance switch offers only these, the first one is shown first,
+   * a single one hides the switch, and an instance that drops out moves the tile
+   * to the first match. Omitted, the whole roster (unchanged).
+   */
+  instanceIds?: readonly string[];
   className?: string;
 }
 
@@ -398,16 +405,41 @@ function SessionTileWithOwnConnectivity(props: SessionTileProps) {
   return <SessionTileCard {...props} connectivity={connectivity} />;
 }
 
+/**
+ * The roster narrowed to `instanceIds` (Issue #4389), in the roster's order. Ids not in
+ * the roster are ignored; if none is left, the whole roster is kept (the page
+ * only passes ids it resolved from the same roster).
+ */
+export function selectTileInstances(
+  instances: readonly AgentInstance[],
+  instanceIds: readonly string[] | undefined,
+): AgentInstance[] {
+  if (!instanceIds) return [...instances];
+  const wanted = new Set(instanceIds);
+  const narrowed = instances.filter((instance) => wanted.has(instance.id));
+  return narrowed.length > 0 ? narrowed : [...instances];
+}
+
 function SessionTileCard({
   worktree,
   enabled,
   connectivity,
+  instanceIds,
   className = '',
 }: SessionTileProps & { connectivity: PendingConnectivity }) {
   const t = useTranslations('common');
   const tWorktree = useTranslations('worktree');
 
-  const instances = useMemo(() => resolveInstances(worktree), [worktree]);
+  // Keyed by content: the page builds a fresh array on every filter pass.
+  const instanceIdsKey = instanceIds ? instanceIds.join('\u0000') : null;
+  const instances = useMemo(
+    () =>
+      selectTileInstances(
+        resolveInstances(worktree),
+        instanceIdsKey === null ? undefined : instanceIdsKey.split('\u0000'),
+      ),
+    [worktree, instanceIdsKey],
+  );
   // Which instance this tile is showing. Held as an id and re-resolved against
   // the roster on every render, so a roster that changes under the tile (an
   // instance removed elsewhere) falls back to the first entry instead of
