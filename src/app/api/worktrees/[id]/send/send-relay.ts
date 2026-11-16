@@ -26,6 +26,12 @@ export interface RouteRelayState {
   attempt: SendAttemptState | null;
   /** Set when the send service answered ok. */
   sent: { messageId: string; generationAfter: number | null } | null;
+  /**
+   * Issue #4437: the tool policy refused this send. A bound relay is then
+   * withdrawn once settled — its end is the refused tool, and the delivery
+   * would refuse it anyway.
+   */
+  withdraw?: boolean;
 }
 
 /**

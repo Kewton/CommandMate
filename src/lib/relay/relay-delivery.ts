@@ -83,7 +83,9 @@ import {
   stashReplyForOpenRelays,
   type RelayWorkerRef,
 } from '@/lib/relay/relay-bound-reply';
-import { RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
+import { findRelayToolPolicyDenial, RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
+import { withdrawRelay } from '@/lib/relay/relay-service';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
 import {
   noteRelayDeliveryAttempt,
@@ -550,6 +552,9 @@ async function attemptDelivery(
   const listed = getRelayById(db, relayId);
   if (!listed) return 'skipped';
 
+  // Issue #4437: before the readiness check and before any key.
+  if (closeRelayRefusedByToolPolicy(db, listed, kind, listedPayloadId)) return 'skipped';
+
   const listedRequester = resolveRelaySession(db, listed.from);
   const hold = await findRelayHoldReason(
     listedRequester.worktreeId,
@@ -687,6 +692,53 @@ async function attemptDelivery(
     // Held, failed or uncertain: the relay can be withdrawn again (a cancel
     // stops later deliveries; it never takes back what may be in A's composer).
     releaseRelayDelivery(relayId);
+  }
+}
+
+/**
+ * Issue #4437: a relay the tool policy refuses now — antigravity at either end
+ * with no API-key / enterprise use declared — is not typed into. One opened
+ * before the policy (an older server) or before the declaration was taken back
+ * is withdrawn by the cancel path (`cancelled`, its undelivered payload dropped;
+ * no new state). An expiry notice of a relay already closed is dropped only when
+ * the requester it would be typed into is the refused end.
+ *
+ * The declaration is read as stated (no credentials). Never throws: a failure
+ * is logged and refuses the delivery (`true`), the safe direction for a send
+ * that must not happen. Returns whether the delivery must stop here.
+ */
+function closeRelayRefusedByToolPolicy(
+  db: Database.Database,
+  relay: SessionRelay,
+  kind: 'reply' | 'prompt' | 'expired',
+  payloadId: string | null
+): boolean {
+  try {
+    const denial = findRelayToolPolicyDenial({
+      from: resolveRelaySession(db, relay.from).cliToolId,
+      to: resolveRelaySession(db, relay.to).cliToolId,
+      declaration: readUsageDeclaration(),
+    });
+    if (!denial) return false;
+    const fields = { relayId: relay.id, kind, endpoint: denial.endpoint, tool: denial.decision.tool };
+    if (isOpenRelayState(relay.state)) {
+      const withdrawn = withdrawRelay(db, relay.id);
+      logger.info('relay-tool-policy-cancelled', { ...fields, cancelled: withdrawn.ok });
+      return true;
+    }
+    if (kind === 'expired' && denial.endpoint !== 'from') {
+      // The notice goes to the requester, which the policy does not refuse.
+      return false;
+    }
+    clearRelayPending(db, relay.id, Date.now(), payloadId);
+    logger.info('relay-tool-policy-payload-dropped', fields);
+    return true;
+  } catch (error) {
+    logger.warn('relay-tool-policy-check-failed', {
+      relayId: relay.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return true;
   }
 }
 

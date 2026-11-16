@@ -15,6 +15,8 @@ import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-too
 import { BOUNDARY_TOOLS, isSlashCommandBody } from '@/lib/session/session-boundary';
 import type { SendRoleRequest } from './send-role';
 import { isAskId } from '@/lib/ask/envelope';
+import type { SendOrigin } from '@/lib/tool-policy/policy';
+import { readBodyOrigin } from './send-tool-policy';
 import { ASK_PROTOCOL_VERSION } from '@/types/ask-correlation';
 import {
   validateCopilotModelName,
@@ -80,6 +82,16 @@ export interface SendMessageRequest extends SendRoleRequest {
    * is 400 with nothing recorded.
    */
   ask?: { id: string; protocol: number };
+  /**
+   * Issue #4437: who started this send, as the CLI reads it from its own
+   * environment (`terminal` / `session` / `agent` / `schedule` / `unknown`).
+   * Absent (the web UI, an older CLI) is `legacy`; any other string is
+   * `unknown`; a non-string is 400 with nothing recorded. Not verified: it
+   * only decides the tool policy (`send-tool-policy`).
+   */
+  origin?: unknown;
+  /** Issue #4437: what the CLI read its `origin` from; logged with a refusal only (cut at 128). */
+  originEvidence?: unknown;
 }
 
 /** Issue #4344: the 400 for a malformed `ask`. */
@@ -152,11 +164,16 @@ export interface ValidatedSendRequest {
   /** `body.instanceId`, validated; undefined when the request named none. */
   instanceId: string | undefined;
   target: SessionTarget;
+  /** Issue #4437: `body.origin` read (`legacy` when absent). */
+  origin: SendOrigin;
 }
 
 /**
  * Validate the body and resolve its destination, in the handler's order:
  * content, CLI tool, instance, the strict resolution, the model.
+ *
+ * Keys the body does not know are not refused (an older server ignores
+ * `origin` / `originEvidence` the same way, Issue #4437).
  */
 export function validateSendRequest(
   db: Database.Database,
@@ -191,6 +208,11 @@ export function validateSendRequest(
   // Issue #4344: the ask field, before anything is resolved (nothing recorded).
   if (!isValidAskField(body.ask)) {
     return { ok: false, response: NextResponse.json({ error: ASK_FIELD_INVALID }, { status: 400 }) };
+  }
+  // Issue #4437: the origin's type, before anything is resolved (nothing recorded).
+  const origin = readBodyOrigin(body.origin);
+  if (!origin.ok) {
+    return { ok: false, response: NextResponse.json({ error: origin.error }, { status: 400 }) };
   }
   const strictBrief = isStrictBriefChoice(body);
   if (strictBrief && isSlashCommandBody(trimmedContent)) {
@@ -266,7 +288,7 @@ export function validateSendRequest(
 
   return {
     ok: true,
-    value: { trimmedContent, requestedCliToolId, instanceId, target: resolution.target },
+    value: { trimmedContent, requestedCliToolId, instanceId, target: resolution.target, origin: origin.origin },
   };
 }
 
