@@ -114,5 +114,12 @@ test.describe('[#4386] sessions branch filter', () => {
     await expect(list).toContainText('feature/1-a');
     await expect(list).toContainText('main');
     await expect(list).toContainText('renamed-wt');
+
+    const tileToggle = page.getByTestId('sessions-view-mode-tile');
+    await tileToggle.click();
+    await expect(tileToggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('session-tile-e2e-4386-a')).toBeVisible();
+    await expect(page.getByTestId('session-tile-e2e-4386-b')).toBeVisible();
+    await expect(page.getByTestId('session-tile-e2e-4386-c')).toBeVisible();
   });
 });
