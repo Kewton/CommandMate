@@ -67,11 +67,13 @@ import {
 import {
   buildArtifactName,
   deriveServerNamespace,
+  holdRoleArtifact,
   inspectRoleArtifact,
   RoleArtifactError,
   writeLaunchEnvFile,
   removeLaunchEnvFile,
   writeRoleArtifact,
+  type RoleArtifactHold,
   type WrittenRoleArtifact,
 } from '@/lib/agent-roles/artifacts';
 import {
@@ -402,15 +404,31 @@ export interface PreparedRoleLaunch {
  * @throws {RoleLaunchRefusedError} It cannot be used; nothing about it reaches a CLI
  */
 export function prepareRoleLaunch(snapshot: LaunchRoleSnapshot): PreparedRoleLaunch | null {
+  return prepareRoleArtifactLaunch(snapshot, false).prepared;
+}
+
+/**
+ * {@link prepareRoleLaunch}, optionally claiming the file before it is written
+ * (Issue #4419): a deletion of the role in between finds no record yet, and
+ * the claim is what keeps the file until the launch's `requested` is recorded
+ * or the launch ends ({@link runWithLaunchRole}). The claim is given up here
+ * when the preparation throws.
+ */
+function prepareRoleArtifactLaunch(
+  snapshot: LaunchRoleSnapshot,
+  hold: boolean
+): { prepared: PreparedRoleLaunch | null; hold: RoleArtifactHold | null } {
   const { injection, resolution, composition, db } = snapshot;
-  if (injection === null) return null;
+  if (injection === null) return { prepared: null, hold: null };
   if (resolution?.kind !== 'role') throw new RoleLaunchRefusedError('resolve-failed', 'The role was not resolved');
+  let claim: RoleArtifactHold | null = null;
   try {
     const name = buildArtifactName({
       namespace: deriveServerNamespace(db.name),
       roleId: resolution.role.id,
       injectionFingerprint: injection.injectionFingerprint,
     });
+    if (hold) claim = holdRoleArtifact({ adapter: injection.adapter, name });
     const artifact = writeRoleArtifact({ adapter: injection.adapter, name, instructions: injection.instructions });
     inspectRoleArtifact({
       adapter: injection.adapter,
@@ -418,8 +436,9 @@ export function prepareRoleLaunch(snapshot: LaunchRoleSnapshot): PreparedRoleLau
       path: artifact.path,
       expectedFingerprint: artifact.artifactFingerprint,
     });
-    return { artifact, args: buildRoleLaunchArguments(injection, artifact, composition ?? {}) };
+    return { prepared: { artifact, args: buildRoleLaunchArguments(injection, artifact, composition ?? {}) }, hold: claim };
   } catch (error) {
+    claim?.release();
     if (error instanceof RoleArtifactError || error instanceof UatIsolationLaunchRefusedError) {
       throw new RoleLaunchRefusedError('artifact-failed', error.message);
     }
@@ -448,6 +467,13 @@ interface LaunchRoleStore {
    * (no check ran) is treated as not checked (fail-closed).
    */
   agentListing: AgentListVerdict | null;
+  /**
+   * This launch's claim on its file (Issue #4419), from before the file is written
+   * until `requested` is on record, or until the launch ends. Dropped without
+   * release when the record could not be written: the launch goes on with no
+   * record to say it uses the file, so the claim stays for this process.
+   */
+  artifactHold: RoleArtifactHold | null;
 }
 
 function scope(): AsyncLocalStorage<LaunchRoleStore> {
@@ -491,11 +517,14 @@ export async function runWithLaunchRole<T>(snapshot: LaunchRoleSnapshot, fn: () 
     epoch: epochMap().get(evidenceKey(snapshot.target)) ?? 0,
     previousFingerprint: null,
     agentListing: null,
+    artifactHold: null,
   };
   try {
     return await scope().run(store, fn);
   } finally {
     if (store.envFile !== null) removeLaunchEnvFile(store.envFile);
+    // Refused, failed or reused without a launch line: nothing records the file for it.
+    releaseArtifactHold(store);
   }
 }
 
@@ -546,7 +575,7 @@ export function gateLaunchRole(): RoleLaunchRefusedError | null {
   if (!store) return null;
   if (store.snapshot.refusal) return store.snapshot.refusal;
   try {
-    store.prepared = prepareRoleLaunch(store.snapshot);
+    prepareInStore(store);
     return null;
   } catch (error) {
     if (error instanceof RoleLaunchRefusedError) return error;
@@ -644,12 +673,29 @@ function sameTarget(a: LaunchRoleTarget, b: LaunchRoleTarget): boolean {
   return a.worktreeId === b.worktreeId && a.cliToolId === b.cliToolId && (a.instanceId ?? a.cliToolId) === (b.instanceId ?? b.cliToolId);
 }
 
-function recordPhase(store: LaunchRoleStore, phase: RoleLaunchPhase): void {
+/**
+ * Prepare this launch's file under a claim (Issue #4419). A claim from an earlier
+ * preparation of the same launch is given up once the new one is held.
+ */
+function prepareInStore(store: LaunchRoleStore): void {
+  const { prepared, hold } = prepareRoleArtifactLaunch(store.snapshot, true);
+  releaseArtifactHold(store);
+  store.prepared = prepared;
+  store.artifactHold = hold;
+}
+
+function releaseArtifactHold(store: LaunchRoleStore): void {
+  store.artifactHold?.release();
+  store.artifactHold = null;
+}
+
+/** @returns `written` when the record is saved, `failed` when saving it threw, `skipped` when nothing was to be written */
+function recordPhase(store: LaunchRoleStore, phase: RoleLaunchPhase): 'written' | 'failed' | 'skipped' {
   const { snapshot, prepared, generation } = store;
   const { resolution, injection, target, db } = snapshot;
   // Every await between a piece of evidence and this write ends here: `launched` is
   // only ever written for the generation that is current in the same step.
-  if (generation === null || resolution === null || resolution.kind === 'ambiguous' || isStale(store)) return;
+  if (generation === null || resolution === null || resolution.kind === 'ambiguous' || isStale(store)) return 'skipped';
   const role = resolution.kind === 'role' ? resolution.role : null;
   try {
     recordRoleLaunch(db, {
@@ -674,9 +720,11 @@ function recordPhase(store: LaunchRoleStore, phase: RoleLaunchPhase): void {
       compositionSourceFingerprint: injection?.compositionSourceFingerprint ?? null,
       noRoleReason: resolution.kind === 'none' ? resolution.reason : null,
     });
+    return 'written';
   } catch (error) {
     // A record that could not be written leaves the state unknown. It is not a reason to refuse the launch.
     logger.warn('role-launch-record-failed', { phase, error: error instanceof Error ? error.message : String(error) });
+    return 'failed';
   }
 }
 
@@ -706,7 +754,11 @@ function openGeneration(store: LaunchRoleStore): void {
     artifactPath: antigravity ? store.prepared?.artifact.path ?? null : null,
     launch: antigravity ? store : null,
   });
-  recordPhase(store, 'requested');
+  // Issue #4419: from here the record names the file, and the session it is
+  // typed into is what keeps it. With no record the claim stays, unreleased.
+  const outcome = recordPhase(store, 'requested');
+  if (outcome === 'written') releaseArtifactHold(store);
+  else if (outcome === 'failed') store.artifactHold = null;
 }
 
 /**
@@ -745,7 +797,7 @@ export function renderLaunchCommandWithRole(context: AgentLaunchContext, plan: A
   const store = scope().getStore();
   if (!store || !sameTarget(store.snapshot.target, context.target)) return renderAgentLaunchCommand(plan);
   if (store.snapshot.refusal) throw store.snapshot.refusal;
-  if (store.snapshot.injection !== null && store.prepared === null) store.prepared = prepareRoleLaunch(store.snapshot);
+  if (store.snapshot.injection !== null && store.prepared === null) prepareInStore(store);
 
   const { prepared } = store;
   let line: string;

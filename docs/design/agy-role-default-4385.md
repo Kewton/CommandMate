@@ -520,19 +520,21 @@ e2e（`tests/e2e/agent-roles-4117.spec.ts`）には足していない: この作
 使用中の判定（消さない条件）:
 
 1. **最新の起動の記録がその定義のセッションが `absent` でないとき**。生存は `probeSession`（#3329）で聞き、`present` と `unknown`（tmux の時間切れ・ソケットの混雑・起動の失敗）は残す。`isRunning`（`hasSession`）は不明を不在にするので使わない
-2. **記録の前の起動準備（レビュー P2）**: 起動は定義を書き・検査してから、`agy --version`・ペイン・`agy agent` を待ち、その後で `requested` を記録する。この間はレコードにもセッションにも現れない。**同じプロセス内の準備の印**で守る: `writeRoleArtifact`（新規・再利用）と `inspectRoleArtifact` がパスごとに時刻を `globalThis.__roleArtifactPreparedAt` に残し、`removeRoleArtifact` は `ROLE_ARTIFACT_PREPARED_HOLD_MS`（10 分）以内の印があれば消さない（`recently-prepared`）。印の確認から unlink までは同期で、同じプロセスの起動が間に入らない。排他（ロック）にしなかったのは、起動の準備が `src/lib/session/role-launch.ts`（この PR の scope 外）にあり、印は scope 内の `artifacts.ts` だけで置けるため
+2. **記録の前の起動準備（レビュー P2、再指示 2 で起動の流れに結び付けた）**: 起動は定義を書き・検査してから、`agy --version`・ペイン・`agy agent` を待ち、その後で `requested` を記録する。この間はレコードにもセッションにも現れない。**起動の予約（hold）**で守る: `role-launch.ts` の `prepareInStore`（`gateLaunchRole` と `renderLaunchCommandWithRole` の準備）は、定義を書く前に `holdRoleArtifact` でパスを予約し、`openGeneration` で `requested` の記録が保存されたとき、または `runWithLaunchRole` の `finally`（拒否・失敗・中止・再接続で行を作らずに抜けた）で外す。記録の保存に失敗して起動が続くときは外さない（プロセスの間は予約が残る）。予約はパスごとの参照カウント（`globalThis.__roleArtifactHolds`）で、同じパスを 2 つの起動が準備していれば両方が外すまで残る。`removeRoleArtifact` は予約があれば消さない（`launch-preparing`）。予約の確認から unlink までは同期で、同じプロセスの起動が間に入らない。予約に時間の失効は無い。記録の後はその記録とセッション（ペインは行を組み立てる前に作られる）が守る。予約を取らない準備（probe の `explicit-launch.ts`、Schedule の `resolveScheduleRole`）は、従来の印（`globalThis.__roleArtifactPreparedAt`）の安全網で `ROLE_ARTIFACT_PREPARED_HOLD_MS`（24 時間）残す（`recently-prepared`）。予約中のパスにはこの印を付けない（外したときすぐ消せるように）
 3. 確認と unlink の間の差し替え（レビュー P3-1）: 指紋は開いた記述子から読んだバイトで取り直し、unlink の直前に lstat を取り直して inode・dev が違えば残す（`replaced`）
 
 残る窓（直していない）:
 
-- 準備から `requested` の記録まで 10 分を超える起動（通常は数十秒以内）。超えたら印は切れるが、その後は記録とセッションで守られる。記録の後にセッションが作られるまでの間に印が切れていることはまず無い
-- 別のプロセス（別のサーバー）の起動準備は見えない。ただし名前にサーバーの名前空間が入るので、別のサーバーの定義は候補にならない。同じ DB を共有する 2 つのサーバーは想定しない
-- 起動の記録の書き込みが失敗して続く起動（`role-launch.ts` の `recordPhase` は失敗を警告にして進む）は、古い記録で判定する
+- 予約・印はメモリだけ: 別のプロセス（別のサーバー）の起動準備と、サーバーの再起動の前の起動は見えない。ただし名前にサーバーの名前空間が入るので、別のサーバーの定義は候補にならない。同じ DB を共有する 2 つのサーバーは想定しない
+- 記録の保存に失敗して続いた起動の予約は、プロセスが終わるまで外れない（その定義はロールを削除しても残り、`launch-preparing` でログに出る。安全側）
+- probe・Schedule の準備は 24 時間の印だけで守る。24 時間を超えて使い続ける probe・Schedule の定義は消えうる
+- 予約中のパスを probe が同時に準備すると、印は付かず予約だけが守る（予約が外れた後の probe は守られない。probe はロール id を自分で名乗るので、実際のロールと同じ名前になることはまず無い）
 - lstat の再照合から unlink までの、同じ uid による差し替え
 - unlink の後に rmdir が失敗すると、空の `cm-role-…/` が残り、再試行されない（記録は残るが、次の削除の機会は無い）。ログに `directory-left:<code>` で出る。agy が `agent.md` の無いディレクトリを一覧でどう扱うかは確かめていない（agy を起こしていない）
 
 ## 改訂の履歴
 
+- 2026-11-16 #4419 PR2 再指示 2: §15 の 2 を時間の印から起動の予約（`requested` の記録まで、または起動の終わりまで。参照カウント）へ。時間の印は予約を取らない準備の安全網（24 時間）に。残る窓を書き直した
 - 2026-11-16 #4419 PR2 再指示 1: §15 を足した（生存は `probeSession` で不明を残す、記録の前の準備を同じプロセスの印で守る、unlink の直前の inode の再照合、rmdir の失敗をログと手順に）
 
 - 2026-11-15 A4 再指示 1: 遅い 409 でも行に理由と戻した記録を残す、`/sessions` のタイルにも同じ扱い（`useRoleRefusalNotice` を共通に）、not-applied の文から稼働の状態の断定を外した

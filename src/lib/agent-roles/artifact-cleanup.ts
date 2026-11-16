@@ -18,7 +18,8 @@
  *   socket, a failed spawn). Only `absent` lets it go.
  * - **Not being prepared.** A launch prepares its file before it records
  *   anything; {@link removeRoleArtifact} leaves a file a launch in this process
- *   prepared within `ROLE_ARTIFACT_PREPARED_HOLD_MS`.
+ *   holds (`holdRoleArtifact`: until its `requested` is recorded or it ends), and
+ *   one a probe or Schedule prepared within `ROLE_ARTIFACT_PREPARED_HOLD_MS`.
  * - **Never in the way.** Nothing here throws; the role is already deleted, and
  *   what was left is reported for a warning.
  *

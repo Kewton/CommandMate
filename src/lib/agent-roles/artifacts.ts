@@ -71,6 +71,8 @@ type Env = Readonly<Record<string, string | undefined>>;
 declare global {
   // eslint-disable-next-line no-var
   var __roleArtifactPreparedAt: Map<string, number> | undefined;
+  // eslint-disable-next-line no-var
+  var __roleArtifactHolds: Map<string, number> | undefined;
 }
 
 /** Moves the data root (Claude, Command Code, OpenCode V1 and V2). Honoured in production. */
@@ -778,21 +780,28 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
 // ---------------------------------------------------------------------------
 
 /**
- * How long a file stays held after a launch in this process wrote, reused or
- * inspected it. A launch prepares its file before anything records it: between
- * the two it waits on `agy --version`, the pane and `agy agent` (seconds, tens
- * at most), and a deletion in that gap would find neither a record nor a live
- * session. Generous on purpose; past it the launch has recorded `requested` and
- * its session is what holds the file.
+ * The safety net for a file prepared outside a held launch: a probe
+ * (`./explicit-launch.ts`) and a Schedule's role (`resolveScheduleRole`) write
+ * or inspect a file and record nothing. Such a file stays for this long after
+ * its last preparation. A launch of a session holds its file instead
+ * ({@link holdRoleArtifact}), and that hold, not this time, is what keeps it.
  */
-export const ROLE_ARTIFACT_PREPARED_HOLD_MS = 10 * 60_000;
+export const ROLE_ARTIFACT_PREPARED_HOLD_MS = 24 * 60 * 60_000;
 
 function preparedAt(): Map<string, number> {
   return getOrInitGlobal('__roleArtifactPreparedAt', () => new Map<string, number>());
 }
 
-/** A launch in this process is about to use `path`. */
+function holds(): Map<string, number> {
+  return getOrInitGlobal('__roleArtifactHolds', () => new Map<string, number>());
+}
+
+/**
+ * A file was written, reused or inspected. Under a hold the hold speaks for it;
+ * otherwise it is timed by {@link ROLE_ARTIFACT_PREPARED_HOLD_MS}.
+ */
 function notePrepared(path: string): void {
+  if (holds().has(path)) return;
   const now = Date.now();
   const marks = preparedAt();
   for (const [known, at] of marks) {
@@ -806,6 +815,43 @@ function isRecentlyPrepared(path: string): boolean {
   return at !== undefined && Date.now() - at <= ROLE_ARTIFACT_PREPARED_HOLD_MS;
 }
 
+/** One launch's claim on a file, from before it is written until the launch is on record. */
+export interface RoleArtifactHold {
+  readonly path: string;
+  /** Give the claim up. Safe to call twice. */
+  release: () => void;
+}
+
+/**
+ * Claim the file a launch in this process is about to write, before it writes
+ * it: {@link removeRoleArtifact} leaves a held file alone however long the
+ * launch takes. Claims are counted, so two launches preparing the same file
+ * keep it until both have let go. A claim is not timed: one never released
+ * (its launch went on without a record) keeps the file for this process.
+ *
+ * @param options - The same options the file will be written with
+ * @throws {RoleArtifactError} The name has no place for this adapter
+ */
+export function holdRoleArtifact(
+  input: { adapter: AgentRoleCliTool; name: string },
+  options: ArtifactOptions = {}
+): RoleArtifactHold {
+  const { path } = resolveArtifactLocation(input.adapter, input.name, options);
+  const counts = holds();
+  counts.set(path, (counts.get(path) ?? 0) + 1);
+  let held = true;
+  return {
+    path,
+    release: () => {
+      if (!held) return;
+      held = false;
+      const left = (holds().get(path) ?? 1) - 1;
+      if (left > 0) holds().set(path, left);
+      else holds().delete(path);
+    },
+  };
+}
+
 /** Why a definition was left where it is. */
 export type RoleArtifactKeptReason =
   /** Nothing is there (already gone, or the agents directory does not exist). */
@@ -814,7 +860,9 @@ export type RoleArtifactKeptReason =
   | 'unsupported-adapter'
   /** The recorded path is not where this build keeps that name. */
   | 'unexpected-location'
-  /** A launch in this process prepared it within {@link ROLE_ARTIFACT_PREPARED_HOLD_MS}. */
+  /** A launch in this process holds it: prepared, and not yet on record ({@link holdRoleArtifact}). */
+  | 'launch-preparing'
+  /** A probe or Schedule in this process prepared it within {@link ROLE_ARTIFACT_PREPARED_HOLD_MS}. */
   | 'recently-prepared'
   /** A symlink, another owner, loose permissions, or not a regular file. */
   | 'not-ours'
@@ -849,7 +897,8 @@ function errorCode(error: unknown): string {
 /**
  * Remove one generated Antigravity definition (`<agents>/<name>/agent.md` and its
  * own directory), only when every byte is the one recorded at launch, nothing
- * else is in its directory, and no launch in this process prepared it lately.
+ * else is in its directory, no launch in this process holds it, and no probe or
+ * Schedule of this process prepared it lately.
  * The bytes hashed are read from the same inode that is unlinked: the path is
  * looked up again just before, and a different inode is left alone. Whether the
  * role is gone and no live session runs on it is the caller's to decide
@@ -875,6 +924,7 @@ export function removeRoleArtifact(
   if (location.path !== path) return kept('unexpected-location');
   if (sharedHookWritePolicy(adapter, [path], options.env ?? process.env) === 'read-only') return kept('read-only');
   // Synchronous from here to the unlink, so no launch of this process slips in between.
+  if (holds().has(path)) return kept('launch-preparing');
   if (isRecentlyPrepared(path)) return kept('recently-prepared');
   const own = dirname(path);
   try {
