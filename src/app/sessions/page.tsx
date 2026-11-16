@@ -435,9 +435,16 @@ export default function SessionsPage() {
   const handleRoleChange = useCallback(
     (role: SessionsRoleCondition) => {
       noteUserChange();
-      setRoleCondition(role);
+      // A default whose roles were all deleted keeps their ids so the list stays
+      // narrowed (#4388 I6). Choosing roles here replaces them: ids of roles that
+      // no longer exist are not carried into the user's condition (nor saved back).
+      setRoleCondition(
+        rolesReadiness === 'ready' && existingRoleIds && role.roleIds
+          ? { ...role, roleIds: role.roleIds.filter((id) => existingRoleIds.includes(id)) }
+          : role
+      );
     },
-    [noteUserChange]
+    [noteUserChange, rolesReadiness, existingRoleIds]
   );
   const openFilter = useCallback(() => {
     setIsFilterOpen(true);

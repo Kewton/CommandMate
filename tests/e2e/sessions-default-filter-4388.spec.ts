@@ -7,6 +7,7 @@
  * - Save the default on PC → reopen /sessions (PC and phone) → it is applied.
  * - Change the condition, go to another screen and back → the default again.
  * - A role of the default was deleted → notice, the rest still filters.
+ * - Every role of the default was deleted (nothing else set) → notice, 0 sessions, not all.
  */
 import { test, expect, type Page, type Route } from '@playwright/test';
 import { mockStartPreview } from './fixtures/start-preview-helpers';
@@ -228,5 +229,26 @@ test.describe('[#4388] sessions default filter', () => {
     await expect(item(page, 'e2e-4388-b')).toHaveCount(0);
     await expect(item(page, 'e2e-4388-c')).toHaveCount(0);
     await expect(page.getByTestId('sessions-filter-differs')).toHaveCount(0);
+  });
+
+  test('every role of the default deleted: a notice, and the list stays narrowed (0 sessions, not all)', async ({ page }) => {
+    const store: Store = { saved: { ...EMPTY, roleIds: ['gone'] }, puts: [] };
+    await mockApi(page, store);
+    await page.goto('/sessions');
+    await expect(page.getByTestId('sessions-default-filter-dropped-roles')).toBeVisible();
+    await expect(page.getByTestId('sessions-filter-count')).toHaveText('1');
+    await expect(item(page, 'e2e-4388-a')).toHaveCount(0);
+    await expect(item(page, 'e2e-4388-b')).toHaveCount(0);
+    await expect(item(page, 'e2e-4388-c')).toHaveCount(0);
+    await expect(page.getByTestId('sessions-filter-differs')).toHaveCount(0);
+
+    // Clear widens on purpose (and is a difference from the default); nothing is saved.
+    await page.getByTestId('sessions-filter-button').click();
+    await page.getByTestId('sessions-filter-clear').click();
+    await page.keyboard.press('Escape');
+    await expect(item(page, 'e2e-4388-a')).toBeVisible();
+    await expect(item(page, 'e2e-4388-c')).toBeVisible();
+    await expect(page.getByTestId('sessions-filter-differs')).toHaveCount(1);
+    expect(store.puts).toEqual([]);
   });
 });

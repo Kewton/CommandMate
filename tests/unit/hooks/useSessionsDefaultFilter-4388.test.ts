@@ -70,7 +70,10 @@ interface Props {
   existingRoleIds: readonly string[] | null;
 }
 
-function setup(initial: Props = { rolesReadiness: 'ready', existingRoleIds: ['review', 'impl'] }) {
+function setup(
+  initial: Props = { rolesReadiness: 'ready', existingRoleIds: ['review', 'impl'] },
+  reactStrictMode = false
+) {
   const applied: SessionsFilterCondition[] = [];
   const hook = renderHook(
     (props: Props) => {
@@ -90,7 +93,7 @@ function setup(initial: Props = { rolesReadiness: 'ready', existingRoleIds: ['re
       };
       return { current, df, userSets };
     },
-    { initialProps: initial }
+    { initialProps: initial, reactStrictMode }
   );
   return { ...hook, applied };
 }
@@ -123,10 +126,10 @@ describe('[#4388] useSessionsDefaultFilter', () => {
     expect(result.current.df.differs).toBe(false);
   });
 
-  it('every role deleted: roleIds becomes [] and the notice is still raised', async () => {
+  it('every role deleted (nothing else left): the deleted ids are kept so the list stays narrowed (I6), and the notice is still raised', async () => {
     const { result } = setup({ rolesReadiness: 'ready', existingRoleIds: [] });
     await act(async () => getCalls[0].resolve(stored(cond({ roleIds: ['gone'] }))));
-    expect(result.current.current.roleIds).toEqual([]);
+    expect(result.current.current.roleIds).toEqual(['gone']);
     expect(result.current.df.droppedRoleIds).toEqual(['gone']);
   });
 
@@ -240,8 +243,11 @@ describe('[#4388] useSessionsDefaultFilter', () => {
       act(() => void result.current.df.saveAsDefault());
       act(() => result.current.userSets(cond({ branchPattern: 'second' })));
       act(() => void result.current.df.saveAsDefault());
-      await act(async () => putCalls[1].d.resolve(stored(cond({ branchPattern: 'second' }))));
+      // I3': the second PUT waits for the first, so the older reply always comes first.
+      expect(putCalls).toHaveLength(1);
       await act(async () => putCalls[0].d.resolve(stored(cond({ branchPattern: 'first' }))));
+      expect(result.current.df.saved).toBe(false);
+      await act(async () => putCalls[1].d.resolve(stored(cond({ branchPattern: 'second' }))));
       expect(result.current.df.defaults?.branchPattern).toBe('second');
       expect(result.current.df.saved).toBe(true);
     });
@@ -253,8 +259,9 @@ describe('[#4388] useSessionsDefaultFilter', () => {
       act(() => void result.current.df.saveAsDefault());
       act(() => result.current.userSets(cond({ branchPattern: 'second' })));
       act(() => void result.current.df.saveAsDefault());
-      await act(async () => putCalls[1].d.resolve(stored(cond({ branchPattern: 'second' }))));
       await act(async () => putCalls[0].d.reject(new ApiError('boom', 400)));
+      expect(result.current.df.saveError).toBeNull();
+      await act(async () => putCalls[1].d.resolve(stored(cond({ branchPattern: 'second' }))));
       expect(result.current.df.saveError).toBeNull();
       expect(result.current.df.defaults?.branchPattern).toBe('second');
     });
@@ -328,5 +335,132 @@ describe('[#4388] useSessionsDefaultFilter', () => {
     rerender({ rolesReadiness: 'unavailable', existingRoleIds: null });
     await waitFor(() => expect(result.current.df.differs).toBe(false));
   });
-});
 
+  describe("I3': saves are serial, so the server's last write is the default the page shows", () => {
+    /** The server: writes a PUT's body when it handles it, and answers with what it wrote. */
+    let serverValue: SessionsFilterCondition | null = null;
+    const handled = new Set<number>();
+    /** Handle every PUT that has reached the server, newest first (the reverse of the clicks). */
+    async function serverHandlesNewestFirst() {
+      for (;;) {
+        const waiting = putCalls.map((c, i) => i).filter((i) => !handled.has(i));
+        if (waiting.length === 0) return;
+        for (const i of waiting.reverse()) {
+          handled.add(i);
+          serverValue = putCalls[i].body;
+          await act(async () => putCalls[i].d.resolve(stored(putCalls[i].body)));
+        }
+      }
+    }
+    beforeEach(() => {
+      serverValue = null;
+      handled.clear();
+    });
+
+    it('A then B saved back to back, the server taking B first: server and page both end on B, and a fresh read gives B', async () => {
+      const { result, unmount } = setup();
+      await act(async () => getCalls[0].resolve({ success: true, filter: EMPTY, configured: false }));
+      act(() => result.current.userSets(cond({ branchPattern: 'A' })));
+      act(() => void result.current.df.saveAsDefault());
+      act(() => result.current.userSets(cond({ branchPattern: 'B' })));
+      act(() => void result.current.df.saveAsDefault());
+      await serverHandlesNewestFirst();
+      // What the page shows as the default is what the server holds, and it is B.
+      expect(result.current.df.defaults).toEqual(serverValue);
+      expect(serverValue).toEqual(cond({ branchPattern: 'B' }));
+      expect(result.current.df.differs).toBe(false);
+      expect(result.current.df.saving).toBe(false);
+      expect(result.current.df.saved).toBe(true);
+      // Reopen: the default read back from the server is B as well.
+      unmount();
+      const reopened = setup();
+      await act(async () => getCalls[getCalls.length - 1].resolve(stored(serverValue!)));
+      expect(reopened.result.current.current).toEqual(cond({ branchPattern: 'B' }));
+      expect(reopened.result.current.df.differs).toBe(false);
+    });
+
+    it('A, B, C clicked while A is out: only the last one (C) waits, B is never sent', async () => {
+      const { result } = setup();
+      await act(async () => getCalls[0].resolve({ success: true, filter: EMPTY, configured: false }));
+      for (const p of ['A', 'B', 'C']) {
+        act(() => result.current.userSets(cond({ branchPattern: p })));
+        act(() => void result.current.df.saveAsDefault());
+      }
+      await serverHandlesNewestFirst();
+      expect(putCalls.map((c) => c.body.branchPattern)).toEqual(['A', 'C']);
+      expect(serverValue?.branchPattern).toBe('C');
+      expect(result.current.df.defaults?.branchPattern).toBe('C');
+    });
+
+    it('the first save fails while the next waits: the next is still sent, its result is shown', async () => {
+      const { result } = setup();
+      await act(async () => getCalls[0].resolve({ success: true, filter: EMPTY, configured: false }));
+      act(() => result.current.userSets(cond({ branchPattern: 'A' })));
+      act(() => void result.current.df.saveAsDefault());
+      act(() => result.current.userSets(cond({ branchPattern: 'B' })));
+      act(() => void result.current.df.saveAsDefault());
+      await act(async () => putCalls[0].d.reject(new ApiError('boom', 500)));
+      expect(putCalls).toHaveLength(2);
+      expect(result.current.df.saveError).toBeNull();
+      await act(async () => putCalls[1].d.resolve(stored(cond({ branchPattern: 'B' }))));
+      expect(result.current.df.defaults?.branchPattern).toBe('B');
+      expect(result.current.df.saveError).toBeNull();
+      expect(result.current.df.saved).toBe(true);
+    });
+  });
+
+  describe('I6: every chosen role deleted is not "no role chosen"', () => {
+    it('roleIds all deleted and nothing else: the role condition stays (matches nothing), notice, no mark', async () => {
+      const { result } = setup({ rolesReadiness: 'ready', existingRoleIds: ['review'] });
+      await act(async () => getCalls[0].resolve(stored(cond({ roleIds: ['gone'] }))));
+      expect(result.current.current).toEqual(cond({ roleIds: ['gone'] }));
+      expect(result.current.df.droppedRoleIds).toEqual(['gone']);
+      expect(result.current.df.defaults).toEqual(cond({ roleIds: ['gone'] }));
+      expect(result.current.df.differs).toBe(false);
+      // Clearing is a real difference from the default.
+      act(() => result.current.userSets(EMPTY));
+      expect(result.current.df.differs).toBe(true);
+      act(() => result.current.df.resetToDefault());
+      expect(result.current.current).toEqual(cond({ roleIds: ['gone'] }));
+      expect(result.current.df.differs).toBe(false);
+    });
+
+    it('control: no role chosen from the start stays "no role condition"', async () => {
+      const { result, applied } = setup({ rolesReadiness: 'ready', existingRoleIds: ['review'] });
+      await act(async () => getCalls[0].resolve(stored(cond({ branchPattern: 'x' }))));
+      expect(applied).toEqual([cond({ branchPattern: 'x' })]);
+      expect(result.current.df.droppedRoleIds).toEqual([]);
+    });
+
+    it('control: a branch condition is left, so the deleted roles are just left out', async () => {
+      const { result } = setup({ rolesReadiness: 'ready', existingRoleIds: [] });
+      await act(async () => getCalls[0].resolve(stored(cond({ branchPattern: '^feature/', roleIds: ['gone'] }))));
+      expect(result.current.current).toEqual(cond({ branchPattern: '^feature/' }));
+      expect(result.current.df.droppedRoleIds).toEqual(['gone']);
+    });
+  });
+
+  describe('I7: an older GET (StrictMode runs the effect twice) never overrides the newer one', () => {
+    it('the first GET fails after the second applied: the default, "back to default" and the mark stay', async () => {
+      const { result } = setup(undefined, true);
+      expect(getCalls).toHaveLength(2);
+      await act(async () => getCalls[1].resolve(stored(cond({ branchPattern: '^feature/' }))));
+      expect(result.current.current.branchPattern).toBe('^feature/');
+      await act(async () => getCalls[0].reject(new ApiError('Internal server error', 500)));
+      expect(result.current.df.hasDefault).toBe(true);
+      expect(result.current.df.defaults).toEqual(cond({ branchPattern: '^feature/' }));
+      expect(result.current.df.differs).toBe(false);
+      expect(result.current.current.branchPattern).toBe('^feature/');
+    });
+
+    it('the first GET succeeds late with an older value: ignored', async () => {
+      const { result, applied } = setup(undefined, true);
+      expect(getCalls).toHaveLength(2);
+      await act(async () => getCalls[1].resolve(stored(cond({ branchPattern: '^feature/' }))));
+      await act(async () => getCalls[0].resolve(stored(cond({ branchPattern: 'main' }))));
+      expect(result.current.df.defaults).toEqual(cond({ branchPattern: '^feature/' }));
+      expect(result.current.df.differs).toBe(false);
+      expect(applied).toEqual([cond({ branchPattern: '^feature/' })]);
+    });
+  });
+});

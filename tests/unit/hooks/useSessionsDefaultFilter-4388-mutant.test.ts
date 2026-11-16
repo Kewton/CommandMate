@@ -2,7 +2,7 @@
  * Positive controls for useSessionsDefaultFilter (Issue #4388), without touching the
  * repository: the hook's source is copied into a fresh `os.tmpdir()` directory with
  * one guard removed, and the scenario of useSessionsDefaultFilter-4388.test.ts must
- * then break its invariant (I1 / I2 / I3). The temp directory is removed after each case.
+ * then break its invariant (I1 / I2 / I3 and I3' / I6 / I7). The temp directory is removed after each case.
  *
  * Runs in the node environment (a module outside the project can only be imported
  * there) with vitest's own jsdom environment set up on the global by hand.
@@ -29,7 +29,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 const getCalls: Array<Deferred<unknown>> = [];
-const putCalls: Array<Deferred<unknown>> = [];
+const putCalls: Array<{ body: SessionsFilterCondition; d: Deferred<unknown> }> = [];
 
 vi.mock('@/lib/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-client')>();
@@ -42,9 +42,9 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
         getCalls.push(d);
         return d.promise;
       }),
-      putDefaultFilter: vi.fn(() => {
+      putDefaultFilter: vi.fn((body: SessionsFilterCondition) => {
         const d = deferred<unknown>();
-        putCalls.push(d);
+        putCalls.push({ body, d });
         return d.promise;
       }),
     },
@@ -101,7 +101,7 @@ interface Props {
   existingRoleIds: readonly string[] | null;
 }
 
-function mount(useHook: typeof HookModule.useSessionsDefaultFilter, initial: Props) {
+function mount(useHook: typeof HookModule.useSessionsDefaultFilter, initial: Props, reactStrictMode = false) {
   return rtl.renderHook(
     (props: Props) => {
       const [current, setCurrent] = react.useState<SessionsFilterCondition>(EMPTY);
@@ -112,7 +112,7 @@ function mount(useHook: typeof HookModule.useSessionsDefaultFilter, initial: Pro
       };
       return { current, df, userSets };
     },
-    { initialProps: initial }
+    { initialProps: initial, reactStrictMode }
   );
 }
 
@@ -122,8 +122,29 @@ const MUTANTS = {
     from: "if (rolesReadiness === 'ready' && existingRoleIds) {\n      const result",
     to: 'if (existingRoleIds) {\n      const result',
   },
-  I3: { from: 'mounted.current && seq === saveSeq.current', to: 'mounted.current' },
+  // I3 / I3': send every save at once instead of waiting for the one that is out.
+  I3: { from: '    if (saveInFlight.current) {\n', to: '    if (false) {\n' },
+  I6: {
+    from: 'if (result.droppedRoleIds.length > 0 && isEmptyCondition(result.condition)) {',
+    to: 'if (false) {',
+  },
+  I7: { from: '      if (!active) return;\n', to: '      if (!mounted.current) return;\n' },
 };
+
+/** The server handles every PUT that reached it, newest first; returns what it holds last. */
+async function serverHandlesNewestFirst(): Promise<string | null> {
+  let value: string | null = null;
+  const handled = new Set<number>();
+  for (;;) {
+    const waiting = putCalls.map((_, i) => i).filter((i) => !handled.has(i));
+    if (waiting.length === 0) return value;
+    for (const i of waiting.reverse()) {
+      handled.add(i);
+      value = putCalls[i].body.branchPattern;
+      await rtl.act(async () => putCalls[i].d.resolve(stored(putCalls[i].body)));
+    }
+  }
+}
 
 async function scenarioI1(useHook: typeof HookModule.useSessionsDefaultFilter): Promise<string> {
   const { result } = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: [] });
@@ -138,15 +159,30 @@ async function scenarioI2(useHook: typeof HookModule.useSessionsDefaultFilter): 
   return result.current.df.droppedRoleIds;
 }
 
-async function scenarioI3(useHook: typeof HookModule.useSessionsDefaultFilter): Promise<string | undefined> {
+async function scenarioI3(
+  useHook: typeof HookModule.useSessionsDefaultFilter
+): Promise<{ server: string | null; shown: string | undefined }> {
   const { result } = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: [] });
   await rtl.act(async () => getCalls[0].resolve({ success: true, filter: EMPTY, configured: false }));
   rtl.act(() => void result.current.df.saveAsDefault());
   rtl.act(() => result.current.userSets(cond({ branchPattern: 'second' })));
   rtl.act(() => void result.current.df.saveAsDefault());
-  await rtl.act(async () => putCalls[1].resolve(stored(cond({ branchPattern: 'second' }))));
-  await rtl.act(async () => putCalls[0].resolve(stored(EMPTY)));
-  return result.current.df.defaults?.branchPattern;
+  const server = await serverHandlesNewestFirst();
+  return { server, shown: result.current.df.defaults?.branchPattern };
+}
+
+async function scenarioI6(useHook: typeof HookModule.useSessionsDefaultFilter): Promise<string[]> {
+  const { result } = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: [] });
+  await rtl.act(async () => getCalls[0].resolve(stored(cond({ roleIds: ['gone'] }))));
+  return result.current.current.roleIds;
+}
+
+async function scenarioI7(useHook: typeof HookModule.useSessionsDefaultFilter): Promise<boolean> {
+  const { result } = mount(useHook, { rolesReadiness: 'ready', existingRoleIds: [] }, true);
+  expect(getCalls).toHaveLength(2);
+  await rtl.act(async () => getCalls[1].resolve(stored(cond({ branchPattern: '^feature/' }))));
+  await rtl.act(async () => getCalls[0].reject(new Error('stale read failed')));
+  return result.current.df.hasDefault;
 }
 
 describe('[#4388] useSessionsDefaultFilter guards (positive / negative controls)', () => {
@@ -167,11 +203,29 @@ describe('[#4388] useSessionsDefaultFilter guards (positive / negative controls)
   });
 
   it('I3: the unmodified copy keeps the latest save; without the latest-request guard an older reply wins', async () => {
-    expect(await scenarioI3((await loadHook()).useSessionsDefaultFilter)).toBe('second');
+    // Unmodified: one PUT at a time, so the server and the page both end on the latest.
+    expect(await scenarioI3((await loadHook()).useSessionsDefaultFilter)).toEqual({ server: 'second', shown: 'second' });
     fs.rmSync(dir!, { recursive: true, force: true });
     rtl.cleanup();
     getCalls.length = 0;
     putCalls.length = 0;
-    expect(await scenarioI3((await loadHook(MUTANTS.I3)).useSessionsDefaultFilter)).toBe('');
+    // Sent at once, the server takes the newer first and the older one is written (and shown) last.
+    expect(await scenarioI3((await loadHook(MUTANTS.I3)).useSessionsDefaultFilter)).toEqual({ server: '', shown: '' });
+  });
+
+  it('I6: the unmodified copy keeps a default whose roles were all deleted narrowed; without the guard it widens to everything', async () => {
+    expect(await scenarioI6((await loadHook()).useSessionsDefaultFilter)).toEqual(['gone']);
+    fs.rmSync(dir!, { recursive: true, force: true });
+    rtl.cleanup();
+    getCalls.length = 0;
+    expect(await scenarioI6((await loadHook(MUTANTS.I6)).useSessionsDefaultFilter)).toEqual([]);
+  });
+
+  it('I7: the unmodified copy drops a stale GET failure under StrictMode; judged by the shared mounted flag it wipes the default', async () => {
+    expect(await scenarioI7((await loadHook()).useSessionsDefaultFilter)).toBe(true);
+    fs.rmSync(dir!, { recursive: true, force: true });
+    rtl.cleanup();
+    getCalls.length = 0;
+    expect(await scenarioI7((await loadHook(MUTANTS.I7)).useSessionsDefaultFilter)).toBe(false);
   });
 });

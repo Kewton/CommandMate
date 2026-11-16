@@ -59,6 +59,8 @@ vi.mock('@/hooks/useSessionsRoles', () => ({
 
 type GetReply = { ok: true; body: unknown } | { ok: false; error: unknown };
 let getReply: GetReply;
+/** When set, each GET waits here until the test answers it (I7). */
+let getQueue: Array<{ resolve: (v: unknown) => void; reject: (e: unknown) => void }> | null = null;
 let putReply: (body: SessionsFilterCondition) => Promise<unknown>;
 const putBodies: SessionsFilterCondition[] = [];
 
@@ -69,6 +71,9 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
     sessionsApi: {
       ...actual.sessionsApi,
       getDefaultFilter: vi.fn(async () => {
+        if (getQueue) {
+          return new Promise((resolve, reject) => getQueue!.push({ resolve, reject }));
+        }
         if (getReply.ok) return getReply.body;
         throw getReply.error;
       }),
@@ -119,6 +124,7 @@ beforeEach(() => {
   getReply = { ok: true, body: { success: true, filter: EMPTY, configured: false } };
   putReply = async (body) => ({ success: true, filter: body, configured: true });
   putBodies.length = 0;
+  getQueue = null;
 });
 afterEach(() => cleanup());
 
@@ -323,5 +329,77 @@ describe('[#4388] /sessions default filter on the page', () => {
     expect(screen.getByTestId('sessions-branch-filter')).toHaveValue('main');
     expect(shown()).toEqual(['3']);
     expect(mark()).not.toBeNull();
+  });
+
+  describe('I6: every chosen role deleted does not widen the list', () => {
+    it('the default chose only a deleted role: notice, 0 rows (not every row), no mark', async () => {
+      getReply = saved(cond({ roleIds: ['gone'] }));
+      await renderPage();
+      expect(screen.getByTestId('sessions-default-filter-dropped-roles')).toHaveTextContent(
+        '削除されたロールが含まれていました'
+      );
+      expect(shown()).toEqual([]);
+      expect(screen.getByTestId('sessions-filter-count')).toHaveTextContent('1');
+      expect(mark()).toBeNull();
+      // Clear widens on purpose, and that is a difference from the default.
+      openPanel();
+      fireEvent.click(screen.getByTestId('sessions-filter-clear'));
+      expect(shown()).toEqual(['1', '2', '3']);
+      expect(mark()).not.toBeNull();
+      fireEvent.click(screen.getByTestId('sessions-default-filter-reset'));
+      expect(shown()).toEqual([]);
+      expect(mark()).toBeNull();
+    });
+
+    it('control: a default with no role chosen from the start filters nothing', async () => {
+      getReply = saved(EMPTY);
+      await renderPage();
+      expect(shown()).toEqual(['1', '2', '3']);
+      expect(screen.queryByTestId('sessions-default-filter-dropped-roles')).toBeNull();
+      expect(mark()).toBeNull();
+    });
+
+    it('choosing a role that exists replaces the deleted one (it is not saved back)', async () => {
+      getReply = saved(cond({ roleIds: ['gone'] }));
+      await renderPage();
+      openPanel();
+      fireEvent.click(screen.getByTestId('sessions-role-filter-role-review'));
+      expect(shown()).toEqual(['1', '3']);
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('sessions-default-filter-save'));
+      });
+      expect(putBodies).toEqual([cond({ roleIds: ['review'] })]);
+    });
+  });
+
+  describe('I7: under StrictMode an older GET reply never replaces the newer one', () => {
+    async function openStrictWithTwoReads() {
+      getQueue = [];
+      render(<SessionsPage />, { reactStrictMode: true });
+      await act(async () => {});
+      expect(getQueue).toHaveLength(2);
+      await act(async () => getQueue![1].resolve(saved(cond({ branchPattern: '^feature/' })).body));
+      expect(shown()).toEqual(['1', '2']);
+      return getQueue!;
+    }
+    const expectSecondReadKept = () => {
+      expect(shown()).toEqual(['1', '2']);
+      expect(mark()).toBeNull();
+      openPanel();
+      expect(screen.getByTestId('sessions-branch-filter')).toHaveValue('^feature/');
+      expect(screen.getByTestId('sessions-default-filter-reset')).not.toBeDisabled();
+    };
+
+    it('the first read fails late', async () => {
+      const queue = await openStrictWithTwoReads();
+      await act(async () => queue[0].reject(new ApiError('Internal server error', 500)));
+      expectSecondReadKept();
+    });
+
+    it('the first read succeeds late with an older value', async () => {
+      const queue = await openStrictWithTwoReads();
+      await act(async () => queue[0].resolve(saved(cond({ branchPattern: 'main' })).body));
+      expectSecondReadKept();
+    });
   });
 });

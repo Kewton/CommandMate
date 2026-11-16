@@ -18,8 +18,16 @@
  *   cannot be read, stored roles are kept as they are (not reported as deleted).
  * - I3: a failed save changes neither the condition nor the default; of
  *   overlapping saves only the latest request's result is adopted.
+ * - I3': saves are serial — the next PUT goes out only after the previous one
+ *   answered, and of the clicks made meanwhile only the last waits. So the
+ *   server's last write is always the default this page shows.
  * - I4: nothing saved / the read failed → the page is left as it is (no filter).
  * - I5: `differs` is `differsFromDefault(current, default)` and nothing else.
+ * - I6: "every chosen role was deleted" is not "no role chosen": when nothing else
+ *   is left, the deleted ids stay in the condition so the list stays narrowed
+ *   (0 rows) instead of showing everything.
+ * - I7: a GET is guarded by its own effect's flag; an older reply (StrictMode
+ *   runs the effect twice) is dropped, success or failure.
  *
  * @module hooks/useSessionsDefaultFilter
  */
@@ -77,6 +85,27 @@ function copyCondition(c: SessionsFilterCondition): SessionsFilterCondition {
   return { ...c, roleIds: [...c.roleIds] };
 }
 
+function isEmptyCondition(c: SessionsFilterCondition): boolean {
+  return c.branchPattern === '' && c.roleIds.length === 0 && !c.includeNoRole && !c.includeAmbiguous;
+}
+
+/**
+ * The default against the roles that exist now. Deleted roles are left out
+ * (`applySessionsDefaultFilter`), except that when that would leave no condition
+ * at all, the deleted ids are kept: they match nothing, so the list stays
+ * narrowed instead of widening to every session (I6).
+ */
+function resolveDefault(
+  stored: SessionsFilterCondition,
+  existingRoleIds: readonly string[]
+): { condition: SessionsFilterCondition; droppedRoleIds: string[] } {
+  const result = applySessionsDefaultFilter(stored, existingRoleIds);
+  if (result.droppedRoleIds.length > 0 && isEmptyCondition(result.condition)) {
+    return { condition: { ...result.condition, roleIds: [...result.droppedRoleIds] }, droppedRoleIds: result.droppedRoleIds };
+  }
+  return { condition: result.condition, droppedRoleIds: result.droppedRoleIds };
+}
+
 export function useSessionsDefaultFilter({
   current,
   existingRoleIds,
@@ -94,13 +123,18 @@ export function useSessionsDefaultFilter({
   const mounted = useRef(true);
   const touched = useRef(false);
   const applied = useRef(false);
-  const saveSeq = useRef(0);
+  /** A PUT is out (I3'). */
+  const saveInFlight = useRef(false);
+  /** The last condition clicked while a PUT was out; sent when it answers. */
+  const pendingSave = useRef<SessionsFilterCondition | null>(null);
   const savedOnce = useRef(false);
   const applyRef = useRef(apply);
   applyRef.current = apply;
 
   useEffect(() => {
     mounted.current = true;
+    // I7: this effect's own flag — a later run (StrictMode) makes this reply stale.
+    let active = true;
     void (async () => {
       let next: SessionsFilterCondition | null;
       try {
@@ -109,12 +143,13 @@ export function useSessionsDefaultFilter({
       } catch {
         next = null; // I4: a failed read filters nothing.
       }
-      if (!mounted.current) return;
+      if (!active) return;
       // A save that already succeeded is newer than this read.
       if (savedOnce.current) return;
       setStored(next);
     })();
     return () => {
+      active = false;
       mounted.current = false;
     };
   }, []);
@@ -136,7 +171,7 @@ export function useSessionsDefaultFilter({
     applied.current = true;
     if (touched.current) return;
     if (rolesReadiness === 'ready' && existingRoleIds) {
-      const result = applySessionsDefaultFilter(stored, existingRoleIds);
+      const result = resolveDefault(stored, existingRoleIds);
       applyRef.current(result.condition);
       setDroppedRoleIds(result.droppedRoleIds);
     } else {
@@ -149,7 +184,7 @@ export function useSessionsDefaultFilter({
 
   const defaults = useMemo<SessionsFilterCondition | null>(() => {
     if (!stored) return null;
-    return roleIdsForDefault ? applySessionsDefaultFilter(stored, roleIdsForDefault).condition : stored;
+    return roleIdsForDefault ? resolveDefault(stored, roleIdsForDefault).condition : stored;
   }, [stored, roleIdsForDefault]);
 
   // I5: the mark is this function's answer and nothing else.
@@ -167,7 +202,7 @@ export function useSessionsDefaultFilter({
     setSaved(false);
     setSaveError(null);
     if (roleIdsForDefault) {
-      const result = applySessionsDefaultFilter(stored, roleIdsForDefault);
+      const result = resolveDefault(stored, roleIdsForDefault);
       applyRef.current(result.condition);
       setDroppedRoleIds(result.droppedRoleIds);
     } else {
@@ -175,33 +210,57 @@ export function useSessionsDefaultFilter({
     }
   }, [stored, roleIdsForDefault]);
 
+  /** Send `first`, then whatever was clicked meanwhile, one PUT at a time (I3'). */
+  const runSaves = useCallback(async (first: SessionsFilterCondition) => {
+    saveInFlight.current = true;
+    let outcome: { ok: true } | { ok: false; error: SessionsDefaultSaveError } = { ok: true };
+    try {
+      let next: SessionsFilterCondition | null = first;
+      while (next) {
+        pendingSave.current = null;
+        try {
+          const body = await sessionsApi.putDefaultFilter(next);
+          if (!mounted.current) return;
+          // Answers come in the order sent, so this is the server's latest write.
+          savedOnce.current = true;
+          setStored(copyCondition(body.filter));
+          setDroppedRoleIds([]);
+          outcome = { ok: true };
+        } catch (error) {
+          if (!mounted.current) return;
+          // I3: the condition and the default stay as they are.
+          outcome = {
+            ok: false,
+            error:
+              error instanceof ApiError && error.status === 400
+                ? { kind: 'invalid', detail: error.message }
+                : { kind: 'failed' },
+          };
+        }
+        next = pendingSave.current;
+      }
+    } finally {
+      saveInFlight.current = false;
+    }
+    // Only the last request's outcome is shown (I3).
+    setSaving(false);
+    if (outcome.ok) setSaved(true);
+    else setSaveError(outcome.error);
+  }, []);
+
   const saveAsDefault = useCallback(async () => {
-    const seq = ++saveSeq.current;
     // Saving declares the current condition as chosen: a late initial read must not replace it.
     touched.current = true;
     setSaving(true);
     setSaved(false);
     setSaveError(null);
-    const isLatest = () => mounted.current && seq === saveSeq.current;
-    try {
-      const body = await sessionsApi.putDefaultFilter(copyCondition(current));
-      if (!isLatest()) return;
-      savedOnce.current = true;
-      setStored(copyCondition(body.filter));
-      setDroppedRoleIds([]);
-      setSaved(true);
-    } catch (error) {
-      if (!isLatest()) return;
-      // I3: the condition and the default stay as they are.
-      setSaveError(
-        error instanceof ApiError && error.status === 400
-          ? { kind: 'invalid', detail: error.message }
-          : { kind: 'failed' }
-      );
-    } finally {
-      if (isLatest()) setSaving(false);
+    const condition = copyCondition(current);
+    if (saveInFlight.current) {
+      pendingSave.current = condition;
+      return;
     }
-  }, [current]);
+    await runSaves(condition);
+  }, [current, runSaves]);
 
   return {
     defaults,
