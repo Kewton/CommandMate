@@ -13,8 +13,12 @@
  * - **Ours by content.** {@link removeRoleArtifact} then reads the file: every
  *   byte must hash to the recorded fingerprint, behind directories we could have
  *   written, with nothing else in its directory. Anything else is left.
- * - **Not in use.** A path is left while a live session's latest launch record
- *   names it (`agy` may still read it), and when that cannot be told.
+ * - **Not in use.** A path is left while a session whose latest launch record
+ *   names it is present, or when tmux cannot say (`unknown`: a timeout, a busy
+ *   socket, a failed spawn). Only `absent` lets it go.
+ * - **Not being prepared.** A launch prepares its file before it records
+ *   anything; {@link removeRoleArtifact} leaves a file a launch in this process
+ *   prepared within `ROLE_ARTIFACT_PREPARED_HOLD_MS`.
  * - **Never in the way.** Nothing here throws; the role is already deleted, and
  *   what was left is reported for a warning.
  *
@@ -31,6 +35,7 @@ import {
   removeRoleArtifact,
   type ArtifactOptions,
   type RoleArtifactRemoval,
+  type RoleArtifactRemovalHooks,
 } from './artifacts';
 
 export interface RoleArtifactCleanupTarget {
@@ -39,11 +44,16 @@ export interface RoleArtifactCleanupTarget {
   cliToolId: string;
 }
 
+/** What tmux says of a session: the shape of `getSessionPresence` (`@/lib/session/cli-session`, Issue #3329). */
+export type RoleArtifactSessionPresence = 'present' | 'absent' | 'unknown';
+
 export interface RoleArtifactCleanupDeps {
-  /** Whether the session of this instance is alive now. A throw counts as alive. */
-  isSessionAlive: (target: RoleArtifactCleanupTarget) => Promise<boolean>;
+  /** Whether the session of this instance exists now. Only `absent` frees a file; a throw counts as `unknown`. */
+  probeSession: (target: RoleArtifactCleanupTarget) => Promise<RoleArtifactSessionPresence>;
   /** Where the files were written. Defaults to where a launch writes them. */
   artifacts?: ArtifactOptions;
+  /** Tests only. See {@link RoleArtifactRemovalHooks}. */
+  removalHooks?: RoleArtifactRemovalHooks;
 }
 
 /** Why a recorded definition was not even looked at. */
@@ -54,9 +64,9 @@ export type RoleArtifactSkipReason =
   | 'not-this-role'
   /** The records disagree on what the file holds. */
   | 'ambiguous-record'
-  /** A live session's latest launch runs on it. */
+  /** A present session's latest launch runs on it. */
   | 'in-use'
-  /** Whether a session runs on it could not be told. */
+  /** Whether a session runs on it could not be told (tmux answered `unknown`, or the probe threw). */
   | 'liveness-unknown';
 
 export type RoleArtifactCleanupEntry =
@@ -74,7 +84,7 @@ function isRoleNamed(name: string, namespace: string, roleId: string): boolean {
   return name.startsWith(prefix) && /^[0-9a-f]{12}$/.test(name.slice(prefix.length));
 }
 
-/** Whether a live session's latest launch record names this path. Unknown is in use. */
+/** Whether a session whose latest launch record names this path may still be there. Unknown is in use. */
 async function usedBySession(
   db: Database.Database,
   path: string,
@@ -90,9 +100,9 @@ async function usedBySession(
     const latest = getLatestRoleLaunchRecords(db, row.worktree_id, row.instance_id);
     const current = [latest.requested, latest.launched].some((record) => record?.artifactPath === path);
     if (!current) continue;
-    let alive: boolean;
+    let presence: RoleArtifactSessionPresence;
     try {
-      alive = await deps.isSessionAlive({
+      presence = await deps.probeSession({
         worktreeId: row.worktree_id,
         instanceId: row.instance_id,
         cliToolId: row.cli_tool_id,
@@ -100,7 +110,8 @@ async function usedBySession(
     } catch {
       return 'liveness-unknown';
     }
-    if (alive) return 'in-use';
+    if (presence === 'present') return 'in-use';
+    if (presence !== 'absent') return 'liveness-unknown';
   }
   return null;
 }
@@ -152,7 +163,7 @@ export async function cleanUpDeletedRoleArtifacts(
       continue;
     }
     const [expectedFingerprint] = known;
-    entries.push(removeRoleArtifact({ adapter: ADAPTER, name, path, expectedFingerprint }, deps.artifacts));
+    entries.push(removeRoleArtifact({ adapter: ADAPTER, name, path, expectedFingerprint }, deps.artifacts, deps.removalHooks));
   }
   return { entries };
 }

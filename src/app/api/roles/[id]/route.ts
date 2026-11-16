@@ -22,8 +22,9 @@ import { respondToRoleError, roleErrorResponse } from '@/lib/agent-roles/route-e
 import {
   cleanUpDeletedRoleArtifacts,
   type RoleArtifactCleanupTarget,
+  type RoleArtifactSessionPresence,
 } from '@/lib/agent-roles/artifact-cleanup';
-import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { getSessionPresence } from '@/lib/session/cli-session';
 import { isCliToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
@@ -117,16 +118,20 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 }
 
-/** A tool this build does not know is treated as alive: its definition is left. */
-async function isSessionAlive(target: RoleArtifactCleanupTarget): Promise<boolean> {
-  if (!isCliToolType(target.cliToolId)) return true;
-  return CLIToolManager.getInstance().getTool(target.cliToolId).isRunning(target.worktreeId, target.instanceId);
+/**
+ * `getSessionPresence` and not `isRunning`: `isRunning` is `hasSession`, which
+ * folds a tmux timeout or a failed spawn into "absent" (Issue #3329). A tool this
+ * build does not know is `unknown`: its definition is left.
+ */
+async function probeRoleSession(target: RoleArtifactCleanupTarget): Promise<RoleArtifactSessionPresence> {
+  if (!isCliToolType(target.cliToolId)) return 'unknown';
+  return getSessionPresence(target.worktreeId, target.cliToolId, target.instanceId);
 }
 
 /** Issue #4419. The role is already deleted, so nothing here fails the request. */
 async function cleanUpArtifacts(db: ReturnType<typeof getDbInstance>, roleId: string): Promise<void> {
   try {
-    const { entries } = await cleanUpDeletedRoleArtifacts(db, roleId, { isSessionAlive });
+    const { entries } = await cleanUpDeletedRoleArtifacts(db, roleId, { probeSession: probeRoleSession });
     for (const entry of entries) {
       if (entry.kind === 'removed') {
         logger.info('role-artifact-removed', { roleId, path: entry.path });

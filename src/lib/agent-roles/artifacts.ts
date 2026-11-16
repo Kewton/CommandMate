@@ -60,12 +60,18 @@ import {
 import { getAntigravityHooksConfigPath } from '@/lib/hooks/sources/antigravity/hooks-config';
 import { getCodexHome } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCopilotHomeDirectory } from '@/lib/hooks/sources/copilot/hook-settings';
+import { getOrInitGlobal } from '@/lib/global-state';
 import type { AgentRoleCliTool } from '@/types/agent-roles';
 import { ANTIGRAVITY_ROLE_TOOLS } from './antigravity';
 import { computeFingerprint } from './fingerprint';
 import { renderTomlBasicDocument } from './toml-basic';
 
 type Env = Readonly<Record<string, string | undefined>>;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __roleArtifactPreparedAt: Map<string, number> | undefined;
+}
 
 /** Moves the data root (Claude, Command Code, OpenCode V1 and V2). Honoured in production. */
 export const AGENT_ROLE_ARTIFACTS_DIR_ENV_VAR = 'CM_AGENT_ROLE_ARTIFACTS_DIR';
@@ -661,6 +667,7 @@ export function inspectRoleArtifact(
   }
   checkDirectories(location, false);
   inspectFile(adapter, name, path, expectedFingerprint);
+  notePrepared(path);
 }
 
 /**
@@ -736,6 +743,7 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
 
   if (readExistingArtifact(location.path) !== null) {
     inspect();
+    notePrepared(location.path);
     return written(true);
   }
 
@@ -761,12 +769,42 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
   // Read back either way. If another writer won the race this is also what proves
   // its bytes are ours.
   inspect();
+  notePrepared(location.path);
   return written(!published);
 }
 
 // ---------------------------------------------------------------------------
 // Removal (Issue #4419)
 // ---------------------------------------------------------------------------
+
+/**
+ * How long a file stays held after a launch in this process wrote, reused or
+ * inspected it. A launch prepares its file before anything records it: between
+ * the two it waits on `agy --version`, the pane and `agy agent` (seconds, tens
+ * at most), and a deletion in that gap would find neither a record nor a live
+ * session. Generous on purpose; past it the launch has recorded `requested` and
+ * its session is what holds the file.
+ */
+export const ROLE_ARTIFACT_PREPARED_HOLD_MS = 10 * 60_000;
+
+function preparedAt(): Map<string, number> {
+  return getOrInitGlobal('__roleArtifactPreparedAt', () => new Map<string, number>());
+}
+
+/** A launch in this process is about to use `path`. */
+function notePrepared(path: string): void {
+  const now = Date.now();
+  const marks = preparedAt();
+  for (const [known, at] of marks) {
+    if (now - at > ROLE_ARTIFACT_PREPARED_HOLD_MS) marks.delete(known);
+  }
+  marks.set(path, now);
+}
+
+function isRecentlyPrepared(path: string): boolean {
+  const at = preparedAt().get(path);
+  return at !== undefined && Date.now() - at <= ROLE_ARTIFACT_PREPARED_HOLD_MS;
+}
 
 /** Why a definition was left where it is. */
 export type RoleArtifactKeptReason =
@@ -776,36 +814,57 @@ export type RoleArtifactKeptReason =
   | 'unsupported-adapter'
   /** The recorded path is not where this build keeps that name. */
   | 'unexpected-location'
+  /** A launch in this process prepared it within {@link ROLE_ARTIFACT_PREPARED_HOLD_MS}. */
+  | 'recently-prepared'
   /** A symlink, another owner, loose permissions, or not a regular file. */
   | 'not-ours'
   /** The bytes are not the ones CommandMate recorded writing. */
   | 'content-mismatch'
   /** Its directory holds something besides `agent.md`. */
   | 'foreign-entries'
+  /** The file checked is no longer the file at the path (replaced in between). */
+  | 'replaced'
   /** `CM_UAT_ISOLATION=1`: this run does not change the shared home. */
   | 'read-only';
 
 export type RoleArtifactRemoval =
   | { kind: 'removed'; path: string }
   | { kind: 'kept'; path: string; reason: RoleArtifactKeptReason }
-  /** It was ours to remove and the filesystem refused (a permission, a race). Only the error code, never content. */
+  /**
+   * It was ours to remove and the filesystem refused (a permission, a race). Only
+   * the error code, never content. `directory-left:<code>`: `agent.md` is gone and
+   * its now empty directory stayed.
+   */
   | { kind: 'failed'; path: string; reason: string };
+
+/** Seams for tests only: what happens between the last check and the unlink. */
+export interface RoleArtifactRemovalHooks {
+  beforeUnlink?: () => void;
+}
+
+function errorCode(error: unknown): string {
+  return (error as NodeJS.ErrnoException).code ?? 'unknown error';
+}
 
 /**
  * Remove one generated Antigravity definition (`<agents>/<name>/agent.md` and its
- * own directory), only when every byte is the one recorded at launch and nothing
- * else is in its directory. Whether the role is gone and no live session runs on
- * it is the caller's to decide (`./artifact-cleanup.ts`). Never throws: the role's
- * deletion does not depend on it.
+ * own directory), only when every byte is the one recorded at launch, nothing
+ * else is in its directory, and no launch in this process prepared it lately.
+ * The bytes hashed are read from the same inode that is unlinked: the path is
+ * looked up again just before, and a different inode is left alone. Whether the
+ * role is gone and no live session runs on it is the caller's to decide
+ * (`./artifact-cleanup.ts`). Never throws: the role's deletion does not depend on it.
  *
  * @param options - The same options the file was written with
  */
 export function removeRoleArtifact(
   input: { adapter: AgentRoleCliTool; name: string; path: string; expectedFingerprint: string },
-  options: ArtifactOptions = {}
+  options: ArtifactOptions = {},
+  hooks: RoleArtifactRemovalHooks = {}
 ): RoleArtifactRemoval {
   const { adapter, name, path, expectedFingerprint } = input;
   const kept = (reason: RoleArtifactKeptReason): RoleArtifactRemoval => ({ kind: 'kept', path, reason });
+  const failed = (reason: string): RoleArtifactRemoval => ({ kind: 'failed', path, reason });
   if (adapter !== 'antigravity') return kept('unsupported-adapter');
   let location: ArtifactLocation;
   try {
@@ -815,6 +874,8 @@ export function removeRoleArtifact(
   }
   if (location.path !== path) return kept('unexpected-location');
   if (sharedHookWritePolicy(adapter, [path], options.env ?? process.env) === 'read-only') return kept('read-only');
+  // Synchronous from here to the unlink, so no launch of this process slips in between.
+  if (isRecentlyPrepared(path)) return kept('recently-prepared');
   const own = dirname(path);
   try {
     checkDirectories(location, false);
@@ -825,15 +886,31 @@ export function removeRoleArtifact(
       if (error.code === 'content-mismatch' || error.code === 'format-invalid') return kept('content-mismatch');
       return kept('not-ours');
     }
-    return { kind: 'failed', path, reason: (error as NodeJS.ErrnoException).code ?? 'unknown error' };
+    return failed(errorCode(error));
   }
+  let checked: Stats;
   try {
+    // The hash again, of the bytes behind this descriptor, and the inode they live in.
+    const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      checked = fstatSync(fd);
+      if (computeFingerprint(readFileSync(fd)) !== expectedFingerprint) return kept('content-mismatch');
+    } finally {
+      closeSync(fd);
+    }
     const entries = readdirSync(own);
     if (entries.length !== 1 || entries[0] !== basename(path)) return kept('foreign-entries');
+    hooks.beforeUnlink?.();
+    const now = lstatOrNull(path);
+    if (now === null || !now.isFile() || now.ino !== checked.ino || now.dev !== checked.dev) return kept('replaced');
     unlinkSync(path);
+  } catch (error) {
+    return failed(errorCode(error));
+  }
+  try {
     rmdirSync(own);
   } catch (error) {
-    return { kind: 'failed', path, reason: (error as NodeJS.ErrnoException).code ?? 'unknown error' };
+    return failed(`directory-left:${errorCode(error)}`);
   }
   return { kind: 'removed', path };
 }

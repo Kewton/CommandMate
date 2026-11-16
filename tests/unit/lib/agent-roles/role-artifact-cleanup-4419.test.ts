@@ -8,7 +8,19 @@
  * @vitest-environment node
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
+import { computeFingerprint } from '@/lib/agent-roles/fingerprint';
 import { homedir, tmpdir } from 'os';
 import { dirname, join, sep } from 'path';
 import Database from 'better-sqlite3';
@@ -17,8 +29,10 @@ import { createAgentRole, deleteAgentRole, recordRoleLaunch } from '@/lib/db/age
 import {
   buildArtifactName,
   deriveServerNamespace,
+  inspectRoleArtifact,
   removeRoleArtifact,
   resolveArtifactLocation,
+  ROLE_ARTIFACT_PREPARED_HOLD_MS,
   writeRoleArtifact,
 } from '@/lib/agent-roles/artifacts';
 import {
@@ -27,6 +41,10 @@ import {
 } from '@/lib/agent-roles/artifact-cleanup';
 
 const WT = 'wt-4419';
+
+function fingerprintOf(path: string): string {
+  return computeFingerprint(readFileSync(path));
+}
 let fp = 0;
 /** A fresh injection fingerprint, so every write is a new name. */
 function nextFingerprint(): string {
@@ -39,9 +57,10 @@ describe('cleanUpDeletedRoleArtifacts (Issue #4419)', () => {
   let home: string;
   let agents: string;
   let db: Database.Database;
-  const dead: RoleArtifactCleanupDeps = { isSessionAlive: async () => false };
+  const dead: RoleArtifactCleanupDeps = { probeSession: async () => 'absent' };
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     base = realpathSync(mkdtempSync(join(tmpdir(), 'cm-role-cleanup-4419-')));
     home = join(base, 'home');
     mkdirSync(home, { mode: 0o700 });
@@ -68,8 +87,10 @@ describe('cleanUpDeletedRoleArtifacts (Issue #4419)', () => {
   afterEach(() => {
     db.close();
     vi.unstubAllEnvs();
+    vi.useRealTimers();
     // Undo any chmod a test made, so the directory can be removed.
     if (existsSync(agents)) {
+      chmodSync(agents, 0o700);
       for (const entry of readdirSync(agents)) chmodSync(join(agents, entry), 0o700);
     }
     rmSync(base, { recursive: true, force: true });
@@ -124,8 +145,14 @@ describe('cleanUpDeletedRoleArtifacts (Issue #4419)', () => {
     return createAgentRole(db, { name, body: 'be a reviewer' }).id;
   }
 
-  async function deleteAndClean(roleId: string, deps: RoleArtifactCleanupDeps = dead) {
+  /** Past the hold a launch's preparation puts on its file. */
+  function afterTheHold(): void {
+    vi.setSystemTime(Date.now() + ROLE_ARTIFACT_PREPARED_HOLD_MS + 1000);
+  }
+
+  async function deleteAndClean(roleId: string, deps: RoleArtifactCleanupDeps = dead, aged = true) {
     deleteAgentRole(db, roleId, { force: true });
+    if (aged) afterTheHold();
     return (await cleanUpDeletedRoleArtifacts(db, roleId, deps)).entries;
   }
 
@@ -200,9 +227,9 @@ describe('cleanUpDeletedRoleArtifacts (Issue #4419)', () => {
       const { path } = launch(id, { instanceId: 'agy-1' });
       const asked: string[] = [];
       const entries = await deleteAndClean(id, {
-        isSessionAlive: async (target) => {
+        probeSession: async (target) => {
           asked.push(`${target.worktreeId}/${target.cliToolId}/${target.instanceId}`);
-          return true;
+          return 'present';
         },
       });
       expect(entries).toEqual([{ kind: 'skipped', path, reason: 'in-use' }]);
@@ -210,11 +237,19 @@ describe('cleanUpDeletedRoleArtifacts (Issue #4419)', () => {
       expect(existsSync(path)).toBe(true);
     });
 
-    it('keeps it when liveness cannot be told', async () => {
+    it('keeps it when tmux answers unknown', async () => {
+      const id = role();
+      const { path } = launch(id);
+      const entries = await deleteAndClean(id, { probeSession: async () => 'unknown' });
+      expect(entries).toEqual([{ kind: 'skipped', path, reason: 'liveness-unknown' }]);
+      expect(existsSync(path)).toBe(true);
+    });
+
+    it('keeps it when the probe throws', async () => {
       const id = role();
       const { path } = launch(id);
       const entries = await deleteAndClean(id, {
-        isSessionAlive: async () => {
+        probeSession: async () => {
           throw new Error('tmux is not answering');
         },
       });
@@ -226,13 +261,65 @@ describe('cleanUpDeletedRoleArtifacts (Issue #4419)', () => {
       const id = role();
       const { path } = launch(id);
       record(null, { path: null, artifactFingerprint: null });
-      const entries = await deleteAndClean(id, { isSessionAlive: async () => true });
+      const entries = await deleteAndClean(id, { probeSession: async () => 'present' });
       expect(entries).toEqual([{ kind: 'removed', path }]);
       expect(existsSync(path)).toBe(false);
     });
   });
 
+  describe('a launch that prepared it but has not recorded it yet (review P2)', () => {
+    it('keeps a definition a launch in this process wrote within the hold', async () => {
+      const id = role();
+      const { path } = launch(id);
+      expect(await deleteAndClean(id, dead, false)).toEqual([{ kind: 'kept', path, reason: 'recently-prepared' }]);
+      expect(existsSync(path)).toBe(true);
+    });
+
+    it('a reuse or an inspection by a later launch renews the hold', async () => {
+      const id = role();
+      const { name, path } = launch(id);
+      afterTheHold();
+      // Another instance prepares the same file: reused, then inspected before its launch.
+      inspectRoleArtifact({ adapter: 'antigravity', name, path, expectedFingerprint: fingerprintOf(path) });
+      expect(await deleteAndClean(id, dead, false)).toEqual([{ kind: 'kept', path, reason: 'recently-prepared' }]);
+      afterTheHold();
+      expect((await cleanUpDeletedRoleArtifacts(db, id, dead)).entries).toEqual([{ kind: 'removed', path }]);
+    });
+  });
+
+  describe('between the last check and the unlink (review P3-1)', () => {
+    it('leaves a file that was replaced after it was checked', async () => {
+      const id = role();
+      const { path } = launch(id);
+      const bytes = readFileSync(path);
+      const entries = await deleteAndClean(id, {
+        ...dead,
+        removalHooks: {
+          beforeUnlink: () => {
+            // Same bytes, another inode: not the file that was checked.
+            renameSync(path, `${path}.old`);
+            writeFileSync(path, bytes, { mode: 0o600 });
+            rmSync(`${path}.old`);
+          },
+        },
+      });
+      expect(entries).toEqual([{ kind: 'kept', path, reason: 'replaced' }]);
+      expect(existsSync(path)).toBe(true);
+    });
+  });
+
   describe('never fails the deletion', () => {
+    it('a directory that cannot be removed after agent.md is reported (review P3-2)', async () => {
+      const id = role();
+      const { path } = launch(id);
+      chmodSync(agents, 0o500);
+      const entries = await deleteAndClean(id);
+      chmodSync(agents, 0o700);
+      expect(entries).toEqual([{ kind: 'failed', path, reason: 'directory-left:EACCES' }]);
+      expect(existsSync(path)).toBe(false);
+      expect(readdirSync(dirname(path))).toEqual([]);
+    });
+
     it('a missing agents directory is reported, not thrown', async () => {
       const id = role();
       const { path } = launch(id);

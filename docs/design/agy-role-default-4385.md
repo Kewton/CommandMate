@@ -228,7 +228,7 @@ agy が終わってシェルに戻っているときは、次の send の `requi
 | I3 | 非同期の観測からの状態の更新・記録・本文の入力は、実際の更新・入力の境界で元の世代と状態に結ぶ。古くなった結果は後継を変えず、消さず、止めない | D6 |
 | I4 | CommandMate は Antigravity のセッションを**自動では止めない**（この Issue で足す停止は 0） | D2 |
 | I5 | 登録に無い道具の名前で動いたプロセスへ本文を送らない。生成物の `tools` は確かめた定数だけ | D1、D2 |
-| I6a | CommandMate が利用者のホームに書くのは `~/.gemini/config/agents/` の下の `cm-role-` のディレクトリと `agent.md`（0600、ディレクトリ 0700）だけ。既存のファイルは書き換えない。消すのはロールの削除のときだけで、起動の記録とバイトで CommandMate の生成物と確かめられ、生きたセッションが使っていないものに限る（#4419、`artifact-cleanup.ts`）。`CM_UAT_ISOLATION=1` では同じバイトの既存の生成物の再利用だけ（`artifacts.ts:690`） | 既存の規則 |
+| I6a | CommandMate が利用者のホームに書くのは `~/.gemini/config/agents/` の下の `cm-role-` のディレクトリと `agent.md`（0600、ディレクトリ 0700）だけ。既存のファイルは書き換えない。消すのはロールの削除のときだけで、起動の記録とバイトで CommandMate の生成物と確かめられ、生きたセッションが使っていないものに限る（#4419、`artifact-cleanup.ts`。§15）。`CM_UAT_ISOLATION=1` では同じバイトの既存の生成物の再利用だけ（`artifacts.ts:690`） | 既存の規則 |
 | I6b | agy の子（`agy agent`）が書くログは別に数え、`CM_UAT_ISOLATION=1` では子を起こさない | D3 |
 | I7 | 拒否の理由とログにロールの本文と agy の任意の文字列を入れない | D2 |
 | I8 | ロールの設定が無いインスタンス・Schedule・他の 6 adapter は今と同じ。再接続では照合を呼ばない | D2 の対象の判定、D3、D5 |
@@ -513,7 +513,27 @@ A4 の再現の手順（隔離のサーバーで行う。本番のポート 3000
 
 e2e（`tests/e2e/agent-roles-4117.spec.ts`）には足していない: この作業の契約ではサーバーを起動できず、走らせて緑を確かめられない spec を足さないため。画面の 3 か所は unit（`tests/unit/components/worktree/role-refusal-send-4385.test.tsx` と変異の対照 `…-mutant.test.tsx`）で固定した。
 
+## 15. ロールの削除での定義の片付け（#4419）
+
+ロールを削除すると（`DELETE /api/roles/:id`。CLI の `roles rm` と画面も同じ）、削除のトランザクションの後に、そのロールの Antigravity の定義を片付ける。候補は起動の記録（`agent_role_launch_records`）だけで、名前の形（このサーバーの名前空間・ロール id）・記録の指紋が 1 つ・今の生成先・所有と権限・バイト一致・ディレクトリに `agent.md` だけ、を満たすものを消す。投げず、残したものはログ `role-artifact-left`。
+
+使用中の判定（消さない条件）:
+
+1. **最新の起動の記録がその定義のセッションが `absent` でないとき**。生存は `probeSession`（#3329）で聞き、`present` と `unknown`（tmux の時間切れ・ソケットの混雑・起動の失敗）は残す。`isRunning`（`hasSession`）は不明を不在にするので使わない
+2. **記録の前の起動準備（レビュー P2）**: 起動は定義を書き・検査してから、`agy --version`・ペイン・`agy agent` を待ち、その後で `requested` を記録する。この間はレコードにもセッションにも現れない。**同じプロセス内の準備の印**で守る: `writeRoleArtifact`（新規・再利用）と `inspectRoleArtifact` がパスごとに時刻を `globalThis.__roleArtifactPreparedAt` に残し、`removeRoleArtifact` は `ROLE_ARTIFACT_PREPARED_HOLD_MS`（10 分）以内の印があれば消さない（`recently-prepared`）。印の確認から unlink までは同期で、同じプロセスの起動が間に入らない。排他（ロック）にしなかったのは、起動の準備が `src/lib/session/role-launch.ts`（この PR の scope 外）にあり、印は scope 内の `artifacts.ts` だけで置けるため
+3. 確認と unlink の間の差し替え（レビュー P3-1）: 指紋は開いた記述子から読んだバイトで取り直し、unlink の直前に lstat を取り直して inode・dev が違えば残す（`replaced`）
+
+残る窓（直していない）:
+
+- 準備から `requested` の記録まで 10 分を超える起動（通常は数十秒以内）。超えたら印は切れるが、その後は記録とセッションで守られる。記録の後にセッションが作られるまでの間に印が切れていることはまず無い
+- 別のプロセス（別のサーバー）の起動準備は見えない。ただし名前にサーバーの名前空間が入るので、別のサーバーの定義は候補にならない。同じ DB を共有する 2 つのサーバーは想定しない
+- 起動の記録の書き込みが失敗して続く起動（`role-launch.ts` の `recordPhase` は失敗を警告にして進む）は、古い記録で判定する
+- lstat の再照合から unlink までの、同じ uid による差し替え
+- unlink の後に rmdir が失敗すると、空の `cm-role-…/` が残り、再試行されない（記録は残るが、次の削除の機会は無い）。ログに `directory-left:<code>` で出る。agy が `agent.md` の無いディレクトリを一覧でどう扱うかは確かめていない（agy を起こしていない）
+
 ## 改訂の履歴
+
+- 2026-11-16 #4419 PR2 再指示 1: §15 を足した（生存は `probeSession` で不明を残す、記録の前の準備を同じプロセスの印で守る、unlink の直前の inode の再照合、rmdir の失敗をログと手順に）
 
 - 2026-11-15 A4 再指示 1: 遅い 409 でも行に理由と戻した記録を残す、`/sessions` のタイルにも同じ扱い（`useRoleRefusalNotice` を共通に）、not-applied の文から稼働の状態の断定を外した
 - 2026-11-15 A4 再指示 2: 送信中の印を試行ごとにし、捨てた古い応答が新しい試行の送信中の印を消さない（復旧で再送しない）。未送信で差し戻した再試行は、行の試行の登録も前の試行へ戻す（遅い 409 の理由と本文の戻しが届く）
