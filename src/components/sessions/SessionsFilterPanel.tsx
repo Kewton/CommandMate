@@ -5,6 +5,9 @@
  * Issue #4389: a role checklist (`GET /api/roles`) plus "no role" and "cannot
  * tell". Nothing checked means no role condition. When the instance roles could
  * not be read, a notice says the role condition is not in use.
+ *
+ * Issue #4388: below the conditions, "make this the default" (saved server-wide),
+ * "back to default", and clear (which does not save).
  */
 
 'use client';
@@ -23,6 +26,18 @@ export interface SessionsFilterRoleOption {
   name: string;
 }
 
+/** The default-condition actions (Issue #4388). */
+export interface SessionsFilterDefaultActions {
+  onSave: () => void;
+  onReset: () => void;
+  /** False when no default is saved. */
+  canReset: boolean;
+  saving: boolean;
+  saved: boolean;
+  /** Already-worded save error, or null. */
+  saveError: string | null;
+}
+
 export interface SessionsFilterPanelProps {
   branchPattern: string;
   onBranchPatternChange: (value: string) => void;
@@ -33,7 +48,12 @@ export interface SessionsFilterPanelProps {
   role?: SessionsRoleCondition;
   onRoleChange?: (role: SessionsRoleCondition) => void;
   roleError?: SessionsRoleError | null;
+  /** Issue #4388. The default buttons are drawn only when this is given. */
+  defaultActions?: SessionsFilterDefaultActions;
 }
+
+const SECONDARY_BUTTON_CLASS =
+  'rounded-md border border-input bg-surface px-3 py-1.5 text-sm text-foreground hover:bg-muted';
 
 function toggle(list: readonly string[] | undefined, id: string, on: boolean): string[] {
   const rest = (list ?? []).filter((x) => x !== id);
@@ -74,6 +94,7 @@ export function SessionsFilterPanel({
   role,
   onRoleChange,
   roleError,
+  defaultActions,
 }: SessionsFilterPanelProps) {
   const tCommon = useTranslations('common');
   return (
@@ -137,12 +158,44 @@ export function SessionsFilterPanel({
           />
         </fieldset>
       )}
-      <div className="flex justify-end">
+      {defaultActions?.saveError && (
+        <p className="text-sm text-danger-foreground" role="alert" data-testid="sessions-default-filter-save-error">
+          {defaultActions.saveError}
+        </p>
+      )}
+      {defaultActions?.saved && !defaultActions.saveError && (
+        <p className="text-sm text-muted-foreground" role="status" data-testid="sessions-default-filter-saved">
+          {tCommon('sessions.defaultFilter.saved')}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {defaultActions && (
+          <>
+            <button
+              type="button"
+              onClick={defaultActions.onSave}
+              data-testid="sessions-default-filter-save"
+              aria-busy={defaultActions.saving || undefined}
+              className={SECONDARY_BUTTON_CLASS}
+            >
+              {tCommon(defaultActions.saving ? 'sessions.defaultFilter.saving' : 'sessions.defaultFilter.save')}
+            </button>
+            <button
+              type="button"
+              onClick={defaultActions.onReset}
+              disabled={!defaultActions.canReset}
+              data-testid="sessions-default-filter-reset"
+              className={`${SECONDARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              {tCommon('sessions.defaultFilter.reset')}
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={onClear}
           data-testid="sessions-filter-clear"
-          className="rounded-md border border-input bg-surface px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+          className={SECONDARY_BUTTON_CLASS}
         >
           {tCommon('sessions.branchFilter.clear')}
         </button>

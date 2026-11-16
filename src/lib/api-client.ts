@@ -7,6 +7,7 @@ import type { Worktree, ChatMessage, WorktreeMemo } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
 import type { SessionRolesResponse } from '@/types/agent-roles';
+import type { SessionsDefaultFilterResponse, SessionsFilterCondition } from '@/types/sessions-default-filter';
 // Issue #2651: type-only import, so the module's `fs/promises` never reaches the client bundle.
 import type { ReleaseNote } from '@/lib/app-update/release-notes';
 import {
@@ -1515,5 +1516,27 @@ export const sessionsApi = {
    */
   async getRoles(): Promise<SessionRolesResponse> {
     return fetchApi<SessionRolesResponse>('/api/sessions/roles');
+  },
+
+  /**
+   * The saved default filter (`GET /api/settings/sessions-filter`, #4388).
+   * Returned as stored: deleted roles are removed by `applySessionsDefaultFilter`.
+   *
+   * @throws ApiError on a non-2xx response or a transport failure
+   */
+  async getDefaultFilter(): Promise<SessionsDefaultFilterResponse> {
+    return fetchApi<SessionsDefaultFilterResponse>('/api/settings/sessions-filter');
+  },
+
+  /**
+   * Save the default filter (`PUT /api/settings/sessions-filter`, #4388).
+   *
+   * @throws ApiError — status 400 with the server's reason when the condition is rejected
+   */
+  async putDefaultFilter(filter: SessionsFilterCondition): Promise<SessionsDefaultFilterResponse> {
+    return fetchApi<SessionsDefaultFilterResponse>('/api/settings/sessions-filter', {
+      method: 'PUT',
+      body: JSON.stringify(filter),
+    });
   },
 };

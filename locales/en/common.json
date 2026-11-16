@@ -46,6 +46,16 @@
       "unavailable": "Roles could not be read, so the role condition is not in use.",
       "rolesLoadError": "Could not read the list of roles.",
       "instanceRole": "{instance}: {role}"
+    },
+    "defaultFilter": {
+      "save": "Make this the default",
+      "reset": "Back to default",
+      "saving": "Saving…",
+      "saved": "Saved as the default.",
+      "saveInvalid": "Could not make this the default: {detail}",
+      "saveFailed": "Could not save the default. Please try again.",
+      "droppedRoles": "The default included deleted roles. They are left out of the filter.",
+      "differs": "Differs from the default"
     }
   },
   "nav": {

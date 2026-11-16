@@ -32,3 +32,11 @@ export const SESSIONS_FILTER_ROLE_IDS_MAX = 100;
 /** Shape of a role id: lowercase alphanumeric segments joined by single hyphens, <= 64 chars. */
 export const SESSIONS_FILTER_ROLE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const SESSIONS_FILTER_ROLE_ID_MAX_LENGTH = 64;
+
+/** Body of `GET` / `PUT /api/settings/sessions-filter`. */
+export interface SessionsDefaultFilterResponse {
+  success: true;
+  filter: SessionsFilterCondition;
+  /** false means nothing is saved (`filter` is then the empty condition). */
+  configured: boolean;
+}

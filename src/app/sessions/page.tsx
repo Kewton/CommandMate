@@ -19,6 +19,11 @@
  * instances, a list row counts only those and names their roles, and the row's
  * link opens the first match (`?instance=`). Unfiltered, all of that is as before.
  *
+ * Issue #4388: the saved default condition is applied once when the page opens
+ * (`useSessionsDefaultFilter`); changes made here are not saved, so leaving and
+ * coming back starts from the default again. The filter button carries a mark
+ * while the condition differs from the default.
+ *
  * Sidebar auto-collapses on this page (via useLayoutConfig).
  */
 
@@ -50,6 +55,12 @@ import {
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSessionsViewMode } from '@/hooks/useSessionsViewMode';
 import { useSessionsRoles } from '@/hooks/useSessionsRoles';
+import {
+  useSessionsDefaultFilter,
+  type SessionsDefaultSaveError,
+  type SessionsRolesReadiness,
+} from '@/hooks/useSessionsDefaultFilter';
+import type { SessionsFilterCondition } from '@/types/sessions-default-filter';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
@@ -238,6 +249,26 @@ function resolveSessionsRoster(wt: FilterTarget): string[] {
 
 const EMPTY_ROLE_CONDITION: SessionsRoleCondition = {};
 
+/** The page's two pieces of condition as the stored shape (Issue #4388). */
+function toFilterCondition(branchPattern: string, role: SessionsRoleCondition): SessionsFilterCondition {
+  return {
+    branchPattern,
+    roleIds: [...(role.roleIds ?? [])],
+    includeNoRole: role.includeNoRole === true,
+    includeAmbiguous: role.includeAmbiguous === true,
+  };
+}
+
+function describeSaveError(
+  error: SessionsDefaultSaveError | null,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string | null {
+  if (!error) return null;
+  return error.kind === 'invalid'
+    ? t('sessions.defaultFilter.saveInvalid', { detail: error.detail })
+    : t('sessions.defaultFilter.saveFailed');
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -255,7 +286,40 @@ export default function SessionsPage() {
   const [branchPattern, setBranchPattern] = useState('');
   const [roleCondition, setRoleCondition] = useState<SessionsRoleCondition>(EMPTY_ROLE_CONDITION);
   const wantsRole = hasRoleCondition(roleCondition);
-  const { roles, source: roleSource, reload: reloadRoles } = useSessionsRoles({ poll: wantsRole });
+  const {
+    roles,
+    rolesStatus,
+    source: roleSource,
+    reload: reloadRoles,
+  } = useSessionsRoles({ poll: wantsRole });
+  // Issue #4388: a deleted role can only be told from a role list that was read,
+  // and from instance roles that were readable (I2).
+  const rolesReadiness: SessionsRolesReadiness =
+    rolesStatus === 'error' || roleSource?.rolesUnavailable
+      ? 'unavailable'
+      : rolesStatus === 'ok' && roles !== null && roleSource !== null
+        ? 'ready'
+        : 'loading';
+  const existingRoleIds = useMemo(() => (roles === null ? null : roles.map((r) => r.id)), [roles]);
+  const currentCondition = useMemo(
+    () => toFilterCondition(branchPattern, roleCondition),
+    [branchPattern, roleCondition]
+  );
+  const applyCondition = useCallback((c: SessionsFilterCondition) => {
+    setBranchPattern(c.branchPattern);
+    setRoleCondition({
+      roleIds: c.roleIds,
+      includeNoRole: c.includeNoRole,
+      includeAmbiguous: c.includeAmbiguous,
+    });
+  }, []);
+  const defaultFilter = useSessionsDefaultFilter({
+    current: currentCondition,
+    existingRoleIds,
+    rolesReadiness,
+    apply: applyCondition,
+  });
+  const { noteUserChange } = defaultFilter;
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -357,9 +421,24 @@ export default function SessionsPage() {
   const branchFilterError = branchFilter.error;
   const roleFilterError = branchFilter.roleError;
   const clearFilters = useCallback(() => {
+    noteUserChange();
     setBranchPattern('');
     setRoleCondition(EMPTY_ROLE_CONDITION);
-  }, []);
+  }, [noteUserChange]);
+  const handleBranchPatternChange = useCallback(
+    (value: string) => {
+      noteUserChange();
+      setBranchPattern(value);
+    },
+    [noteUserChange]
+  );
+  const handleRoleChange = useCallback(
+    (role: SessionsRoleCondition) => {
+      noteUserChange();
+      setRoleCondition(role);
+    },
+    [noteUserChange]
+  );
   const openFilter = useCallback(() => {
     setIsFilterOpen(true);
     // Roles may have been added or instances started since the page opened.
@@ -391,13 +470,21 @@ export default function SessionsPage() {
   const filterPanel = (
     <SessionsFilterPanel
       branchPattern={branchPattern}
-      onBranchPatternChange={setBranchPattern}
+      onBranchPatternChange={handleBranchPatternChange}
       error={branchFilterError}
       onClear={clearFilters}
       roles={roleOptions}
       role={roleCondition}
-      onRoleChange={setRoleCondition}
+      onRoleChange={handleRoleChange}
       roleError={roleFilterError}
+      defaultActions={{
+        onSave: () => void defaultFilter.saveAsDefault(),
+        onReset: defaultFilter.resetToDefault,
+        canReset: defaultFilter.hasDefault,
+        saving: defaultFilter.saving,
+        saved: defaultFilter.saved,
+        saveError: describeSaveError(defaultFilter.saveError, tCommon),
+      }}
     />
   );
 
@@ -466,6 +553,16 @@ export default function SessionsPage() {
                 {activeFilterCount}
               </span>
             )}
+            {/* Issue #4388: differsFromDefault decides this mark, nothing else (I5). */}
+            {defaultFilter.differs && (
+              <span
+                data-testid="sessions-filter-differs"
+                title={tCommon('sessions.defaultFilter.differs')}
+                className="h-2 w-2 rounded-full bg-warning"
+              >
+                <span className="sr-only">{tCommon('sessions.defaultFilter.differs')}</span>
+              </span>
+            )}
           </button>
           <Select value={sortKey} onValueChange={handleSortKeyChange}>
             <SelectTrigger
@@ -505,6 +602,18 @@ export default function SessionsPage() {
               feed both layouts unchanged. */}
           <SessionsViewModeSelector value={viewMode} onChange={setViewMode} />
         </div>
+
+        {/* Issue #4388: roles the default named were deleted. They are left out
+            (never a silent widening to "everything") and the page says so. */}
+        {defaultFilter.droppedRoleIds.length > 0 && (
+          <p
+            role="status"
+            data-testid="sessions-default-filter-dropped-roles"
+            className="-mt-4 mb-6 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-sm text-foreground"
+          >
+            {tCommon('sessions.defaultFilter.droppedRoles')}
+          </p>
+        )}
 
         {isMobile ? (
           <SessionsFilterSheet isOpen={isFilterOpen} onClose={closeFilter}>
