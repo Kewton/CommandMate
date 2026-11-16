@@ -6,7 +6,12 @@
  * PR1a measures two things only: how many PRs the GitHub search returned as created and as
  * merged in `[from, to)` for one repo + base (`coverage: "search-observed"`: the count the
  * search showed, not the proven population — `complete` is never true here). No CI, ledger,
- * alert, notification or resource is read or written.
+ * alert or resource is read or written.
+ *
+ * Issue #4418: when flow.yaml has `relayWatch`, `tick` then runs the relay watch
+ * (`relay-watch.mjs`, docs/design/flow-relay-watch-4418.md) under the same lock, after the
+ * measurement line is written. Its failure is recorded and printed apart and never changes the
+ * measurement's line or exit code.
  *
  * Exit: 0 done (or a tick skipped because another holds the lock) / 1 not written, unfinished
  * tail, lock not observable, release failed, unexpected / 2 arguments, settings, identification.
@@ -21,6 +26,7 @@ import { defaultMonoNow, defaultRun, makeRunBounded } from './runner.mjs';
 import { isValidTimeZone, readFlowConfig } from './config.mjs';
 import { appendTick, flowDirOf, readTicks } from './record.mjs';
 import { readPrCounts } from './sources.mjs';
+import { runWatch } from './relay-watch.mjs';
 import { MAX_WINDOW_MS, dayWindow, hourlyPrCounts, parseIsoTime, tickWindow, zonedParts } from './aggregate.mjs';
 
 export const IDENTIFY_BUDGET_MS = 30_000;
@@ -196,6 +202,12 @@ function tick({ config, scope, recordDir, env, home, lock, runBounded, monoNow, 
     } else {
       exit = 0;
       summary = `flow: tick ${tickRecord.tickId} ${scope.repo}@${scope.base} [${tickRecord.window.from}, ${tickRecord.window.to}) prCreated=${describeValue(counts.prCreated)} prMerged=${describeValue(counts.prMerged)} -> ${written.file}`;
+    }
+    if (config.relayWatch) {
+      // After the measurement line (#4418): a watch that fails or runs out of time is its own record.
+      const watched = runWatch({ settings: config.relayWatch, scope, recordDir, tz: config.tz, tickId: tickRecord.tickId, atMs, runBounded, monoNow });
+      if (watched.error) err(`flow: relay watch: ${watched.error}`);
+      if (summary) summary = `${summary} ${watched.summary}`;
     }
   } catch (e) {
     exit = 1;
