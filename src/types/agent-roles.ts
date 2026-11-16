@@ -145,6 +145,40 @@ export type EffectiveRole =
       roots: RoleAmbiguousRoot[];
     });
 
+/**
+ * The role of one instance as a list shows it (Issue #4387): what the running
+ * process was started with when this server started it and recorded the start
+ * (`basis: 'launched'`), and otherwise what the next start would use
+ * (`basis: 'setting'`, `effectiveNext`). A running process keeps its role until it
+ * is restarted, so a setting changed meanwhile does not move a `launched` entry.
+ *
+ * `ambiguous` (the roots of the worktree disagree, so a launch would refuse) is not
+ * `none`: a filter by "no role" must not take it in. `kind: 'role'` is there so the
+ * three can be told apart by one field; `roleId` alone says the same.
+ */
+export type InstanceRoleSummary =
+  | { kind: 'role'; roleId: string; roleName: string; basis: 'launched' | 'setting' }
+  | { kind: 'none' }
+  | { kind: 'ambiguous' };
+
+/** Instance id → {@link InstanceRoleSummary}, for one worktree. */
+export type InstanceRoleSummaryMap = Record<string, InstanceRoleSummary>;
+
+/**
+ * `GET /api/sessions/roles` (Issue #4387): {@link InstanceRoleSummaryMap} of every
+ * worktree on the server, by worktree id. A worktree with no instance has `{}`.
+ *
+ * When the roles could not be read the answer is still 200, with an empty map and
+ * `rolesUnavailable: true`, so a reader can tell "could not read" from "no
+ * worktrees" and leave its list unfiltered rather than empty. The key is omitted
+ * otherwise.
+ */
+export interface SessionRolesResponse {
+  success: true;
+  roleByWorktree: Record<string, InstanceRoleSummaryMap>;
+  rolesUnavailable?: true;
+}
+
 // ---------------------------------------------------------------------------
 // Launch records
 // ---------------------------------------------------------------------------
