@@ -361,14 +361,15 @@ tmux -L cm-agent-health kill-server
 
 ## 毎日の自動実行（Schedule）
 
-- 確認専用の worktree（`../commandmate-agent-health`）に `docs/agent-health/CMATE.example.md` の中身を `CMATE.md` として置く。CommandMate の Schedule 機能が毎日 07:00 に Antigravity（`agy -p`）で `docs/agent-health/daily-triage-prompt.md` の手順を実行し、結果を Issue にする
+- 確認専用の worktree（`../commandmate-agent-health`）に `docs/agent-health/CMATE.example.md` の中身を `CMATE.md` として置く。CommandMate の Schedule 機能が毎日 07:00 に Claude Code（`claude -p`）で `docs/agent-health/daily-triage-prompt.md` の手順を実行し、結果を Issue にする
+- Antigravity の Schedule は勧めない（#4438）。[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq) は、個人向けプランで第三者のアプリケーションから agy を動かすこと（`agy -p` を包む使い方）を制限している。#4436 が入った版では、利用形態の申告（`CM_ANTIGRAVITY_USAGE`）が無いと antigravity の Schedule は実行されずに止まる。以前の例のまま `CMATE.md` の CLI Tool が `antigravity` になっていれば `claude` に替える
 - この worktree は常駐用で、ブランチ `agent-health-runner`（upstream は `origin/develop`。独自の commit は持たない）を使う。develop は本体の作業ディレクトリで使っているため同じブランチは使えない。作り方: `git worktree add -b agent-health-runner ../commandmate-agent-health origin/develop` のあと `git -C ../commandmate-agent-health branch --set-upstream-to=origin/develop`、`npm install --include=dev`、リポジトリの同期
 - 依頼文は `bash scripts/agent-health/daily.sh --out <レポート>` を呼ぶだけ。`daily.sh` が同期（`git pull --ff-only origin develop`）・依存の更新（同期の前後で `package-lock.json` が変わったときだけ `npm install --include=dev`）・`run.ts` の実行をまとめて行い、標準出力に `AGENT_HEALTH_SYNC status=ok|failed …` を 1 行出す
 - 同期に失敗すると（追跡ファイルの未コミットの変更 `dirty-worktree`・`handoff-failed stage=<段>`（`run.ts` へのロックの引き渡しに失敗。子が受け取りの印を作れず `exec` の前に終わった場合は `stage=ack`）・`pull-failed: <git の最後の行>`・`npm-install-failed`・ほかの実行（UAT など）が共通のロックを持っている `run-locked: <持ち主>`）確認を実行せず、`completedAt` と `scriptErrors` を持ち `tools` が空の最小のレポートを書いて exit 2 になる（08:00 の見張り役が「実行されなかった」と取り違えないため）。同期の後で `run.ts` へ渡す前に `daily.sh` が INT／TERM／HUP／PIPE／QUIT で止められたときは、レポートを書かず `AGENT_HEALTH_SYNC status=failed reason=interrupted exit=<130|143|129|141|131> …` の 1 行だけを出す（終わり始めた後の 2 本目のシグナルは無視するので、行とロックの解放が途中で切れない。KILL は対象外）（`AGENT_HEALTH_SYNC` の行は 1 つの関数だけが出し、シグナルが行の出力と印の間に割り込むと同じ行が 2 本になりうる。同じ行の重複は 1 本と数える。status が食い違う 2 行は出ない）
 - レポートの `sync`（`daily.sh` 経由のときだけ）: `status`（`ok` / `failed`）、`before` / `after`（同期の前後の commit。失敗時は両方とも前の commit）、`reason`（失敗の理由）。`run.ts` を手で実行したときは `sync` は無い
 - **worktree の片付けで削除しない**（CLAUDE.md の「恒久 worktree（クリーンアップ対象外）」）。消すと翌朝の Schedule が動かない
 - ラベル `agent-health` を作っておく: `gh label create agent-health --repo Kewton/CommandMate --description "日次ヘルスチェックが自動登録した Issue"`
-- Antigravity の Schedule は許可の値が `--dangerously-skip-permissions` しか無い。Command Code は `yolo` でないとコマンドを実行できない（#2454）
+- Claude の Schedule の許可は `bypassPermissions` にする（無人で `bash`・`gh` を実行するため。ほかの値では確認で止まる）。Command Code は `yolo` でないとコマンドを実行できない（#2454）
 - 依頼文は `docs/agent-health/daily-triage-prompt.md`、Issue のひな形は `docs/agent-health/issue-template.md`。変えたいときはリポジトリのこれらの文書を直す（`CMATE.md` の Message 欄は依頼文を読むよう指示するだけ）
 - 08:00 に Command Code が今日のレポートの有無を確かめ、無ければ自分で確認を実行する（`docs/agent-health/watch-prompt.md`）
 - Command Code の Schedule の許可は `yolo` にすること（それ以外ではコマンドを実行できず、成功のまま何もしない。#2454）

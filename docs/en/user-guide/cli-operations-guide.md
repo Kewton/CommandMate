@@ -990,6 +990,8 @@ The finer behaviour of `ask` is in these sections under [`commandmate wait`](#co
 
 Shows, withdraws and settles the **waits (relays)** that `ask --async` / `send --reply-to` create.
 
+> **Antigravity (agy) caution (#4438)**: do not send tasks from another AI agent to agy on a consumer-plan sign-in through relays (`ask`, `send --reply-to`). Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict using it through third-party software or agents. If you use agy with an API key or Gemini Enterprise, declare it by setting the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it at startup, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`). Setting it only in the environment where you run the `commandmate` CLI has no effect. The declaration is your own: CommandMate does not read your credentials to check it.
+
 ### Usage
 
 ```bash
@@ -1505,6 +1507,8 @@ A tool whose dialog gate is `legacy` (gemini, vibe-local and command-code by def
 **Claude's edit confirmation (`Do you want to make this edit …?`) is a `multiple_choice` prompt**
 (effectively Yes/No plus allow-all, three options), so under `safe` the worker stops on every edit.
 Widen an unattended contract to `allow-listed` and escalate dangerous operations with `denyPatterns`.
+
+> **Antigravity (agy) caution (#4438)**: do not use agy on a consumer-plan sign-in for unattended runs (contract workers, Schedules, the daily summary). Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict running agy from third-party applications. From the release with #4436, antigravity Schedules and the daily summary do not run without the declaration. If you use agy with an API key or Gemini Enterprise, declare it by setting the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it at startup, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`). Setting it only in the environment where you run the `commandmate` CLI has no effect. The declaration is your own: CommandMate does not read your credentials to check it.
 
 ```yaml
 autoYes:
@@ -2275,6 +2279,8 @@ installed on CommandMate sessions, **opening the following popup when a human cl
 ## commandmate auto-yes
 
 Control auto-yes (automatic prompt response) individually.
+
+> **Antigravity (agy) caution (#4438)**: do not turn on Auto-Yes for agy on a consumer-plan sign-in (taking the person out makes it an unattended run, which Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict). From the release with #4436, turning it on for an antigravity instance is refused without the declaration. If you use agy with an API key or Gemini Enterprise, declare it by setting the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it at startup, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`). Setting it only in the environment where you run the `commandmate` CLI has no effect. The declaration is your own: CommandMate does not read your credentials to check it.
 
 ```bash
 commandmate auto-yes <worktree-id> --enable --duration 3h

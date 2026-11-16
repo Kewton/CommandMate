@@ -144,6 +144,18 @@ Every command and flag is in the [CLI Operations Guide](./docs/en/user-guide/cli
 
 ---
 
+## Before you use Antigravity (agy)
+
+Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict using Antigravity through third-party software or coding agents on consumer plans (Free, Google AI Plus, Pro and Ultra). A breach can lead to account suspension. With a consumer-plan sign-in, do not use CommandMate to:
+
+- send tasks to agy from another AI agent (`send`, `ask`, relays, `/orchestrate`)
+- run agy from Schedules or the daily summary
+- turn on Auto-Yes for agy
+
+There is no explicit confirmation from Google on whether starting agy and typing into it yourself through CommandMate is within the terms. For automation, use a Gemini API key or Gemini Enterprise. To tell CommandMate you use agy that way, set the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it only when it starts, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`); setting it only in the environment where you run the `commandmate` CLI has no effect. The setting is your own declaration — CommandMate does not read your credentials to check it, and it never reads or forwards agy's credentials. Terms: https://antigravity.google/terms · FAQ: https://antigravity.google/docs/faq (as of 2026-11-16). This is not legal advice.
+
+---
+
 ## What it does not do
 
 - It does not keep running in the background on its own. Each piece of work starts and ends, and nothing in your repository changes until you approve it.
