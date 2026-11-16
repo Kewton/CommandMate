@@ -29,18 +29,66 @@ import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 const OPERATIONS: readonly ToolOperation[] = ['send', 'ask', 'respond', 'relay', 'schedule', 'auto-yes'];
 const ORIGINS: readonly SendOrigin[] = ['legacy', 'terminal', 'session', 'agent', 'schedule', 'unknown', 'relay', 'timer'];
 const DECLARATIONS: readonly UsageDeclaration[] = ['personal', 'api-key', 'enterprise'];
-const MODULE_DIR = path.resolve(__dirname, '../../../../src/lib/tool-policy');
 
-/** The one import policy.ts may have. */
-const ALLOWED_IMPORT = { specifier: '../cli-tools/types', names: ['CLIToolType'] };
-const FORBIDDEN_IDENTIFIERS = new Set(['process', 'globalThis', 'global', 'require', 'module', 'eval', 'Function']);
+/*
+ * I6 (policy.ts stays pure) — scope: a test that fails when a dependency is added by accident.
+ * Deliberate obfuscation (generating code from strings, etc.) is for review to catch.
+ *
+ * Allow-list invariant (Issue #4436 L0, reviews l0 / l0b):
+ * (a) every identifier reference (value and type) resolves, through the type checker
+ *     (aliases followed), to a declaration in policy.ts, to `CLIToolType` in
+ *     src/lib/cli-tools/types.ts, or to a standard global in ALLOWED_GLOBALS declared in a
+ *     lib.*.d.ts. Anything else — or an identifier that does not resolve — is a violation.
+ * (b) syntax that reaches out is refused: `import('x')` types, `import.meta`, dynamic import,
+ *     non-type / side-effect imports, `export … from`, `export *`, `import x = require()`, and
+ *     access to `constructor` / `__proto__` / `prototype` (dot or string element access).
+ * (c) positions that are not references are not judged: property names (`obj.process`,
+ *     `{ process: 1 }`) and a destructuring `propertyName` (`{ process: p }`); a shorthand
+ *     property is judged by the value it refers to.
+ */
+const POLICY_PATH = path.resolve(__dirname, '../../../../src/lib/tool-policy/policy.ts');
+const CLI_TOOL_TYPES_PATH = path.resolve(__dirname, '../../../../src/lib/cli-tools/types.ts');
+const ALLOWED_IMPORT_SPECIFIER = '../cli-tools/types';
+const ALLOWED_IMPORTED_NAMES = new Set(['CLIToolType']);
+/** Standard globals policy.ts actually uses (lib.*.d.ts declarations only). `undefined` is the intrinsic. */
+const ALLOWED_GLOBALS = new Set(['Object', 'Readonly', 'Record', 'undefined']);
+const FORBIDDEN_PROPERTY_NAMES = new Set(['constructor', '__proto__', 'prototype']);
 
-/** Is `node` in a position that names a property rather than referring to a binding? */
-function isPropertyNamePosition(node: ts.Identifier): boolean {
+const COMPILER_OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2020,
+  lib: ['lib.es2020.d.ts'],
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  strict: true,
+  noEmit: true,
+  skipLibCheck: true,
+  types: [],
+};
+const sourceFileCache = new Map<string, ts.SourceFile | undefined>();
+
+function createProgramFor(sourceText: string): ts.Program {
+  const host = ts.createCompilerHost(COMPILER_OPTIONS, true);
+  const baseGetSourceFile = host.getSourceFile.bind(host);
+  const baseReadFile = host.readFile.bind(host);
+  const isPolicy = (f: string): boolean => path.resolve(f) === POLICY_PATH;
+  host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+    if (isPolicy(fileName)) return ts.createSourceFile(fileName, sourceText, languageVersion, true, ts.ScriptKind.TS);
+    if (!sourceFileCache.has(fileName)) {
+      sourceFileCache.set(fileName, baseGetSourceFile(fileName, languageVersion, onError, shouldCreate));
+    }
+    return sourceFileCache.get(fileName);
+  };
+  host.readFile = (fileName) => (isPolicy(fileName) ? sourceText : baseReadFile(fileName));
+  return ts.createProgram({ rootNames: [POLICY_PATH], options: COMPILER_OPTIONS, host });
+}
+
+/** Positions that name a property (or a destructured property) rather than refer to a binding. */
+function isNonReferencePosition(node: ts.Identifier): boolean {
   const parent = node.parent;
-  if (!parent) return false;
   if (ts.isPropertyAccessExpression(parent) && parent.name === node) return true;
   if (ts.isQualifiedName(parent) && parent.right === node) return true;
+  if (ts.isBindingElement(parent) && parent.propertyName === node) return true;
+  if (ts.isConstTypeReference(parent)) return true; // `as const`
   if (
     (ts.isPropertyAssignment(parent) ||
       ts.isPropertyDeclaration(parent) ||
@@ -57,52 +105,78 @@ function isPropertyNamePosition(node: ts.Identifier): boolean {
   return false;
 }
 
-/**
- * Violations of "policy.ts reaches the outside world only through `import type { CLIToolType }
- * from '../cli-tools/types'`", judged on the TypeScript AST (Issue #4436 L0, review P2).
- */
+/** Violations of the I6 allow-list invariant for `sourceText` placed at policy.ts's path. */
 function checkPurity(sourceText: string): string[] {
-  const sf = ts.createSourceFile('policy.ts', sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const program = createProgramFor(sourceText);
+  const checker = program.getTypeChecker();
+  const sf = program.getSourceFile(POLICY_PATH);
+  if (!sf) return ['policy.ts could not be loaded'];
   const violations: string[] = [];
-  const where = (n: ts.Node): string => {
+  const at = (n: ts.Node): string => {
     const { line, character } = sf.getLineAndCharacterOfPosition(n.getStart(sf));
     return `${line + 1}:${character + 1}`;
   };
-  let allowedImports = 0;
 
+  // (b) module-level syntax
   for (const stmt of sf.statements) {
     if (ts.isImportDeclaration(stmt)) {
       const spec = ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : '?';
       const clause = stmt.importClause;
-      const named = clause?.namedBindings;
-      const ok =
-        spec === ALLOWED_IMPORT.specifier &&
-        clause !== undefined &&
-        clause.isTypeOnly &&
-        clause.name === undefined &&
-        named !== undefined &&
-        ts.isNamedImports(named) &&
-        named.elements.length === ALLOWED_IMPORT.names.length &&
-        named.elements.every((e, i) => e.name.text === ALLOWED_IMPORT.names[i] && e.propertyName === undefined);
-      if (ok && allowedImports === 0) allowedImports++;
-      else violations.push(`${where(stmt)} import '${spec}' is not the one allowed type import`);
+      if (!clause) violations.push(`${at(stmt)} side-effect import '${spec}'`);
+      else if (!clause.isTypeOnly) violations.push(`${at(stmt)} non-type import '${spec}'`);
+      else if (spec !== ALLOWED_IMPORT_SPECIFIER) violations.push(`${at(stmt)} import from '${spec}'`);
     } else if (ts.isImportEqualsDeclaration(stmt)) {
-      violations.push(`${where(stmt)} import = require(...)`);
+      violations.push(`${at(stmt)} import = require(...)`);
     } else if (ts.isExportDeclaration(stmt) && stmt.moduleSpecifier !== undefined) {
-      violations.push(`${where(stmt)} re-export from another module`);
+      violations.push(`${at(stmt)} export … from another module`);
     }
   }
 
+  const judgeReference = (id: ts.Identifier): void => {
+    let symbol = ts.isShorthandPropertyAssignment(id.parent) && id.parent.name === id
+      ? checker.getShorthandAssignmentValueSymbol(id.parent)
+      : checker.getSymbolAtLocation(id);
+    if (!symbol) {
+      violations.push(`${at(id)} '${id.text}' does not resolve`);
+      return;
+    }
+    if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    const decls = symbol.declarations ?? [];
+    if (decls.length === 0) {
+      if (symbol.escapedName === 'undefined' && ALLOWED_GLOBALS.has('undefined')) return;
+      violations.push(`${at(id)} '${id.text}' resolves to a symbol without a declaration`);
+      return;
+    }
+    const ok = decls.every((d) => {
+      const file = d.getSourceFile();
+      if (path.resolve(file.fileName) === POLICY_PATH) return true;
+      if (path.resolve(file.fileName) === CLI_TOOL_TYPES_PATH) return ALLOWED_IMPORTED_NAMES.has(symbol!.name);
+      if (program.isSourceFileDefaultLibrary(file)) return ALLOWED_GLOBALS.has(symbol!.name);
+      return false;
+    });
+    if (!ok) {
+      const where = path.basename(decls[0].getSourceFile().fileName);
+      violations.push(`${at(id)} '${id.text}' resolves outside the allow-list (${where})`);
+    }
+  };
+
   const visit = (node: ts.Node): void => {
+    if (ts.isImportTypeNode(node)) violations.push(`${at(node)} import('…') type`);
+    if (ts.isMetaProperty(node)) violations.push(`${at(node)} ${node.getText(sf)}`);
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-      violations.push(`${where(node)} dynamic import(...)`);
+      violations.push(`${at(node)} dynamic import(...)`);
     }
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') {
-      violations.push(`${where(node)} require(...) call`);
+    if (ts.isPropertyAccessExpression(node) && FORBIDDEN_PROPERTY_NAMES.has(node.name.text)) {
+      violations.push(`${at(node)} access to '${node.name.text}'`);
     }
-    if (ts.isIdentifier(node) && FORBIDDEN_IDENTIFIERS.has(node.text) && !isPropertyNamePosition(node)) {
-      violations.push(`${where(node)} references identifier '${node.text}'`);
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isStringLiteralLike(node.argumentExpression) &&
+      FORBIDDEN_PROPERTY_NAMES.has(node.argumentExpression.text)
+    ) {
+      violations.push(`${at(node)} access to '${node.argumentExpression.text}'`);
     }
+    if (ts.isIdentifier(node) && !isNonReferencePosition(node)) judgeReference(node);
     ts.forEachChild(node, visit);
   };
   visit(sf);
@@ -226,33 +300,38 @@ describe('tool-policy (#4436)', () => {
     });
   });
 
-  describe('I6: policy.ts has no door to the outside except the CLIToolType type import (AST)', () => {
-    const src = fs.readFileSync(path.join(MODULE_DIR, 'policy.ts'), 'utf-8');
+  describe('I6: policy.ts reaches nothing outside its allow-list (type checker + syntax)', () => {
+    const src = fs.readFileSync(POLICY_PATH, 'utf-8');
 
     it('the current policy.ts has no violation', () => {
       expect(checkPurity(src)).toEqual([]);
     });
-    it('control (allowed): property names that look like forbidden identifiers', () => {
-      expect(checkPurity("const o = { process: 1 }; o.process;")).toEqual([]);
-      expect(checkPurity("import type { CLIToolType } from '../cli-tools/types'; const o = { global: 1, require: 2 }; o.module;")).toEqual([]);
+    it.each([
+      'const o = { process: 1 }; void o.process;',
+      'const { process: p } = { process: 1 }; void p;',
+      'const { process } = { process: 1 }; void process;',
+      "const k = 'a'; const o = { [k]: 1 }; void o;",
+      "import type { CLIToolType } from '../cli-tools/types'; export const t: CLIToolType = 'claude';",
+    ])('control (allowed): %s', (good) => {
+      expect(checkPurity(good)).toEqual([]);
     });
     it.each([
       "void require('crypto');",
       "void process['env'];",
-      'const e = globalThis.process;',
-      "await import('fs');",
+      'const e = globalThis.process; void e;',
+      "export async function f(): Promise<unknown> { return await import('fs'); }",
       "import 'fs';",
       "export * from './declaration';",
       "export { x } from 'node:os';",
-      "import { CLIToolType } from '../cli-tools/types';",
-      "import type { CLIToolType } from '../cli-tools/types'; import fs from 'fs';",
-      'const f = new Function("return 1");',
-      'eval("1");',
-      'const g = global;',
-      'module.exports = {};',
-      'const { env } = process;',
-      "import os = require('os');",
-      "import type { Foo } from './declaration';",
+      "import { CLIToolType } from '../cli-tools/types'; export const t: CLIToolType = 'claude';",
+      "import type { CLIToolType } from '../cli-tools/types'; import fs from 'fs'; export const t: CLIToolType = 'claude'; void fs;",
+      "export type X = import('node:fs').Stats;",
+      'void import.meta.url;',
+      "void Reflect.construct(Object.constructor, ['return this'])().process.env;",
+      'void Buffer;',
+      "import type { CLI_TOOL_IDS } from '../cli-tools/types'; export type T = typeof CLI_TOOL_IDS;",
+      'void Object["prototype"];',
+      'const f = new Function("return 1"); void f;',
     ])('control (refused): %s', (bad) => {
       expect(checkPurity(bad).length).toBeGreaterThan(0);
     });
