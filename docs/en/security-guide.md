@@ -54,6 +54,10 @@ table above still apply to anyone who *does* get past authentication.
 
 See *Option 4: `commandmate remote`* under Recommended Authentication Methods below.
 
+### Agent credentials
+
+CommandMate does not read or forward the OAuth tokens or credential files of agy (Antigravity) or Gemini, and does not call Google APIs directly. `tests/unit/security/no-agy-credentials-4439.test.ts` enforces this.
+
 ---
 
 ## Quick Start: Built-in Token Authentication + HTTPS
