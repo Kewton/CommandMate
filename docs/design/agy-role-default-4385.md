@@ -513,6 +513,10 @@ A4 の再現の手順（隔離のサーバーで行う。本番のポート 3000
 
 e2e（`tests/e2e/agent-roles-4117.spec.ts`）には足していない: この作業の契約ではサーバーを起動できず、走らせて緑を確かめられない spec を足さないため。画面の 3 か所は unit（`tests/unit/components/worktree/role-refusal-send-4385.test.tsx` と変異の対照 `…-mutant.test.tsx`）で固定した。
 
+## 15. 削除時に片付けない理由（Issue #4419 事象 2）
+
+ロールを削除しても、Antigravity の起動で書いた `~/.gemini/config/agents/cm-role-<名前空間>-<ロール id>-<指紋>/agent.md` は消さない（`artifacts.ts` の「Never deleted」の規則のまま）。動いているプロセスや再開する会話がまだ読む定義を消しうるため。削除時に片付ける実装を試みたが、レビューで「起動中・使用中の定義を消しうる窓」が 4 回続けて見つかった。PM の決定で、自動の片付けは別 Issue で設計し、この範囲では「残ること」と「手で消す手順」を CLI 運用ガイド（ja・en）と画面の説明に書くだけにした。製品のコードは変えない。
+
 ## 改訂の履歴
 
 - 2026-11-15 A4 再指示 1: 遅い 409 でも行に理由と戻した記録を残す、`/sessions` のタイルにも同じ扱い（`useRoleRefusalNotice` を共通に）、not-applied の文から稼働の状態の断定を外した
