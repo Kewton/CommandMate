@@ -89,12 +89,30 @@ async function mockApi(page: Page) {
       }
       if (pathname === '/api/roles') return json(route, ROLES);
       if (pathname === '/api/sessions/roles') return json(route, SESSION_ROLES);
-      const sub = pathname.match(/^\/api\/worktrees\/[^/]+(\/.*)$/)?.[1] ?? '';
-      if (sub.startsWith('/slash-commands')) return json(route, { groups: [] });
-      if (sub.startsWith('/messages')) return json(route, []);
-      if (sub.startsWith('/current-output')) return json(route, IDLE_OUTPUT);
       if (pathname === '/api/relays') return json(route, EMPTY_RELAYS);
       if (pathname === '/api/sidebar/group-order') return json(route, { success: true, order: [] });
+      // The worktree screen: the detail answer carries the roster (same shape as
+      // composer-height-helpers.ts), so `?instance=` can be applied to it.
+      const detail = pathname.match(/^\/api\/worktrees\/([^/]+)(\/.*)?$/);
+      if (detail) {
+        const id = decodeURIComponent(detail[1]);
+        const sub = detail[2] ?? '';
+        if (sub === '') return json(route, WORKTREES.find((w) => w.id === id) ?? WORKTREES[0]);
+        if (sub.startsWith('/slash-commands')) return json(route, { groups: [] });
+        if (sub.startsWith('/messages')) return json(route, []);
+        if (sub.startsWith('/current-output')) return json(route, IDLE_OUTPUT);
+        if (sub.startsWith('/special-keys')) return json(route, { success: true });
+        if (sub.startsWith('/memos')) return json(route, []);
+        if (sub.startsWith('/execution-logs')) return json(route, []);
+        if (sub.startsWith('/schedules')) return json(route, []);
+        if (sub.startsWith('/tree')) return json(route, { items: [] });
+        if (sub.startsWith('/tasks')) return json(route, { tasks: [] });
+        if (sub.startsWith('/verify/runs')) return json(route, { runs: [] });
+        if (sub.startsWith('/verify/config')) return json(route, { exists: false, gates: [] });
+        return json(route, {});
+      }
+      if (pathname.includes('/repositories')) return json(route, []);
+      if (pathname.includes('/tools')) return json(route, []);
       return json(route, {});
     },
   );
@@ -146,5 +164,12 @@ test.describe('[#4389] sessions role filter', () => {
     await page.getByTestId('sessions-view-mode-list').click();
     await page.getByTestId('session-item-e2e-4389-a').click();
     await page.waitForURL((url) => url.pathname === '/worktrees/e2e-4389-a');
+    // The worktree screen shows the first matching instance (codex), not its
+    // first instance (claude): the header's current-session pill is codex's.
+    const current = page.locator('[data-session-current]');
+    await expect(current).toHaveAttribute('data-testid', 'desktop-agent-status-codex', { timeout: 30_000 });
+    await expect(current).toHaveAttribute('aria-pressed', 'true');
+    // `?instance=` was consumed by the screen.
+    await expect.poll(() => new URL(page.url()).searchParams.get('instance')).toBeNull();
   });
 });

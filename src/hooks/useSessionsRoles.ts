@@ -11,6 +11,8 @@
  * {@link UseSessionsRolesResult.reload} and every {@link SESSIONS_ROLES_POLL_MS}
  * while `poll` is true (the page passes "a role condition is chosen"). The route
  * costs git work, so it is not read on the worktree list's short interval.
+ * Each read adopts only its latest request, so a late reply never overwrites a
+ * newer one.
  *
  * @module hooks/useSessionsRoles
  */
@@ -37,23 +39,31 @@ export function useSessionsRoles({ poll }: { poll: boolean }): UseSessionsRolesR
   const [roles, setRoles] = useState<AgentRoleSummary[] | null>(null);
   const [source, setSource] = useState<SessionsRoleSource | null>(null);
   const mounted = useRef(true);
+  // Only the latest request of each read is adopted (as in useWorktreesCache):
+  // a slower earlier reply — success or failure — must not undo a newer one.
+  const sourceSeq = useRef(0);
+  const rolesSeq = useRef(0);
 
   const readSource = useCallback(async () => {
+    const seq = ++sourceSeq.current;
+    let next: SessionsRoleSource;
     try {
       const body = await sessionsApi.getRoles();
-      if (!mounted.current) return;
-      setSource({
+      next = {
         roleByWorktree: body.roleByWorktree ?? {},
         rolesUnavailable: body.rolesUnavailable === true,
-      });
+      };
     } catch {
-      if (mounted.current) setSource({ roleByWorktree: {}, rolesUnavailable: true });
+      next = { roleByWorktree: {}, rolesUnavailable: true };
     }
+    if (!mounted.current || seq !== sourceSeq.current) return;
+    setSource(next);
   }, []);
 
   const readRoles = useCallback(async () => {
+    const seq = ++rolesSeq.current;
     const result = await roleApi.list();
-    if (!mounted.current) return;
+    if (!mounted.current || seq !== rolesSeq.current) return;
     setRoles(result.ok ? result.data.roles : null);
   }, []);
 
