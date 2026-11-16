@@ -38,6 +38,14 @@
       "errorInvalid": "正規表現が正しくありません。この条件は使っていません。",
       "errorTooLong": "200 文字までです。この条件は使っていません。",
       "clear": "クリア"
+    },
+    "roleFilter": {
+      "label": "ロール",
+      "noRole": "ロールなし",
+      "ambiguous": "判定できない",
+      "unavailable": "ロールを読めなかったため、ロールの条件は使っていません。",
+      "rolesLoadError": "ロールの一覧を読めませんでした。",
+      "instanceRole": "{instance}: {role}"
     }
   },
   "nav": {
