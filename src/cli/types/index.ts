@@ -708,6 +708,19 @@ export const RoleExitCode = {
 } as const;
 export type RoleExitCode = typeof RoleExitCode[keyof typeof RoleExitCode];
 
+/**
+ * What a send / ask / respond / relay / Auto-Yes refused by the tool policy ends in
+ * (Issue #4436 / #4437, `src/lib/tool-policy/policy.ts`). 33 because 30-32 are
+ * {@link InterruptExitCode} / {@link RoleExitCode} and 40 / 41 are the strict
+ * `respond`'s: an orchestration loop reads all of these out of one `$?`, and 32's
+ * recovery ("start it again and it can be sent") is the opposite of this one.
+ */
+export const ToolPolicyExitCode = {
+  /** Refused by the tool policy (`TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`). Nothing was typed. Sending again gives the same result: a usage declaration or a person on the web UI is needed. */
+  DENIED: 33,
+} as const;
+export type ToolPolicyExitCode = typeof ToolPolicyExitCode[keyof typeof ToolPolicyExitCode];
+
 /** Shared by every `roles` subcommand (Issue #4116). */
 export interface RolesOptions {
   json?: boolean;
