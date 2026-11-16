@@ -31,8 +31,11 @@ const ORIGINS: readonly SendOrigin[] = ['legacy', 'terminal', 'session', 'agent'
 const DECLARATIONS: readonly UsageDeclaration[] = ['personal', 'api-key', 'enterprise'];
 
 /*
- * I6 (policy.ts stays pure) — scope: a test that fails when a dependency is added by accident.
- * Deliberate obfuscation (generating code from strings, etc.) is for review to catch.
+ * I6 (policy.ts stays pure) — 脅威の範囲: うっかり足したら落ちる試験。意図的な難読化
+ * （変数経由の連結・eval 相当・文字列からのコード生成など）はレビューの範囲。
+ * Scope: a test that fails when a dependency is added by accident. Deliberate obfuscation
+ * (concatenation through variables, eval equivalents, generating code from strings, etc.)
+ * is for review to catch.
  *
  * Allow-list invariant (Issue #4436 L0, reviews l0 / l0b):
  * (a) every identifier reference (value and type) resolves, through the type checker
