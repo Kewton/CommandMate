@@ -14,6 +14,11 @@
  * polling loop with `WorktreesCacheProvider` (otherwise `/api/worktrees`
  * is polled twice while this page is mounted).
  *
+ * Issue #4389: a role condition (roles of each instance, `GET /api/sessions/roles`
+ * read once). While it is applied, a tile switches only between the matching
+ * instances, a list row counts only those and names their roles, and the row's
+ * link opens the first match (`?instance=`). Unfiltered, all of that is as before.
+ *
  * Sidebar auto-collapses on this page (via useLayoutConfig).
  */
 
@@ -24,8 +29,17 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowDown, ArrowUp, Filter } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { evaluateSessionsFilter, type FilterTarget } from '@/lib/sessions-filter';
-import { agentInstancesFromSelectedAgents } from '@/lib/cli-tools/types';
+import {
+  evaluateSessionsFilter,
+  hasRoleCondition,
+  type FilterTarget,
+  type SessionsRoleCondition,
+} from '@/lib/sessions-filter';
+import {
+  agentInstancesFromSelectedAgents,
+  getInstanceLabel,
+  type AgentInstance,
+} from '@/lib/cli-tools/types';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
 import {
   SessionTileGrid,
@@ -35,6 +49,7 @@ import {
 } from '@/components/sessions';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSessionsViewMode } from '@/hooks/useSessionsViewMode';
+import { useSessionsRoles } from '@/hooks/useSessionsRoles';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
@@ -58,7 +73,7 @@ import {
   Skeleton,
   StatusDot,
 } from '@/components/ui';
-import { compareByTimestamp } from '@/lib/sidebar-utils';
+import { buildSessionRowHref, compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTimeShort } from '@/lib/date-utils';
 import { STAGGER_ENTER_CLASS, staggerDelay } from '@/lib/utils/stagger';
 import { sanitizePreview } from '@/config/message-preview-config';
@@ -209,13 +224,19 @@ function formatStatus(
 const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
 /** Same roster the tile shows (SessionTile.resolveInstances): the default agents when omitted. */
-function resolveSessionsRoster(wt: FilterTarget): string[] {
+function resolveSessionsInstances(wt: FilterTarget): AgentInstance[] {
   const instances =
     wt.agentInstances && wt.agentInstances.length > 0
       ? wt.agentInstances
       : agentInstancesFromSelectedAgents(wt.selectedAgents ?? getClientDefaultSelectedAgents());
-  return [...instances].sort((a, b) => a.order - b.order).map((i) => i.id);
+  return [...instances].sort((a, b) => a.order - b.order);
 }
+
+function resolveSessionsRoster(wt: FilterTarget): string[] {
+  return resolveSessionsInstances(wt).map((i) => i.id);
+}
+
+const EMPTY_ROLE_CONDITION: SessionsRoleCondition = {};
 
 // ============================================================================
 // Component
@@ -232,6 +253,9 @@ export default function SessionsPage() {
   const hasWorktrees = worktrees.length > 0;
   const [filterText, setFilterText] = useState('');
   const [branchPattern, setBranchPattern] = useState('');
+  const [roleCondition, setRoleCondition] = useState<SessionsRoleCondition>(EMPTY_ROLE_CONDITION);
+  const wantsRole = hasRoleCondition(roleCondition);
+  const { roles, source: roleSource, reload: reloadRoles } = useSessionsRoles({ poll: wantsRole });
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -249,7 +273,7 @@ export default function SessionsPage() {
     void ensureClientDefaultSelectedAgents();
   }, []);
 
-  const filteredAndSorted = useMemo(() => {
+  const { filteredAndSorted, matchedInstances } = useMemo(() => {
     let result = worktrees;
 
     // Filter
@@ -264,8 +288,17 @@ export default function SessionsPage() {
     }
 
     // Issue #4386: branch filter. An unusable pattern keeps everything.
-    const verdict = evaluateSessionsFilter(result, { branchPattern }, resolveSessionsRoster);
+    // Issue #4389: role filter. Roles that could not be read keep everything (and say so).
+    const verdict = evaluateSessionsFilter(
+      result,
+      { branchPattern, role: roleCondition },
+      resolveSessionsRoster,
+      roleSource
+    );
     result = result.filter((wt) => verdict.verdicts.get(wt.id)?.show ?? true);
+    const matched = verdict.roleFiltered
+      ? new Map(result.map((wt) => [wt.id, verdict.verdicts.get(wt.id)?.instanceIds ?? []] as const))
+      : undefined;
 
     // Sort
     const sorted = [...result];
@@ -313,16 +346,47 @@ export default function SessionsPage() {
       return isDefaultDirection ? comparison : -comparison;
     });
 
-    return sorted;
-  }, [worktrees, filterText, branchPattern, sortKey, sortDirection]);
+    return { filteredAndSorted: sorted, matchedInstances: matched };
+  }, [worktrees, filterText, branchPattern, roleCondition, roleSource, sortKey, sortDirection]);
 
   const branchFilter = useMemo(
-    () => evaluateSessionsFilter([], { branchPattern }),
-    [branchPattern]
+    () => evaluateSessionsFilter([], { branchPattern, role: roleCondition }, undefined, roleSource),
+    [branchPattern, roleCondition, roleSource]
   );
   const activeFilterCount = branchFilter.activeCount;
   const branchFilterError = branchFilter.error;
-  const clearFilters = useCallback(() => setBranchPattern(''), []);
+  const roleFilterError = branchFilter.roleError;
+  const clearFilters = useCallback(() => {
+    setBranchPattern('');
+    setRoleCondition(EMPTY_ROLE_CONDITION);
+  }, []);
+  const openFilter = useCallback(() => {
+    setIsFilterOpen(true);
+    // Roles may have been added or instances started since the page opened.
+    reloadRoles();
+  }, [reloadRoles]);
+  const handleRefresh = useCallback(async () => {
+    reloadRoles();
+    await refresh();
+  }, [reloadRoles, refresh]);
+  const roleOptions = useMemo(
+    () => (roles === null ? null : roles.map((r) => ({ id: r.id, name: r.name }))),
+    [roles]
+  );
+  /** "Instance: role" for a matched instance (Issue #4389). */
+  const describeInstanceRole = (worktreeId: string, instance: AgentInstance | undefined, instanceId: string) => {
+    const summary = roleSource?.roleByWorktree[worktreeId]?.[instanceId];
+    const roleLabel =
+      summary?.kind === 'role'
+        ? summary.roleName
+        : summary?.kind === 'ambiguous'
+          ? tCommon('sessions.roleFilter.ambiguous')
+          : tCommon('sessions.roleFilter.noRole');
+    return tCommon('sessions.roleFilter.instanceRole', {
+      instance: instance ? getInstanceLabel(instance) : instanceId,
+      role: roleLabel,
+    });
+  };
   const closeFilter = useCallback(() => setIsFilterOpen(false), []);
   const filterPanel = (
     <SessionsFilterPanel
@@ -330,6 +394,10 @@ export default function SessionsPage() {
       onBranchPatternChange={setBranchPattern}
       error={branchFilterError}
       onClear={clearFilters}
+      roles={roleOptions}
+      role={roleCondition}
+      onRoleChange={setRoleCondition}
+      roleError={roleFilterError}
     />
   );
 
@@ -354,7 +422,7 @@ export default function SessionsPage() {
           container so the gesture only fires at the top and native PTR is
           suppressed. `refresh` re-fetches the shared worktrees cache. */}
       <PullToRefresh
-        onRefresh={refresh}
+        onRefresh={handleRefresh}
         enabled={isMobile}
         // Issue #2509: tile mode drops `container-custom`'s `max-w-7xl mx-auto`
         // and keeps only its gutters, so two 640px-wide tiles have room on a
@@ -384,7 +452,7 @@ export default function SessionsPage() {
           />
           <button
             type="button"
-            onClick={() => setIsFilterOpen(true)}
+            onClick={openFilter}
             data-testid="sessions-filter-button"
             className="inline-flex items-center gap-1 rounded-md border border-input bg-surface px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -465,6 +533,16 @@ export default function SessionsPage() {
           */}
         {hasWorktrees ? (
           <>
+            {/* Issue #4389: a chosen role condition that cannot be used is said, not hidden. */}
+            {roleFilterError && (
+              <div
+                className="mb-4 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+                role="status"
+                data-testid="sessions-role-unavailable-banner"
+              >
+                {tCommon('sessions.roleFilter.unavailable')}
+              </div>
+            )}
             {/* Non-blocking error banner (data already visible below) */}
             {error && (
               <div
@@ -485,7 +563,7 @@ export default function SessionsPage() {
                   {tCommon('sessions.noMatching')}
                 </div>
               ) : (
-                <SessionTileGrid worktrees={filteredAndSorted} />
+                <SessionTileGrid worktrees={filteredAndSorted} instanceIdsByWorktree={matchedInstances} />
               )
             ) : (
               <div className="space-y-2" data-testid="sessions-list">
@@ -509,14 +587,36 @@ export default function SessionsPage() {
                   // chip too, drawn as "cannot tell". Folded into the counter it
                   // would be one more gray dot — the pane a human should look at,
                   // hidden among the ones they can ignore.
-                  const agentStatuses = agents.map((agent) => {
-                    const entry = wt.sessionStatusByCli?.[agent];
-                    return {
-                      agent,
-                      status: deriveCliStatus(entry),
-                      unclassified: isUnclassifiedCliStatus(entry),
-                    };
-                  });
+                  // Issue #4389: under a role condition, only the matching
+                  // instances are shown and counted, read per instance.
+                  const matchedIds = matchedInstances?.get(wt.id);
+                  const instanceById = matchedIds
+                    ? new Map(resolveSessionsInstances(wt).map((i) => [i.id, i] as const))
+                    : null;
+                  const agentStatuses = matchedIds && instanceById
+                    ? matchedIds.map((id) => {
+                        const instance = instanceById.get(id);
+                        const entry =
+                          wt.sessionStatusByInstance?.[id] ??
+                          (instance && instance.id === instance.cliTool
+                            ? wt.sessionStatusByCli?.[instance.cliTool]
+                            : undefined);
+                        return {
+                          agent: id,
+                          label: instance ? getInstanceLabel(instance) : id,
+                          status: deriveCliStatus(entry),
+                          unclassified: isUnclassifiedCliStatus(entry),
+                        };
+                      })
+                    : agents.map((agent) => {
+                        const entry = wt.sessionStatusByCli?.[agent];
+                        return {
+                          agent: agent as string,
+                          label: getCliToolDisplayName(agent),
+                          status: deriveCliStatus(entry),
+                          unclassified: isUnclassifiedCliStatus(entry),
+                        };
+                      });
                   const workingAgents = agentStatuses.filter(
                     (a) => isWorkingStatus(a.status) || a.unclassified
                   );
@@ -533,7 +633,11 @@ export default function SessionsPage() {
                     // from re-firing on polling re-renders.
                     <Link
                       key={wt.id}
-                      href={`/worktrees/${wt.id}`}
+                      href={
+                        matchedIds && matchedIds.length > 0
+                          ? buildSessionRowHref({ worktreeId: wt.id, instanceId: matchedIds[0] })
+                          : `/worktrees/${wt.id}`
+                      }
                       style={{ animationDelay: staggerDelay(index) }}
                       className={`block bg-surface rounded-lg p-4 border transition-colors ${cardStateClasses} ${STAGGER_ENTER_CLASS}`}
                       data-testid={`session-item-${wt.id}`}
@@ -547,19 +651,31 @@ export default function SessionsPage() {
                           <div className="text-xs text-muted-foreground truncate">
                             {wt.name}
                           </div>
+                          {matchedIds && instanceById && (
+                            <div
+                              className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground"
+                              data-testid={`session-roles-${wt.id}`}
+                            >
+                              {matchedIds.map((id) => (
+                                <span key={id} data-testid={`session-role-${wt.id}-${id}`}>
+                                  {describeInstanceRole(wt.id, instanceById.get(id), id)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* [Issue #1078] Working agents as labelled chips; idle group collapsed */}
                         <div className="flex items-center gap-2 ml-4 flex-shrink-0" data-testid={`session-agents-${wt.id}`}>
-                          {workingAgents.map(({ agent, status, unclassified }) => (
+                          {workingAgents.map(({ agent, label, status, unclassified }) => (
                             <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
                               <CliDot
                                 status={status}
-                                label={getCliToolDisplayName(agent)}
+                                label={label}
                                 unclassified={unclassified}
                               />
                               <span className="text-xs text-muted-foreground">
-                                {getCliToolDisplayName(agent)}
+                                {label}
                               </span>
                             </div>
                           ))}

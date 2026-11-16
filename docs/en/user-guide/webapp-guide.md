@@ -459,6 +459,7 @@ A role is the instructions given to a session when it starts. Create a name and 
 - **When adding**: choose "Default (role name)", none, or another role in the add form. The line below says where the default comes from, such as `Inherited: Reviewer [system]` or `Inherited: None [set on the repository]`
 - **Existing sessions**: open **Session roles** under Agents (the same on a phone). A session with no roster row yet can be changed too
 - **When it cannot be determined**: if the roots of one git repository hold different settings, for example, the reason is shown, and starts are refused until they agree or the session names a role
+- **Filtering `/sessions` by role**: under **Filter**, choose roles (several are fine), "No role" or "Cannot tell", and only branches with at least one session of those roles stay. A tile's switch offers only the matching sessions, and a list row names the matching sessions' roles in small text. Opening a row shows the first matching session (PC and phone). Choosing nothing filters nothing. When roles cannot be read, the role condition is not used and the screen says so
 
 **Changing a setting does not reach a running session.** The split header (on a phone, Session roles) keeps the start and the next apart, such as `At start: Reviewer / Next: PM / Pending`. When it cannot be confirmed, after a server restart for example, it reads `At start: Unknown`. **Restart** ends that session, and the next message starts a new one with the current settings.
 

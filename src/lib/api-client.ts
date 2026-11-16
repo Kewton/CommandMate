@@ -6,6 +6,7 @@
 import type { Worktree, ChatMessage, WorktreeMemo } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SlashCommandGroup } from '@/types/slash-commands';
+import type { SessionRolesResponse } from '@/types/agent-roles';
 // Issue #2651: type-only import, so the module's `fs/promises` never reaches the client bundle.
 import type { ReleaseNote } from '@/lib/app-update/release-notes';
 import {
@@ -1501,3 +1502,18 @@ export const appApi = {
   },
 };
 
+
+/**
+ * `/sessions` reads (Issue #4389).
+ */
+export const sessionsApi = {
+  /**
+   * The role of every instance on the server (`GET /api/sessions/roles`, #4387).
+   * Read once for the whole list rather than per worktree.
+   *
+   * @throws ApiError on a non-2xx response or a transport failure
+   */
+  async getRoles(): Promise<SessionRolesResponse> {
+    return fetchApi<SessionRolesResponse>('/api/sessions/roles');
+  },
+};

@@ -38,6 +38,14 @@
       "errorInvalid": "Invalid regular expression. This condition is not applied.",
       "errorTooLong": "Up to 200 characters. This condition is not applied.",
       "clear": "Clear"
+    },
+    "roleFilter": {
+      "label": "Role",
+      "noRole": "No role",
+      "ambiguous": "Cannot tell",
+      "unavailable": "Roles could not be read, so the role condition is not in use.",
+      "rolesLoadError": "Could not read the list of roles.",
+      "instanceRole": "{instance}: {role}"
     }
   },
   "nav": {
