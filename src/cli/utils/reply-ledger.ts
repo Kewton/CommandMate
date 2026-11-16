@@ -1,7 +1,9 @@
 /**
  * Reading an agent's reply out of the chat ledger (Issue #2376 / #2386 / #3039)
  *
- * `ask` reads the reply after its own turn; `reply` (Issue #3039) reads the
+ * `ask` used to read the reply after its own turn here (until Issue #4344,
+ * which reads it by the ask's id instead and keeps only the overlap check's
+ * reads here); `reply` (Issue #3039) reads the
  * latest reply of a turn somebody else sent — a worker told to "stop and
  * report" by a supervisor nudge. Both mean the same thing by "the reply", so
  * the rules live here once rather than in two commands that can drift:
@@ -95,7 +97,15 @@ const CONTROL_CHAR_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u00
  * @param raw - Reply text as it arrived
  */
 export function sanitizeReply(raw: string): string {
-  return raw.replace(ANSI_ESCAPE_PATTERN, '').replace(CONTROL_CHAR_PATTERN, '').trim();
+  return stripReplyControls(raw).trim();
+}
+
+/**
+ * {@link sanitizeReply} without the trim (Issue #4344): `ask` prints the reply
+ * its ledger matched as the whole body, so only escapes and control bytes go.
+ */
+export function stripReplyControls(raw: string): string {
+  return raw.replace(ANSI_ESCAPE_PATTERN, '').replace(CONTROL_CHAR_PATTERN, '');
 }
 
 /** Whether a row's `request_id` says a transcript reader wrote it. */
