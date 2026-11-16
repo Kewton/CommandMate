@@ -517,6 +517,8 @@ e2e（`tests/e2e/agent-roles-4117.spec.ts`）には足していない: この作
 
 ロールを削除しても、Antigravity の起動で書いた `~/.gemini/config/agents/cm-role-<名前空間>-<ロール id>-<指紋>/agent.md` は消さない（`artifacts.ts` の「Never deleted」の規則のまま）。動いているプロセスや再開する会話がまだ読む定義を消しうるため。削除時に片付ける実装を試みたが、レビューで「起動中・使用中の定義を消しうる窓」が 4 回続けて見つかった。PM の決定で、自動の片付けは別 Issue で設計し、この範囲では「残ること」と「手で消す手順」を CLI 運用ガイド（ja・en）と画面の説明に書くだけにした。製品のコードは変えない。
 
+手で消す手順の前提（`artifacts.ts` の `deriveServerNamespace`・`buildArtifactName`、`role-launch.ts` の `prepareRoleLaunch`）: 名前は `cm-role-<名前空間>-<ロール id>-<指紋 12 桁>`、名前空間は DB のパス文字列の SHA-256 の先頭 8 桁でサーバーごとに違う。同じ定義を instance だけでなく Schedule（`job-executor.ts`、`resolveScheduleRole` → `prepareRoleLaunch`）も準備して別の子プロセスで使うため、消す前に止めるのは instance と Schedule の実行の両方。`description: CommandMate role` は共通で目印にならないので、名前で特定できないものは消さない。
+
 ## 改訂の履歴
 
 - 2026-11-15 A4 再指示 1: 遅い 409 でも行に理由と戻した記録を残す、`/sessions` のタイルにも同じ扱い（`useRoleRefusalNotice` を共通に）、not-applied の文から稼働の状態の断定を外した

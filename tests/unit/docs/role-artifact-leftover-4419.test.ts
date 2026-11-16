@@ -17,15 +17,15 @@ const ROOT = path.resolve(__dirname, '../../..');
 const GUIDES: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
   [
     'docs/user-guide/cli-operations-guide.md',
-    ['cm-role-<名前空間>-<ロール id>-<指紋>/agent.md', '~/.gemini/config/agents/', '自動では消えません', '使う instance を止めてから'],
+    ['cm-role-<名前空間>-<ロール id>-<指紋>/agent.md', '~/.gemini/config/agents/', '自動では消えません', '使う instance をすべて止め', 'Schedule', '`commandmate roles list`', 'SHA-256 の先頭 8 桁', '特定できないもの', '目印にはなりません'],
   ],
   [
     'docs/en/user-guide/cli-operations-guide.md',
-    ['cm-role-<namespace>-<role id>-<fingerprint>/agent.md', '~/.gemini/config/agents/', 'is not removed automatically', 'stop every instance that uses'],
+    ['cm-role-<namespace>-<role id>-<fingerprint>/agent.md', '~/.gemini/config/agents/', 'is not removed automatically', 'stop every instance that uses the role', 'Schedule', '`commandmate roles list`', 'SHA-256 of the DB path', 'cannot identify', 'is not a marker'],
   ],
-  ['docs/user-guide/webapp-guide.md', ['~/.gemini/config/agents/', '自動では消えません']],
-  ['docs/en/user-guide/webapp-guide.md', ['~/.gemini/config/agents/', 'not removed automatically']],
-  ['docs/design/agy-role-default-4385.md', ['削除時に片付けない理由', '別 Issue']],
+  ['docs/user-guide/webapp-guide.md', ['~/.gemini/config/agents/', '自動では消えません', 'Schedule', '特定できないものは消しません']],
+  ['docs/en/user-guide/webapp-guide.md', ['~/.gemini/config/agents/', 'not removed automatically', 'Schedule', 'leave anything you cannot identify']],
+  ['docs/design/agy-role-default-4385.md', ['削除時に片付けない理由', '別 Issue', 'Schedule', '名前で特定できないものは消さない']],
 ];
 
 /** Words a guide must carry and must not (the cleanup is not automatic). */
