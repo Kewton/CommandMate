@@ -407,16 +407,22 @@ function printAskReply(
   outcome: AskOutcome,
   options: AskOptions,
   overlapped: boolean,
-  sentTo?: string,
+  sent?: { cliToolId?: string; sentAt?: string },
 ): void {
   const source: ReplySource = outcome.state === 'matched' ? 'history' : 'none';
   if (outcome.state !== 'matched') {
     // Not an error exit: the turn DID end, and saying so on stderr keeps
     // stdout empty rather than filling it with an apology a caller would
     // paste into a report as the agent's answer.
-    // `sentTo`: the tool the send answer named, for the line only (`--json`'s
-    // `cliToolId` stays the command's own).
-    console.error(formatReplyNotCollected(outcome, { worktreeId, instanceId, cliToolId: agent ?? sentTo }));
+    // `sent.cliToolId`: the tool the send answer named, for the line only
+    // (`--json`'s `cliToolId` stays the command's own). `sent.sentAt`: the
+    // `--since` of the `reply` the line recommends (PR3 review r1).
+    console.error(formatReplyNotCollected(outcome, {
+      worktreeId,
+      instanceId,
+      cliToolId: agent ?? sent?.cliToolId,
+      sentAt: sent?.sentAt,
+    }));
   } else if (outcome.notified) {
     console.error(NOTIFIED_NOTE);
   }
@@ -493,7 +499,7 @@ code is still 0 — the turn ended:
                                   {state: too_old|unreadable, minimum, installed}
   unavailable/server_unsupported  the server predates it (404); sent with the old
                                   body. Restart it (\`stop\`, then \`start --daemon\`)
-                                  or \`update\` so it runs the installed version
+                                  so it runs the installed version
   unavailable/slash_command       a body starting with /, ! or # carries no id
   ambiguous/shared_turn, ambiguous/turn_open_at_send
                                   the turn that answered also took another input
@@ -503,7 +509,8 @@ The reply may still be on the other session's screen: look with
 \`capture <id> --instance <id> --pane\`. To get the reply of a tool that is not
 attributed: \`ask <id> "..." --instance <id> --async\` (a relay brings it back),
 or \`send\` + \`wait\` and then \`reply <id> --instance <id> --since <iso>\`
-(transcript tools; copilot, gemini and vibe-local have only the pane).
+(always with --since, the time before the send; not copilot, gemini or
+vibe-local, whose reply is only on the pane).
 "notified": true on a matched reply means the turn also took a
 background-task notification the reply may react to.
 With an id, the claude pane shows the message as a paste with a
@@ -689,7 +696,10 @@ a decision about that session's guard rails, not part of asking it a question.
           : outcomeFromSendAnswer(sent?.ask, toolVersionNote(askPlan.versions, agent ?? sent?.cliToolId));
         if (decided !== null || askPlan?.kind !== 'ask') {
           if (decided !== null) {
-            printAskReply(worktreeId, instanceId, agent, decided, options, false, sent?.cliToolId);
+            printAskReply(worktreeId, instanceId, agent, decided, options, false, {
+              cliToolId: sent?.cliToolId,
+              sentAt: new Date(sentRowStamp(sent) ?? askedAt).toISOString(),
+            });
           }
           process.exit(ExitCode.SUCCESS);
           return;

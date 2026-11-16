@@ -26,6 +26,7 @@
 
 import { randomUUID } from 'crypto';
 import { ExitCode } from '../types';
+import type { CLIToolId } from '../config/cli-tool-ids';
 import type {
   AskAttributionReason,
   AskAttributionResponse,
@@ -268,7 +269,7 @@ export async function readAskOutcome(
 /** What each reason means, for the one stderr line (§0.2). */
 const REASON_TEXT: Readonly<Record<AskAttributionReason, string>> = {
   tool_unsupported: 'this tool has no ask attribution',
-  server_unsupported: 'the server predates ask attribution (an older CommandMate is still running: restart it with `commandmate stop` then `commandmate start --daemon`, or update it with `commandmate update`)',
+  server_unsupported: 'the server predates ask attribution (an older CommandMate server is still running: restart it with `commandmate stop` then `commandmate start --daemon`)',
   slash_command: 'a command body carries no ask id',
   shared_turn: 'the turn that answered also took another input',
   turn_open_at_send: 'the instance was already in a turn when this ask was sent',
@@ -286,6 +287,37 @@ const REASON_TEXT: Readonly<Record<AskAttributionReason, string>> = {
   history_changed: 'the reply rows changed after the reply was settled',
 };
 
+/**
+ * Per tool: whether `commandmate reply` can return its reply (PR3 review r1).
+ * `reply` takes only rows a transcript reader wrote (`<tool>-turn:` request
+ * ids, `reply-ledger.ts` `replyCandidates`/`pickLatestReply(…, true)`); these
+ * are the tools whose readers write them (the same split as
+ * `src/lib/relay/relay-bound-reply.ts` `TRANSCRIPT_READER_TOOLS`, opencode-v2's
+ * `oc-turn:` included). For the others `reply` is always empty, so the line
+ * does not recommend it. The guide's table (ja・en, "send, wait, read the
+ * ledger") names the same tools — held equal by
+ * `tests/unit/cli/commands/ask-reply-guidance-4344.test.ts`. A record, so a new
+ * tool id fails `tsc` here.
+ */
+export const REPLY_COMMAND_TOOLS: Readonly<Record<CLIToolId, boolean>> = {
+  claude: true,
+  codex: true,
+  antigravity: true,
+  'command-code': true,
+  opencode: true,
+  'opencode-v2': true,
+  copilot: false,
+  gemini: false,
+  'vibe-local': false,
+};
+
+/** Whether `reply` can answer for `cliToolId` (unknown tool: no). */
+function replyCommandReads(cliToolId: string | undefined): boolean {
+  return cliToolId !== undefined
+    && Object.prototype.hasOwnProperty.call(REPLY_COMMAND_TOOLS, cliToolId)
+    && REPLY_COMMAND_TOOLS[cliToolId as CLIToolId];
+}
+
 /** Why a tool in the table is off for its version (PR3 review): the version and the minimum. */
 function toolVersionText(note: AskToolVersionNote): string {
   return note.state === 'too_old' && note.installed !== null
@@ -298,12 +330,16 @@ function toolVersionText(note: AskToolVersionNote): string {
  * to look instead. The reply may still exist — it is not this command's to
  * pick off the screen. For a tool the server cannot attribute, the line also
  * names the commands that still bring its reply back (PR3 review): a relay
- * (`ask --async`) and `reply` after the turn (`docs/user-guide/cli-operations-guide.md`
- * says which tools each one answers for).
+ * (`ask --async`), and `reply --since <the send>` after the turn — only for a
+ * tool `reply` can answer for ({@link REPLY_COMMAND_TOOLS}) and only with the
+ * send time, since a `reply` without `--since` may return the previous turn's
+ * answer (the mix-up #4344 prevents).
+ *
+ * @param target.sentAt - ISO time of this ask's send; without it `reply` is not recommended
  */
 export function formatReplyNotCollected(
   outcome: AskOutcome,
-  target: { worktreeId: string; instanceId?: string; cliToolId?: string },
+  target: { worktreeId: string; instanceId?: string; cliToolId?: string; sentAt?: string },
 ): string {
   const reason = outcome.reason ?? 'grace_expired';
   const who = reason === 'tool_unsupported' && target.cliToolId ? `${target.cliToolId}: ` : '';
@@ -314,8 +350,11 @@ export function formatReplyNotCollected(
     ? ` --instance ${target.instanceId}`
     : target.cliToolId ? ` --agent ${target.cliToolId}` : '';
   const look = `capture ${target.worktreeId}${target.instanceId ? ` --instance ${target.instanceId}` : ''} --pane`;
+  const reply = target.sentAt !== undefined && replyCommandReads(target.cliToolId)
+    ? ` or \`reply ${target.worktreeId}${scope} --since ${target.sentAt}\` after the turn`
+    : '';
   const instead = reason === 'tool_unsupported'
-    ? `; for its reply use \`ask ${target.worktreeId} "<message>"${scope} --async\` (relayed back) or \`reply ${target.worktreeId}${scope}\` after the turn`
+    ? `; for its reply use \`ask ${target.worktreeId} "<message>"${scope} --async\` (relayed back)${reply}`
     : '';
   return `reply not collected (${outcome.state}/${reason}): ${who}${why}${instead}; look with \`${look}\``;
 }

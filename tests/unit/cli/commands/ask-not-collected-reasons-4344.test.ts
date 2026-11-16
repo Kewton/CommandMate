@@ -161,7 +161,7 @@ describe('P2 2: claude off for its version is not "a tool with no ask attributio
     expect(stderrText()).toContain('claude: its version 2.1.200 is older than 2.1.239');
   });
 
-  it('negative: copilot\'s --json carries no toolVersion; a server without `versions` is plain tool_unsupported', async () => {
+  it('negative: a server without `versions` reads claude as plain tool_unsupported (no toolVersion)', async () => {
     mockServer({
       '/resolve-target': resolveAs('claude'),
       '/api/asks/capabilities': { protocol: 1, tools: { ...ALL_TOOLS, claude: false } },
@@ -176,8 +176,26 @@ describe('P2 2: claude off for its version is not "a tool with no ask attributio
   });
 });
 
-describe('P2 3: an older server says to restart or update it', () => {
-  it('server_unsupported names the restart and the update', async () => {
+describe('negative: copilot (off the table) carries no toolVersion', () => {
+  it('copilot\'s --json is exactly the three attribution keys, even with `versions` on the server', async () => {
+    mockServer({
+      '/resolve-target': resolveAs('copilot'),
+      '/api/asks/capabilities': { protocol: 1, tools: ALL_TOOLS, versions: { claude: { minimum: '2.1.239', installed: '2.1.300', state: 'ok' } } },
+      'POST /send': SEND,
+      '/current-output': frameOf('copilot'),
+    });
+
+    await runAsk(['wt1', 'hi', '--instance', 'copilot', '--json']);
+
+    expect(firstExit()).toBe(ExitCode.SUCCESS);
+    expect(captures()).toBe(0);
+    expect(payload().attribution).toEqual({ state: 'unavailable', reason: 'tool_unsupported', notified: false });
+    expect(stderrText()).toContain('copilot: this tool has no ask attribution');
+  });
+});
+
+describe('P2 3: an older server says to restart it', () => {
+  it('server_unsupported names the restart (stop, then start --daemon)', async () => {
     mockServer({
       '/resolve-target': resolveAs('claude'),
       '/api/asks/capabilities': { status: 404, data: { error: 'Not Found' } },
@@ -191,6 +209,8 @@ describe('P2 3: an older server says to restart or update it', () => {
     const line = stderrText();
     expect(line).toContain('reply not collected (unavailable/server_unsupported): the server predates ask attribution');
     expect(line).toContain('commandmate stop');
-    expect(line).toContain('commandmate start');
+    expect(line).toContain('commandmate start --daemon');
+    // PR3 review r1 P3-3: `update` does not restart a server whose CLI is already current.
+    expect(line).not.toContain('commandmate update');
   });
 });

@@ -1133,7 +1133,7 @@ commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <ta
 |---|---|---|
 | `matched` | 返答を出す。`notified: true` は、そのターンがバックグラウンドのタスク完了通知も受け取った（返答が通知に反応していることがある） | ID つき |
 | `unavailable` / `tool_unsupported` | ID で帰属できない tool（`copilot`・`gemini`・`vibe-local`・`opencode`・`antigravity`・`command-code`・`opencode-v2` など）。`claude`・`codex` も版のせいで対象外のときはここ（`--json` に `attribution.toolVersion`。下の表） | 今までどおり |
-| `unavailable` / `server_unsupported` | 古いサーバー（`/api/asks/capabilities` が 404）。多くは CLI を更新（`npm i -g`）したのに動いているサーバーを再起動していないとき。`commandmate stop` の後 `commandmate start --daemon` で再起動するか、`commandmate update` で更新する | 今までどおりの body で 1 回 |
+| `unavailable` / `server_unsupported` | 古いサーバー（`/api/asks/capabilities` が 404）。多くは CLI を更新（`npm i -g`）したのに動いているサーバーを再起動していないとき。`commandmate stop` の後 `commandmate start --daemon` で再起動する（CLI が既に新しいと `commandmate update` はサーバーを再起動しない） | 今までどおりの body で 1 回 |
 | `unavailable` / `slash_command` | `/`・`!`・`#` で始まる本文（ID を付けると文章になるため付けない） | 本文はそのまま |
 | `ambiguous` / `shared_turn`・`turn_open_at_send` | 答えたターンが別の入力も受け取った、または送信時にターンが開いていた | ID つき |
 | `unmatched` / `absorbed_mid_turn`・`turn_incomplete`・`grace_expired`・`send_unknown`・`body_truncated`・`history_missing` など | この依頼のターンと結べなかった（`grace_expired`・`turn_incomplete`・`send_unknown` は、ターンの終了後 15 秒の待ちで決まらなかったもの。台帳には書かない） | ID つき |
@@ -1152,12 +1152,12 @@ commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <ta
 どの理由でも `attribution.reason` は `tool_unsupported` のままです（値と他の欄は変えていません）。版の読みは `GET /api/asks/capabilities` の
 `versions`（`{ "<tool>": { minimum, installed, state: "ok" | "too_old" | "unreadable" } }`）から来ます。これを返さない（この変更より前の）サーバーでは `this tool has no ask attribution` だけです。
 
-**帰属できない tool の返答を受け取る代わりの手順。** `ask` は送信はしており、返答を出さないだけです。返答が要るときは次のどれかを使います。
+**帰属できない tool の返答を受け取る代わりの手順。** `ask` は送信はしており、返答を出さないだけです。stderr の行は relay と、`reply` が使える tool では `reply … --since <この ask の送信時刻>` を名指しします。返答が要るときは次のどれかを使います。
 
 | 手順 | 命令 | 返るもの |
 |---|---|---|
 | relay（待たない） | `commandmate ask <worktree-id> "<依頼>" --instance <id> --async` | 相手のターンが終わると、返答が `[from <alias> / <worktree>]` つきで自分の入力欄に届く。`claude`・`codex`・`antigravity`・`command-code`・`opencode`・`opencode-v2` は transcript のターンの行、`copilot`・`gemini`・`vibe-local` は画面から拾った行。ID の帰属ではないので 1 本ずつ送る（重なりは `overlap=` で注記される） |
-| 送って待って台帳を読む | `commandmate send <worktree-id> "<依頼>" --instance <id>` → `commandmate wait <worktree-id> --instance <id>` → `commandmate reply <worktree-id> --instance <id> --since <送信の前に取った ISO 時刻>` | `--since` 以降のいちばん新しい transcript のターンの行（`claude`・`codex`・`antigravity`・`command-code`・`opencode`・`opencode-v2`）。`copilot`・`gemini`・`vibe-local` では常に空 |
+| 送って待って台帳を読む | `commandmate send <worktree-id> "<依頼>" --instance <id>` → `commandmate wait <worktree-id> --instance <id>` → `commandmate reply <worktree-id> --instance <id> --since <送信の前に取った ISO 時刻>`（`--since` は必ず付ける。無いと前のターンの返答を返しうる） | `--since` 以降のいちばん新しい transcript のターンの行（`claude`・`codex`・`antigravity`・`command-code`・`opencode`・`opencode-v2`）。`copilot`・`gemini`・`vibe-local` では常に空 |
 | 画面を見る | `commandmate capture <worktree-id> --instance <id> --pane --tail 60` | 相手の画面（全 tool。どのターンのものかは自分で見分ける） |
 
 ID を付けた依頼は必ず複数行になるため、`claude` のペインには `[Pasted text …]` と `[cmate-ask v1 <id>]` の 1 行が見えます（設計 §7 (b) の決定。意味は変わりません）。

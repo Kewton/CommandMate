@@ -994,8 +994,8 @@ same CommandMate server, and you can hand work to them.
                                     minimum, installed} and stderr says which
     unavailable/server_unsupported  an older server (installed CommandMate is
                                     newer than the running one); sent with the
-                                    old body. Restart ('commandmate stop' then
-                                    'commandmate start --daemon') or update it
+                                    old body. Restart it ('commandmate stop'
+                                    then 'commandmate start --daemon')
     unavailable/slash_command       a body starting with /, ! or #
     ambiguous/...                   the answering turn also took another input
                                     (shared_turn) or was open at the send
