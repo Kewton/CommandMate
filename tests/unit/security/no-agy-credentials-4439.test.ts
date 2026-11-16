@@ -21,6 +21,7 @@
  *   ...) are checked by raw lines only, never normalized.
  * - Out of scope: anything beyond that fold — variables, function or method calls
  *   (['oauth_', 'creds'].join('')), computed properties, `as` casts, etc.
+ * - Out of scope: a race where another process swaps a file during the scan (between the check and the read).
  * - Allow list (N3'): an exemption applies only when the original line at the reported
  *   line number equals an allowed (file, line) exactly; occurrences of each allowed line
  *   are counted on original lines and must equal `count`.
