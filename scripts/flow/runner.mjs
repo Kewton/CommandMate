@@ -6,17 +6,24 @@
  *   monotonic clock, floored first and checked second: a positive fraction floored to 0
  *   never starts a child (`spawnSync` with `timeout: 0` would wait forever, F4).
  * - A result that comes back at or after the deadline is not used (`timeout`).
- * - Only the calls `isAllowedCall` names are run: identification git and the two
- *   `gh pr list` searches of §2.3. Anything else is refused without a child.
+ * - Only the calls `isAllowedCall` names are run: identification git, the two
+ *   `gh pr list` searches of §2.3 and (Issue #4418) this Node running `relay-io.mjs read|notify`
+ *   with one JSON argument. Anything else is refused without a child.
  */
 import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 import { performance } from 'node:perf_hooks';
+import { fileURLToPath } from 'node:url';
 
 export const MAX_BUFFER = 32 * 1024 * 1024;
 export const PR_LIMIT = 1000;
 const DATE_RANGE = /^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$/;
 const REF_SEGMENT = /^[A-Za-z0-9._/-]+$/;
 const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+/** The relay watch's reader of the CommandMate server (#4418): the only Node child flow starts. */
+export const RELAY_IO_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'relay-io.mjs');
+const RELAY_IO_ACTIONS = ['read', 'notify'];
+const RELAY_IO_ARG_MAX = 64 * 1024;
 
 /** The JSON fields each search asks for (§2.3): nothing else is fetched. */
 export const PR_QUERY_FIELDS = {
@@ -52,6 +59,16 @@ export function isAllowedCall(cmd, args) {
       return ref.startsWith('refs/remotes/origin/') && REF_SEGMENT.test(ref) && !ref.includes('..');
     }
     return false;
+  }
+  if (cmd === process.execPath) {
+    if (args.length !== 3 || args[0] !== RELAY_IO_FILE || !RELAY_IO_ACTIONS.includes(args[1])) return false;
+    if (args[2].length > RELAY_IO_ARG_MAX) return false;
+    try {
+      const input = JSON.parse(args[2]);
+      return input !== null && typeof input === 'object' && !Array.isArray(input);
+    } catch {
+      return false;
+    }
   }
   if (cmd === 'gh') {
     if (args.length !== 14) return false;

@@ -9,6 +9,10 @@
  * `wip` (Issue #4368 PR1, docs/design/flow-wip-4368.md §7, X9) is read by
  * scripts/orchestrate/flow-wip.mjs: only `wip.total` (an integer 1..1000) is accepted;
  * `wip.active` is named as a key PR2a adds, and any other key under `wip` is refused.
+ *
+ * `relayWatch` (Issue #4418, docs/design/flow-relay-watch-4418.md §2) is read by `tick`: the PM's
+ * session, the sessions only the PM sends to, the server URL (localhost only) and the two
+ * thresholds, and whether check 1 is told (`notifyNoRelay`, off until #4420). Without the section `tick` reads and writes exactly what it did before.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -19,7 +23,7 @@ export const CONFIG_FILE = path.join('.commandmate', 'flow.yaml');
 export const CONFIG_MAX_BYTES = 64 * 1024;
 export const EXCLUDE_MAX = 64;
 export const GIT_CAP_MS = 10_000;
-export const ALLOWED_KEYS = ['version', 'repo', 'base', 'exclude', 'tz', 'wip'];
+export const ALLOWED_KEYS = ['version', 'repo', 'base', 'exclude', 'tz', 'wip', 'relayWatch'];
 /** Keys that exist in the design but not in PR1a: refused, with who adds them. */
 export const LATER_KEYS = {
   alerts: 'a later PR of #4367 (PR-A)',
@@ -32,6 +36,18 @@ const ALWAYS_EXCLUDED = ['main', 'master'];
 const LIMIT_TOTAL_MAX = 1000;
 const LIMIT_LATER_KEYS = { active: 'PR2a of #4368 adds it' };
 const BRANCH = /^[A-Za-z0-9._/-]+$/;
+/** The relay watch section (#4418). The id patterns mirror the CLI's (`src/cli/utils/api-client.ts`). */
+const WATCH_KEYS = ['url', 'pm', 'receivers', 'pendingMinutes', 'screenMinutes', 'notifyNoRelay'];
+/**
+ * Check 1 (a PM request with no relay) is recorded but not told until #4420 (the relay fix) lands:
+ * the PM sends plain `send` for now, so telling it would be a false alarm every time. The switch
+ * back is `relayWatch.notifyNoRelay: true` in .commandmate/flow.yaml (design §5.1).
+ */
+export const NO_RELAY_TOLD_BY_DEFAULT = false;
+const WATCH_RECEIVERS_MAX = 32;
+const WORKTREE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,199}$/;
+const INSTANCE_ID = /^[a-zA-Z0-9_-]{1,64}$/;
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const REPO_NAME = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** Whether `Intl` accepts `tz` as a time zone name. */
@@ -138,6 +154,10 @@ export function readSettingsFile(repoRoot, options = {}) {
     const problem = limitSectionProblem(doc.wip);
     if (problem) return { error: `${CONFIG_FILE}: ${problem}` };
   }
+  if ('relayWatch' in doc) {
+    const problem = watchSectionProblem(doc.relayWatch);
+    if (problem) return { error: `${CONFIG_FILE}: ${problem}` };
+  }
   return { settings: doc };
 }
 
@@ -160,6 +180,55 @@ function limitSectionProblem(section) {
   if (!Number.isInteger(total) || /** @type {number} */ (total) < 1 || /** @type {number} */ (total) > LIMIT_TOTAL_MAX) {
     return `wip.total must be an integer from 1 to ${LIMIT_TOTAL_MAX}`;
   }
+  return null;
+}
+
+function sessionProblem(value, name) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return `${name} must be { worktreeId, instanceId }`;
+  for (const key of Object.keys(value)) if (key !== 'worktreeId' && key !== 'instanceId') return `unknown key "${name}.${key}"`;
+  if (typeof value.worktreeId !== 'string' || !WORKTREE_ID.test(value.worktreeId)) return `${name}.worktreeId is not a worktree id`;
+  if (typeof value.instanceId !== 'string' || !INSTANCE_ID.test(value.instanceId)) return `${name}.instanceId is not an instance id`;
+  return null;
+}
+
+/**
+ * What is wrong with the `relayWatch` section, or null (#4418, docs/design/flow-relay-watch-4418.md §2).
+ * @param {unknown} section
+ * @returns {string | null}
+ */
+function watchSectionProblem(section) {
+  if (section === null || typeof section !== 'object' || Array.isArray(section)) return 'relayWatch must be a mapping (#4418)';
+  for (const key of Object.keys(section)) if (!WATCH_KEYS.includes(key)) return `unknown key "relayWatch.${key}"`;
+  const s = /** @type {Record<string, any>} */ (section);
+  const pm = sessionProblem(s.pm, 'relayWatch.pm');
+  if (pm) return pm;
+  if (!Array.isArray(s.receivers) || s.receivers.length < 1 || s.receivers.length > WATCH_RECEIVERS_MAX) {
+    return `relayWatch.receivers must be a list of 1 to ${WATCH_RECEIVERS_MAX} sessions`;
+  }
+  const seen = new Set();
+  for (const [i, r] of s.receivers.entries()) {
+    const problem = sessionProblem(r, `relayWatch.receivers[${i}]`);
+    if (problem) return problem;
+    const key = `${r.worktreeId}/${r.instanceId}`;
+    if (key === `${s.pm.worktreeId}/${s.pm.instanceId}`) return `relayWatch.receivers[${i}] is the PM itself`;
+    if (seen.has(key)) return `relayWatch.receivers[${i}] is listed twice`;
+    seen.add(key);
+  }
+  if ('url' in s) {
+    let url = null;
+    try {
+      url = typeof s.url === 'string' ? new URL(s.url) : null;
+    } catch {
+      url = null;
+    }
+    if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:') || !LOCAL_HOSTS.has(url.hostname) || url.pathname !== '/' || url.search || url.username) {
+      return 'relayWatch.url must be http(s)://localhost:<port> (the token is sent to it)';
+    }
+  }
+  for (const key of ['pendingMinutes', 'screenMinutes']) {
+    if (key in s && (!Number.isInteger(s[key]) || s[key] < 1 || s[key] > 1440)) return `relayWatch.${key} must be an integer from 1 to 1440`;
+  }
+  if ('notifyNoRelay' in s && typeof s.notifyNoRelay !== 'boolean') return 'relayWatch.notifyNoRelay must be true or false';
   return null;
 }
 
@@ -227,5 +296,18 @@ export function readFlowConfig(repoRoot, options) {
   const exclude = [...new Set([...(settings.exclude ?? []), base, ...ALWAYS_EXCLUDED])];
   const scope = { repo, slug: repoSlug(repo), base, exclude, tz };
   // Only when the section is there, so a #4367-only flow.yaml reads exactly as before (F1).
-  return settings.wip ? { ...scope, wip: { total: settings.wip.total } } : scope;
+  const withLimit = settings.wip ? { ...scope, wip: { total: settings.wip.total } } : scope;
+  if (!settings.relayWatch) return withLimit;
+  const w = settings.relayWatch;
+  return {
+    ...withLimit,
+    relayWatch: {
+      url: w.url ?? null,
+      pm: { worktreeId: w.pm.worktreeId, instanceId: w.pm.instanceId },
+      receivers: w.receivers.map((r) => ({ worktreeId: r.worktreeId, instanceId: r.instanceId })),
+      pendingMinutes: w.pendingMinutes ?? 60,
+      screenMinutes: w.screenMinutes ?? 20,
+      notifyNoRelay: w.notifyNoRelay ?? NO_RELAY_TOLD_BY_DEFAULT,
+    },
+  };
 }
