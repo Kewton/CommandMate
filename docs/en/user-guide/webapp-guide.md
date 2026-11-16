@@ -445,6 +445,7 @@ Rename, reorder and delete in the **"Agent"** tool right after the header's iden
 | **Command Code** | Command Code CLI (`commandcode`, Issue #2250) |
 
 - A branch holds **1 to 10** of them (the last one cannot be deleted)
+- **Choosing Antigravity shows a usage notice** (Issue #4438: the PC "+" form, and "Add instance" on PC and mobile). Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict using it through third-party software or agents on consumer plans. The notice is guidance and does not stop the add. After **Close**, that browser does not show it again (it is remembered per browser, and shown again when that cannot be read). The API-key / Gemini Enterprise declaration is the server's environment variable `CM_ANTIGRAVITY_USAGE` and cannot be changed from the screen (the server needs a restart after it changes). See the [README](../../../README.md#before-you-use-antigravity-agy)
 - **Auto Yes behaves differently per agent.** Command Code / Gemini / Vibe-Local only have
   the screen-based route (the dialog is drawn once, then answered automatically). See
   [Approval Routes Differ by Agent](#approval-routes-differ-by-agent)
