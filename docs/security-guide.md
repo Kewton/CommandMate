@@ -56,7 +56,7 @@ See *Option 4: `commandmate remote`* under Recommended Authentication Methods be
 
 ### Agent credentials
 
-CommandMate does not read or forward the OAuth tokens or credential files of agy (Antigravity) or Gemini, and does not call Google APIs directly. `tests/unit/security/no-agy-credentials-4439.test.ts` enforces this.
+CommandMate does not read or forward the OAuth tokens or credential files of agy (Antigravity) or Gemini, and does not call Google APIs directly. `tests/unit/security/no-agy-credentials-4439.test.ts` enforces this. The guard detects credential file names written literally or assembled by concatenating constant strings; names built from dynamic values are outside its guarantee.
 
 ---
 
