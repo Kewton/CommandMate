@@ -29,7 +29,16 @@
       "years": "{count}y ago"
     },
     "tileAriaLabel": "Session tile for {branch}",
-    "tileInstanceAriaLabel": "Agent instance shown in this tile"
+    "tileInstanceAriaLabel": "Agent instance shown in this tile",
+    "branchFilter": {
+      "button": "Filter",
+      "title": "Filter",
+      "label": "Branch name (regular expression)",
+      "placeholder": "e.g. ^feature/",
+      "errorInvalid": "Invalid regular expression. This condition is not applied.",
+      "errorTooLong": "Up to 200 characters. This condition is not applied.",
+      "clear": "Clear"
+    }
   },
   "nav": {
     "sessions": "Sessions",

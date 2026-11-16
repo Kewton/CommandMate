@@ -22,9 +22,17 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, Filter } from 'lucide-react';
+import { Modal } from '@/components/ui/Modal';
+import { evaluateSessionsFilter, type FilterTarget } from '@/lib/sessions-filter';
+import { agentInstancesFromSelectedAgents } from '@/lib/cli-tools/types';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
-import { SessionTileGrid, SessionsViewModeSelector } from '@/components/sessions';
+import {
+  SessionTileGrid,
+  SessionsViewModeSelector,
+  SessionsFilterPanel,
+  SessionsFilterSheet,
+} from '@/components/sessions';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSessionsViewMode } from '@/hooks/useSessionsViewMode';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
@@ -200,6 +208,15 @@ function formatStatus(
 
 const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
+/** Same roster the tile shows (SessionTile.resolveInstances): the default agents when omitted. */
+function resolveSessionsRoster(wt: FilterTarget): string[] {
+  const instances =
+    wt.agentInstances && wt.agentInstances.length > 0
+      ? wt.agentInstances
+      : agentInstancesFromSelectedAgents(wt.selectedAgents ?? getClientDefaultSelectedAgents());
+  return [...instances].sort((a, b) => a.order - b.order).map((i) => i.id);
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -214,6 +231,8 @@ export default function SessionsPage() {
   // (unfiltered) list so an active text filter never unmounts the list.
   const hasWorktrees = worktrees.length > 0;
   const [filterText, setFilterText] = useState('');
+  const [branchPattern, setBranchPattern] = useState('');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   // Issue #2509. Resolved from localStorage in an effect, so the first render is
@@ -243,6 +262,10 @@ export default function SessionsPage() {
           (wt.repositoryDisplayName?.toLowerCase().includes(lower) ?? false)
       );
     }
+
+    // Issue #4386: branch filter. An unusable pattern keeps everything.
+    const verdict = evaluateSessionsFilter(result, { branchPattern }, resolveSessionsRoster);
+    result = result.filter((wt) => verdict.verdicts.get(wt.id)?.show ?? true);
 
     // Sort
     const sorted = [...result];
@@ -291,7 +314,24 @@ export default function SessionsPage() {
     });
 
     return sorted;
-  }, [worktrees, filterText, sortKey, sortDirection]);
+  }, [worktrees, filterText, branchPattern, sortKey, sortDirection]);
+
+  const branchFilter = useMemo(
+    () => evaluateSessionsFilter([], { branchPattern }),
+    [branchPattern]
+  );
+  const activeFilterCount = branchFilter.activeCount;
+  const branchFilterError = branchFilter.error;
+  const clearFilters = useCallback(() => setBranchPattern(''), []);
+  const closeFilter = useCallback(() => setIsFilterOpen(false), []);
+  const filterPanel = (
+    <SessionsFilterPanel
+      branchPattern={branchPattern}
+      onBranchPatternChange={setBranchPattern}
+      error={branchFilterError}
+      onClear={clearFilters}
+    />
+  );
 
   const handleFilterChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setFilterText(e.target.value);
@@ -342,6 +382,23 @@ export default function SessionsPage() {
             inputMode="search"
             enterKeyHint="search"
           />
+          <button
+            type="button"
+            onClick={() => setIsFilterOpen(true)}
+            data-testid="sessions-filter-button"
+            className="inline-flex items-center gap-1 rounded-md border border-input bg-surface px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Filter size={16} aria-hidden="true" />
+            {tCommon('sessions.branchFilter.button')}
+            {activeFilterCount > 0 && (
+              <span
+                data-testid="sessions-filter-count"
+                className="rounded-full bg-accent-600 px-1.5 text-xs text-white"
+              >
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
           <Select value={sortKey} onValueChange={handleSortKeyChange}>
             <SelectTrigger
               className="w-40"
@@ -380,6 +437,21 @@ export default function SessionsPage() {
               feed both layouts unchanged. */}
           <SessionsViewModeSelector value={viewMode} onChange={setViewMode} />
         </div>
+
+        {isMobile ? (
+          <SessionsFilterSheet isOpen={isFilterOpen} onClose={closeFilter}>
+            {filterPanel}
+          </SessionsFilterSheet>
+        ) : (
+          <Modal
+            isOpen={isFilterOpen}
+            onClose={closeFilter}
+            title={tCommon('sessions.branchFilter.title')}
+            size="sm"
+          >
+            {filterPanel}
+          </Modal>
+        )}
 
         {/*
           * [Issue #1050] Keep the list mounted across transient polling errors.
