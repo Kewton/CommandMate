@@ -517,23 +517,43 @@ e2e（`tests/e2e/agent-roles-4117.spec.ts`）には足していない: この作
 
 ロールを削除すると（`DELETE /api/roles/:id`。CLI の `roles rm` と画面も同じ）、削除のトランザクションの後に、そのロールの Antigravity の定義を片付ける。候補は起動の記録（`agent_role_launch_records`）だけで、名前の形（このサーバーの名前空間・ロール id）・記録の指紋が 1 つ・今の生成先・所有と権限・バイト一致・ディレクトリに `agent.md` だけ、を満たすものを消す。投げず、残したものはログ `role-artifact-left`。
 
-使用中の判定（消さない条件）:
+**不変条件（再指示 3）**: 起動の記録が指す定義は、(a) その起動のペインが作られて生存が確かめられる か (b) その起動が失敗と記録される まで、どの経路（通常の起動・Schedule・force の削除）からも消さない。予約と時間の印はこの条件を実装する手段で、条件そのものではない。
 
-1. **最新の起動の記録がその定義のセッションが `absent` でないとき**。生存は `probeSession`（#3329）で聞き、`present` と `unknown`（tmux の時間切れ・ソケットの混雑・起動の失敗）は残す。`isRunning`（`hasSession`）は不明を不在にするので使わない
-2. **記録の前の起動準備（レビュー P2、再指示 2 で起動の流れに結び付けた）**: 起動は定義を書き・検査してから、`agy --version`・ペイン・`agy agent` を待ち、その後で `requested` を記録する。この間はレコードにもセッションにも現れない。**起動の予約（hold）**で守る: `role-launch.ts` の `prepareInStore`（`gateLaunchRole` と `renderLaunchCommandWithRole` の準備）は、定義を書く前に `holdRoleArtifact` でパスを予約し、`openGeneration` で `requested` の記録が保存されたとき、または `runWithLaunchRole` の `finally`（拒否・失敗・中止・再接続で行を作らずに抜けた）で外す。記録の保存に失敗して起動が続くときは外さない（プロセスの間は予約が残る）。予約はパスごとの参照カウント（`globalThis.__roleArtifactHolds`）で、同じパスを 2 つの起動が準備していれば両方が外すまで残る。`removeRoleArtifact` は予約があれば消さない（`launch-preparing`）。予約の確認から unlink までは同期で、同じプロセスの起動が間に入らない。予約に時間の失効は無い。記録の後はその記録とセッション（ペインは行を組み立てる前に作られる）が守る。予約を取らない準備（probe の `explicit-launch.ts`、Schedule の `resolveScheduleRole`）は、従来の印（`globalThis.__roleArtifactPreparedAt`）の安全網で `ROLE_ARTIFACT_PREPARED_HOLD_MS`（24 時間）残す（`recently-prepared`）。予約中のパスにはこの印を付けない（外したときすぐ消せるように）
-3. 確認と unlink の間の差し替え（レビュー P3-1）: 指紋は開いた記述子から読んだバイトで取り直し、unlink の直前に lstat を取り直して inode・dev が違えば残す（`replaced`）
+起動の流れと、各区間を守るもの（`base.ts` の `startSessionOnce` → `runWithLaunchRole` → `launchSessionWithRole` → `antigravity.ts` の `launchSession`）:
+
+| 区間 | 記録 | セッション | 守るもの |
+|------|------|-----------|---------|
+| 定義の準備（`gateLaunchRole` → `prepareInStore`）〜`agy --version`・`resolveLaunchPane`・`agy agent` | 無い | 無い（新規） | 起動の予約 |
+| 行の組み立て（`buildAgentLaunchCommandLine` → `renderLaunchCommandWithRole` → `openGeneration` が `requested` を保存）〜 `await createLaunchPane` | 有る | まだ無い（`probeSession` は正しく `absent`） | 起動の予約（`requested` の保存では外さない） |
+| ペインの作成の後〜起動の終わり | 有る | 有る | セッション（`present`）と予約 |
+| 起動の終わりの後 | 有る | 生きていれば有る | セッション（`present` / `unknown` は残す。`absent` だけ消せる） |
+
+仕組み:
+
+1. **起動の予約（claim）**: `prepareInStore` は定義を書く前に `holdRoleArtifact` で予約を取る。予約は起動ごとに 1 つで、id で持つ（`globalThis.__roleArtifactClaims`。パスと持ち主の (worktreeId, instanceId) と `requested` を保存したかの印）。同じパスを 2 つの起動が準備していれば予約は 2 つで、ある起動の終わりや確認は別の起動の予約を外さない。`removeRoleArtifact` はそのパスの予約が 1 つでもあれば消さない（`launch-preparing`）。予約の確認から unlink までは同期。時間の失効は無い
+2. **予約を外すのは (a) か (b) の後だけ**:
+   - (a) `requested` を保存した予約は、片付けが持ち主のセッションを `probeSession` で `present` と聞いたとき外す（`confirmRoleArtifactSession`）。`requested` の後に持ち主のセッションがあるのは、そのペインが作られた（新規）か、行を打つ既存のペイン（再起動）が生きているとき。以後はセッションの生存で決まる。`requested` の前の予約と、別の持ち主の予約はそのまま
+   - (a)/(b) `runWithLaunchRole` の `finally`: ドライバーが戻った（ペインを作り、行を打ち、待った）か、投げた（拒否・失敗・停止。起動の失敗）。以後は記録とセッションで決まる
+   - `requested` の保存では外さない。保存に失敗して続く起動の予約は外さない（記録が無いので、プロセスの間は予約が守る）
+3. **予約なしの準備（Schedule の `resolveScheduleRole`、probe の `explicit-launch.ts`）**: 自分の時間の印（`globalThis.__roleArtifactPreparedAt`、`ROLE_ARTIFACT_PREPARED_HOLD_MS` = 24 時間）を、別の起動の予約の有無に関わらず付ける（`recently-prepared`）。予約の下の準備は、その予約の分だけ印を付けない（`writeRoleArtifact` / `inspectRoleArtifact` に渡す `claim`。全体の予約の有無では決めない）。Schedule の実行は 30 分で打ち切られる（`EXECUTION_TIMEOUT_MS`）ので、24 時間はその実行を覆う
+4. **生存の確認**: `probeSession`（#3329）。`present` と `unknown`（tmux の時間切れ・ソケットの混雑・起動の失敗）は残す。`isRunning`（`hasSession`）は不明を不在にするので使わない
+5. 確認と unlink の間の差し替え（レビュー P3-1）: 指紋は開いた記述子から読んだバイトで取り直し、unlink の直前に lstat を取り直して inode・dev が違えば残す（`replaced`）
+
+試験: `tests/unit/lib/agent-roles/role-artifact-launch-invariant-4419.test.ts`（窓ごと: `requested` の保存〜ペインの作成の間の force の削除で残る／Schedule の準備が通常の起動の予約と重なり、通常の起動が失敗しても Schedule の分が残る／起動の失敗の後は消せる／ペインの生存が確かめられた後はセッションで決まる／ある起動の確認が別の起動の予約を外さない。5 件とも 73489768b で落ちる）と `role-artifact-launch-hold-4419.test.ts`（記録の前の長い起動・記録の保存の失敗・2 つの起動）。
 
 残る窓（直していない）:
 
-- 予約・印はメモリだけ: 別のプロセス（別のサーバー）の起動準備と、サーバーの再起動の前の起動は見えない。ただし名前にサーバーの名前空間が入るので、別のサーバーの定義は候補にならない。同じ DB を共有する 2 つのサーバーは想定しない
+- **メモリだけ**: 予約・印はサーバーのプロセスの中だけ。サーバーの再起動の前に準備して、再起動の後にペインを作る起動は無い（起動はプロセスの中で完結する）が、再起動をまたいで動き続ける Schedule の子は 24 時間の印を失う。片付けの前にサーバーを再起動すると、その印は無い
+- **別プロセス**: 別のサーバーの起動準備は見えない。名前にサーバーの名前空間が入るので、別のサーバーの定義は候補にならない。同じ DB を共有する 2 つのサーバーは想定しない
 - 記録の保存に失敗して続いた起動の予約は、プロセスが終わるまで外れない（その定義はロールを削除しても残り、`launch-preparing` でログに出る。安全側）
-- probe・Schedule の準備は 24 時間の印だけで守る。24 時間を超えて使い続ける probe・Schedule の定義は消えうる
-- 予約中のパスを probe が同時に準備すると、印は付かず予約だけが守る（予約が外れた後の probe は守られない。probe はロール id を自分で名乗るので、実際のロールと同じ名前になることはまず無い）
+- probe・Schedule の準備は 24 時間の印だけで守る。24 時間を超えて使い続けるものは消えうる
+- `present` での確認は、`requested` の後に持ち主のセッション名の tmux セッションがあることで判断する。同じ名前のセッションを CommandMate の外で作られた場合は区別しない
 - lstat の再照合から unlink までの、同じ uid による差し替え
 - unlink の後に rmdir が失敗すると、空の `cm-role-…/` が残り、再試行されない（記録は残るが、次の削除の機会は無い）。ログに `directory-left:<code>` で出る。agy が `agent.md` の無いディレクトリを一覧でどう扱うかは確かめていない（agy を起こしていない）
 
 ## 改訂の履歴
 
+- 2026-11-16 #4419 PR2 再指示 3: §15 を不変条件（記録が指す定義は、ペインの生存の確認か起動の失敗まで消さない）から書き直した。予約を `requested` の保存で外さず、起動の終わりか `present` の確認で外す。予約を起動ごと（id）に持つ。予約なしの準備は別の起動の予約に関わらず自分の印を付ける
 - 2026-11-16 #4419 PR2 再指示 2: §15 の 2 を時間の印から起動の予約（`requested` の記録まで、または起動の終わりまで。参照カウント）へ。時間の印は予約を取らない準備の安全網（24 時間）に。残る窓を書き直した
 - 2026-11-16 #4419 PR2 再指示 1: §15 を足した（生存は `probeSession` で不明を残す、記録の前の準備を同じプロセスの印で守る、unlink の直前の inode の再照合、rmdir の失敗をログと手順に）
 

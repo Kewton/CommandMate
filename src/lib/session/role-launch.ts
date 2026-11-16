@@ -409,10 +409,11 @@ export function prepareRoleLaunch(snapshot: LaunchRoleSnapshot): PreparedRoleLau
 
 /**
  * {@link prepareRoleLaunch}, optionally claiming the file before it is written
- * (Issue #4419): a deletion of the role in between finds no record yet, and
- * the claim is what keeps the file until the launch's `requested` is recorded
- * or the launch ends ({@link runWithLaunchRole}). The claim is given up here
- * when the preparation throws.
+ * (Issue #4419): a deletion of the role in between finds no record yet, or a
+ * record whose pane does not exist yet, and the claim is what keeps the file
+ * until the launch's pane is confirmed alive or the launch ends
+ * ({@link runWithLaunchRole}). The claim is given up here when the preparation
+ * throws. Without a claim (a Schedule) the file is kept by its own timed mark.
  */
 function prepareRoleArtifactLaunch(
   snapshot: LaunchRoleSnapshot,
@@ -428,9 +429,22 @@ function prepareRoleArtifactLaunch(
       roleId: resolution.role.id,
       injectionFingerprint: injection.injectionFingerprint,
     });
-    if (hold) claim = holdRoleArtifact({ adapter: injection.adapter, name });
-    const artifact = writeRoleArtifact({ adapter: injection.adapter, name, instructions: injection.instructions });
+    if (hold) {
+      const { target } = snapshot;
+      claim = holdRoleArtifact({
+        adapter: injection.adapter,
+        name,
+        owner: { worktreeId: target.worktreeId, instanceId: target.instanceId ?? target.cliToolId },
+      });
+    }
+    const artifact = writeRoleArtifact({
+      adapter: injection.adapter,
+      name,
+      instructions: injection.instructions,
+      claim: claim ?? undefined,
+    });
     inspectRoleArtifact({
+      claim: claim ?? undefined,
       adapter: injection.adapter,
       name,
       path: artifact.path,
@@ -469,9 +483,11 @@ interface LaunchRoleStore {
   agentListing: AgentListVerdict | null;
   /**
    * This launch's claim on its file (Issue #4419), from before the file is written
-   * until `requested` is on record, or until the launch ends. Dropped without
-   * release when the record could not be written: the launch goes on with no
-   * record to say it uses the file, so the claim stays for this process.
+   * until the launch ends, or until tmux says its session is present once its
+   * `requested` is on record. Saving `requested` does not release it: the pane the
+   * line is typed into is created after it. Dropped without release when the
+   * record could not be written: the launch goes on with no record to say it uses
+   * the file, so the claim stays for this process.
    */
   artifactHold: RoleArtifactHold | null;
 }
@@ -523,7 +539,9 @@ export async function runWithLaunchRole<T>(snapshot: LaunchRoleSnapshot, fn: () 
     return await scope().run(store, fn);
   } finally {
     if (store.envFile !== null) removeLaunchEnvFile(store.envFile);
-    // Refused, failed or reused without a launch line: nothing records the file for it.
+    // The launch is over: the driver returned (its pane was created and waited
+    // for) or it threw (refused, failed, stopped: the launch failed). From here
+    // the record and the session's presence decide.
     releaseArtifactHold(store);
   }
 }
@@ -754,10 +772,12 @@ function openGeneration(store: LaunchRoleStore): void {
     artifactPath: antigravity ? store.prepared?.artifact.path ?? null : null,
     launch: antigravity ? store : null,
   });
-  // Issue #4419: from here the record names the file, and the session it is
-  // typed into is what keeps it. With no record the claim stays, unreleased.
+  // Issue #4419: the record names the file from here, but the pane the line is
+  // typed into is created after this (the driver's `createLaunchPane`), so the
+  // claim stays until the launch ends or tmux confirms the session. With no
+  // record the claim stays for this process, unreleased.
   const outcome = recordPhase(store, 'requested');
-  if (outcome === 'written') releaseArtifactHold(store);
+  if (outcome === 'written') store.artifactHold?.noteRecorded();
   else if (outcome === 'failed') store.artifactHold = null;
 }
 

@@ -1,8 +1,9 @@
 /**
  * A launch's claim on its Antigravity definition, from its preparation until its
- * `requested` record (Issue #4419): a role deleted in between does not take the
- * file away from it, however long it takes, and a launch that ends without a
- * record gives the claim up.
+ * pane is confirmed alive or the launch ends (Issue #4419; the windows after
+ * `requested` are in `role-artifact-launch-invariant-4419.test.ts`): a role
+ * deleted in between does not take the file away from it, however long it
+ * takes, and a launch that ends gives the claim up.
  *
  * Driven through the real `runWithLaunchRole` / `gateLaunchRole` /
  * `renderLaunchCommandWithRole` and a real database. HOME is a private

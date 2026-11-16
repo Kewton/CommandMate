@@ -16,10 +16,15 @@
  * - **Not in use.** A path is left while a session whose latest launch record
  *   names it is present, or when tmux cannot say (`unknown`: a timeout, a busy
  *   socket, a failed spawn). Only `absent` lets it go.
- * - **Not being prepared.** A launch prepares its file before it records
- *   anything; {@link removeRoleArtifact} leaves a file a launch in this process
- *   holds (`holdRoleArtifact`: until its `requested` is recorded or it ends), and
- *   one a probe or Schedule prepared within `ROLE_ARTIFACT_PREPARED_HOLD_MS`.
+ * - **Not being launched.** The invariant: a definition a launch record names is
+ *   not removed until that launch's pane exists and is confirmed alive, or the
+ *   launch has failed. A launch prepares its file before it records anything,
+ *   and records `requested` before its pane is created; {@link removeRoleArtifact}
+ *   leaves a file a launch in this process claims (`holdRoleArtifact`: until the
+ *   launch ends, or until this cleanup finds the owner's session `present` after
+ *   its `requested`, {@link confirmRoleArtifactSession}), and one a probe or
+ *   Schedule prepared within `ROLE_ARTIFACT_PREPARED_HOLD_MS`, whatever else
+ *   claims it.
  * - **Never in the way.** Nothing here throws; the role is already deleted, and
  *   what was left is reported for a warning.
  *
@@ -32,6 +37,7 @@ import type Database from 'better-sqlite3';
 import { basename, dirname } from 'path';
 import { getLatestRoleLaunchRecords } from '@/lib/db/agent-roles-db';
 import {
+  confirmRoleArtifactSession,
   deriveServerNamespace,
   removeRoleArtifact,
   type ArtifactOptions,
@@ -111,7 +117,11 @@ async function usedBySession(
     } catch {
       return 'liveness-unknown';
     }
-    if (presence === 'present') return 'in-use';
+    if (presence === 'present') {
+      // The pane of a launch on record is there: its claim has done its part.
+      confirmRoleArtifactSession(path, { worktreeId: row.worktree_id, instanceId: row.instance_id });
+      return 'in-use';
+    }
     if (presence !== 'absent') return 'liveness-unknown';
   }
   return null;

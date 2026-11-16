@@ -72,7 +72,9 @@ declare global {
   // eslint-disable-next-line no-var
   var __roleArtifactPreparedAt: Map<string, number> | undefined;
   // eslint-disable-next-line no-var
-  var __roleArtifactHolds: Map<string, number> | undefined;
+  var __roleArtifactClaims: Map<number, RoleArtifactClaim> | undefined;
+  // eslint-disable-next-line no-var
+  var __roleArtifactClaimSeq: { next: number } | undefined;
 }
 
 /** Moves the data root (Claude, Command Code, OpenCode V1 and V2). Honoured in production. */
@@ -639,6 +641,11 @@ export interface WriteRoleArtifactInput {
   name: string;
   /** The full text for the model. See {@link renderRoleArtifact}. */
   instructions: string;
+  /**
+   * The launch's claim on this file, when one prepares it (Issue #4419). A
+   * preparation under its own claim leaves no timed mark: the claim speaks for it.
+   */
+  claim?: RoleArtifactHold;
 }
 
 export interface WrittenRoleArtifact {
@@ -659,7 +666,7 @@ export interface WrittenRoleArtifact {
  * @throws {RoleArtifactError}
  */
 export function inspectRoleArtifact(
-  input: { adapter: AgentRoleCliTool; name: string; path: string; expectedFingerprint: string },
+  input: { adapter: AgentRoleCliTool; name: string; path: string; expectedFingerprint: string; claim?: RoleArtifactHold },
   options: ArtifactOptions = {}
 ): void {
   const { adapter, name, path, expectedFingerprint } = input;
@@ -669,7 +676,7 @@ export function inspectRoleArtifact(
   }
   checkDirectories(location, false);
   inspectFile(adapter, name, path, expectedFingerprint);
-  notePrepared(path);
+  notePrepared(path, input.claim);
 }
 
 /**
@@ -745,7 +752,7 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
 
   if (readExistingArtifact(location.path) !== null) {
     inspect();
-    notePrepared(location.path);
+    notePrepared(location.path, input.claim);
     return written(true);
   }
 
@@ -771,7 +778,7 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
   // Read back either way. If another writer won the race this is also what proves
   // its bytes are ours.
   inspect();
-  notePrepared(location.path);
+  notePrepared(location.path, input.claim);
   return written(!published);
 }
 
@@ -780,11 +787,12 @@ export function writeRoleArtifact(input: WriteRoleArtifactInput, options: Artifa
 // ---------------------------------------------------------------------------
 
 /**
- * The safety net for a file prepared outside a held launch: a probe
- * (`./explicit-launch.ts`) and a Schedule's role (`resolveScheduleRole`) write
- * or inspect a file and record nothing. Such a file stays for this long after
- * its last preparation. A launch of a session holds its file instead
- * ({@link holdRoleArtifact}), and that hold, not this time, is what keeps it.
+ * The guard of a preparation no launch claims: a probe (`./explicit-launch.ts`)
+ * and a Schedule's role (`resolveScheduleRole`) write or inspect a file and
+ * record nothing, and nothing tells when their run ends. Such a file stays for
+ * this long after its last preparation, whatever any launch holds meanwhile: a
+ * Schedule's run is cut at 30 minutes (`EXECUTION_TIMEOUT_MS`). A launch of a
+ * session claims its file instead ({@link holdRoleArtifact}).
  */
 export const ROLE_ARTIFACT_PREPARED_HOLD_MS = 24 * 60 * 60_000;
 
@@ -792,16 +800,33 @@ function preparedAt(): Map<string, number> {
   return getOrInitGlobal('__roleArtifactPreparedAt', () => new Map<string, number>());
 }
 
-function holds(): Map<string, number> {
-  return getOrInitGlobal('__roleArtifactHolds', () => new Map<string, number>());
+/** One launch's claim, by its id: two launches of one file are two claims. */
+interface RoleArtifactClaim {
+  path: string;
+  /** The session the launch is for; tmux's `present` for it confirms its pane. */
+  owner: RoleArtifactClaimOwner | null;
+  /** The launch's `requested` is on record: its line is built and its pane is next. */
+  recorded: boolean;
+}
+
+function claims(): Map<number, RoleArtifactClaim> {
+  return getOrInitGlobal('__roleArtifactClaims', () => new Map<number, RoleArtifactClaim>());
+}
+
+function isClaimed(path: string): boolean {
+  for (const claim of claims().values()) if (claim.path === path) return true;
+  return false;
 }
 
 /**
- * A file was written, reused or inspected. Under a hold the hold speaks for it;
- * otherwise it is timed by {@link ROLE_ARTIFACT_PREPARED_HOLD_MS}.
+ * A file was written, reused or inspected. A preparation under its own claim
+ * leaves no mark (the claim speaks for it, and a launch that fails lets the file
+ * go at once). Any other one is timed by {@link ROLE_ARTIFACT_PREPARED_HOLD_MS},
+ * whether or not another launch holds the same file: that launch's end is not
+ * this preparation's.
  */
-function notePrepared(path: string): void {
-  if (holds().has(path)) return;
+function notePrepared(path: string, claim: RoleArtifactHold | undefined): void {
+  if (claim !== undefined && claim.path === path && claim.isHeld()) return;
   const now = Date.now();
   const marks = preparedAt();
   for (const [known, at] of marks) {
@@ -815,41 +840,83 @@ function isRecentlyPrepared(path: string): boolean {
   return at !== undefined && Date.now() - at <= ROLE_ARTIFACT_PREPARED_HOLD_MS;
 }
 
-/** One launch's claim on a file, from before it is written until the launch is on record. */
+/** The session a launch is for: the key its launch records carry. */
+export interface RoleArtifactClaimOwner {
+  worktreeId: string;
+  instanceId: string;
+}
+
+/**
+ * One launch's claim on a file (Issue #4419). Held from before the file is
+ * written until the launch's pane is confirmed alive or the launch has ended.
+ */
 export interface RoleArtifactHold {
   readonly path: string;
-  /** Give the claim up. Safe to call twice. */
+  /** Whether this claim still keeps the file. */
+  isHeld: () => boolean;
+  /**
+   * The launch's `requested` is on record. The claim stays: the record names the
+   * file, but the pane it is typed into may not exist yet. From here a tmux
+   * `present` for the owner confirms the pane ({@link confirmRoleArtifactSession}).
+   */
+  noteRecorded: () => void;
+  /** The launch ended (returned, refused or failed). Safe to call twice. */
   release: () => void;
 }
 
 /**
  * Claim the file a launch in this process is about to write, before it writes
- * it: {@link removeRoleArtifact} leaves a held file alone however long the
- * launch takes. Claims are counted, so two launches preparing the same file
- * keep it until both have let go. A claim is not timed: one never released
- * (its launch went on without a record) keeps the file for this process.
+ * it: {@link removeRoleArtifact} leaves a claimed file alone however long the
+ * launch takes. Each launch has its own claim, so one launch ending does not
+ * free a file another still prepares. A claim is not timed. It goes when its
+ * launch ends ({@link RoleArtifactHold.release}) or when, once the launch is on
+ * record, tmux says the owner's session is present ({@link confirmRoleArtifactSession});
+ * one never released (its launch went on without a record) keeps the file for
+ * this process.
  *
  * @param options - The same options the file will be written with
  * @throws {RoleArtifactError} The name has no place for this adapter
  */
 export function holdRoleArtifact(
-  input: { adapter: AgentRoleCliTool; name: string },
+  input: { adapter: AgentRoleCliTool; name: string; owner?: RoleArtifactClaimOwner },
   options: ArtifactOptions = {}
 ): RoleArtifactHold {
   const { path } = resolveArtifactLocation(input.adapter, input.name, options);
-  const counts = holds();
-  counts.set(path, (counts.get(path) ?? 0) + 1);
-  let held = true;
+  const sequence = getOrInitGlobal('__roleArtifactClaimSeq', () => ({ next: 1 }));
+  const id = sequence.next++;
+  claims().set(id, { path, owner: input.owner ?? null, recorded: false });
   return {
     path,
+    isHeld: () => claims().has(id),
+    noteRecorded: () => {
+      const claim = claims().get(id);
+      if (claim) claim.recorded = true;
+    },
     release: () => {
-      if (!held) return;
-      held = false;
-      const left = (holds().get(path) ?? 1) - 1;
-      if (left > 0) holds().set(path, left);
-      else holds().delete(path);
+      claims().delete(id);
     },
   };
+}
+
+/**
+ * tmux said the session of `owner` is present, and its latest launch record
+ * names `path`. A claim of that owner whose `requested` is on record has done
+ * its part: the pane it was typed into exists and is alive, so from here the
+ * session's presence decides, as for any recorded launch. Claims of other
+ * launches, and ones not yet on record, stay.
+ */
+export function confirmRoleArtifactSession(path: string, owner: RoleArtifactClaimOwner): void {
+  for (const [id, claim] of claims()) {
+    if (
+      claim.path === path &&
+      claim.recorded &&
+      claim.owner !== null &&
+      claim.owner.worktreeId === owner.worktreeId &&
+      claim.owner.instanceId === owner.instanceId
+    ) {
+      claims().delete(id);
+    }
+  }
 }
 
 /** Why a definition was left where it is. */
@@ -860,7 +927,7 @@ export type RoleArtifactKeptReason =
   | 'unsupported-adapter'
   /** The recorded path is not where this build keeps that name. */
   | 'unexpected-location'
-  /** A launch in this process holds it: prepared, and not yet on record ({@link holdRoleArtifact}). */
+  /** A launch in this process holds it: prepared, and its pane not yet confirmed alive nor the launch ended ({@link holdRoleArtifact}). */
   | 'launch-preparing'
   /** A probe or Schedule in this process prepared it within {@link ROLE_ARTIFACT_PREPARED_HOLD_MS}. */
   | 'recently-prepared'
@@ -924,7 +991,7 @@ export function removeRoleArtifact(
   if (location.path !== path) return kept('unexpected-location');
   if (sharedHookWritePolicy(adapter, [path], options.env ?? process.env) === 'read-only') return kept('read-only');
   // Synchronous from here to the unlink, so no launch of this process slips in between.
-  if (holds().has(path)) return kept('launch-preparing');
+  if (isClaimed(path)) return kept('launch-preparing');
   if (isRecentlyPrepared(path)) return kept('recently-prepared');
   const own = dirname(path);
   try {
