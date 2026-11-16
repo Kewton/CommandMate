@@ -118,6 +118,8 @@
  * covered a name outside its own namespace at all.
  */
 
+import { RUN_ORIGIN_ENV } from '../tool-policy/policy';
+
 /**
  * List of environment variable keys that must be removed before
  * passing environment to child processes.
@@ -191,16 +193,27 @@ export const AGENT_CORRELATION_ENV_KEYS = [
 ] as const;
 
 /**
+ * Where a run came from (Issue #4436, design §5-6): `CM_RUN_ORIGIN`, which the
+ * Schedule / daily-summary executor writes onto its own child (`schedule`) so a
+ * `commandmate send` made inside that run can say so. The server's own value —
+ * inherited from whatever started the server — is not the origin of anything this
+ * server spawns, so it is stripped here like the launching agent's identity, and
+ * the executor adds the value back for the one child it is true of.
+ */
+export const RUN_ORIGIN_ENV_KEYS = [RUN_ORIGIN_ENV] as const;
+
+/**
  * Whether `key` is removed from a child process's environment.
  *
  * @param key - An environment variable name
- * @returns `true` for a listed secret, a launch-line identity variable, or
- *   anything in CommandMate's hook namespace
+ * @returns `true` for a listed secret, a launch-line identity variable, the run
+ *   origin (Issue #4436), or anything in CommandMate's hook namespace
  */
 export function isStrippedChildProcessEnvKey(key: string): boolean {
   return (
     (SENSITIVE_ENV_KEYS as readonly string[]).includes(key) ||
     (AGENT_CORRELATION_ENV_KEYS as readonly string[]).includes(key) ||
+    (RUN_ORIGIN_ENV_KEYS as readonly string[]).includes(key) ||
     key.startsWith(COMMANDMATE_HOOK_ENV_PREFIX)
   );
 }
@@ -210,7 +223,7 @@ export function isStrippedChildProcessEnvKey(key: string): boolean {
  *
  * Removes every key {@link isStrippedChildProcessEnvKey} claims: the listed
  * secrets (Issue #294/#545/#1996), the launch-line identity of the agent this
- * process was started under (Issue #1996), and CommandMate's own `CM_HOOK_*`
+ * process was started under (Issue #1996), `CM_RUN_ORIGIN` (Issue #4436), and CommandMate's own `CM_HOOK_*`
  * namespace (Issue #1942). Non-sensitive variables (PATH, HOME, NODE_ENV, etc.)
  * are preserved, including the operator's own `CM_AGENT_HOOKS_*` switches.
  *

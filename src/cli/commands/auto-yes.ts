@@ -1,10 +1,12 @@
 /**
  * auto-yes Command - Control auto-yes for a worktree
  * Issue #518: [DR1-08] Factory pattern
+ * Issue #4436: an enable the server's tool policy refuses (409 TOOL_POLICY_DENIED)
+ *   exits 33 (ToolPolicyExitCode.DENIED) with the reason on the first stderr line
  */
 
 import { Command } from 'commander';
-import { ExitCode } from '../types';
+import { ExitCode, ToolPolicyExitCode } from '../types';
 import type { AutoYesOptions } from '../types';
 import type { AutoYesContractPolicy, AutoYesSetResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
@@ -13,6 +15,13 @@ import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG 
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
+import { ApiError } from '../utils/api-client';
+import {
+  ANTIGRAVITY_FAQ_URL,
+  TOOL_POLICY_DENIED,
+  TOOL_POLICY_DENIED_MESSAGE,
+  USAGE_DECLARATION_ENV,
+} from '../../lib/tool-policy/policy';
 import {
   AUTO_YES_ANSWER_MODES,
   DEFAULT_AUTO_YES_ANSWER_MODE,
@@ -164,6 +173,30 @@ export function describeContractPolicy(policy: AutoYesContractPolicy | null | un
   return [`Note: ${task} sets autoYes.mode: ${policy.mode}.${deny}`];
 }
 
+/**
+ * Issue #4436: the stderr lines for an arming the server's tool policy refused, or
+ * null when `error` is anything else (which keeps its own message and exit code).
+ *
+ * Only a 409 carrying `code: TOOL_POLICY_DENIED`: the code alone on another status
+ * is not this refusal. The first line is the reason (the server's sentence, or
+ * the same sentence from the shared module when the body had none), so a script
+ * that reads one line of stderr gets it.
+ */
+export function describeToolPolicyDenial(error: unknown): string[] | null {
+  if (!(error instanceof ApiError) || error.statusCode !== 409 || error.apiCode !== TOOL_POLICY_DENIED) {
+    return null;
+  }
+  const payload = error.payload as ({ error?: unknown; links?: { faq?: unknown } } | undefined);
+  const reason = typeof payload?.error === 'string' && payload.error.length > 0 ? payload.error : TOOL_POLICY_DENIED_MESSAGE;
+  const faq = typeof payload?.links?.faq === 'string' ? payload.links.faq : ANTIGRAVITY_FAQ_URL;
+  return [
+    `Error: ${reason} (${TOOL_POLICY_DENIED})`,
+    `Auto-Yes was not enabled. If you use an API key or an enterprise plan, set ${USAGE_DECLARATION_ENV}=api-key ` +
+      `(or ${USAGE_DECLARATION_ENV}=enterprise) on the server and restart it.`,
+    `FAQ: ${faq}`,
+  ];
+}
+
 export function createAutoYesCommand(): Command {
   const cmd = new Command('auto-yes');
   cmd
@@ -274,7 +307,14 @@ export function createAutoYesCommand(): Command {
           console.error(`Auto-yes disabled for ${worktreeId}.`);
         }
       } catch (error) {
-        handleCommandError(error);
+        // Issue #4436: exit 33, not the generic 409's 99 — sending again gives the same answer.
+        const denial = describeToolPolicyDenial(error);
+        if (denial !== null) {
+          for (const line of denial) console.error(line);
+          process.exit(ToolPolicyExitCode.DENIED);
+        } else {
+          handleCommandError(error);
+        }
       }
     });
   return cmd;

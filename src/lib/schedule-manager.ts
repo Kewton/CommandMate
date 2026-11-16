@@ -15,8 +15,14 @@
  *
  * [S3-001] stopAllSchedules() uses synchronous process.kill for immediate cleanup
  * [S3-010] initScheduleManager() is called after initializeWorktrees()
+ *
+ * Issue #4436: every tick goes through the tool policy (`schedule` from the
+ * origin `schedule`) before anything runs ({@link runScheduledExecution}). A
+ * refused tick launches nothing and is recorded once per streak in
+ * `execution_logs`, so an every-minute schedule does not add a row a minute.
  */
 
+import { randomUUID } from 'crypto';
 import { Cron } from 'croner';
 import { readCmateFile, parseSchedulesSection } from './cmate-parser';
 import { getActiveProcesses } from './session/claude-executor';
@@ -33,6 +39,15 @@ import {
 } from './job-executor';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from './global-state';
+import type { CLIToolType } from './cli-tools/types';
+import {
+  decideToolPolicy,
+  formatToolPolicyDenial,
+  TOOL_POLICY_DENIED,
+  TOOL_POLICY_DENIED_MESSAGE,
+  type ToolPolicyDecision,
+} from './tool-policy/policy';
+import { readUsageDeclaration } from './tool-policy/declaration';
 
 const logger = createLogger('schedule-manager');
 
@@ -146,13 +161,115 @@ function scheduleExecution(state: ScheduleState, cronJob: import('croner').Cron)
     // Issue #1343: executeSchedule() rejects if its own error handling fails
     // (e.g. the DB is still down when writing the 'failed' log). Without this
     // catch the rejection is silently unhandled.
-    void executeSchedule(state).catch((error: unknown) => {
+    // Issue #4436: through the tool policy first (runScheduledExecution).
+    void runScheduledExecution(state).catch((error: unknown) => {
       logger.error('execution:unhandled', {
         name: state.entry.name,
         error: error instanceof Error ? error.message : String(error),
       });
     });
   });
+}
+
+// =============================================================================
+// Tool policy (Issue #4436)
+// =============================================================================
+
+/** Head of the `execution_logs.result` of a refused tick; a streak reuses that row. */
+export const SCHEDULE_TOOL_POLICY_RESULT_PREFIX = `${TOOL_POLICY_DENIED} (`;
+
+/**
+ * The `execution_logs.result` of a refused tick: the code and the reason on the
+ * first line (what the list reads), then the explanation in Japanese and English,
+ * each with the terms and FAQ links and how to declare an API-key / enterprise plan.
+ */
+export function formatScheduleToolPolicyResult(decision: ToolPolicyDecision): string {
+  if (decision.allowed) return '';
+  return [
+    `${SCHEDULE_TOOL_POLICY_RESULT_PREFIX}${decision.reason}): ${TOOL_POLICY_DENIED_MESSAGE}`,
+    '',
+    formatToolPolicyDenial(decision, 'ja'),
+    '',
+    formatToolPolicyDenial(decision, 'en'),
+  ].join('\n');
+}
+
+/**
+ * Record a refused tick (Issue #4436).
+ *
+ * Once per streak, not once per tick: when the newest row of this schedule is
+ * already a refusal it is updated in place (`completed_at` = this refusal,
+ * `started_at` = the first one), otherwise one `failed` row is inserted. An
+ * every-minute schedule refused for a day is therefore one row, and a refusal
+ * after a real run (or after a run that failed for another reason) still gets a
+ * row of its own — no other row is ever rewritten. `last_executed_at` is not
+ * touched: nothing ran.
+ *
+ * @returns Whether a new row was inserted (the first refusal of a streak)
+ */
+function recordScheduleToolPolicyDenial(
+  db: ReturnType<typeof getLazyDbInstance>,
+  state: ScheduleState,
+  decision: ToolPolicyDecision
+): boolean {
+  const now = Date.now();
+  const result = formatScheduleToolPolicyResult(decision);
+  const latest = db
+    .prepare(
+      'SELECT id, status, result FROM execution_logs WHERE schedule_id = ? ORDER BY started_at DESC, created_at DESC LIMIT 1'
+    )
+    .get(state.scheduleId) as { id: string; status: string; result: string | null } | undefined;
+  if (latest && latest.status === 'failed' && latest.result?.startsWith(SCHEDULE_TOOL_POLICY_RESULT_PREFIX)) {
+    db.prepare('UPDATE execution_logs SET result = ?, completed_at = ? WHERE id = ?').run(result, now, latest.id);
+    return false;
+  }
+  db.prepare(`
+    INSERT INTO execution_logs (id, schedule_id, worktree_id, message, result, exit_code, status, started_at, completed_at, created_at)
+    VALUES (?, ?, ?, ?, ?, NULL, 'failed', ?, ?, ?)
+  `).run(randomUUID(), state.scheduleId, state.worktreeId, state.entry.message, result, now, now, now);
+  return true;
+}
+
+/**
+ * Run one tick of a schedule, unless the tool policy refuses it (Issue #4436).
+ *
+ * The decision is made on `state.entry` at tick time, so a CLI Tool edit picked
+ * up by a later sync is judged as it now reads, and with the usage declaration of
+ * this process (`CM_ANTIGRAVITY_USAGE`, set before the server starts). A refused
+ * tick runs nothing — no role resolution, no child, no `isExecuting` — and is
+ * recorded by {@link recordScheduleToolPolicyDenial}. An allowed tick is exactly
+ * the `executeSchedule(state)` it always was, called synchronously.
+ *
+ * @param state - The schedule state the cron callback holds
+ */
+export function runScheduledExecution(state: ScheduleState): Promise<void> {
+  const decision = decideToolPolicy({
+    tool: state.entry.cliToolId as CLIToolType,
+    operation: 'schedule',
+    origin: 'schedule',
+    declaration: readUsageDeclaration(),
+  });
+  if (decision.allowed) return executeSchedule(state);
+
+  try {
+    const firstOfStreak = recordScheduleToolPolicyDenial(getLazyDbInstance(), state, decision);
+    const fields = {
+      name: state.entry.name,
+      scheduleId: state.scheduleId,
+      tool: decision.tool,
+      code: decision.code,
+      reason: decision.reason,
+      faq: decision.links.faq,
+    };
+    if (firstOfStreak) logger.warn('execution:tool-policy-denied', fields);
+    else logger.debug('execution:tool-policy-denied-again', fields);
+  } catch (error) {
+    logger.error('execution:tool-policy-record-failed', {
+      name: state.entry.name,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return Promise.resolve();
 }
 
 function createScheduleState(

@@ -147,7 +147,7 @@ npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,c
 
 | オプション | 既定 | 説明 |
 |---|---|---|
-| `--tools` | 6 ツールすべて | 対象ツール（起動して確かめる 6 ツールから選ぶ）。6 ツールすべてを選んだときだけ、gemini・vibe-local・copilot の `version` も読む |
+| `--tools` | antigravity を除く 5 ツール（`CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` を申告した環境では 6 ツールすべて） | 対象ツール（起動して確かめる 6 ツールから選ぶ）。既定（`--tools` を書かない）のときと 6 ツールすべてを名指したときだけ、gemini・vibe-local・copilot の `version` も読む。antigravity は申告が無いと既定から外れ（起動も `agy --version` もしない。stderr に `antigravity: not checked — TOOL_POLICY_DENIED …`）、`--tools antigravity` と名指すと引数の誤り（exit 2、理由と FAQ はレポートの `scriptErrors`）になる（Google Antigravity 追加利用規約 6 条。#4436）。申告を外せば次の実行から外れる |
 | `--only` | 全チェック | 行うチェック（`version` は常に行う） |
 | `--out` | `~/.commandmate/agent-health/reports/<YYYY-MM-DD>.json`（JST の日付） | レポートの書き出し先 |
 | `--timeout-per-tool` | 150 | 1 ツールの持ち時間（秒）。時間切れのチェックは fail |
