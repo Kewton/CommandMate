@@ -3,6 +3,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { CLI_TOOL_IDS } from '@/lib/cli-tools/types';
 import {
@@ -29,6 +30,84 @@ const OPERATIONS: readonly ToolOperation[] = ['send', 'ask', 'respond', 'relay',
 const ORIGINS: readonly SendOrigin[] = ['legacy', 'terminal', 'session', 'agent', 'schedule', 'unknown', 'relay', 'timer'];
 const DECLARATIONS: readonly UsageDeclaration[] = ['personal', 'api-key', 'enterprise'];
 const MODULE_DIR = path.resolve(__dirname, '../../../../src/lib/tool-policy');
+
+/** The one import policy.ts may have. */
+const ALLOWED_IMPORT = { specifier: '../cli-tools/types', names: ['CLIToolType'] };
+const FORBIDDEN_IDENTIFIERS = new Set(['process', 'globalThis', 'global', 'require', 'module', 'eval', 'Function']);
+
+/** Is `node` in a position that names a property rather than referring to a binding? */
+function isPropertyNamePosition(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (!parent) return false;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return true;
+  if (ts.isQualifiedName(parent) && parent.right === node) return true;
+  if (
+    (ts.isPropertyAssignment(parent) ||
+      ts.isPropertyDeclaration(parent) ||
+      ts.isPropertySignature(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isMethodSignature(parent) ||
+      ts.isGetAccessorDeclaration(parent) ||
+      ts.isSetAccessorDeclaration(parent) ||
+      ts.isEnumMember(parent)) &&
+    parent.name === node
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Violations of "policy.ts reaches the outside world only through `import type { CLIToolType }
+ * from '../cli-tools/types'`", judged on the TypeScript AST (Issue #4436 L0, review P2).
+ */
+function checkPurity(sourceText: string): string[] {
+  const sf = ts.createSourceFile('policy.ts', sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const violations: string[] = [];
+  const where = (n: ts.Node): string => {
+    const { line, character } = sf.getLineAndCharacterOfPosition(n.getStart(sf));
+    return `${line + 1}:${character + 1}`;
+  };
+  let allowedImports = 0;
+
+  for (const stmt of sf.statements) {
+    if (ts.isImportDeclaration(stmt)) {
+      const spec = ts.isStringLiteral(stmt.moduleSpecifier) ? stmt.moduleSpecifier.text : '?';
+      const clause = stmt.importClause;
+      const named = clause?.namedBindings;
+      const ok =
+        spec === ALLOWED_IMPORT.specifier &&
+        clause !== undefined &&
+        clause.isTypeOnly &&
+        clause.name === undefined &&
+        named !== undefined &&
+        ts.isNamedImports(named) &&
+        named.elements.length === ALLOWED_IMPORT.names.length &&
+        named.elements.every((e, i) => e.name.text === ALLOWED_IMPORT.names[i] && e.propertyName === undefined);
+      if (ok && allowedImports === 0) allowedImports++;
+      else violations.push(`${where(stmt)} import '${spec}' is not the one allowed type import`);
+    } else if (ts.isImportEqualsDeclaration(stmt)) {
+      violations.push(`${where(stmt)} import = require(...)`);
+    } else if (ts.isExportDeclaration(stmt) && stmt.moduleSpecifier !== undefined) {
+      violations.push(`${where(stmt)} re-export from another module`);
+    }
+  }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      violations.push(`${where(node)} dynamic import(...)`);
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'require') {
+      violations.push(`${where(node)} require(...) call`);
+    }
+    if (ts.isIdentifier(node) && FORBIDDEN_IDENTIFIERS.has(node.text) && !isPropertyNamePosition(node)) {
+      violations.push(`${where(node)} references identifier '${node.text}'`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return violations;
+}
 
 /** Oracle written independently of the implementation's table (design D2 §1.3). */
 function expectedAllowed(tool: string, op: ToolOperation, origin: SendOrigin, decl: UsageDeclaration): boolean {
@@ -147,33 +226,35 @@ describe('tool-policy (#4436)', () => {
     });
   });
 
-  describe('I6: policy.ts stays pure (source scan)', () => {
-    const FORBIDDEN_IMPORT =
-      /(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)['"](?:node:[^'"]+|fs|fs\/promises|os|path|child_process|better-sqlite3|[^'"]*\/db(?:\/[^'"]*)?|\.\/declaration)['"]/;
+  describe('I6: policy.ts has no door to the outside except the CLIToolType type import (AST)', () => {
     const src = fs.readFileSync(path.join(MODULE_DIR, 'policy.ts'), 'utf-8');
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 
-    it('does not import declaration.ts, the DB, fs or node built-ins', () => {
-      expect(FORBIDDEN_IMPORT.test(code)).toBe(false);
+    it('the current policy.ts has no violation', () => {
+      expect(checkPurity(src)).toEqual([]);
     });
-    it('does not reference process.env', () => {
-      expect(code).not.toMatch(/process\s*\.\s*env/);
+    it('control (allowed): property names that look like forbidden identifiers', () => {
+      expect(checkPurity("const o = { process: 1 }; o.process;")).toEqual([]);
+      expect(checkPurity("import type { CLIToolType } from '../cli-tools/types'; const o = { global: 1, require: 2 }; o.module;")).toEqual([]);
     });
-    it('imports only the CLIToolType type', () => {
-      const imports = code.split('\n').filter((l) => /^\s*import\b/.test(l));
-      expect(imports).toEqual(["import type { CLIToolType } from '../cli-tools/types';"]);
-    });
-    it('control: the scanner catches what it forbids', () => {
-      for (const bad of [
-        "import fs from 'fs';",
-        "import { homedir } from 'node:os';",
-        "import { readUsageDeclaration } from './declaration';",
-        "import { getDb } from '@/lib/db';",
-        "import Database from 'better-sqlite3';",
-      ]) {
-        expect(FORBIDDEN_IMPORT.test(bad), bad).toBe(true);
-      }
-      expect(FORBIDDEN_IMPORT.test("import type { CLIToolType } from '../cli-tools/types';")).toBe(false);
+    it.each([
+      "void require('crypto');",
+      "void process['env'];",
+      'const e = globalThis.process;',
+      "await import('fs');",
+      "import 'fs';",
+      "export * from './declaration';",
+      "export { x } from 'node:os';",
+      "import { CLIToolType } from '../cli-tools/types';",
+      "import type { CLIToolType } from '../cli-tools/types'; import fs from 'fs';",
+      'const f = new Function("return 1");',
+      'eval("1");',
+      'const g = global;',
+      'module.exports = {};',
+      'const { env } = process;',
+      "import os = require('os');",
+      "import type { Foo } from './declaration';",
+    ])('control (refused): %s', (bad) => {
+      expect(checkPurity(bad).length).toBeGreaterThan(0);
     });
   });
 
