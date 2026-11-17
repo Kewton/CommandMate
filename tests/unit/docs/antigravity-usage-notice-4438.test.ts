@@ -221,3 +221,41 @@ describe('[#4438] agent-health: the watcher follows the daily runner (I10)', () 
     }
   });
 });
+
+describe('[#4438-4] CLI Operations Guide: every exit-33 row names auto-yes', () => {
+  /** The `| 33 |` rows of a guide's tables. */
+  function rows33(text: string): string[] {
+    return text.split('\n').filter((l) => l.startsWith('| 33 |'));
+  }
+  const files = [
+    'docs/user-guide/cli-operations-guide.md',
+    'docs/en/user-guide/cli-operations-guide.md',
+  ];
+
+  for (const file of files) {
+    it(`${file}: all three 33 rows mention auto-yes`, () => {
+      const rows = rows33(read(file));
+      expect(rows).toHaveLength(3);
+      for (const row of rows) expect(row).toContain('auto-yes');
+    });
+
+    it(`${file}: the auto-yes section says it exits 33 when refused`, () => {
+      const heading = '## commandmate auto-yes';
+      const body = section(read(file), heading);
+      expect(body).toMatch(/33/);
+      expect(body).toContain('TOOL_POLICY_DENIED');
+    });
+  }
+
+  it('negative control: a 33 row that names only send/ask/respond/relay is caught', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4438-4-'));
+    try {
+      const p = path.join(dir, 'guide.md');
+      fs.writeFileSync(p, '| 33 | TOOL POLICY DENIED | `send` / `ask` / `respond` and relay |\n');
+      const rows = rows33(fs.readFileSync(p, 'utf8'));
+      expect(rows.every((r) => r.includes('auto-yes'))).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
