@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 
@@ -157,6 +158,9 @@ afterEach(() => {
 });
 
 describe('[#3798] the poller and a person\'s screen', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  useUsageDeclaration('api-key');
+
   it('answer → survey: poller opens/rebinds screen; stop leaves it; human answers; poller not-waiting closes it', async () => {
     // The confirmation's wait, read before its turn; the answer's post_tool_use binds it.
     const opened = openWait({ kind: 'unattributed', generation: startWaitingObservation(WT, TOOL, TOOL).generation, lastClosedTurnId: null });
@@ -205,6 +209,9 @@ describe('[#3798] the poller and a person\'s screen', () => {
 });
 
 describe('[#3798] the receipt window does not decide the reading (I9)', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  useUsageDeclaration('api-key');
+
   it('a receipt-window-outside agy confirmation is not screen; stop closes the wait', async () => {
     // No permission receipt: Auto-Yes leaves the confirmation alone (no_prompt).
     await pollerTick(CONFIRMATION);

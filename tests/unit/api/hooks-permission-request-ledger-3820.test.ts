@@ -20,6 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -199,6 +200,9 @@ describe('[#3820] an allow on a tool whose allow draws no dialog', () => {
 });
 
 describe('[#3820] an allow on agy (design §5)', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  useUsageDeclaration('api-key');
+
   it('writes no history row: the dialog agy draws anyway is answered — and recorded — on the screen', async () => {
     setAutoYesEnabled(WT, 'antigravity', true, ONE_HOUR_MS);
 

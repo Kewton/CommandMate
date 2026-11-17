@@ -17,6 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -160,6 +161,9 @@ afterEach(async () => {
 });
 
 describe('[#3820 PR 3] the permission route reads agy’s stepIdx', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  useUsageDeclaration('api-key');
+
   it('records the call on the receipt and the hook request, and replies as before', async () => {
     const { status, body } = await preToolUse(PRE_TOOL_USE);
 
