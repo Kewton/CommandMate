@@ -107,3 +107,6 @@ logs/
 !/CONTRIBUTING.md
 !/README.md
 !/SECURITY.md
+
+# Antigravity usage notice record (local CLI run, Issue #4438)
+/antigravity-notice.json

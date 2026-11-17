@@ -327,6 +327,8 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 
 **Guard on sends to Antigravity (default)** — Until you declare how you use Antigravity, `send`, `ask` and `respond` (strict mode included) to an antigravity instance are refused before anything is typed (exit 33) when they come from inside a CommandMate session, a Schedule run, an AI agent, or a caller whose origin cannot be told (for example, no terminal). Relays with antigravity at either end (`send --reply-to`, `ask --async`) cannot be opened (exit 33, apart from the other relay refusals' exit 2). Sends from the web UI and commands a person types in a terminal work as before.
 
+**CLI usage notice (#4438)**: `instances <worktree-id> add --agent antigravity` and `send`, `ask` and `respond` to an antigravity instance print the usage notice with the terms and FAQ links on **stderr only** (never stdout or `--json`; after a refusal's reason lines when refused). It shows the first time per CLI environment (`antigravity-notice.json` in the config directory) and again when the terms' check date changes. If the record cannot be read or written it shows the notice and goes on; the result and exit code do not change.
+
 This guard exists to avoid running into Section 6 of the Google Antigravity Additional Terms and the FAQ by accident. The kind of sender is what the CLI reads from its own environment; the server cannot verify it. Calling the API directly, changing the environment, or using an older CLI gets past it. **It does not guarantee compliance with the terms.** If you use Antigravity with an API key or an enterprise plan, set the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` and restart the server to lift the guard (CommandMate does not read credentials; it takes the declaration as given; setting it where you type the CLI has no effect). Terms: https://antigravity.google/terms · FAQ: https://antigravity.google/docs/faq (as of 2026-11-16). This is not legal advice.
 
 The CLI reads the kind of sender in this order and puts the first match on the body as `origin` (with `originEvidence` for the log; the server's table decides). There is no flag to override it (an agent could pass it).
@@ -997,7 +999,7 @@ The chat History does not show the id line.
 | 11 | **UPSTREAM_FAULT**: the turn never ran. stderr and `--json` carry `id=…` (`ask` always runs with `failOnUpstreamFault: true`). `id=context-limit`: the conversation is over the model's limit — `instances <id> kill <instance>` and ask again in a fresh session. `id=model-capacity`: send to another instance or model (#3936) | Wait a while or change the target, then ask again |
 | 21 | Nothing was running to ask | Check the roster with `instances <id>` |
 | 32 | **ROLE NOT_SENT**: the role condition does not hold; the body was not typed | Review the role settings |
-| 33 | **TOOL POLICY DENIED**: the guard refused a send or an `--async` relay to antigravity; nothing was typed ([Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). `--json` has `sent: false` and `refusal` | Do not resend; ask a person whether a declaration is needed |
+| 33 | **TOOL POLICY DENIED**: the guard refused a send or an `--async` relay to antigravity; nothing was typed ([Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). `--json` has `sent: false` and `refusal` | Do not resend; ask a person whether a declaration is needed. `auto-yes --enable` refusals are also 33 |
 | 99 | Unexpected error | — |
 | 124 | Timed out. When the send itself returned past the deadline, the message **was sent** (stderr says so) | Look with `capture <id> --instance <id> --pane --tail 60`; **do not resend** |
 
@@ -1243,7 +1245,7 @@ the same appearance (`screen.token` of [`commandmate prompt`](#commandmate-promp
 |:----:|---------|
 | 0 | Response sent successfully |
 | 2 | Argument errors; in strict mode also `--default`, a number on an unnumbered screen, or only one of `--expect-screen` / `--observation` |
-| 33 | The guard refused an answer to antigravity (plain and strict alike; checked before strict mode's 40 and 41). **Nothing was typed**. Strict mode's `--json` has `sent: false` and `refusal` ([Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). Sending again gives the same result |
+| 33 | The guard refused an answer to antigravity (plain and strict alike; checked before strict mode's 40 and 41). **Nothing was typed**. Strict mode's `--json` has `sent: false` and `refusal` ([Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). Sending again gives the same result (`auto-yes --enable` refusals also exit 33) |
 | 40 | Strict mode: the screen did not match or could not be checked. **Nothing was sent** (kind, token, folder or label mismatch, capture failure, an older server, …). Observe again with `commandmate prompt` |
 | 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane. Even at 41, when `reason` is `operation_in_progress` / `operation_id_conflict` nothing was sent (`keysSent` is 0; `delivery` reads `indeterminate` but nothing was sent); fetch the result again under a different ID |
 | 99 | Prompt already dismissed (`prompt_no_longer_active`) / the answer was not sent (`answer_not_delivered`) or stopped part-way (`answer_input_lost`, see below) |
@@ -2329,6 +2331,8 @@ commandmate auto-yes <worktree-id> --enable --answer-mode careful  # Questions a
 | `--answer-mode <m>` | The answer mode (`recommended` / `careful`; see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863) below). With `--enable` only. Omitted: `recommended` for a new grant, the current mode for a grant that is on (Issue #3863) |
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
+
+**Exit code 33**: `--enable` on an antigravity instance of a server with no declaration is refused by the API with 409 `TOOL_POLICY_DENIED`; Auto-Yes is not enabled (exit 33, the reason on the first stderr line; `--disable` is never refused). Running it again gives the same result (see 33 in the [Exit Codes](#exit-codes) and [Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)).
 
 Enabled for an instance whose session is not running, Auto-Yes stays on until it expires (`--duration`) and answers once the session starts (Issue #3329); while it waits it checks once a minute. It stops with `consecutive_errors` only when failures keep coming in a row: the session exists but its screen cannot be read or the answer cannot be sent, or tmux itself cannot be asked.
 
@@ -3717,7 +3721,7 @@ commandmate ls --token your-token
 | 30 | NO_ACTIVE_SESSIONS | `interrupt` found no running session to interrupt |
 | 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
-| 33 | TOOL POLICY DENIED | Refused by the tool usage policy; nothing was typed (`send` / `ask` / `respond` and relay creation: `TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`, see [Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). Sending again gives the same result |
+| 33 | TOOL POLICY DENIED | Refused by the tool usage policy; nothing was typed (`send` / `ask` / `respond` and relay creation: `TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`, see [Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). Sending again gives the same result. A refused `auto-yes --enable` (Auto-Yes is not enabled; [`commandmate auto-yes`](#commandmate-auto-yes)) is also 33 |
 | 50–57 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded), and a prompt from `mem check --suggest` (57); see the exit codes of [commandmate mem](#commandmate-mem). `send --note` refused by mem ends in 50–56 too |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |

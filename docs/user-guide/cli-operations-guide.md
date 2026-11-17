@@ -320,6 +320,8 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 
 **Antigravity への送信の柵（既定）** — 利用形態を申告していないあいだ、antigravity の instance への `send`・`ask`・`respond`（厳格モードを含む）は、CommandMate のセッションの中・Schedule・AI エージェントの中・起点の分からない呼び出し（端末の無い実行など）から送られたものを、何も打たずに断ります（exit 33）。antigravity を端点にする relay（`send --reply-to`・`ask --async`）も作れません（exit 33。relay のほかの拒否の exit 2 とは別）。画面と、端末で人が打つコマンドは今までどおり送れます。
 
+**CLI の利用上の注意（#4438）**: `instances <worktree-id> add --agent antigravity` と、antigravity の instance への `send`・`ask`・`respond` は、利用上の注意と規約・FAQ のリンクを **stderr だけ**に出します（stdout と `--json` には混ぜません。拒否のときは拒否の理由の行などの後）。出すのは CLI の環境（設定ディレクトリの `antigravity-notice.json`）ごとに初めての 1 回で、規約の確認日が変わると再び出ます。記録を読めないとき・書けないときは出して続け、結果と exit は変わりません。
+
 この柵は、Google Antigravity の追加利用規約 6 条と FAQ にうっかり触れないためのものです。送り手の種類は CLI が自分の環境から申告するもので、サーバーは確かめられません。API を直接呼ぶ・環境を変える・古い CLI を使うと、柵を通れてしまいます。**規約を守っていることの保証ではありません。** API キーや企業向けで使う場合は、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE` に `api-key` か `enterprise` を設定してサーバーを再起動すると解けます（CommandMate は資格情報を読まず、申告のまま扱います。CLI を打つ側の環境に設定しても効きません）。規約: https://antigravity.google/terms ／ FAQ: https://antigravity.google/docs/faq （2026-11-16 時点。法的な助言ではありません）
 
 CLI は送り手の種類を次の順に読み、最初に当たったものを本文の `origin` に付けます（記録用の `originEvidence` も。判定はサーバーの表）。上書きの旗はありません（AI が使えば柵が無くなるため）。
@@ -1200,7 +1202,7 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 | 11 | **UPSTREAM_FAULT**: ターンが走らなかった。stderr と `--json` に `id=…`（`ask` は常に `failOnUpstreamFault: true`）。`id=context-limit` は文脈上限で、`instances <id> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別のインスタンス・モデルへ送る（#3936） | 時間を置くか送り先を変えて再送 |
 | 21 | 動いているセッションが無い | `instances <id>` で roster を確認 |
 | 32 | **ROLE NOT_SENT**: ロールの条件を満たさず、本文を入力していない | ロールの設定を見直す |
-| 33 | **TOOL POLICY DENIED**: antigravity への送信・relay（`--async`）を柵が断った。何も打っていない（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。`--json` は `sent: false` と `refusal` | 再送しない。人に申告の要否を伺う |
+| 33 | **TOOL POLICY DENIED**: antigravity への送信・relay（`--async`）を柵が断った。何も打っていない（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。`--json` は `sent: false` と `refusal` | 再送しない。人に申告の要否を伺う。`auto-yes --enable` の拒否（stderr の 1 行目は `TOOL_POLICY_DENIED`。何も有効になっていない）も 33 |
 | 99 | 予期しないエラー | — |
 | 124 | タイムアウト。送信が期限を過ぎて返った場合は**送信済み**（stderr に出る） | `capture <id> --instance <id> --pane --tail 60` で見る。**再送しない** |
 
@@ -1484,7 +1486,7 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 |:------:|------|
 | 0 | 応答成功 |
 | 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
-| 33 | antigravity への回答を柵が断った（通常・厳格モードのどちらも。厳格モードの 40・41 より先に判定）。**何も打っていない**。厳格モードの `--json` は `sent: false` と `refusal`（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ |
+| 33 | antigravity への回答を柵が断った（通常・厳格モードのどちらも。厳格モードの 40・41 より先に判定）。**何も打っていない**。厳格モードの `--json` は `sent: false` と `refusal`（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ。`auto-yes --enable` の拒否も 33 |
 | 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
 | 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる。ただし 41 でも `reason` が `operation_in_progress` / `operation_id_conflict` のときは何も送っていない（`keysSent` は 0。`delivery` は `indeterminate` と出るが送信はしていない）。結果の取り直しは別の ID で |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）/ 回答が届かなかった（`answer_not_delivered`）・途中で止まった（`answer_input_lost`、下記）|
@@ -3142,6 +3144,8 @@ commandmate auto-yes <worktree-id> --enable --answer-mode careful  # 質問は�
 | `--instance <id>` | **対象の推奨指定方法**。対象インスタンスID。他インスタンスと独立してAuto-Yesを制御 |
 | `--agent <id>` | roster に無いインスタンス向けの補助（`--instance` 単独で足りる場合は不要） |
 
+**終了コード 33**: 申告の無いサーバーで antigravity の instance に `--enable` すると、API が 409 `TOOL_POLICY_DENIED` で断り、Auto-Yes は有効になりません（exit 33、stderr の 1 行目に理由。`--disable` は断りません）。再実行しても同じです（[全終了コード一覧](#全終了コード一覧)の 33、[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。
+
 セッションが動いていないインスタンスで有効にしても、Auto-Yes は期限（`--duration`）まで有効のまま待ち、セッションが起動したら答えます（Issue #3329）。待っている間の確認は 1 分ごとです。止まる（`consecutive_errors`）のは、セッションはあるのに画面が読めない・答えを送れない失敗や、tmux に問い合わせられない失敗が続いたときです。
 
 ### 答え方のモード（おまかせ／慎重）（Issue #3863）
@@ -4741,7 +4745,7 @@ commandmate ls --token your-token
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 31 | ROLE CONFLICT | ロールや名簿の競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない。ロールを付けない `instances add` / `remove` / `alias` でも出る。例外: `remove --kill` はセッションが停止済みのことがある |
 | 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
-| 33 | TOOL POLICY DENIED | 方針（ツールの利用方針）による拒否。何も打っていない（`send` / `ask` / `respond` と relay の作成。`TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`。[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ |
+| 33 | TOOL POLICY DENIED | 方針（ツールの利用方針）による拒否。何も打っていない（`send` / `ask` / `respond` と relay の作成。`TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`。[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ。`auto-yes --enable` の拒否（Auto-Yes は有効にならない。[`commandmate auto-yes`](#commandmate-auto-yes)）も 33 |
 | 50〜57 | MEM | `mem` の拒否（50 disabled / 51 version_conflict / 52 対象不明 / 53 ambiguous / 54 duplicate_key / 55 not_owner・state_forbids / 56 limit_exceeded）と、`mem check --suggest` の促しあり（57）。[commandmate mem](#commandmate-mem) の終了コード。`send --note` を mem が断ったときも 50〜56 で終わる |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |

@@ -888,5 +888,9 @@
       "claimed": "Another send is delivering the hand-off.",
       "consumed": "This boundary's hand-off was already used (another send delivered it, or a send before a server restart ended without a known result). Only your message was sent."
     }
+  },
+  "toolPolicyRefusal": {
+    "terms": "Terms (Google Antigravity)",
+    "faq": "FAQ (Google Antigravity)"
   }
 }

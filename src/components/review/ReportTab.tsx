@@ -6,6 +6,8 @@
  * Issue #618: Report template system - 3 generation modes
  * Issue #2044: opencode joins the tool selector; the Model box follows
  *   TOOLS_WITH_MODEL_SUPPORT instead of naming copilot.
+ * Issue #4436: a tool-policy refusal (409 TOOL_POLICY_DENIED) shows the reason
+ *   and the terms / FAQ links of the response.
  */
 
 'use client';
@@ -19,6 +21,8 @@ import { SUMMARY_ALLOWED_TOOLS, MAX_USER_INSTRUCTION_LENGTH } from '@/config/rev
 import { TOOLS_WITH_MODEL_SUPPORT } from '@/lib/cmate-cli-tool-parser';
 import { useReportGeneration } from '@/hooks/useReportGeneration';
 import { useGenerationStatus } from '@/hooks/useGenerationStatus';
+import { ToolPolicyRefusalNotice } from '@/components/ui/ToolPolicyRefusalNotice';
+import { parseToolPolicyRefusal, type ToolPolicyRefusalView } from '@/lib/tool-policy/refusal-view';
 import { useCopyFeedback } from '@/hooks/useCopyFeedback';
 import { copyToClipboard } from '@/lib/clipboard-utils';
 import type { GenerationMode } from '@/hooks/useReportGeneration';
@@ -66,6 +70,8 @@ export default function ReportTab() {
   // the 2s window does not leave a callback behind (Issue #2180).
   const { copied, markCopied } = useCopyFeedback();
   const [error, setError] = useState<string | null>(null);
+  // Issue #4436: set with `error` when the generation was refused by the tool policy.
+  const [refusal, setRefusal] = useState<ToolPolicyRefusalView | null>(null);
 
   /**
    * Whether the tool takes a `--model`.
@@ -97,6 +103,7 @@ export default function ReportTab() {
   const fetchReport = useCallback(async (date: string) => {
     setIsLoading(true);
     setError(null);
+    setRefusal(null);
     try {
       const res = await fetch(`/api/daily-summary?date=${date}`);
       if (!res.ok) {
@@ -147,6 +154,7 @@ export default function ReportTab() {
 
     setIsGenerating(true);
     setError(null);
+    setRefusal(null);
     try {
       const body: Record<string, string> = { date: selectedDate, tool: selectedTool };
       if (showModelInput && modelInput.trim()) {
@@ -169,6 +177,12 @@ export default function ReportTab() {
 
       if (!res.ok) {
         const data = await res.json();
+        const refused = parseToolPolicyRefusal(res.status, data);
+        if (refused) {
+          setRefusal(refused);
+          setError(refused.message);
+          return;
+        }
         setError(data.error || t('report.errors.generate'));
         return;
       }
@@ -192,6 +206,7 @@ export default function ReportTab() {
 
     setIsSaving(true);
     setError(null);
+    setRefusal(null);
     try {
       const res = await fetch('/api/daily-summary', {
         method: 'PUT',
@@ -353,7 +368,11 @@ export default function ReportTab() {
       {/* Error display */}
       {error && (
         <div className="mb-4 p-3 bg-danger-subtle text-danger-foreground rounded-lg text-sm" data-testid="report-error">
-          {error}
+          {refusal ? (
+            <ToolPolicyRefusalNotice refusal={refusal} data-testid="report-tool-policy-refusal" />
+          ) : (
+            error
+          )}
         </div>
       )}
 
