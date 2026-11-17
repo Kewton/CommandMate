@@ -139,6 +139,7 @@ import { useSessionTileSurfaceMode } from '@/hooks/useSessionTileSurfaceMode';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import { SESSION_TILE_COMPOSER_HEIGHT_SCOPE } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
+import { buildSessionRowHref } from '@/lib/sidebar-utils';
 import { appendToStoredDraft, getInstanceDraftKey } from '@/lib/drafts/message-draft';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
@@ -449,6 +450,12 @@ function SessionTileCard({
     instances.find((instance) => instance.id === requestedInstanceId) ?? instances[0];
 
   const instanceId = activeInstance?.id;
+  // Issue #4389: under a role filter the heading link opens the first matching instance, built by
+  // the same function the list row uses; with no filter it is the plain worktree link.
+  const headerHref =
+    instanceIds && instanceIds.length > 0
+      ? buildSessionRowHref({ worktreeId: worktree.id, instanceId: instanceIds[0] })
+      : `/worktrees/${worktree.id}`;
   const cliToolId = activeInstance?.cliTool ?? 'claude';
   // The id `/send`, the poller and the Auto-Yes map resolve an omitted instance
   // to: the primary is named by its tool.
@@ -738,7 +745,7 @@ function SessionTileCard({
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs text-muted-foreground">{repositoryLabel}</div>
           <Link
-            href={`/worktrees/${worktree.id}`}
+            href={headerHref}
             className="block truncate text-sm font-medium text-foreground underline-offset-2 hover:text-accent-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:text-accent-400"
             data-testid={`session-tile-branch-${worktree.id}`}
             title={branchLabel}
