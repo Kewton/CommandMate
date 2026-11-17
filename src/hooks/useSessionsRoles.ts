@@ -27,9 +27,17 @@ import type { AgentRoleSummary } from '@/types/agent-roles';
 
 export const SESSIONS_ROLES_POLL_MS = 30_000;
 
+export type SessionsRolesStatus = 'loading' | 'ok' | 'error';
+
 export interface UseSessionsRolesResult {
   /** Every role; `null` until read or when the list could not be read. */
   roles: AgentRoleSummary[] | null;
+  /**
+   * Issue #4388: whether `roles` was read. `loading` only until the first read
+   * settles; a later failed re-read turns it to `error`. Lets the default filter
+   * tell "not read yet" and "could not read" apart from "this role was deleted".
+   */
+  rolesStatus: SessionsRolesStatus;
   /** Instance roles; `null` until the first read finishes. */
   source: SessionsRoleSource | null;
   reload: () => void;
@@ -37,6 +45,7 @@ export interface UseSessionsRolesResult {
 
 export function useSessionsRoles({ poll }: { poll: boolean }): UseSessionsRolesResult {
   const [roles, setRoles] = useState<AgentRoleSummary[] | null>(null);
+  const [rolesStatus, setRolesStatus] = useState<SessionsRolesStatus>('loading');
   const [source, setSource] = useState<SessionsRoleSource | null>(null);
   const mounted = useRef(true);
   // Only the latest request of each read is adopted (as in useWorktreesCache):
@@ -65,6 +74,7 @@ export function useSessionsRoles({ poll }: { poll: boolean }): UseSessionsRolesR
     const result = await roleApi.list();
     if (!mounted.current || seq !== rolesSeq.current) return;
     setRoles(result.ok ? result.data.roles : null);
+    setRolesStatus(result.ok ? 'ok' : 'error');
   }, []);
 
   const reload = useCallback(() => {
@@ -86,5 +96,5 @@ export function useSessionsRoles({ poll }: { poll: boolean }): UseSessionsRolesR
     return () => clearInterval(timer);
   }, [poll, readSource]);
 
-  return { roles, source, reload };
+  return { roles, rolesStatus, source, reload };
 }
