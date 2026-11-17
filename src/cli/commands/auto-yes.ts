@@ -213,7 +213,8 @@ export function createAutoYesCommand(): Command {
     .action(async (worktreeId: string, options: AutoYesOptions) => {
       // Issue #4436 (I7a): the client's warnings (`--token`) are held so that a
       // tool-policy refusal is still the first stderr line; every other outcome
-      // prints them first, as before.
+      // prints them first, as before — including the exits 2 inside the
+      // --instance resolution (I7b), through its `beforeExit` hook.
       const heldWarnings: string[] = [];
       const printHeldWarnings = (): void => {
         for (const line of heldWarnings.splice(0)) console.error(line);
@@ -292,7 +293,10 @@ export function createAutoYesCommand(): Command {
         // and watches the session cliTool names, so the instance must be paired
         // with the CLI tool its roster entry declares.
         const agent = options.instance
-          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
+          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent, 'strict', {
+              // I7b: an ambiguous or contradicting --instance exits 2 inside; the held warnings go first.
+              beforeExit: printHeldWarnings,
+            })
           : options.agent;
 
         if (agent) {
