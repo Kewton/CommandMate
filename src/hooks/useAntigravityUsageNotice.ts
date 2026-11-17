@@ -13,6 +13,10 @@
  * The stored value is the date the terms were checked (`ANTIGRAVITY_TERMS_CHECKED_AT`),
  * so a later re-check of the terms shows the notice again.
  *
+ * One record for the whole browser, read by every entry point (the add forms and the
+ * composer's first launch, Issue #4438 再指示 1): closing it in one tab hides it in the
+ * tabs already open too — they hear the write as a `storage` event and read it again.
+ *
  * Every failure leans towards showing it: storage that cannot be read (private mode,
  * blocked site data, an exception) counts as "not seen", and a write that fails still
  * hides it for the mounted screens only — the next load shows it again.
@@ -54,8 +58,16 @@ export function useAntigravityUsageNotice(): AntigravityUsageNotice {
 
   useEffect(() => {
     const onDismiss = (): void => setDismissed(true);
+    // Another tab's write (or a cleared storage, key === null): read the record again.
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === null || event.key === ANTIGRAVITY_NOTICE_STORAGE_KEY) setDismissed(readDismissed());
+    };
     window.addEventListener(DISMISS_EVENT, onDismiss);
-    return () => window.removeEventListener(DISMISS_EVENT, onDismiss);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(DISMISS_EVENT, onDismiss);
+      window.removeEventListener('storage', onStorage);
+    };
   }, []);
 
   const shouldShow = useCallback(

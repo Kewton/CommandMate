@@ -76,4 +76,36 @@ describe('[#4438] useAntigravityUsageNotice', () => {
     const second = renderHook(() => useAntigravityUsageNotice());
     expect(second.result.current.shouldShow('antigravity')).toBe(true);
   });
+  it("closing in another tab hides it here once that tab's write is seen (I6'')", () => {
+    // Another tab shares the storage but not this window's own event: it reaches
+    // this tab only as a `storage` event.
+    const here = renderHook(() => useAntigravityUsageNotice());
+    expect(here.result.current.shouldShow('antigravity')).toBe(true);
+    window.localStorage.setItem(ANTIGRAVITY_NOTICE_STORAGE_KEY, ANTIGRAVITY_TERMS_CHECKED_AT);
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent('storage', {
+          key: ANTIGRAVITY_NOTICE_STORAGE_KEY,
+          newValue: ANTIGRAVITY_TERMS_CHECKED_AT,
+          storageArea: window.localStorage,
+        }),
+      );
+    });
+    expect(here.result.current.shouldShow('antigravity')).toBe(false);
+  });
+
+  it("a storage event for another key changes nothing, and a cleared storage shows it again (I6'')", () => {
+    window.localStorage.setItem(ANTIGRAVITY_NOTICE_STORAGE_KEY, ANTIGRAVITY_TERMS_CHECKED_AT);
+    const here = renderHook(() => useAntigravityUsageNotice());
+    expect(here.result.current.shouldShow('antigravity')).toBe(false);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'something-else', newValue: 'x' }));
+    });
+    expect(here.result.current.shouldShow('antigravity')).toBe(false);
+    window.localStorage.clear();
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: null }));
+    });
+    expect(here.result.current.shouldShow('antigravity')).toBe(true);
+  });
 });

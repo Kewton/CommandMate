@@ -205,3 +205,19 @@ describe('[#4438] CLI Operations Guide: cautions in the Auto-Yes, relay and unat
     }
   }
 });
+
+describe('[#4438] agent-health: the watcher follows the daily runner (I10)', () => {
+  it('watch-prompt.md reports claude as the runner and names Antigravity only as a caution', () => {
+    const watch = read('docs/agent-health/watch-prompt.md');
+    expect(recommendingAntigravityLines(watch)).toEqual([]);
+    expect(watch).toContain('runner=claude');
+    expect(watch).not.toMatch(/runner=antigravity|agent-health:antigravity:/);
+  });
+
+  it('every file under docs/agent-health names antigravity only as a caution', () => {
+    const dir = path.join(REPO_ROOT, 'docs/agent-health');
+    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.md'))) {
+      expect({ name, lines: recommendingAntigravityLines(read(`docs/agent-health/${name}`)) }).toEqual({ name, lines: [] });
+    }
+  });
+});
