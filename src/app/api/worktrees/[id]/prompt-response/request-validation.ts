@@ -50,9 +50,17 @@ export interface PromptResponseRequest {
   planReviewAction?: string;
   /**
    * Issue #3820: `auto-yes-browser` when the browser's Auto-Yes sent it. Read
-   * by the Auto-Yes ledger only; any other value is ignored, never refused.
+   * by the Auto-Yes ledger for that value only.
+   *
+   * Issue #4437: also who started the answer, as the CLI reads it (`terminal` /
+   * `session` / `agent` / `schedule` / `unknown`), for the tool policy. Absent is
+   * a person (`legacy`), any other string is `unknown` (refused for antigravity
+   * only), and a non-string is now 400 — read by the route (`send-tool-policy`),
+   * right after this validation.
    */
-  origin?: string;
+  origin?: unknown;
+  /** Issue #4437: what the CLI read its `origin` from; logged with a refusal only. */
+  originEvidence?: unknown;
 }
 
 /** A request that passed every body-only check. */

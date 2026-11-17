@@ -22,6 +22,11 @@
  * stops a poller tick under way and holds the poller off the instance for a
  * moment (`auto-yes-manual-answer`), and drops Auto-Yes's decision about the
  * prompt (`autoYesDecision`).
+ *
+ * Issue #4437: the body's `origin` is also who started the answer, as the CLI
+ * reads it. The tool policy is asked as soon as the tool is resolved, before the
+ * session's ownership, the structured decision and any key: a refusal is 409
+ * `TOOL_POLICY_DENIED`. Absent is a person, as before; a non-string is 400.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -44,6 +49,7 @@ import type { ValidatedPromptResponse } from './request-validation';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { noteManualAnswerStarted, settleManualAnswer } from '@/lib/polling/auto-yes-manual-answer';
 import { AUTO_YES_BROWSER_ORIGIN } from '@/lib/prompt-response-body-builder';
+import { findToolPolicyDenial, readBodyOrigin, toolPolicyDeniedResponse } from '../send/send-tool-policy';
 
 /** Issue #3821: the `reason` of the 409 a browser Auto-Yes answer is refused with. */
 const BROWSER_AUTO_YES_RETIRED_REASON = 'browser-auto-yes-retired';
@@ -83,6 +89,9 @@ export async function POST(
         { status: 409 },
       );
     }
+    // Issue #4437: who started the answer (the last body-only check).
+    const sendOrigin = readBodyOrigin(body.origin);
+    if (!sendOrigin.ok) return NextResponse.json({ error: sendOrigin.error }, { status: 400 });
     const { cliToolParam, instanceId } = request;
 
     const db = getDbInstance();
@@ -100,6 +109,17 @@ export async function POST(
     const cliToolId: CLIToolType = (cliToolParam && isCliToolType(cliToolParam))
       ? cliToolParam
       : (worktree.cliToolId || 'claude');
+
+    // Issue #4437 (design §1.3): the tool is known; nothing is read or typed yet.
+    const toolPolicyDenial = findToolPolicyDenial({
+      tool: cliToolId,
+      operation: 'respond',
+      origin: sendOrigin.origin,
+      originEvidence: body.originEvidence,
+      worktreeId: id,
+      instanceId,
+    });
+    if (toolPolicyDenial) return toolPolicyDeniedResponse(toolPolicyDenial);
 
     // Get CLI tool instance from manager
     const manager = CLIToolManager.getInstance();

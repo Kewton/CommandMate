@@ -46,6 +46,16 @@
       "unavailable": "ロールを読めなかったため、ロールの条件は使っていません。",
       "rolesLoadError": "ロールの一覧を読めませんでした。",
       "instanceRole": "{instance}: {role}"
+    },
+    "defaultFilter": {
+      "save": "この条件をデフォルトにする",
+      "reset": "デフォルトに戻す",
+      "saving": "保存しています…",
+      "saved": "この条件をデフォルトにしました。",
+      "saveInvalid": "デフォルトにできませんでした: {detail}",
+      "saveFailed": "デフォルトを保存できませんでした。もう一度お試しください。",
+      "droppedRoles": "削除されたロールが含まれていました。その分は使わずに絞り込んでいます。",
+      "differs": "デフォルトと違う条件"
     }
   },
   "nav": {
