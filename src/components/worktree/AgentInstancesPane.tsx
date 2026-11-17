@@ -65,6 +65,9 @@ import { InstanceCliCommandsModal } from '@/components/worktree/InstanceCliComma
 // a live session.
 import { AgentUpdatesCard } from '@/components/settings';
 import { InstanceRolesSection } from '@/components/roles/InstanceRolesSection';
+// Issue #4438: the Antigravity usage notice, once per browser, when antigravity is chosen to add.
+import { AntigravityUsageNotice } from '@/components/worktree/antigravity-usage-notice';
+import { useAntigravityUsageNotice } from '@/hooks/useAntigravityUsageNotice';
 import { Spinner } from '@/components/ui/Spinner';
 import { useConfirm } from '@/components/ui/ConfirmDialog';
 import { TruncationTooltip } from '@/components/common/TruncationTooltip';
@@ -336,6 +339,7 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   // Base tool for the "add instance" control.
   const [addToolId, setAddToolId] = useState<CLIToolType>(CLI_TOOL_IDS[0]);
+  const usageNotice = useAntigravityUsageNotice();
   // Index of the row currently being dragged (HTML5 reorder).
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   // Issue #2069: whether the agent-CLI update section is open. Closed by
@@ -912,6 +916,11 @@ export const AgentInstancesPane = memo(function AgentInstancesPane({
           {t('agentInstanceAdd')}
         </button>
       </div>
+
+      {/* Guidance only: the add button stays as it is (the server refuses what it must, #4436). */}
+      {usageNotice.shouldShow(addToolId) && (
+        <AntigravityUsageNotice onDismiss={usageNotice.dismiss} className="mt-2" />
+      )}
 
       {atMax && (
         <p className="mt-2 text-xs text-muted-foreground">

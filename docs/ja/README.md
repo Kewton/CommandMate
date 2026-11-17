@@ -144,6 +144,18 @@ commandmate start --daemon
 
 ---
 
+## Antigravity（agy）を使う前に
+
+[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq) は、個人向けプラン（無料・Google AI Plus／Pro／Ultra）で、第三者のソフトウェアやコーディングエージェントを通して Antigravity を使うことを制限している。違反はアカウントの停止につながることがある。CommandMate では、個人向けプランのサインインで次のことをしないでほしい:
+
+- ほかの AI エージェントから agy へ依頼を送る（`send`・`ask`・relay・`/orchestrate`）
+- Schedule や日次サマリーで agy を動かす
+- agy に Auto-Yes を使う
+
+人が自分で起動して入力する使い方が規約の範囲内かについて、Google による明示の確認は無い。自動化には Gemini の API キーか Gemini Enterprise を使う。そう使っていることは、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE` に `api-key` か `enterprise` を設定して CommandMate に伝える（未設定は個人向けプランとして扱う）。サーバーは起動時に読むので、変えたらサーバーを再起動する（`commandmate stop` のあと `commandmate start --daemon`）。`commandmate` の CLI を打つ側の環境に設定しても効かない。この設定は利用者の自己申告で、CommandMate は資格情報を読んで確かめない。agy の認証情報を読むことも、転送することもない。規約: https://antigravity.google/terms ／ FAQ: https://antigravity.google/docs/faq （2026-11-16 時点）。これは法的な助言ではない。
+
+---
+
 ## やらないこと
 
 - 裏で勝手に動き続けるものではない。1 つひとつの作業には始まりと終わりがあり、あなたが承認するまでリポジトリは書き換わらない。

@@ -39,6 +39,9 @@
  *
  * Rename / reorder / delete stay in `AgentInstancesPane`; this is only the
  * quick "add one and look at it" entry point.
+ *
+ * Choosing antigravity shows the usage notice (Issue #4438) once per browser; it is
+ * guidance and leaves the submit as it is.
  */
 
 'use client';
@@ -76,6 +79,8 @@ import {
 import type { AgentRoleSummary, InstanceRoleSettingsResponse } from '@/types/agent-roles';
 import { Modal } from '@/components/ui/Modal';
 import { Tooltip } from '@/components/common/Tooltip';
+import { AntigravityUsageNotice } from '@/components/worktree/antigravity-usage-notice';
+import { useAntigravityUsageNotice } from '@/hooks/useAntigravityUsageNotice';
 
 // ============================================================================
 // Roster helpers (shared with AgentInstancesPane)
@@ -201,6 +206,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
   const [roleChoice, setRoleChoice] = useState(ROLE_CHOICE_INHERIT);
 
   const atMax = instances.length >= MAX_AGENT_INSTANCES;
+  const usageNotice = useAntigravityUsageNotice();
   // Issue #3514: the same per-worktree write queue AgentInstancesPane uses.
   const writeRoster = useAgentInstancesRoster(worktreeId, onInstancesChange);
   const createInstance = useAgentInstanceCreate(worktreeId, onInstancesChange);
@@ -422,6 +428,7 @@ export const AgentAddMenu = memo(function AgentAddMenu({
               })}
             </select>
           </label>
+          {usageNotice.shouldShow(toolId) && <AntigravityUsageNotice onDismiss={usageNotice.dismiss} />}
           {installed === null && (
             <p data-testid="agent-add-installed-unknown" className="text-xs text-muted-foreground">
               {t('agentAdd.installedUnknown')}
