@@ -168,3 +168,22 @@ describe('Issue #4436: main follows the selection', () => {
     expect(stderr.join('')).not.toContain(TOOL_POLICY_DENIED);
   });
 });
+
+describe('Issue #4436 D1: one default in the help and the guide', () => {
+  it('4436 D1: --help states the default --tools without a declaration (antigravity left out), not "all"', async () => {
+    const { USAGE } = await import('@/lib/agent-health/cli-args');
+    const toolsLine = USAGE.split('\n').find((line) => line.trimStart().startsWith('--tools'));
+    expect(toolsLine).toBeDefined();
+    expect(toolsLine).not.toContain('(default: all)');
+    expect(toolsLine).toContain('antigravity');
+    expect(toolsLine).toContain(USAGE_DECLARATION_ENV);
+  });
+
+  it('4436 D1: the guide no longer says the default run checks 6 tools', () => {
+    const guide = fs.readFileSync(path.resolve(__dirname, '../../../../docs/user-guide/agent-health.md'), 'utf8');
+    const example = guide.split('\n').find((line) => line.startsWith('npx tsx scripts/agent-health/run.ts ') && line.includes('#') && !line.includes('--'));
+    expect(example).toBeDefined();
+    expect(example).not.toMatch(/# 6 ツール/);
+    expect(example).toContain('antigravity');
+  });
+});

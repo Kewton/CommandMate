@@ -49,7 +49,8 @@ export type ParseResult =
 export const USAGE = [
   'Usage: npx tsx scripts/agent-health/run.ts [options]',
   '',
-  `  --tools <list>            ${AGENT_HEALTH_TOOLS.join(',')} (default: all)`,
+  // Issue #4436: the default follows the tool policy (scripts/agent-health/tool-policy-selection.ts).
+  `  --tools <list>            ${AGENT_HEALTH_TOOLS.join(',')} (default: all but antigravity; all with CM_ANTIGRAVITY_USAGE=api-key|enterprise. antigravity named without it is an argument error)`,
   `  --only <list>             ${AGENT_HEALTH_CHECK_IDS.join(',')} (default: all; version always runs)`,
   '  --out <file>              report path (default: ~/.commandmate/agent-health/reports/<JST date>.json)',
   `  --timeout-per-tool <sec>  per-tool budget (default: ${DEFAULT_TIMEOUT_PER_TOOL_SEC})`,

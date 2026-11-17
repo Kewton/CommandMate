@@ -68,6 +68,19 @@ for (const key of AGENT_CORRELATION_ENV_KEYS) {
   delete process.env[key];
 }
 
+// Issue #4436: the suite runs as a server that declared an API-key plan for
+// antigravity (`CM_ANTIGRAVITY_USAGE=api-key`).
+//
+// Without a declaration (`personal`, the production default) the tool policy
+// refuses antigravity's unattended runs and Auto-Yes answering, and the suites
+// written before #4436 drive antigravity's Auto-Yes (poller, PermissionRequest
+// hook, ledger) as a server where that is allowed. Pinned here rather than per
+// file for CODEX_HOME's reason below: the next antigravity test inherits it.
+// Always this value, never the shell's, so a developer's own declaration cannot
+// change a verdict. The refusal itself is pinned by the `*4436*` files, which
+// set or delete the variable in their own `beforeEach` (this runs before them).
+process.env.CM_ANTIGRAVITY_USAGE = 'api-key';
+
 // Issue #1760: keep agent config generation out of the developer's home.
 //
 // `CodexTool.startSession` writes codex's hooks file, and codex reads exactly

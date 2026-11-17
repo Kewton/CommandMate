@@ -95,3 +95,49 @@ describe('Issue #4436: auto-yes --enable refused by the tool policy', () => {
     expect(stderrLines()[0]).toBe('Auto-yes enabled for wt1 (claude).');
   });
 });
+
+describe('Issue #4436 I7a: the refusal is the first stderr line with --token too', () => {
+  const TOKEN_WARNING_HEAD = 'Warning: --token flag exposes token';
+
+  it('4436 I7a: --enable --agent antigravity --token <x> refused (409) → the reason first, exit 33, the token warning after it', async () => {
+    mockFetchResponse(DENIAL, 409);
+    await run('wt1', '--enable', '--agent', 'antigravity', '--token', 'secret-4436');
+
+    expect(mockExit).toHaveBeenCalledTimes(1);
+    expect(mockExit).toHaveBeenCalledWith(ToolPolicyExitCode.DENIED);
+    const lines = stderrLines();
+    expect(lines[0]).toContain(TOOL_POLICY_DENIED_MESSAGE);
+    expect(lines[0]).toContain(TOOL_POLICY_DENIED);
+    const warningAt = lines.findIndex((line) => line.startsWith(TOKEN_WARNING_HEAD));
+    expect(warningAt).toBeGreaterThan(0);
+    expect(lines.join('\n')).not.toContain('secret-4436');
+  });
+
+  it('4436 I7a (control): --token on a successful enable keeps the warning before the enabled line', async () => {
+    mockFetchResponse({ enabled: true, cliToolId: 'claude', instanceId: 'claude' }, 200);
+    await run('wt1', '--enable', '--agent', 'claude', '--token', 'secret-4436');
+
+    expect(mockExit).not.toHaveBeenCalled();
+    const lines = stderrLines();
+    expect(lines[0].startsWith(TOKEN_WARNING_HEAD)).toBe(true);
+    expect(lines).toContain('Auto-yes enabled for wt1 (claude).');
+    expect(lines.indexOf('Auto-yes enabled for wt1 (claude).')).toBeGreaterThan(0);
+  });
+
+  it('4436 I7a (control): --token on another failure keeps the warning first and its exit code', async () => {
+    mockFetchResponse({ error: 'boom' }, 500);
+    await run('wt1', '--enable', '--token', 'secret-4436');
+
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.UNEXPECTED_ERROR);
+    expect(stderrLines()[0].startsWith(TOKEN_WARNING_HEAD)).toBe(true);
+  });
+
+  it('4436 I7a (control): --token with an invalid duration keeps the warning before the error and exit 2', async () => {
+    await run('wt1', '--enable', '--duration', '0h', '--token', 'secret-4436');
+
+    expect(mockExit).toHaveBeenCalledWith(ExitCode.CONFIG_ERROR);
+    const lines = stderrLines();
+    expect(lines[0].startsWith(TOKEN_WARNING_HEAD)).toBe(true);
+    expect(lines.some((line) => line.startsWith('Error: Invalid duration.'))).toBe(true);
+  });
+});

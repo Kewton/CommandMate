@@ -233,28 +233,33 @@ function recordScheduleToolPolicyDenial(
 /**
  * Run one tick of a schedule, unless the tool policy refuses it (Issue #4436).
  *
- * The decision is made on `state.entry` at tick time, so a CLI Tool edit picked
- * up by a later sync is judged as it now reads, and with the usage declaration of
- * this process (`CM_ANTIGRAVITY_USAGE`, set before the server starts). A refused
- * tick runs nothing — no role resolution, no child, no `isExecuting` — and is
- * recorded by {@link recordScheduleToolPolicyDenial}. An allowed tick is exactly
- * the `executeSchedule(state)` it always was, called synchronously.
+ * The decision is made on the entry as it reads at tick time, so a CLI Tool edit
+ * picked up by a later sync is judged on its own tick, and with the usage
+ * declaration of this process (`CM_ANTIGRAVITY_USAGE`, set before the server
+ * starts). A refused tick runs nothing — no role resolution, no child, no
+ * `isExecuting` — and is recorded by {@link recordScheduleToolPolicyDenial}.
+ *
+ * I1a: the entry judged is the entry run. It is copied here and handed to
+ * `executeSchedule`, which never reads `state.entry` again; a sync replacing
+ * `state.entry` while the run awaits its role cannot swap in a tool this
+ * judgement did not see.
  *
  * @param state - The schedule state the cron callback holds
  */
 export function runScheduledExecution(state: ScheduleState): Promise<void> {
+  const entry = { ...state.entry };
   const decision = decideToolPolicy({
-    tool: state.entry.cliToolId as CLIToolType,
+    tool: entry.cliToolId as CLIToolType,
     operation: 'schedule',
     origin: 'schedule',
     declaration: readUsageDeclaration(),
   });
-  if (decision.allowed) return executeSchedule(state);
+  if (decision.allowed) return executeSchedule(state, entry);
 
   try {
     const firstOfStreak = recordScheduleToolPolicyDenial(getLazyDbInstance(), state, decision);
     const fields = {
-      name: state.entry.name,
+      name: entry.name,
       scheduleId: state.scheduleId,
       tool: decision.tool,
       code: decision.code,
@@ -265,7 +270,7 @@ export function runScheduledExecution(state: ScheduleState): Promise<void> {
     else logger.debug('execution:tool-policy-denied-again', fields);
   } catch (error) {
     logger.error('execution:tool-policy-record-failed', {
-      name: state.entry.name,
+      name: entry.name,
       error: error instanceof Error ? error.message : String(error),
     });
   }

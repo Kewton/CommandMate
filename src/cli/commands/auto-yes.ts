@@ -211,6 +211,13 @@ export function createAutoYesCommand(): Command {
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: AutoYesOptions) => {
+      // Issue #4436 (I7a): the client's warnings (`--token`) are held so that a
+      // tool-policy refusal is still the first stderr line; every other outcome
+      // prints them first, as before.
+      const heldWarnings: string[] = [];
+      const printHeldWarnings = (): void => {
+        for (const line of heldWarnings.splice(0)) console.error(line);
+      };
       try {
         // [SEC4-04] Validate worktree ID
         if (!isValidWorktreeId(worktreeId)) {
@@ -253,7 +260,7 @@ export function createAutoYesCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        const client = new ApiClient({ token: options.token });
+        const client = new ApiClient({ token: options.token, onWarning: (line) => heldWarnings.push(line) });
 
         const body: Record<string, unknown> = {
           enabled: !!options.enable,
@@ -264,6 +271,7 @@ export function createAutoYesCommand(): Command {
           const durationMs = parseDurationToMs(options.duration ?? DEFAULT_DURATION_FLAG);
 
           if (durationMs === null) {
+            printHeldWarnings();
             console.error(`Error: Invalid duration. Must be ${AUTO_YES_DURATION_FLAG_RANGE} (e.g. 5h).`);
             process.exit(ExitCode.CONFIG_ERROR);
           }
@@ -301,6 +309,7 @@ export function createAutoYesCommand(): Command {
           body,
         );
 
+        printHeldWarnings();
         if (options.enable) {
           reportEnabled(worktreeId, result, options.answerMode !== undefined);
         } else {
@@ -311,8 +320,10 @@ export function createAutoYesCommand(): Command {
         const denial = describeToolPolicyDenial(error);
         if (denial !== null) {
           for (const line of denial) console.error(line);
+          printHeldWarnings();
           process.exit(ToolPolicyExitCode.DENIED);
         } else {
+          printHeldWarnings();
           handleCommandError(error);
         }
       }

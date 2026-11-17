@@ -145,3 +145,23 @@ describe('Issue #4436: a fired timer goes through the tool policy (send from ori
     expect(mockUpdateTimerStatus).not.toHaveBeenCalled();
   });
 });
+
+describe('Issue #4436 I1a: a fired timer sends with the tool it was judged for', () => {
+  it('4436 I1a: a claude timer whose row reads antigravity after the isRunning await is sent to claude only (no agy)', async () => {
+    mockGetTimerById
+      .mockReturnValueOnce(pendingTimer('claude'))
+      // The re-read after the await (#3707): the row now names antigravity.
+      .mockReturnValue(pendingTimer('antigravity'));
+    scheduleTimer('timer-4436', 'wt-4436', 0);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(mockGetTool.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['claude']);
+    expect(mockSendUserMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendUserMessage.mock.calls[0][1]).toMatchObject({ cliToolId: 'claude', instanceId: 'claude' });
+  });
+
+  it('4436 I1a (control): an antigravity timer is still refused when its row is unchanged', async () => {
+    await fire('antigravity');
+    expect(mockSendUserMessage).not.toHaveBeenCalled();
+  });
+});

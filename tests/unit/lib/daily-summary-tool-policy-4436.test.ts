@@ -153,3 +153,23 @@ describe('Issue #4436: POST /api/daily-summary answers 409 for a refused tool', 
     expect(mockExecuteClaudeCommand).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Issue #4436 I1a: the daily summary runs the tool it judged', () => {
+  it('4436 I1a: params.tool switched to antigravity after the judgement (during collection) still runs claude, never agy', async () => {
+    const params: { date: string; tool: string } = { date: DATE, tool: 'claude' };
+    const pending = generateDailySummary(db, params as Parameters<typeof generateDailySummary>[1]);
+    // The generator is past its judgement and into its first await.
+    params.tool = 'antigravity';
+    await expect(pending).resolves.toMatchObject({ generatedByTool: 'claude' });
+    expect(mockExecuteClaudeCommand).toHaveBeenCalledTimes(1);
+    expect(mockExecuteClaudeCommand.mock.calls[0][2]).toBe('claude');
+  });
+
+  it('4436 I1a (control): with CM_ANTIGRAVITY_USAGE=api-key antigravity runs as before', async () => {
+    declare('api-key');
+    await expect(generateDailySummary(db, { date: DATE, tool: 'antigravity' })).resolves.toMatchObject({
+      generatedByTool: 'antigravity',
+    });
+    expect(mockExecuteClaudeCommand.mock.calls[0][2]).toBe('antigravity');
+  });
+});
