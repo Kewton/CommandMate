@@ -76,7 +76,13 @@ import {
   type RegisteredRelay,
 } from './relays';
 import { postMessage, registerRelayForMessage } from './message-dispatch';
-import { ANTIGRAVITY_GUARD_HELP, isToolPolicyDenied, reportToolPolicyDenial } from '../utils/tool-policy-failure';
+import {
+  ANTIGRAVITY_GUARD_HELP,
+  flushClientWarnings,
+  holdClientWarnings,
+  isToolPolicyDenied,
+  reportToolPolicyDenial,
+} from '../utils/tool-policy-failure';
 import { installSendOrigin } from '../utils/send-origin';
 
 /** Default `--timeout`, in seconds. Matches the GUI's delegation brief. */
@@ -557,8 +563,10 @@ Do not ask again: the answer is the same until the server declares its usage.
       // Issue #4437: the target a refusal's --json names, once it is resolved.
       let refusedTarget: { instanceId?: string; cliToolId?: string } = {};
       try {
-        // Issue #4437: this command's requests say who is sending (`send-origin.ts`).
+        // Issue #4437: this command's requests say who is sending (`send-origin.ts`), and
+        // the client's warnings wait until a tool-policy refusal could have been said (I7d).
         installSendOrigin();
+        holdClientWarnings();
         validateAskArgs(worktreeId, message, options);
 
         const timeout = parseTimeout(options.timeout);
@@ -643,6 +651,8 @@ Do not ask again: the answer is the same until the server declares its usage.
           promptWaitingFallback: `${worktreeId} is waiting on a prompt; the message was not sent.`,
           target: commandTarget,
         });
+        // I7d: past the last request a tool-policy refusal can answer.
+        flushClientWarnings();
 
         // Issue #2377: the whole point of `--async`. Nothing is waited on, so
         // the caller's own turn ends here and the answer arrives later, in their
@@ -760,6 +770,7 @@ Do not ask again: the answer is the same until the server declares its usage.
           reportToolPolicyDenial(error, { worktreeId, json: options.json, target: refusedTarget });
           return;
         }
+        flushClientWarnings();
         handleCommandError(error);
       }
     });

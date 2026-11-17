@@ -173,23 +173,19 @@ async function runRespond(argv: string[]): Promise<void> {
 }
 
 const stderrLines = (): string[] => mockConsoleError.mock.calls.map((c) => String(c[0]));
-const firstErrorLine = (): string | undefined => stderrLines().find((l) => l.startsWith('Error'));
 const stdoutJson = (): Record<string, unknown> => JSON.parse(String(mockConsoleLog.mock.calls.at(-1)?.[0]));
 const to = (calls: ReturnType<typeof mockRoutes>, suffix: string) =>
   calls.filter((c) => c.method === 'POST' && new URL(c.url).pathname.endsWith(suffix));
 
-/** The checks every refusal shares (I7, I8). */
+/** The checks every refusal shares (I7, I7d, I8): stderr's very first line is the reason. */
 function expectRefusal(code: 'TOOL_POLICY_DENIED' | 'RELAY_TOOL_POLICY_DENIED'): void {
   const lines = stderrLines();
-  const at = lines.findIndex((l) => l.startsWith(`Error [${code}]: `));
-  expect(at).toBeGreaterThanOrEqual(0);
-  // The reason is the first error line, and nothing of the generic handling precedes it.
-  expect(firstErrorLine()).toBe(lines[at]);
-  expect(lines[at + 1]).toContain(ANTIGRAVITY_TERMS_URL);
-  expect(lines[at + 1]).toContain(ANTIGRAVITY_FAQ_URL);
+  expect(lines[0]).toMatch(new RegExp(`^Error \\[${code}\\]: `));
+  expect(lines[1]).toContain(ANTIGRAVITY_TERMS_URL);
+  expect(lines[1]).toContain(ANTIGRAVITY_FAQ_URL);
   expect(lines.join('\n')).toContain(UNLOCK);
   expect(lines.join('\n')).toContain('sent: false');
-  expect(lines.join('\n')).not.toMatch(/Unexpected HTTP status|safe to send it again|Message sent\./);
+  expect(lines.join('\n')).not.toMatch(/Unexpected HTTP status|safe to send it again|Message sent\.|Task created/);
 }
 
 describe('send (Issue #4437)', () => {
@@ -248,16 +244,61 @@ describe('send (Issue #4437)', () => {
     expect(stderrLines()).toContain('Message sent.');
   });
 
-  it('I9 — with --contract, the task is closed as failed and the refusal is still exit 33', async () => {
+  it('I7c — with --contract, the server is asked first and no task is created (exit 33)', async () => {
     const calls = mockRoutes([
+      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 200, data: { allowed: false, refusal: denied().data } } },
       { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
       { match: '/api/worktrees/wt-g/send', response: denied() },
-      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
     ]);
     const code = await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml', '--instance', 'antigravity']));
     expect(code).toBe(33);
-    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ status: 'failed' });
+    expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    const ask = calls.find((c) => c.url.includes('/tool-policy'));
+    expect(Object.fromEntries(new URL(ask!.url).searchParams)).toEqual({
+      operation: 'send',
+      origin: 'unknown',
+      originEvidence: 'no-tty',
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+    });
     expectRefusal('TOOL_POLICY_DENIED');
+  });
+
+  it('I7c — --auto-yes --reply-to: the relay is asked about with the send, before the grant', async () => {
+    const calls = mockRoutes([
+      { match: '/api/worktrees/wt-c/tool-policy', method: 'GET', response: { status: 200, data: { allowed: false, refusal: RELAY_DENIED.data } } },
+    ]);
+    const code = await runUntilExit(() => runSend(['wt-c', 'x', '--instance', 'codex', '--auto-yes', '--reply-to', 'wt-g@antigravity']));
+    expect(code).toBe(33);
+    expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    const ask = calls.find((c) => c.url.includes('/tool-policy'));
+    expect(new URL(ask!.url).searchParams.get('replyToInstanceId')).toBe('antigravity');
+    expectRefusal('RELAY_TOOL_POLICY_DENIED');
+  });
+
+  it('I7c control — a server without the check (404) goes on as before', async () => {
+    const calls = mockRoutes([
+      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 404, data: { error: 'no' } } },
+      { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
+      { match: '/api/worktrees/wt-g/send', response: { status: 201, data: { id: 'm', role: 'user', content: 'goal', sendOutcome: 'sent' } } },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+    ]);
+    const code = await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml', '--instance', 'antigravity']));
+    expect(code).toBeUndefined();
+    expect(to(calls, '/tasks')).toHaveLength(1);
+    expect(to(calls, '/send')).toHaveLength(1);
+  });
+
+  it('I7c control — a never-restricted tool with nothing to write first is not asked', async () => {
+    const calls = mockRoutes([
+      { match: '/api/worktrees/wt-c/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
+      { match: '/api/worktrees/wt-c/send', response: { status: 201, data: { id: 'm', role: 'user', content: 'goal', sendOutcome: 'sent' } } },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+    ]);
+    const code = await runUntilExit(() => runSend(['wt-c', '--contract', '.commandmate/tasks/t.yaml', '--instance', 'codex']));
+    expect(code).toBeUndefined();
+    expect(to(calls, '/tasks')).toHaveLength(1);
+    expect(calls.some((c) => c.url.includes('/tool-policy'))).toBe(false);
   });
 
   it('send --reply-to — the relay refused (RELAY_TOOL_POLICY_DENIED) is exit 33 and nothing is sent (F3)', async () => {
@@ -342,7 +383,7 @@ describe('ask (Issue #4437)', () => {
         unlock: UNLOCK,
       },
     });
-    expect(firstErrorLine()).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
+    expect(stderrLines()[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
   });
 
   it('--async — the relay refused is exit 33, and --json names the refused end', async () => {
@@ -422,5 +463,55 @@ describe('respond (Issue #4437)', () => {
   it('negative control — another strict 409 stays exit 40', async () => {
     mockRoutes([{ match: '/api/worktrees/wt-g/prompt-response/strict', response: { status: 409, data: { error: 'busy' } } }]);
     expect(await runUntilExit(() => runRespond(STRICT))).toBe(40);
+  });
+});
+
+const TOKEN_WARNING = 'Warning: --token flag exposes token in process list and shell history. Use CM_AUTH_TOKEN environment variable instead.';
+
+describe('I7d: the reason is stderr\'s first line in every combination (Issue #4437)', () => {
+  const STRICT_ARGS = ['wt-g', 'Yes, I trust this folder', '--instance', 'antigravity', '--expect-screen', 'antigravity-trust', '--observation', 'tok-1'];
+  const CASES: Array<[string, Route[], string[], 'TOOL_POLICY_DENIED' | 'RELAY_TOOL_POLICY_DENIED']> = [
+    ['send', [{ match: '/api/worktrees/wt-g/send', response: denied() }], ['send', 'wt-g', 'x', '--instance', 'antigravity'], 'TOOL_POLICY_DENIED'],
+    ['send --reply-to', [{ match: '/api/relays', response: RELAY_DENIED }], ['send', 'wt-g', 'x', '--instance', 'antigravity', '--reply-to', 'wt-a@claude'], 'RELAY_TOOL_POLICY_DENIED'],
+    ['ask', [{ match: '/api/worktrees/wt-g/send', response: denied() }], ['ask', 'wt-g', 'hi', '--instance', 'antigravity'], 'TOOL_POLICY_DENIED'],
+    ['ask --json', [{ match: '/api/worktrees/wt-g/send', response: denied() }], ['ask', 'wt-g', 'hi', '--instance', 'antigravity', '--json'], 'TOOL_POLICY_DENIED'],
+    ['ask --async', [{ match: '/api/relays', response: RELAY_DENIED }], ['ask', 'wt-g', 'hi', '--instance', 'antigravity', '--async', '--reply-to', 'wt-a@claude'], 'RELAY_TOOL_POLICY_DENIED'],
+    ['respond', [{ match: '/api/worktrees/wt-g/prompt-response', response: denied('respond') }], ['respond', 'wt-g', '1', '--instance', 'antigravity'], 'TOOL_POLICY_DENIED'],
+    ['strict', [{ match: '/api/worktrees/wt-g/prompt-response/strict', response: denied('respond', 'unknown', { strictRespond: 1 }) }], ['respond', ...STRICT_ARGS], 'TOOL_POLICY_DENIED'],
+    ['strict --json', [{ match: '/api/worktrees/wt-g/prompt-response/strict', response: denied('respond', 'unknown', { strictRespond: 1 }) }], ['respond', ...STRICT_ARGS, '--json'], 'TOOL_POLICY_DENIED'],
+  ];
+
+  async function run(argv: string[]): Promise<number | undefined> {
+    const [command, ...rest] = argv;
+    if (command === 'send') return runUntilExit(() => runSend(rest));
+    if (command === 'ask') return runUntilExit(() => runAsk(rest));
+    return runUntilExit(() => runRespond(rest));
+  }
+
+  describe.each([['without --token', []], ['with --token', ['--token', 'secret-token']]] as const)('%s', (_label, token) => {
+    it.each(CASES)('%s: line 1 is the reason, exit 33', async (_name, routes, argv, code) => {
+      mockRoutes(routes);
+      expect(await run([...argv, ...token])).toBe(33);
+      expectRefusal(code);
+      // The client's warning is not lost: it comes after the reason.
+      if (token.length > 0) expect(stderrLines().slice(1)).toContain(TOKEN_WARNING);
+    });
+  });
+
+  it('send --contract: line 1 is the reason (the task is never created, so nothing is said of it)', async () => {
+    mockRoutes([
+      { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
+      { match: '/api/worktrees/wt-g/send', response: denied() },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 200, data: { allowed: false, refusal: denied().data } } },
+    ]);
+    expect(await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml', '--instance', 'antigravity', '--token', 'secret-token']))).toBe(33);
+    expectRefusal('TOOL_POLICY_DENIED');
+  });
+
+  it('negative control — a send that is not refused still prints the --token warning first, and exits as before', async () => {
+    mockRoutes([{ match: '/api/worktrees/wt-c/send', response: { status: 500, data: { error: 'boom' } } }]);
+    expect(await runUntilExit(() => runSend(['wt-c', 'x', '--instance', 'codex', '--token', 'secret-token']))).toBe(99);
+    expect(stderrLines()[0]).toBe(TOKEN_WARNING);
   });
 });

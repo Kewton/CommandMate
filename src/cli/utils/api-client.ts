@@ -15,7 +15,7 @@ import { loadClientEnv, resolveServerEndpoint } from './server-url';
 import { ApiError, handleApiError } from './api-client-errors';
 import type { ApiErrorPayload } from './api-client-errors';
 import { DeadlineExceededError } from './api-client-deadline';
-import { ToolPolicyDeniedError, isToolPolicyRoute, toolPolicyDenialFromResponse } from './tool-policy-failure';
+import { ToolPolicyDeniedError, clientWarning, isToolPolicyRoute, toolPolicyDenialFromResponse } from './tool-policy-failure';
 
 export {
   ApiError,
@@ -131,10 +131,12 @@ export class ApiClient {
 
   /**
    * @param options.onWarning - Issue #4436: where the construction warnings
-   *   (`--token` exposure, a token over plain HTTP) go. Default: stderr, at once.
+   *   (`--token` exposure, a token over plain HTTP) go. Default: stderr, at once —
+   *   or, Issue #4437, held while `send` / `ask` / `respond` hold them
+   *   (`clientWarning`), so a tool-policy refusal is the first stderr line.
    */
   constructor(options?: { baseUrl?: string; token?: string; onWarning?: (line: string) => void }) {
-    const warn = options?.onWarning ?? ((line: string) => console.error(line));
+    const warn = options?.onWarning ?? clientWarning;
     // Issue #1743: resolve through loadClientEnv() rather than `process.env.CM_PORT || '3000'`.
     // Reading process.env alone ignored ~/.commandmate/.env, so with two servers running,
     // `status` reported the .env port while every ApiClient-based subcommand (ls / send / wait

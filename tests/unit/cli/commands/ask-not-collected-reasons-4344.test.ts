@@ -22,6 +22,10 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { restoreFetch } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
 import { frame, mockServer, start, type Route } from './command-deadline-server';
+import { PINNED_ORIGIN, pinSendOriginEnv } from './send-origin-env-4437';
+
+// Issue #4437 (I10): a body that may reach antigravity says who sent it; the caller is fixed.
+pinSendOriginEnv();
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -81,7 +85,7 @@ describe('P2 1: a tool whose reply the old ask read (Issue #4344 PR3 review)', (
     await runAsk(['wt1', 'hi', '--instance', 'antigravity', '--json']);
 
     expect(firstExit()).toBe(ExitCode.SUCCESS);
-    expect(sendBodies()).toEqual([{ content: 'hi', cliToolId: 'antigravity', instanceId: 'antigravity' }]);
+    expect(sendBodies()).toEqual([{ content: 'hi', cliToolId: 'antigravity', instanceId: 'antigravity', ...PINNED_ORIGIN }]);
     expect(captures()).toBe(0);
     expect(payload()).toEqual({
       worktreeId: 'wt1',

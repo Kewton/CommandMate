@@ -40,6 +40,10 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { restoreFetch } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
 import { installAskLedger } from './ask-ledger-fake-4344';
+import { PINNED_ORIGIN, pinSendOriginEnv } from './send-origin-env-4437';
+
+// Issue #4437 (I10): a body that may reach antigravity says who sent it; the caller is fixed.
+pinSendOriginEnv();
 
 const store = vi.hoisted(() => ({
   /** The worktree's own CLI tool — what an instance-less request falls to. */
@@ -353,7 +357,7 @@ describe('ask: the targeting that Issue #2479 leaves alone', () => {
     // Expected value changed by Issue #4344 (design §0.2, PR3): with no tool
     // resolved the send names an ask id and the server decides by the tool it
     // resolves (claude here: attributed).
-    expect(requestsTo('/send').map((r) => r.body)).toEqual([{ content: 'hello', ask: ASK_FIELD }]);
+    expect(requestsTo('/send').map((r) => r.body)).toEqual([{ content: 'hello', ask: ASK_FIELD, ...PINNED_ORIGIN }]);
     const polls = requestsTo('/current-output');
     expect(polls.length).toBeGreaterThan(0);
     expect(polls.every((r) => !r.params.has('instance'))).toBe(true);

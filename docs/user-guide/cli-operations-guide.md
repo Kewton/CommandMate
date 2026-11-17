@@ -336,7 +336,9 @@ CLI は送り手の種類を次の順に読み、最初に当たったものを�
 
 読むのは環境と tmux のセッション名だけで、ファイル（資格情報）は読みません。`origin` を付けるのは、断られうる宛先への要求（antigravity・CLI の知らないツール・宛先を指定しない要求）だけです。ほかのツールを指定した要求の本文は今までと同じです。
 
-断られたときの stderr の 1 行目は `Error [TOOL_POLICY_DENIED]: <理由>`（relay は `Error [RELAY_TOOL_POLICY_DENIED]: …`）、2 行目は規約と FAQ のリンク、続いて解除の方法と、何も打っていないこと（`sent: false`）です。`ask --json` と厳格モードの `respond --json` は、stdout に `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }`（relay は `refusal.endpoint` も）を 1 つ出します。exit 33 は送り直しても同じ結果です。再送・再指示はせず、人に申告の要否を伺います（[exit code ごとの対処](../orchestrate/exit-codes.md)）。
+送る前に書き込む `send`（`--register --role` の名簿とロール、`--contract` のタスク、`--auto-yes` の有効化）は、書き込む前に `GET /api/worktrees/<id>/tool-policy` でサーバーに同じ判定を尋ね（何も書き込まない）、断られるならそこで exit 33 にします。断られた送信は、名簿・ロールの設定・タスク・Auto-Yes のどれも残しません。
+
+断られたときの stderr の 1 行目は `Error [TOOL_POLICY_DENIED]: <理由>`（relay は `Error [RELAY_TOOL_POLICY_DENIED]: …`）、2 行目は規約と FAQ のリンク、続いて解除の方法と、何も打っていないこと（`sent: false`）です。`--token` の警告などはその後に出ます。`ask --json` と厳格モードの `respond --json` は、stdout に `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }`（relay は `refusal.endpoint` も）を 1 つ出します。exit 33 は送り直しても同じ結果です。再送・再指示はせず、人に申告の要否を伺います（[exit code ごとの対処](../orchestrate/exit-codes.md)）。
 
 ### プロンプト待ちのセッションへは送信できません（Issue #1708）
 

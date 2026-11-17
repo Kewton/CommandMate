@@ -7,7 +7,14 @@ import { Command } from 'commander';
 import { ExitCode, RoleExitCode } from '../types';
 import type { SendOptions } from '../types';
 import type { AutoYesContractPolicy, AutoYesSetResult, CurrentOutputResponse, TaskCreateResponse, TaskView } from '../types/api-responses';
-import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
+import {
+  ApiClient,
+  ApiError,
+  assertResponseShape,
+  isValidWorktreeId,
+  MAX_STOP_PATTERN_LENGTH,
+  rethrowIfDeadlineExceeded,
+} from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
 import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
@@ -56,8 +63,17 @@ import type {
 } from '../../types/agent-roles';
 import { MEM_EXIT_BY_CODE, type MemErrorCode, type MemWriteResponse } from '../../types/mem';
 import { resolveSessionIdentity, type SessionIdentity } from './whoami';
-import { ANTIGRAVITY_GUARD_HELP, isToolPolicyDenied, reportToolPolicyDenial } from '../utils/tool-policy-failure';
-import { installSendOrigin } from '../utils/send-origin';
+import {
+  ANTIGRAVITY_GUARD_HELP,
+  flushClientWarnings,
+  holdClientWarnings,
+  isToolPolicyDenied,
+  reportToolPolicyDenial,
+  toolPolicyDenialFromResponse,
+} from '../utils/tool-policy-failure';
+import { installSendOrigin, resolveSendOrigin } from '../utils/send-origin';
+import { TOOL_POLICY_TABLE } from '../../lib/tool-policy/policy';
+import type { RelayEndpointArg } from './relays';
 
 // Issue #2464: the message length `send` is verified to deliver whole, stated in
 // `--help`. Issue #4274: the values moved to `src/config/send-verified-limits.ts`
@@ -793,6 +809,48 @@ async function assertNewConversationApplies(
   }
 }
 
+/** Whether `tool` is one the policy table never restricts (a refusal cannot come). */
+function neverRestricted(tool: string | undefined): boolean {
+  return tool !== undefined
+    && Object.prototype.hasOwnProperty.call(TOOL_POLICY_TABLE, tool)
+    && TOOL_POLICY_TABLE[tool as keyof typeof TOOL_POLICY_TABLE] === null;
+}
+
+/**
+ * Issue #4437 (I7c): ask the server whether the send — and the relay `--reply-to`
+ * opens before it — would be refused by the tool policy, BEFORE this send writes
+ * anything (the roster and role of `--register --role`, the task of `--contract`,
+ * the grant of `--auto-yes`). A refusal is thrown as the same `ToolPolicyDeniedError`
+ * the send itself would give (exit 33), with nothing written. Read-only
+ * (`GET /api/worktrees/:id/tool-policy`); a server without it, or one that cannot
+ * resolve the target, says nothing here and the send goes on as before.
+ */
+async function refuseByToolPolicyFirst(
+  client: ApiClient,
+  worktreeId: string,
+  target: { agent: string | undefined; instanceId: string | undefined },
+  relayFrom: RelayEndpointArg | undefined
+): Promise<void> {
+  const { origin, evidence } = resolveSendOrigin();
+  const query = new URLSearchParams({ operation: 'send', origin, originEvidence: evidence });
+  if (target.agent) query.set('cliToolId', target.agent);
+  if (target.instanceId) query.set('instanceId', target.instanceId);
+  if (relayFrom) {
+    query.set('replyToWorktreeId', relayFrom.worktreeId);
+    query.set('replyToInstanceId', relayFrom.instanceId);
+  }
+  let verdict: { allowed?: unknown; refusal?: unknown } | undefined;
+  try {
+    verdict = await client.get<{ allowed?: unknown; refusal?: unknown }>(`/api/worktrees/${worktreeId}/tool-policy?${query}`);
+  } catch (error) {
+    rethrowIfDeadlineExceeded(error);
+    return;
+  }
+  if (verdict?.allowed !== false) return;
+  const denial = toolPolicyDenialFromResponse(409, verdict.refusal, { instanceId: target.instanceId, cliToolId: target.agent });
+  if (denial) throw denial;
+}
+
 /** The `/send` request body. */
 function buildSendBody(
   content: string | undefined,
@@ -973,8 +1031,10 @@ tool policy (antigravity, above; nothing typed, do not send it again).
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
-        // Issue #4437: this command's requests say who is sending (`send-origin.ts`).
+        // Issue #4437: this command's requests say who is sending (`send-origin.ts`), and
+        // the client's warnings wait until a tool-policy refusal could have been said (I7d).
         installSendOrigin();
+        holdClientWarnings();
         const autoYesDurationMs = validateSendArgs(worktreeId, message, options);
         if (bothRoleFlags()) throw usageError('Give --role or --no-role, not both.');
         const expectedRole = expectedRoleOf(options);
@@ -1041,9 +1101,16 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           instance: pinsTarget ? instanceId : options.instance,
           agent: pinsTarget ? agent : options.agent,
         };
-        const relayEndpoints = options.replyTo && (options.contract || options.autoYes)
+        // Issue #4437 (I7c): what this send writes before its message — asked about first.
+        const registersWithRole = roleAssignment !== undefined && Boolean(options.register) && Boolean(instanceId);
+        const writesBeforeSend = registersWithRole || Boolean(options.contract) || (Boolean(options.autoYes) && !deferAutoYes);
+        const relayEndpoints = options.replyTo && (options.contract || options.autoYes || registersWithRole)
           ? await resolveRelayEndpoints(client, { ...relayTarget, replyTo: options.replyTo })
           : undefined;
+        // A tool the table never restricts, with no relay to ask about, cannot be refused.
+        if (writesBeforeSend && (!neverRestricted(agent) || relayEndpoints)) {
+          await refuseByToolPolicyFirst(client, worktreeId, { agent, instanceId }, relayEndpoints?.from);
+        }
 
         if (roleAssignment !== undefined && options.register && instanceId) {
           await registerInstanceWithRole(client, worktreeId, instanceId, options.agent ?? instanceId, roleAssignment);
@@ -1218,6 +1285,7 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           promptWaitingFallback: promptWaitingFallback(worktreeId, commandTarget),
           target: commandTarget,
         });
+        flushClientWarnings();
         console.error('Message sent.');
         if (sent?.replacesDefaultInstructions) {
           console.error(`Note: on ${agent ?? 'this tool'}, the role replaces the tool's default instructions rather than adding to them.`);
@@ -1255,6 +1323,7 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           reportToolPolicyDenial(error, { worktreeId });
           return;
         }
+        flushClientWarnings();
         handleCommandError(error);
       }
     });

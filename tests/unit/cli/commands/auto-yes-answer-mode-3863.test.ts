@@ -82,6 +82,8 @@ describe('[#3863] auto-yes --answer-mode', () => {
 describe('[#3863] send --auto-yes-answer-mode', () => {
   it('arms with the mode before sending', async () => {
     mockFetchSequence([
+      // Issue #4437 (I7c): the tool policy is asked first (no tool named), before the grant.
+      { data: { allowed: true, cliToolId: 'claude' } },
       { data: { enabled: true, expiresAt: 1, answerMode: 'careful' } },
       { data: { id: 1 }, status: 201 },
     ]);

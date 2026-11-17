@@ -176,6 +176,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   The relay is refused (exit 2, nothing sent) when the message you are answering
   arrived over a relay itself (pass --allow-relay-chain), when the chain would
   exceed 3 hops, or when an open relay between the two sessions already exists.
+  A relay with antigravity at either end is refused by the tool policy instead
+  (exit 33, nothing sent) unless the server declares API-key or enterprise use.
   If the target stops on a confirmation you are told, once, and the relay stays
   open -- answer the dialog on that session and the reply still arrives. A relay
   nobody could deliver expires after 24h with a single line of notice.
@@ -216,6 +218,10 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
                         id=context-limit: 'instances <id> kill <instance>' and ask again;
                         id=model-capacity: ask another instance or model
     32  ROLE NOT_SENT   the role condition does not hold; nothing was typed
+    33  TOOL POLICY DENIED  the send or the --async relay to antigravity was refused by
+                        the tool policy (no usage declaration); nothing was typed.
+                        stderr line 1 'Error [TOOL_POLICY_DENIED]: ...'; --json has
+                        "sent": false and "refusal". Do not ask again: tell a person
     2   a relay refusal (reason on stderr), a bad argument, or the target is on a prompt
   The reply is read by the ask's own id (Issue #4344): printed only when the
   server ties it to this ask (attribution.state "matched"; claude and codex).
@@ -750,6 +756,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   31  ROLE CONFLICT    - A role or roster conflict; nothing changed or sent (roles, instances, send).
                          Plain instances add/remove/alias too. remove --kill may have stopped the session
   32  ROLE NOT_SENT    - The role condition does not hold or its start was refused; nothing typed (send, ask)
+  33  TOOL POLICY DENIED - Refused by the tool policy (antigravity without a usage declaration, Issue #4437);
+                         nothing typed, no relay opened (send, ask, respond, --reply-to / --async).
+                         Sending again gives the same answer: do not resend, ask a person
   99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
   124 TIMEOUT          - Wait or verification timeout exceeded
 
@@ -1069,7 +1078,9 @@ same CommandMate server, and you can hand work to them.
   The relay is refused (exit 2, nothing sent) when the message you are
   answering arrived over a relay itself (pass --allow-relay-chain), when the
   chain would exceed 3 hops, or when an open relay between the two sessions
-  already exists. If the target stops on a confirmation you are told, once, and
+  already exists. A relay with antigravity at either end is refused by the
+  tool policy instead (exit 33, nothing sent) unless the server declares
+  API-key or enterprise use. If the target stops on a confirmation you are told, once, and
   the relay stays open -- rule 1 below still applies: report that prompt, do not
   answer it. A relay nobody could deliver expires after 24h.
 

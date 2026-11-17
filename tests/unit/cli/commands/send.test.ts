@@ -5,6 +5,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchResponse, mockFetchSequence, mockFetchError, restoreFetch, keepOffTheRealServer } from '../../../helpers/mock-api';
+import { PINNED_ORIGIN, pinSendOriginEnv } from './send-origin-env-4437';
+
+// Issue #4437 (I10): a body that may reach antigravity says who sent it; the caller is fixed.
+pinSendOriginEnv();
 
 // Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
 keepOffTheRealServer();
@@ -39,7 +43,7 @@ describe('send command action', () => {
       expect.stringContaining('/api/worktrees/wt1/send'),
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ content: 'hello world' }),
+        body: JSON.stringify({ content: 'hello world', ...PINNED_ORIGIN }),
       })
     );
     expect(mockConsoleError).toHaveBeenCalledWith('Message sent.');
@@ -60,8 +64,10 @@ describe('send command action', () => {
   });
 
   it('enables auto-yes before sending when --auto-yes', async () => {
-    // Two API calls: auto-yes then send
+    // Issue #4437 (I7c): three API calls — the tool policy is asked before anything is
+    // written (no tool named, so the server's default may be antigravity), then auto-yes, then send.
     const mockFn = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({ allowed: true, cliToolId: 'claude' }), text: () => Promise.resolve('{"allowed":true,"cliToolId":"claude"}') })
       .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') })
       .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') });
     global.fetch = mockFn;
@@ -70,11 +76,13 @@ describe('send command action', () => {
     const cmd = createSendCommand();
     await cmd.parseAsync(['node', 'send', 'wt1', 'test', '--auto-yes']);
 
-    expect(mockFn).toHaveBeenCalledTimes(2);
-    // First call: auto-yes
-    expect(mockFn.mock.calls[0][0]).toContain('/auto-yes');
-    // Second call: send
-    expect(mockFn.mock.calls[1][0]).toContain('/send');
+    expect(mockFn).toHaveBeenCalledTimes(3);
+    // First call: the tool policy, for the pinned caller
+    expect(mockFn.mock.calls[0][0]).toContain('/api/worktrees/wt1/tool-policy?operation=send&origin=unknown&originEvidence=no-tty');
+    // Second call: auto-yes
+    expect(mockFn.mock.calls[1][0]).toContain('/auto-yes');
+    // Third call: send
+    expect(mockFn.mock.calls[2][0]).toContain('/send');
   });
 
   it('rejects invalid agent with CLI_TOOL_IDS list', async () => {
@@ -176,7 +184,7 @@ describe('send command action', () => {
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/worktrees/wt1/send'),
       expect.objectContaining({
-        body: JSON.stringify({ content: 'test', cliToolId: 'antigravity', model: 'Gemini 3.1 Pro (High)' }),
+        body: JSON.stringify({ content: 'test', cliToolId: 'antigravity', model: 'Gemini 3.1 Pro (High)', ...PINNED_ORIGIN }),
       })
     );
   });
@@ -396,7 +404,7 @@ describe('send --ignore-structured-prompt (Issue #1737)', () => {
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/worktrees/wt1/send'),
       expect.objectContaining({
-        body: JSON.stringify({ content: 'nudge', ignoreStructuredPromptGuard: true }),
+        body: JSON.stringify({ content: 'nudge', ignoreStructuredPromptGuard: true, ...PINNED_ORIGIN }),
       })
     );
   });
@@ -410,7 +418,7 @@ describe('send --ignore-structured-prompt (Issue #1737)', () => {
 
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/worktrees/wt1/send'),
-      expect.objectContaining({ body: JSON.stringify({ content: 'nudge' }) })
+      expect.objectContaining({ body: JSON.stringify({ content: 'nudge', ...PINNED_ORIGIN }) })
     );
   });
 });

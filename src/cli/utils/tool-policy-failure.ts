@@ -55,6 +55,46 @@ export function isToolPolicyRoute(path: string): boolean {
   return isSendFamilyRoute(path) || path === '/api/relays';
 }
 
+// ---------------------------------------------------------------------------
+// I7d: the reason is stderr's first line, whatever else the command would say
+// ---------------------------------------------------------------------------
+
+/** Construction warnings of `ApiClient` held by {@link holdClientWarnings}, or null (printed at once). */
+let heldClientWarnings: string[] | null = null;
+let exitFlushArmed = false;
+
+/**
+ * Where `ApiClient` puts a construction warning (`--token` in the process list, a
+ * token over plain HTTP) when the caller names no `onWarning` of its own: stderr at
+ * once, or held while {@link holdClientWarnings} is on. The same idea as the
+ * `auto-yes` command's held warnings (#4436): a refusal's reason comes first.
+ */
+export function clientWarning(line: string): void {
+  if (heldClientWarnings) heldClientWarnings.push(line);
+  else console.error(line);
+}
+
+/**
+ * Hold construction warnings from here until {@link flushClientWarnings}: `send`,
+ * `ask` and `respond` call it first, so a tool-policy refusal is stderr's first line
+ * and the warnings follow it. Anything left held is printed when the process exits
+ * (an exit from deep inside a command keeps its warning).
+ */
+export function holdClientWarnings(): void {
+  heldClientWarnings = [];
+  if (!exitFlushArmed && typeof process.once === 'function') {
+    exitFlushArmed = true;
+    process.once('exit', () => flushClientWarnings());
+  }
+}
+
+/** Print what was held, and print at once from now on. */
+export function flushClientWarnings(): void {
+  const lines = heldClientWarnings ?? [];
+  heldClientWarnings = null;
+  for (const line of lines) console.error(line);
+}
+
 /** The two refusal codes of the tool policy. */
 export type ToolPolicyDenialCode = typeof TOOL_POLICY_DENIED | typeof RELAY_TOOL_POLICY_DENIED;
 
@@ -237,6 +277,8 @@ export function reportToolPolicyDenial(
   },
 ): void {
   for (const line of formatToolPolicyDenialLines(error)) console.error(line);
+  // I7d: what the client held (the --token warning) after the reason, not before it.
+  flushClientWarnings();
   if (options.json) {
     console.log(JSON.stringify(toolPolicyRefusalJson(error, options.worktreeId, options.target), null, 2));
   }
@@ -254,7 +296,9 @@ relays with antigravity at either end are refused (exit 33). The web UI and
 commands typed in a terminal are not affected. The sender kind is what this CLI
 reads from its own environment and the server cannot verify it: this is a guard
 against accidental use, not a guarantee of compliance with the Google
-Antigravity terms (Section 6 / FAQ). The first stderr line is
+Antigravity terms (Section 6 / FAQ). A send that writes before its message
+(--register --role, --contract, --auto-yes) asks the server first and writes
+nothing when refused. The first stderr line is
 "Error [TOOL_POLICY_DENIED]: ..." (RELAY_TOOL_POLICY_DENIED for a relay); the
 next names the terms and the FAQ, then how to lift it (the server's
 ${'`'}CM_ANTIGRAVITY_USAGE=api-key${'`'} or ${'`'}enterprise${'`'}). Sending again is refused the same way.`;

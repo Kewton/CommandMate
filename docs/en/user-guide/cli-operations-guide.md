@@ -343,7 +343,9 @@ The CLI reads the kind of sender in this order and puts the first match on the b
 
 Only the environment and the tmux session name are read; no file (no credentials). `origin` goes only on requests that may be refused (to antigravity, to a tool this CLI does not know, or naming no target); a request naming any other tool has the body it always had.
 
-When refused, the first stderr line is `Error [TOOL_POLICY_DENIED]: <reason>` (`Error [RELAY_TOOL_POLICY_DENIED]: …` for a relay), the second links the terms and the FAQ, then how to lift it and that nothing was typed (`sent: false`). `ask --json` and the strict `respond --json` print one `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }` on stdout (a relay adds `refusal.endpoint`). Exit 33 gives the same result when sent again: do not resend or re-instruct; ask a person whether a declaration is needed.
+A `send` that writes something before its message (the roster entry and role of `--register --role`, the task of `--contract`, the grant of `--auto-yes`) first asks the server for the same verdict with `GET /api/worktrees/<id>/tool-policy` (which writes nothing) and exits 33 there when refused. A refused send leaves no roster entry, role setting, task or Auto-Yes behind.
+
+When refused, the first stderr line is `Error [TOOL_POLICY_DENIED]: <reason>` (`Error [RELAY_TOOL_POLICY_DENIED]: …` for a relay), the second links the terms and the FAQ, then how to lift it and that nothing was typed (`sent: false`). Warnings such as the `--token` one come after it. `ask --json` and the strict `respond --json` print one `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }` on stdout (a relay adds `refusal.endpoint`). Exit 33 gives the same result when sent again: do not resend or re-instruct; ask a person whether a declaration is needed.
 
 ### Input that overlaps a send (input lock (#3952))
 
