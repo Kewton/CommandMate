@@ -11,6 +11,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { restoreFetch, keepOffTheRealServer } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
 import { MAX_STOP_PATTERN_LENGTH } from '../../../../src/cli/utils/api-client';
+import { PINNED_ORIGIN, pinSendOriginEnv } from './send-origin-env-4437';
+
+// Issue #4437 (I10): a body that may reach antigravity says who sent it; the caller is fixed.
+pinSendOriginEnv();
 
 // Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
 keepOffTheRealServer();
@@ -162,7 +166,7 @@ describe('send --contract', () => {
     expect(create?.body).toEqual({ contractPath: '.commandmate/tasks/t.yaml' });
 
     const send = calls.find((c) => c.url.includes('/send'));
-    expect(send?.body).toEqual({ content: COMPOSED_MESSAGE });
+    expect(send?.body).toEqual({ content: COMPOSED_MESSAGE, ...PINNED_ORIGIN });
 
     // Task creation must precede the send: the row is what the send is recorded against.
     expect(calls.findIndex((c) => c.url.includes('/tasks'))).toBeLessThan(
@@ -256,6 +260,8 @@ describe('send --contract', () => {
 
   it('prints every contract issue and exits 2 without sending', async () => {
     const calls = mockRoutes([
+      // Issue #4437 (I7c): asked before the task is written (no tool named).
+      { match: '/api/worktrees/wt1/tool-policy', method: 'GET', response: { status: 200, data: { allowed: true, cliToolId: 'claude' } } },
       {
         match: '/api/worktrees/wt1/tasks',
         response: {
@@ -278,8 +284,11 @@ describe('send --contract', () => {
     expect(code).toBe(ExitCode.CONFIG_ERROR);
     expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
     // The rejection is the server's, so the request had to be made — but
-    // nothing may follow it.
-    expect(calls.map((c) => c.url).filter((url) => !url.includes('/tasks'))).toEqual([]);
+    // nothing may follow it. Issue #4437 (I7c): the read-only tool-policy check precedes it.
+    expect(calls.map((c) => c.url).filter((url) => !url.includes('/tasks'))).toEqual([
+      expect.stringMatching(/\/api\/worktrees\/wt1\/tool-policy\?operation=send&origin=unknown&originEvidence=no-tty$/),
+    ]);
+    expect(calls.findIndex((c) => c.url.includes('/tool-policy'))).toBeLessThan(calls.findIndex((c) => c.url.includes('/tasks')));
   });
 
   it('records the task as failed when the message could not be delivered', async () => {

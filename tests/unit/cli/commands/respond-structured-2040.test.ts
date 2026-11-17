@@ -22,6 +22,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchSequence, mockFetchError, restoreFetch } from '../../../helpers/mock-api';
+import { PINNED_ORIGIN, pinSendOriginEnv } from './send-origin-env-4437';
+
+// Issue #4437 (I10): a body that may reach antigravity says who sent it; the caller is fixed.
+pinSendOriginEnv();
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -90,7 +94,7 @@ describe('an agent that publishes decision ids', () => {
     expect(respondCall).toBeDefined();
     expect(respondCall?.[1].method).toBe('POST');
     // No id of any kind: the server picks the ONE decision this instance holds.
-    expect(bodyOf(respondCall as [string, { body?: string }])).toEqual({ answer: '3' });
+    expect(bodyOf(respondCall as [string, { body?: string }])).toEqual({ answer: '3', ...PINNED_ORIGIN });
     expect(findCall('/prompt-response')).toBeUndefined();
 
     expect(mockConsoleLog).toHaveBeenCalledWith('Answered approval per_1 with option 3: Reject');
@@ -238,7 +242,7 @@ describe('an agent that publishes no decision id keeps the path it had', () => {
 
     const promptCall = findCall('/prompt-response');
     expect(promptCall).toBeDefined();
-    expect(bodyOf(promptCall as [string, { body?: string }])).toEqual({ answer: '3' });
+    expect(bodyOf(promptCall as [string, { body?: string }])).toEqual({ answer: '3', ...PINNED_ORIGIN });
     expect(findCall('/worktrees/wt1/respond')).toBeUndefined();
     expect(mockConsoleError).toHaveBeenCalledWith('Response sent.');
   });

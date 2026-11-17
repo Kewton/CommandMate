@@ -2766,40 +2766,12 @@ export interface RelayCreateResponse {
 }
 
 /**
- * Issue #4437: `policy` of a tool policy refusal.
- * Mirrors: src/app/api/worktrees/[id]/send/send-tool-policy.ts ToolPolicyDetail.
+ * Issue #4437: the tool policy refusal's types live in `./tool-policy-responses`, so
+ * `utils/tool-policy-failure` (read by `api-client`) can name them without this
+ * module's `lib/session` / `lib/polling` imports entering the client's closure
+ * (`tests/unit/updates/agent-update-not-in-pane-2069.test.ts`). Re-exported here.
  */
-export interface ToolPolicyDetailResponse {
-  tool: string;
-  /** `send` | `ask` | `respond` | `relay`. */
-  operation: string;
-  /** The origin the server read: `terminal` | `session` | `agent` | `schedule` | `unknown` | `relay` | `legacy`. */
-  origin: string;
-  /** `ANTIGRAVITY_CONSUMER_TERMS`. */
-  reason: string;
-  /** `personal` while refused. */
-  declaration: string;
-  links: { terms: string; faq: string };
-  /** The one way past it (the server's usage declaration). */
-  unlock: string;
-  /** Relay creation only: the refused end. */
-  endpoint?: 'from' | 'to';
-}
-
-/**
- * Issue #4437: the 409 of a tool policy refusal — nothing was typed or started.
- * `code` is `TOOL_POLICY_DENIED` (send / ask / respond, strict included, which
- * also carries `strictRespond: 1`) or `RELAY_TOOL_POLICY_DENIED` (`POST /api/relays`,
- * no `sendOutcome`). The send route's body also carries `relayId` / `ask` when it named them.
- * Mirrors: src/app/api/worktrees/[id]/send/send-tool-policy.ts toolPolicyDeniedBody,
- * src/app/api/relays/route.ts POST 409.
- */
-export interface ToolPolicyDeniedResponse {
-  error: string;
-  code: 'TOOL_POLICY_DENIED' | 'RELAY_TOOL_POLICY_DENIED';
-  policy: ToolPolicyDetailResponse;
-  sendOutcome?: 'not_sent';
-}
+export type { ToolPolicyDeniedResponse, ToolPolicyDetailResponse } from './tool-policy-responses';
 
 /** Mirrors: src/app/api/relays/[relayId]/route.ts GET 200 response (Issue #3957). */
 export interface RelayGetResponse {

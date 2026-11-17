@@ -173,6 +173,7 @@ precheck のうち全ファイルを走査するガードのテスト（`tests/u
 | env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定（複数の worktree に同じ項目が出ると `wait-verify.mjs` と `run-log.mjs status` が外部要因の候補と出す）。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |
 | 再指示の後の検証で scope が SKIP（`was not attached to it`）／env-clean が `no baseline snapshot exists for this run` | task に紐づいていない。`verify --task <task id>` で検証し直す（3-4） |
 | 作業証跡ゼロ（exit 21） | captureでcomposer未確定・権限プロンプト・未起動を切り分け（Phase 3-4） |
+| `send` / `ask` / `respond`（厳格モードを含む）・`send --reply-to` / `ask --async` が exit 33（stderr の 1 行目が `Error [TOOL_POLICY_DENIED]` か `Error [RELAY_TOOL_POLICY_DENIED]`） | ツールの利用方針による拒否（`ToolPolicyExitCode.DENIED`。#4437）。申告の無いサーバーで、エージェント・セッション・端末の無い実行から antigravity へ送ろうとした（relay は端点が antigravity）。**何も打っていない・relay も作っていない**（`--register --role` の名簿・ロール、`--contract` のタスク、`--auto-yes` も残らない）。**再指示しない・再送しない**（送り直しても同じ）。人に申告の要否を伺う（[CLI 運用ガイドの「Antigravity への送信の柵」](../user-guide/cli-operations-guide.md#antigravity-への送信の柵issue-4437)） |
 | send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |
 | Command Code の権限の既定が `ask`（launch-worker が exit 45） | 何も送っていない。利用者に `ask` 以外にしてもらって送り直す（docs/orchestrate/command-code.md） |
 | 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |

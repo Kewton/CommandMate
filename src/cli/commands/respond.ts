@@ -27,6 +27,14 @@ import { dialogCaptureCommand, followUpCommand } from '../utils/follow-up-comman
 import { serverReportsPromptAnswerReason } from '../utils/server-capabilities';
 import { isStrictRespond, runStrictRespond } from './respond-strict';
 import { STRICT_RESPOND_KINDS } from '../../lib/prompt-observation/kinds';
+import {
+  ANTIGRAVITY_GUARD_HELP,
+  flushClientWarnings,
+  holdClientWarnings,
+  isToolPolicyDenied,
+  reportToolPolicyDenial,
+} from '../utils/tool-policy-failure';
+import { installSendOrigin } from '../utils/send-origin';
 
 /**
  * Whether this instance's agent can be answered by naming a decision
@@ -533,10 +541,23 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
   mode's permission for an approval.
 
   Exit codes: 0 answered / 40 nothing sent (re-observe first) /
-  41 keys sent, result not confirmed (do NOT send again) / 2 bad arguments`,
+  41 keys sent, result not confirmed (do NOT send again) / 2 bad arguments /
+  33 refused by the tool policy (below), checked before 40 and 41
+
+${ANTIGRAVITY_GUARD_HELP}
+Exit 33 applies to every form of respond (nothing was typed). With the strict
+respond's --json, stdout is {worktreeId, instanceId, cliToolId, "sent": false,
+"refusal": {code, reason, operation, origin, message, links, unlock}}.`,
     )
     .action(async (worktreeId: string, answer: string | undefined, options: RespondOptions) => {
+      // Issue #4437: the target a refusal names, once it is resolved (the strict
+      // respond resolves its own; the refused request names it then).
+      let refusedTarget: { instanceId?: string; cliToolId?: string } = {};
       try {
+        // Issue #4437: this command's requests say who is sending (`send-origin.ts`), and
+        // the client's warnings wait until a tool-policy refusal could have been said (I7d).
+        installSendOrigin();
+        holdClientWarnings();
         // Issue #3756: its own endpoint, and never the unchecked one below.
         if (isStrictRespond(options)) {
           if (!isValidWorktreeId(worktreeId)) {
@@ -545,6 +566,7 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
             return;
           }
           await runStrictRespond(worktreeId, answer, options);
+          flushClientWarnings();
           return;
         }
         if (options.json) {
@@ -562,6 +584,7 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
         // instance is registered under first.
         const commandTarget = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
         const { agent, instanceId } = commandTarget;
+        refusedTarget = { instanceId, cliToolId: agent };
         // Issue #2376: the resolved id. /prompt-response reads instance ids.
         // Issue #3982: every hint below names `commandTarget`, never `options.instance`.
 
@@ -610,6 +633,8 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
           }
         }
 
+        // I7d: past the last request a tool-policy refusal can answer.
+        flushClientWarnings();
         if (result && !result.success) {
           reportFailedResponse(result, worktreeId, answer, useDefault, commandTarget);
         }
@@ -630,6 +655,17 @@ Strict respond (--expect-screen <kind> --observation <token> <label>):
           );
         }
       } catch (error) {
+        // Issue #4437: refused by the tool policy, in any form of respond — before the
+        // strict respond's 40 / 41, which never see it (it is not an ApiError).
+        if (isToolPolicyDenied(error)) {
+          reportToolPolicyDenial(error, {
+            worktreeId,
+            json: options.json === true && isStrictRespond(options),
+            target: refusedTarget,
+          });
+          return;
+        }
+        flushClientWarnings();
         handleCommandError(error);
       }
     });

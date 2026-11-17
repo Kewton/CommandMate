@@ -5,6 +5,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mockFetchResponse, mockFetchError, restoreFetch, keepOffTheRealServer } from '../../../helpers/mock-api';
+import { PINNED_ORIGIN, pinSendOriginEnv } from './send-origin-env-4437';
+
+// Issue #4437 (I10): a body that may reach antigravity says who sent it; the caller is fixed.
+pinSendOriginEnv();
 
 // Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
 keepOffTheRealServer();
@@ -39,7 +43,7 @@ describe('respond command action', () => {
       expect.stringContaining('/api/worktrees/wt1/prompt-response'),
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ answer: 'yes' }),
+        body: JSON.stringify({ answer: 'yes', ...PINNED_ORIGIN }),
       })
     );
     expect(mockConsoleError).toHaveBeenCalledWith('Response sent.');
@@ -183,7 +187,7 @@ describe('respond command semantic resolution (Issue #1681)', () => {
       expect.stringContaining('/api/worktrees/wt1/prompt-response'),
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ useDefault: true }),
+        body: JSON.stringify({ useDefault: true, ...PINNED_ORIGIN }),
       })
     );
     expect(mockConsoleLog).toHaveBeenCalledWith('Selected default option 1: Yes');

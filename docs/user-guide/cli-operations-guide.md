@@ -316,6 +316,30 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 > Claude Code の完了を待つことになります。`--instance` は 5 コマンド全てが受け付けるため、
 > ワークフロー全体を同じフラグで書けます。
 
+### Antigravity への送信の柵（Issue #4437）
+
+**Antigravity への送信の柵（既定）** — 利用形態を申告していないあいだ、antigravity の instance への `send`・`ask`・`respond`（厳格モードを含む）は、CommandMate のセッションの中・Schedule・AI エージェントの中・起点の分からない呼び出し（端末の無い実行など）から送られたものを、何も打たずに断ります（exit 33）。antigravity を端点にする relay（`send --reply-to`・`ask --async`）も作れません（exit 33。relay のほかの拒否の exit 2 とは別）。画面と、端末で人が打つコマンドは今までどおり送れます。
+
+この柵は、Google Antigravity の追加利用規約 6 条と FAQ にうっかり触れないためのものです。送り手の種類は CLI が自分の環境から申告するもので、サーバーは確かめられません。API を直接呼ぶ・環境を変える・古い CLI を使うと、柵を通れてしまいます。**規約を守っていることの保証ではありません。** API キーや企業向けで使う場合は、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE` に `api-key` か `enterprise` を設定してサーバーを再起動すると解けます（CommandMate は資格情報を読まず、申告のまま扱います。CLI を打つ側の環境に設定しても効きません）。規約: https://antigravity.google/terms ／ FAQ: https://antigravity.google/docs/faq （2026-11-16 時点。法的な助言ではありません）
+
+CLI は送り手の種類を次の順に読み、最初に当たったものを本文の `origin` に付けます（記録用の `originEvidence` も。判定はサーバーの表）。上書きの旗はありません（AI が使えば柵が無くなるため）。
+
+| 順 | 読むもの | `origin` |
+|:--:|----------|----------|
+| 1 | 環境 `CM_RUN_ORIGIN=schedule`（ほかの値は `unknown`） | `schedule` |
+| 2 | 環境 `CM_WORKTREE_ID`・`CM_AGENT_WORKTREE_ID`・`CM_INSTANCE_ID`・`CM_AGENT_INSTANCE_ID`・`CM_CLI_TOOL`・`CM_AGENT_TOOL` のどれか | `session` |
+| 3 | `TMUX` があり、セッション名が CommandMate の付けた名前（`mcbd-…`） | `session` |
+| 4 | `TMUX` があるのに名前が読めない | `unknown` |
+| 5 | AI エージェントの印（今は `CLAUDECODE` だけを確認） | `agent` |
+| 6 | 標準入力が端末（TTY）でない（cron・パイプ・多くの AI のシェル） | `unknown` |
+| 7 | それ以外（端末で人が打った。自分の tmux で名前が `mcbd-` でないときも） | `terminal` |
+
+読むのは環境と tmux のセッション名だけで、ファイル（資格情報）は読みません。`origin` を付けるのは、断られうる宛先への要求（antigravity・CLI の知らないツール・宛先を指定しない要求）だけです。ほかのツールを指定した要求の本文は今までと同じです。
+
+送る前に書き込む `send`（`--register --role` の名簿とロール、`--contract` のタスク、`--auto-yes` の有効化）は、書き込む前に `GET /api/worktrees/<id>/tool-policy` でサーバーに同じ判定を尋ね（何も書き込まない）、断られるならそこで exit 33 にします。断られた送信は、名簿・ロールの設定・タスク・Auto-Yes のどれも残しません。
+
+断られたときの stderr の 1 行目は `Error [TOOL_POLICY_DENIED]: <理由>`（relay は `Error [RELAY_TOOL_POLICY_DENIED]: …`）、2 行目は規約と FAQ のリンク、続いて解除の方法と、何も打っていないこと（`sent: false`）です。`--token` の警告などはその後に出ます。`ask --json` と厳格モードの `respond --json` は、stdout に `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }`（relay は `refusal.endpoint` も）を 1 つ出します。exit 33 は送り直しても同じ結果です。再送・再指示はせず、人に申告の要否を伺います（[exit code ごとの対処](../orchestrate/exit-codes.md)）。
+
 ### プロンプト待ちのセッションへは送信できません（Issue #1708）
 
 プロンプトダイアログが開いている間、キー入力は**エージェントに届きません**。ダイアログ自身の
@@ -1165,7 +1189,7 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 
 ### 終了コード
 
-`wait` の終了コードに、`ask` 固有の 11 と 32 が加わります。
+`wait` の終了コードに、`ask` 固有の 11・32・33 が加わります。
 
 | コード | 意味 | 次のアクション |
 |:------:|------|---------------|
@@ -1176,6 +1200,7 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 | 11 | **UPSTREAM_FAULT**: ターンが走らなかった。stderr と `--json` に `id=…`（`ask` は常に `failOnUpstreamFault: true`）。`id=context-limit` は文脈上限で、`instances <id> kill <instance>` で新しいセッションにして送り直す。`id=model-capacity` は別のインスタンス・モデルへ送る（#3936） | 時間を置くか送り先を変えて再送 |
 | 21 | 動いているセッションが無い | `instances <id>` で roster を確認 |
 | 32 | **ROLE NOT_SENT**: ロールの条件を満たさず、本文を入力していない | ロールの設定を見直す |
+| 33 | **TOOL POLICY DENIED**: antigravity への送信・relay（`--async`）を柵が断った。何も打っていない（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。`--json` は `sent: false` と `refusal` | 再送しない。人に申告の要否を伺う |
 | 99 | 予期しないエラー | — |
 | 124 | タイムアウト。送信が期限を過ぎて返った場合は**送信済み**（stderr に出る） | `capture <id> --instance <id> --pane --tail 60` で見る。**再送しない** |
 
@@ -1194,6 +1219,8 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 `ask --async` / `send --reply-to` が作った**待ち（relay）**を表示・取り下げ・保留の解決をします。
 
 > **Antigravity（agy）の注意（#4438）**: 個人向けプランのサインインの agy へ、ほかの AI エージェントから relay（`ask`・`send --reply-to`）で依頼を送らないでください。[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq)が、第三者のソフトウェアやエージェントを通して使うことを制限しています。API キーか Gemini Enterprise で使うときは、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE` に `api-key` か `enterprise` を設定して申告します（未設定は個人向けプランとして扱います）。サーバーは起動時に読むので、変えたらサーバーを再起動します（`commandmate stop` のあと `commandmate start --daemon`）。`commandmate` の CLI を打つ側の環境に設定しても効きません。申告は利用者の自己申告で、CommandMate は資格情報を読んで確かめません。
+
+> **#4437 から**: 申告の無いサーバーでは、antigravity を端点にする relay は作れません（exit 33、stderr の 1 行目は `Error [RELAY_TOOL_POLICY_DENIED]: …`。何も送っていません）。[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)を参照。
 
 ### 使用方法
 
@@ -1283,7 +1310,7 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `base-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。`base-withholds`（Issue #3822）は契約より前の基本の判定で見送ったことを表し、契約の有無によらない（今は `allow-once-unidentified` だけ。契約を見直しても答えは戻らない）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
-| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`prompt-unreported` の本文は提出済みのことがある（`SessionStart` だけ届き http の `UserPromptSubmit` が届かない環境など）ので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる。投げる直前に画面を 1 回読み直し、生成中なら `sent` にする（Issue #4048）。Enter の後に待つ間にセッションが作り直されたときは `not-sent`（`session-replaced`）ではなく `indeterminate`（旧プロセスが受け取った可能性がある。Issue #4048）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる（claude だけ・その本文の送信の記録だけ。claude 以外は warn のログだけで `lastSend` は変えない。Issue #4048）。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、エージェントが終わりペインがシェルに戻っていたため何も打たなかった `agent-not-in-foreground`（Issue #4300。`commandmate instances <worktree-id> kill <instance-id>` でそのインスタンスのセッションを止めてから送り直す）、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`prompt-unreported` の本文は提出済みのことがある（`SessionStart` だけ届き http の `UserPromptSubmit` が届かない環境など）ので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる。投げる直前に画面を 1 回読み直し、生成中なら `sent` にする（Issue #4048）。Enter の後に待つ間にセッションが作り直されたときは `not-sent`（`session-replaced`）ではなく `indeterminate`（旧プロセスが受け取った可能性がある。Issue #4048）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる（claude だけ・その本文の送信の記録だけ。claude 以外は warn のログだけで `lastSend` は変えない。Issue #4048）。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、エージェントが終わりペインがシェルに戻っていたため何も打たなかった `agent-not-in-foreground`（Issue #4300。`commandmate instances <worktree-id> kill <instance-id>` でそのインスタンスのセッションを止めてから送り直す）、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、antigravity への送信をツールの利用方針が断った `tool-policy-denied`（Issue #4437。CLI は exit 33）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
 
 **`lastSend` は「最後に終わった送信」ではありません（Issue #4065）。** 送信が並んだときは、入力ロックを渡された順（世代）で決めます。読む側の要求自身の結末とは限りません（自分の結末は `send` のエラーと送信 API の `sendOutcome` で見ます）。
 - ロックを渡された送信の記録（ロックの後・本文の前に断られた `not-sent` も含む）は、同じインスタンスで後からロックを渡された送信の記録が既にあれば残しません。
@@ -1457,6 +1484,7 @@ server.log（`strict-prompt-answered` / `strict-prompt-response-refused`）と�
 |:------:|------|
 | 0 | 応答成功 |
 | 2 | 引数エラー（`<answer>` と `--default` の同時指定・両方欠落 等）/ 選択肢に無い番号（`answer_out_of_range`）/ 厳格モードでの `--default`・番号なしの画面への番号・`--expect-screen` と `--observation` の片方だけ |
+| 33 | antigravity への回答を柵が断った（通常・厳格モードのどちらも。厳格モードの 40・41 より先に判定）。**何も打っていない**。厳格モードの `--json` は `sent: false` と `refusal`（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ |
 | 40 | 厳格モード: 照合不成立・照合不能。**何も送っていない**（kind・トークン・フォルダ・label の不一致、capture 失敗、古いサーバ 等）。`commandmate prompt` で観測し直す |
 | 41 | 厳格モード: 送信を始めた後の部分送信・結果不確定。**再送してはいけない**。pane を確かめる。ただし 41 でも `reason` が `operation_in_progress` / `operation_id_conflict` のときは何も送っていない（`keysSent` は 0。`delivery` は `indeterminate` と出るが送信はしていない）。結果の取り直しは別の ID で |
 | 99 | プロンプトが既に消えている（`prompt_no_longer_active`）/ yes・no を選択肢に解決できない（`unresolvable_answer`）/ 保持している decision が 0 件（`decision_not_found`）・2 件以上（`multiple_pending_decisions`、Issue #2040）/ 回答が届かなかった（`answer_not_delivered`）・途中で止まった（`answer_input_lost`、下記）|
@@ -4713,6 +4741,7 @@ commandmate ls --token your-token
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 31 | ROLE CONFLICT | ロールや名簿の競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない。ロールを付けない `instances add` / `remove` / `alias` でも出る。例外: `remove --kill` はセッションが停止済みのことがある |
 | 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
+| 33 | TOOL POLICY DENIED | 方針（ツールの利用方針）による拒否。何も打っていない（`send` / `ask` / `respond` と relay の作成。`TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`。[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ |
 | 50〜57 | MEM | `mem` の拒否（50 disabled / 51 version_conflict / 52 対象不明 / 53 ambiguous / 54 duplicate_key / 55 not_owner・state_forbids / 56 limit_exceeded）と、`mem check --suggest` の促しあり（57）。[commandmate mem](#commandmate-mem) の終了コード。`send --note` を mem が断ったときも 50〜56 で終わる |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |
