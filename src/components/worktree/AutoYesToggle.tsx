@@ -185,8 +185,12 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     setShowConfirmDialog(false);
   }, []);
 
+  // Issue #4436: wrapping is only for the refusal notice; without one the row's classes
+  // are the same as before (the composer's meta row must stay one line, #2598).
+  const showRefusal = !displayEnabled && refusal !== null;
+  const wrap = showRefusal ? ' flex-wrap' : '';
   return (
-    <div className={inline ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap items-center gap-3 px-4 py-2 bg-surface-2 border-b border-border'}>
+    <div className={inline ? `flex${wrap} items-center gap-2` : `flex${wrap} items-center gap-3 px-4 py-2 bg-surface-2 border-b border-border`}>
       {/* Toggle switch (Issue #1080: shared Radix ui/Switch) */}
       <Switch
         checked={displayEnabled}
@@ -244,7 +248,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         </span>
       )}
 
-      {!displayEnabled && refusal && (
+      {showRefusal && refusal && (
         <ToolPolicyRefusalNotice
           refusal={refusal}
           className="basis-full text-xs text-warning-foreground"

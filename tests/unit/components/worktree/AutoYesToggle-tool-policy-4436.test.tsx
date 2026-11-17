@@ -59,3 +59,22 @@ describe('AutoYesToggle: tool-policy refusal (#4436)', () => {
     spy.mockRestore();
   });
 });
+
+describe('AutoYesToggle: container without a refusal (#4436 / #2598 C1)', () => {
+  it.each([true, false])('has no flex-wrap and no notice when nothing was refused (inline=%s)', (inline) => {
+    const { container } = render(
+      <AutoYesToggle enabled={false} expiresAt={null} onToggle={vi.fn()} cliToolName="claude" inline={inline} />,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).not.toContain('flex-wrap');
+    expect(screen.queryByTestId('auto-yes-tool-policy-refusal')).toBeNull();
+  });
+
+  it('wraps only while a refusal is shown', async () => {
+    const onToggle = vi.fn(async (_p: AutoYesToggleParams) => { throw new ToolPolicyRefusalError(view); });
+    const { container } = render(<AutoYesToggle enabled={false} expiresAt={null} onToggle={onToggle} cliToolName="antigravity" />);
+    enable();
+    await screen.findByTestId('auto-yes-tool-policy-refusal');
+    expect((container.firstElementChild as HTMLElement).className).toContain('flex-wrap');
+  });
+});
