@@ -1,10 +1,12 @@
 /**
  * auto-yes Command - Control auto-yes for a worktree
  * Issue #518: [DR1-08] Factory pattern
+ * Issue #4436: an enable the server's tool policy refuses (409 TOOL_POLICY_DENIED)
+ *   exits 33 (ToolPolicyExitCode.DENIED) with the reason on the first stderr line
  */
 
 import { Command } from 'commander';
-import { ExitCode } from '../types';
+import { ExitCode, ToolPolicyExitCode } from '../types';
 import type { AutoYesOptions } from '../types';
 import type { AutoYesContractPolicy, AutoYesSetResult } from '../types/api-responses';
 import { ApiClient, isValidWorktreeId, isValidInstanceId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
@@ -13,6 +15,13 @@ import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG 
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
 import { resolveInstanceCliTool } from './instances';
+import { ApiError } from '../utils/api-client';
+import {
+  ANTIGRAVITY_FAQ_URL,
+  TOOL_POLICY_DENIED,
+  TOOL_POLICY_DENIED_MESSAGE,
+  USAGE_DECLARATION_ENV,
+} from '../../lib/tool-policy/policy';
 import {
   AUTO_YES_ANSWER_MODES,
   DEFAULT_AUTO_YES_ANSWER_MODE,
@@ -164,6 +173,30 @@ export function describeContractPolicy(policy: AutoYesContractPolicy | null | un
   return [`Note: ${task} sets autoYes.mode: ${policy.mode}.${deny}`];
 }
 
+/**
+ * Issue #4436: the stderr lines for an arming the server's tool policy refused, or
+ * null when `error` is anything else (which keeps its own message and exit code).
+ *
+ * Only a 409 carrying `code: TOOL_POLICY_DENIED`: the code alone on another status
+ * is not this refusal. The first line is the reason (the server's sentence, or
+ * the same sentence from the shared module when the body had none), so a script
+ * that reads one line of stderr gets it.
+ */
+export function describeToolPolicyDenial(error: unknown): string[] | null {
+  if (!(error instanceof ApiError) || error.statusCode !== 409 || error.apiCode !== TOOL_POLICY_DENIED) {
+    return null;
+  }
+  const payload = error.payload as ({ error?: unknown; links?: { faq?: unknown } } | undefined);
+  const reason = typeof payload?.error === 'string' && payload.error.length > 0 ? payload.error : TOOL_POLICY_DENIED_MESSAGE;
+  const faq = typeof payload?.links?.faq === 'string' ? payload.links.faq : ANTIGRAVITY_FAQ_URL;
+  return [
+    `Error: ${reason} (${TOOL_POLICY_DENIED})`,
+    `Auto-Yes was not enabled. If you use an API key or an enterprise plan, set ${USAGE_DECLARATION_ENV}=api-key ` +
+      `(or ${USAGE_DECLARATION_ENV}=enterprise) on the server and restart it.`,
+    `FAQ: ${faq}`,
+  ];
+}
+
 export function createAutoYesCommand(): Command {
   const cmd = new Command('auto-yes');
   cmd
@@ -178,6 +211,14 @@ export function createAutoYesCommand(): Command {
     .option('--agent <agent>', AGENT_OPTION_DESCRIPTION)
     .option('--token <token>', TOKEN_WARNING)
     .action(async (worktreeId: string, options: AutoYesOptions) => {
+      // Issue #4436 (I7a): the client's warnings (`--token`) are held so that a
+      // tool-policy refusal is still the first stderr line; every other outcome
+      // prints them first, as before — including the exits 2 inside the
+      // --instance resolution (I7b), through its `beforeExit` hook.
+      const heldWarnings: string[] = [];
+      const printHeldWarnings = (): void => {
+        for (const line of heldWarnings.splice(0)) console.error(line);
+      };
       try {
         // [SEC4-04] Validate worktree ID
         if (!isValidWorktreeId(worktreeId)) {
@@ -220,7 +261,7 @@ export function createAutoYesCommand(): Command {
           process.exit(ExitCode.CONFIG_ERROR);
         }
 
-        const client = new ApiClient({ token: options.token });
+        const client = new ApiClient({ token: options.token, onWarning: (line) => heldWarnings.push(line) });
 
         const body: Record<string, unknown> = {
           enabled: !!options.enable,
@@ -231,6 +272,7 @@ export function createAutoYesCommand(): Command {
           const durationMs = parseDurationToMs(options.duration ?? DEFAULT_DURATION_FLAG);
 
           if (durationMs === null) {
+            printHeldWarnings();
             console.error(`Error: Invalid duration. Must be ${AUTO_YES_DURATION_FLAG_RANGE} (e.g. 5h).`);
             process.exit(ExitCode.CONFIG_ERROR);
           }
@@ -251,7 +293,10 @@ export function createAutoYesCommand(): Command {
         // and watches the session cliTool names, so the instance must be paired
         // with the CLI tool its roster entry declares.
         const agent = options.instance
-          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent)
+          ? await resolveInstanceCliTool(client, worktreeId, options.instance, options.agent, 'strict', {
+              // I7b: an ambiguous or contradicting --instance exits 2 inside; the held warnings go first.
+              beforeExit: printHeldWarnings,
+            })
           : options.agent;
 
         if (agent) {
@@ -268,13 +313,23 @@ export function createAutoYesCommand(): Command {
           body,
         );
 
+        printHeldWarnings();
         if (options.enable) {
           reportEnabled(worktreeId, result, options.answerMode !== undefined);
         } else {
           console.error(`Auto-yes disabled for ${worktreeId}.`);
         }
       } catch (error) {
-        handleCommandError(error);
+        // Issue #4436: exit 33, not the generic 409's 99 — sending again gives the same answer.
+        const denial = describeToolPolicyDenial(error);
+        if (denial !== null) {
+          for (const line of denial) console.error(line);
+          printHeldWarnings();
+          process.exit(ToolPolicyExitCode.DENIED);
+        } else {
+          printHeldWarnings();
+          handleCommandError(error);
+        }
       }
     });
   return cmd;

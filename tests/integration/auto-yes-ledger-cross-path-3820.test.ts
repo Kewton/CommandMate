@@ -22,6 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withUsageDeclaration } from '../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -333,6 +334,9 @@ afterEach(async () => {
 });
 
 describe('[#3820 PR 5] agy: request → dialog → answer → gone, end to end', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   it('is one request and one confirmation tied to it by the call, no interval, and one answer in the count', async () => {
     setAutoYesEnabled(WT, 'antigravity', true, ONE_HOUR_MS);
 
@@ -524,6 +528,9 @@ describe('[#3820 PR 5] a human answers first', () => {
 });
 
 describe('[#3820 PR 5] an end event that never comes', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   it('agy "No": no PostToolUse — the confirmation closes when the dialog goes', async () => {
     setAutoYesEnabled(WT, 'antigravity', true, ONE_HOUR_MS);
     contractModeOff('antigravity');

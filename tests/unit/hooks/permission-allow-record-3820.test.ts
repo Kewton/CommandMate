@@ -11,6 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withUsageDeclaration } from '../../helpers/usage-declaration';
 
 const ledgerLog = vi.hoisted(() => {
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), withContext: vi.fn() };
@@ -96,6 +97,9 @@ afterEach(() => {
 });
 
 describe('[#3820] the allow history row (design §5.1)', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   it.each(['claude', 'codex', 'copilot', 'opencode', 'opencode-v2'] as const)(
     'is written for %s, as before',
     (tool) => {
@@ -122,6 +126,9 @@ describe('[#3820] the allow history row (design §5.1)', () => {
 });
 
 describe('[#3820] the hook request is the hook route’s alone (N2)', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   it('writes no ledger line when called without a hook request id, as the API adjudication calls it', () => {
     allowWritesRow('claude');
     allowWritesRow('antigravity');

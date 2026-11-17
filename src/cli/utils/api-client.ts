@@ -69,12 +69,18 @@ export function isValidInstanceId(id: string): boolean {
  * [SEC4-01] Warns on stderr when --token flag is used.
  *
  * @param options - Options object with optional token
+ * @param warn - Where the warning goes (default: stderr). Issue #4436: a command
+ *   whose first stderr line is a contract (the `auto-yes` refusal) collects it
+ *   and prints it after that line.
  * @returns Resolved token or undefined
  */
-export function resolveAuthToken(options?: { token?: string }): string | undefined {
+export function resolveAuthToken(
+  options?: { token?: string },
+  warn: (line: string) => void = (line) => console.error(line)
+): string | undefined {
   if (options?.token) {
     // [SEC4-01] Warn about token exposure in process list
-    console.error(
+    warn(
       'Warning: --token flag exposes token in process list and shell history. Use CM_AUTH_TOKEN environment variable instead.'
     );
     return options.token;
@@ -105,7 +111,12 @@ export class ApiClient {
   /** Epoch ms after which every request of this client fails (Issue #3983). */
   private deadlineAt?: number;
 
-  constructor(options?: { baseUrl?: string; token?: string }) {
+  /**
+   * @param options.onWarning - Issue #4436: where the construction warnings
+   *   (`--token` exposure, a token over plain HTTP) go. Default: stderr, at once.
+   */
+  constructor(options?: { baseUrl?: string; token?: string; onWarning?: (line: string) => void }) {
+    const warn = options?.onWarning ?? ((line: string) => console.error(line));
     // Issue #1743: resolve through loadClientEnv() rather than `process.env.CM_PORT || '3000'`.
     // Reading process.env alone ignored ~/.commandmate/.env, so with two servers running,
     // `status` reported the .env port while every ApiClient-based subcommand (ls / send / wait
@@ -122,11 +133,11 @@ export class ApiClient {
       );
     }
     this.baseUrl = options?.baseUrl || resolveServerEndpoint(loadClientEnv()).url;
-    this.token = resolveAuthToken(options);
+    this.token = resolveAuthToken(options, warn);
 
     // [SEC4-02] Warn about HTTP to non-localhost
     if (this.token && !this.baseUrl.startsWith('https://') && !isLocalhost(this.baseUrl)) {
-      console.error(
+      warn(
         'Warning: Connecting to remote server over HTTP. Auth token will be sent in plaintext. Use HTTPS for non-localhost connections.'
       );
     }

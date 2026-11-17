@@ -5,6 +5,8 @@
  * PUT: Update report content
  *
  * Issue #607: Daily summary feature
+ * Issue #4436: POST answers 409 { code: TOOL_POLICY_DENIED, error, reason, links }
+ *   when the tool policy refuses the tool (antigravity without a usage declaration)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,6 +18,7 @@ import {
   ConcurrentGenerationError,
   GenerationTimeoutError,
   OutputValidationError,
+  ToolPolicyDeniedError,
   MAX_SUMMARY_OUTPUT_LENGTH,
 } from '@/lib/daily-summary-generator';
 import type { DailyReport } from '@/lib/db/daily-report-db';
@@ -181,6 +184,18 @@ export async function POST(request: NextRequest) {
       generated: true,
     });
   } catch (error) {
+    // Issue #4436: refused by the tool policy before anything ran.
+    if (error instanceof ToolPolicyDeniedError) {
+      return NextResponse.json(
+        {
+          code: error.decision.code,
+          error: error.message,
+          reason: error.decision.reason,
+          links: error.decision.links,
+        },
+        { status: 409 }
+      );
+    }
     if (error instanceof ConcurrentGenerationError) {
       return NextResponse.json(
         { error: error.message },

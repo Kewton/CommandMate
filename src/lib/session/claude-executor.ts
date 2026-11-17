@@ -38,6 +38,7 @@ import {
   resolveOpencodeV2Executable,
 } from '@/lib/cli-tools/opencode-executable';
 import { getOrInitGlobal } from '../global-state';
+import { RUN_ORIGIN_ENV } from '@/lib/tool-policy/policy';
 
 // =============================================================================
 // Constants
@@ -1016,7 +1017,15 @@ export async function executeClaudeCommand(
     ? { ...sanitizeEnvForChildProcess(), PWD: cwd }
     : sanitizeEnvForChildProcess();
   // Issue #4115: composed by the caller from this same sanitized environment.
-  const env = options?.role ? { ...baseEnv, ...options.role.env } : baseEnv;
+  // Issue #4436 (design §5-6): every run started here is a Schedule or the daily
+  // summary, so the child is told so (`CM_RUN_ORIGIN=schedule`) — a `commandmate
+  // send` made from inside it is then judged as unattended. Written last, so
+  // neither the server's own value (already stripped by the sanitizer) nor a
+  // role's env can stand in for it.
+  const env = {
+    ...(options?.role ? { ...baseEnv, ...options.role.env } : baseEnv),
+    [RUN_ORIGIN_ENV]: 'schedule',
+  };
 
   return new Promise<ExecutionResult>((resolve) => {
     const child = execFile(

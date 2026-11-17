@@ -5,6 +5,9 @@
  * Issue #607: Daily summary feature
  * Issue #2044: opencode joins SUMMARY_ALLOWED_TOOLS, and the report grows an
  *   agent cost section built from the `agent_session_costs` ledger.
+ * Issue #4436: the run is unattended (`<tool> -p`), so it is the tool policy's
+ *   `schedule` operation; a refused tool throws {@link ToolPolicyDeniedError}
+ *   before anything is collected or launched.
  *
  * Features:
  * - Concurrent execution control via globalThis flag (DR4-004)
@@ -39,6 +42,9 @@ import { collectIssueInfos } from '@/lib/git/github-api';
 import { computeVibeMetrics, MS_PER_DAY } from '@/lib/metrics/vibe-metrics';
 import { withTimeout } from '@/lib/utils';
 import { OPENCODE_CLI_TOOL_ID } from '@/lib/hooks/sources/opencode/tool-id';
+import { CLI_TOOL_IDS, type CLIToolType } from '@/lib/cli-tools/types';
+import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE, type ToolPolicyDecision } from '@/lib/tool-policy/policy';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import {
   auditOpencodeExportRedaction,
   summarizeOpencodeExport,
@@ -123,6 +129,17 @@ export class GenerationTimeoutError extends Error {
   constructor() {
     super('Summary generation timed out');
     this.name = 'GenerationTimeoutError';
+  }
+}
+
+/**
+ * Error thrown when the tool policy refuses the tool (Issue #4436). The API
+ * answers 409 `{ code, error, reason, links }` from {@link decision}.
+ */
+export class ToolPolicyDeniedError extends Error {
+  constructor(public readonly decision: Extract<ToolPolicyDecision, { allowed: false }>) {
+    super(TOOL_POLICY_DENIED_MESSAGE);
+    this.name = 'ToolPolicyDeniedError';
   }
 }
 
@@ -500,6 +517,27 @@ export async function generateDailySummary(
   params: GenerateDailySummaryParams
 ): Promise<DailyReport> {
   const { date, tool, model, userInstruction } = params;
+
+  // Issue #4436: before the concurrency flag and before any collection, so a
+  // refusal leaves nothing behind and launches nothing.
+  if ((CLI_TOOL_IDS as readonly string[]).includes(tool)) {
+    const decision = decideToolPolicy({
+      tool: tool as CLIToolType,
+      operation: 'schedule',
+      origin: 'schedule',
+      declaration: readUsageDeclaration(),
+    });
+    if (!decision.allowed) {
+      logger.warn('tool-policy-denied', {
+        date,
+        tool,
+        code: decision.code,
+        reason: decision.reason,
+        faq: decision.links.faq,
+      });
+      throw new ToolPolicyDeniedError(decision);
+    }
+  }
 
   // Concurrent execution check
   if (isGenerating()) {
