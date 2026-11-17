@@ -1193,6 +1193,8 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 
 `ask --async` / `send --reply-to` が作った**待ち（relay）**を表示・取り下げ・保留の解決をします。
 
+> **Antigravity（agy）の注意（#4438）**: 個人向けプランのサインインの agy へ、ほかの AI エージェントから relay（`ask`・`send --reply-to`）で依頼を送らないでください。[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq)が、第三者のソフトウェアやエージェントを通して使うことを制限しています。API キーか Gemini Enterprise で使うときは、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE` に `api-key` か `enterprise` を設定して申告します（未設定は個人向けプランとして扱います）。サーバーは起動時に読むので、変えたらサーバーを再起動します（`commandmate stop` のあと `commandmate start --daemon`）。`commandmate` の CLI を打つ側の環境に設定しても効きません。申告は利用者の自己申告で、CommandMate は資格情報を読んで確かめません。
+
 ### 使用方法
 
 ```bash
@@ -2032,6 +2034,8 @@ Auto-Yes を ON にする前から開いていた汎用の `(y/n)` を含む。�
 **Claude の編集確認（`Do you want to make this edit …?`）は `multiple_choice` 型**
 （実質 Yes/No＋allow-all の 3 択）なので、safe のままだと編集のたびにワーカーが停止します。
 無人で走らせる契約は `allow-listed` に広げ、危険操作は `denyPatterns` でエスカレートさせてください。
+
+> **Antigravity（agy）の注意（#4438）**: 無人の実行（契約のワーカー・Schedule・日次サマリー）に、個人向けプランのサインインの agy を使わないでください。[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq)が、第三者のアプリケーションから agy を動かすことを制限しています。#4436 が入った版では、申告が無いと antigravity の Schedule・日次サマリーは実行されません。API キーか Gemini Enterprise で使うときは、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE` に `api-key` か `enterprise` を設定して申告します（未設定は個人向けプランとして扱います）。サーバーは起動時に読むので、変えたらサーバーを再起動します（`commandmate stop` のあと `commandmate start --daemon`）。`commandmate` の CLI を打つ側の環境に設定しても効きません。申告は利用者の自己申告で、CommandMate は資格情報を読んで確かめません。
 
 ```yaml
 autoYes:
@@ -3083,6 +3087,8 @@ tmux attach -t '=mcbd-claude-<worktree-id>:'
 ## commandmate auto-yes
 
 Auto-Yes（確認プロンプト自動応答）を個別に制御します。
+
+> **Antigravity（agy）の注意（#4438）**: 個人向けプランのサインインの agy に Auto-Yes を使わないでください（人を外すと無人の実行になり、[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq)の制限に当たります）。#4436 が入った版では、申告が無いと antigravity の instance への有効化は断られます。API キーか Gemini Enterprise で使うときは、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE` に `api-key` か `enterprise` を設定して申告します（未設定は個人向けプランとして扱います）。サーバーは起動時に読むので、変えたらサーバーを再起動します（`commandmate stop` のあと `commandmate start --daemon`）。`commandmate` の CLI を打つ側の環境に設定しても効きません。申告は利用者の自己申告で、CommandMate は資格情報を読んで確かめません。
 
 ### 使用方法
 

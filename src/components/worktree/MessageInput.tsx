@@ -39,6 +39,8 @@ import {
 import type { SlashCommand } from '@/types/slash-commands';
 import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 import type { ShowToast } from '@/types/markdown-editor';
+import { AntigravityUsageNotice } from '@/components/worktree/antigravity-usage-notice';
+import { useAntigravityUsageNotice } from '@/hooks/useAntigravityUsageNotice';
 import {
   DRAFT_STORAGE_KEY_PREFIX,
   getInstanceDraftKey,
@@ -342,6 +344,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4: Pass cliToolId to filter commands by CLI tool
   const isMobile = useIsMobile();
   const { groups, isCatalogStale } = useSlashCommands(worktreeId, cliToolId);
+
+  // Issue #4438 再指示 1 (I6'): an antigravity instance added elsewhere (CLI, another device)
+  // is launched by the first send from here, never passing the add form. The same notice and
+  // the same per-browser record as the add form, while the session is not running — and it
+  // stays up once that send launches it, until closed. Guidance only: the send is not stopped.
+  const usageNotice = useAntigravityUsageNotice();
+  const [usageNoticeArmed, setUsageNoticeArmed] = useState(false);
+  const usageNoticeBeforeLaunch = cliToolId === 'antigravity' && !isSessionRunning;
+  if (usageNoticeBeforeLaunch && !usageNoticeArmed) setUsageNoticeArmed(true);
+  const showUsageNotice =
+    usageNotice.shouldShow(cliToolId ?? '') && (usageNoticeBeforeLaunch || usageNoticeArmed);
 
   // Issue #2598: the stored textarea height and its handle — PC only. On a
   // phone nothing is read or applied, so a height chosen on a desktop never
@@ -1063,6 +1076,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           {error || imageError}
         </div>
       )}
+
+      {/* Issue #4438 再指示 1: the Antigravity usage notice before the first launch. */}
+      {showUsageNotice && <AntigravityUsageNotice onDismiss={usageNotice.dismiss} />}
 
       {/* Issue #4227 G-PR6: the preview for this send could not be read — nothing was sent. */}
       {briefCheckFailed && (
