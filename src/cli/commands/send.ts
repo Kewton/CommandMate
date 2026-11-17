@@ -31,6 +31,7 @@ import {
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
+import { noteAntigravityNotice } from '../utils/antigravity-notice';
 import { resolveCommandTarget, type CommandTarget } from './command-target';
 import { followUpCommand } from '../utils/follow-up-command';
 import {
@@ -1049,6 +1050,9 @@ tool policy (antigravity, above; nothing typed, do not send it again).
         // Issue #2376: the RESOLVED id, never the string the user typed.
         // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
         // /resolve-target knows how to read an alias.
+
+        // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).
+        noteAntigravityNotice(namedTarget.agent);
 
         validateSendModel(options, namedTarget.agent);
 

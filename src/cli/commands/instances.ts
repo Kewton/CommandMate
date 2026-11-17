@@ -10,6 +10,7 @@
  *   commandmate instances <worktree-id> set-role <instance-id> (--role <role> | --none | --inherit)
  */
 
+import { noteAntigravityNotice } from '../utils/antigravity-notice';
 import { Command } from 'commander';
 import { ExitCode, getErrorMessage, RoleExitCode } from '../types';
 import type { InstancesOptions } from '../types';
@@ -800,6 +801,8 @@ async function addInstance(
     );
     const entry = roleEntryOf(created, created.created.instanceId);
     console.error(`Instance added: ${id} (${options.agent})`);
+    // Issue #4438: the usage notice, once per CLI environment (stderr only, never the JSON).
+    noteAntigravityNotice(options.agent);
     if (options.json) {
       console.log(JSON.stringify({ ...roleChangeResult(created, entry), created: created.created }, null, 2));
     } else {
@@ -824,6 +827,8 @@ async function addInstance(
   });
 
   console.error(`Instance added: ${addedId} (${options.agent})`);
+  // Issue #4438: the usage notice, once per CLI environment (stderr only, never the JSON).
+  noteAntigravityNotice(options.agent);
   if (options.json) {
     console.log(JSON.stringify(next, null, 2));
   }

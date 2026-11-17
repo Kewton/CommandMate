@@ -68,6 +68,7 @@ import {
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
+import { noteAntigravityNotice } from '../utils/antigravity-notice';
 import { resolveCommandTarget } from './command-target';
 import { pollWorktree } from './wait';
 import {
@@ -596,6 +597,8 @@ Do not ask again: the answer is the same until the server declares its usage.
         );
         const { agent, instanceId } = commandTarget;
         refusedTarget = { instanceId, cliToolId: agent };
+        // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).
+        noteAntigravityNotice(agent);
 
         // Issue #4344: whether this server attributes the reply, read before the
         // send because the body depends on it. Bounded by `--timeout` like the

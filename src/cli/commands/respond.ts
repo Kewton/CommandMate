@@ -22,6 +22,7 @@ import {
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
+import { noteAntigravityNotice } from '../utils/antigravity-notice';
 import { resolveCommandTarget, type CommandTarget } from './command-target';
 import { dialogCaptureCommand, followUpCommand } from '../utils/follow-up-command';
 import { serverReportsPromptAnswerReason } from '../utils/server-capabilities';
@@ -585,6 +586,8 @@ respond's --json, stdout is {worktreeId, instanceId, cliToolId, "sent": false,
         const commandTarget = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
         const { agent, instanceId } = commandTarget;
         refusedTarget = { instanceId, cliToolId: agent };
+        // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).
+        noteAntigravityNotice(agent);
         // Issue #2376: the resolved id. /prompt-response reads instance ids.
         // Issue #3982: every hint below names `commandTarget`, never `options.instance`.
 
