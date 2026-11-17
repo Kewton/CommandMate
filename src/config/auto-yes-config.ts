@@ -93,6 +93,12 @@ export type AutoYesPollerStopReason =
   | 'expired'
   /** A tick found the grant disabled for another reason, or gone. */
   | 'not-enabled'
+  /**
+   * Issue #4436 (I1b): a tick found a live grant for a tool the tool policy
+   * refuses Auto-Yes for (antigravity without `CM_ANTIGRAVITY_USAGE`). The grant
+   * is left as it is; nothing answers with it.
+   */
+  | 'tool-policy-denied'
   /** A tick's composite key names no known CLI tool. */
   | 'invalid-key'
   /** The stop pattern matched the agent's output. */

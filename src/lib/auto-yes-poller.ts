@@ -24,6 +24,7 @@
 import type { CLIToolType } from './cli-tools/types';
 import { detectPromptOnCleanFrame } from './polling/response-checker';
 import { invalidateSessionAutoYesPolicy } from './polling/auto-yes-policy';
+import { autoYesToolPolicyDenial } from './polling/auto-yes-tool-policy';
 import { normalizeFrame } from './detection/tools/frame';
 import {
   clearEnterFallbacks,
@@ -272,7 +273,8 @@ function endStaleTick(generation: AutoYesTickGeneration): void {
 
 /**
  * Validate that polling context is still valid.
- * Checks pollerState existence and auto-yes enabled state.
+ * Checks pollerState existence and auto-yes enabled state, and (Issue #4436)
+ * that the tool policy lets Auto-Yes answer this tool.
  *
  * Issue #525: Changed from (worktreeId, pollerState) to (compositeKey, pollerState).
  *
@@ -303,6 +305,23 @@ export function validatePollingContext(
     // has just turned a past deadline into `stopReason: 'expired'`, and
     // anything else is a grant some other path disabled or removed.
     stopAutoYesPolling(compositeKey, autoYesState?.stopReason === 'expired' ? 'expired' : 'not-enabled');
+    return 'expired';
+  }
+
+  // Issue #4436 (I1b): every tick passes here before it reads the pane, so a
+  // grant the enable API would have refused (kept across a Hot Reload, armed by
+  // an older build) answers nothing: the poller stops before its first capture.
+  const denial = autoYesToolPolicyDenial(cliToolId);
+  if (denial) {
+    logger.warn('poller:tool-policy-denied', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      code: denial.code,
+      reason: denial.reason,
+      faq: denial.links.faq,
+    });
+    stopAutoYesPolling(compositeKey, 'tool-policy-denied');
     return 'expired';
   }
 

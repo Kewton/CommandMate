@@ -8,7 +8,7 @@ hook のインスタンス取り違え）。`scripts/agent-health/run.ts` は、
 - Issue を立てるのはこのスクリプトではない。レポートを読んで Issue にするのは Schedule で動く AI（#2879）、
   レポートが今日出ているかを見張るのは #2880 の役目。
 - 実エージェントを起動し、1 ツールあたり最大 3 回モデルを呼ぶ（費用がかかる）。
-- 起動して確かめるのは上の 6 ツール。CommandMate が対応しているほかの 3 ツール（gemini・vibe-local・copilot）も、
+- 起動して確かめるのは上の 6 ツール（`CM_ANTIGRAVITY_USAGE` の申告が無いと antigravity を除く 5 ツール。下の `--tools`、#4436）。CommandMate が対応しているほかの 3 ツール（gemini・vibe-local・copilot）も、
   レポートの行として `version` だけを毎朝読む（下の「version だけを読むツール」、Issue #3313）。
 
 ## 何を確かめるか
@@ -97,7 +97,7 @@ skip は要約の `skipByKind`（`利用上限に達している N`）に数え�
 
 ### version だけを読むツール（gemini・vibe-local・copilot、Issue #3313）
 
-確認の実行（6 ツールすべてを選んだとき＝毎朝の実行）では、この 3 ツールも行として出す。起動はせず、`version` だけを読む。
+確認の実行（`--tools` を書かない既定の実行＝毎朝の実行、または 6 ツールすべてを選んだとき）では、この 3 ツールも行として出す。起動はせず、`version` だけを読む。
 `version` 以外の check は、下の種類の `skip` になる（`scripts/agent-health/tool-table.ts` の `LIMITED_TOOL_SPECS`）。
 
 | ツール | `version` の読み方 | ほかの check | 起動して確かめない理由 |
@@ -147,7 +147,7 @@ npx tsx scripts/agent-health/run.ts [--tools claude,codex,antigravity,opencode,c
 
 | オプション | 既定 | 説明 |
 |---|---|---|
-| `--tools` | 6 ツールすべて | 対象ツール（起動して確かめる 6 ツールから選ぶ）。6 ツールすべてを選んだときだけ、gemini・vibe-local・copilot の `version` も読む |
+| `--tools` | antigravity を除く 5 ツール（`CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` を申告した環境では 6 ツールすべて） | 対象ツール（起動して確かめる 6 ツールから選ぶ）。既定（`--tools` を書かない）のときと 6 ツールすべてを名指したときだけ、gemini・vibe-local・copilot の `version` も読む。antigravity は申告が無いと既定から外れ（起動も `agy --version` もしない。stderr に `antigravity: not checked — TOOL_POLICY_DENIED …`）、`--tools antigravity` と名指すと引数の誤り（exit 2、理由と FAQ はレポートの `scriptErrors`）になる（Google Antigravity 追加利用規約 6 条。#4436）。申告を外せば次の実行から外れる |
 | `--only` | 全チェック | 行うチェック（`version` は常に行う） |
 | `--out` | `~/.commandmate/agent-health/reports/<YYYY-MM-DD>.json`（JST の日付） | レポートの書き出し先 |
 | `--timeout-per-tool` | 150 | 1 ツールの持ち時間（秒）。時間切れのチェックは fail |
@@ -224,7 +224,7 @@ interface AgentHealthReport {
   host: { commandmateCommit: string; node: string };
   tools: Array<{
     tool: 'claude' | 'codex' | 'antigravity' | 'opencode' | 'command-code' | 'opencode-v2'
-        | 'gemini' | 'vibe-local' | 'copilot';   // 後の 3 つは version だけ（6 ツールすべてを選んだとき）
+        | 'gemini' | 'vibe-local' | 'copilot';   // 後の 3 つは version だけ（既定の実行か 6 ツールすべてを選んだとき）
     version: string | null;         // `<cli> --version` の 1 行目
     previousVersion: string | null; // 前回（state）の値
     versionChanged: boolean;        // 両方が分かっていて違うときだけ true
@@ -333,7 +333,7 @@ fixture にするには足りない）。
 
 ```bash
 cd <CommandMate のチェックアウト>
-npx tsx scripts/agent-health/run.ts                         # 6 ツール・全チェック（モデル呼び出しあり）＋ 3 ツールの version
+npx tsx scripts/agent-health/run.ts                         # 既定のツール（申告なしは antigravity を除く 5 ツール、申告ありは 6 ツール）・全チェック（モデル呼び出しあり）＋ 3 ツールの version
 npx tsx scripts/agent-health/run.ts --only screen-idle      # 起動画面だけ（モデル呼び出しなし）
 npx tsx scripts/agent-health/run.ts --tools codex --out /tmp/agent-health-codex.json
 ```

@@ -176,3 +176,4 @@ precheck のうち全ファイルを走査するガードのテスト（`tests/u
 | send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**、信頼ダイアログ / 既にプロンプト / まだ起動中で分岐する（3-1 の表）。task id は再送のたびに差し替える |
 | Command Code の権限の既定が `ask`（launch-worker が exit 45） | 何も送っていない。利用者に `ask` 以外にしてもらって送り直す（docs/orchestrate/command-code.md） |
 | 契約エラー（send が exit 2） | 契約の全エラーが一度に出るので、`docs/design/task-contract.md` と突き合わせて修正し再送 |
+| `auto-yes --enable` が exit 33（stderr の 1 行目に `TOOL_POLICY_DENIED`） | 方針による拒否（`ToolPolicyExitCode.DENIED`。#4436）。申告の無いサーバーで antigravity の instance に Auto-Yes を入れようとした。Auto-Yes は入っておらず、何も打っていない。再実行しても同じなので繰り返さない。私たちの運用では antigravity に Auto-Yes を入れない（[team.md の「Antigravity の扱い」](./team.md#antigravity-の扱い)）。API キーまたは企業向けプランで使う人だけが、サーバーに `CM_ANTIGRAVITY_USAGE=api-key`（または `enterprise`）を設定して再起動する |
