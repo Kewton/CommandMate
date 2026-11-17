@@ -3,26 +3,29 @@
  *
  * The web UI shows the notice once per browser (the browser remembers it, keyed
  * by the terms' check date). The CLI's unit is "once per CLI environment": a
- * small file in CommandMate's config directory (`getConfigDir()`, where
- * `remote.json` lives) holds the check date the notice was shown for. A new
+ * small file in CommandMate's own place holds the check date the notice was shown
+ * for: `~/.commandmate` for a global install, the CLI package's root (the checkout
+ * `bin/commandmate.js` lives in, `/antigravity-notice.json` is git-ignored there)
+ * for a local run. Never the cwd: that is the user's working repository. A new
  * date, a missing, unreadable or malformed file shows it again.
  *
  * It is written to stderr only (never stdout, never `--json`): through
  * `clientWarning`, so on `send` / `ask` / `respond` it comes after a tool-policy
  * refusal's lines (the reason stays stderr's first line, I7d). Failing to read
  * or write the record changes nothing else: it shows the notice and goes on.
- * Only CommandMate's own config directory is written.
+ * Only CommandMate's own place is written (never the cwd, never ~/.gemini).
  *
  * Under test (`isUnderTest()`, the one judge of that: a Vitest worker, or a child
  * process with `NODE_ENV=test`) the record is off unless `CM_ANTIGRAVITY_NOTICE_DIR` names a
  * directory (the suite must not write into a real config directory or into the
- * checkout); that variable also relocates the file for a user who wants it.
+ * checkout); that variable is a test-only record location.
  *
  * @module cli/utils/antigravity-notice
  */
 
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { accessSync, chmodSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { dirname, join, resolve } from 'path';
+import { homedir } from 'os';
 
 import {
   ANTIGRAVITY_FAQ_URL,
@@ -31,13 +34,13 @@ import {
   USAGE_DECLARATION_ENV,
 } from '../../lib/tool-policy/policy';
 import { isUnderTest } from '../../lib/test-run-detection';
-import { ensureConfigDir, getConfigDir } from './install-context';
+import { isGlobalInstall } from './install-context';
 import { clientWarning } from './tool-policy-failure';
 
 /** File name inside the config directory. */
 export const ANTIGRAVITY_NOTICE_FILE_NAME = 'antigravity-notice.json';
 
-/** Names a directory for the record instead of the config directory. */
+/** Test-only: names a directory for the record instead of CommandMate's own place. */
 export const ANTIGRAVITY_NOTICE_DIR_ENV = 'CM_ANTIGRAVITY_NOTICE_DIR';
 
 /** The notice, one stderr line each. */
@@ -50,18 +53,40 @@ export function antigravityNoticeLines(): string[] {
   ];
 }
 
+/**
+ * The root of the running CLI package (where package.json is), found from this
+ * module's location, so it does not depend on the cwd.
+ */
+export function cliPackageRoot(startDir: string = __dirname): string {
+  let dir = startDir;
+  for (let i = 0; i < 5; i++) {
+    try {
+      accessSync(join(dir, 'package.json'));
+      return dir;
+    } catch {
+      dir = dirname(dir);
+    }
+  }
+  return resolve(startDir, '..', '..', '..');
+}
+
+/** Where the record lives for a real run: `~/.commandmate` (global) or the package root (local). */
+export function defaultRecordDir(global: boolean = isGlobalInstall()): string {
+  return global ? join(homedir(), '.commandmate') : cliPackageRoot();
+}
+
 /** The directory of the record, or null when the record is off (under test, unnamed). */
-function recordDir(forWrite: boolean): string | null {
+function recordDir(): string | null {
   const named = process.env[ANTIGRAVITY_NOTICE_DIR_ENV];
   if (named) return named;
   if (isUnderTest()) return null;
-  return forWrite ? ensureConfigDir() : getConfigDir();
+  return defaultRecordDir();
 }
 
 /** Whether the record says the notice was shown for the current check date. */
 function alreadyShown(): boolean {
   try {
-    const dir = recordDir(false);
+    const dir = recordDir();
     if (dir === null) return true;
     const parsed: unknown = JSON.parse(readFileSync(join(dir, ANTIGRAVITY_NOTICE_FILE_NAME), 'utf8'));
     return (
@@ -76,7 +101,7 @@ function alreadyShown(): boolean {
 
 function record(): void {
   try {
-    const dir = recordDir(true);
+    const dir = recordDir();
     if (dir === null) return;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const file = join(dir, ANTIGRAVITY_NOTICE_FILE_NAME);

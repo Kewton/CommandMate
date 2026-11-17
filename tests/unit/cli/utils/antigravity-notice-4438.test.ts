@@ -15,6 +15,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ANTIGRAVITY_NOTICE_DIR_ENV,
+  cliPackageRoot,
+  defaultRecordDir,
   ANTIGRAVITY_NOTICE_FILE_NAME,
   antigravityNoticeLines,
   noteAntigravityNotice,
@@ -111,5 +113,33 @@ describe('noteAntigravityNotice (#4438 G4)', () => {
   it('the lines name the usual caution and are plain lines (no newline inside)', () => {
     for (const line of antigravityNoticeLines()) expect(line).not.toContain('\n');
     expect(antigravityNoticeLines()[0]).toMatch(/Section 6/);
+  });
+});
+
+describe('record location (#4438 G4, L1-L3)', () => {
+  it('L1: a local run records in the CLI package root, never under the cwd', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4438-cwd-'));
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    try {
+      const where = defaultRecordDir(false);
+      expect(where).toBe(cliPackageRoot());
+      expect(fs.existsSync(path.join(where, 'package.json'))).toBe(true);
+      expect(path.relative(cwd, where).startsWith('..')).toBe(true);
+      expect(where.startsWith(cwd)).toBe(false);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('L3: a global install records in ~/.commandmate (a temp HOME here)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4438-home-'));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    try {
+      expect(defaultRecordDir(true)).toBe(path.join(home, '.commandmate'));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
