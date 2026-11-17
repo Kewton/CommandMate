@@ -161,6 +161,7 @@ import * as rolesRoute from '@/app/api/roles/route';
 import * as roleRoute from '@/app/api/roles/[id]/route';
 import { clearAllAutoYesStates, getAutoYesState } from '@/lib/auto-yes-state';
 import { createSendCommand } from '@/cli/commands/send';
+import { ANTIGRAVITY_FAQ_URL, ANTIGRAVITY_TERMS_URL } from '@/lib/tool-policy/policy';
 
 const WT = 'wt-4437';
 const CONTRACT = 'version: 1\ntitle: t\ngoal: |\n  Do the work.\nscope:\n  allow: ["src/**"]\n';
@@ -170,6 +171,12 @@ let worktreePath: string;
 let db: Database.Database;
 /** Every request the CLI made, method and path. */
 let requests: string[];
+/**
+ * I7e: what the check before the writes (`GET …/tool-policy`) does instead of the route
+ * (a 500, a server before PR1), or what happens right after it answers.
+ */
+let checkOverride: (() => Response) | null;
+let afterCheck: (() => void) | null;
 
 type RouteHandler = (request: NextRequest, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
 
@@ -200,13 +207,17 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
   if (url.pathname === '/api/capabilities') return Response.json({ serverVersion: 'test', capabilities: ['resolve-session-target'] });
   if (url.pathname === `/api/worktrees/${WT}/current-output`) return Response.json({ isRunning: fakeTool.running });
   if (url.pathname === `/api/worktrees/${WT}/opencode/session`) return Response.json({ instances: [] });
+  const isCheck = url.pathname === `/api/worktrees/${WT}/tool-policy`;
+  if (isCheck && checkOverride) return checkOverride();
   const route = routed(url.pathname);
   if (!route) throw new Error(`Not stubbed: ${method} ${url.pathname}`);
   const handler = route.handlers[method] as RouteHandler | undefined;
   if (!handler) return Response.json({ error: `no ${method}` }, { status: 405 });
-  return handler(new NextRequest(url, init as ConstructorParameters<typeof NextRequest>[1]), {
+  const response = await handler(new NextRequest(url, init as ConstructorParameters<typeof NextRequest>[1]), {
     params: Promise.resolve(route.params),
   });
+  if (isCheck) afterCheck?.();
+  return response;
 }
 
 class ExitSignal extends Error {}
@@ -279,6 +290,8 @@ beforeEach(async () => {
   fakeTool.onStart = null;
   ownership.hook = null;
   requests = [];
+  checkOverride = null;
+  afterCheck = null;
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR', path.join(dir, 'agy-agents'));
@@ -363,5 +376,64 @@ describe('I7c: a refused send leaves nothing behind (Issue #4437)', () => {
     const result = await send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'codex');
     expect(result.code).toBe(0);
     expect(listTasks(db, WT)).toHaveLength(1);
+  });
+});
+
+/**
+ * I7e (re-instruction 2): the check before the writes is a courtesy; `/send` is the guard.
+ * When the check cannot answer, or the default target turns antigravity after it, the
+ * real send route still refuses: nothing typed, exit 33, the reason on stderr (not
+ * necessarily line 1). What the check could not stop (a task row, a role setting) is the
+ * known limitation and is not asserted here.
+ */
+describe('I7e: the send route refuses what the check could not (Issue #4437)', () => {
+  function expectRefusedAndSaid(result: { code: number; stderr: string[] }): void {
+    expect(result.code).toBe(33);
+    expect(fakeTool.typed).toEqual([]);
+    expect(requests).toContain(`POST /api/worktrees/${WT}/send`);
+    const text = result.stderr.join('\n');
+    expect(text).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /m);
+    expect(text).toContain(ANTIGRAVITY_TERMS_URL);
+    expect(text).toContain(ANTIGRAVITY_FAQ_URL);
+    expect(text).toContain('CM_ANTIGRAVITY_USAGE=api-key');
+    expect(text).toContain('sent: false');
+    expect(text).not.toMatch(/Message sent\.|safe to send it again/);
+  }
+
+  describe.each([
+    ['a 500', () => Response.json({ error: 'boom' }, { status: 500 })],
+    ['a server before PR1 (404)', () => Response.json({ error: 'Not Found' }, { status: 404 })],
+  ] as const)('the check answers %s', (_label, answer) => {
+    beforeEach(() => {
+      checkOverride = answer;
+    });
+
+    it('--contract: exit 33, nothing typed, the reason said', async () => {
+      expectRefusedAndSaid(await send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'antigravity'));
+    });
+
+    it('--register --role: exit 33, nothing typed, the reason said', async () => {
+      expectRefusedAndSaid(await send('hello', '--agent', 'antigravity', '--instance', 'agy-new', '--register', '--role', 'reviewer'));
+    });
+
+    it('--auto-yes: exit 33, nothing typed, the reason said', async () => {
+      expectRefusedAndSaid(await send('hello', '--instance', 'antigravity', '--auto-yes'));
+    });
+  });
+
+  it('send --contract naming no target: the default turns antigravity after the check — exit 33, nothing typed', async () => {
+    afterCheck = () => {
+      db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('antigravity', WT);
+    };
+    const result = await send('--contract', '.commandmate/tasks/x.yaml');
+    expect(requests).toContain(`GET /api/worktrees/${WT}/tool-policy`);
+    expectRefusedAndSaid(result);
+  });
+
+  it('control — the same send with the default left as codex goes on and is typed', async () => {
+    fakeTool.onStart = (instanceId) => launchCodex(instanceId);
+    const result = await send('--contract', '.commandmate/tasks/x.yaml');
+    expect(result.code).toBe(0);
+    expect(fakeTool.typed).toHaveLength(1);
   });
 });

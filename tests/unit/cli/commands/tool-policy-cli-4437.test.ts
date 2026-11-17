@@ -515,3 +515,95 @@ describe('I7d: the reason is stderr\'s first line in every combination (Issue #4
     expect(stderrLines()[0]).toBe(TOKEN_WARNING);
   });
 });
+
+/**
+ * I7e (re-instruction 2): whatever the check before the writes says, the send itself is
+ * the last word. When the check cannot answer (a 500, or a server before PR1: 404), or
+ * answers for a default that changes before the send, `/send` still refuses with 409,
+ * nothing is typed, the exit is 33 and the reason (links, how to lift it) is on stderr —
+ * not necessarily line 1, as the task / grant lines may come first. `send` has no --json.
+ * What the check could not stop (the task row, a grant) stays as the known limitation.
+ */
+describe('I7e: the send refuses even when the check before it cannot (Issue #4437)', () => {
+  /** What the body says of the pinned caller (no tmux, no session, no agent, no terminal). */
+  const PINNED_BODY_ORIGIN = { origin: 'unknown', originEvidence: 'no-tty' } as const;
+
+  /** The reason is somewhere on stderr, and nothing claims a send. */
+  function expectReasonSomewhere(code: 'TOOL_POLICY_DENIED'): void {
+    const text = stderrLines().join('\n');
+    expect(text).toMatch(new RegExp(`^Error \\[${code}\\]: `, 'm'));
+    expect(text).toContain(ANTIGRAVITY_TERMS_URL);
+    expect(text).toContain(ANTIGRAVITY_FAQ_URL);
+    expect(text).toContain(UNLOCK);
+    expect(text).toContain('sent: false');
+    expect(text).not.toMatch(/Unexpected HTTP status|safe to send it again|Message sent\./);
+  }
+
+  const CHECK_FAILS = [
+    ['a 500', { status: 500, data: { error: 'boom' } }],
+    ['a server before PR1 (404)', { status: 404, data: { error: 'Not Found' } }],
+  ] as const;
+
+  describe.each(CHECK_FAILS)('the check answers %s', (_label, checkResponse) => {
+    it('--contract: /send refuses, exit 33, the reason is said, the task is marked failed', async () => {
+      const calls = mockRoutes([
+        { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: checkResponse },
+        { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
+        { match: '/api/worktrees/wt-g/send', response: denied() },
+        { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+      ]);
+      const code = await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml', '--instance', 'antigravity']));
+      expect(code).toBe(33);
+      expect(to(calls, '/send')).toHaveLength(1);
+      expect(to(calls, '/send')[0].body).toMatchObject(PINNED_BODY_ORIGIN);
+      expectReasonSomewhere('TOOL_POLICY_DENIED');
+      const patch = calls.find((c) => c.method === 'PATCH');
+      expect(patch?.body).toMatchObject({ status: 'failed' });
+    });
+
+    it('--auto-yes: /send refuses, exit 33, the reason is said', async () => {
+      const calls = mockRoutes([
+        { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: checkResponse },
+        { match: '/api/worktrees/wt-g/auto-yes', response: { status: 200, data: { enabled: true } } },
+        { match: '/api/worktrees/wt-g/send', response: denied() },
+      ]);
+      const code = await runUntilExit(() => runSend(['wt-g', 'x', '--instance', 'antigravity', '--auto-yes']));
+      expect(code).toBe(33);
+      expect(to(calls, '/send')).toHaveLength(1);
+      expectReasonSomewhere('TOOL_POLICY_DENIED');
+    });
+
+    it('--auto-yes --token: the reason is said, and the warning is not lost', async () => {
+      mockRoutes([
+        { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: checkResponse },
+        { match: '/api/worktrees/wt-g/auto-yes', response: { status: 200, data: { enabled: true } } },
+        { match: '/api/worktrees/wt-g/send', response: denied() },
+      ]);
+      expect(await runUntilExit(() => runSend(['wt-g', 'x', '--instance', 'antigravity', '--auto-yes', '--token', 'secret-token']))).toBe(33);
+      expectReasonSomewhere('TOOL_POLICY_DENIED');
+      expect(stderrLines()).toContain(TOKEN_WARNING);
+    });
+  });
+
+  it('send --contract naming no target: the default turns antigravity after the check, /send refuses, exit 33', async () => {
+    const calls = mockRoutes([
+      // Asked with no tool: the default was codex then.
+      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 200, data: { allowed: true, cliToolId: 'codex' } } },
+      { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
+      // ...and antigravity by the time the message goes.
+      { match: '/api/worktrees/wt-g/send', response: denied() },
+      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
+    ]);
+    const code = await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml']));
+    expect(code).toBe(33);
+    const check = calls.find((c) => c.url.includes('/tool-policy'));
+    expect(new URL(check!.url).searchParams.has('cliToolId')).toBe(false);
+    // The body names no tool, so it says who is sending: the server can refuse it.
+    const sends = to(calls, '/send');
+    expect(sends).toHaveLength(1);
+    expect(sends[0].body).not.toHaveProperty('cliToolId');
+    expect(sends[0].body).toMatchObject(PINNED_BODY_ORIGIN);
+    expectReasonSomewhere('TOOL_POLICY_DENIED');
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({ status: 'failed' });
+  });
+});
