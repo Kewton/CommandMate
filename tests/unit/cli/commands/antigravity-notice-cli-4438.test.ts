@@ -209,6 +209,18 @@ describe('send / ask / respond to antigravity (#4438 G4)', () => {
     expect(stderrLines()[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
     expect(noticeCount()).toBe(1);
   });
+
+  it('strict respond to antigravity: the notice is said once on stderr, never on stdout (#4438 G4)', async () => {
+    mockRoutes([{ match: '/api/worktrees/wt-g/prompt-response/strict', response: DENIED }]);
+    const STRICT = ['wt-g', 'Yes, I trust this folder', '--instance', 'antigravity', '--expect-screen', 'antigravity-trust', '--observation', 'tok-1'];
+    const code = await runUntilExit(() => runRespond([...STRICT, '--json']));
+    expect(code).toBe(33);
+    expect(stderrLines()[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
+    expect(noticeCount()).toBe(1);
+    const stdout = mockConsoleLog.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(stdout).not.toContain('Notice [antigravity]');
+    expect(() => JSON.parse(stdout)).not.toThrow();
+  });
 });
 
 describe('instances add --agent antigravity (#4438 G4)', () => {

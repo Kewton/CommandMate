@@ -13,7 +13,8 @@
  * or write the record changes nothing else: it shows the notice and goes on.
  * Only CommandMate's own config directory is written.
  *
- * Under vitest the record is off unless `CM_ANTIGRAVITY_NOTICE_DIR` names a
+ * Under test (`isUnderTest()`, the one judge of that: a Vitest worker, or a child
+ * process with `NODE_ENV=test`) the record is off unless `CM_ANTIGRAVITY_NOTICE_DIR` names a
  * directory (the suite must not write into a real config directory or into the
  * checkout); that variable also relocates the file for a user who wants it.
  *
@@ -29,6 +30,7 @@ import {
   ANTIGRAVITY_TERMS_URL,
   USAGE_DECLARATION_ENV,
 } from '../../lib/tool-policy/policy';
+import { isUnderTest } from '../../lib/test-run-detection';
 import { ensureConfigDir, getConfigDir } from './install-context';
 import { clientWarning } from './tool-policy-failure';
 
@@ -48,11 +50,11 @@ export function antigravityNoticeLines(): string[] {
   ];
 }
 
-/** The directory of the record, or null when the record is off (under vitest, unnamed). */
+/** The directory of the record, or null when the record is off (under test, unnamed). */
 function recordDir(forWrite: boolean): string | null {
   const named = process.env[ANTIGRAVITY_NOTICE_DIR_ENV];
   if (named) return named;
-  if (process.env.VITEST) return null;
+  if (isUnderTest()) return null;
   return forWrite ? ensureConfigDir() : getConfigDir();
 }
 
