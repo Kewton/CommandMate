@@ -85,13 +85,40 @@ function createProgramFor(sourceText: string): ts.Program {
   return ts.createProgram({ rootNames: [POLICY_PATH], options: COMPILER_OPTIONS, host });
 }
 
-/** Positions that name a property (or a destructured property) rather than refer to a binding. */
+/**
+ * I6-k: strip parentheses, `as`, `satisfies`, `<T>` assertions and `!` (what the compiler's
+ * internal `skipOuterExpressions` does for these kinds; it is not in the public API).
+ */
+function skipOuterExpressions(expr: ts.Expression): ts.Expression {
+  let e = expr;
+  for (;;) {
+    if (
+      ts.isParenthesizedExpression(e) ||
+      ts.isAsExpression(e) ||
+      ts.isSatisfiesExpression(e) ||
+      ts.isTypeAssertionExpression(e) ||
+      ts.isNonNullExpression(e)
+    ) {
+      e = e.expression;
+    } else {
+      return e;
+    }
+  }
+}
+
+/**
+ * Positions that name a property (or a destructured property) or a label rather than refer
+ * to a binding.
+ */
 function isNonReferencePosition(node: ts.Identifier): boolean {
   const parent = node.parent;
   if (ts.isPropertyAccessExpression(parent) && parent.name === node) return true;
   if (ts.isQualifiedName(parent) && parent.right === node) return true;
   if (ts.isBindingElement(parent) && parent.propertyName === node) return true;
   if (ts.isConstTypeReference(parent)) return true; // `as const`
+  // I6-l: statement labels and the labels of break / continue
+  if (ts.isLabeledStatement(parent) && parent.label === node) return true;
+  if ((ts.isBreakStatement(parent) || ts.isContinueStatement(parent)) && parent.label === node) return true;
   if (
     (ts.isPropertyAssignment(parent) ||
       ts.isPropertyDeclaration(parent) ||
@@ -172,12 +199,11 @@ function checkPurity(sourceText: string): string[] {
     if (ts.isPropertyAccessExpression(node) && FORBIDDEN_PROPERTY_NAMES.has(node.name.text)) {
       violations.push(`${at(node)} access to '${node.name.text}'`);
     }
-    if (
-      ts.isElementAccessExpression(node) &&
-      ts.isStringLiteralLike(node.argumentExpression) &&
-      FORBIDDEN_PROPERTY_NAMES.has(node.argumentExpression.text)
-    ) {
-      violations.push(`${at(node)} access to '${node.argumentExpression.text}'`);
+    if (ts.isElementAccessExpression(node)) {
+      const key = skipOuterExpressions(node.argumentExpression);
+      if (ts.isStringLiteralLike(key) && FORBIDDEN_PROPERTY_NAMES.has(key.text)) {
+        violations.push(`${at(node)} access to '${key.text}'`);
+      }
     }
     if (ts.isIdentifier(node) && !isNonReferencePosition(node)) judgeReference(node);
     ts.forEachChild(node, visit);
@@ -337,6 +363,23 @@ describe('tool-policy (#4436)', () => {
       'const f = new Function("return 1"); void f;',
     ])('control (refused): %s', (bad) => {
       expect(checkPurity(bad).length).toBeGreaterThan(0);
+    });
+    it.each([
+      "void Object[('prototype')];",
+      "void Object['prototype' as const];",
+      'void Object[`prototype`];',
+      "void Object[<const>'prototype'];",
+      "void Object[('prototype' satisfies string)];",
+      "void Object[(('__proto__'))];",
+      "void Object['constructor'!];",
+    ])('I6-k: a forbidden key is judged after unwrapping parentheses / assertions: %s', (bad) => {
+      expect(checkPurity(bad).some((v) => /access to '(?:prototype|__proto__|constructor)'/.test(v))).toBe(true);
+    });
+    it.each([
+      'export function f(): void { done: { break done; } }',
+      'export function g(): void { outer: for (let i = 0; i < 2; i++) { for (let j = 0; j < 2; j++) { if (j) continue outer; } } }',
+    ])('I6-l: labels are not references: %s', (good) => {
+      expect(checkPurity(good)).toEqual([]);
     });
   });
 
