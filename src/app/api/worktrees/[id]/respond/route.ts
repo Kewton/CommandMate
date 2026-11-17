@@ -29,6 +29,11 @@ import {
 import { settleManualSendError } from '../prompt-response/answer-delivery';
 import { respondByDecisionId, respondToSolePendingDecision } from './structured-decision';
 import { screenAtSend } from './screen-at-send';
+import {
+  findToolPolicyDenial,
+  readBodyOrigin,
+  toolPolicyDeniedResponse,
+} from '../send/send-tool-policy';
 
 const logger = createLogger('api/respond');
 
@@ -68,6 +73,11 @@ const answersInFlight = getOrInitGlobal('__respondAnswersInFlight', () => new Se
  *   "success": true,
  *   "message": ChatMessage     // messageId shape only
  * }
+ *
+ * Issue #4437: every shape takes an optional `origin` (who started the answer,
+ * as the CLI reads it; absent = a person, as before; a non-string is 400). The
+ * tool policy is asked as soon as the tool is resolved and before anything is
+ * claimed, read or typed: a refusal is 409 `TOOL_POLICY_DENIED`.
  */
 export async function POST(
   req: NextRequest,
@@ -99,6 +109,11 @@ export async function POST(
       );
     }
 
+    // Issue #4437: after the answer's own 400, before anything is read.
+    const origin = readBodyOrigin(parsed.body.origin);
+    if (!origin.ok) return NextResponse.json({ error: origin.error }, { status: 400 });
+    const toolPolicy = { origin: origin.origin, originEvidence: parsed.body.originEvidence };
+
     const db = getDbInstance();
 
     // Issue #1932: the structured path. Taken only when no `messageId` was
@@ -117,6 +132,7 @@ export async function POST(
             answer,
             cliToolParam: bodyCliTool,
             instanceParam: bodyInstanceId,
+            toolPolicy,
           })
         : await respondToSolePendingDecision({
             db,
@@ -124,6 +140,7 @@ export async function POST(
             answer,
             cliToolParam: bodyCliTool,
             instanceParam: bodyInstanceId,
+            toolPolicy,
           });
     }
 
@@ -266,6 +283,16 @@ export async function POST(
     // Issue #868: respond to the same agent instance that asked the prompt. The
     // message's instanceId defaults to cliToolId (primary) for legacy messages.
     const instanceId = message.instanceId ?? cliToolId;
+
+    // Issue #4437 (design §1.3): the tool is known; nothing is claimed or typed yet.
+    const toolPolicyDenial = findToolPolicyDenial({
+      tool: cliToolId,
+      operation: 'respond',
+      ...toolPolicy,
+      worktreeId: id,
+      instanceId,
+    });
+    if (toolPolicyDenial) return toolPolicyDeniedResponse(toolPolicyDenial);
 
     // Get CLI tool instance from manager
     const manager = CLIToolManager.getInstance();

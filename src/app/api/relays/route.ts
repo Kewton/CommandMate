@@ -13,6 +13,10 @@
  *
  * Every refusal carries a stable `code`; the CLI branches on it and exits 2, so
  * a chain that was blocked reads as a decision rather than as an HTTP failure.
+ *
+ * Issue #4437: a relay with antigravity at either end is refused with 409
+ * `RELAY_TOOL_POLICY_DENIED` and a `policy` naming the end (`endpoint`) — no row,
+ * no system line. Lifted only by the server's usage declaration.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -30,6 +34,7 @@ import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { createLogger } from '@/lib/logger';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
+import { toolPolicyDetail } from '@/app/api/worktrees/[id]/send/send-tool-policy';
 
 const logger = createLogger('api/relays');
 
@@ -180,11 +185,18 @@ export async function POST(request: NextRequest) {
 
     if (!result.ok) {
       const { code, message } = result.refusal;
-      // 404 for "that worktree does not exist", 409 for the four policy
-      // refusals: the request was well formed and the server is healthy, the
+      // 404 for "that worktree does not exist", 409 for the policy refusals
+      // (the four loop rules and #4437's tool policy): the request was well formed and the server is healthy, the
       // arrangement it asks for is simply one the ledger will not hold.
       const status = code === 'RELAY_WORKTREE_NOT_FOUND' ? 404 : 409;
-      return NextResponse.json({ error: message, code }, { status });
+      // Issue #4437: the tool policy's refusal says which end and why.
+      const toolPolicy = 'toolPolicy' in result.refusal ? result.refusal.toolPolicy : undefined;
+      return NextResponse.json(
+        toolPolicy
+          ? { error: message, code, policy: { ...toolPolicyDetail(toolPolicy.decision), endpoint: toolPolicy.endpoint } }
+          : { error: message, code },
+        { status }
+      );
     }
 
     // Issue #3957: `bindMode` at the top level too, so a CLI can confirm the

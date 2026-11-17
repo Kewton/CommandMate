@@ -46,6 +46,7 @@ import {
 import { isRelayDeliveryClaimed } from '@/lib/relay/relay-delivery-claims';
 import { relayWorktreeExists, resolveRelaySession } from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('relay-service');
@@ -220,8 +221,25 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     parentHops: findParentRelayHops(db, input.from),
     allowRelayChain: input.allowRelayChain === true,
     openBetween: countOpenRelaysBetween(db, input.from, input.to),
+    // Issue #4437: rule 0 — each end's tool by the resolver the send route and
+    // the delivery use, and the declaration as stated (no credentials read).
+    tools: {
+      from: resolveRelaySession(db, input.from).cliToolId,
+      to: resolveRelaySession(db, input.to).cliToolId,
+      declaration: readUsageDeclaration(),
+    },
   });
-  if (isRelayRefusal(verdict)) return { ok: false, refusal: verdict };
+  if (isRelayRefusal(verdict)) {
+    if (verdict.toolPolicy) {
+      logger.info('relay-tool-policy-denied', {
+        from: `${input.from.worktreeId}/${input.from.instanceId}`,
+        to: `${input.to.worktreeId}/${input.to.instanceId}`,
+        endpoint: verdict.toolPolicy.endpoint,
+        tool: verdict.toolPolicy.decision.tool,
+      });
+    }
+    return { ok: false, refusal: verdict };
+  }
 
   const now = input.now ?? Date.now();
   const relay = createRelay(db, {
