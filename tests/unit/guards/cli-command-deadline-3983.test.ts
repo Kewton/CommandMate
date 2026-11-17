@@ -71,7 +71,21 @@ const SERVER = {
   '/current-output': frame,
   '/messages': [],
   'POST /capture': { output: 'the pane reply' },
-  'POST /send': { id: 'm1', timestamp: '2026-10-30T00:00:00.000Z' },
+  // Issue #4344: ask reads the attribution table before the send and the
+  // ask's own attribution after the turn; both are in the runs below.
+  '/api/asks/capabilities': { protocol: 1, tools: { claude: true, codex: true } },
+  'GET /api/asks/': (url: URL) => ({
+    askId: url.pathname.split('/').pop(), state: 'matched', reason: null, reply: 'the reply',
+    sendState: 'sent', nativeInputSeen: true, notified: false,
+  }),
+  'POST /send': (_url: URL, init: RequestInit | undefined) => {
+    const ask = (JSON.parse(String(init?.body ?? '{}')) as { ask?: { id: string } }).ask;
+    return {
+      id: 'm1',
+      timestamp: '2026-10-30T00:00:00.000Z',
+      ...(ask ? { ask: { id: ask.id, state: 'pending', reason: null, sendState: 'sent' } } : {}),
+    };
+  },
   'POST /api/relays': RELAY_CREATED,
   'POST /verify': { status: 202, data: { runId: 7 } },
   '/verify/runs/7': verifyRun('passed'),
@@ -147,7 +161,7 @@ const ALLOWED_CATCHES: readonly { file: string; fn: string; why: string }[] = [
   {
     file: 'src/cli/commands/capture.ts',
     fn: 'readSqueezedPaneTail',
-    why: 'ask reads the pane after completion with the reply-grace client; a pane it cannot read is the fallback working as designed, not a lost --timeout.',
+    why: 'Issue #4344: no longer reached from ask (its reply is the ask\'s attribution, never the pane); capture.ts is left unchanged (invariant 7), and an unreadable pane is "no reply to show", not a lost --timeout.',
   },
   {
     file: 'src/cli/commands/message-dispatch.ts',

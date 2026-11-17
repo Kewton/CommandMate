@@ -9,7 +9,10 @@
  *
  * A fixed table compiled into the build, narrowed by each tool's installed version
  * (H5: below `ASK_ATTRIBUTION_MIN_VERSIONS`, or unreadable, is false; the probe is
- * `lib/updates/agent-versions`, cached). No database. Under the same middleware
+ * `lib/updates/agent-versions`, cached). `versions` says, per tool in the table
+ * with a minimum, why it is on or off for its version (`ok` / `too_old` /
+ * `unreadable`, with the minimum and what was read), so the CLI need not call a
+ * too-old claude "a tool with no ask attribution". No database. Under the same middleware
  * auth as every other API route.
  */
 

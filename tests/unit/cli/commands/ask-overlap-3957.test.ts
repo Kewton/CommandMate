@@ -21,6 +21,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { restoreFetch } from '../../../helpers/mock-api';
 
+import { answerFromRows, installAskLedger, type AskLedgerOptions } from './ask-ledger-fake-4344';
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -159,6 +160,8 @@ interface Scenario {
   onSend?: () => void;
   /** The `/send` 201 body. */
   sent: Record<string, unknown>;
+  /** Issue #4344: the ledger's answer (default: matched with the newest `<tool>-turn:` row). */
+  ledger?: AskLedgerOptions['answer'];
 }
 
 const messageUrls: string[] = [];
@@ -187,7 +190,13 @@ function mockServer(scenario: Scenario): void {
     if (path.includes('/capture')) return Promise.resolve(json({ output: '' }));
     return Promise.resolve(json(frame(scenario.cliToolId, scenario.done(), scenario.turn())));
   }) as unknown as typeof fetch;
+  // Issue #4344: the reply is read by the ask's id since PR3 (answer derived
+  // from the scenario's rows, so `messageUrls` keeps only the CLI's own reads).
+  installAskLedger({ answer: scenario.ledger ?? (() => answerFromRows(scenario.rows())) });
 }
+
+/** Issue #4344: the `--json` keys a matched reply now adds (design §0.2). */
+const MATCHED_KEYS = { askId: expect.any(String), attribution: { state: 'matched', reason: null, notified: false } };
 
 async function runAsk(argv: string[], advanceMs = 60_000): Promise<void> {
   const { createAskCommand } = await import('../../../../src/cli/commands/ask');
@@ -245,7 +254,7 @@ describe('the send API says the instance was mid-turn at the send (Issue #3957)'
 
     expect(mockExit).toHaveBeenCalledWith(0);
     expect(payload()).toEqual({
-      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B',
+      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B', ...MATCHED_KEYS,
     });
     expect(stderr()).not.toContain('overlapped');
   });
@@ -265,12 +274,16 @@ describe('the send API says the instance was mid-turn at the send (Issue #3957)'
         userRow('ub', BODY_B, NOW + 1),
         replyRow('ACK-A', NOW + 500),
       ],
+      ledger: () => ({ state: 'ambiguous', reason: 'shared_turn', nativeInputSeen: true }),
     });
 
     await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toMatchObject({ reply: 'ACK-A', overlapped: true });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): A's `ACK-A` is no longer printed as B's reply (the ledger says the
+    // turn was shared). The overlap key, this test's subject, is unchanged.
+    expect(payload()).toMatchObject({ reply: null, attribution: { state: 'ambiguous', reason: 'shared_turn' }, overlapped: true });
   });
 
   it('askedAt → the old turn ends → input: turnOpenAtSend false is not an overlap, though a poll saw that turn open at askedAt', async () => {
@@ -298,7 +311,7 @@ describe('the send API says the instance was mid-turn at the send (Issue #3957)'
 
     expect(mockExit).toHaveBeenCalledWith(0);
     expect(payload()).toEqual({
-      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B',
+      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B', ...MATCHED_KEYS,
     });
     expect(stderr()).not.toContain('overlapped');
   });
@@ -342,12 +355,15 @@ describe('the send API says the instance was mid-turn at the send (Issue #3957)'
         userRow('ua', BODY_A, NOW + 2_000),
         ...(Date.now() >= DONE_AT ? [replyRow('ACK-A', DONE_AT)] : []),
       ],
+      ledger: () => ({ state: 'ambiguous', reason: 'shared_turn', nativeInputSeen: true }),
     });
 
     await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toMatchObject({ reply: 'ACK-A', overlapped: true });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): A's `ACK-A` is no longer printed as B's reply (ambiguous/shared_turn).
+    expect(payload()).toMatchObject({ reply: null, attribution: { state: 'ambiguous', reason: 'shared_turn' }, overlapped: true });
     expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
   });
 });
@@ -388,7 +404,7 @@ describe('the earlier-ask side counts from the stamp of the row the send returne
 
     expect(mockExit).toHaveBeenCalledWith(0);
     expect(payload()).toEqual({
-      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B',
+      worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B', ...MATCHED_KEYS,
     });
     expect(stderr()).not.toContain('overlapped');
   });
