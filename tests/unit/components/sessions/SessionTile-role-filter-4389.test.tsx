@@ -162,3 +162,29 @@ describe('[#4389] selectTileInstances', () => {
     expect(selectTileInstances(roster, ['zzz'])).toHaveLength(3);
   });
 });
+
+describe('[#4389-f1] the tile heading link under a role filter', () => {
+  const headingHref = (ids?: readonly string[]) => {
+    const view = render(
+      <ToastProvider>
+        <SessionTile worktree={worktree()} enabled instanceIds={ids} />
+      </ToastProvider>,
+    );
+    return within(view.container).getByTestId('session-tile-branch-wt-1').getAttribute('href');
+  };
+
+  it('T1: carries ?instance= of the first match', () => {
+    expect(headingHref(['codex', 'codex-2'])).toBe('/worktrees/wt-1?instance=codex');
+  });
+
+  it('T2: equals the list row href for the same worktree and filter', async () => {
+    const { buildSessionRowHref } = await import('@/lib/sidebar-utils');
+    expect(headingHref(['codex-2', 'codex'])).toBe(
+      buildSessionRowHref({ worktreeId: 'wt-1', instanceId: 'codex-2' }),
+    );
+  });
+
+  it('T3: without a filter the link is the plain worktree link', () => {
+    expect(headingHref()).toBe('/worktrees/wt-1');
+  });
+});
