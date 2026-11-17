@@ -382,15 +382,31 @@ describe('I7c: a refused send leaves nothing behind (Issue #4437)', () => {
 /**
  * I7e (re-instruction 2): the check before the writes is a courtesy; `/send` is the guard.
  * When the check cannot answer, or the default target turns antigravity after it, the
- * real send route still refuses: nothing typed, exit 33, the reason on stderr (not
- * necessarily line 1). What the check could not stop (a task row, a role setting) is the
+ * real send route still refuses — or, for `--auto-yes`, the Auto-Yes route before it
+ * (#4436) —: nothing typed, exit 33, the reason on stderr (not necessarily line 1;
+ * line 1 for `--auto-yes` alone). What the check could not stop (a task row, a role setting) is the
  * known limitation and is not asserted here.
  */
 describe('I7e: the send route refuses what the check could not (Issue #4437)', () => {
-  function expectRefusedAndSaid(result: { code: number; stderr: string[] }): void {
+  /**
+   * `refusedAt: 'auto-yes'` (re-instruction 3): since #4436 (L1) the Auto-Yes route
+   * refuses arming antigravity first, so `/send` is never reached; that refusal is the
+   * send's own (exit 33) and its reason is stderr's very first line.
+   */
+  function expectRefusedAndSaid(
+    result: { code: number; stderr: string[] },
+    refusedAt: 'send' | 'auto-yes' = 'send',
+  ): void {
     expect(result.code).toBe(33);
     expect(fakeTool.typed).toEqual([]);
-    expect(requests).toContain(`POST /api/worktrees/${WT}/send`);
+    if (refusedAt === 'send') {
+      expect(requests).toContain(`POST /api/worktrees/${WT}/send`);
+    } else {
+      expect(requests).toContain(`POST /api/worktrees/${WT}/auto-yes`);
+      expect(requests).not.toContain(`POST /api/worktrees/${WT}/send`);
+      expect(result.stderr[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
+      expect(getAutoYesState(WT, 'antigravity', 'antigravity')?.enabled ?? false).toBe(false);
+    }
     const text = result.stderr.join('\n');
     expect(text).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /m);
     expect(text).toContain(ANTIGRAVITY_TERMS_URL);
@@ -417,7 +433,7 @@ describe('I7e: the send route refuses what the check could not (Issue #4437)', (
     });
 
     it('--auto-yes: exit 33, nothing typed, the reason said', async () => {
-      expectRefusedAndSaid(await send('hello', '--instance', 'antigravity', '--auto-yes'));
+      expectRefusedAndSaid(await send('hello', '--instance', 'antigravity', '--auto-yes'), 'auto-yes');
     });
   });
 

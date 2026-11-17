@@ -1207,7 +1207,13 @@ tool policy (antigravity, above; nothing typed, do not send it again).
             if (!onlyIfOff || !(error instanceof ApiError) || error.apiCode !== 'AUTO_YES_ALREADY_ENABLED') {
               await failTask();
               if (relay) await cancelRelayQuietly(client, relay.id);
-              throw error;
+              // Issue #4437 (re-instruction 3): the Auto-Yes route refuses antigravity with
+              // its own 409 TOOL_POLICY_DENIED (#4436) — reached when the check before the
+              // writes could not answer. The same refusal as the send's: exit 33, reason first.
+              const denial = error instanceof ApiError
+                ? toolPolicyDenialFromResponse(error.statusCode ?? 0, error.payload, { cliToolId: agent, instanceId })
+                : null;
+              throw denial ?? error;
             }
             priorAutoYes = true;
           }

@@ -466,6 +466,8 @@ describe('respond (Issue #4437)', () => {
   });
 });
 
+/** What another 409 of the Auto-Yes route exits with in `send` (an `ApiError`: unexpected, 99). */
+const AUTO_YES_OTHER_409_EXIT = 99;
 const TOKEN_WARNING = 'Warning: --token flag exposes token in process list and shell history. Use CM_AUTH_TOKEN environment variable instead.';
 
 describe('I7d: the reason is stderr\'s first line in every combination (Issue #4437)', () => {
@@ -583,6 +585,63 @@ describe('I7e: the send refuses even when the check before it cannot (Issue #443
       expectReasonSomewhere('TOOL_POLICY_DENIED');
       expect(stderrLines()).toContain(TOKEN_WARNING);
     });
+  });
+
+  /**
+   * Re-instruction 3: after #4436 (L1) the Auto-Yes route refuses arming antigravity
+   * with its own 409 `TOOL_POLICY_DENIED` (no `policy`; `reason` and `links` flat). With
+   * the check unanswered, `send --auto-yes` reaches it before `/send`: the same refusal
+   * as the send's, exit 33, the reason stderr's very first line, nothing sent.
+   */
+  const L1_AUTO_YES_DENIED = {
+    status: 409,
+    data: {
+      code: 'TOOL_POLICY_DENIED',
+      error: TOOL_POLICY_DENIED_MESSAGE,
+      reason: 'ANTIGRAVITY_CONSUMER_TERMS',
+      links: { terms: ANTIGRAVITY_TERMS_URL, faq: ANTIGRAVITY_FAQ_URL },
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+    },
+  };
+
+  describe.each(CHECK_FAILS)('the check answers %s, and the Auto-Yes route refuses (L1)', (_label, checkResponse) => {
+    it.each([['without --token', []], ['with --token', ['--token', 'secret-token']]] as const)(
+      '--auto-yes %s: exit 33, line 1 is the reason, /send never reached',
+      async (_t, token) => {
+        const calls = mockRoutes([
+          { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: checkResponse },
+          { match: '/api/worktrees/wt-g/auto-yes', response: L1_AUTO_YES_DENIED },
+          { match: '/api/worktrees/wt-g/send', response: { status: 201, data: { id: 'm', role: 'user', content: 'x', sendOutcome: 'sent' } } },
+        ]);
+        const code = await runUntilExit(() => runSend(['wt-g', 'x', '--instance', 'antigravity', '--auto-yes', ...token]));
+        expect(code).toBe(33);
+        expect(to(calls, '/send')).toEqual([]);
+        expect(stderrLines()[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
+        expect(stderrLines()[1]).toContain(ANTIGRAVITY_TERMS_URL);
+        expect(stderrLines()[1]).toContain(ANTIGRAVITY_FAQ_URL);
+        // That body has no `unlock`: the shared module's sentence names the declaration.
+        expect(stderrLines()[2]).toMatch(/^To lift it: .*CM_ANTIGRAVITY_USAGE=api-key.*restart/);
+        const text = stderrLines().join('\n');
+        expect(text).toContain('sent: false');
+        expect(text).toContain('operation=auto-yes');
+        expect(text).not.toMatch(/Unexpected HTTP status|safe to send it again|Message sent\./);
+        if (token.length > 0) expect(stderrLines().slice(1)).toContain(TOKEN_WARNING);
+      },
+    );
+  });
+
+  it('negative control — another 409 of the Auto-Yes route keeps its exit (not 33)', async () => {
+    mockRoutes([
+      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 500, data: { error: 'boom' } } },
+      {
+        match: '/api/worktrees/wt-g/auto-yes',
+        response: { status: 409, data: { error: 'A different Auto-Yes grant is on for this instance', code: 'AUTO_YES_GRANT_CHANGED' } },
+      },
+    ]);
+    const code = await runUntilExit(() => runSend(['wt-g', 'x', '--instance', 'antigravity', '--auto-yes']));
+    expect(code).toBe(AUTO_YES_OTHER_409_EXIT);
+    expect(stderrLines().join('\n')).not.toContain('TOOL_POLICY_DENIED');
   });
 
   it('send --contract naming no target: the default turns antigravity after the check, /send refuses, exit 33', async () => {

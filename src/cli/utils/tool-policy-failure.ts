@@ -49,7 +49,8 @@ export function isSendFamilyRoute(path: string): boolean {
  * Where a 409 `TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED` becomes a
  * {@link ToolPolicyDeniedError}: the routes that type into a session and relay
  * creation. Elsewhere (the Auto-Yes route, #4436) it stays an `ApiError`, read by that
- * command's own handling.
+ * command's own handling; `send --auto-yes` turns that one into a refusal itself
+ * ({@link toolPolicyDenialFromResponse} reads its body too).
  */
 export function isToolPolicyRoute(path: string): boolean {
   return isSendFamilyRoute(path) || path === '/api/relays';
@@ -161,6 +162,30 @@ function readPolicy(value: unknown): ToolPolicyDetailResponse | null {
     : null;
 }
 
+/**
+ * The Auto-Yes route's refusal (#4436, L1) carries no `policy`: `reason`, `links` and
+ * the resolved `cliToolId` sit at the top of the body, and arming is judged as
+ * `auto-yes` from origin `legacy`. Read as the same detail, so `send --auto-yes`
+ * refused there says it the way a refused send does (re-instruction 3). No `unlock`
+ * in that body: the shared module's sentence is used.
+ */
+function readFlatPolicy(payload: Record<string, unknown>): ToolPolicyDetailResponse | null {
+  if (typeof payload.reason !== 'string') return null;
+  const links = (payload.links ?? {}) as { terms?: unknown; faq?: unknown };
+  return {
+    tool: typeof payload.cliToolId === 'string' ? payload.cliToolId : 'antigravity',
+    operation: 'auto-yes',
+    origin: 'legacy',
+    reason: payload.reason,
+    declaration: 'personal',
+    links: {
+      terms: typeof links.terms === 'string' ? links.terms : ANTIGRAVITY_TERMS_URL,
+      faq: typeof links.faq === 'string' ? links.faq : ANTIGRAVITY_FAQ_URL,
+    },
+    unlock: '',
+  };
+}
+
 function readRequestTarget(body: unknown): RefusedRequestTarget {
   if (body === null || typeof body !== 'object') return {};
   const record = body as Record<string, unknown>;
@@ -183,7 +208,8 @@ export function toolPolicyDenialFromResponse(
   if (status !== 409 || payload === null || typeof payload !== 'object') return null;
   const code = (payload as { code?: unknown }).code;
   if (code !== TOOL_POLICY_DENIED && code !== RELAY_TOOL_POLICY_DENIED) return null;
-  const policy = readPolicy((payload as { policy?: unknown }).policy);
+  const policy = readPolicy((payload as { policy?: unknown }).policy)
+    ?? readFlatPolicy(payload as Record<string, unknown>);
   return new ToolPolicyDeniedError(
     code,
     policy,
