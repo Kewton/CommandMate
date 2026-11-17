@@ -15,6 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withUsageDeclaration } from '../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -196,6 +197,9 @@ describe('[#2849] the hook POST opens the gate for the instance it names', () =>
 });
 
 describe('[#2849] the record does not depend on how the question was answered', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   it('is written when Auto-Yes is off and the route abstains', async () => {
     const { body } = await postJson(agyPayload(), agyQuery('antigravity'));
 
@@ -206,9 +210,11 @@ describe('[#2849] the record does not depend on how the question was answered', 
   it('is written when Auto-Yes is on', async () => {
     setAutoYesEnabled(WT, 'antigravity', true, ONE_HOUR_MS);
 
-    const { status } = await postJson(agyPayload(), agyQuery('antigravity'));
+    const { status, body } = await postJson(agyPayload(), agyQuery('antigravity'));
 
     expect(status).toBe(200);
+    // Premise (Issue #4436): Auto-Yes really answered — this is not the abstaining case above.
+    expect(body).toEqual({ decision: 'allow' });
     expect(isAnswerable(PRIMARY)).toBe(true);
   });
 });

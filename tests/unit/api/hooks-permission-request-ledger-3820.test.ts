@@ -20,7 +20,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useUsageDeclaration } from '../../helpers/usage-declaration';
+import { withUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -201,7 +201,7 @@ describe('[#3820] an allow on a tool whose allow draws no dialog', () => {
 
 describe('[#3820] an allow on agy (design §5)', () => {
   // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
-  useUsageDeclaration('api-key');
+  withUsageDeclaration('api-key');
 
   it('writes no history row: the dialog agy draws anyway is answered — and recorded — on the screen', async () => {
     setAutoYesEnabled(WT, 'antigravity', true, ONE_HOUR_MS);
@@ -339,6 +339,9 @@ describe('[#3820] a delivery the helper swallowed (review item 4)', () => {
 });
 
 describe('[#3820] the CLI mode a PermissionRequest states (design §3.4)', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   it('writes the first mode and a change, and nothing for a tool whose payload has none', async () => {
     setAutoYesEnabled(WT, 'claude', true, ONE_HOUR_MS);
     setAutoYesEnabled(WT, 'antigravity', true, ONE_HOUR_MS);
@@ -346,7 +349,8 @@ describe('[#3820] the CLI mode a PermissionRequest states (design §3.4)', () =>
     await post('claude');
     await post('claude');
     await post('claude', { ...PAYLOADS.claude(), permission_mode: 'acceptEdits' });
-    await post('antigravity');
+    // Premise (Issue #4436): agy's request goes the same allow path as claude's.
+    expect(await post('antigravity')).toEqual({ status: 200, body: { decision: 'allow' } });
 
     expect(lines(EV.cliModeObserved)).toEqual([
       expect.objectContaining({ cliToolId: 'claude', worktreeId: WT, instanceId: 'claude', mode: 'default', change: 'first' }),
@@ -356,6 +360,9 @@ describe('[#3820] the CLI mode a PermissionRequest states (design §3.4)', () =>
 });
 
 describe('[#3820] the ledger failing changes nothing the agent is told (design §8.1)', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   async function responses() {
     setAutoYesEnabled(WT, 'claude', true, ONE_HOUR_MS);
     setAutoYesEnabled(WT, 'antigravity', true, ONE_HOUR_MS);
@@ -370,6 +377,8 @@ describe('[#3820] the ledger failing changes nothing the agent is told (design �
 
   it('returns the same bodies and statuses when the ledger throws', async () => {
     const baseline = await responses();
+    // Premise (Issue #4436): agy's allow is among the responses the ledger must not change.
+    expect(baseline.allowAgy).toEqual({ status: 200, body: { decision: 'allow' } });
     db!.prepare('DELETE FROM chat_messages').run();
     resetAutoYesConfirmationLedgerForTests();
     setAutoYesLedgerFaultForTests(new Error('ledger down'));
@@ -383,6 +392,8 @@ describe('[#3820] the ledger failing changes nothing the agent is told (design �
 
   it('returns the same bodies and statuses when the ledger’s logger throws', async () => {
     const baseline = await responses();
+    // Premise (Issue #4436): agy's allow is among the responses the ledger must not change.
+    expect(baseline.allowAgy).toEqual({ status: 200, body: { decision: 'allow' } });
     db!.prepare('DELETE FROM chat_messages').run();
     resetAutoYesConfirmationLedgerForTests();
     ledgerLoggerFault.current = true;

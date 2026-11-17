@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useUsageDeclaration } from '../../helpers/usage-declaration';
+import { withUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 
@@ -64,11 +64,12 @@ vi.mock('@/lib/cli-tools/session-liveness', () => ({
 }));
 
 import {
+  buildCompositeKey,
   clearAllAutoYesStates,
   POLLING_INTERVAL_MS,
   setAutoYesEnabled,
 } from '@/lib/auto-yes-state';
-import { clearAllPollerStates, startAutoYesPolling, stopAllAutoYesPolling } from '@/lib/auto-yes-poller';
+import { clearAllPollerStates, isPollerActive, startAutoYesPolling, stopAllAutoYesPolling } from '@/lib/auto-yes-poller';
 import { resetAntigravityPermissionReceiptsForTests } from '@/lib/polling/antigravity-permission-receipts';
 import { clearAgentStopEvents, recordAgentEvent } from '@/lib/session/agent-event-state';
 import { startWaitingObservation } from '@/lib/session/waiting-episode-binding';
@@ -159,7 +160,7 @@ afterEach(() => {
 
 describe('[#3798] the poller and a person\'s screen', () => {
   // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
-  useUsageDeclaration('api-key');
+  withUsageDeclaration('api-key');
 
   it('answer → survey: poller opens/rebinds screen; stop leaves it; human answers; poller not-waiting closes it', async () => {
     // The confirmation's wait, read before its turn; the answer's post_tool_use binds it.
@@ -210,7 +211,7 @@ describe('[#3798] the poller and a person\'s screen', () => {
 
 describe('[#3798] the receipt window does not decide the reading (I9)', () => {
   // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
-  useUsageDeclaration('api-key');
+  withUsageDeclaration('api-key');
 
   it('a receipt-window-outside agy confirmation is not screen; stop closes the wait', async () => {
     // No permission receipt: Auto-Yes leaves the confirmation alone (no_prompt).
@@ -226,6 +227,9 @@ describe('[#3798] the receipt window does not decide the reading (I9)', () => {
 });
 
 describe('[#3798] two observers, one wait', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   it.each([
     ['a survey', SURVEY, 'screen'],
     ['a confirmation outside the receipt window', CONFIRMATION, 'unattributed'],
@@ -235,6 +239,9 @@ describe('[#3798] two observers, one wait', () => {
     expect(opened.binding.kind).toBe(kind);
     for (let i = 0; i < 3; i++) {
       await pollerTick(frame);
+      // Premise (Issue #4436): the poller really is the second observer — it has
+      // not stopped (a tool-policy refusal stops it on its first tick).
+      expect(isPollerActive(buildCompositeKey(WT, TOOL, TOOL))).toBe(true);
       await statusProbe(frame);
     }
     expect(record()).toMatchObject({ episodeId: opened.episodeId, since: opened.since });

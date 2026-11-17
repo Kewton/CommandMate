@@ -73,7 +73,7 @@ for (const key of AGENT_CORRELATION_ENV_KEYS) {
 // antigravity's unattended runs and Auto-Yes answering. Deleted rather than left
 // alone so a developer's own `CM_ANTIGRAVITY_USAGE` cannot change a verdict.
 // A test that needs a declared plan sets it inside its own file and restores it
-// (`useUsageDeclaration` in tests/helpers/usage-declaration.ts).
+// (`withUsageDeclaration` in tests/helpers/usage-declaration.ts).
 delete process.env.CM_ANTIGRAVITY_USAGE;
 
 // Issue #1760: keep agent config generation out of the developer's home.

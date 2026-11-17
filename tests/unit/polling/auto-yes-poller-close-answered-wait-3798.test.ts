@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useUsageDeclaration } from '../../helpers/usage-declaration';
+import { withUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { runMigrations } from '@/lib/db/db-migrations';
 
@@ -149,7 +149,7 @@ afterEach(() => {
 
 describe('[#3798] the poller closes the wait it answered once the prompt is gone', () => {
   // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
-  useUsageDeclaration('api-key');
+  withUsageDeclaration('api-key');
 
   it('positive: answered this episode, then an idle pane — the episode closes (one closing edge)', async () => {
     const opened = openWait();
@@ -202,7 +202,7 @@ describe('[#3798] the poller closes the wait it answered once the prompt is gone
 
 describe('[#3798] an answered prompt followed by a screen only a person can drive keeps the wait', () => {
   // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
-  useUsageDeclaration('api-key');
+  withUsageDeclaration('api-key');
 
   for (const name of ['survey-after-deny.reconstructed', 'picker-switch-model']) {
     it(`negative: ${name} after the answer — the same episode stays, as a person's screen`, async () => {

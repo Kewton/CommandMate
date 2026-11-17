@@ -9,7 +9,8 @@
  * `describe` (or file) that needs it and nowhere else.
  *
  * It registers its own `beforeEach`/`afterEach` and restores whatever was there
- * before, so the declaration never leaks into the next test.
+ * before, so the declaration never leaks into the next test. Not for
+ * `describe.concurrent` / `it.concurrent`: the variable is process-wide.
  *
  * @module tests/helpers/usage-declaration
  */
@@ -23,7 +24,7 @@ import { USAGE_DECLARATION_ENV } from '@/lib/tool-policy/policy';
  *
  * @param value - The declared plan (`api-key` or `enterprise`)
  */
-export function useUsageDeclaration(value: 'api-key' | 'enterprise'): void {
+export function withUsageDeclaration(value: 'api-key' | 'enterprise'): void {
   let saved: string | undefined;
   beforeEach(() => {
     saved = process.env[USAGE_DECLARATION_ENV];
