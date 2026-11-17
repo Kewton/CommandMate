@@ -32,7 +32,7 @@ import {
   type ToolPolicyDecision,
 } from '../../lib/tool-policy/policy';
 import { ToolPolicyExitCode } from '../types';
-import type { ToolPolicyDeniedResponse, ToolPolicyDetailResponse } from '../types/api-responses';
+import type { ToolPolicyDeniedResponse, ToolPolicyDetailResponse } from '../types/tool-policy-responses';
 
 /**
  * The routes that type into a session, whose body takes `origin` (PR1 of #4437):
