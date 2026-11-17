@@ -18,6 +18,15 @@
  *  4. **A session may not relay to itself** (`RELAY_SELF_TARGET`), which is a
  *     one-message loop with no second party in it at all.
  *
+ * And one rule that is not about loops (Issue #4437): **a relay may not have
+ * antigravity at either end** while no API-key / enterprise use is declared
+ * (`RELAY_TOOL_POLICY_DENIED`, Google Antigravity terms §6). A relay is an agent
+ * driving another agent through CommandMate, which is what the consumer terms
+ * restrict. It is asked right after the self-target typo and before every other
+ * refusal, so a flag that lifts one of those (`--allow-relay-chain`) is never
+ * read as the way past it. {@link findRelayToolPolicyDenial} is the same rule
+ * for the delivery of a relay already open (`relay-delivery`).
+ *
  * Pure: every decision is a function of values the caller already read. The
  * database work — finding the parent relay, counting the open ones — is
  * `relay-service`'s, so the rules can be tested without a schema.
@@ -26,6 +35,13 @@
  */
 
 import type { RelayEndpoint } from '@/lib/relay/types';
+import type { CLIToolType } from '@/lib/cli-tools/types';
+import {
+  decideToolPolicy,
+  RELAY_TOOL_POLICY_DENIED,
+  type ToolPolicyDecision,
+  type UsageDeclaration,
+} from '@/lib/tool-policy/policy';
 
 /** How long a relay stands before it is swept. 24h, per the Issue. */
 export const DEFAULT_RELAY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -72,12 +88,54 @@ export type RelayRefusalCode =
   | 'RELAY_CHAIN_BLOCKED'
   | 'RELAY_HOPS_EXCEEDED'
   | 'RELAY_DUPLICATE_PENDING'
-  | 'RELAY_SELF_TARGET';
+  | 'RELAY_SELF_TARGET'
+  | typeof RELAY_TOOL_POLICY_DENIED;
+
+/** A tool policy's refusal of one end (Issue #4437). */
+export type DeniedToolPolicy = Extract<ToolPolicyDecision, { allowed: false }>;
+
+/** Which end of a relay the tool policy refused, and its decision (Issue #4437). */
+export interface RelayToolPolicyDenial {
+  endpoint: 'from' | 'to';
+  decision: DeniedToolPolicy;
+}
 
 /** A refusal, with the sentence the CLI prints. */
 export interface RelayRefusal {
   code: RelayRefusalCode;
   message: string;
+  /** Issue #4437: set on `RELAY_TOOL_POLICY_DENIED` only. */
+  toolPolicy?: RelayToolPolicyDenial;
+}
+
+/** The tools at both ends and the usage declaration, for rule 0 (Issue #4437). */
+export interface RelayEndpointTools {
+  from: CLIToolType;
+  to: CLIToolType;
+  declaration: UsageDeclaration;
+}
+
+/** Issue #4437: the sentence of `RELAY_TOOL_POLICY_DENIED`. */
+export const RELAY_TOOL_POLICY_DENIED_MESSAGE =
+  'A relay with antigravity at either end is refused by default under the Google Antigravity terms §6 '
+  + '(consumer plans). No relay was opened and nothing was typed.';
+
+/**
+ * Issue #4437: the first end of a relay the tool policy refuses (`relay` from
+ * the server's own `relay` origin), `from` before `to`; null when both may be
+ * driven. Pure: the declaration is an argument.
+ */
+export function findRelayToolPolicyDenial(tools: RelayEndpointTools): RelayToolPolicyDenial | null {
+  for (const endpoint of ['from', 'to'] as const) {
+    const decision = decideToolPolicy({
+      tool: tools[endpoint],
+      operation: 'relay',
+      origin: 'relay',
+      declaration: tools.declaration,
+    });
+    if (!decision.allowed) return { endpoint, decision };
+  }
+  return null;
 }
 
 /** What {@link decideRelayCreation} is asked about. */
@@ -94,6 +152,11 @@ export interface RelayCreationInput {
   allowRelayChain: boolean;
   /** Open relays already running from `from` to `to`. */
   openBetween: number;
+  /**
+   * Issue #4437: the tools at both ends, for rule 0. Absent, rule 0 is not
+   * asked (a caller with no tools to name); `relay-service` always passes it.
+   */
+  tools?: RelayEndpointTools;
 }
 
 /** A relay that may be created, and at what depth. */
@@ -114,6 +177,9 @@ export function isSameEndpoint(a: RelayEndpoint, b: RelayEndpoint): boolean {
  * order they can act on: "you are the same session" is a typo, "this would be a
  * chain" is a flag away, "the chain is too deep" and "you already have one" are
  * decisions about work in flight.
+ *
+ * Issue #4437: the tool policy (rule 0) is asked right after the typo and
+ * before the others — no flag of this request lifts it, only a declaration.
  */
 export function decideRelayCreation(
   input: RelayCreationInput
@@ -125,6 +191,11 @@ export function decideRelayCreation(
         'A session cannot relay a reply to itself. --reply-to must name a different '
         + 'worktree or a different agent instance.',
     };
+  }
+
+  const toolPolicy = input.tools ? findRelayToolPolicyDenial(input.tools) : null;
+  if (toolPolicy) {
+    return { code: RELAY_TOOL_POLICY_DENIED, message: RELAY_TOOL_POLICY_DENIED_MESSAGE, toolPolicy };
   }
 
   const hops = input.parentHops === null ? 1 : input.parentHops + 1;

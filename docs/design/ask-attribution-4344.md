@@ -466,3 +466,15 @@ PM 経由で人が決めた。PR1 はこの決定と §3.6 の全セル・不変
 | F5 refresh | `GET /api/asks/:askId` の pending 時の読み取りを `refreshAskFromReader`（`lib/ask/ask-refresh.ts`）で tool ごとに振り分ける | route、`codex/ask-refresh.ts` |
 | F6・Q3 capability | Q3 の実記録（0.167.2、9,428 bytes の封筒つき貼り付け、本文が全文一致）を fixture にし、`ASK_ATTRIBUTION_TOOLS.codex=true`・最低版 `0.167.2`。ガードは codex の必須 record（版・封筒つき `UserMessage` の `thread_id`・同じ turn の `task_started`／`AgentMessage`／`task_complete`・user の `response_item` との全文一致と末尾の行）の欠落を検出する | `tests/fixtures/codex-ask-attribution-4344/`、`tests/unit/guards/ask-capability-controls-4344.test.ts` |
 | 再指示 1（整合性レビュー d19c5c8 の P2 ×3） | (1) 台帳へ書く直前（adapter の最後の await の後）に pointer を読み直し、読み始めの session と違えば入力の記録も確定もしない（Stop・polling・GET はどれも `captureCodexTranscriptTurn` を通る）。(2) 窓の session の集計は History の二重ストリームの除外より前に行い、session を名乗る `response_item` も混在の検査に入れる。(3) id の無い入力の仮の key に turn の id を含め、turn をまたいで同じ入力と見なさない | `bindCodexAskTurns`・`buildCodexTurns`・`distinctInputs` |
+
+### 10.3 PR3（CLI の切り替え）で決めたこと（2026-11-14）
+
+| 項目 | 決めたこと | 置き場所 |
+|---|---|---|
+| 送信の body | capabilities が 404 か protocol が 1 以外 → `ask` を付けない（`server_unsupported`）。解決済みの tool が表で true でない → 付けない（`tool_unsupported`）。tool が解決されていない（`--instance`・`--agent` なし）→ 付けてサーバーに決めさせる（送信の答えの `ask` が `unavailable` ならその理由）。送信の答えに `ask` が無い → `server_unsupported` | `src/cli/utils/ask-reply.ts` の `planAskSend`・`outcomeFromSendAnswer` |
+| capabilities の読み取り | `--timeout` の期限つき。404 だけを旧サーバーと読み、それ以外の失敗（500・形の違う答え）は送信の前に既存のエラー処理で終える（§0.2「黙って落とさない」） | `readAskCapabilities` |
+| 猶予の切れ（表の 17） | 返答の猶予（15 秒）の間 `GET /api/asks/:askId` を 1 秒ごとに読み、`pending` のまま切れたら最後の答えから `send_unknown`（`sendState` が `send_unknown`）→ `turn_incomplete`（`nativeInputSeen`）→ `grace_expired` の順で決める。台帳には書かない（GET だけ） | `readAskOutcome` |
+| `envelope_lost`・`generation_changed` | PR1・PR2 の API の答え（`state`・`reason`・`sendState`・`nativeInputSeen`・`notified`）からは `grace_expired` と区別できない（入力が見えない理由が「封筒が残らない」か「別 session で rejected」か「reader が遅い」かを API が言わない）ので、CLI は出さない（型と文言の表には残す）。区別するにはサーバーの答えに観測の理由を足す必要がある（後続） | — |
+| matched の本文 | 台帳の本文をそのまま出す（窓・trim なし）。#2386 の約束どおり ANSI と制御文字だけ外す | `stripReplyControls`（`reply-ledger.ts`） |
+| overlap | 台帳を読んだ ask だけで今までどおり判定し、行と `"overlapped": true` を出す（出すかどうかは帰属が決める）。`unavailable` の ask は返答を出さないので判定しない | `ask.ts` |
+| `readSqueezedPaneTail` | ask から呼ばれなくなった。`capture.ts` は変えない（不変条件 7）。呼び手は 0 になった | — |

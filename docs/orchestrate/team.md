@@ -8,7 +8,7 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 | 役割 | インスタンス | ロール（CommandMate） | 仕事 |
 |---|---|---|---|
 | PM | `claude` | `project-manager` | 利用者の依頼をブリーフにし、開発リーダーに渡す。進みを見張り、承認の要るものだけ利用者に返す |
-| イネーブラー | `codex`（`codex-2`）。Codex の代わりは、週の上限切れなら Claude 5（`--instance claude-5`）、上限以外の不調なら Antigravity（`--instance antigravity`）（§6 の 7） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
+| イネーブラー | `codex`（`codex-2`）。Codex の代わりは Claude 5（`--instance claude-5`）。Antigravity には AI から頼まない（下の「Antigravity の扱い」）（§6 の 7） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
 | ジャッジ | `claude-2` | `judge` | 統合した版の受け入れテスト・リグレッションテスト（UAT） |
 | 開発リーダー | `claude-3` | `dev-leader` | ブリーフを受けて `/orchestrate` を回す。難易度でワーカーを選ぶ |
 | ワーカー | Issue の worktree ごと | — | 易＝Command Code（#4238 のマージ後。それまでは orchestrate.md 1-2b の現行の担当）、中＝Claude sonnet、難＝Claude opus |
@@ -85,7 +85,7 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 7. **レビュアーの代わり。**
    - Codex の週の上限が切れたら、レビューは Claude 5（`--instance claude-5`、ロール `enabler`）に頼む。止まっていれば 1 行の send で起動してから送る
    - 上限が回復したら（codex の画面の weekly limit の表示で確かめる）Codex に戻す。Claude 5 は戻した後に止めてよい
-   - 上限以外の Codex の不調（接続など）の代わりは Antigravity（`--instance antigravity`）
+   - 上限以外の Codex の不調（接続など）の代わりも Claude 5（`--instance claude-5`）。Antigravity には頼まない
    - `codex-2` は `codex` と同じアカウントの上限を共有するので、上限の対策にならない（stream disconnected のような個別の不調で `codex-2` へ振り替えるのは従来どおり）
 8. **見通しは実績の率で幅を出す。** 「次のレビューで指摘が出なければ」という条件つきの最短を予測として伝えない。残りの往復の見込み（台帳と整合性レビューの記録から）× 1 往復の時間（verify の待ち＋実行＋レビュー）で幅を出し、最短と見込みを分けて書く。分かっている制約（夜の計測・期限・1 人のリーダーを通る直列・CI の不安定）は最初から入れる。見通しを変えたら、何が外れたかを 1 行添える。なぜ: 条件が外れるたびに終わりが延び、後ろ倒しに見えた
 
@@ -101,3 +101,12 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 - 見張りはペインの全行を読む（`capture --pane --tail N` の末尾 N 行には、`DONE:` 行の後に出た出力・入力欄・フッタが並び、`DONE:` 行が入らないことがある）。画面が長く変わらなければ STALL として知らせる。依頼文の締めに「止まるときも `STOP: <task> <理由>` と書く」を必ず入れる
 - 見張りの除外の規則を自作しない（雛形どおりに書いた本物の `DONE:` 行まで除いてしまう）。`DONE:` 行の形は依頼文で決め、見張りではその形で絞る。見張りを張ったら、`DONE:` が既にある画面で一度鳴ることを確かめる
 - CI は `bucket` が全部終わるまでを待ち、10 分以上 queued ならランナーが online かも見る。動いている依頼と見張りの一覧をいつでも出せるようにしておく
+
+## Antigravity の扱い
+
+2026-11-16 から、私たちの運用では AI（PM・ジャッジ・リーダー・ワーカー・イネーブラー）から Antigravity（agy）を使わない。理由: Google Antigravity 追加利用規約 6 条と公式 FAQ（https://antigravity.google/terms ・ https://antigravity.google/docs/faq ）が、個人向けプランで第三者のソフトウェア・エージェントを通して Antigravity を使うことを制限している。私たちのサインインは個人向けプラン。
+
+- `send`・`ask`・`respond`・relay・`/orchestrate` の宛先に antigravity を選ばない。Schedule・日次サマリー・agent-health の対象にしない。antigravity の instance に Auto-Yes を入れない。`agy --version` などの読み取りも AI からは実行しない
+- agy の動きの試験は偽の agy（隔離のサーバー）で行う。本物が要る場面は人が端末で手で行い、結果を渡す
+- 製品側の既定の拒否と利用上の注意は、それぞれの Issue で進める
+

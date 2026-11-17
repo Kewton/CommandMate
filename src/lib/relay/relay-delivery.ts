@@ -83,7 +83,9 @@ import {
   stashReplyForOpenRelays,
   type RelayWorkerRef,
 } from '@/lib/relay/relay-bound-reply';
-import { RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
+import { findRelayToolPolicyDenial, RELAY_SCRAPE_QUIET_MS } from '@/lib/relay/relay-policy';
+import { withdrawRelay } from '@/lib/relay/relay-service';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import { findRelayHoldReason } from '@/lib/relay/relay-readiness';
 import {
   noteRelayDeliveryAttempt,
@@ -99,7 +101,12 @@ import {
   releaseRelayDelivery,
   resetRelayDeliveryClaims,
 } from '@/lib/relay/relay-delivery-claims';
-import { isOpenRelayState, type RelayPendingKind, type SessionRelay } from '@/lib/relay/types';
+import {
+  isOpenRelayState,
+  OPEN_RELAY_STATES,
+  type RelayPendingKind,
+  type SessionRelay,
+} from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
 
@@ -550,6 +557,10 @@ async function attemptDelivery(
   const listed = getRelayById(db, relayId);
   if (!listed) return 'skipped';
 
+  // Issue #4437: before the readiness check, so a refused relay is not waited on.
+  // Judged again after the readiness await, on the ends the send goes to (I6a).
+  if (closeRelayRefusedByToolPolicy(db, listed, kind, listedPayloadId)) return 'skipped';
+
   const listedRequester = resolveRelaySession(db, listed.from);
   const hold = await findRelayHoldReason(
     listedRequester.worktreeId,
@@ -573,6 +584,10 @@ async function attemptDelivery(
   if (!current) return 'skipped';
   const relay = current.relay;
   const requester = resolveRelaySession(db, relay.from);
+  // Issue #4437 (I6a): the readiness check awaited, and either end's instance
+  // may run another tool now. Judged here, on the ends resolved after that
+  // await — the `requester` below is the one typed into — before the claim.
+  if (closeRelayRefusedByToolPolicy(db, relay, kind, current.payloadId, requester)) return 'skipped';
 
   // Issue #4064: take the payload in the ledger before the first key. A write
   // that fails or finds the payload taken means no send.
@@ -687,6 +702,91 @@ async function attemptDelivery(
     // Held, failed or uncertain: the relay can be withdrawn again (a cancel
     // stops later deliveries; it never takes back what may be in A's composer).
     releaseRelayDelivery(relayId);
+  }
+}
+
+/**
+ * Issue #4437: a relay the tool policy refuses now — antigravity at either end
+ * with no API-key / enterprise use declared — is not typed into. One opened
+ * before the policy (an older server) or before the declaration was taken back
+ * is withdrawn by the cancel path (`cancelled`, its undelivered payload dropped;
+ * no new state). An expiry notice of a relay already closed is dropped only when
+ * the requester it would be typed into is the refused end.
+ *
+ * `requester` is the from end as the caller resolved it — the session it would
+ * type into — so the judgment and the send read the same resolution (I6a).
+ * `kind` null is the pump's sweep of open relays (I6b): no payload is named,
+ * so only an open relay is acted on.
+ *
+ * The declaration is read as stated (no credentials). Never throws: a failure
+ * is logged and refuses the delivery (`true`), the safe direction for a send
+ * that must not happen. Returns whether the delivery must stop here.
+ */
+function closeRelayRefusedByToolPolicy(
+  db: Database.Database,
+  relay: SessionRelay,
+  kind: 'reply' | 'prompt' | 'expired' | null,
+  payloadId: string | null,
+  requester?: ResolvedRelaySession
+): boolean {
+  try {
+    const denial = findRelayToolPolicyDenial({
+      from: (requester ?? resolveRelaySession(db, relay.from)).cliToolId,
+      to: resolveRelaySession(db, relay.to).cliToolId,
+      declaration: readUsageDeclaration(),
+    });
+    if (!denial) return false;
+    const fields = { relayId: relay.id, kind, endpoint: denial.endpoint, tool: denial.decision.tool };
+    if (isOpenRelayState(relay.state)) {
+      const withdrawn = withdrawRelay(db, relay.id);
+      logger.info('relay-tool-policy-cancelled', { ...fields, cancelled: withdrawn.ok });
+      return true;
+    }
+    if (kind === null) return false;
+    if (kind === 'expired' && denial.endpoint !== 'from') {
+      // The notice goes to the requester, which the policy does not refuse.
+      return false;
+    }
+    clearRelayPending(db, relay.id, Date.now(), payloadId);
+    logger.info('relay-tool-policy-payload-dropped', fields);
+    return true;
+  } catch (error) {
+    logger.warn('relay-tool-policy-check-failed', {
+      relayId: relay.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return true;
+  }
+}
+
+/**
+ * Issue #4437 (I6b): every open relay the tool policy refuses now is withdrawn,
+ * payload or not. The pump's listing holds only relays carrying a payload, so
+ * a relay still waiting for its worker's turn would otherwise stay open until a
+ * reply or its deadline. A separate read of the open relays, so the listing and
+ * the delivery of every other relay stay as they were; one the policy allows
+ * is not touched. Never throws.
+ */
+function cancelOpenRelaysRefusedByToolPolicy(db: Database.Database): void {
+  let ids: string[];
+  try {
+    ids = (
+      db
+        .prepare(
+          `SELECT id FROM session_relays WHERE state IN (${OPEN_RELAY_STATES.map(() => '?').join(', ')}) ORDER BY created_at ASC`
+        )
+        .all(...OPEN_RELAY_STATES) as Array<{ id: string }>
+    ).map((row) => row.id);
+  } catch (error) {
+    logger.warn('relay-tool-policy-sweep-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+  for (const id of ids) {
+    if (inFlight.has(id)) continue;
+    const relay = getRelayById(db, id);
+    if (relay && isOpenRelayState(relay.state)) closeRelayRefusedByToolPolicy(db, relay, null, null);
   }
 }
 
@@ -974,6 +1074,8 @@ export async function pumpRelayDeliveries(): Promise<void> {
   try {
     const db = getDbInstance();
     ensureRelayRecovery(db);
+    // Issue #4437 (I6b): before the listing, so no refused relay is left open.
+    cancelOpenRelaysRefusedByToolPolicy(db);
     // Issue #3957: a reply promoted out of the second slot during a pass is
     // delivered by one more pass rather than waiting for the next tick.
     for (let pass = 0; pass < PUMP_PASSES_MAX; pass += 1) {
