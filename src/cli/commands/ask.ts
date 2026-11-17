@@ -76,6 +76,8 @@ import {
   type RegisteredRelay,
 } from './relays';
 import { postMessage, registerRelayForMessage } from './message-dispatch';
+import { ANTIGRAVITY_GUARD_HELP, isToolPolicyDenied, reportToolPolicyDenial } from '../utils/tool-policy-failure';
+import { installSendOrigin } from '../utils/send-origin';
 
 /** Default `--timeout`, in seconds. Matches the GUI's delegation brief. */
 const DEFAULT_ASK_TIMEOUT_SECONDS = 1800;
@@ -541,12 +543,22 @@ message went in, and note a proven overlap on the delivered reply's second line
 
 There is deliberately no --auto-yes: turning another session's Auto-Yes on is
 a decision about that session's guard rails, not part of asking it a question.
+
+${ANTIGRAVITY_GUARD_HELP}
+Exit 33 (Issue #4437): refused by the tool policy, nothing was typed and no relay
+was opened. --json prints {worktreeId, instanceId, cliToolId, "sent": false,
+"refusal": {code, reason, operation, origin, message, links, unlock}} on stdout.
+Do not ask again: the answer is the same until the server declares its usage.
 `)
     .action(async (worktreeId: string, message: string, options: AskOptions) => {
       // Issue #3983: `--timeout` counts from here, the resolution and the send
       // included.
       const commandStartedAt = Date.now();
+      // Issue #4437: the target a refusal's --json names, once it is resolved.
+      let refusedTarget: { instanceId?: string; cliToolId?: string } = {};
       try {
+        // Issue #4437: this command's requests say who is sending (`send-origin.ts`).
+        installSendOrigin();
         validateAskArgs(worktreeId, message, options);
 
         const timeout = parseTimeout(options.timeout);
@@ -575,6 +587,7 @@ a decision about that session's guard rails, not part of asking it a question.
           options.agent,
         );
         const { agent, instanceId } = commandTarget;
+        refusedTarget = { instanceId, cliToolId: agent };
 
         // Issue #4344: whether this server attributes the reply, read before the
         // send because the body depends on it. Bounded by `--timeout` like the
@@ -622,6 +635,11 @@ a decision about that session's guard rails, not part of asking it a question.
         // Issue #3957: a bound relay's id rides on the send (see `postMessage`).
         const sent = await postMessage(client, worktreeId, sendBody, {
           relay,
+          // Issue #4437: a tool-policy refusal leaves at once, so its reason is the first
+          // error line; the server withdrew a bound relay and nothing was typed.
+          onFailure: async (error) => {
+            if (isToolPolicyDenied(error)) throw error;
+          },
           promptWaitingFallback: `${worktreeId} is waiting on a prompt; the message was not sent.`,
           target: commandTarget,
         });
@@ -736,6 +754,12 @@ a decision about that session's guard rails, not part of asking it a question.
         printAskReply(worktreeId, instanceId, agent, outcome, options, overlap !== null);
         process.exit(ExitCode.SUCCESS);
       } catch (error) {
+        // Issue #4437: the send or the --async relay refused by the tool policy: exit 33,
+        // and with --json the refusal object (design §3.4).
+        if (isToolPolicyDenied(error)) {
+          reportToolPolicyDenial(error, { worktreeId, json: options.json, target: refusedTarget });
+          return;
+        }
         handleCommandError(error);
       }
     });

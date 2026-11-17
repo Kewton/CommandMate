@@ -56,6 +56,8 @@ import type {
 } from '../../types/agent-roles';
 import { MEM_EXIT_BY_CODE, type MemErrorCode, type MemWriteResponse } from '../../types/mem';
 import { resolveSessionIdentity, type SessionIdentity } from './whoami';
+import { ANTIGRAVITY_GUARD_HELP, isToolPolicyDenied, reportToolPolicyDenial } from '../utils/tool-policy-failure';
+import { installSendOrigin } from '../utils/send-origin';
 
 // Issue #2464: the message length `send` is verified to deliver whole, stated in
 // `--help`. Issue #4274: the values moved to `src/config/send-verified-limits.ts`
@@ -453,6 +455,8 @@ async function createContractTaskWithRole(
  * refused before an attempt. Not known otherwise (no answer, a 5xx saying nothing).
  */
 function knownNotSent(error: unknown, outcome: FailedSendOutcome | null): boolean {
+  // Issue #4437: refused by the tool policy before anything was typed.
+  if (isToolPolicyDenied(error)) return true;
   if (outcome !== null) return outcome !== 'unknown';
   if (!(error instanceof ApiError)) return false;
   const reported = error.payload?.sendOutcome;
@@ -887,7 +891,10 @@ cannot be read first stops the send before the grant (exit 99), and one with no
 
 Exit 2 when the relay is refused: you are answering a relayed message already
 (pass --allow-relay-chain), the chain would exceed 3 hops, or an open relay
-between these two sessions exists. Nothing is sent in that case.
+between these two sessions exists. A relay with antigravity at either end that
+the tool policy refuses is exit 33 (below), not 2. Nothing is sent in either case.
+
+${ANTIGRAVITY_GUARD_HELP}
 
 Message length (Issue #2464): up to ${SEND_VERIFIED_MAX_KIB} KiB and ${SEND_VERIFIED_MAX_LINES} lines is verified
 to arrive whole on claude, codex, command-code and antigravity. A message over
@@ -961,10 +968,13 @@ not caught.
 
 Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
 (nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
-hold or the start was refused because of its role (nothing typed).
+hold or the start was refused because of its role (nothing typed); 33 refused by the
+tool policy (antigravity, above; nothing typed, do not send it again).
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
+        // Issue #4437: this command's requests say who is sending (`send-origin.ts`).
+        installSendOrigin();
         const autoYesDurationMs = validateSendArgs(worktreeId, message, options);
         if (bothRoleFlags()) throw usageError('Give --role or --no-role, not both.');
         const expectedRole = expectedRoleOf(options);
@@ -1193,6 +1203,10 @@ hold or the start was refused because of its role (nothing typed).
             await withdrawAutoYes(knownNotSent(error, outcome));
             // Issue #4226: not sent for certain, so nothing is waited on. Unknown: the relay closes it.
             if (noteItemId && noteAuthor && knownNotSent(error, outcome)) await closeSendNote(client, noteAuthor, noteItemId);
+            // Issue #4437: refused before the role was saved or anything typed, and a bound
+            // relay was withdrawn by the server. Out now, so the refusal's reason is the
+            // first error line and no "safe to send it again" follows it.
+            if (isToolPolicyDenied(error)) throw error;
             // Issue #4116: no answer, so the send may have got as far as the save.
             // A 5xx with a body that says nothing of the setting is no better an answer.
             const saidNothing = error instanceof ApiError
@@ -1236,6 +1250,11 @@ hold or the start was refused because of its role (nothing typed).
           await enableAutoYesAfterSend(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
         }
       } catch (error) {
+        // Issue #4437: the send or its relay refused by the tool policy: exit 33.
+        if (isToolPolicyDenied(error)) {
+          reportToolPolicyDenial(error, { worktreeId });
+          return;
+        }
         handleCommandError(error);
       }
     });
