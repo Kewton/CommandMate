@@ -10,6 +10,8 @@
  * Issue #225: Added duration propagation and HH:MM:SS countdown format
  * Issue #314: Added AutoYesToggleParams interface with stopPattern support
  * Issue #3863: the answer mode — chosen in the confirm dialog, shown beside the ON switch
+ * Issue #4436: a tool-policy refusal of the enabling (the handler rejects with
+ *   ToolPolicyRefusalError) shows its reason and links; the switch stays OFF.
  */
 
 'use client';
@@ -17,6 +19,8 @@
 import React, { memo, useEffect, useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/Switch';
+import { ToolPolicyRefusalNotice } from '@/components/ui/ToolPolicyRefusalNotice';
+import { ToolPolicyRefusalError, type ToolPolicyRefusalView } from '@/lib/tool-policy/refusal-view';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
@@ -100,6 +104,8 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   const [timeRemaining, setTimeRemaining] = useState<string>('');
   const [toggling, setToggling] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  // Issue #4436: the refusal of the last enabling, until the next attempt.
+  const [refusal, setRefusal] = useState<ToolPolicyRefusalView | null>(null);
   // Issue #959: latch that flips the UI to OFF the instant the countdown hits
   // 00:00, so the toggle no longer shows ON while the server-side state catches
   // up on the next poll.
@@ -155,6 +161,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       onToggle({ enabled: false }).finally(() => setToggling(false));
     } else {
       // ON: show confirmation dialog
+      setRefusal(null);
       setShowConfirmDialog(true);
     }
   }, [displayEnabled, onToggle]);
@@ -164,7 +171,13 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     setToggling(true);
     // Issue #3863: the dialog names a mode only when it is not the default, and
     // so does this call (an omitted `answerMode` is the default).
+    setRefusal(null);
     onToggle({ enabled: true, duration, stopPattern, ...(chosenMode ? { answerMode: chosenMode } : {}) })
+      .catch((err: unknown) => {
+        // Only a tool-policy refusal is shown; any other rejection is logged, not shown.
+        if (err instanceof ToolPolicyRefusalError) setRefusal(err.view);
+        else console.error('[AutoYesToggle] Error toggling auto-yes:', err);
+      })
       .finally(() => setToggling(false));
   }, [onToggle]);
 
@@ -173,7 +186,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   }, []);
 
   return (
-    <div className={inline ? 'flex items-center gap-2' : 'flex items-center gap-3 px-4 py-2 bg-surface-2 border-b border-border'}>
+    <div className={inline ? 'flex flex-wrap items-center gap-2' : 'flex flex-wrap items-center gap-3 px-4 py-2 bg-surface-2 border-b border-border'}>
       {/* Toggle switch (Issue #1080: shared Radix ui/Switch) */}
       <Switch
         checked={displayEnabled}
@@ -229,6 +242,14 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         >
           {t('releasedByRestart')}
         </span>
+      )}
+
+      {!displayEnabled && refusal && (
+        <ToolPolicyRefusalNotice
+          refusal={refusal}
+          className="basis-full text-xs text-warning-foreground"
+          data-testid="auto-yes-tool-policy-refusal"
+        />
       )}
 
       <AutoYesConfirmDialog
