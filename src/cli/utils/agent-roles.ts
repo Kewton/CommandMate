@@ -25,6 +25,7 @@ import { ExitCode } from '../types';
 import { ApiError, rethrowIfDeadlineExceeded, type ApiClient } from './api-client';
 import { handleCommandError } from './command-helpers';
 import { RoleCliError, roleFailureFromApi, usageError } from './role-failure';
+import { isToolPolicyDenied } from './tool-policy-failure';
 import { canonicalPath, isDirectory } from './role-input';
 import {
   AGENT_ROLE_CLI_TOOLS,
@@ -69,6 +70,10 @@ export async function roleWrite<T>(check: string, write: () => Promise<T>): Prom
     if (error instanceof ApiError && error.statusCode !== undefined && error.statusCode < 500) {
       throw roleFailureFromApi(error) ?? error;
     }
+    // Issue #4449: the tool policy refused the send this write is for (exit 33, not an
+    // ApiError); nothing was written, so it is not "not known whether it was saved".
+    const refusal = isToolPolicyDenied(error) ? error : null;
+    if (refusal) throw refusal;
     const known = error instanceof ApiError ? error : undefined;
     throw new RoleCliError(
       unclassifiedFailureCode(error),

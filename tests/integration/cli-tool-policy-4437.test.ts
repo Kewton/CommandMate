@@ -171,6 +171,8 @@ let worktreePath: string;
 let db: Database.Database;
 /** Every request the CLI made, method and path. */
 let requests: string[];
+/** Issue #4449: every routed request with its answer's status (`METHOD /path STATUS`). */
+let answered: string[];
 /**
  * I7e: what the check before the writes (`GET …/tool-policy`) does instead of the route
  * (a 500, a server before PR1), or what happens right after it answers.
@@ -217,6 +219,7 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
     params: Promise.resolve(route.params),
   });
   if (isCheck) afterCheck?.();
+  answered.push(`${method} ${url.pathname} ${response.status}`);
   return response;
 }
 
@@ -255,6 +258,17 @@ async function launchCodex(instanceId?: string): Promise<void> {
 
 const rosterIds = (): string[] => getAgentInstances(db, WT).map(({ id }) => id);
 const writes = (): string[] => requests.filter((r) => !r.startsWith('GET '));
+/**
+ * Issue #4449: the CLI no longer asks `GET …/tool-policy` first; the write itself refuses
+ * (409, nothing written). So "nothing written" is now: the only non-GET request is that one
+ * write, it was answered 409, and the check was never asked.
+ */
+function expectOnlyTheRefusedWrite(route: string): void {
+  const write = `POST /api/worktrees/${WT}/${route}`;
+  expect(writes()).toEqual([write]);
+  expect(answered).toContain(`${write} 409`);
+  expect(requests).not.toContain(`GET /api/worktrees/${WT}/tool-policy`);
+}
 
 beforeEach(async () => {
   dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-cli-tool-policy-4437-')));
@@ -290,6 +304,7 @@ beforeEach(async () => {
   fakeTool.onStart = null;
   ownership.hook = null;
   requests = [];
+  answered = [];
   checkOverride = null;
   afterCheck = null;
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
@@ -328,7 +343,7 @@ describe('I7c: a refused send leaves nothing behind (Issue #4437)', () => {
     expect(rosterIds()).not.toContain('agy-new');
     expect(getInstanceRoleState(db, WT, 'agy-new')).toEqual({ state: 'inherit' });
     expect(fakeTool.typed).toEqual([]);
-    expect(writes()).toEqual([]);
+    expectOnlyTheRefusedWrite('instances/roles');
   });
 
   it('--contract: exit 33 and no task row', async () => {
@@ -337,7 +352,7 @@ describe('I7c: a refused send leaves nothing behind (Issue #4437)', () => {
     expect(result.stderr[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
     expect(listTasks(db, WT)).toEqual([]);
     expect(result.stderr.join('\n')).not.toContain('Task created');
-    expect(writes()).toEqual([]);
+    expectOnlyTheRefusedWrite('tasks');
   });
 
   it('--contract --role: no task and no role setting', async () => {
@@ -345,14 +360,16 @@ describe('I7c: a refused send leaves nothing behind (Issue #4437)', () => {
     expect(result.code).toBe(33);
     expect(listTasks(db, WT)).toEqual([]);
     expect(getInstanceRoleState(db, WT, 'antigravity')).toEqual({ state: 'inherit' });
-    expect(writes()).toEqual([]);
+    expect(result.stderr[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
+    expectOnlyTheRefusedWrite('tasks');
   });
 
   it('--auto-yes: exit 33 and Auto-Yes is not armed', async () => {
     const result = await send('hello', '--instance', 'antigravity', '--auto-yes');
     expect(result.code).toBe(33);
     expect(getAutoYesState(WT, 'antigravity', 'antigravity')?.enabled ?? false).toBe(false);
-    expect(writes()).toEqual([]);
+    expect(result.stderr[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
+    expectOnlyTheRefusedWrite('auto-yes');
   });
 
   it('control — a declared server registers, saves and sends as before', async () => {
@@ -380,12 +397,12 @@ describe('I7c: a refused send leaves nothing behind (Issue #4437)', () => {
 });
 
 /**
- * I7e (re-instruction 2): the check before the writes is a courtesy; `/send` is the guard.
- * When the check cannot answer, or the default target turns antigravity after it, the
- * real send route still refuses — or, for `--auto-yes`, the Auto-Yes route before it
- * (#4436) —: nothing typed, exit 33, the reason on stderr (not necessarily line 1;
- * line 1 for `--auto-yes` alone). What the check could not stop (a task row, a role setting) is the
- * known limitation and is not asserted here.
+ * I7e (re-instruction 2), as of Issue #4449: there is no check before the writes any
+ * more — the writes refuse themselves. So a check that "cannot answer" (500, 404) is never
+ * asked, and a default that is antigravity by the time of the write is refused AT that
+ * write: nothing written (no task row, no instance, no role setting), nothing typed,
+ * exit 33, the reason on stderr's first line. (Before #4449 only `/send` refused here and
+ * the task row or role setting was left: the known limitation #4449 closes.)
  */
 describe('I7e: the send route refuses what the check could not (Issue #4437)', () => {
   /**
@@ -395,12 +412,18 @@ describe('I7e: the send route refuses what the check could not (Issue #4437)', (
    */
   function expectRefusedAndSaid(
     result: { code: number; stderr: string[] },
-    refusedAt: 'send' | 'auto-yes' = 'send',
+    refusedAt: 'tasks' | 'instances/roles' | 'auto-yes',
   ): void {
     expect(result.code).toBe(33);
     expect(fakeTool.typed).toEqual([]);
-    if (refusedAt === 'send') {
-      expect(requests).toContain(`POST /api/worktrees/${WT}/send`);
+    if (refusedAt !== 'auto-yes') {
+      // Issue #4449: refused at the write, before anything was written or sent.
+      expectOnlyTheRefusedWrite(refusedAt);
+      expect(result.stderr[0]).toMatch(/^Error \[TOOL_POLICY_DENIED\]: /);
+      expect(listTasks(db, WT)).toEqual([]);
+      expect(rosterIds()).not.toContain('agy-new');
+      expect(getInstanceRoleState(db, WT, 'agy-new')).toEqual({ state: 'inherit' });
+      expect(result.stderr.join('\n')).not.toContain('Task created');
     } else {
       expect(requests).toContain(`POST /api/worktrees/${WT}/auto-yes`);
       expect(requests).not.toContain(`POST /api/worktrees/${WT}/send`);
@@ -425,11 +448,11 @@ describe('I7e: the send route refuses what the check could not (Issue #4437)', (
     });
 
     it('--contract: exit 33, nothing typed, the reason said', async () => {
-      expectRefusedAndSaid(await send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'antigravity'));
+      expectRefusedAndSaid(await send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'antigravity'), 'tasks');
     });
 
     it('--register --role: exit 33, nothing typed, the reason said', async () => {
-      expectRefusedAndSaid(await send('hello', '--agent', 'antigravity', '--instance', 'agy-new', '--register', '--role', 'reviewer'));
+      expectRefusedAndSaid(await send('hello', '--agent', 'antigravity', '--instance', 'agy-new', '--register', '--role', 'reviewer'), 'instances/roles');
     });
 
     it('--auto-yes: exit 33, nothing typed, the reason said', async () => {
@@ -438,12 +461,11 @@ describe('I7e: the send route refuses what the check could not (Issue #4437)', (
   });
 
   it('send --contract naming no target: the default turns antigravity after the check — exit 33, nothing typed', async () => {
-    afterCheck = () => {
-      db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('antigravity', WT);
-    };
+    // Issue #4449: no check is asked; the default is antigravity by the time of the task's
+    // write (the moment the check used to answer for codex), and that write refuses.
+    db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('antigravity', WT);
     const result = await send('--contract', '.commandmate/tasks/x.yaml');
-    expect(requests).toContain(`GET /api/worktrees/${WT}/tool-policy`);
-    expectRefusedAndSaid(result);
+    expectRefusedAndSaid(result, 'tasks');
   });
 
   it('control — the same send with the default left as codex goes on and is typed', async () => {

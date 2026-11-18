@@ -162,11 +162,13 @@ describe('send --contract', () => {
 
     await runSend(['wt1', '--contract', '.commandmate/tasks/t.yaml']);
 
+    // Issue #4449: naming no tool, the task's request says who is sending (the server judges
+    // the default it resolves there), and the message is bound to that task's target.
     const create = calls.find((c) => c.url.includes('/tasks'));
-    expect(create?.body).toEqual({ contractPath: '.commandmate/tasks/t.yaml' });
+    expect(create?.body).toEqual({ contractPath: '.commandmate/tasks/t.yaml', ...PINNED_ORIGIN });
 
     const send = calls.find((c) => c.url.includes('/send'));
-    expect(send?.body).toEqual({ content: COMPOSED_MESSAGE, ...PINNED_ORIGIN });
+    expect(send?.body).toEqual({ content: COMPOSED_MESSAGE, taskId: TASK_ID, ...PINNED_ORIGIN });
 
     // Task creation must precede the send: the row is what the send is recorded against.
     expect(calls.findIndex((c) => c.url.includes('/tasks'))).toBeLessThan(
@@ -260,8 +262,6 @@ describe('send --contract', () => {
 
   it('prints every contract issue and exits 2 without sending', async () => {
     const calls = mockRoutes([
-      // Issue #4437 (I7c): asked before the task is written (no tool named).
-      { match: '/api/worktrees/wt1/tool-policy', method: 'GET', response: { status: 200, data: { allowed: true, cliToolId: 'claude' } } },
       {
         match: '/api/worktrees/wt1/tasks',
         response: {
@@ -284,11 +284,10 @@ describe('send --contract', () => {
     expect(code).toBe(ExitCode.CONFIG_ERROR);
     expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
     // The rejection is the server's, so the request had to be made — but
-    // nothing may follow it. Issue #4437 (I7c): the read-only tool-policy check precedes it.
-    expect(calls.map((c) => c.url).filter((url) => !url.includes('/tasks'))).toEqual([
-      expect.stringMatching(/\/api\/worktrees\/wt1\/tool-policy\?operation=send&origin=unknown&originEvidence=no-tty$/),
-    ]);
-    expect(calls.findIndex((c) => c.url.includes('/tool-policy'))).toBeLessThan(calls.findIndex((c) => c.url.includes('/tasks')));
+    // nothing may follow it. Issue #4449: and nothing precedes it either (no tool-policy
+    // check: the task's own request carries the origin and is judged there).
+    expect(calls.map((c) => c.url).filter((url) => !url.includes('/tasks'))).toEqual([]);
+    expect(calls.find((c) => c.url.includes('/tasks'))?.body).toMatchObject(PINNED_ORIGIN);
   });
 
   it('records the task as failed when the message could not be delivered', async () => {
