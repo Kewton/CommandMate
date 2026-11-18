@@ -1,0 +1,62 @@
+{
+  "version": "0.52.0",
+  "date": "2026-11-18",
+  "highlight": {
+    "ja": "Antigravity の利用規約にうっかり触れないよう、AI や無人の実行から Antigravity を使うことを既定で断るようになりました。API キーや企業向けで使う場合は、サーバーの環境変数 CM_ANTIGRAVITY_USAGE を設定して再起動してください。",
+    "en": "To avoid running into the Antigravity terms by accident, using Antigravity from AI agents or unattended runs is now refused by default. If you use it with an API key or an enterprise plan, set the server's CM_ANTIGRAVITY_USAGE variable and restart the server."
+  },
+  "added": [
+    {
+      "ja": "セッション一覧をブランチ名とロールで絞り込めるようになりました。",
+      "en": "The sessions page can now be filtered by branch name and role."
+    },
+    {
+      "ja": "セッション一覧の絞り込みの条件をデフォルトとして保存し、次に開いたときに当てられるようになりました。",
+      "en": "You can now save the sessions page filter as the default, applied the next time you open it."
+    },
+    {
+      "ja": "Antigravity を追加するときに、利用上の注意と規約・FAQ のリンクを表示するようになりました。",
+      "en": "Adding an Antigravity instance now shows a usage notice with links to the terms and FAQ."
+    },
+    {
+      "ja": "CLI で Antigravity を追加・送信するとき、利用上の注意をエラー出力に 1 回だけ出すようになりました。",
+      "en": "The CLI now prints the Antigravity usage notice once, on stderr, when you add or send to an Antigravity instance."
+    }
+  ],
+  "improved": [
+    {
+      "ja": "Antigravity の Schedule・日次サマリー・予約した送信・Auto-Yes は、利用形態を申告していないサーバーでは実行しなくなりました。",
+      "en": "Antigravity schedules, daily summaries, scheduled sends and Auto-Yes no longer run on a server that has not declared its usage."
+    },
+    {
+      "ja": "AI エージェントや無人の実行から Antigravity への送信・回答と relay は、既定で断られ、CLI は終了コード 33 で終わるようになりました。",
+      "en": "Sends, answers and relays to Antigravity from AI agents or unattended runs are now refused by default, and the CLI exits with code 33."
+    },
+    {
+      "ja": "日次サマリーや Auto-Yes が断られたとき、画面に理由と規約・FAQ のリンクが出るようになりました。",
+      "en": "When a daily summary or Auto-Yes is refused, the screen now shows the reason with links to the terms and FAQ."
+    },
+    {
+      "ja": "ask の返答は依頼ごとに結び付けて受け取るようになりました。Claude Code と Codex 以外では返答を自動で回収しません。",
+      "en": "ask now receives the reply tied to each request. For tools other than Claude Code and Codex, the reply is no longer collected automatically."
+    },
+    {
+      "ja": "Antigravity のロールが既定で有効になりました。更新前に起動したロールつきのセッションは、起動し直してください。",
+      "en": "Antigravity roles are now enabled by default. Restart role-assigned sessions that were started before the update."
+    }
+  ],
+  "fixed": [
+    {
+      "ja": "セッション一覧のタイルで、入力中の下書きが別のインスタンスの入力欄に出る問題を直しました。",
+      "en": "Fixed a draft on a sessions tile appearing in another instance's input box."
+    },
+    {
+      "ja": "セッション一覧のタイルから詳細を開くと、前に開いていたインスタンスで開く問題を直しました。",
+      "en": "Fixed opening details from a sessions tile landing on the previously opened instance."
+    },
+    {
+      "ja": "Antigravity や Gemini の資格情報のファイルを読まないことを、試験で守るようにしました。",
+      "en": "Tests now guard that CommandMate never reads Antigravity or Gemini credential files."
+    }
+  ]
+}
