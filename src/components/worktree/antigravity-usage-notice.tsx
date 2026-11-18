@@ -12,7 +12,8 @@
  *
  * Issue #4456: `compact` (the composer) caps the body's height and scrolls it, so
  * in a narrow pane (the 3-way split) the notice does not push the input box out
- * of view; the headline and Close stay outside the scrolling part.
+ * of view. The headline, the terms / FAQ links and Close stay outside the
+ * scrolling part; the scrolling body is focusable so the keyboard can scroll it.
  */
 
 'use client';
@@ -61,7 +62,7 @@ export const AntigravityUsageNotice = memo(function AntigravityUsageNotice({
       role="note"
       aria-label={t(ANTIGRAVITY_NOTICE_KEYS.headline)}
       data-testid={ANTIGRAVITY_NOTICE_TEST_ID}
-      className={`rounded-md border border-input bg-warning-subtle p-3 text-xs text-foreground space-y-1.5 ${className}`}
+      className={`rounded-md border border-input bg-warning-subtle ${compact ? 'p-2' : 'p-3'} text-xs text-foreground space-y-1.5 ${className}`}
     >
       <p className="flex items-center gap-1.5 font-medium">
         <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-warning" aria-hidden="true" />
@@ -69,27 +70,36 @@ export const AntigravityUsageNotice = memo(function AntigravityUsageNotice({
       </p>
       <div
         data-testid={`${ANTIGRAVITY_NOTICE_TEST_ID}-body`}
-        className={compact ? 'space-y-1.5 max-h-24 overflow-y-auto overscroll-contain pr-1' : 'space-y-1.5'}
+        // Issue #4456 (I5'): compact, the body scrolls; focusable and named so it can
+        // be scrolled from the keyboard (it holds no focusable element of its own).
+        {...(compact
+          ? { tabIndex: 0, role: 'region', 'aria-label': t(ANTIGRAVITY_NOTICE_KEYS.headline) }
+          : {})}
+        className={
+          compact
+            ? 'space-y-1.5 max-h-16 overflow-y-auto overscroll-contain pr-1 rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            : 'space-y-1.5'
+        }
       >
         <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.body)}</p>
         <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.unconfirmed)}</p>
         <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.declaration, { env: USAGE_DECLARATION_ENV })}</p>
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <a href={ANTIGRAVITY_TERMS_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
-            {t(ANTIGRAVITY_NOTICE_KEYS.terms)}
-          </a>
-          <a href={ANTIGRAVITY_FAQ_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
-            {t(ANTIGRAVITY_NOTICE_KEYS.faq)}
-          </a>
-          <span className="text-muted-foreground">{t(ANTIGRAVITY_NOTICE_KEYS.asOf, { date: ANTIGRAVITY_TERMS_CHECKED_AT })}</span>
-        </p>
       </div>
-      <div className="flex justify-end">
+      {/* Issue #4456: the links sit beside Close, outside the scrolling body, so they
+          are always in view. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`${ANTIGRAVITY_NOTICE_TEST_ID}-links`}>
+        <a href={ANTIGRAVITY_TERMS_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
+          {t(ANTIGRAVITY_NOTICE_KEYS.terms)}
+        </a>
+        <a href={ANTIGRAVITY_FAQ_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
+          {t(ANTIGRAVITY_NOTICE_KEYS.faq)}
+        </a>
+        <span className="text-muted-foreground">{t(ANTIGRAVITY_NOTICE_KEYS.asOf, { date: ANTIGRAVITY_TERMS_CHECKED_AT })}</span>
         <button
           type="button"
           onClick={onDismiss}
           data-testid={`${ANTIGRAVITY_NOTICE_TEST_ID}-dismiss`}
-          className="px-2 py-1 text-xs rounded-md bg-muted hover:bg-muted/80 text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="ml-auto px-2 py-1 text-xs rounded-md bg-muted hover:bg-muted/80 text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {t(ANTIGRAVITY_NOTICE_KEYS.dismiss)}
         </button>

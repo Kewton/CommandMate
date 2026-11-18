@@ -2,10 +2,13 @@
  * Issue #4456 item 4: in a narrow pane (the 3-way split) the composer's
  * Antigravity usage notice wrapped into a tall block and pushed the input box
  * below the pane's edge. In the composer the notice is compact: its body
- * scrolls inside a capped height, while the headline and the Close button stay
- * in view. The add forms (wide enough, not above an input) render as before.
+ * scrolls inside a capped height, while the headline, the terms / FAQ links and
+ * the Close button stay in view (outside the scrolling part), and the scrolling
+ * body can be focused to scroll it from the keyboard (re-instruction 1, I5').
+ * The add forms (wide enough, not above an input) have no cap.
  *
- * jsdom has no layout, so the cap is pinned as the classes that make it.
+ * jsdom has no layout, so the cap is pinned as the classes that make it; the
+ * pane-bounded layout is measured in `tests/e2e/antigravity-notice-split-4456.spec.ts`.
  *
  * @vitest-environment jsdom
  */
@@ -57,12 +60,16 @@ describe('[#4456] the composer notice does not push the input out of a narrow pa
     const body = within(box).getByTestId(BODY);
     expect(classesOf(body)).toEqual(expect.arrayContaining(['overflow-y-auto']));
     expect(classesOf(body).some((c) => c.startsWith('max-h-'))).toBe(true);
-    // Close is not inside the scrolling part, so it never scrolls out of reach.
+    // Close and the links are not inside the scrolling part, so they never scroll out of view.
     const dismiss = within(box).getByTestId(`${ANTIGRAVITY_NOTICE_TEST_ID}-dismiss`);
     expect(body.contains(dismiss)).toBe(false);
-    // The links are all still there (I1: reason and links are not reduced).
-    const links = Array.from(body.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+    expect(body.querySelectorAll('a')).toHaveLength(0);
+    const links = Array.from(box.querySelectorAll('a')).map((a) => a.getAttribute('href'));
     expect(links).toEqual([ANTIGRAVITY_TERMS_URL, ANTIGRAVITY_FAQ_URL]);
+    // The scrolling body is reachable from the keyboard and named.
+    expect(body.getAttribute('tabindex')).toBe('0');
+    expect(body.getAttribute('role')).toBe('region');
+    expect(body.getAttribute('aria-label')).toBeTruthy();
     // The input box is still rendered below it.
     expect(screen.getByRole('textbox')).not.toBeNull();
   });
@@ -72,5 +79,6 @@ describe('[#4456] the composer notice does not push the input out of a narrow pa
     const body = screen.getByTestId(BODY);
     expect(classesOf(body)).not.toContain('overflow-y-auto');
     expect(classesOf(body).some((c) => c.startsWith('max-h-'))).toBe(false);
+    expect(body.getAttribute('tabindex')).toBeNull();
   });
 });

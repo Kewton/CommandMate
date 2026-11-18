@@ -96,11 +96,14 @@ function createWorktree(overrides: Partial<Worktree> = {}): Worktree {
 }
 
 function answer(status: number, body: unknown): void {
-  global.fetch = vi.fn(async () => ({
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  })) as unknown as typeof fetch;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    })),
+  );
 }
 
 const REFUSAL_BODY = {
@@ -132,6 +135,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  vi.unstubAllGlobals();
 });
 
 describe('[#4456] SessionTile: a tool-policy refusal of the Auto-Yes enabling', () => {
@@ -157,6 +161,59 @@ describe('[#4456] SessionTile: a tool-policy refusal of the Auto-Yes enabling', 
     await enableOnTile();
     expect(within(composer()).queryByTestId(NOTICE)).toBeNull();
     expect(within(composer()).getByRole('switch').getAttribute('aria-checked')).toBe('false');
+  });
+});
+
+describe("[#4456] SessionTile: the refusal belongs to the instance it was given for (I4')", () => {
+  const TWO = {
+    agentInstances: [
+      { id: 'antigravity', cliTool: 'antigravity', alias: '', order: 0 },
+      { id: 'antigravity-2', cliTool: 'antigravity', alias: '', order: 1 },
+    ],
+  } as Partial<Worktree>;
+
+  function selectInstance(id: string): void {
+    fireEvent.change(screen.getByTestId('session-tile-instance-wt-1'), { target: { value: id } });
+  }
+
+  it('refused on one instance, switched to another of the same tool: not shown there (4456)', async () => {
+    answer(409, REFUSAL_BODY);
+    render(<SessionTile worktree={createWorktree(TWO)} enabled connectivity={ONLINE} />);
+    await enableOnTile();
+    await within(composer()).findByTestId(NOTICE);
+    selectInstance('antigravity-2');
+    expect(within(composer()).queryByTestId(NOTICE)).toBeNull();
+  });
+
+  it('the 409 held while the tile switches instance: not shown on the new one (4456)', async () => {
+    let release: () => void = () => {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ ok: false, status: 409, json: async () => REFUSAL_BODY });
+          }),
+      ),
+    );
+    render(<SessionTile worktree={createWorktree(TWO)} enabled connectivity={ONLINE} />);
+    await enableOnTile();
+    selectInstance('antigravity-2');
+    await act(async () => {
+      release();
+    });
+    expect(within(composer()).queryByTestId(NOTICE)).toBeNull();
+  });
+
+  it('negative: the same instance refused again shows it again (4456)', async () => {
+    answer(409, REFUSAL_BODY);
+    render(<SessionTile worktree={createWorktree(TWO)} enabled connectivity={ONLINE} />);
+    await enableOnTile();
+    await within(composer()).findByTestId(NOTICE);
+    selectInstance('antigravity-2');
+    selectInstance('antigravity');
+    await enableOnTile();
+    expect((await within(composer()).findByTestId(`${NOTICE}-message`)).textContent).toBe(REASON);
   });
 });
 
@@ -192,9 +249,12 @@ describe('[#4456] useSessionTileAutoYes: what toggle() answers', () => {
     await act(async () => {
       await expect(result.current.toggle({ enabled: true })).resolves.toBeUndefined();
     });
-    global.fetch = vi.fn(async () => {
-      throw new TypeError('Failed to fetch');
-    }) as unknown as typeof fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
     await act(async () => {
       await expect(result.current.toggle({ enabled: true })).resolves.toBeUndefined();
     });
