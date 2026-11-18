@@ -231,8 +231,6 @@ describe('[#3723] commandmate send --auto-yes reads the arming response', () => 
   function stubSend(autoYesBody: Record<string, unknown>): ReturnType<typeof vi.fn> {
     const fn = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
-      // Issue #4437 (I7c): asked before the grant, since no tool is named.
-      if (url.pathname.endsWith('/tool-policy')) return jsonResponse(200, { allowed: true, cliToolId: 'claude' });
       if (url.pathname.endsWith('/auto-yes')) return jsonResponse(200, autoYesBody);
       if (url.pathname.endsWith('/send')) return jsonResponse(201, { id: 1 });
       throw new Error(`unexpected request: ${url.pathname}`);
@@ -259,8 +257,8 @@ describe('[#3723] commandmate send --auto-yes reads the arming response', () => 
     expect(lines).toContain('Auto-yes enabled.');
     expect(lines.find((line) => line.startsWith('Warning:'))).toContain('autoYes.mode: off');
     expect(lines).toContain('Message sent.');
+    // Issue #4449: no tool-policy check before the grant (the grant's route judges itself).
     expect(fn.mock.calls.map((call) => new URL(String(call[0])).pathname)).toEqual([
-      `/api/worktrees/${WT}/tool-policy`,
       `/api/worktrees/${WT}/auto-yes`,
       `/api/worktrees/${WT}/send`,
     ]);
