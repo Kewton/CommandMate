@@ -47,6 +47,17 @@ describe('Issue #4458: one judgment of a roster addition', () => {
     }
   });
 
+  it('a row already on the roster that the server would refuse is not this add\'s to judge', () => {
+    const base: AgentInstance[] = [{ id: 'claude', cliTool: 'codex', alias: 'odd', order: 0 }];
+    const added = row('codex-2', 'codex');
+    expect(validateAgentInstanceAddition(base, added)).toMatchObject({ valid: false, refusal: 'entry', index: 0 });
+    expect(rosterAdditionRefusal(base, added)).toBeNull();
+    // The added row itself is still judged, at its own index.
+    expect(rosterAdditionRefusal(base, { id: 'w w', cliTool: 'codex', alias: 'x' })).toBeNull();
+    expect(validateAgentInstanceAddition([], { id: 'w w', cliTool: 'codex', alias: 'x' })).toMatchObject({ refusal: 'entry', index: 0 });
+    expect(rosterAdditionRefusal([], { id: 'w w', cliTool: 'codex', alias: 'x' })).toMatchObject({ atLimit: false });
+  });
+
   it('a refusal says what it is for; an accepted list carries none', () => {
     expect(validateAgentInstancesInput('x').refusal).toBe('shape');
     expect(validateAgentInstancesInput([]).refusal).toBe('limit');

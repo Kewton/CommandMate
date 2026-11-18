@@ -23,7 +23,14 @@ import {
   validateAntigravityModelName,
   validateClaudeModelName,
 } from '../config/model-validation';
-import { fetchAgentRoster, saveRosterChange, defaultAlias, rosterAdditionRefusal, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
+import {
+  fetchAgentRoster,
+  saveRosterChange,
+  defaultAlias,
+  rosterAdditionRefusal,
+  MAX_AGENT_INSTANCES,
+  MAX_AGENT_ALIAS_LENGTH,
+} from '../utils/agent-instances';
 import { isValidInstanceId as isRosterInstanceId } from '../../lib/cli-tools/types';
 import {
   isInstanceSelector,
@@ -267,7 +274,7 @@ async function registerInstance(
   instanceId: string,
   cliTool: string
 ): Promise<void> {
-  const addCommand = `commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`;
+  const addCommand = registerCommandFor(worktreeId, cliTool, instanceId);
   try {
     // Issue #4132: the whole list is replaced, so an add landing after this read has to
     // survive it. Built again on a moved roster, where this one may be there by now.
@@ -313,6 +320,46 @@ async function registerInstance(
   }
 }
 
+/** Whether the alias `--register` gives `instanceId` is longer than the roster takes (Issue #4458). */
+function defaultAliasTooLong(cliTool: string, instanceId: string): boolean {
+  return defaultAlias(cliTool, instanceId).length > MAX_AGENT_ALIAS_LENGTH;
+}
+
+/**
+ * The command that registers the instance by hand, as `--register` would have. When the
+ * default alias is longer than the roster takes, it names a short `--alias`, so the
+ * command does what it says instead of failing for the same reason (Issue #4458).
+ */
+function registerCommandFor(worktreeId: string, cliTool: string, instanceId: string): string {
+  const command = `commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`;
+  if (!defaultAliasTooLong(cliTool, instanceId)) return command;
+  const short = defaultAlias(cliTool, instanceId).slice(0, MAX_AGENT_ALIAS_LENGTH).trimEnd();
+  return `${command} --alias "${short}"`;
+}
+
+/**
+ * `--register` before anything is sent (Issue #4458): an id whose default alias the roster
+ * would refuse. That is decided by the tool and the id alone, so it is refused here with
+ * exit 2 rather than warned about after the message went out. An id already on the roster
+ * registers nothing and is let through.
+ */
+async function assertDefaultAliasFits(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  cliTool: string
+): Promise<void> {
+  if (!defaultAliasTooLong(cliTool, instanceId)) return;
+  const { instances } = await fetchAgentRoster(client, worktreeId);
+  if (instances.some((inst) => inst.id === instanceId)) return;
+  console.error(
+    `Error: --register would name '${instanceId}' '${defaultAlias(cliTool, instanceId)}', longer than the `
+      + `${MAX_AGENT_ALIAS_LENGTH} characters an alias may have, so the roster would refuse it. Nothing was sent. `
+      + `Register it with a shorter alias, then send without --register: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
+  );
+  process.exit(ExitCode.CONFIG_ERROR);
+}
+
 /**
  * `--register` with a role: the instance and its role are created together, before
  * anything goes out, so the first start already has it (Issue #4116). Without a role
@@ -338,10 +385,31 @@ async function registerInstanceWithRole(
   const url = `/api/worktrees/${worktreeId}/instances/roles`;
   const { instances, rosterRevision } = await client.get<InstanceRoleSettingsResponse>(url);
   if (instances.some((instance) => instance.instanceId === instanceId)) return;
+  // Issue #4458: the server's own judgment of the row, before the POST and before anything
+  // is sent, as for a plain --register (the limit, the id, the alias length).
+  const alias = defaultAlias(cliTool, instanceId);
+  const base = instances.map((instance, order) => ({
+    id: instance.instanceId,
+    cliTool: instance.cliToolId,
+    alias: instance.alias,
+    order,
+  }));
+  const refusal = rosterAdditionRefusal(base, { id: instanceId, cliTool, alias });
+  if (refusal) {
+    const addCommand = registerCommandFor(worktreeId, cliTool, instanceId);
+    console.error(
+      refusal.atLimit
+        ? `Error: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit). `
+          + `Nothing was written or sent. Make room, then: ${addCommand}`
+        : `Error: could not register '${instanceId}' in the roster: the server would refuse it (${refusal.error}). `
+          + `Nothing was written or sent. To register it: ${addCommand}`
+    );
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
   try {
     await roleWrite(`commandmate instances ${worktreeId}`, () =>
       client.post<InstanceRoleCreateResponse>(url, {
-        instance: { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId) },
+        instance: { id: instanceId, cliTool, alias },
         role,
         expectedRosterRevision: rosterRevision,
         // Issue #4449: refused by the tool policy here, with nothing created.
@@ -1015,9 +1083,11 @@ touches a role already there. The message has gone out by then, so a roster that
 changing, or any other failure to register, is a warning and exit 0 (Issues #4149, #4159):
 do not send it again; the warning has the command that registers it. The roster's own
 rules decide (Issue #4458): up to 10 instances, so a removed row makes room again; an
---instance that is not an id the roster accepts is exit 2 before anything is sent; a row
-the roster would refuse (the limit, a default alias over 50 characters) is not saved and
-the warning gives the server's reason.
+--instance that is not an id the roster accepts, or whose default alias would be over 50
+characters, is exit 2 before anything is sent (the error gives an instances add command
+with a short --alias); a roster already full by the time the message has gone out is a
+warning, as above. --register --role asks the same before it creates anything: a row the
+roster would refuse, the limit included, is exit 2 with nothing written or sent.
 
 --expect-* pin this send to what the caller read earlier, saving nothing; the server
 reads them again right before the first key, so a process replaced in between gets
@@ -1090,6 +1160,9 @@ tool policy (antigravity, above; nothing typed, do not send it again).
               + '(letters, digits, _ or -, at most 64 characters). Nothing was sent.'
           );
           process.exit(ExitCode.CONFIG_ERROR);
+        }
+        if (options.register && namedTarget.instanceId !== undefined) {
+          await assertDefaultAliasFits(client, worktreeId, namedTarget.instanceId, options.agent ?? namedTarget.instanceId);
         }
 
         // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).

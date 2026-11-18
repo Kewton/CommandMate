@@ -43,6 +43,8 @@ export function validateAgentInstancesInput(input: unknown): {
   error?: string;
   /** Issue #4458: set on a refusal, so a caller can tell the size from a bad row. */
   refusal?: AgentInstancesRefusal;
+  /** Issue #4458: with `refusal: 'entry'`, the position of the row refused. */
+  index?: number;
 } {
   if (!Array.isArray(input)) {
     return { valid: false, error: 'agentInstances must be an array', refusal: 'shape' };
@@ -78,6 +80,7 @@ function validateAgentInstanceEntries(input: unknown[]): {
   valid: boolean;
   value?: AgentInstance[];
   error?: string;
+  index?: number;
 } {
 
   const seen = new Set<string>();
@@ -86,21 +89,21 @@ function validateAgentInstanceEntries(input: unknown[]): {
   for (let index = 0; index < input.length; index++) {
     const raw = input[index];
     if (typeof raw !== 'object' || raw === null) {
-      return { valid: false, error: `agentInstances[${index}] must be an object` };
+      return { valid: false, index, error: `agentInstances[${index}] must be an object` };
     }
     const candidate = raw as Record<string, unknown>;
 
     const id = candidate.id;
     if (typeof id !== 'string' || !isValidInstanceId(id)) {
-      return { valid: false, error: `agentInstances[${index}].id is invalid` };
+      return { valid: false, index, error: `agentInstances[${index}].id is invalid` };
     }
     if (seen.has(id)) {
-      return { valid: false, error: `agentInstances[${index}].id is duplicated: ${id}` };
+      return { valid: false, index, error: `agentInstances[${index}].id is duplicated: ${id}` };
     }
 
     const cliTool = candidate.cliTool;
     if (typeof cliTool !== 'string' || !isCliToolType(cliTool)) {
-      return { valid: false, error: `agentInstances[${index}].cliTool is invalid` };
+      return { valid: false, index, error: `agentInstances[${index}].cliTool is invalid` };
     }
 
     // Primary-anchor consistency: an id that equals a CLI tool id must back that
@@ -108,6 +111,7 @@ function validateAgentInstanceEntries(input: unknown[]): {
     if (isCliToolType(id) && id !== cliTool) {
       return {
         valid: false,
+        index,
         error: `agentInstances[${index}].id "${id}" conflicts with cliTool "${cliTool}"`,
       };
     }
@@ -115,11 +119,12 @@ function validateAgentInstanceEntries(input: unknown[]): {
     let alias = '';
     if (candidate.alias !== undefined && candidate.alias !== null) {
       if (typeof candidate.alias !== 'string') {
-        return { valid: false, error: `agentInstances[${index}].alias must be a string` };
+        return { valid: false, index, error: `agentInstances[${index}].alias must be a string` };
       }
       if (candidate.alias.length > MAX_AGENT_ALIAS_LENGTH) {
         return {
           valid: false,
+          index,
           error: `agentInstances[${index}].alias exceeds ${MAX_AGENT_ALIAS_LENGTH} characters`,
         };
       }

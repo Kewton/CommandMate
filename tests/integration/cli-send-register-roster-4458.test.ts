@@ -117,6 +117,9 @@ import * as resolveTargetRoute from '@/app/api/worktrees/[id]/resolve-target/rou
 import * as worktreeRoute from '@/app/api/worktrees/[id]/route';
 import { createSendCommand } from '@/cli/commands/send';
 import { createInstancesCommand } from '@/cli/commands/instances';
+import * as instanceRolesRoute from '@/app/api/worktrees/[id]/instances/roles/route';
+import * as rolesRoute from '@/app/api/roles/route';
+import { createAgentRole } from '@/lib/db/agent-roles-db';
 
 const WT = 'wt-4458';
 
@@ -124,13 +127,18 @@ let dir: string;
 let db: Database.Database;
 /** Bodies of every PATCH /api/worktrees/:id, as sent. */
 let patches: Array<Record<string, unknown>>;
+/** POSTs to instances/roles (`--register --role`) and to /send. */
+let rolePosts: number;
+let sendPosts: number;
 /** Every answer of a PATCH /api/worktrees/:id (status and body). */
 let patchAnswers: Array<{ status: number; body: Record<string, unknown> }>;
 
 type RouteHandler = (request: NextRequest, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
 
 function routed(pathname: string): { handlers: Record<string, unknown>; params: Record<string, string> } | null {
+  if (pathname === '/api/roles') return { handlers: rolesRoute, params: {} };
   const routes: Array<[RegExp, Record<string, unknown>]> = [
+    [/^\/api\/worktrees\/([^/]+)\/instances\/roles$/, instanceRolesRoute],
     [/^\/api\/worktrees\/([^/]+)\/send$/, sendRoute],
     [/^\/api\/worktrees\/([^/]+)\/resolve-target$/, resolveTargetRoute],
     [/^\/api\/worktrees\/([^/]+)$/, worktreeRoute],
@@ -155,6 +163,8 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
   if (!handler) return Response.json({ error: `no ${method}` }, { status: 405 });
   const isPatch = method === 'PATCH' && url.pathname === `/api/worktrees/${WT}`;
   if (isPatch && init?.body) patches.push(JSON.parse(String(init.body)));
+  if (method === 'POST' && url.pathname === `/api/worktrees/${WT}/instances/roles`) rolePosts += 1;
+  if (method === 'POST' && url.pathname === `/api/worktrees/${WT}/send`) sendPosts += 1;
   const response = await handler(new NextRequest(url, init as ConstructorParameters<typeof NextRequest>[1]), {
     params: Promise.resolve(route.params),
   });
@@ -223,7 +233,10 @@ beforeEach(async () => {
     cliToolId: 'claude',
   } as Worktree);
   createRepository(db, { name: 'repo', path: root, cloneSource: 'local' });
+  createAgentRole(db, { name: 'reviewer', body: 'REVIEW' });
   setLaunchRoleDatabaseForTest(db);
+  rolePosts = 0;
+  sendPosts = 0;
   resetSessionLaunchFlightsForTest();
   resetInstanceInputLocks();
   fakeTool.running = false;
@@ -320,18 +333,79 @@ describe('Issue #4458 (3): what the roster write would refuse is not sent to it'
     expect(rosterIds()).toHaveLength(8);
   });
 
-  it('a row the server refuses (the default alias of a 64-character id is over 50): a warning with the server\'s reason, exit 0, nothing saved', async () => {
+  it('a default alias over 50 characters (a 64-character id): exit 2 before anything is sent, with the reason and a command that registers it', async () => {
     setAgentInstances(db, WT, claudeRoster(8));
     const longId = 'w'.repeat(64);
 
     const result = await send('hello', '--agent', 'claude', '--instance', longId, '--register');
 
-    expect(result.code).toBe(0);
-    expect(fakeTool.typed).toEqual(['hello']);
-    const text = result.stderr.join('\n');
-    expect(text).toMatch(new RegExp(`^Warning: the message was sent, but could not register '${longId}' in the roster: the server would refuse it \\(agentInstances\\[8\\]\\.alias exceeds 50 characters\\)`, 'm'));
+    expect(result.code).toBe(2);
+    expect(fakeTool.typed).toEqual([]);
+    expect(sendPosts).toBe(0);
     expect(patches).toEqual([]);
     expect(rosterIds()).toHaveLength(8);
+    const text = result.stderr.join('\n');
+    expect(text).toMatch(/^Error: --register would name '.+', longer than the 50 characters an alias may have/m);
+    expect(text).toContain('Nothing was sent.');
+    // The command it gives does what it says.
+    const command = text.match(/commandmate instances (\S+) add --agent (\S+) --id (\S+) --alias "([^"]+)"/);
+    expect(command).not.toBeNull();
+    const [, wt, agent, id, alias] = command as RegExpMatchArray;
+    expect(wt).toBe(WT);
+    expect(alias.length).toBeLessThanOrEqual(50);
+    expect(await instances('add', '--agent', agent, '--id', id, '--alias', alias)).toMatchObject({ code: 0 });
+    expect(roster().find((row) => row.id === longId)).toMatchObject({ cliTool: 'claude', alias });
+  });
+
+  it('the same id already on the roster: nothing to register, so it is sent as before', async () => {
+    const longId = 'w'.repeat(64);
+    setAgentInstances(db, WT, [...claudeRoster(8), { id: longId, cliTool: 'claude', alias: 'Long', order: 8 }]);
+
+    const result = await send('hello', '--agent', 'claude', '--instance', longId, '--register');
+
+    expect(result.code).toBe(0);
+    expect(fakeTool.typed).toEqual(['hello']);
+    expect(patches).toEqual([]);
+  });
+});
+
+describe('Issue #4458: --register --role asks the same judgment before it creates anything', () => {
+  it('at the limit: exit 2, no POST, nothing sent, no row and no role written', async () => {
+    setAgentInstances(db, WT, claudeRoster(MAX_AGENT_INSTANCES));
+    const before = roster();
+
+    const result = await send('hello', '--agent', 'claude', '--instance', 'claude-11', '--register', '--role', 'reviewer');
+
+    expect(result.code).toBe(2);
+    expect(result.stderr.join('\n')).toMatch(/^Error: could not register 'claude-11' in the roster \(already at the 10-instance limit\)\. Nothing was written or sent\./m);
+    expect(rolePosts).toBe(0);
+    expect(sendPosts).toBe(0);
+    expect(fakeTool.typed).toEqual([]);
+    expect(roster()).toEqual(before);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM agent_instance_roles').get()).toEqual({ n: 0 });
+  });
+
+  it('a 64-character id: exit 2, no POST, nothing sent, no row', async () => {
+    setAgentInstances(db, WT, claudeRoster(8));
+
+    const result = await send('hello', '--agent', 'claude', '--instance', 'w'.repeat(64), '--register', '--role', 'reviewer');
+
+    expect(result.code).toBe(2);
+    expect(rolePosts).toBe(0);
+    expect(sendPosts).toBe(0);
+    expect(fakeTool.typed).toEqual([]);
+    expect(rosterIds()).toHaveLength(8);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM agent_instance_roles').get()).toEqual({ n: 0 });
+  });
+
+  it('control: room left after the limit: created with its role (one POST)', async () => {
+    setAgentInstances(db, WT, claudeRoster(MAX_AGENT_INSTANCES));
+    expect(await instances('remove', 'claude-6')).toMatchObject({ code: 0 });
+
+    await send('hello', '--agent', 'claude', '--instance', 'claude-6', '--register', '--role', 'reviewer');
+
+    expect(rolePosts).toBe(1);
+    expect(rosterIds()).toContain('claude-6');
   });
 });
 

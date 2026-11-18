@@ -138,9 +138,10 @@ export interface RosterAdditionRefusal {
 /**
  * Whether the roster write would refuse `added` appended to `base`, asked of the server's
  * own validator rather than a copy of its rules (Issue #4458): the limit, the room left
- * under it, the id pattern and length, the primary anchor and the alias length.
+ * under it, the id pattern and length, the primary anchor and the alias length of `added`.
  *
- * @returns null when the write would accept it
+ * @returns null when the write would accept it, or when what it would refuse is a row of
+ *   `base` (not this add's to judge; the save gets the server's own answer)
  */
 export function rosterAdditionRefusal(
   base: ReadonlyArray<AgentInstance>,
@@ -148,6 +149,10 @@ export function rosterAdditionRefusal(
 ): RosterAdditionRefusal | null {
   const validation = validateAgentInstanceAddition(base, added);
   if (validation.valid) return null;
+  // Only the added row and the room for it are this add's to judge. A row already on the
+  // roster is the server's to answer for: refusing an add over it would block every add
+  // (and hide the real answer of the save, a 409 included) on a row the add never touched.
+  if (validation.refusal === 'entry' && validation.index !== base.length) return null;
   return {
     atLimit: validation.refusal === 'limit',
     error: validation.error ?? 'the roster would be refused',
