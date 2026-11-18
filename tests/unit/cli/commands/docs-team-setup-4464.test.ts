@@ -147,7 +147,6 @@ function hasOption(command: Command, flag: string): boolean {
   return command.options.some((option) => option.long === flag || option.short === flag);
 }
 
-/** What in one invocation the registered CLI does not know. */
 /** A placeholder or a quoted value, never a command word: `<worktree-id>`, `"<text>"`. */
 function isPlaceholder(word: string): boolean {
   return /^["'<]/.test(word);
@@ -420,16 +419,22 @@ function reachesFirstPassProblems(guide: string): string[] {
   if (/no work yet exits 21/.test(p3)) problems.push('wrong exit 21 claim');
   // The screen's own label.
   if (!p4.includes('"Insert at start"')) problems.push('Insert at start');
-  // Answers reach a stopped session through the person.
-  if (!/How an answer reaches a stopped session/.test(p5) || !p5.includes('commandmate prompt <worktree-id>') || !p5.includes('commandmate respond <worktree-id> "<their answer>"')) {
+  // Answers reach a stopped session through the person, on the screen (review 4464-2):
+  // no example types an answer with the unchecked respond.
+  if (
+    !/How an answer reaches a stopped session/.test(p5) ||
+    !p5.includes('commandmate prompt <worktree-id>') ||
+    !/answers it themselves on CommandMate's screen/.test(p5) ||
+    /commandmate respond <[^>]+> "/.test(guide)
+  ) {
     problems.push('answer delivery');
   }
   if (/\{owner\}\/\{repo\}/.test(guide)) problems.push('gh placeholders depend on cwd');
   return problems;
 }
 
-describe('[#4464] acceptance 1: the steps reach the first exit 0', () => {
-  it('has no step that stops the first issue short of the checks', () => {
+describe('[#4464] acceptance 1: the fixes from reviews 4464-1 and 4464-2 stay in place', () => {
+  it('has every pinned fix (text presence, not an end-to-end run)', () => {
     expect(reachesFirstPassProblems(TEAM_SETUP_GUIDE)).toEqual([]);
   });
 
@@ -438,6 +443,75 @@ describe('[#4464] acceptance 1: the steps reach the first exit 0', () => {
       .replace('"Insert at start"', '"inject on start"')
       .replaceAll('How an answer reaches a stopped session', 'Answers');
     expect(reachesFirstPassProblems(old)).toEqual(['baseRef', 'Insert at start', 'answer delivery']);
+  });
+
+  it('control: a proxy answer with the unchecked respond fails', () => {
+    const proxy = TEAM_SETUP_GUIDE.replace(
+      'Never choose an option yourself',
+      '```bash\ncommandmate respond <worktree-id> "<their answer>" --instance <instance-id>\n```\n\nNever choose an option yourself',
+    );
+    expect(reachesFirstPassProblems(proxy)).toEqual(['answer delivery']);
+  });
+});
+
+/**
+ * I3, tied to its target (review 4464-2): a yes covers the prompt, repository,
+ * server, files and GitHub repository the person was shown, and the guide never
+ * leads an agent to read it wider.
+ */
+function approvalBindingProblems(guide: string): string[] {
+  const intro = guide.split(/^## Phase 1:/m)[0];
+  const [, p2, p3, p4, p5] = phases(guide).map((x) => x.body);
+  const problems: string[] = [];
+  if (!/A yes covers what the person was shown, and nothing more/.test(intro)) problems.push('yes is tied to its target');
+  // sync touches the whole server: said before every run, retries included.
+  if (
+    !/Before every `commandmate sync`/.test(p2) ||
+    !/every repository registered on the CommandMate server/.test(p2) ||
+    !/stops the sessions running in them/.test(p2) ||
+    !/Running `commandmate sync`/.test(intro)
+  ) {
+    problems.push('sync explained and approved');
+  }
+  // Away from the desk: no Auto Yes in this team.
+  if (!/Do not turn on Auto Yes for it in this team/.test(p5) || /commandmate auto-yes \S+ --enable --duration/.test(guide)) {
+    problems.push('no Auto Yes while away');
+  }
+  // The scope is a check after the work, not a limit on it.
+  if (!/The scope is a check made after the work/.test(p3) || /by the task contract's scope/.test(guide)) {
+    problems.push('scope is a later check');
+  }
+  // The person's approval of files and commits goes down in the brief and the contract.
+  if (!/what the person approved for it \(the files that may change, and whether the worker may commit\)/.test(p4) || !/I approved: changes under <files> only/.test(p5)) {
+    problems.push('approval passed down');
+  }
+  // The GitHub target comes from the person; raw remote URLs are not read.
+  if (/remote -v/.test(guide) || !/Do not work it out from the Git remotes yourself/.test(p5)) {
+    problems.push('GitHub target from the person');
+  }
+  return problems;
+}
+
+describe('[#4464] I3: an approval is tied to what it approved', () => {
+  it('ties every approval in the guide to its target', () => {
+    expect(approvalBindingProblems(TEAM_SETUP_GUIDE)).toEqual([]);
+  });
+
+  it('control: the version reviewed in 4464-2 fails each check', () => {
+    const old = TEAM_SETUP_GUIDE.replace('A yes covers what the person was shown, and nothing more', 'Approvals')
+      .replaceAll('Before every `commandmate sync`', 'Then')
+      .replace('Do not turn on Auto Yes for it in this team', 'Follow Stage 6')
+      .replace('The scope is a check made after the work', 'The scope limits the work')
+      .replace('I approved: changes under <files> only', 'Go')
+      .replace('Do not work it out from the Git remotes yourself', 'Read `git remote -v`');
+    expect(approvalBindingProblems(old)).toEqual([
+      'yes is tied to its target',
+      'sync explained and approved',
+      'no Auto Yes while away',
+      'scope is a later check',
+      'approval passed down',
+      'GitHub target from the person',
+    ]);
   });
 });
 
