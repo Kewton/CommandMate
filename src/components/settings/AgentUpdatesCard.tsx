@@ -27,6 +27,9 @@
  * check, read out of `~/.codex/version.json` — CommandMate contacts nothing.
  * Every other tool therefore shows an installed version and no update column,
  * which is this Issue's 実装内容 2 rather than an omission.
+ *
+ * antigravity has no row unless `CM_ANTIGRAVITY_USAGE` is declared or antigravity
+ * was used on this server (Issue #4452): the server does not start `agy` to list it.
  */
 
 'use client';

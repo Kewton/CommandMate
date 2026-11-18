@@ -26,7 +26,7 @@
  * @vitest-environment node
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /** Absolute path → what its `--version` prints. */
 let execTable: Record<string, { stdout?: string }> = {};
@@ -88,6 +88,15 @@ beforeEach(() => {
   execTable = {};
   pathTable = {};
   clearDetectorVersionProbeCache();
+  // Issue #4452: antigravity is probed only with the usage declaration (or after
+  // a use). These cases are about how agy's version is read, so they run as a
+  // declared install; the undeclared case (no probe at all) is
+  // tests/unit/tool-policy/agy-version-probe-4452.test.ts.
+  vi.stubEnv('CM_ANTIGRAVITY_USAGE', 'api-key');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('[#2292] the antigravity stamp names the build the rules were measured on', () => {
