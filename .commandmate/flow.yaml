@@ -1,0 +1,22 @@
+# Flow settings for this repository (scripts/flow/config.mjs, docs/design/flow-wip-4368.md §7).
+# wip.total: upper bound on unmerged branches (worktree branches + open PRs to the base).
+# Advisory only: `node scripts/orchestrate/flow-wip.mjs check` exits 60 when the count reaches it.
+# 8 = 5 active lanes + 3 waiting on PR (design H1). Revisit after a week of #4367 measurements.
+version: 1
+wip:
+  total: 8
+# relayWatch (#4418, docs/design/flow-relay-watch-4418.md): tick watches the PM's requests.
+# pm: the PM's session. receivers: the sessions only the PM sends to (docs/orchestrate/team.md §1・§2:
+# the judge claude-2 and the dev leader claude-3). A request there with no relay, a relay pending
+# pendingMinutes with the receiver's screen unchanged screenMinutes, and a held or expired relay
+# are recorded under <flowDir>/<slug>/relay-watch/; the last two are told to the PM's composer once.
+# notifyNoRelay: a request with no relay is recorded only, not told, until #4420 (the relay fix)
+# lands; the PM sends plain send for now. After #4420, set it to true here (design §5.1).
+relayWatch:
+  pm: { worktreeId: mycodebranchdesk, instanceId: claude }
+  receivers:
+    - { worktreeId: mycodebranchdesk, instanceId: claude-2 }
+    - { worktreeId: mycodebranchdesk, instanceId: claude-3 }
+  pendingMinutes: 60
+  screenMinutes: 20
+  notifyNoRelay: false

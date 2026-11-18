@@ -122,6 +122,8 @@ CM_SKILL_DISCOVERY_PROBE=1 npx vitest run tests/integration/skills-agent-discove
 
 CLI が未導入の場合、プローブは失敗ではなく `unknown` と skip 理由を記録する。
 
+互換性の matrix の行を未計測（`unknown`）から測定済みに変えるときは、未計測を固定している fixture も同じ変更で直す。どの行でも `tests/unit/lib/skills/compatibility-matrix.test.ts` が未計測の行の一覧（antigravity・gemini・vibe-local）を `toEqual` で固定している。gemini の行ならさらに、`tests/integration/skills-agent-discovery-probe.test.ts`（導入済みの CLI でも `unknown` を期待）と `tests/unit/lib/skills/compatibility.test.ts`（`unknown` を期待）も赤くなる。matrix だけを変えると、これらが赤くなる。
+
 ---
 
 ## 7. 関連
@@ -234,8 +236,17 @@ User skills (~/.commandcode/skills or ~/.agents/skills)
 ### 8.6 この計測が触れていないこと
 
 - CommandMate の palette 側の配線（`loadAgentsSkills` の `cliTools`）は変えていない。command-code セッションに `.agents/skills` の行は今も供給されない
-- `allowed-tools` などの frontmatter 差異、Skill の大きさによる skip 挙動は測っていない
+- `allowed-tools` などの frontmatter 差異、Skill の大きさによる skip 挙動は測っていない（列挙されることだけは §8.7 で確かめた）
 - Gemini / Antigravity / Vibe Local は未計測のまま（Gemini は発見軸だけ §9.1 に記録してある）
+
+### 8.7 `skill_loaded` はストリームにしか出ない
+
+同じ 1.49.0 で、隔離した一時 repository を使って追加で確かめたこと（`HOME` は隔離していない。auth が `~/.commandcode` にあるため）。
+
+- **`skill_loaded` は転写 jsonl に出ない。** `cmd -p "/<name>" --output-format json` の NDJSON には `{"type":"event","event":{"type":"skill_loaded","name":"<name>"}}` が出るが、`~/.commandcode/projects/<slug>/<id>.jsonl` には 1 件も無い。slash route で Skill に解決された print モードのターンは `.jsonl` を **0 バイト**のまま残し、`.checkpoints.jsonl` に `{"prompt":"/<name>","turnNumber":1,…}` だけを書く。「転写に `skill_loaded` が記録されること」を受入条件にすると原理的に満たせない — 見るのはストリームか、checkpoints の `prompt`。
+- **`--max-turns 1` でも `skill_loaded` は出る**（slash の解決はモデルのターンより前）。発見軸の `cmd skills list -d` はモデルを呼ばない。
+- **陰性対照は転写の `tool_result` が一番強い。** `.claude/skills` にだけ置いた `/probe-claude-root` は slash として解決されず、モデルが `activate_skill` を呼んで転写に `Unknown skill: probe-claude-root. Available skills: …` を残す（`skill_loaded` は 0 件、exit 8 = max_turns）。Command Code 自身が持つ Skill 一覧の直読みなので `skills list` より強い証拠になる。
+- `.opencode/skills` に置いた probe も列挙されない。`allowed-tools` frontmatter を持つ Skill、約 60 KB の `SKILL.md` を持つ Skill も skip 理由なしに列挙された。
 
 ---
 

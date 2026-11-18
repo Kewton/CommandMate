@@ -133,6 +133,36 @@ commandmate start --daemon
 - The copy is a self-contained, consistent file, so `cp` is enough to restore it (with the server stopped)
 - After restoring, the "last completed version" record in `db-backups/` is newer than the database; it is ignored at startup (no need to delete it) and overwritten the next time every migration succeeds
 
+## The screen stays on "Updating to the latest version" / breaks when you move between screens?
+
+This screen appears when part of the page (a chunk) could not be loaded. The page reloads once by itself; if it recurs within 30 seconds
+it stops reloading and leaves the message on the screen (`CHUNK_RELOAD_GUARD_MS` in `src/lib/error/chunk-reload.ts`).
+There is more than one possible cause. When the device is known to be offline, the "You're offline" screen appears instead and retries once the
+connection is back (`src/app/error.tsx`). But `navigator.onLine` being true does not prove the network works (a Wi-Fi that needs sign-in, a route
+that does not reach the server), so even when "Updating to the latest version" appears, first rule out **the connection**: check whether other pages
+or the server's URL open from the same device, and whether the server is running.
+
+When the connection is fine, one candidate cause is that the build the running server loaded at start-up and the `.next` on disk disagree (not a code defect).
+It also shows up as a home page that renders while moving to another screen gives `Application error`, or as only the
+not-yet-opened APIs returning 500. The PWA service worker serves `/_next/static/` from its cache first, so devices can look broken in different ways.
+
+Main causes of a build mismatch and fixes:
+
+| Cause | Fix |
+|---|---|
+| `npm run build` was run in the running server's working directory (including a check that runs lint, tsc, test and build together) | Restart the server (no build needed). Run checks in another worktree |
+| `npm run dev` was run in the same directory (`next dev` wipes `.next` and rebuilds it for development; `/_next/static/*` returns 400) | Stopping dev does not fix it. **Build** and restart |
+| The server's version was swapped while an old tab stayed open | Hard reload (Cmd+Shift+R on macOS) |
+
+How to confirm:
+
+- Compare the server's start time (`ps -o lstart= -p <pid>`) with the modification time of `.next/BUILD_ID`. If the build is newer, the builds disagree
+- Check that every static file the served HTML references exists on disk:
+  match each path from `curl -s localhost:3000/ | grep -oE '/_next/static/[^"]+\.(js|css)'` against `.next/static/`. One missing file confirms it
+- **Do not take a route returning 200 as proof of health.** The HTML can render while one CSS file or chunk it references is missing
+- Even if you believe you restarted, confirm it with the uptime from `ps -o etime= -p <pid>` (when the stop fails, the run can end without building or starting anything)
+- When something "does not show" on screen, try a hard reload before digging into the DB or the API. If opening `/api/worktrees` or similar directly returns the right values, the cause is the page in the browser
+
 ## FAQ
 
 **Q: How do I use CommandMate from my phone?**

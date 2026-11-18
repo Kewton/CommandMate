@@ -176,6 +176,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   The relay is refused (exit 2, nothing sent) when the message you are answering
   arrived over a relay itself (pass --allow-relay-chain), when the chain would
   exceed 3 hops, or when an open relay between the two sessions already exists.
+  A relay with antigravity at either end is refused by the tool policy instead
+  (exit 33, nothing sent) unless the server declares API-key or enterprise use.
   If the target stops on a confirmation you are told, once, and the relay stays
   open -- answer the dialog on that session and the reply still arrives. A relay
   nobody could deliver expires after 24h with a single line of notice.
@@ -202,8 +204,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   send + wait + read the reply, in one command. Name the target with --instance
   alone (--agent is for an instance the roster does not know).
     --timeout <seconds>   Maximum wait for the reply (default 1800)
-    --json                worktreeId, instanceId, cliToolId, source (history|pane|none),
-                          reply, overlapped (only when true)
+    --json                worktreeId, instanceId, cliToolId, source (history|none),
+                          reply (null when not collected), askId, attribution
+                          {state, reason, notified}, overlapped (only when true)
     --async               Do not wait: register a relay, print its id, exit 0. The reply
                           is typed into --reply-to's composer when the turn ends.
     --reply-to <target>   <worktree-id>[@<instance-id|alias>], or 'self' (default)
@@ -215,7 +218,16 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
                         id=context-limit: 'instances <id> kill <instance>' and ask again;
                         id=model-capacity: ask another instance or model
     32  ROLE NOT_SENT   the role condition does not hold; nothing was typed
+    33  TOOL POLICY DENIED  the send or the --async relay to antigravity was refused by
+                        the tool policy (no usage declaration); nothing was typed.
+                        stderr line 1 'Error [TOOL_POLICY_DENIED]: ...'; --json has
+                        "sent": false and "refusal". Do not ask again: tell a person
     2   a relay refusal (reason on stderr), a bad argument, or the target is on a prompt
+  The reply is read by the ask's own id (Issue #4344): printed only when the
+  server ties it to this ask (attribution.state "matched"; claude and codex).
+  Otherwise exit 0, empty stdout, reply null and one 'reply not collected' line
+  on stderr (unavailable: tool_unsupported / server_unsupported / slash_command;
+  ambiguous; unmatched). The pane is never read for a reply.
   Full guide: 'commandmate docs --section delegation'.
 
 ### commandmate relays
@@ -744,6 +756,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   31  ROLE CONFLICT    - A role or roster conflict; nothing changed or sent (roles, instances, send).
                          Plain instances add/remove/alias too. remove --kill may have stopped the session
   32  ROLE NOT_SENT    - The role condition does not hold or its start was refused; nothing typed (send, ask)
+  33  TOOL POLICY DENIED - Refused by the tool policy (antigravity without a usage declaration, Issue #4437);
+                         nothing typed, no relay opened (send, ask, respond, --reply-to / --async).
+                         Sending again gives the same answer: do not resend, ask a person
   99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
   124 TIMEOUT          - Wait or verification timeout exceeded
 
@@ -971,15 +986,47 @@ same CommandMate server, and you can hand work to them.
   withheld the answer (autoYesSuppression in the JSON) or 30 s passed. Rule 1
   below applies to it like to any other prompt.
 
-  --json adds the target and a 'source' field saying whether the reply came
-  from the chat transcript ("history") or from the pane ("pane"). copilot,
-  gemini and vibe-local keep no transcript, so their replies are pane reads.
+  Whose reply it is (Issue #4344): ask puts an id on the message and reads the
+  reply back by that id, so a reply is never another turn's. It is printed
+  only when the server ties the transcript's input to the turn that answered
+  it alone (--json: "attribution": {"state": "matched"}, "source": "history").
+  Otherwise ask still exits 0, stdout is empty, --json has "reply": null and
+  the attribution's state and reason, and stderr has one 'reply not collected'
+  line:
+    unavailable/tool_unsupported    the tool has no ask attribution (copilot,
+                                    gemini, vibe-local, opencode, antigravity,
+                                    command-code today); sent as before. claude
+                                    or codex older than the server's minimum
+                                    version, or whose version could not be
+                                    read, land here too: --json adds
+                                    "toolVersion": {state: too_old|unreadable,
+                                    minimum, installed} and stderr says which
+    unavailable/server_unsupported  an older server (installed CommandMate is
+                                    newer than the running one); sent with the
+                                    old body. Restart it ('commandmate stop'
+                                    then 'commandmate start --daemon')
+    unavailable/slash_command       a body starting with /, ! or #
+    ambiguous/...                   the answering turn also took another input
+                                    (shared_turn) or was open at the send
+    unmatched/...                   not tied to this ask (absorbed_mid_turn,
+                                    turn_incomplete, grace_expired, ...)
+  Look at their screen yourself then ('capture <id> --instance <id> --pane');
+  ask never reads the pane for a reply. To get the reply of a tool ask cannot
+  attribute: 'ask <id> "..." --instance <id> --async' (the relay brings the
+  reply back: transcript turn rows for claude, codex, antigravity,
+  command-code, opencode and opencode-v2; the screen's row for copilot, gemini
+  and vibe-local), or 'send' + 'wait' then 'reply <id> --instance <id> --since
+  <time before the send>' (transcript tools only; empty for copilot, gemini
+  and vibe-local, whose reply is only on 'capture --pane'). "notified": true on a matched reply:
+  the turn also took a background-task notification the reply may react to.
+  With an id the message is always multi-line, so a claude pane shows it as a
+  paste with a '[cmate-ask v1 <id>]' line in front; that is expected.
 
   Ask one instance one thing at a time (Issue #3955): a request sent while it
   is mid-turn can be folded into that turn (codex does) and answered with one
-  reply for both. ask then still exits 0 with the reply, but prints
-  'overlapped: ...' on stderr and --json adds "overlapped": true -- the reply
-  may answer the other request.
+  reply for both. ask then still exits 0, but prints 'overlapped: ...' on
+  stderr and --json adds "overlapped": true; whether a reply is printed is
+  still decided by the attribution alone.
   Relay delivery (ask --async / send --reply-to) delivers only a turn that
   ended after the message went in, and notes a proven overlap on the reply's
   second line ('[CommandMate relay] ... (overlap=later)'; unknown is never
@@ -1031,7 +1078,9 @@ same CommandMate server, and you can hand work to them.
   The relay is refused (exit 2, nothing sent) when the message you are
   answering arrived over a relay itself (pass --allow-relay-chain), when the
   chain would exceed 3 hops, or when an open relay between the two sessions
-  already exists. If the target stops on a confirmation you are told, once, and
+  already exists. A relay with antigravity at either end is refused by the
+  tool policy instead (exit 33, nothing sent) unless the server declares
+  API-key or enterprise use. If the target stops on a confirmation you are told, once, and
   the relay stays open -- rule 1 below still applies: report that prompt, do not
   answer it. A relay nobody could deliver expires after 24h.
 

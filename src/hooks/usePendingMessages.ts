@@ -63,7 +63,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, OptimisticSendState } from '@/types/models';
+import type { ChatMessage, OptimisticSendState, SendRoleRefusalReason } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /** Default: mark an unconfirmed 'sending' message as errored after this long. */
@@ -132,6 +132,17 @@ export interface PendingMessage {
    * session is back. `retry()` clears it.
    */
   heldNotSent?: boolean;
+  /**
+   * Issue #4385: the last attempt was refused by the server because of the role (409
+   * `roleRefusal`, nothing typed) — the reason the failed row shows. Cleared by `retry()`.
+   */
+  roleRefusal?: SendRoleRefusalReason;
+  /**
+   * Issue #4385: this message's text was already handed back to the composer by
+   * {@link UsePendingMessagesOptions.onRoleRefused} (its first attempt was refused), so
+   * `discard()` does not hand it back a second time.
+   */
+  returnedToComposer?: boolean;
 }
 
 /**
@@ -192,6 +203,19 @@ export interface UsePendingMessagesOptions {
   isNotSent?: (error: unknown) => boolean;
   /** Issue #4345 1c 再指示 2: a new send not sent — its text, for the composer to keep. */
   onNotSent?: (content: string) => void;
+  /**
+   * Issue #4385: the role reason of a rejection the server answered with 409 `roleRefusal`
+   * (nothing typed), or null. Such a rejection fails the row at once (the server answered, so it
+   * is never parked for connectivity) and the row carries the reason. Omitted: no reason is read.
+   */
+  readRoleRefusal?: (error: unknown) => SendRoleRefusalReason | null;
+  /**
+   * Issue #4385: a send was refused because of its role — for the screen to say why right away.
+   * `firstAttempt` is true for a new send (not a retry): its text is the composer's to keep, as
+   * the composer clears only what the server took. Returns whether it handed the text back to the
+   * composer (then `discard()` does not hand it back again).
+   */
+  onRoleRefused?: (content: string, reason: SendRoleRefusalReason, info: { firstAttempt: boolean }) => boolean;
 }
 
 export interface UsePendingMessagesResult {
@@ -200,7 +224,10 @@ export interface UsePendingMessagesResult {
   pending: PendingMessage[];
   sendOptimistic: (content: string, options: OptimisticSendOptions) => void;
   retry: (tempId: string) => void;
-  /** Removes the pending and returns its content (for draft restore). */
+  /**
+   * Removes the pending and returns its content (for draft restore) — undefined when the text was
+   * already handed back to the composer by `onRoleRefused` (Issue #4385).
+   */
   discard: (tempId: string) => string | undefined;
 }
 
@@ -286,6 +313,7 @@ function toChatMessage(p: PendingMessage, worktreeId: string): ChatMessage {
     // drawn as 'error' so the bubble offers retry / discard (both the PC card and the mobile bubble
     // show them for 'error' only). Nothing resends it on its own; retry is the person's.
     optimisticState: p.heldNotSent ? 'error' : p.status,
+    ...(p.status === 'error' && p.roleRefusal ? { optimisticRoleRefusal: p.roleRefusal } : {}),
   };
 }
 
@@ -299,6 +327,8 @@ export function usePendingMessages({
   resendGraceMs = DEFAULT_RESEND_GRACE_MS,
   isNotSent,
   onNotSent,
+  readRoleRefusal,
+  onRoleRefused,
 }: UsePendingMessagesOptions): UsePendingMessagesResult {
   const [pending, setPending] = useState<PendingMessage[]>([]);
 
@@ -321,6 +351,10 @@ export function usePendingMessages({
   isNotSentRef.current = isNotSent;
   const onNotSentRef = useRef(onNotSent);
   onNotSentRef.current = onNotSent;
+  const readRoleRefusalRef = useRef(readRoleRefusal);
+  readRoleRefusalRef.current = readRoleRefusal;
+  const onRoleRefusedRef = useRef(onRoleRefused);
+  onRoleRefusedRef.current = onRoleRefused;
 
   const offlineRef = useRef(offline);
   offlineRef.current = offline;
@@ -330,7 +364,10 @@ export function usePendingMessages({
   // Issue #2503: tempIds whose send request has not settled. A request in
   // flight has an unknown outcome, and `POST /send` is not idempotent, so these
   // are never resend candidates however long the network has been back.
-  const inFlightRef = useRef<Set<string>>(new Set());
+  // Issue #4385 再指示 2: kept per attempt (the object `dispatchSend` sent), so an older attempt
+  // settling — a late answer after a retry — does not clear the in-flight mark of the attempt that
+  // is still travelling. A tempId is in flight while any of its attempts is.
+  const inFlightRef = useRef<Map<string, Set<PendingMessage>>>(new Map());
   // Server ids already claimed by reconciled (and pruned) pendings. Persisted
   // across renders so a single echo can only ever confirm one pending. Bounded
   // to ids still present in serverMessages so it does not grow unbounded.
@@ -343,6 +380,10 @@ export function usePendingMessages({
   // the prune decided, read rather than recomputed. One short string per
   // confirmed send, for the life of the mount.
   const reconciledTempIdsRef = useRef<Set<string>>(new Set());
+  // Issue #4385 再指示 1: each row's latest attempt (the object `dispatchSend` sent), so a late
+  // answer is applied only to the attempt it answers. Removed when the row is discarded or
+  // confirmed.
+  const attemptsRef = useRef<Map<string, PendingMessage>>(new Map());
 
   const clearTimer = useCallback((tempId: string) => {
     const timer = timersRef.current.get(tempId);
@@ -394,12 +435,20 @@ export function usePendingMessages({
    * before this attempt), or, for a new send (none), leaves with its text handed back.
    */
   const revertNotSent = useCallback(
-    (p: PendingMessage, previous: PendingMessage | undefined) => {
+    (p: PendingMessage, previous: PendingMessage | undefined, priorAttempt: PendingMessage | undefined) => {
       clearTimer(p.tempId);
       if (previous) {
+        // Issue #4385 再指示 2: the row goes back, and so does which attempt it belongs to — the one
+        // before this attempt (say a timed-out send whose answer is still to come), so its late
+        // answer is still applied to the row. Only when this attempt is still the row's latest.
+        if (attemptsRef.current.get(p.tempId) === p) {
+          if (priorAttempt) attemptsRef.current.set(p.tempId, priorAttempt);
+          else attemptsRef.current.delete(p.tempId);
+        }
         setPending((prev) => prev.map((cur) => (cur.tempId === p.tempId ? previous : cur)));
         return;
       }
+      attemptsRef.current.delete(p.tempId);
       setPending((prev) => prev.filter((cur) => cur.tempId !== p.tempId));
       onNotSentRef.current?.(p.content);
     },
@@ -408,8 +457,12 @@ export function usePendingMessages({
 
   const dispatchSend = useCallback(
     async (p: PendingMessage, previous?: PendingMessage) => {
+      const priorAttempt = attemptsRef.current.get(p.tempId);
+      attemptsRef.current.set(p.tempId, p);
       startTimer(p.tempId);
-      inFlightRef.current.add(p.tempId);
+      const attemptsInFlight = inFlightRef.current.get(p.tempId) ?? new Set<PendingMessage>();
+      attemptsInFlight.add(p);
+      inFlightRef.current.set(p.tempId, attemptsInFlight);
       try {
         await sendFnRef.current(p.content, p.options);
         // Issue #2503: the server took it. A request parked by the offline edge
@@ -426,13 +479,49 @@ export function usePendingMessages({
         // fires as a fallback if the echo never arrives).
       } catch (error) {
         // Issue #4345 1c 再指示 2 (K1): not sent — not a failure (no error row, no resend spent).
-        if (isNotSentRef.current?.(error)) revertNotSent(p, previous);
-        else failPending(p.tempId);
+        if (isNotSentRef.current?.(error)) {
+          revertNotSent(p, previous, priorAttempt);
+          return;
+        }
+        // Issue #4385: refused because of the role (409, nothing typed). The server answered, so
+        // the row fails now (never parked) with the reason; a new send's text goes back to the
+        // composer, which clears only what the server took. Also when the answer is late — the
+        // clock already failed this very attempt (再指示 1): the row still takes the reason and the
+        // record that its text went back, so a discard does not hand it back again. Only the row's
+        // latest attempt (`attemptsRef`) counts: a late answer to an older attempt (after a retry
+        // or an automatic resend) or to a row that was discarded or confirmed changes nothing.
+        const roleRefusal = readRoleRefusalRef.current?.(error) ?? null;
+        if (roleRefusal !== null) {
+          if (attemptsRef.current.get(p.tempId) !== p) return;
+          const sameAttempt = (cur: PendingMessage) =>
+            cur.tempId === p.tempId && (cur.status === 'sending' || cur.status === 'error');
+          clearTimer(p.tempId);
+          const firstAttempt = previous === undefined;
+          const handedBack = onRoleRefusedRef.current?.(p.content, roleRefusal, { firstAttempt }) === true;
+          setPending((prev) =>
+            prev.map((cur) =>
+              sameAttempt(cur)
+                ? {
+                    ...cur,
+                    status: 'error',
+                    queued: false,
+                    roleRefusal,
+                    returnedToComposer: cur.returnedToComposer || handedBack,
+                  }
+                : cur,
+            ),
+          );
+          return;
+        }
+        failPending(p.tempId);
       } finally {
-        inFlightRef.current.delete(p.tempId);
+        // Issue #4385 再指示 2: only this attempt stops being in flight; a newer one may still be.
+        const attemptsLeft = inFlightRef.current.get(p.tempId);
+        attemptsLeft?.delete(p);
+        if (attemptsLeft && attemptsLeft.size === 0) inFlightRef.current.delete(p.tempId);
       }
     },
-    [startTimer, failPending, revertNotSent],
+    [startTimer, failPending, revertNotSent, clearTimer],
   );
 
   const sendOptimistic = useCallback(
@@ -471,6 +560,7 @@ export function usePendingMessages({
         accepted: false,
         autoResendAttempted: false,
         heldNotSent: false,
+        roleRefusal: undefined,
       };
       setPending((prev) =>
         prev.map((p) => (p.tempId === tempId ? revived : p)),
@@ -486,8 +576,10 @@ export function usePendingMessages({
       const target = pendingRef.current.find((p) => p.tempId === tempId);
       clearTimer(tempId);
       inFlightRef.current.delete(tempId);
+      attemptsRef.current.delete(tempId);
       setPending((prev) => prev.filter((p) => p.tempId !== tempId));
-      return target?.content;
+      // Issue #4385: a text already handed back to the composer is not handed back twice.
+      return target?.returnedToComposer ? undefined : target?.content;
     },
     [clearTimer],
   );
@@ -516,6 +608,7 @@ export function usePendingMessages({
     if (reconciledTempIds.size === 0) return;
     reconciledTempIds.forEach((id) => reconciledTempIdsRef.current.add(id));
     reconciledTempIds.forEach(clearTimer);
+    reconciledTempIds.forEach((id) => attemptsRef.current.delete(id));
     setPending((cur) => cur.filter((p) => !reconciledTempIds.has(p.tempId)));
   }, [serverMessages, clearTimer]);
 

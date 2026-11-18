@@ -43,6 +43,8 @@ CI は使い捨ての self-hosted ランナー 8 台（2026-09-18 時点）で�
 （#2638 で Unit Tests を 4 本に分割）、同時本数を上げると 1 本あたりが
 伸びる。**が、伸び始めるのは 4 本を超えてからで、3〜4 本まではほぼ無償である。**
 
+self-hosted のランナーはローカルのゲートと同じマシンの資源を使う。PR の CI の間に、オーケストレーターのローカルの重い処理だけでなく、稼働中のワーカーが完了間際に回すゲート（build・lint・tsc・integration・unit）も重なると、ジョブが `timeout-minutes` に達して `cancelled` で終わる。`cancelled` を見たら中身のテストを疑う前に、ジョブの `started_at` と `completed_at` の差を見る。timeout ちょうどなら負荷による打ち切り。`gh run rerun --failed` は負荷が引いてから撃つ（同じ時間帯に撃つと同じ結果になる）。
+
 ## 6-1-1 並走させる理由
 
 順に回すと 1 issue あたり約 22 分（ローカル 10.8 分 ＋ CI 10.8 分）を直列で払う。
@@ -171,6 +173,10 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 他方のテストが旧名を使っていた）。同型の統合破壊はこの run で 2 件あり、**どちらも
 `npx tsc --noEmit` と影響テストのローカル実行で捕まった**。
 
+統合の後に `called N times, but got 0 times` のような「効果が 0 件」で落ちるテストは、期待値やタイミングより先に、呼ばれるべき経路が一度も走っていないことを疑う。相手のブランチが関数の先頭に足した前置きの検査・新しい await を、こちらのテストの partial mock（`{...actual, foo: vi.fn()}`）が塞いでおらず、実 IO に出て失敗していることがある。モックした logger の info/warn を全部出すと原因が名指しで出ることが多い。直したら前提をその場でアサートし（例: `await vi.waitFor(() => expect(opens).toBe(1))`）、手書きのオプションではなく本番の配線を通してテストする。
+
+手前のガードが奥のテストを覆ったら、期待値を書き換えて逃げず、逃がし弁のフラグを渡して両方の保証を別々に固定する。2 本が同じテストファイルの同じ位置に `describe` を足すと、衝突が共有行で分断され、両側保持では波括弧が壊れる。ヘッダ部だけを `git merge-file` で 3-way マージし、各 describe ブロックを順に連結する。検算は `grep -n '^describe('` の並び・括弧の数・`tsc`・当該 suite。
+
 ## 6-2 「CI が通れば」の許可と全チェックの合格
 
 `--last` なしの `merge-pr.mjs` は、全 `unit` の検証と `--build` の precheck がある PR の `Build` も `Unit Tests` も待たない（取り込み後に重い段を CI に任せた HEAD の `Unit Tests` は待つ。下の「6-2 取り込み後の重い段」）。設計どおりだが、利用者の許可の「CI が通れば」とは食い違う。
@@ -183,6 +189,16 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 `gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS` のすべてが登録されるまで待つ。一覧は `.github/workflows/ci-pr.yml` の全ジョブ（matrix の展開後の `Unit Tests (shard 1/4)`〜`(4/4)` と `E2E Tests (shard 1/2)`・`(2/2)` を含む 19 件。`Unit Tests`・`E2E Tests` は shard をまとめる集約ジョブ）で、ジョブを足す・名前を変えるときは一覧も直す。食い違うと `merge-pr.test.ts` が両方向で落ちる。一覧に無いチェック（ほかのワークフローなど）は、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
 
 対象は `ci-pr.yml` だけでよい（#4148 で見送り。追跡は不要）。PR に対して走るほかのワークフローは `cancel-pr-runs-on-close.yml` だけで、PR を閉じたとき（`types: [closed]`）にしか動かない。`pages.yml` は main への push、`publish.yml` はリリースで走る。PR の開いている間に別のワークフローを足すと `merge-pr.test.ts` が落ちるので、そのときに一覧へ足すかを決める。
+
+`--last` なしの merge-pr は E2E の `pending` を待たないので、develop の push run は見て初めて安全網になる。マージのたびに `gh run list --branch develop --event push --limit 3` の結論を見て、failure なら次のマージの前に原因の PR を特定する。UI・レイアウト・testid を変える PR は E2E でしか壊れが出ないことが多い。UI の Epic では各 PR を `--last` でマージするか、契約に関係する e2e spec を `npx playwright test <files>` で走らせてよいと書く（`playwright.config.ts` は専用ポートで本番に触れない）。
+
+## 6-2 gh pr merge --auto を使わない
+
+手でマージするときに `gh pr merge --auto` を使わない。develop には必須のステータスチェックが無いので、`--auto` はキューに入らずその場でマージされる。CI の完了は自分で確かめてから `gh pr merge` を叩く（通常は `merge-pr.mjs` を使う）。`gh pr checks` で完了を待つときは `state` ではなく `bucket` で判定する（`state` の値は `QUEUED`・`IN_PROGRESS` などで、`PENDING` は `bucket` の語彙）。`gh pr view --json mergeStateStatus` の `UNSTABLE` は「pending があるがマージは止まらない」状態で、緑の意味ではない。
+
+## 6-2 develop 向け PR と Issue のクローズ
+
+`Closes #N` による自動クローズは base が既定ブランチ（main）の PR でしか効かない。develop 向けの PR では `closingIssuesReferences` が空になり、マージしても Issue は閉じない（異常ではない）。`merge-pr.mjs` を通さずにマージしたときは、`gh pr view <PR> --json state -q .state` が `MERGED` であることを確かめてから `gh issue close <N> --reason completed` で閉じる。マージの成否を見ずに同じループで close しない（`gh pr merge` が失敗しても後のコマンドは走る）。
 
 ## 6-2 取り込み後の重い段
 
@@ -304,6 +320,21 @@ node scripts/orchestrate/merge-train.mjs --run-dir "workspace/orchestration/runs
 - **PR の HEAD が進んだとき**: 待ちの間に動いたら exit 1（`ci` 段に `head-moved <sha>` を記録）。古い HEAD の run を再実行しても、マージする HEAD の確認にならない。新しい HEAD で再実行すれば続きから進む
 - **再実行の回数**: 同じ HEAD で 1 回のまま。受理された分だけを `rerun=<id>` と記録するので、待っている間に `merge-pr.mjs` が止まっても、再開後に 1 回送る。受理の後は、また落ちれば `after-rerun` で止まる
 
+`Security Audit`（`npm audit`）は registry への接続失敗（HTTP 522 などの HTML がログに出る）で落ちることがある。監査の結果ではなく接続の失敗なので、ログで 5xx を確かめたら落ちたジョブだけを再実行する（`gh run rerun <run-id> --failed`）。ログで確かめずに CI だけの赤を一過性と決めない。
+
+## 6-3 落ちたジョブの理由をステップで読む
+
+CI のジョブ名は「何を検査するはずだったか」で、落ちた理由ではない。赤いジョブは、失敗したステップの名前と、その後のステップが `skipped` かを読む。`Install dependencies` のタイムアウトやレジストリの 503 で落ちたなら、本体（ESLint・tsc・テスト）は実行されておらず、コードの問題ではない。
+`gh api repos/Kewton/CommandMate/actions/runs/<run_id>/jobs` の `steps[].conclusion` で読む。run が進行中でも、終わったジョブのログは `gh api repos/Kewton/CommandMate/actions/jobs/<job_id>/logs` で取れる。同じジョブ名でも試行ごとに理由が変わるので、落ちるたびにログを読む。
+
+## 6-3 CI が queued のまま進まないとき
+
+CI が 10 分以上 queued のまま動かないときは、失敗ではなくランナーが居ないことを疑う。`gh api repos/Kewton/CommandMate/actions/runners` で online の数を見て、0 ならランナーの基盤（コンテナの実行環境）を確かめる。基盤の再起動は同じ基盤の上の他のランナーも止めるので、利用者に確かめてから行う。
+
+ジョブが「The self-hosted runner lost communication with the server」で落ちたときは、テストの step が success でもコードの赤ではない。まず annotation を読む（`gh api repos/<repo>/check-runs/<job>/annotations`）。develop の push の run が走っている間は、precheck と次のマージを重ねない。
+
+self-hosted のランナーは使い捨てのコンテナで、開発機そのものではない。「CI のランナーにツール X が入っている」は、開発機で `command -v X` を叩いても実測にならない。過去の CI ログに実行の跡があるかを見るか、診断のステップを 1 回流す。確かめられないなら fail-closed のインストール手順を書く（`command -v X || <install>; command -v X || exit 1`）。件数やバージョンを受入基準にするときは、どちらで測った値かを書く。
+
 ## 6-3 git push の 5xx
 
 `publish-pr.mjs` と `merge-pr.mjs` の `git push` は `pr-common.mjs` の `pushHead` を通る（#4162）。`gh` の書き込み（下の「gh の 5xx の再試行」）と違い、同じ SHA の push は送り直しても変わらないので、再試行する。
@@ -361,6 +392,16 @@ node scripts/orchestrate/merge-train.mjs --run-dir "workspace/orchestration/runs
 **一本化のコミットには trailer `Orchestrator-Fold: module-reference` を付ける**（例: `git commit -m 'docs(module-reference): #<N> の断片を本体へ写す' --trailer 'Orchestrator-Fold: module-reference'`。trailer が無いと、再指示の後の scope ゲートが一本化を範囲外として落とす）。`docs/module-reference.md` だけを変え、この trailer を持つコミットだけが触ったパスは、その後にワーカーへ再指示しても `verify --task` の scope ゲートが差分から除くので、それを理由に exit 20 にはならない（#3588）。trailer の無いコミット（ワーカーの単独コミットを含む）や未コミットの変更が同じファイルを触った場合は、今までどおり範囲外として落ちる。merge コミット自身の編集は、`docs/module-reference.md` の中なら承認済みの統合（develop の取り込みで衝突を機械解決したもの）として除き、それ以外のファイルの編集はワーカーの変更として scope で判定する。`merge-pr.mjs` が一本化を越えて作業の HEAD を探す規則（`pr-common.mjs` の `workHeads`）は trailer を求めず、変えたファイルに加えて、そのコミット自身の `verify` の記録と、マージなら自動マージとの差も見る（定義は [run-log.md 1-5](./run-log.md#1-5-記録の中身と-next-の決まり)）。
 
 同じ判定で、`work-evidence` ゲートも一本化のコミットを作業証跡のコミット数に数えない（#3633）。一本化のコミットだけのブランチを verify すると、scope は変更ゼロで合格しても work-evidence が作業証跡ゼロ（exit 21）にして未着手として止める。ワーカーのコミットが 1 つでもあれば今までどおり合格する（log の `orchestrator fold commit(s) excluded` が除いた数）。
+
+## 6-4 一本化で表を壊さない
+
+`docs/module-reference.md` は表なので、壊れても tsc・lint・CI は通る。一本化と衝突の解決では次を守る:
+
+- **衝突は行単位で統合する**: CHANGELOG と同じ「両側保持」で解くと同じ行キーが 2 本になる。`git checkout --merge -- docs/module-reference.md` で衝突の状態に戻し、develop 側の行を土台に、自分の断片の追記を行キー（path）ごとに当て直す。検算は 3 つ: 行数が develop と一致（新規行の分だけ増）、`uniq -d` が 0 件、両方の Issue の注記が同じ行に共存していること（`grep -c` で両方の番号を数える）
+- **2 本の注記を 1 行に畳むときは両方の文字列が残ったかを assert する**: 共通の接頭辞で畳むと片方のラベルが剥がれる。セル数の検査も重複行キーの検査もこれを検出しない。`git show origin/develop:docs/module-reference.md` の行と自分の断片から組み直すのが安全
+- **生のパイプを退避する**: 追記の本文の、エスケープされていない `|` だけを `\|` にする。数えるときは `(?<!\\)\|` を使い、`awk -F'|'` や素の `split('|')` で数えない（本文の `\|` を区切りと誤読する）。不変条件は「develop の同じ行と比べてエスケープされていないパイプの数が変わらない」で、全行のセル数の絶対値ではない（コードスパンの中の `|` で既に数が違う行がある）
+- **終端のパイプが無い行がある**: 行末が `|` だと決めて末尾 1 文字を外すと、終端パイプの無い行で本文の最後の 1 文字が消える。末尾が `|` かで分岐する。本文が残ったかは「元の行から終端パイプを除いた文字列が新しい行に含まれるか」で見る
+- **断片の行番号のずれは誤りとは限らない**: 断片の `実在確認: docs/module-reference.md:N` はワーカーの base に対しての値で、その間に別の PR が行を足していれば挿入点より後ろだけずれる。`git show <ワーカーの base>:docs/module-reference.md` で照合し、行は行キーで同定する
 
 ## 6-4 断片が無い PR の実例
 

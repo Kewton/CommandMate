@@ -56,6 +56,7 @@ describe('.commandmate/ tracking policy', () => {
   it.each([
     ['.commandmate/verify.yaml', 'verification gates (#1540)'],
     ['.commandmate/uat.yaml', 'UAT environment declaration (#2590)'],
+    ['.commandmate/flow.yaml', 'flow settings, wip.total (#4368)'],
     ['.commandmate/tasks/build.yaml', 'execution contract (#1545)'],
     ['.commandmate/tasks/any-name.yaml', 'contract under an arbitrary name'],
   ])('tracks %s — %s', (target) => {

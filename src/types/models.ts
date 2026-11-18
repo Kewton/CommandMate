@@ -763,7 +763,21 @@ export interface ChatMessage {
    * messages returned by the API.
    */
   optimisticState?: OptimisticSendState;
+  /**
+   * Issue #4385: why a failed optimistic send was refused by the server because of its role
+   * (409 `roleRefusal`, nothing typed). Set only alongside `optimisticState: 'error'`.
+   */
+  optimisticRoleRefusal?: SendRoleRefusalReason;
 }
+
+/**
+ * Issue #4385: the reason the screen shows for a send the server refused because of its role
+ * (409 with `roleRefusal`; nothing was typed). The server's own reasons this screen names one by
+ * one — `not-applied` (the role is plainly not applied, e.g. `agy agent` did not list it),
+ * `not-confirmed` (it could not be confirmed) and `artifact-failed` (the role's file could not be
+ * prepared) — and `other` for any other role refusal.
+ */
+export type SendRoleRefusalReason = 'not-applied' | 'not-confirmed' | 'artifact-failed' | 'other';
 
 /**
  * Individual memo item for a worktree

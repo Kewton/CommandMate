@@ -56,7 +56,7 @@ feature/*, fix/*, hotfix/* (作業ブランチ)
 
 | worktree | ブランチ | 用途 |
 |----------|----------|------|
-| `../commandmate-main` | `main` | main の参照用 |
+| `../commandmate-main` | `main` | main の参照用（サーバーの停止・起動・ビルドをここでしない） |
 | `../commandmate-agent-health` | `agent-health-runner` | 日次確認の Schedule 実行場所（`CMATE.md` あり。docs/user-guide/agent-health.md） |
 
 ---
@@ -181,7 +181,10 @@ tests/
    - `git push origin main` は拒否される
    - **Git Hook（pre-push）で強制**: ローカル環境でmainブランチへの直接pushをブロック
 
-2. **force push禁止**
+2. **同じディレクトリでのブランチ切り替え禁止**
+   - `git checkout <branch>` で切り替えず、`git worktree add` で別ディレクトリを作る（main のチェックアウトは稼働中サーバの cwd で、他のエージェントのセッションも同居する）
+
+3. **force push禁止**
    - `git push --force` は原則禁止
    - 例外: 自分のfeatureブランチのみ許可
 
@@ -233,6 +236,7 @@ npm run db:reset      # DBリセット
 サブコマンドの一覧は `commandmate --help`。起動・停止・`--issue` による並列サーバーは [cli-setup-guide.md](./docs/user-guide/cli-setup-guide.md)、その他の詳細と終了コードは [cli-operations-guide.md](./docs/user-guide/cli-operations-guide.md)（remote は [webapp-guide.md](./docs/user-guide/webapp-guide.md) も）を参照。踏むと事故になる規則だけをここに残す。
 
 - **送り先**: `send` / `wait` / `respond` / `capture` / `reply` は `--instance <id>` 単独で指定する（例: `commandmate send <worktree-id> "メッセージ" --instance codex`）。`--agent` は roster 外のアドホック起動用
+- **本文の先頭**: `send` / `ask` の依頼文を `/` で始めない（slash コマンドとして打たれ依頼にならない。パスは相対か文の途中に）
 - **`--model`**: `send` で copilot/antigravity/claude に効く。antigravity/claude は新規起動時のみで、稼働中へ指定すると 400
 - **wait**: `--timeout <秒>` 超過は exit 124。`--on-prompt human` でプロンプト検出後も待機継続。`wait` に `--agent` は無い。`--verify` は完了検知後に検証ゲートを実行し、不合格 exit 20 / 作業証跡ゼロ exit 21
 - **verify**: `commandmate verify <worktree-id> [--gates lint,unit] [--json]`。合格 0 / 不合格 20 / 作業証跡ゼロ 21（`.commandmate/verify.yaml`）
@@ -241,6 +245,14 @@ npm run db:reset      # DBリセット
 - **roles**: ロールは起動時に固定。`roles edit` / `roles default` / `set-role` は稼働中に効かない（止めて送り直す）。`send --role` は条件で、不一致・不明は未送信 exit 32（設定は保存済み）
 - **update**: 非対話環境で `--yes` が無いと exit 2（`commandmate update --yes`）。`--check` は変更しない
 - **remote**: `--provider cloudflare` は公開 Tunnel のため `--yes` が必須（非対話環境も）。`--provider tailscale` は承認不要
+
+---
+
+## 記憶の書き場所
+
+- Claude Code の auto memory（`~/.claude/projects/.../memory/`）は使わない（`.claude/settings.json` で `autoMemoryEnabled: false`）
+- 許可・決定・作業の状態・次の一手・人への質問は CommandMate の mem に書く（決定の行き先は該当する Issue）
+- 罠・教訓・手順は docs（運用は `docs/orchestrate/`）に書き、全員が踏む規則だけ AGENTS.md・CLAUDE.md に 1 行で足す
 
 ---
 

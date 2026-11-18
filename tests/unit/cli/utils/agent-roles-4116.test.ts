@@ -2,11 +2,12 @@
  * Issue #4116: naming a role and reading a role API refusal. The commands around
  * these run against the real routes in `tests/integration/cli-roles-4116.test.ts`.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/cli/utils/api-client';
 import { pickRole, RoleCliError, roleFailureFromApi } from '@/cli/utils/agent-roles';
 import { ExitCode, InterruptExitCode, RoleExitCode, StrictRespondExitCode, VerifyExitCode, WaitExitCode } from '@/cli/types';
-import type { AgentRoleSummary } from '@/types/agent-roles';
+import { createRolesCommand } from '@/cli/commands/roles';
+import type { AgentRoleSummary, SystemRoleDefaultEntry } from '@/types/agent-roles';
 
 function role(id: string, name: string): AgentRoleSummary {
   return { id, name, bodyVersion: 1, bodyFingerprint: 'f', bodyBytes: 1, createdAt: 0, updatedAt: 0 };
@@ -99,5 +100,51 @@ describe('RoleExitCode', () => {
     ].filter((code) => code !== 0);
     expect(others).not.toContain(RoleExitCode.CONFLICT);
     expect(others).not.toContain(RoleExitCode.NOT_SENT);
+  });
+});
+
+/**
+ * Issue #4385 PR2 (P11): this server answers `adapterEnabled: true` for every tool,
+ * and the CLI's warning stays for an older server that still answers `false`.
+ */
+describe('the adapter warning, kept for an older server (P11)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  async function setDefaultAgainst(adapterEnabled: boolean): Promise<string> {
+    vi.stubEnv('CM_PORT', '4385');
+    const reviewer = role('aaaa', 'reviewer');
+    const defaults = (stored: SystemRoleDefaultEntry['stored']): SystemRoleDefaultEntry[] => [
+      { cliToolId: 'antigravity', adapterEnabled, stored },
+    ];
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const { pathname } = new URL(String(input));
+      const method = init?.method ?? 'GET';
+      if (pathname === '/api/roles') return Response.json({ success: true, roles: [reviewer] });
+      if (pathname === '/api/repositories') return Response.json({ success: true, repositories: [] });
+      if (pathname === '/api/settings/agent-role-defaults') {
+        return Response.json({
+          success: true,
+          defaults: defaults(method === 'PUT' ? { state: 'role', roleId: 'aaaa', roleName: 'reviewer' } : { state: 'unset' }),
+        });
+      }
+      throw new Error(`Not stubbed: ${method} ${pathname}`);
+    });
+    const errors: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((line: unknown) => void errors.push(String(line)));
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    await createRolesCommand().parseAsync(['node', 'cli', 'default', 'antigravity', '--role', 'reviewer']);
+    return errors.join('\n');
+  }
+
+  it('an older server answering adapterEnabled: false still gets the warning', async () => {
+    expect(await setDefaultAgainst(false)).toContain('roles are not enabled for antigravity yet');
+  });
+
+  it('this server answers true, and nothing is warned', async () => {
+    expect(await setDefaultAgainst(true)).not.toContain('not enabled');
   });
 });

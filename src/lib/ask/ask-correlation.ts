@@ -113,28 +113,70 @@ export function supportsAskAttribution(cliToolId: string): boolean {
 }
 
 /**
+ * Why an attributed tool is on or off for its version (Issue #4344, PR3 review):
+ * `ok` — at or above the minimum; `too_old` — below it; `unreadable` — the
+ * version was not reported, is not `x.y.z`, or the probe threw.
+ */
+export type AskToolVersionState = 'ok' | 'too_old' | 'unreadable';
+
+/** One attributed tool's version against its minimum (`GET /api/asks/capabilities` `versions`). */
+export interface AskToolVersion {
+  minimum: string;
+  /** What the probe read, as it read it; null when nothing was read. */
+  installed: string | null;
+  state: AskToolVersionState;
+}
+
+/**
+ * `GET /api/asks/capabilities`: the table, and for each tool in it that has a
+ * minimum version, that version's reading — so the CLI can say "too old" or
+ * "unreadable" instead of "this tool has no ask attribution". Mirrored for the
+ * CLI in `src/cli/types/api-responses.ts` (`AskCapabilitiesBody`).
+ */
+export interface AskCapabilitiesBody extends AskCapabilitiesResponse {
+  versions: Record<string, AskToolVersion>;
+}
+
+/**
+ * The version reading of `cliToolId` against its minimum (H5), or null for a
+ * tool off the table (or with no minimum). Never throws: a probe that throws is
+ * `unreadable` (its failure stays cached by the probe as before).
+ */
+export async function askToolVersion(cliToolId: string): Promise<AskToolVersion | null> {
+  if (!supportsAskAttribution(cliToolId)) return null;
+  const minimum = (ASK_ATTRIBUTION_MIN_VERSIONS as Record<string, string | undefined>)[cliToolId];
+  if (!minimum) return null;
+  let installed: string | null;
+  try {
+    installed = await versionProbe(cliToolId);
+  } catch (error) {
+    logger.warn('ask-version-probe-failed', { cliToolId, error: error instanceof Error ? error.message : String(error) });
+    return { minimum, installed: null, state: 'unreadable' };
+  }
+  if (installed === null) return { minimum, installed: null, state: 'unreadable' };
+  const atLeast = versionAtLeast(installed, minimum);
+  return { minimum, installed, state: atLeast === null ? 'unreadable' : atLeast ? 'ok' : 'too_old' };
+}
+
+/**
  * Whether the server attributes `cliToolId`'s asks now: in the table, and (H5)
  * its installed version is at least the minimum. A version that cannot be read
  * is false. Never throws.
  */
 export async function askAttributionCapable(cliToolId: string): Promise<boolean> {
-  if (!supportsAskAttribution(cliToolId)) return false;
-  const minimum = (ASK_ATTRIBUTION_MIN_VERSIONS as Record<string, string | undefined>)[cliToolId];
-  if (!minimum) return false;
-  try {
-    const installed = await versionProbe(cliToolId);
-    return installed !== null && versionAtLeast(installed, minimum) === true;
-  } catch (error) {
-    logger.warn('ask-version-probe-failed', { cliToolId, error: error instanceof Error ? error.message : String(error) });
-    return false;
-  }
+  return (await askToolVersion(cliToolId))?.state === 'ok';
 }
 
 /** `GET /api/asks/capabilities`. */
-export async function getAskCapabilities(): Promise<AskCapabilitiesResponse> {
+export async function getAskCapabilities(): Promise<AskCapabilitiesBody> {
   const tools: Record<string, boolean> = {};
-  for (const id of CLI_TOOL_IDS) tools[id] = await askAttributionCapable(id);
-  return { protocol: ASK_PROTOCOL_VERSION, tools };
+  const versions: Record<string, AskToolVersion> = {};
+  for (const id of CLI_TOOL_IDS) {
+    const version = await askToolVersion(id);
+    tools[id] = version?.state === 'ok';
+    if (version) versions[id] = version;
+  }
+  return { protocol: ASK_PROTOCOL_VERSION, tools, versions };
 }
 
 /**

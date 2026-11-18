@@ -13,7 +13,8 @@
 
 import React, { useEffect } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { SEARCH_DEBOUNCE_MS } from '@/hooks/useTerminalSearch';
 import type { ChatMessage } from '@/types/models';
 import type { ConversationPair } from '@/types/conversation';
 import { opencodeTurnRequestId } from '@/types/agent-transcript';
@@ -378,27 +379,39 @@ describe('[#3503] search highlights reach the folded source', () => {
     ['HistoryPane', 'history-search-2'],
   ])('%s re-applies the marks when a diagram finishes drawing during a search', async (surface, name) => {
     const messages = [message({ id: 'u-1', role: 'user', content: 'draw', requestId: undefined }), message()];
+    // The marks (a layout effect after the debounced result) and the settled listener
+    // (a later passive effect) are not in one commit. So the search runs inside ONE
+    // awaited act: the keyword is typed, then a timer of the same delay is registered
+    // AFTER the product's debounce timer, so it fires after it (timers run in expiry
+    // order) — the result has been set by then. The act renders that result and
+    // flushes every effect it queued, the listener's included, before it returns.
+    let keyword: HTMLElement;
     if (surface === 'ChatTranscript') {
       render(<ChatTranscript messages={messages} worktreeId="wt-3503" cliToolId="opencode" onFilePathClick={vi.fn()} />);
       fireEvent.click(screen.getByTestId('chat-transcript-search-toggle'));
-      fireEvent.change(screen.getByLabelText('worktree.history.search.keywordLabel'), {
-        target: { value: 'sentinel' },
-      });
+      keyword = screen.getByLabelText('worktree.history.search.keywordLabel');
     } else {
       render(<HistoryPane messages={messages} worktreeId="wt-3503" onFilePathClick={vi.fn()} splitIndex={2} />);
       fireEvent.click(screen.getByRole('button', { name: /search/i }));
-      fireEvent.change(screen.getByLabelText(/keyword/i), { target: { value: 'sentinel' } });
+      keyword = screen.getByLabelText(/keyword/i);
     }
+    await act(async () => {
+      fireEvent.change(keyword, { target: { value: 'sentinel' } });
+      await new Promise<void>((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS));
+    });
     await waitFor(() => expect(markedTexts(name)).toEqual(['sentinel']));
     const before = registry.get(name);
 
-    // A redraw (late load, theme switch) settles: the frame announces it.
+    // A redraw (late load, theme switch) settles: the frame announces it. The receiver
+    // is ready by the order above, so it is announced exactly once, as the product does
+    // per finished drawing; only the assertions wait.
     const [frame] = frames();
     fireEvent(frame, new CustomEvent(MERMAID_BLOCK_SETTLED_EVENT, { bubbles: true }));
-
     await waitFor(() => expect(registry.get(name)).not.toBe(before));
-    expect(markedTexts(name)).toEqual(['sentinel']);
-    expectSourceHit(name);
+    await waitFor(() => {
+      expect(markedTexts(name)).toEqual(['sentinel']);
+      expectSourceHit(name);
+    });
   });
 
   // -------------------------------------------------------------------------

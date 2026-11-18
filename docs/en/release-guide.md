@@ -99,6 +99,14 @@ Merge main back into develop (-s ours, restores ancestry)
 
    > **Note**: `git log origin/main..origin/develop` reports far more commits than reality because of squashing (e.g. 136 commits for a 15-file diff). **The tree diff (`git diff`) is authoritative.**
 
+   > **Collect the Vibe metrics before cleaning up worktrees.** Deleting a worktree and running
+   > `POST /api/repositories/sync` also deletes that worktree's `tasks` / `verification_runs` rows
+   > (by design, so no orphans remain — `src/lib/db/migrations/v52-orphaned-worktree-children.ts`).
+   > `commandmate report metrics` counts those tables, so collecting after the cleanup reports zero
+   > records for the period, and it cannot be undone. Save `commandmate report metrics --json` to a
+   > file before the cleanup for any run whose record you want to keep. If the cleanup already
+   > happened, say in the PR body that the cleanup removed the records (not just "no records in the period").
+
 ### Step 0.5: Reconcile the slash-command catalog
 
 Before bumping the version, bring the built-in slash-command catalog up to date with each CLI's authoritative source (Issues #1489 / #2026). Two jobs — **do not mix them**:
@@ -282,6 +290,10 @@ gh run list --repo Kewton/CommandMate --workflow=publish.yml --limit 1
 npm view commandmate version    # should be the new version
 ```
 
+- **The publish job can take long because it waits for main's CI.** It runs no tests itself: `Require CI to have passed on the tag commit` (`scripts/check-release-ci.mjs`) waits up to 45 minutes for `Unit Tests` and `Build` of the `ci-pr.yml` run triggered by the main push of the tag commit (= the release PR's merge commit) to succeed. That step staying `in_progress` while main's CI is still running is normal. Let the wait loop run for those 45 minutes plus the build and publish time (the `timeout-minutes` of `publish.yml`).
+- **Even after success, the registry takes a few minutes to show the version.** Meanwhile `npm view commandmate version` returns the old version (E404 when you name the new one). Do not read that as a failure: confirm `+ commandmate@<version>` in the job log, then retry `npm view` every few minutes. Giving up after about 3 minutes mistakes the propagation delay for "not published".
+- If the job ended `cancelled` / `failure`, read [The publish workflow failed](#the-publish-workflow-failed) first (the version may already be out).
+
 ### Step 9: Merge main back into develop (restore ancestry)
 
 **Mandatory.** Squashing means main's commit is no longer an ancestor of develop. Skip this and the next develop → main PR will show phantom conflicts.
@@ -304,6 +316,8 @@ git fetch origin
 git merge-base --is-ancestor origin/main origin/develop && echo "ancestry restored"
 ```
 
+**A sync-only PR (no version bump) needs the same.** A PR that only carries develop's changes to main is squashed too, so merge main back with this procedure every time one is merged. Forget it and the next develop → main PR reports `DIRTY` from `gh pr view <N> --json mergeStateStatus` and cannot be merged (the merge-base falls back to the previous tag). After opening a PR, look at `mergeStateStatus`; if it is `DIRTY`, suspect the broken ancestry before the content. Pushing the `-s ours` merge above to develop while the PR stays open brings it back to `CLEAN` (CI re-runs). Do not skip the tree check before `-s ours`; if the trees differ, main has changes of its own and needs a normal merge.
+
 ---
 
 ## About publishing to npm
@@ -320,7 +334,7 @@ If the workflow fails, fix the cause -- do not work around it with a local publi
 
 ### What the workflow does
 
-`npm ci` → `npm audit --audit-level=critical` → **check that CI's `Unit Tests` and `Build` succeeded on the tag commit** (`scripts/check-release-ci.mjs`; waits up to 20 minutes for the main-push CI to finish) → `npm run build` → `npm run build:cli` → `npm run build:server` → package size check → `npm publish --provenance --access public`
+`npm ci` → `npm audit --audit-level=critical` → **check that CI's `Unit Tests` and `Build` succeeded on the tag commit** (`scripts/check-release-ci.mjs`; waits up to 45 minutes for the main-push CI to finish) → `npm run build` → `npm run build:cli` → `npm run build:server` → package size check → `npm publish --provenance --access public`
 
 ---
 
@@ -342,6 +356,8 @@ cd $(mktemp -d) && npx --yes commandmate@latest --version
 ```
 
 > Run the `npx` check from a **neutral directory outside the repository**. Inside the CommandMate repo, npx resolves the local `bin` instead, so you would not be verifying the published artifact at all.
+
+> The npm version shown in the README is a badge image, and GitHub caches external images, so it can show the old version for a while after publishing. `npm view` is authoritative; the badge catches up by itself.
 
 ---
 
@@ -387,6 +403,14 @@ gh run view <run-id> --repo Kewton/CommandMate --log-failed
 ```
 
 Fix the cause and release again as a new patch version. **The same version number cannot be republished.**
+
+**`cancelled` / `failure` is not proof that nothing was published.** The job can be cut off just after the registry accepted `npm publish`, and the version then appears a few minutes later. Before deciding to re-run, re-tag or open an Issue, check:
+
+1. If the last `npm notice` in the log got as far as `Publishing to …`, suspect that it was published
+2. Wait about 10 minutes after the cut-off, then run `npm view commandmate@<version>` (an E404 right after the cut-off does not mean "not published")
+3. If it is there, check that `npm view commandmate@<version> dist.shasum` matches the `npm notice shasum` in the log, and which run and attempt the provenance at `https://registry.npmjs.org/-/npm/v1/attestations/commandmate@<version>` names
+
+Deleting the tag and Release of a published version and re-creating them on another commit makes a tag with the published version's name point at different content. If it is published, go on to Step 9.
 
 If the run stopped at `Require CI to have passed on the tag commit`, **nothing has reached npm** (that step runs before any build). CI on the tag commit (the main-push run of `ci-pr.yml`) failed or did not finish. Confirm with `npm view commandmate version` that the version is not out, fix CI (or re-run the main CI if the failure was transient) until it is green, then re-run the publish with `gh run rerun <run-id>`. No version bump is needed.
 

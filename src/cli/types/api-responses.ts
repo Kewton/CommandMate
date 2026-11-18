@@ -1662,6 +1662,88 @@ export interface DailySummaryStatusResponse {
 }
 
 // Mirrors: src/types/models.ts ChatMessage (subset for send response)
+/**
+ * Issue #4344: the ask correlation ledger as the CLI reads it (design
+ * `docs/design/ask-attribution-4344.md` §3.3・§4).
+ * Mirrors: src/types/ask-correlation.ts (held equal by
+ * tests/unit/cli/types/ask-attribution-mirror-4344.test.ts).
+ */
+export type AskAttributionState = 'pending' | 'matched' | 'ambiguous' | 'unmatched' | 'unavailable';
+
+/** Issue #4344: why an ask ended where it did. Mirrors src/types/ask-correlation.ts. */
+export type AskAttributionReason =
+  | 'tool_unsupported'
+  | 'server_unsupported'
+  | 'slash_command'
+  | 'shared_turn'
+  | 'turn_open_at_send'
+  | 'envelope_lost'
+  | 'absorbed_mid_turn'
+  | 'envelope_duplicated'
+  | 'turn_incomplete'
+  | 'generation_changed'
+  | 'history_missing'
+  | 'body_truncated'
+  | 'send_unknown'
+  | 'not_sent'
+  | 'grace_expired'
+  | 'turn_interrupted'
+  | 'history_changed';
+
+/** Issue #4344: how the send of a reserved ask ended. Mirrors src/types/ask-correlation.ts. */
+export type AskSendState = 'reserved' | 'sent' | 'not_sent' | 'send_unknown';
+
+/** Issue #4344: `GET /api/asks/capabilities`. Mirrors src/types/ask-correlation.ts. */
+export interface AskCapabilitiesResponse {
+  protocol: number;
+  /** Per tool: whether the server attributes an ask's reply by the ledger. */
+  tools: Record<string, boolean>;
+}
+
+/**
+ * Issue #4344 (PR3 review): why an attributed tool is on or off for its version.
+ * Mirrors src/lib/ask/ask-correlation.ts AskToolVersionState.
+ */
+export type AskToolVersionState = 'ok' | 'too_old' | 'unreadable';
+
+/** Issue #4344 (PR3 review): one attributed tool's version. Mirrors src/lib/ask/ask-correlation.ts AskToolVersion. */
+export interface AskToolVersion {
+  minimum: string;
+  installed: string | null;
+  state: AskToolVersionState;
+}
+
+/**
+ * Issue #4344 (PR3 review): `GET /api/asks/capabilities` with the version
+ * readings. `versions` is optional here: a PR1/PR2 server does not send it.
+ * Mirrors src/lib/ask/ask-correlation.ts AskCapabilitiesBody.
+ */
+export interface AskCapabilitiesBody extends AskCapabilitiesResponse {
+  versions?: Record<string, AskToolVersion>;
+}
+
+/** Issue #4344: `GET /api/asks/:askId`. Mirrors src/types/ask-correlation.ts. */
+export interface AskAttributionResponse {
+  askId: string;
+  state: AskAttributionState;
+  reason: AskAttributionReason | null;
+  /** The reply, only when `state === 'matched'`. */
+  reply: string | null;
+  sendState: AskSendState;
+  /** Whether the reader has seen the native input that carried the envelope. */
+  nativeInputSeen: boolean;
+  /** The answering turn also absorbed a background-task notice. */
+  notified: boolean;
+}
+
+/** Issue #4344: the `ask` field of a send's answer. Mirrors src/types/ask-correlation.ts. */
+export interface AskSendAnswer {
+  id: string | null;
+  state: AskAttributionState;
+  reason: AskAttributionReason | null;
+  sendState?: AskSendState;
+}
+
 export interface ChatMessage {
   id?: number;
   worktreeId: string;
@@ -1691,6 +1773,13 @@ export interface ChatMessage {
    * Mirrors: src/app/api/worktrees/[id]/send/route.ts SendMessageResponse.
    */
   turnOpenAtSend?: boolean;
+  /**
+   * Issue #4344: present when the send named `ask` (a synchronous `commandmate
+   * ask`) on a server that attributes asks: `pending` with the reserved id, or
+   * `unavailable` with why (`tool_unsupported` / `slash_command`) and no id.
+   * Mirrors: src/types/ask-correlation.ts AskSendAnswer.
+   */
+  ask?: AskSendAnswer;
   /**
    * Issue #3957: present when the send named a bound relay (`relayId`). What
    * the CLI may do with the relay: `not_sent` — nothing reached the worker,
@@ -2675,6 +2764,14 @@ export interface RelayCreateResponse {
   /** Issue #3957: `bound` when the server honoured `bind: true`; absent on an older server. */
   bindMode?: string;
 }
+
+/**
+ * Issue #4437: the tool policy refusal's types live in `./tool-policy-responses`, so
+ * `utils/tool-policy-failure` (read by `api-client`) can name them without this
+ * module's `lib/session` / `lib/polling` imports entering the client's closure
+ * (`tests/unit/updates/agent-update-not-in-pane-2069.test.ts`). Re-exported here.
+ */
+export type { ToolPolicyDeniedResponse, ToolPolicyDetailResponse } from './tool-policy-responses';
 
 /** Mirrors: src/app/api/relays/[relayId]/route.ts GET 200 response (Issue #3957). */
 export interface RelayGetResponse {

@@ -3,7 +3,9 @@
  * CommandMate (Issue #2878). Entry point is `run.ts`; this is the run.
  *
  * Order of a run:
- *   1. parse arguments, refuse a relative CODEX_HOME (Issue #4343), take the shared run lock (Issue #3359), start the hook listener
+ *   1. parse arguments, refuse a relative CODEX_HOME (Issue #4343), apply the tool policy to `--tools` (Issue #4436:
+ *      antigravity is out of the default and refused by name unless CM_ANTIGRAVITY_USAGE declares it),
+ *      take the shared run lock (Issue #3359), start the hook listener
  *   2. per tool: `--version` → snapshot machine-singleton files →
  *      `prepareLaunch` → private tmux session → screens and turns → kill →
  *      restore the snapshots (sha256-proved) → scan the production log
@@ -67,6 +69,9 @@ import { locateServerLog, ServerLogWatch } from './production-log';
 import { probeLimitedTool, probeTool, readVersion, type ProbeOutcome } from './probe-tool';
 import { AgentHealthTmux } from './tmux-driver';
 import { LIMITED_TOOL_SPECS, TOOL_PROBE_SPECS } from './tool-table';
+import { decideAgentHealthTool, describeAgentHealthRefusal, selectAgentHealthTools } from './tool-policy-selection';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
+import type { AgentHealthTool } from '@/lib/agent-health/types';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const DEFAULT_DIR = path.join(os.homedir(), '.commandmate', 'agent-health');
@@ -182,11 +187,18 @@ export async function main(argv: readonly string[]): Promise<AgentHealthExitCode
   // lock, chdir, listener, version, snapshots, prepareLaunch). Only the
   // diagnostic report is written; the state is not touched.
   const environmentError = relativeCodexHomeError(process.env);
-  if (!parsed.ok || environmentError !== null) {
+  // Issue #4436: the run is unattended, so the tool policy decides which tools it may drive.
+  const selection = parsed.ok ? selectAgentHealthTools(argv, parsed.options.tools, readUsageDeclaration()) : null;
+  const policyError = selection !== null && !selection.ok ? selection.error : null;
+  if (!parsed.ok || environmentError !== null || policyError !== null) {
     const errors: string[] = [];
     if (!parsed.ok) {
       log(parsed.error);
       errors.push(`引数の誤り: ${parsed.error}`);
+    }
+    if (policyError !== null) {
+      log(policyError);
+      errors.push(`引数の誤り: ${policyError}`);
     }
     if (environmentError !== null) {
       log(environmentError);
@@ -200,8 +212,9 @@ export async function main(argv: readonly string[]): Promise<AgentHealthExitCode
     writeReportOrPrint(out, emptyReport(startedAt, errors, parsed.ok ? parsed.options.syncedFrom : null));
     return 2;
   }
-  const options = parsed.options;
-  return run(options, startedAt);
+  const refused = selection?.ok ? selection.refused : [];
+  const options = selection?.ok ? { ...parsed.options, tools: selection.tools } : parsed.options;
+  return run(options, startedAt, refused);
 }
 
 /** The test role of `--role-file`. Nothing else gives a probe a role. */
@@ -213,7 +226,19 @@ function readRoleFile(file: string): ExplicitRole {
   return { id: parsed.id, body: parsed.body };
 }
 
-async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentHealthExitCode> {
+/**
+ * @param refusedByPolicy - Issue #4436: tools the tool policy took out of the
+ *   default `--tools`. Not probed and not version-read, but the run still counts
+ *   as the daily run (every probed tool selected) for the version-only rows.
+ */
+async function run(
+  options: AgentHealthOptions,
+  startedAt: Date,
+  refusedByPolicy: readonly AgentHealthTool[] = []
+): Promise<AgentHealthExitCode> {
+  for (const tool of refusedByPolicy) {
+    log(`${tool}: not checked — ${describeAgentHealthRefusal(decideAgentHealthTool(tool, readUsageDeclaration()))}`);
+  }
   let role: ExplicitRole | null = null;
   if (options.roleFile !== null) {
     try {
@@ -437,7 +462,7 @@ async function run(options: AgentHealthOptions, startedAt: Date): Promise<AgentH
 
     // Issue #3313: the tools the probe does not launch are rows too — on the
     // daily run (every probed tool selected), not on a `--tools` retry.
-    if (checksLimitedTools(options.tools)) {
+    if (checksLimitedTools([...options.tools, ...refusedByPolicy])) {
       for (const tool of AGENT_HEALTH_LIMITED_TOOLS) {
         const outcome = await probeLimitedTool(LIMITED_TOOL_SPECS[tool], childEnv, (checkId) =>
           options.checks.includes(checkId)

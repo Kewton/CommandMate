@@ -106,3 +106,49 @@ grep '\[layer-disagreement\] layerDisagreement' logs/server.log | tail
   毎回が検出器の不具合。`frameTail` を元に fixture を作り、Issue を起票する。
 - `kind: menu-after-stop` — ターン終了後に選択リストが見えている。利用者が `/model` などを開いた場合にも出るので、
   開いた覚えが無いものだけを調べる。
+
+## 4. 画面の読み方の実測（composer とダイアログ）
+
+判定規則の実体は `src/lib/detection/tools/codex/cli-patterns.ts`（`readCodexGlyphRowKind`）と
+`src/lib/detection/composer-text.ts`。ここには、規則を変えるときに外せない観測だけを置く。
+
+### 4-1. `›` の 3 用途はテキストでは区別できない
+
+codex は列 0 の `›`（U+203A）を composer・送信済みメッセージのエコー・ダイアログの選択行の 3 つに使う
+（0.148.0〜0.153.2 で観測、200x1000）。`stripAnsi` 後は同じ形なので、`capture-pane -p -e` の SGR で読む。
+
+| 用途 | 生の形 | 手がかり |
+|---|---|---|
+| composer | `ESC[1m›ESC[0m ` + 本文（空なら dim の placeholder） | グリフの直後で属性がリセットされる |
+| エコー | `ESC[1;2m› ESC[0m` + 本文 | **グリフが dim** |
+| 選択行（承認・picker・`/keymap`・`/experimental`） | `ESC[1mESC[38;5;6m› …ESC[0m` | **本文が bold** |
+| trust ダイアログの選択行（0.151 以降） | `ESC[38;5;6m› 1. Yes, continueESC[39m` | bold でも dim でもなく、グリフと本文が**同じ色の 1 span** |
+
+- 0.155.1 からは空の composer のグリフも bold＋truecolor で着色される。「グリフに色がある＝選択肢」とは読めず、
+  本文がグリフと同じ色で続くときだけ選択肢の証拠にする（`tests/fixtures/codex-idle-composer-0155/`）。
+- 選択肢は**積極的に認識**し、未知の形・ANSI の無い行は composer 側に倒す。「composer でない」と否定形で書くと
+  新しいダイアログの形を composer と読む。番号の regex（`› \d\. `）で弾くのも不可（`1. buy milk` と打った composer を落とす）。
+- 誤読のコストは非対称。composer を読み落としても現状維持だが、ダイアログ行を composer と読むと送信前の消去が承認画面へ
+  `C-e` / `C-u` を撃ち込み、上限まで回った末に送信自体を拒否する。
+- SGR を走査するときは `38;5;N` / `38;2;R;G;B` の引数を読み飛ばす。`ESC[38;5;2m` の `2` を dim と読むと、
+  選択肢の色がそのまま dim になって全ダイアログがエコー扱いになる。
+- `tmux display-message -p '#{cursor_x}'` は codex では使えない。残存テキストがあっても Home を押していれば
+  空の composer と同じ 2 を返す。
+
+claude も同型の罠を持つ（Claude Code 2.1.238 で観測）。空の composer に dim（`ESC[2m`）の suggestion
+（`Try "how do I log an error?"`）を描き、`stripAnsi` 後は実際の残存テキストと 1 バイトも変わらない。`C-u` でも消えない
+（buffer に無い）ので、テキスト比較で「空か」を判定するループは idle な claude で上限まで回る。`❯` の直後は ASCII 空白ではなく
+U+00A0（NBSP）。claude では `cursor_x == 2` が空を意味するが、フレーム単体（WS push・`capture --json`・fixture）には
+後付けできないので、判定は SGR の dim で行う。
+
+### 4-2. 番号を持たないダイアログ
+
+`/experimental`（フッタ `Press space to select or enter to save for next conversation`、選択行 `› [ ] Network proxy …`）と
+`/keymap`（フッタ `left/right group · enter edit shortcut · … · esc close`）は `1. 2. 3.` を持たず、フッタもダイアログのフッタの
+許可リストに当たらない形だった（0.153.2 で観測）。番号ブロックの検出では拾えないので、主判定は 4-1 の SGR に置く。
+逆に「フッタが許可リスト外なら ready」でもない。trust ダイアログのように `detectPrompt` が番号を読める画面は別の段で拾われ、
+ready に落ちるのは「許可リスト外」かつ「`detectPrompt` も読めない」画面だけ。
+
+採り方は 2-1 と同じ私設 tmux で、`C-u` で入力欄を空にしてから `/<cmd>` + Enter → `capture-pane -p -e` → `Escape`。
+生成中のフレームでも composer（`› Ask Codex to do anything`）は描かれたままなので、「最下段の `›` が composer」という規則は
+running を巻き込まない。

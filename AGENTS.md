@@ -44,6 +44,17 @@ This document provides repository-level guidance for coding agents (including Co
   - `src/middleware.ts`
   - `src/lib/env-sanitizer.ts`
   - `src/lib/ip-restriction.ts`
+- Never switch branches in a shared checkout (`git checkout <branch>`); create a separate `git worktree add` directory instead. The main checkout is the running server's cwd and is shared by other agent sessions.
+- Do not `git stash` in a worktree where another agent is writing files; compare against `git show HEAD:<file>` or a separate worktree instead.
+- When a destructive operation was approved for a listed set of names, act on exactly that list; never re-derive it with a glob or pattern (`26*` also matches `264`).
+- Do not drive Antigravity (`agy`) from an agent: no `send`/`ask`/`respond`/relay/`/orchestrate`, Schedule, Auto-Yes or `agy` commands targeting it (Google Antigravity Additional Terms §6, consumer plan). Details: `docs/orchestrate/team.md` "Antigravity の扱い".
+- Before concluding "zero matches" or "no precedent" from a search, run a positive control (a term known to exist, same command shape); search literals with `grep -F`.
+
+## Memory And Handoff
+
+- Work state, decisions, permissions, next steps and questions for the human go to CommandMate `mem` (a decision's destination is its Issue). Do not keep them in a tool-private memory (e.g. Claude Code auto memory, which this repo turns off).
+- Lessons, pitfalls and procedures go to `docs/` (operations: `docs/orchestrate/`); add one line here or in `CLAUDE.md` only for rules every agent must follow.
+- Reply to the repository owner in Japanese; keep code, commands and identifiers as they are.
 
 ## Validation Checklist
 
@@ -61,6 +72,9 @@ npm run lint
 ```
 
 For small fixes, run targeted tests first, then expand only if needed.
+
+- Judge pass/fail by the command's own exit code (`cmd > log 2>&1; echo $?`); piping into `grep` replaces it with grep's.
+- Run Playwright as `CI=true npx playwright test <spec> --reporter=line`; without `CI` a failure starts the HTML report server and the process never returns.
 
 ## Change Policy For Agent Docs
 

@@ -316,3 +316,16 @@ What is not automated is the first-time-user UX study (it needs participants) an
 measurement driving a real agent CLI's interactive TUI (#1246 automated an opt-in version-drift probe;
 re-measuring palette exposure remains manual work in an isolated environment). For the current status
 see [docs/qa/skills-mvp-uat-report.md](../../qa/skills-mvp-uat-report.md).
+
+### 5-1. Do not write `$<digit>` in a SKILL.md body
+
+When a Skill is invoked as `/<name> <args>`, Claude Code **replaces `$0`–`$N` (0-based) in the SKILL.md body with the
+arguments before** handing it to the model. `$ARGUMENTS` / `$ARGUMENTS[N]` are replaced too. A bash template in the body that
+uses a function's positional parameters (`"$1" "$2"`) turns into the invocation's arguments and becomes a different command
+(only indexes beyond the number of arguments survive).
+
+- The automated checks above look at the file's bytes, not at the body after the replacement, so they do not catch this. Only a real invocation does
+- Out-of-range indexes, `$*`, `$@`, `$#`, `$?`, named variables and `$(…)` survive. That `${1}` survives is the current version's behaviour, not a guarantee
+- Move anything that needs positional parameters into `scripts/`, or write it with named variables. When reviewing a Skill, run
+  `grep -nE '\$[0-9]' <skill>/SKILL.md` (the same for the bodies under `.claude/skills` and `.claude/commands`).
+  `$ARGUMENTS` is the way to receive the arguments, so put it only where receiving them is intended

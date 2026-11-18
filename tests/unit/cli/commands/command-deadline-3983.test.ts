@@ -370,20 +370,32 @@ describe('verify --timeout bounds the start and the run reads (Issue #3983)', ()
 
 describe('ask: --timeout covers the round trip, not the reading of the reply (Issue #3983)', () => {
   it('negative: a reply-ledger GET that does not answer after completion falls back to the pane within the grace, not 124', async () => {
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2・§3.6 cell 17): the reply is read by the ask's id and the pane is no
+    // longer a fallback. The subject is unchanged: a read after completion that
+    // does not answer ends at the reply grace with exit 0, not 124 — now as
+    // unmatched/grace_expired, with nothing read off the screen.
     mockServer({
-      'POST /send': { status: 200, data: { id: 'm1', timestamp: new Date().toISOString() } },
+      '/api/asks/capabilities': { protocol: 1, tools: { claude: true } },
+      'POST /send': (_url, init) => ({
+        id: 'm1',
+        timestamp: new Date().toISOString(),
+        ask: { id: JSON.parse(String(init?.body)).ask.id, state: 'pending', reason: null, sendState: 'sent' },
+      }),
       '/current-output': frame,
+      'GET /api/asks/': 'hang',
       '/messages': 'hang',
       'POST /capture': { status: 200, data: { output: 'the pane reply' } },
     });
     const run = await start('ask', ['wt1', 'hello', '--instance', 'claude', '--timeout', '2']);
     // The reply grace (15 s) bounds each read after the turn ended.
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     await run.pending;
 
     expect(firstExit()).toBe(ExitCode.SUCCESS);
-    expect(calls('POST', '/capture')).toBeGreaterThan(0);
-    expect(mockConsoleLog.mock.calls.map(c => String(c[0])).join('\n')).toContain('the pane reply');
+    expect(calls('POST', '/capture')).toBe(0);
+    expect(mockConsoleLog.mock.calls.map(c => String(c[0])).join('\n')).not.toContain('the pane reply');
+    expect(stderrText()).toContain('reply not collected (unmatched/grace_expired)');
   });
 
   it('negative: a /send that returns past the deadline is 124 that says the message was sent, with no poll', async () => {

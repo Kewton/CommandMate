@@ -3,6 +3,9 @@
  * Manages auto-yes mode state for a worktree
  *
  * Issue #138: Extended to trigger server-side polling
+ * Issue #4436: enabling is refused with 409 { code: TOOL_POLICY_DENIED, error,
+ *   reason, links } when the tool policy refuses Auto-Yes for the resolved tool
+ *   (antigravity without a usage declaration). Disabling is never refused.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -49,6 +52,8 @@ import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { Worktree } from '@/types/models';
 import { autoYesGrantIdOf } from './auto-yes-grant';
+import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE } from '@/lib/tool-policy/policy';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 
 const logger = createLogger('api/auto-yes');
 
@@ -498,6 +503,40 @@ export async function POST(
     let pendingDecisions: AutoYesResponse['pendingDecisions'];
     let state;
     if (body.enabled) {
+      // Issue #4436: the tool policy first — before the session is looked at,
+      // any state is written or a poller starts. Judged on the RESOLVED tool, so
+      // an instance named without `cliToolId` is judged as its roster entry says.
+      // Every arming goes through this route (the CLI's `auto-yes --enable` and
+      // `send --auto-yes`, the web UI), and grants live in memory and are released
+      // on restart, where the declaration is read — so no grant on a refused tool
+      // can outlive this check.
+      const policy = decideToolPolicy({
+        tool: cliToolId,
+        operation: 'auto-yes',
+        origin: 'legacy',
+        declaration: readUsageDeclaration(),
+      });
+      if (!policy.allowed) {
+        logger.warn('tool-policy-denied:', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          code: policy.code,
+          reason: policy.reason,
+        });
+        return NextResponse.json(
+          {
+            code: policy.code,
+            error: TOOL_POLICY_DENIED_MESSAGE,
+            reason: policy.reason,
+            links: policy.links,
+            cliToolId,
+            instanceId,
+          },
+          { status: 409 }
+        );
+      }
+
       // Issue #3290: a same-named session another CommandMate server created is
       // not this worktree's to auto-answer. The poller already declines to act
       // on one (#2865), so arming used to answer 200 and show ON over a session

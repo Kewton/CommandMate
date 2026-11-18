@@ -23,6 +23,7 @@ import { splitFilePathParts } from '@/lib/chat/chat-transcript-view';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { ChatFileLink } from '@/components/worktree/ChatMessageBubble';
 import { MERMAID_MARKDOWN_COMPONENTS } from '@/components/worktree/mermaid-markdown';
+import { sendRoleRefusalMessageKey } from '@/components/worktree/role-refusal-notice';
 
 // ============================================================================
 // Types
@@ -432,6 +433,12 @@ const UserMessageSection = memo(function UserMessageSection({
           </div>
         )}
       </div>
+      {/* Issue #4385: why the server refused it because of the role (nothing was sent), and what to do. */}
+      {sendState === 'error' && message.optimisticRoleRefusal && (
+        <p data-testid="optimistic-error-reason" role="alert" className="mb-1 text-xs text-danger-foreground">
+          {t(sendRoleRefusalMessageKey(message.optimisticRoleRefusal))}
+        </p>
+      )}
       <div
         data-message-id={message.id}
         className="text-sm text-foreground whitespace-pre-wrap break-words [word-break:break-word] max-w-full overflow-x-hidden"

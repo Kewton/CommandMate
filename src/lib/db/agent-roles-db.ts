@@ -381,6 +381,74 @@ export function hasAnyRoleSetting(db: Database.Database): boolean {
   return row?.present === 1;
 }
 
+/**
+ * Whether any root holds a setting. Without one, which roots a worktree belongs to
+ * cannot change any resolution, so a caller may skip asking git (Issue #4387).
+ */
+export function hasAnyRepositoryRoleDefault(db: Database.Database): boolean {
+  const row = db.prepare('SELECT EXISTS (SELECT 1 FROM agent_role_repository_defaults) AS present').get() as
+    | { present?: number }
+    | undefined;
+  return row?.present === 1;
+}
+
+/**
+ * Every instance setting on the server, in one statement (Issue #4387), keyed by
+ * {@link instanceRoleKey}. A missing key means inherit, as in {@link getInstanceRoleState}.
+ */
+export function getAllInstanceRoleStates(db: Database.Database): Map<string, StoredRoleState> {
+  const rows = db
+    .prepare(
+      `SELECT i.worktree_id, i.instance_id, i.role_id, r.name AS role_name
+       FROM agent_instance_roles i LEFT JOIN agent_roles r ON r.id = i.role_id`
+    )
+    .all() as Array<{ worktree_id: string; instance_id: string; role_id: string | null; role_name: string | null }>;
+  return new Map(rows.map((row) => [instanceRoleKey(row.worktree_id, row.instance_id), toStoredState(row)]));
+}
+
+/** The key of the server-wide maps here: one worktree's one instance. */
+export function instanceRoleKey(worktreeId: string, instanceId: string): string {
+  return JSON.stringify([worktreeId, instanceId]);
+}
+
+/** What the server-wide read keeps of a `launched` record. */
+export interface LatestLaunchedRole {
+  sessionGeneration: string;
+  roleId: string | null;
+  roleName: string | null;
+}
+
+/**
+ * The latest `launched` record of every instance, in one statement (Issue #4387),
+ * keyed by {@link instanceRoleKey}. Same order as {@link getLatestRoleLaunchRecords}:
+ * ties on the clock go to the later insert.
+ */
+export function getAllLatestLaunchedRoles(db: Database.Database): Map<string, LatestLaunchedRole> {
+  const rows = db
+    .prepare(
+      `SELECT worktree_id, instance_id, session_generation, role_id, role_name FROM (
+         SELECT worktree_id, instance_id, session_generation, role_id, role_name,
+                ROW_NUMBER() OVER (
+                  PARTITION BY worktree_id, instance_id ORDER BY recorded_at DESC, rowid DESC
+                ) AS rank
+         FROM agent_role_launch_records WHERE phase = 'launched'
+       ) WHERE rank = 1`
+    )
+    .all() as Array<{
+    worktree_id: string;
+    instance_id: string;
+    session_generation: string;
+    role_id: string | null;
+    role_name: string | null;
+  }>;
+  return new Map(
+    rows.map((row) => [
+      instanceRoleKey(row.worktree_id, row.instance_id),
+      { sessionGeneration: row.session_generation, roleId: row.role_id, roleName: row.role_name },
+    ])
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Creation keys (#4132, migration v65)
 // ---------------------------------------------------------------------------

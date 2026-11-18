@@ -9,6 +9,8 @@ import type Database from 'better-sqlite3';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { validateAgentsPair } from '@/lib/selected-agents-validator';
 import { isSurfaceMode, type SurfaceMode } from '@/types/ui-state';
+import { parseStoredSessionsFilter } from '@/lib/sessions-default-filter';
+import type { SessionsFilterCondition } from '@/types/sessions-default-filter';
 
 // ============================================================================
 // Key constants
@@ -41,6 +43,9 @@ const KEY_DEFAULT_SELECTED_AGENTS = 'default_selected_agents';
  * reaches an install that never chose.
  */
 const KEY_DEFAULT_SURFACE_MODE = 'default_surface_mode';
+
+/** Storage key for the /sessions default filter, JSON (Issue #4388). */
+const KEY_SESSIONS_DEFAULT_FILTER = 'sessions_default_filter';
 
 /**
  * Storage key for this server's tmux session-name namespace (Issue #2866).
@@ -261,4 +266,17 @@ export function getTmuxSessionNamespace(db: Database.Database): string | null {
  */
 export function setTmuxSessionNamespace(db: Database.Database, namespace: string): void {
   writeScalar(db, KEY_TMUX_SESSION_NAMESPACE, namespace);
+}
+
+/**
+ * Get the /sessions default filter exactly as stored (deleted roles are NOT
+ * removed here; see `applySessionsDefaultFilter`). Null when unset or malformed.
+ */
+export function getSessionsDefaultFilter(db: Database.Database): SessionsFilterCondition | null {
+  return parseStoredSessionsFilter(readScalar(db, KEY_SESSIONS_DEFAULT_FILTER));
+}
+
+/** Save the /sessions default filter. The caller validates first. */
+export function setSessionsDefaultFilter(db: Database.Database, condition: SessionsFilterCondition): void {
+  writeScalar(db, KEY_SESSIONS_DEFAULT_FILTER, JSON.stringify(condition));
 }

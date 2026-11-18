@@ -112,6 +112,8 @@ import { noteManualAnswerStarted, noteManualSendStarting } from '@/lib/polling/a
 import type { DecisionDelivery } from '@/lib/hooks/sources/pending-decisions';
 import { settleManualSendError, settleManualVerdictReceipt } from '../prompt-response/answer-delivery';
 import { screenAtSend } from './screen-at-send';
+import type { SendOrigin } from '@/lib/tool-policy/policy';
+import { findToolPolicyDenial, toolPolicyDeniedResponse } from '../send/send-tool-policy';
 
 const logger = createLogger('api/respond/structured-decision');
 
@@ -178,6 +180,13 @@ function verdictFor(optionNumber: number): Verdict | null {
       return null;
   }
 }
+/** Issue #4437: who started the answer, for the tool policy. */
+export interface RespondToolPolicyInput {
+  origin: SendOrigin;
+  /** Logged with a refusal only. */
+  originEvidence?: unknown;
+}
+
 export interface RespondByDecisionIdParams {
   db: Database.Database;
   /** The canonical worktree id the route already resolved. */
@@ -190,6 +199,8 @@ export interface RespondByDecisionIdParams {
   cliToolParam?: unknown;
   /** Optional `instanceId` from the body. */
   instanceParam?: unknown;
+  /** Issue #4437: the body's `origin`, already read; absent is `legacy` (a person). */
+  toolPolicy?: RespondToolPolicyInput;
 }
 
 /** {@link respondToSolePendingDecision}'s input — the same, minus the id. */
@@ -203,6 +214,8 @@ export interface RespondToSolePendingDecisionParams {
   cliToolParam?: unknown;
   /** Optional `instanceId` from the body. */
   instanceParam?: unknown;
+  /** Issue #4437: the body's `origin`, already read; absent is `legacy` (a person). */
+  toolPolicy?: RespondToolPolicyInput;
 }
 
 /** The 404 every failed lookup answers with. One body, one code, no detail. */
@@ -291,11 +304,13 @@ function resolveDecisionScope({
   worktreeId,
   cliToolParam,
   instanceParam,
+  toolPolicy,
 }: {
   db: Database.Database;
   worktreeId: string;
   cliToolParam?: unknown;
   instanceParam?: unknown;
+  toolPolicy?: RespondToolPolicyInput;
 }): ScopeResolution {
   // Same allowlists the `/prompt-response` route applies to the same two
   // fields, and rejected on the same terms: an unknown tool or a malformed
@@ -349,6 +364,18 @@ function resolveDecisionScope({
     };
   }
   const { cliToolId, instanceId } = resolution.target;
+
+  // Issue #4437 (design §1.3): the tool is known; nothing is read from the agent
+  // or delivered yet. A verdict over the agent's API answers it as much as a key.
+  const toolPolicyDenial = findToolPolicyDenial({
+    tool: cliToolId,
+    operation: 'respond',
+    origin: toolPolicy?.origin ?? 'legacy',
+    originEvidence: toolPolicy?.originEvidence,
+    worktreeId,
+    instanceId,
+  });
+  if (toolPolicyDenial) return { ok: false, response: toolPolicyDeniedResponse(toolPolicyDenial) };
 
   return {
     ok: true,
@@ -459,6 +486,7 @@ export async function respondByDecisionId({
   answer,
   cliToolParam,
   instanceParam,
+  toolPolicy,
 }: RespondByDecisionIdParams): Promise<NextResponse> {
   if (!isValidDecisionId(decisionId)) {
     return NextResponse.json(
@@ -470,7 +498,7 @@ export async function respondByDecisionId({
     return NextResponse.json({ error: 'answer must be a string' }, { status: 400 });
   }
 
-  const resolved = resolveDecisionScope({ db, worktreeId, cliToolParam, instanceParam });
+  const resolved = resolveDecisionScope({ db, worktreeId, cliToolParam, instanceParam, toolPolicy });
   if (!resolved.ok) return resolved.response;
   const scope = resolved.scope;
 
@@ -522,12 +550,13 @@ export async function respondToSolePendingDecision({
   answer,
   cliToolParam,
   instanceParam,
+  toolPolicy,
 }: RespondToSolePendingDecisionParams): Promise<NextResponse> {
   if (typeof answer !== 'string') {
     return NextResponse.json({ error: 'answer must be a string' }, { status: 400 });
   }
 
-  const resolved = resolveDecisionScope({ db, worktreeId, cliToolParam, instanceParam });
+  const resolved = resolveDecisionScope({ db, worktreeId, cliToolParam, instanceParam, toolPolicy });
   if (!resolved.ok) return resolved.response;
   const scope = resolved.scope;
 

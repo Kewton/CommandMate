@@ -78,6 +78,7 @@ import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { formatChatTurnTime } from '@/lib/date-utils';
 import { stripAnsi } from '@/lib/detection/ansi';
 import { splitFilePathParts, type ChatRowHeader } from '@/lib/chat/chat-transcript-view';
+import { sendRoleRefusalMessageKey } from '@/components/worktree/role-refusal-notice';
 import { SHARED_REMARK_PLUGINS } from '@/lib/markdown';
 import { classifyChatLink, normalizeChatFilePath } from '@/lib/chat/chat-file-path';
 import { splitChatUserBody, useChatImageScope } from '@/lib/chat/chat-image';
@@ -1296,6 +1297,16 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           </>
         )}
       </div>
+      {/* Issue #4385: why the server refused it because of the role (nothing was sent), and what to do. */}
+      {sendState === 'error' && message.optimisticRoleRefusal && (
+        <p
+          data-testid="chat-optimistic-error-reason"
+          role="alert"
+          className={['px-1 text-xs text-danger-foreground', isUser ? 'text-right' : ''].filter(Boolean).join(' ')}
+        >
+          {t(sendRoleRefusalMessageKey(message.optimisticRoleRefusal))}
+        </p>
+      )}
     </div>
   );
 });

@@ -36,6 +36,8 @@ exit 45 を受けたら、利用者に `permissions.defaultMode` を `ask` 以�
 send が exit 99（`prompt not ready`）なら、メッセージは送られていない（Codex / Command Code で実測）。待つ前に画面を見る。
 手順は docs/orchestrate/exit-codes.md#3-1-冷間起動の失敗-exit-99 の表（信頼ダイアログ・既にプロンプト・まだ起動中）に従う。
 
+起動の直後に `? for shortcuts` が一瞬出てから、コーディングの好みを学ぶ画面（`Learning your coding taste` → `Press Enter to continue`）に切り替わることがある（`.commandcode/` が既にある作業ディレクトリで観測）。この間に打った依頼は消える。tmux で直に起動して依頼を打つときは、`Press Enter to continue` を見つけ次第 Enter で閉じ、学習の画面が見えている間は打たず、入力欄が数回続けて見えてから打つ。
+
 ## 3-3 完了の合図が要る理由
 
 Command Code は、前のターンの `hook_stop` が、生成中のターンより先に完了として読まれることがある（#2429）。
@@ -60,3 +62,15 @@ Command Code は、前のターンの `hook_stop` が、生成中のターンよ
 - 確認の画面で止まっている（`capture --pane` で見る）: 権限の既定が `ask` に変わった可能性がある。上の「3-1 権限の既定を確かめる」を読み、利用者に直してもらう
 - exit 21（作業証跡ゼロ）: docs/orchestrate/exit-codes.md#3-4-21-の対応 の手順で切り分ける
 - ワーカー起因の不合格が 2 回続いたら、本体 3-5 の手順で Claude（sonnet）へ格上げする
+
+## 付録 同梱バンドルから仕様を読むとき
+
+外部 CLI の同梱バンドル（`dist/cli.mjs` など）を grep して仕様を決めるときは、値を**受理する**関数（loader / validator）だけでなく、
+その値を**使う**関数（`select*` / `run*` / `resolve*` など）も追う。後者の方が厳しいことがある。
+Command Code の hook の `matcher` がその例で、loader は `"*"` を全一致として警告なく受理するが、実行側は空でない `matcher` に
+ツール名を求めるので、ツール名の無い `SessionStart` / `Stop` は `"*"` では一度も発火しない（空文字なら発火する）。
+CommandMate が `matcher: ""` で登録する理由は `src/lib/hooks/sources/command-code/hooks-config.ts` の冒頭にある。
+
+追い切れないときは、疑う値と既知の良い値を**別の層へ同時に**仕込み、1 回の起動で対照する
+（例: 2 つの設定の層に別のコマンドを登録し、発火した数を見る）。1 回の実機のターンで切り分けられ、イベントによってはモデルの呼び出しより前に発火するので利用枠も使わない。
+validator が唯一の判定者である値（例: 列挙の検証だけで決まる権限モード）は、validator を読めば足りる。

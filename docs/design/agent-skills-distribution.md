@@ -147,6 +147,15 @@ receipt の `artifact` は **`url` を持たない**。download URL は signed U
   `.agents/skills/.commandmate-staging/<opaque-operation-id>/` に置く。
   同一filesystemを保証して rename を atomic にするためであり、
   先頭 dot により Skill ID 文法から外れるため discovery 対象にならない。
+- 配備先の Skill はスラッシュコマンドのパレットにも載る。パレットの重複排除の鍵は名前だけでなく
+  **名前と `cliTools` の組**（`src/lib/command-merger.ts` の `keyOf`。claude と codex の同名の項目を共存させるため）。
+  そのため、ある loader の `cliTools` を広げると、別の loader から来る同名の項目と鍵が分かれ、同じ Skill がパレットに 2 回出る。
+  `.agents/skills`（`['codex', 'antigravity']`）と旧来の `.codex/skills`（`['codex']`）は、`mergeCodexFamilySkills()`
+  （`src/lib/slash-commands.ts`）が先に名前で畳む（`.agents/skills` が勝つ）。loader の `cliTools` に道具を足すときは、
+  同名の項目が来うる場所をすべて確かめ、先に名前で畳む。
+- グローバルと worktree の Skill を合わせる順番は意図して非対称にしてある（slash-commands の route）。
+  グローバルの claude の Skill は worktree の前に置くので同名なら worktree が勝ち、グローバルの codex 系は
+  worktree の後に置くのでグローバルが勝つ。揃えるなら意図を決めてから変える。
 
 ### D-13: safe YAML parse profile
 

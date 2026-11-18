@@ -239,6 +239,32 @@ UI の配色方針は次の 2 分類のみ。曖昧な「暗いまま」の島�
 - **スマホの直接入力キーボード（`MobileDirectInputKeyboard`、#2799）の文字の面のキーの「幅」だけ**が例外（10 列で 360px 幅なら約 36px）。高さは全キー 44px、確認行と特殊キーの段（7 列で約 51px）は幅も 44px 以上を守る。
 - 理由: OS キーボードと同じ寸法で指が覚えている配置になること、誤タップは送信前の確認行で読んで取り消せること。キー同士の当たり判定は隙間なく接し、見た目の隙間はキーの内側に取る。
 
+### hover でだけ出す操作はタッチ端末で見えない
+
+`opacity-0 group-hover:opacity-100 focus-within:opacity-100` のように hover で出すツールバー・操作ボタンは、
+タッチ端末では**ずっと見えない**。`group-hover` は発火せず、見えない要素にはフォーカスもできないので
+`focus-within` も効かない。ボタンは配置上は在るのに、利用者には見つけられない。
+単体テストは不透明度を見ないので、この退行は緑のまま通る。
+
+- hover で出すなら、タッチのフォールバックを必ず付ける: `[@media(hover:none)]:opacity-100`
+  （デスクトップの hover 表示は残し、タッチでは常に出す）。または最初から薄く出しておく（例 `opacity-60`）
+- 先例: `src/components/worktree/ConversationPairCard.tsx`・`ChatMessageBubble.tsx`・`EnvManagerPane.tsx`
+- worktree 系のコンポーネントはスマホの画面（`WorktreeDetailMobile` 経由）でもタッチで描かれる。
+  hover だけ・`opacity-0` だけで隠すパターンはレビューで重点的に見る
+
+### UI の帯の横スクロールにはスクロールバーを出さない
+
+タブの帯・ツールバーなど、UI の枠（chrome）の `overflow-x-auto` には `scrollbar-hide`（`src/app/globals.css`）を付け、
+帯の外へはみ出した項目へは「…」メニュー・ホイール・`scrollIntoView` で届くようにする。
+OS の設定やマウスの接続によっては横スクロールバーが常に表示され（約 15px）、高さ 32px の帯ではタブが半分ほどに潰れる。
+
+- 先例: `WorktreeDetailRefactored` のスマホのタブ、`MessageInput`、`EnvManagerPane`、`NotesAndLogsPane`
+- 確かめ方: スクロールバーが重ならない表示の環境では再現しないので、対象の要素に
+  `::-webkit-scrollbar{height:15px}` を注入して常時表示を模擬し、`clientHeight` の減りを測る
+- `@playwright/test` の headless Chromium は `--hide-scrollbars` 付きで起動するので、注入しても 0px のままで
+  **テストが空振りする**。テストでは `chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] })` の専用ブラウザを立て、
+  注入した素の対照のスクローラが 15px になることを先に assert してから測る
+
 ---
 
 ## フォーカス表現 (Issue #1082)
@@ -420,6 +446,30 @@ import { Bot } from 'lucide-react';
 - **SSR**: Radix の Portal 系(Select / Tooltip / DropdownMenu / Switch / Tabs)は `'use client'` 必須。
 - **z-index**: Portal コンテンツは `Z_INDEX.POPOVER`(65)で描画され、Modal(50)より前面に出る(`src/config/z-index.ts`)。
 - **a11y / キーボード**: Radix 既定のロール・aria 属性・キーボード操作(Tab/矢印/Escape)を壊さない。
+
+### Modal の背景クリック
+
+`src/components/ui/Modal.tsx` の背景は見た目だけ（`aria-hidden`）で、閉じる処理は背景の上を覆う
+ラッパー（`data-testid="modal-backdrop-surface"`）が持つ。ラッパーは DOM の順で後ろに在る positioned 要素で
+全面を覆うので、背景の要素には click が一度も届かない。
+
+- **押下（`mousedown`）と離上（`mouseup`）の両方がラッパー自身に着いたときだけ閉じる。** 押下と離上が別の要素だと
+  `click` は共通の祖先（＝ラッパー）へ飛ぶので、押下だけを見る実装は「外で押して中で離す」で閉じてしまう
+- 単体テストは `mouseDown` → `mouseUp` → `click` の 3 つで撃つ（`mouseUp` を省くと分岐を通らずに緑になる）。
+  `Modal` は `document.body` へ portal するので、要素は `render()` の戻り値の `container` ではなく `baseElement` から取る
+- jsdom はヒットテストをしないので、要素へ直接 `fireEvent.click` するテストは、背景に届かない壊れた実装でも通る。
+  「どの要素が click を受けるか」は実ブラウザ（e2e）で確かめる
+
+### フォーカストラップ（`useFocusTrap`）
+
+`src/hooks/useFocusTrap.ts` は `ui/Modal`・`MobilePromptSheet`・`MobileTerminalActionsSheet` などが共有する。
+有効になった時点でフォーカスがすでにコンテナの中に在れば（利用側が `autoFocus` などで管理している）、
+初期フォーカスを奪わず、閉じたときのフォーカスの戻しもしない。React の `autoFocus` は effect より前に効くので、
+この判定で利用側の管理を見分けられる。`ConfirmDialog`（`autoFocus` で初期フォーカス）と
+`ConfirmProvider`（`restoreFocusRef` で呼び出し元へ戻す）はこれに依っているので、
+Modal・シートに無条件の初期フォーカス・フォーカスの戻しを足さない。
+jsdom には `offsetParent` / `getClientRects` が無いので、フォーカスできる要素の判定に可視性は使わない
+（selector の `:not([disabled])` と `hidden` / `aria-hidden` の除外だけ）。
 
 ### Input / Textarea
 

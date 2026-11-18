@@ -354,6 +354,11 @@ CommandMate 側だけで言える。**本 Issue のスコープ外**なので、
    **`normalizeEvent` では直せない**（1 フレームの純関数で、2 通目を 1 通目と区別できない）。
    購読側に「初出だけ通す」状態機械を置くこと。`createTurnGate` は共通部品では**ない**
    （フレーム名と読み取り位置がツール固有だから。§3.3.2）ので、自分のツールの語彙で書く。
+   - **再送は fixture では見えない。** fixture は「1 種類につき 1 通」しか採らないので、payload の形は正しくても
+     回数と順序については何も言っていない。購読を実装したら実 TUI に繋いで 1 ターン流し、届いたイベント列を
+     時刻つきで全部印字して並びを目視する（opencode 1.18.3 の `message.updated` 再送はこうして初めて見つかった）。
+   - **再接続では武装状態だけ捨て、通した message id は保持する。** 新しいプロンプトは必ず新しい id なので保持に害が無く、
+     再接続がターンの終わりと末尾の再送のあいだに入る窓を塞げる。
 
 7. **テストを書く。** `tests/unit/hooks/sources/` に置く。**入力は実 fixture**。最低限:
    - 各 fixture が期待どおりの語と detail に写ること
@@ -387,7 +392,66 @@ CommandMate 側だけで言える。**本 Issue のスコープ外**なので、
 
 ---
 
-## 6. 関連
+## 6. ツール別の実測（実装と実機プローブの前提）
+
+### 6.1 Command Code の TUI・転写・headless
+
+Command Code 1.40.1 で観測（私設 tmux、200x50。実装用の fixture は 200x1000 で採り直すこと）。hook の payload は
+`tests/fixtures/hooks/command-code/`、設定ファイルと event の制約は
+[`agent-event-hooks.md` の command-code の節](../user-guide/agent-event-hooks.md#command-code--worktree-内の-commandcodesettingslocaljsonmatcher-は空文字) にある。
+
+- **inline 描画**（`alternate_on=0`、scrollback あり）で、Claude Code v1 と同じ構図。`❯ <echo>` → 生成中
+  ` ○ Synthesizing…  esc to interrupt • 2s • ↓ 0` → 応答 `⠶ <本文>` → ` ✻ Worked for 4s` → 罫線 / `❯ Ask your question...` /
+  罫線 / `  ? for shortcuts · taste on`。ツールは ` SHELL  [ls -la]` ＋ `│` 枠 ＋ `└  ... +3 lines [ctrl+o to expand]`、
+  思考は `✻ Thought for 1 second [ctrl+o to expand]`。バナーは `# Command Code v1.40.1`、hook が動くと本文に `◼ Ran 1 session start hook`。
+- **権限ダイアログは Claude 形の番号リスト**（`❯ 1. Yes` / `2. Yes, allow all edits this session [shift+tab]` /
+  `3. No, tell Command Code what to do differently` / `↑/↓ navigate · enter select · …`）。`--trust` ＋ default モードでは `ls` は確認なしで走る（読み取り扱い）。
+- **転写は `~/.commandcode/projects/<slug>/<session_id>.jsonl`。** slug は cwd を小文字の kebab にしたもの（`/FooBar` → `foo-bar`）で
+  cwd から作り直しにくいので、hook の `transcript_path`（絶対パス）を使う。1 行目が `{type:'session', id, cwd, timestamp, version}`、
+  以降が `{type:'message', id, parentId, timestamp, message:{role, content:[text|thinking|tool_use|tool_result]}, model?, usage?}`。
+  行は**ターン完了時刻で一括にスタンプ**される。`.meta.json` / `.checkpoints.jsonl` が隣にあり、`--no-session` では何も残さない。
+- **headless** は `-p "<msg>" --output-format json` で NDJSON（`{"type":"event",…}` の列 ＋ 最後に
+  `{"type":"result","subtype":"success|error|max_turns","finalText",…}`）。書き込み系ツールのゲートは
+  [cmate-schedules-guide の command-code の節](../user-guide/cmate-schedules-guide.md#command-code--yolo----permission-mode) を参照。
+
+### 6.2 copilot の picker を実機で採るときの罠
+
+copilot 1.0.80 で `/model` `/agent` `/theme` `/permissions` `/skills` `/mcp` `/settings` `/statusline` `/subagents` `/resume` `/session`
+の 11 種を連続で採ったときの観測。
+
+- **picker が開くと composer が消え、以降に送った文字列は picker の検索欄とキーバインドに落ちる。** `/session` を開いたまま
+  `/model gpt-5-mini` ＋ Enter を送ると、文字列中の `n` が `n new` に食われて**新しいセッションが作られた**。1 コマンドごとに確実に閉じる。
+- **`/session` だけ `Esc` で閉じない**（フッタ `/ search · ↑/↓ navigate · enter open · n new · tab switch tabs · a filter:all` に `esc` が無い）。
+  閉じられなくなったら、そのプローブ用の tmux セッションを止めて起動し直すのが速い。
+- **フッタは一様でない。** `/agent` は一覧が空だと `↑/↓` を描かない。`/agent` と `/subagents` はフッタの**下**に全幅の罫線を描くので
+  フッタが最下行ではない。`/permissions` は picker のフッタを持ちながら本体は 2 択の番号メニュー。`↑/↓` と `esc` のどちらかは必ずあるが、どちらも必須にはできない。
+- **引数つきの `/model <id>` は picker を開かず**、約 300ms で `● Model changed from … for this session.` を印字して切り替わる。
+  未知の id は有効な id の一覧を出して何も変えない。`send --model` の経路で picker を待つ意味は無い。
+- `/resume` `/session` `/settings` の画面には、他のリポジトリのセッション名・ブランチ・パスや操作者の設定値が写る。fixture にする前に中身を確かめる。
+
+### 6.3 model・effort の切替
+
+claude 2.1.220 / codex 0.144.6 / agy 1.1.7 で観測（claude の数字キーは 2.1.260 で再確認）。
+
+| | 起動時 | 途中変更 |
+|---|---|---|
+| claude | `--model <alias\|full>` ＋ `--effort <low\|medium\|high\|xhigh\|max>` | `/model <arg>` `/effort <arg>` は 1 回で効くが、**`~/.claude/settings.json` の `model` / `effortLevel` を書き換える**（利用者のグローバル既定が変わる） |
+| codex | `-m, --model` ＋ `-c model_reasoning_effort="…"`（effort 専用のフラグは無い） | `/effort` は無く、effort の途中変更には再起動が要る |
+| agy | `--model` ＋ `--effort (low\|medium\|high)`。`agy models` で一覧。モデル名に effort を含むもの（`…-high`）がある | — |
+
+- **claude の `/model` picker の数字キーは「移動」ではなく「確定＋既定の書き換え」。** `4` を送っただけで
+  `Set model to … and saved as your default for new sessions` が出て `settings.json` が書き換わった（Enter は押していない）。
+  この画面で安全なのは矢印での移動と `s`（use this session only）だけ。番号が安全に効くのはフッタが `Enter to select` /
+  `Enter to confirm` 系の別のダイアログ（codex の `/model`、copilot の `/permissions` など）。
+- 切替後の実際の値はバナーやフッタ（`… with xhigh effort`、agy `… · medium`）から読める。
+- **実 TUI のプローブは利用者の環境を壊しうる。** `/model <arg>` は既定を書き換えるので、プローブの前に元の値を控えて必ず戻す
+  （claude は `HOME` / `CLAUDE_CONFIG_DIR` を差し替えると未ログインになるので隔離では避けられない）。codex は起動時に
+  `Update available … 1. Update now` を出すことがあり、送った文字列＋Enter がそれを選ぶと `npm install -g @openai/codex` が走る。
+  agy も trust ダイアログが先に入力を食う。**起動直後の割り込み（update / trust）を片付けてから本題を送る**ハーネスで行う。
+
+---
+
+## 7. 関連
 
 - Epic: [#1720](https://github.com/Kewton/CommandMate/issues/1720)
 - 本 Issue: [#1759](https://github.com/Kewton/CommandMate/issues/1759) / I/F 申し送りの裁定: [#1846](https://github.com/Kewton/CommandMate/issues/1846)（§3.3）

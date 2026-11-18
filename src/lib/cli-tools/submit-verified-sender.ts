@@ -97,6 +97,7 @@
  * a body this one called sent says so ({@link reportSubmittedBodyInComposer}).
  */
 
+import { readRoleLaunchRefusal } from '@/lib/agent-roles/launch-errors';
 import * as childProcess from 'child_process';
 import { sendKeys, sendSpecialKeys, capturePane, clearInputLine, exactTarget } from '../tmux/tmux';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
@@ -240,7 +241,8 @@ async function pasteBody(
   sessionName: string,
   message: string,
   ticket: InstanceInputTicket,
-  cliToolId: CLIToolType
+  cliToolId: CLIToolType,
+  beforeBody?: () => void
 ): Promise<void> {
   pasteBufferSeq.last += 1;
   const bufferName = `cm-send-${process.pid}-${pasteBufferSeq.last}`;
@@ -265,7 +267,10 @@ async function pasteBody(
   // `load-buffer` (up to its timeout), right before the body reaches the pane.
   // Issue #3992: a refused input boundary (#3957) stops the send here, with the
   // body loaded but not pasted — the buffer is dropped before the refusal goes up.
+  // Issue #4385: the caller's last check (Antigravity's role gate) goes first,
+  // inside the same catch, so a refusal drops the loaded buffer too.
   try {
+    runBeforeBody(beforeBody);
     noteInputStart();
   } catch (error: unknown) {
     await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
@@ -278,6 +283,19 @@ async function pasteBody(
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to paste message into tmux session: ${errorMessage}`);
   }
+}
+
+/** The caller's last check before the body (Issue #4385); a throw types nothing. */
+function runBeforeBody(check: (() => void) | undefined): void {
+  if (check) check();
+}
+
+/**
+ * Whether a failed paste may have put some of the body on the pane. A refusal of
+ * the caller's last check (Issue #4385) came before `paste-buffer`, so it did not.
+ */
+function pasteMayHaveTyped(error: unknown): boolean {
+  return pasteFailureMayHaveTyped(error) && readRoleLaunchRefusal(error) === null;
 }
 
 /** The composer's first row, for an error message a person has to act on. */
@@ -750,9 +768,10 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     const pastedAt = Date.now();
     assertInputOwner(ticket, cliToolId, 'the paste', false);
     try {
-      await pasteBody(sessionName, message, ticket, cliToolId);
+      await pasteBody(sessionName, message, ticket, cliToolId, params.beforeBody);
     } catch (error: unknown) {
-      if (pasteFailureMayHaveTyped(error)) leaveCarriedPasteMark(ticket);
+      // Issue #4385: a refusal of the caller's last check came before `paste-buffer`.
+      if (pasteMayHaveTyped(error)) leaveCarriedPasteMark(ticket);
       throw error;
     }
     await confirmPasteLanded({ sessionName, message, cliToolId, composer, attempts: pasteLandedAttempts, ticket });
@@ -776,6 +795,8 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
     // Issue #3953: the send's stamp is taken here — after the lock, the carried
     // mark, the re-check and the clear, right before the body's first key — so a
     // previous turn that ended during any of them is older than this send.
+    // Issue #4385: the caller's last check (Antigravity's role gate) first.
+    runBeforeBody(params.beforeBody);
     noteInputStart();
     try {
       await sendKeys(sessionName, message, false, { literal: true });

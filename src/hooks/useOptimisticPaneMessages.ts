@@ -12,6 +12,7 @@ import {
 import { isHandoffPageOperationRefused, sendMessageForHandoffPage } from '@/lib/handoff/page-owner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import type { ChatMessage } from '@/types/models';
+import { useRoleRefusalNotice } from '@/hooks/useRoleRefusalNotice';
 
 export interface UseOptimisticPaneMessagesArgs {
   worktreeId: string;
@@ -78,6 +79,10 @@ export function useOptimisticPaneMessages({
     }),
     [connectivity.signals],
   );
+  // Issue #4385: a send the server refused because of its role (409 `roleRefusal`, nothing typed)
+  // says why right away (the app's toast) and on its failed row; a new send's text goes back to the
+  // composer (the same insert as `onNotSent`). Shared with the `/sessions` tile.
+  const { readRoleRefusal, onRoleRefused } = useRoleRefusalNotice(onNotSent);
   return usePendingMessages({
     worktreeId,
     serverMessages,
@@ -86,6 +91,8 @@ export function useOptimisticPaneMessages({
     connectivity: pendingConnectivity,
     isNotSent: isHandoffPageOperationRefused,
     onNotSent,
+    readRoleRefusal,
+    onRoleRefused,
   });
 }
 

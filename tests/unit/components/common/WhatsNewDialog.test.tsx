@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
 import type { ReleaseNote } from '@/lib/app-update/release-notes';
+import { waitForModalSettled } from '@tests/helpers/modal-settled';
 
 const locale = vi.hoisted(() => ({ current: 'en' }));
 vi.mock('next-intl', async () => {
@@ -308,7 +309,9 @@ describe('[#2651] WhatsNewDialog close', () => {
 
   it('records the running version on Escape too', async () => {
     render(<WhatsNewDialog />);
-    await screen.findByTestId('whats-new-dialog');
+    // Issue #4413: the dialog opens after a fetch, outside act(); it is in the DOM
+    // before Modal listens for Escape. Wait for its effects, not just the DOM.
+    await waitForModalSettled({ contentTestId: 'whats-new-dialog' });
 
     fireEvent.keyDown(document, { key: 'Escape' });
 

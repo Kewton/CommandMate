@@ -534,9 +534,6 @@ export function AgentRolesSettings(): React.ReactElement {
                       ))}
                     </select>
                   </label>
-                  {!entry.adapterEnabled && (
-                    <p className="text-xs text-warning">{t('agentRoles.adapterDisabledNote')}</p>
-                  )}
                 </li>
               ))}
             </ul>

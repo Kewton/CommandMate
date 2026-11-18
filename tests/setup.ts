@@ -68,6 +68,14 @@ for (const key of AGENT_CORRELATION_ENV_KEYS) {
   delete process.env[key];
 }
 
+// Issue #4436: the suite runs with the production default — no antigravity
+// usage declaration (`personal`), under which the tool policy refuses
+// antigravity's unattended runs and Auto-Yes answering. Deleted rather than left
+// alone so a developer's own `CM_ANTIGRAVITY_USAGE` cannot change a verdict.
+// A test that needs a declared plan sets it inside its own file and restores it
+// (`withUsageDeclaration` in tests/helpers/usage-declaration.ts).
+delete process.env.CM_ANTIGRAVITY_USAGE;
+
 // Issue #1760: keep agent config generation out of the developer's home.
 //
 // `CodexTool.startSession` writes codex's hooks file, and codex reads exactly
@@ -248,8 +256,6 @@ process.env.CM_AGENT_ROLE_ARTIFACTS_DIR = join(
   'commandmate-test-agent-roles',
   String(process.pid)
 );
-// Issue #4115: a shell that enabled the adapter does not enable it for the suite.
-delete process.env.CM_AGENT_ROLE_ANTIGRAVITY_ENABLED;
 process.env.CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR = join(
   tmpdir(),
   'commandmate-test-agent-roles-antigravity',

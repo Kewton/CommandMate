@@ -230,11 +230,6 @@ function InstanceRoleRow({
               )}
             </div>
           )}
-          {!entry.adapterEnabled && (
-            <p data-testid={`instance-role-adapter-off-${id}`} className="text-xs text-warning">
-              {t('agentRoles.adapterDisabledNote')}
-            </p>
-          )}
           {entry.application.resumedAcrossRole && (
             <p data-testid={`instance-role-resumed-${id}`} className="text-xs text-warning">
               {t('agentRoles.resumedAcrossRoleNote')}

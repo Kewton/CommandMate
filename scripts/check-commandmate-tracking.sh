@@ -7,6 +7,7 @@
 #
 #   .commandmate/verify.yaml       verification gates  (Issue #1540)
 #   .commandmate/uat.yaml          UAT environment     (Issue #2590)
+#   .commandmate/flow.yaml         flow settings       (Issue #4368)
 #   .commandmate/tasks/*.yaml      execution contracts (Issue #1545)
 #
 # A config file that is silently ignored looks identical to one that is tracked
@@ -60,6 +61,7 @@ echo "commandmate config tracking (.gitignore):"
 # Configuration — must be committed and shared.
 expect tracked '.commandmate/verify.yaml'        'verification gates #1540'
 expect tracked '.commandmate/uat.yaml'           'UAT environment #2590'
+expect tracked '.commandmate/flow.yaml'          'flow settings #4368'
 expect tracked '.commandmate/tasks/build.yaml'   'execution contract #1545'
 expect tracked '.commandmate/tasks/any-name.yaml' 'contract, arbitrary name'
 

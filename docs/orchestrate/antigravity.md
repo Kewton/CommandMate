@@ -32,6 +32,10 @@ agy 用の目印を使い、`realtimeSnippet` と `content` の長い方から�
 - プロンプト: `↑/↓ Navigate` フッター＋番号つきの選択肢（`> 1. Yes` など）
 - 待機中: 入力欄の枠（罫線 / `>` / 罫線 / ステータス行）。`? for shortcuts` には頼らない（#2478）
 
+## 3-2 編集の確認ダイアログと accept-edits
+
+Antigravity に編集を任せると、編集ごとに `Accept this file edit?` で止まり、Auto-Yes は答えない。最初の編集ダイアログが出たのを `commandmate capture <wt> --instance antigravity --pane --tail 40` で確かめてから、`tmux send-keys -t "=mcbd-antigravity-<worktree-id>:" BTab` を 1 回送ると accept-edits モードになり、以後は止まらない（送信の直後に送っても効かない）。accept-edits の後は `wait --on-prompt human` のログに `Prompt detected` が繰り返し出るので、回数ではなく「プロンプト行のまま数分変わらないか」で見る。
+
 ## 3-3 完了の合図を手で確かめる
 
 2026-09-17 #2605 の実測（`logs/server.log`）:
