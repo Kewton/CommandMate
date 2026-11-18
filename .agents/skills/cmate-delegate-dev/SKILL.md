@@ -87,6 +87,8 @@ alias の照合は「完全一致 → 大小無視の一致 → 部分一致」�
 
 宛先の worktree が別リポジトリでもよい。**相手のコンテキストは共有されない**ことだけ忘れないこと（第3節）。
 
+> **宛先が Antigravity（agy）のとき** — Google Antigravity の追加利用規約 6 条（https://antigravity.google/terms ）と公式 FAQ（https://antigravity.google/docs/faq ）は、個人向けプラン（無料・Google AI Plus／Pro／Ultra）で、第三者のソフトウェアやコーディングエージェントを通して Antigravity を使うことを制限しています。この skill は AI エージェントから隣のセッションへ依頼を送るため、宛先の instance のツールが `antigravity` なら送らず、人に返してください。API キーか Gemini Enterprise で使っている場合の申告は、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE`（`api-key` / `enterprise`）で、変えたらサーバーの再起動が要ります（CLI を打つ側の環境に設定しても効きません。申告は利用者の自己申告で、CommandMate は資格情報を読んで確かめません）。人が自分で起動して入力する使い方が規約の範囲内かについて、Google による明示の確認は無い。（2026-11-16 時点）
+
 ## 3. 依頼文を組む
 
 **相手はあなたの会話も、あなたが読んだファイルも、あなたが決めたことも知らない。**
@@ -155,7 +157,7 @@ bash .agents/skills/cmate-delegate-dev/scripts/ask.sh <worktree-id> <instance-id
 
 | code | 名前 | 意味 | すること |
 |---|---|---|---|
-| `0` | `SUCCESS` | 相手が 1 ターンを終えてコンポーザーへ戻った | `capture` して第7節へ |
+| `0` | `SUCCESS` | 相手が 1 ターンを終えてコンポーザーへ戻った | `capture` して第7節へ（`ask` で `"reply": null` なら第7節「出典を明示する」） |
 | `10` | `PROMPT_DETECTED` | 相手が確認を待っている | **第5節。答えない** |
 | `11` | `UPSTREAM_FAULT` | ターンが走っていない。`id=context-limit`（stderr / `--json`）なら相手の文脈が上限で、依頼は何もされていない | 既定は送り直す。`id=context-limit` は**再送しても直らない**。`commandmatedev instances <worktree-id> kill <instance-id>` で新しいセッションにして送り直す |
 | `21` | `NOT_STARTED` | 宛先のセッションが起動していない | `send` を実際に打ったか確認する。打っていて 21 なら相手が落ちている |
@@ -224,8 +226,19 @@ auto-yes は解決策ではない。
 
 ### 出典を明示する
 
-- `ask --json` が `source` を返す版（CommandMate#2376 以降）で `source` が `capture` なら、
-  「**画面の末尾から読んだ**」と報告に書く。`history` なら「チャット履歴から読んだ」。
+- `ask --json` の `source` は版で意味が変わる。
+  - **CommandMate 0.32.0 〜 0.51.2**（`ask` 導入から #4344 PR3 を含まない版まで）: `source` は
+    `history` / `pane` / `none`。`pane` なら「**画面の末尾から読んだ**」、`history` なら
+    「チャット履歴から読んだ」と報告に書く。
+  - **CommandMate 0.52.0 以降**（#4344 PR3 を含む版）: `ask` は返答を**この依頼の ID の帰属**でだけ読み、
+    画面からは拾わない。`source` は `history`（台帳がこの依頼に結んだ返答）/ `none` だけで、`pane` は出ない。
+    `attribution.state` が `matched` でないとき（帰属できない tool＝`tool_unsupported`、古いサーバー＝
+    `server_unsupported`、`ambiguous`・`unmatched`）は **exit 0 でも `"reply": null`・stdout 空**で、
+    stderr に `reply not collected (<state>/<reason>)` が 1 行出る。これを「返答が無かった」「完了した」と
+    報告しない。「返答は回収されなかった（理由: `<state>/<reason>`）」と書き、
+    `commandmatedev capture <worktree-id> --instance <instance-id> --pane --tail 80` で取った画面を
+    「**画面の末尾から読んだ**」と明記して添える。同梱の `ask.sh` はこのとき stderr に
+    `id=reply-not-collected` を出し、exit 0 のまま返す。
 - **v0.1 の経路（`capture --pane --tail`）では、常に「画面の末尾から読んだ」である。**
   0.31.3 の `capture --json` に `source` field は無い（実測）。
   画面の末尾は**スクロールで流れた部分を含まない**ので、長い返答は先頭が欠けうる。
