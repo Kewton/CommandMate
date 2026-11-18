@@ -1184,7 +1184,7 @@ commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <ta
 |---|---|---|
 | relay（待たない） | `commandmate ask <worktree-id> "<依頼>" --instance <id> --async` | 相手のターンが終わると、返答が `[from <alias> / <worktree>]` つきで自分の入力欄に届く。`claude`・`codex`・`antigravity`・`command-code`・`opencode`・`opencode-v2` は transcript のターンの行、`copilot`・`gemini`・`vibe-local` は画面から拾った行。ID の帰属ではないので 1 本ずつ送る（重なりは `overlap=` で注記される） |
 | 送って待って台帳を読む | `commandmate send <worktree-id> "<依頼>" --instance <id>` → `commandmate wait <worktree-id> --instance <id>` → `commandmate reply <worktree-id> --instance <id> --since <送信の前に取った ISO 時刻>`（`--since` は必ず付ける。無いと前のターンの返答を返しうる） | `--since` 以降のいちばん新しい transcript のターンの行（`claude`・`codex`・`antigravity`・`command-code`・`opencode`・`opencode-v2`）。`copilot`・`gemini`・`vibe-local` では常に空 |
-| 画面を見る | `commandmate capture <worktree-id> --instance <id> --pane --tail 60` | 相手の画面（全 tool。どのターンのものかは自分で見分ける） |
+| 画面を見る | `commandmate capture <worktree-id> --instance <id> --pane --tail 80` | 相手の画面（全 tool。どのターンのものかは自分で見分ける） |
 
 ID を付けた依頼は必ず複数行になるため、`claude` のペインには `[Pasted text …]` と `[cmate-ask v1 <id>]` の 1 行が見えます（設計 §7 (b) の決定。意味は変わりません）。
 チャット画面の履歴には ID の行は出ません。
@@ -1204,7 +1204,7 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 | 32 | **ROLE NOT_SENT**: ロールの条件を満たさず、本文を入力していない | ロールの設定を見直す |
 | 33 | **TOOL POLICY DENIED**: antigravity への送信・relay（`--async`）を柵が断った。何も打っていない（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。`--json` は `sent: false` と `refusal` | 再送しない。人に申告の要否を伺う。`auto-yes --enable` の拒否（stderr の 1 行目は `TOOL_POLICY_DENIED`。何も有効になっていない）も 33 |
 | 99 | 予期しないエラー | — |
-| 124 | タイムアウト。送信が期限を過ぎて返った場合は**送信済み**（stderr に出る） | `capture <id> --instance <id> --pane --tail 60` で見る。**再送しない** |
+| 124 | タイムアウト。送信が期限を過ぎて返った場合は**送信済み**（stderr に出る） | `capture <id> --instance <id> --pane --tail 80` で見る。**再送しない** |
 
 ### 関連する節
 
@@ -2756,7 +2756,7 @@ CommandMate が読めない選択画面へ Auto-Yes が Enter を 1 回送る動
 
 ```bash
 commandmate capture <worktree-id> --pane              # 空行を畳んだ transcript（TTY ならページャ）
-commandmate capture <worktree-id> --pane --tail 40    # 末尾 40 行だけ
+commandmate capture <worktree-id> --pane --tail 80    # 末尾 80 行だけ
 commandmate capture <worktree-id> --pane --raw        # 圧縮せず生のペインを出す
 commandmate capture <worktree-id> --pane --json       # 圧縮前後の行数つき JSON
 commandmate capture <worktree-id> --pane --instance codex-2
@@ -2780,7 +2780,7 @@ commandmate capture <worktree-id> --pane --follow     # 追従表示（Ctrl-C �
 ```bash
 commandmate capture <worktree-id> --pane --follow                  # 既定 2000ms 間隔
 commandmate capture <worktree-id> --pane --follow --interval 1000  # 間隔指定（250〜60000ms）
-commandmate capture <worktree-id> --pane --follow --tail 40        # 圧縮後の末尾 40 行だけ追う
+commandmate capture <worktree-id> --pane --follow --tail 80        # 圧縮後の末尾 80 行だけ追う
 ```
 
 - **tmux クライアントもキーバインドも要りません。** これが効くのは
@@ -2878,7 +2878,7 @@ commandmate reply <worktree-id> --instance cc-1 --json
 
 - 返答とみなすのは転写リーダーが書いた行（`<tool>-turn:<id>`）だけです。`ask` と同じ共有関数で読むので、
   「返答」の定義は `ask` と一致します。furniture 行（`relay-sys:` / `model-changed:`）は除き、ANSI・制御文字は落とします
-- 転写リーダーがあるツール: claude / codex / antigravity / command-code / opencode。
+- 転写リーダーがあるツール: claude / codex / antigravity / command-code / opencode / opencode-v2。
   それ以外のツールでは常に「返答なし」になります
 - **画面（pane）は読みません**。画面の行はターンに帰属できない（nudge 自身のエコーが混ざる）ためです
 - `--since` は ISO 8601。その時刻**以降**に書かれた返答だけを返します。`--instance` / `--agent` の解決は `ask` と同じです
