@@ -46,7 +46,7 @@ Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · n
 If you want Level 3 on your own repository — a PM you talk to, a development lead, workers each in their own worktree, a reviewer and a judge — paste this into the agent CLI you already use (Claude Code, Codex, Command Code):
 
 ```text
-Read https://kewton.github.io/CommandMate/team-setup.md and set up a CommandMate team for my repository with me. Explain each step before you run it, and ask me before you install anything, change files in my repository, create an instance or a role, change a permission, turn on Auto Yes, or merge.
+Read https://kewton.github.io/CommandMate/team-setup.md and set up a CommandMate team for my repository with me. Explain each step before you run it, and ask me before you install anything, change files in my repository, create an instance or a role, change a permission, run `commandmate sync`, use a GitHub repository, turn on Auto Yes, or merge.
 ```
 
 The agent asks which agent CLIs you have, which checks your repository runs and which GitHub Milestone to start with; you answer and approve. The guide starts by installing CommandMate if it is not there yet, has a team for a single agent CLI too, and keeps Antigravity out of every role an agent drives. Decisions an agent records wait for you on CommandMate's screen. Once CommandMate is installed, the same guide is `commandmate docs --section team-setup`.

@@ -313,18 +313,22 @@ At this point the new \`verify.yaml\` and \`.gitignore\` are uncommitted changes
 
 The scope is a check made after the work, against what changed in Git. It does not stop a session from editing a file outside it: by the time the check fails, the edit has been made. So a worker keeps inside it from its instructions, and its CLI's permission prompts stay on.
 
+In the example below, the lines in angle brackets come from the brief: copy what the person approved, not the example. The \`scope\` lines are an example for a person who approved \`src/\` and \`tests/\`. \`autoYes: mode: off\` makes sure Auto Yes never answers this task's prompts, even if someone turns it on for the worker's session; leaving it out keeps whatever is set on that session, which in this team is off.
+
 \`\`\`yaml
 version: 1
 title: "Issue #<n>: <one-line summary>"
 goal: |
-  Implement issue #<n>. Change only files under src/ and tests/.
-  The person approved commits in this worktree: commit when the work is done.
+  Implement issue #<n>. Change only the files the scope allows.
+  <Commits, from the brief: "Commit when the work is done." only if the person approved commits; otherwise "Do not commit; report when the work is done.">
 scope:
-  allow:
+  allow:                     # the files the person approved, from the brief
     - "src/**"
     - "tests/**"
 verify:
   gates: [lint, unit]        # gate ids from .commandmate/verify.yaml
+autoYes:
+  mode: off
 success:
   requireWorkEvidence: true
   requireScopeClean: true
@@ -406,7 +410,8 @@ A Skill marked high-risk also needs \`--ack-risk <skill-id>@<version>\`: explain
 - The person talks to the PM only. The PM never sends to a worker; the development lead never asks the person. Questions and approvals go up through the PM.
 - A brief from the PM has five parts: the issue; what the person approved for it (the files that may change, and whether the worker may commit); how far merging is allowed (default: none; stop and report "mergeable"); when to stop; and the last line of the report (\`DONE: <summary>\` or \`STOP: <reason>\`).
 - The development lead writes the person's approval into the contract and hands nothing more down. If a brief does not say what the person approved, or the work needs more than that, stop there and report up through the PM; do not start or widen it.
-- A contract's scope is checked after the work; it does not stop an edit. Keep inside it yourself.
+- A contract's scope is checked after the work; it does not stop an edit. Keep inside it yourself. Every contract says \`autoYes: mode: off\`.
+- Making a worktree and \`commandmate sync\` are the development lead's, and each needs the person's yes first, through the PM. Before asking, say what \`sync\` does: it re-reads every repository registered on the CommandMate server, not only this one, deletes its records of worktrees that no longer exist in Git and stops their sessions, and stops the global assistant session. The person may press sync on the screen instead.
 - Done means \`commandmate wait <worktree-id> --instance <worker> --verify\` exited 0. Report 20 or 21 as they are; never weaken a check.
 - The PM's report starts with one line that says whether the person has to do anything ("Nothing needs your attention now." or "2 decisions are waiting for you."), then each decision with its options, the recommended one first.
 - When a session you asked stops on a question or a permission prompt (\`wait\` or \`ask\` exits 10), do not answer it for that session: report it up. The person answers it on CommandMate's screen.

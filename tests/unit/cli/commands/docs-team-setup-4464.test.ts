@@ -34,6 +34,7 @@ import { createPeersCommand } from '../../../../src/cli/commands/peers';
 import { createRelaysCommand } from '../../../../src/cli/commands/relays';
 import { createRolesCommand } from '../../../../src/cli/commands/roles';
 import * as cliTypes from '../../../../src/cli/types';
+import { parseTaskContract } from '../../../../src/lib/tasks/contract-parser';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const TEAM_SETUP_MD = path.join(REPO_ROOT, 'website', 'team-setup.md');
@@ -512,6 +513,45 @@ describe('[#4464] I3: an approval is tied to what it approved', () => {
       'approval passed down',
       'GitHub target from the person',
     ]);
+  });
+});
+
+/** The example contract in Phase 3: the YAML block that starts with `version: 1`. */
+function exampleContract(guide: string): string {
+  const p3 = phases(guide)[2].body;
+  const block = /```yaml\n(version: 1\n[\s\S]*?)```/.exec(p3);
+  return block ? block[1] : '';
+}
+
+describe('[#4464] review 4464-4: approvals the lead acts on, and the README prompt', () => {
+  it('the example contract parses, pins Auto Yes off, and takes the commit approval from the brief', () => {
+    const yaml = exampleContract(TEAM_SETUP_GUIDE);
+    const contract = parseTaskContract(yaml, 'team-setup example');
+
+    expect(contract.autoYes.mode).toBe('off');
+    expect(contract.goal).toMatch(/<Commits, from the brief:/);
+    expect(yaml).not.toMatch(/The person approved commits/);
+  });
+
+  it('control: an example without autoYes leaves the mode unset, not off', () => {
+    const yaml = exampleContract(TEAM_SETUP_GUIDE).replace('autoYes:\n  mode: off\n', '');
+    expect(parseTaskContract(yaml, 'team-setup example').autoYes.mode).toBeNull();
+  });
+
+  it('the team rules tell the development lead what sync does before it asks', () => {
+    const phase4 = phases(TEAM_SETUP_GUIDE)[3].body;
+
+    expect(phase4).toMatch(/Making a worktree and `commandmate sync` are the development lead's, and each needs the person's yes first/);
+    expect(phase4).toMatch(/re-reads every repository registered on the CommandMate server, not only this one/);
+    expect(phase4).toMatch(/stops the global assistant session/);
+  });
+
+  it('the README prompt asks first before sync and before using a GitHub repository', () => {
+    const readme = fs.readFileSync(README, 'utf-8');
+    const prompt = readme.split('\n').find((line) => line.startsWith('Read https://kewton.github.io/CommandMate/team-setup.md')) ?? '';
+
+    expect(prompt).toContain('run `commandmate sync`');
+    expect(prompt).toContain('use a GitHub repository');
   });
 });
 
