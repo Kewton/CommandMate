@@ -24,6 +24,12 @@
  *
  * The origin is the caller's claim and is not verified: a guard against accidental
  * use, not a guarantee of compliance with the Google Antigravity terms.
+ *
+ * Issue #4449: the CLI no longer asks here. The writes themselves (`POST/PUT
+ * instances/roles`, `POST tasks`, the Auto-Yes grant's relay) refuse in the same
+ * request with the same bodies (`send/write-tool-policy`), so an ask that failed, or a
+ * default changed after it, can no longer let a write through. Kept read-only for any
+ * other caller that wants the verdict without writing.
  */
 
 import { NextRequest, NextResponse } from 'next/server';

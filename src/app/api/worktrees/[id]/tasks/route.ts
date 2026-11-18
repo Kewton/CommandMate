@@ -10,6 +10,13 @@
  *
  * The task row is created only after the contract validates: an unreadable
  * contract has nothing to record.
+ *
+ * Issue #4449: the body may carry the `origin` / `originEvidence` / `replyTo` of the
+ * `send --contract` the task is for. The tool policy judges the target this request
+ * resolves, and refuses with the send's 409 (`TOOL_POLICY_DENIED`, or the relay's
+ * `RELAY_TOOL_POLICY_DENIED`) before the row exists; the row is then written for that
+ * very target, never a default resolved again. A body with none of them (the web UI,
+ * an older CLI) is not affected.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -32,6 +39,7 @@ import { recordTaskSession } from '@/lib/verification/env-clean-gate';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { contractRoleWarning } from './contract-role-warning';
+import { findWriteToolPolicyRefusal, readWriteToolPolicyRequest } from '../send/write-tool-policy';
 
 const logger = createLogger('api/tasks');
 
@@ -129,6 +137,11 @@ export async function POST(
       }
     }
 
+    const policyRequest = readWriteToolPolicyRequest(payload);
+    if (!policyRequest.ok) {
+      return NextResponse.json({ error: policyRequest.error }, { status: 400 });
+    }
+
     // Contract issues are returned as a list, not one at a time: the loader
     // collects every violation and the caller prints all of them (exit 2).
     let contract;
@@ -174,6 +187,21 @@ export async function POST(
       instanceId: payload.instanceId as string | undefined,
       requestedCliTool: payload.cliToolId as CLIToolType | undefined,
     });
+    // Issue #4449: the tool this row is written for — named, or the default resolved
+    // just above — is the one judged, and the one written below. Judged here, before
+    // the reads that follow, so a refusal comes before a role's (exit 33, not 32). The
+    // awaits between this verdict and `createTask` only read (role evidence, a warning):
+    // the verdict's inputs are locals (`taskCliToolId`, the body's origin) and the
+    // server's declaration, which no request changes, so nothing can make the row
+    // differ from what was judged (I2 / I3).
+    const taskCliToolId: CLIToolType = (payload.cliToolId as CLIToolType | undefined) ?? roleTarget.cliToolId;
+    const toolPolicyRefusal = findWriteToolPolicyRefusal(db, {
+      worktreeId: id,
+      tool: taskCliToolId,
+      instanceId: roleTarget.instanceId,
+      request: policyRequest.value,
+    });
+    if (toolPolicyRefusal) return NextResponse.json(toolPolicyRefusal, { status: 409 });
     const launchTarget = { worktreeId: id, cliToolId: roleTarget.cliToolId, instanceId: roleTarget.instanceId };
     const roleProblem = await runningRoleProblem(db, launchTarget, worktree.path);
     if (roleProblem !== null) {
@@ -187,7 +215,7 @@ export async function POST(
 
     const task = createTask(db, {
       worktreeId: id,
-      cliToolId: (payload.cliToolId as string | undefined) ?? worktree.cliToolId ?? 'claude',
+      cliToolId: taskCliToolId,
       instanceId: (payload.instanceId as string | undefined) ?? null,
       contractPath,
       contract,

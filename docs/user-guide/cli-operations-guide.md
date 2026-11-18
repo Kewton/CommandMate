@@ -338,7 +338,7 @@ CLI は送り手の種類を次の順に読み、最初に当たったものを�
 
 読むのは環境と tmux のセッション名だけで、ファイル（資格情報）は読みません。`origin` を付けるのは、断られうる宛先への要求（antigravity・CLI の知らないツール・宛先を指定しない要求）だけです。ほかのツールを指定した要求の本文は今までと同じです。
 
-送る前に書き込む `send`（`--register --role` の名簿とロール、`--contract` のタスク、`--auto-yes` の有効化）は、書き込む前に `GET /api/worktrees/<id>/tool-policy` でサーバーに同じ判定を尋ね（何も書き込まない）、断られるならそこで exit 33 にします。断られた送信は、名簿・ロールの設定・タスク・Auto-Yes のどれも残しません。
+送る前に書き込む `send`（`--register --role` の名簿とロール、`--contract` のタスク、`--auto-yes` の有効化）は、その書き込みの要求そのものをサーバーが同じ判定で断り（何も書き込まない。`--reply-to` の relay の判定も同じ要求で行う）、exit 33 にします。事前の照会はしません（Issue #4449）。断られた送信は、名簿（instances の登録）・ロールの設定・契約のタスク・Auto-Yes のどれも書かれません。
 
 断られたときの stderr の 1 行目は `Error [TOOL_POLICY_DENIED]: <理由>`（relay は `Error [RELAY_TOOL_POLICY_DENIED]: …`）、2 行目は規約と FAQ のリンク、続いて解除の方法と、何も打っていないこと（`sent: false`）です。`--token` の警告などはその後に出ます。`ask --json` と厳格モードの `respond --json` は、stdout に `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }`（relay は `refusal.endpoint` も）を 1 つ出します。exit 33 は送り直しても同じ結果です。再送・再指示はせず、人に申告の要否を伺います（[exit code ごとの対処](../orchestrate/exit-codes.md)）。
 
@@ -4745,7 +4745,7 @@ commandmate ls --token your-token
 | 30 | NO_ACTIVE_SESSIONS | interruptの対象となる稼働中セッションが無い |
 | 31 | ROLE CONFLICT | ロールや名簿の競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない。ロールを付けない `instances add` / `remove` / `alias` でも出る。例外: `remove --kill` はセッションが停止済みのことがある |
 | 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
-| 33 | TOOL POLICY DENIED | 方針（ツールの利用方針）による拒否。何も打っていない（`send` / `ask` / `respond` と relay の作成。`TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`。[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ。`auto-yes --enable` の拒否（Auto-Yes は有効にならない。[`commandmate auto-yes`](#commandmate-auto-yes)）も 33 |
+| 33 | TOOL POLICY DENIED | 方針（ツールの利用方針）による拒否。何も打っていない（`send` / `ask` / `respond` と relay の作成。`TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`。[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ。`send` の `--register` の instance の登録・`--role` のロールの保存・`--contract` のタスクも書かれない（書き込みの要求そのものが断られる。Issue #4449）。`auto-yes --enable` の拒否（Auto-Yes は有効にならない。[`commandmate auto-yes`](#commandmate-auto-yes)）も 33 |
 | 50〜57 | MEM | `mem` の拒否（50 disabled / 51 version_conflict / 52 対象不明 / 53 ambiguous / 54 duplicate_key / 55 not_owner・state_forbids / 56 limit_exceeded）と、`mem check --suggest` の促しあり（57）。[commandmate mem](#commandmate-mem) の終了コード。`send --note` を mem が断ったときも 50〜56 で終わる |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |

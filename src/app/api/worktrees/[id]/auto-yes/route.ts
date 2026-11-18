@@ -54,6 +54,7 @@ import type { Worktree } from '@/types/models';
 import { autoYesGrantIdOf } from './auto-yes-grant';
 import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE } from '@/lib/tool-policy/policy';
 import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
+import { findWriteToolPolicyRefusal, readWriteToolPolicyRequest } from '../send/write-tool-policy';
 
 const logger = createLogger('api/auto-yes');
 
@@ -535,6 +536,24 @@ export async function POST(
           },
           { status: 409 }
         );
+      }
+
+      // Issue #4449: `send --auto-yes --reply-to` arms before the relay it opens is
+      // asked about, so the relay's rule 0 (antigravity at either end) is asked here
+      // too, on the tool this grant is for: refused, no grant is written (the same
+      // 409 `POST /api/relays` gives). Absent (the web UI, `auto-yes --enable`), as before.
+      if (body.replyTo !== undefined) {
+        const relayRequest = readWriteToolPolicyRequest({ replyTo: body.replyTo });
+        if (!relayRequest.ok) {
+          return NextResponse.json({ error: relayRequest.error }, { status: 400 });
+        }
+        const relayRefusal = findWriteToolPolicyRefusal(getDbInstance(), {
+          worktreeId: id,
+          tool: cliToolId,
+          instanceId,
+          request: relayRequest.value,
+        });
+        if (relayRefusal) return NextResponse.json(relayRefusal, { status: 409 });
       }
 
       // Issue #3290: a same-named session another CommandMate server created is
