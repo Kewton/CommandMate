@@ -90,6 +90,7 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
    - 上限以外の Codex の不調（接続など）の代わりも Claude 5（`--instance claude-5`）。Antigravity には頼まない
    - `codex-2` は `codex` と同じアカウントの上限を共有するので、上限の対策にならない（stream disconnected のような個別の不調で `codex-2` へ振り替えるのは従来どおり）
 8. **見通しは実績の率で幅を出す。** 「次のレビューで指摘が出なければ」という条件つきの最短を予測として伝えない。残りの往復の見込み（台帳と整合性レビューの記録から）× 1 往復の時間（verify の待ち＋実行＋レビュー）で幅を出し、最短と見込みを分けて書く。分かっている制約（夜の計測・期限・1 人のリーダーを通る直列・CI の不安定）は最初から入れる。見通しを変えたら、何が外れたかを 1 行添える。なぜ: 条件が外れるたびに終わりが延び、後ろ倒しに見えた
+9. **「使っていない」「同じ条件だ」「生きている」を、外れうる観測から推測して許可に使う設計は、同じ種類の 2 回目で形を変える。** Sprint 7 で 3 本が同じ形で止まった: #4430（生成物の片付け。lstart・server の行・名前・親の死から不使用を推測）、#4432 案 A（合格の使い回し。並列の設定・途中の作業ツリー・未申告の入力が同じと推測）、#4459（busy 待ち。秒数・欄の変化から run の生存を推測）。観測を足して塞ぐのをやめ、(a) 推測を人の確認に置き換える（#4430 → 人の確認で消すコマンド）、(b) 推測が外れても安全側に倒れる範囲にだけ使う（観測は「残す」「待つ」側にだけ効かせる）、(c) 生存・同一を示す専用の印を作る（#4463 の心拍）、のどれかに設計を替える。外れたら合格になる・消える・打ち切る向きの推測は、ゲートと受入条件を弱めることになる
 
 ## 7. WIP の上限とレーンの組み方
 
@@ -135,7 +136,7 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 1. **持ち分の表。** PM が計画で、Issue ごとに「書くファイル（glob）」と「境界の持ち主」の列を持つ表を書く。既定の分け方は、画面＝`src/app` の画面・`src/components`・`src/hooks`／CLI・サーバー＝`src/cli`・`src/app/api`・`src/lib`。持ち分の外を書く必要が計画の後に分かったら、書かずに STOP で返す
 2. **境界のファイルは Issue ごとに 1 人の持ち主を決める。** 共有の型（`src/types/**`・`src/cli/types/api-responses.ts`）・API の呼び口（`src/lib/api-client*.ts`）・DB の migration（版の番号は計画で割り当てる）・試験の基盤（`tests/setup.ts`・`tests/helpers/**`・`vitest.config.ts`）・文言（`locales/{ja,en}/*.json`）・文書（`docs/module-reference.md`・`docs/user-guide/cli-operations-guide.md`・`.env.example`）。持ち主でないリーダーのワーカーは書かない。changelog は Issue ごとの断片なので持ち分の対象にしない。API を変える Issue と、それを呼ぶ画面の Issue は同じリーダーの同じ PR にするか、API を先にマージする直列にする。もう 1 人のリーダーの未マージのブランチの上でブランチを切らない（土台のマージの後に develop から切る）
 3. **マージの順と積み直しの持ち主。** マージは各リーダーが自分の PR を自分で流す（ロックの先着順に任せ、待ち合わせのシェルを自作しない）。**積み直し（develop の取り込み・衝突の解消・precheck・merge-pr の exit 4 の再実行）の持ち主は、後からマージする PR のリーダー**。衝突の解消で相手の持ち分のファイルの意味を変える必要があれば、解消せずに止めて PM に返す。統合破壊は後からマージした側が直す。マージのたびに develop の push CI の結論を見て、赤なら 2 人とも次のマージを止める。「CI が通れば」の許可の run では全 PR に `--last` を付ける。列（`--queue`）には条件がそろった PR だけを 1 回に 2〜3 本まで入れる
-4. **単体テストの mutex（`cpu.heavy`）の取り合い。** mutex はマシンで 1 本のまま、リーダーで分けない。重いゲートを走らせる人を減らす（リーダーは同じ tree・同じ環境の合格を再利用し、重ねて流さない）。2 人合わせて同時のワーカーは 5〜6 本以下。verify の待ちは 1 本あたり 30〜45 分を見込みに入れる。exit 99（待ち切り）はテストの不合格にせず、`--mutex-retries` で並び直す。ゲートのコマンドを worktree で直に流すのは調べるためだけ（直の実行は verify の mutex・work-evidence・scope・env-clean を通らない）。マシンで 1 度に 1 本、PM へ 1 行知らせてから流す。**合否の裁定は verify の run で行い、直の実行の結果を裁定に使わない**（ci-merge.md の mutex の節）
+4. **単体テストの mutex（`cpu.heavy`）の取り合い。** mutex はマシンで 1 本のまま、リーダーで分けない。重いゲートを走らせる人を減らす（リーダーは同じ tree・同じ環境の合格を再利用し、重ねて流さない）。2 人合わせて同時のワーカーは 5〜6 本以下。verify の待ちは 1 本あたり 30〜45 分を見込みに入れる（`mode=full` の run は実行だけで 50〜72 分。手元で全体に切り替えない形は ci-merge.md の「テスト全体と unit-related の分け方」）。同じ worktree の古いコミットの run を列に残さない。列の順を変える手段は無いので、急ぐレーンがあるときは PM が両リーダーに新しい verify を控えてもらう。exit 99（待ち切り）はテストの不合格にせず、`--mutex-retries` で並び直す。ゲートのコマンドを worktree で直に流すのは調べるためだけ（直の実行は verify の mutex・work-evidence・scope・env-clean を通らない）。マシンで 1 度に 1 本、PM へ 1 行知らせてから流す。**合否の裁定は verify の run で行い、直の実行の結果を裁定に使わない**（ci-merge.md の mutex の節）
 5. **受け入れの間のマージの凍結。** §9 のとおり。2 人の成果は統合した develop の 1 つの HEAD で 1 回の受け入れにまとめる。差し戻しは Issue の持ち主のリーダーへ PM が振り分ける
 6. **同じ種類の指摘の一覧（`workspace/orchestration/same-kind-findings.md`）を、リーダーは依頼文を書く前に読む。** 片方のリーダーで 1 回目が出た種類は、もう片方の依頼文にも最初から不変条件として書く（2 人で数えを共有する）。2 回目は直しを送らず STOP で PM に返す
 
@@ -143,7 +144,7 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 
 mem は許可・決定・作業の状態・次の一手・人への質問の置き場（CLAUDE.md「記憶の書き場所」、コマンドは docs/user-guide/cli-operations-guide.md の mem の節）。次の 3 つを守る。
 
-1. **ジャッジ（審判）のセッションは、起動した人（PM・リーダー）が起動の後に `/effort high` を送る。** 推論の強さの決定（mem の決定 4c98e7a4、人 11-18）: codex は high 既定・高リスクのレビューだけ xhigh。審判 high、開発リーダー・イネーブラー medium。`/effort` で稼働中でも変えられる。並行の本の新しいセッション（§9）の審判にも同じく送る。開発リーダー・イネーブラーの medium も、起動した人が起動の後に `/effort medium` を送る。イネーブラーが codex（§1 の表）のときの値（既定の high か medium か）は決定の本文では決まっていないので、決まるまでここに書かない
+1. **ジャッジ（審判）のセッションは、起動した人（PM・リーダー）が起動の後に `/effort high` を送る。** 推論の強さの決定（mem の決定 4c98e7a4、人 11-18）: codex は high 既定・高リスクのレビューだけ xhigh。審判 high、開発リーダー・イネーブラー medium。`/effort` で稼働中でも変えられる。並行の本の新しいセッション（§9）の審判にも同じく送る。開発リーダー・イネーブラーの medium も、起動した人が起動の後に `/effort medium` を送る。**codex は例外（決定 c31c6c68、人 11-18）**: codex（gpt-6.2-sol）には `/effort` が無い（送ると `Unrecognized command '/effort'` が出て、入力欄に文字が残り、次の依頼がその後ろに打たれる）。effort は人が codex の画面の `/model` で選ぶしかないので、codex は high のまま使い、xhigh へは切り替えない。高リスクのレビューは codex（high）に、新しい文脈の Claude opus のレビューを 1 本足して補う。次の起動の既定は `~/.codex/config.toml` の `model = "gpt-6.2-sol"`・`model_reasoning_effort = "high"`
 2. **mem の決定には行き先を付ける。** `commandmate mem add --kind decision … --promote-to issue:#N`（または `pr:#N`、リポジトリからの相対の `path:<docs の .md ファイル>`）。決定の行き先は該当する Issue、docs に残す規則なら path。path は `.md` のファイルを名指す（ディレクトリは画面から記録できない）。行き先の無い `open` の決定は `mem check --suggest` が `decision_no_destination` と出す（対象は自分の項目だけ）。書き込みは人が画面で承認したときだけ（CLI に書く口は無い）
 3. **path（docs）を行き先にした決定は、その docs の PR で反映する。** 反映の記録は画面の流れで行う（人が差分を承認 → `recorded` → 正本へ反映したことを確かめて `promoted`）。`mem close` で閉じられるのは決定を書いた instance か人（画面）だけで、ほかの instance（PM が他人の決定を閉じる場合を含む）は exit 55（`not_owner`）。`recorded` になった後は `mem close` も断られる。docs の PR のマージ後、PM が人へ画面での記録を頼む。反映していない決定を閉じない
 
@@ -151,6 +152,16 @@ mem は許可・決定・作業の状態・次の一手・人への質問の置�
 
 - 決定 4c98e7a4: 推論の強さ（審判 high など）を §11 の 1 に反映した（#4460）。行き先は `path:docs/orchestrate/team.md`
 - 決定 89aee71f: `merge-pr` は `--last` が無いと `Build`・`Unit Tests` だけを待つ（それぞれ例外の条件のとき）。E2E を含む全チェックの合格が条件のマージには `--last` を付ける。中身は ci-merge.md の「6-2 「CI が通れば」の許可と全チェックの合格」に反映した（#4460）。この決定の行き先は `path:docs/orchestrate/`（ディレクトリ）で画面から記録できないため、人が行き先を `.md` のファイルに直すか、PM が人へ伝えて閉じ方を決める
+
+- 決定 c31c6c68: codex は high のまま、高リスクのレビューは Claude opus を 1 本足す（§11 の 1 に反映。develop へ直接、人 11-19 の許可）
+
+## 13. Sprint・Milestone・ロードマップ（人の決定 2026-11-18、mem c1bb26d2）
+
+- 段 7 以降の段を Sprint N と呼ぶ。Sprint ごとにリリースで閉じる（リリースは人の承認）
+- 管理は GitHub の Milestone（`Sprint 7`〜`Sprint 13`）と、ロードマップの Issue #4461。Sprint の並び・理由・保留の条件・変更の履歴は #4461 に書き、Issue の割り当ては Milestone で持つ
+- 段の途中で起こす追跡の Issue は、次の Sprint の Milestone を付ける（`gh issue create … --milestone "Sprint 8"`）
+- Sprint に Issue を足す・外すのは人の判断（承認された範囲の変更）。PM は理由と推奨をつけて聞き、決まったら Milestone を移し、#4461 に変更をコメントで残す
+- 再起動の後は、#4461・今の Sprint の Milestone・PM の台帳（`workspace/orchestration/runs/<日付>/pm-ledger-s<N>.md`）・`commandmate brief` の順に読み直す
 
 ## Antigravity の扱い
 
