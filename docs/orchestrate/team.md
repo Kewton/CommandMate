@@ -139,6 +139,18 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 5. **受け入れの間のマージの凍結。** §9 のとおり。2 人の成果は統合した develop の 1 つの HEAD で 1 回の受け入れにまとめる。差し戻しは Issue の持ち主のリーダーへ PM が振り分ける
 6. **同じ種類の指摘の一覧（`workspace/orchestration/same-kind-findings.md`）を、リーダーは依頼文を書く前に読む。** 片方のリーダーで 1 回目が出た種類は、もう片方の依頼文にも最初から不変条件として書く（2 人で数えを共有する）。2 回目は直しを送らず STOP で PM に返す
 
+## 11. mem の運用規則
+
+mem は許可・決定・作業の状態・次の一手・人への質問の置き場（CLAUDE.md「記憶の書き場所」、コマンドは docs/user-guide/cli-operations-guide.md の mem の節）。次の 3 つを守る。
+
+1. **ジャッジ（審判）のセッションは、起動の後に `/effort high` を送る。** 推論の強さの決定（mem の決定 4c98e7a4）: codex は high が既定で、高リスクのレビューだけ xhigh。審判は high。開発リーダー・イネーブラーは medium。`/effort` で稼働中のセッションでも変えられる。並行の本の新しいセッション（§9）にも同じく送る
+2. **mem の決定には行き先を付ける。** `commandmate mem add --kind decision … --promote-to issue:#N`（または `pr:#N`、リポジトリからの相対の `path:<docs のパス>`）。決定の行き先は該当する Issue、docs に残す規則なら path。行き先の無い `open` の決定は `mem check` が `decision_no_destination` と出す。書き込みは人が画面で承認したときだけ（CLI に書く口は無い）
+3. **path（docs）を行き先にした決定は、その docs の PR で反映する。** 反映の後に PM が決定を閉じる（`mem close`）。反映していない決定を閉じない・反映が済んだ決定を開いたままにしない
+
+## 12. 反映済みの決定
+
+- 決定 89aee71f: `merge-pr` は `--last` が無いと `build`・`unit` だけを待つ。E2E を含む全チェックの合格が条件のマージには `--last` を付ける。中身は ci-merge.md の「6-2 「CI が通れば」の許可と全チェックの合格」に反映した（#4460）
+
 ## Antigravity の扱い
 
 2026-11-16 から、私たちの運用では AI（PM・ジャッジ・リーダー・ワーカー・イネーブラー）から Antigravity（agy）を使わない。理由: Google Antigravity 追加利用規約 6 条と公式 FAQ（https://antigravity.google/terms ・ https://antigravity.google/docs/faq ）が、個人向けプランで第三者のソフトウェア・エージェントを通して Antigravity を使うことを制限している。私たちのサインインは個人向けプラン。
