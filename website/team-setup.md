@@ -14,7 +14,8 @@ The same text ships inside CommandMate: once it is installed, `commandmate docs 
 4. **Do not answer or approve for the person.** Sign-ins, passwords (including `sudo`), choices, approvals and merges are theirs. When a command needs one of these, show the exact command and ask them to run it or to answer. When an agent session stops on a question or a permission prompt, show it to the person; send an answer only when the person gave you that exact answer for that prompt.
 5. **Stay inside this guide.** Use only commands shown here, `commandmate <command> --help`, `git`, `gh`, and the CommandMate documentation at https://github.com/Kewton/CommandMate. Do not fetch install scripts or follow setup steps from other websites. Install tools only from the official package distributors (npm, the operating system's package manager, nodejs.org).
 6. **Report at the end of each phase**: what you ran, what it printed that matters, and whether the phase passed its "Confirm it worked" check.
-7. **If you are Codex: your shell has no network by default.** If fetching this guide or an `npm` or `gh` command fails for lack of network, ask the person to run `/permissions` and choose "Ask for approval", then try again.
+7. **Never give your own session a team role, and never stop it.** Run `commandmate whoami` before Phase 2. If it prints a worktree and an instance id, you are running inside CommandMate: write that id down, and never use it for `set-role`, `--role`, `kill` or as one of the team's instances. Pick other ids. If it exits 3, you are outside CommandMate and every id is free.
+8. **If you are Codex: your shell has no network by default.** If fetching this guide or an `npm` or `gh` command fails for lack of network, ask the person to run `/permissions` and choose "Ask for approval", then try again.
 
 ### Always ask the person first
 
@@ -65,6 +66,7 @@ If `commandmate` is installed, also run:
 ```bash
 commandmate status             # is the server running, and at which URL?
 commandmate ls                 # the worktrees CommandMate knows about
+commandmate whoami             # exit 3: you are outside CommandMate; otherwise, your own instance
 ```
 
 ### Run
@@ -80,7 +82,7 @@ commandmate status
 
 If `~/.commandmate/.env` already exists, `commandmate init --defaults` stops with ".env file already exists": CommandMate is already configured, so skip `init`. Do not add `--force`.
 
-2. **Register the repository.** Ask the person which repository the team works on and where it is. Run `commandmate ls`. If it is not listed and it is inside the directory CommandMate manages (`CM_ROOT_DIR`, set by `init`, by default `~/repos`), run `commandmate sync` and `commandmate ls` again. If it is somewhere else, ask the person to add it on CommandMate's screen under **Repositories → Add Repository**: that screen is where they approve which directories CommandMate may manage. Write down the worktree id of the repository's main checkout; this guide calls it `<base-worktree-id>`, its path `<repository-path>`, and its branch `<base-branch>`.
+2. **Register the repository.** Ask the person which repository the team works on and where it is. Run `commandmate ls`. If it is not listed, the person registers it: the CLI cannot. Ask them to open CommandMate's screen, go to **Repositories → Add Repository**, and add it. The screen accepts repositories under the directory `init` set (`CM_ROOT_DIR`, by default `~/repos`); if theirs is elsewhere, tell them so, and let them choose whether to move or clone it under that directory. Then run `commandmate sync` and `commandmate ls` again. Write down the worktree id of the repository's main checkout; this guide calls it `<base-worktree-id>`, its path `<repository-path>`, and its branch `<base-branch>`.
 
 3. **Propose a team.** Build the table from the CLIs the check found, and show it to the person. Every row uses the same five roles and the same checks; only who plays each role changes.
 
@@ -96,12 +98,12 @@ If `~/.commandmate/.env` already exists, `commandmate init --defaults` stops wit
 - The reviewer is never the session that did the work. When the person has a second vendor, the reviewer comes from the other vendor than the worker; with one vendor, say plainly that the review is by the same vendor in a fresh session, which is weaker. The checks in Phase 3 are the same in every row.
 - The PM and development lead have been tried in recorded runs on Claude Code and on Command Code. A team led from Codex alone has not been: if Codex is all the person has, tell them so and ask whether to go on with Codex as PM and development lead.
 - Antigravity is not in this table (see "Antigravity (agy)" above).
-- The PM, the development lead, the reviewer and the judge are instances in `<base-worktree-id>`. Each worker runs in its own worktree, one per issue (Phase 2 and Phase 5).
+- The PM, the development lead, the reviewer and the judge are instances in `<base-worktree-id>`, never your own instance (instruction 7). Each worker runs in its own worktree, one per issue (Phase 2 and Phase 5).
 
 ### Ask the person first
 
 - Installing CommandMate and anything it needs, each with its exact command.
-- Which repository, and, if it is outside `CM_ROOT_DIR`, adding it on the screen.
+- Which repository, and adding it on the screen (Repositories → Add Repository) if `commandmate ls` does not list it.
 - Which row of the table to use, or a change to it.
 - If `gh` is missing or not signed in: installing it, and signing in, which is theirs (`gh auth login` in their own terminal). They may also skip it: then, in Phase 5, ask them for the milestone's issue numbers, titles and acceptance criteria, and the team works from their answer.
 
@@ -116,7 +118,9 @@ If `~/.commandmate/.env` already exists, `commandmate init --defaults` stops wit
 - `commandmate: command not found` after `npm install -g`: npm's global bin directory is not on `PATH`. Run `npm prefix -g` and show the person; the fix is in https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md#command-not-found-error.
 - `EACCES` during `npm install -g`: do not retry with `sudo`. Show the person the "Permission Error (EACCES)" section of the same setup guide.
 - The port is already in use: `commandmate start --daemon --port 3001`, then `commandmate status`.
-- "Worktree ID not found" or an empty `commandmate ls`: run `commandmate sync`, then `commandmate ls`, and copy the ID exactly.
+- `commandmate sync` says no repositories are registered, or `commandmate ls` is empty: the repository has not been added on the screen yet. Ask the person to add it under **Repositories → Add Repository**, then run `commandmate sync` and `commandmate ls` again.
+- The screen refuses the path: it is outside `CM_ROOT_DIR`. Tell the person; moving or cloning the repository under that directory is their choice.
+- "Worktree ID not found": run `commandmate sync`, then `commandmate ls`, and copy the ID exactly.
 
 ## Phase 2: Five fixed roles and isolated worktrees
 
@@ -127,6 +131,7 @@ A role is text CommandMate gives the session when it starts. It is an instructio
 ### Check
 
 ```bash
+commandmate whoami             # your own instance, if you run inside CommandMate (instruction 7)
 commandmate roles list
 commandmate roles defaults --repo <repository-path>
 commandmate instances <base-worktree-id>
@@ -154,17 +159,18 @@ You are the judge. When the PM asks, check the integrated result of a milestone 
 EOF
 ```
 
-2. **Give each team session its role.** Use the instance ids from the person's table. An instance already listed by `commandmate instances <base-worktree-id>` gets its role with `set-role`; a new one is created with its role. For the first row of the table:
+2. **Give each team session its role.** First read `commandmate instances <base-worktree-id>`: the worktree already lists one instance per agent CLI (`claude`, `codex`, `command-code`, …). An id it lists gets its role with `set-role`; a new one is created with `add --id`, so you know its id. Never use your own instance (instruction 7). For the first row of the table:
 
 ```bash
-commandmate instances <base-worktree-id> set-role claude --role pm
-commandmate instances <base-worktree-id> add --agent claude --id claude-2 --role dev-lead
-commandmate instances <base-worktree-id> add --agent claude --id claude-3 --role judge
-commandmate instances <base-worktree-id> add --agent codex --role reviewer
+commandmate instances <base-worktree-id>
+commandmate instances <base-worktree-id> add --agent claude --id claude-2 --role pm
+commandmate instances <base-worktree-id> add --agent claude --id claude-3 --role dev-lead
+commandmate instances <base-worktree-id> add --agent claude --id claude-4 --role judge
+commandmate instances <base-worktree-id> set-role codex --role reviewer
 commandmate instances <base-worktree-id>
 ```
 
-With Claude Code only, the reviewer is one more Claude Code instance (`--agent claude --id claude-4 --role reviewer`). Use `--agent command-code` for Command Code.
+With Claude Code only, the reviewer is one more Claude Code instance: `commandmate instances <base-worktree-id> add --agent claude --id claude-5 --role reviewer`. For Command Code, use `--agent command-code --id command-code-2` and so on (`instances --help` does not list `command-code` among the `--agent` values, but `add` accepts it, as `send --help` lists). If an id is taken, pick the next number. Write the ids into the team table: this guide calls them `<pm-instance>`, `<lead-instance>`, `<reviewer-instance>` and `<judge-instance>`.
 
 3. **Make every new worker start as a worker.** Workers run in worktrees made later, so set the role as the repository's default for the worker's CLI:
 
@@ -174,7 +180,7 @@ commandmate roles default command-code --repo <repository-path> --role worker
 
 Use the worker's tool from the table (`claude`, `codex` or `command-code`). An instance that was given a role in step 2 keeps it; the default only applies to instances that have none.
 
-4. **Send to a role, not just to an instance.** From now on, a send to a team session names the role it must hold: `commandmate send <base-worktree-id> "<message>" --instance claude --role pm`. If the session is running under another role, or CommandMate has no record of how it started, the send exits **32** and types nothing. A role is fixed when the process starts: stop it (`commandmate instances <base-worktree-id> kill <instance-id>`, after the person agrees) and send again.
+4. **Send to a role, not just to an instance.** From now on, a send to a team session names the role it must hold: `commandmate send <base-worktree-id> "<message>" --instance <pm-instance> --role pm`. If the session is running under another role, or CommandMate has no record of how it started, the send exits **32** and types nothing. A role is fixed when the process starts: stop it (`commandmate instances <base-worktree-id> kill <instance-id>`, after the person agrees) and send again.
 
 5. **Permissions for the team sessions.** The PM and the development lead run `commandmate` commands. For Claude Code, all instances in `<base-worktree-id>` share that worktree's `.claude/settings.local.json`; show the person these rules and add them only after they agree:
 
@@ -191,6 +197,8 @@ Bash(commandmate brief:*)
 
 For Codex and Command Code, show the person that CLI's own permission screen and let them choose. Do not widen a permission to get past a prompt.
 
+Each worker worktree is a separate directory with its own permission settings (for Claude Code, its own `.claude/settings.local.json`). So a worker, and the development lead when it works there, will stop on permission prompts the first time it edits files or runs a check. Those prompts go to the person (Phase 5, step 3); adding rules to a worker worktree is again their choice.
+
 6. **One worktree per issue.** A worker never shares a working copy with another session. When Phase 5 starts an issue, its worktree is made next to the repository, after the person agrees, and registered:
 
 ```bash
@@ -199,7 +207,7 @@ commandmate sync
 commandmate ls
 ```
 
-The new directory must be inside `CM_ROOT_DIR` like the repository itself, or CommandMate does not see it.
+`commandmate sync` reads the registered repository's worktrees from Git, so the new worktree shows up in `commandmate ls` with its own worktree id: this guide calls it `<worker-worktree-id>`.
 
 ### Ask the person first
 
@@ -214,7 +222,8 @@ The new directory must be inside `CM_ROOT_DIR` like the repository itself, or Co
 - `commandmate roles list` lists `pm`, `dev-lead`, `worker`, `reviewer` and `judge`.
 - `commandmate instances <base-worktree-id>` lists the PM, the development lead, the reviewer and the judge as separate instances, each with its role.
 - `commandmate roles defaults --repo <repository-path>` shows `worker` for the worker's tool.
-- `commandmate send <base-worktree-id> "Run commandmate whoami and tell me your role in one line." --instance claude --role pm` exits 0, and `commandmate reply <base-worktree-id> --instance claude` says it is the PM.
+- `commandmate send <base-worktree-id> "Run commandmate whoami and tell me your role in one line." --instance <pm-instance> --role pm` exits 0, and `commandmate reply <base-worktree-id> --instance <pm-instance>` says it is the PM.
+- None of the team's instance ids is your own (instruction 7).
 
 ### If it fails
 
@@ -222,6 +231,8 @@ The new directory must be inside `CM_ROOT_DIR` like the repository itself, or Co
 - Exit 31: the instance already exists, or the roster changed while you wrote. Read `commandmate instances <base-worktree-id>` again, then use `set-role` for an existing instance.
 - Exit 32 from `send --role`: the running session holds another role or its start is not known. Ask the person, `kill` it, and send again.
 - Exit 33: the target is Antigravity. Stop; it has no place in this team.
+- The new worktree is not in `commandmate ls` after `commandmate sync`: show the person `git -C <repository-path> worktree list` and the output of `sync`; do not make it again under another name.
+- You notice that an instance you were about to use is your own: stop, pick another id, and tell the person.
 
 ## Phase 3: Done means the checks passed
 
@@ -243,24 +254,41 @@ git -C <repository-path> check-ignore -v .commandcode/ .claude/skills/cmate-x/ .
 ```bash
 commandmate verify init --cwd <repository-path> --dry-run   # print the draft, write nothing
 commandmate verify init --cwd <repository-path>             # write it (never overwrites)
-commandmate verify <base-worktree-id>
 ```
 
-Show the person each gate (lint, type check, tests and so on) and change them only with their agreement. `commandmate verify` on a worktree with no work yet exits 21; that is expected.
+Show the person each gate (lint, type check, tests and so on) and change them only with their agreement.
 
-2. **Keep generated files out of the checks.** Without these lines, the contract's scope check fails every task because files the tools generate appear as changes. Add them to the repository's `.gitignore` after the person agrees, only the ones for the CLIs they use:
+2. **Set what the checks compare against.** The checks judge a worker's work as the difference between its worktree and a base ref. Without one, they use the remote's default branch (`origin/HEAD`), which does not have this setup's commits (they are not pushed), may not be `<base-branch>`, and may not exist at all. So, with the person's agreement, set it to the local base branch under `options:` in `.commandmate/verify.yaml`. The draft has a commented-out `# baseRef:` line there; replace it with:
+
+```yaml
+options:
+  baseRef: <base-branch>
+```
+
+A local branch works from every worktree of the repository, because worktrees share their branches.
+
+3. **Keep generated files out of the checks.** Without these lines, the contract's scope check fails every task because files the tools write appear as changes. Add them to the repository's `.gitignore` after the person agrees, only the ones for the CLIs they use:
 
 ```text
 /.commandmate/*
 !/.commandmate/verify.yaml
 /.commandcode/
+/.claude/settings.local.json
 /.claude/skills/cmate-*/
 /.agents/skills/cmate-*/
 ```
 
-3. **Commit `verify.yaml` and `.gitignore` to `<base-branch>`**, after the person agrees, so every worktree made from it has the same checks. If `git config user.name` or `user.email` is empty, ask the person for their name and email and set them only with their answer; do not invent a bot name.
+4. **Run the checks once, before committing:**
 
-4. **A task contract.** The development lead writes one per task in the worker's worktree, as `.commandmate/tasks/issue-<n>.yaml`. It states the goal, the files the worker may change, and the checks that decide when it is done:
+```bash
+commandmate verify <base-worktree-id>
+```
+
+At this point the new `verify.yaml` and `.gitignore` are uncommitted changes, so they count as work and every gate runs: expect exit 0, or a failure the person recognizes as real. (After the commit in the next step, the same command exits 21: nothing differs from `<base-branch>` any more. That is expected.)
+
+5. **Commit only `.commandmate/verify.yaml` and `.gitignore` to `<base-branch>`**, after the person agrees, so every worktree made from it has the same checks. Pushing is not needed. If `git config user.name` or `user.email` is empty, ask the person for their name and email and set them only with their answer; do not invent a bot name.
+
+6. **A task contract.** The development lead writes one per task in the worker's worktree, as `.commandmate/tasks/issue-<n>.yaml`. It states the goal, the files the worker may change, and the checks that decide when it is done:
 
 ```yaml
 version: 1
@@ -278,30 +306,34 @@ success:
   requireScopeClean: true
 ```
 
-The development lead hands it over and waits for the checks:
+The development lead hands it over and waits for the checks. `<worker-instance>` is the worker's CLI from the team table (`command-code`, `claude` or `codex`: the instance the new worktree lists for it):
 
 ```bash
-commandmate send <worker-worktree-id> --contract .commandmate/tasks/issue-<n>.yaml --instance command-code
-commandmate wait <worker-worktree-id> --instance command-code --verify
+commandmate send <worker-worktree-id> --contract .commandmate/tasks/issue-<n>.yaml --instance <worker-instance>
+commandmate wait <worker-worktree-id> --instance <worker-instance> --verify
 ```
 
 `wait --verify` exits **0** when every gate passed, **20** when a gate failed, and **21** when there is no work to judge (no commits and no changes).
 
 ### Ask the person first
 
-- Writing `.commandmate/verify.yaml`, which gates it declares, and any later change to them.
+- Writing `.commandmate/verify.yaml`, which gates it declares, its `baseRef`, and any later change to them.
 - Editing `.gitignore`.
 - Setting `git config user.name` / `user.email`, and the commit to `<base-branch>`.
 
 ### Confirm it worked
 
-- `commandmate verify <base-worktree-id>` ends with exit 0, or with 21 because there is no work yet, or with a gate failure the person recognizes as real.
-- `git -C <repository-path> check-ignore -v .claude/skills/cmate-x/` prints a rule (for each CLI they use).
+- Before the commit, `commandmate verify <base-worktree-id>` ended with exit 0, or with a gate failure the person recognizes as real.
+- `git -C <repository-path> log -1 --stat` shows the commit with only `.commandmate/verify.yaml` and `.gitignore`.
+- `git -C <repository-path> check-ignore -v .claude/settings.local.json .claude/skills/cmate-x/` prints a rule for each.
 - `commandmate verify history` lists the run.
 
 ### If it fails
 
 - Exit 20: a gate failed. `commandmate verify show <run-id>` shows which one and the end of its log. Report it; do not weaken the gate to make it pass.
+- Exit 20 with "work-evidence: no base ref" or "base ref is unreachable": `options.baseRef` is missing or names a branch that does not exist. Check the `options:` block of `verify.yaml` and `git -C <repository-path> rev-parse --verify <base-branch>`, and fix `baseRef` with the person's agreement.
+- Exit 20 from the scope check on files nobody meant to change (for example `.claude/settings.local.json`): the `.gitignore` lines from step 3 are missing or not committed to `<base-branch>`.
+- Exit 21 right after the commit: expected (step 4).
 - The contract is rejected (exit 2): it prints every problem, for example a gate id that is not in `verify.yaml`. Fix the contract, not the gates.
 - `verify init` finds nothing to draft from: ask the person which commands they run to check their work, and write those as gates with their agreement.
 
@@ -318,7 +350,7 @@ commandmate skill list
 
 ### Run
 
-1. **Turn `mem` on — the person does it, on the screen.** The mode can only be changed on CommandMate's screen: **Repositories → the repository's "mem"**, as rules for branch names. Ask the person to set it to `on` for `<base-branch>` and for the workers' branches (for example `feature/**`), and to turn on "inject on start" so a restarted session gets its brief with the first message. Then confirm it:
+1. **Turn `mem` on — the person does it, on the screen.** The mode can only be changed on CommandMate's screen: **Repositories → the repository's "mem"**, as rules for branch names. Ask the person to set it to `on` for `<base-branch>` and for the workers' branches (for example `feature/**`), and to turn on "Insert at start" so a restarted session gets its brief with the first message. Then confirm it:
 
 ```bash
 commandmate mem mode --worktree <base-worktree-id>   # should say on
@@ -351,6 +383,7 @@ A Skill marked high-risk also needs `--ack-risk <skill-id>@<version>`: explain w
 - A brief from the PM has four parts: the issue, how far merging is allowed (default: none; stop and report "mergeable"), when to stop, and the last line of the report (`DONE: <summary>` or `STOP: <reason>`).
 - Done means `commandmate wait <worktree-id> --instance <worker> --verify` exited 0. Report 20 or 21 as they are; never weaken a check.
 - The PM's report starts with one line that says whether the person has to do anything ("Nothing needs your attention now." or "2 decisions are waiting for you."), then each decision with its options, the recommended one first.
+- When a session you asked stops on a question or a permission prompt (`wait` or `ask` exits 10), do not answer it for that session: report it up. The person answers it.
 - Merging is the person's.
 
 ## mem and restarts
@@ -366,7 +399,7 @@ A Skill marked high-risk also needs `--ack-risk <skill-id>@<version>`: explain w
 
 Commit the instructions file to `<base-branch>` after the person agrees, so new worktrees have it.
 
-4. **Restart the team sessions once**, after the person agrees, so they read the instructions and the Skills: `commandmate instances <base-worktree-id> kill <instance-id>` for each, and the next `send --role` starts it again with its role.
+4. **Restart the team sessions once**, after the person agrees, so they read the instructions and the Skills: `commandmate instances <base-worktree-id> kill <instance-id>` for each team instance (never your own, instruction 7), and the next `send --role` starts it again with its role.
 
 ### Ask the person first
 
@@ -395,7 +428,7 @@ Goal: the PM takes one issue from a GitHub Milestone through the development lea
 ### Check
 
 ```bash
-gh issue list --milestone "<milestone>" --state open
+gh issue list --repo <owner>/<repo> --milestone "<milestone>" --state open
 commandmate instances <base-worktree-id>
 commandmate mem mode --worktree <base-worktree-id>
 ```
@@ -403,7 +436,7 @@ commandmate mem mode --worktree <base-worktree-id>
 ### Run
 
 1. **Agree on the run.** Ask the person:
-   - Which GitHub Milestone. Without `gh` (Phase 1), ask for its issue numbers, titles and acceptance criteria instead, and put them in the brief. If there is no milestone yet, suggest a small trial milestone with one or two small issues; create it and move the issues only after they agree (`gh api repos/{owner}/{repo}/milestones -f title="<milestone>"`, then `gh issue edit <n> --milestone "<milestone>"`).
+   - Which GitHub Milestone. Without `gh` (Phase 1), ask for its issue numbers, titles and acceptance criteria instead, and put them in the brief. If there is no milestone yet, suggest a small trial milestone with one or two small issues; create it and move the issues only after they agree (`gh api repos/<owner>/<repo>/milestones -f title="<milestone>"`, then `gh issue edit <n> --repo <owner>/<repo> --milestone "<milestone>"`). Name the repository explicitly as `<owner>/<repo>` (from `git -C <repository-path> remote -v`), so `gh` does not depend on the directory you run it in.
    - Which issue goes first.
    - The deadline, with its time zone, and when to stop (for example: a check fails twice, a change outside the contract's scope is needed, or an approval is needed).
    - How far merging is allowed. The default is none: the PM reports "mergeable" and the person merges.
@@ -421,7 +454,22 @@ commandmate wait <base-worktree-id> --instance <pm-instance> --timeout 1800
 commandmate reply <base-worktree-id> --instance <pm-instance>
 ```
 
-When `wait` exits 10, a session is waiting on a question: show it to the person with `commandmate capture <base-worktree-id> --instance <pm-instance>` and pass on only the answer they give.
+**How an answer reaches a stopped session.** Any session in the chain can stop on a question or a permission prompt: the PM, the development lead, the reviewer, and above all a worker in its new worktree (Phase 2, step 5). `wait` on the PM exits 10 when the PM is waiting; `commandmate ls` shows which worktree is waiting on someone. For each one:
+
+```bash
+commandmate ls
+commandmate prompt <worktree-id> --instance <instance-id>   # the question, its options, read only
+```
+
+1. Show the person the question and its options as `prompt` printed them, and say which session asks and why.
+2. The person answers it on CommandMate's screen: open that worktree, choose that instance, and answer there (the same screen the phone shows).
+3. Only if the person tells you the exact answer in words and asks you to send it, send that answer to that one prompt, and nothing else:
+
+```bash
+commandmate respond <worktree-id> "<their answer>" --instance <instance-id>
+```
+
+Never choose an option yourself, and never let a team session answer another session's prompt.
 
 4. **After the first issue.** The rest of the milestone goes the same way. When all its issues are merged, the PM asks the judge to check the integrated `<base-branch>` against each issue's acceptance criteria and reports GO or NO-GO per issue. To let the PM keep going while the person is away, follow "time-boxed runs" in Stage 6 of https://kewton.github.io/CommandMate/setup.md, and only with their agreement.
 
@@ -430,7 +478,7 @@ When `wait` exits 10, a session is waiting on a question: show it to the person 
 - The milestone, the first issue, the deadline and the stop conditions.
 - Creating a milestone or moving issues into one.
 - Each worktree and branch the development lead asks for.
-- Every approval and every question the PM brings back.
+- Every approval and every question the PM brings back, and every prompt a session stops on: the person answers it on the screen, or tells you the exact answer to send.
 - Every merge. You never approve or merge on the person's behalf.
 
 ### Confirm it worked
@@ -442,7 +490,8 @@ When `wait` exits 10, a session is waiting on a question: show it to the person 
 ### If it fails
 
 - Exit 20 or 21 from `wait --verify`: see Phase 3. Report it to the person through the PM; do not weaken a check.
-- Exit 10 from `wait`: a session is waiting on a question. Show it to the person; do not answer it yourself.
+- Exit 10 from `wait`: a session is waiting on a question. Use step 3 ("How an answer reaches a stopped session"); do not choose an answer yourself.
+- Nothing moves and no `wait` returns: run `commandmate ls`; a worker or the development lead may be waiting on a permission prompt in its own worktree. Use step 3 for it.
 - Exit 124: the wait timed out. Look with `commandmate capture` before waiting again.
 - Exit 32 from `send --role`: see Phase 2, step 4.
 - `ask` or `send` exits 99: read what it printed on stderr before anything else; it says whether the message was sent. Send again only when it says nothing was sent. If you cannot tell, do not send again; tell the person.

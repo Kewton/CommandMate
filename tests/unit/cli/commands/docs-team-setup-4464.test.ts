@@ -148,6 +148,24 @@ function hasOption(command: Command, flag: string): boolean {
 }
 
 /** What in one invocation the registered CLI does not know. */
+/** A placeholder or a quoted value, never a command word: `<worktree-id>`, `"<text>"`. */
+function isPlaceholder(word: string): boolean {
+  return /^["'<]/.test(word);
+}
+
+/**
+ * The actions `instances` takes as its second positional argument, read from
+ * the registered argument's own description ("list (default), add, …, or set-role").
+ */
+function instancesActions(program: Command): string[] {
+  const instances = program.commands.find((c) => c.name() === 'instances');
+  const action = instances?.registeredArguments.find((a) => a.name() === 'action');
+  return Array.from((action?.description ?? '').matchAll(/[a-z][a-z-]+/g), ([w]) => w).filter(
+    (w) => !['default', 'or'].includes(w),
+  );
+}
+
+/** What in one invocation the registered CLI does not know. */
 function unknownParts(program: Command, line: string): string[] {
   const words = tokens(line).slice(1); // drop `commandmate`
   const problems: string[] = [];
@@ -162,14 +180,38 @@ function unknownParts(program: Command, line: string): string[] {
     words.shift();
   }
 
-  for (const word of words) {
+  const positional: string[] = [];
+  let expectSubcommand = command.commands.length > 0;
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
     if (word.startsWith('-')) {
       const flag = word.split('=')[0];
-      if (!hasOption(command, flag)) problems.push(`${command.name()} ${flag}`);
+      const option = command.options.find((o) => o.long === flag || o.short === flag);
+      if (!option && !hasOption(command, flag)) problems.push(`${command.name()} ${flag}`);
+      if (option && (option.required || option.optional) && !word.includes('=')) i++; // its value
       continue;
     }
-    const sub = command.commands.find((c) => c.name() === word);
-    if (sub) command = sub;
+    if (expectSubcommand) {
+      const sub = command.commands.find((c) => c.name() === word);
+      if (sub) {
+        command = sub;
+        expectSubcommand = sub.commands.length > 0;
+        continue;
+      }
+      // A command with subcommands may also take a positional (`verify <worktree-id>`),
+      // but a bare word there is a misspelt subcommand (`verify histroy`).
+      if (!isPlaceholder(word)) problems.push(`${command.name()} subcommand "${word}"`);
+      expectSubcommand = false;
+      continue;
+    }
+    positional.push(word);
+  }
+
+  if (command.name() === 'instances' && positional.length >= 2) {
+    const action = positional[1];
+    if (!isPlaceholder(action) && !instancesActions(program).includes(action)) {
+      problems.push(`instances action "${action}"`);
+    }
   }
   return problems;
 }
@@ -191,7 +233,10 @@ function definedExitCodes(): Set<number> {
 
 function undefinedExitCodes(guide: string): number[] {
   const known = definedExitCodes();
-  const said = Array.from(guide.matchAll(/\bexits? \**(\d+)\**/g), ([, n]) => Number(n));
+  // Case-insensitive ("Exit 20 or 21" opens a sentence), and every number of a run
+  // like "exit 20 or 21" / "exits 10/124".
+  const runs = Array.from(guide.matchAll(/\bexits? (\**\d+\**(?:(?:,|\/| or| and) \**\d+\**|\/\d+)*)/gi), ([, run]) => run);
+  const said = runs.flatMap((run) => Array.from(run.matchAll(/\d+/g), ([n]) => Number(n)));
   return [...new Set(said)].filter((n) => !known.has(n));
 }
 
@@ -348,6 +393,54 @@ describe('[#4464] docs --section team-setup', () => {
   });
 });
 
+/**
+ * Acceptance 1 as an invariant (review 4464-1): following the guide from the top,
+ * the first issue's `wait --verify` can reach exit 0 with the person only
+ * answering and approving. Each step that would otherwise stop the run is pinned.
+ */
+function reachesFirstPassProblems(guide: string): string[] {
+  const p = phases(guide);
+  const [p1, p2, p3, p4, p5] = p.map((x) => x.body);
+  const problems: string[] = [];
+  if (p.length !== 5) return ['five phases'];
+  // The repository is added on the screen; sync does not scan CM_ROOT_DIR.
+  if (!/Repositories → Add Repository/.test(p1) || /inside the directory CommandMate manages[^.]*run `commandmate sync`/.test(p1)) {
+    problems.push('repository registered on the screen');
+  }
+  // The agent never takes or stops its own instance.
+  if (!/Never give your own session a team role, and never stop it/.test(guide) || !p2.includes('commandmate whoami')) {
+    problems.push('own instance');
+  }
+  if (/set-role claude --role pm|--instance claude --role pm/.test(guide)) problems.push('primary claude as PM');
+  // The checks compare against the local base branch, and tool files are ignored.
+  if (!/baseRef: <base-branch>/.test(p3)) problems.push('baseRef');
+  if (!p3.includes('/.claude/settings.local.json')) problems.push('settings.local.json ignored');
+  if (!/no base ref/.test(p3)) problems.push('no base ref line');
+  if (!/--instance <worker-instance>/.test(p3)) problems.push('worker instance placeholder');
+  if (/no work yet exits 21/.test(p3)) problems.push('wrong exit 21 claim');
+  // The screen's own label.
+  if (!p4.includes('"Insert at start"')) problems.push('Insert at start');
+  // Answers reach a stopped session through the person.
+  if (!/How an answer reaches a stopped session/.test(p5) || !p5.includes('commandmate prompt <worktree-id>') || !p5.includes('commandmate respond <worktree-id> "<their answer>"')) {
+    problems.push('answer delivery');
+  }
+  if (/\{owner\}\/\{repo\}/.test(guide)) problems.push('gh placeholders depend on cwd');
+  return problems;
+}
+
+describe('[#4464] acceptance 1: the steps reach the first exit 0', () => {
+  it('has no step that stops the first issue short of the checks', () => {
+    expect(reachesFirstPassProblems(TEAM_SETUP_GUIDE)).toEqual([]);
+  });
+
+  it('control: the version reviewed in 4464-1 fails', () => {
+    const old = TEAM_SETUP_GUIDE.replace('  baseRef: <base-branch>', '  # baseRef: origin/main')
+      .replace('"Insert at start"', '"inject on start"')
+      .replaceAll('How an answer reaches a stopped session', 'Answers');
+    expect(reachesFirstPassProblems(old)).toEqual(['baseRef', 'Insert at start', 'answer delivery']);
+  });
+});
+
 describe('[#4464] the guide has the shape the Issue asks for', () => {
   it('opens with instructions for the agent reading it', () => {
     const intro = TEAM_SETUP_GUIDE.split(/^## Phase 1:/m)[0];
@@ -419,7 +512,7 @@ describe('[#4464] the guide has the shape the Issue asks for', () => {
   it('runs the first milestone until one issue passes the checks', () => {
     const phase5 = phases(TEAM_SETUP_GUIDE)[4].body;
 
-    expect(phase5).toContain('gh issue list --milestone');
+    expect(phase5).toContain('gh issue list --repo <owner>/<repo> --milestone');
     expect(phase5).toMatch(/--verify` exited 0/);
     expect(phase5).toMatch(/You never approve or merge on the person's behalf/);
   });
@@ -465,13 +558,34 @@ describe('[#4464 I1] every command, flag and exit code in the guide exists', () 
       'command "teams"',
       'add --role',
       'send --as',
+      'mem subcommand "promote"',
       'mem --approve',
+    ]);
+  });
+
+  it('control: a misspelt subcommand or instances action is caught', () => {
+    const weakened = [
+      '```bash',
+      'commandmate verify histroy',
+      'commandmate verify <base-worktree-id>',
+      'commandmate instances <base-worktree-id> set-rol claude --role pm',
+      'commandmate instances <base-worktree-id> set-role claude --role pm',
+      'commandmate mem mode --worktree <base-worktree-id>',
+      '```',
+    ].join('\n');
+
+    expect(instancesActions(fullProgram())).toEqual(['list', 'add', 'remove', 'alias', 'kill', 'set-role']);
+    expect(unknownCommandParts(weakened).map((p) => p.split('  ←  ')[0])).toEqual([
+      'verify subcommand "histroy"',
+      'instances action "set-rol"',
     ]);
   });
 
   it('every exit code it names is one the CLI defines', () => {
     expect(undefinedExitCodes(TEAM_SETUP_GUIDE)).toEqual([]);
     expect(undefinedExitCodes('wait exits 77, verify exits **20**')).toEqual([77]);
+    // Capitalised, and the second number of a pair, are read too.
+    expect(undefinedExitCodes('Exit 78: no. Exit 20 or 79 from it.')).toEqual([78, 79]);
   });
 
   it('names exit 32 and 33 for what the CLI means by them', () => {
