@@ -18,7 +18,7 @@ import { ROSTER_CHANGED_ERROR_CODE } from './api-client-errors';
 import { RoleCliError } from './role-failure';
 import type { AgentInstance, WorktreeDetailResponse } from '../types/api-responses';
 import { MAX_AGENT_INSTANCES, MAX_AGENT_ALIAS_LENGTH, getCliToolDisplayName, type CLIToolType } from '../../lib/cli-tools/types';
-import { MIN_AGENT_INSTANCES } from '../../lib/agent-instances-validator';
+import { MIN_AGENT_INSTANCES, validateAgentInstanceAddition } from '../../lib/agent-instances-validator';
 
 export { MAX_AGENT_INSTANCES, MAX_AGENT_ALIAS_LENGTH, MIN_AGENT_INSTANCES };
 
@@ -125,6 +125,33 @@ export async function saveRosterChange(
     }
     snapshot = await fetchAgentRoster(client, worktreeId);
   }
+}
+
+/** Why the server would refuse a row added to the roster (Issue #4458). */
+export interface RosterAdditionRefusal {
+  /** The roster has no room left: it already holds MAX_AGENT_INSTANCES. */
+  atLimit: boolean;
+  /** The server's own sentence for it (`validateAgentInstancesInput`). */
+  error: string;
+}
+
+/**
+ * Whether the roster write would refuse `added` appended to `base`, asked of the server's
+ * own validator rather than a copy of its rules (Issue #4458): the limit, the room left
+ * under it, the id pattern and length, the primary anchor and the alias length.
+ *
+ * @returns null when the write would accept it
+ */
+export function rosterAdditionRefusal(
+  base: ReadonlyArray<AgentInstance>,
+  added: Pick<AgentInstance, 'id' | 'cliTool' | 'alias'>
+): RosterAdditionRefusal | null {
+  const validation = validateAgentInstanceAddition(base, added);
+  if (validation.valid) return null;
+  return {
+    atLimit: validation.refusal === 'limit',
+    error: validation.error ?? 'the roster would be refused',
+  };
 }
 
 /**

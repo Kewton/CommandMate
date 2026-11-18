@@ -23,7 +23,8 @@ import {
   validateAntigravityModelName,
   validateClaudeModelName,
 } from '../config/model-validation';
-import { fetchAgentRoster, saveRosterChange, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
+import { fetchAgentRoster, saveRosterChange, defaultAlias, rosterAdditionRefusal, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
+import { isValidInstanceId as isRosterInstanceId } from '../../lib/cli-tools/types';
 import {
   isInstanceSelector,
   resolveInstanceTarget,
@@ -273,14 +274,25 @@ async function registerInstance(
     const roster = await fetchAgentRoster(client, worktreeId);
     const saved = await saveRosterChange(client, worktreeId, roster, (base) => {
       if (base.some((inst) => inst.id === instanceId)) return null;
-      if (base.length >= MAX_AGENT_INSTANCES) {
+      const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+      // Issue #4458: the limit, the room under it and the id rules are the server's
+      // validator's, asked here, so this neither refuses a row the save would take nor
+      // sends one it would refuse (and then hides why behind a generic 400).
+      const refusal = rosterAdditionRefusal(base, added);
+      if (refusal?.atLimit) {
         console.error(
           `Warning: the message was sent, but could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit). `
             + `Do not send it again. Make room, then: ${addCommand}`
         );
         return null;
       }
-      const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+      if (refusal) {
+        console.error(
+          `Warning: the message was sent, but could not register '${instanceId}' in the roster: the server would refuse it (${refusal.error}). `
+            + `Do not send it again. To register it: ${addCommand}`
+        );
+        return null;
+      }
       return [...base, added as (typeof base)[number]];
     });
     if (saved !== null) console.error(`Instance registered in roster: ${instanceId}`);
@@ -290,7 +302,10 @@ async function registerInstance(
       return;
     }
     // A save answered by a 5xx or not at all may have happened, so this does not say it did not.
-    const reason = error instanceof Error ? error.message : String(error);
+    // Issue #4458: the server's own sentence too, which a 400 otherwise hides.
+    const serverReason = error instanceof ApiError ? error.payload?.error : undefined;
+    const reason = `${error instanceof Error ? error.message : String(error)}`
+      + (typeof serverReason === 'string' && serverReason.length > 0 ? ` ${serverReason}` : '');
     console.error(
       `Warning: the message was sent, but registering '${instanceId}' in the roster failed, so it may not be there (${reason}). `
         + `Do not send it again. Check with \`commandmate instances ${worktreeId}\`. To register it: ${addCommand}`
@@ -998,7 +1013,11 @@ instance holds and is a condition as above. A changed roster is exit 31, nothing
 --register without a role keeps its old order (sent, then registered) and never
 touches a role already there. The message has gone out by then, so a roster that kept
 changing, or any other failure to register, is a warning and exit 0 (Issues #4149, #4159):
-do not send it again; the warning has the command that registers it.
+do not send it again; the warning has the command that registers it. The roster's own
+rules decide (Issue #4458): up to 10 instances, so a removed row makes room again; an
+--instance that is not an id the roster accepts is exit 2 before anything is sent; a row
+the roster would refuse (the limit, a default alias over 50 characters) is not saved and
+the warning gives the server's reason.
 
 --expect-* pin this send to what the caller read earlier, saving nothing; the server
 reads them again right before the first key, so a process replaced in between gets
@@ -1061,6 +1080,17 @@ tool policy (antigravity, above; nothing typed, do not send it again).
         // Issue #2376: the RESOLVED id, never the string the user typed.
         // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
         // /resolve-target knows how to read an alias.
+
+        // Issue #4458: --register saves this id into the roster, and the roster write
+        // refuses an id outside its rules. Refused here, by the same rule, before anything
+        // is sent: after the send it could only be a warning.
+        if (options.register && namedTarget.instanceId !== undefined && !isRosterInstanceId(namedTarget.instanceId)) {
+          console.error(
+            `Error: --register needs an instance id the roster accepts, and '${namedTarget.instanceId}' is not one `
+              + '(letters, digits, _ or -, at most 64 characters). Nothing was sent.'
+          );
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
 
         // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).
         noteAntigravityNotice(namedTarget.agent);

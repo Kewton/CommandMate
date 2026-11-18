@@ -24,6 +24,7 @@ import {
   saveRosterChange,
   nextInstanceId,
   defaultAlias,
+  rosterAdditionRefusal,
   MAX_AGENT_INSTANCES,
   MAX_AGENT_ALIAS_LENGTH,
   MIN_AGENT_INSTANCES,
@@ -771,11 +772,14 @@ async function addInstance(
         order,
       }));
 
-  if (existing.length >= MAX_AGENT_INSTANCES) {
+  const id = options.id ?? nextInstanceId(options.agent, existing);
+  const alias = options.alias ?? defaultAlias(options.agent, id);
+  // Issue #4458: the limit and the room under it, judged by the server's validator.
+  const refusal = rosterAdditionRefusal(existing, { id, cliTool: options.agent, alias });
+  if (refusal?.atLimit) {
     refuse(`worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
   }
 
-  const id = options.id ?? nextInstanceId(options.agent, existing);
   if (existing.some(inst => inst.id === id)) {
     if (roleSettings !== null) {
       throw new RoleCliError('instance_exists', `Instance '${id}' already exists. Set its role with: set-role ${id}`, RoleExitCode.CONFLICT);
@@ -788,8 +792,9 @@ async function addInstance(
   if (isCliToolId(id) && id !== options.agent) {
     refuse(`instance id '${id}' conflicts with --agent '${options.agent}'.`);
   }
+  // Anything else the roster write would refuse, in the server's own words.
+  if (refusal) refuse(`the roster would refuse '${id}': ${refusal.error}`);
 
-  const alias = options.alias ?? defaultAlias(options.agent, id);
   if (roleAssignment !== undefined && roleSettings !== null) {
     const agent = options.agent;
     const created = await roleWrite(`commandmate instances ${worktreeId}`, () =>
@@ -815,14 +820,16 @@ async function addInstance(
   const agent = options.agent;
   let addedId = id;
   const next = await saveRosterChange(client, worktreeId, roster ?? { instances: existing }, (base) => {
-    if (base.length >= MAX_AGENT_INSTANCES) {
+    addedId = options.id ?? nextInstanceId(agent, base);
+    const added = { id: addedId, cliTool: agent, alias: options.alias ?? defaultAlias(agent, addedId), order: base.length };
+    const again = rosterAdditionRefusal(base, added);
+    if (again?.atLimit) {
       refuse(`worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
     }
-    addedId = options.id ?? nextInstanceId(agent, base);
     if (base.some((inst) => inst.id === addedId)) {
       refuse(`instance '${addedId}' already exists.`);
     }
-    const added = { id: addedId, cliTool: agent, alias: options.alias ?? defaultAlias(agent, addedId), order: base.length };
+    if (again) refuse(`the roster would refuse '${addedId}': ${again.error}`);
     return [...base, added as AgentInstance];
   });
 

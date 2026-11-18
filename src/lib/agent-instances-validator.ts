@@ -28,6 +28,9 @@ import {
 /** Minimum number of agent instances a worktree must retain (Issue #869). */
 export const MIN_AGENT_INSTANCES = 1;
 
+/** What a refused roster is refused for: `limit` is the size, `entry` one of the rows. */
+export type AgentInstancesRefusal = 'shape' | 'limit' | 'entry';
+
 /**
  * Validate the `agentInstances` input from an API request body.
  *
@@ -38,16 +41,44 @@ export function validateAgentInstancesInput(input: unknown): {
   valid: boolean;
   value?: AgentInstance[];
   error?: string;
+  /** Issue #4458: set on a refusal, so a caller can tell the size from a bad row. */
+  refusal?: AgentInstancesRefusal;
 } {
   if (!Array.isArray(input)) {
-    return { valid: false, error: 'agentInstances must be an array' };
+    return { valid: false, error: 'agentInstances must be an array', refusal: 'shape' };
   }
   if (input.length < MIN_AGENT_INSTANCES) {
-    return { valid: false, error: `agentInstances must have at least ${MIN_AGENT_INSTANCES} entry` };
+    return { valid: false, error: `agentInstances must have at least ${MIN_AGENT_INSTANCES} entry`, refusal: 'limit' };
   }
   if (input.length > MAX_AGENT_INSTANCES) {
-    return { valid: false, error: `agentInstances must have at most ${MAX_AGENT_INSTANCES} entries` };
+    return { valid: false, error: `agentInstances must have at most ${MAX_AGENT_INSTANCES} entries`, refusal: 'limit' };
   }
+  const result = validateAgentInstanceEntries(input);
+  return result.valid ? result : { ...result, refusal: 'entry' };
+}
+
+/**
+ * Whether `candidate` can be added to `base`, judged exactly as the roster write
+ * (`PATCH /api/worktrees/[id]`) will judge the list that results (Issue #4458). The CLI
+ * (`send --register`, `instances add`) asks this before it saves, so the limit, the room
+ * left under it and the id rules have one definition, here, and not a copy in the CLI.
+ *
+ * @param base - The roster as read
+ * @param candidate - The row to append
+ * @returns The validation of `[...base, candidate]`
+ */
+export function validateAgentInstanceAddition(
+  base: ReadonlyArray<unknown>,
+  candidate: unknown
+): ReturnType<typeof validateAgentInstancesInput> {
+  return validateAgentInstancesInput([...base, candidate]);
+}
+
+function validateAgentInstanceEntries(input: unknown[]): {
+  valid: boolean;
+  value?: AgentInstance[];
+  error?: string;
+} {
 
   const seen = new Set<string>();
   const normalized: AgentInstance[] = [];
