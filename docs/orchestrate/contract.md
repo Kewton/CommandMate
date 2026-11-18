@@ -333,4 +333,4 @@ Issue 本文の原因が実測していない仮説なら、goal に「本文の
 6. **陰性の対照（落ちるべき例）を先に書き、今の HEAD で赤を確かめてから実装する。**
 7. **レビューの依頼文にも同じ範囲を書く。** Codex の再レビューの brief に範囲を書き、範囲外の回避は P3（記録だけ）として扱うよう頼む。範囲内で同じ種類が 2 回出たら直しを送らず STOP（team.md §6 の 6）
 
-同じ種類の指摘の一覧は `workspace/orchestration/same-kind-findings.md`（リーダーは依頼文を書く前に読む）。根拠: 段 6 の L0・L4（`workspace/orchestration/runs/2026-11-17/lead-return-s6.md` の静的ガードの節）。
+同じ種類の指摘の一覧は `workspace/orchestration/same-kind-findings.md`（リーダーは依頼文を書く前に読む）。根拠: 段 6 の L0・L4（`workspace/orchestration/runs/2026-11-17/lead-return-s6.md` の静的ガードの節。追跡されない置き場所で、main のチェックアウトにしか無い）。

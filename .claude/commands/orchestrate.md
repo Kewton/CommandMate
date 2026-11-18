@@ -1130,9 +1130,9 @@ CHANGELOG の断片は Issue ごとの別ファイル（`changelog.d/<N>.md`）�
 
 上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI が安全網になる。**最後の 1 本だけ**はフル CI を待つ。
 
-**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全 `bucket` が `pass` か `skipping`、`pending` は待つ。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
+**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全 `bucket` が `pass` か `skipping`・`ci-pr.yml` の全ジョブの登録も待つ・`pending` は待ち・`fail` / `cancel` はマージしない。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
 
-**例外:** 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。また、CI の `Build` のチェックも `pass` になってからマージする（マージする HEAD の precheck に `build=ok` があれば `Build` の `pending` は待たない）。
+**例外:** 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。また、CI の `Build` のチェックも `pass` になってからマージする（`build=ok` の precheck があれば待たない）。
 
 根拠: docs/orchestrate/ci-merge.md#6-2-unit-tests-と-build-を待つ例外
 
@@ -1143,16 +1143,16 @@ CHANGELOG の断片は Issue ごとの別ファイル（`changelog.d/<N>.md`）�
 ### 6-3. マージ前に `fail` / `cancel` が無いことを機械的に確認する
 
 `gh pr checks <PR> --json name,bucket` を読み、**`bucket` に `fail` / `cancel` が 1 つでも
-あればマージしない**。判定は目視ではなくスクリプトで行うこと。
+あればマージしない**。判定はスクリプトで行う。
 
 根拠: docs/orchestrate/ci-merge.md#6-3-fail-を見落とした実例
 
 `merge-pr.mjs`（`--queue` は entry ごと）がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
 
-既存の揺れは、同じテストの 2 回目で再実行をやめて修正の担当を決める（根拠: docs/orchestrate/ci-merge.md#6-3-既存の揺れが再発したときの担当）。
+既存の揺れは 2 回目で再実行をやめ担当を決める（根拠: docs/orchestrate/ci-merge.md#6-3-既存の揺れが再発したときの担当）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
 影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
-待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**（と 6-2 の「CI が通れば」の run の全 PR）は全チェックの合格を待つ。
+**最後の 1 本だけ**（と 6-2 の「CI が通れば」の run の全 PR）は全チェックの合格を待つ。
 
 `unit-related` で裁定した PR（と、テスト全体を通していない整理の PR）では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
 `Build` のチェックも `pass` になってからマージする（6-2 の例外。マージする HEAD の precheck の記録に `build=ok`（と `build-cli=ok`・`build-server=ok`）があるときだけ、その `pending` は待たなくてよい）。

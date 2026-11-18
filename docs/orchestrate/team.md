@@ -143,13 +143,14 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 
 mem は許可・決定・作業の状態・次の一手・人への質問の置き場（CLAUDE.md「記憶の書き場所」、コマンドは docs/user-guide/cli-operations-guide.md の mem の節）。次の 3 つを守る。
 
-1. **ジャッジ（審判）のセッションは、起動の後に `/effort high` を送る。** 推論の強さの決定（mem の決定 4c98e7a4）: codex は high が既定で、高リスクのレビューだけ xhigh。審判は high。開発リーダー・イネーブラーは medium。`/effort` で稼働中のセッションでも変えられる。並行の本の新しいセッション（§9）にも同じく送る
-2. **mem の決定には行き先を付ける。** `commandmate mem add --kind decision … --promote-to issue:#N`（または `pr:#N`、リポジトリからの相対の `path:<docs のパス>`）。決定の行き先は該当する Issue、docs に残す規則なら path。行き先の無い `open` の決定は `mem check` が `decision_no_destination` と出す。書き込みは人が画面で承認したときだけ（CLI に書く口は無い）
-3. **path（docs）を行き先にした決定は、その docs の PR で反映する。** 反映の後に PM が決定を閉じる（`mem close`）。反映していない決定を閉じない・反映が済んだ決定を開いたままにしない
+1. **ジャッジ（審判）のセッションは、起動した人（PM・リーダー）が起動の後に `/effort high` を送る。** 推論の強さの決定（mem の決定 4c98e7a4、人 11-18）: codex は high 既定・高リスクのレビューだけ xhigh。審判 high、開発リーダー・イネーブラー medium。`/effort` で稼働中でも変えられる。並行の本の新しいセッション（§9）の審判にも同じく送る。開発リーダー・イネーブラーの medium も、起動した人が起動の後に `/effort medium` を送る。イネーブラーが codex（§1 の表）のときの値（既定の high か medium か）は決定の本文では決まっていないので、決まるまでここに書かない
+2. **mem の決定には行き先を付ける。** `commandmate mem add --kind decision … --promote-to issue:#N`（または `pr:#N`、リポジトリからの相対の `path:<docs の .md ファイル>`）。決定の行き先は該当する Issue、docs に残す規則なら path。path は `.md` のファイルを名指す（ディレクトリは画面から記録できない）。行き先の無い `open` の決定は `mem check --suggest` が `decision_no_destination` と出す（対象は自分の項目だけ）。書き込みは人が画面で承認したときだけ（CLI に書く口は無い）
+3. **path（docs）を行き先にした決定は、その docs の PR で反映する。** 反映の記録は画面の流れで行う（人が差分を承認 → `recorded` → 正本へ反映したことを確かめて `promoted`）。`mem close` で閉じられるのは決定を書いた instance か人（画面）だけで、ほかの instance（PM が他人の決定を閉じる場合を含む）は exit 55（`not_owner`）。`recorded` になった後は `mem close` も断られる。docs の PR のマージ後、PM が人へ画面での記録を頼む。反映していない決定を閉じない
 
 ## 12. 反映済みの決定
 
-- 決定 89aee71f: `merge-pr` は `--last` が無いと `Build`・`Unit Tests` だけを待つ（それぞれ例外の条件のとき）。E2E を含む全チェックの合格が条件のマージには `--last` を付ける。中身は ci-merge.md の「6-2 「CI が通れば」の許可と全チェックの合格」に反映した（#4460）
+- 決定 4c98e7a4: 推論の強さ（審判 high など）を §11 の 1 に反映した（#4460）。行き先は `path:docs/orchestrate/team.md`
+- 決定 89aee71f: `merge-pr` は `--last` が無いと `Build`・`Unit Tests` だけを待つ（それぞれ例外の条件のとき）。E2E を含む全チェックの合格が条件のマージには `--last` を付ける。中身は ci-merge.md の「6-2 「CI が通れば」の許可と全チェックの合格」に反映した（#4460）。この決定の行き先は `path:docs/orchestrate/`（ディレクトリ）で画面から記録できないため、人が行き先を `.md` のファイルに直すか、PM が人へ伝えて閉じ方を決める
 
 ## Antigravity の扱い
 
