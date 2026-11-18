@@ -99,6 +99,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
 import { appendRecord, envCleanItemsNote, envCleanShared, formatEnvCleanShared, inItem, readRecords } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
@@ -129,7 +130,52 @@ export const START_TASK_RETRY_MS = 5_000;
  * every SIGNAL_POLL_SEC, and the verification started again at most
  * VERIFY_BUSY_ATTEMPTS times (#3883).
  */
-export const VERIFY_BUSY_TIMEOUT_SEC = 3600;
+/**
+ * The busy wait (#4459): the limit is on the run's *lack of progress*, not on its age, and it is
+ * derived from .commandmate/verify.yaml, not written down here. One gate can legitimately take, from
+ * the moment it starts to the moment it ends: its wait for the machine-wide mutex (`mutexWaitSec`,
+ * else `timeoutSec`, of a gate with `mutex`), then a wait for a run slot it gave back while it
+ * queued (up to the longest gate that holds a slot without a mutex), then its own run
+ * (`timeoutSec`). The old 3600 was below the mutex wait alone: the run waited for was still queued
+ * and this call gave up (exit 99, no verdict; runs 3299〜3302). The clock starts again whenever the
+ * run finishes a gate; a run that finishes nothing for this long is taken as stuck.
+ * A config that cannot be read gives the large side, never a small one.
+ */
+export const VERIFY_BUSY_MARGIN_SEC = 600;
+/** The longest `mutexWaitSec` verify-config.ts accepts (MAX_MUTEX_WAIT_SEC): the fallback when verify.yaml is unreadable. */
+export const VERIFY_BUSY_FALLBACK_SEC = 86400;
+const REPO_VERIFY_CONFIG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.commandmate/verify.yaml');
+
+/**
+ * Seconds a verification run may go without finishing a gate before it is taken as stuck.
+ *
+ * @param {string} [worktree] the worktree whose verify.yaml the server verifies with; this
+ *   repository's own is read when it has none
+ * @param {{ readFile?: (file: string) => string }} [deps]
+ */
+export function verifyBusyTimeoutSec(worktree, { readFile = (file) => fs.readFileSync(file, 'utf8') } = {}) {
+  const files = [worktree ? path.join(worktree, '.commandmate', 'verify.yaml') : null, REPO_VERIFY_CONFIG].filter(Boolean);
+  for (const file of files) {
+    let gates;
+    try {
+      gates = YAML.parse(readFile(file))?.gates;
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(gates) || gates.length === 0) continue;
+    const seconds = (value) => (Number.isInteger(value) && value > 0 ? value : null);
+    const usable = gates.filter((gate) => seconds(gate?.timeoutSec) !== null);
+    if (usable.length !== gates.length) continue;
+    const longest = (list) => Math.max(0, ...list.map((gate) => gate.timeoutSec));
+    const mutexWait = Math.max(
+      0,
+      ...usable.filter((gate) => gate.mutex).map((gate) => seconds(gate.mutexWaitSec) ?? gate.timeoutSec)
+    );
+    const slotWait = longest(usable.filter((gate) => !gate.mutex));
+    return mutexWait + slotWait + longest(usable) + VERIFY_BUSY_MARGIN_SEC;
+  }
+  return VERIFY_BUSY_FALLBACK_SEC;
+}
 export const VERIFY_BUSY_ATTEMPTS = 3;
 /**
  * A verification that reached no verdict only because a gate's machine-wide
@@ -901,7 +947,9 @@ function runVerifyOnce({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVe
 
 /** Wait for the verification run `runId` to leave `running` (or, unnamed, one poll interval). */
 function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
-  const deadline = now().getTime() + VERIFY_BUSY_TIMEOUT_SEC * 1000;
+  const limitMs = verifyBusyTimeoutSec(o.worktree) * 1000;
+  let deadline = now().getTime() + limitMs;
+  let finishedGates = 0;
   for (;;) {
     if (!runId) {
       sleep(SIGNAL_POLL_SEC * 1000);
@@ -909,6 +957,12 @@ function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
     }
     const view = readRun(run, o.cli, o.wt, runId, cwd);
     if (view && view.status !== 'running') return { ended: true, superseded: supersededBy?.() ?? null };
+    // Progress (#4459): a gate that finished since the last read starts the limit again.
+    const finished = Array.isArray(view?.gates) ? view.gates.filter((g) => g?.status && g.status !== 'running').length : 0;
+    if (finished > finishedGates) {
+      finishedGates = finished;
+      deadline = now().getTime() + limitMs;
+    }
     const newer = supersededBy?.();
     if (newer) return { ended: false, superseded: newer };
     if (now().getTime() >= deadline) return { ended: false, superseded: null };

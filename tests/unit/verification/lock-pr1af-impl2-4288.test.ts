@@ -174,13 +174,30 @@ describe('item 7 (PM Claude P3-8, F53): I3 reading an older tmp pid while the cl
   });
 });
 
+/**
+ * Whether an owner record carries the injected `pgid` field (kv `pgid=4242` or JSON `"pgid":4242`). Not a
+ * search for the digits `4242` (#4459): the record also holds a random token, a pid and a clock, and
+ * `106751-1794879446-3107424279` contains `4242` — the CI shard 4/4 failure of PR #4441.
+ */
+const carriesPgid = (owner: string): boolean => /(^|[\n{,"])pgid["=]/.test(owner);
+
 describe('item 8 (PM Claude P3-7): LOCK_OWNER_EXTRA is not inherited from the environment', () => {
+  it('#4459: the owner check looks for the pgid field, not for digits a random token can hold', () => {
+    // The record CI read on 2026-11-17 (run 43996300641, shard 4/4): the old check, not.toContain('4242'), failed on it.
+    const ci = '{"pid":106751,"host":"eb166232413e","token":"106751-1794879446-3107424279","acquiredAt":1794879446264,"v":1}';
+    expect(ci).toContain('4242');
+    expect(carriesPgid(ci)).toBe(false);
+    // Positive controls: what the env injection would have written is still seen.
+    expect(carriesPgid('pid=1\ntoken=a\npgid=4242')).toBe(true);
+    expect(carriesPgid('{"pid":1,"pgid":4242,"v":1}')).toBe(true);
+  });
+
   for (const who of ['acquire-head-nograce', 'acquire-head-grace'] as const) {
     it(`bash ${who}: an exported LOCK_OWNER_EXTRA=pgid=… does not refuse the acquisition, nor reach the record`, async () => {
       const r = freshRoot();
       const out = await H.drive('bash', who, r, { env: { LOCK_OWNER_EXTRA: 'pgid=4242' } });
       expect([out.code, out.log]).toEqual(['acquired', expect.not.stringContaining('machine-lock-owner-field-reserved')]);
-      expect(fs.readFileSync(path.join(H.lockPathIn(r), 'owner'), 'utf8')).not.toContain('4242');
+      expect(carriesPgid(fs.readFileSync(path.join(H.lockPathIn(r), 'owner'), 'utf8'))).toBe(false);
     }, 60000);
   }
 
