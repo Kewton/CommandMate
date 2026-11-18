@@ -32,6 +32,7 @@
 import { DETECTOR_VERSION_PROBES, runDetectorVersionProbe } from '../detection/version-probes';
 import { evaluateCodexUpdate, readCodexVersionFile } from './codex-version';
 import { isUpdatableAgentTool } from './agent-updater';
+import { mayProbeToolVersion } from '../tool-policy/version-probe-gate';
 
 /**
  * How long one fan-out of `--version` probes is reused.
@@ -66,6 +67,12 @@ export interface AgentVersionRow {
 interface CacheEntry {
   rows: AgentVersionRow[];
   expiresAt: number;
+  /**
+   * Issue #4452: whether antigravity could be probed when these rows were made. A
+   * use of antigravity (or a declaration) since makes the entry stale at once, so
+   * the row shows right after the use rather than after the TTL.
+   */
+  antigravityProbeable: boolean;
 }
 
 let cache: CacheEntry | null = null;
@@ -102,8 +109,15 @@ async function buildRow(tool: string): Promise<AgentVersionRow> {
   };
 }
 
+/**
+ * Issue #4452: antigravity has no row unless its version may be read
+ * ({@link mayProbeToolVersion}: the usage declaration, or a use in this process).
+ * Listing versions is not using antigravity, so `agy` is not started for it. The row
+ * is left out rather than reported as `installed: null`, which would read as
+ * "not installed".
+ */
 async function computeRows(): Promise<AgentVersionRow[]> {
-  const tools = Object.keys(DETECTOR_VERSION_PROBES).sort();
+  const tools = Object.keys(DETECTOR_VERSION_PROBES).filter((tool) => mayProbeToolVersion(tool)).sort();
   return Promise.all(tools.map(buildRow));
 }
 
@@ -139,21 +153,26 @@ export async function getAgentVersions(
 
   if (options.force) {
     cache = null;
-  } else if (cache && cache.expiresAt > now) {
+  } else if (
+    cache &&
+    cache.expiresAt > now &&
+    cache.antigravityProbeable === mayProbeToolVersion('antigravity')
+  ) {
     return cache.rows;
   }
 
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
+    const antigravityProbeable = mayProbeToolVersion('antigravity');
     try {
       const rows = await computeRows();
-      cache = { rows, expiresAt: expiryFrom(now) };
+      cache = { rows, expiresAt: expiryFrom(now), antigravityProbeable };
       return rows;
     } catch {
       // A probe fan-out that throws must not fail the surface that asked: the
       // versions are an annotation, and an empty list renders as "unknown".
-      cache = { rows: [], expiresAt: expiryFrom(now) };
+      cache = { rows: [], expiresAt: expiryFrom(now), antigravityProbeable };
       return [];
     } finally {
       inFlight = null;
