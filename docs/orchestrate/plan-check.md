@@ -74,12 +74,12 @@ sharedState:
 
 （#4148。2026-11-04 の run で、並列の `unit-related` が全体実行に広がって順番待ちが 1〜3 時間になり、#4133 は mutex の 5400 秒で SKIP を 2 回出した。）
 
-`unit-related` は、`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイルが変わるとテスト全体に切り替わり、`cpu.heavy` で 1 本ずつになる（ci-merge.md#6-1-1-テスト全体と-unit-related-の分け方）。`docs/`・`.claude/`・`scripts/` の変更はどれも当たる。これを計画の段階で見分ける:
+#4467 から、`unit-related` は手元でテスト全体に切り替わらない。`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイル（`docs/`・`.claude/`・`scripts/` など）が変わっても、変更から辿れるテストとリポのファイルを読む試験（`findTextScanTests` の全件）だけを流し、ログは `mode=related reason=non-source:<ファイル>` になる。全体は CI の `Unit Tests` が見る（ci-merge.md#6-1-1-テスト全体と-unit-related-の分け方）。それでも `unit-related` は `cpu.heavy` で 1 本ずつなので、計画の段階で見分ける:
 
-- `contract.mjs generate` は、scope が全体実行に広げうる契約に `contract: note: #<N>: unit-related runs the whole unit suite when a file under "<pattern>" changes` を stderr へ出す（状態ファイルが無い run でも出る）。判定は `run-related-unit-tests.mjs` の `classifyChanges` そのもの
+- `contract.mjs generate` は、#4467 より前なら全体に切り替わっていた scope の契約に `contract: note: #<N>: unit-related runs the whole unit suite when a file under "<pattern>" changes` を stderr へ出す（状態ファイルが無い run でも出る。文面は古いままで、今は全体を流さない。判定は `run-related-unit-tests.mjs` の `classifyChanges` の `full`＝「以前なら全体」の印）
 - `plan-check.mjs check` は、1 つの波で `cpu.heavy` に並びうる item（`unit` / `integration` と、上の `unit-related`）が 2 本以上なら `plan-check: notice: cpu-heavy: wave <id>: …` を stdout へ出す（`--json` は `notices`）。契約の設定が無い item の `unit-related` は、scope が分からないので数えない
 
-**出たら、plan にその item の順を書く**（波を分けるか、同じ波で先に検証へ入れる順を決める）。`unit-related` の 5400 秒は待ちと実行の両方の上限で、2026-11-04 の run では全体実行の 1 本に 2158 秒かかったので、前に 3 本並ぶと待ち切りうる。
+**出たら、plan にその item の順を書く**（波を分けるか、同じ波で先に検証へ入れる順を決める）。`unit-related` の 5400 秒は待ちと実行の両方の上限で、2026-11-04 の run（#4467 より前）では全体実行の 1 本に 2158 秒かかり、前に 3 本並ぶと待ち切りえた。
 
 止めない（exit は変わらない）のは、scope が「触ってよい範囲」で実際の差分ではなく、`docs/` を scope に持つ item の多くは同じ波で問題なく流れるから。`heavy-gates` の違反は今までどおり `unit-related` を数えない。
 

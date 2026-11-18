@@ -523,7 +523,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   commandmate reply <id> --instance cc-1                          # Reply body
   commandmate reply <id> --instance cc-1 --since 2026-09-30T12:00:00Z --json
 
-  Only transcript-reader rows (<tool>-turn:<id>) count, as in 'ask'. No reply
+  Only transcript-reader rows (<tool>-turn:<id>) count, as in 'ask': claude, codex,
+  antigravity, command-code, opencode, opencode-v2. No reply
   yet: exit 0, empty stdout, one line on stderr; --json prints "reply": null.
 
 ### commandmate auto-yes <worktree-id>
@@ -1098,7 +1099,7 @@ same CommandMate server, and you can hand work to them.
 
 ## 5. Watch, do not interfere
 
-  commandmate capture <worktree-id> --instance <id> --pane --tail 60
+  commandmate capture <worktree-id> --instance <id> --pane --tail 80
 
 ## The three rules
 
