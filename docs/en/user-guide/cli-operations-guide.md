@@ -985,7 +985,7 @@ Wait failures (exit 10, 11, 21, 124) are as before and read no ledger. `--async`
 |---|---|---|
 | A relay (no wait) | `commandmate ask <worktree-id> "<request>" --instance <id> --async` | When their turn ends, the reply arrives in your composer as `[from <alias> / <worktree>]`. The transcript turn row for `claude`, `codex`, `antigravity`, `command-code`, `opencode`, `opencode-v2`; the screen scraper's row for `copilot`, `gemini`, `vibe-local`. Not tied by an id: send one at a time (overlaps are noted as `overlap=`) |
 | Send, wait, read the ledger | `commandmate send <worktree-id> "<request>" --instance <id>` → `commandmate wait <worktree-id> --instance <id>` → `commandmate reply <worktree-id> --instance <id> --since <ISO time taken before the send>` (always pass `--since`: without it `reply` can return the previous turn's answer) | The newest transcript turn row after `--since` for `claude`, `codex`, `antigravity`, `command-code`, `opencode`, `opencode-v2`. Always empty for `copilot`, `gemini`, `vibe-local` |
-| Look at the screen | `commandmate capture <worktree-id> --instance <id> --pane --tail 60` | What is on their screen (all tools; you judge which turn it is) |
+| Look at the screen | `commandmate capture <worktree-id> --instance <id> --pane --tail 80` | What is on their screen (all tools; you judge which turn it is) |
 
 A request with an id is always multi-line, so a `claude` pane shows `[Pasted text …]` and a `[cmate-ask v1 <id>]` line (design §7 (b); the meaning is unchanged).
 The chat History does not show the id line.
@@ -1005,7 +1005,7 @@ The chat History does not show the id line.
 | 32 | **ROLE NOT_SENT**: the role condition does not hold; the body was not typed | Review the role settings |
 | 33 | **TOOL POLICY DENIED**: the guard refused a send or an `--async` relay to antigravity; nothing was typed ([Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). `--json` has `sent: false` and `refusal` | Do not resend; ask a person whether a declaration is needed. `auto-yes --enable` refusals are also 33 |
 | 99 | Unexpected error | — |
-| 124 | Timed out. When the send itself returned past the deadline, the message **was sent** (stderr says so) | Look with `capture <id> --instance <id> --pane --tail 60`; **do not resend** |
+| 124 | Timed out. When the send itself returned past the deadline, the message **was sent** (stderr says so) | Look with `capture <id> --instance <id> --pane --tail 80`; **do not resend** |
 
 ### Related sections
 
@@ -1942,7 +1942,7 @@ screen.
 
 ```bash
 commandmate capture <worktree-id> --pane              # Transcript with blank lines collapsed (paged on a TTY)
-commandmate capture <worktree-id> --pane --tail 40    # Only the last 40 lines
+commandmate capture <worktree-id> --pane --tail 80    # Only the last 80 lines
 commandmate capture <worktree-id> --pane --raw        # The raw pane, uncompressed
 commandmate capture <worktree-id> --pane --json       # JSON with line counts before and after compression
 commandmate capture <worktree-id> --pane --instance codex-2
@@ -1968,7 +1968,7 @@ redrawn on an interval, and `Ctrl-C` ends it.
 ```bash
 commandmate capture <worktree-id> --pane --follow                  # 2000ms interval by default
 commandmate capture <worktree-id> --pane --follow --interval 1000  # 250-60000ms
-commandmate capture <worktree-id> --pane --follow --tail 40        # Follow only the compressed last 40 lines
+commandmate capture <worktree-id> --pane --follow --tail 80        # Follow only the compressed last 80 lines
 ```
 
 - **No tmux client and no key binding are needed.** That is what makes this the answer under
@@ -2070,7 +2070,7 @@ commandmate reply <worktree-id> --instance cc-1 --json
 - Only rows a transcript reader wrote (`<tool>-turn:<id>`) count as a reply. `ask` reads through the same shared function,
   so both mean the same thing by "reply". Furniture rows (`relay-sys:` / `model-changed:`) are skipped; ANSI and control
   characters are stripped
-- Tools with a transcript reader: claude / codex / antigravity / command-code / opencode. Any other tool always reports
+- Tools with a transcript reader: claude / codex / antigravity / command-code / opencode / opencode-v2. Any other tool always reports
   "no reply"
 - **The pane is never read**: a screen line cannot be attributed to a turn (the nudge's own echo is on it)
 - `--since` takes ISO 8601 and returns only a reply written **at or after** that time. `--instance` / `--agent` resolve as in `ask`

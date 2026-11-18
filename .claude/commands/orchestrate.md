@@ -417,7 +417,7 @@ node scripts/orchestrate/contract.mjs generate \
   根拠: docs/orchestrate/contract.md#2-4-和集合にする実測
 - `verify.gates` を絞ると**絞ったゲートしか裁定しない**。`unit-related` は、変更に関係するテストと、
   リポジトリのファイルを読むテストだけを実行する（`scripts/run-related-unit-tests.mjs`。import されない
-  ファイルが変わったときはテスト全体に切り替わる）。テスト全体の合否は CI の `Unit Tests` で見るので、
+  ファイルが変わってもテスト全体に切り替わらない。#4467）。テスト全体の合否は CI の `Unit Tests` で見るので、
   `unit-related` で裁定した PR は 6-2 の例外に従う。テストの共通設定・ヘルパーの変更や広い範囲の rename
   など、テスト全体が必要な Issue では `gates: [lint, typecheck, unit]` にする（#2639）。
 - **`.sh` を触る Issue**（`scope.allow` に `.sh` が入りうる。`scripts/**` など）では、`gates` に `lint-sh` を足す
@@ -529,6 +529,8 @@ Issue と契約は「変える場所」を名指しし、ワーカーはそこ�
 探した結果は、見つからなかったときも「探した対象と、無かったこと」を書かせる。
 
 根拠: docs/orchestrate/contract.md#2-4-2-対になる場所を探す実測
+
+静的ガードの試験は、脅威の範囲を冒頭に書く。根拠: docs/orchestrate/contract.md#2-4-静的ガードの試験の書き方
 
 ### 2-4-3. 整理（refactor）の Issue の契約の型
 
@@ -1126,12 +1128,11 @@ CHANGELOG の断片は Issue ごとの別ファイル（`changelog.d/<N>.md`）�
 
 根拠: docs/orchestrate/ci-merge.md#6-2-コメントの中の衝突マーカーの実例
 
-上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
-なる。**最後の 1 本だけ**はフル CI を待つ。
+上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI が安全網になる。**最後の 1 本だけ**はフル CI を待つ。
 
-**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全チェックの合格 = すべての `bucket` が `pass` か `skipping` で、`ci-pr.yml` の全ジョブの登録も待つ。`pending` は待ち、`fail` / `cancel` はマージしない。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
+**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全 `bucket` が `pass` か `skipping`・`ci-pr.yml` の全ジョブの登録も待つ・`pending` は待ち・`fail` / `cancel` はマージしない。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
 
-**例外:** 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。また、CI の `Build` のチェックも `pass` になってからマージする（マージする HEAD の precheck に `build=ok` があれば `Build` の `pending` は待たない）。
+**例外:** 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。また、CI の `Build` のチェックも `pass` になってからマージする（`build=ok` の precheck があれば待たない）。
 
 根拠: docs/orchestrate/ci-merge.md#6-2-unit-tests-と-build-を待つ例外
 
@@ -1142,16 +1143,16 @@ CHANGELOG の断片は Issue ごとの別ファイル（`changelog.d/<N>.md`）�
 ### 6-3. マージ前に `fail` / `cancel` が無いことを機械的に確認する
 
 `gh pr checks <PR> --json name,bucket` を読み、**`bucket` に `fail` / `cancel` が 1 つでも
-あればマージしない**。判定は目視ではなくスクリプトで行うこと。
+あればマージしない**。判定はスクリプトで行う。
 
 根拠: docs/orchestrate/ci-merge.md#6-3-fail-を見落とした実例
 
 `merge-pr.mjs`（`--queue` は entry ごと）がこの判定を行う（落ちたジョブは HEAD ごとに 1 回だけ `gh run rerun --failed` で再実行し、それでも落ちればマージしない）。
 
-既存の揺れは、同じテストの 2 回目で再実行をやめて修正の担当を決める（根拠: docs/orchestrate/ci-merge.md#6-3-既存の揺れが再発したときの担当）。
+既存の揺れは 2 回目で再実行をやめ担当を決める（根拠: docs/orchestrate/ci-merge.md#6-3-既存の揺れが再発したときの担当）。
 `pending` の扱いは 6-2 に従う: **6-2 のローカルゲート（refresh → マーカー走査 → `tsc` →
 影響テスト）を通していれば `pending` は待たなくてよい**。develop 側の CI が安全網になるからで、
-待つと 1 issue あたり 12〜25 分が消える。**最後の 1 本だけ**（と 6-2 の「CI が通れば」の run の全 PR）は全チェックの合格を待つ。
+**最後の 1 本だけ**（と 6-2 の「CI が通れば」の run の全 PR）は全チェックの合格を待つ。
 
 `unit-related` で裁定した PR（と、テスト全体を通していない整理の PR）では、`Unit Tests` のチェックが `pass` になってからマージする（6-2 の例外）。
 `Build` のチェックも `pass` になってからマージする（6-2 の例外。マージする HEAD の precheck の記録に `build=ok`（と `build-cli=ok`・`build-server=ok`）があるときだけ、その `pending` は待たなくてよい）。
@@ -1207,7 +1208,7 @@ grep '^| `' docs/module-reference.md | cut -d'|' -f2 | sort | uniq -d
 
 ## Phase 7: UAT（--full時のみ）
 
-体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送り、結果はジャッジ→PM→開発リーダーの順で返る。7-2 の修正ループは開発リーダーが回す。1 人で回す場合は以下のまま。根拠: docs/orchestrate/team.md#5-uat-の結果の返し方phase-7
+体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送り、結果はジャッジ→PM→開発リーダーの順で返る。7-2 の修正ループは開発リーダーが回す。1 人で回す場合は以下のまま。受け入れは 1 回にまとめて並行（§9）。根拠: docs/orchestrate/team.md#5-uat-の結果の返し方phase-7
 
 ### 7-1. 受入テスト実行
 
