@@ -100,6 +100,7 @@ import {
 } from '../cli-tools/opencode-executable';
 import { sanitizeEnvForChildProcess } from '../security/env-sanitizer';
 import { DETECTOR_VERIFIED_AGAINST } from './tools/verified-against';
+import { mayProbeToolVersion } from '../tool-policy/version-probe-gate';
 
 /** Budget for one `<cli> --version`. Matches the catalog probe and copilot-executable. */
 export const DETECTOR_VERSION_PROBE_TIMEOUT_MS = 5000;
@@ -212,6 +213,7 @@ export type DetectorVersionProbe =
 export const DETECTOR_VERSION_PROBES: Readonly<Record<string, DetectorVersionProbe>> = {
   claude: { kind: 'execFile', command: 'claude', args: ['--version'] },
   codex: { kind: 'execFile', command: 'codex', args: ['--version'] },
+  // Issue #4452: run only when `mayProbeToolVersion('antigravity')` allows it.
   antigravity: { kind: 'execFile', command: 'agy', args: ['--version'] },
   'command-code': { kind: 'execFile', command: 'commandcode', args: ['--version'] },
   // Issue #2939: both OpenCodes are delegated, like copilot. `opencode` may be
@@ -306,8 +308,25 @@ export function runDetectorVersionProbe(probe: DetectorVersionProbe): Promise<st
   });
 }
 
-async function computeDetectorFreshness(): Promise<readonly DetectorFreshnessRow[]> {
-  const tools = Object.keys(DETECTOR_VERSION_PROBES).sort();
+/**
+ * Tools whose version may be probed now (Issue #4452). antigravity only with the
+ * usage declaration or after a use in this process: the pane poll and
+ * `commandmate status` are not a use of antigravity, so `agy` is not started for
+ * them. A held-back tool has no row, which reads as "not stale" — the quiet default.
+ */
+function probeableDetectorTools(): string[] {
+  return Object.keys(DETECTOR_VERSION_PROBES).filter((tool) => mayProbeToolVersion(tool));
+}
+
+/**
+ * Tools {@link freshnessCache} has probed (Issue #4452). A tool that becomes
+ * probeable later is probed alone and merged in; the others keep their answer.
+ */
+let freshnessProbedTools: ReadonlySet<string> = new Set();
+
+async function computeDetectorFreshness(
+  tools: readonly string[]
+): Promise<readonly DetectorFreshnessRow[]> {
   return Promise.all(
     tools.map(async (tool): Promise<DetectorFreshnessRow> => {
       const verifiedAgainst = DETECTOR_VERIFIED_AGAINST[tool]?.version ?? 'unmeasured';
@@ -334,12 +353,20 @@ async function computeDetectorFreshness(): Promise<readonly DetectorFreshnessRow
  * both entry points share.
  */
 export async function getDetectorFreshness(): Promise<readonly DetectorFreshnessRow[]> {
-  if (freshnessCache !== null) return freshnessCache;
   if (freshnessInFlight) return freshnessInFlight;
+  const probeable = probeableDetectorTools();
+  const missing = probeable.filter((tool) => !freshnessProbedTools.has(tool));
+  if (freshnessCache !== null && missing.length === 0) return freshnessCache;
 
-  freshnessInFlight = computeDetectorFreshness();
+  // Issue #4452: a warm cache gains only the tools it could not probe before (in
+  // practice antigravity, after the declaration or a use).
+  const base = freshnessCache;
+  freshnessInFlight = computeDetectorFreshness(base === null ? probeable : missing).then((fresh) =>
+    [...(base ?? []), ...fresh].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0))
+  );
   try {
     freshnessCache = await freshnessInFlight;
+    freshnessProbedTools = new Set([...freshnessProbedTools, ...probeable]);
     return freshnessCache;
   } finally {
     freshnessInFlight = null;
@@ -366,7 +393,13 @@ export function toDetectorStaleness(rows: readonly DetectorFreshnessRow[]): Dete
  * is how a caller tells the two apart.
  */
 export function getDetectorStalenessSnapshot(): DetectorStaleness | undefined {
-  if (freshnessCache !== null) return toDetectorStaleness(freshnessCache);
+  if (freshnessCache !== null) {
+    // Issue #4452: a tool that became probeable since is added in the background.
+    if (probeableDetectorTools().some((tool) => !freshnessProbedTools.has(tool))) {
+      void getDetectorFreshness().catch(() => []);
+    }
+    return toDetectorStaleness(freshnessCache);
+  }
   // Fire and forget. No in-flight check here on purpose: getDetectorFreshness
   // owns that slot and hands a concurrent caller the promise that is already
   // running, so a second guard would be a copy of an invariant that lives one
@@ -380,4 +413,5 @@ export function getDetectorStalenessSnapshot(): DetectorStaleness | undefined {
 export function clearDetectorVersionProbeCache(): void {
   freshnessCache = null;
   freshnessInFlight = null;
+  freshnessProbedTools = new Set();
 }

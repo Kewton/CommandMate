@@ -39,6 +39,7 @@ import { sanitizeEnvForChildProcess } from '@/lib/security/env-sanitizer';
 import { mergeCommandGroups, groupByCategory } from '@/lib/command-merger';
 import { truncateString } from '@/lib/utils';
 import { createLogger } from '@/lib/logger';
+import { mayProbeToolVersion } from '@/lib/tool-policy/version-probe-gate';
 
 const logger = createLogger('slash-command-catalog');
 
@@ -86,7 +87,10 @@ type VersionProbe =
 /**
  * Staleness probes: catalog tool id → how to read its installed version.
  *
- * The binary for antigravity is `agy` (Issue #1476 R3).
+ * The binary for antigravity is `agy` (Issue #1476 R3). Its row runs only when
+ * `mayProbeToolVersion('antigravity')` allows it (Issue #4452: the usage
+ * declaration `CM_ANTIGRAVITY_USAGE=api-key|enterprise`, or antigravity was used in
+ * this process) — a staleness hint is not a reason to start agy.
  *
  * **copilot is delegated, and must stay delegated** (Issue #1913 follow-up).
  * The first cut of this table probed `gh copilot -- --version`, on the premise
@@ -332,6 +336,13 @@ export function composeStandardLayer(
 
 let stalenessCache: CatalogStaleness | null = null;
 let stalenessInFlight: Promise<CatalogStaleness> | null = null;
+/**
+ * Tools {@link stalenessCache} has probed (Issue #4452). A tool held back by
+ * {@link mayProbeToolVersion} is not in it, so a later call that may probe it
+ * (the declaration, or antigravity was used since) probes that tool alone and
+ * merges it, rather than re-probing every tool.
+ */
+let stalenessProbedTools: ReadonlySet<string> = new Set();
 
 /** Extract a normalized `major.minor.patch` version from `--version` output. */
 export function parseCliVersion(output: string): string | null {
@@ -389,11 +400,16 @@ function probeCliVersion(command: string, args: string[]): Promise<string | null
   });
 }
 
-async function computeCatalogStaleness(): Promise<CatalogStaleness> {
+/** Tools whose version may be probed now (Issue #4452: antigravity only when allowed). */
+function probeableCatalogTools(): string[] {
+  return Object.keys(VERSION_PROBES).filter((tool) => mayProbeToolVersion(tool));
+}
+
+async function computeCatalogStaleness(tools: readonly string[]): Promise<CatalogStaleness> {
   const result: CatalogStaleness = {};
 
   await Promise.all(
-    Object.keys(VERSION_PROBES).map(async (tool) => {
+    tools.map(async (tool) => {
       const verifiedAgainst = CATALOG_VERIFIED_AGAINST[tool];
       if (!verifiedAgainst) return;
       const probe = VERSION_PROBES[tool];
@@ -428,12 +444,20 @@ async function computeCatalogStaleness(): Promise<CatalogStaleness> {
  * points share.
  */
 export async function getCatalogStaleness(): Promise<CatalogStaleness> {
-  if (stalenessCache !== null) return stalenessCache;
   if (stalenessInFlight) return stalenessInFlight;
+  const probeable = probeableCatalogTools();
+  const missing = probeable.filter((tool) => !stalenessProbedTools.has(tool));
+  if (stalenessCache !== null && missing.length === 0) return stalenessCache;
 
-  stalenessInFlight = computeCatalogStaleness();
+  // Issue #4452: a warm cache gains only the tools it could not probe before (in
+  // practice antigravity, after the declaration or a use); the rest keep their answer.
+  const base = stalenessCache;
+  stalenessInFlight = computeCatalogStaleness(base === null ? probeable : missing).then(
+    (fresh) => ({ ...(base ?? {}), ...fresh })
+  );
   try {
     stalenessCache = await stalenessInFlight;
+    stalenessProbedTools = new Set([...stalenessProbedTools, ...probeable]);
     return stalenessCache;
   } finally {
     stalenessInFlight = null;
@@ -458,7 +482,14 @@ export async function getCatalogStaleness(): Promise<CatalogStaleness> {
  * hangs. A version banner is not worth a request that can block for seconds.
  */
 export function getCatalogStalenessSnapshot(): CatalogStaleness {
-  if (stalenessCache !== null) return stalenessCache;
+  if (stalenessCache !== null) {
+    // Issue #4452: a tool that became probeable since (antigravity after the
+    // declaration or a use) is added in the background, like a cold cache.
+    if (probeableCatalogTools().some((tool) => !stalenessProbedTools.has(tool))) {
+      void getCatalogStaleness().catch(() => ({}));
+    }
+    return stalenessCache;
+  }
   // Fire and forget. No in-flight check here on purpose: getCatalogStaleness
   // owns that slot and hands a concurrent caller the promise that is already
   // running, so a second guard would be a copy of an invariant that lives one
@@ -477,4 +508,5 @@ export function clearCatalogCache(): void {
   userCatalogCache = null;
   stalenessCache = null;
   stalenessInFlight = null;
+  stalenessProbedTools = new Set();
 }
