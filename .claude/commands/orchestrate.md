@@ -417,7 +417,7 @@ node scripts/orchestrate/contract.mjs generate \
   根拠: docs/orchestrate/contract.md#2-4-和集合にする実測
 - `verify.gates` を絞ると**絞ったゲートしか裁定しない**。`unit-related` は、変更に関係するテストと、
   リポジトリのファイルを読むテストだけを実行する（`scripts/run-related-unit-tests.mjs`。import されない
-  ファイルが変わったときはテスト全体に切り替わる）。テスト全体の合否は CI の `Unit Tests` で見るので、
+  ファイルが変わってもテスト全体に切り替わらない。#4467）。テスト全体の合否は CI の `Unit Tests` で見るので、
   `unit-related` で裁定した PR は 6-2 の例外に従う。テストの共通設定・ヘルパーの変更や広い範囲の rename
   など、テスト全体が必要な Issue では `gates: [lint, typecheck, unit]` にする（#2639）。
 - **`.sh` を触る Issue**（`scope.allow` に `.sh` が入りうる。`scripts/**` など）では、`gates` に `lint-sh` を足す
