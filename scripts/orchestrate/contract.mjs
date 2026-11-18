@@ -434,6 +434,17 @@ function stringList(value, name, problems) {
 }
 
 /**
+ * A scope pattern with the shell's bracket escapes written out (#4459): `[[]id[]]` → `[id]`.
+ * The scope gate (src/lib/verification/scope-gate-glob.ts) reads `[` and `]` as themselves, so the
+ * escaped form matches only a path that literally contains `[[]id[]]` — none — and a change inside
+ * `src/app/api/worktrees/[id]/` came out as a scope violation (run 3307). The gate is right and is
+ * not changed; what goes into the contract is what the gate matches.
+ */
+export function literalBrackets(pattern) {
+  return pattern.replaceAll('[[]', '[').replaceAll('[]]', ']');
+}
+
+/**
  * Validate a parsed config and fill in the defaults.
  *
  * @param {Record<string, unknown>} raw
@@ -500,7 +511,7 @@ export function normalizeConfig(raw, options = {}) {
   });
 
   const fragment = `changelog.d/${issue}.md`;
-  const scope = stringList(raw.scope, 'scope', problems);
+  const scope = stringList(raw.scope, 'scope', problems).map(literalBrackets);
   if (scope.length === 0) problems.push('scope: at least one path is required');
   for (const shared of SHARED_FILES) {
     if (scope.includes(shared)) problems.push(`scope: ${shared} is shared — the worker writes a fragment instead (2-4-1)`);
