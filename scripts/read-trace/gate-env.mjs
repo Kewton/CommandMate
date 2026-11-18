@@ -12,6 +12,11 @@
  * Measurement only: no gate reads this.
  *
  * Usage: node scripts/read-trace/gate-env.mjs [--root <repo>]   (prints JSON)
+ *
+ * Take the verify side's gate-env the way verify runs the gate: on the verify
+ * machine, from the worktree, with `CI=true` (`CI=true node scripts/read-trace/
+ * gate-env.mjs`). Taken from a plain shell it records `ci: false`, which never
+ * matches a table; measure.mjs reports that separately in its diagnostics.
  */
 
 import crypto from 'node:crypto';

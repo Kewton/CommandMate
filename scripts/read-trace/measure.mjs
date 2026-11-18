@@ -15,8 +15,14 @@
  * changes a selection, a verdict or a ruling.
  *
  * f leaves out (i) of §2.3.2 (the current `related` selection for the branch's
- * code changes) because that needs vitest's graph at each HEAD; the output says
- * so (`fExcludesCodeRelated: true`), and the real f is at least this large.
+ * code changes) because that needs vitest's graph at each HEAD. It is printed
+ * as `fLowerBound` — the real f is at least this large — and no threshold is
+ * judged on it (`fMet: null`): a lower bound under 0.5 says nothing about the
+ * real f.
+ *
+ * Diagnostics (never part of the hit / miss judgment, which stays the exact,
+ * fail-closed lookup): the miss reasons, which gate-env fields differed and how
+ * often, and whether the verify-side gate-env was taken without `CI=true`.
  *
  * Usage:
  *   node scripts/read-trace/measure.mjs --tables <dir> --verify-gate-env <file> \
@@ -31,6 +37,8 @@ import { computeF, isB2DataFile, lookupHit, readerKey, selectTests } from './tab
 
 export const HIT_RATE_THRESHOLD = 0.8;
 export const F_THRESHOLD = 0.5;
+export const F_LOWER_BOUND_NOTE =
+  'lower bound: excludes (i) the related selection for the branch code changes; no threshold is judged';
 
 const SRC_PATTERN = /^src\/.+\.(ts|tsx|js|jsx|mjs|cjs)$/;
 const TEST_PATTERN = /^tests\/(unit|helpers)\/.+\.(ts|tsx)$/;
@@ -89,7 +97,7 @@ export function measureRuns(input) {
     const run = { at: line.at ?? null, issue: line.issue ?? null, head: line.head, mergeBase: facts.mergeBase, ...lookup };
     if (lookup.hit) {
       const r = computeF(table, selectTests({ table, changedFiles: facts.changedFiles }));
-      run.f = r.f;
+      run.fLowerBound = r.f;
       selectedMs += r.selectedMs;
       totalMs += r.totalMs;
     }
@@ -97,20 +105,37 @@ export function measureRuns(input) {
   }
   const hits = runs.filter((r) => r.hit).length;
   const hitRate = runs.length > 0 ? hits / runs.length : null;
-  const f = totalMs > 0 ? selectedMs / totalMs : null;
+  const fLowerBound = totalMs > 0 ? selectedMs / totalMs : null;
   const reasons = {};
-  for (const r of runs) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
+  const gateEnvFieldDiffs = {};
+  for (const r of runs) {
+    reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
+    for (const field of r.diffs ?? []) gateEnvFieldDiffs[field] = (gateEnvFieldDiffs[field] ?? 0) + 1;
+  }
+  const verifyCi = input.verifyGateEnv && typeof input.verifyGateEnv === 'object' ? input.verifyGateEnv.ci : undefined;
   return {
     targets: runs.length,
     hits,
     hitRate,
     hitRateThreshold: HIT_RATE_THRESHOLD,
     hitRateMet: hitRate !== null && hitRate >= HIT_RATE_THRESHOLD,
-    f,
+    fLowerBound,
     fThreshold: F_THRESHOLD,
-    fMet: f !== null && f <= F_THRESHOLD,
+    fMet: null,
+    fNote: F_LOWER_BOUND_NOTE,
     fExcludesCodeRelated: true,
     reasons,
+    diagnostics: {
+      usedForJudgment: false,
+      missReasons: Object.fromEntries(Object.entries(reasons).filter(([k]) => k !== 'hit')),
+      gateEnvFieldDiffs,
+      verifyGateEnvCi:
+        verifyCi === true
+          ? 'ci:true'
+          : verifyCi === false
+            ? 'ci:false (taken without CI=true; never matches a table built with CI=true)'
+            : 'missing',
+    },
     runs,
   };
 }

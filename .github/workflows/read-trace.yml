@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+# Two pushes to develop in a row: the older traced run is superseded (only the
+# newest develop commit needs a table soon; it is measurement, not a verdict).
+concurrency:
+  group: read-trace-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   read-trace:
     name: Read Trace (measurement only)
@@ -33,6 +39,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # The suite runs here; it needs no token left in .git/config.
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -53,6 +62,11 @@ jobs:
           CM_TRACE_REPO_READS="$out/traces" NODE_ENV=test npx vitest run tests/unit \
             --reporter=json --outputFile="$out/report.json" || status=$?
           echo "vitest exit=$status (not a verdict; non-passing files are opaque in the table)"
+        env:
+          CI: 'true'
+          # Same heap as the `Unit Tests` job of ci-pr.yml; this run is all four
+          # shards in one process tree.
+          NODE_OPTIONS: '--max-old-space-size=6144'
 
       - name: Build the read table
         run: |

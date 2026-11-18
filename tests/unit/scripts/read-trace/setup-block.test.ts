@@ -49,6 +49,8 @@ describe('tests/setup.ts read-trace block: behaviour', () => {
     for (const target of [fs, fsp, childProcess]) {
       for (const [name, fn] of functionsOf(target)) {
         expect((fn as Record<symbol, unknown>)[ORIGINAL_KEY], name).toBeUndefined();
+        // Not only the marker: no function is the tracer's wrapper by its source either.
+        expect(String(fn), name).not.toContain('tracedFsFunction');
       }
     }
     expect((workerThreads.Worker as unknown as Record<symbol, unknown>)[ORIGINAL_KEY]).toBeUndefined();

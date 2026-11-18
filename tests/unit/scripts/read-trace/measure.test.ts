@@ -60,7 +60,6 @@ describe('isUnitRelatedRun', () => {
 describe('isB2Target', () => {
   it('is a full run whose every full-making file is md / locales / integration / e2e', () => {
     expect(isB2Target(['docs/a.md', 'src/x.ts'])).toBe(true);
-    expect(isB2Target(['locales/ja/common.json', 'tests/unit/a.test.ts'])).toBe(true);
     expect(isB2Target(['tests/integration/a.test.ts'])).toBe(true);
   });
 
@@ -68,6 +67,9 @@ describe('isB2Target', () => {
     expect(isB2Target(['src/x.ts', 'tests/unit/a.test.ts'])).toBe(false);
     expect(isB2Target(['docs/a.md', 'package.json'])).toBe(false);
     expect(isB2Target(['docs/a.md', 'scripts/x.mjs'])).toBe(false);
+    // M1: a locale change stays a full run, never a B2 target.
+    expect(isB2Target(['locales/ja/common.json', 'tests/unit/a.test.ts'])).toBe(false);
+    expect(isB2Target(['docs/a.md', 'locales/ja/common.json'])).toBe(false);
     expect(isB2Target(['changelog.d/1.md', 'CHANGELOG.md', 'docs/module-reference.md'])).toBe(false);
   });
 });
@@ -98,10 +100,18 @@ describe('measureRuns', () => {
     expect(r.hitRate).toBeCloseTo(1 / 3);
     expect(r.hitRateMet).toBe(false);
     expect(r.reasons).toEqual({ hit: 1, 'key-mismatch': 1, 'no-table': 1 });
-    // doc.test.ts (100 ms) of 400 ms.
-    expect(r.f).toBeCloseTo(0.25);
-    expect(r.fMet).toBe(true);
+    // doc.test.ts (100 ms) of 400 ms — a lower bound, so no threshold is judged on it.
+    expect(r.fLowerBound).toBeCloseTo(0.25);
+    expect(r.fMet).toBeNull();
+    expect(r.fNote).toMatch(/lower bound/);
     expect(r.fExcludesCodeRelated).toBe(true);
+    expect(r).not.toHaveProperty('f');
+    expect(r.diagnostics).toMatchObject({
+      usedForJudgment: false,
+      missReasons: { 'key-mismatch': 1, 'no-table': 1 },
+      gateEnvFieldDiffs: {},
+      verifyGateEnvCi: 'ci:true',
+    });
   });
 
   it('counts a gate-env difference as a miss, and a key lookup that throws as a miss', () => {
@@ -113,7 +123,8 @@ describe('measureRuns', () => {
       tables,
       verifyGateEnv: { ...ENV, node: 'v24.0.0' },
     });
-    expect(r).toMatchObject({ targets: 1, hits: 0, hitRate: 0, f: null, fMet: false, reasons: { 'gate-env-mismatch': 1 } });
+    expect(r).toMatchObject({ targets: 1, hits: 0, hitRate: 0, fLowerBound: null, fMet: null, reasons: { 'gate-env-mismatch': 1 } });
+    expect(r.diagnostics.gateEnvFieldDiffs).toEqual({ node: 1 });
 
     const thrown = measureRuns({
       lines: [verifyLine('h1')],
@@ -129,7 +140,26 @@ describe('measureRuns', () => {
 
   it('reports no rate at all when there is no target run', () => {
     const r = measureRuns({ lines: [], facts: () => null, keyOf: () => '', tables: new Map(), verifyGateEnv: ENV });
-    expect(r).toMatchObject({ targets: 0, hitRate: null, hitRateMet: false, f: null, fMet: false });
+    expect(r).toMatchObject({ targets: 0, hitRate: null, hitRateMet: false, fLowerBound: null, fMet: null });
+  });
+
+  it('diagnoses a CI table against a macOS verify taken without CI=true, field by field, without changing the verdict', () => {
+    const tables = new Map<string, unknown>([['m1', table('m1', 'k1')]]);
+    const macVerify = { ...ENV, platform: 'darwin', arch: 'arm64', ci: false, tools: { ...ENV.tools, tmux: true } };
+    const r = measureRuns({
+      lines: [verifyLine('h1'), verifyLine('h2'), verifyLine('h3')],
+      facts: (h: string) => ({ h1: { mergeBase: 'm1', changedFiles: ['docs/a.md'] }, h2: { mergeBase: 'm1', changedFiles: ['docs/a.md'] }, h3: { mergeBase: 'm9', changedFiles: ['docs/a.md'] } } as Record<string, { mergeBase: string; changedFiles: string[] }>)[h] ?? null,
+      keyOf: (c: string) => (c === 'm1' ? 'k1' : 'k9'),
+      tables,
+      verifyGateEnv: macVerify,
+    });
+    expect(r).toMatchObject({ targets: 3, hits: 0, hitRate: 0, hitRateMet: false });
+    expect(r.diagnostics).toEqual({
+      usedForJudgment: false,
+      missReasons: { 'gate-env-mismatch': 2, 'no-table': 1 },
+      gateEnvFieldDiffs: { platform: 2, arch: 2, ci: 2, tools: 2 },
+      verifyGateEnvCi: expect.stringMatching(/^ci:false/),
+    });
   });
 });
 

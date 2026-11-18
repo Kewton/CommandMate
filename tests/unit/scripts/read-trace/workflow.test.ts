@@ -43,6 +43,17 @@ describe('.github/workflows/read-trace.yml', () => {
     expect(jobs[0].permissions).toBeUndefined();
   });
 
+  it('supersedes an older develop run, keeps no credentials, and gives the suite the CI heap (P3-4)', () => {
+    const c = (wf as unknown as { concurrency?: Record<string, unknown> }).concurrency;
+    expect(c?.group).toBe('read-trace-${{ github.ref }}');
+    expect(c?.['cancel-in-progress']).toBe(true);
+    const checkout = steps.find((s) => s.uses?.startsWith('actions/checkout@'));
+    expect(checkout?.with?.['persist-credentials']).toBe(false);
+    const traced = steps.find((s) => (s.run ?? '').includes('CM_TRACE_REPO_READS=')) as Step & { env?: Record<string, string> };
+    expect(traced.env?.NODE_OPTIONS).toBe('--max-old-space-size=6144');
+    expect(traced.env?.CI).toBe('true');
+  });
+
   it('caps the job with timeout-minutes', () => {
     expect(Number.isInteger(jobs[0]['timeout-minutes'])).toBe(true);
     expect(jobs[0]['timeout-minutes'] as number).toBeGreaterThan(0);

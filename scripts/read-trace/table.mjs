@@ -44,9 +44,17 @@ export function readerKey(commit, { runGit }) {
   return crypto.createHash('sha256').update(lines.join('\n')).digest('hex');
 }
 
-/** A data-file change that B2 would no longer send to the full suite. */
+/**
+ * A data-file change that B2 would no longer send to the full suite.
+ *
+ * `locales/**` is NOT one (design §2.3.3 M1): tests import the locale JSON and
+ * `src/i18n.ts` loads it with a dynamic import, both through vite's transform,
+ * which the worker's fs wrapper never sees. Until an M1 control shows those
+ * reads reach the table, a locale change stays a full run (measured as a
+ * non-target), so the measurement cannot lean towards adopting B2.
+ */
 export function isB2DataFile(file) {
-  return /\.md$/.test(file) || file.startsWith('locales/') || /^tests\/(integration|e2e)\//.test(file);
+  return /\.md$/.test(file) || /^tests\/(integration|e2e)\//.test(file);
 }
 
 function toRepoRelative(name, repoRoot) {

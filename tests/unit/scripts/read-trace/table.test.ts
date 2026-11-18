@@ -202,7 +202,8 @@ describe('selectTests and computeF', () => {
 
   it('classifies B2 data files', () => {
     expect(isB2DataFile('docs/x.md')).toBe(true);
-    expect(isB2DataFile('locales/en/common.json')).toBe(true);
+    // M1: locale JSON is read through vite's transform, invisible to the tracer.
+    expect(isB2DataFile('locales/en/common.json')).toBe(false);
     expect(isB2DataFile('tests/integration/a.test.ts')).toBe(true);
     expect(isB2DataFile('tests/e2e/a.spec.ts')).toBe(true);
     expect(isB2DataFile('src/a.ts')).toBe(false);
