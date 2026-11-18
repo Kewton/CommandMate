@@ -530,6 +530,8 @@ Issue と契約は「変える場所」を名指しし、ワーカーはそこ�
 
 根拠: docs/orchestrate/contract.md#2-4-2-対になる場所を探す実測
 
+静的ガードの試験は、脅威の範囲を冒頭に書く。根拠: docs/orchestrate/contract.md#2-4-静的ガードの試験の書き方
+
 ### 2-4-3. 整理（refactor）の Issue の契約の型
 
 整理（refactor）の Issue は、**振る舞いを変えないこと**を契約で縛る。2-4 の雛形に、次の 3 つの決まりを足す。
@@ -1129,7 +1131,7 @@ CHANGELOG の断片は Issue ごとの別ファイル（`changelog.d/<N>.md`）�
 上記が通れば**フル CI の完走を待たずにマージしてよい**。develop 側の CI（12〜25 分）が安全網に
 なる。**最後の 1 本だけ**はフル CI を待つ。
 
-**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全チェックの合格 = すべての `bucket` が `pass` か `skipping` で、`ci-pr.yml` の全ジョブの登録も待つ。`pending` は待ち、`fail` / `cancel` はマージしない。根拠: docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
+**利用者の許可の条件が「CI が通れば」の run では、どの PR にも `--last` を付けて全チェックの合格を待つ**（全チェックの合格の定義と待ち方は docs/orchestrate/ci-merge.md#6-2-ci-が通ればの許可と全チェックの合格）。
 
 **例外:** 契約の `gates` が `unit-related` の PR は、CI の `Unit Tests` が `pass` になってからマージする。整理の契約（`lint`・`typecheck` だけ、2-4-3）も同じ。また、CI の `Build` のチェックも `pass` になってからマージする（マージする HEAD の precheck に `build=ok` があれば `Build` の `pending` は待たない）。
 
