@@ -184,6 +184,8 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 決定: `merge-pr` にオプションは足さない。全チェックを待つ経路は既存の `--last` で足りるので、許可の条件が「CI が通れば」の run ではどの PR にも付ける規則にする。
 
+`--last` なしの待ちの範囲（決定 89aee71f）: 待つのは `Build` と `Unit Tests` だけ（それぞれ下の「6-2 Unit Tests と Build を待つ例外」の条件のとき）で、E2E などほかのチェックの `pending` は待たない。**E2E を含む全チェックの合格が条件のマージには、`--last` を付ける。**
+
 全チェックの合格は `judgeChecks` の判定そのもの: すべての `bucket` が `pass` か `skipping`。`skipping` は CI が条件で飛ばしたジョブで、待っても結果は変わらないので合格に数える。`pending` は待ち、`fail` / `cancel` はマージしない。
 
 `gh pr checks` は登録済みのチェックしか返さない。登録済みが全部合格でも CI の完走とは限らないので、`--last` は `LAST_REQUIRED_CHECKS` のすべてが登録されるまで待つ。一覧は `.github/workflows/ci-pr.yml` の全ジョブ（matrix の展開後の `Unit Tests (shard 1/4)`〜`(4/4)` と `E2E Tests (shard 1/2)`・`(2/2)` を含む 19 件。`Unit Tests`・`E2E Tests` は shard をまとめる集約ジョブ）で、ジョブを足す・名前を変えるときは一覧も直す。食い違うと `merge-pr.test.ts` が両方向で落ちる。一覧に無いチェック（ほかのワークフローなど）は、登録されてから完了を待つ。`--last` なしは未登録を待たない（今までどおり）。
