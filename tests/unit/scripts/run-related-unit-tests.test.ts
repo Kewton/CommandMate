@@ -290,7 +290,7 @@ describe('main', () => {
     expect(logs).toContain('run-related-unit-tests: related exit=1 textscan exit=0');
   });
 
-  it('handles full mode: calls only npm run test:unit', () => {
+  it('handles a former full change (vitest.config.ts) as related: no npm run test:unit, text-scan tests only (Issue #4467)', () => {
     const calls: { cmd: string; args: string[]; opts: RunOptions }[] = [];
     const run = (cmd: string, args: string[], opts: unknown) => {
       calls.push({ cmd, args, opts: opts as RunOptions });
@@ -310,14 +310,18 @@ describe('main', () => {
       log,
       root: '/dummy',
       collectChangedFiles: collectChangedFilesMock,
+      findTextScanTests: () => ['tests/unit/scan.test.ts'],
     });
 
     expect(exitCode).toBe(0);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].cmd).toBe('npm');
-    expect(calls[0].args).toEqual(['run', 'test:unit']);
-    expect(logs).toContain('run-related-unit-tests: mode=full reason=vitest.config.ts');
-    expect(logs).toContain('run-related-unit-tests: full exit=0');
+    expect(calls.map((c) => [c.cmd, ...c.args])).toEqual([
+      [path.join('/dummy', 'node_modules', '.bin', 'vitest'), 'run', 'tests/unit/scan.test.ts'],
+    ]);
+    expect(logs).toContain(
+      'run-related-unit-tests: mode=related reason=non-source:vitest.config.ts changed=1 traced=0 textscan=1'
+    );
+    expect(logs).toContain('run-related-unit-tests: related exit=skipped textscan exit=0');
+    expect(logs.some((l) => l.includes('mode=full') || l.includes('full exit='))).toBe(false);
   });
 
   it('handles none mode: run is not called and returns 0', () => {
@@ -345,5 +349,117 @@ describe('main', () => {
     expect(exitCode).toBe(0);
     expect(runCalled).toBe(false);
     expect(logs).toContain('run-related-unit-tests: mode=none');
+  });
+});
+
+/**
+ * Issue #4467: a change outside src/ and tests/ no longer switches the local
+ * gate to the whole unit suite (CI's Unit Tests runs it). Pins the argv `run`
+ * receives for the four shapes of change the contract names.
+ */
+describe('main: non-source changes stay related (Issue #4467)', () => {
+  let tmpRoot: string;
+  const TEXTSCAN = ['tests/unit/docs/a.test.ts', 'tests/unit/guards/b.test.ts'];
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-test-related-4467-'));
+  });
+
+  afterEach(() => {
+    removeTempDir(tmpRoot);
+  });
+
+  function touch(rel: string): void {
+    const full = path.join(tmpRoot, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, '');
+  }
+
+  function runMain(files: string[], codes: number[] = []) {
+    const calls: string[][] = [];
+    const logs: string[] = [];
+    const exitCode = main(['--base', 'origin/develop'], {
+      run: (cmd: string, args: string[]) => {
+        calls.push([cmd, ...args]);
+        return codes[calls.length - 1] ?? 0;
+      },
+      log: (msg: string) => logs.push(msg),
+      root: tmpRoot,
+      collectChangedFiles: () => ({ mergeBase: 'base123', files }),
+      findTextScanTests: () => TEXTSCAN,
+    });
+    return { exitCode, calls, logs };
+  }
+
+  const vitest = () => path.join(tmpRoot, 'node_modules', '.bin', 'vitest');
+
+  it('(1) non-source only (docs, README): runs only the text-scan tests', () => {
+    const { exitCode, calls, logs } = runMain(['README.md', 'docs/guide.md']);
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([[vitest(), 'run', ...TEXTSCAN]]);
+    expect(logs).toEqual([
+      'run-related-unit-tests: mode=related reason=non-source:README.md changed=2 traced=0 textscan=2',
+      'run-related-unit-tests: related exit=skipped textscan exit=0',
+    ]);
+  });
+
+  it('(2) non-source + src: vitest related on the existing traceable files, then the text-scan tests', () => {
+    touch('src/lib/a.ts');
+    // src/lib/gone.ts is a deletion: it does not exist, so it is not handed to vitest related.
+    const { exitCode, calls, logs } = runMain(['docs/guide.md', 'src/lib/a.ts', 'src/lib/gone.ts']);
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      [vitest(), 'related', '--run', '--dir', 'tests/unit', 'src/lib/a.ts', '--passWithNoTests'],
+      [vitest(), 'run', ...TEXTSCAN],
+    ]);
+    expect(logs).toEqual([
+      'run-related-unit-tests: mode=related reason=non-source:docs/guide.md changed=3 traced=1 textscan=2',
+      'run-related-unit-tests: related exit=0 textscan exit=0',
+    ]);
+  });
+
+  it('(3) scripts .mjs only: the script is traced by vitest related, and the text-scan tests run', () => {
+    touch('scripts/foo.mjs');
+    const { exitCode, calls, logs } = runMain(['scripts/foo.mjs']);
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      [vitest(), 'related', '--run', '--dir', 'tests/unit', 'scripts/foo.mjs', '--passWithNoTests'],
+      [vitest(), 'run', ...TEXTSCAN],
+    ]);
+    expect(logs[0]).toBe(
+      'run-related-unit-tests: mode=related reason=non-source:scripts/foo.mjs changed=1 traced=1 textscan=2'
+    );
+  });
+
+  it('(4) none: metadata only runs nothing', () => {
+    const { exitCode, calls, logs } = runMain([
+      '.commandmate/tasks/issue-1.yaml',
+      'dev-reports/x.md',
+      'changelog.d/1.md',
+      'CHANGELOG.md',
+      'docs/module-reference.md',
+    ]);
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([]);
+    expect(logs).toEqual(['run-related-unit-tests: mode=none']);
+  });
+
+  it('fails when either the related run or the text-scan run fails', () => {
+    touch('scripts/foo.mjs');
+    expect(runMain(['scripts/foo.mjs'], [1, 0]).exitCode).toBe(1);
+    expect(runMain(['scripts/foo.mjs'], [0, 1]).exitCode).toBe(1);
+    const { exitCode, logs } = runMain(['README.md'], [1]);
+    expect(exitCode).toBe(1);
+    expect(logs).toContain('run-related-unit-tests: related exit=skipped textscan exit=1');
+  });
+
+  it('negative control: src/tests only keeps the --changed run (unchanged argv)', () => {
+    touch('src/lib/a.ts');
+    const { calls, logs } = runMain(['src/lib/a.ts']);
+    expect(calls).toEqual([
+      [vitest(), 'run', 'tests/unit', '--changed', 'base123', '--passWithNoTests'],
+      [vitest(), 'run', ...TEXTSCAN],
+    ]);
+    expect(logs[0]).toBe('run-related-unit-tests: mode=related changed=1 textscan=2');
   });
 });
