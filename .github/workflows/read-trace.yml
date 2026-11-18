@@ -1,0 +1,74 @@
+# Read Trace — measurement only (Issue #4432 PR3, docs/design/verify-wait-4432.md §2.3).
+#
+# On every push to develop, runs the unit suite once with CM_TRACE_REPO_READS
+# set (tests/setup.ts then records which repo files each test file touched),
+# and uploads the resulting read table as an artifact. That is all it does:
+#
+#   - It is not a required check and must not be added to branch protection.
+#   - It never comments, sets a status, or commits; permissions are read-only.
+#   - No gate (run-related-unit-tests, precheck, merge-pr, wait-verify, CI) reads
+#     the artifact. scripts/read-trace/measure.mjs reads it by hand to produce the
+#     key hit rate and f of §2.3.5, which decide whether PR4 is built at all.
+#   - A red test here does not fail the job: a test that did not pass is simply
+#     opaque in the table (M7). The `Unit Tests` job of ci-pr.yml is the verdict.
+#
+# The table records its gate-env (node, platform, CI, lockfile hash, tools on
+# PATH); a verify run whose gate-env differs never counts it as a hit.
+name: Read Trace
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  read-trace:
+    name: Read Trace (measurement only)
+    runs-on: ubuntu-latest
+    # The traced suite runs with CI=true (serial files, vitest.config.ts) plus the
+    # tracer's overhead; the four `Unit Tests` shards each cap at 20.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        # Same cap and `--no-audit` as ci-pr.yml (Issue #2313).
+        timeout-minutes: 5
+        run: npm ci --no-audit
+
+      - name: Run the unit suite with the read tracer
+        run: |
+          out="$RUNNER_TEMP/read-trace"
+          mkdir -p "$out/traces"
+          status=0
+          CM_TRACE_REPO_READS="$out/traces" NODE_ENV=test npx vitest run tests/unit \
+            --reporter=json --outputFile="$out/report.json" || status=$?
+          echo "vitest exit=$status (not a verdict; non-passing files are opaque in the table)"
+
+      - name: Build the read table
+        run: |
+          out="$RUNNER_TEMP/read-trace"
+          node scripts/read-trace/gate-env.mjs > "$out/gate-env.json"
+          node scripts/read-trace/build-table.mjs \
+            --trace-dir "$out/traces" --report "$out/report.json" \
+            --gate-env "$out/gate-env.json" --commit "$GITHUB_SHA" \
+            --out "$out/table-$GITHUB_SHA.json"
+
+      - name: Upload the read table
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-trace-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/read-trace/table-${{ github.sha }}.json
+            ${{ runner.temp }}/read-trace/gate-env.json
+          retention-days: 30
+          if-no-files-found: error

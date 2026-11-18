@@ -527,3 +527,23 @@ afterAll(() => {
   closeOpenTestDatabases();
   removeTestDatabaseDir(testDatabase.dir);
 });
+
+// Issue #4432 PR3: read trace for the B2 measurement (docs/design/verify-wait-4432.md §2.3).
+//
+// Only when CM_TRACE_REPO_READS is set (the develop-push job in
+// .github/workflows/read-trace.yml). Without it nothing is imported and nothing
+// is wrapped, so every other run of the suite is unchanged — pinned by
+// tests/unit/scripts/read-trace/setup-block.test.ts. Registered last, so its
+// afterAll runs before the cleanup above (stack order) and that cleanup is not
+// attributed to the test file (M12). Measurement only: no gate reads the trace.
+if (process.env.CM_TRACE_REPO_READS) {
+  const { installReadTracer } = await import('../scripts/read-trace/tracer.mjs');
+  const readTracer = installReadTracer({
+    outDir: process.env.CM_TRACE_REPO_READS,
+    repoRoot: process.cwd(),
+  });
+  readTracer.beginFile(expect.getState().testPath ?? null);
+  afterAll(() => {
+    readTracer.endFile();
+  });
+}
