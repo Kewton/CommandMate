@@ -67,6 +67,12 @@ export interface AgentVersionRow {
 interface CacheEntry {
   rows: AgentVersionRow[];
   expiresAt: number;
+  /**
+   * Issue #4452: whether antigravity could be probed when these rows were made. A
+   * use of antigravity (or a declaration) since makes the entry stale at once, so
+   * the row shows right after the use rather than after the TTL.
+   */
+  antigravityProbeable: boolean;
 }
 
 let cache: CacheEntry | null = null;
@@ -147,21 +153,26 @@ export async function getAgentVersions(
 
   if (options.force) {
     cache = null;
-  } else if (cache && cache.expiresAt > now) {
+  } else if (
+    cache &&
+    cache.expiresAt > now &&
+    cache.antigravityProbeable === mayProbeToolVersion('antigravity')
+  ) {
     return cache.rows;
   }
 
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
+    const antigravityProbeable = mayProbeToolVersion('antigravity');
     try {
       const rows = await computeRows();
-      cache = { rows, expiresAt: expiryFrom(now) };
+      cache = { rows, expiresAt: expiryFrom(now), antigravityProbeable };
       return rows;
     } catch {
       // A probe fan-out that throws must not fail the surface that asked: the
       // versions are an annotation, and an empty list renders as "unknown".
-      cache = { rows: [], expiresAt: expiryFrom(now) };
+      cache = { rows: [], expiresAt: expiryFrom(now), antigravityProbeable };
       return [];
     } finally {
       inFlight = null;

@@ -5,12 +5,19 @@
  * (Antigravity terms §6, consumer plans) CommandMate does not start agy on a path the
  * user did not aim at antigravity: server start, health, the agents version list
  * (`GET /api/agents/versions`, `GET /api/asks/capabilities`), the slash-command
- * catalog's staleness probe. antigravity's version is read only when
+ * catalog's staleness probe, and the detector's freshness probe (the pane poll
+ * `GET /current-output`, `capture --json`, `commandmate status`). antigravity's
+ * version is read only when
  *
  *  - the user declared an API-key or enterprise plan (`CM_ANTIGRAVITY_USAGE`), or
  *  - antigravity was used in this server process (a launch or a send).
  *
  * Every other tool is always allowed: their probes are unchanged.
+ *
+ * Who marks a use: `AntigravityTool.launchSession` / `sendMessage`. Without the
+ * declaration only a person reaches them — the tool policy refuses agent, schedule,
+ * timer, relay and Auto-Yes origins first — and the server's start sequence (session
+ * adopt / alias reconcile / opencode reattach) calls neither.
  *
  * The "used" mark lives on `globalThis`, because Next.js route bundles and the custom
  * server can load this module more than once; one process must have one answer.
