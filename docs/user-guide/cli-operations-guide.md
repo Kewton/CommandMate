@@ -4479,6 +4479,8 @@ Update available for codex: 0.149.1 -> 0.151.0
 Run "commandmate agents update codex" to install it.
 ```
 
+> **antigravity の行が出る条件**（Issue #4452）: `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` の申告があるときだけです（申告なしでは `agy --version` を実行しません）。More 画面・agent pane の版の表示（`GET /api/agents/versions`）とスラッシュコマンドの版の注意は、申告があるとき、またはそのサーバーで antigravity を起動・送信した後に出ます。
+
 #### LATEST 列が codex にしか出ない理由
 
 **ネットワークを一切使わないため**です。INSTALLED はどのツールも `<cli> --version` の実測ですが、

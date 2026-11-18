@@ -8,7 +8,7 @@
  * is why `getAgentVersions({ force: true })` exists and why it has its own case.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // `vi.mock` factories are hoisted above every other statement in the file, so
 // the doubles they close over have to be hoisted with them.
@@ -49,6 +49,15 @@ function machine(version: string | null, latest: string | null = '0.151.0') {
 beforeEach(() => {
   vi.clearAllMocks();
   clearAgentVersionsCache();
+  // Issue #4452: antigravity has a row only with the usage declaration (or after
+  // a use). These cases are about every probe-table row, so they run as a
+  // declared install; the undeclared case is
+  // tests/unit/tool-policy/agy-version-probe-4452.test.ts.
+  vi.stubEnv('CM_ANTIGRAVITY_USAGE', 'api-key');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe('[#2069] getAgentVersions', () => {

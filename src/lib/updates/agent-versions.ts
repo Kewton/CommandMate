@@ -32,6 +32,7 @@
 import { DETECTOR_VERSION_PROBES, runDetectorVersionProbe } from '../detection/version-probes';
 import { evaluateCodexUpdate, readCodexVersionFile } from './codex-version';
 import { isUpdatableAgentTool } from './agent-updater';
+import { mayProbeToolVersion } from '../tool-policy/version-probe-gate';
 
 /**
  * How long one fan-out of `--version` probes is reused.
@@ -102,8 +103,15 @@ async function buildRow(tool: string): Promise<AgentVersionRow> {
   };
 }
 
+/**
+ * Issue #4452: antigravity has no row unless its version may be read
+ * ({@link mayProbeToolVersion}: the usage declaration, or a use in this process).
+ * Listing versions is not using antigravity, so `agy` is not started for it. The row
+ * is left out rather than reported as `installed: null`, which would read as
+ * "not installed".
+ */
 async function computeRows(): Promise<AgentVersionRow[]> {
-  const tools = Object.keys(DETECTOR_VERSION_PROBES).sort();
+  const tools = Object.keys(DETECTOR_VERSION_PROBES).filter((tool) => mayProbeToolVersion(tool)).sort();
   return Promise.all(tools.map(buildRow));
 }
 
