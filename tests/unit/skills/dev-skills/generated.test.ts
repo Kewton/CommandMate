@@ -73,8 +73,8 @@ describe('generated -dev skills', () => {
         }
       }
     }
-    // 83 per root (81 replacements + 2 description prefixes), two roots.
-    expect(total).toBe(83 * 2);
+    // 85 per root (83 replacements + 2 description prefixes), two roots.
+    expect(total).toBe(85 * 2);
   });
 });
 
