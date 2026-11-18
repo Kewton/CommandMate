@@ -3,8 +3,9 @@
  * Runs unit tests related to changed files in the working tree / branch.
  *
  * Used by `/orchestrate` verify gate `unit-related` (Issue #2639).
- * Runs only tests affected by the diff plus tests that scan repository files,
- * falling back to full unit tests when non-source/config files change.
+ * Runs only tests affected by the diff plus tests that scan repository files.
+ * Changes outside src/ and tests/ do not switch to the whole unit suite
+ * (Issue #4467): CI's Unit Tests runs it for every PR.
  * Excludes metadata files (.commandmate/tasks/, dev-reports/, changelog.d/,
  * CHANGELOG.md, docs/module-reference.md).
  *
@@ -63,6 +64,7 @@ export function collectChangedFiles({ cwd, base }) {
 
 /**
  * Classifies file changes into 'none', 'related', or 'full'.
+ * 'full' only marks "this used to run the whole suite" (#4467); main() does not run the whole suite.
  *
  * @param {string[]} files
  * @returns {{ mode: 'none' | 'related' | 'full', reason: string | null, considered: string[] }}
@@ -145,6 +147,23 @@ export function findTextScanTests({ root }) {
 }
 
 /**
+ * Changed files `vitest related` can trace through the module graph (#4467).
+ */
+const TRACEABLE_PATTERN = /^(src|tests|scripts)\/.+\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
+
+/**
+ * Picks the changed files to hand to `vitest related`: traceable code that still
+ * exists (a deleted file cannot be resolved).
+ *
+ * @param {string[]} files
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function traceableFiles(files, root) {
+  return files.filter((file) => TRACEABLE_PATTERN.test(file) && fs.existsSync(path.join(root, file)));
+}
+
+/**
  * Default runner for child processes.
  */
 export function defaultRun(command, args, options = {}) {
@@ -200,25 +219,38 @@ export function main(argv, deps = {}) {
     return 0;
   }
 
-  if (mode === 'full') {
-    log(`run-related-unit-tests: mode=full reason=${reason}`);
-    const code = run('npm', ['run', 'test:unit'], { cwd: root, env: process.env });
-    log(`run-related-unit-tests: full exit=${code}`);
-    return code === 0 ? 0 : 1;
-  }
-
-  // mode === 'related'
   const textScanTests = findScan({ root });
-  log(`run-related-unit-tests: mode=related changed=${considered.length} textscan=${textScanTests.length}`);
-
   const vitestBin = path.join(root, 'node_modules', '.bin', 'vitest');
   const env = { ...process.env, NODE_ENV: 'test' };
 
-  const code1 = run(
-    vitestBin,
-    ['run', 'tests/unit', '--changed', changed.mergeBase, '--passWithNoTests'],
-    { cwd: root, env }
-  );
+  let code1 = 0;
+  let exit1Str;
+  if (mode === 'full') {
+    // A change outside src/ and tests/ (#4467): the whole unit suite is CI's job.
+    // Run the tests the traceable files reach, plus every text-scan test.
+    const traced = traceableFiles(considered, root);
+    log(
+      `run-related-unit-tests: mode=related reason=non-source:${reason} changed=${considered.length} traced=${traced.length} textscan=${textScanTests.length}`
+    );
+    exit1Str = 'skipped';
+    if (traced.length > 0) {
+      code1 = run(
+        vitestBin,
+        ['related', '--run', '--dir', 'tests/unit', ...traced, '--passWithNoTests'],
+        { cwd: root, env }
+      );
+      exit1Str = String(code1);
+    }
+  } else {
+    // mode === 'related'
+    log(`run-related-unit-tests: mode=related changed=${considered.length} textscan=${textScanTests.length}`);
+    code1 = run(
+      vitestBin,
+      ['run', 'tests/unit', '--changed', changed.mergeBase, '--passWithNoTests'],
+      { cwd: root, env }
+    );
+    exit1Str = String(code1);
+  }
 
   let code2 = 0;
   let exit2Str = 'skipped';
@@ -227,7 +259,7 @@ export function main(argv, deps = {}) {
     exit2Str = String(code2);
   }
 
-  log(`run-related-unit-tests: related exit=${code1} textscan exit=${exit2Str}`);
+  log(`run-related-unit-tests: related exit=${exit1Str} textscan exit=${exit2Str}`);
 
   const success = code1 === 0 && (exit2Str === 'skipped' || code2 === 0);
   return success ? 0 : 1;
