@@ -12,6 +12,9 @@
  * Issue #3863: the answer mode — chosen in the confirm dialog, shown beside the ON switch
  * Issue #4436: a tool-policy refusal of the enabling (the handler rejects with
  *   ToolPolicyRefusalError) shows its reason and links; the switch stays OFF.
+ * Issue #4456: that notice answers one enabling. A change of `enabled` or of the
+ *   agent (by the CLI, the API, another tab) drops it, so it is not shown again
+ *   when the switch reads OFF later; a new refusal is shown as before.
  */
 
 'use client';
@@ -106,6 +109,14 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   // Issue #4436: the refusal of the last enabling, until the next attempt.
   const [refusal, setRefusal] = useState<ToolPolicyRefusalView | null>(null);
+  // Issue #4456: the state the refusal was given in. Adjusted during render (not
+  // in an effect) so no frame shows a refusal of a state that has since changed.
+  const refusalStateKey = `${enabled ? 'on' : 'off'}|${cliToolName ?? ''}`;
+  const [refusalState, setRefusalState] = useState(refusalStateKey);
+  if (refusalState !== refusalStateKey) {
+    setRefusalState(refusalStateKey);
+    if (refusal !== null) setRefusal(null);
+  }
   // Issue #959: latch that flips the UI to OFF the instant the countdown hits
   // 00:00, so the toggle no longer shows ON while the server-side state catches
   // up on the next poll.

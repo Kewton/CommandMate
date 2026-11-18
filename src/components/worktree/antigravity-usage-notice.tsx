@@ -9,6 +9,10 @@
  * Guidance only: it never blocks the add. What must be refused is refused by the
  * server (#4436). The declaration is a server environment variable, so its state is
  * not shown and cannot be changed here.
+ *
+ * Issue #4456: `compact` (the composer) caps the body's height and scrolls it, so
+ * in a narrow pane (the 3-way split) the notice does not push the input box out
+ * of view; the headline and Close stay outside the scrolling part.
  */
 
 'use client';
@@ -41,11 +45,14 @@ export interface AntigravityUsageNoticeProps {
   /** Close the notice (it is not shown again in this browser). */
   onDismiss: () => void;
   className?: string;
+  /** Issue #4456: cap the body's height (scrolls) — for the composer, above the input box. */
+  compact?: boolean;
 }
 
 export const AntigravityUsageNotice = memo(function AntigravityUsageNotice({
   onDismiss,
   className = '',
+  compact = false,
 }: AntigravityUsageNoticeProps) {
   const t = useTranslations('worktree');
   const linkClass = 'underline text-accent-700 dark:text-accent-300 hover:text-accent-800';
@@ -60,18 +67,23 @@ export const AntigravityUsageNotice = memo(function AntigravityUsageNotice({
         <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-warning" aria-hidden="true" />
         {t(ANTIGRAVITY_NOTICE_KEYS.headline)}
       </p>
-      <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.body)}</p>
-      <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.unconfirmed)}</p>
-      <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.declaration, { env: USAGE_DECLARATION_ENV })}</p>
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <a href={ANTIGRAVITY_TERMS_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
-          {t(ANTIGRAVITY_NOTICE_KEYS.terms)}
-        </a>
-        <a href={ANTIGRAVITY_FAQ_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
-          {t(ANTIGRAVITY_NOTICE_KEYS.faq)}
-        </a>
-        <span className="text-muted-foreground">{t(ANTIGRAVITY_NOTICE_KEYS.asOf, { date: ANTIGRAVITY_TERMS_CHECKED_AT })}</span>
-      </p>
+      <div
+        data-testid={`${ANTIGRAVITY_NOTICE_TEST_ID}-body`}
+        className={compact ? 'space-y-1.5 max-h-24 overflow-y-auto overscroll-contain pr-1' : 'space-y-1.5'}
+      >
+        <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.body)}</p>
+        <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.unconfirmed)}</p>
+        <p className="break-words">{t(ANTIGRAVITY_NOTICE_KEYS.declaration, { env: USAGE_DECLARATION_ENV })}</p>
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <a href={ANTIGRAVITY_TERMS_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
+            {t(ANTIGRAVITY_NOTICE_KEYS.terms)}
+          </a>
+          <a href={ANTIGRAVITY_FAQ_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
+            {t(ANTIGRAVITY_NOTICE_KEYS.faq)}
+          </a>
+          <span className="text-muted-foreground">{t(ANTIGRAVITY_NOTICE_KEYS.asOf, { date: ANTIGRAVITY_TERMS_CHECKED_AT })}</span>
+        </p>
+      </div>
       <div className="flex justify-end">
         <button
           type="button"

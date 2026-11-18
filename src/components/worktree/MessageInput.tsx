@@ -1077,8 +1077,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         </div>
       )}
 
-      {/* Issue #4438 再指示 1: the Antigravity usage notice before the first launch. */}
-      {showUsageNotice && <AntigravityUsageNotice onDismiss={usageNotice.dismiss} />}
+      {/* Issue #4438 再指示 1: the Antigravity usage notice before the first launch.
+          Issue #4456: compact, so a narrow pane keeps the input box in view. */}
+      {showUsageNotice && <AntigravityUsageNotice onDismiss={usageNotice.dismiss} compact />}
 
       {/* Issue #4227 G-PR6: the preview for this send could not be read — nothing was sent. */}
       {briefCheckFailed && (
