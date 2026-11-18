@@ -535,7 +535,7 @@ Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
        name it (id=...). id=context-limit: the conversation is over the model's
        limit; \`instances <id> kill <instance>\` and ask again in a fresh session
   21   nothing was running to ask
-  124  timed out. Look with \`capture <id> --instance <id> --pane --tail 60\`.
+  124  timed out. Look with \`capture <id> --instance <id> --pane --tail 80\`.
        When the send itself returned past the deadline, the message WAS sent
        (stderr says so); do not send it again
 
@@ -672,7 +672,7 @@ Do not ask again: the answer is the same until the server declares its usage.
           console.error(
             `Timeout: ${worktreeId} exceeded ${timeout}s while the message was being sent. `
             + 'The message was sent; not waiting for the reply. '
-            + `Look with \`capture ${worktreeId}${instanceId ? ` --instance ${instanceId}` : ''} --pane --tail 60\`.`
+            + `Look with \`capture ${worktreeId}${instanceId ? ` --instance ${instanceId}` : ''} --pane --tail 80\`.`
           );
           process.exit(WaitExitCode.TIMEOUT);
           return;
