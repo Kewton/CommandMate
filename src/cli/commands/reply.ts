@@ -97,7 +97,7 @@ export function createReplyCommand(): Command {
     .addHelpText('after', `
 Only rows a transcript reader wrote (<tool>-turn:<id>) count as a reply, the
 same rule \`ask\` uses; the pane is never read. Tools with a transcript reader:
-claude, codex, antigravity, command-code, opencode.
+claude, codex, antigravity, command-code, opencode, opencode-v2.
 
 No reply yet (or none after --since) is not an error: stdout is empty, stderr
 says so in one line, and the exit code is 0. --json prints "reply": null.
