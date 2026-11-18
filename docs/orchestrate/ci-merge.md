@@ -82,6 +82,16 @@ self-hosted のランナーはローカルのゲートと同じマシンの資�
 `unit-related` は、`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイルが変わると自分でテスト全体に切り替わる
 （`scripts/run-related-unit-tests.mjs` の `mode=full`）。そのときに `unit` を重ねて足さない（同じ全体を 2 回走らせるだけ）。
 
+**手元ではテスト全体に切り替えない。全体は CI に任せる（人の承認 2026-11-19、Sprint 7 のレーン V3 で実装）。**
+実測（2026-11-18、run 3374〜3427）: docs・README・`.claude/**`・`scripts/**` を 1 つ変えるだけで `mode=full` になり、ほぼ全 PR が
+手元で全体（3072 ファイル・約 5.7 万テスト）を 50〜72 分走らせていた。`cpu.heavy` の待ちも 22〜78 分で、25 本中 14 本が待ち切り
+（`reason=mutex-wait`、exit 99）で結果が出なかった。CI の `Unit Tests` は同じ全体を 4 分割で流し、CI 全体が 17〜23 分で終わる。
+- V3 の後: 非ソースの変更でも `related`（変更から辿れるテスト＋リポのファイルを読む試験＝`findTextScanTests` の全件）だけを流す。
+  ログは `mode=related reason=non-source:<ファイル>`
+- マージの関門は変えない: CI の `Unit Tests`（全体）は必須で、`merge-pr --last` が全チェックの合格を待つ。手元で見逃したものは CI で落ち、
+  手戻りが 1 回（約 20 分）増えるだけ
+- V3 のマージまで: `mode=full` の run は 1 本 1 時間前後かかる前提で、1 コミット 1 本・新しいコミットを待ってから流す（下の資源制御の節）
+
 **同じ PR の同じ tree で、テスト全体を重ねない。** テストのゲートの合格は、その HEAD（＝その tree）と、その環境（`env=` の manifest、
 `verifyEnvState` が `same`）にだけ効く。この 2 つが同じなら、レビューの往復で新しいコミットが無い再検証・precheck・merge 前の確認で
 テスト全体を走らせ直さない（precheck は同じ HEAD・同じ引数の `ok` を再利用する。上の節）。HEAD か環境が変わったら走らせ直す。
@@ -128,6 +138,12 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **run の記録**: `verify` / `precheck` の行は、`durationSec` を `queueSec`（枠の待ち）・`mutexSec`（ロックの待ち）・`runSec`（実行）に
   分けて持てる（`run-log.mjs append --queue-sec / --mutex-sec / --run-sec`。無い行は今までどおり読む）。precheck は自分で
   `mutexSec`・`runSec` を書く
+- **ゲートの `status: running` は「実行中」とは限らない**: `cpu.heavy` を待っている間も `running` と出る。始まったかは
+  `log_tail` の `[mutex] waited=` の行（ロックを取ると出る）か、`vitest` のプロセスがその worktree で動いているかで確かめる
+  （2026-11-18、PM が `running` を開始と読み違え、A1 の順の調整を誤った）
+- **1 コミットに verify は 1 本**: ワーカーの verify が走っている同じコミットに、リーダーの `wait-verify` や再試行を重ねない。
+  古いコミットの run が列に残ると、同じ worktree の新しい verify は 409 で断られる。run の取消し（`POST /api/worktrees/<id>/verify/runs/<run>/cancel`）は
+  エージェントからは自動の許可の判定で断られることがある。そのときは迂回せず、PM が人へ取消しを頼む（承認は run ごと）
 - **待ち切った verify**: `reason=mutex-wait` の SKIP だけで exit 99 になった検証は、`wait-verify.mjs` が `--mutex-retries`（既定 2）回まで
   自動で並び直す（#3938）。手順と記録の読み方は docs/orchestrate/exit-codes.md#3-4-99-の対応
 
