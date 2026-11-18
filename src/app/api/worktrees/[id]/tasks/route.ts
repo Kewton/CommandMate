@@ -25,7 +25,8 @@ import { createTask, getWorktreeById, listTasks, type Task } from '@/lib/db';
 import { isValidInstanceId, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { ROLE_CONDITION_UNMET_CODE } from '@/lib/agent-roles/launch-errors';
 import { runningRoleProblem } from '@/lib/session/role-launch';
-import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
+import { resolveSessionTargetStrict } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { loadTaskContract, TaskContractError } from '@/lib/tasks/contract-parser';
 import {
@@ -183,25 +184,35 @@ export async function POST(
     // since then, this contract would run under a stale role: nothing is created or
     // sent. A session with no evidence here is one the send below starts, or one already
     // running that the answer warns about (#4132).
-    const roleTarget = resolveSessionTarget(db, id, {
+    //
+    // Issue #4449 (P2-1): strict, as `/send` and the Auto-Yes route resolve: a body
+    // naming a tool its instance's roster entry contradicts is 400, never judged (and
+    // written) as the tool it named while the session is another.
+    const resolution = resolveSessionTargetStrict(db, id, {
       instanceId: payload.instanceId as string | undefined,
       requestedCliTool: payload.cliToolId as CLIToolType | undefined,
     });
-    // Issue #4449: the tool this row is written for — named, or the default resolved
-    // just above — is the one judged, and the one written below. Judged here, before
-    // the reads that follow, so a refusal comes before a role's (exit 33, not 32). The
-    // awaits between this verdict and `createTask` only read (role evidence, a warning):
-    // the verdict's inputs are locals (`taskCliToolId`, the body's origin) and the
-    // server's declaration, which no request changes, so nothing can make the row
-    // differ from what was judged (I2 / I3).
-    const taskCliToolId: CLIToolType = (payload.cliToolId as CLIToolType | undefined) ?? roleTarget.cliToolId;
-    const toolPolicyRefusal = findWriteToolPolicyRefusal(db, {
-      worktreeId: id,
-      tool: taskCliToolId,
-      instanceId: roleTarget.instanceId,
-      request: policyRequest.value,
-    });
-    if (toolPolicyRefusal) return NextResponse.json(toolPolicyRefusal, { status: 409 });
+    if (!resolution.ok) return sessionTargetConflictResponse(resolution.conflict);
+    const roleTarget = resolution.target;
+    // Issue #4449: the tool this row is written for — the target resolved once, just
+    // above — is the one judged and the one written (`/send` and the grant then go to the
+    // task's recorded target by `taskId`, never a default resolved again). Judged here,
+    // before the reads that follow, so a refusal comes before a role's (exit 33, not 32),
+    // and judged again right before `createTask`, with no await in between (I3): the
+    // awaits only read (role evidence, a warning), but the relay part of the verdict
+    // reads the roster of the `replyTo` session, which may move while they run.
+    const taskCliToolId: CLIToolType = roleTarget.cliToolId;
+    const judge = (): NextResponse | null => {
+      const refusal = findWriteToolPolicyRefusal(db, {
+        worktreeId: id,
+        tool: taskCliToolId,
+        instanceId: roleTarget.instanceId,
+        request: policyRequest.value,
+      });
+      return refusal ? NextResponse.json(refusal, { status: 409 }) : null;
+    };
+    const earlyRefusal = judge();
+    if (earlyRefusal) return earlyRefusal;
     const launchTarget = { worktreeId: id, cliToolId: roleTarget.cliToolId, instanceId: roleTarget.instanceId };
     const roleProblem = await runningRoleProblem(db, launchTarget, worktree.path);
     if (roleProblem !== null) {
@@ -213,6 +224,8 @@ export async function POST(
 
     const roleWarning = await contractRoleWarning(db, launchTarget, worktree.path);
 
+    const lateRefusal = judge();
+    if (lateRefusal) return lateRefusal;
     const task = createTask(db, {
       worktreeId: id,
       cliToolId: taskCliToolId,

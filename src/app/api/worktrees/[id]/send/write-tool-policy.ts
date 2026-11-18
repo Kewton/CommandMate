@@ -84,7 +84,14 @@ export type WriteToolPolicyRefusalBody = Record<string, unknown> & { code: strin
  */
 export function findWriteToolPolicyRefusal(
   db: Database.Database,
-  input: { worktreeId: string; tool: CLIToolType; instanceId?: string; request: WriteToolPolicyRequest },
+  input: {
+    worktreeId: string;
+    tool: CLIToolType;
+    instanceId?: string;
+    request: WriteToolPolicyRequest;
+    /** `send` for the writes; `GET …/tool-policy` may ask for `ask`. */
+    operation?: 'send' | 'ask';
+  },
 ): WriteToolPolicyRefusalBody | null {
   const { request } = input;
   if (request.replyTo !== null) {
@@ -94,7 +101,10 @@ export function findWriteToolPolicyRefusal(
         instanceId: request.replyTo.instanceId,
       }).cliToolId;
     } catch {
-      // Not resolvable here: opening the relay will say what is wrong with it.
+      // `resolveSessionTarget` answers for any id (down to the fallback tool) and throws
+      // only on an id it cannot read at all. Then rule 0 is not asked here: the CLI
+      // resolves both ends before any write (`resolveRelayEndpoints`, exit 2), and
+      // `POST /api/relays` judges rule 0 again when the relay is opened.
     }
     const relayDenial = from === null
       ? null
@@ -109,7 +119,7 @@ export function findWriteToolPolicyRefusal(
   }
   const denial = findToolPolicyDenial({
     tool: input.tool,
-    operation: 'send',
+    operation: input.operation ?? 'send',
     origin: request.origin,
     originEvidence: request.originEvidence,
     worktreeId: input.worktreeId,

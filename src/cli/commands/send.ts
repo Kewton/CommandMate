@@ -135,6 +135,7 @@ function resolveAutoYesDurationMs(duration: string | undefined): number {
  * @param contractPolicy - The policy of the contract this send created (Issue #3723), else null
  * @param onlyIfOff - Refuse if a grant is on by the time it arrives (Issue #4132)
  * @param replyTo - The `--reply-to` relay still to be opened after arming (Issue #4449)
+ * @param taskId - The task of `--contract`: the grant goes to its recorded target (Issue #4449)
  */
 async function enableAutoYes(
   client: ApiClient,
@@ -145,7 +146,8 @@ async function enableAutoYes(
   instanceId: string | undefined,
   contractPolicy: AutoYesContractPolicy | null = null,
   onlyIfOff = false,
-  replyTo?: RelayEndpointArg
+  replyTo?: RelayEndpointArg,
+  taskId?: string
 ): Promise<AutoYesSetResult | undefined> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
@@ -154,6 +156,10 @@ async function enableAutoYes(
   // Issue #4449: the relay this send opens after arming, judged before the grant is written.
   if (replyTo) {
     autoYesBody.replyTo = { worktreeId: replyTo.worktreeId, instanceId: replyTo.instanceId };
+  }
+  // Issue #4449: the grant of a --contract send is for the task's recorded target.
+  if (taskId) {
+    autoYesBody.taskId = taskId;
   }
   if (onlyIfOff) {
     autoYesBody.onlyIfOff = true;
@@ -221,10 +227,11 @@ async function enableAutoYesAfterSend(
   durationMs: number,
   agent: string | undefined,
   instanceId: string | undefined,
-  contractPolicy: AutoYesContractPolicy | null
+  contractPolicy: AutoYesContractPolicy | null,
+  taskId: string | undefined
 ): Promise<void> {
   try {
-    await enableAutoYes(client, worktreeId, options, durationMs, agent, instanceId, contractPolicy);
+    await enableAutoYes(client, worktreeId, options, durationMs, agent, instanceId, contractPolicy, false, undefined, taskId);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.error(
@@ -1117,6 +1124,8 @@ tool policy (antigravity, above; nothing typed, do not send it again).
         // so an invalid contract cannot leave auto-yes enabled for a message
         // that was never sent.
         let taskId: string | undefined;
+        // Issue #4449: set when the message and the grant go by the task's target.
+        let boundTaskId: string | undefined;
         // Issue #3723: what the created contract lets Auto-Yes answer.
         let contractPolicy: AutoYesContractPolicy | null = null;
         let content = message;
@@ -1125,6 +1134,9 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           taskId = task.task.id;
           content = task.message;
           contractPolicy = task.contractPolicy;
+          // Issue #4449 (I2): a send naming no target is bound to its task's recorded target
+          // (`taskId` on the grant and on `/send`), the one the task was judged for.
+          if (agent === undefined && instanceId === undefined) boundTaskId = taskId;
           console.error(`Task created: ${taskId}`);
           console.log(taskId);
         }
@@ -1200,7 +1212,8 @@ tool policy (antigravity, above; nothing typed, do not send it again).
             armedGrant = await enableAutoYes(
               client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, onlyIfOff,
               // Issue #4449: the relay not opened yet is judged with the grant, before it is written.
-              relay ? undefined : relayEndpoints?.from
+              relay ? undefined : relayEndpoints?.from,
+              boundTaskId
             );
           } catch (error) {
             // Issue #4132: a grant armed since that read. It is theirs: it stays as it
@@ -1268,6 +1281,11 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           assignment: roleAssignment,
           expected: expectedRole,
         });
+        // Issue #4449 (I2): the message of a --contract send naming no target goes to the
+        // target its task was judged and created for — the server reads it from the task,
+        // so a default changed since the task is not resolved again. The body still names
+        // nobody (#4116); a send that names its target already pins it.
+        if (boundTaskId) sendBody.taskId = boundTaskId;
 
         // Issue #3957: a bound relay's id rides on the send, which reserves it
         // and records where the body went in.
@@ -1323,7 +1341,7 @@ tool policy (antigravity, above; nothing typed, do not send it again).
         // A failure here does not fail the task: the message was delivered and
         // the task is running, which is what the row already says. Nor the command (Issue #4159).
         if (applyAutoYesAfterSend) {
-          await enableAutoYesAfterSend(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
+          await enableAutoYesAfterSend(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, boundTaskId);
         }
       } catch (error) {
         // Issue #4437: the send or its relay refused by the tool policy: exit 33.

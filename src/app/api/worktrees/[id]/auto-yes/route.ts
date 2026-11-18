@@ -55,6 +55,7 @@ import { autoYesGrantIdOf } from './auto-yes-grant';
 import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE } from '@/lib/tool-policy/policy';
 import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import { findWriteToolPolicyRefusal, readWriteToolPolicyRequest } from '../send/write-tool-policy';
+import { readTaskTarget } from '../send/task-target';
 
 const logger = createLogger('api/auto-yes');
 
@@ -486,9 +487,19 @@ export async function POST(
     // of that table — with two contradicting declarations of which agent is
     // meant, refusing is the only answer that cannot auto-answer a dialog in
     // the wrong pane.
-    const resolution = resolveSessionTargetStrict(getDbInstance(), id, {
+    //
+    // Issue #4449: a grant for a task (`send --contract --auto-yes`, `taskId`) is for the
+    // target the task recorded when it was judged and created, not a default resolved
+    // again; a body naming another target is 400 `task_target_mismatch`.
+    const taskTarget = readTaskTarget(getDbInstance(), id, {
+      taskId: body.taskId,
+      cliToolId: body.cliToolId as CLIToolType | undefined,
       instanceId: body.instanceId as string | undefined,
-      requestedCliTool: body.cliToolId as CLIToolType | undefined,
+    });
+    if (!taskTarget.ok) return taskTarget.response;
+    const resolution = resolveSessionTargetStrict(getDbInstance(), id, {
+      instanceId: taskTarget.value.instanceId,
+      requestedCliTool: taskTarget.value.requestedCliTool,
     });
     if (!resolution.ok) {
       return sessionTargetConflictResponse(resolution.conflict);

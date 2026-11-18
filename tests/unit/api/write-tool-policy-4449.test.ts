@@ -291,3 +291,82 @@ describe('POST /tasks — send --contract (Issue #4449)', () => {
     expect(count('tasks')).toBe(0);
   });
 });
+
+describe('POST /tasks judges the session the target resolves to (Issue #4449, P2-1)', () => {
+  beforeEach(() => {
+    setAgentInstances(db, WT, [
+      { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 },
+      { id: 'agy-1', cliTool: 'antigravity', alias: 'Agy', order: 1 },
+    ] as Parameters<typeof setAgentInstances>[2]);
+  });
+
+  it('4449: codex named for an instance the roster records as antigravity is a 400 and writes no row', async () => {
+    const { status, body } = await call(tasksRoute.POST as Handler, 'tasks', 'POST', {
+      contractPath: '.commandmate/tasks/x.yaml',
+      cliToolId: 'codex',
+      instanceId: 'agy-1',
+      origin: 'agent',
+    });
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ code: 'instance_tool_conflict' });
+    expect(count('tasks')).toBe(0);
+  });
+
+  it('4449: that instance named alone is judged as antigravity: 409, no row', async () => {
+    const { status } = await call(tasksRoute.POST as Handler, 'tasks', 'POST', {
+      contractPath: '.commandmate/tasks/x.yaml',
+      instanceId: 'agy-1',
+      origin: 'agent',
+    });
+    expect(status).toBe(409);
+    expect(count('tasks')).toBe(0);
+  });
+});
+
+describe('POST /send and the Auto-Yes grant go to the task\'s recorded target (Issue #4449, I2)', () => {
+  async function createdTaskId(): Promise<string> {
+    const { status, body } = await call(tasksRoute.POST as Handler, 'tasks', 'POST', { contractPath: '.commandmate/tasks/x.yaml', origin: 'session' });
+    expect(status).toBe(201);
+    return body.task.id as string;
+  }
+
+  it('4449: naming nobody but the task, a default turned antigravity since is not resolved again', async () => {
+    const { validateSendRequest } = await import('@/app/api/worktrees/[id]/send/send-request');
+    const taskId = await createdTaskId();
+    db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('antigravity', WT);
+    const validated = validateSendRequest(db, WT, { content: 'go', taskId });
+    expect(validated.ok && validated.value.target).toMatchObject({ cliToolId: 'codex', instanceId: 'codex' });
+    // control: without the task, the default is resolved as before
+    const plain = validateSendRequest(db, WT, { content: 'go' });
+    expect(plain.ok && plain.value.target.cliToolId).toBe('antigravity');
+  });
+
+  it.each([
+    [{ cliToolId: 'antigravity' as const }],
+    [{ instanceId: 'agy-2' }],
+  ])('4449: a body naming another target than its task is a 400, not a silent choice (%o)', async (named) => {
+    const { validateSendRequest } = await import('@/app/api/worktrees/[id]/send/send-request');
+    const taskId = await createdTaskId();
+    const validated = validateSendRequest(db, WT, { content: 'go', taskId, ...named });
+    expect(validated.ok).toBe(false);
+    if (!validated.ok) {
+      const response = await validated.response;
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: 'task_target_mismatch', sendOutcome: 'not_sent' });
+    }
+  });
+
+  it('4449: a body naming the task\'s own target goes on', async () => {
+    const { validateSendRequest } = await import('@/app/api/worktrees/[id]/send/send-request');
+    const taskId = await createdTaskId();
+    const validated = validateSendRequest(db, WT, { content: 'go', taskId, cliToolId: 'codex', instanceId: 'codex' });
+    expect(validated.ok).toBe(true);
+  });
+
+  it('4449: a task of no task, or of another worktree, is a 400', async () => {
+    const { validateSendRequest } = await import('@/app/api/worktrees/[id]/send/send-request');
+    const validated = validateSendRequest(db, WT, { content: 'go', taskId: 'no-such-task' });
+    expect(validated.ok).toBe(false);
+    if (!validated.ok) expect((await validated.response).status).toBe(400);
+  });
+});

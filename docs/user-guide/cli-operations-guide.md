@@ -338,7 +338,9 @@ CLI は送り手の種類を次の順に読み、最初に当たったものを�
 
 読むのは環境と tmux のセッション名だけで、ファイル（資格情報）は読みません。`origin` を付けるのは、断られうる宛先への要求（antigravity・CLI の知らないツール・宛先を指定しない要求）だけです。ほかのツールを指定した要求の本文は今までと同じです。
 
-送る前に書き込む `send`（`--register --role` の名簿とロール、`--contract` のタスク、`--auto-yes` の有効化）は、その書き込みの要求そのものをサーバーが同じ判定で断り（何も書き込まない。`--reply-to` の relay の判定も同じ要求で行う）、exit 33 にします。事前の照会はしません（Issue #4449）。断られた送信は、名簿（instances の登録）・ロールの設定・契約のタスク・Auto-Yes のどれも書かれません。
+送る前に書き込む `send`（`--register --role` の名簿とロール、`--contract` のタスク、`--auto-yes` の有効化）は、その書き込みの要求そのものをサーバーが同じ判定で断り（何も書き込まない。`--reply-to` の relay の判定も同じ要求で行う）、exit 33 にします。事前の照会はしません（Issue #4449）。断られた送信は、名簿（instances の登録）・ロールの設定・契約のタスク・Auto-Yes のどれも書かれません。宛先を指定しない `send --contract` のメッセージと Auto-Yes は、作ったタスクに記録された宛先（作成時に判定した宛先）へ行き、その後に既定が変わっても既定を解決し直しません（本文に宛先を書いてタスクと食い違えば 400 `task_target_mismatch` で送らない）。
+
+> **注意**: #4449 より前のサーバーに新しい CLI でつなぐと、書き込みの API が方針を判定しないため、断られる送信でもタスクやロールの設定が書かれてから `/send` が 409（exit 33）で断ることがあります。CLI とサーバーは同じ版にそろえてください。
 
 断られたときの stderr の 1 行目は `Error [TOOL_POLICY_DENIED]: <理由>`（relay は `Error [RELAY_TOOL_POLICY_DENIED]: …`）、2 行目は規約と FAQ のリンク、続いて解除の方法と、何も打っていないこと（`sent: false`）です。`--token` の警告などはその後に出ます。`ask --json` と厳格モードの `respond --json` は、stdout に `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }`（relay は `refusal.endpoint` も）を 1 つ出します。exit 33 は送り直しても同じ結果です。再送・再指示はせず、人に申告の要否を伺います（[exit code ごとの対処](../orchestrate/exit-codes.md)）。
 

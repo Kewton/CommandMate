@@ -7,8 +7,9 @@
  * "no row in instances / roles / tasks, exit 33, the reason on stderr's first line":
  *   1. the ask failing (500, or 404 from a server before #4437) let the task be written;
  *   2. a default that turned antigravity after the ask was written under codex's verdict.
- * (I2 — the row is written for the very target judged — is pinned at the route, in
- * tests/unit/api/write-tool-policy-4449.test.ts.) No tmux, no server, no agy (the tool is a fake), no file
+ * And I2 across the task and the message: a default that turns antigravity AFTER the task
+ * was written does not move the message (`/send` takes `taskId` and goes to the task's
+ * recorded target), with --reply-to, --auto-yes and --note too. No tmux, no server, no agy (the tool is a fake), no file
  * under $HOME (everything is under os.tmpdir(), removed after each test).
  *
  * @vitest-environment node
@@ -163,6 +164,7 @@ import * as resolveTargetRoute from '@/app/api/worktrees/[id]/resolve-target/rou
 import * as autoYesRoute from '@/app/api/worktrees/[id]/auto-yes/route';
 import * as toolPolicyRoute from '@/app/api/worktrees/[id]/tool-policy/route';
 import * as rolesRoute from '@/app/api/roles/route';
+import * as relaysRoute from '@/app/api/relays/route';
 import * as roleRoute from '@/app/api/roles/[id]/route';
 import { clearAllAutoYesStates, getAutoYesState } from '@/lib/auto-yes-state';
 import { createSendCommand } from '@/cli/commands/send';
@@ -184,12 +186,15 @@ let checkOverride: (() => Response) | null;
 let afterCheck: (() => void) | null;
 /** Runs right before a request reaches its route (`METHOD /path`). */
 let beforeRoute: ((request: string) => void) | null;
+/** Runs right after a route answered (`METHOD /path`). */
+let afterRoute: ((request: string) => void) | null;
 
 
 type RouteHandler = (request: NextRequest, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
 
 function routed(pathname: string): { handlers: Record<string, unknown>; params: Record<string, string> } | null {
   if (pathname === '/api/roles') return { handlers: rolesRoute, params: {} };
+  if (pathname === '/api/relays') return { handlers: relaysRoute, params: {} };
   const role = pathname.match(/^\/api\/roles\/([^/]+)$/);
   if (role) return { handlers: roleRoute, params: { id: role[1] } };
   const routes: Array<[RegExp, Record<string, unknown>]> = [
@@ -215,6 +220,8 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
   if (url.pathname === '/api/capabilities') return Response.json({ serverVersion: 'test', capabilities: ['resolve-session-target'] });
   if (url.pathname === `/api/worktrees/${WT}/current-output`) return Response.json({ isRunning: fakeTool.running });
   if (url.pathname === `/api/worktrees/${WT}/opencode/session`) return Response.json({ instances: [] });
+  // `send --note`'s mem item (Issue #4226), kept out of this suite's subject.
+  if (url.pathname === `/api/worktrees/${WT}/mem/items`) return Response.json({ item: { id: 'note-1' } }, { status: 201 });
   const isCheck = url.pathname === `/api/worktrees/${WT}/tool-policy`;
   if (isCheck && checkOverride) return checkOverride();
   const route = routed(url.pathname);
@@ -226,6 +233,7 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
     params: Promise.resolve(route.params),
   });
   if (isCheck) afterCheck?.();
+  afterRoute?.(`${method} ${url.pathname}`);
   return response;
 }
 
@@ -301,6 +309,7 @@ beforeEach(async () => {
   checkOverride = null;
   afterCheck = null;
   beforeRoute = null;
+  afterRoute = null;
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR', path.join(dir, 'agy-agents'));
@@ -394,6 +403,51 @@ describe('path 2 of #4449: a default that turns antigravity is judged where the 
       }
     };
     expectRefusedWithNoRows(await send('--contract', '.commandmate/tasks/x.yaml'));
+  });
+});
+
+describe('I2 of #4449: the message goes where its task was judged and written', () => {
+  const flipAfterTask = (): void => {
+    afterRoute = (request) => {
+      if (request === `POST /api/worktrees/${WT}/tasks`) {
+        db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('antigravity', WT);
+      }
+    };
+  };
+  /** Bodies of every request to `path`, as sent. */
+  let bodies: Record<string, Array<Record<string, unknown>>>;
+  beforeEach(() => {
+    bodies = {};
+    fakeTool.onStart = (instanceId) => launchCodex(instanceId);
+    vi.stubGlobal('fetch', async (input: unknown, init?: RequestInit) => {
+      const key = `${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`;
+      if (init?.body) (bodies[key] ??= []).push(JSON.parse(String(init.body)));
+      return dispatch(input, init);
+    });
+  });
+
+  it.each([
+    ['alone', []],
+    ['with --auto-yes', ['--auto-yes']],
+    ['with --reply-to', ['--reply-to', `${WT}@claude`]],
+    ['with --reply-to --note', ['--reply-to', `${WT}@claude`, '--note', 'the review']],
+  ])('4449 send --contract naming no target %s, the default turned antigravity after the task: sent to codex, exit 0, one task row', async (_label, extra) => {
+    if (extra.includes('--note')) vi.stubEnv('CM_WORKTREE_ID', WT);
+    flipAfterTask();
+    const result = await send('--contract', '.commandmate/tasks/x.yaml', ...extra);
+    expect(result.stderr.filter((line) => line.startsWith('Error'))).toEqual([]);
+    expect(result.code).toBe(0);
+    expect(listTasks(db, WT).map((task) => [task.cliToolId, task.instanceId])).toEqual([['codex', null]]);
+    expect(fakeTool.typed).toHaveLength(1);
+    const [sendBody] = bodies[`POST /api/worktrees/${WT}/send`];
+    // #4116: the body still names nobody; the task binds the target.
+    expect(sendBody).toMatchObject({ taskId: listTasks(db, WT)[0].id });
+    expect(sendBody).not.toHaveProperty('cliToolId');
+    expect(sendBody).not.toHaveProperty('instanceId');
+    if (extra.includes('--auto-yes')) {
+      expect(getAutoYesState(WT, 'codex', 'codex')?.enabled).toBe(true);
+      expect(getAutoYesState(WT, 'antigravity', 'antigravity')?.enabled ?? false).toBe(false);
+    }
   });
 });
 

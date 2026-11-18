@@ -36,18 +36,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db/worktree-db';
 import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
-import { resolveSessionTarget, resolveSessionTargetStrict } from '@/lib/session/resolve-session-target';
+import { resolveSessionTargetStrict } from '@/lib/session/resolve-session-target';
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
-import { RELAY_TOOL_POLICY_DENIED } from '@/lib/tool-policy/policy';
-import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
-import { findRelayToolPolicyDenial, RELAY_TOOL_POLICY_DENIED_MESSAGE } from '@/lib/relay/relay-policy';
-import {
-  findToolPolicyDenial,
-  readBodyOrigin,
-  toolPolicyDeniedBody,
-  toolPolicyDetail,
-} from '../send/send-tool-policy';
+import { readBodyOrigin } from '../send/send-tool-policy';
+import { findWriteToolPolicyRefusal } from '../send/write-tool-policy';
 
 function badRequest(error: string): NextResponse {
   return NextResponse.json({ error }, { status: 400 });
@@ -93,37 +86,21 @@ export async function GET(
   if (!resolution.ok) return sessionTargetConflictResponse(resolution.conflict);
   const cliToolId = resolution.target.cliToolId;
 
-  // The relay first: `send --reply-to` opens it before the message goes out.
-  if (replyToWorktreeId !== undefined && replyToInstanceId !== undefined) {
-    let from: CLIToolType | null = null;
-    try {
-      from = resolveSessionTarget(db, canonicalWorktreeId(replyToWorktreeId), { instanceId: replyToInstanceId }).cliToolId;
-    } catch {
-      // Not resolvable here: opening the relay will say what is wrong with it.
-    }
-    const relayDenial = from === null
-      ? null
-      : findRelayToolPolicyDenial({ from, to: cliToolId, declaration: readUsageDeclaration() });
-    if (relayDenial) {
-      return NextResponse.json({
-        allowed: false,
-        refusal: {
-          error: RELAY_TOOL_POLICY_DENIED_MESSAGE,
-          code: RELAY_TOOL_POLICY_DENIED,
-          policy: { ...toolPolicyDetail(relayDenial.decision), endpoint: relayDenial.endpoint },
-        },
-      });
-    }
-  }
-
-  const denial = findToolPolicyDenial({
-    tool: cliToolId,
-    operation,
-    origin: origin.origin,
-    originEvidence: query.get('originEvidence') ?? undefined,
+  // Issue #4449 (P3-3): the very verdict the writes give (`findWriteToolPolicyRefusal`):
+  // the relay `send --reply-to` would open first, then the send.
+  const refusal = findWriteToolPolicyRefusal(db, {
     worktreeId: id,
+    tool: cliToolId,
     instanceId: instanceId ?? cliToolId,
+    operation,
+    request: {
+      origin: origin.origin,
+      originEvidence: query.get('originEvidence') ?? undefined,
+      replyTo: replyToWorktreeId !== undefined && replyToInstanceId !== undefined
+        ? { worktreeId: replyToWorktreeId, instanceId: replyToInstanceId }
+        : null,
+    },
   });
-  if (denial) return NextResponse.json({ allowed: false, refusal: toolPolicyDeniedBody(denial) });
+  if (refusal) return NextResponse.json({ allowed: false, refusal });
   return NextResponse.json({ allowed: true, cliToolId });
 }
