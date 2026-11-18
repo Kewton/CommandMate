@@ -290,6 +290,36 @@ describe('POST /tasks — send --contract (Issue #4449)', () => {
     expect(status).toBe(400);
     expect(count('tasks')).toBe(0);
   });
+
+  it('4449 (I1\'): a send allowed from a terminal that arms Auto-Yes later is refused here with the grant\'s 409, no task row', async () => {
+    const { status, body } = await call(tasksRoute.POST as Handler, 'tasks', 'POST', {
+      ...contract,
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+      origin: 'terminal',
+      autoYes: true,
+    });
+    expect(status).toBe(409);
+    expect(body).toMatchObject({ code: 'TOOL_POLICY_DENIED', policy: { tool: 'antigravity', operation: 'auto-yes' } });
+    expect(count('tasks')).toBe(0);
+  });
+
+  it('4449 (I1\') control — the same from a terminal without Auto-Yes writes its task', async () => {
+    const { status } = await call(tasksRoute.POST as Handler, 'tasks', 'POST', {
+      ...contract,
+      cliToolId: 'antigravity',
+      instanceId: 'antigravity',
+      origin: 'terminal',
+    });
+    expect(status).toBe(201);
+    expect(count('tasks')).toBe(1);
+  });
+
+  it('4449 (I1\'): an autoYes that is not a boolean is a 400 and writes nothing', async () => {
+    const { status } = await call(tasksRoute.POST as Handler, 'tasks', 'POST', { ...contract, autoYes: 'yes' });
+    expect(status).toBe(400);
+    expect(count('tasks')).toBe(0);
+  });
 });
 
 describe('POST /tasks judges the session the target resolves to (Issue #4449, P2-1)', () => {

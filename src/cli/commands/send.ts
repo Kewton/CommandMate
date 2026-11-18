@@ -77,14 +77,24 @@ import type { RelayEndpointArg } from './relays';
 /**
  * Issue #4449: what a write this send makes before its message tells the server about
  * the send it is for — who sends (`origin`, for a tool the policy may restrict) and the
- * session its `--reply-to` relay answers into (`replyTo`). The write route judges them
- * with the tool it writes and refuses with the send's 409 (exit 33), writing nothing.
- * Empty when there is nothing to judge, so such a body is what it always was.
+ * session its `--reply-to` relay answers into (`replyTo`), and that it arms Auto-Yes on the
+ * same target later (`autoYes`, I1' of #4449: the grant is refused for antigravity from
+ * every origin, a send from a terminal is not, so the first write has to know). The write
+ * route judges them with the tool it writes and refuses with the send's 409 (exit 33),
+ * writing nothing. Empty when there is nothing to judge, so such a body is what it always
+ * was; `autoYes` only rides with an origin, as a tool the policy never restricts is
+ * refused nothing.
  */
-function writePolicyFields(tool: string | undefined, replyTo: RelayEndpointArg | undefined): Record<string, unknown> {
+function writePolicyFields(
+  tool: string | undefined,
+  replyTo: RelayEndpointArg | undefined,
+  autoYes: boolean | undefined
+): Record<string, unknown> {
+  const origin = sendOriginFieldsFor(tool);
   return {
-    ...sendOriginFieldsFor(tool),
+    ...origin,
     ...(replyTo ? { replyTo: { worktreeId: replyTo.worktreeId, instanceId: replyTo.instanceId } } : {}),
+    ...(autoYes && origin.origin !== undefined ? { autoYes: true } : {}),
   };
 }
 
@@ -307,7 +317,8 @@ async function registerInstanceWithRole(
   instanceId: string,
   cliTool: string,
   role: RoleAssignmentInput,
-  replyTo: RelayEndpointArg | undefined
+  replyTo: RelayEndpointArg | undefined,
+  autoYes: boolean | undefined
 ): Promise<void> {
   const url = `/api/worktrees/${worktreeId}/instances/roles`;
   const { instances, rosterRevision } = await client.get<InstanceRoleSettingsResponse>(url);
@@ -319,7 +330,7 @@ async function registerInstanceWithRole(
         role,
         expectedRosterRevision: rosterRevision,
         // Issue #4449: refused by the tool policy here, with nothing created.
-        ...writePolicyFields(cliTool, replyTo),
+        ...writePolicyFields(cliTool, replyTo, autoYes),
       })
     );
   } catch (error) {
@@ -371,7 +382,7 @@ async function createContractTask(
   }
   // Issue #4449: the tool policy judges the target this request writes the row for,
   // and refuses (exit 33) before the row exists — no ask before it that could fail.
-  Object.assign(body, writePolicyFields(agent, replyTo));
+  Object.assign(body, writePolicyFields(agent, replyTo, options.autoYes));
 
   try {
     const response = await client.post<TaskCreateResponse>(
@@ -479,7 +490,7 @@ async function createContractTaskWithRole(
           role,
           expectedRosterRevision: now.rosterRevision,
           // Issue #4449: refused by the tool policy here, with nothing saved.
-          ...writePolicyFields(target.cliToolId, replyTo),
+          ...writePolicyFields(target.cliToolId, replyTo, options.autoYes),
         }),
         ['instances'],
         'PUT /api/worktrees/:id/instances/roles'
@@ -1117,7 +1128,9 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           : undefined;
 
         if (roleAssignment !== undefined && options.register && instanceId) {
-          await registerInstanceWithRole(client, worktreeId, instanceId, options.agent ?? instanceId, roleAssignment, relayEndpoints?.from);
+          await registerInstanceWithRole(
+            client, worktreeId, instanceId, options.agent ?? instanceId, roleAssignment, relayEndpoints?.from, options.autoYes
+          );
         }
 
         // Issue #1545: resolve the contract before anything with a side effect,

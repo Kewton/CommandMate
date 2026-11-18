@@ -21,7 +21,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { getAgentInstances } from '@/lib/db/agent-instances-db';
+import { getAgentInstances, setAgentInstances } from '@/lib/db/agent-instances-db';
 import { upsertWorktree } from '@/lib/db';
 import { createRepository } from '@/lib/db/db-repository';
 import { createAgentRole, getInstanceRoleState } from '@/lib/db/agent-roles-db';
@@ -140,6 +140,29 @@ vi.mock('@/lib/polling/auto-yes-manager', async (importOriginal) => ({
   stopAutoYesPolling: vi.fn(),
   stopAutoYesPollingByWorktree: vi.fn(),
 }));
+/**
+ * The mutation seams of the I1' table (Issue #4449, re-instruction 2b): one judgment taken
+ * out, everything else as it is. `write` = the write APIs' own judgment
+ * (`findWriteToolPolicyRefusal`); `send` / `auto-yes` = every judgment of that operation.
+ * Null (the default) changes nothing.
+ */
+const seam = vi.hoisted(() => ({ off: null as null | 'write' | 'send' | 'auto-yes' }));
+vi.mock('@/lib/tool-policy/policy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tool-policy/policy')>();
+  return {
+    ...actual,
+    decideToolPolicy: (input: Parameters<typeof actual.decideToolPolicy>[0]) =>
+      seam.off === input.operation ? { allowed: true } : actual.decideToolPolicy(input),
+  };
+});
+vi.mock('@/app/api/worktrees/[id]/send/write-tool-policy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/app/api/worktrees/[id]/send/write-tool-policy')>();
+  return {
+    ...actual,
+    findWriteToolPolicyRefusal: (...args: Parameters<typeof actual.findWriteToolPolicyRefusal>) =>
+      seam.off === 'write' ? null : actual.findWriteToolPolicyRefusal(...args),
+  };
+});
 vi.mock('@/lib/hooks/pending-decision-recheck', () => ({
   recheckPendingDecisions: vi.fn(async () => ({ reason: 'test', examined: 0, delivered: 0, skipped: 0 })),
 }));
@@ -164,6 +187,7 @@ import * as resolveTargetRoute from '@/app/api/worktrees/[id]/resolve-target/rou
 import * as autoYesRoute from '@/app/api/worktrees/[id]/auto-yes/route';
 import * as toolPolicyRoute from '@/app/api/worktrees/[id]/tool-policy/route';
 import * as rolesRoute from '@/app/api/roles/route';
+import * as worktreeRoute from '@/app/api/worktrees/[id]/route';
 import * as relaysRoute from '@/app/api/relays/route';
 import * as roleRoute from '@/app/api/roles/[id]/route';
 import { clearAllAutoYesStates, getAutoYesState } from '@/lib/auto-yes-state';
@@ -204,6 +228,8 @@ function routed(pathname: string): { handlers: Record<string, unknown>; params: 
     [/^\/api\/worktrees\/([^/]+)\/resolve-target$/, resolveTargetRoute],
     [/^\/api\/worktrees\/([^/]+)\/auto-yes$/, autoYesRoute],
     [/^\/api\/worktrees\/([^/]+)\/tool-policy$/, toolPolicyRoute],
+    // The roster save of a plain --register, after its message (`registerInstance`).
+    [/^\/api\/worktrees\/([^/]+)$/, worktreeRoute],
   ];
   for (const [pattern, handlers] of routes) {
     const match = pathname.match(pattern);
@@ -261,12 +287,12 @@ async function send(...args: string[]): Promise<{ code: number; stderr: string[]
 }
 
 /** A real codex launch's effect on what is known, without tmux (the cli-roles-4116 way). */
-async function launchCodex(instanceId?: string): Promise<void> {
-  const launchTarget = { worktreeId: WT, cliToolId: 'codex' as const, instanceId };
+async function launchCodex(instanceId?: string, cliToolId: 'codex' | 'antigravity' = 'codex'): Promise<void> {
+  const launchTarget = { worktreeId: WT, cliToolId, instanceId };
   const snapshot = await resolveLaunchRole(db, { ...launchTarget, worktreePath, readEnv: fixedEnvReader({}) });
   await runWithLaunchRole(snapshot, async () => {
     beginAgentSession(launchTarget);
-    buildAgentLaunchCommandLine({ target: launchTarget, executablePath: 'codex', worktreePath });
+    buildAgentLaunchCommandLine({ target: launchTarget, executablePath: cliToolId === 'codex' ? 'codex' : 'agy', worktreePath });
   });
 }
 
@@ -305,6 +331,7 @@ beforeEach(async () => {
   fakeTool.beforeFirstKey = null;
   fakeTool.onStart = null;
   ownership.hook = null;
+  seam.off = null;
   requests = [];
   checkOverride = null;
   afterCheck = null;
@@ -483,5 +510,169 @@ describe('controls (Issue #4449): what is allowed writes as before', () => {
     vi.stubEnv('CM_ANTIGRAVITY_USAGE', 'api-key');
     await send('--contract', '.commandmate/tasks/x.yaml', '--instance', 'antigravity');
     expect(listTasks(db, WT).map((task) => task.cliToolId)).toEqual(['antigravity']);
+  });
+});
+
+/**
+ * I1' of #4449 as one table (re-instruction 2b): the first request a `send` writes judges
+ * every policy target the command goes on to (the send, the Auto-Yes grant), on the real
+ * target, and writes nothing when any of them is refused.
+ *
+ *  - axis 1: every non-empty subset of --contract / --register / --role / --auto-yes
+ *    (15); --register comes with --agent antigravity --instance agy-new, the others go to
+ *    the roster's antigravity
+ *  - axis 2: the origin the CLI reads — terminal / agent / schedule / unknown
+ *  - axis 3: the stage that is refused, read off `src/lib/tool-policy/policy.ts`
+ *    (antigravity, no declaration): send is a person's only (`terminal`), Auto-Yes nobody's.
+ *    The first write is the stage: instances/roles (--register --role), else tasks
+ *    (--contract), else the grant (--auto-yes), else /send.
+ *
+ * Refused rows: no row in tasks / instances / role settings, no grant, nothing typed, exit
+ * 33, the reason first. Allowed rows (terminal without --auto-yes): as today. The mutation
+ * column takes one judgment out (`seam`) and expects the row to turn red.
+ */
+describe('I1\' of #4449: every write combination × origin, refused before anything is written', () => {
+  type Flag = 'contract' | 'register' | 'role' | 'auto-yes';
+  type Origin = 'terminal' | 'agent' | 'schedule' | 'unknown';
+  type Stage = 'instances' | 'tasks' | 'auto-yes' | 'send';
+  type Seam = 'write' | 'send' | 'auto-yes';
+  const FLAGS: Flag[] = ['contract', 'register', 'role', 'auto-yes'];
+  const ORIGINS: Origin[] = ['terminal', 'agent', 'schedule', 'unknown'];
+  const COMBOS: Flag[][] = Array.from({ length: 15 }, (_, i) => FLAGS.filter((_flag, bit) => ((i + 1) >> bit) & 1));
+
+  /** Per the policy table: send is refused from anyone but a person, Auto-Yes from everyone. */
+  const refusedBy = (flags: Flag[], origin: Origin): Seam[] => [
+    ...(origin === 'terminal' ? [] : ['send' as const]),
+    ...(flags.includes('auto-yes') ? ['auto-yes' as const] : []),
+  ];
+  const firstWrite = (flags: Flag[]): Stage => {
+    if (flags.includes('register') && flags.includes('role')) return 'instances';
+    if (flags.includes('contract')) return 'tasks';
+    if (flags.includes('auto-yes')) return 'auto-yes';
+    return 'send';
+  };
+  /** The seams that turn a refused row red: its only refusing judgment, or the write's own when it writes first. */
+  const redWithout = (flags: Flag[], origin: Origin): Seam[] => {
+    const by = refusedBy(flags, origin);
+    return [
+      ...(by.length === 1 ? by : []),
+      ...(['instances', 'tasks'].includes(firstWrite(flags)) ? ['write' as const] : []),
+    ];
+  };
+  const argsOf = (flags: Flag[]): string[] => [
+    ...(flags.includes('contract') ? ['--contract', '.commandmate/tasks/x.yaml'] : ['hello']),
+    ...(flags.includes('register') ? ['--agent', 'antigravity', '--instance', 'agy-new', '--register'] : ['--instance', 'antigravity']),
+    ...(flags.includes('role') ? ['--role', 'reviewer'] : []),
+    ...(flags.includes('auto-yes') ? ['--auto-yes'] : []),
+  ];
+
+  const ttyBefore = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+  const asOrigin = (origin: Origin): void => {
+    vi.stubEnv('CM_AGENT_TOOL', '');
+    Object.defineProperty(process.stdin, 'isTTY', { value: origin !== 'unknown', configurable: true });
+    if (origin === 'agent') vi.stubEnv('CLAUDECODE', '1');
+    if (origin === 'schedule') vi.stubEnv('CM_RUN_ORIGIN', 'schedule');
+  };
+  afterEach(() => {
+    if (ttyBefore) Object.defineProperty(process.stdin, 'isTTY', ttyBefore);
+    else delete (process.stdin as { isTTY?: boolean }).isTTY;
+  });
+
+  const grants = (): string[] => ['antigravity', 'agy-new']
+    .filter((instanceId) => getAutoYesState(WT, 'antigravity', instanceId)?.enabled);
+  /** What a refused row breaks; empty when the refusal holds. */
+  const refusalBroken = (result: { code: number; stderr: string[] }): string[] => [
+    ...(result.code === 33 ? [] : [`exit ${result.code}`]),
+    ...(/^Error \[TOOL_POLICY_DENIED\]: /.test(result.stderr[0] ?? '') ? [] : [`stderr[0] ${result.stderr[0]}`]),
+    ...(JSON.stringify(writtenRows()) === JSON.stringify(NO_ROWS) ? [] : [`rows ${JSON.stringify(writtenRows())}`]),
+    ...(grants().length === 0 ? [] : [`grants ${grants().join(',')}`]),
+    ...(fakeTool.typed.length === 0 ? [] : [`typed ${fakeTool.typed.length}`]),
+  ];
+
+  const rows = COMBOS.flatMap((flags) => ORIGINS.map((origin) => ({
+    name: `${flags.join('+')} from ${origin}`,
+    flags,
+    origin,
+    refused: refusedBy(flags, origin).length > 0,
+  })));
+
+  it('4449 the table has every combination and origin (15 × 4)', () => {
+    expect(rows).toHaveLength(60);
+    expect(rows.filter((row) => row.refused)).toHaveLength(53);
+  });
+
+  it.each(rows.filter((row) => row.refused).map((row) => [row.name, row] as const))(
+    '4449 refused: %s — no row, no grant, nothing typed, exit 33, the reason first',
+    async (_name, row) => {
+      asOrigin(row.origin);
+      const result = await send(...argsOf(row.flags));
+      expect(refusalBroken(result)).toEqual([]);
+    },
+  );
+
+  it.each(rows.filter((row) => !row.refused).map((row) => [row.name, row] as const))(
+    '4449 allowed: %s — written and typed as before',
+    async (_name, row) => {
+      asOrigin(row.origin);
+      fakeTool.onStart = (instanceId) => launchCodex(instanceId, 'antigravity');
+      const result = await send(...argsOf(row.flags));
+      expect({ code: result.code, stderr: result.stderr }).toMatchObject({ code: 0 });
+      expect(fakeTool.typed).toHaveLength(1);
+      expect(listTasks(db, WT)).toHaveLength(row.flags.includes('contract') ? 1 : 0);
+      if (row.flags.includes('register')) expect(rosterIds()).toContain('agy-new');
+      if (row.flags.includes('role')) {
+        expect(getInstanceRoleState(db, WT, row.flags.includes('register') ? 'agy-new' : 'antigravity')).toMatchObject({ state: 'role' });
+      }
+    },
+  );
+
+  const mutations = rows.filter((row) => row.refused).flatMap((row) =>
+    redWithout(row.flags, row.origin).map((off) => [`${row.name}, without the ${off} judgment`, row, off] as const));
+
+  it.each(mutations)('4449 mutation: %s — the refusal no longer holds', async (_name, row, off) => {
+    seam.off = off;
+    asOrigin(row.origin);
+    const result = await send(...argsOf(row.flags));
+    expect(refusalBroken(result)).not.toEqual([]);
+  });
+});
+
+describe('I3\' of #4449: the grant\'s relay is judged again after the last await', () => {
+  it('4449 the reply-to session turns antigravity while ownership is checked: 409, no grant, no poller', async () => {
+    const { startAutoYesPolling } = await import('@/lib/polling/auto-yes-manager');
+    vi.mocked(startAutoYesPolling).mockClear();
+    setAgentInstances(db, WT, [
+      { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 },
+      { id: 'review', cliTool: 'claude', alias: 'Review', order: 1 },
+    ] as Parameters<typeof setAgentInstances>[2]);
+    ownership.hook = () => {
+      setAgentInstances(db, WT, [
+        { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 },
+        { id: 'review', cliTool: 'antigravity', alias: 'Review', order: 1 },
+      ] as Parameters<typeof setAgentInstances>[2]);
+    };
+    const response = await dispatch(`http://localhost/api/worktrees/${WT}/auto-yes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true, cliToolId: 'codex', instanceId: 'codex', replyTo: { worktreeId: WT, instanceId: 'review' } }),
+    });
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe('RELAY_TOOL_POLICY_DENIED');
+    expect(getAutoYesState(WT, 'codex', 'codex')?.enabled ?? false).toBe(false);
+    expect(startAutoYesPolling).not.toHaveBeenCalled();
+  });
+
+  it('4449 control — the reply-to session stays claude: the grant is armed', async () => {
+    setAgentInstances(db, WT, [
+      { id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 },
+      { id: 'review', cliTool: 'claude', alias: 'Review', order: 1 },
+    ] as Parameters<typeof setAgentInstances>[2]);
+    const response = await dispatch(`http://localhost/api/worktrees/${WT}/auto-yes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true, cliToolId: 'codex', instanceId: 'codex', replyTo: { worktreeId: WT, instanceId: 'review' } }),
+    });
+    expect(response.status).toBe(200);
+    expect(getAutoYesState(WT, 'codex', 'codex')?.enabled).toBe(true);
   });
 });

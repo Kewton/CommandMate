@@ -99,6 +99,8 @@ export async function GET(
       replyTo: replyToWorktreeId !== undefined && replyToInstanceId !== undefined
         ? { worktreeId: replyToWorktreeId, instanceId: replyToInstanceId }
         : null,
+      // This ask is for one operation; a write's `autoYes` is judged where it is written.
+      autoYes: false,
     },
   });
   if (refusal) return NextResponse.json({ allowed: false, refusal });

@@ -11,9 +11,15 @@
  * (`TOOL_POLICY_DENIED`), or the one `POST /api/relays` answers
  * (`RELAY_TOOL_POLICY_DENIED`) for the relay `send --reply-to` opens before its message.
  *
- * The body may carry `origin` / `originEvidence` (as on `/send`) and `replyTo`
- * (`{ worktreeId, instanceId }`, the session the relay answers into). None of them →
- * nothing changes: the web UI and older CLIs write as before (`legacy` is a person).
+ * The body may carry `origin` / `originEvidence` (as on `/send`), `replyTo`
+ * (`{ worktreeId, instanceId }`, the session the relay answers into) and `autoYes: true`
+ * (the command arms Auto-Yes on the same target later). None of them → nothing changes:
+ * the web UI and older CLIs write as before (`legacy` is a person).
+ *
+ * I1' of #4449: the first write of a command judges everything the command goes on to —
+ * the relay, the send and the Auto-Yes grant — on the target it writes, so a later step
+ * can never be refused after this one wrote its row (a send allowed from a terminal with
+ * a grant refused from everyone left the task, or the instance and its role, behind).
  * The origin is the caller's claim and is not verified: a guard against accidental
  * use, not a guarantee of compliance with the Google Antigravity terms.
  *
@@ -43,12 +49,17 @@ export interface WriteToolPolicyRequest {
   origin: SendOrigin;
   originEvidence: unknown;
   replyTo: WriteReplyTo | null;
+  /** The command arms Auto-Yes on this target after the write. */
+  autoYes: boolean;
 }
 
 /** The 400 for a `replyTo` that is not `{ worktreeId, instanceId }`. */
 export const REPLY_TO_FIELD_INVALID = 'replyTo must be { worktreeId, instanceId }';
 
-/** Read `origin`, `originEvidence` and `replyTo` off a write's body; the 400's sentence when malformed. */
+/** The 400 for an `autoYes` that is not a boolean. */
+export const AUTO_YES_FIELD_INVALID = 'autoYes must be true or false';
+
+/** Read `origin`, `originEvidence`, `replyTo` and `autoYes` off a write's body; the 400's sentence when malformed. */
 export function readWriteToolPolicyRequest(
   body: Record<string, unknown>,
 ): { ok: true; value: WriteToolPolicyRequest } | { ok: false; error: string } {
@@ -69,15 +80,23 @@ export function readWriteToolPolicyRequest(
     }
     replyTo = { worktreeId: value.worktreeId, instanceId: value.instanceId };
   }
-  return { ok: true, value: { origin: origin.origin, originEvidence: body.originEvidence, replyTo } };
+  if (body.autoYes !== undefined && typeof body.autoYes !== 'boolean') {
+    return { ok: false, error: AUTO_YES_FIELD_INVALID };
+  }
+  return {
+    ok: true,
+    value: { origin: origin.origin, originEvidence: body.originEvidence, replyTo, autoYes: body.autoYes === true },
+  };
 }
 
 /** The 409 body of a refused write: the send's or the relay's, as those routes give it. */
 export type WriteToolPolicyRefusalBody = Record<string, unknown> & { code: string };
 
 /**
- * Would the send this write is for be refused? The relay first (the CLI opens it before
- * the message), then the send to `tool`, as `GET /tool-policy` and `POST /send` decide.
+ * Would the command this write is for be refused anywhere? The relay first (the CLI opens
+ * it before the message), then the send to `tool`, as `GET /tool-policy` and `POST /send`
+ * decide, then the Auto-Yes grant on `tool` when `request.autoYes`, as the Auto-Yes route
+ * decides (`origin: 'legacy'`, the origin that route judges every grant with).
  * Synchronous: the caller writes `tool` right after, with nothing in between.
  *
  * @returns The 409 body, or null when the write may go on
@@ -125,7 +144,17 @@ export function findWriteToolPolicyRefusal(
     worktreeId: input.worktreeId,
     instanceId: input.instanceId ?? input.tool,
   });
-  return denial ? toolPolicyDeniedBody(denial) : null;
+  if (denial) return toolPolicyDeniedBody(denial);
+  if (!request.autoYes) return null;
+  const autoYesDenial = findToolPolicyDenial({
+    tool: input.tool,
+    operation: 'auto-yes',
+    origin: 'legacy',
+    originEvidence: request.originEvidence,
+    worktreeId: input.worktreeId,
+    instanceId: input.instanceId ?? input.tool,
+  });
+  return autoYesDenial ? toolPolicyDeniedBody(autoYesDenial) : null;
 }
 
 /**

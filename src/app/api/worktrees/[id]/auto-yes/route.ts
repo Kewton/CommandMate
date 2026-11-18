@@ -553,19 +553,27 @@ export async function POST(
       // asked about, so the relay's rule 0 (antigravity at either end) is asked here
       // too, on the tool this grant is for: refused, no grant is written (the same
       // 409 `POST /api/relays` gives). Absent (the web UI, `auto-yes --enable`), as before.
+      // I3' of #4449: the relay's other end is read from the roster, which can move
+      // during the ownership check below, so it is asked again after the last await.
+      let relayRequest: ReturnType<typeof readWriteToolPolicyRequest> | null = null;
       if (body.replyTo !== undefined) {
-        const relayRequest = readWriteToolPolicyRequest({ replyTo: body.replyTo });
+        relayRequest = readWriteToolPolicyRequest({ replyTo: body.replyTo });
         if (!relayRequest.ok) {
           return NextResponse.json({ error: relayRequest.error }, { status: 400 });
         }
-        const relayRefusal = findWriteToolPolicyRefusal(getDbInstance(), {
+      }
+      const relayRefusal = (): NextResponse | null => {
+        if (relayRequest === null || !relayRequest.ok) return null;
+        const refusal = findWriteToolPolicyRefusal(getDbInstance(), {
           worktreeId: id,
           tool: cliToolId,
           instanceId,
           request: relayRequest.value,
         });
-        if (relayRefusal) return NextResponse.json(relayRefusal, { status: 409 });
-      }
+        return refusal ? NextResponse.json(refusal, { status: 409 }) : null;
+      };
+      const relayRefusedFirst = relayRefusal();
+      if (relayRefusedFirst) return relayRefusedFirst;
 
       // Issue #3290: a same-named session another CommandMate server created is
       // not this worktree's to auto-answer. The poller already declines to act
@@ -608,6 +616,12 @@ export async function POST(
           );
         }
       }
+
+      // I3' of #4449: the relay judged again on the roster as it is now, with no await
+      // between this and the grant written below (the grant's own target stays the one
+      // resolved above).
+      const relayRefusedLast = relayRefusal();
+      if (relayRefusedLast) return relayRefusedLast;
 
       // Issue #3863: the mode is passed only when the request named one, so an
       // enable without it reaches the setter exactly as before (which keeps a
