@@ -79,8 +79,8 @@ self-hosted のランナーはローカルのゲートと同じマシンの資�
 - 広い rename・移動で、import の関係そのものが変わる
 - 多くのモジュールが読む共有の状態・型の**意味**を変える（署名が同じでも読者が多いもの。例: `src/lib/db` の行の意味、`src/types` の共通の型）
 
-`unit-related` は、`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイルが変わると自分でテスト全体に切り替わる
-（`scripts/run-related-unit-tests.mjs` の `mode=full`）。そのときに `unit` を重ねて足さない（同じ全体を 2 回走らせるだけ）。
+`unit-related` は、`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイルが変わってもテスト全体に切り替わらない
+（#4467。下の「V3 の後」のとおり `mode=related reason=non-source:<ファイル>`）。全体が要る変更は上の 3 つのとおり契約で `unit` を選ぶ。
 
 **手元ではテスト全体に切り替えない。全体は CI に任せる（人の承認 2026-11-19、Sprint 7 のレーン V3 で実装）。**
 実測（2026-11-18、run 3374〜3427）: docs・README・`.claude/**`・`scripts/**` を 1 つ変えるだけで `mode=full` になり、ほぼ全 PR が
