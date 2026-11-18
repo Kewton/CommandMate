@@ -989,6 +989,9 @@ function SessionTileCard({
                 lastAutoResponse={null}
                 cliToolName={cliToolId}
                 inline
+                // Issue #4456: the tile switches instances in place; a refusal belongs to one.
+                worktreeId={worktree.id}
+                instanceId={resolvedInstanceId}
               />
             }
           />

@@ -1321,6 +1321,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
                 blockedByContract={autoYesBlockedByContract}
                 releasedByRestart={autoYesReleasedByRestart}
                 answerMode={autoYesAnswerMode}
+                // Issue #4456: a refusal belongs to this pane's instance.
+                worktreeId={worktreeId}
+                instanceId={resolvedInstanceId}
               />
             }
             // Issue #2766 / #2797: the direct-input toggle, in the toolbar's end

@@ -245,34 +245,38 @@ describe('send (Issue #4437)', () => {
   });
 
   it('I7c — with --contract, the server is asked first and no task is created (exit 33)', async () => {
+    // Issue #4449: "asked first" is now the task's own request — it carries who sends and
+    // the target, and the server refuses it (409) before any row exists. Nothing else is written.
     const calls = mockRoutes([
-      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 200, data: { allowed: false, refusal: denied().data } } },
-      { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
+      { match: '/api/worktrees/wt-g/tasks', response: denied() },
       { match: '/api/worktrees/wt-g/send', response: denied() },
     ]);
     const code = await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml', '--instance', 'antigravity']));
     expect(code).toBe(33);
-    expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
-    const ask = calls.find((c) => c.url.includes('/tool-policy'));
-    expect(Object.fromEntries(new URL(ask!.url).searchParams)).toEqual({
-      operation: 'send',
-      origin: 'unknown',
-      originEvidence: 'no-tty',
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => new URL(c.url).pathname)).toEqual(['/api/worktrees/wt-g/tasks']);
+    expect(to(calls, '/tasks')[0].body).toEqual({
+      contractPath: '.commandmate/tasks/t.yaml',
       cliToolId: 'antigravity',
       instanceId: 'antigravity',
+      origin: 'unknown',
+      originEvidence: 'no-tty',
     });
+    expect(calls.some((c) => c.url.includes('/tool-policy'))).toBe(false);
     expectRefusal('TOOL_POLICY_DENIED');
   });
 
   it('I7c — --auto-yes --reply-to: the relay is asked about with the send, before the grant', async () => {
+    // Issue #4449: asked by the grant's own request (`replyTo` on it), which the server
+    // refuses (409) before arming; no relay is opened and nothing is sent.
     const calls = mockRoutes([
-      { match: '/api/worktrees/wt-c/tool-policy', method: 'GET', response: { status: 200, data: { allowed: false, refusal: RELAY_DENIED.data } } },
+      { match: '/api/worktrees/wt-c/auto-yes', method: 'GET', response: { status: 200, data: { enabled: false } } },
+      { match: '/api/worktrees/wt-c/auto-yes', response: RELAY_DENIED },
     ]);
     const code = await runUntilExit(() => runSend(['wt-c', 'x', '--instance', 'codex', '--auto-yes', '--reply-to', 'wt-g@antigravity']));
     expect(code).toBe(33);
-    expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
-    const ask = calls.find((c) => c.url.includes('/tool-policy'));
-    expect(new URL(ask!.url).searchParams.get('replyToInstanceId')).toBe('antigravity');
+    expect(calls.filter((c) => c.method !== 'GET').map((c) => new URL(c.url).pathname)).toEqual(['/api/worktrees/wt-c/auto-yes']);
+    expect(to(calls, '/auto-yes')[0].body).toMatchObject({ enabled: true, replyTo: { worktreeId: 'wt-g', instanceId: 'antigravity' } });
+    expect(calls.some((c) => c.url.includes('/tool-policy'))).toBe(false);
     expectRefusal('RELAY_TOOL_POLICY_DENIED');
   });
 
@@ -501,11 +505,10 @@ describe('I7d: the reason is stderr\'s first line in every combination (Issue #4
   });
 
   it('send --contract: line 1 is the reason (the task is never created, so nothing is said of it)', async () => {
+    // Issue #4449: the task's own request is refused (409), so there is no row to speak of.
     mockRoutes([
-      { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
+      { match: '/api/worktrees/wt-g/tasks', response: denied() },
       { match: '/api/worktrees/wt-g/send', response: denied() },
-      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
-      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 200, data: { allowed: false, refusal: denied().data } } },
     ]);
     expect(await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml', '--instance', 'antigravity', '--token', 'secret-token']))).toBe(33);
     expectRefusal('TOOL_POLICY_DENIED');
@@ -645,24 +648,24 @@ describe('I7e: the send refuses even when the check before it cannot (Issue #443
   });
 
   it('send --contract naming no target: the default turns antigravity after the check, /send refuses, exit 33', async () => {
+    // Issue #4449: there is no check; the default the server resolves when the task is
+    // written is antigravity, and the task's own request is refused (409): no row, no
+    // send, no "failed" task to report, and the reason is stderr's first line.
     const calls = mockRoutes([
-      // Asked with no tool: the default was codex then.
-      { match: '/api/worktrees/wt-g/tool-policy', method: 'GET', response: { status: 200, data: { allowed: true, cliToolId: 'codex' } } },
-      { match: '/api/worktrees/wt-g/tasks', response: { status: 201, data: { task: { id: TASK_ID, status: 'pending' }, message: 'goal' } } },
-      // ...and antigravity by the time the message goes.
+      { match: '/api/worktrees/wt-g/tasks', response: denied() },
       { match: '/api/worktrees/wt-g/send', response: denied() },
-      { match: `/api/tasks/${TASK_ID}`, method: 'PATCH', response: { status: 200, data: {} } },
     ]);
     const code = await runUntilExit(() => runSend(['wt-g', '--contract', '.commandmate/tasks/t.yaml']));
     expect(code).toBe(33);
-    const check = calls.find((c) => c.url.includes('/tool-policy'));
-    expect(new URL(check!.url).searchParams.has('cliToolId')).toBe(false);
+    expect(calls.some((c) => c.url.includes('/tool-policy'))).toBe(false);
     // The body names no tool, so it says who is sending: the server can refuse it.
-    const sends = to(calls, '/send');
-    expect(sends).toHaveLength(1);
-    expect(sends[0].body).not.toHaveProperty('cliToolId');
-    expect(sends[0].body).toMatchObject(PINNED_BODY_ORIGIN);
+    const tasks = to(calls, '/tasks');
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].body).not.toHaveProperty('cliToolId');
+    expect(tasks[0].body).toMatchObject(PINNED_BODY_ORIGIN);
+    expect(to(calls, '/send')).toHaveLength(0);
     expectReasonSomewhere('TOOL_POLICY_DENIED');
-    expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({ status: 'failed' });
+    expectRefusal('TOOL_POLICY_DENIED');
+    expect(calls.find((c) => c.method === 'PATCH')).toBeUndefined();
   });
 });

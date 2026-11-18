@@ -271,6 +271,9 @@ function assertToolTakesAssignment(cliToolId: CLIToolType, input: RoleAssignment
  *
  * @param expectedRosterRevision - When given, the write applies only to this roster:
  *   the same id can have become another tool's since the caller read it
+ * @param beforeWrite - Called with the tool of the instance about to be written, inside
+ *   the transaction and right before the write; a throw writes nothing (Issue #4449: the
+ *   tool policy judges the very tool it writes)
  * @throws {InstanceRoleRequestError}
  * @throws {AgentRoleNotFoundError}
  */
@@ -279,7 +282,8 @@ export function setManagedInstanceRole(
   worktree: Worktree,
   instanceId: string,
   input: RoleAssignmentInput,
-  expectedRosterRevision?: string
+  expectedRosterRevision?: string,
+  beforeWrite?: (cliToolId: CLIToolType) => void
 ): void {
   db.transaction(() => {
     const roster = currentRoster(db, worktree);
@@ -287,6 +291,7 @@ export function setManagedInstanceRole(
     const instance = roster.find((entry) => entry.id === instanceId);
     if (!instance) throw new InstanceRoleRequestError('not_found', `Instance not in the roster: ${instanceId}`);
     assertToolTakesAssignment(instance.cliTool, input);
+    beforeWrite?.(instance.cliTool);
     setInstanceRoleState(db, worktree.id, instanceId, input);
   })();
 }
@@ -347,6 +352,10 @@ export function soleAddedInstanceId(previous: readonly AgentInstance[], next: re
  * With `idempotencyKey`, what that key already did is answered first, before the
  * revision: a resend's revision is stale because of its own first attempt.
  *
+ * `beforeWrite` is called with the tool of the instance about to be created, inside the
+ * transaction and right before the write; a throw writes nothing (Issue #4449). A replay
+ * creates nothing and is not asked.
+ *
  * @throws {InstanceRoleRequestError}
  * @throws {AgentRoleNotFoundError}
  */
@@ -358,6 +367,7 @@ export function createInstanceWithRole(
     role: RoleAssignmentInput;
     expectedRosterRevision?: string;
     idempotencyKey?: string;
+    beforeWrite?: (cliToolId: CLIToolType) => void;
   }
 ): { instanceId: string; replayed?: true } {
   return db.transaction(() => {
@@ -385,6 +395,7 @@ export function createInstanceWithRole(
     const next = validation.value;
     const created = next[next.length - 1];
     assertToolTakesAssignment(created.cliTool, input.role);
+    input.beforeWrite?.(created.cliTool);
 
     try {
       setAgentInstances(db, worktreeId, next);

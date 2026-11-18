@@ -46,14 +46,22 @@ export function isSendFamilyRoute(path: string): boolean {
 }
 
 /**
+ * The routes a send writes through before its message, which refuse that send's
+ * write with the send's own 409 (Issue #4449): `instances/roles` (`--register --role`,
+ * `--contract --role`) and `tasks` (`--contract`).
+ */
+const SEND_WRITE_ROUTE = /^\/api\/worktrees\/[^/?#]+\/(?:tasks|instances\/roles)(?:[?#].*)?$/;
+
+/**
  * Where a 409 `TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED` becomes a
- * {@link ToolPolicyDeniedError}: the routes that type into a session and relay
- * creation. Elsewhere (the Auto-Yes route, #4436) it stays an `ApiError`, read by that
- * command's own handling; `send --auto-yes` turns that one into a refusal itself
+ * {@link ToolPolicyDeniedError}: the routes that type into a session, relay creation,
+ * and the writes a send makes before its message (Issue #4449). Elsewhere (the
+ * Auto-Yes route, #4436) it stays an `ApiError`, read by that command's own handling;
+ * `send --auto-yes` turns that one into a refusal itself
  * ({@link toolPolicyDenialFromResponse} reads its body too).
  */
 export function isToolPolicyRoute(path: string): boolean {
-  return isSendFamilyRoute(path) || path === '/api/relays';
+  return isSendFamilyRoute(path) || path === '/api/relays' || SEND_WRITE_ROUTE.test(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -323,8 +331,8 @@ commands typed in a terminal are not affected. The sender kind is what this CLI
 reads from its own environment and the server cannot verify it: this is a guard
 against accidental use, not a guarantee of compliance with the Google
 Antigravity terms (Section 6 / FAQ). A send that writes before its message
-(--register --role, --contract, --auto-yes) asks the server first and writes
-nothing when refused. The first stderr line is
+(--register --role, --contract, --auto-yes) is refused by the server at that
+write, which then writes nothing. The first stderr line is
 "Error [TOOL_POLICY_DENIED]: ..." (RELAY_TOOL_POLICY_DENIED for a relay); the
 next names the terms and the FAQ, then how to lift it (the server's
 ${'`'}CM_ANTIGRAVITY_USAGE=api-key${'`'} or ${'`'}enterprise${'`'}). Sending again is refused the same way.`;

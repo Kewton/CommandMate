@@ -442,7 +442,7 @@ Claude の詳細な出力をMarkdown形式で閲覧できます。
 | **Command Code** | Command Code CLI（`commandcode`、Issue #2250） |
 
 - 1 つのブランチに置けるのは **1〜10 件**です（最後の 1 件は削除できません）
-- **Antigravity を選ぶと、利用上の注意が出ます**（Issue #4438。PC の［＋］のフォームと、PC・モバイルの「インスタンスを追加」）。[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq)が、個人向けプランで第三者のソフトウェアやエージェントを通して使うことを制限しているためです。注意は案内で、追加は止めません。［閉じる］を押すと、そのブラウザでは次から出ません（ブラウザごとに記憶し、記憶が読めないときはまた出ます。CLI の注意は単位が違い、CLI の環境ごとに初めての 1 回・確認日が変われば再び出る・stderr だけです）。API キー・Gemini Enterprise の申告はサーバーの環境変数 `CM_ANTIGRAVITY_USAGE` で、画面からは変えられません（変えたらサーバーの再起動が要ります）。詳しくは [README](../ja/README.md#antigravityagyを使う前に)
+- **Antigravity を選ぶと、利用上の注意が出ます**（Issue #4438。PC の［＋］のフォームと、PC・モバイルの「インスタンスを追加」）。[Google Antigravity の追加利用規約](https://antigravity.google/terms) 6 条と[公式 FAQ](https://antigravity.google/docs/faq)が、個人向けプランで第三者のソフトウェアやエージェントを通して使うことを制限しているためです。注意は案内で、追加は止めません。［閉じる］を押すと、そのブラウザでは次から出ません（ブラウザごとに記憶し、記憶が読めないときはまた出ます。CLI の注意は単位が違い、CLI の環境ごとに初めての 1 回・確認日が変われば再び出る・stderr だけです。CLI の記録 `antigravity-notice.json` は、グローバル install なら `~/.commandmate`、ローカル実行（リポジトリの checkout から）なら CLI のパッケージの根に置きます。作業中のディレクトリ（cwd）を基準には決めません）。API キー・Gemini Enterprise の申告はサーバーの環境変数 `CM_ANTIGRAVITY_USAGE` で、画面からは変えられません（変えたらサーバーの再起動が要ります）。詳しくは [README](../ja/README.md#antigravityagyを使う前に)
 - **Auto Yes の効き方はエージェントで違います。** Command Code / Gemini / Vibe-Local は
   画面ベース（ダイアログが一度出てから自動応答）の経路のみです。
   [エージェントごとの承認経路](#エージェントごとの承認経路)を参照してください
