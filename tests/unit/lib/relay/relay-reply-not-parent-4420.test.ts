@@ -47,6 +47,7 @@ import { buildRelayReplyMessage } from '@/lib/relay/relay-messages';
 import {
   countConsecutiveReplyRounds,
   findParentRelayHops,
+  scanRelayLineage,
   openRelay,
   withdrawRelay,
   type OpenRelayResult,
@@ -54,6 +55,7 @@ import {
 import {
   decideRelayCreation,
   MAX_RELAY_HOPS,
+  MAX_RELAY_LINEAGE_ROWS,
   MAX_RELAY_ROUNDS,
 } from '@/lib/relay/relay-policy';
 import type { RelayEndpoint, SessionRelay } from '@/lib/relay/types';
@@ -162,6 +164,13 @@ function seedRequestFromX(hops: number, atMs = tick()): string {
     requestId: relayRequestId(parent.relay.id),
   });
   return parent.relay.id;
+}
+
+/** A `prompt` / `expired` notice: a relay row with no ledger key. */
+function seedNotice(i: number, atMs = tick()): string {
+  const body = `[from Codex / wt-b] waiting on a confirmation ${i}`;
+  rowOnA(body, atMs, { messageType: 'relay' });
+  return body;
 }
 
 function humanTypesOnA(text = 'a person typed this', atMs = tick()): void {
@@ -570,17 +579,14 @@ describe('#4420 round trips are counted and capped at MAX_RELAY_ROUNDS (I6)', ()
     expect(countConsecutiveReplyRounds(db, A)).toBe(2);
   });
 
-  it('refuses when the chain runs past the end of what it reads (fail-closed)', () => {
-    // Notices neither count nor stop, so a history of nothing but notices
-    // fills the read without reaching an end. Undecidable → at the limit.
-    for (let i = 0; i < 60; i += 1) {
-      rowOnA(`[from Codex / wt-b] waiting ${i}`, tick(), { messageType: 'relay' });
-    }
+  it('reads a history of nothing but notices to its start: zero replies, the next relay goes (I10)', () => {
+    // #4420 fix1: this used to be refused as "at the limit" because the read
+    // window filled up. I10 reads to a settled end (here, the start of the
+    // history), so sixty notices are sixty notices and zero replies.
+    for (let i = 0; i < 60; i += 1) seedNotice(i);
 
-    expect(countConsecutiveReplyRounds(db, A)).toBe(MAX_RELAY_ROUNDS);
-    const result = open(A, B);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+    expect(countConsecutiveReplyRounds(db, A)).toBe(0);
+    expect(open(A, B).ok).toBe(true);
   });
 
   it('is scoped to the instance', () => {
@@ -595,6 +601,147 @@ describe('#4420 round trips are counted and capped at MAX_RELAY_ROUNDS (I6)', ()
     const users = getMessages(db, 'wt-a', { limit: 50, cliToolId: 'claude', instanceId: 'claude' })
       .filter((m) => m.role === 'user');
     expect(users.map((m) => m.messageType)).toEqual(['relay', 'relay']);
+  });
+});
+
+describe('#4420 I10: count and parent are read to a settled end, not to a window edge', () => {
+  // The fc01e3bd0 window was 45 user turns (5 + 4 × MAX_RELAY_ROUNDS); the
+  // 44 / 45 / 46 cases straddle that old edge on purpose.
+  it.each([44, 45, 46])('lets the next relay through after %i notices and nothing else', (n) => {
+    for (let i = 0; i < n; i += 1) seedNotice(i);
+
+    expect(countConsecutiveReplyRounds(db, A)).toBe(0);
+    expect(open(A, B).ok).toBe(true);
+  });
+
+  it('lets it through after 3 replies and 40 notices', () => {
+    roundTrips(3);
+    for (let i = 0; i < 40; i += 1) seedNotice(i);
+
+    expect(countConsecutiveReplyRounds(db, A)).toBe(3);
+    expect(open(A, B).ok).toBe(true);
+  });
+
+  it('lets it through after 3 replies and 45 notices (past the old edge)', () => {
+    roundTrips(3);
+    for (let i = 0; i < 45; i += 1) seedNotice(i);
+
+    expect(countConsecutiveReplyRounds(db, A)).toBe(3);
+    expect(open(A, B).ok).toBe(true);
+  });
+
+  it('lets it through when the history ends after exactly 45 rows (3 replies + 42 notices)', () => {
+    roundTrips(3);
+    for (let i = 0; i < 42; i += 1) seedNotice(i);
+
+    expect(countConsecutiveReplyRounds(db, A)).toBe(3);
+    expect(open(A, B).ok).toBe(true);
+  });
+
+  // 44 splits the echo from its notice at the old 45-turn edge; 31 and 63 at
+  // the edges of the current reads (32, then 64 turns).
+  it.each([31, 44, 63])('refuses after 10 replies, a notice, its echo and %i notices (the echo split from its row at a read edge)', (notices) => {
+    roundTrips(MAX_RELAY_ROUNDS);
+    const at = tick();
+    const body = seedNotice(-1, at);
+    seedEcho(body, at + ECHO_DELAY_MS);
+    for (let i = 0; i < notices; i += 1) seedNotice(i);
+
+    expect(countConsecutiveReplyRounds(db, A)).toBe(MAX_RELAY_ROUNDS);
+    const result = open(A, B);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+      expect(result.refusal.message).toMatch(/in a row/);
+    }
+  });
+
+  it('keeps the parent found behind a split echo and many notices (no parent lost at an edge)', () => {
+    const ab = mustOpen(A, B);
+    seedRequestFromX(2);
+    deliverReply(ab);
+    const at = tick();
+    seedEcho(seedNotice(-1, at), at + ECHO_DELAY_MS);
+    for (let i = 0; i < 44; i += 1) seedNotice(i);
+
+    // A notice in front of the parent answers "no parent" (I4, unchanged), so
+    // the guarantee here is the count: one reply, found behind 46 rows.
+    expect(countConsecutiveReplyRounds(db, A)).toBe(1);
+  });
+
+  it.each([
+    ['reply, notice, echo', ['reply', 'notice', 'echo']],
+    ['echo, reply, notice', ['echo', 'reply', 'notice']],
+    ['notice, echo, reply', ['notice', 'echo', 'reply']],
+  ])('counts the 10th reply whatever the insertion order of a same-millisecond reply, notice and echo (%s)', (_label, order) => {
+    roundTrips(MAX_RELAY_ROUNDS - 1);
+    const last = mustOpen(A, B);
+    const at = tick();
+    const replyBody = '[from Codex / wt-b] the tenth answer';
+    const write = {
+      reply: () => rowOnA(replyBody, at, { messageType: 'relay', requestId: relayRequestId(last.id) }),
+      notice: () => rowOnA('[from Copilot / wt-c] waiting at the same instant', at, { messageType: 'relay' }),
+      echo: () => rowOnA(replyBody, at, { requestId: 'claude-prompt:tie' }),
+    };
+    for (const kind of order as Array<keyof typeof write>) write[kind]();
+    markRelayDelivered(db, last.id, relayRequestId(last.id), at);
+
+    expect(countConsecutiveReplyRounds(db, A)).toBe(MAX_RELAY_ROUNDS);
+    const result = open(A, B);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+  });
+
+  it.each([
+    [MAX_RELAY_ROUNDS - 1, true],
+    [MAX_RELAY_ROUNDS, false],
+  ])('reads past turns with many assistant rows (%i replies → allowed: %s)', (replies, allowed) => {
+    for (let i = 0; i < replies; i += 1) {
+      deliverReply(mustOpen(A, B));
+      for (let j = 0; j < 60; j += 1) {
+        createMessage(db, {
+          worktreeId: 'wt-a',
+          role: 'assistant',
+          content: `step ${i}.${j}`,
+          messageType: 'normal',
+          timestamp: new Date(tick(1)),
+          cliToolId: 'claude',
+          instanceId: 'claude',
+        });
+      }
+      for (let k = 0; k < 5; k += 1) seedNotice(i * 10 + k);
+    }
+
+    expect(countConsecutiveReplyRounds(db, A)).toBe(replies);
+    expect(open(A, B).ok).toBe(allowed);
+  });
+
+  it(`stops at MAX_RELAY_LINEAGE_ROWS and refuses, saying how many replies it could confirm`, () => {
+    roundTrips(2);
+    for (let i = 0; i < MAX_RELAY_LINEAGE_ROWS + 20; i += 1) seedNotice(i);
+
+    const lineage = scanRelayLineage(db, A);
+    expect(lineage.truncated).toBe(true);
+    expect(lineage.replyRounds).toBe(0);
+
+    const result = open(A, B, true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+      expect(result.refusal.message).toContain(`${MAX_RELAY_LINEAGE_ROWS}`);
+      expect(result.refusal.message).toMatch(/0 replies/);
+      expect(result.refusal.message).not.toMatch(/in a row, each right after a reply/);
+    }
+  });
+
+  it('reads a history of just under MAX_RELAY_LINEAGE_ROWS to its start and lets it through', () => {
+    roundTrips(2);
+    for (let i = 0; i < MAX_RELAY_LINEAGE_ROWS - 10; i += 1) seedNotice(i);
+
+    const lineage = scanRelayLineage(db, A);
+    expect(lineage.truncated).toBe(false);
+    expect(lineage.replyRounds).toBe(2);
+    expect(open(A, B).ok).toBe(true);
   });
 });
 
@@ -617,6 +764,13 @@ describe('#4420 decideRelayCreation with replyRounds (pure)', () => {
       const verdict = decideRelayCreation({ ...base, allowRelayChain, replyRounds: MAX_RELAY_ROUNDS });
       expect('code' in verdict && verdict.code).toBe('RELAY_HOPS_EXCEEDED');
     }
+  });
+
+  it('refuses a truncated read below the limit with its own sentence (I10)', () => {
+    const verdict = decideRelayCreation({ ...base, replyRounds: 3, historyTruncated: true });
+    expect('code' in verdict && verdict.code).toBe('RELAY_HOPS_EXCEEDED');
+    expect('message' in verdict && verdict.message).toMatch(/3 replies/);
+    expect('message' in verdict && verdict.message).toContain(`${MAX_RELAY_LINEAGE_ROWS}`);
   });
 
   it('asks the chain rule first and the duplicate rule after', () => {

@@ -74,10 +74,27 @@ export const MAX_RELAY_HOPS = 3;
  * (alternating targets must not reset it), from the delivered replies in its
  * history back to the newest ordinary row. Not {@link MAX_RELAY_HOPS}: depth is
  * nesting, this is length, and a requester asking → reading the reply → asking
- * again is the normal use. With one open relay per direction a runaway advances
- * one reply per turn of the other side, so ten bounds it to about ten turns.
+ * again is the normal use. With one open relay per direction a one-sided
+ * runaway (A answering every reply with a new relay) advances one reply per
+ * turn of the other side, so ten bounds it to about ten turns. That bound does
+ * NOT hold for two sessions relaying to each other: what B is asked arrives as
+ * an ordinary row, which resets B's count (known limit (a)), and a relay opened
+ * while answering one is not seen as a chain today (known limit (b), #4492).
  */
 export const MAX_RELAY_ROUNDS = 10;
+
+/**
+ * How far back the walk that counts round trips may read, in user rows
+ * (Issue #4420, I10).
+ *
+ * The walk reads to a settled end — an ordinary row, the start of the history,
+ * the parent, or {@link MAX_RELAY_ROUNDS} replies — and notices and echoes are
+ * stepped over without counting, so only a history of hundreds of them with no
+ * person typing comes near this. When it does, the relay is refused
+ * (fail-closed) with a sentence that says how many replies were confirmed and
+ * that the history could not be read to its end.
+ */
+export const MAX_RELAY_LINEAGE_ROWS = 500;
 
 /** How many open relays one from→to direction may hold at once. */
 export const MAX_OPEN_RELAYS_PER_PAIR = 1;
@@ -177,6 +194,11 @@ export interface RelayCreationInput {
    */
   replyRounds?: number;
   /**
+   * Issue #4420 (I10): the count could not be read to a settled end within
+   * {@link MAX_RELAY_LINEAGE_ROWS}; `replyRounds` is what was confirmed.
+   */
+  historyTruncated?: boolean;
+  /**
    * Issue #4437: the tools at both ends, for rule 0. Absent, rule 0 is not
    * asked (a caller with no tools to name); `relay-service` always passes it.
    */
@@ -253,6 +275,16 @@ export function decideRelayCreation(
       message:
         `This session has opened relays ${replyRounds} times in a row, each right after a reply, `
         + `with nothing typed in between; round trips stop at ${MAX_RELAY_ROUNDS}. `
+        + 'Have a person look before sending another (any ordinary message resets the count).',
+    };
+  }
+  if (input.historyTruncated === true) {
+    return {
+      code: 'RELAY_HOPS_EXCEEDED',
+      message:
+        `Only ${replyRounds} replies in a row could be confirmed: this session's history has no `
+        + `ordinary message within the last ${MAX_RELAY_LINEAGE_ROWS} rows, so the round-trip count `
+        + `(limit ${MAX_RELAY_ROUNDS}) could not be read to its end. `
         + 'Have a person look before sending another (any ordinary message resets the count).',
     };
   }

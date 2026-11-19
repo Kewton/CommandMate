@@ -8,8 +8,14 @@
  *   chat row, no keystroke to tmux.
  *
  * The loop guard and the policy are not mocked. The database is a real file
- * under `os.tmpdir()` (removed after each test); tmux is a spy that must never
- * be called; the socket is mocked because opening a relay publishes its line.
+ * under `os.tmpdir()` (removed after each test); the socket is mocked because
+ * opening a relay publishes its line.
+ *
+ * What proves "nothing was sent" is the row counts: no `session_relays` row and
+ * no `chat_messages` row (a send writes its user row). The tmux spy is a
+ * supplementary check only — this route never reaches tmux on any path, so its
+ * zero says little on its own; the CLI's own `/send` after a refusal is covered
+ * by the CLI suites (`registerRelay` exits 2 before sending).
  *
  * @vitest-environment node
  */

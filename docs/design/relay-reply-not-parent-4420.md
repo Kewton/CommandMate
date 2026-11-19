@@ -53,7 +53,7 @@
 
 - **人の普通の行で 0 に戻る**（#2377 の「人が打てば連鎖が切れる」と同じ規則・同じ判定）。S の履歴を新しい順に読み、§3.1 と同じく、返事の行とその echo は数えて先へ進み、`requestId` の無い `relay` 行（`prompt`・`expired` の知らせ）は数えずに先へ進み、それ以外の user 行（人の行、`to` 側の依頼の行）に当たったら止まる
 - **時間の窓は置かない**。返事と次の依頼の間が何時間空いても、人の行が無ければ同じ連続。時間で戻すと、遅い受け手との暴走が時間をかけて上限を抜けられる
-- **読む量（実装で変えた。§3.3）**: 親の探索と往復の数えを 1 回の読み（`scanRelayLineage`）にまとめ、`5 + 4 × MAX_RELAY_ROUNDS` = 45 ターンを読む。初めの案（上限 +1 ターンを別に読み、親の探索は 5 ターンのまま）は、返事と echo が本当の親を 5 ターンの窓から押し出す（I7）ので採らなかった
+- **読む量（実装で変えた。§3.3・I10）**: 親の探索と往復の数えを 1 回の歩き（`scanRelayLineage`）にまとめ、確定した終わりまで読む（固定の窓にしない）。fc01e3bd0 の 45 ターンの固定窓は実装レビューで窓の端の問題が出たので I10 で書き直した。初めの案（上限 +1 ターンを別に読み、親の探索は 5 ターンのまま）は、返事と echo が本当の親を 5 ターンの窓から押し出す（I7）ので採らなかった
 - 注意: 人以外の普通の行（ほかのエージェントが relay なしで S に `send` した行、`flow tick` が PM に送る 1 行）も「人の行」と同じく 0 に戻す。#2377 の規則が既にそうで、行に送り手が無い（§1-3）ので見分けられない。これは上限が緩む向きの限界として書いておく
 
 #### (4) どこから数えるか（ledger か履歴か・migration）
@@ -105,42 +105,52 @@
 
 ### 3.1 1 回の歩き（`scanRelayLineage`）で、親と往復の数を決める
 
-`relay-service.ts` に `scanRelayLineage(db, from): { parentHops, replyRounds }` を足し、`findParentRelayHops`・`countConsecutiveReplyRounds` はその片方を返す。`openRelay` は 1 回だけ呼んで両方を `decideRelayCreation` に渡す。
+`relay-service.ts` に `scanRelayLineage(db, from): { parentHops, replyRounds, truncated }` を足し、`findParentRelayHops`・`countConsecutiveReplyRounds` はその片方を返す。`openRelay` は 1 回だけ呼んで両方を `decideRelayCreation` に渡す。
 
 ```
-userRows = 依頼元の user 行を 45 ターン読み、新しい順に並べ直す（同じ時刻は普通の行を先に。I7）
+読み: 依頼元の user 行を 32 ターン読む（getMessages、limitUnit 'pairs'、同期）。歩きが確定した終わりに
+      当たらなければ 64・128・256・501 ターンと読み直す（I10）
+並べ: 新しい順。同じ時刻は普通の行を先に、relay 行どうしは挿入順（rowid）の新しい順（I7・I10）
 pending = []
 各行 row について:
   row が relay 行でない → pending に積む
   row が relay 行:
-    pending の行が 1 本でも row の echo でない → 終わり（人の行。#2377。I3・I8）
+    pending の行が 1 本でも row（または同じ時刻の relay 行）の echo でない → 終わり（人の行。#2377。I3・I8）
     pending = []
     id が無い（prompt・expired の知らせ） → 親が未決なら「親なし」に決める（今までどおり。I4）。数えも 0 戻しもせず先へ
-    relay があり relay.from が自分（isSameEndpoint） → 返事。replyRounds += 1 して先へ（I1・I2）
+    relay があり relay.from が自分（isSameEndpoint） → 返事。replyRounds += 1 して先へ（I1・I2）。
+      MAX_RELAY_ROUNDS に届いたら終わり（断ることが決まる）
     それ以外（自分が to の relay、relay が消えた） → 親が未決ならこの行の hops（消えていれば null）。終わり（I4）
-歩き終わり:
-  pending が残った → 人の行で終わり
-  読んだ行が 45 ターン未満 → 履歴の始まり。終わり
-  45 ターンを読み切っても終わりの行に当たらない → replyRounds = max(数, MAX_RELAY_ROUNDS)（断る向き。§3.3）
-ledger が読めない（例外） → { parentHops: null, replyRounds: 0 }（今までの fail-open の向き）
+読んだ行が尽きた:
+  履歴を全部読んだ（読めた user 行が頼んだ数より少ない） → 履歴の始まり。終わり（pending が残っていれば、
+    その後ろに relay 行は無いので人の行。終わり）
+  まだ後ろがある → 終わりではない（未照合の echo も終わりにしない）。倍のターンで読み直す
+  501 ターン（MAX_RELAY_LINEAGE_ROWS + 1）を読んでも終わりに当たらない → truncated: true、replyRounds は確かめた本数
+ledger が読めない（例外） → { parentHops: null, replyRounds: 0, truncated: false }（今までの fail-open の向き）
 ```
 
-- **echo の帰属（I8）**: 新しい順に、次の relay 行までの普通の行をまとめ、それらをその relay 行にだけ `isEchoOfRelayRow`（#2387、変えない）で照合する。「echo R2 → 返事 R2 → echo R1 → 親 R1」は親 R1 を残す。返事 R2 と同じ本文でも R2 より古い行は R1 と照合され、echo でないので人の行として終わる
-- **「同じセッション」**: `relay.from` と `from` の worktree と instance が文字どおり同じ（`isSameEndpoint`）。同じ worktree の別 instance・食い違いは返事と決めず、親として扱う（I4）
-- 往復の数え: 親が決まった後も、知らせ・返事を歩いて数え続ける。`MAX_RELAY_ROUNDS` に届いた時点で親が決まっていれば止める
+- **echo の帰属（I8）**: 新しい順に、次の relay 行までの普通の行をまとめ、それらをその relay 行（とそれと同じ時刻の relay 行）にだけ `isEchoOfRelayRow`（#2387、変えない）で照合する。同じ時刻の relay 行も見るのは、同じ時刻の返事・知らせ・echo の並びで帰属が変わらないようにするため（I10）。「echo R2 → 返事 R2 → echo R1 → 親 R1」は親 R1 を残す。返事 R2 と同じ本文でも R2 より古い行は R1 と照合され、echo でないので人の行として終わる
+- **「同じセッション」**: `relay.from` と `from` の worktree と instance が文字どおり同じ（`isSameEndpoint`）。同じ worktree の別 instance・食い違いは返事と決めず、親として扱う（I4）。**別名**: instance の別名（alias）と id が食い違った relay は自分の返事と決めず親として扱う（fail-closed。親があれば連鎖として断る側）。API・CLI は endpoint を id に解決してから送るので、本番でこの食い違いが起きる経路は見つかっていない（影響小。実装レビュー opus P3）
+- 往復の数え: 親が決まった後も、知らせ・返事を歩いて数え続ける。`MAX_RELAY_ROUNDS` に届いたら止める（断ることが決まる。親が未決なら `findParentRelayHops` は null を返すが、`openRelay` は往復の上限で断る）
 
 ### 3.2 往復の上限（`relay-policy.ts`）
 
 - `MAX_RELAY_ROUNDS = 10`（名前つきの定数 1 か所。試験は定数を参照）
 - `decideRelayCreation` の入力に `replyRounds?: number`（省略時 0）。判定の順は 自分宛て → ツールの方針 → 連鎖（`RELAY_CHAIN_BLOCKED`）→ 深さ（`RELAY_HOPS_EXCEEDED`）→ **往復（`RELAY_HOPS_EXCEEDED`）** → 重複（`RELAY_DUPLICATE_PENDING`）。純関数のまま
 - 往復の文面（深さの `Relay chains stop at …` と見分けがつく）: `This session has opened relays ${n} times in a row, each right after a reply, with nothing typed in between; round trips stop at 10. Have a person look before sending another (any ordinary message resets the count).`
+- 読み切れなかったとき（入力 `historyTruncated?: boolean`、往復が上限未満のとき）の文面（I10。「10 回続けた」と言わない）: `Only ${n} replies in a row could be confirmed: this session's history has no ordinary message within the last 500 rows, so the round-trip count (limit 10) could not be read to its end. Have a person look before sending another (any ordinary message resets the count).`
+- `MAX_RELAY_LINEAGE_ROWS = 500`（名前つきの定数 1 か所）
 - `allowRelayChain` では外れない
 
-### 3.3 窓と同じ時刻（I7）
+### 3.3 窓の端と同じ時刻（I7・I10）
 
-- 親の探索の窓（5 ターン）を、返事と echo の分だけ広げた（`PARENT_RELAY_LOOKBACK_TURNS + 4 × MAX_RELAY_ROUNDS` = 45 ターン。1 往復に返事・echo・知らせの 3 行を見込み、余りを持たせた）。返事と echo が並んで本当の親が 5・6・7 件目に来ても親は見える。「古い無関係な relay を親と取り違えない」は窓ではなく歩きの規則（echo と自分の返事・知らせしか飛ばさず、それ以外で止まる）が守る
-- 45 ターンを読み切っても終わりの行に当たらないときは、後ろが分からないので**上限に達したとみなして断る**（親を見失って旗なしで通す向きにしない）。そうなるのは、人の行を挟まずに返事 10 本未満と知らせ・echo で 45 行が埋まったときだけ。人が 1 行打てば戻る
-- SQLite の `ORDER BY timestamp DESC` は同じ時刻の行の順を決めないので、読んだ後に安定な並べ直しをする: 同じ時刻なら普通の行を新しい側（echo は relay 行より古くならないため、echo として照合される。人の行なら連鎖を切る）。同じ時刻の relay 行どうしは読んだ順のままで、返事は飛ばし依頼は親になるので、どちらの順でも同じ答えになる
+- **確定した終わりまで読む（I10）**: 往復の数と親は、確定した終わり（人の普通の行・履歴の先頭・親の行・消えた relay の行・返事 `MAX_RELAY_ROUNDS` 本）まで読んで決める。固定の件数の窓で読み切ったことを終わりとみなさない。fc01e3bd0 の 45 ターンの窓は、(1) 窓の最後が未照合の echo（対の行が窓の外）だと人の行として終わって上限を抜け、(2) 知らせが窓を食うと 0〜数本の返事で「10 回続けた」と断り、(3) ちょうど 45 件で終わる履歴も上限扱いにした（実装レビュー codex P1・P2、opus P2）
+- **読み方**: 同期のまま（#4466 の設計が同期の読みを前提にしている）。`getMessages` を `limitUnit: 'pairs'` で 32 ターンから倍々に読み直す（`before` でのページ送りは、同じ時刻の行がページの境で割れるので使わない。`pairs` は境の時刻の行を全部含む）。知らせ・echo は数えずに進む。履歴を全部読んだかは「読めた user 行が頼んだ数より少ない」で決める（ちょうどの件数でも、倍で読み直して確かめる）
+- **固い上限**: `MAX_RELAY_LINEAGE_ROWS = 500`。501 ターン読んでも終わりに当たらなければ断る（fail-closed、`RELAY_HOPS_EXCEEDED`）。文面は確かめた本数と「読み切れなかった」を言う。上限の判定のため 1 行先（501）まで読み、同じ時刻の行の組は割らない
+- **未照合の echo**: 読んだ行の最後に、対の relay 行がまだ読めていない普通の行が残っても、それを終わり（人の行）としない。読み進めて決める。履歴を全部読んで残ったときだけ人の行
+- **assistant の多いターン**: `pairs` は user 行で数えるので、assistant 行は読む量に効かない
+- **同じ時刻**: SQLite の `ORDER BY timestamp DESC` は同じ時刻の行の順を決めないので、読んだ後に並べ直す: 同じ時刻なら普通の行を新しい側（echo は relay 行より古くならないため、echo として照合される。人の行なら連鎖を切る）、relay 行どうしは挿入順（`rowid`）の新しい順。普通の行は同じ時刻の relay 行のどれの echo でもよい（返事・知らせ・echo が同じ時刻でも、どの挿入順でも 10 本目の返事を数える）。決められない並びでも、確定した上限を解除しない（返事 `MAX_RELAY_ROUNDS` 本に届けばそこで終わり、断る）
+- 返事と echo が並んで本当の親が 5・6・7 件目に来ても親は見える。「古い無関係な relay を親と取り違えない」は窓ではなく歩きの規則（echo と自分の返事・知らせしか飛ばさず、それ以外で止まる）が守る
 
 ## 4. 不変条件（試験で固定した）
 
@@ -150,31 +160,34 @@ ledger が読めない（例外） → { parentHops: null, replyRounds: 0 }（�
 - **I4** 判定できないとき（ledger が読めない・relay が消えた・id が無い）の向きは今までの文書どおり。返事か依頼かが決められない行は親として扱う（返事と決められたときだけ飛ばす）
 - **I5** hops の上限・期限・`--allow-relay-chain` の意味は変えない
 - **I6** 往復の上限: 依頼元セッション単位（相手を問わず）で、人の普通の行が入るまでに受けた自分の relay の返事の数が `MAX_RELAY_ROUNDS` 以上なら、次の relay を `RELAY_HOPS_EXCEEDED` で断る。旗では外れない。期限切れ・cancelled（返事の行が無いもの）は数えない。返事と決められない行（relay が消えた等）で数えるのを止め、数え足しも 0 戻しもしない。migration は足さない
-- **I7** 返事と echo が本当の親を窓から押し出さない（窓を 45 ターンに広げ、読み切ったら断る向き）。同じ時刻の行は普通の行を新しい側に並べる
-- **I8** echo の帰属は 1 通り: 次の relay 行までの普通の行をその relay 行にだけ照合する
-- **I9** 上限の陰性対照は手順を分ける（深さ 2 の親 → 旗で深さ 3 → 返事 → 次も深さ 3 / 深さ 3 の親で次を拒否）。実ルートの拒否で、relay の新規行・chat の新規行・tmux への送信がゼロ
+- **I7** 返事と echo が本当の親を窓から押し出さない。同じ時刻の行は普通の行を新しい側に並べる
+- **I10（窓の端）** 往復の数と親は確定した終わり（人の普通の行・履歴の先頭など）まで読んで決める。固定の件数の窓で読み切ったことを終わりとみなさない。同期の読みで、終わりの行・返事 `MAX_RELAY_ROUNDS` 本・固い上限 `MAX_RELAY_LINEAGE_ROWS`（500 行）のどれかまで読む。固い上限で止まったら断り、文面は確かめた本数と読み切れなかったことを言う。未照合の echo は終わりとしない。同じ時刻の型が混ざる行は挿入順で並べ、決められないときも確定した上限を解除しない
+- **I8** echo の帰属は 1 通り: 次の relay 行までの普通の行をその relay 行（と同じ時刻の relay 行）にだけ照合する
+- **I9** 上限の陰性対照は手順を分ける（深さ 2 の親 → 旗で深さ 3 → 返事 → 次も深さ 3 / 深さ 3 の親で次を拒否）。実ルートの拒否で、relay の新規行・chat の新規行がゼロ（tmux の呼び出しゼロは補助。このルートはどの経路でも tmux に届かないので、それだけでは弱い）
 
 ## 5. 試験
 
-`tests/unit/lib/relay/relay-reply-not-parent-4420.test.ts`（41 件）と `tests/integration/relay-reply-rounds-route-4420.test.ts`（2 件）。行は `relay-delivery` が書く形（依頼元の履歴に `messageType: 'relay'`・`requestId: relay:<id>`・本文は `buildRelayReplyMessage`）で置く。
+`tests/unit/lib/relay/relay-reply-not-parent-4420.test.ts`（59 件）と `tests/integration/relay-reply-rounds-route-4420.test.ts`（2 件）。行は `relay-delivery` が書く形（依頼元の履歴に `messageType: 'relay'`・`requestId: relay:<id>`・本文は `buildRelayReplyMessage`）で置く。
 
 - I1（陽性）: 返事の後の A→B（旗なし・hops 1）、A→C、3 回目、echo を挟んでも通る
 - I2・I9: (i) 深さ 2 の親 → 旗で A→B（深さ 3）→ 返事 → 旗なし `RELAY_CHAIN_BLOCKED`・旗あり深さ 3 / (ii) 深さ 3 の親の前に返事 → 旗あり `RELAY_HOPS_EXCEEDED`・旗なし `RELAY_CHAIN_BLOCKED` / 親と返事の間・返事の後の人の行で連鎖が切れる
 - I4: 消えた relay の返事の行は親（null）でその後ろの親に届かない、知らせが最新なら null、同じ worktree の別 instance の relay は返事にしない
 - I7: 親が 5・6・7 件目、同じ時刻の echo と返事・人の行と返事・親と返事（挿入の順を両方）
 - I8: 「echo R2 → 返事 R2 → echo R1 → 親 R1」、返事より古い同じ本文の行、#2392（読み手が行を書かない）、人が同じ本文を打ち直した行（既知の制限として固定）、別の本文
-- I6: 上限 -1 は通る、上限で断る（旗あり・なし、文面、relay の新規行ゼロ）、相手を交互にしても続く、人の行で 0、echo を数えない、期限切れの知らせは数えも 0 戻しもしない、cancelled を数えない、消えた relay の行で止まる、自分が `to` の行で止まる、読み切ったら断る、instance ごと
+- I6: 上限 -1 は通る、上限で断る（旗あり・なし、文面、relay の新規行ゼロ）、相手を交互にしても続く、人の行で 0、echo を数えない、期限切れの知らせは数えも 0 戻しもしない、cancelled を数えない、消えた relay の行で止まる、自分が `to` の行で止まる、知らせだけの履歴は先頭まで読んで 0 本（fc01e3bd0 では「読み切ったら断る」と固定していた試験の期待を I10 で変えた）、instance ごと
+- I10: 知らせのみ 44・45・46 件（通る）、返事 3＋知らせ 40・45（通る）、ちょうど 45 件で終わる履歴（返事 3＋知らせ 42、通る）、返事 10＋知らせ＋割れた echo＋知らせ 31・44・63 件（断る。読みの端 32・64 と旧窓 45 で echo が割れる）、割れた echo の後ろの返事を数える、同じ時刻の返事・知らせ・echo の 3 通りの挿入順（10 本目を数えて断る）、assistant の多いターン（9 本は通る・10 本は断る）、500 行の上限で止まる（断る・文面が確かめた本数）、上限の手前の履歴は先頭まで読む
+- 変異で確かめた（コミットに残さない）: 窓の件数で打ち切る変異（45 ターン固定、読み切り＝終わり）で I10 の 8 件が赤、未照合の echo を終わりとする変異で割れた echo の 2 件（31・63）が赤
 - 純関数: `replyRounds` 省略時は今までどおり、上限未満は通る、上限で `RELAY_HOPS_EXCEEDED`（旗で外れない）、連鎖が先・重複が後
-- 実ルート: 返事の後の `POST /api/relays` が 201・hops 1 / 10 往復の後は旗あり・なしとも 409 `RELAY_HOPS_EXCEEDED`（往復の文面）、relay・chat の行数が変わらず tmux の呼び出しゼロ
+- 実ルート: 返事の後の `POST /api/relays` が 201・hops 1 / 10 往復の後は旗あり・なしとも 409 `RELAY_HOPS_EXCEEDED`（往復の文面）、relay・chat の行数が変わらない（tmux の呼び出しゼロは補助）
 - 既存の `the loop guard`・#2387・クローズ後の再作成の試験は変えずに緑
 
 ## 6. 既知の制限
 
-- (a) 行に送り手が無い（§1-3）ため、人以外の普通の行（relay なしの `send`・`flow tick` の 1 行など）でも往復の数は 0 に戻る（上限が緩む向き）
+- (a) 行に送り手が無い（§1-3）ため、人以外の普通の行（relay なしの `send`・`flow tick` の 1 行など）でも往復の数は 0 に戻る（上限が緩む向き）。**相互の relay（A と B が互いに relay を開く）では「約 10 ターンで止まる」は成り立たない**: B に届く A の依頼は普通の行なので B の数は 0 に戻り、依頼に答える途中の relay も (b) のとおり止まらない。10 ターンの見積もりは片側の暴走（A が返事のたびに次を開く）にだけ当てはまる
 - (b) 依頼に答える途中で開く B→C の relay は、受け手の依頼の行に relay の印が無いため今も本番で止まっておらず、この変更でも変わらない（D2）。続きは #4492（Sprint 9。bound の `input_message_id` を使う案を含む）
 - (c) 人が返事と同じ本文を打ち直した行は、#2387 の規則どおり echo と区別できない（返事の本文は `[from …]` の枠つき）
-- (d) 45 ターンを読み切っても終わりの行に当たらないときは上限に達したとみなして断る（§3.3）
-- (e) 同じ時刻の relay 行どうしの順は決めない（どちらの順でも答えは同じ。§3.3）
+- (d) 人の行を挟まずに 500 行を読んでも終わりに当たらないときは断る（fail-closed。文面は確かめた本数と読み切れなかったことを言う。§3.3）
+- (e) 同じ時刻の relay 行どうしは挿入順（`rowid`）で並べる。挿入順が実際の順と違う書き手があれば、その並びは挿入順のまま読む（§3.3）
 
 ## 7. 対になる場所
 

@@ -41,6 +41,7 @@ import {
   decideRelayCreation,
   isRelayRefusal,
   isSameEndpoint,
+  MAX_RELAY_LINEAGE_ROWS,
   MAX_RELAY_ROUNDS,
   resolveRelayTtlMs,
   type RelayRefusal,
@@ -85,34 +86,18 @@ export type OpenRelayResult =
   | { ok: false; refusal: RelayRefusal | RelayEndpointMissing };
 
 /**
- * How many of the requesting session's recent turns the parent lookup reads,
- * when nothing but echoes stands in front of the parent.
+ * How many user turns the first read of {@link scanRelayLineage} asks for
+ * (Issue #4420, I10).
  *
- * Bounded in **user turns** rather than rows — `limitUnit: 'pairs'` — because a
- * single codex turn can emit dozens of assistant rows, and a row-counted window
- * would slide the user rows this lookup is entirely about out of range. Five is
- * far above the one echo a delivery actually produces (see
- * {@link isEchoOfRelayRow}).
- *
- * Issue #4420: the walk also reads past the replies to this session's own
- * relays, so the window grows by room for {@link MAX_RELAY_ROUNDS} of them, each
- * with an echo — see {@link RELAY_LINEAGE_LOOKBACK_TURNS}. What keeps an
- * unrelated relay from further back from being taken for the parent is not the
- * window but the walk: it only ever steps over echoes and this session's own
- * replies, and stops at anything else.
+ * Not a window: when the walk has not reached a settled end (an ordinary row,
+ * the start of the history, a parent, or {@link MAX_RELAY_ROUNDS} replies) by
+ * the last row read, the read is repeated with twice as many turns, up to
+ * {@link MAX_RELAY_LINEAGE_ROWS}. Bounded in **user turns** — `limitUnit:
+ * 'pairs'` — because a single codex turn can emit dozens of assistant rows.
+ * Thirty-two covers the common case (a few replies since the person last typed)
+ * in one read.
  */
-const PARENT_RELAY_LOOKBACK_TURNS = 5;
-
-/**
- * The turns {@link scanRelayLineage} reads (Issue #4420).
- *
- * Room for the parent lookback plus {@link MAX_RELAY_ROUNDS} replies with up to
- * three rows each (the reply, an echo, a notice). A walk that reaches the end
- * of this read without meeting a row that ends it cannot say what is behind it,
- * and is answered as "at the limit" — the safe direction for both the parent
- * and the count (design §4 I7).
- */
-const RELAY_LINEAGE_LOOKBACK_TURNS = PARENT_RELAY_LOOKBACK_TURNS + 4 * MAX_RELAY_ROUNDS;
+const RELAY_LINEAGE_FIRST_READ_TURNS = 32;
 
 /**
  * Whether `candidate` is a transcript reader's second copy of `relayRow`.
@@ -139,28 +124,39 @@ function isEchoOfRelayRow(candidate: ChatMessage, relayRow: ChatMessage): boolea
 }
 
 /**
- * Newest first, and among rows with the SAME timestamp the ordinary rows before
- * the relay rows (Issue #4420, I7).
+ * Newest first. Among rows with the SAME timestamp, the ordinary rows before the
+ * relay rows, and the relay rows newest-inserted first (Issue #4420, I7 / I10).
  *
  * SQLite's `ORDER BY timestamp DESC` leaves ties in no stated order. An echo is
  * never older than its relay row ({@link isEchoOfRelayRow}), so at a tie it is
- * the newer of the two; a person's row at a tie is read as newer too, which
- * ends the chain rather than hiding behind it. The sort is stable, so ties
- * between two relay rows keep the reader's order — both ways round the walk
- * reaches the same answer (a reply is stepped over, a request is the parent).
+ * read as the newer of the two; a person's row at a tie is read as newer too,
+ * which ends the chain rather than hiding behind it. Relay rows at a tie are put
+ * in insertion order (`rowid`, the order the delivery wrote them), so a reply,
+ * a notice and a vanished relay's row sharing a millisecond are always walked
+ * the same way.
  */
-function newestFirstNormalBeforeRelay(rows: ChatMessage[]): ChatMessage[] {
-  return rows
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      const byTime = b.row.timestamp.getTime() - a.row.timestamp.getTime();
-      if (byTime !== 0) return byTime;
-      const aRelay = a.row.messageType === 'relay' ? 1 : 0;
-      const bRelay = b.row.messageType === 'relay' ? 1 : 0;
-      if (aRelay !== bRelay) return aRelay - bRelay;
-      return a.index - b.index;
-    })
-    .map(({ row }) => row);
+function sortNewestFirst(rows: ChatMessage[], insertedAt: Map<string, number>): ChatMessage[] {
+  return [...rows].sort((a, b) => {
+    const byTime = b.timestamp.getTime() - a.timestamp.getTime();
+    if (byTime !== 0) return byTime;
+    const aRelay = a.messageType === 'relay' ? 1 : 0;
+    const bRelay = b.messageType === 'relay' ? 1 : 0;
+    if (aRelay !== bRelay) return aRelay - bRelay;
+    return (insertedAt.get(b.id) ?? 0) - (insertedAt.get(a.id) ?? 0);
+  });
+}
+
+/** Insertion order of the rows read, for {@link sortNewestFirst}'s ties. */
+function readInsertionOrder(db: Database.Database, rows: ChatMessage[]): Map<string, number> {
+  const order = new Map<string, number>();
+  for (let i = 0; i < rows.length; i += 500) {
+    const ids = rows.slice(i, i + 500).map((row) => row.id);
+    const found = db
+      .prepare(`SELECT id, rowid AS seq FROM chat_messages WHERE id IN (${ids.map(() => '?').join(',')})`)
+      .all(...ids) as Array<{ id: string; seq: number }>;
+    for (const { id, seq } of found) order.set(id, seq);
+  }
+  return order;
 }
 
 /** What one walk of the requesting session's history says (Issue #4420). */
@@ -169,22 +165,111 @@ export interface RelayLineage {
   parentHops: number | null;
   /** Replies to this session's own relays received in a row (see {@link countConsecutiveReplyRounds}). */
   replyRounds: number;
+  /**
+   * I10: the walk met {@link MAX_RELAY_LINEAGE_ROWS} user rows without a settled
+   * end, so what lies behind is unknown. `replyRounds` is then the number
+   * actually confirmed, and the policy refuses (fail-closed) with a sentence
+   * that says so.
+   */
+  truncated: boolean;
+}
+
+/** One walk over rows already read: settled, or it ran out of rows. */
+type WalkOutcome = { settled: true; lineage: RelayLineage } | { settled: false; lineage: RelayLineage };
+
+/**
+ * Walk user rows newest-first once (see {@link scanRelayLineage}).
+ *
+ * `complete` says the rows are the whole history, so running out of them is the
+ * start of the history — a settled end. Otherwise running out is not an end
+ * (I10): an ordinary row still waiting for the relay row it may be an echo of,
+ * or a chain of replies and notices, says nothing about what is behind it.
+ */
+function walkRelayLineage(
+  db: Database.Database,
+  from: RelayEndpoint,
+  rows: ChatMessage[],
+  complete: boolean
+): WalkOutcome {
+  // I8 at a tie: an ordinary row may be the echo of a relay row with its own
+  // timestamp, wherever that row sits among the tie.
+  const relayRowsAt = new Map<number, ChatMessage[]>();
+  for (const row of rows) {
+    if (row.messageType !== 'relay') continue;
+    const at = row.timestamp.getTime();
+    relayRowsAt.set(at, [...(relayRowsAt.get(at) ?? []), row]);
+  }
+  const isEchoFor = (candidate: ChatMessage, relayRow: ChatMessage): boolean =>
+    isEchoOfRelayRow(candidate, relayRow)
+    || (relayRowsAt.get(candidate.timestamp.getTime()) ?? []).some((tied) =>
+      isEchoOfRelayRow(candidate, tied)
+    );
+
+  let parentHops: number | null = null;
+  let parentDecided = false;
+  let replyRounds = 0;
+  let pending: ChatMessage[] = [];
+  const lineage = (): RelayLineage => ({
+    parentHops: parentDecided ? parentHops : null,
+    replyRounds,
+    truncated: false,
+  });
+  const settled = (): WalkOutcome => ({ settled: true, lineage: lineage() });
+
+  for (const row of rows) {
+    if (row.messageType !== 'relay') {
+      pending.push(row);
+      continue;
+    }
+    if (pending.some((candidate) => !isEchoFor(candidate, row))) return settled();
+    pending = [];
+
+    const relayId = parseRelayRequestId(row.requestId);
+    if (!relayId) {
+      // A notice: "no parent" as before #4420 (I4); neither counted nor an end.
+      if (!parentDecided) {
+        parentHops = null;
+        parentDecided = true;
+      }
+      continue;
+    }
+    const relay = getRelayById(db, relayId);
+    if (relay && isSameEndpoint(relay.from, from)) {
+      replyRounds += 1;
+      // At the ceiling the verdict is a refusal whatever lies behind.
+      if (replyRounds >= MAX_RELAY_ROUNDS) return settled();
+      continue;
+    }
+    if (!parentDecided) {
+      parentHops = relay?.hops ?? null;
+      parentDecided = true;
+    }
+    return settled();
+  }
+
+  // Ordinary rows left over with the whole history read have no relay row
+  // behind them to be an echo of: somebody typed them — an end.
+  if (complete) return settled();
+  return { settled: false, lineage: lineage() };
 }
 
 /**
- * Walk the requesting session's newest user rows once, for both halves of the
- * loop guard (Issues #2377, #2387, #4420).
+ * Walk the requesting session's newest user rows, for both halves of the loop
+ * guard (Issues #2377, #2387, #4420).
  *
  * The rows are cut into groups: each relay row together with the ordinary rows
  * newer than it and older than the next newer relay row. Every ordinary row in
- * a group must be an echo of THAT relay row and of no other (I8); one that is
- * not is somebody typing, and ends the walk (#2377: a person taking the session
- * over ends the chain). Then the relay row is read:
+ * a group must be an echo of THAT relay row (or of a relay row with the very
+ * same timestamp) and of no other (I8); one that is not is somebody typing, and
+ * ends the walk (#2377: a person taking the session over ends the chain). Then
+ * the relay row is read:
  *
- * - **a reply to a relay this session opened** (`relay.from` is this session):
- *   counted as one round trip and stepped over — it is the answer to this
- *   session's own question, not a request to it (I1), and what is behind it is
- *   still read (I2);
+ * - **a reply to a relay this session opened** (`relay.from` is this session,
+ *   worktree and instance id as written — an alias or another instance is not
+ *   this session, and is read as a parent, the fail-closed side): counted as one
+ *   round trip and stepped over — it is the answer to this session's own
+ *   question, not a request to it (I1), and what is behind it is still read
+ *   (I2). At {@link MAX_RELAY_ROUNDS} the walk stops: the verdict is a refusal;
  * - **a notice with no ledger key** (a `prompt` / `expired` delivery): as
  *   before #4420, the parent is "none" if not already found (I4); the count
  *   neither grows nor resets, and the walk goes on;
@@ -193,73 +278,51 @@ export interface RelayLineage {
  *   gone relay answers null: the documented fail-open, unchanged); the count
  *   stops here.
  *
- * The walk ends at the first row that ends it; reaching the end of the read
- * instead is answered as "at the limit" ({@link RELAY_LINEAGE_LOOKBACK_TURNS}).
+ * ## Read to a settled end (I10)
+ *
+ * The walk is decided only at a settled end: one of the rows above that ends
+ * it, or the start of the history. Running out of rows read is not an end —
+ * the read is repeated, synchronously, with twice as many turns
+ * ({@link RELAY_LINEAGE_FIRST_READ_TURNS} first), up to
+ * {@link MAX_RELAY_LINEAGE_ROWS} user rows. A walk that still has not settled
+ * there answers `truncated: true` with the replies it did confirm, and the
+ * policy refuses (fail-closed) saying exactly that.
+ *
  * A ledger that cannot be read answers `{ parentHops: null, replyRounds: 0 }`,
  * the direction the guard has always failed in.
  */
 export function scanRelayLineage(db: Database.Database, from: RelayEndpoint): RelayLineage {
   try {
     const resolved = resolveRelaySession(db, from);
-    const userRows = newestFirstNormalBeforeRelay(
-      getMessages(db, from.worktreeId, {
-        limit: RELAY_LINEAGE_LOOKBACK_TURNS,
+    let turns = RELAY_LINEAGE_FIRST_READ_TURNS;
+    for (;;) {
+      // One past the ceiling, so "exactly the ceiling" is told from "more".
+      const limit = Math.min(turns, MAX_RELAY_LINEAGE_ROWS + 1);
+      const userRows = getMessages(db, from.worktreeId, {
+        limit,
         limitUnit: 'pairs',
         cliToolId: resolved.cliToolId,
         instanceId: from.instanceId,
         matchResolvedInstance: true,
-      }).filter((message) => message.role === 'user')
-    );
-
-    let parentHops: number | null = null;
-    let parentDecided = false;
-    let replyRounds = 0;
-    let pending: ChatMessage[] = [];
-    const decideParent = (hops: number | null): void => {
-      if (parentDecided) return;
-      parentHops = hops;
-      parentDecided = true;
-    };
-    const done = (): RelayLineage => ({ parentHops: parentDecided ? parentHops : null, replyRounds });
-
-    for (const row of userRows) {
-      if (row.messageType !== 'relay') {
-        pending.push(row);
-        continue;
-      }
-      if (pending.some((candidate) => !isEchoOfRelayRow(candidate, row))) return done();
-      pending = [];
-
-      const relayId = parseRelayRequestId(row.requestId);
-      if (!relayId) {
-        decideParent(null);
-        continue;
-      }
-      const relay = getRelayById(db, relayId);
-      if (relay && isSameEndpoint(relay.from, from)) {
-        replyRounds += 1;
-        if (parentDecided && replyRounds >= MAX_RELAY_ROUNDS) return done();
-        continue;
-      }
-      decideParent(relay?.hops ?? null);
-      return done();
+      }).filter((message) => message.role === 'user');
+      // Fewer user rows (= turns, what `limitUnit: 'pairs'` bounds) than asked
+      // for: this is the whole history.
+      const complete = userRows.length < limit;
+      const rows = sortNewestFirst(userRows, readInsertionOrder(db, userRows));
+      // Not cut at the ceiling: a tie group is read whole (`pairs` includes every
+      // row at the cutoff's timestamp), so an echo is never parted from its row.
+      const walked = walkRelayLineage(db, from, rows, complete);
+      if (walked.settled) return walked.lineage;
+      if (limit > MAX_RELAY_LINEAGE_ROWS) return { ...walked.lineage, truncated: true };
+      turns *= 2;
     }
-
-    // Ordinary rows left over sit behind every relay row read: nothing they can
-    // be an echo of, so they end the walk like any other row a person typed.
-    if (pending.length > 0) return done();
-    // Fewer user rows (= turns, what `limitUnit: 'pairs'` bounds) than asked
-    // for: this is the start of the history.
-    if (userRows.length < RELAY_LINEAGE_LOOKBACK_TURNS) return done();
-    // The read ran out mid-walk: what lies behind is unknown — at the limit.
-    return { ...done(), replyRounds: Math.max(replyRounds, MAX_RELAY_ROUNDS) };
   } catch (error) {
     logger.warn('relay-parent-lookup-failed', {
       worktreeId: from.worktreeId,
       instanceId: from.instanceId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { parentHops: null, replyRounds: 0 };
+    return { parentHops: null, replyRounds: 0, truncated: false };
   }
 }
 
@@ -348,6 +411,7 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     allowRelayChain: input.allowRelayChain === true,
     openBetween: countOpenRelaysBetween(db, input.from, input.to),
     replyRounds: lineage.replyRounds,
+    historyTruncated: lineage.truncated,
     // Issue #4437: rule 0 — each end's tool by the resolver the send route and
     // the delivery use, and the declaration as stated (no credentials read).
     tools: {
