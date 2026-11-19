@@ -186,6 +186,29 @@ done 3< <(awk -F'\t' '{
   `env-changed-during-verify=<項目>` と exit 3（雛形は `RC=3`＝`verify=fail` にする。裁定にしない）。precheck / publish / merge はこの `env=` を 3-3 の記録と同じに照らし合わせる
   （docs/orchestrate/workers.md の「合格を使う地点も環境を照らし合わせる」）
 
+## 1-5 リーダーが直接流した verify の記録（record-verify）
+
+wait-verify はワーカーの合図（`IMPL_COMPLETED`）を待つので、リーダーが `commandmatedev verify <wt>` を直接流した run には使えない（#4482。Sprint 7 の A1〜D2 では
+`verify=ok` を手で書き、note に run 番号を書いた。env= は残らなかった）。直接の run は、終わった後に run 番号から記録する:
+
+```bash
+node scripts/orchestrate/run-log.mjs record-verify --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --run "$RUN_ID" --wt "$WT" --worktree "$WT_DIR" [--head "$(git -C "$WT_DIR" rev-parse HEAD)"] [--task "$TASK_ID"] "${ITEM_ARGS[@]}"
+```
+
+- **写すのは run の事実だけ**: `verify show <run> --json` を読み、`passed` だけを `verify=ok`、`failed`・`error`・`cancelled`・`not_started` を `fail` と書く。
+  ゲートごとの結果は note の `gates=<id>:<ok|skip|fail>,…`（`passed`→ok、`skipped`→skip、ほか→fail）。合否の裁定は今までどおり verify の run（直の実行の
+  ゲートの結果を読み替えて合格にしない、team.md §10-4）
+- **終わっていない run は記録しない**: `running`・`queued`（と知らない status）は exit 3 で断る（結果を決めない）。終わってから呼び直す
+- **別の run を取り違えない**: run の `worktreeId` が `--wt` でない・答えた run の id が違う・`--task` と run の task が違う・同じ work item に同じ run が既に記録済み
+  （wait-verify の行の `run=<id>` も含む）なら exit 4 で断る。run は HEAD を持たないので、HEAD は記録する時点の worktree の HEAD とし、そのコミットが **run の開始より後**
+  なら（run は前の状態を見た。wait-verify の `committedAfter` と同じ判断）、または `--head` と違えば exit 4 で断る
+- **env は記録する時点の manifest**（note に `env-at=record`）: 直の実行には開始時の manifest が無く、後から開始時刻の状態を作り直せないため。`env-manifest.mjs` の
+  `takeManifest` / `manifestHash` を使い、`verify-<work item>.run<id>.env.json` の `end` に置いて、記録の `key`（`<issues>:<work item>:<task|->:run<id>`）と
+  `env=<hash>` を note に書く。precheck / publish / merge の照合（`verifyEnvState`）は wait-verify の行と同じに読む。run の後で環境を変えたなら、記録の前に流し直す
+- note の形: `direct=verify run=<id> run-status=<status> gates=… key=<key> env-at=record env=<hash>`。wait-verify の行の形は変えていない
+- exit code: 0 記録した / 1 run・HEAD を読めない / 2 引数の誤り / 3 run が終わっていない / 4 別の run・記録済み（docs/orchestrate/exit-codes.md#1-5-record-verify-の-exit-code）
+
 ## 1-5 plan.md の対象 Issue 表の例
 
 ```markdown

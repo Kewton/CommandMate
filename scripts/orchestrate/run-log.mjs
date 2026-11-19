@@ -49,12 +49,21 @@
  *        [--agent <claude|command-code>] [--model <opus|sonnet|->] [--duration-sec <n>] [--note <text>]
  *        [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
  *   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
+ *   node scripts/orchestrate/run-log.mjs record-verify --run-dir <dir> --issues <range> --issue <N>
+ *        --run <verification run id> --wt <worktree id> --worktree <path> [--head <sha>] [--task <id>]
+ *        [--item <work item>] [--cli <commandmatedev>]
+ *
+ * `record-verify` (Issue #4482) writes the `verify` line of a verification the leader ran directly
+ * (`commandmatedev verify <wt>`, no wait-verify and so no worker signal): see recordVerifyRun.
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { itemProblem } from './execution-key.mjs';
+import { takeManifest, manifestHash } from './env-manifest.mjs';
+import { itemProblem, workItemName } from './execution-key.mjs';
 
 /**
  * In run order: the consistency review (5-2b) and the out-of-body findings
@@ -454,6 +463,209 @@ export function envCleanShared(records) {
 export const formatEnvCleanShared = ({ item, workItems }) =>
   `env-clean: ${item} in ${workItems.join(', ')} — candidate for an outside cause (attribute it: 3-4)`;
 
+/**
+ * Exit codes of `record-verify` (#4482). `notFinished` and `refused` write nothing: the run is not
+ * over (its verdict is not taken early), or it is not the run of this worktree / HEAD / task.
+ */
+export const RECORD_VERIFY_EXIT = { recorded: 0, unreadable: 1, usage: 2, notFinished: 3, refused: 4 };
+/** The run statuses that are an end (src/cli/types/api-responses.ts VerificationRunStatus); only `passed` is `ok`. */
+const RUN_END_STATUSES = ['passed', 'failed', 'error', 'cancelled', 'not_started'];
+/** A gate's stored status as a record result: only `passed` is `ok`, a SKIP is `skip`, anything else `fail`. */
+const gateResult = (status) => (status === 'passed' ? 'ok' : status === 'skipped' ? 'skip' : 'fail');
+const RUN_NOTE = (runId) => new RegExp(`(?:^|\\s)run=${runId}(?:\\s|$)`);
+
+function defaultRun(command, args, { cwd, timeoutMs } = {}) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    ...(timeoutMs ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
+  });
+  if (result.error) throw result.error;
+  return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+}
+
+function runSafely(run, command, args, cwd) {
+  try {
+    return run(command, args, { cwd, timeoutMs: 15_000 });
+  } catch (error) {
+    return { status: 1, stdout: '', stderr: String(error?.message ?? error) };
+  }
+}
+
+/**
+ * Record a verification the leader ran directly (Issue #4482), from its run id: what
+ * `verify show <id> --json` says of it, nothing more. The verdict stays the run's (team.md §10-4).
+ *
+ * - The run must be over (RUN_END_STATUSES): a `running` / `queued` (or unknown) run is refused
+ *   (`notFinished`), its result is not decided here. Only `passed` is written as `ok`; `failed`,
+ *   `error`, `cancelled`, `not_started` are `fail`. Each gate is `ok` / `skip` / `fail` (gateResult).
+ * - The run must be this one (`refused` otherwise): its id is the one asked, its `worktreeId` is
+ *   `--wt`, its task is `--task` when both say one. The run does not store the HEAD, so the HEAD is
+ *   the worktree's now, refused when it was committed after the run started (the run saw an earlier
+ *   state — wait-verify's `committedAfter`) or when `--head` names another. A run already recorded
+ *   for the work item (`run=<id>` in a verify line's note, by wait-verify or by this) is refused too.
+ * - env: a direct run has no manifest from its start, and one taken now cannot be dated back, so the
+ *   env is the manifest **taken when recording** (`env-at=record` in the note says so). It is kept as
+ *   the end manifest of `verify-<work item>.run<id>.env.json` under the record's key
+ *   (`<issues>:<work item>:<task|->:run<id>`), so verifyEnvState compares it as it does wait-verify's.
+ *
+ * The note: `direct=verify run=<id> run-status=<status> gates=<id>:<ok|skip|fail>,… key=<key> env-at=record env=<hash>`.
+ *
+ * @returns {{ exit: number, reason?: string, file?: string, record?: any, envFile?: string }}
+ */
+export function recordVerifyRun(options, { run = defaultRun, home = os.homedir(), now = new Date() } = {}) {
+  const runId = String(options.runId);
+  const cli = options.cli || 'commandmatedev';
+  const refuse = (exit, reason) => ({ exit, reason });
+  const shown = runSafely(run, cli, ['verify', 'show', runId, '--json'], options.worktree);
+  let parsed = null;
+  try {
+    parsed = shown.status === 0 ? JSON.parse(shown.stdout) : null;
+  } catch {
+    parsed = null;
+  }
+  const view = parsed && typeof parsed === 'object' ? (parsed.run ?? parsed) : null;
+  if (!view || typeof view !== 'object') {
+    return refuse(RECORD_VERIFY_EXIT.unreadable, `run ${runId}: \`${cli} verify show ${runId} --json\` gave no run (exit ${shown.status}${shown.stderr ? `: ${String(shown.stderr).trim()}` : ''})`);
+  }
+  if (String(view.id) !== runId) return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId}: the CLI answered with run ${view.id ?? '-'}`);
+  if (view.worktreeId !== options.wt) {
+    return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId} is of worktree ${view.worktreeId ?? '-'}, not ${options.wt}`);
+  }
+  if (!RUN_END_STATUSES.includes(view.status)) {
+    return refuse(RECORD_VERIFY_EXIT.notFinished, `run ${runId} is ${view.status ?? 'without a status'}: not over, nothing recorded (record it once it has ended)`);
+  }
+  const taskId = optionalString(options.taskId);
+  if (taskId !== null && view.taskId && view.taskId !== taskId) {
+    return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId} is of task ${view.taskId}, not ${taskId}`);
+  }
+  const revParse = runSafely(run, 'git', ['-C', options.worktree, 'rev-parse', 'HEAD'], options.worktree);
+  const head = revParse.status === 0 ? revParse.stdout.trim() : '';
+  if (!FULL_SHA.test(head)) return refuse(RECORD_VERIFY_EXIT.unreadable, `${options.worktree}: cannot read HEAD (${String(revParse.stderr).trim()})`);
+  const wanted = optionalString(options.head);
+  if (wanted !== null && wanted !== head) {
+    return refuse(RECORD_VERIFY_EXIT.refused, `--head ${wanted.slice(0, 7)} is not the worktree's HEAD ${head.slice(0, 7)}`);
+  }
+  const started = Date.parse(view.startedAt);
+  const logged = runSafely(run, 'git', ['-C', options.worktree, 'log', '-1', '--format=%cI'], options.worktree);
+  const committedAt = logged.status === 0 ? Date.parse(logged.stdout.trim()) : NaN;
+  if (!Number.isFinite(started) || !Number.isFinite(committedAt)) {
+    return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId}: cannot tell whether HEAD ${head.slice(0, 7)} is what it verified (start ${view.startedAt ?? '-'}, commit ${logged.stdout.trim() || '-'})`);
+  }
+  if (committedAt > started) {
+    return refuse(RECORD_VERIFY_EXIT.refused, `HEAD ${head.slice(0, 7)} was committed after the run started (${view.startedAt}): run ${runId} verified an earlier state`);
+  }
+  const item = optionalString(options.item);
+  const issue = Number(options.issue);
+  const { records } = readRecords(options.runDir, options.issues);
+  const earlier = records.find(
+    (r) => r.issue === issue && r.stage === 'verify' && itemOf(r) === item && RUN_NOTE(runId).test(String(r.note ?? ''))
+  );
+  if (earlier) return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId} is already recorded for #${workItemName(issue, item)} (at ${earlier.at ?? '-'})`);
+
+  const recordTask = taskId ?? optionalString(view.taskId);
+  const key = `${options.issues}:${workItemName(issue, item)}:${recordTask ?? '-'}:run${runId}`;
+  const manifest = takeManifest({ worktree: options.worktree, home });
+  const hash = manifestHash(manifest);
+  const gates = (Array.isArray(view.gates) ? view.gates : []).map((g) => `${g.gateId}:${gateResult(String(g.status ?? ''))}`);
+  const note = [
+    'direct=verify',
+    `run=${runId}`,
+    `run-status=${view.status}`,
+    `gates=${gates.join(',') || '-'}`,
+    `key=${key}`,
+    'env-at=record',
+    `env=${hash}`,
+  ].join(' ');
+  const finished = Date.parse(view.finishedAt);
+  const input = {
+    issue,
+    stage: 'verify',
+    result: view.status === 'passed' ? 'ok' : 'fail',
+    head,
+    taskId: recordTask,
+    agent: optionalString(view.instanceId),
+    durationSec: Number.isFinite(finished) && finished >= started ? Math.round((finished - started) / 1000) : null,
+    note,
+    item,
+    key,
+  };
+  makeRecord(input, now); // validate before anything is written
+  const envFile = path.join(options.runDir, `verify-${workItemName(issue, item)}.run${runId}.env.json`);
+  fs.mkdirSync(options.runDir, { recursive: true });
+  fs.writeFileSync(
+    envFile,
+    `${JSON.stringify({ key, runId: Number(runId), takenAt: now.toISOString(), start: null, verify: null, end: manifest, changed: { duringTask: [], duringVerify: [] } }, null, 2)}\n`
+  );
+  const { file, record } = appendRecord(options.runDir, options.issues, input, now);
+  return { exit: RECORD_VERIFY_EXIT.recorded, file, record, envFile };
+}
+
+const RECORD_VERIFY_FLAGS = {
+  '--run-dir': 'runDir',
+  '--issues': 'issues',
+  '--issue': 'issue',
+  '--run': 'runId',
+  '--wt': 'wt',
+  '--worktree': 'worktree',
+  '--head': 'head',
+  '--task': 'taskId',
+  '--item': 'item',
+  '--cli': 'cli',
+};
+
+function recordVerifyMain(rest, now, deps) {
+  const out = deps.out ?? ((line) => console.log(line));
+  const error = deps.error ?? ((line) => console.error(line));
+  const options = {};
+  for (let i = 0; i < rest.length; i++) {
+    const flag = RECORD_VERIFY_FLAGS[rest[i]];
+    if (!flag || i + 1 >= rest.length) {
+      error(`unknown or incomplete argument: ${rest[i]}\n${USAGE}`);
+      return RECORD_VERIFY_EXIT.usage;
+    }
+    options[flag] = rest[++i];
+  }
+  const missing = ['runDir', 'issues', 'issue', 'runId', 'wt', 'worktree'].filter((field) => !options[field]);
+  if (missing.length > 0) {
+    error(`missing ${missing.map((field) => Object.keys(RECORD_VERIFY_FLAGS).find((flag) => RECORD_VERIFY_FLAGS[flag] === field)).join(', ')}\n${USAGE}`);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  if (!/^[1-9]\d*$/.test(options.runId)) {
+    error(`--run: must be a verification run id (a positive integer) (got ${options.runId})`);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  if (optionalString(options.head) !== null && !FULL_SHA.test(options.head)) {
+    error(`--head: must be the full 40-digit commit sha (use \`git rev-parse HEAD\`, not a short sha) (got ${options.head})`);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  const problem = itemProblem(options.item);
+  if (problem) {
+    error(problem);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  try {
+    runLogPath(options.runDir, options.issues);
+  } catch (err) {
+    error(err.message);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  try {
+    const result = recordVerifyRun(options, { run: deps.run, home: deps.home, now });
+    if (result.exit !== RECORD_VERIFY_EXIT.recorded) {
+      error(`not recorded: ${result.reason}`);
+      return result.exit;
+    }
+    const { record, file } = result;
+    out(`recorded #${workItemName(record.issue, record.item)} verify=${record.result} ${record.head.slice(0, 7)}: ${record.note} -> ${file}`);
+    return RECORD_VERIFY_EXIT.recorded;
+  } catch (err) {
+    error(err.message);
+    return RECORD_VERIFY_EXIT.unreadable;
+  }
+}
+
 function formatStatus(summary, skipped, shared = [], queue = [], train = null) {
   const lines = [];
   for (const item of summary) {
@@ -474,7 +686,8 @@ function formatStatus(summary, skipped, shared = [], queue = [], train = null) {
 
 const USAGE = `Usage:
   node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${[...STAGES, ...ANY_LOG_STAGES].join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>] [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
-  node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]`;
+  node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
+  node scripts/orchestrate/run-log.mjs record-verify --run-dir <dir> --issues <range> --issue <N> --run <verification run id> --wt <worktree id> --worktree <path> [--head <sha>] [--task <id>] [--item <work item>] [--cli <commandmatedev>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -495,8 +708,9 @@ const FLAGS = {
   ...Object.fromEntries(Object.entries(TIMING_FIELDS).map(([field, flag]) => [flag, field])),
 };
 
-export function main(argv, now = new Date()) {
+export function main(argv, now = new Date(), deps = {}) {
   const [command, ...rest] = argv;
+  if (command === 'record-verify') return recordVerifyMain(rest, now, deps);
   const options = { json: false };
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];

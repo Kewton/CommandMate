@@ -24,6 +24,10 @@
  * which keep the same `<file>.env.json` under the same execution key, so
  * precheck / publish / merge compare it the same way (verifyEnvState).
  *
+ * A verification the leader ran directly has no start manifest at all: run-log.mjs `record-verify`
+ * (#4482) keeps the manifest taken when it records (`env-at=record`) as the end manifest of
+ * `verify-<work item>.run<id>.env.json`, so verifyEnvState reads it like the others.
+ *
  * Usage:
  *   node scripts/orchestrate/env-manifest.mjs start --worktree <path> --file <x.env.json> --key <execution key>
  *   node scripts/orchestrate/env-manifest.mjs end --worktree <path> --file <x.env.json>
