@@ -1,15 +1,15 @@
 {
-  "ref": "64f81858e20babae9b9596efc3ac5eac423d5793",
+  "ref": "9d30f0a0ab64c375125d3debd2abbba9e2c06e37",
   "packages": [
     {
       "id": "cmate-delegate-dev",
       "upstream": "skills/cmate-delegate",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "files": [
         {
           "path": "SKILL.md",
-          "upstreamSha256": "b81277f124ccda08c6b169891f8341d3369335c28f28bde5b64e62048748cc75",
-          "outputSha256": "f41f058ef42e723e0ec0d56d6568b610ef418f683f82428a66a9ec6392e24487"
+          "upstreamSha256": "44c390515748cc689d2f9b798810d29b469db65b83187f3a21e3e47682f5150f",
+          "outputSha256": "5c7676ee4176b6fcb1f04e592a36bceb74dffe0d4d2e24dd2e0516a2b8c9c3d6"
         },
         {
           "path": "references/agent-compatibility.md",
@@ -23,18 +23,18 @@
         },
         {
           "path": "references/exit-codes.md",
-          "upstreamSha256": "d2ede8f7f9c921827ca623b662ac1ec2e800f9e2c9befcf5efaee104217da34d",
-          "outputSha256": "9f759f98c2c4b0b489f686e4dd97f65df8e2d7c735578a8e11e98b4f01956f23"
+          "upstreamSha256": "928fe2bdfd38c4fb561527130385fca68f7f1362e85a8373deb25fdf3f10bdbc",
+          "outputSha256": "a9afa3a3f83bdd82faf60069fd7e4eb12911918e61b79b95c7bc6d52f99664e5"
         },
         {
           "path": "references/release-notes.md",
-          "upstreamSha256": "33753930a6ef37e207804f56dfb0cacf86bc1bc16444f1b91c52caad1aea472e",
-          "outputSha256": "a03538b8a2c0e5eb8244fbfcffed5de8f9b3436f53a770b0df38324ba7565e7a"
+          "upstreamSha256": "57bcc2b39a38e31cc86702e2828ec7a753bb390ce1fdaaff6bf7f6a2d9a26568",
+          "outputSha256": "43f870b7e34e7f5d297306dc2adc66f462b4c2ba2a953718dd0e3f8c80940d30"
         },
         {
           "path": "scripts/ask.sh",
-          "upstreamSha256": "e561633bd9fa4d776e08546fb3bf5113bc408300c9de3ca330ed8f18aef524c8",
-          "outputSha256": "00fc44c76e41e7e0fb2dd4c490f25a6711c9c5a93de087f2765c7c6e64113a3d"
+          "upstreamSha256": "deadd86634d1b837781914e1bce5e31ac5cb255e2ce34e94f1ce817977283aed",
+          "outputSha256": "3594b71e1619d3a5388c5bb08588b42fff92a6a8ff941a1ec6cb6eae34e07aba"
         }
       ]
     },

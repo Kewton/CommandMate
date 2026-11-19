@@ -159,6 +159,22 @@ function namesUnrestrictedTool(body: Record<string, unknown>): boolean {
 }
 
 /**
+ * Issue #4449: the `origin` / `originEvidence` of a write a send makes before its message
+ * (the task of `--contract`, the instance and role of `--register --role` / `--contract
+ * --role`), which the server judges as it would the send. Empty for a tool the policy
+ * table never restricts, so those bodies stay byte for byte what they were; a tool this
+ * CLI does not know, or none (the server picks the default), carries it.
+ */
+export function sendOriginFieldsFor(
+  tool: string | undefined,
+  resolve: () => ResolvedSendOrigin = () => resolveSendOrigin(),
+): { origin?: CliSendOrigin; originEvidence?: string } {
+  if (namesUnrestrictedTool({ cliToolId: tool })) return {};
+  const { origin, evidence: originEvidence } = resolve();
+  return { origin, originEvidence };
+}
+
+/**
  * The body of a POST to `path` with `origin` / `originEvidence` on it, when `path` is
  * one of the routes that type into a session, the body names no origin of its own,
  * and it may reach a tool the policy restricts ({@link namesUnrestrictedTool});

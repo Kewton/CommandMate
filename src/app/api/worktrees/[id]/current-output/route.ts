@@ -134,6 +134,8 @@ export async function GET(
     // `undefined` and probes in the background, and never awaits a child.
     // `detector` is therefore absent until the cache is warm, which the reader
     // must take as "not known yet" rather than "nothing is stale".
+    // Issue #4452: the snapshot probes antigravity (`agy --version`) only with the
+    // usage declaration or after antigravity was used here — this poll is not a use.
     //
     // Attached here rather than inside buildCurrentOutput on purpose: DR4-008
     // limits this to authenticated surfaces (`capture --json` / `commandmate

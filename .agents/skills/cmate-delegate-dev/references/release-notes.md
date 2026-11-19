@@ -1,5 +1,18 @@
 # release notes
 
+## 0.3.1 — `ask` が返答を依頼の ID で読む版に合わせる（CommandMate#4344 PR3）
+
+**CommandMate 0.52.0 以降**（#4344 PR3 を含む版）、`ask` は返答をこの依頼の ID の帰属でだけ読み、
+画面からは拾わない。`--json` の `source` は `history` / `none` だけになり、帰属できないとき
+（`tool_unsupported`・`server_unsupported`・`ambiguous`・`unmatched`）は exit 0 で `"reply": null`・stdout 空になる。
+
+- 第7節「出典を明示する」を版で分けた。旧来の記述は `source` の `capture` を画面の印としていたが、
+  CommandMate 0.32.0〜0.51.2 の実際の値は `pane` である（`capture` は出ない）。
+  新しい版では `"reply": null` を「返答なし」「完了」と報告せず、理由と `capture --pane` の画面を添える。
+- `ask.sh`: `ask` が 0 で `"reply": null` を返したら、exit 0 のまま stderr に `id=reply-not-collected` と
+  `capture --pane` の案内を出す。本文が無いので文脈上限の保険は働かないが、上限は 0.43.0 以降の
+  `ask` が自分で 11 にする。`compatibility.commandmate` は変えない。
+
 ## 0.3.0 — 委任の目的を mem に残す（CommandMate#4228 の契約 2）
 
 `send --reply-to` に `--note` を足す手順を第8.2節に加えた。手順の頭で

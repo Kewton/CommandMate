@@ -17,6 +17,7 @@ import type { SendRoleRequest } from './send-role';
 import { isAskId } from '@/lib/ask/envelope';
 import type { SendOrigin } from '@/lib/tool-policy/policy';
 import { readBodyOrigin } from './send-tool-policy';
+import { readTaskTarget } from './task-target';
 import { ASK_PROTOCOL_VERSION } from '@/types/ask-correlation';
 import {
   validateCopilotModelName,
@@ -92,6 +93,12 @@ export interface SendMessageRequest extends SendRoleRequest {
   origin?: unknown;
   /** Issue #4437: what the CLI read its `origin` from; logged with a refusal only (cut at 128). */
   originEvidence?: unknown;
+  /**
+   * Issue #4449: the task (`send --contract`) this message is for. The send goes to the
+   * target the task recorded when it was judged and created (`task-target`), never to a
+   * default resolved again; a body naming another target is 400 `task_target_mismatch`.
+   */
+  taskId?: unknown;
 }
 
 /** Issue #4344: the 400 for a malformed `ask`. */
@@ -245,7 +252,10 @@ export function validateSendRequest(
       ),
     };
   }
-  const instanceId = body.instanceId;
+  // Issue #4449: a send for a task goes to the task's recorded target (the one judged).
+  const taskTarget = readTaskTarget(db, id, { taskId: body.taskId, cliToolId: requestedCliToolId, instanceId: body.instanceId });
+  if (!taskTarget.ok) return { ok: false, response: taskTarget.response };
+  const instanceId = taskTarget.value.instanceId;
 
   // Issue #1629: the roster is what declares which CLI tool backs an instance.
   // Without this the tool came from the worktree default, so `--instance codex`
@@ -267,7 +277,7 @@ export function validateSendRequest(
   // the only answer that cannot land the message in the wrong pane.
   const resolution = resolveSessionTargetStrict(db, id, {
     instanceId,
-    requestedCliTool: requestedCliToolId,
+    requestedCliTool: taskTarget.value.requestedCliTool,
   });
   if (!resolution.ok) {
     return { ok: false, response: sessionTargetConflictResponse(resolution.conflict) };
@@ -288,7 +298,13 @@ export function validateSendRequest(
 
   return {
     ok: true,
-    value: { trimmedContent, requestedCliToolId, instanceId, target: resolution.target, origin: origin.origin },
+    value: {
+      trimmedContent,
+      requestedCliToolId: taskTarget.value.requestedCliTool,
+      instanceId,
+      target: resolution.target,
+      origin: origin.origin,
+    },
   };
 }
 

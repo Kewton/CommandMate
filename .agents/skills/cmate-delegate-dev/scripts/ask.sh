@@ -20,6 +20,9 @@
 #         returned instead, with one exception below.
 #         The one exception: a reply that ENDS in a context-limit error turns an
 #         upstream 0 into 11 with id=context-limit. Only 0 is ever rewritten.
+#         An ask 0 whose --json says "reply": null (CommandMate with #4344 PR3:
+#         the reply could not be attributed to this ask) stays 0, with
+#         id=reply-not-collected on stderr. stdout is then ask's JSON, no reply.
 #
 # The pass-through is the whole point. `commandmatedev wait ... ; echo done` turns
 # every one of those codes into 0, and the caller then reports a timeout as a
@@ -217,6 +220,16 @@ if cm ask --help >/dev/null 2>&1; then
   if [ "$ask_rc" -eq 0 ] && printf '%s' "$ask_out" | has_context_limit_error; then
     context_limit_advice
     exit "$EXIT_CONTEXT_LIMIT"
+  fi
+  # From CommandMate 0.52.0 (the release that includes #4344 PR3), ask reads the reply
+  # only through the ask's own ID, and otherwise answers exit 0 with
+  # "reply": null (tool_unsupported, server_unsupported, ambiguous, unmatched).
+  # There is no body to scan then, so "no context-limit line" proves nothing.
+  # Say so; the exit code stays as ask gave it (a context-limit fault on such a
+  # turn is already ask's own exit 11 since CommandMate 0.43.0).
+  if [ "$ask_rc" -eq 0 ] && printf '%s' "$ask_out" | grep -E -q '"reply": *null'; then
+    printf 'ask.sh: id=reply-not-collected: the turn ended but ask did not collect a reply (see the attribution in the JSON and the line ask wrote to stderr). Do not report it as an answer. Look at the screen: commandmatedev capture %s --instance %s --pane --tail 40\n' \
+      "$WORKTREE_ID" "$INSTANCE_ID" >&2
   fi
   exit "$ask_rc"
 fi

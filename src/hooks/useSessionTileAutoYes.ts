@@ -54,6 +54,14 @@
  * an omitted mode on an instance that is already on as "keep the current one",
  * and the tile may not have seen another tab turn it on.
  *
+ * ## A tool-policy refusal (Issue #4456)
+ *
+ * An enabling the tool policy refuses (409 `TOOL_POLICY_DENIED`, antigravity
+ * without a declared plan, #4436) rejects with `ToolPolicyRefusalError`, so
+ * `AutoYesToggle` shows the reason and the terms / FAQ links beside the switch,
+ * as on the worktree screen. Nothing changed on the server, so nothing is held
+ * and the list is not re-read. Every other failure resolves quietly as before.
+ *
  * ## Expiry
  *
  * The server resolves an expired state to disabled at read time, so the list
@@ -71,6 +79,7 @@ import type { AutoYesInstanceSummary, AutoYesToggleParams } from '@/types/auto-y
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
 import { isReleasedByRestart } from '@/config/auto-yes-config';
+import { parseToolPolicyRefusal, ToolPolicyRefusalError } from '@/lib/tool-policy/refusal-view';
 import {
   DEFAULT_AUTO_YES_ANSWER_MODE,
   isAutoYesAnswerMode,
@@ -180,7 +189,10 @@ export interface UseSessionTileAutoYesResult {
   releasedByRestart: boolean;
   /** Issue #3863: the answer mode while ON, when the server named one. */
   answerMode?: AutoYesInstanceSummary['answerMode'];
-  /** `AutoYesToggle`'s `onToggle`. Never rejects. */
+  /**
+   * `AutoYesToggle`'s `onToggle`. Rejects only with `ToolPolicyRefusalError`
+   * (Issue #4456: an enabling refused by the tool policy); never otherwise.
+   */
   toggle: (params: AutoYesToggleParams) => Promise<void>;
 }
 
@@ -232,7 +244,14 @@ export function useSessionTileAutoYes({
         });
         // A refused toggle changed nothing on the server, so the row is still
         // the truth and there is nothing to hold.
-        if (!response.ok) return;
+        if (!response.ok) {
+          // Issue #4456: a tool-policy refusal of the enabling is said, with its reason.
+          if (params.enabled) {
+            const refused = parseToolPolicyRefusal(response.status, await response.json().catch(() => null));
+            if (refused) throw new ToolPolicyRefusalError(refused);
+          }
+          return;
+        }
         const data = (await response.json()) as { enabled?: unknown; expiresAt?: unknown; answerMode?: unknown };
         const enabled = data.enabled === true;
         answer = {
@@ -240,7 +259,8 @@ export function useSessionTileAutoYes({
           expiresAt: enabled && typeof data.expiresAt === 'number' ? data.expiresAt : null,
           ...(enabled && isAutoYesAnswerMode(data.answerMode) ? { answerMode: data.answerMode } : {}),
         };
-      } catch {
+      } catch (err) {
+        if (err instanceof ToolPolicyRefusalError) throw err;
         return;
       }
       const held: TileAutoYesOverride = { instanceId, value: answer, settledRow: null };
