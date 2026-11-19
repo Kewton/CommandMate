@@ -175,10 +175,10 @@ export const DELEGATION_ASK_TIMEOUT_SECONDS = 1800;
 /**
  * Rows of pane transcript the brief's progress-check line asks for.
  *
- * Matches what `capture --pane --tail 60` shows a human: enough to see what the
+ * Matches what `capture --pane --tail 80` shows a human: enough to see what the
  * other session is doing, short enough to paste into a report.
  */
-const DELEGATION_CAPTURE_TAIL = 60;
+const DELEGATION_CAPTURE_TAIL = 80;
 
 /** The locales the brief is written in. Anything else falls back to English. */
 export type DelegationBriefLocale = 'ja' | 'en';
