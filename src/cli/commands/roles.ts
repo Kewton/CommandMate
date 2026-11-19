@@ -9,7 +9,7 @@
 
 import { EXPECTED_ROLE_NAME_HEADER } from '../../types/agent-roles';
 import { Command } from 'commander';
-import type { RolesOptions } from '../types';
+import { ExitCode, type RolesOptions } from '../types';
 import { ApiClient, ApiError } from '../utils/api-client';
 import { TOKEN_WARNING } from '../utils/command-helpers';
 import {
@@ -94,7 +94,8 @@ Exit codes:
             (a server older than roles) or unexpected_error, with the exit code above.
             A change that got a 5xx or no answer also has saved: "unknown" and check, the
             command that shows what it is now. A 4xx changed nothing.
-            A missing argument or unknown option is commander's: stderr only, exit 1.
+            A missing argument or unknown option is commander's: stderr only, exit 1 —
+            except a missing <tool> of 'roles default', which is exit 2 (Issue #4473).
 
 Example: define a reviewer and make it this repository's Codex default
   commandmate roles add reviewer --file ./reviewer.md
@@ -528,6 +529,11 @@ export function createRolesCommand(): Command {
   withCommon(
     cmd
       .command('default')
+      // Issue #4473: a missing <tool> is a usage error, exit 2 like the rest of this command's
+      // usage errors (commander's own default is 1, which is DEPENDENCY_ERROR here).
+      .exitOverride((error) => {
+        if (error.code === 'commander.missingArgument') process.exit(ExitCode.CONFIG_ERROR);
+      })
       .description('Set which role a new start of this tool gets, for one repository (--repo) or all that do not say otherwise')
       .argument('<tool>', `One of: ${AGENT_ROLE_CLI_TOOLS.join(', ')}`)
       .option('--repo <repository>', 'Repository ID, path or name. Omit for the system level')

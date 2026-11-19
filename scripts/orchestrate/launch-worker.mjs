@@ -47,6 +47,19 @@
  * have roles (it restarted, and knows nothing of this process) is not "nothing to
  * pin": stopped and 44, unlike an older server or a tool roles do not apply to.
  *
+ * A starting message that was not confirmed (exit 99, #3904) may sit unsent in the
+ * composer — drawn late, its Enter lost — and the contract's `send` would refuse
+ * `composer-not-empty` (#1880) on every try (Issue #4476). So before the contract the
+ * composer is read (`capture --json`'s `composerState`) and NEVER cleared: the contract
+ * goes only after two `empty` / `ghost` reads in a row (re-read 5 s apart, 6 times at most).
+ * Anything else — text (the starting message's rest or anyone's), a composer that cannot
+ * be read (`no_composer`, an unknown state, a failed read) — stops with 1 and no contract,
+ * the session left running for a person to look at; the `.err` and the log say what the
+ * composer held and the next step (a person clears it and launches again). A process
+ * replaced since the model check stops as before (44). A server that reports no
+ * `composerState` goes on as before. The starting message is never submitted again: it
+ * may have gone.
+ *
  * Command Code (Issue #4238, the easy tier) has no Claude model: `--model -` only,
  * and nothing is written to `.claude/`. Its interactive permissions are fixed
  * when the session starts, from the worktree's `.commandcode/settings.local.json`
@@ -69,7 +82,9 @@
  * sent); 45 a Command Code worktree whose permissions default is `ask`, or
  * cannot be read (nothing sent); 2 a usage error (a Claude model for Command Code too), an `--instance` that cannot be resolved, or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
- * starting message: stopped, contract not sent); otherwise the `send`'s own
+ * starting message: stopped, contract not sent; or — Issue #4476 — the composer did not
+ * read clean twice in a row after a starting message that was not confirmed: nothing
+ * cleared, the session NOT stopped, contract not sent); otherwise the `send`'s own
  * exit code (99 = not sent, 3-1's cold start; 31 / 32, see
  * docs/orchestrate/workers.md "3-1 send とワーカーの起動の exit code").
  *
@@ -128,6 +143,17 @@ export const STOP_READ_INTERVAL_SEC = 5;
 export const READY_STREAK = 2;
 export const READY_MAX_POLLS = 30;
 export const READY_POLL_SEC = 10;
+/**
+ * Issue #4476: reads of the composer after a starting message that was not confirmed, the
+ * pause before each, and the clean reads in a row (`empty` / `ghost`) the contract waits for.
+ */
+export const COMPOSER_SETTLE_READS = 6;
+export const COMPOSER_SETTLE_INTERVAL_SEC = 5;
+export const COMPOSER_CLEAN_STREAK = 2;
+/** `composerState` values that hold no text a person (or a lost send) typed (#1879). */
+const COMPOSER_CLEAN_STATES = new Set(['empty', 'ghost']);
+/** What a person does when the launch stops on the composer (Issue #4476, PM decision). */
+export const COMPOSER_NEXT_STEP = '人が入力欄を確かめて消し、launch-worker を起動し直す';
 /** Starts the session without handing it the contract: no work, no files, no Auto-Yes. */
 export const INIT_MESSAGE =
   'セッションの起動とモデルの確認です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。';
@@ -419,6 +445,138 @@ export function waitReady({ run, sleep, cli, wt, instance, onAnswer }) {
 }
 
 /**
+ * One `capture --json` answer's composer, as the leftover check reads it (Issue #4476).
+ * Only `empty` / `ghost` are clean. A key that is not there at all is an older server
+ * (`legacy`); anything else that is not `content` — `no_composer`, `unsupported_tool`, a
+ * state this script does not know, a value of the wrong type, no answer — says nothing
+ * about the composer (`unreadable`).
+ *
+ * @returns {{ kind: 'clean' | 'content' | 'legacy' | 'unreadable', state: string, text: string }}
+ */
+export function composerReading(answer) {
+  if (answer === null || typeof answer !== 'object') return { kind: 'unreadable', state: 'unreadable', text: '' };
+  if (!('composerState' in answer)) return { kind: 'legacy', state: '-', text: '' };
+  const state = answer.composerState;
+  if (typeof state !== 'string') return { kind: 'unreadable', state: `invalid:${typeof state}`, text: '' };
+  if (COMPOSER_CLEAN_STATES.has(state)) return { kind: 'clean', state, text: '' };
+  if (state === 'content') return { kind: 'content', state, text: typeof answer.composerText === 'string' ? answer.composerText : '' };
+  // `unsupported_tool` included: the model path that reads this is Claude's, whose composer is measured.
+  return { kind: 'unreadable', state, text: '' };
+}
+
+/** The text with ANSI sequences and every whitespace character taken out: wrapping and indent proof. */
+function squashComposerText(text) {
+  // eslint-disable-next-line no-control-regex
+  return String(text ?? '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\s+/g, '');
+}
+
+/**
+ * I6 (Issue #4476): the shortest beginning of the starting message that the stop's log calls
+ * "the rest of the starting message", in characters after {@link squashComposerText}. Shorter
+ * text — `OK`, one character — is what a person may type on their own. It only words the log:
+ * nothing is cleared, whatever the composer holds.
+ */
+export const STARTING_MESSAGE_MIN_CHARS = 20;
+
+/**
+ * Whether composer text looks like the starting message as far as it was drawn (Issue #4476,
+ * I6): with ANSI and whitespace taken out, a BEGINNING of it of {@link STARTING_MESSAGE_MIN_CHARS}
+ * characters or more (the whole of a message shorter than that). A piece from inside it, a
+ * short match, or anything else is "other text". Used for the log only.
+ */
+export function isStartingMessageText(text, message = INIT_MESSAGE) {
+  const shown = squashComposerText(text);
+  const whole = squashComposerText(message);
+  if (shown === '') return false;
+  if ([...whole].length < STARTING_MESSAGE_MIN_CHARS) return shown === whole;
+  return [...shown].length >= STARTING_MESSAGE_MIN_CHARS && whole.startsWith(shown);
+}
+
+/**
+ * Whether the composer is clean before the contract, after a starting message that was not
+ * confirmed (Issue #4476). That message may sit unsent in the composer — claude drew it late
+ * and its Enter did nothing — and the contract's `send` would then refuse `composer-not-empty`
+ * (#1880) on every try. Nothing here clears it, types into it or submits it (PM decision
+ * s8/pm-reply-4476-redesign: a clear needs a destination this script cannot prove is the one
+ * it read; a person can).
+ *
+ * `answer` (the last ready read) is the first reading; the composer is read again up to
+ * {@link COMPOSER_SETTLE_READS} times, {@link COMPOSER_SETTLE_INTERVAL_SEC} apart, until
+ * {@link COMPOSER_CLEAN_STREAK} readings in a row are `empty` / `ghost` — the first one too.
+ *
+ *   - `unknown`: the first answer has no `composerState` key (a server older than #1879) — the
+ *     caller goes on as before;
+ *   - `clean`: clean readings in a row;
+ *   - `replaced`: `role()` says `changed` — a generation or fingerprint read that differs from
+ *     the one the starting message started (#4115); the caller's role check stops it. A read
+ *     whose role record is missing (`role()` says `missing`) is not that: it counts as a read
+ *     that says nothing (not clean), so it ends in `held` if it lasts;
+ *   - `held`: no clean streak within the reads. `last` is the last reading that was not clean
+ *     (text, or a state that says nothing: `no_composer`, unknown, wrong type, a failed read).
+ *
+ * @returns {{ verdict: 'unknown' | 'clean' | 'replaced' | 'held', state: string,
+ *   last: { kind: string, state: string, text: string } | null,
+ *   final: { kind: string, state: string, text: string } }} `last` the latest reading that was not clean, `final` the last one
+ */
+export function settleLeftoverComposer({ run, sleep, cli, wt, instance, answer, role = () => 'holds', onAnswer }) {
+  let reading = composerReading(answer);
+  if (reading.kind === 'legacy') return { verdict: 'unknown', state: reading.state, last: null, final: reading };
+  let last = null;
+  let streak = 0;
+  for (let read = 0; read <= COMPOSER_SETTLE_READS; read++) {
+    if (read > 0) {
+      sleep(COMPOSER_SETTLE_INTERVAL_SEC * 1000);
+      let now = null;
+      try {
+        // A capture that cannot even start (ENOENT, a timeout) is a read that says nothing, like a failed one.
+        const out = run(cli, ['capture', wt, '--instance', instance, '--json'], { timeoutMs: QUERY_TIMEOUT_MS });
+        now = out.status === 0 ? JSON.parse(out.stdout) : null;
+      } catch {
+        now = null;
+      }
+      if (now !== null && typeof now === 'object') onAnswer?.(now);
+      reading = composerReading(now);
+      // A key that went missing after the first answer is not "an older server".
+      if (reading.kind === 'legacy') reading = { kind: 'unreadable', state: 'missing', text: '' };
+    }
+    const roleNow = role();
+    // A generation or fingerprint read that differs (#4115): the caller's role check stops it, as before.
+    if (roleNow === 'changed') return { verdict: 'replaced', state: reading.state, last, final: reading };
+    // No role record in this read (a server restarted under a live session, say): which process
+    // this is cannot be told, so the read counts for nothing — not clean, not "replaced".
+    if (roleNow === 'missing') reading = { kind: 'unreadable', state: 'roleLaunch missing', text: '' };
+    if (reading.kind === 'clean') {
+      streak += 1;
+      if (streak >= COMPOSER_CLEAN_STREAK) return { verdict: 'clean', state: reading.state, last, final: reading };
+      continue;
+    }
+    streak = 0;
+    last = reading;
+  }
+  return { verdict: 'held', state: reading.state, last, final: reading };
+}
+
+/**
+ * What the composer held when the launch stopped on it, for the stop's log (Issue #4476): the
+ * latest reading that was not clean — the rest of the starting message or other text (I6 only
+ * words it), text not reported, or a composer not read — and the last read itself.
+ */
+function describeHeldComposer(last, final) {
+  const lastRead = `last read ${final?.state ?? '-'}`;
+  if (last === null) return `it read clean, but not ${COMPOSER_CLEAN_STREAK} times in a row (${lastRead})`;
+  if (last.kind !== 'content') return `the composer cannot be read (${last.state}; ${lastRead})`;
+  if (!last.text) return `it holds text, but its text was not reported (composerText empty or not a string; ${lastRead})`;
+  const kind = isStartingMessageText(last.text) ? 'looks like the rest of the starting message' : 'other text';
+  return `it holds "${composerHead(last.text)}" (${kind}; ${lastRead})`;
+}
+
+/** The first characters of a composer's text, on one line, for a log. */
+function composerHead(text) {
+  const line = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return line.length > 60 ? `${line.slice(0, 60)}…` : line;
+}
+
+/**
  * The `--duration` format the CLI accepts (Issue #3913): `1h`〜`24h`, whole
  * hours. A copy of AUTO_YES_DURATION_FLAG_PATTERN in
  * src/config/auto-yes-duration.ts (this .mjs cannot import TypeScript);
@@ -478,7 +636,7 @@ export function parseArgs(argv) {
 /**
  * @param {string[]} argv
  * @param {{
- *   run?: (command: string, args: string[], opts?: { cwd?: string }) => { status: number, stdout: string, stderr: string },
+ *   run?: (command: string, args: string[], opts?: { cwd?: string, timeoutMs?: number }) => { status: number, stdout: string, stderr: string },
  *   resolveTarget?: typeof defaultResolveTarget,
  *   sleep?: (ms: number) => void,
  *   out?: (line: string) => void,
@@ -604,9 +762,54 @@ export function main(argv, deps = {}) {
         continue;
       }
       let roleNow = rolePin;
-      if (!waitReady({ ...ctx, onAnswer: (answer) => (roleNow = rolePinOf(answer)) })) {
+      let lastAnswer = null;
+      const readAnswer = (answer) => {
+        lastAnswer = answer;
+        roleNow = rolePinOf(answer);
+      };
+      if (!waitReady({ ...ctx, onAnswer: readAnswer })) {
         log(`not ready: ${o.instance} of ${o.wt} did not read ready ${READY_STREAK} times in a row after the starting message; contract not sent`);
         return stopped('not ready after the starting message') ? 1 : EXIT_STOP_UNCONFIRMED;
+      }
+      if (init.status !== 0) {
+        // Issue #4476: the starting message that was not confirmed may sit unsent in the composer,
+        // and the contract's send would refuse it (#1880) on every try. The composer is read, never
+        // cleared, typed into or submitted (the message may have gone): two clean reads, or a stop
+        // that leaves the session as it is for a person to look at.
+        // The re-reads keep the role read before them when one comes back without a record: a
+        // missing record says nothing about the process (it is not "another process").
+        let roleMissing = false;
+        const leftover = settleLeftoverComposer({
+          ...ctx,
+          answer: lastAnswer,
+          // A process replaced since the model check: the role check below stops it, as before.
+          role: () => (roleMissing ? 'missing' : rolePinHolds(rolePin, roleNow) ? 'holds' : 'changed'),
+          onAnswer: (answer) => {
+            lastAnswer = answer;
+            const pin = rolePinOf(answer);
+            roleMissing = rolePin !== null && pin === null;
+            if (!roleMissing) roleNow = pin;
+          },
+        });
+        const errFile = path.join(o.runDir, `${init.name.replace(/\.out$/, '')}.err`);
+        const record = (line) => {
+          fs.appendFileSync(errFile, `${line}\n`);
+          log(line);
+        };
+        if (leftover.verdict === 'unknown') {
+          log(`composer UNKNOWN ${o.instance} of ${o.wt}: the server reports no composerState; contract sent as before`);
+        } else if (leftover.verdict === 'clean') {
+          record(`composer CLEAN ${o.instance} of ${o.wt} after start exit=${init.status}: ${COMPOSER_CLEAN_STREAK} clean reads in a row (${leftover.state})`);
+        } else if (leftover.verdict === 'held') {
+          // Not killed: the composer is what a person has to look at (PM decision).
+          record(
+            `composer NOT CLEAN ${o.instance} of ${o.wt} after start exit=${init.status}: ${describeHeldComposer(leftover.last, leftover.final)}; ` +
+              `not ${COMPOSER_CLEAN_STREAK} clean reads in a row within ${COMPOSER_SETTLE_READS} reads; nothing cleared, session left running; ` +
+              `contract not sent. 次の手: ${COMPOSER_NEXT_STEP}`
+          );
+          return 1;
+        }
+        // `replaced` falls to the role check below, which stops the session.
       }
       if (!rolePinHolds(rolePin, roleNow)) {
         log(`role changed: ${o.instance} of ${o.wt} is not the process the starting message started; contract not sent`);
