@@ -53,6 +53,7 @@ import {
   captureEnvSnapshot,
   ENV_PROBE_IDS,
   ENV_PROBE_LABELS,
+  limitConfigReason,
   RESOURCE_CONFIG_ENTRY_NAME,
   type EnvConfigCheck,
   type EnvEntry,
@@ -1022,6 +1023,31 @@ function toChange(entry: EnvEntry, owner: EnvEntryOwner): EnvChange {
  * By exact name only — `resource.yml` or `Resource.yaml` are other files and get
  * no note. Reads nothing: the readings were taken with the snapshots.
  */
+/**
+ * An entry's reading, checked field by field (#4406 review P3-1). A snapshot is
+ * a JSON file and `isEnvSnapshot` does not look inside entries, so a reading
+ * with the wrong types is treated as no reading ("not checked") and a field of
+ * the wrong type as absent. Never throws; never changes the verdict.
+ */
+function readConfigCheck(entry: EnvEntry): EnvConfigCheck | null {
+  const raw: unknown = entry.config;
+  if (typeof raw !== 'object' || raw === null) return null;
+  const config = raw as Record<string, unknown>;
+  if (config.shape !== 'ok' && config.shape !== 'invalid') return null;
+  return {
+    shape: config.shape,
+    reason: typeof config.reason === 'string' ? limitConfigReason(config.reason) : null,
+    sha256:
+      typeof config.sha256 === 'string' && /^[0-9a-f]{64}$/.test(config.sha256)
+        ? config.sha256
+        : null,
+    size:
+      typeof config.size === 'number' && Number.isSafeInteger(config.size) && config.size >= 0
+        ? config.size
+        : null,
+  };
+}
+
 function resourceConfigNotes(before: EnvEntry[], after: EnvEntry[]): ConfigNote[] {
   const was = before.find((entry) => entry.key === RESOURCE_CONFIG_ENTRY_NAME);
   const now = after.find((entry) => entry.key === RESOURCE_CONFIG_ENTRY_NAME);
@@ -1029,12 +1055,12 @@ function resourceConfigNotes(before: EnvEntry[], after: EnvEntry[]): ConfigNote[
     change: ConfigNote['change'],
     entry: EnvEntry,
     beforeSha256: string | null
-  ): ConfigNote => ({ key: entry.key, change, config: entry.config ?? null, beforeSha256 });
+  ): ConfigNote => ({ key: entry.key, change, config: readConfigCheck(entry), beforeSha256 });
   if (!was && now) return [note('added', now, null)];
   if (was && !now) return [note('removed', was, null)];
   if (was && now) {
-    const from = was.config?.sha256 ?? null;
-    const to = now.config?.sha256 ?? null;
+    const from = readConfigCheck(was)?.sha256 ?? null;
+    const to = readConfigCheck(now)?.sha256 ?? null;
     // Only when both sides were read: a baseline from before #4406 has no hash,
     // and saying nothing is what that baseline always got.
     if (from && to && from !== to) return [note('changed', now, from)];

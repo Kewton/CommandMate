@@ -641,6 +641,28 @@ export const RESOURCE_CONFIG_TOP_KEYS: readonly string[] = [
   'idle',
 ];
 
+/** Unknown keys named in a reason before the rest becomes a count. */
+export const RESOURCE_CONFIG_REASON_MAX_KEYS = 5;
+
+/** Longest reason carried into a snapshot and printed in a report. */
+export const RESOURCE_CONFIG_REASON_MAX_CHARS = 200;
+
+/**
+ * Make a reason safe to print on one report line: control and line-separator
+ * characters become `\uXXXX`, and the text is cut at
+ * {@link RESOURCE_CONFIG_REASON_MAX_CHARS}. Applied where a reason is made and
+ * again where a loaded one is printed (a baseline is a file, not a promise).
+ */
+export function limitConfigReason(reason: string): string {
+  // eslint-disable-next-line no-control-regex
+  const escaped = reason.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (c) =>
+    `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
+  );
+  return escaped.length > RESOURCE_CONFIG_REASON_MAX_CHARS
+    ? `${escaped.slice(0, RESOURCE_CONFIG_REASON_MAX_CHARS)}…`
+    : escaped;
+}
+
 /** Keys under which a later resource PR runs commands or keeps a controller (resource-4370.md §2.7). */
 const RESOURCE_CONFIG_ACTING_KEYS = ['runners', 'health', 'idle'];
 
@@ -654,7 +676,10 @@ export function checkResourceConfigText(text: string): { ok: boolean; reason: st
   try {
     parsed = parseYaml(text);
   } catch (error) {
-    return { ok: false, reason: `not YAML (${String((error as Error).message).split('\n')[0]})` };
+    return {
+      ok: false,
+      reason: limitConfigReason(`not YAML (${String((error as Error).message).split('\n')[0]})`),
+    };
   }
   if (parsed === null || parsed === undefined) parsed = {};
   if (typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -662,9 +687,18 @@ export function checkResourceConfigText(text: string): { ok: boolean; reason: st
   }
   const doc = parsed as Record<string, unknown>;
   const unknown = Object.keys(doc).filter((key) => !RESOURCE_CONFIG_TOP_KEYS.includes(key));
-  if (unknown.length > 0) return { ok: false, reason: `unknown key ${unknown.join(', ')}` };
+  if (unknown.length > 0) {
+    // Keys are the file's text: quoted (a newline becomes `\n`), and only the
+    // first few, so a crafted key cannot forge a report line or bloat it.
+    const shown = unknown.slice(0, RESOURCE_CONFIG_REASON_MAX_KEYS).map((key) => JSON.stringify(key));
+    const more = unknown.length - shown.length;
+    return {
+      ok: false,
+      reason: limitConfigReason(`unknown key ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`),
+    };
+  }
   if (doc.version !== undefined && doc.version !== 1) {
-    return { ok: false, reason: `version ${JSON.stringify(doc.version)} is not 1` };
+    return { ok: false, reason: limitConfigReason(`version ${JSON.stringify(doc.version)} is not 1`) };
   }
   const acting = RESOURCE_CONFIG_ACTING_KEYS.filter((key) => key in doc);
   return { ok: true, reason: acting.length > 0 ? `has ${acting.join('/')}` : null };
@@ -682,7 +716,7 @@ export function inspectResourceConfig(deps: EnvProbeDeps, path: string): EnvConf
   } catch (error) {
     return {
       shape: 'invalid',
-      reason: error instanceof Error ? error.message : String(error),
+      reason: limitConfigReason(error instanceof Error ? error.message : String(error)),
       sha256: null,
       size: null,
     };

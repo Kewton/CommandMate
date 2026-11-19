@@ -50,8 +50,8 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   **`+ resource.yaml`（`commandmate-entries`）の裁定**（#4406）: `~/.commandmate/resource.yaml` は資源の門（#4370）の設定ファイル。読み手が呼ばれるたびに読み直すので、task の途中で置かれると、全レーンの門に効く。誰が置いたかはゲートでは確かめられないため、追加は**違反のまま**にしている（持ち主の確かめで外すのは #4497）。その代わり、違反の行の下に `    · resource.yaml: the user's resource config (#4370), shape=<ok|invalid> (<理由>) sha256=<先頭 12 桁> size=<n>B — counted; …` の行が出る。この行は wait-verify の項目名に入らない。裁定の手順:
   1. `shape=ok` か確かめる。`invalid`（YAML でない・知らない鍵・シンボリックリンク・ハードリンク・64 KiB 超など）は、それだけでワーカー起因として扱う
   2. 置いた PM・人に、置いたファイルの sha256 を聞く（`shasum -a 256 ~/.commandmate/resource.yaml`）。添え行の先頭 12 桁と一致するか確かめる
-  3. ワーカーのコマンドに `resource.yaml` を書くものが無いかを、`capture --prompts --limit 100` の `Run this command?` で確かめる
-  4. 一致し、ワーカーが書いた形跡が無ければ、外の原因として合格に裁定する。根拠（sha の一致と、置いた人）を PR 本文に書く。不一致、またはワーカーが書いた形跡があれば、ワーカー起因として扱う
+  3. ワーカーのコマンドに `resource.yaml` を書くものが無いかを、`capture --prompts --limit 100` の `Run this command?` で確かめる。**プロンプトが見えないことは証拠にならない**（Auto-Yes の間や、エディタの道具・Node のスクリプトの中で書けば、プロンプトに出ない）。この手順で分かるのは、ワーカーが書いた形跡があるときだけ
+  4. 合格には、**置いた人の sha と添え行の sha の一致が要る**。一致し、ワーカーが書いた形跡も無ければ、外の原因として合格に裁定し、根拠（sha の一致と、置いた人）を PR 本文に書く。置いた人が sha を示せない、不一致、またはワーカーが書いた形跡があれば、ワーカー起因として扱う
 
   `(has runners/health/idle)` が付いていたら、後の PR でコマンドを動かす鍵が入っている。置いた人に、その鍵が意図したものか必ず確かめる。`- resource.yaml` は task の初めに在った設定が消えたもの（添え行は初めの sha）で、違反として扱う。既に在る `resource.yaml` の書き換えは、env-clean が名前しか比べないので数えない。書き換えがあれば `    · ~ resource.yaml changed during the task (sha256 <前> → <後>)` の行で見えるだけ（判定は clean のまま。pass のときは wait-verify の記録には載らない）。設定は、なるべく task の無いときに置く。
 

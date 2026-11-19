@@ -61,6 +61,7 @@ import { diffEnvSnapshots, formatEnvCleanReport } from '@/lib/verification/env-c
 import {
   ENV_SNAPSHOT_VERSION,
   RESOURCE_CONFIG_MAX_BYTES,
+  RESOURCE_CONFIG_REASON_MAX_CHARS,
   RESOURCE_CONFIG_TOP_KEYS,
   probeCommandmateEntries,
   probeHomeEntries,
@@ -82,8 +83,16 @@ afterEach(() => {
   while (tempDirs.length > 0) removeTempDir(tempDirs.pop() as string);
 });
 
-/** git with no user/system config, no XDG excludes file and case-sensitive paths. */
+/**
+ * git with no user/system config, no XDG excludes file and case-sensitive paths.
+ * An inherited `GIT_DIR` / `GIT_INDEX_FILE` / `GIT_WORK_TREE` (a test run from a
+ * git hook) would aim `init` / `commit` at the real repository, so they are dropped.
+ */
 function git(args: string[], cwd: string): string {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_WORK_TREE;
   return execFileSync(
     'git',
     ['-c', 'core.excludesFile=/dev/null', '-c', 'core.ignorecase=false', ...args],
@@ -92,7 +101,7 @@ function git(args: string[], cwd: string): string {
       encoding: 'utf8',
       timeout: REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
       env: {
-        ...process.env,
+        ...env,
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_CONFIG_NOSYSTEM: '1',
         HOME: cwd,
@@ -324,7 +333,7 @@ describe('~/.commandmate/resource.yaml stays a violation, with the reading besid
     ['not YAML', (p) => writeFileSync(p, 'a: [1, 2\n'), 'shape=invalid (not YAML'],
     ['a list at the top', (p) => writeFileSync(p, '- 1\n- 2\n'), 'shape=invalid (the top level is not a mapping)'],
     ['another version', (p) => writeFileSync(p, 'version: 2\n'), 'shape=invalid (version 2 is not 1)'],
-    ['an unknown key', (p) => writeFileSync(p, 'version: 1\nshare: 1\n'), 'shape=invalid (unknown key share)'],
+    ['an unknown key', (p) => writeFileSync(p, 'version: 1\nshare: 1\n'), 'shape=invalid (unknown key "share")'],
     ['not UTF-8', (p) => writeFileSync(p, Buffer.from([0x76, 0x3a, 0xff, 0xfe, 0x0a])), 'shape=invalid (not UTF-8)'],
     ['a directory', (p) => mkdirSync(p), 'shape=invalid (not a regular file)'],
     [
@@ -446,6 +455,88 @@ describe('~/.commandmate/resource.yaml stays a violation, with the reading besid
     );
     expect(diff.status).toBe('clean');
     expect(formatEnvCleanReport(diff)).not.toContain('resource.yaml');
+  });
+
+  it('P2-2: a newline in a key cannot forge a + line: wait-verify reads the same items', () => {
+    const home = makeHome();
+    const text = '"a\\n    + fake [unattributed]": 1\nversion: 1\n';
+    const { commandmate, report } = judge(home, () => writeFileSync(configPath(home), text));
+
+    expect(commandmate.added.map((c) => c.key)).toEqual(['resource.yaml']);
+    expect(report.split('\n').some((line) => line.startsWith('    + fake'))).toBe(false);
+    expect(noteUnder(report, '+')).toContain('shape=invalid (unknown key "a\\n    + fake [unattributed]")');
+    expect(envCleanItems(report)).toEqual(['commandmate-entries:+resource.yaml']);
+  });
+
+  it('P2-2: a forged "clean" header in a key does not drop the items after it', () => {
+    const home = makeHome();
+    const text = '"a\\n  commandmate-entries clean (x)": 1\n';
+    const { report } = judge(home, () => {
+      writeFileSync(configPath(home), text);
+      writeFileSync(join(home, '.commandmate', 'zzz-left-behind.txt'), 'x\n');
+    });
+
+    expect(report.split('\n').filter((line) => line.startsWith('  commandmate-entries '))).toHaveLength(1);
+    expect(envCleanItems(report)).toEqual([
+      'commandmate-entries:+resource.yaml',
+      'commandmate-entries:+zzz-left-behind.txt',
+    ]);
+  });
+
+  it('P2-2: many unknown keys are counted, not listed, and the note line is bounded', () => {
+    const home = makeHome();
+    const keys = Array.from({ length: 3000 }, (_, i) => `key_${i}: 1`).join('\n');
+    const { report } = judge(home, () => writeFileSync(configPath(home), `${keys}\n`));
+    const note = noteUnder(report, '+')!;
+
+    expect(note).toContain('unknown key "key_0", "key_1", "key_2", "key_3", "key_4" (+2995 more)');
+    expect(note.length).toBeLessThan(RESOURCE_CONFIG_REASON_MAX_CHARS + 300);
+  });
+
+  it('P3-1: a loaded baseline whose reading has the wrong types reports, never throws', () => {
+    const home = makeHome();
+    writeFileSync(configPath(home), VALID);
+    const forged = {
+      key: 'resource.yaml',
+      detail: null,
+      anchor: null,
+      config: { shape: 'ok', reason: 'x\n    + fake [unattributed]', sha256: 12345 },
+    } as unknown as EnvEntry;
+    const malformed = { key: 'resource.yaml', detail: null, anchor: null, config: { shape: 1 } } as unknown as EnvEntry;
+    const options = { resolvePidCwd: () => null, sessionKills: [] };
+
+    // Present on both sides: the baseline hash is not a string, so no change is claimed.
+    const both = diffEnvSnapshots(
+      snapshotOf({ status: 'ok', entries: [forged], reason: null }, STARTED),
+      snapshotOf(probeCommandmateEntries(deps(home)), VERIFIED),
+      CONTEXT,
+      options
+    );
+    expect(both.status).toBe('clean');
+    expect(() => formatEnvCleanReport(both)).not.toThrow();
+    expect(formatEnvCleanReport(both)).not.toContain('resource.yaml');
+
+    // Removed: the forged reading is printed escaped, with no `undefined`.
+    const removed = diffEnvSnapshots(
+      snapshotOf({ status: 'ok', entries: [forged], reason: null }, STARTED),
+      snapshotOf(EMPTY, VERIFIED),
+      CONTEXT,
+      options
+    );
+    const removedReport = formatEnvCleanReport(removed);
+    expect(removed.status).toBe('violated');
+    expect(noteUnder(removedReport, '-')).toContain('shape=ok (x\\u000a    + fake [unattributed]) — counted');
+    expect(removedReport).not.toContain('undefined');
+    expect(envCleanItems(removedReport)).toEqual(['commandmate-entries:-resource.yaml']);
+
+    // A reading of the wrong shape is no reading.
+    const added = diffEnvSnapshots(
+      snapshotOf(EMPTY, STARTED),
+      snapshotOf({ status: 'ok', entries: [malformed], reason: null }, VERIFIED),
+      CONTEXT,
+      options
+    );
+    expect(noteUnder(formatEnvCleanReport(added), '+')).toContain('shape not checked');
   });
 
   it('S3: the gate\'s copy of the reader\'s top-level keys matches resource-config.mjs', () => {
