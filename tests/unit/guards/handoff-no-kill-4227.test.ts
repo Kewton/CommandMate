@@ -24,7 +24,7 @@ import ts from 'typescript';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { createModuleGraph, REPO_ROOT, repoRelative } from './route-tmux-reach';
+import { createModuleGraph, REPO_ROOT, repoRelative, type ModuleGraph } from './route-tmux-reach';
 
 const KILL_NAMES = new Set(['killSession', 'stopClaudeSession', 'killWorktreeSession']);
 const FORBIDDEN_SPECIFIER = /(^|\/)lib\/tmux(\/|$)|session-cleanup|kill-session/;
@@ -92,17 +92,34 @@ const HANDOFF_ROUTES = path.join(REPO_ROOT, 'src', 'app', 'api', 'worktrees', '[
 const DIALOG = path.join(REPO_ROOT, 'src', 'components', 'mem', 'SessionHandoffDialog.tsx');
 
 /** Modules of the lib's closure that are a kill's way, or call one. */
-function closureKillers(entry: string): string[] {
-  const graph = createModuleGraph();
+function closureKillers(entry: string, graph: ModuleGraph = createModuleGraph(), callsKill: (file: string) => boolean = fileCallsKill): string[] {
   return [...graph.closure(entry)]
     .map((file) => [repoRelative(file), file] as const)
     .filter(([module, file]) => {
       // `cli-tools/types.ts` is the tools' ids and types (mem's roster reads it); it is still held to the call check below.
       const toolModule = /^src\/lib\/cli-tools\//.test(module) && module !== 'src/lib/cli-tools/types.ts';
       if (/^src\/lib\/tmux\//.test(module) || toolModule || /session-cleanup\.ts$/.test(module) || /kill-session\/route\.ts$/.test(module)) return true;
-      return killFindings(file, readFileSync(file, 'utf8')).some((finding) => finding.startsWith('calls'));
+      return callsKill(file);
     })
     .map(([module]) => module);
+}
+
+/** Whether `file` calls a kill (its AST read once per file, not once per entry whose closure holds it). */
+function fileCallsKill(file: string): boolean {
+  return killFindings(file, readFileSync(file, 'utf8')).some((finding) => finding.startsWith('calls'));
+}
+
+/** `fileCallsKill` that remembers its answer: the closures of the lib's entries overlap almost entirely. */
+function memoisedCallsKill(): (file: string) => boolean {
+  const known = new Map<string, boolean>();
+  return (file) => {
+    let answer = known.get(file);
+    if (answer === undefined) {
+      answer = fileCallsKill(file);
+      known.set(file, answer);
+    }
+    return answer;
+  };
 }
 
 /** The bodies of the dialog's effects (`useEffect(() => { … })`), where `onStop` must never be. */
@@ -135,8 +152,21 @@ describe('the hand-off never kills (Issue #4227, the PM’s decision)', () => {
   it('(1) nothing src/lib/handoff/** loads is a kill’s way', () => {
     const entries = files(HANDOFF_LIB);
     expect(entries.length).toBeGreaterThanOrEqual(8);
-    for (const entry of entries) expect([repoRelative(entry), closureKillers(entry)]).toEqual([repoRelative(entry), []]);
+    // One module graph and one per-file verdict for all entries: their closures overlap, and each file is parsed once.
+    const graph = createModuleGraph();
+    const callsKill = memoisedCallsKill();
+    for (const entry of entries) expect([repoRelative(entry), closureKillers(entry, graph, callsKill)]).toEqual([repoRelative(entry), []]);
     for (const entry of entries) expect([repoRelative(entry), killFindings(entry, readFileSync(entry, 'utf8'))]).toEqual([repoRelative(entry), []]);
+  });
+
+  it('(1b) the memoised verdict agrees with reading each file afresh, and a shared graph finds a kill', () => {
+    const calls = fixture('k.ts', "import { killSession } from '@/lib/tmux/tmux';\nexport const e = (n: string) => killSession(n);\n");
+    const quiet = fixture('q.ts', 'export const q = 1;\n');
+    const memo = memoisedCallsKill();
+    for (const file of [calls, quiet, calls, quiet]) expect(memo(file)).toBe(fileCallsKill(file));
+    expect([memo(calls), memo(quiet)]).toEqual([true, false]);
+    // A fixture lib that reaches a kill is named by the shared-graph path, as by a fresh graph.
+    expect(closureKillers(calls, createModuleGraph(), memo)).toEqual(closureKillers(calls));
   });
 
   it('(2) the routes call no kill; only the observation route loads the tools, and asks isRunning', () => {
