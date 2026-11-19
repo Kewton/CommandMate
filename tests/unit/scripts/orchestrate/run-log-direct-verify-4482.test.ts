@@ -36,8 +36,6 @@ const COMMITTED_AFTER = '2026-11-19T01:05:00+00:00';
 /** HEAD's last move (reflog, epoch seconds): before the run by default. */
 const MOVED_BEFORE = String(Date.parse(COMMITTED_BEFORE) / 1000);
 const MOVED_AFTER = String(Date.parse('2026-11-19T01:03:00Z') / 1000);
-/** A time before the run, for the files the tests make. */
-const OLD = new Date('2026-11-18T00:00:00Z');
 
 let base: string;
 let runDir: string;
@@ -52,7 +50,6 @@ beforeEach(() => {
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(worktree, 'package-lock.json'), '{"lockfileVersion":3}\n');
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"model":"opus"}\n');
-  for (const file of [path.join(worktree, 'package-lock.json'), path.join(home, '.claude', 'settings.json')]) fs.utimesSync(file, OLD, OLD);
 });
 afterEach(() => {
   fs.rmSync(base, { recursive: true, force: true });

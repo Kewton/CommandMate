@@ -218,6 +218,7 @@ export function verifyEnvState(record, { runDir, worktree, home, ignore }) {
   const hash = recordedEnvHash(record?.note);
   if (hash === null) return { state: 'unrecorded', fields: [], detail: 'no env= in the record (taken before #3883 H-8): used as before' };
   if (hash === DIRECT_ENV) {
+    // 直の記録は passed= を持たないのでゲートは再利用されない。passed= を足すなら env が無いまま再利用されるので足さない（#4482）。
     return { state: 'unrecorded', fields: [], detail: 'env=none (a direct verify run recorded by run-log.mjs record-verify, no manifest from its start): no environment to compare, used as a record without env=' };
   }
   const kept = record?.key ? keptManifest(runDir, record.key, hash) : null;
