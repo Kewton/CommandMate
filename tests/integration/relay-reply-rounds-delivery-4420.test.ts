@@ -306,6 +306,7 @@ describe('#4420 the Issue, with the echo the delivery itself leaves behind (code
     expect(third.ok).toBe(true);
     if (!third.ok) return;
     expect(third.relay.hops).toBe(1);
+    expect(findParentRelayHops(db, A)).toBeNull();
   });
 });
 
@@ -341,7 +342,11 @@ describe('#4420 a fast loop between two sessions stops at MAX_RELAY_ROUNDS', () 
     for (const allowRelayChain of [false, true]) {
       const refused = openRelay(db, { from: A, to: B, bind: true, allowRelayChain });
       expect(refused.ok).toBe(false);
-      if (!refused.ok) expect(refused.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+      if (refused.ok) continue;
+      expect(refused.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+      // The round-trip ceiling, not the chain depth.
+      expect(refused.refusal.message).toContain(`the limit is ${MAX_RELAY_ROUNDS}`);
+      expect(refused.refusal.message).not.toContain('Relay chains stop at');
     }
     expect(openRelay(db, { from: B, to: A, bind: true }).ok).toBe(true);
   });
