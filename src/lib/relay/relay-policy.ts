@@ -45,6 +45,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import {
   decideToolPolicy,
   RELAY_TOOL_POLICY_DENIED,
+  TOOL_POLICY_TABLE,
   type ToolPolicyDecision,
   type UsageDeclaration,
 } from '@/lib/tool-policy/policy';
@@ -147,11 +148,33 @@ export interface RelayRefusal {
   ceiling?: 'rounds';
 }
 
+/**
+ * What one end of a relay is driven by, for rule 0 (Issue #4496): a tool, `null` for
+ * an end whose tool could not be read (judged as every tool, so refused when any tool
+ * would be — never let through), or several readings of the same end (the tool a send
+ * asked for and the tool the delivery will resolve), refused when any one is.
+ */
+export type RelayEndpointToolReading = CLIToolType | null | ReadonlyArray<CLIToolType | null>;
+
 /** The tools at both ends and the usage declaration, for rule 0 (Issue #4437). */
 export interface RelayEndpointTools {
-  from: CLIToolType;
-  to: CLIToolType;
+  from: RelayEndpointToolReading;
+  to: RelayEndpointToolReading;
   declaration: UsageDeclaration;
+}
+
+/** Every tool one reading of an end may be (Issue #4496). */
+function candidateTools(reading: RelayEndpointToolReading): CLIToolType[] {
+  const readings: ReadonlyArray<CLIToolType | null> = Array.isArray(reading)
+    ? reading
+    : [reading as CLIToolType | null];
+  const tools: CLIToolType[] = [];
+  for (const tool of readings) {
+    for (const candidate of tool === null ? (Object.keys(TOOL_POLICY_TABLE) as CLIToolType[]) : [tool]) {
+      if (!tools.includes(candidate)) tools.push(candidate);
+    }
+  }
+  return tools;
 }
 
 /** Issue #4437: the sentence of `RELAY_TOOL_POLICY_DENIED`. */
@@ -160,19 +183,33 @@ export const RELAY_TOOL_POLICY_DENIED_MESSAGE =
   + '(consumer plans). No relay was opened and nothing was typed.';
 
 /**
+ * Issue #4496: the sentence of `RELAY_TOOL_POLICY_DENIED` when the relay had already
+ * been opened (by a CLI that did not name the tool) and the send bound to it is
+ * refused: unlike {@link RELAY_TOOL_POLICY_DENIED_MESSAGE}, the relay exists, and is
+ * withdrawn (`cancelled`) with nothing typed.
+ */
+export const RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE =
+  'A relay with antigravity at either end is refused by default under the Google Antigravity terms §6 '
+  + '(consumer plans). The relay this send was bound to had been opened; it was withdrawn and nothing was typed.';
+
+/**
  * Issue #4437: the first end of a relay the tool policy refuses (`relay` from
  * the server's own `relay` origin), `from` before `to`; null when both may be
  * driven. Pure: the declaration is an argument.
  */
 export function findRelayToolPolicyDenial(tools: RelayEndpointTools): RelayToolPolicyDenial | null {
   for (const endpoint of ['from', 'to'] as const) {
-    const decision = decideToolPolicy({
-      tool: tools[endpoint],
-      operation: 'relay',
-      origin: 'relay',
-      declaration: tools.declaration,
-    });
-    if (!decision.allowed) return { endpoint, decision };
+    // Issue #4496: an end of no known tool is fail-closed — any tool it might be —
+    // and an end read more than one way is refused when any reading is.
+    for (const candidate of candidateTools(tools[endpoint])) {
+      const decision = decideToolPolicy({
+        tool: candidate,
+        operation: 'relay',
+        origin: 'relay',
+        declaration: tools.declaration,
+      });
+      if (!decision.allowed) return { endpoint, decision };
+    }
   }
   return null;
 }

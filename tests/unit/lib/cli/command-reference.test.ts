@@ -203,6 +203,6 @@ describe('[#2376] buildDelegationBrief', () => {
 
   it('offers a progress check that reads without interfering', () => {
     const brief = buildDelegationBrief({ ...base, locale: 'en' });
-    expect(brief).toContain('capture anvil-develop --instance codex-2 --pane --tail 60');
+    expect(brief).toContain('capture anvil-develop --instance codex-2 --pane --tail 80');
   });
 });
