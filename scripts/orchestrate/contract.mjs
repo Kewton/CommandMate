@@ -303,9 +303,10 @@ export function touchesServerBuild(scope) {
 }
 
 /**
- * The first scope pattern that can turn `unit-related` into the whole unit suite (#4148), judged
- * by scripts/run-related-unit-tests.mjs `classifyChanges` itself: docs, .claude and scripts/ all
- * do (`mode=full`), and then the gate queues on `cpu.heavy` behind every other worker's full run.
+ * The first scope pattern that reaches a file outside src/ and tests/ — one `classifyChanges` in
+ * scripts/run-related-unit-tests.mjs marks `full` (#4148). Since #4467 that mark no longer runs the
+ * whole unit suite: `unit-related` runs the tests the change reaches plus every repo-reading test
+ * (log `mode=related reason=non-source:<file>`), and the whole suite is CI's `Unit Tests`.
  * The scope is what the worker may touch, not what it will, so this says "can": a plan note, not a stop.
  * A glob with no extension stands for code, so `src/**` is related and `src/**\/*.json` is not.
  */
@@ -328,7 +329,7 @@ export function fullUnitNote(config) {
   if (!config.gates.includes('unit-related')) return null;
   const pattern = fullUnitPattern(config.scope);
   if (pattern === null) return null;
-  return `contract: note: #${config.issue}: unit-related runs the whole unit suite when a file under "${pattern}" changes — write the order of such items in the plan (docs/orchestrate/plan-check.md)`;
+  return `contract: note: #${config.issue}: scope "${pattern}" reaches files outside src/ and tests/ — unit-related runs the related tests plus the repo-reading tests there (mode=related reason=non-source), not the whole suite; the whole suite is CI's Unit Tests (docs/orchestrate/plan-check.md)`;
 }
 
 /**
@@ -434,6 +435,17 @@ function stringList(value, name, problems) {
 }
 
 /**
+ * A scope pattern with the shell's bracket escapes written out (#4459): `[[]id[]]` → `[id]`.
+ * The scope gate (src/lib/verification/scope-gate-glob.ts) reads `[` and `]` as themselves, so the
+ * escaped form matches only a path that literally contains `[[]id[]]` — none — and a change inside
+ * `src/app/api/worktrees/[id]/` came out as a scope violation (run 3307). The gate is right and is
+ * not changed; what goes into the contract is what the gate matches.
+ */
+export function literalBrackets(pattern) {
+  return pattern.replaceAll('[[]', '[').replaceAll('[]]', ']');
+}
+
+/**
  * Validate a parsed config and fill in the defaults.
  *
  * @param {Record<string, unknown>} raw
@@ -500,7 +512,7 @@ export function normalizeConfig(raw, options = {}) {
   });
 
   const fragment = `changelog.d/${issue}.md`;
-  const scope = stringList(raw.scope, 'scope', problems);
+  const scope = stringList(raw.scope, 'scope', problems).map(literalBrackets);
   if (scope.length === 0) problems.push('scope: at least one path is required');
   for (const shared of SHARED_FILES) {
     if (scope.includes(shared)) problems.push(`scope: ${shared} is shared — the worker writes a fragment instead (2-4-1)`);

@@ -17,6 +17,11 @@
  * sent (40), sent but not confirmed (41) — is a 200 whose body is a
  * `StrictRespondResult`; 4xx is a request this route could not take at all.
  * Every body carries `strictRespond: 1`, which an older server's 404 does not.
+ *
+ * Issue #4437: an optional `origin` (who started the answer, as the CLI reads
+ * it; a non-string is 400 `invalid_origin`) goes to the tool policy once the
+ * target is resolved, before the ownership check and the input lock: a refusal
+ * is 409 `TOOL_POLICY_DENIED` with nothing captured or typed.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -40,6 +45,8 @@ import {
 } from '@/lib/session/strict-prompt-answer-io';
 import { startPolling } from '@/lib/polling/response-poller';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
+import type { SendOrigin } from '@/lib/tool-policy/policy';
+import { findToolPolicyDenial, readBodyOrigin, toolPolicyDeniedResponse } from '../../send/send-tool-policy';
 
 const logger = createLogger('api/prompt-response-strict');
 
@@ -59,6 +66,10 @@ interface StrictRequestBody {
   cliTool?: unknown;
   answeredBy?: unknown;
   useDefault?: unknown;
+  /** Issue #4437: who started the answer; absent is a person (`legacy`). */
+  origin?: unknown;
+  /** Issue #4437: logged with a refusal only. */
+  originEvidence?: unknown;
 }
 
 interface StrictRequest {
@@ -70,6 +81,8 @@ interface StrictRequest {
   instanceId: string | undefined;
   cliTool: string | undefined;
   answeredBy: string;
+  origin: SendOrigin;
+  originEvidence: unknown;
 }
 
 function refuse(status: number, code: string, error: string): NextResponse {
@@ -109,6 +122,8 @@ function validate(body: StrictRequestBody): StrictRequest | NextResponse {
   if (body.answeredBy !== undefined && (typeof body.answeredBy !== 'string' || !ANSWERED_BY_PATTERN.test(body.answeredBy))) {
     return refuse(400, 'invalid_answered_by', 'Invalid answeredBy');
   }
+  const origin = readBodyOrigin(body.origin);
+  if (!origin.ok) return refuse(400, 'invalid_origin', origin.error);
   return {
     expectScreen: body.expectScreen,
     observation: body.observation,
@@ -118,6 +133,8 @@ function validate(body: StrictRequestBody): StrictRequest | NextResponse {
     instanceId: body.instanceId as string | undefined,
     cliTool: body.cliTool as string | undefined,
     answeredBy: (body.answeredBy as string | undefined) ?? 'cli',
+    origin: origin.origin,
+    originEvidence: body.originEvidence,
   };
 }
 
@@ -147,6 +164,17 @@ export async function POST(
     });
     if (!resolved.ok) return refuse(400, 'instance_tool_conflict', resolved.error);
     const { cliToolId, instanceId, resolvedBy } = resolved.target;
+
+    // Issue #4437 (design §1.3): the tool is known; nothing is captured or typed yet.
+    const toolPolicyDenial = findToolPolicyDenial({
+      tool: cliToolId,
+      operation: 'respond',
+      origin: request.origin,
+      originEvidence: request.originEvidence,
+      worktreeId: id,
+      instanceId,
+    });
+    if (toolPolicyDenial) return toolPolicyDeniedResponse(toolPolicyDenial, { strictRespond: 1 });
 
     // Issue #2865: another server's session of the same name is never answered.
     const sessionName = resolveSessionName(cliToolId, id, instanceId);

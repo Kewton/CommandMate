@@ -3,6 +3,9 @@
  * Manages auto-yes mode state for a worktree
  *
  * Issue #138: Extended to trigger server-side polling
+ * Issue #4436: enabling is refused with 409 { code: TOOL_POLICY_DENIED, error,
+ *   reason, links } when the tool policy refuses Auto-Yes for the resolved tool
+ *   (antigravity without a usage declaration). Disabling is never refused.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -49,6 +52,10 @@ import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { Worktree } from '@/types/models';
 import { autoYesGrantIdOf } from './auto-yes-grant';
+import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE } from '@/lib/tool-policy/policy';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
+import { findWriteToolPolicyRefusal, readWriteToolPolicyRequest } from '../send/write-tool-policy';
+import { readTaskTarget } from '../send/task-target';
 
 const logger = createLogger('api/auto-yes');
 
@@ -480,9 +487,19 @@ export async function POST(
     // of that table — with two contradicting declarations of which agent is
     // meant, refusing is the only answer that cannot auto-answer a dialog in
     // the wrong pane.
-    const resolution = resolveSessionTargetStrict(getDbInstance(), id, {
+    //
+    // Issue #4449: a grant for a task (`send --contract --auto-yes`, `taskId`) is for the
+    // target the task recorded when it was judged and created, not a default resolved
+    // again; a body naming another target is 400 `task_target_mismatch`.
+    const taskTarget = readTaskTarget(getDbInstance(), id, {
+      taskId: body.taskId,
+      cliToolId: body.cliToolId as CLIToolType | undefined,
       instanceId: body.instanceId as string | undefined,
-      requestedCliTool: body.cliToolId as CLIToolType | undefined,
+    });
+    if (!taskTarget.ok) return taskTarget.response;
+    const resolution = resolveSessionTargetStrict(getDbInstance(), id, {
+      instanceId: taskTarget.value.instanceId,
+      requestedCliTool: taskTarget.value.requestedCliTool,
     });
     if (!resolution.ok) {
       return sessionTargetConflictResponse(resolution.conflict);
@@ -498,6 +515,66 @@ export async function POST(
     let pendingDecisions: AutoYesResponse['pendingDecisions'];
     let state;
     if (body.enabled) {
+      // Issue #4436: the tool policy first — before the session is looked at,
+      // any state is written or a poller starts. Judged on the RESOLVED tool, so
+      // an instance named without `cliToolId` is judged as its roster entry says.
+      // Every arming goes through this route (the CLI's `auto-yes --enable` and
+      // `send --auto-yes`, the web UI), and grants live in memory and are released
+      // on restart, where the declaration is read — so no grant on a refused tool
+      // can outlive this check.
+      const policy = decideToolPolicy({
+        tool: cliToolId,
+        operation: 'auto-yes',
+        origin: 'legacy',
+        declaration: readUsageDeclaration(),
+      });
+      if (!policy.allowed) {
+        logger.warn('tool-policy-denied:', {
+          worktreeId: id,
+          cliToolId,
+          instanceId,
+          code: policy.code,
+          reason: policy.reason,
+        });
+        return NextResponse.json(
+          {
+            code: policy.code,
+            error: TOOL_POLICY_DENIED_MESSAGE,
+            reason: policy.reason,
+            links: policy.links,
+            cliToolId,
+            instanceId,
+          },
+          { status: 409 }
+        );
+      }
+
+      // Issue #4449: `send --auto-yes --reply-to` arms before the relay it opens is
+      // asked about, so the relay's rule 0 (antigravity at either end) is asked here
+      // too, on the tool this grant is for: refused, no grant is written (the same
+      // 409 `POST /api/relays` gives). Absent (the web UI, `auto-yes --enable`), as before.
+      // I3' of #4449: the relay's other end is read from the roster, which can move
+      // during the ownership check below, so it is asked again after the last await.
+      let relayRequest: ReturnType<typeof readWriteToolPolicyRequest> | null = null;
+      if (body.replyTo !== undefined) {
+        relayRequest = readWriteToolPolicyRequest({ replyTo: body.replyTo });
+        if (!relayRequest.ok) {
+          return NextResponse.json({ error: relayRequest.error }, { status: 400 });
+        }
+      }
+      const relayRefusal = (): NextResponse | null => {
+        if (relayRequest === null || !relayRequest.ok) return null;
+        const refusal = findWriteToolPolicyRefusal(getDbInstance(), {
+          worktreeId: id,
+          tool: cliToolId,
+          instanceId,
+          request: relayRequest.value,
+        });
+        return refusal ? NextResponse.json(refusal, { status: 409 }) : null;
+      };
+      const relayRefusedFirst = relayRefusal();
+      if (relayRefusedFirst) return relayRefusedFirst;
+
       // Issue #3290: a same-named session another CommandMate server created is
       // not this worktree's to auto-answer. The poller already declines to act
       // on one (#2865), so arming used to answer 200 and show ON over a session
@@ -539,6 +616,12 @@ export async function POST(
           );
         }
       }
+
+      // I3' of #4449: the relay judged again on the roster as it is now, with no await
+      // between this and the grant written below (the grant's own target stays the one
+      // resolved above).
+      const relayRefusedLast = relayRefusal();
+      if (relayRefusedLast) return relayRefusedLast;
 
       // Issue #3863: the mode is passed only when the request named one, so an
       // enable without it reaches the setter exactly as before (which keeps a

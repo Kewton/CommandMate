@@ -25,6 +25,7 @@ import {
   UNNUMBERED_STRICT_RESPOND_KINDS,
 } from '../../lib/prompt-observation/kinds';
 import type { StrictRespondResult } from '../../lib/prompt-observation/types';
+import { noteAntigravityNotice } from '../utils/antigravity-notice';
 import { resolveCommandTarget, type CommandTarget } from './command-target';
 import { paneCaptureCommand, targetFlags } from '../utils/follow-up-command';
 
@@ -253,6 +254,8 @@ export async function runStrictRespond(
   const client = new ApiClient({ token: options.token });
   const commandTarget = await resolveCommandTarget(client, worktreeId, options.instance, options.agent);
   const { agent, instanceId } = commandTarget;
+  // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).
+  noteAntigravityNotice(agent);
 
   const body: Record<string, unknown> = {
     expectScreen: options.expectScreen,

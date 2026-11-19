@@ -10,6 +10,7 @@
  *   commandmate instances <worktree-id> set-role <instance-id> (--role <role> | --none | --inherit)
  */
 
+import { noteAntigravityNotice } from '../utils/antigravity-notice';
 import { Command } from 'commander';
 import { ExitCode, getErrorMessage, RoleExitCode } from '../types';
 import type { InstancesOptions } from '../types';
@@ -23,6 +24,7 @@ import {
   saveRosterChange,
   nextInstanceId,
   defaultAlias,
+  rosterAdditionRefusal,
   MAX_AGENT_INSTANCES,
   MAX_AGENT_ALIAS_LENGTH,
   MIN_AGENT_INSTANCES,
@@ -274,10 +276,21 @@ export async function resolveInstanceCliTool(
   worktreeId: string,
   instanceId: string,
   requestedAgent: string | undefined,
-  mode: InstanceConflictMode = 'strict'
+  mode: InstanceConflictMode = 'strict',
+  hooks: ResolveInstanceTargetHooks = {}
 ): Promise<string | undefined> {
-  return (await resolveInstanceTarget(client, worktreeId, instanceId, requestedAgent, mode))
+  return (await resolveInstanceTarget(client, worktreeId, instanceId, requestedAgent, mode, hooks))
     .cliToolId;
+}
+
+/** What a caller can hang on {@link resolveInstanceTarget}'s own exits. */
+export interface ResolveInstanceTargetHooks {
+  /**
+   * Called once just before an ambiguity or a strict contradiction prints its
+   * error and exits 2 — the process ends there, so a caller holding output for
+   * later (`auto-yes`'s `--token` warnings, Issue #4436 I7b) prints it here.
+   */
+  beforeExit?: () => void;
 }
 
 // ===========================================================================
@@ -373,13 +386,15 @@ export interface ResolvedInstanceTarget {
  *   or undefined for a caller that resolves only to learn the agent
  * @param requestedAgent - The `--agent` value, if the user gave one
  * @param mode - What a roster contradiction means for this caller
+ * @param hooks - {@link ResolveInstanceTargetHooks.beforeExit} runs before either exit 2
  */
 export async function resolveInstanceTarget(
   client: ApiClient,
   worktreeId: string,
   selector: string | undefined,
   requestedAgent: string | undefined,
-  mode: InstanceConflictMode = 'strict'
+  mode: InstanceConflictMode = 'strict',
+  hooks: ResolveInstanceTargetHooks = {}
 ): Promise<ResolvedInstanceTarget> {
   let target;
   try {
@@ -389,6 +404,7 @@ export async function resolveInstanceTarget(
     });
   } catch (error) {
     if (error instanceof ApiError && error.apiCode === AMBIGUOUS_INSTANCE_ALIAS_CODE) {
+      hooks.beforeExit?.();
       console.error(`Error: ${error.payload?.error ?? `--instance '${selector}' is ambiguous.`}`);
       for (const candidate of error.payload?.issues ?? []) {
         console.error(`  - ${candidate}`);
@@ -401,6 +417,7 @@ export async function resolveInstanceTarget(
   if (target.conflict) {
     const detail = describeSessionTargetConflict(target.conflict);
     if (mode === 'strict') {
+      hooks.beforeExit?.();
       console.error(`Error: ${detail}`);
       process.exit(ExitCode.CONFIG_ERROR);
     } else {
@@ -755,11 +772,14 @@ async function addInstance(
         order,
       }));
 
-  if (existing.length >= MAX_AGENT_INSTANCES) {
+  const id = options.id ?? nextInstanceId(options.agent, existing);
+  const alias = options.alias ?? defaultAlias(options.agent, id);
+  // Issue #4458: the limit and the room under it, judged by the server's validator.
+  const refusal = rosterAdditionRefusal(existing, { id, cliTool: options.agent, alias });
+  if (refusal?.atLimit) {
     refuse(`worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
   }
 
-  const id = options.id ?? nextInstanceId(options.agent, existing);
   if (existing.some(inst => inst.id === id)) {
     if (roleSettings !== null) {
       throw new RoleCliError('instance_exists', `Instance '${id}' already exists. Set its role with: set-role ${id}`, RoleExitCode.CONFLICT);
@@ -772,8 +792,9 @@ async function addInstance(
   if (isCliToolId(id) && id !== options.agent) {
     refuse(`instance id '${id}' conflicts with --agent '${options.agent}'.`);
   }
+  // Anything else the roster write would refuse, in the server's own words.
+  if (refusal) refuse(`the roster would refuse '${id}': ${refusal.error}`);
 
-  const alias = options.alias ?? defaultAlias(options.agent, id);
   if (roleAssignment !== undefined && roleSettings !== null) {
     const agent = options.agent;
     const created = await roleWrite(`commandmate instances ${worktreeId}`, () =>
@@ -785,6 +806,8 @@ async function addInstance(
     );
     const entry = roleEntryOf(created, created.created.instanceId);
     console.error(`Instance added: ${id} (${options.agent})`);
+    // Issue #4438: the usage notice, once per CLI environment (stderr only, never the JSON).
+    noteAntigravityNotice(options.agent);
     if (options.json) {
       console.log(JSON.stringify({ ...roleChangeResult(created, entry), created: created.created }, null, 2));
     } else {
@@ -797,18 +820,22 @@ async function addInstance(
   const agent = options.agent;
   let addedId = id;
   const next = await saveRosterChange(client, worktreeId, roster ?? { instances: existing }, (base) => {
-    if (base.length >= MAX_AGENT_INSTANCES) {
+    addedId = options.id ?? nextInstanceId(agent, base);
+    const added = { id: addedId, cliTool: agent, alias: options.alias ?? defaultAlias(agent, addedId), order: base.length };
+    const again = rosterAdditionRefusal(base, added);
+    if (again?.atLimit) {
       refuse(`worktree already has the maximum of ${MAX_AGENT_INSTANCES} agent instances.`);
     }
-    addedId = options.id ?? nextInstanceId(agent, base);
     if (base.some((inst) => inst.id === addedId)) {
       refuse(`instance '${addedId}' already exists.`);
     }
-    const added = { id: addedId, cliTool: agent, alias: options.alias ?? defaultAlias(agent, addedId), order: base.length };
+    if (again) refuse(`the roster would refuse '${addedId}': ${again.error}`);
     return [...base, added as AgentInstance];
   });
 
   console.error(`Instance added: ${addedId} (${options.agent})`);
+  // Issue #4438: the usage notice, once per CLI environment (stderr only, never the JSON).
+  noteAntigravityNotice(options.agent);
   if (options.json) {
     console.log(JSON.stringify(next, null, 2));
   }
@@ -975,9 +1002,9 @@ export function createInstancesCommand(): Command {
     .argument('[action]', 'list (default), add, remove, alias, kill, or set-role')
     .argument('[rest...]', 'Action-specific arguments (instance-id, new alias)')
     .option('--json', 'JSON output (list/add/set-role)')
-    .option('--agent <tool>', 'CLI tool for the add action (claude, codex, gemini, vibe-local, opencode, copilot, antigravity)')
+    .option('--agent <tool>', `CLI tool for the add action (${CLI_TOOL_IDS.join(', ')})`)
     .option('--alias <name>', 'Display alias for the add action')
-    .option('--id <instance-id>', 'Explicit instance ID for the add action (format: <agent> or <agent>-<n>, e.g. claude-2)')
+    .option('--id <instance-id>', 'Explicit instance ID for the add action (format: <agent> or <agent>-<n>, e.g. claude-2; any other name of letters, digits, _ and - up to 64 characters such as claude_x is also taken, but an id equal to a tool id must be that tool)')
     .option('--kill', 'Also kill the running session when removing an instance')
     .option('--role <role>', 'add / set-role: role ID or name for this instance')
     .option('--no-role', 'add: explicitly no role')

@@ -17,6 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -105,7 +106,10 @@ async function preToolUse(body: Record<string, unknown>) {
       })
     )
   );
-  return { status: response.status, body: (await response.json()) as unknown };
+  const result = { status: response.status, body: (await response.json()) as unknown };
+  // Premise (Issue #4436): Auto-Yes answers agy's question — the call these tests follow was allowed.
+  expect(result).toEqual({ status: 200, body: { decision: 'allow' } });
+  return result;
 }
 
 /** The body `scripts/hooks/cmate-agent-event.sh` posts for agy's `PostToolUse`. */
@@ -158,6 +162,10 @@ afterEach(async () => {
   resetAutoYesConfirmationLedgerForTests();
   setAutoYesLedgerClockTimersForTests(null);
 });
+
+// Issue #4436: every test here arms Auto-Yes for agy and has it answer the
+// PreToolUse, which presupposes a declared usage plan (asserted in `preToolUse`).
+withUsageDeclaration('api-key');
 
 describe('[#3820 PR 3] the permission route reads agy’s stepIdx', () => {
   it('records the call on the receipt and the hook request, and replies as before', async () => {

@@ -11,6 +11,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { restoreFetch, keepOffTheRealServer } from '../../../helpers/mock-api';
 import { ExitCode } from '../../../../src/cli/types';
 import { MAX_STOP_PATTERN_LENGTH } from '../../../../src/cli/utils/api-client';
+import { PINNED_ORIGIN, pinSendOriginEnv } from './send-origin-env-4437';
+
+// Issue #4437 (I10): a body that may reach antigravity says who sent it; the caller is fixed.
+pinSendOriginEnv();
 
 // Issue #4191: no request from this file reaches 127.0.0.1:3000, not even by failing.
 keepOffTheRealServer();
@@ -158,11 +162,13 @@ describe('send --contract', () => {
 
     await runSend(['wt1', '--contract', '.commandmate/tasks/t.yaml']);
 
+    // Issue #4449: naming no tool, the task's request says who is sending (the server judges
+    // the default it resolves there), and the message is bound to that task's target.
     const create = calls.find((c) => c.url.includes('/tasks'));
-    expect(create?.body).toEqual({ contractPath: '.commandmate/tasks/t.yaml' });
+    expect(create?.body).toEqual({ contractPath: '.commandmate/tasks/t.yaml', ...PINNED_ORIGIN });
 
     const send = calls.find((c) => c.url.includes('/send'));
-    expect(send?.body).toEqual({ content: COMPOSED_MESSAGE });
+    expect(send?.body).toEqual({ content: COMPOSED_MESSAGE, taskId: TASK_ID, ...PINNED_ORIGIN });
 
     // Task creation must precede the send: the row is what the send is recorded against.
     expect(calls.findIndex((c) => c.url.includes('/tasks'))).toBeLessThan(
@@ -278,8 +284,10 @@ describe('send --contract', () => {
     expect(code).toBe(ExitCode.CONFIG_ERROR);
     expect(mockConsoleError).not.toHaveBeenCalledWith('Message sent.');
     // The rejection is the server's, so the request had to be made — but
-    // nothing may follow it.
+    // nothing may follow it. Issue #4449: and nothing precedes it either (no tool-policy
+    // check: the task's own request carries the origin and is judged there).
     expect(calls.map((c) => c.url).filter((url) => !url.includes('/tasks'))).toEqual([]);
+    expect(calls.find((c) => c.url.includes('/tasks'))?.body).toMatchObject(PINNED_ORIGIN);
   });
 
   it('records the task as failed when the message could not be delivered', async () => {

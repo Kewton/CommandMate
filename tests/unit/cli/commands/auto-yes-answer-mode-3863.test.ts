@@ -82,6 +82,7 @@ describe('[#3863] auto-yes --answer-mode', () => {
 describe('[#3863] send --auto-yes-answer-mode', () => {
   it('arms with the mode before sending', async () => {
     mockFetchSequence([
+      // Issue #4449: no tool-policy check first; the grant is the first request.
       { data: { enabled: true, expiresAt: 1, answerMode: 'careful' } },
       { data: { id: 1 }, status: 201 },
     ]);

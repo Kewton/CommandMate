@@ -40,6 +40,7 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { createMessage } from '@/lib/db/chat-db';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getSessionAutoYesPolicy } from '@/lib/polling/auto-yes-policy';
+import { autoYesToolPolicyDenial } from '@/lib/polling/auto-yes-tool-policy';
 import {
   evaluatePolicyAgainstTexts,
   MAX_DENY_MATCH_TEXT_LENGTH,
@@ -86,7 +87,10 @@ export type PermissionDecisionReason =
   | 'unknown-payload'
   /** `AskUserQuestion`; never adjudicated (Issue #1726). */
   | 'ask-user-question'
-  /** Auto-Yes off, never enabled, or expired. */
+  /**
+   * Auto-Yes off, never enabled, or expired — or (Issue #4436) on for a tool the
+   * tool policy refuses Auto-Yes for, which counts as off here.
+   */
   | 'auto-yes-disabled'
   /** A contract policy withheld the approval; see `suppressedBy`. */
   | 'policy-suppressed'
@@ -185,7 +189,7 @@ function readContractPolicy(session: PermissionRequestSession): AutoYesPolicyLoo
  * |---|---|
  * | payload unreadable | no-decision |
  * | `AskUserQuestion` | no-decision |
- * | Auto-Yes off / expired | no-decision |
+ * | Auto-Yes off / expired, or its tool refused by the tool policy (Issue #4436) | no-decision |
  * | contract lookup failed (Issue #3822) | no-decision + suppression |
  * | policy suppresses (mode off, deny pattern, type) | no-decision + suppression |
  * | otherwise | allow |
@@ -223,6 +227,19 @@ export function decidePermissionRequest(
   // the expiry boundary is the same one the poller sees.
   const state = getAutoYesState(worktreeId, cliToolId, instanceId);
   if (!state?.enabled) {
+    return NO_DECISION('auto-yes-disabled');
+  }
+  // Issue #4436 (I1b): a grant the enable API would have refused (kept across a
+  // Hot Reload, armed by an older build) allows nothing; the dialog is drawn.
+  const toolPolicyDenial = autoYesToolPolicyDenial(cliToolId);
+  if (toolPolicyDenial) {
+    logger.warn('permission-request:tool-policy-denied', {
+      worktreeId,
+      cliToolId,
+      instanceId,
+      code: toolPolicyDenial.code,
+      reason: toolPolicyDenial.reason,
+    });
     return NO_DECISION('auto-yes-disabled');
   }
 

@@ -323,6 +323,38 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 | `--note "<text>"` | With `--reply-to`: what you wait for, kept in the sender's mem (your own session, `whoami`) as a `waiting` item (`close_when=relay:<id>`, `evidence=[relay:<id>]`; it closes when the relay ends). Only the note and the relay id are stored — not the other session, the time or the message. **The message is not changed.** Without `--reply-to` or a session identity: exit 2. When mem refuses it (mode not `on` 50, a check 2, the open limit 56, ...) **nothing is sent**: the contract's task is failed, the Auto-Yes grant this send armed and the relay are withdrawn, and send exits with mem's code. With `--auto-yes`, an Auto-Yes state that cannot be read first stops the send before arming (exit 99), and `--instance` is required (with `--agent` alone there is no instance to read the state for: exit 2, nothing done). A send known not to have gone in closes the item (Issue #4226) | - |
 | `--stop-pattern <p>` | Auto-yes stop condition (regex) | - |
 
+### Guard on sends to Antigravity (Issue #4437)
+
+**Guard on sends to Antigravity (default)** — Until you declare how you use Antigravity, `send`, `ask` and `respond` (strict mode included) to an antigravity instance are refused before anything is typed (exit 33) when they come from inside a CommandMate session, a Schedule run, an AI agent, or a caller whose origin cannot be told (for example, no terminal). Relays with antigravity at either end (`send --reply-to`, `ask --async`) cannot be opened (exit 33, apart from the other relay refusals' exit 2). Sends from the web UI and commands a person types in a terminal work as before. A relay to an ad-hoc instance (`send --agent antigravity --instance <id not on the roster> --reply-to …`) is judged by the `--agent` tool and refused too, from a terminal as well (Issue #4496: it used to be judged by the worktree's default tool, so from a terminal the relay opened and the message was typed, exit 0; it is now exit 33, and an end whose tool cannot be determined is refused). An ad-hoc end is judged both by the `--agent` tool and by the worktree's default tool the delivery uses, so a relay to a worktree whose default is antigravity cannot be opened even with an ad-hoc `--agent claude` (exit 33).
+
+**CLI usage notice (#4438)**: `instances <worktree-id> add --agent antigravity` and `send`, `ask` and `respond` to an antigravity instance print the usage notice with the terms and FAQ links on **stderr only** (never stdout or `--json`; after a refusal's reason lines when refused). It shows the first time per CLI environment (where the record `antigravity-notice.json` lives: `~/.commandmate` for a global install, or the CLI package's root for a local run from a checkout of the repository; the place is not decided by the working directory (cwd)) and again when the terms' check date changes. If the record cannot be read or written it shows the notice and goes on; the result and exit code do not change.
+
+This guard exists to avoid running into Section 6 of the Google Antigravity Additional Terms and the FAQ by accident. The kind of sender is what the CLI reads from its own environment; the server cannot verify it. Calling the API directly, changing the environment, or using an older CLI gets past it. **It does not guarantee compliance with the terms.** If you use Antigravity with an API key or an enterprise plan, set the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` and restart the server to lift the guard (CommandMate does not read credentials; it takes the declaration as given; setting it where you type the CLI has no effect). Terms: https://antigravity.google/terms · FAQ: https://antigravity.google/docs/faq (as of 2026-11-16). This is not legal advice.
+
+The CLI reads the kind of sender in this order and puts the first match on the body as `origin` (with `originEvidence` for the log; the server's table decides). There is no flag to override it (an agent could pass it).
+
+| Order | What is read | `origin` |
+|:-----:|--------------|----------|
+| 1 | Environment `CM_RUN_ORIGIN=schedule` (any other value is `unknown`) | `schedule` |
+| 2 | Any of `CM_WORKTREE_ID`, `CM_AGENT_WORKTREE_ID`, `CM_INSTANCE_ID`, `CM_AGENT_INSTANCE_ID`, `CM_CLI_TOOL`, `CM_AGENT_TOOL` | `session` |
+| 3 | `TMUX` is set and the session name is one CommandMate gave (`mcbd-…`) | `session` |
+| 4 | `TMUX` is set but the name cannot be read | `unknown` |
+| 5 | An AI agent's marker (only `CLAUDECODE` is confirmed so far) | `agent` |
+| 6 | stdin is not a terminal (cron, a pipe, most agents' shells) | `unknown` |
+| 7 | Otherwise (a person typing in a terminal; also inside your own tmux whose name does not start with `mcbd-`) | `terminal` |
+
+Only the environment and the tmux session name are read; no file (no credentials). `origin` goes only on requests that may be refused (to antigravity, to a tool this CLI does not know, or naming no target); a request naming any other tool has the body it always had.
+
+A `send` that writes something before its message (the roster entry and role of `--register --role`, the task of `--contract`, the grant of `--auto-yes`) is refused by the server at that very write, with the same verdict (the relay of `--reply-to` is judged in the same request), and exits 33; nothing is asked beforehand (Issue #4449). With `--auto-yes`, the first write also judges the Auto-Yes grant (refused for antigravity even from a terminal), so a terminal's `send --contract --auto-yes` and the like exit 33 before the task is created. A refused send writes no roster entry (instance registration), role setting, contract task or Auto-Yes grant (except for the known limitation below). The message and the Auto-Yes grant of a `send --contract` that names no target go to the target recorded on the task it created (the one judged then), and a default changed afterwards is not resolved again (a body naming a target that contradicts the task is refused with 400 `task_target_mismatch`, nothing sent).
+
+> **Known limitation** (to be fixed in Issue #4466):
+> - With `--reply-to` and `--contract`, `--register --role` or `--auto-yes`, if the target (the default target or the roster) changes while the send is in progress, the task (or the role setting, roster entry or Auto-Yes grant) may be written and then the relay refused (exit 33). The message is not typed. The task left behind is marked `failed`, its id has already been printed on stdout, and the first stderr line is `Task created: …`, not the reason.
+> - From a terminal to antigravity, `--model --auto-yes` with `--role` or `--register` and without `--contract` defers Auto-Yes until after the message: the role is saved (or the roster entry registered) and the message is sent, and only Auto-Yes is refused afterwards (a warning, exit 0; Auto-Yes stays off).
+
+> **Note**: a new CLI against a server from before #4449 gets no verdict from the write routes, so a send that is refused may still write its task or role setting before `/send` refuses it (409, exit 33). Keep the CLI and the server on the same version.
+
+When refused, the first stderr line is `Error [TOOL_POLICY_DENIED]: <reason>` (`Error [RELAY_TOOL_POLICY_DENIED]: …` for a relay), the second links the terms and the FAQ, then how to lift it and that nothing was typed (`sent: false`). Warnings such as the `--token` one come after it. `ask --json` and the strict `respond --json` print one `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }` on stdout (a relay adds `refusal.endpoint`). Exit 33 gives the same result when sent again: do not resend or re-instruct; ask a person whether a declaration is needed.
+
 ### Input that overlaps a send (input lock (#3952))
 
 A message send (`send` / `ask`, chat, timers, relay) types into the composer only while it holds the instance's input lock (Issue #3945), so nothing else is typed in the middle of it (paste → check → Enter, the watch for a late paste, the withdrawal). The other input paths:
@@ -389,7 +421,7 @@ commandmate wait <worktree-id> --require-work        # Run only work-evidence af
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--timeout <sec>` | Maximum time to wait (seconds). One deadline counted from the command's start: it cuts the reads before the poll (`--instance` resolution and the capabilities probe, the task list of `--verify` / `--require-work`) and each poll's reads (`current-output` and the messages ledger), up to the end of the body. A server that does not answer still ends in exit 124 at the deadline, with no poll or verification after it (Issue #3974 / #3983). Verification after a detected completion (`--verify` / `--require-work`) is not part of it and is not cut. `ask --timeout` is the same deadline, except that the send POST (and, with `--async`, the relay POST) is not cut: if it returns past the deadline, ask exits 124 saying the message was sent (`--async` exits 0 once the relay exists). Resolving the two ends of an `--async` relay is inside the deadline. Reading the reply after completion (ledger, pane) is not part of it either: each read is cut at the reply grace (15 s) and falls back to the pane | unlimited |
+| `--timeout <sec>` | Maximum time to wait (seconds). One deadline counted from the command's start: it cuts the reads before the poll (`--instance` resolution and the capabilities probe, the task list of `--verify` / `--require-work`) and each poll's reads (`current-output` and the messages ledger), up to the end of the body. A server that does not answer still ends in exit 124 at the deadline, with no poll or verification after it (Issue #3974 / #3983). Verification after a detected completion (`--verify` / `--require-work`) is not part of it and is not cut. `ask --timeout` is the same deadline, except that the send POST (and, with `--async`, the relay POST) is not cut: if it returns past the deadline, ask exits 124 saying the message was sent (`--async` exits 0 once the relay exists). Resolving the two ends of an `--async` relay is inside the deadline. Reading the reply after completion (the ask's attribution, `GET /api/asks/:askId`) is not part of it either: each read is cut at the reply grace (15 s), and a reply still undecided then is `unmatched/grace_expired` (or `turn_incomplete` / `send_unknown`) with exit 0; the pane is never read (Issue #4344). The read of `GET /api/asks/capabilities` before the send is inside the deadline | unlimited |
 | `--on-prompt <mode>` | What to do when a prompt is detected (agent / human) | agent |
 | `--stall-timeout <sec>` | Timeout on "no output change" (seconds). Like `--timeout`, it also cuts a read that does not answer (exit 124) | - |
 | `--instance <id>` | Target instance ID (`<agent>` or `<agent>-<n>`). **This is the only way to name the target** (there is no `--agent`) | the agent's primary instance |
@@ -548,7 +580,9 @@ a composer problem).
 When `ask` sees such an overlap it keeps the reply and the exit code as they are, prints one
 `overlapped: …` line on stderr, and adds `"overlapped": true` to `--json` (the key is absent when
 nothing overlapped). A reply marked this way is not necessarily the answer to your request; send
-the requests again one at a time if it matters. Two things are detected:
+the requests again one at a time if it matters. Since Issue #4344 whether a reply is printed at all is
+decided by the ask's attribution (a shared turn is `ambiguous/shared_turn` with `"reply": null`; see
+[`commandmate ask`](#commandmate-ask)); the overlap line stays a warning beside it. Two things are detected:
 
 - the instance was already in another turn when the message was sent (the later sender; only for
   tools whose hooks report turn starts, and a turn that ended before the send does not count; it is
@@ -609,7 +643,11 @@ its request** (a new CLI with a new server).
   When the HTTP send is confirmed not to have arrived and the terminal fallback types the body, the
   terminal input start replaces the boundary
 - Relays opened by an older CLI, and older servers, behave as before (a new CLI prints one "legacy
-  handling" line on stderr against an older server and does not send `relayId`)
+  handling" line on stderr against an older server and does not send `relayId`). One exception: when
+  a relay an older CLI opened without naming the `--agent` tool is bound to a send that types into
+  antigravity, `/send` refuses it with 409 `RELAY_TOOL_POLICY_DENIED` (exit 33) and withdraws the relay
+  with nothing typed (Issue #4496). Unlike a refusal at creation the relay had been opened, so its row
+  is left `cancelled` (the response says the opened relay was withdrawn)
 
 **Limits until PR 3** (matching turns to replies comes in the next change):
 
@@ -880,7 +918,7 @@ commandmate ask <worktree-id> "<request>" --instance <id> --async [--reply-to <t
 | `--json` | Print the reply as JSON |
 | `--async` | Do not wait: register a relay, print its ID and exit 0. The reply is delivered into `--reply-to`'s composer when the other turn ends |
 | `--reply-to <target>` | Where an `--async` reply goes: `<worktree-id>[@<instance-id\|alias>]`, or `self` (the session running the command; the default) |
-| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops) |
+| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops). The next request after the reply to a relay you opened is not counted as a chain. But once the requesting session has received 10 replies to its own relays within the last 30 minutes, its next relay is refused with `RELAY_HOPS_EXCEEDED` (neither this flag nor a line typed by a person lifts it; it opens again once fewer than 10 replies remain within the last 30 minutes — later than 30 minutes after the oldest one if more than 10 are in the window. If it is urgent, ask with `send` without `--reply-to`) |
 | `--token <token>` | Auth token |
 
 There is deliberately **no `--auto-yes`**: turning another session's Auto-Yes on is a decision about that session's guard
@@ -908,29 +946,72 @@ Stdout is the reply body. `--json` has this shape:
   "cliToolId": "codex",
   "source": "history",
   "reply": "…",
+  "askId": "0b6f3c1e-…",
+  "attribution": { "state": "matched", "reason": null, "notified": false },
   "overlapped": true
 }
 ```
 
-`source` is `history` (transcript) / `pane` (screen) / `none`. `overlapped` appears only when an overlap was found
-([Do not stack `ask`s on one instance (Issue #3955)](#commandmate-wait)). When the turn ended but no reply could be read,
-stderr carries a warning and the exit code is 0. On an upstream fault (exit 11), `--json` carries `upstreamFault`.
+`source` is `history` (the ledger tied the reply to this ask) / `none` (the reply was not collected). `overlapped` appears only when an overlap was found
+([Do not stack `ask`s on one instance (Issue #3955)](#commandmate-wait)). On an upstream fault (exit 11), `--json` carries `upstreamFault`.
+
+### The reply is read by this ask's id (Issue #4344)
+
+`ask` makes an id for each request, puts it on the send, and after the turn reads the reply **by that id** (never "the newest reply after the send", never the screen).
+It applies to the tools the server reports in `GET /api/asks/capabilities` (today `claude` and `codex`, at or above the versions the server observes).
+The reply is printed only when the server's ledger (`GET /api/asks/:askId`) ties the transcript's input to the completed turn that answered **this request alone**
+(`attribution.state` is `matched`). Otherwise the reply is not collected: **exit 0, empty stdout, `"reply": null` in `--json`**, and one `reply not collected (<state>/<reason>): …` line on stderr.
+
+| `attribution.state` / `reason` | Meaning | Send |
+|---|---|---|
+| `matched` | The reply is printed. `notified: true`: the turn also took a background-task notification (the reply may react to it) | with the id |
+| `unavailable` / `tool_unsupported` | A tool asks cannot be attributed on (`copilot`, `gemini`, `vibe-local`, `opencode`, `antigravity`, `command-code`, `opencode-v2`, …). Also `claude` / `codex` when they are off for their version: then `--json` adds `attribution.toolVersion` (below) | as before |
+| `unavailable` / `server_unsupported` | An older server (`/api/asks/capabilities` answers 404). Usually the CLI was updated (`npm i -g`) but the running server was not restarted: restart it with `commandmate stop` then `commandmate start --daemon` (`commandmate update` does not restart a server when the CLI is already current) | once, with the old body |
+| `unavailable` / `slash_command` | A body starting with `/`, `!` or `#` (an id in front would turn the command into text) | body as it is |
+| `ambiguous` / `shared_turn`, `turn_open_at_send` | The answering turn also took another input, or a turn was open at the send | with the id |
+| `unmatched` / `absorbed_mid_turn`, `turn_incomplete`, `grace_expired`, `send_unknown`, `body_truncated`, `history_missing`, … | The turn could not be tied to this request (`grace_expired`, `turn_incomplete` and `send_unknown` are what was still undecided 15 s after the turn ended; nothing is written to the ledger) | with the id |
+
+When the reply was not collected, look at the other session's screen with `capture <id> --instance <id> --pane` (`ask` never reads the screen as a reply).
+Wait failures (exit 10, 11, 21, 124) are as before and read no ledger. `--async` carries no id and is unchanged.
+
+**Why a tool is `tool_unsupported`** (stderr says which; `--json` has `attribution.toolVersion` only for the version cases):
+
+| Cause | stderr (after `<tool>: `) | `attribution.toolVersion` | What to do |
+|---|---|---|---|
+| The tool has no ask attribution (not in the server's table) | `this tool has no ask attribution` | absent | Use one of the alternatives below |
+| `claude` / `codex` older than the server's minimum (`claude` 2.1.239, `codex` 0.167.2) | `its version <installed> is older than <minimum>, the minimum for ask attribution` | `{ "state": "too_old", "minimum": "2.1.239", "installed": "2.1.200" }` | Update the tool. The server re-reads versions within 30 s |
+| `claude` / `codex` whose installed version the server could not read (not reported, not `x.y.z`, or the probe failed) | `its installed version could not be read (ask attribution needs <minimum> or newer)` | `{ "state": "unreadable", "minimum": "2.1.239", "installed": null }` | Check that the tool runs with `--version` where the server runs. A failed probe is retried after 30 s |
+
+`attribution.reason` stays `tool_unsupported` in every case (its value and the other keys are unchanged). The table's version readings come from `GET /api/asks/capabilities`'s
+`versions` (`{ "<tool>": { minimum, installed, state: "ok" | "too_old" | "unreadable" } }`); a server without it (before this change) gives only `this tool has no ask attribution`.
+
+**Getting the reply of a tool `ask` does not attribute.** `ask` still sends, it only does not print the reply. The stderr line names the relay, and — for the tools `reply` answers for — `reply … --since <this ask's send time>`. To have the reply:
+
+| Way | Commands | What comes back |
+|---|---|---|
+| A relay (no wait) | `commandmate ask <worktree-id> "<request>" --instance <id> --async` | When their turn ends, the reply arrives in your composer as `[from <alias> / <worktree>]`. The transcript turn row for `claude`, `codex`, `antigravity`, `command-code`, `opencode`, `opencode-v2`; the screen scraper's row for `copilot`, `gemini`, `vibe-local`. Not tied by an id: send one at a time (overlaps are noted as `overlap=`) |
+| Send, wait, read the ledger | `commandmate send <worktree-id> "<request>" --instance <id>` → `commandmate wait <worktree-id> --instance <id>` → `commandmate reply <worktree-id> --instance <id> --since <ISO time taken before the send>` (always pass `--since`: without it `reply` can return the previous turn's answer) | The newest transcript turn row after `--since` for `claude`, `codex`, `antigravity`, `command-code`, `opencode`, `opencode-v2`. Always empty for `copilot`, `gemini`, `vibe-local` |
+| Look at the screen | `commandmate capture <worktree-id> --instance <id> --pane --tail 80` | What is on their screen (all tools; you judge which turn it is) |
+
+A request with an id is always multi-line, so a `claude` pane shows `[Pasted text …]` and a `[cmate-ask v1 <id>]` line (design §7 (b); the meaning is unchanged).
+The chat History does not show the id line.
 
 ### Exit codes
 
-`wait`'s exit codes, plus 11 and 32 that `ask` adds.
+`wait`'s exit codes, plus 11, 32 and 33 that `ask` adds.
 
 | Code | Meaning | Next action |
 |:----:|---------|-------------|
-| 0 | The turn ended (`--async`: the relay was registered). Stdout is the reply | — |
+| 0 | The turn ended (`--async`: the relay was registered). Stdout is the reply (empty when it was not collected; see "The reply is read by this ask's id" above) | When `reply` is `null`, read the reason on stderr |
 | 1 | Server not running etc. (DEPENDENCY_ERROR) | `commandmate start --daemon` |
 | 2 | Bad argument, ambiguous alias, **a relay refusal** (reason on stderr; same number as CONFIG_ERROR), or the other session is on a prompt and the body was not sent | Read stderr; do not resend |
 | 10 | The other session is waiting on a prompt; stdout carries the prompt JSON | Report it; do not `respond` for it |
 | 11 | **UPSTREAM_FAULT**: the turn never ran. stderr and `--json` carry `id=…` (`ask` always runs with `failOnUpstreamFault: true`). `id=context-limit`: the conversation is over the model's limit — `instances <id> kill <instance>` and ask again in a fresh session. `id=model-capacity`: send to another instance or model (#3936) | Wait a while or change the target, then ask again |
 | 21 | Nothing was running to ask | Check the roster with `instances <id>` |
 | 32 | **ROLE NOT_SENT**: the role condition does not hold; the body was not typed | Review the role settings |
+| 33 | **TOOL POLICY DENIED**: the guard refused a send or an `--async` relay to antigravity; nothing was typed ([Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). `--json` has `sent: false` and `refusal` | Do not resend; ask a person whether a declaration is needed. `auto-yes --enable` refusals are also 33 |
 | 99 | Unexpected error | — |
-| 124 | Timed out. When the send itself returned past the deadline, the message **was sent** (stderr says so) | Look with `capture <id> --instance <id> --pane --tail 60`; **do not resend** |
+| 124 | Timed out. When the send itself returned past the deadline, the message **was sent** (stderr says so) | Look with `capture <id> --instance <id> --pane --tail 80`; **do not resend** |
 
 ### Related sections
 
@@ -945,6 +1026,10 @@ The finer behaviour of `ask` is in these sections under [`commandmate wait`](#co
 ## commandmate relays
 
 Shows, withdraws and settles the **waits (relays)** that `ask --async` / `send --reply-to` create.
+
+> **Antigravity (agy) caution (#4438)**: do not send tasks from another AI agent to agy on a consumer-plan sign-in through relays (`ask`, `send --reply-to`). Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict using it through third-party software or agents. If you use agy with an API key or Gemini Enterprise, declare it by setting the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it at startup, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`). Setting it only in the environment where you run the `commandmate` CLI has no effect. The declaration is your own: CommandMate does not read your credentials to check it.
+
+> **Since #4437**: on a server with no declaration, a relay with antigravity at either end cannot be opened (exit 33; the first stderr line is `Error [RELAY_TOOL_POLICY_DENIED]: …`; nothing is sent). See [Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437).
 
 ### Usage
 
@@ -1034,7 +1119,7 @@ To answer a screen only while it is still the one observed, pass its kind and to
 | `autoYes.enabled` / `pollerActive` | Whether Auto-Yes is on / whether the server's poller runs |
 | `autoYes.pollerRecord` | What the poller (or the permission hook) last recorded as withheld. `screenCorrelation` relates it to this screen; the record names no screen, so it is `unknown` / `type-mismatch` / `no-prompt-on-screen` |
 | `autoYes.contractEvaluation` | The contract's policy applied to this screen **now** (`policy-withholds` + reason / `base-withholds` + reason / `policy-permits` / `no-base-answer` / `not-evaluated`). `base-withholds` (Issue #3822) means the base rules withheld the answer before the contract was read, with or without a contract (today only `allow-once-unidentified`; changing the contract does not bring the answer back). Reasons use the `AutoYesSuppressionReason` words ([reason table](#autoyeslastsuppression-observing-a-policy-suppression-issue-1684)) |
-| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer; `prompt-unreported` when, on a new claude session's first send, the composer no longer showed the body after Enter but claude never reported the prompt with `UserPromptSubmit` (Issue #4035) — the body may still have been submitted (for example where only `SessionStart` arrives and the http `UserPromptSubmit` hook does not), so check with `commandmate capture <worktree-id> --pane` before resending; the screen is read once more right before failing and a generating screen makes it `sent` (Issue #4048); a session recreated while the send waits after its Enter is `indeterminate`, not `not-sent` (`session-replaced`), since the old process may have taken it (Issue #4048); a `sent` record turns `found-in-composer` when the next send finds that body still in the composer (claude only, and only the record of the send whose body it is; other tools only log the warning and keep `lastSend`, Issue #4048) — only while that send runs; the lasting record is the warn log `pre-send-found-submitted-body`). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), `agent-not-in-foreground` (Issue #4300: the agent has exited and the pane is back at its shell, so nothing was typed; stop the instance's session with `commandmate instances <worktree-id> kill <instance-id>` and send again), `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body), and `paste-not-started` (Issue #4031: a long body sent as one paste could not be loaded into the tmux buffer — `load-buffer` failed, so `paste-buffer` never ran; `not-sent` with or without a relay, and the send API's `sendOutcome` is `not_sent`; a failed `paste-buffer` stays `indeterminate` (`send-error`) / `unknown`); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
+| `lastSend` | How the last send to this instance ended (Issue #3759): `{ at, state, reason }`. `state` is `not-sent` (it failed before any key of the body was typed, e.g. `prompt-not-ready`) / `sent` (the submit was confirmed) / `indeterminate` (it failed after part of it may have been typed, or the outcome could not be read back; `reason: composer-residue` when the body is still in the composer; `prompt-unreported` when, on a new claude session's first send, the composer no longer showed the body after Enter but claude never reported the prompt with `UserPromptSubmit` (Issue #4035) — the body may still have been submitted (for example where only `SessionStart` arrives and the http `UserPromptSubmit` hook does not), so check with `commandmate capture <worktree-id> --pane` before resending; the screen is read once more right before failing and a generating screen makes it `sent` (Issue #4048); a session recreated while the send waits after its Enter is `indeterminate`, not `not-sent` (`session-replaced`), since the old process may have taken it (Issue #4048); a `sent` record turns `found-in-composer` when the next send finds that body still in the composer (claude only, and only the record of the send whose body it is; other tools only log the warning and keep `lastSend`, Issue #4048) — only while that send runs; the lasting record is the warn log `pre-send-found-submitted-body`). Null when this server has no record since it started; absent from an older server . The `not-sent` reasons include, besides `prompt-not-ready`, those from the input lock (Issue #3945): `input-lock-timeout` (the wait limit passed) / `session-replaced` (the session was recreated while waiting) / `input-lock-lost` (the lock's ownership was lost mid-input), `recheck-failed` (the re-read just before typing failed), `agent-not-in-foreground` (Issue #4300: the agent has exited and the pane is back at its shell, so nothing was typed; stop the instance's session with `commandmate instances <worktree-id> kill <instance-id>` and send again), `relay-reservation-lost` (Issue #3992: the reservation of the bound relay a `--reply-to` / `ask --async` send went in under was lost — cancelled, expired or taken by another send — right before the body), `tool-policy-denied` (Issue #4437: the tool usage policy refused a send to antigravity; the CLI exits 33), and `paste-not-started` (Issue #4031: a long body sent as one paste could not be loaded into the tmux buffer — `load-buffer` failed, so `paste-buffer` never ran; `not-sent` with or without a relay, and the send API's `sendOutcome` is `not_sent`; a failed `paste-buffer` stays `indeterminate` (`send-error`) / `unknown`); none of them typed any key of the body. The unsent bar's Clear (`POST /api/worktrees/:id/clear-composer`) returns 409 `INSTANCE_INPUT_BUSY` when it cannot get the same input lock or the session was recreated (wait a moment and retry), and returns HTTP 200 with `cleared: false` when the text could not be cleared |
 
 **`lastSend` is not "the send that finished last" (Issue #4065).** When sends overlap, it follows the order in which the input lock was granted (its generation). It is not necessarily the reading request's own outcome (a request's own outcome is in the `send` error and the send API's `sendOutcome`).
 - The record of a send that was granted the lock (including a `not-sent` refused after the grant, before the body) is not kept when a send granted the lock later already has a record for the same instance.
@@ -1170,6 +1255,7 @@ the same appearance (`screen.token` of [`commandmate prompt`](#commandmate-promp
 |:----:|---------|
 | 0 | Response sent successfully |
 | 2 | Argument errors; in strict mode also `--default`, a number on an unnumbered screen, or only one of `--expect-screen` / `--observation` |
+| 33 | The guard refused an answer to antigravity (plain and strict alike; checked before strict mode's 40 and 41). **Nothing was typed**. Strict mode's `--json` has `sent: false` and `refusal` ([Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). Sending again gives the same result (`auto-yes --enable` refusals also exit 33) |
 | 40 | Strict mode: the screen did not match or could not be checked. **Nothing was sent** (kind, token, folder or label mismatch, capture failure, an older server, …). Observe again with `commandmate prompt` |
 | 41 | Strict mode: keys were sent (or may have been) and the result is not confirmed. **Do not send again**; look at the pane. Even at 41, when `reason` is `operation_in_progress` / `operation_id_conflict` nothing was sent (`keysSent` is 0; `delivery` reads `indeterminate` but nothing was sent); fetch the result again under a different ID |
 | 99 | Prompt already dismissed (`prompt_no_longer_active`) / the answer was not sent (`answer_not_delivered`) or stopped part-way (`answer_input_lost`, see below) |
@@ -1461,6 +1547,8 @@ A tool whose dialog gate is `legacy` (gemini, vibe-local and command-code by def
 **Claude's edit confirmation (`Do you want to make this edit …?`) is a `multiple_choice` prompt**
 (effectively Yes/No plus allow-all, three options), so under `safe` the worker stops on every edit.
 Widen an unattended contract to `allow-listed` and escalate dangerous operations with `denyPatterns`.
+
+> **Antigravity (agy) caution (#4438)**: do not use agy on a consumer-plan sign-in for unattended runs (contract workers, Schedules, the daily summary). Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict running agy from third-party applications. From the release with #4436, antigravity Schedules and the daily summary do not run without the declaration. If you use agy with an API key or Gemini Enterprise, declare it by setting the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it at startup, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`). Setting it only in the environment where you run the `commandmate` CLI has no effect. The declaration is your own: CommandMate does not read your credentials to check it.
 
 ```yaml
 autoYes:
@@ -1860,7 +1948,7 @@ screen.
 
 ```bash
 commandmate capture <worktree-id> --pane              # Transcript with blank lines collapsed (paged on a TTY)
-commandmate capture <worktree-id> --pane --tail 40    # Only the last 40 lines
+commandmate capture <worktree-id> --pane --tail 80    # Only the last 80 lines
 commandmate capture <worktree-id> --pane --raw        # The raw pane, uncompressed
 commandmate capture <worktree-id> --pane --json       # JSON with line counts before and after compression
 commandmate capture <worktree-id> --pane --instance codex-2
@@ -1886,7 +1974,7 @@ redrawn on an interval, and `Ctrl-C` ends it.
 ```bash
 commandmate capture <worktree-id> --pane --follow                  # 2000ms interval by default
 commandmate capture <worktree-id> --pane --follow --interval 1000  # 250-60000ms
-commandmate capture <worktree-id> --pane --follow --tail 40        # Follow only the compressed last 40 lines
+commandmate capture <worktree-id> --pane --follow --tail 80        # Follow only the compressed last 80 lines
 ```
 
 - **No tmux client and no key binding are needed.** That is what makes this the answer under
@@ -1988,7 +2076,7 @@ commandmate reply <worktree-id> --instance cc-1 --json
 - Only rows a transcript reader wrote (`<tool>-turn:<id>`) count as a reply. `ask` reads through the same shared function,
   so both mean the same thing by "reply". Furniture rows (`relay-sys:` / `model-changed:`) are skipped; ANSI and control
   characters are stripped
-- Tools with a transcript reader: claude / codex / antigravity / command-code / opencode. Any other tool always reports
+- Tools with a transcript reader: claude / codex / antigravity / command-code / opencode / opencode-v2. Any other tool always reports
   "no reply"
 - **The pane is never read**: a screen line cannot be attributed to a turn (the nudge's own echo is on it)
 - `--since` takes ISO 8601 and returns only a reply written **at or after** that time. `--instance` / `--agent` resolve as in `ask`
@@ -2232,6 +2320,8 @@ installed on CommandMate sessions, **opening the following popup when a human cl
 
 Control auto-yes (automatic prompt response) individually.
 
+> **Antigravity (agy) caution (#4438)**: do not turn on Auto-Yes for agy on a consumer-plan sign-in (taking the person out makes it an unattended run, which Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict). From the release with #4436, turning it on for an antigravity instance is refused without the declaration. If you use agy with an API key or Gemini Enterprise, declare it by setting the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it at startup, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`). Setting it only in the environment where you run the `commandmate` CLI has no effect. The declaration is your own: CommandMate does not read your credentials to check it.
+
 ```bash
 commandmate auto-yes <worktree-id> --enable --duration 3h
 commandmate auto-yes <worktree-id> --enable --stop-pattern "error"
@@ -2251,6 +2341,8 @@ commandmate auto-yes <worktree-id> --enable --answer-mode careful  # Questions a
 | `--answer-mode <m>` | The answer mode (`recommended` / `careful`; see [Answer Modes](#answer-modes-recommended-and-careful-issue-3863) below). With `--enable` only. Omitted: `recommended` for a new grant, the current mode for a grant that is on (Issue #3863) |
 | `--instance <id>` | **The recommended way to name the target.** The instance ID; Auto-Yes is controlled independently of the other instances |
 | `--agent <id>` | A helper for instances that are not in the roster (unnecessary when `--instance` alone is enough) |
+
+**Exit code 33**: `--enable` on an antigravity instance of a server with no declaration is refused by the API with 409 `TOOL_POLICY_DENIED`; Auto-Yes is not enabled (exit 33, the reason on the first stderr line; `--disable` is never refused). Running it again gives the same result (see 33 in the [Exit Codes](#exit-codes) and [Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)).
 
 Enabled for an instance whose session is not running, Auto-Yes stays on until it expires (`--duration`) and answers once the session starts (Issue #3329); while it waits it checks once a minute. It stops with `consecutive_errors` only when failures keep coming in a row: the session exists but its screen cannot be read or the answer cannot be sent, or tmux itself cannot be asked.
 
@@ -2697,6 +2789,7 @@ commandmate roles default codex --repo . --role reviewer
 - Nothing is reserved. "No role" and "follow the defaults" are the flags `--none` / `--no-role` / `--inherit`, so a role can be called `none`
 - Tools are claude, codex, command-code, opencode, opencode-v2, copilot and antigravity. Any other is exit 2 (`tool_not_supported`)
 - Antigravity (Issue #4385): with a role set, the definition (with the 13 `tools` checked on agy 1.5.8) is written to `~/.gemini/config/agents/<name>/agent.md`, and before a new process is started `agy agent` is asked whether it lists that name; it then starts with `--agent <name>`. Only when it is listed can the role be confirmed on agy's screen after the start, and no body is sent from CommandMate until it is. When it is not listed, `agy agent` does not answer, or the list could not be checked (`agy agent` is not run under `CM_UAT_ISOLATION=1`), the process still starts (under `CM_UAT_ISOLATION=1`, only when the shared home already holds the role's definition and agy's hook config as this build writes them; without the definition the start is refused and nothing is written, #3360), but every body to it is refused, not sent, with a reason that says which of these it was. When it cannot be confirmed, or there is no record of it (after a server restart or rebuild, or a role set on a session that was running without one), the send is refused with the reason ("the role could not be confirmed ... nothing was sent"), not sent, exit 32 (`roleRefusal` is `not-confirmed` or `not-applied`). The process is left running: stop it with `commandmate instances <worktree-id> kill <instance-id>` and send again. Auto-Yes answers and `respond` are not a body and are not held
+- Deleting a role does not remove its Antigravity artifact (Issue #4419): the definition written when the role launched stays at `~/.gemini/config/agents/cm-role-<namespace>-<role id>-<fingerprint>/agent.md`, and agy's list keeps showing a definition nothing points to (a running process or a resumable conversation may still read it, so CommandMate never deletes it; automatic cleanup is designed in a separate Issue). It is not removed automatically. To remove it by hand: (0) Before deleting, note the role's id from `commandmate roles list` (you cannot look it up after `roles rm`). (1) What to stop: stop every instance that uses the role, and also the Schedule runs that use the role (a Schedule prepares the same definition and uses it in a separate child process started with `--agent`; wait for a running one to finish and disable the Schedule while you delete so no new run starts). Never delete a definition that a running or starting instance uses. (2) Identify the target: check each part of the directory name `cm-role-<namespace>-<role id>-<fingerprint>`. The role id must equal the id you noted. The namespace differs per server: it is the first 8 hex digits of the SHA-256 of the DB path string the server has open (for example `printf '%s' '<DB path>' | shasum -a 256 | cut -c1-8`; any difference in how the path is written gives another value). If you run several servers on the same home and cannot confirm that a definition's namespace is your server's, do not delete it. The fingerprint is 12 hex digits that change with each version of the role's body and settings; ones with the same id and namespace are older versions. (3) Delete only what you identified, as a whole `cm-role-…/` directory. The `description: CommandMate role` line in `agent.md` is shared by every role and every server, so it is not a marker. Do not touch what you cannot identify, or definitions made by something other than CommandMate. The Copilot (`~/.copilot/agents/cm-role-*.agent.md`) and Codex (`~/.codex/cm-role-*.config.toml`) artifacts stay in the same way
 - `adapterEnabled` is always `true` for every tool (kept for compatibility). The "roles are not enabled" warning on setting a role appears only against an older server that answers `false`
 
 ### `--repo` forms and precedence
@@ -2747,7 +2840,7 @@ With `--require-roles` a role that cannot be read fails the command instead of b
 
 ### `--json` shapes
 
-Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1. A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
+Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1 — except a missing `<tool>` of `roles default`, which is exit 2 (it was 1 before Issue #4473). A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
 
 | Command | Shape |
 |---------|-------|
@@ -3638,6 +3731,7 @@ commandmate ls --token your-token
 | 30 | NO_ACTIVE_SESSIONS | `interrupt` found no running session to interrupt |
 | 31 | ROLE CONFLICT | A role or roster conflict (`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`); nothing changed or sent. Also from `instances add` / `remove` / `alias` without a role. The exception: `remove --kill` may have stopped the session |
 | 32 | ROLE NOT_SENT | The role condition does not hold, or the start was refused because of its role; the body was not typed (`send` / `ask`) |
+| 33 | TOOL POLICY DENIED | Refused by the tool usage policy; nothing was typed (`send` / `ask` / `respond` and relay creation: `TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`, see [Guard on sends to Antigravity](#guard-on-sends-to-antigravity-issue-4437)). Sending again gives the same result. A `send` refused this way (with `--auto-yes` too) writes no `--register` instance, no `--role` setting and no `--contract` task either (the write itself is refused, Issue #4449), except that with `--reply-to`, if the target changes mid-send, the task (or the role setting or roster entry) may be written and then the relay refused (the task is marked `failed`; nothing typed; a known limitation, to be fixed in Issue #4466). A refused `auto-yes --enable` (Auto-Yes is not enabled; [`commandmate auto-yes`](#commandmate-auto-yes)) is also 33 |
 | 50–57 | MEM | Refusals of `mem` (50 disabled / 51 version_conflict / 52 target not found / 53 ambiguous / 54 duplicate_key / 55 not_owner, state_forbids / 56 limit_exceeded), and a prompt from `mem check --suggest` (57); see the exit codes of [commandmate mem](#commandmate-mem). `send --note` refused by mem ends in 50–56 too |
 | 99 | UNEXPECTED_ERROR | Unexpected error / resource not found |
 | 124 | TIMEOUT | Wait timeout exceeded |

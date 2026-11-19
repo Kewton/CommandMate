@@ -5,6 +5,10 @@
  * [DP-003] Located in src/lib/ alongside schedule-manager.ts
  * Uses globalThis singleton pattern for Hot Reload persistence.
  * Uses CLIToolManager.getInstance().getTool() for session name resolution [CON-MF-001/DP-004].
+ *
+ * Issue #4436 (PM decision Q4): a timer fires with nobody at the keyboard, so it
+ * is a `send` from the origin `timer` for the tool policy. A refused timer types
+ * nothing and ends `failed` with the reason code and the FAQ link.
  */
 
 import {
@@ -23,6 +27,8 @@ import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-const
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import type { CLIToolType } from './cli-tools/types';
 import { getOrInitGlobal } from './global-state';
+import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE, USAGE_DECLARATION_ENV } from './tool-policy/policy';
+import { readUsageDeclaration } from './tool-policy/declaration';
 
 const logger = createLogger('timer-manager');
 
@@ -73,6 +79,31 @@ async function executeTimer(timerId: string): Promise<void> {
   try {
     const timer = getTimerById(db, timerId);
     if (!timer || timer.status !== 'pending') return;
+
+    // Issue #4436: judged before the session is looked at, so a refused timer
+    // touches neither the tool nor tmux. No await before the write, so a cancel
+    // cannot land in between (#3707).
+    const decision = decideToolPolicy({
+      tool: timer.cliToolId as CLIToolType,
+      operation: 'send',
+      origin: 'timer',
+      declaration: readUsageDeclaration(),
+    });
+    if (!decision.allowed) {
+      const reason =
+        `${decision.code} (${decision.reason}): ${TOOL_POLICY_DENIED_MESSAGE} ` +
+        `Declare ${USAGE_DECLARATION_ENV}=api-key (or enterprise) on the server only if you use an API key or an enterprise plan. ` +
+        `FAQ: ${decision.links.faq}`;
+      updateTimerStatus(db, timerId, 'failed', undefined, reason);
+      logger.warn('timer:tool-policy-denied', {
+        timerId,
+        worktreeId: timer.worktreeId,
+        cliToolId: timer.cliToolId,
+        code: decision.code,
+        reason: decision.reason,
+      });
+      return;
+    }
 
     // [DP-004/CON-MF-001] Resolve session name via CLIToolManager singleton
     const cliTool = CLIToolManager.getInstance().getTool(timer.cliToolId as CLIToolType);

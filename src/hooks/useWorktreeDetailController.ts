@@ -65,6 +65,7 @@ import { useAppUpdate } from '@/contexts/AppUpdateContext';
 import { type AutoYesToggleParams } from '@/components/worktree/AutoYesToggle';
 import { isReleasedByRestart, type AutoYesStopReason } from '@/config/auto-yes-config';
 import type { AutoYesInstanceSummary } from '@/types/auto-yes';
+import { parseToolPolicyRefusal, ToolPolicyRefusalError } from '@/lib/tool-policy/refusal-view';
 import { DEFAULT_AUTO_YES_ANSWER_MODE, isAutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { CurrentOutputResponseBody } from '@/lib/session/current-output-types';
 import {
@@ -1919,8 +1920,14 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
             // "anything armed?" gate is decided by this answer, not by the
             // single entry this POST wrote.
             void fetchAutoYesStates();
+          } else if (params.enabled) {
+            // Issue #4436: a tool-policy refusal of the enabling (409 TOOL_POLICY_DENIED)
+            // changed nothing on the server; the toggle shows its reason and links.
+            const refused = parseToolPolicyRefusal(response.status, await response.json().catch(() => null));
+            if (refused) throw new ToolPolicyRefusalError(refused);
           }
         } catch (err) {
+          if (err instanceof ToolPolicyRefusalError) throw err;
           console.error('[WorktreeDetailRefactored] Error toggling auto-yes:', err);
         }
       },

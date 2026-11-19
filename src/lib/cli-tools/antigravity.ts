@@ -84,6 +84,7 @@ import {
   type RoleApplicationView,
 } from '@/lib/session/role-launch';
 import { isUnderTest } from '@/lib/test-run-detection';
+import { noteAntigravityUse } from '@/lib/tool-policy/version-probe-gate';
 import { roleEnvReaderForPane } from '@/lib/agent-roles/pane-env';
 
 const logger = createLogger('cli-tools/antigravity');
@@ -457,6 +458,8 @@ export class AntigravityTool extends BaseCLITool {
    *   for a session that is already running.
    */
   protected async launchSession(worktreeId: string, worktreePath: string, instanceId?: string, model?: string): Promise<void> {
+    // Issue #4452: the user aimed at antigravity, so its version may be read from now on.
+    noteAntigravityUse();
     // Check if agy is installed
     await this.requireInstalled();
 
@@ -787,6 +790,8 @@ export class AntigravityTool extends BaseCLITool {
    * @param message - Message to send
    */
   async sendMessage(worktreeId: string, message: string, instanceId?: string): Promise<void> {
+    // Issue #4452: a send is a use (the session may predate this server process).
+    noteAntigravityUse();
     const sessionName = this.getSessionName(worktreeId, instanceId);
 
     // Issue #2070: the pane exists, but does the AGENT? An agent that quit,

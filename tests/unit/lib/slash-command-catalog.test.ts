@@ -123,9 +123,15 @@ beforeEach(() => {
   resolveCopilotExecutableMock.mockClear();
   resolveOpencodeV2ExecutableMock.mockClear();
   clearCatalogCache();
+  // Issue #4452: the agy probe runs only with the usage declaration (or after a
+  // use). The cases below are about the probe mechanics with agy probed, so they
+  // run as a declared install; the undeclared case is
+  // tests/unit/tool-policy/agy-version-probe-4452.test.ts.
+  vi.stubEnv('CM_ANTIGRAVITY_USAGE', 'api-key');
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   clearCatalogCache();
   removeTempDir(tmpRoot);
 });

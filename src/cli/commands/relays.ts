@@ -49,6 +49,7 @@ import {
   resolveInstanceTarget,
 } from './instances';
 import { NOT_IN_SESSION_MESSAGE, resolveSessionIdentity } from './whoami';
+import { isToolPolicyDenied } from '../utils/tool-policy-failure';
 
 /** crypto.randomUUID() output; mirrors RELAY_ID_PATTERN in the API route. */
 const RELAY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,6 +63,9 @@ const SELF_SELECTORS = new Set(['self', 'me']);
  * Mirrors `RelayRefusalCode` in `lib/relay/relay-policy` plus the route's own
  * not-found; duplicated rather than imported so the CLI bundle does not pull the
  * server's database graph in for four strings.
+ *
+ * Not `RELAY_TOOL_POLICY_DENIED` (Issue #4437): that one is exit 33, and `ApiClient`
+ * throws it as a `ToolPolicyDeniedError`, which {@link registerRelay} passes on.
  */
 export const RELAY_REFUSAL_CODES = new Set([
   'RELAY_CHAIN_BLOCKED',
@@ -75,6 +79,11 @@ export const RELAY_REFUSAL_CODES = new Set([
 export interface RelayEndpointArg {
   worktreeId: string;
   instanceId: string;
+  /**
+   * Issue #4496: on the `to` end only, the tool the send asked for (`--agent`), which
+   * `POST /api/relays` judges rule 0 by for an ad-hoc instance. An older server ignores it.
+   */
+  cliToolId?: string;
 }
 
 /** The text `--reply-to` is documented with, shared by `send` and `ask`. */
@@ -213,6 +222,11 @@ export const LEGACY_RELAY_NOTICE =
  * `bindMode: 'bound'`. A server that does not know the flag answers without
  * the key; the relay is then the legacy kind and its id is not sent along.
  *
+ * Issue #4437: a relay with antigravity at either end that the tool policy refuses
+ * (409 `RELAY_TOOL_POLICY_DENIED`) is not one of these: after `onFailure` it is thrown
+ * on as a `ToolPolicyDeniedError`, and the command reports it with exit 33 (its
+ * `--json` included) before anything is sent.
+ *
  * @returns The relay id, and whether it is bound
  */
 export async function registerRelay(
@@ -231,6 +245,7 @@ export async function registerRelay(
     return { id: response.relay.id, bound };
   } catch (error) {
     await input.onFailure?.();
+    if (isToolPolicyDenied(error)) throw error;
     if (error instanceof ApiError && error.apiCode && RELAY_REFUSAL_CODES.has(error.apiCode)) {
       console.error(`Error: ${error.payload?.error ?? error.apiCode}`);
       process.exit(ExitCode.CONFIG_ERROR);

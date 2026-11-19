@@ -326,7 +326,7 @@ export function buildAttachHints(
       'bottom, and tmux follows the cursor — so this attach shows the composer and blank rows,',
       'not the conversation. To read it:',
       `  prefix + g                                     popup, in this terminal`,
-      `  ${capture('--pane --tail 60')}   without attaching`,
+      `  ${capture('--pane --tail 80')}   without attaching`,
       `  ${capture('--pane --follow')}    live, without attaching`,
     );
     if (isLiveAttachSupported(cliToolId)) {

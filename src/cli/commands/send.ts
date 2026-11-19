@@ -7,8 +7,15 @@ import { Command } from 'commander';
 import { ExitCode, RoleExitCode } from '../types';
 import type { SendOptions } from '../types';
 import type { AutoYesContractPolicy, AutoYesSetResult, CurrentOutputResponse, TaskCreateResponse, TaskView } from '../types/api-responses';
-import { ApiClient, ApiError, assertResponseShape, isValidWorktreeId, MAX_STOP_PATTERN_LENGTH } from '../utils/api-client';
+import {
+  ApiClient,
+  ApiError,
+  assertResponseShape,
+  isValidWorktreeId,
+  MAX_STOP_PATTERN_LENGTH,
+} from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
+import { MAX_SERVER_ERROR_DETAIL } from '../utils/api-client-errors';
 import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
@@ -17,13 +24,22 @@ import {
   validateAntigravityModelName,
   validateClaudeModelName,
 } from '../config/model-validation';
-import { fetchAgentRoster, saveRosterChange, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
+import {
+  fetchAgentRoster,
+  saveRosterChange,
+  defaultAlias,
+  rosterAdditionRefusal,
+  MAX_AGENT_INSTANCES,
+  MAX_AGENT_ALIAS_LENGTH,
+} from '../utils/agent-instances';
+import { isValidInstanceId as isRosterInstanceId } from '../../lib/cli-tools/types';
 import {
   isInstanceSelector,
   resolveInstanceTarget,
   INSTANCE_ALIAS_HELP_SUFFIX,
   INSTANCE_SELECTOR_ERROR,
 } from './instances';
+import { noteAntigravityNotice } from '../utils/antigravity-notice';
 import { resolveCommandTarget, type CommandTarget } from './command-target';
 import { followUpCommand } from '../utils/follow-up-command';
 import {
@@ -56,6 +72,40 @@ import type {
 } from '../../types/agent-roles';
 import { MEM_EXIT_BY_CODE, type MemErrorCode, type MemWriteResponse } from '../../types/mem';
 import { resolveSessionIdentity, type SessionIdentity } from './whoami';
+import {
+  ANTIGRAVITY_GUARD_HELP,
+  flushClientWarnings,
+  holdClientWarnings,
+  isToolPolicyDenied,
+  reportToolPolicyDenial,
+  toolPolicyDenialFromResponse,
+} from '../utils/tool-policy-failure';
+import { installSendOrigin, sendOriginFieldsFor } from '../utils/send-origin';
+import type { RelayEndpointArg } from './relays';
+
+/**
+ * Issue #4449: what a write this send makes before its message tells the server about
+ * the send it is for — who sends (`origin`, for a tool the policy may restrict) and the
+ * session its `--reply-to` relay answers into (`replyTo`), and that it arms Auto-Yes on the
+ * same target later (`autoYes`, I1' of #4449: the grant is refused for antigravity from
+ * every origin, a send from a terminal is not, so the first write has to know). The write
+ * route judges them with the tool it writes and refuses with the send's 409 (exit 33),
+ * writing nothing. Empty when there is nothing to judge, so such a body is what it always
+ * was; `autoYes` only rides with an origin, as a tool the policy never restricts is
+ * refused nothing.
+ */
+function writePolicyFields(
+  tool: string | undefined,
+  replyTo: RelayEndpointArg | undefined,
+  autoYes: boolean | undefined
+): Record<string, unknown> {
+  const origin = sendOriginFieldsFor(tool);
+  return {
+    ...origin,
+    ...(replyTo ? { replyTo: { worktreeId: replyTo.worktreeId, instanceId: replyTo.instanceId } } : {}),
+    ...(autoYes && origin.origin !== undefined ? { autoYes: true } : {}),
+  };
+}
 
 // Issue #2464: the message length `send` is verified to deliver whole, stated in
 // `--help`. Issue #4274: the values moved to `src/config/send-verified-limits.ts`
@@ -103,6 +153,8 @@ function resolveAutoYesDurationMs(duration: string | undefined): number {
  * @param agent - CLI tool resolved for --instance (Issue #1629), else --agent
  * @param contractPolicy - The policy of the contract this send created (Issue #3723), else null
  * @param onlyIfOff - Refuse if a grant is on by the time it arrives (Issue #4132)
+ * @param replyTo - The `--reply-to` relay still to be opened after arming (Issue #4449)
+ * @param taskId - The task of `--contract`: the grant goes to its recorded target (Issue #4449)
  */
 async function enableAutoYes(
   client: ApiClient,
@@ -112,12 +164,22 @@ async function enableAutoYes(
   agent: string | undefined,
   instanceId: string | undefined,
   contractPolicy: AutoYesContractPolicy | null = null,
-  onlyIfOff = false
+  onlyIfOff = false,
+  replyTo?: RelayEndpointArg,
+  taskId?: string
 ): Promise<AutoYesSetResult | undefined> {
   const autoYesBody: Record<string, unknown> = {
     enabled: true,
     duration: durationMs,
   };
+  // Issue #4449: the relay this send opens after arming, judged before the grant is written.
+  if (replyTo) {
+    autoYesBody.replyTo = { worktreeId: replyTo.worktreeId, instanceId: replyTo.instanceId };
+  }
+  // Issue #4449: the grant of a --contract send is for the task's recorded target.
+  if (taskId) {
+    autoYesBody.taskId = taskId;
+  }
   if (onlyIfOff) {
     autoYesBody.onlyIfOff = true;
   }
@@ -184,10 +246,11 @@ async function enableAutoYesAfterSend(
   durationMs: number,
   agent: string | undefined,
   instanceId: string | undefined,
-  contractPolicy: AutoYesContractPolicy | null
+  contractPolicy: AutoYesContractPolicy | null,
+  taskId: string | undefined
 ): Promise<void> {
   try {
-    await enableAutoYes(client, worktreeId, options, durationMs, agent, instanceId, contractPolicy);
+    await enableAutoYes(client, worktreeId, options, durationMs, agent, instanceId, contractPolicy, false, undefined, taskId);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.error(
@@ -212,21 +275,32 @@ async function registerInstance(
   instanceId: string,
   cliTool: string
 ): Promise<void> {
-  const addCommand = `commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`;
+  const addCommand = registerCommandFor(worktreeId, cliTool, instanceId);
   try {
     // Issue #4132: the whole list is replaced, so an add landing after this read has to
     // survive it. Built again on a moved roster, where this one may be there by now.
     const roster = await fetchAgentRoster(client, worktreeId);
     const saved = await saveRosterChange(client, worktreeId, roster, (base) => {
       if (base.some((inst) => inst.id === instanceId)) return null;
-      if (base.length >= MAX_AGENT_INSTANCES) {
+      const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+      // Issue #4458: the limit, the room under it and the id rules are the server's
+      // validator's, asked here, so this neither refuses a row the save would take nor
+      // sends one it would refuse (and then hides why behind a generic 400).
+      const refusal = rosterAdditionRefusal(base, added);
+      if (refusal?.atLimit) {
         console.error(
           `Warning: the message was sent, but could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit). `
             + `Do not send it again. Make room, then: ${addCommand}`
         );
         return null;
       }
-      const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+      if (refusal) {
+        console.error(
+          `Warning: the message was sent, but could not register '${instanceId}' in the roster: the server would refuse it (${refusal.error}). `
+            + `Do not send it again. To register it: ${addCommand}`
+        );
+        return null;
+      }
       return [...base, added as (typeof base)[number]];
     });
     if (saved !== null) console.error(`Instance registered in roster: ${instanceId}`);
@@ -236,12 +310,73 @@ async function registerInstance(
       return;
     }
     // A save answered by a 5xx or not at all may have happened, so this does not say it did not.
-    const reason = error instanceof Error ? error.message : String(error);
+    // Issue #4458: the server's own sentence too, which a 400 otherwise hides.
+    const serverReason = error instanceof ApiError ? error.payload?.error : undefined;
+    const reason = `${error instanceof Error ? error.message : String(error)}`
+      + (typeof serverReason === 'string' && serverReason.length > 0 ? ` ${serverReason}` : '');
     console.error(
       `Warning: the message was sent, but registering '${instanceId}' in the roster failed, so it may not be there (${reason}). `
         + `Do not send it again. Check with \`commandmate instances ${worktreeId}\`. To register it: ${addCommand}`
     );
   }
+}
+
+/** Whether the alias `--register` gives `instanceId` is longer than the roster takes (Issue #4458). */
+function defaultAliasTooLong(cliTool: string, instanceId: string): boolean {
+  return defaultAlias(cliTool, instanceId).length > MAX_AGENT_ALIAS_LENGTH;
+}
+
+/**
+ * The command that registers the instance by hand, as `--register` would have. When the
+ * default alias is longer than the roster takes, it names a short `--alias`, so the
+ * command does what it says instead of failing for the same reason (Issue #4458).
+ */
+function registerCommandFor(worktreeId: string, cliTool: string, instanceId: string): string {
+  const command = `commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`;
+  if (!defaultAliasTooLong(cliTool, instanceId)) return command;
+  const short = defaultAlias(cliTool, instanceId).slice(0, MAX_AGENT_ALIAS_LENGTH).trimEnd();
+  return `${command} --alias "${short}"`;
+}
+
+/**
+ * `--register` before anything is sent (Issue #4458): the candidate row on its own (its
+ * default alias above all, which the tool and the id alone decide), refused here with
+ * exit 2 rather than warned about after the message went out. The room left is not asked
+ * here: the limit of a plain --register stays a warning after the send (I3).
+ *
+ * J2: a send to an instance already on the roster registers nothing, so it must behave as
+ * a send without --register. The roster is read only when the candidate would be refused,
+ * and a read that fails does not hold the send up (the registration after it says what it
+ * finds).
+ */
+async function assertCandidateRowFits(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  cliTool: string
+): Promise<void> {
+  const refusal = rosterAdditionRefusal([], { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId) });
+  if (refusal === null) return;
+  let onRoster: boolean;
+  try {
+    onRoster = (await fetchAgentRoster(client, worktreeId)).instances.some((inst) => inst.id === instanceId);
+  } catch {
+    return;
+  }
+  if (onRoster) return;
+  if (defaultAliasTooLong(cliTool, instanceId)) {
+    console.error(
+      `Error: --register would name '${instanceId}' '${defaultAlias(cliTool, instanceId)}', longer than the `
+        + `${MAX_AGENT_ALIAS_LENGTH} characters an alias may have, so the roster would refuse it. Nothing was sent. `
+        + `Register it with a shorter alias, then send without --register: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
+    );
+  } else {
+    console.error(
+      `Error: --register could not add '${instanceId}' to the roster: the server would refuse it (${refusal.error}). `
+        + `Nothing was sent. To register it: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
+    );
+  }
+  process.exit(ExitCode.CONFIG_ERROR);
 }
 
 /**
@@ -252,6 +387,9 @@ async function registerInstance(
  * Repeating the command creates nothing. The role on the send replaces what the
  * instance holds, and is then a condition like any `--role`.
  *
+ * Issue #4449: the server judges the send this registration is for (the tool policy,
+ * and the relay of `--reply-to`) and refuses with exit 33 before creating anything.
+ *
  * @throws The roster changed since it was read (exit 31), or the server refused
  */
 async function registerInstanceWithRole(
@@ -259,17 +397,42 @@ async function registerInstanceWithRole(
   worktreeId: string,
   instanceId: string,
   cliTool: string,
-  role: RoleAssignmentInput
+  role: RoleAssignmentInput,
+  replyTo: RelayEndpointArg | undefined,
+  autoYes: boolean | undefined
 ): Promise<void> {
   const url = `/api/worktrees/${worktreeId}/instances/roles`;
   const { instances, rosterRevision } = await client.get<InstanceRoleSettingsResponse>(url);
   if (instances.some((instance) => instance.instanceId === instanceId)) return;
+  // Issue #4458: the server's own judgment of the row, before the POST and before anything
+  // is sent, as for a plain --register (the limit, the id, the alias length).
+  const alias = defaultAlias(cliTool, instanceId);
+  const base = instances.map((instance, order) => ({
+    id: instance.instanceId,
+    cliTool: instance.cliToolId,
+    alias: instance.alias,
+    order,
+  }));
+  const refusal = rosterAdditionRefusal(base, { id: instanceId, cliTool, alias });
+  if (refusal) {
+    const addCommand = registerCommandFor(worktreeId, cliTool, instanceId);
+    console.error(
+      refusal.atLimit
+        ? `Error: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit). `
+          + `Nothing was written or sent. Make room, then: ${addCommand}`
+        : `Error: could not register '${instanceId}' in the roster: the server would refuse it (${refusal.error}). `
+          + `Nothing was written or sent. To register it: ${addCommand}`
+    );
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
   try {
     await roleWrite(`commandmate instances ${worktreeId}`, () =>
       client.post<InstanceRoleCreateResponse>(url, {
-        instance: { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId) },
+        instance: { id: instanceId, cliTool, alias },
         role,
         expectedRosterRevision: rosterRevision,
+        // Issue #4449: refused by the tool policy here, with nothing created.
+        ...writePolicyFields(cliTool, replyTo, autoYes),
       })
     );
   } catch (error) {
@@ -309,8 +472,9 @@ async function createContractTask(
   worktreeId: string,
   options: SendOptions,
   agent: string | undefined,
-  instanceId: string | undefined
-): Promise<{ taskId: string; message: string; contractPolicy: AutoYesContractPolicy | null }> {
+  instanceId: string | undefined,
+  replyTo: RelayEndpointArg | undefined
+): Promise<{ task: TaskView; message: string; contractPolicy: AutoYesContractPolicy | null }> {
   const body: Record<string, unknown> = { contractPath: options.contract };
   if (agent) {
     body.cliToolId = agent;
@@ -318,6 +482,9 @@ async function createContractTask(
   if (instanceId) {
     body.instanceId = instanceId;
   }
+  // Issue #4449: the tool policy judges the target this request writes the row for,
+  // and refuses (exit 33) before the row exists — no ask before it that could fail.
+  Object.assign(body, writePolicyFields(agent, replyTo, options.autoYes));
 
   try {
     const response = await client.post<TaskCreateResponse>(
@@ -331,7 +498,7 @@ async function createContractTask(
     );
     if (typeof created.roleWarning === 'string') console.error(`Warning: ${created.roleWarning}`);
     return {
-      taskId: created.task.id,
+      task: created.task,
       message: created.message,
       contractPolicy: contractPolicyOf(created.task),
     };
@@ -395,16 +562,17 @@ async function createContractTaskWithRole(
   options: SendOptions,
   agent: string | undefined,
   instanceId: string | undefined,
-  role: RoleAssignmentInput | undefined
+  role: RoleAssignmentInput | undefined,
+  replyTo: RelayEndpointArg | undefined
 ): ReturnType<typeof createContractTask> {
-  if (role === undefined) return createContractTask(client, worktreeId, options, agent, instanceId);
+  if (role === undefined) return createContractTask(client, worktreeId, options, agent, instanceId, replyTo);
   const target = await effectiveTarget(client, worktreeId, agent, instanceId);
   const url = `/api/worktrees/${worktreeId}/instances/roles`;
   const resolved = await client.get<InstanceRoleSettingsResponse>(url);
   const toolOf = (settings: InstanceRoleSettingsResponse): string | undefined =>
     settings.instances.find((instance) => instance.instanceId === target.instanceId)?.cliToolId;
   try {
-    return await createContractTask(client, worktreeId, options, agent, instanceId);
+    return await createContractTask(client, worktreeId, options, agent, instanceId, replyTo);
   } catch (error) {
     if (!(error instanceof RoleCliError) || error.code !== 'ROLE_CONDITION_UNMET') throw error;
   }
@@ -419,7 +587,13 @@ async function createContractTaskWithRole(
   try {
     saved = await roleWrite(`commandmate instances ${worktreeId}`, async () =>
       assertResponseShape<InstanceRoleSettingsResponse>(
-        await client.put<unknown>(url, { instanceId: target.instanceId, role, expectedRosterRevision: now.rosterRevision }),
+        await client.put<unknown>(url, {
+          instanceId: target.instanceId,
+          role,
+          expectedRosterRevision: now.rosterRevision,
+          // Issue #4449: refused by the tool policy here, with nothing saved.
+          ...writePolicyFields(target.cliToolId, replyTo, options.autoYes),
+        }),
         ['instances'],
         'PUT /api/worktrees/:id/instances/roles'
       )
@@ -445,7 +619,7 @@ async function createContractTaskWithRole(
     );
   }
   console.error(`Role saved for ${target.instanceId} ahead of the contract's check; it stays saved if this send goes no further.`);
-  return createContractTask(client, worktreeId, options, agent, instanceId);
+  return createContractTask(client, worktreeId, options, agent, instanceId, replyTo);
 }
 
 /**
@@ -453,6 +627,8 @@ async function createContractTaskWithRole(
  * refused before an attempt. Not known otherwise (no answer, a 5xx saying nothing).
  */
 function knownNotSent(error: unknown, outcome: FailedSendOutcome | null): boolean {
+  // Issue #4437: refused by the tool policy before anything was typed.
+  if (isToolPolicyDenied(error)) return true;
   if (outcome !== null) return outcome !== 'unknown';
   if (!(error instanceof ApiError)) return false;
   const reported = error.payload?.sendOutcome;
@@ -734,6 +910,36 @@ function validateSendModel(options: SendOptions, agent: string | undefined): voi
 }
 
 /**
+ * The `code` of the server's 400 that refuses `--model` (the tool, the value, a running
+ * session). Not imported: the CLI does not load route code. Pinned to the route's constant by
+ * `tests/unit/cli/commands/cli-small-fixes-4473.test.ts`.
+ */
+export const MODEL_REFUSED_CODE = 'model_refused';
+
+/**
+ * Issue #4473: the 400 that refuses `--model` says why. The shared 400 line is "Bad request.
+ * Check your input parameters.", which cannot tell a running session (the model is a launch
+ * flag) from a bad value. Only the server's `model_refused` 400 counts — a role, relay, ask,
+ * brief or task-target 400 on a send that also carried `--model` is not about the model —
+ * and a role failure (RoleCliError) never. Only this command reads the body: the shared
+ * classifier is every command's.
+ *
+ * Exits with the code the shared handler would have used (true is only seen where exit is stubbed);
+ * returns false when there is nothing to add.
+ */
+export function reportModelRefusal(error: unknown, options: { model?: string }): boolean {
+  if (!options.model || !(error instanceof ApiError) || error instanceof RoleCliError) return false;
+  if (error.statusCode !== 400 || error.payload?.code !== MODEL_REFUSED_CODE) return false;
+  const reason = error.payload?.error;
+  if (typeof reason !== 'string' || reason.trim() === '') return false;
+  const detail = reason.trim();
+  console.error(`Error: ${error.message}`);
+  console.error(`Server: ${detail.length > MAX_SERVER_ERROR_DETAIL ? `${detail.slice(0, MAX_SERVER_ERROR_DETAIL)}…` : detail}`);
+  process.exit(error.exitCode);
+  return true;
+}
+
+/**
  * The `--expect-*` flags as the `/send` field that carries them to the last check
  * before the first key, or undefined when none was given (Issue #4116).
  */
@@ -856,6 +1062,8 @@ export function createSendCommand(): Command {
       '--model <model>',
       'Specify AI model for a Copilot, Antigravity or Claude agent. For Antigravity and Claude it is a launch'
         + ' flag: it applies only when this send starts the session, and a running session answers 400'
+        + ' (the server\'s reason is printed). Claude takes an alias such as opus or sonnet, or a full model id'
+        + ' such as claude-opus-4-1'
     )
     .option('--auto-yes', 'Enable auto-yes before sending (session-wide, no policy guard; for unattended runs prefer --contract with an autoYes policy)')
     .option('--auto-yes-answer-mode <mode>', `With --auto-yes: ${ANSWER_MODE_OPTION_DESCRIPTION}`)
@@ -887,7 +1095,10 @@ cannot be read first stops the send before the grant (exit 99), and one with no
 
 Exit 2 when the relay is refused: you are answering a relayed message already
 (pass --allow-relay-chain), the chain would exceed 3 hops, or an open relay
-between these two sessions exists. Nothing is sent in that case.
+between these two sessions exists. A relay with antigravity at either end that
+the tool policy refuses is exit 33 (below), not 2. Nothing is sent in either case.
+
+${ANTIGRAVITY_GUARD_HELP}
 
 Message length (Issue #2464): up to ${SEND_VERIFIED_MAX_KIB} KiB and ${SEND_VERIFIED_MAX_LINES} lines is verified
 to arrive whole on claude, codex, command-code and antigravity. A message over
@@ -921,7 +1132,18 @@ instance holds and is a condition as above. A changed roster is exit 31, nothing
 --register without a role keeps its old order (sent, then registered) and never
 touches a role already there. The message has gone out by then, so a roster that kept
 changing, or any other failure to register, is a warning and exit 0 (Issues #4149, #4159):
-do not send it again; the warning has the command that registers it.
+do not send it again; the warning has the command that registers it. The roster's own
+rules decide (Issue #4458): up to 10 instances, so a removed row makes room again. The
+row to add is judged whatever the rows already there look like; a bad existing row is
+left to the server's answer to the save. An --instance already on the roster registers
+nothing and is sent as without --register. When more than one reason applies, the first
+of these decides:
+  1. the --instance is not an id the roster accepts: exit 2, nothing written or sent
+  2. the row to add would be refused (a default alias over 50 characters, ...): exit 2,
+     nothing written or sent; the error gives an instances add command with a short
+     --alias. With --role, the limit is judged here too (exit 2)
+  3. the tool policy refuses the send (or what it writes first): exit 33, nothing typed
+  4. a plain --register on a full roster: sent, then a warning and exit 0
 
 --expect-* pin this send to what the caller read earlier, saving nothing; the server
 reads them again right before the first key, so a process replaced in between gets
@@ -961,10 +1183,15 @@ not caught.
 
 Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
 (nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
-hold or the start was refused because of its role (nothing typed).
+hold or the start was refused because of its role (nothing typed); 33 refused by the
+tool policy (antigravity, above; nothing typed, do not send it again).
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
+        // Issue #4437: this command's requests say who is sending (`send-origin.ts`), and
+        // the client's warnings wait until a tool-policy refusal could have been said (I7d).
+        installSendOrigin();
+        holdClientWarnings();
         const autoYesDurationMs = validateSendArgs(worktreeId, message, options);
         if (bothRoleFlags()) throw usageError('Give --role or --no-role, not both.');
         const expectedRole = expectedRoleOf(options);
@@ -979,6 +1206,23 @@ hold or the start was refused because of its role (nothing typed).
         // Issue #2376: the RESOLVED id, never the string the user typed.
         // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
         // /resolve-target knows how to read an alias.
+
+        // Issue #4458: --register saves this id into the roster, and the roster write
+        // refuses an id outside its rules. Refused here, by the same rule, before anything
+        // is sent: after the send it could only be a warning.
+        if (options.register && namedTarget.instanceId !== undefined && !isRosterInstanceId(namedTarget.instanceId)) {
+          console.error(
+            `Error: --register needs an instance id the roster accepts, and '${namedTarget.instanceId}' is not one `
+              + '(letters, digits, _ or -, at most 64 characters). Nothing was sent.'
+          );
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+        if (options.register && namedTarget.instanceId !== undefined) {
+          await assertCandidateRowFits(client, worktreeId, namedTarget.instanceId, options.agent ?? namedTarget.instanceId);
+        }
+
+        // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).
+        noteAntigravityNotice(namedTarget.agent);
 
         validateSendModel(options, namedTarget.agent);
 
@@ -1031,26 +1275,40 @@ hold or the start was refused because of its role (nothing typed).
           instance: pinsTarget ? instanceId : options.instance,
           agent: pinsTarget ? agent : options.agent,
         };
-        const relayEndpoints = options.replyTo && (options.contract || options.autoYes)
+        // Issue #4437 (I7c) / #4449: what this send writes before its message (the roster
+        // and role of --register --role, the task of --contract, the grant of --auto-yes)
+        // is refused by the tool policy AT that write, in the same request, with nothing
+        // written: each carries who sends and the relay's other end (`writePolicyFields`).
+        // No ask before them (`GET …/tool-policy`): an ask that failed let the writes go on,
+        // and a default changed after it was written under another tool's verdict.
+        const registersWithRole = roleAssignment !== undefined && Boolean(options.register) && Boolean(instanceId);
+        const relayEndpoints = options.replyTo && (options.contract || options.autoYes || registersWithRole)
           ? await resolveRelayEndpoints(client, { ...relayTarget, replyTo: options.replyTo })
           : undefined;
 
         if (roleAssignment !== undefined && options.register && instanceId) {
-          await registerInstanceWithRole(client, worktreeId, instanceId, options.agent ?? instanceId, roleAssignment);
+          await registerInstanceWithRole(
+            client, worktreeId, instanceId, options.agent ?? instanceId, roleAssignment, relayEndpoints?.from, options.autoYes
+          );
         }
 
         // Issue #1545: resolve the contract before anything with a side effect,
         // so an invalid contract cannot leave auto-yes enabled for a message
         // that was never sent.
         let taskId: string | undefined;
+        // Issue #4449: set when the message and the grant go by the task's target.
+        let boundTaskId: string | undefined;
         // Issue #3723: what the created contract lets Auto-Yes answer.
         let contractPolicy: AutoYesContractPolicy | null = null;
         let content = message;
         if (options.contract) {
-          const task = await createContractTaskWithRole(client, worktreeId, options, agent, instanceId, roleAssignment);
-          taskId = task.taskId;
+          const task = await createContractTaskWithRole(client, worktreeId, options, agent, instanceId, roleAssignment, relayEndpoints?.from);
+          taskId = task.task.id;
           content = task.message;
           contractPolicy = task.contractPolicy;
+          // Issue #4449 (I2): a send naming no target is bound to its task's recorded target
+          // (`taskId` on the grant and on `/send`), the one the task was judged for.
+          if (agent === undefined && instanceId === undefined) boundTaskId = taskId;
           console.error(`Task created: ${taskId}`);
           console.log(taskId);
         }
@@ -1123,14 +1381,26 @@ hold or the start was refused because of its role (nothing typed).
           // that never went out, which is the state #1608 removed for a bad
           // --duration.
           try {
-            armedGrant = await enableAutoYes(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, onlyIfOff);
+            armedGrant = await enableAutoYes(
+              client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, onlyIfOff,
+              // Issue #4449: the relay not opened yet is judged with the grant, before it is written.
+              relay ? undefined : relayEndpoints?.from,
+              boundTaskId
+            );
           } catch (error) {
             // Issue #4132: a grant armed since that read. It is theirs: it stays as it
             // is, and this is now the send that found one on.
             if (!onlyIfOff || !(error instanceof ApiError) || error.apiCode !== 'AUTO_YES_ALREADY_ENABLED') {
               await failTask();
               if (relay) await cancelRelayQuietly(client, relay.id);
-              throw error;
+              // Issue #4437 (re-instruction 3): the Auto-Yes route refuses antigravity with
+              // its own 409 TOOL_POLICY_DENIED (#4436), and the relay of --reply-to with
+              // RELAY_TOOL_POLICY_DENIED (#4449). The same refusal as the send's: exit 33,
+              // reason first.
+              const denial = error instanceof ApiError
+                ? toolPolicyDenialFromResponse(error.statusCode ?? 0, error.payload, { cliToolId: agent, instanceId })
+                : null;
+              throw denial ?? error;
             }
             priorAutoYes = true;
           }
@@ -1183,6 +1453,11 @@ hold or the start was refused because of its role (nothing typed).
           assignment: roleAssignment,
           expected: expectedRole,
         });
+        // Issue #4449 (I2): the message of a --contract send naming no target goes to the
+        // target its task was judged and created for — the server reads it from the task,
+        // so a default changed since the task is not resolved again. The body still names
+        // nobody (#4116); a send that names its target already pins it.
+        if (boundTaskId) sendBody.taskId = boundTaskId;
 
         // Issue #3957: a bound relay's id rides on the send, which reserves it
         // and records where the body went in.
@@ -1193,6 +1468,10 @@ hold or the start was refused because of its role (nothing typed).
             await withdrawAutoYes(knownNotSent(error, outcome));
             // Issue #4226: not sent for certain, so nothing is waited on. Unknown: the relay closes it.
             if (noteItemId && noteAuthor && knownNotSent(error, outcome)) await closeSendNote(client, noteAuthor, noteItemId);
+            // Issue #4437: refused before the role was saved or anything typed, and a bound
+            // relay was withdrawn by the server. Out now, so the refusal's reason is the
+            // first error line and no "safe to send it again" follows it.
+            if (isToolPolicyDenied(error)) throw error;
             // Issue #4116: no answer, so the send may have got as far as the save.
             // A 5xx with a body that says nothing of the setting is no better an answer.
             const saidNothing = error instanceof ApiError
@@ -1204,6 +1483,7 @@ hold or the start was refused because of its role (nothing typed).
           promptWaitingFallback: promptWaitingFallback(worktreeId, commandTarget),
           target: commandTarget,
         });
+        flushClientWarnings();
         console.error('Message sent.');
         if (sent?.replacesDefaultInstructions) {
           console.error(`Note: on ${agent ?? 'this tool'}, the role replaces the tool's default instructions rather than adding to them.`);
@@ -1233,9 +1513,16 @@ hold or the start was refused because of its role (nothing typed).
         // A failure here does not fail the task: the message was delivered and
         // the task is running, which is what the row already says. Nor the command (Issue #4159).
         if (applyAutoYesAfterSend) {
-          await enableAutoYesAfterSend(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy);
+          await enableAutoYesAfterSend(client, worktreeId, options, autoYesDurationMs, agent, instanceId, contractPolicy, boundTaskId);
         }
       } catch (error) {
+        // Issue #4437: the send or its relay refused by the tool policy: exit 33.
+        if (isToolPolicyDenied(error)) {
+          reportToolPolicyDenial(error, { worktreeId });
+          return;
+        }
+        flushClientWarnings();
+        if (reportModelRefusal(error, options)) return;
         handleCommandError(error);
       }
     });

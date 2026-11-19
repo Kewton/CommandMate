@@ -14,6 +14,16 @@
  * polling loop with `WorktreesCacheProvider` (otherwise `/api/worktrees`
  * is polled twice while this page is mounted).
  *
+ * Issue #4389: a role condition (roles of each instance, `GET /api/sessions/roles`
+ * read once). While it is applied, a tile switches only between the matching
+ * instances, a list row counts only those and names their roles, and the row's
+ * link opens the first match (`?instance=`). Unfiltered, all of that is as before.
+ *
+ * Issue #4388: the saved default condition is applied once when the page opens
+ * (`useSessionsDefaultFilter`); changes made here are not saved, so leaving and
+ * coming back starts from the default again. The filter button carries a mark
+ * while the condition differs from the default.
+ *
  * Sidebar auto-collapses on this page (via useLayoutConfig).
  */
 
@@ -22,11 +32,35 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, Filter } from 'lucide-react';
+import { Modal } from '@/components/ui/Modal';
+import {
+  evaluateSessionsFilter,
+  hasRoleCondition,
+  type FilterTarget,
+  type SessionsRoleCondition,
+} from '@/lib/sessions-filter';
+import {
+  agentInstancesFromSelectedAgents,
+  getInstanceLabel,
+  type AgentInstance,
+} from '@/lib/cli-tools/types';
 import { PullToRefresh } from '@/components/common/PullToRefresh';
-import { SessionTileGrid, SessionsViewModeSelector } from '@/components/sessions';
+import {
+  SessionTileGrid,
+  SessionsViewModeSelector,
+  SessionsFilterPanel,
+  SessionsFilterSheet,
+} from '@/components/sessions';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useSessionsViewMode } from '@/hooks/useSessionsViewMode';
+import { useSessionsRoles } from '@/hooks/useSessionsRoles';
+import {
+  useSessionsDefaultFilter,
+  type SessionsDefaultSaveError,
+  type SessionsRolesReadiness,
+} from '@/hooks/useSessionsDefaultFilter';
+import type { SessionsFilterCondition } from '@/types/sessions-default-filter';
 import { useWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
@@ -50,7 +84,7 @@ import {
   Skeleton,
   StatusDot,
 } from '@/components/ui';
-import { compareByTimestamp } from '@/lib/sidebar-utils';
+import { buildSessionRowHref, compareByTimestamp } from '@/lib/sidebar-utils';
 import { formatRelativeTimeShort } from '@/lib/date-utils';
 import { STAGGER_ENTER_CLASS, staggerDelay } from '@/lib/utils/stagger';
 import { sanitizePreview } from '@/config/message-preview-config';
@@ -200,6 +234,41 @@ function formatStatus(
 
 const DEFAULT_BADGE_CLASS = 'bg-muted text-muted-foreground';
 
+/** Same roster the tile shows (SessionTile.resolveInstances): the default agents when omitted. */
+function resolveSessionsInstances(wt: FilterTarget): AgentInstance[] {
+  const instances =
+    wt.agentInstances && wt.agentInstances.length > 0
+      ? wt.agentInstances
+      : agentInstancesFromSelectedAgents(wt.selectedAgents ?? getClientDefaultSelectedAgents());
+  return [...instances].sort((a, b) => a.order - b.order);
+}
+
+function resolveSessionsRoster(wt: FilterTarget): string[] {
+  return resolveSessionsInstances(wt).map((i) => i.id);
+}
+
+const EMPTY_ROLE_CONDITION: SessionsRoleCondition = {};
+
+/** The page's two pieces of condition as the stored shape (Issue #4388). */
+function toFilterCondition(branchPattern: string, role: SessionsRoleCondition): SessionsFilterCondition {
+  return {
+    branchPattern,
+    roleIds: [...(role.roleIds ?? [])],
+    includeNoRole: role.includeNoRole === true,
+    includeAmbiguous: role.includeAmbiguous === true,
+  };
+}
+
+function describeSaveError(
+  error: SessionsDefaultSaveError | null,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string | null {
+  if (!error) return null;
+  return error.kind === 'invalid'
+    ? t('sessions.defaultFilter.saveInvalid', { detail: error.detail })
+    : t('sessions.defaultFilter.saveFailed');
+}
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -214,6 +283,44 @@ export default function SessionsPage() {
   // (unfiltered) list so an active text filter never unmounts the list.
   const hasWorktrees = worktrees.length > 0;
   const [filterText, setFilterText] = useState('');
+  const [branchPattern, setBranchPattern] = useState('');
+  const [roleCondition, setRoleCondition] = useState<SessionsRoleCondition>(EMPTY_ROLE_CONDITION);
+  const wantsRole = hasRoleCondition(roleCondition);
+  const {
+    roles,
+    rolesStatus,
+    source: roleSource,
+    reload: reloadRoles,
+  } = useSessionsRoles({ poll: wantsRole });
+  // Issue #4388: a deleted role can only be told from a role list that was read,
+  // and from instance roles that were readable (I2).
+  const rolesReadiness: SessionsRolesReadiness =
+    rolesStatus === 'error' || roleSource?.rolesUnavailable
+      ? 'unavailable'
+      : rolesStatus === 'ok' && roles !== null && roleSource !== null
+        ? 'ready'
+        : 'loading';
+  const existingRoleIds = useMemo(() => (roles === null ? null : roles.map((r) => r.id)), [roles]);
+  const currentCondition = useMemo(
+    () => toFilterCondition(branchPattern, roleCondition),
+    [branchPattern, roleCondition]
+  );
+  const applyCondition = useCallback((c: SessionsFilterCondition) => {
+    setBranchPattern(c.branchPattern);
+    setRoleCondition({
+      roleIds: c.roleIds,
+      includeNoRole: c.includeNoRole,
+      includeAmbiguous: c.includeAmbiguous,
+    });
+  }, []);
+  const defaultFilter = useSessionsDefaultFilter({
+    current: currentCondition,
+    existingRoleIds,
+    rolesReadiness,
+    apply: applyCondition,
+  });
+  const { noteUserChange } = defaultFilter;
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('lastSent');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   // Issue #2509. Resolved from localStorage in an effect, so the first render is
@@ -230,7 +337,7 @@ export default function SessionsPage() {
     void ensureClientDefaultSelectedAgents();
   }, []);
 
-  const filteredAndSorted = useMemo(() => {
+  const { filteredAndSorted, matchedInstances } = useMemo(() => {
     let result = worktrees;
 
     // Filter
@@ -243,6 +350,19 @@ export default function SessionsPage() {
           (wt.repositoryDisplayName?.toLowerCase().includes(lower) ?? false)
       );
     }
+
+    // Issue #4386: branch filter. An unusable pattern keeps everything.
+    // Issue #4389: role filter. Roles that could not be read keep everything (and say so).
+    const verdict = evaluateSessionsFilter(
+      result,
+      { branchPattern, role: roleCondition },
+      resolveSessionsRoster,
+      roleSource
+    );
+    result = result.filter((wt) => verdict.verdicts.get(wt.id)?.show ?? true);
+    const matched = verdict.roleFiltered
+      ? new Map(result.map((wt) => [wt.id, verdict.verdicts.get(wt.id)?.instanceIds ?? []] as const))
+      : undefined;
 
     // Sort
     const sorted = [...result];
@@ -290,8 +410,90 @@ export default function SessionsPage() {
       return isDefaultDirection ? comparison : -comparison;
     });
 
-    return sorted;
-  }, [worktrees, filterText, sortKey, sortDirection]);
+    return { filteredAndSorted: sorted, matchedInstances: matched };
+  }, [worktrees, filterText, branchPattern, roleCondition, roleSource, sortKey, sortDirection]);
+
+  const branchFilter = useMemo(
+    () => evaluateSessionsFilter([], { branchPattern, role: roleCondition }, undefined, roleSource),
+    [branchPattern, roleCondition, roleSource]
+  );
+  const activeFilterCount = branchFilter.activeCount;
+  const branchFilterError = branchFilter.error;
+  const roleFilterError = branchFilter.roleError;
+  const clearFilters = useCallback(() => {
+    noteUserChange();
+    setBranchPattern('');
+    setRoleCondition(EMPTY_ROLE_CONDITION);
+  }, [noteUserChange]);
+  const handleBranchPatternChange = useCallback(
+    (value: string) => {
+      noteUserChange();
+      setBranchPattern(value);
+    },
+    [noteUserChange]
+  );
+  const handleRoleChange = useCallback(
+    (role: SessionsRoleCondition) => {
+      noteUserChange();
+      // A default whose roles were all deleted keeps their ids so the list stays
+      // narrowed (#4388 I6). Choosing roles here replaces them: ids of roles that
+      // no longer exist are not carried into the user's condition (nor saved back).
+      setRoleCondition(
+        rolesReadiness === 'ready' && existingRoleIds && role.roleIds
+          ? { ...role, roleIds: role.roleIds.filter((id) => existingRoleIds.includes(id)) }
+          : role
+      );
+    },
+    [noteUserChange, rolesReadiness, existingRoleIds]
+  );
+  const openFilter = useCallback(() => {
+    setIsFilterOpen(true);
+    // Roles may have been added or instances started since the page opened.
+    reloadRoles();
+  }, [reloadRoles]);
+  const handleRefresh = useCallback(async () => {
+    reloadRoles();
+    await refresh();
+  }, [reloadRoles, refresh]);
+  const roleOptions = useMemo(
+    () => (roles === null ? null : roles.map((r) => ({ id: r.id, name: r.name }))),
+    [roles]
+  );
+  /** "Instance: role" for a matched instance (Issue #4389). */
+  const describeInstanceRole = (worktreeId: string, instance: AgentInstance | undefined, instanceId: string) => {
+    const summary = roleSource?.roleByWorktree[worktreeId]?.[instanceId];
+    const roleLabel =
+      summary?.kind === 'role'
+        ? summary.roleName
+        : summary?.kind === 'ambiguous'
+          ? tCommon('sessions.roleFilter.ambiguous')
+          : tCommon('sessions.roleFilter.noRole');
+    return tCommon('sessions.roleFilter.instanceRole', {
+      instance: instance ? getInstanceLabel(instance) : instanceId,
+      role: roleLabel,
+    });
+  };
+  const closeFilter = useCallback(() => setIsFilterOpen(false), []);
+  const filterPanel = (
+    <SessionsFilterPanel
+      branchPattern={branchPattern}
+      onBranchPatternChange={handleBranchPatternChange}
+      error={branchFilterError}
+      onClear={clearFilters}
+      roles={roleOptions}
+      role={roleCondition}
+      onRoleChange={handleRoleChange}
+      roleError={roleFilterError}
+      defaultActions={{
+        onSave: () => void defaultFilter.saveAsDefault(),
+        onReset: defaultFilter.resetToDefault,
+        canReset: defaultFilter.hasDefault,
+        saving: defaultFilter.saving,
+        saved: defaultFilter.saved,
+        saveError: describeSaveError(defaultFilter.saveError, tCommon),
+      }}
+    />
+  );
 
   const handleFilterChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setFilterText(e.target.value);
@@ -314,7 +516,7 @@ export default function SessionsPage() {
           container so the gesture only fires at the top and native PTR is
           suppressed. `refresh` re-fetches the shared worktrees cache. */}
       <PullToRefresh
-        onRefresh={refresh}
+        onRefresh={handleRefresh}
         enabled={isMobile}
         // Issue #2509: tile mode drops `container-custom`'s `max-w-7xl mx-auto`
         // and keeps only its gutters, so two 640px-wide tiles have room on a
@@ -342,6 +544,33 @@ export default function SessionsPage() {
             inputMode="search"
             enterKeyHint="search"
           />
+          <button
+            type="button"
+            onClick={openFilter}
+            data-testid="sessions-filter-button"
+            className="inline-flex items-center gap-1 rounded-md border border-input bg-surface px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Filter size={16} aria-hidden="true" />
+            {tCommon('sessions.branchFilter.button')}
+            {activeFilterCount > 0 && (
+              <span
+                data-testid="sessions-filter-count"
+                className="rounded-full bg-accent-600 px-1.5 text-xs text-white"
+              >
+                {activeFilterCount}
+              </span>
+            )}
+            {/* Issue #4388: differsFromDefault decides this mark, nothing else (I5). */}
+            {defaultFilter.differs && (
+              <span
+                data-testid="sessions-filter-differs"
+                title={tCommon('sessions.defaultFilter.differs')}
+                className="h-2 w-2 rounded-full bg-warning"
+              >
+                <span className="sr-only">{tCommon('sessions.defaultFilter.differs')}</span>
+              </span>
+            )}
+          </button>
           <Select value={sortKey} onValueChange={handleSortKeyChange}>
             <SelectTrigger
               className="w-40"
@@ -381,6 +610,33 @@ export default function SessionsPage() {
           <SessionsViewModeSelector value={viewMode} onChange={setViewMode} />
         </div>
 
+        {/* Issue #4388: roles the default named were deleted. They are left out
+            (never a silent widening to "everything") and the page says so. */}
+        {defaultFilter.droppedRoleIds.length > 0 && (
+          <p
+            role="status"
+            data-testid="sessions-default-filter-dropped-roles"
+            className="-mt-4 mb-6 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-sm text-foreground"
+          >
+            {tCommon('sessions.defaultFilter.droppedRoles')}
+          </p>
+        )}
+
+        {isMobile ? (
+          <SessionsFilterSheet isOpen={isFilterOpen} onClose={closeFilter}>
+            {filterPanel}
+          </SessionsFilterSheet>
+        ) : (
+          <Modal
+            isOpen={isFilterOpen}
+            onClose={closeFilter}
+            title={tCommon('sessions.branchFilter.title')}
+            size="sm"
+          >
+            {filterPanel}
+          </Modal>
+        )}
+
         {/*
           * [Issue #1050] Keep the list mounted across transient polling errors.
           * `worktrees` comes from a shared polling cache; a temporary fetch
@@ -393,6 +649,16 @@ export default function SessionsPage() {
           */}
         {hasWorktrees ? (
           <>
+            {/* Issue #4389: a chosen role condition that cannot be used is said, not hidden. */}
+            {roleFilterError && (
+              <div
+                className="mb-4 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+                role="status"
+                data-testid="sessions-role-unavailable-banner"
+              >
+                {tCommon('sessions.roleFilter.unavailable')}
+              </div>
+            )}
             {/* Non-blocking error banner (data already visible below) */}
             {error && (
               <div
@@ -413,7 +679,7 @@ export default function SessionsPage() {
                   {tCommon('sessions.noMatching')}
                 </div>
               ) : (
-                <SessionTileGrid worktrees={filteredAndSorted} />
+                <SessionTileGrid worktrees={filteredAndSorted} instanceIdsByWorktree={matchedInstances} />
               )
             ) : (
               <div className="space-y-2" data-testid="sessions-list">
@@ -437,14 +703,36 @@ export default function SessionsPage() {
                   // chip too, drawn as "cannot tell". Folded into the counter it
                   // would be one more gray dot — the pane a human should look at,
                   // hidden among the ones they can ignore.
-                  const agentStatuses = agents.map((agent) => {
-                    const entry = wt.sessionStatusByCli?.[agent];
-                    return {
-                      agent,
-                      status: deriveCliStatus(entry),
-                      unclassified: isUnclassifiedCliStatus(entry),
-                    };
-                  });
+                  // Issue #4389: under a role condition, only the matching
+                  // instances are shown and counted, read per instance.
+                  const matchedIds = matchedInstances?.get(wt.id);
+                  const instanceById = matchedIds
+                    ? new Map(resolveSessionsInstances(wt).map((i) => [i.id, i] as const))
+                    : null;
+                  const agentStatuses = matchedIds && instanceById
+                    ? matchedIds.map((id) => {
+                        const instance = instanceById.get(id);
+                        const entry =
+                          wt.sessionStatusByInstance?.[id] ??
+                          (instance && instance.id === instance.cliTool
+                            ? wt.sessionStatusByCli?.[instance.cliTool]
+                            : undefined);
+                        return {
+                          agent: id,
+                          label: instance ? getInstanceLabel(instance) : id,
+                          status: deriveCliStatus(entry),
+                          unclassified: isUnclassifiedCliStatus(entry),
+                        };
+                      })
+                    : agents.map((agent) => {
+                        const entry = wt.sessionStatusByCli?.[agent];
+                        return {
+                          agent: agent as string,
+                          label: getCliToolDisplayName(agent),
+                          status: deriveCliStatus(entry),
+                          unclassified: isUnclassifiedCliStatus(entry),
+                        };
+                      });
                   const workingAgents = agentStatuses.filter(
                     (a) => isWorkingStatus(a.status) || a.unclassified
                   );
@@ -461,7 +749,11 @@ export default function SessionsPage() {
                     // from re-firing on polling re-renders.
                     <Link
                       key={wt.id}
-                      href={`/worktrees/${wt.id}`}
+                      href={
+                        matchedIds && matchedIds.length > 0
+                          ? buildSessionRowHref({ worktreeId: wt.id, instanceId: matchedIds[0] })
+                          : `/worktrees/${wt.id}`
+                      }
                       style={{ animationDelay: staggerDelay(index) }}
                       className={`block bg-surface rounded-lg p-4 border transition-colors ${cardStateClasses} ${STAGGER_ENTER_CLASS}`}
                       data-testid={`session-item-${wt.id}`}
@@ -475,19 +767,31 @@ export default function SessionsPage() {
                           <div className="text-xs text-muted-foreground truncate">
                             {wt.name}
                           </div>
+                          {matchedIds && instanceById && (
+                            <div
+                              className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground"
+                              data-testid={`session-roles-${wt.id}`}
+                            >
+                              {matchedIds.map((id) => (
+                                <span key={id} data-testid={`session-role-${wt.id}-${id}`}>
+                                  {describeInstanceRole(wt.id, instanceById.get(id), id)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* [Issue #1078] Working agents as labelled chips; idle group collapsed */}
                         <div className="flex items-center gap-2 ml-4 flex-shrink-0" data-testid={`session-agents-${wt.id}`}>
-                          {workingAgents.map(({ agent, status, unclassified }) => (
+                          {workingAgents.map(({ agent, label, status, unclassified }) => (
                             <div key={agent} className="flex items-center gap-1" data-testid={`session-agent-${agent}`}>
                               <CliDot
                                 status={status}
-                                label={getCliToolDisplayName(agent)}
+                                label={label}
                                 unclassified={unclassified}
                               />
                               <span className="text-xs text-muted-foreground">
-                                {getCliToolDisplayName(agent)}
+                                {label}
                               </span>
                             </div>
                           ))}

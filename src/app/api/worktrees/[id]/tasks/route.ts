@@ -10,6 +10,13 @@
  *
  * The task row is created only after the contract validates: an unreadable
  * contract has nothing to record.
+ *
+ * Issue #4449: the body may carry the `origin` / `originEvidence` / `replyTo` of the
+ * `send --contract` the task is for. The tool policy judges the target this request
+ * resolves, and refuses with the send's 409 (`TOOL_POLICY_DENIED`, or the relay's
+ * `RELAY_TOOL_POLICY_DENIED`) before the row exists; the row is then written for that
+ * very target, never a default resolved again. A body with none of them (the web UI,
+ * an older CLI) is not affected.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -18,7 +25,8 @@ import { createTask, getWorktreeById, listTasks, type Task } from '@/lib/db';
 import { isValidInstanceId, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { ROLE_CONDITION_UNMET_CODE } from '@/lib/agent-roles/launch-errors';
 import { runningRoleProblem } from '@/lib/session/role-launch';
-import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
+import { resolveSessionTargetStrict } from '@/lib/session/resolve-session-target';
+import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
 import { loadTaskContract, TaskContractError } from '@/lib/tasks/contract-parser';
 import {
@@ -32,6 +40,7 @@ import { recordTaskSession } from '@/lib/verification/env-clean-gate';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { contractRoleWarning } from './contract-role-warning';
+import { findWriteToolPolicyRefusal, readWriteToolPolicyRequest } from '../send/write-tool-policy';
 
 const logger = createLogger('api/tasks');
 
@@ -129,6 +138,11 @@ export async function POST(
       }
     }
 
+    const policyRequest = readWriteToolPolicyRequest(payload);
+    if (!policyRequest.ok) {
+      return NextResponse.json({ error: policyRequest.error }, { status: 400 });
+    }
+
     // Contract issues are returned as a list, not one at a time: the loader
     // collects every violation and the caller prints all of them (exit 2).
     let contract;
@@ -170,10 +184,35 @@ export async function POST(
     // since then, this contract would run under a stale role: nothing is created or
     // sent. A session with no evidence here is one the send below starts, or one already
     // running that the answer warns about (#4132).
-    const roleTarget = resolveSessionTarget(db, id, {
+    //
+    // Issue #4449 (P2-1): strict, as `/send` and the Auto-Yes route resolve: a body
+    // naming a tool its instance's roster entry contradicts is 400, never judged (and
+    // written) as the tool it named while the session is another.
+    const resolution = resolveSessionTargetStrict(db, id, {
       instanceId: payload.instanceId as string | undefined,
       requestedCliTool: payload.cliToolId as CLIToolType | undefined,
     });
+    if (!resolution.ok) return sessionTargetConflictResponse(resolution.conflict);
+    const roleTarget = resolution.target;
+    // Issue #4449: the tool this row is written for — the target resolved once, just
+    // above — is the one judged and the one written (`/send` and the grant then go to the
+    // task's recorded target by `taskId`, never a default resolved again). Judged here,
+    // before the reads that follow, so a refusal comes before a role's (exit 33, not 32),
+    // and judged again right before `createTask`, with no await in between (I3): the
+    // awaits only read (role evidence, a warning), but the relay part of the verdict
+    // reads the roster of the `replyTo` session, which may move while they run.
+    const taskCliToolId: CLIToolType = roleTarget.cliToolId;
+    const judge = (): NextResponse | null => {
+      const refusal = findWriteToolPolicyRefusal(db, {
+        worktreeId: id,
+        tool: taskCliToolId,
+        instanceId: roleTarget.instanceId,
+        request: policyRequest.value,
+      });
+      return refusal ? NextResponse.json(refusal, { status: 409 }) : null;
+    };
+    const earlyRefusal = judge();
+    if (earlyRefusal) return earlyRefusal;
     const launchTarget = { worktreeId: id, cliToolId: roleTarget.cliToolId, instanceId: roleTarget.instanceId };
     const roleProblem = await runningRoleProblem(db, launchTarget, worktree.path);
     if (roleProblem !== null) {
@@ -185,9 +224,11 @@ export async function POST(
 
     const roleWarning = await contractRoleWarning(db, launchTarget, worktree.path);
 
+    const lateRefusal = judge();
+    if (lateRefusal) return lateRefusal;
     const task = createTask(db, {
       worktreeId: id,
-      cliToolId: (payload.cliToolId as string | undefined) ?? worktree.cliToolId ?? 'claude',
+      cliToolId: taskCliToolId,
       instanceId: (payload.instanceId as string | undefined) ?? null,
       contractPath,
       contract,

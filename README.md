@@ -41,6 +41,16 @@ As observed: one run, recorded on 2026-10-02. Not a benchmark.
 
 Open source (MIT) · runs on your machine · macOS / Linux / Windows (WSL2) · no app to install
 
+### Set up a team with one prompt
+
+If you want Level 3 on your own repository — a PM you talk to, a development lead, workers each in their own worktree, a reviewer and a judge — paste this into the agent CLI you already use (Claude Code, Codex, Command Code):
+
+```text
+Read https://kewton.github.io/CommandMate/team-setup.md and set up a CommandMate team for my repository with me. Explain each step before you run it, and ask me before you install anything, change files in my repository, create an instance or a role, change a permission, run `commandmate sync`, use a GitHub repository, turn on Auto Yes, or merge.
+```
+
+The agent asks which agent CLIs you have, which checks your repository runs and which GitHub Milestone to start with; you answer and approve. The guide starts by installing CommandMate if it is not there yet, has a team for a single agent CLI too, and keeps Antigravity out of every role an agent drives. Decisions an agent records wait for you on CommandMate's screen. Once CommandMate is installed, the same guide is `commandmate docs --section team-setup`.
+
 ---
 
 ## The problem
@@ -141,6 +151,18 @@ For you or for your agent, by level.
 | `commandmate docs --section agent-operations` | The full command guide, for your agent to read |
 
 Every command and flag is in the [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md); `commandmate --help` lists the options.
+
+---
+
+## Before you use Antigravity (agy)
+
+Section 6 of the [Google Antigravity Additional Terms of Service](https://antigravity.google/terms) and the [official FAQ](https://antigravity.google/docs/faq) restrict using Antigravity through third-party software or coding agents on consumer plans (Free, Google AI Plus, Pro and Ultra). A breach can lead to account suspension. With a consumer-plan sign-in, do not use CommandMate to:
+
+- send tasks to agy from another AI agent (`send`, `ask`, relays, `/orchestrate`)
+- run agy from Schedules or the daily summary
+- turn on Auto-Yes for agy
+
+There is no explicit confirmation from Google on whether starting agy and typing into it yourself through CommandMate is within the terms. For automation, use a Gemini API key or Gemini Enterprise. To tell CommandMate you use agy that way, set the server's environment variable `CM_ANTIGRAVITY_USAGE` to `api-key` or `enterprise` (unset means a consumer plan). The server reads it only when it starts, so restart the server after changing it (`commandmate stop`, then `commandmate start --daemon`); setting it only in the environment where you run the `commandmate` CLI has no effect. The setting is your own declaration — CommandMate does not read your credentials to check it, and it never reads or forwards agy's credentials. Terms: https://antigravity.google/terms · FAQ: https://antigravity.google/docs/faq (as of 2026-11-16). This is not legal advice.
 
 ---
 

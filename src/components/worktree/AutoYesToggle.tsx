@@ -10,13 +10,22 @@
  * Issue #225: Added duration propagation and HH:MM:SS countdown format
  * Issue #314: Added AutoYesToggleParams interface with stopPattern support
  * Issue #3863: the answer mode — chosen in the confirm dialog, shown beside the ON switch
+ * Issue #4436: a tool-policy refusal of the enabling (the handler rejects with
+ *   ToolPolicyRefusalError) shows its reason and links; the switch stays OFF.
+ * Issue #4456: that notice answers one enabling of one target. It belongs to the
+ *   target (worktree, instance, agent) and to the generation of the shown state
+ *   the request started in: a change of either (an instance switch, ON/OFF by the
+ *   CLI, the API or another tab) drops it, and an answer that arrives after such
+ *   a change is not shown. A new refusal for the same target is shown as before.
  */
 
 'use client';
 
-import React, { memo, useEffect, useState, useCallback } from 'react';
+import React, { memo, useEffect, useRef, useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/Switch';
+import { ToolPolicyRefusalNotice } from '@/components/ui/ToolPolicyRefusalNotice';
+import { ToolPolicyRefusalError, type ToolPolicyRefusalView } from '@/lib/tool-policy/refusal-view';
 import { AutoYesConfirmDialog } from './AutoYesConfirmDialog';
 import { formatTimeRemaining, AUTO_YES_COUNTDOWN_INTERVAL_MS } from '@/config/auto-yes-config';
 import type { AutoYesDuration } from '@/config/auto-yes-config';
@@ -82,6 +91,14 @@ export interface AutoYesToggleProps {
    * `recommended`.
    */
   answerMode?: AutoYesAnswerMode;
+  /**
+   * Issue #4456: the worktree and the instance this toggle arms, so a refusal is
+   * tied to the target it was given for (a tile or a phone tab switches the
+   * instance in place). Optional: omitted reads as "unknown" and only the agent
+   * name and the ON/OFF state key the refusal.
+   */
+  worktreeId?: string;
+  instanceId?: string;
 }
 
 export const AutoYesToggle = memo(function AutoYesToggle({
@@ -95,11 +112,15 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   blockedByContract = false,
   releasedByRestart = false,
   answerMode,
+  worktreeId,
+  instanceId,
 }: AutoYesToggleProps) {
   const t = useTranslations('autoYes');
   const [timeRemaining, setTimeRemaining] = useState<string>('');
   const [toggling, setToggling] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  // Issue #4436: the refusal of the last enabling, until the next attempt.
+  const [refusal, setRefusal] = useState<ToolPolicyRefusalView | null>(null);
   // Issue #959: latch that flips the UI to OFF the instant the countdown hits
   // 00:00, so the toggle no longer shows ON while the server-side state catches
   // up on the next poll.
@@ -148,6 +169,21 @@ export const AutoYesToggle = memo(function AutoYesToggle({
   // of truth so the visual state, click behaviour and countdown all agree.
   const displayEnabled = enabled && !hasExpired;
 
+  // Issue #4456: the target and the shown state a refusal belongs to. Keyed on
+  // `displayEnabled` (not `enabled`): a poll catching up with a local expiry
+  // (#959) changes nothing on screen and must not drop a refusal given since.
+  // Each change of the key starts a new generation; adjusted during render (not
+  // in an effect) so no frame shows a refusal of a target or state since left.
+  const refusalKey = JSON.stringify([worktreeId ?? '', instanceId ?? '', cliToolName ?? '', displayEnabled]);
+  const [refusalScope, setRefusalScope] = useState({ key: refusalKey, generation: 0 });
+  if (refusalScope.key !== refusalKey) {
+    setRefusalScope({ key: refusalKey, generation: refusalScope.generation + 1 });
+    if (refusal !== null) setRefusal(null);
+  }
+  // Read when an answer arrives (outside any render): the generation now shown.
+  const refusalGenerationRef = useRef(refusalScope.generation);
+  refusalGenerationRef.current = refusalScope.generation;
+
   const handleToggle = useCallback(() => {
     if (displayEnabled) {
       // OFF: execute directly
@@ -155,6 +191,7 @@ export const AutoYesToggle = memo(function AutoYesToggle({
       onToggle({ enabled: false }).finally(() => setToggling(false));
     } else {
       // ON: show confirmation dialog
+      setRefusal(null);
       setShowConfirmDialog(true);
     }
   }, [displayEnabled, onToggle]);
@@ -164,7 +201,17 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     setToggling(true);
     // Issue #3863: the dialog names a mode only when it is not the default, and
     // so does this call (an omitted `answerMode` is the default).
+    setRefusal(null);
+    // Issue #4456: the generation this request started in; a refusal answering it
+    // is kept only while the same target and state are still shown.
+    const startedIn = refusalGenerationRef.current;
     onToggle({ enabled: true, duration, stopPattern, ...(chosenMode ? { answerMode: chosenMode } : {}) })
+      .catch((err: unknown) => {
+        // Only a tool-policy refusal is shown; any other rejection is logged, not shown.
+        if (err instanceof ToolPolicyRefusalError) {
+          if (refusalGenerationRef.current === startedIn) setRefusal(err.view);
+        } else console.error('[AutoYesToggle] Error toggling auto-yes:', err);
+      })
       .finally(() => setToggling(false));
   }, [onToggle]);
 
@@ -172,8 +219,12 @@ export const AutoYesToggle = memo(function AutoYesToggle({
     setShowConfirmDialog(false);
   }, []);
 
+  // Issue #4436: wrapping is only for the refusal notice; without one the row's classes
+  // are the same as before (the composer's meta row must stay one line, #2598).
+  const showRefusal = !displayEnabled && refusal !== null;
+  const wrap = showRefusal ? ' flex-wrap' : '';
   return (
-    <div className={inline ? 'flex items-center gap-2' : 'flex items-center gap-3 px-4 py-2 bg-surface-2 border-b border-border'}>
+    <div className={inline ? `flex${wrap} items-center gap-2` : `flex${wrap} items-center gap-3 px-4 py-2 bg-surface-2 border-b border-border`}>
       {/* Toggle switch (Issue #1080: shared Radix ui/Switch) */}
       <Switch
         checked={displayEnabled}
@@ -229,6 +280,14 @@ export const AutoYesToggle = memo(function AutoYesToggle({
         >
           {t('releasedByRestart')}
         </span>
+      )}
+
+      {showRefusal && refusal && (
+        <ToolPolicyRefusalNotice
+          refusal={refusal}
+          className="basis-full text-xs text-warning-foreground"
+          data-testid="auto-yes-tool-policy-refusal"
+        />
       )}
 
       <AutoYesConfirmDialog

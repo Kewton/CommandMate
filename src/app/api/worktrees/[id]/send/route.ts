@@ -28,6 +28,13 @@
  * its envelope in front of the operator's body, and records how the send ended;
  * every answer after the field was read carries `ask` (`lib/ask/ask-send`). A
  * body without `ask` is answered byte for byte as before.
+ *
+ * Issue #4437: the body's `origin` (who started the send, as the CLI reads it)
+ * goes to the tool policy right after the reservations and before anything
+ * else — the session's ownership, the role's save, a start, a key. A refusal
+ * is 409 `TOOL_POLICY_DENIED`, recorded `not-sent` (`tool-policy-denied`); a
+ * bound relay is withdrawn and a reserved ask settled `not_sent`. No `origin`
+ * (the web UI, an older CLI) is a person's send, as before.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -51,8 +58,10 @@ import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import type { RelaySendOutcome } from '@/lib/relay/relay-bind';
 import { evaluateRelayAfterSend } from '@/lib/relay/relay-delivery';
+import { withdrawRelay } from '@/lib/relay/relay-service';
 import { resolveRespondAgent, validateSendRequest, type SendMessageRequest } from './send-request';
 import {
+  findBoundRelayToolPolicyRefusal,
   judgeTurnOpenAtSend,
   readTurnAtInput,
   reportsTurns,
@@ -68,6 +77,7 @@ import {
 } from './send-session-start';
 import { resolveSendImagePath } from './send-image-path';
 import { answerSendFailure } from './send-failure';
+import { findToolPolicyDenial, toolPolicyDeniedResponse } from './send-tool-policy';
 import {
   checkRunningRole,
   chooseNewOpencodeConversation,
@@ -128,7 +138,20 @@ export async function POST(
       : { kind: 'failed', attempt: relay.attempt }
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
+  if (relay.withdraw) withdrawRefusedRelay(binding.relayId);
   return withBody(response, { relayId: binding.relayId, sendOutcome });
+}
+
+/** Issue #4437: withdraw a bound relay the tool policy refused the send of. Never throws. */
+function withdrawRefusedRelay(relayId: string): void {
+  try {
+    withdrawRelay(getDbInstance(), relayId);
+  } catch (error) {
+    logger.warn('relay-tool-policy-withdraw-failed', {
+      relayId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /** Issue #4344: what this request did with the body's `ask`. */
@@ -254,6 +277,52 @@ async function handleSend(
     if (!reserved.ok) return reserved.response;
     relay.binding = reserved.value;
 
+    // Issue #3759: the attempts this route refuses before the send service are
+    // recorded too, so `lastSend` names the latest one.
+    const sendAttemptInstance = { worktreeId: id, cliToolId, instanceId: instanceId ?? cliToolId };
+    // Issue #4011: the same record is this request's attempt, so `sendOutcome`
+    // answers `not_sent` for it whether or not a relay is bound.
+    const recordNotSent = (reason: SendAttemptReason): void => {
+      recordSendAttempt(sendAttemptInstance, {
+        state: 'not-sent',
+        reason,
+        content: trimmedContent,
+        observedGeneration: observedInputGeneration,
+      });
+      relay.attempt = 'not-sent';
+    };
+
+    // Issue #4437 (design §1.3): the tool policy, before the session's ownership,
+    // the role's save (a refusal leaves no setting) and any start or key — after
+    // the reservations, so a bound relay and a reserved ask close `not_sent`.
+    const toolPolicyDenial = findToolPolicyDenial({
+      tool: cliToolId,
+      operation: body.ask !== undefined ? 'ask' : 'send',
+      origin: validated.value.origin,
+      originEvidence: body.originEvidence,
+      worktreeId: id,
+      instanceId: instanceId ?? cliToolId,
+    });
+    if (toolPolicyDenial) {
+      recordNotSent('tool-policy-denied');
+      relay.withdraw = true;
+      // An ask the tool cannot attribute was never reserved; it says nothing was sent either.
+      if (ask.answer && !ask.askId) ask.answer = { ...ask.answer, sendState: 'not_sent' };
+      return toolPolicyDeniedResponse(toolPolicyDenial);
+    }
+
+    // Issue #4496: the bound relay's rule 0 with the tool this send types into — a relay
+    // opened by a CLI that did not name the tool judged an ad-hoc end by the default.
+    if (relay.binding) {
+      const relayRefusal = findBoundRelayToolPolicyRefusal(db, relay.binding.relayId, cliToolId);
+      if (relayRefusal) {
+        recordNotSent('tool-policy-denied');
+        relay.withdraw = true;
+        if (ask.answer && !ask.askId) ask.answer = { ...ask.answer, sendState: 'not_sent' };
+        return NextResponse.json(relayRefusal, { status: 409 });
+      }
+    }
+
     // Get CLI tool instance from manager
     const manager = CLIToolManager.getInstance();
     const cliTool = manager.getTool(cliToolId);
@@ -280,20 +349,6 @@ async function handleSend(
     // nor adopted, and no session of our own is started over it.
     const sessionName = cliTool.getSessionName(id, instanceId);
     const ownership = await checkSessionOwnership(sessionName, worktree.path);
-    // Issue #3759: the attempts this route refuses before the send service are
-    // recorded too, so `lastSend` names the latest one.
-    const sendAttemptInstance = { worktreeId: id, cliToolId, instanceId: instanceId ?? cliToolId };
-    // Issue #4011: the same record is this request's attempt, so `sendOutcome`
-    // answers `not_sent` for it whether or not a relay is bound.
-    const recordNotSent = (reason: SendAttemptReason): void => {
-      recordSendAttempt(sendAttemptInstance, {
-        state: 'not-sent',
-        reason,
-        content: trimmedContent,
-        observedGeneration: observedInputGeneration,
-      });
-      relay.attempt = 'not-sent';
-    };
     if (ownership.verdict === 'foreign') {
       recordNotSent('foreign-session');
       return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });

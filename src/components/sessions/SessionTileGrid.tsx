@@ -77,9 +77,11 @@ export const SESSION_TILE_ROOT_MARGIN = '560px';
 const SessionTileSlot = memo(function SessionTileSlot({
   worktree,
   connectivity,
+  instanceIds,
 }: {
   worktree: Worktree;
   connectivity: PendingConnectivity;
+  instanceIds?: readonly string[];
 }) {
   const { ref, inViewport } = useInViewport<HTMLDivElement>({
     rootMargin: SESSION_TILE_ROOT_MARGIN,
@@ -87,7 +89,12 @@ const SessionTileSlot = memo(function SessionTileSlot({
 
   return (
     <div ref={ref} className={`min-w-0 ${SESSION_TILE_HEIGHT_CLASS}`}>
-      <SessionTile worktree={worktree} enabled={inViewport} connectivity={connectivity} />
+      <SessionTile
+        worktree={worktree}
+        enabled={inViewport}
+        connectivity={connectivity}
+        instanceIds={instanceIds}
+      />
     </div>
   );
 });
@@ -95,10 +102,17 @@ const SessionTileSlot = memo(function SessionTileSlot({
 export interface SessionTileGridProps {
   /** Already filtered and sorted by the page; rendered in the order given. */
   worktrees: Worktree[];
+  /**
+   * Issue #4389: when the page filters by role, the matching instances per
+   * worktree id; each tile then switches only between those. Omitted when no role
+   * condition is applied (every tile keeps its whole roster).
+   */
+  instanceIdsByWorktree?: ReadonlyMap<string, readonly string[]>;
 }
 
 export const SessionTileGrid = memo(function SessionTileGrid({
   worktrees,
+  instanceIdsByWorktree,
 }: SessionTileGridProps) {
   const connectivity = usePendingConnectivity();
 
@@ -110,7 +124,12 @@ export const SessionTileGrid = memo(function SessionTileGrid({
       {worktrees.map((worktree) => (
         // Keyed by id so a polling re-render never remounts a tile — remounting
         // one would drop its transcript and re-attach its poller.
-        <SessionTileSlot key={worktree.id} worktree={worktree} connectivity={connectivity} />
+        <SessionTileSlot
+          key={worktree.id}
+          worktree={worktree}
+          connectivity={connectivity}
+          instanceIds={instanceIdsByWorktree?.get(worktree.id)}
+        />
       ))}
     </div>
   );

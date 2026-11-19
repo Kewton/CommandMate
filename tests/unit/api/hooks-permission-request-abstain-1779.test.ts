@@ -24,6 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { withUsageDeclaration } from '../../helpers/usage-declaration';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -276,6 +277,9 @@ describe('a rejected request stays a 4xx', () => {
 });
 
 describe('the ordinary adjudication path, on agy', () => {
+  // Issue #4436: answering antigravity with Auto-Yes presupposes a declared usage plan.
+  withUsageDeclaration('api-key');
+
   const QUERY = `?tool=antigravity&worktreeId=${WT}&instanceId=antigravity`;
 
   it('answers `allow` when Auto-Yes is on', async () => {

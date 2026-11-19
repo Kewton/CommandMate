@@ -15,6 +15,7 @@ import { loadClientEnv, resolveServerEndpoint } from './server-url';
 import { ApiError, handleApiError } from './api-client-errors';
 import type { ApiErrorPayload } from './api-client-errors';
 import { DeadlineExceededError } from './api-client-deadline';
+import { ToolPolicyDeniedError, clientWarning, isToolPolicyRoute, toolPolicyDenialFromResponse } from './tool-policy-failure';
 
 export {
   ApiError,
@@ -69,17 +70,40 @@ export function isValidInstanceId(id: string): boolean {
  * [SEC4-01] Warns on stderr when --token flag is used.
  *
  * @param options - Options object with optional token
+ * @param warn - Where the warning goes (default: stderr). Issue #4436: a command
+ *   whose first stderr line is a contract (the `auto-yes` refusal) collects it
+ *   and prints it after that line.
  * @returns Resolved token or undefined
  */
-export function resolveAuthToken(options?: { token?: string }): string | undefined {
+export function resolveAuthToken(
+  options?: { token?: string },
+  warn: (line: string) => void = (line) => console.error(line)
+): string | undefined {
   if (options?.token) {
     // [SEC4-01] Warn about token exposure in process list
-    console.error(
+    warn(
       'Warning: --token flag exposes token in process list and shell history. Use CM_AUTH_TOKEN environment variable instead.'
     );
     return options.token;
   }
   return process.env.CM_AUTH_TOKEN;
+}
+
+/** What {@link ApiClient.post} does to a body before it goes (Issue #4437). */
+export type PostBodyStamp = (path: string, body: unknown) => unknown;
+
+let postBodyStamp: PostBodyStamp | null = null;
+
+/**
+ * Set what every {@link ApiClient.post} of this process does to its body first, or
+ * null for nothing (Issue #4437). `send`, `ask` and `respond` set `send-origin.ts`'s
+ * `withSendOrigin`, so every request that types into a session — the strict
+ * respond's own client included — says who is sending. A hook rather than an import:
+ * reading the origin runs tmux, and this module is reached from `lib/brief` and
+ * `lib/handoff`, which the guards keep free of it.
+ */
+export function setPostBodyStamp(stamp: PostBodyStamp | null): void {
+  postBodyStamp = stamp;
 }
 
 /**
@@ -105,7 +129,14 @@ export class ApiClient {
   /** Epoch ms after which every request of this client fails (Issue #3983). */
   private deadlineAt?: number;
 
-  constructor(options?: { baseUrl?: string; token?: string }) {
+  /**
+   * @param options.onWarning - Issue #4436: where the construction warnings
+   *   (`--token` exposure, a token over plain HTTP) go. Default: stderr, at once —
+   *   or, Issue #4437, held while `send` / `ask` / `respond` hold them
+   *   (`clientWarning`), so a tool-policy refusal is the first stderr line.
+   */
+  constructor(options?: { baseUrl?: string; token?: string; onWarning?: (line: string) => void }) {
+    const warn = options?.onWarning ?? clientWarning;
     // Issue #1743: resolve through loadClientEnv() rather than `process.env.CM_PORT || '3000'`.
     // Reading process.env alone ignored ~/.commandmate/.env, so with two servers running,
     // `status` reported the .env port while every ApiClient-based subcommand (ls / send / wait
@@ -122,11 +153,11 @@ export class ApiClient {
       );
     }
     this.baseUrl = options?.baseUrl || resolveServerEndpoint(loadClientEnv()).url;
-    this.token = resolveAuthToken(options);
+    this.token = resolveAuthToken(options, warn);
 
     // [SEC4-02] Warn about HTTP to non-localhost
     if (this.token && !this.baseUrl.startsWith('https://') && !isLocalhost(this.baseUrl)) {
-      console.error(
+      warn(
         'Warning: Connecting to remote server over HTTP. Auth token will be sent in plaintext. Use HTTPS for non-localhost connections.'
       );
     }
@@ -287,9 +318,14 @@ export class ApiClient {
   /**
    * HTTP POST request
    * [DR1-05] Generic type parameter specified at call site
+   *
+   * Issue #4437: the body goes through the stamp the command set
+   * ({@link setPostBodyStamp}): `send` / `ask` / `respond` put who is sending on
+   * every request that types into a session, the strict respond's included.
    */
   async post<T>(path: string, body?: unknown): Promise<T> {
-    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, body, this.startDeadline());
+    const stamped = postBodyStamp ? postBodyStamp(path, body) : body;
+    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, stamped, this.startDeadline());
   }
 
   /**
@@ -337,6 +373,10 @@ async function sendWithBody<T>(
       // Issue #1637: read the body first — handleApiError needs it to surface
       // the server's reason for a 5xx instead of "check the logs".
       const payload = await bounded(deadline, readErrorPayload(response));
+      // Issue #4437: the tool policy's 409 on the routes this CLI sends and opens relays
+      // through is exit 33, not an HTTP failure (`tool-policy-failure.ts`).
+      const denial = isToolPolicyRoute(path) ? toolPolicyDenialFromResponse(response.status, payload, body) : null;
+      if (denial) throw denial;
       const errResult = handleApiError(null, response.status, payload, { serverUrl: baseUrl });
       throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
     }
@@ -350,7 +390,7 @@ async function sendWithBody<T>(
       const classified = deadline.classify(error);
       if (classified instanceof DeadlineExceededError) throw classified;
     }
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError || error instanceof ToolPolicyDeniedError) throw error;
     const errResult = handleApiError(error);
     throw new ApiError(errResult.message, errResult.exitCode, undefined, undefined, error);
   } finally {

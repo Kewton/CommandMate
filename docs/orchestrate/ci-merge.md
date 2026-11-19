@@ -79,8 +79,18 @@ self-hosted のランナーはローカルのゲートと同じマシンの資�
 - 広い rename・移動で、import の関係そのものが変わる
 - 多くのモジュールが読む共有の状態・型の**意味**を変える（署名が同じでも読者が多いもの。例: `src/lib/db` の行の意味、`src/types` の共通の型）
 
-`unit-related` は、`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイルが変わると自分でテスト全体に切り替わる
-（`scripts/run-related-unit-tests.mjs` の `mode=full`）。そのときに `unit` を重ねて足さない（同じ全体を 2 回走らせるだけ）。
+`unit-related` は、`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイルが変わってもテスト全体に切り替わらない
+（#4467。下の「V3 の後」のとおり `mode=related reason=non-source:<ファイル>`）。全体が要る変更は上の 3 つのとおり契約で `unit` を選ぶ。
+
+**手元ではテスト全体に切り替えない。全体は CI に任せる（人の承認 2026-11-19、Sprint 7 のレーン V3 で実装）。**
+実測（2026-11-18、run 3374〜3427）: docs・README・`.claude/**`・`scripts/**` を 1 つ変えるだけで `mode=full` になり、ほぼ全 PR が
+手元で全体（3072 ファイル・約 5.7 万テスト）を 50〜72 分走らせていた。`cpu.heavy` の待ちも 22〜78 分で、25 本中 14 本が待ち切り
+（`reason=mutex-wait`、exit 99）で結果が出なかった。CI の `Unit Tests` は同じ全体を 4 分割で流し、CI 全体が 17〜23 分で終わる。
+- V3 の後: 非ソースの変更でも `related`（変更から辿れるテスト＋リポのファイルを読む試験＝`findTextScanTests` の全件）だけを流す。
+  ログは `mode=related reason=non-source:<ファイル>`
+- マージの関門は変えない: CI の `Unit Tests`（全体）は必須で、`merge-pr --last` が全チェックの合格を待つ。手元で見逃したものは CI で落ち、
+  手戻りが 1 回（約 20 分）増えるだけ
+- V3 のマージまで: `mode=full` の run は 1 本 1 時間前後かかる前提で、1 コミット 1 本・新しいコミットを待ってから流す（下の資源制御の節）
 
 **同じ PR の同じ tree で、テスト全体を重ねない。** テストのゲートの合格は、その HEAD（＝その tree）と、その環境（`env=` の manifest、
 `verifyEnvState` が `same`）にだけ効く。この 2 つが同じなら、レビューの往復で新しいコミットが無い再検証・precheck・merge 前の確認で
@@ -128,6 +138,14 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **run の記録**: `verify` / `precheck` の行は、`durationSec` を `queueSec`（枠の待ち）・`mutexSec`（ロックの待ち）・`runSec`（実行）に
   分けて持てる（`run-log.mjs append --queue-sec / --mutex-sec / --run-sec`。無い行は今までどおり読む）。precheck は自分で
   `mutexSec`・`runSec` を書く
+- **ゲートの `status: running` は「実行中」とは限らない**: `cpu.heavy` を待っている間も `running` と出る。始まったかは
+  `log_tail` の `[mutex] waited=` の行（ロックを取ると出る）か、`vitest` のプロセスがその worktree で動いているかで確かめる
+  （2026-11-18、PM が `running` を開始と読み違え、A1 の順の調整を誤った）
+- **1 コミットに verify は 1 本**: ワーカーの verify が走っている同じコミットに、リーダーの `wait-verify` や再試行を重ねない。
+  古いコミットの run が列に残ると、同じ worktree の新しい verify は 409 で断られる。run の取消し（`POST /api/worktrees/<id>/verify/runs/<run>/cancel`）は
+  エージェントからは自動の許可の判定で断られることがある。そのときは迂回せず、PM が人へ取消しを頼む（承認は run ごと）。
+  **同じ worktree の古い head の verify run は、PM が取り消してよい**（人の決定、mem c31afe28）。古い head の run は新しいコミットの裁定にならず、列と mutex を塞ぐだけだから。
+  取り消すのは古い head の run だけで、現在の head の run・別の worktree の run・合格の記録は取り消さない
 - **待ち切った verify**: `reason=mutex-wait` の SKIP だけで exit 99 になった検証は、`wait-verify.mjs` が `--mutex-retries`（既定 2）回まで
   自動で並び直す（#3938）。手順と記録の読み方は docs/orchestrate/exit-codes.md#3-4-99-の対応
 
@@ -177,12 +195,21 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 手前のガードが奥のテストを覆ったら、期待値を書き換えて逃げず、逃がし弁のフラグを渡して両方の保証を別々に固定する。2 本が同じテストファイルの同じ位置に `describe` を足すと、衝突が共有行で分断され、両側保持では波括弧が壊れる。ヘッダ部だけを `git merge-file` で 3-way マージし、各 describe ブロックを順に連結する。検算は `grep -n '^describe('` の並び・括弧の数・`tsc`・当該 suite。
 
+## 6-2-1 受け入れ・リリースの間の develop へのマージ
+
+（人の決定、mem c31afe28。）**受け入れ・リリースの間も、develop へのマージは続ける。** 止めるのは、**main への PR を作ってから、マージバック（main の変更を develop へ戻すマージ）が済むまで**の間だけ。
+- 受け入れの版は、判定する commit を決めて固定する（比べる版を PM が決める）。その後に develop へ入ったものは、次の受け入れの対象になる
+- 関門は変えない。develop へのマージは今までどおり CI の全チェックの合格（`--last`）が条件で、止める区間でも main への PR の CI・承認は弱めない
+- 止める区間の間は、develop へのマージも main への PR の追加も、PM の合図まで待つ（祖先関係を壊さないため）
+
 ## 6-2 「CI が通れば」の許可と全チェックの合格
 
 `--last` なしの `merge-pr.mjs` は、全 `unit` の検証と `--build` の precheck がある PR の `Build` も `Unit Tests` も待たない（取り込み後に重い段を CI に任せた HEAD の `Unit Tests` は待つ。下の「6-2 取り込み後の重い段」）。設計どおりだが、利用者の許可の「CI が通れば」とは食い違う。
 実例（#4135）: PR #4125 を、開いて 22 秒でマージした（`checks=pending:16`）。push の CI は後で全 17 ジョブ合格で、結果として害は無かった。
 
 決定: `merge-pr` にオプションは足さない。全チェックを待つ経路は既存の `--last` で足りるので、許可の条件が「CI が通れば」の run ではどの PR にも付ける規則にする。
+
+`--last` なしの待ちの範囲（決定 89aee71f）: 待つのは `Build` と `Unit Tests` だけ（それぞれ下の「6-2 Unit Tests と Build を待つ例外」の条件のとき）で、E2E などほかのチェックの `pending` は待たない。**E2E を含む全チェックの合格が条件のマージには、`--last` を付ける。**
 
 全チェックの合格は `judgeChecks` の判定そのもの: すべての `bucket` が `pass` か `skipping`。`skipping` は CI が条件で飛ばしたジョブで、待っても結果は変わらないので合格に数える。`pending` は待ち、`fail` / `cancel` はマージしない。
 

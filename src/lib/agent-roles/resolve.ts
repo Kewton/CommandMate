@@ -62,7 +62,7 @@ import { existsSync } from 'fs';
 import type Database from 'better-sqlite3';
 import { getAgentRole, getInstanceRoleState, getRepositoryRoleStates, getSystemRoleDefaults } from '@/lib/db/agent-roles-db';
 import { getAllRepositories, getRepositoryById, type Repository } from '@/lib/db/db-repository';
-import { getWorktreeById } from '@/lib/db/worktree-db';
+import { getWorktreeById, getWorktrees } from '@/lib/db/worktree-db';
 import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { GitCommonDirProbe } from '@/lib/git/git-common-dir';
@@ -363,6 +363,105 @@ export function withSettledRepositoryMembership<R>(
     deps,
     build
   );
+}
+
+/** How many git processes the server-wide read runs at once (Issue #4387). */
+const SERVER_PROBE_CONCURRENCY = 8;
+
+/**
+ * The membership of every worktree on the server at once (Issue #4387), for a read
+ * that shows them all side by side. Same answers as {@link withSettledWorktreeMembership}
+ * for each worktree, but git is asked about each path once (every root, and each
+ * worktree's own path) rather than every root again per worktree, and the check that
+ * nothing moved during the wait covers all of them together.
+ *
+ * @param build - Same contract as for one worktree: runs in the synchronous stretch
+ *   with the final check, and returns plain data
+ * @throws {MembershipUnsettledError} The worktrees or the roots never held still
+ */
+export async function withSettledServerMemberships<R>(
+  db: Database.Database,
+  deps: RoleResolverDeps,
+  build: (worktrees: Worktree[], membershipOf: (worktreeId: string) => RoleRepositoryMembership) => R
+): Promise<R> {
+  const target = worktreeTarget(db, '');
+  const signatureOf = (worktrees: Worktree[]): string =>
+    // By id: the list's own order follows `updated_at`, which says nothing about membership.
+    JSON.stringify(
+      worktrees.map((worktree) => [worktree.id, target.signature(worktree)]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    );
+  for (let attempt = 0; attempt < MAX_MEMBERSHIP_ATTEMPTS; attempt += 1) {
+    const worktrees = getWorktrees(db);
+    const asked = `${signatureOf(worktrees)}|${rootsSignature(db)}`;
+    const questions = worktrees.map((worktree) => target.question(worktree));
+    const roots = getAllRepositories(db);
+
+    const probe = roots.length > 0 ? await loadProbe(deps) : null;
+    const asking = new Map<string, Promise<GitCommonDirProbe>>();
+    const limit = createLimiter(SERVER_PROBE_CONCURRENCY);
+    const ask = (path: string): Promise<GitCommonDirProbe> => {
+      let answer = asking.get(path);
+      if (!answer) {
+        answer = limit(() => (probe as (p: string) => Promise<GitCommonDirProbe>)(path));
+        asking.set(path, answer);
+      }
+      return answer;
+    };
+    let rootProbes: GitCommonDirProbe[] = [];
+    let identities: Array<string | null> = questions.map(() => null);
+    if (probe) {
+      [rootProbes, identities] = await Promise.all([
+        Promise.all(roots.map((root) => ask(root.path))),
+        Promise.all(
+          questions.map(async (question) => {
+            for (const path of question.identityPaths) {
+              const identity = commonDirOf(await ask(path));
+              if (identity !== null) return identity;
+            }
+            return null;
+          })
+        ),
+      ]);
+    }
+
+    // The synchronous stretch: compare, then build.
+    const current = getWorktrees(db);
+    if (`${signatureOf(current)}|${rootsSignature(db)}` !== asked) continue;
+    const memberships = new Map<string, RoleRepositoryMembership>();
+    worktrees.forEach((worktree, index) => {
+      memberships.set(
+        worktree.id,
+        membershipFrom(
+          questions[index],
+          {
+            roots,
+            identity: identities[index],
+            commonDirs: rootProbes.map(commonDirOf),
+            notRepository: rootProbes.map((answer) => answer.kind === 'not-repository'),
+          },
+          deps
+        )
+      );
+    });
+    return build(current, (worktreeId) => memberships.get(worktreeId) ?? NO_MEMBERSHIP);
+  }
+  throw new MembershipUnsettledError();
+}
+
+/** At most `concurrency` of the given tasks running at once, in the order they were given. */
+function createLimiter(concurrency: number): <T>(task: () => Promise<T>) => Promise<T> {
+  let running = 0;
+  const waiting: Array<() => void> = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (running >= concurrency) await new Promise<void>((resolve) => waiting.push(resolve));
+    running += 1;
+    try {
+      return await task();
+    } finally {
+      running -= 1;
+      waiting.shift()?.();
+    }
+  };
 }
 
 function freezeRole(db: Database.Database, roleId: string): ResolvedRole {

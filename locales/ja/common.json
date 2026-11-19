@@ -29,7 +29,34 @@
       "years": "{count}年前"
     },
     "tileAriaLabel": "{branch} のセッションタイル",
-    "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス"
+    "tileInstanceAriaLabel": "このタイルに表示するエージェントインスタンス",
+    "branchFilter": {
+      "button": "絞り込み",
+      "title": "絞り込み",
+      "label": "ブランチ名（正規表現）",
+      "placeholder": "例: ^feature/",
+      "errorInvalid": "正規表現が正しくありません。この条件は使っていません。",
+      "errorTooLong": "200 文字までです。この条件は使っていません。",
+      "clear": "クリア"
+    },
+    "roleFilter": {
+      "label": "ロール",
+      "noRole": "ロールなし",
+      "ambiguous": "判定できない",
+      "unavailable": "ロールを読めなかったため、ロールの条件は使っていません。",
+      "rolesLoadError": "ロールの一覧を読めませんでした。",
+      "instanceRole": "{instance}: {role}"
+    },
+    "defaultFilter": {
+      "save": "この条件をデフォルトにする",
+      "reset": "デフォルトに戻す",
+      "saving": "保存しています…",
+      "saved": "この条件をデフォルトにしました。",
+      "saveInvalid": "デフォルトにできませんでした: {detail}",
+      "saveFailed": "デフォルトを保存できませんでした。もう一度お試しください。",
+      "droppedRoles": "削除されたロールが含まれていました。その分は使わずに絞り込んでいます。",
+      "differs": "デフォルトと違う条件"
+    }
   },
   "nav": {
     "sessions": "セッション",
@@ -861,5 +888,9 @@
       "claimed": "別の送信が引き継ぎを渡しています。",
       "consumed": "この区切りの引き継ぎは使い済みでした（別の送信で渡されたか、サーバーの再起動の前に結果の分からない送信がありました）。本文だけを送りました。"
     }
+  },
+  "toolPolicyRefusal": {
+    "terms": "利用規約（Google Antigravity）",
+    "faq": "FAQ（Google Antigravity）"
   }
 }

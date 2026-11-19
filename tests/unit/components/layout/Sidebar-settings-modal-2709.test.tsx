@@ -22,6 +22,7 @@ import { WorktreeSelectionProvider } from '@/contexts/WorktreeSelectionContext';
 import { SettingsDialogProvider, useSettingsDialog } from '@/contexts/SettingsDialogContext';
 import { Modal } from '@/components/ui/Modal';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
+import { waitForModalSettled } from '@tests/helpers/modal-settled';
 import type { Worktree } from '@/types/models';
 
 // The menu item is matched by its English label; resolve it through
@@ -151,7 +152,9 @@ describe('Sidebar footer settings button (Issue #2709)', () => {
       const trigger = await renderSidebarAndOpenMenu(1024);
 
       fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
-      await waitFor(() => expect(screen.getByTestId('modal-panel')).toBeInTheDocument());
+      // Issue #4413: the panel is in the DOM before Modal listens for Escape (the
+      // modal opens outside act()); an Escape sent then is lost. Wait for its effects.
+      await waitForModalSettled();
 
       fireEvent.keyDown(document, { key: 'Escape' });
 

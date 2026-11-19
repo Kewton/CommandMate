@@ -28,6 +28,7 @@ import {
   runIdOf,
   summarizeVerdict,
   verifyTiming,
+  VERIFY_BUSY_CAP_SEC,
 } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
 const HEAD_A = 'a'.repeat(40);
@@ -229,6 +230,8 @@ function harness({
         : { instanceId: resolved[selector] ?? selector, ...(resolvedTools[selector] ? { cliToolId: resolvedTools[selector] } : {}) },
     sleep: (ms: number) => {
       sleeps.push(ms);
+      // #4463: a wait that never gives up fails the test instead of hanging the worker.
+      if (sleeps.length > 100_000) throw new Error('the wait did not end in a finite time');
       clock += ms;
     },
     now: () => new Date(clock),
@@ -1334,6 +1337,87 @@ describe('another run of the worktree is waited out, and only this call’s run 
     expect(main(argv(), h.deps)).toBe(99);
     expect(records()[0].note).toContain('waited-for=run 7(still running)');
     expect(h.autoYesCalls()).toEqual([]);
+  });
+
+  it('#4459 I1: a run queued on the cpu.heavy mutex for longer than 3600 s is still waited for', () => {
+    // 200 polls x 30 s = 6000 s of "running" with no gate finished (a mutex wait), then it ends.
+    const h = harness({
+      verifySequence: [{ exit: 99, log: busy(7) }, { exit: 0, log: PASS_LOG }],
+      runs: { '7': [...Array.from({ length: 200 }, () => ({ status: 'running' })), { status: 'passed' }] },
+    });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(records()[0].note).toContain('waited-for=run 7');
+    expect(records()[0].note).not.toContain('(still running)');
+    expect(h.sleeps.filter((ms) => ms === 30_000).length).toBeGreaterThan(3600 / 30);
+  });
+
+  it('#4459 P2-1: the worst single gate (mutex 5400 + slot 1800 + run 5400 = 12600 s) is still waited for', () => {
+    const h = harness({
+      verifySequence: [{ exit: 99, log: busy(7) }, { exit: 0, log: PASS_LOG }],
+      runs: { '7': [...Array.from({ length: 420 }, () => ({ status: 'running' })), { status: 'passed' }] },
+    });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(records()[0].note).not.toContain('(still running)');
+  });
+
+  it('#4459 negative: a run that makes no progress is still given up on, at the limit', () => {
+    const h = harness({ verifySequence: [{ exit: 99, log: busy(7) }], runs: { '7': [{ status: 'running' }] } });
+    expect(main(argv(), h.deps)).toBe(99);
+    expect(records()[0].note).toContain('waited-for=run 7(still running)');
+    const waitedSec = h.sleeps.filter((ms) => ms === 30_000).length * 30;
+    // #4463 (PM, pm-reply-4463-stop.md): the limit is one named constant, 7 days.
+    expect(waitedSec).toBeGreaterThanOrEqual(VERIFY_BUSY_CAP_SEC);
+    expect(waitedSec).toBeLessThanOrEqual(VERIFY_BUSY_CAP_SEC + 60);
+    expect(VERIFY_BUSY_CAP_SEC).toBe(604_800);
+  });
+
+  describe('#4459: the limit comes from verify.yaml (P2-1)', () => {
+    // #4463 (PM, pm-reply-4463-stop.md): the limit no longer comes from verify.yaml. A formula over
+    // it kept undercounting the real worst (contract gates, mutex waits per retry) and could be made
+    // infinite by a value the server refuses. It is one named constant, 7 days (604800 s); the
+    // names below are kept, and each checks the constant covers what its formula once covered.
+    const MAX_TIMEOUT_SEC = 7200;
+    const MAX_MUTEX_WAIT_SEC = 86400;
+
+    it('is the worst one gate can take: mutex wait + slot wait + its run + margin', () => {
+      // The worst one gate verify-config.ts accepts: its longest mutex wait, then its run twice (retryOnFail: 1).
+      expect(VERIFY_BUSY_CAP_SEC).toBe(604_800);
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThan(MAX_MUTEX_WAIT_SEC + 2 * MAX_TIMEOUT_SEC);
+    });
+
+    it('follows verify.yaml: raising timeoutSec or declaring mutexWaitSec raises it', () => {
+      // Raising either to the most verify-config.ts accepts stays under the constant, with 3 runs at their worst.
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThan(3 * (MAX_MUTEX_WAIT_SEC + 2 * MAX_TIMEOUT_SEC) + 600);
+    });
+
+    it('is never below what this repository’s own verify.yaml allows one gate to take', () => {
+      const text = fs.readFileSync(path.resolve(__dirname, '../../../../.commandmate/verify.yaml'), 'utf8');
+      const gates = [...text.matchAll(/^  - id: (\S+)\n((?:    .*\n|\s*#.*\n|\n)*)/gm)].map((m) => ({
+        timeout: Number(/^ {4}timeoutSec: (\d+)/m.exec(m[2])?.[1] ?? 0),
+        mutex: /^ {4}mutex: /m.test(m[2]),
+        mutexWait: Number(/^ {4}mutexWaitSec: (\d+)/m.exec(m[2])?.[1] ?? 0),
+      }));
+      expect(gates.length).toBeGreaterThan(5);
+      const perGate = gates.map((g) => g.timeout + (g.mutex ? g.mutexWait || g.timeout : 0));
+      for (const one of perGate) expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThanOrEqual(one);
+      // And a whole run of this repository, three times over.
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThanOrEqual(3 * perGate.reduce((a, b) => a + b, 0));
+    });
+
+    it('a config that cannot be read gives the large side, not a small one', () => {
+      // Nothing is read: the constant is the large side for every config.
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThanOrEqual(172800);
+    });
+  });
+
+  it('#4459: a run that keeps finishing gates is not given up on while it makes progress', () => {
+    // A gate finishes every 150 polls (4500 s): 3 of them = 13500 s, longer than the limit.
+    const states: { status: string; gates?: unknown[] }[] = [];
+    for (let g = 0; g <= 3; g++) for (let i = 0; i < 150; i++) states.push({ status: 'running', gates: Array.from({ length: g }, () => ({ status: 'passed' })) });
+    states.push({ status: 'passed' });
+    const h = harness({ verifySequence: [{ exit: 99, log: busy(7) }, { exit: 0, log: PASS_LOG }], runs: { '7': states } });
+    expect(main(argv(), h.deps)).toBe(0);
+    expect(records()[0].note).not.toContain('(still running)');
   });
 
   it('a newer task while waiting for the old run → exit 3, no second verification', () => {

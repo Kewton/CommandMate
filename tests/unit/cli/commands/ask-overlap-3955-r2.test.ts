@@ -29,6 +29,7 @@ import {
 import type { PromptMessageResponse } from '../../../../src/cli/types/api-responses';
 import type { ApiClient } from '../../../../src/cli/utils/api-client';
 
+import { answerFromRows, installAskLedger, type AskLedgerOptions } from './ask-ledger-fake-4344';
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
 const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -165,6 +166,8 @@ interface Scenario {
   rows: () => Row[];
   /** Run on the `/send` request (e.g. to move the clock past the send). */
   onSend?: () => void;
+  /** Issue #4344: the ledger's answer (default: matched with the newest `<tool>-turn:` row). */
+  ledger?: AskLedgerOptions['answer'];
 }
 
 const messageUrls: string[] = [];
@@ -193,7 +196,14 @@ function mockServer(scenario: Scenario): void {
     if (path.includes('/capture')) return Promise.resolve(json({ output: '' }));
     return Promise.resolve(json(frame(scenario.cliToolId, scenario.done(), scenario.turn())));
   }) as unknown as typeof fetch;
+  // Issue #4344: the reply is read by the ask's id since PR3. The answer is
+  // derived from the scenario's rows directly, so `messageUrls` keeps only the
+  // CLI's own reads.
+  installAskLedger({ answer: scenario.ledger ?? (() => answerFromRows(scenario.rows())) });
 }
+
+const SHARED_TURN = () => ({ state: 'ambiguous' as const, reason: 'shared_turn' as const, nativeInputSeen: true });
+
 
 async function runAsk(argv: string[], advanceMs = 60_000): Promise<void> {
   const { createAskCommand } = await import('../../../../src/cli/commands/ask');
@@ -224,13 +234,17 @@ describe('(1) the later ask joined an old turn that closed before its first poll
         userRow('ub', BODY_B, NOW + 1),
         replyRow('ACK-A', NOW + 500),
       ],
+      ledger: () => ({ state: 'ambiguous', reason: 'turn_open_at_send', nativeInputSeen: true }),
     });
 
     await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledTimes(1);
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toMatchObject({ reply: 'ACK-A', overlapped: true });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): A's `ACK-A` is no longer printed as B's reply; the ledger says
+    // ambiguous/turn_open_at_send. The overlap line is unchanged.
+    expect(payload()).toMatchObject({ reply: null, attribution: { state: 'ambiguous' }, overlapped: true });
     expect(stderr()).toMatch(/^overlapped: codex was already in a turn/m);
   });
 
@@ -255,8 +269,10 @@ describe('(1) the later ask joined an old turn that closed before its first poll
     await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
+    // Issue #4344: a matched reply adds `askId` and `attribution` (design §0.2).
     expect(payload()).toEqual({
       worktreeId: 'wt1', instanceId: 'codex', cliToolId: 'codex', source: 'history', reply: 'ACK-B',
+      askId: expect.any(String), attribution: { state: 'matched', reason: null, notified: false },
     });
     expect(stderr()).not.toContain('overlapped');
   });
@@ -280,14 +296,18 @@ describe('(2) the earlier ask finds the other user row behind 30+ rows (Issue #3
         ...narration(NOW + 2_100, REPLY_LOOKBACK_MESSAGES + 5),
         ...(Date.now() >= DONE_AT ? [replyRow('ACK-B', DONE_AT)] : []),
       ],
+      ledger: SHARED_TURN,
     });
 
     await runAsk(['wt1', BODY_A, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toMatchObject({ reply: 'ACK-B', overlapped: true });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): B's `ACK-B` is no longer printed as A's reply (ambiguous/shared_turn).
+    expect(payload()).toMatchObject({ reply: null, attribution: { state: 'ambiguous', reason: 'shared_turn' }, overlapped: true });
     expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
-    // The reply read itself is unchanged: the newest 30 rows, scoped.
+    // The first ledger read is still the newest 30 rows, scoped (since #4344
+    // it is the overlap check's own read; the reply comes from the ask's id).
     expect(messageUrls[0]).toBe('?limit=30&instance=codex');
   });
 
@@ -499,12 +519,16 @@ describe('(A) known limit: B\'s own record replaces A\'s before B\'s first poll 
         userRow('ub', BODY_B, NOW + 1),
         ...(Date.now() >= DONE_AT ? [replyRow('ACK-A', DONE_AT)] : []),
       ],
+      ledger: SHARED_TURN,
     });
 
     await runAsk(['wt1', BODY_B, '--instance', 'codex', '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toMatchObject({ reply: 'ACK-A' });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): the CLI's overlap check still misses this case, but the ledger
+    // (codex: two inputs in one turn) no longer lets A's `ACK-A` out as B's reply.
+    expect(payload()).toMatchObject({ reply: null, attribution: { state: 'ambiguous', reason: 'shared_turn' } });
     expect(payload()).not.toHaveProperty('overlapped');
     expect(stderr()).not.toContain('overlapped');
   });
@@ -526,12 +550,15 @@ describe('(B) the instance guess is bounded by the turn\'s end too (Issue #3955)
         ...(Date.now() >= DONE_AT ? [replyRow('ACK-B', DONE_AT, 'codex')] : []),
         ...(Date.now() >= DONE_AT + 1_000 ? [userRow('ua-later', BODY_A, DONE_AT + 1_000, 'codex-2')] : []),
       ],
+      ledger: SHARED_TURN,
     });
 
     await runAsk(['wt1', BODY_A, '--json']);
 
     expect(mockExit).toHaveBeenCalledWith(0);
-    expect(payload()).toMatchObject({ reply: 'ACK-B', overlapped: true });
+    // Expected value changed by the human decision of Issue #4344 (design §7,
+    // §0.2): B's `ACK-B` is no longer printed as A's reply (ambiguous/shared_turn).
+    expect(payload()).toMatchObject({ reply: null, attribution: { state: 'ambiguous' }, overlapped: true });
     expect(stderr()).toMatch(/^overlapped: another message reached codex/m);
   });
 

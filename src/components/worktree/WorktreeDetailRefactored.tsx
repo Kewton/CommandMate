@@ -1277,6 +1277,9 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                       blockedByContract={autoYesBlockedByContract}
                       releasedByRestart={autoYesReleasedByRestart}
                       answerMode={autoYesAnswerMode}
+                      // Issue #4456: a refusal belongs to the active instance.
+                      worktreeId={worktreeId}
+                      instanceId={activeInstanceId}
                     />
                   }
                   // Issue #3999: no send into the active instance's plan review.

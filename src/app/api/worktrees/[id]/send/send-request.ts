@@ -15,6 +15,9 @@ import { CLI_TOOL_IDS, isValidInstanceId, type CLIToolType } from '@/lib/cli-too
 import { BOUNDARY_TOOLS, isSlashCommandBody } from '@/lib/session/session-boundary';
 import type { SendRoleRequest } from './send-role';
 import { isAskId } from '@/lib/ask/envelope';
+import type { SendOrigin } from '@/lib/tool-policy/policy';
+import { readBodyOrigin } from './send-tool-policy';
+import { readTaskTarget } from './task-target';
 import { ASK_PROTOCOL_VERSION } from '@/types/ask-correlation';
 import {
   validateCopilotModelName,
@@ -80,10 +83,39 @@ export interface SendMessageRequest extends SendRoleRequest {
    * is 400 with nothing recorded.
    */
   ask?: { id: string; protocol: number };
+  /**
+   * Issue #4437: who started this send, as the CLI reads it from its own
+   * environment (`terminal` / `session` / `agent` / `schedule` / `unknown`).
+   * Absent (the web UI, an older CLI) is `legacy`; any other string is
+   * `unknown`; a non-string is 400 with nothing recorded. Not verified: it
+   * only decides the tool policy (`send-tool-policy`).
+   */
+  origin?: unknown;
+  /** Issue #4437: what the CLI read its `origin` from; logged with a refusal only (cut at 128). */
+  originEvidence?: unknown;
+  /**
+   * Issue #4449: the task (`send --contract`) this message is for. The send goes to the
+   * target the task recorded when it was judged and created (`task-target`), never to a
+   * default resolved again; a body naming another target is 400 `task_target_mismatch`.
+   */
+  taskId?: unknown;
 }
 
 /** Issue #4344: the 400 for a malformed `ask`. */
 export const ASK_FIELD_INVALID = 'ask must be { id: <uuid>, protocol: 1 }';
+
+/**
+ * What a claude `--model` takes (Issue #4473): an alias or a full id. Said in the 400s about the
+ * value, so a caller can tell "this value is wrong" from "a running session cannot take one".
+ */
+export const CLAUDE_MODEL_EXAMPLES = 'Accepted values: an alias such as opus or sonnet, or a full model id such as claude-opus-4-1.';
+
+/**
+ * Issue #4473: the `code` of every 400 that refuses `--model` (the tool, the value, a running
+ * session). Spelled out in `src/cli/commands/send.ts` too — the CLI does not load route code —
+ * and pinned to this string by `tests/unit/cli/commands/cli-small-fixes-4473.test.ts`.
+ */
+export const MODEL_REFUSED_CODE = 'model_refused';
 
 /** Issue #4344: whether the body's `ask` is well formed (absent is). */
 export function isValidAskField(ask: unknown): boolean {
@@ -152,11 +184,16 @@ export interface ValidatedSendRequest {
   /** `body.instanceId`, validated; undefined when the request named none. */
   instanceId: string | undefined;
   target: SessionTarget;
+  /** Issue #4437: `body.origin` read (`legacy` when absent). */
+  origin: SendOrigin;
 }
 
 /**
  * Validate the body and resolve its destination, in the handler's order:
  * content, CLI tool, instance, the strict resolution, the model.
+ *
+ * Keys the body does not know are not refused (an older server ignores
+ * `origin` / `originEvidence` the same way, Issue #4437).
  */
 export function validateSendRequest(
   db: Database.Database,
@@ -192,6 +229,11 @@ export function validateSendRequest(
   if (!isValidAskField(body.ask)) {
     return { ok: false, response: NextResponse.json({ error: ASK_FIELD_INVALID }, { status: 400 }) };
   }
+  // Issue #4437: the origin's type, before anything is resolved (nothing recorded).
+  const origin = readBodyOrigin(body.origin);
+  if (!origin.ok) {
+    return { ok: false, response: NextResponse.json({ error: origin.error }, { status: 400 }) };
+  }
   const strictBrief = isStrictBriefChoice(body);
   if (strictBrief && isSlashCommandBody(trimmedContent)) {
     return { ok: false, response: NextResponse.json({ error: STRICT_BRIEF_NOT_FOR_COMMAND }, { status: 400 }) };
@@ -223,7 +265,10 @@ export function validateSendRequest(
       ),
     };
   }
-  const instanceId = body.instanceId;
+  // Issue #4449: a send for a task goes to the task's recorded target (the one judged).
+  const taskTarget = readTaskTarget(db, id, { taskId: body.taskId, cliToolId: requestedCliToolId, instanceId: body.instanceId });
+  if (!taskTarget.ok) return { ok: false, response: taskTarget.response };
+  const instanceId = taskTarget.value.instanceId;
 
   // Issue #1629: the roster is what declares which CLI tool backs an instance.
   // Without this the tool came from the worktree default, so `--instance codex`
@@ -245,7 +290,7 @@ export function validateSendRequest(
   // the only answer that cannot land the message in the wrong pane.
   const resolution = resolveSessionTargetStrict(db, id, {
     instanceId,
-    requestedCliTool: requestedCliToolId,
+    requestedCliTool: taskTarget.value.requestedCliTool,
   });
   if (!resolution.ok) {
     return { ok: false, response: sessionTargetConflictResponse(resolution.conflict) };
@@ -266,7 +311,13 @@ export function validateSendRequest(
 
   return {
     ok: true,
-    value: { trimmedContent, requestedCliToolId, instanceId, target: resolution.target },
+    value: {
+      trimmedContent,
+      requestedCliToolId: taskTarget.value.requestedCliTool,
+      instanceId,
+      target: resolution.target,
+      origin: origin.origin,
+    },
   };
 }
 
@@ -299,7 +350,7 @@ export function validateSendModel(
     // model is only supported for copilot, antigravity and claude
     if (cliToolId !== 'copilot' && cliToolId !== 'antigravity' && cliToolId !== 'claude') {
       return NextResponse.json(
-        { error: 'The model parameter is only supported for copilot, antigravity and claude agents' },
+        { error: 'The model parameter is only supported for copilot, antigravity and claude agents', code: MODEL_REFUSED_CODE },
         { status: 400 }
       );
     }
@@ -310,7 +361,7 @@ export function validateSendModel(
         : validateCopilotModelName(model);
     if (!modelValidation.valid) {
       return NextResponse.json(
-        { error: `Invalid model name: ${modelValidation.reason}` },
+        { error: `Invalid model name: ${modelValidation.reason}${cliToolId === 'claude' ? `. ${CLAUDE_MODEL_EXAMPLES}` : ''}`, code: MODEL_REFUSED_CODE },
         { status: 400 }
       );
     }

@@ -72,6 +72,12 @@ export type SendAttemptReason =
    * the body reached the pane (#4011/#4031).
    */
   | 'paste-not-started'
+  /**
+   * `not-sent`: the tool policy refused the send before anything was started or
+   * typed — antigravity from an agent, a session, a Schedule run or an unknown
+   * origin with no API-key / enterprise use declared (Google Antigravity terms §6, #4437).
+   */
+  | 'tool-policy-denied'
   /** `indeterminate`: the body was typed, did not land intact, and was taken back out best-effort (#2464/#3366). */
   | 'body-not-landed'
   /** `indeterminate`: an autocompletion replaced the body; the line was cleared best-effort (#1501). */

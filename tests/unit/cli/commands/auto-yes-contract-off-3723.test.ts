@@ -257,6 +257,7 @@ describe('[#3723] commandmate send --auto-yes reads the arming response', () => 
     expect(lines).toContain('Auto-yes enabled.');
     expect(lines.find((line) => line.startsWith('Warning:'))).toContain('autoYes.mode: off');
     expect(lines).toContain('Message sent.');
+    // Issue #4449: no tool-policy check before the grant (the grant's route judges itself).
     expect(fn.mock.calls.map((call) => new URL(String(call[0])).pathname)).toEqual([
       `/api/worktrees/${WT}/auto-yes`,
       `/api/worktrees/${WT}/send`,

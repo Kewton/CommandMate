@@ -223,11 +223,24 @@ export function resolveScheduleExecuteOptions(
  * Execute a scheduled task.
  * Guards against concurrent execution of the same schedule.
  *
- * @param state - The schedule state to execute
+ * Issue #4436 (I1a): the run uses ONE entry from start to finish — `entry`, read
+ * before the first await. A CMATE.md sync replaces `state.entry` whenever it
+ * likes, including while this run awaits the worktree's role; re-reading
+ * `state.entry` after that await launched a tool nobody had judged (a claude
+ * tick passing the tool policy, then `agy` launched because the row changed
+ * meanwhile), with options and a role resolved for the other tool. The
+ * replacement runs from the next tick, which judges it.
+ *
+ * @param state - The schedule state to execute (its `isExecuting` guard)
+ * @param entry - The entry to run; the caller passes the one it judged
+ *   (`runScheduledExecution`). Defaults to a copy of `state.entry` taken now.
  */
-export async function executeSchedule(state: ScheduleState): Promise<void> {
+export async function executeSchedule(
+  state: ScheduleState,
+  entry: ScheduleEntry = { ...state.entry }
+): Promise<void> {
   if (state.isExecuting) {
-    logger.warn('execution:skip-concurrent', { name: state.entry.name });
+    logger.warn('execution:skip-concurrent', { name: entry.name });
     return;
   }
 
@@ -238,7 +251,7 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
   let logId: string | undefined;
 
   try {
-    logId = createExecutionLog(state.scheduleId, state.worktreeId, state.entry.message);
+    logId = createExecutionLog(state.scheduleId, state.worktreeId, entry.message);
 
     const db = getLazyDbInstance();
     const worktree = db.prepare('SELECT path, vibe_local_model FROM worktrees WHERE id = ?').get(state.worktreeId) as WorktreeRow | undefined;
@@ -249,29 +262,29 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
     }
 
     // Resolve the CLI options via the centralized helper (DR1-004, #2044)
-    const options = resolveScheduleExecuteOptions(state.entry, worktree);
+    const options = resolveScheduleExecuteOptions(entry, worktree);
 
     // Issue #4115: the defaults for this worktree and tool, resolved here and not in
     // `executeClaudeCommand`, which the daily summary shares (D2). A role that cannot
     // be applied fails the run: it must not go ahead without one.
     const scheduleRole = await resolveScheduleRole(db, {
       worktreeId: state.worktreeId,
-      cliToolId: state.entry.cliToolId,
+      cliToolId: entry.cliToolId,
       worktreePath: worktree.path,
       explicitAgent: options?.agent,
       env: sanitizeEnvForChildProcess(),
     });
     if (scheduleRole.kind === 'refused') {
       updateExecutionLog(logId, 'failed', scheduleRole.refusal.message, null);
-      logger.warn('execution:role-refused', { name: state.entry.name, reason: scheduleRole.refusal.reason });
+      logger.warn('execution:role-refused', { name: entry.name, reason: scheduleRole.refusal.reason });
       return;
     }
 
     const result = await executeClaudeCommand(
-      state.entry.message,
+      entry.message,
       worktree.path,
-      state.entry.cliToolId,
-      state.entry.permission,
+      entry.cliToolId,
+      entry.permission,
       scheduleRole.kind === 'role' ? { ...options, role: scheduleRole.role } : options
     );
 
@@ -285,13 +298,13 @@ export async function executeSchedule(state: ScheduleState): Promise<void> {
     updateExecutionLog(logId, result.status, result.output, result.exitCode);
     updateScheduleLastExecuted(state.scheduleId);
 
-    logger.info('execution:completed', { name: state.entry.name, status: result.status });
+    logger.info('execution:completed', { name: entry.name, status: result.status });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (logId !== undefined) {
       updateExecutionLog(logId, 'failed', errorMessage, null);
     }
-    logger.error('execution:failed', { name: state.entry.name, error: errorMessage });
+    logger.error('execution:failed', { name: entry.name, error: errorMessage });
   } finally {
     state.isExecuting = false;
   }
