@@ -24,6 +24,18 @@
  * reason it is not. The drift case fails when server.ts adds, drops or reorders
  * a call (review-4480 codex P2-2 / opus P3-1).
  *
+ * Known limits of that drift check (review-4480 r2; PM decision): it reads the
+ * source text, so it does not see a start call written as
+ *  - a call through a namespace import (`import * as x from './src/…'`, then `x.f()`),
+ *  - a named import in double quotes (`import { f } from "./src/…"`),
+ *  - a call moved into a function expression that is not run where it stands,
+ *  - a top-level call before `app.prepare()`,
+ *  - a call through a function local to server.ts (other than `initializeWorktrees`).
+ * The root fix is Issue #4515 (Sprint 9): move the start sequence into a function
+ * of its own and run THAT here with fake dependencies, dropping this copy and the
+ * text check. Until then the check stays as it is (it catches named static and
+ * dynamic imports being added, dropped or reordered).
+ *
  * @vitest-environment node
  */
 
@@ -92,6 +104,7 @@ import { initResourceCleanup, stopResourceCleanup } from '@/lib/resource-cleanup
 const WT = 'wt-4480-startup';
 const OLD_WT = 'wt-4480-startup-old';
 const NAMESPACE = 'abcd1234';
+const READ_MODE_KEY = 'F7';
 
 const SERVER_SOURCE = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf8');
 
@@ -217,6 +230,8 @@ beforeEach(() => {
   fs.mkdirSync(path.join(home, '.commandmate', 'data'), { recursive: true });
   vi.stubEnv('CM_DB_PATH', path.join(home, '.commandmate', 'data', 'cm.db'));
   vi.stubEnv('CM_READ_MODE', 'on');
+  // Fixed so the case does not depend on the caller's environment (review-4480 r2).
+  vi.stubEnv('CM_READ_MODE_KEY', READ_MODE_KEY);
 
   db = new Database(':memory:');
   runMigrations(db);
@@ -320,7 +335,10 @@ describe('[#4480] server start sequence', () => {
     const scriptPath = (results.initReadMode as { scriptPath: string }).scriptPath;
     expect(scriptPath.startsWith(path.join(fake.root, 'home'))).toBe(true);
     expect(fs.existsSync(scriptPath)).toBe(true);
-    expect(fake.callsOf('tmux').some((line) => line.startsWith('tmux bind-key'))).toBe(true);
+    expect(results.initReadMode).toMatchObject({ key: READ_MODE_KEY });
+    const binds = fake.callsOf('tmux').filter((line) => line.startsWith('tmux bind-key'));
+    expect(binds).toHaveLength(1);
+    expect(binds[0].startsWith(`tmux bind-key -T prefix ${READ_MODE_KEY} `)).toBe(true);
     expect(fake.callsOf('agy')).toEqual([]);
   });
 

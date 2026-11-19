@@ -14,9 +14,7 @@
  * @vitest-environment node
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import fs from 'fs';
-import path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installFakeAgyPath, type FakeAgyPath } from '@tests/helpers/fake-agy-path';
 import {
   AGENT_VERSIONS_CACHE_TTL_MS,
@@ -24,6 +22,25 @@ import {
   getAgentVersions,
 } from '@/lib/updates/agent-versions';
 import { noteAntigravityUse, resetAntigravityUseForTest } from '@/lib/tool-policy/version-probe-gate';
+import type { DetectorVersionProbe } from '@/lib/detection/version-probes';
+
+/**
+ * The force cases below (review-4480 r2) drive each probe from the test: while
+ * `held` is set, `runDetectorVersionProbe` starts no process and answers through
+ * {@link held}. Otherwise it is the real one (which runs the fake binaries).
+ */
+interface HeldProbes {
+  (probe: DetectorVersionProbe): Promise<string | null>;
+}
+const control: { held: HeldProbes | null } = { held: null };
+vi.mock('@/lib/detection/version-probes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/detection/version-probes')>();
+  return {
+    ...actual,
+    runDetectorVersionProbe: (probe: DetectorVersionProbe) =>
+      control.held ? control.held(probe) : actual.runDetectorVersionProbe(probe),
+  };
+});
 
 let fake: FakeAgyPath;
 
@@ -108,54 +125,68 @@ describe('[#4480] agents version list after a use', () => {
  * re-probe every tool and return that, and the add must not write its older rows
  * back afterwards.
  *
- * The fakes here read their version from `<sandbox>/<name>.version` (so the test
- * can "update" claude and codex mid-way), and each `agy` call waits for
- * `<sandbox>/agy.release.<n>` (n = its call number), so the add's probe can be
- * held while the forced fetch runs.
+ * Review-4480 r2 (codex P3-1 / opus P3-2): each probe is controlled from the test
+ * — no process, no shared counter, no busy wait. claude and codex answer at once
+ * with the version the test set ("updated" mid-way); every antigravity probe is a
+ * promise of its own, started and released one by one, and every one is released
+ * and settled before the case ends.
  */
 describe('[#4480] a forced fetch while the antigravity row is being added (I4\')', () => {
-  let held: FakeAgyPath;
+  interface AgyProbe {
+    release(): void;
+    done: Promise<void>;
+  }
+  let versions: Record<string, string>;
+  let agyProbes: AgyProbe[];
+  let probeCalls: string[];
+  let started: Array<() => void>;
 
-  const versionedFake = (name: string): string => [
-    'root="${0%/bin/' + name + '}"',
-    'read -r v < "$root/' + name + '.version"',
-    'echo "$v"',
-  ].join('\n');
+  const toolOf = async (probe: DetectorVersionProbe): Promise<string> => {
+    const { DETECTOR_VERSION_PROBES } = await vi.importActual<typeof import('@/lib/detection/version-probes')>(
+      '@/lib/detection/version-probes',
+    );
+    return Object.entries(DETECTOR_VERSION_PROBES).find(([, p]) => p === probe)?.[0] ?? '?';
+  };
 
-  const heldAgy = [
-    'root="${0%/bin/agy}"',
-    'n=0',
-    'while IFS= read -r line; do case "$line" in "agy "*) n=$((n+1)) ;; esac; done < "$root/calls.log"',
-    'while [ ! -f "$root/agy.release.$n" ]; do :; done',
-    "echo '1.1.18'",
-  ].join('\n');
+  /** Resolves once `count` antigravity probes have started (no polling). */
+  const agyStarted = (count: number): Promise<void> =>
+    new Promise((resolve) => {
+      const check = (): void => {
+        if (agyProbes.length >= count) resolve();
+        else started.push(check);
+      };
+      check();
+    });
 
-  const setVersion = (name: string, value: string): void => {
-    fs.writeFileSync(path.join(held.root, `${name}.version`), `${value}\n`);
-  };
-  const release = (n: number): void => {
-    fs.writeFileSync(path.join(held.root, `agy.release.${n}`), '');
-  };
-  const waitFor = async (check: () => boolean): Promise<void> => {
-    for (let i = 0; i < 300 && !check(); i += 1) await new Promise((r) => setTimeout(r, 10));
-    expect(check()).toBe(true);
-  };
   const installedOf = (rows: { tool: string; installed: string | null }[], tool: string) =>
     rows.find((row) => row.tool === tool)?.installed;
 
   beforeEach(() => {
-    fake.restore();
-    held = installFakeAgyPath({
-      extraBinaries: { claude: versionedFake('claude'), codex: versionedFake('codex'), agy: heldAgy },
-    });
-    fake = held;
-    setVersion('claude', '2.1.0 (Claude Code)');
-    setVersion('codex', 'codex-cli 0.100.0');
+    versions = { claude: '2.1.0', codex: '0.100.0' };
+    agyProbes = [];
+    probeCalls = [];
+    started = [];
+    control.held = async (probe) => {
+      const tool = await toolOf(probe);
+      probeCalls.push(tool);
+      if (tool !== 'antigravity') return versions[tool] ?? null;
+      let release!: () => void;
+      let finish!: () => void;
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      const done = new Promise<void>((resolve) => { finish = resolve; });
+      agyProbes.push({ release, done });
+      for (const wake of started.splice(0)) wake();
+      await released;
+      finish();
+      return '1.1.18';
+    };
   });
 
-  afterEach(() => {
-    // Let any held probe finish before the sandbox goes.
-    for (let n = 1; n <= 5; n += 1) release(n);
+  afterEach(async () => {
+    // Release every held probe and wait for it to end before the sandbox goes.
+    for (const probe of agyProbes) probe.release();
+    await Promise.all(agyProbes.map((probe) => probe.done));
+    control.held = null;
   });
 
   it('4480 (I4\'): force during the add returns every tool re-probed, and the add does not write its old rows back', async () => {
@@ -163,44 +194,44 @@ describe('[#4480] a forced fetch while the antigravity row is being added (I4\')
     expect(installedOf(first, 'codex')).toBe('0.100.0');
 
     noteAntigravityUse();
-    const adding = getAgentVersions({ now: 1_001 }); // the add: agy call 1, held
-    await waitFor(() => held.callsOf('agy').length === 1);
+    const adding = getAgentVersions({ now: 1_001 }); // the add: antigravity probe 1, held
+    await agyStarted(1);
 
-    setVersion('claude', '2.2.0 (Claude Code)');
-    setVersion('codex', 'codex-cli 0.101.0');
-    const forced = getAgentVersions({ now: 1_002, force: true }); // full: agy call 2, held
-    await waitFor(() => held.callsOf('agy').length === 2);
-    release(2);
+    versions = { claude: '2.2.0', codex: '0.101.0' };
+    const forced = getAgentVersions({ now: 1_002, force: true }); // full: antigravity probe 2, held
+    await agyStarted(2);
+    agyProbes[1].release();
     const forcedRows = await forced;
 
     expect(installedOf(forcedRows, 'claude')).toBe('2.2.0');
     expect(installedOf(forcedRows, 'codex')).toBe('0.101.0');
     expect(installedOf(forcedRows, 'antigravity')).toBe('1.1.18');
 
-    release(1);
+    // Only now does the add's probe end (after the forced fetch wrote its rows).
+    agyProbes[0].release();
     await adding;
 
     // The next plain fetch inside the TTL answers the forced rows, not the add's.
     const next = await getAgentVersions({ now: 1_003 });
     expect(installedOf(next, 'claude')).toBe('2.2.0');
     expect(installedOf(next, 'codex')).toBe('0.101.0');
-    expect(held.callsOf('claude')).toHaveLength(2);
+    expect(probeCalls.filter((tool) => tool === 'claude')).toHaveLength(2);
   });
 
   it('4480 (I4\'): clearing the cache during the add keeps the add from writing its old rows back', async () => {
     await getAgentVersions({ now: 1_000 });
     noteAntigravityUse();
     const adding = getAgentVersions({ now: 1_001 });
-    await waitFor(() => held.callsOf('agy').length === 1);
+    await agyStarted(1);
 
     clearAgentVersionsCache();
-    setVersion('codex', 'codex-cli 0.101.0');
-    release(1);
+    versions = { claude: '2.1.0', codex: '0.101.0' };
+    agyProbes[0].release();
     await adding;
-    release(2);
 
-    const next = await getAgentVersions({ now: 1_002 });
-    expect(installedOf(next, 'codex')).toBe('0.101.0');
+    const next = getAgentVersions({ now: 1_002 }); // a full fetch: antigravity probe 2
+    await agyStarted(2);
+    agyProbes[1].release();
+    expect(installedOf(await next, 'codex')).toBe('0.101.0');
   });
 });
-

@@ -9,6 +9,13 @@
  * `initializeWorktrees()` is spliced in where it is called, so the list is the
  * order things start in. A call inside a `void (async () => …)()` is listed where
  * it is started (it is not awaited there).
+ *
+ * Known limits (it reads text, not the program): a call through a namespace
+ * import (`import * as x`), a named import in double quotes, a call moved into a
+ * function expression that is not run where it stands, a top-level call before
+ * `app.prepare()`, and a call through a server.ts local function other than
+ * `initializeWorktrees` are not seen. Issue #4515 (Sprint 9) replaces this with a
+ * start-sequence function the test runs itself; do not extend this reader.
  */
 
 const START_MARK = 'app.prepare().then(';
