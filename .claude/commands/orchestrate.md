@@ -735,11 +735,8 @@ while IFS="$(printf '\t')" read -r issue AGENT MODEL <&3; do
 done 3< "workspace/orchestration/runs/$DATE/assign.tsv"
 ```
 
-**assign.tsv を stdin で読まない**（2026-09-30 実測）: `while read …; done < assign.tsv` にすると、
-ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
-上の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
-stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける。
-`task MISSING` が出たら、その Issue は送れていない。exit 40〜44 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。
+**assign.tsv を stdin で読まない**（2026-09-30 実測）: ループの中の `commandmatedev` が残りの行を消費する。雛形（fd 3）を stdin で読む形に戻さない。1 件ずつ送るときは各 `commandmatedev` に `</dev/null` を付ける。
+`task MISSING` が出たら、その Issue は送れていない。exit 40〜44 は下の「モデルの確認結果」、それ以外は `send-<issue>[.a<n>].err` を読み、3-1 の「冷間起動の失敗」に従って再送する。exit 1 で `send-init-*.err` に `composer NOT CLEAN` があれば、再送の前に人が入力欄を確かめて消す（再送の停止で kill され消える。#4476、workers.md の launch-worker の exit の表）。
 
 根拠: docs/orchestrate/workers.md#3-1-assigntsv-を-stdin-で読んで止まった実測
 
