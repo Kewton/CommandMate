@@ -24,6 +24,7 @@ import {
 } from '../utils/docs-reader';
 import { AGENT_DELEGATION_GUIDE } from '../docs/agent-operations';
 import { SETUP_GUIDE } from '../docs/setup-guide';
+import { TEAM_SETUP_GUIDE } from '../docs/team-setup-guide';
 
 /**
  * Sections this command carries itself (Issue #2376).
@@ -40,10 +41,15 @@ import { SETUP_GUIDE } from '../docs/setup-guide';
  *
  * `setup` (Issue #3059) is the agent-facing setup guide, served on the site as
  * `website/setup.md`; registered here for the same reason as `delegation`.
+ *
+ * `team-setup` (Issue #4464) is the agent-facing guide that sets up a team
+ * (PM, development lead, workers, reviewer, judge) on the person's repository,
+ * served on the site as `website/team-setup.md`; same reason again.
  */
 const LOCAL_SECTIONS: Record<string, string> = {
   delegation: AGENT_DELEGATION_GUIDE,
   setup: SETUP_GUIDE,
+  'team-setup': TEAM_SETUP_GUIDE,
 };
 
 /** Every section name, the reader's plus {@link LOCAL_SECTIONS}. */
