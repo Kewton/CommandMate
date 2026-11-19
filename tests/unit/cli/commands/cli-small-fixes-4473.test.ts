@@ -13,14 +13,15 @@
  *
  * @vitest-environment node
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { mockFetchSequence, restoreFetch } from '../../../helpers/mock-api';
 import { ApiError } from '../../../../src/cli/utils/api-client';
 import { MAX_SERVER_ERROR_DETAIL } from '../../../../src/cli/utils/api-client-errors';
+import { resetSessionLaunchFlightsForTest, runSessionLaunch } from '../../../../src/lib/session/session-launch-flight';
 import { CLI_TOOL_IDS } from '../../../../src/cli/config/cli-tool-ids';
 import { validateAgentInstanceCandidate } from '../../../../src/lib/agent-instances-validator';
-import { refuseModelOnRunningSession } from '../../../../src/app/api/worktrees/[id]/send/send-session-start';
-import { CLAUDE_MODEL_EXAMPLES, MODEL_REFUSED_CODE } from '../../../../src/app/api/worktrees/[id]/send/send-request';
+import { answerSessionStartFailure, refuseModelOnRunningSession } from '../../../../src/app/api/worktrees/[id]/send/send-session-start';
+import { CLAUDE_MODEL_EXAMPLES, MODEL_REFUSED_CODE, validateSendModel } from '../../../../src/app/api/worktrees/[id]/send/send-request';
 
 const mockExit = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 const mockConsoleLog = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -49,11 +50,28 @@ describe('#4473 P-2: send --model 400 prints the server reason', () => {
     expect(cliCode).toBe(MODEL_REFUSED_CODE);
   });
 
-  it('every server 400 that refuses --model carries the code', async () => {
-    const running = refuseModelOnRunningSession('opus', 'claude', true);
-    expect(((await running?.json()) as { code: string }).code).toBe(MODEL_REFUSED_CODE);
-    const antigravity = refuseModelOnRunningSession('m', 'antigravity', true);
-    expect(((await antigravity?.json()) as { code: string }).code).toBe(MODEL_REFUSED_CODE);
+  it('every server 400 that refuses --model carries the code (all five places)', async () => {
+    const codeOf = async (response: Response | null | undefined): Promise<unknown> =>
+      response ? ((await response.json()) as { code?: unknown }).code : undefined;
+    // the running session: claude, antigravity
+    expect(await codeOf(refuseModelOnRunningSession('opus', 'claude', true))).toBe(MODEL_REFUSED_CODE);
+    expect(await codeOf(refuseModelOnRunningSession('m', 'antigravity', true))).toBe(MODEL_REFUSED_CODE);
+    // validateSendModel: a tool that takes no model, and a name it rejects
+    expect(await codeOf(validateSendModel('opus', 'codex'))).toBe(MODEL_REFUSED_CODE);
+    expect(await codeOf(validateSendModel('bad name', 'claude'))).toBe(MODEL_REFUSED_CODE);
+    // a start that joined a launch of another model
+    const gate = new Promise<void>(() => {});
+    void runSessionLaunch('cm4473-mismatch', 'Claude Code', () => gate, { cliToolId: 'claude', model: 'sonnet' });
+    const mismatch = await runSessionLaunch('cm4473-mismatch', 'Claude Code', () => gate, { cliToolId: 'claude', model: 'opus' }).catch((e: unknown) => e);
+    resetSessionLaunchFlightsForTest();
+    const answered = await answerSessionStartFailure(mismatch, {
+      cliTool: {} as never,
+      worktreeId: 'wt',
+      instanceId: 'claude',
+      recordNotSent: () => {},
+    });
+    expect(answered.status).toBe(400);
+    expect(await codeOf(answered)).toBe(MODEL_REFUSED_CODE);
   });
 
   it('prints the shared line once and then the server reason, exiting with the shared code', async () => {
@@ -168,12 +186,33 @@ describe('#4473 P-3 / P-5: instances --help', () => {
 });
 
 describe('#4473 P-4: roles default with no <tool> is a usage error (exit 2)', () => {
+  // A stub client for the whole block: with `process.exit` stubbed, commander goes on into the
+  // action after a missing argument, and nothing here may reach a real server.
+  const entry = { cliToolId: 'codex', adapterEnabled: true, stored: { state: 'unset' }, effective: { kind: 'none', source: 'fallback', reason: 'no-default' } };
+  const answer = { success: true, defaults: [entry], repositories: [], roles: [] };
+  let get: MockInstance;
+  let put: MockInstance;
+  beforeEach(async () => {
+    const { ApiClient } = await import('../../../../src/cli/utils/api-client');
+    get = vi.spyOn(ApiClient.prototype, 'get').mockResolvedValue(answer);
+    put = vi.spyOn(ApiClient.prototype, 'put').mockResolvedValue(answer);
+  });
+  afterEach(() => {
+    get.mockRestore();
+    put.mockRestore();
+  });
+
   const run = async (argv: string[]): Promise<void> => {
     const { createRolesCommand } = await import('../../../../src/cli/commands/roles');
     const { Command } = await import('commander');
+    const quiet = { writeOut: () => {}, writeErr: () => {} };
+    const roles = createRolesCommand();
+    // commander's own "missing argument" line stays out of the test's output
+    roles.configureOutput(quiet);
+    for (const child of roles.commands) child.configureOutput(quiet);
     const program = new Command();
-    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-    program.addCommand(createRolesCommand());
+    program.configureOutput(quiet);
+    program.addCommand(roles);
     await program.parseAsync(['node', 'cm', 'roles', ...argv]).catch(() => {});
   };
 
@@ -187,9 +226,9 @@ describe('#4473 P-4: roles default with no <tool> is a usage error (exit 2)', ()
     expect(mockExit.mock.calls[0]?.[0]).toBe(1);
   });
 
-  it('negative control: with <tool> given the command goes on (no exit from the argument check)', async () => {
-    mockFetchSequence([{ data: { success: true, defaults: [], repositories: [] }, status: 200 }]);
-    await run(['default', 'codex']);
-    expect(mockExit.mock.calls[0]?.[0]).not.toBe(1);
+  it('negative control: with <tool> given the command runs and exits nothing (a stub client, no real fetch)', async () => {
+    await run(['default', 'codex', '--none']);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(mockExit).not.toHaveBeenCalled();
   });
 });

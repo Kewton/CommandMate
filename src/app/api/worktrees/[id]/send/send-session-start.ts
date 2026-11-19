@@ -143,7 +143,7 @@ export function answerSessionStartFailure(
   // session that is starting with another. Nothing was typed; answered as
   // a `--model` to a running session is (#989 / #2771).
   if (isSessionLaunchModelMismatchError(error)) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ error: error.message, code: MODEL_REFUSED_CODE }, { status: 400 });
   }
   // Issue #4115: the role could not be applied, or another start is running with
   // another role. Nothing was typed, and the reason is stable for the caller.
