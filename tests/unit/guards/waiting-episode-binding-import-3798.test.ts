@@ -44,6 +44,18 @@ const WRITERS = new Set([
 /** Any writer's name as a word: a cheap test a file must pass before it is parsed (the AST decides what counts as a call). */
 const WRITER_NAME = new RegExp(`\\b(?:${[...WRITERS].join('|')})\\b`);
 
+/**
+ * `code` with its `\\uXXXX` and `\\u{...}` escapes decoded. An identifier may be spelled with them
+ * (`\\u006fpenEpisode(...)` calls `openEpisode`), and the AST sees through that, so the name test must too.
+ */
+function decodeEscapes(code: string): string {
+  const char = (hex: string): string => {
+    const point = parseInt(hex, 16);
+    return point <= 0x10ffff ? String.fromCodePoint(point) : '';
+  };
+  return code.replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})/g, (_m, braced: string | undefined, plain: string | undefined) => char(braced ?? plain ?? ''));
+}
+
 /** Where the writers are defined: these modules and the pieces split off them (#3903). */
 const DEFINERS = ['src/lib/session/waiting-episode-state.ts', 'src/lib/session/waiting-episode-binding.ts'];
 
@@ -92,7 +104,7 @@ function auditWriters(root: string): { writers: string[]; offenders: string[] } 
     if (DEFINERS.some((d) => inFamily(rel, d))) continue;
     const code = readFileSync(file, 'utf8');
     // A call to a writer names it, so a file without the name needs no parse (most of src/): the parse is the cost.
-    if (!WRITER_NAME.test(code)) continue;
+    if (!WRITER_NAME.test(decodeEscapes(code))) continue;
     const { calls, imports } = scan(code);
     if (calls.length === 0) continue;
     writers.push(rel);
@@ -120,6 +132,17 @@ describe('[#3798] the observers register the binding resolver themselves', () =>
         expect(auditWriters(root)).toEqual({ writers: ['src/lib/w.ts'], offenders: ['src/lib/w.ts'] });
       } finally {
         rmSync(root, { recursive: true, force: true });
+      }
+    }
+    // Positive control: a writer spelled with Unicode escapes is still a writer (the AST sees it; the prefilter must too).
+    for (const spelled of ['\\u006fpenEpisode', '\\u{6f}penEpisode', 'closeEpis\\u006fde'.replace('\\u006fde', '\\u{6f}de'), 'observe\\u0057aiting']) {
+      const escaped = mkdtempSync(join(tmpdir(), 'guard-3798-prefilter-'));
+      try {
+        mkdirSync(join(escaped, 'src'), { recursive: true });
+        writeFileSync(join(escaped, 'src', 'e.ts'), `export function f() { ${spelled}({}); }\n`);
+        expect(auditWriters(escaped)).toEqual({ writers: ['src/e.ts'], offenders: ['src/e.ts'] });
+      } finally {
+        rmSync(escaped, { recursive: true, force: true });
       }
     }
     // Negative control: a file that names none of them is not a writer.

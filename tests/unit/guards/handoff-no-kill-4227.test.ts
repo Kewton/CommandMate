@@ -169,6 +169,24 @@ describe('the hand-off never kills (Issue #4227, the PM’s decision)', () => {
     expect(closureKillers(calls, createModuleGraph(), memo)).toEqual(closureKillers(calls));
   });
 
+  it('(1c) two entries that reach the same forbidden module are both named, with one graph and one memo shared', () => {
+    const shared = fixture('shared.ts', "import { killSession } from '@/lib/tmux/tmux';\nexport const stop = (n: string) => killSession(n);\n");
+    const viaA = fixture('a.ts', "import { stop } from './shared';\nexport const a = stop;\n");
+    const viaB = fixture('b.ts', "import { stop } from './shared';\nexport const b = stop;\n");
+    const graph = createModuleGraph();
+    const memo = memoisedCallsKill();
+    // What a fresh graph says of each entry: both routes to the forbidden module (the shared piece, and the tmux it loads).
+    const expected = closureKillers(viaA);
+    expect(expected).toContain(repoRelative(shared));
+    expect(expected.some((module) => /^src\/lib\/tmux\//.test(module))).toBe(true);
+    // The second entry meets modules the first already judged: it must still be named, not skipped as seen.
+    expect(closureKillers(viaA, graph, memo)).toEqual(expected);
+    expect(closureKillers(viaB, graph, memo)).toEqual(expected);
+    // Negative control: an entry that reaches nothing forbidden stays clean on the same graph and memo.
+    const clean = fixture('clean.ts', 'export const c = 1;\n');
+    expect(closureKillers(clean, graph, memo)).toEqual([]);
+  });
+
   it('(2) the routes call no kill; only the observation route loads the tools, and asks isRunning', () => {
     const routes = files(HANDOFF_ROUTES);
     expect(routes.length).toBeGreaterThanOrEqual(12);
