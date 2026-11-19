@@ -179,9 +179,19 @@ describe('.commandcode/ tool state is not uncommitted work (#4406)', () => {
   it('S2: dirty-tree.mjs carries the same roster as src/lib/skills/agent-state-paths.ts', () => {
     expect([...MJS_AGENT_STATE_FILES]).toEqual([...AGENT_STATE_FILES]);
     expect([...MJS_AGENT_STATE_DIR_PREFIXES]).toEqual([...AGENT_STATE_DIR_PREFIXES]);
-    for (const path of ['.commandcode/taste/../x.md', '.commandcode/settings.json', '.Commandcode/settings.local.json']) {
+    for (const path of [
+      '.commandcode/taste/../x.md',
+      '.commandcode/settings.json',
+      '.Commandcode/settings.local.json',
+      // Anchored at the repository root: the same names nested elsewhere are not the roster.
+      'src/.commandcode/taste/a.md',
+      'src/.commandcode/settings.local.json',
+      'x.commandcode/taste/a.md',
+    ]) {
       expect(mjsIsAgentStatePath(path)).toBe(isAgentStatePath(path));
     }
+    expect(mjsIsAgentStatePath('src/.commandcode/taste/a.md')).toBe(false);
+    expect(mjsIsAgentStatePath('src/.commandcode/settings.local.json')).toBe(false);
   });
 
   it('S2: every path the #3126 roster excuses leaves a real tree clean', () => {
@@ -232,6 +242,19 @@ describe('.commandcode/ tool state is not uncommitted work (#4406)', () => {
     write(repo, path);
 
     expect(dirty(repo).length).toBeGreaterThan(0);
+  });
+
+  it('N7: with status.showUntrackedFiles=all, nested look-alikes listed file by file stay uncommitted', () => {
+    // Without the setting git collapses them to `?? src/.commandcode/`, and the
+    // root anchoring of the roster is never exercised (review 2, P3-1).
+    const repo = createRepo();
+    git(['config', 'status.showUntrackedFiles', 'all'], repo);
+    write(repo, 'src/.commandcode/settings.local.json');
+    write(repo, 'src/.commandcode/taste/a.md');
+    write(repo, '.commandcode/settings.local.json');
+    write(repo, '.commandcode/taste/b.md');
+
+    expect(dirty(repo)).toEqual(['src/.commandcode/settings.local.json', 'src/.commandcode/taste/a.md']);
   });
 
   it('N7: work and tool state together still report the work', () => {
