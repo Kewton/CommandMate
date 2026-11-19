@@ -325,7 +325,7 @@ commandmate send "$WT" "Quick check" --agent codex --instance codex-3 --register
 
 ### Guard on sends to Antigravity (Issue #4437)
 
-**Guard on sends to Antigravity (default)** — Until you declare how you use Antigravity, `send`, `ask` and `respond` (strict mode included) to an antigravity instance are refused before anything is typed (exit 33) when they come from inside a CommandMate session, a Schedule run, an AI agent, or a caller whose origin cannot be told (for example, no terminal). Relays with antigravity at either end (`send --reply-to`, `ask --async`) cannot be opened (exit 33, apart from the other relay refusals' exit 2). Sends from the web UI and commands a person types in a terminal work as before.
+**Guard on sends to Antigravity (default)** — Until you declare how you use Antigravity, `send`, `ask` and `respond` (strict mode included) to an antigravity instance are refused before anything is typed (exit 33) when they come from inside a CommandMate session, a Schedule run, an AI agent, or a caller whose origin cannot be told (for example, no terminal). Relays with antigravity at either end (`send --reply-to`, `ask --async`) cannot be opened (exit 33, apart from the other relay refusals' exit 2). Sends from the web UI and commands a person types in a terminal work as before. A relay to an ad-hoc instance (`send --agent antigravity --instance <id not on the roster> --reply-to …`) is judged by the `--agent` tool and refused too, from a terminal as well (Issue #4496: it used to be judged by the worktree's default tool, so from a terminal the relay opened and the message was typed, exit 0; it is now exit 33, and an end whose tool cannot be determined is refused). An ad-hoc end is judged both by the `--agent` tool and by the worktree's default tool the delivery uses, so a relay to a worktree whose default is antigravity cannot be opened even with an ad-hoc `--agent claude` (exit 33).
 
 **CLI usage notice (#4438)**: `instances <worktree-id> add --agent antigravity` and `send`, `ask` and `respond` to an antigravity instance print the usage notice with the terms and FAQ links on **stderr only** (never stdout or `--json`; after a refusal's reason lines when refused). It shows the first time per CLI environment (where the record `antigravity-notice.json` lives: `~/.commandmate` for a global install, or the CLI package's root for a local run from a checkout of the repository; the place is not decided by the working directory (cwd)) and again when the terms' check date changes. If the record cannot be read or written it shows the notice and goes on; the result and exit code do not change.
 
@@ -643,7 +643,11 @@ its request** (a new CLI with a new server).
   When the HTTP send is confirmed not to have arrived and the terminal fallback types the body, the
   terminal input start replaces the boundary
 - Relays opened by an older CLI, and older servers, behave as before (a new CLI prints one "legacy
-  handling" line on stderr against an older server and does not send `relayId`)
+  handling" line on stderr against an older server and does not send `relayId`). One exception: when
+  a relay an older CLI opened without naming the `--agent` tool is bound to a send that types into
+  antigravity, `/send` refuses it with 409 `RELAY_TOOL_POLICY_DENIED` (exit 33) and withdraws the relay
+  with nothing typed (Issue #4496). Unlike a refusal at creation the relay had been opened, so its row
+  is left `cancelled` (the response says the opened relay was withdrawn)
 
 **Limits until PR 3** (matching turns to replies comes in the next change):
 
@@ -914,7 +918,7 @@ commandmate ask <worktree-id> "<request>" --instance <id> --async [--reply-to <t
 | `--json` | Print the reply as JSON |
 | `--async` | Do not wait: register a relay, print its ID and exit 0. The reply is delivered into `--reply-to`'s composer when the other turn ends |
 | `--reply-to <target>` | Where an `--async` reply goes: `<worktree-id>[@<instance-id\|alias>]`, or `self` (the session running the command; the default) |
-| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops) |
+| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops). The next request after the reply to a relay you opened is not counted as a chain. But once the requesting session has received 10 replies to its own relays within the last 30 minutes, its next relay is refused with `RELAY_HOPS_EXCEEDED` (neither this flag nor a line typed by a person lifts it; it opens again once fewer than 10 replies remain within the last 30 minutes — later than 30 minutes after the oldest one if more than 10 are in the window. If it is urgent, ask with `send` without `--reply-to`) |
 | `--token <token>` | Auth token |
 
 There is deliberately **no `--auto-yes`**: turning another session's Auto-Yes on is a decision about that session's guard
@@ -2836,7 +2840,7 @@ With `--require-roles` a role that cannot be read fails the command instead of b
 
 ### `--json` shapes
 
-Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1. A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
+Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1 — except a missing `<tool>` of `roles default`, which is exit 2 (it was 1 before Issue #4473). A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
 
 | Command | Shape |
 |---------|-------|

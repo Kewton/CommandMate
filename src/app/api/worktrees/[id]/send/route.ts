@@ -61,6 +61,7 @@ import { evaluateRelayAfterSend } from '@/lib/relay/relay-delivery';
 import { withdrawRelay } from '@/lib/relay/relay-service';
 import { resolveRespondAgent, validateSendRequest, type SendMessageRequest } from './send-request';
 import {
+  findBoundRelayToolPolicyRefusal,
   judgeTurnOpenAtSend,
   readTurnAtInput,
   reportsTurns,
@@ -308,6 +309,18 @@ async function handleSend(
       // An ask the tool cannot attribute was never reserved; it says nothing was sent either.
       if (ask.answer && !ask.askId) ask.answer = { ...ask.answer, sendState: 'not_sent' };
       return toolPolicyDeniedResponse(toolPolicyDenial);
+    }
+
+    // Issue #4496: the bound relay's rule 0 with the tool this send types into — a relay
+    // opened by a CLI that did not name the tool judged an ad-hoc end by the default.
+    if (relay.binding) {
+      const relayRefusal = findBoundRelayToolPolicyRefusal(db, relay.binding.relayId, cliToolId);
+      if (relayRefusal) {
+        recordNotSent('tool-policy-denied');
+        relay.withdraw = true;
+        if (ask.answer && !ask.askId) ask.answer = { ...ask.answer, sendState: 'not_sent' };
+        return NextResponse.json(relayRefusal, { status: 409 });
+      }
     }
 
     // Get CLI tool instance from manager

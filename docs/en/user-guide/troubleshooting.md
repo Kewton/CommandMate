@@ -29,7 +29,7 @@ commandmate ls
 commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
 
 # Read the transcript WITHOUT attaching
-commandmate capture <worktree-id> --pane --tail 60
+commandmate capture <worktree-id> --pane --tail 80
 commandmate capture <worktree-id> --pane --follow    # follow a reply as it is generated
 
 # Attach this terminal (detach with Ctrl+b then d)

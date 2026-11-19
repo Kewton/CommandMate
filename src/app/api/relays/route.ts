@@ -17,6 +17,9 @@
  * Issue #4437: a relay with antigravity at either end is refused with 409
  * `RELAY_TOOL_POLICY_DENIED` and a `policy` naming the end (`endpoint`) — no row,
  * no system line. Lifted only by the server's usage declaration.
+ *
+ * Issue #4496: `to.cliToolId` (optional) is the tool the send asked for; an ad-hoc
+ * `to` instance is judged by it rather than by the worktree's default.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -30,7 +33,7 @@ import {
 import { openRelay, readSessionRelays } from '@/lib/relay/relay-service';
 import { listClosedBlockedRelays, withLastDeliveryBlocks } from '@/lib/relay/relay-delivery-block';
 import { resolveRelayTtlMs } from '@/lib/relay/relay-policy';
-import { isValidInstanceId } from '@/lib/cli-tools/types';
+import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { createLogger } from '@/lib/logger';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
@@ -45,6 +48,11 @@ const MAX_RELAY_METRICS_DAYS = 90;
 interface RelayEndpointBody {
   worktreeId?: unknown;
   instanceId?: unknown;
+  /**
+   * Issue #4496: on `to`, the tool the send asked for (`send --agent`), which rule 0
+   * judges an ad-hoc instance by. Absent (an older CLI): the instance's own resolution.
+   */
+  cliToolId?: unknown;
 }
 
 interface CreateRelayBody {
@@ -71,6 +79,16 @@ function readEndpoint(
     worktreeId: canonicalWorktreeId(value.worktreeId.trim()),
     instanceId: value.instanceId,
   };
+}
+
+/** Issue #4496: the 400 for a `to.cliToolId` that names no CLI tool. */
+const TO_CLI_TOOL_INVALID = 'to.cliToolId must be a CLI tool id';
+
+/** Issue #4496: the `to` end's requested tool (absent → undefined); null when malformed. */
+function readRequestedCliTool(value: RelayEndpointBody | undefined): CLIToolType | undefined | null {
+  const raw = value?.cliToolId;
+  if (raw === undefined) return undefined;
+  return typeof raw === 'string' && isCliToolType(raw) ? raw : null;
 }
 
 export async function GET(request: NextRequest) {
@@ -172,6 +190,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: to }, { status: 400 });
     }
 
+    const toCliToolId = readRequestedCliTool(body.to);
+    if (toCliToolId === null) {
+      return NextResponse.json({ error: TO_CLI_TOOL_INVALID }, { status: 400 });
+    }
+
     const ttlMs =
       typeof body.ttlMs === 'number' ? resolveRelayTtlMs(body.ttlMs) : undefined;
 
@@ -181,6 +204,7 @@ export async function POST(request: NextRequest) {
       allowRelayChain: body.allowRelayChain === true,
       ttlMs,
       bind: body.bind === true,
+      toCliToolId,
     });
 
     if (!result.ok) {
