@@ -56,7 +56,9 @@ import {
   AGENT_STATE_DIR_PREFIXES,
   AGENT_STATE_FILES,
   isAgentStatePath,
+  isAgentStateUntrackedEntry,
 } from '@/lib/skills/agent-state-paths';
+import { parsePorcelainStatusEntries } from '@/lib/verification/scope-gate';
 import {
   AGENT_STATE_DIR_PREFIXES as MJS_AGENT_STATE_DIR_PREFIXES,
   AGENT_STATE_FILES as MJS_AGENT_STATE_FILES,
@@ -70,6 +72,7 @@ import {
   RESOURCE_CONFIG_MAX_BYTES,
   RESOURCE_CONFIG_REASON_MAX_CHARS,
   RESOURCE_CONFIG_TOP_KEYS,
+  captureEnvSnapshot,
   probeCommandmateEntries,
   probeHomeEntries,
   readRegularFileNoFollow,
@@ -289,26 +292,92 @@ describe('.commandcode/ tool state is not uncommitted work (#4406)', () => {
       calls.push([command, ...args]);
       return {
         status: 0,
-        stdout: ' M src/a.ts\n?? .commandmate/tasks/issue-1.yaml\n?? dev-reports/x.md\n?? newdir/\nR  old.ts -> new.ts\n',
+        // `-z`: NUL-terminated, a rename's original path in the next field (codex review 3).
+        stdout: ' M src/a.ts\0?? .commandmate/tasks/issue-1.yaml\0?? dev-reports/x.md\0?? newdir/\0R  new.ts\0old.ts\0',
         stderr: '',
       };
     };
 
     expect(dirtyPaths(run, '/wt')).toEqual(['src/a.ts', 'newdir/', 'old.ts -> new.ts']);
-    expect(calls).toEqual([['git', '-C', '/wt', 'status', '--porcelain']]);
+    expect(calls).toEqual([['git', '-C', '/wt', 'status', '--porcelain', '-z']]);
     expect(IGNORED_DIRTY).toEqual(['.commandmate/tasks/', 'dev-reports/']);
   });
 
   it('a git failure still throws, including on the expansion of .commandcode/', () => {
     const failing = () => ({ status: 128, stdout: '', stderr: 'fatal: not a git repository' });
-    expect(() => dirtyPaths(failing, '/wt')).toThrow('git status --porcelain failed in /wt');
+    expect(() => dirtyPaths(failing, '/wt')).toThrow('git status --porcelain -z failed in /wt');
 
     let n = 0;
     const second = () =>
       ++n === 1
-        ? { status: 0, stdout: '?? .commandcode/\n', stderr: '' }
+        ? { status: 0, stdout: '?? .commandcode/\0', stderr: '' }
         : { status: 128, stdout: '', stderr: 'fatal: boom' };
-    expect(() => dirtyPaths(second, '/wt')).toThrow('git status --porcelain -uall -- .commandcode/ failed in /wt');
+    expect(() => dirtyPaths(second, '/wt')).toThrow('git status --porcelain -z -uall -- .commandcode/ failed in /wt');
+  });
+});
+
+/**
+ * What the product gates (scope-gate.ts, gate-runner.ts work-evidence) count in
+ * the working tree: `git status --porcelain -z --untracked-files=all`, parsed by
+ * their own parser and filtered by their own roster check. IGNORED_DIRTY is the
+ * orchestrator's own and is applied to both sides.
+ */
+function productCounted(repo: string): string[] {
+  const out = git(['status', '--porcelain', '-z', '--untracked-files=all'], repo);
+  return parsePorcelainStatusEntries(out)
+    .filter((entry) => !isAgentStateUntrackedEntry(entry))
+    .flatMap((entry) => entry.paths)
+    .filter((path) => !IGNORED_DIRTY.some((prefix) => path.startsWith(prefix)));
+}
+
+describe('I1: dirty-tree judges the same raw paths as the product gates (git status -z) (#4406, codex review 3)', () => {
+  // A name git quotes under the default core.quotePath (non-ASCII, a space)
+  // used to reach the roster as `"..."` and never matched it.
+  const cases: Array<[path: string, excused: boolean]> = [
+    ['.commandcode/taste/日本語.md', true],
+    ['.commandcode/taste/a b.md', true],
+    ['.commandcode/taste/"q".md', true],
+    // Negative controls: still counted, by both.
+    ['.COMMANDCODE/Settings.local.json', false],
+    ['.commandcode/other.ts', false],
+    ['.commandcode/settings.local.json/x', false],
+    ['src/日本語.ts', false],
+    ['.commandcode/skills/日 本/SKILL.md', false],
+  ];
+
+  it.each(cases)('I1: %s — excused=%s, the same answer as scope-gate / work-evidence', (path, excused) => {
+    const repo = createRepo();
+    write(repo, path);
+
+    expect(productCounted(repo).length === 0).toBe(excused);
+    expect(dirty(repo).length === 0).toBe(excused);
+  });
+
+  it('I1: a counted non-ASCII path is named raw (not C-quoted), as the product names it', () => {
+    const repo = createRepo();
+    write(repo, '.commandcode/taste/日本語.md');
+    write(repo, 'src/日本語.ts');
+    write(repo, 'src/a b.ts');
+
+    expect(productCounted(repo)).toEqual(['src/a b.ts', 'src/日本語.ts']);
+    expect(dirty(repo)).toEqual(['src/a b.ts', 'src/日本語.ts']);
+  });
+
+  it('I1: a rename (two NUL fields under -z) is still counted, into or out of the roster', () => {
+    const repo = createRepo();
+    write(repo, 'src/old 名.ts');
+    git(['add', '-A'], repo);
+    git(['commit', '-q', '-m', 'two'], repo);
+    mkdirSync(join(repo, '.commandcode/taste'), { recursive: true });
+    git(['mv', 'src/greet.ts', '.commandcode/taste/g 日.md'], repo);
+    git(['mv', 'src/old 名.ts', 'src/new 名.ts'], repo);
+
+    expect(productCounted(repo).sort()).toEqual(
+      ['.commandcode/taste/g 日.md', 'src/greet.ts', 'src/new 名.ts', 'src/old 名.ts'].sort()
+    );
+    expect(dirty(repo).sort()).toEqual(
+      ['src/greet.ts -> .commandcode/taste/g 日.md', 'src/old 名.ts -> src/new 名.ts'].sort()
+    );
   });
 });
 
@@ -642,6 +711,41 @@ describe('~/.commandmate/resource.yaml stays a violation, with the reading besid
       options
     );
     expect(noteUnder(formatEnvCleanReport(added), '+')).toContain('shape not checked');
+  });
+
+  it('I2: a self-referencing YAML (`version: &v [*v]`) placed during the task is VIOLATED as invalid, never UNKNOWN', () => {
+    const home = makeHome();
+    const text = 'version: &v [*v]\n';
+    const { diff, commandmate, report } = judge(home, () => writeFileSync(configPath(home), text));
+
+    expect(diff.status).toBe('violated');
+    expect(commandmate.status).toBe('violated');
+    expect(commandmate.added.map((c) => c.key)).toEqual(['resource.yaml']);
+    expect(noteUnder(report, '+')).toContain(`shape=invalid (version (a list) is not 1) sha256=${sha(text).slice(0, 12)}`);
+    expect(envCleanItems(report)).toEqual(['commandmate-entries:+resource.yaml']);
+  });
+
+  it('I2: the same file present at task start: the probe and the baseline capture still answer', async () => {
+    const home = makeHome();
+    writeFileSync(configPath(home), 'version: &v [*v]\n');
+
+    const probe = probeCommandmateEntries(deps(home));
+    expect(probe.status).toBe('ok');
+    expect(probe.entries.find((e) => e.key === 'resource.yaml')?.config?.shape).toBe('invalid');
+
+    const baseline = await captureEnvSnapshot({ worktreeId: WORKTREE_ID, now: STARTED, deps: deps(home) });
+    expect(baseline.probes['commandmate-entries'].status).toBe('ok');
+    expect(baseline.probes['commandmate-entries'].entries.map((e) => e.key)).toEqual(['resource.yaml']);
+  });
+
+  it('I2: other non-scalar versions are invalid without being expanded into the reason', () => {
+    for (const text of ['version: [1, 2]\n', 'version: { a: 1 }\n', 'version: "2"\n', 'version: 2\n']) {
+      const home = makeHome();
+      writeFileSync(configPath(home), text);
+      const config = probeCommandmateEntries(deps(home)).entries[0]?.config;
+      expect(config?.shape).toBe('invalid');
+      expect(config?.reason).toMatch(/^version .* is not 1$/);
+    }
   });
 
   it('S3: the gate\'s copy of the reader\'s top-level keys matches resource-config.mjs', () => {

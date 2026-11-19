@@ -31,28 +31,48 @@ function holdsAgentState(entry) {
   return entry.endsWith('/') && [...AGENT_STATE_FILES, ...AGENT_STATE_DIR_PREFIXES].some((p) => p.startsWith(entry) && p !== entry);
 }
 
-/** `XY path` records of `git status --porcelain [args]`, with the status kept. */
+/**
+ * Records of `git status --porcelain -z [args]`: `{ code, file, original }`.
+ *
+ * `-z`, as the product gates read it (scope-gate.ts, gate-runner.ts work-evidence):
+ * paths come verbatim, where the line format C-quotes a name with a space or a
+ * non-ASCII character (core.quotePath) and the quoted `".commandcode/taste/…"`
+ * would never match the roster (codex review 3, P2). Each record is `XY path`
+ * followed by NUL; a rename or copy (`R`/`C` in either column) is followed by
+ * its original path as the next NUL field.
+ */
 function statusRecords(run, worktree, extra = []) {
-  const args = ['status', '--porcelain', ...extra];
+  const args = ['status', '--porcelain', '-z', ...extra];
   const { status, stdout, stderr } = run('git', ['-C', worktree, ...args]);
   if (status !== 0) throw new Error(`git ${args.join(' ')} failed in ${worktree}: ${stderr.trim()}`);
-  return stdout
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const code = /^\S+/.exec(line)[0];
-      return { code, file: line.replace(/^\S+\s+/, '') };
-    });
+  const fields = stdout.split('\0');
+  const records = [];
+  for (let i = 0; i < fields.length; i += 1) {
+    const field = fields[i];
+    if (field.length < 4) continue; // "XY " plus at least one path character
+    const code = field.slice(0, 2);
+    const record = { code, file: field.slice(3), original: null };
+    if (/[RC]/.test(code)) {
+      i += 1;
+      record.original = fields[i] || null;
+    }
+    records.push(record);
+  }
+  return records;
 }
 
-/** Changed paths other than the contract, dev-reports and declared agent state (`git status --porcelain`). */
+/** What callers are shown: the path, or `old -> new` for a rename or copy as before. */
+function shownPath(record) {
+  return record.original ? `${record.original} -> ${record.file}` : record.file;
+}
+
+/** Changed paths other than the contract, dev-reports and declared agent state (`git status --porcelain -z`). */
 export function dirtyPaths(run, worktree) {
   const records = statusRecords(run, worktree).flatMap((record) =>
     record.code === '??' && holdsAgentState(record.file) ? statusRecords(run, worktree, ['-uall', '--', record.file]) : [record],
   );
   return records
     .filter((record) => !(record.code === '??' && isAgentStatePath(record.file)))
-    .map((record) => record.file)
+    .map(shownPath)
     .filter((file) => !IGNORED_DIRTY.some((prefix) => file.startsWith(prefix)));
 }

@@ -663,6 +663,18 @@ export function limitConfigReason(reason: string): string {
     : escaped;
 }
 
+/**
+ * A wrong `version` for the reason, without expanding a collection: YAML aliases
+ * can make one refer to itself (`version: &v [*v]`), and stringifying that would
+ * throw out of the probe (codex review 3, P2).
+ */
+function describeConfigVersion(value: unknown): string {
+  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
+    return JSON.stringify(value) ?? String(value);
+  }
+  return `(a ${Array.isArray(value) ? 'list' : typeof value})`;
+}
+
 /** Keys under which a later resource PR runs commands or keeps a controller (resource-4370.md §2.7). */
 const RESOURCE_CONFIG_ACTING_KEYS = ['runners', 'health', 'idle'];
 
@@ -698,7 +710,7 @@ export function checkResourceConfigText(text: string): { ok: boolean; reason: st
     };
   }
   if (doc.version !== undefined && doc.version !== 1) {
-    return { ok: false, reason: limitConfigReason(`version ${JSON.stringify(doc.version)} is not 1`) };
+    return { ok: false, reason: limitConfigReason(`version ${describeConfigVersion(doc.version)} is not 1`) };
   }
   const acting = RESOURCE_CONFIG_ACTING_KEYS.filter((key) => key in doc);
   return { ok: true, reason: acting.length > 0 ? `has ${acting.join('/')}` : null };
@@ -728,7 +740,17 @@ export function inspectResourceConfig(deps: EnvProbeDeps, path: string): EnvConf
   } catch {
     return { shape: 'invalid', reason: 'not UTF-8', sha256, size: bytes.length };
   }
-  const shape = checkResourceConfigText(text);
+  // The check must not cost the entry: whatever the text does to the parser,
+  // the entry stays (as `invalid`) and is judged by its name like any other.
+  let shape: { ok: boolean; reason: string | null };
+  try {
+    shape = checkResourceConfigText(text);
+  } catch (error) {
+    shape = {
+      ok: false,
+      reason: limitConfigReason(`check failed (${error instanceof Error ? error.message : String(error)})`),
+    };
+  }
   return { shape: shape.ok ? 'ok' : 'invalid', reason: shape.reason, sha256, size: bytes.length };
 }
 
