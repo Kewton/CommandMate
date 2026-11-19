@@ -336,9 +336,9 @@ decideRelayCreation({ …, parentHops, replyRounds: rounds })                   
 
 **未確認**（実装の最初に確かめる）:
 1. `session_relays` の保留中（`uncertain`）の payload の列名と状態の名前（`pending_body`・配送の状態。v60・v63）
-4. 同じ instance への打鍵が入力の錠（#3945）で 1 本ずつであること（`inflight_body_hash` が 1 つで足りるか。足りなければ instance ごとに複数の記録を持つ）
 2. SQLite の版が `ALTER TABLE … DROP COLUMN` を持つか（§5 の down）
 3. 外のトランザクションの中から `createMessage` を呼ぶ呼び手があるか（§3.3 の savepoint）
+4. 同じ instance への打鍵が入力の錠（#3945）で 1 本ずつであること（`inflight_body_hash` が 1 つで足りるか。足りなければ instance ごとに複数の記録を持つ）
 
 ---
 
