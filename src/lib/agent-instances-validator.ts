@@ -28,6 +28,9 @@ import {
 /** Minimum number of agent instances a worktree must retain (Issue #869). */
 export const MIN_AGENT_INSTANCES = 1;
 
+/** What a refused roster is refused for: `limit` is the size, `entry` one of the rows. */
+export type AgentInstancesRefusal = 'shape' | 'limit' | 'entry';
+
 /**
  * Validate the `agentInstances` input from an API request body.
  *
@@ -38,38 +41,101 @@ export function validateAgentInstancesInput(input: unknown): {
   valid: boolean;
   value?: AgentInstance[];
   error?: string;
+  /** Issue #4458: set on a refusal, so a caller can tell the size from a bad row. */
+  refusal?: AgentInstancesRefusal;
+  /** Issue #4458: with `refusal: 'entry'`, the position of the row refused. */
+  index?: number;
 } {
   if (!Array.isArray(input)) {
-    return { valid: false, error: 'agentInstances must be an array' };
+    return { valid: false, error: 'agentInstances must be an array', refusal: 'shape' };
   }
   if (input.length < MIN_AGENT_INSTANCES) {
-    return { valid: false, error: `agentInstances must have at least ${MIN_AGENT_INSTANCES} entry` };
+    return { valid: false, error: `agentInstances must have at least ${MIN_AGENT_INSTANCES} entry`, refusal: 'limit' };
   }
   if (input.length > MAX_AGENT_INSTANCES) {
-    return { valid: false, error: `agentInstances must have at most ${MAX_AGENT_INSTANCES} entries` };
+    return { valid: false, error: `agentInstances must have at most ${MAX_AGENT_INSTANCES} entries`, refusal: 'limit' };
   }
+  const result = validateAgentInstanceEntries(input);
+  return result.valid ? result : { ...result, refusal: 'entry' };
+}
 
-  const seen = new Set<string>();
+/**
+ * Whether `candidate` can be added to `base`, judged exactly as the roster write
+ * (`PATCH /api/worktrees/[id]`) will judge the list that results (Issue #4458). The CLI
+ * (`send --register`, `instances add`) asks this before it saves, so the limit, the room
+ * left under it and the id rules have one definition, here, and not a copy in the CLI.
+ *
+ * @param base - The roster as read
+ * @param candidate - The row to append
+ * @returns The validation of `[...base, candidate]`
+ */
+export function validateAgentInstanceAddition(
+  base: ReadonlyArray<unknown>,
+  candidate: unknown
+): ReturnType<typeof validateAgentInstancesInput> {
+  return validateAgentInstancesInput([...base, candidate]);
+}
+
+/**
+ * Whether `candidate` can be added to `base`, judging the candidate row and the room for
+ * it only (Issue #4458, J1): the limit, the candidate's id (shape, and not already taken),
+ * tool, primary anchor and alias, with the index and the sentence the whole-list check
+ * would give it. The existing rows are not judged, so a bad one cannot hide what is wrong
+ * with the candidate; they are the server's to answer for when the list is saved. On a
+ * roster whose rows are all valid this is the verdict of {@link validateAgentInstanceAddition}.
+ *
+ * @param base - The roster as read
+ * @param candidate - The row to append
+ */
+export function validateAgentInstanceCandidate(
+  base: ReadonlyArray<unknown>,
+  candidate: unknown
+): { valid: boolean; error?: string; refusal?: AgentInstancesRefusal; index?: number } {
+  if (base.length + 1 > MAX_AGENT_INSTANCES) {
+    return { valid: false, error: `agentInstances must have at most ${MAX_AGENT_INSTANCES} entries`, refusal: 'limit' };
+  }
+  const taken = new Set<string>();
+  for (const row of base) {
+    const id = typeof row === 'object' && row !== null ? (row as { id?: unknown }).id : undefined;
+    if (typeof id === 'string') taken.add(id);
+  }
+  const result = validateAgentInstanceEntries([candidate], base.length, taken);
+  return result.valid ? { valid: true } : { valid: false, error: result.error, index: result.index, refusal: 'entry' };
+}
+
+/**
+ * @param offset - The position of `input[0]` in the list the rows belong to
+ * @param taken - Ids already used ahead of `input` in that list
+ */
+function validateAgentInstanceEntries(input: unknown[], offset = 0, taken: ReadonlySet<string> = new Set()): {
+  valid: boolean;
+  value?: AgentInstance[];
+  error?: string;
+  index?: number;
+} {
+
+  const seen = new Set<string>(taken);
   const normalized: AgentInstance[] = [];
 
-  for (let index = 0; index < input.length; index++) {
-    const raw = input[index];
+  for (let position = 0; position < input.length; position++) {
+    const index = position + offset;
+    const raw = input[position];
     if (typeof raw !== 'object' || raw === null) {
-      return { valid: false, error: `agentInstances[${index}] must be an object` };
+      return { valid: false, index, error: `agentInstances[${index}] must be an object` };
     }
     const candidate = raw as Record<string, unknown>;
 
     const id = candidate.id;
     if (typeof id !== 'string' || !isValidInstanceId(id)) {
-      return { valid: false, error: `agentInstances[${index}].id is invalid` };
+      return { valid: false, index, error: `agentInstances[${index}].id is invalid` };
     }
     if (seen.has(id)) {
-      return { valid: false, error: `agentInstances[${index}].id is duplicated: ${id}` };
+      return { valid: false, index, error: `agentInstances[${index}].id is duplicated: ${id}` };
     }
 
     const cliTool = candidate.cliTool;
     if (typeof cliTool !== 'string' || !isCliToolType(cliTool)) {
-      return { valid: false, error: `agentInstances[${index}].cliTool is invalid` };
+      return { valid: false, index, error: `agentInstances[${index}].cliTool is invalid` };
     }
 
     // Primary-anchor consistency: an id that equals a CLI tool id must back that
@@ -77,6 +143,7 @@ export function validateAgentInstancesInput(input: unknown): {
     if (isCliToolType(id) && id !== cliTool) {
       return {
         valid: false,
+        index,
         error: `agentInstances[${index}].id "${id}" conflicts with cliTool "${cliTool}"`,
       };
     }
@@ -84,11 +151,12 @@ export function validateAgentInstancesInput(input: unknown): {
     let alias = '';
     if (candidate.alias !== undefined && candidate.alias !== null) {
       if (typeof candidate.alias !== 'string') {
-        return { valid: false, error: `agentInstances[${index}].alias must be a string` };
+        return { valid: false, index, error: `agentInstances[${index}].alias must be a string` };
       }
       if (candidate.alias.length > MAX_AGENT_ALIAS_LENGTH) {
         return {
           valid: false,
+          index,
           error: `agentInstances[${index}].alias exceeds ${MAX_AGENT_ALIAS_LENGTH} characters`,
         };
       }

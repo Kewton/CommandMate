@@ -23,7 +23,15 @@ import {
   validateAntigravityModelName,
   validateClaudeModelName,
 } from '../config/model-validation';
-import { fetchAgentRoster, saveRosterChange, defaultAlias, MAX_AGENT_INSTANCES } from '../utils/agent-instances';
+import {
+  fetchAgentRoster,
+  saveRosterChange,
+  defaultAlias,
+  rosterAdditionRefusal,
+  MAX_AGENT_INSTANCES,
+  MAX_AGENT_ALIAS_LENGTH,
+} from '../utils/agent-instances';
+import { isValidInstanceId as isRosterInstanceId } from '../../lib/cli-tools/types';
 import {
   isInstanceSelector,
   resolveInstanceTarget,
@@ -266,21 +274,32 @@ async function registerInstance(
   instanceId: string,
   cliTool: string
 ): Promise<void> {
-  const addCommand = `commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`;
+  const addCommand = registerCommandFor(worktreeId, cliTool, instanceId);
   try {
     // Issue #4132: the whole list is replaced, so an add landing after this read has to
     // survive it. Built again on a moved roster, where this one may be there by now.
     const roster = await fetchAgentRoster(client, worktreeId);
     const saved = await saveRosterChange(client, worktreeId, roster, (base) => {
       if (base.some((inst) => inst.id === instanceId)) return null;
-      if (base.length >= MAX_AGENT_INSTANCES) {
+      const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+      // Issue #4458: the limit, the room under it and the id rules are the server's
+      // validator's, asked here, so this neither refuses a row the save would take nor
+      // sends one it would refuse (and then hides why behind a generic 400).
+      const refusal = rosterAdditionRefusal(base, added);
+      if (refusal?.atLimit) {
         console.error(
           `Warning: the message was sent, but could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit). `
             + `Do not send it again. Make room, then: ${addCommand}`
         );
         return null;
       }
-      const added = { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId), order: base.length };
+      if (refusal) {
+        console.error(
+          `Warning: the message was sent, but could not register '${instanceId}' in the roster: the server would refuse it (${refusal.error}). `
+            + `Do not send it again. To register it: ${addCommand}`
+        );
+        return null;
+      }
       return [...base, added as (typeof base)[number]];
     });
     if (saved !== null) console.error(`Instance registered in roster: ${instanceId}`);
@@ -290,12 +309,73 @@ async function registerInstance(
       return;
     }
     // A save answered by a 5xx or not at all may have happened, so this does not say it did not.
-    const reason = error instanceof Error ? error.message : String(error);
+    // Issue #4458: the server's own sentence too, which a 400 otherwise hides.
+    const serverReason = error instanceof ApiError ? error.payload?.error : undefined;
+    const reason = `${error instanceof Error ? error.message : String(error)}`
+      + (typeof serverReason === 'string' && serverReason.length > 0 ? ` ${serverReason}` : '');
     console.error(
       `Warning: the message was sent, but registering '${instanceId}' in the roster failed, so it may not be there (${reason}). `
         + `Do not send it again. Check with \`commandmate instances ${worktreeId}\`. To register it: ${addCommand}`
     );
   }
+}
+
+/** Whether the alias `--register` gives `instanceId` is longer than the roster takes (Issue #4458). */
+function defaultAliasTooLong(cliTool: string, instanceId: string): boolean {
+  return defaultAlias(cliTool, instanceId).length > MAX_AGENT_ALIAS_LENGTH;
+}
+
+/**
+ * The command that registers the instance by hand, as `--register` would have. When the
+ * default alias is longer than the roster takes, it names a short `--alias`, so the
+ * command does what it says instead of failing for the same reason (Issue #4458).
+ */
+function registerCommandFor(worktreeId: string, cliTool: string, instanceId: string): string {
+  const command = `commandmate instances ${worktreeId} add --agent ${cliTool} --id ${instanceId}`;
+  if (!defaultAliasTooLong(cliTool, instanceId)) return command;
+  const short = defaultAlias(cliTool, instanceId).slice(0, MAX_AGENT_ALIAS_LENGTH).trimEnd();
+  return `${command} --alias "${short}"`;
+}
+
+/**
+ * `--register` before anything is sent (Issue #4458): the candidate row on its own (its
+ * default alias above all, which the tool and the id alone decide), refused here with
+ * exit 2 rather than warned about after the message went out. The room left is not asked
+ * here: the limit of a plain --register stays a warning after the send (I3).
+ *
+ * J2: a send to an instance already on the roster registers nothing, so it must behave as
+ * a send without --register. The roster is read only when the candidate would be refused,
+ * and a read that fails does not hold the send up (the registration after it says what it
+ * finds).
+ */
+async function assertCandidateRowFits(
+  client: ApiClient,
+  worktreeId: string,
+  instanceId: string,
+  cliTool: string
+): Promise<void> {
+  const refusal = rosterAdditionRefusal([], { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId) });
+  if (refusal === null) return;
+  let onRoster: boolean;
+  try {
+    onRoster = (await fetchAgentRoster(client, worktreeId)).instances.some((inst) => inst.id === instanceId);
+  } catch {
+    return;
+  }
+  if (onRoster) return;
+  if (defaultAliasTooLong(cliTool, instanceId)) {
+    console.error(
+      `Error: --register would name '${instanceId}' '${defaultAlias(cliTool, instanceId)}', longer than the `
+        + `${MAX_AGENT_ALIAS_LENGTH} characters an alias may have, so the roster would refuse it. Nothing was sent. `
+        + `Register it with a shorter alias, then send without --register: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
+    );
+  } else {
+    console.error(
+      `Error: --register could not add '${instanceId}' to the roster: the server would refuse it (${refusal.error}). `
+        + `Nothing was sent. To register it: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
+    );
+  }
+  process.exit(ExitCode.CONFIG_ERROR);
 }
 
 /**
@@ -323,10 +403,31 @@ async function registerInstanceWithRole(
   const url = `/api/worktrees/${worktreeId}/instances/roles`;
   const { instances, rosterRevision } = await client.get<InstanceRoleSettingsResponse>(url);
   if (instances.some((instance) => instance.instanceId === instanceId)) return;
+  // Issue #4458: the server's own judgment of the row, before the POST and before anything
+  // is sent, as for a plain --register (the limit, the id, the alias length).
+  const alias = defaultAlias(cliTool, instanceId);
+  const base = instances.map((instance, order) => ({
+    id: instance.instanceId,
+    cliTool: instance.cliToolId,
+    alias: instance.alias,
+    order,
+  }));
+  const refusal = rosterAdditionRefusal(base, { id: instanceId, cliTool, alias });
+  if (refusal) {
+    const addCommand = registerCommandFor(worktreeId, cliTool, instanceId);
+    console.error(
+      refusal.atLimit
+        ? `Error: could not register '${instanceId}' in the roster (already at the ${MAX_AGENT_INSTANCES}-instance limit). `
+          + `Nothing was written or sent. Make room, then: ${addCommand}`
+        : `Error: could not register '${instanceId}' in the roster: the server would refuse it (${refusal.error}). `
+          + `Nothing was written or sent. To register it: ${addCommand}`
+    );
+    process.exit(ExitCode.CONFIG_ERROR);
+  }
   try {
     await roleWrite(`commandmate instances ${worktreeId}`, () =>
       client.post<InstanceRoleCreateResponse>(url, {
-        instance: { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId) },
+        instance: { id: instanceId, cliTool, alias },
         role,
         expectedRosterRevision: rosterRevision,
         // Issue #4449: refused by the tool policy here, with nothing created.
@@ -998,7 +1099,18 @@ instance holds and is a condition as above. A changed roster is exit 31, nothing
 --register without a role keeps its old order (sent, then registered) and never
 touches a role already there. The message has gone out by then, so a roster that kept
 changing, or any other failure to register, is a warning and exit 0 (Issues #4149, #4159):
-do not send it again; the warning has the command that registers it.
+do not send it again; the warning has the command that registers it. The roster's own
+rules decide (Issue #4458): up to 10 instances, so a removed row makes room again. The
+row to add is judged whatever the rows already there look like; a bad existing row is
+left to the server's answer to the save. An --instance already on the roster registers
+nothing and is sent as without --register. When more than one reason applies, the first
+of these decides:
+  1. the --instance is not an id the roster accepts: exit 2, nothing written or sent
+  2. the row to add would be refused (a default alias over 50 characters, ...): exit 2,
+     nothing written or sent; the error gives an instances add command with a short
+     --alias. With --role, the limit is judged here too (exit 2)
+  3. the tool policy refuses the send (or what it writes first): exit 33, nothing typed
+  4. a plain --register on a full roster: sent, then a warning and exit 0
 
 --expect-* pin this send to what the caller read earlier, saving nothing; the server
 reads them again right before the first key, so a process replaced in between gets
@@ -1061,6 +1173,20 @@ tool policy (antigravity, above; nothing typed, do not send it again).
         // Issue #2376: the RESOLVED id, never the string the user typed.
         // `--instance "Codex 2"` has to reach /send as `codex-2`; no route but
         // /resolve-target knows how to read an alias.
+
+        // Issue #4458: --register saves this id into the roster, and the roster write
+        // refuses an id outside its rules. Refused here, by the same rule, before anything
+        // is sent: after the send it could only be a warning.
+        if (options.register && namedTarget.instanceId !== undefined && !isRosterInstanceId(namedTarget.instanceId)) {
+          console.error(
+            `Error: --register needs an instance id the roster accepts, and '${namedTarget.instanceId}' is not one `
+              + '(letters, digits, _ or -, at most 64 characters). Nothing was sent.'
+          );
+          process.exit(ExitCode.CONFIG_ERROR);
+        }
+        if (options.register && namedTarget.instanceId !== undefined) {
+          await assertCandidateRowFits(client, worktreeId, namedTarget.instanceId, options.agent ?? namedTarget.instanceId);
+        }
 
         // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).
         noteAntigravityNotice(namedTarget.agent);
