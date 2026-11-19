@@ -1,7 +1,8 @@
 # 決定の承認の導線 — 承認待ちの件数・行き先と期限・二重の検知・承認前の修正・機械で決まる片付け（Issue #4354）設計
 
 - 段: 設計（この文書だけ）。コード・DB・試験は書かない。実装は §8 の人の答え（Q1・Q2）の後に、§7 の PR ごとに別の契約で行う（Sprint 9 以降）
-- 版: 第 3 版（2026-11-19、イネーブラー claude-5）
+- 版: 第 3.1 版（2026-11-19、イネーブラー claude-5）
+  - 第 3.1 版: 第 3 版の確かめの N4（purge で 24 時間の記録を消せる）の処分。§10.4
   - 第 3 版: 第 2 版の確かめ（`workspace/orchestration/runs/2026-11-19/s8/verify-4354-v2.md`）の処分。A P1-1 の残り・N1〜N3・R1 を反映した（PM の依頼 `pm-req-4354-v3.md`）。処分は §10.3
   - 第 2 版: 設計レビュー 2 本（A: データと契約の安全、`workspace/orchestration/runs/2026-11-19/s8/review-4354-a.md`／B: 既存の設計・文書との整合と使い勝手、`review-4354-b.md`）の処分を反映した。処分の表は §10
   - 第 2 版: PM の決定（`pm-req-4354-review-disposition.md`）を反映した。Q3〜Q8 は PM が範囲の中で決め、人へは Q1・Q2 だけを渡す
@@ -243,7 +244,7 @@ Issue の直し方 2（行き先の必須化）と追記 2（期限つきの決�
 - 片付けの手段は今のまま:
   - 人の画面の close
   - 作成者の `mem close`（`promoted` は `manual`）
-  - `mem purge --include-decisions`
+  - `mem purge --include-decisions`（直近 24 時間に閉じた decision は対象にならない、§4.1）
   - docs の運用（`team.md` §11）に「反映を確かめた promoted は、PM が週に 1 回閉じる」のような手順を足すかは、PM の運用の判断（設計の外）
 
 ### 3.4 数え方の変更
@@ -270,7 +271,10 @@ Issue の直し方 2（行き先の必須化）と追記 2（期限つきの決�
 - 直近に終わったもの（A P1-1 の残り。閉じた行の読みと時刻の比較だけ）:
   - `endedGrants`: 直近 24 時間に閉じた許可。期限で閉じたものと、取り下げたものの両方。許可は、行き先なし・印つきの期限で判定する
   - `withdrawnDecisions`: 直近 24 時間に取り下げられた（`withdrawn`）、許可でない decision（R1 の見え方）
-  - 24 時間は定数。`mem purge` で消えた行は数えない（purge は人だけの操作、`mem-store-4221.md` §8.3）
+  - 24 時間は定数
+  - **purge から守る（確かめ N4）**: `purgeMem`（`mem-db.ts:1067-1110`）は、直近 24 時間に閉じた decision を、どの絞り込み（`--include-decisions` を含む）でも消さない（`NOT (kind = 'decision' AND state = 'closed' AND closed_at >= :now - 24h)` を常に足す）。dry-run の件数にも入れない
+    - 消せるのは 24 時間を過ぎてから。`endedGrants`・`withdrawnDecisions` の記録は、少なくとも窓のあいだは残る
+  - 前提の書き直し: 「purge は人だけ」は CLI の検査（`src/cli/commands/mem.ts:622-625`）で、保証ではない（`mem-store-4221.md` §8.3・§11.3）。同じ OS 権限で DB を直に消すことまでは防げない（A と同じ限界）
 - `now` は引数で受け、関数は純粋のまま
 - `ambiguous` は、足した欄も null
 
@@ -369,6 +373,7 @@ Issue の直し方 2（行き先の必須化）と追記 2（期限つきの決�
 | 単体（純粋） | `memTransition` の表: kind × 状態 × 遷移 × 行き先の有無 × 印の有無。`expire` は「decision・open・行き先なし・印つき」だけが通る | `expire` の行き先の条件・印の条件を、それぞれ外した変異で赤（2 つの変異） |
 | 単体（純粋） | `checkDecisionDestinationRule` の表: 作成と update × 行き先の有無 × 期限（なし・過去・4 分・5 分・7 日・7 日＋1 分）× 条件の型（`at` 印つき・`at` 印なし・`issue`・`pr`・`branch`）× 行き先を外す update × **作成から 6 日後に「今＋7 日」へ延ばす update** × **印つきの期限の無い decision に `--expires-at` を足す update** | 7 日の上限を外す変異で、`2099-01-01` の行が通り赤（A P1-1）。上限の基準を update の時点にする変異で、6 日後の延長が通り赤（N1）。期限を足す検査を外す変異で、既存の decision が許可に変わり赤（N2）。行き先を外す検査を外す変異で赤（A P1-2）。印なしの `at` を受ける変異で赤（A P2-3） |
 | 単体（純粋） | `decisionCountsOf` の表: mode 4 通り × 状態 × 行き先の有無 × 条件（なし・印つきの `at`・印の無い `at`・`issue`・`pr`・`branch`）× 期限の前後（`now` を差し替え）× 閉じた行（期限で閉じた許可・取り下げた許可・取り下げた decision、24 時間の前後）。既存の `open`・`recorded` の値は今と同じ。**全部の行で `pending + grants + expiredGrants + noDestination = open`**（N3） | `open` の意味を変える変異（行き先を見る）で、既存の表の行が赤（#4355 の互換、A P2-5）。`noDestination` を「期限も条件も無い」に戻す変異で、印の無い `at`・`issue` の行の和が合わず赤（N3）。`grants` を数えない変異で赤。`endedGrants` の 24 時間の窓を外す変異で赤 |
+| 単体（store、purge。N4） | 直近 24 時間に閉じた許可・取り下げた decision を作り、`mem purge --closed-only --kind decision --confirm` と `--include-decisions` を打つ。行は残り、`endedGrants`・`withdrawnDecisions` の数が変わらない。時計を 24 時間＋1 分進めると消える | 24 時間の除外を外す変異で、purge の後の数が 0 になり赤 |
 | 単体（store・経路ごと） | 作成の拒否を 3 つの経路で: `memAddItem`（CLI・API）・`memWriteFromScreen` の `add`・handoff の提案の適用（I7、A P2-1・B P2-2）。どの経路も行 0 | 規則を CLI の側だけに置く変異で、画面と handoff の行が赤 |
 | 単体（store） | `closeMemItemByCondition` を直接呼ぶ: 版と `close_when` は一致させ、`promote_to` だけを非 NULL にした行（fixture で直接作る）を渡す → 閉じない（A P2-6） | `promote_to` の検査を外す変異で赤（版の照合では止まらない行） |
 | 結合（評価） | 時計を差し替え、期限の前は閉じず、後の `check` で許可だけが `time-passed` で閉じる。行き先のある decision・印の無い `at` は閉じない | 評価で閉じる条件から行き先か印を外す変異で赤 |
@@ -400,7 +405,7 @@ Issue の直し方 2（行き先の必須化）と追記 2（期限つきの決�
 
 | PR | 中身 | 書くファイル（見込み） | 依存 | 陽性対照 |
 |---|---|---|---|---|
-| PR1a 数と見え方 | promoted を上限の警告から外す（§3.3・§3.4）、`decisionCountsOf` に欄を足す（§4.1。既存の欄は変えない）、`presentMemItem` の `expired`（§3.2） | `src/lib/db/mem-db.ts`（`countOpenItems`）、`src/lib/promote/decision-counts.ts`、`src/lib/mem/present.ts`、`src/lib/brief/sources.ts`（`expired` の欄）、試験。docs: `mem-store-4221.md:285`・guide・`mem-skills-4228.md:59`・`brief-4223.md`（欄の追加） | なし | 件数の表、`expired` の時計の行 |
+| PR1a 数と見え方 | promoted を上限の警告から外す（§3.3・§3.4）、`decisionCountsOf` に欄を足す（§4.1。既存の欄は変えない）、`presentMemItem` の `expired`（§3.2）、purge から直近 24 時間に閉じた decision を外す（§4.1、N4） | `src/lib/db/mem-db.ts`（`countOpenItems`・`purgeMem`）、`src/lib/promote/decision-counts.ts`、`src/lib/mem/present.ts`、`src/lib/brief/sources.ts`（`expired` の欄）、試験。docs: `mem-store-4221.md:285`・guide・`mem-skills-4228.md:59`・`brief-4223.md`（欄の追加） | なし | 件数の表、`expired` の時計の行 |
 | PR1b update の欄 | `mem update` の `--promote-to`・`--quote`・`--quote-at`（§4.4）。行き先を外す拒否 | `src/lib/mem/{service,validate}.ts`、`src/lib/db/mem-db.ts`（`updateMemItem`）、`src/cli/commands/mem.ts`、試験 | なし | 行き先を外す update の拒否の変異 |
 | PR1c 作成の規則と期限 | `checkDecisionDestinationRule`（§3.1、store 層）、`--expires-at`（add・update）、印つきの `at`、`expire`（§3.2）、`destination_required`（公開の契約の変更。CHANGELOG の Breaking、公開版 `cmate-handoff` の skill）、suggest の規則（§4.4）、docs（§3.2 の一覧） | `src/types/mem.ts`、`src/lib/mem/{validate,service,transitions,evaluate,close-when}.ts`、`src/lib/db/mem-db.ts`、`src/lib/mem-suggest/rules.ts`、`src/cli/commands/mem.ts`、試験。**直す既存の試験の一覧**（行き先なしの decision を作る fixture）を契約に書く | PR1b（update の経路を同じ関数で検査するため）。§8 Q1・Q2 の答え | §5 の規則・評価・I3・I6 の表 |
 | PR2 件数とバッジ | 件数の API（§4.1）、ヘッダー・サイドバーのバッジ、決定の画面の冒頭の数と説明（§4.1・§4.2）、guide の決定の画面の節 | 新しい route、`Header.tsx`・`Sidebar.tsx`、`DecisionPromotePanel.tsx`、docs | PR1a（欄）。PR1c（許可の数。PR1c の前なら `grants` は常に 0） | 副作用 0 の spy、e2e |
@@ -548,3 +553,12 @@ Issue の直し方 2（行き先の必須化）と追記 2（期限つきの決�
 | R1 作成者が承認待ちの decision を取り下げられる（前からの口。第 2 版が代わりに勧めていた） | 勧めを外した。§9 に既知の口として書き、Sprint 9 以降の追跡に（PM が Issue にする）。見え方として `withdrawnDecisions` を出す | §3.1、§4.1、§9 の 6 |
 
 - 人へ渡す Q1・Q2 の形は変わらない。Q1 の影響の欄（許可は人の確認なしに使われうる）と、Q2 の新しい拒否の一覧（許可でない decision への期限の追加）を書き足した
+
+### 10.4 第 3 版の確かめ（`verify-4354-v2.md` の「## 第 3 版」）の処分（第 3.1 版）
+
+| 指摘 | 処分 | 反映した節 |
+|---|---|---|
+| A P1-1 の残り（一部、扱いは妥当） | 確認として受けた（Q1 の影響の欄のまま） | §8 Q1 |
+| N4 purge で 24 時間の記録を消せる・「purge は人だけ」は保証でない | 採用（両方: 直近 24 時間に閉じた decision を purge の対象から常に外す。前提を「検査で保証ではない」に書き直す。§5 に purge の後の数の行と変異） | §4.1、§3.3、§5、§7 PR1a |
+
+- 人へ渡す Q1・Q2 の形は変わらない（purge の除外は、人の操作にも効く挙動の変化だが、消せるまでの待ちが 24 時間のびるだけで、公開の拒否の code・exit は増えない。PM の範囲の判断とした）
