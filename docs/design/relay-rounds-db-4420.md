@@ -1,7 +1,8 @@
 # 往復の数と連鎖の親を DB に持つ（Issue #4420 の数え方の設計し直し）
 
 - 段: 設計（この文書だけ）。コード・DB・試験は書かない。実装は、設計レビューの処分の後に、開発リーダー（claude-3）のレーンで行う（`fix/4420-relay-reply-not-parent`、PR は 1 本）
-- 版: 第 2 版（2026-11-19、イネーブラー claude-5）
+- 版: 第 2.1 版（2026-11-19、イネーブラー claude-5）
+  - 第 2.1 版: 第 2 版の確かめ（`review-4420-redesign-a.md` の「## 第 2 版」、一部 2・新しい穴 N1〜N5）の処分。§11.3
   - 第 2 版: 設計レビュー 2 本の処分。処分の表は §11
     - A: 暴走の上限の安全性、`workspace/orchestration/runs/2026-11-19/s8/review-4420-redesign-a.md`、P1 0・P2 2・P3 6
     - B: 整合・配送、`review-4420-redesign-b.md`、P1 0・P2 2・P3 5
@@ -33,8 +34,8 @@
     - 端末の記録は、本体より先に書くことも、取りこぼしを後で書くこともある
   - そこで、状態の遷移は次の 2 つで決める:
     1. **数える**: 返事の行。relay の台帳の印で、1 relay につき 1 回だけ（冪等）
-    2. **0 に戻す**: 人の普通の行のうち、行の時刻が「最後に数えた返事の時刻」より新しく、echo でないものだけ。echo は、台帳の配送中の本文か、直近の relay 行で決める
-  - 残る「順への依存」は §3.4 に列挙した。緩む向きに外れるのは O4 の 1 回だけで、ほかは厳しい向き（早めに断る側）にしか外れない
+    2. **0 に戻す**: 人の普通の行のうち、行の時刻が「最後に数えた返事の時刻」より新しく、echo でないものだけ。echo は、**この instance へ今打っている本文**（返事・bound の依頼・知らせ・素の送信のすべて。打鍵の前に記録する）か、直近の relay 行で決める
+  - 残る「順への依存」は §3.4 に列挙した。第 2.1 版で、どれも厳しい向き（早めに断る側）にしか外れない形にした（O4 を直した）
 - relay に bound した送信（`--reply-to`・`ask --async`）で届く依頼の行は、数を戻さない（PM の決定。A↔B の相互の依頼も 10 で止まる）
 - 会話の archive（kill-session）は、同じトランザクションで状態を戻す（今の動きを変えない、E4）
 - 公開の契約は変えない（code・文面の型・exit）
@@ -78,7 +79,7 @@
 | R6 | 判定できないときの向き: 親の relay が消えていれば hops は null（連鎖でない）。往復の数は DB の値をそのまま使う（消えた relay の返事も数えたまま。PM の決定 Q3） |
 | **R7** | **1 つの relay の返事は、1 回だけ数える**（台帳の印で冪等。レビュー A P3-3） |
 | **R8** | **0 に戻すのは、行の時刻が `last_counted_at`（最後に数えた返事の行の時刻）より新しい、echo でない人の普通の行だけ**。同じ時刻・古い時刻の行は戻さない（厳しい向き。レビュー A P2-1） |
-| **R9** | **echo は台帳で決める**: 配送中（`attempting`）の返事の本文、または直近の relay 行と、`normalizeUserTurnContent` で一致する行（レビュー A P2-1） |
+| **R9** | **echo は打鍵の前の記録で決める**: この (worktree, instance) へ**今打っている本文**（`sendUserMessage` が打鍵の前に記録する。返事・bound の依頼・知らせ・素の送信のすべて）、`uncertain` で保留中の relay の本文、または直近の relay 行と、`normalizeUserTurnContent` で一致する行（レビュー A P2-1、第 2 版の確かめ N1・N2・N3） |
 | **R10** | **relay に bound した送信で届く依頼の行は、状態を変えない**（PM の決定。レビュー A P2-2） |
 | **R11** | 状態の行を消す・戻す操作は、対応する履歴の操作（archive・instance の削除）と同じトランザクションで行う（レビュー B P2-1、A P3-5） |
 
@@ -98,6 +99,8 @@ CREATE TABLE relay_session_rounds (
   parent_relay_id TEXT,                   -- 連鎖の親（自分が to の relay）。NULL = 親なし
   last_relay_message_id TEXT,             -- 直近の relay 行（echo の照合の 2 つ目、R9）
   last_reset_message_id TEXT,             -- 直近に 0 へ戻した行（記録・ログ用）
+  inflight_body_hash TEXT,                -- 今打っている本文の hash（normalizeUserTurnContent の後の SHA-256。R9）
+  inflight_set_at INTEGER,                -- その記録の時刻
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (worktree_id, instance_id)
 );
@@ -120,16 +123,21 @@ ALTER TABLE session_relays ADD COLUMN rounds_counted_at INTEGER;  -- R7 の印�
 | T4 | relay は在るが、端がどちらとも一致しない relay 行（今は起きない。将来の別名の解決） | 変えない | 変えない | **変えない**（生きた relay を親にしない。レビュー A P3-1） | この行 |
 | T5 | **知らせ**: `message_type='relay'`、`request_id` なし（`prompt`・`expired`） | 変えない | 変えない | NULL（旧 I4） | この行 |
 | T6 | **relay に bound した送信で届く依頼の行**: send の route が `body.relayId`（bound の relay）を持つ送信で書く `normal` の行。`createMessage` に `relayRequest: true` を渡す（行の分類の欄は変えない。R2 の「状態を飛ばす引数」ではなく、遷移を選ぶ入力） | 変えない（R10） | 変えない | 変えない | 変えない |
-| T7 | **echo**（R9）: `message_type='normal'` で、次のどちらか:<br>(a) 同じ (worktree, instance) を `from` とする relay の、配送中（`attempting`）の返事の本文と一致する<br>(b) `last_relay_message_id` の行と一致し、その行の時刻以後 | 変えない | 変えない | 変えない | 変えない |
+| T7 | **echo**（R9）: `message_type='normal'` で、次のどれか:<br>(a) 本文の hash が `inflight_body_hash`（この instance へ今打っている本文）と一致する<br>(a') 同じ (worktree, instance) を `from` とする relay のうち、`uncertain` で保留中の payload の本文と一致する<br>(b) `last_relay_message_id` の行と一致し、その行の時刻以後 | 変えない | 変えない | 変えない | 変えない |
 | T8 | **人の普通の行**: `message_type='normal'` で、T6・T7 でない。**かつ 行の timestamp > last_counted_at**（または `last_counted_at` が NULL） | **0** | NULL | NULL | 変えない |
 | T8' | 人の普通の行だが、行の timestamp ≦ last_counted_at（遅れて書かれた行。取りこぼしの後書きなど） | 変えない（R8） | 変えない | 変えない | 変えない |
 | T9 | そのほかの user 行（`prompt`・`prompt_response` など。今は書き手が無い、レビュー B P3-3） | 変えない（PM の決定 Q1。将来の防御） | 変えない | 変えない | 変えない |
 
 - T1 の「同じ」の判定は `isSameEndpoint`（worktree と instance の id が文字どおり同じ）
-- T7 (a) の台帳の照合:
-  - `session_relays` の配送中の payload を、`from` が同じ (worktree, instance) の relay について読む。使う列は `pending_kind='reply'`、配送の状態 `attempting`、`pending_body`（v60・v63 の列）
-  - 列名と状態の名前は実装で確かめる（見立て）
-  - claim（`attempting`）は打鍵より前に書かれる（`relay-delivery.ts:600-626`）。エージェントがその本文を受け取ってから端末の記録が行を書くまでに、必ず台帳にある（因果の順。§3.4）
+- T7 (a) の「今打っている本文」の記録（第 2 版の確かめ N1・N2。第 2 版は台帳の返事の payload だけだった）:
+  - `sendUserMessage` は、打鍵の**前**に、この (worktree, instance) の状態の行の `inflight_body_hash`・`inflight_set_at` を書く（小さな UPSERT）
+  - 対象は、この関数で打つ本文のすべて: relay の返事・知らせ（`relay-delivery.ts:626-634`）、bound の依頼と素の送信（send の route）
+  - 同じ instance への打鍵は入力の錠（#3945）で 1 本ずつなので、記録は 1 つで足りる（見立て。実装で確かめる）
+  - 記録を外すのは、route の行（T1・T1'・T5・T6 など）を書く `createMessage` の同じトランザクションの中。外す時点と行の書き込みの間に隙間が無い。送れなかった（`not_sent`）ときも外す
+  - 結果の分からない送信は、次の打鍵の記録で上書きされるまで残す（同じ本文の後の行を echo とみなす。厳しい向き）
+  - エージェントが本文を受け取るのは打鍵の後なので、端末の記録がその本文を書く時点では、必ず記録がある（因果の順。§3.4 O3）
+  - route の行が書かれた後は、端末の記録は #2392 と未キーの行の claim（`src/lib/history/user-turn-recorder.ts:340-372`）で同じ本文の行を書かない。その後の echo は T7 (b) と未キーの行の claim が受け持つ
+- T7 (a') の台帳の照合（第 2 版の確かめ N3）: `uncertain` で保留中（hold）の relay の payload（`pending_body`、v60・v63 の列。列名と状態の名前は実装で確かめる）
 - T7 (b) は、#2387 の `isEchoOfRelayRow`（`relay-service.ts:114-119`。時刻の向きの試験を含む）をそのまま使う。行が読めない（再送で消えた。レビュー B P3-2）ときは (b) は不一致で、(a) だけで決める
 - T8 の時刻:
   - 行の `timestamp` は出来事の時刻（送信は打ち始めの時刻、端末の記録は transcript の時刻）
@@ -139,7 +147,7 @@ ALTER TABLE session_relays ADD COLUMN rounds_counted_at INTEGER;  -- R7 の印�
 
 `createMessage` の中で、次の順に行う（1 つのトランザクション）:
 1. **最初に `INSERT INTO chat_messages`**。書き込みの文から始めるので、トランザクションは最初から書き込みの錠を持つ。読みから始めて後で書く形（WAL の BUSY_SNAPSHOT）にしない
-2. 行の分類（§3.2 の T1〜T9）に要る台帳の読み（relay・配送中の payload）と、T1 の印（`UPDATE session_relays SET rounds_counted_at=? WHERE id=? AND rounds_counted_at IS NULL`、変わった行の数で T1／T1' を決める）
+2. 行の分類（§3.2 の T1〜T9）に要る読み（relay・`inflight_body_hash`・保留中の payload）と、T1 の印（`UPDATE session_relays SET rounds_counted_at=? WHERE id=? AND rounds_counted_at IS NULL`、変わった行の数で T1／T1' を決める）
 3. 状態は **1 つの SQL の UPSERT** で進める（`INSERT … ON CONFLICT(worktree_id, instance_id) DO UPDATE SET rounds = CASE … END, …`）
    - R8 の時刻の比較（`excluded` の行の時刻 > `last_counted_at`）も、この文の CASE の中で行う
    - 前の状態を JS で読んで次を計算する形にしない
@@ -151,12 +159,13 @@ ALTER TABLE session_relays ADD COLUMN rounds_counted_at INTEGER;  -- R7 の印�
 |---|---|---|---|
 | O1 | R8: 人の行の時刻と `last_counted_at` の比較。時刻が出来事の順を表すこと（送信は打ち始めの時刻、transcript は記録の時刻） | transcript の時刻が秒に丸められる等で人の行が古く見えると、戻らない（**厳しい向き**: 早めに断る。人がもう 1 行打てば戻る） | 既知の制限 (f) |
 | O2 | R8: 返事 r_k と r_{k+1} の間に人が打った行が、r_{k+1} を数えた後に遅れて書かれる | 戻らない（**厳しい向き**） | 既知の制限 (f) |
-| O3 | T7 (a): 台帳の `attempting` は打鍵より前に書かれる | 因果の順（claim → 打鍵 → エージェントの受け取り → 端末の記録）で、書き込みの順の前提ではない。claim が無いまま打たれる経路は無い（見立て。`relay-delivery.ts:600-626`） | 試験で固定（§8） |
-| O4 | T7 (a): 配送が終わって `attempting` が外れた後に、端末の記録の echo が書かれる | その時点では返事の行が書かれているので、T7 (b) で echo と決まる。返事の行が書かれずに終わった（`uncertain`・`not_sent`）場合は、echo でなく人の行として 0 に戻りうる（**緩む向き**）。ただし行の時刻 > `last_counted_at` のときだけ | 既知の制限 (c)。その送信の返事は数えられていないので、数への影響は 1 回の 0 戻しまで |
+| O3 | T7 (a): 今打っている本文の記録は、打鍵より前に書かれる | 因果の順（記録 → 打鍵 → エージェントの受け取り → 端末の記録）で、書き込みの順の前提ではない。`sendUserMessage` を通らずに打つ経路は無い（見立て。打つ経路は `sendUserMessage` の 1 つ。返事・知らせ・bound の依頼・素の送信） | 試験で固定（§8）。打つ経路が 1 つであることを静的な試験で固定（§8） |
+| O4 | 配送が `uncertain`（結果が分からない）で終わり、返事の行が書かれない | 第 2.1 版で**厳しい向き**に直した（第 2 版の確かめ N3）:<br>- `uncertain` に移す（`holdRelayPayloadDelivery`）同じトランザクションで、その relay を数えて印を付ける（+1。届いた前提）<br>- その本文は、`inflight_body_hash` と保留中の payload（T7 (a')）で echo とみなす<br>- 後で返事の行が書かれても T1'（2 回目は数えない）<br>`not_sent`（確かに打っていない）は数えず、記録を外す（エージェントは受け取っていないので echo も出ない） | 人が「届いていない」と解決したときも、数えたままにする（厳しい向き。PM の決定待ちの推奨、§9.1） |
 | O5 | 親（T3・T5）: 知らせと `to` 側の行の順 | 本番には `to` 側の行が無い（旧設計 D1）ので、親は常に null。試験の形だけ | 記録だけ |
+| O6 | 端末（tmux attach）から直に打った人の行は、ターンの終わりまで書かれない（`src/lib/hooks/sources/claude/history.ts:847-866`） | 10 で断られた後に人が端末で「続けて」と打ち、エージェントが同じターンの中で relay を開くと、まだ 10 のままで断られる（**厳しい向き**）。画面・`send` の行は打鍵の直後に書かれるので起きない。旧設計も同じ（履歴にまだ無い）で、退行ではない（第 2 版の確かめ N5） | 既知の制限 (j)。cli-operations-guide の「人が 1 行打てば数え直す」に「端末から直に打った行は、そのターンが終わってから効く」を足す |
 
-- 残るのは、1 つの時刻の比較（O1・O2）と、因果の順（O3）だけ。列の復元（窓・並べ替え）は無い
-- 緩む向きに外れるのは O4 だけで、1 回の 0 戻しに限られる
+- 残るのは、1 つの時刻の比較（O1・O2）、因果の順（O3）、端末の行の書かれる時点（O6）だけ。列の復元（窓・並べ替え）は無い
+- 第 2.1 版で、**緩む向きに外れる依存は無くなった**（O4 を厳しい向きに直し、因果の保護を、打っている本文のすべてに広げた）。どれも外れれば早めに断る側で、人の 1 行（O6 は画面か `send`）で戻る
 
 ### 3.5 開くときの読み（`openRelay`、同期）
 
@@ -201,7 +210,8 @@ decideRelayCreation({ …, parentHops, replyRounds: rounds })                   
 | 再送で前の行が消される（orphan の削除、`send-user-message.ts:626-640`・`:863-866`。レビュー B P3-2） | 数と印はそのまま（R7 で 2 本目は数えない）。`last_relay_message_id` が消えた行を指すと、T7 (b) は不一致になる。T7 (a) と R8 の時刻の比較で決まる |
 | **会話の archive（kill-session。レビュー B P2-1）** | 今の動き（99811ebb1 は archive 済みを読まないので、数と親が 0・なしに戻る）を保つ。`deleteMessagesByInstance`・`deleteMessagesByCliTool`・`deleteAllMessages`（`chat-db.ts:598-612`）の中で、archive と同じトランザクションで状態の行を消す（R11）:<br>- `ByInstance`: その (worktree, instance)<br>- `ByCliTool`: `DELETE FROM relay_session_rounds WHERE worktree_id=? AND instance_id IN (SELECT DISTINCT instance_id FROM chat_messages WHERE worktree_id=? AND cli_tool_id=?)`（archive の前に引く）<br>- `deleteAllMessages`: その worktree の全部 |
 | **instance の削除（`removeAgentInstance`、`agent-instances-db.ts:414`。レビュー A P3-5）** | 同じトランザクションで、その (worktree, instance) の状態の行を消す（R11）。同じ id の再追加は 0 から |
-| セッションの再起動・`/clear`（履歴を archive しないもの） | 状態は残る（旧設計も履歴が残るので同じ。厳しい向き）。既知の制限 (h) |
+| **エージェントのプロセスの作り直し**（tmux が消えた・`/exit`・再起動・codex の同じ pane への relaunch。第 2 版の確かめ N4） | `beginAgentSession` → `archiveSupersededSessionMessages`（`src/lib/session/session-generation-archive.ts:1-28`・`:123`）が `deleteMessagesByInstance` を呼ぶ。R11 によって、同じトランザクションで状態の行も消え、**0 に戻る**。今の動き（99811ebb1 は archive 済みの履歴を読まないので 0 に戻る）と同じで、E4 に合う。人以外の 0 戻しの経路として既知の制限 (h) に書く（PM の決定、§9.1） |
+| `/clear` など、履歴を archive しない操作 | 状態は残る（厳しい向き） |
 
 ---
 
@@ -262,8 +272,9 @@ decideRelayCreation({ …, parentHops, replyRounds: rounds })                   
 | 単体（store） | 行の挿入と状態の UPSERT と台帳の印が、同じトランザクションにある。UPSERT で例外を注入すると、行も印も残らない（R1） | 状態の更新をトランザクションの外へ出す変異 |
 | 単体（store、2 接続） | 同じ DB の 2 つの接続で、交互に返事の行と人の行を書く。BUSY_SNAPSHOT で落ちない（§3.3） | 前の状態を SELECT してから書く形に戻す変異で、2 接続の行が赤（A P3-2） |
 | 単体（静的、R2） | `src` の中で、`chat_messages` への書き込み（`INSERT`・`INSERT OR IGNORE`・`INSERT OR REPLACE`・`REPLACE INTO`、改行を挟む形を含む）が `createMessage` の 1 か所だけ。user 行の `role`・`message_type`・`worktree_id`・`instance_id` を変える UPDATE と、`request_id` に `relay:` を入れる UPDATE が無い。`createMessage` に状態を飛ばす引数が無い（A P3-4） | 別の書き込みの経路を足す変異。状態を条件付きにする変異 |
+| 単体（静的、O3） | tmux へ本文を打つ経路（`sendKeys` などの送信の関数の呼び手）が、`sendUserMessage` の中の 1 か所だけ（打鍵の前の記録を通らない打鍵が無い） | 記録を通らない打鍵の経路を足す変異で赤 |
 | 結合（書き手ごと、R4） | 本物の書き手で行を書く: 送信（`sendUserMessage`、偽の tmux）・bound の送信・relay の配送（`deliverOne`、返事・prompt・expired）・端末の直の入力の記録（`recordUserTurn`）。状態が §3.2 のとおり進む | 1 つの書き手だけ別の関数で進める変異 |
-| **結合（順のずれ、A P2-1）** | (1) 返事の配送の claim の後、返事の行より**先に**端末の記録が同じ本文の `normal` 行を書く → 0 に戻らない（T7 (a)）<br>(2) 返事 3 本の後に、それより古い時刻の人の行を backfill する → 0 に戻らない（T8'）<br>(3) 返事の後に、それより新しい時刻の人の行 → 0（T8） | (1) は台帳の照合を外す変異で赤。(2) は時刻の比較を外す変異で赤 |
+| **結合（順のずれ、A P2-1・第 2 版の確かめ N1・N2・N3）** | (1) 打鍵の前の記録の後、route の行より**先に**端末の記録が同じ本文の `normal` 行を書く → 0 に戻らない（T7 (a)）。**返事・bound の依頼・知らせ・素の送信の 4 種類のそれぞれで**確かめる<br>(1') `uncertain` で保留した返事: 保留の時点で +1、その本文の端末の記録は 0 に戻さない、後で書かれた返事の行は数えない<br>(2) 返事 3 本の後に、それより古い時刻の人の行を backfill する → 0 に戻らない（T8'）<br>(3) 返事の後に、それより新しい時刻の人の行 → 0（T8） | (1) は記録の照合を外す変異で赤。照合の対象を返事だけに戻す変異で、bound の依頼と知らせの行が赤（N1・N2）。(1') は保留のときに数えない変異で赤（N3）。(2) は時刻の比較を外す変異で赤 |
 | **結合（冪等、A P3-3）** | 同じ relay の返事の行を 2 本書く（再試行の形）→ +1 だけ | 印を外す変異で +2 になり赤 |
 | **結合（相互の依頼、A P2-2）** | A↔B が bound の送信（`--reply-to`）で相互に依頼し、人を挟まずに 11 往復 → どちらかが `RELAY_HOPS_EXCEEDED`（T6）。素の `send`（bound なし）で届く行は 0 に戻す（既知の制限 (a) を固定する向き） | T6 を外す変異で、11 往復が通り赤 |
 | 結合（判定） | `openRelay` の判定:<br>- 返事 9 本の後は通る。10 本で `RELAY_HOPS_EXCEEDED`（旗あり・なし）<br>- 人の普通の行の後は 0<br>- 相手を交互にしても数え続ける<br>- 知らせを挟んでも数は変わらない<br>- 親（`to` 側の行）の後の返事でも、親は残る | `openRelay` で履歴を読む変異（旧関数を戻す）は、下の回帰の行で赤 |
@@ -291,6 +302,8 @@ decideRelayCreation({ …, parentHops, replyRounds: rounds })                   
 | Q5 | #4490 に「`relay_session_rounds` は状態」を渡す（§6） |
 | （第 2 版の依頼） | relay に bound した送信（`--reply-to`・`ask --async`）で届く依頼の行は、数を戻さない（T6、R10）。素の `send`（relay なし）で届く行は人の行と見分けられないので、既知の制限 (a) として残し、#4492 に足す。公開の契約は変えない |
 | （第 2 版の依頼） | 会話の archive は、同じトランザクションで状態を戻す（今の動きを変えない） |
+| （第 2.1 版の依頼） | エージェントのプロセスの作り直しでも 0 に戻る（R11 を `deleteMessagesByInstance` の中に置く。今の動きと同じ）。既知の制限 (h) に書く |
+| （第 2.1 版の推奨。PM の決定待ち） | `uncertain` で保留した返事を、人が後で「届いていない」と解決しても、数えたままにする（厳しい向き） |
 
 ### 9.2 実装の積み方の材料（レビュー B P3-5。決めるのはリーダー）
 
@@ -312,16 +325,18 @@ decideRelayCreation({ …, parentHops, replyRounds: rounds })                   
 
 - (a) **素の `send`**（relay に bound しない）で届く依頼の行は、人の行と見分けられないので 0 に戻る。A↔B が素の `send` で相互に依頼すると、10 では止まらない。bound の送信（`--reply-to`・`ask --async`）は止まる（T6）。続きは #4492
 - (b) 依頼に答える途中の B→C は止まらない（旧 (b)、#4492）
-- (c) 配送が `uncertain`・`not_sent` で終わり、返事の行が書かれなかったとき、端末の記録の echo が人の行として 0 に戻しうる（§3.4 O4。1 回まで）
+- (c) （第 2.1 版で解消）配送が `uncertain` で終わった返事は保留の時点で数え、その本文は echo とみなす（§3.4 O4）。`not_sent` は打っていないので echo も出ない
 - (d) 移行の直後と、同じ ID の worktree を作り直した直後に、往復の数は 0 から数え直す（1 回だけ緩む）
 - (e) 人が返事と同じ本文を打ち直した行は、echo と区別できない（旧 (c)）
 - (f) 人の行の時刻が、最後に数えた返事の時刻以前に見えると、0 に戻らない（§3.4 O1・O2。厳しい向き。人がもう 1 行打てば戻る）
 - (g) 数が上限の手前のときに並べて開く relay（扇の広がり）は止めない（旧設計と同じ）
-- (h) セッションの再起動・`/clear`（履歴を archive しないもの）では、数は残る（厳しい向き）
+- (h) （第 2 版の記述を事実に直した。第 2 版の確かめ N4）エージェントのプロセスを作り直すたび（tmux が消えた・`/exit`・再起動・relaunch）に、会話の archive と同じく数は 0 に戻る（`session-generation-archive.ts:123`）。今の動きと同じ（E4）。人以外の 0 戻しの経路。`/clear` など履歴を archive しない操作では残る
+- (j) 端末（tmux attach）から直に打った人の行は、そのターンが終わってから効く。同じターンの中の relay は、まだ前の数で判定される（§3.4 O6。厳しい向き。画面・`send` の行は直ちに効く）
 - (i) worktree の ID の改名で、移し先に同じ instance の状態の行があると、移し元の行が落ちる（0 へ緩む向き。改名の衝突のときだけ）
 
 **未確認**（実装の最初に確かめる）:
-1. `session_relays` の配送中の payload の列名と状態の名前（`pending_kind`・`pending_body`・配送の状態。v60・v63）。あわせて、`attempting` が打鍵より前に書かれること（§3.4 O3）
+1. `session_relays` の保留中（`uncertain`）の payload の列名と状態の名前（`pending_body`・配送の状態。v60・v63）
+4. 同じ instance への打鍵が入力の錠（#3945）で 1 本ずつであること（`inflight_body_hash` が 1 つで足りるか。足りなければ instance ごとに複数の記録を持つ）
 2. SQLite の版が `ALTER TABLE … DROP COLUMN` を持つか（§5 の down）
 3. 外のトランザクションの中から `createMessage` を呼ぶ呼び手があるか（§3.3 の savepoint）
 
@@ -357,3 +372,17 @@ decideRelayCreation({ …, parentHops, replyRounds: rounds })                   
 | P3-5 実装の積み方の材料 | 採用（材料を書いた。決めるのはリーダー） | §9.2 |
 
 - 却下 0 件・未解決 0 件
+
+### 11.3 第 2 版の確かめ（`review-4420-redesign-a.md` の「## 第 2 版」）の処分（第 2.1 版）
+
+| 指摘 | 処分 | 反映した節 |
+|---|---|---|
+| P2-1・P2-2 の残り（一部） | 採用（下の N1・N2 と同じ直しで塞いだ） | §3.2、§3.4 |
+| N1（P2）bound の依頼も、端末の記録が先に書くと 0 に戻る | 採用（T7 (a) の照合を、この instance へ今打っている本文のすべてに広げた。`sendUserMessage` が打鍵の前に本文の hash を記録し、route の行を書くトランザクションで外す。4 種類の本文のそれぞれで陰性対照） | §2.2 R9、§3.1、§3.2 T7、§3.4 O3、§8 |
+| N2（P3）知らせの echo | 採用（同上。知らせも `sendUserMessage` で打つので同じ記録に入る） | 同上 |
+| N3（P3）O4 を厳しい向きに | 採用（`uncertain` に移す同じトランザクションで数えて印を付ける。保留中の本文を echo の照合に足す。人が「届いていない」と解決したときも数えたままにする案は、PM の決定待ち） | §3.2 T7 (a')、§3.4 O4、§8、§9.1、§10 (c) |
+| N4（P3）(h) の「再起動では残る」は誤り | 採用（プロセスの作り直しのたびに 0 に戻る、と事実に直した。今の動きと同じ。人以外の 0 戻しの経路として書いた） | §4、§9.1、§10 (h) |
+| N5（P3）端末から打った行はターンの終わりまで書かれない | 採用（O6 と既知の制限 (j)、guide に 1 文） | §3.4 O6、§10 (j) |
+
+- 打つ経路が `sendUserMessage` の 1 つであることを、静的な試験で固定した（O3 の前提）
+- 第 2.1 版で、緩む向きに外れる順の依存は無くなった（§3.4）
