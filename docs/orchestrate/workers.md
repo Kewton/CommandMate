@@ -287,7 +287,7 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 ## 3-1 モデルの確認結果ごとの扱い
 
 - `model ok`: そのまま 3-2 へ
-- 起動のメッセージが exit 99 でも、launch-worker.mjs は画面の model を読み、読めれば先へ進む（`send-init-*.err` に記録）。読めなければ下の UNKNOWN と同じ扱い。先へ進むときは契約の前に入力欄（`capture --json` の `composerState`）を読み、`empty`・`ghost` が 2 回続いたときだけ契約を送る（5 秒おきに 6 回まで読み直す）。入力欄に文字が残っている（遅れて描かれた開始の一言・人の入力）・読めない（`no_composer`・未知の状態・読み取りの失敗）ままなら、**消さず・契約を送らず・セッションを止めずに exit 1**（#4476）。`send-init-*.err` と log の `composer NOT CLEAN` の行に、入力欄の先頭（開始の一言の残りとみられるか、別の文字か）と次の手が出る。**人が入力欄を確かめて消し、launch-worker を起動し直す**（起動し直すと launch-worker は最初にセッションを止めるので、残す必要のある文字はその前に控える）。開始の一言を Enter で提出し直さない（提出されていた可能性がある）。`composerState` を返さない古いサーバーでは今までどおり契約へ進む
+- 起動のメッセージが exit 99 でも、launch-worker.mjs は画面の model を読み、読めれば先へ進む（`send-init-*.err` に記録）。読めなければ下の UNKNOWN と同じ扱い。先へ進むときは契約の前に入力欄（`capture --json` の `composerState`）を読み、`empty`・`ghost` が 2 回続いたときだけ契約を送る（5 秒おきに 6 回まで読み直す）。入力欄に文字が残っている（遅れて描かれた開始の一言・人の入力）・読めない（`no_composer`・未知の状態・読み取りの失敗・例外を投げた読み・ロールの記録 `roleLaunch` が欠けた読み）ままなら、**消さず・契約を送らず・セッションを止めずに exit 1**（#4476）。`send-init-*.err` と log の `composer NOT CLEAN` の行に、入力欄の先頭（開始の一言の残りとみられるか、別の文字か）と次の手が出る。**人が入力欄を確かめて消し、launch-worker を起動し直す**（起動し直すと launch-worker は最初にセッションを止めるので、残す必要のある文字はその前に控える）。開始の一言を Enter で提出し直さない（提出されていた可能性がある）。`composerState` を返さない古いサーバーでは今までどおり契約へ進む
 - `model UNKNOWN` / `model MISMATCH`（1 回目）: launch-worker.mjs が自分で 1 回だけ起動し直す（契約はまだ送っていない）
 - exit 40（2 回目も `model MISMATCH`）/ 41（2 回目も `model UNKNOWN`）: **セッションは止まっている。契約は送られていない。その Issue は進めない**（そのモデルのまま続けない）。
   8-3 に書き、`.claude/settings.local.json` と CommandMate の版を確かめてから、人の判断で送り直す。利用者の `~/.claude/settings.json` は変えない
