@@ -918,7 +918,7 @@ commandmate ask <worktree-id> "<request>" --instance <id> --async [--reply-to <t
 | `--json` | Print the reply as JSON |
 | `--async` | Do not wait: register a relay, print its ID and exit 0. The reply is delivered into `--reply-to`'s composer when the other turn ends |
 | `--reply-to <target>` | Where an `--async` reply goes: `<worktree-id>[@<instance-id\|alias>]`, or `self` (the session running the command; the default) |
-| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops) |
+| `--allow-relay-chain` | Permit a relay opened while answering a relayed message (refused by default; chains stop at 3 hops). The next request after the reply to a relay you opened is not counted as a chain. But once the requesting session has received 10 replies to its own relays within the last 30 minutes, its next relay is refused with `RELAY_HOPS_EXCEEDED` (neither this flag nor a line typed by a person lifts it; it opens again once fewer than 10 replies remain within the last 30 minutes — later than 30 minutes after the oldest one if more than 10 are in the window. If it is urgent, ask with `send` without `--reply-to`) |
 | `--token <token>` | Auth token |
 
 There is deliberately **no `--auto-yes`**: turning another session's Auto-Yes on is a decision about that session's guard

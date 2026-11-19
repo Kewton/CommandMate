@@ -40,6 +40,8 @@ import {
 import {
   decideRelayCreation,
   isRelayRefusal,
+  isSameEndpoint,
+  RELAY_ROUNDS_WINDOW_MS,
   resolveRelayTtlMs,
   type RelayRefusal,
 } from '@/lib/relay/relay-policy';
@@ -133,11 +135,11 @@ function isEchoOfRelayRow(candidate: ChatMessage, relayRow: ChatMessage): boolea
  * The depth of the relay whose delivery this session is currently answering.
  *
  * Read from the newest USER rows of the requesting session: if the newest one
- * that is not a duplicate of a delivery is the row a relay delivered
- * (`request_id` = `relay:<id>`), then whatever the session is doing now was set
- * in motion by a relay, and a new relay opened from here is a chain. An
- * assistant row in between does not clear it — the session replying is exactly
- * the case the guard is about.
+ * that is not a duplicate of a delivery, nor the reply to one of this session's
+ * own relays, is the row a relay delivered (`request_id` = `relay:<id>`), then
+ * whatever the session is doing now was set in motion by a relay, and a new
+ * relay opened from here is a chain. An assistant row in between does not clear
+ * it — the session replying is exactly the case the guard is about.
  *
  * ## Why this reads a window and not the single newest row
  *
@@ -153,6 +155,24 @@ function isEchoOfRelayRow(candidate: ChatMessage, relayRow: ChatMessage): boolea
  * NEWER than it must be an echo of it. Skipping unconditionally would be the
  * cheaper fix and the wrong one: an ordinary message typed after the delivery is
  * the operator taking the session over, and #2377 decided that ends the chain.
+ *
+ * ## Why the reply to this session's own relay is stepped over
+ *
+ * Issue #4420: `relay-delivery` writes a relay row into the REQUESTER's history
+ * only, and the one keyed `relay:<id>` is the reply. Taking it for a parent made
+ * "ask → read the reply → ask again" a chain on the second ask. A reply is the
+ * answer to this session's question, not a request to it, so a relay row whose
+ * relay this session opened (`relay.from`, worktree and instance id as the
+ * ledger holds them) is stepped over together with its echoes, and the scan
+ * goes on to what is behind it. The window stays the five turns it was: replies
+ * and their echoes count against it, so a parent behind more of them than that
+ * is not seen (the fail-open direction this lookup already had; known limit Q-4
+ * of docs/design/relay-rounds-window-4420.md). The pace of such round trips is
+ * capped elsewhere, from the ledger ({@link countRecentReplyRounds}).
+ *
+ * Each ordinary row is compared with the relay row right behind it only (the
+ * next older one): an echo is never older than its own row, and a row that is
+ * not an echo of that one is somebody typing.
  *
  * `getMessages` — already the reader `relay-delivery` uses for the other side of
  * the ledger — rather than a new query, so the two halves of the guard keep
@@ -179,22 +199,30 @@ export function findParentRelayHops(
       matchResolvedInstance: true,
     }).filter((message) => message.role === 'user');
 
-    const parentIndex = recentUserRows.findIndex((row) => row.messageType === 'relay');
-    if (parentIndex === -1) return null;
+    // Ordinary rows newer than the next relay row: each must be its echo.
+    let newer: ChatMessage[] = [];
+    for (const row of recentUserRows) {
+      if (row.messageType !== 'relay') {
+        newer.push(row);
+        continue;
+      }
+      if (newer.some((candidate) => !isEchoOfRelayRow(candidate, row))) return null;
+      newer = [];
 
-    // Stop at the FIRST relay row rather than searching on past it: a row that
-    // names a relay the ledger no longer holds is still the thing this session
-    // was last told, and answering "no parent" for it is the documented
-    // fail-open. Searching on would reach behind it for an older, unrelated
-    // relay and report that one's depth instead.
-    const parentRow = recentUserRows[parentIndex];
-    for (let i = 0; i < parentIndex; i += 1) {
-      if (!isEchoOfRelayRow(recentUserRows[i], parentRow)) return null;
+      // Stop at the first relay row that is not this session's own reply,
+      // rather than searching on past it: a row that names a relay the ledger
+      // no longer holds, or a notice with no key, is still the thing this
+      // session was last told, and answering "no parent" for it is the
+      // documented fail-open. Searching on would reach behind it for an older,
+      // unrelated relay and report that one's depth instead.
+      const relayId = parseRelayRequestId(row.requestId);
+      if (!relayId) return null;
+      const relay = getRelayById(db, relayId);
+      // Issue #4420: the answer to this session's own question — step over it.
+      if (relay && isSameEndpoint(relay.from, from)) continue;
+      return relay?.hops ?? null;
     }
-
-    const parentId = parseRelayRequestId(parentRow.requestId);
-    if (!parentId) return null;
-    return getRelayById(db, parentId)?.hops ?? null;
+    return null;
   } catch (error) {
     logger.warn('relay-parent-lookup-failed', {
       worktreeId: from.worktreeId,
@@ -203,6 +231,68 @@ export function findParentRelayHops(
     });
     return null;
   }
+}
+
+/**
+ * The one read behind {@link countRecentReplyRounds} (Issue #4420). Exported for
+ * the suite that pins its query plan to `idx_session_relays_from`; parameters
+ * `@since`, `@worktreeId`, `@instanceId`.
+ */
+export const RECENT_REPLY_ROUNDS_SQL = `
+  SELECT COUNT(*) AS n, MIN(at) AS oldest, MAX(at) AS newest FROM (
+    SELECT CASE WHEN sent_request_id IS NOT NULL AND delivered_at >= @since
+                THEN delivered_at ELSE delivery_at END AS at
+    FROM session_relays
+    WHERE from_worktree_id = @worktreeId AND from_instance_id = @instanceId
+      AND ((sent_request_id IS NOT NULL AND delivered_at >= @since)
+           OR (delivery_state = 'uncertain' AND pending_kind = 'reply'
+               AND delivery_at >= @since))
+  )
+`;
+
+/** What {@link countRecentReplyRounds} answers (Issue #4420). */
+export interface RecentReplyRounds {
+  /** Replies to this session's own relays within the window. */
+  count: number;
+  /** Epoch ms of the oldest and the newest of them, or null when there are none. */
+  oldestAt: number | null;
+  newestAt: number | null;
+}
+
+/**
+ * How many replies to its own relays the session `from` has received within
+ * {@link RELAY_ROUNDS_WINDOW_MS} before `now` — the input of the round-trip
+ * ceiling, `relay-policy`'s `MAX_RELAY_ROUNDS` (Issue #4420, 案 Q,
+ * docs/design/relay-rounds-window-4420.md §2.1).
+ *
+ * One synchronous COUNT over the ledger, and nothing else: a relay `from`
+ * opened (worktree and instance id as written) whose reply was delivered —
+ * `sent_request_id` is set only by a delivered reply, and `delivered_at` is in
+ * the window — or whose reply's delivery is held `uncertain` (counted from
+ * `delivery_at`, as if it had arrived: the strict side). Nothing in the history
+ * is read, so no person's line, echo, notice, window edge or row order decides
+ * it. Expired, cancelled and notice-only relays carry no `sent_request_id` and
+ * are not counted; a held reply a person discards stops counting, and one they
+ * confirm on an open relay counts from the confirmation, and one confirmed after
+ * the relay was closed stops counting (known limits Q-8, Q-9, Q-12).
+ *
+ * Synchronous, so `openRelay` stays one synchronous stretch (#4466). A database
+ * that cannot be read throws, and no relay is opened.
+ */
+export function countRecentReplyRounds(
+  db: Database.Database,
+  from: RelayEndpoint,
+  now: number
+): RecentReplyRounds {
+  const since = now - RELAY_ROUNDS_WINDOW_MS;
+  const row = db
+    .prepare(RECENT_REPLY_ROUNDS_SQL)
+    .get({ since, worktreeId: from.worktreeId, instanceId: from.instanceId }) as {
+    n: number;
+    oldest: number | null;
+    newest: number | null;
+  };
+  return { count: row.n, oldestAt: row.oldest, newestAt: row.newest };
 }
 
 /**
@@ -226,12 +316,16 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     }
   }
 
+  const now = input.now ?? Date.now();
+  // Issue #4420: the pace of round trips, from the ledger (one COUNT).
+  const rounds = countRecentReplyRounds(db, input.from, now);
   const verdict = decideRelayCreation({
     from: input.from,
     to: input.to,
     parentHops: findParentRelayHops(db, input.from),
     allowRelayChain: input.allowRelayChain === true,
     openBetween: countOpenRelaysBetween(db, input.from, input.to),
+    replyRounds: rounds.count,
     // Issue #4437: rule 0 — each end's tool by the resolver the send route and
     // the delivery use, and the declaration as stated (no credentials read).
     // Issue #4496: the `to` end with the tool the send asked for (the one typed into
@@ -256,10 +350,20 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
         tool: verdict.toolPolicy.decision.tool,
       });
     }
+    if (verdict.ceiling === 'rounds') {
+      // Issue #4420 (Q-11): every refusal on the pace — and only those (a
+      // depth refusal shares the code) — with what it saw: the material for
+      // reviewing the window and the limit.
+      logger.info('relay-rounds-refused', {
+        session: `${input.from.worktreeId}/${input.from.instanceId}`,
+        n: rounds.count,
+        oldestReplyAt: rounds.oldestAt === null ? null : new Date(rounds.oldestAt).toISOString(),
+        newestReplyAt: rounds.newestAt === null ? null : new Date(rounds.newestAt).toISOString(),
+      });
+    }
     return { ok: false, refusal: verdict };
   }
 
-  const now = input.now ?? Date.now();
   const relay = createRelay(db, {
     from: input.from,
     to: input.to,
