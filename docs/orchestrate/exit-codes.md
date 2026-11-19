@@ -94,7 +94,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 | `unconfirmed:` の理由 | 対応 |
 |---|---|
 | `no IMPL_COMPLETED line within <秒>s` / `the verification saw an earlier state …` / `a commit landed during the re-verification` | ワーカーはまだ作業中。capture で確かめ、作業中なら同じ引数で待ち直す |
-| `uncommitted changes: …` | 未コミットの変更がある。commit するよう再指示する |
+| `uncommitted changes: …` | 未コミットの変更がある。commit するよう再指示する。Command Code が起動時に置く `.commandcode/settings.local.json`・`.commandcode/taste/` は #4406 から repo の `.gitignore` で外れる（製品の scope・work-evidence の #3126 の名簿と同じ path）。`.git/info/exclude` に足して裁定し直す必要はもう無い。`.commandcode/` のそれ以外（`skills/`・`commands/`、`settings.local.json` という名前のディレクトリなど）は、今までどおり作業として数える |
 | `no IMPL_COMPLETED line within <秒>s`（記録に `waited-for` も検証の行も無い） | 合図が要る担当（Command Code・Antigravity・`--require-signal`）は、**合図を見るまで検証を始めない**（#3883）。作業の途中のターン終了だったので、capture で確かめて同じ引数で待ち直す。画面に前の task の `IMPL_COMPLETED` が残っていても、この task の返事に合図が無ければ合図とは数えない（返事がまだ無い・読めないときも、画面の裸の行は数えない。数えるのは、task の作成の後のコミットを名指す `IMPL_COMPLETED head=<sha>` だけ） |
 | `a newer task <新しい id> was created for this instance after task <古い id>` | 待機中に同じ instance へ新しい契約が送られた（#3587）。ワーカーは新しい task を作業中なので Auto-Yes は切られていない（`auto-yes=kept`）。古い task の裁定は取らず、tasks.tsv の task id を新しい id に差し替えて **`wait-verify.mjs --task <新しい id>`** を呼び直す（ほかの引数は同じ） |
 
