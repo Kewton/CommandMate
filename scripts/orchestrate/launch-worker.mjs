@@ -51,8 +51,10 @@
  * composer — drawn late, its Enter lost — and the contract's `send` would refuse
  * `composer-not-empty` (#1880) on every try (Issue #4476). So before the contract the
  * last `capture --json` read's `composerState` decides: `empty` / `ghost` go on. The
- * starting message (or a piece of it) gets one clear through the server's existing
- * clear-composer route, called with the CLI's own HTTP client; anything else in the
+ * starting message as far as it was drawn (a beginning of 20 characters or more, I6) gets
+ * one clear through the server's existing clear-composer route, called with the CLI's own
+ * HTTP client — only when `--cli` is that package's own bin, so the clear goes where the
+ * reads went (I7; otherwise no clear, and the output says so); anything else in the
  * composer is not this script's and is left alone (1, the session left running).
  * A composer that cannot be read (`no_composer`, an unknown state) is read again. The
  * contract then goes only after two clean reads in a row, else the session is stopped
@@ -447,8 +449,10 @@ export const CLEAR_COMPOSER_TIMEOUT_MS = 75_000;
 
 /**
  * The clear's child (`node -e`, argv: `<cli> <route> <body JSON>`). It finds the CLI's own
- * package — `<cli>` on PATH (or the path given), symlinks followed, up to the `package.json`
- * named `commandmate` — and posts with that package's `ApiClient` (`dist/cli/utils/api-client.js`),
+ * package — `<cli>` on PATH (or the path given), symlinks followed — and goes on only when that
+ * file IS the package's `bin/commandmate.js` in a `package.json` named `commandmate` (I7: a
+ * wrapper, another package or another script is refused, since what it runs — and where it
+ * connects — cannot be confirmed). It posts with that package's `ApiClient` (`dist/cli/utils/api-client.js`),
  * so the server, token, `.env`, `CM_BIND` / HTTPS and UAT-isolation rules are the CLI's own
  * (`resolveServerEndpoint(loadClientEnv())`, src/cli/utils/server-url.ts) and nothing is
  * re-derived here. Needs no CommandMate session (`whoami` does). Prints one JSON line:
@@ -474,19 +478,24 @@ let root = null;
 try {
   const bin = onPath(cli);
   if (bin === null) say({ stage: 'resolve', error: cli + ' is not on PATH' }, 2);
-  let dir = path.dirname(fs.realpathSync(bin));
-  for (let i = 0; i < 8 && root === null; i++) {
-    try { if (JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name === 'commandmate') root = dir; } catch {}
-    const up = path.dirname(dir);
-    if (root !== null || up === dir) break;
-    dir = up;
+  // I7: the CLI that runs is the package's own bin, nothing in front of it (a wrapper may change
+  // CM_PORT or the package). Only then is this package's ApiClient the CLI's own connection.
+  const real = fs.realpathSync(bin);
+  const candidate = path.dirname(path.dirname(real));
+  let name = null;
+  try { name = JSON.parse(fs.readFileSync(path.join(candidate, 'package.json'), 'utf8')).name; } catch {}
+  let canonical = null;
+  try { canonical = fs.realpathSync(path.join(candidate, 'bin', 'commandmate.js')); } catch {}
+  if (name !== 'commandmate' || canonical !== real) {
+    say({ stage: 'resolve', error: real + ' is not the bin/commandmate.js of a commandmate package (a wrapper or another script)' }, 2);
   }
+  root = candidate;
 } catch (e) { say({ stage: 'resolve', error: reason(e) }, 2); }
-if (root === null) say({ stage: 'resolve', error: 'no commandmate package above ' + cli }, 2);
 let client;
 try {
   const { ApiClient } = require(path.join(root, 'dist', 'cli', 'utils', 'api-client.js'));
   client = new ApiClient({ onWarning: () => {} });
+  if (typeof client.post !== 'function') throw new Error('the ApiClient of ' + root + ' has no post');
 } catch (e) { say({ stage: 'resolve', error: reason(e) }, 2); }
 client.post(route, JSON.parse(body)).then(
   () => say({ stage: 'post', serverUrl: client.serverUrl, ok: true }, 0),
@@ -523,7 +532,7 @@ export function defaultClearComposer({ run, cli, wt, instance, cliToolId }) {
     answer = null;
   }
   if (answer?.stage === 'resolve') {
-    return { attempted: false, ok: false, detail: `clear not done: the CLI's server could not be resolved (${answer.error ?? 'unknown'})` };
+    return { attempted: false, ok: false, detail: `clear not done — 消去は未実施: 接続先を確かめられない (${answer.error ?? 'unknown'})` };
   }
   if (answer?.stage !== 'post') {
     return { attempted: true, ok: false, detail: `POST ${route} unconfirmed: exit=${posted.status} ${String(posted.stderr ?? '').trim().split('\n').pop() ?? ''}`.trim() };
@@ -560,13 +569,24 @@ function squashComposerText(text) {
 }
 
 /**
- * Whether composer text is the starting message or a piece of it (Issue #4476): its
- * beginning, or any part drawn late. Only that is this script's to clear; anything else in
- * the composer may be a person's, and is left alone.
+ * I6 (Issue #4476): the shortest beginning of the starting message that may be cleared, in
+ * characters after {@link squashComposerText}. Shorter text — `OK`, one character — is what a
+ * person may type on their own, so it cannot be told to be this script's.
+ */
+export const STARTING_MESSAGE_MIN_CHARS = 20;
+
+/**
+ * Whether composer text is the starting message as far as it was drawn (Issue #4476, I6): with
+ * ANSI and whitespace taken out, a BEGINNING of it of {@link STARTING_MESSAGE_MIN_CHARS}
+ * characters or more (the whole of a message shorter than that). A piece from inside it, a
+ * short match, or anything else cannot be told from a person's typing, and is left alone.
  */
 export function isStartingMessageText(text, message = INIT_MESSAGE) {
   const shown = squashComposerText(text);
-  return shown !== '' && squashComposerText(message).includes(shown);
+  const whole = squashComposerText(message);
+  if (shown === '') return false;
+  if ([...whole].length < STARTING_MESSAGE_MIN_CHARS) return shown === whole;
+  return [...shown].length >= STARTING_MESSAGE_MIN_CHARS && whole.startsWith(shown);
 }
 
 /**
@@ -696,7 +716,7 @@ export function parseArgs(argv) {
 /**
  * @param {string[]} argv
  * @param {{
- *   run?: (command: string, args: string[], opts?: { cwd?: string }) => { status: number, stdout: string, stderr: string },
+ *   run?: (command: string, args: string[], opts?: { cwd?: string, timeoutMs?: number }) => { status: number, stdout: string, stderr: string },
  *   resolveTarget?: typeof defaultResolveTarget,
  *   sleep?: (ms: number) => void,
  *   clearComposer?: typeof defaultClearComposer,
@@ -850,7 +870,8 @@ export function main(argv, deps = {}) {
           fs.appendFileSync(errFile, `${line}\n`);
           log(line);
         };
-        const held = `it held "${composerHead(leftover.text)}"`;
+        // opus r2 P3-3: a `content` reading whose text came empty or not as a string.
+        const held = leftover.text ? `it held "${composerHead(leftover.text)}"` : 'its text was not reported (composerText empty or not a string)';
         const clearNote = leftover.clear === null ? 'no clear' : leftover.clear.attempted ? `one clear (${leftover.clear.detail})` : `clear not done (${leftover.clear.detail})`;
         if (leftover.verdict === 'unknown') {
           log(`composer UNKNOWN ${o.instance} of ${o.wt}: the server reports no composerState; contract sent as before`);
@@ -858,10 +879,11 @@ export function main(argv, deps = {}) {
           record(`composer ${leftover.verdict === 'cleared' ? 'CLEARED' : 'SETTLED'} ${o.instance} of ${o.wt} after start exit=${init.status}: ${leftover.text ? `${held}; ` : ''}${clearNote}, then ${COMPOSER_CLEAN_STREAK} clean reads (${leftover.state})`);
         } else if (leftover.verdict === 'foreign') {
           // Not the starting message: maybe a person's. Neither cleared nor stopped (a stop would lose it too).
-          record(`composer FOREIGN ${o.instance} of ${o.wt}: ${held}, which is not the starting message; not cleared, session left running; contract not sent`);
+          record(`composer FOREIGN ${o.instance} of ${o.wt}: ${held}, which cannot be told to be the starting message (I6: its beginning, ${STARTING_MESSAGE_MIN_CHARS} characters or more); not cleared, session left running; contract not sent — check the composer by hand, then launch again`);
           return 1;
         } else if (leftover.verdict === 'left') {
-          record(`composer NOT CLEARED ${o.instance} of ${o.wt}: ${clearNote}; last read ${leftover.state}${leftover.text ? `; ${held}` : ''}; contract not sent`);
+          const next = leftover.clear !== null && !leftover.clear.attempted ? '; 次の手: 人が入力欄を確かめてから起動し直す' : '';
+          record(`composer NOT CLEARED ${o.instance} of ${o.wt}: ${clearNote}; last read ${leftover.state}${leftover.text ? `; ${held}` : ''}; contract not sent${next}`);
           return stopped('the composer did not read clean after the starting message') ? 1 : EXIT_STOP_UNCONFIRMED;
         }
         // `replaced` falls to the role check below, which stops the session.

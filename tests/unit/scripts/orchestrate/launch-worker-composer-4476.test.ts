@@ -201,7 +201,8 @@ describe('[#4476] the starting message left in the composer after exit 99 (I5)',
   });
 
   it('a piece of the starting message drawn late (wrapped) is cleared like the whole', () => {
-    const piece = { composerState: 'content', composerText: `${INIT_MESSAGE.slice(30, 50)}\n  ${INIT_MESSAGE.slice(50, 70)}` };
+    // I6: the long beginning drawn so far, wrapped over two rows.
+    const piece = { composerState: 'content', composerText: `${INIT_MESSAGE.slice(0, 25)}\n  ${INIT_MESSAGE.slice(25, 45)}` };
     const fake = fakeCli({ captures: [piece], afterClear: [EMPTY] });
     expect(go(fake).code).toBe(0);
     expect(fake.clears).toHaveLength(1);
@@ -253,11 +254,58 @@ describe('[#4476] text that is not the starting message is not this script\'s (o
 
   it('isStartingMessageText: the message, its pieces (ANSI and whitespace aside) — not other text, not empty', () => {
     expect(isStartingMessageText(INIT_MESSAGE)).toBe(true);
-    expect(isStartingMessageText(INIT_MESSAGE.slice(0, 10))).toBe(true);
-    expect(isStartingMessageText(`\x1b[1m${INIT_MESSAGE.slice(40, 60)}\x1b[0m \n  `)).toBe(true);
+    // I6: a beginning of 20 characters or more, ANSI and whitespace aside.
+    expect(isStartingMessageText(`\x1b[1m${INIT_MESSAGE.slice(0, 12)}\x1b[0m \n  ${INIT_MESSAGE.slice(12, 20)}`)).toBe(true);
+    // I6: a short beginning, or a piece from inside, cannot be told from a person's typing.
+    expect(isStartingMessageText(INIT_MESSAGE.slice(0, 10))).toBe(false);
+    expect(isStartingMessageText(`\x1b[1m${INIT_MESSAGE.slice(40, 60)}\x1b[0m \n  `)).toBe(false);
     expect(isStartingMessageText(`${INIT_MESSAGE}追加`)).toBe(false);
     expect(isStartingMessageText('echo hi')).toBe(false);
     expect(isStartingMessageText('  \n ')).toBe(false);
+  });
+});
+
+describe('[#4476] I6: only a beginning of the starting message of 20 characters or more is cleared (codex r2 P2)', () => {
+  const content = (text: unknown) => ({ composerState: 'content', composerText: text });
+
+  it.each([
+    ['OK', 'OK'],
+    ['one character', 'の'],
+    ['a short input with a space', 'O K'],
+    ['a piece from inside the message', INIT_MESSAGE.slice(30, 60)],
+    ['a beginning of 19 characters', INIT_MESSAGE.slice(0, 19)],
+  ])('%s: not cleared, no contract, the session left running', (_label, text) => {
+    const fake = fakeCli({ captures: [content(text)], afterClear: [EMPTY] });
+    const r = go(fake);
+    expect(r.code).toBe(1);
+    expect(fake.clears).toEqual([]);
+    expect(contractSends(fake)).toEqual([]);
+    expect(kills(fake)).toHaveLength(1);
+    expect(r.log.join('\n')).toMatch(/composer FOREIGN .*not cleared.*contract not sent/);
+  });
+
+  it.each([
+    ['a beginning of exactly 20 characters', INIT_MESSAGE.slice(0, 20)],
+    ['a long beginning drawn late', INIT_MESSAGE.slice(0, 60)],
+    ['the whole message', INIT_MESSAGE],
+  ])('%s: cleared once, then the contract', (_label, text) => {
+    const fake = fakeCli({ captures: [content(text)], afterClear: [EMPTY] });
+    expect(go(fake).code).toBe(0);
+    expect(fake.clears).toHaveLength(1);
+    expect(contractSends(fake)).toHaveLength(1);
+  });
+
+  it.each([
+    ['an empty text', ''],
+    ['no text (null)', null],
+    ['a text of the wrong type', 42],
+  ])('content with %s: not cleared, and the log says the text was not reported (opus r2 P3-3)', (_label, text) => {
+    const fake = fakeCli({ captures: [content(text)] });
+    const r = go(fake);
+    expect(r.code).toBe(1);
+    expect(fake.clears).toEqual([]);
+    expect(contractSends(fake)).toEqual([]);
+    expect(r.log.join('\n')).toMatch(/composer FOREIGN .*its text was not reported/);
   });
 });
 
@@ -480,6 +528,82 @@ describe('[#4476] defaultClearComposer: the existing clear-composer route, throu
     expect(calls[0].command).toBe(process.execPath);
     expect(calls[0].args).toEqual(['-e', CLEAR_COMPOSER_SCRIPT, 'commandmatedev', '/api/worktrees/wt-1/clear-composer', JSON.stringify({ cliToolId: 'claude', instanceId: 'claude' })]);
     expect(calls[0].args.join(' ')).not.toContain('secret-token-4476');
+  });
+});
+
+describe('[#4476] I7: the clear goes only where the CLI itself would go (codex r2 P2)', () => {
+  /**
+   * A `--cli` that is a shell wrapper inside the checkout (next to the real bin, so the package
+   * above it is the right one): it runs the real bin with another CM_PORT.
+   */
+  function wrapper(pkgRoot: string) {
+    const file = path.join(pkgRoot, 'bin', 'cm-wrap');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `#!/bin/sh\nCM_PORT=4001 exec "${process.execPath}" "${path.join(pkgRoot, 'bin', 'commandmate.js')}" "$@"\n`);
+    fs.chmodSync(file, 0o755);
+    return file;
+  }
+
+  /** Another package (not `commandmate`) with the same layout, or the `commandmate` package's other script. */
+  function otherBins(pkgRoot: string) {
+    const other = path.join(tmp, 'other-pkg');
+    fs.mkdirSync(path.join(other, 'bin'), { recursive: true });
+    fs.cpSync(path.join(pkgRoot, 'dist'), path.join(other, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(other, 'package.json'), JSON.stringify({ name: 'not-commandmate' }));
+    fs.writeFileSync(path.join(other, 'bin', 'commandmate.js'), '#!/usr/bin/env node\n');
+    fs.chmodSync(path.join(other, 'bin', 'commandmate.js'), 0o755);
+    const sibling = path.join(pkgRoot, 'bin', 'other-tool.js');
+    fs.writeFileSync(sibling, '#!/usr/bin/env node\n');
+    fs.chmodSync(sibling, 0o755);
+    return [path.join(other, 'bin', 'commandmate.js'), sibling];
+  }
+
+  const clearWith = (cli: string, logFile: string) =>
+    withEnv({ ...OUTSIDE_SESSION, CM_PORT: '3999', FAKE_CLIENT_LOG: logFile, FAKE_CLIENT_FAIL: undefined }, () =>
+      defaultClearComposer({ run: defaultRun, cli, wt: 'wt-1', instance: 'claude', cliToolId: 'claude' })
+    );
+
+  it('the canonical bin (or a symlink to it) is cleared through', () => {
+    const pkg = fakeCliPackage();
+    for (const cli of [pkg.link, path.join(pkg.root, 'bin', 'commandmate.js')]) {
+      fs.rmSync(pkg.logFile, { force: true });
+      expect(clearWith(cli, pkg.logFile)).toMatchObject({ attempted: true, ok: true });
+      expect(fs.existsSync(pkg.logFile)).toBe(true);
+    }
+  });
+
+  it('a wrapper that changes CM_PORT, another package\'s bin, another script of the package: not cleared, and it says why', () => {
+    const pkg = fakeCliPackage();
+    for (const cli of [wrapper(pkg.root), ...otherBins(pkg.root)]) {
+      const result = clearWith(cli, pkg.logFile);
+      expect(result).toMatchObject({ attempted: false, ok: false });
+      expect(result.detail).toContain('消去は未実施: 接続先を確かめられない');
+      expect(fs.existsSync(pkg.logFile)).toBe(false);
+    }
+  });
+
+  it('main with a wrapper --cli: no POST, no contract, stopped, and the next step is written', () => {
+    const pkg = fakeCliPackage();
+    const cli = wrapper(pkg.root);
+    const fake = fakeCli({ captures: [CONTENT] });
+    const run = (command: string, args: string[], opts?: { timeoutMs?: number }) =>
+      command === process.execPath ? defaultRun(command, args, opts) : fake.run(command, args);
+    const log: string[] = [];
+    const code = withEnv({ ...OUTSIDE_SESSION, FAKE_CLIENT_LOG: pkg.logFile, FAKE_CLIENT_FAIL: undefined }, () =>
+      main(
+        [
+          'send', '--run-dir', runDir, '--issue', '4476', '--wt', 'wt-1', '--worktree', worktree,
+          '--instance', 'claude', '--contract', '.commandmate/tasks/issue-4476.yaml', '--model', 'opus', '--cli', cli,
+        ],
+        { run, sleep: fake.sleep, out: () => {}, log: (line: string) => log.push(line), error: (line: string) => log.push(line) }
+      )
+    );
+    expect(code).toBe(1);
+    expect(fs.existsSync(pkg.logFile)).toBe(false);
+    expect(contractSends(fake)).toEqual([]);
+    expect(initErr()).toContain('消去は未実施: 接続先を確かめられない');
+    expect(initErr()).toContain('人が入力欄を確かめてから起動し直す');
+    expect(log.join('\n')).toMatch(/composer NOT CLEARED .*消去は未実施: 接続先を確かめられない/);
   });
 });
 
