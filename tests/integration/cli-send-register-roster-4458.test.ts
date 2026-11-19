@@ -44,6 +44,22 @@ vi.mock('@/lib/cli-tools/codex', () => ({
     getSessionName(id: string, instanceId?: string) { return `mcbd-codex-${id}-${instanceId ?? 'codex'}`; }
   },
 }));
+vi.mock('@/lib/cli-tools/antigravity', () => ({
+  AntigravityTool: class {
+    id = 'antigravity';
+    name = 'Antigravity';
+    command = 'agy';
+    async isInstalled() { return true; }
+    async isRunning() { return fakeTool.running; }
+    async startSession() { fakeTool.running = true; }
+    async sendMessage(_id: string, message: string) {
+      noteInputStart();
+      fakeTool.typed.push(message);
+    }
+    async killSession() { fakeTool.running = false; }
+    getSessionName(id: string, instanceId?: string) { return `mcbd-antigravity-${id}-${instanceId ?? 'antigravity'}`; }
+  },
+}));
 vi.mock('@/lib/cli-tools/claude', () => ({
   ClaudeTool: class {
     id = 'claude';
@@ -130,6 +146,8 @@ let patches: Array<Record<string, unknown>>;
 /** POSTs to instances/roles (`--register --role`) and to /send. */
 let rolePosts: number;
 let sendPosts: number;
+/** J2: GET /api/worktrees/:id (the roster read) answers 500 when set. */
+let failRosterGet: boolean;
 /** Every answer of a PATCH /api/worktrees/:id (status and body). */
 let patchAnswers: Array<{ status: number; body: Record<string, unknown> }>;
 
@@ -157,6 +175,9 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
   if (url.pathname === '/api/capabilities') return Response.json({ serverVersion: 'test', capabilities: ['resolve-session-target'] });
   if (url.pathname === `/api/worktrees/${WT}/current-output`) return Response.json({ isRunning: fakeTool.running });
   if (url.pathname === `/api/worktrees/${WT}/opencode/session`) return Response.json({ instances: [] });
+  if (failRosterGet && method === 'GET' && url.pathname === `/api/worktrees/${WT}`) {
+    return Response.json({ error: 'boom' }, { status: 500 });
+  }
   const route = routed(url.pathname);
   if (!route) throw new Error(`Not stubbed: ${method} ${url.pathname}`);
   const handler = route.handlers[method] as RouteHandler | undefined;
@@ -237,6 +258,7 @@ beforeEach(async () => {
   setLaunchRoleDatabaseForTest(db);
   rolePosts = 0;
   sendPosts = 0;
+  failRosterGet = false;
   resetSessionLaunchFlightsForTest();
   resetInstanceInputLocks();
   fakeTool.running = false;
@@ -444,4 +466,164 @@ describe('Issue #4458 (4): send --register and the server judge the same rows', 
       if (!row.accepted) expect(result.stderr.join('\n')).toMatch(/^(Warning|Error): /m);
     },
   );
+});
+
+/**
+ * J1 of #4458 (reinstruct-4458b-2): the row being added is always judged, on every add path
+ * (send --register, send --register --role, instances add, instances add --role), whatever
+ * the rows already there look like. A refusal caused by the candidate alone (its id, its
+ * default alias, the limit) is refused before anything is saved; a roster whose only bad row
+ * is an existing one goes on to the save and the server answers it (#4149).
+ */
+describe('J1 of #4458: the candidate row is judged on every add path, whatever the existing rows are', () => {
+  type Path = 'send' | 'send --role' | 'add' | 'add --role';
+  type Base = 'normal' | 'bad existing row';
+  type Candidate = 'normal' | 'long default alias' | 'invalid id' | 'over the limit';
+  const PATHS: Path[] = ['send', 'send --role', 'add', 'add --role'];
+  const BASES: Base[] = ['normal', 'bad existing row'];
+  const CANDIDATES: Candidate[] = ['normal', 'long default alias', 'invalid id', 'over the limit'];
+  const LONG_ID = 'w'.repeat(64);
+
+  const idOf = (candidate: Candidate): string =>
+    candidate === 'long default alias' ? LONG_ID : candidate === 'invalid id' ? 'Worker 6' : 'claude-x';
+  /** The existing row #4149's fake server has: a tool-named id under another tool. */
+  function baseOf(base: Base, size: number): AgentInstance[] {
+    const rows = claudeRoster(size);
+    if (base === 'bad existing row') rows[0] = { id: 'claude', cliTool: 'codex', alias: 'Odd', order: 0 };
+    return rows;
+  }
+  function argsOf(path: Path, id: string): () => Promise<{ code: number; stderr: string[] }> {
+    const role = path.endsWith('--role') ? ['--role', 'reviewer'] : [];
+    return path.startsWith('send')
+      ? () => send('hello', '--agent', 'claude', '--instance', id, '--register', ...role)
+      : () => instances('add', '--agent', 'claude', '--id', id, ...role);
+  }
+
+  const rows = PATHS.flatMap((p) => BASES.flatMap((b) => CANDIDATES.map((c) => [`${p} × ${b} × ${c}`, p, b, c] as const)));
+
+  it.each(rows)('%s', async (_name, p, b, c) => {
+    setAgentInstances(db, WT, baseOf(b, c === 'over the limit' ? MAX_AGENT_INSTANCES : 8));
+    const before = roster();
+    const id = idOf(c);
+
+    const result = await argsOf(p, id)();
+    const saves = patches.length + rolePosts;
+
+    if (c === 'normal') {
+      // The candidate is fine: the save is asked (a bad existing row is the server's to answer).
+      expect(saves).toBe(1);
+      if (b === 'normal') {
+        // send --role: the fake tool keeps no launch record of its role, so the send that
+        // follows the creation is refused by the role check (32), after the row exists.
+        expect(result.code).toBe(p === 'send --role' ? 32 : 0);
+        expect(rosterIds()).toContain(id);
+      }
+      return;
+    }
+    // A refusal caused by the candidate alone: nothing saved, nothing added.
+    expect(saves).toBe(0);
+    expect(roster()).toEqual(before);
+    if (c === 'over the limit' && p === 'send') {
+      // The limit of a plain --register is the one refusal after the send (I3): warned, exit 0.
+      expect(result.code).toBe(0);
+      expect(sendPosts).toBe(1);
+      expect(result.stderr.join('\n')).toMatch(/^Warning: the message was sent, but could not register 'claude-x' in the roster \(already at the 10-instance limit\)/m);
+      return;
+    }
+    expect(result.code).toBe(2);
+    expect(sendPosts).toBe(0);
+    expect(fakeTool.typed).toEqual([]);
+    expect(result.stderr.join('\n')).toMatch(/^Error: /m);
+  });
+});
+
+describe('J2 of #4458: a resend to an instance already on the roster is not held up before the send', () => {
+  it('a 64-character id registered with a short alias, the roster read answering 500: sent, exit 0', async () => {
+    const longId = 'w'.repeat(64);
+    setAgentInstances(db, WT, [...claudeRoster(8), { id: longId, cliTool: 'claude', alias: 'Long', order: 8 }]);
+    failRosterGet = true;
+
+    const result = await send('hello', '--agent', 'claude', '--instance', longId, '--register');
+
+    expect(result.code).toBe(0);
+    expect(sendPosts).toBe(1);
+    expect(fakeTool.typed).toEqual(['hello']);
+    expect(result.stderr.filter((line) => line.startsWith('Error'))).toEqual([]);
+  });
+
+  it('control: a candidate that passes on its own never reads the roster before the send', async () => {
+    setAgentInstances(db, WT, claudeRoster(8));
+    failRosterGet = true;
+
+    const result = await send('hello', '--agent', 'claude', '--instance', 'claude-x', '--register');
+
+    expect(result.code).toBe(0);
+    expect(fakeTool.typed).toEqual(['hello']);
+  });
+});
+
+/**
+ * J3 of #4458: one order when reasons overlap. Before the send: the id's shape, then the
+ * candidate row (exit 2, nothing written or sent). After them: the tool policy of /send
+ * (409 → exit 33), and last the limit of a plain --register (a warning after the send).
+ */
+describe('J3 of #4458: the order of refusals that overlap', () => {
+  const LONG_ID = 'w'.repeat(64);
+  const asSessionOrigin = (): void => {
+    // An agent session with no usage declared: the server refuses antigravity (#4437).
+    vi.stubEnv('CM_AGENT_TOOL', 'codex');
+    vi.stubEnv('CM_ANTIGRAVITY_USAGE', '');
+  };
+  const writtenRows = (): number => (db.prepare('SELECT COUNT(*) AS n FROM agent_instances').get() as { n: number }).n
+    + (db.prepare('SELECT COUNT(*) AS n FROM agent_instance_roles').get() as { n: number }).n
+    + (db.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }).n;
+
+  it('the tool policy × a long id: the candidate first — exit 2, nothing written or sent', async () => {
+    setAgentInstances(db, WT, claudeRoster(8));
+    asSessionOrigin();
+    const before = writtenRows();
+
+    const result = await send('hello', '--agent', 'antigravity', '--instance', LONG_ID, '--register');
+
+    expect(result.code).toBe(2);
+    expect(sendPosts).toBe(0);
+    expect(patches).toEqual([]);
+    expect(writtenRows()).toBe(before);
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('control: the same send with a short id is the policy\'s refusal, exit 33, nothing written', async () => {
+    setAgentInstances(db, WT, claudeRoster(8));
+    asSessionOrigin();
+    const before = writtenRows();
+
+    const result = await send('hello', '--agent', 'antigravity', '--instance', 'agy-new', '--register');
+
+    expect(result.code).toBe(33);
+    expect(patches).toEqual([]);
+    expect(writtenRows()).toBe(before);
+    expect(fakeTool.typed).toEqual([]);
+  });
+
+  it('the limit × a long id: the candidate first — exit 2, nothing written or sent', async () => {
+    setAgentInstances(db, WT, claudeRoster(MAX_AGENT_INSTANCES));
+    const before = roster();
+
+    const result = await send('hello', '--agent', 'claude', '--instance', LONG_ID, '--register');
+
+    expect(result.code).toBe(2);
+    expect(sendPosts).toBe(0);
+    expect(patches).toEqual([]);
+    expect(roster()).toEqual(before);
+  });
+
+  it('send --help states the order', async () => {
+    const { createSendCommand: create } = await import('@/cli/commands/send');
+    let help = '';
+    const cmd = create();
+    cmd.configureOutput({ writeOut: (text) => { help += text; } });
+    cmd.outputHelp();
+    const text = help.replace(/\s+/g, ' ');
+    expect(text).toContain('When more than one reason applies, the first of these decides');
+  });
 });

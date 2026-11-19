@@ -338,25 +338,43 @@ function registerCommandFor(worktreeId: string, cliTool: string, instanceId: str
 }
 
 /**
- * `--register` before anything is sent (Issue #4458): an id whose default alias the roster
- * would refuse. That is decided by the tool and the id alone, so it is refused here with
- * exit 2 rather than warned about after the message went out. An id already on the roster
- * registers nothing and is let through.
+ * `--register` before anything is sent (Issue #4458): the candidate row on its own (its
+ * default alias above all, which the tool and the id alone decide), refused here with
+ * exit 2 rather than warned about after the message went out. The room left is not asked
+ * here: the limit of a plain --register stays a warning after the send (I3).
+ *
+ * J2: a send to an instance already on the roster registers nothing, so it must behave as
+ * a send without --register. The roster is read only when the candidate would be refused,
+ * and a read that fails does not hold the send up (the registration after it says what it
+ * finds).
  */
-async function assertDefaultAliasFits(
+async function assertCandidateRowFits(
   client: ApiClient,
   worktreeId: string,
   instanceId: string,
   cliTool: string
 ): Promise<void> {
-  if (!defaultAliasTooLong(cliTool, instanceId)) return;
-  const { instances } = await fetchAgentRoster(client, worktreeId);
-  if (instances.some((inst) => inst.id === instanceId)) return;
-  console.error(
-    `Error: --register would name '${instanceId}' '${defaultAlias(cliTool, instanceId)}', longer than the `
-      + `${MAX_AGENT_ALIAS_LENGTH} characters an alias may have, so the roster would refuse it. Nothing was sent. `
-      + `Register it with a shorter alias, then send without --register: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
-  );
+  const refusal = rosterAdditionRefusal([], { id: instanceId, cliTool, alias: defaultAlias(cliTool, instanceId) });
+  if (refusal === null) return;
+  let onRoster: boolean;
+  try {
+    onRoster = (await fetchAgentRoster(client, worktreeId)).instances.some((inst) => inst.id === instanceId);
+  } catch {
+    return;
+  }
+  if (onRoster) return;
+  if (defaultAliasTooLong(cliTool, instanceId)) {
+    console.error(
+      `Error: --register would name '${instanceId}' '${defaultAlias(cliTool, instanceId)}', longer than the `
+        + `${MAX_AGENT_ALIAS_LENGTH} characters an alias may have, so the roster would refuse it. Nothing was sent. `
+        + `Register it with a shorter alias, then send without --register: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
+    );
+  } else {
+    console.error(
+      `Error: --register could not add '${instanceId}' to the roster: the server would refuse it (${refusal.error}). `
+        + `Nothing was sent. To register it: ${registerCommandFor(worktreeId, cliTool, instanceId)}`
+    );
+  }
   process.exit(ExitCode.CONFIG_ERROR);
 }
 
@@ -1082,12 +1100,17 @@ instance holds and is a condition as above. A changed roster is exit 31, nothing
 touches a role already there. The message has gone out by then, so a roster that kept
 changing, or any other failure to register, is a warning and exit 0 (Issues #4149, #4159):
 do not send it again; the warning has the command that registers it. The roster's own
-rules decide (Issue #4458): up to 10 instances, so a removed row makes room again; an
---instance that is not an id the roster accepts, or whose default alias would be over 50
-characters, is exit 2 before anything is sent (the error gives an instances add command
-with a short --alias); a roster already full by the time the message has gone out is a
-warning, as above. --register --role asks the same before it creates anything: a row the
-roster would refuse, the limit included, is exit 2 with nothing written or sent.
+rules decide (Issue #4458): up to 10 instances, so a removed row makes room again. The
+row to add is judged whatever the rows already there look like; a bad existing row is
+left to the server's answer to the save. An --instance already on the roster registers
+nothing and is sent as without --register. When more than one reason applies, the first
+of these decides:
+  1. the --instance is not an id the roster accepts: exit 2, nothing written or sent
+  2. the row to add would be refused (a default alias over 50 characters, ...): exit 2,
+     nothing written or sent; the error gives an instances add command with a short
+     --alias. With --role, the limit is judged here too (exit 2)
+  3. the tool policy refuses the send (or what it writes first): exit 33, nothing typed
+  4. a plain --register on a full roster: sent, then a warning and exit 0
 
 --expect-* pin this send to what the caller read earlier, saving nothing; the server
 reads them again right before the first key, so a process replaced in between gets
@@ -1162,7 +1185,7 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           process.exit(ExitCode.CONFIG_ERROR);
         }
         if (options.register && namedTarget.instanceId !== undefined) {
-          await assertDefaultAliasFits(client, worktreeId, namedTarget.instanceId, options.agent ?? namedTarget.instanceId);
+          await assertCandidateRowFits(client, worktreeId, namedTarget.instanceId, options.agent ?? namedTarget.instanceId);
         }
 
         // Issue #4438: the usage notice, once per CLI environment, on stderr (after a refusal's lines).

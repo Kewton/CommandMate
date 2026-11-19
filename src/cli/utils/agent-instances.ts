@@ -18,7 +18,7 @@ import { ROSTER_CHANGED_ERROR_CODE } from './api-client-errors';
 import { RoleCliError } from './role-failure';
 import type { AgentInstance, WorktreeDetailResponse } from '../types/api-responses';
 import { MAX_AGENT_INSTANCES, MAX_AGENT_ALIAS_LENGTH, getCliToolDisplayName, type CLIToolType } from '../../lib/cli-tools/types';
-import { MIN_AGENT_INSTANCES, validateAgentInstanceAddition } from '../../lib/agent-instances-validator';
+import { MIN_AGENT_INSTANCES, validateAgentInstanceCandidate } from '../../lib/agent-instances-validator';
 
 export { MAX_AGENT_INSTANCES, MAX_AGENT_ALIAS_LENGTH, MIN_AGENT_INSTANCES };
 
@@ -140,19 +140,19 @@ export interface RosterAdditionRefusal {
  * own validator rather than a copy of its rules (Issue #4458): the limit, the room left
  * under it, the id pattern and length, the primary anchor and the alias length of `added`.
  *
- * @returns null when the write would accept it, or when what it would refuse is a row of
- *   `base` (not this add's to judge; the save gets the server's own answer)
+ * Every add path asks this (send --register with and without --role, instances add with
+ * and without --role, first build and rebuild after ROSTER_CHANGED), and `added` is judged
+ * whatever the rows of `base` look like (J1). A bad row of `base` is not this add's to
+ * judge: the save goes ahead and the server answers it (#4149).
+ *
+ * @returns null when nothing about `added` or the room for it would be refused
  */
 export function rosterAdditionRefusal(
   base: ReadonlyArray<AgentInstance>,
   added: Pick<AgentInstance, 'id' | 'cliTool' | 'alias'>
 ): RosterAdditionRefusal | null {
-  const validation = validateAgentInstanceAddition(base, added);
+  const validation = validateAgentInstanceCandidate(base, added);
   if (validation.valid) return null;
-  // Only the added row and the room for it are this add's to judge. A row already on the
-  // roster is the server's to answer for: refusing an add over it would block every add
-  // (and hide the real answer of the save, a 409 included) on a row the add never touched.
-  if (validation.refusal === 'entry' && validation.index !== base.length) return null;
   return {
     atLimit: validation.refusal === 'limit',
     error: validation.error ?? 'the roster would be refused',

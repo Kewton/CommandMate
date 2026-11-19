@@ -8,7 +8,11 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest';
-import { validateAgentInstanceAddition, validateAgentInstancesInput } from '@/lib/agent-instances-validator';
+import {
+  validateAgentInstanceAddition,
+  validateAgentInstanceCandidate,
+  validateAgentInstancesInput,
+} from '@/lib/agent-instances-validator';
 import { rosterAdditionRefusal, defaultAlias } from '@/cli/utils/agent-instances';
 import { MAX_AGENT_INSTANCES, type AgentInstance } from '@/lib/cli-tools/types';
 
@@ -52,10 +56,31 @@ describe('Issue #4458: one judgment of a roster addition', () => {
     const added = row('codex-2', 'codex');
     expect(validateAgentInstanceAddition(base, added)).toMatchObject({ valid: false, refusal: 'entry', index: 0 });
     expect(rosterAdditionRefusal(base, added)).toBeNull();
-    // The added row itself is still judged, at its own index.
-    expect(rosterAdditionRefusal(base, { id: 'w w', cliTool: 'codex', alias: 'x' })).toBeNull();
-    expect(validateAgentInstanceAddition([], { id: 'w w', cliTool: 'codex', alias: 'x' })).toMatchObject({ refusal: 'entry', index: 0 });
-    expect(rosterAdditionRefusal([], { id: 'w w', cliTool: 'codex', alias: 'x' })).toMatchObject({ atLimit: false });
+  });
+
+  // J1 (reinstruct-4458b-2): the candidate is judged whatever the existing rows are.
+  it.each([
+    ['an id with a space', { id: 'w w', cliTool: 'codex', alias: 'x' }, /\[1\]\.id is invalid/],
+    ['a default alias over 50', row('w'.repeat(64)), /\[1\]\.alias exceeds 50/],
+    ['another tool\'s primary id', { id: 'opencode', cliTool: 'codex', alias: 'x' }, /\[1\]\.id "opencode" conflicts/],
+    ['an id already there', { id: 'claude', cliTool: 'claude', alias: 'x' }, /\[1\]\.id is duplicated: claude/],
+  ])('with a bad existing row, the candidate still refused: %s', (_name, candidate, error) => {
+    const base: AgentInstance[] = [{ id: 'claude', cliTool: 'codex', alias: 'odd', order: 0 }];
+    expect(rosterAdditionRefusal(base, candidate)).toEqual({ atLimit: false, error: expect.stringMatching(error) });
+  });
+
+  it('with a bad existing row, the limit still refused', () => {
+    const base = claudeRoster(MAX_AGENT_INSTANCES);
+    base[0] = { id: 'claude', cliTool: 'codex', alias: 'odd', order: 0 };
+    expect(rosterAdditionRefusal(base, row('claude-x'))).toMatchObject({ atLimit: true });
+  });
+
+  it.each(cases.map((c) => [c.name, c] as const))('on a valid roster the candidate check is the whole-list check: %s', (_name, c) => {
+    const base = claudeRoster(c.size);
+    const candidate = validateAgentInstanceCandidate(base, c.added);
+    const whole = validateAgentInstancesInput([...base, c.added]);
+    expect(candidate.valid).toBe(whole.valid);
+    expect(candidate.error).toBe(whole.error);
   });
 
   it('a refusal says what it is for; an accepted list carries none', () => {

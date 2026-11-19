@@ -76,18 +76,50 @@ export function validateAgentInstanceAddition(
   return validateAgentInstancesInput([...base, candidate]);
 }
 
-function validateAgentInstanceEntries(input: unknown[]): {
+/**
+ * Whether `candidate` can be added to `base`, judging the candidate row and the room for
+ * it only (Issue #4458, J1): the limit, the candidate's id (shape, and not already taken),
+ * tool, primary anchor and alias, with the index and the sentence the whole-list check
+ * would give it. The existing rows are not judged, so a bad one cannot hide what is wrong
+ * with the candidate; they are the server's to answer for when the list is saved. On a
+ * roster whose rows are all valid this is the verdict of {@link validateAgentInstanceAddition}.
+ *
+ * @param base - The roster as read
+ * @param candidate - The row to append
+ */
+export function validateAgentInstanceCandidate(
+  base: ReadonlyArray<unknown>,
+  candidate: unknown
+): { valid: boolean; error?: string; refusal?: AgentInstancesRefusal; index?: number } {
+  if (base.length + 1 > MAX_AGENT_INSTANCES) {
+    return { valid: false, error: `agentInstances must have at most ${MAX_AGENT_INSTANCES} entries`, refusal: 'limit' };
+  }
+  const taken = new Set<string>();
+  for (const row of base) {
+    const id = typeof row === 'object' && row !== null ? (row as { id?: unknown }).id : undefined;
+    if (typeof id === 'string') taken.add(id);
+  }
+  const result = validateAgentInstanceEntries([candidate], base.length, taken);
+  return result.valid ? { valid: true } : { valid: false, error: result.error, index: result.index, refusal: 'entry' };
+}
+
+/**
+ * @param offset - The position of `input[0]` in the list the rows belong to
+ * @param taken - Ids already used ahead of `input` in that list
+ */
+function validateAgentInstanceEntries(input: unknown[], offset = 0, taken: ReadonlySet<string> = new Set()): {
   valid: boolean;
   value?: AgentInstance[];
   error?: string;
   index?: number;
 } {
 
-  const seen = new Set<string>();
+  const seen = new Set<string>(taken);
   const normalized: AgentInstance[] = [];
 
-  for (let index = 0; index < input.length; index++) {
-    const raw = input[index];
+  for (let position = 0; position < input.length; position++) {
+    const index = position + offset;
+    const raw = input[position];
     if (typeof raw !== 'object' || raw === null) {
       return { valid: false, index, error: `agentInstances[${index}] must be an object` };
     }
