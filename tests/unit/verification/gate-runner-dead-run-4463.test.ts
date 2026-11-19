@@ -22,8 +22,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runMigrations } from '@/lib/db/db-migrations';
-import { getVerificationRun, upsertWorktree } from '@/lib/db';
+import { createTask, getVerificationRun, upsertWorktree } from '@/lib/db';
+import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import * as runner from '@/lib/verification/gate-runner';
+import * as scopeGate from '@/lib/verification/scope-gate';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
@@ -84,8 +86,12 @@ function register(id: string, path: string): void {
 }
 
 /** Start a run; resolve with its id once it closed, or with null after SETTLE_BOUND_MS. */
-async function runWithin(id: string, path: string): Promise<{ runId: number; settled: boolean }> {
-  const { runId } = await runner.startVerification({ worktreeId: id, worktreePath: path, trigger: 'api' });
+async function runWithin(
+  id: string,
+  path: string,
+  extra: { taskId?: string; gateIds?: string[] } = {}
+): Promise<{ runId: number; settled: boolean }> {
+  const { runId } = await runner.startVerification({ worktreeId: id, worktreePath: path, trigger: 'api', ...extra });
   let timer: NodeJS.Timeout | undefined;
   const settled = await Promise.race([
     runner.waitForVerification(runId).then(() => true),
@@ -107,6 +113,7 @@ beforeEach(async () => {
 afterEach(() => {
   process.env.PATH = originalPath;
   (runner as { setRunGitTimeoutMsForTests?: (ms?: number) => void }).setRunGitTimeoutMsForTests?.();
+  (scopeGate as { setScopeRunGitTimeoutMsForTests?: (ms?: number) => void }).setScopeRunGitTimeoutMsForTests?.();
   for (const file of pidFiles.splice(0)) {
     try {
       process.kill(Number(readFileSync(file, 'utf8')), 'SIGKILL');
@@ -224,5 +231,96 @@ options:
 
   it('keeps a limit by default, well above any real git call', () => {
     expect(runner.RUN_GIT_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
+  });
+});
+
+/** The real git, found before a test puts a fake one first on PATH. */
+const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+
+/**
+ * A fake `git` first on PATH: the listed subcommands go to the real git, every other one never
+ * returns. Both runners' limits are shortened to 1 s.
+ */
+function gitThatHangsExcept(passing: string[]): void {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), 'fake-git-4463-')));
+  tempDirs.push(bin);
+  const cases = passing.map((sub) => `  ${sub}) exec "${REAL_GIT}" "$@" ;;`).join('\n');
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\ncase "$1" in\n${cases}\n  *) exec sleep 120 ;;\nesac\n`);
+  chmodSync(join(bin, 'git'), 0o755);
+  process.env.PATH = `${bin}:${originalPath}`;
+  (runner as { setRunGitTimeoutMsForTests?: (ms?: number) => void }).setRunGitTimeoutMsForTests?.(1000);
+  (scopeGate as { setScopeRunGitTimeoutMsForTests?: (ms?: number) => void }).setScopeRunGitTimeoutMsForTests?.(1000);
+}
+
+describe('#4463 F2 (review 1 P1-1): scope-gate.ts runGit has the same limit', () => {
+  it(
+    'work-evidence: merge-base and rev-list return, the later `git log` (scope-gate) does not → the run closes, not passed',
+    async () => {
+      const repo = createRepo(`
+version: 1
+gates:
+  - id: never-reached
+    command: "touch reached"
+    timeoutSec: 30
+options:
+  baseRef: main
+`);
+      register('wt-log-hangs', repo);
+      gitThatHangsExcept(['merge-base', 'rev-list']);
+
+      const { runId, settled } = await runWithin('wt-log-hangs', repo);
+
+      expect(settled).toBe(true);
+      const run = getVerificationRun(db, runId);
+      expect(run?.status).not.toBe('running');
+      expect(run?.status).not.toBe('passed');
+      const evidence = run?.gates.find((g) => g.gateId === runner.WORK_EVIDENCE_GATE_ID);
+      expect(evidence?.status).toBe('error');
+      expect(existsSync(join(repo, 'reached'))).toBe(false);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'a scope-only run: its first git (scope-gate merge-base) does not return → the scope gate errors and the run closes',
+    async () => {
+      const repo = createRepo(`
+version: 1
+gates:
+  - id: never-reached
+    command: "touch reached"
+    timeoutSec: 30
+options:
+  baseRef: main
+`);
+      register('wt-scope-hangs', repo);
+      const task = createTask(db, {
+        worktreeId: 'wt-scope-hangs',
+        cliToolId: 'claude',
+        contractPath: '.commandmate/tasks/t.yaml',
+        contract: parseTaskContract(
+          // work-evidence off: the scope gate's merge-base is the run's first git call.
+          'version: 1\ntitle: scope run\ngoal: do the work\nscope:\n  allow: ["**"]\nsuccess:\n  requireWorkEvidence: false\n',
+          'task.yaml'
+        ),
+        status: 'running',
+      });
+      gitThatHangsExcept([]);
+
+      const { runId, settled } = await runWithin('wt-scope-hangs', repo, { taskId: task.id, gateIds: [runner.SCOPE_GATE_ID] });
+
+      expect(settled).toBe(true);
+      const run = getVerificationRun(db, runId);
+      expect(run?.status).not.toBe('running');
+      expect(run?.status).not.toBe('passed');
+      expect(run?.gates.find((g) => g.gateId === runner.WORK_EVIDENCE_GATE_ID)?.status).not.toBe('error');
+      const scope = run?.gates.find((g) => g.gateId === runner.SCOPE_GATE_ID);
+      expect(scope?.status).toBe('error');
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it('keeps a limit by default, the same as the runner’s', () => {
+    expect((scopeGate as { SCOPE_RUN_GIT_TIMEOUT_MS?: number }).SCOPE_RUN_GIT_TIMEOUT_MS).toBe(runner.RUN_GIT_TIMEOUT_MS);
   });
 });

@@ -214,3 +214,49 @@ describe('#4463 the cap comes from verify.yaml', () => {
     expect(verifyBusyTimeoutSec(worktree)).toBe(VERIFY_BUSY_UNREADABLE_SEC);
   });
 });
+
+describe('#4463 review 1 P3-1/P3-2: the wait uses the worktree’s cap, and the decided numbers stay', () => {
+  const highCapYaml = [
+    'version: 1',
+    'gates:',
+    '  - id: unit',
+    '    command: "true"',
+    '    timeoutSec: 7200',
+    '    mutex: cpu.heavy',
+    '    mutexWaitSec: 86400',
+    '    retryOnFail: 1',
+    '',
+  ].join('\n');
+  /** 3 × (86400 + 7200 × 2 + margin 600). */
+  const HIGH_CAP = 3 * (86400 + 7200 * 2 + 600);
+  const useHighCap = () => {
+    fs.mkdirSync(path.join(worktree, '.commandmate'), { recursive: true });
+    fs.writeFileSync(path.join(worktree, '.commandmate', 'verify.yaml'), highCapYaml);
+  };
+
+  it('P3-1 a run alive longer than the floor (86400 s) is waited for when the worktree’s cap is higher', () => {
+    useHighCap();
+    expect(verifyBusyTimeoutSec(worktree)).toBe(HIGH_CAP);
+    expectWaitedOut(busyWait([...repeat(polls(100_000), running([{ gateId: 'unit', status: 'running' }])), { status: 'passed' }]));
+  });
+
+  it('P3-1 a run that never ends is given up on at the worktree’s cap, not at the floor', () => {
+    useHighCap();
+    const r = busyWait([running([{ gateId: 'unit', status: 'running' }])]);
+    expectGivenUp(r, 'cap');
+    expect(r.waitedSec).toBeGreaterThanOrEqual(HIGH_CAP - 30);
+    expect(r.waitedSec).toBeLessThanOrEqual(HIGH_CAP + 60);
+  });
+
+  it('P3-2 the decided numbers: unreachable 1800 s, unreadable verify.yaml 172800 s, floor 86400 s', () => {
+    expect(VERIFY_UNREACHABLE_SEC).toBe(1800);
+    expect(VERIFY_BUSY_UNREADABLE_SEC).toBe(172800);
+    expect(VERIFY_BUSY_FALLBACK_SEC).toBe(86400);
+    const r = busyWait([null]);
+    expect(r.waitedSec).toBeGreaterThanOrEqual(1770);
+    expect(r.waitedSec).toBeLessThanOrEqual(1830);
+    fs.mkdirSync(path.join(worktree, '.commandmate'), { recursive: true });
+    fs.writeFileSync(path.join(worktree, '.commandmate', 'verify.yaml'), 'gates: [unclosed\n');
+    expect(verifyBusyTimeoutSec(worktree)).toBe(172800);
+  });
+});

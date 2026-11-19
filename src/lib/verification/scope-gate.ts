@@ -220,7 +220,25 @@ export interface ScopeOutcome {
 // Changed-path collection
 // =============================================================================
 
-/** Run a git plumbing command. No shell: every argument here is code-supplied. */
+/**
+ * The time limit of one git plumbing call here (Issue #4463, the same as gate-runner.ts
+ * RUN_GIT_TIMEOUT_MS). Both the work-evidence gate (collectBranchCommitChanges) and the scope gate
+ * (collectChangedPaths) run git through this helper; a git that never returned kept the run
+ * `running` for as long as the server lived.
+ */
+export const SCOPE_RUN_GIT_TIMEOUT_MS = 120_000;
+let scopeRunGitTimeoutMs = SCOPE_RUN_GIT_TIMEOUT_MS;
+
+/** Tests only: shorten runGit's limit (no argument restores the default). */
+export function setScopeRunGitTimeoutMsForTests(ms?: number): void {
+  scopeRunGitTimeoutMs = ms ?? SCOPE_RUN_GIT_TIMEOUT_MS;
+}
+
+/**
+ * Run a git plumbing command. No shell: every argument here is code-supplied. Bounded by
+ * {@link SCOPE_RUN_GIT_TIMEOUT_MS} (Issue #4463): a call that does not come back is killed and
+ * answers `code: null`, which every caller turns into an error verdict, never a pass.
+ */
 function runGit(
   args: string[],
   cwd: string
@@ -228,15 +246,33 @@ function runGit(
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
+    let settled = false;
     const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const settle = (result: { code: number | null; stdout: string; stderr: string }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(limit);
+      resolve(result);
+    };
+    const limit = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Already gone.
+      }
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      settle({ code: null, stdout: '', stderr: `git ${args[0]} did not return within ${scopeRunGitTimeoutMs}ms` });
+    }, scopeRunGitTimeoutMs);
+    limit.unref?.();
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8');
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
-    child.on('error', (error: Error) => resolve({ code: null, stdout: '', stderr: error.message }));
-    child.on('close', (code) => resolve({ code, stdout, stderr }));
+    child.on('error', (error: Error) => settle({ code: null, stdout: '', stderr: error.message }));
+    child.on('close', (code) => settle({ code, stdout, stderr }));
   });
 }
 
