@@ -11,7 +11,7 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 | イネーブラー | `codex`（`codex-2`）。Codex の代わりは Claude 5（`--instance claude-5`）。Antigravity には AI から頼まない（下の「Antigravity の扱い」）（§6 の 7） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
 | ジャッジ | `claude-2`（並行の本は新しいセッション） | `judge` | 統合した版の受け入れテスト・リグレッションテスト（UAT）。リリースごとに 1 回まとめ、独立した 2〜3 本に分けて並行し、主が結果をまとめて判定する（§9） |
 | 開発リーダー | `claude-3` | `dev-leader` | ブリーフを受けて `/orchestrate` を回す。難易度でワーカーを選ぶ。受け入れの間のマージの凍結に従い、差し戻しは持ち主として直す（§9・§10） |
-| ワーカー | Issue の worktree ごと | — | 易＝Command Code（#4238 のマージ後。それまでは orchestrate.md 1-2b の現行の担当）、中＝Claude sonnet、難＝Claude opus |
+| ワーカー | Issue の worktree ごと | — | 易・中＝Command Code（#4238 のマージ後。中は 2026-11-19 から）、難＝Claude opus（Command Code がワーカー起因で 2 回不合格なら opus。sonnet は起動・送信で詰まったときの代わりだけ）。目標は仕事の 6〜8 割を Command Code |
 
 `claude-3` は、agent-health の自動修正ループ（Epic #3047、毎朝 08:30 の dispatch）の送り先も兼ねる。
 

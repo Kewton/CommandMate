@@ -104,8 +104,8 @@ TodoWriteツールで作業計画を作成：
 ```
 
 **重要（エージェント指定ルール）**: `commandmatedev send` でワーカーにタスクを送信する際のエージェント指定は以下に従うこと：
-- **開発タスク**: 担当は 1-2b の難易度判定で決める。**易 → `--instance command-code`**
-  （Command Code。`--model` は渡さない）、**中 → `--instance claude`（sonnet＝Sonnet 5.5）**、**難 → `--instance claude`（opus）**
+- **開発タスク**: 担当は 1-2b の難易度判定で決める。**易・中 → `--instance command-code`**
+  （Command Code。`--model` は渡さない）、**難 → `--instance claude`（opus）**
   - **Claude のモデルは `--instance` でも `--model` でも決まらない**（`send --model` は copilot / antigravity / claude に効くが antigravity / claude は新規起動時のみ。稼働中の claude に渡すと 400）。セッションの起動時に worktree の `.claude/settings.local.json` から決まる（3-1 の `launch-worker.mjs`）。**ワーカーに `/model` を送らない**（#1495 / #2297）
 根拠: docs/orchestrate/workers.md#phase-0-claude-のモデルの決まり方
 
@@ -113,7 +113,7 @@ TodoWriteツールで作業計画を作成：
   - 送り先は `--instance` で指定し、**send / wait / capture / respond で同じ値を渡す**。
     `wait` には `--agent` が無く、worktree の既定エージェントは claude なので、
     `--instance command-code` を付け忘れると Claude のセッションを待つことになる
-  - Command Code がワーカー起因で 2 回不合格になったら Claude（sonnet）に上げる（3-5）
+  - Command Code がワーカー起因で 2 回不合格になったら opus に上げる（3-5）。sonnet は、Command Code が起動・送信で詰まったときの代わりだけ（理由を lead-return に書く）
 - **レビュー系**（仕様レビュー、設計レビュー等）: 一部 `--agent codex` に依頼可
 - **バグ根本原因分析**（Phase 2.5）: `--agent copilot --model claude-sonnet-5` を指定
 
@@ -166,13 +166,14 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 
 各 Issue の本文（1-1 で取得済み）から難易度を判定し、開発担当を決める。
 **優先順位**: `--claude-only` ＞ `--assign <N>=<agent>` ＞ 下の判定表。
+**目標: 仕事の 6〜8 割を Command Code で回す**（Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える）。
 
 **Claude に回す（1 つでも当てはまれば「難」）**
 
 | 観点 | 条件 |
 |---|---|
 | 危険な領域 | `src/lib/tmux/**`・セッション・`src/lib/detection/**`・`src/lib/polling/**`（Auto-Yes）・hooks・`src/lib/security/**`・DB migration・`src/lib/cli-tools/**`・`ws-server` を変更する（2-5 の対象を含む） |
-| 判断の余地 | **ワーカーが「どう直すか」を自分で決める箇所が 1 つでもある**（本文が `file:line` ＋置換後のコードまで確定していない変更がある）。**件数ではなく、決まっていない箇所の有無で見る**（下の実測を参照） |
+| 判断の余地 | **本文に選択肢か手順と受入条件が閉じていない判断が 1 つでもある**。全箇所の置換後のコードまでは要らない（2026-11-19 改定。下の実測を参照） |
 | 設計 | **ワーカーが**新規のガード・テストを 1 本まるごと**設計して**書く（構造で対象を特定する、陽性/陰性対照を置く、など）。**本文にテスト全文があるなら転記であって設計ではないので、この行には当てはまらない**（下の実測を参照）。既存テストへの assert 追加・書き換えも含まない |
 | 原因 | バグで、原因が file:line まで特定されていない |
 | 未決事項 | 「要調査」「未決」「実機で決める」などが残っている、または設計書が必要 |
@@ -180,47 +181,37 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 | 依存 | 他の Issue と強依存（1-4）、または同じ関数の書き換えを伴う |
 | 新規 export | 新しいモジュールや公開関数を作り、その呼び出し元の配線も必要 |
 
-**Command Code に回す（すべて満たせば「易」）**
+**Command Code に回す（上のどれにも当てはまらないもの。易と中をまとめて）**
 
-- 上の条件に 1 つも当てはまらない
-- **変更する全箇所が `file:line` ＋「置換後のコード」または「削除」まで確定している。件数は問わない**
-- 受入基準の合否がすべて自動で決まる（lint / typecheck / unit / e2e）。実機の項目は、見た目の念押しだけなら残っていてよい
+- 危険な領域・設計・原因未特定・未決事項・実機でしか決まらない検証・強い依存・新規 export の**どれにも当てはまらない**
+- **選択肢か手順と受入条件が本文で閉じている**（**中**＝選択肢か手順が本文に閉じた判断・設計もここに入る。全箇所の置換後のコードまでは要らない）
+- 受入基準の合否がすべて自動で決まる（lint / typecheck / unit / e2e）。実機の項目は、見た目の念押しだけなら残ってよい
 - バグなら、原因（file:line）と対策が本文に書かれている
 - **逸脱時の退避路が本文に書いてある** — 「本文に無い指摘が出た場合は、そのファイルを変更せず、
-  コミットメッセージ本文に『本文に無い指摘: `<file>:<line>` `<rule>`』と書いて報告すること（勝手に直さない）」。
-  これが**規模を上げられる条件そのもの**である（下の実測を参照）
+  コミットメッセージ本文に『本文に無い指摘: `<file>:<line>` `<rule>`』と書いて報告すること（勝手に直さない）」
 
-**退避路で報告された重複は、整理の Issue の候補として残す**: 退避路が決めているのは「直さずに報告する」までである。
-報告の行き先が無いと、重複は残り続ける。ワーカーが「本文に無い指摘」で、同じ処理の写し（重複）を報告したら、次のようにする。
+**本文が閉じていなければ、イネーブラーが具体化する**: 着手の前に、イネーブラーが Issue を「選択肢・手順・受入条件」まで具体化する（docs/orchestrate/difficulty.md#1-2b-委任する-issue-で起票側がやること）。閉じていないまま Command Code に回さない（2026-11-19 改定）。
 
-- その run では直させない（整理と、振る舞いの変更を同じ PR に入れない。2-4-3）
-- オーケストレーターが、`workspace/orchestration/runs/$DATE/refactor-candidates.md` に 1 件 1 行で残す
-  （報告した Issue・`file:line`・何と何が写しか）
-- run の最後に、候補を整理の Issue として起票するかを利用者に訊く（8-4）
+**退避路で報告された重複は、整理の Issue の候補として残す**（手順は docs/orchestrate/difficulty.md#1-2b-重複の報告の行き先の根拠）。
 
-根拠: docs/orchestrate/difficulty.md#1-2b-重複の報告の行き先の根拠
+**確定 diff は、対象のコードを読んでから書く**（手順は docs/orchestrate/difficulty.md#1-2b-確定-diff-を読まずに書いた例）。
 
-**確定 diff は、対象のコードを読んでから書く**: 起票で確定 diff を書くときは、対象の範囲を `sed -n '<開始>,<終了>p' <file>` などで
-実際に読んでから書く。
+**担当の振り分け（Command Code / opus）— 2026-11-19 改定**
 
-根拠: docs/orchestrate/difficulty.md#1-2b-確定-diff-を読まずに書いた例
-
-**Claude の中の振り分け（opus / sonnet）— 2026-09-30 改定（Sonnet 5.5）**
-
-Claude の担当は、Issue の中で**ワーカーが自分で見つけなければならないもの**の大きさで opus と sonnet に分ける。
+ワーカーは上の「Claude に回す」に当てはまるかで分ける（中＝旧 sonnet は Command Code）。
 
 根拠: docs/orchestrate/difficulty.md#1-2b-中の範囲を広げた経緯
 
 | 難易度 | 担当 | モデル | 条件 |
 |---|---|---|---|
-| 易 | command-code | — | 「Command Code に回す」をすべて満たす |
-| 中 | claude | sonnet | 「Claude に回す」の観点のうち当てはまるのが「危険な領域」「依存」と、次の「閉じた判断」「閉じた設計」**だけ**で、受入基準がすべて自動・逸脱時の退避路がある。**閉じた判断**＝直し方の候補が本文に列挙されている、または「置き場所・書き方はあなたが決めてよい」の範囲が 1 関数・1 節に収まる。**閉じた設計**＝新しいテストを書くが、確かめる項目と陽性/陰性対照が受入基準に列挙されている |
-| 難 | claude | opus | 次のどれかに当てはまる: **原因**（バグで原因が file:line まで特定されていない）・**未決事項**（「要調査」「実機で決める」など、結論が作業の結果で変わる）・**検証**（合否が実機・画面でしか決まらない）・**新規 export**（新しいモジュールと呼び出し元の配線）・**開いた判断/設計**（候補も確かめる項目も本文に無い） |
+| 易 | command-code | — | 「Command Code に回す」をすべて満たす（変更箇所は `file:line` ＋置換後のコードまで確定） |
+| 中 | command-code | — | 「Claude に回す」の「危険な領域」「依存」には当てはまらず、**「閉じた判断」「閉じた設計」だけ**で、受入基準がすべて自動・逸脱時の退避路がある（定義は docs/orchestrate/difficulty.md#1-2b-中の範囲を広げた実測） |
+| 難 | claude | opus | 上の「Claude に回す」のどれかに当てはまる: **危険な領域**・**設計**・**原因**（file:line まで特定されていない）・**未決事項**・**検証**（実機・画面でしか決まらない）・**依存**（強い依存）・**新規 export** |
 
-- 「中」と「難」の境目は、作業の前に結論が決まっているか。**迷ったら難（opus）**。sonnet がワーカー起因で 2 回不合格なら opus へ格上げ（3-5b）。
+- 「中」と「難」の境目は、作業の前に結論が決まっているか。**迷ったら難（opus）**。Command Code がワーカー起因で 2 回不合格なら opus へ格上げ（3-5）。sonnet は起動・送信で詰まったときの代わりだけ（3-5）。
 根拠: docs/orchestrate/difficulty.md#1-2b-中と難の境目と注意
 
-- **Sonnet 5.5 での実測はまだ無い（閉じた判断・閉じた設計への拡大はパイロット）。** 改定後の最初の run から、中の Issue ごとに再指示の回数・格上げの有無と、③④のどちらで中にしたかを 8-2 に記録し、8-3 で見直す
+- **中の実測はまだ無い（2026-11-19 のパイロット）。** 改定後の最初の run から、中の Issue ごとに再指示の回数・格上げの有無と、どちらの条件で中にしたかを 8-2 に記録し、8-3 で見直す
 
 **「検証」の注**: 実機の項目が見た目の念押しだけなら「難」にしない。
 根拠: docs/orchestrate/difficulty.md#1-2b-検証の注の詳細
@@ -472,11 +463,11 @@ node scripts/orchestrate/contract.mjs generate \
 
 - **Claude 担当**: 従来どおり Issue 本文（事象・原因・対応方針・受入基準）と 2-4-1 の作業ルールを書く。
   Claude は指示が薄くても Issue レビューや設計相当の確認を自発的に行う。
-  - **sonnet 担当（1-2b の「中」）の goal には、次の 1 行をそのまま足す**:
+  - **sonnet 担当（Command Code の起動・送信の詰まりで代えたとき）の goal には、次の 1 行をそのまま足す**:
     ```
     Issue 本文に無い変更が必要に見えたら、そのファイルを変更せず、コミットメッセージ本文に「本文に無い指摘: <file>:<line> <内容>」と書いて報告すること。
     ```
-    「中」に振り分けた前提（全変更が確定 diff）が崩れたときの退避路で、易の雛形と同じもの。
+    代えた前提（本文が閉じている）が崩れたときの退避路で、易の雛形と同じもの。
     サブエージェントについての指示は要らない（`.claude/agents/*.md` は `model: inherit`）
 根拠: docs/orchestrate/contract.md#2-4-2-sonnet-担当とサブエージェント
 
@@ -846,7 +837,7 @@ done 3< "workspace/orchestration/runs/$DATE/tasks.tsv"
 | exit | 意味 | 対応 |
 |------|------|------|
 | `0` | 完了・検証合格 | Phase 4（設計突合）／Phase 6（マージ）へ進む |
-| `20` | 検証不合格（ゲートが落ちた） | 下記「20 の対応」。**再指示は上限2回**。超えたら Command Code 担当は Claude（sonnet）へ格上げ（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
+| `20` | 検証不合格（ゲートが落ちた） | 下記「20 の対応」。**再指示は上限2回**。超えたら Command Code 担当は Claude（opus）へ格上げ（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
 | `21` | 作業証跡ゼロ（未着手） | 下記「21 の対応」 |
 | `10` | プロンプト検出 | `commandmatedev capture <WT> --instance "$AGENT"` で内容確認 → `commandmatedev respond <WT> "<番号>" --instance "$AGENT"` → 再度 wait |
 | `124` | タイムアウト | capture で状況確認 → 追加指示 or ユーザーに報告 |
@@ -871,7 +862,7 @@ exit 20 を受けたら docs/orchestrate/exit-codes.md#3-4-20-の対応 を読�
 
 ワーカー起因なら、失敗ゲートと `logTail` を添えて同じ worker に再指示する（契約は据え置き。再送は素の send でよく、
 `--instance "$AGENT"` を付ける）。再指示は **同一 worktree につき最大2回**。
-3回目に到達したら、**Command Code 担当は 3-5 の手順で Claude（sonnet）に上げる**。**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 で格上げした sonnet も同じ）。**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ。
+3回目に到達したら、**Command Code 担当は 3-5 の手順で Claude（opus）に上げる**。**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 の代わりに sonnet にした場合も同じ）。**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ。
 
 **再指示の後の裁定は `wait --verify` ではなく、`wait` → `verify --task` の 2 段で行う。** 担当によらず `wait-verify.mjs` で行う
 （Command Code・Antigravity は、再指示の送信より後の完了の合図を確かめてから検証する）。
@@ -907,12 +898,14 @@ commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30
 
 画面ごとの対応（composer の未確定・Command Code の確認の画面・権限プロンプト・セッションの未起動）は、exit 21 を受けたら docs/orchestrate/exit-codes.md#3-4-21-の対応 を読み、その手順で切り分ける。
 
-### 3-5. Command Code から Claude（sonnet）への格上げ
+### 3-5. Command Code から Claude（opus）への格上げ
 
-Command Code 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
+Command Code 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。**格上げ先は opus**（2026-11-19 改定。sonnet は飛ばす）。
 ユーザーには確認しない（2026-09-17 合意）。切り替えたことは 8-2 と 8-3 に必ず書く。
 
-切り替えるときは docs/orchestrate/switching.md#3-5-command-code-から-claudesonnetへの格上げ を読み、その手順 1〜4（Command Code のセッションだけを止める・引き継ぎ節つきの sonnet 用の契約を作る・sonnet で送る・以降は 3-4 と 3-5b に従う）で進める。
+切り替えるときは docs/orchestrate/switching.md#3-5b-sonnet-から-opus-への格上げ の手順 2〜5 を、手順 1 だけ「Command Code のセッションだけを止める（`kill command-code`）」に読み替えて進める（引き継ぎ節は「前任: Command Code」）。
+
+**sonnet に代えるのは、Command Code が起動・送信で詰まったときだけ**（3-4 の 3 回目に届かない停止）。代えたら理由を lead-return に書く（手順は docs/orchestrate/switching.md#3-5-command-code-から-claudesonnetへの格上げ）。
 
 ### 3-5b. sonnet から opus への格上げ
 
@@ -1262,9 +1255,9 @@ npm run build
 | Issue | 難易度 | 担当 | モデル（実測） | 判定の根拠 | 再指示 | 切替 | 実装時間 | 検証 | 帰属の裁定 |
 |-------|--------|------|---------------|-----------|--------|------|---------|------|-----------|
 | #{N} | 易 | command-code | — | {plan.md の根拠} | 0 | なし | 5 分 | exit 20 → 合格扱い | env-clean の違反はワーカー起因でない（{根拠}） |
-| #{M} | 易 | command-code → claude | sonnet | {根拠} | 2 | 切替（{失敗ゲート}） | {分} | exit 0 | — |
-| #{L} | 中 | claude | sonnet（`claude-sonnet-5-5`） | {根拠} | 0 | なし | {分} | exit 0 | — |
-| #{K} | 中 | claude | sonnet → opus | {根拠} | 2 | 格上げ（{失敗ゲート}） | {分} | exit 0 | — |
+| #{M} | 易 | command-code → claude | opus | {根拠} | 2 | 格上げ（{失敗ゲート}） | {分} | exit 0 | — |
+| #{L} | 中 | command-code | — | {根拠} | 0 | なし | {分} | exit 0 | — |
+| #{K} | 難 | claude | opus | {根拠} | 0 | なし | {分} | exit 0 | — |
 
 「モデル（実測）」には、3-1 で `capture --json` の `.model` から読んだ値を書く（指定した値ではなく、動いていた値）。
 
@@ -1281,12 +1274,15 @@ Phase ごとの結果・`lint` / `tsc` / `test:unit` / `build` の合否・設�
 summary.md の末尾に「振り分けの改善案」節を書き、完了報告でユーザーにも示す。
 **次のどれかが起きた run では必須**（何も起きなかった run でも、気付いた点があれば書く）:
 
-- Command Code から Claude（sonnet）への格上げ（3-5）
-- sonnet から opus への格上げ（3-5b）、または sonnet 担当が再指示を要した（1-2b の「中」の条件が甘い証拠になる）
+- Command Code から Claude（opus）への格上げ（3-5）
+- Command Code の起動・送信の詰まりで sonnet に代えた（3-5。理由を lead-return に書いたか）
+- sonnet から opus への格上げ（3-5b）、または sonnet 担当が再指示を要した
 - `model MISMATCH` / `model UNKNOWN` / `stop UNCONFIRMED` / `auto-yes UNCONFIRMED` で止まった（3-1。exit 40〜44）
 - ワーカー起因でない不合格を、オーケストレーターの裁定で合格扱いにした（3-4）
 - 判定表と実際の結果が食い違った（「易」と判定したのに再指示が要った／「難」と判定したが小さい変更で終わった）
 - Command Code 固有の停止（確認の画面・exit 45、冷間起動の失敗、合図の欠落など）
+
+**Sprint ごとにワーカーのモデルの割合（Command Code の目標 6〜8 割）を lead-return と台帳に数える**（8-2 の表と Sprint の締めに書く）。
 
 各項目には次の 3 つを書く:
 
@@ -1341,7 +1337,7 @@ summary.md の末尾に「振り分けの改善案」節を書き、完了報告
 | CommandMateサーバー未起動 | `commandmatedev start --daemon` を案内 |
 | worktree作成失敗 | エラー表示、手動作成を案内 |
 | ワーカーのタイムアウト（exit 124） | captureで状況確認→追加指示 or ユーザーに報告 |
-| 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Command Code 担当は Claude（sonnet）へ格上げ（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
+| 検証不合格（exit 20） | `verify --json` で失敗ゲートを特定し、先にワーカー起因かを判定（3-4）。ワーカー起因なら再指示。上限2回で、Command Code 担当は Claude（opus）へ格上げ（3-5）、Claude（sonnet）担当は opus へ格上げ（3-5b）、Claude（opus）担当は人間へエスカレーション |
 | env-clean だけが FAIL・作業証跡ゼロ（exit 21）・exit 45・契約エラー（exit 2） | 3-4・3-1 に従う（行ごとの対応: docs/orchestrate/exit-codes.md#エラーハンドリング表の個別の行） |
 | 再指示の後の検証で scope が SKIP（`was not attached to it`）／env-clean が `no baseline snapshot exists for this run` | task に紐づいていない。`verify --task <task id>` で検証し直す（3-4） |
 | send が exit 99（`prompt not ready`） | 未送信。**待つ前に capture で画面を見て**分岐する（3-1 の表） |

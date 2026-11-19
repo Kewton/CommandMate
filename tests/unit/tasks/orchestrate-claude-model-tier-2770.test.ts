@@ -123,21 +123,25 @@ describe('/orchestrate 1-2b: three tiers', () => {
 
   it('has one row per tier, with the model each one runs on', () => {
     expect(body).toMatch(/^\| 易 \| command-code \| —/m);
-    expect(body).toMatch(/^\| 中 \| claude \| sonnet \|/m);
+    // #4489 (2026-11-19): the middle tier moved from Claude sonnet to Command Code.
+    expect(body).toMatch(/^\| 中 \| command-code \| —/m);
     expect(body).toMatch(/^\| 難 \| claude \| opus \|/m);
   });
 
-  it('admits to the middle tier ONLY on 「危険な領域」「依存」 and closed judgment / design (Issue #3015)', () => {
+  it('sends the middle tier to Command Code and keeps the hard criteria off it (Issues #3015 / #4489)', () => {
     const row = body.split('\n').find((line) => line.startsWith('| 中 |')) ?? '';
     expect(row).toContain('「危険な領域」');
     expect(row).toContain('「依存」');
-    // #3015 (Sonnet 5.5): a judgment or a design is admitted only when the body
-    // closes it — the options listed, or the checks and controls enumerated.
+    // A judgment or a design is admitted only when the body closes it — the
+    // options listed, or the checks and controls enumerated — and then it goes
+    // to Command Code, not merely because it is small.
     expect(row).toContain('「閉じた判断」');
     expect(row).toContain('「閉じた設計」');
     expect(row).toContain('だけ');
+    expect(row).toContain('command-code');
+    expect(row).toContain('当てはまらず');
     for (const ambiguity of ['判断の余地', '原因', '未決事項', '検証', '新規 export']) {
-      expect(row, `${ambiguity} must not admit an Issue to the sonnet tier`).not.toContain(ambiguity);
+      expect(row, `${ambiguity} must not admit an Issue to the middle tier`).not.toContain(ambiguity);
     }
   });
 
@@ -253,7 +257,7 @@ describe('/orchestrate 3-1: the model is set before the first send, and checked 
 describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures', () => {
   it('3-4 names all three destinations', () => {
     const row = section('3-4').split('\n').find((line) => line.startsWith('| `20` |')) ?? '';
-    expect(row).toContain('Command Code 担当は Claude（sonnet）へ格上げ（3-5）');
+    expect(row).toContain('Command Code 担当は Claude（opus）へ格上げ（3-5）');
     expect(row).toContain('opus へ格上げ（3-5b）');
     expect(row).toContain('Claude（opus）担当は人間へエスカレーション');
   });
@@ -291,42 +295,48 @@ describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures
 describe('/orchestrate: the easy tier is Command Code (Issue #4238)', () => {
   it('Phase 0 sends the easy tier to --instance command-code, with no --model', () => {
     const phase0 = orchestrate.slice(orchestrate.indexOf('## Phase 0'), orchestrate.indexOf('## Phase 1'));
-    expect(phase0).toContain('**易 → `--instance command-code`**');
-    expect(phase0).toContain('Command Code がワーカー起因で 2 回不合格になったら Claude（sonnet）に上げる（3-5）');
+    expect(phase0).toContain('**易・中 → `--instance command-code`**');
+    expect(phase0).toContain('Command Code がワーカー起因で 2 回不合格になったら opus に上げる（3-5）');
     expect(phase0).not.toMatch(/--instance antigravity/);
   });
 
   it('1-2b names Command Code for the easy tier and points at its document', () => {
     const body = section('1-2b');
-    expect(body).toContain('**Command Code に回す（すべて満たせば「易」）**');
+    expect(body).toContain('**Command Code に回す（上のどれにも当てはまらないもの。易と中をまとめて）**');
     expect(body).not.toMatch(/^\| 易 \| antigravity/m);
     expect(body).toContain('docs/orchestrate/command-code.md');
   });
 
-  it('3-5 raises a Command Code Issue to Claude sonnet, and 3-5b then takes it to opus', () => {
-    const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ')}`;
-    expect(section('3-5')).toContain('Command Code 担当の Issue が');
-    expect(body).toContain('AGENT=claude; MODEL=sonnet');
-    expect(body).toContain('commandmatedev instances "$WT" kill command-code');
-    expect(body).toContain('--instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml"');
-    expect(body).toContain('3-5b');
-    expect(body).not.toMatch(/MODEL=opus/);
+  it('3-5 raises a Command Code Issue to Claude opus; sonnet is only the startup/send stand-in (#4489)', () => {
+    const raise = section('3-5');
+    const fallback = docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ');
+    expect(raise).toContain('Command Code 担当の Issue が');
+    expect(raise).toContain('**格上げ先は opus**');
+    expect(raise).toContain('switching.md#3-5b-sonnet-から-opus-への格上げ');
+    expect(raise).toContain('Command Code のセッションだけを止める');
+    expect(raise).toContain('**sonnet に代えるのは、Command Code が起動・送信で詰まったときだけ**');
+    expect(raise).toContain('lead-return');
+    // The old sonnet procedure is kept as the stand-in, not the default.
+    expect(fallback).toContain('AGENT=claude; MODEL=sonnet');
+    expect(fallback).toContain('commandmatedev instances "$WT" kill command-code');
+    expect(fallback).toContain('--instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml"');
     // Bound to the new task, like every switch (#3118).
-    expect(body).toMatch(/wait-verify\.mjs[\s\S]*--task "\$TASK_ID"/);
+    expect(fallback).toMatch(/wait-verify\.mjs[\s\S]*--task "\$TASK_ID"/);
   });
 
   it('the error table and 8-3 agree with 3-5', () => {
     const row = orchestrate.split('\n').find((line) => line.startsWith('| 検証不合格（exit 20） |')) ?? '';
-    expect(row).toContain('Command Code 担当は Claude（sonnet）へ格上げ（3-5）');
-    expect(orchestrate).toContain('- Command Code から Claude（sonnet）への格上げ（3-5）');
+    expect(row).toContain('Command Code 担当は Claude（opus）へ格上げ（3-5）');
+    expect(orchestrate).toContain('- Command Code から Claude（opus）への格上げ（3-5）');
   });
 });
 
-describe('/orchestrate: after a raise from Command Code, failures go sonnet → opus → a person everywhere (Issue #4238 review)', () => {
+describe('/orchestrate: after a raise from Command Code, failures go opus → a person everywhere (Issues #4238 / #4489)', () => {
   const body34 = section('3-4');
 
-  it('the 3-4 text splits the Claude branch: sonnet goes to 3-5b, only opus stops for a person', () => {
-    expect(body34).toContain('**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 で格上げした sonnet も同じ）');
+  it('the 3-4 text raises Command Code to opus, and only opus stops for a person', () => {
+    expect(body34).toContain('**Command Code 担当は 3-5 の手順で Claude（opus）に上げる**');
+    expect(body34).toContain('**Claude（sonnet）担当は 3-5b の手順で opus に上げる**（3-5 の代わりに sonnet にした場合も同じ）');
     expect(body34).toContain('**Claude（opus）担当は** worker を止め、ユーザーに判断を仰ぐ');
     // The old branch stopped every Claude worker, a sonnet raised by 3-5 included.
     expect(body34).not.toContain('**Claude 担当は** worker を止め');
@@ -393,7 +403,7 @@ describe('/orchestrate 8-2 / 8-3: the pilot leaves a record', () => {
     expect(end).toBeGreaterThan(start);
     const body = orchestrate.slice(start, end);
     expect(body).toContain('| モデル（実測） |');
-    expect(body).toMatch(/^\| #\{L\} \| 中 \| claude \| sonnet/m);
+    expect(body).toMatch(/^\| #\{L\} \| 中 \| command-code \| —/m);
   });
 
   it('8-3 is mandatory after a promotion or a sonnet re-instruction', () => {
@@ -460,9 +470,11 @@ describe('send --model: which tools it works for (Issue #4247)', () => {
     expect(claudeMd).not.toContain('（claude/antigravity）');
   });
 
-  it('3-5 Command Code path still goes to sonnet (current procedure, not the legacy Antigravity section)', () => {
-    const body = docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ');
-    expect(body).toContain('commandmatedev instances "$WT" kill command-code');
-    expect(body).toContain('sonnet');
+  it('3-5 now goes to opus; the switching.md sonnet section is kept as the startup/send stand-in (#4489)', () => {
+    expect(section('3-5')).toContain('**格上げ先は opus**');
+    expect(section('3-5')).toContain('起動・送信で詰まったときだけ');
+    const fallback = docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ');
+    expect(fallback).toContain('commandmatedev instances "$WT" kill command-code');
+    expect(fallback).toContain('sonnet');
   });
 });

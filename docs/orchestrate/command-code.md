@@ -1,10 +1,13 @@
 # Command Code 担当の運用メモ
 
-本体の 1-2b・3-1・3-3・3-5 から読む。難易度「易」の担当は #4238 で Antigravity から Command Code に変わった（中・難は変えていない）。
+本体の 1-2b・3-1・3-3・3-5 から読む。難易度「易」の担当は #4238 で Antigravity から Command Code に変わり、**2026-11-19 から「中」も Command Code** が担当する（難は Claude opus）。
 Antigravity の実測は docs/orchestrate/antigravity.md に残してある（今は使わない）。
 
 ## 1-2b Command Code に回す前提
 
+- 難の観点（危険な領域・設計・原因未特定・未決事項・実機でしか決まらない検証・強い依存・新規 export）に当てはまらないものは、易と中をまとめて Command Code に回す。**中**＝選択肢か手順と受入条件が本文で閉じている判断・設計（旧 sonnet）
+- **本文が閉じていないまま回さない。** 着手の前に、イネーブラーが Issue を「選択肢・手順・受入条件」まで具体化する
+- 仕事の **6〜8 割**を Command Code で回すのが目標。Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える
 - 名簿の instance id は `command-code`（2 本目は `command-code-2`）。`send` / `wait` / `capture` / `respond` に `--instance command-code` を渡す
 - Claude のモデルは無い。契約の設定は `agent: command-code` で `model` を書かない（`-`）。`agent: antigravity` は契約を作らずに止まる（`contract.mjs`）
 - skill の置き場所は `.commandcode/skills` と `.agents/skills` だけで、`.claude/commands` は読まない。
@@ -61,7 +64,7 @@ Command Code は、前のターンの `hook_stop` が、生成中のターンよ
 
 - 確認の画面で止まっている（`capture --pane` で見る）: 権限の既定が `ask` に変わった可能性がある。上の「3-1 権限の既定を確かめる」を読み、利用者に直してもらう
 - exit 21（作業証跡ゼロ）: docs/orchestrate/exit-codes.md#3-4-21-の対応 の手順で切り分ける
-- ワーカー起因の不合格が 2 回続いたら、本体 3-5 の手順で Claude（sonnet）へ格上げする
+- ワーカー起因の不合格が 2 回続いたら、本体 3-5 の手順で Claude（opus）へ格上げする。sonnet は、Command Code が起動・送信で詰まったときの代わりだけ（理由を lead-return に書く）
 
 ## 付録 同梱バンドルから仕様を読むとき
 
