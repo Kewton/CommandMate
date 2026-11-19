@@ -47,6 +47,15 @@
  * have roles (it restarted, and knows nothing of this process) is not "nothing to
  * pin": stopped and 44, unlike an older server or a tool roles do not apply to.
  *
+ * A starting message that was not confirmed (exit 99, #3904) may sit unsent in the
+ * composer — drawn late, its Enter lost — and the contract's `send` would refuse
+ * `composer-not-empty` (#1880) on every try (Issue #4476). So before the contract the
+ * last `capture --json` read's `composerState` decides: `empty` / `ghost` go on;
+ * `content` gets one clear through the server's existing clear-composer route and the
+ * contract only after two clean reads in a row, else the session is stopped (1); a
+ * server that reports no `composerState` goes on as before. The starting message is
+ * never submitted again: it may have gone.
+ *
  * Command Code (Issue #4238, the easy tier) has no Claude model: `--model -` only,
  * and nothing is written to `.claude/`. Its interactive permissions are fixed
  * when the session starts, from the worktree's `.commandcode/settings.local.json`
@@ -69,7 +78,8 @@
  * sent); 45 a Command Code worktree whose permissions default is `ask`, or
  * cannot be read (nothing sent); 2 a usage error (a Claude model for Command Code too), an `--instance` that cannot be resolved, or a settings file git does not ignore (nothing
  * sent); 1 any other failure (the session did not come back ready after the
- * starting message: stopped, contract not sent); otherwise the `send`'s own
+ * starting message, or — Issue #4476 — a starting message that was not confirmed
+ * still sits in the composer after one clear: stopped, contract not sent); otherwise the `send`'s own
  * exit code (99 = not sent, 3-1's cold start; 31 / 32, see
  * docs/orchestrate/workers.md "3-1 send とワーカーの起動の exit code").
  *
@@ -128,6 +138,15 @@ export const STOP_READ_INTERVAL_SEC = 5;
 export const READY_STREAK = 2;
 export const READY_MAX_POLLS = 30;
 export const READY_POLL_SEC = 10;
+/**
+ * Issue #4476: reads of the composer after one clear of a starting message left in it,
+ * the pause before each, and the clean reads in a row (`empty` / `ghost`) the contract waits for.
+ */
+export const COMPOSER_SETTLE_READS = 6;
+export const COMPOSER_SETTLE_INTERVAL_SEC = 5;
+export const COMPOSER_CLEAN_STREAK = 2;
+/** `composerState` values that hold no text a person (or a lost send) typed (#1879). */
+const COMPOSER_CLEAN_STATES = new Set(['empty', 'ghost']);
 /** Starts the session without handing it the contract: no work, no files, no Auto-Yes. */
 export const INIT_MESSAGE =
   'セッションの起動とモデルの確認です（作業の依頼ではありません）。まだ何も実行せず、ファイルにも触らず、「OK」とだけ返してください。依頼は次のメッセージで送ります。';
@@ -419,6 +438,100 @@ export function waitReady({ run, sleep, cli, wt, instance, onAnswer }) {
 }
 
 /**
+ * POSTs the body (argv[2]) to the URL (argv[1]) with the token of the environment the CLI
+ * also reads (`CM_AUTH_TOKEN`), never on argv. Prints `{status}` / `{error}`; exit 0 on 2xx.
+ */
+export const CLEAR_COMPOSER_SCRIPT = [
+  'const [url, body] = process.argv.slice(1);',
+  "const headers = { 'Content-Type': 'application/json' };",
+  'if (process.env.CM_AUTH_TOKEN) headers.Authorization = `Bearer ${process.env.CM_AUTH_TOKEN}`;',
+  "fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(12000) })",
+  '  .then(async (res) => { const text = await res.text(); process.stdout.write(JSON.stringify({ status: res.status, body: text.slice(0, 500) })); process.exit(res.ok ? 0 : 1); })',
+  '  .catch((e) => { process.stdout.write(JSON.stringify({ error: String(e && e.message ? e.message : e) })); process.exit(1); });',
+].join('\n');
+
+/**
+ * Empty the instance's composer through the server's existing clear-composer route
+ * (Issue #4476; the route is #1879's [Clear], which loops `C-e`+`C-u` under the input lock
+ * and reads back). The CLI has no command for it, so the route is called directly — on the
+ * server this CLI talks to: its URL is the one `whoami --json` reports (the CLI's own
+ * resolution, #2404), never guessed here. No URL, no request.
+ *
+ * @returns {{ ok: boolean, detail: string }} `ok` only for a 2xx answer; the caller reads the composer back either way
+ */
+export function defaultClearComposer({ run, cli, wt, instance, cliToolId }) {
+  const who = run(cli, ['whoami', '--json']);
+  let serverUrl = '';
+  try {
+    serverUrl = who.status === 0 ? String(JSON.parse(who.stdout)?.serverUrl ?? '') : '';
+  } catch {
+    serverUrl = '';
+  }
+  if (!serverUrl) return { ok: false, detail: `server URL unknown (whoami exit=${who.status}); not cleared` };
+  const url = `${serverUrl.replace(/\/+$/, '')}/api/worktrees/${encodeURIComponent(wt)}/clear-composer`;
+  try {
+    const posted = run(process.execPath, ['-e', CLEAR_COMPOSER_SCRIPT, url, JSON.stringify({ cliToolId, instanceId: instance })], {
+      timeoutMs: QUERY_TIMEOUT_MS,
+    });
+    const answer = String(posted.stdout ?? '').trim();
+    return { ok: posted.status === 0, detail: `POST ${url} exit=${posted.status} ${answer}`.trim() };
+  } catch (err) {
+    return { ok: false, detail: `POST ${url} failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/**
+ * What the composer holds right before the contract, after a starting message that was not
+ * confirmed (Issue #4476). That message may sit unsent in the composer — claude drew it late
+ * and its Enter did nothing — and the contract's `send` would then refuse `composer-not-empty`
+ * (#1880) on every try. It is never submitted again here: it may have gone (I2).
+ *
+ *   - `clean`: `empty` / `ghost` — nothing to do;
+ *   - `unknown`: no `composerState` (a server older than #1879) — the caller goes on as before;
+ *   - `cleared`: it held text, one clear went out, and then {@link COMPOSER_CLEAN_STREAK} reads
+ *     in a row were clean;
+ *   - `left`: it held text and did not read clean that often within {@link COMPOSER_SETTLE_READS}.
+ *
+ * Any other state (`no_composer`, `unsupported_tool`) is not text seen in the composer, and is
+ * `clean` as far as this check goes (the send's own pre-send clear reads it again).
+ *
+ * @param {object} p
+ * @param {object | null} p.answer - The last `capture --json` answer read before the contract
+ * @param {(input: object) => { ok: boolean, detail: string }} p.clear
+ * @returns {{ verdict: 'clean' | 'unknown' | 'cleared' | 'left', state: string, text: string, detail: string }}
+ */
+export function settleLeftoverComposer({ run, sleep, cli, wt, instance, cliToolId, answer, clear, onAnswer }) {
+  const state = answer?.composerState;
+  if (typeof state !== 'string') return { verdict: 'unknown', state: '-', text: '', detail: 'no composerState' };
+  if (state !== 'content') return { verdict: 'clean', state, text: '', detail: '' };
+  const text = typeof answer.composerText === 'string' ? answer.composerText : '';
+  const cleared = clear({ run, cli, wt, instance, cliToolId });
+  let streak = 0;
+  let last = state;
+  for (let read = 1; read <= COMPOSER_SETTLE_READS; read++) {
+    sleep(COMPOSER_SETTLE_INTERVAL_SEC * 1000);
+    const out = run(cli, ['capture', wt, '--instance', instance, '--json']);
+    let now = null;
+    try {
+      now = out.status === 0 ? JSON.parse(out.stdout) : null;
+    } catch {
+      now = null;
+    }
+    if (now !== null) onAnswer?.(now);
+    last = typeof now?.composerState === 'string' ? now.composerState : 'unreadable';
+    streak = COMPOSER_CLEAN_STATES.has(last) ? streak + 1 : 0;
+    if (streak >= COMPOSER_CLEAN_STREAK) return { verdict: 'cleared', state: last, text, detail: cleared.detail };
+  }
+  return { verdict: 'left', state: last, text, detail: cleared.detail };
+}
+
+/** The first characters of a composer's text, on one line, for a log. */
+function composerHead(text) {
+  const line = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return line.length > 60 ? `${line.slice(0, 60)}…` : line;
+}
+
+/**
  * The `--duration` format the CLI accepts (Issue #3913): `1h`〜`24h`, whole
  * hours. A copy of AUTO_YES_DURATION_FLAG_PATTERN in
  * src/config/auto-yes-duration.ts (this .mjs cannot import TypeScript);
@@ -481,6 +594,7 @@ export function parseArgs(argv) {
  *   run?: (command: string, args: string[], opts?: { cwd?: string }) => { status: number, stdout: string, stderr: string },
  *   resolveTarget?: typeof defaultResolveTarget,
  *   sleep?: (ms: number) => void,
+ *   clearComposer?: typeof defaultClearComposer,
  *   out?: (line: string) => void,
  *   log?: (line: string) => void,
  *   error?: (line: string) => void,
@@ -604,9 +718,39 @@ export function main(argv, deps = {}) {
         continue;
       }
       let roleNow = rolePin;
-      if (!waitReady({ ...ctx, onAnswer: (answer) => (roleNow = rolePinOf(answer)) })) {
+      let lastAnswer = null;
+      const readAnswer = (answer) => {
+        lastAnswer = answer;
+        roleNow = rolePinOf(answer);
+      };
+      if (!waitReady({ ...ctx, onAnswer: readAnswer })) {
         log(`not ready: ${o.instance} of ${o.wt} did not read ready ${READY_STREAK} times in a row after the starting message; contract not sent`);
         return stopped('not ready after the starting message') ? 1 : EXIT_STOP_UNCONFIRMED;
+      }
+      if (init.status !== 0) {
+        // Issue #4476: the starting message that was not confirmed may sit unsent in the composer,
+        // and the contract's send would refuse it (#1880) on every try. Read off the last ready
+        // answer; it is never submitted again (it may have gone). The model path is Claude's.
+        const leftover = settleLeftoverComposer({
+          ...ctx,
+          cliToolId: target.cliToolId ?? 'claude',
+          answer: lastAnswer,
+          clear: deps.clearComposer ?? defaultClearComposer,
+          onAnswer: readAnswer,
+        });
+        const errFile = path.join(o.runDir, `${init.name.replace(/\.out$/, '')}.err`);
+        if (leftover.verdict === 'unknown') {
+          log(`composer UNKNOWN ${o.instance} of ${o.wt}: the server reports no composerState; contract sent as before`);
+        } else if (leftover.verdict === 'cleared') {
+          const note = `composer CLEARED ${o.instance} of ${o.wt}: it held "${composerHead(leftover.text)}" after start exit=${init.status}; one clear (${leftover.detail}), then ${COMPOSER_CLEAN_STREAK} clean reads (${leftover.state})\n`;
+          fs.appendFileSync(errFile, note);
+          log(note.trim());
+        } else if (leftover.verdict === 'left') {
+          const note = `composer NOT CLEARED ${o.instance} of ${o.wt}: still holds text after one clear (${leftover.detail}); last read ${leftover.state}; it held "${composerHead(leftover.text)}"; contract not sent\n`;
+          fs.appendFileSync(errFile, note);
+          log(note.trim());
+          return stopped('the starting message is still in the composer') ? 1 : EXIT_STOP_UNCONFIRMED;
+        }
       }
       if (!rolePinHolds(rolePin, roleNow)) {
         log(`role changed: ${o.instance} of ${o.wt} is not the process the starting message started; contract not sent`);
