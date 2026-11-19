@@ -9,9 +9,17 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { main, parsePmSendArgs, type PmSendDeps } from '../../../../scripts/orchestrate/pm-send-main';
+import {
+  RELAY_ROUNDS_REFUSED_NOTICE,
+  isRelayRoundsRefusal,
+  main,
+  parsePmSendArgs,
+  type PmSendDeps,
+  type SpawnResult,
+} from '../../../../scripts/orchestrate/pm-send-main';
 import { main as reserveMain, type Exec } from '../../../../scripts/agent-health/claude3-reserve-main';
 import { pmRelayFlags, pmSendArgv, sendArgv } from '@/lib/agent-health/dispatch';
+import { MAX_RELAY_HOPS, MAX_RELAY_ROUNDS, decideRelayCreation, isRelayRefusal } from '@/lib/relay/relay-policy';
 
 let root: string;
 let execCalls: Array<[string, string[]]>;
@@ -292,5 +300,90 @@ describe('parsePmSendArgs', () => {
       ok: true,
       command: { worktreeId: 'wt', instance: 'codex', note: 'n', token: null, message: 'x' },
     });
+  });
+});
+
+/**
+ * #4418 after #4420: asking again after an answer is no longer a chain, but PM that
+ * received MAX_RELAY_ROUNDS replies within the window is refused RELAY_HOPS_EXCEEDED.
+ * pm-send returns that exit as it is, never sends plainly instead, and says to wait
+ * or hand it back (I5: L1 holds).
+ */
+describe('pm-send after the relay pace ceiling (#4418 after #4420)', () => {
+  const PM_END = { worktreeId: 'wt-pm', instanceId: 'claude' };
+  const TARGET_END = { worktreeId: 'wt-x', instanceId: 'codex' };
+  /** The CLI's line for a relay refusal (`registerRelay`: `Error: <message>`), with the policy's own message. */
+  const refusalLine = (replyRounds: number, parentHops: number | null = null, allowRelayChain = false) => {
+    const verdict = decideRelayCreation({ from: PM_END, to: TARGET_END, parentHops, allowRelayChain, openBetween: 0, replyRounds });
+    if (!isRelayRefusal(verdict)) throw new Error('expected a refusal');
+    return { code: verdict.code, stderr: `Error: ${verdict.message}\n` };
+  };
+
+  function runWith(answer: SpawnResult, extra: Partial<PmSendDeps> = {}, argv = ['wt-x', '--instance', 'codex', '--note', 'n', '次の依頼']) {
+    return main(argv, {
+      exec,
+      resolveWorktree: async (id) => formerIds[id] ?? id,
+      spawn: (command, args) => {
+        spawnCalls.push([command, [...args]]);
+        return answer;
+      },
+      stderr: (line) => err.push(line),
+      reserve: reserveDeps(),
+      ...extra,
+    });
+  }
+
+  it('the policy\'s pace refusal is what isRelayRoundsRefusal reads; the depth refusal and the others are not', () => {
+    const rounds = refusalLine(MAX_RELAY_ROUNDS);
+    expect(rounds.code).toBe('RELAY_HOPS_EXCEEDED');
+    expect(isRelayRoundsRefusal(rounds.stderr)).toBe(true);
+    const depth = refusalLine(0, MAX_RELAY_HOPS, true);
+    expect(depth.code).toBe('RELAY_HOPS_EXCEEDED');
+    expect(isRelayRoundsRefusal(depth.stderr)).toBe(false);
+    expect(isRelayRoundsRefusal(refusalLine(0, 1, false).stderr)).toBe(false); // RELAY_CHAIN_BLOCKED
+    expect(isRelayRoundsRefusal(undefined)).toBe(false);
+    expect(isRelayRoundsRefusal('')).toBe(false);
+  });
+
+  it('refused on the pace: the exit as it is, one send only (with the relay), and the line says wait or hand it back', async () => {
+    expect(await runWith({ status: 2, stderr: refusalLine(MAX_RELAY_ROUNDS).stderr })).toBe(2);
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0][1]).toEqual(expect.arrayContaining(['--reply-to', 'self', '--note', 'n']));
+    expect(err).toContain(RELAY_ROUNDS_REFUSED_NOTICE);
+    expect(RELAY_ROUNDS_REFUSED_NOTICE).toMatch(/RELAY_HOPS_EXCEEDED/);
+    expect(RELAY_ROUNDS_REFUSED_NOTICE).toMatch(/待/);
+    expect(RELAY_ROUNDS_REFUSED_NOTICE).toMatch(/人に返す/);
+    expect(RELAY_ROUNDS_REFUSED_NOTICE).toMatch(/素の send には落とさない/);
+  });
+
+  it('negative control: another failure, or a send that went through, adds no line and keeps the exit', async () => {
+    expect(await runWith({ status: 2, stderr: refusalLine(0, 1, false).stderr })).toBe(2);
+    expect(await runWith({ status: 1, stderr: 'Error: something else\n' })).toBe(1);
+    expect(await runWith({ status: 0, stderr: 'Relay registered: r-1\n' })).toBe(0);
+    expect(await runWith({ status: 0 })).toBe(0);
+    expect(spawnCalls).toHaveLength(4);
+    expect(err).not.toContain(RELAY_ROUNDS_REFUSED_NOTICE);
+  });
+
+  it('claude-3 under the reservation: the same refusal gives the same line, and nothing more is sent', async () => {
+    expect(await reserveMain(['reserve', '--label', '#4418'], { ...reserveDeps(), stdout: (l) => err.push(`TOKEN ${l}`) })).toBe(0);
+    const token = (err.find((l) => l.startsWith('TOKEN ')) ?? '').slice(6);
+    const reserveSpawned: string[][] = [];
+    const code = await runWith(
+      { status: 0 },
+      {
+        reserveSpawn: async (_command, args) => {
+          reserveSpawned.push([...args]);
+          return { status: 2, stdout: '', stderr: refusalLine(MAX_RELAY_ROUNDS).stderr };
+        },
+      },
+      ['mycodebranchdesk', '--instance', 'claude-3', '--token', token, '--note', 'リーダーの DONE:', 'ブリーフ']
+    );
+    expect(code).toBe(2);
+    expect(spawnCalls).toEqual([]);
+    expect(reserveSpawned).toEqual([
+      ['send', 'mycodebranchdesk', 'ブリーフ', '--instance', 'claude-3', '--reply-to', 'self', '--note', 'リーダーの DONE:'],
+    ]);
+    expect(err).toContain(RELAY_ROUNDS_REFUSED_NOTICE);
   });
 });

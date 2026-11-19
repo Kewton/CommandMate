@@ -24,36 +24,22 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 - イネーブラーへの依頼（2-4-4・5-2b）は今の `/orchestrate` の手順のまま。送るのは開発リーダー
 - ジャッジへの UAT の依頼は PM が送る。`/orchestrate` の Phase 7（UAT）を行うのは、開発リーダーではなく PM がジャッジへ頼む形に替わる
 
-- 手順書の改定・仕組みの導入・設計の方針・Issue の分け方のような高難易度の判断は、Issue にする前・実施する前にイネーブラーへレビューを頼む（PM の送り方は §3 の `pm-send.ts` だけ）。案は事実と見立てを分け、根拠のファイル・コマンドを添え、「同意の列挙ではなく反対と疑問を優先」と頼む。返ってきた指摘はリポジトリで確かめてから採否を決め、自分の報告に誤りが見つかれば訂正を明記する。イネーブラーが確認で止まったら（exit 10）答えず、選択肢を原文のまま利用者に見せる
+- 手順書の改定・仕組みの導入・設計の方針・Issue の分け方のような高難易度の判断は、Issue にする前・実施する前にイネーブラーへレビューを頼む（`cmate-delegate`）。案は事実と見立てを分け、根拠のファイル・コマンドを添え、「同意の列挙ではなく反対と疑問を優先」と頼む。返ってきた指摘はリポジトリで確かめてから採否を決め、自分の報告に誤りが見つかれば訂正を明記する。イネーブラーが確認で止まったら（exit 10）答えず、選択肢を原文のまま利用者に見せる
 
 - リーダーから PM への結果と案は `workspace/orchestration/runs/$DATE/lead-return-<issue>-<item>.md`、PM の処分は `pm-return-<issue>-<item>.md` に書く。同じ名前に書くと、PM の処分がリーダーの案を上書きする
 
 ## 3. PM から開発リーダーへのブリーフ
 
-**PM の送り方は 1 つだけ**（Issue #4418。設計は [docs/design/pm-send-relay-4418.md](../design/pm-send-relay-4418.md)）。ブリーフ・途中の返事・再指示（PM の処分）・イネーブラーへのレビュー・ジャッジへの UAT の依頼を、すべて main のチェックアウトで次のコマンドで送る:
-
-```bash
-npx tsx scripts/orchestrate/pm-send.ts <worktree-id> --instance <id> --note "<待つもの>" "<本文>"
-# claude-3 へは予約の token を足す（§4）
-npx tsx scripts/orchestrate/pm-send.ts mycodebranchdesk --instance claude-3 --token <token> --note "<待つもの>" "<本文>"
-```
-
-- 常に `--reply-to self --note "<待つもの>"` が付く。受け手が送り返さずに手番を終えても、その手番の終わりに返事が PM の入力欄へ届き、mem の `waiting` も relay が閉じれば閉じる。relay を外す旗は無い
-- `--note` が無い・空なら exit 2 で何も送らない（commandmate を起動しない）。それ以外は `commandmate send` の終了コードをそのまま返す
-- 素の `commandmate send` / `ask` / `cmate-delegate` で PM から送らない（返しが受け手の記憶頼みになり、約 8 時間止まった。#4418）
-- relay で届いた返事を読んだ直後の再指示・次の依頼は、今は送れない（relay の連鎖の防止で exit 2・`RELAY_CHAIN_BLOCKED`）。人が PM に 1 行入れると戻る。`--allow-relay-chain` を付けても 3 ホップ目の次で止まる。未解決（設計メモ §「返事を受けた後の再依頼」）
-- 送り先は解決済みの worktree（旧 ID は今の ID）とインスタンス（別名は ID）に送る。解決できなければ exit 2 で何も送らない
-
-ブリーフには次の 4 点を含める。
+次の 4 点を含める。
 
 1. 対象の Issue（番号）
 2. マージの許可の範囲（どの Issue・どの base まで。無ければ「マージは進めず、マージ可能を報告して止まる」）
 3. 止まる条件（例: 不合格が続いた・範囲外の変更が要る・承認が要る）
-4. 締めの指示: 「**最後の行は `DONE: <要約>` / `WAIT: <了承・判断待ちの内容>` / `STOP: <理由>` のどれか**」。PM はこの行で完了・待ち・停止を読む（途中の返事・再指示の締めも同じ）
+4. 締めの `DONE:` 行（完了時に最後の行へ出す要約。PM はこの行で完了を読む）
 
 返し・引き継ぎ・送る本文に時刻を書くときは推測しない。書く直前に `date` を実行するか、書くコマンドの中で `$(date +%H:%M)` を使う（並列のレーンで返しが続くと、経過の足し算がずれていく）。
 
-完了の主の合図は relay（`pm-send.ts` が張る `--reply-to self`）で受け、画面の見張りは従にする。画面を見張るときは `capture --pane --tail N` の末尾の窓だけを grep しない（`--tail` は先頭と末尾の空行を除いた後の最後の N 行で、`DONE:` 行の後に続く出力・入力欄・フッタが窓を埋めると、`DONE:` 行は窓の外へ押し出される）。全行を `LC_ALL=C` で読み、「一定時間変化が無い」で STALL を出す出口を持たせる。雛形の締めの行には実値と紛れない印（`<sha>` など）だけを使い、自分の送信や雛形の行を `DONE:` / `WAIT:` / `STOP:` と数えない。
+完了の主の合図は relay（`send --reply-to` / `ask --async`）で受け、画面の見張りは従にする。画面を見張るときは `capture --pane --tail N` の末尾の窓だけを grep しない（`--tail` は先頭と末尾の空行を除いた後の最後の N 行で、`DONE:` 行の後に続く出力・入力欄・フッタが窓を埋めると、`DONE:` 行は窓の外へ押し出される）。全行を `LC_ALL=C` で読み、「一定時間変化が無い」で STALL を出す出口を持たせる。雛形の締めの行には実値と紛れない印（`<sha>` など）だけを使い、自分の送信や雛形の行を DONE と数えない。
 
 ## 4. agent-health の依頼とブリーフが重なったとき
 
@@ -67,20 +53,20 @@ PM も dispatch も、予約を持っている間だけ `claude-3` に送る。�
 1. **予約**: `reserve --label "<対象の Issue>"`。標準出力の 1 行が token。token は引き継ぎメモ（`workspace/mem`）にも書く。
    `claude-3` が処理中・プロンプト待ちなら exit 4、別の持ち主（前の PM の run・自動依頼の run）がいれば exit 3 で、どちらも予約しない
    **開発リーダー自身が守る場合**（PM を通さず直接 `/orchestrate` を頼まれた run など）: `claude-3` の中から `reserve --self --label "<対象の Issue>"`。状態確認を省き（自分が処理中のため）、持ち主は `leader`。`whoami` が `mycodebranchdesk` の `claude-3`（cliTool は claude）でなければ exit 2。dispatch は予約中として `skipped-busy` で見送る。解除は `release --token <token>`（`send` は exit 3）。token を失ったら `status` で読み、残った leader の予約は PM が `release --force --from <token>` で外す（`takeover` は使えない）。exit 3 は `status` で持ち主を見て、dispatch なら終わるのを待って取り直す
-2. **送信**: ブリーフも途中の返事も `npx tsx scripts/orchestrate/pm-send.ts mycodebranchdesk --instance claude-3 --token <token> --note "<待つもの>" "<本文>"` で送る（§3。中で `claude3-reserve.ts send --token <token> --note "<待つもの>" "<本文>"` を通り、`commandmate send mycodebranchdesk "<本文>" --instance claude-3 --reply-to self --note "<待つもの>"` になる）。PM の予約の token でだけ送れる（自動依頼の token では exit 3）。token が無ければ exit 2、`--note` が無ければ exit 2 で、どちらも送らない。素の `commandmate send … --instance claude-3` は使わない
+2. **送信**: ブリーフも途中の返事も `send --token <token> "<本文>"` で送る（PM の予約の token でだけ送れる。自動依頼の token では exit 3）（中身は `commandmate send mycodebranchdesk "<本文>" --instance claude-3`）。素の `commandmate send … --instance claude-3` は使わない
 3. **解除**: 開発リーダーの `DONE:` を読んだら `release --token <token>`。長くかかるときは `renew --token <token> [--hours 1-24]`。期限（既定 8 時間）を過ぎても予約は外れない。期限は「要確認」の表示だけ
 4. **PM の再起動後**: `status` で自分の予約の token を見て `takeover --from <token> --reason restart`。新しい token に替わり、古い token の操作は以後すべて exit 3
 5. **自動依頼の run が外せなかったとき**: run の最後の `finish --token` が完了の印（予約の置き場所の `finished-<token>.json`）を残したのに解除が通らなかった場合だけ、`claude-3` が手すきなら `takeover --from <token> --reason dispatch-finished` で引き継げる。リリース判断レポート（HTML）は run の途中でも手で作れるので証拠にしない。印が無ければ exit 3 で、人が `release --force --from <token>` で判断する
 6. **導入時**: PM のセッションと Schedule（dispatch）の環境の両方で `status` を実行し、出た `dir=` の絶対パスが同じことを確かめる（置き場所は `~/.commandmate/agent-health/claude3.reservation` に固定）
 
 dispatch 側は、対象があれば `/clear` の前に予約を取り、依頼を送った後も run の終わりまで持つ。run の最後に `claude-3` 自身が条件ファイルの指示どおり `finish --token` を実行する（完了の印を残してから解除）（[agent-health.md](../user-guide/agent-health.md)「自動依頼」）。
-PM が素の `commandmate send` を打つことを仕組みで止めるのは未対応（追跡）。リポジトリの共有の設定（`.claude/settings.json` のフック）を足すと clone した利用者を含む全 Claude セッションに効くため採らない。`claude-3` へは `npx tsx scripts/orchestrate/pm-send.ts … --token <token>` だけで送る（手順 2）。
+PM が素の `commandmate send` を打つことを仕組みで止めるのは未対応（追跡）。リポジトリの共有の設定（`.claude/settings.json` のフック）を足すと clone した利用者を含む全 Claude セッションに効くため採らない。`claude-3` へは `npx tsx scripts/agent-health/claude3-reserve.ts send` だけで送る（手順 2）。
 
 手で着手する Issue に `agent-health` / `catalog-drift` / `metrics` のラベルが付いていれば、着手のときに `gh issue edit <N> --add-label auto-dispatched` を付けてコメントを残す。付けないと、翌朝の自動依頼（`src/lib/agent-health/dispatch.ts`）が同じ Issue を `claude-3` に送り、ブランチ・PR が重なる。自分で起票する Issue には、自動の修正に回したいもの以外これらのラベルを付けない。
 
 ## 5. UAT の結果の返し方（Phase 7）
 
-UAT はジャッジ（`claude-2`）が行い、結果はジャッジ → PM → 開発リーダーの順で返す。PM はジャッジへの依頼も開発リーダーへの返しも `pm-send.ts` で送る（§3）。不合格の修正ループ（`/uat-fix-loop`）は開発リーダーが回す。
+UAT はジャッジ（`claude-2`）が行い、結果はジャッジ → PM → 開発リーダーの順で返す。不合格の修正ループ（`/uat-fix-loop`）は開発リーダーが回す。
 修正ループ内の再UAT（`/uat-fix-loop` の Step 5 の `/uat`）と全 Issue の回帰確認も同じで、開発リーダーが自分で `/uat` を回さず、PM 経由でジャッジに頼み結果を待つ。
 開発リーダー以外の人が 1 人で `/orchestrate` を回す場合（今の運用）は、`orchestrate.md` の Phase 7 の手順のままでよい。
 UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1b を含む develop を取り込んでから起こす（`scripts/uat/run-server.sh` は各 worktree のチェックアウトのものを使うので、取り込む前の worktree は旧い run-lock のまま取り合い、混在の間は旧い `up` が新しい `up` のロックを pid だけで死んだと読んで取ることがある。設計は `docs/design/run-lock-machine-lock-4288.md` と `docs/design/lock-reservation-rest-4288.md` §1.9）。
@@ -114,9 +100,8 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 
 ## 8. 依頼ごとの完了の見張り
 
-- PM の依頼は `pm-send.ts` で送る（§3）。返事は relay で PM の入力欄に届くので、それが主の合図。見張りは従
-- 依頼（ワーカー・イネーブラー・CI）を送ったら、同じ手番で期限の無い完了の見張りを張る。`DONE:` / `WAIT:` / `STOP:` 行（または返しのファイルのその行）が出たら終わる待ちにする。期限で切れる見張りを張り直す運用にしない
-- 見張りはペインの全行を読む（`capture --pane --tail N` の末尾 N 行には、`DONE:` 行の後に出た出力・入力欄・フッタが並び、`DONE:` 行が入らないことがある）。画面が長く変わらなければ STALL として知らせる。依頼文の締めに「最後の行は `DONE: <要約>` / `WAIT: <了承・判断待ちの内容>` / `STOP: <task> <理由>` のどれか」を必ず入れる（了承・判断を待つときは `WAIT:` で止まり、`DONE:` と書かない）
+- 依頼（ワーカー・イネーブラー・CI）を送ったら、同じ手番で期限の無い完了の見張りを張る。`DONE:` 行（または返しのファイルの `DONE:` 行）が出たら終わる待ちにする。期限で切れる見張りを張り直す運用にしない
+- 見張りはペインの全行を読む（`capture --pane --tail N` の末尾 N 行には、`DONE:` 行の後に出た出力・入力欄・フッタが並び、`DONE:` 行が入らないことがある）。画面が長く変わらなければ STALL として知らせる。依頼文の締めに「止まるときも `STOP: <task> <理由>` と書く」を必ず入れる
 - 見張りの除外の規則を自作しない（雛形どおりに書いた本物の `DONE:` 行まで除いてしまう）。`DONE:` 行の形は依頼文で決め、見張りではその形で絞る。見張りを張ったら、`DONE:` が既にある画面で一度鳴ることを確かめる
 - CI は `bucket` が全部終わるまでを待ち、10 分以上 queued ならランナーが online かも見る。動いている依頼と見張りの一覧をいつでも出せるようにしておく
 

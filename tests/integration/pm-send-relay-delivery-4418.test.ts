@@ -25,10 +25,10 @@ import { codexTurnRequestId } from '@/types/agent-transcript';
 import { reserveRelaySend } from '@/lib/relay/relay-bind';
 import { resetRelayServerBootId } from '@/lib/relay/relay-boot';
 import { openRelay } from '@/lib/relay/relay-service';
-import { MAX_RELAY_HOPS } from '@/lib/relay/relay-policy';
+import { MAX_RELAY_ROUNDS, RELAY_ROUNDS_WINDOW_MS } from '@/lib/relay/relay-policy';
 import { clearAgentStopEvents } from '@/lib/session/agent-event-state';
 import { clearWaitingEpisodes } from '@/lib/session/waiting-episode-state';
-import { main as pmSend } from '../../scripts/orchestrate/pm-send-main';
+import { RELAY_ROUNDS_REFUSED_NOTICE, main as pmSend } from '../../scripts/orchestrate/pm-send-main';
 
 const NOW = 1_800_000_000_000;
 /** PM: the session running pm-send (`whoami`), which `--reply-to self` names. */
@@ -180,100 +180,159 @@ describe('pm-send → relay → PM\'s composer (Issue #4418)', () => {
 });
 
 /**
- * Codex P1 on e7ca98ac9 — the facts, pinned as they are (the relay body is out
- * of #4418's scope; docs/design/pm-send-relay-4418.md §「返事を受けた後の再依頼」).
- * PM reads the answer the relay put in its composer and asks again. The answer
- * is PM's newest user row (`relay:<id>`), so the next relay PM opens is a chain.
+ * Codex P1 on e7ca98ac9, after #4420 (docs/design/pm-send-relay-4418.md
+ * §「返事を受けた後の再依頼」). PM reads the answer the relay put in its composer
+ * and asks again through pm-send, with no flag: a reply to PM's own relay is not
+ * a chain parent any more. What stops PM is the pace: MAX_RELAY_ROUNDS replies
+ * within RELAY_ROUNDS_WINDOW_MS, refused RELAY_HOPS_EXCEEDED — and pm-send then
+ * sends nothing plain.
+ *
+ * Each send goes through the entry; its `commandmate send` is a stub that does
+ * what the CLI does with that argv: `--reply-to self` opens a bound relay from PM
+ * (`--allow-relay-chain` only if the argv has it), a refusal is `Error: <message>`
+ * on stderr and exit 2 (`registerRelay`), and otherwise the body is sent under the
+ * binding. Date is faked so the ledger's `delivered_at` sits on the test's clock.
  */
-describe('PM asks again after a relayed answer (Codex P1: what the relay does today)', () => {
-  const target = { worktreeId: TARGET_WT, instanceId: 'codex' };
+describe('PM asks again after a relayed answer (Codex P1, after #4420)', () => {
+  /** Every argv pm-send ran, and the bodies that reached the target. */
+  let spawned: string[][];
+  let delivered: string[];
+  let pmErr: string[];
 
-  /** One request and its answer, as in the test above; the answer is written into PM's history. */
-  async function ask(round: number, allowRelayChain: boolean) {
-    const t = NOW + round * 100_000;
-    const opened = openRelay(db, { from: PM, to: target, bind: true, allowRelayChain, now: t });
-    if (!opened.ok) return opened;
+  /** `commandmate send` for one argv, as the CLI runs it (see above). */
+  async function commandmateSend(argv: readonly string[], t: number): Promise<{ status: number; stderr?: string; relayId?: string }> {
+    expect(flag(argv, '--reply-to')).toBe('self');
+    const opened = openRelay(db, {
+      from: PM,
+      to: { worktreeId: argv[1], instanceId: flag(argv, '--instance') as string },
+      bind: true,
+      allowRelayChain: argv.includes('--allow-relay-chain'),
+      now: t,
+    });
+    if (!opened.ok) return { status: 2, stderr: `Error: ${opened.refusal.message}\n` };
     const reserved = reserveRelaySend(
       db,
       {
         relayId: opened.relay.id,
-        worktreeId: TARGET_WT,
+        worktreeId: argv[1],
         cliToolId: 'codex',
-        instanceId: 'codex',
+        instanceId: flag(argv, '--instance') as string,
         hooksReportTurns: true,
         readTurn: () => ({ open: false, generation: null }),
       },
       t + 10
     );
-    if (!reserved.ok) throw new Error(`reserve ${round}`);
+    if (!reserved.ok) throw new Error('reserve');
     reserved.binding.begin(null);
     reserved.binding.hooks().beforeInput(new Date(t + 100), 'input_start');
     const own = createMessage(db, {
-      worktreeId: TARGET_WT, role: 'user', content: `依頼 ${round}`, messageType: 'normal',
+      worktreeId: argv[1], role: 'user', content: argv[2], messageType: 'normal',
       timestamp: new Date(t + 100), cliToolId: 'codex', instanceId: 'codex',
     }).id;
     reserved.binding.finish({ kind: 'sent', messageId: own, generationAfter: null });
+    delivered.push(argv[2]);
     evaluateRelayAfterSend(opened.relay.id);
+    return { status: 0, stderr: `Relay registered: ${opened.relay.id}\n`, relayId: opened.relay.id };
+  }
+
+  /** PM sends round `round` through pm-send; the target answers when it went through. */
+  async function ask(round: number): Promise<{ code: number; relayId?: string }> {
+    const t = NOW + round * 100_000;
+    vi.setSystemTime(t);
+    let relayId: string | undefined;
+    const code = await pmSend([TARGET_WT, '--instance', 'codex', '--note', `返事 ${round}`, `依頼 ${round}`], {
+      exec: () => ({ status: null, stdout: '' }),
+      resolveWorktree: async (id) => id,
+      spawn: async (_command, args) => {
+        spawned.push([...args]);
+        const result = await commandmateSend(args, t);
+        relayId = result.relayId;
+        return result;
+      },
+      stderr: (line) => pmErr.push(line),
+    });
+    if (relayId === undefined) return { code };
     await settle();
+    vi.setSystemTime(t + 5_000);
     createMessage(db, {
       worktreeId: TARGET_WT, role: 'assistant', content: `WAIT: 判断待ち ${round}`, messageType: 'normal',
       timestamp: new Date(t + 5_000), requestId: codexTurnRequestId(`turn-p1-${round}`), cliToolId: 'codex', instanceId: 'codex',
     });
     await notifyRelayTurnCompleted({ worktreeId: TARGET_WT, cliToolId: 'codex', instanceId: 'codex' }, { settled: true });
+    vi.setSystemTime(t + 6_000);
     await settle();
-    expect(getRelayById(db, opened.relay.id)?.state).toBe('delivered');
-    return opened;
+    expect(getRelayById(db, relayId)?.state).toBe('delivered');
+    return { code, relayId };
   }
 
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    spawned = [];
+    delivered = [];
+    pmErr = [];
     // The delivery writes the answer into PM's history the way sendUserMessage does: a `relay` user row.
-    let n = 0;
     sendUserMessage.mockImplementation(async (_db: unknown, p: { worktreeId: string; content: string; instanceId?: string; requestId?: string }) => {
-      n += 1;
       const row = createMessage(db, {
         worktreeId: p.worktreeId, role: 'user', content: p.content, messageType: 'relay', requestId: p.requestId,
-        timestamp: new Date(NOW + n * 100_000 + 6_000), cliToolId: 'claude', instanceId: p.instanceId ?? 'claude',
+        timestamp: new Date(Date.now()), cliToolId: 'claude', instanceId: p.instanceId ?? 'claude',
       });
       return { ok: true, message: { id: row.id } };
     });
   });
 
-  it('without --allow-relay-chain (what pm-send sends today) the second request is refused: RELAY_CHAIN_BLOCKED', async () => {
-    const first = await ask(1, false);
-    expect(first.ok && first.relay.hops).toBe(1);
-    const second = await ask(2, false);
-    expect(second.ok).toBe(false);
-    if (!second.ok) expect(second.refusal.code).toBe('RELAY_CHAIN_BLOCKED');
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it('with --allow-relay-chain each round is one hop deeper, and the request after MAX_RELAY_HOPS is refused', async () => {
-    expect(MAX_RELAY_HOPS).toBe(3);
-    const hops: number[] = [];
-    for (let round = 1; round <= MAX_RELAY_HOPS; round += 1) {
-      const opened = await ask(round, round > 1);
-      expect(opened.ok).toBe(true);
-      if (opened.ok) hops.push(opened.relay.hops);
+  it('(a) send → answer → send again goes through with no flag, every round at hop 1 (red before #4420: RELAY_CHAIN_BLOCKED)', async () => {
+    for (let round = 1; round <= 3; round += 1) {
+      const sent = await ask(round);
+      expect(sent.code).toBe(0);
+      expect(getRelayById(db, sent.relayId as string)?.hops).toBe(1);
     }
-    expect(hops).toEqual([1, 2, 3]);
-    const over = await ask(MAX_RELAY_HOPS + 1, true);
-    expect(over.ok).toBe(false);
-    if (!over.ok) expect(over.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+    expect(spawned.every((argv) => !argv.includes('--allow-relay-chain'))).toBe(true);
+    expect(delivered).toEqual(['依頼 1', '依頼 2', '依頼 3']);
+    expect(sendUserMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('(b) after MAX_RELAY_ROUNDS answers in the window, pm-send exits with the refusal and nothing is sent plainly', async () => {
+    expect(MAX_RELAY_ROUNDS).toBe(10);
+    expect(RELAY_ROUNDS_WINDOW_MS).toBe(30 * 60_000);
+    for (let round = 1; round <= MAX_RELAY_ROUNDS; round += 1) {
+      expect((await ask(round)).code).toBe(0);
+    }
+    // All ten answers fall inside the window of the next send.
+    expect((MAX_RELAY_ROUNDS + 1) * 100_000 - 100_000).toBeLessThan(RELAY_ROUNDS_WINDOW_MS);
+    const before = { spawned: spawned.length, delivered: delivered.length };
+    const over = await ask(MAX_RELAY_ROUNDS + 1);
+    expect(over.code).toBe(2);
+    expect(over.relayId).toBeUndefined();
+    // One run, with the relay; no second (plain) send, and the body never reached the target.
+    expect(spawned.length - before.spawned).toBe(1);
+    expect(flag(spawned[spawned.length - 1], '--reply-to')).toBe('self');
+    expect(delivered.length).toBe(before.delivered);
+    expect(
+      db.prepare(`SELECT COUNT(*) AS n FROM chat_messages WHERE worktree_id = ? AND role = 'user'`).get(TARGET_WT)
+    ).toEqual({ n: MAX_RELAY_ROUNDS });
+    expect(pmErr).toContain(RELAY_ROUNDS_REFUSED_NOTICE);
   });
 
   it('a line a person types into PM ends the chain: the next request is hop 1 again', async () => {
-    await ask(1, false);
+    await ask(1);
     createMessage(db, {
       worktreeId: PM.worktreeId, role: 'user', content: '次へ進めて', messageType: 'normal',
       timestamp: new Date(NOW + 150_000), cliToolId: 'claude', instanceId: 'claude',
     });
-    const next = await ask(2, false);
-    expect(next.ok && next.relay.hops).toBe(1);
+    const next = await ask(2);
+    expect(next.code).toBe(0);
+    expect(getRelayById(db, next.relayId as string)?.hops).toBe(1);
   });
 
   it('the answer PM was handed names the relay it closed (the guard reads that row)', async () => {
-    const first = await ask(1, false);
-    if (!first.ok) throw new Error('setup');
+    const first = await ask(1);
+    if (first.relayId === undefined) throw new Error('setup');
     const [, params] = sendUserMessage.mock.calls[0] as [unknown, { requestId?: string }];
-    expect(params.requestId).toBe(relayRequestId(first.relay.id));
+    expect(params.requestId).toBe(relayRequestId(first.relayId));
   });
 });

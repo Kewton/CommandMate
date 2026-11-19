@@ -22,7 +22,7 @@ relayWatch:
     - { worktreeId: mycodebranchdesk, instanceId: claude-3 }
   pendingMinutes: 60     # 既定 60（1〜1440）
   screenMinutes: 20      # 既定 20（1〜1440）
-  notifyNoRelay: false   # 検査 1 を PM へ知らせるか。既定 false（記録だけ。§5.1）
+  notifyNoRelay: true    # 検査 1 を PM へ知らせるか。キーを省いた既定は false（記録だけ）。リポジトリの設定は #4420 の後 true（§5.1）
   # url: http://localhost:3000   # 省略時 http://localhost:${CM_PORT:-3000}。localhost 以外は exit 2（token を送るため）
 ```
 
@@ -41,7 +41,7 @@ relayWatch:
 - relay の無い依頼 = 依頼の行に、`from = pm`・`to = その受け手` の relay が結び付かない。結び付き: `|inputBoundaryAt − 行の時刻| ≤ 5 秒`、`inputBoundaryAt` が無い古い relay は `createdAt ≤ 行の時刻 ≤ createdAt + 120 秒`
 - 突き合わせる relay: 今の `awaiting`・`held`・`closedBlocked`、PM の履歴（直近 200 行）の `relay:`／`relay-sys:` の ID を 1 本ずつ読んだもの、前の tick の記録が覚えている relay（26 時間）。開いたまま 15 分以上生きた relay は tick が見て覚え、15 分より早く閉じた relay は返事が PM の履歴に残る
 - 0 件は `unobserved`（「未観測」。0 件の確定ではない）。受け手の履歴を読めなければ `unknown`
-- **当面は記録だけで、知らせない**（§5.1）。PM は #4420 が入るまで素の `send` を使うため、知らせると毎回の誤報になる
+- #4420 が入るまでは記録だけで知らせなかった（§5.1）。#4420 の後、リポジトリの設定（`notifyNoRelay: true`）で知らせる
 
 ### 4.2 進まない relay（`stall`）
 - `from = pm` で `state: pending`、`inputBoundaryAt`（無ければ `createdAt`）から `pendingMinutes` 以上、かつ受け手の画面が `screenMinutes` 以上変わらない
@@ -93,7 +93,7 @@ relayWatch:
 
 - 本体（API・relay・DB）は変えていない。この保証は上の既存の振る舞いに依る。試験はその振る舞いの置き場所（route の順序・send-role の条件・claude の送信）を読んで、変わったら落ちるようにした
 
-### 5.1 検査 1 は #4420 まで記録だけ（人の決定・PM 経由）
+### 5.1 検査 1 は #4420 まで記録だけ（人の決定・PM 経由）。#4420 の後に戻した
 
 - 検査 1（relay の無い依頼）は、#4420（relay 本体の直し・段 7）が入るまで**知らせない・記録だけ**にする。当面 PM は素の `send` で依頼するので、知らせると毎回の誤報になる。検査 2（STALL）と検査 3（保留・期限切れ）は今のとおり知らせる
 - 記録: 見張りの行の `checks.noRelay` に今までどおり残る。知らせていない鍵は tick ごとに `notice.recordOnly` に入り、`notice.keys`（送る鍵）には入らない。検査 1 だけが新しいときは `notice.why: "record-only"` で、送らない
@@ -101,6 +101,7 @@ relayWatch:
 - **戻し方（1 か所）**: #4420 が入った後、`.commandmate/flow.yaml` の `relayWatch.notifyNoRelay` を `true` にする。コードは変えない。キーを省いたときの既定は `scripts/flow/config.mjs` の `NO_RELAY_TOLD_BY_DEFAULT`（今は `false`）
 - 戻した最初の tick では、その時点で続いている（直近 24 時間の）検査 1 の件がまとめて 1 行で知らされる（5 件まで名前、残りは件数）。その後は今までどおり 1 回だけ
 - 送信は既存の `POST /api/worktrees/:pm/send` を `relay-io.mjs` から直接呼ぶ。レーン a（pm-send）の入口には依存しない（a が無くても見張りと試験は完結する）
+- **戻した（#4418 レーン a、#4420 の後）**: `.commandmate/flow.yaml` の `relayWatch.notifyNoRelay` を `true` にした。コード（`NO_RELAY_TOLD_BY_DEFAULT` は `false` のまま）は変えていない。#4420 で返事の後の再依頼が止まらなくなり、PM は `pm-send.ts`（常に relay つき）で送るので、relay の無い依頼は誤報でなく見るべき件になった。試験は `relay-watch-4418.test.ts` の「the repository flow.yaml tells check 1 since #4420」と「#4418 (c)」（リポジトリの flow.yaml で tick が 1 回知らせる）
 
 ## 6. 記録の形（既存の読み手を壊さない）
 

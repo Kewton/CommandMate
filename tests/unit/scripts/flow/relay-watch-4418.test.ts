@@ -347,12 +347,24 @@ describe('#4418 check 1 is recorded, not told, until #4420 (design §5.1)', () =
     expect(w.io.err.join('\n')).toContain('relayWatch.notifyNoRelay');
   });
 
-  it('the repository flow.yaml keeps check 1 record-only', () => {
+  it('the repository flow.yaml tells check 1 since #4420 (switched back, design §5.1); the code default stays record-only', () => {
     const repoRoot = path.resolve(__dirname, '../../../..');
     const raw = readRawFlowConfig(repoRoot) as { settings?: { relayWatch?: { notifyNoRelay?: unknown } } };
     expect(raw.settings?.relayWatch).toBeDefined();
-    expect(raw.settings?.relayWatch?.notifyNoRelay ?? NO_RELAY_TOLD_BY_DEFAULT).toBe(false);
+    expect(raw.settings?.relayWatch?.notifyNoRelay).toBe(true);
     expect(NO_RELAY_TOLD_BY_DEFAULT).toBe(false);
+  });
+
+  it('#4418 (c) with the repository flow.yaml, tick tells the PM about a request with no relay (once)', () => {
+    const repoYaml = fs.readFileSync(path.resolve(__dirname, '../../../../.commandmate/flow.yaml'), 'utf8');
+    const w = world({ yaml: repoYaml });
+    const s = snapshot({ leader: [msg('m1', AT - 40 * MIN)] });
+    expect(w.tick(AT, s)).toBe(0);
+    expect(w.tick(AT + 15 * MIN, s)).toBe(0);
+    expect(notices(w)).toHaveLength(1);
+    expect(String(notices(w)[0].input.text)).toContain('relay なしの依頼');
+    expect(lastWatch(w).notice.recordOnly).toEqual([]);
+    expect(lastWatch(w).reported).toContain('no-relay:m1');
   });
 
   it('lane b stands alone: the watch imports nothing outside scripts/flow and node: (no pm-send entry)', () => {

@@ -18,40 +18,27 @@ function section(doc: string, heading: string): string {
 
 const CLOSING = /最後の行は `?DONE:.*`?WAIT:.*`?STOP:/;
 
-describe('docs/orchestrate/team.md (#4418)', () => {
-  const team = read('docs/orchestrate/team.md');
+describe('docs/design/pm-send-relay-4418.md after #4420', () => {
+  const design = read('docs/design/pm-send-relay-4418.md');
 
-  it('§3: PM sends only through pm-send.ts, with --note, and the brief closes with DONE / WAIT / STOP', () => {
-    const s3 = section(team, '## 3. PM から開発リーダーへのブリーフ');
-    expect(s3).toContain('npx tsx scripts/orchestrate/pm-send.ts <worktree-id> --instance <id> --note "<待つもの>" "<本文>"');
-    expect(s3).toContain('--reply-to self --note');
-    expect(s3).toMatch(/`--note` が無い・空なら exit 2 で何も送らない/);
-    expect(s3).toMatch(CLOSING);
-    expect(s3).toContain('WAIT: <了承・判断待ちの内容>');
+  it('the re-request after a relayed answer goes through; the ceiling is 10 replies in 30 minutes (RELAY_HOPS_EXCEEDED)', () => {
+    const s = section(design, '## 返事を受けた後の再依頼');
+    expect(s).toContain('#4420 で解消');
+    expect(s).toMatch(/旗なしで通り/);
+    expect(s).toContain('RELAY_HOPS_EXCEEDED');
+    expect(s).toMatch(/直近 30 分.*10 本/);
+    expect(s).toMatch(/PM は多くの相手.*10 本に当たりうる/);
+    expect(s).toMatch(/素の send には落とさない/);
+    expect(s).toMatch(/exit をそのまま返す/);
+    expect(s).toMatch(/待つか人に返す/);
+    // The old fact is history, not the instruction.
+    expect(s).not.toMatch(/今の `pm-send` は付けないので、\*\*返事を受けた後の 2 回目の送信で止まる/);
   });
 
-  it('§3: the re-request after a relayed answer is named as not working today (Codex P1)', () => {
-    const s3 = section(team, '## 3. PM から開発リーダーへのブリーフ');
-    expect(s3).toContain('RELAY_CHAIN_BLOCKED');
-    expect(s3).toContain('人が PM に 1 行入れると戻る');
-    expect(read('docs/design/pm-send-relay-4418.md')).toContain('## 返事を受けた後の再依頼');
-  });
-
-  it('§4 step 2: claude-3 is sent to through pm-send.ts with the token, not claude3-reserve send directly', () => {
-    const s4 = section(team, '## 4. agent-health の依頼とブリーフが重なったとき');
-    const step2 = s4.split('\n').find((l) => l.startsWith('2. **送信**')) ?? '';
-    expect(step2).toContain('npx tsx scripts/orchestrate/pm-send.ts mycodebranchdesk --instance claude-3 --token <token> --note "<待つもの>" "<本文>"');
-    expect(step2).toContain('--reply-to self --note');
-    expect(s4).toContain('`claude-3` へは `npx tsx scripts/orchestrate/pm-send.ts … --token <token>` だけで送る');
-    // The old form (a send with no note) is no longer the instruction.
-    expect(s4).not.toMatch(/`send --token <token> "<本文>"`/);
-  });
-
-  it('§8: requests close with DONE / WAIT / STOP and are sent through pm-send.ts', () => {
-    const s8 = section(team, '## 8. 依頼ごとの完了の見張り');
-    expect(s8).toContain('pm-send.ts');
-    expect(s8).toMatch(CLOSING);
-    expect(s8).toContain('`WAIT:`');
+  it('the relay watch tells check 1 again (flow-relay-watch-4418.md §5.1)', () => {
+    const watch = read('docs/design/flow-relay-watch-4418.md');
+    expect(watch).toMatch(/戻した（#4418 レーン a、#4420 の後）/);
+    expect(read('.commandmate/flow.yaml')).toMatch(/^  notifyNoRelay: true$/m);
   });
 });
 

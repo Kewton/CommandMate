@@ -26,37 +26,36 @@ PM の依頼の返しが受け手の記憶頼みで約 8 時間止まった。PM
 - `tests/unit/scripts/orchestrate/pm-send-4418.test.ts`: `--note` なし・空は exit 2 で exec / spawn が 0 回。陽性対照（argv に `--reply-to self` と `--note`）。claude-3 の token の規則。`claude3-reserve send` も同じ。`sendArgv` が変わらない
 - `tests/integration/pm-send-relay-delivery-4418.test.ts`: 入口の argv が求める relay（PM → 送り先、送信に結合）を開き、受け手が送り返さずに手番を終えても PM の入力欄へ配送される
 - 同じ単体試験の「the rule and the send use the same resolved target」: 旧 ID でも claude-3 に token が要る（陽性対照: token ありなら予約を通る）、送る argv が解決済みの worktree とインスタンス、解決できなければ何も送らない
-- 同じ結合試験の「PM asks again after a relayed answer」: P1 の事実（旗なしは 2 回目で `RELAY_CHAIN_BLOCKED`、旗ありは hops 1・2・3 の次で `RELAY_HOPS_EXCEEDED`、人の入力で 1 に戻る）
-- `tests/unit/docs/pm-send-relay-docs-4418.test.ts`: team.md・orchestrate.md・雛形が新しい入口と `WAIT:` を指す
+- 同じ結合試験の「PM asks again after a relayed answer (Codex P1, after #4420)」: 送信は入口（`pm-send`）を通し、その argv を CLI と同じく実の relay で開く。(a) 送る → 返事 → 次を送るが旗なしで 3 回通り毎回 hops 1（#4420 の前の develop では 2 回目が `RELAY_CHAIN_BLOCKED`）、(b) 窓の中で 10 本の返事を受けた後の `pm-send` は exit 2・送信 1 回（relay つき）だけ・受け手に本文が届かない・`RELAY_ROUNDS_REFUSED_NOTICE` を出す
+- `tests/unit/scripts/flow/relay-watch-4418.test.ts` の (c): リポジトリの `.commandmate/flow.yaml`（`notifyNoRelay: true`）で、tick が relay の無い依頼を PM へ 1 回知らせる
+- `tests/unit/docs/pm-send-relay-docs-4418.test.ts`: orchestrate.md・雛形・この設計メモが新しい入口と `WAIT:`・#4420 の後の事実を指す。team.md を固定する試験（`tests/unit/docs/pm-send-relay-team-4418.test.ts`）は team.md の差分と一緒に後から当てる（§残り）
 
-## 返事を受けた後の再依頼（Codex のレビューの P1。未解決・本体の変更が要る）
+## 返事を受けた後の再依頼（Codex のレビューの P1。#4420 で解消）
 
-PM が relay で返事を受け、人の入力を挟まずに `pm-send` で再指示・次の依頼を送ると、今は送れない。本体を変えずに何往復でも続ける方法は無かったので、入口は直していない。
+PM が relay で返事を受け、人の入力を挟まずに `pm-send` で再指示・次の依頼を送ると、#4420 の前は 2 回目で `RELAY_CHAIN_BLOCKED`（exit 2・未送信）だった。#4420（`docs/design/relay-reply-not-parent-4420.md`。往復の数え方は同 §3 の案 Q）で本体が直り、入口は旗を足さずにそのまま送れる。
 
-### 調べた事実（試験 `tests/integration/pm-send-relay-delivery-4418.test.ts` の 2 つ目の describe が固定）
+### 今の事実（試験 `tests/integration/pm-send-relay-delivery-4418.test.ts` の 2 つ目の describe が固定）
 
-- 返事の配送は PM の入力欄に `messageType: 'relay'`・`request_id = relay:<PM が開いた relay の id>` の user 行を書く（`src/lib/relay/relay-delivery.ts:616-620`）
-- 次に PM が relay を開くとき、PM の最新の user 行（5 ターンの窓。`src/lib/relay/relay-service.ts:94`）が relay の行で、それより新しい行が echo だけなら、その relay の `hops` が親になる（`relay-service.ts:170-185`、`:220`）
-- 親があると `--allow-relay-chain` 無しは `RELAY_CHAIN_BLOCKED`（`src/lib/relay/relay-policy.ts:132-139`）。今の `pm-send` は付けないので、**返事を受けた後の 2 回目の送信で止まる**（exit 2・未送信）
-- `--allow-relay-chain` を付けると `hops = 親 + 1`（`relay-policy.ts:130`）。上限は `MAX_RELAY_HOPS = 3`（`:46`、`:142-147`）。PM の 1 回目が 1、返事の後の再依頼が 2、その次が 3、**4 回目の送信（3 回目の再依頼）で `RELAY_HOPS_EXCEEDED`**
-- 人が PM に普通の行を入れると連鎖は切れ、次は 1 から（`relay-service.ts:180`、既存の試験 `tests/unit/lib/relay/relay-parent-hops-2387.test.ts:223`）
-- 配送済みの relay の行を消す API は無い（`DELETE FROM session_relays` は src に無い）。親が消えたときの fail-open（`relay-service.ts:183-185`）は使えない
+- 返事の配送は PM の入力欄に `messageType: 'relay'`・`request_id = relay:<PM が開いた relay の id>` の user 行を書く。その relay の `from` は PM 自身なので、次に PM が開く relay の親に数えない（#4420）。送る → 返事 → 次を送る は旗なしで通り、毎回 hops 1
+- 止めるのは往復の上限だけ: 直近 30 分（`RELAY_ROUNDS_WINDOW_MS`）に受けた自分の relay の返事が 10 本（`MAX_RELAY_ROUNDS`）以上なら `RELAY_HOPS_EXCEEDED`（`src/lib/relay/relay-policy.ts`。`--allow-relay-chain` でも外れない）。数えるのは依頼元（PM のセッション）単位の合計で、相手ごとではない
+- **PM は多くの相手（開発リーダー・ジャッジ・イネーブラー）から返事を受けるので、この 10 本に当たりうる**。3 分に 1 往復より速い往復が 30 分続くと当たる
+- 人が PM に普通の行を入れても往復の数は 0 に戻らない（台帳の時刻だけで数える）。戻るのは返事が 30 分の窓から外れたとき
 
-### 入口だけでは採らなかったこと
+### 往復の上限で断られたときの入口
 
-- `--allow-relay-chain` を入口が常に付ける: 人の入力 1 回あたり 3 回まで延びるだけで「何往復でも」にならない。しかも PM が転送役になる連鎖（他人の返事をそのまま別の宛先へ流す）も通してしまう
-- 返事の後に PM 自身へ普通の行を送って連鎖を切る: 人の入力を装って連鎖の防止を骨抜きにする
+- `commandmate send` は relay の拒否を `Error: <message>` で stderr に出し exit 2 で終わる（コードは出ない。`src/cli/commands/relays.ts` の `registerRelay`）。`pm-send` は送信の stderr を流しながら末尾を持ち、往復の上限の文面（`… replies to its relays in the last <n> minutes; the limit is <n>`）なら、`RELAY_ROUNDS_REFUSED_NOTICE`（何も送っていない・素の send には落とさない・待つか人に返す）を 1 行足して、**exit をそのまま返す**
+- 素の send（relay 無し）で送り直さない（L1。不変条件 I5）。`--allow-relay-chain` を付けて送り直すこともしない（上限は旗で外れない）
+- claude-3 宛て（`claude3-reserve.ts send` 経由）も同じ。`claude3-reserve` の送信の runner は stderr を捨てるので、`pm-send` が stderr を流して持つ runner（`reserveSpawn`）を渡す（試験が `exec` / `spawnExec` を差し込んだときは渡さない）
+- 文面の照合は `decideRelayCreation` の実の文面で試験が固定する（`pm-send-4418.test.ts` の「pm-send after the relay pace ceiling」）。深さの上限（同じ `RELAY_HOPS_EXCEEDED`）は `pm-send` が `--allow-relay-chain` を付けないので起きず、照合もしない
+
+### 入口で採らなかったこと（#4420 の前に検討した案。今も採らない）
+
+- `--allow-relay-chain` を入口が常に付ける: 今は不要。付けても往復の上限は外れず、PM が転送役になる連鎖（他人の返事をそのまま別の宛先へ流す）を通すだけ
+- 返事の後に PM 自身へ普通の行を送る: 人の入力を装う。#4420 の後は往復の数も戻らないので効きもしない
 - 拒否されたら relay 無しで送り直す: L1（PM の送信は必ず relay つき）を壊す
-
-### 取りうる案（本体の変更。別 Issue）
-
-1. **自分が開いた relay の返事は親にしない**: `findParentRelayHops` で親の relay の `from` が依頼元と同じ（自分の問いへの返事）なら連鎖と見なさない。問い→返事→問いは転送ではない。ただしエージェント同士の往復（A が B に問い続ける）も無制限になるので、2 と組み合わせる
-2. **PM に限る**: 1 の扱いを、ロール（agent-roles の PM ロールなど）または送信時の明示の旗で、PM のセッションだけに効かせる。連鎖の防止の目的（エージェント同士の無限往復を止める）は PM 以外ではそのまま残る。PM は人の代理で依頼を出す側で、往復の回数は PM の判断（team.md の止まる条件）で止める
-3. **同じ相手との往復の回数に別の上限を持つ**（例: 人の入力なしで 20 往復まで）: 1 の無制限を数で縛る
-
-推奨は 1 + 2（PM のセッションでだけ、自分の問いへの返事を親にしない）。
 
 ## 残り
 
 - PM が素の `commandmate send` を打つことを仕組みで止めるのは、引き続き採らない（team.md §4。共有の設定のフックは全 Claude セッションに効くため）
-- `claude3-reserve` の送信は `spawn-exec.ts` が stderr を捨てるので、claude-3 宛ての `Relay registered: <id>` と mem の拒否の文面は PM に見えない（終了コードは返る）
+- `claude3-reserve.ts send` を直接打つと、`spawn-exec.ts` が stderr を捨てるので claude-3 宛ての `Relay registered: <id>` と拒否の文面は見えない（終了コードは返る）。`pm-send` 経由なら stderr を流す runner を渡すので見える
+- team.md の差分（§3 の往復の上限の 1 文を含む）と team.md を固定する試験は、claude-8 の割り当て規則の PR のマージ後にリーダーの指示で最後のコミットとして当てる（それまで team.md は develop のまま）
