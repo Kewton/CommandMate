@@ -2836,7 +2836,7 @@ With `--require-roles` a role that cannot be read fails the command instead of b
 
 ### `--json` shapes
 
-Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1. A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
+Failures included, on stdout (the same sentence goes to stderr). A failure with no role code of its own says `internal_error`, `request_failed`, `no_response` (no server), `role_api_unavailable` (a server older than roles) or `unexpected_error`, with the exit codes below. A missing argument or unknown option is commander's: stderr only, exit 1 — except a missing `<tool>` of `roles default`, which is exit 2 (it was 1 before Issue #4473). A request changing a role setting (`roles add` / `edit` / `rm` / `default`, `set-role`, `add --role`) that ends in a 5xx or no answer may have saved, so it says that is not known and how to check (`--json`: `saved: "unknown"` and `check`). A 4xx saved nothing. `send` has no `--json`; `send --register --role` and `--contract --role` print the same sentence on stderr.
 
 | Command | Shape |
 |---------|-------|

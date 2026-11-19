@@ -31,10 +31,8 @@ const read = (file: string): string => fs.readFileSync(path.join(root, file), 'u
 const expected = CLI_TOOL_IDS.filter((id) => REPLY_COMMAND_TOOLS[id]).sort();
 
 describe('the three tables name the same tools (I4)', () => {
-  it('reply-ledger TRANSCRIPT_READER_TOOLS differs only by opencode-v2 (src/cli/utils is outside this contract; follow-up)', () => {
-    // It only feeds brief's `latestTurnOf`, never `reply`. When the follow-up adds
-    // opencode-v2 there, change this to `toEqual(expected)`.
-    expect([...TRANSCRIPT_READER_TOOLS].sort()).toEqual(expected.filter((id) => id !== 'opencode-v2'));
+  it('reply-ledger TRANSCRIPT_READER_TOOLS is the same set (opencode-v2 included, Issue #4473)', () => {
+    expect([...TRANSCRIPT_READER_TOOLS].sort()).toEqual(expected);
   });
   it('REPLY_COMMAND_TOOLS = relay-bound-reply requiresTurnRow', () => {
     expect(CLI_TOOL_IDS.filter((id) => requiresTurnRow(id)).sort()).toEqual(expected);

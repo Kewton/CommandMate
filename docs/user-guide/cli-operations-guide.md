@@ -3701,7 +3701,7 @@ commandmate roles default codex --repo . --role reviewer
 
 ### `--json` の形
 
-失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。ロールを変える要求（`roles add` / `edit` / `rm` / `default`、`set-role`、`add --role`）が 5xx か応答なしで終わると、保存された可能性があるので、保存の有無が不明であることと確かめるコマンドを伝えます（`--json` は `saved: "unknown"` と `check`）。4xx は保存していません。`send` に `--json` はありませんが、`send --register --role` と `--contract --role` も同じ文を stderr に出します。
+失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。ただし `roles default` の `<tool>` 不足は exit 2 です（Issue #4473 より前は 1）。ロールを変える要求（`roles add` / `edit` / `rm` / `default`、`set-role`、`add --role`）が 5xx か応答なしで終わると、保存された可能性があるので、保存の有無が不明であることと確かめるコマンドを伝えます（`--json` は `saved: "unknown"` と `check`）。4xx は保存していません。`send` に `--json` はありませんが、`send --register --role` と `--contract --role` も同じ文を stderr に出します。
 
 | コマンド | 形 |
 |---------|----|

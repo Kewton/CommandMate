@@ -196,7 +196,7 @@ exit 10 にもならない）。
   最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、
   その結果を記録する。時刻が読めないときは推測せず、記録の要約に `run-start=unknown` / `last-stop=unknown` と残す
 - **検証が `already in progress` で始められないとき**（再指示の前の古い run がまだ動いている、#3883）: その run（`(run <id>)`）が `running` でなくなるまで
-  30 秒ごとに `verify show` で待ち（3600 秒まで）、検証を始め直す（3 回まで）。裁定はこの呼び出しが始めた run のもの。記録の要約に `waited-for=run <id>` と残す
+  30 秒ごとに `verify show` で待ち（`running` と読める間は待つ。やめるのはサーバーが 1800 秒答えないときと上限に達したときだけ。exit-codes.md の `waited-for`）、検証を始め直す（3 回まで）。裁定はこの呼び出しが始めた run のもの。記録の要約に `waited-for=run <id>` と残す
 - **実行ごとのファイル**（#3883）: ログは呼び出しごとに新しい名前を排他的に取る（1 回目は `wait-<issue>.log`、同じ work item の 2 回目からは `wait-<issue>.a<n>.log`。
   `--item <名前>` を付けると `wait-<issue>-<名前>.log`）。`.verify.log` / `.reverify.log` / `.exit` はその名前から作るので、同じ Issue の 2 本の PR や
   再試行がログと終了コードを取り合わない（`.exit` にはこの呼び出しだけが知る印が付き、ほかの書き手の `.exit` は読まない）。既にある `--log` を渡すと exit 2。
