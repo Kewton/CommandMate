@@ -765,7 +765,8 @@ function closeRelayRefusedByToolPolicy(
  * a relay still waiting for its worker's turn would otherwise stay open until a
  * reply or its deadline. A separate read of the open relays, so the listing and
  * the delivery of every other relay stay as they were; one the policy allows
- * is not touched. Never throws.
+ * is not touched. Never throws. Run at the start and at the end of every pump
+ * (Issue #4456).
  */
 function cancelOpenRelaysRefusedByToolPolicy(db: Database.Database): void {
   let ids: string[];
@@ -1102,6 +1103,10 @@ export async function pumpRelayDeliveries(): Promise<void> {
       }
       if (!globalThis.__relayPumpAgain) break;
     }
+    // Issue #4456: and after the last pass, so a relay refused while a delivery
+    // awaited (a switched tool, a declaration taken back) is not left open
+    // until the next pump. Sends nothing and claims nothing.
+    cancelOpenRelaysRefusedByToolPolicy(db);
   } catch (error) {
     logger.warn('relay-pump-failed', {
       error: error instanceof Error ? error.message : String(error),
