@@ -200,13 +200,25 @@ node scripts/orchestrate/run-log.mjs record-verify --run-dir "workspace/orchestr
   ゲートごとの結果は note の `gates=<id>:<ok|skip|fail>,…`（`passed`→ok、`skipped`→skip、ほか→fail）。合否の裁定は今までどおり verify の run（直の実行の
   ゲートの結果を読み替えて合格にしない、team.md §10-4）
 - **終わっていない run は記録しない**: `running`・`queued`（と知らない status）は exit 3 で断る（結果を決めない）。終わってから呼び直す
-- **別の run を取り違えない**: run の `worktreeId` が `--wt` でない・答えた run の id が違う・`--task` と run の task が違う・同じ work item に同じ run が既に記録済み
-  （wait-verify の行の `run=<id>` も含む）なら exit 4 で断る。run は HEAD を持たないので、HEAD は記録する時点の worktree の HEAD とし、そのコミットが **run の開始より後**
-  なら（run は前の状態を見た。wait-verify の `committedAfter` と同じ判断）、または `--head` と違えば exit 4 で断る
-- **env は記録する時点の manifest**（note に `env-at=record`）: 直の実行には開始時の manifest が無く、後から開始時刻の状態を作り直せないため。`env-manifest.mjs` の
-  `takeManifest` / `manifestHash` を使い、`verify-<work item>.run<id>.env.json` の `end` に置いて、記録の `key`（`<issues>:<work item>:<task|->:run<id>`）と
-  `env=<hash>` を note に書く。precheck / publish / merge の照合（`verifyEnvState`）は wait-verify の行と同じに読む。run の後で環境を変えたなら、記録の前に流し直す
-- note の形: `direct=verify run=<id> run-status=<status> gates=… key=<key> env-at=record env=<hash>`。wait-verify の行の形は変えていない
+- **別の run を取り違えない**: run の `worktreeId` が `--wt` でない・答えた run の id が違う・`--task` と run の task が違う・`--worktree` が
+  `commandmatedev ls --json` の `--wt` の path と realpath で一致しない・同じ work item に同じ run が既に記録済み（wait-verify の行の `run=<id>` も含む）なら
+  exit 4 で断る。`--task` は照合にだけ使い、run に task が無いときも記録には書かない
+- **head は、その run が確かめた木と同じだと言えるときだけ書く（fail-closed）**: run は HEAD を持たないので、HEAD は記録する時点の worktree の HEAD とし、
+  次をすべて満たすときだけ書く。言えない・読めないときは exit 4 で断る
+  - 作業ツリーに未コミットの変更が無い（`dirty-tree.mjs` の `dirtyPaths`。`.commandmate/tasks/`・`dev-reports/` は数えない。読めなければ断る）
+  - HEAD のコミットが run の開始より前で、**HEAD が run の開始より後に動いていない**: HEAD の reflog の最新の項目の時刻
+    （`git log -g -1 --date=unix --format=%gd HEAD`。`%ct` はコミットの時刻なので使わない）が開始より前。reflog は秒単位なので、開始と同じ秒の移動は後と数える。
+    古いコミットへの `reset`・`checkout`・`merge --ff-only` もこれで断る。reflog が読めなければ断る
+  - `--head` を付けたなら、それが HEAD
+  - 限界: run の間だけ未コミットの変更があり、記録の前に消した（HEAD を動かさずに戻した）木は見分けられない。直に流すときは、コミットした木で流す
+- **env は記録する時点の manifest**（note に `env-at=record`）: 直の実行には開始時の manifest が無く、後から開始時刻の状態を作り直せないため。そのかわり、
+  manifest の入力（`env-manifest.mjs` の `manifestInputs`: `~/.claude/settings.json`・`.claude/settings.local.json`・`package-lock.json`・`node_modules` と
+  その実体・`node_modules/.package-lock.json`）のどれかの mtime が run の開始より後なら exit 4 で断る（記録時の env が run の env と同じと言えない）。
+  `takeManifest` / `manifestHash` で取った manifest を `verify-<work item>.run<id>.env.json` の `end` に置き、記録の `key`（`<issues>:<work item>:<task|->:run<id>`）と
+  `env=<hash>` を note に書く。precheck / publish / merge の環境の照合（`verifyEnvState`）は wait-verify の行と同じに読む。追記に失敗したら env の file は消す
+- note の形: `direct=verify run=<id> run-status=<status> gates=… key=<key> env-at=record env=<hash>`。wait-verify の行の形は変えていない。
+  `gates=` は読む人のための欄で、precheck・merge-pr は wait-verify の `passed=` を読むので、**直の記録は `verify=ok` の行として読まれるがゲートの再利用はされない**
+  （precheck は手元の検証をやり直し、merge-pr は CI の `Unit Tests` を待つ）
 - exit code: 0 記録した / 1 run・HEAD を読めない / 2 引数の誤り / 3 run が終わっていない / 4 別の run・記録済み（docs/orchestrate/exit-codes.md#1-5-record-verify-の-exit-code）
 
 ## 1-5 plan.md の対象 Issue 表の例

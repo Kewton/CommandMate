@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   RECORD_VERIFY_EXIT,
@@ -28,6 +29,11 @@ const STARTED = '2026-11-19T01:00:00.000Z';
 const FINISHED = '2026-11-19T01:10:00.000Z';
 const COMMITTED_BEFORE = '2026-11-19T00:50:00+00:00';
 const COMMITTED_AFTER = '2026-11-19T01:05:00+00:00';
+/** HEAD's last move (reflog, epoch seconds): before the run by default. */
+const MOVED_BEFORE = String(Date.parse(COMMITTED_BEFORE) / 1000);
+const MOVED_AFTER = String(Date.parse('2026-11-19T01:03:00Z') / 1000);
+/** Every env input is dated before the run, so the record-time manifest is the run's (#4482 P2-1). */
+const OLD = new Date('2026-11-18T00:00:00Z');
 
 let base: string;
 let runDir: string;
@@ -42,6 +48,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(worktree, 'package-lock.json'), '{"lockfileVersion":3}\n');
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"model":"opus"}\n');
+  for (const file of [path.join(worktree, 'package-lock.json'), path.join(home, '.claude', 'settings.json')]) fs.utimesSync(file, OLD, OLD);
 });
 afterEach(() => {
   fs.rmSync(base, { recursive: true, force: true });
@@ -66,18 +73,44 @@ function view(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** A fake `run`: `verify show <id> --json` prints `shown`; git answers with `head` and `committedAt`. */
+type FakeOptions = {
+  shown?: unknown;
+  head?: string;
+  committedAt?: string;
+  showStatus?: number;
+  /** `git status --porcelain` output; null: git status fails. */
+  porcelain?: string | null;
+  /** HEAD's last reflog entry in epoch seconds (`git log -g -1 --date=unix --format=%gd HEAD` → `HEAD@{<n>}`); null: unreadable. */
+  movedAt?: string | null;
+  /** `ls --json` rows; null: ls fails. Default: `WT` at the test's worktree. */
+  worktrees?: Array<{ id: string; path: string }> | null;
+};
+
+/**
+ * A fake `run`: `verify show <id> --json` prints `shown`; `ls --json` lists `worktrees`; git answers
+ * with `head`, `committedAt`, `porcelain` and `movedAt`.
+ */
 function fakeRun({
   shown = view() as unknown,
   head = HEAD_A,
   committedAt = COMMITTED_BEFORE,
   showStatus = 0,
-}: { shown?: unknown; head?: string; committedAt?: string; showStatus?: number } = {}) {
+  porcelain = '',
+  movedAt = MOVED_BEFORE,
+  worktrees,
+}: FakeOptions = {}) {
   const calls: string[][] = [];
   const run = (command: string, args: string[]) => {
     calls.push([command, ...args]);
+    const fail = { status: 128, stdout: '', stderr: 'fatal: nope' };
     if (command === 'git' && args.includes('rev-parse')) return { status: 0, stdout: `${head}\n`, stderr: '' };
+    if (command === 'git' && args.includes('status')) return porcelain === null ? fail : { status: 0, stdout: porcelain, stderr: '' };
+    if (command === 'git' && args.includes('-g')) return movedAt === null ? fail : { status: 0, stdout: movedAt === '' ? '' : `HEAD@{${movedAt}}\n`, stderr: '' };
     if (command === 'git' && args.includes('log')) return { status: 0, stdout: `${committedAt}\n`, stderr: '' };
+    if (args[0] === 'ls' && args.includes('--json')) {
+      const rows = worktrees === undefined ? [{ id: WT, path: worktree }] : worktrees;
+      return rows === null ? { status: 1, stdout: '', stderr: 'server down' } : { status: 0, stdout: JSON.stringify(rows), stderr: '' };
+    }
     if (args[0] === 'verify' && args[1] === 'show') {
       return showStatus === 0
         ? { status: 0, stdout: JSON.stringify(shown), stderr: '' }
@@ -90,7 +123,7 @@ function fakeRun({
 
 const NOW = new Date('2026-11-19T01:20:00.000Z');
 
-function record(options: Record<string, unknown> = {}, runOptions: Parameters<typeof fakeRun>[0] = {}) {
+function record(options: Record<string, unknown> = {}, runOptions: FakeOptions = {}) {
   const { run } = fakeRun(runOptions);
   return recordVerifyRun(
     { runDir, issues: '4482', issue: '4482', wt: WT, worktree, runId: '812', cli: 'commandmatedev', ...options },
@@ -206,8 +239,22 @@ describe('record-verify: what it refuses, writing nothing (#4482 I2 / I3)', () =
     { name: '--task that is not the run’s task', runOptions: {}, options: { taskId: 'task-2' }, exit: 'refused', reason: /task-2/ },
     { name: 'a run that cannot be read', runOptions: { showStatus: 4 }, options: {}, exit: 'unreadable', reason: /812/ },
     { name: 'a run that is not JSON', runOptions: { shown: 'not json' }, options: {}, exit: 'unreadable', reason: /812/ },
+    // #4482 review 1 (P1-1, P2-1, P2-3, P3-2, P3-3): the HEAD is written only when it is the tree the run verified.
+    { name: 'an answer that is not a run ({ error })', runOptions: { shown: { error: 'boom' } }, options: {}, exit: 'unreadable', reason: /812/ },
+    { name: 'an answer that is not a run ({})', runOptions: { shown: {} }, options: {}, exit: 'unreadable', reason: /812/ },
+    { name: 'a run without startedAt', runOptions: { shown: view({ startedAt: undefined }) }, options: {}, exit: 'refused', reason: /start/ },
+    { name: 'a run whose startedAt does not parse', runOptions: { shown: view({ startedAt: 'yesterday' }) }, options: {}, exit: 'refused', reason: /start/ },
+    { name: 'uncommitted changes in the worktree', runOptions: { porcelain: ' M src/a.ts\n?? new.txt\n' }, options: {}, exit: 'refused', reason: /uncommitted.*src\/a\.ts/ },
+    { name: 'a worktree whose status cannot be read', runOptions: { porcelain: null }, options: {}, exit: 'refused', reason: /status/ },
+    { name: 'HEAD moved (reset / checkout to an older commit) after the run started', runOptions: { movedAt: MOVED_AFTER }, options: {}, exit: 'refused', reason: /moved after the run started/ },
+    { name: 'HEAD moved within the second the run started', runOptions: { movedAt: String(Date.parse(STARTED) / 1000) }, options: {}, exit: 'refused', reason: /moved after the run started/ },
+    { name: 'a HEAD reflog that cannot be read', runOptions: { movedAt: null }, options: {}, exit: 'refused', reason: /reflog/ },
+    { name: 'a HEAD reflog that is empty', runOptions: { movedAt: '' }, options: {}, exit: 'refused', reason: /reflog/ },
+    { name: '--worktree that is not --wt’s path', runOptions: { worktrees: [{ id: WT, path: '/elsewhere/commandmate-issue-4463' }] }, options: {}, exit: 'refused', reason: /elsewhere/ },
+    { name: '--wt that the CLI does not list', runOptions: { worktrees: [{ id: 'other', path: '/x' }] }, options: {}, exit: 'refused', reason: /not listed/ },
+    { name: 'a worktree list that cannot be read', runOptions: { worktrees: null }, options: {}, exit: 'refused', reason: /ls --json/ },
   ])('$name', ({ runOptions, options, exit, reason }) => {
-    const out = record(options, runOptions as Parameters<typeof fakeRun>[0]);
+    const out = record(options, runOptions as FakeOptions);
     expect(out.exit).toBe(RECORD_VERIFY_EXIT[exit as keyof typeof RECORD_VERIFY_EXIT]);
     expect(out.reason).toMatch(reason);
     expect(readRecords(runDir, '4482').records).toHaveLength(0);
@@ -226,6 +273,144 @@ describe('record-verify: what it refuses, writing nothing (#4482 I2 / I3)', () =
   it('records the same run id for another work item (the run ids are the worktree’s, the record is per item)', () => {
     appendRecord(runDir, '4482', { issue: 4482, stage: 'verify', result: 'ok', head: HEAD_A, item: 'd1', note: 'run=812' });
     expect(record().exit).toBe(RECORD_VERIFY_EXIT.recorded);
+  });
+});
+
+describe('record-verify: the env must be the run’s (#4482 review 1 P2-1)', () => {
+  it.each([
+    ['the global settings.json', () => path.join(home, '.claude', 'settings.json')],
+    ['the lockfile', () => path.join(worktree, 'package-lock.json')],
+    ['the local settings.local.json', () => {
+      const file = path.join(worktree, '.claude', 'settings.local.json');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, '{}\n');
+      return file;
+    }],
+    ['node_modules', () => {
+      const dir = path.join(worktree, 'node_modules');
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    }],
+    ['node_modules/.package-lock.json', () => {
+      const dir = path.join(worktree, 'node_modules');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.utimesSync(dir, OLD, OLD);
+      const file = path.join(dir, '.package-lock.json');
+      fs.writeFileSync(file, '{}\n');
+      return file;
+    }],
+  ])('refuses when %s changed after the run started', (_name, make) => {
+    const file = make();
+    fs.utimesSync(file, new Date('2026-11-19T01:15:00Z'), new Date('2026-11-19T01:15:00Z'));
+    const out = record();
+    expect(out.exit).toBe(RECORD_VERIFY_EXIT.refused);
+    expect(out.reason).toMatch(/changed after the run started/);
+    expect(out.reason).toContain(path.basename(file));
+    expect(readRecords(runDir, '4482').records).toHaveLength(0);
+  });
+
+  it('records when every env input (node_modules included) is older than the run', () => {
+    const dir = path.join(worktree, 'node_modules');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, '.package-lock.json'), '{}\n');
+    fs.utimesSync(path.join(dir, '.package-lock.json'), OLD, OLD);
+    fs.utimesSync(dir, OLD, OLD);
+    expect(record().exit).toBe(RECORD_VERIFY_EXIT.recorded);
+  });
+});
+
+describe('record-verify: --task is not a fact of the run (#4482 review 1 P3-1)', () => {
+  it('does not write --task when the run has no task', () => {
+    const out = record({ taskId: 'task-9' }, { shown: view({ taskId: null }) });
+    expect(out.exit).toBe(RECORD_VERIFY_EXIT.recorded);
+    expect(out.record).toMatchObject({ taskId: null, key: '4482:4482:-:run812' });
+    expect(out.record?.note).not.toContain('task-9');
+  });
+
+  it('writes the run’s task when --task agrees', () => {
+    expect(record({ taskId: 'task-1' }).record).toMatchObject({ taskId: 'task-1' });
+  });
+});
+
+describe('record-verify: the env file goes with the record (#4482 review 1 P3-4)', () => {
+  it('removes the env file when the record cannot be appended', () => {
+    fs.mkdirSync(runDir, { recursive: true });
+    // A read-only run-log file: it reads (no records), and the append after the env file fails.
+    const file = path.join(runDir, 'run-4482.jsonl');
+    fs.writeFileSync(file, '');
+    fs.chmodSync(file, 0o444);
+    expect(() => record()).toThrow();
+    fs.chmodSync(file, 0o644);
+    expect(fs.readdirSync(runDir).filter((name) => name.endsWith('.env.json'))).toEqual([]);
+  });
+});
+
+describe('record-verify against a real git worktree (#4482 review 1 P1-1)', () => {
+  const OLD_DATE = '2020-01-01T00:00:00+00:00';
+  const RUN_START = '2026-11-18T12:00:00.000Z'; // after OLD (the env inputs' time) and the commits, before now
+  const git = (args: string[], env: Record<string, string> = {}) => {
+    const out = spawnSync('git', ['-C', worktree, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    });
+    if (out.status !== 0) throw new Error(out.stderr);
+    return out.stdout.trim();
+  };
+  /** Real git; `verify show` and `ls` faked. */
+  const hybrid = (shown: unknown) => (command: string, args: string[], opts?: { cwd?: string }) => {
+    if (command === 'git') {
+      const out = spawnSync('git', args, { cwd: opts?.cwd, encoding: 'utf8' });
+      return { status: out.status ?? 1, stdout: out.stdout ?? '', stderr: out.stderr ?? '' };
+    }
+    if (args[0] === 'ls') return { status: 0, stdout: JSON.stringify([{ id: WT, path: worktree }]), stderr: '' };
+    return { status: 0, stdout: JSON.stringify(shown), stderr: '' };
+  };
+  let older: string;
+  let newer: string;
+  beforeEach(() => {
+    const dated = { GIT_AUTHOR_DATE: OLD_DATE, GIT_COMMITTER_DATE: OLD_DATE };
+    git(['init', '-q']);
+    fs.writeFileSync(path.join(worktree, '.gitignore'), 'package-lock.json\n');
+    fs.writeFileSync(path.join(worktree, 'f'), '1\n');
+    git(['add', '.'], dated);
+    git(['commit', '-q', '-m', 'a'], dated);
+    older = git(['rev-parse', 'HEAD']);
+    fs.writeFileSync(path.join(worktree, 'f'), '2\n');
+    git(['commit', '-q', '-am', 'b'], dated);
+    newer = git(['rev-parse', 'HEAD']);
+  });
+  const recordReal = () =>
+    recordVerifyRun(
+      { runDir, issues: '4482', issue: '4482', wt: WT, worktree, runId: '812' },
+      { run: hybrid(view({ startedAt: RUN_START })), home, now: NOW }
+    );
+
+  it('records the HEAD the run saw (committed and moved to before the run, clean tree)', () => {
+    const out = recordReal();
+    expect(out.exit).toBe(RECORD_VERIFY_EXIT.recorded);
+    expect(out.record?.head).toBe(newer);
+  });
+
+  it('refuses after HEAD was reset to an older commit (committed before the run, moved after it)', () => {
+    git(['reset', '-q', '--hard', older]);
+    const out = recordReal();
+    expect(out.exit).toBe(RECORD_VERIFY_EXIT.refused);
+    expect(out.reason).toMatch(/moved after the run started/);
+    expect(readRecords(runDir, '4482').records).toHaveLength(0);
+  });
+
+  it('refuses with uncommitted changes', () => {
+    fs.writeFileSync(path.join(worktree, 'f'), '3\n');
+    const out = recordReal();
+    expect(out.exit).toBe(RECORD_VERIFY_EXIT.refused);
+    expect(out.reason).toMatch(/uncommitted/);
+  });
+
+  it('refuses when the reflog is gone', () => {
+    fs.rmSync(path.join(worktree, '.git', 'logs'), { recursive: true, force: true });
+    const out = recordReal();
+    expect(out.exit).toBe(RECORD_VERIFY_EXIT.refused);
+    expect(out.reason).toMatch(/reflog/);
   });
 });
 

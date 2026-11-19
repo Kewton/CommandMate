@@ -26,7 +26,8 @@
  *
  * A verification the leader ran directly has no start manifest at all: run-log.mjs `record-verify`
  * (#4482) keeps the manifest taken when it records (`env-at=record`) as the end manifest of
- * `verify-<work item>.run<id>.env.json`, so verifyEnvState reads it like the others.
+ * `verify-<work item>.run<id>.env.json`, so verifyEnvState reads it like the others — and only when
+ * no input of it (manifestInputs) changed after the run started, so it is the run's env too.
  *
  * Usage:
  *   node scripts/orchestrate/env-manifest.mjs start --worktree <path> --file <x.env.json> --key <execution key>
@@ -128,6 +129,31 @@ export function takeManifest({ worktree, home }) {
     nodeModules: nodeModulesLocation(path.join(worktree, 'node_modules')),
     packages: packageVersions(worktree),
   };
+}
+
+/**
+ * The files takeManifest reads, for a caller that dates them (run-log.mjs `record-verify`, #4482):
+ * the two settings files, the lockfile, `node_modules` (the entry, the directory it resolves to,
+ * and npm's `.package-lock.json` in it). A file that does not exist is in the list too.
+ *
+ * @param {{ worktree: string, home: string }} where
+ */
+export function manifestInputs({ worktree, home }) {
+  const nodeModules = path.join(worktree, 'node_modules');
+  let resolved = nodeModules;
+  try {
+    resolved = fs.realpathSync(nodeModules);
+  } catch {
+    // absent or unreadable: the entry itself is dated (or skipped when absent)
+  }
+  return [
+    path.join(home, '.claude', 'settings.json'),
+    path.join(worktree, '.claude', 'settings.local.json'),
+    path.join(worktree, 'package-lock.json'),
+    nodeModules,
+    ...(resolved !== nodeModules ? [resolved] : []),
+    path.join(resolved, '.package-lock.json'),
+  ];
 }
 
 /**

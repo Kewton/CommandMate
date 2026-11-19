@@ -62,7 +62,8 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { takeManifest, manifestHash } from './env-manifest.mjs';
+import { dirtyPaths } from './dirty-tree.mjs';
+import { manifestHash, manifestInputs, takeManifest } from './env-manifest.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
 
 /**
@@ -493,6 +494,21 @@ function runSafely(run, command, args, cwd) {
   }
 }
 
+/** The rows of `ls --json` (an array, or `{ worktrees }`), or null. */
+function worktreeRows(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.worktrees)) return parsed.worktrees;
+  return null;
+}
+
+function realpathOrNull(file) {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Record a verification the leader ran directly (Issue #4482), from its run id: what
  * `verify show <id> --json` says of it, nothing more. The verdict stays the run's (team.md §10-4).
@@ -500,25 +516,37 @@ function runSafely(run, command, args, cwd) {
  * - The run must be over (RUN_END_STATUSES): a `running` / `queued` (or unknown) run is refused
  *   (`notFinished`), its result is not decided here. Only `passed` is written as `ok`; `failed`,
  *   `error`, `cancelled`, `not_started` are `fail`. Each gate is `ok` / `skip` / `fail` (gateResult).
+ *   An answer that is not a run (no `id`) is `unreadable`.
  * - The run must be this one (`refused` otherwise): its id is the one asked, its `worktreeId` is
- *   `--wt`, its task is `--task` when both say one. The run does not store the HEAD, so the HEAD is
- *   the worktree's now, refused when it was committed after the run started (the run saw an earlier
- *   state — wait-verify's `committedAfter`) or when `--head` names another. A run already recorded
- *   for the work item (`run=<id>` in a verify line's note, by wait-verify or by this) is refused too.
- * - env: a direct run has no manifest from its start, and one taken now cannot be dated back, so the
- *   env is the manifest **taken when recording** (`env-at=record` in the note says so). It is kept as
- *   the end manifest of `verify-<work item>.run<id>.env.json` under the record's key
+ *   `--wt`, its task is `--task` when both say one, and `--worktree` is the path the CLI lists for
+ *   `--wt` (realpath). A run already recorded for the work item (`run=<id>` in a verify line's note,
+ *   by wait-verify or by this) is refused too. `--task` is never written for a run without a task.
+ * - The HEAD is written only when it is the tree the run verified, fail-closed (#4482 review 1): the
+ *   run does not store a HEAD, so the HEAD is the worktree's now, and it is refused unless the tree
+ *   has no uncommitted change (dirty-tree.mjs dirtyPaths), HEAD was neither committed nor moved
+ *   (HEAD's reflog entry, `git log -g -1 --date=unix --format=%gd HEAD`, whole seconds: a move in the second the run
+ *   started counts as after it) after the run started, and `--head` (when given) is that HEAD. What
+ *   cannot be read is refused, not assumed. A tree that was dirty during the run and cleaned before
+ *   recording is not seen (a cleaning that does not move HEAD leaves no time to compare).
+ * - env: a direct run has no manifest from its start, so the env is the manifest **taken when
+ *   recording** (`env-at=record`), written only when no input of it (env-manifest.mjs
+ *   manifestInputs) changed after the run started (mtime): then it is the run's env too. It is kept
+ *   as the end manifest of `verify-<work item>.run<id>.env.json` under the record's key
  *   (`<issues>:<work item>:<task|->:run<id>`), so verifyEnvState compares it as it does wait-verify's.
  *
  * The note: `direct=verify run=<id> run-status=<status> gates=<id>:<ok|skip|fail>,… key=<key> env-at=record env=<hash>`.
+ * `gates=` is for the reader: precheck / merge-pr read `passed=` (wait-verify's), so a direct record
+ * is read as a `verify=ok` line and never lends its gates to a reuse.
  *
  * @returns {{ exit: number, reason?: string, file?: string, record?: any, envFile?: string }}
  */
 export function recordVerifyRun(options, { run = defaultRun, home = os.homedir(), now = new Date() } = {}) {
   const runId = String(options.runId);
   const cli = options.cli || 'commandmatedev';
+  const worktree = options.worktree;
   const refuse = (exit, reason) => ({ exit, reason });
-  const shown = runSafely(run, cli, ['verify', 'show', runId, '--json'], options.worktree);
+  const refused = (reason) => refuse(RECORD_VERIFY_EXIT.refused, reason);
+  const shown = runSafely(run, cli, ['verify', 'show', runId, '--json'], worktree);
   let parsed = null;
   try {
     parsed = shown.status === 0 ? JSON.parse(shown.stdout) : null;
@@ -526,47 +554,91 @@ export function recordVerifyRun(options, { run = defaultRun, home = os.homedir()
     parsed = null;
   }
   const view = parsed && typeof parsed === 'object' ? (parsed.run ?? parsed) : null;
-  if (!view || typeof view !== 'object') {
+  if (!view || typeof view !== 'object' || view.id === undefined || view.id === null) {
     return refuse(RECORD_VERIFY_EXIT.unreadable, `run ${runId}: \`${cli} verify show ${runId} --json\` gave no run (exit ${shown.status}${shown.stderr ? `: ${String(shown.stderr).trim()}` : ''})`);
   }
-  if (String(view.id) !== runId) return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId}: the CLI answered with run ${view.id ?? '-'}`);
-  if (view.worktreeId !== options.wt) {
-    return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId} is of worktree ${view.worktreeId ?? '-'}, not ${options.wt}`);
-  }
+  if (String(view.id) !== runId) return refused(`run ${runId}: the CLI answered with run ${view.id}`);
+  if (view.worktreeId !== options.wt) return refused(`run ${runId} is of worktree ${view.worktreeId ?? '-'}, not ${options.wt}`);
   if (!RUN_END_STATUSES.includes(view.status)) {
     return refuse(RECORD_VERIFY_EXIT.notFinished, `run ${runId} is ${view.status ?? 'without a status'}: not over, nothing recorded (record it once it has ended)`);
   }
-  const taskId = optionalString(options.taskId);
-  if (taskId !== null && view.taskId && view.taskId !== taskId) {
-    return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId} is of task ${view.taskId}, not ${taskId}`);
-  }
-  const revParse = runSafely(run, 'git', ['-C', options.worktree, 'rev-parse', 'HEAD'], options.worktree);
-  const head = revParse.status === 0 ? revParse.stdout.trim() : '';
-  if (!FULL_SHA.test(head)) return refuse(RECORD_VERIFY_EXIT.unreadable, `${options.worktree}: cannot read HEAD (${String(revParse.stderr).trim()})`);
-  const wanted = optionalString(options.head);
-  if (wanted !== null && wanted !== head) {
-    return refuse(RECORD_VERIFY_EXIT.refused, `--head ${wanted.slice(0, 7)} is not the worktree's HEAD ${head.slice(0, 7)}`);
-  }
   const started = Date.parse(view.startedAt);
-  const logged = runSafely(run, 'git', ['-C', options.worktree, 'log', '-1', '--format=%cI'], options.worktree);
+  if (!Number.isFinite(started)) return refused(`run ${runId}: no readable start (startedAt ${view.startedAt ?? '-'}), so no HEAD can be tied to it`);
+  const taskId = optionalString(options.taskId);
+  if (taskId !== null && view.taskId && view.taskId !== taskId) return refused(`run ${runId} is of task ${view.taskId}, not ${taskId}`);
+
+  // (c) --worktree is --wt's worktree.
+  const listed = runSafely(run, cli, ['ls', '--json'], worktree);
+  let rows = null;
+  try {
+    rows = listed.status === 0 ? worktreeRows(JSON.parse(listed.stdout)) : null;
+  } catch {
+    rows = null;
+  }
+  if (!rows) return refused(`cannot read \`${cli} ls --json\` to tie --worktree to ${options.wt} (exit ${listed.status})`);
+  const row = rows.find((r) => r && r.id === options.wt);
+  if (!row || typeof row.path !== 'string') return refused(`worktree ${options.wt} is not listed by \`${cli} ls --json\``);
+  const listedPath = realpathOrNull(row.path);
+  const givenPath = realpathOrNull(worktree);
+  if (listedPath === null || givenPath === null || listedPath !== givenPath) {
+    return refused(`--worktree ${worktree} is not worktree ${options.wt} (${row.path})`);
+  }
+
+  const revParse = runSafely(run, 'git', ['-C', worktree, 'rev-parse', 'HEAD'], worktree);
+  const head = revParse.status === 0 ? revParse.stdout.trim() : '';
+  if (!FULL_SHA.test(head)) return refuse(RECORD_VERIFY_EXIT.unreadable, `${worktree}: cannot read HEAD (${String(revParse.stderr).trim()})`);
+  const short = head.slice(0, 7);
+  const wanted = optionalString(options.head);
+  if (wanted !== null && wanted !== head) return refused(`--head ${wanted.slice(0, 7)} is not the worktree's HEAD ${short}`);
+  // (a) No uncommitted change: the record says HEAD, and only the committed tree is HEAD.
+  let dirty;
+  try {
+    dirty = dirtyPaths(run, worktree);
+  } catch (error) {
+    return refused(`cannot read the worktree's git status, so HEAD ${short} cannot be tied to run ${runId}: ${error.message}`);
+  }
+  if (dirty.length > 0) return refused(`uncommitted changes in ${worktree} (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}): run ${runId} did not verify HEAD ${short} alone`);
+  const logged = runSafely(run, 'git', ['-C', worktree, 'log', '-1', '--format=%cI'], worktree);
   const committedAt = logged.status === 0 ? Date.parse(logged.stdout.trim()) : NaN;
-  if (!Number.isFinite(started) || !Number.isFinite(committedAt)) {
-    return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId}: cannot tell whether HEAD ${head.slice(0, 7)} is what it verified (start ${view.startedAt ?? '-'}, commit ${logged.stdout.trim() || '-'})`);
+  if (!Number.isFinite(committedAt)) return refused(`cannot read when HEAD ${short} was committed (${String(logged.stderr).trim()})`);
+  if (committedAt > started) return refused(`HEAD ${short} was committed after the run started (${view.startedAt}): run ${runId} verified an earlier state`);
+  // (b) HEAD did not move after the run started (a reset / checkout to an older commit keeps an old commit date).
+  // `%gd` with `--date=unix` is the reflog entry's own time (`HEAD@{<epoch>}`); `%ct` would be the commit's.
+  const reflog = runSafely(run, 'git', ['-C', worktree, 'log', '-g', '-1', '--date=unix', '--format=%gd', 'HEAD'], worktree);
+  const movedMatch = reflog.status === 0 ? /^HEAD@\{(\d+)\}$/.exec(reflog.stdout.trim()) : null;
+  const movedSec = movedMatch ? Number(movedMatch[1]) : null;
+  if (movedSec === null) return refused(`cannot read HEAD's reflog in ${worktree}, so it cannot be told that HEAD ${short} stayed since run ${runId} started`);
+  if ((movedSec + 1) * 1000 > started) {
+    return refused(`HEAD ${short} moved after the run started (${new Date(movedSec * 1000).toISOString()} >= ${view.startedAt}): run ${runId} verified another state`);
   }
-  if (committedAt > started) {
-    return refuse(RECORD_VERIFY_EXIT.refused, `HEAD ${head.slice(0, 7)} was committed after the run started (${view.startedAt}): run ${runId} verified an earlier state`);
+  // (d) The env taken now is the run's only if none of its inputs changed since the run started.
+  let changed;
+  try {
+    changed = manifestInputs({ worktree, home }).filter((file) => {
+      try {
+        return fs.statSync(file).mtimeMs > started;
+      } catch (error) {
+        if (error?.code === 'ENOENT') return false;
+        throw error;
+      }
+    });
+  } catch (error) {
+    return refused(`cannot read the env inputs' times: ${error.message}`);
   }
+  if (changed.length > 0) return refused(`env input changed after the run started: ${changed.join(', ')} (verify again, then record that run)`);
+
   const item = optionalString(options.item);
   const issue = Number(options.issue);
   const { records } = readRecords(options.runDir, options.issues);
   const earlier = records.find(
     (r) => r.issue === issue && r.stage === 'verify' && itemOf(r) === item && RUN_NOTE(runId).test(String(r.note ?? ''))
   );
-  if (earlier) return refuse(RECORD_VERIFY_EXIT.refused, `run ${runId} is already recorded for #${workItemName(issue, item)} (at ${earlier.at ?? '-'})`);
+  if (earlier) return refused(`run ${runId} is already recorded for #${workItemName(issue, item)} (at ${earlier.at ?? '-'})`);
 
-  const recordTask = taskId ?? optionalString(view.taskId);
+  // Only the run's own task (#4482 review 1 P3-1): `--task` checks it, it never stands in for it.
+  const recordTask = optionalString(view.taskId);
   const key = `${options.issues}:${workItemName(issue, item)}:${recordTask ?? '-'}:run${runId}`;
-  const manifest = takeManifest({ worktree: options.worktree, home });
+  const manifest = takeManifest({ worktree, home });
   const hash = manifestHash(manifest);
   const gates = (Array.isArray(view.gates) ? view.gates : []).map((g) => `${g.gateId}:${gateResult(String(g.status ?? ''))}`);
   const note = [
@@ -598,8 +670,14 @@ export function recordVerifyRun(options, { run = defaultRun, home = os.homedir()
     envFile,
     `${JSON.stringify({ key, runId: Number(runId), takenAt: now.toISOString(), start: null, verify: null, end: manifest, changed: { duringTask: [], duringVerify: [] } }, null, 2)}\n`
   );
-  const { file, record } = appendRecord(options.runDir, options.issues, input, now);
-  return { exit: RECORD_VERIFY_EXIT.recorded, file, record, envFile };
+  try {
+    const { file, record } = appendRecord(options.runDir, options.issues, input, now);
+    return { exit: RECORD_VERIFY_EXIT.recorded, file, record, envFile };
+  } catch (error) {
+    // No manifest without its record (#4482 review 1 P3-4).
+    fs.rmSync(envFile, { force: true });
+    throw error;
+  }
 }
 
 const RECORD_VERIFY_FLAGS = {
