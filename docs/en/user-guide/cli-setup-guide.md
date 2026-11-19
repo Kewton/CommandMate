@@ -40,7 +40,7 @@ The following tools are required to use CommandMate.
 
 Every agent CLI is optional. CommandMate starts with none of them installed, but a
 worktree cannot start a session for an agent whose CLI is missing.
-`commandmate init` reports a version (or "not found") for every row above. Antigravity CLI is the one exception: without the declaration `agy` is not started, and only whether it is on PATH (`found (version not checked; …)`) or not found is reported (out of care for Section 6 of the Google Antigravity Additional Terms; Issue #4480).
+`commandmate init` reports a version (or "not found") for every row above. Antigravity CLI is the one exception: without the declaration neither `init` nor `quickstart` starts `agy` (no `agy --version`), and `init` (and `quickstart` when there is no `.env` yet and it runs the `init` steps) reports only whether it is on PATH (`found (version not checked; …)`) or not found (out of care for Section 6 of the Google Antigravity Additional Terms; Issue #4480).
 
 > **Note**: `vibe-local` is a seat for a local script driving an Ollama model.
 > There is no published artifact to check, so `init` does not check for one.

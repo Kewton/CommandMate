@@ -15,6 +15,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { installFakeAgyPath, type FakeAgyPath } from '@tests/helpers/fake-agy-path';
 import {
   AGENT_VERSIONS_CACHE_TTL_MS,
@@ -99,3 +101,106 @@ describe('[#4480] agents version list after a use', () => {
     expect(fake.callsOf('agy')).toEqual([]);
   });
 });
+
+/**
+ * Review-4480 (codex P2-1 / opus P3-2): a forced fetch (`force`, `?refresh=1`, an
+ * update just finished) that arrives while the antigravity row is being added must
+ * re-probe every tool and return that, and the add must not write its older rows
+ * back afterwards.
+ *
+ * The fakes here read their version from `<sandbox>/<name>.version` (so the test
+ * can "update" claude and codex mid-way), and each `agy` call waits for
+ * `<sandbox>/agy.release.<n>` (n = its call number), so the add's probe can be
+ * held while the forced fetch runs.
+ */
+describe('[#4480] a forced fetch while the antigravity row is being added (I4\')', () => {
+  let held: FakeAgyPath;
+
+  const versionedFake = (name: string): string => [
+    'root="${0%/bin/' + name + '}"',
+    'read -r v < "$root/' + name + '.version"',
+    'echo "$v"',
+  ].join('\n');
+
+  const heldAgy = [
+    'root="${0%/bin/agy}"',
+    'n=0',
+    'while IFS= read -r line; do case "$line" in "agy "*) n=$((n+1)) ;; esac; done < "$root/calls.log"',
+    'while [ ! -f "$root/agy.release.$n" ]; do :; done',
+    "echo '1.1.18'",
+  ].join('\n');
+
+  const setVersion = (name: string, value: string): void => {
+    fs.writeFileSync(path.join(held.root, `${name}.version`), `${value}\n`);
+  };
+  const release = (n: number): void => {
+    fs.writeFileSync(path.join(held.root, `agy.release.${n}`), '');
+  };
+  const waitFor = async (check: () => boolean): Promise<void> => {
+    for (let i = 0; i < 300 && !check(); i += 1) await new Promise((r) => setTimeout(r, 10));
+    expect(check()).toBe(true);
+  };
+  const installedOf = (rows: { tool: string; installed: string | null }[], tool: string) =>
+    rows.find((row) => row.tool === tool)?.installed;
+
+  beforeEach(() => {
+    fake.restore();
+    held = installFakeAgyPath({
+      extraBinaries: { claude: versionedFake('claude'), codex: versionedFake('codex'), agy: heldAgy },
+    });
+    fake = held;
+    setVersion('claude', '2.1.0 (Claude Code)');
+    setVersion('codex', 'codex-cli 0.100.0');
+  });
+
+  afterEach(() => {
+    // Let any held probe finish before the sandbox goes.
+    for (let n = 1; n <= 5; n += 1) release(n);
+  });
+
+  it('4480 (I4\'): force during the add returns every tool re-probed, and the add does not write its old rows back', async () => {
+    const first = await getAgentVersions({ now: 1_000 });
+    expect(installedOf(first, 'codex')).toBe('0.100.0');
+
+    noteAntigravityUse();
+    const adding = getAgentVersions({ now: 1_001 }); // the add: agy call 1, held
+    await waitFor(() => held.callsOf('agy').length === 1);
+
+    setVersion('claude', '2.2.0 (Claude Code)');
+    setVersion('codex', 'codex-cli 0.101.0');
+    const forced = getAgentVersions({ now: 1_002, force: true }); // full: agy call 2, held
+    await waitFor(() => held.callsOf('agy').length === 2);
+    release(2);
+    const forcedRows = await forced;
+
+    expect(installedOf(forcedRows, 'claude')).toBe('2.2.0');
+    expect(installedOf(forcedRows, 'codex')).toBe('0.101.0');
+    expect(installedOf(forcedRows, 'antigravity')).toBe('1.1.18');
+
+    release(1);
+    await adding;
+
+    // The next plain fetch inside the TTL answers the forced rows, not the add's.
+    const next = await getAgentVersions({ now: 1_003 });
+    expect(installedOf(next, 'claude')).toBe('2.2.0');
+    expect(installedOf(next, 'codex')).toBe('0.101.0');
+    expect(held.callsOf('claude')).toHaveLength(2);
+  });
+
+  it('4480 (I4\'): clearing the cache during the add keeps the add from writing its old rows back', async () => {
+    await getAgentVersions({ now: 1_000 });
+    noteAntigravityUse();
+    const adding = getAgentVersions({ now: 1_001 });
+    await waitFor(() => held.callsOf('agy').length === 1);
+
+    clearAgentVersionsCache();
+    setVersion('codex', 'codex-cli 0.101.0');
+    release(1);
+    await adding;
+    release(2);
+
+    const next = await getAgentVersions({ now: 1_002 });
+    expect(installedOf(next, 'codex')).toBe('0.101.0');
+  });
+});
+

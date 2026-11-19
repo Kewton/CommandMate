@@ -4490,7 +4490,7 @@ Update available for codex: 0.149.1 -> 0.151.0
 Run "commandmate agents update codex" to install it.
 ```
 
-> **antigravity の行が出る条件**（Issue #4452）: `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` の申告があるときだけです（申告なしでは `agy --version` を実行しません）。More 画面・agent pane の版の表示（`GET /api/agents/versions`）、スラッシュコマンドの版の注意、`capture --json` と `commandmate status` の検出ルールの陳腐化の注意は、申告があるとき、またはそのサーバーで antigravity を起動・送信した後に出ます（`commandmate status` は CLI のプロセスなので申告があるときだけ）。初期設定の `commandmate init` / `quickstart` の依存の確認も、申告（CLI を打つ環境、無ければサーバーの `.env` の `CM_ANTIGRAVITY_USAGE`）があるときだけ `agy --version` を実行します。申告が無いときは `agy` が PATH にあるかだけをファイルで確かめ（起動しません）、`Antigravity CLI: found (version not checked; …)` か `Not found` を出します（Issue #4480）。
+> **antigravity の行が出る条件**（Issue #4452）: `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` の申告があるときだけです（申告なしでは `agy --version` を実行しません）。More 画面・agent pane の版の表示（`GET /api/agents/versions`）、スラッシュコマンドの版の注意、`capture --json` と `commandmate status` の検出ルールの陳腐化の注意は、申告があるとき、またはそのサーバーで antigravity を起動・送信した後に出ます（`commandmate status` は CLI のプロセスなので申告があるときだけ）。初期設定の `commandmate init` と `quickstart` の依存の確認も、どちらも申告（CLI を打つ環境、無ければサーバーの `.env` の `CM_ANTIGRAVITY_USAGE`）があるときだけ `agy --version` を実行し、申告が無いときは `agy` が PATH にあるかだけをファイルで確かめます（起動しません。Issue #4480）。その結果の行（`Antigravity CLI: found (version not checked; …)` か `Not found`）を出すのは `init` と、`.env` がまだ無いときの `quickstart`（`init` の手順に入る）です。`.env` があるときの `quickstart` は、必須の依存が欠けたときだけその行を出し、この行は出しません。
 
 #### LATEST 列が codex にしか出ない理由
 

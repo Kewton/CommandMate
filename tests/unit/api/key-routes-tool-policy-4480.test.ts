@@ -70,6 +70,8 @@ vi.mock('@/lib/db/db-instance', () => {
 import { POST as directInput } from '@/app/api/worktrees/[id]/direct-input/route';
 import { POST as specialKeys } from '@/app/api/worktrees/[id]/special-keys/route';
 import { setMockDb } from '@/lib/db/db-instance';
+import { checkSessionOwnership } from '@/lib/cli-tools/session-ownership';
+import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { TOOL_POLICY_DENIED } from '@/lib/tool-policy/policy';
 
 const WT = 'wt-4480-keys';
@@ -118,6 +120,7 @@ beforeEach(() => {
     cliToolId: 'claude',
   };
   upsertWorktree(db, worktree);
+  vi.mocked(checkSessionOwnership).mockClear();
 });
 
 afterEach(() => {
@@ -144,6 +147,7 @@ describe('[#4480] /direct-input and /special-keys ask the tool policy', () => {
         sendOutcome: 'not_sent',
         policy: { tool: 'antigravity', operation: ROUTES[route].operation },
       });
+      expect(checkSessionOwnership).not.toHaveBeenCalled();
       expect(tmuxWrites).toEqual([]);
       expect(fake.callsOf('agy')).toEqual([]);
       expect(rowCountsOfAllTables(db)).toEqual(before);
@@ -179,6 +183,42 @@ describe('[#4480] /direct-input and /special-keys ask the tool policy', () => {
       vi.stubEnv('CM_ANTIGRAVITY_USAGE', 'enterprise');
       expect((await call(route, { cliToolId: 'antigravity', origin: 'agent' })).status).toBe(200);
       expect(tmuxWrites).toHaveLength(1);
+    },
+  );
+
+  // Review-4480 (codex P3-1): a refusal on a named instance also stops before the
+  // ownership check, and a key that goes through lands in the session of the tool
+  // and instance named (the session name the route checks and types into).
+  it.each(ROUTE_NAMES)(
+    '4480 (I1): /%s refuses a named antigravity instance from origin agent before the ownership check',
+    async (route) => {
+      const res = await call(route, { cliToolId: 'antigravity', instanceId: 'antigravity-2', origin: 'agent' });
+
+      expect(res.status).toBe(409);
+      expect(checkSessionOwnership).not.toHaveBeenCalled();
+      expect(tmuxWrites).toEqual([]);
+    },
+  );
+
+  it.each(ROUTE_NAMES.flatMap((route) => [
+    [route, 'antigravity', 'antigravity-2', 'terminal'],
+    [route, 'antigravity', undefined, undefined],
+    [route, 'claude', 'claude-2', 'agent'],
+  ] as const))(
+    '4480 (I2): /%s types %s / %s (origin %s) into that tool and instance\'s session',
+    async (route, tool, instanceId, origin) => {
+      const body: Record<string, unknown> = { cliToolId: tool };
+      if (instanceId) body.instanceId = instanceId;
+      if (origin) body.origin = origin;
+
+      const res = await call(route, body);
+
+      expect(res.status).toBe(200);
+      const sessionName = resolveSessionName(tool, WT, instanceId);
+      expect(sessionName).toContain(tool);
+      expect(vi.mocked(checkSessionOwnership).mock.calls.map((args) => args[0])).toEqual([sessionName]);
+      expect(tmuxWrites).toHaveLength(1);
+      expect(JSON.parse(tmuxWrites[0].replace(/^\w+ /, ''))[0]).toBe(sessionName);
     },
   );
 });

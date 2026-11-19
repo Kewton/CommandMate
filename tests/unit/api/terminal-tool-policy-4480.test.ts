@@ -67,6 +67,8 @@ vi.mock('@/lib/db/db-instance', () => {
 
 import { POST } from '@/app/api/worktrees/[id]/terminal/route';
 import { setMockDb } from '@/lib/db/db-instance';
+import { setAgentInstances } from '@/lib/db/agent-instances-db';
+import { checkSessionOwnership } from '@/lib/cli-tools/session-ownership';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { TOOL_POLICY_DENIED } from '@/lib/tool-policy/policy';
@@ -108,6 +110,8 @@ beforeEach(() => {
     cliToolId: 'claude',
   };
   upsertWorktree(db, worktree);
+  setAgentInstances(db, WT, [{ id: 'antigravity-2', cliTool: 'antigravity', alias: 'Antigravity 2', order: 0 }]);
+  vi.mocked(checkSessionOwnership).mockClear();
   for (const tool of ['antigravity', 'claude'] as CLIToolType[]) {
     const instance = CLIToolManager.getInstance().getTool(tool);
     vi.spyOn(instance, 'sendMessage').mockImplementation(async (...args: unknown[]) => {
@@ -146,6 +150,7 @@ describe('[#4480] POST /terminal asks the tool policy', () => {
       });
       expect(sendMessageCalls).toEqual([]);
       expect(isRunningCalls).toEqual([]);
+      expect(checkSessionOwnership).not.toHaveBeenCalled();
       expect(tmuxWrites).toEqual([]);
       expect(hasAntigravityBeenUsed()).toBe(false);
       expect(fake.callsOf('agy')).toEqual([]);
@@ -189,4 +194,45 @@ describe('[#4480] POST /terminal asks the tool policy', () => {
       expect(sendMessageCalls).toHaveLength(1);
     },
   );
+
+  // Review-4480 (codex P3-1): the refusal stops before the ownership check (which
+  // asks tmux), and a send that goes through reaches the tool and instance named.
+  it('4480 (I1): /terminal refuses a registered named antigravity instance from origin agent before the ownership check', async () => {
+    const before = rowCountsOfAllTables(db);
+
+    const res = await call({ cliToolId: 'antigravity', instanceId: 'antigravity-2', command: 'hello', origin: 'agent' });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: TOOL_POLICY_DENIED, policy: { tool: 'antigravity' } });
+    expect(checkSessionOwnership).not.toHaveBeenCalled();
+    expect(sendMessageCalls).toEqual([]);
+    expect(tmuxWrites).toEqual([]);
+    expect(rowCountsOfAllTables(db)).toEqual(before);
+  });
+
+  it('4480 (I2): /terminal from a terminal sends to the named instance of the tool the roster names', async () => {
+    const res = await call({ cliToolId: 'antigravity', instanceId: 'antigravity-2', command: 'hi', origin: 'terminal' });
+
+    expect(res.status).toBe(200);
+    expect(sendMessageCalls).toEqual([`antigravity ${JSON.stringify([WT, 'hi', 'antigravity-2'])}`]);
+    expect(checkSessionOwnership).toHaveBeenCalledTimes(1);
+  });
+
+  it('4480 (I2): /terminal from origin agent sends to claude, primary instance', async () => {
+    const res = await call({ cliToolId: 'claude', command: 'hi', origin: 'agent' });
+
+    expect(res.status).toBe(200);
+    expect(sendMessageCalls).toEqual([`claude ${JSON.stringify([WT, 'hi', null])}`]);
+  });
+
+  // The reinstruction called this "the existing 409"; the route answers it with
+  // `sessionTargetConflictResponse`, which is 400 `instance_tool_conflict` (#1925).
+  it('4480: a body tool the roster contradicts is still the earlier 400 instance_tool_conflict (not a tool-policy refusal), and nothing is sent', async () => {
+    const res = await call({ cliToolId: 'claude', instanceId: 'antigravity-2', command: 'hi', origin: 'agent' });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe('instance_tool_conflict');
+    expect(checkSessionOwnership).not.toHaveBeenCalled();
+    expect(sendMessageCalls).toEqual([]);
+  });
 });

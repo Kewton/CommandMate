@@ -7,18 +7,22 @@
  * version probe rested on a static reading. This file runs the steps, in
  * server.ts's order, on the real modules:
  *
- *  - an in-memory DB (migrated) holding one worktree whose roster is an
- *    antigravity instance, so every step that looks at sessions sees one;
- *  - a private `PATH` with the fake agy / claude / codex and a fake `tmux` whose
- *    `list-sessions` answers that worktree's antigravity and claude sessions —
- *    the real tmux is not on `PATH`, so no real session or option is touched;
+ *  - an in-memory DB (migrated, tmux namespace `abcd1234`) holding one worktree
+ *    whose roster is antigravity + claude, and an alias row from its old ID;
+ *  - a private `PATH` with the fake agy / claude / codex and a fake `tmux`.
+ *    `list-sessions` answers the lines of `<sandbox>/sessions.txt` (written per
+ *    case); `list-commands display-popup` answers a line, so read mode goes on to
+ *    write its script and bind its key. The real tmux is not on `PATH`, so no
+ *    real session or option is touched;
  *  - a private `HOME` (the install is treated as global) and `CM_DB_PATH` under the
  *    sandbox: the read-mode script, the Skill journal and the Auto-Yes shutdown
  *    record land there, if anywhere — not in the repository's working directory.
  *
- * Steps not run are listed in {@link NOT_RUN} with the reason, and the last case
- * fails when server.ts gains a dynamically imported start step this file neither
- * runs nor lists.
+ * {@link START_STEPS} is the start sequence as a table: every call server.ts
+ * makes there (read off its source by tests/helpers/server-start-calls.ts, static
+ * and dynamic imports alike), in order, each either run here or listed with the
+ * reason it is not. The drift case fails when server.ts adds, drops or reorders
+ * a call (review-4480 codex P2-2 / opus P3-1).
  *
  * @vitest-environment node
  */
@@ -28,9 +32,12 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { installFakeAgyPath, settleBackgroundProbes, type FakeAgyPath } from '@tests/helpers/fake-agy-path';
+import { serverStartCalls } from '@tests/helpers/server-start-calls';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { upsertWorktree } from '@/lib/db';
 import { setAgentInstances } from '@/lib/db/agent-instances-db';
+import { setTmuxSessionNamespace } from '@/lib/db/app-settings-db';
+import { recordWorktreeAlias } from '@/lib/db/worktree-alias-db';
 import type { Worktree } from '@/types/models';
 
 // The install is treated as global, so the steps that keep state under the
@@ -70,69 +77,151 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
-import { setMockDb } from '@/lib/db/db-instance';
+import { getDbInstance, setMockDb } from '@/lib/db/db-instance';
+import { resetSessionNamespaceForTests } from '@/lib/cli-tools/session-namespace';
 import { hasAntigravityBeenUsed, resetAntigravityUseForTest } from '@/lib/tool-policy/version-probe-gate';
 import { restoreAutoYesShutdownRecord } from '@/lib/auto-yes-shutdown-record';
 import { runDotenvSelfCheck } from '@/lib/env';
+import { getAllRepositories, registerAndFilterRepositories } from '@/lib/db/db-repository';
+import { getRepositoryPaths, reclaimGhostRepositories } from '@/lib/git/worktrees';
 import { syncWorktreesAndCleanup } from '@/lib/session-cleanup';
 import { initScheduleManager, stopAllSchedules } from '@/lib/schedule-manager';
 import { initTimerManager, stopAllTimers } from '@/lib/timer-manager';
 import { initResourceCleanup, stopResourceCleanup } from '@/lib/resource-cleanup';
 
 const WT = 'wt-4480-startup';
+const OLD_WT = 'wt-4480-startup-old';
+const NAMESPACE = 'abcd1234';
 
 const SERVER_SOURCE = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf8');
 
-/** Every module server.ts loads with `await import('./src/...')`. */
-const DYNAMIC_START_MODULES = [
-  ...new Set([...SERVER_SOURCE.matchAll(/await import\(\s*'(\.\/src\/[^']+)'\s*\)/g)].map((m) => m[1])),
-];
+interface StartContext {
+  db: Database.Database;
+  worktree: Worktree;
+}
 
-/** Dynamically imported start steps this file runs. */
-const RUN = [
-  './src/lib/skills/startup-reconcile',
-  './src/lib/cli-tools/session-namespace',
-  './src/lib/session/worktree-session-reconcile',
-  './src/lib/session/adopt-legacy-sessions',
-  './src/lib/verification/verification-reconciler',
-  './src/lib/push/vapid',
-  './src/lib/hooks/sources/opencode-v2/reattach',
-  './src/lib/hooks/sources/opencode/reattach',
-  './src/lib/tmux/read-mode',
-];
+/**
+ * One call of server.ts's start sequence. `run` runs it here; `notRun` says why
+ * it is not. `notAwaited`: server.ts starts it inside `void (async () => …)()`
+ * and goes on; the drift check compares the order calls START in, and this file
+ * awaits each in turn (so a later step never races an earlier one here).
+ */
+interface StartStep {
+  call: string;
+  run?: (ctx: StartContext) => unknown;
+  notRun?: string;
+  notAwaited?: true;
+}
 
-/** Dynamically imported modules not run here, and why. */
-const NOT_RUN: Record<string, string> = {
-  './src/lib/server/localhost-self-check':
-    'connects to the listening server over HTTP; no server is started in a unit test',
-};
+const START_STEPS: readonly StartStep[] = [
+  { call: 'stampIngress', notRun: 'stamps one request\'s headers (request handler); no request is served' },
+  { call: 'stampIngress', notRun: 'stamps a WebSocket upgrade\'s headers; no listener is started' },
+  { call: 'stampIngress', notRun: 'stamps a WebSocket upgrade\'s headers; no listener is started' },
+  { call: 'setupWebSocket', notRun: 'attaches a WebSocket server to the HTTP listener; no listener is started' },
+  { call: 'restoreAutoYesShutdownRecord', run: () => restoreAutoYesShutdownRecord() },
+  { call: 'remoteServer.listen', notRun: 'opens a port; no server is started in a unit test' },
+  { call: 'server.listen', notRun: 'opens a port; no server is started in a unit test' },
+  { call: 'selfCheck.clearLocalhostConflict', notRun: 'assigned as the shutdown cleanup, not called at start' },
+  {
+    call: 'selfCheck.runLocalhostSelfCheck',
+    notRun: 'connects to the listening server over HTTP; no server is started',
+    notAwaited: true,
+  },
+  { call: 'runDotenvSelfCheck', run: () => runDotenvSelfCheck({ warn: () => {} }) },
+  {
+    call: 'runVapidSelfCheck',
+    run: async () => (await import('@/lib/push/vapid')).runVapidSelfCheck({ warn: () => {} }),
+    notAwaited: true,
+  },
+  // initializeWorktrees()
+  { call: 'getDbInstance', run: () => getDbInstance() },
+  { call: 'runMigrations', notRun: 'run in beforeEach on the in-memory DB before the fixture rows are written' },
+  {
+    call: 'runSkillStartupReconciliation',
+    run: async ({ db }) => (await import('@/lib/skills/startup-reconcile')).runSkillStartupReconciliation(db),
+  },
+  {
+    call: 'initSessionNamespace',
+    run: async ({ db }) => (await import('@/lib/cli-tools/session-namespace')).initSessionNamespace(db),
+  },
+  {
+    call: 'reconcileWorktreeSessionsFromAliases',
+    run: async ({ db }) =>
+      (await import('@/lib/session/worktree-session-reconcile')).reconcileWorktreeSessionsFromAliases(db),
+  },
+  {
+    call: 'adoptLegacySessions',
+    run: async ({ db }) => (await import('@/lib/session/adopt-legacy-sessions')).adoptLegacySessions(db),
+  },
+  {
+    call: 'reconcileOrphanVerificationRuns',
+    run: async ({ db }) =>
+      (await import('@/lib/verification/verification-reconciler')).reconcileOrphanVerificationRuns(db),
+  },
+  { call: 'getRepositoryPaths', run: () => getRepositoryPaths() },
+  // The repository list is empty here: the fixture's worktree is handed to the
+  // sync as the scan's result (see scanMultipleRepositories).
+  { call: 'reclaimGhostRepositories', run: ({ db }) => reclaimGhostRepositories(db, []) },
+  { call: 'getAllRepositories', run: ({ db }) => getAllRepositories(db) },
+  { call: 'registerAndFilterRepositories', run: ({ db }) => registerAndFilterRepositories(db, []) },
+  {
+    call: 'scanMultipleRepositories',
+    notRun: 'runs git over the configured repositories on disk; the fixture worktree stands for its result',
+  },
+  { call: 'syncWorktreesAndCleanup', run: ({ db, worktree }) => syncWorktreesAndCleanup(db, [worktree]) },
+  // after initializeWorktrees()
+  {
+    call: 'reattachOpencodeV2EventStreams',
+    run: async () => (await import('@/lib/hooks/sources/opencode-v2/reattach')).reattachOpencodeV2EventStreams(),
+    notAwaited: true,
+  },
+  {
+    call: 'reattachOpencodeEventStreams',
+    run: async () => (await import('@/lib/hooks/sources/opencode/reattach')).reattachOpencodeEventStreams(),
+    notAwaited: true,
+  },
+  { call: 'initReadMode', run: async () => (await import('@/lib/tmux/read-mode')).initReadMode() },
+  { call: 'initScheduleManager', run: () => initScheduleManager() },
+  { call: 'initTimerManager', run: () => initTimerManager() },
+  { call: 'initResourceCleanup', run: () => initResourceCleanup() },
+];
 
 let fake: FakeAgyPath;
 let db: Database.Database;
 let worktree: Worktree;
 
+function writeSessions(names: string[]): void {
+  fs.writeFileSync(
+    path.join(fake.root, 'sessions.txt'),
+    names.map((name) => `${name}\t1\t0\t${worktree.path}\n`).join(''),
+  );
+}
+
 beforeEach(() => {
   fake = installFakeAgyPath({
     extraBinaries: {
       tmux: [
+        'root="${0%/bin/tmux}"',
         'case "$1" in',
-        // name, windows, attached, path (the `-F` the tmux module asks for);
-        // legacy (un-namespaced) names, which the adopt step takes over.
-        `  list-sessions) printf 'mcbd-antigravity-${WT}\\t1\\t0\\t%s\\nmcbd-claude-${WT}\\t1\\t0\\t%s\\n' "\${0%/bin/tmux}/repo/wt" "\${0%/bin/tmux}/repo/wt" ;;`,
-        '  has-session) exit 0 ;;',
+        // name, windows, attached, path (the `-F` the tmux module asks for)
+        '  list-sessions) [ -f "$root/sessions.txt" ] && while IFS= read -r line; do printf \'%s\\n\' "$line"; done < "$root/sessions.txt" ;;',
+        '  list-commands) [ "$2" = display-popup ] && echo "display-popup (popup) [-B] [-C] [-E] [-c target-client]" ;;',
         'esac',
         'exit 0',
       ].join('\n'),
     },
   });
   resetAntigravityUseForTest();
+  resetSessionNamespaceForTests();
   const home = path.join(fake.root, 'home');
   fs.mkdirSync(path.join(home, '.commandmate', 'data'), { recursive: true });
   vi.stubEnv('CM_DB_PATH', path.join(home, '.commandmate', 'data', 'cm.db'));
+  vi.stubEnv('CM_READ_MODE', 'on');
 
   db = new Database(':memory:');
   runMigrations(db);
   setMockDb(db);
+  setTmuxSessionNamespace(db, NAMESPACE);
   const wtPath = path.join(fake.root, 'repo', 'wt');
   fs.mkdirSync(wtPath, { recursive: true });
   worktree = {
@@ -148,6 +237,7 @@ beforeEach(() => {
     { id: 'antigravity', cliTool: 'antigravity', alias: 'Antigravity', order: 0 },
     { id: 'claude', cliTool: 'claude', alias: 'Claude', order: 1 },
   ]);
+  recordWorktreeAlias(db, OLD_WT, WT);
 });
 
 afterEach(() => {
@@ -157,59 +247,41 @@ afterEach(() => {
   setMockDb(null);
   db.close();
   resetAntigravityUseForTest();
+  resetSessionNamespaceForTests();
   vi.unstubAllEnvs();
   fake.restore();
 });
 
-/** server.ts's start sequence, in its order, each step fail-open as there. */
+/** The runnable steps of {@link START_STEPS}, in order, each fail-open as in server.ts. */
 async function runStartSequence(): Promise<{ ran: string[]; results: Record<string, unknown> }> {
   const ran: string[] = [];
   const results: Record<string, unknown> = {};
-  const step = async (name: string, fn: () => unknown): Promise<void> => {
+  for (const step of START_STEPS) {
+    if (!step.run) continue;
     try {
-      results[name] = await fn();
+      results[step.call] = await step.run({ db, worktree });
     } catch (error) {
       // server.ts wraps every step in its own try/catch
-      results[name] = error;
+      results[step.call] = error;
     }
-    ran.push(name);
-  };
-
-  await step('restoreAutoYesShutdownRecord', () => restoreAutoYesShutdownRecord());
-  await step('runDotenvSelfCheck', () => runDotenvSelfCheck({ warn: () => {} }));
-  await step('runVapidSelfCheck', async () =>
-    (await import('@/lib/push/vapid')).runVapidSelfCheck({ warn: () => {} }));
-  // initializeWorktrees()
-  await step('runSkillStartupReconciliation', async () =>
-    (await import('@/lib/skills/startup-reconcile')).runSkillStartupReconciliation(db));
-  await step('initSessionNamespace', async () =>
-    (await import('@/lib/cli-tools/session-namespace')).initSessionNamespace(db));
-  await step('reconcileWorktreeSessionsFromAliases', async () =>
-    (await import('@/lib/session/worktree-session-reconcile')).reconcileWorktreeSessionsFromAliases(db));
-  await step('adoptLegacySessions', async () =>
-    (await import('@/lib/session/adopt-legacy-sessions')).adoptLegacySessions(db));
-  await step('reconcileOrphanVerificationRuns', async () =>
-    (await import('@/lib/verification/verification-reconciler')).reconcileOrphanVerificationRuns(db));
-  await step('syncWorktreesAndCleanup', () => syncWorktreesAndCleanup(db, [worktree]));
-  // after initializeWorktrees()
-  await step('reattachOpencodeV2EventStreams', async () =>
-    (await import('@/lib/hooks/sources/opencode-v2/reattach')).reattachOpencodeV2EventStreams());
-  await step('reattachOpencodeEventStreams', async () =>
-    (await import('@/lib/hooks/sources/opencode/reattach')).reattachOpencodeEventStreams());
-  await step('initReadMode', async () => (await import('@/lib/tmux/read-mode')).initReadMode());
-  await step('initScheduleManager', () => initScheduleManager());
-  await step('initTimerManager', () => initTimerManager());
-  await step('initResourceCleanup', () => initResourceCleanup());
-
+    ran.push(step.call);
+  }
   await settleBackgroundProbes();
   return { ran, results };
 }
 
+function mutate(source: string, from: string, to: string): string {
+  expect(source.split(from), `"${from}" must occur once in server.ts`).toHaveLength(2);
+  return source.replace(from, to);
+}
+
 describe('[#4480] server start sequence', () => {
   it('4480 (I5): running server.ts\'s start sequence (namespace, alias reconcile, legacy adopt, verification reconcile, skills, worktree sync, opencode reattach, read mode, schedule/timer/cleanup) starts agy 0 times', async () => {
+    writeSessions([`mcbd-antigravity-${WT}`, `mcbd-claude-${WT}`]);
+
     const { ran, results } = await runStartSequence();
 
-    expect(ran).toHaveLength(15);
+    expect(ran).toEqual(START_STEPS.filter((step) => step.run).map((step) => step.call));
     expect(Object.values(results).filter((value) => value instanceof Error)).toEqual([]);
     // The sequence reached tmux (the fake) and took over the live antigravity
     // session: the steps ran against one, not against an empty machine.
@@ -223,22 +295,78 @@ describe('[#4480] server start sequence', () => {
     expect(hasAntigravityBeenUsed()).toBe(false);
   });
 
+  it('4480 (I5): the alias reconcile renames a live antigravity session from the old ID (through the fake tmux) and agy still runs 0 times', async () => {
+    const oldName = `mcbd-${NAMESPACE}-antigravity-${OLD_WT}`;
+    writeSessions([oldName]);
+
+    const { results } = await runStartSequence();
+
+    expect(results.reconcileWorktreeSessionsFromAliases).toMatchObject({
+      renamedSessions: expect.arrayContaining([expect.anything()]),
+    });
+    const renames = fake.callsOf('tmux').filter((line) => line.startsWith('tmux rename-session'));
+    expect(renames.some((line) => line.includes(oldName))).toBe(true);
+    expect(renames.some((line) => line.includes(`mcbd-${NAMESPACE}-antigravity-${WT}`))).toBe(true);
+    expect(fake.callsOf('agy')).toEqual([]);
+    expect(hasAntigravityBeenUsed()).toBe(false);
+  });
+
+  it('4480 (I5): read mode writes its script under the private HOME and binds its key on the fake tmux, and agy still runs 0 times', async () => {
+    writeSessions([]);
+
+    const { results } = await runStartSequence();
+
+    expect(results.initReadMode).toMatchObject({ installed: true });
+    const scriptPath = (results.initReadMode as { scriptPath: string }).scriptPath;
+    expect(scriptPath.startsWith(path.join(fake.root, 'home'))).toBe(true);
+    expect(fs.existsSync(scriptPath)).toBe(true);
+    expect(fake.callsOf('tmux').some((line) => line.startsWith('tmux bind-key'))).toBe(true);
+    expect(fake.callsOf('agy')).toEqual([]);
+  });
+
   it('4480 (I5): the start sequence runs no --version of claude or codex either', async () => {
+    writeSessions([`mcbd-antigravity-${WT}`, `mcbd-claude-${WT}`]);
+
     await runStartSequence();
 
     expect(fake.callsOf('claude')).toEqual([]);
     expect(fake.callsOf('codex')).toEqual([]);
   });
 
-  it('4480: every start step server.ts loads with await import() is either run here or listed with a reason', () => {
-    expect(DYNAMIC_START_MODULES.length).toBeGreaterThan(5);
-    const accounted = new Set([...RUN, ...Object.keys(NOT_RUN)]);
-    for (const specifier of DYNAMIC_START_MODULES) {
-      expect(accounted.has(specifier), `${specifier} is neither run nor listed`).toBe(true);
+  it('4480: every call server.ts makes at start is in the table, in order, run here or listed with a reason', () => {
+    for (const step of START_STEPS) {
+      expect(Boolean(step.run) !== Boolean(step.notRun), `${step.call}: run xor notRun`).toBe(true);
     }
-    // And nothing listed here is gone from server.ts.
-    for (const specifier of accounted) {
-      expect(DYNAMIC_START_MODULES, specifier).toContain(specifier);
+    expect(serverStartCalls(SERVER_SOURCE)).toEqual(START_STEPS.map((step) => step.call));
+  });
+
+  it('4480: the table check turns red when server.ts adds, drops or reorders a start call (server.ts is not changed; its text is)', () => {
+    const table = START_STEPS.map((step) => step.call);
+    const adoptLine = '        const adoptReport = await adoptLegacySessions(db);';
+    const timerLine = '    initTimerManager();';
+    const scheduleLine = '    initScheduleManager();';
+
+    const added = mutate(SERVER_SOURCE, adoptLine, `${adoptLine}\n        await adoptLegacySessions(db);`);
+    const dropped = mutate(SERVER_SOURCE, timerLine, '');
+    const swapped = mutate(
+      mutate(SERVER_SOURCE, scheduleLine, '    __SWAP__();'),
+      timerLine,
+      scheduleLine,
+    ).replace('    __SWAP__();', timerLine);
+    // A new step through a static import (the shape review-4480 opus P3-1 names).
+    const staticStep = mutate(
+      mutate(
+        SERVER_SOURCE,
+        "import { syncWorktreesAndCleanup } from './src/lib/session-cleanup';",
+        "import { syncWorktreesAndCleanup } from './src/lib/session-cleanup';\nimport { getAgentVersions } from './src/lib/updates/agent-versions';",
+      ),
+      timerLine,
+      `${timerLine}\n    void getAgentVersions();`,
+    );
+
+    expect(serverStartCalls(SERVER_SOURCE)).toEqual(table);
+    for (const [name, source] of Object.entries({ added, dropped, swapped, staticStep })) {
+      expect(serverStartCalls(source), name).not.toEqual(table);
     }
   });
 });

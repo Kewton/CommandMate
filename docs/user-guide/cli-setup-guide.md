@@ -41,7 +41,7 @@ CommandMate を使用するには、以下のツールが必要です。
 
 エージェント CLI はすべて任意です。1 つも入っていなくても CommandMate は起動しますが、
 worktree に割り当てたエージェントの CLI が無いとそのセッションは開始できません。
-`commandmate init` が上表のすべてについてバージョン（または未検出）を表示します。Antigravity CLI だけは、申告が無いと `agy` を起動せず、PATH にあるか（`found (version not checked; …)`）か未検出だけを表示します（Google Antigravity 追加利用規約 6 条への配慮。Issue #4480）。
+`commandmate init` が上表のすべてについてバージョン（または未検出）を表示します。Antigravity CLI だけは、`init` も `quickstart` も申告が無いと `agy` を起動せず（`agy --version` を実行しない）、`init`（と、`.env` がまだ無く `init` の手順に入る `quickstart`）は PATH にあるか（`found (version not checked; …)`）か未検出だけを表示します（Google Antigravity 追加利用規約 6 条への配慮。Issue #4480）。
 
 > **Note**: `vibe-local` はローカルの Ollama を叩く自作スクリプトを想定した口で、
 > 配布物がないため `init` の確認対象には含まれません。
