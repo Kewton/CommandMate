@@ -86,6 +86,7 @@ import {
   CONTRACT_DIR_PREFIX,
   evaluateScope,
   isContractPath,
+  isGitTimeoutLog,
   isSkillInstalledUntrackedEntry,
   parsePorcelainStatusEntries,
   scopeSkipDetachedContract,
@@ -157,8 +158,9 @@ export const MAX_CONCURRENT_VERIFICATIONS = 2;
 const SIGKILL_GRACE_MS = 5000;
 
 /**
- * How long after the SIGKILL a killed gate may keep its pipes open before the runner lets go of
- * them and closes the gate anyway (Issue #4463, the minimal part of #4494).
+ * How long after the SIGKILL a killed gate may keep its pipes open before the runner closes the
+ * gate anyway (Issue #4463, the minimal part of #4494). The pipes stay open until the descendants
+ * close them: that `close` is the sign they are gone (see {@link ORPHAN_MUTEX_HOLD_MS}).
  *
  * The kill reaches the gate's process group only. A descendant that moved to a group of its own
  * (setsid, a `detached` child) and inherited stdout keeps the pipe open, so `close` never came and
@@ -167,8 +169,33 @@ const SIGKILL_GRACE_MS = 5000;
  */
 const PIPE_RELEASE_GRACE_MS = 2000;
 
+/** Gates not run after a gate whose descendants outlived the kill (Issue #4463). */
+const ORPHAN_REMAINDER_LOG =
+  'skipped: an earlier gate left processes running after its kill, so the run reached no verdict.';
+
+/** Gates not run after the scope gate's git never returned (Issue #4463). */
+const SCOPE_GIT_TIMEOUT_REMAINDER_LOG =
+  'skipped: the scope gate\'s git did not return, so the run reached no verdict.';
+
 /** The log line of a gate closed because its pipes outlived the kill (Issue #4463). */
-const PIPES_HELD_LOG = '[gate output pipes still held after the kill; released by the runner]';
+const PIPES_HELD_LOG =
+  '[gate output pipes still held after the kill: a descendant outlived it, so no verdict ' +
+  '(the run closes as error) and the gate\'s mutex is held until it is gone]';
+
+/**
+ * How long a gate whose descendants outlived the kill keeps its mutex after the gate closed, at
+ * most (Issue #4463, review 2 P2). The next gate on the same mutex must not start beside them
+ * (a port, a database, a build directory), so the lock is held until their pipes close; past this
+ * the release is recorded and the lock handed on, so a descendant that never ends cannot hold a
+ * machine-wide resource for ever.
+ */
+export const ORPHAN_MUTEX_HOLD_MS = 1_800_000;
+let orphanMutexHoldMs = ORPHAN_MUTEX_HOLD_MS;
+
+/** Tests only: shorten the hold limit (no argument restores the default). */
+export function setOrphanMutexHoldMsForTests(ms?: number): void {
+  orphanMutexHoldMs = ms ?? ORPHAN_MUTEX_HOLD_MS;
+}
 
 /**
  * The time limit of one git plumbing call of the runner (Issue #4463, the minimal part of #4494).
@@ -365,6 +392,17 @@ interface GateOutcome {
   startedAt: number;
   durationMs: number;
   logTail: string | null;
+  /**
+   * Issue #4463: the gate reached no verdict and the run must close `error` (exit 99) — a git call
+   * that never returned, or descendants that outlived the kill and could not be confirmed gone.
+   * Not stored; read by executeRun.
+   */
+  noVerdict?: boolean;
+  /**
+   * Issue #4463: settles once the descendants that kept the gate's pipes open after the kill are
+   * gone (`true`), or the hold limit passed (`false`). Its mutex is held until then.
+   */
+  drained?: Promise<boolean>;
 }
 
 /**
@@ -740,6 +778,8 @@ function runCommand(
     let graceTimer: NodeJS.Timeout | undefined;
     let cancelGraceTimer: NodeJS.Timeout | undefined;
     let releaseTimer: NodeJS.Timeout | undefined;
+    /** Issue #4463: settled once the pipes a descendant kept after the kill finally close. */
+    let markDrained: ((gone: boolean) => void) | undefined;
 
     const child = spawn(command, {
       shell: true,
@@ -778,17 +818,32 @@ function runCommand(
      * the group is signalled before it can do anything.
      */
     /**
-     * Issue #4463: after the SIGKILL, give the pipes PIPE_RELEASE_GRACE_MS to close, then let go
-     * of them and settle as `close` would have (timeout, or the cancel's skip). Armed only by a
-     * kill — never by the clock alone — so a live gate is not ended before its timeoutSec.
+     * Issue #4463: after the SIGKILL, give the pipes PIPE_RELEASE_GRACE_MS to close, then settle
+     * as `close` would have (timeout, or the cancel's skip) with no verdict, and hand the caller a
+     * promise of the descendants being gone. Armed only by a kill — never by the clock alone — so
+     * a live gate is not ended before its timeoutSec.
      */
     const killThenRelease = (): void => {
       signalGroup('SIGKILL');
       if (releaseTimer) return;
       releaseTimer = setTimeout(() => {
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        settleKilled(null, true);
+        // The pipes are left open: their `close` is the only sign the descendants holding them
+        // are gone, and the gate's mutex waits for it (review 2 P2). Past the hold limit they are
+        // let go, and the release is recorded by the lock's holder.
+        const drained = new Promise<boolean>((resolveDrained) => {
+          markDrained = resolveDrained;
+        });
+        const holdTimer = setTimeout(() => {
+          markDrained?.(false);
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+        }, orphanMutexHoldMs);
+        holdTimer.unref?.();
+        child.once('close', () => {
+          clearTimeout(holdTimer);
+          markDrained?.(true);
+        });
+        settleKilled(null, drained);
       }, PIPE_RELEASE_GRACE_MS);
       releaseTimer.unref?.();
     };
@@ -833,8 +888,9 @@ function runCommand(
      * Settle a gate that was killed (timeout or cancel): from `close`, or from the release of
      * pipes a descendant kept open (Issue #4463). Returns false when no kill was ever sent.
      */
-    function settleKilled(signal: NodeJS.Signals | null, pipesHeld: boolean): boolean {
-      const held = pipesHeld ? `\n${PIPES_HELD_LOG}` : '';
+    function settleKilled(signal: NodeJS.Signals | null, drained: Promise<boolean> | null): boolean {
+      const held = drained ? `\n${PIPES_HELD_LOG}` : '';
+      const orphan = drained ? { noVerdict: true, drained } : {};
       if (timedOut) {
         finish({
           status: 'timeout',
@@ -843,6 +899,7 @@ function runCommand(
           exitCode: null,
           logTail:
             `${tail.toString()}\n[gate exceeded ${timeoutSec}s and was terminated (${signal ?? 'exited'})]${held}`.trim(),
+          ...orphan,
         });
         return true;
       }
@@ -860,6 +917,7 @@ function runCommand(
           exitCode: null,
           logTail:
             `${tail.toString()}\n${CANCELLED_RUNNING_GATE_LOG} (${signal ?? 'exited'})${held}`.trim(),
+          ...orphan,
         });
         return true;
       }
@@ -867,7 +925,7 @@ function runCommand(
     }
 
     child.on('close', (code, signal) => {
-      if (settleKilled(signal, false)) return;
+      if (settleKilled(signal, null)) return;
       finish({
         status: code === 0 ? 'passed' : 'failed',
         exitCode: code,
@@ -996,6 +1054,7 @@ async function runGateAttempt(
     };
   }
 
+  let drained: Promise<boolean> | undefined;
   try {
     // The lock can still come free in the same tick the cancel arrives, so the
     // latch is read once more before anything is spawned.
@@ -1018,12 +1077,30 @@ async function runGateAttempt(
       gateEnv,
       cancellation
     );
+    drained = outcome.drained;
     return {
       ...outcome,
       logTail: withMutexMarker(mutex, lock.waitedMs, lock.handle.path, outcome.logTail),
     };
   } finally {
-    lock.handle.release();
+    if (drained) {
+      // Issue #4463 (review 2 P2): the gate's descendants outlived the kill. The mutex is not
+      // handed to the next gate while they run; it goes once their pipes close, or at the hold
+      // limit, which is recorded.
+      const handle = lock.handle;
+      void drained.then((gone) => {
+        if (!gone) {
+          logger.warn('verification-mutex-released-with-orphan', {
+            gateId: gate.id,
+            mutex,
+            heldMs: orphanMutexHoldMs,
+          });
+        }
+        handle.release();
+      });
+    } else {
+      lock.handle.release();
+    }
   }
 }
 
@@ -1096,6 +1173,8 @@ async function runCommandGateAttempts(
     // work into a run with no verdict (exit 99), which is strictly weaker.
     return {
       ...first,
+      // Issue #4463: a retry whose descendants outlived the kill leaves no verdict to stand on.
+      ...(second.noVerdict ? { noVerdict: true } : {}),
       logTail: prefixLogTail(
         `${FLAKY_LOG_PREFIX} retry reached no verdict (${second.status}); ` +
           "the first run's result stands. Retry log:\n" +
@@ -1838,6 +1917,12 @@ async function executeRun(
     // to — that second case is how a run reported `passed` while the scope it
     // was supposed to judge went unexamined (#1620).
     const declined = selection.scope === 'explicit' || detachedContract !== null;
+    // Issue #4463 (review 2 P1-3): a git that never returned judged nothing. The run closes
+    // `error` (exit 99) as the work-evidence path does, never `failed` (exit 20).
+    if (outcome.status === 'error' && isGitTimeoutLog(outcome.logTail)) {
+      recordRemainder(SCOPE_GIT_TIMEOUT_REMAINDER_LOG, { scope: false, envClean: selection.runEnvClean, gates });
+      return 'error';
+    }
     if (outcome.status !== 'skipped' || declined) {
       statuses.push(outcome.status);
     }
@@ -1890,6 +1975,12 @@ async function executeRun(
       runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv(), cancellation, slot)
     );
     statuses.push(outcome.status);
+    if (outcome.noVerdict && !cancellation.cancelled) {
+      // Issue #4463 (review 2 P2): its descendants outlived the kill and could not be confirmed
+      // gone. No verdict (exit 99), and nothing more is started beside them.
+      recordRemainder(ORPHAN_REMAINDER_LOG, { scope: false, envClean: false, gates: gates.slice(index + 1) });
+      return 'error';
+    }
   }
 
   // The loop's own check cannot see a cancel that landed during the LAST gate:

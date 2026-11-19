@@ -19,17 +19,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   runVerify,
-  verifyBusyTimeoutSec,
-  VERIFY_BUSY_FALLBACK_SEC,
-  VERIFY_BUSY_MARGIN_SEC,
-  VERIFY_BUSY_UNREADABLE_SEC,
+  VERIFY_BUSY_CAP_SEC,
   VERIFY_UNREACHABLE_SEC,
 } from '../../../../scripts/orchestrate/wait-verify.mjs';
-import { loadVerifyConfig, mutexWaitBudgetSec } from '../../../../src/lib/verification/verify-config';
-import { MAX_CONCURRENT_VERIFICATIONS } from '../../../../src/lib/verification/gate-runner';
 
 const POLL_MS = 30_000;
-const SLEEP_CEILING = 20_000;
+const SLEEP_CEILING = 30_000;
 const BUSY_LOG = "Error: A verification run is already in progress for 'wt-1' (run 7)\n";
 const PASS_LOG = 'Verifying: wt-1 (run 8)\nGATE scope PASS (exit=0, 0.1s)\nRESULT passed\n';
 
@@ -160,7 +155,7 @@ describe('#4463 dead runs are given up on in a finite time (I2, I3)', () => {
   it('D2 a run that stays running for ever (F3/F4): exit 99 at the cap', () => {
     const r = busyWait([running([{ gateId: 'unit', status: 'running' }])]);
     expectGivenUp(r, 'cap');
-    const cap = verifyBusyTimeoutSec(worktree);
+    const cap = VERIFY_BUSY_CAP_SEC;
     expect(r.waitedSec).toBeGreaterThanOrEqual(cap - 30);
     expect(r.waitedSec).toBeLessThanOrEqual(cap + 60);
   });
@@ -171,92 +166,37 @@ describe('#4463 dead runs are given up on in a finite time (I2, I3)', () => {
   });
 });
 
-describe('#4463 the cap comes from verify.yaml', () => {
-  const write = (text: string) => {
+describe('#4463 review 2 / PM: the cap is one named constant, 7 days, whatever verify.yaml says', () => {
+  const writeYaml = (text: string) => {
     fs.mkdirSync(path.join(worktree, '.commandmate'), { recursive: true });
     fs.writeFileSync(path.join(worktree, '.commandmate', 'verify.yaml'), text);
   };
-  const runs = MAX_CONCURRENT_VERIFICATIONS + 1;
 
-  it('N2 is never below (slots + 1) × the worst run this repository’s verify.yaml allows, nor below the floor', () => {
-    const config = loadVerifyConfig(path.resolve(__dirname, '../../../..'));
-    expect(config?.gates.length).toBeGreaterThan(5);
-    const perRun =
-      config!.gates.reduce((sum, g) => sum + (g.mutex ? mutexWaitBudgetSec(g) : 0) + g.timeoutSec * (1 + (g.retryOnFail ?? 0)), 0) +
-      VERIFY_BUSY_MARGIN_SEC;
-    expect(verifyBusyTimeoutSec(worktree)).toBe(Math.max(VERIFY_BUSY_FALLBACK_SEC, runs * perRun));
-  });
-
-  it('follows the worktree’s own verify.yaml above the floor (mutexWaitSec, retryOnFail, omitted and quoted timeoutSec)', () => {
-    write(
-      [
-        'version: 1',
-        'gates:',
-        '  - id: unit',
-        '    command: "true"',
-        '    timeoutSec: "7200"',
-        '    mutex: cpu.heavy',
-        '    mutexWaitSec: 86400',
-        '    retryOnFail: 1',
-        '  - id: lint',
-        '    command: "true"',
-        '',
-      ].join('\n')
-    );
-    const perRun = 86400 + 7200 * 2 + 600 + VERIFY_BUSY_MARGIN_SEC;
-    expect(verifyBusyTimeoutSec(worktree)).toBe(runs * perRun);
-  });
-
-  it('a verify.yaml that is there but cannot be read gives the large side, not another file', () => {
-    write('version: 1\ngates: [unclosed\n');
-    expect(verifyBusyTimeoutSec(worktree)).toBe(VERIFY_BUSY_UNREADABLE_SEC);
-    write('version: 1\ngates:\n  - id: unit\n    command: "true"\n    timeoutSec: soon\n');
-    expect(verifyBusyTimeoutSec(worktree)).toBe(VERIFY_BUSY_UNREADABLE_SEC);
-  });
-});
-
-describe('#4463 review 1 P3-1/P3-2: the wait uses the worktree’s cap, and the decided numbers stay', () => {
-  const highCapYaml = [
-    'version: 1',
-    'gates:',
-    '  - id: unit',
-    '    command: "true"',
-    '    timeoutSec: 7200',
-    '    mutex: cpu.heavy',
-    '    mutexWaitSec: 86400',
-    '    retryOnFail: 1',
-    '',
-  ].join('\n');
-  /** 3 × (86400 + 7200 × 2 + margin 600). */
-  const HIGH_CAP = 3 * (86400 + 7200 * 2 + 600);
-  const useHighCap = () => {
-    fs.mkdirSync(path.join(worktree, '.commandmate'), { recursive: true });
-    fs.writeFileSync(path.join(worktree, '.commandmate', 'verify.yaml'), highCapYaml);
-  };
-
-  it('P3-1 a run alive longer than the floor (86400 s) is waited for when the worktree’s cap is higher', () => {
-    useHighCap();
-    expect(verifyBusyTimeoutSec(worktree)).toBe(HIGH_CAP);
-    expectWaitedOut(busyWait([...repeat(polls(100_000), running([{ gateId: 'unit', status: 'running' }])), { status: 'passed' }]));
-  });
-
-  it('P3-1 a run that never ends is given up on at the worktree’s cap, not at the floor', () => {
-    useHighCap();
-    const r = busyWait([running([{ gateId: 'unit', status: 'running' }])]);
-    expectGivenUp(r, 'cap');
-    expect(r.waitedSec).toBeGreaterThanOrEqual(HIGH_CAP - 30);
-    expect(r.waitedSec).toBeLessThanOrEqual(HIGH_CAP + 60);
-  });
-
-  it('P3-2 the decided numbers: unreachable 1800 s, unreadable verify.yaml 172800 s, floor 86400 s', () => {
+  it('the decided numbers: cap 604800 s (7 days), unreachable 1800 s', () => {
+    expect(VERIFY_BUSY_CAP_SEC).toBe(604_800);
     expect(VERIFY_UNREACHABLE_SEC).toBe(1800);
-    expect(VERIFY_BUSY_UNREADABLE_SEC).toBe(172800);
-    expect(VERIFY_BUSY_FALLBACK_SEC).toBe(86400);
     const r = busyWait([null]);
     expect(r.waitedSec).toBeGreaterThanOrEqual(1770);
     expect(r.waitedSec).toBeLessThanOrEqual(1830);
-    fs.mkdirSync(path.join(worktree, '.commandmate'), { recursive: true });
-    fs.writeFileSync(path.join(worktree, '.commandmate', 'verify.yaml'), 'gates: [unclosed\n');
-    expect(verifyBusyTimeoutSec(worktree)).toBe(172800);
+  });
+
+  it('L7 a run longer than any verify.yaml formula gave (contract gates: 13 × 7000 s and more) is waited for', () => {
+    // review 2 P1-1: contract-declared gates are not in verify.yaml; 120000 s is past the old 86400 floor.
+    expectWaitedOut(busyWait([...repeat(polls(120_000), running([{ gateId: 'contract-12', status: 'running' }])), { status: 'passed' }]));
+  });
+
+  it('a verify.yaml the server would refuse (a 400-digit timeoutSec) does not make the cap infinite', () => {
+    // review 2 P1-2: the wait does not read verify.yaml at all any more.
+    writeYaml(`version: 1\ngates:\n  - id: unit\n    command: "true"\n    timeoutSec: "${'9'.repeat(400)}"\n    mutex: cpu.heavy\n`);
+    const r = busyWait([running([{ gateId: 'unit', status: 'running' }])]);
+    expectGivenUp(r, 'cap');
+    expect(r.waitedSec).toBeGreaterThanOrEqual(604_800 - 30);
+    expect(r.waitedSec).toBeLessThanOrEqual(604_800 + 60);
+  });
+
+  it('a small verify.yaml does not lower the cap either', () => {
+    writeYaml('version: 1\ngates:\n  - id: lint\n    command: "true"\n    timeoutSec: 60\n');
+    const r = busyWait([...repeat(polls(200_000), running()), { status: 'passed' }]);
+    expectWaitedOut(r);
   });
 });

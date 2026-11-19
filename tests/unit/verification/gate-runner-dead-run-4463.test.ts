@@ -12,6 +12,13 @@
  * gate ended this way is never a pass (I3). Real processes and real repositories, under
  * os.tmpdir(); every escaped process is killed afterwards.
  *
+ * Review 2 (codex) / PM (pm-reply-4463-stop.md):
+ * - a git that does not return is no verdict: the run closes `error` (exit 99) on both the
+ *   work-evidence and the scope path, never `failed` (exit 20).
+ * - a gate whose descendants outlived the kill cannot be confirmed gone: the run closes `error`,
+ *   and the gate's mutex is held until the descendants are gone (bounded; past the bound it is
+ *   recorded and released), so the next gate on that mutex never runs beside them.
+ *
  * @vitest-environment node
  */
 
@@ -26,6 +33,8 @@ import { createTask, getVerificationRun, upsertWorktree } from '@/lib/db';
 import { parseTaskContract } from '@/lib/tasks/contract-parser';
 import * as runner from '@/lib/verification/gate-runner';
 import * as scopeGate from '@/lib/verification/scope-gate';
+import { acquireMachineLock, MACHINE_LOCK_ROOT_ENV } from '@/lib/verification/machine-lock';
+import { exitCodeForRunStatus } from '@/cli/utils/verify-runner';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
 declare module '@/lib/db/db-instance' {
@@ -104,6 +113,9 @@ async function runWithin(
 }
 
 beforeEach(async () => {
+  const lockRoot = realpathSync(mkdtempSync(join(tmpdir(), 'locks-4463-')));
+  tempDirs.push(lockRoot);
+  vi.stubEnv(MACHINE_LOCK_ROOT_ENV, lockRoot);
   db = new Database(':memory:');
   runMigrations(db);
   const { setMockDb } = await import('@/lib/db/db-instance');
@@ -114,6 +126,8 @@ afterEach(() => {
   process.env.PATH = originalPath;
   (runner as { setRunGitTimeoutMsForTests?: (ms?: number) => void }).setRunGitTimeoutMsForTests?.();
   (scopeGate as { setScopeRunGitTimeoutMsForTests?: (ms?: number) => void }).setScopeRunGitTimeoutMsForTests?.();
+  (runner as { setOrphanMutexHoldMsForTests?: (ms?: number) => void }).setOrphanMutexHoldMsForTests?.();
+  vi.unstubAllEnvs();
   for (const file of pidFiles.splice(0)) {
     try {
       process.kill(Number(readFileSync(file, 'utf8')), 'SIGKILL');
@@ -131,7 +145,7 @@ afterEach(() => {
 
 describe('#4463 F1: a gate whose descendant keeps the pipes open after the kill', () => {
   it(
-    'closes as timeout a grace after the kill, and the run as failed (not passed)',
+    'closes as timeout a grace after the kill, and the run as error (exit 99, not passed)',
     async () => {
       const repo = createRepo(`
 version: 1
@@ -164,7 +178,9 @@ options:
       expect(gate?.status).toBe('timeout');
       expect(gate?.exitCode).toBeNull();
       expect(gate?.logTail ?? '').toMatch(/pipes still held/);
-      expect(run?.status).toBe('failed');
+      // Review 2 P2 / PM: the descendants could not be confirmed gone, so no verdict (exit 99).
+      expect(run?.status).toBe('error');
+      expect(exitCodeForRunStatus(run!.status)).toBe(99);
     },
     TEST_TIMEOUT_MS
   );
@@ -225,6 +241,8 @@ options:
       expect(run?.status).not.toBe('passed');
       const evidence = run?.gates.find((g) => g.gateId === runner.WORK_EVIDENCE_GATE_ID);
       expect(evidence?.status).toBe('error');
+      expect(run?.status).toBe('error');
+      expect(exitCodeForRunStatus(run!.status)).toBe(99);
     },
     TEST_TIMEOUT_MS
   );
@@ -276,6 +294,8 @@ options:
       expect(run?.status).not.toBe('passed');
       const evidence = run?.gates.find((g) => g.gateId === runner.WORK_EVIDENCE_GATE_ID);
       expect(evidence?.status).toBe('error');
+      expect(run?.status).toBe('error');
+      expect(exitCodeForRunStatus(run!.status)).toBe(99);
       expect(existsSync(join(repo, 'reached'))).toBe(false);
     },
     TEST_TIMEOUT_MS
@@ -316,11 +336,124 @@ options:
       expect(run?.gates.find((g) => g.gateId === runner.WORK_EVIDENCE_GATE_ID)?.status).not.toBe('error');
       const scope = run?.gates.find((g) => g.gateId === runner.SCOPE_GATE_ID);
       expect(scope?.status).toBe('error');
+      // Review 2 P1-3: a git timeout is no verdict on the scope path too — error / exit 99, not failed / 20.
+      expect(run?.status).toBe('error');
+      expect(exitCodeForRunStatus(run!.status)).toBe(99);
+      // The gates after it were not run beside an unanswered git.
+      expect(existsSync(join(repo, 'reached'))).toBe(false);
     },
     TEST_TIMEOUT_MS
   );
 
   it('keeps a limit by default, the same as the runner’s', () => {
     expect((scopeGate as { SCOPE_RUN_GIT_TIMEOUT_MS?: number }).SCOPE_RUN_GIT_TIMEOUT_MS).toBe(runner.RUN_GIT_TIMEOUT_MS);
+  });
+});
+
+/** Whether `name` can be taken now (taken and released at once), within `ms`. */
+async function lockFree(name: string, ms = 500): Promise<boolean> {
+  const lock = await acquireMachineLock(name, { timeoutMs: ms });
+  if (lock.acquired) lock.handle.release();
+  return lock.acquired;
+}
+
+/** A gate on mutex `name` whose descendant (pid in `pidFile`) escapes the kill holding its stdout for `sec`. */
+function escapingMutexRepo(name: string, sec: number): { repo: string; pidFile: string } {
+  const repo = createRepo(`
+version: 1
+gates:
+  - id: escapes
+    command: "node escape.js escaped.pid; sleep 120"
+    timeoutSec: 1
+    mutex: ${name}
+options:
+  baseRef: main
+`);
+  writeFileSync(
+    join(repo, 'escape.js'),
+    [
+      "const { spawn } = require('child_process');",
+      `const c = spawn('sleep', ['${sec}'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });`,
+      "require('fs').writeFileSync(process.argv[2], String(c.pid));",
+      'c.unref();',
+    ].join('\n')
+  );
+  const pidFile = join(repo, 'escaped.pid');
+  pidFiles.push(pidFile);
+  return { repo, pidFile };
+}
+
+async function until(check: () => Promise<boolean>, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    if (await check()) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+describe('#4463 review 2 P2: the mutex is not handed on while a released gate\'s descendants live', () => {
+  it(
+    'holds the mutex while the escaped descendant lives, and hands it on once it is gone',
+    async () => {
+      const name = `t4463-hold-${process.pid}`;
+      const { repo, pidFile } = escapingMutexRepo(name, 120);
+      register('wt-mutex-hold', repo);
+
+      const { runId, settled } = await runWithin('wt-mutex-hold', repo);
+
+      expect(settled).toBe(true);
+      expect(getVerificationRun(db, runId)?.status).toBe('error');
+      // The run is closed, but its descendant still runs: the next gate on the mutex must wait.
+      expect(await lockFree(name)).toBe(false);
+      process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+      expect(await until(() => lockFree(name), 15_000)).toBe(true);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'past the hold limit, the mutex is recorded and handed on even with the descendant alive',
+    async () => {
+      const name = `t4463-bound-${process.pid}`;
+      const { repo } = escapingMutexRepo(name, 120);
+      register('wt-mutex-bound', repo);
+      (runner as { setOrphanMutexHoldMsForTests?: (ms?: number) => void }).setOrphanMutexHoldMsForTests?.(3000);
+
+      const { settled } = await runWithin('wt-mutex-bound', repo);
+
+      expect(settled).toBe(true);
+      expect(await until(() => lockFree(name), 15_000)).toBe(true);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'negative control: a gate killed with nothing escaping hands the mutex on at once, and the run is failed (a verdict)',
+    async () => {
+      const name = `t4463-plain-${process.pid}`;
+      const repo = createRepo(`
+version: 1
+gates:
+  - id: slow
+    command: "sleep 30"
+    timeoutSec: 1
+    mutex: ${name}
+options:
+  baseRef: main
+`);
+      register('wt-mutex-plain', repo);
+
+      const { runId, settled } = await runWithin('wt-mutex-plain', repo);
+
+      expect(settled).toBe(true);
+      expect(getVerificationRun(db, runId)?.status).toBe('failed');
+      expect(await lockFree(name)).toBe(true);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it('keeps a hold limit by default', () => {
+    expect((runner as { ORPHAN_MUTEX_HOLD_MS?: number }).ORPHAN_MUTEX_HOLD_MS).toBe(1_800_000);
   });
 });

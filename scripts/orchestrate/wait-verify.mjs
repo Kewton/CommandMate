@@ -99,7 +99,6 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import YAML from 'yaml';
 import { appendRecord, envCleanItemsNote, envCleanShared, formatEnvCleanShared, inItem, readRecords } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
@@ -134,83 +133,23 @@ export const START_TASK_RETRY_MS = 5_000;
  * `running` is alive, and is waited for — queued for a slot, waiting on a mutex or inside a long
  * gate, its rows do not move for hours, so their moving is no sign of life (Sprint 7, #4459
  * reviews 1–3). A run whose execution died while the server lives on closes its own row (the
- * runner's kill, its catch, and since #4463 its release of held pipes and its git limit), and a
+ * runner's kill, its catch, and since #4463 its release of held pipes and its git limits), and a
  * server that died answers nothing. So the wait gives up (exit 99, never a verdict) only when:
  * - the server has not answered for VERIFY_UNREACHABLE_SEC (a rebuild takes minutes; a restarted
  *   server closes the run as `error`, and the wait then verifies again), or
- * - the cap ran out: (MAX_CONCURRENT_VERIFICATIONS + 1) × the worst one run of verify.yaml may
- *   take, never below VERIFY_BUSY_FALLBACK_SEC. It is what ends a row left `running` with no one
- *   behind it (a close that failed twice, a promise that never settles: known limits).
+ * - VERIFY_BUSY_CAP_SEC ran out. One named constant, not a formula over verify.yaml: a formula
+ *   kept undercounting the real worst (gates a contract adds, a mutex wait per retry) and could be
+ *   made infinite by a value the server refuses (#4463 review 2). It is what ends a row left
+ *   `running` with no one behind it (a close that failed twice, a promise that never settles:
+ *   known limits, #4494).
  * Both are counted in time this process was awake ({@link VERIFY_AWAKE_STEP_MAX_SEC}), so a laptop
- * that slept or a clock that jumped does not spend them. A run queued behind more than two runs at
- * their worst can still meet the cap; the cap is exit 99 too.
+ * that slept or a clock that jumped does not spend them.
  */
-export const VERIFY_BUSY_MARGIN_SEC = 600;
-/** The floor of the cap: the longest `mutexWaitSec` verify-config.ts accepts (MAX_MUTEX_WAIT_SEC). */
-export const VERIFY_BUSY_FALLBACK_SEC = 86400;
-/** The cap when the worktree's verify.yaml is there but cannot be read: the large side, never another file. */
-export const VERIFY_BUSY_UNREADABLE_SEC = 172800;
+export const VERIFY_BUSY_CAP_SEC = 604_800;
 /** How long the server may not answer about the run before the wait gives up. */
 export const VERIFY_UNREACHABLE_SEC = 1800;
-/** Runs one cap covers: the one waited for and the runs holding the slots ahead of it (gate-runner MAX_CONCURRENT_VERIFICATIONS = 2). */
-export const VERIFY_BUSY_CAP_RUNS = 3;
 /** The most one poll counts towards the windows: two poll intervals and one query timeout. */
 export const VERIFY_AWAKE_STEP_MAX_SEC = 2 * SIGNAL_POLL_SEC + QUERY_TIMEOUT_MS / 1000;
-/** verify-config.ts DEFAULT_TIMEOUT_SEC: a gate without `timeoutSec`. */
-const DEFAULT_GATE_TIMEOUT_SEC = 600;
-const REPO_VERIFY_CONFIG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.commandmate/verify.yaml');
-
-/** A positive integer as verify-config.ts reads one (a number, or its exact decimal spelling in quotes), else null. */
-function configInteger(value) {
-  if (typeof value === 'number') return Number.isInteger(value) && value > 0 ? value : null;
-  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value) > 0 ? Number(value) : null;
-  return null;
-}
-
-/** Seconds the worst one run of these gates may take, or null when one of them cannot be read. */
-function worstRunSec(gates) {
-  let total = VERIFY_BUSY_MARGIN_SEC;
-  for (const gate of gates) {
-    if (!gate || typeof gate !== 'object') return null;
-    const timeout = gate.timeoutSec === undefined ? DEFAULT_GATE_TIMEOUT_SEC : configInteger(gate.timeoutSec);
-    const mutexWait = gate.mutexWaitSec === undefined ? timeout : configInteger(gate.mutexWaitSec);
-    const retries = gate.retryOnFail === undefined || gate.retryOnFail === 0 || gate.retryOnFail === '0' ? 0 : configInteger(gate.retryOnFail);
-    if (timeout === null || mutexWait === null || retries === null) return null;
-    total += (gate.mutex ? mutexWait : 0) + timeout * (1 + retries);
-  }
-  return total;
-}
-
-/**
- * Seconds the busy wait may last at most (the cap), from the worktree's verify.yaml; this
- * repository's own when the worktree has none. One that is there but cannot be read gives
- * VERIFY_BUSY_UNREADABLE_SEC rather than another file's value (#4459 review 2 P2-2).
- *
- * @param {string} [worktree]
- * @param {{ readFile?: (file: string) => string }} [deps]
- */
-export function verifyBusyTimeoutSec(worktree, { readFile = (file) => fs.readFileSync(file, 'utf8') } = {}) {
-  const files = [worktree ? path.join(worktree, '.commandmate', 'verify.yaml') : null, REPO_VERIFY_CONFIG].filter(Boolean);
-  for (const file of files) {
-    let text;
-    try {
-      text = readFile(file);
-    } catch (error) {
-      if (error?.code === 'ENOENT') continue;
-      return VERIFY_BUSY_UNREADABLE_SEC;
-    }
-    let gates;
-    try {
-      gates = YAML.parse(text)?.gates;
-    } catch {
-      return VERIFY_BUSY_UNREADABLE_SEC;
-    }
-    const perRun = Array.isArray(gates) && gates.length > 0 ? worstRunSec(gates) : null;
-    if (perRun === null) return VERIFY_BUSY_UNREADABLE_SEC;
-    return Math.max(VERIFY_BUSY_FALLBACK_SEC, VERIFY_BUSY_CAP_RUNS * perRun);
-  }
-  return VERIFY_BUSY_UNREADABLE_SEC;
-}
 export const VERIFY_BUSY_ATTEMPTS = 3;
 /**
  * A verification that reached no verdict only because a gate's machine-wide
@@ -992,7 +931,7 @@ function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
     sleep(SIGNAL_POLL_SEC * 1000);
     return { ended: true, superseded: supersededBy?.() ?? null };
   }
-  const capSec = verifyBusyTimeoutSec(o.worktree);
+  const capSec = VERIFY_BUSY_CAP_SEC;
   let awakeSec = 0;
   let unreachableSec = 0;
   let last = now().getTime();

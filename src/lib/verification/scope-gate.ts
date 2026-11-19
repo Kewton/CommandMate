@@ -234,6 +234,17 @@ export function setScopeRunGitTimeoutMsForTests(ms?: number): void {
   scopeRunGitTimeoutMs = ms ?? SCOPE_RUN_GIT_TIMEOUT_MS;
 }
 
+/** The first word of the message of a git call that did not return (Issue #4463). */
+export const GIT_TIMEOUT_REASON = 'reason=git-timeout';
+
+/**
+ * Whether a gate's log says one of its git calls did not return: no verdict (the run closes
+ * `error`, exit 99), never a failed check (Issue #4463, review 2 P1-3).
+ */
+export function isGitTimeoutLog(logTail: string | null | undefined): boolean {
+  return (logTail ?? '').includes(GIT_TIMEOUT_REASON);
+}
+
 /**
  * Run a git plumbing command. No shell: every argument here is code-supplied. Bounded by
  * {@link SCOPE_RUN_GIT_TIMEOUT_MS} (Issue #4463): a call that does not come back is killed and
@@ -262,7 +273,11 @@ function runGit(
       }
       child.stdout?.destroy();
       child.stderr?.destroy();
-      settle({ code: null, stdout: '', stderr: `git ${args[0]} did not return within ${scopeRunGitTimeoutMs}ms` });
+      settle({
+        code: null,
+        stdout: '',
+        stderr: `${GIT_TIMEOUT_REASON} git ${args[0]} did not return within ${scopeRunGitTimeoutMs}ms`,
+      });
     }, scopeRunGitTimeoutMs);
     limit.unref?.();
     child.stdout?.on('data', (chunk: Buffer) => {
