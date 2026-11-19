@@ -103,7 +103,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 | I6 | 確定の後に起きる失敗は、方針の拒否ではない。S3 は try/finally で包み、送ったかどうか不明を含めて必ず S4 を通す。S4 は 1 トランザクションで今の失敗の約束を行う（タスクは `failed`、relay は取り消し、送っていなければ grant を戻し、note を閉じる）。確定の後に方針の判定をし直さない（I2） | §4.4 |
 | I7 | 新しい CLI と古いサーバーの組み合わせで、黙って柵を弱めない。能力の確認に失敗したら断る。新しい route の失敗の応答（404・5xx を含む）で、古い経路へ切り替えない。**端末以外の起点（`session`・`agent`・`schedule`・`unknown`）は、H3 の答えにかかわらず古い経路を使わない**（確かめ N4）。H3 は端末の起点の扱いだけを伺う | §4.6 |
 | I10 | S2 の中で起きる DB の外の副作用（WebSocket の配信・ログ）は、コミットの後へ回す。S2 の中では集めるだけで、戻したら捨てる（確かめ N2） | §4.2 (c)(d) |
-| I8 | 方針の判定は今の関数（`decideToolPolicy`・`decideRelayCreation`・Auto-Yes の方針）を使う。判定の表は変えない。#4420 の往復の数え方（`countConsecutiveReplyRounds(db, from): number`、同期。#4420 の設計 `relay-reply-not-parent-4420.md:128`）は、S2 の中でそのまま呼べる | §4.2 |
+| I8 | 方針の判定は今の関数（`decideToolPolicy`・`decideRelayCreation`・Auto-Yes の方針）を使う。判定の表は変えない。#4420 の往復の数の読み（設計し直しの後は `readRelaySessionRounds(db, from)`、`relay_session_rounds` の 1 行の同期の SELECT。`docs/design/relay-rounds-db-4420.md` §3.3）は、S2 の中でそのまま呼べる | §4.2 |
 | I9 | 拒否の優先順位を今と同じに保つ。方針の拒否（exit 33）は、非方針の拒否（所有・ロールの条件・モデル・契約の不正）より先に返す（レビュー A P3-1） | §4.2 S0 |
 
 **I1 の範囲の外（明記する）**:
@@ -189,7 +189,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
      - `resolveRelaySessionStrict` が失敗を返したら断る（I3b。`FALLBACK_CLI_TOOL` で判定しない）
      - strict を使うのは新しい route の S2 だけ。既存の `POST /api/relays` の `openRelay` は、今の fallback のまま変えない（I5、確かめ V3-2。`openRelay` は strict を使う口を引数で選ぶ）
      - 今の `resolveRelaySession`（`relay-session-ref.ts:58-85`、fallback つき）は配送（`relay-delivery.ts`）のために残す。中身は strict の版を包むだけにする
-     - #4420 の `replyRounds`（`countConsecutiveReplyRounds`、同期）も含む
+     - #4420 の `replyRounds`（`readRelaySessionRounds`、1 行の同期の読み。`relay-rounds-db-4420.md`）も含む
      - 結果: 名簿に無い ad-hoc の id ＋ `--agent antigravity` ＋ `--reply-to` は、`to` の tool が antigravity なので規則 0 で断られる（exit 33）。relay の行も system line も書かれない（N1）
   3. Auto-Yes: 方針、shutdown（`isAutoYesShutdownStarted()`）、`onlyIfOff`
      - `onlyIfOff` に当たったら、断らない。「既に on」として扱い、`after-send` に回す（今の CLI の扱い、`send.ts:1363-1368`。レビュー A P2-3）
