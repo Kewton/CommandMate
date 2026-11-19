@@ -25,8 +25,8 @@ argument-hint: "[version-type] (major|minor|patch) or [version] (e.g., 1.2.3)"
 
 - **`develop` ブランチ**が最新で、`origin/develop` と同期していること（リリースは develop 基点。main 基点ではない）
 - 作業ツリーがクリーンであること
-- 検証ゲートが通ること（Phase 2-3 参照）。**`npm run build` は primary checkout で回さない** —
-  稼働サーバの `.next` を壊すため。build の検証はリリース PR の CI が行う
+- 手元の検証（lint・typecheck。Phase 2-3 参照）が通ること。unit 全体・E2E・build は手元で回さず、リリース PR の CI の全件 success で裁定する（3-2）。
+  **`npm run build` は primary checkout で回さない** — 稼働サーバの `.next` を壊すため
 
 ## 全体の流れ
 
@@ -327,7 +327,7 @@ LP の hero には、prereq 行の下に版行が**静的に**書いてある（
 
 リリースのたびにこの 1 行を書き換える。`tests/unit/website/landing-page.test.ts` が
 **版を package.json の `version` と、日付を CHANGELOG の `## [X.Y.Z] - YYYY-MM-DD` 見出しと**
-突き合わせるので、書き換え忘れは 2-3 の `npm run test:unit` で落ちる。
+突き合わせるので、書き換え忘れはリリース PR の CI の `Unit Tests` で落ちる（手元の unit 全体は回さない。2-3）。
 
 ```bash
 # 日付は 2-2 の apply が CHANGELOG に書いた見出しから取る（JST で書き直さない。二重管理になる）
@@ -432,7 +432,7 @@ npx vitest run tests/unit/release-notes/release-notes-files.test.ts > /tmp/rel-n
 ```
 
 - `NOTES=0` であること。0 以外なら `/tmp/rel-notes.log` に出たファイル名と理由を見て直し、再実行する
-- 2-3 の `npm run test:unit` もこのテストを含むが、ノートの誤りはここで先に潰す
+- リリース PR の CI の `Unit Tests` もこのテストを含むが、ノートの誤りはここで先に潰す
 - GitHub Release のノート（4-3）はこれまでどおり CHANGELOG の転記。このファイルは使わない
 
 ### 2-3. 品質ゲート
@@ -458,16 +458,21 @@ RESULT error → exit 99
 
 したがって develop で `verify` を叩くと**何も検証されないまま exit 99 が返る**。
 
-**手動で以下の 3 つを回す。`npm run build` は含めない。**
+**手動で以下の 2 つを回す。`npm run build` も `npm run test:unit`（unit 全体）も含めない。**
 
 ```bash
 npm run lint      > /tmp/rel-lint.log 2>&1; echo "LINT=$?"
 npx tsc --noEmit  > /tmp/rel-tsc.log  2>&1; echo "TSC=$?"
-npm run test:unit > /tmp/rel-unit.log 2>&1; echo "UNIT=$?"
 ```
 
 `> ファイル 2>&1; echo $?` の形を崩さないこと。`| grep` に繋ぐと exit code が grep のものに
-化け、失敗を成功として読む。3 つとも 0 であること。1 つでも落ちたら修正してから進む（3 回失敗で中断）。
+化け、失敗を成功として読む。2 つとも 0 であること。1 つでも落ちたら修正してから進む（3 回失敗で中断）。
+
+**unit 全体の合否は、手元ではなくリリース PR の CI で裁定する。** `ci-pr.yml` の `Unit Tests` は
+同じ全体を 4 分割（shard 1/4〜4/4）で流し、別マシンで走るので稼働サーバに影響しない。手元で全体を回すと
+同じマシンのほかの検証と負荷で食い合う。PR を作った後、3-2 で **unit の全 shard と E2E の両 shard
+（shard 1/2・2/2）を含む全チェックが success** であることを確かめる。1 つでも fail・cancel・未完なら、
+リリースの可否は出さない（関門は弱めない。手元の lint・typecheck の合格で CI の赤を覆さない）。
 
 **build の検証は CI に委ねる。** リリース PR の `ci-pr.yml` に Build ジョブがあり、
 別マシンで実行されるので稼働サーバに影響しない。どうしても手元で build を確認したい場合は
@@ -559,6 +564,9 @@ done
 gh pr view <PR番号> --repo Kewton/CommandMate --json mergeable,statusCheckRollup \
   -q '"mergeable=\(.mergeable) 非SUCCESS: " + ([.statusCheckRollup[]?|select((.conclusion // .state)!="SUCCESS")|"\(.name // .context)=\(.conclusion // .state)"]|join(" "))'
 ```
+
+unit の全 shard（`Unit Tests (shard 1/4)`〜`(4/4)`）と E2E の両 shard（`E2E Tests (shard 1/2)`・`(2/2)`）を含む全件が
+`SUCCESS` であること（2-3 のとおり、unit 全体は手元で回さずここで裁定する）。
 
 **CI 限定の赤を反射的に flake 扱いしないこと。** ローカル緑・CI 赤は、ロケールや OS 差など
 実在の移植性欠陥であることがある（#1623 で awk のロケール依存を実際にこの形で検出した）。
