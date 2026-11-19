@@ -24,10 +24,10 @@ let createdWorkspace = false;
 let fakeCopy: string | null = null;
 
 function makeFakeCopy(): string {
-  if (!fs.existsSync(WORKSPACE)) {
-    fs.mkdirSync(WORKSPACE);
-    createdWorkspace = true;
-  }
+  // recursive:true なので、同時に workspace/ が作られても EEXIST で落ちない
+  const existedBefore = fs.existsSync(WORKSPACE);
+  fs.mkdirSync(WORKSPACE, { recursive: true });
+  createdWorkspace = !existedBefore;
   const dir = fs.mkdtempSync(path.join(WORKSPACE, 'fake-copy-4488-'));
   fakeCopy = dir;
   fs.mkdirSync(path.join(dir, 'tests', 'unit'), { recursive: true });
