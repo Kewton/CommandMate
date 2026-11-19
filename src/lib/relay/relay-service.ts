@@ -44,7 +44,12 @@ import {
   type RelayRefusal,
 } from '@/lib/relay/relay-policy';
 import { isRelayDeliveryClaimed } from '@/lib/relay/relay-delivery-claims';
-import { relayWorktreeExists, resolveRelaySession } from '@/lib/relay/relay-session-ref';
+import {
+  relayWorktreeExists,
+  resolveRelayEndpointTool,
+  resolveRelaySession,
+} from '@/lib/relay/relay-session-ref';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
 import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import { createLogger } from '@/lib/logger';
@@ -68,6 +73,12 @@ export interface OpenRelayInput {
    * question (`bind: true`), and the relay is answered from that send only.
    */
   bind?: boolean;
+  /**
+   * Issue #4496: the tool the send asked the `to` end for (`send --agent`). An ad-hoc
+   * id (not on the roster, not a tool name) is judged by it for rule 0 instead of the
+   * worktree's default; a roster row and a tool-named id still decide by themselves.
+   */
+  toCliToolId?: CLIToolType;
 }
 
 /** A refusal that names which endpoint was not found. */
@@ -223,9 +234,11 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     openBetween: countOpenRelaysBetween(db, input.from, input.to),
     // Issue #4437: rule 0 — each end's tool by the resolver the send route and
     // the delivery use, and the declaration as stated (no credentials read).
+    // Issue #4496: the `to` end with the tool the send asked for (the one typed into
+    // an ad-hoc id), and an end that cannot be read is refused (null), not guessed.
     tools: {
-      from: resolveRelaySession(db, input.from).cliToolId,
-      to: resolveRelaySession(db, input.to).cliToolId,
+      from: resolveRelayEndpointTool(db, input.from),
+      to: resolveRelayEndpointTool(db, input.to, input.toCliToolId),
       declaration: readUsageDeclaration(),
     },
   });

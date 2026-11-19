@@ -318,7 +318,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 
 ### Antigravity への送信の柵（Issue #4437）
 
-**Antigravity への送信の柵（既定）** — 利用形態を申告していないあいだ、antigravity の instance への `send`・`ask`・`respond`（厳格モードを含む）は、CommandMate のセッションの中・Schedule・AI エージェントの中・起点の分からない呼び出し（端末の無い実行など）から送られたものを、何も打たずに断ります（exit 33）。antigravity を端点にする relay（`send --reply-to`・`ask --async`）も作れません（exit 33。relay のほかの拒否の exit 2 とは別）。画面と、端末で人が打つコマンドは今までどおり送れます。
+**Antigravity への送信の柵（既定）** — 利用形態を申告していないあいだ、antigravity の instance への `send`・`ask`・`respond`（厳格モードを含む）は、CommandMate のセッションの中・Schedule・AI エージェントの中・起点の分からない呼び出し（端末の無い実行など）から送られたものを、何も打たずに断ります（exit 33）。antigravity を端点にする relay（`send --reply-to`・`ask --async`）も作れません（exit 33。relay のほかの拒否の exit 2 とは別）。画面と、端末で人が打つコマンドは今までどおり送れます。名簿に無い instance をアドホックに指定した relay（`send --agent antigravity --instance <名簿に無い id> --reply-to …`）も、端末からを含め `--agent` の tool で判定して断ります（Issue #4496。以前は worktree の既定の tool で判定したため、端末からは relay が開いて打鍵まで進み exit 0 でした。今は exit 33。tool を決められない端も断ります）。
 
 **CLI の利用上の注意（#4438）**: `instances <worktree-id> add --agent antigravity` と、antigravity の instance への `send`・`ask`・`respond` は、利用上の注意と規約・FAQ のリンクを **stderr だけ**に出します（stdout と `--json` には混ぜません。拒否のときは拒否の理由の行などの後）。出すのは CLI の環境（記録 `antigravity-notice.json` の置き場所。グローバル install なら `~/.commandmate`、ローカル実行（リポジトリの checkout から）なら CLI のパッケージの根で、作業中のディレクトリ（cwd）を基準には決めません）ごとに初めての 1 回で、規約の確認日が変わると再び出ます。記録を読めないとき・書けないときは出して続け、結果と exit は変わりません。
 

@@ -39,6 +39,7 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import {
   decideToolPolicy,
   RELAY_TOOL_POLICY_DENIED,
+  TOOL_POLICY_TABLE,
   type ToolPolicyDecision,
   type UsageDeclaration,
 } from '@/lib/tool-policy/policy';
@@ -108,10 +109,14 @@ export interface RelayRefusal {
   toolPolicy?: RelayToolPolicyDenial;
 }
 
-/** The tools at both ends and the usage declaration, for rule 0 (Issue #4437). */
+/**
+ * The tools at both ends and the usage declaration, for rule 0 (Issue #4437).
+ * Issue #4496: `null` is an end whose tool could not be read; it is judged as every
+ * tool (refused when any tool would be), never let through.
+ */
 export interface RelayEndpointTools {
-  from: CLIToolType;
-  to: CLIToolType;
+  from: CLIToolType | null;
+  to: CLIToolType | null;
   declaration: UsageDeclaration;
 }
 
@@ -127,13 +132,18 @@ export const RELAY_TOOL_POLICY_DENIED_MESSAGE =
  */
 export function findRelayToolPolicyDenial(tools: RelayEndpointTools): RelayToolPolicyDenial | null {
   for (const endpoint of ['from', 'to'] as const) {
-    const decision = decideToolPolicy({
-      tool: tools[endpoint],
-      operation: 'relay',
-      origin: 'relay',
-      declaration: tools.declaration,
-    });
-    if (!decision.allowed) return { endpoint, decision };
+    const tool = tools[endpoint];
+    // Issue #4496: an end of no known tool is fail-closed — any tool it might be.
+    const candidates = tool === null ? (Object.keys(TOOL_POLICY_TABLE) as CLIToolType[]) : [tool];
+    for (const candidate of candidates) {
+      const decision = decideToolPolicy({
+        tool: candidate,
+        operation: 'relay',
+        origin: 'relay',
+        declaration: tools.declaration,
+      });
+      if (!decision.allowed) return { endpoint, decision };
+    }
   }
   return null;
 }

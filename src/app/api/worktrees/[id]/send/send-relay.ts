@@ -14,7 +14,13 @@ import { getAgentEventSource } from '@/lib/hooks/sources/registry';
 import { buildCompositeKey } from '@/lib/auto-yes-state';
 import type { ChatMessage } from '@/types/models';
 import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind';
+import { getRelayById } from '@/lib/db/relay-db';
+import { resolveRelayEndpointTool } from '@/lib/relay/relay-session-ref';
+import { findRelayToolPolicyDenial, RELAY_TOOL_POLICY_DENIED_MESSAGE } from '@/lib/relay/relay-policy';
+import { RELAY_TOOL_POLICY_DENIED } from '@/lib/tool-policy/policy';
+import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import type { SendStep } from './send-request';
+import { toolPolicyDetail } from './send-tool-policy';
 
 /**
  * What the handler learned about a relay-bound send, for `POST` (route.ts) to settle
@@ -124,4 +130,35 @@ export function reserveRelayForSend(
     return { ok: true, value: reservation.binding };
   }
   return { ok: true, value: null };
+}
+
+/**
+ * Issue #4496: rule 0 of the relay a send is bound to, judged again with the tool this
+ * send types into (`cliToolId`, resolved from the body's `cliToolId` the strict way).
+ * `POST /api/relays` judged the `to` end by what it was told, and a CLI before #4496
+ * told it nothing: an ad-hoc instance was judged by the worktree's default while the
+ * send typed into antigravity. Here the tool is the one actually driven. The `from`
+ * end is read as `POST /api/relays` reads it; an end that cannot be read is refused.
+ *
+ * @returns The 409 body (`POST /api/relays`'s own), or null when the send may go on
+ */
+export function findBoundRelayToolPolicyRefusal(
+  db: Database.Database,
+  relayId: string,
+  cliToolId: CLIToolType,
+): Record<string, unknown> | null {
+  let from: CLIToolType | null = null;
+  try {
+    const relay = getRelayById(db, relayId);
+    if (relay) from = resolveRelayEndpointTool(db, relay.from);
+  } catch {
+    // Unreadable: `from` stays null, which rule 0 refuses (fail-closed).
+  }
+  const denial = findRelayToolPolicyDenial({ from, to: cliToolId, declaration: readUsageDeclaration() });
+  if (!denial) return null;
+  return {
+    error: RELAY_TOOL_POLICY_DENIED_MESSAGE,
+    code: RELAY_TOOL_POLICY_DENIED,
+    policy: { ...toolPolicyDetail(denial.decision), endpoint: denial.endpoint },
+  };
 }

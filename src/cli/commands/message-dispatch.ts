@@ -8,6 +8,7 @@
  */
 
 import { ExitCode } from '../types';
+import { isCliToolId } from '../config/cli-tool-ids';
 import type { ChatMessage, RelayGetResponse } from '../types/api-responses';
 import { ApiClient, ApiError } from '../utils/api-client';
 import { paneCaptureCommand } from '../utils/follow-up-command';
@@ -67,6 +68,9 @@ export async function resolveRelayEndpoints(
 ): Promise<RelayEndpoints> {
   const from = await resolveRelayEndpoint(client, input.replyTo);
   const to = await resolveEndpointForWorktree(client, input.worktreeId, input.instance, input.agent);
+  // Issue #4496: the tool `--agent` asks for rides on the `to` end, so the server's rule 0
+  // judges an ad-hoc instance by the tool that will be typed into, not the worktree's default.
+  if (input.agent !== undefined && isCliToolId(input.agent)) to.cliToolId = input.agent;
   return { from, to };
 }
 
