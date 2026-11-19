@@ -33,8 +33,8 @@
  *
  * A notice (`plan-check: notice: cpu-heavy: …`, exit code unchanged) names the items of one wave
  * that can queue on the `cpu.heavy` mutex: `unit` / `integration`, and `unit-related` whose scope
- * can turn it into the whole suite (#4148). The scope says what may change, not what will, so it
- * asks for the order in the plan and does not stop the run.
+ * reaches files outside src/ and tests/ (#4148; since #4467 that runs related + repo-reading tests,
+ * not the whole suite). The scope says what may change, not what will, so it asks for the order in the plan and does not stop the run.
  *
  * A run without a state file is checked as before: `check` says it skipped
  * and exits 0, so calling this from the runbook changes nothing for such a run.
@@ -239,7 +239,7 @@ export function checkPlan(plan, { baseDir = process.cwd(), load = loadConfig } =
     const direct = item.gates.filter((gate) => CPU_HEAVY_GATES.includes(gate));
     const widens = item.config && item.gates.includes('unit-related') ? fullUnitPattern(item.config.scope) : null;
     if (direct.length === 0 && widens === null) continue;
-    const why = widens === null ? direct.join(',') : `unit-related, full by ${widens}`;
+    const why = widens === null ? direct.join(',') : `unit-related, scope outside src/tests ${widens}`;
     queueByWave.set(item.wave, [...(queueByWave.get(item.wave) ?? []), `${id} (${why})`]);
   }
   for (const [wave, queued] of queueByWave) {

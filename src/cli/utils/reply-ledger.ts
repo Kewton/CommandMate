@@ -61,11 +61,11 @@ const SYSTEM_ROW_REQUEST_ID_PREFIXES = ['relay-sys:', 'model-changed:'] as const
 /**
  * Tools whose reply CommandMate reads out of a transcript rather than a screen.
  *
- * For these five the ledger is authoritative and a row with no turn marker is
+ * For these six the ledger is authoritative and a row with no turn marker is
  * by definition not the answer. For every other tool (copilot / gemini /
  * vibe-local) the scraper's row is the only record there will ever be.
  *
- * Mirrors the five readers that live under `src/lib/hooks/sources/`.
+ * Mirrors the six readers that live under `src/lib/hooks/sources/`.
  */
 export const TRANSCRIPT_READER_TOOLS: ReadonlySet<string> = new Set([
   'claude',
@@ -73,6 +73,7 @@ export const TRANSCRIPT_READER_TOOLS: ReadonlySet<string> = new Set([
   'antigravity',
   'command-code',
   'opencode',
+  'opencode-v2',
 ]);
 
 /**
