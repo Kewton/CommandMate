@@ -63,6 +63,11 @@ function section(markdown: string, id: string): string {
   return (end === -1 ? rest : rest.slice(0, end)).join('\n');
 }
 
+/** The `| <label> | …` row of 1-2b's criteria table, or '' when the row is gone. */
+function tableRow(markdown: string, label: string): string {
+  return markdown.split('\n').find((line) => line.startsWith(`| ${label} |`)) ?? '';
+}
+
 /** What the 2026-11-19 decision requires, as a list of problems (empty when the docs agree). */
 function allocationProblems(docs: Docs): string[] {
   const problems: string[] = [];
@@ -80,12 +85,48 @@ function allocationProblems(docs: Docs): string[] {
   if (body.includes('変更する全箇所が `file:line` ＋「置換後のコード」')) {
     problems.push('the old fixed-diff condition still gates Command Code');
   }
-  for (const criterion of ['危険な領域', '設計', '原因が file:line まで特定されていない', '未決事項', '実機', '強い依存', '新規 export']) {
-    if (!body.includes(criterion)) problems.push(`the hard criterion is missing: ${criterion}`);
+
+  // Pin the hard criteria as the table rows themselves. Matching a bare word
+  // let 「閉じた設計」 keep 「設計」 alive after the row was gone (#4507 review).
+  const hardRows: Array<[string, string]> = [
+    ['危険な領域', '`src/lib/tmux/**`'],
+    ['危険な領域', 'セッション'],
+    ['危険な領域', '`src/lib/detection/**`'],
+    ['危険な領域', '`src/lib/polling/**`'],
+    ['危険な領域', 'hooks'],
+    ['危険な領域', '`src/lib/security/**`'],
+    ['危険な領域', 'DB migration'],
+    ['危険な領域', '`src/lib/cli-tools/**`'],
+    ['危険な領域', 'ws-server'],
+    ['判断の余地', '本文に選択肢か手順と受入条件が閉じていない判断が 1 つでもある'],
+    ['設計', '新規のガード・テストを 1 本まるごと**設計して**書く'],
+    ['原因', '原因が file:line まで特定されていない'],
+    ['未決事項', '「要調査」「未決」「実機で決める」などが残っている'],
+    ['検証', '画面・実機でしか決まらない'],
+    ['依存', '同じ関数の書き換えを伴う'],
+    ['新規 export', '新しいモジュールや公開関数を作り'],
+  ];
+  for (const [label, condition] of hardRows) {
+    const row = tableRow(body, label);
+    if (!row) problems.push(`the hard criterion row is missing: ${label}`);
+    else if (!row.includes(condition)) {
+      problems.push(`the hard criterion row lost its condition: ${label}: ${condition}`);
+    }
   }
-  for (const area of ['src/lib/tmux/**', 'セッション', 'src/lib/detection/**', 'src/lib/polling/**', 'hooks', 'src/lib/security/**', 'DB migration', 'src/lib/cli-tools/**', 'ws-server']) {
-    if (!body.includes(area)) problems.push(`the dangerous area was dropped: ${area}`);
-  }
+
+  // A closed judgment is the middle tier; a design (a whole new guard or test)
+  // stays opus under the 設計 row. The bullet that says what Command Code takes
+  // must not read 「判断・設計」 either (the review's P1, orchestrate.md:187).
+  const bullet = body
+    .split('\n')
+    .find((line) => line.startsWith('- **選択肢か手順と受入条件が本文で閉じている**')) ?? '';
+  if (!bullet) problems.push('the closed-body bullet is missing');
+  if (bullet.includes('設計')) problems.push('the Command Code bullet admits a design');
+  const middle = tableRow(body, '中');
+  if (!middle.includes('「閉じた判断」')) problems.push('the middle tier does not take a closed judgment');
+  if (middle.includes('閉じた設計')) problems.push('the middle tier admits a closed design');
+  if (!middle.includes('「設計」')) problems.push('the middle tier does not exclude design');
+
   if (!body.includes('逸脱時の退避路')) problems.push('the retreat rule is missing');
 
   // 3. The enabler closes the body, and the target share is counted.
@@ -163,7 +204,22 @@ describe('Issue #4507: the allocation rule', () => {
 
     it('positive: dropping the dangerous areas is reported', () => {
       const docs = copyDocs((text) => text.replace('src/lib/tmux/**', 'tmux'));
-      expect(allocationProblems(docs)).toContain('the dangerous area was dropped: src/lib/tmux/**');
+      expect(allocationProblems(docs)).toContain('the hard criterion row lost its condition: 危険な領域: `src/lib/tmux/**`');
+    });
+
+    it('positive: dropping the 設計 row is reported', () => {
+      const docs = copyDocs((text) => text.replace(/^\| 設計 \|.*\n/m, ''));
+      expect(allocationProblems(docs)).toContain('the hard criterion row is missing: 設計');
+    });
+
+    it('positive: admitting a closed design to the middle tier is reported', () => {
+      const docs = copyDocs((text) => text.replace('**「閉じた判断」だけ**', '**「閉じた判断」「閉じた設計」だけ**'));
+      expect(allocationProblems(docs)).toContain('the middle tier admits a closed design');
+    });
+
+    it('positive: admitting a design in the Command Code bullet is reported', () => {
+      const docs = copyDocs((text) => text.replace('本文に閉じた判断も', '本文に閉じた判断・設計も'));
+      expect(allocationProblems(docs)).toContain('the Command Code bullet admits a design');
     });
   });
 });

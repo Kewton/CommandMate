@@ -123,20 +123,21 @@ describe('/orchestrate 1-2b: three tiers', () => {
 
   it('has one row per tier, with the model each one runs on', () => {
     expect(body).toMatch(/^\| 易 \| command-code \| —/m);
-    // #4489 (2026-11-19): the middle tier moved from Claude sonnet to Command Code.
+    // #4507 (2026-11-19): the middle tier moved from Claude sonnet to Command Code.
     expect(body).toMatch(/^\| 中 \| command-code \| —/m);
     expect(body).toMatch(/^\| 難 \| claude \| opus \|/m);
   });
 
-  it('sends the middle tier to Command Code and keeps the hard criteria off it (Issues #3015 / #4489)', () => {
+  it('sends the middle tier to Command Code and keeps the hard criteria off it (Issues #3015 / #4507)', () => {
     const row = body.split('\n').find((line) => line.startsWith('| 中 |')) ?? '';
     expect(row).toContain('「危険な領域」');
     expect(row).toContain('「依存」');
-    // A judgment or a design is admitted only when the body closes it — the
-    // options listed, or the checks and controls enumerated — and then it goes
-    // to Command Code, not merely because it is small.
+    // #4507: a judgment is admitted only when the body closes it (the options
+    // listed) and then it goes to Command Code, not merely because it is small.
+    // A design — a whole new guard or test — stays on opus (the 設計 row).
     expect(row).toContain('「閉じた判断」');
-    expect(row).toContain('「閉じた設計」');
+    expect(row).toContain('「設計」');
+    expect(row).not.toContain('「閉じた設計」');
     expect(row).toContain('だけ');
     expect(row).toContain('command-code');
     expect(row).toContain('当てはまらず');
@@ -264,7 +265,7 @@ describe('/orchestrate 3-4 / 3-5 / 3-5b: where each tier goes after two failures
 
   // #3883: 3-5 / 3-5b call the same launch-worker.mjs as 3-1 (opus written, checked, restarted once).
   // Reads the legacy Antigravity section of switching.md on purpose: it is kept ("今は使わない", #4238) because the Command Code
-  // section refers to its steps 1-2 and its handoff form; the current Command Code -> sonnet path is pinned in the #4238 describe below.
+  // section refers to its steps 1-2 and its handoff form; the Command Code startup/send stand-in is pinned in the #4238 describe below.
   it('3-5 switches an Antigravity Issue to opus, never to sonnet', () => {
     const body = `${section('3-5')}\n${docSection('switching.md', '3-5 Antigravity から Claude への切り替え')}`;
     expect(body).toContain('AGENT=claude; MODEL=opus');
@@ -307,16 +308,21 @@ describe('/orchestrate: the easy tier is Command Code (Issue #4238)', () => {
     expect(body).toContain('docs/orchestrate/command-code.md');
   });
 
-  it('3-5 raises a Command Code Issue to Claude opus; sonnet is only the startup/send stand-in (#4489)', () => {
+  it('3-5 raises a Command Code Issue to Claude opus; sonnet is only the startup/send stand-in (#4507)', () => {
     const raise = section('3-5');
-    const fallback = docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ');
+    const opus = docSection('switching.md', '3-5 Command Code から Claude（opus）への格上げ');
+    const fallback = docSection('switching.md', '3-5 Command Code の詰まりで sonnet に代える');
     expect(raise).toContain('Command Code 担当の Issue が');
     expect(raise).toContain('**格上げ先は opus**');
-    expect(raise).toContain('switching.md#3-5b-sonnet-から-opus-への格上げ');
+    expect(raise).toContain('switching.md#3-5-command-code-から-claudeopusへの格上げ');
     expect(raise).toContain('Command Code のセッションだけを止める');
     expect(raise).toContain('**sonnet に代えるのは、Command Code が起動・送信で詰まったときだけ**');
     expect(raise).toContain('lead-return');
-    // The old sonnet procedure is kept as the stand-in, not the default.
+    // The opus procedure stands on its own (not 3-5b read as Command Code).
+    expect(opus).toContain('AGENT=claude; MODEL=opus');
+    expect(opus).toContain('issue-${issue}-opus.yaml');
+    expect(opus).toContain('引き継ぎ（前任: Command Code');
+    // The sonnet procedure is kept as the stand-in, not the default.
     expect(fallback).toContain('AGENT=claude; MODEL=sonnet');
     expect(fallback).toContain('commandmatedev instances "$WT" kill command-code');
     expect(fallback).toContain('--instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml"');
@@ -331,7 +337,7 @@ describe('/orchestrate: the easy tier is Command Code (Issue #4238)', () => {
   });
 });
 
-describe('/orchestrate: after a raise from Command Code, failures go opus → a person everywhere (Issues #4238 / #4489)', () => {
+describe('/orchestrate: after a raise from Command Code, failures go opus → a person everywhere (Issues #4238 / #4507)', () => {
   const body34 = section('3-4');
 
   it('the 3-4 text raises Command Code to opus, and only opus stops for a person', () => {
@@ -350,7 +356,7 @@ describe('/orchestrate: after a raise from Command Code, failures go opus → a 
       expect(row).toContain('Claude（opus）担当は人間へエスカレーション');
     }
     expect(section('3-5b')).toContain('Claude（sonnet）担当の Issue が');
-    expect(docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ')).toMatch(/ワーカー起因の不合格 2 回で 3-5b の opus への格上げ/);
+    expect(docSection('switching.md', '3-5 Command Code の詰まりで sonnet に代える')).toMatch(/ワーカー起因の不合格 2 回で 3-5b の opus への格上げ/);
     expect(docSection('switching.md', '3-5b sonnet から opus への格上げ')).toContain('Claude（opus）担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）');
   });
 
@@ -470,10 +476,10 @@ describe('send --model: which tools it works for (Issue #4247)', () => {
     expect(claudeMd).not.toContain('（claude/antigravity）');
   });
 
-  it('3-5 now goes to opus; the switching.md sonnet section is kept as the startup/send stand-in (#4489)', () => {
+  it('3-5 now goes to opus; the switching.md sonnet section is kept as the startup/send stand-in (#4507)', () => {
     expect(section('3-5')).toContain('**格上げ先は opus**');
     expect(section('3-5')).toContain('起動・送信で詰まったときだけ');
-    const fallback = docSection('switching.md', '3-5 Command Code から Claude（sonnet）への格上げ');
+    const fallback = docSection('switching.md', '3-5 Command Code の詰まりで sonnet に代える');
     expect(fallback).toContain('commandmatedev instances "$WT" kill command-code');
     expect(fallback).toContain('sonnet');
   });

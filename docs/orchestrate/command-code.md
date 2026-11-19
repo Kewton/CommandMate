@@ -5,7 +5,7 @@ Antigravity の実測は docs/orchestrate/antigravity.md に残してある（�
 
 ## 1-2b Command Code に回す前提
 
-- 難の観点（危険な領域・設計・原因未特定・未決事項・実機でしか決まらない検証・強い依存・新規 export）に当てはまらないものは、易と中をまとめて Command Code に回す。**中**＝選択肢か手順と受入条件が本文で閉じている判断・設計（旧 sonnet）
+- 難の観点（危険な領域・設計・原因未特定・未決事項・実機でしか決まらない検証・強い依存・新規 export）に当てはまらないものは、易と中をまとめて Command Code に回す。**中**＝選択肢か手順と受入条件が本文で閉じている判断（旧 sonnet）。**新しいガード・テストを 1 本まるごと設計するものは難（opus）に残す**
 - **本文が閉じていないまま回さない。** 着手の前に、イネーブラーが Issue を「選択肢・手順・受入条件」まで具体化する
 - 仕事の **6〜8 割**を Command Code で回すのが目標。Sprint ごとにワーカーのモデルの割合を lead-return と台帳に数える
 - 名簿の instance id は `command-code`（2 本目は `command-code-2`）。`send` / `wait` / `capture` / `respond` に `--instance command-code` を渡す

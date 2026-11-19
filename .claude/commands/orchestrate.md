@@ -183,14 +183,14 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 
 **Command Code に回す（上のどれにも当てはまらないもの。易と中をまとめて）**
 
-- 危険な領域・設計・原因未特定・未決事項・実機でしか決まらない検証・強い依存・新規 export の**どれにも当てはまらない**
-- **選択肢か手順と受入条件が本文で閉じている**（**中**＝選択肢か手順が本文に閉じた判断・設計もここに入る。全箇所の置換後のコードまでは要らない）
+- 危険な領域・設計・原因未特定・未決事項・実機でしか決まらない検証・強い依存（同じ関数の書き換え）・新規 export の**どれにも当てはまらない**
+- **選択肢か手順と受入条件が本文で閉じている**（**中**＝選択肢か手順が本文に閉じた判断もここに入る。全箇所の置換後のコードまでは要らない）
 - 受入基準の合否がすべて自動で決まる（lint / typecheck / unit / e2e）。実機の項目は、見た目の念押しだけなら残ってよい
 - バグなら、原因（file:line）と対策が本文に書かれている
 - **逸脱時の退避路が本文に書いてある** — 「本文に無い指摘が出た場合は、そのファイルを変更せず、
   コミットメッセージ本文に『本文に無い指摘: `<file>:<line>` `<rule>`』と書いて報告すること（勝手に直さない）」
 
-**本文が閉じていなければ、イネーブラーが具体化する**: 着手の前に、イネーブラーが Issue を「選択肢・手順・受入条件」まで具体化する（docs/orchestrate/difficulty.md#1-2b-委任する-issue-で起票側がやること）。閉じていないまま Command Code に回さない（2026-11-19 改定）。
+**本文が閉じていなければ、イネーブラーが具体化する**: 着手の前に、イネーブラーが Issue を「選択肢・手順・受入条件」まで具体化する（docs/orchestrate/difficulty.md#1-2b-委任する-issue-で起票側がやること）。閉じていないまま Command Code に回さない。**閉じてもなお難の観点なら opus**（2026-11-19 改定）。
 
 **退避路で報告された重複は、整理の Issue の候補として残す**（手順は docs/orchestrate/difficulty.md#1-2b-重複の報告の行き先の根拠）。
 
@@ -205,8 +205,8 @@ PR の前に `node scripts/count-suppressions.mjs --base origin/develop` を走�
 | 難易度 | 担当 | モデル | 条件 |
 |---|---|---|---|
 | 易 | command-code | — | 「Command Code に回す」をすべて満たす（変更箇所は `file:line` ＋置換後のコードまで確定） |
-| 中 | command-code | — | 「Claude に回す」の「危険な領域」「依存」には当てはまらず、**「閉じた判断」「閉じた設計」だけ**で、受入基準がすべて自動・逸脱時の退避路がある（定義は docs/orchestrate/difficulty.md#1-2b-中の範囲を広げた実測） |
-| 難 | claude | opus | 上の「Claude に回す」のどれかに当てはまる: **危険な領域**・**設計**・**原因**（file:line まで特定されていない）・**未決事項**・**検証**（実機・画面でしか決まらない）・**依存**（強い依存）・**新規 export** |
+| 中 | command-code | — | 「Claude に回す」の「危険な領域」「設計」「依存」には当てはまらず、**「閉じた判断」だけ**で、受入基準がすべて自動・逸脱時の退避路がある（定義は docs/orchestrate/difficulty.md#1-2b-中の範囲を広げた経緯） |
+| 難 | claude | opus | 上の「Claude に回す」のどれかに当てはまる: **危険な領域**・**設計**・**原因**（file:line まで特定されていない）・**未決事項**・**検証**（実機・画面でしか決まらない）・**依存**（強い依存。同じ関数の書き換え）・**新規 export** |
 
 - 「中」と「難」の境目は、作業の前に結論が決まっているか。**迷ったら難（opus）**。Command Code がワーカー起因で 2 回不合格なら opus へ格上げ（3-5）。sonnet は起動・送信で詰まったときの代わりだけ（3-5）。
 根拠: docs/orchestrate/difficulty.md#1-2b-中と難の境目と注意
@@ -903,9 +903,9 @@ commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30
 Command Code 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。**格上げ先は opus**（2026-11-19 改定。sonnet は飛ばす）。
 ユーザーには確認しない（2026-09-17 合意）。切り替えたことは 8-2 と 8-3 に必ず書く。
 
-切り替えるときは docs/orchestrate/switching.md#3-5b-sonnet-から-opus-への格上げ の手順 2〜5 を、手順 1 だけ「Command Code のセッションだけを止める（`kill command-code`）」に読み替えて進める（引き継ぎ節は「前任: Command Code」）。
+切り替えるときは docs/orchestrate/switching.md#3-5-command-code-から-claudeopusへの格上げ の手順 1〜4 で進める（手順 1 で Command Code のセッションだけを止める）。
 
-**sonnet に代えるのは、Command Code が起動・送信で詰まったときだけ**（3-4 の 3 回目に届かない停止）。代えたら理由を lead-return に書く（手順は docs/orchestrate/switching.md#3-5-command-code-から-claudesonnetへの格上げ）。
+**sonnet に代えるのは、Command Code が起動・送信で詰まったときだけ**（3-4 の 3 回目に届かない停止）。代えたら理由を lead-return に書く（手順は docs/orchestrate/switching.md#3-5-command-code-の詰まりで-sonnet-に代える）。
 
 ### 3-5b. sonnet から opus への格上げ
 
