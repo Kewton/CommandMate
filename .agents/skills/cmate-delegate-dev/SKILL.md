@@ -183,7 +183,7 @@ bash .agents/skills/cmate-delegate-dev/scripts/ask.sh <worktree-id> <instance-id
 exit 10 が返ったら、**あなたは答えない。**
 
 1. `wait` が stdout に出した prompt の JSON を読む。読めなければ
-   `commandmatedev capture <wt> --instance <id> --pane --tail 40` で画面を取る。
+   `commandmatedev capture <wt> --instance <id> --pane --tail 80` で画面を取る。
 2. **prompt の本文と選択肢を、そのまま人へ見せる。** 選択肢は番号付きで、
    相手が示したままの並びで写す。要約しない。
 3. **そこで止まる。** 「たぶん yes でいいので進めます」と続けない。
@@ -232,8 +232,11 @@ auto-yes は解決策ではない。
     「チャット履歴から読んだ」と報告に書く。
   - **CommandMate 0.52.0 以降**（#4344 PR3 を含む版）: `ask` は返答を**この依頼の ID の帰属**でだけ読み、
     画面からは拾わない。`source` は `history`（台帳がこの依頼に結んだ返答）/ `none` だけで、`pane` は出ない。
-    `attribution.state` が `matched` でないとき（帰属できない tool＝`tool_unsupported`、古いサーバー＝
-    `server_unsupported`、`ambiguous`・`unmatched`）は **exit 0 でも `"reply": null`・stdout 空**で、
+    `attribution.state` が `matched` でないとき（例は `state/reason` で、`unavailable/tool_unsupported`・
+    `unavailable/server_unsupported`・`unavailable/slash_command`（`/`・`!`・`#` で始まる本文は ID を運べない）・
+    `ambiguous/shared_turn`・`ambiguous/turn_open_at_send`・`unmatched/<reason>`（`absorbed_mid_turn`・
+    `turn_incomplete`・`grace_expired` など））は **exit 0 のまま**で、返答は取れない。`--json` なら stdout の JSON は
+    出るが `"reply": null`（`--json` 無しだと stdout は空）で、
     stderr に `reply not collected (<state>/<reason>)` が 1 行出る。これを「返答が無かった」「完了した」と
     報告しない。「返答は回収されなかった（理由: `<state>/<reason>`）」と書き、
     `commandmatedev capture <worktree-id> --instance <instance-id> --pane --tail 80` で取った画面を

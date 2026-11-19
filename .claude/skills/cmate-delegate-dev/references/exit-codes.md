@@ -54,8 +54,8 @@ Command Code の管理セッションを長く使い回すと、依頼が
 `context_length_exceeded` は別 Issue で、この検出には含めない。
 
 この保険が本文を読めるのは、本文がある経路だけである。**CommandMate 0.52.0 以降**（#4344 PR3 を含む版）の
-`ask` は、返答をこの依頼の ID に帰属できないとき（帰属できない tool・古いサーバー・`ambiguous`・`unmatched`）
-exit `0` のまま `"reply": null` を返す。読む本文が無いので、保険が当たらないことは「文脈の上限ではなかった」の
+`ask` は、返答をこの依頼の ID に帰属できないとき（`unavailable/tool_unsupported`・`unavailable/server_unsupported`・`unavailable/slash_command`・
+`ambiguous/*`・`unmatched/*`）exit `0` のまま返答を出さない（`--json` なら JSON は出て `"reply": null`、`--json` 無しなら stdout は空）。読む本文が無いので、保険が当たらないことは「文脈の上限ではなかった」の
 証拠にならない。このとき `ask.sh` は `0` を書き換えず、stderr に `id=reply-not-collected` と
 `capture --pane` の案内を出す。文脈の上限そのものは、CommandMate 0.43.0 以降の `ask` が
 自分で `11`（`id=context-limit`）として返すので、その版で取りこぼすことはない。
