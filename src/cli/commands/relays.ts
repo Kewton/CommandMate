@@ -79,6 +79,11 @@ export const RELAY_REFUSAL_CODES = new Set([
 export interface RelayEndpointArg {
   worktreeId: string;
   instanceId: string;
+  /**
+   * Issue #4496: on the `to` end only, the tool the send asked for (`--agent`), which
+   * `POST /api/relays` judges rule 0 by for an ad-hoc instance. An older server ignores it.
+   */
+  cliToolId?: string;
 }
 
 /** The text `--reply-to` is documented with, shared by `send` and `ask`. */
