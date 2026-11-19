@@ -132,7 +132,7 @@ ledger が読めない（例外） → null（今までの fail-open の向き�
 - `countRecentReplyRounds(db, from, now)`: `session_relays` の 1 本の COUNT を同期で読む。`from` が自分（worktree・instance）で、返事が届いた（`sent_request_id` あり・`delivered_at` が窓の中）か、返事の配送が `uncertain` で保留中（`pending_kind = 'reply'`・`delivery_at` が窓の中）。人の行・echo・知らせ・書かれた順は見ない。migration なし
 - `RELAY_ROUNDS_WINDOW_MS = 30 分`、`MAX_RELAY_ROUNDS = 10`（`relay-policy.ts` の名前つきの定数）。`replyRounds >= 10` で `RELAY_HOPS_EXCEEDED`、`--allow-relay-chain` では外れない。判定の順は 自分宛て → ツールの方針 → 連鎖 → 深さ → **往復** → 重複
 - 文面: `This session received ${n} replies to its relays in the last 30 minutes; the limit is 10. Wait before opening another (the count clears as replies age out).`
-- 拒否のたびに構造化ログ `relay-rounds-refused`（`session`・`n`・窓の中の最も古い返事と最も新しい返事の時刻）
+- 往復の上限で断ったときだけ（判定が `ceiling: 'rounds'` を返す。深さと両方成り立つときは深さで断り、出さない）構造化ログ `relay-rounds-refused`（`session`・`n`・窓の中の最も古い返事と最も新しい返事の時刻）。HTTP の応答は `code`・`message` のまま
 
 ## 4. 不変条件（試験で固定した）
 
@@ -151,7 +151,11 @@ relay-rounds-window-4420.md §2.4 の表のとおり。単体（SQL・純粋・�
 
 ## 6. 既知の制限
 
-relay-rounds-window-4420.md §2.3 の Q-1〜Q-11 を正とする。この文書の旧 (a)（人以外の普通の行で 0 に戻る）・(d)（500 行）・(e)（同じ時刻の挿入順）は、履歴を読まなくなったので無くなった。旧 (b)（依頼に答える途中で開く B→C の relay は本番で止まっていない。#4492）と (c)（人が返事と同じ本文を打ち直した行は echo と区別できない。親の探索だけに残る）は残る。
+relay-rounds-window-4420.md §2.3 の Q-1〜Q-11 を正とし、実装のレビューで見つかった次の 1 つを足す。
+
+- **Q-12** `uncertain` で保留中の返事の relay を人が閉じて（cancel して）から `confirm` すると、閉じた relay は閉じた状態を保つ（`relay-db-hold.ts` の閉じた relay の解決。この契約は変えない）ため `sent_request_id` と `delivered_at` が書かれず、その返事は数から消える。緩む向き。人が閉じてから受領を確定したときだけ、1 本につき 1 回（Q-8 の `discard` と同じ扱い）。閉じた後も保留の間は保留の時刻で数える。Q-9（解決の時刻から数える）は開いた relay の `confirm` だけに当たる。試験で向きを固定した
+
+この文書の旧 (a)（人以外の普通の行で 0 に戻る）・(d)（500 行）・(e)（同じ時刻の挿入順）は、履歴を読まなくなったので無くなった。旧 (b)（依頼に答える途中で開く B→C の relay は本番で止まっていない。#4492）と (c)（人が返事と同じ本文を打ち直した行は echo と区別できない。親の探索だけに残る）は残る。
 
 ## 7. 対になる場所
 
@@ -172,4 +176,3 @@ relay-rounds-window-4420.md §2.3 の Q-1〜Q-11 を正とする。この文書�
 ## 9. 履歴: 案 C の往復の数え方（採らなくなった）
 
 案 C は、依頼元の履歴を新しい順に歩き、人の普通の行までに受けた自分の返事を数えた（`scanRelayLineage`・`countConsecutiveReplyRounds`、99811ebb1 では確定した終わりまで倍々に読み直す I10 と、500 行の固い上限 `MAX_RELAY_LINEAGE_ROWS`）。人の行と echo の見分け・窓の端・同じ時刻の並び・書かれた順に頼る箇所から、レビューのたびに同じ種類の穴が出た（設計レビュー P2、実装レビュー P1・P2）ため、PM の決定で案 Q に置き換え、コードと試験は消した。比較は relay-rounds-window-4420.md §0〜§4。
-

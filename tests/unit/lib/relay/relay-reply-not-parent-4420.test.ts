@@ -78,6 +78,7 @@ import { buildRelayReplyMessage } from '@/lib/relay/relay-messages';
 import {
   countRecentReplyRounds,
   findParentRelayHops,
+  RECENT_REPLY_ROUNDS_SQL,
   openRelay,
   resolveRelayHold,
   withdrawRelay,
@@ -654,6 +655,33 @@ describe('#4420 round trips: replies within the window, capped at MAX_RELAY_ROUN
     expect(logged.info.filter((entry) => entry.action === 'relay-rounds-refused')).toHaveLength(0);
   });
 
+  it('logs relay-rounds-refused only when the round-trip ceiling refused, not when depth did with both over', () => {
+    roundTrips(MAX_RELAY_ROUNDS);
+    seedRequestFromX(MAX_RELAY_HOPS);
+    expect(rounds()).toBe(MAX_RELAY_ROUNDS);
+    expect(findParentRelayHops(db, A)).toBe(MAX_RELAY_HOPS);
+    logged.info.length = 0;
+
+    const result = open(A, B, true);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.refusal.code).toBe('RELAY_HOPS_EXCEEDED');
+      expect(result.refusal.message).toMatch(/Relay chains stop at/);
+    }
+    expect(logged.info.filter((entry) => entry.action === 'relay-rounds-refused')).toHaveLength(0);
+  });
+
+  it('reads the count through idx_session_relays_from', () => {
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN ${RECENT_REPLY_ROUNDS_SQL}`)
+      .all({ since: clock - RELAY_ROUNDS_WINDOW_MS, worktreeId: A.worktreeId, instanceId: A.instanceId }) as Array<{
+      detail: string;
+    }>;
+
+    expect(plan.map((step) => step.detail).join('\n')).toMatch(/USING INDEX idx_session_relays_from\b/);
+  });
+
   it('is read synchronously, in one call (#4466: openRelay stays one synchronous stretch)', () => {
     roundTrips(2);
     const answer = countRecentReplyRounds(db, A, clock);
@@ -715,6 +743,32 @@ describe('#4420 known limits pinned in the direction chosen (案 Q §2.3)', () =
     // Past the window of the hold, inside the window of the confirmation.
     expect(countRecentReplyRounds(db, A, heldAt + RELAY_ROUNDS_WINDOW_MS + 1).count).toBe(1);
     expect(countRecentReplyRounds(db, A, confirmAt + RELAY_ROUNDS_WINDOW_MS + 1).count).toBe(0);
+  });
+
+  it('Q-12: a held reply on a relay closed (cancelled) before a person confirms it stops counting at the confirm', () => {
+    roundTrips(MAX_RELAY_ROUNDS - 1);
+    const held = replyUncertain(C);
+    expect(withdrawRelay(db, held.relay.id, tick()).ok).toBe(true);
+    // Closed, still held: the hold is kept, and counted as the strict side.
+    expect(getRelayById(db, held.relay.id)?.state).toBe('cancelled');
+    expect(rounds()).toBe(MAX_RELAY_ROUNDS);
+
+    const resolved = resolveRelayHold(db, {
+      relayId: held.relay.id,
+      payloadId: held.payloadId,
+      attemptId: held.attemptId,
+      action: 'confirm',
+      now: tick(),
+    });
+    expect(resolved.ok).toBe(true);
+
+    // The closed relay stays closed and gets no delivery time (its contract),
+    // so the confirmed reply leaves the count (the loose side; once per reply).
+    const after = getRelayById(db, held.relay.id);
+    expect(after?.state).toBe('cancelled');
+    expect(after?.deliveredAt).toBeNull();
+    expect(rounds()).toBe(MAX_RELAY_ROUNDS - 1);
+    expect(open(A, B).ok).toBe(true);
   });
 
   it('Q-10: at nine, relays opened side by side to two peers both go (the count is of replies, not of opens)', () => {

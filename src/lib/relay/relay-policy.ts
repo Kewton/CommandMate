@@ -138,6 +138,13 @@ export interface RelayRefusal {
   message: string;
   /** Issue #4437: set on `RELAY_TOOL_POLICY_DENIED` only. */
   toolPolicy?: RelayToolPolicyDenial;
+  /**
+   * Issue #4420: which ceiling a `RELAY_HOPS_EXCEEDED` came from — set to
+   * `'rounds'` only when the round-trip ceiling refused (depth refuses first, so
+   * a request over both is a depth refusal). Internal: the route answers `code`
+   * and `message` only.
+   */
+  ceiling?: 'rounds';
 }
 
 /** The tools at both ends and the usage declaration, for rule 0 (Issue #4437). */
@@ -264,6 +271,7 @@ export function decideRelayCreation(
   if (replyRounds >= MAX_RELAY_ROUNDS) {
     return {
       code: 'RELAY_HOPS_EXCEEDED',
+      ceiling: 'rounds',
       message:
         `This session received ${replyRounds} replies to its relays in the last `
         + `${RELAY_ROUNDS_WINDOW_MS / 60_000} minutes; the limit is ${MAX_RELAY_ROUNDS}. `

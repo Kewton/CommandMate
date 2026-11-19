@@ -41,7 +41,6 @@ import {
   decideRelayCreation,
   isRelayRefusal,
   isSameEndpoint,
-  MAX_RELAY_ROUNDS,
   RELAY_ROUNDS_WINDOW_MS,
   resolveRelayTtlMs,
   type RelayRefusal,
@@ -223,6 +222,23 @@ export function findParentRelayHops(
   }
 }
 
+/**
+ * The one read behind {@link countRecentReplyRounds} (Issue #4420). Exported for
+ * the suite that pins its query plan to `idx_session_relays_from`; parameters
+ * `@since`, `@worktreeId`, `@instanceId`.
+ */
+export const RECENT_REPLY_ROUNDS_SQL = `
+  SELECT COUNT(*) AS n, MIN(at) AS oldest, MAX(at) AS newest FROM (
+    SELECT CASE WHEN sent_request_id IS NOT NULL AND delivered_at >= @since
+                THEN delivered_at ELSE delivery_at END AS at
+    FROM session_relays
+    WHERE from_worktree_id = @worktreeId AND from_instance_id = @instanceId
+      AND ((sent_request_id IS NOT NULL AND delivered_at >= @since)
+           OR (delivery_state = 'uncertain' AND pending_kind = 'reply'
+               AND delivery_at >= @since))
+  )
+`;
+
 /** What {@link countRecentReplyRounds} answers (Issue #4420). */
 export interface RecentReplyRounds {
   /** Replies to this session's own relays within the window. */
@@ -235,7 +251,7 @@ export interface RecentReplyRounds {
 /**
  * How many replies to its own relays the session `from` has received within
  * {@link RELAY_ROUNDS_WINDOW_MS} before `now` — the input of the round-trip
- * ceiling, {@link MAX_RELAY_ROUNDS} (Issue #4420, 案 Q,
+ * ceiling, `relay-policy`'s `MAX_RELAY_ROUNDS` (Issue #4420, 案 Q,
  * docs/design/relay-rounds-window-4420.md §2.1).
  *
  * One synchronous COUNT over the ledger, and nothing else: a relay `from`
@@ -246,7 +262,8 @@ export interface RecentReplyRounds {
  * is read, so no person's line, echo, notice, window edge or row order decides
  * it. Expired, cancelled and notice-only relays carry no `sent_request_id` and
  * are not counted; a held reply a person discards stops counting, and one they
- * confirm counts from the confirmation (known limits Q-8, Q-9).
+ * confirm on an open relay counts from the confirmation, and one confirmed after
+ * the relay was closed stops counting (known limits Q-8, Q-9, Q-12).
  *
  * Synchronous, so `openRelay` stays one synchronous stretch (#4466). A database
  * that cannot be read throws, and no relay is opened.
@@ -258,17 +275,7 @@ export function countRecentReplyRounds(
 ): RecentReplyRounds {
   const since = now - RELAY_ROUNDS_WINDOW_MS;
   const row = db
-    .prepare(`
-      SELECT COUNT(*) AS n, MIN(at) AS oldest, MAX(at) AS newest FROM (
-        SELECT CASE WHEN sent_request_id IS NOT NULL AND delivered_at >= @since
-                    THEN delivered_at ELSE delivery_at END AS at
-        FROM session_relays
-        WHERE from_worktree_id = @worktreeId AND from_instance_id = @instanceId
-          AND ((sent_request_id IS NOT NULL AND delivered_at >= @since)
-               OR (delivery_state = 'uncertain' AND pending_kind = 'reply'
-                   AND delivery_at >= @since))
-      )
-    `)
+    .prepare(RECENT_REPLY_ROUNDS_SQL)
     .get({ since, worktreeId: from.worktreeId, instanceId: from.instanceId }) as {
     n: number;
     oldest: number | null;
@@ -325,9 +332,10 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
         tool: verdict.toolPolicy.decision.tool,
       });
     }
-    if (verdict.code === 'RELAY_HOPS_EXCEEDED' && rounds.count >= MAX_RELAY_ROUNDS) {
-      // Issue #4420 (Q-11): every refusal on the pace, with what it saw — the
-      // material for reviewing the window and the limit.
+    if (verdict.ceiling === 'rounds') {
+      // Issue #4420 (Q-11): every refusal on the pace — and only those (a
+      // depth refusal shares the code) — with what it saw: the material for
+      // reviewing the window and the limit.
       logger.info('relay-rounds-refused', {
         session: `${input.from.worktreeId}/${input.from.instanceId}`,
         n: rounds.count,
