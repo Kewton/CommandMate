@@ -1,7 +1,8 @@
 # 作業の外で Agent が mem をまとめ直し、人が承認する提案として出す（dreaming）（Issue #4248）設計
 
 - 段: 設計（この文書だけ）。コード・DB・試験は書かない。実装は、§11 の人の答えと設計レビューの処分の後に、§10 の PR ごとに別の契約で行う（Sprint 9 前半・Sprint 10 後半）
-- 版: 第 2 版（2026-11-19、イネーブラー claude-5）
+- 版: 第 2.1 版（2026-11-19、イネーブラー claude-5）
+  - 第 2.1 版: 第 2 版の確かめ（`review-4248-a.md` の「## 第 2 版」、新しい穴 N1〜N3。どれも P3）の処分。§13.3
   - 第 2 版: 設計レビュー 2 本の処分を反映した。処分の表は §13
     - A: 安全、`workspace/orchestration/runs/2026-11-19/s8/review-4248-a.md`、P1 2・P2 7・P3 7
     - B: 被覆・整合・PR の分け方、`review-4248-b.md`、P1 3・P2 9・P3 6
@@ -93,7 +94,7 @@
 | T10 | 副作用（材料の読みで項目が閉じる・知らせが消える） | `dream-input` が呼んでよい関数と、呼んではならない関数を名指す（§4.2） | run の前後で項目・知らせ・受領が変わらない | 結合（S9-3）: 期限切れの許可・条件の成立した項目を含む fixture。spy で禁止の関数が 0 回 |
 | T11 | 承認の詰まり | 1 回の提案の上限、まとめての拒否・種類ごとの承認、2 週間の計測 | 未判断の推移が `mem dream list --json` で読める。まとめての承認・拒否で古い版だけが競合になる | 結合（S10-3）＋e2e（S10-4: 画面のまとめての操作） |
 | T12 | 外部の生成の混入 | 既存の「モデルを呼ばない」の表に行を足す | mem・brief・check・`dream-input`・`dream-read` がモデルを呼ばない | 単体（S9-3・S9-4・S10-1）: spy |
-| T13 | dreaming が許可を作る・延ばす・人の決定を書き換える（レビュー A P1-2） | 提案の対象と欄を store 層の関数で限る（§7.1）。取り込みと確定の両方で検査する | （Issue の範囲 6 の「`recorded`・`promoted` を指定できない」の拡張） | 単体（S10-2・S10-3）: 禁止の形の表。取り込みだけ・確定だけの検査を外す変異でそれぞれ赤 |
+| T13 | dreaming が許可を作る・延ばす・人の決定を書き換える（レビュー A P1-2） | 提案の対象と欄を store 層の関数で限る（§7.1）。取り込みと確定の両方で検査する | （Issue の範囲 6 の「`recorded`・`promoted` を指定できない」の拡張） | 単体（S10-2・S10-3）: 禁止の形の表（`decision-candidate` の `closeWhen` に印つきの `at` を入れた行、`expiresAt` の行、`quote` の行を含む）。取り込みだけ・確定だけの検査を外す変異でそれぞれ赤。許可の一覧を禁止の一覧に戻す変異で `closeWhen` の行が赤 |
 | T14 | 機能が仕上がる前の dreaming の行が、守りなしに通常の Schedule として走る（レビュー B P1-1・P2-1） | 機能の旗（§2.4）。Purpose を落とす書き手を作らない | — | 結合（S9-1）: 旗が off で起動 0。CMATE.md の書き手が Purpose を保つ |
 
 ---
@@ -114,6 +115,10 @@
 ### 2.2 識別
 
 - Schedules の表に任意の列 `Purpose` を足し、**見出しの名前で読む**（PM の決定。parser に見出しの読み取りを足す）。値が `mem-dream` の行だけを dreaming の行とする
+- **Purpose の値は fail-closed で読む**（確かめ 新 N2）:
+  - 列が無い・値が空の行は、今までどおり通常の Schedule
+  - 値が `mem-dream`（完全一致）の行は dreaming の行
+  - **値が空でなく `mem-dream` でもない行**（`mem-dreem` などの綴りの誤り・将来の値）は、子を起動せず `purpose_unknown` で skip する。通常の Schedule として走らせない
 - `ScheduleEntry` に `purpose: 'mem-dream' | null` を足す。DB の列は足さない（entry は CMATE.md の同期から来る）
 - **Purpose を落とさない（レビュー B P2-1、T14）**:
   - CMATE.md の書き手（`cmate-writer.ts`・画面の編集・`batchUpsertSchedules`）が、未知の列と Purpose を保つことを試験で固定する（S9-1）
@@ -127,6 +132,7 @@
 
 | 順 | 検査 | 欠けたときの理由（固定の語） |
 |---|---|---|
+| -1 | Purpose の値が `mem-dream` でない空でない値（§2.2） | `purpose_unknown` |
 | 0 | 機能の旗が on（§2.4） | `not_enabled` |
 | 1 | worktree から `repository_id` とブランチを決められる（A の規則） | `branch_unresolved`・`ambiguous` |
 | 2 | そのブランチの mode が `on` | `mode_not_on` |
@@ -148,12 +154,16 @@
 
 ### 2.4 機能の旗（レビュー B P1-1、T14）
 
-- サーバーの環境変数 `CM_MEM_DREAM`（名前は見立て）を足す。既定は off
+- サーバーの環境変数 `CM_MEM_DREAM` を足す。**`CM_MEM_DREAM=1`（完全一致）だけを on と読み、それ以外（未設定・空・`true`・`on`・`yes`・`0`・大文字・前後の空白を含む）は全部 off**（確かめ 新 N2）。単体の表で固定する
 - off のとき:
   - Purpose が `mem-dream` の行は、**常に**子を起動せず `not_enabled` で skip する
   - 通常の Schedule としても走らせない
 - Sprint 9 の途中（token・argv・取り込みが揃う前）に入った部品は、旗が off のあいだは起動に届かない。各 PR を独立に戻せる
 - 旗を on にしてよいのは S10-4 のマージの後。既定を on にするかは人が決める（§11 H1 の公開の時期と一緒に）
+- **古い版のサーバーでの推奨の行**（Purpose の列を読まない版は、未知の列を無視して通常の Schedule として走らせる、`cmate-parser.ts:196-272`）: docs・skill に載せる推奨の行は、通常の Schedule として走っても害の無い形にする（確かめ 新 N2）
+  - `Message` は「何もせずに、すぐ終えてください。」の 1 文（新しい版では使わない、§2.2）
+  - 権限の列は読むだけの値（claude なら `plan`）
+  - docs に「Purpose を読む版（#4248 の S9-1 以降）が要る」と書く
 
 ---
 
@@ -209,13 +219,14 @@
 | 非対話・答えを JSON で | `-p <固定の短い本文>` `--output-format json` |
 | 組み込みの道具を Bash だけにする（Read・Grep・Glob・Edit・Write・WebFetch・WebSearch・Task などを使わせない） | `--tools Bash`（無い版では `--disallowedTools` に全部を明示） |
 | 許可の一覧の外は断る | `--permission-mode dontAsk` |
-| 許可は 2 つだけ | `--allowedTools "Bash(commandmate mem dream-input:*)" "Bash(commandmate mem dream-read:*)"` |
+| 許可は 2 つだけ | `--allowedTools "Bash(<CLI の絶対パス> mem dream-input:*)" "Bash(<CLI の絶対パス> mem dream-read:*)"`（`<CLI の絶対パス>` は下の注） |
 | 利用者・project・local の設定（allow・hooks・MCP）を読まない | `--setting-sources ""` と、CommandMate が書いた一時の設定 `--settings <tmp.json>`（allow 2 つだけ・hooks なし） |
 | MCP を使わない | `--strict-mcp-config`（MCP の設定を渡さない） |
+| skill・slash コマンドを使わない | `--disable-slash-commands`（版に無ければ、S9-0 で project・利用者の skill が読み込まれないことを記録する。読み込まれる版は対象外。確かめ 新 N3） |
 | 手順 | skill を読ませず、CommandMate が版つきの固定の文を `--append-system-prompt` で渡す（project の skill の名前の衝突も起きない） |
 
-- `commandmate` は、サーバーと同じパッケージの CLI の絶対パスで許可する（見立て。PATH の別の `commandmate` を通さない）
-- argv は単体試験で固定する。変異: `--setting-sources` を外す・`--tools` を外す・許可を 3 つにする、のどれでも赤（S9-1）
+- `<CLI の絶対パス>`: サーバーと同じパッケージの CLI の絶対パス（例: パッケージの根の `bin/commandmate.js` を指す実行の形。PATH の別の `commandmate` を通さない）。許可の一覧・一時の設定の allow・子への固定の本文・手順の文は、**すべて同じこの 1 つの形**を使う（確かめ 新 N3。第 2 版の `Bash(commandmate …)` と絶対パスの食い違いを直した）。実行の形（`node <path>` か、shebang の直の実行か）は S9-0 で許可の照合と合わせて決める
+- argv は単体試験で固定する。変異: `--setting-sources` を外す・`--tools` を外す・`--disable-slash-commands` を外す・許可を 3 つにする・許可の形を `commandmate …` に戻す、のどれでも赤（S9-1）
 - **S9-0 の実機の確認**（隔離した HOME とサーバー、本物の claude。agy は使わない）で、次の陰性の記録を残す。版ごとに表を確定する:
   - cwd の外の Read（`~/.claude/projects` など）
   - WebFetch・WebSearch
@@ -382,7 +393,7 @@
 | `restate`（言い直し） | 1 項目。`state='open'` かつ `kind != 'decision'` | `text`・`evidence` だけ。`kind`・`closeWhen`・`promoteTo`・`expiresAt`・`quote` は不変 | 版の一致 |
 | `close` | 1 項目。`state='open'` かつ `kind != 'decision'` | — | 版の一致 |
 | `merge` | 2 項目以上。全部が `state='open'`・同じ kind・`kind != 'decision'` | 新しい 1 項目（対象と同じ kind の `text`・`evidence`・`closeWhen`） | 全部の版が一致したときだけ全部を確定。1 つでも違えば何もしない |
-| `decision-candidate` | — | decision（`open`、`createdBy: agent`、出所 dream）。**`promoteTo` 必須、`expiresAt` は禁止**（許可を起案しない）、`quote` なし | 作るだけ。`recorded`・`promoted` を指定できない。#4354 の作成の規則（store 層）も通る |
+| `decision-candidate` | — | **受ける欄は `text`・`evidence`・`promoteTo`（必須）だけ**（許可の一覧）。`closeWhen`（印つきの `at` を含む）・`expiresAt`・`quote`・`quoteAt`・`state`・`createdBy`・`kind` は `field_forbidden`（確かめ 新 N1）。作る行は decision（`open`、`createdBy: agent`、出所 dream）。許可を起案しない | 作るだけ。`recorded`・`promoted` を指定できない。#4354 の作成の規則（store 層）も通る |
 | `move-to-destination` | 1 項目と行き先。`state='open'` かつ `kind != 'decision'` | `destination` | E の差分（preview）へつなぐだけ。書き込みは E の承認。二重の検知は #4354 PR3a の一致の関数 |
 | `fix-refs` | 1 項目。`state='open'` かつ `kind != 'decision'` | `evidence` だけ | 版の一致 |
 
@@ -541,7 +552,7 @@
 | PR | 中身 | 依存 | 陽性対照 | 戻し方 |
 |---|---|---|---|---|
 | S9-0 実機の確認（最初） | §3.3 の陰性の記録（claude の版ごと、codex の sandbox）。結果で §3.3 の表と argv を確定する docs の PR | — | 許可の外の各形が断られる記録 | docs だけ |
-| S9-1 識別・旗・検査 | `Purpose` の列（名前で読む）・`ScheduleEntry.purpose`・書き手が保つ試験・旗（§2.4）・検査 0〜6・8・argv の組み立てと固定の試験・役割を適用しない | S9-0 | 旗 off で起動 0（旗の検査を外すと 1）。mode off・detached・対象外のツールで起動 0。argv の変異（`--setting-sources` を外す等）で赤。書き手が Purpose を落とす変異で赤 | 分岐ごと戻す（旗が off なので通常の Schedule は変わらない） |
+| S9-1 識別・旗・検査 | `Purpose` の列（名前で読む。未知の値は `purpose_unknown`）・`ScheduleEntry.purpose`・書き手が保つ試験・旗（§2.4。`=1` だけが on の表）・検査 -1〜6・8・argv の組み立てと固定の試験・役割を適用しない | S9-0 | 旗 off で起動 0（旗の検査を外すと 1）。mode off・detached・対象外のツールで起動 0。argv の変異（`--setting-sources` を外す等）で赤。書き手が Purpose を落とす変異で赤 | 分岐ごと戻す（旗が off なので通常の Schedule は変わらない） |
 | S9-2 run・token・排他（M1） | M1 の migration、token の発行・ハッシュ・失効、排他（期限・`WHERE run_id`・abandoned の始末）、検査 7 | S9-1、M1 の番号 | 2 本の同時の run で後が skip。期限で回復。他の run の token・期限切れが 401／403 | down で表を消す |
 | S9-3 `dream-input` | 材料（§4）、副作用なし（呼ぶ関数の一覧）、snapshot・位置・NOOP・予算、dream token の route、middleware の完全一致の除外、ingress で受けない | S9-2、**#4354 PR1a**、B の事前調査（§4.2） | 前後で mem の行・知らせ・受領が同じ（期限切れの許可を含む fixture）。禁止の関数の spy が 0。全 route の一覧を dream token だけで回して 401（除外を前方一致にする変異で赤）。消費・失効の後は断る。モデルを呼ばない spy | route を戻す |
 | S9-4 `dream-read` | 参照ごとの読み（§5）、範囲の限り、本文の秘密の検査、未確認、同じ範囲の秘密の失敗 3 回で外す | S9-3 | snapshot の外・別のブランチの区間で断る。秘密を含む会話が伏せて返る（検査を外すと原文が出て赤）。モデルを呼ばない spy | route を戻す |
@@ -653,3 +664,13 @@
 | P3-6 状態の対応表 | 採用 | §2.3 |
 
 - 却下 0 件・未解決 0 件
+
+### 13.3 第 2 版の確かめ（`review-4248-a.md` の「## 第 2 版」）の処分（第 2.1 版）
+
+| 指摘 | 処分 | 反映した節 |
+|---|---|---|
+| 新 N1（P3）`decision-candidate` の受ける欄が許可の一覧でない | 採用（受ける欄を `text`・`evidence`・`promoteTo` の一覧にし、`closeWhen` などは `field_forbidden`。T13 に印つきの `at` の行と変異） | §7.1、§1.2 T13 |
+| 新 N2（P3）旗の値・Purpose の読み方が fail-closed でない | 採用（`CM_MEM_DREAM=1` の完全一致だけが on。空でなく `mem-dream` でもない Purpose は `purpose_unknown` で skip。古いサーバーで通常の Schedule として走っても害の無い推奨の行） | §2.2、§2.3 の -1、§2.4、§10 S9-1 |
+| 新 N3（P3）skill を無効にする引数・許可の形の食い違い | 採用（`--disable-slash-commands` を足し、変異に入れた。許可・設定・本文・手順の CLI の形を絶対パスの 1 つにそろえた） | §3.3、§10 S9-1 |
+
+- 人への問い（H1〜H7）の形は変わらない
