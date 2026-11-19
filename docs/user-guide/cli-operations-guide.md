@@ -344,6 +344,8 @@ CLI は送り手の種類を次の順に読み、最初に当たったものを�
 > - `--reply-to` と `--contract`・`--register --role`・`--auto-yes` を併用し、送信の途中で宛先（既定の宛先や名簿）が変わると、先にタスク（またはロールの設定・名簿の登録・Auto-Yes の有効化）が書かれた後で relay が断られることがあります（exit 33）。メッセージは打たれません。残ったタスクは `failed` になり、その id は stdout に出ていて、stderr の 1 行目は理由ではなく `Task created: …` です。
 > - 端末から antigravity へ `--model` と `--auto-yes` を、`--contract` なしで `--role` か `--register` と併用すると、Auto-Yes はメッセージの後に回るため、ロールの保存（または名簿の登録）とメッセージの送信は行われ、その後 Auto-Yes だけが断られます（警告・exit 0。Auto-Yes は有効になりません）。
 
+> **API の打鍵の入口（Issue #4480）**: CLI のコマンドからは使いませんが、pane に打つ API の `POST /api/worktrees/<id>/terminal`（`send` として判定）・`/direct-input`（任意の文字列を打てるので `send`）・`/special-keys`（`respond`）も、本文の `origin` で同じ表に聞きます。`origin` の無い要求（画面）と `terminal` は今までどおり通り、申告の無いサーバーで antigravity に `session`・`agent`・`schedule`・`unknown`（と知らない文字列）からの要求は、何も打たず（`/terminal` は antigravity の再起動もせず）409 `TOOL_POLICY_DENIED`（`sendOutcome: "not_sent"`。`/send` と同じ本文）で断ります。`origin` が文字列でないと 400 です。
+
 > **注意**: #4449 より前のサーバーに新しい CLI でつなぐと、書き込みの API が方針を判定しないため、断られる送信でもタスクやロールの設定が書かれてから `/send` が 409（exit 33）で断ることがあります。CLI とサーバーは同じ版にそろえてください。
 
 断られたときの stderr の 1 行目は `Error [TOOL_POLICY_DENIED]: <理由>`（relay は `Error [RELAY_TOOL_POLICY_DENIED]: …`）、2 行目は規約と FAQ のリンク、続いて解除の方法と、何も打っていないこと（`sent: false`）です。`--token` の警告などはその後に出ます。`ask --json` と厳格モードの `respond --json` は、stdout に `{ worktreeId, instanceId, cliToolId, "sent": false, "refusal": { code, reason, operation, origin, message, links, unlock } }`（relay は `refusal.endpoint` も）を 1 つ出します。exit 33 は送り直しても同じ結果です。再送・再指示はせず、人に申告の要否を伺います（[exit code ごとの対処](../orchestrate/exit-codes.md)）。
@@ -4488,7 +4490,7 @@ Update available for codex: 0.149.1 -> 0.151.0
 Run "commandmate agents update codex" to install it.
 ```
 
-> **antigravity の行が出る条件**（Issue #4452）: `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` の申告があるときだけです（申告なしでは `agy --version` を実行しません）。More 画面・agent pane の版の表示（`GET /api/agents/versions`）、スラッシュコマンドの版の注意、`capture --json` と `commandmate status` の検出ルールの陳腐化の注意は、申告があるとき、またはそのサーバーで antigravity を起動・送信した後に出ます（`commandmate status` は CLI のプロセスなので申告があるときだけ）。初期設定の `commandmate init` / `quickstart` は依存の確認で `agy --version` を実行します。
+> **antigravity の行が出る条件**（Issue #4452）: `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` の申告があるときだけです（申告なしでは `agy --version` を実行しません）。More 画面・agent pane の版の表示（`GET /api/agents/versions`）、スラッシュコマンドの版の注意、`capture --json` と `commandmate status` の検出ルールの陳腐化の注意は、申告があるとき、またはそのサーバーで antigravity を起動・送信した後に出ます（`commandmate status` は CLI のプロセスなので申告があるときだけ）。初期設定の `commandmate init` / `quickstart` の依存の確認も、申告（CLI を打つ環境、無ければサーバーの `.env` の `CM_ANTIGRAVITY_USAGE`）があるときだけ `agy --version` を実行します。申告が無いときは `agy` が PATH にあるかだけをファイルで確かめ（起動しません）、`Antigravity CLI: found (version not checked; …)` か `Not found` を出します（Issue #4480）。
 
 #### LATEST 列が codex にしか出ない理由
 

@@ -35,12 +35,12 @@ The following tools are required to use CommandMate.
 | Gemini CLI | - | Optional | `gemini --version` |
 | GitHub Copilot CLI | - | Optional | `copilot --version` |
 | OpenCode | - | Optional | `opencode --version` |
-| Antigravity CLI | - | Optional | `agy --version` |
+| Antigravity CLI | - | Optional | `agy --version` (only with the declaration `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise`; otherwise only whether it is on PATH) |
 | Command Code CLI | - | Optional | `commandcode --version` |
 
 Every agent CLI is optional. CommandMate starts with none of them installed, but a
 worktree cannot start a session for an agent whose CLI is missing.
-`commandmate init` reports a version (or "not found") for every row above.
+`commandmate init` reports a version (or "not found") for every row above. Antigravity CLI is the one exception: without the declaration `agy` is not started, and only whether it is on PATH (`found (version not checked; …)`) or not found is reported (out of care for Section 6 of the Google Antigravity Additional Terms; Issue #4480).
 
 > **Note**: `vibe-local` is a seat for a local script driving an Ollama model.
 > There is no published artifact to check, so `init` does not check for one.

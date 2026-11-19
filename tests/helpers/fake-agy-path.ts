@@ -7,6 +7,10 @@
  * private directory, so the real agy cannot be resolved and `~/.gemini` is never
  * read (I4). `CM_ANTIGRAVITY_USAGE` is unset; `restore()` puts all three back and
  * removes the sandbox.
+ *
+ * Issue #4480: `extraBinaries` adds more fakes beside the three (e.g. a `tmux`
+ * that answers `list-sessions`), each recording its calls in the same log and
+ * then running the given `/bin/sh` body.
  */
 
 import fs from 'fs';
@@ -30,7 +34,13 @@ export interface FakeAgyPath {
   restore(): void;
 }
 
-export function installFakeAgyPath(): FakeAgyPath {
+/** Options of {@link installFakeAgyPath}. */
+export interface FakeAgyPathOptions {
+  /** More fake binaries: name → `/bin/sh` body run after the call is recorded. */
+  extraBinaries?: Readonly<Record<string, string>>;
+}
+
+export function installFakeAgyPath(options: FakeAgyPathOptions = {}): FakeAgyPath {
   const saved: Record<string, string | undefined> = {};
   for (const key of SAVED_KEYS) saved[key] = process.env[key];
 
@@ -44,6 +54,13 @@ export function installFakeAgyPath(): FakeAgyPath {
     fs.writeFileSync(
       path.join(bin, name),
       `#!/bin/sh\necho "${name} $*" >> '${logPath}'\necho '${banner}'\n`,
+      { mode: 0o755 }
+    );
+  }
+  for (const [name, body] of Object.entries(options.extraBinaries ?? {})) {
+    fs.writeFileSync(
+      path.join(bin, name),
+      `#!/bin/sh\necho "${name} $*" >> '${logPath}'\n${body}\n`,
       { mode: 0o755 }
     );
   }

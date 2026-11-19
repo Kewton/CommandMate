@@ -69,8 +69,10 @@ interface CacheEntry {
   expiresAt: number;
   /**
    * Issue #4452: whether antigravity could be probed when these rows were made. A
-   * use of antigravity (or a declaration) since makes the entry stale at once, so
-   * the row shows right after the use rather than after the TTL.
+   * use of antigravity (or a declaration) since changes the answer, and the row
+   * shows right after the use rather than after the TTL. Issue #4480: only the
+   * antigravity row is added (or dropped) then; the other rows are kept, so
+   * claude / codex are not probed again inside the TTL.
    */
   antigravityProbeable: boolean;
 }
@@ -121,6 +123,22 @@ async function computeRows(): Promise<AgentVersionRow[]> {
   return Promise.all(tools.map(buildRow));
 }
 
+/** Rows in the list's order (by tool id, as {@link computeRows} sorts the ids). */
+function sortRows(rows: AgentVersionRow[]): AgentVersionRow[] {
+  return [...rows].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+}
+
+/**
+ * Issue #4480: the cached rows with the antigravity row added (gate open) or
+ * dropped (gate closed). Only antigravity is probed — the same "add only what
+ * became probeable" the detector and the catalog do.
+ */
+async function withAntigravityRow(rows: AgentVersionRow[], probeable: boolean): Promise<AgentVersionRow[]> {
+  const others = rows.filter((row) => row.tool !== 'antigravity');
+  if (!probeable || !('antigravity' in DETECTOR_VERSION_PROBES)) return others;
+  return sortRows([...others, await buildRow('antigravity')]);
+}
+
 /**
  * When a fan-out started at `startedAt` should stop being reused.
  *
@@ -153,12 +171,30 @@ export async function getAgentVersions(
 
   if (options.force) {
     cache = null;
-  } else if (
-    cache &&
-    cache.expiresAt > now &&
-    cache.antigravityProbeable === mayProbeToolVersion('antigravity')
-  ) {
-    return cache.rows;
+  } else if (cache && cache.expiresAt > now) {
+    const probeable = mayProbeToolVersion('antigravity');
+    if (cache.antigravityProbeable === probeable) return cache.rows;
+    if (inFlight) return inFlight;
+
+    // Issue #4480: inside the TTL only the gate's answer changed (a use or a
+    // declaration since). Add or drop the antigravity row and keep the rest — a
+    // full fan-out here would run claude / codex `--version` once more than the TTL
+    // allows (review-4452-3 P3-2). The entry keeps its expiry.
+    const base = cache;
+    inFlight = (async () => {
+      try {
+        const rows = await withAntigravityRow(base.rows, probeable);
+        cache = { rows, expiresAt: base.expiresAt, antigravityProbeable: probeable };
+        return rows;
+      } catch {
+        // Same rule as the full fan-out below: the versions are an annotation.
+        cache = { rows: base.rows, expiresAt: base.expiresAt, antigravityProbeable: probeable };
+        return base.rows;
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
   }
 
   if (inFlight) return inFlight;

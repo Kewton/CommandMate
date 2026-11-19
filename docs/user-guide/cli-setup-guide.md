@@ -36,12 +36,12 @@ CommandMate を使用するには、以下のツールが必要です。
 | Gemini CLI | - | △（オプション） | `gemini --version` |
 | GitHub Copilot CLI | - | △（オプション） | `copilot --version` |
 | OpenCode | - | △（オプション） | `opencode --version` |
-| Antigravity CLI | - | △（オプション） | `agy --version` |
+| Antigravity CLI | - | △（オプション） | `agy --version`（申告 `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` があるときだけ。無いときは PATH にあるかだけ） |
 | Command Code CLI | - | △（オプション） | `commandcode --version` |
 
 エージェント CLI はすべて任意です。1 つも入っていなくても CommandMate は起動しますが、
 worktree に割り当てたエージェントの CLI が無いとそのセッションは開始できません。
-`commandmate init` が上表のすべてについてバージョン（または未検出）を表示します。
+`commandmate init` が上表のすべてについてバージョン（または未検出）を表示します。Antigravity CLI だけは、申告が無いと `agy` を起動せず、PATH にあるか（`found (version not checked; …)`）か未検出だけを表示します（Google Antigravity 追加利用規約 6 条への配慮。Issue #4480）。
 
 > **Note**: `vibe-local` はローカルの Ollama を叩く自作スクリプトを想定した口で、
 > 配布物がないため `init` の確認対象には含まれません。
