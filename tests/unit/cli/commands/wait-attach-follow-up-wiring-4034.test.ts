@@ -122,19 +122,19 @@ async function runAttach(argv: string[], sessionName: string, instanceId: string
 describe('[#4034] attach: the capture hints, through the action', () => {
   it('positive: --instance names the instance the server resolved', async () => {
     const out = await runAttach(['wt1', '--instance', 'claude-2'], 'mcbd-claude-wt1-2', 'claude-2');
-    expect(out).toContain('commandmate capture wt1 --instance claude-2 --pane --tail 60');
+    expect(out).toContain('commandmate capture wt1 --instance claude-2 --pane --tail 80');
     expect(out).not.toContain('--agent');
   });
 
   it('positive: --agent alone names the agent, not an instance', async () => {
     const out = await runAttach(['wt1', '--agent', 'claude'], 'mcbd-claude-wt1', 'claude');
-    expect(out).toContain('commandmate capture wt1 --agent claude --pane --tail 60');
+    expect(out).toContain('commandmate capture wt1 --agent claude --pane --tail 80');
     expect(out).not.toContain('--instance');
   });
 
   it('negative: no flag names nothing, although the server echoes the default instance', async () => {
     const out = await runAttach(['wt1'], 'mcbd-claude-wt1', 'claude');
-    expect(out).toContain('commandmate capture wt1 --pane --tail 60');
+    expect(out).toContain('commandmate capture wt1 --pane --tail 80');
     expect(out).not.toContain('--instance');
     expect(out).not.toContain('--agent');
   });
