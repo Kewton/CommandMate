@@ -1117,7 +1117,7 @@ commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <ta
 | `--json` | 返答を JSON で出力 |
 | `--async` | 待たない。relay を登録して relay ID を出し、exit 0。返答は相手のターンが終わったとき `--reply-to` の入力欄へ届く |
 | `--reply-to <target>` | `--async` の返答の届け先: `<worktree-id>[@<instance-id\|alias>]`、または `self`（このコマンドを実行しているセッション。既定） |
-| `--allow-relay-chain` | relay された依頼に答える途中で開く relay を許可（既定は拒否。連鎖は 3 ホップで止まる） |
+| `--allow-relay-chain` | relay された依頼に答える途中で開く relay を許可（既定は拒否。連鎖は 3 ホップで止まる）。自分が開いた relay の返事を受けた後の次の依頼は連鎖に数えないが、人の普通の行を挟まない往復は 10 回で `RELAY_HOPS_EXCEEDED` になる（この旗では外れない。人が 1 行打てば数え直す） |
 | `--token <token>` | 認証トークン |
 
 `--auto-yes` は**意図的にありません**。他のセッションの Auto-Yes を入れるのは、そのセッションの安全柵の判断であり、質問の一部では

@@ -11,7 +11,12 @@
  *     default. `--allow-relay-chain` is the deliberate override, and the flag is
  *     named after what it permits rather than after what it disables.
  *  2. **Chains are bounded** (`RELAY_HOPS_EXCEEDED`). Even with the override,
- *     depth stops at {@link MAX_RELAY_HOPS}.
+ *     depth stops at {@link MAX_RELAY_HOPS}. Issue #4420: so are round trips —
+ *     a session that opens relay after relay, each right after the reply to its
+ *     own previous one, with nothing typed in between, stops at
+ *     {@link MAX_RELAY_ROUNDS} (same code, its own sentence; the flag does not
+ *     lift it either). The reply to a relay the session opened is NOT a relayed
+ *     request for rule 1 — answering it is the session's own next step.
  *  3. **One open relay per direction** (`RELAY_DUPLICATE_PENDING`). A second
  *     standing instruction from A to B says nothing the first does not, and both
  *     would fire on the same finished turn.
@@ -60,6 +65,19 @@ export const MAX_RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * refused — `--allow-relay-chain` widens the door, it does not remove the wall.
  */
 export const MAX_RELAY_HOPS = 3;
+
+/**
+ * How many relays a session may open in a row, each right after the reply to
+ * its own previous one, before a person has to type something (Issue #4420).
+ *
+ * Ten, by the PM's decision. Counted per requesting session whoever it asks
+ * (alternating targets must not reset it), from the delivered replies in its
+ * history back to the newest ordinary row. Not {@link MAX_RELAY_HOPS}: depth is
+ * nesting, this is length, and a requester asking → reading the reply → asking
+ * again is the normal use. With one open relay per direction a runaway advances
+ * one reply per turn of the other side, so ten bounds it to about ten turns.
+ */
+export const MAX_RELAY_ROUNDS = 10;
 
 /** How many open relays one from→to direction may hold at once. */
 export const MAX_OPEN_RELAYS_PER_PAIR = 1;
@@ -153,6 +171,12 @@ export interface RelayCreationInput {
   /** Open relays already running from `from` to `to`. */
   openBetween: number;
   /**
+   * Issue #4420: replies to `from`'s own relays received in a row with no
+   * ordinary row in between (`relay-service`'s `countConsecutiveReplyRounds`).
+   * Absent means 0, so a caller that does not count is unaffected.
+   */
+  replyRounds?: number;
+  /**
    * Issue #4437: the tools at both ends, for rule 0. Absent, rule 0 is not
    * asked (a caller with no tools to name); `relay-service` always passes it.
    */
@@ -180,6 +204,9 @@ export function isSameEndpoint(a: RelayEndpoint, b: RelayEndpoint): boolean {
  *
  * Issue #4437: the tool policy (rule 0) is asked right after the typo and
  * before the others — no flag of this request lifts it, only a declaration.
+ *
+ * Issue #4420: the round-trip ceiling sits right after the depth ceiling — the
+ * same code, and like it not lifted by `allowRelayChain`.
  */
 export function decideRelayCreation(
   input: RelayCreationInput
@@ -216,6 +243,17 @@ export function decideRelayCreation(
       message:
         `Relay chains stop at ${MAX_RELAY_HOPS} hops; this one would be ${hops}. `
         + 'Report the reply to whoever asked instead of forwarding it again.',
+    };
+  }
+
+  const replyRounds = input.replyRounds ?? 0;
+  if (replyRounds >= MAX_RELAY_ROUNDS) {
+    return {
+      code: 'RELAY_HOPS_EXCEEDED',
+      message:
+        `This session has opened relays ${replyRounds} times in a row, each right after a reply, `
+        + `with nothing typed in between; round trips stop at ${MAX_RELAY_ROUNDS}. `
+        + 'Have a person look before sending another (any ordinary message resets the count).',
     };
   }
 
