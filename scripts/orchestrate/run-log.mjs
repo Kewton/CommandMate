@@ -58,12 +58,10 @@
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { dirtyPaths } from './dirty-tree.mjs';
-import { manifestHash, manifestInputs, takeManifest } from './env-manifest.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
 
 /**
@@ -528,19 +526,18 @@ function realpathOrNull(file) {
  *   started counts as after it) after the run started, and `--head` (when given) is that HEAD. What
  *   cannot be read is refused, not assumed. A tree that was dirty during the run and cleaned before
  *   recording is not seen (a cleaning that does not move HEAD leaves no time to compare).
- * - env: a direct run has no manifest from its start, so the env is the manifest **taken when
- *   recording** (`env-at=record`), written only when no input of it (env-manifest.mjs
- *   manifestInputs) changed after the run started (mtime): then it is the run's env too. It is kept
- *   as the end manifest of `verify-<work item>.run<id>.env.json` under the record's key
- *   (`<issues>:<work item>:<task|->:run<id>`), so verifyEnvState compares it as it does wait-verify's.
+ * - env: none (`env=none`, the human decision (a) on #4482). A direct run has no manifest from its
+ *   start, and one taken later can differ from the run's in ways no time stamp shows (a re-pointed
+ *   `node_modules`, a deleted or restored settings file), so no env is claimed and no manifest file
+ *   is written. env-manifest.mjs verifyEnvState never reads `env=none` as `same`.
  *
- * The note: `direct=verify run=<id> run-status=<status> gates=<id>:<ok|skip|fail>,… key=<key> env-at=record env=<hash>`.
+ * The note: `direct=verify run=<id> run-status=<status> gates=<id>:<ok|skip|fail>,… key=<key> env=none`.
  * `gates=` is for the reader: precheck / merge-pr read `passed=` (wait-verify's), so a direct record
  * is read as a `verify=ok` line and never lends its gates to a reuse.
  *
- * @returns {{ exit: number, reason?: string, file?: string, record?: any, envFile?: string }}
+ * @returns {{ exit: number, reason?: string, file?: string, record?: any }}
  */
-export function recordVerifyRun(options, { run = defaultRun, home = os.homedir(), now = new Date() } = {}) {
+export function recordVerifyRun(options, { run = defaultRun, now = new Date() } = {}) {
   const runId = String(options.runId);
   const cli = options.cli || 'commandmatedev';
   const worktree = options.worktree;
@@ -611,22 +608,6 @@ export function recordVerifyRun(options, { run = defaultRun, home = os.homedir()
   if ((movedSec + 1) * 1000 > started) {
     return refused(`HEAD ${short} moved after the run started (${new Date(movedSec * 1000).toISOString()} >= ${view.startedAt}): run ${runId} verified another state`);
   }
-  // (d) The env taken now is the run's only if none of its inputs changed since the run started.
-  let changed;
-  try {
-    changed = manifestInputs({ worktree, home }).filter((file) => {
-      try {
-        return fs.statSync(file).mtimeMs > started;
-      } catch (error) {
-        if (error?.code === 'ENOENT') return false;
-        throw error;
-      }
-    });
-  } catch (error) {
-    return refused(`cannot read the env inputs' times: ${error.message}`);
-  }
-  if (changed.length > 0) return refused(`env input changed after the run started: ${changed.join(', ')} (verify again, then record that run)`);
-
   const item = optionalString(options.item);
   const issue = Number(options.issue);
   const { records } = readRecords(options.runDir, options.issues);
@@ -638,8 +619,6 @@ export function recordVerifyRun(options, { run = defaultRun, home = os.homedir()
   // Only the run's own task (#4482 review 1 P3-1): `--task` checks it, it never stands in for it.
   const recordTask = optionalString(view.taskId);
   const key = `${options.issues}:${workItemName(issue, item)}:${recordTask ?? '-'}:run${runId}`;
-  const manifest = takeManifest({ worktree, home });
-  const hash = manifestHash(manifest);
   const gates = (Array.isArray(view.gates) ? view.gates : []).map((g) => `${g.gateId}:${gateResult(String(g.status ?? ''))}`);
   const note = [
     'direct=verify',
@@ -647,8 +626,8 @@ export function recordVerifyRun(options, { run = defaultRun, home = os.homedir()
     `run-status=${view.status}`,
     `gates=${gates.join(',') || '-'}`,
     `key=${key}`,
-    'env-at=record',
-    `env=${hash}`,
+    // No env is claimed for a direct run: it has no manifest from its start (#4482 decision (a)).
+    'env=none',
   ].join(' ');
   const finished = Date.parse(view.finishedAt);
   const input = {
@@ -663,21 +642,8 @@ export function recordVerifyRun(options, { run = defaultRun, home = os.homedir()
     item,
     key,
   };
-  makeRecord(input, now); // validate before anything is written
-  const envFile = path.join(options.runDir, `verify-${workItemName(issue, item)}.run${runId}.env.json`);
-  fs.mkdirSync(options.runDir, { recursive: true });
-  fs.writeFileSync(
-    envFile,
-    `${JSON.stringify({ key, runId: Number(runId), takenAt: now.toISOString(), start: null, verify: null, end: manifest, changed: { duringTask: [], duringVerify: [] } }, null, 2)}\n`
-  );
-  try {
-    const { file, record } = appendRecord(options.runDir, options.issues, input, now);
-    return { exit: RECORD_VERIFY_EXIT.recorded, file, record, envFile };
-  } catch (error) {
-    // No manifest without its record (#4482 review 1 P3-4).
-    fs.rmSync(envFile, { force: true });
-    throw error;
-  }
+  const { file, record } = appendRecord(options.runDir, options.issues, input, now);
+  return { exit: RECORD_VERIFY_EXIT.recorded, file, record };
 }
 
 const RECORD_VERIFY_FLAGS = {
@@ -730,7 +696,7 @@ function recordVerifyMain(rest, now, deps) {
     return RECORD_VERIFY_EXIT.usage;
   }
   try {
-    const result = recordVerifyRun(options, { run: deps.run, home: deps.home, now });
+    const result = recordVerifyRun(options, { run: deps.run, now });
     if (result.exit !== RECORD_VERIFY_EXIT.recorded) {
       error(`not recorded: ${result.reason}`);
       return result.exit;

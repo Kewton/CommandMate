@@ -174,11 +174,11 @@ precheck のうち全ファイルを走査するガードのテスト（`tests/u
 
 | exit | 意味 | 対応 |
 |---|---|---|
-| 0 | `verify` の行を env つきで記録した | なし |
+| 0 | `verify` の行を記録した（`env=none`） | なし |
 | 1 | `verify show <run> --json` が run を返さない（失敗・JSON でない・`id` の無い答え）、または worktree の HEAD を読めない | run 番号・`--cli`・サーバーを確かめて呼び直す |
 | 2 | 引数の誤り（`--run` が数でない、`--head` が 40 桁でない、必須の引数が無い） | 引数を直す |
 | 3 | run が終わっていない（`running`・`queued` など） | 結果を決めずに断っている。run が終わってから呼び直す |
-| 4 | 別の run（worktree の id・path、run の id、task の不一致）、HEAD をその run が確かめた木と言えない（未コミットの変更・HEAD のコミットか移動が run の開始より後・`--head` と違う・git status / reflog / run の開始時刻を読めない）、env の入力が run の開始より後に変わった、同じ work item に記録済み | stderr の理由を読む。木か env が動いたなら、今の HEAD（コミット済み）で verify を流し直してから、その run を記録する |
+| 4 | 別の run（worktree の id・path、run の id、task の不一致）、HEAD をその run が確かめた木と言えない（未コミットの変更・HEAD のコミットか移動が run の開始より後・`--head` と違う・git status / reflog / run の開始時刻を読めない）、同じ work item に記録済み | stderr の理由を読む。木が動いたなら、今の HEAD（コミット済み）で verify を流し直してから、その run を記録する |
 
 ## エラーハンドリング表の個別の行
 

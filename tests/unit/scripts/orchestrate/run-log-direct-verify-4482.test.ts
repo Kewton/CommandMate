@@ -1,6 +1,7 @@
 /**
  * scripts/orchestrate/run-log.mjs `record-verify` — a verify the leader ran directly, recorded from
- * its run id with the environment (Issue #4482).
+ * its run id: run, head and result, and `env=none` (Issue #4482; the human decision (a) of 11-20:
+ * a direct run has no manifest from its start, so no env is claimed for it).
  *
  * The verify CLI and git are faked (`run`); the worktree, HOME and run directory are under
  * os.tmpdir() and removed after each test. Nothing external is called.
@@ -20,7 +21,10 @@ import {
   readRecords,
   recordVerifyRun,
 } from '../../../../scripts/orchestrate/run-log.mjs';
-import { keptManifest, manifestHash, takeManifest, verifyEnvState } from '../../../../scripts/orchestrate/env-manifest.mjs';
+import { manifestHash, takeManifest, verifyEnvState } from '../../../../scripts/orchestrate/env-manifest.mjs';
+import { passedGates } from '../../../../scripts/orchestrate/precheck.mjs';
+import { judgedByUnitRelated, ranFullUnit } from '../../../../scripts/orchestrate/merge-pr.mjs';
+import { missingRecords } from '../../../../scripts/orchestrate/pr-common.mjs';
 
 const HEAD_A = 'a'.repeat(40);
 const HEAD_B = 'b'.repeat(40);
@@ -32,7 +36,7 @@ const COMMITTED_AFTER = '2026-11-19T01:05:00+00:00';
 /** HEAD's last move (reflog, epoch seconds): before the run by default. */
 const MOVED_BEFORE = String(Date.parse(COMMITTED_BEFORE) / 1000);
 const MOVED_AFTER = String(Date.parse('2026-11-19T01:03:00Z') / 1000);
-/** Every env input is dated before the run, so the record-time manifest is the run's (#4482 P2-1). */
+/** A time before the run, for the files the tests make. */
 const OLD = new Date('2026-11-18T00:00:00Z');
 
 let base: string;
@@ -127,7 +131,7 @@ function record(options: Record<string, unknown> = {}, runOptions: FakeOptions =
   const { run } = fakeRun(runOptions);
   return recordVerifyRun(
     { runDir, issues: '4482', issue: '4482', wt: WT, worktree, runId: '812', cli: 'commandmatedev', ...options },
-    { run, home, now: NOW }
+    { run, now: NOW }
   );
 }
 
@@ -170,7 +174,7 @@ describe('record-verify: what the record says (#4482)', () => {
       result: 'ok',
       gates: 'lint:ok,typecheck:ok,unit:ok',
     },
-  ])('$name → verify=$result with run, status, gates, key and env', ({ shown, result, gates }) => {
+  ])('$name → verify=$result with run, status, gates, key and env=none', ({ shown, result, gates }) => {
     const out = record({}, { shown });
     expect(out.exit).toBe(RECORD_VERIFY_EXIT.recorded);
     const { records } = readRecords(runDir, '4482');
@@ -182,8 +186,8 @@ describe('record-verify: what the record says (#4482)', () => {
     expect(line.note).toContain('run=812');
     expect(line.note).toContain(`run-status=${status}`);
     expect(line.note).toContain(`gates=${gates}`);
-    expect(line.note).toContain('env-at=record');
-    expect(line.note).toMatch(/(?:^|\s)env=[0-9a-f]{12}(?:\s|$)/);
+    expect(line.note).toMatch(/(?:^|\s)env=none(?:\s|$)/);
+    expect(line.note).not.toContain('env-at=');
     expect(line.note).toContain(`key=${line.key}`);
     expect(line.key).toBe('4482:4482:task-1:run812');
   });
@@ -197,32 +201,27 @@ describe('record-verify: what the record says (#4482)', () => {
     }
   });
 
-  it('keeps the env manifest so precheck / publish compare it the same way (verifyEnvState is `same`)', () => {
+  it('writes env=none and no manifest file, with the environment unchanged since the run', () => {
     const out = record();
+    expect(out.exit).toBe(RECORD_VERIFY_EXIT.recorded);
     const line = readRecords(runDir, '4482').records[0];
-    const hash = manifestHash(takeManifest({ worktree, home }));
-    expect(line.note).toContain(`env=${hash}`);
-    expect(out.envFile && fs.existsSync(out.envFile)).toBe(true);
-    expect(keptManifest(runDir, line.key, hash)).not.toBeNull();
-    expect(verifyEnvState(line, { runDir, worktree, home }).state).toBe('same');
-    // The environment as it is when recorded: a change after it reads as `changed`, not as the run's.
-    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"model":"sonnet"}\n');
-    expect(verifyEnvState(line, { runDir, worktree, home }).state).toBe('changed');
+    expect(line.note).not.toContain(`env=${manifestHash(takeManifest({ worktree, home }))}`);
+    expect((out as { envFile?: string }).envFile).toBeUndefined();
+    expect(fs.readdirSync(runDir).filter((name) => name.endsWith('.env.json'))).toEqual([]);
   });
 
-  it('records the env even when the run itself says nothing of it (no instance, no task, no finish)', () => {
+  it('writes env=none even when the run itself says nothing (no instance, no task, no finish)', () => {
     const out = record({}, { shown: view({ instanceId: null, taskId: null, finishedAt: null }) });
     expect(out.exit).toBe(RECORD_VERIFY_EXIT.recorded);
     const line = readRecords(runDir, '4482').records[0];
     expect(line).toMatchObject({ taskId: null, agent: null, durationSec: null, key: '4482:4482:-:run812' });
-    expect(line.note).toMatch(/(?:^|\s)env=[0-9a-f]{12}(?:\s|$)/);
+    expect(line.note).toMatch(/(?:^|\s)env=none(?:\s|$)/);
   });
 
-  it('passes --item into the record, the key and the env file name', () => {
-    const out = record({ item: 'd1' });
+  it('passes --item into the record and the key', () => {
+    record({ item: 'd1' });
     const line = readRecords(runDir, '4482').records[0];
     expect(line).toMatchObject({ item: 'd1', key: '4482:4482-d1:task-1:run812' });
-    expect(path.basename(out.envFile ?? '')).toBe('verify-4482-d1.run812.env.json');
   });
 });
 
@@ -276,46 +275,48 @@ describe('record-verify: what it refuses, writing nothing (#4482 I2 / I3)', () =
   });
 });
 
-describe('record-verify: the env must be the run’s (#4482 review 1 P2-1)', () => {
-  it.each([
-    ['the global settings.json', () => path.join(home, '.claude', 'settings.json')],
-    ['the lockfile', () => path.join(worktree, 'package-lock.json')],
-    ['the local settings.local.json', () => {
-      const file = path.join(worktree, '.claude', 'settings.local.json');
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, '{}\n');
-      return file;
-    }],
-    ['node_modules', () => {
-      const dir = path.join(worktree, 'node_modules');
-      fs.mkdirSync(dir, { recursive: true });
-      return dir;
-    }],
-    ['node_modules/.package-lock.json', () => {
-      const dir = path.join(worktree, 'node_modules');
-      fs.mkdirSync(dir, { recursive: true });
-      fs.utimesSync(dir, OLD, OLD);
-      const file = path.join(dir, '.package-lock.json');
-      fs.writeFileSync(file, '{}\n');
-      return file;
-    }],
-  ])('refuses when %s changed after the run started', (_name, make) => {
-    const file = make();
-    fs.utimesSync(file, new Date('2026-11-19T01:15:00Z'), new Date('2026-11-19T01:15:00Z'));
-    const out = record();
-    expect(out.exit).toBe(RECORD_VERIFY_EXIT.refused);
-    expect(out.reason).toMatch(/changed after the run started/);
-    expect(out.reason).toContain(path.basename(file));
-    expect(readRecords(runDir, '4482').records).toHaveLength(0);
+describe('record-verify: env=none is never read as the run’s environment (#4482 decision (a))', () => {
+  const where = () => ({ runDir, worktree, home });
+  const direct = () => {
+    expect(record().exit).toBe(RECORD_VERIFY_EXIT.recorded);
+    return readRecords(runDir, '4482').records[0];
+  };
+
+  it('does not date the env inputs: a change after the run is not a refusal (no env is claimed)', () => {
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{"model":"sonnet"}\n');
+    expect(direct().note).toMatch(/(?:^|\s)env=none(?:\s|$)/);
   });
 
-  it('records when every env input (node_modules included) is older than the run', () => {
-    const dir = path.join(worktree, 'node_modules');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, '.package-lock.json'), '{}\n');
-    fs.utimesSync(path.join(dir, '.package-lock.json'), OLD, OLD);
-    fs.utimesSync(dir, OLD, OLD);
-    expect(record().exit).toBe(RECORD_VERIFY_EXIT.recorded);
+  it('verifyEnvState does not read env=none as `same` (nor as `changed` / `missing` against a manifest)', () => {
+    const state = verifyEnvState(direct(), where());
+    expect(state.state).not.toBe('same');
+    expect(state.state).toBe('unrecorded');
+    expect(state.detail).toMatch(/env=none/);
+  });
+
+  it('precheck reuses none of its gates, and merge-pr waits for CI’s Unit Tests', () => {
+    const line = direct();
+    expect(line.result).toBe('ok');
+    expect(passedGates(line)).toEqual([]);
+    expect(ranFullUnit(line)).toBe(false);
+    expect(judgedByUnitRelated(line)).toBe(false);
+  });
+
+  it('publish / merge take it as the verify of the HEAD, with a warning that names env=none', () => {
+    const records = [direct()];
+    const warnings: string[] = [];
+    const missing = missingRecords(records, 4482, { head: HEAD_A, workHead: HEAD_A }, null, { ...where(), warn: (line: string) => warnings.push(line) });
+    expect(missing.filter((reason: string | null) => String(reason).startsWith('verify'))).toEqual([]);
+    expect(warnings.join('\n')).toMatch(/env=none/);
+  });
+
+  it('a wait-verify line (env=<hash> with its manifest) is still read as `same` (I1)', () => {
+    const hash = manifestHash(takeManifest({ worktree, home }));
+    const key = '4482:4482:task-1:a1';
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'wait-4482.log.env.json'), JSON.stringify({ key, end: takeManifest({ worktree, home }) }));
+    const line = { note: `exit=0(passed) passed=lint run=1 key=${key} env=${hash}`, key };
+    expect(verifyEnvState(line, where()).state).toBe('same');
   });
 });
 
@@ -332,10 +333,9 @@ describe('record-verify: --task is not a fact of the run (#4482 review 1 P3-1)',
   });
 });
 
-describe('record-verify: the env file goes with the record (#4482 review 1 P3-4)', () => {
-  it('removes the env file when the record cannot be appended', () => {
+describe('record-verify writes no env file (#4482 decision (a))', () => {
+  it('leaves no .env.json when the record cannot be appended either', () => {
     fs.mkdirSync(runDir, { recursive: true });
-    // A read-only run-log file: it reads (no records), and the append after the env file fails.
     const file = path.join(runDir, 'run-4482.jsonl');
     fs.writeFileSync(file, '');
     fs.chmodSync(file, 0o444);
@@ -347,7 +347,7 @@ describe('record-verify: the env file goes with the record (#4482 review 1 P3-4)
 
 describe('record-verify against a real git worktree (#4482 review 1 P1-1)', () => {
   const OLD_DATE = '2020-01-01T00:00:00+00:00';
-  const RUN_START = '2026-11-18T12:00:00.000Z'; // after OLD (the env inputs' time) and the commits, before now
+  const RUN_START = '2026-11-18T12:00:00.000Z'; // after the commits, before now
   const git = (args: string[], env: Record<string, string> = {}) => {
     const out = spawnSync('git', ['-C', worktree, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
       encoding: 'utf8',
@@ -382,7 +382,7 @@ describe('record-verify against a real git worktree (#4482 review 1 P1-1)', () =
   const recordReal = () =>
     recordVerifyRun(
       { runDir, issues: '4482', issue: '4482', wt: WT, worktree, runId: '812' },
-      { run: hybrid(view({ startedAt: RUN_START })), home, now: NOW }
+      { run: hybrid(view({ startedAt: RUN_START })), now: NOW }
     );
 
   it('records the HEAD the run saw (committed and moved to before the run, clean tree)', () => {

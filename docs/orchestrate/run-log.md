@@ -189,7 +189,7 @@ done 3< <(awk -F'\t' '{
 ## 1-5 リーダーが直接流した verify の記録（record-verify）
 
 wait-verify はワーカーの合図（`IMPL_COMPLETED`）を待つので、リーダーが `commandmatedev verify <wt>` を直接流した run には使えない（#4482。Sprint 7 の A1〜D2 では
-`verify=ok` を手で書き、note に run 番号を書いた。env= は残らなかった）。直接の run は、終わった後に run 番号から記録する:
+`verify=ok` を手で書き、note に run 番号を書いた）。直接の run は、終わった後に run 番号から記録する（run 番号・head・結果が残る。env は書かない）:
 
 ```bash
 node scripts/orchestrate/run-log.mjs record-verify --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
@@ -210,15 +210,18 @@ node scripts/orchestrate/run-log.mjs record-verify --run-dir "workspace/orchestr
     （`git log -g -1 --date=unix --format=%gd HEAD`。`%ct` はコミットの時刻なので使わない）が開始より前。reflog は秒単位なので、開始と同じ秒の移動は後と数える。
     古いコミットへの `reset`・`checkout`・`merge --ff-only` もこれで断る。reflog が読めなければ断る
   - `--head` を付けたなら、それが HEAD
-  - 限界: run の間だけ未コミットの変更があり、記録の前に消した（HEAD を動かさずに戻した）木は見分けられない。直に流すときは、コミットした木で流す
-- **env は記録する時点の manifest**（note に `env-at=record`）: 直の実行には開始時の manifest が無く、後から開始時刻の状態を作り直せないため。そのかわり、
-  manifest の入力（`env-manifest.mjs` の `manifestInputs`: `~/.claude/settings.json`・`.claude/settings.local.json`・`package-lock.json`・`node_modules` と
-  その実体・`node_modules/.package-lock.json`）のどれかの mtime が run の開始より後なら exit 4 で断る（記録時の env が run の env と同じと言えない）。
-  `takeManifest` / `manifestHash` で取った manifest を `verify-<work item>.run<id>.env.json` の `end` に置き、記録の `key`（`<issues>:<work item>:<task|->:run<id>`）と
-  `env=<hash>` を note に書く。precheck / publish / merge の環境の照合（`verifyEnvState`）は wait-verify の行と同じに読む。追記に失敗したら env の file は消す
-- note の形: `direct=verify run=<id> run-status=<status> gates=… key=<key> env-at=record env=<hash>`。wait-verify の行の形は変えていない。
+- **env は書かない（`env=none`）**: 直の実行には run の開始時の manifest が無い。記録する時点の manifest を代わりに書くと、run の後の環境の変化
+  （`node_modules` の付け替え・設定ファイルの削除や mtime を保った差し戻し）を時刻では見分けられず、run が見ていない環境を run の環境として残しうる
+  （レビュー 2 回の P2。人の判断 (a)、Issue #4482 のコメント）。そこで env は主張せず、`.env.json` も書かない。`env-manifest.mjs` の `verifyEnvState` は
+  `env=none` を `same` と読まず、`env=` の無い行と同じ `unrecorded`（警告つきで、記録として使う）と読む
+- **既知の限界**（head の確かめは誤りを防ぐためのもので、意図した偽装は防がない）:
+  - run の間だけ未コミットの変更があり、記録の前に消した（HEAD を動かさずに戻した）木は見分けられない。直に流すときは、コミットした木で流す
+  - `GIT_COMMITTER_DATE` を過去にした amend・reset は、reflog の項目の時刻も過去になるので通る
+  - gitignore された入力（`.env*.local`・手元の DB・生成物）の run の後の変更は `git status --porcelain` に出ないので見えない（wait-verify も同じ）
+  - run の `startedAt` はサーバーの時計、reflog の時刻は手元の時計で比べる。同じマシンの前提で、サーバーの時計が進んでいると run の後の移動を見逃す
+- note の形: `direct=verify run=<id> run-status=<status> gates=… key=<key> env=none`。wait-verify の行の形は変えていない。
   `gates=` は読む人のための欄で、precheck・merge-pr は wait-verify の `passed=` を読むので、**直の記録は `verify=ok` の行として読まれるがゲートの再利用はされない**
-  （precheck は手元の検証をやり直し、merge-pr は CI の `Unit Tests` を待つ）
+  （precheck は手元の検証をやり直し、merge-pr は CI の `Unit Tests` を待つ）。publish / merge は、この行をその HEAD の verify として `env=none` の警告つきで使う
 - exit code: 0 記録した / 1 run・HEAD を読めない / 2 引数の誤り / 3 run が終わっていない / 4 別の run・記録済み（docs/orchestrate/exit-codes.md#1-5-record-verify-の-exit-code）
 
 ## 1-5 plan.md の対象 Issue 表の例
