@@ -60,6 +60,17 @@ vi.mock('@/lib/db/db-instance', () => {
   };
 });
 
+/** What the runner wrote to its log (warn/error), so the release record can be checked. */
+vi.mock('@/lib/logger', () => {
+  const g = globalThis as { __t4463Logs?: { event: string; data: Record<string, unknown> }[] };
+  const LOGS = (g.__t4463Logs ??= []);
+  const push = (event: string, data?: unknown) => LOGS.push({ event, data: (data ?? {}) as Record<string, unknown> });
+  const logger = { warn: push, info: () => {}, error: push, debug: () => {}, withContext: () => logger };
+  return { createLogger: () => logger };
+});
+const logs = (): { event: string; data: Record<string, unknown> }[] =>
+  ((globalThis as { __t4463Logs?: { event: string; data: Record<string, unknown> }[] }).__t4463Logs ??= []);
+
 /** How long a test waits for the run to close before calling it stuck. */
 const SETTLE_BOUND_MS = 40_000;
 const TEST_TIMEOUT_MS = 90_000;
@@ -420,10 +431,14 @@ describe('#4463 review 2 P2: the mutex is not handed on while a released gate\'s
       register('wt-mutex-bound', repo);
       (runner as { setOrphanMutexHoldMsForTests?: (ms?: number) => void }).setOrphanMutexHoldMsForTests?.(3000);
 
-      const { settled } = await runWithin('wt-mutex-bound', repo);
+      logs().length = 0;
+      const { runId, settled } = await runWithin('wt-mutex-bound', repo);
 
       expect(settled).toBe(true);
       expect(await until(() => lockFree(name), 15_000)).toBe(true);
+      // impl-2/impl-3 P3-2: the release past the limit is recorded, naming the run it came from.
+      const record = logs().find((l) => l.event === 'verification-mutex-released-with-orphan');
+      expect(record?.data).toMatchObject({ runId, worktreeId: 'wt-mutex-bound', gateId: 'escapes', mutex: name });
     },
     TEST_TIMEOUT_MS
   );
@@ -456,4 +471,46 @@ options:
   it('keeps a hold limit by default', () => {
     expect((runner as { ORPHAN_MUTEX_HOLD_MS?: number }).ORPHAN_MUTEX_HOLD_MS).toBe(1_800_000);
   });
+});
+
+describe('#4463 impl-3 P3-1: a retry whose descendants outlive the kill leaves no verdict', () => {
+  it(
+    'first attempt fails, the retry leaves a descendant holding the pipes → run error (exit 99), the next gate not run',
+    async () => {
+      const repo = createRepo(`
+version: 1
+gates:
+  - id: flaky
+    command: "if [ -f attempt1 ]; then node escape.js escaped.pid; sleep 120; else touch attempt1; exit 1; fi"
+    timeoutSec: 2
+    retryOnFail: 1
+  - id: after
+    command: "touch reached"
+    timeoutSec: 30
+options:
+  baseRef: main
+`);
+      writeFileSync(
+        join(repo, 'escape.js'),
+        [
+          "const { spawn } = require('child_process');",
+          "const c = spawn('sleep', ['120'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });",
+          "require('fs').writeFileSync(process.argv[2], String(c.pid));",
+          'c.unref();',
+        ].join('\n')
+      );
+      pidFiles.push(join(repo, 'escaped.pid'));
+      register('wt-retry-orphan', repo);
+
+      const { runId, settled } = await runWithin('wt-retry-orphan', repo);
+
+      expect(settled).toBe(true);
+      expect(existsSync(join(repo, 'escaped.pid'))).toBe(true);
+      const run = getVerificationRun(db, runId);
+      expect(run?.status).toBe('error');
+      expect(exitCodeForRunStatus(run!.status)).toBe(99);
+      expect(existsSync(join(repo, 'reached'))).toBe(false);
+    },
+    TEST_TIMEOUT_MS
+  );
 });

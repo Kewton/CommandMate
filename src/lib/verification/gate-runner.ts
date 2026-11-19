@@ -169,6 +169,12 @@ const SIGKILL_GRACE_MS = 5000;
  */
 const PIPE_RELEASE_GRACE_MS = 2000;
 
+/** The run a command gate belongs to, named in what the runner records about it (Issue #4463). */
+interface GateOwner {
+  runId: number;
+  worktreeId: string;
+}
+
 /** Gates not run after a gate whose descendants outlived the kill (Issue #4463). */
 const ORPHAN_REMAINDER_LOG =
   'skipped: an earlier gate left processes running after its kill, so the run reached no verdict.';
@@ -179,8 +185,9 @@ const SCOPE_GIT_TIMEOUT_REMAINDER_LOG =
 
 /** The log line of a gate closed because its pipes outlived the kill (Issue #4463). */
 const PIPES_HELD_LOG =
-  '[gate output pipes still held after the kill: a descendant outlived it, so no verdict ' +
-  '(the run closes as error) and the gate\'s mutex is held until it is gone]';
+  '[gate output pipes still held after the kill: a descendant outlived it holding them, so no ' +
+  'verdict (the run closes as error) and the gate\'s mutex is held until those pipes close ' +
+  '(a descendant that escaped without the pipes is not tracked, #4494)]';
 
 /**
  * How long a gate whose descendants outlived the kill keeps its mutex after the gate closed, at
@@ -1000,7 +1007,8 @@ async function runGateAttempt(
   gateEnv: Record<string, string>,
   cancellation: RunCancellation,
   slot: RunSlot,
-  waits: GateWaits
+  waits: GateWaits,
+  owner: GateOwner
 ): Promise<GateOutcome> {
   const mutex = gate.mutex;
   if (!mutex) {
@@ -1088,16 +1096,33 @@ async function runGateAttempt(
       // handed to the next gate while they run; it goes once their pipes close, or at the hold
       // limit, which is recorded.
       const handle = lock.handle;
-      void drained.then((gone) => {
-        if (!gone) {
-          logger.warn('verification-mutex-released-with-orphan', {
+      void drained
+        .then((gone) => {
+          if (!gone) {
+            logger.warn('verification-mutex-released-with-orphan', {
+              runId: owner.runId,
+              worktreeId: owner.worktreeId,
+              gateId: gate.id,
+              mutex,
+              heldMs: orphanMutexHoldMs,
+            });
+          }
+          handle.release();
+        })
+        .catch((error: unknown) => {
+          // impl-2 P3-6: never an unhandled rejection in the server; the lock is still handed on.
+          logger.error('verification-mutex-release-failed', {
+            runId: owner.runId,
             gateId: gate.id,
             mutex,
-            heldMs: orphanMutexHoldMs,
+            error: error instanceof Error ? error.message : String(error),
           });
-        }
-        handle.release();
-      });
+          try {
+            handle.release();
+          } catch {
+            // Already released, or the lock directory is gone.
+          }
+        });
     } else {
       lock.handle.release();
     }
@@ -1126,7 +1151,8 @@ async function runCommandGate(
   maxLogTailBytes: number,
   gateEnv: Record<string, string>,
   cancellation: RunCancellation,
-  slot: RunSlot
+  slot: RunSlot,
+  owner: GateOwner
 ): Promise<GateOutcome> {
   // The slot wait since the previous command gate (for the first one, since
   // the run was opened) belongs to this gate: it is what kept it from starting.
@@ -1138,7 +1164,8 @@ async function runCommandGate(
     gateEnv,
     cancellation,
     slot,
-    waits
+    waits,
+    owner
   );
   if (!gate.mutex && waits.queueMs === 0) return outcome;
   return {
@@ -1155,10 +1182,11 @@ async function runCommandGateAttempts(
   gateEnv: Record<string, string>,
   cancellation: RunCancellation,
   slot: RunSlot,
-  waits: GateWaits
+  waits: GateWaits,
+  owner: GateOwner
 ): Promise<GateOutcome> {
   const attempt = (): Promise<GateOutcome> =>
-    runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv, cancellation, slot, waits);
+    runGateAttempt(gate, worktreePath, maxLogTailBytes, gateEnv, cancellation, slot, waits, owner);
   const first = await attempt();
   // A cancelled attempt reports `skipped`, so the retry below is already ruled
   // out by the status check: an operator's Stop must not buy a second run of
@@ -1972,7 +2000,7 @@ async function executeRun(
     }
 
     const outcome = await runGate(gate.id, gate.command, gate.source, () =>
-      runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv(), cancellation, slot)
+      runCommandGate(gate, worktreePath, maxLogTailBytes, gateEnv(), cancellation, slot, { runId, worktreeId })
     );
     statuses.push(outcome.status);
     if (outcome.noVerdict && !cancellation.cancelled) {
