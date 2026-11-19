@@ -36,6 +36,7 @@ import {
   isStartingMessageText,
   main,
 } from '../../../../scripts/orchestrate/launch-worker.mjs';
+import { QUERY_TIMEOUT_MS } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
 let tmp: string;
 let worktree: string;
@@ -64,14 +65,19 @@ type Answer = Record<string, unknown>;
  * model check, `[1]` and `[2]` the two ready reads, the rest the composer's
  * re-reads; the last answer repeats.
  */
-function fakeCli({ initExit = 99, captures = [GHOST] as Answer[] } = {}) {
+/** The CLI verbs a launch may use; a clear (or any other write) is none of them. */
+const ALLOWED_VERBS = new Set(['reply', 'capture', 'instances', 'auto-yes', 'send']);
+
+function fakeCli({ initExit = 99, captures = [GHOST] as Answer[], captureThrowsFrom = Infinity } = {}) {
   const calls: string[][] = [];
+  /** The options each `capture` was run with (its time bound). */
+  const captureOpts: Array<{ timeoutMs?: number } | undefined> = [];
   const sleeps: number[] = [];
   /** Every call to the clear a previous version had (`deps.clearComposer`): must stay 0. */
   const clears: unknown[] = [];
   let read = 0;
   let running = true;
-  const run = (command: string, args: string[]) => {
+  const run = (command: string, args: string[], opts?: { timeoutMs?: number }) => {
     calls.push([command, ...args]);
     const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
     if (command === 'git') return ok();
@@ -80,6 +86,9 @@ function fakeCli({ initExit = 99, captures = [GHOST] as Answer[] } = {}) {
     const verb = args[0];
     if (verb === 'reply') return ok(JSON.stringify({ instanceId: args[args.indexOf('--instance') + 1], cliToolId: 'claude', reply: null }));
     if (verb === 'capture') {
+      captureOpts.push(opts);
+      // A capture that cannot even start (`spawnSync` ENOENT, as `defaultRun` throws it).
+      if (read >= captureThrowsFrom) throw Object.assign(new Error('spawnSync commandmatedev ENOENT'), { code: 'ENOENT' });
       const answer = captures[Math.min(read, captures.length - 1)];
       read += 1;
       if (answer === FAIL) return { status: 1, stdout: '', stderr: 'ECONNREFUSED' };
@@ -102,7 +111,7 @@ function fakeCli({ initExit = 99, captures = [GHOST] as Answer[] } = {}) {
     clears.push(input);
     return { attempted: true, ok: true, detail: 'POST ok' };
   };
-  return { run, calls, sleeps, clears, clearComposer, sleep: (ms: number) => sleeps.push(ms) };
+  return { run, calls, captureOpts, sleeps, clears, clearComposer, sleep: (ms: number) => sleeps.push(ms) };
 }
 
 function go(fake: ReturnType<typeof fakeCli>) {
@@ -135,6 +144,8 @@ const killsAfterInit = (fake: ReturnType<typeof fakeCli>) => {
 };
 const captures = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c) => c[1] === 'capture').length;
 const nonCliCommands = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c) => c[0] !== 'commandmatedev' && c[0] !== 'git');
+/** CLI calls whose verb is not one a launch reads or sends with. */
+const otherVerbs = (fake: ReturnType<typeof fakeCli>) => fake.calls.filter((c) => c[0] === 'commandmatedev' && !ALLOWED_VERBS.has(c[1]));
 const initErr = () => fs.readFileSync(path.join(runDir, 'send-init-4476.err'), 'utf8');
 
 /** Composer answers for the ready reads and every re-read after them. */
@@ -163,6 +174,7 @@ describe('[#4476] the composer is never cleared, whatever it holds (redesign)', 
     expect(r.code).toBe(1);
     expect(fake.clears).toEqual([]);
     expect(nonCliCommands(fake)).toEqual([]);
+    expect(otherVerbs(fake)).toEqual([]);
     expect(contractSends(fake)).toEqual([]);
     expect(killsAfterInit(fake)).toEqual([]);
     // I2: the starting message is never typed (or submitted) again.
@@ -237,7 +249,7 @@ describe('[#4476] the stop says what the composer held (I6 only describes)', () 
   it('a composer that cannot be read: says so, with the last state', () => {
     const fake = fakeCli({ captures: throughout(NO_COMPOSER) });
     go(fake);
-    expect(initErr()).toContain('cannot be read (last read no_composer)');
+    expect(initErr()).toContain('cannot be read (no_composer; last read no_composer)');
   });
 });
 
@@ -308,6 +320,73 @@ describe('[#4476] everything else keeps the path it had (negative)', () => {
     expect(r.code).toBe(EXIT_ROLE_CHANGED);
     expect(fake.clears).toEqual([]);
     expect(contractSends(fake)).toEqual([]);
+  });
+});
+
+describe('[#4476] a re-read without its role record is a read that says nothing (codex r4 P2)', () => {
+  const G1 = { sessionGeneration: 'g1', injectionFingerprint: 'f1' };
+  const G2 = { sessionGeneration: 'g2', injectionFingerprint: 'f1' };
+
+  it('G1 throughout the ready reads, then re-reads with no roleLaunch and no_composer: no kill, no contract, exit 1, the next step', () => {
+    const fake = fakeCli({ captures: [{ roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, NO_COMPOSER] });
+    const r = go(fake);
+    expect(r.code).toBe(1);
+    expect(killsAfterInit(fake)).toEqual([]);
+    expect(contractSends(fake)).toEqual([]);
+    expect(initErr()).toContain('roleLaunch missing');
+    expect(initErr()).toContain(NEXT_STEP);
+  });
+
+  it('a clean re-read without its role record does not count: no contract', () => {
+    const fake = fakeCli({ captures: [{ roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, EMPTY] });
+    const r = go(fake);
+    expect(r.code).toBe(1);
+    expect(killsAfterInit(fake)).toEqual([]);
+    expect(contractSends(fake)).toEqual([]);
+  });
+
+  it('the record back (G1) and clean: the contract, pinned to G1', () => {
+    const fake = fakeCli({ captures: [{ roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, EMPTY, { ...EMPTY, roleLaunch: G1 }, { ...GHOST, roleLaunch: G1 }] });
+    const r = go(fake);
+    expect(r.code).toBe(0);
+    expect(contractSends(fake)).toHaveLength(1);
+    expect(contractSends(fake)[0]).toEqual(expect.arrayContaining(['--expect-role-generation', 'g1', '--expect-role-fingerprint', 'f1']));
+  });
+
+  it('G2 read in a re-read: the existing role stop (44) as before', () => {
+    const fake = fakeCli({ captures: [{ roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, { ...EMPTY, roleLaunch: G1 }, { ...EMPTY, roleLaunch: G2 }] });
+    const r = go(fake);
+    expect(r.code).toBe(EXIT_ROLE_CHANGED);
+    expect(contractSends(fake)).toEqual([]);
+    expect(killsAfterInit(fake)).toHaveLength(1);
+  });
+});
+
+describe('[#4476] a re-read that cannot start, and its time bound (r4 P3)', () => {
+  it('a capture that throws (ENOENT) is a read that says nothing: NOT CLEAN and the next step are written, exit 1', () => {
+    const fake = fakeCli({ captures: [{}, EMPTY, EMPTY], captureThrowsFrom: 3 });
+    const r = go(fake);
+    expect(r.code).toBe(1);
+    expect(contractSends(fake)).toEqual([]);
+    expect(killsAfterInit(fake)).toEqual([]);
+    expect(initErr()).toContain('composer NOT CLEAN');
+    expect(initErr()).toContain(NEXT_STEP);
+    expect(r.log.join('\n')).toContain(NEXT_STEP);
+  });
+
+  it('every re-read is bounded in time (QUERY_TIMEOUT_MS)', () => {
+    const fake = fakeCli({ captures: throughout(NO_COMPOSER) });
+    go(fake);
+    // The model read and the two ready reads are the existing ones; the re-reads after them carry the bound.
+    const rereads = fake.captureOpts.slice(3);
+    expect(rereads).toHaveLength(COMPOSER_SETTLE_READS);
+    for (const opts of rereads) expect(opts).toEqual({ timeoutMs: QUERY_TIMEOUT_MS });
+  });
+
+  it('the stop names the last read, after the latest one that was not clean', () => {
+    const fake = fakeCli({ captures: [{}, GHOST, GHOST, CONTENT, GHOST, CONTENT, GHOST, CONTENT, GHOST] });
+    go(fake);
+    expect(initErr()).toContain('(looks like the rest of the starting message; last read ghost)');
   });
 });
 

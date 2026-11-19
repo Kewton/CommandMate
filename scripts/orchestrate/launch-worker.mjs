@@ -460,6 +460,7 @@ export function composerReading(answer) {
   if (typeof state !== 'string') return { kind: 'unreadable', state: `invalid:${typeof state}`, text: '' };
   if (COMPOSER_CLEAN_STATES.has(state)) return { kind: 'clean', state, text: '' };
   if (state === 'content') return { kind: 'content', state, text: typeof answer.composerText === 'string' ? answer.composerText : '' };
+  // `unsupported_tool` included: the model path that reads this is Claude's, whose composer is measured.
   return { kind: 'unreadable', state, text: '' };
 }
 
@@ -506,25 +507,29 @@ export function isStartingMessageText(text, message = INIT_MESSAGE) {
  *   - `unknown`: the first answer has no `composerState` key (a server older than #1879) — the
  *     caller goes on as before;
  *   - `clean`: clean readings in a row;
- *   - `replaced`: `holds()` says the process is no longer the one the starting message
- *     started (#4115) — the caller's role check stops it;
+ *   - `replaced`: `role()` says `changed` — a generation or fingerprint read that differs from
+ *     the one the starting message started (#4115); the caller's role check stops it. A read
+ *     whose role record is missing (`role()` says `missing`) is not that: it counts as a read
+ *     that says nothing (not clean), so it ends in `held` if it lasts;
  *   - `held`: no clean streak within the reads. `last` is the last reading that was not clean
  *     (text, or a state that says nothing: `no_composer`, unknown, wrong type, a failed read).
  *
  * @returns {{ verdict: 'unknown' | 'clean' | 'replaced' | 'held', state: string,
- *   last: { kind: string, state: string, text: string } | null }}
+ *   last: { kind: string, state: string, text: string } | null,
+ *   final: { kind: string, state: string, text: string } }} `last` the latest reading that was not clean, `final` the last one
  */
-export function settleLeftoverComposer({ run, sleep, cli, wt, instance, answer, holds = () => true, onAnswer }) {
+export function settleLeftoverComposer({ run, sleep, cli, wt, instance, answer, role = () => 'holds', onAnswer }) {
   let reading = composerReading(answer);
-  if (reading.kind === 'legacy') return { verdict: 'unknown', state: reading.state, last: null };
+  if (reading.kind === 'legacy') return { verdict: 'unknown', state: reading.state, last: null, final: reading };
   let last = null;
   let streak = 0;
   for (let read = 0; read <= COMPOSER_SETTLE_READS; read++) {
     if (read > 0) {
       sleep(COMPOSER_SETTLE_INTERVAL_SEC * 1000);
-      const out = run(cli, ['capture', wt, '--instance', instance, '--json']);
       let now = null;
       try {
+        // A capture that cannot even start (ENOENT, a timeout) is a read that says nothing, like a failed one.
+        const out = run(cli, ['capture', wt, '--instance', instance, '--json'], { timeoutMs: QUERY_TIMEOUT_MS });
         now = out.status === 0 ? JSON.parse(out.stdout) : null;
       } catch {
         now = null;
@@ -534,28 +539,35 @@ export function settleLeftoverComposer({ run, sleep, cli, wt, instance, answer, 
       // A key that went missing after the first answer is not "an older server".
       if (reading.kind === 'legacy') reading = { kind: 'unreadable', state: 'missing', text: '' };
     }
-    if (!holds()) return { verdict: 'replaced', state: reading.state, last };
+    const roleNow = role();
+    // A generation or fingerprint read that differs (#4115): the caller's role check stops it, as before.
+    if (roleNow === 'changed') return { verdict: 'replaced', state: reading.state, last, final: reading };
+    // No role record in this read (a server restarted under a live session, say): which process
+    // this is cannot be told, so the read counts for nothing — not clean, not "replaced".
+    if (roleNow === 'missing') reading = { kind: 'unreadable', state: 'roleLaunch missing', text: '' };
     if (reading.kind === 'clean') {
       streak += 1;
-      if (streak >= COMPOSER_CLEAN_STREAK) return { verdict: 'clean', state: reading.state, last };
+      if (streak >= COMPOSER_CLEAN_STREAK) return { verdict: 'clean', state: reading.state, last, final: reading };
       continue;
     }
     streak = 0;
     last = reading;
   }
-  return { verdict: 'held', state: reading.state, last };
+  return { verdict: 'held', state: reading.state, last, final: reading };
 }
 
 /**
- * What a reading that was not clean held, for the stop's log (Issue #4476). I6 only words it:
- * the rest of the starting message, other text, text not reported, or a composer not read.
+ * What the composer held when the launch stopped on it, for the stop's log (Issue #4476): the
+ * latest reading that was not clean — the rest of the starting message or other text (I6 only
+ * words it), text not reported, or a composer not read — and the last read itself.
  */
-function describeHeldComposer(last) {
-  if (last === null) return 'it read clean, but not twice in a row';
-  if (last.kind !== 'content') return `the composer cannot be read (last read ${last.state})`;
-  if (!last.text) return 'it holds text, but its text was not reported (composerText empty or not a string)';
+function describeHeldComposer(last, final) {
+  const lastRead = `last read ${final?.state ?? '-'}`;
+  if (last === null) return `it read clean, but not ${COMPOSER_CLEAN_STREAK} times in a row (${lastRead})`;
+  if (last.kind !== 'content') return `the composer cannot be read (${last.state}; ${lastRead})`;
+  if (!last.text) return `it holds text, but its text was not reported (composerText empty or not a string; ${lastRead})`;
   const kind = isStartingMessageText(last.text) ? 'looks like the rest of the starting message' : 'other text';
-  return `it holds "${composerHead(last.text)}" (${kind})`;
+  return `it holds "${composerHead(last.text)}" (${kind}; ${lastRead})`;
 }
 
 /** The first characters of a composer's text, on one line, for a log. */
@@ -764,12 +776,20 @@ export function main(argv, deps = {}) {
         // and the contract's send would refuse it (#1880) on every try. The composer is read, never
         // cleared, typed into or submitted (the message may have gone): two clean reads, or a stop
         // that leaves the session as it is for a person to look at.
+        // The re-reads keep the role read before them when one comes back without a record: a
+        // missing record says nothing about the process (it is not "another process").
+        let roleMissing = false;
         const leftover = settleLeftoverComposer({
           ...ctx,
           answer: lastAnswer,
           // A process replaced since the model check: the role check below stops it, as before.
-          holds: () => rolePinHolds(rolePin, roleNow),
-          onAnswer: readAnswer,
+          role: () => (roleMissing ? 'missing' : rolePinHolds(rolePin, roleNow) ? 'holds' : 'changed'),
+          onAnswer: (answer) => {
+            lastAnswer = answer;
+            const pin = rolePinOf(answer);
+            roleMissing = rolePin !== null && pin === null;
+            if (!roleMissing) roleNow = pin;
+          },
         });
         const errFile = path.join(o.runDir, `${init.name.replace(/\.out$/, '')}.err`);
         const record = (line) => {
@@ -783,7 +803,7 @@ export function main(argv, deps = {}) {
         } else if (leftover.verdict === 'held') {
           // Not killed: the composer is what a person has to look at (PM decision).
           record(
-            `composer NOT CLEAN ${o.instance} of ${o.wt} after start exit=${init.status}: ${describeHeldComposer(leftover.last)}; ` +
+            `composer NOT CLEAN ${o.instance} of ${o.wt} after start exit=${init.status}: ${describeHeldComposer(leftover.last, leftover.final)}; ` +
               `not ${COMPOSER_CLEAN_STREAK} clean reads in a row within ${COMPOSER_SETTLE_READS} reads; nothing cleared, session left running; ` +
               `contract not sent. 次の手: ${COMPOSER_NEXT_STEP}`
           );

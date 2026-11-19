@@ -37,6 +37,10 @@ done
 
 ## 3-1 assign.tsv を stdin で読んで止まった実測
 
+`while read …; done < assign.tsv` にすると、ループの中の `commandmatedev`（`ls` / `send` / `capture`）が stdin を読み、残りの行を消費する。
+本体の雛形は fd 3 から読むので、ループの中のコマンドに `</dev/null` を付けなくてよい。雛形を書き換えて使うときも、
+stdin で読む形に戻さないこと。ループを使わずに 1 件ずつ送るときは、各 `commandmatedev` に `</dev/null` を付ける（本体の 3-1 から移した詳細、#4476 の追記で本体の容量を空けるため）。
+
 その run では 1 件目の `send` の前でループが止まり、**約 90 分、ワーカーが 1 人も起動していないのに「送信中」と報告した**
 （send の出力ファイルは 1 つも作られず、`GET /api/worktrees/<WT>/tasks` は空だった）。
 
@@ -52,7 +56,7 @@ done
 - **契約より先に起動して確かめる**（#3883 N1）: セッションは契約ではなく、作業を頼まない短いメッセージ（`INIT_MESSAGE`。Auto-Yes も付けない）で起動する。
   その後に `capture --json` の `model` を読む（空なら 20 秒おいて 3 回まで）。契約のモデル（`opus` / `sonnet` の語）を含めば `model ok`。
   空のままなら `model UNKNOWN`、別のモデルなら `model MISMATCH`。`model ok` のときだけ、`sessionStatus` が `ready` を 2 回続けて読む（10 秒おき、30 回まで）のを待って
-  契約と Auto-Yes を送る。ready にならなければセッションを止め、契約は送らずに exit 1
+  契約と Auto-Yes を送る。ready にならなければセッションを止め、契約は送らずに exit 1。起動のメッセージが exit 99 だったときは、契約の前に入力欄が空（`empty`・`ghost`）と 2 回続けて読めることも確かめる。確かめられなければ**セッションを止めずに** exit 1（下の 3-1 のモデルの確認結果の節、#4476）
 - **1 回だけ起動し直す**: UNKNOWN / MISMATCH はセッションを止め、モデルを書き直し、起動のメッセージから送り直す。2 回目も一致しなければ
   セッションを止めて exit 40（MISMATCH）/ 41（UNKNOWN）。**契約も Auto-Yes もそのセッションには送らない**（tasks.tsv の task id は空になる）
 - **止めたことを確かめる**（#3883 N2）: 止めるたびに `instances <WT> kill` の exit code と、その後の `instances <WT> --json` で `running` でないこと
@@ -64,7 +68,7 @@ done
   Auto-Yes は契約の送信（`--auto-yes`）で初めて入る
 - **送信の出力**: `runs/<date>/send-<issue>[-<item>][.a<n>].out` / `.err` を呼び出しごとに排他的に取る（`execution-key.mjs`。同じ Issue の送信を並行しても、
   起動し直しても混ざらない）。起動のメッセージの出力は `send-init-<issue>[-<item>][.a<n>].out` / `.err`。stdout は task id だけ。
-  起動のメッセージが exit 99（initialization timeout / prompt not ready / composer-not-empty）なら、`MODEL_READS` × `MODEL_READ_INTERVAL_SEC` の範囲で `capture --json` の model を読み、読めれば `.err` に「プロンプト到達を確認して続行」と残して契約へ進む（読めなければ従来どおり 1 回起動し直し、なお読めなければ exit 41）。99 以外の失敗はその exit code を返し、モデルは確かめない。契約の send の失敗は従来どおり
+  起動のメッセージが exit 99（initialization timeout / prompt not ready / composer-not-empty）なら、`MODEL_READS` × `MODEL_READ_INTERVAL_SEC` の範囲で `capture --json` の model を読み、読めれば `.err` に「プロンプト到達を確認して続行」と残して先へ進む（読めなければ従来どおり 1 回起動し直し、なお読めなければ exit 41）。先へ進んでも、契約を送るのは入力欄が空と 2 回続けて読めたときだけ（#4476。読めなければ `send-init-*.err` に `composer NOT CLEAN` を残し、セッションを止めずに exit 1）。99 以外の失敗はその exit code を返し、モデルは確かめない。契約の send の失敗は従来どおり
 - **単独で使うとき**: `launch-worker.mjs set-model --worktree <path> --model <opus|sonnet>`、
   `launch-worker.mjs check-model --wt <WT> --model <opus|sonnet>`（0 / 40 / 41）
 
@@ -92,6 +96,7 @@ done
 |---|---|---|---|
 | 0 | | 契約を送った（Claude はモデルの一致を確かめた後） | 3-2 へ |
 | 1 | | 起動のメッセージの後で `ready` にならなかった。セッションは止めた。契約は送っていない | 画面を読んで送り直す |
+| 1 | | （#4476）起動のメッセージが exit 99 の後、入力欄が空（`empty`・`ghost`）と 2 回続けて読めなかった（文字が残っている・読めない・ロールの記録が欠けた）。**セッションは止めていない**。入力欄は消していない。契約は送っていない。理由と入力欄の先頭は `send-init-*.err` と log の `composer NOT CLEAN` の行 | 先に人が入力欄を確かめて消す（残す文字は控える）。それから送り直す。**送り直す（起動し直す）と最初の停止でセッションが kill され、入力欄は失われる**。開始の一言を Enter で提出し直さない |
 | 2 | | 使い方の誤り、または git が無視しない設定ファイル。何も送っていない | 呼び出しか `.gitignore` を直す |
 | 31 | `EXIT_ROLE_CONFLICT` | send の 31 をそのまま返す。名簿が動いた。契約は送っていない。セッションは止めず、次の起動が止める | 名簿を読み直し、同じ呼び出しで送り直す |
 | 32 | `EXIT_ROLE_NOT_SENT` | send の 32 をそのまま返すのは、`--model -` の直接送信・起動のメッセージで断られたとき・起動時のロールの記録が無いツールのとき。本文は打っていない | `send-*.err` を読み、ロールを確かめて送り直す |
