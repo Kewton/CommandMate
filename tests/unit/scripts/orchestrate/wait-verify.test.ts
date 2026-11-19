@@ -232,6 +232,8 @@ function harness({
         : { instanceId: resolved[selector] ?? selector, ...(resolvedTools[selector] ? { cliToolId: resolvedTools[selector] } : {}) },
     sleep: (ms: number) => {
       sleeps.push(ms);
+      // #4463: a wait that never gives up fails the test instead of hanging the worker.
+      if (sleeps.length > 100_000) throw new Error('the wait did not end in a finite time');
       clock += ms;
     },
     now: () => new Date(clock),
@@ -1368,6 +1370,8 @@ describe('another run of the worktree is waited out, and only this call’s run 
     // The worktree of the harness has no verify.yaml, so this repository's is read.
     expect(waitedSec).toBeGreaterThanOrEqual(verifyBusyTimeoutSec('/wt'));
     expect(waitedSec).toBeLessThanOrEqual(verifyBusyTimeoutSec('/wt') + 60);
+    // #4463: the limit is the cap — (slots + 1) runs at their worst, never below the floor.
+    expect(waitedSec).toBeGreaterThanOrEqual(VERIFY_BUSY_FALLBACK_SEC);
   });
 
   describe('#4459: the limit comes from verify.yaml (P2-1)', () => {
@@ -1375,16 +1379,24 @@ describe('another run of the worktree is waited out, and only this call’s run 
     const gate = (id: string, timeoutSec: number, extra = '') => `  - id: ${id}\n    command: "true"\n    timeoutSec: ${timeoutSec}\n${extra}`;
 
     it('is the worst one gate can take: mutex wait + slot wait + its run + margin', () => {
-      const deps = config(gate('unit', 5400, '    mutex: cpu.heavy\n') + gate('build', 1800) + gate('lint', 900));
-      expect(verifyBusyTimeoutSec('/w', deps)).toBe(5400 + 1800 + 5400 + VERIFY_BUSY_MARGIN_SEC);
+      // #4463: the cap — 3 runs (the one waited for and the 2 holding slots) at their worst, each
+      // every gate's mutex wait + its run (twice with retryOnFail) + margin; floor 86400.
+      const deps = config(gate('unit', 7200, '    mutex: cpu.heavy\n    mutexWaitSec: 86400\n') + gate('build', 1800) + gate('lint', 900));
+      expect(verifyBusyTimeoutSec('/w', deps)).toBe(3 * (86400 + 7200 + 1800 + 900 + VERIFY_BUSY_MARGIN_SEC));
+      const small = config(gate('unit', 5400, '    mutex: cpu.heavy\n') + gate('build', 1800) + gate('lint', 900));
+      expect(verifyBusyTimeoutSec('/w', small)).toBe(VERIFY_BUSY_FALLBACK_SEC);
     });
 
     it('follows verify.yaml: raising timeoutSec or declaring mutexWaitSec raises it', () => {
-      const base = verifyBusyTimeoutSec('/w', config(gate('unit', 5400, '    mutex: cpu.heavy\n') + gate('build', 1800)));
-      const slower = verifyBusyTimeoutSec('/w', config(gate('unit', 7200, '    mutex: cpu.heavy\n') + gate('build', 1800)));
-      const queued = verifyBusyTimeoutSec('/w', config(gate('unit', 5400, '    mutex: cpu.heavy\n    mutexWaitSec: 9000\n') + gate('build', 1800)));
-      expect(slower).toBeGreaterThan(base);
-      expect(queued).toBe(base + (9000 - 5400));
+      const unit = (timeout: number, wait: number) => gate('unit', timeout, `    mutex: cpu.heavy\n    mutexWaitSec: ${wait}\n`);
+      const base = verifyBusyTimeoutSec('/w', config(unit(5400, 40000) + gate('build', 1800)));
+      const slower = verifyBusyTimeoutSec('/w', config(unit(7200, 40000) + gate('build', 1800)));
+      const queued = verifyBusyTimeoutSec('/w', config(unit(5400, 49000) + gate('build', 1800)));
+      const retried = verifyBusyTimeoutSec('/w', config(unit(5400, 40000) + gate('build', 1800, '    retryOnFail: 1\n')));
+      expect(base).toBe(3 * (40000 + 5400 + 1800 + VERIFY_BUSY_MARGIN_SEC));
+      expect(slower).toBe(base + 3 * (7200 - 5400));
+      expect(queued).toBe(base + 3 * (49000 - 40000));
+      expect(retried).toBe(base + 3 * 1800);
     });
 
     it('is never below what this repository’s own verify.yaml allows one gate to take', () => {

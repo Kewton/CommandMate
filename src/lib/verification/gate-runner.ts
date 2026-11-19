@@ -157,6 +157,34 @@ export const MAX_CONCURRENT_VERIFICATIONS = 2;
 const SIGKILL_GRACE_MS = 5000;
 
 /**
+ * How long after the SIGKILL a killed gate may keep its pipes open before the runner lets go of
+ * them and closes the gate anyway (Issue #4463, the minimal part of #4494).
+ *
+ * The kill reaches the gate's process group only. A descendant that moved to a group of its own
+ * (setsid, a `detached` child) and inherited stdout keeps the pipe open, so `close` never came and
+ * the run stayed `running` while the server lived on — wait-verify could not tell it from a long
+ * gate. The grace runs only after a kill, so it never ends a live gate before its timeoutSec.
+ */
+const PIPE_RELEASE_GRACE_MS = 2000;
+
+/** The log line of a gate closed because its pipes outlived the kill (Issue #4463). */
+const PIPES_HELD_LOG = '[gate output pipes still held after the kill; released by the runner]';
+
+/**
+ * The time limit of one git plumbing call of the runner (Issue #4463, the minimal part of #4494).
+ * A git that never returns (a lock, a hung credential helper, a network filesystem) used to keep
+ * the run `running` for as long as the server lived. The calls are local plumbing that answers in
+ * well under a second, so the limit only ever ends a call that is not coming back.
+ */
+export const RUN_GIT_TIMEOUT_MS = 120_000;
+let runGitTimeoutMs = RUN_GIT_TIMEOUT_MS;
+
+/** Tests only: shorten runGit's limit (no argument restores the default). */
+export function setRunGitTimeoutMsForTests(ms?: number): void {
+  runGitTimeoutMs = ms ?? RUN_GIT_TIMEOUT_MS;
+}
+
+/**
  * Per-worktree environment every command gate is given (Issue #1771).
  *
  * `CM_WORKTREE_INDEX` is what lets a repository write
@@ -711,6 +739,7 @@ function runCommand(
     let cancelled = false;
     let graceTimer: NodeJS.Timeout | undefined;
     let cancelGraceTimer: NodeJS.Timeout | undefined;
+    let releaseTimer: NodeJS.Timeout | undefined;
 
     const child = spawn(command, {
       shell: true,
@@ -748,10 +777,26 @@ function runCommand(
      * run was cancelled between the two, `register` fires this immediately and
      * the group is signalled before it can do anything.
      */
+    /**
+     * Issue #4463: after the SIGKILL, give the pipes PIPE_RELEASE_GRACE_MS to close, then let go
+     * of them and settle as `close` would have (timeout, or the cancel's skip). Armed only by a
+     * kill — never by the clock alone — so a live gate is not ended before its timeoutSec.
+     */
+    const killThenRelease = (): void => {
+      signalGroup('SIGKILL');
+      if (releaseTimer) return;
+      releaseTimer = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settleKilled(null, true);
+      }, PIPE_RELEASE_GRACE_MS);
+      releaseTimer.unref?.();
+    };
+
     const unregisterCancel = cancellation?.register(() => {
       cancelled = true;
       signalGroup('SIGTERM');
-      cancelGraceTimer = setTimeout(() => signalGroup('SIGKILL'), SIGKILL_GRACE_MS);
+      cancelGraceTimer = setTimeout(killThenRelease, SIGKILL_GRACE_MS);
       cancelGraceTimer.unref?.();
     });
 
@@ -763,6 +808,7 @@ function runCommand(
       clearTimeout(killTimer);
       if (graceTimer) clearTimeout(graceTimer);
       if (cancelGraceTimer) clearTimeout(cancelGraceTimer);
+      if (releaseTimer) clearTimeout(releaseTimer);
       unregisterCancel?.();
       resolve({ ...outcome, startedAt, durationMs: Date.now() - startedAt });
     };
@@ -770,7 +816,7 @@ function runCommand(
     const killTimer = setTimeout(() => {
       timedOut = true;
       signalGroup('SIGTERM');
-      graceTimer = setTimeout(() => signalGroup('SIGKILL'), SIGKILL_GRACE_MS);
+      graceTimer = setTimeout(killThenRelease, SIGKILL_GRACE_MS);
       graceTimer.unref?.();
     }, timeoutSec * 1000);
     killTimer.unref?.();
@@ -783,7 +829,12 @@ function runCommand(
       });
     });
 
-    child.on('close', (code, signal) => {
+    /**
+     * Settle a gate that was killed (timeout or cancel): from `close`, or from the release of
+     * pipes a descendant kept open (Issue #4463). Returns false when no kill was ever sent.
+     */
+    function settleKilled(signal: NodeJS.Signals | null, pipesHeld: boolean): boolean {
+      const held = pipesHeld ? `\n${PIPES_HELD_LOG}` : '';
       if (timedOut) {
         finish({
           status: 'timeout',
@@ -791,9 +842,9 @@ function runCommand(
           // exit code would look like the command decided something.
           exitCode: null,
           logTail:
-            `${tail.toString()}\n[gate exceeded ${timeoutSec}s and was terminated (${signal ?? 'exited'})]`.trim(),
+            `${tail.toString()}\n[gate exceeded ${timeoutSec}s and was terminated (${signal ?? 'exited'})]${held}`.trim(),
         });
-        return;
+        return true;
       }
       // Checked after `timedOut` so a gate that had already blown its budget
       // keeps reporting the budget as the cause: the cancel arrived second and
@@ -808,10 +859,15 @@ function runCommand(
           // Killed, so whatever the shell reported is the signal's doing.
           exitCode: null,
           logTail:
-            `${tail.toString()}\n${CANCELLED_RUNNING_GATE_LOG} (${signal ?? 'exited'})`.trim(),
+            `${tail.toString()}\n${CANCELLED_RUNNING_GATE_LOG} (${signal ?? 'exited'})${held}`.trim(),
         });
-        return;
+        return true;
       }
+      return false;
+    }
+
+    child.on('close', (code, signal) => {
+      if (settleKilled(signal, false)) return;
       finish({
         status: code === 0 ? 'passed' : 'failed',
         exitCode: code,
@@ -1104,15 +1160,36 @@ function prefixLogTail(marker: string, logTail: string | null): string {
 }
 
 /** Run a git plumbing command. No shell: every argument here is code-supplied. */
+/**
+ * Bounded by {@link RUN_GIT_TIMEOUT_MS} (Issue #4463): a call that does not come back is killed and
+ * answers as a failed call (`code: null`), which every caller already turns into an error verdict.
+ */
 function runGit(args: string[], cwd: string): Promise<{ code: number | null; stdout: string }> {
   return new Promise((resolve) => {
     let stdout = '';
+    let settled = false;
     const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
+    const settle = (result: { code: number | null; stdout: string }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(limit);
+      resolve(result);
+    };
+    const limit = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Already gone.
+      }
+      child.stdout?.destroy();
+      settle({ code: null, stdout: '' });
+    }, runGitTimeoutMs);
+    limit.unref?.();
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8');
     });
-    child.on('error', () => resolve({ code: null, stdout: '' }));
-    child.on('close', (code) => resolve({ code, stdout }));
+    child.on('error', () => settle({ code: null, stdout: '' }));
+    child.on('close', (code) => settle({ code, stdout }));
   });
 }
 
