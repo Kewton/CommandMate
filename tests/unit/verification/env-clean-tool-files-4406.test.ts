@@ -21,23 +21,23 @@
  * start, merging into what is there) and `.commandcode/taste/` (Command Code's
  * own). The product gates already excuse exactly these untracked paths by the
  * #3126 roster (`src/lib/skills/agent-state-paths.ts`); the orchestrator's
- * dirty-tree check (`git status --porcelain`, scripts/orchestrate/dirty-tree.mjs)
- * did not, and failed `wait-verify` with exit 3. The repo `.gitignore` now names
- * the same two paths — and only them: `.commandcode/skills/`, `commands/`, a
- * *directory* called `settings.local.json`, and look-alikes elsewhere stay
- * visible.
+ * dirty-tree check (scripts/orchestrate/dirty-tree.mjs, shared by wait-verify,
+ * precheck, merge-pr, publish-pr and merge-train) did not, and failed
+ * `wait-verify` with exit 3. dirty-tree now carries a copy of the same roster and
+ * matches it itself, case-sensitively, on untracked entries only. Not through
+ * `.gitignore`: git's `core.ignorecase` (the default on macOS) would also hide
+ * `.COMMANDCODE/Settings.local.json`, which the roster does not excuse (PM's
+ * decision on review P2-1).
  *
- * The git runs are isolated from the machine: no global or system config, no
- * XDG excludes file (`~/.config/git/ignore` hides `.claude/settings.local.json`
- * on developer machines), and `core.ignorecase=false` so macOS and Linux CI
- * agree. Case variants are left out: on a case-insensitive filesystem the
- * answer depends on the filesystem, not on the rule.
+ * The git runs are isolated from the machine (no global or system config, no XDG
+ * excludes file) but keep the repository's own `core.ignorecase` as `git init`
+ * set it, so on macOS the case variants run under the setting that hid them.
  *
  * @vitest-environment node
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import {
   linkSync,
@@ -57,6 +57,13 @@ import {
   AGENT_STATE_FILES,
   isAgentStatePath,
 } from '@/lib/skills/agent-state-paths';
+import {
+  AGENT_STATE_DIR_PREFIXES as MJS_AGENT_STATE_DIR_PREFIXES,
+  AGENT_STATE_FILES as MJS_AGENT_STATE_FILES,
+  IGNORED_DIRTY,
+  dirtyPaths,
+  isAgentStatePath as mjsIsAgentStatePath,
+} from '../../../scripts/orchestrate/dirty-tree.mjs';
 import { diffEnvSnapshots, formatEnvCleanReport } from '@/lib/verification/env-clean-gate';
 import {
   ENV_SNAPSHOT_VERSION,
@@ -75,8 +82,6 @@ import {
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import { REAL_SHELL_SUBPROCESS_TIMEOUT_MS } from '@tests/helpers/real-shell-budget';
 
-const REPO_GITIGNORE = join(process.cwd(), '.gitignore');
-
 const tempDirs: string[] = [];
 
 afterEach(() => {
@@ -84,31 +89,47 @@ afterEach(() => {
 });
 
 /**
- * git with no user/system config, no XDG excludes file and case-sensitive paths.
- * An inherited `GIT_DIR` / `GIT_INDEX_FILE` / `GIT_WORK_TREE` (a test run from a
- * git hook) would aim `init` / `commit` at the real repository, so they are dropped.
+ * The environment git runs with: no user/system config and no XDG excludes file
+ * (`~/.config/git/ignore` hides `.claude/settings.local.json` on developer
+ * machines). An inherited `GIT_DIR` / `GIT_INDEX_FILE` / `GIT_WORK_TREE` (a test
+ * run from a git hook) would aim `init` / `commit` at the real repository, so
+ * they are dropped.
  */
-function git(args: string[], cwd: string): string {
+function gitEnv(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.GIT_DIR;
   delete env.GIT_INDEX_FILE;
   delete env.GIT_WORK_TREE;
-  return execFileSync(
-    'git',
-    ['-c', 'core.excludesFile=/dev/null', '-c', 'core.ignorecase=false', ...args],
-    {
-      cwd,
+  return {
+    ...env,
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, '.no-xdg'),
+  };
+}
+
+const GIT_ISOLATION = ['-c', 'core.excludesFile=/dev/null'];
+
+function git(args: string[], cwd: string): string {
+  return execFileSync('git', [...GIT_ISOLATION, ...args], {
+    cwd,
+    encoding: 'utf8',
+    timeout: REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
+    env: gitEnv(cwd),
+  });
+}
+
+/** The `run` dirty-tree.mjs is given by its callers (`spawnSync` → status / stdout / stderr), isolated. */
+function realRun(home: string) {
+  return (command: string, args: string[]) => {
+    const result = spawnSync(command, [...GIT_ISOLATION, ...args], {
       encoding: 'utf8',
       timeout: REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
-      env: {
-        ...env,
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        GIT_CONFIG_NOSYSTEM: '1',
-        HOME: cwd,
-        XDG_CONFIG_HOME: join(cwd, '.no-xdg'),
-      },
-    }
-  );
+      env: gitEnv(home),
+    });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
 }
 
 function write(repo: string, relativePath: string, contents = 'x\n'): void {
@@ -117,7 +138,7 @@ function write(repo: string, relativePath: string, contents = 'x\n'): void {
   writeFileSync(absolute, contents);
 }
 
-/** A fresh repository carrying this repository's `.gitignore`, committed. */
+/** A fresh repository with one committed file and no `.gitignore` of its own. */
 function createRepo(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'tool-files-4406-')));
   tempDirs.push(dir);
@@ -125,19 +146,15 @@ function createRepo(): string {
   git(['config', 'user.email', 'a@example.test'], dir);
   git(['config', 'user.name', 'A'], dir);
   git(['config', 'commit.gpgsign', 'false'], dir);
-  writeFileSync(join(dir, '.gitignore'), readFileSync(REPO_GITIGNORE, 'utf8'));
   write(dir, 'src/greet.ts', 'export const greet = 1;\n');
   git(['add', '-A'], dir);
   git(['commit', '-q', '-m', 'base'], dir);
   return dir;
 }
 
-/** What the dirty-tree check would see, file by file (`-uall`: no collapsed directories). */
-function untracked(repo: string): string[] {
-  return git(['status', '--porcelain', '-uall'], repo)
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => line.slice(3));
+/** What wait-verify / precheck / merge-pr / publish-pr see as uncommitted. */
+function dirty(repo: string): string[] {
+  return dirtyPaths(realRun(repo), repo);
 }
 
 describe('.commandcode/ tool state is not uncommitted work (#4406)', () => {
@@ -147,10 +164,27 @@ describe('.commandcode/ tool state is not uncommitted work (#4406)', () => {
     write(repo, '.commandcode/taste/taste.md', 'prefers tabs\n');
     write(repo, '.commandcode/taste/nested/a.json', '{}\n');
 
-    expect(untracked(repo)).toEqual([]);
+    expect(dirty(repo)).toEqual([]);
   });
 
-  it('S2: every path the #3126 roster excuses is ignored by the repository .gitignore', () => {
+  it('R2: beside other work, only the tool state is dropped and the work is named file by file', () => {
+    const repo = createRepo();
+    write(repo, '.commandcode/settings.local.json');
+    write(repo, '.commandcode/taste/taste.md');
+    write(repo, '.commandcode/skills/x/SKILL.md');
+
+    expect(dirty(repo)).toEqual(['.commandcode/skills/x/SKILL.md']);
+  });
+
+  it('S2: dirty-tree.mjs carries the same roster as src/lib/skills/agent-state-paths.ts', () => {
+    expect([...MJS_AGENT_STATE_FILES]).toEqual([...AGENT_STATE_FILES]);
+    expect([...MJS_AGENT_STATE_DIR_PREFIXES]).toEqual([...AGENT_STATE_DIR_PREFIXES]);
+    for (const path of ['.commandcode/taste/../x.md', '.commandcode/settings.json', '.Commandcode/settings.local.json']) {
+      expect(mjsIsAgentStatePath(path)).toBe(isAgentStatePath(path));
+    }
+  });
+
+  it('S2: every path the #3126 roster excuses leaves a real tree clean', () => {
     const repo = createRepo();
     const samples = [
       ...AGENT_STATE_FILES,
@@ -161,49 +195,97 @@ describe('.commandcode/ tool state is not uncommitted work (#4406)', () => {
       write(repo, path);
     }
 
-    expect(untracked(repo)).toEqual([]);
+    expect(dirty(repo)).toEqual([]);
   });
 
-  it('N7: the work, and anything only dressed as .commandcode/ state, is still uncommitted', () => {
+  it('the exclusion is not in the repository .gitignore (git ignorecase would widen it)', () => {
+    expect(readFileSync(join(process.cwd(), '.gitignore'), 'utf8')).not.toContain('.commandcode');
+  });
+
+  // One repository each: on a case-insensitive filesystem `.COMMANDCODE/` and
+  // `.commandcode/` would be the same directory, and a sibling must not mask one.
+  const work = [
+    'src/new-feature.ts',
+    '.commandcode/skills/x/SKILL.md',
+    '.commandcode/commands/x.md',
+    '.commandcode/other.ts',
+    '.commandcode/settings.json',
+    '.commandcode/settings.local.json.bak',
+    // A directory named like the excused file.
+    '.commandcode/settings.local.json/x',
+    '.commandcode/settings.local.json/x/payload.ts',
+    // Case variants: the roster is case-sensitive, whatever core.ignorecase says.
+    '.COMMANDCODE/Settings.local.json',
+    '.COMMANDCODE/settings.local.json',
+    '.commandcode/Settings.local.json',
+    '.commandcode/Taste/x.md',
+    '.COMMANDCODE/taste/x.md',
+    // The same names anywhere but the repository root.
+    'src/.commandcode/settings.local.json',
+    'src/.commandcode/taste/a.md',
+    '.commandcodex/settings.local.json',
+    '.commandcodex/taste/a.md',
+  ];
+
+  it.each(work)('N7: %s is still uncommitted work', (path) => {
     const repo = createRepo();
-    const work = [
-      'src/new-feature.ts',
-      '.commandcode/skills/x/SKILL.md',
-      '.commandcode/commands/x.md',
-      '.commandcode/other.json',
-      '.commandcode/settings.json',
-      // A directory named like the excused file (the pattern would match it too).
-      '.commandcode/settings.local.json/x/payload.ts',
-      // The same names anywhere but the repository root.
-      'src/.commandcode/settings.local.json',
-      'src/.commandcode/taste/a.md',
-      '.commandcodex/settings.local.json',
-      '.commandcodex/taste/a.md',
-    ];
-    for (const path of work) write(repo, path);
-    // The excused files sit beside the work and must not hide it.
+    write(repo, path);
+
+    expect(dirty(repo).length).toBeGreaterThan(0);
+  });
+
+  it('N7: work and tool state together still report the work', () => {
+    const repo = createRepo();
+    write(repo, '.commandcode/settings.local.json');
+    write(repo, '.commandcode/other.ts');
     write(repo, '.commandcode/settings.local.json.bak');
 
-    const seen = untracked(repo);
-    for (const path of work) expect(seen).toContain(path);
-    expect(seen).toContain('.commandcode/settings.local.json.bak');
+    expect(dirty(repo)).toEqual(['.commandcode/other.ts', '.commandcode/settings.local.json.bak']);
   });
 
   it('N7: a file (not a directory) named .commandcode is still uncommitted', () => {
     const repo = createRepo();
     write(repo, '.commandcode', 'not a directory\n');
 
-    expect(untracked(repo)).toEqual(['.commandcode']);
+    expect(dirty(repo)).toEqual(['.commandcode']);
   });
 
-  it('N7: a tracked file under .commandcode/ that changes is still counted (.gitignore does not apply)', () => {
+  it('N7: a tracked file under .commandcode/ that changes is still counted (untracked only)', () => {
     const repo = createRepo();
     write(repo, '.commandcode/settings.local.json', '{}\n');
     git(['add', '-f', '.commandcode/settings.local.json'], repo);
     git(['commit', '-q', '-m', 'force-added'], repo);
     write(repo, '.commandcode/settings.local.json', '{"permissions":{"allow":["*"]}}\n');
 
-    expect(untracked(repo)).toEqual(['.commandcode/settings.local.json']);
+    expect(dirty(repo)).toEqual(['.commandcode/settings.local.json']);
+  });
+
+  it('callers see the same answer as before when no tool state is involved (one git call, same list)', () => {
+    const calls: string[][] = [];
+    const run = (command: string, args: string[]) => {
+      calls.push([command, ...args]);
+      return {
+        status: 0,
+        stdout: ' M src/a.ts\n?? .commandmate/tasks/issue-1.yaml\n?? dev-reports/x.md\n?? newdir/\nR  old.ts -> new.ts\n',
+        stderr: '',
+      };
+    };
+
+    expect(dirtyPaths(run, '/wt')).toEqual(['src/a.ts', 'newdir/', 'old.ts -> new.ts']);
+    expect(calls).toEqual([['git', '-C', '/wt', 'status', '--porcelain']]);
+    expect(IGNORED_DIRTY).toEqual(['.commandmate/tasks/', 'dev-reports/']);
+  });
+
+  it('a git failure still throws, including on the expansion of .commandcode/', () => {
+    const failing = () => ({ status: 128, stdout: '', stderr: 'fatal: not a git repository' });
+    expect(() => dirtyPaths(failing, '/wt')).toThrow('git status --porcelain failed in /wt');
+
+    let n = 0;
+    const second = () =>
+      ++n === 1
+        ? { status: 0, stdout: '?? .commandcode/\n', stderr: '' }
+        : { status: 128, stdout: '', stderr: 'fatal: boom' };
+    expect(() => dirtyPaths(second, '/wt')).toThrow('git status --porcelain -uall -- .commandcode/ failed in /wt');
   });
 });
 

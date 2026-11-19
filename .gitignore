@@ -110,12 +110,3 @@ logs/
 
 # Antigravity usage notice record (local CLI run, Issue #4438)
 /antigravity-notice.json
-
-# Command Code が worktree に置く自分の状態（#4406）。#3126 の名簿 src/lib/skills/agent-state-paths.ts と
-# 同じ path だけを外す（製品の scope / work-evidence と、オーケストレーターの未コミットの判定を揃える）。
-# .commandcode/ のそれ以外（skills/・commands/ など）は作業として数える。名簿を変えたらここも揃える
-# （tests/unit/verification/env-clean-tool-files-4406.test.ts が突き合わせる）。
-# 2 行目: settings.local.json という名前の「ディレクトリ」は名簿の外なので、見えるように戻す。
-/.commandcode/settings.local.json
-!/.commandcode/settings.local.json/
-/.commandcode/taste/
