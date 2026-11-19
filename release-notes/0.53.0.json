@@ -1,0 +1,45 @@
+{
+  "version": "0.53.0",
+  "date": "2026-11-19",
+  "highlight": {
+    "ja": "利用形態を申告していないサーバーは、Antigravity の版を確かめるために agy を起動しなくなりました。Antigravity への送信が断られるときは、タスクや登録を書く前に止まります。",
+    "en": "A server that has not declared its usage no longer launches agy to check the Antigravity version. When a send to Antigravity is refused, it now stops before writing any task or registration."
+  },
+  "added": [
+    {
+      "ja": "1 つの指示文を貼るだけで、エージェントと一緒に CommandMate のチームを組めるガイドを追加しました。",
+      "en": "Added a guide that sets up a CommandMate team together with your agent from a single pasted instruction."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "利用形態を申告していないサーバーが、起動時や画面の表示のたびに agy を起動していた問題を直しました。",
+      "en": "Fixed a server without a declared usage launching agy at startup and while showing screens."
+    },
+    {
+      "ja": "Antigravity への送信が断られたとき、タスクや名簿・ロールの設定が先に書かれて残る問題を直しました。",
+      "en": "Fixed tasks, roster entries and role settings being left behind when a send to Antigravity was refused."
+    },
+    {
+      "ja": "Auto-Yes の拒否の表示が、インスタンスを切り替えた後や状態が変わった後も残る問題を直しました。",
+      "en": "Fixed the Auto-Yes refusal message staying on screen after switching instances or after the state changed."
+    },
+    {
+      "ja": "セッション一覧のタイルで Auto-Yes が断られたとき、理由を出さずに OFF に戻る問題を直しました。",
+      "en": "Fixed a sessions tile silently switching Auto-Yes back off when it was refused; it now shows the reason."
+    },
+    {
+      "ja": "狭い画面で、Antigravity の利用上の注意が入力欄を押し出す問題を直しました。",
+      "en": "Fixed the Antigravity usage notice pushing the input box out of view in a narrow pane."
+    },
+    {
+      "ja": "send --register が、名簿に登録できない名前でも送ってしまう問題を直しました。送る前に理由を出して止まります。",
+      "en": "Fixed send --register sending even when the name cannot be added to the roster; it now stops first and shows why."
+    },
+    {
+      "ja": "reply のヘルプとガイドで、答えられるツールの一覧が食い違っていた問題を直しました。",
+      "en": "Fixed the list of tools that reply can answer differing between its help and the guides."
+    }
+  ]
+}
