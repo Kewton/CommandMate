@@ -1,22 +1,56 @@
 # 決定の承認の導線 — 承認待ちの件数・行き先と期限・二重の検知・承認前の修正・機械で決まる片付け（Issue #4354）設計
 
-- 段: 設計（この文書だけ）。コード・DB・試験は書かない。実装は設計レビュー 2 本の処分と、§8 の人の答えの後に、§7 の PR ごとに別の契約で行う（Sprint 9 以降）
-- 版: 第 1 版（2026-11-19、イネーブラー claude-5）
+- 段: 設計（この文書だけ）。コード・DB・試験は書かない。実装は §8 の人の答え（Q1・Q2）の後に、§7 の PR ごとに別の契約で行う（Sprint 9 以降）
+- 版: 第 2 版（2026-11-19、イネーブラー claude-5）
+  - 第 2 版: 設計レビュー 2 本（A: データと契約の安全、`workspace/orchestration/runs/2026-11-19/s8/review-4354-a.md`／B: 既存の設計・文書との整合と使い勝手、`review-4354-b.md`）の処分を反映した。処分の表は §10
+  - 第 2 版: PM の決定（`pm-req-4354-review-disposition.md`）を反映した。Q3〜Q8 は PM が範囲の中で決め、人へは Q1・Q2 だけを渡す
+  - 第 1 版: `795d5b7f4`
 - 基準: develop `b8f6e33b8`（v0.53.0）。行番号はこの版のもの。「事実」は file:line、「見立て」「未確認」は明記する
 - 正: Issue #4354 の本文・追記（2026-11-15）・コメント（2026-11-15 の衝突の指摘、2026-11-17 の順番、2026-11-19 の Sprint 8 は設計だけ）
-- 関連: #4225（承認の画面、`docs/design/mem-promote-4225.md`）、#4355（決定の画面・件数の共有関数、`docs/design/mem-decisions-ux-4355.md`）、#4222（条件の評価、`mem-close-when-4222.md`）、#4221（store、`mem-store-4221.md`）、#4248（Dreaming。この設計の §6 を入力にする）
-- この文書が人に伺う点は §8 にまとめる（PM が人へ渡す）。**§2 の衝突の答えが出るまで、§7 の PR1 は始められない**
+- 関連:
+  - #4225（承認の画面、`docs/design/mem-promote-4225.md`）
+  - #4355（決定の画面・件数の共有関数、`docs/design/mem-decisions-ux-4355.md`）
+  - #4222（条件の評価、`mem-close-when-4222.md`）
+  - #4221（store、`mem-store-4221.md`）
+  - #4223（brief、`brief-4223.md`）
+  - #4228（skill、`mem-skills-4228.md`）
+  - #4248（Dreaming。この設計の §6 を入力にする）
 
 ---
 
 ## 0. 結論（先に）
 
-1. **衝突の扱い（§2）**: 3 案を比べ、**案 1「行き先か期限のどちらかを必須にする（期限つきは行き先なしを許す）」を推奨**する。行き先も期限も無い decision だけを作れなくする。期限は既存の `close_when` の `at`（decision で既に許されている型）に載せ、DB の列を足さない
-2. **期限の意味（§3.2）**: 期限を過ぎた decision は、**行き先が無いものだけ**を次の評価で閉じる（`close_reason='condition'`、終わりの理由 `time-passed`）。行き先のある decision は、期限を過ぎても反映していなければ閉じず、今までどおり「未反映」として残す（`team.md` §11 の 3「反映していない決定を閉じない」を機械の側でも守る）
-3. **promoted の片付け（§3.3）**: `promoted` は状態を変えずに、件数・上限の警告・承認待ち・brief の数から外す（案 P-a）。自動で `closed` にする案（P-b）は、`close_reason` の CHECK を変えるために `mem_items` の作り直しの migration が要るので、推奨しない
-4. **件数（§4.1）**: 全リポジトリの承認待ちの数を返す読みだけの API と、ヘッダー（PC）・サイドバー（スマホ）のバッジを足す。数え方は #4355 の `decisionCountsOf`（`src/lib/promote/decision-counts.ts:44`）の 1 つだけを使う。分からないときは 0 と書かずに「?」と出す
-5. **二重の検知（§4.3）**: 差分を作るときに、行き先に同じ本文が既にあるかを機械で照らし、画面に出す。人は「記録済みとして閉じる」を選べる（外へは何も書かない）。「似ている」は機械で判定しない（完全一致の部分文字列だけ）
-6. **承認前の修正（§4.4）**: `mem update` に `--promote-to`・`--quote`・`--quote-at`・`--expires-at` を足す。作成者の instance だけが、`open` のあいだだけ直せる（既存の `update` の規則、`transitions.ts:50-51`）
+1. **衝突の扱い（§2）**: 推奨は案 1。decision は、行き先か期限のどちらかを必須にする。期限だけの decision を「許可」と呼ぶ
+   - 許可は、行き先を持たない代わりに、短い期限（最長 7 日）を必須にする
+   - 許可は、承認待ちとは**別の数で、同じバッジの場所に必ず出す**（見えない許可を作らない）
+   - 期限は既存の `close_when` の `at` に載せ、「期限である」印（`expires: true`）を付ける。DB の列は足さない
+2. **期限の意味（§3.2）**: 期限で機械が閉じるのは、**印つきの期限を持ち、行き先の無い `open` の decision（許可）だけ**
+   - 行き先のある decision は、期限を過ぎても反映前なら閉じない（I2）
+   - 印の無い既存の `at` は、今の意味（未反映の印だけ）のまま（I6）
+   - 行き先を外す update は断る（I2 の迂回を塞ぐ）
+3. **規則の置き場所（§3.1）**: 作成・update の規則は store 層（`createMemItem`・`updateMemItem` のトランザクションの内側）に置く。CLI・画面・handoff の提案の適用の 3 つの経路が、同じ規則で断る
+4. **promoted（§3.3）**: 状態を変えずに、件数（上限の警告・承認待ち）から外す（P-a。PM の決定）。brief の出し方は変えない（`brief-4223.md` §2.3 の順位 10 のまま）
+5. **件数（§4.1）**: `decisionCountsOf` の既存の `open`・`recorded` の意味と型は変えない。`pending`・`grants`・`noDestination` の欄を**足す**
+   - ヘッダーとサイドバーのバッジは「承認待ち N・許可 M」を出す
+   - 決定の画面の冒頭の数も、同じ欄に合わせる
+6. **二重の検知（§4.3）**: サーバーが差分（preview）を作るときに、完全一致を照らして preview に記録する
+   - 人は画面で「記録済みにする」を選べる（`open → promoted`、外へは書かない）
+   - 一致の事実は、サーバーが preview に残した値だけを使う
+7. **承認前の修正（§4.4）**: `mem update` に `--promote-to`・`--quote`・`--quote-at`・`--expires-at` を足す。作成者の instance だけが、`open` のあいだだけ直せる。行き先を外す形は作らない
+8. **#4248 へ（§6）**: `expire` は、書き込みの評価の口（`list`・`check`・`brief`・`preview`）でだけ走る。`dream-input` は純粋な時刻の比較だけを使う
+
+### 0.1 Issue の要求と、この設計の対応（B P2-7）
+
+| Issue の要求 | 対応 | 節 |
+|---|---|---|
+| 直し方 1・受入 1: 承認待ちの件数を固定の場所に出し、決定の画面へ行ける | 満たす（バッジ。許可の数も同じ場所に出す） | §4.1 |
+| 直し方 2・受入 2: 行き先なしの decision を作れない（または既定の行き先が付く） | **読み替え（人の了承 Q1・Q2）**: 「行き先も期限も無い decision を作れない」。期限だけの decision（許可）は、最長 7 日・バッジに出す条件で許す | §2・§3.1 |
+| 直し方 3・受入 3: 書く先に同じ本文があれば、差分の画面が示す | 満たす（完全一致。確かめた範囲を明記） | §4.3 |
+| 直し方 4・受入 4: 承認前の引用の時刻と行き先を作成者が直せる（承認後は直せない） | 満たす（行き先を外す変更だけは断る） | §4.4 |
+| 直し方 5: 画面の冒頭の説明 | 満たす（PM の決定 Q6: 書く） | §4.2 |
+| 追記 1: promoted を自動で閉じる（少なくとも上限の数に入れない）。閉じたことを理由つきで記録する | **読み替え（PM の決定 Q4: P-a）**: 「上限の数と承認待ちに入れない」だけを満たす。閉じないので「閉じた理由」の記録は無い。promoted は残り続け、人が閉じるか purge する | §3.3 |
+| 追記 2: 期限つきの決定を、期限の後の評価で理由つきで閉じ、前は閉じない | 満たす（許可だけ）。理由は `time-passed`（PM の決定 Q4。`expired` の値は足さない） | §3.2 |
+| 追記の受入: mem・brief・check がモデルを呼ばない | 満たす（既存の表に行を足す） | §5 |
 
 ---
 
@@ -25,140 +59,190 @@
 | # | 事実 | 出典 |
 |---|---|---|
 | F1 | decision の状態は `open`・`recorded`・`promoted`・`closed`。承認は画面だけ（`screen_only`）。`open → recorded`（効果 `spec`）・`open → promoted`（効果 `record_only`）・`recorded → promoted` | `src/lib/mem/transitions.ts:49-66`、`mem-promote-4225.md` §1.1 |
-| F2 | 条件の成立で閉じる遷移（`condition`）は、decision では `promoted` からだけ。`open`・`recorded` で成立しても閉じず、`unreflected` の印だけを付ける | `transitions.ts:56-57`、`src/lib/mem/evaluate.ts:441-444` |
+| F2 | 条件の成立で閉じる遷移（`condition`）は、decision では `promoted` からだけ。`open`・`recorded` で成立しても閉じず、`unreflected` の印だけを付ける | `transitions.ts:56-57`、`src/lib/mem/evaluate.ts:442-444` |
 | F3 | decision に付けられる条件の型は `issue`・`pr`・`branch`・`at`。省略時は NULL（遷移だけで閉じる） | `src/types/mem.ts:74`・`:84-91` |
 | F4 | 条件の評価は `list`・`check`・`brief`・`preview` のきっかけで走る。新しいタイマーは無い（D13） | `src/types/mem.ts:344`、`evaluate.ts:416-470` |
-| F5 | decision の作成で `--promote-to` は任意。行き先の無い `open` の decision は、`mem check --suggest` の `decision_no_destination` が知らせるだけ | `src/cli/commands/mem.ts:430`、`src/lib/mem-suggest/rules.ts:173` |
-| F6 | 承認の差分は、本文の `destination` か項目の `promoteTo` を行き先にする。画面で行き先を選べば、行き先の無い decision も承認できる | `src/lib/promote/service.ts:447-450` |
-| F7 | `mem update` が直せるのは `text`・`close_when`・`evidence` だけ。`promote_to`・`quote`・`quote_at` は直せない | `src/cli/commands/mem.ts:474-480`、`src/lib/mem/service.ts:579` |
-| F8 | open の件数は `state != 'closed'` で数える。`recorded`・`promoted` も数に入る。decision の警告は 20 件から（上限は無し） | `src/lib/db/mem-db.ts:284-290`・`:607-614` |
-| F9 | 承認待ちの件数の共有関数 `decisionCountsOf` は、`open` と `recorded` だけを数え、`promoted` を数えない。mode が `ambiguous` なら null（0 ではない） | `src/lib/promote/decision-counts.ts:44-53` |
-| F10 | brief は `closed` 以外の decision を全部出す（`recorded` は rank 4、ほかは 10） | `src/lib/brief/sources.ts:451-452`・`:500-520` |
-| F11 | `close_reason` の値は `manual`・`condition`・`superseded`・`slot-removed`・`withdrawn` だけで、DB の CHECK で固定している | `src/lib/db/migrations/v66-mem-store.ts:121` |
-| F12 | 承認の操作の効果は `spec`・`record_only` の 2 つで、DB の CHECK で固定している | `src/lib/db/migrations/v69-mem-promote.ts`（`effect` の CHECK、2 か所） |
+| F5 | decision の作成で `--promote-to` は任意。行き先の無い `open` の decision は、`mem check --suggest` の `decision_no_destination` が知らせるだけ | `src/cli/commands/mem.ts:430`、`src/lib/mem-suggest/rules.ts:172-173` |
+| F6 | 承認の差分は、本文の `destination` か項目の `promoteTo` を行き先にする。画面で選んだ行き先は、項目の `promote_to` に書き戻さない。このため `recorded`・`promoted` でも `promote_to IS NULL` がありうる（レビュー A の補足） | `src/lib/promote/service.ts:447-450`、`mem-db.ts`（`promote_to` の UPDATE は無く、INSERT の `:498`・`:711` だけ） |
+| F7 | `mem update` が直せるのは `text`・`close_when`・`evidence` だけ | `src/cli/commands/mem.ts:474-480`、`src/lib/mem/service.ts:579`、`mem-db.ts:913` |
+| F8 | open の件数は `state != 'closed'` で数える。使い手は上限（`mem-db.ts:705`）・警告（`mem/service.ts:322`）・suggest（`mem-suggest/service.ts:393`）。decision の警告は 20 件から（上限は無し） | `mem-db.ts:283-290`・`:607-614` |
+| F9 | 件数の共有関数 `decisionCountsOf` は、`open` と `recorded` だけを数え、行き先を見ない。mode が `ambiguous` なら null | `src/lib/promote/decision-counts.ts:44-53` |
+| F10 | brief は `closed` 以外の decision を全部出す（`recorded` は rank 4、ほかは 10）。`brief-4223.md` §2.3 と `mem-skills-4228.md` の順位表も `promoted` を出す側に書いている | `src/lib/brief/sources.ts:451-452`・`:507-521`、`brief-4223.md:162`、`mem-skills-4228.md:92` |
+| F11 | `close_reason` の値は 5 つで、DB の CHECK で固定している | `src/lib/db/migrations/v66-mem-store.ts:121` |
+| F12 | 承認の操作の効果は `spec`・`record_only` の 2 つで、DB の CHECK で固定している | `v69-mem-promote.ts:46`・`:81` |
+| F13 | decision の作成の口は 2 つ。`memAddItem`（CLI・API、`mem/service.ts:369` → `:403`）と、`memWriteFromScreen`（画面、`:697` → `:772`）。後者の `op:'add'` は `now` 以外の全 kind を受ける（`:578`・`:600-620`）。handoff の提案の適用も、後者の経路に乗る（`src/lib/handoff/proposals.ts`）。第 1 版の「画面の経路は未確認」は誤り（レビュー A・B） | 左 |
+| F14 | `at` の検査は書式だけで、過去の時刻も通る。第 1 版の「既存の検査に乗せる」は誤り（レビュー A） | `src/lib/mem/close-when.ts:153-158`・`:299-300` |
+| F15 | `at` の成立の答えは `met('time-passed', 'unknown', …)`。成否は `unknown`。第 1 版の「成否 `success`」は誤り（レビュー A） | `src/lib/mem/condition-evaluators.ts:144` |
+| F16 | 保存した条件の読み取り（`readStoredCloseWhen`）は、`schema` と `type` だけを確かめる。ほかの欄があっても、そのまま読む | `close-when.ts:340-349` |
+| F17 | 決定の画面の一覧の上に「承認待ち N 件・反映待ち M 件」を出す。ブランチの select の行には件数を付けない（#4355 PR2 の処分 5-2b） | `docs/user-guide/cli-operations-guide.md:3842`・`:3840`、`mem-decisions-ux-4355.md:98` |
 
-### 1.1 運用の実測（2026-11-19、このリポジトリの mem、`commandmatedev mem list --all --json`）
+### 1.1 運用の実測
 
-- decision は 83 件。内訳は次のとおり:
+**(a) `commandmatedev mem list --all --json`（2026-11-19 午後、このブランチ）**
+- decision は 83 件。内訳:
   - `closed`・`withdrawn`: 53 件（行き先あり 28・なし 25）
-  - `closed`・`manual`: 12 件（承認・反映の後に閉じたもの）
+  - `closed`・`manual`: 12 件
   - `promoted`: 3 件
   - `open`: 15 件（行き先あり 10・なし 5）
-- 行き先の無い 25 件の取り下げ（`withdrawn`）は、ほとんどが「自走 N 時間」「Auto-Yes の許可（期限 …）」「段 N のリリースの許可」のように、**期限のある許可**だった（本文の先頭を目で見た読み。全件の分類はしていない）
-- 承認まで進んだのは 15 件（`promoted` 3・`manual` 12）。承認されずに取り下げられたものは 53 件
-- 読み: 実際に使われている decision の多くは「期限つきの許可」で、承認の流れ（行き先へ書く）に乗っていない。承認の導線だけを足しても、許可の決定は承認待ちの数を増やすだけになる
+- 行き先の無い 25 件の取り下げは、ほとんどが「自走 N 時間」「Auto-Yes の許可」「段 N のリリースの許可」のような期限のある許可だった（本文の先頭を目で見た読み。全件の分類はしていない）
+- 許可の長さ: 本文から読めた範囲では 4〜24 時間。リリースの許可は「この版の受け入れに合格するまで」で、1〜2 日だった（読み）
+
+**(b) 本番の DB の読むだけの集計（2026-11-19 20:06 JST）。レビュー A P1-3 の求め**
+- 方法: `sqlite3 'file:<CM_DB_PATH>?mode=ro'`
+- decision は 12 件で、全部が `open`（行き先あり 6・なし 6）。`close_when` を持つ decision は 0 件
+- (a) の後に、閉じた decision は purge されていた（見立て。PM の棚卸し）
+- 範囲: このインストールの DB だけ。ほかの利用者の DB は見ていない
+- 結論: このインストールでは「行き先なし・`at` あり」の既存の行は 0 件。ほかのインストールにはありうるので、§3.2 の印で守る（I6）
 
 ---
 
 ## 2. 衝突: 行き先の必須化と、期限つきの許可（行き先なし）
 
-Issue の直し方 2（行き先の必須化）と、追記 2（期限つきの決定。自走の許可・マージの許可・「この版限り」の許可が対象）は、そのままでは両立しない。§1.1 のとおり、許可の決定は行き先を元々持たない。
+Issue の直し方 2（行き先の必須化）と追記 2（期限つきの決定）は、そのままでは両立しない。§1.1 のとおり、許可の決定は行き先を元々持たない。
 
 ### 2.1 不変条件（どの案でも守る）
 
 | # | 不変条件 | 破れるとどうなるか |
 |---|---|---|
-| I1 | 承認（画面の `screen_only` の経路）で外へ書く decision は、書く前に行き先が決まっている | 承認しても書く先が無い（Issue の事象 2） |
-| I2 | 行き先のある decision は、反映（`promoted`）の前に機械が閉じない。期限を過ぎても閉じない | 人の決定が正本に入らないまま消える（`team.md` §11 の 3） |
-| I3 | 期限で閉じる・数から外すのは、機械で決まる値（時刻・状態）だけで判断する。モデルを呼ばない。評価できないとき（mode が `on` でない、条件の JSON が読めない）は閉じない | 推測で人の決定を閉じる（同じ種類の穴: #4419・#4430 の「外れうる観測で消す」） |
-| I4 | 件数は 1 つの関数で数え、分からないときに 0 と言わない | 画面ごとに数が違い、人が「承認し終えた」と誤る（#4355 I6） |
+| I1 | 承認（画面の `screen_only` の経路）で外へ書く decision は、書く前に行き先が決まっている | 承認しても書く先が無い（事象 2） |
+| I2 | 行き先のある decision は、反映（`promoted`）の前に機械が閉じない。期限を過ぎても閉じない。**行き先を外す変更でこれを迂回できない** | 人の決定が正本に入らないまま消える（`team.md` §11 の 3） |
+| I3 | 期限で閉じる・数から外すのは、機械で決まる値（時刻・状態・印）だけで判断する。モデルを呼ばない。評価できないとき（mode が `on` でない・条件の JSON が読めない・schema が違う）は閉じない | 推測で人の決定を閉じる（#4419・#4430 の「外れうる観測で消す」） |
+| I4 | 件数は 1 つの関数で数える。分からないときに 0 と言わない。**見えないものを無いと言わない**（許可の数も必ず出す） | 画面ごとに数が違う／許可が人の目に入らないまま有効になる |
 | I5 | エージェントが人の決定を「承認済み」にする口を作らない（画面だけ）。#4354 で足す遷移もすべて画面の印を要する | エージェントが人の決定を作れる（#4225 D9） |
-| I6 | 既にある decision の意味を、この変更で黙って変えない（行き先も期限も無い既存の `open` は、作り直しも自動の close もしない） | 移行で既存の決定が消える |
+| I6 | 既にある decision の意味を、この変更で黙って変えない。行き先も期限も無い既存の `open` と、**印の無い既存の `at` を持つ decision** は、今の意味のまま | 移行で既存の決定が閉じる・消える |
+| I7 | 規則は、作成と update のすべての経路（CLI・API・画面・handoff の提案の適用）に同じく効く。store 層のトランザクションの内側に置く | 1 つの経路だけ規則を通らない |
 
 ### 2.2 案
 
-| | 案 1（推奨）: 行き先か期限のどちらかを必須にする | 案 2: 許可を別の kind（例 `grant`）にする | 案 3: 既定の行き先を持たせる |
+| | 案 1（推奨）: 行き先か「短い期限」のどちらかを必須にする | 案 2: 許可を別の kind（例 `grant`）にする | 案 3: 既定の行き先を持たせる |
 |---|---|---|---|
-| 中身 | decision の作成で `--promote-to` か `--expires-at`（中身は `close_when` の `at`）の少なくとも一方を要する。両方とも無ければ 400 `destination_required`（exit 2）。行き先の無い期限つきの decision は「許可」として、期限の後の評価で閉じる（§3.2） | `MEM_KINDS` に `grant` を足す。`grant` は期限が必須で、行き先も承認の流れも持たない。期限の後の評価で閉じる。decision は行き先を必須にする | リポジトリの設定に「決定の既定の行き先」（例 `path:docs/decisions.md` か追跡の Issue）を持ち、`--promote-to` の無い decision に付ける。期限は全 decision に付けられる |
-| 不使用・推測の残り | 無し（時刻と状態だけで判断） | 無し | 無し |
-| DB の変更 | **無し**（`close_when` の `at` は decision で既に許されている、F3） | **`mem_items` の作り直し**（`kind` の CHECK を変える、`v66-mem-store.ts:99`）。SQLite は CHECK を変えられないので、表を作り直して写す migration（`RENAME TO` の前例: `v33`・`v46`〜`v48`）。ほかの mem の表は `mem_items(id)` を参照しているので（`v67-mem-close-records.ts:26`・`:54`）、参照を保ったまま写す | リポジトリの設定の列を足す（`mem_repository_settings` に ADD COLUMN。追加だけ） |
-| 波及するファイル | `validate.ts`・`service.ts`・`evaluate.ts`・`transitions.ts`・CLI の `mem add`／`update`・suggest の規則・docs | 案 1 の全部に加えて、`CLOSE_WHEN_ALLOWED`・`CLOSE_WHEN_DEFAULTS`・`MEM_OPEN_LIMITS`・古さ・brief の rank・画面の種類の表示と絞り込み・handoff の提案（`kind` の検査）・skill（`cmate-handoff`）・docs | 設定の画面と API、承認の差分（既定の行き先を出す）、docs |
-| 利用者の手間 | 許可を書くときに期限を書く（今も本文に「〜11-17 23:00」と書いている） | 許可と決定の区別を書き手が覚える。古い許可の decision は decision のまま | 許可も承認すると既定の行き先へ書かれる。許可の記録が正本（docs か Issue）に溜まる |
-| 承認の流れとの関係 | 行き先のある decision だけが承認の流れに乗る。許可は承認待ちの数に入れない（§4.1） | 同左（grant は承認の流れの外） | 全部が承認の流れに乗る。許可も人が承認しないと残り続ける（§1.1 の詰まりが増える） |
-| 実装の大きさ（見立て） | 小〜中 | 大（migration の作り直しと、kind の表のすべて） | 中（設定の UI と migration） |
+| 中身 | decision は `--promote-to` か `--expires-at` の少なくとも一方を要する。両方とも無ければ 400 `destination_required`（exit 2）。行き先の無い期限つきの decision を「許可」とする。許可の条件は次の 3 つ:<br>1. 期限は時刻だけ<br>2. 作成の時点から 5 分〜7 日<br>3. バッジに「許可 M」として出し、期限の後の評価で閉じる | `MEM_KINDS` に `grant` を足す。grant は期限が必須で、行き先も承認の流れも持たない。decision は行き先を必須にする | リポジトリの設定に「決定の既定の行き先」を持ち、`--promote-to` の無い decision に付ける |
+| 推測の残り | 無し（時刻・状態・印だけ） | 無し | 無し |
+| DB の変更 | **無し**（`close_when` の `at` に印を足すだけ、F16） | `mem_items` の作り直し（kind の CHECK、`v66-mem-store.ts:99`）。ほかの表が `mem_items(id)` を参照する（`v67-mem-close-records.ts:26`・`:54`） | 設定の列を足す（追加だけ） |
+| 利用者の手間 | 許可を書くときに期限を書く（今も本文に「〜11-17 23:00」と書いている）。7 日を超える許可は書き直す | 許可と決定の区別を覚える | 許可も承認すると正本に書かれ、溜まる |
+| 承認の流れとの関係 | 行き先のある decision だけが承認の流れに乗る。許可は承認の外だが、数と一覧で人に見える | 同左 | 全部が承認の流れに乗る（§1.1 の詰まりが増える） |
+| 実装の大きさ（見立て） | 小〜中 | 大 | 中 |
 
 ### 2.3 推奨と、捨てた理由
 
-**推奨: 案 1。** 次の理由による。
-- I1〜I6 を、DB の作り直しなしで満たせる。期限は既にある `at` の型に載り、評価も既にある経路（F4）で走る
-- §1.1 の実際の使い方（許可を decision に書き、期限が来たら手で取り下げる）を、その形のまま機械の片付けに置き換えられる
-- 承認待ちの数を「承認して行き先へ書くもの」だけにでき、許可が数を埋めない
+**推奨は案 1。**
+- I1〜I7 を DB の作り直しなしで満たせる
+- 今の使い方（許可を decision に書き、期限が来たら手で取り下げる）を、その形のまま機械の片付けに置き換えられる
+- レビュー A P1-1 の「期限を遠くにすれば門を素通りできる」は、次の 2 つで塞ぐ:
+  - 最長 7 日の期限
+  - 許可を必ずバッジと一覧に出すこと（I4）
 
 **案 2 を捨てた理由**:
-- 意味は最もはっきりする
-- しかし `mem_items` の作り直しの migration が要る（F11 と同じく CHECK のため）。mem の表どうしの参照もあるので、データの移行を安全に試す費用が大きい
-- 書き手が 2 つの kind を使い分ける運用の手間も増える
-- 案 1 で I1〜I6 が満たせるので、その費用に見合わない（読み）
-- 後で `grant` を足したくなったときも、案 1 の「行き先の無い期限つきの decision」を写せば移れる
+- `mem_items` の作り直しの migration が要る（F11 と同じく CHECK のため）
+- mem の表どうしの参照もあり、移行の検証の費用が大きい
+- 案 1 の許可は、後で grant を足したくなったときに写せる
 
 **案 3 を捨てた理由**:
-- 許可まで承認の流れに乗せると、§1.1 の「承認されずに溜まる」を増やす（#4248 の追記も同じ詰まりを心配している）
-- 既定の行き先へ許可を書くと、正本（docs・Issue）が期限切れの許可で埋まる
+- 許可まで承認の流れに乗り、§1.1 の詰まりを増やす
+- 正本が期限切れの許可で埋まる
 
-### 2.4 案 1 で変わる受入条件（人の了承が要る）
+### 2.4 許可の期限を時刻だけにする理由（レビュー B P2-1）
 
-- Issue の受入条件「行き先なしの decision を作れない（または既定の行き先が付く）」を、**「行き先も期限も無い decision を作れない」**に読み替える
-- 期限だけを持つ decision は、承認の流れの外に置く。§4.1 の承認待ちの数に入れず、期限が来たら閉じる
-- これは受入条件の変更なので、人の了承を要する（§8 Q1・Q2）
+- 「この PR のマージまでの許可」のように、PR・Issue の条件で終わる許可も考えられる
+- しかし PR の条件は「不明」の答え（認証切れ・ネットワーク）がありえて、成立しないまま残りうる（F2・D8）
+- 最長の期限で上限を保てるのは時刻だけ
+- PR の条件で終わる許可は、時刻に書き直してもらう。拒否の文で書き直し方を示す（§3.1）
+- PR の条件と時刻の両方を持つ形（どちらか早いほう）は、`close_when` が 1 つしか持てないので v1 では作らない
 
 ---
 
-## 3. store と評価の変更（案 1 の場合）
+## 3. store と評価の変更（案 1）
 
-### 3.1 作成の規則
+### 3.1 作成と update の規則（store 層、I7）
 
-| 入力 | 今 | 案 1 の後 |
-|---|---|---|
-| `--promote-to` あり | 作れる | 作れる（今と同じ） |
-| `--promote-to` なし・`--expires-at`（または `--close-when at:…`）あり | 作れる | 作れる（「許可」として扱う） |
-| 両方なし | 作れる（suggest の知らせだけ、F5） | **400 `destination_required`（CLI は exit 2）。何も書かない** |
-| `--expires-at` が過去・5 分より近い | — | 400 `invalid_close_when`（既存の検査に乗せる。未来 1 分以上などの値は §8 Q5） |
+規則は 1 つの関数 `checkDecisionDestinationRule(prev, next, now)`（名前は見立て、`src/lib/mem/validate.ts`）に置く。`createMemItem`（`mem-db.ts:659`）と `updateMemItem`（`mem-db.ts:875`）が、トランザクションの内側で呼ぶ。CLI・API・画面・handoff の提案の適用は、どれもこの 2 つの関数を通る（F13）。
 
-- `--expires-at <ISO 8601, オフセット必須>` は `--close-when at:<ISO>` と同じ値を作る、分かりやすい別名にする。両方を指定したら使い方の誤り（exit 2）
-- 新しい拒否の code `destination_required` を `MemErrorCode` と `MEM_EXIT_BY_CODE`（`src/types/mem.ts:201-263`）に足す。今まで通った入力が exit 2 になるので、**CLI の公開の契約の変更**にあたる。人の了承が要る（§8 Q2）
-- 画面の経路（人が画面のメモから decision を作る経路があれば、それ）も同じ規則にする（未確認: 画面から decision を作る経路の有無。#2427 のメモの経路は `now` だけ、`mem-store-4221.md` §6.3）
-- I6: 既にある、行き先も期限も無い `open` の decision は、そのまま残す。作り直しも自動の close もしない。suggest の `decision_no_destination` は今までどおり知らせる
+| 入力（作成、または update の後の値） | 結果 |
+|---|---|
+| 行き先あり（期限の有無を問わない） | 受ける。期限があっても、反映前は閉じない（§3.2） |
+| 行き先なし・印つきの期限（`--expires-at`）。作成か update の時点から 5 分以上、7 日以内 | 受ける（許可） |
+| 行き先なし・期限なし | 400 `destination_required`（exit 2） |
+| 行き先なし・期限が 5 分未満か過去、または 7 日を超える | 400 `invalid_close_when`（`reason: expiry_out_of_range`、exit 2）。既存の code を使う |
+| 行き先なし・`issue`・`pr`・`branch` の条件 | 400 `destination_required`（文で「許可の期限は時刻で書く」と示す。§2.4） |
+| 行き先なし・印の無い `--close-when at:…`（今の書き方） | 400 `destination_required`。文で `--expires-at` を示す。作成の時点で印の無い `at` を、行き先なしで受けない（`--close-when at:` で範囲の検査を素通りさせない。レビュー A P2-3） |
+| **update で、行き先のある decision から行き先を外す** | **400 `invalid_promote_to`（`reason: destination_removal`、exit 2）**。行き先の取り替え（別の行き先へ）だけを許す。外したいときは `mem close`（`withdrawn`）を使う（レビュー A P1-2） |
+| update で、許可（行き先なし・期限つき）に行き先を足す | 受ける。行き先のある decision になり、承認の流れに乗る。期限で閉じなくなる |
+| update で、許可の期限を延ばす | 受ける。範囲（update の時点から 7 日以内）を同じく検査する |
+
+- 期限の範囲（5 分・7 日）は PM の決定（Q5 は「最長を設ける方向」）に沿う設計の案で、定数にする。7 日の根拠は §1.1 の許可の長さ（4〜24 時間、リリースの許可で 1〜2 日）に余裕を持たせた値（読み）
+- 拒否の文（エージェントが次に打つ形を出す。レビュー B P2-5）:
+  - `destination_required`: 「decision には行き先か期限が要ります。決定なら `--promote-to issue:#N`（または `pr:#N`・`path:<docs の .md>`）、期限つきの許可なら `--expires-at <ISO 8601>`（7 日以内）を付けてください」
+  - `expiry_out_of_range`: 「許可の期限は今から 5 分以上、7 日以内にしてください」
+  - `destination_removal`: 「行き先は外せません。取り替えるか、`mem close <id> --reason …` で取り下げてください」
+- `--expires-at` は `mem add` と `mem update` の両方に足す。`--close-when` と同時に指定したら、使い方の誤り（exit 2）
+- 新しい拒否の code `destination_required` を `MemErrorCode` と `MEM_EXIT_BY_CODE`（`src/types/mem.ts:201-263`）に足す。今まで通った入力が exit 2 になるので、**CLI の公開の契約の変更**（人の了承、§8 Q2）
+- **適用の前の handoff の提案**: 保存済みで適用していない提案に、行き先なし・期限なしの decision の add がありうる。適用のときに store が断る
+  - 画面はその提案を `failed`（理由 `destination_required`）として人に見せる
+  - 人は、行き先か期限を足した提案を作り直すよう、エージェントに頼む
+- I6:
+  - 既にある、行き先も期限も無い `open` の decision はそのまま残す
+  - 規則は、作成と update のときにだけ効く。既存の行を読み直して断ることはしない
+  - ただし既存の行に、行き先なしのまま text だけを直す update は受ける（行き先・期限の欄に触れない update は規則の外。見立て。PR1c の契約で確かめる）
 
 ### 3.2 期限の意味と評価
 
-`close_when` の `at` が成立したとき（評価の `decideAt`、`evaluate.ts:405-406`）の扱いを、decision について次の表にする。
+**印**:
+- `--expires-at` が作る `close_when` は `{ schema: 1, type: 'at', epochMs, offset, expires: true }`
+- 今の読み取り（`readStoredCloseWhen`）は `schema` と `type` だけを見るので、そのまま読める（F16）
+- 印の無い `at`（今までの `--close-when at:`）は、今の意味のまま（I6、レビュー A P1-3）
+- 古い版のサーバーに戻した場合は印を読まず、今の意味（未反映の印だけ）になる。閉じないので安全側
 
-| decision の状態 | 行き先 | 今（F2） | 案 1 の後 |
-|---|---|---|---|
-| `open` | 無し | 閉じない（`unreflected`） | **閉じる**（`closed`、`close_reason='condition'`、終わりの理由 `time-passed`、成否 `success`） |
-| `open` | 有り | 閉じない（`unreflected`） | 閉じない（`unreflected`、変わらず。I2） |
-| `recorded` | 有り | 閉じない（`unreflected`） | 閉じない（変わらず。I2） |
-| `promoted` | 有り | 閉じる（`condition`） | 閉じる（変わらず） |
+**`at` が成立したときの扱い**（評価の `decideAt`、`evaluate.ts:405-406`）:
 
-- 実装の形（見立て）:
-  - `memTransition` に、decision の `open → closed`（理由 `condition`）を「行き先の無い期限」に限って許す遷移 `expire` を足す
-  - 行き先の有無は `memTransition(kind, state, transition)` の引数に無いので、遷移の判定に `{ promoteTo: string | null }` を足すか、評価（`evaluate.ts:441`）で `expire` を選ぶ
-  - どちらにしても、**store の書き込みの関数の中で、同じトランザクションで項目を読み直し、`promote_to IS NULL AND state='open'` を確かめてから書く**
-    - 今の `closeMemItemByCondition`（`mem-db.ts:1122-1145`）は、トランザクションの中で項目を読み直し、版と条件の一致（`:1129`）と `memTransition(…,'condition')`（`:1130`）を確かめてから書く。`closeItemByCondition`（`mem-close-db.ts:307-318`）がそれを 1 つのトランザクションで包む
-    - 行き先の検査は `:1130` の判定と同じ場所に足す。評価と書き込みの間に `mem update --promote-to` が入っても、版が上がるので `:1129` で止まる。行き先の検査はその二重の守り
-- 閉じたことは、既存の終わりの記録（`mem_close_records`、v67）と知らせ（作成者・後継への「終わった」の知らせ、#4222 §3.3）に乗る。新しい表は要らない
-- 期限は評価のきっかけ（F4）でしか閉じない。期限の直後に評価が走らなければ、次の `list`・`check`・`brief` まで `open` のまま残る。§4.1 の件数は評価を待たずに期限で外す（純粋な時刻の比較。書き込みはしない）
-- mode が `on` でないブランチでは評価しない（`evaluate.ts:417`）。期限を過ぎた許可は閉じずに残る。件数からは外す（§4.1）
-- `close_reason` に `expired` を足す案は採らない。CHECK の変更（F11）が要るため。「期限で閉じた」ことは終わりの理由 `time-passed` で分かる（Issue の受入「`expired` などの理由つき」を、この語で満たす。§8 Q4）
+| decision の状態 | 行き先（`promote_to`） | 印 | 今（F2） | 案 1 の後 |
+|---|---|---|---|---|
+| `open` | 無し | `expires: true` | 閉じない（`unreflected`） | **閉じる**（`closed`、`close_reason='condition'`、終わりの理由 `time-passed`、成否 `unknown`） |
+| `open` | 無し | 無し（既存の `at`） | 閉じない | 閉じない（変わらず。I6） |
+| `open` | 有り | 問わない | 閉じない | 閉じない（変わらず。I2） |
+| `recorded` | 有り・無し（F6） | 問わない | 閉じない | 閉じない（変わらず。I2） |
+| `promoted` | 有り・無し（F6） | 問わない | 閉じる（`condition`） | 閉じる（変わらず） |
 
-### 3.3 promoted の片付け
+- 実装の形:
+  - 遷移の検査は `closeMemItemByCondition`（`mem-db.ts:1122-1145`）の中、トランザクションの内側にある（版と条件の一致 `:1129`、`memTransition(…,'condition')` `:1130`）
+  - ここに「decision・`open`・`promote_to IS NULL`・印つきの `at`」のときだけ閉じる分岐（遷移 `expire`）を足す
+  - 評価と書き込みの間の update は版を上げるので、`:1129` で止まる。行き先の検査はそれと独立に効く二重の守り（§5 で両方を別々に試験する、レビュー A P2-6）
+- `expire` は、書き込みの評価の口（`evaluateMemConditions`、F4 のきっかけ）でだけ走る。副作用の無い読み（件数の API・`dream-input`・`presentMemItem`）は閉じず、時刻の比較だけをする（§4.1・§6、レビュー B P1-4）
+- I3: mode が `on` でないブランチでは評価しない（`evaluate.ts:417`）。条件の JSON が読めない・schema が違うときも閉じない（`readStoredCloseWhen` が null）。この場合、許可は閉じずに残り、`expired: true` の印（下）が付く
+- 閉じたことは、既存の終わりの記録（`mem_close_records`、v67）と知らせ（#4222 §3.3）に乗る
 
-| 案 | 中身 | DB の変更 | 推奨 |
-|---|---|---|---|
-| **P-a（推奨）** | `promoted` の状態は変えない。上限の警告（`countOpenItems`、F8）・承認待ちの数（F9 は既にそう）・brief の出力（F10）から外す。人の `mem close`・画面の close は今までどおり。条件（`close_when`）のある `promoted` は今までどおり評価で閉じる | 無し | ○ |
-| P-b | `promoted` になった遷移と同じトランザクションで `closed` にする（新しい `close_reason='promoted'`） | `mem_items` の作り直し（F11） | × |
-| P-c | `promoted` の後 N 日で閉じる | 無し（`at` を自動で付ける）。ただし「自動で条件を足す」が人の書いた条件を上書きする | × |
+**期限切れの見え方（閉じる前。レビュー A P2-4・B P2-6）**:
+- `presentMemItem`（`src/lib/mem/present.ts`）で、期限（印つきか否かを問わない `at`）を過ぎた decision に `expired: true` を付ける。時刻の比較だけで、書き込みはしない
+- brief: `expired` の decision は、欄 `expired=true` を付けて出す（rank は変えない。下の §3.3 と同じく brief の順位表を変えない）。エージェントは「期限切れの許可」と読める
+- `mem list`・決定の画面: 「許可・期限 〇〇」「期限切れ」の印を出す
+- 承認の差分: 行き先があり期限を過ぎた decision の差分に「期限を過ぎています」と警告を出す（承認は止めない）
+- `close_reason` に `expired` を足さない（F11 の CHECK のため）。期限で閉じたことは終わりの理由 `time-passed` で分かる（PM の決定 Q4）
 
-- **P-a を推奨する理由**:
-  - Issue の受入は「promoted の decision が上限の数と承認待ちの件数に入らない」で、状態を変えなくても満たせる
-  - 「閉じたことを理由つきで記録に残す」は、P-a では「閉じない」ので該当しない。代わりに、`promoted` は「反映済み」として画面と `mem list` に出す。人が「閉じたこと」を求める場合は P-b になる（§8 Q4）
-- brief から外す範囲（読み。実装の前に PM へ確かめる）: brief の S7（`sources.ts:500-520`）で `promoted` の decision を出さない。代わりに `mem list` と画面では今までどおり見える
-  - #4248 の dreaming の材料には `promoted` を入れる（正本への移し済みかどうかの判断に要る、§6）
+**既存の文書と試験の直し（レビュー B P1-3）**:
+- B の不変条件「decision は promote の前に閉じない」に、例外が 1 つできる（印つきの期限を持つ、行き先なしの `open`）
+- PR1c の docs の範囲で、次の場所を直す:
+  - `mem-close-when-4222.md`: 条件の節（`:348`）、不変条件の表（`:446`）、試験の表（`:506`）。履歴として「#4354 で例外を足した」の 1 行
+  - `cli-operations-guide.md:3772` 付近（日英）
+  - `mem-skills-4228.md:58`
+  - `cmate-handoff` の skill の `references/kinds-and-close-when.md`（公開版は commandmate-skills。人の承認）
+- 既存の試験の「decision は open で閉じない」の行は、期待値を変えず「行き先あり、または印の無い `at`」の行だと明記する。印つきの行を新しく足す
+
+### 3.3 promoted の片付け（PM の決定 Q4: P-a）
+
+- `promoted` の状態は変えない
+- 上限の警告（`countOpenItems`、F8）と承認待ちの数から外す
+- **brief の出し方は変えない**。`brief-4223.md` §2.3 の順位 10 と `mem-skills-4228.md` の順位表のまま（第 1 版の「brief から外す」は取り下げた。レビュー B P1-2）
+- Issue の追記 1 の「閉じたことを理由つきで記録に残す」は満たさない。promoted は閉じずに残り、`mem list`・画面の `promoted` は運用とともに増える（§1.1 (a) の実績で、承認された 15 件のうち 12 件を PM が手で閉じた）
+- 片付けの手段は今のまま:
+  - 人の画面の close
+  - 作成者の `mem close`（`promoted` は `manual`）
+  - `mem purge --include-decisions`
+  - docs の運用（`team.md` §11）に「反映を確かめた promoted は、PM が週に 1 回閉じる」のような手順を足すかは、PM の運用の判断（設計の外）
 
 ### 3.4 数え方の変更
 
-- `countOpenItems`（`mem-db.ts:607`）の decision の数を、`state IN ('open','recorded')` に絞る。ほかの kind は変わらない（`recorded`・`promoted` は decision にしか無い、`v66-mem-store.ts` の CHECK）
-- 期限を過ぎた `open` の decision（行き先なし）は、評価で閉じるまでの間も数に入れない（純粋な時刻の比較）
+- `countOpenItems`（`mem-db.ts:607`）の decision の数を、`state IN ('open','recorded')` に絞る。ほかの kind は変わらない
+- 期限を過ぎた許可は、評価で閉じるまでの間も数に入れない（SQL の `json_extract(close_when, '$.expires')` と `'$.epochMs'` の比較。式は PR1c の契約で名指す。レビュー A P3-5）
+- 警告の式が変わるので、`mem-store-4221.md:285` の表と、guide・`mem-skills-4228.md:59` の「件数の上限」の行に一言足す（レビュー B P3-5）
 
 ---
 
@@ -166,51 +250,83 @@ Issue の直し方 2（行き先の必須化）と、追記 2（期限つきの�
 
 ### 4.1 承認待ちの件数（直し方 1）
 
-- **新しい読みの API**: `GET /api/mem/decisions/pending`（名前は見立て）。登録されたリポジトリのブランチごとに次を返す:
-  - `decisionCountsOf` の数（`open`・`recorded`・`approvable`・`mode`）
-  - 期限つきの許可の数（数え方は下の 3 段目）
-  - 行き先の無い既存の decision の数（I6 の残り）
-- 数え方:
-  - 承認待ちの数 = `open` かつ行き先あり（承認の流れに乗るもの）＋ `recorded`（反映の確認待ち）
-  - `decisionCountsOf` は今は行き先を見ないので、引数の型 `DecisionCountsItem` に `promoteTo`（有無だけ）と `closeWhen`（期限）を足して、1 つの関数のまま数え分ける（I4。#4355 の CLI・画面の select と同じ数になるよう、同じ fixture の表試験を広げる）
-  - 期限つきの許可（行き先なし・期限あり・期限の前）は別の数として返し、バッジの数には入れない。期限を過ぎたものは数えない
-  - 行き先も期限も無い既存の `open`（I6）は「行き先なし」として別に返す。バッジの数に入れるかは §8 Q3
-- **副作用なし**: 条件の評価（B）・`gh`・git の照会・書き込みを一切しない。DB の読みと時刻の比較だけ（I3）。このため、評価で閉じる前の期限切れも外せる
-- `ambiguous`（同じ git の root の間で mode が食い違う）のブランチは数を null で返す。バッジは「?」を出し、0 と書かない（I4）
-- **表示**:
-  - PC はヘッダー（`src/components/layout/Header.tsx`）に、スマホはサイドバーかメニューに、「承認待ち N」を出す
-  - 1 クリックで決定の画面（`/repositories/<id>/mem/decisions?branch=<name>`）へ行く。承認待ちが 1 つのブランチにだけあればそこへ直接、複数なら件数つきのブランチの一覧へ
-  - 0 件のときは出さない
-  - 既存の `AttentionBadge`（`src/components/layout/AttentionBadge.tsx`）を使うかは実装で決める（見立て）
-- 読み直しの間隔: ヘッダーの既存の読み直しに合わせる。新しいタイマーは足さない（D13）。画面の遷移ごとに 1 回と、決定の画面の承認の後に読み直す
+**数え方（I4。既存の欄は変えない。レビュー A P2-5・B P1-1）**:
+- `decisionCountsOf(mode, items, now)` の既存の `open`・`recorded` の意味と型は変えない（`mem decisions --json` の `counts` の schema 1、#4355 I7）
+- 次の欄を**足す**:
+  - `pending`: 承認待ち = 行き先ありの `open` ＋ `recorded`
+  - `grants`: 期限の前の許可（行き先なし・印つきの期限）
+  - `expiredGrants`: 期限を過ぎてまだ閉じていない許可
+  - `noDestination`: 行き先も期限も無い既存の `open`（I6 の残り）
+- `now` は引数で受け、関数は純粋のまま
+- `ambiguous` は、足した欄も null
+- `pending` の項の数え方: `recorded` は行き先の有無を問わない（F6。画面で選んだ行き先は書き戻されないので、`promote_to` で判定しない）
 
-### 4.2 決定の画面の冒頭（直し方 5）
+**API**:
+- `GET /api/mem/decisions/pending`（名前は見立て）。登録されたリポジトリのブランチごとに、上の欄を返す
+- 副作用なし: 条件の評価・`gh`・git の照会・書き込みを一切しない。DB の読みと時刻の比較だけ（I3）
+- 全部のブランチを、1 本の SELECT で読む（見立て。§9）
 
-2〜3 行の固定の説明を出す（文案。実装で調整する）:
+**表示**:
+- PC はヘッダー（`src/components/layout/Header.tsx`）、スマホはサイドバーかメニュー
+- 「承認待ち N・許可 M」を出す（PM の決定 Q3: `noDestination` は数に入れず、決定の画面で別に出す）
+  - 許可の数も必ず出す（I4。レビュー A P1-1 の直し方 2）
+  - どちらも 0 なら出さない
+  - `expiredGrants` があれば「許可 M（期限切れ K）」
+- 押した先:
+  - 承認待ち・許可が 1 つのブランチにだけあれば、そのブランチの決定の画面へ直接行く
+  - 複数なら、#4355 のリポジトリ → ブランチの select の画面へ行く（ブランチの行に件数は付けない。#4355 の決定 5-2b に合わせる。レビュー B P2-4）。バッジが全体の数で、先はブランチを選ぶだけ
+- 「?」（`ambiguous`）: 「確認できません（ブランチの mode の設定が、同じ git の登録の間で食い違っています）」の説明を出す。PC はツールチップ、スマホはタップで出す（レビュー B P3-2）
+- 読み直し: ヘッダーの既存の読み直しに合わせる。新しいタイマーは足さない（D13）
 
-- 「エージェントは人の決定を記録として確定できません。ここで承認すると、決定の本文が行き先（Issue のコメントか docs）に書かれます」
-- 「承認していない決定は、それに頼る作業の根拠になりません。期限つきの許可は承認の対象ではなく、期限が来ると閉じます」
+**決定の画面の冒頭の数（F17）**:
+- 今の「承認待ち N 件・反映待ち M 件」は、一覧の `open` を数えている
+- これを、同じ関数の `pending` と、別の行「行き先なし K 件・許可 L 件（期限切れ J 件）」に変える
+- PR2 で画面・`cli-operations-guide.md` の決定の画面の節（`:3842`）・`mem decisions` の表示を一緒に直す（レビュー B P1-1）
+- `mem decisions --json` の `counts` は欄を足すだけで、既存の欄は変えない
 
-二つ目の文の「根拠になりません」は運用の規則で、機械で止めているわけではない。docs の運用の規則（`team.md` §11）に合わせる。§8 Q6 で人に確かめる。
+### 4.2 決定の画面の冒頭（直し方 5。PM の決定 Q6: 書く）
 
-### 4.3 二重の検知と「記録済みとして閉じる」（直し方 3）
+2〜3 行の固定の説明を出す（文案。運用の規則だと分かる言い方。レビュー B P3-3）:
+1. 「エージェントは人の決定を記録として確定できません。ここで承認すると、決定の本文が行き先（Issue のコメントか docs）に書かれます」
+2. 「運用では、承認していない決定と、人がこの画面で見ていない許可を、作業の根拠にしません（機械で止めてはいません）」
+3. 「期限つきの許可は承認の対象ではなく、期限が来ると閉じます」
 
-- **検知**: 差分（preview）を作るとき（`promotePreview`）に、行き先の今の内容を読む。照会は既存の経路を使い、新しい外部の照会先は足さない
-  - 文書（`path:`）は、既に読んでいるファイルの内容（基準の指紋に使う内容、`mem-promote-4225.md` §2.2）を使う
-  - Issue・PR のコメントは、`gh api --hostname <host> repos/{o}/{r}/issues/{N}/comments` の新しい側から最大 100 件を読む（上限は見立て）
-- **一致の規則**（機械が判断するのは次だけ）:
-  - 比べる前に両方を正規化する（NFC、空白の連続を 1 つにする、行頭・行末の空白を除く）
-  - decision の `text` か `quote` が 20 code point 以上で、行き先の内容に**部分文字列として完全に含まれる**とき、一致とする
+- 2 つ目の文は、`team.md` §11 の運用の規則と合わせる（docs の書き順は PM）
+- 許可に人が「確かめた」印を付ける口は作らない（PM の決定 Q7）
+
+### 4.3 二重の検知と「記録済みにする」（直し方 3）
+
+**検知（サーバーが preview を作るとき）**:
+- 差分（preview）を作るときに、行き先の今の内容を読む。照会は既存の経路を使う
+  - 文書: 基準の指紋に使う内容（`mem-promote-4225.md` §2.2）
+  - Issue・PR のコメント: `gh api --hostname <host> repos/{o}/{r}/issues/{N}/comments` を新しい側から最大 100 件
+- 一致の規則（機械が判断するのは次だけ）:
+  - 両方を正規化する（NFC、空白の連続を 1 つ、行頭・行末の空白を除く）
+  - decision の `text` と `quote` のそれぞれについて、20 code point 以上で、行き先の内容に**部分文字列として完全に含まれる**かを見る
   - 似ている・言い換えは判定しない
-- **表示**:
-  - 一致したら、差分の画面に「行き先に同じ本文があります（<コメントの URL か 文書の行>）」を出す
-  - 照会できなかったときは「確かめられませんでした（<理由>）」を出し、一致なしと書かない（I3）
-- **記録済みとして閉じる**:
-  - 一致を見た人が画面で選ぶ。新しい画面の入口 `decision-mark-recorded` で、`open → promoted`（既存の遷移 `promote-record-only`、`transitions.ts:62-63`）に進める
-  - 外へは何も書かない
-  - 一致の場所（URL か path:行）・一致を確かめた時刻・人の操作は、新しい表に残す（追加の migration。既存の表の CHECK は変えない、F12）
-  - 入口は画面の印（`screen_only`）・mode `on`・worktree の世代・版の照合を、#4225 の `ENTRANCES` の表（`write-entrances-recreate-4221.test.ts`）の行として守る（I5）
-- 一致が無いのに「記録済み」にしたい場合（人が手で別の場所に書いた等）は、この口では受けない。既存の「記録だけ（`record_only`）」の承認を使う
+- 一致の結果を preview の行に記録する。preview は項目の版・指紋に結び付いている。記録するもの:
+  - どの欄が一致したか（`text`・`quote`）
+  - 場所（コメントの URL、文書の行）
+  - 確かめた範囲（コメントの何件を見たか）
+- 一致の関数は純粋な関数（`src/lib/promote/prior-record.ts` 見込み）にする。#4248 の「詳細を Issue・文書へ移す案」の二重の検知でも同じ関数を使う（§6）
+
+**表示（レビュー A P2-10・P3-3）**:
+- 一致あり: 「行き先に同じ本文があります（一致した欄: 本文／引用。場所: <URL か 文書:行>）」
+- 一致なし、かつ全部を見た: 「行き先に同じ本文は見つかりませんでした」
+- 一致なし、かつコメントが 100 件を超える: 「最新 100 件のコメントの中に同じ本文はありません（それより古いコメントは見ていません）」
+- 照会できなかった: 「確かめられませんでした（<理由>）」。一致なしと書かない（I3）
+
+**記録済みにする（レビュー A P2-9・P3-2）**:
+- 名前は「記録済みにする」。閉じない。`open → promoted` で、既存の遷移 `promote-record-only`（`transitions.ts:62-63`）を使い、外へは何も書かない
+- 新しい画面の入口 `decision-mark-recorded`。本文は preview の ID と、画面が表示した指紋だけ。**一致の場所はクライアントから受けない**
+- サーバーは、同期の区間で次を照らす。どれかが違えば何もしない:
+  1. preview が期限内・未使用で、項目の版・指紋が preview と同じ
+  2. preview に一致の記録があり、その一致が `text` の一致を含む（`quote` だけの一致では記録済みにしない。§8 の外の設計の判断。引用だけが行き先にあっても、決定の本文が記録されたとは言えないため）
+  3. 画面の印（`screen_only`）・mode `on`・worktree の世代
+- 一致の記録は、新しい表に残す（追加の migration。既存の表の CHECK は変えない、F12。番号は PM の決定 Q8）
+- 入口は #4225 の `ENTRANCES` の表（`write-entrances-recreate-4221.test.ts`）の行として守る（I5）
+- 一致が無いのに記録済みにしたい場合は、この口では受けない。既存の「記録だけ（`record_only`）」の承認を使う
+- 画面の文言（レビュー A P3-4）: 行き先なしの許可を画面で行き先を選んで承認しようとすると、preview の評価（F4）で許可が期限で閉じることがある。そのときは「この許可は期限で閉じました」と出す（apply は `state_forbids` で止まる）
 
 ### 4.4 承認前の修正（直し方 4）
 
@@ -219,76 +335,178 @@ Issue の直し方 2（行き先の必須化）と、追記 2（期限つきの�
   - 作成者の instance だけ（`ownedBy`、`mem-db.ts:886`）
   - `open` の decision だけ（`recorded` は `state_forbids`、exit 55、`transitions.ts:50-51`）
   - 版の照合（`--if-version`）
-- 検査は作成と同じ関数を使う（`validatePromoteTo`・`validateQuote`、`validate.ts`）
-- 直した結果が「行き先も期限も無い」になる update（行き先を消す）は、§3.1 の規則で断る
+- 検査は作成と同じ関数を使う（`validatePromoteTo`・`validateQuote`、§3.1 の規則）
+- **行き先を外す形は作らない**（`--promote-to ''` は 400 `invalid_promote_to`、`destination_removal`）。外したいときは `mem close`（§3.1）。レビュー A P1-2・B P2-5
 - 承認の差分は項目の版と指紋に結び付いている（`mem-promote-4225.md` §2.1）。直した後の古い差分は、既存の照合で `reapproval_required`（`item_changed`）になる
+- suggest の規則（`rules.ts:173`、レビュー B P2-5）:
+  - `decision_no_destination` を「行き先も期限も無い `open`」だけに絞る（許可には出さない）
+  - 新しい促し `decision_grant_expired`（期限を過ぎてまだ閉じていない自分の許可。「閉じるか期限を延ばしてください」）を足す
 
 ---
 
 ## 5. 試験の層と陰性対照
 
-| 層 | 試験 | 陰性対照（直しを外すと赤になること） |
+| 層 | 試験 | 陰性対照（直しを外すと赤） |
 |---|---|---|
-| 単体（純粋） | `memTransition` の表: kind × 状態 × 遷移 × 行き先の有無。`expire` は「decision・open・行き先なし」だけ通る | `expire` の行き先の条件を外した変異で、「行き先あり・open」の行が赤 |
-| 単体（純粋） | `decisionCountsOf` の表: mode 4 通り（`on`・`off`・`derived`・`ambiguous`）× 状態 × 行き先の有無 × 期限の前後（時計を差し替え） | promoted を数える変異・期限を見ない変異で赤。`ambiguous` で 0 を返す変異で赤 |
-| 単体（store） | 作成の検査: 行き先・期限の 4 通り。両方なしは 400 `destination_required` で行 0 | 検査を外すと行が 1 になり赤 |
-| 単体（store） | update の新しい欄: 作成者・open だけ。`recorded` は 55。行き先を消して期限も無い update は断る | `ownedBy` を外すと他者の update が通り赤 |
-| 結合（評価） | 時計を差し替え、期限の前は閉じず、後の `check` で行き先の無い decision だけが `time-passed` で閉じる。行き先のある decision は `unreflected` のまま | 評価で閉じる条件から行き先を外す変異で、行き先ありが閉じて赤 |
-| 結合（競合） | 評価が期限を読んだ後、書き込みの前に `mem update --promote-to` を入れる（評価の await の点の hook）。閉じない | 書き込みのトランザクションの中の読み直しを外す変異で赤 |
-| 結合（件数 API） | 全リポジトリの数が `mem decisions`（#4355 PR1）と同じ fixture で同じになる。照会・書き込み 0（`gh` と DB の書き込みを spy で 0 回） | API の中で評価（B）を呼ぶ変異で、spy が 1 以上になり赤 |
-| 結合（二重の検知） | 文書・コメントの完全一致あり／なし／20 code point 未満／照会の失敗（「確かめられませんでした」）。`decision-mark-recorded` を `ENTRANCES` に足し、画面の印なし・mode `off`・作り直し・版の食い違いで断る | 一致の規則を「似ている」に広げる変異は不要（読み）。印の検査を外す変異で、`ENTRANCES` の既存の `it.each` が赤 |
-| e2e | ヘッダーのバッジ → 決定の画面へ 1 クリック（PC 1280・スマホ 390）。0 件で出ない。`ambiguous` で「?」 | バッジの数を API と別に数える変異で赤（同じ fixture の数を比べる） |
-| 回帰 | 既存の行き先も期限も無い `open` の decision が、移行の後も `open` のまま残る（I6） | — |
+| 単体（純粋） | `memTransition` の表: kind × 状態 × 遷移 × 行き先の有無 × 印の有無。`expire` は「decision・open・行き先なし・印つき」だけが通る | `expire` の行き先の条件・印の条件を、それぞれ外した変異で赤（2 つの変異） |
+| 単体（純粋） | `checkDecisionDestinationRule` の表: 作成と update × 行き先の有無 × 期限（なし・過去・4 分・5 分・7 日・7 日＋1 分）× 条件の型（`at` 印つき・`at` 印なし・`issue`・`pr`・`branch`）× 行き先を外す update | 7 日の上限を外す変異で、`2099-01-01` の行が通り赤（A P1-1）。行き先を外す検査を外す変異で赤（A P1-2）。印なしの `at` を受ける変異で赤（A P2-3） |
+| 単体（純粋） | `decisionCountsOf` の表: mode 4 通り × 状態 × 行き先の有無 × 期限の前後（`now` を差し替え）。既存の `open`・`recorded` の値は今と同じ | `open` の意味を変える変異（行き先を見る）で、既存の表の行が赤（#4355 の互換、A P2-5）。`grants` を数えない変異で赤 |
+| 単体（store・経路ごと） | 作成の拒否を 3 つの経路で: `memAddItem`（CLI・API）・`memWriteFromScreen` の `add`・handoff の提案の適用（I7、A P2-1・B P2-2）。どの経路も行 0 | 規則を CLI の側だけに置く変異で、画面と handoff の行が赤 |
+| 単体（store） | `closeMemItemByCondition` を直接呼ぶ: 版と `close_when` は一致させ、`promote_to` だけを非 NULL にした行（fixture で直接作る）を渡す → 閉じない（A P2-6） | `promote_to` の検査を外す変異で赤（版の照合では止まらない行） |
+| 結合（評価） | 時計を差し替え、期限の前は閉じず、後の `check` で許可だけが `time-passed` で閉じる。行き先のある decision・印の無い `at` は閉じない | 評価で閉じる条件から行き先か印を外す変異で赤 |
+| 結合（I3、A P2-7） | mode `off`・`derived`・`ambiguous`、条件の JSON が読めない、schema が違う、の各行で、期限を過ぎても閉じない | `evaluate.ts:417` の早期 return を外す変異で、mode の行が赤 |
+| 結合（I6、A P2-8） | 移行前の行を写した fixture: 行き先なし・期限なし／行き先なし・印の無い `at` が過去／行き先あり・`at` が過去。PR の後に `check` を 1 回走らせても、状態と `version` が変わらない | 印の判定を外す変異で、印の無い `at` の行が閉じて赤 |
+| 結合（副作用なし） | 件数の API・`presentMemItem`・`dream-input` の材料の組み立て（#4248 の PR で）の前後で、mem の行の状態と版が同じ。`gh` と DB の書き込みの spy が 0 回（B P1-4） | 件数の API の中で評価を呼ぶ変異で、spy が 1 以上になり赤。期限切れの許可が閉じて赤 |
+| 結合（二重の検知） | 一致あり（本文・引用それぞれ）／なし／20 code point 未満／100 件を超えるコメント／照会の失敗。`decision-mark-recorded`: 一致なしの preview・引用だけの一致・版の変わった preview は断る（A P2-9）。画面の印なし・mode `off`・作り直しも断る | クライアントの値を信じる変異（preview の一致を照らさない）で、一致なしの行が通り赤。印の検査を外す変異で、`ENTRANCES` の既存の `it.each` が赤 |
+| 結合（期限切れの見え方） | 時計を差し替え、期限の後の `mem list --json`・brief に `expired: true` が付き、行の状態は変わらない（A P2-4） | `expired` を付けない変異で赤 |
+| e2e | ヘッダーのバッジ（承認待ち・許可）→ 決定の画面へ（PC 1280・スマホ 390）。0 件で出ない。`ambiguous` で「?」と説明。決定の画面の冒頭の数がバッジと同じ fixture で同じ | 画面の数を別の数え方にする変異で赤 |
+| 回帰 | `mem decisions --json` の `counts` の既存の欄が、同じ fixture で今と同じ（#4355 I7） | — |
 
-- 時計: 評価・件数の試験は `now` を差し替える（既存の `MemEvalDeps` の `now`、`evaluate.ts:422`）
-- mem・brief・check・件数がモデルを呼ばないこと（Issue の追記の受入）は、既存の「モデルを呼ばない」の試験の表に、件数 API と期限の評価の行を足す（未確認: 既存の表の場所。実装の契約で名指す）
+- 時計: 評価・件数の試験は `now` を差し替える（`MemEvalDeps` の `now`、`evaluate.ts:422`）
+- モデルを呼ばないこと（Issue の追記の受入）は、既存の表に、件数の API と期限の評価の行を足す（既存の表の場所は PR の契約で名指す。未確認）
 
 ---
 
 ## 6. #4248（Dreaming）へ渡す結論
 
-1. 機械で決まる片付けは、この Issue が持つ（期限の許可・promoted の数）。dreaming は「中身が古い・誤り」だけを扱い、期限・promoted の片付けを提案しない（重ねない）
-2. dreaming の「decision の候補」の提案は、案 1 の作成の規則（行き先か期限）を満たす形でだけ出せる。提案の schema の必須の欄に入れる
-3. 承認待ちの数（§4.1）と、dreaming の「未判断の提案」の数は、**別の数**として並べる。混ぜない（#4248 の §9 の C の 1 行と同じ）
+1. 機械で決まる片付け（許可の期限・promoted の数）は、この Issue が持つ。dreaming は「中身が古い・誤り」だけを扱う。**期限の許可と `promoted` の decision を対象にした `close` の提案は出さない**（レビュー B P3-6）
+2. dreaming の「decision の候補」の提案は、§3.1 の規則（行き先か、5 分〜7 日の印つきの期限）を満たす形でだけ出せる。#4248 の §6 の schema の「decision の候補」の行に足す文: 「`promote_to`（`issue:#N`・`pr:#N`・`path:<.md>`）か `expiresAt`（作成から 5 分〜7 日、ISO 8601）のどちらか必須。両方とも無い候補は取り込みで断る」
+3. 承認待ちの数（§4.1 の `pending`）と、dreaming の「未判断の提案」の数は、**別の数**として並べる。#4248 §9 の C の行: 「『未判断の提案 N 件（うち dreaming M 件）』の 1 行を優先順位の表に足す」
 4. 期限の過ぎた許可は、dreaming の材料に入れない（閉じる前でも）。`promoted` は材料に入れる（「正本へ移す案」を重ねないため）
-5. 「記録済みとして閉じる」の一致の規則（完全一致・正規化）は、dreaming の「詳細を Issue・文書へ移す案」の二重の検知でも同じ関数を使う
+5. 「記録済みにする」の一致の規則（完全一致・正規化、§4.3 の純粋な関数）は、dreaming の「詳細を Issue・文書へ移す案」の二重の検知でも同じ関数を使う
+6. **`expire` は書き込みの評価の口でだけ走る**。`dream-input` は、既存の評価の口（閉じる）を呼ばない。期限切れは純粋な時刻の比較（`presentMemItem` の `expired`）で判定し、材料から外す。書き込まない（レビュー B P1-4）
 
 ---
 
-## 7. PR の分け方（Sprint 9 以降）
+## 7. PR の分け方（Sprint 9 以降。レビュー B P2-8）
 
 | PR | 中身 | 書くファイル（見込み） | 依存 | 陽性対照 |
 |---|---|---|---|---|
-| PR1 store と評価 | 作成の規則（§3.1）、期限の評価（§3.2）、promoted を数から外す（§3.3・§3.4）、update の新しい欄（§4.4）、CLI の `--expires-at`・update の欄、新しい error code、docs（cli-operations-guide の mem の節・`team.md` §11 の 2 の文言は PM の書き順で） | `src/types/mem.ts`、`src/lib/mem/{validate,service,transitions,evaluate}.ts`、`src/lib/db/mem-db.ts`、`src/lib/db/mem-close-db.ts`、`src/lib/promote/decision-counts.ts`、`src/lib/brief/sources.ts`、`src/cli/commands/mem.ts`、`src/lib/mem-suggest/rules.ts`、試験 | §8 Q1・Q2・Q4 の答え | §5 の単体・結合（評価・競合）の表。変異で赤 |
-| PR2 件数とバッジ | 件数 API（§4.1）、ヘッダー・サイドバーのバッジ、決定の画面の冒頭の説明（§4.2） | 新しい route（`src/app/api/mem/decisions/pending/route.ts` 見込み）、`src/components/layout/Header.tsx`・`Sidebar.tsx`、`DecisionPromotePanel.tsx`（冒頭の文） | PR1（数え方の関数）。`DecisionPromotePanel.tsx` は #4355 PR3 と同じファイルなので、同じレーンで #4355 PR3 と順を決める | 件数 API の副作用 0 の spy、e2e |
-| PR3 二重の検知 | 差分の照会に一致の検知を足す（§4.3）、`decision-mark-recorded` の入口、一致の記録の表（追加の migration） | `src/lib/promote/{service,reference-diff}.ts`、新しい migration（番号は PM）、`DecisionPromotePanel.tsx`、`ENTRANCES` の表 | PR1。PR2 と同じ画面のファイルなので PR2 の後 | `ENTRANCES` の行、一致・不一致・照会の失敗の表 |
+| PR1a 数と見え方 | promoted を上限の警告から外す（§3.3・§3.4）、`decisionCountsOf` に欄を足す（§4.1。既存の欄は変えない）、`presentMemItem` の `expired`（§3.2） | `src/lib/db/mem-db.ts`（`countOpenItems`）、`src/lib/promote/decision-counts.ts`、`src/lib/mem/present.ts`、`src/lib/brief/sources.ts`（`expired` の欄）、試験。docs: `mem-store-4221.md:285`・guide・`mem-skills-4228.md:59`・`brief-4223.md`（欄の追加） | なし | 件数の表、`expired` の時計の行 |
+| PR1b update の欄 | `mem update` の `--promote-to`・`--quote`・`--quote-at`（§4.4）。行き先を外す拒否 | `src/lib/mem/{service,validate}.ts`、`src/lib/db/mem-db.ts`（`updateMemItem`）、`src/cli/commands/mem.ts`、試験 | なし | 行き先を外す update の拒否の変異 |
+| PR1c 作成の規則と期限 | `checkDecisionDestinationRule`（§3.1、store 層）、`--expires-at`（add・update）、印つきの `at`、`expire`（§3.2）、`destination_required`（公開の契約の変更。CHANGELOG の Breaking、公開版 `cmate-handoff` の skill）、suggest の規則（§4.4）、docs（§3.2 の一覧） | `src/types/mem.ts`、`src/lib/mem/{validate,service,transitions,evaluate,close-when}.ts`、`src/lib/db/mem-db.ts`、`src/lib/mem-suggest/rules.ts`、`src/cli/commands/mem.ts`、試験。**直す既存の試験の一覧**（行き先なしの decision を作る fixture）を契約に書く | PR1b（update の経路を同じ関数で検査するため）。§8 Q1・Q2 の答え | §5 の規則・評価・I3・I6 の表 |
+| PR2 件数とバッジ | 件数の API（§4.1）、ヘッダー・サイドバーのバッジ、決定の画面の冒頭の数と説明（§4.1・§4.2）、guide の決定の画面の節 | 新しい route、`Header.tsx`・`Sidebar.tsx`、`DecisionPromotePanel.tsx`、docs | PR1a（欄）。PR1c（許可の数。PR1c の前なら `grants` は常に 0） | 副作用 0 の spy、e2e |
+| PR3a 一致の関数 | 一致の規則の純粋な関数（§4.3）。#4248 と共有 | `src/lib/promote/prior-record.ts`（新）、試験 | なし（PR2 の前でも出せる） | 一致の表 |
+| PR3b 二重の検知の画面 | preview に一致を記録、`decision-mark-recorded` の入口、一致の記録の表（追加の migration） | `src/lib/promote/service.ts`、migration（番号は PM）、`DecisionPromotePanel.tsx`、`ENTRANCES` の表 | PR3a、PR2（同じ画面のファイル） | `ENTRANCES` の行、mark-recorded の拒否の行 |
 
-- PR1 は DB の変更が無い。PR3 だけが migration を持つ（新しい表を作るだけ。既存の表は変えない）
-- 各 PR の契約に、§2.1 の不変条件の番号を書く。高リスク（データ・mem の契約）なので、レビューは系統を分けて 2 本
-- `docs/module-reference.md` は直接書かず、断片で渡す（今の運用）
+- `DecisionPromotePanel.tsx` は #4355 の残り（PR3、Sprint 9 へ移した、`pm-plan-s8.md`）と同じファイル。#4355 の PR2 までは develop に入っている（`a21776371`・`e162dd9b9`）。PR2・PR3b と #4355 PR3 の順は、同じレーンで PM が固定する
+- PR1a・PR1b・PR3a は DB の変更が無い。PR3b だけが migration を持つ（新しい表を作るだけ）
+- 高リスク（データ・mem の契約）なので、各 PR のレビューは系統を分けて 2 本
+- `docs/module-reference.md` は直接書かず、断片で渡す
 
 ---
 
-## 8. 人に伺う点（PM が人へ渡す）
+## 8. 人に伺う点（PM の整理: 人へは Q1・Q2 だけ）
 
-| # | 問い | 推奨 | 推奨しない側を選んだときの影響 |
-|---|---|---|---|
-| Q1 | 行き先の必須化と期限つきの許可の衝突を、どの案で解くか（§2.2） | **案 1（行き先か期限のどちらかを必須）** | 案 2: `mem_items` の作り直しの migration と、kind の表の全部の変更（大）。案 3: 許可も承認待ちに乗り、正本に許可の記録が溜まる |
-| Q2 | 受入条件の読み替え「行き先も期限も無い decision を作れない」と、新しい拒否（exit 2 `destination_required`。今まで通った入力が断られる CLI の契約の変更）でよいか | よい | 拒否を入れないなら、suggest の知らせだけが残る（今と同じ） |
-| Q3 | 行き先も期限も無い既存の `open` の decision（今 5 件）を、バッジの数に入れるか | 入れない。「行き先なし N 件」として別に出す。PM が中身を見て、期限を足すか取り下げる | 入れると、承認できない（行き先を画面で選ぶまで）ものが承認待ちに出る |
-| Q4 | promoted を「数から外すだけ」（P-a）か、「自動で閉じて理由を残す」（P-b、migration で作り直し）か。期限で閉じた理由は `time-passed` の語でよいか（`expired` の値を足さない） | P-a と `time-passed` | P-b は案 2 と同じ作り直しの費用 |
-| Q5 | 期限の最短（作成の時点から何分先から受けるか）と最長（例: 30 日） | 最短 5 分・最長は設けない（見立て） | 最長を設けると、長い許可を書き直す手間 |
-| Q6 | 「承認していない決定は、それに頼る作業の根拠にならない」を画面に書いてよいか（運用の規則として。機械では止めない） | 書く | 書かないなら、承認の目的の説明が弱くなる（事象 5） |
-| Q7 | 許可（行き先なし・期限あり）を人が「確かめた」印を付ける口を作るか（エージェントが許可を作り上げていないことの確認） | 作らない（今の運用でも許可は承認されていない、§1.1）。必要になったら別 Issue | 作るなら、新しい遷移と画面の口（I5 の表の行）を足す |
-| Q8 | PR3 の migration の番号 | PM が割り当てる | — |
+### Q1（人へ）: 行き先の必須化と期限つきの許可の衝突を、どう解くか
+
+背景:
+- Issue の直し方 2 は「行き先の無い decision を作れなくする」
+- 追記 2 は「期限つきの許可（自走・マージ・この版限り）を、期限で閉じる」
+- 許可は行き先（Issue・docs）を持たないので、2 つはそのままでは両立しない
+- 今の mem の decision の多くは許可で（§1.1）、承認されずに手で取り下げられている
+
+選択肢:
+
+| | 中身 | 影響 |
+|---|---|---|
+| **案 1（推奨）** | 決定は行き先（`--promote-to`）を付ける。許可は行き先の代わりに期限（`--expires-at`、今から 5 分〜7 日、時刻だけ）を付ける。許可は承認の対象ではない。ただしバッジに「許可 M」として出し、期限の後に機械が閉じる | DB の変更なし。7 日を超える許可や「PR のマージまで」の許可は、時刻で書き直す必要がある |
+| 案 2 | 許可を decision とは別の種類（grant）にする | 意味は最もはっきりするが、mem の表の作り直し（データの移行）が要り、実装が大きい |
+| 案 3 | 行き先の無い decision に既定の行き先（例: docs の決定の記録のファイル）を付ける | 許可まで承認待ちに乗り、承認されずに溜まる。正本に期限切れの許可が溜まる |
+
+### Q2（人へ）: 新しい拒否（CLI の公開の契約の変更）でよいか
+
+- 案 1 を採ると、`commandmate mem add --kind decision` に行き先も期限も無いと、今まで通っていた入力が **exit 2**（`destination_required`）で断られる。画面と handoff の提案も同じく断られる
+- ほかに、次の 2 つも新しく断る（どちらも exit 2）:
+  - 許可の期限が範囲の外（5 分未満・7 日超え）
+  - 行き先を外す update
+- 影響の範囲（確かめた範囲。レビュー A P3-7）: 次の 3 つは既に `--promote-to` 付きで書いており、影響は小さい
+  - `.claude/skills/cmate-handoff-dev/SKILL.md:145`
+  - `docs/orchestrate/team.md:148`
+  - `src/cli/docs/team-setup-guide.ts:423`
+- 公開版の `cmate-handoff` skill と CHANGELOG の Breaking に載せる
+- 選択肢:
+  - (a) 推奨: 断る（exit 2）
+  - (b) 断らず、`mem check --suggest` の知らせだけを続ける（今と同じ。行き先も期限も無い decision が作られ続ける）
+
+### PM が範囲の中で決めたこと（記録）
+
+| # | 決定 | この版での反映 |
+|---|---|---|
+| Q3 | 行き先も期限も無い既存の `open` は、バッジの数に入れず、決定の画面で別に出す | §4.1（`noDestination`） |
+| Q4 | promoted は P-a（数から外すだけ）。期限で閉じた理由は `time-passed` | §3.2・§3.3 |
+| Q5 | 期限に最長を設ける。案は設計が出す | §3.1（5 分〜7 日） |
+| Q6 | 画面の冒頭の説明を書く | §4.2 |
+| Q7 | 許可に人が「確かめた」印を付ける口は作らない | §4.2 |
+| Q8 | migration の番号は PM | §7 PR3b |
 
 ---
 
 ## 9. 未確認・レビューで見てほしい点
 
-1. 画面から decision を作る経路があるか（§3.1）。あれば同じ規則にする
-2. （確かめた）遷移の検査は `closeMemItemByCondition` の中、トランザクションの内側にある（`mem-db.ts:1129-1130`）。`expire` はそこに足す（§3.2）。session_notes の枠（`now`）の分岐（`:1131-1137`）は decision に関係しない
-3. brief から `promoted` を外すと、ほかに `promoted` を brief で読む使い手がいないか（#4226 の促し、#4227 の handoff）。`grep` の範囲では brief の S7 だけを見た
-4. 二重の検知でコメントを最大 100 件読む上限が、`gh` の照会の予算（`QueryLimits`、`src/lib/mem/query-plan.ts`）と合うか
-5. ヘッダーに出す API の読み直しの頻度と、全リポジトリを数える費用（`listMem` を全ブランチで回すか、1 つの SELECT で数えるか）。読みの SELECT 1 本を推奨（見立て）
-6. §1.1 の分類は本文の先頭を目で見た読みで、全件を分類していない
+1. 行き先・期限の欄に触れない update（行き先なしの既存の decision の text だけを直す）を、規則の外にしてよいか（§3.1 の I6。PR1c で確かめる）
+2. コメントを最大 100 件読む上限が、`gh` の照会の予算（`QueryLimits`、`src/lib/mem/query-plan.ts`）と合うか
+3. 件数の API の SELECT 1 本で、全部のリポジトリ・ブランチの mode（規則・上書き）を解決できるか。mode の解決は今 TS の関数（`memModeOnFor` など）なので、SELECT の後に TS で mode を決める形になる（見立て）
+4. モデルを呼ばないことの既存の試験の表の場所
+5. §1.1 (a) の分類は、本文の先頭を目で見た読み
+
+---
+
+## 10. 設計レビューの処分（第 2 版）
+
+- 処分の語: 採用（設計を直した）・却下（理由つき）・未解決（次の手つき）
+- P1 は全部を設計で塞いだ
+
+### 10.1 レビュー A（データと契約の安全）
+
+| 指摘 | 処分 | 反映した節 |
+|---|---|---|
+| 事実 F6 の補足（画面で選んだ行き先は書き戻さない） | 採用 | F6、§3.2 の表、§4.1 の `pending` |
+| 事実「成否 `success`」は誤り | 採用 | F15、§3.2 |
+| 事実「過去の `at` は既存の検査に乗る」は誤り | 採用 | F14、§3.1 |
+| 事実「画面から decision を作る経路は未確認」は誤り | 採用 | F13、§3.1 |
+| P1-1 遠い期限で必須を素通り・バッジに出ない許可 | 採用（直し方 1 と 2 の組み合わせ。3 は PM の決定 Q6・Q7 に沿い、画面の説明に入れた） | §2.2・§3.1（5 分〜7 日）、§4.1（許可の数を必ず出す）、§4.2 |
+| P1-2 update で行き先を外して機械で閉じる迂回 | 採用 | I2、§3.1、§4.4、§5 |
+| P1-3 行き先なし・`at` の既存の decision が一斉に閉じる | 採用（実測は 0 件、§1.1 (b)。印 `expires: true` で新しい期限だけに効かせる） | I6、§3.2、§5 |
+| P2-1 規則を CLI だけに置くと画面・handoff から作れる | 採用 | I7、§3.1、§5 |
+| P2-2 行き先なしで `issue/pr/branch` の条件だけ | 採用（時刻だけに限る） | §2.4、§3.1 |
+| P2-3 過去・直近の期限の検査は新設で、`--close-when at:` も同じに | 採用（行き先なしで印の無い `at` は受けない） | §3.1 |
+| P2-4 期限切れの許可が brief・list で有効に見える | 採用（`expired` の印。brief の rank は変えない） | §3.2 |
+| P2-5 `decisionCountsOf` の意味の変更が #4355 の出力を変える | 採用（欄を足す。既存の欄は変えない） | §4.1、§5 |
+| P2-6 競合の試験の陰性対照が効かない | 採用 | §5 |
+| P2-7 I3 の陰性対照が無い | 採用 | §5 |
+| P2-8 I6 の回帰に陰性対照が無い | 採用 | §5 |
+| P2-9 記録済みはサーバーが一致を確かめ直す | 採用（preview の一致だけを使い、クライアントの値は受けない） | §4.3、§5 |
+| P2-10 100 件だけの「一致なし」 | 採用 | §4.3 |
+| P3-1 成否 `unknown` | 採用 | §3.2 |
+| P3-2 「記録済みとして閉じる」の名前 | 採用（「記録済みにする」） | §4.3 |
+| P3-3 どちらの欄が一致したかを出す | 採用（さらに、`quote` だけの一致では記録済みにしない） | §4.3 |
+| P3-4 preview の評価で許可が閉じうる | 採用（画面の文言） | §4.3 |
+| P3-5 期限切れを数えない式を名指す | 採用（式の形を書き、名指しは PR1c の契約） | §3.4 |
+| P3-6 `promote_to IS NULL` の `recorded`・`promoted` | 採用 | §3.2 の表 |
+| P3-7 CLI の契約の変更の影響と、公開 skill・CHANGELOG | 採用 | §7 PR1c、§8 Q2 |
+
+### 10.2 レビュー B（既存の設計・文書との整合と使い勝手）
+
+| 指摘 | 処分 | 反映した節 |
+|---|---|---|
+| P1-1 バッジの数と #4355 の画面の数・`decisionCountsOf` の食い違い | 採用（欄を足し、既存の欄は保つ。画面の冒頭の数を同じ欄に合わせ、guide を同じ PR で直す） | §4.1、§7 PR2 |
+| P1-2 brief から promoted を外すのが 4223・4228 に反する | 採用（brief は変えない。第 1 版の案を取り下げた） | §3.3 |
+| P1-3 B の不変条件を破るのに 4222・guide・skill の手当てが無い | 採用（直す文書の一覧と、既存の試験の行の扱い） | §3.2、§7 PR1c |
+| P1-4 `dream-input` の「評価しても閉じない」口 | 採用 | §3.2、§6 の 6、§5 |
+| P2-1 期限が `at` だけで、PR の条件の許可が作れない | 却下（時刻だけに限る。理由は §2.4: PR の条件は「不明」で残りうるため、最長の期限で上限を保てない。拒否の文で書き直し方を示し、Q1 の影響の欄に書いた） | §2.4、§3.1、§8 Q1 |
+| P2-2 画面から作る経路はある | 採用 | F13、§3.1 |
+| P2-3 P-a と Issue の「閉じる」の差 | 採用（差を §0.1 と §3.3 に明記。Q4 は PM が P-a に決めた） | §0.1、§3.3 |
+| P2-4 バッジの先が #4355 の決定と食い違う | 採用（#4355 の select へ行き、件数は付けない） | §4.1 |
+| P2-5 エージェントへの案内（文・suggest・help・行き先を外す形） | 採用 | §3.1、§4.4 |
+| P2-6 期限切れの許可を人が見る所が無い | 採用 | §3.2、§4.1 |
+| P2-7 受入条件の被覆表が無い | 採用 | §0.1 |
+| P2-8 PR1 が大きい | 採用（PR1a・1b・1c と PR3a・3b に分けた） | §7 |
+| P3-1 最短の表記の不一致 | 採用（5 分にそろえた） | §3.1 |
+| P3-2 「?」の説明 | 採用 | §4.1 |
+| P3-3 画面の文の断定 | 採用（運用の規則と分かる言い方） | §4.2 |
+| P3-4 F8・F10 の行番号の確認 | 採用（レビュー A が develop で照合して正と確かめた。行番号を A の照合に合わせた） | §1 |
+| P3-5 `countOpenItems` の変更と 4221・guide・4228 | 採用 | §3.4、§7 PR1a |
+| P3-6 Dreaming への引き渡しの曖昧さ | 採用（promoted・許可の close の提案を出さない、schema への追記文、C の行の引用） | §6 |
+
+- 却下 1 件（B P2-1）。未解決 0 件
