@@ -99,7 +99,6 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import YAML from 'yaml';
 import { appendRecord, envCleanItemsNote, envCleanShared, formatEnvCleanShared, inItem, readRecords } from './run-log.mjs';
 import { dirtyPaths } from './dirty-tree.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
@@ -126,56 +125,31 @@ export const START_TASK_ATTEMPTS = 3;
 export const START_TASK_RETRY_MS = 5_000;
 /**
  * A verification of the worktree that is still running when this call starts
- * its own (`already in progress`, 409): waited for up to this long, polled
- * every SIGNAL_POLL_SEC, and the verification started again at most
- * VERIFY_BUSY_ATTEMPTS times (#3883).
+ * its own (`already in progress`, 409): waited for, polled every SIGNAL_POLL_SEC,
+ * and the verification started again at most VERIFY_BUSY_ATTEMPTS times (#3883).
  */
 /**
- * The busy wait (#4459): the limit is on the run's *lack of progress*, not on its age, and it is
- * derived from .commandmate/verify.yaml, not written down here. One gate can legitimately take, from
- * the moment it starts to the moment it ends: its wait for the machine-wide mutex (`mutexWaitSec`,
- * else `timeoutSec`, of a gate with `mutex`), then a wait for a run slot it gave back while it
- * queued (up to the longest gate that holds a slot without a mutex), then its own run
- * (`timeoutSec`). The old 3600 was below the mutex wait alone: the run waited for was still queued
- * and this call gave up (exit 99, no verdict; runs 3299〜3302). The clock starts again whenever the
- * run finishes a gate; a run that finishes nothing for this long is taken as stuck.
- * A config that cannot be read gives the large side, never a small one.
+ * The busy wait (#4463, replacing #4459's limits): a run that `verify show` still reads as
+ * `running` is alive, and is waited for — queued for a slot, waiting on a mutex or inside a long
+ * gate, its rows do not move for hours, so their moving is no sign of life (Sprint 7, #4459
+ * reviews 1–3). A run whose execution died while the server lives on closes its own row (the
+ * runner's kill, its catch, and since #4463 its release of held pipes and its git limits), and a
+ * server that died answers nothing. So the wait gives up (exit 99, never a verdict) only when:
+ * - the server has not answered for VERIFY_UNREACHABLE_SEC (a rebuild takes minutes; a restarted
+ *   server closes the run as `error`, and the wait then verifies again), or
+ * - VERIFY_BUSY_CAP_SEC ran out. One named constant, not a formula over verify.yaml: a formula
+ *   kept undercounting the real worst (gates a contract adds, a mutex wait per retry) and could be
+ *   made infinite by a value the server refuses (#4463 review 2). It is what ends a row left
+ *   `running` with no one behind it (a close that failed twice, a promise that never settles:
+ *   known limits, #4494).
+ * Both are counted in time this process was awake ({@link VERIFY_AWAKE_STEP_MAX_SEC}), so a laptop
+ * that slept or a clock that jumped does not spend them.
  */
-export const VERIFY_BUSY_MARGIN_SEC = 600;
-/** The longest `mutexWaitSec` verify-config.ts accepts (MAX_MUTEX_WAIT_SEC): the fallback when verify.yaml is unreadable. */
-export const VERIFY_BUSY_FALLBACK_SEC = 86400;
-const REPO_VERIFY_CONFIG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.commandmate/verify.yaml');
-
-/**
- * Seconds a verification run may go without finishing a gate before it is taken as stuck.
- *
- * @param {string} [worktree] the worktree whose verify.yaml the server verifies with; this
- *   repository's own is read when it has none
- * @param {{ readFile?: (file: string) => string }} [deps]
- */
-export function verifyBusyTimeoutSec(worktree, { readFile = (file) => fs.readFileSync(file, 'utf8') } = {}) {
-  const files = [worktree ? path.join(worktree, '.commandmate', 'verify.yaml') : null, REPO_VERIFY_CONFIG].filter(Boolean);
-  for (const file of files) {
-    let gates;
-    try {
-      gates = YAML.parse(readFile(file))?.gates;
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(gates) || gates.length === 0) continue;
-    const seconds = (value) => (Number.isInteger(value) && value > 0 ? value : null);
-    const usable = gates.filter((gate) => seconds(gate?.timeoutSec) !== null);
-    if (usable.length !== gates.length) continue;
-    const longest = (list) => Math.max(0, ...list.map((gate) => gate.timeoutSec));
-    const mutexWait = Math.max(
-      0,
-      ...usable.filter((gate) => gate.mutex).map((gate) => seconds(gate.mutexWaitSec) ?? gate.timeoutSec)
-    );
-    const slotWait = longest(usable.filter((gate) => !gate.mutex));
-    return mutexWait + slotWait + longest(usable) + VERIFY_BUSY_MARGIN_SEC;
-  }
-  return VERIFY_BUSY_FALLBACK_SEC;
-}
+export const VERIFY_BUSY_CAP_SEC = 604_800;
+/** How long the server may not answer about the run before the wait gives up. */
+export const VERIFY_UNREACHABLE_SEC = 1800;
+/** The most one poll counts towards the windows: two poll intervals and one query timeout. */
+export const VERIFY_AWAKE_STEP_MAX_SEC = 2 * SIGNAL_POLL_SEC + QUERY_TIMEOUT_MS / 1000;
 export const VERIFY_BUSY_ATTEMPTS = 3;
 /**
  * A verification that reached no verdict only because a gate's machine-wide
@@ -929,7 +903,7 @@ export function runVerify(ctx, args, logFile) {
  *
  * @returns {{ exitCode: number, log: string, notes: string[], superseded: string | null }}
  */
-function runVerifyOnce({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVerifyStart }, args, logFile) {
+function runVerifyOnce({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVerifyStart, error }, args, logFile) {
   const notes = [];
   for (let attempt = 1; ; attempt++) {
     // The environment this verification starts in (#3883 H-8).
@@ -939,33 +913,44 @@ function runVerifyOnce({ spawnToLog, run, sleep, now, o, cwd, supersededBy, onVe
     const busy = VERDICT_EXIT_CODES.includes(exitCode) ? null : busyRunOf(log);
     if (!busy) return { exitCode, log, notes, superseded: null };
     const waited = awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, busy.runId);
+    // Why the wait gave up, on stderr only: the record's note keeps its shape (#4463 I4).
+    if (waited.gaveUp) error?.(`wait-verify: run ${busy.runId}: busy-gave-up=${waited.gaveUp}`);
     notes.push(`waited-for=run ${busy.runId ?? '?'}${waited.ended ? '' : '(still running)'}`);
     if (waited.superseded) return { exitCode, log, notes, superseded: waited.superseded };
     if (!waited.ended || attempt >= VERIFY_BUSY_ATTEMPTS) return { exitCode, log, notes, superseded: null };
   }
 }
 
-/** Wait for the verification run `runId` to leave `running` (or, unnamed, one poll interval). */
+/**
+ * Wait for the verification run `runId` to leave `running` (or, unnamed, one poll interval).
+ * `gaveUp` names why a wait ended without the run ending: `unreachable@<s>` or `cap@<s>`, in
+ * seconds awake (#4463).
+ */
 function awaitRunEnd({ run, sleep, now, o, cwd, supersededBy }, runId) {
-  const limitMs = verifyBusyTimeoutSec(o.worktree) * 1000;
-  let deadline = now().getTime() + limitMs;
-  let finishedGates = 0;
+  if (!runId) {
+    sleep(SIGNAL_POLL_SEC * 1000);
+    return { ended: true, superseded: supersededBy?.() ?? null };
+  }
+  const capSec = VERIFY_BUSY_CAP_SEC;
+  let awakeSec = 0;
+  let unreachableSec = 0;
+  let last = now().getTime();
   for (;;) {
-    if (!runId) {
-      sleep(SIGNAL_POLL_SEC * 1000);
-      return { ended: true, superseded: supersededBy?.() ?? null };
-    }
     const view = readRun(run, o.cli, o.wt, runId, cwd);
+    const at = now().getTime();
+    // Awake time (#4463 P1-1): a gap longer than a poll (sleep, a clock jump) counts as one step.
+    const step = Math.min(Math.max(0, (at - last) / 1000), VERIFY_AWAKE_STEP_MAX_SEC);
+    last = at;
+    awakeSec += step;
     if (view && view.status !== 'running') return { ended: true, superseded: supersededBy?.() ?? null };
-    // Progress (#4459): a gate that finished since the last read starts the limit again.
-    const finished = Array.isArray(view?.gates) ? view.gates.filter((g) => g?.status && g.status !== 'running').length : 0;
-    if (finished > finishedGates) {
-      finishedGates = finished;
-      deadline = now().getTime() + limitMs;
-    }
+    // Read as running: alive. Not read: counts towards the unreachable window, which a read resets.
+    unreachableSec = view ? 0 : unreachableSec + step;
     const newer = supersededBy?.();
     if (newer) return { ended: false, superseded: newer };
-    if (now().getTime() >= deadline) return { ended: false, superseded: null };
+    if (unreachableSec >= VERIFY_UNREACHABLE_SEC) {
+      return { ended: false, superseded: null, gaveUp: `unreachable@${Math.round(unreachableSec)}` };
+    }
+    if (awakeSec >= capSec) return { ended: false, superseded: null, gaveUp: `cap@${Math.round(awakeSec)}` };
     sleep(SIGNAL_POLL_SEC * 1000);
   }
 }
@@ -1271,7 +1256,7 @@ export function main(argv, deps = {}) {
     /** The runs before it that a mutex wait sent back (#3938): their waits count in the record's split. */
     let verifyEarlier = [];
     const verifyCtx = {
-      spawnToLog, run, sleep, now, o, cwd, supersededBy,
+      spawnToLog, run, sleep, now, o, cwd, supersededBy, error,
       onVerifyStart: () => {
         env.verify = manifest();
       },
