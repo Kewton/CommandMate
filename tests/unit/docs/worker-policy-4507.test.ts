@@ -1,6 +1,6 @@
 /**
  * Worker allocation: easy and middle go to Command Code, hard goes to Claude opus
- * (Issue #4489, decided 2026-11-19).
+ * (Issue #4507, decided 2026-11-19).
  *
  * The runbook is executed by an LLM, so a rule that says one thing in 1-2b and
  * another in 3-5 / Phase 0 / 8-2 changes nothing at run time. This pins the
@@ -120,7 +120,7 @@ function allocationProblems(docs: Docs): string[] {
   return problems;
 }
 
-describe('Issue #4489: the allocation rule', () => {
+describe('Issue #4507: the allocation rule', () => {
   it('the repository documents follow the 2026-11-19 decision', () => {
     expect(allocationProblems(readDocs(REPO_ROOT))).toEqual([]);
   });
@@ -135,7 +135,7 @@ describe('Issue #4489: the allocation rule', () => {
 
     /** Write the four documents under a temporary root, with `orchestrate` optionally replaced. */
     function copyDocs(orchestrate?: (text: string) => string): Docs {
-      root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-worker-policy-4489-'));
+      root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-worker-policy-4507-'));
       const docs = readDocs(REPO_ROOT);
       const written: Docs = {
         orchestrate: orchestrate ? orchestrate(docs.orchestrate) : docs.orchestrate,
