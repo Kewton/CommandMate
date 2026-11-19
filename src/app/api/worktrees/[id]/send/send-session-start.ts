@@ -29,7 +29,7 @@ import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import type { ClaudeTool } from '@/lib/cli-tools/claude';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
-import { CLAUDE_MODEL_EXAMPLES, type SendStep } from './send-request';
+import { CLAUDE_MODEL_EXAMPLES, MODEL_REFUSED_CODE, type SendStep } from './send-request';
 
 const logger = createLogger('api/send');
 
@@ -54,7 +54,7 @@ export function refuseModelOnRunningSession(
   // session. Reject rather than silently ignoring the requested model.
   if (model && cliToolId === 'antigravity' && running) {
     return NextResponse.json(
-      { error: 'Antigravity model can only be set when starting a new session. Stop the current Antigravity session and resend with --model to switch models.' },
+      { error: 'Antigravity model can only be set when starting a new session. Stop the current Antigravity session and resend with --model to switch models.', code: MODEL_REFUSED_CODE },
       { status: 400 }
     );
   }
@@ -66,7 +66,7 @@ export function refuseModelOnRunningSession(
   // changed when nothing did.
   if (model && cliToolId === 'claude' && running) {
     return NextResponse.json(
-      { error: `Claude model can only be set when starting a new session. Stop the current Claude session and resend with --model to switch models. ${CLAUDE_MODEL_EXAMPLES}` },
+      { error: `Claude model can only be set when starting a new session. Stop the current Claude session and resend with --model to switch models. ${CLAUDE_MODEL_EXAMPLES}`, code: MODEL_REFUSED_CODE },
       { status: 400 }
     );
   }

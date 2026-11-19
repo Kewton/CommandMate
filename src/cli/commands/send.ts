@@ -15,6 +15,7 @@ import {
   MAX_STOP_PATTERN_LENGTH,
 } from '../utils/api-client';
 import { TOKEN_WARNING, handleCommandError } from '../utils/command-helpers';
+import { MAX_SERVER_ERROR_DETAIL } from '../utils/api-client-errors';
 import { parseDurationToMs, AUTO_YES_DURATION_FLAG_RANGE, DEFAULT_DURATION_FLAG } from '../config/duration-constants';
 import { isCliToolId, CLI_TOOL_IDS } from '../config/cli-tool-ids';
 import { AGENT_OPTION_DESCRIPTION, INSTANCE_OPTION_DESCRIPTION } from '../config/agent-target-options';
@@ -909,20 +910,33 @@ function validateSendModel(options: SendOptions, agent: string | undefined): voi
 }
 
 /**
- * Issue #4473: a 400 on a send that carried `--model` says why. The shared 400 line is
- * "Bad request. Check your input parameters.", which cannot tell a running session (the
- * model is a launch flag) from a bad value. Only this command reads the body: the shared
+ * The `code` of the server's 400 that refuses `--model` (the tool, the value, a running
+ * session). Not imported: the CLI does not load route code. Pinned to the route's constant by
+ * `tests/unit/cli/commands/cli-small-fixes-4473.test.ts`.
+ */
+export const MODEL_REFUSED_CODE = 'model_refused';
+
+/**
+ * Issue #4473: the 400 that refuses `--model` says why. The shared 400 line is "Bad request.
+ * Check your input parameters.", which cannot tell a running session (the model is a launch
+ * flag) from a bad value. Only the server's `model_refused` 400 counts — a role, relay, ask,
+ * brief or task-target 400 on a send that also carried `--model` is not about the model —
+ * and a role failure (RoleCliError) never. Only this command reads the body: the shared
  * classifier is every command's.
  *
- * Exits with the code the shared handler would have used; returns when there is no reason to add.
+ * Exits with the code the shared handler would have used (true is only seen where exit is stubbed);
+ * returns false when there is nothing to add.
  */
-export function reportModelRefusal(error: unknown, options: { model?: string }): void {
-  if (!options.model || !(error instanceof ApiError) || error.statusCode !== 400) return;
+export function reportModelRefusal(error: unknown, options: { model?: string }): boolean {
+  if (!options.model || !(error instanceof ApiError) || error instanceof RoleCliError) return false;
+  if (error.statusCode !== 400 || error.payload?.code !== MODEL_REFUSED_CODE) return false;
   const reason = error.payload?.error;
-  if (typeof reason !== 'string' || reason.trim() === '') return;
+  if (typeof reason !== 'string' || reason.trim() === '') return false;
+  const detail = reason.trim();
   console.error(`Error: ${error.message}`);
-  console.error(`Server: ${reason.trim()}`);
+  console.error(`Server: ${detail.length > MAX_SERVER_ERROR_DETAIL ? `${detail.slice(0, MAX_SERVER_ERROR_DETAIL)}…` : detail}`);
   process.exit(error.exitCode);
+  return true;
 }
 
 /**
@@ -1508,7 +1522,7 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           return;
         }
         flushClientWarnings();
-        reportModelRefusal(error, options);
+        if (reportModelRefusal(error, options)) return;
         handleCommandError(error);
       }
     });
