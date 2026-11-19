@@ -53,6 +53,8 @@ import {
   captureEnvSnapshot,
   ENV_PROBE_IDS,
   ENV_PROBE_LABELS,
+  RESOURCE_CONFIG_ENTRY_NAME,
+  type EnvConfigCheck,
   type EnvEntry,
   type EnvProbeId,
   type EnvSnapshot,
@@ -958,6 +960,29 @@ export interface EnvProbeDiff {
    * name the config never mentioned is not blamed on the config (#3672).
    */
   ignoredBuiltIn: EnvChange[];
+  /**
+   * `commandmate-entries` only: the resource config's reading, attached to its
+   * `+` / `-` line or reported as a change (#4406). Never part of the verdict.
+   */
+  configNotes: ConfigNote[];
+}
+
+/**
+ * What the report says about `~/.commandmate/resource.yaml` (Issue #4406).
+ *
+ * Information for the adjudicator only: an addition or removal of the file is
+ * in `added` / `removed` and counts exactly as before, and a content change
+ * (which the name-only probe never counts) stays uncounted. Making an addition
+ * pass needs an owner check (#4497), not this.
+ */
+export interface ConfigNote {
+  key: string;
+  /** `added` / `removed`: the file came or went; `changed`: present on both sides, other bytes. */
+  change: 'added' | 'removed' | 'changed';
+  /** The reading on the side the file is on (the final one for `changed`); null when unrecorded. */
+  config: EnvConfigCheck | null;
+  /** The baseline's hash, for `changed` only. */
+  beforeSha256: string | null;
 }
 
 /** What {@link diffEnvSnapshots} may be told beyond the two snapshots. */
@@ -990,6 +1015,31 @@ export interface EnvCleanDiff {
 
 function toChange(entry: EnvEntry, owner: EnvEntryOwner): EnvChange {
   return { key: entry.key, detail: entry.detail, owner };
+}
+
+/**
+ * The resource config's notes for one `commandmate-entries` comparison (#4406).
+ * By exact name only — `resource.yml` or `Resource.yaml` are other files and get
+ * no note. Reads nothing: the readings were taken with the snapshots.
+ */
+function resourceConfigNotes(before: EnvEntry[], after: EnvEntry[]): ConfigNote[] {
+  const was = before.find((entry) => entry.key === RESOURCE_CONFIG_ENTRY_NAME);
+  const now = after.find((entry) => entry.key === RESOURCE_CONFIG_ENTRY_NAME);
+  const note = (
+    change: ConfigNote['change'],
+    entry: EnvEntry,
+    beforeSha256: string | null
+  ): ConfigNote => ({ key: entry.key, change, config: entry.config ?? null, beforeSha256 });
+  if (!was && now) return [note('added', now, null)];
+  if (was && !now) return [note('removed', was, null)];
+  if (was && now) {
+    const from = was.config?.sha256 ?? null;
+    const to = now.config?.sha256 ?? null;
+    // Only when both sides were read: a baseline from before #4406 has no hash,
+    // and saying nothing is what that baseline always got.
+    if (from && to && from !== to) return [note('changed', now, from)];
+  }
+  return [];
 }
 
 /**
@@ -1035,6 +1085,7 @@ export function diffEnvSnapshots(
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
         ignoredBuiltIn: [],
+        configNotes: [],
       };
     }
     if (!after || after.status !== 'ok') {
@@ -1053,6 +1104,7 @@ export function diffEnvSnapshots(
         removedStaleDemoVitest: [],
         ignoredByConfig: [],
         ignoredBuiltIn: [],
+        configNotes: [],
       };
     }
 
@@ -1142,6 +1194,9 @@ export function diffEnvSnapshots(
       }
     }
 
+    const configNotes =
+      probeId === 'commandmate-entries' ? resourceConfigNotes(before.entries, after.entries) : [];
+
     return {
       probeId,
       status: added.length + removed.length > 0 ? ('violated' as const) : ('clean' as const),
@@ -1157,6 +1212,7 @@ export function diffEnvSnapshots(
       removedStaleDemoVitest,
       ignoredByConfig,
       ignoredBuiltIn,
+      configNotes,
     };
   });
 
@@ -1193,15 +1249,65 @@ export const ENV_CLEAN_GUIDANCE =
   'pattern (`pkill -f`): it takes every process whose command line matches, which is how ' +
   'the production server was stopped in #1739.';
 
-function formatChanges(sign: string, changes: EnvChange[]): string[] {
+function formatChanges(
+  sign: string,
+  changes: EnvChange[],
+  notes: ConfigNote[] = []
+): string[] {
   const listed = changes.slice(0, MAX_REPORTED_ENV_CHANGES);
   const remainder = changes.length - listed.length;
-  const lines = listed.map((change) => {
+  const noteFor = (key: string) => notes.filter((note) => note.key === key);
+  const lines = listed.flatMap((change) => {
     const detail = change.detail ? ` ${change.detail}` : '';
-    return `    ${sign} ${change.key}${detail} [${change.owner}]`;
+    // The owner stays the line's last token: wait-verify.mjs `envCleanItems`
+    // reads the item name as everything before it (#4162), so a note goes on a
+    // line of its own instead (#4406).
+    return [
+      `    ${sign} ${change.key}${detail} [${change.owner}]`,
+      ...noteFor(change.key).map(formatConfigNote),
+    ];
   });
   if (remainder > 0) lines.push(`    ... and ${remainder} more`);
+  // A note whose change fell past the cap is still printed.
+  const listedKeys = new Set(listed.map((change) => change.key));
+  for (const change of changes) {
+    if (!listedKeys.has(change.key)) lines.push(...noteFor(change.key).map(formatConfigNote));
+  }
   return lines;
+}
+
+const RESOURCE_CONFIG_SUBJECT = "the user's resource config (#4370)";
+
+function describeConfigCheck(config: EnvConfigCheck | null): string {
+  if (!config) return 'shape not checked (snapshot predates #4406)';
+  const reason = config.reason ? ` (${config.reason})` : '';
+  const sha = config.sha256 ? ` sha256=${config.sha256.slice(0, 12)}` : '';
+  const size = config.size !== null ? ` size=${config.size}B` : '';
+  return `shape=${config.shape}${reason}${sha}${size}`;
+}
+
+/**
+ * One `    · ` line for a resource config note (#4406). Never a `+` / `-` line,
+ * so wait-verify's `envCleanItems` does not read it as an item.
+ */
+function formatConfigNote(note: ConfigNote): string {
+  if (note.change === 'changed') {
+    const from = (note.beforeSha256 ?? '').slice(0, 12);
+    const to = (note.config?.sha256 ?? '').slice(0, 12);
+    return (
+      `    · ~ ${note.key} changed during the task (sha256 ${from} → ${to}): ` +
+      `${RESOURCE_CONFIG_SUBJECT} — not counted, env-clean compares names only`
+    );
+  }
+  const when = note.change === 'removed' ? 'at task start ' : '';
+  return (
+    `    · ${note.key}: ${RESOURCE_CONFIG_SUBJECT}, ${when}${describeConfigCheck(note.config)} — ` +
+    'counted; adjudicate per docs/orchestrate/exit-codes.md 3-4 (owner check: #4497)'
+  );
+}
+
+function formatChangedConfigNotes(notes: ConfigNote[]): string[] {
+  return notes.filter((note) => note.change === 'changed').map(formatConfigNote);
 }
 
 /**
@@ -1334,13 +1440,18 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
       lines.push(...formatIgnoredByConfig(probe.ignoredByConfig));
       lines.push(...formatIgnoredBuiltIn(probe.ignoredBuiltIn));
       lines.push(...formatIgnoredAttributed(probe.ignoredAdded));
+      lines.push(...formatChangedConfigNotes(probe.configNotes));
       continue;
     }
     lines.push(
       `  ${probe.probeId} VIOLATED (${label}): +${probe.added.length} -${probe.removed.length}`
     );
-    lines.push(...formatChanges('+', probe.added));
-    lines.push(...formatChanges('-', probe.removed));
+    lines.push(
+      ...formatChanges('+', probe.added, probe.configNotes.filter((n) => n.change === 'added'))
+    );
+    lines.push(
+      ...formatChanges('-', probe.removed, probe.configNotes.filter((n) => n.change === 'removed'))
+    );
     lines.push(...formatRemovedKillNotExcused(probe.removedKillNotExcused));
     lines.push(...formatTaskSessionChanges(probe.taskSessionAdded));
     lines.push(...formatRemovedByOtherServer(probe.removedByOtherServer));
@@ -1352,6 +1463,7 @@ export function formatEnvCleanReport(diff: EnvCleanDiff): string {
     for (const excused of probe.ignoredAdded) {
       lines.push(`    · ${excused.key} (ignored: belongs to another worktree)`);
     }
+    lines.push(...formatChangedConfigNotes(probe.configNotes));
   }
   return lines.join('\n');
 }

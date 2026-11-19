@@ -8,7 +8,15 @@
  * it. What is pinned is that a tool's own state stops counting and that nothing
  * else does.
  *
- * `.commandcode/` (this file, part 1): Command Code's state in a worktree is
+ * `~/.commandmate/resource.yaml` (part 2): the user's resource config (#4370),
+ * re-read by every call of the resource gate. Who placed it cannot be shown here,
+ * so its appearance stays a violation (decision on #4406; the owner check that
+ * would make it pass is #4497). What changes is the report: a separate `    · `
+ * line under the violation gives the shape check and the sha256, so the
+ * adjudicator can compare it with what the PM placed. The `+` line keeps its
+ * owner as the last token, so wait-verify's item name is unchanged.
+ *
+ * `.commandcode/` (part 1): Command Code's state in a worktree is
  * `.commandcode/settings.local.json` (CommandMate writes it on every Command Code
  * start, merging into what is there) and `.commandcode/taste/` (Command Code's
  * own). The product gates already excuse exactly these untracked paths by the
@@ -30,7 +38,18 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
@@ -38,6 +57,20 @@ import {
   AGENT_STATE_FILES,
   isAgentStatePath,
 } from '@/lib/skills/agent-state-paths';
+import { diffEnvSnapshots, formatEnvCleanReport } from '@/lib/verification/env-clean-gate';
+import {
+  ENV_SNAPSHOT_VERSION,
+  RESOURCE_CONFIG_MAX_BYTES,
+  RESOURCE_CONFIG_TOP_KEYS,
+  probeCommandmateEntries,
+  probeHomeEntries,
+  readRegularFileNoFollow,
+  type EnvEntry,
+  type EnvProbeDeps,
+  type EnvProbeId,
+  type EnvProbeResult,
+  type EnvSnapshot,
+} from '@/lib/verification/env-snapshot';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 import { REAL_SHELL_SUBPROCESS_TIMEOUT_MS } from '@tests/helpers/real-shell-budget';
 
@@ -162,5 +195,279 @@ describe('.commandcode/ tool state is not uncommitted work (#4406)', () => {
     write(repo, '.commandcode/settings.local.json', '{"permissions":{"allow":["*"]}}\n');
 
     expect(untracked(repo)).toEqual(['.commandcode/settings.local.json']);
+  });
+});
+
+// =============================================================================
+// Part 2: ~/.commandmate/resource.yaml
+// =============================================================================
+
+const WORKTREE_ID = 'commandmate-issue-4406';
+const CONTEXT = { worktreeId: WORKTREE_ID, worktreePath: '/Users/dev/work/commandmate-issue-4406' };
+const STARTED = 1_763_500_000_000;
+const VERIFIED = STARTED + 60 * 60 * 1000;
+
+/**
+ * wait-verify.mjs `envCleanItems`' line rule, copied (a `.mjs` that runs git is
+ * not imported here): a change line is `    <+|-> <name> [<owner>]`, read only
+ * under a VIOLATED probe header.
+ */
+function envCleanItems(report: string): string[] {
+  const items: string[] = [];
+  let probe: string | null = null;
+  for (const line of report.split('\n')) {
+    const header = /^ {2}(\S+) (\S+) \(/.exec(line);
+    if (header) probe = header[2] === 'VIOLATED' ? header[1] : null;
+    const change = /^ {4}([+-]) (.+) \[([^\]]+)\]$/.exec(line);
+    if (!probe || !change || change[3] === 'self' || change[3].startsWith('task session')) continue;
+    items.push(`${probe}:${change[1]}${change[2]}`);
+  }
+  return items;
+}
+
+function makeHome(): string {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'cm-env-clean-4406-')));
+  tempDirs.push(home);
+  mkdirSync(join(home, '.commandmate'));
+  return home;
+}
+
+/** The real probes (and the real no-follow read), pointed at a private HOME. */
+function deps(home: string): EnvProbeDeps {
+  return {
+    run: async () => ({ code: 0, stdout: '', stderr: '', failure: null }),
+    readDir: (path: string) => readdirSync(path),
+    homeDir: () => home,
+  };
+}
+
+const EMPTY: EnvProbeResult = { status: 'ok', entries: [], reason: null };
+
+function snapshotOf(
+  commandmate: EnvProbeResult,
+  capturedAt: number,
+  home: EnvProbeResult = EMPTY
+): EnvSnapshot {
+  const probes: Record<EnvProbeId, EnvProbeResult> = {
+    listeners: EMPTY,
+    'tmux-sessions': EMPTY,
+    'home-entries': home,
+    'commandmate-entries': commandmate,
+  };
+  return { version: ENV_SNAPSHOT_VERSION, capturedAt, worktreeId: WORKTREE_ID, probes };
+}
+
+function snapshot(home: string, capturedAt: number): EnvSnapshot {
+  return snapshotOf(probeCommandmateEntries(deps(home)), capturedAt, probeHomeEntries(deps(home)));
+}
+
+/** Snapshot, mutate, snapshot, compare, render. */
+function judge(home: string, mutate: () => void) {
+  const before = snapshot(home, STARTED);
+  mutate();
+  const diff = diffEnvSnapshots(before, snapshot(home, VERIFIED), CONTEXT, {
+    resolvePidCwd: () => null,
+    sessionKills: [],
+  });
+  const commandmate = diff.probes.find((p) => p.probeId === 'commandmate-entries')!;
+  return { diff, commandmate, report: formatEnvCleanReport(diff) };
+}
+
+const VALID = 'version: 1\ncommandmate_share: 0.5\nweights: { cpu_heavy: 4 }\nci_vm: { cpus: 8 }\n';
+const sha = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
+const configPath = (home: string, name = 'resource.yaml') => join(home, '.commandmate', name);
+
+/** The report line right after `+ resource.yaml [unattributed]` (or `-`). */
+function noteUnder(report: string, sign: '+' | '-'): string | undefined {
+  const lines = report.split('\n');
+  const at = lines.indexOf(`    ${sign} resource.yaml [unattributed]`);
+  return at < 0 ? undefined : lines[at + 1];
+}
+
+describe('~/.commandmate/resource.yaml stays a violation, with the reading beside it (#4406)', () => {
+  it('R1: a valid config placed during the task is VIOLATED, the shape and sha256 on a separate line', () => {
+    const home = makeHome();
+    const { diff, commandmate, report } = judge(home, () => writeFileSync(configPath(home), VALID));
+
+    expect(diff.status).toBe('violated');
+    expect(commandmate.status).toBe('violated');
+    expect(commandmate.added.map((c) => [c.key, c.owner])).toEqual([['resource.yaml', 'unattributed']]);
+    expect(noteUnder(report, '+')).toBe(
+      `    · resource.yaml: the user's resource config (#4370), shape=ok sha256=${sha(VALID).slice(0, 12)} ` +
+        `size=${Buffer.byteLength(VALID)}B — counted; adjudicate per docs/orchestrate/exit-codes.md 3-4 (owner check: #4497)`
+    );
+    // wait-verify's item name is unchanged by the note.
+    expect(envCleanItems(report)).toEqual(['commandmate-entries:+resource.yaml']);
+  });
+
+  it('R1: keys under which a later PR runs commands are named on the note (still counted)', () => {
+    const home = makeHome();
+    const text = 'version: 1\nrunners: { total_max: 4 }\n';
+    const { commandmate, report } = judge(home, () => writeFileSync(configPath(home), text));
+
+    expect(commandmate.status).toBe('violated');
+    expect(noteUnder(report, '+')).toContain('shape=ok (has runners) sha256=');
+  });
+
+  it('N1: an unknown file the work wrote under ~/.commandmate is VIOLATED, with no config note', () => {
+    const home = makeHome();
+    const { commandmate, report } = judge(home, () =>
+      writeFileSync(join(home, '.commandmate', 'notes.txt'), 'x\n')
+    );
+
+    expect(commandmate.added.map((c) => c.key)).toEqual(['notes.txt']);
+    expect(report).toContain('    + notes.txt [unattributed]');
+    expect(report).not.toContain('resource config');
+  });
+
+  const invalid: Array<[string, (path: string, home: string) => void, string]> = [
+    ['not YAML', (p) => writeFileSync(p, 'a: [1, 2\n'), 'shape=invalid (not YAML'],
+    ['a list at the top', (p) => writeFileSync(p, '- 1\n- 2\n'), 'shape=invalid (the top level is not a mapping)'],
+    ['another version', (p) => writeFileSync(p, 'version: 2\n'), 'shape=invalid (version 2 is not 1)'],
+    ['an unknown key', (p) => writeFileSync(p, 'version: 1\nshare: 1\n'), 'shape=invalid (unknown key share)'],
+    ['not UTF-8', (p) => writeFileSync(p, Buffer.from([0x76, 0x3a, 0xff, 0xfe, 0x0a])), 'shape=invalid (not UTF-8)'],
+    ['a directory', (p) => mkdirSync(p), 'shape=invalid (not a regular file)'],
+    [
+      'a symlink to a valid file',
+      (p, home) => {
+        writeFileSync(join(home, 'elsewhere.yaml'), VALID);
+        symlinkSync(join(home, 'elsewhere.yaml'), p);
+      },
+      'shape=invalid (a symlink (not followed))',
+    ],
+    [
+      'a hard link to a valid file',
+      (p, home) => {
+        writeFileSync(join(home, 'elsewhere.yaml'), VALID);
+        linkSync(join(home, 'elsewhere.yaml'), p);
+      },
+      'shape=invalid (a hard link (nlink=2))',
+    ],
+    [
+      'larger than 64 KiB',
+      (p) => writeFileSync(p, `# ${'x'.repeat(RESOURCE_CONFIG_MAX_BYTES)}\nversion: 1\n`),
+      `shape=invalid (larger than ${RESOURCE_CONFIG_MAX_BYTES} bytes`,
+    ],
+  ];
+
+  it.each(invalid)('N2: %s stays VIOLATED and the note says why', (_name, place, expected) => {
+    const home = makeHome();
+    const { commandmate, report } = judge(home, () => place(configPath(home), home));
+
+    expect(commandmate.status).toBe('violated');
+    expect(commandmate.added.map((c) => c.key)).toContain('resource.yaml');
+    expect(noteUnder(report, '+')).toContain(expected);
+    expect(envCleanItems(report)).toContain('commandmate-entries:+resource.yaml');
+  });
+
+  it('N3: look-alike names stay VIOLATED and get no config note', () => {
+    const home = makeHome();
+    const { commandmate, report } = judge(home, () => {
+      writeFileSync(configPath(home, 'resource.yml'), VALID);
+      writeFileSync(configPath(home, 'resource.yaml.bak'), VALID);
+    });
+
+    expect(commandmate.added.map((c) => c.key)).toEqual(['resource.yaml.bak', 'resource.yml']);
+    expect(report).not.toContain('resource config');
+  });
+
+  it('N3: a case variant is another name (judged on entries, not on the filesystem)', () => {
+    const entry: EnvEntry = { key: 'Resource.yaml', detail: null, anchor: null };
+    const diff = diffEnvSnapshots(
+      snapshotOf(EMPTY, STARTED),
+      snapshotOf({ status: 'ok', entries: [entry], reason: null }, VERIFIED),
+      CONTEXT,
+      { resolvePidCwd: () => null, sessionKills: [] }
+    );
+
+    expect(diff.status).toBe('violated');
+    expect(formatEnvCleanReport(diff)).not.toContain('resource config');
+  });
+
+  it('N4: an entry with no reading (a snapshot from before #4406) stays VIOLATED, "not checked"', () => {
+    const entry: EnvEntry = { key: 'resource.yaml', detail: null, anchor: null };
+    const diff = diffEnvSnapshots(
+      snapshotOf(EMPTY, STARTED),
+      snapshotOf({ status: 'ok', entries: [entry], reason: null }, VERIFIED),
+      CONTEXT,
+      { resolvePidCwd: () => null, sessionKills: [] }
+    );
+    const report = formatEnvCleanReport(diff);
+
+    expect(diff.status).toBe('violated');
+    expect(noteUnder(report, '+')).toContain('shape not checked (snapshot predates #4406) — counted');
+  });
+
+  it('N5: a config that existed at task start and is gone is VIOLATED, with what it held', () => {
+    const home = makeHome();
+    writeFileSync(configPath(home), VALID);
+    const { commandmate, report } = judge(home, () => rmSync(configPath(home)));
+
+    expect(commandmate.removed.map((c) => c.key)).toEqual(['resource.yaml']);
+    expect(noteUnder(report, '-')).toContain(`at task start shape=ok sha256=${sha(VALID).slice(0, 12)}`);
+    expect(envCleanItems(report)).toEqual(['commandmate-entries:-resource.yaml']);
+  });
+
+  it('N6: resource.yaml directly under $HOME is VIOLATED and gets no config note', () => {
+    const home = makeHome();
+    const { diff, report } = judge(home, () => writeFileSync(join(home, 'resource.yaml'), VALID));
+    const homeProbe = diff.probes.find((p) => p.probeId === 'home-entries')!;
+
+    expect(homeProbe.status).toBe('violated');
+    expect(homeProbe.added.map((c) => c.key)).toEqual(['resource.yaml']);
+    expect(report).not.toContain('resource config');
+  });
+
+  it('S1: a config rewritten during the task stays clean (names only) but the change is shown', () => {
+    const home = makeHome();
+    writeFileSync(configPath(home), VALID);
+    const rewritten = VALID.replace('0.5', '1');
+    const { diff, commandmate, report } = judge(home, () => writeFileSync(configPath(home), rewritten));
+
+    expect(diff.status).toBe('clean');
+    expect(commandmate.status).toBe('clean');
+    expect(report).toContain(
+      `    · ~ resource.yaml changed during the task (sha256 ${sha(VALID).slice(0, 12)} → ${sha(rewritten).slice(0, 12)})`
+    );
+    expect(envCleanItems(report)).toEqual([]);
+  });
+
+  it('S1: an unchanged config, or a baseline with no hash, says nothing', () => {
+    const home = makeHome();
+    writeFileSync(configPath(home), VALID);
+    expect(judge(home, () => undefined).report).not.toContain('resource.yaml');
+
+    const unread: EnvEntry = { key: 'resource.yaml', detail: null, anchor: null };
+    const diff = diffEnvSnapshots(
+      snapshotOf({ status: 'ok', entries: [unread], reason: null }, STARTED),
+      snapshotOf(probeCommandmateEntries(deps(home)), VERIFIED),
+      CONTEXT,
+      { resolvePidCwd: () => null, sessionKills: [] }
+    );
+    expect(diff.status).toBe('clean');
+    expect(formatEnvCleanReport(diff)).not.toContain('resource.yaml');
+  });
+
+  it('S3: the gate\'s copy of the reader\'s top-level keys matches resource-config.mjs', () => {
+    const source = readFileSync(join(process.cwd(), 'scripts/orchestrate/resource-config.mjs'), 'utf8');
+    const match = /const TOP_KEYS = new Set\(\[([^\]]*)\]\)/.exec(source);
+    expect(match).not.toBeNull();
+    const keys = [...match![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect([...RESOURCE_CONFIG_TOP_KEYS].sort()).toEqual(keys.sort());
+  });
+
+  it('reads with O_NOFOLLOW and fstat on the same fd: a symlink is refused, a regular file is read', () => {
+    const home = makeHome();
+    const file = join(home, 'a.yaml');
+    writeFileSync(file, VALID);
+    symlinkSync(file, join(home, 'link.yaml'));
+
+    expect(readRegularFileNoFollow(file, RESOURCE_CONFIG_MAX_BYTES).toString('utf8')).toBe(VALID);
+    expect(() => readRegularFileNoFollow(join(home, 'link.yaml'), RESOURCE_CONFIG_MAX_BYTES)).toThrow(
+      'a symlink (not followed)'
+    );
+    expect(() => readRegularFileNoFollow(join(home, 'missing.yaml'), RESOURCE_CONFIG_MAX_BYTES)).toThrow(
+      'cannot open (ENOENT)'
+    );
   });
 });
