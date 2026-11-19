@@ -118,7 +118,7 @@ describe('item 2: 全体実行に広がる unit-related', () => {
 
   it('notes a contract that runs unit-related, and no other', () => {
     const base = { issue: 1, title: 't', kind: 'feature', agent: 'claude', model: 'opus' };
-    expect(fullUnitNote(normalizeConfig({ ...base, scope: ['docs/**'] }))).toContain('under "docs/**"');
+    expect(fullUnitNote(normalizeConfig({ ...base, scope: ['docs/**'] }))).toContain('scope "docs/**" reaches files outside src/ and tests/');
     expect(fullUnitNote(normalizeConfig({ ...base, scope: ['src/lib/x/**'] }))).toBeNull();
     expect(fullUnitNote(normalizeConfig({ ...base, scope: ['docs/**'], gates: ['lint', 'typecheck'] }))).toBeNull();
   });
@@ -128,7 +128,7 @@ describe('item 2: 全体実行に広がる unit-related', () => {
     fs.writeFileSync(config, stringify({ issue: 1, title: 't', kind: 'feature', agent: 'claude', model: 'opus', scope: ['docs/**'] }));
     const result = spawnSync(process.execPath, [path.join(SCRIPTS, 'contract.mjs'), 'generate', '--config', config, '--worktree', tmp, '--stdout'], { encoding: 'utf8' });
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain('contract: note: #1: unit-related runs the whole unit suite');
+    expect(result.stderr).toContain('contract: note: #1: scope "docs/**" reaches files outside src/ and tests/');
     expect(parse(result.stdout).version).toBe(1);
   });
 
@@ -147,7 +147,7 @@ describe('item 2: 全体実行に広がる unit-related', () => {
 
     it('names two items of a wave that can queue on cpu.heavy (positive control)', () => {
       const p = plan([['a', 'b']], [{ id: 'a', contract: 'full-a' }, { id: 'b', contract: 'full-b' }]);
-      expect(notices(p)).toEqual([expect.stringMatching(/^cpu-heavy: wave 1: a \(unit-related, full by docs\/\*\*\), b \(unit-related, full by docs\/\*\*\) can run one at a time/)]);
+      expect(notices(p)).toEqual([expect.stringMatching(/^cpu-heavy: wave 1: a \(unit-related, scope outside src\/tests docs\/\*\*\), b \(unit-related, scope outside src\/tests docs\/\*\*\) can run one at a time/)]);
       expect(checkPlan(p, { baseDir: tmp, load }).violations).toEqual([]);
     });
 
