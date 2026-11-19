@@ -1,10 +1,19 @@
 # release notes
 
+## 0.3.2 — 文言の訂正（CommandMate#4457）
+
+- `--json` の前提: 帰属できないとき（`state` が `matched` 以外）、exit 0 でも `"reply": null` だが、`--json` では stdout に
+  JSON が出る。stdout が空なのは `--json` 無しのとき（CommandMate の `ask` の実装・ガイドで確認）。
+- `capture --pane` の `--tail` を 80 にそろえた（第 5 節の案内と `ask.sh` の案内が 40 だった）。
+- 「帰属できない例」を `state/reason` で挙げ直した: `unavailable/tool_unsupported`・`unavailable/server_unsupported`・
+  `unavailable/slash_command`・`ambiguous/shared_turn`・`ambiguous/turn_open_at_send`・`unmatched/<reason>`。
+  条件は「`matched` 以外」のまま。
+
 ## 0.3.1 — `ask` が返答を依頼の ID で読む版に合わせる（CommandMate#4344 PR3）
 
 **CommandMate 0.52.0 以降**（#4344 PR3 を含む版）、`ask` は返答をこの依頼の ID の帰属でだけ読み、
 画面からは拾わない。`--json` の `source` は `history` / `none` だけになり、帰属できないとき
-（`tool_unsupported`・`server_unsupported`・`ambiguous`・`unmatched`）は exit 0 で `"reply": null`・stdout 空になる。
+（`unavailable`・`ambiguous`・`unmatched`）は exit 0 で `"reply": null` になる（0.3.2 で訂正: `--json` なら stdout に JSON は出る。stdout が空なのは `--json` 無しのとき）。
 
 - 第7節「出典を明示する」を版で分けた。旧来の記述は `source` の `capture` を画面の印としていたが、
   CommandMate 0.32.0〜0.51.2 の実際の値は `pane` である（`capture` は出ない）。
