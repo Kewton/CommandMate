@@ -76,8 +76,8 @@ sharedState:
 
 #4467 から、`unit-related` は手元でテスト全体に切り替わらない。`src/` のコードと `tests/unit`・`tests/helpers` 以外のファイル（`docs/`・`.claude/`・`scripts/` など）が変わっても、変更から辿れるテストとリポのファイルを読む試験（`findTextScanTests` の全件）だけを流し、ログは `mode=related reason=non-source:<ファイル>` になる。全体は CI の `Unit Tests` が見る（ci-merge.md#6-1-1-テスト全体と-unit-related-の分け方）。それでも `unit-related` は `cpu.heavy` で 1 本ずつなので、計画の段階で見分ける:
 
-- `contract.mjs generate` は、#4467 より前なら全体に切り替わっていた scope の契約に `contract: note: #<N>: unit-related runs the whole unit suite when a file under "<pattern>" changes` を stderr へ出す（状態ファイルが無い run でも出る。文面は古いままで、今は全体を流さない。判定は `run-related-unit-tests.mjs` の `classifyChanges` の `full`＝「以前なら全体」の印）
-- `plan-check.mjs check` は、1 つの波で `cpu.heavy` に並びうる item（`unit` / `integration` と、上の `unit-related`）が 2 本以上なら `plan-check: notice: cpu-heavy: wave <id>: …` を stdout へ出す（`--json` は `notices`）。契約の設定が無い item の `unit-related` は、scope が分からないので数えない
+- `contract.mjs generate` は、scope が `src/`・`tests/` の外のファイルに届く契約に `contract: note: #<N>: scope "<pattern>" reaches files outside src/ and tests/ — unit-related runs the related tests plus the repo-reading tests there (mode=related reason=non-source), not the whole suite; …` を stderr へ出す（状態ファイルが無い run でも出る。全体は流さない。判定は `run-related-unit-tests.mjs` の `classifyChanges` の `full`＝「以前なら全体」の印）
+- `plan-check.mjs check` は、1 つの波で `cpu.heavy` に並びうる item（`unit` / `integration` と、上の `unit-related`。後者は `(unit-related, scope outside src/tests <pattern>)` と出る）が 2 本以上なら `plan-check: notice: cpu-heavy: wave <id>: …` を stdout へ出す（`--json` は `notices`）。契約の設定が無い item の `unit-related` は、scope が分からないので数えない
 
 **出たら、plan にその item の順を書く**（波を分けるか、同じ波で先に検証へ入れる順を決める）。`unit-related` の 5400 秒は待ちと実行の両方の上限で、2026-11-04 の run（#4467 より前）では全体実行の 1 本に 2158 秒かかり、前に 3 本並ぶと待ち切りえた。
 
@@ -87,10 +87,11 @@ sharedState:
 
 ### 1-4 全体に広がる item は同じ波に 2 本まで
 
-（#4192。2026-11-06 の run で、検証がテスト全体に広がる item が 4 本同じ波に重なり、2 本が mutex 待ち 5400 秒で SKIP、precheck が 2 回保留になった。）
+（#4192。#4467 より前の 2026-11-06 の run で、検証がテスト全体に広がる item が 4 本同じ波に重なり、2 本が mutex 待ち 5400 秒で SKIP、precheck が 2 回保留になった。）
 
 - 上の `notice: cpu-heavy` / `note:` が出た item（`unit` / `integration` を持つ item を含む）は、**1 つの波に 2 本まで**にする。3 本目からは次の波に送る
-- 2 本の中でも、検証に入れる順（先に入れる 1 本）を plan に書く。全体実行の 1 本が 2158 秒（2026-11-04）かかった実測では、3 本目は待ちだけで 5400 秒に届きうる
+- #4467 の後、`note:` だけが出た item（scope が src・tests の外に届く `unit-related`）は全体を流さず related ＋ リポを読む試験だけを流すので、順の重さは `unit` / `integration` ほどではない。それでも `cpu.heavy` は 1 本ずつで、上限の 2 本は変えない
+- 2 本の中でも、検証に入れる順（先に入れる 1 本）を plan に書く。全体実行の 1 本が 2158 秒（2026-11-04、#4467 より前）かかった実測では、3 本目は待ちだけで 5400 秒に届きうる
 - 並べる数を上げるのは、全体実行の 1 本の実測が短くなったときだけ。`mutexWaitSec` の宣言（待ちの上限を別に持つ）は #4172 で扱う
 
 ## 2-4 経路表と割込み表の書き方
