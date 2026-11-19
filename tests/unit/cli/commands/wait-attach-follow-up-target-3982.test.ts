@@ -83,7 +83,7 @@ describe('[#3982] attach: the capture hints name the target attached to', () => 
       readOnly: true,
       target: commandTargetOf(null, 'claude'),
     }).join('\n');
-    expect(hints).toContain('commandmate capture wt1 --agent claude --pane --tail 60');
+    expect(hints).toContain('commandmate capture wt1 --agent claude --pane --tail 80');
     expect(hints).toContain('commandmate capture wt1 --agent claude --pane --follow');
     expect(hints).not.toContain('<id>');
   });
@@ -92,13 +92,13 @@ describe('[#3982] attach: the capture hints name the target attached to', () => 
     const hints = buildAttachHints('claude', 'wt1', 'mcbd-claude-2-wt1', {
       target: commandTargetOf({ cliToolId: 'claude', instanceId: 'claude-2' }, undefined),
     }).join('\n');
-    expect(hints).toContain('commandmate capture wt1 --instance claude-2 --pane --tail 60');
+    expect(hints).toContain('commandmate capture wt1 --instance claude-2 --pane --tail 80');
     expect(hints).not.toContain('--agent');
   });
 
   it('negative: no target, no target flag', () => {
     const hints = buildAttachHints('claude', 'wt1', 'mcbd-claude-wt1', { target: commandTargetOf(null, undefined) }).join('\n');
-    expect(hints).toContain('commandmate capture wt1 --pane --tail 60');
+    expect(hints).toContain('commandmate capture wt1 --pane --tail 80');
     expect(hints).not.toContain('--instance');
     expect(hints).not.toContain('--agent');
   });

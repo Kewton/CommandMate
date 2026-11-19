@@ -909,6 +909,23 @@ function validateSendModel(options: SendOptions, agent: string | undefined): voi
 }
 
 /**
+ * Issue #4473: a 400 on a send that carried `--model` says why. The shared 400 line is
+ * "Bad request. Check your input parameters.", which cannot tell a running session (the
+ * model is a launch flag) from a bad value. Only this command reads the body: the shared
+ * classifier is every command's.
+ *
+ * Exits with the code the shared handler would have used; returns when there is no reason to add.
+ */
+export function reportModelRefusal(error: unknown, options: { model?: string }): void {
+  if (!options.model || !(error instanceof ApiError) || error.statusCode !== 400) return;
+  const reason = error.payload?.error;
+  if (typeof reason !== 'string' || reason.trim() === '') return;
+  console.error(`Error: ${error.message}`);
+  console.error(`Server: ${reason.trim()}`);
+  process.exit(error.exitCode);
+}
+
+/**
  * The `--expect-*` flags as the `/send` field that carries them to the last check
  * before the first key, or undefined when none was given (Issue #4116).
  */
@@ -1031,6 +1048,8 @@ export function createSendCommand(): Command {
       '--model <model>',
       'Specify AI model for a Copilot, Antigravity or Claude agent. For Antigravity and Claude it is a launch'
         + ' flag: it applies only when this send starts the session, and a running session answers 400'
+        + ' (the server\'s reason is printed). Claude takes an alias such as opus or sonnet, or a full model id'
+        + ' such as claude-opus-4-1'
     )
     .option('--auto-yes', 'Enable auto-yes before sending (session-wide, no policy guard; for unattended runs prefer --contract with an autoYes policy)')
     .option('--auto-yes-answer-mode <mode>', `With --auto-yes: ${ANSWER_MODE_OPTION_DESCRIPTION}`)
@@ -1489,6 +1508,7 @@ tool policy (antigravity, above; nothing typed, do not send it again).
           return;
         }
         flushClientWarnings();
+        reportModelRefusal(error, options);
         handleCommandError(error);
       }
     });

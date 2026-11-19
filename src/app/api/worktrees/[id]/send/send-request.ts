@@ -102,6 +102,12 @@ export interface SendMessageRequest extends SendRoleRequest {
 }
 
 /** Issue #4344: the 400 for a malformed `ask`. */
+/**
+ * What a claude `--model` takes (Issue #4473): an alias or a full id. Said in the 400s about the
+ * value, so a caller can tell "this value is wrong" from "a running session cannot take one".
+ */
+export const CLAUDE_MODEL_EXAMPLES = 'Accepted values: an alias such as opus or sonnet, or a full model id such as claude-opus-4-1.';
+
 export const ASK_FIELD_INVALID = 'ask must be { id: <uuid>, protocol: 1 }';
 
 /** Issue #4344: whether the body's `ask` is well formed (absent is). */
@@ -348,7 +354,7 @@ export function validateSendModel(
         : validateCopilotModelName(model);
     if (!modelValidation.valid) {
       return NextResponse.json(
-        { error: `Invalid model name: ${modelValidation.reason}` },
+        { error: `Invalid model name: ${modelValidation.reason}${cliToolId === 'claude' ? `. ${CLAUDE_MODEL_EXAMPLES}` : ''}` },
         { status: 400 }
       );
     }

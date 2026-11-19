@@ -29,7 +29,7 @@ import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import type { ClaudeTool } from '@/lib/cli-tools/claude';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
-import type { SendStep } from './send-request';
+import { CLAUDE_MODEL_EXAMPLES, type SendStep } from './send-request';
 
 const logger = createLogger('api/send');
 
@@ -66,7 +66,7 @@ export function refuseModelOnRunningSession(
   // changed when nothing did.
   if (model && cliToolId === 'claude' && running) {
     return NextResponse.json(
-      { error: 'Claude model can only be set when starting a new session. Stop the current Claude session and resend with --model to switch models.' },
+      { error: `Claude model can only be set when starting a new session. Stop the current Claude session and resend with --model to switch models. ${CLAUDE_MODEL_EXAMPLES}` },
       { status: 400 }
     );
   }
