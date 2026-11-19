@@ -16,6 +16,7 @@ import {
   parsePmSendArgs,
   type PmSendDeps,
   type SpawnResult,
+  type TargetApi,
 } from '../../../../scripts/orchestrate/pm-send-main';
 import { main as reserveMain, type Exec } from '../../../../scripts/agent-health/claude3-reserve-main';
 import { pmRelayFlags, pmSendArgv, sendArgv } from '@/lib/agent-health/dispatch';
@@ -25,6 +26,8 @@ let root: string;
 let execCalls: Array<[string, string[]]>;
 let spawnCalls: Array<[string, string[]]>;
 let worktreeCalls: string[];
+/** pm-send's own instance resolutions on its endpoint: [worktree id, selector]. */
+let resolveCalls: Array<[string, string]>;
 /** Former worktree ids and what the server makes of them (`GET /api/worktrees/:id` → `id`). */
 let formerIds: Record<string, string>;
 let reserveCalls: Array<[string, string[]]>;
@@ -39,6 +42,7 @@ beforeEach(() => {
   execCalls = [];
   spawnCalls = [];
   worktreeCalls = [];
+  resolveCalls = [];
   formerIds = { 'mcbd-old': 'mycodebranchdesk', 'wt-x-old': 'wt-x' };
   reserveCalls = [];
   err = [];
@@ -49,14 +53,40 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+const toolOf = (instanceId: string) => (instanceId === 'codex' ? 'codex' : 'claude');
+const PATHS: Record<string, string> = { mycodebranchdesk: '/repo/mcbd', 'wt-x': '/repo/wt-x' };
+
+/** The CLI's own check of the target (`reply --json`, `ls --json`), on the same fake server. */
 const exec: Exec = (command, args) => {
   execCalls.push([command, [...args]]);
   if (command === 'commandmate' && args[0] === 'reply') {
     const id = roster[args[3]];
-    return id ? { status: 0, stdout: JSON.stringify({ instanceId: id, reply: null }) } : { status: 2, stdout: '' };
+    return id
+      ? { status: 0, stdout: JSON.stringify({ worktreeId: args[1], instanceId: id, cliToolId: toolOf(id), reply: null }) }
+      : { status: 2, stdout: '' };
+  }
+  if (command === 'commandmate' && args[0] === 'ls') {
+    return { status: 0, stdout: JSON.stringify(Object.entries(PATHS).map(([id, p]) => ({ id, path: p }))) };
   }
   return { status: null, stdout: '' };
 };
+
+/** pm-send's own reads (`GET /api/worktrees/:id`, `…/resolve-target`) on the same fake server. */
+const api: TargetApi = {
+  worktree: async (id) => {
+    worktreeCalls.push(id);
+    if (id === 'gone') return { error: 'HTTP 404' };
+    const current = formerIds[id] ?? id;
+    return { id: current, path: PATHS[current] ?? `/repo/${current}` };
+  },
+  resolveTarget: async (worktreeId, selector) => {
+    resolveCalls.push([worktreeId, selector]);
+    const id = roster[selector];
+    return id ? { instanceId: id, cliToolId: toolOf(id) } : { error: 'HTTP 404' };
+  },
+};
+
+const endpoint = () => ({ url: 'http://127.0.0.1:3011', env: { CM_PORT: '3011' } });
 
 /** The reservation side's commandmate (ls for reserve, send for the send). */
 const reserveExec: Exec = (command, args) => {
@@ -90,11 +120,9 @@ const reserveDeps = () => ({
 function run(argv: string[], status = 0): Promise<number> {
   const deps: Partial<PmSendDeps> = {
     exec,
-    resolveWorktree: async (id) => {
-      worktreeCalls.push(id);
-      if (id === 'gone') return { error: 'HTTP 404' };
-      return formerIds[id] ?? id;
-    },
+    endpoint,
+    api: () => api,
+    pinEnv: () => {},
     spawn: (command, args) => {
       spawnCalls.push([command, [...args]]);
       return { status };
@@ -108,6 +136,7 @@ function run(argv: string[], status = 0): Promise<number> {
 const reserveSends = () => reserveCalls.filter(([, a]) => a[0] === 'send').map(([, a]) => a);
 const nothingRan = () => {
   expect(worktreeCalls).toEqual([]);
+  expect(resolveCalls).toEqual([]);
   expect(execCalls).toEqual([]);
   expect(spawnCalls).toEqual([]);
   expect(reserveCalls).toEqual([]);
@@ -147,10 +176,11 @@ describe('pm-send: what is sent (positive control)', () => {
   it('always adds --reply-to self --note <note>', async () => {
     expect(await run(['wt-x', '--instance', 'codex', '--note', '設計レビューの DONE:', 'レビューして'])).toBe(0);
     expect(spawnCalls).toEqual([
-      ['commandmate', ['send', 'wt-x', 'レビューして', '--instance', 'codex', '--reply-to', 'self', '--note', '設計レビューの DONE:']],
+      ['commandmate', ['send', 'wt-x', '--instance', 'codex', '--reply-to', 'self', '--note', '設計レビューの DONE:', '--', 'レビューして']],
     ]);
-    // Another worktree has no claude-3: nothing is resolved.
-    expect(execCalls).toEqual([]);
+    // I3': every target is resolved and, right before the send, checked by the CLI too.
+    expect(resolveCalls).toEqual([['wt-x', 'codex'], ['wt-x', 'codex']]);
+    expect(execCalls.map(([, a]) => a[0])).toEqual(['ls', 'reply']);
   });
 
   it('returns commandmate send\'s exit as it is', async () => {
@@ -160,9 +190,9 @@ describe('pm-send: what is sent (positive control)', () => {
 
   it('a non-claude-3 instance of mycodebranchdesk is resolved, then sent plainly with the relay', async () => {
     expect(await run(['mycodebranchdesk', '--instance', 'claude-2', '--note', 'UAT の DONE:', 'UAT して'])).toBe(0);
-    expect(execCalls.map(([, a]) => a[0])).toEqual(['reply']);
+    expect(execCalls.map(([, a]) => a[0])).toEqual(['ls', 'reply']);
     expect(spawnCalls[0][1]).toEqual([
-      'send', 'mycodebranchdesk', 'UAT して', '--instance', 'claude-2', '--reply-to', 'self', '--note', 'UAT の DONE:',
+      'send', 'mycodebranchdesk', '--instance', 'claude-2', '--reply-to', 'self', '--note', 'UAT の DONE:', '--', 'UAT して',
     ]);
   });
 
@@ -216,7 +246,7 @@ describe('pm-send: the rule and the send use the same resolved target (Codex P2-
     expect(spawnCalls).toEqual([]);
     expect(reserveSends()).toEqual([]);
     // The instance was resolved against the current id, not the former one.
-    expect(execCalls.map(([, a]) => a[1])).toEqual(['mycodebranchdesk', 'mycodebranchdesk']);
+    expect(resolveCalls.map(([wt]) => wt)).toEqual(['mycodebranchdesk', 'mycodebranchdesk']);
   });
 
   it('positive control: a former id with PM\'s token goes through the reservation', async () => {
@@ -233,7 +263,7 @@ describe('pm-send: the rule and the send use the same resolved target (Codex P2-
   it('the send names the resolved worktree and instance, not what PM typed', async () => {
     expect(await run(['mcbd-old', '--instance', 'reviewer', '--note', 'n', 'UAT して'])).toBe(0);
     expect(spawnCalls).toEqual([
-      ['commandmate', ['send', 'mycodebranchdesk', 'UAT して', '--instance', 'claude-2', '--reply-to', 'self', '--note', 'n']],
+      ['commandmate', ['send', 'mycodebranchdesk', '--instance', 'claude-2', '--reply-to', 'self', '--note', 'n', '--', 'UAT して']],
     ]);
     // An alias that changes after the check cannot redirect the send: the argv carries no alias.
     roster.reviewer = 'claude-3';
@@ -322,7 +352,9 @@ describe('pm-send after the relay pace ceiling (#4418 after #4420)', () => {
   function runWith(answer: SpawnResult, extra: Partial<PmSendDeps> = {}, argv = ['wt-x', '--instance', 'codex', '--note', 'n', '次の依頼']) {
     return main(argv, {
       exec,
-      resolveWorktree: async (id) => formerIds[id] ?? id,
+      endpoint,
+      api: () => api,
+      pinEnv: () => {},
       spawn: (command, args) => {
         spawnCalls.push([command, [...args]]);
         return answer;
@@ -363,6 +395,20 @@ describe('pm-send after the relay pace ceiling (#4418 after #4420)', () => {
     expect(await runWith({ status: 0 })).toBe(0);
     expect(spawnCalls).toHaveLength(4);
     expect(err).not.toContain(RELAY_ROUNDS_REFUSED_NOTICE);
+  });
+
+  it('(Codex P3-1) the line is added only for exit 2 with the whole refusal line, not for a fragment or another exit', async () => {
+    const line = refusalLine(MAX_RELAY_ROUNDS).stderr.trim();
+    const fragment = line.replace(/^Error: /, '');
+    expect(await runWith({ status: 1, stderr: `${line}\n` })).toBe(1);
+    expect(await runWith({ status: 2, stderr: `Error: upstream said: ${fragment}\n` })).toBe(2);
+    expect(await runWith({ status: 2, stderr: `Warning: ${fragment}\nError: something else\n` })).toBe(2);
+    expect(err).not.toContain(RELAY_ROUNDS_REFUSED_NOTICE);
+    // positive control: the same line, alone on its line, with exit 2 (other lines around it are fine)
+    expect(await runWith({ status: 2, stderr: `Relay ...\n${line}\n` })).toBe(2);
+    expect(err.filter((l) => l === RELAY_ROUNDS_REFUSED_NOTICE)).toHaveLength(1);
+    expect(isRelayRoundsRefusal(`${line}\n`)).toBe(true);
+    expect(isRelayRoundsRefusal(`Error: upstream said: ${fragment}`)).toBe(false);
   });
 
   it('claude-3 under the reservation: the same refusal gives the same line, and nothing more is sent', async () => {

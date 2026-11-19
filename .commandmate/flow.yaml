@@ -10,8 +10,8 @@ wip:
 # the judge claude-2 and the dev leader claude-3). A request there with no relay, a relay pending
 # pendingMinutes with the receiver's screen unchanged screenMinutes, and a held or expired relay
 # are recorded under <flowDir>/<slug>/relay-watch/; the last two are told to the PM's composer once.
-# notifyNoRelay: a request with no relay is told too. It was recorded only until #4420 (the relay
-# fix) landed; with #4420 the PM sends through pm-send (always a relay), so it is back on (design §5.1).
+# notifyNoRelay: a request with no relay is recorded only, not told, until #4420 (the relay fix)
+# lands; the PM sends plain send for now. After #4420, set it to true here (design §5.1).
 relayWatch:
   pm: { worktreeId: mycodebranchdesk, instanceId: claude }
   receivers:
@@ -19,4 +19,4 @@ relayWatch:
     - { worktreeId: mycodebranchdesk, instanceId: claude-3 }
   pendingMinutes: 60
   screenMinutes: 20
-  notifyNoRelay: true
+  notifyNoRelay: false

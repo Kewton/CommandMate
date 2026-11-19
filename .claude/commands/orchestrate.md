@@ -1204,7 +1204,7 @@ grep '^| `' docs/module-reference.md | cut -d'|' -f2 | sort | uniq -d
 
 ## Phase 7: UAT（--full時のみ）
 
-体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送り、結果はジャッジ→PM→開発リーダーの順で返る。PM は `pm-send.ts` で送る（team.md §3）。7-2 の修正ループは開発リーダーが回す。1 人で回す場合は以下のまま。受け入れは 1 回にまとめて並行（§9）。根拠: docs/orchestrate/team.md#5-uat-の結果の返し方phase-7
+体制では UAT の依頼は PM がジャッジ（`claude-2`）へ送り、結果はジャッジ→PM→開発リーダーの順で返る。7-2 の修正ループは開発リーダーが回す。1 人で回す場合は以下のまま。受け入れは 1 回にまとめて並行（§9）。根拠: docs/orchestrate/team.md#5-uat-の結果の返し方phase-7
 
 ### 7-1. 受入テスト実行
 

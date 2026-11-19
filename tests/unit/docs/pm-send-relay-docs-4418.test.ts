@@ -35,10 +35,13 @@ describe('docs/design/pm-send-relay-4418.md after #4420', () => {
     expect(s).not.toMatch(/今の `pm-send` は付けないので、\*\*返事を受けた後の 2 回目の送信で止まる/);
   });
 
-  it('the relay watch tells check 1 again (flow-relay-watch-4418.md §5.1)', () => {
+  it('the relay watch stays record-only after #4420, with why, until #4517 (flow-relay-watch-4418.md §5.1)', () => {
     const watch = read('docs/design/flow-relay-watch-4418.md');
-    expect(watch).toMatch(/戻した（#4418 レーン a、#4420 の後）/);
-    expect(read('.commandmate/flow.yaml')).toMatch(/^  notifyNoRelay: true$/m);
+    expect(watch).toMatch(/#4420 の後も `false` のまま/);
+    expect(watch).toContain('#4517');
+    expect(watch).toMatch(/毎朝の自動依頼/);
+    expect(watch).toMatch(/照会できなかった/);
+    expect(read('.commandmate/flow.yaml')).toMatch(/^  notifyNoRelay: false$/m);
   });
 });
 
@@ -46,7 +49,8 @@ describe('request templates (#4418)', () => {
   it('orchestrate.md names the rule and the entry, within the size limit', () => {
     const o = read('.claude/commands/orchestrate.md');
     expect(o).toContain('最後の行は `DONE:` / `WAIT:`（了承・判断待ち）/ `STOP:` のどれか');
-    expect(section(o, '## Phase 7: UAT')).toContain('PM は `pm-send.ts` で送る（team.md §3）');
+    // Phase 7 is develop's as it is (claude-8's §7; team.md §3 says how PM sends).
+    expect(section(o, '## Phase 7: UAT')).not.toContain('pm-send.ts');
     expect(section(o, '## Phase 4: 設計突合')).toContain('最後の行は DONE: / WAIT: / STOP: のどれか'); // 4-3 の修正指示
     expect(Buffer.byteLength(o, 'utf8')).toBeLessThanOrEqual(118_000);
   });

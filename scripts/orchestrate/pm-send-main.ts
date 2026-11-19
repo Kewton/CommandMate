@@ -13,13 +13,22 @@
  *
  * claude-3 of `mycodebranchdesk` is sent to only under PM's reservation
  * (docs/orchestrate/team.md §4): such a send needs `--token` and goes through
- * `claude3-reserve.ts send`, which adds the same relay. The worktree id is
- * made current first (a former id of mycodebranchdesk is mycodebranchdesk,
- * through the server's `GET /api/worktrees/:id`), and on mycodebranchdesk the
- * selector is resolved (an alias of claude-3 is claude-3), so the rule does not
- * depend on how either is named. The send goes to the RESOLVED pair — the one
- * the rule was checked against — never to the strings PM typed. Either
- * resolution failing sends nothing (exit 2).
+ * `claude3-reserve.ts send`, which adds the same relay.
+ *
+ * One server, one target (I3'): the endpoint is resolved once (the CLI's own
+ * `loadClientEnv` → `resolveServerEndpoint`) and pinned for every child
+ * `commandmate` (CM_PORT / CM_BIND / CM_HTTPS_CERT / CM_HTTPS_KEY exported, so a
+ * CLI that reads another .env still dials this one). On it, the worktree is made
+ * current (`GET /api/worktrees/:id`: a former id of mycodebranchdesk is
+ * mycodebranchdesk) and the selector resolved (`GET …/resolve-target`: an alias
+ * of claude-3 is claude-3) — for every target, so the claude-3 rule does not
+ * depend on how either is named. Right before the send the resolved ids are
+ * checked again, by pm-send on the endpoint and by the CLI itself
+ * (`commandmate reply … --json`, `commandmate ls --json`): the same worktree row
+ * (id and path) and the id resolving to itself with the same tool. Anything else
+ * — a row gone and its id now another instance's alias, a CLI on another
+ * server, a read that fails — sends nothing (exit 2). The message goes after
+ * `--`, so one that starts with "-" is the message, not an option.
  *
  * Asking again after an answer goes through (#4420: a reply to PM's own relay is
  * not a chain parent). What stops it is the pace ceiling: PM that received
@@ -34,6 +43,8 @@
 
 import { spawn as spawnChild, spawnSync } from 'child_process';
 import { ApiClient } from '@/cli/utils/api-client';
+import { loadClientEnv, resolveServerEndpoint } from '@/cli/utils/server-url';
+import { isUatIsolationEnabled } from '@/config/uat-isolation';
 import { DISPATCH_INSTANCE_ID, DISPATCH_WORKTREE_ID, pmRelayFlags } from '@/lib/agent-health/dispatch';
 import { MAX_RELAY_ROUNDS, RELAY_ROUNDS_WINDOW_MS } from '@/lib/relay/relay-policy';
 import { main as reserveMain, type Exec, type ReserveDeps } from '../agent-health/claude3-reserve-main';
@@ -55,11 +66,40 @@ export type ReserveSpawn = (
   onChild?: (pid: number) => void
 ) => Promise<{ status: number | null; stdout: string; stderr: string }>;
 
+/** The one server pm-send and its children talk to (I3'). */
+export interface Endpoint {
+  url: string;
+  /** Exported to every child `commandmate`, so it dials `url` whatever .env it would read. */
+  env: Record<string, string>;
+}
+
+/** A resolved target, as the server states it. */
+export interface ResolvedWorktree {
+  id: string;
+  path: string;
+}
+export interface ResolvedInstance {
+  instanceId: string;
+  cliToolId: string;
+}
+
+/** pm-send's own reads, on the pinned endpoint. */
+export interface TargetApi {
+  /** `GET /api/worktrees/:id`: a former id answers with the current worktree. */
+  worktree: (worktreeId: string) => Promise<ResolvedWorktree | { error: string }>;
+  /** `GET /api/worktrees/:id/resolve-target?instance=`: a row's id first, then a tool id, then an alias. */
+  resolveTarget: (worktreeId: string, selector: string) => Promise<ResolvedInstance | { error: string }>;
+}
+
 export interface PmSendDeps {
-  /** A captured run (only the instance resolution uses it). */
+  /** A captured `commandmate` run (the CLI's own check of the target). */
   exec: Exec;
-  /** The current id of a worktree id (a former id maps to its worktree's current one). */
-  resolveWorktree: (worktreeId: string) => Promise<string | { error: string }>;
+  /** The endpoint to pin, or why it cannot be named. */
+  endpoint: () => Endpoint | { error: string };
+  /** pm-send's reads on that endpoint. */
+  api: (endpoint: Endpoint) => TargetApi;
+  /** Pin the endpoint for every child that follows (production: into process.env). */
+  pinEnv: (env: Record<string, string>) => void;
   /** The send itself. */
   spawn: Spawn;
   stderr: (line: string) => void;
@@ -73,7 +113,11 @@ export interface PmSendDeps {
 }
 
 export const PM_SEND_USAGE = [
-  'Usage: npx tsx scripts/orchestrate/pm-send.ts <worktree-id> --instance <id> --note "<what you wait for>" [--token <t>] "<message>"',
+  'Usage: npx tsx scripts/orchestrate/pm-send.ts <worktree-id> --instance <id> --note "<what you wait for>" [--token <t>] [--] "<message>"',
+  '',
+  '  A message that starts with "-" goes after --. It is sent after -- too (claude-3: not possible, exit 2).',
+  '  The target is resolved and checked on one server (the endpoint is pinned for commandmate);',
+  '  if it cannot be confirmed to be the same row right before the send, nothing is sent (exit 2).',
   '',
   '  Always sends with --reply-to self --note <s>: the answer comes back to your composer when the',
   '  target\'s turn ends. No --note (or an empty one): exit 2, nothing sent.',
@@ -91,8 +135,13 @@ export const PM_SEND_USAGE = [
  * message, not its code (`registerRelay` in src/cli/commands/relays.ts), so the message is read.
  */
 export function isRelayRoundsRefusal(stderr: string | undefined): boolean {
-  return typeof stderr === 'string' && /replies to its relays in the last \d+ minutes; the limit is \d+/.test(stderr);
+  if (typeof stderr !== 'string') return false;
+  return stderr.split(/\r?\n/).some((line) => RELAY_ROUNDS_REFUSAL_LINE.test(line));
 }
+
+/** The whole line `registerRelay` prints for the pace refusal (relay-policy's message after `Error: `). */
+const RELAY_ROUNDS_REFUSAL_LINE =
+  /^Error: This session received \d+ replies to its relays in the last \d+ minutes; the limit is \d+\. Wait before opening another \(the count clears as replies age out\)\.$/;
 
 /** What pm-send adds after the pace refusal: nothing was sent, no plain send follows, wait or hand back. */
 export const RELAY_ROUNDS_REFUSED_NOTICE =
@@ -119,6 +168,11 @@ export function parsePmSendArgs(argv: readonly string[]): PmSendParse {
   const VALUED = ['--instance', '--note', '--token'];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    // Everything after `--` is positional: a message may start with "-".
+    if (arg === '--') {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
     if (arg === '-h' || arg === '--help') return { ok: false, error: PM_SEND_USAGE, help: true };
     if (VALUED.includes(arg)) {
       const value = argv[++i];
@@ -145,9 +199,9 @@ export function parsePmSendArgs(argv: readonly string[]): PmSendParse {
   };
 }
 
-/** argv of the plain send (any target but claude-3). */
+/** argv of the plain send (any target but claude-3). The message after `--`, so "-h" is a message. */
 export function pmSendCommandArgv(command: Pick<PmSendCommand, 'worktreeId' | 'instance' | 'note' | 'message'>): string[] {
-  return ['send', command.worktreeId, command.message, '--instance', command.instance, ...pmRelayFlags(command.note)];
+  return ['send', command.worktreeId, '--instance', command.instance, ...pmRelayFlags(command.note), '--', command.message];
 }
 
 const defaultExec: Exec = (command, args) => {
@@ -210,37 +264,133 @@ const defaultSpawn: Spawn = async (command, args) => {
 
 const defaultReserveSpawn: ReserveSpawn = (command, args, onChild) => teeRun(command, args, true, onChild);
 
-/** `GET /api/worktrees/:id` answers with the worktree, whose `id` is the current one (Issue #1621). */
-const defaultResolveWorktree: PmSendDeps['resolveWorktree'] = async (worktreeId) => {
+/** The CLI's own endpoint resolution, once; its keys are what every child is pinned to. */
+const defaultEndpoint: PmSendDeps['endpoint'] = () => {
   try {
-    const worktree = await new ApiClient().get<{ id?: unknown }>(`/api/worktrees/${encodeURIComponent(worktreeId)}`);
-    if (typeof worktree.id === 'string' && worktree.id !== '') return worktree.id;
-    return { error: 'no id in the answer' };
+    if (isUatIsolationEnabled() && !process.env.CM_PORT) return { error: 'CM_UAT_ISOLATION without CM_PORT' };
+    const env = loadClientEnv();
+    const endpoint = resolveServerEndpoint(env);
+    return {
+      url: endpoint.url,
+      env: {
+        CM_PORT: String(endpoint.port),
+        CM_BIND: endpoint.bind,
+        // An empty value is "not set" to the CLI and wins over its .env.
+        CM_HTTPS_CERT: env.CM_HTTPS_CERT ?? '',
+        CM_HTTPS_KEY: env.CM_HTTPS_KEY ?? '',
+      },
+    };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
 };
 
+const errorOf = (error: unknown): { error: string } => ({ error: error instanceof Error ? error.message : String(error) });
+
+const defaultApi: PmSendDeps['api'] = (endpoint) => {
+  const client = new ApiClient({ baseUrl: endpoint.url });
+  return {
+    worktree: async (worktreeId) => {
+      try {
+        const worktree = await client.get<{ id?: unknown; path?: unknown }>(`/api/worktrees/${encodeURIComponent(worktreeId)}`);
+        if (typeof worktree.id === 'string' && worktree.id !== '' && typeof worktree.path === 'string') {
+          return { id: worktree.id, path: worktree.path };
+        }
+        return { error: 'no id or path in the answer' };
+      } catch (error) {
+        return errorOf(error);
+      }
+    },
+    resolveTarget: async (worktreeId, selector) => {
+      try {
+        const answer = await client.get<{ instanceId?: unknown; cliToolId?: unknown; conflict?: unknown }>(
+          `/api/worktrees/${encodeURIComponent(worktreeId)}/resolve-target?instance=${encodeURIComponent(selector)}`
+        );
+        if (answer.conflict) return { error: 'the roster and the instance disagree (conflict)' };
+        if (typeof answer.instanceId === 'string' && answer.instanceId !== '' && typeof answer.cliToolId === 'string') {
+          return { instanceId: answer.instanceId, cliToolId: answer.cliToolId };
+        }
+        return { error: 'no instance in the answer' };
+      } catch (error) {
+        return errorOf(error);
+      }
+    },
+  };
+};
+
+const defaultPinEnv: PmSendDeps['pinEnv'] = (env) => {
+  Object.assign(process.env, env);
+};
+
 function defaultDeps(): PmSendDeps {
   return {
     exec: defaultExec,
-    resolveWorktree: defaultResolveWorktree,
+    endpoint: defaultEndpoint,
+    api: defaultApi,
+    pinEnv: defaultPinEnv,
     spawn: defaultSpawn,
     stderr: (line) => process.stderr.write(`[pm-send] ${line}\n`),
   };
 }
 
-/** The instance id behind a selector of mycodebranchdesk, through the CLI's own resolution. */
-function resolveInstance(deps: PmSendDeps, worktreeId: string, selector: string): string | { error: string } {
-  const result = deps.exec('commandmate', ['reply', worktreeId, '--instance', selector, '--since', REPLY_SINCE_NEVER, '--json']);
+/** The CLI's own answer for a target (`reply --json` resolves `--instance` the way `send` does). */
+function cliResolves(deps: PmSendDeps, worktreeId: string, instanceId: string): ResolvedInstance & { worktreeId: string } | { error: string } {
+  const result = deps.exec('commandmate', ['reply', worktreeId, '--instance', instanceId, '--since', REPLY_SINCE_NEVER, '--json']);
   if (result.status !== 0) return { error: `commandmate reply exit ${String(result.status)}` };
   try {
-    const answer = JSON.parse(result.stdout) as { instanceId?: unknown };
-    if (typeof answer.instanceId === 'string' && answer.instanceId !== '') return answer.instanceId;
+    const answer = JSON.parse(result.stdout) as { worktreeId?: unknown; instanceId?: unknown; cliToolId?: unknown };
+    if (typeof answer.worktreeId === 'string' && typeof answer.instanceId === 'string' && typeof answer.cliToolId === 'string') {
+      return { worktreeId: answer.worktreeId, instanceId: answer.instanceId, cliToolId: answer.cliToolId };
+    }
   } catch {
     // fall through
   }
   return { error: `no instance in the answer: ${result.stdout.trim()}` };
+}
+
+/** The worktree row the CLI's server has under this id (`ls --json`). */
+function cliWorktreeRow(deps: PmSendDeps, worktreeId: string): ResolvedWorktree | { error: string } {
+  const result = deps.exec('commandmate', ['ls', '--json']);
+  if (result.status !== 0) return { error: `commandmate ls exit ${String(result.status)}` };
+  try {
+    const rows = JSON.parse(result.stdout) as unknown;
+    if (Array.isArray(rows)) {
+      const row = rows.find((r: { id?: unknown }) => r && r.id === worktreeId) as { id: string; path?: unknown } | undefined;
+      if (!row) return { error: `no worktree ${worktreeId}` };
+      if (typeof row.path === 'string') return { id: row.id, path: row.path };
+    }
+  } catch {
+    // fall through
+  }
+  return { error: 'no worktree path in the answer' };
+}
+
+/**
+ * Right before the send (I3'): the checked worktree and instance are still the same rows, on
+ * pm-send's endpoint and as the CLI that sends sees them. Null when they are; else why not.
+ */
+async function confirmTarget(
+  deps: PmSendDeps,
+  api: TargetApi,
+  worktree: ResolvedWorktree,
+  instance: ResolvedInstance
+): Promise<string | null> {
+  const same = (a: ResolvedInstance, b: ResolvedInstance): boolean => a.instanceId === b.instanceId && a.cliToolId === b.cliToolId;
+  const again = await api.worktree(worktree.id);
+  if ('error' in again) return `worktree ${worktree.id} を読み直せない（${again.error}）`;
+  if (again.id !== worktree.id || again.path !== worktree.path) return `worktree ${worktree.id} が判定した行と違う（${again.id} ${again.path}）`;
+  const resolvedAgain = await api.resolveTarget(worktree.id, instance.instanceId);
+  if ('error' in resolvedAgain) return `${instance.instanceId} を読み直せない（${resolvedAgain.error}）`;
+  if (!same(resolvedAgain, instance)) return `${instance.instanceId} が判定した行と違う（今は ${resolvedAgain.instanceId} / ${resolvedAgain.cliToolId}）`;
+  const row = cliWorktreeRow(deps, worktree.id);
+  if ('error' in row) return `commandmate から worktree ${worktree.id} を確かめられない（${row.error}）`;
+  if (row.path !== worktree.path) return `commandmate の接続先の worktree ${worktree.id} が別の行（${row.path}。判定は ${worktree.path}）`;
+  const cli = cliResolves(deps, worktree.id, instance.instanceId);
+  if ('error' in cli) return `commandmate から ${instance.instanceId} を確かめられない（${cli.error}）`;
+  if (cli.worktreeId !== worktree.id || !same(cli, instance)) {
+    return `commandmate では ${instance.instanceId} が別の宛先（${cli.worktreeId} / ${cli.instanceId} / ${cli.cliToolId}）`;
+  }
+  return null;
 }
 
 export async function main(argv: readonly string[], overrides: Partial<PmSendDeps> = {}): Promise<number> {
@@ -256,32 +406,50 @@ export async function main(argv: readonly string[], overrides: Partial<PmSendDep
   }
   const command = parsed.command;
 
+  // One server for everything below (I3'): pinned before any child runs.
+  const endpoint = deps.endpoint();
+  if ('error' in endpoint) {
+    deps.stderr(`接続先を決められなかった（${endpoint.error}）。何も送っていない`);
+    return 2;
+  }
+  deps.pinEnv(endpoint.env);
+  const api = deps.api(endpoint);
+
   // The current worktree id: a former id of mycodebranchdesk must meet the same rule (Codex P2-1).
-  const worktreeId = await deps.resolveWorktree(command.worktreeId);
-  if (typeof worktreeId !== 'string') {
-    deps.stderr(`worktree ${command.worktreeId} を解決できなかった（${worktreeId.error}）。何も送っていない`);
+  const worktree = await api.worktree(command.worktreeId);
+  if ('error' in worktree) {
+    deps.stderr(`worktree ${command.worktreeId} を解決できなかった（${worktree.error}）。何も送っていない`);
+    return 2;
+  }
+  // The instance id behind the selector (an alias of claude-3 is claude-3); the send names this id (Codex P2-2).
+  const instance = await api.resolveTarget(worktree.id, command.instance);
+  if ('error' in instance) {
+    deps.stderr(`--instance ${command.instance} を解決できなかった（${instance.error}）。何も送っていない`);
+    return 2;
+  }
+  const worktreeId = worktree.id;
+  const toClaude3 = worktreeId === DISPATCH_WORKTREE_ID && instance.instanceId === DISPATCH_INSTANCE_ID;
+
+  if (toClaude3 && !command.token) {
+    deps.stderr('claude-3 へは予約の token が要る（claude3-reserve.ts reserve → --token。docs/orchestrate/team.md §4）。何も送っていない');
+    return 2;
+  }
+  if (!toClaude3 && command.token) {
+    deps.stderr('--token は claude-3 宛てにだけ使う。何も送っていない');
+    return 2;
+  }
+  if (toClaude3 && command.message.startsWith('-')) {
+    deps.stderr('claude-3 宛ての本文は "-" で始められない（claude3-reserve の送信は本文を位置引数で渡す）。先頭を変えて送り直す。何も送っていない');
     return 2;
   }
 
-  // claude-3 lives only on mycodebranchdesk (the reservation's target).
-  let instance = command.instance;
-  let toClaude3 = false;
-  if (worktreeId === DISPATCH_WORKTREE_ID) {
-    const resolved = resolveInstance(deps, worktreeId, command.instance);
-    if (typeof resolved !== 'string') {
-      deps.stderr(`--instance ${command.instance} を解決できなかった（${resolved.error}）。何も送っていない`);
-      return 2;
-    }
-    // The send names the instance the rule was checked against, not the alias (Codex P2-2).
-    instance = resolved;
-    toClaude3 = resolved === DISPATCH_INSTANCE_ID;
+  const unconfirmed = await confirmTarget(deps, api, worktree, instance);
+  if (unconfirmed !== null) {
+    deps.stderr(`${unconfirmed}。判定した宛先と送る宛先が同じと確かめられないので、何も送っていない`);
+    return 2;
   }
 
-  if (toClaude3) {
-    if (!command.token) {
-      deps.stderr('claude-3 へは予約の token が要る（claude3-reserve.ts reserve → --token。docs/orchestrate/team.md §4）。何も送っていない');
-      return 2;
-    }
+  if (toClaude3 && command.token) {
     // The claude-3 send's stderr is read here: claude3-reserve's own runner drops it.
     const injected = deps.reserve?.exec !== undefined || deps.reserve?.spawnExec !== undefined;
     const reserveSpawn = overrides.reserveSpawn ?? (injected ? undefined : defaultReserveSpawn);
@@ -300,16 +468,12 @@ export async function main(argv: readonly string[], overrides: Partial<PmSendDep
     });
     return afterSend(deps, status, reserveStderr);
   }
-  if (command.token) {
-    deps.stderr('--token は claude-3 宛てにだけ使う。何も送っていない');
-    return 2;
-  }
-  const result = await deps.spawn('commandmate', pmSendCommandArgv({ ...command, worktreeId, instance }));
+  const result = await deps.spawn('commandmate', pmSendCommandArgv({ ...command, worktreeId, instance: instance.instanceId }));
   return afterSend(deps, result.status ?? 2, result.stderr);
 }
 
 /** The send's exit as it is; after the pace refusal, the line that says what to do instead (never a plain send). */
 function afterSend(deps: PmSendDeps, status: number, stderr: string | undefined): number {
-  if (status !== 0 && isRelayRoundsRefusal(stderr)) deps.stderr(RELAY_ROUNDS_REFUSED_NOTICE);
+  if (status === 2 && isRelayRoundsRefusal(stderr)) deps.stderr(RELAY_ROUNDS_REFUSED_NOTICE);
   return status;
 }

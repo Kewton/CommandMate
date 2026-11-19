@@ -68,6 +68,32 @@ function flag(argv: readonly string[], name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+/** The message of a `commandmate send` argv: after `--` (pm-send always puts it there). */
+function bodyOf(argv: readonly string[]): string {
+  const i = argv.indexOf('--');
+  return argv[i + 1];
+}
+
+/**
+ * pm-send's target reads and the CLI's own check (I3'), answered from the test's
+ * worktrees: one fake server, the target's codex row resolving to itself.
+ */
+const targetDeps = {
+  endpoint: () => ({ url: 'http://127.0.0.1:3011', env: { CM_PORT: '3011' } }),
+  pinEnv: () => {},
+  api: () => ({
+    worktree: async (id: string) => ({ id, path: `/tmp/${id}` }),
+    resolveTarget: async (_wt: string, selector: string) => ({ instanceId: selector, cliToolId: 'codex' }),
+  }),
+  exec: (_command: string, args: readonly string[]) => {
+    if (args[0] === 'ls') return { status: 0, stdout: JSON.stringify([{ id: TARGET_WT, path: `/tmp/${TARGET_WT}` }]) };
+    if (args[0] === 'reply') {
+      return { status: 0, stdout: JSON.stringify({ worktreeId: args[1], instanceId: args[3], cliToolId: 'codex', reply: null }) };
+    }
+    return { status: null, stdout: '' };
+  },
+};
+
 async function settle(): Promise<void> {
   for (let i = 0; i < 20; i += 1) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -102,8 +128,7 @@ describe('pm-send → relay → PM\'s composer (Issue #4418)', () => {
     // 1. PM's entry: what it would run.
     const spawned: string[][] = [];
     const code = await pmSend([TARGET_WT, '--instance', 'codex', '--note', 'レビューの DONE:', 'レビューして。最後の行は DONE: / WAIT: / STOP:'], {
-      exec: () => ({ status: null, stdout: '' }),
-      resolveWorktree: async (id) => id,
+      ...targetDeps,
       spawn: (_command, args) => {
         spawned.push([...args]);
         return { status: 0 };
@@ -124,7 +149,7 @@ describe('pm-send → relay → PM\'s composer (Issue #4418)', () => {
     if (!opened.ok) return;
     const relayId = opened.relay.id;
 
-    // 3. The send of the body (argv[2]) under the binding, confirmed.
+    // 3. The send of the body (after `--`) under the binding, confirmed.
     const reserved = reserveRelaySend(
       db,
       {
@@ -145,7 +170,7 @@ describe('pm-send → relay → PM\'s composer (Issue #4418)', () => {
     const own = createMessage(db, {
       worktreeId: TARGET_WT,
       role: 'user',
-      content: argv[2],
+      content: bodyOf(argv),
       messageType: 'normal',
       timestamp: new Date(NOW + 100),
       cliToolId: 'codex',
@@ -226,11 +251,11 @@ describe('PM asks again after a relayed answer (Codex P1, after #4420)', () => {
     reserved.binding.begin(null);
     reserved.binding.hooks().beforeInput(new Date(t + 100), 'input_start');
     const own = createMessage(db, {
-      worktreeId: argv[1], role: 'user', content: argv[2], messageType: 'normal',
+      worktreeId: argv[1], role: 'user', content: bodyOf(argv), messageType: 'normal',
       timestamp: new Date(t + 100), cliToolId: 'codex', instanceId: 'codex',
     }).id;
     reserved.binding.finish({ kind: 'sent', messageId: own, generationAfter: null });
-    delivered.push(argv[2]);
+    delivered.push(bodyOf(argv));
     evaluateRelayAfterSend(opened.relay.id);
     return { status: 0, stderr: `Relay registered: ${opened.relay.id}\n`, relayId: opened.relay.id };
   }
@@ -241,8 +266,7 @@ describe('PM asks again after a relayed answer (Codex P1, after #4420)', () => {
     vi.setSystemTime(t);
     let relayId: string | undefined;
     const code = await pmSend([TARGET_WT, '--instance', 'codex', '--note', `返事 ${round}`, `依頼 ${round}`], {
-      exec: () => ({ status: null, stdout: '' }),
-      resolveWorktree: async (id) => id,
+      ...targetDeps,
       spawn: async (_command, args) => {
         spawned.push([...args]);
         const result = await commandmateSend(args, t);
