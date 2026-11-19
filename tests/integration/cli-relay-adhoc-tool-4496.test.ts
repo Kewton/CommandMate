@@ -131,6 +131,18 @@ vi.mock('@/lib/polling/auto-yes-manager', async (importOriginal) => ({
 vi.mock('@/lib/hooks/pending-decision-recheck', () => ({
   recheckPendingDecisions: vi.fn(async () => ({ reason: 'test', examined: 0, delivered: 0, skipped: 0 })),
 }));
+/** Issue #4496 (fix1): a roster read that throws for one instance id (fault injection). */
+const rosterFault = vi.hoisted(() => ({ instanceId: null as string | null }));
+vi.mock('@/lib/db/agent-instances-db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db/agent-instances-db')>();
+  return {
+    ...actual,
+    getAgentInstance: (...args: Parameters<typeof actual.getAgentInstance>) => {
+      if (rosterFault.instanceId !== null && args[2] === rosterFault.instanceId) throw new Error('roster unreadable (injected)');
+      return actual.getAgentInstance(...args);
+    },
+  };
+});
 vi.mock('@/lib/cli-tools/claude', () => ({
   ClaudeTool: class {
     id = 'claude';
@@ -139,7 +151,10 @@ vi.mock('@/lib/cli-tools/claude', () => ({
     async isInstalled() { return true; }
     async isRunning() { return fakeTool.claudeRunning(); }
     async startSession() {}
-    async sendMessage() {}
+    async sendMessage(_id: string, message: string) {
+      noteInputStart();
+      fakeTool.typed.push(`claude:${message}`);
+    }
     async killSession() {}
     getSessionName(id: string, instanceId?: string) { return `mcbd-claude-${id}-${instanceId ?? 'claude'}`; }
   },
@@ -149,11 +164,16 @@ import * as sendRoute from '@/app/api/worktrees/[id]/send/route';
 import * as resolveTargetRoute from '@/app/api/worktrees/[id]/resolve-target/route';
 import * as relaysRoute from '@/app/api/relays/route';
 import * as relayCancelRoute from '@/app/api/relays/[relayId]/cancel/route';
+import * as tasksRoute from '@/app/api/worktrees/[id]/tasks/route';
+import { listTasks } from '@/lib/db/tasks-db';
+import { RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE } from '@/lib/relay/relay-policy';
+import { pumpRelayDeliveries, resetRelayDeliveryState } from '@/lib/relay/relay-delivery';
 import { createSendCommand } from '@/cli/commands/send';
 import { addAgentInstance } from '@/lib/db/agent-instances-db';
 
 const WT = 'wt-4496';
 const AD_HOC = 'agy-adhoc';
+const CONTRACT = 'version: 1\ntitle: t\ngoal: |\n  Do the work.\nscope:\n  allow: ["src/**"]\n';
 
 let dir: string;
 let worktreePath: string;
@@ -172,6 +192,7 @@ function routed(pathname: string): { handlers: Record<string, unknown>; params: 
   const routes: Array<[RegExp, Record<string, unknown>]> = [
     [/^\/api\/worktrees\/([^/]+)\/send$/, sendRoute],
     [/^\/api\/worktrees\/([^/]+)\/resolve-target$/, resolveTargetRoute],
+    [/^\/api\/worktrees\/([^/]+)\/tasks$/, tasksRoute],
   ];
   for (const [pattern, handlers] of routes) {
     const match = pathname.match(pattern);
@@ -184,6 +205,7 @@ async function dispatch(input: unknown, init?: RequestInit): Promise<Response> {
   const url = new URL(String(input));
   const method = init?.method ?? 'GET';
   requests.push(`${method} ${url.pathname}`);
+  if (url.pathname.startsWith('/api/tasks/')) return Response.json({ ok: true });
   if (url.pathname === '/api/capabilities') return Response.json({ serverVersion: 'test', capabilities: ['resolve-session-target'] });
   if (url.pathname === `/api/worktrees/${WT}/current-output`) return Response.json({ isRunning: fakeTool.running });
   if (url.pathname === `/api/worktrees/${WT}/opencode/session`) return Response.json({ instances: [] });
@@ -249,7 +271,8 @@ beforeEach(async () => {
   const root = path.join(dir, 'root');
   const bin = path.join(dir, 'bin');
   agyCalls = path.join(dir, 'agy-calls');
-  fs.mkdirSync(worktreePath, { recursive: true });
+  fs.mkdirSync(path.join(worktreePath, '.commandmate', 'tasks'), { recursive: true });
+  fs.writeFileSync(path.join(worktreePath, '.commandmate', 'tasks', 'x.yaml'), CONTRACT);
   fs.mkdirSync(root);
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(dir, 'home'));
@@ -284,6 +307,10 @@ beforeEach(async () => {
   stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
   vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? ''}`);
   vi.stubEnv('HOME', path.join(dir, 'home'));
+  // I5: the CLI's usage-notice record (`antigravity-notice.json`) only under this run's directory.
+  vi.stubEnv('CM_ANTIGRAVITY_NOTICE_DIR', path.join(dir, 'notice'));
+  rosterFault.instanceId = null;
+  resetRelayDeliveryState();
   vi.stubEnv('CM_AGENT_HOOKS_INJECT', '0');
   vi.stubEnv('CM_AGENT_ROLE_ARTIFACTS_DIR', path.join(dir, 'data'));
   vi.stubEnv('CM_AGENT_ROLE_ANTIGRAVITY_AGENTS_DIR', path.join(dir, 'agy-agents'));
@@ -322,6 +349,9 @@ describe('Issue #4496: rule 0 judges an ad-hoc end by the tool --agent asked for
     const result = await send('hello', '--agent', 'antigravity', '--instance', AD_HOC, '--reply-to', `${WT}@codex`);
     expectRefusedWithNothingLeft(result);
     expect(answered).toContain('POST /api/relays 409');
+    // I5: the usage notice's record went to this run's directory, and nowhere under HOME.
+    expect(fs.existsSync(path.join(dir, 'notice', 'antigravity-notice.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'home', '.commandmate'))).toBe(false);
   });
 
   it('4496 agent-session origin: ad-hoc --agent antigravity --reply-to self is refused at the relay — exit 33, no row', async () => {
@@ -363,10 +393,44 @@ describe('Issue #4496: rule 0 judges an ad-hoc end by the tool --agent asked for
       body: JSON.stringify({ content: 'hello', cliToolId: 'antigravity', instanceId: AD_HOC, relayId: relay.id, origin: 'terminal' }),
     }), { params: Promise.resolve({ id: WT }) });
     expect(sent.status).toBe(409);
-    expect(((await sent.json()) as { code: string }).code).toBe('RELAY_TOOL_POLICY_DENIED');
+    const refusal = (await sent.json()) as { code: string; error: string };
+    expect(refusal.code).toBe('RELAY_TOOL_POLICY_DENIED');
+    // Not the "no relay was opened" of a refusal at creation: this one was opened, and withdrawn.
+    expect(refusal.error).toBe(RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE);
+    expect(refusal.error).not.toContain('No relay was opened');
     expect(fakeTool.typed).toEqual([]);
     expect(agyWasCalled()).toBe(false);
     const row = db.prepare('SELECT state FROM session_relays WHERE id = ?').get(relay.id) as { state: string };
     expect(row.state).toBe('cancelled');
+  });
+
+  it('4496 fix1: a worktree whose default is antigravity + ad-hoc --agent claude --reply-to — exit 33, no relay row, nothing typed', async () => {
+    // The delivery and the pump's sweep resolve an ad-hoc end by the default (they name no
+    // tool), so a relay opened on `claude` alone would be withdrawn silently later.
+    db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('antigravity', WT);
+    const result = await send('hello', '--agent', 'claude', '--instance', 'claude-adhoc', '--reply-to', 'self');
+    expectRefusedWithNothingLeft(result);
+    expect(answered).toContain('POST /api/relays 409');
+  });
+
+  it('4496 fix1 control — default codex + ad-hoc --agent claude: opened, typed, and the pump does not cancel it', async () => {
+    const result = await send('hello', '--agent', 'claude', '--instance', 'claude-adhoc', '--reply-to', 'self');
+    expect(result.code).toBe(0);
+    expect(fakeTool.typed).toEqual(['claude:hello']);
+    const [{ id }] = db.prepare('SELECT id FROM session_relays').all() as Array<{ id: string }>;
+    await pumpRelayDeliveries();
+    const row = db.prepare('SELECT state FROM session_relays WHERE id = ?').get(id) as { state: string };
+    expect(row.state).not.toBe('cancelled');
+  });
+
+  it('4496 fix1 (I4): the requester\'s roster cannot be read — --contract writes no task, exit 33, nothing typed', async () => {
+    rosterFault.instanceId = 'codex';
+    const result = await send('--contract', '.commandmate/tasks/x.yaml', '--agent', 'claude', '--instance', 'claude-adhoc', '--reply-to', 'self');
+    expect(result.code).toBe(33);
+    expect(result.stderr[0]).toMatch(/^Error \[RELAY_TOOL_POLICY_DENIED\]: /);
+    expect(listTasks(db, WT)).toEqual([]);
+    expect(relayRows()).toBe(0);
+    expect(fakeTool.typed).toEqual([]);
+    expect(answered).toContain(`POST /api/worktrees/${WT}/tasks 409`);
   });
 });

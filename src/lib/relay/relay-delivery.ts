@@ -93,7 +93,11 @@ import {
   resetRelayDeliveryBlocks,
   type RelayDeliveryBlockEntry,
 } from '@/lib/relay/relay-delivery-block';
-import { resolveRelaySession, type ResolvedRelaySession } from '@/lib/relay/relay-session-ref';
+import {
+  resolveRelayEndpointTool,
+  resolveRelaySession,
+  type ResolvedRelaySession,
+} from '@/lib/relay/relay-session-ref';
 import { writeRelaySystemLine } from '@/lib/relay/relay-system-line';
 import {
   claimRelayDelivery,
@@ -730,9 +734,13 @@ function closeRelayRefusedByToolPolicy(
   requester?: ResolvedRelaySession
 ): boolean {
   try {
+    // Issue #4496: the policy reads each end without the display fallback (claude when
+    // the roster cannot be read): an unreadable end is null, judged as every tool. The
+    // requester's tool stays the one the send will use (I6a) once its read succeeds.
+    const fromTool = resolveRelayEndpointTool(db, relay.from);
     const denial = findRelayToolPolicyDenial({
-      from: (requester ?? resolveRelaySession(db, relay.from)).cliToolId,
-      to: resolveRelaySession(db, relay.to).cliToolId,
+      from: fromTool === null ? null : (requester?.cliToolId ?? fromTool),
+      to: resolveRelayEndpointTool(db, relay.to),
       declaration: readUsageDeclaration(),
     });
     if (!denial) return false;

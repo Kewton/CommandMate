@@ -16,7 +16,7 @@ import type { ChatMessage } from '@/types/models';
 import { reserveRelaySend, type RelaySendBinding } from '@/lib/relay/relay-bind';
 import { getRelayById } from '@/lib/db/relay-db';
 import { resolveRelayEndpointTool } from '@/lib/relay/relay-session-ref';
-import { findRelayToolPolicyDenial, RELAY_TOOL_POLICY_DENIED_MESSAGE } from '@/lib/relay/relay-policy';
+import { findRelayToolPolicyDenial, RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE } from '@/lib/relay/relay-policy';
 import { RELAY_TOOL_POLICY_DENIED } from '@/lib/tool-policy/policy';
 import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
 import type { SendStep } from './send-request';
@@ -137,8 +137,10 @@ export function reserveRelayForSend(
  * send types into (`cliToolId`, resolved from the body's `cliToolId` the strict way).
  * `POST /api/relays` judged the `to` end by what it was told, and a CLI before #4496
  * told it nothing: an ad-hoc instance was judged by the worktree's default while the
- * send typed into antigravity. Here the tool is the one actually driven. The `from`
- * end is read as `POST /api/relays` reads it; an end that cannot be read is refused.
+ * send typed into antigravity. Here the tool is the one actually driven, together with
+ * the one the delivery resolves the `to` end to (as `POST /api/relays` judges both).
+ * The `from` end is read as `POST /api/relays` reads it; an end that cannot be read is
+ * refused.
  *
  * @returns The 409 body (`POST /api/relays`'s own), or null when the send may go on
  */
@@ -148,16 +150,22 @@ export function findBoundRelayToolPolicyRefusal(
   cliToolId: CLIToolType,
 ): Record<string, unknown> | null {
   let from: CLIToolType | null = null;
+  // The tool typed into, and the one the delivery and the pump's sweep will resolve.
+  let to: Array<CLIToolType | null> = [cliToolId, null];
   try {
     const relay = getRelayById(db, relayId);
-    if (relay) from = resolveRelayEndpointTool(db, relay.from);
+    if (relay) {
+      from = resolveRelayEndpointTool(db, relay.from);
+      to = [cliToolId, resolveRelayEndpointTool(db, relay.to)];
+    }
   } catch {
-    // Unreadable: `from` stays null, which rule 0 refuses (fail-closed).
+    // Unreadable: the unread ends stay null, which rule 0 refuses (fail-closed).
   }
-  const denial = findRelayToolPolicyDenial({ from, to: cliToolId, declaration: readUsageDeclaration() });
+  const denial = findRelayToolPolicyDenial({ from, to, declaration: readUsageDeclaration() });
   if (!denial) return null;
   return {
-    error: RELAY_TOOL_POLICY_DENIED_MESSAGE,
+    // Not "no relay was opened": this relay was, and is withdrawn by the caller.
+    error: RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE,
     code: RELAY_TOOL_POLICY_DENIED,
     policy: { ...toolPolicyDetail(denial.decision), endpoint: denial.endpoint },
   };

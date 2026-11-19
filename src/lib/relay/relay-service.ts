@@ -235,10 +235,15 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     // Issue #4437: rule 0 — each end's tool by the resolver the send route and
     // the delivery use, and the declaration as stated (no credentials read).
     // Issue #4496: the `to` end with the tool the send asked for (the one typed into
-    // an ad-hoc id), and an end that cannot be read is refused (null), not guessed.
+    // an ad-hoc id) AND the tool the delivery and the pump's sweep resolve it to (they
+    // name no tool), refused when either is — so a relay opened here is never one the
+    // pump withdraws next. An end that cannot be read is refused (null), not guessed.
     tools: {
       from: resolveRelayEndpointTool(db, input.from),
-      to: resolveRelayEndpointTool(db, input.to, input.toCliToolId),
+      to: [
+        resolveRelayEndpointTool(db, input.to, input.toCliToolId),
+        resolveRelayEndpointTool(db, input.to),
+      ],
       declaration: readUsageDeclaration(),
     },
   });

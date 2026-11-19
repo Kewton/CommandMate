@@ -31,7 +31,7 @@
 
 import type Database from 'better-sqlite3';
 import { isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
-import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
+import { resolveRelayEndpointTool } from '@/lib/relay/relay-session-ref';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { RELAY_TOOL_POLICY_DENIED, type SendOrigin } from '@/lib/tool-policy/policy';
 import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
@@ -114,20 +114,16 @@ export function findWriteToolPolicyRefusal(
 ): WriteToolPolicyRefusalBody | null {
   const { request } = input;
   if (request.replyTo !== null) {
-    let from: CLIToolType | null = null;
-    try {
-      from = resolveSessionTarget(db, canonicalWorktreeId(request.replyTo.worktreeId), {
-        instanceId: request.replyTo.instanceId,
-      }).cliToolId;
-    } catch {
-      // `resolveSessionTarget` answers for any id (down to the fallback tool) and throws
-      // only on an id it cannot read at all. Then rule 0 is not asked here: the CLI
-      // resolves both ends before any write (`resolveRelayEndpoints`, exit 2), and
-      // `POST /api/relays` judges rule 0 again when the relay is opened.
-    }
-    const relayDenial = from === null
-      ? null
-      : findRelayToolPolicyDenial({ from, to: input.tool, declaration: readUsageDeclaration() });
+    // Issue #4496: an end that cannot be read is null, judged as every tool (fail-closed),
+    // as `POST /api/relays` judges it. It used to skip rule 0 here, so a task could be
+    // written before the relay was refused. The `to` end stays the tool this write is for:
+    // `--register` puts it on the roster before the relay opens, so the worktree default
+    // the relay also judges an ad-hoc id by does not apply to every write.
+    const from = resolveRelayEndpointTool(db, {
+      worktreeId: canonicalWorktreeId(request.replyTo.worktreeId),
+      instanceId: request.replyTo.instanceId,
+    });
+    const relayDenial = findRelayToolPolicyDenial({ from, to: input.tool, declaration: readUsageDeclaration() });
     if (relayDenial) {
       return {
         error: RELAY_TOOL_POLICY_DENIED_MESSAGE,

@@ -16,11 +16,30 @@ import { RELAY_TOOL_POLICY_DENIED } from '@/lib/tool-policy/policy';
 
 let db: Database.Database;
 
+const sendUserMessage = vi.fn();
+/** A roster read that throws for one instance id (fault injection, fix1). */
+const rosterFault = vi.hoisted(() => ({ instanceId: null as string | null }));
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
+vi.mock('@/lib/session/send-user-message', () => ({
+  sendUserMessage: (...args: unknown[]) => sendUserMessage(...args),
+}));
+vi.mock('@/lib/relay/relay-readiness', () => ({ findRelayHoldReason: vi.fn(async () => null) }));
+vi.mock('@/lib/db/agent-instances-db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db/agent-instances-db')>();
+  return {
+    ...actual,
+    getAgentInstance: (...args: Parameters<typeof actual.getAgentInstance>) => {
+      if (rosterFault.instanceId !== null && args[2] === rosterFault.instanceId) throw new Error('roster unreadable (injected)');
+      return actual.getAgentInstance(...args);
+    },
+  };
+});
 
 const { POST: postRelayRoute } = await import('@/app/api/relays/route');
 const { resolveRelayEndpointTool } = await import('@/lib/relay/relay-session-ref');
+const { pumpRelayDeliveries, resetRelayDeliveryState } = await import('@/lib/relay/relay-delivery');
+const { createRelay, getRelayById } = await import('@/lib/db/relay-db');
 
 const WT = 'wt-4496';
 const FROM = { worktreeId: WT, instanceId: 'codex' };
@@ -46,6 +65,9 @@ beforeEach(() => {
     WT, WT, `/tmp/${WT}`, 'codex', Date.now(),
   );
   vi.stubEnv('CM_ANTIGRAVITY_USAGE', '');
+  rosterFault.instanceId = null;
+  resetRelayDeliveryState();
+  sendUserMessage.mockReset();
 });
 
 afterEach(() => {
@@ -116,5 +138,26 @@ describe('Issue #4496 I4: an end whose tool cannot be read is refused (fail-clos
     expect(resolveRelayEndpointTool(db, { worktreeId: WT, instanceId: 'x-adhoc' }, 'antigravity')).toBe('antigravity');
     expect(resolveRelayEndpointTool(db, { worktreeId: WT, instanceId: 'antigravity' }, 'claude')).toBe('antigravity');
     expect(resolveRelayEndpointTool(db, { worktreeId: WT, instanceId: 'x-adhoc' })).toBe('codex');
+  });
+});
+
+describe('Issue #4496 fix1 (I4): the delivery judges an unreadable end as every tool', () => {
+  function openAdHocRelay(): string {
+    const now = Date.now();
+    return createRelay(db, { from: FROM, to: { worktreeId: WT, instanceId: 'x-adhoc' }, hops: 1, expiresAt: now + 60 * 60 * 1000, now }).id;
+  }
+
+  it('4496 the to end\'s roster cannot be read: the pump\'s sweep withdraws the relay (rule 0 reached)', async () => {
+    const id = openAdHocRelay();
+    rosterFault.instanceId = 'x-adhoc';
+    await pumpRelayDeliveries();
+    expect(getRelayById(db, id)?.state).toBe('cancelled');
+    expect(sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('4496 control — the same relay with the roster readable stays open', async () => {
+    const id = openAdHocRelay();
+    await pumpRelayDeliveries();
+    expect(getRelayById(db, id)?.state).not.toBe('cancelled');
   });
 });
