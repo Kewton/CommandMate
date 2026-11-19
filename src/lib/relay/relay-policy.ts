@@ -11,12 +11,13 @@
  *     default. `--allow-relay-chain` is the deliberate override, and the flag is
  *     named after what it permits rather than after what it disables.
  *  2. **Chains are bounded** (`RELAY_HOPS_EXCEEDED`). Even with the override,
- *     depth stops at {@link MAX_RELAY_HOPS}. Issue #4420: so are round trips —
- *     a session that opens relay after relay, each right after the reply to its
- *     own previous one, with nothing typed in between, stops at
- *     {@link MAX_RELAY_ROUNDS} (same code, its own sentence; the flag does not
- *     lift it either). The reply to a relay the session opened is NOT a relayed
- *     request for rule 1 — answering it is the session's own next step.
+ *     depth stops at {@link MAX_RELAY_HOPS}. Issue #4420: so is the pace of
+ *     round trips — a session that has received {@link MAX_RELAY_ROUNDS}
+ *     replies to its own relays within {@link RELAY_ROUNDS_WINDOW_MS} may not
+ *     open another until the oldest ages out (same code, its own sentence; the
+ *     flag does not lift it either). The reply to a relay the session opened is
+ *     NOT a relayed request for rule 1 — answering it is the session's own next
+ *     step.
  *  3. **One open relay per direction** (`RELAY_DUPLICATE_PENDING`). A second
  *     standing instruction from A to B says nothing the first does not, and both
  *     would fire on the same finished turn.
@@ -67,34 +68,30 @@ export const MAX_RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_RELAY_HOPS = 3;
 
 /**
- * How many relays a session may open in a row, each right after the reply to
- * its own previous one, before a person has to type something (Issue #4420).
+ * How many replies to its own relays a session may receive within
+ * {@link RELAY_ROUNDS_WINDOW_MS} before its next relay is refused (Issue #4420,
+ * 案 Q, docs/design/relay-rounds-window-4420.md §2).
  *
- * Ten, by the PM's decision. Counted per requesting session whoever it asks
- * (alternating targets must not reset it), from the delivered replies in its
- * history back to the newest ordinary row. Not {@link MAX_RELAY_HOPS}: depth is
- * nesting, this is length, and a requester asking → reading the reply → asking
- * again is the normal use. With one open relay per direction a one-sided
- * runaway (A answering every reply with a new relay) advances one reply per
- * turn of the other side, so ten bounds it to about ten turns. That bound does
- * NOT hold for two sessions relaying to each other: what B is asked arrives as
- * an ordinary row, which resets B's count (known limit (a)), and a relay opened
- * while answering one is not seen as a chain today (known limit (b), #4492).
+ * Ten, by the PM's decision. Counted per requesting session (worktree and
+ * instance id as the ledger holds them), whoever it asked, from the ledger
+ * alone: a relay whose reply was delivered, or whose reply's delivery is held
+ * `uncertain`. Nothing in the history is read — not a person's line, not an
+ * echo, not a notice — so typing does not reset it; time does. Not
+ * {@link MAX_RELAY_HOPS}: depth is nesting, this is pace. A round trip faster
+ * than about three minutes reaches ten inside the window; a slower one never
+ * does (known limit Q-1, left to the relay watch). The bound is not exact
+ * either: a reply still being typed is not counted (Q-7), and relays opened
+ * side by side at nine all go (Q-10).
  */
 export const MAX_RELAY_ROUNDS = 10;
 
 /**
- * How far back the walk that counts round trips may read, in user rows
- * (Issue #4420, I10).
- *
- * The walk reads to a settled end — an ordinary row, the start of the history,
- * the parent, or {@link MAX_RELAY_ROUNDS} replies — and notices and echoes are
- * stepped over without counting, so only a history of hundreds of them with no
- * person typing comes near this. When it does, the relay is refused
- * (fail-closed) with a sentence that says how many replies were confirmed and
- * that the history could not be read to its end.
+ * The window {@link MAX_RELAY_ROUNDS} is counted over (Issue #4420): thirty
+ * minutes, by the PM's decision. A reply counts from the moment the ledger
+ * recorded its delivery (`delivered_at`; for a held one, `delivery_at`), so a
+ * refused session can open again at most this long after it was refused.
  */
-export const MAX_RELAY_LINEAGE_ROWS = 500;
+export const RELAY_ROUNDS_WINDOW_MS = 30 * 60 * 1000;
 
 /** How many open relays one from→to direction may hold at once. */
 export const MAX_OPEN_RELAYS_PER_PAIR = 1;
@@ -188,16 +185,11 @@ export interface RelayCreationInput {
   /** Open relays already running from `from` to `to`. */
   openBetween: number;
   /**
-   * Issue #4420: replies to `from`'s own relays received in a row with no
-   * ordinary row in between (`relay-service`'s `countConsecutiveReplyRounds`).
+   * Issue #4420: replies to `from`'s own relays received within
+   * {@link RELAY_ROUNDS_WINDOW_MS} (`relay-service`'s `countRecentReplyRounds`).
    * Absent means 0, so a caller that does not count is unaffected.
    */
   replyRounds?: number;
-  /**
-   * Issue #4420 (I10): the count could not be read to a settled end within
-   * {@link MAX_RELAY_LINEAGE_ROWS}; `replyRounds` is what was confirmed.
-   */
-  historyTruncated?: boolean;
   /**
    * Issue #4437: the tools at both ends, for rule 0. Absent, rule 0 is not
    * asked (a caller with no tools to name); `relay-service` always passes it.
@@ -273,19 +265,9 @@ export function decideRelayCreation(
     return {
       code: 'RELAY_HOPS_EXCEEDED',
       message:
-        `This session has opened relays ${replyRounds} times in a row, each right after a reply, `
-        + `with nothing typed in between; round trips stop at ${MAX_RELAY_ROUNDS}. `
-        + 'Have a person look before sending another (any ordinary message resets the count).',
-    };
-  }
-  if (input.historyTruncated === true) {
-    return {
-      code: 'RELAY_HOPS_EXCEEDED',
-      message:
-        `Only ${replyRounds} replies in a row could be confirmed: this session's history has no `
-        + `ordinary message within the last ${MAX_RELAY_LINEAGE_ROWS} rows, so the round-trip count `
-        + `(limit ${MAX_RELAY_ROUNDS}) could not be read to its end. `
-        + 'Have a person look before sending another (any ordinary message resets the count).',
+        `This session received ${replyRounds} replies to its relays in the last `
+        + `${RELAY_ROUNDS_WINDOW_MS / 60_000} minutes; the limit is ${MAX_RELAY_ROUNDS}. `
+        + 'Wait before opening another (the count clears as replies age out).',
     };
   }
 

@@ -2,10 +2,15 @@
  * Issue #4420 through the real route: `POST /api/relays` → `openRelay`.
  *
  * - after the reply to A's own relay, the next relay is created (201, depth 1);
- * - after `MAX_RELAY_ROUNDS` replies in a row it is refused (409,
- *   `RELAY_HOPS_EXCEEDED`, the round-trip sentence), with or without
- *   `allowRelayChain` — and the refusal leaves nothing behind: no relay row, no
- *   chat row, no keystroke to tmux.
+ * - after `MAX_RELAY_ROUNDS` replies within `RELAY_ROUNDS_WINDOW_MS` it is
+ *   refused (409, `RELAY_HOPS_EXCEEDED`, the round-trip sentence), with or
+ *   without `allowRelayChain` — and the refusal leaves nothing behind: no relay
+ *   row, no chat row, no keystroke to tmux;
+ * - once the clock has moved past the window, the same request is created
+ *   (201) — waiting is the way out (案 Q, known limit Q-11).
+ *
+ * The clock is `Date` faked (`toFake: ['Date']`, timers stay real): the route
+ * reads `Date.now()` for the window, as in production.
  *
  * The loop guard and the policy are not mocked. The database is a real file
  * under `os.tmpdir()` (removed after each test); the socket is mocked because
@@ -62,7 +67,7 @@ vi.mock('@/lib/db/db-instance', () => {
 import { runMigrations } from '@/lib/db/db-migrations';
 import { createMessage, relayRequestId } from '@/lib/db/chat-db';
 import { markRelayDelivered } from '@/lib/db/relay-db';
-import { MAX_RELAY_ROUNDS } from '@/lib/relay/relay-policy';
+import { MAX_RELAY_ROUNDS, RELAY_ROUNDS_WINDOW_MS } from '@/lib/relay/relay-policy';
 
 const NOW = Date.parse('2026-11-19T03:00:00.000Z');
 const A = { worktreeId: 'wt-a', instanceId: 'claude' };
@@ -70,7 +75,11 @@ const B = { worktreeId: 'wt-b', instanceId: 'codex' };
 
 let tmpDir: string;
 let db: Database.Database;
-let clock: number;
+
+function advance(ms: number): number {
+  vi.setSystemTime(Date.now() + ms);
+  return Date.now();
+}
 
 async function setMockDb(value: Database.Database | null): Promise<void> {
   const module = (await import('@/lib/db/db-instance')) as unknown as {
@@ -101,7 +110,7 @@ async function roundTrip(n: number): Promise<void> {
   const response = await postRelay({ from: A, to: B });
   expect(response.status).toBe(201);
   const { relay } = (await response.json()) as { relay: { id: string } };
-  clock += 1_000;
+  const clock = advance(1_000);
   createMessage(db, {
     worktreeId: 'wt-a',
     role: 'user',
@@ -126,13 +135,15 @@ beforeEach(async () => {
   runMigrations(db);
   insertWorktree('wt-a', 'claude');
   insertWorktree('wt-b', 'codex');
-  clock = Date.now();
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
   tmuxCalls.count = 0;
   await setMockDb(db);
 });
 
 afterEach(async () => {
   await setMockDb(null);
+  vi.useRealTimers();
   db.close();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
@@ -148,7 +159,7 @@ describe('POST /api/relays after replies to my own relays (#4420)', () => {
     expect(body.relay.hops).toBe(1);
   });
 
-  it('refuses after MAX_RELAY_ROUNDS replies in a row, and leaves no relay, no row, no keystroke', async () => {
+  it('refuses after MAX_RELAY_ROUNDS replies within the window, and leaves no relay, no row, no keystroke', async () => {
     for (let i = 0; i < MAX_RELAY_ROUNDS; i += 1) await roundTrip(i);
     const relaysBefore = count('session_relays');
     const rowsBefore = count('chat_messages');
@@ -159,11 +170,23 @@ describe('POST /api/relays after replies to my own relays (#4420)', () => {
       expect(response.status).toBe(409);
       const body = (await response.json()) as { code: string; error: string };
       expect(body.code).toBe('RELAY_HOPS_EXCEEDED');
-      expect(body.error).toContain(`round trips stop at ${MAX_RELAY_ROUNDS}`);
+      expect(body.error).toContain(`the limit is ${MAX_RELAY_ROUNDS}`);
     }
 
     expect(count('session_relays')).toBe(relaysBefore);
     expect(count('chat_messages')).toBe(rowsBefore);
     expect(tmuxCalls.count).toBe(0);
+  });
+
+  it('creates it (201) once the clock has moved the window past the replies', async () => {
+    for (let i = 0; i < MAX_RELAY_ROUNDS; i += 1) await roundTrip(i);
+    expect((await postRelay({ from: A, to: B })).status).toBe(409);
+
+    advance(RELAY_ROUNDS_WINDOW_MS);
+
+    const response = await postRelay({ from: A, to: B });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { relay: { hops: number } };
+    expect(body.relay.hops).toBe(1);
   });
 });
