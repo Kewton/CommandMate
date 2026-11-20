@@ -249,6 +249,14 @@ export const EXEMPTIONS: ReadonlyArray<{
       'STRIPPED_ENV_VARS deletes it from the child environment; naming it here is the opposite ' +
       'of relying on it',
   },
+  {
+    file: 'tests/unit/tool-policy/agy-startup-sequence-4480.test.ts',
+    token: 'bind-key',
+    occurrences: 2,
+    reason:
+      'asserts the call strings a fake tmux (first on PATH, private HOME) recorded; the real tmux ' +
+      'is never reached',
+  },
 ];
 
 // =============================================================================

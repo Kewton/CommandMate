@@ -5,6 +5,8 @@
  */
 
 import { spawnSync } from 'child_process';
+import { accessSync, constants as fsConstants, statSync } from 'fs';
+import { delimiter, join } from 'path';
 import {
   DependencyCheck,
   DependencyStatus,
@@ -12,6 +14,44 @@ import {
 } from '../types';
 import { getDependencies } from '../config/cli-dependencies';
 import { compareVersions } from './semver';
+import { loadEnvFileValues } from './server-url';
+import { mayProbeToolVersion } from '../../lib/tool-policy/version-probe-gate';
+
+type EnvLike = Readonly<Record<string, string | undefined>>;
+
+/**
+ * Issue #4480: where the usage declaration (`CM_ANTIGRAVITY_USAGE`) is read for the
+ * preflight. The shell first, else the server's `.env` (the declaration is
+ * documented as the server's setting, and `init --force` / `quickstart` run where
+ * that `.env` already exists). An unreadable `.env` is no declaration.
+ */
+export function preflightDeclarationEnv(env: EnvLike = process.env): EnvLike {
+  let fileValues: Record<string, string> = {};
+  try {
+    fileValues = loadEnvFileValues();
+  } catch {
+    fileValues = {};
+  }
+  return { ...fileValues, ...env };
+}
+
+/**
+ * Whether `command` is an executable file in one of `PATH`'s directories. Reads
+ * the file system only: no child process is started (Issue #4480).
+ */
+export function isCommandOnPath(command: string, pathValue: string | undefined = process.env.PATH): boolean {
+  for (const dir of (pathValue ?? '').split(delimiter)) {
+    if (dir === '') continue;
+    const candidate = join(dir, command);
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      if (statSync(candidate).isFile()) return true;
+    } catch {
+      // not here
+    }
+  }
+  return false;
+}
 
 /**
  * Preflight checker for system dependencies
@@ -21,7 +61,14 @@ export class PreflightChecker {
    * Check a single dependency
    * MF-SEC-1: Uses spawnSync with array args (no shell injection)
    */
-  async checkDependency(dep: DependencyCheck): Promise<DependencyStatus> {
+  async checkDependency(dep: DependencyCheck, declarationEnv?: EnvLike): Promise<DependencyStatus> {
+    // Issue #4480: a gated tool's version command (agy) is not run unless the gate
+    // (#4452: the usage declaration) allows it; it is only looked up on PATH.
+    if (dep.gatedTool && !mayProbeToolVersion(dep.gatedTool, declarationEnv ?? preflightDeclarationEnv())) {
+      return isCommandOnPath(dep.command)
+        ? { name: dep.name, status: 'not_checked' }
+        : { name: dep.name, status: 'missing' };
+    }
     try {
       const result = spawnSync(dep.command, [dep.versionArg], {
         encoding: 'utf-8',
@@ -73,9 +120,10 @@ export class PreflightChecker {
     const dependencies = getDependencies();
     const results: DependencyStatus[] = [];
     let allRequiredMet = true;
+    const declarationEnv = preflightDeclarationEnv();
 
     for (const dep of dependencies) {
-      const status = await this.checkDependency(dep);
+      const status = await this.checkDependency(dep, declarationEnv);
       results.push(status);
 
       if (dep.required && status.status !== 'ok') {
