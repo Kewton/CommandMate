@@ -118,6 +118,7 @@ MARK_LAUNCHER_CWD=""
 MARK_WORKTREE_ROOT=""
 MARK_REPO_ROOT=""
 MARK_SESSION=""
+MARK_WRITTEN=0
 
 # mark_json_safe <value> — 0 when it can go between JSON quotes as is.
 mark_json_safe() {
@@ -125,6 +126,47 @@ mark_json_safe() {
         *'"'* | *'\'* | *[[:cntrl:]]*) return 1 ;;
     esac
     return 0
+}
+
+# mark_bounded <seconds> <command...> — the command's stdout; a command that has not ended within
+# <seconds> is killed (status 137), so a hung tmux or git never holds `up` open. bash 3.2 has no
+# `timeout`: a watchdog that ends with the command (its own output goes nowhere, so a command
+# substitution does not wait for it).
+mark_bounded() {
+    local limit=$1
+    shift
+    (
+        "$@" </dev/null 2>/dev/null &
+        cpid=$!
+        (
+            i=0
+            while [ "$i" -lt $((limit * 10)) ]; do
+                sleep 0.1
+                kill -0 "$cpid" 2>/dev/null || exit 0
+                i=$((i + 1))
+            done
+            kill -s KILL "$cpid" 2>/dev/null
+        ) >/dev/null 2>&1 &
+        wait "$cpid"
+    )
+}
+
+# mark_runs_in_pane <pane pid> — 0 when the pane's process is this shell or one of its ancestors.
+# TMUX / TMUX_PANE are only environment variables, inherited by processes outside tmux too: they
+# name the caller's session only when the caller runs in that pane (#4433 review FO P2-1).
+mark_runs_in_pane() {
+    local cur=$$ i=0 parent
+    while [ "$i" -le 64 ]; do
+        [ "$cur" = "$1" ] && return 0
+        parent="$(LC_ALL=C ps -o ppid= -p "$cur" 2>/dev/null | tr -d ' ')"
+        case "$parent" in
+            "" | *[!0-9]*) return 1 ;;
+        esac
+        [ "$parent" -gt 1 ] || return 1
+        cur=$parent
+        i=$((i + 1))
+    done
+    return 1
 }
 
 # mark_prepare — decide the record path and read the caller's origin. Sets MARK_* (MARK_PATH empty
@@ -148,7 +190,7 @@ mark_prepare() {
     [ "${#hex}" -eq 32 ] || return 1
     MARK_LAUNCHER_CWD="$(pwd -P)" || return 1
     MARK_WORKTREE_ROOT=""
-    top="$(git -C "$MARK_LAUNCHER_CWD" rev-parse --show-toplevel 2>/dev/null)"
+    top="$(mark_bounded 3 git -C "$MARK_LAUNCHER_CWD" rev-parse --show-toplevel)"
     if [ -n "$top" ] && [ -d "$top" ]; then
         MARK_WORKTREE_ROOT="$(cd "$top" && pwd -P)" || MARK_WORKTREE_ROOT=""
     fi
@@ -158,10 +200,17 @@ mark_prepare() {
     elif [ -z "${TMUX_PANE:-}" ]; then
         MARK_SESSION=lookup-failed
     else
-        MARK_SESSION="$(tmux -S "${TMUX%%,*}" display-message -p -t "$TMUX_PANE" '#S' 2>/dev/null)"
-        case "$MARK_SESSION" in
-            "" | *[[:space:]]*) MARK_SESSION=lookup-failed ;;
+        local answer pane_pid
+        answer="$(mark_bounded 3 tmux -S "${TMUX%%,*}" display-message -p -t "$TMUX_PANE" '#{pane_pid} #S')"
+        pane_pid="${answer%% *}"
+        MARK_SESSION="${answer#* }"
+        case "$pane_pid" in
+            "" | *[!0-9]*) MARK_SESSION=lookup-failed ;;
         esac
+        case "$MARK_SESSION" in
+            "" | *[[:space:]]* | "$answer") MARK_SESSION=lookup-failed ;;
+        esac
+        [ "$MARK_SESSION" = lookup-failed ] || mark_runs_in_pane "$pane_pid" || MARK_SESSION=lookup-failed
     fi
     for v in "$dir" "$MARK_LAUNCHER_CWD" "$MARK_WORKTREE_ROOT" "$MARK_REPO_ROOT" "$MARK_SESSION"; do
         mark_json_safe "$v" || return 1
@@ -175,13 +224,16 @@ mark_prepare() {
 # mark_remove <state file> — remove the record `up` wrote, once its server is stopped. Only a regular
 # file named like a record in a record directory; anything else recorded there is left alone.
 mark_remove() {
-    local path
-    path=$(state_get "$1" mark_path)
-    case "$path" in
+    mark_remove_path "$(state_get "$1" mark_path)"
+}
+
+# mark_remove_path <record path> — the same, for a path this run holds.
+mark_remove_path() {
+    case "$1" in
         /*/commandmate-server-marks-*/*.json) ;;
         *) return 0 ;;
     esac
-    [ -f "$path" ] && [ ! -L "$path" ] && rm -f "$path"
+    [ -f "$1" ] && [ ! -L "$1" ] && rm -f "$1"
     return 0
 }
 
@@ -751,6 +803,8 @@ up_on_exit() {
         remove_socket_dir_tmux_only "$sock_dir"
     else
         remove_socket_dir "$sock_dir"
+        # The server is stopped: its launch record names nothing any more (#4433).
+        [ "$MARK_WRITTEN" != 1 ] || mark_remove_path "$MARK_PATH"
     fi
     if [ -n "$UP_STATE" ] && [ -f "$UP_STATE" ]; then state_set "$UP_STATE" status "$st"; fi
     rm -rf "$UP_GO" "$UP_ACK" 2>/dev/null
@@ -954,6 +1008,7 @@ cmd_up() {
     fi
     if [ -n "$MARK_PATH" ]; then
         if mark_write "$UP_SERVER_PID"; then
+            MARK_WRITTEN=1
             state_set "$UP_STATE" mark_path "$MARK_PATH"
         else
             log "could not write the launch mark record (env-clean will judge the server as unmarked)"

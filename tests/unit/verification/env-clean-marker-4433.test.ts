@@ -25,6 +25,7 @@
 
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -32,6 +33,7 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
+  type Stats,
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -41,6 +43,7 @@ import { diffEnvSnapshots, formatEnvCleanReport } from '@/lib/verification/env-c
 import {
   ENV_SNAPSHOT_VERSION,
   probeListeners,
+  readServerMarkRecord,
   type CommandResult,
   type EnvEntry,
   type EnvProbeDeps,
@@ -343,6 +346,18 @@ describe('owner of a verified mark', () => {
     expect(diff.status).toBe('violated');
   });
 
+  it('is not excused when the listener’s own cwd cannot be read (no anchor)', () => {
+    const { diff, listeners } = judge([marked('tcp/3917', [verifiedMark({ anchor: null })], null)]);
+    expect(diff.status).toBe('violated');
+    expect(listeners.added[0].owner).toBe('unattributed');
+  });
+
+  it('is not excused when the launch came from an ancestor of this worktree (a worktree kept inside the repo)', () => {
+    const { diff, listeners } = judge([marked('tcp/3918', [verifiedMark({ launcherCwd: root, worktreeRoot: root })])]);
+    expect(diff.status).toBe('violated');
+    expect(listeners.added[0].owner).toBe('unattributed');
+  });
+
   it('does not take a path that merely shares the worktree’s name as a prefix for this worktree', () => {
     const lookalike = `${self}-2`;
     mkdirSync(lookalike);
@@ -566,6 +581,36 @@ describe('probeListeners reading the mark', () => {
       probeDeps({ pids: [{ pid: 4321, port: 3871, cwd: pkg, env: `${MARK_ENV}=${path}` }] })
     );
     expect(probe.entries[0].marks?.[0]).toMatchObject({ status: 'invalid', reason: 'dir-not-private' });
+  });
+
+  it('is invalid when the record directory belongs to another uid', () => {
+    const foreign = join(root, 'marks', `commandmate-server-marks-${UID + 1}`);
+    mkdirSync(foreign, { mode: 0o700 });
+    chmodSync(foreign, 0o700);
+    const path = join(foreign, `${'c'.repeat(32)}.json`);
+    writeFileSync(path, readFileSync(writeRecord('d'.repeat(31) + 'e')), { mode: 0o600 });
+    expect(readServerMarkRecord(path, UID + 1)).toEqual({ ok: false, reason: 'dir-not-private' });
+  });
+
+  it('is invalid when the record file belongs to another uid', () => {
+    const path = writeRecord('c'.repeat(31) + 'd');
+    expect(readServerMarkRecord(path, UID).ok).toBe(true);
+    const foreignFile = (target: string): Stats => {
+      const stat = lstatSync(target);
+      return target === path ? Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: UID + 1 }) : stat;
+    };
+    expect(readServerMarkRecord(path, UID, foreignFile)).toEqual({ ok: false, reason: 'record-unreadable' });
+  });
+
+  it('is invalid when the group leader’s start time cannot be read', async () => {
+    const path = writeRecord('c'.repeat(31) + 'e');
+    const probe = await probeListeners(
+      probeDeps({
+        pids: [{ pid: 4321, port: 3871, cwd: pkg, env: `${MARK_ENV}=${path}` }],
+        omit: ['ps -o pid=,lstart= -p 4300'],
+      })
+    );
+    expect(probe.entries[0].marks?.[0]).toMatchObject({ status: 'invalid', reason: 'lstart-unreadable' });
   });
 
   it('is invalid when the record directory is not named for this user', async () => {

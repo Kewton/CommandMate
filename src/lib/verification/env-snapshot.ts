@@ -36,6 +36,7 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  type Stats,
 } from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, join } from 'path';
@@ -373,16 +374,21 @@ const RECORD_FILE_NAME = /^[0-9a-f]{32}\.json$/;
  * named for this user (`commandmate-server-marks-<uid>`), that directory a real
  * directory of this user's with no access for anyone else, the file a regular
  * file of this user's (not a symlink, not a hard link) no larger than 4 KiB,
- * and its content a v1 record. Any miss is a reason, never a throw.
+ * and its content a v1 record. Any miss is a reason, never a throw. `lstat` is
+ * injectable only so a test can present a file of another uid.
  */
-export function readServerMarkRecord(path: string, uid: number): ServerMarkRecordReading {
+export function readServerMarkRecord(
+  path: string,
+  uid: number,
+  lstat: (path: string) => Stats = lstatSync
+): ServerMarkRecordReading {
   if (!path.startsWith('/') || /\s|\0/.test(path)) return { ok: false, reason: 'bad-path' };
   const dir = dirname(path);
   if (basename(dir) !== serverMarkDirName(uid) || !RECORD_FILE_NAME.test(basename(path))) {
     return { ok: false, reason: 'bad-path' };
   }
   try {
-    const stat = lstatSync(dir);
+    const stat = lstat(dir);
     if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o077) !== 0) {
       return { ok: false, reason: 'dir-not-private' };
     }
@@ -391,7 +397,7 @@ export function readServerMarkRecord(path: string, uid: number): ServerMarkRecor
   }
   let text: string;
   try {
-    if (lstatSync(path).uid !== uid) return { ok: false, reason: 'record-unreadable' };
+    if (lstat(path).uid !== uid) return { ok: false, reason: 'record-unreadable' };
     text = readRegularFileNoFollow(path, SERVER_MARK_MAX_BYTES).toString('utf8');
   } catch (error) {
     const message = error instanceof Error ? error.message : '';

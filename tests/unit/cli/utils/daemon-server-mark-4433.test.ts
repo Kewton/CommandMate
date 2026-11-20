@@ -56,8 +56,9 @@ vi.mock('../../../../src/cli/utils/logger', () => ({
 }));
 
 import { DaemonManager, type ServerMarkLauncherDeps } from '../../../../src/cli/utils/daemon';
-import { parseServerMarkRecord } from '../../../../src/cli/types/server-mark';
-import { readServerMarkRecord } from '../../../../src/lib/verification/env-snapshot';
+import { parseServerMarkRecord, type ServerMarkRecord } from '../../../../src/cli/types/server-mark';
+import { readServerMarkRecord, type EnvEntry } from '../../../../src/lib/verification/env-snapshot';
+import { attributeListener } from '../../../../src/lib/verification/env-clean-gate';
 
 const UID = process.getuid ? process.getuid() : 0;
 const HEX = '0123456789abcdef0123456789abcdef';
@@ -68,27 +69,53 @@ let base: string;
 let launchDir: string;
 let calls: Array<{ command: string; args: string[]; env?: Record<string, string> }>;
 
-function deps(overrides: Partial<ServerMarkLauncherDeps> = {}, answers: Record<string, string | null> = {}): Partial<ServerMarkLauncherDeps> {
+/** The launcher's pid, and the pid of the shell in the pane TMUX_PANE names. */
+const LAUNCHER_PID = 5000;
+const PANE_PID = 4000;
+
+/**
+ * Stubbed machine. `answers` replaces git / tmux / ps(lstart) output (null = the command fails);
+ * `parents` is the `ps -o ppid=` chain (by default the launcher runs under the pane's shell).
+ */
+function deps(
+  overrides: Partial<ServerMarkLauncherDeps> = {},
+  answers: Record<string, string | null> = {},
+  parents: Record<number, number> = { [LAUNCHER_PID]: 4500, 4500: PANE_PID, [PANE_PID]: 1 }
+): Partial<ServerMarkLauncherDeps> {
   const table: Record<string, string | null> = {
     git: launchDir,
-    tmux: 'mcbd-claude-commandmate-judge',
+    tmux: `${PANE_PID} mcbd-claude-commandmate-judge`,
     ps: `  ${LSTART}`,
     ...answers,
   };
   return {
     base: () => base,
     getuid: () => UID,
+    pid: () => LAUNCHER_PID,
     cwd: () => launchDir,
     env: () => ({ TMUX: '/private/tmp/tmux-501/default,999,0', TMUX_PANE: '%3' }),
     randomHex: () => HEX,
     now: () => new Date('2026-11-20T03:04:05.000Z'),
     run: (command, args, env) => {
       calls.push({ command, args, env });
+      if (command === 'ps' && args[1] === 'ppid=') {
+        const parent = parents[Number(args[3])];
+        return parent === undefined ? { status: 1, stdout: '' } : { status: 0, stdout: ` ${parent}\n` };
+      }
       const out = table[command];
       return out === null || out === undefined ? { status: 1, stdout: '' } : { status: 0, stdout: `${out}\n` };
     },
     ...overrides,
   };
+}
+
+/** How env-clean would attribute a listener carrying this record's mark, verified. */
+function ownerOf(record: ServerMarkRecord): string {
+  const worker = join(root, 'worker-wt');
+  mkdirSync(worker, { recursive: true });
+  const mark = { ...record, pid: 12346, anchor: launchDir, status: 'verified', reason: null };
+  const entry = { key: 'tcp/3871', detail: 'node pid=12346', anchor: launchDir, marks: [mark] } as unknown as EnvEntry;
+  return attributeListener(entry, { worktreeId: 'commandmate-issue-4433', worktreePath: worker });
 }
 
 function spawnedEnv(): NodeJS.ProcessEnv {
@@ -145,7 +172,7 @@ describe('DaemonManager marks the server it starts (#4433)', () => {
 
   it('reads the leader start time with a fixed locale and time zone, for the spawned pid', async () => {
     await new DaemonManager(join(root, 'cm.pid'), undefined, undefined, deps()).start({ port: 3871 });
-    const ps = calls.find((call) => call.command === 'ps');
+    const ps = calls.find((call) => call.command === 'ps' && call.args[1] === 'lstart=');
     expect(ps?.args).toEqual(['-o', 'lstart=', '-p', '12345']);
     expect(ps?.env).toMatchObject({ LC_ALL: 'C', TZ: 'UTC0' });
   });
@@ -153,7 +180,40 @@ describe('DaemonManager marks the server it starts (#4433)', () => {
   it('asks tmux for the launcher’s own pane on the launcher’s own socket', async () => {
     await new DaemonManager(join(root, 'cm.pid'), undefined, undefined, deps()).start({ port: 3871 });
     const tmux = calls.find((call) => call.command === 'tmux');
-    expect(tmux?.args).toEqual(['-S', '/private/tmp/tmux-501/default', 'display-message', '-p', '-t', '%3', '#S']);
+    expect(tmux?.args).toEqual(['-S', '/private/tmp/tmux-501/default', 'display-message', '-p', '-t', '%3', '#{pane_pid} #S']);
+  });
+
+  it('records the session only when the launcher runs inside that pane (its shell is an ancestor)', async () => {
+    await new DaemonManager(join(root, 'cm.pid'), undefined, undefined, deps()).start({ port: 3871 });
+    const record = parseServerMarkRecord(readFileSync(spawnedEnv().CM_SERVER_MARK!, 'utf8'))!;
+    expect(record.session).toBe('mcbd-claude-commandmate-judge');
+    const walk = calls.filter((call) => call.command === 'ps' && call.args[1] === 'ppid=');
+    expect(walk.map((call) => call.args[3])).toEqual([String(LAUNCHER_PID), '4500']);
+    expect(walk[0].env).toMatchObject({ LC_ALL: 'C' });
+    // The positive control: launched from another worktree's pane, the server is that worktree's.
+    expect(ownerOf(record)).toBe('other');
+  });
+
+  it('records lookup-failed — and env-clean does not excuse it — when TMUX_PANE was inherited from a pane the launcher is not in', async () => {
+    // e.g. a Schedule run (outside tmux) whose server was started from someone's pane.
+    const outside = { [LAUNCHER_PID]: 4600, 4600: 4700, 4700: 1 };
+    await new DaemonManager(join(root, 'cm.pid'), undefined, undefined, deps({}, {}, outside)).start({ port: 3871 });
+    const record = parseServerMarkRecord(readFileSync(spawnedEnv().CM_SERVER_MARK!, 'utf8'))!;
+    expect(record.session).toBe('lookup-failed');
+    expect(ownerOf(record)).toBe('unattributed');
+  });
+
+  it('records lookup-failed when the parent chain cannot be read, or tmux gives no pane pid', async () => {
+    await new DaemonManager(join(root, 'a.pid'), undefined, undefined, deps({}, {}, { [LAUNCHER_PID]: 4500 })).start({
+      port: 3871,
+    });
+    expect(parseServerMarkRecord(readFileSync(spawnedEnv().CM_SERVER_MARK!, 'utf8'))?.session).toBe('lookup-failed');
+
+    rmSync(markDir(), { recursive: true, force: true });
+    await new DaemonManager(join(root, 'b.pid'), undefined, undefined, deps({}, { tmux: 'mcbd-claude-commandmate-judge' })).start({
+      port: 3872,
+    });
+    expect(parseServerMarkRecord(readFileSync(spawnedEnv().CM_SERVER_MARK!, 'utf8'))?.session).toBe('lookup-failed');
   });
 
   it('records no-tmux outside tmux, and lookup-failed when tmux cannot answer', async () => {

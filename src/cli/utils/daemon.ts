@@ -254,6 +254,8 @@ export interface ServerMarkLauncherDeps {
   /** Directory the record directory is created in. */
   base(): string;
   getuid(): number;
+  /** The CLI's own pid: the start of the parent chain that must reach the tmux pane. */
+  pid(): number;
   /** The CLI's own cwd (the server runs in the package root, which says nothing about who launched it). */
   cwd(): string;
   /** The CLI's own environment, for TMUX / TMUX_PANE. */
@@ -271,6 +273,7 @@ const MARK_COMMAND_TIMEOUT_MS = 3000;
 const DEFAULT_SERVER_MARK_DEPS: ServerMarkLauncherDeps = {
   base: () => process.env[SERVER_MARK_BASE_ENV] || SERVER_MARK_DEFAULT_BASE,
   getuid: () => (typeof process.getuid === 'function' ? process.getuid() : -1),
+  pid: () => process.pid,
   cwd: () => process.cwd(),
   env: () => process.env,
   run: (command, args, env) => {
@@ -306,16 +309,43 @@ function realpathOr(path: string): string {
   }
 }
 
-/** The launcher's tmux session name, or the reason there is none (recorded as text, never null). */
+/** How many parents are followed from the launcher towards its pane's shell. */
+const PANE_ANCESTOR_LIMIT = 64;
+
+/**
+ * True when `panePid` is the launcher itself or one of its ancestors (`ps -o ppid=`,
+ * `LC_ALL=C`). TMUX / TMUX_PANE are only environment variables: a process outside
+ * tmux inherits them from whoever started it (a server started from a pane passes
+ * them to every child), so they name the launcher's session only when the
+ * launcher actually runs in that pane. Anything unreadable is false.
+ */
+function runsInPane(panePid: number, deps: ServerMarkLauncherDeps): boolean {
+  let current = deps.pid();
+  for (let step = 0; step <= PANE_ANCESTOR_LIMIT; step += 1) {
+    if (current === panePid) return true;
+    const result = deps.run('ps', ['-o', 'ppid=', '-p', String(current)], { LC_ALL: 'C' });
+    const parent = result.status === 0 ? result.stdout.trim() : '';
+    if (!/^[0-9]+$/.test(parent) || Number(parent) <= 1) return false;
+    current = Number(parent);
+  }
+  return false;
+}
+
+/**
+ * The launcher's tmux session name, or the reason there is none (recorded as
+ * text, never null). A name is recorded only when the pane TMUX_PANE names is the
+ * one the launcher runs in; an inherited pane is `lookup-failed` (#4433 review FO P2-1).
+ */
 function launcherSession(deps: ServerMarkLauncherDeps): string {
   const env = deps.env();
   if (!env.TMUX) return SERVER_MARK_SESSION_NO_TMUX;
   const socket = env.TMUX.split(',')[0];
   const pane = env.TMUX_PANE;
   if (!socket || !pane) return SERVER_MARK_SESSION_LOOKUP_FAILED;
-  const result = deps.run('tmux', ['-S', socket, 'display-message', '-p', '-t', pane, '#S']);
-  const name = result.status === 0 ? result.stdout.trim() : '';
-  return name !== '' && !/\s/.test(name) ? name : SERVER_MARK_SESSION_LOOKUP_FAILED;
+  const result = deps.run('tmux', ['-S', socket, 'display-message', '-p', '-t', pane, '#{pane_pid} #S']);
+  const answer = result.status === 0 ? /^([0-9]+) (\S+)$/.exec(result.stdout.trim()) : null;
+  if (!answer || !runsInPane(Number(answer[1]), deps)) return SERVER_MARK_SESSION_LOOKUP_FAILED;
+  return answer[2];
 }
 
 /**

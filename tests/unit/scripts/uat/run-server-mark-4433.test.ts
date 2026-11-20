@@ -111,6 +111,19 @@ async function freePort(): Promise<number> {
   });
 }
 
+/** The file's content once it exists and ends a line (written by a command in a pane). */
+async function waitForFile(file: string): Promise<string> {
+  const deadline = Date.now() + REAL_SHELL_SUBPROCESS_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(file)) {
+      const text = fs.readFileSync(file, 'utf8');
+      if (text.endsWith('\n')) return text;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`${file} was not written within ${REAL_SHELL_SUBPROCESS_TIMEOUT_MS} ms`);
+}
+
 function serverEnvironment(pid: number): string[] {
   return spawnSync('ps', ['eww', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.split(' ');
 }
@@ -143,7 +156,8 @@ afterEach(() => {
   }
   for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
     if (name.startsWith('cmuat-')) {
-      spawnSync('tmux', ['-S', path.join(shortRoot, name, 'tmux.sock'), 'kill-server'], { stdio: 'ignore' });
+      const sock = path.join(shortRoot, name, 'tmux.sock');
+      spawnSync('tmux', ['-S', sock, 'kill-server'], { stdio: 'ignore' });
     }
   }
   spawnSync('tmux', ['-S', callerSock, 'kill-server'], { stdio: 'ignore' });
@@ -196,6 +210,33 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh marks its server (Issue #4433)', () =
   it(
     'records the caller’s tmux session, not the private one it gives the server',
     async () => {
+      // Run from inside the pane (the pane's shell is an ancestor of the script), as a worker does.
+      const port = await freePort();
+      const out = path.join(root, 'up.out');
+      const status = path.join(root, 'up.status');
+      const command =
+        `bash '${RUN_SERVER}' up --port ${port} --run-dir '${runDir}' --wait-listen 30 >'${out}' 2>&1; ` +
+        `echo $? >'${status}'; sleep 600`;
+      const created = spawnSync(
+        'tmux',
+        ['-S', callerSock, 'new-session', '-d', '-s', 'mcbd-claude-commandmate-judge', '-c', caller, command],
+        { env: baseEnv() }
+      );
+      expect(created.status).toBe(0);
+      const code = await waitForFile(status);
+      expect(code.trim(), fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '').toBe('0');
+      const pid = Number(stateOf(runDir).server_pid);
+      const recordPath = serverEnvironment(pid)
+        .find((token) => token.startsWith('CM_SERVER_MARK='))!
+        .slice('CM_SERVER_MARK='.length);
+      expect(parseServerMarkRecord(fs.readFileSync(recordPath, 'utf8'))?.session).toBe('mcbd-claude-commandmate-judge');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'records lookup-failed when TMUX_PANE names a pane the caller is not running in (an inherited environment)',
+    async () => {
       const created = spawnSync('tmux', ['-S', callerSock, 'new-session', '-d', '-s', 'mcbd-claude-commandmate-judge', 'sleep 600']);
       expect(created.status).toBe(0);
       const pane = spawnSync('tmux', ['-S', callerSock, 'display-message', '-p', '-t', 'mcbd-claude-commandmate-judge', '#{pane_id}'], {
@@ -213,7 +254,51 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh marks its server (Issue #4433)', () =
       const recordPath = serverEnvironment(pid)
         .find((token) => token.startsWith('CM_SERVER_MARK='))!
         .slice('CM_SERVER_MARK='.length);
-      expect(parseServerMarkRecord(fs.readFileSync(recordPath, 'utf8'))?.session).toBe('mcbd-claude-commandmate-judge');
+      expect(parseServerMarkRecord(fs.readFileSync(recordPath, 'utf8'))?.session).toBe('lookup-failed');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'gives up on a caller’s tmux that does not answer, and records lookup-failed',
+    async () => {
+      // A tmux that hangs on the caller's session lookup and is the real tmux otherwise.
+      const realTmux = spawnSync('sh', ['-c', 'command -v tmux'], { encoding: 'utf8' }).stdout.trim();
+      const bin = path.join(root, 'bin');
+      fs.mkdirSync(bin);
+      fs.writeFileSync(
+        path.join(bin, 'tmux'),
+        `#!/bin/sh\ncase "$*" in *'#S'*) exec sleep 30 ;; esac\nexec '${realTmux}' "$@"\n`,
+        { mode: 0o755 }
+      );
+      const port = await freePort();
+      const started = Date.now();
+      const up = runScript(['up', '--port', String(port), '--run-dir', runDir, '--wait-listen', '30'], {
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        TMUX: `${path.join(root, 'hung.sock')},1,0`,
+        TMUX_PANE: '%1',
+      });
+      expect(up.status, up.stderr).toBe(0);
+      expect(Date.now() - started).toBeLessThan(20_000);
+      const pid = Number(stateOf(runDir).server_pid);
+      const recordPath = serverEnvironment(pid)
+        .find((token) => token.startsWith('CM_SERVER_MARK='))!
+        .slice('CM_SERVER_MARK='.length);
+      expect(parseServerMarkRecord(fs.readFileSync(recordPath, 'utf8'))?.session).toBe('lookup-failed');
+    },
+    REAL_SHELL_TEST_TIMEOUT_MS
+  );
+
+  it(
+    'removes the record when up fails after writing it',
+    async () => {
+      // The server execs and exits at once, after the record names its group.
+      fs.writeFileSync(path.join(root, 'dist', 'server', 'server.js'), 'process.exit(3);\n');
+      const port = await freePort();
+      const up = runScript(['up', '--port', String(port), '--run-dir', runDir, '--wait-listen', '30']);
+      expect(up.status).not.toBe(0);
+      expect(up.stderr).toContain('exited');
+      expect(fs.readdirSync(path.join(markBase, `commandmate-server-marks-${UID}`))).toEqual([]);
     },
     REAL_SHELL_TEST_TIMEOUT_MS
   );

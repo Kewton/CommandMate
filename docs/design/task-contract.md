@@ -661,11 +661,11 @@ package root（開発用ではメインの checkout＝兄弟）なので、ワ�
 | 項目 | 内容 |
 |---|---|
 | 印 | サーバーの環境の `CM_SERVER_MARK=<記録の絶対パス>`。付けるのは `DaemonManager.start`（`src/cli/utils/daemon.ts`）と `scripts/uat/run-server.sh up`。形は `src/cli/types/server-mark.ts` |
-| 記録 | `/tmp/commandmate-server-marks-<uid>/<32 桁の hex>.json`（dir 0700・file 0600・4 KiB 以下）。`pgid`（detached／`set -m` で作った group＝leader の pid）、`leaderStartTime`（`LC_ALL=C TZ=UTC0 ps -o lstart=`）、`launcherCwd`・`worktreeRoot`（起動した CLI／呼び出し元のシェルの cwd と git の root）、`repoRoot`（run-server.sh の checkout）、`session`（起動元の tmux セッション名・`no-tmux`・`lookup-failed`） |
-| 検証（スナップショットの時） | 環境から印を読む（linux は `/proc/<pid>/environ`、macOS は `ps -E` の出力からコマンドラインを除いた残り。2 回あれば invalid）→ 記録のパスと dir（自 uid・0700・名前）→ 記録の形 → `ps -o pid=,pgid=` の pgid が記録と一致 → leader の lstart が記録と一致。どれかが外れたら `absent` / `invalid`（理由は固定の語。報告の行に `mark=<理由>`） |
+| 記録 | `/tmp/commandmate-server-marks-<uid>/<32 桁の hex>.json`（dir は自 uid で group/other の権限なし＝作るときは 0700、run-server.sh は 0700 ちょうどのときだけ使う・file 0600・4 KiB 以下）。`pgid`（detached／`set -m` で作った group＝leader の pid）、`leaderStartTime`（`LC_ALL=C TZ=UTC0 ps -o lstart=`）、`launcherCwd`・`worktreeRoot`（起動した CLI／呼び出し元のシェルの cwd と git の root）、`repoRoot`（run-server.sh の checkout）、`session`（起動元の tmux セッション名・`no-tmux`・`lookup-failed`。名前を書くのは、`TMUX_PANE` のペインのプロセスが起動した側（CLI・run-server.sh のシェル）の祖先のときだけ。継いだだけの `TMUX_PANE` や、tmux・git が 3 秒で答えないときは `lookup-failed`） |
+| 検証（スナップショットの時） | 環境から印を読む（linux は `/proc/<pid>/environ`、macOS は `ps -E` の出力からコマンドラインを除いた残り。2 回あれば invalid）→ 記録のパスと dir（自 uid・group/other の権限なし・名前）→ 記録の形 → `ps -o pid=,pgid=` の pgid が記録と一致 → leader の lstart が記録と一致。どれかが外れたら `absent` / `invalid`（理由は固定の語。報告の行に `mark=<理由>`） |
 | 継承 | `server.ts` は起動の最初に `CM_SERVER_MARK` を自分の環境から消す（子は継がない。`ps -E`・`/proc` は起動時の値を出すので照合はできる）。daemon は親から継いだ印を子に渡さない |
 | 消えたもの（`-`） | 印は持ち主を示すだけで、誰が止めたかは示さない。基準で別 worktree のものと検証された listener が消えても違反のまま（#1739 の型を通さないため）。報告の行の `mark=verified` を見て override を判断する |
-| 残る穴 | 同じ uid の故意の偽造（TMUX を外して別 worktree に cd して起動する、記録を手で書いて pgid・lstart を合わせる）は防げない。ゲートは作業の副作用を捕まえるもので、故意は対象外 |
+| 残る穴 | 同じ uid の故意の偽造（TMUX を外して別 worktree に cd して起動する、記録を手で書いて pgid・lstart を合わせる）は防げない。ゲートは作業の副作用を捕まえるもので、故意は対象外。読む側は記録の dir の名前・uid・権限を見るが、置き場所（親が `/tmp` か）は見ない（`CM_SERVER_MARK_BASE` で動かしても照合の強さは pgid と lstart のまま） |
 | 厳しくなったもの | 印の無いサーバー（人が別 worktree で手で立てたもの、foreground の `start`、`npm run dev`）は、兄弟の worktree でも違反になる。override の運用で扱う |
 
 #### `<id>-…` の帰属の証拠（Issue #4192）

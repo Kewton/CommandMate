@@ -100,14 +100,21 @@ function spawnStdio(): childProcess.StdioOptions | undefined {
 }
 
 // Issue #4433: start() writes a launch-mark record under CM_SERVER_MARK_BASE (default /tmp);
-// keep it in a temp dir of this file's own.
+// keep it in a temp dir of this file's own, and out of tmux (no lookup on the caller's tmux server).
 let serverMarkBase = '';
+const savedTmux = { TMUX: process.env.TMUX, TMUX_PANE: process.env.TMUX_PANE };
 beforeEach(() => {
   serverMarkBase = mkdtempSync(join(tmpdir(), 'cm-mark-'));
   process.env.CM_SERVER_MARK_BASE = serverMarkBase;
+  delete process.env.TMUX;
+  delete process.env.TMUX_PANE;
 });
 afterEach(() => {
   delete process.env.CM_SERVER_MARK_BASE;
+  for (const [name, value] of Object.entries(savedTmux)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   rmSync(serverMarkBase, { recursive: true, force: true });
 });
 
