@@ -47,6 +47,14 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   生きたテストのものは #2954 で `other` に分かれる）。`[unattributed]` で残ったら、
   `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
 
+  **`+ resource.yaml`（`commandmate-entries`）の裁定**（#4406）: `~/.commandmate/resource.yaml` は資源の門（#4370）の設定ファイル。読み手が呼ばれるたびに読み直すので、task の途中で置かれると、全レーンの門に効く。誰が置いたかはゲートでは確かめられないため、追加は**違反のまま**にしている（持ち主の確かめで外すのは #4497）。その代わり、違反の行の下に `    · resource.yaml: the user's resource config (#4370), shape=<ok|invalid> (<理由>) sha256=<先頭 12 桁> size=<n>B — counted; …` の行が出る。この行は wait-verify の項目名に入らない。裁定の手順:
+  1. `shape=ok` か確かめる。`invalid`（YAML でない・知らない鍵・シンボリックリンク・ハードリンク・64 KiB 超など）は、それだけでワーカー起因として扱う
+  2. 置いた PM・人に、置いたファイルの sha256 を聞く（`shasum -a 256 ~/.commandmate/resource.yaml`）。添え行の先頭 12 桁と一致するか確かめる
+  3. ワーカーのコマンドに `resource.yaml` を書くものが無いかを、`capture --prompts --limit 100` の `Run this command?` で確かめる。**プロンプトが見えないことは証拠にならない**（Auto-Yes の間や、エディタの道具・Node のスクリプトの中で書けば、プロンプトに出ない）。この手順で分かるのは、ワーカーが書いた形跡があるときだけ
+  4. 合格には、**置いた人の sha と添え行の sha の一致が要る**。一致し、ワーカーが書いた形跡も無ければ、外の原因として合格に裁定し、根拠（sha の一致と、置いた人）を PR 本文に書く。置いた人が sha を示せない、不一致、またはワーカーが書いた形跡があれば、ワーカー起因として扱う
+
+  `(has runners/health/idle)` が付いていたら、後の PR でコマンドを動かす鍵が入っている。置いた人に、その鍵が意図したものか必ず確かめる。`- resource.yaml` は task の初めに在った設定が消えたもの（添え行は初めの sha）で、違反として扱う。既に在る `resource.yaml` の書き換えは、env-clean が名前しか比べないので数えない。書き換えがあれば `    · ~ resource.yaml changed during the task (sha256 <前> → <後>)` の行で見えるだけ（判定は clean のまま。pass のときは wait-verify の記録には載らない）。設定は、なるべく task の無いときに置く。
+
   **外部要因の候補の表示**（#4148）: 2026-11-04 の run では `~/.s185h-operator-tests` が 1 件増えただけで、13:45 以降の検証の `env-clean` が worktree を問わず不合格になった。
   `wait-verify.mjs` は env-clean が挙げた項目を `verify` の記録に `env-clean-items=<probe>:<+|-><名前>` と残し（`[self]` と免除された task session は除く。名前の空白・カンマ・`=`・`%` は記録の中だけ `%20` のように書く。#4162）、同じ項目を別の Issue／work item の検証でも見たら、
   `env-clean: <項目> in #4132, #4133 — candidate for an outside cause` と出す。`run-log.mjs status` も同じ行を出す（`--json` は `envCleanShared`）。
@@ -94,11 +102,11 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 | `unconfirmed:` の理由 | 対応 |
 |---|---|
 | `no IMPL_COMPLETED line within <秒>s` / `the verification saw an earlier state …` / `a commit landed during the re-verification` | ワーカーはまだ作業中。capture で確かめ、作業中なら同じ引数で待ち直す |
-| `uncommitted changes: …` | 未コミットの変更がある。commit するよう再指示する |
+| `uncommitted changes: …` | 未コミットの変更がある。commit するよう再指示する。Command Code が起動時に置く `.commandcode/settings.local.json`・`.commandcode/taste/` は、#4406 から未コミットに数えない。`scripts/orchestrate/dirty-tree.mjs`（wait-verify・precheck・merge-pr・publish-pr・merge-train が共有）が、製品の scope・work-evidence と同じ #3126 の名簿を持ち、未追跡の項目だけを大文字小文字を区別して外す。`.gitignore` には入れない（macOS の `core.ignorecase` で `.COMMANDCODE/…` まで隠れるため）。`.git/info/exclude` に足して裁定し直す必要はもう無い。`.commandcode/` のそれ以外（`skills/`・`commands/`、`settings.local.json` という名前のディレクトリ、大文字小文字の違う path、追跡済みのファイルの変更など）は、今までどおり作業として数える |
 | `no IMPL_COMPLETED line within <秒>s`（記録に `waited-for` も検証の行も無い） | 合図が要る担当（Command Code・Antigravity・`--require-signal`）は、**合図を見るまで検証を始めない**（#3883）。作業の途中のターン終了だったので、capture で確かめて同じ引数で待ち直す。画面に前の task の `IMPL_COMPLETED` が残っていても、この task の返事に合図が無ければ合図とは数えない（返事がまだ無い・読めないときも、画面の裸の行は数えない。数えるのは、task の作成の後のコミットを名指す `IMPL_COMPLETED head=<sha>` だけ） |
 | `a newer task <新しい id> was created for this instance after task <古い id>` | 待機中に同じ instance へ新しい契約が送られた（#3587）。ワーカーは新しい task を作業中なので Auto-Yes は切られていない（`auto-yes=kept`）。古い task の裁定は取らず、tasks.tsv の task id を新しい id に差し替えて **`wait-verify.mjs --task <新しい id>`** を呼び直す（ほかの引数は同じ） |
 
-記録の要約の `waited-for=run <id>` は、検証を始めようとしたときに同じ worktree の別の検証（再指示の前の古い run など）が動いていた（`already in progress`）ので、その run の終了を待ってから検証をやり直したという意味（#3883）。裁定はこの呼び出しが始めた run（ログの `Verifying: … (run <id>)`）のもので、待った run の結果は使わない。`waited-for=run <id>(still running)` は 3600 秒待っても終わらなかったという意味で、exit は `verify` のもの（99）のまま、Auto-Yes は切られていない。
+記録の要約の `waited-for=run <id>` は、検証を始めようとしたときに同じ worktree の別の検証（再指示の前の古い run など）が動いていた（`already in progress`）ので、その run の終了を待ってから検証をやり直したという意味（#3883）。裁定はこの呼び出しが始めた run（ログの `Verifying: … (run <id>)`）のもので、待った run の結果は使わない。`waited-for=run <id>(still running)` は待つのをやめたという意味で、exit は `verify` のもの（99。裁定ではない）のまま、Auto-Yes は切られていない。待つのをやめるのは次の 2 つだけで、理由は stderr の `busy-gave-up=` に出る（記録の要約には入れない。#4463）。`unreachable@<秒>` はサーバーが 1800 秒答えなかった（プロセスが居ない。起動し直したサーバーは run を `error` で閉じるので、その間に起き直せば待ちを続けて検証をやり直す）。`cap@<秒>` は上限 604800 秒（7 日。名前つきの定数 `VERIFY_BUSY_CAP_SEC` 1 つで、verify.yaml からは求めない。式は契約が足すゲートや再試行ごとの mutex 待ちを数え足りず、サーバーが拒む値で無限にもなった）に達した。`verify show` が `running` と読める run は、列で待つ・mutex を待つ・長いゲートを走る間も生きているとして待つ（ゲートの行が動かないことは死んだ印にしない）。秒は wait-verify が起きていた時間で、ノートのスリープや時計の飛びは 1 回のポーリング分しか数えない。既知の限界: サーバーが生きたまま行が `running` で残る形のうち、run を閉じる書き込みが 2 回とも失敗した場合（F3）と、解決しない Promise（不具合、F4）は cap の 7 日まで待って exit 99（合格にはならない。#4494）。ゲートの子孫がパイプを持ったまま残る場合は kill の後の猶予で、git が返らない場合は検証ランナーの 2 つの git の呼び出し口（work-evidence の `gate-runner.ts` の `runGit` と、work-evidence の後半と scope が使う `scope-gate.ts` の `runGit`）の時間の上限 120 秒で、サーバーが行を閉じる。どちらも run は `error`（exit 99。裁定ではない）で、`failed`（exit 20）にはしない（#4463）。子孫がパイプを持ったまま残ったゲートの mutex は、ゲートのパイプが閉じたのを確かめるまで（最長 30 分）次のゲートに渡さない（確かめるのはパイプが閉じたことで、パイプを持たずに逃げたデーモンは対象外、#4494）。30 分を超えたらサーバーのログに run id つきで `verification-mutex-released-with-orphan` を残して渡す。
 要約の `auto-yes=unknown` は、`--disable` は通ったが状態を読み返せなかった（`capture --json` が失敗した）という意味（#3883）。切れたとは確かめられていないので、`wait-verify.mjs --auto-yes-off` で切り直す（exit 0 になるまで）。
 
 新しい task の検出は、基準の task が task 一覧（新しい順に 20 件）から外れても `task show` で個別に読んで続ける（#3633）。task 一覧が開始時に読めなかったときも、`wait` と `verify` を分けた経路で待ち始めの task への結び付けを保つ（`--task` が無ければ、一覧が読めた時点で基準を取り直す）。
@@ -167,6 +175,18 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 ## 6-1-1 precheck の負荷による timeout
 
 precheck のうち全ファイルを走査するガードのテスト（`tests/unit/guards` の下）が `Test timed out in 5000ms` で落ちるのは、多くの場合マシンの負荷（同じマシンの CI ランナーなど）によるもので、作業とは関係しない。ワーカーへ再指示しない。すぐに再実行しても同じ負荷で落ちる。1 分の load average が論理 CPU 数の目安を下回るまで待ってから、同じ HEAD で precheck を再実行する。
+
+## 1-5 record-verify の exit code
+
+`run-log.mjs record-verify`（#4482。リーダーが直接流した verify を run 番号から記録する。docs/orchestrate/run-log.md）の exit code。0 以外は何も書かない。
+
+| exit | 意味 | 対応 |
+|---|---|---|
+| 0 | `verify` の行を記録した（`env=none`） | なし |
+| 1 | `verify show <run> --json` が run を返さない（失敗・JSON でない・`id` の無い答え）、または worktree の HEAD を読めない | run 番号・`--cli`・サーバーを確かめて呼び直す |
+| 2 | 引数の誤り（`--run` が数でない、`--head` が 40 桁でない、必須の引数が無い） | 引数を直す |
+| 3 | run が終わっていない（`running`・`queued` など） | 結果を決めずに断っている。run が終わってから呼び直す |
+| 4 | 別の run（worktree の id・path、run の id、task の不一致）、HEAD をその run が確かめた木と言えない（未コミットの変更・HEAD のコミットか移動が run の開始より後・`--head` と違う・git status / reflog / run の開始時刻を読めない）、同じ work item に記録済み | stderr の理由を読む。木が動いたなら、今の HEAD（コミット済み）で verify を流し直してから、その run を記録する |
 
 ## エラーハンドリング表の個別の行
 

@@ -27,7 +27,7 @@ export interface ApiErrorResult {
  * Trimmed and length-capped because it is printed to a terminal, and an
  * unbounded server string is not something a CLI should paste verbatim.
  */
-const MAX_SERVER_ERROR_DETAIL = 2000;
+export const MAX_SERVER_ERROR_DETAIL = 2000;
 
 function serverErrorDetail(payload?: ApiErrorPayload): string | undefined {
   const detail = typeof payload?.error === 'string' ? payload.error.trim() : '';

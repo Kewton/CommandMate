@@ -303,9 +303,10 @@ export function touchesServerBuild(scope) {
 }
 
 /**
- * The first scope pattern that can turn `unit-related` into the whole unit suite (#4148), judged
- * by scripts/run-related-unit-tests.mjs `classifyChanges` itself: docs, .claude and scripts/ all
- * do (`mode=full`), and then the gate queues on `cpu.heavy` behind every other worker's full run.
+ * The first scope pattern that reaches a file outside src/ and tests/ — one `classifyChanges` in
+ * scripts/run-related-unit-tests.mjs marks `full` (#4148). Since #4467 that mark no longer runs the
+ * whole unit suite: `unit-related` runs the tests the change reaches plus every repo-reading test
+ * (log `mode=related reason=non-source:<file>`), and the whole suite is CI's `Unit Tests`.
  * The scope is what the worker may touch, not what it will, so this says "can": a plan note, not a stop.
  * A glob with no extension stands for code, so `src/**` is related and `src/**\/*.json` is not.
  */
@@ -328,7 +329,7 @@ export function fullUnitNote(config) {
   if (!config.gates.includes('unit-related')) return null;
   const pattern = fullUnitPattern(config.scope);
   if (pattern === null) return null;
-  return `contract: note: #${config.issue}: unit-related runs the whole unit suite when a file under "${pattern}" changes — write the order of such items in the plan (docs/orchestrate/plan-check.md)`;
+  return `contract: note: #${config.issue}: scope "${pattern}" reaches files outside src/ and tests/ — unit-related runs the related tests plus the repo-reading tests there (mode=related reason=non-source), not the whole suite; the whole suite is CI's Unit Tests (docs/orchestrate/plan-check.md)`;
 }
 
 /**

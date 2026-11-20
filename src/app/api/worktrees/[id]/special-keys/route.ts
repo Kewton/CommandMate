@@ -19,6 +19,10 @@
  * therefore moves ahead of key validation — it is a synchronous registry read,
  * so nothing about the request's cost or its failure ordering changes for a
  * request that was valid before.
+ *
+ * Issue #4480: asks the tool policy (#4437) as a `respond` (these keys answer the
+ * tool's dialogs and pickers) with the body's `origin`, before the session is
+ * read or typed into. The screen sends no origin (`legacy`) and goes through.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -32,6 +36,7 @@ import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/
 import { createLogger } from '@/lib/logger';
 import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/terminal-broadcast';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
+import { findToolPolicyDenial, readBodyOrigin, toolPolicyDeniedResponse } from '../send/send-tool-policy';
 
 const logger = createLogger('api/special-keys');
 
@@ -50,7 +55,7 @@ export async function POST(
   const body = parsed.body;
 
   try {
-    const { cliToolId, keys, instanceId } = body;
+    const { cliToolId, keys, instanceId, origin: rawOrigin, originEvidence } = body;
 
     // 1. cliToolId validation (isCliToolType)
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
@@ -102,6 +107,12 @@ export async function POST(
       }
     }
 
+    // Issue #4480: who started the request, read as `/send` reads it.
+    const origin = readBodyOrigin(rawOrigin);
+    if (!origin.ok) {
+      return NextResponse.json({ error: origin.error }, { status: 400 });
+    }
+
     // 4. DB existence check
     const db = getDbInstance();
     const worktree = getWorktreeById(db, id);
@@ -111,6 +122,17 @@ export async function POST(
         { status: 404 }
       );
     }
+
+    // Issue #4480: the tool policy, before the session is read or typed into.
+    const toolPolicyDenial = findToolPolicyDenial({
+      tool: cliToolId,
+      operation: 'respond',
+      origin: origin.origin,
+      originEvidence,
+      worktreeId: id,
+      instanceId: instanceId as string | undefined,
+    });
+    if (toolPolicyDenial) return toolPolicyDeniedResponse(toolPolicyDenial);
 
     // 5. Session existence check
     const sessionName = cliTool.getSessionName(id, instanceId);

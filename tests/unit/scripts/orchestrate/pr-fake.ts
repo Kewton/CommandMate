@@ -99,7 +99,8 @@ export function fakeGit(overrides: Partial<FakeState> = {}) {
       const sub = args.slice(2);
       const [verb] = sub;
       if (verb === 'rev-parse') return ok(sub.includes('--abbrev-ref') ? `${state.branch}\n` : `${state.head}\n`);
-      if (verb === 'status') return ok(state.status);
+      // dirty-tree reads `status --porcelain -z` (#4406): the fixture is written line by line and sent NUL-terminated.
+      if (verb === 'status') return ok(sub.includes('-z') ? state.status.replace(/\n/g, '\0') : state.status);
       if (verb === 'log' && sub.includes('--first-parent')) return ok(state.firstParent.join('\n'));
       if (verb === 'log') return ok(sub.includes('--format=%s') ? `${state.subjects[sub[sub.length - 1]] ?? 'feat(orchestrate): publish and merge (#3477)'}\n` : 'body line\n');
       // The automatic merge of a merge's parents (#4076): diff-tree of it against the merge answers commitFiles[merge].

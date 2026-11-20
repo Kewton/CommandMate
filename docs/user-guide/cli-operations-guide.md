@@ -318,7 +318,7 @@ commandmate send <worktree-id> "<message>" --auto-yes --auto-yes-answer-mode car
 
 ### Antigravity への送信の柵（Issue #4437）
 
-**Antigravity への送信の柵（既定）** — 利用形態を申告していないあいだ、antigravity の instance への `send`・`ask`・`respond`（厳格モードを含む）は、CommandMate のセッションの中・Schedule・AI エージェントの中・起点の分からない呼び出し（端末の無い実行など）から送られたものを、何も打たずに断ります（exit 33）。antigravity を端点にする relay（`send --reply-to`・`ask --async`）も作れません（exit 33。relay のほかの拒否の exit 2 とは別）。画面と、端末で人が打つコマンドは今までどおり送れます。
+**Antigravity への送信の柵（既定）** — 利用形態を申告していないあいだ、antigravity の instance への `send`・`ask`・`respond`（厳格モードを含む）は、CommandMate のセッションの中・Schedule・AI エージェントの中・起点の分からない呼び出し（端末の無い実行など）から送られたものを、何も打たずに断ります（exit 33）。antigravity を端点にする relay（`send --reply-to`・`ask --async`）も作れません（exit 33。relay のほかの拒否の exit 2 とは別）。画面と、端末で人が打つコマンドは今までどおり送れます。名簿に無い instance をアドホックに指定した relay（`send --agent antigravity --instance <名簿に無い id> --reply-to …`）も、端末からを含め `--agent` の tool で判定して断ります（Issue #4496。以前は worktree の既定の tool で判定したため、端末からは relay が開いて打鍵まで進み exit 0 でした。今は exit 33。tool を決められない端も断ります）。名簿に無い端は、`--agent` の tool と、配送が使う worktree の既定の tool の両方で判定するので、既定が antigravity の worktree へは `--agent claude` のアドホックでも relay を作れません（exit 33）。
 
 **CLI の利用上の注意（#4438）**: `instances <worktree-id> add --agent antigravity` と、antigravity の instance への `send`・`ask`・`respond` は、利用上の注意と規約・FAQ のリンクを **stderr だけ**に出します（stdout と `--json` には混ぜません。拒否のときは拒否の理由の行などの後）。出すのは CLI の環境（記録 `antigravity-notice.json` の置き場所。グローバル install なら `~/.commandmate`、ローカル実行（リポジトリの checkout から）なら CLI のパッケージの根で、作業中のディレクトリ（cwd）を基準には決めません）ごとに初めての 1 回で、規約の確認日が変わると再び出ます。記録を読めないとき・書けないときは出して続け、結果と exit は変わりません。
 
@@ -343,6 +343,8 @@ CLI は送り手の種類を次の順に読み、最初に当たったものを�
 > **既知の制限**（Issue #4466 で直します）:
 > - `--reply-to` と `--contract`・`--register --role`・`--auto-yes` を併用し、送信の途中で宛先（既定の宛先や名簿）が変わると、先にタスク（またはロールの設定・名簿の登録・Auto-Yes の有効化）が書かれた後で relay が断られることがあります（exit 33）。メッセージは打たれません。残ったタスクは `failed` になり、その id は stdout に出ていて、stderr の 1 行目は理由ではなく `Task created: …` です。
 > - 端末から antigravity へ `--model` と `--auto-yes` を、`--contract` なしで `--role` か `--register` と併用すると、Auto-Yes はメッセージの後に回るため、ロールの保存（または名簿の登録）とメッセージの送信は行われ、その後 Auto-Yes だけが断られます（警告・exit 0。Auto-Yes は有効になりません）。
+
+> **API の打鍵の入口（Issue #4480）**: CLI のコマンドからは使いませんが、pane に打つ API の `POST /api/worktrees/<id>/terminal`（`send` として判定）・`/direct-input`（任意の文字列を打てるので `send`）・`/special-keys`（`respond`）も、本文の `origin` で同じ表に聞きます。`origin` の無い要求（画面）と `terminal` は今までどおり通り、申告の無いサーバーで antigravity に `session`・`agent`・`schedule`・`unknown`（と知らない文字列）からの要求は、何も打たず（`/terminal` は antigravity の再起動もせず）409 `TOOL_POLICY_DENIED`（`sendOutcome: "not_sent"`。`/send` と同じ本文）で断ります。`origin` が文字列でないと 400 です。
 
 > **注意**: #4449 より前のサーバーに新しい CLI でつなぐと、書き込みの API が方針を判定しないため、断られる送信でもタスクやロールの設定が書かれてから `/send` が 409（exit 33）で断ることがあります。CLI とサーバーは同じ版にそろえてください。
 
@@ -766,7 +768,10 @@ relay 配送（`ask --async` / `send --reply-to`）は、relay を**その依頼
 - opencode の HTTP 送信は入力開始を報告しないので、送る直前の時刻を境界にします。HTTP で届かなかったと
   確定して端末入力へ切り替えたときは、端末入力の開始で境界を書き直します
 - 古い CLI が開いた relay・古いサーバーは従来どおりです（新しい CLI は古いサーバーに対して「従来の扱い」の
-  1 行を標準エラーに出し、`relayId` を付けません）
+  1 行を標準エラーに出し、`relayId` を付けません）。ただし、古い CLI が `--agent` の tool を伝えずに開いた relay
+  に結び付けた送信が antigravity に打つものなら、`/send` が 409 `RELAY_TOOL_POLICY_DENIED`（exit 33）で断り、
+  何も打たずに relay を取り下げます（Issue #4496）。作成前に断る場合と違い relay は開いていたので、`cancelled`
+  の行が残ります（応答の文面も「開いていた relay を取り下げた」です）
 
 **PR 3 までの制約**（ターンと返答の対応付けは次の変更で入ります）:
 
@@ -1117,7 +1122,7 @@ commandmate ask <worktree-id> "<依頼>" --instance <id> --async [--reply-to <ta
 | `--json` | 返答を JSON で出力 |
 | `--async` | 待たない。relay を登録して relay ID を出し、exit 0。返答は相手のターンが終わったとき `--reply-to` の入力欄へ届く |
 | `--reply-to <target>` | `--async` の返答の届け先: `<worktree-id>[@<instance-id\|alias>]`、または `self`（このコマンドを実行しているセッション。既定） |
-| `--allow-relay-chain` | relay された依頼に答える途中で開く relay を許可（既定は拒否。連鎖は 3 ホップで止まる） |
+| `--allow-relay-chain` | relay された依頼に答える途中で開く relay を許可（既定は拒否。連鎖は 3 ホップで止まる）。自分が開いた relay の返事を受けた後の次の依頼は連鎖に数えない。ただし依頼元のセッションが直近 30 分に受け取った自分の relay の返事が 10 本に届くと、次の relay は `RELAY_HOPS_EXCEEDED` で断られる（この旗や人の 1 行では解けない。直近 30 分の返事が 10 本未満に減ると開ける（窓の中が 10 本を超えていれば、最も古い返事から 30 分よりさらに後）。急ぐときは `--reply-to` を付けない `send` で頼む） |
 | `--token <token>` | 認証トークン |
 
 `--auto-yes` は**意図的にありません**。他のセッションの Auto-Yes を入れるのは、そのセッションの安全柵の判断であり、質問の一部では
@@ -3701,7 +3706,7 @@ commandmate roles default codex --repo . --role reviewer
 
 ### `--json` の形
 
-失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。ロールを変える要求（`roles add` / `edit` / `rm` / `default`、`set-role`、`add --role`）が 5xx か応答なしで終わると、保存された可能性があるので、保存の有無が不明であることと確かめるコマンドを伝えます（`--json` は `saved: "unknown"` と `check`）。4xx は保存していません。`send` に `--json` はありませんが、`send --register --role` と `--contract --role` も同じ文を stderr に出します。
+失敗も含めて stdout に出力します（同じ文を stderr にも出します）。ロールの分類が無い失敗の `error` は `internal_error`、`request_failed`、`no_response`（サーバーに届かない）、`role_api_unavailable`（ロールより古いサーバー）、`unexpected_error` で、終了コードは下の表のとおりです。引数の不足や不明なオプションは commander の出力（stderr のみ、exit 1）です。ただし `roles default` の `<tool>` 不足は exit 2 です（Issue #4473 より前は 1）。ロールを変える要求（`roles add` / `edit` / `rm` / `default`、`set-role`、`add --role`）が 5xx か応答なしで終わると、保存された可能性があるので、保存の有無が不明であることと確かめるコマンドを伝えます（`--json` は `saved: "unknown"` と `check`）。4xx は保存していません。`send` に `--json` はありませんが、`send --register --role` と `--contract --role` も同じ文を stderr に出します。
 
 | コマンド | 形 |
 |---------|----|
@@ -4485,7 +4490,7 @@ Update available for codex: 0.149.1 -> 0.151.0
 Run "commandmate agents update codex" to install it.
 ```
 
-> **antigravity の行が出る条件**（Issue #4452）: `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` の申告があるときだけです（申告なしでは `agy --version` を実行しません）。More 画面・agent pane の版の表示（`GET /api/agents/versions`）、スラッシュコマンドの版の注意、`capture --json` と `commandmate status` の検出ルールの陳腐化の注意は、申告があるとき、またはそのサーバーで antigravity を起動・送信した後に出ます（`commandmate status` は CLI のプロセスなので申告があるときだけ）。初期設定の `commandmate init` / `quickstart` は依存の確認で `agy --version` を実行します。
+> **antigravity の行が出る条件**（Issue #4452）: `CM_ANTIGRAVITY_USAGE=api-key` / `enterprise` の申告があるときだけです（申告なしでは `agy --version` を実行しません）。More 画面・agent pane の版の表示（`GET /api/agents/versions`）、スラッシュコマンドの版の注意、`capture --json` と `commandmate status` の検出ルールの陳腐化の注意は、申告があるとき、またはそのサーバーで antigravity を起動・送信した後に出ます（`commandmate status` は CLI のプロセスなので申告があるときだけ）。初期設定の `commandmate init` と `quickstart` の依存の確認も、どちらも申告（CLI を打つ環境、無ければサーバーの `.env` の `CM_ANTIGRAVITY_USAGE`）があるときだけ `agy --version` を実行し、申告が無いときは `agy` が PATH にあるかだけをファイルで確かめます（起動しません。Issue #4480）。その結果の行（`Antigravity CLI: found (version not checked; …)` か `Not found`）を出すのは `init` と、`.env` がまだ無いときの `quickstart`（`init` の手順に入る）です。`.env` があるときの `quickstart` は依存の行を出さず、`found (version not checked; …)` も出しません。ただし必須の依存が欠けて止まるときは、見つからなかった依存をまとめて `Not found` で出すので、agy が PATH に無ければ `Antigravity CLI: Not found` もそこに並びます。
 
 #### LATEST 列が codex にしか出ない理由
 

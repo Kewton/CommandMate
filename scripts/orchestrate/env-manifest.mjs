@@ -24,6 +24,10 @@
  * which keep the same `<file>.env.json` under the same execution key, so
  * precheck / publish / merge compare it the same way (verifyEnvState).
  *
+ * A verification the leader ran directly has no start manifest at all: run-log.mjs `record-verify`
+ * (#4482) writes `env=none` and keeps no manifest. verifyEnvState reads it as `unrecorded` (never
+ * `same`): it is taken as a record without env, with a warning that names it.
+ *
  * Usage:
  *   node scripts/orchestrate/env-manifest.mjs start --worktree <path> --file <x.env.json> --key <execution key>
  *   node scripts/orchestrate/env-manifest.mjs end --worktree <path> --file <x.env.json>
@@ -147,6 +151,12 @@ export function manifestHash(manifest) {
   return crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex').slice(0, 12);
 }
 
+/**
+ * The `env=` of a verify run recorded by run-log.mjs `record-verify` (#4482): it claims no env.
+ * Never a hash (manifestHash is 12 hex digits), so it never matches a kept manifest.
+ */
+export const DIRECT_ENV = 'none';
+
 /** The `env=<hash>` of a record's note; null for a record taken before #3883 H-8 recorded it. */
 export function recordedEnvHash(note) {
   const match = /(?:^|\s)env=(\S+)/.exec(note ?? '');
@@ -190,7 +200,8 @@ export const FOLLOWS_HEAD = (field) => field === 'lockfile' || field.startsWith(
  * environment of `worktree` now (#3883 N3): the manifest kept with the record
  * (keptManifest) against a manifest taken now.
  *
- * - `unrecorded`: the note has no `env=` (a record from before #3883 H-8). It
+ * - `unrecorded`: the note has no `env=` (a record from before #3883 H-8), or
+ *   `env=none` (a direct run recorded by run-log.mjs `record-verify`, #4482). It
  *   is taken as before; the caller says so (a warning), so the run in progress
  *   when this landed is not stopped by its own earlier records.
  * - `missing`: the note names an environment whose manifest is not in the run
@@ -206,6 +217,10 @@ export const FOLLOWS_HEAD = (field) => field === 'lockfile' || field.startsWith(
 export function verifyEnvState(record, { runDir, worktree, home, ignore }) {
   const hash = recordedEnvHash(record?.note);
   if (hash === null) return { state: 'unrecorded', fields: [], detail: 'no env= in the record (taken before #3883 H-8): used as before' };
+  if (hash === DIRECT_ENV) {
+    // 直の記録は passed= を持たないのでゲートは再利用されない。passed= を足すなら env が無いまま再利用されるので足さない（#4482）。
+    return { state: 'unrecorded', fields: [], detail: 'env=none (a direct verify run recorded by run-log.mjs record-verify, no manifest from its start): no environment to compare, used as a record without env=' };
+  }
   const kept = record?.key ? keptManifest(runDir, record.key, hash) : null;
   if (!kept) return { state: 'missing', fields: [], detail: `env=${hash}: no manifest with that hash under key ${record?.key ?? '-'} in ${runDir}` };
   const fields = diffManifest(kept.manifest, takeManifest({ worktree, home })).filter((field) => !ignore?.(field));
