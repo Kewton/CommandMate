@@ -187,8 +187,9 @@ describe('diffEnvSnapshots', () => {
     );
     expect(diff.status).toBe('violated');
     expect(listeners?.removed.map((change) => change.key)).toEqual(['tcp/3000']);
-    // Attribution excuses additions, never removals.
-    expect(listeners?.removed[0].owner).toBe('other');
+    // Attribution excuses additions, never removals. Since #4433 a listener is
+    // `other` only on a verified launch mark, never by its directory.
+    expect(listeners?.removed[0].owner).toBe('unattributed');
   });
 
   it('ignores a parallel worker’s new server and its new session', () => {
@@ -198,11 +199,15 @@ describe('diffEnvSnapshots', () => {
       'tmux-sessions': probe([entry('mcbd-claude-commandmate-issue-1726')]),
     });
     const diff = diffEnvSnapshots(before, after, CONTEXT);
-    expect(diff.status).toBe('clean');
+    // #4433: the session is still excused by its name, but a listener is no
+    // longer excused by a sibling directory — only a verified launch mark does
+    // that (tests/unit/verification/env-clean-marker-4433.test.ts).
+    expect(diff.status).toBe('violated');
     expect(diff.probes.flatMap((entry) => entry.ignoredAdded).map((change) => change.key)).toEqual([
-      'tcp/3778',
       'mcbd-claude-commandmate-issue-1726',
     ]);
+    const listeners = diff.probes.find((entry) => entry.probeId === 'listeners');
+    expect(listeners?.added.map((change) => [change.key, change.owner])).toEqual([['tcp/3778', 'unattributed']]);
   });
 
   it('reports a sibling worker’s session being killed — the #1624 failure', () => {
