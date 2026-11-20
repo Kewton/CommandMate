@@ -99,6 +99,18 @@ function spawnStdio(): childProcess.StdioOptions | undefined {
   return (call?.[2] as childProcess.SpawnOptions | undefined)?.stdio;
 }
 
+// Issue #4433: start() writes a launch-mark record under CM_SERVER_MARK_BASE (default /tmp);
+// keep it in a temp dir of this file's own.
+let serverMarkBase = '';
+beforeEach(() => {
+  serverMarkBase = mkdtempSync(join(tmpdir(), 'cm-mark-'));
+  process.env.CM_SERVER_MARK_BASE = serverMarkBase;
+});
+afterEach(() => {
+  delete process.env.CM_SERVER_MARK_BASE;
+  rmSync(serverMarkBase, { recursive: true, force: true });
+});
+
 describe('DaemonManager server log (Issue #3731)', () => {
   let pidFile: string;
 

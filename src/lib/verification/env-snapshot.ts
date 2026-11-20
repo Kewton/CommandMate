@@ -27,6 +27,7 @@ import {
   closeSync,
   constants as fsConstants,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -39,6 +40,15 @@ import {
 import { homedir } from 'os';
 import { basename, dirname, join } from 'path';
 import { parse as parseYaml } from 'yaml';
+import {
+  SERVER_MARK_ENV,
+  SERVER_MARK_LSTART_ENV,
+  SERVER_MARK_MAX_BYTES,
+  normalizeLstart,
+  parseServerMarkRecord,
+  serverMarkDirName,
+  type ServerMarkRecord,
+} from '@/cli/types/server-mark';
 import { getEnv } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
 import { MACHINE_LOCK_DIR_NAME } from './machine-lock';
@@ -87,10 +97,10 @@ export interface EnvEntry {
   /**
    * Filesystem path the entity is anchored to (a listener's process cwd).
    *
-   * The only input to ownership attribution, which is what stops a parallel
-   * worker's server from being reported as this task's leak. Null means
-   * unattributable, which is deliberately the strict answer (see
-   * `attributeAnchor` in env-clean-gate).
+   * For a listener it can only make the listener this task's (`self`); since
+   * Issue #4433 only a verified {@link EnvEntry.marks} entry can make it
+   * another worktree's. Null means unattributable, which is deliberately the
+   * strict answer (see `attributeListener` in env-clean-gate).
    */
   anchor: string | null;
   /**
@@ -102,6 +112,59 @@ export interface EnvEntry {
    * held. Absent on snapshots written before #4406.
    */
   config?: EnvConfigCheck;
+  /**
+   * `listeners` only (Issue #4433): one reading of the launch mark per process
+   * listening on this key, in the order lsof listed them. The only evidence
+   * that may excuse an added listener as another worktree's
+   * (`attributeListener` in env-clean-gate); never compared. Absent on
+   * snapshots written before #4433, which leaves such a listener judged.
+   */
+  marks?: EnvListenerMark[];
+}
+
+/**
+ * Why a listener's mark was not verified — a fixed vocabulary, printed as
+ * `mark=<reason>` on the report line (Issue #4433).
+ *
+ * `absent`: the process carries no readable mark (`env-unreadable`, `no-mark`,
+ * `pgid-unreadable`). `invalid`: it carries one that does not hold
+ * (`duplicate-mark`, `bad-path`, `dir-not-private`, `record-unreadable`,
+ * `record-too-large`, `record-malformed`, `pgid-mismatch`, `lstart-unreadable`,
+ * `leader-gone`, `leader-start-mismatch`). Either way the listener is judged.
+ */
+export const ENV_LISTENER_MARK_REASONS = [
+  'env-unreadable',
+  'no-mark',
+  'pgid-unreadable',
+  'duplicate-mark',
+  'bad-path',
+  'dir-not-private',
+  'record-unreadable',
+  'record-too-large',
+  'record-malformed',
+  'pgid-mismatch',
+  'lstart-unreadable',
+  'leader-gone',
+  'leader-start-mismatch',
+] as const;
+
+export type EnvListenerMarkReason = (typeof ENV_LISTENER_MARK_REASONS)[number];
+
+/** One listening process's mark, as read at capture time (Issue #4433). */
+export interface EnvListenerMark {
+  pid: number;
+  /** Null when `ps` could not say. */
+  pgid: number | null;
+  /** The process's cwd (the same reading as {@link EnvEntry.anchor}, per pid). */
+  anchor: string | null;
+  status: 'verified' | 'absent' | 'invalid';
+  /** Null exactly when `verified`. */
+  reason: EnvListenerMarkReason | null;
+  /** The record's launch origin; set only when `verified`. */
+  launcherCwd?: string | null;
+  worktreeRoot?: string | null;
+  repoRoot?: string | null;
+  session?: string | null;
 }
 
 /**
@@ -154,7 +217,8 @@ export interface CommandResult {
 }
 
 export interface EnvProbeDeps {
-  run(command: string, args: string[]): Promise<CommandResult>;
+  /** `options.env` is added to this process's environment for that one command. */
+  run(command: string, args: string[], options?: { env?: Readonly<Record<string, string>> }): Promise<CommandResult>;
   /** Throws the way `fs.readdirSync` does; the caller turns that into `unavailable`. */
   readDir(path: string): string[];
   homeDir(): string;
@@ -164,6 +228,17 @@ export interface EnvProbeDeps {
    * probe fakes keep working; defaults to {@link readRegularFileNoFollow}.
    */
   readConfigFile?(path: string, maxBytes: number): Buffer;
+  /**
+   * The rest are for reading launch marks (Issue #4433) and are optional so
+   * existing probe fakes keep working. `platform` picks how a process's
+   * environment is read: `/proc/<pid>/environ` on linux, `ps -E` elsewhere.
+   */
+  platform?(): NodeJS.Platform;
+  /** `/proc/<pid>/environ` as text (NUL separated); null when unreadable. */
+  readProcEnviron?(pid: number): string | null;
+  getuid?(): number;
+  /** Defaults to {@link readServerMarkRecord} with {@link getuid}. */
+  readMarkRecord?(path: string): ServerMarkRecordReading;
 }
 
 /** Probes are bounded: a hung `lsof` must not hold a verification run open. */
@@ -172,12 +247,21 @@ const PROBE_TIMEOUT_MS = 5000;
 /** Output kept per probe command; far above any real listing. */
 const PROBE_MAX_BUFFER = 4 * 1024 * 1024;
 
-function runCommand(command: string, args: string[]): Promise<CommandResult> {
+function runCommand(
+  command: string,
+  args: string[],
+  options?: { env?: Readonly<Record<string, string>> }
+): Promise<CommandResult> {
   return new Promise<CommandResult>((resolve) => {
     execFile(
       command,
       args,
-      { timeout: PROBE_TIMEOUT_MS, maxBuffer: PROBE_MAX_BUFFER, encoding: 'utf8' },
+      {
+        timeout: PROBE_TIMEOUT_MS,
+        maxBuffer: PROBE_MAX_BUFFER,
+        encoding: 'utf8',
+        ...(options?.env ? { env: { ...process.env, ...options.env } } : {}),
+      },
       (error, stdout, stderr) => {
         if (!error) {
           resolve({ code: 0, stdout, stderr, failure: null });
@@ -248,12 +332,225 @@ export function readRegularFileNoFollow(path: string, maxBytes: number): Buffer 
   }
 }
 
+/** `/proc/<pid>/environ`, or null when it cannot be read. Never throws. */
+function readProcEnvironFile(pid: number): string | null {
+  try {
+    return readFileSync(`/proc/${pid}/environ`, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** -1 where the platform has no uids, which no record directory is named for. */
+const currentUid = (): number => (typeof process.getuid === 'function' ? process.getuid() : -1);
+
 export const DEFAULT_ENV_PROBE_DEPS: EnvProbeDeps = {
   run: runCommand,
   readDir: (path: string) => readdirSync(path),
   homeDir: () => homedir(),
   readConfigFile: readRegularFileNoFollow,
+  platform: () => process.platform,
+  readProcEnviron: readProcEnvironFile,
+  getuid: currentUid,
 };
+
+// =============================================================================
+// Launch marks (Issue #4433)
+// =============================================================================
+
+export type ServerMarkRecordReading =
+  | { ok: true; record: ServerMarkRecord }
+  | { ok: false; reason: EnvListenerMarkReason };
+
+/** What the launchers name a record: 32 hex digits. */
+const RECORD_FILE_NAME = /^[0-9a-f]{32}\.json$/;
+
+/**
+ * Read a launch record from the path a server's `CM_SERVER_MARK` names.
+ *
+ * The path comes from the process's own environment, so it is checked before
+ * anything is read: absolute, a `<32 hex>.json` file directly in a directory
+ * named for this user (`commandmate-server-marks-<uid>`), that directory a real
+ * directory of this user's with no access for anyone else, the file a regular
+ * file of this user's (not a symlink, not a hard link) no larger than 4 KiB,
+ * and its content a v1 record. Any miss is a reason, never a throw.
+ */
+export function readServerMarkRecord(path: string, uid: number): ServerMarkRecordReading {
+  if (!path.startsWith('/') || /\s|\0/.test(path)) return { ok: false, reason: 'bad-path' };
+  const dir = dirname(path);
+  if (basename(dir) !== serverMarkDirName(uid) || !RECORD_FILE_NAME.test(basename(path))) {
+    return { ok: false, reason: 'bad-path' };
+  }
+  try {
+    const stat = lstatSync(dir);
+    if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o077) !== 0) {
+      return { ok: false, reason: 'dir-not-private' };
+    }
+  } catch {
+    return { ok: false, reason: 'record-unreadable' };
+  }
+  let text: string;
+  try {
+    if (lstatSync(path).uid !== uid) return { ok: false, reason: 'record-unreadable' };
+    text = readRegularFileNoFollow(path, SERVER_MARK_MAX_BYTES).toString('utf8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    return { ok: false, reason: message.startsWith('larger than') ? 'record-too-large' : 'record-unreadable' };
+  }
+  const record = parseServerMarkRecord(text);
+  return record ? { ok: true, record } : { ok: false, reason: 'record-malformed' };
+}
+
+const answered = (result: CommandResult): boolean =>
+  result.failure === null && (result.code === 0 || result.code === 1);
+
+/** The `CM_SERVER_MARK=` values among one environment's entries; null stays null (unreadable). */
+function markValues(tokens: string[] | null): string[] | null {
+  if (tokens === null) return null;
+  const prefix = `${SERVER_MARK_ENV}=`;
+  return tokens.filter((token) => token.startsWith(prefix)).map((token) => token.slice(prefix.length));
+}
+
+/**
+ * Each process's environment entries, or null when it could not be read.
+ *
+ * linux: `/proc/<pid>/environ`, exact. Elsewhere (macOS): `ps -E` prints the
+ * command line and then the environment with no boundary, so only what follows
+ * the command line `ps -A -o command=` printed for the same pid is read — a
+ * mark-shaped *argument* is not the environment. A line that does not start
+ * with that command line is unreadable.
+ */
+async function readEnvironments(
+  deps: EnvProbeDeps,
+  pids: number[],
+  commandLines: Map<number, string>
+): Promise<Map<number, string[] | null>> {
+  const result = new Map<number, string[] | null>();
+  const platform = deps.platform?.() ?? process.platform;
+  if (platform === 'linux') {
+    for (const pid of pids) {
+      const text = deps.readProcEnviron?.(pid) ?? null;
+      result.set(pid, text === null ? null : text.split('\0').filter((token) => token !== ''));
+    }
+    return result;
+  }
+  const listing = await deps.run('ps', ['-E', '-ww', '-o', 'pid=,command=', '-p', pids.join(',')]);
+  const lines = answered(listing) ? parseProcessTable(listing.stdout) : new Map<number, string>();
+  for (const pid of pids) {
+    const line = lines.get(pid);
+    const command = commandLines.get(pid);
+    if (line === undefined || command === undefined || !line.startsWith(command)) {
+      result.set(pid, null);
+      continue;
+    }
+    result.set(pid, line.slice(command.length).split(/\s+/).filter((token) => token !== ''));
+  }
+  return result;
+}
+
+/**
+ * Read and check each listening process's launch mark (Issue #4433).
+ *
+ * A mark holds only when the record it names says this process's group is the
+ * launch's group and that group's leader is still the recorded process (same
+ * start time, read as `LC_ALL=C TZ=UTC0 ps -o lstart=`). That ties the mark to
+ * one launch: a mark inherited through the environment or copied from another
+ * server names a group this process is not in, and a reused pid has another
+ * start time. The extra commands are separate from the listing's own, and a
+ * failure in any of them only makes marks absent or invalid — the listing, its
+ * keys and details are what they were before #4433.
+ */
+async function readListenerMarks(
+  deps: EnvProbeDeps,
+  pids: number[],
+  commandLines: Map<number, string>,
+  cwdByPid: Map<number, string>
+): Promise<Map<number, EnvListenerMark>> {
+  const pidList = pids.join(',');
+  const pgidListing = await deps.run('ps', ['-o', 'pid=,pgid=', '-p', pidList]);
+  const pgidByPid = new Map<number, number>();
+  if (answered(pgidListing)) {
+    for (const [pid, rest] of parseProcessTable(pgidListing.stdout)) {
+      if (/^\d+$/.test(rest)) pgidByPid.set(pid, Number(rest));
+    }
+  }
+  const environments = await readEnvironments(deps, pids, commandLines);
+  const uid = deps.getuid?.() ?? currentUid();
+  const readRecord = deps.readMarkRecord ?? ((path: string) => readServerMarkRecord(path, uid));
+
+  const marks = new Map<number, EnvListenerMark>();
+  const candidates = new Map<number, ServerMarkRecord>();
+  for (const pid of pids) {
+    const base = { pid, pgid: pgidByPid.get(pid) ?? null, anchor: cwdByPid.get(pid) ?? null };
+    const fail = (status: 'absent' | 'invalid', reason: EnvListenerMarkReason) =>
+      marks.set(pid, { ...base, status, reason });
+    const values = markValues(environments.get(pid) ?? null);
+    if (values === null) {
+      fail('absent', 'env-unreadable');
+      continue;
+    }
+    if (values.length === 0) {
+      fail('absent', 'no-mark');
+      continue;
+    }
+    // Which one `getenv` would return is not knowable from here: refuse both.
+    if (values.length > 1) {
+      fail('invalid', 'duplicate-mark');
+      continue;
+    }
+    if (base.pgid === null) {
+      fail('absent', 'pgid-unreadable');
+      continue;
+    }
+    const reading = readRecord(values[0]);
+    if (!reading.ok) {
+      fail('invalid', reading.reason);
+      continue;
+    }
+    if (reading.record.pgid !== base.pgid) {
+      fail('invalid', 'pgid-mismatch');
+      continue;
+    }
+    candidates.set(pid, reading.record);
+  }
+  if (candidates.size === 0) return marks;
+
+  // One reading for every leader, taken from the observed groups.
+  const leaders = [...new Set(pids.map((pid) => pgidByPid.get(pid)).filter((pgid): pgid is number => pgid !== undefined))];
+  const lstartListing = await deps.run('ps', ['-o', 'pid=,lstart=', '-p', leaders.join(',')], {
+    env: SERVER_MARK_LSTART_ENV,
+  });
+  const lstartByPid = new Map<number, string>();
+  if (answered(lstartListing)) {
+    for (const [pid, rest] of parseProcessTable(lstartListing.stdout)) lstartByPid.set(pid, normalizeLstart(rest));
+  }
+  for (const [pid, record] of candidates) {
+    const base = { pid, pgid: record.pgid, anchor: cwdByPid.get(pid) ?? null };
+    if (!answered(lstartListing)) {
+      marks.set(pid, { ...base, status: 'invalid', reason: 'lstart-unreadable' });
+      continue;
+    }
+    const leaderStart = lstartByPid.get(record.pgid);
+    if (leaderStart === undefined || leaderStart === '') {
+      marks.set(pid, { ...base, status: 'invalid', reason: 'leader-gone' });
+      continue;
+    }
+    if (leaderStart !== record.leaderStartTime) {
+      marks.set(pid, { ...base, status: 'invalid', reason: 'leader-start-mismatch' });
+      continue;
+    }
+    marks.set(pid, {
+      ...base,
+      status: 'verified',
+      reason: null,
+      launcherCwd: record.launcherCwd,
+      worktreeRoot: record.worktreeRoot,
+      repoRoot: record.repoRoot,
+      session: record.session,
+    });
+  }
+  return marks;
+}
 
 // =============================================================================
 // Probe: TCP listeners
@@ -461,16 +758,31 @@ export async function probeListeners(deps: EnvProbeDeps): Promise<EnvProbeResult
     }
   }
 
+  const pidOrder = [...new Set(relevant.map((block) => block.pid))];
+  const markByPid = await readListenerMarks(deps, pidOrder, table, cwdByPid);
+
+  // Every process on a key keeps its own mark (Issue #4433): `ok()` keeps the
+  // first entry of a key, so the list is shared by all of that key's entries.
+  const marksByKey = new Map<string, EnvListenerMark[]>();
   const entries: EnvEntry[] = [];
   for (const block of relevant) {
     const command = block.fields.get('c')?.[0] ?? 'unknown';
     for (const name of block.fields.get('n') ?? []) {
       const port = portOf(name);
       if (!port) continue;
+      const key = `tcp/${port}`;
+      let marks = marksByKey.get(key);
+      if (!marks) {
+        marks = [];
+        marksByKey.set(key, marks);
+      }
+      const mark = markByPid.get(block.pid);
+      if (mark && !marks.some((existing) => existing.pid === block.pid)) marks.push(mark);
       entries.push({
-        key: `tcp/${port}`,
+        key,
         detail: `${command} pid=${block.pid}`,
         anchor: cwdByPid.get(block.pid) ?? null,
+        marks,
       });
     }
   }

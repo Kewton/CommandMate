@@ -35,7 +35,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { existsSync, readdirSync, readlinkSync } from 'fs';
+import { existsSync, readdirSync, readlinkSync, realpathSync } from 'fs';
 import { basename, dirname, join, resolve, sep } from 'path';
 import type { VerificationGateTerminalStatus } from '@/lib/db';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -51,12 +51,14 @@ import { isCliToolType } from '@/lib/cli-tools/types';
 import type { TaskContract } from '@/lib/tasks/contract-parser';
 import {
   captureEnvSnapshot,
+  ENV_LISTENER_MARK_REASONS,
   ENV_PROBE_IDS,
   ENV_PROBE_LABELS,
   limitConfigReason,
   RESOURCE_CONFIG_ENTRY_NAME,
   type EnvConfigCheck,
   type EnvEntry,
+  type EnvListenerMark,
   type EnvProbeId,
   type EnvSnapshot,
 } from './env-snapshot';
@@ -276,14 +278,16 @@ export function defaultOtherWorktreeProbe(
 }
 
 /**
- * Attribute a listening process by the directory it runs in.
+ * Attribute a process by the directory it runs in.
  *
  * Inside this worktree is this task. A *sibling* of this worktree is another
- * worker — linked worktrees are created side by side, and the primary checkout
- * the user's production server runs from sits there too, which is what keeps a
- * parallel delegation and the user's own server from being reported as this
- * task's leak. Anything else, including a process with no readable cwd, stays
- * unattributed and is judged.
+ * worker — linked worktrees are created side by side. Anything else, including
+ * a process with no readable cwd, stays unattributed and is judged.
+ *
+ * Used for `$HOME` entries of live test runs and for session-kill callers. Not
+ * for listeners since Issue #4433: a detached daemon runs in the package root,
+ * itself a sibling, so a directory says nothing about who launched a server
+ * ({@link attributeListener}).
  */
 export function attributeAnchor(anchor: string | null, worktreePath: string): EnvEntryOwner {
   if (!anchor) return 'unattributed';
@@ -295,6 +299,136 @@ export function attributeAnchor(anchor: string | null, worktreePath: string): En
   // unattributable as one running in `/`.
   if (path !== parent && path.startsWith(parent + sep)) return 'other';
   return 'unattributed';
+}
+
+// -----------------------------------------------------------------------------
+// Listeners: attributed by launch marks only (Issue #4433)
+// -----------------------------------------------------------------------------
+
+const MARK_STATUSES = new Set<string>(['verified', 'absent', 'invalid']);
+const MARK_REASONS = new Set<string>(ENV_LISTENER_MARK_REASONS);
+
+/**
+ * A stored listener's marks, or null when it has none (a snapshot written
+ * before #4433). A snapshot is a JSON file and `isEnvSnapshot` does not look
+ * inside entries, so an element of the wrong shape is kept as a mark that is
+ * not verified rather than trusted or dropped.
+ */
+function readListenerMarks(entry: EnvEntry): EnvListenerMark[] | null {
+  const marks: unknown = entry.marks;
+  if (!Array.isArray(marks)) return null;
+  return marks.map((value): EnvListenerMark => {
+    const mark = (typeof value === 'object' && value !== null ? value : {}) as Partial<EnvListenerMark>;
+    const status = typeof mark.status === 'string' && MARK_STATUSES.has(mark.status) ? mark.status : 'invalid';
+    return {
+      ...mark,
+      pid: typeof mark.pid === 'number' ? mark.pid : -1,
+      pgid: typeof mark.pgid === 'number' ? mark.pgid : null,
+      anchor: typeof mark.anchor === 'string' ? mark.anchor : null,
+      status,
+      reason:
+        status === 'verified'
+          ? null
+          : typeof mark.reason === 'string' && MARK_REASONS.has(mark.reason)
+            ? mark.reason
+            : 'record-malformed',
+    };
+  });
+}
+
+/** `realpath` with the platform's own call (it also folds case on macOS); null on failure. */
+function realpathOrNull(path: string): string | null {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return null;
+  }
+}
+
+/** `path` is `root` or below it, on a separator boundary (`/a/wt-2` is not in `/a/wt`). */
+function isWithin(path: string, root: string): boolean {
+  return path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
+/**
+ * Inside the task's worktree, compared both as written and as resolved. Either
+ * one is enough: calling something this task's makes it a violation, so a
+ * failed `realpath` here never excuses anything (#4459 review P1-2).
+ */
+function isInsideWorktree(path: string, worktreePath: string): boolean {
+  if (isWithin(resolve(path), resolve(worktreePath))) return true;
+  const real = realpathOrNull(path);
+  const worktree = realpathOrNull(worktreePath);
+  return real !== null && worktree !== null && isWithin(real, worktree);
+}
+
+/**
+ * Shown, after resolving, to be neither inside the worktree nor one of its
+ * ancestors. A path that does not resolve is not shown to be anywhere.
+ */
+function isShownOutside(path: string | null | undefined, realWorktree: string): boolean {
+  if (typeof path !== 'string' || !path.startsWith('/')) return false;
+  const real = realpathOrNull(path);
+  return real !== null && !isWithin(real, realWorktree) && !isWithin(realWorktree, real);
+}
+
+/**
+ * Attribute a listening port by the launch marks of the processes on it.
+ *
+ * Nothing about the process itself — its directory, its ancestors, its port —
+ * can excuse it (Issue #4433: a guess that is wrong makes the worker's own
+ * server pass). Only a mark the probe verified at capture time counts, and the
+ * record's launch origin decides:
+ *
+ *   - `self` when any process runs inside this worktree, any verified record
+ *     was launched from inside it (cwd, git root, run-server's repo root), or
+ *     any verified record's tmux session is this worktree's;
+ *   - `other` only when **every** process on the port carries a verified mark
+ *     whose session is another worktree's CommandMate session and whose launch
+ *     cwd, git root, repo root (when recorded) and the process's own cwd all
+ *     resolve outside this worktree. `no-tmux`, `lookup-failed`, a session that
+ *     is not a CommandMate one, or a missing git root are not evidence;
+ *   - `unattributed` (judged) otherwise, including every listener of a
+ *     snapshot written before #4433.
+ */
+export function attributeListener(entry: EnvEntry, context: EnvAttributionContext): EnvEntryOwner {
+  const marks = readListenerMarks(entry);
+  const sessionOwner = (mark: EnvListenerMark): EnvEntryOwner =>
+    mark.status === 'verified' && typeof mark.session === 'string'
+      ? attributeSessionName(mark.session, context.worktreeId, context.isOtherWorktree)
+      : 'unattributed';
+
+  const ownPaths = [
+    entry.anchor,
+    ...(marks ?? []).flatMap((mark) => [
+      mark.anchor,
+      ...(mark.status === 'verified' ? [mark.launcherCwd, mark.worktreeRoot, mark.repoRoot] : []),
+    ]),
+  ].filter((path): path is string => typeof path === 'string' && path !== '');
+  if (ownPaths.some((path) => isInsideWorktree(path, context.worktreePath))) return 'self';
+  if ((marks ?? []).some((mark) => sessionOwner(mark) === 'self')) return 'self';
+
+  if (!marks || marks.length === 0) return 'unattributed';
+  const realWorktree = realpathOrNull(context.worktreePath);
+  if (realWorktree === null) return 'unattributed';
+  const everyOther = marks.every(
+    (mark) =>
+      mark.status === 'verified' &&
+      sessionOwner(mark) === 'other' &&
+      isShownOutside(mark.launcherCwd, realWorktree) &&
+      isShownOutside(mark.worktreeRoot, realWorktree) &&
+      (mark.repoRoot === null || mark.repoRoot === undefined || isShownOutside(mark.repoRoot, realWorktree)) &&
+      isShownOutside(mark.anchor, realWorktree)
+  );
+  return everyOther ? 'other' : 'unattributed';
+}
+
+/** `mark=<word>[,<word>…]` for a listener line, one fixed word per process; null without marks. */
+function describeListenerMarks(entry: EnvEntry): string | null {
+  const marks = readListenerMarks(entry);
+  if (marks === null) return null;
+  if (marks.length === 0) return 'mark=none';
+  return `mark=${marks.map((mark) => mark.reason ?? 'verified').join(',')}`;
 }
 
 /**
@@ -420,7 +554,7 @@ function attributeEntry(
     case 'tmux-sessions':
       return attributeSessionName(entry.key, context.worktreeId, context.isOtherWorktree);
     case 'listeners':
-      return attributeAnchor(entry.anchor, context.worktreePath);
+      return attributeListener(entry, context);
     case 'home-entries':
       return attributeHomeEntry(entry.key, context.worktreePath, resolvePidCwd);
     default:
@@ -1015,7 +1149,11 @@ export interface EnvCleanDiff {
 }
 
 function toChange(entry: EnvEntry, owner: EnvEntryOwner): EnvChange {
-  return { key: entry.key, detail: entry.detail, owner };
+  // A listener's mark goes on its line before the owner, which must stay the
+  // line's last token (wait-verify.mjs `envCleanItems`, #4162).
+  const mark = describeListenerMarks(entry);
+  const detail = mark === null ? entry.detail : [entry.detail, mark].filter(Boolean).join(' ');
+  return { key: entry.key, detail, owner };
 }
 
 /**

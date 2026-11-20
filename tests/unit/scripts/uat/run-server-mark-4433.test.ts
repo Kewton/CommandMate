@@ -53,6 +53,8 @@ setInterval(() => {}, 1 << 30);
 const UID = process.getuid ? process.getuid() : 0;
 
 let root: string;
+/** As mkdtemp returned it: socket paths stay within macOS's 104 bytes (no `/private` prefix). */
+let shortRoot: string;
 let runDir: string;
 let caller: string;
 let markBase: string;
@@ -67,7 +69,7 @@ function baseEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     ...env,
     CM_RUN_LOCK_DIR: path.join(root, 'lock'),
-    CM_UAT_SOCK_BASE: root,
+    CM_UAT_SOCK_BASE: shortRoot,
     CM_UAT_SERVER_ENTRY: path.join(root, 'dist', 'server', 'server.js'),
     CM_SERVER_MARK_BASE: markBase,
     CODEX_HOME: path.join(root, 'codex'),
@@ -114,11 +116,12 @@ function serverEnvironment(pid: number): string[] {
 }
 
 beforeEach(() => {
-  root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'm')));
+  shortRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'm'));
+  root = fs.realpathSync(shortRoot);
   runDir = path.join(root, 'run');
   caller = path.join(root, 'caller');
   markBase = path.join(root, 'marks');
-  callerSock = path.join(root, 'c.sock');
+  callerSock = path.join(shortRoot, 'c.sock');
   fs.mkdirSync(caller);
   fs.mkdirSync(markBase);
   fs.mkdirSync(path.join(root, 'codex'));
@@ -140,7 +143,7 @@ afterEach(() => {
   }
   for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
     if (name.startsWith('cmuat-')) {
-      spawnSync('tmux', ['-S', path.join(root, name, 'tmux.sock'), 'kill-server'], { stdio: 'ignore' });
+      spawnSync('tmux', ['-S', path.join(shortRoot, name, 'tmux.sock'), 'kill-server'], { stdio: 'ignore' });
     }
   }
   spawnSync('tmux', ['-S', callerSock, 'kill-server'], { stdio: 'ignore' });
@@ -181,6 +184,11 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh marks its server (Issue #4433)', () =
       const entry = probe.entries.find((candidate) => candidate.key === `tcp/${port}`);
       expect(entry?.marks).toHaveLength(1);
       expect(entry?.marks?.[0]).toMatchObject({ pid, pgid: pid, status: 'verified' });
+
+      // `down` removes the record once the server is stopped.
+      const down = runScript(['down', '--run-dir', runDir]);
+      expect(down.status, down.stderr).toBe(0);
+      expect(fs.existsSync(recordPath)).toBe(false);
     },
     REAL_SHELL_TEST_TIMEOUT_MS
   );

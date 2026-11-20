@@ -113,6 +113,18 @@ let port: number;
 const leaders: number[] = [];
 const holders: Server[] = [];
 
+// Issue #4433: start() writes a launch-mark record under CM_SERVER_MARK_BASE (default /tmp);
+// keep it in a temp dir of this file's own.
+let serverMarkBase = '';
+beforeEach(() => {
+  serverMarkBase = mkdtempSync(join(tmpdir(), 'cm-mark-'));
+  process.env.CM_SERVER_MARK_BASE = serverMarkBase;
+});
+afterEach(() => {
+  delete process.env.CM_SERVER_MARK_BASE;
+  rmSync(serverMarkBase, { recursive: true, force: true });
+});
+
 describe('DaemonManager process group (Issue #3087)', () => {
   beforeEach(async () => {
     const caseDir = mkdtempSync(join(workDir, 'case-'));

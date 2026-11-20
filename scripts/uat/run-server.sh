@@ -53,7 +53,8 @@
 # it: under own-home they are the dedicated user's, written on purpose. Without
 # --own-home nothing changes.
 #
-# Test hooks: CM_UAT_SOCK_BASE (default /tmp) moves the socket directories,
+# Test hooks: CM_UAT_SOCK_BASE (default /tmp) moves the socket directories, CM_SERVER_MARK_BASE
+# (default /tmp) the launch-mark record directory (#4433),
 # CM_UAT_SERVER_ENTRY (default dist/server/server.js) replaces the server.
 #
 # bash 3.2 compatible (macOS /bin/bash).
@@ -100,6 +101,105 @@ state_set() {
 # env_value_of <pid> <name> — a variable from the process's own environment.
 env_value_of() {
     ps eww -o command= -p "$1" 2>/dev/null | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1
+}
+
+# ---------------------------------------------------------------------- launch mark (#4433)
+#
+# The server gets CM_SERVER_MARK=<record> and the record (src/cli/types/server-mark.ts, the same
+# shape `commandmate start --daemon` writes) names its process group (set -m: pgid = server pid),
+# the leader's start time and where this run was started from. env-clean excuses a listener as
+# another worktree's only on a record it can verify, so the judge's isolated server no longer fails
+# a worker's verify. The origin is the CALLER's: its directory and tmux pane, read before cmd_up's
+# `cd "$REPO_ROOT"` and before the server is handed a private tmux. Anything that does not hold
+# leaves the server unmarked (judged like any other), never stops the run.
+
+MARK_PATH=""
+MARK_LAUNCHER_CWD=""
+MARK_WORKTREE_ROOT=""
+MARK_REPO_ROOT=""
+MARK_SESSION=""
+
+# mark_json_safe <value> — 0 when it can go between JSON quotes as is.
+mark_json_safe() {
+    case "$1" in
+        *'"'* | *'\'* | *[[:cntrl:]]*) return 1 ;;
+    esac
+    return 0
+}
+
+# mark_prepare — decide the record path and read the caller's origin. Sets MARK_* (MARK_PATH empty
+# when the run starts unmarked).
+mark_prepare() {
+    MARK_PATH=""
+    local base uid dir hex top v
+    # Fixed (not TMPDIR, not the socket base): the daemon and the verifier use the same place.
+    base="${CM_SERVER_MARK_BASE:-/tmp}"
+    base="${base%/}"
+    uid="$(id -u 2>/dev/null)" || return 1
+    dir="$base/commandmate-server-marks-$uid"
+    mkdir -m 700 "$dir" 2>/dev/null
+    [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
+    # A directory of this user's that nobody else can enter, or no mark.
+    [ -n "$(find "$dir" -maxdepth 0 -type d -user "$uid" -perm 700 2>/dev/null)" ] || return 1
+    hex="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+    case "$hex" in
+        "" | *[!0-9a-f]*) return 1 ;;
+    esac
+    [ "${#hex}" -eq 32 ] || return 1
+    MARK_LAUNCHER_CWD="$(pwd -P)" || return 1
+    MARK_WORKTREE_ROOT=""
+    top="$(git -C "$MARK_LAUNCHER_CWD" rev-parse --show-toplevel 2>/dev/null)"
+    if [ -n "$top" ] && [ -d "$top" ]; then
+        MARK_WORKTREE_ROOT="$(cd "$top" && pwd -P)" || MARK_WORKTREE_ROOT=""
+    fi
+    MARK_REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)" || return 1
+    if [ -z "${TMUX:-}" ]; then
+        MARK_SESSION=no-tmux
+    elif [ -z "${TMUX_PANE:-}" ]; then
+        MARK_SESSION=lookup-failed
+    else
+        MARK_SESSION="$(tmux -S "${TMUX%%,*}" display-message -p -t "$TMUX_PANE" '#S' 2>/dev/null)"
+        case "$MARK_SESSION" in
+            "" | *[[:space:]]*) MARK_SESSION=lookup-failed ;;
+        esac
+    fi
+    for v in "$dir" "$MARK_LAUNCHER_CWD" "$MARK_WORKTREE_ROOT" "$MARK_REPO_ROOT" "$MARK_SESSION"; do
+        mark_json_safe "$v" || return 1
+    done
+    case "$dir" in
+        *[[:space:]]*) return 1 ;;
+    esac
+    MARK_PATH="$dir/$hex.json"
+}
+
+# mark_remove <state file> — remove the record `up` wrote, once its server is stopped. Only a regular
+# file named like a record in a record directory; anything else recorded there is left alone.
+mark_remove() {
+    local path
+    path=$(state_get "$1" mark_path)
+    case "$path" in
+        /*/commandmate-server-marks-*/*.json) ;;
+        *) return 0 ;;
+    esac
+    [ -f "$path" ] && [ ! -L "$path" ] && rm -f "$path"
+    return 0
+}
+
+# mark_write <pid> — write the record for the group <pid> leads. Exclusive create, mode 0600.
+mark_write() {
+    local lstart wt at
+    [ -n "$MARK_PATH" ] || return 1
+    lstart="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | tr -s ' \t' '  ' | sed 's/^ //; s/ $//')"
+    [ -n "$lstart" ] && mark_json_safe "$lstart" || return 1
+    wt=null
+    [ -z "$MARK_WORKTREE_ROOT" ] || wt="\"$MARK_WORKTREE_ROOT\""
+    at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    (
+        umask 077
+        set -o noclobber
+        printf '{"v":1,"launcher":"run-server","pgid":%s,"leaderStartTime":"%s","launcherCwd":"%s","worktreeRoot":%s,"repoRoot":"%s","session":"%s","launchedAt":"%s"}\n' \
+            "$1" "$lstart" "$MARK_LAUNCHER_CWD" "$wt" "$MARK_REPO_ROOT" "$MARK_SESSION" "$at" >"$MARK_PATH"
+    ) 2>/dev/null
 }
 
 # group_members <G> — the pids (not the leader <G>) whose process group is <G>, one per
@@ -805,6 +905,13 @@ cmd_up() {
     [ -n "$tmux_pid" ] || exit 1
     state_set "$UP_STATE" tmux_pid "$tmux_pid"
 
+    # Before the cd: the record names the caller's directory, not this checkout (#4433).
+    local mark_env=()
+    if mark_prepare; then
+        mark_env=("CM_SERVER_MARK=$MARK_PATH")
+    else
+        log "the server starts without a launch mark (env-clean will judge it as unmarked)"
+    fi
     cd "$REPO_ROOT" || exit 1
     # The handover's signal (go) and receipt (ack) are named by this run: a second `up` on the same run dir
     # (after `down`) never meets an earlier run's. Removed and seen absent before the fork, or nothing starts.
@@ -833,6 +940,7 @@ cmd_up() {
         CM_OPENCODE_SESSION_FILE="$RUN_DIR/opencode-sessions.json" \
         CM_OPENCODE_PORT_FILE="$RUN_DIR/opencode-ports.json" \
         ${test_seams[@]+"${test_seams[@]}"} \
+        ${mark_env[@]+"${mark_env[@]}"} \
         nohup /bin/bash -c '. "$1" || exit 75; lock_child_wait "$2" "$3" "$4" "$5" || exit 75; unset CM_VERIFY_TEST_HANDOFF CM_VERIFY_TEST_HANDOFF_DIR CM_VERIFY_TEST_OBS_FAULT CM_VERIFY_TEST_OBS_FAULT_FILE; shift 6; exec "$@"' \
         cm-uat-child "$REPO_ROOT/scripts/lib/machine-lock.sh" "$UP_GO" "$UP_ACK" "$deadline" "$$" -- node "$SERVER_ENTRY" >"$RUN_DIR/server.log" 2>&1 </dev/null &
     UP_SERVER_PID=$!
@@ -843,6 +951,13 @@ cmd_up() {
         wait "$UP_SERVER_PID" 2>/dev/null
         UP_CHILD_REAPED=1
         fail_up "state-write-failed"
+    fi
+    if [ -n "$MARK_PATH" ]; then
+        if mark_write "$UP_SERVER_PID"; then
+            state_set "$UP_STATE" mark_path "$MARK_PATH"
+        else
+            log "could not write the launch mark record (env-clean will judge the server as unmarked)"
+        fi
     fi
     run_lock_set_pid "$run_id" "$UP_SERVER_PID" "$UP_SERVER_PID" "$UP_GO" || up_handoff_fail "$RUN_LOCK_STAGE"
     UP_PHASE=after-go
@@ -905,10 +1020,12 @@ cmd_down() {
 
     if down_procedure "$state"; then
         remove_socket_dir "$sock_dir"
+        mark_remove "$state"
     else
         # The lock stays when the server or its group may still be running (or the lock is another run's).
         if [ "$DOWN_SERVER_STOPPED" -eq 1 ]; then
             remove_socket_dir "$sock_dir"
+            mark_remove "$state"
         else
             remove_socket_dir_tmux_only "$sock_dir"
         fi
