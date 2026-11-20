@@ -22,9 +22,23 @@
  */
 
 import { execFile } from 'child_process';
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, join } from 'path';
+import { parse as parseYaml } from 'yaml';
 import { getEnv } from '@/lib/env';
 import { createLogger } from '@/lib/logger';
 import { MACHINE_LOCK_DIR_NAME } from './machine-lock';
@@ -79,6 +93,32 @@ export interface EnvEntry {
    * `attributeAnchor` in env-clean-gate).
    */
   anchor: string | null;
+  /**
+   * What reading `~/.commandmate/resource.yaml` found (Issue #4406). Only ever
+   * set on that one entry of `commandmate-entries`, and never compared or used
+   * for the verdict: the addition stays a violation whatever this says. It is
+   * there so the person adjudicating the violation can tell, without opening
+   * the machine, whether the file has the reader's shape and which bytes it
+   * held. Absent on snapshots written before #4406.
+   */
+  config?: EnvConfigCheck;
+}
+
+/**
+ * The result of reading one user config file for the report (Issue #4406).
+ *
+ * `invalid` covers every way the file could not be shown to be a config the
+ * reader would accept — not a regular file, a symlink, a hard link, too big,
+ * unreadable, not YAML, the wrong shape — with the cause in `reason`. On `ok`,
+ * `reason` is an optional note for the reader of the report.
+ */
+export interface EnvConfigCheck {
+  shape: 'ok' | 'invalid';
+  reason: string | null;
+  /** sha256 of the file's bytes as read (what `shasum -a 256` prints); null when unread. */
+  sha256: string | null;
+  /** Bytes read; null when unread. */
+  size: number | null;
 }
 
 export type EnvProbeStatus = 'ok' | 'unavailable';
@@ -118,6 +158,12 @@ export interface EnvProbeDeps {
   /** Throws the way `fs.readdirSync` does; the caller turns that into `unavailable`. */
   readDir(path: string): string[];
   homeDir(): string;
+  /**
+   * Read a user config file's bytes for {@link inspectResourceConfig}; throws
+   * with the reason when the file is not one to read. Optional so existing
+   * probe fakes keep working; defaults to {@link readRegularFileNoFollow}.
+   */
+  readConfigFile?(path: string, maxBytes: number): Buffer;
 }
 
 /** Probes are bounded: a hung `lsof` must not hold a verification run open. */
@@ -158,10 +204,55 @@ function runCommand(command: string, args: string[]): Promise<CommandResult> {
   });
 }
 
+/**
+ * Read a regular file without following a link, checking and reading the same
+ * open file (Issue #4406).
+ *
+ * `O_NOFOLLOW` refuses a symlink at the final component; `fstat` on the open fd
+ * then checks the file that is actually being read, so a swap between the check
+ * and the read cannot substitute another file. `nlink === 1` refuses a hard link
+ * to a file kept elsewhere. `O_NONBLOCK` keeps a FIFO from hanging the probe
+ * (it is then refused as not a regular file). A deliberate swap by the same user
+ * is out of scope: that user can write the directory and the baselines alike.
+ *
+ * @throws Error whose message is the reason the file was not read
+ */
+export function readRegularFileNoFollow(path: string, maxBytes: number): Buffer {
+  let fd: number;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? 'EUNKNOWN';
+    throw new Error(code === 'ELOOP' ? 'a symlink (not followed)' : `cannot open (${code})`);
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error('not a regular file');
+    if (stat.nlink !== 1) throw new Error(`a hard link (nlink=${stat.nlink})`);
+    if (stat.size > maxBytes) throw new Error(`larger than ${maxBytes} bytes (${stat.size})`);
+    // Read up to one byte past the limit: a file that grew after fstat is still caught.
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let total = 0;
+    for (;;) {
+      const read = readSync(fd, buffer, total, buffer.length - total, null);
+      if (read === 0) break;
+      total += read;
+      if (total > maxBytes) throw new Error(`larger than ${maxBytes} bytes`);
+    }
+    return buffer.subarray(0, total);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    throw code ? new Error(`cannot read (${code})`) : error;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export const DEFAULT_ENV_PROBE_DEPS: EnvProbeDeps = {
   run: runCommand,
   readDir: (path: string) => readdirSync(path),
   homeDir: () => homedir(),
+  readConfigFile: readRegularFileNoFollow,
 };
 
 // =============================================================================
@@ -516,12 +607,169 @@ export function probeHomeEntries(deps: EnvProbeDeps): EnvProbeResult {
   return probeDirectory(deps, deps.homeDir(), { missingIsEmpty: false });
 }
 
+// =============================================================================
+// The user's resource config (Issue #4406)
+// =============================================================================
+
+/**
+ * `~/.commandmate/resource.yaml`, read by `scripts/orchestrate/resource-config.mjs`
+ * (Issue #4370) every time it is called. A change to it takes effect on the
+ * resource gate of every lane at once, so its appearance during a task stays a
+ * violation: who placed it cannot be established here (the owner check is #4497).
+ * What this module adds is the reading the adjudicator needs — shape and hash.
+ */
+export const RESOURCE_CONFIG_ENTRY_NAME = 'resource.yaml';
+
+/** Far above a hand-written config; a larger file is not read. */
+export const RESOURCE_CONFIG_MAX_BYTES = 64 * 1024;
+
+/**
+ * The reader's top-level keys (`TOP_KEYS` in resource-config.mjs). A copy, since a
+ * `.mjs` script cannot be imported from here; the unit test compares it with the
+ * script's source so the two cannot drift apart.
+ */
+export const RESOURCE_CONFIG_TOP_KEYS: readonly string[] = [
+  'version',
+  'ncpu',
+  'commandmate_share',
+  'load_ceiling',
+  'load_resume',
+  'weights',
+  'ci_vm',
+  'runners',
+  'health',
+  'idle',
+];
+
+/** Unknown keys named in a reason before the rest becomes a count. */
+export const RESOURCE_CONFIG_REASON_MAX_KEYS = 5;
+
+/** Longest reason carried into a snapshot and printed in a report. */
+export const RESOURCE_CONFIG_REASON_MAX_CHARS = 200;
+
+/**
+ * Make a reason safe to print on one report line: control and line-separator
+ * characters become `\uXXXX`, and the text is cut at
+ * {@link RESOURCE_CONFIG_REASON_MAX_CHARS}. Applied where a reason is made and
+ * again where a loaded one is printed (a baseline is a file, not a promise).
+ */
+export function limitConfigReason(reason: string): string {
+  // eslint-disable-next-line no-control-regex
+  const escaped = reason.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, (c) =>
+    `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
+  );
+  return escaped.length > RESOURCE_CONFIG_REASON_MAX_CHARS
+    ? `${escaped.slice(0, RESOURCE_CONFIG_REASON_MAX_CHARS)}…`
+    : escaped;
+}
+
+/**
+ * A wrong `version` for the reason, without expanding a collection: YAML aliases
+ * can make one refer to itself (`version: &v [*v]`), and stringifying that would
+ * throw out of the probe (codex review 3, P2).
+ */
+function describeConfigVersion(value: unknown): string {
+  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
+    return JSON.stringify(value) ?? String(value);
+  }
+  return `(a ${Array.isArray(value) ? 'list' : typeof value})`;
+}
+
+/** Keys under which a later resource PR runs commands or keeps a controller (resource-4370.md §2.7). */
+const RESOURCE_CONFIG_ACTING_KEYS = ['runners', 'health', 'idle'];
+
+/**
+ * Whether the text has the shape the reader accepts, judged strictly: an
+ * unknown top-level key is `invalid` here although the reader only warns.
+ * Values are not range-checked — that is the reader's job.
+ */
+export function checkResourceConfigText(text: string): { ok: boolean; reason: string | null } {
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(text);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: limitConfigReason(`not YAML (${String((error as Error).message).split('\n')[0]})`),
+    };
+  }
+  if (parsed === null || parsed === undefined) parsed = {};
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, reason: 'the top level is not a mapping' };
+  }
+  const doc = parsed as Record<string, unknown>;
+  const unknown = Object.keys(doc).filter((key) => !RESOURCE_CONFIG_TOP_KEYS.includes(key));
+  if (unknown.length > 0) {
+    // Keys are the file's text: quoted (a newline becomes `\n`), and only the
+    // first few, so a crafted key cannot forge a report line or bloat it.
+    const shown = unknown.slice(0, RESOURCE_CONFIG_REASON_MAX_KEYS).map((key) => JSON.stringify(key));
+    const more = unknown.length - shown.length;
+    return {
+      ok: false,
+      reason: limitConfigReason(`unknown key ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`),
+    };
+  }
+  if (doc.version !== undefined && doc.version !== 1) {
+    return { ok: false, reason: limitConfigReason(`version ${describeConfigVersion(doc.version)} is not 1`) };
+  }
+  const acting = RESOURCE_CONFIG_ACTING_KEYS.filter((key) => key in doc);
+  return { ok: true, reason: acting.length > 0 ? `has ${acting.join('/')}` : null };
+}
+
+/**
+ * Read and check `path` for the report. Never throws: a file that cannot be
+ * read is `invalid` with the reason, which changes nothing about the verdict.
+ */
+export function inspectResourceConfig(deps: EnvProbeDeps, path: string): EnvConfigCheck {
+  const read = deps.readConfigFile ?? readRegularFileNoFollow;
+  let bytes: Buffer;
+  try {
+    bytes = read(path, RESOURCE_CONFIG_MAX_BYTES);
+  } catch (error) {
+    return {
+      shape: 'invalid',
+      reason: limitConfigReason(error instanceof Error ? error.message : String(error)),
+      sha256: null,
+      size: null,
+    };
+  }
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return { shape: 'invalid', reason: 'not UTF-8', sha256, size: bytes.length };
+  }
+  // The check must not cost the entry: whatever the text does to the parser,
+  // the entry stays (as `invalid`) and is judged by its name like any other.
+  let shape: { ok: boolean; reason: string | null };
+  try {
+    shape = checkResourceConfigText(text);
+  } catch (error) {
+    shape = {
+      ok: false,
+      reason: limitConfigReason(`check failed (${error instanceof Error ? error.message : String(error)})`),
+    };
+  }
+  return { shape: shape.ok ? 'ok' : 'invalid', reason: shape.reason, sha256, size: bytes.length };
+}
+
 /** Entries directly under `~/.commandmate` — the state directory #1722 polluted. */
 export function probeCommandmateEntries(deps: EnvProbeDeps): EnvProbeResult {
-  return probeDirectory(deps, join(deps.homeDir(), '.commandmate'), {
+  const dir = join(deps.homeDir(), '.commandmate');
+  const result = probeDirectory(deps, dir, {
     missingIsEmpty: true,
     alsoIgnored: COMMANDMATE_RUNTIME_ENTRY_NAMES,
   });
+  if (result.status !== 'ok') return result;
+  return {
+    ...result,
+    entries: result.entries.map((entry) =>
+      entry.key === RESOURCE_CONFIG_ENTRY_NAME
+        ? { ...entry, config: inspectResourceConfig(deps, join(dir, entry.key)) }
+        : entry
+    ),
+  };
 }
 
 // =============================================================================

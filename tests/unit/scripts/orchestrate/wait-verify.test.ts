@@ -162,7 +162,8 @@ function harness({
       if (command === 'git') {
         const sub = args.slice(2);
         if (sub[0] === 'rev-parse') return ok(`${head}\n`);
-        if (sub[0] === 'status') return ok(status);
+        // dirty-tree reads `status --porcelain -z` (#4406): the fixture is written line by line and sent NUL-terminated.
+        if (sub[0] === 'status') return ok(sub.includes('-z') ? status.replace(/\n/g, '\0') : status);
         if (sub[0] === 'log') return ok(`${iso(commitAt)}\n`);
         throw new Error(`unexpected git ${sub.join(' ')}`);
       }
