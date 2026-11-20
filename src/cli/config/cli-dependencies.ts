@@ -96,11 +96,15 @@ export const DEPENDENCIES: DependencyCheck[] = [
     versionArg: '--version',
     required: false,
   },
+  // Issue #4480: `agy --version` starts the Antigravity binary, so it runs only
+  // with the usage declaration (#4452's gate). Without it, `agy` is only looked
+  // up on PATH and reported as found (version not checked) or missing.
   {
     name: 'Antigravity CLI',
     command: 'agy',
     versionArg: '--version',
     required: false,
+    gatedTool: 'antigravity',
   },
   {
     name: 'Command Code CLI',

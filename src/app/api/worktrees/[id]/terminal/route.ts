@@ -37,6 +37,13 @@
  * revisit the `sendUserMessage` question is a new caller, not this comment.
  * `tests/integration/api-send-prompt-waiting-1708.test.ts` pins both halves of
  * the arrangement so neither can drift while the route sits unused.
+ *
+ * Issue #4480: the route asks the tool policy (#4437) with the body's `origin`
+ * as `/send` does, right after the roster names the tool and before anything
+ * reads or types into the session. `sendMessage` is where antigravity marks a use
+ * and may relaunch agy, so a refusal must stop ahead of it: 409
+ * `TOOL_POLICY_DENIED`, nothing typed, no relaunch. No origin (the web UI, an
+ * older caller) and `terminal` go through, as on `/send`.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -60,6 +67,7 @@ import { PLAN_REVIEW_SEND_REFUSED_CODE } from '@/lib/session/send-attempt-types'
 import { commandCodePlanReviewSendMessage, respondAgentFor } from '@/lib/session/respond-target';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
+import { findToolPolicyDenial, readBodyOrigin, toolPolicyDeniedResponse } from '../send/send-tool-policy';
 
 const logger = createLogger('api/terminal');
 
@@ -75,7 +83,7 @@ export async function POST(
     const id = canonicalWorktreeId(requestedWorktreeId);
     const parsed = await readJsonObjectBody(req);
     if (!parsed.ok) return parsed.response;
-    const { cliToolId, command, instanceId: rawInstanceId } = parsed.body;
+    const { cliToolId, command, instanceId: rawInstanceId, origin: rawOrigin, originEvidence } = parsed.body;
 
     // Validate cliToolId against known CLI tool types
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
@@ -111,6 +119,12 @@ export async function POST(
     }
     const instanceId: string | undefined = rawInstanceId;
 
+    // Issue #4480: who started the request, read as `/send` reads it.
+    const origin = readBodyOrigin(rawOrigin);
+    if (!origin.ok) {
+      return NextResponse.json({ error: origin.error }, { status: 400 });
+    }
+
     // Verify worktree exists in DB
     const db = getDbInstance();
     const worktree = getWorktreeById(db, id);
@@ -134,6 +148,18 @@ export async function POST(
       return sessionTargetConflictResponse(resolution.conflict);
     }
     const target = resolution.target;
+
+    // Issue #4480: the tool policy, on the tool the roster resolved (the one
+    // `sendMessage` below drives), before the session is read or typed into.
+    const toolPolicyDenial = findToolPolicyDenial({
+      tool: target.cliToolId,
+      operation: 'send',
+      origin: origin.origin,
+      originEvidence,
+      worktreeId: id,
+      instanceId,
+    });
+    if (toolPolicyDenial) return toolPolicyDeniedResponse(toolPolicyDenial);
 
     // Issue #4049: the refusals' `respond` must reach the tool this request
     // named. A bare `respond` resolves as a request naming nothing does, so the

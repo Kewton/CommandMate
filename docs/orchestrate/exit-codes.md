@@ -106,7 +106,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 | `no IMPL_COMPLETED line within <秒>s`（記録に `waited-for` も検証の行も無い） | 合図が要る担当（Command Code・Antigravity・`--require-signal`）は、**合図を見るまで検証を始めない**（#3883）。作業の途中のターン終了だったので、capture で確かめて同じ引数で待ち直す。画面に前の task の `IMPL_COMPLETED` が残っていても、この task の返事に合図が無ければ合図とは数えない（返事がまだ無い・読めないときも、画面の裸の行は数えない。数えるのは、task の作成の後のコミットを名指す `IMPL_COMPLETED head=<sha>` だけ） |
 | `a newer task <新しい id> was created for this instance after task <古い id>` | 待機中に同じ instance へ新しい契約が送られた（#3587）。ワーカーは新しい task を作業中なので Auto-Yes は切られていない（`auto-yes=kept`）。古い task の裁定は取らず、tasks.tsv の task id を新しい id に差し替えて **`wait-verify.mjs --task <新しい id>`** を呼び直す（ほかの引数は同じ） |
 
-記録の要約の `waited-for=run <id>` は、検証を始めようとしたときに同じ worktree の別の検証（再指示の前の古い run など）が動いていた（`already in progress`）ので、その run の終了を待ってから検証をやり直したという意味（#3883）。裁定はこの呼び出しが始めた run（ログの `Verifying: … (run <id>)`）のもので、待った run の結果は使わない。`waited-for=run <id>(still running)` は 3600 秒待っても終わらなかったという意味で、exit は `verify` のもの（99）のまま、Auto-Yes は切られていない。
+記録の要約の `waited-for=run <id>` は、検証を始めようとしたときに同じ worktree の別の検証（再指示の前の古い run など）が動いていた（`already in progress`）ので、その run の終了を待ってから検証をやり直したという意味（#3883）。裁定はこの呼び出しが始めた run（ログの `Verifying: … (run <id>)`）のもので、待った run の結果は使わない。`waited-for=run <id>(still running)` は待つのをやめたという意味で、exit は `verify` のもの（99。裁定ではない）のまま、Auto-Yes は切られていない。待つのをやめるのは次の 2 つだけで、理由は stderr の `busy-gave-up=` に出る（記録の要約には入れない。#4463）。`unreachable@<秒>` はサーバーが 1800 秒答えなかった（プロセスが居ない。起動し直したサーバーは run を `error` で閉じるので、その間に起き直せば待ちを続けて検証をやり直す）。`cap@<秒>` は上限 604800 秒（7 日。名前つきの定数 `VERIFY_BUSY_CAP_SEC` 1 つで、verify.yaml からは求めない。式は契約が足すゲートや再試行ごとの mutex 待ちを数え足りず、サーバーが拒む値で無限にもなった）に達した。`verify show` が `running` と読める run は、列で待つ・mutex を待つ・長いゲートを走る間も生きているとして待つ（ゲートの行が動かないことは死んだ印にしない）。秒は wait-verify が起きていた時間で、ノートのスリープや時計の飛びは 1 回のポーリング分しか数えない。既知の限界: サーバーが生きたまま行が `running` で残る形のうち、run を閉じる書き込みが 2 回とも失敗した場合（F3）と、解決しない Promise（不具合、F4）は cap の 7 日まで待って exit 99（合格にはならない。#4494）。ゲートの子孫がパイプを持ったまま残る場合は kill の後の猶予で、git が返らない場合は検証ランナーの 2 つの git の呼び出し口（work-evidence の `gate-runner.ts` の `runGit` と、work-evidence の後半と scope が使う `scope-gate.ts` の `runGit`）の時間の上限 120 秒で、サーバーが行を閉じる。どちらも run は `error`（exit 99。裁定ではない）で、`failed`（exit 20）にはしない（#4463）。子孫がパイプを持ったまま残ったゲートの mutex は、ゲートのパイプが閉じたのを確かめるまで（最長 30 分）次のゲートに渡さない（確かめるのはパイプが閉じたことで、パイプを持たずに逃げたデーモンは対象外、#4494）。30 分を超えたらサーバーのログに run id つきで `verification-mutex-released-with-orphan` を残して渡す。
 要約の `auto-yes=unknown` は、`--disable` は通ったが状態を読み返せなかった（`capture --json` が失敗した）という意味（#3883）。切れたとは確かめられていないので、`wait-verify.mjs --auto-yes-off` で切り直す（exit 0 になるまで）。
 
 新しい task の検出は、基準の task が task 一覧（新しい順に 20 件）から外れても `task show` で個別に読んで続ける（#3633）。task 一覧が開始時に読めなかったときも、`wait` と `verify` を分けた経路で待ち始めの task への結び付けを保つ（`--task` が無ければ、一覧が読めた時点で基準を取り直す）。
@@ -175,6 +175,18 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 ## 6-1-1 precheck の負荷による timeout
 
 precheck のうち全ファイルを走査するガードのテスト（`tests/unit/guards` の下）が `Test timed out in 5000ms` で落ちるのは、多くの場合マシンの負荷（同じマシンの CI ランナーなど）によるもので、作業とは関係しない。ワーカーへ再指示しない。すぐに再実行しても同じ負荷で落ちる。1 分の load average が論理 CPU 数の目安を下回るまで待ってから、同じ HEAD で precheck を再実行する。
+
+## 1-5 record-verify の exit code
+
+`run-log.mjs record-verify`（#4482。リーダーが直接流した verify を run 番号から記録する。docs/orchestrate/run-log.md）の exit code。0 以外は何も書かない。
+
+| exit | 意味 | 対応 |
+|---|---|---|
+| 0 | `verify` の行を記録した（`env=none`） | なし |
+| 1 | `verify show <run> --json` が run を返さない（失敗・JSON でない・`id` の無い答え）、または worktree の HEAD を読めない | run 番号・`--cli`・サーバーを確かめて呼び直す |
+| 2 | 引数の誤り（`--run` が数でない、`--head` が 40 桁でない、必須の引数が無い） | 引数を直す |
+| 3 | run が終わっていない（`running`・`queued` など） | 結果を決めずに断っている。run が終わってから呼び直す |
+| 4 | 別の run（worktree の id・path、run の id、task の不一致）、HEAD をその run が確かめた木と言えない（未コミットの変更・HEAD のコミットか移動が run の開始より後・`--head` と違う・git status / reflog / run の開始時刻を読めない）、同じ work item に記録済み | stderr の理由を読む。木が動いたなら、今の HEAD（コミット済み）で verify を流し直してから、その run を記録する |
 
 ## エラーハンドリング表の個別の行
 

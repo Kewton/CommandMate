@@ -28,9 +28,7 @@ import {
   runIdOf,
   summarizeVerdict,
   verifyTiming,
-  verifyBusyTimeoutSec,
-  VERIFY_BUSY_FALLBACK_SEC,
-  VERIFY_BUSY_MARGIN_SEC,
+  VERIFY_BUSY_CAP_SEC,
 } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
 const HEAD_A = 'a'.repeat(40);
@@ -233,6 +231,8 @@ function harness({
         : { instanceId: resolved[selector] ?? selector, ...(resolvedTools[selector] ? { cliToolId: resolvedTools[selector] } : {}) },
     sleep: (ms: number) => {
       sleeps.push(ms);
+      // #4463: a wait that never gives up fails the test instead of hanging the worker.
+      if (sleeps.length > 100_000) throw new Error('the wait did not end in a finite time');
       clock += ms;
     },
     now: () => new Date(clock),
@@ -1366,26 +1366,29 @@ describe('another run of the worktree is waited out, and only this call’s run 
     expect(main(argv(), h.deps)).toBe(99);
     expect(records()[0].note).toContain('waited-for=run 7(still running)');
     const waitedSec = h.sleeps.filter((ms) => ms === 30_000).length * 30;
-    // The worktree of the harness has no verify.yaml, so this repository's is read.
-    expect(waitedSec).toBeGreaterThanOrEqual(verifyBusyTimeoutSec('/wt'));
-    expect(waitedSec).toBeLessThanOrEqual(verifyBusyTimeoutSec('/wt') + 60);
+    // #4463 (PM, pm-reply-4463-stop.md): the limit is one named constant, 7 days.
+    expect(waitedSec).toBeGreaterThanOrEqual(VERIFY_BUSY_CAP_SEC);
+    expect(waitedSec).toBeLessThanOrEqual(VERIFY_BUSY_CAP_SEC + 60);
+    expect(VERIFY_BUSY_CAP_SEC).toBe(604_800);
   });
 
   describe('#4459: the limit comes from verify.yaml (P2-1)', () => {
-    const config = (gates: string) => ({ readFile: () => `version: 1\ngates:\n${gates}` });
-    const gate = (id: string, timeoutSec: number, extra = '') => `  - id: ${id}\n    command: "true"\n    timeoutSec: ${timeoutSec}\n${extra}`;
+    // #4463 (PM, pm-reply-4463-stop.md): the limit no longer comes from verify.yaml. A formula over
+    // it kept undercounting the real worst (contract gates, mutex waits per retry) and could be made
+    // infinite by a value the server refuses. It is one named constant, 7 days (604800 s); the
+    // names below are kept, and each checks the constant covers what its formula once covered.
+    const MAX_TIMEOUT_SEC = 7200;
+    const MAX_MUTEX_WAIT_SEC = 86400;
 
     it('is the worst one gate can take: mutex wait + slot wait + its run + margin', () => {
-      const deps = config(gate('unit', 5400, '    mutex: cpu.heavy\n') + gate('build', 1800) + gate('lint', 900));
-      expect(verifyBusyTimeoutSec('/w', deps)).toBe(5400 + 1800 + 5400 + VERIFY_BUSY_MARGIN_SEC);
+      // The worst one gate verify-config.ts accepts: its longest mutex wait, then its run twice (retryOnFail: 1).
+      expect(VERIFY_BUSY_CAP_SEC).toBe(604_800);
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThan(MAX_MUTEX_WAIT_SEC + 2 * MAX_TIMEOUT_SEC);
     });
 
     it('follows verify.yaml: raising timeoutSec or declaring mutexWaitSec raises it', () => {
-      const base = verifyBusyTimeoutSec('/w', config(gate('unit', 5400, '    mutex: cpu.heavy\n') + gate('build', 1800)));
-      const slower = verifyBusyTimeoutSec('/w', config(gate('unit', 7200, '    mutex: cpu.heavy\n') + gate('build', 1800)));
-      const queued = verifyBusyTimeoutSec('/w', config(gate('unit', 5400, '    mutex: cpu.heavy\n    mutexWaitSec: 9000\n') + gate('build', 1800)));
-      expect(slower).toBeGreaterThan(base);
-      expect(queued).toBe(base + (9000 - 5400));
+      // Raising either to the most verify-config.ts accepts stays under the constant, with 3 runs at their worst.
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThan(3 * (MAX_MUTEX_WAIT_SEC + 2 * MAX_TIMEOUT_SEC) + 600);
     });
 
     it('is never below what this repository’s own verify.yaml allows one gate to take', () => {
@@ -1396,13 +1399,15 @@ describe('another run of the worktree is waited out, and only this call’s run 
         mutexWait: Number(/^ {4}mutexWaitSec: (\d+)/m.exec(m[2])?.[1] ?? 0),
       }));
       expect(gates.length).toBeGreaterThan(5);
-      const limit = verifyBusyTimeoutSec('/wt');
-      for (const g of gates) expect(limit).toBeGreaterThanOrEqual(g.timeout + (g.mutex ? g.mutexWait || g.timeout : 0));
+      const perGate = gates.map((g) => g.timeout + (g.mutex ? g.mutexWait || g.timeout : 0));
+      for (const one of perGate) expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThanOrEqual(one);
+      // And a whole run of this repository, three times over.
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThanOrEqual(3 * perGate.reduce((a, b) => a + b, 0));
     });
 
     it('a config that cannot be read gives the large side, not a small one', () => {
-      expect(verifyBusyTimeoutSec('/w', { readFile: () => { throw new Error('ENOENT'); } })).toBeGreaterThanOrEqual(VERIFY_BUSY_FALLBACK_SEC);
-      expect(verifyBusyTimeoutSec('/w', config('  - id: x\n'))).toBeGreaterThanOrEqual(VERIFY_BUSY_FALLBACK_SEC);
+      // Nothing is read: the constant is the large side for every config.
+      expect(VERIFY_BUSY_CAP_SEC).toBeGreaterThanOrEqual(172800);
     });
   });
 

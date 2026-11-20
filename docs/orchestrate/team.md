@@ -11,7 +11,7 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 | イネーブラー | `codex`（`codex-2`）。Codex の代わりは Claude 5（`--instance claude-5`）。Antigravity には AI から頼まない（下の「Antigravity の扱い」）（§6 の 7） | `enabler` | 設計の事前レビュー（2-4-4）・整合性レビュー（5-2b）・原因調査。読むだけ |
 | ジャッジ | `claude-2`（並行の本は新しいセッション） | `judge` | 統合した版の受け入れテスト・リグレッションテスト（UAT）。リリースごとに 1 回まとめ、独立した 2〜3 本に分けて並行し、主が結果をまとめて判定する（§9） |
 | 開発リーダー | `claude-3` | `dev-leader` | ブリーフを受けて `/orchestrate` を回す。難易度でワーカーを選ぶ。受け入れの間のマージの凍結に従い、差し戻しは持ち主として直す（§9・§10） |
-| ワーカー | Issue の worktree ごと | — | 易＝Command Code（#4238 のマージ後。それまでは orchestrate.md 1-2b の現行の担当）、中＝Claude sonnet、難＝Claude opus |
+| ワーカー | Issue の worktree ごと | — | 易・中＝Command Code（#4238 のマージ後。中は 2026-11-19 から）、難＝Claude opus（Command Code がワーカー起因で 2 回不合格なら opus。sonnet は起動・送信で詰まったときの代わりだけ）。目標は仕事の 6〜8 割を Command Code |
 
 `claude-3` は、agent-health の自動修正ループ（Epic #3047、毎朝 08:30 の dispatch）の送り先も兼ねる。
 
@@ -127,7 +127,7 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 
 ### 受け入れの間のマージの凍結
 
-判定する版を決めるのは PM。凍結は、主のジャッジが判定する版のビルドを始めてから、各本の実行が終わるまで（まとめの間は解く）。PM が「凍結」「解除」を全リーダーへ 1 行で知らせる。凍結の間もレビュー・直し・verify は続けてよい。
+判定する版を決めるのは PM。**受け入れ・リリースの間も develop へのマージは続ける**（人の決定、mem c31afe28）。止めるのは、**main への PR を作ってから、マージバック（main の変更を develop へ戻すマージ）が済むまで**だけで、PM が「停止」「再開」を全リーダーへ 1 行で知らせる。止めている間もレビュー・直し・verify は続けてよい。判定する版（commit）は固定し、その後に develop へ入ったものは次の受け入れの対象になる。関門は変えない（根拠は ci-merge.md の 6-2-1）。
 
 ## 10. 開発リーダー 2 人で回す決まり（段 7、PM の採用: 2026-11-17）
 
@@ -136,8 +136,8 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 1. **持ち分の表。** PM が計画で、Issue ごとに「書くファイル（glob）」と「境界の持ち主」の列を持つ表を書く。既定の分け方は、画面＝`src/app` の画面・`src/components`・`src/hooks`／CLI・サーバー＝`src/cli`・`src/app/api`・`src/lib`。持ち分の外を書く必要が計画の後に分かったら、書かずに STOP で返す
 2. **境界のファイルは Issue ごとに 1 人の持ち主を決める。** 共有の型（`src/types/**`・`src/cli/types/api-responses.ts`）・API の呼び口（`src/lib/api-client*.ts`）・DB の migration（版の番号は計画で割り当てる）・試験の基盤（`tests/setup.ts`・`tests/helpers/**`・`vitest.config.ts`）・文言（`locales/{ja,en}/*.json`）・文書（`docs/module-reference.md`・`docs/user-guide/cli-operations-guide.md`・`.env.example`）。持ち主でないリーダーのワーカーは書かない。changelog は Issue ごとの断片なので持ち分の対象にしない。API を変える Issue と、それを呼ぶ画面の Issue は同じリーダーの同じ PR にするか、API を先にマージする直列にする。もう 1 人のリーダーの未マージのブランチの上でブランチを切らない（土台のマージの後に develop から切る）
 3. **マージの順と積み直しの持ち主。** マージは各リーダーが自分の PR を自分で流す（ロックの先着順に任せ、待ち合わせのシェルを自作しない）。**積み直し（develop の取り込み・衝突の解消・precheck・merge-pr の exit 4 の再実行）の持ち主は、後からマージする PR のリーダー**。衝突の解消で相手の持ち分のファイルの意味を変える必要があれば、解消せずに止めて PM に返す。統合破壊は後からマージした側が直す。マージのたびに develop の push CI の結論を見て、赤なら 2 人とも次のマージを止める。「CI が通れば」の許可の run では全 PR に `--last` を付ける。列（`--queue`）には条件がそろった PR だけを 1 回に 2〜3 本まで入れる
-4. **単体テストの mutex（`cpu.heavy`）の取り合い。** mutex はマシンで 1 本のまま、リーダーで分けない。重いゲートを走らせる人を減らす（リーダーは同じ tree・同じ環境の合格を再利用し、重ねて流さない）。2 人合わせて同時のワーカーは 5〜6 本以下。verify の待ちは 1 本あたり 30〜45 分を見込みに入れる（`mode=full` の run は実行だけで 50〜72 分。手元で全体に切り替えない形は ci-merge.md の「テスト全体と unit-related の分け方」）。同じ worktree の古いコミットの run を列に残さない。列の順を変える手段は無いので、急ぐレーンがあるときは PM が両リーダーに新しい verify を控えてもらう。exit 99（待ち切り）はテストの不合格にせず、`--mutex-retries` で並び直す。ゲートのコマンドを worktree で直に流すのは調べるためだけ（直の実行は verify の mutex・work-evidence・scope・env-clean を通らない）。マシンで 1 度に 1 本、PM へ 1 行知らせてから流す。**合否の裁定は verify の run で行い、直の実行の結果を裁定に使わない**（ci-merge.md の mutex の節）
-5. **受け入れの間のマージの凍結。** §9 のとおり。2 人の成果は統合した develop の 1 つの HEAD で 1 回の受け入れにまとめる。差し戻しは Issue の持ち主のリーダーへ PM が振り分ける
+4. **単体テストの mutex（`cpu.heavy`）の取り合い。** mutex はマシンで 1 本のまま、リーダーで分けない。重いゲートを走らせる人を減らす（リーダーは同じ tree・同じ環境の合格を再利用し、重ねて流さない）。2 人合わせて同時のワーカーは 5〜6 本以下。verify の待ちは 1 本あたり 30〜45 分を見込みに入れる（#4467 の後、手元の `unit-related` は src・tests 以外の変更でもテスト全体に切り替わらず `mode=related reason=non-source:<ファイル>` で流れる。全体は CI の `Unit Tests` が見る。ci-merge.md の「テスト全体と unit-related の分け方」）。同じ worktree の古いコミットの run を列に残さない。列の順を変える手段は無いので、急ぐレーンがあるときは PM が両リーダーに新しい verify を控えてもらう。exit 99（待ち切り）はテストの不合格にせず、`--mutex-retries` で並び直す。ゲートのコマンドを worktree で直に流すのは調べるためだけ（直の実行は verify の mutex・work-evidence・scope・env-clean を通らない）。マシンで 1 度に 1 本、PM へ 1 行知らせてから流す。**合否の裁定は verify の run で行い、直の実行の結果を裁定に使わない**（ci-merge.md の mutex の節）
+5. **受け入れの間のマージ。** §9 のとおり（止めるのは main への PR からマージバックまで。それ以外は develop へのマージを続ける）。2 人の成果は統合した develop の 1 つの HEAD で 1 回の受け入れにまとめる。差し戻しは Issue の持ち主のリーダーへ PM が振り分ける
 6. **同じ種類の指摘の一覧（`workspace/orchestration/same-kind-findings.md`）を、リーダーは依頼文を書く前に読む。** 片方のリーダーで 1 回目が出た種類は、もう片方の依頼文にも最初から不変条件として書く（2 人で数えを共有する）。2 回目は直しを送らず STOP で PM に返す
 
 ## 11. mem の運用規則

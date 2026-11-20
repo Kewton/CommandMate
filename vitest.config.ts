@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
@@ -14,6 +14,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     env: { NODE_ENV: 'test' },
+    // gitignore された workspace/ の下のリポジトリの複製（審判・ワーカーの写し）を拾わない（Issue #4488）。
+    // `vitest run tests/unit` のパス絞り込みは部分一致なので、複製の tests/unit も対象になっていた。
+    exclude: [...configDefaults.exclude, 'workspace/**'],
     setupFiles: ['./tests/setup.ts'],
     // CI環境ではメモリ使用量を抑えるため同時実行を制限
     maxConcurrency: process.env.CI === 'true' ? 1 : 10,

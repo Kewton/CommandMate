@@ -186,6 +186,44 @@ done 3< <(awk -F'\t' '{
   `env-changed-during-verify=<項目>` と exit 3（雛形は `RC=3`＝`verify=fail` にする。裁定にしない）。precheck / publish / merge はこの `env=` を 3-3 の記録と同じに照らし合わせる
   （docs/orchestrate/workers.md の「合格を使う地点も環境を照らし合わせる」）
 
+## 1-5 リーダーが直接流した verify の記録（record-verify）
+
+wait-verify はワーカーの合図（`IMPL_COMPLETED`）を待つので、リーダーが `commandmatedev verify <wt>` を直接流した run には使えない（#4482。Sprint 7 の A1〜D2 では
+`verify=ok` を手で書き、note に run 番号を書いた）。直接の run は、終わった後に run 番号から記録する（run 番号・head・結果が残る。env は書かない）:
+
+```bash
+node scripts/orchestrate/run-log.mjs record-verify --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+  --issue "$issue" --run "$RUN_ID" --wt "$WT" --worktree "$WT_DIR" [--head "$(git -C "$WT_DIR" rev-parse HEAD)"] [--task "$TASK_ID"] "${ITEM_ARGS[@]}"
+```
+
+- **写すのは run の事実だけ**: `verify show <run> --json` を読み、`passed` だけを `verify=ok`、`failed`・`error`・`cancelled`・`not_started` を `fail` と書く。
+  ゲートごとの結果は note の `gates=<id>:<ok|skip|fail>,…`（`passed`→ok、`skipped`→skip、ほか→fail）。合否の裁定は今までどおり verify の run（直の実行の
+  ゲートの結果を読み替えて合格にしない、team.md §10-4）
+- **終わっていない run は記録しない**: `running`・`queued`（と知らない status）は exit 3 で断る（結果を決めない）。終わってから呼び直す
+- **別の run を取り違えない**: run の `worktreeId` が `--wt` でない・答えた run の id が違う・`--task` と run の task が違う・`--worktree` が
+  `commandmatedev ls --json` の `--wt` の path と realpath で一致しない・同じ work item に同じ run が既に記録済み（wait-verify の行の `run=<id>` も含む）なら
+  exit 4 で断る。`--task` は照合にだけ使い、run に task が無いときも記録には書かない
+- **head は、その run が確かめた木と同じだと言えるときだけ書く（fail-closed）**: run は HEAD を持たないので、HEAD は記録する時点の worktree の HEAD とし、
+  次をすべて満たすときだけ書く。言えない・読めないときは exit 4 で断る
+  - 作業ツリーに未コミットの変更が無い（`dirty-tree.mjs` の `dirtyPaths`。`.commandmate/tasks/`・`dev-reports/` は数えない。読めなければ断る）
+  - HEAD のコミットが run の開始より前で、**HEAD が run の開始より後に動いていない**: HEAD の reflog の最新の項目の時刻
+    （`git log -g -1 --date=unix --format=%gd HEAD`。`%ct` はコミットの時刻なので使わない）が開始より前。reflog は秒単位なので、開始と同じ秒の移動は後と数える。
+    古いコミットへの `reset`・`checkout`・`merge --ff-only` もこれで断る。reflog が読めなければ断る
+  - `--head` を付けたなら、それが HEAD
+- **env は書かない（`env=none`）**: 直の実行には run の開始時の manifest が無い。記録する時点の manifest を代わりに書くと、run の後の環境の変化
+  （`node_modules` の付け替え・設定ファイルの削除や mtime を保った差し戻し）を時刻では見分けられず、run が見ていない環境を run の環境として残しうる
+  （レビュー 2 回の P2。人の判断 (a)、Issue #4482 のコメント）。そこで env は主張せず、`.env.json` も書かない。`env-manifest.mjs` の `verifyEnvState` は
+  `env=none` を `same` と読まず、`env=` の無い行と同じ `unrecorded`（警告つきで、記録として使う）と読む
+- **既知の限界**（head の確かめは誤りを防ぐためのもので、意図した偽装は防がない）:
+  - run の間だけ未コミットの変更があり、記録の前に消した（HEAD を動かさずに戻した）木は見分けられない。直に流すときは、コミットした木で流す
+  - `GIT_COMMITTER_DATE` を過去にした amend・reset は、reflog の項目の時刻も過去になるので通る
+  - gitignore された入力（`.env*.local`・手元の DB・生成物）の run の後の変更は `git status --porcelain` に出ないので見えない（wait-verify も同じ）
+  - run の `startedAt` はサーバーの時計、reflog の時刻は手元の時計で比べる。同じマシンの前提で、サーバーの時計が進んでいると run の後の移動を見逃す
+- note の形: `direct=verify run=<id> run-status=<status> gates=… key=<key> env=none`。wait-verify の行の形は変えていない。
+  `gates=` は読む人のための欄で、precheck・merge-pr は wait-verify の `passed=` を読むので、**直の記録は `verify=ok` の行として読まれるがゲートの再利用はされない**
+  （precheck は手元の検証をやり直し、merge-pr は CI の `Unit Tests` を待つ）。publish / merge は、この行をその HEAD の verify として `env=none` の警告つきで使う
+- exit code: 0 記録した / 1 run・HEAD を読めない / 2 引数の誤り / 3 run が終わっていない / 4 別の run・記録済み（docs/orchestrate/exit-codes.md#1-5-record-verify-の-exit-code）
+
 ## 1-5 plan.md の対象 Issue 表の例
 
 ```markdown
