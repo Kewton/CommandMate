@@ -25,36 +25,38 @@ function ItemsContent(): React.ReactElement {
   const [draft, setDraft] = useState(branch);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4">
-      <h1 className="break-words text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{t('mem.items.title', { branch: branch || '—' })}</h1>
-      <p className="text-xs text-muted-foreground">{t('mem.items.description')}</p>
-      <form
-        className="flex flex-wrap items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const next = draft.trim();
-          if (next.length === 0) return;
-          const query = `branch=${encodeURIComponent(next)}${worktreeId ? `&worktree=${encodeURIComponent(worktreeId)}` : ''}`;
-          router.push(`/repositories/${encodeURIComponent(repositoryId)}/mem?${query}`);
-        }}
-      >
-        <input
-          type="text"
-          aria-label={t('mem.decisions.branch')}
-          placeholder={t('mem.decisions.branch')}
-          className="min-w-0 flex-1 rounded border border-border bg-surface px-2 py-1 text-xs text-foreground"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          data-testid="mem-items-branch-input"
-        />
-        <Button size="sm" type="submit">
-          {t('mem.decisions.show')}
-        </Button>
-      </form>
-      {branch && repositoryId && (
-        <MemItemsPanel key={`${repositoryId}:${branch}`} repositoryId={repositoryId} branch={branch} worktreeId={worktreeId} />
-      )}
-      <p className="text-xs text-muted-foreground">{t('mem.items.limits')}</p>
+    <div className="h-full overflow-auto">
+      <div className="mx-auto max-w-3xl space-y-4 p-4">
+        <h1 className="break-words text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{t('mem.items.title', { branch: branch || '—' })}</h1>
+        <p className="text-xs text-muted-foreground">{t('mem.items.description')}</p>
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const next = draft.trim();
+            if (next.length === 0) return;
+            const query = `branch=${encodeURIComponent(next)}${worktreeId ? `&worktree=${encodeURIComponent(worktreeId)}` : ''}`;
+            router.push(`/repositories/${encodeURIComponent(repositoryId)}/mem?${query}`);
+          }}
+        >
+          <input
+            type="text"
+            aria-label={t('mem.decisions.branch')}
+            placeholder={t('mem.decisions.branch')}
+            className="min-w-0 flex-1 rounded border border-border bg-surface px-2 py-1 text-xs text-foreground"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            data-testid="mem-items-branch-input"
+          />
+          <Button size="sm" type="submit">
+            {t('mem.decisions.show')}
+          </Button>
+        </form>
+        {branch && repositoryId && (
+          <MemItemsPanel key={`${repositoryId}:${branch}`} repositoryId={repositoryId} branch={branch} worktreeId={worktreeId} />
+        )}
+        <p className="text-xs text-muted-foreground">{t('mem.items.limits')}</p>
+      </div>
     </div>
   );
 }
