@@ -260,36 +260,6 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh marks its server (Issue #4433)', () =
   );
 
   it(
-    'gives up on a caller’s tmux that does not answer, and records lookup-failed',
-    async () => {
-      // A tmux that hangs on the caller's session lookup and is the real tmux otherwise.
-      const realTmux = spawnSync('sh', ['-c', 'command -v tmux'], { encoding: 'utf8' }).stdout.trim();
-      const bin = path.join(root, 'bin');
-      fs.mkdirSync(bin);
-      fs.writeFileSync(
-        path.join(bin, 'tmux'),
-        `#!/bin/sh\ncase "$*" in *'#S'*) exec sleep 30 ;; esac\nexec '${realTmux}' "$@"\n`,
-        { mode: 0o755 }
-      );
-      const port = await freePort();
-      const started = Date.now();
-      const up = runScript(['up', '--port', String(port), '--run-dir', runDir, '--wait-listen', '30'], {
-        PATH: `${bin}:${process.env.PATH ?? ''}`,
-        TMUX: `${path.join(root, 'hung.sock')},1,0`,
-        TMUX_PANE: '%1',
-      });
-      expect(up.status, up.stderr).toBe(0);
-      expect(Date.now() - started).toBeLessThan(20_000);
-      const pid = Number(stateOf(runDir).server_pid);
-      const recordPath = serverEnvironment(pid)
-        .find((token) => token.startsWith('CM_SERVER_MARK='))!
-        .slice('CM_SERVER_MARK='.length);
-      expect(parseServerMarkRecord(fs.readFileSync(recordPath, 'utf8'))?.session).toBe('lookup-failed');
-    },
-    REAL_SHELL_TEST_TIMEOUT_MS
-  );
-
-  it(
     'removes the record when up fails after writing it',
     async () => {
       // The server execs and exits at once, after the record names its group.

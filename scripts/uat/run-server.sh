@@ -128,29 +128,6 @@ mark_json_safe() {
     return 0
 }
 
-# mark_bounded <seconds> <command...> — the command's stdout; a command that has not ended within
-# <seconds> is killed (status 137), so a hung tmux or git never holds `up` open. bash 3.2 has no
-# `timeout`: a watchdog that ends with the command (its own output goes nowhere, so a command
-# substitution does not wait for it).
-mark_bounded() {
-    local limit=$1
-    shift
-    (
-        "$@" </dev/null 2>/dev/null &
-        cpid=$!
-        (
-            i=0
-            while [ "$i" -lt $((limit * 10)) ]; do
-                sleep 0.1
-                kill -0 "$cpid" 2>/dev/null || exit 0
-                i=$((i + 1))
-            done
-            kill -s KILL "$cpid" 2>/dev/null
-        ) >/dev/null 2>&1 &
-        wait "$cpid"
-    )
-}
-
 # mark_runs_in_pane <pane pid> — 0 when the pane's process is this shell or one of its ancestors.
 # TMUX / TMUX_PANE are only environment variables, inherited by processes outside tmux too: they
 # name the caller's session only when the caller runs in that pane (#4433 review FO P2-1).
@@ -190,7 +167,7 @@ mark_prepare() {
     [ "${#hex}" -eq 32 ] || return 1
     MARK_LAUNCHER_CWD="$(pwd -P)" || return 1
     MARK_WORKTREE_ROOT=""
-    top="$(mark_bounded 3 git -C "$MARK_LAUNCHER_CWD" rev-parse --show-toplevel)"
+    top="$(git -C "$MARK_LAUNCHER_CWD" rev-parse --show-toplevel 2>/dev/null)"
     if [ -n "$top" ] && [ -d "$top" ]; then
         MARK_WORKTREE_ROOT="$(cd "$top" && pwd -P)" || MARK_WORKTREE_ROOT=""
     fi
@@ -201,7 +178,7 @@ mark_prepare() {
         MARK_SESSION=lookup-failed
     else
         local answer pane_pid
-        answer="$(mark_bounded 3 tmux -S "${TMUX%%,*}" display-message -p -t "$TMUX_PANE" '#{pane_pid} #S')"
+        answer="$(tmux -S "${TMUX%%,*}" display-message -p -t "$TMUX_PANE" '#{pane_pid} #S' 2>/dev/null)"
         pane_pid="${answer%% *}"
         MARK_SESSION="${answer#* }"
         case "$pane_pid" in
