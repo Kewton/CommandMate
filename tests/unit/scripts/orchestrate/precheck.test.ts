@@ -58,7 +58,8 @@ function harness({
       if (command === 'git') {
         const sub = args.slice(2);
         if (sub[0] === 'rev-parse') return { status: 0, stdout: `${head}\n`, stderr: '' };
-        if (sub[0] === 'status') return { status: 0, stdout: status, stderr: '' };
+        // dirty-tree reads `status --porcelain -z` (#4406): the fixture is written line by line and sent NUL-terminated.
+        if (sub[0] === 'status') return { status: 0, stdout: sub.includes('-z') ? status.replace(/\n/g, '\0') : status, stderr: '' };
         if (sub.includes('--diff-filter=ACMR')) return { status: 0, stdout: changed.join('\n'), stderr: '' };
         if (sub.includes('--diff-filter=D')) return { status: 0, stdout: deleted.join('\n'), stderr: '' };
         if (sub.includes('--unified=0')) return { status: 0, stdout: testsDiff, stderr: '' };

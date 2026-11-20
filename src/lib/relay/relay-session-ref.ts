@@ -84,6 +84,37 @@ export function resolveRelaySession(
   };
 }
 
+/**
+ * The tool that drives one end of a relay, for rule 0 (Issue #4496); null when it
+ * cannot be read.
+ *
+ * Unlike {@link resolveRelaySession} this takes the tool the request asked for
+ * (`requestedCliTool`, `send --agent`): a roster row and a tool-named id still win
+ * over it (the roster is the authority, and a contradiction is the send's strict
+ * 400 to answer), but an ad-hoc id is the tool that will actually be typed into,
+ * not the worktree's default. And it never falls back: a caller judging a policy
+ * must refuse what it cannot read (fail-closed), where a delivery may guess.
+ */
+export function resolveRelayEndpointTool(
+  db: Database.Database,
+  endpoint: RelayEndpoint,
+  requestedCliTool?: CLIToolType
+): CLIToolType | null {
+  try {
+    return resolveSessionTarget(db, endpoint.worktreeId, {
+      instanceId: endpoint.instanceId,
+      requestedCliTool,
+    }).cliToolId;
+  } catch (error) {
+    logger.warn('relay-endpoint-tool-unreadable', {
+      worktreeId: endpoint.worktreeId,
+      instanceId: endpoint.instanceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 /** Whether this worktree exists at all. The one check a create must make. */
 export function relayWorktreeExists(db: Database.Database, worktreeId: string): boolean {
   try {

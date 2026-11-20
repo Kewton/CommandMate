@@ -99,73 +99,75 @@ function DecisionsContent(): React.ReactElement {
   ];
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4">
-      <h1 className="break-all text-lg font-semibold text-foreground">{t('mem.decisions.title', { branch: branch || '—' })}</h1>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-foreground">
-        <label className="flex min-w-0 max-w-full items-center gap-2">
-          {t('mem.decisions.repository')}
-          <select
-            className={SELECT_CLASS}
-            value={repositoryId}
-            onChange={(e) => {
-              // Another repository: the branch is not carried over (a same-named branch is another's decisions).
-              if (e.target.value !== repositoryId) router.push(decisionsPath(e.target.value));
-            }}
-            data-testid="decision-repository-select"
-          >
-            {repositoryOptions.map((repository) => (
-              <option key={repository.id} value={repository.id}>
-                {repository.displayName || repository.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex min-w-0 max-w-full items-center gap-2">
-          {t('mem.decisions.branch')}
-          <select
-            className={SELECT_CLASS}
-            value={branch}
-            disabled={branches === null}
-            onChange={(e) => {
-              if (e.target.value && e.target.value !== branch) router.push(decisionsPath(repositoryId, e.target.value));
-            }}
-            data-testid="decision-branch-select"
-          >
-            {!branch && <option value="">{t('mem.decisions.chooseBranch')}</option>}
-            {branch && !listed && (
-              <option value={branch} data-testid="decision-branch-not-listed">
-                {t('mem.decisions.branchOption.notListed', { branch })}
-              </option>
-            )}
-            {(branches ?? []).map((entry) => (
-              <option key={entry.branch} value={entry.branch}>
-                {entry.branch}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {failedFor === repositoryId ? (
-        <p role="alert" className="text-xs text-danger-foreground" data-testid="decision-branches-error">
-          {t('mem.decisions.branchesError')}
-        </p>
-      ) : branches === null ? (
-        <p className="text-xs text-muted-foreground">{t('mem.decisions.branchesLoading')}</p>
-      ) : (
-        branches.length === 0 &&
-        !branch && (
-          <p className="text-xs text-muted-foreground" data-testid="decision-no-branches">
-            {t('mem.decisions.noBranches')}
+    <div className="h-full overflow-auto">
+      <div className="mx-auto max-w-3xl space-y-4 p-4">
+        <h1 className="break-all text-lg font-semibold text-foreground">{t('mem.decisions.title', { branch: branch || '—' })}</h1>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-foreground">
+          <label className="flex min-w-0 max-w-full items-center gap-2">
+            {t('mem.decisions.repository')}
+            <select
+              className={SELECT_CLASS}
+              value={repositoryId}
+              onChange={(e) => {
+                // Another repository: the branch is not carried over (a same-named branch is another's decisions).
+                if (e.target.value !== repositoryId) router.push(decisionsPath(e.target.value));
+              }}
+              data-testid="decision-repository-select"
+            >
+              {repositoryOptions.map((repository) => (
+                <option key={repository.id} value={repository.id}>
+                  {repository.displayName || repository.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-0 max-w-full items-center gap-2">
+            {t('mem.decisions.branch')}
+            <select
+              className={SELECT_CLASS}
+              value={branch}
+              disabled={branches === null}
+              onChange={(e) => {
+                if (e.target.value && e.target.value !== branch) router.push(decisionsPath(repositoryId, e.target.value));
+              }}
+              data-testid="decision-branch-select"
+            >
+              {!branch && <option value="">{t('mem.decisions.chooseBranch')}</option>}
+              {branch && !listed && (
+                <option value={branch} data-testid="decision-branch-not-listed">
+                  {t('mem.decisions.branchOption.notListed', { branch })}
+                </option>
+              )}
+              {(branches ?? []).map((entry) => (
+                <option key={entry.branch} value={entry.branch}>
+                  {entry.branch}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {failedFor === repositoryId ? (
+          <p role="alert" className="text-xs text-danger-foreground" data-testid="decision-branches-error">
+            {t('mem.decisions.branchesError')}
           </p>
-        )
-      )}
-      {branch && repositoryId && (
-        <DecisionPromotePanel
-          key={`${repositoryId}:${branch}`}
-          repositoryId={repositoryId}
-          branch={branch}
-        />
-      )}
+        ) : branches === null ? (
+          <p className="text-xs text-muted-foreground">{t('mem.decisions.branchesLoading')}</p>
+        ) : (
+          branches.length === 0 &&
+          !branch && (
+            <p className="text-xs text-muted-foreground" data-testid="decision-no-branches">
+              {t('mem.decisions.noBranches')}
+            </p>
+          )
+        )}
+        {branch && repositoryId && (
+          <DecisionPromotePanel
+            key={`${repositoryId}:${branch}`}
+            repositoryId={repositoryId}
+            branch={branch}
+          />
+        )}
+      </div>
     </div>
   );
 }

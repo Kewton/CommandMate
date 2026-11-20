@@ -49,12 +49,20 @@
  *        [--agent <claude|command-code>] [--model <opus|sonnet|->] [--duration-sec <n>] [--note <text>]
  *        [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
  *   node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
+ *   node scripts/orchestrate/run-log.mjs record-verify --run-dir <dir> --issues <range> --issue <N>
+ *        --run <verification run id> --wt <worktree id> --worktree <path> [--head <sha>] [--task <id>]
+ *        [--item <work item>] [--cli <commandmatedev>]
+ *
+ * `record-verify` (Issue #4482) writes the `verify` line of a verification the leader ran directly
+ * (`commandmatedev verify <wt>`, no wait-verify and so no worker signal): see recordVerifyRun.
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { itemProblem } from './execution-key.mjs';
+import { dirtyPaths } from './dirty-tree.mjs';
+import { itemProblem, workItemName } from './execution-key.mjs';
 
 /**
  * In run order: the consistency review (5-2b) and the out-of-body findings
@@ -454,6 +462,254 @@ export function envCleanShared(records) {
 export const formatEnvCleanShared = ({ item, workItems }) =>
   `env-clean: ${item} in ${workItems.join(', ')} — candidate for an outside cause (attribute it: 3-4)`;
 
+/**
+ * Exit codes of `record-verify` (#4482). `notFinished` and `refused` write nothing: the run is not
+ * over (its verdict is not taken early), or it is not the run of this worktree / HEAD / task.
+ */
+export const RECORD_VERIFY_EXIT = { recorded: 0, unreadable: 1, usage: 2, notFinished: 3, refused: 4 };
+/** The run statuses that are an end (src/cli/types/api-responses.ts VerificationRunStatus); only `passed` is `ok`. */
+const RUN_END_STATUSES = ['passed', 'failed', 'error', 'cancelled', 'not_started'];
+/** A gate's stored status as a record result: only `passed` is `ok`, a SKIP is `skip`, anything else `fail`. */
+const gateResult = (status) => (status === 'passed' ? 'ok' : status === 'skipped' ? 'skip' : 'fail');
+const RUN_NOTE = (runId) => new RegExp(`(?:^|\\s)run=${runId}(?:\\s|$)`);
+
+function defaultRun(command, args, { cwd, timeoutMs } = {}) {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    ...(timeoutMs ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
+  });
+  if (result.error) throw result.error;
+  return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+}
+
+function runSafely(run, command, args, cwd) {
+  try {
+    return run(command, args, { cwd, timeoutMs: 15_000 });
+  } catch (error) {
+    return { status: 1, stdout: '', stderr: String(error?.message ?? error) };
+  }
+}
+
+/** The rows of `ls --json` (an array, or `{ worktrees }`), or null. */
+function worktreeRows(parsed) {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.worktrees)) return parsed.worktrees;
+  return null;
+}
+
+function realpathOrNull(file) {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record a verification the leader ran directly (Issue #4482), from its run id: what
+ * `verify show <id> --json` says of it, nothing more. The verdict stays the run's (team.md §10-4).
+ *
+ * - The run must be over (RUN_END_STATUSES): a `running` / `queued` (or unknown) run is refused
+ *   (`notFinished`), its result is not decided here. Only `passed` is written as `ok`; `failed`,
+ *   `error`, `cancelled`, `not_started` are `fail`. Each gate is `ok` / `skip` / `fail` (gateResult).
+ *   An answer that is not a run (no `id`) is `unreadable`.
+ * - The run must be this one (`refused` otherwise): its id is the one asked, its `worktreeId` is
+ *   `--wt`, its task is `--task` when both say one, and `--worktree` is the path the CLI lists for
+ *   `--wt` (realpath). A run already recorded for the work item (`run=<id>` in a verify line's note,
+ *   by wait-verify or by this) is refused too. `--task` is never written for a run without a task.
+ * - The HEAD is written only when it is the tree the run verified, fail-closed (#4482 review 1): the
+ *   run does not store a HEAD, so the HEAD is the worktree's now, and it is refused unless the tree
+ *   has no uncommitted change (dirty-tree.mjs dirtyPaths), HEAD was neither committed nor moved
+ *   (HEAD's reflog entry, `git log -g -1 --date=unix --format=%gd HEAD`, whole seconds: a move in the second the run
+ *   started counts as after it) after the run started, and `--head` (when given) is that HEAD. What
+ *   cannot be read is refused, not assumed. A tree that was dirty during the run and cleaned before
+ *   recording is not seen (a cleaning that does not move HEAD leaves no time to compare).
+ * - env: none (`env=none`, the human decision (a) on #4482). A direct run has no manifest from its
+ *   start, and one taken later can differ from the run's in ways no time stamp shows (a re-pointed
+ *   `node_modules`, a deleted or restored settings file), so no env is claimed and no manifest file
+ *   is written. env-manifest.mjs verifyEnvState never reads `env=none` as `same`.
+ *
+ * The note: `direct=verify run=<id> run-status=<status> gates=<id>:<ok|skip|fail>,… key=<key> env=none`.
+ * `gates=` is for the reader: precheck / merge-pr read `passed=` (wait-verify's), so a direct record
+ * is read as a `verify=ok` line and never lends its gates to a reuse.
+ *
+ * @returns {{ exit: number, reason?: string, file?: string, record?: any }}
+ */
+export function recordVerifyRun(options, { run = defaultRun, now = new Date() } = {}) {
+  const runId = String(options.runId);
+  const cli = options.cli || 'commandmatedev';
+  const worktree = options.worktree;
+  const refuse = (exit, reason) => ({ exit, reason });
+  const refused = (reason) => refuse(RECORD_VERIFY_EXIT.refused, reason);
+  const shown = runSafely(run, cli, ['verify', 'show', runId, '--json'], worktree);
+  let parsed = null;
+  try {
+    parsed = shown.status === 0 ? JSON.parse(shown.stdout) : null;
+  } catch {
+    parsed = null;
+  }
+  const view = parsed && typeof parsed === 'object' ? (parsed.run ?? parsed) : null;
+  if (!view || typeof view !== 'object' || view.id === undefined || view.id === null) {
+    return refuse(RECORD_VERIFY_EXIT.unreadable, `run ${runId}: \`${cli} verify show ${runId} --json\` gave no run (exit ${shown.status}${shown.stderr ? `: ${String(shown.stderr).trim()}` : ''})`);
+  }
+  if (String(view.id) !== runId) return refused(`run ${runId}: the CLI answered with run ${view.id}`);
+  if (view.worktreeId !== options.wt) return refused(`run ${runId} is of worktree ${view.worktreeId ?? '-'}, not ${options.wt}`);
+  if (!RUN_END_STATUSES.includes(view.status)) {
+    return refuse(RECORD_VERIFY_EXIT.notFinished, `run ${runId} is ${view.status ?? 'without a status'}: not over, nothing recorded (record it once it has ended)`);
+  }
+  const started = Date.parse(view.startedAt);
+  if (!Number.isFinite(started)) return refused(`run ${runId}: no readable start (startedAt ${view.startedAt ?? '-'}), so no HEAD can be tied to it`);
+  const taskId = optionalString(options.taskId);
+  if (taskId !== null && view.taskId && view.taskId !== taskId) return refused(`run ${runId} is of task ${view.taskId}, not ${taskId}`);
+
+  // (c) --worktree is --wt's worktree.
+  const listed = runSafely(run, cli, ['ls', '--json'], worktree);
+  let rows = null;
+  try {
+    rows = listed.status === 0 ? worktreeRows(JSON.parse(listed.stdout)) : null;
+  } catch {
+    rows = null;
+  }
+  if (!rows) return refused(`cannot read \`${cli} ls --json\` to tie --worktree to ${options.wt} (exit ${listed.status})`);
+  const row = rows.find((r) => r && r.id === options.wt);
+  if (!row || typeof row.path !== 'string') return refused(`worktree ${options.wt} is not listed by \`${cli} ls --json\``);
+  const listedPath = realpathOrNull(row.path);
+  const givenPath = realpathOrNull(worktree);
+  if (listedPath === null || givenPath === null || listedPath !== givenPath) {
+    return refused(`--worktree ${worktree} is not worktree ${options.wt} (${row.path})`);
+  }
+
+  const revParse = runSafely(run, 'git', ['-C', worktree, 'rev-parse', 'HEAD'], worktree);
+  const head = revParse.status === 0 ? revParse.stdout.trim() : '';
+  if (!FULL_SHA.test(head)) return refuse(RECORD_VERIFY_EXIT.unreadable, `${worktree}: cannot read HEAD (${String(revParse.stderr).trim()})`);
+  const short = head.slice(0, 7);
+  const wanted = optionalString(options.head);
+  if (wanted !== null && wanted !== head) return refused(`--head ${wanted.slice(0, 7)} is not the worktree's HEAD ${short}`);
+  // (a) No uncommitted change: the record says HEAD, and only the committed tree is HEAD.
+  let dirty;
+  try {
+    dirty = dirtyPaths(run, worktree);
+  } catch (error) {
+    return refused(`cannot read the worktree's git status, so HEAD ${short} cannot be tied to run ${runId}: ${error.message}`);
+  }
+  if (dirty.length > 0) return refused(`uncommitted changes in ${worktree} (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}): run ${runId} did not verify HEAD ${short} alone`);
+  const logged = runSafely(run, 'git', ['-C', worktree, 'log', '-1', '--format=%cI'], worktree);
+  const committedAt = logged.status === 0 ? Date.parse(logged.stdout.trim()) : NaN;
+  if (!Number.isFinite(committedAt)) return refused(`cannot read when HEAD ${short} was committed (${String(logged.stderr).trim()})`);
+  if (committedAt > started) return refused(`HEAD ${short} was committed after the run started (${view.startedAt}): run ${runId} verified an earlier state`);
+  // (b) HEAD did not move after the run started (a reset / checkout to an older commit keeps an old commit date).
+  // `%gd` with `--date=unix` is the reflog entry's own time (`HEAD@{<epoch>}`); `%ct` would be the commit's.
+  const reflog = runSafely(run, 'git', ['-C', worktree, 'log', '-g', '-1', '--date=unix', '--format=%gd', 'HEAD'], worktree);
+  const movedMatch = reflog.status === 0 ? /^HEAD@\{(\d+)\}$/.exec(reflog.stdout.trim()) : null;
+  const movedSec = movedMatch ? Number(movedMatch[1]) : null;
+  if (movedSec === null) return refused(`cannot read HEAD's reflog in ${worktree}, so it cannot be told that HEAD ${short} stayed since run ${runId} started`);
+  if ((movedSec + 1) * 1000 > started) {
+    return refused(`HEAD ${short} moved after the run started (${new Date(movedSec * 1000).toISOString()} >= ${view.startedAt}): run ${runId} verified another state`);
+  }
+  const item = optionalString(options.item);
+  const issue = Number(options.issue);
+  const { records } = readRecords(options.runDir, options.issues);
+  const earlier = records.find(
+    (r) => r.issue === issue && r.stage === 'verify' && itemOf(r) === item && RUN_NOTE(runId).test(String(r.note ?? ''))
+  );
+  if (earlier) return refused(`run ${runId} is already recorded for #${workItemName(issue, item)} (at ${earlier.at ?? '-'})`);
+
+  // Only the run's own task (#4482 review 1 P3-1): `--task` checks it, it never stands in for it.
+  const recordTask = optionalString(view.taskId);
+  const key = `${options.issues}:${workItemName(issue, item)}:${recordTask ?? '-'}:run${runId}`;
+  const gates = (Array.isArray(view.gates) ? view.gates : []).map((g) => `${g.gateId}:${gateResult(String(g.status ?? ''))}`);
+  const note = [
+    'direct=verify',
+    `run=${runId}`,
+    `run-status=${view.status}`,
+    `gates=${gates.join(',') || '-'}`,
+    `key=${key}`,
+    // No env is claimed for a direct run: it has no manifest from its start (#4482 decision (a)).
+    'env=none',
+  ].join(' ');
+  const finished = Date.parse(view.finishedAt);
+  const input = {
+    issue,
+    stage: 'verify',
+    result: view.status === 'passed' ? 'ok' : 'fail',
+    head,
+    taskId: recordTask,
+    agent: optionalString(view.instanceId),
+    durationSec: Number.isFinite(finished) && finished >= started ? Math.round((finished - started) / 1000) : null,
+    note,
+    item,
+    key,
+  };
+  const { file, record } = appendRecord(options.runDir, options.issues, input, now);
+  return { exit: RECORD_VERIFY_EXIT.recorded, file, record };
+}
+
+const RECORD_VERIFY_FLAGS = {
+  '--run-dir': 'runDir',
+  '--issues': 'issues',
+  '--issue': 'issue',
+  '--run': 'runId',
+  '--wt': 'wt',
+  '--worktree': 'worktree',
+  '--head': 'head',
+  '--task': 'taskId',
+  '--item': 'item',
+  '--cli': 'cli',
+};
+
+function recordVerifyMain(rest, now, deps) {
+  const out = deps.out ?? ((line) => console.log(line));
+  const error = deps.error ?? ((line) => console.error(line));
+  const options = {};
+  for (let i = 0; i < rest.length; i++) {
+    const flag = RECORD_VERIFY_FLAGS[rest[i]];
+    if (!flag || i + 1 >= rest.length) {
+      error(`unknown or incomplete argument: ${rest[i]}\n${USAGE}`);
+      return RECORD_VERIFY_EXIT.usage;
+    }
+    options[flag] = rest[++i];
+  }
+  const missing = ['runDir', 'issues', 'issue', 'runId', 'wt', 'worktree'].filter((field) => !options[field]);
+  if (missing.length > 0) {
+    error(`missing ${missing.map((field) => Object.keys(RECORD_VERIFY_FLAGS).find((flag) => RECORD_VERIFY_FLAGS[flag] === field)).join(', ')}\n${USAGE}`);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  if (!/^[1-9]\d*$/.test(options.runId)) {
+    error(`--run: must be a verification run id (a positive integer) (got ${options.runId})`);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  if (optionalString(options.head) !== null && !FULL_SHA.test(options.head)) {
+    error(`--head: must be the full 40-digit commit sha (use \`git rev-parse HEAD\`, not a short sha) (got ${options.head})`);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  const problem = itemProblem(options.item);
+  if (problem) {
+    error(problem);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  try {
+    runLogPath(options.runDir, options.issues);
+  } catch (err) {
+    error(err.message);
+    return RECORD_VERIFY_EXIT.usage;
+  }
+  try {
+    const result = recordVerifyRun(options, { run: deps.run, now });
+    if (result.exit !== RECORD_VERIFY_EXIT.recorded) {
+      error(`not recorded: ${result.reason}`);
+      return result.exit;
+    }
+    const { record, file } = result;
+    out(`recorded #${workItemName(record.issue, record.item)} verify=${record.result} ${record.head.slice(0, 7)}: ${record.note} -> ${file}`);
+    return RECORD_VERIFY_EXIT.recorded;
+  } catch (err) {
+    error(err.message);
+    return RECORD_VERIFY_EXIT.unreadable;
+  }
+}
+
 function formatStatus(summary, skipped, shared = [], queue = [], train = null) {
   const lines = [];
   for (const item of summary) {
@@ -474,7 +730,8 @@ function formatStatus(summary, skipped, shared = [], queue = [], train = null) {
 
 const USAGE = `Usage:
   node scripts/orchestrate/run-log.mjs append --run-dir <dir> --issues <range> --issue <N> --stage <${[...STAGES, ...ANY_LOG_STAGES].join('|')}> --result <${RESULTS.join('|')}> [--head <sha>] [--work-head <sha>] [--task <id>] [--contract <path>] [--agent <name>] [--model <name>] [--duration-sec <n>] [--note <text>] [--item <work item>] [--key <execution key>] [--queue-sec <n>] [--mutex-sec <n>] [--run-sec <n>]
-  node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]`;
+  node scripts/orchestrate/run-log.mjs status --run-dir <dir> --issues <range> [--json]
+  node scripts/orchestrate/run-log.mjs record-verify --run-dir <dir> --issues <range> --issue <N> --run <verification run id> --wt <worktree id> --worktree <path> [--head <sha>] [--task <id>] [--item <work item>] [--cli <commandmatedev>]`;
 
 const FLAGS = {
   '--run-dir': 'runDir',
@@ -495,8 +752,9 @@ const FLAGS = {
   ...Object.fromEntries(Object.entries(TIMING_FIELDS).map(([field, flag]) => [flag, field])),
 };
 
-export function main(argv, now = new Date()) {
+export function main(argv, now = new Date(), deps = {}) {
   const [command, ...rest] = argv;
+  if (command === 'record-verify') return recordVerifyMain(rest, now, deps);
   const options = { json: false };
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];

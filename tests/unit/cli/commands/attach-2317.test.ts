@@ -208,7 +208,7 @@ describe('the hint printed before the terminal is handed to tmux', () => {
     const hints = buildAttachHints('claude', 'wt1', 'mcbd-claude-wt1', {}).join('\n');
 
     expect(hints).toContain('prefix + g');
-    expect(hints).toContain('commandmate capture wt1 --pane --tail 60');
+    expect(hints).toContain('commandmate capture wt1 --pane --tail 80');
     expect(hints).toContain('commandmate capture wt1 --pane --follow');
     expect(hints).toContain('commandmate attach wt1 --live');
     expect(hints).toContain("tmux ls -F '#{session_name} #{@cm_status}'");

@@ -69,14 +69,37 @@ interface CacheEntry {
   expiresAt: number;
   /**
    * Issue #4452: whether antigravity could be probed when these rows were made. A
-   * use of antigravity (or a declaration) since makes the entry stale at once, so
-   * the row shows right after the use rather than after the TTL.
+   * use of antigravity (or a declaration) since changes the answer, and the row
+   * shows right after the use rather than after the TTL. Issue #4480: only the
+   * antigravity row is added (or dropped) then; the other rows are kept, so
+   * claude / codex are not probed again inside the TTL.
    */
   antigravityProbeable: boolean;
 }
 
+/** One probe run in flight, and what it was started under. */
+interface Flight {
+  promise: Promise<AgentVersionRow[]>;
+  /** {@link generation} when it started; it writes the cache only if unchanged. */
+  generation: number;
+  /** `mayProbeToolVersion('antigravity')` when it started. */
+  antigravityProbeable: boolean;
+  /** Started by `force` (a forced fetch may share only a forced full fetch). */
+  forced: boolean;
+}
+
 let cache: CacheEntry | null = null;
-let inFlight: Promise<AgentVersionRow[]> | null = null;
+/**
+ * Issue #4480 (review-4480): bumped by a forced fetch and by
+ * {@link clearAgentVersionsCache}. A run started under an older generation still
+ * answers its own callers but never writes the cache, so rows probed before an
+ * update cannot be written back over the rows probed after it.
+ */
+let generation = 0;
+/** The full fan-out in flight (every tool the gate allows). */
+let fullInFlight: Flight | null = null;
+/** The antigravity-row add in flight (only antigravity is probed). */
+let addInFlight: Flight | null = null;
 
 /** Probe one tool and build its row. codex gets the extra half. */
 async function buildRow(tool: string): Promise<AgentVersionRow> {
@@ -121,6 +144,22 @@ async function computeRows(): Promise<AgentVersionRow[]> {
   return Promise.all(tools.map(buildRow));
 }
 
+/** Rows in the list's order (by tool id, as {@link computeRows} sorts the ids). */
+function sortRows(rows: AgentVersionRow[]): AgentVersionRow[] {
+  return [...rows].sort((a, b) => (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0));
+}
+
+/**
+ * Issue #4480: the cached rows with the antigravity row added (gate open) or
+ * dropped (gate closed). Only antigravity is probed — the same "add only what
+ * became probeable" the detector and the catalog do.
+ */
+async function withAntigravityRow(rows: AgentVersionRow[], probeable: boolean): Promise<AgentVersionRow[]> {
+  const others = rows.filter((row) => row.tool !== 'antigravity');
+  if (!probeable || !('antigravity' in DETECTOR_VERSION_PROBES)) return others;
+  return sortRows([...others, await buildRow('antigravity')]);
+}
+
 /**
  * When a fan-out started at `startedAt` should stop being reused.
  *
@@ -138,7 +177,10 @@ function expiryFrom(startedAt: number): number {
  * Every tool's version row, cached for {@link AGENT_VERSIONS_CACHE_TTL_MS}.
  *
  * Single-flight: two concurrent callers share one fan-out rather than doubling
- * the child processes.
+ * the child processes. Issue #4480: except that a forced fetch shares only a
+ * forced fan-out of its own generation — never the antigravity-row add, nor a
+ * fan-out started before it — and nothing started before a force or a clear
+ * writes the cache afterwards.
  *
  * @param options.force - Skip the cache and re-probe. What the UI passes right
  *   after an update, so the new version is visible without a 30s wait.
@@ -150,40 +192,90 @@ export async function getAgentVersions(
   options: { force?: boolean; now?: number } = {}
 ): Promise<AgentVersionRow[]> {
   const now = options.now ?? Date.now();
+  const probeable = mayProbeToolVersion('antigravity');
 
   if (options.force) {
+    // Issue #4480 (review-4480): a forced fetch is a full fan-out started now. It
+    // never shares an add (which probes antigravity only) or a full fan-out that
+    // was started before it; it shares only a forced one of the same generation.
+    if (fullInFlight?.forced && fullInFlight.generation === generation) return fullInFlight.promise;
+    generation += 1;
     cache = null;
-  } else if (
-    cache &&
-    cache.expiresAt > now &&
-    cache.antigravityProbeable === mayProbeToolVersion('antigravity')
-  ) {
-    return cache.rows;
+    return startFull(now, probeable, true);
   }
 
-  if (inFlight) return inFlight;
+  if (cache && cache.expiresAt > now) {
+    if (cache.antigravityProbeable === probeable) return cache.rows;
+    const sharable = [fullInFlight, addInFlight].find(
+      (flight) => flight && flight.generation === generation && flight.antigravityProbeable === probeable
+    );
+    if (sharable) return sharable.promise;
+    return startAdd(cache, probeable);
+  }
 
-  inFlight = (async () => {
-    const antigravityProbeable = mayProbeToolVersion('antigravity');
+  if (fullInFlight && fullInFlight.generation === generation) return fullInFlight.promise;
+  return startFull(now, probeable, false);
+}
+
+/** Start a full fan-out; it writes the cache only if no force or clear came since. */
+function startFull(now: number, antigravityProbeable: boolean, forced: boolean): Promise<AgentVersionRow[]> {
+  const startedIn = generation;
+  // `promise` is set below: the run compares itself with the slot when it ends.
+  const flight = { generation: startedIn, antigravityProbeable, forced } as Flight;
+  const promise = (async () => {
+    let rows: AgentVersionRow[];
     try {
-      const rows = await computeRows();
-      cache = { rows, expiresAt: expiryFrom(now), antigravityProbeable };
-      return rows;
+      rows = await computeRows();
     } catch {
       // A probe fan-out that throws must not fail the surface that asked: the
       // versions are an annotation, and an empty list renders as "unknown".
-      cache = { rows: [], expiresAt: expiryFrom(now), antigravityProbeable };
-      return [];
-    } finally {
-      inFlight = null;
+      rows = [];
     }
+    if (generation === startedIn) {
+      cache = { rows, expiresAt: expiryFrom(now), antigravityProbeable };
+    }
+    if (fullInFlight === flight) fullInFlight = null;
+    return rows;
   })();
+  flight.promise = promise;
+  fullInFlight = flight;
+  return promise;
+}
 
-  return inFlight;
+/**
+ * Issue #4480: inside the TTL only the gate's answer changed (a use or a
+ * declaration since). Add or drop the antigravity row and keep the rest — a full
+ * fan-out here would run claude / codex `--version` once more than the TTL allows
+ * (review-4452-3 P3-2). The entry keeps its expiry. It writes the cache only if
+ * the entry it started from is still the cache and no force or clear came since.
+ */
+function startAdd(base: CacheEntry, antigravityProbeable: boolean): Promise<AgentVersionRow[]> {
+  const startedIn = generation;
+  // `promise` is set below: the run compares itself with the slot when it ends.
+  const flight = { generation: startedIn, antigravityProbeable, forced: false } as Flight;
+  const promise = (async () => {
+    let rows: AgentVersionRow[];
+    try {
+      rows = await withAntigravityRow(base.rows, antigravityProbeable);
+    } catch {
+      // Same rule as the full fan-out: the versions are an annotation.
+      rows = base.rows;
+    }
+    if (generation === startedIn && cache === base) {
+      cache = { rows, expiresAt: base.expiresAt, antigravityProbeable };
+    }
+    if (addInFlight === flight) addInFlight = null;
+    return rows;
+  })();
+  flight.promise = promise;
+  addInFlight = flight;
+  return promise;
 }
 
 /** Drop the cached probe. Tests, and every surface that just ran an update. */
 export function clearAgentVersionsCache(): void {
+  generation += 1;
   cache = null;
-  inFlight = null;
+  fullInFlight = null;
+  addInFlight = null;
 }

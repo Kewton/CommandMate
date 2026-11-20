@@ -1,0 +1,40 @@
+{
+  "version": "0.54.0",
+  "date": "2026-11-21",
+  "highlight": {
+    "ja": "relay の返事を受けた後の次の依頼が止まる問題や、検証が止まった実行を待ち続ける問題など、エージェントのチームを止めていた不具合を直しました。",
+    "en": "Fixed problems that stalled agent teams, such as the next request being blocked after receiving a relay reply and verification waiting forever on a stopped run."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "メモの一覧と決定の画面が、最後の項目までスクロールできない問題を直しました。",
+      "en": "Fixed the memo list and decision screens not scrolling down to the last item."
+    },
+    {
+      "ja": "relay の返事を受けた後に次の依頼を送ると、連鎖として断られる問題を直しました。",
+      "en": "Fixed the next request being refused as a chain after receiving a relay reply."
+    },
+    {
+      "ja": "検証の実行が途中で止まったとき、待つ側が待ち続けたり、記録が実行中のまま残ったりする問題を直しました。",
+      "en": "Fixed waiting forever, or a run staying marked as running, when a verification run stopped partway."
+    },
+    {
+      "ja": "エージェントの道具が置くファイルのせいで、検証が不合格になる問題を直しました。",
+      "en": "Fixed verification failing because of files that agent tools place in the working tree."
+    },
+    {
+      "ja": "Antigravity の画面に直接打つ操作にも、送信の方針が掛かるようになりました。",
+      "en": "Direct typing into the Antigravity screen now follows the same send policy as other sends."
+    },
+    {
+      "ja": "名簿に無いインスタンスへの返事つきの送信で、Antigravity の規則が正しく判定されない問題を直しました。",
+      "en": "Fixed the Antigravity rule not being applied correctly to sends with a reply request to an instance outside the roster."
+    },
+    {
+      "ja": "CLI の案内やヘルプの記載のずれをいくつか直しました。",
+      "en": "Fixed several inaccuracies in CLI guidance and help text."
+    }
+  ]
+}

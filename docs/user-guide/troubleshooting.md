@@ -29,7 +29,7 @@ commandmate ls
 commandmate ls --json | jq -r '.[] | "\(.id)\t\(.tmuxSession)"'
 
 # attach せずに transcript を読む
-commandmate capture <worktree-id> --pane --tail 60
+commandmate capture <worktree-id> --pane --tail 80
 commandmate capture <worktree-id> --pane --follow    # 生成中の応答を追う
 
 # この端末を attach（detach は Ctrl+b → d）
