@@ -123,7 +123,7 @@ MARK_WRITTEN=0
 # mark_json_safe <value> — 0 when it can go between JSON quotes as is.
 mark_json_safe() {
     case "$1" in
-        *'"'* | *'\'* | *[[:cntrl:]]*) return 1 ;;
+        *'"'* | *\\* | *[[:cntrl:]]*) return 1 ;;
     esac
     return 0
 }
