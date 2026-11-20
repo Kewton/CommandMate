@@ -262,6 +262,9 @@ export async function runInit(options: InitOptions): Promise<InitResult> {
         logger.info(`  ${PreflightChecker.getInstallHint(result.name)}`);
       } else if (result.status === 'version_mismatch') {
         logger.warn(`${result.name}: ${result.version} (minimum required version not met)`);
+      } else if (result.status === 'not_checked') {
+        // Issue #4480: found on PATH; its version command (agy) runs only with the declaration.
+        logger.info(`${result.name}: found (version not checked; set CM_ANTIGRAVITY_USAGE=api-key or enterprise to check it)`);
       }
     }
 

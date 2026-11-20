@@ -23,6 +23,10 @@
  * The authority is the one `/send` already grants an authenticated caller —
  * arbitrary text to an agent that runs shell commands — so nothing here widens
  * what a session can be made to do.
+ *
+ * Issue #4480: and so it asks the same tool policy `/send` asks (#4437), as a
+ * `send` (any text can be typed), with the body's `origin`, before the session
+ * is read or typed into. The screen sends no origin (`legacy`) and goes through.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -37,6 +41,7 @@ import { broadcastTerminalSnapshotAfterInteraction } from '@/lib/realtime/termin
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { MAX_DIRECT_INPUT_EVENTS, isDirectInputEvent } from '@/types/direct-input';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
+import { findToolPolicyDenial, readBodyOrigin, toolPolicyDeniedResponse } from '../send/send-tool-policy';
 
 const logger = createLogger('api/direct-input');
 
@@ -51,7 +56,7 @@ export async function POST(
   const body = parsedBody.body;
 
   try {
-    const { cliToolId, events, instanceId } = body;
+    const { cliToolId, events, instanceId, origin: rawOrigin, originEvidence } = body;
 
     if (!cliToolId || typeof cliToolId !== 'string' || !isCliToolType(cliToolId)) {
       return NextResponse.json({ error: 'Invalid cliToolId parameter' }, { status: 400 });
@@ -70,11 +75,29 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid events parameter' }, { status: 400 });
     }
 
+    // Issue #4480: who started the request, read as `/send` reads it.
+    const origin = readBodyOrigin(rawOrigin);
+    if (!origin.ok) {
+      return NextResponse.json({ error: origin.error }, { status: 400 });
+    }
+
     const db = getDbInstance();
     const worktree = getWorktreeById(db, id);
     if (!worktree) {
       return NextResponse.json({ error: 'Worktree not found' }, { status: 404 });
     }
+
+    // Issue #4480: the tool policy, before the session is read or typed into.
+    // The session typed into is named after `cliToolId`, so that is the tool asked.
+    const toolPolicyDenial = findToolPolicyDenial({
+      tool: cliToolId,
+      operation: 'send',
+      origin: origin.origin,
+      originEvidence,
+      worktreeId: id,
+      instanceId: instanceId as string | undefined,
+    });
+    if (toolPolicyDenial) return toolPolicyDeniedResponse(toolPolicyDenial);
 
     // Issue #3290: a same-named session another CommandMate server created is
     // not ours to type into. The name is the one `sendDirectInput` sends to —

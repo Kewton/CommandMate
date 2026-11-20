@@ -166,6 +166,12 @@ export interface DependencyCheck {
   required: boolean;
   /** Minimum version (optional) */
   minVersion?: string;
+  /**
+   * Issue #4480: the CommandMate tool id whose version probe is gated
+   * (`mayProbeToolVersion`, src/lib/tool-policy/version-probe-gate.ts). When the
+   * gate is closed the command is not run; it is only looked up on `PATH`.
+   */
+  gatedTool?: string;
 }
 
 /**
@@ -174,8 +180,11 @@ export interface DependencyCheck {
 export interface DependencyStatus {
   /** Dependency name */
   name: string;
-  /** Check status */
-  status: 'ok' | 'missing' | 'version_mismatch';
+  /**
+   * Check status. `not_checked` (Issue #4480): found on `PATH`, but its version
+   * command was not run (antigravity without the usage declaration).
+   */
+  status: 'ok' | 'missing' | 'version_mismatch' | 'not_checked';
   /** Detected version (if available) */
   version?: string;
 }
