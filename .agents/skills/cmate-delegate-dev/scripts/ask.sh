@@ -228,7 +228,7 @@ if cm ask --help >/dev/null 2>&1; then
   # Say so; the exit code stays as ask gave it (a context-limit fault on such a
   # turn is already ask's own exit 11 since CommandMate 0.43.0).
   if [ "$ask_rc" -eq 0 ] && printf '%s' "$ask_out" | grep -E -q '"reply": *null'; then
-    printf 'ask.sh: id=reply-not-collected: the turn ended but ask did not collect a reply (see the attribution in the JSON and the line ask wrote to stderr). Do not report it as an answer. Look at the screen: commandmatedev capture %s --instance %s --pane --tail 40\n' \
+    printf 'ask.sh: id=reply-not-collected: the turn ended but ask did not collect a reply (see the attribution in the JSON and the line ask wrote to stderr). Do not report it as an answer. Look at the screen: commandmatedev capture %s --instance %s --pane --tail 80\n' \
       "$WORKTREE_ID" "$INSTANCE_ID" >&2
   fi
   exit "$ask_rc"

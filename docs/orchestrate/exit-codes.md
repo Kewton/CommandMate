@@ -168,6 +168,18 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
 
 precheck のうち全ファイルを走査するガードのテスト（`tests/unit/guards` の下）が `Test timed out in 5000ms` で落ちるのは、多くの場合マシンの負荷（同じマシンの CI ランナーなど）によるもので、作業とは関係しない。ワーカーへ再指示しない。すぐに再実行しても同じ負荷で落ちる。1 分の load average が論理 CPU 数の目安を下回るまで待ってから、同じ HEAD で precheck を再実行する。
 
+## 1-5 record-verify の exit code
+
+`run-log.mjs record-verify`（#4482。リーダーが直接流した verify を run 番号から記録する。docs/orchestrate/run-log.md）の exit code。0 以外は何も書かない。
+
+| exit | 意味 | 対応 |
+|---|---|---|
+| 0 | `verify` の行を記録した（`env=none`） | なし |
+| 1 | `verify show <run> --json` が run を返さない（失敗・JSON でない・`id` の無い答え）、または worktree の HEAD を読めない | run 番号・`--cli`・サーバーを確かめて呼び直す |
+| 2 | 引数の誤り（`--run` が数でない、`--head` が 40 桁でない、必須の引数が無い） | 引数を直す |
+| 3 | run が終わっていない（`running`・`queued` など） | 結果を決めずに断っている。run が終わってから呼び直す |
+| 4 | 別の run（worktree の id・path、run の id、task の不一致）、HEAD をその run が確かめた木と言えない（未コミットの変更・HEAD のコミットか移動が run の開始より後・`--head` と違う・git status / reflog / run の開始時刻を読めない）、同じ work item に記録済み | stderr の理由を読む。木が動いたなら、今の HEAD（コミット済み）で verify を流し直してから、その run を記録する |
+
 ## エラーハンドリング表の個別の行
 
 | env-clean だけが FAIL（exit 20） | `capture --prompts` と違反項目の時刻で帰属を判定（複数の worktree に同じ項目が出ると `wait-verify.mjs` と `run-log.mjs status` が外部要因の候補と出す）。ワーカー起因でなければ合格扱いにし、根拠を PR と summary に書く（3-4） |

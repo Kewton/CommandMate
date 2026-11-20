@@ -11,7 +11,13 @@
  *     default. `--allow-relay-chain` is the deliberate override, and the flag is
  *     named after what it permits rather than after what it disables.
  *  2. **Chains are bounded** (`RELAY_HOPS_EXCEEDED`). Even with the override,
- *     depth stops at {@link MAX_RELAY_HOPS}.
+ *     depth stops at {@link MAX_RELAY_HOPS}. Issue #4420: so is the pace of
+ *     round trips — a session that has received {@link MAX_RELAY_ROUNDS}
+ *     replies to its own relays within {@link RELAY_ROUNDS_WINDOW_MS} may not
+ *     open another until the oldest ages out (same code, its own sentence; the
+ *     flag does not lift it either). The reply to a relay the session opened is
+ *     NOT a relayed request for rule 1 — answering it is the session's own next
+ *     step.
  *  3. **One open relay per direction** (`RELAY_DUPLICATE_PENDING`). A second
  *     standing instruction from A to B says nothing the first does not, and both
  *     would fire on the same finished turn.
@@ -62,6 +68,32 @@ export const MAX_RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export const MAX_RELAY_HOPS = 3;
 
+/**
+ * How many replies to its own relays a session may receive within
+ * {@link RELAY_ROUNDS_WINDOW_MS} before its next relay is refused (Issue #4420,
+ * 案 Q, docs/design/relay-rounds-window-4420.md §2).
+ *
+ * Ten, by the PM's decision. Counted per requesting session (worktree and
+ * instance id as the ledger holds them), whoever it asked, from the ledger
+ * alone: a relay whose reply was delivered, or whose reply's delivery is held
+ * `uncertain`. Nothing in the history is read — not a person's line, not an
+ * echo, not a notice — so typing does not reset it; time does. Not
+ * {@link MAX_RELAY_HOPS}: depth is nesting, this is pace. A round trip faster
+ * than about three minutes reaches ten inside the window; a slower one never
+ * does (known limit Q-1, left to the relay watch). The bound is not exact
+ * either: a reply still being typed is not counted (Q-7), and relays opened
+ * side by side at nine all go (Q-10).
+ */
+export const MAX_RELAY_ROUNDS = 10;
+
+/**
+ * The window {@link MAX_RELAY_ROUNDS} is counted over (Issue #4420): thirty
+ * minutes, by the PM's decision. A reply counts from the moment the ledger
+ * recorded its delivery (`delivered_at`; for a held one, `delivery_at`), so a
+ * refused session can open again at most this long after it was refused.
+ */
+export const RELAY_ROUNDS_WINDOW_MS = 30 * 60 * 1000;
+
 /** How many open relays one from→to direction may hold at once. */
 export const MAX_OPEN_RELAYS_PER_PAIR = 1;
 
@@ -107,6 +139,13 @@ export interface RelayRefusal {
   message: string;
   /** Issue #4437: set on `RELAY_TOOL_POLICY_DENIED` only. */
   toolPolicy?: RelayToolPolicyDenial;
+  /**
+   * Issue #4420: which ceiling a `RELAY_HOPS_EXCEEDED` came from — set to
+   * `'rounds'` only when the round-trip ceiling refused (depth refuses first, so
+   * a request over both is a depth refusal). Internal: the route answers `code`
+   * and `message` only.
+   */
+  ceiling?: 'rounds';
 }
 
 /**
@@ -190,6 +229,12 @@ export interface RelayCreationInput {
   /** Open relays already running from `from` to `to`. */
   openBetween: number;
   /**
+   * Issue #4420: replies to `from`'s own relays received within
+   * {@link RELAY_ROUNDS_WINDOW_MS} (`relay-service`'s `countRecentReplyRounds`).
+   * Absent means 0, so a caller that does not count is unaffected.
+   */
+  replyRounds?: number;
+  /**
    * Issue #4437: the tools at both ends, for rule 0. Absent, rule 0 is not
    * asked (a caller with no tools to name); `relay-service` always passes it.
    */
@@ -217,6 +262,9 @@ export function isSameEndpoint(a: RelayEndpoint, b: RelayEndpoint): boolean {
  *
  * Issue #4437: the tool policy (rule 0) is asked right after the typo and
  * before the others — no flag of this request lifts it, only a declaration.
+ *
+ * Issue #4420: the round-trip ceiling sits right after the depth ceiling — the
+ * same code, and like it not lifted by `allowRelayChain`.
  */
 export function decideRelayCreation(
   input: RelayCreationInput
@@ -253,6 +301,18 @@ export function decideRelayCreation(
       message:
         `Relay chains stop at ${MAX_RELAY_HOPS} hops; this one would be ${hops}. `
         + 'Report the reply to whoever asked instead of forwarding it again.',
+    };
+  }
+
+  const replyRounds = input.replyRounds ?? 0;
+  if (replyRounds >= MAX_RELAY_ROUNDS) {
+    return {
+      code: 'RELAY_HOPS_EXCEEDED',
+      ceiling: 'rounds',
+      message:
+        `This session received ${replyRounds} replies to its relays in the last `
+        + `${RELAY_ROUNDS_WINDOW_MS / 60_000} minutes; the limit is ${MAX_RELAY_ROUNDS}. `
+        + 'Wait before opening another (the count clears as replies age out).',
     };
   }
 

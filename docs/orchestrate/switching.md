@@ -2,9 +2,32 @@
 
 本体の 3-5・3-5b から、切り替えの手順を移した（#3481）。切り替えるかどうかの条件は本体にある。
 
-## 3-5 Command Code から Claude（sonnet）への格上げ
+## 3-5 Command Code から Claude（opus）への格上げ
 
-易（Command Code）の 1 つ上は中（sonnet）なので、切替先は sonnet にする（#4238）。sonnet でもワーカー起因で 2 回不合格なら、3-5b で opus に上げる。
+Command Code 担当がワーカー起因の不合格を 2 回再指示しても合格しなかったとき（本体 3-4 の 3 回目）の格上げ先は **opus**（2026-11-19 改定。sonnet は飛ばす）。
+
+1. **Command Code のセッションだけを止める**（task を作る**前**に。理由は下の Antigravity の手順 1 と同じ）。
+   ```bash
+   commandmatedev instances "$WT" kill command-code
+   commandmatedev instances "$WT"        # command-code の RUNNING が no であること
+   ```
+2. **opus 用の契約** `.commandmate/tasks/issue-<N>-opus.yaml` を作る。`scope` / `verify` / `success` は元の契約と同じ。
+   設定は `agent: claude`・`model: opus` にして `contract.mjs generate` で作る。
+   goal には、下の Antigravity の手順 2 と同じ形の「引き継ぎ」節を足す（見出しは `## 引き継ぎ（前任: Command Code、検証不合格 N 回）`）
+3. **Claude に送る**。tasks.tsv には切替の行を追記する（元の行は残す）。
+   ```bash
+   AGENT=claude; MODEL=opus          # Command Code の格上げ先は opus。sonnet には切り替えない
+   # 3-1 と同じ launch-worker.mjs: opus を明示して書き、起動して実効モデルを確かめてから契約を送る（exit 40〜44 なら待たずに止める）
+   TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
+     --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-opus.yaml") \
+     && node scripts/orchestrate/wait-verify.mjs --run-dir "workspace/orchestration/runs/$DATE" --issues "$RUN_ISSUES" \
+       --issue "$issue" --wt "$WT" --worktree "$WT_PATH" --instance claude --task "$TASK_ID" --model "$MODEL"
+   ```
+4. 以降は通常の Claude（opus）担当として 3-4 に従う（ワーカー起因の不合格 2 回で人間へエスカレーション）。
+
+## 3-5 Command Code の詰まりで sonnet に代える
+
+**sonnet に代えるのは、Command Code が起動・送信で詰まったときだけ**（2 回不合格の格上げ先ではない。3-4 の 3 回目に届かない停止）。代えたら理由を lead-return に書く。
 
 1. **Command Code のセッションだけを止める**（task を作る**前**に。理由は下の Antigravity の手順 1 と同じ）。
    ```bash
@@ -13,10 +36,10 @@
    ```
 2. **sonnet 用の契約** `.commandmate/tasks/issue-<N>-claude.yaml` を作る。`scope` / `verify` / `success` は元の契約と同じ。
    設定は `agent: claude`・`model: sonnet` にして `contract.mjs generate` で作る（sonnet の退避路の 1 行が入る）。
-   goal には、下の Antigravity の手順 2 と同じ形の「引き継ぎ」節を足す（見出しは `## 引き継ぎ（前任: Command Code、検証不合格 N 回）`）
+   goal には、下の Antigravity の手順 2 と同じ形の「引き継ぎ」節を足す（見出しは `## 引き継ぎ（前任: Command Code、起動・送信で停止）`）
 3. **Claude に送る**。tasks.tsv には切替の行を追記する（元の行は残す）。
    ```bash
-   AGENT=claude; MODEL=sonnet        # 易の次は中（sonnet）。opus へは 3-5b で上げる
+   AGENT=claude; MODEL=sonnet        # Command Code の起動・送信の詰まりで代える。2 回不合格の格上げ先ではない
    # 3-1 と同じ launch-worker.mjs: sonnet を明示して書き、起動して実効モデルを確かめてから契約を送る（exit 40〜44 なら待たずに止める）
    TASK_ID=$(node scripts/orchestrate/launch-worker.mjs send --run-dir "workspace/orchestration/runs/$DATE" --issue "$issue" \
      --wt "$WT" --worktree "$WT_PATH" --instance claude --model "$MODEL" --contract ".commandmate/tasks/issue-${issue}-claude.yaml") \
@@ -70,7 +93,7 @@
 2. **モデルは次の手順の launch-worker.mjs が書く**（`opus[1m]` を明示する。`model` キーを消して `~/.claude/settings.json` の既定に任せることはしない。
    既定は利用者が変えるので、opus を指定して fable で動いた。#3883）
 3. **opus 用の契約** `.commandmate/tasks/issue-<N>-opus.yaml` を作る。`scope` / `verify` / `success` は元の契約と同じ。
-   goal は Claude 担当の通常の goal（2-4-2。**sonnet 用の 2 行は外す**）に、3-5 と同じ形の「引き継ぎ」節を足す（見出しは `## 引き継ぎ（前任: Claude sonnet、検証不合格 N 回）`）
+   goal は Claude 担当の通常の goal（2-4-2。**sonnet 用の行は外す**）に、3-5 の「引き継ぎ」節の形で足す（見出しは `## 引き継ぎ（前任: Claude sonnet（Command Code の詰まりの代わり）、検証不合格 N 回）`）
 4. **送って、モデルを確かめてから待つ**。tasks.tsv には切替の行を追記する（元の行は残す）。
    ```bash
    AGENT=claude; MODEL=opus
