@@ -983,14 +983,6 @@ cmd_up() {
         UP_CHILD_REAPED=1
         fail_up "state-write-failed"
     fi
-    if [ -n "$MARK_PATH" ]; then
-        if mark_write "$UP_SERVER_PID"; then
-            MARK_WRITTEN=1
-            state_set "$UP_STATE" mark_path "$MARK_PATH"
-        else
-            log "could not write the launch mark record (env-clean will judge the server as unmarked)"
-        fi
-    fi
     run_lock_set_pid "$run_id" "$UP_SERVER_PID" "$UP_SERVER_PID" "$UP_GO" || up_handoff_fail "$RUN_LOCK_STAGE"
     UP_PHASE=after-go
 
@@ -1027,6 +1019,18 @@ cmd_up() {
         sleep 0.1
         i=$((i + 1))
     done
+    # The record is written once the server is up, not between the fork and `go`: work there shifts
+    # when the waiting child is released relative to this shell's first look at it (#4433). The pid
+    # and the group leader's start time are the same now as then; until the record exists a snapshot
+    # reads the mark as unverifiable (judged), never as another worktree's.
+    if [ -n "$MARK_PATH" ]; then
+        if mark_write "$UP_SERVER_PID"; then
+            MARK_WRITTEN=1
+            state_set "$UP_STATE" mark_path "$MARK_PATH"
+        else
+            log "could not write the launch mark record (env-clean will judge the server as unmarked)"
+        fi
+    fi
     state_set "$UP_STATE" status up
     UP_DONE=1
     trap - EXIT INT TERM

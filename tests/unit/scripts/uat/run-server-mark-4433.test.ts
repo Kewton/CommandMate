@@ -260,9 +260,9 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh marks its server (Issue #4433)', () =
   );
 
   it(
-    'removes the record when up fails after writing it',
+    'leaves no record when up fails (the record is written only once the server is up)',
     async () => {
-      // The server execs and exits at once, after the record names its group.
+      // The server execs and exits at once.
       fs.writeFileSync(path.join(root, 'dist', 'server', 'server.js'), 'process.exit(3);\n');
       const port = await freePort();
       const up = runScript(['up', '--port', String(port), '--run-dir', runDir, '--wait-listen', '30']);
