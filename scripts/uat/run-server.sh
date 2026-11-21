@@ -53,12 +53,8 @@
 # it: under own-home they are the dedicated user's, written on purpose. Without
 # --own-home nothing changes.
 #
-# Test hooks: CM_UAT_SOCK_BASE (default /tmp) moves the socket directories, CM_SERVER_MARK_BASE
-# (default /tmp) the launch-mark record directory (#4433),
+# Test hooks: CM_UAT_SOCK_BASE (default /tmp) moves the socket directories,
 # CM_UAT_SERVER_ENTRY (default dist/server/server.js) replaces the server.
-# CM_VERIFY_TEST_HANDOFF with CM_VERIFY_TEST_HANDOFF_DIR (machine-lock.sh's lock_test_pause /
-# lock_test_fault; nothing without them) also pauses at mark-publish, mark-written (up) and
-# mark-remove (down), and fault:mark-state fails up's state write of the record (#4433).
 #
 # bash 3.2 compatible (macOS /bin/bash).
 
@@ -104,151 +100,6 @@ state_set() {
 # env_value_of <pid> <name> — a variable from the process's own environment.
 env_value_of() {
     ps eww -o command= -p "$1" 2>/dev/null | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1
-}
-
-# ---------------------------------------------------------------------- launch mark (#4433)
-#
-# The server gets CM_SERVER_MARK=<record> and the record (src/cli/types/server-mark.ts, the same
-# shape `commandmate start --daemon` writes) names its process group (set -m: pgid = server pid),
-# the leader's start time and where this run was started from. env-clean excuses a listener as
-# another worktree's only on a record it can verify, so the judge's isolated server no longer fails
-# a worker's verify. The origin is the CALLER's: its directory and tmux pane, read before cmd_up's
-# `cd "$REPO_ROOT"` and before the server is handed a private tmux. Anything that does not hold
-# leaves the server unmarked (judged like any other), never stops the run.
-
-MARK_PATH=""
-MARK_LAUNCHER_CWD=""
-MARK_WORKTREE_ROOT=""
-MARK_REPO_ROOT=""
-MARK_SESSION=""
-MARK_LSTART=""
-MARK_WRITTEN=0
-
-# mark_json_safe <value> — 0 when it can go between JSON quotes as is.
-mark_json_safe() {
-    case "$1" in
-        *'"'* | *\\* | *[[:cntrl:]]*) return 1 ;;
-    esac
-    return 0
-}
-
-# mark_runs_in_pane <pane pid> — 0 when the pane's process is this shell or one of its ancestors.
-# TMUX / TMUX_PANE are only environment variables, inherited by processes outside tmux too: they
-# name the caller's session only when the caller runs in that pane (#4433 review FO P2-1).
-mark_runs_in_pane() {
-    local cur=$$ i=0 parent
-    while [ "$i" -le 64 ]; do
-        [ "$cur" = "$1" ] && return 0
-        parent="$(LC_ALL=C ps -o ppid= -p "$cur" 2>/dev/null | tr -d ' ')"
-        case "$parent" in
-            "" | *[!0-9]*) return 1 ;;
-        esac
-        [ "$parent" -gt 1 ] || return 1
-        cur=$parent
-        i=$((i + 1))
-    done
-    return 1
-}
-
-# mark_prepare — decide the record path and read the caller's origin. Sets MARK_* (MARK_PATH empty
-# when the run starts unmarked).
-mark_prepare() {
-    MARK_PATH=""
-    local base uid dir hex top v
-    # Fixed (not TMPDIR, not the socket base): the daemon and the verifier use the same place.
-    base="${CM_SERVER_MARK_BASE:-/tmp}"
-    base="${base%/}"
-    uid="$(id -u 2>/dev/null)" || return 1
-    dir="$base/commandmate-server-marks-$uid"
-    mkdir -m 700 "$dir" 2>/dev/null
-    [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
-    # A directory of this user's that nobody else can enter, or no mark.
-    [ -n "$(find "$dir" -maxdepth 0 -type d -user "$uid" -perm 700 2>/dev/null)" ] || return 1
-    hex="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
-    case "$hex" in
-        "" | *[!0-9a-f]*) return 1 ;;
-    esac
-    [ "${#hex}" -eq 32 ] || return 1
-    MARK_LAUNCHER_CWD="$(pwd -P)" || return 1
-    MARK_WORKTREE_ROOT=""
-    top="$(git -C "$MARK_LAUNCHER_CWD" rev-parse --show-toplevel 2>/dev/null)"
-    if [ -n "$top" ] && [ -d "$top" ]; then
-        MARK_WORKTREE_ROOT="$(cd "$top" && pwd -P)" || MARK_WORKTREE_ROOT=""
-    fi
-    MARK_REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)" || return 1
-    if [ -z "${TMUX:-}" ]; then
-        MARK_SESSION=no-tmux
-    elif [ -z "${TMUX_PANE:-}" ]; then
-        MARK_SESSION=lookup-failed
-    else
-        local answer pane_pid
-        answer="$(tmux -S "${TMUX%%,*}" display-message -p -t "$TMUX_PANE" '#{pane_pid} #S' 2>/dev/null)"
-        pane_pid="${answer%% *}"
-        MARK_SESSION="${answer#* }"
-        case "$pane_pid" in
-            "" | *[!0-9]*) MARK_SESSION=lookup-failed ;;
-        esac
-        case "$MARK_SESSION" in
-            "" | *[[:space:]]* | "$answer") MARK_SESSION=lookup-failed ;;
-        esac
-        [ "$MARK_SESSION" = lookup-failed ] || mark_runs_in_pane "$pane_pid" || MARK_SESSION=lookup-failed
-    fi
-    for v in "$dir" "$MARK_LAUNCHER_CWD" "$MARK_WORKTREE_ROOT" "$MARK_REPO_ROOT" "$MARK_SESSION"; do
-        mark_json_safe "$v" || return 1
-    done
-    case "$dir" in
-        *[[:space:]]*) return 1 ;;
-    esac
-    MARK_PATH="$dir/$hex.json"
-}
-
-# mark_lstart_of <pid> — the start time of <pid> as the record holds it; empty when ps cannot say.
-mark_lstart_of() {
-    LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | tr -s ' \t' '  ' | sed 's/^ //; s/ $//'
-}
-
-# mark_remove <record path> <pgid> <leader start> — remove a record this run wrote, once its server
-# is stopped: a regular file named like a record in a record directory whose pgid and leaderStartTime
-# are <pgid> and <leader start> (the run's server). A record that does not say so — another run's
-# on the same run dir, unreadable, half written — is left alone (#4433).
-mark_remove() {
-    local text
-    case "$1" in
-        /*/commandmate-server-marks-*/*.json) ;;
-        *) return 0 ;;
-    esac
-    [ -n "$2" ] && [ -n "$3" ] || return 0
-    [ -f "$1" ] && [ ! -L "$1" ] || return 0
-    text=$(cat "$1" 2>/dev/null) || return 0
-    case "$text" in
-        *"\"pgid\":$2,"*) ;;
-        *) return 0 ;;
-    esac
-    case "$text" in
-        *"\"leaderStartTime\":\"$3\","*) ;;
-        *) return 0 ;;
-    esac
-    rm -f "$1"
-    return 0
-}
-
-# mark_write <pid> — write the record for the group <pid> leads. Exclusive create, mode 0600. Sets
-# MARK_LSTART to the start time it recorded.
-mark_write() {
-    local lstart wt at
-    [ -n "$MARK_PATH" ] || return 1
-    lstart="$(mark_lstart_of "$1")"
-    [ -n "$lstart" ] && mark_json_safe "$lstart" || return 1
-    MARK_LSTART=$lstart
-    wt=null
-    [ -z "$MARK_WORKTREE_ROOT" ] || wt="\"$MARK_WORKTREE_ROOT\""
-    at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    (
-        umask 077
-        set -o noclobber
-        printf '{"v":1,"launcher":"run-server","pgid":%s,"leaderStartTime":"%s","launcherCwd":"%s","worktreeRoot":%s,"repoRoot":"%s","session":"%s","launchedAt":"%s"}\n' \
-            "$1" "$lstart" "$MARK_LAUNCHER_CWD" "$wt" "$MARK_REPO_ROOT" "$MARK_SESSION" "$at" >"$MARK_PATH"
-    ) 2>/dev/null
 }
 
 # group_members <G> — the pids (not the leader <G>) whose process group is <G>, one per
@@ -800,8 +651,6 @@ up_on_exit() {
         remove_socket_dir_tmux_only "$sock_dir"
     else
         remove_socket_dir "$sock_dir"
-        # The server is stopped: its launch record names nothing any more (#4433).
-        [ "$MARK_WRITTEN" != 1 ] || mark_remove "$MARK_PATH" "$UP_SERVER_PID" "$MARK_LSTART"
     fi
     if [ -n "$UP_STATE" ] && [ -f "$UP_STATE" ]; then state_set "$UP_STATE" status "$st"; fi
     rm -rf "$UP_GO" "$UP_ACK" 2>/dev/null
@@ -956,13 +805,6 @@ cmd_up() {
     [ -n "$tmux_pid" ] || exit 1
     state_set "$UP_STATE" tmux_pid "$tmux_pid"
 
-    # Before the cd: the record names the caller's directory, not this checkout (#4433).
-    local mark_env=()
-    if mark_prepare; then
-        mark_env=("CM_SERVER_MARK=$MARK_PATH")
-    else
-        log "the server starts without a launch mark (env-clean will judge it as unmarked)"
-    fi
     cd "$REPO_ROOT" || exit 1
     # The handover's signal (go) and receipt (ack) are named by this run: a second `up` on the same run dir
     # (after `down`) never meets an earlier run's. Removed and seen absent before the fork, or nothing starts.
@@ -991,7 +833,6 @@ cmd_up() {
         CM_OPENCODE_SESSION_FILE="$RUN_DIR/opencode-sessions.json" \
         CM_OPENCODE_PORT_FILE="$RUN_DIR/opencode-ports.json" \
         ${test_seams[@]+"${test_seams[@]}"} \
-        ${mark_env[@]+"${mark_env[@]}"} \
         nohup /bin/bash -c '. "$1" || exit 75; lock_child_wait "$2" "$3" "$4" "$5" || exit 75; unset CM_VERIFY_TEST_HANDOFF CM_VERIFY_TEST_HANDOFF_DIR CM_VERIFY_TEST_OBS_FAULT CM_VERIFY_TEST_OBS_FAULT_FILE; shift 6; exec "$@"' \
         cm-uat-child "$REPO_ROOT/scripts/lib/machine-lock.sh" "$UP_GO" "$UP_ACK" "$deadline" "$$" -- node "$SERVER_ENTRY" >"$RUN_DIR/server.log" 2>&1 </dev/null &
     UP_SERVER_PID=$!
@@ -1039,39 +880,6 @@ cmd_up() {
         sleep 0.1
         i=$((i + 1))
     done
-    # The record is published once the server runs, not between the fork and `go`: work there shifts
-    # when the waiting child is released relative to this shell's first look at it (#4433). What is
-    # known by then: the child exec'd the server with this run's CM_DB_PATH and has not ended, and,
-    # only with --wait-listen > 0, that it listens on the port. Without --wait-listen (the UAT's
-    # default) the record can name a server that has not listened yet, or that ends before it does:
-    # the health check after `up` finds that, and `down` removes the record (its group then names no
-    # live leader, which never excuses anything). Until the record exists a snapshot reads the mark as
-    # record-unreadable (judged), never as another worktree's.
-    # After writing it: the state must hold its path (else `down` could not remove it), and the server
-    # must still be the one recorded (a `down` that stopped it meanwhile found no path to remove).
-    # Either failing, this run removes its own record; a gone server also fails `up`.
-    if [ -n "$MARK_PATH" ]; then
-        lock_test_pause mark-publish
-        if mark_write "$UP_SERVER_PID"; then
-            MARK_WRITTEN=1
-            if lock_test_fault mark-state ||
-                ! state_set "$UP_STATE" mark_lstart "$MARK_LSTART" ||
-                ! state_set "$UP_STATE" mark_path "$MARK_PATH"; then
-                mark_remove "$MARK_PATH" "$UP_SERVER_PID" "$MARK_LSTART"
-                MARK_WRITTEN=0
-                log "could not record the launch mark in $UP_STATE: removed it (env-clean will judge the server as unmarked)"
-            fi
-            lock_test_pause mark-written
-            # Our own child, not reaped until here: its pid names no other process.
-            if up_server_ended; then
-                mark_remove "$MARK_PATH" "$UP_SERVER_PID" "$MARK_LSTART"
-                MARK_WRITTEN=0
-                fail_up "the server (pid $UP_SERVER_PID) ended before its launch mark was published; see $RUN_DIR/server.log"
-            fi
-        else
-            log "could not write the launch mark record (env-clean will judge the server as unmarked)"
-        fi
-    fi
     state_set "$UP_STATE" status up
     UP_DONE=1
     trap - EXIT INT TERM
@@ -1082,7 +890,7 @@ cmd_up() {
 # ---------------------------------------------------------------------- down
 
 cmd_down() {
-    local state sock_dir rc=0 mark_pid mark_lstart
+    local state sock_dir rc=0
     require_run_dir
     RUN_DIR="$(cd "$RUN_DIR" 2>/dev/null && pwd)" || {
         log "no run dir: refusing to stop anything by port"
@@ -1094,24 +902,13 @@ cmd_down() {
         exit 1
     fi
     sock_dir=$(state_get "$state" sock_dir)
-    # The server this down stops, fixed before it stops anything (#4433): after the release a new `up`
-    # on the same run dir may rewrite the state, so its record is never judged by what is read then.
-    # The start time is the live server's; for one already gone, what `up` recorded with the record.
-    mark_pid=$(state_get "$state" server_pid)
-    mark_lstart=""
-    [ -z "$mark_pid" ] || mark_lstart=$(mark_lstart_of "$mark_pid")
-    [ -n "$mark_lstart" ] || mark_lstart=$(state_get "$state" mark_lstart)
 
     if down_procedure "$state"; then
         remove_socket_dir "$sock_dir"
-        lock_test_pause mark-remove
-        mark_remove "$(state_get "$state" mark_path)" "$mark_pid" "$mark_lstart"
     else
         # The lock stays when the server or its group may still be running (or the lock is another run's).
         if [ "$DOWN_SERVER_STOPPED" -eq 1 ]; then
             remove_socket_dir "$sock_dir"
-            lock_test_pause mark-remove
-            mark_remove "$(state_get "$state" mark_path)" "$mark_pid" "$mark_lstart"
         else
             remove_socket_dir_tmux_only "$sock_dir"
         fi

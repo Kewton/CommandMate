@@ -76,8 +76,6 @@ function baseEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     CM_UAT_SOCK_BASE: root,
     CM_UAT_SERVER_ENTRY: listenJs,
     CODEX_HOME: path.join(root, 'codex'),
-    // Issue #4433: `up` writes a launch-mark record; keep it under this test's temp dir, not /tmp.
-    CM_SERVER_MARK_BASE: root,
     // `up` hashes $HOME/.gemini/config/hooks.json and `down` compares it
     // (Issue #3360): a private HOME keeps the user's real file out of the test.
     HOME: path.join(root, 'home'),
