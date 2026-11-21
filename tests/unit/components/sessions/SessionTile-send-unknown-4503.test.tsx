@@ -4,7 +4,9 @@
  * offers no ［再試行］, 「送り直す」 sends only after its confirmation, and ［ターミナルを確かめる］
  * switches the tile to its terminal. Positive control: a 400 still fails with a direct ［再試行］.
  *
- * Red with the wiring taken out of `SessionTile.tsx` (checked by hand, #4503 review 1).
+ * Red with the wiring taken out of `SessionTile.tsx` (checked by hand, #4503 review 1). Review 3
+ * (P2-1): the clock tests below are red with only `holdInFlightOnTimeout: true` taken out — without
+ * it the tile's run-out clock is error + ［再試行］ again, a second send of what may have landed.
  *
  * @vitest-environment jsdom
  */
@@ -84,7 +86,7 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 let sendCalls = 0;
-function installFetch(...answers: Array<() => Response>) {
+function installFetch(...answers: Array<() => Response | Promise<Response>>) {
   sendCalls = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
     const url = String(input);
@@ -173,5 +175,64 @@ describe('[#4503 U-0] the /sessions tile and a send whose outcome is unknown', (
     fireEvent.click(tile().getByTestId('chat-pending-retry'));
     await flush();
     expect(sendCalls).toBe(2);
+  });
+});
+
+/** Nothing on the tile's row sends it again without a confirmation, or says it failed. */
+function expectWaitingWithNothingToPress() {
+  expect(tile().getByTestId('chat-optimistic-awaiting')).toHaveTextContent(JA.awaiting);
+  for (const id of ['chat-pending-retry', 'chat-pending-resend', 'chat-pending-discard', 'chat-optimistic-error', 'chat-optimistic-unknown']) {
+    expect(tile().queryByTestId(id)).toBeNull();
+  }
+  expect(textarea().value).toBe('');
+  expect(sendCalls).toBe(1);
+}
+
+describe('[#4503 review 3 P2-1] the /sessions tile when the clock runs out (`holdInFlightOnTimeout`)', () => {
+  it('201 accepted, no echo, 30 s pass: waiting (not error), no ［再試行］ — then unknown, resent only after the confirmation', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      installFetch(created, created);
+      await sendFromTile();
+      await waitFor(() => expect(sendCalls).toBe(1));
+      await waitFor(() => expect(tile().getByTestId('chat-optimistic-sending')).toBeInTheDocument());
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expectWaitingWithNothingToPress();
+
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(tile().getByTestId('chat-optimistic-unknown')).toHaveTextContent(JA.status);
+      expect(tile().queryByTestId('chat-pending-retry')).toBeNull();
+      expect(tile().queryByTestId('chat-optimistic-error')).toBeNull();
+      fireEvent.click(tile().getByTestId('chat-pending-resend'));
+      await flush();
+      expect(sendCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('in flight (no answer yet), 30 s pass: waiting (not error), no ［再試行］, nothing sent again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      installFetch(() => new Promise<Response>(() => undefined));
+      await sendFromTile();
+      await waitFor(() => expect(sendCalls).toBe(1));
+      await waitFor(() => expect(tile().getByTestId('chat-optimistic-sending')).toBeInTheDocument());
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expectWaitingWithNothingToPress();
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      // Still on its way: still waiting, still nothing to press.
+      expectWaitingWithNothingToPress();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
