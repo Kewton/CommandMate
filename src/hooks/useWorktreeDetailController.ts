@@ -80,6 +80,7 @@ import {
   isValidInstanceId,
   agentInstancesFromSelectedAgents,
   getActiveInstanceLabel,
+  getInstanceLabel,
   type CLIToolType,
   type AgentInstance,
 } from '@/lib/cli-tools/types';
@@ -258,6 +259,27 @@ const ACTIVE_POLLING_INTERVAL_MS = 2000;
 
 /** Polling interval when terminal is idle (ms) */
 const IDLE_POLLING_INTERVAL_MS = 5000;
+
+/**
+ * Issue #4484: how long a `?instance=` request may stay unapplied before the
+ * screen gives up and says so — two idle polls, so a roster that was briefly
+ * different (a stand-in roster, a save not seen yet) gets one more look.
+ */
+export const INSTANCE_QUERY_GRACE_MS = 2 * IDLE_POLLING_INTERVAL_MS;
+
+/** Issue #4484: a `?instance=` request not yet applied or ended. */
+interface PendingInstanceQuery {
+  /** The worktree whose URL asked; leaving it ends the request. */
+  worktreeId: string;
+  instanceId: string;
+  token: number;
+  /** `Date.now()` when the URL was taken; the grace runs from here. */
+  startedAt: number;
+  /** PC: the active instance was set to X (the layout is applying it). */
+  activated: boolean;
+  /** PC: the active instance before that, restored if it is never applied. */
+  previousActiveId: string | null;
+}
 
 /**
  * Issue #2498: backoff ladder for a failed detail load, ported from
@@ -1470,77 +1492,6 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     }
   }, [displayedInstances, activeInstanceId, activeCliTab, setActiveCliTab]);
 
-  // Issue #2656: `?instance=<id>` from the sidebar's sessions view.
-  //
-  // Waits for THIS worktree's roster (`rosterReady`) — before that the roster
-  // is the default seed and an alias like `claude-2` would look unknown. Then:
-  // an id in the roster becomes the active instance (on the phone it is also
-  // made visible first, or the reconcile effect above would switch it back),
-  // and, on the PC, `instanceSelectionRequest` gets a new token so the PC layout
-  // routes it exactly like a header pick (the selected split if shown nowhere —
-  // split 0 before Issue #3593 — focus move if another split shows it). The PC
-  // acknowledges the token, which clears the request, so a later remount of the
-  // PC layout cannot re-apply it. An id
-  // NOT in the roster (a running instance outside it) changes nothing. Either
-  // way the parameter is removed with `router.replace` (same path, other query
-  // parameters kept, no scroll), which re-renders without remounting the page.
-  //
-  // `handledInstanceParamRef` makes one URL apply once even though the effect
-  // re-runs until the replaced URL arrives; it is cleared when the parameter
-  // disappears, so clicking the same row again applies again.
-  const [instanceSelectionRequest, setInstanceSelectionRequest] =
-    useState<{ instanceId: string; token: number } | null>(null);
-  const instanceSelectionTokenRef = useRef(0);
-  const handledInstanceParamRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (requestedInstanceId === null) {
-      handledInstanceParamRef.current = null;
-      return;
-    }
-    if (!rosterReady) return;
-    if (handledInstanceParamRef.current === requestedInstanceId) return;
-    handledInstanceParamRef.current = requestedInstanceId;
-
-    if (agentInstances.some((inst) => inst.id === requestedInstanceId)) {
-      if (isMobileRef.current) {
-        // The phone shows `activeInstanceId` directly; no PC request is left behind.
-        showInstances([requestedInstanceId]);
-        setActiveInstanceId(requestedInstanceId);
-      } else {
-        setActiveInstanceId(requestedInstanceId);
-        instanceSelectionTokenRef.current += 1;
-        setInstanceSelectionRequest({
-          instanceId: requestedInstanceId,
-          token: instanceSelectionTokenRef.current,
-        });
-      }
-    }
-
-    const params = new URLSearchParams(searchParams?.toString() ?? '');
-    params.delete(SESSION_INSTANCE_QUERY_PARAM);
-    const query = params.toString();
-    const basePath = pathname ?? `/worktrees/${worktreeId}`;
-    router.replace(query ? `${basePath}?${query}` : basePath, { scroll: false });
-  }, [
-    requestedInstanceId,
-    rosterReady,
-    agentInstances,
-    showInstances,
-    setActiveInstanceId,
-    searchParams,
-    pathname,
-    worktreeId,
-    router,
-  ]);
-
-  // Issue #2656: the PC layout calls this once it has applied a request. Only
-  // the matching token clears it, so a newer request is never dropped.
-  const acknowledgeInstanceSelection = useCallback((token: number) => {
-    setInstanceSelectionRequest((current) =>
-      current !== null && current.token === token ? null : current
-    );
-  }, []);
-
   // Issue #379: Disable auto-follow for full-screen TUI tools (OpenCode, Copilot).
   // These tools render in alternate screen mode where menus appear at the top.
   // Auto-following new content to bottom would hide these menus.
@@ -1635,6 +1586,218 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
 
   // Toast state for notifications (moved before event handlers that reference showToast)
   const { showToast } = useToast();
+
+  // Issue #2656 / #4484: `?instance=<id>` from the sidebar's sessions view.
+  //
+  // The URL's id becomes a pending request tied to THIS worktree and a token.
+  // It is not consumed until it is applied or ended:
+  // - it waits for this worktree's roster (`rosterReady`; before that the
+  //   roster is the default seed and an alias like `claude-2` looks unknown),
+  //   and for X itself to be in it: a roster without X (a stand-in roster, a
+  //   save not seen yet) is looked at again on every roster change;
+  // - X in the roster: on the phone it is made visible first (or the reconcile
+  //   effect would switch it back) and becomes the active instance, which is
+  //   what the phone shows and sends to — done. On the PC it becomes the active
+  //   instance and `instanceSelectionRequest` is handed to the PC layout, which
+  //   routes it through the split container's placement path (#3514) and
+  //   acknowledges it only once the committed selected split shows X
+  //   (`acknowledgeInstanceSelection(token, 'applied')`), or with `'refused'`.
+  //   Until then a rebuild of the PC layout hands it over again;
+  // - it ends without a word when the user leaves the worktree, opens another
+  //   URL, or picks an instance by hand (`cancelInstanceSelectionRequest`), so
+  //   an old request never overrides what the user chose later;
+  // - it ends with a toast after INSTANCE_QUERY_GRACE_MS of not being applied —
+  //   whatever the reason (never in the roster, left it again, no PC layout to
+  //   apply it) — naming the instance the screen shows and sends to instead.
+  // The parameter itself is removed with `router.replace` once the roster is
+  // ready (same path, other query parameters kept, no scroll); the request
+  // lives on in state. `handledInstanceParamRef` makes one URL apply once even
+  // though the effect re-runs until the replaced URL arrives; it is cleared
+  // when the parameter disappears, so clicking the same row again applies again.
+  // Sends made before the request is applied go where the To: line says (the
+  // selected split's instance), as any send does (PM decision on #4484).
+  const [pendingInstanceQuery, setPendingInstanceQuery] =
+    useState<PendingInstanceQuery | null>(null);
+  const pendingInstanceQueryRef = useRef(pendingInstanceQuery);
+  pendingInstanceQueryRef.current = pendingInstanceQuery;
+  const instanceSelectionTokenRef = useRef(0);
+  const handledInstanceParamRef = useRef<string | null>(null);
+  const replacedInstanceParamRef = useRef<string | null>(null);
+  const rosterReadyRef = useRef(rosterReady);
+  rosterReadyRef.current = rosterReady;
+
+  const instanceLabelOf = useCallback(
+    (instanceId: string): string => {
+      const inst = agentInstancesRef.current.find((i) => i.id === instanceId);
+      return inst ? getInstanceLabel(inst) : instanceId;
+    },
+    [],
+  );
+
+  // Take the URL's id as a new request (it replaces an older one).
+  useEffect(() => {
+    if (requestedInstanceId === null) {
+      handledInstanceParamRef.current = null;
+      replacedInstanceParamRef.current = null;
+      return;
+    }
+    const paramKey = `${worktreeId}\n${requestedInstanceId}`;
+    if (handledInstanceParamRef.current === paramKey) return;
+    handledInstanceParamRef.current = paramKey;
+    instanceSelectionTokenRef.current += 1;
+    setPendingInstanceQuery({
+      worktreeId,
+      instanceId: requestedInstanceId,
+      token: instanceSelectionTokenRef.current,
+      startedAt: Date.now(),
+      activated: false,
+      previousActiveId: null,
+    });
+  }, [requestedInstanceId, worktreeId]);
+
+  // Remove the parameter once this worktree's roster is ready.
+  useEffect(() => {
+    if (requestedInstanceId === null || !rosterReady) return;
+    const paramKey = `${worktreeId}\n${requestedInstanceId}`;
+    if (handledInstanceParamRef.current !== paramKey) return;
+    if (replacedInstanceParamRef.current === paramKey) return;
+    replacedInstanceParamRef.current = paramKey;
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    params.delete(SESSION_INSTANCE_QUERY_PARAM);
+    const query = params.toString();
+    const basePath = pathname ?? `/worktrees/${worktreeId}`;
+    router.replace(query ? `${basePath}?${query}` : basePath, { scroll: false });
+  }, [requestedInstanceId, rosterReady, searchParams, pathname, worktreeId, router]);
+
+  // Apply it once X is in this worktree's roster.
+  const pendingInstanceInRoster =
+    pendingInstanceQuery !== null &&
+    agentInstances.some((inst) => inst.id === pendingInstanceQuery.instanceId);
+  useEffect(() => {
+    const pending = pendingInstanceQuery;
+    if (!pending) return;
+    if (pending.worktreeId !== worktreeId) {
+      // Left the worktree it was asked for: end it, silently.
+      setPendingInstanceQuery((cur) => (cur?.token === pending.token ? null : cur));
+      return;
+    }
+    if (!rosterReady || !pendingInstanceInRoster) return;
+    if (isMobile) {
+      // The phone shows `activeInstanceId` directly; no PC request is left behind.
+      showInstances([pending.instanceId]);
+      setActiveInstanceId(pending.instanceId);
+      setPendingInstanceQuery((cur) => (cur?.token === pending.token ? null : cur));
+      return;
+    }
+    if (pending.activated) return;
+    const previousActiveId = activeInstanceIdRef.current;
+    setActiveInstanceId(pending.instanceId);
+    setPendingInstanceQuery((cur) =>
+      cur?.token === pending.token ? { ...cur, activated: true, previousActiveId } : cur,
+    );
+  }, [
+    pendingInstanceQuery,
+    pendingInstanceInRoster,
+    worktreeId,
+    rosterReady,
+    isMobile,
+    showInstances,
+    setActiveInstanceId,
+  ]);
+
+  // The grace covers the whole unapplied state, not only the first roster.
+  const pendingToken = pendingInstanceQuery?.token ?? null;
+  const pendingStartedAt = pendingInstanceQuery?.startedAt ?? null;
+  useEffect(() => {
+    if (pendingToken === null || pendingStartedAt === null) return;
+    const remaining = Math.max(0, pendingStartedAt + INSTANCE_QUERY_GRACE_MS - Date.now());
+    const timer = setTimeout(() => {
+      const pending = pendingInstanceQueryRef.current;
+      if (!pending || pending.token !== pendingToken) return;
+      setPendingInstanceQuery(null);
+      if (pending.worktreeId !== worktreeIdRef.current) return;
+      const inRoster =
+        rosterReadyRef.current &&
+        agentInstancesRef.current.some((inst) => inst.id === pending.instanceId);
+      if (!inRoster) {
+        showToast(
+          tWorktree('detail.instanceQueryNotInRoster', {
+            instance: pending.instanceId,
+            current: instanceLabelOf(activeInstanceIdRef.current),
+          }),
+          'warning',
+        );
+        return;
+      }
+      // In the roster but never applied (no PC layout took it): do not leave the
+      // header on X while the split still sends elsewhere.
+      let current = activeInstanceIdRef.current;
+      if (
+        pending.activated &&
+        pending.previousActiveId !== null &&
+        current === pending.instanceId &&
+        agentInstancesRef.current.some((inst) => inst.id === pending.previousActiveId)
+      ) {
+        current = pending.previousActiveId;
+        setActiveInstanceId(current);
+      }
+      showToast(
+        tWorktree('detail.instanceQueryNotApplied', {
+          instance: pending.instanceId,
+          current: instanceLabelOf(current),
+        }),
+        'warning',
+      );
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [pendingToken, pendingStartedAt, showToast, tWorktree, instanceLabelOf, setActiveInstanceId]);
+
+  // What the PC layout is handed: only while X is in this worktree's roster.
+  const pendingInstanceId = pendingInstanceQuery?.instanceId ?? null;
+  const pendingWorktreeId = pendingInstanceQuery?.worktreeId ?? null;
+  const instanceSelectionRequest = useMemo<{ instanceId: string; token: number } | null>(
+    () =>
+      pendingToken !== null &&
+      pendingInstanceId !== null &&
+      pendingWorktreeId === worktreeId &&
+      !isMobile &&
+      rosterReady &&
+      pendingInstanceInRoster
+        ? { instanceId: pendingInstanceId, token: pendingToken }
+        : null,
+    [pendingToken, pendingInstanceId, pendingWorktreeId, worktreeId, isMobile, rosterReady, pendingInstanceInRoster],
+  );
+
+  // Issue #2656 / #4484: the PC layout calls this once the request is applied
+  // (the committed selected split shows X) or refused. Only the matching token
+  // clears it, so a newer request is never dropped. On `refused`, the screen
+  // says so and names the instance the selected split still shows.
+  const acknowledgeInstanceSelection = useCallback(
+    (token: number, outcome: 'applied' | 'refused' = 'applied', currentInstanceId?: string) => {
+      const pending = pendingInstanceQueryRef.current;
+      if (pending === null || pending.token !== token) return;
+      pendingInstanceQueryRef.current = null;
+      setPendingInstanceQuery((cur) => (cur?.token === token ? null : cur));
+      if (outcome === 'refused') {
+        showToast(
+          tWorktree('detail.instanceQueryNotApplied', {
+            instance: pending.instanceId,
+            current: instanceLabelOf(currentInstanceId ?? activeInstanceIdRef.current),
+          }),
+          'warning',
+        );
+      }
+    },
+    [showToast, tWorktree, instanceLabelOf],
+  );
+
+  // Issue #4484: a manual pick (header, a split, a phone tab) ends a request
+  // still waiting, silently, so it cannot override the pick later.
+  const cancelInstanceSelectionRequest = useCallback(() => {
+    if (pendingInstanceQueryRef.current === null) return;
+    pendingInstanceQueryRef.current = null;
+    setPendingInstanceQuery(null);
+  }, []);
 
   // ========================================================================
   // Event Handlers
@@ -2887,6 +3050,7 @@ export function useWorktreeDetailController({ worktreeId }: { worktreeId: string
     rosterReady,
     instanceSelectionRequest,
     acknowledgeInstanceSelection,
+    cancelInstanceSelectionRequest,
     handleVibeLocalModelChange,
     hasUpdate,
     historyDisplayLimit,

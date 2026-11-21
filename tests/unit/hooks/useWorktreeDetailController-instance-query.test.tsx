@@ -35,7 +35,21 @@ vi.mock('@/contexts/SidebarContext', () => ({
 }));
 vi.mock('@/components/providers/WorktreesCacheProvider', () => ({ useOptionalWorktreesCacheContext: () => null }));
 
-import { useWorktreeDetailController } from '@/hooks/useWorktreeDetailController';
+// Issue #4484: the toasts the controller raises, and their real (en) wording.
+const toast = vi.hoisted(() => ({ show: vi.fn() }));
+vi.mock('@/components/common/Toast', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/common/Toast')>();
+  return {
+    ...actual,
+    useToast: () => ({ toasts: [], showToast: toast.show, removeToast: vi.fn(), clearToasts: vi.fn() }),
+  };
+});
+vi.mock('next-intl', async () => {
+  const { createRealIntlMock } = await import('@tests/helpers/real-intl');
+  return createRealIntlMock('en');
+});
+
+import { useWorktreeDetailController, INSTANCE_QUERY_GRACE_MS } from '@/hooks/useWorktreeDetailController';
 
 const WORKTREE_ID = 'wt-s3';
 const ROSTER = [
@@ -53,18 +67,25 @@ function jsonResponse(body: unknown): Response {
   } as unknown as Response;
 }
 
-/** `hold` keeps the detail request pending until `release()` is called. */
-function stubFetch({ hold = false } = {}) {
+/**
+ * `hold` keeps the detail request pending until `release()` is called.
+ * Issue #4484: `rosters` answers one roster per detail request (the last repeats).
+ */
+function stubFetch({ hold = false, rosters = [ROSTER] as Array<typeof ROSTER> } = {}) {
   let release: () => void = () => {};
   const gate = hold ? new Promise<void>((r) => { release = r; }) : Promise.resolve();
+  let detailCalls = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.includes('/messages')) return jsonResponse([]);
     if (url.includes('/current-output')) return jsonResponse({ isRunning: false });
     if (url.includes('/auto-yes')) return jsonResponse({ states: [] });
     await gate;
+    const roster = rosters[Math.min(detailCalls, rosters.length - 1)];
+    detailCalls += 1;
+    const id = String(url).split('?')[0].split('/').pop();
     return jsonResponse({
-      id: WORKTREE_ID, name: 'feature/s3', path: '/repo/s3', repositoryPath: '/repo', repositoryName: 'Repo',
-      selectedAgents: ['claude', 'codex'], agentInstances: ROSTER,
+      id, name: 'feature/s3', path: '/repo/s3', repositoryPath: '/repo', repositoryName: 'Repo',
+      selectedAgents: ['claude', 'codex'], agentInstances: roster,
     });
   }));
   return { release: () => release() };
@@ -80,9 +101,11 @@ beforeEach(() => {
   nav.pathname = `/worktrees/${WORKTREE_ID}`;
   nav.router.replace.mockClear();
   mobile.current = false;
+  toast.show.mockClear();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -141,6 +164,10 @@ describe('useWorktreeDetailController — ?instance= (Issue #2656)', () => {
   });
 
   it('leaves the selection alone for an id outside the roster', async () => {
+    // Issue #4484: no longer silent — the id is looked for during the grace
+    // (a later roster may bring it), then the screen says so, naming what it
+    // shows. The selection is left alone throughout.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     stubFetch();
     nav.search = new URLSearchParams('instance=codex-9');
     const result = mount();
@@ -149,6 +176,18 @@ describe('useWorktreeDetailController — ?instance= (Issue #2656)', () => {
       expect(nav.router.replace).toHaveBeenCalledTimes(1);
     });
     expect(nav.router.replace).toHaveBeenCalledWith('/worktrees/wt-s3', { scroll: false });
+    expect(result.current.instanceSelectionRequest).toBeNull();
+    expect(result.current.activeInstanceId).toBe('claude');
+    expect(toast.show).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(INSTANCE_QUERY_GRACE_MS + 100);
+    });
+    expect(toast.show).toHaveBeenCalledTimes(1);
+    expect(toast.show).toHaveBeenCalledWith(
+      "codex-9 is not one of this worktree's agents. Showing Claude instead.",
+      'warning',
+    );
     expect(result.current.instanceSelectionRequest).toBeNull();
     expect(result.current.activeInstanceId).toBe('claude');
   });
@@ -243,5 +282,98 @@ describe('useWorktreeDetailController — ?instance= (Issue #2656)', () => {
       result.current.acknowledgeInstanceSelection(1);
     });
     expect(result.current.instanceSelectionRequest).toEqual({ instanceId: 'codex', token: 2 });
+  });
+});
+
+describe('useWorktreeDetailController — ?instance= waits until applied or ended (Issue #4484)', () => {
+  const WITHOUT_ALIAS = ROSTER.slice(0, 2);
+
+  async function advance(ms: number): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it('an id missing from the first roster is applied when a later roster within the grace brings it, without a toast', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch({ rosters: [WITHOUT_ALIAS, ROSTER] });
+    nav.search = new URLSearchParams('instance=claude-2');
+    const result = mount();
+
+    await waitFor(() => expect(nav.router.replace).toHaveBeenCalledTimes(1));
+    expect(result.current.instanceSelectionRequest).toBeNull();
+    expect(result.current.activeInstanceId).toBe('claude');
+
+    await advance(5_500); // the next idle poll brings claude-2
+    await waitFor(() => {
+      expect(result.current.instanceSelectionRequest).toEqual({ instanceId: 'claude-2', token: 1 });
+    });
+    expect(result.current.activeInstanceId).toBe('claude-2');
+    act(() => result.current.acknowledgeInstanceSelection(1, 'applied', 'claude-2'));
+    await advance(INSTANCE_QUERY_GRACE_MS);
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(result.current.instanceSelectionRequest).toBeNull();
+  });
+
+  it('a refusal from the PC layout ends the request with a toast naming what the split still shows', async () => {
+    stubFetch();
+    nav.search = new URLSearchParams('instance=claude-2');
+    const result = mount();
+    await waitFor(() => {
+      expect(result.current.instanceSelectionRequest).toEqual({ instanceId: 'claude-2', token: 1 });
+    });
+    act(() => result.current.acknowledgeInstanceSelection(1, 'refused', 'codex'));
+    expect(result.current.instanceSelectionRequest).toBeNull();
+    expect(toast.show).toHaveBeenCalledWith('Could not show claude-2. Messages still go to Codex.', 'warning');
+  });
+
+  it('the phone says so too for an id outside the roster', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mobile.current = true;
+    stubFetch();
+    nav.search = new URLSearchParams('instance=codex-9');
+    const result = mount();
+    await waitFor(() => expect(nav.router.replace).toHaveBeenCalledTimes(1));
+    await advance(INSTANCE_QUERY_GRACE_MS + 100);
+    expect(toast.show).toHaveBeenCalledWith(
+      "codex-9 is not one of this worktree's agents. Showing Claude instead.",
+      'warning',
+    );
+    expect(result.current.activeInstanceId).toBe('claude');
+  });
+
+  it('a manual pick ends a waiting request: the id arriving later changes nothing and nothing is said', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch({ rosters: [WITHOUT_ALIAS, ROSTER] });
+    nav.search = new URLSearchParams('instance=claude-2');
+    const result = mount();
+    await waitFor(() => expect(nav.router.replace).toHaveBeenCalledTimes(1));
+    act(() => {
+      result.current.cancelInstanceSelectionRequest();
+      result.current.setActiveInstanceId('codex');
+    });
+    await advance(INSTANCE_QUERY_GRACE_MS + 1_000);
+    expect(result.current.instanceSelectionRequest).toBeNull();
+    expect(result.current.activeInstanceId).toBe('codex');
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+
+  it('leaving the worktree ends a waiting request: the next worktree\'s same id is not selected and nothing is said', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch({ rosters: [WITHOUT_ALIAS, ROSTER] });
+    nav.search = new URLSearchParams('instance=claude-2');
+    const { result, rerender } = renderHook(
+      ({ id }) => useWorktreeDetailController({ worktreeId: id }),
+      { initialProps: { id: WORKTREE_ID } },
+    );
+    await waitFor(() => expect(nav.router.replace).toHaveBeenCalledTimes(1));
+    nav.search = new URLSearchParams();
+    nav.pathname = '/worktrees/wt-s3-other';
+    rerender({ id: 'wt-s3-other' });
+    await waitFor(() => expect(result.current.rosterReady).toBe(true));
+    await advance(INSTANCE_QUERY_GRACE_MS + 1_000);
+    expect(result.current.instanceSelectionRequest).toBeNull();
+    expect(result.current.activeInstanceId).not.toBe('claude-2');
+    expect(toast.show).not.toHaveBeenCalled();
   });
 });

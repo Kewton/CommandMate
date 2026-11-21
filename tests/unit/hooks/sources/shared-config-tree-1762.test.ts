@@ -43,6 +43,10 @@ import {
   type GeminiHookMatcherGroup,
 } from '@/lib/hooks/sources/gemini/settings-generator';
 import { renderAgentLaunchCommand } from '@/lib/hooks/sources';
+import {
+  readJsonObjectFile,
+  readJsonObjectFileState,
+} from '@/lib/hooks/sources/gemini/shared-config-tree';
 import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
 import { geminiAgentEventSource, prepareGeminiLaunch } from '@/lib/hooks/sources/gemini/source';
 
@@ -573,5 +577,36 @@ describe('CM_AGENT_HOOKS_INJECT=0', () => {
 
     expect(sha256(agyHooks)).toBe(before.agy);
     expect(sha256(geminiUserSettings)).toBe(before.gemini);
+  });
+});
+
+// ===========================================================================
+// The three states the antigravity writer needs kept apart (Issue #4505)
+// ===========================================================================
+
+describe('readJsonObjectFileState', () => {
+  const statePath = () => join(home, 'state.json');
+
+  it('separates absent, object, and invalid files', () => {
+    // `readJsonObjectFile` answers null for all three on purpose, because
+    // gemini's per-worktree file may be created from empty. antigravity's one
+    // machine-wide file may not, so the writer asks this instead.
+    expect(readJsonObjectFileState(statePath())).toEqual({ kind: 'missing' });
+
+    writeFileSync(statePath(), '{"a":1}\n');
+    expect(readJsonObjectFileState(statePath())).toEqual({ kind: 'object', value: { a: 1 } });
+
+    writeFileSync(statePath(), '[]\n');
+    expect(readJsonObjectFileState(statePath())).toEqual({ kind: 'invalid' });
+
+    writeFileSync(statePath(), '{"a":1,}\n');
+    expect(readJsonObjectFileState(statePath())).toEqual({ kind: 'invalid' });
+  });
+
+  it('treats a file with no content as absent, and leaves readJsonObjectFile alone', () => {
+    writeFileSync(statePath(), '  \n');
+    expect(readJsonObjectFileState(statePath())).toEqual({ kind: 'missing' });
+    // The unchanged contract of the function gemini and command-code call.
+    expect(readJsonObjectFile(statePath())).toBeNull();
   });
 });

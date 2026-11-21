@@ -74,6 +74,13 @@ describe('Stage 6 of the setup guide', () => {
     expect(SETUP_GUIDE).not.toMatch(/Stages 3 to 5/);
     expect(SETUP_GUIDE).not.toMatch(/after Stage 5\b/);
   });
+
+  it('sends a reader who wants the five fixed roles to team-setup.md (Issue #4540)', () => {
+    // Stage 6 here is the short form (roles as sections in the instructions
+    // file); the full five-role setup with the `roles` subcommand is the team
+    // guide's, so this only pins the link.
+    expect(stage6(SETUP_GUIDE)).toContain('https://kewton.github.io/CommandMate/team-setup.md');
+  });
 });
 
 describe('team-roles templates', () => {

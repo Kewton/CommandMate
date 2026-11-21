@@ -79,11 +79,12 @@ const LINE_SUFFIX_REGEX = /:\d+(?::\d+)?$/;
  *    with a scheme. Changing it would change `MarkdownPreview`'s behaviour, so
  *    the knowledge lives here instead.
  *  - an UNKNOWN scheme (`vscode:`, `data:`, `javascript:`) is `null`, not a
- *    path. `rehypeSanitize`'s default schema already strips those hrefs before
- *    a renderer can see them — measured, along with the fact that it also drops
- *    `file:` and `tel:` — so this is the belt to that braces: nothing that is
- *    not one of the four known schemes is ever handed to `window.open` or to
- *    the file panel.
+ *    path. `rehypeSanitize`'s default schema strips those hrefs before a
+ *    renderer can see them, and `tel:` with them — so this is the belt to that
+ *    braces: nothing that is not one of the four known schemes is ever handed to
+ *    `window.open` or to the file panel. [#4501] `file:` is now PASSED by the
+ *    chat renderer (Antigravity writes a file that way) and still dropped by
+ *    History's, so this function must keep deciding for itself either way.
  */
 export function classifyChatLink(href: string): ChatLinkTarget | null {
   const sanitized = sanitizeHref(href.trim());
@@ -149,30 +150,43 @@ function withoutTrailingSlash(path: string): string {
 }
 
 /**
- * The path the file API can serve for a link in a chat body, or `null`.
+ * [#4501] macOS's `/tmp`, in the one spelling the containment test compares in.
  *
- * @param href - the link destination, or a bare path the linkifier sliced out
- * @param worktreePath - `Worktree.path`, the absolute root of this worktree.
- *   Omitting it is legal and simply means no absolute path can be recognized as
- *   being inside the worktree — the pre-#2345 behaviour.
- *
- * The four answers it can give:
- *
- *  - `null` — not a file link at all (an anchor, an external URL, an unknown
- *    scheme, or a string that decodes to nothing). The caller opens nothing.
- *  - a path RELATIVE to the worktree root — the only shape the file API serves,
- *    and what an absolute path inside `worktreePath` becomes.
- *  - the absolute path unchanged — it is outside this worktree, so it is left
- *    for `probeChatFilePath` to get a 400 on and for #2274's toast to report.
- *    Rewriting it would only hide which file the body actually named.
- *  - `null` again for `href === worktreePath`: the worktree ROOT is a directory,
- *    and "" would ask the file API for a listing rather than a file.
+ * `/tmp` is a symlink to `/private/tmp` (and the reverse reads the same), so a
+ * reply may name either spelling of a directory the worktree is rooted at. Folding
+ * them here — and only here — lets `…/tmp/wt/a.md` be recognized as inside a
+ * worktree rooted at `…/private/tmp/wt`. No other symlink is resolved: this is a
+ * name this surface is known to meet, not a filesystem walk (that stays the
+ * server's, and its answer must not be widened by a rewrite here).
  */
-export function normalizeChatFilePath(
-  href: string,
-  worktreePath?: string | null,
-): string | null {
-  if (classifyChatLink(href) !== 'file') return null;
+const MACOS_TMP_REGEX = /^\/private\/tmp(?=\/|$)/;
+
+function canonicalMacosTmp(path: string): string {
+  return path.replace(MACOS_TMP_REGEX, '/tmp');
+}
+
+/**
+ * What one file link resolves to, before the callers reduce it to a string or a
+ * boolean. `outside` is the only kind a click has to answer differently from a
+ * file this worktree has (Issue #4501); `unscoped` is the pre-#2345 mount that
+ * knows no root, and keeps behaving exactly as it did.
+ */
+type ChatFilePathResolution =
+  | { kind: 'none' }
+  | { kind: 'root' }
+  | { kind: 'relative'; path: string }
+  | { kind: 'outside'; path: string }
+  | { kind: 'unscoped'; path: string };
+
+/**
+ * The one place the absolute/relative/inside/outside decision is written.
+ *
+ * Both {@link normalizeChatFilePath} and {@link isChatFilePathOutsideWorktree}
+ * read it, so a handler asking "is this outside?" and the string it then hands
+ * to the file API can never disagree.
+ */
+function resolveChatFilePath(href: string, worktreePath?: string | null): ChatFilePathResolution {
+  if (classifyChatLink(href) !== 'file') return { kind: 'none' };
 
   const sanitized = href.trim();
 
@@ -183,18 +197,80 @@ export function normalizeChatFilePath(
   const withoutScheme = sanitized.replace(FILE_SCHEME_REGEX, '');
   const withoutSuffix = stripFragment(withoutScheme).replace(LINE_SUFFIX_REGEX, '');
   const decoded = decodeOnce(withoutSuffix).trim();
-  if (!decoded) return null;
+  if (!decoded) return { kind: 'none' };
 
   if (!decoded.startsWith('/')) {
     // Relative destination, read against the worktree root — a chat body has no
     // "current file" for `resolveRelativePath` to resolve against.
-    return collapseSegments(decoded) || null;
+    const path = collapseSegments(decoded);
+    return path ? { kind: 'relative', path } : { kind: 'none' };
   }
 
   const root = worktreePath ? withoutTrailingSlash(worktreePath.trim()) : '';
-  if (!root || !root.startsWith('/')) return decoded;
-  if (decoded === root) return null;
-  if (!decoded.startsWith(`${root}/`)) return decoded;
+  // No root: no absolute path can be called inside OR outside it, so the caller
+  // keeps the pre-#2345 behaviour of asking the file API.
+  if (!root || !root.startsWith('/')) return { kind: 'unscoped', path: decoded };
+  // [#4501] Compare in one spelling of macOS's /tmp. The rewrite only touches the
+  // LEADING root spelling, so the remainder is identical either way and slicing
+  // the canonical form keeps the author's names.
+  const canonicalRoot = canonicalMacosTmp(root);
+  const canonicalDecoded = canonicalMacosTmp(decoded);
+  if (canonicalDecoded === canonicalRoot) return { kind: 'root' };
+  if (!canonicalDecoded.startsWith(`${canonicalRoot}/`)) {
+    return { kind: 'outside', path: decoded };
+  }
 
-  return collapseSegments(decoded.slice(root.length + 1)) || null;
+  const path = collapseSegments(canonicalDecoded.slice(canonicalRoot.length + 1));
+  return path ? { kind: 'relative', path } : { kind: 'none' };
+}
+
+/**
+ * Whether this file link names a path OUTSIDE the worktree, so a click can say
+ * "cannot open" rather than asking whether a file this worktree cannot serve is
+ * there (Issue #4501).
+ *
+ * Only a known root can answer `true`: with no `worktreePath` nothing is
+ * outside, and this returns `false` so the click behaves as it always has.
+ */
+export function isChatFilePathOutsideWorktree(
+  href: string,
+  worktreePath?: string | null,
+): boolean {
+  return resolveChatFilePath(href, worktreePath).kind === 'outside';
+}
+
+/**
+ * The path the file API can serve for a link in a chat body, or `null`.
+ *
+ * @param href - the link destination, or a bare path the linkifier sliced out
+ * @param worktreePath - `Worktree.path`, the absolute root of this worktree.
+ *   Omitting it is legal and simply means no absolute path can be recognized as
+ *   being inside the worktree — the pre-#2345 behaviour.
+ *
+ * The four answers it can give:
+ *
+ *  - `null` — not a file link at all (an anchor, an external URL, an unknown
+ *    scheme, a string that decodes to nothing, or the worktree root itself).
+ *    The caller opens nothing.
+ *  - a path RELATIVE to the worktree root — the only shape the file API serves,
+ *    and what an absolute path inside `worktreePath` becomes. [#4501] On macOS
+ *    the root and the destination are compared in one spelling of `/tmp`, so
+ *    `…/private/tmp/wt/a.md` and `…/tmp/wt/a.md` are the same directory.
+ *  - the absolute path unchanged — it is outside this worktree, so it is left
+ *    for the caller to report. Rewriting it would only hide which file the body
+ *    actually named. {@link isChatFilePathOutsideWorktree} is how a caller tells
+ *    this apart from the unrooted case below.
+ *  - `null` again for `href === worktreePath`: the worktree ROOT is a directory,
+ *    and "" would ask the file API for a listing rather than a file.
+ */
+export function normalizeChatFilePath(
+  href: string,
+  worktreePath?: string | null,
+): string | null {
+  const resolution = resolveChatFilePath(href, worktreePath);
+  return resolution.kind === 'relative' ||
+    resolution.kind === 'outside' ||
+    resolution.kind === 'unscoped'
+    ? resolution.path
+    : null;
 }
