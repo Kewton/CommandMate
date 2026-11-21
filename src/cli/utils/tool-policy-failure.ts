@@ -228,6 +228,23 @@ export function toolPolicyDenialFromResponse(
 }
 
 /**
+ * Issue #4498: what became of the relay. A refusal at creation (no `relayId`) opened
+ * none; a bound `/send` refused it after it was opened, and says whether its
+ * withdrawal took (`relayWithdrawn`). Only `true` is a confirmed withdrawal: a server
+ * before #4498 sends no `relayWithdrawn` and said "withdrawn" even when the write
+ * failed, so its silence is read as unconfirmed (r1).
+ */
+function relayRefusalSentence(payload: ToolPolicyDeniedResponse, detail: string): string {
+  const relayId = typeof payload.relayId === 'string' && payload.relayId !== '' ? payload.relayId : null;
+  if (relayId === null) return `The relay was not opened and nothing was sent (${detail}).`;
+  if (payload.relayWithdrawn !== true) {
+    return `The relay ${relayId} had been opened and nothing was sent (${detail}), but its withdrawal could not be confirmed: `
+      + `it may still be open (commandmate relays cancel ${relayId}).`;
+  }
+  return `The relay ${relayId} had been opened and was withdrawn; nothing was sent (${detail}).`;
+}
+
+/**
  * The stderr lines: the reason first (`Error [<code>]: <sentence>`), the terms and the
  * FAQ second, then how to lift it and what was (not) done.
  */
@@ -241,7 +258,7 @@ export function formatToolPolicyDenialLines(error: ToolPolicyDeniedError): strin
   const origin = error.policy?.origin ?? 'unknown';
   const end = error.policy?.endpoint ? `its \`${error.policy.endpoint}\` end` : 'one of its ends';
   const what = error.code === RELAY_TOOL_POLICY_DENIED
-    ? `The relay was not opened and nothing was sent (sent: false; ${tool} is ${end}).`
+    ? relayRefusalSentence(error.payload, `sent: false; ${tool} is ${end}`)
     : 'Nothing was typed (sent: false).';
   return [
     `Error [${error.code}]: ${lines[0]}`,

@@ -2081,3 +2081,29 @@ describe('Issue #3162: the page cut to its axis', () => {
     expect(readme).toContain('#3162');
   });
 });
+
+/**
+ * Issue #4540 — Level 3 is where a reader decides to build a whole team, so the
+ * page has to point at the team guide next to `#ask-level-3`, not only at
+ * setup.md, and llms.txt has to carry the same route. The setup prompt itself is
+ * left alone; the route is added beside it.
+ */
+describe('Issue #4540: Level 3 points at the team guide', () => {
+  const TEAM_URL = 'https://kewton.github.io/CommandMate/team-setup.md';
+  const level3 = (): string =>
+    /<section class="section[^"]*" id="level-3"[\s\S]*?<\/section>/.exec(readIndexHtml())?.[0] ?? '';
+
+  it('links #ask-level-3 to team-setup.md, keeping the setup.md prompt as it was', () => {
+    const ask = /<div class="ask">[\s\S]*?<\/div>\s*<\/div>/.exec(level3())?.[0] ?? '';
+
+    expect(ask, 'the ask box in #level-3').not.toBe('');
+    expect(ask).toContain('https://kewton.github.io/CommandMate/setup.md');
+    expect(level3()).toContain(`href="${TEAM_URL}"`);
+  });
+
+  it('links llms.txt to team-setup.md', () => {
+    const llms = fs.readFileSync(path.join(WEBSITE_DIR, 'llms.txt'), 'utf-8');
+
+    expect(llms).toContain(`](${TEAM_URL})`);
+  });
+});
