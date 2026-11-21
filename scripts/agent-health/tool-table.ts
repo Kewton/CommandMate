@@ -20,6 +20,7 @@ import { OPENCODE_PANE_HEIGHT, OPENCODE_PANE_WIDTH, TUI_PANE_HEIGHT, TUI_PANE_WI
 import { resolveCaptureSpec } from '@/lib/cli-tools/capture-spec';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { getAntigravityHooksConfigPath } from '@/lib/hooks/sources/antigravity/hooks-config';
+import { getAntigravityRelayInstallPath } from '@/lib/hooks/sources/antigravity/relay-install';
 import { getCodexHome, getCodexHooksPath } from '@/lib/hooks/sources/codex/hooks-config';
 import { getCodexRelayInstallPath } from '@/lib/hooks/sources/codex/relay-install';
 import { sameTomlWithoutMarker, type TrustStateComparator } from '@/lib/agent-health/config-guard';
@@ -361,7 +362,13 @@ export const TOOL_PROBE_SPECS: Record<AgentHealthTool, ToolProbeSpec> = {
     // agy asks before `sleep` too.
     approval: { via: 'running-turn', dialog: /Run this command\?/, denyKeys: ['Escape'] },
     guardedFiles: () => ({
-      hookConfig: [getAntigravityHooksConfigPath()],
+      // Issue #4505: `prepareLaunch` writes the relay copy the hooks file
+      // names, beside it. A daily check that restores only `hooks.json` would
+      // leave the copy (and its bytes) behind on the real machine.
+      hookConfig: [
+        getAntigravityHooksConfigPath(),
+        getAntigravityRelayInstallPath(getAntigravityHooksConfigPath()),
+      ],
       // `trustedWorkspaces` — written when the folder-trust dialog is answered.
       trustState: [path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json')],
     }),
