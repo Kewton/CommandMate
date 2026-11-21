@@ -184,13 +184,14 @@ exit 10 にもならない）。
 
 - **完了の確定**（下の 2 つの手順と同じことをスクリプトが行う）: Command Code と Antigravity の instance（`command-code-2` / `antigravity-2` などの追加 instance と、その alias も。
   サーバーが解決した担当ツール `cliToolId` で決める、#3883）と `--require-signal` を付けた担当は、
-  行全体が `IMPL_COMPLETED` の行が出るまで 30 秒ごとに待ち、**合図を見るまで検証を始めない**（`wait --verify` ではなく `wait` → 合図 → `verify --task` に分ける。
-  作業の途中のターン終了で検証を走らせない、#3883）。合図は**この task のもの**だけを数える: この task の返事（`reply "$WT" --instance <id> --since <task の作成時刻> --json`）が
+  **返しの行**（`DONE: #<N> <sha> verify exit <n>`。行全体がこの形で、`<sha>` が今の HEAD を名指す。`WAIT:` / `STOP:` は待ちを終わらせない）が出るまで 30 秒ごとに待ち、**合図を見るまで検証を始めない**（`wait --verify` ではなく `wait` → 合図 → `verify --task` に分ける。
+  作業の途中のターン終了で検証を走らせない、#3883）。`IMPL_COMPLETED` の行も引き続き合図として読む（#4532 より前に送った task がまだそれを待っている）が、**返しの行が終わりの形**で、
+  `IMPL_COMPLETED` は「形の外の終わり方」— 見張り（`orchestrate-monitor`）は `SHAPE_OUTSIDE` として知らせ、合格には数えない。合図は**この task のもの**だけを数える: この task の返事（`reply "$WT" --instance <id> --since <task の作成時刻> --json`）が
   読めるときはその返事の中の行で決める（画面に前の task の合図が残っていても、返事に無ければまだ）。返事がまだ無い（`reply: null`）か読めないときは、
   画面の裸の `IMPL_COMPLETED` は数えない（前の task の行が残ったまま、この task の途中のターン終了が来ることがある）。画面で数えるのは、
-  今の HEAD を名指す `IMPL_COMPLETED head=<sha>` で、その HEAD のコミットが task の作成より後のものだけ。どれも無ければ `--signal-timeout` まで未確定のまま待つ。
+  今の HEAD を名指す `DONE: #<N> <sha> verify exit <n>` か `IMPL_COMPLETED head=<sha>` で、その HEAD のコミットが task の作成より後のものだけ。どれも無ければ `--signal-timeout` まで未確定のまま待つ。
   task が台帳に無い（作成時刻が分からない）ときだけ、画面の行を今までどおり数えて `signal-task=unknown` と残す。`IMPL_COMPLETED head=<sha>` の形なら、その HEAD が今の HEAD のときだけ数え、
-  合図を見た後に HEAD が動いたら検証をやり直す。次に、**この呼び出しの検証の開始時刻**（ログの `Verifying: <WT> (run <id>)` の run を `verify show <id> --json` で読む。
+  合図を見た後に HEAD が動いたら検証をやり直す。画面は `capture --pane` で**全行**を読む（`--json` の `content` / `realtimeSnippet` の末尾の窓や `--tail` では、枠の行が下に続くと合図が押し出される。`wait-verify.mjs` も同じ読み、#4315。見張り `orchestrate-monitor` も担当を問わず毎ポーリング `--pane` の全行で終わり方を判定し、許可のプロンプトも pane から拾う、#4532）。次に、**この呼び出しの検証の開始時刻**（ログの `Verifying: <WT> (run <id>)` の run を `verify show <id> --json` で読む。
   worktree の最新の run（`verify history --limit 1`）は使わない。その間に別の run が始まっていることがある、#3883）と
   最後のターン終了（`capture --json` の `lastStopEventAt`）と最後のコミットの時刻と作業ツリーを比べる。検証の開始の後にコミットがあるか、
   最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、

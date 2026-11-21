@@ -617,6 +617,141 @@ ml_prompt_signature() {
   { printf '%s\n' "${2:-}"; ml_json_block "$1" promptData; } | cksum | awk '{print $1}'
 }
 
+# --- the return line (Issue #4532) ---------------------------------------------
+# Until #4532 a worker ended a turn with a bare `IMPL_COMPLETED`, and the
+# orchestrator waited on that line. Two failures came from it: a permission prompt
+# or an ordinary `DONE:` turn looked like nothing at all, and `IMPL_COMPLETED`
+# itself is easy to mistake a stale line for. The goal now asks for a return line
+# as the turn's LAST line:
+#
+#   DONE: #<N> <sha> verify exit <n>   /   WAIT: <reason>   /   STOP: <reason>
+#
+# and `IMPL_COMPLETED` is a shape-OUTSIDE ending: named and reported, never
+# accepted as completion.
+#
+# Anchored at the start of a line on purpose: the goal text itself names all three
+# shapes (`手番の最後の行は \`DONE: …\`・\`WAIT: <理由>\`・\`STOP: <理由>\` …`) and scrolls
+# into the pane, so a substring match would read the instructions as an ending.
+# A return line is a whole line that STARTS with the shape.
+#
+# ml_pane_rows <capture-json-file>: the rows of the longer of content /
+# realtimeSnippet, JSON-unescaped. NOT what the loop judges an ending on (#4532
+# review P1-A): one of the two `--json` fields is still a window — codex's split
+# canvas (#3946) puts the composer in the snippet and nothing in content once
+# the reply was saved, so the DONE above the blank gap is in neither. monitor.sh
+# reads `capture --pane` on every poll and scans that with ml_return_line_text.
+# ml_return_line below is kept for callers that hold only a `--json` frame.
+ml_pane_rows() {
+  ml__rows_snip=$(ml_json_scalar "$1" realtimeSnippet)
+  ml__rows_cont=$(ml_json_scalar "$1" content)
+  [ "$ml__rows_snip" = "null" ] && ml__rows_snip=""
+  [ "$ml__rows_cont" = "null" ] && ml__rows_cont=""
+  if [ ${#ml__rows_cont} -gt ${#ml__rows_snip} ]; then
+    ml__rows_src=$ml__rows_cont
+  else
+    ml__rows_src=$ml__rows_snip
+  fi
+  printf '%s\n' "$ml__rows_src" | ml_strip_ansi | ml__json_unescape
+}
+
+# ml_return_line <capture-json-file> -> the newest ending in that pane, or `none`:
+#   `DONE: …` / `WAIT: …` / `STOP: …`   the newest such line in the pane
+#   `SHAPE_OUTSIDE IMPL_COMPLETED[ head=<sha>]`   the old ending
+#   `none`
+# The DONE line is the shape of wait-verify.mjs's DONE_LINE_RE (#4532 review
+# P3-B): fields separated by `[ \t]+` (spaces or tabs, any number), leading and
+# trailing blanks allowed, a sha of 7-40 hex. A 1-character token or a 41-hex
+# one must not read as a DONE here while the orchestrator's own reader refuses
+# it, and two spaces must not be refused here while it accepts them. The sha
+# length is checked in awk code rather than as `{7,40}`: an interval expression
+# is not portable across the awks this runs under (BSD awk, gawk, older mawk).
+# One table of rows pins both readers to the same answers
+# (monitor-pane-invariants-4532.test.ts, T3).
+ML_DONE_LINE_RE='^DONE:[ \t]+#[0-9]+[ \t]+[0-9a-f]+[ \t]+verify[ \t]+exit[ \t]+[0-9]+$'
+ML_DONE_SHA_MIN=7
+ML_DONE_SHA_MAX=40
+
+# The one scan of a list of rows. Both readers below feed it, so a raw
+# `capture --json` and a `--pane` transcript name the ending the same way.
+ml__return_line_scan() {
+  LC_ALL=C awk -v done_re="$ML_DONE_LINE_RE" -v sha_min="$ML_DONE_SHA_MIN" -v sha_max="$ML_DONE_SHA_MAX" '
+    { line = $0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line) }
+    line ~ done_re {
+      split(line, field, /[ \t]+/)
+      if (length(field[3]) >= sha_min + 0 && length(field[3]) <= sha_max + 0) { out = line; found = 1 }
+    }
+    line ~ /^WAIT:/ { out = line; found = 1 }
+    line ~ /^STOP:/ { out = line; found = 1 }
+    line ~ /^IMPL_COMPLETED([ \t]+head=[0-9a-f]+)?[ \t]*$/ { out = "SHAPE_OUTSIDE " line; found = 1 }
+    END { print (found ? out : "none") }
+  '
+}
+
+# The frame is read with ml_pane_rows (JSON-unescaped rows, ANSI stripped).
+ml_return_line() {
+  ml_pane_rows "$1" | ml__return_line_scan
+}
+
+# ml_return_line_text <pane-text-file>: the same scan over a `capture --pane`
+# transcript — EVERY line, with no window (#4532 review P1-1, P1-A). This is
+# the reader monitor.sh judges the ending with, for every CLI: a Command Code
+# pane is top-anchored (the ending sits above the last 30 non-blank rows), and
+# a codex pane puts the composer at the bottom of its canvas (the ending sits
+# above the last 100 rows). The CLI's transcript is already plain text, so only
+# ANSI is normalized.
+ml_return_line_text() {
+  [ -f "$1" ] || { echo "none"; return 0; }
+  ml_strip_ansi "$1" | ml__return_line_scan
+}
+
+# ml_pane_as_capture <pane-text-file> <cli-tool-id>: the `capture --pane`
+# transcript written out as a capture frame, so classify-state.sh can put the
+# SAME per-CLI prompt marker it puts on `--json` on the pane too (#4532 review
+# P2-A). #4434's frame had an empty content and a blank snippet, and a dialog
+# that only the pane showed was never PROMPT.
+#   content          every row of the pane — the field ml_cc_frame / ml_agy_frame
+#                    window from (they take the longer field and keep its bottom
+#                    drawn rows), so Command Code and agy read their own window.
+#   realtimeSnippet  the bottom ML_PANE_LIVE_ROWS drawn (non-blank) rows — what
+#                    the Claude markers (ml_pane_text) read. Kept to the bottom
+#                    on purpose: a marker word in the transcript above (the task
+#                    text, an answered dialog) is not a prompt (#1522).
+# No marker is added for a CLI that has none (codex): its prompt stays the
+# server's isPromptWaiting. The strings are JSON-escaped (`\` `"` and the line
+# break), which is all ml_json_scalar / ml__json_unescape need.
+ML_PANE_LIVE_ROWS=30
+ml_pane_as_capture() {
+  ml__pac_escape='{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); gsub(/\r/, "") }'
+  ml__pac_all=$(ml_strip_ansi "$1" | LC_ALL=C awk "$ml__pac_escape"'
+    { out = (NR == 1 ? $0 : out "\\n" $0) } END { printf "%s", out }')
+  ml__pac_live=$(ml_strip_ansi "$1" | LC_ALL=C awk -v keep="$ML_PANE_LIVE_ROWS" "$ml__pac_escape"'
+    { if ($0 ~ /[^ \t]/) row[++n] = $0 }
+    END {
+      first = n - keep + 1
+      if (first < 1) first = 1
+      for (i = first; i <= n; i++) out = (i == first ? row[i] : out "\\n" row[i])
+      printf "%s", out
+    }')
+  printf '{\n  "isRunning": true,\n  "cliToolId": "%s",\n  "content": "%s",\n  "realtimeSnippet": "%s"\n}\n' \
+    "$2" "$ml__pac_all" "$ml__pac_live"
+}
+
+# ml_has_return_line <capture-json-file> <shape>: whether the newest ending is
+# that shape (`DONE` / `WAIT` / `STOP` / `SHAPE_OUTSIDE`). A stale `DONE:` from an
+# earlier turn is not distinguishable from this turn's on the pane alone, so the
+# caller still ties it to its own task (the same reason wait-verify reads the
+# reply rather than the pane when it can).
+ml_has_return_line() {
+  ml__line=$(ml_return_line "$1")
+  case "$2" in
+    DONE) case "$ml__line" in DONE:*) return 0 ;; esac ;;
+    WAIT) case "$ml__line" in WAIT:*) return 0 ;; esac ;;
+    STOP) case "$ml__line" in STOP:*) return 0 ;; esac ;;
+    SHAPE_OUTSIDE) case "$ml__line" in SHAPE_OUTSIDE*) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
 # --- tmux session targeting ---------------------------------------------------
 # The pane an intervention is typed into is DERIVED from the capture payload, not
 # guessed from a fixed prefix.

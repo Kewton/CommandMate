@@ -101,7 +101,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { allocateLog, itemProblem, workItemName } from './execution-key.mjs';
-import { QUERY_TIMEOUT_MS, defaultRun } from './wait-verify.mjs';
+import { DONE_LINE_RE, QUERY_TIMEOUT_MS, defaultRun } from './wait-verify.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 
 /**
@@ -442,6 +442,63 @@ export function waitReady({ run, sleep, cli, wt, instance, onAnswer }) {
     if (poll < READY_MAX_POLLS) sleep(READY_POLL_SEC * 1000);
   }
   return false;
+}
+
+/**
+ * How the turn on this `capture --json` answer ended (Issue #4532), read from the
+ * visible rows the same way `.claude/skills/orchestrate-monitor/scripts/monitor-lib.sh`
+ * reads them (JSON-unescaped rows of the longer of content / realtimeSnippet, ANSI
+ * stripped). The goal now asks for a return line as the turn's LAST line:
+ *
+ *   DONE: #<N> <sha> verify exit <n>   /   WAIT: <reason>   /   STOP: <reason>
+ *
+ * An ending is anchored at the line start because the goal text itself names all
+ * three shapes and scrolls into the pane — a substring match would read the
+ * instructions as an ending. `IMPL_COMPLETED` is a shape-OUTSIDE ending: a task
+ * sent before #4532 still ends with it, and it must be NAMED, never read as
+ * completion. The DONE shape is wait-verify's `DONE_LINE_RE` (#4532 review): one
+ * definition for both readers, with a 7-40 hex sha, so this report and the
+ * completion signal cannot disagree about what a DONE is.
+ *
+ * @returns {{ kind: 'DONE' | 'WAIT' | 'STOP' | 'SHAPE_OUTSIDE' | 'none', line: string }}
+ */
+export function endingOfAnswer(answer) {
+  const text = [answer?.content, answer?.realtimeSnippet]
+    .filter((value) => typeof value === 'string')
+    .sort((a, b) => b.length - a.length)[0];
+  if (typeof text !== 'string') return { kind: 'none', line: '' };
+  const rows = text
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\\u00[aA]0/g, ' ')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, '\n')
+    .split('\n')
+    .map((row) => row.trim());
+  let found = { kind: 'none', line: '' };
+  for (const line of rows) {
+    if (DONE_LINE_RE.test(line)) found = { kind: 'DONE', line };
+    else if (/^WAIT:/.test(line)) found = { kind: 'WAIT', line };
+    else if (/^STOP:/.test(line)) found = { kind: 'STOP', line };
+    else if (/^IMPL_COMPLETED([ \t]+head=[0-9a-f]+)?[ \t]*$/.test(line)) found = { kind: 'SHAPE_OUTSIDE', line };
+  }
+  return found;
+}
+
+/**
+ * The complaint a launch logs when the session it started already shows a
+ * shape-outside ending — the goal asked for a return line, and `IMPL_COMPLETED`
+ * alone is not one (#4532). Null when there is nothing out of shape. It is a
+ * report: nothing here decides completion, and nothing is sent differently.
+ *
+ * @returns {string | null}
+ */
+export function shapeOutsideWarning(answer, where) {
+  const ending = endingOfAnswer(answer);
+  if (ending.kind !== 'SHAPE_OUTSIDE') return null;
+  return `${where}: the session shows IMPL_COMPLETED, which is not a return line (#4532) — not completion; it is the old ending`;
 }
 
 /**
@@ -815,6 +872,12 @@ export function main(argv, deps = {}) {
         log(`role changed: ${o.instance} of ${o.wt} is not the process the starting message started; contract not sent`);
         return stopped('role changed after the starting message') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;
       }
+      // Issue #4532: a session that already shows the OLD ending is named here, from
+      // the answer already read (`lastAnswer`) — no extra capture. It changes nothing
+      // that is sent: it is a report, so an operator is not left believing
+      // `IMPL_COMPLETED` is a return line.
+      const shapeOutside = shapeOutsideWarning(lastAnswer, `${o.instance} of ${o.wt}`);
+      if (shapeOutside) log(shapeOutside);
       if (roleNow === null && roleEvidenceRequired(disarm.row)) {
         log(`role unknown: the server has no record of what ${o.instance} of ${o.wt} was started with; contract not sent`);
         return stopped('no record of the role it started with') ? EXIT_ROLE_CHANGED : EXIT_STOP_UNCONFIRMED;

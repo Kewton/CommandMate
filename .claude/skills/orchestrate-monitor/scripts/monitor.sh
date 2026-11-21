@@ -479,7 +479,41 @@ while [ "$done_count" -lt "$n_ids" ]; do
     # i.e. a classifier that dies turns a busy worker into a COMPLETE report.
     # Skipping the poll — the treatment a failed capture already gets — is what
     # keeps the empty value away from the decision.
-    state=$("$CLASSIFY" --json "$poll")
+    #
+    # The pane (#4532 review P1-A / P2-A, invariant N1). Unless the session is
+    # not running, EVERY poll reads `capture --pane` for EVERY CLI — no branch
+    # on the tool and no "only when `--json` shows no row" fallback. `--json`'s
+    # content/realtimeSnippet are windows: Command Code's top-anchored pane
+    # leaves them blank padding (#4245, #4434), and codex's split canvas (#3946)
+    # puts the composer in the snippet and nothing in content once the reply
+    # was saved. The pane is where the ending (below) and a dialog are drawn,
+    # so the ending is judged on ALL its rows and the prompt marker is put on it
+    # too (classify-state.sh --pane-json). `--json` stays the source of the
+    # state, promptData, the session name and the rest.
+    # A failed pane read is announced once per worker rather than read as "no
+    # ending": silence there is what hid #4434.
+    pane_file="$STATE_DIR/$lbl.pane.txt"
+    pane_json="$STATE_DIR/$lbl.pane.json"
+    pane_ok=0
+    rm -f "$pane_json"
+    if [ "$(ml_json_scalar "$poll" isRunning)" != "false" ]; then
+      # cap_args is empty or the validated `--agent … --instance …` pair.
+      # shellcheck disable=SC2086
+      if $CM capture "$wid" --pane $cap_args > "$pane_file" 2>/dev/null; then
+        pane_ok=1
+        ml_pane_as_capture "$pane_file" "$(ml_json_scalar "$poll" cliToolId)" > "$pane_json" 2>/dev/null \
+          || rm -f "$pane_json"
+      elif [ ! -f "$STATE_DIR/$lbl.panewarn" ]; then
+        touch "$STATE_DIR/$lbl.panewarn"
+        echo "monitor[$lbl]: WARN capture --pane failed — the ending and a prompt drawn only on the pane are not read while it fails (reported once)"
+      fi
+    fi
+
+    if [ -f "$pane_json" ]; then
+      state=$("$CLASSIFY" --json "$poll" --pane-json "$pane_json")
+    else
+      state=$("$CLASSIFY" --json "$poll")
+    fi
     classify_rc=$?
     if [ "$classify_rc" -ne 0 ] || [ -z "$state" ]; then
       echo "monitor[$lbl]: classify-state failed (exit $classify_rc), skipping poll"
@@ -620,6 +654,37 @@ while [ "$done_count" -lt "$n_ids" ]; do
     # polls.
     if [ "$state" != "PROMPT" ]; then
       : > "$STATE_DIR/$lbl.heldsig"
+    fi
+
+    # The ending this pane shows (Issue #4532). The goal now asks for a return
+    # line — `DONE: #<N> <sha> verify exit <n>` / `WAIT: …` / `STOP: …` — and
+    # `IMPL_COMPLETED` is a shape-OUTSIDE ending: the orchestrator used to wait on
+    # a bare one and could not tell a stale line from this task's, or notice a
+    # worker that stopped on a prompt at all. Reported once per ending, and only
+    # when there is one, so a pane with no ending keeps the pre-#4532 stream
+    # byte-for-byte (that output is pinned by monitor-observability.test.ts).
+    # It is a report, not a verdict: COMPLETE still comes from the ledger or the
+    # capture heuristics. A stale ending from an earlier turn is not
+    # distinguishable here, so a person reads the task it belongs to.
+    #
+    # Judged on ALL rows of the pane read above (invariant N1), for every CLI.
+    # A poll whose pane could not be read reports no ending; the WARN above
+    # already said so.
+    ending="none"
+    if [ "$state" != "NOT_RUNNING" ] && [ "$pane_ok" = "1" ]; then
+      ending=$(ml_return_line_text "$pane_file" 2>/dev/null) || ending="none"
+    fi
+    if [ "$ending" != "none" ] && [ "$ending" != "$(read_state "$lbl" ending)" ]; then
+      printf '%s' "$ending" > "$STATE_DIR/$lbl.ending"
+      case "$ending" in
+        DONE:*) echo "monitor[$lbl]: return line DONE — $ending" ;;
+        WAIT:*) echo "monitor[$lbl]: return line WAIT — the worker is waiting; $ending" ;;
+        STOP:*) echo "monitor[$lbl]: return line STOP — the worker stopped; $ending" ;;
+        SHAPE_OUTSIDE*)
+          # Not a terminal shape (#4532): named so it is never read as completion.
+          echo "monitor[$lbl]: SHAPE_OUTSIDE ending — ${ending#SHAPE_OUTSIDE } (not a return line; not completion)"
+          ;;
+      esac
     fi
 
     post_started=$(read_state "$lbl" started)

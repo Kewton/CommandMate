@@ -39,4 +39,4 @@
 - コミットは 1 つにまとめる。メッセージは `{{COMMIT_PREFIX}}: <要約> (#{{ISSUE}})`。本文に、決めたこと・確かめたこと・本文に無い指摘を書く。
   `.commandmate/tasks/` と `dev-reports/` はコミットに含めない。`changelog.d/{{ISSUE}}.md` は実装と同じコミットに含める。
 - push と PR 作成はしない（オーケストレーターが行う）。
-- すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。
+- 手番の最後の行は `DONE: #{{ISSUE}} <sha> verify exit <n>`・`WAIT: <理由>`・`STOP: <理由>` のどれかにする（`IMPL_COMPLETED` だけの行は終わりの形にしない。待つ側は `IMPL_COMPLETED` を「形の外の終わり方」として検出して知らせる）。
