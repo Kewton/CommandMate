@@ -4,13 +4,19 @@
  * The built-in `env-clean` gate must tell another worktree's server from the
  * worker's own. Guessing from the listening process's directory or ancestors
  * failed both ways (Sprint 7: the detached daemon runs in the package root, a
- * sibling of every worktree). So the launchers — `commandmate start --daemon`
- * (src/cli/utils/daemon.ts) and scripts/uat/run-server.sh — leave evidence:
+ * sibling of every worktree). So the launcher — today only `commandmate start
+ * --daemon` (src/cli/utils/daemon.ts) — leaves evidence:
  *
  *   - the server's environment gets `CM_SERVER_MARK=<absolute record path>`;
  *   - the record names the process group the launch created (`pgid`), the
  *     start time of that group's leader, and where the launch came from (the
- *     launcher's cwd, its git root, run-server's repo root, its tmux session).
+ *     launcher's cwd, its git root, its tmux session).
+ *
+ * The shape also admits `launcher: 'run-server'` with a `repoRoot` (the judge's
+ * UAT server, scripts/uat/run-server.sh). Nothing writes it today: that
+ * launcher is left unmarked until its run ownership is designed (Sprint 10), so
+ * its server is judged like any unmarked one. Accepting the value changes no
+ * verdict — a record is still verified only by its group and leader.
  *
  * The verifier (src/lib/verification/env-snapshot.ts) accepts a mark only when
  * the listener is in the recorded group and that group's leader is the recorded
@@ -28,8 +34,9 @@ export const SERVER_MARK_ENV = 'CM_SERVER_MARK';
 export const SERVER_MARK_BASE_ENV = 'CM_SERVER_MARK_BASE';
 
 /**
- * Fixed, not `os.tmpdir()`: run-server.sh starts its server under `env -i`, so
- * the two launchers would otherwise disagree about where records live.
+ * Fixed, not `os.tmpdir()`: a launcher that starts its server under `env -i`
+ * (run-server.sh, once it writes marks) must agree with the daemon about where
+ * records live.
  */
 export const SERVER_MARK_DEFAULT_BASE = '/tmp';
 
@@ -66,7 +73,7 @@ export interface ServerMarkRecord {
   launcherCwd: string;
   /** realpath of `git rev-parse --show-toplevel` in the launcher's cwd; null outside git. */
   worktreeRoot: string | null;
-  /** run-server.sh's checkout (realpath); null for the daemon. */
+  /** run-server.sh's checkout (realpath); null for the daemon (the only writer today). */
   repoRoot: string | null;
   /** The launcher's tmux session name, {@link SERVER_MARK_SESSION_NO_TMUX} or {@link SERVER_MARK_SESSION_LOOKUP_FAILED}. */
   session: string;

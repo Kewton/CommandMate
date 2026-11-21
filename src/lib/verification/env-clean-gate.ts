@@ -381,7 +381,7 @@ function isShownOutside(path: string | null | undefined, realWorktree: string): 
  * record's launch origin decides:
  *
  *   - `self` when any process runs inside this worktree, any verified record
- *     was launched from inside it (cwd, git root, run-server's repo root), or
+ *     was launched from inside it (cwd, git root, repo root when recorded), or
  *     any verified record's tmux session is this worktree's;
  *   - `other` only when **every** process on the port carries a verified mark
  *     whose session is another worktree's CommandMate session and whose launch

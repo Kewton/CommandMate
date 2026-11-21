@@ -8,7 +8,8 @@
  * checkout, a sibling) and could not excuse the judge's isolated server when it
  * ran anywhere else. Sprint 7 tried reading ancestors instead and drew four P1s.
  *
- * Now the launcher (DaemonManager, scripts/uat/run-server.sh) gives the server
+ * Now the launcher (DaemonManager — the only writer today; the run-server
+ * records below exercise a shape the verifier still accepts) gives the server
  * `CM_SERVER_MARK=<record path>` and writes a record naming the process group it
  * started, the group leader's start time and where it was launched from. The
  * probe checks, at capture time, that the listener's group is the recorded one

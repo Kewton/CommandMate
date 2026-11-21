@@ -646,7 +646,7 @@ probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable`
 | probe | 判定 |
 |---|---|
 | `tmux-sessions` | 名前 `mcbd-<cli>-<worktreeId>[-suffix]` を分解し、自 worktree なら `self`、別 worktree なら `other`、解釈できなければ `unattributed`。worktree id はハイフンを含みうるので曖昧なケースは `self` に倒す（厳しい側）。`<worktreeId>-…` の形は、自 id より長いハイフン区切りの接頭辞に**別の worktree だという証拠**があるときだけ `other`（Issue #4192、下の「`<id>-…` の帰属の証拠」）。ただし**追加のうちタスク自身のエージェントセッションと完全一致する 1 本**は、帰属より先に除外する（Issue #2472） |
-| `listeners` | **起動の印だけで判定する（Issue #4433）。** どれかの pid の cwd、または検証済みの記録の起動元（cwd・git の root・run-server の repo root）が自 worktree 配下、または記録の tmux セッションが自 worktree のものなら `self`。そのポートの**全 pid** が検証済みの印を持ち、セッションが別 worktree の CommandMate のもので、起動元と cwd がすべて realpath で自 worktree の外（祖先でもない）なら `other`。それ以外（印なし・検証できない・`no-tmux`・`lookup-failed`・git の root なし・#4433 より前の基準）は `unattributed`。兄弟ディレクトリ・祖先・名前・ポートの一致では免除しない |
+| `listeners` | **起動の印だけで判定する（Issue #4433）。** どれかの pid の cwd、または検証済みの記録の起動元（cwd・git の root・記録にあれば repo root）が自 worktree 配下、または記録の tmux セッションが自 worktree のものなら `self`。そのポートの**全 pid** が検証済みの印を持ち、セッションが別 worktree の CommandMate のもので、起動元と cwd がすべて realpath で自 worktree の外（祖先でもない）なら `other`。それ以外（印なし・検証できない・`no-tmux`・`lookup-failed`・git の root なし・#4433 より前の基準）は `unattributed`。兄弟ディレクトリ・祖先・名前・ポートの一致では免除しない |
 | `home-entries` / `commandmate-entries` | ファイルに所有者は無いので常に `unattributed` |
 
 `unattributed` は「たぶん誰のものでもない」ではなく「他人のものだと**示せなかった**」であり、
@@ -660,10 +660,9 @@ package root（開発用ではメインの checkout＝兄弟）なので、ワ�
 
 | 項目 | 内容 |
 |---|---|
-| 印 | サーバーの環境の `CM_SERVER_MARK=<記録の絶対パス>`。付けるのは `DaemonManager.start`（`src/cli/utils/daemon.ts`）と `scripts/uat/run-server.sh up`。形は `src/cli/types/server-mark.ts` |
-| 記録 | `/tmp/commandmate-server-marks-<uid>/<32 桁の hex>.json`（dir は自 uid で group/other の権限なし＝作るときは 0700、run-server.sh は 0700 ちょうどのときだけ使う・file 0600・4 KiB 以下）。`pgid`（detached／`set -m` で作った group＝leader の pid）、`leaderStartTime`（`LC_ALL=C TZ=UTC0 ps -o lstart=`）、`launcherCwd`・`worktreeRoot`（起動した CLI／呼び出し元のシェルの cwd と git の root）、`repoRoot`（run-server.sh の checkout）、`session`（起動元の tmux セッション名・`no-tmux`・`lookup-failed`。名前を書くのは、`TMUX_PANE` のペインのプロセスが起動した側（CLI・run-server.sh のシェル）の祖先のときだけ。継いだだけの `TMUX_PANE` は `lookup-failed`） |
+| 印 | サーバーの環境の `CM_SERVER_MARK=<記録の絶対パス>`。付けるのは `DaemonManager.start`（`src/cli/utils/daemon.ts`。`commandmate start --daemon`）だけ。形は `src/cli/types/server-mark.ts`。審判の UAT サーバー（`scripts/uat/run-server.sh`）は印なしで、今までどおり違反として docs/orchestrate/exit-codes.md 3-4 の手の裁定で扱う（印は Sprint 10 で run の所有権〈run ID・token〉から設計する） |
+| 記録 | `/tmp/commandmate-server-marks-<uid>/<32 桁の hex>.json`（dir は自 uid で group/other の権限なし＝作るときは 0700・file 0600・4 KiB 以下）。`pgid`（detached で作った group＝leader の pid）、`leaderStartTime`（`LC_ALL=C TZ=UTC0 ps -o lstart=`）、`launcherCwd`・`worktreeRoot`（起動した CLI の cwd と git の root）、`repoRoot`（daemon は null。形としては受けるが今の書き手は無い）、`session`（起動元の tmux セッション名・`no-tmux`・`lookup-failed`。名前を書くのは、`TMUX_PANE` のペインのプロセスが起動した側（CLI）の祖先のときだけ。継いだだけの `TMUX_PANE` は `lookup-failed`） |
 | 検証（スナップショットの時） | 環境から印を読む（linux は `/proc/<pid>/environ`、macOS は `ps -E` の出力からコマンドラインを除いた残り。2 回あれば invalid）→ 記録のパスと dir（自 uid・group/other の権限なし・名前）→ 記録の形 → `ps -o pid=,pgid=` の pgid が記録と一致 → leader の lstart が記録と一致。どれかが外れたら `absent` / `invalid`（理由は固定の語。報告の行に `mark=<理由>`） |
-| 記録の寿命（run-server.sh） | 記録は子が `go` を受けて exec した後に書く。書く前に確かめるのは、子がこの run の `CM_DB_PATH` でサーバーを exec して終わっていないこと、`--wait-listen` が正のときだけそれに加えてポートで listen していること。既定の UAT（`--wait-listen` 無し）では listen 前のサーバーにも記録が付き、listen 前に終わったものは後の health が見つけ、`down` が記録を消す（leader の居ない記録は免除の根拠にならない）。記録が出来るまでの観測は `invalid`／`record-unreadable` で違反。書いた後に state へ path を書けない、またはサーバーがもう居ない（`down` が追い越した）なら、`up` は自分の記録を消す（後者は `up` も失敗）。消すのは記録の `pgid` と `leaderStartTime` がその run のサーバーと一致するものだけで、`down` は止める前にサーバーの pid と起動時刻を固定し、解放の後に同じ run-dir の次の `up` が書き換えた state では照合しない |
 | 継承 | `server.ts` は起動の最初に `CM_SERVER_MARK` を自分の環境から消す（子は継がない。`ps -E`・`/proc` は起動時の値を出すので照合はできる）。daemon は親から継いだ印を子に渡さない |
 | 消えたもの（`-`） | 印は持ち主を示すだけで、誰が止めたかは示さない。基準で別 worktree のものと検証された listener が消えても違反のまま（#1739 の型を通さないため）。報告の行の `mark=verified` を見て override を判断する |
 | 残る穴 | 同じ uid の故意の偽造（TMUX を外して別 worktree に cd して起動する、記録を手で書いて pgid・lstart を合わせる）は防げない。ゲートは作業の副作用を捕まえるもので、故意は対象外。読む側は記録の dir の名前・uid・権限を見るが、置き場所（親が `/tmp` か）は見ない（`CM_SERVER_MARK_BASE` で動かしても照合の強さは pgid と lstart のまま） |
