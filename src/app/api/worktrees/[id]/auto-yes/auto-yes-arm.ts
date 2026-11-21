@@ -99,6 +99,12 @@ export type AutoYesArmOutcome =
 /**
  * Judge and arm the grant on `target`, with nothing in between: the shutdown, `onlyIfOff`,
  * the relay judged again (`relayRefusal`), then the grant and its poller. Synchronous.
+ *
+ * It does not judge the tool policy: call it only after {@link findAutoYesToolPolicyRefusal}
+ * allowed this target (and with `relayRefusal` asking {@link findAutoYesRelayRefusal} when
+ * the body named a `replyTo`). It starts the poller itself, so the operation route's S2
+ * cannot call it as is inside its transaction (the grant and the poller come after the
+ * commit, design §4.2 (e)); PR1b splits that off.
  */
 export function armAutoYesGrant(
   target: AutoYesArmTarget,

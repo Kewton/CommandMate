@@ -298,11 +298,12 @@ export function countRecentReplyRounds(
 
 /**
  * What {@link judgeRelayCreation} answers (Issue #4466 PR1a): a missing worktree, or
- * the verdict of `decideRelayCreation` with the rounds it was given (for the log).
+ * the verdict of `decideRelayCreation` with the rounds it was given (for the log) and
+ * the time it judged at (to write the relay at, {@link recordOpenedRelay}).
  */
 export type RelayCreationJudgment =
   | { ok: false; refusal: RelayEndpointMissing }
-  | { ok: true; verdict: RelayCreationVerdict | RelayRefusal; rounds: RecentReplyRounds };
+  | { ok: true; verdict: RelayCreationVerdict | RelayRefusal; rounds: RecentReplyRounds; now: number };
 
 /**
  * The judgment half of {@link openRelay} (Issue #4466 PR1a): everything it reads
@@ -310,11 +311,18 @@ export type RelayCreationJudgment =
  * (the resolvers' own warnings aside). Synchronous, so a caller can judge and then
  * write in one stretch; {@link openRelay} is exactly this followed by
  * {@link recordOpenedRelay}.
+ *
+ * The time (`input.now`, else the clock) is taken right after the worktrees are found,
+ * where `openRelay` always took it — it bounds the round-trip window — and is answered as
+ * `now` so the write uses the same one.
+ *
+ * Not yet the operation route's S2 judgment (PR1b): it still resolves the `from` end
+ * itself and judges the `to` end both by the asked tool and the worktree default, as
+ * `POST /api/relays` does; the S2 judgment takes the decided tools of both ends (I2a).
  */
 export function judgeRelayCreation(
   db: Database.Database,
-  input: OpenRelayInput,
-  now: number
+  input: OpenRelayInput
 ): RelayCreationJudgment {
   for (const worktreeId of [input.from.worktreeId, input.to.worktreeId]) {
     if (!relayWorktreeExists(db, worktreeId)) {
@@ -329,6 +337,7 @@ export function judgeRelayCreation(
     }
   }
 
+  const now = input.now ?? Date.now();
   // Issue #4420: the pace of round trips, from the ledger (one COUNT).
   const rounds = countRecentReplyRounds(db, input.from, now);
   const verdict = decideRelayCreation({
@@ -353,13 +362,20 @@ export function judgeRelayCreation(
       declaration: readUsageDeclaration(),
     },
   });
-  return { ok: true, verdict, rounds };
+  return { ok: true, verdict, rounds, now };
 }
 
 /**
  * The write half of {@link openRelay} (Issue #4466 PR1a): the row, its log line and
  * the `requested` system line, for a relay {@link judgeRelayCreation} allowed at
  * `hops`. Synchronous.
+ *
+ * Call it only right after {@link judgeRelayCreation} allowed this very relay, in the
+ * same synchronous stretch: it judges nothing (no rule 0, no ceiling). It also logs and
+ * broadcasts the system line itself, so it cannot be used as is inside the operation
+ * route's S2 transaction, which must not broadcast before its commit (I10): PR1b gives it
+ * an entry that takes the judged ends and hands the broadcast and the log back for after
+ * the commit.
  */
 export function recordOpenedRelay(
   db: Database.Database,
@@ -404,10 +420,9 @@ export function recordOpenedRelay(
  * never see a reply.
  */
 export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRelayResult {
-  const now = input.now ?? Date.now();
-  const judgment = judgeRelayCreation(db, input, now);
+  const judgment = judgeRelayCreation(db, input);
   if (!judgment.ok) return judgment;
-  const { verdict, rounds } = judgment;
+  const { verdict, rounds, now } = judgment;
   if (isRelayRefusal(verdict)) {
     if (verdict.toolPolicy) {
       logger.info('relay-tool-policy-denied', {

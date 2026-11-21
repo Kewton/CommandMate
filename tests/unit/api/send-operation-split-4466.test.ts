@@ -4,9 +4,10 @@
  *
  * Two properties the operation route (PR1b) builds on, each pinned here against a real
  * database:
- * - a read-only function writes nothing: the row count of every table is the same
- *   before and after (and a write the snapshot must see does show up — the measure's
- *   own control);
+ * - a read-only function writes nothing: the row count of every table and the
+ *   connection's `total_changes()` are the same before and after (so an UPDATE that keeps
+ *   the counts shows up too), nothing is broadcast, and a contract file it reads keeps its
+ *   content (and a write the snapshot must see does show up — the measure's own control);
  * - a judge-and-write function is synchronous: what it returns is not a Promise.
  *
  * Temporary files live under `os.tmpdir()` and are removed after each test.
@@ -16,6 +17,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -23,7 +25,10 @@ import { runMigrations } from '@/lib/db/db-migrations';
 import { getOrCreateWorktreeIncarnation } from '@/lib/mem/incarnation';
 import { readMemActor } from '@/lib/mem/service';
 import { judgeRelayCreation, openRelay, recordOpenedRelay } from '@/lib/relay/relay-service';
-import { isRelayRefusal } from '@/lib/relay/relay-policy';
+import { isRelayRefusal, MAX_RELAY_ROUNDS, RELAY_ROUNDS_WINDOW_MS } from '@/lib/relay/relay-policy';
+import { createRelay, markRelayDelivered } from '@/lib/db/relay-db';
+import { relayRequestId } from '@/lib/db/chat-db';
+import { broadcastMessage } from '@/lib/ws-server';
 import { getWorktreeById } from '@/lib/db';
 import {
   createTaskIfAllowed,
@@ -41,6 +46,20 @@ import {
 } from '@/app/api/worktrees/[id]/auto-yes/auto-yes-arm';
 
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
+
+/** A hook run on every worktree read (the boundary test moves the clock there). */
+const worktreeReads = vi.hoisted(() => ({ onRead: null as (() => void) | null }));
+
+vi.mock('@/lib/db/worktree-db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/db/worktree-db')>();
+  return {
+    ...actual,
+    getWorktreeById: (...args: Parameters<typeof actual.getWorktreeById>) => {
+      worktreeReads.onRead?.();
+      return actual.getWorktreeById(...args);
+    },
+  };
+});
 
 const autoYes = vi.hoisted(() => ({
   shuttingDown: false,
@@ -72,7 +91,11 @@ function insertWorktree(id: string, cliToolId = 'claude'): void {
   ).run(id, id, path.join(tmp, id), cliToolId, NOW);
 }
 
-/** Row count of every table: the snapshot a read-only function must leave unchanged. */
+/**
+ * Row count of every table, plus the connection's `total_changes()` (key
+ * `(total_changes)`, which an UPDATE moves too): the snapshot a read-only function must
+ * leave unchanged.
+ */
 function rowCounts(): Record<string, number> {
   const tables = db
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
@@ -81,7 +104,18 @@ function rowCounts(): Record<string, number> {
   for (const { name } of tables) {
     counts[name] = (db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get() as { n: number }).n;
   }
+  counts['(total_changes)'] = (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
   return counts;
+}
+
+/** A read-only function's whole check: the snapshot is unchanged and nothing was broadcast. */
+function expectNothingWritten(before: Record<string, number>): void {
+  expect(rowCounts()).toEqual(before);
+  expect(broadcastMessage).not.toHaveBeenCalled();
+}
+
+function sha256(file: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
 function isPromise(value: unknown): boolean {
@@ -103,9 +137,12 @@ beforeEach(() => {
   autoYes.live = null;
   autoYes.set.mockReset().mockReturnValue({ enabled: true, enabledAt: NOW, expiresAt: NOW + 1 });
   autoYes.start.mockReset().mockReturnValue({ started: true });
+  vi.mocked(broadcastMessage).mockClear();
+  worktreeReads.onRead = null;
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   db.close();
   fs.rmSync(tmp, { recursive: true, force: true });
   if (savedDeclaration === undefined) delete process.env.CM_ANTIGRAVITY_USAGE;
@@ -118,6 +155,12 @@ describe('the snapshot itself (control)', () => {
     getOrCreateWorktreeIncarnation(db, 'wt-a');
     expect(rowCounts()).not.toEqual(before);
   });
+
+  it('sees an UPDATE that keeps every row count', () => {
+    const before = rowCounts();
+    db.prepare('UPDATE worktrees SET updated_at = updated_at + 1').run();
+    expect(rowCounts()).not.toEqual(before);
+  });
 });
 
 describe('read-only functions write nothing', () => {
@@ -126,7 +169,7 @@ describe('read-only functions write nothing', () => {
     const reading = readMemActor(db, 'wt-a', 'claude');
     expect(isPromise(reading)).toBe(false);
     expect(reading).toMatchObject({ ok: true, instanceId: 'claude', cliToolId: 'claude', worktreeIncarnation: null });
-    expect(rowCounts()).toEqual(before);
+    expectNothingWritten(before);
   });
 
   it('readMemActor answers the write paths\' refusals, writing nothing', () => {
@@ -134,42 +177,41 @@ describe('read-only functions write nothing', () => {
     expect(readMemActor(db, 'wt-none', 'claude')).toMatchObject({ ok: false, outcome: { body: { code: 'not_found' } } });
     expect(readMemActor(db, 'wt-a', '')).toMatchObject({ ok: false, outcome: { body: { code: 'target_required' } } });
     expect(readMemActor(db, 'wt-a', 'nobody')).toMatchObject({ ok: false, outcome: { body: { code: 'instance_not_found' } } });
-    expect(rowCounts()).toEqual(before);
+    expectNothingWritten(before);
   });
 
   it('readMemActor reads an incarnation that exists', () => {
     const made = getOrCreateWorktreeIncarnation(db, 'wt-a');
     const before = rowCounts();
     expect(readMemActor(db, 'wt-a', 'claude')).toMatchObject({ ok: true, worktreeIncarnation: made });
-    expect(rowCounts()).toEqual(before);
+    expectNothingWritten(before);
   });
 
   it('judgeRelayCreation allows or refuses without a row or a system line', () => {
     const before = rowCounts();
     const allowed = judgeRelayCreation(
       db,
-      { from: { worktreeId: 'wt-a', instanceId: 'claude' }, to: { worktreeId: 'wt-b', instanceId: 'codex' } },
-      NOW
+      { from: { worktreeId: 'wt-a', instanceId: 'claude' }, to: { worktreeId: 'wt-b', instanceId: 'codex' }, now: NOW }
     );
     expect(isPromise(allowed)).toBe(false);
     expect(allowed.ok && !isRelayRefusal(allowed.verdict)).toBe(true);
+    expect(allowed.ok && allowed.now).toBe(NOW);
     const refused = judgeRelayCreation(
       db,
       {
         from: { worktreeId: 'wt-a', instanceId: 'claude' },
         to: { worktreeId: 'wt-b', instanceId: 'agy-1' },
         toCliToolId: 'antigravity',
-      },
-      NOW
+        now: NOW,
+      }
     );
     expect(refused.ok && isRelayRefusal(refused.verdict) && refused.verdict.code).toBe('RELAY_TOOL_POLICY_DENIED');
     const missing = judgeRelayCreation(
       db,
-      { from: { worktreeId: 'wt-a', instanceId: 'claude' }, to: { worktreeId: 'wt-none', instanceId: 'codex' } },
-      NOW
+      { from: { worktreeId: 'wt-a', instanceId: 'claude' }, to: { worktreeId: 'wt-none', instanceId: 'codex' }, now: NOW }
     );
     expect(missing).toMatchObject({ ok: false, refusal: { code: 'RELAY_WORKTREE_NOT_FOUND' } });
-    expect(rowCounts()).toEqual(before);
+    expectNothingWritten(before);
   });
 
   it('readTaskContractForCreate reads the contract and writes nothing', () => {
@@ -180,6 +222,8 @@ describe('read-only functions write nothing', () => {
       'version: 1\ntitle: "split"\ngoal: |\n  Split.\nscope:\n  allow:\n    - "src/**"\n',
       'utf8'
     );
+    const contractFile = path.join(worktreePath, '.commandmate', 'tasks', 'x.yaml');
+    const contractHash = sha256(contractFile);
     const before = rowCounts();
     const read = readTaskContractForCreate(worktreePath, '.commandmate/tasks/x.yaml');
     expect(isPromise(read)).toBe(false);
@@ -187,8 +231,9 @@ describe('read-only functions write nothing', () => {
     const bad = readTaskContractForCreate(worktreePath, '../outside.yaml');
     expect(bad.ok).toBe(false);
     expect(bad.ok ? null : bad.response.status).toBe(400);
-    expect(rowCounts()).toEqual(before);
+    expectNothingWritten(before);
     expect(fs.readdirSync(path.join(worktreePath, '.commandmate', 'tasks'))).toEqual(['x.yaml']);
+    expect(sha256(contractFile)).toBe(contractHash);
   });
 
   it('the policy judgments take the target as an argument and write nothing', () => {
@@ -206,7 +251,7 @@ describe('read-only functions write nothing', () => {
     expect(refuseSendForTool({ model: 'opus' }, 'codex')?.status).toBe(400);
     expect(refuseSendForTool({ brief: 'decline' }, 'gemini')?.status).toBe(400);
     expect(refuseSendForTool({}, 'claude')).toBeNull();
-    expect(rowCounts()).toEqual(before);
+    expectNothingWritten(before);
   });
 });
 
@@ -243,7 +288,7 @@ describe('judge-and-write functions are synchronous', () => {
 
   it('recordOpenedRelay writes what openRelay writes for an allowed judgment', () => {
     const input = { from: { worktreeId: 'wt-a', instanceId: 'claude' }, to: { worktreeId: 'wt-b', instanceId: 'codex' }, now: NOW };
-    const judged = judgeRelayCreation(db, input, NOW);
+    const judged = judgeRelayCreation(db, input);
     if (!judged.ok || isRelayRefusal(judged.verdict)) throw new Error('expected an allowed relay');
     const before = rowCounts();
     const relay = recordOpenedRelay(db, input, judged.verdict.hops, NOW);
@@ -255,6 +300,29 @@ describe('judge-and-write functions are synchronous', () => {
     const refused = openRelay(db, { ...input, to: { worktreeId: 'wt-b', instanceId: 'agy-1' }, toCliToolId: 'antigravity' });
     expect(refused.ok).toBe(false);
     expect(rowCounts()).toEqual(afterRecord);
+  });
+
+  it('openRelay takes its time after the worktrees are found, as it always did (round-trip window edge)', () => {
+    const A = { worktreeId: 'wt-a', instanceId: 'claude' };
+    const B = { worktreeId: 'wt-b', instanceId: 'codex' };
+    // MAX_RELAY_ROUNDS replies to A's own relays: one exactly at the window's lower edge
+    // for a clock that reads NOW, the rest well inside it.
+    for (let i = 0; i < MAX_RELAY_ROUNDS; i += 1) {
+      const at = i === 0 ? NOW - RELAY_ROUNDS_WINDOW_MS : NOW - 60_000 - i * 1_000;
+      const relay = createRelay(db, { from: A, to: B, hops: 1, expiresAt: at + 3_600_000, now: at - 1, bindMode: 'legacy' });
+      markRelayDelivered(db, relay.id, relayRequestId(relay.id), at);
+    }
+    // The clock reads NOW until the first worktree read, then NOW + 1 ms: taken after the
+    // existence check, the edge reply has left the window (9 < MAX) and the relay opens;
+    // taken before it, the edge reply still counts and the ceiling refuses.
+    let clock = NOW;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    worktreeReads.onRead = () => {
+      clock = NOW + 1;
+    };
+    const result = openRelay(db, { from: A, to: B });
+    worktreeReads.onRead = null;
+    expect(result.ok ? 'opened' : result.refusal.code).toBe('opened');
   });
 
   it('createInstanceRole and writeInstanceRole throw a policy refusal with nothing written', () => {
