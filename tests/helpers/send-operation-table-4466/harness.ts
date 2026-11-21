@@ -35,6 +35,14 @@ export async function loadSendOperationRoute(): Promise<{ POST: RouteHandler }> 
   return { POST: loaded.POST };
 }
 
+/**
+ * The new route for the CLI's dispatch, or null while it does not exist (the dispatch then
+ * answers 404, as a server without the route would).
+ */
+export async function loadSendOperationRouteIfPresent(): Promise<{ POST: RouteHandler } | null> {
+  return fs.existsSync(SEND_OPERATION_ROUTE_FILE) ? loadSendOperationRoute() : null;
+}
+
 export interface CliResult {
   code: number;
   stderr: string[];

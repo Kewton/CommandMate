@@ -40,6 +40,7 @@ export class SendOperationStop extends Error {
 
 const hooks = new Map<SendOperationHookPoint, SendOperationHook>();
 const fired: SendOperationHookPoint[] = [];
+const stopped: SendOperationHookPoint[] = [];
 
 /** Register the hook of one point (replaces an earlier one). */
 export function setSendOperationHook(point: SendOperationHookPoint, hook: SendOperationHook): void {
@@ -50,13 +51,26 @@ export function setSendOperationHook(point: SendOperationHookPoint, hook: SendOp
 export function clearSendOperationHooks(): void {
   hooks.clear();
   fired.length = 0;
+  stopped.length = 0;
 }
 
 /** The insertion point: the route (PR1b) calls this at each point. No hook → nothing. */
 export async function runSendOperationHook(point: SendOperationHookPoint, worktreeId: string): Promise<void> {
   fired.push(point);
   const hook = hooks.get(point);
-  if (hook) await hook({ point, worktreeId });
+  if (!hook) return;
+  try {
+    await hook({ point, worktreeId });
+  } catch (error) {
+    // Recorded here, so a route that turns every exception into a 5xx still shows where it stopped.
+    if (error instanceof SendOperationStop) stopped.push(point);
+    throw error;
+  }
+}
+
+/** The points where a hook stopped the operation ({@link SendOperationStop}). */
+export function stoppedSendOperationHooks(): readonly SendOperationHookPoint[] {
+  return [...stopped];
 }
 
 /** The points reached, in order (a row with a hook expects its point among them). */

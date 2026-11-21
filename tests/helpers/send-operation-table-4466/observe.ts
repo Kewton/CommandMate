@@ -11,33 +11,47 @@
 
 import type Database from 'better-sqlite3';
 
-/** The tables of §6.1: tasks, the roster and its roles, relays, the transcript, mem and its incarnations. */
+/**
+ * The tables of §6.1 (tasks, the roster and its roles, relays, the transcript, mem and its
+ * incarnations) and the ones a send or a roster write touches beside them (r1, review
+ * P2-4 / codex P2-3): the `now` slot of mem (`session_notes`), the roster's idempotency keys,
+ * the worktree row (`last_user_message`), the brief boundary, the role launch record, the
+ * session state and the ask correlation. The rest of the schema is not written by any
+ * stage of a send (settings, schedules, reports, skills, push, clones, other mem tables).
+ */
 export const OBSERVED_TABLES = [
   'tasks',
   'task_events',
   'agent_instances',
   'agent_instance_roles',
+  'agent_instance_creation_keys',
   'session_relays',
   'chat_messages',
+  'session_notes',
   'mem_items',
   'mem_worktree_incarnations',
   'mem_instance_incarnations',
+  'worktrees',
+  'session_brief_boundaries',
+  'agent_role_launch_records',
+  'session_states',
+  'ask_correlations',
 ] as const;
 export type ObservedTable = (typeof OBSERVED_TABLES)[number];
 
 /** Outside the database (§6.1): grants, pollers, env baselines, keys, launches, broadcasts. */
 export interface OutsideObservation {
-  /** `cliToolId/instanceId` of every enabled grant (`peekAutoYesState`). */
+  /** Every stored Auto-Yes state, enabled or not, as `key=<JSON of the whole state>` (terms, expiry, stop pattern). */
   grants: string[];
-  /** Pollers started (Auto-Yes and response pollers). */
+  /** Pollers started and stopped (Auto-Yes and response pollers), `start:` / `stop:`. */
   pollers: string[];
-  /** Files in the env-snapshot directory. */
+  /** Files in the env-snapshot directory, `name:sha256` (an overwrite is a change). */
   envSnapshots: string[];
-  /** What was typed into the fake tmux, `tool:message`. */
+  /** What was typed into the fake tmux, `tool:instanceId:message`. */
   typed: string[];
   /** Fake tool launches, `tool:instanceId`. */
   launched: string[];
-  /** WebSocket broadcasts the fake recorded. */
+  /** WebSocket broadcasts the fake recorded, the session-status broadcasts included. */
   broadcasts: string[];
 }
 
