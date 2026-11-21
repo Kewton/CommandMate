@@ -27,6 +27,7 @@ Anywhere: at every level you can answer and approve from your phone, paired with
 ## Docs
 
 - [Set up with your agent](https://kewton.github.io/CommandMate/setup.md): a guide for a coding agent to set CommandMate up on this machine, stage by stage, asking the person before it installs anything or opens access from the internet. Also printed by `commandmate docs --section setup`.
+- [Set up a team with your agent](https://kewton.github.io/CommandMate/team-setup.md): the guide for a whole development team — the five fixed roles (a PM, a development lead, workers, a reviewer and a judge) with `roles`, `mem` and the restart brief. Use setup.md instead for installing CommandMate itself, pairing a phone, or one agent at a time. Also printed by `commandmate docs --section team-setup`.
 - [Documentation](https://github.com/Kewton/CommandMate/tree/main/docs/en): the English docs
 - [Tutorial](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/tutorial.md): Use a sample repository with two bugs left in on purpose to work through the core of CommandMate in about fifteen minutes.
 - [Setup guide](https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/cli-setup-guide.md): install it for daily use

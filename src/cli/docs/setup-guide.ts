@@ -17,6 +17,8 @@ This guide is written for a coding agent (Claude Code, Codex, Command Code, or a
 
 The same text ships inside CommandMate: once it is installed, \`commandmate docs --section setup\` prints it.
 
+**This guide or the team guide?** This guide sets up CommandMate itself: install, pairing a phone, and one agent at a time. If the person wants a development team — one to three vendors' agent CLIs in the five fixed roles (a PM, a development lead, workers, a reviewer and a judge), with the \`roles\` command (a send to the wrong role exits 32), \`mem\` and the restart brief — use the team guide instead: https://kewton.github.io/CommandMate/team-setup.md (\`commandmate docs --section team-setup\`). The team guide starts from an installed CommandMate and repeats the single-agent steps only briefly.
+
 ## Instructions for the agent reading this
 
 1. **Explain each stage before you start it.** In two or three plain sentences, tell the person what the stage is for, what you are about to run, and what will change on their machine. Then run it.
@@ -236,6 +238,8 @@ The first time Codex starts in a worktree it shows two confirmation screens. Sho
 
 Goal: one session plans the work and hands tasks to the others. That session is the lead. Skills from CommandMate's official Catalog teach it the method. In Stages 4 and 5 this one session does everything and is called the lead; Stage 6 then splits it into a PM and a development lead.
 
+**Stages 4 to 6 are the short form.** They build the team by hand: roles written as sections in the instructions file, compared with the IDs \`commandmate whoami\` prints. For the five fixed roles as CommandMate roles (\`commandmate roles\`, a send to the wrong role exits 32), with \`mem\`, the restart brief and isolated worktrees, use the team guide instead: https://kewton.github.io/CommandMate/team-setup.md (\`commandmate docs --section team-setup\`). Read this stage only when the person wants the smallest team on one machine.
+
 ### Check
 
 \`\`\`bash
@@ -363,6 +367,8 @@ commandmate wait <worktree-id> --instance command-code --verify
 Goal: the person talks to one PM session. The PM does not write code: it asks a development lead, the development lead hands one task to a worker under a contract, and the checks decide when it is done. The PM then tells the person, in the first line, whether they have to do anything.
 
 Stages 4 and 5 used one lead session. Here you keep that session as the development lead and add a separate PM next to it. The roles are written into the repository's instructions file, and each session compares the IDs \`commandmate whoami\` prints with those sections and states its own role. The role templates are in https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/team-roles.md (Japanese: https://github.com/Kewton/CommandMate/blob/main/docs/user-guide/team-roles.md).
+
+**For the full team, use the team guide.** This stage keeps the roles in the instructions file. The team guide sets up the same five fixed roles (a PM, a development lead, workers, a reviewer and a judge) as CommandMate roles, through the \`roles\` subcommand, so a send names the role it must hold and one that does not hold it exits 32, and it adds \`mem\`, the restart brief and one worktree per worker: https://kewton.github.io/CommandMate/team-setup.md (\`commandmate docs --section team-setup\`). Follow this stage only for the smallest team on one machine; hand a real team to the team guide.
 
 **Out of scope here.** Creating one worktree per issue, \`profile-init.mjs\` and \`commandmate sync\` are the full \`cmate-orchestrate\` workflow. This stage hands one task to a worker in a worktree that already exists, as in Stage 5. For the full workflow, read the \`cmate-orchestrate\` Skill's own documents after this stage.
 
