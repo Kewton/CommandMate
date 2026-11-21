@@ -166,7 +166,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 - `target` の欄を持つ理由: 今の `/send` は「宛先の欄なし」（#4116）で、既定の解決をサーバーに任せている。新しい route は、その操作で S2 が決める宛先の出発点として、CLI が名指したものだけを受ける。名指しが無ければ、今と同じく既定（S2 で解決）。`/send` の約束は変えない（レビュー B P3-3）
 - 能力の名前は `send-operation-v1`。欄を足すだけの変更は同じ版のまま。意味の変わる変更は `v2` を足す（`v1` は残す）（レビュー B P3-1）
 - 応答（成功）: `{ ok: true, target, taskId?, relayId?, grant?, registered?, noteItemId?, sent: { … 今の /send の応答（brief を含む）… } }`
-  - **案（PR0 の表が置いた形。PR1b で確定。§8.3 の U1）**: 成功の応答にも `policy` を載せる。`policy.target.tool`（実際に打つ tool。I2a）と、relay があれば `policy.relay.from` / `policy.relay.to`（規則 0 がそれぞれの端を判定した tool）。§6.1 の ad-hoc の `--agent codex` の対照が「`to` を名簿の既定で判定した」と「打つ tool で判定した」を見分けるのに要る
+  - **PM 決定 11-21（§8.3 の U1）。PR0 の表が置いた形**: 成功の応答にも `policy` を載せる。`policy.target.tool`（実際に打つ tool。I2a）と、relay があれば `policy.relay.from` / `policy.relay.to`（規則 0 がそれぞれの端を判定した tool）。§6.1 の ad-hoc の `--agent codex` の対照が「`to` を名簿の既定で判定した」と「打つ tool で判定した」を見分けるのに要る
   - `operationId` は出さない（使い道が無い。レビュー B P3-2）
 - 応答（拒否）: §5.1 の表
 
@@ -187,6 +187,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
   - 違えば `OperationTargetChanged` を投げる
 - **(c1) 名簿とロールの書き込み（DB だけ）**: ロールありの名簿の行（`--register --role`）→ ロールの設定。(b) が (c2) と同じ DB の状態を見るために、先に書く。断るときは例外で戻るので、行は残らない（I3a）。DB の外の副作用は無い
 - **(b) 判定（I3b）**: (c1) の後の DB の状態で、次を全部判定する。どれか 1 つで断るなら、型付きの例外を投げる
+  - **判定の順（PM 決定 11-21、§8.3 の U2）**: 下の 2（relay の作成）を 1（宛先への送信の方針）より先に判定する。両方が断るときは relay の拒否（`RELAY_TOOL_POLICY_DENIED`）を返す（今の書き込みの API の判定 `findWriteToolPolicyRefusal` と同じ順・同じ code）。番号は下の参照（「1 の実際に打つ tool」など）のために残し、判定の集合は変えない
   1. 宛先への送信の方針: `decideToolPolicy`。tool は (a) で決めた**実際に打つ tool**。起点は本文、申告は env
   2. relay の作成: `decideRelayCreation` を、(c2) の `openRelay` と同じ関数・同じ入力で呼ぶ。入力の決め方:
      - `to`（送信の宛先の端）の tool は、**1 の実際に打つ tool をそのまま渡す**（I2a）。名簿から解決し直さない
@@ -277,7 +278,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 | C3 | 送信の途中で宛先が変わった（`operation_target_changed`、何も書いていない、再送してよい） | 無し（今は行が残る） | 409 `OPERATION_TARGET_CHANGED`。exit は H1 で決める | **要（exit の番号。§8 H1）** |
 | C4 | `--note` の mem の拒否（50・2・56 など） | 何も送らず、契約の task を `failed` にし（行は残る）、grant と relay を取り下げ、mem の終了コードで終わる（`cli-operations-guide.md:308`） | S2 の中の拒否なので、全部を戻す。**task の行も残らない**。exit は mem の終了コードのまま。stdout は空 | **要（結果の変化。§8 H2）** |
 | C5 | relay の方針以外の拒否（`RELAY_CHAIN_BLOCKED`・`RELAY_HOPS_EXCEEDED`・`RELAY_DUPLICATE_PENDING`・`RELAY_SELF_TARGET`・`RELAY_WORKTREE_NOT_FOUND`、`src/cli/commands/relays.ts:70-76`） | relay の段で exit 2 と固有の文面。それより前の段の行（タスク・登録）は残る | 同じ code・同じ文面・exit 2。S2 の中の拒否なので、何も残らない。#4420 は新しい code を作らない（PM の決定） | 不要（code と exit は同じ。行が残らなくなるのは I1 の直し） |
-| C6 | 名簿の拒否（`--register`、上限・id） | exit 2（送る前）または警告・exit 0（送った後） | `--register` の名簿の検査は S2 で行う。名簿が断る行は、何も書かず送らず exit 2。**応答の code は未確定**（§8.3 の U3。PR0 の表は案として 400 `invalid_request` を置いた） | 不要（#4458 の CLI の判定と同じ結果。#4479 の方向） |
+| C6 | 名簿の拒否（`--register`、上限・id） | exit 2（送る前）または警告・exit 0（送った後） | `--register` の名簿の検査は S2 で行う。名簿が断る行は、何も書かず送らず exit 2。**応答の code は 400 `invalid_request`**（PM 決定 11-21、§8.3 の U3。新しい code は足さない） | 不要（#4458 の CLI の判定と同じ結果。#4479 の方向） |
 | C7 | 古いサーバー（能力の一覧にトークンが無い） | — | H3 で決める | **要（§8 H3）** |
 | C8 | 能力の確認に失敗した | — | exit（`serverResolvesSessionTargets` と同じ exit）。古い経路へ落とさない | 不要（既存の能力の確認の約束と同じ） |
 | C9 | 確定の後の失敗（起動の失敗など） | CLI が `failTask` 等で取り消す。CLI が止まれば残る | サーバーが S4 で始末する。exit は今の失敗の exit のまま | 不要 |
@@ -440,15 +441,15 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 | P7 | 打鍵の前の要求の中断を not_sent にするか（§4.2 S3） | する |
 | P8 | await の網羅の静的な検査を入れるか（§4.3） | Sprint 9 では入れない（安全の根拠は I3c） |
 
-### 8.3 PR1b の前に決める未確定（PM が決める。PR1a で一覧した）
+### 8.3 PR1b の前に決める未確定（PR1a で一覧し、PM が 11-21 に決めた）
 
-PR0 の表とそのレビュー（`s9/review-4466-pr0-codex-r2.md` の新規 P1 1・2）で、設計が決めていない点が出た。この設計書では決めない。各項目に推奨と根拠を書く。
+PR0 の表とそのレビュー（`s9/review-4466-pr0-codex-r2.md` の新規 P1 1・2）で、設計が決めていない点が出た。各項目に推奨と根拠を書き、PM の決定（11-21）を最後の列に書いた。3 つとも推奨の (a)。
 
-| # | 未確定 | 選択肢 | 推奨 | 根拠 |
-|---|---|---|---|---|
-| U1 | §4.1 の成功の応答の `policy` の形 | (a) PR0 の表の案: `policy.target.tool` と、relay があれば `policy.relay.from` / `policy.relay.to`（判定した tool）<br>(b) 成功では `policy` を出さない（§4.1 のまま） | (a) | §6.1 の ad-hoc の `--agent codex` の対照（`to` の判定に codex が使われる）と §6.3 の変異「`to` を名簿から解決し直す」は、応答に判定した tool が無いと観測できない（打鍵先の instance だけでは、`to` の規則 0 がどの tool で判定されたかを見分けられない）。(b) なら §6.1 の期待を DB の外の観測に書き換える必要がある |
-| U2 | 同じ要求で宛先の方針（`TOOL_POLICY_DENIED`）と relay の規則 0（`RELAY_TOOL_POLICY_DENIED`）の両方が断るとき、どちらの code を返すか（§4.2 (b) は 1 宛先 → 2 relay の順、§6.1 の解決の食い違いの行は「規則 0 の理由」を期待） | (a) relay を先（`RELAY_TOOL_POLICY_DENIED`）<br>(b) 宛先を先（`TOOL_POLICY_DENIED`。§4.2 (b) の番号のまま） | (a) | 今の書き込みの API の判定（`findWriteToolPolicyRefusal`、`write-tool-policy.ts`）は relay を先に判定する（CLI が relay を打鍵の前に開く順）。今の CLI（古い経路、C11a）は `RELAY_TOOL_POLICY_DENIED` を出すので、(a) なら新旧の経路で stderr の 1 行目の理由が変わらず、§6.1 の期待とも合う。exit はどちらも 33 で変わらない。(a) を採るなら §4.2 (b) の 1 と 2 の順を入れ替える（判定の集合は同じ） |
-| U3 | §5.1 C6 の名簿の拒否の応答の code | (a) `invalid_request`（PR0 の表の案）<br>(b) 新しい code（例 `ROSTER_LIMIT_EXCEEDED`）を足す | (a) | 今の `POST /instances/roles` は上限で 400 を返し、同じ値を `error` の欄に載せる（`roleErrorResponse`）。新しい code を足すと H4 の公開 API の追加が増え、CLI の写し（exit 2）も同じ。ただし欄の名前が `error` から `code` に変わるので、PR2 の CLI の写しで両方を読むことを確かめる |
+| # | 未確定 | 選択肢 | 推奨 | 根拠 | PM 決定 11-21 |
+|---|---|---|---|---|---|
+| U1 | §4.1 の成功の応答の `policy` の形 | (a) PR0 の表の案: `policy.target.tool` と、relay があれば `policy.relay.from` / `policy.relay.to`（判定した tool）<br>(b) 成功では `policy` を出さない（§4.1 のまま） | (a) | §6.1 の ad-hoc の `--agent codex` の対照（`to` の判定に codex が使われる）と §6.3 の変異「`to` を名簿から解決し直す」は、応答に判定した tool が無いと観測できない（打鍵先の instance だけでは、`to` の規則 0 がどの tool で判定されたかを見分けられない）。(b) なら §6.1 の期待を DB の外の観測に書き換える必要がある | **(a)**。成功の応答に `policy.target.tool` と、relay があれば `policy.relay.from` / `policy.relay.to` を載せる（§4.1） |
+| U2 | 同じ要求で宛先の方針（`TOOL_POLICY_DENIED`）と relay の規則 0（`RELAY_TOOL_POLICY_DENIED`）の両方が断るとき、どちらの code を返すか（§4.2 (b) は 1 宛先 → 2 relay の順、§6.1 の解決の食い違いの行は「規則 0 の理由」を期待） | (a) relay を先（`RELAY_TOOL_POLICY_DENIED`）<br>(b) 宛先を先（`TOOL_POLICY_DENIED`。§4.2 (b) の番号のまま） | (a) | 今の書き込みの API の判定（`findWriteToolPolicyRefusal`、`write-tool-policy.ts`）は relay を先に判定する（CLI が relay を打鍵の前に開く順）。今の CLI（古い経路、C11a）は `RELAY_TOOL_POLICY_DENIED` を出すので、(a) なら新旧の経路で stderr の 1 行目の理由が変わらず、§6.1 の期待とも合う。exit はどちらも 33 で変わらない。(a) を採るなら §4.2 (b) の 1 と 2 の順を入れ替える（判定の集合は同じ） | **(a)**。relay を先に判定し、両方が断るときは `RELAY_TOOL_POLICY_DENIED`（今の経路と同じ code）。§4.2 (b) の 1 と 2 の順を入れ替えた（§4.2 (b) の「判定の順」） |
+| U3 | §5.1 C6 の名簿の拒否の応答の code | (a) `invalid_request`（PR0 の表の案）<br>(b) 新しい code（例 `ROSTER_LIMIT_EXCEEDED`）を足す | (a) | 今の `POST /instances/roles` は上限で 400 を返し、同じ値を `error` の欄に載せる（`roleErrorResponse`）。新しい code を足すと H4 の公開 API の追加が増え、CLI の写し（exit 2）も同じ。ただし欄の名前が `error` から `code` に変わるので、PR2 の CLI の写しで両方を読むことを確かめる | **(a)**。`invalid_request`。新しい code は足さない。PR2 の CLI の写しで、`error` の欄（今の `POST /instances/roles`）と `code` の欄（新しい route）の両方を読むことを確かめる（§5.1 C6） |
 
 ---
 
