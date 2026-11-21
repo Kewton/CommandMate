@@ -233,13 +233,19 @@ export const antigravityStatusDetector = createToolStatusDetector({
     // check report ready during generation. The row under the box is the source
     // of truth, read by POSITION in this order:
     //
-    //  1. `? for shortcuts` → ready, before any thinking word. agy's own thought
-    //     body can say "Generating the specified file"; matching that word in the
-    //     15-row window pinned an idle pane as `running` (Issue #4504).
+    //  1. `? for shortcuts` → ready, before this hook's positional markers. agy's
+    //     own thought body can say "Generating the specified file"; matching that
+    //     word in the 15-row window pinned an idle pane as `running` (Issue #4504).
     //  2. `esc to cancel` → generating.
     //  3. neither (agy 1.2.1 after a tool turn, #2478) → generating only when the
     //     tail carries a row-leading braille spinner or `Generating...`/`Generating…`;
     //     a bare `Generating` in a heading is not a turn in flight.
+    //
+    // The shared priority 2 (`detectThinking` over the last 5 rows) runs BEFORE
+    // this hook and is not part of this order: a bare `Generating`, mid-row
+    // braille or `Generating..` inside those 5 rows still answers `running`. The
+    // send gate applies the same 5-row test in its no-footer branch, so it never
+    // opens on a frame this detector leaves `running` (review of #4504, P2-1).
     //
     // A frame without a readable input box keeps the pre-#4504 reading below.
     const statusRow = readAntigravityInputBoxStatusRow(frame.contentLines);

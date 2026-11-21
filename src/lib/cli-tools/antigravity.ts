@@ -22,6 +22,7 @@ import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import {
   ANTIGRAVITY_SELECTION_LIST_PATTERN,
+  detectThinking,
   stripAnsi,
 } from '../detection/cli-patterns';
 import { normalizeFrame } from '../detection/tools/frame';
@@ -197,9 +198,15 @@ function logTrustDecisionOnce(
  *  2. The frame ends in the input box ({@link readAntigravityInputBoxStatusRow}).
  *  3. Read the status row under the box, in this order (Issue #4504):
  *     `? for shortcuts` → ready, before any thinking word; `esc to cancel` →
- *     generating; neither → generating only when the tail carries a row-leading
- *     spinner or `Generating...`/`Generating…`. A bare `Generating` in agy's
- *     own thought body ("Generating the specified file") is not a turn. The box
+ *     generating; neither → generating when the tail carries a row-leading
+ *     spinner or `Generating...`/`Generating…`, AND when the shared priority 2's
+ *     5-row thinking window matches. The short window is the second half on
+ *     purpose: the detector runs `detectThinking` over the last 5 rows before
+ *     `afterThinking`, so a bare `Generating` / mid-row braille / `Generating..`
+ *     inside those rows publishes `running` while the positional reader alone
+ *     would not. Applying the same window here keeps the gate from being looser
+ *     than the detector (review of #4504). A bare `Generating` further up the
+ *     15-row tail ("Generating the specified file") is not a turn. The box
  *     stays on screen while agy generates, so 2 alone would not do.
  *
  * Before #2478 the footer was required and the detector never read it, so the
@@ -217,6 +224,10 @@ export function isAntigravityReady(output: string): boolean {
   if (statusRow === null) return false;
   if (ANTIGRAVITY_READY_FOOTER_PATTERN.test(statusRow)) return true;
   if (ANTIGRAVITY_CANCEL_FOOTER_PATTERN.test(statusRow)) return false;
+  // Review of #4504: the detector's priority 2 runs the same 5-row window before
+  // afterThinking, so the gate must answer it too or it opens on a frame the
+  // status detector calls running.
+  if (detectThinking('antigravity', frame.thinkingLines)) return false;
   return !isAntigravityGeneratingAt(frame.lastLines);
 }
 
