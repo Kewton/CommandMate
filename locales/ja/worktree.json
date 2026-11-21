@@ -1252,6 +1252,8 @@
     "unknownRepository": "不明",
     "loadingEditor": "エディタを読み込み中...",
     "agentInstanceSelection": "エージェントインスタンスの選択",
+    "instanceQueryNotInRoster": "開こうとした {instance} はこの worktree のエージェントにありません。{current} を表示しています。",
+    "instanceQueryNotApplied": "{instance} を表示できませんでした。送り先は {current} のままです。",
     "statusPill": "{label}: {status}",
     "subTabMessage": "メッセージ",
     "subTabGit": "Git",

@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { getInstanceLabel, type AgentInstance } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import type { UseTerminalSplitsReturn } from '@/hooks/useTerminalSplits';
@@ -17,6 +17,17 @@ export type UsePerSplitHandlersArgs = Pick<
   instanceById: Map<string, AgentInstance>;
   showToast?: ShowToast;
   onActiveInstanceChange?: (instanceId: string) => void;
+  /**
+   * Issue #4484: a user's own pick of a split — a click (focus) into a split
+   * other than the selected one, a split's instance menu, a drop. The worktree
+   * screen ends a `?instance=` request still waiting, so it cannot later
+   * override what the user chose.
+   */
+  onUserSelectionChange?: () => void;
+  /** Issue #4484: tells a focus into the selected split from a pick of another. */
+  focusedSplitIndex?: number;
+  /** Issue #4484: true while the container moves focus itself (not a pick). */
+  programmaticFocusRef?: { current: boolean };
 };
 
 export function usePerSplitHandlers({
@@ -27,16 +38,38 @@ export function usePerSplitHandlers({
   toggleMaximize,
   showToast,
   onActiveInstanceChange,
+  onUserSelectionChange,
+  focusedSplitIndex,
+  programmaticFocusRef,
 }: UsePerSplitHandlersArgs) {
+  // Issue #4484: read through refs so the memoized handlers keep their identity.
+  const onUserSelectionChangeRef = useRef(onUserSelectionChange);
+  onUserSelectionChangeRef.current = onUserSelectionChange;
+  const focusedSplitIndexRef = useRef(focusedSplitIndex);
+  focusedSplitIndexRef.current = focusedSplitIndex;
+
   // Memoize per-split onFocus handlers so prop identity is stable.
   const focusHandlers = useMemo(
-    () => splits.map((_, idx) => () => setFocusedSplitIndex(idx)),
-    [splits, setFocusedSplitIndex],
+    () =>
+      splits.map((_, idx) => () => {
+        if (
+          focusedSplitIndexRef.current !== undefined &&
+          focusedSplitIndexRef.current !== idx &&
+          !programmaticFocusRef?.current
+        ) {
+          onUserSelectionChangeRef.current?.();
+        }
+        setFocusedSplitIndex(idx);
+      }),
+    [splits, setFocusedSplitIndex, programmaticFocusRef],
   );
 
   const instanceChangeHandlers = useMemo(
     () =>
-      splits.map((_, idx) => (instanceId: string) => setSplitInstance(idx, instanceId)),
+      splits.map((_, idx) => (instanceId: string) => {
+        onUserSelectionChangeRef.current?.();
+        return setSplitInstance(idx, instanceId);
+      }),
     [splits, setSplitInstance],
   );
 
@@ -65,6 +98,7 @@ export function usePerSplitHandlers({
   const dropHandlers = useMemo(
     () =>
       splits.map((_, idx) => (instanceId: string) => {
+        onUserSelectionChangeRef.current?.();
         const label = getInstanceLabel(
           instanceById.get(instanceId) ?? { cliTool: 'claude', alias: instanceId },
         );
