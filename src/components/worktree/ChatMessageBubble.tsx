@@ -606,8 +606,11 @@ export const CHAT_FILE_LINK_TESTID = 'chat-file-link';
  * twice, in two components, from a prop each would have to be handed.
  *
  * `rehypeSanitize` has already dropped the href of anything whose scheme is not
- * http / https / mailto (measured: `file:`, `tel:` and `javascript:` all arrive
- * with no href at all), so a hrefless link simply renders as text.
+ * http / https / mailto / file (measured: `tel:`, `javascript:` and `data:`
+ * all arrive with no href at all), so a hrefless link simply renders as text.
+ * [#4501] `file:` is on that list because Antigravity writes a file that way;
+ * the click is still intercepted — `file:` is never handed to the browser — and
+ * the surface's own handler decides what it means.
  */
 export const ChatFileLink = memo(function ChatFileLink({
   href,
@@ -749,24 +752,28 @@ const ChatUserBody = memo(function ChatUserBody({
 });
 
 /**
- * [#3120] `file://` image sources survive the pipeline; nothing else changes.
+ * [#3120] `file://` sources survive the pipeline as an image; [#4501] as a link.
  *
  * react-markdown's default URL transform and rehype-sanitize's default schema
  * both drop `file:`, which is one of the three shapes an agent writes an image
- * as. Only `src` is widened — a link's `href` keeps the defaults, which #2345's
- * renderer is documented against — and `ChatImage` still loads nothing that
- * does not resolve into this worktree.
+ * as and the only shape Antigravity writes a file link as. Both keys are
+ * widened; every other scheme keeps the defaults, which is what the renderer's
+ * negative controls pin. `ChatImage` still loads nothing that does not resolve
+ * into this worktree, and a `file:` link is intercepted rather than navigated.
  */
 const CHAT_FILE_SRC_REGEX = /^file:\/\//i;
 
 const chatUrlTransform: UrlTransform = (url, key) =>
-  key === 'src' && CHAT_FILE_SRC_REGEX.test(url) ? url : defaultUrlTransform(url);
+  (key === 'src' || key === 'href') && CHAT_FILE_SRC_REGEX.test(url)
+    ? url
+    : defaultUrlTransform(url);
 
 const CHAT_SANITIZE_SCHEMA = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
     src: [...(defaultSchema.protocols?.src ?? []), 'file'],
+    href: [...(defaultSchema.protocols?.href ?? []), 'file'],
   },
 };
 

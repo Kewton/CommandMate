@@ -402,6 +402,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
     rosterReady,
     instanceSelectionRequest,
     acknowledgeInstanceSelection,
+    cancelInstanceSelectionRequest,
     setActiveInstanceId,
     setFocusedSplitIndex,
     setHistorySubTab,
@@ -835,6 +836,7 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
           setActiveInstanceId={setActiveInstanceId}
           instanceSelectionRequest={instanceSelectionRequest}
           onInstanceSelectionHandled={acknowledgeInstanceSelection}
+          onInstanceSelectionCancel={cancelInstanceSelectionRequest}
           hasUpdate={hasUpdate}
           lastAutoResponse={lastAutoResponse}
           activeActivity={activeActivity}
@@ -1043,7 +1045,11 @@ export const WorktreeDetailRefactored = memo(function WorktreeDetailRefactored({
                   return (
                     <button
                       key={inst.id}
-                      onClick={() => setActiveInstanceId(inst.id)}
+                      onClick={() => {
+                        // Issue #4484: a tab picked by hand ends a waiting `?instance=`.
+                        cancelInstanceSelectionRequest();
+                        setActiveInstanceId(inst.id);
+                      }}
                       // Issue #1127: min-h-[44px] + touch-manipulation give these
                       // densely-packed instance tabs a ≥44px tap target (text stays
                       // text-xs; only the hit area grows) and kill the double-tap

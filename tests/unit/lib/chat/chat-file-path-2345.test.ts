@@ -173,3 +173,45 @@ describe('[#2345] normalizeChatFilePath opens nothing that is not a file', () =>
     expect(normalizeChatFilePath(href, WORKTREE)).toBeNull();
   });
 });
+
+/**
+ * [#4501] On macOS `/tmp` IS `/private/tmp` (a symlink), and a reply may name
+ * either spelling of the same directory. A worktree rooted at one spelling has
+ * to recognize the other as its own, or a file inside it is reported as being
+ * outside the worktree. Nothing else is resolved: this is not a symlink walk.
+ */
+describe('[#4501] normalizeChatFilePath reads both spellings of macOS /tmp as one root', () => {
+  it.each([
+    ['/tmp/wt', '/private/tmp/wt/docs/a.md'],
+    ['/private/tmp/wt', '/tmp/wt/docs/a.md'],
+    ['/tmp/wt/', '/private/tmp/wt/docs/a.md'],
+    ['/tmp/wt', '/private/tmp/wt/docs/a.md:12'],
+    ['/tmp/wt', '/private/tmp/wt/docs/a.md#L12'],
+  ])('treats %j under root %j as inside', (root, href) => {
+    expect(normalizeChatFilePath(href, root)).toBe('docs/a.md');
+  });
+
+  it('reads a `file://` destination in the other spelling as inside too', () => {
+    expect(normalizeChatFilePath('file:///private/tmp/wt/docs/a.md', '/tmp/wt')).toBe('docs/a.md');
+    expect(normalizeChatFilePath('file:///tmp/wt/docs/a.md', '/private/tmp/wt')).toBe('docs/a.md');
+  });
+
+  it('still opens nothing for the worktree root written in the other spelling', () => {
+    expect(normalizeChatFilePath('/private/tmp/wt', '/tmp/wt')).toBeNull();
+    expect(normalizeChatFilePath('/private/tmp/wt/', '/tmp/wt')).toBeNull();
+    expect(normalizeChatFilePath('/tmp/wt', '/private/tmp/wt')).toBeNull();
+  });
+
+  it.each([
+    // `/private/tmpfoo` is not inside `/private/tmp`.
+    ['/tmp/wt', '/private/tmpfoo/wt/a.md'],
+    // A sibling worktree under the same spelling is still a different root.
+    ['/tmp/wt', '/private/tmp/wt-2/a.md'],
+    // The collapse is for `/tmp` alone: another symlink-shaped pair is not
+    // resolved by this rule.
+    ['/var/wt', '/private/var/wt/a.md'],
+    ['/Users/x/wt', '/private/Users/x/wt/a.md'],
+  ])('leaves %j alone under root %j', (root, href) => {
+    expect(normalizeChatFilePath(href, root)).toBe(href);
+  });
+});

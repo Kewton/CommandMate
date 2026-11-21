@@ -58,7 +58,8 @@ import { buildCompositeKey } from '@/lib/auto-yes-state';
 import { checkSessionOwnership, foreignSessionErrorBody } from '@/lib/cli-tools/session-ownership';
 import type { RelaySendOutcome } from '@/lib/relay/relay-bind';
 import { evaluateRelayAfterSend } from '@/lib/relay/relay-delivery';
-import { withdrawRelay } from '@/lib/relay/relay-service';
+import { RELAY_TOOL_POLICY_WITHDRAW_UNCONFIRMED_MESSAGE, withdrawRelay } from '@/lib/relay/relay-service';
+import { RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE } from '@/lib/relay/relay-policy';
 import { resolveRespondAgent, validateSendRequest, type SendMessageRequest } from './send-request';
 import {
   findBoundRelayToolPolicyRefusal,
@@ -138,19 +139,33 @@ export async function POST(
       : { kind: 'failed', attempt: relay.attempt }
   );
   if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
-  if (relay.withdraw) withdrawRefusedRelay(binding.relayId);
-  return withBody(response, { relayId: binding.relayId, sendOutcome });
+  if (!relay.withdraw) return withBody(response, { relayId: binding.relayId, sendOutcome });
+  // Issue #4498: the answer says whether the withdrawal took (`relayWithdrawn`), and
+  // never claims "was withdrawn" for one that could not be confirmed.
+  const relayWithdrawn = withdrawRefusedRelay(binding.relayId);
+  return withBody(response, { relayId: binding.relayId, sendOutcome, relayWithdrawn }, (body) =>
+    !relayWithdrawn && body.error === RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE
+      ? { error: RELAY_TOOL_POLICY_WITHDRAW_UNCONFIRMED_MESSAGE }
+      : {}
+  );
 }
 
-/** Issue #4437: withdraw a bound relay the tool policy refused the send of. Never throws. */
-function withdrawRefusedRelay(relayId: string): void {
+/**
+ * Issue #4437: withdraw a bound relay the tool policy refused the send of. Never throws.
+ * Issue #4498: whether it is withdrawn now — this call cancelled it, or it already was
+ * cancelled; false for a write that failed, a relay being delivered, or one gone.
+ */
+function withdrawRefusedRelay(relayId: string): boolean {
   try {
-    withdrawRelay(getDbInstance(), relayId);
+    const result = withdrawRelay(getDbInstance(), relayId);
+    if (!result.ok) logger.warn('relay-tool-policy-withdraw-refused', { relayId, reason: result.reason });
+    return result.ok || result.relay?.state === 'cancelled';
   } catch (error) {
     logger.warn('relay-tool-policy-withdraw-failed', {
       relayId,
       error: error instanceof Error ? error.message : String(error),
     });
+    return false;
   }
 }
 
@@ -203,14 +218,18 @@ function unboundSendOutcome(attempt: SendAttemptState): RelaySendOutcome {
 }
 
 /** The route's answer with `extra` added to its JSON body, status kept. */
-async function withBody(response: Response, extra: Record<string, unknown>): Promise<NextResponse> {
+async function withBody(
+  response: Response,
+  extra: Record<string, unknown>,
+  revise?: (body: Record<string, unknown>) => Record<string, unknown>
+): Promise<NextResponse> {
   let body: Record<string, unknown> = {};
   try {
     body = (await response.json()) as Record<string, unknown>;
   } catch {
     // Every answer of this route is JSON; an unreadable one keeps its status.
   }
-  return NextResponse.json({ ...body, ...extra }, { status: response.status });
+  return NextResponse.json({ ...body, ...extra, ...(revise ? revise(body) : {}) }, { status: response.status });
 }
 
 async function handleSend(

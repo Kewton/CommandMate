@@ -5,7 +5,8 @@
  * SF-1: SRP - Process management only (PID handling delegated to PidManager)
  */
 
-import { spawn, type StdioOptions } from 'child_process';
+import { spawn, spawnSync, type StdioOptions } from 'child_process';
+import { randomBytes } from 'crypto';
 import {
   closeSync,
   constants as fsConstants,
@@ -13,12 +14,13 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeSync,
   type Stats,
 } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { config as dotenvConfig } from 'dotenv';
 import { DaemonStatus, StartOptions } from '../types';
 import { DaemonState, PidManager } from './pid-manager';
@@ -35,6 +37,18 @@ import {
   isZombieProcess,
   listProcessGroupStates,
 } from './process-inspect';
+import {
+  SERVER_MARK_BASE_ENV,
+  SERVER_MARK_DEFAULT_BASE,
+  SERVER_MARK_ENV,
+  SERVER_MARK_LSTART_ENV,
+  SERVER_MARK_SESSION_LOOKUP_FAILED,
+  SERVER_MARK_SESSION_NO_TMUX,
+  SERVER_MARK_VERSION,
+  normalizeLstart,
+  serverMarkDirName,
+  type ServerMarkRecord,
+} from '../types/server-mark';
 
 /** How long stop() waits for the server's process group after SIGTERM before escalating. */
 export const STOP_GRACE_TIMEOUT_MS = 10000;
@@ -228,6 +242,190 @@ export function openServerLog(logPath: string): number {
   return fd;
 }
 
+// =============================================================================
+// Launch mark (Issue #4433)
+// =============================================================================
+
+/**
+ * What marking a launch reads from the machine; injected so tests never run the
+ * real git, tmux or ps.
+ */
+export interface ServerMarkLauncherDeps {
+  /** Directory the record directory is created in. */
+  base(): string;
+  getuid(): number;
+  /** The CLI's own pid: the start of the parent chain that must reach the tmux pane. */
+  pid(): number;
+  /** The CLI's own cwd (the server runs in the package root, which says nothing about who launched it). */
+  cwd(): string;
+  /** The CLI's own environment, for TMUX / TMUX_PANE. */
+  env(): Readonly<Record<string, string | undefined>>;
+  /** Run a short command; `env` is added to this process's environment. Never throws. */
+  run(command: string, args: string[], env?: Readonly<Record<string, string>>): { status: number | null; stdout: string };
+  /** 32 hex digits. */
+  randomHex(): string;
+  now(): Date;
+}
+
+/** Bounded: a hung git or tmux must not hold `start` open. */
+const MARK_COMMAND_TIMEOUT_MS = 3000;
+
+const DEFAULT_SERVER_MARK_DEPS: ServerMarkLauncherDeps = {
+  base: () => process.env[SERVER_MARK_BASE_ENV] || SERVER_MARK_DEFAULT_BASE,
+  getuid: () => (typeof process.getuid === 'function' ? process.getuid() : -1),
+  pid: () => process.pid,
+  cwd: () => process.cwd(),
+  env: () => process.env,
+  run: (command, args, env) => {
+    try {
+      const result = spawnSync(command, args, {
+        encoding: 'utf8',
+        timeout: MARK_COMMAND_TIMEOUT_MS,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        ...(env ? { env: { ...process.env, ...env } } : {}),
+      });
+      return { status: result.status, stdout: typeof result.stdout === 'string' ? result.stdout : '' };
+    } catch {
+      return { status: null, stdout: '' };
+    }
+  },
+  randomHex: () => randomBytes(16).toString('hex'),
+  now: () => new Date(),
+};
+
+/** A mark decided before the spawn; the record is written once the child's pid is known. */
+export interface PreparedServerMark {
+  path: string;
+  launcherCwd: string;
+  worktreeRoot: string | null;
+  session: string;
+}
+
+function realpathOr(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
+}
+
+/** How many parents are followed from the launcher towards its pane's shell. */
+const PANE_ANCESTOR_LIMIT = 64;
+
+/**
+ * True when `panePid` is the launcher itself or one of its ancestors (`ps -o ppid=`,
+ * `LC_ALL=C`). TMUX / TMUX_PANE are only environment variables: a process outside
+ * tmux inherits them from whoever started it (a server started from a pane passes
+ * them to every child), so they name the launcher's session only when the
+ * launcher actually runs in that pane. Anything unreadable is false.
+ */
+function runsInPane(panePid: number, deps: ServerMarkLauncherDeps): boolean {
+  let current = deps.pid();
+  for (let step = 0; step <= PANE_ANCESTOR_LIMIT; step += 1) {
+    if (current === panePid) return true;
+    const result = deps.run('ps', ['-o', 'ppid=', '-p', String(current)], { LC_ALL: 'C' });
+    const parent = result.status === 0 ? result.stdout.trim() : '';
+    if (!/^[0-9]+$/.test(parent) || Number(parent) <= 1) return false;
+    current = Number(parent);
+  }
+  return false;
+}
+
+/**
+ * The launcher's tmux session name, or the reason there is none (recorded as
+ * text, never null). A name is recorded only when the pane TMUX_PANE names is the
+ * one the launcher runs in; an inherited pane is `lookup-failed` (#4433 review FO P2-1).
+ */
+function launcherSession(deps: ServerMarkLauncherDeps): string {
+  const env = deps.env();
+  if (!env.TMUX) return SERVER_MARK_SESSION_NO_TMUX;
+  const socket = env.TMUX.split(',')[0];
+  const pane = env.TMUX_PANE;
+  if (!socket || !pane) return SERVER_MARK_SESSION_LOOKUP_FAILED;
+  const result = deps.run('tmux', ['-S', socket, 'display-message', '-p', '-t', pane, '#{pane_pid} #S']);
+  const answer = result.status === 0 ? /^([0-9]+) (\S+)$/.exec(result.stdout.trim()) : null;
+  if (!answer || !runsInPane(Number(answer[1]), deps)) return SERVER_MARK_SESSION_LOOKUP_FAILED;
+  return answer[2];
+}
+
+/**
+ * Decide this launch's mark before the spawn (Issue #4433): make (or check) the
+ * private record directory and read where the launch comes from. Null — the
+ * server then starts unmarked — when the directory is not a directory of this
+ * user's with no access for anyone else, or anything else goes wrong. Never
+ * throws: a mark is never a reason not to start.
+ */
+export function prepareServerMark(deps: ServerMarkLauncherDeps): PreparedServerMark | null {
+  try {
+    const uid = deps.getuid();
+    if (uid < 0) return null;
+    const dir = join(deps.base(), serverMarkDirName(uid));
+    try {
+      mkdirSync(dir, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') return null;
+    }
+    const stat = lstatSync(dir);
+    if (!stat.isDirectory() || stat.uid !== uid || (stat.mode & 0o077) !== 0) return null;
+    const hex = deps.randomHex();
+    if (!/^[0-9a-f]{32}$/.test(hex)) return null;
+    const path = join(dir, `${hex}.json`);
+    if (/\s/.test(path)) return null;
+
+    const cwd = deps.cwd();
+    const top = deps.run('git', ['-C', cwd, 'rev-parse', '--show-toplevel']);
+    const topPath = top.status === 0 ? top.stdout.trim() : '';
+    return {
+      path,
+      launcherCwd: realpathOr(cwd),
+      worktreeRoot: topPath.startsWith('/') ? realpathOr(topPath) : null,
+      session: launcherSession(deps),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write the record of a launch whose detached child is `pid` (its own process
+ * group, so pgid = pid). The leader's start time is read the way the verifier
+ * reads it (`LC_ALL=C TZ=UTC0 ps -o lstart=`). Exclusive create, no symlink
+ * follow, mode 0600. False — the server then carries a mark nobody can verify,
+ * which is judged like no mark — when any of that fails. Never throws.
+ */
+export function writeServerMarkRecord(mark: PreparedServerMark, pid: number, deps: ServerMarkLauncherDeps): boolean {
+  try {
+    const lstart = deps.run('ps', ['-o', 'lstart=', '-p', String(pid)], SERVER_MARK_LSTART_ENV);
+    const leaderStartTime = lstart.status === 0 ? normalizeLstart(lstart.stdout) : '';
+    if (leaderStartTime === '') return false;
+    const record: ServerMarkRecord = {
+      v: SERVER_MARK_VERSION,
+      launcher: 'daemon',
+      pgid: pid,
+      leaderStartTime,
+      launcherCwd: mark.launcherCwd,
+      worktreeRoot: mark.worktreeRoot,
+      repoRoot: null,
+      session: mark.session,
+      launchedAt: deps.now().toISOString(),
+    };
+    const fd = openSync(
+      mark.path,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+      0o600
+    );
+    try {
+      fchmodSync(fd, 0o600);
+      writeSync(fd, `${JSON.stringify(record)}\n`);
+    } finally {
+      closeSync(fd);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Daemon manager for background server process
  */
@@ -237,6 +435,7 @@ export class DaemonManager {
   private envPath?: string;
   private effectiveEnv?: ServerEnv;
   private resolveServerLogPath?: () => string;
+  private serverMarkDeps: ServerMarkLauncherDeps;
 
   /**
    * @param pidFilePath - PID file for this server
@@ -245,12 +444,19 @@ export class DaemonManager {
    * @param resolveServerLogPath - Issue #3731: where start() appends the server's
    *   stdout/stderr (see getServerLogPath()). Resolved at start(), so a config directory that
    *   cannot be resolved only costs the log. Omit to discard the output as before.
+   * @param serverMarkDeps - Issue #4433: overrides for marking the launch (tests)
    */
-  constructor(pidFilePath: string, envPath?: string, resolveServerLogPath?: () => string) {
+  constructor(
+    pidFilePath: string,
+    envPath?: string,
+    resolveServerLogPath?: () => string,
+    serverMarkDeps: Partial<ServerMarkLauncherDeps> = {}
+  ) {
     this.pidManager = new PidManager(pidFilePath);
     this.logger = new CLILogger();
     this.envPath = envPath;
     this.resolveServerLogPath = resolveServerLogPath;
+    this.serverMarkDeps = { ...DEFAULT_SERVER_MARK_DEPS, ...serverMarkDeps };
   }
 
   /**
@@ -286,6 +492,13 @@ export class DaemonManager {
 
     await this.assertPortFree(bindAddress, port);
 
+    // Issue #4433: mark this launch so env-clean can tell whose server it is. A
+    // mark inherited from whoever ran this CLI never reaches the child: it names
+    // another launch's process group and would only make this server judged.
+    delete env[SERVER_MARK_ENV];
+    const mark = prepareServerMark(this.serverMarkDeps);
+    if (mark) env[SERVER_MARK_ENV] = mark.path;
+
     // Log startup with accurate settings (Stage 4 review: MF-2)
     this.logger.info(`Starting server at ${protocol}://${bindAddress}:${port}`);
 
@@ -316,6 +529,10 @@ export class DaemonManager {
     const pid = child.pid!;
 
     this.recordState(pid, env, bindAddress, port, protocol);
+
+    if (mark && !writeServerMarkRecord(mark, pid, this.serverMarkDeps)) {
+      this.logger.warn('Could not write the launch mark record; env-clean will judge this server as unmarked.');
+    }
 
     return pid;
   }

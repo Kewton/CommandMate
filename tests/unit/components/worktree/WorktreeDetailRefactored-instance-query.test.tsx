@@ -98,18 +98,44 @@ vi.mock('@/components/error/ErrorBoundary', () => ({
 }));
 
 // The only stand-in: what the split container was handed, as attributes.
+// Issue #4484: `?instance=` now reaches the container as a `url` placement
+// request (the header "+" path) rather than as a header pick, and the
+// container acknowledges it once applied — the probe reads either prop and
+// can report the request applied (`probe-ack`).
 vi.mock('@/components/worktree/TerminalSplitContainer', () => ({
   TerminalSplitContainer: ({
     headerInstanceSelection,
+    instancePlacementRequest,
+    onInstancePlacementApplied,
   }: {
     headerInstanceSelection?: { instanceId: string; token: number } | null;
-  }) => (
-    <div
-      data-testid="split-container-probe"
-      data-instance={headerInstanceSelection?.instanceId ?? ''}
-      data-token={headerInstanceSelection?.token ?? 0}
-    />
-  ),
+    instancePlacementRequest?: { instanceId: string; token: number; source: 'add' | 'url' } | null;
+    onInstancePlacementApplied?: (token: number, source: 'add' | 'url', outcome: 'applied', selected?: string) => void;
+  }) => {
+    const handed = instancePlacementRequest?.source === 'url' ? instancePlacementRequest : headerInstanceSelection;
+    return (
+      <div
+        data-testid="split-container-probe"
+        data-instance={handed?.instanceId ?? ''}
+        data-token={handed?.token ?? 0}
+      >
+        <button
+          type="button"
+          data-testid="probe-ack"
+          onClick={() => {
+            if (instancePlacementRequest) {
+              onInstancePlacementApplied?.(
+                instancePlacementRequest.token,
+                instancePlacementRequest.source,
+                'applied',
+                instancePlacementRequest.instanceId,
+              );
+            }
+          }}
+        />
+      </div>
+    );
+  },
 }));
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';
@@ -199,6 +225,18 @@ describe('[#2656] WorktreeDetailRefactored routes ?instance= into the split', ()
 
     // The replace has landed: the query is gone.
     nav.search = new URLSearchParams();
+
+    // Issue #4484: handing it over is not applying it — the request stays
+    // until the container reports it applied (a rebuild before that hands it
+    // over again; see instance-query-4484.test.tsx #3). Then it is gone.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByTestId('split-container-probe')).toHaveAttribute('data-instance', 'codex');
+    await act(async () => {
+      screen.getByTestId('probe-ack').click();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('split-container-probe')).toHaveAttribute('data-instance', ''),
+    );
 
     // Narrow to the phone (the PC layout unmounts), then widen again.
     await act(async () => {

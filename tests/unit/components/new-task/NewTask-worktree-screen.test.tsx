@@ -122,15 +122,23 @@ vi.mock('@/components/error/ErrorBoundary', () => ({
 vi.mock('@/components/worktree/TerminalSplitContainer', () => ({
   TerminalSplitContainer: ({
     headerInstanceSelection,
+    instancePlacementRequest,
   }: {
     headerInstanceSelection?: { instanceId: string; token: number } | null;
-  }) => (
-    <div
-      data-testid="split-container-probe"
-      data-instance={headerInstanceSelection?.instanceId ?? ''}
-      data-token={headerInstanceSelection?.token ?? 0}
-    />
-  ),
+    instancePlacementRequest?: { instanceId: string; token: number; source: string } | null;
+  }) => {
+    // #4484: `?instance=` reaches the container as a `source: 'url'` placement
+    // request; a header pick still comes as `headerInstanceSelection`.
+    const selection =
+      instancePlacementRequest?.source === 'url' ? instancePlacementRequest : headerInstanceSelection;
+    return (
+      <div
+        data-testid="split-container-probe"
+        data-instance={selection?.instanceId ?? ''}
+        data-token={selection?.token ?? 0}
+      />
+    );
+  },
 }));
 
 import { WorktreeDetailRefactored } from '@/components/worktree/WorktreeDetailRefactored';

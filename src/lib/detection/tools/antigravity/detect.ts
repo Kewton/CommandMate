@@ -29,6 +29,12 @@ import { ANTIGRAVITY_LIVE_REGION } from './live-region';
 import { createToolStatusDetector } from '../run-detection';
 import { ANTIGRAVITY_VERIFIED_AGAINST } from '../verified-against';
 import { detectAntigravityNumberedDialogPrompt, isAntigravityUnvouchedNumberedScreen } from './dialog';
+import {
+  ANTIGRAVITY_CANCEL_FOOTER_PATTERN,
+  ANTIGRAVITY_READY_FOOTER_PATTERN,
+  isAntigravityGeneratingAt,
+  readAntigravityInputBoxStatusRow,
+} from './patterns';
 import type { ToolStatusVerdict } from '../types';
 
 /** agy build these rules were read off (Issue #988 / #995 / #2364; value in ../verified-against, #1929). */
@@ -218,26 +224,53 @@ export const antigravityStatusDetector = createToolStatusDetector({
   },
 
   afterThinking(frame): ToolStatusVerdict | null {
-    // 2.8. Antigravity (agy) footer-based detection (Issue #988)
+    // 2.8. Antigravity (agy) footer-based detection (Issue #988; positional
+    // reading by Issue #4504).
+    //
     // agy renders inline (scrollback retained), with the status bar as the last
     // non-empty line and a bare "> " input box always visible just above it — even
     // while generating. So the always-visible "> " would make the generic composer
-    // check report ready during generation. The footer is the source of
-    // truth: "esc to cancel" + braille spinner / "Generating..." while running,
-    // "? for shortcuts" when idle. Resolve running explicitly here first, then idle.
+    // check report ready during generation. The row under the box is the source
+    // of truth, read by POSITION in this order:
+    //
+    //  1. `? for shortcuts` → ready, before this hook's positional markers. agy's
+    //     own thought body can say "Generating the specified file"; matching that
+    //     word in the 15-row window pinned an idle pane as `running` (Issue #4504).
+    //  2. `esc to cancel` → generating.
+    //  3. neither (agy 1.2.1 after a tool turn, #2478) → generating only when the
+    //     tail carries a row-leading braille spinner or `Generating...`/`Generating…`;
+    //     a bare `Generating` in a heading is not a turn in flight.
+    //
+    // The shared priority 2 (`detectThinking` over the last 5 rows) runs BEFORE
+    // this hook and is not part of this order: a bare `Generating`, mid-row
+    // braille or `Generating..` inside those 5 rows still answers `running`. The
+    // send gate applies the same 5-row test in its no-footer branch, so it never
+    // opens on a frame this detector leaves `running` (review of #4504, P2-1).
+    //
+    // A frame without a readable input box keeps the pre-#4504 reading below.
+    const statusRow = readAntigravityInputBoxStatusRow(frame.contentLines);
+    if (statusRow !== null) {
+      if (ANTIGRAVITY_READY_FOOTER_PATTERN.test(statusRow)) {
+        return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
+      }
+      if (ANTIGRAVITY_CANCEL_FOOTER_PATTERN.test(statusRow) || isAntigravityGeneratingAt(frame.lastLines)) {
+        return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
+      }
+      // Idle: the box is live and neither footer nor a generating marker says
+      // otherwise.
+      //
+      // Issue #2592: the bare box includes the permission-mode banner agy paints
+      // into an EMPTY box while accept-edits / plan is on (`> Plan mode:
+      // research & plan only (shift+tab to cycle)`) — the shared reader accepts
+      // it through `ANTIGRAVITY_PROMPT_PATTERN`. Without that, a resting pane in
+      // either mode reached the `default` floor as `running` + unclassified, and
+      // the mode button (which refuses unclassified frames) could switch INTO
+      // accept-edits once and never back out.
+      return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);
+    }
     if (detectThinking('antigravity', frame.lastLines)) {
       return positiveVerdict('running', STATUS_REASON.THINKING_INDICATOR);
     }
-    // Idle: bare "> " input prompt visible and the response has completed.
-    //
-    // Issue #2592: "bare" includes the permission-mode banner agy paints into
-    // an EMPTY box while accept-edits / plan is on (`> Plan mode: research &
-    // plan only (shift+tab to cycle)`) — `promptPattern` accepts it, see
-    // ANTIGRAVITY_COMPOSER_MODE_BANNER_PATTERN. Without that, a resting pane in
-    // either mode reached the `default` floor as `running` + unclassified, and
-    // the mode button (which refuses unclassified frames) could switch INTO
-    // accept-edits once and never back out. The thinking check above still runs
-    // first, so a generating pane in those modes is still `running`.
     const { promptPattern } = getCliToolPatterns('antigravity');
     if (promptPattern.test(frame.lastLines)) {
       return positiveVerdict('ready', STATUS_REASON.INPUT_PROMPT);

@@ -601,7 +601,7 @@ Phase 0 の bash 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.
 
 | probe id | 取得方法 | 違反の意味 |
 |---|---|---|
-| `listeners` | `lsof -nP -iTCP -sTCP:LISTEN -F pcn` を `ps -A -o pid=,command=` と突き合わせ、コマンドラインが CommandMate のもの（`COMMANDMATE_PROCESS_PATTERN`）だけを残す。key は `tcp/<port>`、anchor は `lsof -a -d cwd` で引いた cwd | ポートが消えた＝サーバを落とした／増えた＝サーバを残した |
+| `listeners` | `lsof -nP -iTCP -sTCP:LISTEN -F pcn` を `ps -A -o pid=,command=` と突き合わせ、コマンドラインが CommandMate のもの（`COMMANDMATE_PROCESS_PATTERN`）だけを残す。key は `tcp/<port>`、anchor は `lsof -a -d cwd` で引いた cwd。Issue #4433 から、各 pid の起動の印（`marks[]`。下の「`listeners` の起動の印」）も別の呼び出しで読む（読めなければ印は `absent`〈環境が読めない・環境に `CM_SERVER_MARK` が無い・pgid が読めない〉か `invalid`〈環境にパスがあって記録が無い＝`record-unreadable`、書きかけの JSON＝`record-malformed` など〉になるだけで、一覧・key・detail は変わらない） | ポートが消えた＝サーバを落とした／増えた＝サーバを残した |
 | `tmux-sessions` | `tmux list-sessions -F '#{session_name}'` のうち `mcbd-` 始まり | 他ワーカーのセッションを殺した（#1624）／自分のセッションを残した（**タスク自身のエージェントセッション 1 本は除く**。下の「タスク自身のエージェントセッション」、Issue #2472） |
 | `home-entries` | `$HOME` 直下の `readdir` | HOME を汚した |
 | `commandmate-entries` | `~/.commandmate` 直下の `readdir` | 設定・状態ディレクトリを汚した |
@@ -646,11 +646,27 @@ probe は `ok` / `unavailable` のどちらかを必ず名乗り、`unavailable`
 | probe | 判定 |
 |---|---|
 | `tmux-sessions` | 名前 `mcbd-<cli>-<worktreeId>[-suffix]` を分解し、自 worktree なら `self`、別 worktree なら `other`、解釈できなければ `unattributed`。worktree id はハイフンを含みうるので曖昧なケースは `self` に倒す（厳しい側）。`<worktreeId>-…` の形は、自 id より長いハイフン区切りの接頭辞に**別の worktree だという証拠**があるときだけ `other`（Issue #4192、下の「`<id>-…` の帰属の証拠」）。ただし**追加のうちタスク自身のエージェントセッションと完全一致する 1 本**は、帰属より先に除外する（Issue #2472） |
-| `listeners` | プロセスの cwd が自 worktree 配下なら `self`、**自 worktree の兄弟ディレクトリ**なら `other`（linked worktree は横並びに作られ、ユーザの本番サーバが動くプライマリ checkout もそこに居る）、それ以外・cwd 不明は `unattributed` |
+| `listeners` | **起動の印だけで判定する（Issue #4433）。** どれかの pid の cwd、または検証済みの記録の起動元（cwd・git の root・記録にあれば repo root）が自 worktree 配下、または記録の tmux セッションが自 worktree のものなら `self`。そのポートの**全 pid** が検証済みの印を持ち、セッションが別 worktree の CommandMate のもので、起動元と cwd がすべて realpath で自 worktree の外（祖先でもない）なら `other`。それ以外（印なし・検証できない・`no-tmux`・`lookup-failed`・git の root なし・#4433 より前の基準）は `unattributed`。兄弟ディレクトリ・祖先・名前・ポートの一致では免除しない |
 | `home-entries` / `commandmate-entries` | ファイルに所有者は無いので常に `unattributed` |
 
 `unattributed` は「たぶん誰のものでもない」ではなく「他人のものだと**示せなかった**」であり、
 追加は違反として扱う。免除には他所有者の積極的な証拠が要る。
+
+#### `listeners` の起動の印（Issue #4433）
+
+以前は「cwd が兄弟ディレクトリなら `other`」だった。`commandmate start --daemon` は detached で cwd が
+package root（開発用ではメインの checkout＝兄弟）なので、ワーカーが残したデーモンが免除されていた。
+祖先の鎖から推す案も Sprint 7 のレビューで P1×4 になったため、推測をやめ、起動した側が残す証拠だけを使う。
+
+| 項目 | 内容 |
+|---|---|
+| 印 | サーバーの環境の `CM_SERVER_MARK=<記録の絶対パス>`。付けるのは `DaemonManager.start`（`src/cli/utils/daemon.ts`。`commandmate start --daemon`）だけ。形は `src/cli/types/server-mark.ts`。審判の UAT サーバー（`scripts/uat/run-server.sh`）は印なしで、今までどおり違反として docs/orchestrate/exit-codes.md 3-4 の手の裁定で扱う（印は Sprint 10 で run の所有権〈run ID・token〉から設計する） |
+| 記録 | `/tmp/commandmate-server-marks-<uid>/<32 桁の hex>.json`（dir は自 uid で group/other の権限なし＝作るときは 0700・file 0600・4 KiB 以下）。`pgid`（detached で作った group＝leader の pid）、`leaderStartTime`（`LC_ALL=C TZ=UTC0 ps -o lstart=`）、`launcherCwd`・`worktreeRoot`（起動した CLI の cwd と git の root）、`repoRoot`（daemon は null。形としては受けるが今の書き手は無い）、`session`（起動元の tmux セッション名・`no-tmux`・`lookup-failed`。名前を書くのは、`TMUX_PANE` のペインのプロセスが起動した側（CLI）の祖先のときだけ。継いだだけの `TMUX_PANE` は `lookup-failed`） |
+| 検証（スナップショットの時） | 環境から印を読む（linux は `/proc/<pid>/environ`、macOS は `ps -E` の出力からコマンドラインを除いた残り。2 回あれば invalid）→ 記録のパスと dir（自 uid・group/other の権限なし・名前）→ 記録の形 → `ps -o pid=,pgid=` の pgid が記録と一致 → leader の lstart が記録と一致。どれかが外れたら `absent` / `invalid`（理由は固定の語。報告の行に `mark=<理由>`） |
+| 継承 | `server.ts` は起動の最初に `CM_SERVER_MARK` を自分の環境から消す（子は継がない。`ps -E`・`/proc` は起動時の値を出すので照合はできる）。daemon は親から継いだ印を子に渡さない |
+| 消えたもの（`-`） | 印は持ち主を示すだけで、誰が止めたかは示さない。基準で別 worktree のものと検証された listener が消えても違反のまま（#1739 の型を通さないため）。報告の行の `mark=verified` を見て override を判断する |
+| 残る穴 | 同じ uid の故意の偽造（TMUX を外して別 worktree に cd して起動する、記録を手で書いて pgid・lstart を合わせる）は防げない。ゲートは作業の副作用を捕まえるもので、故意は対象外。読む側は記録の dir の名前・uid・権限を見るが、置き場所（親が `/tmp` か）は見ない（`CM_SERVER_MARK_BASE` で動かしても照合の強さは pgid と lstart のまま） |
+| 厳しくなったもの | 印の無いサーバー（人が別 worktree で手で立てたもの、foreground の `start`、`npm run dev`）は、兄弟の worktree でも違反になる。override の運用で扱う |
 
 #### `<id>-…` の帰属の証拠（Issue #4192）
 
