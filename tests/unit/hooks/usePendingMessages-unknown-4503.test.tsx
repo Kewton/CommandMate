@@ -114,6 +114,10 @@ describe('[#4503] isSendOutcomeUnknown: what the route answered', () => {
     ['409 not_sent', conflict409()],
     ['409 role refusal', roleRefused()],
     ['offline (never sent)', offline()],
+    // Review 1 P2-1: a 5xx whose code says the server refused before any key (the session start).
+    ['503 SESSION_STARTING with no sendOutcome', new ApiError('starting', 503, { error: 'starting', code: 'SESSION_STARTING' })],
+    ['503 SESSION_START_FAILED with no sendOutcome', new ApiError('exited', 503, { error: 'exited', code: 'SESSION_START_FAILED' })],
+    ['503 SESSION_START_UNAVAILABLE with no sendOutcome', new ApiError('missing', 503, { error: 'missing', code: 'SESSION_START_UNAVAILABLE' })],
     ['not an ApiError', new TypeError('Failed to fetch')],
     ['null', null],
   ])('%s → not unknown', (_name, error) => {
@@ -203,6 +207,25 @@ describe('[#4503] U1・U2: an unknown outcome is not a failure, and is never res
     expect(result.current.pending).toHaveLength(0);
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].optimisticState).toBeUndefined();
+  });
+
+  it('review 1 P3-6: a later send of the same text takes the echo before an older unknown row', async () => {
+    const sendFn = vi.fn().mockRejectedValueOnce(unknown500()).mockResolvedValue({ success: true });
+    const { result, rerender } = renderPending(sendFn, {}, { timeoutMs: 60_000 });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('unknown');
+    // The person types the same text again (a new send, not a resend of the row).
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    const [older, newer] = result.current.pending.map((p) => p.tempId);
+    rerender({ serverMessages: [serverUserMessage('hello', 's1', Date.now() + 1000)], connectivity: ONLINE, timeoutMs: 60_000 });
+    await flush();
+    // One echo: the new send's. The unknown row stays unknown (it never resends itself).
+    expect(result.current.pending.map((p) => p.tempId)).toEqual([older]);
+    expect(result.current.pending.some((p) => p.tempId === newer)).toBe(false);
+    expect(result.current.pending[0].status).toBe('unknown');
+    expect(sendFn).toHaveBeenCalledTimes(2);
   });
 
   it.each([

@@ -231,3 +231,97 @@ describe.each([
     await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
   });
 });
+
+describe('[#4503 U-0 / review P2-5] the mark lives as long as the draft', () => {
+  const base = () => createDefaultProps({ cliToolId: 'antigravity', isSessionRunning: true });
+
+  async function typeAndWaitForSave(text: string) {
+    typeMessage(text);
+    // The draft's debounced save (500 ms) — what a reload brings back.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+  }
+
+  async function expectEnterAsks(calls: number) {
+    pressEnter();
+    await settle();
+    expect(screen.getByTestId('message-input-resend-confirm')).toBeInTheDocument();
+    expect(sendMessageMock).toHaveBeenCalledTimes(calls);
+  }
+
+  it('a remount (a reload) brings the draft back with its mark: Enter asks', async () => {
+    sendMessageMock.mockRejectedValueOnce(unknown500()).mockResolvedValue({ id: 's2', role: 'user', content: 'x', timestamp: new Date() });
+    const first = render(<MessageInput {...base()} />);
+    await typeAndWaitForSave('hello agent');
+    await submitAndSettle();
+    await waitFor(() => expect(screen.getByTestId('message-input-send-unknown')).toBeInTheDocument());
+    first.unmount();
+
+    render(<MessageInput {...base()} />);
+    await settle();
+    expect(getTextarea().value).toBe('hello agent');
+    expect(screen.getByTestId('message-input-send-unknown')).toHaveTextContent(JA.status);
+    await expectEnterAsks(1);
+    await submitAndSettle();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a switch of the target and back (one draft for the split): Enter asks again', async () => {
+    sendMessageMock.mockRejectedValueOnce(unknown500()).mockResolvedValue({ id: 's2', role: 'user', content: 'x', timestamp: new Date() });
+    const view = render(<MessageInput {...base()} instanceId="antigravity" />);
+    await typeAndWaitForSave('hello agent');
+    await submitAndSettle();
+    await waitFor(() => expect(screen.getByTestId('message-input-send-unknown')).toBeInTheDocument());
+
+    view.rerender(<MessageInput {...base()} instanceId="antigravity-2" />);
+    await settle();
+    // The same draft, another target: not that send (no notice there).
+    expect(screen.queryByTestId('message-input-send-unknown')).toBeNull();
+    view.rerender(<MessageInput {...base()} instanceId="antigravity" />);
+    await settle();
+    expect(getTextarea().value).toBe('hello agent');
+    expect(screen.getByTestId('message-input-send-unknown')).toBeInTheDocument();
+    await expectEnterAsks(1);
+  });
+
+  it("the tile's per-instance draft: switching away and back brings the draft and its question back", async () => {
+    sendMessageMock.mockRejectedValueOnce(unknown500()).mockResolvedValue({ id: 's2', role: 'user', content: 'x', timestamp: new Date() });
+    const view = render(<MessageInput {...base()} draftScope="instance" instanceId="antigravity" />);
+    await typeAndWaitForSave('hello agent');
+    await submitAndSettle();
+    await waitFor(() => expect(screen.getByTestId('message-input-send-unknown')).toBeInTheDocument());
+
+    view.rerender(<MessageInput {...base()} draftScope="instance" instanceId="antigravity-2" />);
+    await settle();
+    expect(getTextarea().value).toBe('');
+    expect(screen.queryByTestId('message-input-send-unknown')).toBeNull();
+    view.rerender(<MessageInput {...base()} draftScope="instance" instanceId="antigravity" />);
+    await settle();
+    expect(getTextarea().value).toBe('hello agent');
+    await expectEnterAsks(1);
+  });
+
+  it('(negative control) a draft sent successfully leaves no mark behind', async () => {
+    sendMessageMock.mockRejectedValueOnce(unknown500()).mockResolvedValue({ id: 's2', role: 'user', content: 'x', timestamp: new Date() });
+    const first = render(<MessageInput {...base()} />);
+    await typeAndWaitForSave('hello agent');
+    await submitAndSettle();
+    await waitFor(() => expect(screen.getByTestId('message-input-send-unknown')).toBeInTheDocument());
+    pressEnter();
+    await settle();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('message-input-resend-confirm-yes'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getTextarea().value).toBe(''));
+    first.unmount();
+
+    render(<MessageInput {...base()} />);
+    await typeAndWaitForSave('hello agent');
+    await submitAndSettle();
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(3));
+    expect(screen.queryByTestId('message-input-resend-confirm')).toBeNull();
+  });
+});

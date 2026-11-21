@@ -78,6 +78,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, OptimisticSendState, RetryPendingOptions, SendRoleRefusalReason } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import {
+  SESSION_STARTING_CODE,
+  SESSION_START_FAILED_CODE,
+  SESSION_START_UNAVAILABLE_CODE,
+} from '@/lib/session/session-start-error';
 
 /** Default: mark an unconfirmed 'sending' message as errored after this long. */
 export const DEFAULT_PENDING_TIMEOUT_MS = 30_000;
@@ -97,6 +102,13 @@ export const DEFAULT_PENDING_TIMEOUT_MS = 30_000;
  */
 export const DEFAULT_RESEND_GRACE_MS = 250;
 
+/** Issue #4503: the codes of a 5xx the server answers before any key is typed (the session start). */
+const SEND_REFUSED_BEFORE_INPUT_CODES: ReadonlySet<string> = new Set([
+  SESSION_STARTING_CODE,
+  SESSION_START_FAILED_CODE,
+  SESSION_START_UNAVAILABLE_CODE,
+]);
+
 /**
  * Issue #4503: whether a send's rejection leaves its outcome unknown — the screen must not offer a
  * direct retry, because the text may already be in the agent's session (`POST /send` has no dedupe
@@ -110,6 +122,9 @@ export const DEFAULT_RESEND_GRACE_MS = 250;
  * - a bare 500 (no `sendOutcome`) stays a failure, as before: #4385 / #4345 pin it as "a plain
  *   failure, shown as before" (`role-refusal-send-4385`, `SessionTile-role-refusal-4385`,
  *   `page-gate-callers-4345`). Whether it should be unknown too is the PM's call (#4503 report).
+ * - a 5xx whose `code` says the server refused before any key (`SEND_REFUSED_BEFORE_INPUT_CODES`:
+ *   the session start's 503s) → not unknown, as before. The route also adds `sendOutcome:
+ *   'not_sent'` to these (`recordNotSent` / the sender's `settle`); the code covers an answer without it.
  * - a 4xx, `kind: 'offline'` (refused before it was sent), anything that is not an `ApiError` → not unknown
  */
 export function isSendOutcomeUnknown(error: unknown): boolean {
@@ -122,6 +137,8 @@ export function isSendOutcomeUnknown(error: unknown): boolean {
   // `sent` on a failed answer still means the text was typed: never a direct retry.
   if (outcome === 'unknown' || outcome === 'sent') return true;
   if (kind === 'network' || kind === 'timeout' || kind === 'aborted') return true;
+  const code = data !== null && typeof data === 'object' ? (data as { code?: unknown }).code : undefined;
+  if (typeof code === 'string' && SEND_REFUSED_BEFORE_INPUT_CODES.has(code)) return false;
   return kind === 'http' && status > 500 && status < 600;
 }
 
@@ -341,8 +358,14 @@ function computeReconciliation(
     .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   const consumed = new Set<string>();
 
+  // Issue #4503 (review P3-6): the rows still on their way take an echo first, the unknown ones
+  // after. A later send of the same text must not lose its echo to an older unknown row — it would
+  // then run out its clock with no echo, while the unknown row (which may never have arrived)
+  // vanished as if delivered. An unknown row left over stays unknown: safe, it never resends itself.
   const ordered = [...sending].sort(
-    (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+    (a, b) =>
+      Number(a.status === 'unknown') - Number(b.status === 'unknown') ||
+      a.timestamp.getTime() - b.timestamp.getTime(),
   );
   for (const p of ordered) {
     const match = serverUser.find(

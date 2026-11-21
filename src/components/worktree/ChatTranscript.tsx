@@ -153,7 +153,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui';
-import type { ChatMessage } from '@/types/models';
+import type { ChatMessage, RetryPendingOptions } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { useHighlightReapplyTick, useHistorySearch } from '@/hooks/useHistorySearch';
@@ -457,10 +457,15 @@ export interface ChatTranscriptProps {
   onFilePathClick?: (path: string) => void;
   showToast?: ShowToast;
   onInsertToMessage?: (content: string) => void;
-  /** Issue #1121: re-send an optimistic message whose send failed. */
-  onRetryPending?: (tempId: string) => void;
+  /**
+   * Issue #1121: re-send an optimistic message whose send failed. Issue #4503: `{ confirmedResend:
+   * true }` for an unknown send the person confirmed sending again.
+   */
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   /** Issue #1121: discard an optimistic message whose send failed. */
   onDiscardPending?: (tempId: string) => void;
+  /** Issue #4503: show the terminal, to check whether a send whose outcome is unknown arrived. */
+  onCheckTerminal?: () => void;
   /**
    * Issue #744's per-split highlight isolation, applied to chat's own namespace.
    * Omit on the phone / a single mount.
@@ -759,6 +764,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
+  onCheckTerminal,
   splitIndex,
   liveTurn = null,
   sessionEnded = false,
@@ -1512,6 +1518,7 @@ export const ChatTranscript = memo(function ChatTranscript({
           onInsertToMessage={onInsertToMessage}
           onRetryPending={onRetryPending}
           onDiscardPending={onDiscardPending}
+          onCheckTerminal={onCheckTerminal}
         />
       );
       // [#2284] A nested provider, so the override is scoped to the one row and
@@ -1533,6 +1540,7 @@ export const ChatTranscript = memo(function ChatTranscript({
       onInsertToMessage,
       onRetryPending,
       onDiscardPending,
+      onCheckTerminal,
       searchHitMessageIds,
       isPreviousSessionOpen,
       previousSessionRegionId,

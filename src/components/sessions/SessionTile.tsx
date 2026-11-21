@@ -701,6 +701,9 @@ function SessionTileCard({
     [setSurfaceMode],
   );
 
+  // Issue #4503: a send whose outcome is unknown is checked on the tile's terminal.
+  const showTerminalSurface = useCallback(() => setSurfaceMode('terminal'), [setSurfaceMode]);
+
   const chatHistory = useMemo(
     () => ({
       isLoading,
@@ -930,6 +933,7 @@ function SessionTileCard({
                   onInsertToMessage={insertIntoShownComposer}
                   onRetryPending={retryPending}
                   onDiscardPending={handleDiscardPending}
+                  onCheckTerminal={showTerminalSurface}
                   className="h-full"
                 />
               </div>

@@ -17,6 +17,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ChatMessageBubble } from '@/components/worktree/ChatMessageBubble';
 import { ChatTranscript } from '@/components/worktree/ChatTranscript';
+import { ConversationPairCard } from '@/components/worktree/ConversationPairCard';
 import { usePendingMessages, isSendOutcomeUnknown, type SendFn } from '@/hooks/usePendingMessages';
 import { ApiError } from '@/lib/api-client';
 import type { ChatMessage } from '@/types/models';
@@ -154,5 +155,67 @@ describe('[#4503] from the parent: the optimistic hook feeding ChatTranscript', 
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(sendFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('[#4503 review 1 P2-3・P2-4] ［ターミナルを確かめる］ where the terminal can be shown', () => {
+  it('the bubble offers it only when the screen passes a way to the terminal', () => {
+    const onCheckTerminal = vi.fn();
+    const { unmount } = render(
+      <ChatMessageBubble
+        message={pendingRow({ optimisticState: 'unknown' })}
+        showHeader={false}
+        onFilePathClick={() => undefined}
+        onCheckTerminal={onCheckTerminal}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('chat-pending-check-terminal'));
+    expect(onCheckTerminal).toHaveBeenCalledTimes(1);
+    unmount();
+    renderBubble(pendingRow({ optimisticState: 'unknown' }));
+    expect(screen.queryByTestId('chat-pending-check-terminal')).toBeNull();
+    expect(screen.getByTestId('chat-optimistic-unknown-guidance')).toHaveTextContent(JA.guidance);
+  });
+
+  it('the history card (ConversationPairCard) shows the mark, the guidance, the button, and a confirmed 「送り直す」', () => {
+    const onCheckTerminal = vi.fn();
+    const onRetryPending = vi.fn();
+    const onDiscardPending = vi.fn();
+    const message = pendingRow({ optimisticState: 'unknown' });
+    render(
+      <ConversationPairCard
+        pair={{ id: message.id, userMessage: message, assistantMessages: [], status: 'pending' }}
+        onFilePathClick={() => undefined}
+        onRetryPending={onRetryPending}
+        onDiscardPending={onDiscardPending}
+        onCheckTerminal={onCheckTerminal}
+      />,
+    );
+    expect(screen.getByTestId('optimistic-unknown')).toHaveTextContent(JA.status);
+    expect(screen.getByTestId('optimistic-unknown-guidance')).toHaveTextContent(JA.guidance);
+    expect(screen.queryByTestId('pending-retry')).toBeNull();
+    fireEvent.click(screen.getByTestId('pending-check-terminal'));
+    expect(onCheckTerminal).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId('pending-resend'));
+    expect(onRetryPending).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('pending-resend-confirm-yes'));
+    expect(onRetryPending).toHaveBeenCalledWith('pending-0', { confirmedResend: true });
+    fireEvent.click(screen.getByTestId('pending-discard'));
+    expect(onDiscardPending).toHaveBeenCalledWith('pending-0');
+  });
+
+  it('(positive control) the history card still offers ［再試行］ for a failed send', () => {
+    const onRetryPending = vi.fn();
+    const message = pendingRow({ optimisticState: 'error' });
+    render(
+      <ConversationPairCard
+        pair={{ id: message.id, userMessage: message, assistantMessages: [], status: 'pending' }}
+        onFilePathClick={() => undefined}
+        onRetryPending={onRetryPending}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('pending-retry'));
+    expect(onRetryPending).toHaveBeenCalledWith('pending-0');
+    expect(screen.queryByTestId('optimistic-unknown')).toBeNull();
   });
 });
