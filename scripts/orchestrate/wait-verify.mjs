@@ -477,11 +477,25 @@ export function tryLogFile(logFile, attempt) {
 }
 
 /**
+ * The return line #4532 asks for — one definition for every reader in this
+ * repository (#4532 review): wait-verify's completion signal and launch-worker's
+ * shape-outside report. Its sha is 7-40 hex, the same as `IMPL_COMPLETED
+ * head=<sha>`; a 1-character token is not a DONE anywhere.
+ */
+export const DONE_LINE_RE = /^[\s]*DONE:[ \t]+#[0-9]+[ \t]+([0-9a-f]{7,40})[ \t]+verify[ \t]+exit[ \t]+[0-9]+[ \t]*$/;
+
+/**
  * Whether a pane (or a reply) shows the completion signal on a line of its own
  * (3-3: the goal text also contains the word). A signal that names its HEAD
  * (`IMPL_COMPLETED head=<sha>`) counts only for that HEAD when `head` is given
  * (#3883); the bare line the goal asks for counts as before, unless
  * `requireHead` (a pane read with a task known: only a line naming its HEAD).
+ *
+ * Since #4532 the goal asks for a return line instead — `DONE: #<N> <sha>
+ * verify exit <n>` — and `IMPL_COMPLETED` is a shape-outside ending. The reader
+ * is not removed (a task sent before #4532 is still waiting on it): a `DONE:`
+ * line counts by the same rule, its `<sha>` being the HEAD it names, and a line
+ * that names another HEAD is not this one's.
  *
  * @param {string} pane
  * @param {{ head?: string, requireHead?: boolean }} [options]
@@ -491,10 +505,16 @@ export function hasCompletionSignal(pane, { head, requireHead = false } = {}) {
     .replace(/\u001b\[[0-9;]*m/g, '')
     .split('\n')
     .some((line) => {
-      const match = /^[\s]*IMPL_COMPLETED(?:[\s]+head=([0-9a-f]{7,40}))?[\s]*$/.exec(line);
-      if (!match) return false;
-      if (!match[1]) return !requireHead;
-      return !head || head.startsWith(match[1]);
+      const legacy = /^[\s]*IMPL_COMPLETED(?:[\s]+head=([0-9a-f]{7,40}))?[\s]*$/.exec(line);
+      if (legacy) {
+        if (!legacy[1]) return !requireHead;
+        return !head || head.startsWith(legacy[1]);
+      }
+      // `DONE: #<N> <sha> verify exit <n>` — the return line #4532 asks for. Its
+      // sha names the HEAD, as `IMPL_COMPLETED head=<sha>` does.
+      const done = DONE_LINE_RE.exec(line);
+      if (!done) return false;
+      return !head || head.startsWith(done[1]);
     });
 }
 
@@ -753,7 +773,7 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
     const newer = supersededBy?.();
     if (newer) return { seen: false, reason: newer };
     if (found) return found;
-    if (now().getTime() >= deadline) return { seen: false, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s` };
+    if (now().getTime() >= deadline) return { seen: false, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s; no DONE:/WAIT:/STOP: return line either` };
     sleep(SIGNAL_POLL_SEC * 1000);
   }
 }

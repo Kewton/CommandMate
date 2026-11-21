@@ -96,6 +96,7 @@ function runLoop({ fixtures, polls, args = [], env = {}, id = 'w1' }: RunOptions
     cmShim,
     [
       '#!/bin/sh',
+      'case " $* " in *" capture "*" --pane "*) exit 0 ;; esac',
       `printf '%s\\n' "$*" >> "${captureLog}"`,
       `n=$(cat "${counter}" 2>/dev/null || echo 0)`,
       'n=$((n + 1))',

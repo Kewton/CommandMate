@@ -78,6 +78,7 @@ function runLoop(opts: {
     cmShim,
     [
       '#!/bin/sh',
+      'case " $* " in *" capture "*" --pane "*) exit 0 ;; esac',
       'case "$1" in',
       '  capture)',
       `    printf '%s\\n' "$*" >> "${captureLog}"`,

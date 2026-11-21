@@ -111,6 +111,7 @@ function runLoop({
     path.join(dir, 'fake-cm'),
     [
       '#!/bin/sh',
+      'case " $* " in *" capture "*" --pane "*) exit 0 ;; esac',
       `printf '%s\\n' "$*" >> "${captureLog}"`,
       `n=$(cat "${counter}" 2>/dev/null || echo 0)`,
       'n=$((n + 1))',
