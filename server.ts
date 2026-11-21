@@ -4,6 +4,8 @@
  * Issue #331: HTTPS support and auth cleanup on shutdown
  */
 
+// Issue #4433: the launch mark identifies this process only (env-clean reads it from ps / /proc); children must not inherit it.
+delete process.env.CM_SERVER_MARK;
 // IMPORTANT: Register uncaught exception handler FIRST, before any imports
 // This ensures we catch WebSocket frame errors before other handlers
 process.on('uncaughtException', (error: Error & { code?: string }) => {
