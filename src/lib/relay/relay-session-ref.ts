@@ -7,9 +7,10 @@
  * the attribution header) is therefore resolved at the moment it is needed, from
  * the roster, with the id as the fallback for every field.
  *
- * Never throws. A relay whose roster cannot be read still delivers, attributed
- * to the instance id — which is worse to read and strictly better than not
- * delivering.
+ * Never throws. {@link resolveRelaySession} is the display reading: a roster
+ * that cannot be read still gives an alias (the instance id) and a tool (claude).
+ * A delivery uses {@link tryResolveRelaySession} instead, which answers null
+ * there, and holds rather than type into a guessed tool (Issue #4498).
  *
  * @module lib/relay/relay-session-ref
  */
@@ -82,6 +83,42 @@ export function resolveRelaySession(
     cliToolId,
     alias,
   };
+}
+
+/**
+ * {@link resolveRelaySession} for a delivery (Issue #4498): the same resolution, or
+ * null when the roster cannot be read — never the display fallback.
+ *
+ * `resolveRelaySession` answers claude when the read fails, which is right for an
+ * alias in a system line and wrong for the session a reply is typed into: the
+ * guessed tool would decide both rule 0 and the send, and a claude pane under the
+ * same instance id would take a reply owed to codex. A delivery that gets null
+ * holds the payload and tries again on the next pump.
+ */
+export function tryResolveRelaySession(
+  db: Database.Database,
+  endpoint: RelayEndpoint
+): ResolvedRelaySession | null {
+  try {
+    const { cliToolId } = resolveSessionTarget(db, endpoint.worktreeId, {
+      instanceId: endpoint.instanceId,
+    });
+    const rosterRow = getAgentInstance(db, endpoint.worktreeId, endpoint.instanceId);
+    return {
+      worktreeId: endpoint.worktreeId,
+      instanceId: endpoint.instanceId,
+      cliToolId,
+      alias: rosterRow?.alias ? rosterRow.alias : endpoint.instanceId,
+    };
+  } catch (error) {
+    logger.warn('relay-session-resolve-failed', {
+      worktreeId: endpoint.worktreeId,
+      instanceId: endpoint.instanceId,
+      strict: true,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 /**
