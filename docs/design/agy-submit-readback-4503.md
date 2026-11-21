@@ -2,7 +2,7 @@
 
 > **状態: Sprint 10 へ持ち越し（#4535 で送信器全体として決め直す）。** PR-B2（画面の unknown）は Sprint 9 で別に入る。この設計の §2 の入力枠の読み方（R1〜R6）と実フレームは資産、読み戻しの判定（提出の帰属）は未解決。
 >
-> レビュー（いずれも workspace の中にあり git に入らない）: `review-4503-claude5.md`（第 1 版）・`review-4503-codex.md`（第 1 版）・`review-4503-v2-claude5.md`（第 2 版）・`review-4503-v3-codex.md`（第 3 版）。
+> レビュー（いずれも workspace の中にあり git に入らない）: `review-4503-claude5.md`（第 1 版）・`review-4503-codex.md`（第 1 版）・`review-4503-v2-claude5.md`（第 2 版）・`review-4503-v3-codex.md`（第 3 版）・`review-4503-v3-claude5.md`（第 3 版、P1 1・P2 5・P3 7。P1: 入力枠の包みの意味が未定で、文のとおりだと文字入りの枠 6 枚でゲート・状態が ready になり typed-spoof も閉じない。P2: submitted-0s でゲートが開き遅れた前の試行の echo・esc を証拠と読む／echo を 12 行の窓で数えると偽の増加／paste 経路に規則なし／赤・緑の分類の誤り（N-4・N-6 は今も緑、P-2 は赤）／規則 1 の Enter の再送の前に証拠 (i) を見ない。D11 は採らない＋記録の条件。処分は Sprint 10）。
 > - v3 の codex P1-2: 位置が正しい echo・フッターでも、今回の提出に帰属できない。先頭一致では ` and no other words` を足した別の文も一致し、前回の `esc to cancel` も成功の根拠になる。これが未解決の中心
 > - v3 の codex P2-1: ロックの中で readiness を必須にしないと、空欄でも生成中の画面に打てる
 > - v3 の codex P1-1: 空欄が `pending`、案内文が無関係な文字になり、提出済みの画面を見失う（判定の順の問題）
