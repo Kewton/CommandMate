@@ -125,6 +125,7 @@ import {
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import {
   usePendingMessages,
+  isSendOutcomeUnknown,
   type OptimisticSendOptions,
   type PendingConnectivity,
 } from '@/hooks/usePendingMessages';
@@ -587,6 +588,10 @@ function SessionTileCard({
     connectivity,
     readRoleRefusal,
     onRoleRefused: roleRefusalNotice.onRoleRefused,
+    // Issue #4503: the worktree screen's wiring (`useOptimisticPaneMessages`) — an unknown outcome
+    // is not a failure, and a clock that runs out in flight waits for the answer.
+    isOutcomeUnknown: isSendOutcomeUnknown,
+    holdInFlightOnTimeout: true,
   });
   const messages = useMemo(
     () => messagesForTileInstance(mergedMessages, resolvedInstanceId),

@@ -57,6 +57,17 @@
     "assistant": "Assistant",
     "sending": "Sending…",
     "failedToSend": "Failed to send",
+    "sendUnknown": {
+      "status": "Not sure whether this arrived",
+      "guidance": "Part or all of it may have arrived. Check the terminal, then send it again only if needed",
+      "awaiting": "Waiting for the answer… (it may already have arrived)",
+      "checkTerminal": "Check the terminal",
+      "resend": "Send again",
+      "resendAria": "Send the same text again after checking",
+      "resendConfirm": "If the earlier send arrived, the same text will be sent twice. Checked the terminal and still send it again?",
+      "resendConfirmYes": "Send again",
+      "resendConfirmNo": "Cancel"
+    },
     "roleRefusal": {
       "notApplied": "The role is not applied to this session, so nothing was sent. Stop the session and start it again.",
       "notConfirmed": "The role could not be confirmed for this session, so nothing was sent. Stop the session and start it again.",

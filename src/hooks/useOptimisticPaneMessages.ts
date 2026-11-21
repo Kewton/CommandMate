@@ -1,9 +1,11 @@
 import { useCallback, useMemo } from 'react';
 import {
   usePendingMessages,
+  isSendOutcomeUnknown,
   type OptimisticSendOptions,
   type UsePendingMessagesResult,
 } from '@/hooks/usePendingMessages';
+
 import {
   useConnectivity,
   isServerConfirmedReachable,
@@ -93,6 +95,10 @@ export function useOptimisticPaneMessages({
     onNotSent,
     readRoleRefusal,
     onRoleRefused,
+    // Issue #4503: an unknown outcome is not a failure (no direct retry, no automatic resend), and
+    // a clock that runs out while the request is in flight waits for the answer.
+    isOutcomeUnknown: isSendOutcomeUnknown,
+    holdInFlightOnTimeout: true,
   });
 }
 

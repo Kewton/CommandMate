@@ -51,10 +51,11 @@
  * tokens that are unreadable on a light ground. Nothing else here may be dark.
  */
 
-import React, { memo, useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import {
   AlertCircle,
+  CircleHelp,
   ArrowDownToLine,
   Brain,
   ChevronDown,
@@ -72,7 +73,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform 
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import { rehypeSearchRawText, searchRawProps, type RawOffsetMapper } from '@/lib/terminal-highlight';
-import type { ChatMessage } from '@/types/models';
+import type { ChatMessage, RetryPendingOptions } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { formatChatTurnTime } from '@/lib/date-utils';
@@ -1009,10 +1010,18 @@ export interface ChatMessageBubbleProps {
   onCopy?: (content: string) => void;
   /** Issue #485: put a user message back into the composer. */
   onInsertToMessage?: (content: string) => void;
-  /** Issue #1121: re-send an optimistic message whose send failed. */
-  onRetryPending?: (tempId: string) => void;
+  /**
+   * Issue #1121: re-send an optimistic message whose send failed. Issue #4503: for a send whose
+   * outcome is unknown it is called only after the person confirmed, with `{ confirmedResend: true }`.
+   */
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   /** Issue #1121: drop an optimistic message whose send failed. */
   onDiscardPending?: (tempId: string) => void;
+  /**
+   * Issue #4503: show the terminal, so the person can check whether a send whose outcome is
+   * unknown arrived. Absent: the guidance says to check it, with no button.
+   */
+  onCheckTerminal?: () => void;
 }
 
 export const ChatMessageBubble = memo(function ChatMessageBubble({
@@ -1024,9 +1033,12 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
+  onCheckTerminal,
 }: ChatMessageBubbleProps) {
   const t = useTranslations('worktree');
   const tCommon = useTranslations('common');
+  // Issue #4503: 「送り直す」 of an unknown send asks once before it sends.
+  const [confirmingResend, setConfirmingResend] = useState(false);
 
   const isUser = message.role === 'user';
   const sendState = message.optimisticState;
@@ -1204,13 +1216,33 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           .filter(Boolean)
           .join(' ')}
       >
-        {sendState === 'sending' && (
+        {sendState === 'sending' && !message.optimisticAwaitingResponse && (
           <span
             data-testid="chat-optimistic-sending"
             className="flex items-center gap-1 text-xs text-muted-foreground"
           >
             <Loader2 size={12} className="animate-spin" aria-hidden="true" />
             <span>{t('conversation.sending')}</span>
+          </span>
+        )}
+        {/* Issue #4503: the clock ran out while the request is still on its way — waiting for
+            the answer, not failed; nothing to press until it comes. */}
+        {sendState === 'sending' && message.optimisticAwaitingResponse && (
+          <span
+            data-testid="chat-optimistic-awaiting"
+            className="flex items-center gap-1 text-xs text-muted-foreground"
+          >
+            <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+            <span>{t('conversation.sendUnknown.awaiting')}</span>
+          </span>
+        )}
+        {sendState === 'unknown' && (
+          <span
+            data-testid="chat-optimistic-unknown"
+            className="flex items-center gap-1 text-xs text-warning-foreground"
+          >
+            <CircleHelp size={12} aria-hidden="true" />
+            <span>{t('conversation.sendUnknown.status')}</span>
           </span>
         )}
         {sendState === 'error' && (
@@ -1223,7 +1255,48 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           </span>
         )}
 
-        {sendState === 'error' ? (
+        {sendState === 'unknown' ? (
+          // Issue #4503: no ［再試行］ — the text may already be in the session. Check the terminal;
+          // 「送り直す」 is a new send, and only after the confirmation below.
+          <>
+            {onCheckTerminal && (
+              <button
+                type="button"
+                data-testid="chat-pending-check-terminal"
+                onClick={onCheckTerminal}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent-700 transition-colors hover:bg-muted dark:text-accent-400"
+              >
+                <TerminalSquare size={12} aria-hidden="true" />
+                {t('conversation.sendUnknown.checkTerminal')}
+              </button>
+            )}
+            {onRetryPending && !confirmingResend && (
+              <button
+                type="button"
+                data-testid="chat-pending-resend"
+                onClick={() => setConfirmingResend(true)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label={t('conversation.sendUnknown.resendAria')}
+              >
+                <RotateCcw size={12} aria-hidden="true" />
+                {t('conversation.sendUnknown.resend')}
+              </button>
+            )}
+            {onDiscardPending && (
+              <button
+                type="button"
+                data-testid="chat-pending-discard"
+                onClick={() => onDiscardPending(message.id)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-danger-foreground"
+                aria-label={t('conversation.discardMessage')}
+                title={t('conversation.discard')}
+              >
+                <X size={12} aria-hidden="true" />
+                {t('conversation.discard')}
+              </button>
+            )}
+          </>
+        ) : sendState === 'sending' && message.optimisticAwaitingResponse ? null : sendState === 'error' ? (
           <>
             {onRetryPending && (
               <button
@@ -1297,6 +1370,46 @@ export const ChatMessageBubble = memo(function ChatMessageBubble({
           </>
         )}
       </div>
+      {/* Issue #4503: what an unknown outcome means, and the confirmation before a resend. */}
+      {sendState === 'unknown' && (
+        <p
+          data-testid="chat-optimistic-unknown-guidance"
+          role="status"
+          className={['px-1 text-xs text-muted-foreground', isUser ? 'text-right' : ''].filter(Boolean).join(' ')}
+        >
+          {t('conversation.sendUnknown.guidance')}
+        </p>
+      )}
+      {sendState === 'unknown' && confirmingResend && onRetryPending && (
+        <div
+          data-testid="chat-pending-resend-confirm"
+          role="alert"
+          className={['flex flex-wrap items-center gap-1 px-1 text-xs text-foreground', isUser ? 'justify-end text-right' : '']
+            .filter(Boolean)
+            .join(' ')}
+        >
+          <span>{t('conversation.sendUnknown.resendConfirm')}</span>
+          <button
+            type="button"
+            data-testid="chat-pending-resend-confirm-yes"
+            onClick={() => {
+              setConfirmingResend(false);
+              onRetryPending(message.id, { confirmedResend: true });
+            }}
+            className="rounded px-1.5 py-0.5 text-xs font-medium text-accent-700 transition-colors hover:bg-muted dark:text-accent-400"
+          >
+            {t('conversation.sendUnknown.resendConfirmYes')}
+          </button>
+          <button
+            type="button"
+            data-testid="chat-pending-resend-confirm-no"
+            onClick={() => setConfirmingResend(false)}
+            className="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {t('conversation.sendUnknown.resendConfirmNo')}
+          </button>
+        </div>
+      )}
       {/* Issue #4385: why the server refused it because of the role (nothing was sent), and what to do. */}
       {sendState === 'error' && message.optimisticRoleRefusal && (
         <p

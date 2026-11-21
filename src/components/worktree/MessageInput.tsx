@@ -31,6 +31,7 @@ import { ComposerMetaRow } from './message-input/ComposerMetaRow';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useImageAttachment } from '@/hooks/useImageAttachment';
+import { isSendOutcomeUnknown } from '@/hooks/usePendingMessages';
 import { useComposerHeight } from '@/hooks/useComposerHeight';
 import {
   COMPOSER_AUTO_MAX_HEIGHT_PX,
@@ -438,9 +439,22 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       sendAttemptRef.current += 1;
     };
   }, []);
+  // Issue #4503: an awaited send (the plain one without an optimistic history, or the brief choice)
+  // whose outcome is unknown — the draft it sent (text, image). The draft stays (if it really did not
+  // arrive, the text is not lost); the next send of that same draft asks first. Editing it makes it
+  // another send. `confirmed`: the person said to send it again.
+  const unknownSendRef = useRef<{ text: string; imagePath: string | null; confirmed: boolean } | null>(null);
+  const [sendUnknownNotice, setSendUnknownNotice] = useState<'notice' | 'confirm' | null>(null);
+  const clearSendUnknown = useCallback(() => {
+    unknownSendRef.current = null;
+    setSendUnknownNotice(null);
+  }, []);
   useEffect(() => {
     previewKeyRef.current = previewKey;
     return () => {
+      // Issue #4503: another target's draft is another send.
+      unknownSendRef.current = null;
+      setSendUnknownNotice(null);
       // The target changes (or the composer goes): a send waiting on the old target's preview is void.
       sendAttemptRef.current += 1;
       briefCheckingRef.current = false;
@@ -461,6 +475,32 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   useEffect(() => {
     attachedImagePathRef.current = attachedImage?.path ?? null;
   }, [attachedImage]);
+  // Issue #4503: the draft no longer is the one whose send is unknown — another send, no question.
+  useEffect(() => {
+    const mark = unknownSendRef.current;
+    if (mark && (message.trim() !== mark.text || (attachedImage?.path ?? null) !== mark.imagePath)) clearSendUnknown();
+  }, [message, attachedImage, clearSendUnknown]);
+  /**
+   * Issue #4503: whether this send of `text` (with `imagePath`) must wait for the person's
+   * confirmation — the same draft whose earlier send's outcome is unknown. Asks (the confirmation
+   * row) and returns true; once confirmed, lets this one send through.
+   */
+  const holdsUnconfirmedResend = useCallback((text: string, imagePath: string | null): boolean => {
+    const mark = unknownSendRef.current;
+    if (!mark) return false;
+    if (mark.confirmed || mark.text !== text || mark.imagePath !== imagePath) {
+      unknownSendRef.current = null;
+      setSendUnknownNotice(null);
+      return false;
+    }
+    setSendUnknownNotice('confirm');
+    return true;
+  }, []);
+  const markSendUnknown = useCallback((text: string, imagePath: string | null) => {
+    unknownSendRef.current = { text, imagePath, confirmed: false };
+    setError(null);
+    setSendUnknownNotice('notice');
+  }, []);
   useEffect(() => {
     planReviewActiveRef.current = !!planReviewActive;
   }, [planReviewActive]);
@@ -658,6 +698,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setPlanReviewStopped(true);
       return;
     }
+    // Issue #4503: the same draft as a send whose outcome is unknown — ask before anything is sent
+    // (Enter and the button both come through here; the brief choice is reached only from here).
+    if (holdsUnconfirmedResend(message.trim(), attachedImage?.path ?? null)) return;
     // Issue #4345 1c 再指示 1: a send of a worktree page starts only while the page's registration
     // (fixed now) may start — not once a 401 was taken (the registry's expiry). Nothing is sent and
     // the draft stays; checked again after the preview's await below. Outside a page: as before.
@@ -770,11 +813,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // Issue #4345 1c 再指示 2 (K1): not sent (the page's gate refused it) — nothing happened: no
       // error, the draft stays.
       if (isHandoffPageOperationRefused(err)) return;
+      // Issue #4503: nobody knows whether it arrived — the draft stays, the composer says so, and
+      // its next send asks first (never an error that invites a plain Enter).
+      if (isSendOutcomeUnknown(err)) {
+        markSendUnknown(trimmed, attachedImage?.path ?? null);
+        return;
+      }
       setError(describeSendError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, markSendUnknown]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -790,6 +839,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (!operation.mayStart()) return;
     const trimmed = message.trim();
     if (!trimmed && !attachedImage) {
+      setBriefAsk(null);
+      return;
+    }
+    // Issue #4503: see the plain send (the question first; nothing is sent).
+    if (holdsUnconfirmedResend(trimmed, attachedImage?.path ?? null)) {
       setBriefAsk(null);
       return;
     }
@@ -840,6 +894,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           setBriefAsk(null);
           setError(notice);
         }
+      } else if (isSendOutcomeUnknown(err)) {
+        // Issue #4503: the boundary's choice is made — the dialog closes as for any failure; the
+        // draft stays and its next send (Enter, the button, the choice) asks first.
+        setBriefAsk(null);
+        markSendUnknown(trimmed, attachedImage?.path ?? null);
       } else {
         setBriefAsk(null);
         setError(describeSendError(err));
@@ -848,7 +907,18 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, markSendUnknown]);
+
+  /** Issue #4503: the person confirmed sending the same draft again — a new send. */
+  const confirmResend = useCallback(() => {
+    const mark = unknownSendRef.current;
+    if (mark) unknownSendRef.current = { ...mark, confirmed: true };
+    setSendUnknownNotice(null);
+    void submitMessage();
+  }, [submitMessage]);
+  const cancelResend = useCallback(() => {
+    setSendUnknownNotice((current) => (current === 'confirm' ? 'notice' : current));
+  }, []);
 
   const closeBriefAsk = useCallback(() => {
     if (briefSending) return;
@@ -1074,6 +1144,39 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       {(error || imageError) && (
         <div className="p-2 bg-danger-subtle border border-danger-border rounded text-sm text-danger-foreground">
           {error || imageError}
+        </div>
+      )}
+
+      {/* Issue #4503: an awaited send whose outcome is unknown — check before sending again. */}
+      {sendUnknownNotice !== null && (
+        <div
+          data-testid="message-input-send-unknown"
+          role="status"
+          className="rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs leading-5 text-foreground"
+        >
+          <span className="font-medium">{t('conversation.sendUnknown.status')}</span>{' '}
+          {t('conversation.sendUnknown.guidance')}
+          {sendUnknownNotice === 'confirm' && (
+            <div data-testid="message-input-resend-confirm" role="alert" className="mt-1 flex flex-wrap items-center gap-2">
+              <span>{t('conversation.sendUnknown.resendConfirm')}</span>
+              <button
+                type="button"
+                data-testid="message-input-resend-confirm-yes"
+                onClick={confirmResend}
+                className="inline rounded-sm font-medium text-warning-foreground underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+              >
+                {t('conversation.sendUnknown.resendConfirmYes')}
+              </button>
+              <button
+                type="button"
+                data-testid="message-input-resend-confirm-no"
+                onClick={cancelResend}
+                className="inline rounded-sm text-muted-foreground underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+              >
+                {t('conversation.sendUnknown.resendConfirmNo')}
+              </button>
+            </div>
+          )}
         </div>
       )}
 

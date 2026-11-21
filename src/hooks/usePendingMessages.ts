@@ -58,12 +58,22 @@
  * from the queue as well as from the verdict, because the render in which the
  * connection is visibly down is not guaranteed to be committed — see the two
  * effects under "Issue #2503: connectivity".
+ *
+ * ## Unknown outcomes (Issue #4503)
+ *
+ * Given `isOutcomeUnknown` (the production surfaces pass {@link isSendOutcomeUnknown}), a rejection
+ * that does not say "not sent" — `sendOutcome: 'unknown'`, a 5xx without `sendOutcome`, a request
+ * that never completed — lands on `unknown`, not `error`: it is never parked for the offline
+ * recovery and `retry()` sends it only with `{ confirmedResend: true }`. With
+ * `holdInFlightOnTimeout` the clock running out while the request is still in flight leaves the
+ * row waiting for the answer (`awaitingResponse`) instead of failing it. Omitted, both behave as
+ * before #4503.
  */
 
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChatMessage, OptimisticSendState, SendRoleRefusalReason } from '@/types/models';
+import type { ChatMessage, OptimisticSendState, RetryPendingOptions, SendRoleRefusalReason } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
 /** Default: mark an unconfirmed 'sending' message as errored after this long. */
@@ -83,6 +93,34 @@ export const DEFAULT_PENDING_TIMEOUT_MS = 30_000;
  * has actually landed.
  */
 export const DEFAULT_RESEND_GRACE_MS = 250;
+
+/**
+ * Issue #4503: whether a send's rejection leaves its outcome unknown — the screen must not offer a
+ * direct retry, because the text may already be in the agent's session (`POST /send` has no dedupe
+ * key). Read from the shape `fetchApi` gives its errors (`ApiError`: `kind`, `status`, `data`) —
+ * duck-typed, so a test that replaces `@/lib/api-client` does not take this down with it.
+ *
+ * - `data.sendOutcome === 'unknown'` (the route's answer, `route.ts` `unboundSendOutcome`) → unknown
+ * - `data.sendOutcome === 'not_sent'` → not unknown (nothing was typed: retrying is safe)
+ * - `kind` `network` / `timeout` / `aborted` (the request may have reached the server) → unknown
+ * - an HTTP 5xx other than 500 without `sendOutcome` (a proxy's or tunnel's 502 / 504) → unknown
+ * - a bare 500 (no `sendOutcome`) stays a failure, as before: #4385 / #4345 pin it as "a plain
+ *   failure, shown as before" (`role-refusal-send-4385`, `SessionTile-role-refusal-4385`,
+ *   `page-gate-callers-4345`). Whether it should be unknown too is the PM's call (#4503 report).
+ * - a 4xx, `kind: 'offline'` (refused before it was sent), anything that is not an `ApiError` → not unknown
+ */
+export function isSendOutcomeUnknown(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  const { kind, status, data } = error as { kind?: unknown; status?: unknown; data?: unknown };
+  if (typeof kind !== 'string' || typeof status !== 'number') return false;
+  const outcome =
+    data !== null && typeof data === 'object' ? (data as { sendOutcome?: unknown }).sendOutcome : undefined;
+  if (outcome === 'not_sent') return false;
+  // `sent` on a failed answer still means the text was typed: never a direct retry.
+  if (outcome === 'unknown' || outcome === 'sent') return true;
+  if (kind === 'network' || kind === 'timeout' || kind === 'aborted') return true;
+  return kind === 'http' && status > 500 && status < 600;
+}
 
 export interface OptimisticSendOptions {
   cliToolId: CLIToolType;
@@ -143,6 +181,11 @@ export interface PendingMessage {
    * `discard()` does not hand it back a second time.
    */
   returnedToComposer?: boolean;
+  /**
+   * Issue #4503: the clock ran out while this attempt's request is still in flight (with
+   * `holdInFlightOnTimeout`). Paired with `status: 'sending'`: the row waits for the answer.
+   */
+  awaitingResponse?: boolean;
 }
 
 /**
@@ -216,6 +259,18 @@ export interface UsePendingMessagesOptions {
    * composer (then `discard()` does not hand it back again).
    */
   onRoleRefused?: (content: string, reason: SendRoleRefusalReason, info: { firstAttempt: boolean }) => boolean;
+  /**
+   * Issue #4503: whether a rejection leaves the send's outcome unknown (pass
+   * {@link isSendOutcomeUnknown}). Such a row lands on `unknown`: never parked, never resent on its
+   * own, and `retry()` sends it only when confirmed. Omitted: every such rejection is a failure.
+   */
+  isOutcomeUnknown?: (error: unknown) => boolean;
+  /**
+   * Issue #4503: when the clock runs out while the row's latest attempt is still in flight, the
+   * row waits for the answer (`awaitingResponse`) instead of failing; the answer then decides.
+   * Omitted: the clock fails the row as before.
+   */
+  holdInFlightOnTimeout?: boolean;
 }
 
 export interface UsePendingMessagesResult {
@@ -223,7 +278,12 @@ export interface UsePendingMessagesResult {
   messages: ChatMessage[];
   pending: PendingMessage[];
   sendOptimistic: (content: string, options: OptimisticSendOptions) => void;
-  retry: (tempId: string) => void;
+  /**
+   * Re-sends a pending row. Issue #4503: an `unknown` row is sent again only with
+   * `{ confirmedResend: true }` (the person confirmed it); a row waiting for its in-flight answer
+   * is not sent again at all.
+   */
+  retry: (tempId: string, options?: RetryPendingOptions) => void;
   /**
    * Removes the pending and returns its content (for draft restore) — undefined when the text was
    * already handed back to the composer by `onRoleRefused` (Issue #4385).
@@ -264,7 +324,8 @@ function computeReconciliation(
 ): ReconcileResult {
   const reconciledTempIds = new Set<string>();
   const consumedServerIds = new Set<string>();
-  const sending = pending.filter((p) => p.status === 'sending');
+  // Issue #4503: an `unknown` row's echo proves it was delivered after all.
+  const sending = pending.filter((p) => p.status === 'sending' || p.status === 'unknown');
   if (sending.length === 0) return { reconciledTempIds, consumedServerIds };
 
   const serverUser = serverMessages
@@ -314,6 +375,7 @@ function toChatMessage(p: PendingMessage, worktreeId: string): ChatMessage {
     // show them for 'error' only). Nothing resends it on its own; retry is the person's.
     optimisticState: p.heldNotSent ? 'error' : p.status,
     ...(p.status === 'error' && p.roleRefusal ? { optimisticRoleRefusal: p.roleRefusal } : {}),
+    ...(p.status === 'sending' && p.awaitingResponse && !p.heldNotSent ? { optimisticAwaitingResponse: true } : {}),
   };
 }
 
@@ -329,6 +391,8 @@ export function usePendingMessages({
   onNotSent,
   readRoleRefusal,
   onRoleRefused,
+  isOutcomeUnknown,
+  holdInFlightOnTimeout = false,
 }: UsePendingMessagesOptions): UsePendingMessagesResult {
   const [pending, setPending] = useState<PendingMessage[]>([]);
 
@@ -355,6 +419,10 @@ export function usePendingMessages({
   readRoleRefusalRef.current = readRoleRefusal;
   const onRoleRefusedRef = useRef(onRoleRefused);
   onRoleRefusedRef.current = onRoleRefused;
+  const isOutcomeUnknownRef = useRef(isOutcomeUnknown);
+  isOutcomeUnknownRef.current = isOutcomeUnknown;
+  const holdInFlightOnTimeoutRef = useRef(holdInFlightOnTimeout);
+  holdInFlightOnTimeoutRef.current = holdInFlightOnTimeout;
 
   const offlineRef = useRef(offline);
   offlineRef.current = offline;
@@ -418,11 +486,46 @@ export function usePendingMessages({
     [clearTimer],
   );
 
+  /**
+   * Issue #4503: the attempt `p` answered "nobody knows whether it was sent". The row (its latest
+   * attempt — the caller checked) lands on `unknown`: never parked for the offline recovery, which
+   * resends only what never left, and never offered a direct retry. A row the clock already failed
+   * (pre-#4503 wiring) takes it too, so its retry goes away.
+   */
+  const settleUnknown = useCallback(
+    (tempId: string) => {
+      clearTimer(tempId);
+      setPending((prev) =>
+        prev.map((p) =>
+          p.tempId === tempId && (p.status === 'sending' || p.status === 'error')
+            ? { ...p, status: 'unknown', queued: false, awaitingResponse: false, heldNotSent: false }
+            : p,
+        ),
+      );
+    },
+    [clearTimer],
+  );
+
   const startTimer = useCallback(
     (tempId: string) => {
       clearTimer(tempId);
       const timer = setTimeout(() => {
         timersRef.current.delete(tempId);
+        // Issue #4503: the clock says nothing about a request still on its way (the send itself
+        // may run far longer, `getSendTimeoutMs()`): the row waits for the answer instead.
+        if (holdInFlightOnTimeoutRef.current) {
+          const latest = attemptsRef.current.get(tempId);
+          if (latest && inFlightRef.current.get(tempId)?.has(latest)) {
+            setPending((prev) =>
+              prev.map((p) =>
+                p.tempId === tempId && p.status === 'sending' && !p.awaitingResponse
+                  ? { ...p, awaitingResponse: true }
+                  : p,
+              ),
+            );
+            return;
+          }
+        }
         failPending(tempId);
       }, timeoutMs);
       timersRef.current.set(tempId, timer);
@@ -465,15 +568,23 @@ export function usePendingMessages({
       inFlightRef.current.set(p.tempId, attemptsInFlight);
       try {
         await sendFnRef.current(p.content, p.options);
+        // Issue #4503: a row that was waiting for this answer (its clock ran out in flight) gets
+        // its clock back, as a send answered in time has it: the echo, or the fallback as before.
+        const waited = pendingRef.current.some(
+          (cur) => cur.tempId === p.tempId && cur.status === 'sending' && cur.awaitingResponse === true && !cur.queued,
+        );
         // Issue #2503: the server took it. A request parked by the offline edge
         // while it was still travelling must not survive as a resend candidate
         // once it has been answered — it stays parked (no clock while there is
         // no network) but it is no longer something to send.
         setPending((prev) =>
           prev.map((cur) =>
-            cur.tempId === p.tempId && !cur.accepted ? { ...cur, accepted: true } : cur,
+            cur.tempId === p.tempId && (!cur.accepted || cur.awaitingResponse)
+              ? { ...cur, accepted: true, awaitingResponse: false }
+              : cur,
           ),
         );
+        if (waited) startTimer(p.tempId);
         void onSentRef.current?.();
         // Stays 'sending' until the server echo reconciles it (or the timeout
         // fires as a fallback if the echo never arrives).
@@ -506,11 +617,17 @@ export function usePendingMessages({
                     status: 'error',
                     queued: false,
                     roleRefusal,
+                    awaitingResponse: false,
                     returnedToComposer: cur.returnedToComposer || handedBack,
                   }
                 : cur,
             ),
           );
+          return;
+        }
+        // Issue #4503: nobody knows whether it arrived — not a failure, and nothing to retry.
+        if (isOutcomeUnknownRef.current?.(error)) {
+          settleUnknown(p.tempId);
           return;
         }
         failPending(p.tempId);
@@ -521,7 +638,7 @@ export function usePendingMessages({
         if (attemptsLeft && attemptsLeft.size === 0) inFlightRef.current.delete(p.tempId);
       }
     },
-    [startTimer, failPending, revertNotSent, clearTimer],
+    [startTimer, failPending, revertNotSent, clearTimer, settleUnknown],
   );
 
   const sendOptimistic = useCallback(
@@ -545,9 +662,14 @@ export function usePendingMessages({
   );
 
   const retry = useCallback(
-    (tempId: string) => {
+    (tempId: string, options?: RetryPendingOptions) => {
       const target = pendingRef.current.find((p) => p.tempId === tempId);
       if (!target) return;
+      // Issue #4503: an unknown outcome may already be in the agent's session — sent again only
+      // when the person confirmed it (then as a new send of the same text). A row still waiting
+      // for its in-flight answer is not sent again at all.
+      if (target.status === 'unknown' && options?.confirmedResend !== true) return;
+      if (target.status === 'sending' && target.awaitingResponse) return;
       const revived: PendingMessage = {
         ...target,
         status: 'sending',
@@ -561,6 +683,7 @@ export function usePendingMessages({
         autoResendAttempted: false,
         heldNotSent: false,
         roleRefusal: undefined,
+        awaitingResponse: false,
       };
       setPending((prev) =>
         prev.map((p) => (p.tempId === tempId ? revived : p)),
@@ -579,6 +702,9 @@ export function usePendingMessages({
       attemptsRef.current.delete(tempId);
       setPending((prev) => prev.filter((p) => p.tempId !== tempId));
       // Issue #4385: a text already handed back to the composer is not handed back twice.
+      // Issue #4503: nor is an unknown one's — back in the composer, one Enter would send it again
+      // without the confirmation its row asks for.
+      if (target?.status === 'unknown') return undefined;
       return target?.returnedToComposer ? undefined : target?.content;
     },
     [clearTimer],
