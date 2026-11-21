@@ -86,8 +86,18 @@ export {
   clampOverflowPanelLeft,
   overflowPanelMaxWidth,
 } from './terminal-split-container/ActionBarItemsOverflow';
-export type { InstancePlacementRequest, SelectedSplit } from './terminal-split-container/types';
-import type { InstancePlacementRequest, SelectedSplit } from './terminal-split-container/types';
+export type {
+  InstancePlacementAppliedHandler,
+  InstancePlacementOutcome,
+  InstancePlacementRequest,
+  InstancePlacementSource,
+  SelectedSplit,
+} from './terminal-split-container/types';
+import type {
+  InstancePlacementAppliedHandler,
+  InstancePlacementRequest,
+  SelectedSplit,
+} from './terminal-split-container/types';
 
 
 /** Render-prop signature: each pane is supplied externally so the
@@ -196,8 +206,18 @@ export interface TerminalSplitContainerProps {
    * (placed, or focus moved to the split already showing it). The parent must
    * drop that request: the guard against re-applying it lives in a ref, and a
    * remount of this container resets it.
+   *
+   * Issue #4484: also carries the request's `source` and the outcome
+   * (`applied` / `focused` / `refused`); a `url` request reports `applied`
+   * only once the committed selected split shows it, with that instance.
    */
-  onInstancePlacementApplied?: (token: number) => void;
+  onInstancePlacementApplied?: InstancePlacementAppliedHandler;
+  /**
+   * Issue #4484: a user's own pick of a split (a click into another split, a
+   * split's instance menu, a drop). Not called for the container's own focus
+   * moves. The worktree screen ends a waiting `?instance=` request with it.
+   */
+  onUserSelectionChange?: () => void;
   /** Issue #3514: published whenever the split count changes (the "+" needs it). */
   onSplitCountChange?: (count: number) => void;
   /**
@@ -259,6 +279,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
   headerInstanceSelection,
   instancePlacementRequest,
   onInstancePlacementApplied,
+  onUserSelectionChange,
   onSplitCountChange,
   onSelectedSplitChange,
   actionBarItems,
@@ -309,6 +330,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isResizing, setIsResizing] = useState(false);
+  // Issue #4484: true while the container moves DOM focus itself.
+  const programmaticFocusRef = useRef(false);
 
   useSplitFocusAndPlacement({
     splits,
@@ -316,6 +339,8 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     setFocusedSplitIndex,
     setSplitInstance,
     openInstanceInNewSplit,
+    maximizedIndex,
+    toggleMaximize,
     instances,
     containerRef,
     onFocusedSplitChange,
@@ -325,6 +350,7 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
     onInstancePlacementApplied,
     onSplitCountChange,
     onSelectedSplitChange,
+    programmaticFocusRef,
   });
 
   const {
@@ -476,6 +502,9 @@ export const TerminalSplitContainer = memo(function TerminalSplitContainer({
       toggleMaximize,
       showToast,
       onActiveInstanceChange,
+      onUserSelectionChange,
+      focusedSplitIndex,
+      programmaticFocusRef,
     });
 
 

@@ -33,7 +33,7 @@ export function useTerminalSplitPlacement(): UseTerminalSplitPlacementReturn {
   const requestPlacement = useCallback((instanceId: string, placement: AgentPlacement) => {
     if (placement === 'roster-only') return;
     tokenRef.current += 1;
-    setRequest({ instanceId, placement, token: tokenRef.current });
+    setRequest({ instanceId, placement, token: tokenRef.current, source: 'add' });
   }, []);
 
   const handleApplied = useCallback((token: number) => {
