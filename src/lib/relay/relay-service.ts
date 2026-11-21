@@ -432,6 +432,17 @@ export function withdrawRelay(
   return { ok: true, relay: getRelayById(db, relayId) ?? existing };
 }
 
+/**
+ * Issue #4498: the sentence of a bound `/send` refused by rule 0 when withdrawing
+ * the relay it was bound to could not be confirmed (the write failed, or the relay
+ * was not withdrawn by it). Nothing was typed; the relay may still be open, so the
+ * answer must not say it was withdrawn (`RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE`).
+ */
+export const RELAY_TOOL_POLICY_WITHDRAW_UNCONFIRMED_MESSAGE =
+  'A relay with antigravity at either end is refused by default under the Google Antigravity terms §6 '
+  + '(consumer plans). The relay this send was bound to had been opened and nothing was typed, '
+  + 'but its withdrawal could not be confirmed: it may still be open.';
+
 /** What {@link resolveRelayHold} is asked (Issue #4082). */
 export interface ResolveRelayHoldInput {
   relayId: string;

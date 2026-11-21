@@ -4,6 +4,10 @@ This guide is written for a coding agent (Claude Code, Codex, Command Code, or a
 
 The same text ships inside CommandMate: once it is installed, `commandmate docs --section setup` prints it.
 
+**This guide or the team guide?** This guide sets up CommandMate itself: install, pairing a phone, and one agent at a time. If the person wants a development team — one to three vendors' agent CLIs in the five fixed roles (a PM, a development lead, workers, a reviewer and a judge), with the `roles` command (a send to the wrong role exits 32), `mem` and the restart brief — use the team guide instead: https://kewton.github.io/CommandMate/team-setup.md (`commandmate docs --section team-setup`). The team guide installs CommandMate first if it is missing, then builds the team.
+
+**If the person names stages, do those stages here.** A prompt that names them (the landing page's Level 3 asks for Stages 4 to 6) takes priority over this fork: do the stages they named in this guide, and do not switch them to the team guide on your own. Offer the team guide only when they want a whole team and have not named the stages.
+
 ## Instructions for the agent reading this
 
 1. **Explain each stage before you start it.** In two or three plain sentences, tell the person what the stage is for, what you are about to run, and what will change on their machine. Then run it.
@@ -223,6 +227,8 @@ The first time Codex starts in a worktree it shows two confirmation screens. Sho
 
 Goal: one session plans the work and hands tasks to the others. That session is the lead. Skills from CommandMate's official Catalog teach it the method. In Stages 4 and 5 this one session does everything and is called the lead; Stage 6 then splits it into a PM and a development lead.
 
+**Stages 4 to 6 are the short form.** They build the team by hand: roles written as sections in the instructions file, compared with the IDs `commandmate whoami` prints, with a PM, a development lead and a worker. For the five fixed roles as CommandMate roles (`commandmate roles`, a send to the wrong role exits 32), with `mem`, the restart brief and isolated worktrees, use the team guide instead: https://kewton.github.io/CommandMate/team-setup.md (`commandmate docs --section team-setup`). Do the stages here when the person named them; offer the team guide when they want a whole team and have not.
+
 ### Check
 
 ```bash
@@ -350,6 +356,8 @@ commandmate wait <worktree-id> --instance command-code --verify
 Goal: the person talks to one PM session. The PM does not write code: it asks a development lead, the development lead hands one task to a worker under a contract, and the checks decide when it is done. The PM then tells the person, in the first line, whether they have to do anything.
 
 Stages 4 and 5 used one lead session. Here you keep that session as the development lead and add a separate PM next to it. The roles are written into the repository's instructions file, and each session compares the IDs `commandmate whoami` prints with those sections and states its own role. The role templates are in https://github.com/Kewton/CommandMate/blob/main/docs/en/user-guide/team-roles.md (Japanese: https://github.com/Kewton/CommandMate/blob/main/docs/user-guide/team-roles.md).
+
+**For a whole team, use the team guide.** This stage builds a PM, a development lead and a worker, keeping the roles in the instructions file. The team guide sets up the five fixed roles (a PM, a development lead, workers, a reviewer and a judge) as CommandMate roles, through the `roles` subcommand, so a send names the role it must hold and one that does not hold it exits 32, and it adds `mem`, the restart brief and one worktree per worker: https://kewton.github.io/CommandMate/team-setup.md (`commandmate docs --section team-setup`). Do this stage when the person named it; offer the team guide when they want a whole team and have not.
 
 **Out of scope here.** Creating one worktree per issue, `profile-init.mjs` and `commandmate sync` are the full `cmate-orchestrate` workflow. This stage hands one task to a worker in a worktree that already exists, as in Stage 5. For the full workflow, read the `cmate-orchestrate` Skill's own documents after this stage.
 

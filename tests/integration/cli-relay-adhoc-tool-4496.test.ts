@@ -170,6 +170,10 @@ import { RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE } from '@/lib/relay/relay-policy';
 import { pumpRelayDeliveries, resetRelayDeliveryState } from '@/lib/relay/relay-delivery';
 import { createSendCommand } from '@/cli/commands/send';
 import { addAgentInstance } from '@/lib/db/agent-instances-db';
+import { notifyRelayTurnCompleted } from '@/lib/relay/relay-delivery';
+import { createMessage } from '@/lib/db/chat-db';
+import { generationStartedAt } from '@/lib/session/agent-event-turn';
+import { buildCompositeKey } from '@/lib/auto-yes-state';
 
 const WT = 'wt-4496';
 const AD_HOC = 'agy-adhoc';
@@ -404,6 +408,47 @@ describe('Issue #4496: rule 0 judges an ad-hoc end by the tool --agent asked for
     expect(row.state).toBe('cancelled');
   });
 
+  it('4498 P3 — the withdrawal of the refused bound relay fails: the answer does not say "was withdrawn"', async () => {
+    const opened = await relaysRoute.POST(new NextRequest('http://localhost/api/relays', {
+      method: 'POST',
+      body: JSON.stringify({ from: { worktreeId: WT, instanceId: 'codex' }, to: { worktreeId: WT, instanceId: AD_HOC }, bind: true }),
+    }));
+    const { relay } = (await opened.json()) as { relay: { id: string } };
+    // The cancel write fails (injected in SQLite: no mock of the route's modules).
+    db.exec(`CREATE TEMP TRIGGER fail_cancel_4498 BEFORE UPDATE OF state ON session_relays
+      WHEN NEW.state = 'cancelled' BEGIN SELECT RAISE(ABORT, 'cancel write refused (injected)'); END;`);
+    const sent = await sendRoute.POST(new NextRequest(`http://localhost/api/worktrees/${WT}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ content: 'hello', cliToolId: 'antigravity', instanceId: AD_HOC, relayId: relay.id, origin: 'terminal' }),
+    }), { params: Promise.resolve({ id: WT }) });
+    expect(sent.status).toBe(409);
+    const refusal = (await sent.json()) as { code: string; error: string; relayWithdrawn?: boolean; sendOutcome?: string };
+    expect(refusal.code).toBe('RELAY_TOOL_POLICY_DENIED');
+    expect(refusal.relayWithdrawn).toBe(false);
+    expect(refusal.sendOutcome).toBe('not_sent');
+    expect(refusal.error).not.toContain('was withdrawn');
+    expect(refusal.error).toContain('could not be confirmed');
+    expect(fakeTool.typed).toEqual([]);
+    db.exec('DROP TRIGGER fail_cancel_4498');
+    const row = db.prepare('SELECT state FROM session_relays WHERE id = ?').get(relay.id) as { state: string };
+    expect(row.state).not.toBe('cancelled');
+  });
+
+  it('4498 P3 control — the withdrawal succeeds: relayWithdrawn true, the withdrawn sentence as before', async () => {
+    const opened = await relaysRoute.POST(new NextRequest('http://localhost/api/relays', {
+      method: 'POST',
+      body: JSON.stringify({ from: { worktreeId: WT, instanceId: 'codex' }, to: { worktreeId: WT, instanceId: AD_HOC }, bind: true }),
+    }));
+    const { relay } = (await opened.json()) as { relay: { id: string } };
+    const sent = await sendRoute.POST(new NextRequest(`http://localhost/api/worktrees/${WT}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ content: 'hello', cliToolId: 'antigravity', instanceId: AD_HOC, relayId: relay.id, origin: 'terminal' }),
+    }), { params: Promise.resolve({ id: WT }) });
+    const refusal = (await sent.json()) as { error: string; relayWithdrawn?: boolean };
+    expect(refusal.relayWithdrawn).toBe(true);
+    expect(refusal.error).toBe(RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE);
+  });
+
   it('4496 fix1: a worktree whose default is antigravity + ad-hoc --agent claude --reply-to — exit 33, no relay row, nothing typed', async () => {
     // The delivery and the pump's sweep resolve an ad-hoc end by the default (they name no
     // tool), so a relay opened on `claude` alone would be withdrawn silently later.
@@ -421,6 +466,51 @@ describe('Issue #4496: rule 0 judges an ad-hoc end by the tool --agent asked for
     await pumpRelayDeliveries();
     const row = db.prepare('SELECT state FROM session_relays WHERE id = ?').get(id) as { state: string };
     expect(row.state).not.toBe('cancelled');
+  });
+
+  it('4498 A3 — default codex + ad-hoc --agent claude --reply-to: the reply is taken from claude and typed back into codex', async () => {
+    // The claude session typed into has a generation of this process; the codex key the
+    // ad-hoc end resolves to (no tool named) has none. Observed as codex, the bound relay
+    // was held `generation_changed` and invalidated, and the reply never came back.
+    const claudeKey = buildCompositeKey(WT, 'claude', 'claude-adhoc');
+    generationStartedAt.set(claudeKey, Date.now() - 1_000);
+    try {
+      const result = await send('hello', '--agent', 'claude', '--instance', 'claude-adhoc', '--reply-to', 'self');
+      expect(result.code).toBe(0);
+      expect(fakeTool.typed).toEqual(['claude:hello']);
+      const [{ id }] = db.prepare('SELECT id FROM session_relays').all() as Array<{ id: string }>;
+      const sent = db.prepare('SELECT hold_reason, obs_state FROM session_relays WHERE id = ?').get(id) as { hold_reason: string | null; obs_state: string | null };
+      expect(sent.hold_reason).toBeNull();
+      expect(sent.obs_state).not.toBe('invalid');
+
+      // Claude finishes its turn (a transcript row), and the requester (codex) is up.
+      createMessage(db, {
+        worktreeId: WT,
+        role: 'assistant',
+        content: 'the answer from claude',
+        timestamp: new Date(Date.now() + 1_000),
+        requestId: 'claude-turn:4498',
+        messageType: 'normal',
+        cliToolId: 'claude',
+        instanceId: 'claude-adhoc',
+      });
+      fakeTool.running = true;
+      await notifyRelayTurnCompleted({ worktreeId: WT, cliToolId: 'claude', instanceId: 'claude-adhoc' }, { settled: true });
+      await vi.waitFor(async () => {
+        await pumpRelayDeliveries();
+        expect(fakeTool.typed).toHaveLength(2);
+      });
+      // Back into codex (the requester), once, carrying claude's answer — never into claude.
+      expect(fakeTool.typed[1]).not.toMatch(/^claude:/);
+      expect(fakeTool.typed[1]).toContain('the answer from claude');
+      const row = db.prepare('SELECT state FROM session_relays WHERE id = ?').get(id) as { state: string };
+      expect(row.state).toBe('delivered');
+      await pumpRelayDeliveries();
+      expect(fakeTool.typed).toHaveLength(2);
+      expect(agyWasCalled()).toBe(false);
+    } finally {
+      generationStartedAt.delete(claudeKey);
+    }
   });
 
   it('4496 fix1 (I4): the requester\'s roster cannot be read — --contract writes no task, exit 33, nothing typed', async () => {
