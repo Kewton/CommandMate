@@ -39,6 +39,15 @@ rules). Neither is what the old rule tripped on — only the missing
 `? for shortcuts` is — but a rule that wanted the `>` directly on top of the
 lower rule would refuse this frame too.
 
+## Issue #4504's derived frame
+
+`tests/unit/lib/detection/antigravity-generating-word-4504.test.ts` builds its
+(b) frame **in memory** from `after-tool-turn.txt`: `▸ Thought for 2s` and
+`  Generating the specified file` inserted above the tool turn's last body row.
+That capture's status row already lacks `? for shortcuts`, which is the shape
+the Issue is about. It is not added as a file here because this directory's
+frame inventory is pinned by suites outside Issue #4504's scope.
+
 ## What is not here
 
 No agy 1.2.1 capture of the other screens the Issue's acceptance names exists in

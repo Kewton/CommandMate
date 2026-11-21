@@ -21,17 +21,18 @@ import {
 import { sendMessageWithSubmitVerification } from './submit-verified-sender';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import {
-  ANTIGRAVITY_PROMPT_PATTERN,
   ANTIGRAVITY_SELECTION_LIST_PATTERN,
-  ANTIGRAVITY_SEPARATOR_PATTERN,
-  detectThinking,
   stripAnsi,
 } from '../detection/cli-patterns';
 import { normalizeFrame } from '../detection/tools/frame';
 import {
+  ANTIGRAVITY_CANCEL_FOOTER_PATTERN,
   ANTIGRAVITY_NAVIGATE_FOOTER_PATTERN,
+  ANTIGRAVITY_READY_FOOTER_PATTERN,
   ANTIGRAVITY_TRUST_DIALOG_PATTERN,
+  isAntigravityGeneratingAt,
   isAntigravityTrustScreen,
+  readAntigravityInputBoxStatusRow,
 } from '../detection/tools/antigravity/patterns';
 import {
   beginStartupWindow,
@@ -117,18 +118,6 @@ const ANTIGRAVITY_INIT_MAX_ATTEMPTS = 30;
 const ANTIGRAVITY_PROMPT_WAIT_TIMEOUT_MS = 15000;
 
 /**
- * agy's own word for "idle", drawn on the status row under the input box
- * ("? for shortcuts … <model>"). While generating the same row reads "esc to
- * cancel"; the trust screen and the dialogs draw their own footers instead.
- *
- * Issue #2478: sufficient, no longer required. agy 1.2.1 does not redraw it
- * after a turn that used a tool — the row keeps only the right-aligned model
- * label (`tests/fixtures/antigravity-live-2478/after-tool-turn.txt`) — and a
- * send that waited for it timed out on every later turn of that session.
- */
-const ANTIGRAVITY_READY_FOOTER_PATTERN = /\?\s+for\s+shortcuts/;
-
-/**
  * How long a send waits for the prompt while the launch's trust Enter is still
  * owed (Issue #3757). agy was measured drawing the trust screen 61 s after the
  * launch, ~27 s after the launch window ended; 60 s covers that with room.
@@ -193,49 +182,6 @@ function logTrustDecisionOnce(
 }
 
 /**
- * Read agy's input box off the bottom of a frame (Issue #2478).
- *
- * agy draws the box — a bare `>` between two rules, its status row under the
- * lower one — as the last thing on the screen, and everything else it can show
- * either replaces the box (the permission dialogs, the trust screen, the
- * post-answer survey) or is drawn below it (the `/model` picker, the slash
- * command popup, `/feedback`'s category menu). So a frame that ENDS in the box
- * is one whose input box is live, and a `>` row with more than the status row
- * under it is not a box anyone can type into.
- *
- * This is stricter than the status detector's `promptPattern.test(lastLines)`
- * (`detection/tools/antigravity/detect.ts`), which accepts the `>` anywhere in
- * the 15-row tail: the detector tells `/feedback`'s menu apart only in the
- * shared generic prompt step that runs before it, and this check does not run
- * that step. The rows between the `>` and the lower rule may be blank — agy
- * 1.2.1 leaves the box three rows tall after a tool turn.
- *
- * @param contentLines - ANSI-stripped rows, trailing blank rows dropped
- * @returns The status row under the box ('' when agy drew none), or null when
- *   the frame does not end in the box
- */
-function readInputBoxStatusRow(contentLines: readonly string[]): string | null {
-  const rows = contentLines.map((row) => row.trim());
-  const isRule = (i: number): boolean => i >= 0 && ANTIGRAVITY_SEPARATOR_PATTERN.test(rows[i]);
-  const skipBlank = (from: number): number => {
-    let i = from;
-    while (i >= 0 && rows[i] === '') i--;
-    return i;
-  };
-
-  let i = rows.length - 1;
-  let statusRow = '';
-  if (i >= 0 && !isRule(i)) {
-    statusRow = rows[i];
-    i = skipBlank(i - 1);
-  }
-  if (!isRule(i)) return null;
-  i = skipBlank(i - 1);
-  if (i < 0 || !ANTIGRAVITY_PROMPT_PATTERN.test(rows[i])) return null;
-  return isRule(skipBlank(i - 1)) ? statusRow : null;
-}
-
-/**
  * Decide whether a typed message would land in agy's input box (Issue #2478).
  *
  * Read on the status detector's evidence (`detection/tools/antigravity/detect.ts`)
@@ -248,13 +194,13 @@ function readInputBoxStatusRow(contentLines: readonly string[]): string | null {
  *     question. Both over the tail — with the pane 1000 rows tall the whole
  *     transcript is in the capture, and a quoted question anywhere in it used
  *     to block every send.
- *  2. The frame ends in the input box ({@link readInputBoxStatusRow}).
- *  3. agy is not generating. `? for shortcuts` on the status row settles it —
- *     kept as a sufficient signal so a thought summary such as "Generating the
- *     specified file" left in the tail cannot block a send the pre-#2478 rule
- *     allowed. Without it, `afterThinking`'s reading: no spinner, `Generating`
- *     or `esc to cancel` in the tail. The box stays on screen while agy
- *     generates, so 2 alone would not do.
+ *  2. The frame ends in the input box ({@link readAntigravityInputBoxStatusRow}).
+ *  3. Read the status row under the box, in this order (Issue #4504):
+ *     `? for shortcuts` → ready, before any thinking word; `esc to cancel` →
+ *     generating; neither → generating only when the tail carries a row-leading
+ *     spinner or `Generating...`/`Generating…`. A bare `Generating` in agy's
+ *     own thought body ("Generating the specified file") is not a turn. The box
+ *     stays on screen while agy generates, so 2 alone would not do.
  *
  * Before #2478 the footer was required and the detector never read it, so the
  * two disagreed on every frame agy 1.2.1 draws after a tool turn.
@@ -267,10 +213,11 @@ export function isAntigravityReady(output: string): boolean {
   if (ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) return false;
   if (ANTIGRAVITY_TRUST_DIALOG_PATTERN.test(frame.lastLines)) return false;
 
-  const statusRow = readInputBoxStatusRow(frame.contentLines);
+  const statusRow = readAntigravityInputBoxStatusRow(frame.contentLines);
   if (statusRow === null) return false;
   if (ANTIGRAVITY_READY_FOOTER_PATTERN.test(statusRow)) return true;
-  return !detectThinking('antigravity', frame.lastLines);
+  if (ANTIGRAVITY_CANCEL_FOOTER_PATTERN.test(statusRow)) return false;
+  return !isAntigravityGeneratingAt(frame.lastLines);
 }
 
 /**
@@ -295,7 +242,7 @@ export function readAntigravityRoleFrame(output: string): AntigravityRoleFrame {
   }
   // The box's status row is read the same way whether agy is idle or still
   // generating: which agent runs is said apart from whether a body could go now.
-  const statusRow = readInputBoxStatusRow(frame.contentLines);
+  const statusRow = readAntigravityInputBoxStatusRow(frame.contentLines);
   if (statusRow === null || ANTIGRAVITY_SELECTION_LIST_PATTERN.test(frame.lastLines)) return { kind: 'other', statusRow: null };
   return { kind: isAntigravityReady(output) ? 'input-box' : 'busy', statusRow };
 }
