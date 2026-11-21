@@ -215,6 +215,7 @@ afterEach(() => {
 
 const UNKNOWN_ANSWERS: Array<[string, SendAnswer]> = [
   ['500 sendOutcome:unknown (the route: typed, then its answer failed)', () => json(500, { error: 'submit could not be confirmed', sendOutcome: 'unknown' })],
+  ['500 with no sendOutcome (review 2: D4 as written)', () => json(500, { error: 'Internal failure' })],
   ['502 with no sendOutcome (a proxy / tunnel)', () => json(502, { error: 'Bad Gateway' })],
   ['504 with no sendOutcome (a proxy / tunnel)', () => json(504, {})],
   ['the fetch rejected (network)', () => Promise.reject(new TypeError('Failed to fetch'))],
@@ -297,6 +298,34 @@ describe('[#4503 U-0] the worktree pane: an unknown send is never sent again wit
       for (const id of ['chat-pending-retry', 'chat-pending-discard', 'chat-pending-resend', 'chat-optimistic-error']) {
         expect(phone().queryByTestId(id)).toBeNull();
       }
+      expect(sendCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('[#4503 U-0 / review 2 P2-2] a 201 whose echo does not come', () => {
+  it('the clock runs out: waiting, then unknown — never ［再試行］', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      installFetch(created);
+      await renderAndSend();
+      await waitFor(() => expect(sendCalls).toBe(1));
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(pc().getByTestId('optimistic-awaiting')).toHaveTextContent(JA.awaiting);
+      expect(pc().queryByTestId('pending-retry')).toBeNull();
+      expect(phone().queryByTestId('chat-pending-retry')).toBeNull();
+      expect(pc().queryByTestId('optimistic-error')).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(pc().getByTestId('optimistic-unknown')).toBeInTheDocument();
+      expect(pc().queryByTestId('pending-retry')).toBeNull();
+      fireEvent.click(pc().getByTestId('pending-resend'));
+      await flush(10);
       expect(sendCalls).toBe(1);
     } finally {
       vi.useRealTimers();

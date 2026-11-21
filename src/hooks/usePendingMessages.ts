@@ -118,10 +118,7 @@ const SEND_REFUSED_BEFORE_INPUT_CODES: ReadonlySet<string> = new Set([
  * - `data.sendOutcome === 'unknown'` (the route's answer, `route.ts` `unboundSendOutcome`) → unknown
  * - `data.sendOutcome === 'not_sent'` → not unknown (nothing was typed: retrying is safe)
  * - `kind` `network` / `timeout` / `aborted` (the request may have reached the server) → unknown
- * - an HTTP 5xx other than 500 without `sendOutcome` (a proxy's or tunnel's 502 / 504) → unknown
- * - a bare 500 (no `sendOutcome`) stays a failure, as before: #4385 / #4345 pin it as "a plain
- *   failure, shown as before" (`role-refusal-send-4385`, `SessionTile-role-refusal-4385`,
- *   `page-gate-callers-4345`). Whether it should be unknown too is the PM's call (#4503 report).
+ * - an HTTP 5xx without `sendOutcome` (500 included — PM's D4; a proxy's or tunnel's 502 / 504) → unknown
  * - a 5xx whose `code` says the server refused before any key (`SEND_REFUSED_BEFORE_INPUT_CODES`:
  *   the session start's 503s) → not unknown, as before. The route also adds `sendOutcome:
  *   'not_sent'` to these (`recordNotSent` / the sender's `settle`); the code covers an answer without it.
@@ -139,7 +136,7 @@ export function isSendOutcomeUnknown(error: unknown): boolean {
   if (kind === 'network' || kind === 'timeout' || kind === 'aborted') return true;
   const code = data !== null && typeof data === 'object' ? (data as { code?: unknown }).code : undefined;
   if (typeof code === 'string' && SEND_REFUSED_BEFORE_INPUT_CODES.has(code)) return false;
-  return kind === 'http' && status > 500 && status < 600;
+  return kind === 'http' && status >= 500 && status < 600;
 }
 
 export interface OptimisticSendOptions {
@@ -513,6 +510,14 @@ export function usePendingMessages({
           if (offlineRef.current && !p.autoResendAttempted) {
             return p.queued ? p : { ...p, queued: true };
           }
+          // Issue #4503 (review 2 P2-2): the server answered 201 — it typed the text — and only the
+          // echo is missing. Never error + ［再試行］ (that would send it twice): first it waits for
+          // the echo (`awaitingResponse`, one more window), then nobody can say whether it landed.
+          if (p.accepted && holdInFlightOnTimeoutRef.current) {
+            return p.awaitingResponse
+              ? { ...p, status: 'unknown', queued: false, awaitingResponse: false }
+              : { ...p, awaitingResponse: true };
+          }
           return { ...p, status: 'error', queued: false };
         }),
       );
@@ -566,6 +571,18 @@ export function usePendingMessages({
     },
     [clearTimer, failPending, timeoutMs],
   );
+
+  // Issue #4503 (review 2 P2-2): an accepted row whose clock ran out waits for its echo one more
+  // window (`failPending` set `awaitingResponse`); when that one runs out too, it is unknown.
+  // Read off the committed rows, so the re-armed clock follows what is on screen.
+  useEffect(() => {
+    if (!holdInFlightOnTimeout) return;
+    for (const p of pending) {
+      if (p.status === 'sending' && p.accepted && p.awaitingResponse && !p.queued && !timersRef.current.has(p.tempId)) {
+        startTimer(p.tempId);
+      }
+    }
+  }, [pending, startTimer, holdInFlightOnTimeout]);
 
   /** Issue #4417: a new send's text went back to the composer; its image could not. */
   const noteAttachmentNotReturned = useCallback((p: PendingMessage) => {

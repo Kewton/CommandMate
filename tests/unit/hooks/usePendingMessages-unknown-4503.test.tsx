@@ -6,9 +6,8 @@
  * without the person confirming it — not by ［再試行］, not by the offline recovery (#2503).
  * Answers are shaped as the route returns them (`sendOutcome` on the error body, `route.ts`
  * `unboundSendOutcome`): `not_sent` / a 4xx is a failure that may be retried; `unknown`, a 5xx other
- * than 500 with no `sendOutcome` (a proxy's 502/504), and a fetch that never completed
- * (`ApiError.kind` network / timeout / aborted) are `unknown`. A bare 500 stays a failure (pinned by
- * the #4385 / #4345 suites). Only a send refused before it left (`kind: 'offline'`) is parked
+ * with no `sendOutcome` (review 2: 500 included; the session start's 503 codes excepted), and a fetch
+ * that never completed (`ApiError.kind` network / timeout / aborted) are `unknown`. Only a send refused before it left (`kind: 'offline'`) is parked
  * and resent on its own.
  *
  * #4417: every answer is applied to the row only when it answers the row's latest attempt — a late
@@ -97,6 +96,8 @@ function deferredSend() {
 describe('[#4503] isSendOutcomeUnknown: what the route answered', () => {
   it.each([
     ['500 sendOutcome:unknown', unknown500()],
+    // Review 2 P2-1 (PM: D4 as written): a bare 500 is unknown too.
+    ['500 with no sendOutcome', bare500()],
     ['502 with no sendOutcome', bare502()],
     ['504 with no sendOutcome', bare504()],
     ['fetch rejected (network)', network()],
@@ -108,8 +109,6 @@ describe('[#4503] isSendOutcomeUnknown: what the route answered', () => {
 
   it.each([
     ['500 sendOutcome:not_sent', notSent500()],
-    // A bare 500 stays a plain failure: #4385 / #4345 pin it (see isSendOutcomeUnknown).
-    ['500 with no sendOutcome', bare500()],
     ['400', bad400()],
     ['409 not_sent', conflict409()],
     ['409 role refusal', roleRefused()],
@@ -242,6 +241,43 @@ describe('[#4503] U1・U2: an unknown outcome is not a failure, and is never res
     await flush();
     expect(sendFn).toHaveBeenCalledTimes(2);
     expect(result.current.messages[0].optimisticState).toBe('sending');
+  });
+});
+
+describe('[#4503 review 2 P2-2] the clock runs out after a 201 (the server took it, no echo yet)', () => {
+  const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  it('waits for the echo — never error + retry — then is unknown; only a confirmation sends it again', async () => {
+    const sendFn = vi.fn().mockResolvedValue({ id: 's1' });
+    const { result, rerender } = renderPending(sendFn, { timeoutMs: 60 });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await wait(90);
+    expect(result.current.pending[0].accepted).toBe(true);
+    expect(result.current.messages[0].optimisticState).toBe('sending');
+    expect(result.current.messages[0].optimisticAwaitingResponse).toBe(true);
+    act(() => result.current.retry(result.current.pending[0].tempId));
+    await wait(5);
+    expect(sendFn).toHaveBeenCalledTimes(1);
+
+    // The second window passes with no echo: unknown (check the terminal; 「送り直す」 asks first).
+    await wait(90);
+    expect(result.current.messages[0].optimisticState).toBe('unknown');
+    act(() => result.current.retry(result.current.pending[0].tempId));
+    await wait(5);
+    expect(sendFn).toHaveBeenCalledTimes(1);
+
+    // The echo still proves it arrived.
+    rerender({ serverMessages: [serverUserMessage('hello', 's1', Date.now() + 1000)], connectivity: ONLINE });
+    await wait(5);
+    expect(result.current.pending).toHaveLength(0);
+  });
+
+  it('(control) without holdInFlightOnTimeout a 201 with no echo fails as before', async () => {
+    const sendFn = vi.fn().mockResolvedValue({ id: 's1' });
+    const { result } = renderPending(sendFn, { timeoutMs: 20, holdInFlightOnTimeout: false });
+    act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await wait(60);
+    expect(result.current.messages[0].optimisticState).toBe('error');
   });
 });
 
