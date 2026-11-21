@@ -81,7 +81,9 @@
     "openImage": "画像を開く: {path}",
     "videoLabel": "動画: {path}",
     "conversationLabel": "会話: {preview}",
-    "filePathMissing": "このパスは worktree にありません"
+    "filePathMissing": "このパスは worktree にありません",
+    "filePathOutsideWorktree": "worktree の外のファイルなので開けません。パスをコピーしました",
+    "filePathOutsideWorktreeNoCopy": "worktree の外のファイルなので開けません"
   },
   "slashCommands": {
     "title": "コマンド",

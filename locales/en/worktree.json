@@ -81,7 +81,9 @@
     "openImage": "Open image: {path}",
     "videoLabel": "Video: {path}",
     "conversationLabel": "Conversation: {preview}",
-    "filePathMissing": "That path is not in this worktree"
+    "filePathMissing": "That path is not in this worktree",
+    "filePathOutsideWorktree": "That file is outside this worktree, so it cannot be opened. The path was copied.",
+    "filePathOutsideWorktreeNoCopy": "That file is outside this worktree, so it cannot be opened"
   },
   "slashCommands": {
     "title": "Commands",
