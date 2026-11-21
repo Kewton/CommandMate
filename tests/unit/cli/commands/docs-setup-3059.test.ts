@@ -191,6 +191,19 @@ describe('the setup guide forks to team-setup.md for a whole team', () => {
     );
   });
 
+  it('control: a guide without the docs section is caught in the intro', () => {
+    expect(
+      problems(SETUP_GUIDE.replace(/commandmate docs --section team-setup/g, 'commandmate docs --section team')),
+    ).toEqual(['intro docs section']);
+  });
+
+  it('defers to the stages the person named, so the landing prompt and the fork do not disagree', () => {
+    // The LP's #ask-level-3 names Stages 4 to 6 of this guide; an agent reading
+    // both must do those stages here rather than switch on its own.
+    expect(intro).toMatch(/If the person names stages, do those stages here/);
+    expect(intro).toMatch(/takes priority over this fork/);
+  });
+
   it('keeps the single-agent and phone instructions where they were', () => {
     // Adding the fork must not remove what setup.md itself is for.
     expect(intro).toMatch(/Do Stage 2 \(Pair your phone\) last/);
