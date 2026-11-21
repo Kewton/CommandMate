@@ -43,6 +43,7 @@ import {
   isSameEndpoint,
   RELAY_ROUNDS_WINDOW_MS,
   resolveRelayTtlMs,
+  type RelayCreationVerdict,
   type RelayRefusal,
 } from '@/lib/relay/relay-policy';
 import { isRelayDeliveryClaimed } from '@/lib/relay/relay-delivery-claims';
@@ -296,13 +297,25 @@ export function countRecentReplyRounds(
 }
 
 /**
- * Open a relay, or say why not.
- *
- * The system line is written on success and only on success — a refused relay
- * must not leave "delegated, waiting for the reply" in a transcript that will
- * never see a reply.
+ * What {@link judgeRelayCreation} answers (Issue #4466 PR1a): a missing worktree, or
+ * the verdict of `decideRelayCreation` with the rounds it was given (for the log).
  */
-export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRelayResult {
+export type RelayCreationJudgment =
+  | { ok: false; refusal: RelayEndpointMissing }
+  | { ok: true; verdict: RelayCreationVerdict | RelayRefusal; rounds: RecentReplyRounds };
+
+/**
+ * The judgment half of {@link openRelay} (Issue #4466 PR1a): everything it reads
+ * before it writes, and nothing written — no row, no system line, no log of its own
+ * (the resolvers' own warnings aside). Synchronous, so a caller can judge and then
+ * write in one stretch; {@link openRelay} is exactly this followed by
+ * {@link recordOpenedRelay}.
+ */
+export function judgeRelayCreation(
+  db: Database.Database,
+  input: OpenRelayInput,
+  now: number
+): RelayCreationJudgment {
   for (const worktreeId of [input.from.worktreeId, input.to.worktreeId]) {
     if (!relayWorktreeExists(db, worktreeId)) {
       return {
@@ -316,7 +329,6 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     }
   }
 
-  const now = input.now ?? Date.now();
   // Issue #4420: the pace of round trips, from the ledger (one COUNT).
   const rounds = countRecentReplyRounds(db, input.from, now);
   const verdict = decideRelayCreation({
@@ -341,6 +353,61 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
       declaration: readUsageDeclaration(),
     },
   });
+  return { ok: true, verdict, rounds };
+}
+
+/**
+ * The write half of {@link openRelay} (Issue #4466 PR1a): the row, its log line and
+ * the `requested` system line, for a relay {@link judgeRelayCreation} allowed at
+ * `hops`. Synchronous.
+ */
+export function recordOpenedRelay(
+  db: Database.Database,
+  input: OpenRelayInput,
+  hops: number,
+  now: number
+): SessionRelay {
+  const relay = createRelay(db, {
+    from: input.from,
+    to: input.to,
+    hops,
+    expiresAt: now + resolveRelayTtlMs(input.ttlMs),
+    now,
+    bindMode: input.bind === true ? 'bound' : 'legacy',
+  });
+
+  logger.info('relay-opened', {
+    relayId: relay.id,
+    from: `${relay.from.worktreeId}/${relay.from.instanceId}`,
+    to: `${relay.to.worktreeId}/${relay.to.instanceId}`,
+    hops: relay.hops,
+    bindMode: relay.bindMode,
+  });
+
+  writeRelaySystemLine(
+    db,
+    relay.id,
+    'requested',
+    resolveRelaySession(db, relay.from),
+    resolveRelaySession(db, relay.to),
+    now
+  );
+
+  return relay;
+}
+
+/**
+ * Open a relay, or say why not.
+ *
+ * The system line is written on success and only on success — a refused relay
+ * must not leave "delegated, waiting for the reply" in a transcript that will
+ * never see a reply.
+ */
+export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRelayResult {
+  const now = input.now ?? Date.now();
+  const judgment = judgeRelayCreation(db, input, now);
+  if (!judgment.ok) return judgment;
+  const { verdict, rounds } = judgment;
   if (isRelayRefusal(verdict)) {
     if (verdict.toolPolicy) {
       logger.info('relay-tool-policy-denied', {
@@ -364,33 +431,7 @@ export function openRelay(db: Database.Database, input: OpenRelayInput): OpenRel
     return { ok: false, refusal: verdict };
   }
 
-  const relay = createRelay(db, {
-    from: input.from,
-    to: input.to,
-    hops: verdict.hops,
-    expiresAt: now + resolveRelayTtlMs(input.ttlMs),
-    now,
-    bindMode: input.bind === true ? 'bound' : 'legacy',
-  });
-
-  logger.info('relay-opened', {
-    relayId: relay.id,
-    from: `${relay.from.worktreeId}/${relay.from.instanceId}`,
-    to: `${relay.to.worktreeId}/${relay.to.instanceId}`,
-    hops: relay.hops,
-    bindMode: relay.bindMode,
-  });
-
-  writeRelaySystemLine(
-    db,
-    relay.id,
-    'requested',
-    resolveRelaySession(db, relay.from),
-    resolveRelaySession(db, relay.to),
-    now
-  );
-
-  return { ok: true, relay };
+  return { ok: true, relay: recordOpenedRelay(db, input, verdict.hops, now) };
 }
 
 /** What {@link withdrawRelay} answers. */

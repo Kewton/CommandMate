@@ -24,12 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
-import {
-  buildInstanceRoleSettings,
-  createInstanceWithRole,
-  setManagedInstanceRole,
-  type RoleApplicationDeps,
-} from '@/lib/agent-roles/management';
+import { buildInstanceRoleSettings, type RoleApplicationDeps } from '@/lib/agent-roles/management';
 import { respondToRoleError, roleErrorResponse } from '@/lib/agent-roles/route-errors';
 import { parseRoleAssignmentInput } from '@/lib/agent-roles/validation';
 import { getLaunchRoleEvidence, wasResumedAcrossRole } from '@/lib/session/role-launch';
@@ -38,12 +33,8 @@ import type { CLIToolType } from '@/lib/cli-tools/types';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
-import {
-  findWriteToolPolicyRefusal,
-  readWriteToolPolicyRequest,
-  WriteToolPolicyRefused,
-  type WriteToolPolicyRequest,
-} from '../../send/write-tool-policy';
+import { readWriteToolPolicyRequest } from '../../send/write-tool-policy';
+import { createInstanceRole, toolPolicyRefusalResponse, writeInstanceRole } from './role-write';
 import {
   INSTANCE_CREATION_KEY_HEADER,
   INSTANCE_CREATION_KEY_PATTERN,
@@ -66,27 +57,6 @@ function applicationDeps(worktreeId: string): RoleApplicationDeps {
     resumedAcrossRole: (cliToolId: CLIToolType, instanceId: string) =>
       wasResumedAcrossRole({ worktreeId, cliToolId, instanceId }),
   };
-}
-
-/**
- * Issue #4449: what the transaction calls right before it writes — the tool policy for the
- * tool it is about to write, thrown as {@link WriteToolPolicyRefused} so nothing is written.
- */
-function toolPolicyGuard(
-  db: ReturnType<typeof getDbInstance>,
-  worktreeId: string,
-  request: WriteToolPolicyRequest,
-  instanceId: () => string,
-): (cliToolId: CLIToolType) => void {
-  return (cliToolId) => {
-    const refusal = findWriteToolPolicyRefusal(db, { worktreeId, tool: cliToolId, instanceId: instanceId(), request });
-    if (refusal) throw new WriteToolPolicyRefused(refusal);
-  };
-}
-
-/** The 409 of a refused write, or null for any other error. */
-function toolPolicyRefusalResponse(error: unknown): NextResponse | null {
-  return error instanceof WriteToolPolicyRefused ? NextResponse.json(error.body, { status: 409 }) : null;
 }
 
 function worktreeNotFound(id: string): NextResponse {
@@ -123,14 +93,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (expectedRosterRevision !== undefined && typeof expectedRosterRevision !== 'string') {
       return roleErrorResponse('invalid_request', 'expectedRosterRevision must be a string', 400);
     }
-    setManagedInstanceRole(
-      db,
-      worktree,
-      instanceId,
-      role,
-      expectedRosterRevision,
-      toolPolicyGuard(db, id, policyRequest.value, () => instanceId),
-    );
+    writeInstanceRole(db, id, worktree, { instanceId, role, expectedRosterRevision, request: policyRequest.value });
     return NextResponse.json(await buildInstanceRoleSettings(db, id, applicationDeps(id)), { status: 200 });
   } catch (error: unknown) {
     return toolPolicyRefusalResponse(error) ?? respondToRoleError(error, logger, 'write-failed');
@@ -164,12 +127,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!role) return roleErrorResponse('invalid_request', 'role must be inherit, none or a role id', 400);
 
     const db = getDbInstance();
-    const { instanceId, replayed } = createInstanceWithRole(db, id, {
+    const { instanceId, replayed } = createInstanceRole(db, id, {
       instance: instance as { id: unknown; cliTool: unknown; alias?: unknown },
       role,
       expectedRosterRevision,
       idempotencyKey,
-      beforeWrite: toolPolicyGuard(db, id, policyRequest.value, () => String((instance as { id: unknown }).id)),
+      request: policyRequest.value,
     });
     const body: InstanceRoleCreateResponse = {
       ...(await buildInstanceRoleSettings(db, id, applicationDeps(id))),

@@ -2,6 +2,7 @@
 
 - 段: 設計（この文書だけ）。コード・DB・試験は書かない。実装は Sprint 9。人の決定（§8.1、11-19、mem 91b25c73）を受けて始める。#4473（`send.ts`・`send-request.ts`）と #4420（`relay-service.ts`）のマージの後に始める（`pm-plan-s8.md` の直列）
 - 版: 第 3.1 版（2026-11-19、イネーブラー claude-5）
+  - PR1a の更新（2026-11-21）: 「今」の記述 7 か所を develop `d21e23870`（#4449・#4496・#4498 の後）に合わせて直し、PR1b の前に決める未確定を §8.3 に一覧した。設計の決定は変えていない
   - 第 3.1 版: 第 3 版の確かめ（`verify-4466-v2.md` の「## 第 3 版」。表の漏れ V3-1・V3-2、新しい穴 V3-N1、記録 1）の処分。§10.4
   - 第 3 版: 第 2 版の確かめ（`workspace/orchestration/runs/2026-11-19/s8/verify-4466-v2.md`。塞がった 1・一部 2・新しい穴 5・表の漏れ 5）の処分。処分は §10.3
   - 第 3 版の前提（PM の確かめ、`check-agy-relay-fence.md`）: N1 の形は、今のコード（v0.53.0）では「relay は開くが、打鍵は exit 33 で断られ、同じ要求の中で relay は `cancelled` になる」。打鍵には届かない。ただし relay の行と system line は残る。この設計では、それも残さない形で塞ぐ
@@ -66,6 +67,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 - 断るときは例外を投げず、`{ ok: false, refusal }` を返す
 - 端の解決は `resolveRelaySession` を使う。例外のときは `FALLBACK_CLI_TOOL` に倒す（`relay-session-ref.ts:62-77`）
 - これは `findWriteToolPolicyRefusal` の解決（`resolveSessionTarget`。例外なら規則 0 を飛ばす、`write-tool-policy.ts:119-128`）と別の関数
+- **PR1a 時点の今（develop `d21e23870`）**: 上の 2 行は v0.53.0 の事実で、今は違う。#4496 で `openRelay` と `findWriteToolPolicyRefusal` の規則 0 は、どちらも `resolveRelayEndpointTool`（`relay-session-ref.ts`。読めない端は `null`）で端を解決し、`null` を「すべての tool」として断る（fail-closed）。`openRelay` は `to` を、送信が名指した tool（`toCliToolId`）と名簿の解決の両方で判定する。fallback の `resolveRelaySession` は system line の表示と連鎖の読みにだけ残る。配送は #4498 の `tryResolveRelayDeliveryTarget`（読めない・推測なら `null` で保留）を使う。PR1a で `openRelay` を判定（`judgeRelayCreation`、読みだけ）と書き込み（`recordOpenedRelay`）に分けた
 
 **mem の書き込みの拒否**: `memAddItem` 系は、拒否を `MemOutcome` で返す（`mem/service.ts:398-421`）。
 
@@ -73,7 +75,9 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 
 **0.53.0 の既知の制限（#4466 K1・K2）**:
 - K1: 返信先・既定が段の間で変わると、段 2 の後で段 3 か段 4 が断られ、タスクが残る
+  - **PR1a 時点の今**: 「既定」は当たらない。#4449 で送信と grant はタスクの記録した宛先（`taskId`、`send/task-target.ts`）へ行き、既定を解決し直さない。残るのは返信先（`--reply-to` の端の名簿）が段 2 の後に変わる形
 - K2: `--model --auto-yes` では Auto-Yes が段 8 に回る。段 1・7 の後で Auto-Yes だけが断られる（警告・exit 0）
+  - **PR1a 時点の今**: `--register --role` と `--contract` の形は、#4449 で最初の書き込み（段 1・段 2）が Auto-Yes も判定して断る（`write-tool-policy.ts` の `autoYes`）。残るのは、最初の書き込みが `/send`（段 7）の形と、ロールなしの `--register`（段 8 の登録。送れた後に名簿の行が残る）
 
 ### 1.1 同じ種類の穴の履歴
 
@@ -162,6 +166,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 - `target` の欄を持つ理由: 今の `/send` は「宛先の欄なし」（#4116）で、既定の解決をサーバーに任せている。新しい route は、その操作で S2 が決める宛先の出発点として、CLI が名指したものだけを受ける。名指しが無ければ、今と同じく既定（S2 で解決）。`/send` の約束は変えない（レビュー B P3-3）
 - 能力の名前は `send-operation-v1`。欄を足すだけの変更は同じ版のまま。意味の変わる変更は `v2` を足す（`v1` は残す）（レビュー B P3-1）
 - 応答（成功）: `{ ok: true, target, taskId?, relayId?, grant?, registered?, noteItemId?, sent: { … 今の /send の応答（brief を含む）… } }`
+  - **案（PR0 の表が置いた形。PR1b で確定。§8.3 の U1）**: 成功の応答にも `policy` を載せる。`policy.target.tool`（実際に打つ tool。I2a）と、relay があれば `policy.relay.from` / `policy.relay.to`（規則 0 がそれぞれの端を判定した tool）。§6.1 の ad-hoc の `--agent codex` の対照が「`to` を名簿の既定で判定した」と「打つ tool で判定した」を見分けるのに要る
   - `operationId` は出さない（使い道が無い。レビュー B P3-2）
 - 応答（拒否）: §5.1 の表
 
@@ -189,6 +194,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
      - `resolveRelaySessionStrict` が失敗を返したら断る（I3b。`FALLBACK_CLI_TOOL` で判定しない）
      - strict を使うのは新しい route の S2 だけ。既存の `POST /api/relays` の `openRelay` は、今の fallback のまま変えない（I5、確かめ V3-2。`openRelay` は strict を使う口を引数で選ぶ）
      - 今の `resolveRelaySession`（`relay-session-ref.ts:58-85`、fallback つき）は配送（`relay-delivery.ts`）のために残す。中身は strict の版を包むだけにする
+     - **PR1a 時点の今**: 上の 2 行の前提（既存の `openRelay` は fallback で判定する）は古い。#4496 で既存の `openRelay` も、読めない端を `null`（すべての tool）として断る（fail-closed。§1）。配送は #4498 の `tryResolveRelayDeliveryTarget` で、fallback を使わない。このため `resolveRelaySessionStrict` は新しく作らず、#4498 の `tryResolveRelaySession`／`tryResolveRelayDeliveryTarget` を使う（同じ役割の関数を 2 つ作らない）。新しい route の 503 `RELAY_ENDPOINT_UNRESOLVED`（C15）は、その `null` を S2 で例外に変えたもの。既存の `POST /api/relays` は同じ `null` を今どおり 409 `RELAY_TOOL_POLICY_DENIED` で断り、`/send` の束ねた relay の判定（`findBoundRelayToolPolicyRefusal`）と二重に守る
      - #4420 の `replyRounds`（`readRelaySessionRounds`、1 行の同期の読み。`relay-rounds-db-4420.md`）も含む
      - 結果: 名簿に無い ad-hoc の id ＋ `--agent antigravity` ＋ `--reply-to` は、`to` の tool が antigravity なので規則 0 で断られる（exit 33）。relay の行も system line も書かれない（N1）
   3. Auto-Yes: 方針、shutdown（`isAutoYesShutdownStarted()`）、`onlyIfOff`
@@ -271,17 +277,17 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 | C3 | 送信の途中で宛先が変わった（`operation_target_changed`、何も書いていない、再送してよい） | 無し（今は行が残る） | 409 `OPERATION_TARGET_CHANGED`。exit は H1 で決める | **要（exit の番号。§8 H1）** |
 | C4 | `--note` の mem の拒否（50・2・56 など） | 何も送らず、契約の task を `failed` にし（行は残る）、grant と relay を取り下げ、mem の終了コードで終わる（`cli-operations-guide.md:308`） | S2 の中の拒否なので、全部を戻す。**task の行も残らない**。exit は mem の終了コードのまま。stdout は空 | **要（結果の変化。§8 H2）** |
 | C5 | relay の方針以外の拒否（`RELAY_CHAIN_BLOCKED`・`RELAY_HOPS_EXCEEDED`・`RELAY_DUPLICATE_PENDING`・`RELAY_SELF_TARGET`・`RELAY_WORKTREE_NOT_FOUND`、`src/cli/commands/relays.ts:70-76`） | relay の段で exit 2 と固有の文面。それより前の段の行（タスク・登録）は残る | 同じ code・同じ文面・exit 2。S2 の中の拒否なので、何も残らない。#4420 は新しい code を作らない（PM の決定） | 不要（code と exit は同じ。行が残らなくなるのは I1 の直し） |
-| C6 | 名簿の拒否（`--register`、上限・id） | exit 2（送る前）または警告・exit 0（送った後） | `--register` の名簿の検査は S2 で行う。名簿が断る行は、何も書かず送らず exit 2 | 不要（#4458 の CLI の判定と同じ結果。#4479 の方向） |
+| C6 | 名簿の拒否（`--register`、上限・id） | exit 2（送る前）または警告・exit 0（送った後） | `--register` の名簿の検査は S2 で行う。名簿が断る行は、何も書かず送らず exit 2。**応答の code は未確定**（§8.3 の U3。PR0 の表は案として 400 `invalid_request` を置いた） | 不要（#4458 の CLI の判定と同じ結果。#4479 の方向） |
 | C7 | 古いサーバー（能力の一覧にトークンが無い） | — | H3 で決める | **要（§8 H3）** |
 | C8 | 能力の確認に失敗した | — | exit（`serverResolvesSessionTargets` と同じ exit）。古い経路へ落とさない | 不要（既存の能力の確認の約束と同じ） |
 | C9 | 確定の後の失敗（起動の失敗など） | CLI が `failTask` 等で取り消す。CLI が止まれば残る | サーバーが S4 で始末する。exit は今の失敗の exit のまま | 不要 |
 | C10 | `--model --auto-yes`（K2） | 送った後で Auto-Yes だけが方針で断られる（警告・exit 0） | 方針の拒否は S2 で、何も送らず exit 33 | 不要（I1 の直し。既知の制限の解消） |
-| C11a | 名簿に無い ad-hoc の id ＋ `--agent antigravity` ＋ `--reply-to`、**AI の起点**（`session`・`agent`・`unknown`・`schedule`。N1） | relay は開き、打鍵は `/send` の柵で exit 33 で断られ、同じ要求の中で relay は `cancelled`。relay の行（`cancelled`）と `requested` の system line（とその配信）が残る（PM の確かめ `check-agy-relay-fence.md`） | S2 の規則 0 で、実際に打つ tool（antigravity）で断る。exit 33。relay の行も system line も配信も、何も残らない | 不要（exit は同じ。I1 の直し） |
-| C11b | 同じ形で、**端末の起点**（N1。確かめ V3-1） | `/send` の柵は端末の起点の antigravity への送信を許す（`policy.ts:95-98`）。relay の規則 0 は名簿の既定の tool（例: claude）で判定されて通る。**relay が開いたまま打鍵され、exit 0**。規則 0（どの起点でも antigravity の端の relay を断る、`relay-policy.ts:128-139`）が破れている | S2 の規則 0 で、実際に打つ tool（antigravity）で断る。**exit 33**。何も残らず、何も打たない | **要（成功から拒否へ変わる。§8 H6）** |
+| C11a | 名簿に無い ad-hoc の id ＋ `--agent antigravity` ＋ `--reply-to`、**AI の起点**（`session`・`agent`・`unknown`・`schedule`。N1） | relay は開き、打鍵は `/send` の柵で exit 33 で断られ、同じ要求の中で relay は `cancelled`。relay の行（`cancelled`）と `requested` の system line（とその配信）が残る（PM の確かめ `check-agy-relay-fence.md`）。**PR1a 時点の今**: #4496 で `POST /api/relays` が `to` を `--agent` の tool で判定するので、relay は開かず exit 33、何も残らない（`tests/integration/cli-relay-adhoc-tool-4496.test.ts`） | S2 の規則 0 で、実際に打つ tool（antigravity）で断る。exit 33。relay の行も system line も配信も、何も残らない | 不要（exit は同じ。I1 の直し） |
+| C11b | 同じ形で、**端末の起点**（N1。確かめ V3-1） | `/send` の柵は端末の起点の antigravity への送信を許す（`policy.ts:95-98`）。relay の規則 0 は名簿の既定の tool（例: claude）で判定されて通る。**relay が開いたまま打鍵され、exit 0**。規則 0（どの起点でも antigravity の端の relay を断る、`relay-policy.ts:128-139`）が破れている。**PR1a 時点の今**: #4496 で直っている（exit 33、relay の行も打鍵も無い。同じ試験の terminal の行） | S2 の規則 0 で、実際に打つ tool（antigravity）で断る。**exit 33**。何も残らず、何も打たない | **要（成功から拒否へ変わる。§8 H6）** |
 | C12 | 確定の後の失敗の出力（表の漏れ 2） | `--contract` は送る前に `Task created:`（stderr）と task の id（stdout）を出すので、失敗でも id が残る。応答には `roleSettings` がある（`send/route.ts:118-121`） | 失敗の応答に `taskId`・`relayId`・`roleSettings`・`sendOutcome` を載せる。CLI は、失敗のときも `Task created:` と task の id を、今と同じ順で失敗の文の前に出す。方針の拒否・S2 の拒否では、タスクが無いので出さない | 不要（今の出力の約束を保つ） |
 | C13 | ロールなしの `--register`（表の漏れ 1） | 送れた後にだけ登録する（`send.ts:1470-1477`）。失敗では行が残らない | 同じ（S3 の送れた後に登録。方針は S2 で判定済み） | 不要（今と同じ） |
 | C14 | CLI の中断（Ctrl-C・接続の切断。表の漏れ 3） | CLI が `/send` の前で止まれば、打鍵は起きない | 要求を送った後は、サーバーが S3 まで進みうる。打鍵の直前に中断を確かめ、届いていれば打たない（not_sent で S4）。届かない（`request.signal` が切断を反映しない）ときは打つ | **要（§8 H5）** |
-| C15 | 端の解決の失敗（I3b の fail-closed。表の漏れ 4） | `resolveRelaySession` が fallback の tool（claude）で判定し、relay を開く | **新しい route だけ**: 503 `RELAY_ENDPOINT_UNRESOLVED`。何も書かない。新しい CLI は exit 99（`UNEXPECTED_ERROR`、再送してよい）。新しい exit の番号は足さない<br>既存の `POST /api/relays`（古い CLI・`ask`・`send` の古い経路）は**今の fallback のまま変えない**（I5。確かめ V3-2）。その経路の端の解決の失敗は、今と同じく fallback で判定され、打鍵は `/send` の柵、配送は relay の pump の規則 0（#4456 (5)）が受け持つ | **要（新しい code。§8 H4）** |
+| C15 | 端の解決の失敗（I3b の fail-closed。表の漏れ 4） | `resolveRelaySession` が fallback の tool（claude）で判定し、relay を開く。**PR1a 時点の今**: #4496 で既存の `openRelay`・書き込みの API の判定も、読めない端を `null`（すべての tool）として 409 `RELAY_TOOL_POLICY_DENIED` で断る（fail-closed）。fallback で開くことは無い（§4.2 (b)2 の注） | **新しい route だけ**: 503 `RELAY_ENDPOINT_UNRESOLVED`。何も書かない。新しい CLI は exit 99（`UNEXPECTED_ERROR`、再送してよい）。新しい exit の番号は足さない<br>既存の `POST /api/relays`（古い CLI・`ask`・`send` の古い経路）は**今の fallback のまま変えない**（I5。確かめ V3-2）。その経路の端の解決の失敗は、今と同じく fallback で判定され、打鍵は `/send` の柵、配送は relay の pump の規則 0（#4456 (5)）が受け持つ（PR1a の注: 今の既存の経路は上の「今」のとおり fail-closed で、変えないのはその形） | **要（新しい code。§8 H4）** |
 | C16 | `IMMEDIATE` のトランザクションの busy（表の漏れ 4） | — | 503 `OPERATION_BUSY`。何も書かない。CLI は exit 99（再送してよい） | **要（新しい code。§8 H4）** |
 | C17 | `--note` で Auto-Yes の状態が読めない（表の漏れ 5） | 送る前に止めて exit 99（`send.ts:1333-1341`） | サーバーが同じプロセスの中で状態を読むので、この終わり方は無くなる | 不要（終わり方が 1 つ減るだけ） |
 | C18 | `message` と `contract` の両方（N3） | CLI はサーバーが作った本文だけを打つ | 新しい route は 400 `invalid_request`（exit 2）で、何もしない | 不要（新しい route の入力の検査。CLI はこの形を送らない） |
@@ -406,7 +412,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 | H3 | 新しい CLI と古いサーバー（能力の一覧にトークンが無い）: **起点で分ける**。端末の起点は今の別々の要求の形で送り、stderr に 1 行の注意を出す。端末以外の起点は断る（exit 2、I7 で固定）。能力の確認の失敗は、どの起点でも断る（C7・C8） |
 | H4 | 新しい公開 API `POST /api/worktrees/:id/send-operation`・能力 `send-operation-v1`・応答の欄 `policy.stage`・応答の code `RELAY_ENDPOINT_UNRESOLVED`（新しい route だけ）・`OPERATION_BUSY`（どちらも exit 99、再送してよい）を**足す**（C1・C15・C16） |
 | H5 | CLI の中断の意味の変化を**この形でよい**とする（要求を送った後は、サーバーが打鍵まで進みうる。打鍵の直前に中断を確かめ、届いていれば打たない。C14） |
-| H6 | 端末から ad-hoc の instance へ `--agent antigravity --reply-to` で送る形を**直す**（今の exit 0 → exit 33。relay の規則 0 の破れの直し。C11b）。docs の既知の制限と CHANGELOG に、直ったことを書く |
+| H6 | 端末から ad-hoc の instance へ `--agent antigravity --reply-to` で送る形を**直す**（今の exit 0 → exit 33。relay の規則 0 の破れの直し。C11b）。docs の既知の制限と CHANGELOG に、直ったことを書く。**PR1a 時点の今**: #4496 で既に exit 33・何も残らない（C11b の注）。決定はそのまま |
 
 以下は、人に伺ったときの問いの記録（決定の根拠として残す）。
 
@@ -419,7 +425,7 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 | H3 | 新しい CLI と古いサーバー（能力の一覧にトークンが無い）で、**端末の起点の**書き込みのフラグを伴う送信をどうするか（C7）。端末以外の起点は、答えにかかわらず断る（I7） | (a) 断る（exit 2。「サーバーを同じ版に更新してください」）<br>(b) 今の別々の要求の形で送り、stderr に 1 行の注意<br>(c)（第 2 版の案。第 3 版では I7 に固定した）起点で分ける。端末（人）は (b)、それ以外（エージェント・Schedule・不明。stderr を読まない呼び手）は (a) | (c)。エージェントからの送信で、既知の穴（K1・K2）の形を黙って使わない。人の端末は使い続けられる。能力の確認の失敗は、どれでも断る（C8） |
 | H4 | 新しい公開 API `POST /api/worktrees/:id/send-operation` と能力 `send-operation-v1`、応答の欄 `policy.stage`、新しい応答の code `RELAY_ENDPOINT_UNRESOLVED`（新しい route だけ。既存の `POST /api/relays` は変えない）・`OPERATION_BUSY`（どちらも CLI は exit 99、再送してよい）を足してよいか（C1・C15・C16） | 足す／足さない（足さないなら案 A は取れない） | 足す |
 | H5 | CLI の中断の意味の変化（C14）。要求を送った後に Ctrl-C しても、サーバーが打鍵まで進みうる（打鍵の直前に中断を確かめ、届いていれば打たない） | (a) この形でよい<br>(b) 中断を届けるため、CLI が要求の取り消しの要求を別に送る（新しい API がもう 1 つ要る） | (a)。今の `/send` を送った後の Ctrl-C も、サーバーが打鍵まで進む（新しい route でも、打つかどうかの境目が `/send` から操作の全体へ広がるだけ） |
-| H6 | 端末から、名簿に無い ad-hoc の instance へ `--agent antigravity --reply-to` で送る形（C11b）が、今は成功（exit 0。relay が開き打鍵される）で、新しい形では exit 33 になる。relay の規則 0（どの起点でも antigravity の端の relay を断る、#4437 の決定）の破れを直す変化 | (a) 直す（exit 33）<br>(b) 端末の起点だけ今のまま（規則 0 の破れを既知の制限として docs に書く） | (a)。規則 0 は起点を問わない決まりで、今の成功は判定する tool の取り違えによるもの。docs の既知の制限（0.53.0 の CHANGELOG）にも、直ったことを書く |
+| H6 | 端末から、名簿に無い ad-hoc の instance へ `--agent antigravity --reply-to` で送る形（C11b）が、今は成功（exit 0。relay が開き打鍵される）で、新しい形では exit 33 になる（伺った時点の記録。PR1a 時点では #4496 で既に exit 33）。relay の規則 0（どの起点でも antigravity の端の relay を断る、#4437 の決定）の破れを直す変化 | (a) 直す（exit 33）<br>(b) 端末の起点だけ今のまま（規則 0 の破れを既知の制限として docs に書く） | (a)。規則 0 は起点を問わない決まりで、今の成功は判定する tool の取り違えによるもの。docs の既知の制限（0.53.0 の CHANGELOG）にも、直ったことを書く |
 
 ### 8.2 PM が範囲の中で決めること（推奨）
 
@@ -433,6 +439,16 @@ CLI の `send` は、1 つの操作を次の別々の要求に分けて送る（
 | P6 | プロセスの停止の残りを、Sprint 9 では既知の制限とするか（§4.4） | する（起動の時の照合は PR3 と一緒に） |
 | P7 | 打鍵の前の要求の中断を not_sent にするか（§4.2 S3） | する |
 | P8 | await の網羅の静的な検査を入れるか（§4.3） | Sprint 9 では入れない（安全の根拠は I3c） |
+
+### 8.3 PR1b の前に決める未確定（PM が決める。PR1a で一覧した）
+
+PR0 の表とそのレビュー（`s9/review-4466-pr0-codex-r2.md` の新規 P1 1・2）で、設計が決めていない点が出た。この設計書では決めない。各項目に推奨と根拠を書く。
+
+| # | 未確定 | 選択肢 | 推奨 | 根拠 |
+|---|---|---|---|---|
+| U1 | §4.1 の成功の応答の `policy` の形 | (a) PR0 の表の案: `policy.target.tool` と、relay があれば `policy.relay.from` / `policy.relay.to`（判定した tool）<br>(b) 成功では `policy` を出さない（§4.1 のまま） | (a) | §6.1 の ad-hoc の `--agent codex` の対照（`to` の判定に codex が使われる）と §6.3 の変異「`to` を名簿から解決し直す」は、応答に判定した tool が無いと観測できない（打鍵先の instance だけでは、`to` の規則 0 がどの tool で判定されたかを見分けられない）。(b) なら §6.1 の期待を DB の外の観測に書き換える必要がある |
+| U2 | 同じ要求で宛先の方針（`TOOL_POLICY_DENIED`）と relay の規則 0（`RELAY_TOOL_POLICY_DENIED`）の両方が断るとき、どちらの code を返すか（§4.2 (b) は 1 宛先 → 2 relay の順、§6.1 の解決の食い違いの行は「規則 0 の理由」を期待） | (a) relay を先（`RELAY_TOOL_POLICY_DENIED`）<br>(b) 宛先を先（`TOOL_POLICY_DENIED`。§4.2 (b) の番号のまま） | (a) | 今の書き込みの API の判定（`findWriteToolPolicyRefusal`、`write-tool-policy.ts`）は relay を先に判定する（CLI が relay を打鍵の前に開く順）。今の CLI（古い経路、C11a）は `RELAY_TOOL_POLICY_DENIED` を出すので、(a) なら新旧の経路で stderr の 1 行目の理由が変わらず、§6.1 の期待とも合う。exit はどちらも 33 で変わらない。(a) を採るなら §4.2 (b) の 1 と 2 の順を入れ替える（判定の集合は同じ） |
+| U3 | §5.1 C6 の名簿の拒否の応答の code | (a) `invalid_request`（PR0 の表の案）<br>(b) 新しい code（例 `ROSTER_LIMIT_EXCEEDED`）を足す | (a) | 今の `POST /instances/roles` は上限で 400 を返し、同じ値を `error` の欄に載せる（`roleErrorResponse`）。新しい code を足すと H4 の公開 API の追加が増え、CLI の写し（exit 2）も同じ。ただし欄の名前が `error` から `code` に変わるので、PR2 の CLI の写しで両方を読むことを確かめる |
 
 ---
 
