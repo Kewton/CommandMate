@@ -23,7 +23,7 @@ import { ConversationPairCard } from './ConversationPairCard';
 import { HistorySearchBar } from './HistorySearchBar';
 import { HISTORY_PANE_ID } from './TerminalContainer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { normalizeChatFilePath, isChatFilePathOutsideWorktree } from '@/lib/chat/chat-file-path';
 import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import {
@@ -598,10 +598,25 @@ export const HistoryPane = memo(function HistoryPane({
   // dead tab for the very same body. Only a definite "no" (404 / 400 / 403)
   // stops the open — a probe that could not be made is not evidence of absence,
   // so the panel opens and reports its own error (see `lib/chat/chat-file-probe`).
+  //
+  // [#4501] A path OUTSIDE this worktree is not asked about at all — the files
+  // API cannot serve it. It is copied instead, exactly as chat does, so the two
+  // surfaces answer the same body the same way.
   const handleFilePathClick = useCallback(
     (path: string) => {
       const target = normalizeChatFilePath(path, resolvedWorktreePath);
       if (target === null) return;
+      if (isChatFilePathOutsideWorktree(path, resolvedWorktreePath)) {
+        void (async () => {
+          try {
+            await copyToClipboard(target);
+            showToast?.(tRef.current('conversation.filePathOutsideWorktree'), 'info');
+          } catch {
+            showToast?.(tRef.current('conversation.filePathOutsideWorktreeNoCopy'), 'error');
+          }
+        })();
+        return;
+      }
       void (async () => {
         const probe = await probeChatFilePath(worktreeId, target);
         if (probe === 'missing') {

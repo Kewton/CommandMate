@@ -28,6 +28,11 @@ import type { ChatMessage } from '@/types/models';
 import { ChatTranscript } from '@/components/worktree/ChatTranscript';
 import { HistoryPane } from '@/components/worktree/HistoryPane';
 
+const copyToClipboardMock = vi.fn(async (_text: string) => {});
+vi.mock('@/lib/clipboard-utils', () => ({
+  copyToClipboard: (text: string) => copyToClipboardMock(text),
+}));
+
 const WORKTREE_ID = 'commandagent-develop';
 const WORKTREE_PATH = '/Users/maenokota/share/work/github_kewton/CommandAgent-develop';
 const T0 = Date.UTC(2026, 9, 6, 9, 0, 0);
@@ -73,6 +78,8 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, status: 200 });
   vi.stubGlobal('fetch', fetchMock);
+  copyToClipboardMock.mockReset();
+  copyToClipboardMock.mockImplementation(async () => {});
 });
 
 afterEach(() => {
@@ -112,8 +119,9 @@ async function settle(): Promise<void> {
 
 describe('[#2352] History and a path this worktree does not have', () => {
   it('shows the toast and opens nothing for the Issue’s path (a 404 from outside)', async () => {
-    // Exactly the live capture: the bare path, outside the worktree, and the
-    // files API (since #2349) answering 404. Chat already ended here in a toast.
+    // Exactly the live capture: the bare path, outside the worktree. [#4501 案 1]
+    // The reason given is now "outside this worktree", not "not here" — the
+    // files API can never serve it, so the probe is not asked at all.
     const onFilePathClick = vi.fn();
     const showToast = vi.fn();
     fetchMock.mockResolvedValue({ ok: false, status: 404 });
@@ -124,20 +132,27 @@ describe('[#2352] History and a path this worktree does not have', () => {
 
     fireEvent.click(pathButton(OUTSIDE_ABS));
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(MISSING_KEY, 'error'));
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        'worktree.conversation.filePathOutsideWorktree',
+        'info',
+      ),
+    );
+    expect(copyToClipboardMock).toHaveBeenCalledWith(OUTSIDE_ABS);
     expect(onFilePathClick).not.toHaveBeenCalled();
   });
 
   it('asked with HEAD, on the URL the file panel would GET, before deciding', async () => {
-    // The capture showed the panel's own GET going out; a probe that goes to a
-    // different URL than the open it gates is a second opinion, not a gate.
-    renderPane(conversation(`検証 epic は ${OUTSIDE_ABS} に置いた。`));
+    // [#4501 案 1] An OUTSIDE path is the one case that is no longer asked
+    // about; a path inside the worktree still is, on the same URL the open uses.
+    const inside = `${WORKTREE_PATH}/docs/removed-last-week.md`;
+    renderPane(conversation(`削除済み: ${inside}`));
 
-    fireEvent.click(pathButton(OUTSIDE_ABS));
+    fireEvent.click(pathButton(inside));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        `/api/worktrees/${WORKTREE_ID}/files/${OUTSIDE_ABS}`,
+        `/api/worktrees/${WORKTREE_ID}/files/docs/removed-last-week.md`,
         { method: 'HEAD', cache: 'no-store' },
       ),
     );
@@ -283,20 +298,31 @@ describe('[#2352] chat and History answer the same click the same way', () => {
   }
 
   it('both toast the same message and open nothing for the missing path', async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 404 });
-
+    // [#4501 案 1] This body names a path OUTSIDE the worktree, so both surfaces
+    // answer with the outside wording; the point of the test — one wording, not
+    // two — is unchanged.
     const chatOpen = vi.fn();
     const chatToast = vi.fn();
     const chat = renderTranscript({ onFilePathClick: chatOpen, showToast: chatToast });
     fireEvent.click(pathButton(OUTSIDE_ABS));
-    await waitFor(() => expect(chatToast).toHaveBeenCalledWith(MISSING_KEY, 'error'));
+    await waitFor(() =>
+      expect(chatToast).toHaveBeenCalledWith(
+        'worktree.conversation.filePathOutsideWorktree',
+        'info',
+      ),
+    );
     chat.unmount();
 
     const historyOpen = vi.fn();
     const historyToast = vi.fn();
     renderPane(conversation(BODY), { onFilePathClick: historyOpen, showToast: historyToast });
     fireEvent.click(pathButton(OUTSIDE_ABS));
-    await waitFor(() => expect(historyToast).toHaveBeenCalledWith(MISSING_KEY, 'error'));
+    await waitFor(() =>
+      expect(historyToast).toHaveBeenCalledWith(
+        'worktree.conversation.filePathOutsideWorktree',
+        'info',
+      ),
+    );
 
     expect(chatOpen).not.toHaveBeenCalled();
     expect(historyOpen).not.toHaveBeenCalled();

@@ -32,6 +32,11 @@ import { HistoryPane } from '@/components/worktree/HistoryPane';
 import { CHAT_FILE_LINK_TESTID } from '@/components/worktree/ChatMessageBubble';
 import { ChatFileLinkProvider } from '@/lib/chat/chat-file-link-scope';
 
+const copyToClipboardMock = vi.fn(async (_text: string) => {});
+vi.mock('@/lib/clipboard-utils', () => ({
+  copyToClipboard: (text: string) => copyToClipboardMock(text),
+}));
+
 const WORKTREE_ID = 'commandagent-develop';
 const WORKTREE_PATH = '/Users/maenokota/share/work/github_kewton/CommandAgent-develop';
 const T0 = Date.UTC(2026, 8, 5, 9, 0, 0);
@@ -85,6 +90,8 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, status: 200 });
   vi.stubGlobal('fetch', fetchMock);
+  copyToClipboardMock.mockReset();
+  copyToClipboardMock.mockImplementation(async () => {});
 });
 
 afterEach(() => {
@@ -196,15 +203,17 @@ describe('[#2345] a Markdown link in a chat reply', () => {
 
     clickAllowsNavigation(link('別リポジトリのログ'));
 
+    // [#4501 案 1] The path is still reported as itself, and the files API still
+    // cannot serve it — but the click no longer ASKS a question the answer to
+    // which is already known: it copies the path and says why.
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        `/api/worktrees/${WORKTREE_ID}/files/${OUTSIDE_ABS}`,
-        { method: 'HEAD', cache: 'no-store' },
+      expect(showToast).toHaveBeenCalledWith(
+        'worktree.conversation.filePathOutsideWorktree',
+        'info',
       ),
     );
-    await waitFor(() =>
-      expect(showToast).toHaveBeenCalledWith('worktree.conversation.filePathMissing', 'error'),
-    );
+    expect(copyToClipboardMock).toHaveBeenCalledWith(OUTSIDE_ABS);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(onFilePathClick).not.toHaveBeenCalled();
   });
 
@@ -300,13 +309,22 @@ describe('[#2345] the same link in History', () => {
   });
 
   it('reports a path outside this worktree unchanged', async () => {
-    // Normalization leaves a foreign absolute path as itself; whether it then
-    // opens is the probe's call (#2352), and the default stub above says yes.
+    // Normalization leaves a foreign absolute path as itself; [#4501 案 1] the
+    // click then copies that path and opens nothing, rather than asking the
+    // files API about a path it cannot serve.
     const onFilePathClick = vi.fn();
-    renderPane({ onFilePathClick });
+    const showToast = vi.fn();
+    renderPane({ onFilePathClick, showToast });
 
     clickAllowsNavigation(link('別リポジトリのログ'));
-    await waitFor(() => expect(onFilePathClick).toHaveBeenCalledWith(OUTSIDE_ABS));
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        'worktree.conversation.filePathOutsideWorktree',
+        'info',
+      ),
+    );
+    expect(copyToClipboardMock).toHaveBeenCalledWith(OUTSIDE_ABS);
+    expect(onFilePathClick).not.toHaveBeenCalled();
   });
 
   it('renders the card`s own links the same way with no worktree root', () => {
