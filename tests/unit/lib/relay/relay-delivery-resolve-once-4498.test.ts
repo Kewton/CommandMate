@@ -29,6 +29,8 @@ const findRelayHoldReason = vi.fn();
 const rosterFault = vi.hoisted(() => ({ instanceId: null as string | null, remaining: 0 }));
 /** T2: what the display resolver answers for the requester (as if it fell back). */
 const displayOverride = vi.hoisted(() => ({ cliToolId: null as string | null }));
+/** r1 (I2): what rule 0's own reading of the requester would answer, if it read again. */
+const endpointOverride = vi.hoisted(() => ({ cliToolId: null as string | null }));
 
 vi.mock('@/lib/ws-server', () => ({ broadcastMessage: vi.fn() }));
 vi.mock('@/lib/db/db-instance', () => ({ getDbInstance: () => db }));
@@ -61,6 +63,12 @@ vi.mock('@/lib/relay/relay-session-ref', async (importOriginal) => {
         return { ...resolved, cliToolId: displayOverride.cliToolId as typeof resolved.cliToolId };
       }
       return resolved;
+    },
+    resolveRelayEndpointTool: (...args: Parameters<typeof actual.resolveRelayEndpointTool>) => {
+      if (endpointOverride.cliToolId !== null && args[1].instanceId === REQ_ID) {
+        return endpointOverride.cliToolId as ReturnType<typeof actual.resolveRelayEndpointTool>;
+      }
+      return actual.resolveRelayEndpointTool(...args);
     },
   };
 });
@@ -118,6 +126,7 @@ beforeEach(() => {
   rosterFault.instanceId = null;
   rosterFault.remaining = 0;
   displayOverride.cliToolId = null;
+  endpointOverride.cliToolId = null;
   resetRelayDeliveryState();
   sendUserMessage.mockReset();
   sendUserMessage.mockResolvedValue({ ok: true, message: { id: 'm1' } });
@@ -239,5 +248,75 @@ describe('Issue #4498 T4: the roster moves while the readiness check awaits', ()
     await pumpRelayDeliveries();
     expect(sendUserMessage).not.toHaveBeenCalled();
     expect(getRelayById(db, relayId)?.state).toBe('cancelled');
+  });
+});
+
+describe('Issue #4498 r1 (I2): rule 0 judges the resolution the send uses, not a second read', () => {
+  it('4498 r1 I2 a second read of the requester would say antigravity: judged on the one resolution (codex), sent once, not withdrawn', async () => {
+    // Undeclared: a second read answering antigravity would withdraw the relay.
+    const relayId = openRelayWithReply();
+    findRelayHoldReason.mockImplementationOnce(async () => {
+      endpointOverride.cliToolId = 'antigravity';
+      return null;
+    });
+    await pumpRelayDeliveries();
+    expect(sentTools()).toEqual(['codex']);
+    expect(getRelayById(db, relayId)?.state).not.toBe('cancelled');
+  });
+});
+
+describe('Issue #4498 r1: a registered requester whose roster row goes away is not typed into under another tool', () => {
+  /** Default claude, the instance registered as codex: a non-primary id, so a lost row resolves to claude. */
+  const REG: RelayEndpoint = { worktreeId: 'wt-c', instanceId: 'reg-9' };
+
+  function openFrom(from: RelayEndpoint): string {
+    const relay = createRelay(db, { from, to: WORKER, hops: 1, expiresAt: NOW + DAY_MS, now: NOW });
+    expect(stashRelayPayload(db, relay.id, 'reply', '[from B] done', NOW)).toBe(true);
+    return relay.id;
+  }
+  const removeRow = (endpoint: RelayEndpoint): void => {
+    db.prepare('DELETE FROM agent_instances WHERE worktree_id = ? AND instance_id = ?').run(endpoint.worktreeId, endpoint.instanceId);
+  };
+
+  beforeEach(() => {
+    insertWorktree('wt-c', 'claude');
+  });
+
+  it('4498 r1 the row goes away during the readiness check: nothing sent, held; held again next pump; the row back → codex once', async () => {
+    addRosterInstance(REG, 'codex');
+    const relayId = openFrom(REG);
+    findRelayHoldReason.mockImplementationOnce(async () => {
+      removeRow(REG);
+      return null;
+    });
+    await pumpRelayDeliveries();
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(deliveryState(relayId)).toBeNull();
+    expect(getRelayPendingPayload(db, relayId)).toMatchObject({ kind: 'reply' });
+
+    await pumpRelayDeliveries();
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(isOpenRelayState(getRelayById(db, relayId)?.state ?? 'cancelled')).toBe(true);
+    expect(getRelayPendingPayload(db, relayId)).toMatchObject({ kind: 'reply' });
+
+    addRosterInstance(REG, 'codex');
+    await pumpRelayDeliveries();
+    await pumpRelayDeliveries();
+    expect(sentTools()).toEqual(['codex']);
+    expect(sendUserMessage.mock.calls[0][1]).toMatchObject({ worktreeId: 'wt-c', instanceId: 'reg-9' });
+  });
+
+  it('4498 r1 negative control — an ad-hoc id never on the roster goes to the worktree default (claude)', async () => {
+    openFrom({ worktreeId: 'wt-c', instanceId: 'helper-7' });
+    await pumpRelayDeliveries();
+    expect(sentTools()).toEqual(['claude']);
+  });
+
+  it('4498 r1 the shared resolver\'s last resort (the worktree declares no usable tool): held, never the assumed claude', async () => {
+    db.prepare('UPDATE worktrees SET cli_tool_id = ? WHERE id = ?').run('not-a-tool', 'wt-c');
+    const relayId = openFrom({ worktreeId: 'wt-c', instanceId: 'helper-7' });
+    await pumpRelayDeliveries();
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(getRelayPendingPayload(db, relayId)).toMatchObject({ kind: 'reply' });
   });
 });

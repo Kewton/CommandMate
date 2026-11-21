@@ -10,7 +10,8 @@
  * Never throws. {@link resolveRelaySession} is the display reading: a roster
  * that cannot be read still gives an alias (the instance id) and a tool (claude).
  * A delivery uses {@link tryResolveRelaySession} instead, which answers null
- * there, and holds rather than type into a guessed tool (Issue #4498).
+ * there (and for the shared resolver's last-resort guess), and holds rather than
+ * type into a guessed tool (Issue #4498).
  *
  * @module lib/relay/relay-session-ref
  */
@@ -18,7 +19,7 @@
 import type Database from 'better-sqlite3';
 import { getAgentInstance } from '@/lib/db/agent-instances-db';
 import { getWorktreeById } from '@/lib/db/worktree-db';
-import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
+import { resolveSessionTarget, type SessionTargetResolvedBy } from '@/lib/session/resolve-session-target';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { RelayEndpoint } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
@@ -85,30 +86,53 @@ export function resolveRelaySession(
   };
 }
 
+/** {@link tryResolveRelayDeliveryTarget}'s answer: the session, and which stage named its tool. */
+export interface RelayDeliveryTarget {
+  session: ResolvedRelaySession;
+  resolvedBy: SessionTargetResolvedBy;
+}
+
 /**
  * {@link resolveRelaySession} for a delivery (Issue #4498): the same resolution, or
- * null when the roster cannot be read — never the display fallback.
+ * null when it would be a guess — never the display fallback.
  *
  * `resolveRelaySession` answers claude when the read fails, which is right for an
  * alias in a system line and wrong for the session a reply is typed into: the
  * guessed tool would decide both rule 0 and the send, and a claude pane under the
- * same instance id would take a reply owed to codex. A delivery that gets null
- * holds the payload and tries again on the next pump.
+ * same instance id would take a reply owed to codex. Null too for the shared
+ * resolver's own last resort (`resolvedBy: 'fallback'`: the worktree declares no
+ * usable tool, so claude is assumed) — a guess all the same (r1). A delivery that
+ * gets null holds the payload and tries again on the next pump.
+ *
+ * `resolvedBy` lets the delivery tell a registered instance whose roster row went
+ * away (`roster` before, `worktree-default` now) from an ad-hoc id that was never
+ * on the roster and resolves to the worktree's default by design.
  */
-export function tryResolveRelaySession(
+export function tryResolveRelayDeliveryTarget(
   db: Database.Database,
   endpoint: RelayEndpoint
-): ResolvedRelaySession | null {
+): RelayDeliveryTarget | null {
   try {
-    const { cliToolId } = resolveSessionTarget(db, endpoint.worktreeId, {
+    const { cliToolId, resolvedBy } = resolveSessionTarget(db, endpoint.worktreeId, {
       instanceId: endpoint.instanceId,
     });
+    if (resolvedBy === 'fallback') {
+      logger.warn('relay-session-resolve-fallback', {
+        worktreeId: endpoint.worktreeId,
+        instanceId: endpoint.instanceId,
+        strict: true,
+      });
+      return null;
+    }
     const rosterRow = getAgentInstance(db, endpoint.worktreeId, endpoint.instanceId);
     return {
-      worktreeId: endpoint.worktreeId,
-      instanceId: endpoint.instanceId,
-      cliToolId,
-      alias: rosterRow?.alias ? rosterRow.alias : endpoint.instanceId,
+      session: {
+        worktreeId: endpoint.worktreeId,
+        instanceId: endpoint.instanceId,
+        cliToolId,
+        alias: rosterRow?.alias ? rosterRow.alias : endpoint.instanceId,
+      },
+      resolvedBy,
     };
   } catch (error) {
     logger.warn('relay-session-resolve-failed', {
@@ -119,6 +143,14 @@ export function tryResolveRelaySession(
     });
     return null;
   }
+}
+
+/** {@link tryResolveRelayDeliveryTarget}'s session alone (null when it is null). */
+export function tryResolveRelaySession(
+  db: Database.Database,
+  endpoint: RelayEndpoint
+): ResolvedRelaySession | null {
+  return tryResolveRelayDeliveryTarget(db, endpoint)?.session ?? null;
 }
 
 /**

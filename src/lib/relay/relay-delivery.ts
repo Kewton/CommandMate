@@ -96,7 +96,8 @@ import {
 import {
   resolveRelayEndpointTool,
   resolveRelaySession,
-  tryResolveRelaySession,
+  tryResolveRelayDeliveryTarget,
+  type RelayDeliveryTarget,
   type ResolvedRelaySession,
 } from '@/lib/relay/relay-session-ref';
 import { takeRelayObservedTool } from '@/lib/relay/relay-bind';
@@ -115,6 +116,7 @@ import {
 } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
 import { getOrInitGlobal } from '../global-state';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 
 // Issue #3996: the reply/notice decisions moved; their public names stay here.
 export { findWorkerReply, recoverBoundRelays, type RelayWorkerRef };
@@ -167,9 +169,19 @@ declare global {
   var __relayPumpAgain: boolean | undefined;
   // eslint-disable-next-line no-var
   var __relayAttemptsRecoveredBootId: string | undefined;
+  // eslint-disable-next-line no-var
+  var __relayRosterRequesters: Map<string, CLIToolType> | undefined;
 }
 
 const inFlight = getOrInitGlobal('__relayDeliveryInFlight', () => new Set<string>());
+/**
+ * Issue #4498 r1: the tool a relay's requester was last resolved to from its
+ * roster row, per relay id. A later resolution that no longer comes from the
+ * roster (the row was removed) and names another tool is held, not typed into:
+ * the same instance id under the worktree's default tool is a different
+ * session. In memory, so a restart forgets it (the ledger records ids only).
+ */
+const rosterRequesters = getOrInitGlobal('__relayRosterRequesters', () => new Map<string, CLIToolType>());
 
 /** Forget every in-flight delivery. Test seam. */
 export function resetRelayDeliveryState(): void {
@@ -177,6 +189,7 @@ export function resetRelayDeliveryState(): void {
   resetRelayDeliveryClaims();
   // Issue #4105: a restart forgets the last attempts' observations too.
   resetRelayDeliveryBlocks();
+  rosterRequesters.clear();
   globalThis.__relayPumpRunning = false;
   globalThis.__relayRecoveredBootId = undefined;
   globalThis.__relayAttemptsRecoveredBootId = undefined;
@@ -578,8 +591,8 @@ async function attemptDelivery(
 
   // Issue #4498 (A2): the readiness check is asked about the requester's resolved
   // tool, never the display fallback; an unreadable roster holds the payload.
-  const listedRequester = tryResolveRelaySession(db, listed.from);
-  if (!listedRequester) return holdUnresolved(relayId, kind);
+  const listedRequester = settleRequester(relayId, tryResolveRelayDeliveryTarget(db, listed.from));
+  if ('held' in listedRequester) return holdUnresolved(relayId, kind, listedRequester.held);
   const hold = await findRelayHoldReason(
     listedRequester.worktreeId,
     listedRequester.cliToolId,
@@ -605,8 +618,9 @@ async function attemptDelivery(
   // session typed into, with no await and no second read between it and the
   // claim. A failed read holds the payload BEFORE the claim (nothing taken, the
   // next pump tries again) — never the claude the display reading falls back to.
-  const requester = tryResolveRelaySession(db, relay.from);
-  if (!requester) return holdUnresolved(relayId, kind);
+  const settled = settleRequester(relayId, tryResolveRelayDeliveryTarget(db, relay.from));
+  if ('held' in settled) return holdUnresolved(relayId, kind, settled.held);
+  const requester = settled;
   // Issue #4437 (I6a): the readiness check awaited, and either end's instance
   // may run another tool now. Judged here, on the ends resolved after that
   // await — the `requester` below is the one typed into — before the claim.
@@ -728,15 +742,50 @@ async function attemptDelivery(
   }
 }
 
+type RequesterHoldReason = 'resolve-failed' | 'roster-row-gone';
+
 /**
- * Issue #4498: the requester could not be resolved (its roster read failed), so
- * neither rule 0 nor the send has a tool to go on. The payload is left as it is
- * — not claimed, not dropped — and the next pump tries again; the expiry sweep
- * and a cancel act on it as on any queued payload. Logged with its own reason;
- * not a `lastDeliveryBlock` (that reason set is the API's, see the commit).
+ * Issue #4498: the requester a delivery may type into, or why it is held.
+ *
+ * - null (the read failed, or only the resolver's last-resort guess answered):
+ *   `resolve-failed`.
+ * - r1: resolved from the roster → remembered for this relay. Resolved from
+ *   anything else to a tool other than the remembered one → `roster-row-gone`:
+ *   the instance was registered as that tool and its row went away, so the
+ *   worktree's default under the same id is another session. An ad-hoc id never
+ *   on the roster has nothing remembered and goes to the worktree default, as the
+ *   shared resolver (and `/send`) resolve it.
  */
-function holdUnresolved(relayId: string, kind: 'reply' | 'prompt' | 'expired'): RelayDeliveryOutcome {
-  logger.info('relay-delivery-held', { relayId, kind, reason: 'resolve-failed' });
+function settleRequester(
+  relayId: string,
+  target: RelayDeliveryTarget | null
+): ResolvedRelaySession | { held: RequesterHoldReason } {
+  if (!target) return { held: 'resolve-failed' };
+  if (target.resolvedBy === 'roster') {
+    rosterRequesters.set(relayId, target.session.cliToolId);
+    return target.session;
+  }
+  const registered = rosterRequesters.get(relayId);
+  if (registered !== undefined && registered !== target.session.cliToolId) {
+    return { held: 'roster-row-gone' };
+  }
+  return target.session;
+}
+
+/**
+ * Issue #4498: the requester could not be resolved to a session it is known to
+ * run in (see {@link settleRequester}), so neither rule 0 nor the send has a tool
+ * to go on. The payload is left as it is — not claimed, not dropped — and the
+ * next pump tries again; the expiry sweep and a cancel act on it as on any queued
+ * payload. Logged with its own reason; not a `lastDeliveryBlock` (that reason set
+ * is the API's, see the commit).
+ */
+function holdUnresolved(
+  relayId: string,
+  kind: 'reply' | 'prompt' | 'expired',
+  reason: RequesterHoldReason
+): RelayDeliveryOutcome {
+  logger.info('relay-delivery-held', { relayId, kind, reason });
   return 'held';
 }
 
@@ -1125,7 +1174,12 @@ export async function pumpRelayDeliveries(): Promise<void> {
       const listing = listDeliverableRelayPayloads(db);
       // Issue #4105: an observation of a relay no longer listed (delivered,
       // closed, emptied, held) is dropped.
-      pruneRelayDeliveryBlocks(new Set(listing.map((item) => item.relay.id)));
+      const listed = new Set(listing.map((item) => item.relay.id));
+      pruneRelayDeliveryBlocks(listed);
+      // Issue #4498 r1: a relay no longer listed has no requester left to type into.
+      for (const relayId of rosterRequesters.keys()) {
+        if (!listed.has(relayId)) rosterRequesters.delete(relayId);
+      }
       for (const item of listing) {
         if (inFlight.has(item.relay.id)) continue;
         inFlight.add(item.relay.id);

@@ -38,12 +38,10 @@ describe('Issue #4498 P3: the relay refusal says whether the relay was opened, a
   });
 
   it('4498 refused at the bound /send, withdrawal confirmed: opened, withdrawn — not "not opened"', () => {
-    for (const extra of [{ relayWithdrawn: true }, {}]) {
-      const line = fourthLine({ relayId: RELAY_ID, sendOutcome: 'not_sent', ...extra });
-      expect(line).toContain(`The relay ${RELAY_ID} had been opened and was withdrawn; nothing was sent`);
-      expect(line).not.toContain('was not opened');
-      expect(line).toContain('`to` end');
-    }
+    const line = fourthLine({ relayId: RELAY_ID, sendOutcome: 'not_sent', relayWithdrawn: true });
+    expect(line).toContain(`The relay ${RELAY_ID} had been opened and was withdrawn; nothing was sent`);
+    expect(line).not.toContain('was not opened');
+    expect(line).toContain('`to` end');
   });
 
   it('4498 refused at the bound /send, withdrawal not confirmed: never "was withdrawn"; says how to cancel it', () => {
@@ -53,5 +51,12 @@ describe('Issue #4498 P3: the relay refusal says whether the relay was opened, a
     expect(line).toContain('its withdrawal could not be confirmed');
     expect(line).toContain(`commandmate relays cancel ${RELAY_ID}`);
     expect(line).toContain('nothing was sent');
+  });
+
+  it('4498 r1 an older server (relayId, no relayWithdrawn): unconfirmed, never "was withdrawn"', () => {
+    const line = fourthLine({ relayId: RELAY_ID, sendOutcome: 'not_sent' });
+    expect(line).not.toContain('was withdrawn');
+    expect(line).toContain('its withdrawal could not be confirmed');
+    expect(line).toContain(`commandmate relays cancel ${RELAY_ID}`);
   });
 });

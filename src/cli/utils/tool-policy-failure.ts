@@ -230,13 +230,14 @@ export function toolPolicyDenialFromResponse(
 /**
  * Issue #4498: what became of the relay. A refusal at creation (no `relayId`) opened
  * none; a bound `/send` refused it after it was opened, and says whether its
- * withdrawal took (`relayWithdrawn`; a server before #4498 sends none and said
- * "withdrawn" in its own `error`).
+ * withdrawal took (`relayWithdrawn`). Only `true` is a confirmed withdrawal: a server
+ * before #4498 sends no `relayWithdrawn` and said "withdrawn" even when the write
+ * failed, so its silence is read as unconfirmed (r1).
  */
 function relayRefusalSentence(payload: ToolPolicyDeniedResponse, detail: string): string {
   const relayId = typeof payload.relayId === 'string' && payload.relayId !== '' ? payload.relayId : null;
   if (relayId === null) return `The relay was not opened and nothing was sent (${detail}).`;
-  if (payload.relayWithdrawn === false) {
+  if (payload.relayWithdrawn !== true) {
     return `The relay ${relayId} had been opened and nothing was sent (${detail}), but its withdrawal could not be confirmed: `
       + `it may still be open (commandmate relays cancel ${relayId}).`;
   }
