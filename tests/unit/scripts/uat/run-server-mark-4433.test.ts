@@ -503,7 +503,7 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh publishes and removes only its own re
     'mark_remove removes a record only when its pgid and leader start time are the run’s (R1)',
     () => {
       const remove = (record: string, pid: string, lstart: string) =>
-        spawnSync('bash', ['-c', '. "$0"; mark_remove "$1" "$2" "$3"', RUN_SERVER, record, pid, lstart], {
+        spawnSync('bash', ['-c', '. "$1"; mark_remove "$2" "$3" "$4"', 'mark-remove', RUN_SERVER, record, pid, lstart], {
           env: baseEnv(),
           encoding: 'utf8',
         });
@@ -563,16 +563,22 @@ describe.skipIf(!HAS_TOOLS)('run-server.sh publishes and removes only its own re
         CM_VERIFY_TEST_HANDOFF_DIR: seams,
       });
       await waitForPath(path.join(seams, 'mark-remove.reached'), down.exited);
-      // A new run on the same run dir: its server (this test process stands in) and its record.
-      const next = writeForeignRecord(`${'f'.repeat(32)}.json`, process.pid, lstartOf(process.pid));
-      rewriteState(runDir, { server_pid: String(process.pid), mark_path: next, mark_lstart: lstartOf(process.pid) });
-      fs.writeFileSync(path.join(seams, 'mark-remove.go'), '');
-      const finished = await down.done;
-      expect(finished.status, finished.stderr).toBe(0);
-      expect(fs.existsSync(next)).toBe(true);
-      fs.rmSync(next, { force: true });
-      fs.rmSync(own, { force: true });
-      fs.rmSync(path.join(runDir, 'uat-run.state'), { force: true });
+      // A new run on the same run dir: its server (a sleep stands in) and its record.
+      const stand = spawn('sleep', ['600'], { stdio: 'ignore' });
+      const standPid = stand.pid!;
+      try {
+        const next = writeForeignRecord(`${'f'.repeat(32)}.json`, standPid, lstartOf(standPid));
+        rewriteState(runDir, { server_pid: String(standPid), mark_path: next, mark_lstart: lstartOf(standPid) });
+        fs.writeFileSync(path.join(seams, 'mark-remove.go'), '');
+        const finished = await down.done;
+        expect(finished.status, finished.stderr).toBe(0);
+        expect(fs.existsSync(next)).toBe(true);
+      } finally {
+        stand.kill('SIGKILL');
+        // The state names the stand-in now: afterEach must not stop by it. down stopped this run's server.
+        fs.rmSync(path.join(runDir, 'uat-run.state'), { force: true });
+        fs.rmSync(own, { force: true });
+      }
     },
     REAL_SHELL_TEST_TIMEOUT_MS
   );

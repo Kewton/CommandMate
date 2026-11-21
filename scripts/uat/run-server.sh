@@ -56,6 +56,9 @@
 # Test hooks: CM_UAT_SOCK_BASE (default /tmp) moves the socket directories, CM_SERVER_MARK_BASE
 # (default /tmp) the launch-mark record directory (#4433),
 # CM_UAT_SERVER_ENTRY (default dist/server/server.js) replaces the server.
+# CM_VERIFY_TEST_HANDOFF with CM_VERIFY_TEST_HANDOFF_DIR (machine-lock.sh's lock_test_pause /
+# lock_test_fault; nothing without them) also pauses at mark-publish, mark-written (up) and
+# mark-remove (down), and fault:mark-state fails up's state write of the record (#4433).
 #
 # bash 3.2 compatible (macOS /bin/bash).
 
@@ -118,6 +121,7 @@ MARK_LAUNCHER_CWD=""
 MARK_WORKTREE_ROOT=""
 MARK_REPO_ROOT=""
 MARK_SESSION=""
+MARK_LSTART=""
 MARK_WRITTEN=0
 
 # mark_json_safe <value> — 0 when it can go between JSON quotes as is.
@@ -198,28 +202,44 @@ mark_prepare() {
     MARK_PATH="$dir/$hex.json"
 }
 
-# mark_remove <state file> — remove the record `up` wrote, once its server is stopped. Only a regular
-# file named like a record in a record directory; anything else recorded there is left alone.
-mark_remove() {
-    mark_remove_path "$(state_get "$1" mark_path)"
+# mark_lstart_of <pid> — the start time of <pid> as the record holds it; empty when ps cannot say.
+mark_lstart_of() {
+    LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | tr -s ' \t' '  ' | sed 's/^ //; s/ $//'
 }
 
-# mark_remove_path <record path> — the same, for a path this run holds.
-mark_remove_path() {
+# mark_remove <record path> <pgid> <leader start> — remove a record this run wrote, once its server
+# is stopped: a regular file named like a record in a record directory whose pgid and leaderStartTime
+# are <pgid> and <leader start> (the run's server). A record that does not say so — another run's
+# on the same run dir, unreadable, half written — is left alone (#4433).
+mark_remove() {
+    local text
     case "$1" in
         /*/commandmate-server-marks-*/*.json) ;;
         *) return 0 ;;
     esac
-    [ -f "$1" ] && [ ! -L "$1" ] && rm -f "$1"
+    [ -n "$2" ] && [ -n "$3" ] || return 0
+    [ -f "$1" ] && [ ! -L "$1" ] || return 0
+    text=$(cat "$1" 2>/dev/null) || return 0
+    case "$text" in
+        *"\"pgid\":$2,"*) ;;
+        *) return 0 ;;
+    esac
+    case "$text" in
+        *"\"leaderStartTime\":\"$3\","*) ;;
+        *) return 0 ;;
+    esac
+    rm -f "$1"
     return 0
 }
 
-# mark_write <pid> — write the record for the group <pid> leads. Exclusive create, mode 0600.
+# mark_write <pid> — write the record for the group <pid> leads. Exclusive create, mode 0600. Sets
+# MARK_LSTART to the start time it recorded.
 mark_write() {
     local lstart wt at
     [ -n "$MARK_PATH" ] || return 1
-    lstart="$(LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | tr -s ' \t' '  ' | sed 's/^ //; s/ $//')"
+    lstart="$(mark_lstart_of "$1")"
     [ -n "$lstart" ] && mark_json_safe "$lstart" || return 1
+    MARK_LSTART=$lstart
     wt=null
     [ -z "$MARK_WORKTREE_ROOT" ] || wt="\"$MARK_WORKTREE_ROOT\""
     at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -781,7 +801,7 @@ up_on_exit() {
     else
         remove_socket_dir "$sock_dir"
         # The server is stopped: its launch record names nothing any more (#4433).
-        [ "$MARK_WRITTEN" != 1 ] || mark_remove_path "$MARK_PATH"
+        [ "$MARK_WRITTEN" != 1 ] || mark_remove "$MARK_PATH" "$UP_SERVER_PID" "$MARK_LSTART"
     fi
     if [ -n "$UP_STATE" ] && [ -f "$UP_STATE" ]; then state_set "$UP_STATE" status "$st"; fi
     rm -rf "$UP_GO" "$UP_ACK" 2>/dev/null
@@ -1019,14 +1039,35 @@ cmd_up() {
         sleep 0.1
         i=$((i + 1))
     done
-    # The record is written once the server is up, not between the fork and `go`: work there shifts
-    # when the waiting child is released relative to this shell's first look at it (#4433). The pid
-    # and the group leader's start time are the same now as then; until the record exists a snapshot
-    # reads the mark as unverifiable (judged), never as another worktree's.
+    # The record is published once the server runs, not between the fork and `go`: work there shifts
+    # when the waiting child is released relative to this shell's first look at it (#4433). What is
+    # known by then: the child exec'd the server with this run's CM_DB_PATH and has not ended, and,
+    # only with --wait-listen > 0, that it listens on the port. Without --wait-listen (the UAT's
+    # default) the record can name a server that has not listened yet, or that ends before it does:
+    # the health check after `up` finds that, and `down` removes the record (its group then names no
+    # live leader, which never excuses anything). Until the record exists a snapshot reads the mark as
+    # record-unreadable (judged), never as another worktree's.
+    # After writing it: the state must hold its path (else `down` could not remove it), and the server
+    # must still be the one recorded (a `down` that stopped it meanwhile found no path to remove).
+    # Either failing, this run removes its own record; a gone server also fails `up`.
     if [ -n "$MARK_PATH" ]; then
+        lock_test_pause mark-publish
         if mark_write "$UP_SERVER_PID"; then
             MARK_WRITTEN=1
-            state_set "$UP_STATE" mark_path "$MARK_PATH"
+            if lock_test_fault mark-state ||
+                ! state_set "$UP_STATE" mark_lstart "$MARK_LSTART" ||
+                ! state_set "$UP_STATE" mark_path "$MARK_PATH"; then
+                mark_remove "$MARK_PATH" "$UP_SERVER_PID" "$MARK_LSTART"
+                MARK_WRITTEN=0
+                log "could not record the launch mark in $UP_STATE: removed it (env-clean will judge the server as unmarked)"
+            fi
+            lock_test_pause mark-written
+            # Our own child, not reaped until here: its pid names no other process.
+            if up_server_ended; then
+                mark_remove "$MARK_PATH" "$UP_SERVER_PID" "$MARK_LSTART"
+                MARK_WRITTEN=0
+                fail_up "the server (pid $UP_SERVER_PID) ended before its launch mark was published; see $RUN_DIR/server.log"
+            fi
         else
             log "could not write the launch mark record (env-clean will judge the server as unmarked)"
         fi
@@ -1041,7 +1082,7 @@ cmd_up() {
 # ---------------------------------------------------------------------- down
 
 cmd_down() {
-    local state sock_dir rc=0
+    local state sock_dir rc=0 mark_pid mark_lstart
     require_run_dir
     RUN_DIR="$(cd "$RUN_DIR" 2>/dev/null && pwd)" || {
         log "no run dir: refusing to stop anything by port"
@@ -1053,15 +1094,24 @@ cmd_down() {
         exit 1
     fi
     sock_dir=$(state_get "$state" sock_dir)
+    # The server this down stops, fixed before it stops anything (#4433): after the release a new `up`
+    # on the same run dir may rewrite the state, so its record is never judged by what is read then.
+    # The start time is the live server's; for one already gone, what `up` recorded with the record.
+    mark_pid=$(state_get "$state" server_pid)
+    mark_lstart=""
+    [ -z "$mark_pid" ] || mark_lstart=$(mark_lstart_of "$mark_pid")
+    [ -n "$mark_lstart" ] || mark_lstart=$(state_get "$state" mark_lstart)
 
     if down_procedure "$state"; then
         remove_socket_dir "$sock_dir"
-        mark_remove "$state"
+        lock_test_pause mark-remove
+        mark_remove "$(state_get "$state" mark_path)" "$mark_pid" "$mark_lstart"
     else
         # The lock stays when the server or its group may still be running (or the lock is another run's).
         if [ "$DOWN_SERVER_STOPPED" -eq 1 ]; then
             remove_socket_dir "$sock_dir"
-            mark_remove "$state"
+            lock_test_pause mark-remove
+            mark_remove "$(state_get "$state" mark_path)" "$mark_pid" "$mark_lstart"
         else
             remove_socket_dir_tmux_only "$sock_dir"
         fi

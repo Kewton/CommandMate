@@ -601,7 +601,7 @@ Phase 0 の bash 参照実装（`.claude/skills/cmate-verify/scripts/verify-run.
 
 | probe id | 取得方法 | 違反の意味 |
 |---|---|---|
-| `listeners` | `lsof -nP -iTCP -sTCP:LISTEN -F pcn` を `ps -A -o pid=,command=` と突き合わせ、コマンドラインが CommandMate のもの（`COMMANDMATE_PROCESS_PATTERN`）だけを残す。key は `tcp/<port>`、anchor は `lsof -a -d cwd` で引いた cwd。Issue #4433 から、各 pid の起動の印（`marks[]`。下の「`listeners` の起動の印」）も別の呼び出しで読む（失敗しても印が absent になるだけで、一覧・key・detail は変わらない） | ポートが消えた＝サーバを落とした／増えた＝サーバを残した |
+| `listeners` | `lsof -nP -iTCP -sTCP:LISTEN -F pcn` を `ps -A -o pid=,command=` と突き合わせ、コマンドラインが CommandMate のもの（`COMMANDMATE_PROCESS_PATTERN`）だけを残す。key は `tcp/<port>`、anchor は `lsof -a -d cwd` で引いた cwd。Issue #4433 から、各 pid の起動の印（`marks[]`。下の「`listeners` の起動の印」）も別の呼び出しで読む（読めなければ印は `absent`〈環境が読めない・環境に `CM_SERVER_MARK` が無い・pgid が読めない〉か `invalid`〈環境にパスがあって記録が無い＝`record-unreadable`、書きかけの JSON＝`record-malformed` など〉になるだけで、一覧・key・detail は変わらない） | ポートが消えた＝サーバを落とした／増えた＝サーバを残した |
 | `tmux-sessions` | `tmux list-sessions -F '#{session_name}'` のうち `mcbd-` 始まり | 他ワーカーのセッションを殺した（#1624）／自分のセッションを残した（**タスク自身のエージェントセッション 1 本は除く**。下の「タスク自身のエージェントセッション」、Issue #2472） |
 | `home-entries` | `$HOME` 直下の `readdir` | HOME を汚した |
 | `commandmate-entries` | `~/.commandmate` 直下の `readdir` | 設定・状態ディレクトリを汚した |
@@ -663,6 +663,7 @@ package root（開発用ではメインの checkout＝兄弟）なので、ワ�
 | 印 | サーバーの環境の `CM_SERVER_MARK=<記録の絶対パス>`。付けるのは `DaemonManager.start`（`src/cli/utils/daemon.ts`）と `scripts/uat/run-server.sh up`。形は `src/cli/types/server-mark.ts` |
 | 記録 | `/tmp/commandmate-server-marks-<uid>/<32 桁の hex>.json`（dir は自 uid で group/other の権限なし＝作るときは 0700、run-server.sh は 0700 ちょうどのときだけ使う・file 0600・4 KiB 以下）。`pgid`（detached／`set -m` で作った group＝leader の pid）、`leaderStartTime`（`LC_ALL=C TZ=UTC0 ps -o lstart=`）、`launcherCwd`・`worktreeRoot`（起動した CLI／呼び出し元のシェルの cwd と git の root）、`repoRoot`（run-server.sh の checkout）、`session`（起動元の tmux セッション名・`no-tmux`・`lookup-failed`。名前を書くのは、`TMUX_PANE` のペインのプロセスが起動した側（CLI・run-server.sh のシェル）の祖先のときだけ。継いだだけの `TMUX_PANE` は `lookup-failed`） |
 | 検証（スナップショットの時） | 環境から印を読む（linux は `/proc/<pid>/environ`、macOS は `ps -E` の出力からコマンドラインを除いた残り。2 回あれば invalid）→ 記録のパスと dir（自 uid・group/other の権限なし・名前）→ 記録の形 → `ps -o pid=,pgid=` の pgid が記録と一致 → leader の lstart が記録と一致。どれかが外れたら `absent` / `invalid`（理由は固定の語。報告の行に `mark=<理由>`） |
+| 記録の寿命（run-server.sh） | 記録は子が `go` を受けて exec した後に書く。書く前に確かめるのは、子がこの run の `CM_DB_PATH` でサーバーを exec して終わっていないこと、`--wait-listen` が正のときだけそれに加えてポートで listen していること。既定の UAT（`--wait-listen` 無し）では listen 前のサーバーにも記録が付き、listen 前に終わったものは後の health が見つけ、`down` が記録を消す（leader の居ない記録は免除の根拠にならない）。記録が出来るまでの観測は `invalid`／`record-unreadable` で違反。書いた後に state へ path を書けない、またはサーバーがもう居ない（`down` が追い越した）なら、`up` は自分の記録を消す（後者は `up` も失敗）。消すのは記録の `pgid` と `leaderStartTime` がその run のサーバーと一致するものだけで、`down` は止める前にサーバーの pid と起動時刻を固定し、解放の後に同じ run-dir の次の `up` が書き換えた state では照合しない |
 | 継承 | `server.ts` は起動の最初に `CM_SERVER_MARK` を自分の環境から消す（子は継がない。`ps -E`・`/proc` は起動時の値を出すので照合はできる）。daemon は親から継いだ印を子に渡さない |
 | 消えたもの（`-`） | 印は持ち主を示すだけで、誰が止めたかは示さない。基準で別 worktree のものと検証された listener が消えても違反のまま（#1739 の型を通さないため）。報告の行の `mark=verified` を見て override を判断する |
 | 残る穴 | 同じ uid の故意の偽造（TMUX を外して別 worktree に cd して起動する、記録を手で書いて pgid・lstart を合わせる）は防げない。ゲートは作業の副作用を捕まえるもので、故意は対象外。読む側は記録の dir の名前・uid・権限を見るが、置き場所（親が `/tmp` か）は見ない（`CM_SERVER_MARK_BASE` で動かしても照合の強さは pgid と lstart のまま） |

@@ -47,7 +47,7 @@ SCREEN=$(commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30)
   生きたテストのものは #2954 で `other` に分かれる）。`[unattributed]` で残ったら、
   `commandmatedev verify "$WT" --task "$TASK_ID" --gates env-clean` を再実行して、その項目が消えていれば合格として扱う。
 
-  **listeners の `mark=`**（#4433）: listener の行は `tcp/<port> <コマンド> pid=<n> mark=<語>[,<語>…] [<owner>]`。別 worktree のサーバーが免除されるのは起動の印が `verified` のときだけで（`ignored (attributed to another worktree)` に出る）、印の無いサーバーは兄弟の worktree のものでも、消えた listener（`-`）は `mark=verified` でも違反のまま。持ち主を確かめて override で扱う（docs/design/task-contract.md §2.6「`listeners` の起動の印」）。#4433 より前に取った基準の行（`-` の側）には `mark=` が無い。
+  **listeners の `mark=`**（#4433）: listener の行は `tcp/<port> <コマンド> pid=<n> mark=<語>[,<語>…] [<owner>]`。別 worktree のサーバーが免除されるのは起動の印が `verified` のときだけで（`ignored (attributed to another worktree)` に出る）、印の無いサーバーは兄弟の worktree のものでも、消えた listener（`-`）は `mark=verified` でも違反のまま。持ち主を確かめて override で扱う（docs/design/task-contract.md §2.6「`listeners` の起動の印」）。#4433 より前に取った基準の行（`-` の側）には `mark=` が無い。起動の途中で現れる語: 環境に印が無い `no-mark`（`absent`）、印のパスはあるが記録がまだ無い `record-unreadable`、書きかけ `record-malformed`（どれも違反のまま。task-contract.md の「記録の寿命」）。
 
   **`+ resource.yaml`（`commandmate-entries`）の裁定**（#4406）: `~/.commandmate/resource.yaml` は資源の門（#4370）の設定ファイル。読み手が呼ばれるたびに読み直すので、task の途中で置かれると、全レーンの門に効く。誰が置いたかはゲートでは確かめられないため、追加は**違反のまま**にしている（持ち主の確かめで外すのは #4497）。その代わり、違反の行の下に `    · resource.yaml: the user's resource config (#4370), shape=<ok|invalid> (<理由>) sha256=<先頭 12 桁> size=<n>B — counted; …` の行が出る。この行は wait-verify の項目名に入らない。裁定の手順:
   1. `shape=ok` か確かめる。`invalid`（YAML でない・知らない鍵・シンボリックリンク・ハードリンク・64 KiB 超など）は、それだけでワーカー起因として扱う
