@@ -94,7 +94,12 @@ export type JsonObjectFileState =
 export function readJsonObjectFileState(path: string): JsonObjectFileState {
   if (!existsSync(path)) return { kind: 'missing' };
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    const raw = readFileSync(path, 'utf8');
+    // Issue #4505: a file with no content is one nobody wrote anything into —
+    // a bare `touch` — so it is as createable as an absent one. Treating it as
+    // broken would disable hooks for that user forever.
+    if (raw.trim() === '') return { kind: 'missing' };
+    const parsed: unknown = JSON.parse(raw);
     return isPlainObject(parsed) ? { kind: 'object', value: parsed } : { kind: 'invalid' };
   } catch {
     // Unreadable is as unmergeable as unparseable, and neither is a session

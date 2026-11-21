@@ -36,7 +36,7 @@ vi.mock('@/lib/logger', () => ({
   generateRequestId: vi.fn(() => 'test-request-id'),
 }));
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
@@ -133,5 +133,37 @@ describe('a hooks.json CommandMate can parse', () => {
     expect(Object.keys(JSON.parse(readFileSync(configPath, 'utf8')))).toEqual([
       ANTIGRAVITY_HOOK_NAME,
     ]);
+  });
+});
+
+describe('a hooks.json with nothing in it', () => {
+  it.each([
+    ['an empty file', ''],
+    ['a whitespace-only file', '\n  \n'],
+  ])('treats %s as absent and writes the hooks', (_label, body) => {
+    // A bare `touch` is not a file whose content is being deleted: it has no
+    // content. Refusing to write it would disable hooks for that user forever.
+    writeFileSync(configPath, body);
+
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+
+    expect(Object.keys(JSON.parse(readFileSync(configPath, 'utf8')))).toEqual([
+      ANTIGRAVITY_HOOK_NAME,
+    ]);
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite a file it is not allowed to read', () => {
+    const body = '{\n  "lint-checker": {"Stop": []}\n}\n';
+    writeFileSync(configPath, body);
+    chmodSync(configPath, 0o000);
+
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBeNull();
+
+    chmodSync(configPath, 0o600);
+    expect(readFileSync(configPath, 'utf8')).toBe(body);
+    expect(mockLogger.warn).toHaveBeenCalledWith('antigravity-hooks-config-invalid', {
+      path: configPath,
+    });
   });
 });

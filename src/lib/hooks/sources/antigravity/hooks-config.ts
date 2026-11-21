@@ -72,9 +72,14 @@
  * @module lib/hooks/sources/antigravity/hooks-config
  */
 
+import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { sharedHookWritePolicy, UAT_SAME_BUILD_FIX } from '@/config/uat-isolation';
+import {
+  getUatIsolationMode,
+  sharedHookWritePolicy,
+  UAT_SAME_BUILD_FIX,
+} from '@/config/uat-isolation';
 import { isValidInstanceId } from '@/lib/cli-tools/types';
 import { SELF_RESUME_PENDING_DETAIL, type AgentEventType } from '@/lib/hooks/agent-event-types';
 import {
@@ -100,6 +105,7 @@ import {
   getAntigravityRelayStagingPath,
   getInstalledAntigravityRelayPath,
   installAntigravityRelayScript,
+  installAntigravityRelayScriptOrThrow,
 } from './relay-install';
 import { ANTIGRAVITY_CLI_TOOL_ID } from './tool-id';
 
@@ -463,6 +469,30 @@ export function inspectAntigravityHooksConfigReadOnly(
       fix: UAT_SAME_BUILD_FIX,
     };
   }
+  // Issue #4505: the command string names the copy, not the script that runs,
+  // so a copy installed by another build would compare equal while executing
+  // something else. Compare the bytes, as codex does (#2315). When this build
+  // cannot find its own relay at all (a global install), the copy is all there
+  // is and it is accepted, as before.
+  const shippedRelay = resolveRelayScriptPath();
+  if (shippedRelay) {
+    try {
+      if (readFileSync(shippedRelay, 'utf8') !== readFileSync(relayPath, 'utf8')) {
+        logger.info('antigravity-hooks-relay-differs-readonly', { relayPath });
+        return {
+          usable: false,
+          reason: `the installed relay ${relayPath} differs from the one this build ships`,
+          fix: UAT_SAME_BUILD_FIX,
+        };
+      }
+    } catch {
+      return {
+        usable: false,
+        reason: `the installed relay ${relayPath} could not be read`,
+        fix: UAT_SAME_BUILD_FIX,
+      };
+    }
+  }
   const existing = state.value;
   if (Object.keys(existing).some((key) => key !== ANTIGRAVITY_HOOK_NAME)) {
     logger.info('antigravity-hooks-config-foreign-readonly', { configPath });
@@ -529,7 +559,14 @@ export function writeAntigravityHooksConfig(options: { path?: string } = {}): st
     // Issue #4505: name the copy beside the hooks file, never this checkout.
     // The install happens before the content is built, so the generated file
     // is a function of the hooks file's location alone.
-    const relayPath = installAntigravityRelayScript(configPath, resolveRelayScriptPath());
+    // Issue #3312: under `own-home` a relay that could not be brought up to
+    // date is a failed preparation (the launch is refused), not an older relay
+    // the check would quietly run against.
+    const shippedRelay = resolveRelayScriptPath();
+    const relayPath =
+      getUatIsolationMode() === 'own-home'
+        ? installAntigravityRelayScriptOrThrow(configPath, shippedRelay)
+        : installAntigravityRelayScript(configPath, shippedRelay);
     if (!relayPath) {
       logger.warn('antigravity-hook-relay-missing');
       return null;

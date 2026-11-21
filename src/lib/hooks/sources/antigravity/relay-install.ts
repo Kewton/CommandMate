@@ -33,7 +33,7 @@
  * @module lib/hooks/sources/antigravity/relay-install
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { isVirtualFilesystemPath } from '@/config/system-directories';
 import { createLogger } from '@/lib/logger';
@@ -66,9 +66,16 @@ export function getAntigravityRelayInstallPath(hooksConfigPath: string): string 
   );
 }
 
-/** The temp file the relay is written to before it is renamed over the target. */
+/**
+ * The temp file the relay is written to before it is renamed over the target.
+ *
+ * Carries the pid so two servers installing at once cannot delete each other's
+ * half-written script or rename the inode the other is still writing. Within
+ * one process the name is deterministic, which is what lets
+ * `sharedHookWritePolicy` check the exact path.
+ */
 export function getAntigravityRelayStagingPath(target: string): string {
-  return `${target}.tmp`;
+  return `${target}.${process.pid}.tmp`;
 }
 
 /**
@@ -78,11 +85,15 @@ export function getAntigravityRelayStagingPath(target: string): string {
  * itself is done once by {@link installAntigravityRelayScript}, from the one
  * function that was going to touch the disk anyway.
  *
+ * A directory or device node at the path is not a relay: naming it in
+ * `hooks.json` would make every session fail to run its hook in silence, so it
+ * answers null here and the install answers null too.
+ *
  * @param hooksConfigPath - The `hooks.json` the config belongs to
  */
 export function getInstalledAntigravityRelayPath(hooksConfigPath: string): string | null {
   const target = getAntigravityRelayInstallPath(hooksConfigPath);
-  return existsSync(target) ? target : null;
+  return isRegularFile(target) ? target : null;
 }
 
 /**
@@ -137,7 +148,36 @@ export function installAntigravityRelayScript(
     }
   }
 
-  return existsSync(target) ? target : null;
+  return isRegularFile(target) ? target : null;
+}
+
+/**
+ * {@link installAntigravityRelayScript} for `CM_UAT_ISOLATION=own-home`
+ * (Issue #3312): every failure throws instead of being absorbed — no shipped
+ * relay, a copy that could not be written, or a copy whose bytes still differ
+ * from the shipped one — so the caller refuses the launch rather than running
+ * the check against an older relay.
+ *
+ * @returns The installed path, byte-identical to `sourcePath`
+ * @throws When the relay is missing or could not be made identical
+ */
+export function installAntigravityRelayScriptOrThrow(
+  hooksConfigPath: string,
+  sourcePath: string | null
+): string {
+  if (!sourcePath) throw new Error('this build ships no relay script');
+  const target = getAntigravityRelayInstallPath(hooksConfigPath);
+  if (isVirtualFilesystemPath(target)) {
+    throw new Error(
+      `Refusing to install the relay inside a virtual filesystem: ${target} ` +
+        `(a recursive mkdir under /proc, /sys or /dev never returns on Linux; Issue #1774)`
+    );
+  }
+  if (sourcePath !== target) copyRelayIfChanged(sourcePath, target);
+  if (!isRegularFile(target) || readFileSync(target, 'utf8') !== readFileSync(sourcePath, 'utf8')) {
+    throw new Error(`the installed relay ${target} differs from the one this build ships`);
+  }
+  return target;
 }
 
 /**
@@ -146,11 +186,18 @@ export function installAntigravityRelayScript(
  * The temp file is removed first and then created exclusively (`wx`), so a
  * symlink planted at that name is removed, never written through; the rename
  * stays beside the target so it cannot cross a filesystem.
+ *
+ * A byte-identical copy is left in place, but its executable bit is restored if
+ * it lost one: the hook is invoked by path, so a copy that cannot be executed
+ * drops every event in silence.
  */
 function copyRelayIfChanged(sourcePath: string, target: string): void {
   const desired = readFileSync(sourcePath, 'utf8');
-  const current = existsSync(target) ? readFileSync(target, 'utf8') : null;
-  if (current === desired) return;
+  const current = isRegularFile(target) ? readFileSync(target, 'utf8') : null;
+  if (current === desired) {
+    ensureExecutable(target);
+    return;
+  }
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
   const staging = getAntigravityRelayStagingPath(target);
   try {
@@ -162,6 +209,21 @@ function copyRelayIfChanged(sourcePath: string, target: string): void {
     throw error;
   }
   logger.info('antigravity-relay-installed', { target });
+}
+
+/** Whether `file` exists and is a regular file (not a directory or device). */
+function isRegularFile(file: string): boolean {
+  try {
+    return statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Put the executable bit back on a copy that has the right bytes but none. */
+function ensureExecutable(target: string): void {
+  if ((statSync(target).mode & 0o111) !== 0) return;
+  chmodSync(target, 0o700);
 }
 
 function unlinkIfPresent(file: string): void {

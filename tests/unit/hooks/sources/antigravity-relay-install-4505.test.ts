@@ -34,19 +34,25 @@ vi.mock('@/lib/logger', () => ({
   generateRequestId: vi.fn(() => 'test-request-id'),
 }));
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'fs';
+import os, { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { removeTempDir } from '@tests/helpers/temp-dir';
+import { UatIsolationLaunchRefusedError } from '@/config/uat-isolation';
 import {
   ANTIGRAVITY_RELAY_INSTALL_BASENAME,
   ANTIGRAVITY_RELAY_INSTALL_DIRNAME,
   getAntigravityRelayInstallPath,
 } from '@/lib/hooks/sources/antigravity/relay-install';
-import { writeAntigravityHooksConfig } from '@/lib/hooks/sources/antigravity/hooks-config';
+import {
+  inspectAntigravityHooksConfigReadOnly,
+  writeAntigravityHooksConfig,
+} from '@/lib/hooks/sources/antigravity/hooks-config';
+import { antigravityAgentEventSource } from '@/lib/hooks/sources/antigravity/source';
 
 const RELAY_A = '#!/bin/sh\n# the relay checkout A ships\nexit 0\n';
 const RELAY_B = '#!/bin/sh\n# the relay checkout B ships\nexit 0\n';
+const DEDICATED = 'cmate-4505-own-home';
 
 const dirs: string[] = [];
 let originalCwd: string;
@@ -102,12 +108,36 @@ beforeEach(() => {
 
 afterEach(() => {
   process.chdir(originalCwd);
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   while (dirs.length > 0) {
     const dir = dirs.pop();
     if (dir) removeTempDir(dir);
   }
 });
+
+/** A session reference for `prepareLaunch`; nothing is executed here. */
+function launchContext(): Parameters<typeof antigravityAgentEventSource.prepareLaunch>[0] {
+  return {
+    target: { worktreeId: 'wt-4505', cliToolId: 'antigravity' as const },
+    executablePath: 'agy',
+    worktreePath: root,
+  };
+}
+
+/** `CM_UAT_ISOLATION=own-home` as the dedicated user, whose HOME is `home`. */
+function asDedicatedUser(home: string): void {
+  vi.spyOn(os, 'userInfo').mockReturnValue({
+    username: DEDICATED,
+    uid: process.getuid!(),
+    gid: process.getgid!(),
+    shell: '/bin/zsh',
+    homedir: home,
+  } as ReturnType<typeof os.userInfo>);
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('CM_UAT_ISOLATION', 'own-home');
+  vi.stubEnv('CM_UAT_DEDICATED_USER', DEDICATED);
+}
 
 describe('the relay hooks.json names', () => {
   it('is a copy beside hooks.json, and stays one when another checkout writes next', () => {
@@ -130,6 +160,7 @@ describe('the relay hooks.json names', () => {
     const first = readFileSync(configPath, 'utf8');
     expect(first).toContain(installed);
     expect(first).not.toContain(checkoutA);
+    const firstInode = statSync(installed).ino;
 
     // A second server, in a different checkout, rewrites the same shared file.
     const checkoutB = makeCheckout('cmate-4505-checkout-b-', RELAY_B);
@@ -139,6 +170,9 @@ describe('the relay hooks.json names', () => {
     // Only the copy's bytes move; the file that names it does not.
     expect(readFileSync(installed, 'utf8')).toBe(RELAY_B);
     expect(readFileSync(configPath, 'utf8')).toBe(first);
+    // Replaced through staging + rename, and the staging file is gone.
+    expect(statSync(installed).ino).not.toBe(firstInode);
+    expect(readdirSync(dirname(installed))).toEqual([ANTIGRAVITY_RELAY_INSTALL_BASENAME]);
 
     // The checkout that wrote first disappears; the shared file is unaffected.
     removeTempDir(checkoutA);
@@ -197,6 +231,76 @@ describe('the relay hooks.json names', () => {
     expect(existsSync(configPath)).toBe(false);
     expect(mockLogger.warn).toHaveBeenCalledWith('antigravity-hook-relay-missing');
   });
+
+  it('replaces a command that pointed at an old checkout, and keeps the user’s hooks', () => {
+    const checkoutA = makeCheckout('cmate-4505-migrate-', RELAY_A);
+    const oldRelay = join(checkoutA, 'scripts', 'hooks', ANTIGRAVITY_RELAY_INSTALL_BASENAME);
+    mkdirSync(dirname(configPath), { recursive: true });
+    const userHook = {
+      PostToolUse: [
+        { matcher: 'run_command', hooks: [{ type: 'command', command: './scripts/lint.sh' }] },
+      ],
+    };
+    writeFileSync(
+      configPath,
+      `${JSON.stringify(
+        {
+          commandmate: {
+            SessionStart: [
+              {
+                type: 'command',
+                command: `'${oldRelay}' --tool antigravity --event session_start --stdin-json`,
+                timeout: 5,
+              },
+            ],
+          },
+          'lint-checker': userHook,
+        },
+        null,
+        2
+      )}\n`
+    );
+    process.chdir(checkoutA);
+
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+
+    const written = JSON.parse(readFileSync(configPath, 'utf8'));
+    const installed = getAntigravityRelayInstallPath(configPath);
+    expect(Object.keys(written)).toEqual(['commandmate', 'lint-checker']);
+    expect(written['lint-checker']).toEqual(userHook);
+    const commands = hookCommands(written);
+    expect(commands.some((command) => command.includes(oldRelay))).toBe(false);
+    expect(
+      commands.filter((command) => command.includes(ANTIGRAVITY_RELAY_INSTALL_BASENAME))
+    ).toHaveLength(3);
+    for (const command of commands) {
+      expect(command).not.toContain(checkoutA);
+    }
+    expect(commands.every((command) => !command.includes(ANTIGRAVITY_RELAY_INSTALL_BASENAME) || command.includes(installed))).toBe(true);
+  });
+
+  it('puts the executable bit back when the bytes already match', () => {
+    process.chdir(makeCheckout('cmate-4505-exec-bit-', RELAY_A));
+    writeAntigravityHooksConfig({ path: configPath });
+    const installed = getAntigravityRelayInstallPath(configPath);
+    chmodSync(installed, 0o600);
+
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+
+    expect(readFileSync(installed, 'utf8')).toBe(RELAY_A);
+    expect(statSync(installed).mode & 0o111).not.toBe(0);
+  });
+
+  it('does not name a directory that sits where the copy belongs', () => {
+    process.chdir(makeCheckout('cmate-4505-directory-', RELAY_A));
+    const installed = getAntigravityRelayInstallPath(configPath);
+    mkdirSync(installed, { recursive: true });
+
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBeNull();
+
+    expect(existsSync(configPath)).toBe(false);
+    expect(mockLogger.warn).toHaveBeenCalledWith('antigravity-hook-relay-missing');
+  });
 });
 
 describe('the read-only UAT policy', () => {
@@ -222,5 +326,107 @@ describe('the read-only UAT policy', () => {
     expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
     expect(readFileSync(configPath).equals(written)).toBe(true);
     expect(statSync(installed).ino).toBe(inode);
+  });
+});
+
+describe('the read-only UAT policy compares the copy with this build', () => {
+  it('refuses a copy whose bytes differ from the one this build ships', () => {
+    process.chdir(makeCheckout('cmate-4505-readonly-differs-', RELAY_A));
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+    const installed = getAntigravityRelayInstallPath(configPath);
+    // Another CommandMate version (or another worktree's server) installed it.
+    writeFileSync(installed, RELAY_B);
+    const written = readFileSync(configPath);
+
+    vi.stubEnv('CM_UAT_ISOLATION', '1');
+
+    const inspection = inspectAntigravityHooksConfigReadOnly({ path: configPath });
+    expect(inspection.usable).toBe(false);
+    if (!inspection.usable) {
+      expect(inspection.reason).toMatch(/differs from the one this build ships/);
+    }
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBeNull();
+    expect(readFileSync(configPath).equals(written)).toBe(true);
+    // Not repaired either: read-only writes nothing, the copy included.
+    expect(readFileSync(installed, 'utf8')).toBe(RELAY_B);
+  });
+
+  it('refuses when the copy the file names is gone', () => {
+    process.chdir(makeCheckout('cmate-4505-readonly-gone-', RELAY_A));
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+    const installed = getAntigravityRelayInstallPath(configPath);
+    unlinkSync(installed);
+
+    vi.stubEnv('CM_UAT_ISOLATION', '1');
+
+    const inspection = inspectAntigravityHooksConfigReadOnly({ path: configPath });
+    expect(inspection.usable).toBe(false);
+    if (!inspection.usable) {
+      expect(inspection.reason).toMatch(/no relay is installed beside/);
+    }
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBeNull();
+  });
+
+  it('accepts the copy alone when this build cannot find its own relay', () => {
+    process.chdir(makeCheckout('cmate-4505-readonly-shipped-', RELAY_A));
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+    const written = readFileSync(configPath);
+    const installed = getAntigravityRelayInstallPath(configPath);
+    const inode = statSync(installed).ino;
+
+    // A global install whose cwd is the user's shell directory: no relay.
+    process.chdir(makeEmptyCheckout('cmate-4505-readonly-global-'));
+    vi.stubEnv('CM_UAT_ISOLATION', '1');
+
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+    expect(readFileSync(configPath).equals(written)).toBe(true);
+    expect(statSync(installed).ino).toBe(inode);
+  });
+});
+
+describe('own-home refuses rather than running an older copy', () => {
+  it('refuses when this build ships no relay and only an old copy is left', () => {
+    const home = join(root, 'home');
+    mkdirSync(home, { recursive: true });
+    const installed = getAntigravityRelayInstallPath(configPath);
+    mkdirSync(dirname(installed), { recursive: true });
+    writeFileSync(installed, RELAY_B);
+    chmodSync(installed, 0o755);
+    process.chdir(makeEmptyCheckout('cmate-4505-own-home-no-relay-'));
+    asDedicatedUser(home);
+
+    expect(() => antigravityAgentEventSource.prepareLaunch(launchContext())).toThrow(
+      UatIsolationLaunchRefusedError
+    );
+
+    // The old copy is left as it was, and no hooks file was written for it.
+    expect(readFileSync(installed, 'utf8')).toBe(RELAY_B);
+    expect(existsSync(configPath)).toBe(false);
+  });
+
+  it('refuses when the copy could not be updated, instead of naming the old one', () => {
+    const home = join(root, 'home');
+    mkdirSync(home, { recursive: true });
+    process.chdir(makeCheckout('cmate-4505-own-home-copy-fails-', RELAY_A));
+    // Something that is not a file sits where the copy belongs: the rename
+    // cannot replace it.
+    mkdirSync(getAntigravityRelayInstallPath(configPath), { recursive: true });
+    asDedicatedUser(home);
+
+    expect(() => antigravityAgentEventSource.prepareLaunch(launchContext())).toThrow(
+      UatIsolationLaunchRefusedError
+    );
+
+    expect(existsSync(configPath)).toBe(false);
+  });
+
+  it('negative control — off: the same old copy is used, fail-open as before', () => {
+    const installed = getAntigravityRelayInstallPath(configPath);
+    mkdirSync(dirname(installed), { recursive: true });
+    writeFileSync(installed, RELAY_B);
+    process.chdir(makeEmptyCheckout('cmate-4505-off-old-copy-'));
+
+    expect(writeAntigravityHooksConfig({ path: configPath })).toBe(configPath);
+    expect(readFileSync(installed, 'utf8')).toBe(RELAY_B);
   });
 });
