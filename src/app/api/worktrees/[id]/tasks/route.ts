@@ -21,26 +21,21 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbInstance } from '@/lib/db/db-instance';
-import { createTask, getWorktreeById, listTasks, type Task } from '@/lib/db';
+import { getWorktreeById, listTasks, type Task } from '@/lib/db';
 import { isValidInstanceId, isCliToolType, type CLIToolType } from '@/lib/cli-tools/types';
 import { ROLE_CONDITION_UNMET_CODE } from '@/lib/agent-roles/launch-errors';
 import { runningRoleProblem } from '@/lib/session/role-launch';
 import { resolveSessionTargetStrict } from '@/lib/session/resolve-session-target';
 import { sessionTargetConflictResponse } from '@/lib/session/session-target-conflict-response';
 import { isValidWorktreeId } from '@/lib/security/path-validator';
-import { loadTaskContract, TaskContractError } from '@/lib/tasks/contract-parser';
-import {
-  composeContractMessage,
-  runsEnvCleanGate,
-  validateContractAgainstVerifyConfig,
-} from '@/lib/tasks/contract-message';
-import { loadVerifyConfig, VerifyConfigError } from '@/lib/verification/verify-config';
+import { composeContractMessage, runsEnvCleanGate } from '@/lib/tasks/contract-message';
 import { captureEnvSnapshot, saveEnvSnapshot } from '@/lib/verification/env-snapshot';
 import { recordTaskSession } from '@/lib/verification/env-clean-gate';
 import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import { contractRoleWarning } from './contract-role-warning';
-import { findWriteToolPolicyRefusal, readWriteToolPolicyRequest } from '../send/write-tool-policy';
+import { readWriteToolPolicyRequest } from '../send/write-tool-policy';
+import { createTaskIfAllowed, findTaskWriteRefusal, readTaskContractForCreate } from './task-create';
 
 const logger = createLogger('api/tasks');
 
@@ -143,41 +138,11 @@ export async function POST(
       return NextResponse.json({ error: policyRequest.error }, { status: 400 });
     }
 
-    // Contract issues are returned as a list, not one at a time: the loader
-    // collects every violation and the caller prints all of them (exit 2).
-    let contract;
-    try {
-      contract = loadTaskContract(worktree.path, contractPath);
-    } catch (error) {
-      if (error instanceof TaskContractError) {
-        return NextResponse.json(
-          { error: 'Invalid task contract', issues: error.issues },
-          { status: 400 }
-        );
-      }
-      throw error;
-    }
-
-    // A malformed verify.yaml is reported as a contract issue rather than a 500:
-    // it is the same class of problem for the caller, and the same fix.
-    let verifyConfig = null;
-    try {
-      verifyConfig = loadVerifyConfig(worktree.path);
-    } catch (error) {
-      if (!(error instanceof VerifyConfigError)) throw error;
-      return NextResponse.json(
-        { error: 'Invalid task contract', issues: error.issues },
-        { status: 400 }
-      );
-    }
-
-    const gateIssues = validateContractAgainstVerifyConfig(contract, verifyConfig);
-    if (gateIssues.length > 0) {
-      return NextResponse.json(
-        { error: 'Invalid task contract', issues: gateIssues },
-        { status: 400 }
-      );
-    }
+    // Issue #4466 PR1a: the contract and verify.yaml are read (nothing written) in
+    // `task-create.ts`, with the same 400s.
+    const contractRead = readTaskContractForCreate(worktree.path, contractPath);
+    if (!contractRead.ok) return contractRead.response;
+    const { contract, verifyConfig } = contractRead.value;
 
     // Issue #4115: a contract goes out under the role the process was started with
     // (for `launch-worker`, at its starting message). If the settings have moved on
@@ -202,16 +167,10 @@ export async function POST(
     // awaits only read (role evidence, a warning), but the relay part of the verdict
     // reads the roster of the `replyTo` session, which may move while they run.
     const taskCliToolId: CLIToolType = roleTarget.cliToolId;
-    const judge = (): NextResponse | null => {
-      const refusal = findWriteToolPolicyRefusal(db, {
-        worktreeId: id,
-        tool: taskCliToolId,
-        instanceId: roleTarget.instanceId,
-        request: policyRequest.value,
-      });
-      return refusal ? NextResponse.json(refusal, { status: 409 }) : null;
-    };
-    const earlyRefusal = judge();
+    // Issue #4466 PR1a: the judgment and the judged write are `task-create.ts`'s
+    // synchronous functions, given the target resolved above.
+    const writeTarget = { worktreeId: id, cliToolId: taskCliToolId, instanceId: roleTarget.instanceId };
+    const earlyRefusal = findTaskWriteRefusal(db, writeTarget, policyRequest.value);
     if (earlyRefusal) return earlyRefusal;
     const launchTarget = { worktreeId: id, cliToolId: roleTarget.cliToolId, instanceId: roleTarget.instanceId };
     const roleProblem = await runningRoleProblem(db, launchTarget, worktree.path);
@@ -224,15 +183,13 @@ export async function POST(
 
     const roleWarning = await contractRoleWarning(db, launchTarget, worktree.path);
 
-    const lateRefusal = judge();
-    if (lateRefusal) return lateRefusal;
-    const task = createTask(db, {
-      worktreeId: id,
-      cliToolId: taskCliToolId,
-      instanceId: (payload.instanceId as string | undefined) ?? null,
+    const created = createTaskIfAllowed(db, writeTarget, policyRequest.value, {
+      rowInstanceId: (payload.instanceId as string | undefined) ?? null,
       contractPath,
       contract,
     });
+    if (!created.ok) return created.response;
+    const task = created.task;
 
     await recordEnvBaseline(task, contract, verifyConfig);
 

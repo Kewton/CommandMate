@@ -50,6 +50,7 @@ import { isScreenRequest } from '@/lib/security/screen-request';
 import { createLogger } from '@/lib/logger';
 import { getMemNotice as getMemNoticeRow, memModeOnFor } from '@/lib/db/mem-close-db';
 import { resolveAgentInstances } from '@/lib/session/agent-instances-resolver';
+import type { CLIToolType } from '@/lib/cli-tools/types';
 import {
   isMemKind,
   type MemCheckResponse,
@@ -214,8 +215,28 @@ async function resolveTarget<R>(
 
 type ActorLookup = { ok: true; worktree: Worktree; actor: MemActor } | { ok: false; outcome: MemOutcome };
 
-/** Read synchronously, before any await: this fixes the incarnation the write is for. */
-function lookupActor(db: Database.Database, worktreeId: string, instanceId: unknown, by: 'agent' | 'human'): ActorLookup {
+/** What {@link readMemActor} answers: the actor's worktree, instance and incarnations, as they are now. */
+export type MemActorReading =
+  | {
+      ok: true;
+      worktree: Worktree;
+      instanceId: string;
+      cliToolId: CLIToolType;
+      /** The instance's incarnation when it is still for this tool, else null. */
+      capturedIncarnation: string | null;
+      /** The worktree's incarnation, or null when none has been made yet (it is not made here). */
+      worktreeIncarnation: string | null;
+    }
+  | { ok: false; outcome: MemOutcome };
+
+/** The reads of {@link lookupActor} before it makes anything (Issue #4466 PR1a). */
+function readActorInstance(
+  db: Database.Database,
+  worktreeId: string,
+  instanceId: unknown
+):
+  | { ok: true; worktree: Worktree; instanceId: string; cliToolId: CLIToolType; capturedIncarnation: string | null }
+  | { ok: false; outcome: MemOutcome } {
   const worktree = getWorktreeById(db, worktreeId);
   if (!worktree) return { ok: false, outcome: memError('not_found') };
   if (typeof instanceId !== 'string' || instanceId.length === 0) {
@@ -224,6 +245,32 @@ function lookupActor(db: Database.Database, worktreeId: string, instanceId: unkn
   const instance = resolveAgentInstances(db, worktreeId, worktree.selectedAgents).find((entry) => entry.id === instanceId);
   if (!instance) return { ok: false, outcome: memError('instance_not_found') };
   const captured = getInstanceIncarnation(db, worktreeId, instanceId);
+  return {
+    ok: true,
+    worktree,
+    instanceId,
+    cliToolId: instance.cliTool,
+    capturedIncarnation: captured && captured.cliToolId === instance.cliTool ? captured.incarnation : null,
+  };
+}
+
+/**
+ * The writer of a mem item, read only (Issue #4466 PR1a, design §6.4 2): the same checks
+ * and answers as the write paths' resolution, but the worktree's incarnation is read
+ * (null when it has none yet), never made. Nothing is written. Synchronous.
+ */
+export function readMemActor(db: Database.Database, worktreeId: string, instanceId: unknown): MemActorReading {
+  const read = readActorInstance(db, worktreeId, instanceId);
+  if (!read.ok) return read;
+  return { ...read, worktreeIncarnation: getWorktreeIncarnation(db, worktreeId) };
+}
+
+/** Read synchronously, before any await: this fixes the incarnation the write is for. */
+function lookupActor(db: Database.Database, worktreeId: string, instanceId: unknown, by: 'agent' | 'human'): ActorLookup {
+  const read = readActorInstance(db, worktreeId, instanceId);
+  if (!read.ok) return read;
+  const { worktree, cliToolId, capturedIncarnation } = read;
+  const actorInstanceId = read.instanceId;
   // Integration review 2 P1: the worktree's lifetime is fixed here too. Made now when
   // it has none, so a delete and a re-creation under the same id and path during
   // the awaits (which ends it, and may derive the same primary again) is told apart.
@@ -233,9 +280,9 @@ function lookupActor(db: Database.Database, worktreeId: string, instanceId: unkn
     worktree,
     actor: {
       worktreeId,
-      instanceId,
-      cliToolId: instance.cliTool,
-      capturedIncarnation: captured && captured.cliToolId === instance.cliTool ? captured.incarnation : null,
+      instanceId: actorInstanceId,
+      cliToolId,
+      capturedIncarnation,
       sessionGeneration: null,
       by,
       // Asked again in the write's transaction, after the awaits (review P1).
@@ -245,7 +292,7 @@ function lookupActor(db: Database.Database, worktreeId: string, instanceId: unkn
         return Boolean(
           now &&
             resolveAgentInstances(db, worktreeId, now.selectedAgents).some(
-              (entry) => entry.id === instanceId && entry.cliTool === instance.cliTool
+              (entry) => entry.id === actorInstanceId && entry.cliTool === cliToolId
             )
         );
       },

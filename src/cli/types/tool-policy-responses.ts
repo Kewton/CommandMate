@@ -40,4 +40,12 @@ export interface ToolPolicyDeniedResponse {
   code: 'TOOL_POLICY_DENIED' | 'RELAY_TOOL_POLICY_DENIED';
   policy: ToolPolicyDetailResponse;
   sendOutcome?: 'not_sent';
+  /** The bound relay of a refused `/send`; absent for a refusal at relay creation. */
+  relayId?: string;
+  /**
+   * Issue #4498: a refused bound `/send` only — whether its relay was withdrawn.
+   * `false`: the withdrawal could not be confirmed (the relay may still be open).
+   * Absent from a server before #4498.
+   */
+  relayWithdrawn?: boolean;
 }

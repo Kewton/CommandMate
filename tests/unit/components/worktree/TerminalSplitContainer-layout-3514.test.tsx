@@ -129,6 +129,7 @@ describe('[#3514] placing an agent added from the header "+"', () => {
     instanceId: ADDED.id,
     placement,
     token,
+    source: 'add',
   });
 
   it('new-split appends a split showing it and focuses that split', () => {

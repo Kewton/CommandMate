@@ -45,7 +45,12 @@ import {
 } from '@/hooks/useActivityPaneOverlay';
 import { FileTreeView } from '@/components/worktree/FileTreeView';
 import { FilePanelSplit } from '@/components/worktree/FilePanelSplit';
-import { TerminalSplitContainer, type SelectedSplit } from '@/components/worktree/TerminalSplitContainer';
+import {
+  TerminalSplitContainer,
+  type InstancePlacementAppliedHandler,
+  type InstancePlacementRequest,
+  type SelectedSplit,
+} from '@/components/worktree/TerminalSplitContainer';
 import { useTerminalSplitPlacement } from '@/hooks/useTerminalSplitPlacement';
 import { AgentAddMenu } from '@/components/worktree/AgentAddMenu';
 import type { AgentPlacement } from '@/config/terminal-split-config';
@@ -140,12 +145,28 @@ export interface WorktreeDetailDesktopProps {
   setActiveInstanceId: (instanceId: string) => void;
   /**
    * Issue #2656: an instance chosen outside this screen (the sidebar's
-   * sessions view), token-stamped by the controller. Applied once per token,
-   * exactly like a header pick, so the selected split shows it (#3593).
+   * sessions view), token-stamped by the controller. Issue #4484: handed to
+   * the split container as a `url` placement (the header "+" path), which
+   * routes it like a header pick — the selected split if shown nowhere, a
+   * focus move if another split shows it — and reports back only once the
+   * committed selected split shows it.
    */
   instanceSelectionRequest?: { instanceId: string; token: number } | null;
-  /** Issue #2656: tells the controller a request was applied (clears it). */
-  onInstanceSelectionHandled?: (token: number) => void;
+  /**
+   * Issue #2656: tells the controller a request was handled (clears it).
+   * Issue #4484: with the outcome, and on `refused` the instance the selected
+   * split still shows (what the screen sends to).
+   */
+  onInstanceSelectionHandled?: (
+    token: number,
+    outcome?: 'applied' | 'refused',
+    currentInstanceId?: string,
+  ) => void;
+  /**
+   * Issue #4484: the user picked an instance by hand (the header, a split):
+   * a `?instance=` request still waiting is ended so it cannot override it.
+   */
+  onInstanceSelectionCancel?: () => void;
   hasUpdate: boolean;
   lastAutoResponse: string | null;
 
@@ -328,6 +349,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   setActiveInstanceId,
   instanceSelectionRequest = null,
   onInstanceSelectionHandled,
+  onInstanceSelectionCancel,
   hasUpdate,
   lastAutoResponse,
   activeActivity,
@@ -481,9 +503,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // active instance (kill / Auto-Yes / the header's current session) follows
     // the split through `selectedSplit` below, so it is not set here: setting
     // it first would show a session the split may not end up showing.
+    // Issue #4484: a pick by hand ends a waiting `?instance=` request.
+    onInstanceSelectionCancel?.();
     headerSelectTokenRef.current += 1;
     setHeaderInstanceSelection({ instanceId, token: headerSelectTokenRef.current });
-  }, []);
+  }, [onInstanceSelectionCancel]);
 
   /**
    * Issue #3593: the selected split, published by the split container. The
@@ -497,12 +521,18 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   const selectedInstanceId = selectedSplit?.instanceId ?? null;
   const activeInstanceIdRef = React.useRef(activeInstanceId);
   activeInstanceIdRef.current = activeInstanceId;
+  // Issue #4484: held while a `?instance=` request is being applied (the
+  // controller has already made X active; the split follows within the same
+  // few commits), and run again when it ends — on `refused` that puts the
+  // active instance back on what the selected split shows and sends to.
+  const urlRequestPending = instanceSelectionRequest !== null;
   React.useEffect(() => {
+    if (urlRequestPending) return;
     if (!selectedInstanceId) return;
     if (!instances.some((inst) => inst.id === selectedInstanceId)) return;
     if (activeInstanceIdRef.current === selectedInstanceId) return;
     setActiveInstanceId(selectedInstanceId);
-  }, [selectedInstanceId, instances, setActiveInstanceId]);
+  }, [selectedInstanceId, instances, setActiveInstanceId, urlRequestPending]);
 
   /**
    * Issue #3514: the header "+" (AgentAddMenu).
@@ -545,19 +575,41 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
   const composerBranchName =
     currentBranch && currentBranch !== '(unknown)' ? currentBranch : worktreeName;
 
-  // Issue #2656: route an instance picked in the sidebar's sessions view
-  // through the same path as a header pick (the selected split if shown
-  // nowhere — split 0 before #3593 — focus move if another split shows it). The token guard keeps a re-created
-  // `handleHeaderInstanceSelect` from re-applying an old request within this
-  // mount; acknowledging clears the request so a remount cannot either.
-  const appliedInstanceRequestTokenRef = React.useRef(0);
-  React.useEffect(() => {
-    if (!instanceSelectionRequest) return;
-    if (instanceSelectionRequest.token === appliedInstanceRequestTokenRef.current) return;
-    appliedInstanceRequestTokenRef.current = instanceSelectionRequest.token;
-    handleHeaderInstanceSelect(instanceSelectionRequest.instanceId);
-    onInstanceSelectionHandled?.(instanceSelectionRequest.token);
-  }, [instanceSelectionRequest, handleHeaderInstanceSelect, onInstanceSelectionHandled]);
+  // Issue #2656 / #4484: an instance picked in the sidebar's sessions view
+  // (`?instance=`) goes to the split container as a `url` placement — the
+  // header "+" path (#3514), so it waits for the container's roster and is
+  // not lost to a rebuild of this layout: it is NOT acknowledged when handed
+  // over (that lost it to a rebuild before the container applied it), but
+  // when the container reports the committed selected split shows it. Until
+  // then the controller keeps it and a new mount hands it over again. While
+  // it stands, a "+" request waits behind it in its own state.
+  const urlPlacementRequest = useMemo<InstancePlacementRequest | null>(
+    () =>
+      instanceSelectionRequest
+        ? {
+            instanceId: instanceSelectionRequest.instanceId,
+            placement: 'replace',
+            token: instanceSelectionRequest.token,
+            source: 'url',
+          }
+        : null,
+    [instanceSelectionRequest],
+  );
+  const containerPlacementRequest = urlPlacementRequest ?? instancePlacementRequest;
+  const handleContainerPlacementApplied = useCallback<InstancePlacementAppliedHandler>(
+    (token, source, outcome, selectedInstanceId) => {
+      if (source === 'url') {
+        onInstanceSelectionHandled?.(
+          token,
+          outcome === 'refused' ? 'refused' : 'applied',
+          selectedInstanceId,
+        );
+        return;
+      }
+      handleInstancePlacementApplied(token);
+    },
+    [onInstanceSelectionHandled, handleInstancePlacementApplied],
+  );
 
   /**
    * Issue #1816: the header chip opens the Verification pane.
@@ -787,8 +839,11 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
         // Issue #1152 / #3593: route header picks into the selected split.
         headerInstanceSelection={headerInstanceSelection}
         // Issue #3514: show an agent added from the header "+".
-        instancePlacementRequest={instancePlacementRequest}
-        onInstancePlacementApplied={handleInstancePlacementApplied}
+        // Issue #4484: and `?instance=` (source `url`) ahead of it.
+        instancePlacementRequest={containerPlacementRequest}
+        onInstancePlacementApplied={handleContainerPlacementApplied}
+        // Issue #4484: a pick of a split by hand ends a waiting `?instance=`.
+        onUserSelectionChange={onInstanceSelectionCancel}
         onSplitCountChange={setSplitCount}
         // Issue #3593: the header's current session and End / Auto Yes follow it.
         onSelectedSplitChange={setSelectedSplit}
@@ -801,7 +856,7 @@ export const WorktreeDetailDesktop = memo(function WorktreeDetailDesktop({
     // destabilize the memo beyond the existing per-render cadence.
     // headerInstanceSelection changes only on a header pick (a user
     // action, not the polling cadence), so re-creating the region then is fine.
-    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, instancePlacementRequest, handleInstancePlacementApplied, verificationChip],
+    [worktreeId, instances, rosterReady, renderSplitPane, setFocusedSplitIndex, showToast, setActiveInstanceId, headerInstanceSelection, containerPlacementRequest, handleContainerPlacementApplied, onInstanceSelectionCancel, verificationChip],
   );
 
   /**
