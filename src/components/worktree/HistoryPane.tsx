@@ -15,7 +15,7 @@ import { useTranslations } from 'next-intl';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Search, User, UserCheck, ChevronLeft, Forward } from 'lucide-react';
 import { Checkbox, Skeleton } from '@/components/ui';
-import type { ChatMessage } from '@/types/models';
+import type { ChatMessage, RetryPendingOptions } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { splitHistorySlotId } from '@/hooks/useHistoryPaneState';
 import { useHighlightReapplyTick, useHistorySearch } from '@/hooks/useHistorySearch';
@@ -105,13 +105,16 @@ export interface HistoryPaneProps {
    * Issue #1121: Called with a failed optimistic message's tempId to re-send it.
    * Wired by callers that provide optimistic-UI sending (PC split). Omitted
    * elsewhere — error bubbles simply render without a Retry action.
+   * Issue #4503: `{ confirmedResend: true }` for an unknown send the person confirmed sending again.
    */
-  onRetryPending?: (tempId: string) => void;
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   /**
    * Issue #1121: Called with a failed optimistic message's tempId to discard it
    * (the caller may restore its content to the composer draft).
    */
   onDiscardPending?: (tempId: string) => void;
+  /** Issue #4503: show the terminal, to check whether a send whose outcome is unknown arrived. */
+  onCheckTerminal?: () => void;
   /** Issue #168: Whether archived messages are being shown */
   showArchived?: boolean;
   /** Issue #168: Callback when showArchived toggle changes */
@@ -275,6 +278,7 @@ export const HistoryPane = memo(function HistoryPane({
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
+  onCheckTerminal,
   showArchived = false,
   onShowArchivedChange,
   historyDisplayLimit,
@@ -667,6 +671,7 @@ export const HistoryPane = memo(function HistoryPane({
           onInsertToMessage={onInsertToMessage}
           onRetryPending={onRetryPending}
           onDiscardPending={onDiscardPending}
+          onCheckTerminal={onCheckTerminal}
           showAssistant={!historyUserOnly}
         />
       </div>

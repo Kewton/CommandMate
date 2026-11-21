@@ -107,13 +107,16 @@ describe('[#4345 1c 再指示 2] (T4) the composer: "not sent" is not a failure'
     expect(document.body.textContent).not.toMatch(/not sent|Not sent/);
   });
 
-  it('(negative control) a real failure still shows its error', async () => {
+  // Issue #4503 review 2 (PM: D4): a 500 with no sendOutcome is unknown. The core stays: a real
+  // failure is not swallowed as "not sent" — the composer shows a notice, and the draft stays.
+  it('(negative control) a real failure is not swallowed: the composer shows its notice', async () => {
     sendAnswer.next = () => Promise.reject(new ApiError('Upstream exploded', 500));
     const page = standInPage();
     render(<PageTree owner={page.owner}>{composer()}</PageTree>);
     typeMessage('hello');
     fireEvent.click(getSendButton());
-    await waitFor(() => expect(screen.getByText('Upstream exploded')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('message-input-send-unknown')).toHaveTextContent('Not sure whether this arrived'));
+    expect(draft()).toBe('hello');
   });
 });
 

@@ -131,9 +131,19 @@ describe('[#4385 A4 再指示 1] the /sessions tile and a role refusal', () => {
     await waitFor(() => expect(textarea().value).toBe(BODY));
   });
 
-  it('negative control: a 500 is a plain failure — no reason, the composer is not refilled', async () => {
+  // Issue #4503 review 2 (PM: D4): a 500 with no sendOutcome is unknown, not a plain failure. The
+  // negative control's core stays: no role reason, the composer is not refilled.
+  it('negative control: a 500 is unknown (no direct retry) — no reason, the composer is not refilled', async () => {
     installFetch(() => json(500, { error: 'Internal failure' }));
-    await sendFromTile();
+    render(
+      <ToastProvider>
+        <SessionTile worktree={worktree()} enabled />
+      </ToastProvider>,
+    );
+    fireEvent.change(textarea(), { target: { value: BODY } });
+    fireEvent.click(within(screen.getByTestId('session-tile-composer-wt-1')).getByRole('button', { name: /send message/i }));
+    await waitFor(() => expect(screen.getByTestId('chat-optimistic-unknown')).toBeInTheDocument());
+    expect(screen.queryByTestId('chat-pending-retry')).toBeNull();
     expect(screen.queryByTestId('chat-optimistic-error-reason')).toBeNull();
     expect(textarea().value).toBe('');
   });

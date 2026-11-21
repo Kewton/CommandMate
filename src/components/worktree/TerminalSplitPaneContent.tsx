@@ -839,6 +839,8 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
   // surface must not have — collapsing the OUTPUT would leave the split showing
   // nothing at all. Kept as a props object rather than two JSX copies so the
   // two can never be handed different messages or a different filter.
+  // Issue #4503: a send whose outcome is unknown is checked on this split's terminal.
+  const showTerminalSurface = useCallback(() => handleSurfaceModeChange('terminal'), [handleSurfaceModeChange]);
   const historyPaneProps = useMemo(
     () => ({
       messages: mergedMessages,
@@ -850,6 +852,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       onInsertToMessage: onHistoryInsertToMessage,
       onRetryPending: retryPending,
       onDiscardPending: handleDiscardPending,
+      onCheckTerminal: showTerminalSurface,
       showArchived,
       onShowArchivedChange,
       historyDisplayLimit,
@@ -863,6 +866,7 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
       mergedMessages,
       retryPending,
       handleDiscardPending,
+      showTerminalSurface,
       worktreeId,
       onFilePathClick,
       splitMessagesLoading,

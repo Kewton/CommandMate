@@ -54,6 +54,7 @@ vi.mock('@/components/worktree/ChatTranscript', () => ({
           key={m.id}
           data-testid={`row-${m.id}`}
           data-optimistic={m.optimisticState ?? ''}
+          data-awaiting={m.optimisticAwaitingResponse ? 'yes' : ''}
           data-role={m.role}
         >
           {m.content}
@@ -293,7 +294,9 @@ describe('[#2213] mobile chat surface optimistic send', () => {
     expect(screen.getByTestId('row-srv-1')).toHaveTextContent('second copy');
   });
 
-  it('marks an unconfirmed send as failed once the timeout elapses', async () => {
+  // Issue #4503 review 2 (PM: D5): the server answered 201 (it typed the text) and only its echo is
+  // late — the row waits for it, never "failed" with a direct retry (that would send it twice).
+  it('an accepted send whose echo has not come waits (no failure, no direct retry) once the timeout elapses', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderScreen();
@@ -309,7 +312,12 @@ describe('[#2213] mobile chat surface optimistic send', () => {
         vi.advanceTimersByTime(30_000);
       });
 
-      expect(screen.getByText('deploy please')).toHaveAttribute('data-optimistic', 'error');
+      expect(screen.getByText('deploy please')).toHaveAttribute('data-optimistic', 'sending');
+      expect(screen.getByText('deploy please')).toHaveAttribute('data-awaiting', 'yes');
+      act(() => {
+        screen.getByTestId('retry-last').click();
+      });
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

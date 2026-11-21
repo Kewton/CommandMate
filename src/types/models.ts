@@ -714,8 +714,21 @@ export function isAnswerablePromptData(
  * before the server confirms it. `sending` = awaiting the send API / server
  * echo; `error` = the send failed and the user can retry or discard. Never set
  * on messages returned by the API.
+ *
+ * Issue #4503: `unknown` = nobody knows whether it arrived (the server answered
+ * `sendOutcome: 'unknown'`, a 5xx without `sendOutcome`, or the request never
+ * completed). Not retried directly: only a confirmed resend sends it again.
  */
-export type OptimisticSendState = 'sending' | 'error';
+export type OptimisticSendState = 'sending' | 'error' | 'unknown';
+
+/**
+ * Issue #4503: the second argument of a pending row's retry. `confirmedResend` is the person's
+ * confirmation that an `unknown` row is to be sent again (a new send of the same text); without
+ * it a retry of an `unknown` row sends nothing.
+ */
+export interface RetryPendingOptions {
+  confirmedResend?: boolean;
+}
 
 /**
  * Chat message
@@ -768,6 +781,11 @@ export interface ChatMessage {
    * (409 `roleRefusal`, nothing typed). Set only alongside `optimisticState: 'error'`.
    */
   optimisticRoleRefusal?: SendRoleRefusalReason;
+  /**
+   * Issue #4503: the send's clock ran out while its request is still in flight — the row waits
+   * for the answer ("応答待ち") rather than failing. Set only alongside `optimisticState: 'sending'`.
+   */
+  optimisticAwaitingResponse?: boolean;
 }
 
 /**
