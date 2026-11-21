@@ -68,6 +68,7 @@
       "resendConfirmYes": "Send again",
       "resendConfirmNo": "Cancel"
     },
+    "attachmentNotReturned": "The unsent text is back in the input box, but the attached image could not be put back. Attach it again before sending",
     "roleRefusal": {
       "notApplied": "The role is not applied to this session, so nothing was sent. Stop the session and start it again.",
       "notConfirmed": "The role could not be confirmed for this session, so nothing was sent. Stop the session and start it again.",

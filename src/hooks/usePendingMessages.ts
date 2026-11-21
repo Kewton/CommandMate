@@ -68,6 +68,9 @@
  * `holdInFlightOnTimeout` the clock running out while the request is still in flight leaves the
  * row waiting for the answer (`awaitingResponse`) instead of failing it. Omitted, both behave as
  * before #4503.
+ *
+ * Issue #4417: every answer is applied only when it answers the row's latest attempt — a late
+ * answer to an attempt that was retried leaves the row and its in-flight mark alone.
  */
 
 'use client';
@@ -271,6 +274,11 @@ export interface UsePendingMessagesOptions {
    * Omitted: the clock fails the row as before.
    */
   holdInFlightOnTimeout?: boolean;
+  /**
+   * Issue #4417: a new send's text was handed back to the composer as not sent (`onNotSent`, or
+   * `onRoleRefused` returning true) but its attached image could not go with it — for the screen to say so.
+   */
+  onAttachmentNotReturned?: (imagePath: string) => void;
 }
 
 export interface UsePendingMessagesResult {
@@ -393,6 +401,7 @@ export function usePendingMessages({
   onRoleRefused,
   isOutcomeUnknown,
   holdInFlightOnTimeout = false,
+  onAttachmentNotReturned,
 }: UsePendingMessagesOptions): UsePendingMessagesResult {
   const [pending, setPending] = useState<PendingMessage[]>([]);
 
@@ -423,6 +432,8 @@ export function usePendingMessages({
   isOutcomeUnknownRef.current = isOutcomeUnknown;
   const holdInFlightOnTimeoutRef = useRef(holdInFlightOnTimeout);
   holdInFlightOnTimeoutRef.current = holdInFlightOnTimeout;
+  const onAttachmentNotReturnedRef = useRef(onAttachmentNotReturned);
+  onAttachmentNotReturnedRef.current = onAttachmentNotReturned;
 
   const offlineRef = useRef(offline);
   offlineRef.current = offline;
@@ -533,6 +544,11 @@ export function usePendingMessages({
     [clearTimer, failPending, timeoutMs],
   );
 
+  /** Issue #4417: a new send's text went back to the composer; its image could not. */
+  const noteAttachmentNotReturned = useCallback((p: PendingMessage) => {
+    if (p.options.imagePath) onAttachmentNotReturnedRef.current?.(p.options.imagePath);
+  }, []);
+
   /**
    * Issue #4345 1c 再指示 2: the attempt `p` was not sent — the row goes back to `previous` (its state
    * before this attempt), or, for a new send (none), leaves with its text handed back.
@@ -554,8 +570,9 @@ export function usePendingMessages({
       attemptsRef.current.delete(p.tempId);
       setPending((prev) => prev.filter((cur) => cur.tempId !== p.tempId));
       onNotSentRef.current?.(p.content);
+      if (onNotSentRef.current) noteAttachmentNotReturned(p);
     },
-    [clearTimer],
+    [clearTimer, noteAttachmentNotReturned],
   );
 
   const dispatchSend = useCallback(
@@ -568,6 +585,13 @@ export function usePendingMessages({
       inFlightRef.current.set(p.tempId, attemptsInFlight);
       try {
         await sendFnRef.current(p.content, p.options);
+        // Issue #4417: an answer to an attempt that is no longer the row's latest (retried,
+        // discarded, confirmed) changes nothing on the row. The refetch still runs: its echo is
+        // what confirms the row if this older attempt is the one that arrived.
+        if (attemptsRef.current.get(p.tempId) !== p) {
+          void onSentRef.current?.();
+          return;
+        }
         // Issue #4503: a row that was waiting for this answer (its clock ran out in flight) gets
         // its clock back, as a send answered in time has it: the echo, or the fallback as before.
         const waited = pendingRef.current.some(
@@ -589,6 +613,9 @@ export function usePendingMessages({
         // Stays 'sending' until the server echo reconciles it (or the timeout
         // fires as a fallback if the echo never arrives).
       } catch (error) {
+        // Issue #4417: a late answer to an older attempt (after a retry or an automatic resend) or
+        // to a row that was discarded or confirmed changes nothing — whatever kind it is.
+        if (attemptsRef.current.get(p.tempId) !== p) return;
         // Issue #4345 1c 再指示 2 (K1): not sent — not a failure (no error row, no resend spent).
         if (isNotSentRef.current?.(error)) {
           revertNotSent(p, previous, priorAttempt);
@@ -609,6 +636,7 @@ export function usePendingMessages({
           clearTimer(p.tempId);
           const firstAttempt = previous === undefined;
           const handedBack = onRoleRefusedRef.current?.(p.content, roleRefusal, { firstAttempt }) === true;
+          if (handedBack) noteAttachmentNotReturned(p);
           setPending((prev) =>
             prev.map((cur) =>
               sameAttempt(cur)
@@ -638,7 +666,7 @@ export function usePendingMessages({
         if (attemptsLeft && attemptsLeft.size === 0) inFlightRef.current.delete(p.tempId);
       }
     },
-    [startTimer, failPending, revertNotSent, clearTimer, settleUnknown],
+    [startTimer, failPending, revertNotSent, clearTimer, settleUnknown, noteAttachmentNotReturned],
   );
 
   const sendOptimistic = useCallback(

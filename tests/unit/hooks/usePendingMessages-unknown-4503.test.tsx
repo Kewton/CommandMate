@@ -1,5 +1,5 @@
 /**
- * Issue #4503 (PR-B2, design-4503.md 第 2 版 §3・§6.3 U1〜U3): the optimistic layer
+ * Issue #4503 (PR-B2, design-4503.md 第 2 版 §3・§6.3 U1〜U4) and Issue #4417: the optimistic layer
  * tells "the server said it was not sent" apart from "nobody knows whether it was sent".
  *
  * `POST /send` has no dedupe key, so a send whose outcome is unknown must never be sent again
@@ -10,6 +10,10 @@
  * (`ApiError.kind` network / timeout / aborted) are `unknown`. A bare 500 stays a failure (pinned by
  * the #4385 / #4345 suites). Only a send refused before it left (`kind: 'offline'`) is parked
  * and resent on its own.
+ *
+ * #4417: every answer is applied to the row only when it answers the row's latest attempt — a late
+ * success / 500 / 409 of an attempt that was retried leaves the retried row and its in-flight mark
+ * alone. A not-sent new send hands its text back; its attachment cannot go back, so the screen is told.
  *
  * Negative controls: without the new options the hook behaves exactly as before (the existing
  * suites pin that), and `not_sent` / 4xx still fail with a working ［再試行］.
@@ -26,6 +30,7 @@ import {
   type UsePendingMessagesOptions,
 } from '@/hooks/usePendingMessages';
 import { ApiError } from '@/lib/api-client';
+import { readSendRoleRefusal } from '@/components/worktree/role-refusal-notice';
 import type { ChatMessage } from '@/types/models';
 
 const ONLINE: PendingConnectivity = { offline: false, reachable: true };
@@ -259,5 +264,93 @@ describe('[#4503] U3: the clock runs out while the request is still in flight', 
     act(() => result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
     await flush();
     expect(result.current.messages[0].optimisticState).toBe('error');
+  });
+});
+
+describe('[#4417] U4: a late answer to an older attempt leaves the retried row alone', () => {
+  /** The first attempt is failed by the clock (pre-#4503 wiring), then retried: attempt 2 is in flight. */
+  async function retriedWhileFirstInFlight(extra: Partial<UsePendingMessagesOptions> = {}) {
+    const { sendFn, answers } = deferredSend();
+    const hook = renderPending(sendFn, {
+      timeoutMs: 10,
+      holdInFlightOnTimeout: false,
+      readRoleRefusal: readSendRoleRefusal,
+      onRoleRefused: vi.fn(() => true),
+      ...extra,
+    });
+    act(() => hook.result.current.sendOptimistic('hello', { cliToolId: 'antigravity' }));
+    await flush();
+    expect(hook.result.current.messages[0].optimisticState).toBe('error');
+    // The retry gets a long clock, so only the answers move the row from here.
+    hook.rerender({ serverMessages: [], connectivity: ONLINE, timeoutMs: 60_000 });
+    act(() => hook.result.current.retry(hook.result.current.pending[0].tempId));
+    expect(sendFn).toHaveBeenCalledTimes(2);
+    return { ...hook, sendFn, answers };
+  }
+
+  it('success of the old attempt: the new row is not marked accepted and stays sending', async () => {
+    const { result, answers } = await retriedWhileFirstInFlight();
+    await act(async () => answers[0].resolve({ id: 's-old' }));
+    await flush();
+    expect(result.current.pending[0].status).toBe('sending');
+    expect(result.current.pending[0].accepted).toBe(false);
+  });
+
+  it('500 of the old attempt: the new row does not fail', async () => {
+    const { result, answers } = await retriedWhileFirstInFlight();
+    await act(async () => answers[0].reject(bare500()));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('sending');
+  });
+
+  it('409 of the old attempt: the new row does not fail and carries no reason', async () => {
+    const { result, answers } = await retriedWhileFirstInFlight();
+    await act(async () => answers[0].reject(roleRefused()));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('sending');
+    expect(result.current.messages[0].optimisticRoleRefusal).toBeUndefined();
+  });
+
+  it('after the old attempt settles, the new attempt is still the one the row follows', async () => {
+    const { result, answers } = await retriedWhileFirstInFlight();
+    await act(async () => answers[0].resolve({ id: 's-old' }));
+    await flush();
+    // The new attempt answers last; it is still the one the row follows.
+    await act(async () => answers[1].reject(unknown500()));
+    await flush();
+    expect(result.current.messages[0].optimisticState).toBe('unknown');
+  });
+});
+
+describe('[#4417] the attachment of a send handed back as not sent', () => {
+  it('a not-sent new send hands its text back and tells the screen the image did not go back', async () => {
+    const onNotSent = vi.fn();
+    const onAttachmentNotReturned = vi.fn();
+    const sendFn = vi.fn().mockRejectedValue(new Error('gate'));
+    const { result } = renderPending(sendFn, {
+      isNotSent: () => true,
+      onNotSent,
+      onAttachmentNotReturned,
+    });
+    act(() => result.current.sendOptimistic('see this', { cliToolId: 'claude', imagePath: '.commandmate/attachments/a.png' }));
+    await flush();
+    expect(onNotSent).toHaveBeenCalledWith('see this');
+    expect(onAttachmentNotReturned).toHaveBeenCalledWith('.commandmate/attachments/a.png');
+  });
+
+  it('a role refusal of a new send with an image tells the screen too; without an image it does not', async () => {
+    const onAttachmentNotReturned = vi.fn();
+    const sendFn = vi.fn().mockRejectedValue(roleRefused());
+    const { result } = renderPending(sendFn, {
+      readRoleRefusal: readSendRoleRefusal,
+      onRoleRefused: vi.fn(() => true),
+      onAttachmentNotReturned,
+    });
+    act(() => result.current.sendOptimistic('plain', { cliToolId: 'claude' }));
+    await flush();
+    expect(onAttachmentNotReturned).not.toHaveBeenCalled();
+    act(() => result.current.sendOptimistic('with image', { cliToolId: 'claude', imagePath: '.commandmate/attachments/b.png' }));
+    await flush();
+    expect(onAttachmentNotReturned).toHaveBeenCalledWith('.commandmate/attachments/b.png');
   });
 });

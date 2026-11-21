@@ -1,11 +1,12 @@
 import { useCallback, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import {
   usePendingMessages,
   isSendOutcomeUnknown,
   type OptimisticSendOptions,
   type UsePendingMessagesResult,
 } from '@/hooks/usePendingMessages';
-
+import { useToast } from '@/components/common/Toast';
 import {
   useConnectivity,
   isServerConfirmedReachable,
@@ -85,6 +86,7 @@ export function useOptimisticPaneMessages({
   // says why right away (the app's toast) and on its failed row; a new send's text goes back to the
   // composer (the same insert as `onNotSent`). Shared with the `/sessions` tile.
   const { readRoleRefusal, onRoleRefused } = useRoleRefusalNotice(onNotSent);
+  const onAttachmentNotReturned = useAttachmentNotReturnedNotice();
   return usePendingMessages({
     worktreeId,
     serverMessages,
@@ -99,7 +101,21 @@ export function useOptimisticPaneMessages({
     // a clock that runs out while the request is in flight waits for the answer.
     isOutcomeUnknown: isSendOutcomeUnknown,
     holdInFlightOnTimeout: true,
+    onAttachmentNotReturned,
   });
+}
+
+/**
+ * Issue #4417: a not-sent send's text goes back to the composer, but its attached image cannot
+ * (the composer's attachment holds an uploaded file, not a path) — the screen says so, so the
+ * person attaches it again before sending. Shared with the `/sessions` tile.
+ */
+export function useAttachmentNotReturnedNotice(): (imagePath: string) => void {
+  const t = useTranslations('worktree');
+  const { showToast } = useToast();
+  return useCallback(() => {
+    showToast(t('conversation.attachmentNotReturned'), 'warning');
+  }, [showToast, t]);
 }
 
 /**
