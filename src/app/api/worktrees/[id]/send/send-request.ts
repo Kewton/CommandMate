@@ -302,12 +302,8 @@ export function validateSendRequest(
   // check this line used to carry had become unreachable. The one that still
   // matters is the check on `body.cliToolId` above, which runs on raw input.
   const cliToolId = resolution.target.cliToolId;
-  if (strictBrief && !BOUNDARY_TOOLS.has(cliToolId)) {
-    return { ok: false, response: NextResponse.json({ error: STRICT_BRIEF_NOT_FOR_TOOL }, { status: 400 }) };
-  }
-
-  const modelRefusal = validateSendModel(body.model, cliToolId);
-  if (modelRefusal) return { ok: false, response: modelRefusal };
+  const targetRefusal = refuseSendForTool(body, cliToolId);
+  if (targetRefusal) return { ok: false, response: targetRefusal };
 
   return {
     ok: true,
@@ -319,6 +315,24 @@ export function validateSendRequest(
       origin: origin.origin,
     },
   };
+}
+
+/**
+ * The checks of {@link validateSendRequest} that depend on the tool the send goes to
+ * (Issue #4466 PR1a): given that tool, the 400 for a strict brief choice it has no session
+ * boundaries for, or a `model` it cannot take; null when neither. Synchronous; reads only.
+ */
+export function refuseSendForTool(
+  body: Pick<SendMessageRequest, 'brief' | 'briefDetail' | 'model'>,
+  cliToolId: CLIToolType,
+): NextResponse | null {
+  if (isStrictBriefChoice(body) && !BOUNDARY_TOOLS.has(cliToolId)) {
+    return NextResponse.json({ error: STRICT_BRIEF_NOT_FOR_TOOL }, { status: 400 });
+  }
+
+  const modelRefusal = validateSendModel(body.model, cliToolId);
+  if (modelRefusal) return modelRefusal;
+  return null;
 }
 
 /**
