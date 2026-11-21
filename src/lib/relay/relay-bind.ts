@@ -52,6 +52,7 @@ import type { SendAttemptState } from '@/lib/session/send-attempt-types';
 import { relayObservationSource, relayServerBootId } from '@/lib/relay/relay-boot';
 import type { RelayObsState } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
+import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('relay-bind');
 
@@ -75,6 +76,35 @@ export const RELAY_HOLD_REASONS = {
 export interface RelayTurnReading {
   open: boolean;
   generation: number | null;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __relayObservedTools: Map<string, { attemptId: string; cliToolId: CLIToolType }> | undefined;
+}
+
+/**
+ * Issue #4498: the tool whose session a bound send's boundary was observed in, by
+ * relay id, for the attempt that wrote it. The ledger stores ids only (#2377), and
+ * an ad-hoc id sent with `--agent` resolves to the worktree's default without it,
+ * so the judgement right after the send would otherwise read another tool's rows
+ * and generation. In memory (a restart forgets it; the judgement then resolves as
+ * before), on `globalThis` (#1736): the route's bundle writes it, the delivery reads it.
+ */
+const observedTools = getOrInitGlobal(
+  '__relayObservedTools',
+  () => new Map<string, { attemptId: string; cliToolId: CLIToolType }>()
+);
+
+/**
+ * Issue #4498: take the tool the boundary of `relayId`'s attempt `attemptId` was
+ * observed in, or null when this process did not record one for that attempt.
+ * The entry is removed either way (one judgement per send).
+ */
+export function takeRelayObservedTool(relayId: string, attemptId: string | null): CLIToolType | null {
+  const entry = observedTools.get(relayId);
+  observedTools.delete(relayId);
+  return entry && attemptId !== null && entry.attemptId === attemptId ? entry.cliToolId : null;
 }
 
 /** What a bound send needs to know about its target. */
@@ -237,6 +267,7 @@ export class RelaySendBinding {
       throw new Error(`relay ${this.target.relayId} is no longer reserved for this send`);
     }
     this.boundaryWritten = true;
+    observedTools.set(this.target.relayId, { attemptId: this.attemptId, cliToolId: this.target.cliToolId });
     this.observationInvalid = obsState === 'invalid';
     if (kind === 'dispatch') this.dispatch = 'pending';
   }
@@ -275,6 +306,8 @@ export class RelaySendBinding {
    * is `unknown` (held, never cancelled by the CLI).
    */
   finish(result: RelaySendResult): RelaySendOutcome {
+    // Issue #4498: only a sent attempt is judged (and takes the entry); drop the rest.
+    if (result.kind !== 'sent') observedTools.delete(this.target.relayId);
     try {
       return this.settle(result);
     } catch (error) {

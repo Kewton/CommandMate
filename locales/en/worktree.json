@@ -1254,6 +1254,8 @@
     "unknownRepository": "Unknown",
     "loadingEditor": "Loading editor...",
     "agentInstanceSelection": "Agent Instance Selection",
+    "instanceQueryNotInRoster": "{instance} is not one of this worktree's agents. Showing {current} instead.",
+    "instanceQueryNotApplied": "Could not show {instance}. Messages still go to {current}.",
     "statusPill": "{label}: {status}",
     "subTabMessage": "Message",
     "subTabGit": "Git",

@@ -54,6 +54,12 @@ describe('the setup guide is one text in two places', () => {
       '](https://kewton.github.io/CommandMate/setup.md)',
     );
   });
+
+  it('is linked from website/llms.txt to the team guide too (Issue #4540)', () => {
+    expect(fs.readFileSync(LLMS_TXT, 'utf-8')).toContain(
+      '](https://kewton.github.io/CommandMate/team-setup.md)',
+    );
+  });
 });
 
 describe('docs --section setup', () => {
@@ -148,5 +154,60 @@ describe('the setup guide has the shape the Issue asks for', () => {
 
     expect(urls.length).toBeGreaterThan(0);
     expect(urls.filter((url) => !allowed.some((prefix) => url.startsWith(prefix)))).toEqual([]);
+  });
+});
+
+/**
+ * Issue #4540 — the guide must send a reader who wants a team to
+ * `team-setup.md`, while the single-agent and phone steps stay in setup.md.
+ * Pinned: the fork is stated up front, and each team-building stage says so
+ * before the reader follows the old hand-written-roles steps here.
+ */
+describe('the setup guide forks to team-setup.md for a whole team', () => {
+  const TEAM_URL = 'https://kewton.github.io/CommandMate/team-setup.md';
+  const intro = SETUP_GUIDE.split(/^## Stage 1:/m)[0];
+
+  const problems = (guide: string): string[] => {
+    const found: string[] = [];
+    if (!guide.split(/^## Stage 1:/m)[0].includes(TEAM_URL)) found.push('intro');
+    if (!guide.split(/^## Stage 1:/m)[0].includes('commandmate docs --section team-setup')) {
+      found.push('intro docs section');
+    }
+    for (const title of ['Stage 4: Give your team a PM', 'Stage 6: Hand the work to a PM']) {
+      const at = guide.indexOf(`## ${title}`);
+      const body = at < 0 ? '' : guide.slice(at).split('\n## ')[0];
+      if (!body.includes(TEAM_URL)) found.push(title);
+    }
+    return found;
+  };
+
+  it('states the fork up front, and in Stage 4 and Stage 6', () => {
+    expect(problems(SETUP_GUIDE)).toEqual([]);
+  });
+
+  it('control: a guide without the fork is caught', () => {
+    expect(problems(SETUP_GUIDE.replace(new RegExp(TEAM_URL, 'g'), 'https://example.invalid/'))).toEqual(
+      expect.arrayContaining(['intro', 'Stage 4: Give your team a PM', 'Stage 6: Hand the work to a PM']),
+    );
+  });
+
+  it('control: a guide without the docs section is caught in the intro', () => {
+    expect(
+      problems(SETUP_GUIDE.replace(/commandmate docs --section team-setup/g, 'commandmate docs --section team')),
+    ).toEqual(['intro docs section']);
+  });
+
+  it('defers to the stages the person named, so the landing prompt and the fork do not disagree', () => {
+    // The LP's #ask-level-3 names Stages 4 to 6 of this guide; an agent reading
+    // both must do those stages here rather than switch on its own.
+    expect(intro).toMatch(/If the person names stages, do those stages here/);
+    expect(intro).toMatch(/takes priority over this fork/);
+  });
+
+  it('keeps the single-agent and phone instructions where they were', () => {
+    // Adding the fork must not remove what setup.md itself is for.
+    expect(intro).toMatch(/Do Stage 2 \(Pair your phone\) last/);
+    expect(SETUP_GUIDE).toMatch(/## Stage 1: Install and start/);
+    expect(SETUP_GUIDE).toMatch(/## Stage 3: Add a second agent/);
   });
 });

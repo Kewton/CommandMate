@@ -71,10 +71,99 @@ export const ANTIGRAVITY_PROMPT_PATTERN = new RegExp(
 export const ANTIGRAVITY_THINKING_PATTERN = /[\u2800-\u28FF]|Generating|esc to cancel/;
 
 /**
+ * agy's own word for "idle", drawn on the status row under the input box
+ * ("? for shortcuts … <model>"). While generating the same row reads "esc to
+ * cancel"; the trust screen and the dialogs draw their own footers instead.
+ *
+ * Issue #2478: sufficient, no longer required — agy 1.2.1 does not redraw it
+ * after a turn that used a tool. Issue #4504: read BEFORE the thinking words,
+ * because agy's thought body can itself contain `Generating` (see
+ * {@link isAntigravityGeneratingAt}).
+ */
+export const ANTIGRAVITY_READY_FOOTER_PATTERN = /\?\s+for\s+shortcuts/;
+
+/** The other half of agy's status row: drawn while a turn is running (Issue #4504). */
+export const ANTIGRAVITY_CANCEL_FOOTER_PATTERN = /esc\s+to\s+cancel/;
+
+/**
+ * A spinner row: the braille glyph is the first thing on its row (Issue #4504).
+ *
+ * agy draws `⢿  Generating...` above the input box while a turn runs. The same
+ * glyph may also appear inside a thought body, so only the row-leading spelling
+ * counts here — unlike {@link ANTIGRAVITY_THINKING_PATTERN}, which matches the
+ * glyph anywhere.
+ */
+export const ANTIGRAVITY_SPINNER_ROW_PATTERN = /^[^\S\n]*[\u2800-\u28FF]/m;
+
+/**
+ * The word `Generating` followed immediately by its ellipsis (Issue #4504).
+ *
+ * The generating line is `⢿  Generating...` (agy 1.1.x) / `Generating…`; a
+ * thought body instead spells the word with text after it ("Generating the
+ * specified file"). Requiring the ellipsis is what tells the two apart.
+ */
+export const ANTIGRAVITY_GENERATING_ELLIPSIS_PATTERN = /Generating(?:\.{3}|…)/;
+
+/**
+ * Whether the tail carries a generating marker by POSITION (Issue #4504).
+ *
+ * Used only after the status row under the input box has been read and says
+ * neither `? for shortcuts` nor `esc to cancel` (the agy 1.2.1 after-tool-turn
+ * shape, #2478). A bare `Generating` in a thought heading or body is not a
+ * turn in flight; the spinner row or the ellipsis is.
+ */
+export function isAntigravityGeneratingAt(tail: string): boolean {
+  return ANTIGRAVITY_SPINNER_ROW_PATTERN.test(tail)
+    || ANTIGRAVITY_GENERATING_ELLIPSIS_PATTERN.test(tail);
+}
+
+/**
  * Antigravity (agy) separator pattern (Issue #988)
  * agy draws turn separators and the input-box border with runs of U+2500 (─).
  */
 export const ANTIGRAVITY_SEPARATOR_PATTERN = /^─{3,}$/m;
+
+/**
+ * Read agy's input box off the bottom of a frame (Issue #2478; shared with the
+ * status detector by Issue #4504).
+ *
+ * agy draws the box — a bare `>` between two rules, its status row under the
+ * lower one — as the last thing on the screen, and everything else it can show
+ * either replaces the box (the permission dialogs, the trust screen, the
+ * post-answer survey) or is drawn below it (the `/model` picker, the slash
+ * command popup, `/feedback`'s category menu). So a frame that ENDS in the box
+ * is one whose input box is live, and a `>` row with more than the status row
+ * under it is not a box anyone can type into.
+ *
+ * This is stricter than the status detector's `promptPattern.test(lastLines)`:
+ * it accepts the `>` anywhere in the 15-row tail, while this reads it only at
+ * the bottom, under the box. The rows between the `>` and the lower rule may be
+ * blank — agy 1.2.1 leaves the box three rows tall after a tool turn.
+ *
+ * @param contentLines - ANSI-stripped rows, trailing blank rows dropped
+ * @returns The status row under the box ('' when agy drew none), or null when
+ *   the frame does not end in the box
+ */
+export function readAntigravityInputBoxStatusRow(contentLines: readonly string[]): string | null {
+  const rows = contentLines.map((row) => row.trim());
+  const isRule = (i: number): boolean => i >= 0 && ANTIGRAVITY_SEPARATOR_PATTERN.test(rows[i]);
+  const skipBlank = (from: number): number => {
+    let i = from;
+    while (i >= 0 && rows[i] === '') i--;
+    return i;
+  };
+
+  let i = rows.length - 1;
+  let statusRow = '';
+  if (i >= 0 && !isRule(i)) {
+    statusRow = rows[i];
+    i = skipBlank(i - 1);
+  }
+  if (!isRule(i)) return null;
+  i = skipBlank(i - 1);
+  if (i < 0 || !ANTIGRAVITY_PROMPT_PATTERN.test(rows[i])) return null;
+  return isRule(skipBlank(i - 1)) ? statusRow : null;
+}
 
 /**
  * Antigravity (agy) selection list pattern (Issue #995, broadened in #997)
