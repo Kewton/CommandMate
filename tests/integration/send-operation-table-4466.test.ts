@@ -46,6 +46,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
+import { execFileSync } from 'child_process';
 import { NextRequest } from 'next/server';
 import { runMigrations } from '@/lib/db/db-migrations';
 import { getAgentInstances, setAgentInstances } from '@/lib/db/agent-instances-db';
@@ -67,7 +68,7 @@ import { noteInputStart, resetInstanceInputLocks } from '@/lib/session/instance-
 import { MAX_AGENT_INSTANCES } from '@/lib/cli-tools/types';
 import type { AgentInstance, CLIToolType } from '@/lib/cli-tools/types';
 import type { Worktree } from '@/types/models';
-import { FIXTURE, FIXTURE_ROSTER, GIT_PATH, fillerRows, gitInit, seedRosterNeighbours } from '../helpers/send-operation-table-4466/fixture';
+import { FIXTURE, FIXTURE_ROSTER, GIT_PATH, fillerRows, gitInit, isolatedGitEnv, seedRosterNeighbours } from '../helpers/send-operation-table-4466/fixture';
 import {
   BASE_OPS,
   EXIT,
@@ -1158,6 +1159,35 @@ describe('#4466 (iii) negative control: today\'s CLI writes an allowed operation
     const typed = result.changes.find(({ part }) => part === 'typed')?.added ?? [];
     expect(typed).toHaveLength(1);
     expect(typed[0]).toMatch(new RegExp(`^codex:${args.includes(FIXTURE.adHoc) ? FIXTURE.adHoc : FIXTURE.instanceOf.codex}:`));
+  });
+});
+
+describe('#4466 the fixture\'s git stays inside the test directory', () => {
+  it('4466 gitInit with GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE pointing at another repository commits only inside its own directory', () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cm-send-operation-4466-git-')));
+    try {
+      const outside = path.join(root, 'outside');
+      const inside = path.join(root, 'inside');
+      fs.mkdirSync(outside);
+      fs.mkdirSync(inside);
+      const git = (cwd: string, args: string[]): string =>
+        execFileSync('git', ['-C', cwd, ...args], { env: isolatedGitEnv(root), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      git(outside, ['init', '-q', '-b', 'main']);
+      vi.stubEnv('GIT_DIR', path.join(outside, '.git'));
+      vi.stubEnv('GIT_WORK_TREE', outside);
+      vi.stubEnv('GIT_INDEX_FILE', path.join(outside, '.git', 'index'));
+      vi.stubEnv('GIT_COMMON_DIR', path.join(outside, '.git'));
+      gitInit(inside);
+      // The repository written is the test's own: its .git, one commit on main.
+      expect(git(inside, ['rev-parse', '--show-toplevel'])).toBe(inside);
+      expect(git(inside, ['rev-list', '--count', 'HEAD'])).toBe('1');
+      expect(git(inside, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
+      // The repository GIT_DIR named got nothing: no commit, no ref.
+      expect(() => git(outside, ['rev-parse', '--verify', '-q', 'HEAD'])).toThrow();
+      expect(fs.readdirSync(path.join(outside, '.git', 'refs', 'heads'))).toEqual([]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

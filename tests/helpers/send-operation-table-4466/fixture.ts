@@ -49,13 +49,27 @@ export function fillerRows(limit: number): Array<{ id: string; cliTool: string; 
 export const GIT_PATH = '/usr/bin:/bin';
 
 /**
+ * The environment git runs with: every `GIT_*` variable of this process dropped (a
+ * `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` set by the caller would point git at a
+ * repository outside the test), `HOME` = `home` (a directory of the test), no system or
+ * global config, and only {@link GIT_PATH} on `PATH`.
+ */
+export function isolatedGitEnv(home: string): NodeJS.ProcessEnv {
+  const env = {} as NodeJS.ProcessEnv;
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('GIT_')) env[key] = value;
+  }
+  return { ...env, PATH: GIT_PATH, HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
+}
+
+/**
  * A git repository at `dir` on `main` with one empty commit, so mem resolves its branch
- * (r1, review P2-3). git runs with no global or system config and `HOME` = `dir`.
+ * (r1, review P2-3). git runs with {@link isolatedGitEnv} (`HOME` = `dir`) and `-C dir`.
  */
 export function gitInit(dir: string): void {
-  const env = { ...process.env, PATH: GIT_PATH, HOME: dir, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
-  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir, env, stdio: 'ignore' });
-  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'init'], {
+  const env = isolatedGitEnv(dir);
+  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'], { cwd: dir, env, stdio: 'ignore' });
+  execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'init'], {
     cwd: dir,
     env,
     stdio: 'ignore',
