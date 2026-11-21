@@ -93,8 +93,14 @@ import {
 import { createLogger } from '@/lib/logger';
 // The `~/.gemini` tree belongs to gemini; agy lives inside it. The merge that
 // keeps the two from erasing each other is written once, there.
-import { readJsonObjectFile, writeJsonObjectFile } from '../gemini/shared-config-tree';
+import { readJsonObjectFileState, writeJsonObjectFile } from '../gemini/shared-config-tree';
 import { AGENT_EVENT_URL_ENV_VAR } from '../launch-command';
+import {
+  getAntigravityRelayInstallPath,
+  getAntigravityRelayStagingPath,
+  getInstalledAntigravityRelayPath,
+  installAntigravityRelayScript,
+} from './relay-install';
 import { ANTIGRAVITY_CLI_TOOL_ID } from './tool-id';
 
 const logger = createLogger('lib/hooks/sources/antigravity/hooks-config');
@@ -433,15 +439,31 @@ export function inspectAntigravityHooksConfigReadOnly(
       fix: 'Do not combine CM_AGENT_HOOKS_INJECT=0 with UAT isolation.',
     };
   }
-  const relayPath = resolveRelayScriptPath();
-  if (!relayPath) {
-    return { usable: false, reason: 'this build ships no relay script', fix: UAT_SAME_BUILD_FIX };
-  }
-  const existing = readJsonObjectFile(configPath);
-  if (existing === null) {
+  const state = readJsonObjectFileState(configPath);
+  if (state.kind === 'missing') {
     logger.info('antigravity-hooks-config-absent-readonly', { configPath });
     return { usable: false, reason: `${configPath} does not exist or cannot be read`, fix: UAT_SAME_BUILD_FIX };
   }
+  if (state.kind === 'invalid') {
+    // Issue #4505: a file CommandMate cannot parse is the user's, and nothing
+    // this server may run from. It is never "usable as it is".
+    logger.info('antigravity-hooks-config-invalid-readonly', { configPath });
+    return {
+      usable: false,
+      reason: `${configPath} is not a JSON object (unreadable, unparseable, or an array)`,
+      fix: UAT_SAME_BUILD_FIX,
+    };
+  }
+  const relayPath = getInstalledAntigravityRelayPath(configPath);
+  if (!relayPath) {
+    logger.info('antigravity-hooks-relay-absent-readonly', { configPath });
+    return {
+      usable: false,
+      reason: `no relay is installed beside ${configPath}`,
+      fix: UAT_SAME_BUILD_FIX,
+    };
+  }
+  const existing = state.value;
   if (Object.keys(existing).some((key) => key !== ANTIGRAVITY_HOOK_NAME)) {
     logger.info('antigravity-hooks-config-foreign-readonly', { configPath });
     return {
@@ -467,21 +489,26 @@ export function inspectAntigravityHooksConfigReadOnly(
  * (Issue #3312) it is written once the path checks out, else this throws
  * `UatIsolationLaunchRefusedError`.
  *
+ * Issue #4505: a file that is not a JSON object is the user's file, and is left
+ * byte-for-byte as it is — this server warns and starts without hooks rather
+ * than writing a file that would delete their hooks. Only an absent file is
+ * created. The relay is installed beside the file before the content is built,
+ * so the command this writes names that copy and never a checkout.
+ *
  * @returns The path written, or null when injection is off or not possible
  */
 export function writeAntigravityHooksConfig(options: { path?: string } = {}): string | null {
   if (!isHookInjectionEnabled()) return null;
 
-  const relayPath = resolveRelayScriptPath();
-  if (!relayPath) {
-    logger.warn('antigravity-hook-relay-missing');
-    return null;
-  }
-
   const configPath = getAntigravityHooksConfigPath(options);
+  const relayInstallPath = getAntigravityRelayInstallPath(configPath);
   // Issue #3312: outside the fail-open `try` on purpose — under `own-home` a
   // path outside the dedicated user's HOME refuses the launch.
-  const policy = sharedHookWritePolicy('antigravity', [configPath]);
+  const policy = sharedHookWritePolicy('antigravity', [
+    configPath,
+    relayInstallPath,
+    getAntigravityRelayStagingPath(relayInstallPath),
+  ]);
   try {
     if (policy === 'read-only') {
       // Issue #3360: the file is the user's, shared with their production
@@ -490,8 +517,27 @@ export function writeAntigravityHooksConfig(options: { path?: string } = {}): st
       const inspection = inspectAntigravityHooksConfigReadOnly(options);
       return inspection.usable ? inspection.configPath : null;
     }
-    const existing = readJsonObjectFile(configPath);
-    const merged = mergeAntigravityHooksConfig(existing, buildAntigravityHookConfig(relayPath));
+    // Issue #4505: a file CommandMate cannot parse is not an empty file. It is
+    // overwritten only when it is absent; a broken one is left byte-for-byte
+    // as the user wrote it, because the alternative is deleting every hook in
+    // the one file agy reads for the whole machine.
+    const state = readJsonObjectFileState(configPath);
+    if (state.kind === 'invalid') {
+      logger.warn('antigravity-hooks-config-invalid', { path: configPath });
+      return null;
+    }
+    // Issue #4505: name the copy beside the hooks file, never this checkout.
+    // The install happens before the content is built, so the generated file
+    // is a function of the hooks file's location alone.
+    const relayPath = installAntigravityRelayScript(configPath, resolveRelayScriptPath());
+    if (!relayPath) {
+      logger.warn('antigravity-hook-relay-missing');
+      return null;
+    }
+    const merged = mergeAntigravityHooksConfig(
+      state.kind === 'object' ? state.value : null,
+      buildAntigravityHookConfig(relayPath)
+    );
     writeJsonObjectFile(configPath, merged);
     return configPath;
   } catch (error) {

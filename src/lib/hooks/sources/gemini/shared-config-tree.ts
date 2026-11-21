@@ -68,6 +68,41 @@ export function readJsonObjectFile(path: string): Record<string, unknown> | null
   }
 }
 
+/** What {@link readJsonObjectFileState} found. */
+export type JsonObjectFileState =
+  | { kind: 'missing' }
+  | { kind: 'object'; value: Record<string, unknown> }
+  | { kind: 'invalid' };
+
+/**
+ * {@link readJsonObjectFile} with the three null cases kept apart (Issue #4505).
+ *
+ * `readJsonObjectFile` answers null for "absent", "not JSON" and "JSON that is
+ * not an object" alike, and for gemini's per-worktree file the caller's response
+ * to all three really is the same: treat it as empty and write CommandMate's
+ * hooks into it. antigravity's file is not per-worktree — it is the one file agy
+ * reads for the whole machine — so treating a file the user broke as empty
+ * means deleting every hook in it. This function is the distinction those
+ * callers need: `missing` may be created, `object` may be merged into, and
+ * `invalid` is the user's file and is not written at all.
+ *
+ * The `readJsonObjectFile` contract itself is unchanged, so gemini's and
+ * command-code's generators keep behaving exactly as they did.
+ *
+ * @param path - Absolute path to the file
+ */
+export function readJsonObjectFileState(path: string): JsonObjectFileState {
+  if (!existsSync(path)) return { kind: 'missing' };
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    return isPlainObject(parsed) ? { kind: 'object', value: parsed } : { kind: 'invalid' };
+  } catch {
+    // Unreadable is as unmergeable as unparseable, and neither is a session
+    // worth failing: the caller starts without hooks instead.
+    return { kind: 'invalid' };
+  }
+}
+
 /**
  * Write a JSON object, creating the directory when it is missing.
  *
