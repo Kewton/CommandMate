@@ -116,3 +116,73 @@ describe('G-閉包: the functions a send reaches the layers through are a closed
     expect(found.violations).toEqual(['R-root: src/lib/zz-literal.ts#poke is reached by nothing and opens no ticket']);
   });
 });
+
+/**
+ * (f)〜(k) (design §5, "今は赤にならない書き方"): each form below added to
+ * today's tree must be a violation. Before the check was mended each one
+ * answered no violation at all (`[]`).
+ */
+describe('G-閉包: the forms the first check did not read', () => {
+  const timerFile = 'src/lib/timer-manager.ts';
+  const marker = '    const result = await runWithSendTicket(';
+  const inTimerEntry = (lines: string): Map<string, string> => {
+    const text = TODAY.get(timerFile) ?? '';
+    expect(text.includes(marker)).toBe(true);
+    return withTree({ [timerFile]: text.replace(marker, `${lines}\n${marker}`) });
+  };
+
+  it('[fence-f] imported and called through a two-step export * chain → R-module', () => {
+    const found = computeSendClosure(withTree({
+      'src/lib/zz-star1.ts': "export * from '@/lib/session-key-sender';\n",
+      'src/lib/zz-star2.ts': "export * from './zz-star1';\n",
+      'src/lib/zz-rogue-f.ts': "import { sendMessageToSession } from './zz-star2';\nexport async function viaStars(): Promise<void> {\n  await sendMessageToSession('wt', 'm');\n}\n",
+    }));
+    expect(found.violations).toEqual(['R-module: src/lib/zz-star1.ts#<re-export> reaches the send layers from re-export']);
+  });
+
+  it('[fence-g] in an entry, taken as a value and called outside its ticket → R-run', () => {
+    const found = computeSendClosure(inTimerEntry(
+      "    const early = sendUserMessage;\n    await early(db, { worktreeId: timer.worktreeId, content: 'early', cliToolId: timer.cliToolId as CLIToolType });",
+    ));
+    expect(found.violations).toEqual([expect.stringMatching(/^R-run: src\/lib\/timer-manager\.ts#executeTimer references sendUserMessage outside its ticket/)]);
+  });
+
+  it('[fence-h] in an entry, called inside another AsyncLocalStorage’s .run(…) → R-run', () => {
+    const found = computeSendClosure(inTimerEntry(
+      "    const other = new AsyncLocalStorage<number>();\n    await other.run(1, () => sendUserMessage(db, { worktreeId: timer.worktreeId, content: 'early', cliToolId: timer.cliToolId as CLIToolType }));",
+    ));
+    expect(found.violations).toEqual([expect.stringMatching(/^R-run: src\/lib\/timer-manager\.ts#executeTimer calls sendUserMessage outside its ticket/)]);
+  });
+
+  it('[fence-i] a loop of two functions that call each other, one of them a marked layer’s caller, with no root → R-root', () => {
+    const found = computeSendClosure(withTree({
+      'src/lib/zz-loop.ts': "import { typeLaunchLines } from '@/lib/cli-tools/launch-keys';\nexport async function ping(n: number): Promise<void> {\n  if (n > 0) await pong(n - 1);\n  await typeLaunchLines('s', ['x']);\n}\nexport async function pong(n: number): Promise<void> {\n  await ping(n);\n}\n",
+    }));
+    expect(found.violations).toEqual([
+      'R-root: src/lib/zz-loop.ts#ping reaches no entry through its callers',
+      'R-root: src/lib/zz-loop.ts#pong reaches no entry through its callers',
+    ]);
+  });
+
+  it('[fence-j] a real tool call added to a function on the same-name exclusions → no longer excused', () => {
+    const file = 'src/lib/handoff/page-owner.ts';
+    const text = TODAY.get(file) ?? '';
+    const anchor = '    ? worktreeApi.sendMessage(worktreeId, content, options, observer)';
+    expect(text.includes(anchor)).toBe(true);
+    const found = computeSendClosure(withTree({
+      [file]: text.replace(anchor, "    ? (void CLIToolManager.getInstance().getTool('claude').sendMessage(worktreeId, content), worktreeApi.sendMessage(worktreeId, content, options, observer))"),
+    }));
+    expect(found.violations.filter((v) => v.includes('page-owner') || v.includes('src/components/') || v.includes('src/hooks/'))).not.toEqual([]);
+    expect(found.members.has('src/lib/handoff/page-owner.ts#sendMessageForHandoffPage')).toBe(true);
+  });
+
+  it('[fence-k] an entry written as a class method, calling into the set outside its ticket → R-run', () => {
+    const found = computeSendClosure(withTree({
+      'src/lib/zz-entry-k.ts': "import { runWithSendTicket, type SendTicketInit } from '@/lib/session/terminal-fence';\nimport { sendUserMessage } from '@/lib/session/send-user-message';\nexport class Sender {\n  async send(db: never, init: SendTicketInit): Promise<void> {\n    await sendUserMessage(db, {} as never);\n    await runWithSendTicket(init, async () => undefined);\n  }\n}\n",
+    }));
+    expect(found.violations).toEqual([
+      'R-run: src/lib/zz-entry-k.ts#Sender.send calls sendUserMessage outside its ticket (line 5)',
+      'R-run: src/lib/zz-entry-k.ts#Sender.send runs nothing of the set under its ticket',
+    ]);
+  });
+});
