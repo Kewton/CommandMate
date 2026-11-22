@@ -11,6 +11,8 @@
 | r3 P2: `export *` の連鎖を通る呼び手は赤にならない（2 本とも） | 表を「赤になると確かめた書き方」だけに直し、直しを PR-A の受入条件にした（試験が先） | §5、§6 |
 | r3 P2: 入口の中で値として取り出して呼ぶ形・別の `.run(` の中の呼び出しは赤にならない | 同上 | §5、§6 |
 | r3 P3（輪・除く表・入口がメソッド・同名のメソッド・R11 の文・束の受け持ち） | 小さい 3 つは PR-A で直す。残りは静的検査の限界として名指し | §2.1、§5 |
+| a2 の再確認（表の誤り 4・P3 4。P2 以上 0） | 文言を直した（誰が流したか・(g)(h) の直す向きが今の木を赤にしない書き方・限界の最後の行の向き・G-台帳の範囲・行番号） | §5、§7 |
+| r2 の P3-5（測っていない範囲） | 測った。既存の試験 1 本が緑のまま送信 0 回になる形を見つけ、名前の出どころを決めた | §2.3、§4 |
 | r2・r3 の、この種類の外の P3 | 追随した（要約の文・OpenCode の `not-sent`・入口ごとの確かめ・貼り付けの門・本文の残り・poller・分類の順・src の一覧・main へ出す条件・測っていない範囲・別の session） | §0、§2.2、§2.4、§4〜§7 |
 
 ## 0. 結論と、人の答え
@@ -56,7 +58,7 @@
 
 ### 2.2 札・門・入口
 
-- **札**: `requestId`・`target`（三つ組）・`resolvedBy`・`kind`（`resolved`／`timer`。v2 §2.3）・`confirm`・`refusal`・`closed`・`bodyStarted`（`noteInputStart` が通った時に立つ）・`dispatchUnknown`（`noteDispatchStart` が通った時に立ち、その dispatch が `not_sent` と決着したら落とす〔`noteDispatchFailed` が `not_sent` を受けた時。呼ぶ所は `opencode.ts:707`。札への記録は、`instance-input-lock.ts:1011` の observer の有無の判定より前に置く〕。v2 §3.2 と同じ分け方。試作は 1 つの欄 `inputStarted` で、POST が断られた後のキーボードの退路で断ると `indeterminate` になる＝読み）・`names`（検知器の鍵）。PR-B で `conditions`（relay の予約・claim。v2 §2.9）を足す。**入口は札の handle を持ち**、`run` の外の catch でも `refusal`・`bodyStarted`・`dispatchUnknown` を読める（分類の順 1。ツールの包み直しは `cause` を落とす）。**順 1 は自分の札だけを、閉じる前に読む**。自分の札に `refusal` があれば、捕まえた例外が別の文でも柵の拒否として分類する（範囲の中で札を受け継いだ poller が先に断った場合を含む。宛先が変わった事実を優先し、元の例外は log に残す）。相乗りの launch で他人の拒否を受けた要求は、自分の札に `refusal` が無いので今の分類に入る（v2 §3.2 の順 4）
+- **札**: `requestId`・`target`（三つ組）・`resolvedBy`・`kind`（`resolved`／`timer`。v2 §2.3）・`confirm`・`refusal`・`closed`・`bodyStarted`（`noteInputStart` が通った時に立つ）・`dispatchUnknown`（`noteDispatchStart` が通った時に立ち、その dispatch が `not_sent` と決着したら落とす〔`noteDispatchFailed` が `not_sent` を受けた時。呼ぶ所は `opencode.ts:707`。札への記録は、`instance-input-lock.ts:1013` の observer の有無の判定より前に置く〕。v2 §3.2 と同じ分け方。試作は 1 つの欄 `inputStarted` で、POST が断られた後のキーボードの退路で断ると `indeterminate` になる＝読み）・`names`（検知器の鍵）。PR-B で `conditions`（relay の予約・claim。v2 §2.9）を足す。**入口は札の handle を持ち**、`run` の外の catch でも `refusal`・`bodyStarted`・`dispatchUnknown` を読める（分類の順 1。ツールの包み直しは `cause` を落とす）。**順 1 は自分の札だけを、閉じる前に読む**。自分の札に `refusal` があれば、捕まえた例外が別の文でも柵の拒否として分類する（範囲の中で札を受け継いだ poller が先に断った場合を含む。宛先が変わった事実を優先し、元の例外は log に残す）。相乗りの launch で他人の拒否を受けた要求は、自分の札に `refusal` が無いので今の分類に入る（v2 §3.2 の順 4）
 - **確かめ**（同期。入口ごと。どれも `getWorktreeById` が空なら `worktree-gone`、例外は `unreadable`）
 
 | 入口 | 確かめ | 試作 |
@@ -110,6 +112,7 @@ fenceConfirm(): void                 // R9。確かめるだけ
 ### 2.3 検知器（B1 (b)）
 
 - **規則**: 入口は、札を開くときに「開いた送信の数」を tmux の名前（`resolveSessionName`）で 1 増やし、閉じるときに減らす（`globalThis`）。送信だけの層は、入るときに同期で 1 行確かめる。**開いた札が ALS に無く、その名前の数が 1 以上なら `FenceMisuseError('unticketed')`**。数が 0 なら何もしない。札つきで層に入った名前が札に無ければ、その名前も数える（#2866 の別名が落ちた後の名前を拾う）
+- **鍵の名前の出どころ**: `/terminal` の入口は、手にある `cliTool.getSessionName(id, instanceId)`（`base.ts:226–228`。中身は `resolveSessionName` で、上書きする tool は無い）。send の route・relay・timer は `resolveSessionName`。名前の解決が投げたら、札を開かずにその例外をそのまま投げる（fail-open にしない。本番では同じ呼び出しが tool の中でも投げる＝読み）。名前が空の札は作らない。理由は §4（試作は全部の入口で `resolveSessionName` を呼び、既存の試験 1 本が緑のまま送信 0 回になった）
 - **印の層（6 つ）**: `sendMessageWithSubmitVerification`・`typeLaunchLines`・`createLaunchPane`（`base.ts:926`）・`startClaudeSession`・`sendModelCommand`（`copilot.ts:1070`）・`dispatchViaServer`（`opencode.ts:718`）
 - **検知器でも止まらない変更**: (1) 印の外: 再利用するペインの形の直し（`base.ts:452`）、OpenCode の `resize-window`（v1・v2）、起動中の画面への答え（`codex.ts:354` ほか）、claude の送信前の案内への答え（`claude-session.ts:1183`）、copilot の選択の一覧（`copilot.ts:936–963`）、#4115 の kill（`base.ts:417`）(2) 層に入った後で札を失った変更 (3) 範囲が終わった後の変更 (4) 取り下げの包みの中の変更。claude の健康でないペインの kill（`claude-session.ts:752–758`）は `startClaudeSession` の中なので止まる
 - **残るもの**: 別名が落ちた後、新しい名前で層に入る前に札を失うと見逃す。最初の呼び手が起動を待たずに範囲を終えると（今のコードに経路は無い）、閉じた札の文脈で続く起動の本体に相乗りした送信が、理由 `unticketed` の起動の失敗を受ける
@@ -145,11 +148,14 @@ fenceConfirm(): void                 // R9。確かめるだけ
 | `tests/unit/cli-tools tests/unit/lib/session tests/unit/lib/relay tests/unit/relay tests/unit/api tests/integration`（7,974 本） | 第 2 版（段 2a） | 1 | 134 本・14 ファイル |
 | `tests/unit/cli-tools tests/unit/lib tests/unit/relay tests/unit/api tests/unit/app tests/unit/tmux tests/unit/session tests/unit/polling tests/integration`（1,409 ファイル・27,461 本） | 改 1 の形（検知器あり） | 1 | **2 本・1 ファイル**（`instance-input-entries-3945.test.ts`。人が前置きを許した 2 本） |
 | `tests/unit/guards`（既存 63 ファイル） | 改 1 の形 | 0 | **0 本**（新しい src のファイルを git に見せた状態でも） |
+| `tests/unit` 直下の 106 ファイルと `tests/unit/sessions`・`agent-roles`・`push`・`db`（215 ファイル・3,479 本。`--maxWorkers=2`） | 改 2 の形 | 1 | 試作のせいは **0 本**。赤 15 本（4 ファイル）は試作を外しても同じ 15 本（一時の worktree が `/private/var` の下にあり、DB のパスの守りに当たる。この 15 本への試作の影響は測れていない） |
+| `terminal-route.test.ts` と 3945 のファイル／`tests/unit/guards`（1,047 本）／`tests/unit/app tests/unit/api tests/unit/session`（4,417 本） | 改 2 の形＋`/terminal` の名前を `cliTool.getSessionName` から取る | 1／0／1 | 試作のままから増えた赤 **0 本**。赤は 3945 の同じ 2 本だけ（前置きを当てると 8 本とも緑） |
 
 - 赤の 2 本は、`/terminal` の route と札なしの `sendUserMessage` の直呼びを同じ session に並べる。直呼びを試験用の札で包むと（+4／−2 行。期待値は変えない）8 本とも緑
+- **緑のまま送信が落ちた試験**（測定。r2 の読みは事実だった）: `tests/unit/terminal-route.test.ts` の `instanceId: 'codex-2'` の試験は、`@/lib/cli-tools/types` を 2 つの関数だけの mock にしている。試作の入口が `resolveSessionName` → `deriveSessionSuffix` を呼ぶと投げ、route は 500・`sendMessage` 0 回になる。expect は送信より前の呼び出しだけを見るので緑のまま（試作なしは 200・1 回）。`/terminal` の名前を `cliTool.getSessionName` から取ると 200・1 回に戻る。同じ形は上の 215 ファイルに、この 1 本のほか 0 件（入口に計装を入れて流した）。§2.3 の「鍵の名前の出どころ」はこのため
 - **形の選び方で赤になった例**（直して上の数）: 入口の包みに `await`・`finally` を挟む → `relay-delivery.test.ts` の 4 本。`handleSend` ごと closure で包む → `brief-call-chain-forms-4224.test.ts` の 1 本。確かめを生の SQL で読む／入口で `session-name` の別の関数を使う → 3945 のファイルがさらに 2 本（DB と `session-name` を偽にしている）。R6、route の形、確かめの読み方、検知器の鍵はこのため
 - **既存の試験が入口の札の下で届く門は、境界の通知の確かめ（R9）だけ**。ほかの門には届かない（最初の形で記録して 0 行）。「赤 2 本」が示すのは R4 と、R9 が今の試験の宛先を通すことまで。R5 は新しい陽性対照でしか確かめられない
-- 流していないもの: `tests/unit` の残り、e2e、verify、precheck
+- 流していないもの: `tests/unit` のほかのディレクトリ、e2e、verify、precheck。測定の記録は `workspace/orchestration/runs/2026-11-22/s10/measure-4534-a2-*.md`
 
 **試作の試験**（22 本、全部緑。柵から送信サービス・ドライバまで本物。偽は process の境〔`execFile`・`exec`・`spawn`・同期版・`fetch`〕と OpenCode のポートの読み）
 
@@ -198,17 +204,17 @@ fenceConfirm(): void                 // R9。確かめるだけ
 | 入口 4 つの経路の中の、門の無い変更（tmux・`exec`・`fetch`） | G-境（実行時の照合） | **主**。試験が通る経路だけ。起動で門を外すと赤（試作）。`tmux.ts` の中に門の無い変更を足す形・送信の経路の新しい POST は流していない（未確認） |
 | 札を失って、または札なしで、印の層に入る | 検知器（本番でも動く） | **主**。その session に開いた送信がある間だけ。層の入口より上で札を失うと `unticketed`（試作） |
 | 束の札の誤用: (d) 単独の門の戻りを取っておき、断られた後に続きへ渡す／(e) 束が終わった後の札・別の送信の札で続きを呼ぶ／束の札を別の所で作る・export された関数が受ける・公開の options に載せる・別の関数で続きを呼ぶ | 型（`tsc` が exit 2）・実行時（`not-a-batch`・`batch-ended`・`batch-of-another-send`。変更 0）・G-印 | **主**。試作が全部赤（設計者と r3 の再現） |
-| 入口の外から、印の層とその上の関数を呼ぶ新しい呼び手 | G-閉包（静的） | **補助**。下の「確かめた書き方」だけ。見ない書き方で足された呼び手を、試験の時点で赤にする検査は無い（本番では検知器が、開いた送信がある間だけ止める） |
+| 入口の外から、印の層とその上の関数を呼ぶ新しい呼び手 | G-閉包（静的） | **補助**。下の「確かめた書き方」だけ。見ない書き方で足された呼び手を、試験の時点で赤にする検査を、この設計は足さない（本番では検知器が、その session に開いた送信がある間だけ止める。既存の `session-brief-send-callers-4274.test.ts` は `sendUserMessage(` の素の呼び出しだけを今も赤にする＝a2 の読み） |
 | 印を通らずに `tmux.ts` の打鍵の関数を直に呼ぶ新しい書き手 | 既存の `pane-key-writers.test.ts` の台帳（変えない） | G-閉包の外。新しい参照は今も赤（r3 の読み） |
-| `tmux.ts` の外の、打鍵以外の tmux の変更と `prompt_async` | G-台帳（静的） | 補助。HTTP は `prompt_async` だけ |
+| `tmux.ts` の外の、打鍵以外の tmux の変更と `prompt_async` | G-台帳（静的） | 補助。HTTP は `prompt_async` だけ。試作が確かめたのは、走査が新しい変更（argv と shell の行）を拾うことまで。行を固定して新しい行で赤にする台帳と、`prompt_async` の行は書いていない |
 
-**G-閉包が赤にすると確かめた書き方**（試作 v5。設計者と r3 の再現のレビューが別々に流した）
+**G-閉包が赤にすると確かめた書き方**（試作 v5。(a)〜(c)・モジュールの直下・別名の無い名前つきの re-export・R-run は、設計者と r3 の再現のレビューが別々に流した。`export { x as y }`・`export default`・文字列の literal は r3 の再現だけ）
 
 | 書き方 | 規則 |
 |---|---|
 | (a)(b) 入口の外の新しい名前つきの関数が、名前つきの import と素の呼び出しで `sendMessageToSession`／`startSessionForSend` を呼ぶ。実際に src に置いても赤 | R-root |
 | (c) 印の層を包む新しい中間の関数を足し（名前はどこにも書かない）、入口の外（`setInterval`）から呼ぶ | R-root |
-| モジュールの直下から呼ぶ／名前つきの re-export（`export { x as y } from …`）／`export default` | R-module |
+| モジュールの直下から呼ぶ／名前つきの re-export（`export { x } from …`。別名つきの `export { x as y } from …` は r3 F7b）／`export default`（r3 F8） | R-module |
 | 入口の中の、札の下でない所に、素の呼び出し（`sendUserMessage(`）を書く | R-run |
 | 文字列の literal の `tool()['sendMessage'](…)` | 赤（r3 の再現 F2） |
 
@@ -217,8 +223,8 @@ fenceConfirm(): void                 // R9。確かめるだけ
 | # | 書き方 | 今の検査の答え | 直す向き |
 |---|---|---|---|
 | (f) | `export *` の連鎖（2 段）を通して import して呼ぶ | 違反 0 件（r3 F7。2 本とも指摘） | `export *` を再 export として扱う。集合の module を `export *` する所を R-module にするか、import を定義までたどる |
-| (g) | 入口の中で値として取り出して呼ぶ（`const early = sendUserMessage; await early(…)`） | 0 件（r3 F4） | R-run は、入口の中の識別子の参照を全部見る（callee に限らない） |
-| (h) | 入口の中で、別の `AsyncLocalStorage` の `.run(…)` の中から呼ぶ | 0 件（r3 F5） | 「札の下」を、`openSendTicket(` の戻りを受けた変数の `.run(` と、`runWithSendTicket(` の第 2 引数に限る |
+| (g) | 入口の中で値として取り出して呼ぶ（`const early = sendUserMessage; await early(…)`） | 0 件（r3 F4） | R-run は、入口の中の**値の位置の**参照を全部見る（callee に限らない）。`typeof`・型の注釈・import 文は除く（今の木では、入口 `attemptDelivery` の中・札の外に `typeof sendUserMessage` がある。`relay-delivery.ts:661`。除く行を足して通す形にはしない） |
+| (h) | 入口の中で、別の `AsyncLocalStorage` の `.run(…)` の中から呼ぶ | 0 件（r3 F5） | 「札の下」を、`openSendTicket(` の戻りを受けた変数（宣言の初期化子と**代入**の両方）の `.run(` と、`runWithSendTicket(` の第 2 引数に限る。send の route は札を `finally` で閉じるので、`try` の外の `let` に代入で受ける。route は受けた変数のまま `.run(` を呼ぶ（試作は `const ticket = fence` と別の名前へ移していた。その形は直した後の検査では赤になる） |
 | (i) | 互いに参照し合う関数の輪（外に根が無い） | 0 件（r3 F14） | 「集合の各関数は、呼び手をたどって入口に着く」を規則にする（R-root はその特別な場合） |
 | (j) | 除く表（同じ名前の別物）の関数に、本物の呼び出しを足す | 0 件（r3 F10） | 除く行を `{site, member, receiver}` にする（`worktreeApi.sendMessage` だけ） |
 | (k) | 入口をクラスのメソッドにする | R-run が黙って効かない（r3 の読み。流していない） | 入口ごとに、札の下の呼び出しを 1 つも見つけなければ赤 |
@@ -229,9 +235,13 @@ fenceConfirm(): void                 // R9。確かめるだけ
 - 名前が変数の `tool[name]()`、`Reflect`・`Proxy`
 - 集合のメソッドと同じ名前の新しいメソッドを、上の見えない呼び方だけで呼ぶ（メソッドは名前でたどるので、入口の中の同名の呼び出しが呼び手に数えられる）
 - 札の下の関数の中で予約し、札が閉じた後に走る処理（字句では札の下。r3 F6。§7 の「範囲が終わった後」の窓と同じ）
-- (h) を直した後も、札の変数や関数を別の名前へ移してから使う形（データの流れは 1 段しか見ない。見立て）
+- (h) を直した後も、札を受けた変数へ別の値を再代入する形・`runWithSendTicket` と同じ名前の関数を手元で定義する形（データの流れは 1 段しか見ない。読み）。逆に、札の変数や関数を別の名前へ移してから使う形は赤になる（見えない側ではなく、偽陽性の側）
 
-**PR-A のレビューでの等級**（A2 の読み）: 上の限界の中の新しい見えない書き方は、今の木に実在しなければ P3（この一覧に足す）。「赤になる」と書いた書き方（確かめた表と、直した後の (f)〜(k)）が赤にならなければ P2 以上で、人へ「札を引数で運ぶ形」の判断を返す。
+**PR-A のレビューでの等級**（A2 の読み。PM・人が違うと言えば直す）
+
+- 上の限界の中の新しい見えない書き方: 今の木に実在しなければ P3（この一覧に足す）。実在すれば本番の穴なので P2 以上
+- 「赤になる」と書いた書き方（確かめた表と、直した後の (f)〜(k)）が赤にならない: P2 以上。止めて PM へ返す（人の決定のときの約束）。返しには、検査の直しの書き損じで直るのか、検査の作り（字句と 1 段のデータの流れ）では赤にできないのかを付ける。「札を引数で運ぶ形」へ倒すかは人が決める
+- 直すと今の木が赤になる（偽陽性）: 規則の文言を直して通るなら P3。除く行を足さないと通らないなら止めて返す
 
 - **G-閉包**（新しい試験のファイル。補助）: 印（`enterSendLayer`）を持つ関数から始め、集合の中の関数を参照する関数を、入口（札を開く関数）に当たるまで足す。入口でないのに誰からも参照されない関数（R-root）、モジュールの直下・名前つきの re-export（R-module）、入口の中の札の下でない所の呼び出し（R-run）は赤。自由関数は参照で、メソッドは名前でたどる（広め）。「札の下か」は字句で見る。同じ名前の別物（ブラウザの `worktreeApi.sendMessage` の 2 行）は理由つきで除く。見る書き方・見ない書き方は上の表。**今の木: 印 6・入口 4（どれも自由関数）・集合 44 関数、赤 0。44 関数は全部、呼び手をたどると入口に着く（r3 の再現）**
 - **G-印**（同）: **今の木: 束の札を作る所 1（`createSession`）、受け取る非公開の関数 2（`respawnLoginShell`・`reconcileGeometry`）、続きの門 5、公開の signature・options・`tmux.ts` の外は 0**。取り下げの包みの 3 か所も同じ走査で固定する（書いていない）。静的に許すのは、`tmux.ts` の中で `FenceBatch` 型の引数を持つ関数と、その中の名前の無い関数。その外へ出た札は実行時の `batch-ended` が止める（札が開いている間だけ。閉じた後は今と同じ）。束の中の `await` は全部 `DEFAULT_TIMEOUT` つきで、`finally` は必ず来る（r3 の読み）
@@ -242,7 +252,7 @@ fenceConfirm(): void                 // R9。確かめるだけ
 
 | 本 | 中身 | 受入条件 |
 |---|---|---|
-| PR-A 柵の本体（I1・I2・I4） | 札・門・入口 4 つ・取り下げの包み・検知器・境界の通知の確かめ。拒否は型つきで投げ、飲む・包む catch は投げ直す。試行の state は札から決める（reason は今の `send-error`）。**柵の拒否では起動失敗の通知を出さない**（`base.ts:366–376`）。公開の code・exit は足さない | T1〜T9・T11〜T13・T-D と既存の試験が緑。§5 の「確かめた書き方」と (d)(e) が赤になること、直す前の赤、変異の exit を返しに書く。**(f)〜(k) は、陽性対照の試験（「この書き方を足すと検査が違反を返す」）を先にコミットし、検査を直す前はその試験が落ちる（違反 0 件）ことを示してから、検査を直して通す**。既存の試験の変更は `instance-input-entries-3945.test.ts` の前置きだけ（測った範囲は §4） |
+| PR-A 柵の本体（I1・I2・I4） | 札・門・入口 4 つ・取り下げの包み・検知器・境界の通知の確かめ。拒否は型つきで投げ、飲む・包む catch は投げ直す。試行の state は札から決める（reason は今の `send-error`）。**柵の拒否では起動失敗の通知を出さない**（`base.ts:366–376`）。公開の code・exit は足さない | T1〜T9・T11〜T13・T-D と既存の試験が緑。§5 の「確かめた書き方」と (d)(e) が赤になること、直す前の赤、変異の exit を返しに書く。**(f)〜(k) は、陽性対照の試験（「この書き方を足すと検査が違反を返す」）を先にコミットし、検査を直す前はその試験が落ちる（違反 0 件）ことを示してから、検査を直して通す**。既存の試験の変更は `instance-input-entries-3945.test.ts` の前置きだけ（測った範囲は §4）。`/terminal` に instance を付けた送信が通ること（200・`sendMessage` 1 回）を、`types` を mock しない新しい試験で固定する |
 | PR-B 理由と公開の契約（I3・F4） | 分類の順を全入口に。409・`sendOutcome`・exit 34・`lastSend.reason`・文書 ja/en。`conditions` | 柵の拒否が route で専用の code になり、予約の喪失の答えと区別できる（直す前は赤）。`send-user-message-input-boundary-3957.test.ts:255–267` を変えずに緑。T14〜 |
 
 - PR-A の src（16）: `terminal-fence.ts`（新。import は `node:async_hooks` だけ）、`send-target-names.ts`（新。札の材料＝確かめと名前。DB・解決・`session-name` を読む）、§2.2 の門の表の 6 ファイル、印の `launch-keys.ts`・`base.ts`・`copilot.ts`、入口の route 2 つ・`relay-delivery.ts`・`timer-manager.ts`、`send-user-message.ts`。PR-B は v2 §8.3 から、DB の貸し出し・ペイン ID の分を除いたもの
@@ -264,7 +274,8 @@ fenceConfirm(): void                 // R9。確かめるだけ
 **確かめていないこと**
 - T7 の全体（入口 4 つ × ツール）、codex・agy の T1・T3。試作は claude の送信器と起動、copilot の `/model`、OpenCode の送信、送信サービスまで
 - OpenCode の照合先と 2 回目の POST、timer と relay の配送の札の確かめ（§2.2 の表）、`bodyStarted`・`dispatchUnknown` の分け方、貼り付けの門の置き直し、G-境の宛先の確かめ、I3 の分類、PR-A の答え（通知の抑止を含む）。試作に入れていない
-- (f)〜(k) の直し。今の検査の答え（0 件）は r3 の再現。直した後の検査は書いていない
-- T9・`await` の静的検査・G-印の包みの分は書いていない。`tests/unit` の残りは流していない
+- (f)〜(k) の直し。今の検査の答え（0 件）は r3 の再現。直した後の検査は書いていない。(g)(h) の直す向きが今の木を赤にしないことは読み（a2 の再確認）
+- G-台帳の行の固定と HTTP の行（§5 の受け持ちの表）
+- T9・`await` の静的検査・G-印の包みの分は書いていない。`tests/unit` のほかのディレクトリ（`cli`・`components`・`config` ほか）は流していない（CI が判定する）
 
-**別 Issue の候補**: 札を引数で運ぶ形（`pane-key-writers.test.ts:47–48` と同じ向き。PR-A のレビューで「赤になる」と書いた書き方が赤にならなければ、人へこの形の判断を返す）／名簿の書き手を待たせる／ペイン ID で打つ
+**別 Issue の候補**: 札を引数で運ぶ形（`pane-key-writers.test.ts:49–50` と同じ向き。PR-A のレビューで「赤になる」と書いた書き方が赤にならなければ、止めて返す。§5 の等級）／名簿の書き手を待たせる／ペイン ID で打つ
