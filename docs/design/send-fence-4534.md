@@ -1,23 +1,16 @@
 # 1 回の送信の端末の変更を 1 か所の柵に通す（Issue #4534）設計 第 3 版
 
-- 版: 第 3 版・改 1（2026-11-22）。第 3 版の最初の形は `8da8b15de`。第 2 版は [`send-fence-4534-v2.md`](./send-fence-4534-v2.md)（以下 v2）、第 1 版は `6c495b52b`
+- 版: 第 3 版・改 2（2026-11-22）。第 3 版の最初の形は `8da8b15de`。第 2 版は [`send-fence-4534-v2.md`](./send-fence-4534-v2.md)（以下 v2）、第 1 版は `6c495b52b`
 - 基準: develop `ad21704ea`。正は Issue #4534 の本文
 - 設計だけ。src・既存の試験は変えていない。§4 の試作は未コミットで戻した（差分は worktree の `dev-reports/issue-4534-v3-probe.diff`、gitignore）。「見立て」「未確認」は明記する
 
-**改 1 の処分**（レビュー 2 本: 再現つき P1 2・P2 2・P3 5／読み P2 4・P3 11。全部採った。採らなかったものは無い）
+**改 2 の処分**（再確認の読み P2 2。漏れを見つける検査の種類だけを直した。不変条件と試験が先。試作は 34 本。ほかは改 1 のまま。改 1 の表は `1a0e004a8`）
 
 | 指摘 | 処分 | 節 |
 |---|---|---|
-| 再現 P1-1 `createSession` と G-境の矛盾、`exec` が見えない | 門を変更 1 つずつの直前に。作成は「束」。偽の process は全部の出口を見る | R2・R3、§5 |
-| 再現 P1-2 断った札が閉じない | `closed` を別の欄にし、門が最初に見る | R8、T11 |
-| 再現 P2-1・読み P3-6 拒否を包む・飲む catch | 所ごとに決めた | §2.2 の表 |
-| 再現 P2-2・P3-5、読み P3-7 別名で名前が変わる | 札は三つ組。`ticket-mismatch` は捨てた。検知器は使った名前を足して数える | R10、§2.3 |
-| 読み P2-1 門が境界の通知の後 | 通知の中で、hook より先に確かめる | R9、T1・T5 |
-| 読み P2-2 G-入口の名前が足りない | 印の 6 層と中間の関数まで広げた。受け持ちの表 | §5 |
-| 読み P2-3 PR-A 単独の答え | 通知の抑止と投げ直しを PR-A に。PR-B まで main に出さない | §6 |
-| 読み P2-4 guards | 測った（0 本）。台帳は新しいファイル | §4、§5 |
-| 再現 P3-1〜P3-4、読み P3-1・P3-2・P3-5 | 検知器の一覧・相乗り・poller・包みの範囲と中身・G-境の定義と読みの一覧 | §2.2〜§2.4、§5、§7 |
-| 読み P3-3・P3-4・P3-8〜P3-11 | 札の欄と handle、I1 の読みと入口の外の書き手、試験、触るファイル、数の漏れ | §0、§2、§5、§6 |
+| P2-A 入口の台帳が呼び出しの連鎖をたどらない | 名前の一覧をやめ、検査が閉じた集合を自分で作る | R11、§5 |
+| P2-B・再現 N1 束の札がどの門の戻りからでも作れる | 束の札を別の型にし、作る所・受ける所・寿命を固定 | R3、§2.2 |
+| P3-4 「新しい POST → G-台帳が赤」は言い過ぎ | 表を、試作が赤にしたものだけに | §5 |
 
 ## 0. 結論と、人の答え
 
@@ -50,7 +43,7 @@
 |---|---|---|
 | R1 | 開いた札の中の変更は、必ず門を通る | 作り＋G-境（実行時）＋G-台帳（静的） |
 | R2 | 門は変更 **1 つずつ**の直前にある。門と spawn・fetch の間に `await` が無い。例外は無い | 作り＋G-境（1 対 1）＋T6 |
-| R3 | 門が宛先を**確かめる**のは、単独の変更と、束（`createSession`）の先頭。束の続きは、先頭の門が返した札を渡して通す（確かめない・断らない） | 作り（札は関数の中の値）＋静的検査（G-印） |
+| R3 | **INV-束**: 確かめるのは、単独の変更と束の先頭。束の札は束の先頭の門でだけ作られ、束が終わると失効する。単独の門は何も返さない（型が違う）。札は `tmux.ts` の `createSession` と非公開の関数の間だけを渡り、公開の options・signature を越えない。束に入れてよいのは、1 回の `createSession` の中の、その session を作る手順で、途中で止めると placeholder だけの session が残るもの | 型＋G-印＋T12 |
 | R4 | 札が無い・閉じているとき、argv・呼び出し先・呼び出しの数は今と同じ | 作り＋既存の試験が緑 |
 | R5 | 一致する札の下でも、argv の列は札なしと同じ | 陽性対照（T8） |
 | R6 | 入口と取り下げの包みは、`fn` の Promise をそのまま返す | 作り＋既存の試験（挟むと赤。§4） |
@@ -58,7 +51,7 @@
 | R8 | **`closed` は `refusal` と別の欄で、門が最初に見る**。閉じた札は、断った札でも無いのと同じ。ALS の入れ物は 1 つで、内側の札が勝つ | 作り＋T11 |
 | R9 | 境界の通知（`noteInputStart`・`noteDispatchStart`）は、hook より先に確かめる。断ったら hook は走らず、`dispatched` も立たない。柵の拒否は `delivery: 'not-started'` を持つ | 作り＋T1・T5 |
 | R10 | 札の宛先は三つ組 `(worktree, instance, tool)`。門は session 名を比べない。検知器だけが名前で数え、札の中で使った名前を足す | 作り＋T-D |
-| R11 | 送信の層へ届く production の呼び手は、札を作る入口の中にしか無い | G-入口（静的）＋検知器 |
+| R11 | **INV-閉包**: 門へ届く production の関数の集合は閉じている。集合の外から中を呼べるのは、札を開く入口だけで、それも札の下で走らせる関数の中だけ。集合は検査が自分で作る（名前の一覧を持たない） | G-閉包＋検知器 |
 
 ### 2.2 札・門・入口
 
@@ -67,15 +60,16 @@
 - **門**（`src/lib/session/terminal-fence.ts`、新。import は `node:async_hooks` だけ）:
 
 ```
-fenceGate(kind, batch?):            // kind: key | kill | create | geometry | env | paste | dispatch
+fenceGate(kind): void               // 単独の変更。key | kill | geometry | env | paste | dispatch
   t = 札（ALS）
-  if t が無い or t.closed: return 素通り                       // R4・R8（最初に見る）
-  if 取り下げの包みが有効 and kind が key か kill: return 通す   // R7
-  if batch があり、その札が t: return batch                     // R3（束の続き）
+  if t が無い or t.closed: return                               // R4・R8（最初に見る）
+  if 取り下げの包みが有効 and kind が key か kill: return        // R7
   if t.refusal: throw t.refusal                                 // R7
-  v = t.confirm()   （例外・不一致は t.refusal に置いて throw）
-  return { t }                                                  // 束の先頭なら、これを続きへ渡す
-fenceConfirm():                     // R9。確かめるだけ。t が無い・closed なら何もしない
+  t.confirm()   （例外・不一致は t.refusal に置いて throw）
+fenceBatchOpen('create'): FenceBatch // 束の先頭。同じに確かめ、束の札を返す
+fenceBatchStep(batch): void          // 束の続き。確かめない・断らない。札でない値・失効した札・別の送信の札は誤用で投げる
+fenceBatchEnd(batch)                 // createSession の finally
+fenceConfirm(): void                 // R9。確かめるだけ
 ```
 
 - **門を置く所**。どれも今の呼び出しの直前に 1 行。関数は包まない
@@ -84,8 +78,8 @@ fenceConfirm():                     // R9。確かめるだけ。t が無い・c
 |---|---|---|
 | `tmux.ts` `sendKeys`・`sendSpecialKey`・`clearInputLine`・`clearComposerLine`・`clearComposerPasteToken`・`killSession` | `try` の前 | そのまま |
 | `tmux.ts` `sendSpecialKeys` | キーごと（`try` の中） | catch が投げ直す |
-| `tmux.ts` `createSession`（束） | `new-session` の前で確かめ、`set-option`・`new-window`・`respawn-pane`・形の直し 2 つは続き | catch が投げ直す（今は包む） |
-| `tmux.ts` `reconcileSessionGeometry`（単独で呼ぶとき） | `set-window-option`・`resize-window` それぞれで確かめる | catch が投げ直す（今は飲む） |
+| `tmux.ts` `createSession`（束） | `new-session` の前が先頭。`set-option`・`new-window`・`respawn-pane`・形の直し 2 つは続き。`finally` で終える | catch が投げ直す（今は包む） |
+| `tmux.ts` `reconcileSessionGeometry`（公開。中身は非公開の `reconcileGeometry` へ） | 2 つの変更それぞれで確かめる。束の札を受ける口は無い | catch が投げ直す（今は飲む） |
 | 送信器の `paste-buffer`（`submit-verified-sender.ts:280`） | `try` の前 | そのまま |
 | claude の `set-environment`（`claude-session.ts:1018`。`exec`） | 直前 | `startClaudeSession` の catch が投げ直す |
 | OpenCode の `resize-window`（`opencode.ts:449–452`・`opencode-v2.ts:284–287`） | `try` の前（今の `try` は飲む） | そのまま |
@@ -93,7 +87,7 @@ fenceConfirm():                     // R9。確かめるだけ。t が無い・c
 | `instance-input-lock.ts` `noteInputStart`・`noteDispatchStart` | 先頭で `fenceConfirm` | そのまま（hook より前） |
 
 - **束にする理由**（事実）: `new-session` の窓 0 は placeholder で、`new-window -k` が入れ替える。間で断ると placeholder だけの session が残り、次の送信が起動行を `sleep` に打つ（v2 §2.7）。作成の間に名簿が動いても作成は終わらせ、次の門で止める
-- **入口**（4 つ。送信の層へ届く呼び手はこれだけ。§5 の G-入口の今の 61 行で確かめた）
+- **入口**（4 つ。送信の層へ届く呼び手はこれだけ。§5 の G-閉包が今の木で確かめた）
 
 | 入口 | 範囲 |
 |---|---|
@@ -160,7 +154,7 @@ fenceConfirm():                     // R9。確かめるだけ。t が無い・c
 | 3 | 打鍵・貼り付け・送信サービス | 消去の後に行が消える → 変更は消去だけ、境界の hook 0 回、carried mark 無し、拒否は `not-started`、記録は `not-sent`。貼り付けは buffer を捨てる。本文の後に断ると `indeterminate` |
 | 3 | OpenCode（F5） | POST 0。dispatch の境界は通知されず、失敗の verdict も立たず、キーボードへ切り替えない。対照は POST 1 件で門と 1 対 1 |
 | — | F2（copilot の `/model`） | idle の読みの後に tool が変わると変更 0。対照は 1 件 |
-| 4 | 静的検査（新しいファイル。既存の走査の helper は変えない） | G-入口は今の呼び手 61 行、G-台帳は 11 行（送信の経路は 3 行）を読み出す。足した呼び手・命令を見つける対照が緑 |
+| 4 | 静的検査（新しいファイル。既存の走査の helper は変えない） | G-閉包・G-印・G-台帳。結果は §5 の表 |
 | 5 | 別名が落ちる送信 | 旧い名前で始まり、範囲の中で名前が変わっても起動は断られない。数は両方の名前で 1、閉じると 0。新しい名前で札を失った層は `unticketed` |
 | — | 検知器 | 開いた送信が無ければ直呼びは今と同じ。あれば `unticketed`。別の session は影響なし。reject・throw の後に数が戻る。閉じた札の文脈は、別の開いた送信がある間だけ `unticketed` |
 
@@ -170,7 +164,7 @@ fenceConfirm():                     // R9。確かめるだけ。t が無い・c
 
 足場は §4 の試作と同じ。各試験は同じ fixture の陽性対照を先に通し、後で検知器の数が 0 であることを見る。
 
-**読みの一覧（G-境・G-台帳で共通）**: tmux の `has-session`・`capture-pane`・`display-message`・`list-*`・`show-*`・`-V` は読み。`load-buffer`・`delete-buffer` は buffer だけ。それ以外の tmux の命令は変更。`exec` の行は `tmux <命令>` を同じ表で分ける。tmux 以外の process は端末の変更ではない。`fetch` は GET 以外が変更。
+**読みの一覧（G-境・G-台帳で共通）**: tmux の `has-session`・`capture-pane`・`display-message`・`list-*`・`show-*`・`-V` は読み。`load-buffer`・`delete-buffer` は buffer だけ。ほかの tmux の命令は変更。`exec` の行は `tmux <命令>` で分ける。tmux 以外の process は対象外。`fetch` は GET 以外が変更。
 
 | # | 受入条件・不変条件 | 試験 | 直す前 | 変異 |
 |---|---|---|---|---|
@@ -179,7 +173,8 @@ fenceConfirm():                     // R9。確かめるだけ。t が無い・c
 | T3 | F3・R2・R3 | 起動の前 → 変更 0。`new-session` の直後 → 作成だけ終わり、その先 0。拒否が型のまま届く（claude・codex） | 赤 | `set-environment` の門・束の続きの門を外す |
 | T4 | I2・R7 | 起動行の後・消去の後に名簿が動く → その先 0 | 赤 | — |
 | T5 | F5・R9 | OpenCode。POST 0、境界は通知されない、`not-sent`、キーボードの変更 0。ポートだけが変わる形・2 回目の POST | 赤 | POST の門を外す |
-| T6 | 札の無い経路（静的）・R2 | G-入口・G-台帳・G-印。門と spawn の間に `await` が無い | 赤 | 写しに呼び手・命令・`await` を足す |
+| T6 | 札の無い経路（静的）・R2・R11 | G-閉包・G-台帳・G-印。門と spawn の間に `await` が無い | 赤 | 下の表の (a)〜(c)。写しに命令・`await` |
+| T12 | R3 | 単独の門の戻り・失効した札・別の送信の札では続きを呼べない | — | 下の (d)(e) |
 | T7 | 札の無い経路（実行時） | G-境。入口 4 つ × 代表のツール。起動（claude・codex）を必ず含む | 赤 | 門を 1 つ外す |
 | T8 | I4・R5 | 一致する札あり・札なしで、出口の列が同じ。起動を含む | 緑 | ペイン ID |
 | T9 | B2 の境界 | spawn 済み・未適用で名簿を変える → 変更 1 件 | — | — |
@@ -188,24 +183,29 @@ fenceConfirm():                     // R9。確かめるだけ。t が無い・c
 | T-D | 検知器・R10 | 札を失って層に入る → `unticketed`（層ごと）／開いた送信が無い → 今と同じ／別の session／reject・throw・早い return で数が戻る／閉じた札の文脈／別名が落ちる形で起動つきの送信が通り、数が合う | — | — |
 | T14〜 | I3・F4（PR-B） | v2 §6.2 の T5・T7・T11 と、T3 の 409 | 赤 | — |
 
-**受入条件 4「札の無い経路を足すと赤」を、何が捕まえるか**
+**受入条件 4「札の無い経路を足すと赤」を、何が捕まえるか**（試作が赤にしたものだけ）
 
-| 足されたもの | 静的（CI） | G-境（実行時・CI） | 検知器（本番） |
-|---|---|---|---|
-| 入口の外から、送信の層・中間の関数を呼ぶ新しい呼び手 | **G-入口が赤** | — | その session に開いた送信がある間だけ |
-| `tmux.ts` の外の、門の無い新しい tmux の変更・POST | **G-台帳が赤** | 試験が通る経路なら赤 | — |
-| `tmux.ts` の中の、門の無い新しい変更 | — | 試験が通る経路なら赤。断る札の下で全 export を呼ぶ検査（v2 §5 の G1）も置く | — |
-| 入口から門までの間で札を失う作り | — | 試験が通る経路なら赤 | 層の入口より上なら止める |
+| 足されたもの | 赤にした検査 |
+|---|---|
+| (a)(b) 入口の外の新しい関数が `sendMessageToSession`／`startSessionForSend` を呼ぶ | G-閉包（R-root）。実際に src に置いても赤 |
+| (c) 印の層を包む新しい中間の関数を足し、入口の外から呼ぶ（名前はどこにも書かない） | G-閉包（R-root） |
+| モジュールの直下・re-export から／入口が札の外で、集合の中を呼ぶ | G-閉包（R-module／R-run） |
+| (d) 単独の門の戻りを取っておき、断られた後に束の続きへ渡す | 型（`tsc` が exit 2）と実行時（`not-a-batch`）。変更 0 |
+| (e) 束が終わった後の札・別の送信の札で続きを呼ぶ | 実行時（`batch-ended`・`batch-of-another-send`） |
+| 束の札を別の所で作る／export された関数が受ける／公開の options に載せる／別の関数で続きを呼ぶ | G-印 |
+| `tmux.ts` の外の門の無い tmux の変更／起動で門を外す／層の入口より上で札を失う（改 1） | G-台帳／G-境／検知器 |
+| **未確認**: `tmux.ts` の中に門の無い変更を足す／送信の経路に新しい POST を足す | G-境は試験が通る経路だけ。G-台帳の HTTP は `prompt_async` だけ |
 
-- **G-境**: 門が通ると「許可」を 1 つ置く。同じ同期の一歩の次の変更が 1 つ使う。使われなければ microtask の境で消える。許可の無い変更が 1 件でもあれば赤。束の続き・取り下げの包みの門も許可を置く。control mode の stdin は process の境に見えないので、G-台帳だけが受け持つ
-- **G-入口**（新しい試験のファイル）: `sendUserMessage`・印の 6 層・`sendMessageToClaude` と、メソッド `sendMessage`・`sendMessageWithImage`・`startSession`・`trySendViaServer`・`launchSession`・`launchSessionWithRole`・`requireSession`・`relaunchIfToolExited` の呼び手を「名前 ← ファイル#関数」で固定する（ブラウザの API の同名 2 行は「送信の外」）
-- **G-台帳**（新しい試験のファイル。既存の `pane-key-writers.test.ts` は変えない）: `tmux.ts` の外の、打鍵以外の tmux の変更と `prompt_async`。各行は「門あり」か「送信の外」。**G-印**: 印の 6 層・束の続きの門・包みの場所
+- **G-閉包**（新しい試験のファイル）: 印（`enterSendLayer`）を持つ関数から始め、集合の中の関数を参照する関数を、入口（札を開く関数）に当たるまで足す。入口でないのに誰からも参照されない関数（R-root）、モジュールの直下・re-export（R-module）、入口の中で `run` に渡す関数の外の参照（R-run）は赤。メソッドは名前でたどる（広め。値として取り出す呼び方・`tool[name]()` は見ない＝未確認）。同じ名前の別物（ブラウザの `worktreeApi.sendMessage` の 2 行）は理由つきで除く。**今の木: 印 6・入口 4・集合 44 関数、赤 0**
+- **G-印**（同）: **今の木: 束の札を作る所 1（`createSession`）、受け取る非公開の関数 2（`respawnLoginShell`・`reconcileGeometry`）、続きの門 5、公開の signature・options・`tmux.ts` の外は 0**。取り下げの包みの 3 か所も同じ走査で固定する（書いていない）
+- **G-境**: 門が通ると「許可」を 1 つ置き、同じ同期の一歩の次の変更が使う（使われなければ microtask の境で消える）。許可の無い変更があれば赤。束の続き（有効な札だけ）・包みの門も許可を置く。control mode の stdin は G-台帳だけが受け持つ
+- **G-台帳**（同。既存の `pane-key-writers.test.ts` は変えない）: `tmux.ts` の外の、打鍵以外の tmux の変更と `prompt_async`。各行は「門あり」か「送信の外」
 
 ## 6. PR の割り方（同じファイルなので 1 人のワーカーが直列で）
 
 | 本 | 中身 | 受入条件 |
 |---|---|---|
-| PR-A 柵の本体（I1・I2・I4） | 札・門・入口 4 つ・取り下げの包み・検知器・境界の通知の確かめ。拒否は型つきで投げ、飲む・包む catch は投げ直す。試行の state は札から決める（reason は今の `send-error`）。**柵の拒否では起動失敗の通知を出さない**（`base.ts:366–376`）。公開の code・exit は足さない | T1〜T9・T11・T13・T-D と既存の試験が緑。直す前の赤と変異の exit を返しに書く。既存の試験の変更は `instance-input-entries-3945.test.ts` の前置きだけ |
+| PR-A 柵の本体（I1・I2・I4） | 札・門・入口 4 つ・取り下げの包み・検知器・境界の通知の確かめ。拒否は型つきで投げ、飲む・包む catch は投げ直す。試行の state は札から決める（reason は今の `send-error`）。**柵の拒否では起動失敗の通知を出さない**（`base.ts:366–376`）。公開の code・exit は足さない | T1〜T9・T11〜T13・T-D と既存の試験が緑。§5 の表の (a)〜(e) が赤になること、直す前の赤、変異の exit を返しに書く。既存の試験の変更は `instance-input-entries-3945.test.ts` の前置きだけ |
 | PR-B 理由と公開の契約（I3・F4） | 分類の順を全入口に。409・`sendOutcome`・exit 34・`lastSend.reason`・文書 ja/en。`conditions` | 柵の拒否が route で専用の code になり、予約の喪失の答えと区別できる（直す前は赤）。`send-user-message-input-boundary-3957.test.ts:255–267` を変えずに緑。T14〜 |
 
 - PR-A の src（15）: `terminal-fence.ts`（新）、§2.2 の門の表の 6 ファイル、印の `launch-keys.ts`・`base.ts`・`copilot.ts`、入口の route 2 つ・`relay-delivery.ts`・`timer-manager.ts`、`send-user-message.ts`。PR-B は v2 §8.3 から、DB の貸し出し・ペイン ID の分を除いたもの
@@ -226,6 +226,7 @@ fenceConfirm():                     // R9。確かめるだけ。t が無い・c
 **確かめていないこと**
 - T7 の全体（入口 4 つ × ツール）、codex・agy の T1・T3。試作は claude の送信器と起動、copilot の `/model`、OpenCode の送信、送信サービスまで
 - OpenCode の照合先と 2 回目の POST、timer と relay の配送の札の確かめ、I3 の分類、PR-A の答え（通知の抑止を含む）。試作に入れていない
-- T9・`await` の静的検査・G-印は書いていない。`tests/unit` の残りは流していない
+- T9・`await` の静的検査・G-印の包みの分は書いていない。`tests/unit` の残りは流していない
+- 再確認（r2）の P3 のうち、この種類でないものは未処分（OpenCode の `indeterminate`・relay と timer の確かめ・`tests/unit` 直下の 17 ファイル ほか）。別のコミットで直す
 
 **別 Issue の候補**: 札を引数で運ぶ形（`pane-key-writers.test.ts:47–48` と同じ向き）／名簿の書き手を待たせる／ペイン ID で打つ
