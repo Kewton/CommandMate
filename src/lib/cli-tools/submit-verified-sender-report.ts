@@ -407,3 +407,43 @@ export async function awaitSlashCommandSettle(params: {
       `opened would take it (Issue #4555). ${promptUnreportedResendNote(target, cliToolId)}`
   );
 }
+
+/**
+ * The read-back after a lone slash command's `pending` verdict (Issue #4555:
+ * kept out of `sendUnderInputLock` (submit-verified-sender.ts), whose
+ * complexity #4057 bounds). Any other verdict, or any other body, comes back
+ * as it was. A lone slash command's `pending` is watched without a key by
+ * {@link awaitSlashCommandSettle}, against one deadline per send counted from
+ * its first Enter (returned, for the next read of the same send). THROWS as
+ * unconfirmed when the composer still shows the command at that deadline.
+ */
+export async function settleLoneSlashCommand(input: {
+  state: SubmitState;
+  rule: SubmitRule;
+  output: string;
+  slashSettleDeadline: number | null;
+  sessionName: string;
+  message: string;
+  cliToolId: CLIToolType;
+  composer: ComposerSpec;
+  enteredAt: number;
+  ticket: InstanceInputTicket;
+  target: PromptSubmitExpected | undefined;
+}): Promise<SubmitReadBack & { slashSettleDeadline: number | null }> {
+  const { state, rule, output, slashSettleDeadline, message, target } = input;
+  if (state !== 'pending' || !isLoneSlashCommand(message)) return { state, rule, output, slashSettleDeadline };
+  const deadline = slashSettleDeadline ?? input.enteredAt + SLASH_COMMAND_SETTLE_WAIT_MS;
+  const settled = await awaitSlashCommandSettle({
+    sessionName: input.sessionName,
+    message,
+    cliToolId: input.cliToolId,
+    composer: input.composer,
+    enteredAt: input.enteredAt,
+    rule,
+    output,
+    deadline,
+    ticket: input.ticket,
+    ...(target !== undefined ? { target } : {}),
+  });
+  return { ...settled, slashSettleDeadline: deadline };
+}

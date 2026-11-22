@@ -143,7 +143,6 @@ import {
   PASTE_LANDED_POLL_MS,
   PROMPT_REPORT_WAIT_MS,
   RECHECK_CAPTURE_LINES,
-  SLASH_COMMAND_SETTLE_WAIT_MS,
   TYPED_BODY_POLL_MS,
   logger,
   type SubmitVerifiedSendParams,
@@ -157,9 +156,7 @@ import {
 } from './submit-verified-sender-composer';
 import {
   awaitPromptReport,
-  awaitSlashCommandSettle,
   holdsResendEnter,
-  isLoneSlashCommand,
   logClearInputFailed,
   pasteFailureMayHaveTyped,
   promptReceiptFor,
@@ -167,6 +164,7 @@ import {
   reportSubmittedBodyInComposer,
   resolveSubmitEnterCount,
   settleAwaitedPromptReport,
+  settleLoneSlashCommand,
   shouldAwaitTypedBody,
 } from './submit-verified-sender-report';
 
@@ -882,24 +880,8 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
       ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output, target }));
     }
 
-    if (state === 'pending' && isLoneSlashCommand(message)) {
-      // Issue #4555: no Enter is resent for a lone slash command — the frame
-      // may predate its Enter while the picker it opened is up. Watch without
-      // a key; THROWS as unconfirmed when the composer still shows it.
-      slashSettleDeadline ??= enteredAt + SLASH_COMMAND_SETTLE_WAIT_MS;
-      ({ state, rule, output } = await awaitSlashCommandSettle({
-        sessionName,
-        message,
-        cliToolId,
-        composer,
-        enteredAt,
-        rule,
-        output,
-        deadline: slashSettleDeadline,
-        ticket,
-        ...(target !== undefined ? { target } : {}),
-      }));
-    }
+    // Issue #4555: no Enter is resent for a lone slash command (watched without a key).
+    ({ state, rule, output, slashSettleDeadline } = await settleLoneSlashCommand({ state, rule, output, slashSettleDeadline, sessionName, message, cliToolId, composer, enteredAt, ticket, target }));
 
     if (state === 'submitted') {
       rememberScreenOnlySubmit({ sessionName, cliToolId, enteredAt, message, ticket, target });
