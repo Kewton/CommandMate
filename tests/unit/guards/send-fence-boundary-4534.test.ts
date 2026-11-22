@@ -81,7 +81,7 @@ import type { Worktree } from '@/types/models';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { addPane, changeCommands, changes, fakeFetch, gateObserver, resetWorld, ungated, world, type Out } from './send-fence-process';
-import { openSendCount, resetFenceForTests, runWithSendTicket, setFenceObserver } from '@/lib/session/terminal-fence';
+import { isFenceRefusal, openSendCount, resetFenceForTests, runWithSendTicket, SendTargetChangedError, setFenceObserver } from '@/lib/session/terminal-fence';
 import { routeSendTicketInit } from '@/lib/session/send-target-names';
 import { getCarriedPasteMark, resetInstanceInputLocks } from '@/lib/session/instance-input-lock';
 import { sendUserMessage } from '@/lib/session/send-user-message';
@@ -424,6 +424,32 @@ describe('T2 (F2): copilot /model', () => {
 // T3 (F3, R2, R3) and T4 (I2, R7): the launch
 // ---------------------------------------------------------------------------
 
+/**
+ * What the tool's `startSession` threw, as the send route's start step
+ * (`startSessionForSend`) received it — the layer before the route answers.
+ * A spy that calls through: the launch itself is the real one.
+ */
+function captureStartError(tool: CLIToolType): { error: () => unknown; restore: () => void } {
+  const cliTool = CLIToolManager.getInstance().getTool(tool);
+  const original = cliTool.startSession.bind(cliTool);
+  let caught: unknown = undefined;
+  const spy = vi.spyOn(cliTool, 'startSession').mockImplementation((...args: Parameters<typeof cliTool.startSession>) =>
+    original(...args).catch((error: unknown) => {
+      caught = error;
+      throw error;
+    }),
+  );
+  return { error: () => caught, restore: () => spy.mockRestore() };
+}
+
+/** Whether the fence's refusal is `error` or anywhere on its `cause` chain. */
+function fenceRefusalOnChain(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e !== undefined && e !== null && depth < 10; e = (e as { cause?: unknown }).cause, depth++) {
+    if (e instanceof SendTargetChangedError || isFenceRefusal(e)) return true;
+  }
+  return false;
+}
+
 describe('T3 (F3): the launch the send starts', () => {
   it.each([
     ['claude', 'claude-t3'],
@@ -443,12 +469,47 @@ describe('T3 (F3): the launch the send starts', () => {
   ] as const)('[T3] %s: the row goes right after new-session → the creation finishes as one change, nothing after it; the refusal comes up as itself', async (tool, instanceId) => {
     addRoster(instanceId, tool);
     onFirst((o) => o.line.startsWith('new-session'), () => dropRoster(instanceId));
-    const { status, json } = await postSend({ content: 'body t3b', cliToolId: tool, instanceId });
-    expect(status).toBe(500);
-    expect(changeCommands()).toEqual(['new-session', 'set-option', 'new-window', 'set-window-option', 'resize-window']);
-    expect(String(json.error)).toContain('send target changed: target-gone');
-    expect(reportSessionStartFailure).not.toHaveBeenCalled();
-    expect(ungated()).toEqual([]);
+    const start = captureStartError(tool);
+    try {
+      const { status, json } = await postSend({ content: 'body t3b', cliToolId: tool, instanceId });
+      expect(status).toBe(500);
+      expect(changeCommands()).toEqual(['new-session', 'set-option', 'new-window', 'set-window-option', 'resize-window']);
+      expect(String(json.error)).toContain('send target changed: target-gone');
+      expect(reportSessionStartFailure).not.toHaveBeenCalled();
+      expect(ungated()).toEqual([]);
+      // claude: the refusal reaches the route's start step as its own type.
+      // codex: not yet — see [T3-known-pr-b] below.
+      if (tool === 'claude') {
+        expect(start.error()).toBeInstanceOf(SendTargetChangedError);
+        expect(start.error()).toMatchObject({ reason: 'target-gone', delivery: 'not-started' });
+      }
+    } finally {
+      start.restore();
+    }
+  }, 60_000);
+
+  it('[T3-known-pr-b] codex: the launch catch drops the cause — the refusal arrives as text only (PR-B makes it typed; then this test turns red and is replaced)', async () => {
+    // Known remainder, fixed here so it is not mistaken for done: PR-B makes the
+    // launch catch of the 8 drivers (codex.ts:362, antigravity.ts:516,
+    // command-code.ts:312, gemini.ts:193, copilot.ts:557, opencode-v2.ts:315,
+    // opencode.ts:538, vibe-local.ts:172) keep the cause. This test turns red
+    // then; replace it with the type check the claude case above makes.
+    addRoster('codex-t3k', 'codex');
+    onFirst((o) => o.line.startsWith('new-session'), () => dropRoster('codex-t3k'));
+    const start = captureStartError('codex');
+    try {
+      const { status, json } = await postSend({ content: 'body t3k', cliToolId: 'codex', instanceId: 'codex-t3k' });
+      expect(status).toBe(500);
+      expect(changeCommands()).toEqual(['new-session', 'set-option', 'new-window', 'set-window-option', 'resize-window']);
+      const error = start.error();
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(SendTargetChangedError);
+      expect(fenceRefusalOnChain(error)).toBe(false);
+      expect((error as Error).message).toContain('send target changed: target-gone');
+      expect(String(json.error)).toContain('send target changed: target-gone');
+    } finally {
+      start.restore();
+    }
   }, 60_000);
 });
 

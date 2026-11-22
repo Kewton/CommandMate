@@ -185,6 +185,7 @@ fenceConfirm(): void                 // R9。確かめるだけ
 | T1 | F1・R9 | 札の後・消去の前に行が消える／tool が変わる → 変更 0。消去の後 → `not-sent`、hook 0 回、carried mark 無し（claude・codex・記録した画面の agy） | 赤 | 消去の門を外す |
 | T2 | F2 | copilot `--model`。idle の読みの後 → 変更 0 | 赤 | `sendKeys` の門を外す |
 | T3 | F3・R2・R3 | 起動の前 → 変更 0。`new-session` の直後 → 作成だけ終わり、その先 0。拒否が型のまま届く（claude・codex） | 赤 | `set-environment` の門・束の続きの門を外す |
+| T3 の注 | — | T3 の codex の型は PR-B で満たす（8 ドライバの launch の catch が cause を落とす。PR-A では文と変更の列で確かめ、`[T3-known-pr-b]` で今の振る舞いを固定） | — | — |
 | T4 | I2・R7 | 起動行の後・消去の後に名簿が動く → その先 0 | 赤 | — |
 | T5 | F5・R9 | OpenCode。POST 0、境界は通知されない、`not-sent`、キーボードの変更 0。ポートだけが変わる形・2 回目の POST。POST が断られた（`rejected`）後のキーボードの退路で断る → `not-sent`（`dispatchUnknown` が落ちる） | 赤 | POST の門を外す |
 | T6 | 札の無い経路（静的。補助）・R2・R11 | G-閉包・G-台帳・G-印。門と spawn の間に `await` が無い | 赤 | 下の「確かめた書き方」と (f)〜(k)。写しに命令・`await` |
@@ -253,7 +254,7 @@ fenceConfirm(): void                 // R9。確かめるだけ
 | 本 | 中身 | 受入条件 |
 |---|---|---|
 | PR-A 柵の本体（I1・I2・I4） | 札・門・入口 4 つ・取り下げの包み・検知器・境界の通知の確かめ。拒否は型つきで投げ、飲む・包む catch は投げ直す。試行の state は札から決める（reason は今の `send-error`）。**柵の拒否では起動失敗の通知を出さない**（`base.ts:366–376`）。公開の code・exit は足さない | T1〜T9・T11〜T13・T-D と既存の試験が緑。§5 の「確かめた書き方」と (d)(e) が赤になること、直す前の赤、変異の exit を返しに書く。**(f)〜(k) は、陽性対照の試験（「この書き方を足すと検査が違反を返す」）を先にコミットし、検査を直す前はその試験が落ちる（違反 0 件）ことを示してから、検査を直して通す**。既存の試験の変更は `instance-input-entries-3945.test.ts` の前置きだけ（測った範囲は §4）。`/terminal` に instance を付けた送信が通ること（200・`sendMessage` 1 回）を、`types` を mock しない新しい試験で固定する |
-| PR-B 理由と公開の契約（I3・F4） | 分類の順を全入口に。409・`sendOutcome`・exit 34・`lastSend.reason`・文書 ja/en。`conditions` | 柵の拒否が route で専用の code になり、予約の喪失の答えと区別できる（直す前は赤）。`send-user-message-input-boundary-3957.test.ts:255–267` を変えずに緑。T14〜 |
+| PR-B 理由と公開の契約（I3・F4） | 分類の順を全入口に。409・`sendOutcome`・exit 34・`lastSend.reason`・文書 ja/en。`conditions` | 柵の拒否が route で専用の code になり、予約の喪失の答えと区別できる（直す前は赤）。`send-user-message-input-boundary-3957.test.ts:255–267` を変えずに緑。T14〜。8 ドライバ（`codex.ts:362`・`antigravity.ts:516`・`command-code.ts:312`・`gemini.ts:193`・`copilot.ts:557`・`opencode-v2.ts:315`・`opencode.ts:538`・`vibe-local.ts:172`）の launch の catch が cause を保ち、T3 の codex で拒否が型のまま届く（`[T3-known-pr-b]` が赤になり、型を確かめる形に入れ替える） |
 
 - PR-A の src（16）: `terminal-fence.ts`（新。import は `node:async_hooks` だけ）、`send-target-names.ts`（新。札の材料＝確かめと名前。DB・解決・`session-name` を読む）、§2.2 の門の表の 6 ファイル、印の `launch-keys.ts`・`base.ts`・`copilot.ts`、入口の route 2 つ・`relay-delivery.ts`・`timer-manager.ts`、`send-user-message.ts`。PR-B は v2 §8.3 から、DB の貸し出し・ペイン ID の分を除いたもの
 - **PR-A だけの間の答え**（公開の値は今のまま。文に `send target changed: <理由>` が入る）: send の起動は 500 `SESSION_START_FAILED` で通知なし。`/model` は今の「モデルの切り替えに失敗」の答え。本文・dispatch・`/terminal` は今の送信失敗の 500。timer・relay は今の失敗の記録と戻し。試行は、`bodyStarted` も `dispatchUnknown` も立っていなければ `not-sent`、どちらかが立っていれば `indeterminate`。送り直しの扱いは誤らない
@@ -272,6 +273,7 @@ fenceConfirm(): void                 // R9。確かめるだけ
 | 範囲が終わった後に残った送信の処理 | lock を持ち続けている処理の打鍵は、今の `ticket.isCurrent()` が断る。**新しく lock を取る処理は断らない** | 閉じない。今のコードに経路は無い（読み） |
 
 **確かめていないこと**
+- T3 の codex の型は PR-B で満たす（8 ドライバの launch の catch が cause を落とす。PR-A では文と変更の列で確かめ、`[T3-known-pr-b]` で今の振る舞いを固定）
 - T7 の全体（入口 4 つ × ツール）、codex・agy の T1・T3。試作は claude の送信器と起動、copilot の `/model`、OpenCode の送信、送信サービスまで
 - OpenCode の照合先と 2 回目の POST、timer と relay の配送の札の確かめ（§2.2 の表）、`bodyStarted`・`dispatchUnknown` の分け方、貼り付けの門の置き直し、G-境の宛先の確かめ、I3 の分類、PR-A の答え（通知の抑止を含む）。試作に入れていない
 - (f)〜(k) の直し。今の検査の答え（0 件）は r3 の再現。直した後の検査は書いていない。(g)(h) の直す向きが今の木を赤にしないことは読み（a2 の再確認）
