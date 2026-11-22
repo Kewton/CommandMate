@@ -1,0 +1,44 @@
+{
+  "version": "0.55.0",
+  "date": "2026-11-22",
+  "highlight": {
+    "ja": "届いたか分からない送信を失敗として再試行させず、確かめてから送り直す形にしました。Antigravity への送信が断られ続ける問題も直しました。",
+    "en": "A send that may or may not have arrived is no longer shown as failed with a retry; you check first, then resend. Sends to Antigravity no longer keep getting refused."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "届いたか分からない送信で再試行が出て、同じ本文が二重に送られることがある問題を直しました。",
+      "en": "Fixed a retry appearing for a send that may have arrived, which could send the same text twice."
+    },
+    {
+      "ja": "送信を再試行した後に前の試行の応答が遅れて届くと、新しい行の表示が変わる問題を直しました。",
+      "en": "Fixed a late reply to an earlier attempt changing the new row after a resend."
+    },
+    {
+      "ja": "Antigravity が待機中なのに生成中と判定され、送信が断られ続ける問題を直しました。",
+      "en": "Fixed Antigravity being judged as still generating while idle, which kept refusing sends."
+    },
+    {
+      "ja": "Antigravity の設定ファイルが壊れているとき、利用者の設定を上書きして消してしまう問題を直しました。",
+      "en": "Fixed a broken Antigravity settings file being overwritten, which erased your own settings."
+    },
+    {
+      "ja": "Antigravity の返事の中のファイルへのリンクが、クリックしても開かない問題を直しました。",
+      "en": "Fixed file links in Antigravity replies not opening when clicked."
+    },
+    {
+      "ja": "relay の返事が、依頼元とは違うエージェントへ届くことがある問題を直しました。",
+      "en": "Fixed a relay reply sometimes being delivered to a different agent than the one that asked."
+    },
+    {
+      "ja": "セッションの一覧から開いた画面が、選んだものと違うエージェントを黙って表示する問題を直しました。",
+      "en": "Fixed a screen opened from the session list silently showing a different agent than the one you chose."
+    },
+    {
+      "ja": "別の作業場所のサーバーのせいで、検証が不合格になる問題を直しました。",
+      "en": "Fixed verification failing because of a server running from another worktree."
+    }
+  ]
+}
