@@ -1,0 +1,28 @@
+{
+  "version": "0.55.1",
+  "date": "2026-11-22",
+  "highlight": {
+    "ja": "/model や /effort を送ったときに、モデルや effort が勝手に選ばれたり、既定が書き換わったりする問題を直しました。",
+    "en": "Fixed sending /model or /effort picking a model or effort on its own, or overwriting your default."
+  },
+  "added": [],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "応答の遅い Codex に /model を送ると、モデルと effort が勝手に選ばれる問題を直しました。",
+      "en": "Fixed /model sent to a slow Codex session picking a model and effort on its own."
+    },
+    {
+      "ja": "Claude Code 2.1.329 以降で、/model と /effort の選択画面をボタンで操作できない問題を直しました。",
+      "en": "Fixed the /model and /effort pickers in Claude Code 2.1.329 and later not being operable from the buttons."
+    },
+    {
+      "ja": "Claude Code 2.1.329 以降で、/model に答えると既定のモデルが書き換わる問題を直しました。Auto-Yes もこの画面に答えなくなりました。",
+      "en": "Fixed answering /model in Claude Code 2.1.329 and later overwriting the default model. Auto-Yes no longer answers this screen."
+    },
+    {
+      "ja": "Claude Code 2.1.329 以降に /effort を送ると、届いたか分からないと表示される問題を直しました。",
+      "en": "Fixed /effort sent to Claude Code 2.1.329 and later being reported as possibly not delivered."
+    }
+  ]
+}
