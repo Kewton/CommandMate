@@ -1,9 +1,12 @@
 /**
  * Issue #4534, G-台帳 (design §5): the terminal changes composed OUTSIDE
  * `tmux.ts` that are not keys (the existing `pane-key-writers.test.ts` ledger
- * holds `send-keys` / `paste-buffer` and is not changed), and OpenCode's
- * `prompt_async`. Each row is "gated" — the function that composes it has a
- * fence gate in front of it — or "not a send" with the reason.
+ * holds the key commands and is not changed), and OpenCode's `prompt_async`.
+ * A change is EVERY tmux command the closed reads list of design §5 does not
+ * name (r7b) — this file spells no change command, so none can be left off a
+ * list. Each `file#site` is "gated" — the function that composes it has a
+ * fence gate in front of it — or "not a send" with the reason, and holds the
+ * number of changes it composes.
  *
  * And R2 statically: between a gate and the process call it guards there is no
  * `await` (the gate's permit and the spawn are one synchronous step). A HELPER
@@ -20,55 +23,176 @@ import ts from 'typescript';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT } from './route-tmux-reach';
-import { scanLiterals, scanRawTmuxCommands, srcFiles, TMUX_MODULE, type TmuxCommandSet } from './pane-key-writers-scan';
+import { RAW_KEY_COMMANDS, scanLiterals, srcFiles, TMUX_MODULE } from './pane-key-writers-scan';
 import { buildTmuxTeardownArgv } from '@/lib/agent-health/tmux-command';
 
 const read = (f: string): string => readFileSync(join(REPO_ROOT, f), 'utf-8');
 
-/** tmux commands that change a session, window, pane, client or the server — keys aside. */
-const CHANGE_SET: TmuxCommandSet = {
-  commands: [
-    'new-session', 'new-window', 'respawn-pane', 'respawn-window', 'resize-window', 'resize-pane', 'set-option', 'set-window-option',
-    'set-environment', 'set-hook', 'set-buffer', 'kill-session', 'kill-server', 'kill-window', 'kill-pane', 'rename-session',
-    'rename-window', 'refresh-client', 'split-window', 'select-pane', 'select-window', 'pipe-pane', 'swap-pane', 'break-pane',
-    'join-pane', 'move-window', 'unlink-window', 'source-file', 'run-shell', 'if-shell', 'clear-history', 'detach-client',
-    'switch-client', 'attach-session', 'rotate-window',
-  ],
-  aliases: {
-    new: 'new-session', neww: 'new-window', respawnp: 'respawn-pane', resizew: 'resize-window', resizep: 'resize-pane',
-    set: 'set-option', setw: 'set-window-option', setenv: 'set-environment', rename: 'rename-session', refresh: 'refresh-client',
-    splitw: 'split-window', killw: 'kill-window', killp: 'kill-pane',
-  },
-};
+/** The program's own name in an argv or a shell line. */
+const isTmuxProgram = (text: string): boolean => text === 'tmux' || text.endsWith('/tmux');
+/** Global flags of tmux that take an argument (`tmux -L <socket> <command> …`). */
+const FLAGS_WITH_ARGUMENT: ReadonlySet<string> = new Set(['-L', '-S', '-f', '-c', '-T']);
 
-type Row = { kind: 'gated' } | { kind: 'not-a-send'; reason: string };
+/**
+ * How design §5 reads a tmux command: a read, a buffer command, a key (the
+ * existing `pane-key-writers` ledger's), or — everything else, names this file
+ * never spells included — a change.
+ */
+function classifyTmuxCommand(command: string): 'read' | 'buffer' | 'key' | 'change' {
+  if (READ_COMMANDS.some((r) => (r.endsWith('*') ? command.startsWith(r.slice(0, -1)) : command === r))) return 'read';
+  if (BUFFER_COMMANDS.includes(command)) return 'buffer';
+  if (RAW_KEY_COMMANDS.includes(command)) return 'key';
+  return 'change';
+}
 
-/** `command <- file#site` → how it is held. Today's tree, all of it. */
+function siteOf(node: ts.Node): string {
+  for (let c: ts.Node | undefined = node.parent; c; c = c.parent) {
+    if (ts.isFunctionDeclaration(c) && c.name) return c.name.text;
+    if (ts.isMethodDeclaration(c) && ts.isIdentifier(c.name)) {
+      const owner = c.parent;
+      return ts.isClassDeclaration(owner) && owner.name ? `${owner.name.text}.${c.name.text}` : c.name.text;
+    }
+    if ((ts.isArrowFunction(c) || ts.isFunctionExpression(c)) && ts.isVariableDeclaration(c.parent) && ts.isIdentifier(c.parent.name)) return c.parent.name.text;
+  }
+  return '<module>';
+}
+
+/** The command words of a tmux argv: after the global flags, and after each `;`. A non-literal there is a command nobody can read. */
+function argvCommandWords(array: ts.ArrayLiteralExpression): string[] {
+  let elements = [...array.elements];
+  const head = elements[0];
+  if (head !== undefined && ts.isStringLiteralLike(head) && isTmuxProgram(head.text)) elements = elements.slice(1);
+  const words: string[] = [];
+  let expect = true;
+  for (let i = 0; i < elements.length; i += 1) {
+    const element = elements[i];
+    const literal = ts.isStringLiteralLike(element) ? element.text : null;
+    if (!expect) {
+      if (literal === ';' || literal === '\;') expect = true;
+      continue;
+    }
+    if (ts.isSpreadElement(element)) continue;
+    if (literal === null) {
+      words.push('<unreadable>');
+      expect = false;
+      continue;
+    }
+    if (FLAGS_WITH_ARGUMENT.has(literal)) {
+      i += 1;
+      continue;
+    }
+    // `tmux -V` asks the version: the flag is the whole command.
+    if (literal === '-V') {
+      words.push(literal);
+      break;
+    }
+    if (literal.startsWith('-')) continue;
+    words.push(literal);
+    expect = false;
+  }
+  return words;
+}
+
+const calleeText = (e: ts.Expression): string | null => (ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : null);
+
+/**
+ * Every tmux command word one file composes: an argv handed to tmux (its program
+ * named, or a callee that says tmux), an argv that starts with the program or —
+ * inside a function that says tmux — with a global flag, a shell line
+ * `tmux [flags] <word>`, and a control-mode line written to a client's stdin.
+ */
+function tmuxCommandWords(file: string, text: string): Array<{ site: string; line: number; command: string }> {
+  if (!/tmux|stdin/.test(text)) return [];
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const found: Array<{ site: string; line: number; command: string }> = [];
+  const add = (node: ts.Node, command: string): void => {
+    found.push({ site: siteOf(node), line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1, command });
+  };
+  const literalText = (node: ts.Node): string | null =>
+    ts.isStringLiteralLike(node) ? node.text : ts.isTemplateExpression(node) ? node.head.text + node.templateSpans.map((span) => `\u0000${span.literal.text}`).join('') : null;
+  const shellLine = /(?:^|[\s;&|(`'"])tmux(?:\s+-[A-Za-z0-9]+(?:\s+(?!-)[^\s;]+)?)*\s+([A-Za-z][A-Za-z0-9-]*)(?=[\s;'"`]|$)/g;
+  const visit = (node: ts.Node): void => {
+    if (ts.isArrayLiteralExpression(node)) {
+      const parent = node.parent;
+      const head = node.elements[0];
+      const toTmux =
+        (ts.isCallExpression(parent) && parent.arguments.includes(node) &&
+          ((parent.arguments[0] !== undefined && ts.isStringLiteralLike(parent.arguments[0]) && isTmuxProgram(parent.arguments[0].text)) ||
+            /tmux/i.test(calleeText(parent.expression) ?? ''))) ||
+        (head !== undefined && ts.isStringLiteralLike(head) && isTmuxProgram(head.text)) ||
+        (head !== undefined && ts.isStringLiteralLike(head) && FLAGS_WITH_ARGUMENT.has(head.text) && /tmux/i.test(siteOf(node)));
+      if (toTmux) for (const word of argvCommandWords(node)) add(node, word);
+    } else {
+      const textOf = literalText(node);
+      if (textOf !== null) {
+        for (const m of textOf.matchAll(shellLine)) add(node, m[1]);
+        // A control-mode line: a literal written to a tmux client's stdin.
+        const call = node.parent;
+        if (ts.isCallExpression(call) && call.arguments[0] === node && ts.isPropertyAccessExpression(call.expression)
+          && call.expression.name.text === 'write' && /\bstdin$/.test(call.expression.expression.getText(source))) {
+          const word = /^([A-Za-z][A-Za-z0-9-]*)/.exec(textOf);
+          if (word) add(node, word[1]);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+type Row = { kind: 'gated'; count: number } | { kind: 'not-a-send'; count: number; reason: string };
+
+/** `file#site` → how its changes are held, and how many it composes. Today's tree, all of it. */
 const LEDGER: Readonly<Record<string, Row>> = {
-  'resize-window <- src/lib/cli-tools/opencode.ts#OpenCodeTool.launchSession': { kind: 'gated' },
-  'resize-window <- src/lib/cli-tools/opencode-v2.ts#OpenCodeV2Tool.launchSession': { kind: 'gated' },
-  'set-environment <- src/lib/session/claude-session.ts#startClaudeSession': { kind: 'gated' },
-  'prompt_async <- src/lib/hooks/sources/opencode/client.ts#sendOpencodePrompt': { kind: 'gated' },
-  'refresh-client <- src/lib/tmux/tmux-control-client.ts#TmuxControlClient.resize': {
-    kind: 'not-a-send',
-    reason: "the terminal viewer's control-mode client sizes itself (a person's screen, §2.4)",
-  },
-  'resize-window <- src/lib/tmux/session-hook-scripts.ts#<module>': { kind: 'not-a-send', reason: 'text of a tmux hook script tmux runs itself' },
-  'set-option <- src/lib/tmux/session-hook-scripts.ts#<module>': { kind: 'not-a-send', reason: 'text of a tmux hook script tmux runs itself' },
-  'set-window-option <- src/lib/tmux/session-hook-scripts.ts#<module>': { kind: 'not-a-send', reason: 'text of a tmux hook script tmux runs itself' },
-  'set-option <- src/lib/hooks/hook-settings-generator.ts#<module>': { kind: 'not-a-send', reason: "text of an agent hook command the agent runs" },
-  'run-shell <- src/lib/session/tmux-session-surface.ts#buildHookRunShellBody': { kind: 'not-a-send', reason: 'text of a tmux hook body tmux runs itself' },
+  'src/app/manifest.ts#manifest': { kind: 'not-a-send', count: 1, reason: "text shown in the browser" },
+  'src/cli/commands/attach.ts#planGuardedAttach': { kind: 'not-a-send', count: 4, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/commands/attach.ts#buildAttachHints': { kind: 'not-a-send', count: 3, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/commands/attach.ts#attachOrSwitch': { kind: 'not-a-send', count: 1, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/commands/attach.ts#createAttachCommand': { kind: 'not-a-send', count: 2, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/commands/capture.ts#createCaptureCommand': { kind: 'not-a-send', count: 1, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/commands/whoami.ts#describeSource': { kind: 'not-a-send', count: 1, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/commands/whoami.ts#<module>': { kind: 'not-a-send', count: 1, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/docs/agent-operations.ts#<module>': { kind: 'not-a-send', count: 1, reason: "CLI documentation text" },
+  'src/cli/docs/setup-guide.ts#<module>': { kind: 'not-a-send', count: 2, reason: "CLI documentation text" },
+  'src/cli/docs/team-setup-guide.ts#<module>': { kind: 'not-a-send', count: 2, reason: "CLI documentation text" },
+  'src/cli/program.ts#buildProgram': { kind: 'not-a-send', count: 1, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/cli/utils/api-client-errors.ts#foreignSessionMessage': { kind: 'not-a-send', count: 1, reason: "a CLI process: its own messages and the attach line it shows or runs in a person’s terminal" },
+  'src/components/Terminal.tsx#TerminalComponent': { kind: 'not-a-send', count: 1, reason: "text shown in the browser" },
+  'src/lib/agent-health/tmux-command.ts#buildTmuxArgv': { kind: 'not-a-send', count: 2, reason: "the agent-health run’s own private tmux server (-L cm-agent-health), a separate process" },
+  'src/lib/agent-health/tmux-command.ts#buildTmuxTeardownArgv': { kind: 'not-a-send', count: 1, reason: "the agent-health run’s own private tmux server (-L cm-agent-health), a separate process" },
+  'src/lib/agent-health/tmux-command.ts#exactSessionTarget': { kind: 'not-a-send', count: 1, reason: "the agent-health run’s own private tmux server (-L cm-agent-health), a separate process" },
+  'src/lib/agent-roles/pane-env.ts#tmuxPaneLaunchCwdReader': { kind: 'not-a-send', count: 1, reason: "message text that names tmux (no invocation)" },
+  'src/lib/cli-tools/opencode-v2.ts#OpenCodeV2Tool.launchSession': { kind: 'gated', count: 1 },
+  'src/lib/cli-tools/opencode.ts#OpenCodeTool.launchSession': { kind: 'gated', count: 1 },
+  'src/lib/hooks/hook-settings-generator.ts#<module>': { kind: 'not-a-send', count: 2, reason: "text of an agent permission pattern / hook command the agent runs" },
+  'src/lib/hooks/sources/opencode/client.ts#sendOpencodePrompt': { kind: 'gated', count: 1 },
+  'src/lib/session/claude-session.ts#<module>': { kind: 'not-a-send', count: 2, reason: "message text that names tmux (no invocation)" },
+  'src/lib/session/claude-session.ts#startClaudeSession': { kind: 'gated', count: 1 },
+  'src/lib/session/send-user-message.ts#sendUserMessage': { kind: 'not-a-send', count: 2, reason: "message text that names tmux (no invocation)" },
+  'src/lib/session/session-launch-flight.ts#<module>': { kind: 'not-a-send', count: 4, reason: "message text that names tmux (no invocation)" },
+  'src/lib/session/session-start-error.ts#<module>': { kind: 'not-a-send', count: 2, reason: "message text that names tmux (no invocation)" },
+  'src/lib/session/session-start-error.ts#buildSessionExitedToShellMessage': { kind: 'not-a-send', count: 1, reason: "message text that names tmux (no invocation)" },
+  'src/lib/tmux/read-mode-pager.ts#<module>': { kind: 'not-a-send', count: 2, reason: "text of a script tmux runs itself (a hook, the read-mode pager)" },
+  'src/lib/tmux/session-hook-scripts.ts#<module>': { kind: 'not-a-send', count: 7, reason: "text of a script tmux runs itself (a hook, the read-mode pager)" },
+  'src/lib/tmux/session-ownership.ts#<module>': { kind: 'not-a-send', count: 1, reason: "message text that names tmux (no invocation)" },
+  'src/lib/tmux/session-ownership.ts#foreignSessionErrorBody': { kind: 'not-a-send', count: 1, reason: "message text that names tmux (no invocation)" },
+  'src/lib/tmux/tmux-control-client.ts#TmuxControlClient.start': { kind: 'not-a-send', count: 1, reason: "an error message of the viewer’s control-mode client" },
+  'src/lib/tmux/tmux-control-client.ts#TmuxControlClient.resize': { kind: 'not-a-send', count: 1, reason: "the terminal viewer's control-mode client sizes itself (a person's screen, §2.4)" },
+  'src/lib/verification/env-snapshot.ts#<module>': { kind: 'not-a-send', count: 1, reason: "message text that names tmux (no invocation)" },
+  'src/lib/verification/env-snapshot.ts#captureEnvSnapshot': { kind: 'not-a-send', count: 1, reason: "message text that names tmux (no invocation)" },
 };
 
 /** Where the gate of a `gated` row stands, when it is not in the composing function itself. */
 const GATED_BY: Readonly<Record<string, { file: string; site: string; gate: string }>> = {
-  'prompt_async <- src/lib/hooks/sources/opencode/client.ts#sendOpencodePrompt': {
+  'src/lib/hooks/sources/opencode/client.ts#sendOpencodePrompt': {
     file: 'src/lib/cli-tools/opencode.ts',
     site: 'OpenCodeTool.dispatchViaServer',
     gate: "fenceGate('dispatch')",
   },
 };
 
+/** `file#site` → the lines of its changes (tmux commands the reads list does not name, and `prompt_async`). */
 function ledgerRows(files: ReadonlyMap<string, string>): Map<string, number[]> {
   const rows = new Map<string, number[]>();
   const add = (row: string, line: number): void => {
@@ -76,8 +200,8 @@ function ledgerRows(files: ReadonlyMap<string, string>): Map<string, number[]> {
   };
   for (const [f, text] of files) {
     if (f === TMUX_MODULE) continue;
-    for (const w of scanRawTmuxCommands(f, text, CHANGE_SET)) add(`${w.command} <- ${w.file}#${w.site}`, w.line);
-    for (const l of scanLiterals(f, text, (literal) => literal.includes('/prompt_async'))) add(`prompt_async <- ${l.file}#${l.site}`, l.line);
+    for (const w of tmuxCommandWords(f, text)) if (classifyTmuxCommand(w.command) === 'change') add(`${f}#${w.site}`, w.line);
+    for (const l of scanLiterals(f, text, (literal) => literal.includes('/prompt_async'))) add(`${l.file}#${l.site}`, l.line);
   }
   return rows;
 }
@@ -110,9 +234,10 @@ function ledgerViolations(files: ReadonlyMap<string, string>): string[] {
       v.push(`a terminal change no ledger row holds: ${row} (line ${lines.join(', ')})`);
       continue;
     }
+    if (lines.length !== held.count) v.push(`a ledger row whose changes are not the ones held: ${row} (${lines.length}, held ${held.count})`);
     if (held.kind !== 'gated') continue;
     const at = GATED_BY[row];
-    const [file, site] = at ? [at.file, at.site] : [row.slice(row.indexOf('<- ') + 3, row.indexOf('#')), row.slice(row.indexOf('#') + 1)];
+    const [file, site] = at ? [at.file, at.site] : [row.slice(0, row.indexOf('#')), row.slice(row.indexOf('#') + 1)];
     const body = functionText(file, files.get(file) ?? '', site);
     if (body === null || !(at ? body.includes(at.gate) : /\bfenceGate\(/.test(body))) v.push(`a gated row lost its gate: ${row}`);
   }
@@ -187,13 +312,13 @@ describe('G-台帳: terminal changes outside tmux.ts that are not keys, and prom
 
   it('positive controls: a new raw change (argv and shell line) / a gated row without its gate → red', () => {
     const files = new Map(srcFiles().map((f) => [f, read(f)] as const));
-    files.set('src/lib/zz-raw.ts', "import { execFile, exec } from 'child_process';\nexport function a(): void { execFile('tmux', ['kill-window', '-t', 'x']); }\nexport function b(): void { exec('tmux set-environment -g FOO 1'); }\n");
+    files.set('src/lib/zz-raw.ts', "import { execFile, exec } from 'child_process';\nexport function a(): void { execFile('tmux', ['frobnicate-window', '-t', 'x']); }\nexport function b(): void { exec('tmux frobnicate-env -g FOO 1'); }\n");
     const claude = 'src/lib/session/claude-session.ts';
     files.set(claude, (files.get(claude) ?? '').replace("    fenceGate('env');\n", ''));
     expect(ledgerViolations(files)).toEqual([
-      'a gated row lost its gate: set-environment <- src/lib/session/claude-session.ts#startClaudeSession',
-      'a terminal change no ledger row holds: kill-window <- src/lib/zz-raw.ts#a (line 2)',
-      'a terminal change no ledger row holds: set-environment <- src/lib/zz-raw.ts#b (line 3)',
+      'a gated row lost its gate: src/lib/session/claude-session.ts#startClaudeSession',
+      'a terminal change no ledger row holds: src/lib/zz-raw.ts#a (line 2)',
+      'a terminal change no ledger row holds: src/lib/zz-raw.ts#b (line 3)',
     ]);
   });
 });
