@@ -90,7 +90,7 @@ import { reportSessionStartFailure } from '@/lib/cli-tools/start-availability';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
 import { getOpencodeLiveness, getOpencodePrimarySession } from '@/lib/hooks/sources/opencode/subscription';
 import { pumpRelayDeliveries, resetRelayDeliveryState } from '@/lib/relay/relay-delivery';
-import { scheduleTimer, stopAllTimers } from '@/lib/timer-manager';
+import { getActiveTimerCount, scheduleTimer, stopAllTimers } from '@/lib/timer-manager';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 import { COPILOT_MODEL_SWITCH_2623_FRAMES as COPILOT_FRAMES } from '@tests/fixtures/copilot-model-switch-2623';
@@ -218,6 +218,8 @@ async function fireTimer(tool: CLIToolType, instanceId: string, message: string)
     () => {
       const status = getTimerById(db, timer.id)?.status;
       if (status === 'pending' || status === 'sending') throw new Error(`timer still ${status}`);
+      // …and its execution is over (a row cancelled meanwhile is not the end of the send).
+      if (getActiveTimerCount() > 0) throw new Error('timer still running');
     },
     { timeout: 20_000, interval: 20 },
   );
@@ -278,6 +280,19 @@ describe('T7 G-境: entries × tools, every change behind a gate of the open tic
     expect(openSendCount(S)).toBe(0);
   }, 60_000);
 
+  it('[T7] the send route × claude, a long body (the paste path): 201, the paste-buffer behind its own gate', async () => {
+    const S = nameOf('claude');
+    addPane(S, 'claude');
+    const body = `long ${'y'.repeat(4000)}`;
+    const { status } = await postSend({ content: body, cliToolId: 'claude' });
+    expect(status).toBe(201);
+    const pastes = world.out.filter((o) => o.cls === 'change' && o.line.startsWith('paste-buffer'));
+    expect(pastes).toHaveLength(1);
+    expect(pastes[0].permit).toBe('ticketed');
+    expect(pastes[0].permitNames).toContain(S);
+    expect(ungated()).toEqual([]);
+  }, 60_000);
+
   it('[T7] a timer × claude: sent, every change gated', async () => {
     const S = nameOf('claude');
     addPane(S, 'claude');
@@ -289,8 +304,80 @@ describe('T7 G-境: entries × tools, every change behind a gate of the open tic
 });
 
 // ---------------------------------------------------------------------------
+// Each entry's own check refuses (design §2.2): relay, timer, /terminal
+// ---------------------------------------------------------------------------
+
+describe('the entry’s own check: a mismatch refuses before any change', () => {
+  it('[T7-refuse] a relay delivery: the requester’s instance runs another tool after the claim → nothing typed', async () => {
+    addRoster('codex-rr', 'codex');
+    const S = nameOf('codex', 'codex-rr');
+    addPane(S, 'codex');
+    openRelayWithReply('codex-rr');
+    onFirst((o) => o.line.startsWith('capture-pane'), () => setRosterTool('codex-rr', 'claude'));
+    const sent = captureToolError('codex', 'sendMessage');
+    await pumpRelayDeliveries().finally(() => sent.restore());
+    expect(world.out.some((o) => o.line.startsWith('capture-pane'))).toBe(true);
+    expect(changes()).toEqual([]);
+    expect(refusedFor(sent.error(), 'tool-changed')).toBe(true);
+  }, 60_000);
+
+  it('[T7-refuse] a timer: its row is no longer sending (cancelled meanwhile) → nothing typed', async () => {
+    const S = nameOf('claude');
+    addPane(S, 'claude');
+    // The first read after the timer took its row (`sending`): under its ticket.
+    const sending = (): boolean => (db.prepare(`SELECT COUNT(*) AS n FROM timer_messages WHERE status = 'sending'`).get() as { n: number }).n > 0;
+    onFirst((o) => o.line.startsWith('capture-pane') && sending(), () => {
+      db.prepare(`UPDATE timer_messages SET status = 'cancelled' WHERE status = 'sending'`).run();
+    });
+    const sent = captureToolError('claude', 'sendMessage');
+    await fireTimer('claude', 'claude', 'timer refused').finally(() => sent.restore());
+    expect(world.out.some((o) => o.line.startsWith('capture-pane'))).toBe(true);
+    expect(changes()).toEqual([]);
+    expect(refusedFor(sent.error(), 'target-gone')).toBe(true);
+  }, 60_000);
+
+  it('[T7-refuse] /terminal: the roster instance runs another tool after the route resolved it → nothing typed', async () => {
+    addRoster('codex-tr', 'codex');
+    const S = nameOf('codex', 'codex-tr');
+    addPane(S, 'codex');
+    onFirst((o) => o.line.startsWith('capture-pane'), () => setRosterTool('codex-tr', 'claude'));
+    const sent = captureToolError('codex', 'sendMessage');
+    const { status } = await postTerminal({ cliToolId: 'codex', command: 'echo refused', instanceId: 'codex-tr' }).finally(() => sent.restore());
+    expect(status).toBe(500);
+    expect(changes()).toEqual([]);
+    expect(refusedFor(sent.error(), 'tool-changed')).toBe(true);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
 // T1 (F1, R9): the body's keys
 // ---------------------------------------------------------------------------
+
+/**
+ * What one of the tool's methods threw (a spy that calls through). The layer
+ * below the route's answer: the fence's reason is read off it.
+ */
+function captureToolError(tool: CLIToolType, method: 'sendMessage' | 'startSession'): { error: () => unknown; restore: () => void } {
+  const cliTool = CLIToolManager.getInstance().getTool(tool) as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const original = cliTool[method].bind(cliTool);
+  let caught: unknown = undefined;
+  const spy = vi.spyOn(cliTool, method).mockImplementation((...args: unknown[]) =>
+    original(...args).catch((error: unknown) => {
+      caught = error;
+      throw error;
+    }),
+  );
+  return { error: () => caught, restore: () => spy.mockRestore() };
+}
+
+/** The fence's refusal with `reason`, as the error or anywhere on its cause chain, or in its text (a driver's wrap). */
+function refusedFor(error: unknown, reason: string): boolean {
+  for (let e: unknown = error, depth = 0; e !== undefined && e !== null && depth < 10; e = (e as { cause?: unknown }).cause, depth++) {
+    if (isFenceRefusal(e) && (e as { reason?: unknown }).reason === reason) return true;
+    if (e instanceof Error && e.message.includes(`send target changed: ${reason}`)) return true;
+  }
+  return false;
+}
 
 /** The send service under the send route's ticket, as the route runs it. */
 async function serviceSend(tool: CLIToolType, instanceId: string, content: string, hook = vi.fn()) {
@@ -315,14 +402,20 @@ describe('T1 (F1, R9): the target changes around the body', () => {
   it.each([
     ['claude', 'claude-t1'],
     ['codex', 'codex-t1'],
-  ] as const)('[T1] %s: the roster row goes after the ticket, before the clear → no change at all', async (tool, instanceId) => {
+  ] as const)('[T1] %s: the roster row goes after the route resolved it (at its health check, before the ticket opens) → the first gate refuses, no change at all', async (tool, instanceId) => {
     addRoster(instanceId, tool);
     const S = nameOf(tool, instanceId);
     addPane(S, tool, 'echo PREFILLED');
     onFirst((o) => o.line.startsWith('capture-pane'), () => dropRoster(instanceId));
-    const { status } = await postSend({ content: 'body t1', cliToolId: tool, instanceId });
-    expect(status).toBe(500);
-    expect(changes()).toEqual([]);
+    const sent = captureToolError(tool, 'sendMessage');
+    try {
+      const { status } = await postSend({ content: 'body t1', cliToolId: tool, instanceId });
+      expect(status).toBe(500);
+      expect(changes()).toEqual([]);
+      expect(refusedFor(sent.error(), 'target-gone')).toBe(true);
+    } finally {
+      sent.restore();
+    }
   }, 60_000);
 
   it.each([
@@ -333,8 +426,11 @@ describe('T1 (F1, R9): the target changes around the body', () => {
     const S = nameOf(tool, instanceId);
     addPane(S, tool, 'echo PREFILLED');
     onFirst(isKeys(/C-u/), () => setRosterTool(instanceId, tool === 'claude' ? 'codex' : 'claude'));
-    const { result, attempt, hookCalls } = await serviceSend(tool, instanceId, 'body t1b');
+    const sent = captureToolError(tool, 'sendMessage');
+    const { result, attempt, hookCalls } = await serviceSend(tool, instanceId, 'body t1b').finally(() => sent.restore());
     expect(result.ok).toBe(false);
+    expect(refusedFor(sent.error(), 'tool-changed')).toBe(true);
+    expect(changes().length).toBeGreaterThan(0);
     expect(changes().every((l) => /^send-keys .* (C-e|C-u|BSpace)/.test(l))).toBe(true);
     expect(changes().some((l) => l.includes('body t1b'))).toBe(false);
     expect(hookCalls).toBe(0);
@@ -348,8 +444,10 @@ describe('T1 (F1, R9): the target changes around the body', () => {
     const S = nameOf('claude', 'claude-t1p');
     addPane(S, 'claude');
     onFirst((o) => o.line.startsWith('load-buffer'), () => dropRoster('claude-t1p'));
-    const { result, attempt, hookCalls } = await serviceSend('claude', 'claude-t1p', 'x'.repeat(4000));
+    const sent = captureToolError('claude', 'sendMessage');
+    const { result, attempt, hookCalls } = await serviceSend('claude', 'claude-t1p', 'x'.repeat(4000)).finally(() => sent.restore());
     expect(result.ok).toBe(false);
+    expect(refusedFor(sent.error(), 'target-gone')).toBe(true);
     expect(changes()).toEqual([]);
     expect(world.out.filter((o) => o.cls === 'buffer').map((o) => o.line.split(' ')[0])).toEqual(['load-buffer', 'delete-buffer']);
     expect(hookCalls).toBe(0);
@@ -374,8 +472,10 @@ describe('T1 (F1, R9): the target changes around the body', () => {
     addRoster('claude-t1i', 'claude');
     addPane(nameOf('claude', 'claude-t1i'), 'claude');
     onFirst(isKeys(/-l -- body late/), () => dropRoster('claude-t1i'));
-    const { result, attempt } = await serviceSend('claude', 'claude-t1i', 'body late');
+    const sent = captureToolError('claude', 'sendMessage');
+    const { result, attempt } = await serviceSend('claude', 'claude-t1i', 'body late').finally(() => sent.restore());
     expect(result.ok).toBe(false);
+    expect(refusedFor(sent.error(), 'target-gone')).toBe(true);
     expect(attempt?.state).toBe('indeterminate');
     expect(changes().filter((l) => /Enter|C-m$/.test(l))).toEqual([]);
   }, 60_000);
@@ -387,10 +487,9 @@ describe('T1 (F1, R9): the target changes around the body', () => {
 
 describe('T2 (F2): copilot /model', () => {
   const instanceId = 'copilot-t2';
-  const run = (confirmGone: () => boolean) => {
+  const run = () => {
     const tool = new CopilotTool();
     const init = routeSendTicketInit(db, { worktreeId: WT, instanceId, cliToolId: 'copilot', resolvedBy: 'roster' });
-    void confirmGone;
     return settle(runWithSendTicket(init, () => tool.sendModelCommand(WT, 'gpt-5.6-terra', instanceId)));
   };
 
@@ -400,8 +499,9 @@ describe('T2 (F2): copilot /model', () => {
     addPane(S, 'copilot');
     world.frame = (s) => (s === S ? COPILOT_FRAMES.SWITCH_BEFORE() : null);
     onFirst((o) => o.line.startsWith('capture-pane'), () => setRosterTool(instanceId, 'claude'));
-    const outcome = await run(() => true);
+    const outcome = await run();
     expect(outcome).toBeInstanceOf(Error);
+    expect(refusedFor(outcome, 'tool-changed')).toBe(true);
     expect(changes()).toEqual([]);
   }, 60_000);
 
@@ -414,7 +514,7 @@ describe('T2 (F2): copilot /model', () => {
     world.onCall = (o) => {
       if (o.line.includes('/model ')) frame = COPILOT_FRAMES.SWITCH_AFTER();
     };
-    await run(() => false);
+    await run();
     expect(changes().filter((l) => l.includes('/model gpt-5.6-terra'))).toHaveLength(1);
     expect(ungated()).toEqual([]);
   }, 60_000);
@@ -423,24 +523,6 @@ describe('T2 (F2): copilot /model', () => {
 // ---------------------------------------------------------------------------
 // T3 (F3, R2, R3) and T4 (I2, R7): the launch
 // ---------------------------------------------------------------------------
-
-/**
- * What the tool's `startSession` threw, as the send route's start step
- * (`startSessionForSend`) received it — the layer before the route answers.
- * A spy that calls through: the launch itself is the real one.
- */
-function captureStartError(tool: CLIToolType): { error: () => unknown; restore: () => void } {
-  const cliTool = CLIToolManager.getInstance().getTool(tool);
-  const original = cliTool.startSession.bind(cliTool);
-  let caught: unknown = undefined;
-  const spy = vi.spyOn(cliTool, 'startSession').mockImplementation((...args: Parameters<typeof cliTool.startSession>) =>
-    original(...args).catch((error: unknown) => {
-      caught = error;
-      throw error;
-    }),
-  );
-  return { error: () => caught, restore: () => spy.mockRestore() };
-}
 
 /** Whether the fence's refusal is `error` or anywhere on its `cause` chain. */
 function fenceRefusalOnChain(error: unknown): boolean {
@@ -457,9 +539,12 @@ describe('T3 (F3): the launch the send starts', () => {
   ] as const)('[T3] %s: the row goes before the launch → nothing created; no start-failure notice', async (tool, instanceId) => {
     addRoster(instanceId, tool);
     onFirst((o) => o.line.startsWith('has-session') || /which /.test(o.line), () => dropRoster(instanceId));
-    const { status } = await postSend({ content: 'body t3', cliToolId: tool, instanceId });
+    const start = captureToolError(tool, 'startSession');
+    const { status, json } = await postSend({ content: 'body t3', cliToolId: tool, instanceId }).finally(() => start.restore());
     expect(status).toBe(500);
     expect(changes()).toEqual([]);
+    expect(refusedFor(start.error(), 'target-gone')).toBe(true);
+    expect(String(json.error)).toContain('send target changed: target-gone');
     expect(reportSessionStartFailure).not.toHaveBeenCalled();
   }, 60_000);
 
@@ -469,7 +554,7 @@ describe('T3 (F3): the launch the send starts', () => {
   ] as const)('[T3] %s: the row goes right after new-session → the creation finishes as one change, nothing after it; the refusal comes up as itself', async (tool, instanceId) => {
     addRoster(instanceId, tool);
     onFirst((o) => o.line.startsWith('new-session'), () => dropRoster(instanceId));
-    const start = captureStartError(tool);
+    const start = captureToolError(tool, 'startSession');
     try {
       const { status, json } = await postSend({ content: 'body t3b', cliToolId: tool, instanceId });
       expect(status).toBe(500);
@@ -496,7 +581,7 @@ describe('T3 (F3): the launch the send starts', () => {
     // then; replace it with the type check the claude case above makes.
     addRoster('codex-t3k', 'codex');
     onFirst((o) => o.line.startsWith('new-session'), () => dropRoster('codex-t3k'));
-    const start = captureStartError('codex');
+    const start = captureToolError('codex', 'startSession');
     try {
       const { status, json } = await postSend({ content: 'body t3k', cliToolId: 'codex', instanceId: 'codex-t3k' });
       expect(status).toBe(500);
@@ -517,9 +602,12 @@ describe('T4 (I2, R7): the roster moves after a change that went out', () => {
   it('[T4] claude: after the launch line → no body, nothing after it', async () => {
     addRoster('claude-t4', 'claude');
     onFirst(isKeys(/CM_PORT|claude/), () => setRosterTool('claude-t4', 'codex'));
-    const { status } = await postSend({ content: 'body t4', cliToolId: 'claude', instanceId: 'claude-t4' });
+    const start = captureToolError('claude', 'startSession');
+    const { status } = await postSend({ content: 'body t4', cliToolId: 'claude', instanceId: 'claude-t4' }).finally(() => start.restore());
     expect(status).toBe(500);
+    expect(refusedFor(start.error(), 'tool-changed')).toBe(true);
     const keys = changes().filter((l) => l.startsWith('send-keys'));
+    expect(keys.length).toBeGreaterThan(0);
     expect(keys.some((l) => l.includes('body t4'))).toBe(false);
     expect(keys.length).toBeLessThanOrEqual(2);
     expect(ungated()).toEqual([]);
@@ -530,8 +618,11 @@ describe('T4 (I2, R7): the roster moves after a change that went out', () => {
     const S = nameOf('codex', 'codex-t4');
     addPane(S, 'codex', 'echo PREFILLED');
     onFirst(isKeys(/C-u|BSpace/), () => dropRoster('codex-t4'));
-    const { status } = await postSend({ content: 'body t4c', cliToolId: 'codex', instanceId: 'codex-t4' });
+    const sent = captureToolError('codex', 'sendMessage');
+    const { status } = await postSend({ content: 'body t4c', cliToolId: 'codex', instanceId: 'codex-t4' }).finally(() => sent.restore());
     expect(status).toBe(500);
+    expect(refusedFor(sent.error(), 'target-gone')).toBe(true);
+    expect(changes().some((l) => /C-u|BSpace/.test(l))).toBe(true);
     expect(changes().some((l) => l.includes('body t4c') || /Enter$/.test(l))).toBe(false);
   }, 60_000);
 });

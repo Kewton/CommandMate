@@ -298,15 +298,30 @@ describe('T13 (R7): a retraction passes keys and a kill, nothing else, and ends 
 
   it('[T13] the withdraw of a refused body is a retraction: its clear goes out after the refusal', async () => {
     addPane(S, 'claude');
+    const SEP = '─'.repeat(40);
     let refuse = false;
+    let partial = false;
+    // A pasted body that did not land as sent: the composer shows it with
+    // something more after it (`mismatch`) until it is cleared. A typed body is
+    // checked after Enter, whose gate refuses first and leaves the body (design
+    // §7); a paste is checked before Enter, so its withdraw runs.
+    const body = `withdrawn ${'z'.repeat(4000)}`;
+    world.frame = (session) =>
+      session === S && partial ? ['⏺ a reply', '', SEP, `\u001b[39m❯ ${body} EXTRA`, SEP, '  ⏵⏵ auto mode on'].join('\n') : null;
     world.onCall = (o) => {
-      if (o.line.startsWith('send-keys') && o.line.includes('-l --')) refuse = true;
+      if (o.cls !== 'change') return;
+      if (o.line.startsWith('paste-buffer')) {
+        refuse = true;
+        partial = true;
+      } else if (refuse && o.line.includes('C-u')) {
+        partial = false;
+      }
     };
-    await settle(
+    const outcome = await settle(
       runWithSendTicket(init(() => (refuse ? 'tool-changed' : null)), () =>
         sendMessageWithSubmitVerification({
           sessionName: S,
-          message: 'withdrawn body',
+          message: body,
           cliToolId: 'claude',
           textInputWaitMs: 1,
           interEnterWaitMs: 1,
@@ -316,7 +331,15 @@ describe('T13 (R7): a retraction passes keys and a kill, nothing else, and ends 
         }),
       ),
     );
-    const after = world.out.filter((o) => o.cls === 'change').slice(1);
+    expect(outcome).toBeInstanceOf(Error);
+    const all = world.out.filter((o) => o.cls === 'change');
+    expect(all[0]?.line).toMatch(/^paste-buffer /);
+    expect(all[0]?.permit).toBe('ticketed');
+    const after = all.slice(1);
+    // First that the withdraw cleared at all (the clear went out, under the refused ticket)…
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.some((o) => o.line.includes('C-u'))).toBe(true);
+    // …then that it went out as a retraction, and nothing else did.
     expect(after.every((o) => o.permit === 'retraction')).toBe(true);
     expect(after.some((o) => /Enter$/.test(o.line))).toBe(false);
   });
@@ -351,6 +374,27 @@ describe('T-D (B1 (b)): the detector', () => {
       other.close();
     } finally {
       handle.close();
+    }
+    expect(changes()).toEqual([]);
+  });
+
+  it('[T-D] per layer: createLaunchPane, sendModelCommand and dispatchViaServer are send-only layers too', async () => {
+    const { CodexTool } = await import('@/lib/cli-tools/codex');
+    const { CopilotTool } = await import('@/lib/cli-tools/copilot');
+    const { OpenCodeTool } = await import('@/lib/cli-tools/opencode');
+    const codexName = resolveSessionName('codex', 'wt-td3');
+    const copilotName = resolveSessionName('copilot', 'wt-td3');
+    const opencodeName = resolveSessionName('opencode', 'wt-td3');
+    addPane(copilotName, 'copilot');
+    const open = openSendTicket(init(() => null, [codexName, copilotName, opencodeName]));
+    try {
+      const codex = new CodexTool() as unknown as { createLaunchPane(s: string, p: string): Promise<void> };
+      await expect(codex.createLaunchPane(codexName, '/tmp')).rejects.toMatchObject({ reason: 'unticketed' });
+      await expect(new CopilotTool().sendModelCommand('wt-td3', 'gpt-5.6-terra')).rejects.toMatchObject({ reason: 'unticketed' });
+      const opencode = new OpenCodeTool() as unknown as { dispatchViaServer(t: unknown, m: string): Promise<unknown> };
+      await expect(opencode.dispatchViaServer({ worktreeId: 'wt-td3', cliToolId: 'opencode' }, 'm')).rejects.toMatchObject({ reason: 'unticketed' });
+    } finally {
+      open.close();
     }
     expect(changes()).toEqual([]);
   });
