@@ -143,6 +143,7 @@ import {
   PASTE_LANDED_POLL_MS,
   PROMPT_REPORT_WAIT_MS,
   RECHECK_CAPTURE_LINES,
+  SLASH_COMMAND_SETTLE_WAIT_MS,
   TYPED_BODY_POLL_MS,
   logger,
   type SubmitVerifiedSendParams,
@@ -156,7 +157,9 @@ import {
 } from './submit-verified-sender-composer';
 import {
   awaitPromptReport,
+  awaitSlashCommandSettle,
   holdsResendEnter,
+  isLoneSlashCommand,
   logClearInputFailed,
   pasteFailureMayHaveTyped,
   promptReceiptFor,
@@ -844,6 +847,8 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   const attempts = Math.max(1, verifyAttempts);
   // Issue #4035: one wait for the agent's report per send, however many reads.
   let promptReportDeadline: number | null = null;
+  // Issue #4555: one wait for a lone slash command's screen per send.
+  let slashSettleDeadline: number | null = null;
   for (let attempt = 0; attempt <= attempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
@@ -875,6 +880,25 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
         ...(target !== undefined ? { target } : {}),
       });
       ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output, target }));
+    }
+
+    if (state === 'pending' && isLoneSlashCommand(message)) {
+      // Issue #4555: no Enter is resent for a lone slash command — the frame
+      // may predate its Enter while the picker it opened is up. Watch without
+      // a key; THROWS as unconfirmed when the composer still shows it.
+      slashSettleDeadline ??= enteredAt + SLASH_COMMAND_SETTLE_WAIT_MS;
+      ({ state, rule, output } = await awaitSlashCommandSettle({
+        sessionName,
+        message,
+        cliToolId,
+        composer,
+        enteredAt,
+        rule,
+        output,
+        deadline: slashSettleDeadline,
+        ticket,
+        ...(target !== undefined ? { target } : {}),
+      }));
     }
 
     if (state === 'submitted') {
