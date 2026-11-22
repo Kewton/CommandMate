@@ -949,7 +949,8 @@ function hasModelOverlayFooter(scanWindow: string[]): boolean {
   // (collectOptions()) would otherwise return as a genuine multiple_choice prompt. Auto-Yes
   // (detectAndRespondToPrompt) calls detectPrompt() directly and would resolve +
   // Enter-confirm the default option — silently changing the user's default model.
-  // The overlay-unique "Enter to set as default …" footer never appears in real
+  // The overlay-unique footer ("Enter to set as default …" up to 2.1.326, the pair
+  // "s to use this session only · Enter to save" since 2.1.329 — Issue #4556) never appears in real
   // confirmation prompts (permission dialogs, the trust dialog, AskUserQuestion),
   // so bailing out here stops Auto-Yes without touching any real-prompt path. The
   // overlay is modal — no genuine prompt can be active at the same time, and the

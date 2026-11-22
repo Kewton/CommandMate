@@ -69,6 +69,7 @@ import {
   FILTER_INPUT_PATTERN,
 } from './selection-shape-patterns';
 import { isAntigravityTrustScreen } from './tools/antigravity/patterns';
+import { CLAUDE_SAVE_PICKER_FOOTER_PATTERN } from './tools/claude/patterns';
 
 export { COMMAND_CODE_PLAN_REVIEW_FOOTER };
 
@@ -126,8 +127,16 @@ export const SESSION_SCOPE_FOOTER_PATTERN = /\bs\s+to\s+use\s+this\s+session\s+o
  * Kept separate from {@link SESSION_SCOPE_FOOTER_PATTERN} so the card can label
  * the two buttons from what the frame actually claims, instead of asserting
  * claude's wording for a screen that may not carry it.
+ *
+ * Two spellings of the same claim: `Enter to set as default` (≤ 2.1.326) and,
+ * since 2.1.329, `Enter to save` — matched only as the pair with the session-scope
+ * hint ({@link CLAUDE_SAVE_PICKER_FOOTER_PATTERN}, Issue #4556), so a question
+ * panel that merely says `Enter to save` is not told that Enter writes a default.
  */
-export const SET_AS_DEFAULT_FOOTER_PATTERN = /\bEnter\s+to\s+set\s+as\s+default\b/i;
+export const SET_AS_DEFAULT_FOOTER_PATTERN = new RegExp(
+  String.raw`\bEnter\s+to\s+set\s+as\s+default\b|${CLAUDE_SAVE_PICKER_FOOTER_PATTERN.source}`,
+  'i',
+);
 
 
 import {
