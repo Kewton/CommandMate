@@ -67,7 +67,7 @@ import {
 } from '@/lib/cli-tools/launch-answer-skips';
 import { settleSessionLaunch } from '@/lib/session/session-launch-flight';
 import { typeLaunchLines } from '@/lib/cli-tools/launch-keys';
-import { enterSendLayer, fenceGate, isFenceRefusal } from '@/lib/session/terminal-fence';
+import { enterSendLayer, fenceGate, isFenceRefusal, rethrowFenceRefusal } from '@/lib/session/terminal-fence';
 
 const logger = createLogger('claude-session');
 
@@ -429,7 +429,8 @@ async function answerTrustDialog(
       state.pollsSinceAnswer = 0;
       state.answers++;
       logger.info('trust-dialog-detected', { keys: 'Enter', attempt: state.answers });
-    } catch {
+    } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       // Left unhandled so a later poll answers the dialog again
       noteTrustKeySkipped(sessionName, state, 'Enter', 'send-failed', answerLife);
     }
@@ -453,7 +454,8 @@ async function answerTrustDialog(
     state.pollsSinceMove = 0;
     state.moves++;
     logger.info('trust-dialog-cursor-move', { key: keys[0], attempt: state.moves });
-  } catch {
+  } catch (error: unknown) {
+    rethrowFenceRefusal(error);
     // Left unhandled so a later poll moves the cursor again
     noteTrustKeySkipped(sessionName, state, keys[0], 'send-failed', answerLife);
   }
@@ -1142,6 +1144,7 @@ export async function startClaudeSession(
 
     logger.info('started-claude-session');
   } catch (error: unknown) {
+    rethrowFenceRefusal(error);
     // MF-S2-002: Clear cached path on all failures (harmless for non-path failures)
     clearCachedClaudePath();
     // SEC-SF-002: Log detailed error server-side, throw generic message to client

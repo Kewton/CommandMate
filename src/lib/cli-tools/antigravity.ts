@@ -13,6 +13,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import {
   sendSpecialKey,
@@ -512,6 +513,7 @@ export class AntigravityTool extends BaseCLITool {
 
       logger.info('started-antigravity-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Antigravity session: ${errorMessage}`);
     }
@@ -586,6 +588,7 @@ export class AntigravityTool extends BaseCLITool {
           logTrustDecisionOnce(sessionName, decision, loggedTrustDecisions);
         }
       } catch (error: unknown) {
+        rethrowFenceRefusal(error);
         // Capture may fail during initialization - continue polling, but keep
         // count so the timeout below can say so (Issue #3757).
         captureErrors++;
@@ -702,6 +705,7 @@ export class AntigravityTool extends BaseCLITool {
           continue;
         }
       } catch (error: unknown) {
+        rethrowFenceRefusal(error);
         // Issue #4385: the role gate's refusal is final for this send.
         if (error instanceof RoleLaunchRefusedError) throw error;
         // Capture may fail - continue polling
@@ -783,6 +787,7 @@ export class AntigravityTool extends BaseCLITool {
 
       logger.info('sent-message-to-antigravity-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to Antigravity: ${errorMessage}`, { cause: error });

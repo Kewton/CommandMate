@@ -45,7 +45,7 @@
  */
 
 import { BaseCLITool } from './base';
-import { enterSendLayer, fenceConfirmDispatch, fenceGate, isFenceRefusal } from '../session/terminal-fence';
+import { enterSendLayer, fenceConfirmDispatch, fenceGate, isFenceRefusal, rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import {
@@ -534,6 +534,7 @@ export class OpenCodeTool extends BaseCLITool {
 
       logger.info('started-opencode-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start OpenCode session: ${errorMessage}`);
     }
@@ -929,6 +930,7 @@ export class OpenCodeTool extends BaseCLITool {
     try {
       await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       throw this.keepUnknownDispatch(error, trace, sessionName) ?? error;
     }
 
@@ -961,6 +963,7 @@ export class OpenCodeTool extends BaseCLITool {
 
       logger.info('sent-message-to-opencode-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #4040: the keyboard typed nothing (no ready input box — or any
       // other refusal before the first key: a dialog, the lock), but the server

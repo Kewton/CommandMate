@@ -101,6 +101,17 @@ export function isFenceRefusal(error: unknown): boolean {
   return code === SEND_TARGET_CHANGED_CODE || code === SEND_FENCE_MISUSE_CODE;
 }
 
+/**
+ * INV-catch (Issue #4534 r3): the first statement of a driver's `catch` around
+ * a gated call. The fence's refusal goes on as itself — never swallowed, never
+ * wrapped; anything else is left to the catch.
+ *
+ * @throws The refusal, unchanged, when `error` is one
+ */
+export function rethrowFenceRefusal(error: unknown): void {
+  if (isFenceRefusal(error)) throw error;
+}
+
 interface Ticket {
   readonly requestId: string;
   readonly target: SendTarget;

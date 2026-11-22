@@ -29,6 +29,32 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+/**
+ * A private HOME and a private PATH, before any module reads them: the PATH
+ * holds empty executable files only so the drivers' PATH walks find a binary to
+ * probe — the probe itself goes to the fake process, so nothing is ever run.
+ */
+const sandbox = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require('node:fs') as typeof import('node:fs');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const os = require('node:os') as typeof import('node:os');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require('node:path') as typeof import('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fence4534-catch-'));
+  const home = path.join(root, 'home');
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(home);
+  fs.mkdirSync(bin);
+  for (const name of ['claude', 'codex', 'copilot', 'gemini', 'agy', 'opencode', 'opencode2', 'command-code', 'cmd', 'vibe-local', 'vibe']) {
+    fs.writeFileSync(path.join(bin, name), '', { mode: 0o755 });
+  }
+  const saved = { HOME: process.env.HOME, PATH: process.env.PATH };
+  process.env.HOME = home;
+  process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ''}`;
+  return { root, saved };
+});
+
 vi.mock('child_process', async () => (await import('./send-fence-process')).fakeChildProcess());
 vi.mock('@/lib/cli-tools/opencode-config', () => ({ ensureOpencodeConfig: vi.fn() }));
 vi.mock('@/lib/hooks/sources/opencode/ports', async (importOriginal) => ({
@@ -58,6 +84,7 @@ import { CLIToolManager } from '@/lib/cli-tools/manager';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import { resolveSessionName } from '@/lib/cli-tools/session-name';
 import { clearCachedClaudePath } from '@/lib/session/claude-session';
+import { clearStartupTrust, markStartupTrustPending } from '@/lib/cli-tools/antigravity-startup-trust';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 import { buildCopilotFolderTrustFrame, buildCopilotReadyFrame } from '@tests/fixtures/copilot-folder-trust-1080';
 import { buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
@@ -352,7 +379,9 @@ const sendRefused: Scenario = async (id) => {
 const sendScreenRefused: Scenario = async (id) => {
   const screen = SEND_SCREEN[id];
   if (screen === undefined) throw new Error(`no send-time screen recorded for ${id}`);
-  runningPane(id, screen);
+  const session = runningPane(id, screen);
+  // agy's send-time wait answers its trust screen only while the startup trust is owed.
+  if (id === 'antigravity') markStartupTrustPending(session);
   arm();
   return underTicket(id, () => tool(id).sendMessage(WT, 'refused body'));
 };
@@ -407,22 +436,32 @@ const SCENARIOS: Readonly<Record<string, { tool: CLIToolType; run: Scenario }>> 
   'src/lib/cli-tools/vibe-local.ts#sendMessage': { tool: 'vibe-local', run: sendRefused },
 };
 
-let home = '';
 let wtPath = '';
-const previousHome = process.env.HOME;
 beforeAll(() => {
-  home = mkdtempSync(join(tmpdir(), 'fence4534-catch-home-'));
   wtPath = mkdtempSync(join(tmpdir(), 'fence4534-catch-wt-'));
-  process.env.HOME = home;
 });
 afterAll(() => {
-  process.env.HOME = previousHome;
-  rmSync(home, { recursive: true, force: true });
+  process.env.HOME = sandbox.saved.HOME;
+  process.env.PATH = sandbox.saved.PATH;
+  rmSync(sandbox.root, { recursive: true, force: true });
   rmSync(wtPath, { recursive: true, force: true });
 });
+
+/** `--version` answers the drivers' executable probes read (to the fake process). */
+function versionAnswer(line: string): string | null {
+  if (!/\s--version$/.test(line)) return null;
+  const bin = line.split(' ')[0].split('/').pop() ?? '';
+  if (bin === 'copilot') return 'GitHub Copilot CLI 1.0.91.';
+  if (bin === 'opencode') return '1.18.33';
+  if (bin === 'opencode2') return '2.1.0';
+  return '1.0.0';
+}
 beforeEach(() => {
   resetWorld();
   world.path = wtPath;
+  const execAnswer = world.execAnswer;
+  world.execAnswer = (line) => versionAnswer(line) ?? execAnswer(line);
+  clearStartupTrust();
   resetFenceForTests();
   resetInstanceInputLocks();
   clearCachedClaudePath();
@@ -459,11 +498,11 @@ describe('INV-catch (static): the rows’ catch throws the refusal on first', ()
   it('positive control: the codex launch wait without its rethrow → red', () => {
     const file = 'src/lib/cli-tools/codex.ts';
     const text = read(file);
-    const mutated = text.replace(/(\n\s*\} catch \(\w+\) \{\n)\s*rethrowFenceRefusal\(\w+\);\n/, '$1');
-    expect(mutated).not.toBe(text);
+    const rethrow = '        rethrowFenceRefusal(error);\n        // Capture may fail during initialization - continue polling\n';
+    expect(text.includes(rethrow)).toBe(true);
     const files = new Map(LIB);
-    files.set(file, mutated);
+    files.set(file, text.replace(rethrow, '        // Capture may fail during initialization - continue polling\n'));
     const rows = driverCatchRows(files, GATED).filter((r) => r.file === file && !r.rethrows);
-    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.map((r) => r.method)).toEqual(['waitForReady']);
   });
 });
