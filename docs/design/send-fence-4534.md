@@ -1,7 +1,7 @@
 # 1 回の送信の端末の変更を 1 か所の柵に通す（Issue #4534）設計
 
 - 段: 段 1（設計 1 枚。この文書だけ）。src・tests は書かない。段 2 で、試験を先に書き（直す前の赤を確かめる）、その後に実装する
-- 版: 第 2 版（2026-11-22）。第 1 版 `6c495b52b`
+- 版: 第 2 版（2026-11-22）。第 1 版 `6c495b52b`。段 2a で §0 の I4・§4.1・§4.2 を測定の事実に合わせて直し、§4.3（(iii) の評価）を足した
 - 基準: develop `ad21704ea`。行番号はこの版のもの。Issue の行番号（`192f9dca1`）は §1.2 で今の位置に直した
 - 正: Issue #4534 の本文（事象 F1〜F5・不変条件 I1〜I4・受入条件・範囲の外）。この文書は本文の意味を狭めない
 - 材料: s9 の `review-4518-4492-codex-r2.md`（A2）・`review-4518-v3-codex.md`（2）・`review-4518-v3-opus.md`（P1-1・P2-2）・`review-4466-exact-diff-codex.md`（2・3・6）・`worker-return-4518-stage1.txt`・`followup-candidates.md`（追跡票 T6・T8・T10）。関連の設計 `docs/design/send-atomic-4466.md`
@@ -35,7 +35,7 @@
 | I2（**狭めない**） | 確かめから spawn・fetch の開始までは同期で、同じプロセスの JS は割り込めない（発行の時点）。**実変更の時点まで閉じるために、案 B1（名簿の書き手との排他。宛先ごとの貸し出し、DB に置く）と案 B2（ペイン ID で打つ）の両方を採る**（§2.5）。両方を入れたうえで残る窓は、CommandMate を経ずに DB を直に書く書き手だけ（§2.5.4）。これを I2 の外と読むかは PM・人が決める（§9 P-1） |
 | I3 | 断った理由は札の上に、元の型と `cause` を持つ object で置く。分類は入口ごとに決まった順で行う（§3.2）。宛先の変化は 409、予約の喪失は今の答え、呼び出しの誤りは 500。409 には `sendOutcome` が必ず付く |
 | 公開の契約 | 案 (a) 既存の 409 `roster_changed`・exit 31 に寄せる、案 (b) 新しい 409 `SEND_TARGET_CHANGED`・exit 34。推奨は (b)。**exit と `reason` の値は人の答えの後に確定する**（§3.3） |
-| I4 | 宛先が変わらない送信では、門は確かめて数えるだけ。tmux を mock する既存の試験は門ごと mock されるので変わらない。ただし fail-closed（A）は、札の無いまま本物の門まで届く既存の試験を赤にしうる。その数は段 2 の最初に測り、PM が決める（§4.2、§9 P-2） |
+| I4 | 宛先が変わらない送信では、門は確かめて数えるだけ。ただし fail-closed（A）は既存の試験を赤にする。**段 2a の測定（事実）: 14 ファイル 134 本が赤。14 ファイルはすべて `@/lib/tmux/tmux` を mock しており、当たった門は `tmux.ts` の外の 3 つ（送信器の `paste-buffer`・claude の `set-environment`・OpenCode の `prompt_async`）**。「tmux を mock する既存の試験は門ごと mock されるので変わらない」は成り立たない。扱いは人が決める（§4.2・§4.3、§9 P-2） |
 | 数 | 端末の変更の箇所は 22 行（§1.1 の E1〜E22。E23 は変更ではない）。Issue の F1・F2・F3・F5 に当たるのが 4 行、F3 の延長が 1 行、**Issue に無いものが 14 行**、本文の後で門だけ要るものが 3 行。送信の入口は 4 つ（§2.3）。未決は PM の判断 2 件と、その他 7 件（§9） |
 
 ---
@@ -425,6 +425,8 @@ B1-db と B2 の両方を入れたうえで残る窓は次の 2 つ。
 
 宛先が変わらない送信では、門は確かめて数え、貸し出しを取って返すだけ。tmux の呼び出しの並び・回数・引数を変えない。案 B2 の `%pane_id` は札の下でだけ使い、tmux を mock する試験には見えない。
 
+**段 2a の測定で直した点**: 下の表のうち、送信器・OpenCode の HTTP・起動の打鍵・境界の hook の行に挙げた試験の一部は、札が要るようになって赤になる（§4.2 の表）。tmux を mock していても、`tmux.ts` の外で端末を変える 3 か所（送信器の `paste-buffer`、claude の `set-environment`、OpenCode の `prompt_async`）の門は mock されないため。ここに挙げた試験は、宛先が変わらない送信で**期待値を変えずに**緑であることを守る対象であり、「ファイルを変えずに緑」かどうかは §4.2・§4.3 の答えによる。
+
 | 守るもの | 試験（ファイル: describe） |
 |---|---|
 | 本文と Enter を分ける・読み戻し | `tests/unit/cli-tools/submit-verified-sender.test.ts`: `submit-verified-sender`（`body/Enter separation (Issue #1469/#1470 regression guard)` ほか） |
@@ -443,16 +445,62 @@ B1-db と B2 の両方を入れたうえで残る窓は次の 2 つ。
 
 ### 4.2 fail-closed（A）と I4 の重なり（PM の判断 P-2）
 
-- 送信の層の印の下で札が無いと、門が投げる（§2.4）。既存の試験のうち、次の 3 つを全て満たすものは赤になりうる
-  - 札を作る入口を通らずに、送信の層（§2.4 の表）を直に呼ぶ
-  - tmux も送信器も mock せずに、本物の門まで届く（`child_process` だけを偽にする試験）
-  - `fetch` だけを偽にする OpenCode の試験
-- 候補（見立て。段 2 の最初に、印と門を入れた枝で該当の試験を流して数を測る）: `tests/unit/cli-tools/submit-verified-sender.test.ts`（`child_process` を偽にする）・`launch-lines-input-lock-3981.test.ts`・`session-relaunch-2070.test.ts`・`opencode-v2.test.ts`・`send-readiness-4040.test.ts`・`submit-verified-sender-first-prompt-4048.test.ts`・`submit-verified-sender-final-enter-3880.test.ts`・`copilot-agent-hooks.test.ts`・`opencode-send-api-2035.test.ts`
-- 赤が出たら、どれか 1 つを PM が選ぶ
-  - (i) その試験に、明示の札を作る試験用の入口（`withTestSendTicket`）を足す。試験の期待値は変えず、前置きの 1 行を足すだけ。ただし「既存の試験を変えずに緑」とは違う
-  - (ii) 送信の層の印を付ける所を、赤の出ない所まで狭める。fail-closed の範囲が狭まる
-- 勧めは (i)。試験用の札は test のヘルパーにだけ置く。production の入口の一覧（G3）には入れない。vitest の setup で全体に札を配る形は採らない（fail-closed が試験で見えなくなる）
-- 「迂回」でも「ゲートのための前提の変更」でもないが、I4 の字句に触れるので PM が決める
+送信の層の印の下で札が無いと、門が投げる（§2.4）。第 2 版はこの重なりを「`child_process` だけを偽にする試験・`fetch` だけを偽にする OpenCode の試験」の 9 本（見立て）と書いたが、段 2a で測って直した。
+
+**測り方（事実）**: src に一時の試作を入れた（コミットしない。差分は `dev-reports/issue-4534-s2a-probe.diff`）。送信の層の印 6 か所（§2.4 の表）、札が無ければ投げる門を `tmux.ts` の変更の関数 9 つ（`killSession`・`renameSession` を除く）・送信器の `paste-buffer`・claude の `set-environment`・OpenCode の `prompt_async` と `resize-window` に置き、送信の入口 4 つ（§2.3）では常に通る札を作った（実装の後も赤になる数に近づけるため）。範囲は `tests/unit/cli-tools tests/unit/lib/session tests/unit/lib/relay tests/unit/relay tests/unit/api tests/integration`。
+
+**結果（事実）**: 7,974 本中 **134 本（14 ファイル）が赤**。試作を外すと同じ 14 ファイル 413 本は全部緑。**14 ファイルはすべて `@/lib/tmux/tmux` を factory で mock している**ので、`tmux.ts` の中の門はこの範囲では一度も通らない。赤は `tmux.ts` の外の 3 つの門から出た。
+
+| 当たった門 | ファイル（赤 / 全件） | 計 |
+|---|---|---|
+| 送信器の `paste-buffer`（`submit-verified-sender.ts` の `runTmux`、`child_process` を直に使う） | `tests/unit/cli-tools/submit-verified-sender-input-lock-3945.test.ts`（28 / 48）・`submit-verified-sender-codex-reader-corpus-3880.test.ts`（17 / 83）・`submit-verified-sender-long-body-2464.test.ts`（14 / 42）・`submit-verified-sender-codex-window-3906.test.ts`（9 / 48）・`submit-verified-sender.test.ts`（9 / 63）・`submit-verified-sender-late-paste-3937.test.ts`（3 / 7）、`tests/unit/lib/session/send-user-message-input-start-3953.test.ts`（2 / 19）・`send-user-message-input-boundary-3957.test.ts`（1 / 11） | 83 |
+| OpenCode の `prompt_async`（`dispatchViaServer`、`fetch` を偽にする） | `tests/unit/cli-tools/opencode-send-api-2035.test.ts`（22 / 32）・`opencode-send-selection-2048.test.ts`（4 / 4） | 26 |
+| claude の `set-environment`（`claude-session.ts` の `execAsync`） | `tests/integration/issue-265-acceptance.test.ts`（7 / 14）・`tests/integration/trust-dialog-auto-response.test.ts`（7 / 12）・`tests/unit/lib/session/claude-trust-repeat-scope-4211.test.ts`（9 / 10）・`tests/unit/cli-tools/launch-lines-input-lock-3981.test.ts`（2 / 20） | 25 |
+
+- 第 2 版の候補 9 本のうち `opencode-v2`・`send-readiness-4040`・`submit-verified-sender-first-prompt-4048`・`submit-verified-sender-final-enter-3880`・`copilot-agent-hooks`・`session-relaunch-2070` は赤にならなかった
+- claude の 25 本は、門の理由が `Failed to start Claude session` に置き換わって見える（I3 の今の失い方の実例。§3.1）
+- `tmux.ts` を mock しない試験（`tests/unit/tmux` ほか）は範囲の外。段 2b で同じ試作を流して確かめる（見立て: 札も印も無い直接の呼び出しなので赤にならない）
+- 選び方
+  - (i) その試験に、明示の札を作る試験用の入口（`withTestSendTicket`）を足す。期待値は変えない。ただし「既存の試験を変えずに緑」とは違う
+  - (ii) 送信の層の印を付ける所を、赤の出ない所まで狭める。fail-closed の範囲が狭まる。**採らない**（PM・開発リーダー）
+  - (iii) `tmux.ts` の外の 3 つの変更を、既存の試験が既に mock している層に寄せる（§4.3）
+- 試験用の札は test のヘルパーにだけ置く。production の入口の一覧（G3）には入れない。vitest の setup で全体に札を配る形は採らない（fail-closed が試験で見えなくなる）
+- 「迂回」でも「ゲートのための前提の変更」でもないが、I4 の字句に触れるので人が決める
+
+### 4.3 (iii) の評価: 3 つの変更を mock 済みの層に寄せられるか
+
+問い: 送信器の `paste-buffer`（と同じ手順の `load-buffer`・`delete-buffer`）、claude の `set-environment`、OpenCode の `prompt_async` を、既存の試験が既に mock している層（`@/lib/tmux/tmux`）に寄せれば、既存の試験を変えずに緑（I4 の字句）を守れるか。条件は I1（fail-closed）を弱めないこと。
+
+**事実 1: mock の形**。赤の 14 ファイルは、どれも `vi.mock('@/lib/tmux/tmux', () => ({ … }))` を `importOriginal` 無しの factory で書き、export を名前で列挙している（例: `submit-verified-sender.test.ts:23`、`issue-265-acceptance.test.ts:17`、`opencode-send-api-2035.test.ts:40`、`launch-lines-input-lock-3981.test.ts:24`）。`tmux.ts` に新しい export（例 `pasteBufferBody`・`unsetGlobalEnvironment`）を足すと、その factory には無いので、vitest は呼んだ時点で「No export is defined on the mock」で投げる。寄せた先が mock されていても、**factory に 1 行足さない限り赤のまま**（見立て。vitest の factory mock の仕様。段 2a では src を変えないので実測していない）。
+
+**事実 2: argv を直に確かめている試験**。次の試験は、`child_process` の偽に届いた argv（`load-buffer`・`paste-buffer`・`delete-buffer`・`set-environment`）や `fetch` の URL を確かめている。寄せると、その argv は mock の層で止まって `child_process` に届かないので、確かめが外れて赤になる。
+
+| 変更 | 試験（ファイル: it） |
+|---|---|
+| `paste-buffer`・`load-buffer` | `submit-verified-sender-input-lock-3945.test.ts`: `two loads of the sender (…)`（`:746`）・`negative: not replaced, the sender joins the outer ticket and sends`（`:788`）・`replaced while load-buffer ran: no paste reaches the pane, the buffer is dropped, not-sent`（`:793`）・`negative: the same slow load-buffer with the session left alone pastes and submits`（`:807`）・`negative: a send-keys tmux never started leaves no mark`（`:877`）・`load-buffer fails: nothing pasted, no mark, and the next send goes in without waiting`（`:883`）・`negative: paste-buffer fails after the body went in: the mark is left and the next send waits it out`（`:903`） |
+| 同 | `submit-verified-sender-long-body-2464.test.ts`: `pastes a long body as one bracketed paste and never types it`（`:249`）・`drops the buffer and throws, without Enter, when load-buffer fails`（`:282`）・`[#4031] a failed load-buffer carries PASTE_NOT_STARTED_CODE and is recorded not-sent`（`:294`）・`[#4031] negative: a failed paste-buffer carries no such code and stays indeterminate`（`:305`） |
+| 同 | `submit-verified-sender.test.ts`: `confirms submit for a long (paste-length) message, pasted rather than typed (Issue #2464)`（`:335`） |
+| 同 | `send-user-message-input-boundary-3957.test.ts`: `a refusing hook stops a PASTED body before …`（`:270`）・`a refused PASTED body drops its loaded buffer and leaves no carried mark (Issue #3992)`（`:291`）・`negative control: a PASTED body that passes the boundary makes no extra tmux call (Issue #3992)`（`:301`） |
+| 同 | `send-user-message-input-start-3953.test.ts`: `stamps the user row as the paste reaches the pane, after …`（`:428`） |
+| `set-environment` | `tests/integration/issue-265-acceptance.test.ts`: `should call tmux set-environment -g -u CLAUDECODE during session creation`（`:251`・`:265`） |
+| `prompt_async` | `opencode-send-api-2035.test.ts`: `POSTs the prompt to the instance`（`:196`） |
+
+（探し方: 赤の 14 ファイルで `paste-buffer|load-buffer|set-environment|prompt_async` を含むコメント以外の行と、その行を含む `it` を挙げた。）
+
+**事実 3: `prompt_async` には寄せる先が無い**。OpenCode の 2 ファイルは `@/lib/hooks/sources/opencode/client.ts`（`sendOpencodePrompt` `:584`）を mock せず、`fetch` だけを偽にしている。既に mock されている層（`@/lib/tmux/tmux`・`@/lib/cli-tools/submit-verified-sender`）に HTTP の dispatch を寄せるのは層の責務を曲げる。寄せても、26 本は事実 1 と同じく factory に無い export で赤のまま。
+
+**見立て: I1 は寄せても弱まらない**（門は寄せた先の関数の中に置く。production の経路は変わらない）。ただし寄せた先が mock される試験では、門そのものが試験から見えなくなる（§6 の柵の試験が本物の門を受け持つ）。
+
+**結論（見立て）**: (iii) では I4 の字句（既存の試験を変えずに緑）を守れない。事実 1 で 3 つとも factory の 1 行が要り、事実 2 で argv・URL を確かめる 18 本（7 ファイル）は期待値（argv の行き先）まで変わる。(i) は期待値を変えずに前置きを足すだけで済む。推奨は (i)。決めるのは人。
+
+| 観点 | (i) 試験用の札（`withTestSendTicket`）を前置きする | (iii) 3 つの変更を `tmux.ts`（mock 済み）に寄せる |
+|---|---|---|
+| 変わるファイル: src | 柵の本体だけ（両案に共通。§8.3）。(i) に固有の src は 0。試験用の入口は `tests/helpers/send-fence-4534/` に置く | 柵の本体に加えて `src/lib/tmux/tmux.ts`（新しい export 2 つ）・`src/lib/cli-tools/submit-verified-sender.ts`（`load-buffer`・`paste-buffer`・`delete-buffer` を移す）・`src/lib/session/claude-session.ts`（`set-environment` を移す）。`prompt_async` は寄せる先が無い（事実 3） |
+| 変わるファイル: 既存の試験 | 赤の 14 ファイル全部（§4.2 の表） | 少なくとも 14 ファイル全部（factory に新しい export を足す。事実 1）。うち 7 ファイル 18 本は argv・URL の確かめの書き換え（事実 2）。OpenCode の 2 ファイルは (i) と同じ札も要る |
+| 行数の見込み: src | (i) に固有の分は 0 | 両案に共通の分に加えて +60〜+90 / −30〜−40（見立て: 移す関数と import） |
+| 行数の見込み: 既存の試験 | 約 100 行（見立て: 送信の層を呼ぶ箇所が 14 ファイルで計 84 か所（`grep -cE` の数。注釈を含む）＋ import 14 行。ファイルの中の共通の helper を包めば減る）。期待値の行は 0 | 約 30〜60 行（factory 14 ＋ argv・URL の確かめ 18 本の書き換え ＋ OpenCode 2 ファイルの札）。期待値の行が変わる |
+| I4「既存の試験を変えずに緑」を字句どおり守れるか | 守れない（前置きを足す）。期待値は変えない | 守れない。理由は事実 1（14 ファイルの factory に export が無い）と事実 2（上の表の 7 ファイル 18 本が `child_process` の argv・`fetch` の URL を確かめている）。期待値まで変わる |
+| I1（fail-closed） | 弱めない | 弱めない（門は寄せた先の中）。ただし mock される試験からは門が見えない |
 
 ---
 
@@ -571,7 +619,7 @@ B1-db と B2 の両方を入れたうえで残る窓は次の 2 つ。
 | # | 問い | 勧め |
 |---|---|---|
 | P-1 | I2 を実変更の時点で満たすために、案 B1-db（名簿の書き手との排他、DB の貸し出し。名簿の route に短い待ちと 409 `roster_changed` が増える）と案 B2（ペイン ID で打つ）の両方を入れる。両方を入れても残る窓は「CommandMate を経ずに DB を直に書く書き手」だけ（§2.5.4）。この窓を受入条件の外と読むか | 両方を入れる。DB を直に書く手での編集は、CommandMate の書き手ではないので I2 の外と読む。読まないなら、受入条件の変更として人が決める |
-| P-2 | fail-closed（送信の層の印の下で札が無ければ投げる）が、本物の門まで札無しで届く既存の試験を赤にしうる（§4.2）。(i) その試験に試験用の札の前置きを足すか、(ii) 印の範囲を狭めるか | (i)。段 2 の最初に数を測って返す |
+| P-2 | fail-closed（送信の層の印の下で札が無ければ投げる）が、本物の門まで札無しで届く既存の試験を赤にしうる（§4.2）。(i) その試験に試験用の札の前置きを足すか、(ii) 印の範囲を狭めるか | (i)。段 2a で測った: 14 ファイル 134 本（§4.2）。(ii) は採らない。(iii) は §4.3 で評価し、I4 の字句を守れない |
 
 ### 9.2 その他（開発リーダーが決める、または人の答えを待つ）
 
