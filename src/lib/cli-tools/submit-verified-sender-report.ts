@@ -22,7 +22,7 @@ import {
 import { markLastSendDiscarded } from '@/lib/session/send-attempt-state';
 import { isInputBoundaryRefusal, type InstanceInputTicket } from '@/lib/session/instance-input-lock';
 import { SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
-import { classifySubmitWithRule, type SubmitRule, type SubmitState } from './submit-composer-read';
+import { classifySubmitWithRule, claudePickerFooterBelowComposer, type SubmitRule, type SubmitState } from './submit-composer-read';
 import {
   PROMPT_REPORT_POLL_MS,
   PROMPT_REPORT_WAIT_MS,
@@ -355,8 +355,9 @@ export function isLoneSlashCommand(message: string): boolean {
  * picks its highlighted row (codex `/model`: the model, then the effort, saved
  * as the default). So no Enter is resent for such a body. The pane is read
  * every {@link SLASH_COMMAND_SETTLE_POLL_MS} until `deadline`; the first verdict
- * that is not `pending` (the picker: no composer, `B-absent`; generating; a
- * cleared composer), or the agent's own report of the prompt, is returned for
+ * that is not `pending` (the picker: no composer, `B-absent`; claude's picker
+ * footer under the composer still showing the command, `S-panel` (#4555 R6);
+ * generating; a cleared composer), or the agent's own report of the prompt, is returned for
  * the read-back loop to act on as it acts on any read.
  *
  * Issue #4048: ownership is asked after every capture, so a session replaced
@@ -389,7 +390,13 @@ export async function awaitSlashCommandSettle(params: {
     }
     const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
     assertStillOwnedAfterEnter(ticket, cliToolId, 'the slash command wait');
-    const verdict = classifySubmitWithRule(output, cliToolId, message, composer);
+    const read = classifySubmitWithRule(output, cliToolId, message, composer);
+    // Issue #4555 R6: claude's picker drawn under the composer it left showing
+    // the command — the Enter opened it. Pending reads only, here only.
+    const verdict =
+      read.state === 'pending' && claudePickerFooterBelowComposer(output, cliToolId)
+        ? { state: 'submitted' as const, rule: 'S-panel' as const }
+        : read;
     if (verdict.state !== 'pending') {
       logger.info('submit-classified', { sessionName, cliToolId, state: verdict.state, rule: verdict.rule, slashCommand: true });
       return { ...verdict, output };
