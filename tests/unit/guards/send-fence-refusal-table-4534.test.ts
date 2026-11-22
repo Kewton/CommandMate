@@ -597,3 +597,65 @@ describe('the latent row: session-key-sender stopSession (claude’s stop) under
     expect(retracted).toEqual(bare);
   });
 });
+
+// ---------------------------------------------------------------------------
+// INV-catch-after (r6): a record the refusal must not skip
+// ---------------------------------------------------------------------------
+
+describe('INV-catch-after: the records a refused key still owes are kept (agy’s owed trust Enter, command-code’s pending composer)', () => {
+  /** A ticket for `tool` whose check refuses once `refuse()` says so. */
+  const ticketFor = (tool: CLIToolType, refuse: () => boolean) => ({
+    target: { worktreeId: WT, instanceId: instanceOf(tool), cliToolId: tool },
+    resolvedBy: 'roster',
+    kind: 'resolved' as const,
+    confirm: () => (refuse() ? ('tool-changed' as const) : null),
+    names: [sessionOf(tool)],
+  });
+  const settled = (p: Promise<unknown>): Promise<unknown> => p.then((v) => v, (e: unknown) => e);
+  const enterKeys = (): string[] => world.out.filter((o) => o.cls === 'change' && /^send-keys \S+ \S+ Enter$/.test(o.line)).map((o) => o.line);
+
+  /** The next send with nothing refused: it answers the trust screen it finds and types the body. */
+  async function nextSendAnswersTrust(): Promise<void> {
+    const agy = CLIToolManager.getInstance().getTool('antigravity');
+    const before = enterKeys().length;
+    const outcome = await settled(runWithSendTicket(ticketFor('antigravity', () => false), () => agy.sendMessage(WT, 'after the refusal', instanceOf('antigravity'))));
+    expect(outcome instanceof Error ? outcome.message : 'sent').toBe('sent');
+    expect(enterKeys().length).toBeGreaterThan(before);
+    expect(world.out.some((o) => o.cls === 'change' && o.line.includes('after the refusal'))).toBe(true);
+  }
+
+  it('[INV-catch-after] agy waitForReady: the launch window’s trust Enter refused → the Enter stays owed, and the next send answers it', async () => {
+    await setupRun({ entry: 'send', tool: 'antigravity', launch: true, screen: 'startup' });
+    const session = sessionOf('antigravity');
+    const agy = CLIToolManager.getInstance().getTool('antigravity');
+    // Refused from the first key after the launch line: the trust Enter of the launch window.
+    const outcome = await settled(runWithSendTicket(ticketFor('antigravity', () => screenState.launched), () => agy.startSession(WT, sandbox.wt, instanceOf('antigravity'))));
+    expect(isFenceRefusal(outcome)).toBe(true);
+    expect(screenState.pending).toBe('startup');
+    const { isStartupTrustPending } = await import('@/lib/cli-tools/antigravity-startup-trust');
+    expect(isStartupTrustPending(session)).toBe(true);
+    await nextSendAnswersTrust();
+  }, 120_000);
+
+  it('[INV-catch-after] agy waitForPrompt: the owed Enter claimed, then its key refused → the claim is given back, and the next send answers it', async () => {
+    await setupRun({ entry: 'send', tool: 'antigravity', launch: false, screen: 'startup' });
+    const session = sessionOf('antigravity');
+    const { isStartupTrustPending } = await import('@/lib/cli-tools/antigravity-startup-trust');
+    const { markStartupTrustPending } = await import('@/lib/cli-tools/antigravity-startup-trust');
+    markStartupTrustPending(session);
+    const agy = CLIToolManager.getInstance().getTool('antigravity');
+    const outcome = await settled(runWithSendTicket(ticketFor('antigravity', () => true), () => agy.sendMessage(WT, 'refused body', instanceOf('antigravity'))));
+    expect(isFenceRefusal(outcome)).toBe(true);
+    expect(enterKeys()).toEqual([]);
+    expect(isStartupTrustPending(session)).toBe(true);
+    await nextSendAnswersTrust();
+  }, 120_000);
+
+  it('[INV-catch-after] command-code launchSession: a refused launch leaves no pending composer behind (a later send is not told “still starting”)', async () => {
+    await setupRun({ entry: 'send', tool: 'command-code', launch: true, screen: 'idle' });
+    const cc = CLIToolManager.getInstance().getTool('command-code') as unknown as { composerPendingSince: Map<string, number>; startSession: (w: string, p: string, i: string) => Promise<void> };
+    const outcome = await settled(runWithSendTicket(ticketFor('command-code', () => true), () => cc.startSession(WT, sandbox.wt, instanceOf('command-code'))));
+    expect(isFenceRefusal(outcome)).toBe(true);
+    expect(cc.composerPendingSince.has(sessionOf('command-code'))).toBe(false);
+  }, 120_000);
+});
