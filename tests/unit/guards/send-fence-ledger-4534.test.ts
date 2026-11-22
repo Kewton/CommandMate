@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO_ROOT } from './route-tmux-reach';
 import { scanLiterals, scanRawTmuxCommands, srcFiles, TMUX_MODULE, type TmuxCommandSet } from './pane-key-writers-scan';
+import { buildTmuxTeardownArgv } from '@/lib/agent-health/tmux-command';
 
 const read = (f: string): string => readFileSync(join(REPO_ROOT, f), 'utf-8');
 
@@ -220,3 +221,57 @@ describe('R2 (static): no await between a gate and the process call it guards', 
     expect(awaitBetweenGateAndSpawn(sender, moved).join('\n')).toMatch(/an await at line \d+ before its process call/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// r7b: a change is every tmux command the reads list does not name (design §5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The closed reads list of design §5 (G-境 and G-台帳 share it): these, and
+ * nothing else, change nothing. `*` is any rest of the name. Adding one is a
+ * change of this list, which the design's own line below must say first.
+ */
+export const READ_COMMANDS: readonly string[] = ['has-session', 'capture-pane', 'display-message', 'list-*', 'show-*', '-V'];
+/** Commands that touch only the server's paste buffers, never a pane (design §5). */
+export const BUFFER_COMMANDS: readonly string[] = ['load-buffer', 'delete-buffer'];
+
+/** A sample command name each entry of a list stands for (`list-*` → `list-x`). */
+const sampleOf = (entry: string): string => (entry.endsWith('*') ? `${entry.slice(0, -1)}x` : entry);
+/** The program's own teardown command, read off production — this file spells no such name. */
+const TEARDOWN = buildTmuxTeardownArgv()[buildTmuxTeardownArgv().length - 1];
+
+describe('r7b: a terminal change is every tmux command the reads list does not name', () => {
+  const withFile = (text: string): Map<string, string> => {
+    const files = new Map(srcFiles().map((f) => [f, read(f)] as const));
+    files.set('src/lib/zz-ledger-r7b.ts', text);
+    return files;
+  };
+  const rowsOf = (files: ReadonlyMap<string, string>): string[] => [...ledgerRows(files).keys()].filter((k) => k.includes('src/lib/zz-ledger-r7b.ts'));
+
+  it('[r7b] (a) a command no list names, and the program’s own teardown (from production), are changes', () => {
+    const files = withFile(
+      "import { execFile, exec } from 'child_process';\n" +
+        "export function unknownCommand(): void { execFile('tmux', ['frobnicate-pane', '-t', 'x']); }\n" +
+        `export function teardown(): void { execFile('tmux', ['-L', 'private', '${TEARDOWN}']); }\n` +
+        "export function shellLine(): void { exec('tmux frobnicate-window -t x'); }\n",
+    );
+    expect(rowsOf(files)).toHaveLength(3);
+  });
+
+  it('[r7b] (b) the reads and the buffer commands are not changes', () => {
+    const lines = [...READ_COMMANDS, ...BUFFER_COMMANDS].map((c, i) => `export function r${i}(): void { execFile('tmux', ['${sampleOf(c)}', '-t', 'x']); }`);
+    const files = withFile(["import { execFile } from 'child_process';", ...lines, ''].join('\n'));
+    expect(rowsOf(files)).toEqual([]);
+  });
+
+  it('[r7b] (c) the reads list is the closed list of design §5 (one added here, or there, is red)', () => {
+    const design = read('docs/design/send-fence-4534.md');
+    const line = design.split('\n').find((l) => l.startsWith('**読みの一覧（G-境・G-台帳で共通）**')) ?? '';
+    const reads = line.slice(0, line.indexOf('は読み'));
+    const buffers = line.slice(line.indexOf('は読み'), line.indexOf('は buffer だけ'));
+    const ticked = (text: string): string[] => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    expect(ticked(reads)).toEqual([...READ_COMMANDS]);
+    expect(ticked(buffers)).toEqual([...BUFFER_COMMANDS]);
+  });
+});
+
