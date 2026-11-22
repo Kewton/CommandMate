@@ -715,8 +715,8 @@ describe('[補助] INV-catch (static): every catch around a gate-reaching call t
     const files = new Map(SRC);
     files.set('src/lib/zz-new-catch.ts', "import { sendKeys } from '@/lib/tmux/tmux';\nexport async function poke(s: string): Promise<void> {\n  try {\n    await sendKeys(s, 'x', false);\n  } catch {\n    // swallowed\n  }\n}\n");
     for (const [file, from, to] of [
-      ['src/lib/cli-tools/claude-auto-default-nudge.ts', /\} catch \(error: unknown\) \{\n\s*rethrowFenceRefusal\(error\);\n/, '} catch {\n'],
-      ['src/lib/session-key-sender.ts', /\} catch \(error: unknown\) \{\n\s*rethrowFenceRefusal\(error\);\n/, '} catch (error: unknown) {\n'],
+      ['src/lib/cli-tools/claude-auto-default-nudge.ts', /\} catch \(error: unknown\) \{\n(?:\s*\/\/[^\n]*\n)?\s*rethrowFenceRefusal\(error\);\n/, '} catch {\n'],
+      ['src/lib/session-key-sender.ts', /\} catch \(error: unknown\) \{\n(?:\s*\/\/[^\n]*\n)?\s*rethrowFenceRefusal\(error\);\n/, '} catch (error: unknown) {\n'],
     ] as const) {
       const text = files.get(file) ?? '';
       const mutated = text.replace(from, to);

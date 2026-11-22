@@ -27,6 +27,7 @@ import { isClaudeAutoDefaultNudgeOpen, resolveClaudeAutoDefaultNudgeKey, stripAn
 import { answerUnderInstanceInputLock, instanceInputAnswerSkipLife, instanceInputLaunchReadMark } from '@/lib/session/instance-input-lock';
 import { assertAgentInForeground } from '@/lib/session/composer-clear';
 import { createLogger } from '@/lib/logger';
+import { rethrowFenceRefusal } from '@/lib/session/terminal-fence';
 import { forgetLaunchAnswerSkip, newLaunchAnswerSkips, noteLaunchAnswerSkipped, type LaunchAnswerSkips } from './launch-answer-skips';
 
 const logger = createLogger('cli-tools/claude-auto-default-nudge');
@@ -153,7 +154,9 @@ export async function sendNudgeKey(
       noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: outcome.reason }, answerLife);
     }
     return outcome.answered;
-  } catch {
+  } catch (error: unknown) {
+    // Issue #4534 (INV-catch): the send's fence refused the key — not a key to retry.
+    rethrowFenceRefusal(error);
     // Left for a later poll, as the folder trust's key is.
     noteLaunchAnswerSkipped(logger, record, KEY_SKIPPED, { sessionName, key, reason: 'send-failed' }, answerLife);
     return false;

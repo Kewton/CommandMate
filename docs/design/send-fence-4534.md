@@ -55,7 +55,7 @@
 | R9 | 境界の通知（`noteInputStart`・`noteDispatchStart`）は、hook より先に確かめる。断ったら hook は走らず、`dispatched` も立たない。柵の拒否は `delivery: 'not-started'` を持つ | 作り＋T1・T5 |
 | R10 | 札の宛先は三つ組 `(worktree, instance, tool)`。門は session 名を比べない。検知器だけが名前で数え、札の中で使った名前を足す | 作り＋T-D |
 | R11 | **INV-閉包**: 印（`enterSendLayer`）へ届く production の関数の集合は閉じている。集合の外から中を呼べるのは、札を開く入口だけで、それも札の下で走らせる関数の中だけ。集合は検査が自分で作る（名前の一覧を持たない）。門を持つ `tmux.ts` の関数は集合の外（入口の外の書き手も呼ぶ。§2.4） | 検知器（本番）＋G-閉包（**補助**。見る書き方は §5 の表だけ） |
-| R12 | **INV-catch**: 柵の拒否（`isFenceRefusal`）は、どのドライバの catch でも飲まれず、包み直されず、型と cause を保ったまま投げ直される（門に届く呼び出しを囲む catch の先頭で `rethrowFenceRefusal`） | T3c（走査で見つけた catch の行ごとに拒否を注入）＋静的検査（`send-fence-driver-catch-4534.test.ts`） |
+| R12 | **INV-catch（実行時）**: 入口 4 つのどの経路で柵の拒否が起きても、送信は成功で返らず、拒否の理由（`send target changed: <理由>` か柵の拒否の型）が送信の答えまで残る。拒否の後の端末の変更は 0（束の続きと取り下げの包みの中を除く）。ドライバの catch は先頭の `rethrowFenceRefusal` で型のまま投げ直す | **主**: 実行時の表（`send-fence-refusal-table-4534.test.ts`。門を通った記録から行を作る）と T3c。**補助**: 門へ届く関数を呼ぶ式を囲む src の全 catch の走査を、行ごとの除く理由の表と照らす（§8） |
 
 ### 2.2 札・門・入口
 
@@ -282,3 +282,13 @@ fenceConfirm(): void                 // R9。確かめるだけ
 - T9・`await` の静的検査・G-印の包みの分は書いていない。`tests/unit` のほかのディレクトリ（`cli`・`components`・`config` ほか）は流していない（CI が判定する）
 
 **別 Issue の候補**: 札を引数で運ぶ形（`pane-key-writers.test.ts:49–50` と同じ向き。PR-A のレビューで「赤になる」と書いた書き方が赤にならなければ、止めて返す。§5 の等級）／名簿の書き手を待たせる／ペイン ID で打つ
+
+## 8. INV-catch を実行時の表で守る（r5。人の決定 (iv) 11-23 00:33）
+
+- **決定**: INV-catch（R12）の主を実行時の表に移し、静的な走査は除く理由つきの補助に下げる
+- **理由**: 同じ種類（catch が柵の拒否を飲む・包む）が 3 回続いた（codex の起動待ち → 8 ドライバの launch の包み直し → ドライバの外の nudge の鍵と claude の停止）。一覧（ファイル名）は漏れる。性質（門へ届く関数を呼ぶ式を囲む catch）で静的に定義し直すと、設計どおりの受け止め（入口の分類・起動の段・`/model`・取り下げの包み・札の無い書き手）と区別できない。札は ALS で運ぶので、「この catch が拒否を受けうるか」は字句では決められない（r4 の走査: 門へ届く関数 270・catch 149・投げ直さないもの 104。どれも受け止めか届かない形で、握りつぶしは nudge の 1 か所）
+- **実行時の表**: 経路（入口 4 つ × 9 ツール × 画面〔起動・起動の画面への答え・nudge・消去・dispatch・停止〕）を何も動かさずに流し、開いた札の門が確かめた変更の 1 つ 1 つを行にする。行ごとに、その門の直前で名簿の instance の tool を替えて流し直し、成功で返らない・理由が答えに残る・拒否の後の変更 0 を確かめる。門の所の区分がすべて行を持つことも固定する（r5 の時点で 47 経路・152 行）
+- **静的な補助**: G-閉包の走査を門から始めた集合（`computeGateReach`）を呼ぶ式を囲む catch のうち、投げ直さないものを行ごとの理由（入口の分類・起動の段・`/model`・取り下げの包み・札の無い書き手・poller・relay の入れ子の札・門が無い）と照らす。表に無い catch が足されたら赤
+- **直したもの**: `claude-auto-default-nudge.ts` の `sendNudgeKey`（握りつぶし。起動の経路で 60 秒待った後に 503 `SESSION_STARTING` と `session-starting` の記録になり、送信前の経路では理由が消えていた）と `session-key-sender.ts` の `stopSession`（潜在。今の呼び手は札の無い kill の route と取り下げの包みの中だけ）。PR-A の答えは、起動の段の 500 `Failed to start … session: send target changed: <理由>`（code は付かない。§6 の「500 `SESSION_START_FAILED`」は、起動の段の汎用の 500 で code を持たないのが実際）
+- **直さないもの**（除く表に理由。P3）: `opencode-v2.ts` の lazy resume（門が無い）、`tmux.ts` の `new-window` の catch が束の誤用を飲む作り、`send-user-message.ts` の `.catch(classifySendFailure)` が順 1 を読まない形、`prompt-answer-sender.ts` の `withKeysSent` が札の 1 つの refusal に `keysSent` を書き足す形、相乗りの launch の失敗の受け取り
+

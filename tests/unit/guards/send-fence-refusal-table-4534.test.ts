@@ -533,6 +533,36 @@ describe('INV-catch (run time): a refusal anywhere on an entry’s path never en
   });
 });
 
+describe('the nudge rows, by their answers (claude-auto-default-nudge sendNudgeKey)', () => {
+  const nudgeRow = async (path: PathSpec): Promise<{ answer: Answer; after: string[]; ms: number }> => {
+    const control = await controlRows(path);
+    const row = control.rows.find((r) => r.place === 'nudge');
+    expect(row, 'the control run answered the nudge').toBeDefined();
+    const started = Date.now();
+    const result = await refusedRun(path, row as Row);
+    return { ...result, ms: Date.now() - started };
+  };
+
+  it('[refusal-table] the launch path (claude.ts answerClaudeAutoDefaultNudgeUntil): the start failure’s 500 with the reason, never 503 SESSION_STARTING, recorded session-start-failed', async () => {
+    const { answer, after } = await nudgeRow({ entry: 'send', tool: 'claude', launch: true, screen: 'nudge-launch' });
+    // PR-A's answer (design §6): the start step's generic 500 `Failed to start … session: <the refusal>`,
+    // which carries no code today (the start step's own answer, unchanged).
+    expect(answer.status).toBe(500);
+    expect(answer.code).toBeUndefined();
+    expect(answer.texts.join(' ')).toMatch(REASON);
+    expect(answer.lastSendReason).toBe('session-start-failed');
+    expect(after).toEqual([]);
+  }, 600_000);
+
+  it('[refusal-table] the send path (claude-session sendMessageToClaude): refused at once — no 10 s of reads — with the reason in the answer', async () => {
+    const { answer, after, ms } = await nudgeRow({ entry: 'send', tool: 'claude', launch: false, screen: 'nudge-send' });
+    expect(answer.status).toBe(500);
+    expect(answer.texts.join(' ')).toMatch(REASON);
+    expect(ms).toBeLessThan(5_000);
+    expect(after).toEqual([]);
+  }, 600_000);
+});
+
 describe('the latent row: session-key-sender stopSession (claude’s stop) under an open ticket', () => {
   it('[refusal-table] outside a retraction: the stop does not return as done, and nothing is killed', async () => {
     await setupRun({ entry: 'send', tool: 'claude', launch: false, screen: 'idle' });
