@@ -57,6 +57,18 @@
     "assistant": "アシスタント",
     "sending": "送信中…",
     "failedToSend": "送信に失敗しました",
+    "sendUnknown": {
+      "status": "届いたかどうか分かりません",
+      "guidance": "途中まで、または全部届いている場合があります。ターミナルの表示を確かめてから、必要なら送り直してください",
+      "awaiting": "応答を待っています…（届いている場合があります）",
+      "checkTerminal": "ターミナルを確かめる",
+      "resend": "送り直す",
+      "resendAria": "確かめたうえで同じ本文を送り直す",
+      "resendConfirm": "前の送信が届いていると、同じ本文が 2 回送られます。ターミナルを確かめたうえで送り直しますか？",
+      "resendConfirmYes": "送り直す",
+      "resendConfirmNo": "やめる"
+    },
+    "attachmentNotReturned": "送信されなかった本文を入力欄に戻しましたが、添付した画像は戻せませんでした。もう一度添付してから送ってください",
     "roleRefusal": {
       "notApplied": "ロールが適用されていないため、本文は送信していません。セッションを停止して起動し直してください。",
       "notConfirmed": "このセッションでロールを確かめられなかったため、本文は送信していません。セッションを停止して起動し直してください。",
@@ -81,7 +93,9 @@
     "openImage": "画像を開く: {path}",
     "videoLabel": "動画: {path}",
     "conversationLabel": "会話: {preview}",
-    "filePathMissing": "このパスは worktree にありません"
+    "filePathMissing": "このパスは worktree にありません",
+    "filePathOutsideWorktree": "worktree の外のファイルなので開けません。パスをコピーしました",
+    "filePathOutsideWorktreeNoCopy": "worktree の外のファイルなので開けません"
   },
   "slashCommands": {
     "title": "コマンド",
@@ -1252,6 +1266,8 @@
     "unknownRepository": "不明",
     "loadingEditor": "エディタを読み込み中...",
     "agentInstanceSelection": "エージェントインスタンスの選択",
+    "instanceQueryNotInRoster": "開こうとした {instance} はこの worktree のエージェントにありません。{current} を表示しています。",
+    "instanceQueryNotApplied": "{instance} を表示できませんでした。送り先は {current} のままです。",
     "statusPill": "{label}: {status}",
     "subTabMessage": "メッセージ",
     "subTabGit": "Git",

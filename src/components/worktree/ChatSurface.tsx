@@ -148,7 +148,7 @@ import { TerminalEscapeHatch } from '@/components/worktree/TerminalEscapeHatch';
 import { DismissPanelKeys, PromptAnswerKeys } from '@/components/worktree/PromptAnswerKeys';
 import { SelectionListKeys } from '@/components/worktree/SelectionListKeys';
 import { hasDismissablePanelFooter, isTrustConfirmationFrame } from '@/lib/detection/selection-shape';
-import type { ChatMessage, LivePromptData } from '@/types/models';
+import type { ChatMessage, LivePromptData, RetryPendingOptions } from '@/types/models';
 import { derivePromptView } from '@/lib/session/prompt-view';
 import { offersPlanReviewControls, readSelectionListFrame } from '@/lib/session/selection-list-ops';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -400,7 +400,7 @@ export interface ChatSurfaceHistoryProps {
   isLoading?: boolean;
   showToast?: ShowToast;
   onInsertToMessage?: (content: string) => void;
-  onRetryPending?: (tempId: string) => void;
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   onDiscardPending?: (tempId: string) => void;
   splitIndex?: number;
   /**
@@ -1171,6 +1171,9 @@ export const ChatSurface = memo(function ChatSurface({
           // folds the previous session's rows and draws the ended banner,
           // because both are decisions about which ROWS are on screen.
           sessionEnded={sessionEnded}
+          // Issue #4503: a send whose outcome is unknown is checked on the terminal — this surface's
+          // own way there (the PC split, the phone's tab and the `/sessions` tile all switch).
+          onCheckTerminal={handleOpenTerminal}
           onScrollControlsChange={handleScrollControlsChange}
           className="h-full"
         />

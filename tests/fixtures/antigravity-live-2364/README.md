@@ -69,6 +69,16 @@ it pins (a selection list, not a `multiple_choice` prompt) is deliberate: the
 screen takes a typed digit, while `sendPromptAnswer` drives agy's numeric
 answers with arrow keys, so a `0. Skip` button would send the wrong keys.
 
+## Issue #4504's derived frame
+
+`tests/unit/lib/detection/antigravity-generating-word-4504.test.ts` builds its
+(a) frame **in memory** from `idle-after-deny.txt`: the first turn's rows, then
+this capture's own input box and `? for shortcuts` status row — the resting
+pane whose tail still holds `Generating the specified file`. It is not added as
+a file here because the exact membership and 200x1000 geometry above are pinned
+by suites outside Issue #4504's scope (#2845's quoted frames are built the same
+way).
+
 ## Why these live under `tests/fixtures/` and not `tests/unit/lib/detection/fixtures/`
 
 Four suites walk `tests/unit/lib/detection/fixtures/` as a corpus and pin what

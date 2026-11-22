@@ -160,23 +160,21 @@ export function rereadWorktreeForRole(
 }
 
 /**
- * Validate and save the role this send asks for, and work out what it must inject.
- *
- * @returns Null when the request says nothing about a role
+ * The save half of {@link prepareSendRole} (Issue #4466 PR1a): validate and save the role
+ * `body.role` names for `target` (nothing when it names none), and read back what is
+ * stored. Synchronous.
  */
-export async function prepareSendRole(
+export function saveSendRole(
   db: Database.Database,
   body: SendRoleRequest,
   target: SendRoleTarget,
   recordNotSent: (reason: SendAttemptReason) => void
-): Promise<SendStep<SendRoleGate | null>> {
-  const { worktree, cliToolId, rosterInstanceId, instanceId } = target;
+): { ok: true; value: Pick<SendRoleGate, 'saved' | 'stored'> } | { ok: false; response: NextResponse } {
+  const { worktree, rosterInstanceId } = target;
   const untouched = (): Pick<SendRoleGate, 'saved' | 'stored'> => ({
     saved: false,
     stored: getInstanceRoleState(db, worktree.id, rosterInstanceId),
   });
-  if (body.role === undefined && body.expectedRole === undefined) return { ok: true, value: null };
-
   let saved = false;
   if (body.role !== undefined) {
     const input = parseRoleAssignmentInput(body.role);
@@ -197,6 +195,27 @@ export async function prepareSendRole(
     }
   }
   const stored = getInstanceRoleState(db, worktree.id, rosterInstanceId);
+  return { ok: true, value: { saved, stored } };
+}
+
+/**
+ * Validate and save the role this send asks for, and work out what it must inject.
+ *
+ * @returns Null when the request says nothing about a role
+ */
+export async function prepareSendRole(
+  db: Database.Database,
+  body: SendRoleRequest,
+  target: SendRoleTarget,
+  recordNotSent: (reason: SendAttemptReason) => void
+): Promise<SendStep<SendRoleGate | null>> {
+  const { worktree, cliToolId, instanceId } = target;
+  if (body.role === undefined && body.expectedRole === undefined) return { ok: true, value: null };
+
+  // Issue #4466 PR1a: the save is `saveSendRole`, synchronous, before the first await here.
+  const savedRole = saveSendRole(db, body, target, recordNotSent);
+  if (!savedRole.ok) return savedRole;
+  const { saved, stored } = savedRole.value;
 
   const expected = body.expectedRole === undefined ? null : parseExpectedRole(body.expectedRole);
   if (body.expectedRole !== undefined && expected === null) {

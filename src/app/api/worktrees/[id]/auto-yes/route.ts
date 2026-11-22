@@ -20,7 +20,6 @@ import { sessionTargetConflictResponse } from '@/lib/session/session-target-conf
 import {
   getAutoYesState,
   setAutoYesEnabled,
-  startAutoYesPolling,
   stopAutoYesPolling,
   stopAutoYesPollingByWorktree,
   buildCompositeKey,
@@ -30,7 +29,7 @@ import {
   type AutoYesState,
 } from '@/lib/polling/auto-yes-manager';
 import { AUTO_YES_ANSWER_MODES, isAutoYesAnswerMode, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
-import { autoYesAnswerModeOf, isAutoYesShutdownStarted } from '@/lib/auto-yes-state';
+import { autoYesAnswerModeOf } from '@/lib/auto-yes-state';
 import { recheckPendingDecisions } from '@/lib/hooks/pending-decision-recheck';
 import {
   getSessionContractPolicySummary,
@@ -52,9 +51,8 @@ import { createLogger } from '@/lib/logger';
 import { canonicalWorktreeId } from '@/lib/git/git-route-worktree';
 import type { Worktree } from '@/types/models';
 import { autoYesGrantIdOf } from './auto-yes-grant';
-import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE } from '@/lib/tool-policy/policy';
-import { readUsageDeclaration } from '@/lib/tool-policy/declaration';
-import { findWriteToolPolicyRefusal, readWriteToolPolicyRequest } from '../send/write-tool-policy';
+import { readWriteToolPolicyRequest } from '../send/write-tool-policy';
+import { armAutoYesGrant, findAutoYesRelayRefusal, findAutoYesToolPolicyRefusal } from './auto-yes-arm';
 import { readTaskTarget } from '../send/task-target';
 
 const logger = createLogger('api/auto-yes');
@@ -522,32 +520,10 @@ export async function POST(
       // `send --auto-yes`, the web UI), and grants live in memory and are released
       // on restart, where the declaration is read — so no grant on a refused tool
       // can outlive this check.
-      const policy = decideToolPolicy({
-        tool: cliToolId,
-        operation: 'auto-yes',
-        origin: 'legacy',
-        declaration: readUsageDeclaration(),
-      });
-      if (!policy.allowed) {
-        logger.warn('tool-policy-denied:', {
-          worktreeId: id,
-          cliToolId,
-          instanceId,
-          code: policy.code,
-          reason: policy.reason,
-        });
-        return NextResponse.json(
-          {
-            code: policy.code,
-            error: TOOL_POLICY_DENIED_MESSAGE,
-            reason: policy.reason,
-            links: policy.links,
-            cliToolId,
-            instanceId,
-          },
-          { status: 409 }
-        );
-      }
+      // Issue #4466 PR1a: judged by `auto-yes-arm.ts` on the target resolved above.
+      const armTarget = { worktreeId: id, cliToolId, instanceId };
+      const policyRefusal = findAutoYesToolPolicyRefusal(armTarget);
+      if (policyRefusal) return policyRefusal;
 
       // Issue #4449: `send --auto-yes --reply-to` arms before the relay it opens is
       // asked about, so the relay's rule 0 (antigravity at either end) is asked here
@@ -564,13 +540,7 @@ export async function POST(
       }
       const relayRefusal = (): NextResponse | null => {
         if (relayRequest === null || !relayRequest.ok) return null;
-        const refusal = findWriteToolPolicyRefusal(getDbInstance(), {
-          worktreeId: id,
-          tool: cliToolId,
-          instanceId,
-          request: relayRequest.value,
-        });
-        return refusal ? NextResponse.json(refusal, { status: 409 }) : null;
+        return findAutoYesRelayRefusal(getDbInstance(), armTarget, relayRequest.value);
       };
       const relayRefusedFirst = relayRefusal();
       if (relayRefusedFirst) return relayRefusedFirst;
@@ -592,48 +562,32 @@ export async function POST(
         return NextResponse.json(foreignSessionErrorBody(sessionName, ownership.sessionPath), { status: 409 });
       }
 
-      // Issue #3730: the ownership check above awaits, and a shutdown can
-      // begin meanwhile. The shutdown has already written down which grants it
-      // released, so a grant added now would be one the next process never
-      // explains — and a poller started now would run into the teardown.
-      // Checked here, after the last await and before the synchronous write.
-      if (isAutoYesShutdownStarted()) {
+      // Issue #4466 PR1a: what ran after the last await — the shutdown, `onlyIfOff`, the
+      // relay judged again, the grant and its poller — is `armAutoYesGrant`, synchronous.
+      const armed = armAutoYesGrant(armTarget, {
+        onlyIfOff: body.onlyIfOff === true,
+        duration,
+        stopPattern,
+        answerMode,
+        relayRefusal,
+      });
+      if (armed.kind === 'shutting-down') {
         return NextResponse.json({ error: 'Server is shutting down' }, { status: 503 });
       }
-
-      // Issue #4132: read here, after the last await, so nothing lands between this
-      // and the write below.
-      if (body.onlyIfOff === true) {
-        const live = getAutoYesState(id, cliToolId, instanceId);
-        if (live?.enabled) {
-          return NextResponse.json(
-            {
-              error: 'Auto-Yes is already on for this instance',
-              code: 'AUTO_YES_ALREADY_ENABLED',
-              ...withAnswerMode(buildAutoYesResponse(live, undefined, target), live),
-            },
-            { status: 409 }
-          );
-        }
+      if (armed.kind === 'already-on') {
+        const live = armed.live;
+        return NextResponse.json(
+          {
+            error: 'Auto-Yes is already on for this instance',
+            code: 'AUTO_YES_ALREADY_ENABLED',
+            ...withAnswerMode(buildAutoYesResponse(live, undefined, target), live),
+          },
+          { status: 409 }
+        );
       }
-
-      // I3' of #4449: the relay judged again on the roster as it is now, with no await
-      // between this and the grant written below (the grant's own target stays the one
-      // resolved above).
-      const relayRefusedLast = relayRefusal();
-      if (relayRefusedLast) return relayRefusedLast;
-
-      // Issue #3863: the mode is passed only when the request named one, so an
-      // enable without it reaches the setter exactly as before (which keeps a
-      // live grant's mode and starts a new one at `recommended`).
-      state = answerMode === undefined
-        ? setAutoYesEnabled(id, cliToolId, true, duration, stopPattern, instanceId)
-        : setAutoYesEnabled(id, cliToolId, true, duration, stopPattern, instanceId, answerMode);
-      const result = startAutoYesPolling(id, cliToolId, instanceId);
-      pollingStarted = result.started;
-      if (!result.started) {
-        logger.warn('polling-not-started:');
-      }
+      if (armed.kind === 'relay-refused') return armed.response;
+      state = armed.state;
+      pollingStarted = armed.pollingStarted;
 
       // Issue #1898-2: the policy just changed, so re-judge what the agent is
       // already blocked on. The poller cannot: it reads the SCREEN, and the

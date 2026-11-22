@@ -109,10 +109,15 @@ describe('[#4385 A4] a send refused because of the role says why on the screen',
 });
 
 describe('[#4385 A4] (negative controls) other failures are shown as before', () => {
-  it('a 500 fails the row with no reason, no role toast, and the composer is not refilled', async () => {
+  // Issue #4503 review 2 (PM: D4): a 500 with no sendOutcome is unknown — not a plain failure with a
+  // direct retry. The negative control's core stays: no role reason, no role toast, no refill.
+  it('a 500 with no sendOutcome is unknown (no direct retry), with no reason, no role toast, and the composer is not refilled', async () => {
     installFetch(serverError500);
     renderPane();
-    await sendBody();
+    fireEvent.change(textarea(), { target: { value: BODY } });
+    fireEvent.click(screen.getByRole('button', { name: /send message/i }));
+    await waitFor(() => expect(within(screen.getByTestId('pc-history')).getByTestId('optimistic-unknown')).toBeInTheDocument());
+    expect(within(screen.getByTestId('pc-history')).queryByTestId('pending-retry')).toBeNull();
     expect(screen.queryByTestId('optimistic-error-reason')).toBeNull();
     expect(screen.queryByTestId('chat-optimistic-error-reason')).toBeNull();
     expect(document.body.textContent).not.toMatch(/nothing was sent/);
@@ -139,12 +144,15 @@ describe('[#4385 A4] the awaited send (a composer with no optimistic history)', 
     expect(document.body.textContent).not.toContain(SERVER_SENTENCE);
   });
 
-  it('(negative control) a 500 still shows the server\'s error, as before', async () => {
+  // Issue #4503 review 2 (PM: D4): a 500 with no sendOutcome is unknown — the composer says so
+  // (check the terminal before sending again) instead of the server's error; the draft stays.
+  it('(negative control) a 500 is not a role refusal: the composer says it is unknown and keeps the draft', async () => {
     installFetch(serverError500);
     render(<MessageInput worktreeId="wt-4385" cliToolId="antigravity" onMessageSent={() => undefined} />);
     fireEvent.change(textarea(), { target: { value: BODY } });
     fireEvent.click(screen.getByRole('button', { name: /send message/i }));
-    await waitFor(() => expect(screen.getByText('Internal failure')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('message-input-send-unknown')).toHaveTextContent('Not sure whether this arrived'));
     expect(textarea().value).toBe(BODY);
+    expect(document.body.textContent).not.toMatch(/nothing was sent/);
   });
 });

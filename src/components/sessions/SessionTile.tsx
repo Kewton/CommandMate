@@ -125,10 +125,12 @@ import {
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import {
   usePendingMessages,
+  isSendOutcomeUnknown,
   type OptimisticSendOptions,
   type PendingConnectivity,
 } from '@/hooks/usePendingMessages';
 import { useRoleRefusalNotice } from '@/hooks/useRoleRefusalNotice';
+import { useAttachmentNotReturnedNotice } from '@/hooks/useOptimisticPaneMessages';
 import { usePendingConnectivity } from '@/hooks/usePendingConnectivity';
 import { useSessionTileAutoYes } from '@/hooks/useSessionTileAutoYes';
 import {
@@ -563,6 +565,7 @@ function SessionTileCard({
   // `usePendingMessages` reads the refusal and hands the text back in one
   // synchronous step, so the target read here is that send's).
   const refusedTargetRef = useRef<string | undefined>(undefined);
+  const attachmentNotReturnedNotice = useAttachmentNotReturnedNotice();
   const roleRefusalNotice = useRoleRefusalNotice(
     useCallback((content: string) => insertIntoComposer(content, refusedTargetRef.current), [insertIntoComposer]),
   );
@@ -587,6 +590,12 @@ function SessionTileCard({
     connectivity,
     readRoleRefusal,
     onRoleRefused: roleRefusalNotice.onRoleRefused,
+    // Issue #4503: the worktree screen's wiring (`useOptimisticPaneMessages`) — an unknown outcome
+    // is not a failure, and a clock that runs out in flight waits for the answer.
+    isOutcomeUnknown: isSendOutcomeUnknown,
+    holdInFlightOnTimeout: true,
+    // Issue #4417: a refused new send's image does not go back with its text — say so.
+    onAttachmentNotReturned: attachmentNotReturnedNotice,
   });
   const messages = useMemo(
     () => messagesForTileInstance(mergedMessages, resolvedInstanceId),
@@ -691,6 +700,9 @@ function SessionTileCard({
     (mode: SurfaceMode) => setSurfaceMode(mode),
     [setSurfaceMode],
   );
+
+  // Issue #4503: a send whose outcome is unknown is checked on the tile's terminal.
+  const showTerminalSurface = useCallback(() => setSurfaceMode('terminal'), [setSurfaceMode]);
 
   const chatHistory = useMemo(
     () => ({
@@ -921,6 +933,7 @@ function SessionTileCard({
                   onInsertToMessage={insertIntoShownComposer}
                   onRetryPending={retryPending}
                   onDiscardPending={handleDiscardPending}
+                  onCheckTerminal={showTerminalSurface}
                   className="h-full"
                 />
               </div>

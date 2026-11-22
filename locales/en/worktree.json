@@ -57,6 +57,18 @@
     "assistant": "Assistant",
     "sending": "Sending…",
     "failedToSend": "Failed to send",
+    "sendUnknown": {
+      "status": "Not sure whether this arrived",
+      "guidance": "Part or all of it may have arrived. Check the terminal, then send it again only if needed",
+      "awaiting": "Waiting for the answer… (it may already have arrived)",
+      "checkTerminal": "Check the terminal",
+      "resend": "Send again",
+      "resendAria": "Send the same text again after checking",
+      "resendConfirm": "If the earlier send arrived, the same text will be sent twice. Checked the terminal and still send it again?",
+      "resendConfirmYes": "Send again",
+      "resendConfirmNo": "Cancel"
+    },
+    "attachmentNotReturned": "The unsent text is back in the input box, but the attached image could not be put back. Attach it again before sending",
     "roleRefusal": {
       "notApplied": "The role is not applied to this session, so nothing was sent. Stop the session and start it again.",
       "notConfirmed": "The role could not be confirmed for this session, so nothing was sent. Stop the session and start it again.",
@@ -81,7 +93,9 @@
     "openImage": "Open image: {path}",
     "videoLabel": "Video: {path}",
     "conversationLabel": "Conversation: {preview}",
-    "filePathMissing": "That path is not in this worktree"
+    "filePathMissing": "That path is not in this worktree",
+    "filePathOutsideWorktree": "That file is outside this worktree, so it cannot be opened. The path was copied.",
+    "filePathOutsideWorktreeNoCopy": "That file is outside this worktree, so it cannot be opened"
   },
   "slashCommands": {
     "title": "Commands",
@@ -1252,6 +1266,8 @@
     "unknownRepository": "Unknown",
     "loadingEditor": "Loading editor...",
     "agentInstanceSelection": "Agent Instance Selection",
+    "instanceQueryNotInRoster": "{instance} is not one of this worktree's agents. Showing {current} instead.",
+    "instanceQueryNotApplied": "Could not show {instance}. Messages still go to {current}.",
     "statusPill": "{label}: {status}",
     "subTabMessage": "Message",
     "subTabGit": "Git",

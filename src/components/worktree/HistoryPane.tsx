@@ -15,7 +15,7 @@ import { useTranslations } from 'next-intl';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Search, User, UserCheck, ChevronLeft, Forward } from 'lucide-react';
 import { Checkbox, Skeleton } from '@/components/ui';
-import type { ChatMessage } from '@/types/models';
+import type { ChatMessage, RetryPendingOptions } from '@/types/models';
 import { useConversationHistory } from '@/hooks/useConversationHistory';
 import { splitHistorySlotId } from '@/hooks/useHistoryPaneState';
 import { useHighlightReapplyTick, useHistorySearch } from '@/hooks/useHistorySearch';
@@ -23,7 +23,7 @@ import { ConversationPairCard } from './ConversationPairCard';
 import { HistorySearchBar } from './HistorySearchBar';
 import { HISTORY_PANE_ID } from './TerminalContainer';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { normalizeChatFilePath, isChatFilePathOutsideWorktree } from '@/lib/chat/chat-file-path';
 import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import {
@@ -105,13 +105,16 @@ export interface HistoryPaneProps {
    * Issue #1121: Called with a failed optimistic message's tempId to re-send it.
    * Wired by callers that provide optimistic-UI sending (PC split). Omitted
    * elsewhere — error bubbles simply render without a Retry action.
+   * Issue #4503: `{ confirmedResend: true }` for an unknown send the person confirmed sending again.
    */
-  onRetryPending?: (tempId: string) => void;
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   /**
    * Issue #1121: Called with a failed optimistic message's tempId to discard it
    * (the caller may restore its content to the composer draft).
    */
   onDiscardPending?: (tempId: string) => void;
+  /** Issue #4503: show the terminal, to check whether a send whose outcome is unknown arrived. */
+  onCheckTerminal?: () => void;
   /** Issue #168: Whether archived messages are being shown */
   showArchived?: boolean;
   /** Issue #168: Callback when showArchived toggle changes */
@@ -275,6 +278,7 @@ export const HistoryPane = memo(function HistoryPane({
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
+  onCheckTerminal,
   showArchived = false,
   onShowArchivedChange,
   historyDisplayLimit,
@@ -598,10 +602,25 @@ export const HistoryPane = memo(function HistoryPane({
   // dead tab for the very same body. Only a definite "no" (404 / 400 / 403)
   // stops the open — a probe that could not be made is not evidence of absence,
   // so the panel opens and reports its own error (see `lib/chat/chat-file-probe`).
+  //
+  // [#4501] A path OUTSIDE this worktree is not asked about at all — the files
+  // API cannot serve it. It is copied instead, exactly as chat does, so the two
+  // surfaces answer the same body the same way.
   const handleFilePathClick = useCallback(
     (path: string) => {
       const target = normalizeChatFilePath(path, resolvedWorktreePath);
       if (target === null) return;
+      if (isChatFilePathOutsideWorktree(path, resolvedWorktreePath)) {
+        void (async () => {
+          try {
+            await copyToClipboard(target);
+            showToast?.(tRef.current('conversation.filePathOutsideWorktree'), 'info');
+          } catch {
+            showToast?.(tRef.current('conversation.filePathOutsideWorktreeNoCopy'), 'error');
+          }
+        })();
+        return;
+      }
       void (async () => {
         const probe = await probeChatFilePath(worktreeId, target);
         if (probe === 'missing') {
@@ -652,6 +671,7 @@ export const HistoryPane = memo(function HistoryPane({
           onInsertToMessage={onInsertToMessage}
           onRetryPending={onRetryPending}
           onDiscardPending={onDiscardPending}
+          onCheckTerminal={onCheckTerminal}
           showAssistant={!historyUserOnly}
         />
       </div>

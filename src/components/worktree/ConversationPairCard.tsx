@@ -7,15 +7,15 @@
 
 'use client';
 
-import React, { useMemo, useCallback, memo } from 'react';
-import { Copy, ArrowDownToLine, ChevronDown, Loader2, AlertCircle, RotateCcw, X } from 'lucide-react';
+import React, { useMemo, useCallback, useState, memo } from 'react';
+import { Copy, ArrowDownToLine, ChevronDown, Loader2, AlertCircle, RotateCcw, X, CircleHelp, TerminalSquare } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import rehypeHighlight from 'rehype-highlight';
 import { rehypeSearchRawText, searchRawProps } from '@/lib/terminal-highlight';
 import type { ConversationPair } from '@/types/conversation';
-import type { ChatMessage } from '@/types/models';
+import type { ChatMessage, RetryPendingOptions } from '@/types/models';
 import { isAgentAuthoredMarkdown } from '@/types/agent-transcript';
 import { getDateFnsLocale } from '@/lib/date-locale';
 import { formatMessageTimestamp } from '@/lib/date-utils';
@@ -57,13 +57,20 @@ export interface ConversationPairCardProps {
   /**
    * Issue #1121: Called with the message id (tempId) to re-send an
    * optimistic message whose send failed. Only reachable on error bubbles.
+   * Issue #4503: for a send whose outcome is unknown it is called only after the person confirmed,
+   * with `{ confirmedResend: true }` (「送り直す」, a new send).
    */
-  onRetryPending?: (tempId: string) => void;
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   /**
    * Issue #1121: Called with the message id (tempId) to discard an
    * optimistic message whose send failed. Only reachable on error bubbles.
    */
   onDiscardPending?: (tempId: string) => void;
+  /**
+   * Issue #4503: show the terminal, so the person can check whether a send whose outcome is
+   * unknown arrived. Absent: the guidance says to check it, with no button.
+   */
+  onCheckTerminal?: () => void;
 }
 
 // ============================================================================
@@ -319,13 +326,15 @@ const UserMessageSection = memo(function UserMessageSection({
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
+  onCheckTerminal,
 }: {
   message: ChatMessage;
   onFilePathClick: (path: string) => void;
   onCopy?: (content: string) => void;
   onInsertToMessage?: (content: string) => void;
-  onRetryPending?: (tempId: string) => void;
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   onDiscardPending?: (tempId: string) => void;
+  onCheckTerminal?: () => void;
 }) {
   const locale = useLocale();
   const t = useTranslations('worktree');
@@ -335,10 +344,16 @@ const UserMessageSection = memo(function UserMessageSection({
 
   // Issue #1121: optimistic send state drives the bubble's styling and actions.
   const sendState = message.optimisticState;
+  // Issue #4503: the clock ran out while the request is still on its way — waiting for the answer.
+  const awaitingResponse = sendState === 'sending' && message.optimisticAwaitingResponse === true;
+  // Issue #4503: 「送り直す」 of an unknown send asks once before it sends.
+  const [confirmingResend, setConfirmingResend] = useState(false);
   const sectionClassName = [
     'group relative border-l-2 p-3 transition-opacity',
     sendState === 'error'
       ? 'border-danger-border bg-danger-subtle'
+      : sendState === 'unknown'
+      ? 'border-warning-border bg-warning-subtle'
       : 'border-accent-500 bg-accent-500/10',
     sendState === 'sending' ? 'opacity-70' : '',
   ]
@@ -351,13 +366,32 @@ const UserMessageSection = memo(function UserMessageSection({
         <span className="text-xs font-medium text-accent-700 dark:text-accent-400">{t('conversation.you')}</span>
         <span className="text-xs text-muted-foreground">{formattedTime}</span>
         {/* Issue #1121: send-state chip (before the action toolbar). */}
-        {sendState === 'sending' && (
+        {sendState === 'sending' && !awaitingResponse && (
           <span
             data-testid="optimistic-sending"
             className="flex items-center gap-1 text-xs text-muted-foreground"
           >
             <Loader2 size={12} className="animate-spin" aria-hidden="true" />
             <span>{t('conversation.sending')}</span>
+          </span>
+        )}
+        {/* Issue #4503: waiting for the answer (nothing to press), or nobody knows whether it arrived. */}
+        {awaitingResponse && (
+          <span
+            data-testid="optimistic-awaiting"
+            className="flex items-center gap-1 text-xs text-muted-foreground"
+          >
+            <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+            <span>{t('conversation.sendUnknown.awaiting')}</span>
+          </span>
+        )}
+        {sendState === 'unknown' && (
+          <span
+            data-testid="optimistic-unknown"
+            className="flex items-center gap-1 text-xs text-warning-foreground"
+          >
+            <CircleHelp size={12} aria-hidden="true" />
+            <span>{t('conversation.sendUnknown.status')}</span>
           </span>
         )}
         {sendState === 'error' && (
@@ -371,7 +405,49 @@ const UserMessageSection = memo(function UserMessageSection({
         )}
         {/* Issue #1121: on a failed send, retry/discard replace the hover toolbar
             and stay always-visible so recovery actions are reachable on touch too. */}
-        {sendState === 'error' ? (
+        {sendState === 'unknown' ? (
+          // Issue #4503: no ［再試行］ — the text may already be in the session. Check the terminal;
+          // 「送り直す」 is a new send, and only after the confirmation below. Nothing to insert or
+          // copy either: the composer's Enter would send it again without asking.
+          <div className="ml-auto flex items-center gap-1">
+            {onCheckTerminal && (
+              <button
+                type="button"
+                data-testid="pending-check-terminal"
+                onClick={onCheckTerminal}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent-700 dark:text-accent-400 hover:bg-muted transition-colors"
+              >
+                <TerminalSquare size={12} aria-hidden="true" />
+                {t('conversation.sendUnknown.checkTerminal')}
+              </button>
+            )}
+            {onRetryPending && !confirmingResend && (
+              <button
+                type="button"
+                data-testid="pending-resend"
+                onClick={() => setConfirmingResend(true)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                aria-label={t('conversation.sendUnknown.resendAria')}
+              >
+                <RotateCcw size={12} aria-hidden="true" />
+                {t('conversation.sendUnknown.resend')}
+              </button>
+            )}
+            {onDiscardPending && (
+              <button
+                type="button"
+                data-testid="pending-discard"
+                onClick={() => onDiscardPending(message.id)}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-danger-foreground hover:bg-muted transition-colors"
+                aria-label={t('conversation.discardMessage')}
+                title={t('conversation.discard')}
+              >
+                <X size={12} aria-hidden="true" />
+                {t('conversation.discard')}
+              </button>
+            )}
+          </div>
+        ) : awaitingResponse ? null : sendState === 'error' ? (
           <div className="ml-auto flex items-center gap-1">
             {onRetryPending && (
               <button
@@ -433,6 +509,36 @@ const UserMessageSection = memo(function UserMessageSection({
           </div>
         )}
       </div>
+      {/* Issue #4503: what an unknown outcome means, and the confirmation before a resend. */}
+      {sendState === 'unknown' && (
+        <p data-testid="optimistic-unknown-guidance" role="status" className="mb-1 text-xs text-muted-foreground">
+          {t('conversation.sendUnknown.guidance')}
+        </p>
+      )}
+      {sendState === 'unknown' && confirmingResend && onRetryPending && (
+        <div data-testid="pending-resend-confirm" role="alert" className="mb-1 flex flex-wrap items-center gap-1 text-xs text-foreground">
+          <span>{t('conversation.sendUnknown.resendConfirm')}</span>
+          <button
+            type="button"
+            data-testid="pending-resend-confirm-yes"
+            onClick={() => {
+              setConfirmingResend(false);
+              onRetryPending(message.id, { confirmedResend: true });
+            }}
+            className="rounded px-1.5 py-0.5 text-xs font-medium text-accent-700 dark:text-accent-400 hover:bg-muted transition-colors"
+          >
+            {t('conversation.sendUnknown.resendConfirmYes')}
+          </button>
+          <button
+            type="button"
+            data-testid="pending-resend-confirm-no"
+            onClick={() => setConfirmingResend(false)}
+            className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            {t('conversation.sendUnknown.resendConfirmNo')}
+          </button>
+        </div>
+      )}
       {/* Issue #4385: why the server refused it because of the role (nothing was sent), and what to do. */}
       {sendState === 'error' && message.optimisticRoleRefusal && (
         <p data-testid="optimistic-error-reason" role="alert" className="mb-1 text-xs text-danger-foreground">
@@ -682,6 +788,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
   showAssistant = true,
   onRetryPending,
   onDiscardPending,
+  onCheckTerminal,
 }: ConversationPairCardProps) {
   const t = useTranslations('worktree');
   // Issue #1121: an optimistic (unsent / failed) user message drives special
@@ -746,6 +853,7 @@ export const ConversationPairCard = memo(function ConversationPairCard({
           onInsertToMessage={onInsertToMessage}
           onRetryPending={onRetryPending}
           onDiscardPending={onDiscardPending}
+          onCheckTerminal={onCheckTerminal}
         />
       )}
 

@@ -153,12 +153,12 @@ import {
   Wrench,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui';
-import type { ChatMessage } from '@/types/models';
+import type { ChatMessage, RetryPendingOptions } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { ShowToast } from '@/types/markdown-editor';
 import { useHighlightReapplyTick, useHistorySearch } from '@/hooks/useHistorySearch';
 import { copyToClipboard } from '@/lib/clipboard-utils';
-import { normalizeChatFilePath } from '@/lib/chat/chat-file-path';
+import { normalizeChatFilePath, isChatFilePathOutsideWorktree } from '@/lib/chat/chat-file-path';
 import { probeChatFilePath } from '@/lib/chat/chat-file-probe';
 import { useChatFileLinkScope } from '@/lib/chat/chat-file-link-scope';
 import { ChatImageScopeProvider, type ChatImageScope } from '@/lib/chat/chat-image';
@@ -457,10 +457,15 @@ export interface ChatTranscriptProps {
   onFilePathClick?: (path: string) => void;
   showToast?: ShowToast;
   onInsertToMessage?: (content: string) => void;
-  /** Issue #1121: re-send an optimistic message whose send failed. */
-  onRetryPending?: (tempId: string) => void;
+  /**
+   * Issue #1121: re-send an optimistic message whose send failed. Issue #4503: `{ confirmedResend:
+   * true }` for an unknown send the person confirmed sending again.
+   */
+  onRetryPending?: (tempId: string, options?: RetryPendingOptions) => void;
   /** Issue #1121: discard an optimistic message whose send failed. */
   onDiscardPending?: (tempId: string) => void;
+  /** Issue #4503: show the terminal, to check whether a send whose outcome is unknown arrived. */
+  onCheckTerminal?: () => void;
   /**
    * Issue #744's per-split highlight isolation, applied to chat's own namespace.
    * Omit on the phone / a single mount.
@@ -759,6 +764,7 @@ export const ChatTranscript = memo(function ChatTranscript({
   onInsertToMessage,
   onRetryPending,
   onDiscardPending,
+  onCheckTerminal,
   splitIndex,
   liveTurn = null,
   sessionEnded = false,
@@ -1432,6 +1438,10 @@ export const ChatTranscript = memo(function ChatTranscript({
    * Only a definite "no" from the server stops the open (see the probe): a
    * network failure leaves the panel to report its own error rather than this
    * surface asserting the file is absent when it does not know.
+   *
+   * [#4501] A path OUTSIDE this worktree is not asked about at all — the files
+   * API cannot serve it, so the question is not "is it there" but "it is not
+   * this worktree's". It is copied instead, so the reader still has the path.
    */
   const handleFilePathClick = useCallback(
     (path: string) => {
@@ -1443,6 +1453,19 @@ export const ChatTranscript = memo(function ChatTranscript({
       // URL, the worktree root itself), and nothing at all should happen.
       const target = normalizeChatFilePath(path, resolvedWorktreePath);
       if (target === null) return;
+      // [#4501] Decided by the same function that produced `target`, so the
+      // string copied and the verdict cannot disagree.
+      if (isChatFilePathOutsideWorktree(path, resolvedWorktreePath)) {
+        void (async () => {
+          try {
+            await copyToClipboard(target);
+            showToast?.(tRef.current('conversation.filePathOutsideWorktree'), 'info');
+          } catch {
+            showToast?.(tRef.current('conversation.filePathOutsideWorktreeNoCopy'), 'error');
+          }
+        })();
+        return;
+      }
       void (async () => {
         const probe = await probeChatFilePath(worktreeId, target);
         if (probe === 'missing') {
@@ -1512,6 +1535,7 @@ export const ChatTranscript = memo(function ChatTranscript({
           onInsertToMessage={onInsertToMessage}
           onRetryPending={onRetryPending}
           onDiscardPending={onDiscardPending}
+          onCheckTerminal={onCheckTerminal}
         />
       );
       // [#2284] A nested provider, so the override is scoped to the one row and
@@ -1533,6 +1557,7 @@ export const ChatTranscript = memo(function ChatTranscript({
       onInsertToMessage,
       onRetryPending,
       onDiscardPending,
+      onCheckTerminal,
       searchHitMessageIds,
       isPreviousSessionOpen,
       previousSessionRegionId,
