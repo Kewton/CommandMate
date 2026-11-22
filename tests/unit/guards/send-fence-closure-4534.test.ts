@@ -56,7 +56,7 @@ describe('G-閉包: the functions a send reaches the layers through are a closed
       'src/lib/timer-manager.ts#executeTimer',
     ]);
     expect(found.members.size).toBeGreaterThan(20);
-    for (const row of Object.keys(NOT_A_SEND)) expect(existsSync(join(REPO_ROOT, row.split('#')[0]))).toBe(true);
+    for (const row of NOT_A_SEND) expect(existsSync(join(REPO_ROOT, row.site.split('#')[0]))).toBe(true);
   });
 
   it('[fence-a] a new function outside an entry calls sendMessageToSession → R-root', () => {
