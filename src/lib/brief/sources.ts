@@ -478,6 +478,8 @@ function memItem(ctx: BriefSourceContext, view: MemItemView, slotOwn: boolean | 
       cond: condition ? `${condition.result}:${condition.reason}` : null,
       unreflected: condition?.unreflected ? true : null,
       stale: view.stale ? true : null,
+      // Issue #4354 (design §3.2): a decision whose `at` has passed; its rank is unchanged.
+      expired: view.expired ? true : null,
     }),
   };
   if (view.withheld) {
