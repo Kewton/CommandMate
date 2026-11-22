@@ -294,6 +294,12 @@ export function DecisionPromotePanel({
         <p className="break-all text-xs text-muted-foreground">
           {t('mem.decisions.destination')}: {item.promoteTo ?? t('mem.decisions.noDestination')}
         </p>
+        {/* Issue #4354 I-B3: a row stored before the write refused its destination says why (its diff is refused). */}
+        {item.promoteToRefusal && (
+          <p role="alert" className="text-xs text-danger-foreground" data-testid={`decision-destination-refused-${item.id}`}>
+            {t(`mem.decisions.destinationRefused.${item.promoteToRefusal}`)}
+          </p>
+        )}
         {unreflected && (
           <p role="status" className="text-xs text-danger-foreground" data-testid={`decision-unreflected-${item.id}`}>
             {t('mem.decisions.unreflected')}

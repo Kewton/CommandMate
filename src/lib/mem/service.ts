@@ -155,10 +155,16 @@ export function memError(code: MemErrorCode, extra: Partial<MemErrorBody> = {}):
 }
 
 const fieldError = (error: MemFieldError): MemOutcome =>
-  memError(error.code, { field: error.field, ...(error.rule ? { rule: error.rule } : {}), ...(error.limit ? { limit: error.limit } : {}) });
+  memError(error.code, {
+    field: error.field,
+    ...(error.rule ? { rule: error.rule } : {}),
+    ...(error.limit ? { limit: error.limit } : {}),
+    // Issue #4354: why a promote destination is refused (an agent's instruction file, `.git`, not a `.md`).
+    ...(error.reason ? { reason: error.reason } : {}),
+  });
 
 function logRefusal(event: string, error: MemFieldError | { code: string }, context: Record<string, unknown>): void {
-  logger.info(event, { ...context, code: error.code, ...('field' in error ? { field: error.field, rule: error.rule } : {}) });
+  logger.info(event, { ...context, code: error.code, ...('field' in error ? { field: error.field, rule: error.rule, reason: error.reason } : {}) });
 }
 
 function targetFailure(target: Exclude<MemTarget, MemTargetResolved>): MemOutcome {
@@ -1137,6 +1143,7 @@ export async function memPurge(
         kind: body.kind as MemKind | undefined,
         before,
         includeDecisions: body.includeDecisions === true,
+        now: deps.now?.() ?? Date.now(),
       },
       confirm,
       alive,

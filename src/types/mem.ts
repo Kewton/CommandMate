@@ -133,7 +133,24 @@ export interface MemItemView {
   closeReason: MemCloseReason | null;
   stale: boolean;
   frozen: boolean;
+  /**
+   * Issue #4354 (design `mem-approval-4354.md` §3.2): present and true when the item is a decision
+   * not closed whose `at` (marked or not) has passed. A comparison of times only: nothing is
+   * closed or written by reading it. Absent otherwise.
+   */
+  expired?: true;
+  /**
+   * Issue #4354 I-B3: why the stored destination cannot be used (a row written before the write
+   * refused it). The row is kept and shown; its approval is refused. Absent when it can be used.
+   */
+  promoteToRefusal?: MemPromoteToRefusal;
 }
+
+/**
+ * Why a `path:` destination is refused by the rule every entrance shares (Issue #4354,
+ * `lib/promote/promote-to-rule.ts`): a `.git` component, an agent's instruction file, not a `.md`.
+ */
+export type MemPromoteToRefusal = 'git_dir' | 'agent_instructions' | 'not_markdown';
 
 /** The fields an item may carry when it is withheld; nothing that a person or an agent typed. */
 export const MEM_WITHHELD_KEPT_KEYS = [

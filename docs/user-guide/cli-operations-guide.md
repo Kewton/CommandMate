@@ -3770,7 +3770,9 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 - `--close-when`：`manual` ・ `replaced`（now だけ）・ `issue:[host/owner/repo]#N` ・ `pr:[host/owner/repo]#N[?state=merged|closed]` ・ `branch:<name>?merged=<ref>[&scope=local|remote]` ・ `branch:<name>?deleted` ・ `relay:<id>` ・ `worktree:<id>` ・ `session:task:<id>` ・ `session:verify:<run id>` ・ `session:schedule:<実行ログ id>` ・ `at:<オフセット付き ISO 8601>`。`session:` は CommandMate が終わりを記録している 3 種類だけ（tmux のセッション名・PID は受けない）。`branch:…?deleted` も書いた時点の tip を保存する（ref が無ければ空）
 - `update` / `close` ができるのは作成した instance（同じ世代）と人（画面）だけ。instance を消して同じ ID で作り直すと別の世代になり、前の項目は変えられない（exit 55）
 - `--key` を付けた `add` は、同じ key・同じ内容の再送で最初の項目を返す（`replayed: true`）。中身が違えば exit 54
-- `purge` は `--confirm` が無いと何も消さず、消える件数だけを出す。`recorded` / `promoted` の決定は `--include-decisions` が無いと対象にしない。Agent のセッションの中からは断る（exit 55）
+- `purge` は `--confirm` が無いと何も消さず、消える件数だけを出す。`recorded` / `promoted` の決定は `--include-decisions` が無いと対象にしない。**直近 24 時間に閉じた決定は、どの指定（`--include-decisions` を含む）でも消さず、件数にも入れない**（終わった許可・取り下げた決定を人が見られる窓。24 時間を過ぎると消せる。Issue #4354）。Agent のセッションの中からは断る（exit 55）
+- 件数の警告（`mem list` の `warnings`・`check --suggest` の `open_count`）の decision は、`open` と `recorded` だけを数える。`promoted`（反映済み）は数えない（Issue #4354）
+- `mem list` の行の印：`expired` は decision の `at` の時刻を過ぎた（読むだけの時刻の比較で、閉じはしない）。`promote-to-refused:<理由>` は保存済みの行き先が使えない（下の「自由入力の欄の検査」。`--json` は `expired: true`・`promoteToRefusal`。Issue #4354）
 
 ### 閉じる条件の評価（Issue #4222）
 
@@ -3816,7 +3818,7 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 
 ### 自由入力の欄の検査
 
-すべての自由入力の欄（`text`・`quote`・`evidence`・`promote_to`・`reason`）はサーバで、長さの上限・秘密らしい文字列（トークン・鍵・`password=` など）・制御文字を検査する。`evidence` と `promote_to` の `path:` は repository からの相対パスだけで、絶対パス・`..` で外へ出るもの・symlink を通るもの・`.env` などを断る。断ったときのエラー・`--json`・ログには `code`・`field`・`rule` だけが出て、**断った文字列そのものは出さない**。
+すべての自由入力の欄（`text`・`quote`・`evidence`・`promote_to`・`reason`）はサーバで、長さの上限・秘密らしい文字列（トークン・鍵・`password=` など）・制御文字を検査する。`evidence` と `promote_to` の `path:` は repository からの相対パスだけで、絶対パス・`..` で外へ出るもの・symlink を通るもの・`.env` などを断る。`promote_to` の `path:` は、さらに承認の差分・書き込みと**同じ 1 つの検査**を通る：エージェントの指示ファイル（下の「決定を正本へ記録する」の一覧。大文字小文字は区別しない）と、拡張子が `.md` でないものを、書くとき（`mem add`・画面の追加・handoff の提案）に `invalid_promote_to`（exit 2、`reason` が `agent_instructions` / `not_markdown`）で断り、CLI は直し方の 1 文を添える（`.git` の下は従来どおり書くときに `sensitive_path` で断る。exit 2）。ただし書くときはディスクの状態（親のディレクトリが在るか・既存のものが通常のファイルか・1 MiB 以下か）を見ないので、たとえば親の無い `path:docs/decisions/x.md` は書くときに通り、承認の差分で `invalid_destination` になる（既知の残り）。これより前に保存された行は壊さずに残し、一覧に出したまま `promoteToRefusal` で理由を示し、決定の画面は行き先の下に理由と直し方の 1 文を出す（承認の差分は従来どおり断る。Issue #4354）。断ったときのエラー・`--json`・ログには `code`・`field`・`rule` だけが出て、**断った文字列そのものは出さない**。
 
 ### 終了コード
 
@@ -3824,7 +3826,7 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 |:------:|------|
 | 0 | 成功（`--key` の再送で既存を返したときも） |
 | 1 | サーバーに届かない |
-| 2 | 入力の不正（`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required` など）。何も保存していない |
+| 2 | 入力の不正（`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_promote_to` / `invalid_key` / `target_required` など）。何も保存していない |
 | 50 | `disabled`：そのブランチの mode が `off` か `derived`。何も保存していない（`check` は照会もしない） |
 | 51 | `version_conflict`：`--if-version` が今の版と違う。今保存されている項目を返す |
 | 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
