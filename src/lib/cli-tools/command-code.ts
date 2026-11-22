@@ -309,8 +309,9 @@ export class CommandCodeTool extends BaseCLITool {
 
       logger.info('started-command-code-session');
     } catch (error: unknown) {
-      rethrowFenceRefusal(error);
+      // Issue #4534 (INV-catch-after): the start is over, refused or not.
       this.composerPendingSince.delete(sessionName);
+      rethrowFenceRefusal(error);
       throw new Error(`Failed to start Command Code session: ${getErrorMessage(error)}`);
     }
   }

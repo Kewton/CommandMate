@@ -199,28 +199,39 @@ function catchRethrows(clause: ts.CatchClause, source: ts.SourceFile): boolean {
   const binding = clause.variableDeclaration && ts.isIdentifier(clause.variableDeclaration.name) ? clause.variableDeclaration.name.text : null;
   if (binding === null) return false;
   const statements = clause.block.statements;
-  const first = statements[0];
+  const escapes = (node: ts.Node, except?: ts.Node): boolean => {
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (ts.isFunctionLike(n)) return;
+      if (n !== except && (ts.isReturnStatement(n) || ts.isThrowStatement(n) || ts.isContinueStatement(n) || ts.isBreakStatement(n))) found = true;
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+    return found;
+  };
+  const throwsBinding = (n: ts.Statement | undefined): n is ts.ThrowStatement =>
+    n !== undefined && ts.isThrowStatement(n) && n.expression?.getText(source) === binding;
+  // INV-catch-after (r6): records the refusal still needs may come first, as plain statements.
+  let i = 0;
+  while (i < statements.length && ts.isExpressionStatement(statements[i]) && !/\brethrowFenceRefusal\(/.test(statements[i].getText(source)) && !escapes(statements[i])) i += 1;
+  const first = statements[i];
   if (first !== undefined) {
     // rethrowFenceRefusal(e);
     if (ts.isExpressionStatement(first) && ts.isCallExpression(first.expression) && ts.isIdentifier(first.expression.expression)
       && first.expression.expression.text === 'rethrowFenceRefusal' && first.expression.arguments[0]?.getText(source) === binding) return true;
-    // if (… isFenceRefusal(e) …) throw e;
+    // if (… isFenceRefusal(e) …) throw e;  /  if (isFenceRefusal(e)) { …records…; throw e; }
     if (ts.isIfStatement(first) && new RegExp(`\\bisFenceRefusal\\(${binding}\\)`).test(first.expression.getText(source))) {
-      const then = ts.isBlock(first.thenStatement) ? first.thenStatement.statements[0] : first.thenStatement;
-      if (then !== undefined && ts.isThrowStatement(then) && then.expression?.getText(source) === binding) return true;
+      const then = first.thenStatement;
+      if (throwsBinding(ts.isBlock(then) ? then.statements[0] : then)) return true;
+      if (ts.isBlock(then)) {
+        const last = then.statements[then.statements.length - 1];
+        if (throwsBinding(last) && !escapes(then, last)) return true;
+      }
     }
   }
   // A catch that always throws its own error on: no way out but `throw e` at the end.
   const last = statements[statements.length - 1];
-  if (last === undefined || !ts.isThrowStatement(last) || last.expression?.getText(source) !== binding) return false;
-  let escapes = false;
-  const visit = (n: ts.Node): void => {
-    if (ts.isFunctionLike(n)) return;
-    if (n !== last && (ts.isReturnStatement(n) || ts.isThrowStatement(n) || ts.isContinueStatement(n) || ts.isBreakStatement(n))) escapes = true;
-    ts.forEachChild(n, visit);
-  };
-  visit(clause.block);
-  return !escapes;
+  return throwsBinding(last) && !escapes(clause.block, last);
 }
 
 export function driverCatchRows(files: ReadonlyMap<string, string>, gated: ReadonlySet<string>): CatchRow[] {

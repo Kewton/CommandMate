@@ -13,7 +13,7 @@
  */
 
 import { BaseCLITool } from './base';
-import { rethrowFenceRefusal } from '../session/terminal-fence';
+import { isFenceRefusal, rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import {
   sendSpecialKey,
@@ -588,7 +588,12 @@ export class AntigravityTool extends BaseCLITool {
           logTrustDecisionOnce(sessionName, decision, loggedTrustDecisions);
         }
       } catch (error: unknown) {
-        rethrowFenceRefusal(error);
+        // Issue #4534 (INV-catch-after): a refused trust Enter is still owed —
+        // recorded, as the loop's end records it, before the refusal goes on.
+        if (isFenceRefusal(error)) {
+          if (!trustDialogHandled) markStartupTrustPending(sessionName);
+          throw error;
+        }
         // Capture may fail during initialization - continue polling, but keep
         // count so the timeout below can say so (Issue #3757).
         captureErrors++;
@@ -682,7 +687,14 @@ export class AntigravityTool extends BaseCLITool {
             () => this.isTrustPressStill(sessionName, pressKey),
             async () => {
               if (!claimStartupTrust(sessionName)) return false;
-              await sendSpecialKey(sessionName, pressKey);
+              try {
+                await sendSpecialKey(sessionName, pressKey);
+              } catch (error: unknown) {
+                // Issue #4534 (INV-catch-after): a refused key sent nothing, so
+                // the Enter stays owed — the claim is given back.
+                if (isFenceRefusal(error)) markStartupTrustPending(sessionName);
+                throw error;
+              }
               return true;
             },
             { repeatScope: answerSkips }
