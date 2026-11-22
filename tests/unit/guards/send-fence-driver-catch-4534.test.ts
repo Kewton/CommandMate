@@ -72,6 +72,8 @@ vi.mock('@/lib/tmux/session-ownership', async (importOriginal) =>
 
 import { addPane, resetWorld, world, type Out } from './send-fence-process';
 import { REPO_ROOT } from './route-tmux-reach';
+import { srcFiles } from './pane-key-writers-scan';
+import { computeGateReach } from './send-fence-closure';
 import {
   isFenceRefusal,
   resetFenceForTests,
@@ -506,3 +508,227 @@ describe('INV-catch (static): the rows’ catch throws the refusal on first', ()
     expect(rows.map((r) => r.method)).toEqual(['waitForReady']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [補助] Every catch in src around a call of a function that reaches a gate
+// ---------------------------------------------------------------------------
+
+/**
+ * A HELPER of the run-time table (`send-fence-refusal-table-4534.test.ts`, the
+ * main guard of INV-catch, the human's decision (iv)). ALS carries the ticket,
+ * so whether a catch can receive a refusal is not decided by its text: a static
+ * definition cannot tell a designed catch from a swallowing one. So this check
+ * holds the catches that do not throw the refusal on to a table, each with its
+ * reason; a new one is red until its reason is written here.
+ */
+type ExcuseKind =
+  /** An entry turns the refusal into its answer (the classification, PR-B's order 1). */
+  | 'entry-answer'
+  /** The send's start step answers a failed start (500, no notice). */
+  | 'start-step'
+  /** copilot's `/model` failure answer. */
+  | 'model'
+  /** A retraction: its keys and kill pass the refused ticket (R7). */
+  | 'retraction'
+  /** Runs where no ticket is ever open (another request's context, a CLI process, the browser, startup / cleanup). */
+  | 'no-ticket'
+  /** The Auto-Yes poller, armed in the send's launch: a refusal is one poller error (design §2.4). */
+  | 'poller'
+  /** Reached under relay's nested ticket, whose entry answers it. */
+  | 'nested-relay'
+  /** Nothing behind the try has a gate (reached by a shared name only). */
+  | 'no-gate'
+  /** Latent, not reachable today; named for the follow-up (P3). */
+  | 'latent';
+
+const EXCUSED: Readonly<Record<string, { kind: ExcuseKind; why: string }>> = {
+  'src/app/api/app/update/route.ts#willUpdateRestartServer': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/app/update/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/hooks/agent-event/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/hooks/claude-done/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/relays/[relayId]/resolve/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/repositories/clone/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/repositories/restore/route.ts#PUT': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/repositories/route.ts#DELETE': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/repositories/scan/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/repositories/sync/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/clear-composer/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/clear-composer/route.ts#POST#2': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/cmate/schedules/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/cmate/schedules/route.ts#PATCH': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/cmate/schedules/route.ts#DELETE': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/current-output/route.ts#GET': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/direct-input/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/interrupt/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/kill-session/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/kill-session/route.ts#POST#2': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/mem/handoff/requests/[rid]/end/observe/route.ts#readRunning': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/mem/handoff/requests/[rid]/end/observe/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/prompt-response/answer-delivery.ts#sendResolvedAnswer': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/prompt-response/frame-verification.ts#answerPlanReviewIfShown': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/prompt-response/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/prompt-response/strict/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/respond/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/respond/route.ts#POST#2': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/route.ts#PATCH': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/route.ts#PATCH#2': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/schedules/active/route.ts#GET': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/send/route.ts#handleSend': { kind: 'entry-answer', why: 'the send route: 500 Failed to send message (§6; the ticket is read by PR-B)' },
+  'src/app/api/worktrees/[id]/send/route.ts#handleSend#2': { kind: 'entry-answer', why: 'the launch-in-flight wait before the ticket opens (503 SESSION_STARTING only for a start timeout)' },
+  'src/app/api/worktrees/[id]/send/send-session-start.ts#startSessionForSend': { kind: 'start-step', why: 'the start step: 500 Failed to start … (no notice, §6)' },
+  'src/app/api/worktrees/[id]/special-keys/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/terminal/route.ts#POST': { kind: 'entry-answer', why: '/terminal: the fixed 500 (D1-007, §6)' },
+  'src/app/api/worktrees/[id]/terminal/route.ts#POST#2': { kind: 'entry-answer', why: '/terminal: only prompt-waiting / plan-review become 409, the rest is thrown on' },
+  'src/app/api/worktrees/[id]/timers/route.ts#POST': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/app/api/worktrees/[id]/timers/route.ts#POST#2': { kind: 'no-ticket', why: 'another HTTP request: its own context, no send ticket (§2.4)' },
+  'src/cli/commands/quickstart.ts#runQuickstart': { kind: 'no-ticket', why: 'a CLI process: no send ticket is ever open in it (reached by a shared name)' },
+  'src/cli/commands/remote.ts#remoteCommand': { kind: 'no-ticket', why: 'a CLI process: no send ticket is ever open in it (reached by a shared name)' },
+  'src/cli/commands/start.ts#runStart': { kind: 'no-ticket', why: 'a CLI process: no send ticket is ever open in it (reached by a shared name)' },
+  'src/cli/commands/stop.ts#stopCommand': { kind: 'no-ticket', why: 'a CLI process: no send ticket is ever open in it (reached by a shared name)' },
+  'src/cli/commands/update.ts#updateCommand': { kind: 'no-ticket', why: 'a CLI process: no send ticket is ever open in it (reached by a shared name)' },
+  'src/cli/commands/wait-timing.ts#readWithinDeadlines': { kind: 'no-ticket', why: 'a CLI process: no send ticket is ever open in it (reached by a shared name)' },
+  'src/cli/utils/worktree-servers.ts#listRunningWorktreeServers': { kind: 'no-ticket', why: 'a CLI process: no send ticket is ever open in it (reached by a shared name)' },
+  'src/hooks/useAgentUpdates.ts#useAgentUpdates': { kind: 'no-gate', why: 'reads only; reached by a shared name (read)' },
+  'src/lib/api-client-body-deadline.ts#readSource': { kind: 'no-gate', why: 'reads only; reached by a shared name (read, deliver)' },
+  'src/lib/auto-yes-poller.ts#detectAndRespondToPrompt': { kind: 'poller', why: 'a refusal in the send’s scope is one poller error (§2.4)' },
+  'src/lib/auto-yes-poller.ts#pollAutoYes': { kind: 'poller', why: 'its try reaches a gate only through detectAndRespondToPrompt, which answers with a value' },
+  'src/lib/cli-tools/opencode-v2.ts#OpenCodeV2Tool.resumeInBackground': { kind: 'no-gate', why: 'the lazy resume: port recovery and the SSE attach, no gate behind it (r5: checked, not changed)' },
+  'src/lib/cli-tools/submit-verified-sender.ts#withdrawUnsentBody': { kind: 'retraction', why: 'asRetraction(withdraw): its keys pass the refused ticket (R7)' },
+  'src/lib/cli-tools/submit-verified-sender.ts#sendUnderInputLock#3': { kind: 'retraction', why: 'asRetraction(replaced-clear) (R7)' },
+  'src/lib/git/clone-manager.ts#CloneManager.executeClone': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/git/clone-manager.ts#CloneManager.onCloneSuccess': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/git/clone-manager.ts#CloneManager.onCloneSuccess#2': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/history/transcript-tail.ts#readTranscriptTail': { kind: 'no-gate', why: 'reads only; reached by a shared name (read / isRunning / buildCurrentOutput)' },
+  'src/lib/hooks/sources/antigravity/history.ts#resolveAntigravityStopAt': { kind: 'no-gate', why: 'reads only; reached by a shared name (read)' },
+  'src/lib/hooks/sources/claude/history.ts#readClaudeTranscriptTail': { kind: 'no-gate', why: 'reads only; reached by a shared name (read)' },
+  'src/lib/hooks/sources/opencode-v2/reattach.ts#reattachOpencodeV2EventStreams': { kind: 'no-gate', why: 'reads only; reached by a shared name (defaultDeps)' },
+  'src/lib/hooks/sources/opencode-v2/runtime.ts#attachOpencodeV2EventStream': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/hooks/sources/opencode-v2/runtime.ts#resumeOpencodeV2EventStream': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/hooks/sources/opencode-v2/subscription.ts#runStream': { kind: 'no-gate', why: 'reads only; reached by a shared name (deliver)' },
+  'src/lib/hooks/sources/opencode/ingest.ts#ingestOpencodeEvent': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/hooks/sources/opencode/log-diagnosis.ts#readTail': { kind: 'no-gate', why: 'reads only; reached by a shared name (read)' },
+  'src/lib/hooks/sources/opencode/reattach.ts#loadPaneCheck': { kind: 'no-gate', why: 'reads only; reached by a shared name (isRunning)' },
+  'src/lib/hooks/sources/opencode/reattach.ts#reattachOpencodeEventStreams': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/hooks/sources/opencode/runtime.ts#attachOpencodeEventStream': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/hooks/sources/opencode/runtime.ts#resumeOpencodeEventStream': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/hooks/stop-history-capture.ts#readAfterResponding': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/hooks/stop-history-capture.ts#resolveStopTranscriptCapture': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/polling/response-checker.ts#checkForResponse': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/polling/response-poller-core.ts#runPollTick': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/polling/structured-history-gate.ts#captureStructuredHistoryTurn': { kind: 'nested-relay', why: 'reaches a gate only through the relay pump, whose delivery runs under its own ticket' },
+  'src/lib/prompt-answer-sender.ts#sendSpecialKeysWhileCurrent#2': { kind: 'poller', why: 'an answer’s keys (poller, or respond with no ticket)' },
+  'src/lib/prompt-answer-sender.ts#sendPromptAnswer': { kind: 'poller', why: 'throws on with keysSent / answerDelivery added to the same object (type and code kept; note 4 (c))' },
+  'src/lib/realtime/terminal-broadcast.ts#broadcastTerminalSnapshot': { kind: 'no-gate', why: 'reads only; reached by a shared name (read / isRunning / buildCurrentOutput)' },
+  'src/lib/realtime/terminal-broadcast.ts#broadcastTerminalSnapshotAfterInteraction': { kind: 'no-gate', why: 'reads only; reached by a shared name (read / isRunning / buildCurrentOutput)' },
+  'src/lib/relay/relay-delivery.ts#evaluateRelayAfterSend': { kind: 'nested-relay', why: 'relay’s own delivery runs under its nested ticket, and its entry answers it' },
+  'src/lib/relay/relay-delivery.ts#notifyRelayTurnCompleted': { kind: 'nested-relay', why: 'relay’s own delivery runs under its nested ticket, and its entry answers it' },
+  'src/lib/relay/relay-delivery.ts#notifyRelayPromptWaiting': { kind: 'nested-relay', why: 'relay’s own delivery runs under its nested ticket, and its entry answers it' },
+  'src/lib/relay/relay-delivery.ts#attemptDelivery': { kind: 'entry-answer', why: 'relay: a throw holds the payload uncertain (§6)' },
+  'src/lib/relay/relay-delivery.ts#pumpRelayDeliveries': { kind: 'entry-answer', why: 'relay: the pump logs a delivery that threw and goes on with the next (the payload stays)' },
+  'src/lib/relay/relay-delivery.ts#pumpRelayDeliveries#2': { kind: 'entry-answer', why: 'relay: the pump’s own failure is logged; nothing is sent after it' },
+  'src/lib/relay/relay-readiness.ts#findRelayHoldReason': { kind: 'no-gate', why: 'reads only; reached by a shared name (isRunning)' },
+  'src/lib/relay/relay-triggers.ts#onRelayTurnCompleted': { kind: 'nested-relay', why: 'relay’s own delivery runs under its nested ticket, and its entry answers it' },
+  'src/lib/relay/relay-triggers.ts#onRelayPromptWaiting': { kind: 'nested-relay', why: 'relay’s own delivery runs under its nested ticket, and its entry answers it' },
+  'src/lib/relay/relay-triggers.ts#runRelayMaintenance': { kind: 'nested-relay', why: 'relay’s own delivery runs under its nested ticket, and its entry answers it' },
+  'src/lib/schedule-manager.ts#isCronJobActive': { kind: 'no-gate', why: 'reads only; reached by a shared name (isRunning)' },
+  'src/lib/schedule-manager.ts#syncSchedules': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/session-cleanup.ts#killWorktreeSession': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/session-cleanup.ts#cleanupGlobalSessions': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/session-cleanup.ts#syncWorktreesAndCleanup': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/session-cleanup.ts#syncWorktreesAndCleanup#2': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/session/prompt-waiting-guard.ts#isPromptWaiting': { kind: 'no-gate', why: 'reads only; reached by a shared name (read / isRunning / buildCurrentOutput)' },
+  'src/lib/session/send-user-message.ts#sendUserMessage': { kind: 'model', why: 'copilot /model: not-sent model-switch-failed, the route answers 500 (§6)' },
+  'src/lib/session/session-launch-flight.ts#runSessionLaunch': { kind: 'start-step', why: 'a shared launch: a joined send takes the launch’s failure in its own classification (v2 §3.2 order 4; note 4 (d))' },
+  'src/lib/session/strict-prompt-answer-io.ts#read': { kind: 'no-gate', why: 'reads only; reached by a shared name (read / isRunning / buildCurrentOutput)' },
+  'src/lib/session/worktree-session-reconcile.ts#migrateRuntimeState': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/session/worktree-session-reconcile.ts#migrateRuntimeState#2': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/timer-manager.ts#executeTimer': { kind: 'entry-answer', why: 'timer: failed with the message as its reason (§6)' },
+  'src/lib/verification/env-snapshot.ts#inspectResourceConfig': { kind: 'no-gate', why: 'reads only; reached by a shared name (read / isRunning / buildCurrentOutput)' },
+  'src/lib/ws-server.ts#setupWebSocket': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+  'src/lib/ws-server.ts#runTerminalInput': { kind: 'no-ticket', why: 'startup / cleanup / a person’s direct input / schedules: no send ticket' },
+};
+
+interface GateCatchRow {
+  key: string;
+  line: number;
+  rethrows: boolean;
+  calls: string[];
+}
+
+function gateCatchRows(files: ReadonlyMap<string, string>, reach: ReadonlySet<string>): GateCatchRow[] {
+  const names = new Set([...reach].map((n) => {
+    const site = n.slice(n.indexOf('#') + 1);
+    return site.includes('.') ? site.slice(site.indexOf('.') + 1) : site;
+  }));
+  const rows: GateCatchRow[] = [];
+  for (const [file, text] of files) {
+    if (file === 'src/lib/session/terminal-fence.ts') continue;
+    const source = sourceOf(file, text);
+    const counts = new Map<string, number>();
+    const visit = (n: ts.Node): void => {
+      if (ts.isTryStatement(n) && n.catchClause) {
+        const calls = [...new Set(calledNames(n.tryBlock).filter((c) => names.has(c)))];
+        if (calls.length > 0) {
+          const site = siteNameOf(n, source);
+          const nth = (counts.get(site) ?? 0) + 1;
+          counts.set(site, nth);
+          rows.push({
+            key: `${file}#${site}${nth > 1 ? `#${nth}` : ''}`,
+            line: source.getLineAndCharacterOfPosition(n.getStart(source)).line + 1,
+            rethrows: catchRethrows(n.catchClause, source),
+            calls,
+          });
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(source);
+  }
+  return rows;
+}
+
+function siteNameOf(node: ts.Node, source: ts.SourceFile): string {
+  for (let c: ts.Node | undefined = node.parent; c; c = c.parent) {
+    if (ts.isFunctionDeclaration(c) && c.name) return c.name.text;
+    if (ts.isMethodDeclaration(c) && c.name) {
+      const owner = c.parent;
+      return ts.isClassDeclaration(owner) && owner.name ? `${owner.name.text}.${c.name.getText(source)}` : c.name.getText(source);
+    }
+    if ((ts.isArrowFunction(c) || ts.isFunctionExpression(c)) && ts.isVariableDeclaration(c.parent) && ts.isIdentifier(c.parent.name)) {
+      return c.parent.name.text;
+    }
+  }
+  return '<module>';
+}
+
+const SRC = new Map(srcFiles().map((f) => [f, read(f)] as const));
+
+describe('[補助] INV-catch (static): every catch around a gate-reaching call throws the refusal on, or its reason is on the table', () => {
+  it('[補助] negative control: today’s tree — no catch outside the table, no row of the table without its catch', () => {
+    const rows = gateCatchRows(SRC, computeGateReach(SRC));
+    const swallowing = rows.filter((r) => !r.rethrows);
+    expect(swallowing.filter((r) => !(r.key in EXCUSED)).map((r) => `${r.key} (line ${r.line}; ${r.calls.join(',')})`)).toEqual([]);
+    expect(Object.keys(EXCUSED).filter((k) => !swallowing.some((r) => r.key === k))).toEqual([]);
+  }, 120_000);
+
+  it('[補助] positive control: the nudge key and the claude stop without a rethrow, and a new catch → red', () => {
+    const files = new Map(SRC);
+    files.set('src/lib/zz-new-catch.ts', "import { sendKeys } from '@/lib/tmux/tmux';\nexport async function poke(s: string): Promise<void> {\n  try {\n    await sendKeys(s, 'x', false);\n  } catch {\n    // swallowed\n  }\n}\n");
+    for (const [file, from, to] of [
+      ['src/lib/cli-tools/claude-auto-default-nudge.ts', /\} catch \(error: unknown\) \{\n\s*rethrowFenceRefusal\(error\);\n/, '} catch {\n'],
+      ['src/lib/session-key-sender.ts', /\} catch \(error: unknown\) \{\n\s*rethrowFenceRefusal\(error\);\n/, '} catch (error: unknown) {\n'],
+    ] as const) {
+      const text = files.get(file) ?? '';
+      const mutated = text.replace(from, to);
+      expect(mutated, file).not.toBe(text);
+      files.set(file, mutated);
+    }
+    const rows = gateCatchRows(files, computeGateReach(files)).filter((r) => !r.rethrows && !(r.key in EXCUSED));
+    expect(rows.map((r) => r.key).sort()).toEqual([
+      'src/lib/cli-tools/claude-auto-default-nudge.ts#sendNudgeKey',
+      'src/lib/session-key-sender.ts#stopSession',
+      'src/lib/zz-new-catch.ts#poke',
+    ]);
+  }, 120_000);
+});
+

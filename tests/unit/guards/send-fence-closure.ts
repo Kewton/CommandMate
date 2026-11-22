@@ -284,3 +284,30 @@ export function computeSendClosure(files: ReadonlyMap<string, string>): Closure 
   }
   return { seeds, entries: [...entries].sort(), members, violations: violations.sort() };
 }
+
+/** The gates (Issue #4534 r5): a function that calls one is where the walk below starts. */
+export const GATE_CALLS = ['fenceGate', 'fenceBatchOpen', 'fenceBatchStep', 'fenceConfirm', 'fenceConfirmDispatch'] as const;
+
+/**
+ * The functions that reach a gate, as `file#site` — G-閉包's walk (free functions
+ * by reference through their imports, methods by NAME) started at the gates
+ * instead of at the layer mark, and not stopped at the entries. Wider than the
+ * truth (a method is reached by every same-named call). A helper of the static
+ * INV-catch check; the run-time table is the main one.
+ */
+export function computeGateReach(files: ReadonlyMap<string, string>): Set<string> {
+  const seeds = [...new Set(GATE_CALLS.flatMap((g) => freeReferences(files, FENCE_MODULE, g)))].filter((n) => !n.startsWith(`${FENCE_MODULE}#`));
+  const members = new Set<string>();
+  const work = [...seeds];
+  while (work.length > 0) {
+    const node = work.pop() as string;
+    if (members.has(node)) continue;
+    members.add(node);
+    const [file, site] = split(node);
+    if (site === '<module>' || site === '<re-export>') continue;
+    const method = site.includes('.') ? site.slice(site.indexOf('.') + 1) : null;
+    const callers = method !== null ? memberReferences(files, method) : freeReferences(files, file, site);
+    for (const caller of callers) if (!members.has(caller)) work.push(caller);
+  }
+  return members;
+}
