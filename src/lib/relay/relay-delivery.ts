@@ -39,6 +39,8 @@
  */
 
 import { randomUUID } from 'crypto';
+import { runWithSendTicket } from '@/lib/session/terminal-fence';
+import { relaySendTicketInit } from '@/lib/session/send-target-names';
 import type Database from 'better-sqlite3';
 import { getDbInstance } from '@/lib/db/db-instance';
 import {
@@ -618,9 +620,17 @@ async function attemptDelivery(
   // session typed into, with no await and no second read between it and the
   // claim. A failed read holds the payload BEFORE the claim (nothing taken, the
   // next pump tries again) — never the claude the display reading falls back to.
-  const settled = settleRequester(relayId, tryResolveRelayDeliveryTarget(db, relay.from));
+  const resolvedRequester = tryResolveRelayDeliveryTarget(db, relay.from);
+  const settled = settleRequester(relayId, resolvedRequester);
   if ('held' in settled) return holdUnresolved(relayId, kind, settled.held);
   const requester = settled;
+  // Issue #4534: the send's ticket, from this resolution (before the claim: a
+  // name that cannot be resolved claims nothing).
+  const ticketInit = relaySendTicketInit(db, relay.from, {
+    cliToolId: requester.cliToolId,
+    instanceId: requester.instanceId,
+    resolvedBy: resolvedRequester?.resolvedBy ?? null,
+  });
   // Issue #4437 (I6a): the readiness check awaited, and either end's instance
   // may run another tool now. Judged here, on the ends resolved after that
   // await — the `requester` below is the one typed into — before the claim.
@@ -660,7 +670,7 @@ async function attemptDelivery(
     let attempt: ObservedAttempt = null;
     let result: Awaited<ReturnType<typeof sendUserMessage>>;
     try {
-      result = await sendUserMessage(db, {
+      result = await runWithSendTicket(ticketInit, () => sendUserMessage(db, {
         worktreeId: requester.worktreeId,
         content: body,
         cliToolId: requester.cliToolId,
@@ -674,7 +684,7 @@ async function attemptDelivery(
         onAttempt: (observed) => {
           attempt = observed;
         },
-      });
+      }));
     } catch (error) {
       const reason = reasonForThrow(attempt);
       logger.warn('relay-delivery-uncertain', {

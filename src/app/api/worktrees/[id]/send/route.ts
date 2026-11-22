@@ -38,6 +38,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { openSendTicket, type SendTicketHandle } from '@/lib/session/terminal-fence';
+import { routeSendTicketInit } from '@/lib/session/send-target-names';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { getDbInstance } from '@/lib/db/db-instance';
 import { getWorktreeById } from '@/lib/db';
@@ -245,6 +247,9 @@ async function handleSend(
   // this request — here or in the send service — carries it, so it does not
   // replace the record of a send granted while this one waited.
   const observedInputGeneration = instanceInputGenerationMark();
+  // Issue #4534: this request's send ticket — the launch and the body run under
+  // it, each in its own `run`; closed when the request is over.
+  let ticket: SendTicketHandle | undefined;
   try {
     const { id: requestedWorktreeId } = await params;
     const id = canonicalWorktreeId(requestedWorktreeId);
@@ -442,6 +447,9 @@ async function handleSend(
     const modelRefusal = refuseModelOnRunningSession(body.model, cliToolId, running);
     if (modelRefusal) return modelRefusal;
 
+    ticket = openSendTicket(
+      routeSendTicketInit(db, { worktreeId: id, instanceId, cliToolId, resolvedBy: target.resolvedBy })
+    );
     // Start CLI tool session if not running
     if (!running) {
       // Issue #4116: starting one would only make a process this send then refuses.
@@ -451,7 +459,7 @@ async function handleSend(
       if (cliToolId === 'opencode' && body.newConversation === true) {
         chooseNewOpencodeConversation({ worktreeId: id, instanceId });
       }
-      const started = await startSessionForSend({
+      const started = await ticket.run(() => startSessionForSend({
         db,
         cliTool,
         cliToolId,
@@ -460,7 +468,7 @@ async function handleSend(
         instanceId,
         model: body.model,
         recordNotSent,
-      });
+      }));
       if (!started.ok) return started.response;
     } else {
       // Issue #2433: the session is already up, so `startSession()` — and with it
@@ -505,7 +513,7 @@ async function handleSend(
     const respondAgent = resolveRespondAgent(db, id, requestedCliToolId, instanceId);
 
     ask.delivering = true;
-    const result = await sendUserMessage(db, {
+    const result = await ticket.run(() => sendUserMessage(db, {
       worktreeId: id,
       content: trimmedContent,
       cliToolId,
@@ -540,7 +548,7 @@ async function handleSend(
       inputBoundary: roleConditionBoundary(roleGate, roleTarget, relay.binding?.hooks()),
       // Issue #4344: the reserved ask's envelope goes on the typed text (M3); none without one.
       askEnvelopeId: ask.askId ?? undefined,
-    });
+    }));
 
     if (!result.ok) {
       // Issue #4227 (S-B, design §3.2): the screen's choice stopped before any key. Not a send
@@ -613,5 +621,7 @@ async function handleSend(
       { error: 'Failed to send message' },
       { status: 500 }
     );
+  } finally {
+    ticket?.close();
   }
 }

@@ -91,6 +91,7 @@ import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
 import { getOpencodeLiveness, getOpencodePrimarySession } from '@/lib/hooks/sources/opencode/subscription';
 import { pumpRelayDeliveries, resetRelayDeliveryState } from '@/lib/relay/relay-delivery';
 import { scheduleTimer, stopAllTimers } from '@/lib/timer-manager';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 import { COPILOT_MODEL_SWITCH_2623_FRAMES as COPILOT_FRAMES } from '@tests/fixtures/copilot-model-switch-2623';
 import { buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
@@ -222,6 +223,10 @@ async function fireTimer(tool: CLIToolType, instanceId: string, message: string)
   );
   return getTimerById(db, timer.id)?.status ?? 'gone';
 }
+
+/** The changes, one per line, with the gate that let each through. */
+const permitted = (): string[] =>
+  world.out.filter((o) => o.cls === 'change').map((o) => `${o.permit ?? 'none'}:${o.line.replace(/^tmux\s+/, '').split(' ')[0]}`);
 
 // ---------------------------------------------------------------------------
 // T7: G-境 — every change of every entry, gate by gate
@@ -571,5 +576,43 @@ describe('T5 (F5, R9): OpenCode prompt_async', () => {
     expect(posts).toBe(1);
     expect(hook.mock.calls.map((c) => c[1])).toEqual(['dispatch']);
     expect(world.out.filter((o) => o.via === 'fetch' && o.cls === 'change').map((o) => o.permit)).toEqual(['ticketed']);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// T8 (I4, R5) and T9 (B2)
+// ---------------------------------------------------------------------------
+
+describe('T8 (I4, R5): a matching ticket changes no argv', () => {
+  it('[T8] the send service with a launch: the same process calls, in the same order, with and without a ticket', async () => {
+    const S = nameOf('codex', 'codex-t8');
+    addRoster('codex-t8', 'codex');
+    const codex = CLIToolManager.getInstance().getTool('codex');
+    const sendOnce = (): Promise<unknown> =>
+      codex.startSession(WT, wtPath, 'codex-t8').then(() =>
+        sendUserMessage(db, { worktreeId: WT, content: 'same argv', cliToolId: 'codex', instanceId: 'codex-t8' }),
+      );
+    const init = routeSendTicketInit(db, { worktreeId: WT, instanceId: 'codex-t8', cliToolId: 'codex', resolvedBy: 'roster' });
+    await runWithSendTicket(init, () => sendOnce() as Promise<unknown>);
+    const ticketed = world.out.map((o) => `${o.via} ${o.line}`);
+
+    world.out.length = 0;
+    world.panes.clear();
+    resetInstanceInputLocks();
+    await sendOnce();
+    expect(world.out.map((o) => `${o.via} ${o.line}`)).toEqual(ticketed);
+    expect(ticketed.some((l) => l.includes(`new-session -d -s ${S}`))).toBe(true);
+  }, 60_000);
+});
+
+describe('T9 (B2): the check is at the gate, not after the spawn', () => {
+  it('[T9] the roster moves after a key was spawned (before it would apply) → that one key counts as sent', async () => {
+    addRoster('claude-t9', 'claude');
+    const S = nameOf('claude', 'claude-t9');
+    addPane(S, 'claude');
+    onFirst(isKeys(/-l -- body t9/), () => setRosterTool('claude-t9', 'codex'));
+    await serviceSend('claude', 'claude-t9', 'body t9');
+    expect(changes().filter((l) => l.includes('body t9'))).toHaveLength(1);
+    expect(permitted().filter((p) => p.startsWith('ticketed:send-keys')).length).toBeGreaterThanOrEqual(1);
   }, 60_000);
 });

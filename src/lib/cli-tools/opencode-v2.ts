@@ -35,6 +35,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { BaseCLITool } from './base';
+import { fenceGate } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import {
@@ -280,6 +281,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
         await this.createLaunchPane(sessionName, worktreePath);
       }
 
+      fenceGate('geometry');
       try {
         await execFileAsync('tmux', [
           'resize-window', '-t', exactTarget(sessionName),

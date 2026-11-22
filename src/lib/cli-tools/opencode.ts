@@ -45,6 +45,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { enterSendLayer, fenceConfirmDispatch, fenceGate, isFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import {
@@ -445,6 +446,7 @@ export class OpenCodeTool extends BaseCLITool {
       // boundary this depends on (sidebar at >=121 columns, hidden at <=120) and
       // moved the number to `OPENCODE_PANE_WIDTH` / `CM_OPENCODE_PANE_WIDTH`.
       // [SEC-001] Uses execFile (not exec) to prevent shell meta-character injection via sessionName
+      fenceGate('geometry');
       try {
         await execFileAsync('tmux', [
           // Issue #1156: exact-match target so resize never leaks to a prefix-colliding instance
@@ -720,6 +722,8 @@ export class OpenCodeTool extends BaseCLITool {
     message: string,
     imagePath?: string
   ): Promise<'delivered' | 'skipped' | 'not_sent' | 'unknown'> {
+    // Issue #4534: the detector — a send-only layer.
+    enterSendLayer('dispatchViaServer', this.getSessionName(target.worktreeId, target.instanceId));
     const instanceId = target.instanceId ?? target.cliToolId;
     let dispatched = false;
     try {
@@ -775,6 +779,15 @@ export class OpenCodeTool extends BaseCLITool {
       // §20.5). Null when nothing is configured, and the request body is then
       // byte-identical to the pre-#2048 one.
       const selection = opencodePromptSelection(getOpencodeLaunchSettings(target));
+      // Issue #4534 (design v2 §2.8): the dispatch still goes where the send's
+      // ticket is served — read again in this step, before the boundary is told.
+      fenceConfirmDispatch(
+        { worktreeId: target.worktreeId, instanceId, cliToolId: target.cliToolId },
+        () =>
+          getAssignedOpencodePort(target) === port &&
+          getOpencodeLiveness(target).state === 'live' &&
+          getOpencodePrimarySession(target) === sessionId
+      );
       // Issue #3957: the boundary, right before the POST. A refusal throws and
       // nothing is posted.
       noteDispatchStart();
@@ -782,6 +795,8 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #3992: a POST the server refused (a non-2xx, an unknown route's
       // `200 text/html`) sent nothing. One that got no answer, or an unexpected
       // 2xx, may still have created the message, so it stays unknown.
+      // Issue #4534: the POST's gate, right before it.
+      fenceGate('dispatch');
       const dispatch = await sendOpencodePrompt(port, sessionId, messageId, parts, selection);
       if (dispatch === 'rejected') return 'not_sent';
       if (dispatch === 'unknown') return 'unknown';
@@ -811,7 +826,8 @@ export class OpenCodeTool extends BaseCLITool {
     } catch (error: unknown) {
       // Issue #3957: the relay refused the boundary — nothing was posted, and
       // nothing may be typed either.
-      if (isInputBoundaryRefusal(error)) throw error;
+      // Issue #4534: so did the fence (nothing posted, nothing typed after it).
+      if (isInputBoundaryRefusal(error) || isFenceRefusal(error)) throw error;
       // Nothing above is allowed to take the send down: the keystroke route is
       // still there and is what runs when this answers false.
       logger.warn('opencode-send-api-failed', {

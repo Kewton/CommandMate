@@ -25,6 +25,7 @@ import { resolveGracefulExitSpec } from './graceful-exit';
 import { resolveLivenessSpec } from './liveness-spec';
 import { probeSessionLiveness } from './session-liveness';
 import { reportSessionStartFailure, reportStaleHookUrl } from './start-availability';
+import { asRetraction, enterSendLayer, isFenceRefusal, readOwnFenceRefusal } from '../session/terminal-fence';
 import { missingToolError } from './install-hints';
 import { stripAnsi } from '../detection/ansi';
 import { getServerPort } from '../env';
@@ -368,15 +369,19 @@ export abstract class BaseCLITool implements ICLITool {
       // nothing else. The mark is dropped rather than left behind so a later,
       // successful start of the same session does not inherit it.
       this.takeAdoptionMark(worktreeId, instanceId);
-      reportSessionStartFailure(
-        {
-          worktreeId,
-          cliToolId: this.id,
-          instanceId,
-          toolName: this.name,
-        },
-        error
-      );
+      // Issue #4534: the fence's refusal is not a start that failed — no notice.
+      // Read on the send's own ticket too: a driver's catch may have wrapped it.
+      if (!isFenceRefusal(error) && readOwnFenceRefusal() === null) {
+        reportSessionStartFailure(
+          {
+            worktreeId,
+            cliToolId: this.id,
+            instanceId,
+            toolName: this.name,
+          },
+          error
+        );
+      }
       throw error;
     } finally {
       // Issue #3179: the launch is over, returned or thrown, so the screen
@@ -414,7 +419,8 @@ export abstract class BaseCLITool implements ICLITool {
     await settleLaunchRole({
       isAlive: () => this.isToolLive(sessionName),
       capture: () => capturePane(sessionName, LAUNCH_ROLE_SCREEN_LINES),
-      kill: () => this.killSession(worktreeId, instanceId),
+      // Issue #4534 (R7): taking back this launch's own process passes a refused ticket.
+      kill: () => asRetraction('role-kill', () => this.killSession(worktreeId, instanceId)),
       readServerConfig: () => this.readServerConfig(worktreeId, worktreePath, instanceId),
     });
   }
@@ -924,6 +930,8 @@ export abstract class BaseCLITool implements ICLITool {
    * @param worktreePath - Worktree path, the session's working directory
    */
   protected async createLaunchPane(sessionName: string, worktreePath: string): Promise<void> {
+    // Issue #4534: the detector — a send-only layer.
+    enterSendLayer('createLaunchPane', sessionName);
     // Create tmux session. Scrollback depth comes from the shared
     // TMUX_HISTORY_LIMIT default (Issue #1624) — do not re-hardcode it here.
     await createSession({

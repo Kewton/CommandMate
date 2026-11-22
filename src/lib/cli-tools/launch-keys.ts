@@ -15,6 +15,7 @@
  */
 
 import { sendKeys } from '../tmux/tmux';
+import { enterSendLayer } from '../session/terminal-fence';
 import {
   currentInstanceInputTicket,
   InstanceInputOwnershipLostError,
@@ -37,6 +38,8 @@ export type LaunchKeyStep = string | (() => Promise<void>);
  *   turn; nothing after that point is typed
  */
 export async function typeLaunchLines(sessionName: string, steps: readonly LaunchKeyStep[]): Promise<void> {
+  // Issue #4534: the detector — a send-only layer.
+  enterSendLayer('typeLaunchLines', sessionName);
   await withInstanceInputLock(sessionName, async () => {
     for (const step of steps) {
       if (typeof step === 'string') {

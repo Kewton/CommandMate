@@ -99,6 +99,7 @@
 
 import { readRoleLaunchRefusal } from '@/lib/agent-roles/launch-errors';
 import * as childProcess from 'child_process';
+import { asRetraction, enterSendLayer, fenceGate } from '@/lib/session/terminal-fence';
 import { sendKeys, sendSpecialKeys, capturePane, clearInputLine, exactTarget } from '../tmux/tmux';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { resolveComposerSpec } from './composer-spec';
@@ -273,6 +274,8 @@ async function pasteBody(
   try {
     runBeforeBody(beforeBody);
     noteInputStart();
+    // Issue #4534: the paste's gate, in the same step as the boundary's check.
+    fenceGate('paste');
   } catch (error: unknown) {
     await runTmux(['delete-buffer', '-b', bufferName]).catch(() => undefined);
     throw error;
@@ -327,10 +330,13 @@ async function withdrawUnsentBody(
   }
   try {
     if (composerSpec.clearBeforeSend) {
-      const result = await clearComposer(sessionName, cliToolId, { beforePass: () => ticket.isCurrent() });
+      // Issue #4534 (R7): this send's own body, taken back even when its ticket was refused.
+      const result = await asRetraction('withdraw', () =>
+        clearComposer(sessionName, cliToolId, { beforePass: () => ticket.isCurrent() })
+      );
       return result.cleared;
     }
-    await clearInputLine(sessionName);
+    await asRetraction('withdraw', () => clearInputLine(sessionName));
     // One `C-u` into a composer nothing here can read: sent, never confirmed.
     return false;
   } catch (clearError: unknown) {
@@ -707,6 +713,8 @@ export async function clearComposerBeforeSend(
 export async function sendMessageWithSubmitVerification(
   params: SubmitVerifiedSendParams
 ): Promise<void> {
+  // Issue #4534: the detector — a send-only layer.
+  enterSendLayer('sendMessageWithSubmitVerification', params.sessionName);
   await withInstanceInputLock(params.sessionName, (ticket) => {
     // Issue #4065: the body's generation, told to the request before any key
     // (and kept by it if the send throws). The same ticket when this joins the
@@ -897,7 +905,7 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
       // to the caller instead of ever resending Enter.
       try {
         if (ticket.isCurrent()) {
-          await clearInputLine(sessionName);
+          await asRetraction('replaced-clear', () => clearInputLine(sessionName));
         } else {
           logger.error('submit-clear-input-skipped-not-owner', { sessionName, cliToolId, generation: ticket.generation });
         }

@@ -19,6 +19,14 @@ import {
   escapeTrailingSemicolon,
   keySequenceArgs,
 } from './key-sequence';
+import {
+  fenceBatchEnd,
+  fenceBatchOpen,
+  fenceBatchStep,
+  fenceGate,
+  isFenceRefusal,
+  type FenceBatch,
+} from '@/lib/session/terminal-fence';
 
 const execFileAsync = promisify(execFile);
 const logger = createLogger('tmux');
@@ -127,9 +135,22 @@ export interface SessionGeometryOptions {
  *
  * @returns true when at least one tmux option was changed.
  */
-export async function reconcileSessionGeometry(
+export function reconcileSessionGeometry(
   sessionName: string,
   options: SessionGeometryOptions = {},
+): Promise<boolean> {
+  return reconcileGeometry(sessionName, options);
+}
+
+/**
+ * {@link reconcileSessionGeometry}'s body. `batch` comes only from
+ * {@link createSession} (Issue #4534): its two changes are then steps of the
+ * creation; on their own each is confirmed by its gate.
+ */
+async function reconcileGeometry(
+  sessionName: string,
+  options: SessionGeometryOptions,
+  batch?: FenceBatch,
 ): Promise<boolean> {
   const windowWidth = options.windowWidth ?? TUI_PANE_WIDTH;
   const windowHeight = options.windowHeight ?? TUI_PANE_HEIGHT;
@@ -173,6 +194,8 @@ export async function reconcileSessionGeometry(
 
   try {
     if (!modeMatches) {
+      if (batch) fenceBatchStep(batch);
+      else fenceGate('geometry');
       await execFileAsync(
         'tmux',
         ['set-window-option', '-t', target, 'window-size', 'manual'],
@@ -180,6 +203,8 @@ export async function reconcileSessionGeometry(
       );
     }
     if (!sizeMatches) {
+      if (batch) fenceBatchStep(batch);
+      else fenceGate('geometry');
       await execFileAsync(
         'tmux',
         ['resize-window', '-t', target, '-x', String(windowWidth), '-y', String(windowHeight)],
@@ -188,6 +213,8 @@ export async function reconcileSessionGeometry(
     }
     return true;
   } catch (error: unknown) {
+    // Issue #4534: the fence's refusal is not a geometry failure to swallow.
+    if (isFenceRefusal(error)) throw error;
     logger.warn('session-geometry:reconcile-failed', {
       sessionName,
       error: error instanceof Error ? error.message : String(error),
@@ -431,7 +458,7 @@ const PLACEHOLDER_PANE_COMMAND = ['sleep', '2147483647'] as const;
  * A bare `respawn-pane` would re-run the pane's creation command — the
  * placeholder — so the shell is named explicitly.
  */
-async function respawnLoginShell(sessionName: string, workingDirectory: string): Promise<void> {
+async function respawnLoginShell(sessionName: string, workingDirectory: string, batch: FenceBatch): Promise<void> {
   let shell = '';
   try {
     const { stdout } = await execFileAsync(
@@ -444,6 +471,7 @@ async function respawnLoginShell(sessionName: string, workingDirectory: string):
     // Fall through to the environment's shell.
   }
   if (!shell) shell = process.env.SHELL || '/bin/sh';
+  fenceBatchStep(batch);
   await execFileAsync(
     'tmux',
     ['respawn-pane', '-k', '-t', `${exactTarget(sessionName)}0`, '-c', workingDirectory, shell, '-l'],
@@ -513,6 +541,10 @@ export async function createSession(
     windowHeight = sessionNameOrOptions.windowHeight || TUI_PANE_HEIGHT;
   }
 
+  // Issue #4534: the creation is one change to the fence — confirmed at
+  // `new-session`, then finished, so a refusal never leaves a placeholder-only
+  // session behind (a later send would type its launch line into `sleep`).
+  let batch: FenceBatch | undefined;
   try {
     // Create session with explicit window size to avoid 80x24 default
     // This is critical for TUI tools (Copilot, OpenCode) that use alternate screen
@@ -528,6 +560,7 @@ export async function createSession(
     // the replacement pane ran its first command after 61s; 0 of 40 with the
     // placeholder. Two argv words make tmux exec it directly, so no shell (and
     // no rc file) is started for window 0 at all.
+    batch = fenceBatchOpen('create');
     await execFileAsync(
       'tmux',
       [
@@ -549,6 +582,7 @@ export async function createSession(
     // `mcbd-codex-*` session sat at 1977/2000 lines used, silently dropping the
     // oldest transcript. `respawn-pane -k` does NOT fix it either (the pane reuses
     // its existing buffer); only creating a NEW pane does.
+    fenceBatchStep(batch);
     await execFileAsync(
       'tmux',
       ['set-option', '-t', exactTarget(sessionName), 'history-limit', String(historyLimit)],
@@ -570,6 +604,7 @@ export async function createSession(
     // only a placeholder (Issue #2958), so the fallback must still put the login
     // shell into it — see respawnLoginShell().
     try {
+      fenceBatchStep(batch);
       await execFileAsync(
         'tmux',
         ['new-window', '-k', '-t', `${exactTarget(sessionName)}0`, '-c', workingDirectory],
@@ -581,7 +616,7 @@ export async function createSession(
         historyLimit,
         error: error instanceof Error ? error.message : String(error),
       });
-      await respawnLoginShell(sessionName, workingDirectory);
+      await respawnLoginShell(sessionName, workingDirectory, batch);
     }
 
     // Issue #1163: Pin the pane to a fixed height so alternate-screen TUIs
@@ -601,16 +636,20 @@ export async function createSession(
     // replaced (verified: `show-window-options -v window-size` came back empty),
     // so reconciling first would have the setting thrown away and leave the pane
     // tracking the latest client again.
-    await reconcileSessionGeometry(sessionName, {
+    await reconcileGeometry(sessionName, {
       windowWidth,
       windowHeight,
       // Nothing can be attached to a session this call is still creating, so the
       // Phase D client probe would be a round-trip with one possible answer.
       respectAttachedClient: false,
-    });
+    }, batch);
   } catch (error: unknown) {
+    // Issue #4534: the fence's refusal goes up as itself, not as a tmux failure.
+    if (isFenceRefusal(error)) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create tmux session: ${errorMessage}`);
+  } finally {
+    fenceBatchEnd(batch);
   }
   // Issue #3796: an Auto-Yes poller waiting for this session ticks now rather
   // than a backoff later. Outside the try: a listener cannot fail the creation.
@@ -688,6 +727,7 @@ export async function sendKeys(
       ? ['send-keys', '-t', exactTarget(sessionName), legacyKeys, 'C-m']
       : ['send-keys', '-t', exactTarget(sessionName), legacyKeys];
 
+  fenceGate('key');
   try {
     await execFileAsync('tmux', args, { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
@@ -892,6 +932,7 @@ export async function sendSpecialKeys(
   let delivered = 0;
   try {
     for (let i = 0; i < keys.length; i++) {
+      fenceGate('key');
       await execFileAsync('tmux', ['send-keys', '-t', exactTarget(sessionName), keys[i]], { timeout: DEFAULT_TIMEOUT });
       delivered = i + 1;
       // Delay between key presses (skip after the last key)
@@ -903,7 +944,7 @@ export async function sendSpecialKeys(
       }
     }
   } catch (error: unknown) {
-    if (error instanceof SpecialKeysAbortedError) throw error;
+    if (error instanceof SpecialKeysAbortedError || isFenceRefusal(error)) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new TmuxSendError(
       `Failed to send special keys to tmux session: ${errorMessage}`,
@@ -1001,6 +1042,7 @@ export async function capturePane(
  * ```
  */
 export async function killSession(sessionName: string): Promise<boolean> {
+  fenceGate('kill');
   try {
     await execFileAsync('tmux', ['kill-session', '-t', exactTarget(sessionName)], {
       timeout: DEFAULT_TIMEOUT,
@@ -1161,6 +1203,7 @@ export async function sendSpecialKey(
     throw new Error(`Invalid special key: ${key}`);
   }
 
+  fenceGate('key');
   try {
     await execFileAsync('tmux', ['send-keys', '-t', exactTarget(sessionName), key], { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
@@ -1186,6 +1229,7 @@ export async function sendSpecialKey(
  * @throws {Error} If the tmux command fails
  */
 export async function clearInputLine(sessionName: string): Promise<void> {
+  fenceGate('key');
   try {
     await execFileAsync('tmux', ['send-keys', '-t', exactTarget(sessionName), 'C-u'], { timeout: DEFAULT_TIMEOUT });
   } catch (error: unknown) {
@@ -1218,6 +1262,7 @@ export async function clearInputLine(sessionName: string): Promise<void> {
  * @throws {Error} If the tmux command fails
  */
 export async function clearComposerLine(sessionName: string): Promise<void> {
+  fenceGate('key');
   try {
     await execFileAsync(
       'tmux',
@@ -1246,6 +1291,7 @@ export async function clearComposerLine(sessionName: string): Promise<void> {
  * @throws {Error} If the tmux command fails
  */
 export async function clearComposerPasteToken(sessionName: string): Promise<void> {
+  fenceGate('key');
   try {
     await execFileAsync(
       'tmux',

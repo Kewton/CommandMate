@@ -17,6 +17,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { enterSendLayer } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import {
   sendKeys,
@@ -1069,6 +1070,8 @@ export class CopilotTool extends BaseCLITool {
    */
   async sendModelCommand(worktreeId: string, modelName: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
+    // Issue #4534: the detector — a send-only layer.
+    enterSendLayer('sendModelCommand', sessionName);
 
     await this.requireSession('Copilot', worktreeId, instanceId, { relaunch: false });
 

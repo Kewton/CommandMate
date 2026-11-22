@@ -47,6 +47,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { runWithSendTicket } from '@/lib/session/terminal-fence';
+import { routeSendTicketInit } from '@/lib/session/send-target-names';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import {
@@ -243,7 +245,16 @@ export async function POST(
     // input lock in the shared sender) and re-reads the pane once it has it. A
     // dialog found then is the refusal above, found late — the same 409.
     try {
-      await cliTool.sendMessage(id, command, instanceId);
+      // Issue #4534: under this request's send ticket. The name is the one the
+      // route already holds — the tool's own (`cliTool.getSessionName`).
+      await runWithSendTicket(
+        routeSendTicketInit(
+          db,
+          { worktreeId: id, instanceId, cliToolId: target.cliToolId, resolvedBy: target.resolvedBy },
+          [sessionName]
+        ),
+        () => cliTool.sendMessage(id, command, instanceId)
+      );
     } catch (error) {
       if (classifySendFailure(error).reason === 'prompt-waiting') {
         logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });

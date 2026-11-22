@@ -25,6 +25,8 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
 import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-constants';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { runWithSendTicket } from '@/lib/session/terminal-fence';
+import { timerSendTicketInit } from '@/lib/session/send-target-names';
 import type { CLIToolType } from './cli-tools/types';
 import { getOrInitGlobal } from './global-state';
 import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE, USAGE_DECLARATION_ENV } from './tool-policy/policy';
@@ -138,12 +140,16 @@ async function executeTimer(timerId: string): Promise<void> {
     // rather than the low-level cliTool.sendMessage, so timer-fired messages also
     // record the user message in chat_messages and start response polling —
     // otherwise they never appear in Message History.
-    const result = await sendUserMessage(db, {
-      worktreeId: timer.worktreeId,
-      content: timer.message,
-      cliToolId: timer.cliToolId as CLIToolType,
-      instanceId,
-    });
+    // [Issue #4534] Under the timer's send ticket: its own row still `sending`.
+    const result = await runWithSendTicket(
+      timerSendTicketInit(db, { id: timerId, worktreeId: timer.worktreeId, instanceId, cliToolId: timer.cliToolId as CLIToolType }),
+      () => sendUserMessage(db, {
+        worktreeId: timer.worktreeId,
+        content: timer.message,
+        cliToolId: timer.cliToolId as CLIToolType,
+        instanceId,
+      })
+    );
 
     if (!result.ok) {
       // [Issue #1107] Persist the failure reason so the detail modal can show

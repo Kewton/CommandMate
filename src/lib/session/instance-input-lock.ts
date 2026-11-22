@@ -56,6 +56,12 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import {
+  fenceConfirm,
+  noteFenceBodyStarted,
+  noteFenceDispatchNotSent,
+  noteFenceDispatchStarted,
+} from './terminal-fence';
 import { getOrInitGlobal } from '@/lib/global-state';
 import { createLogger } from '@/lib/logger';
 
@@ -942,11 +948,18 @@ export async function observeInputStart<T>(
  * second body, a retry) and calls outside one do nothing.
  */
 export function noteInputStart(now: Date = new Date()): void {
+  // Issue #4534 (R9): the send's ticket is confirmed before the boundary is
+  // told — a refusal runs no hook and leaves no record of input.
+  fenceConfirm();
   const observer = inputStartScope.getStore();
-  if (observer === undefined || observer.at !== null) return;
+  if (observer === undefined || observer.at !== null) {
+    noteFenceBodyStarted();
+    return;
+  }
   // Issue #3957: the required hook first, and outside the catch below — a
   // refusal must stop the sender before its first key.
   runBoundaryHook(observer, now, 'input_start');
+  noteFenceBodyStarted();
   observer.at = now;
   try {
     observer.onStart?.(now);
@@ -990,9 +1003,15 @@ export function noteInputTicket(ticket: InstanceInputTicket): void {
  * fix the input-start stamp — a keyboard fallback still reports its own.
  */
 export function noteDispatchStart(now: Date = new Date()): void {
+  // Issue #4534 (R9): as noteInputStart — confirmed before the hook.
+  fenceConfirm();
   const observer = inputStartScope.getStore();
-  if (observer === undefined || observer.at !== null) return;
+  if (observer === undefined || observer.at !== null) {
+    noteFenceDispatchStarted();
+    return;
+  }
   runBoundaryHook(observer, now, 'dispatch');
+  noteFenceDispatchStarted();
   observer.dispatchOpen = true;
   // Issue #4065: after the required hook, so a refused dispatch — nothing went
   // out — is not reported as one.
@@ -1009,6 +1028,8 @@ export function noteDispatchStart(now: Date = new Date()): void {
  * `unknown` when it could not be told. Called before any fallback. Never throws.
  */
 export function noteDispatchFailed(verdict: DispatchFailureVerdict): void {
+  // Issue #4534: on the ticket whether or not a request observes this context.
+  if (verdict === 'not_sent') noteFenceDispatchNotSent();
   const observer = inputStartScope.getStore();
   if (observer === undefined || !observer.dispatchOpen) return;
   observer.dispatchOpen = false;

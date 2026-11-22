@@ -67,6 +67,7 @@ import {
 } from '@/lib/cli-tools/launch-answer-skips';
 import { settleSessionLaunch } from '@/lib/session/session-launch-flight';
 import { typeLaunchLines } from '@/lib/cli-tools/launch-keys';
+import { enterSendLayer, fenceGate, isFenceRefusal } from '@/lib/session/terminal-fence';
 
 const logger = createLogger('claude-session');
 
@@ -916,6 +917,8 @@ export async function startClaudeSession(
   }
 
   const sessionName = getSessionName(worktreeId, instanceId);
+  // Issue #4534: the detector — a send-only layer.
+  enterSendLayer('startClaudeSession', sessionName);
 
   // Check if session already exists
   const exists = await hasSession(sessionName);
@@ -1015,6 +1018,7 @@ export async function startClaudeSession(
     // input in order, so the `unset` runs first without it, and a pause inside
     // the turn would only hold sends off longer. The init polls below stay
     // outside the lock.
+    fenceGate('env');
     await execAsync('tmux set-environment -g -u CLAUDECODE 2>/dev/null || true');
     await typeLaunchLines(sessionName, ['unset CLAUDECODE', withLaunchScreenCleared(launchCommand)]);
 
@@ -1148,7 +1152,8 @@ export async function startClaudeSession(
     // safe to hand to the caller, and they are the whole reason the caller can
     // tell "still starting" from "broken" instead of being told to read a log
     // it may not have.
-    if (isSafeSessionStartError(error)) {
+    // Issue #4534: the fence's refusal goes up as itself.
+    if (isSafeSessionStartError(error) || isFenceRefusal(error)) {
       throw error;
     }
     throw new Error('Failed to start Claude session');
