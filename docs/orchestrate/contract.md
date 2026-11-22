@@ -175,6 +175,8 @@ unit ゲートで同型を弾くが、契約側にも明示すること。
 
 `--worktree`（省略時はカレントディレクトリ）の `.commandmate/verify.yaml` に `build-server` が無ければ足さない。`POST /tasks` が未知のゲートを 400 で拒否し、従来の既定で送れていた契約が送れなくなるため。
 
+**`lint-sh`（#4527）**: 同じ理由で、`--worktree` の `.commandmate/verify.yaml` が `lint-sh` を宣言していれば、生成する契約の `verify.gates` に必ず `lint-sh` を入れる（`lint` の直後）。**既定の gates でも、`gates` を書き出した設定でも、`kind: refactor` の 2 ゲートでも同じ**で、足す向きだけ — 書いたゲートを減らさない・並べ替えない。宣言していない worktree は従来どおり。`--worktree` を省いたときは 2 つの経路で worktree が違う: **ファイルへ書き出す `generate --config …`（`--out` の有無を問わない）はカレントディレクトリ**を worktree にする（`writeContract` の既定）ので、カレントの `.commandmate/verify.yaml` を見て `lint-sh` を入れる。**`--stdout` は worktree を持たない `loadConfig`** なので入れない（プレビューはファイル出力と一致しないことがある。ランナーは常に `--worktree` を付けるので実害は無い）。足すのはゲートの形・上限の検査より前なので、追加で 32 個を超える契約は送られずに断られる。動機: #4433 の契約が `gates: [lint, typecheck, build-server, unit-related]` と書き出し、verify の run 3534 が宣言した全ゲート PASS でも、同じコミットの precheck と CI の shellcheck が SC1003（`scripts/uat/run-server.sh:126`）で落ちた — 書き出した一覧はそのまま走るからである。
+
 | 実測（2026-11-04、この worktree・warm、load average 30〜41） | 所要 |
 |---|---|
 | `npm run build:server` 3 回 | 3.63 / 3.65 / 3.33 秒 |
