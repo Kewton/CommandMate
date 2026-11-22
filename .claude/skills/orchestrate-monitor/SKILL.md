@@ -103,6 +103,28 @@ mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]      # getSessionName() と�
 報告する（`commandmate respond <worktree-id>` で人手対応）。`--no-auto-approve` を付けると常に保留に
 固定される。COMPLETE 行の `held=` は保留が 1 件以上あったときだけ付く。
 
+### 終わり方は `capture --pane` の全行から読む（Issue #4532）
+
+セッションが動いていれば（`NOT_RUNNING` でなければ）担当を問わず毎ポーリング `capture --pane` を読み、
+返しの行を pane の**全行**から拾って、終わり方ごとに 1 回だけ報告する。
+
+| 何が出るか | いつ |
+|---|---|
+| `monitor[<lbl>]: return line DONE — DONE: #<N> <sha> verify exit <n>` | 行全体が DONE の形（sha は 7〜40 桁の 16 進） |
+| `monitor[<lbl>]: return line WAIT — the worker is waiting; WAIT: …` / `return line STOP — the worker stopped; STOP: …` | 行頭が `WAIT:` / `STOP:` |
+| `monitor[<lbl>]: SHAPE_OUTSIDE ending — IMPL_COMPLETED … (not a return line; not completion)` | 古い終わり方。合格には数えない |
+| `monitor[<lbl>]: WARN capture --pane failed — … (reported once until a read succeeds)` | `--pane` の読み取りに失敗した（失敗が続く間は 1 回。読めたら張り直す） |
+
+行は照合の前に 1 つの正規化を通す（`monitor-lib.sh` の `ml_pane_line`。JS の写しは
+`scripts/orchestrate/wait-verify.mjs` の `normalizePaneLine`）: ANSI と NBSP を落とし、右の差分のパネル
+（`<文字><空白 2 つ以上>│ <パネル>`。claude 2.1.330）を `│` から行末まで落とし、前後の空白を落とす。
+行頭の返しの目印は 1 つだけ、直後の空白 1 つと一緒に剥がす（1 行だけの返事 `<目印> DONE: …`・
+`<目印> IMPL_COMPLETED` も拾う）。目印の集合は `scripts/reply-markers.tsv` の 1 か所にあり（担当 × プラットフォーム。
+claude は macOS とそれ以外で字が違う）、bash も JS もそこからだけ読む。ほかの文字（入力欄の `❯`・echo の `›`・`│`・`-` など）は
+剥がさないので、入力欄に打っただけの `❯ DONE: …` は終わりと読まない。許可のプロンプトは、自前の目印の組を
+持つ担当（claude・Command Code・Antigravity）だけ pane にも目印を当てる。codex などはサーバーの
+`isPromptWaiting` に任せる。
+
 ### 監視が生きているかを外から見る（#1728）
 
 **「静かなのは健全だから」と「静かなのは監視が死んだから」を区別できること。** 2026-08-06 に、

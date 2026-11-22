@@ -28,7 +28,7 @@ import {
   REAL_SHELL_SUBPROCESS_TIMEOUT_MS,
   assertSubprocessCompleted,
 } from '@tests/helpers/real-shell-budget';
-import { DONE_LINE_RE } from '../../../../scripts/orchestrate/wait-verify.mjs';
+import { DONE_LINE_RE, normalizePaneLine } from '../../../../scripts/orchestrate/wait-verify.mjs';
 
 const MONITOR = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts/monitor.sh');
 const LIB = path.join(process.cwd(), '.claude/skills/orchestrate-monitor/scripts/monitor-lib.sh');
@@ -209,12 +209,15 @@ describe('T3 (review P3-B): DONE_LINE_RE and the monitor agree on one table', ()
     ['sha of 7', 'DONE: #4527 abcdef1 verify exit 0', true],
     ['sha of 40', `DONE: #4527 ${hex40} verify exit 0`, true],
     ['sha of 41', `DONE: #4527 ${hex40}8 verify exit 0`, false],
-    ['a prefix', '• DONE: #4527 abcdef1 verify exit 0', false],
+    // S10 (lead r1): the reply marker is normalized away on both sides, so this
+    // row — `false` in r4 — is a DONE now (pane-line-agreement-4532.test.ts).
+    ['a prefix', '• DONE: #4527 abcdef1 verify exit 0', true],
     ['a prose prefix', 'note: DONE: #4527 abcdef1 verify exit 0', false],
   ];
 
   it.each(rows)('%s: both readers give the same answer', (_name, row, expected) => {
-    expect(DONE_LINE_RE.test(row)).toBe(expected);
+    // Both readers see the row after the one normalization (S10).
+    expect(DONE_LINE_RE.test(normalizePaneLine(row))).toBe(expected);
     expect(monitorReadsDone(row)).toBe(expected);
   });
 });

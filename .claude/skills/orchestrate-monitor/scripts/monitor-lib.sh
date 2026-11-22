@@ -671,11 +671,89 @@ ML_DONE_LINE_RE='^DONE:[ \t]+#[0-9]+[ \t]+[0-9a-f]+[ \t]+verify[ \t]+exit[ \t]+[
 ML_DONE_SHA_MIN=7
 ML_DONE_SHA_MAX=40
 
+# --- the row normalization (#4532 S10, review r4 P1-B) -----------------------
+# One definition of "the row a reader matches", for every reader that anchors at
+# the head of a row: the ending scan below (DONE / WAIT / STOP / IMPL_COMPLETED)
+# and, for the panel step, the pane frame the prompt markers read
+# (ml_pane_as_capture). Its JS copy is wait-verify.mjs `normalizePaneLine`, and
+# pane-line-agreement-4532.test.ts pins both to one table of rows (N1).
+#   1. ANSI (CSI) and the non-breaking space — ml_strip_ansi, before the awk.
+#   2. The right-hand panel. claude 2.1.330 draws its "N files edited (show)"
+#      diff panel to the right of the transcript, so every row reads
+#      `<left column><blanks>│ <panel>`, and a reader anchored at the row's end
+#      missed `DONE: … exit 0      │ src/x.ts +12 -3`. The row is cut at the
+#      FIRST `│` (U+2502) that follows text and two or more blanks; that `│`
+#      and everything after it go. A `│` with nothing but blanks to its left is
+#      kept (` │ Blocked: …` — Command Code's tool output — and codex's header
+#      box start their rows that way), and so is one after a single blank (a
+#      boxed quote `│ DONE: … │`), so a panel-only or a quoted `DONE:` still
+#      does not sit at the head of the row (N2).
+#   3. The blanks at the end (step 2 leaves the run before the `│`).
+#   4. ml_pane_line only: the blanks at the start, then ONE reply marker at
+#      the head and the one blank after it (review r3 P3-E, lead r1, review
+#      P2-1). A CLI puts its marker on the FIRST row of a reply, so a one-line
+#      reply (`<marker> DONE: …`, the live `<marker> IMPL_COMPLETED`) is the
+#      ending on that row. The markers are reply-markers.tsv, next to this file,
+#      and nothing else (ML_REPLY_MARKERS below; the data names each tool, the
+#      platform — claude draws a different glyph on macOS and elsewhere — and
+#      where each glyph was measured). Only one, and only with one blank after
+#      it: the composer `❯ DONE: …` (typed, not sent), the user echo `›`, a
+#      doubled marker, a marker behind `│` and `- …` stay as they are and are
+#      not an ending. After the strip nothing more is trimmed, so a marker and
+#      two blanks before `DONE` does not sit at the head either.
+# Done with awk index()/substr() over bytes (LC_ALL=C) rather than a UTF-8
+# regex, so it behaves the same under BSD awk, gawk and mawk.
+#
+# The data is read once, when this file is sourced. A missing or empty file is
+# an ERROR on stderr, not a silent empty set: a reader with no markers would
+# miss every one-line reply, the very miss the data exists to prevent.
+ML_REPLY_MARKERS_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/reply-markers.tsv"
+ML_REPLY_MARKERS=$(LC_ALL=C awk -F '\t' '
+  /^#/ || NF < 3 || $3 == "" { next }
+  !seen[$3]++ { printf "%s%s", (n++ ? " " : ""), $3 }' "$ML_REPLY_MARKERS_FILE" 2>/dev/null) || ML_REPLY_MARKERS=""
+if [ -z "$ML_REPLY_MARKERS" ]; then
+  echo "monitor-lib: ERROR no reply markers read from $ML_REPLY_MARKERS_FILE — one-line replies are not read as endings" >&2
+fi
+ML_PANE_PANEL_BAR='│'
+ML__PANE_ROW_AWK='
+function ml_pane_row(line,   off, p, left) {
+  off = 0
+  while ((p = index(substr(line, off + 1), bar)) > 0) {
+    left = substr(line, 1, off + p - 1)
+    if (left ~ /[^ \t][ \t][ \t]+$/) { line = left; break }
+    off += p + length(bar) - 1
+  }
+  sub(/[ \t]+$/, "", line)
+  return line
+}
+function ml_pane_line(line,   i, m) {
+  line = ml_pane_row(line)
+  sub(/^[ \t]+/, "", line)
+  if (!ml__marks_split) { ml__nmark = split(marks, ml__mark, " "); ml__marks_split = 1 }
+  for (i = 1; i <= ml__nmark; i++) {
+    m = ml__mark[i]
+    if (substr(line, 1, length(m)) == m && substr(line, length(m) + 1, 1) ~ /^[ \t]$/) {
+      line = substr(line, length(m) + 2)
+      break
+    }
+  }
+  return line
+}'
+
+# ml_pane_lines <pane-text-file>: every row of the file, normalized (steps 1-4).
+ml_pane_lines() {
+  ml_strip_ansi "$1" | LC_ALL=C awk -v bar="$ML_PANE_PANEL_BAR" -v marks="$ML_REPLY_MARKERS" "$ML__PANE_ROW_AWK"'
+    { print ml_pane_line($0) }'
+}
+
 # The one scan of a list of rows. Both readers below feed it, so a raw
-# `capture --json` and a `--pane` transcript name the ending the same way.
+# `capture --json` and a `--pane` transcript name the ending the same way. Each
+# row is normalized first (ml_pane_line), so the reported line carries no panel
+# text either: a WAIT next to a changing panel is still the same WAIT.
 ml__return_line_scan() {
-  LC_ALL=C awk -v done_re="$ML_DONE_LINE_RE" -v sha_min="$ML_DONE_SHA_MIN" -v sha_max="$ML_DONE_SHA_MAX" '
-    { line = $0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line) }
+  LC_ALL=C awk -v done_re="$ML_DONE_LINE_RE" -v sha_min="$ML_DONE_SHA_MIN" -v sha_max="$ML_DONE_SHA_MAX" \
+    -v bar="$ML_PANE_PANEL_BAR" -v marks="$ML_REPLY_MARKERS" "$ML__PANE_ROW_AWK"'
+    { line = ml_pane_line($0) }
     line ~ done_re {
       split(line, field, /[ \t]+/)
       if (length(field[3]) >= sha_min + 0 && length(field[3]) <= sha_max + 0) { out = line; found = 1 }
@@ -697,8 +775,8 @@ ml_return_line() {
 # the reader monitor.sh judges the ending with, for every CLI: a Command Code
 # pane is top-anchored (the ending sits above the last 30 non-blank rows), and
 # a codex pane puts the composer at the bottom of its canvas (the ending sits
-# above the last 100 rows). The CLI's transcript is already plain text, so only
-# ANSI is normalized.
+# above the last 100 rows). Each row goes through the row normalization above
+# (ANSI, the right-hand panel, the blanks at both ends).
 ml_return_line_text() {
   [ -f "$1" ] || { echo "none"; return 0; }
   ml_strip_ansi "$1" | ml__return_line_scan
@@ -719,12 +797,20 @@ ml_return_line_text() {
 # No marker is added for a CLI that has none (codex): its prompt stays the
 # server's isPromptWaiting. The strings are JSON-escaped (`\` `"` and the line
 # break), which is all ml_json_scalar / ml__json_unescape need.
+# Every row goes through steps 1-3 of the row normalization first (ANSI, the
+# right-hand panel, the trailing blanks): a dialog word in claude's diff panel
+# is panel text, not the dialog. The leading blanks are kept — ml_cc_frame and
+# ml_agy_frame count the drawn rows as they are.
 ML_PANE_LIVE_ROWS=30
+ml__pane_rows_cut() {
+  ml_strip_ansi "$1" | LC_ALL=C awk -v bar="$ML_PANE_PANEL_BAR" "$ML__PANE_ROW_AWK"'
+    { print ml_pane_row($0) }'
+}
 ml_pane_as_capture() {
   ml__pac_escape='{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); gsub(/\r/, "") }'
-  ml__pac_all=$(ml_strip_ansi "$1" | LC_ALL=C awk "$ml__pac_escape"'
+  ml__pac_all=$(ml__pane_rows_cut "$1" | LC_ALL=C awk "$ml__pac_escape"'
     { out = (NR == 1 ? $0 : out "\\n" $0) } END { printf "%s", out }')
-  ml__pac_live=$(ml_strip_ansi "$1" | LC_ALL=C awk -v keep="$ML_PANE_LIVE_ROWS" "$ml__pac_escape"'
+  ml__pac_live=$(ml__pane_rows_cut "$1" | LC_ALL=C awk -v keep="$ML_PANE_LIVE_ROWS" "$ml__pac_escape"'
     { if ($0 ~ /[^ \t]/) row[++n] = $0 }
     END {
       first = n - keep + 1

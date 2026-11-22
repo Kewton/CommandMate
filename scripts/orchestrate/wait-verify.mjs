@@ -480,9 +480,129 @@ export function tryLogFile(logFile, attempt) {
  * The return line #4532 asks for — one definition for every reader in this
  * repository (#4532 review): wait-verify's completion signal and launch-worker's
  * shape-outside report. Its sha is 7-40 hex, the same as `IMPL_COMPLETED
- * head=<sha>`; a 1-character token is not a DONE anywhere.
+ * head=<sha>`; a 1-character token is not a DONE anywhere. It is matched against a
+ * row AFTER `normalizePaneLine` (S10), so it is anchored at the row's head with
+ * no blanks: a reply marker and two blanks before `DONE:` is not a DONE here, as
+ * it is not one for the monitor.
  */
-export const DONE_LINE_RE = /^[\s]*DONE:[ \t]+#[0-9]+[ \t]+([0-9a-f]{7,40})[ \t]+verify[ \t]+exit[ \t]+[0-9]+[ \t]*$/;
+export const DONE_LINE_RE = /^DONE:[ \t]+#[0-9]+[ \t]+([0-9a-f]{7,40})[ \t]+verify[ \t]+exit[ \t]+[0-9]+[ \t]*$/;
+
+/**
+ * The shape-outside ending, `IMPL_COMPLETED[ head=<hex>]`, after
+ * `normalizePaneLine` — the one pattern returnLineOf and hasCompletionSignal
+ * share, with the same blank class (`[ \t]`) as DONE_LINE_RE and the monitor
+ * (#4532 review P3-3: the signal used `\s`, so a CR or a full-width space read
+ * differently there). hasCompletionSignal counts a named head only when it is
+ * 7-40 hex, as before.
+ */
+export const IMPL_COMPLETED_LINE_RE = /^IMPL_COMPLETED(?:[ \t]+head=([0-9a-f]+))?[ \t]*$/;
+
+/**
+ * The reply markers — ONE piece of data for every reader (#4532 review P2-1,
+ * invariant M1): `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv`,
+ * the same file monitor-lib.sh reads. One marker per line, TAB-separated
+ * `tool platform marker source`; `#` lines are comments. A missing or empty
+ * file throws: a reader with no markers would silently miss every one-line reply.
+ */
+export const REPLY_MARKERS_FILE = fileURLToPath(
+  new URL('../../.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv', import.meta.url),
+);
+
+/**
+ * @param {string} [file]
+ * @returns {Array<{ tool: string, platform: string, marker: string, source: string }>}
+ */
+export function readReplyMarkers(file = REPLY_MARKERS_FILE) {
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    throw new Error(`cannot read the reply markers (${file}): ${error.message}`);
+  }
+  const rows = text
+    .split('\n')
+    .filter((line) => line !== '' && !line.startsWith('#'))
+    .map((line) => {
+      const [tool, platform, marker, source] = line.split('\t');
+      return { tool, platform, marker, source };
+    })
+    .filter((row) => row.marker);
+  if (rows.length === 0) throw new Error(`no reply markers in ${file}`);
+  return rows;
+}
+
+/**
+ * The row normalization over a given marker set (`normalizePaneLine` is this
+ * over reply-markers.tsv).
+ *
+ * @param {string[]} markers
+ * @returns {(row: string) => string}
+ */
+export function makePaneLineNormalizer(markers) {
+  const escape = (m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const set = [...new Set(markers)].filter(Boolean);
+  // No marker set strips nothing (never an empty alternation, which would eat a blank).
+  const head = set.length ? new RegExp(`^(?:${set.map(escape).join('|')})[ \\t]`) : /(?!)/;
+  return (row) =>
+    row
+      .replace(/\\u001[bB]\[[0-9;]*[a-zA-Z]/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+      .replace(/\\u00[aA]0/g, ' ')
+      .replace(/\u00a0/g, ' ')
+      .replace(/^([\s\S]*?[^ \t])[ \t]{2,}│[\s\S]*$/, '$1')
+      .replace(/[ \t]+$/, '')
+      .replace(/^[ \t]+/, '')
+      .replace(head, '');
+}
+
+let defaultNormalizer = null;
+
+/**
+ * One pane row as every head-anchored reader matches it (#4532 S10, review r4
+ * P1-B) — the JS copy of monitor-lib.sh's row normalization (`ml_pane_line`;
+ * the comment there has the reasons), pinned to the same answers by
+ * tests/unit/skills/orchestrate-monitor/pane-line-agreement-4532.test.ts:
+ *   1. ANSI (CSI, raw or JSON-escaped) and the non-breaking space, as
+ *      `ml_strip_ansi` does;
+ *   2. the right-hand panel — from the first `│` that follows text and two or
+ *      more blanks, to the end of the row (claude 2.1.330's diff panel:
+ *      `DONE: … exit 0      │ src/x.ts +12 -3`);
+ *   3. the blanks at both ends;
+ *   4. ONE reply marker at the head — the set is reply-markers.tsv, read by
+ *      `readReplyMarkers` and nothing else — and the one blank after it, so a
+ *      one-line reply `<marker> DONE: …` is read like the same line on its own
+ *      row (lead r1). Nothing else is a marker (the composer's prompt glyph,
+ *      the echo's, `│`, `-`), only one is stripped, and nothing is trimmed
+ *      after it.
+ *
+ * @param {string} row
+ * @returns {string}
+ */
+export function normalizePaneLine(row) {
+  defaultNormalizer ??= makePaneLineNormalizer(readReplyMarkers().map((r) => r.marker));
+  return defaultNormalizer(row);
+}
+
+/**
+ * The newest ending in a pane's rows, read the way the monitor reads it
+ * (monitor-lib.sh `ml__return_line_scan`): each row normalized, then a DONE of
+ * DONE_LINE_RE's shape, `WAIT:` / `STOP:` at the head, or `IMPL_COMPLETED` —
+ * the shape-outside ending. The line is the normalized row.
+ *
+ * @param {string} text rows separated by `\n`
+ * @returns {{ kind: 'DONE' | 'WAIT' | 'STOP' | 'SHAPE_OUTSIDE' | 'none', line: string }}
+ */
+export function returnLineOf(text) {
+  let found = { kind: 'none', line: '' };
+  for (const line of text.split('\n').map(normalizePaneLine)) {
+    if (DONE_LINE_RE.test(line)) found = { kind: 'DONE', line };
+    else if (/^WAIT:/.test(line)) found = { kind: 'WAIT', line };
+    else if (/^STOP:/.test(line)) found = { kind: 'STOP', line };
+    else if (IMPL_COMPLETED_LINE_RE.test(line)) found = { kind: 'SHAPE_OUTSIDE', line };
+  }
+  return found;
+}
 
 /**
  * Whether a pane (or a reply) shows the completion signal on a line of its own
@@ -501,13 +621,16 @@ export const DONE_LINE_RE = /^[\s]*DONE:[ \t]+#[0-9]+[ \t]+([0-9a-f]{7,40})[ \t]
  * @param {{ head?: string, requireHead?: boolean }} [options]
  */
 export function hasCompletionSignal(pane, { head, requireHead = false } = {}) {
+  // Each row through the one normalization (#4532 S10): a signal row with
+  // claude's diff panel to its right is read by its left column.
   return pane
-    .replace(/\u001b\[[0-9;]*m/g, '')
     .split('\n')
+    .map(normalizePaneLine)
     .some((line) => {
-      const legacy = /^[\s]*IMPL_COMPLETED(?:[\s]+head=([0-9a-f]{7,40}))?[\s]*$/.exec(line);
+      const legacy = IMPL_COMPLETED_LINE_RE.exec(line);
       if (legacy) {
         if (!legacy[1]) return !requireHead;
+        if (legacy[1].length < 7 || legacy[1].length > 40) return false;
         return !head || head.startsWith(legacy[1]);
       }
       // `DONE: #<N> <sha> verify exit <n>` — the return line #4532 asks for. Its
@@ -773,7 +896,7 @@ export function awaitCompletionSignal({ run, sleep, now, o, cwd, since, supersed
     const newer = supersededBy?.();
     if (newer) return { seen: false, reason: newer };
     if (found) return found;
-    if (now().getTime() >= deadline) return { seen: false, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s; no DONE:/WAIT:/STOP: return line either` };
+    if (now().getTime() >= deadline) return { seen: false, reason: `no IMPL_COMPLETED line within ${o.signalTimeout}s` };
     sleep(SIGNAL_POLL_SEC * 1000);
   }
 }

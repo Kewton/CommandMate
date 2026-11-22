@@ -101,7 +101,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { allocateLog, itemProblem, workItemName } from './execution-key.mjs';
-import { DONE_LINE_RE, QUERY_TIMEOUT_MS, defaultRun } from './wait-verify.mjs';
+import { QUERY_TIMEOUT_MS, defaultRun, returnLineOf } from './wait-verify.mjs';
 import { resolveInstanceThroughCli } from './resolve-instance.mjs';
 
 /**
@@ -467,24 +467,18 @@ export function endingOfAnswer(answer) {
     .filter((value) => typeof value === 'string')
     .sort((a, b) => b.length - a.length)[0];
   if (typeof text !== 'string') return { kind: 'none', line: '' };
+  // The escaped form a `capture --json` string can carry, unescaped; then the
+  // rows go through wait-verify's returnLineOf — the one row normalization
+  // (#4532 S10: claude's diff panel to the right of a row is cut off) and the
+  // one scan the monitor runs too.
   const rows = text
     // eslint-disable-next-line no-control-regex
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
     .replace(/\\u001b\[[0-9;?]*[ -/]*[@-~]/g, '')
     .replace(/\\u00[aA]0/g, ' ')
-    .replace(/\u00a0/g, ' ')
     .replace(/\\"/g, '"')
-    .replace(/\\n/g, '\n')
-    .split('\n')
-    .map((row) => row.trim());
-  let found = { kind: 'none', line: '' };
-  for (const line of rows) {
-    if (DONE_LINE_RE.test(line)) found = { kind: 'DONE', line };
-    else if (/^WAIT:/.test(line)) found = { kind: 'WAIT', line };
-    else if (/^STOP:/.test(line)) found = { kind: 'STOP', line };
-    else if (/^IMPL_COMPLETED([ \t]+head=[0-9a-f]+)?[ \t]*$/.test(line)) found = { kind: 'SHAPE_OUTSIDE', line };
-  }
-  return found;
+    .replace(/\\n/g, '\n');
+  return returnLineOf(rows);
 }
 
 /**

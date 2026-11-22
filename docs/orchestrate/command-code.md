@@ -75,7 +75,9 @@ Command Code は、前のターンの `hook_stop` が、生成中のターンよ
 | どれも無い（生成中・入力待ち） | 何も出さない（従来のストリームと 1 バイトも変わらない） |
 
 行頭の完全一致で読む。依頼文（goal）自体が 3 つの形を名指しして画面に残るので、部分一致だと「指示を終わりと読む」— だから行全体で判定する。
-Command Code は 200x1000 の pane の上から描く（top-anchored）ので、`realtimeSnippet`（下の 100 行）は transcript が pane を埋めるまで余白になる（#4245）。そのため終わり方は `capture --json` の `content` / `realtimeSnippet` ではなく、`capture --pane` の全行から読む（末尾 30 行の窓では、枠の行が下に続くと合図が窓の外へ押し出される）。見張りは担当を問わず（セッションが動いていれば）毎ポーリングで `--pane` を引き、終わり方はその全行だけで判定する（codex も下端の入力欄で `realtimeSnippet` が埋まり、上の方の合図が窓に入らない。#3946）。許可のダイアログも、`ml_cc_has_prompt_marker` と同じ目印（下の 30 行の窓）を pane にも当てて `PROMPT` にする（#4434 の枠のように `content` が空で `isPromptWaiting` が false でも拾う）。`--pane` の読み取りに失敗したら 1 回だけ `WARN capture --pane failed` を出す。
+Command Code は 200x1000 の pane の上から描く（top-anchored）ので、`realtimeSnippet`（下の 100 行）は transcript が pane を埋めるまで余白になる（#4245）。そのため終わり方は `capture --json` の `content` / `realtimeSnippet` ではなく、`capture --pane` の全行から読む（末尾 30 行の窓では、枠の行が下に続くと合図が窓の外へ押し出される）。見張りは担当を問わず（セッションが動いていれば）毎ポーリングで `--pane` を引き、終わり方はその全行だけで判定する（codex も下端の入力欄で `realtimeSnippet` が埋まり、上の方の合図が窓に入らない。#3946）。許可のダイアログも、`ml_cc_has_prompt_marker` と同じ目印（下の 30 行の窓）を pane にも当てて `PROMPT` にする（#4434 の枠のように `content` が空で `isPromptWaiting` が false でも拾う）。`--pane` の読み取りに失敗したら、失敗が続く間に 1 回だけ `WARN capture --pane failed` を出す（読めたら張り直し、次の失敗でまた出す）。
+
+行は照合の前に 1 つの正規化を通す（見張りの `monitor-lib.sh` の `ml_pane_line` と、`wait-verify.mjs` の `normalizePaneLine`。同じ表の行で答えが一致することを試験で固定している）: ANSI と NBSP を落とし、右の差分のパネル（`<文字><空白 2 つ以上>│ <パネル>`。claude 2.1.330 の「N files edited」）を `│` から行末まで落とし、前後の空白を落とす。行頭の返しの目印は 1 つだけ、直後の空白 1 つと一緒に剥がすので、1 行だけの返事（`<目印> DONE: …`）も拾う。目印の集合（担当 × プラットフォーム）は `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv` の 1 か所にあり、見張りも `wait-verify.mjs` もそこからだけ読む。ほかの文字（入力欄の `❯`・echo の `›`・`│` など）は剥がさない（入力欄に打っただけの `❯ DONE: …` は終わりと読まない）。
 
 
 ## 3-4 止まったときの対処

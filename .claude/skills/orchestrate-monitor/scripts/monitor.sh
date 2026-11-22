@@ -490,8 +490,8 @@ while [ "$done_count" -lt "$n_ids" ]; do
     # so the ending is judged on ALL its rows and the prompt marker is put on it
     # too (classify-state.sh --pane-json). `--json` stays the source of the
     # state, promptData, the session name and the rest.
-    # A failed pane read is announced once per worker rather than read as "no
-    # ending": silence there is what hid #4434.
+    # A failed pane read is announced once per failure episode rather than read
+    # as "no ending": silence there is what hid #4434.
     pane_file="$STATE_DIR/$lbl.pane.txt"
     pane_json="$STATE_DIR/$lbl.pane.json"
     pane_ok=0
@@ -501,11 +501,14 @@ while [ "$done_count" -lt "$n_ids" ]; do
       # shellcheck disable=SC2086
       if $CM capture "$wid" --pane $cap_args > "$pane_file" 2>/dev/null; then
         pane_ok=1
+        # A read that works again re-arms the WARN, so a later failure is
+        # announced too (#4532 review r4 P3-H): one WARN per failure episode.
+        rm -f "$STATE_DIR/$lbl.panewarn"
         ml_pane_as_capture "$pane_file" "$(ml_json_scalar "$poll" cliToolId)" > "$pane_json" 2>/dev/null \
           || rm -f "$pane_json"
       elif [ ! -f "$STATE_DIR/$lbl.panewarn" ]; then
         touch "$STATE_DIR/$lbl.panewarn"
-        echo "monitor[$lbl]: WARN capture --pane failed — the ending and a prompt drawn only on the pane are not read while it fails (reported once)"
+        echo "monitor[$lbl]: WARN capture --pane failed — the ending and a prompt drawn only on the pane are not read while it fails (reported once until a read succeeds)"
       fi
     fi
 

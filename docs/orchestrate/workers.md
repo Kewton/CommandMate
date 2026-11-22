@@ -191,7 +191,7 @@ exit 10 にもならない）。
   画面の裸の `IMPL_COMPLETED` は数えない（前の task の行が残ったまま、この task の途中のターン終了が来ることがある）。画面で数えるのは、
   今の HEAD を名指す `DONE: #<N> <sha> verify exit <n>` か `IMPL_COMPLETED head=<sha>` で、その HEAD のコミットが task の作成より後のものだけ。どれも無ければ `--signal-timeout` まで未確定のまま待つ。
   task が台帳に無い（作成時刻が分からない）ときだけ、画面の行を今までどおり数えて `signal-task=unknown` と残す。`IMPL_COMPLETED head=<sha>` の形なら、その HEAD が今の HEAD のときだけ数え、
-  合図を見た後に HEAD が動いたら検証をやり直す。画面は `capture --pane` で**全行**を読む（`--json` の `content` / `realtimeSnippet` の末尾の窓や `--tail` では、枠の行が下に続くと合図が押し出される。`wait-verify.mjs` も同じ読み、#4315。見張り `orchestrate-monitor` も担当を問わず毎ポーリング `--pane` の全行で終わり方を判定し、許可のプロンプトも pane から拾う、#4532）。次に、**この呼び出しの検証の開始時刻**（ログの `Verifying: <WT> (run <id>)` の run を `verify show <id> --json` で読む。
+  合図を見た後に HEAD が動いたら検証をやり直す。画面は `capture --pane` で**全行**を読む（`--json` の `content` / `realtimeSnippet` の末尾の窓や `--tail` では、枠の行が下に続くと合図が押し出される。`wait-verify.mjs` も同じ読み、#4315。見張り `orchestrate-monitor` も担当を問わず毎ポーリング `--pane` の全行で終わり方を判定し、許可のプロンプトも pane から拾う、#4532。どの読み手も行を同じ正規化に通すので、右に claude の差分のパネルが開いた行 `DONE: … exit 0   │ …` も拾う。行頭の返しの目印（集合は `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv`）は 1 つだけ剥がすので、1 行だけの返事 `<目印> DONE: …` も拾う）。次に、**この呼び出しの検証の開始時刻**（ログの `Verifying: <WT> (run <id>)` の run を `verify show <id> --json` で読む。
   worktree の最新の run（`verify history --limit 1`）は使わない。その間に別の run が始まっていることがある、#3883）と
   最後のターン終了（`capture --json` の `lastStopEventAt`）と最後のコミットの時刻と作業ツリーを比べる。検証の開始の後にコミットがあるか、
   最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、

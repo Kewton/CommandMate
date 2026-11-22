@@ -87,16 +87,24 @@ fi
 #
 # The same marker is also put on the pane (--pane-json, #4532 review P2-A): a
 # dialog the pane shows while `--json`'s window is blank padding (#4434's frame)
-# is a prompt all the same. Only the marker this CLI already has is used; a CLI
-# whose marker set reads nothing on its dialog (codex's `› 1.`) stays with the
-# server's isPromptWaiting.
+# is a prompt all the same. Only the marker this CLI already has is used, and
+# only for claude / command-code / antigravity: a CLI with no marker set of its
+# own (codex's `› 1.`) stays with the server's isPromptWaiting.
 prompt_waiting=$(ml_json_scalar "$JSON_FILE" isPromptWaiting)
 session_status=$(ml_json_scalar "$JSON_FILE" sessionStatus)
 if [ "$prompt_waiting" = "true" ] || [ "$session_status" = "waiting" ] || "$has_prompt_marker" "$JSON_FILE"; then
   echo PROMPT
   exit 0
 fi
-if [ -n "$PANE_JSON" ] && [ -f "$PANE_JSON" ] && "$has_prompt_marker" "$PANE_JSON"; then
+# Only for a CLI whose marker set is its own (#4532 review r4 P3-G): the `*)`
+# arm above puts Claude's markers on everything else, and on a codex pane they
+# read the transcript above the composer — a quoted Claude dialog in a codex
+# reply became PROMPT. Those CLIs stay with the server's isPromptWaiting above.
+case "$cli_tool" in
+  claude|command-code|antigravity) pane_marker=1 ;;
+  *) pane_marker=0 ;;
+esac
+if [ "$pane_marker" = "1" ] && [ -n "$PANE_JSON" ] && [ -f "$PANE_JSON" ] && "$has_prompt_marker" "$PANE_JSON"; then
   echo PROMPT
   exit 0
 fi

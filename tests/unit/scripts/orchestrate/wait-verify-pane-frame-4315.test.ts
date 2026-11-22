@@ -113,10 +113,7 @@ describe('awaitCompletionSignal reads the whole pane frame (Issue #4315)', () =>
 describe('the wider read takes nothing it did not take before (Issue #4315)', () => {
   it('a frame with no signal stays unseen', () => {
     const h = harness({ frame: FRAME.replace('  IMPL_COMPLETED head=0a1b2c3d4e', '  still working') });
-    expect(awaitCompletionSignal(h.ctx)).toEqual({
-      seen: false,
-      reason: 'no IMPL_COMPLETED line within 60s; no DONE:/WAIT:/STOP: return line either',
-    });
+    expect(awaitCompletionSignal(h.ctx)).toEqual({ seen: false, reason: 'no IMPL_COMPLETED line within 60s' });
   });
 
   it('a line naming another HEAD stays unseen', () => {
