@@ -22,10 +22,12 @@ import {
 import { markLastSendDiscarded } from '@/lib/session/send-attempt-state';
 import { isInputBoundaryRefusal, type InstanceInputTicket } from '@/lib/session/instance-input-lock';
 import { SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/composer-text';
-import { classifySubmitWithRule, type SubmitRule, type SubmitState } from './submit-composer-read';
+import { classifySubmitWithRule, claudePickerFooterBelowComposer, type SubmitRule, type SubmitState } from './submit-composer-read';
 import {
   PROMPT_REPORT_POLL_MS,
   PROMPT_REPORT_WAIT_MS,
+  SLASH_COMMAND_SETTLE_POLL_MS,
+  SLASH_COMMAND_SETTLE_WAIT_MS,
   logger,
   promptUnreportedResendNote,
   type SubmitVerifiedSendParams,
@@ -329,4 +331,126 @@ export function holdsResendEnter(input: {
     return true;
   }
   return false;
+}
+
+/**
+ * Whether a body is a lone slash command (Issue #4555): one line starting with
+ * `/` and a non-blank character, arguments included (`/model gpt-6.2-sol`).
+ *
+ * Arguments are included because the TUI reads the line as a command whatever
+ * follows the name, and a command that opens a picker or a dialog takes the
+ * next Enter there. Any one-line body starting with `/` counts (a path too):
+ * every TUI this sender drives reads it as a command line.
+ */
+export function isLoneSlashCommand(message: string): boolean {
+  return /^\/\S[^\r\n]*$/.test(message);
+}
+
+/**
+ * Watch a lone slash command still shown in the composer after its Enter,
+ * without another key, until the screen says something else (Issue #4555).
+ *
+ * The frame may be the one from before the Enter on a pane that draws late,
+ * while the command's picker or dialog is already open: an Enter resent there
+ * picks its highlighted row (codex `/model`: the model, then the effort, saved
+ * as the default). So no Enter is resent for such a body. The pane is read
+ * every {@link SLASH_COMMAND_SETTLE_POLL_MS} until `deadline`; the first verdict
+ * that is not `pending` (the picker: no composer, `B-absent`; claude's picker
+ * footer under the composer still showing the command, `S-panel` (#4555 R6);
+ * generating; a cleared composer), or the agent's own report of the prompt, is returned for
+ * the read-back loop to act on as it acts on any read.
+ *
+ * Issue #4048: ownership is asked after every capture, so a session replaced
+ * meanwhile throws as indeterminate.
+ *
+ * @throws Error — `submit could not be confirmed` (`indeterminate` /
+ *   `submit-unconfirmed`, never `not-sent`) when the composer still shows the
+ *   command at `deadline`: the Enter may have been taken, and nothing is resent.
+ */
+export async function awaitSlashCommandSettle(params: {
+  sessionName: string;
+  message: string;
+  cliToolId: CLIToolType;
+  composer: ComposerSpec;
+  enteredAt: number;
+  rule: SubmitRule;
+  output: string;
+  deadline: number;
+  ticket: InstanceInputTicket;
+  target?: PromptSubmitExpected;
+}): Promise<SubmitReadBack> {
+  const { sessionName, message, cliToolId, composer, enteredAt, deadline, ticket, target } = params;
+  logger.warn('submit-not-confirmed:slash-command-held', { sessionName, cliToolId, rule: params.rule });
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(SLASH_COMMAND_SETTLE_POLL_MS, deadline - Date.now())));
+    if (readPromptSubmitReceipt(sessionName, cliToolId, enteredAt, target) === 'received') {
+      assertStillOwnedAfterEnter(ticket, cliToolId, 'the slash command wait');
+      logger.info('submit-confirmed-by-prompt-hook', { sessionName, cliToolId, rule: params.rule });
+      return { state: 'submitted', rule: params.rule, output: params.output };
+    }
+    const output = await capturePane(sessionName, { startLine: -composer.verifyCaptureLines });
+    assertStillOwnedAfterEnter(ticket, cliToolId, 'the slash command wait');
+    const read = classifySubmitWithRule(output, cliToolId, message, composer);
+    // Issue #4555 R6: claude's picker drawn under the composer it left showing
+    // the command — the Enter opened it. Pending reads only, here only.
+    const verdict =
+      read.state === 'pending' && claudePickerFooterBelowComposer(output, cliToolId)
+        ? { state: 'submitted' as const, rule: 'S-panel' as const }
+        : read;
+    if (verdict.state !== 'pending') {
+      logger.info('submit-classified', { sessionName, cliToolId, state: verdict.state, rule: verdict.rule, slashCommand: true });
+      return { ...verdict, output };
+    }
+  }
+  invalidateCache(sessionName);
+  logger.error('submit-not-confirmed:slash-command-unsettled', {
+    sessionName,
+    cliToolId,
+    waitedMs: SLASH_COMMAND_SETTLE_WAIT_MS,
+  });
+  throw new Error(
+    `Message submit could not be confirmed for session ${sessionName}: the composer still showed the slash command ` +
+      `${SLASH_COMMAND_SETTLE_WAIT_MS}ms after Enter, and Enter was not pressed again — a picker or dialog the command ` +
+      `opened would take it (Issue #4555). ${promptUnreportedResendNote(target, cliToolId)}`
+  );
+}
+
+/**
+ * The read-back after a lone slash command's `pending` verdict (Issue #4555:
+ * kept out of `sendUnderInputLock` (submit-verified-sender.ts), whose
+ * complexity #4057 bounds). Any other verdict, or any other body, comes back
+ * as it was. A lone slash command's `pending` is watched without a key by
+ * {@link awaitSlashCommandSettle}, against one deadline per send counted from
+ * its first Enter (returned, for the next read of the same send). THROWS as
+ * unconfirmed when the composer still shows the command at that deadline.
+ */
+export async function settleLoneSlashCommand(input: {
+  state: SubmitState;
+  rule: SubmitRule;
+  output: string;
+  slashSettleDeadline: number | null;
+  sessionName: string;
+  message: string;
+  cliToolId: CLIToolType;
+  composer: ComposerSpec;
+  enteredAt: number;
+  ticket: InstanceInputTicket;
+  target: PromptSubmitExpected | undefined;
+}): Promise<SubmitReadBack & { slashSettleDeadline: number | null }> {
+  const { state, rule, output, slashSettleDeadline, message, target } = input;
+  if (state !== 'pending' || !isLoneSlashCommand(message)) return { state, rule, output, slashSettleDeadline };
+  const deadline = slashSettleDeadline ?? input.enteredAt + SLASH_COMMAND_SETTLE_WAIT_MS;
+  const settled = await awaitSlashCommandSettle({
+    sessionName: input.sessionName,
+    message,
+    cliToolId: input.cliToolId,
+    composer: input.composer,
+    enteredAt: input.enteredAt,
+    rule,
+    output,
+    deadline,
+    ticket: input.ticket,
+    ...(target !== undefined ? { target } : {}),
+  });
+  return { ...settled, slashSettleDeadline: deadline };
 }

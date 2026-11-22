@@ -47,6 +47,9 @@ import {
 // would invite the callers that must keep using `getActiveTask` (Auto-Yes,
 // prompt events) to reach for the wider set by accident.
 import { getVerifiableTask } from '@/lib/db/tasks-db';
+// Past the barrel, like `getVerifiableTask`: only the runner's close retry (Issue #4494) needs to
+// tell a row that is gone from a write that failed.
+import { VerificationRunNotFoundError } from '@/lib/db/verification-db';
 import { resolveDefaultBranchName } from '@/lib/git/git-default-branch';
 import { createLogger } from '@/lib/logger';
 // Issue #2000: deep path, not the `@/lib/push` barrel — several suites replace
@@ -548,6 +551,161 @@ class RunSlot {
  * that {@link startVerification} deliberately did not wait for.
  */
 const inFlight = new Map<number, Promise<VerificationRunTerminalStatus>>();
+
+// =============================================================================
+// Closing the run row (Issue #4494)
+// =============================================================================
+
+/**
+ * How many writes closing one run's row may take, the verdict write included (Issue #4494).
+ *
+ * The close used to be the verdict write and one `error` write after it. When both threw, the row
+ * stayed `running` for as long as the server lived and every later verify of the worktree was
+ * refused as already in progress. The bound keeps a database that never recovers from turning
+ * into a loop; a row still open past it is closed by the next {@link startVerification}.
+ */
+export const RUN_CLOSE_MAX_ATTEMPTS = 5;
+
+/** The pause between two writes closing a run's row (Issue #4494). */
+export const RUN_CLOSE_RETRY_DELAY_MS = 200;
+
+/**
+ * Runs whose row this process could not close, by id (Issue #4494).
+ *
+ * Every one of them ended in this process and has no verdict on record, so each is closed as
+ * `error` — never as the verdict its write lost — before the next run looks for an open one.
+ */
+const unclosedRuns = new Set<number>();
+
+/** Tests only: the ids of the runs whose row is waiting to be closed. */
+export function getUnclosedRunIdsForTests(): number[] {
+  return [...unclosedRuns];
+}
+
+/**
+ * When a row {@link closeRunRow} gave up on is written again without waiting for another run
+ * (Issue #4494 r1): each entry is the pause before one more {@link closeUnclosedRuns}, 5s, 30s,
+ * then every 60s, about 11.5 minutes in all. Past the last one the rows are left for the next
+ * {@link startVerification} (or the startup reconciler), so a database that never recovers is not
+ * written to for ever. A row that is gone or closed is dropped, and the timer stops when none is
+ * left. The timer is `unref()`'d: it never keeps the process alive.
+ */
+export const RUN_LATE_CLOSE_DELAYS_MS: readonly number[] = [
+  5_000, 30_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000, 60_000,
+];
+let runLateCloseDelaysMs: readonly number[] = RUN_LATE_CLOSE_DELAYS_MS;
+
+/** Tests only: shorten the late-close backoff (no argument restores the default). */
+export function setRunLateCloseDelaysMsForTests(delays?: readonly number[]): void {
+  runLateCloseDelaysMs = delays ?? RUN_LATE_CLOSE_DELAYS_MS;
+}
+
+/** The pending late close and how many of its delays have been spent. */
+let lateCloseTimer: NodeJS.Timeout | null = null;
+let lateCloseStep = 0;
+
+/** Tests only: forget the remembered rows and stop the late close (each test has its own db). */
+export function resetUnclosedRunsForTests(): void {
+  unclosedRuns.clear();
+  if (lateCloseTimer) clearTimeout(lateCloseTimer);
+  lateCloseTimer = null;
+  lateCloseStep = 0;
+}
+
+/**
+ * Arm the next late close, unless one is pending or the backoff is spent. `restart` begins the
+ * backoff again — a newly remembered row gets the whole of it.
+ */
+function scheduleLateClose(restart: boolean): void {
+  if (restart) lateCloseStep = 0;
+  if (lateCloseTimer || unclosedRuns.size === 0) return;
+  const delay = runLateCloseDelaysMs[lateCloseStep];
+  if (delay === undefined) return;
+  lateCloseStep += 1;
+  lateCloseTimer = setTimeout(() => {
+    lateCloseTimer = null;
+    try {
+      closeUnclosedRuns(getDbInstance());
+    } catch {
+      // No database to write to right now; the next step (or startVerification) tries again.
+    }
+    scheduleLateClose(false);
+  }, delay);
+  lateCloseTimer.unref?.();
+}
+
+/** One close write. `gone` is a row that no longer exists: there is nothing left to close. */
+function tryCloseRunRow(
+  db: Database.Database,
+  runId: number,
+  status: VerificationRunTerminalStatus
+): 'closed' | 'gone' | Error {
+  try {
+    finishVerificationRun(db, runId, status);
+    return 'closed';
+  } catch (error) {
+    if (error instanceof VerificationRunNotFoundError) return 'gone';
+    return error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+/**
+ * Close a run's row with `status`, retrying a failed write a bounded number of times (#4494).
+ *
+ * Never throws or rejects. Resolves with the status the run ends with: `status` when that write
+ * succeeded, otherwise `error` — a verdict that could not be written is not a verdict, so a retry
+ * never writes it again (a failed or cancelled run is not turned into a pass, and a pass that was
+ * not recorded is not reported). A row that is gone is not retried. A row still open after
+ * {@link RUN_CLOSE_MAX_ATTEMPTS} writes is kept in {@link unclosedRuns} and closed `error` by the
+ * next {@link startVerification}.
+ *
+ * The first write happens synchronously, before the first `await`.
+ */
+async function closeRunRow(
+  db: Database.Database,
+  runId: number,
+  status: VerificationRunTerminalStatus
+): Promise<VerificationRunTerminalStatus> {
+  const first = tryCloseRunRow(db, runId, status);
+  if (first === 'closed') return status;
+  if (first === 'gone') return 'error';
+
+  let lastError: Error = first;
+  for (let attempt = 2; attempt <= RUN_CLOSE_MAX_ATTEMPTS; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, RUN_CLOSE_RETRY_DELAY_MS));
+    const outcome = tryCloseRunRow(db, runId, 'error');
+    if (outcome === 'closed' || outcome === 'gone') {
+      logger.warn('verification-run-close-retried', { runId, status, attempts: attempt, outcome });
+      return 'error';
+    }
+    lastError = outcome;
+  }
+
+  unclosedRuns.add(runId);
+  scheduleLateClose(true);
+  logger.error('verification-run-close-failed', {
+    runId,
+    status,
+    attempts: RUN_CLOSE_MAX_ATTEMPTS,
+    error: lastError.message,
+  });
+  return 'error';
+}
+
+/**
+ * Close, as `error`, the rows {@link closeRunRow} gave up on (Issue #4494). One write each; a row
+ * that still cannot be written stays listed for the next call, a row that is gone is dropped.
+ * Called by the late-close timer and before every {@link startVerification}.
+ */
+function closeUnclosedRuns(db: Database.Database): void {
+  for (const runId of [...unclosedRuns]) {
+    const outcome = tryCloseRunRow(db, runId, 'error');
+    if (outcome === 'closed' || outcome === 'gone') {
+      unclosedRuns.delete(runId);
+      logger.warn('verification-run-closed-late', { runId, outcome });
+    }
+  }
+}
 
 /**
  * Resolve when `runId` finishes, with its final status.
@@ -2174,6 +2332,8 @@ export async function startVerification(
 ): Promise<{ runId: number }> {
   const db = getDbInstance();
 
+  // Issue #4494: a row this process failed to close would otherwise refuse this run for good.
+  closeUnclosedRuns(db);
   const existing = getRunningVerificationRun(db, input.worktreeId);
   if (existing) {
     throw new VerificationConflictError(input.worktreeId, existing.id);
@@ -2280,7 +2440,9 @@ export async function startVerification(
       logTail: configFailure,
       executionWindow: { startedAt: recordedAt, finishedAt: recordedAt },
     });
-    finishVerificationRun(db, run.id, 'error');
+    // Issue #4494: a failed write no longer throws out of here with the row left `running`; the
+    // first write is synchronous, so a row that can be written is closed before this returns.
+    void closeRunRow(db, run.id, 'error');
     logger.warn('verification-config-unusable', { runId: run.id, worktreeId: input.worktreeId });
     // Issue #2000: an unusable config leaves the verdict as absent as a red
     // gate does, and the operator's next move is the same — so this path
@@ -2334,9 +2496,8 @@ export async function startVerification(
       // ever spawned, so there is nothing to kill and no gate row to write —
       // just the verdict the operator asked for.
       if (cancellation.cancelled) {
-        terminalStatus = 'cancelled';
-        finishVerificationRun(db, run.id, 'cancelled');
-        return 'cancelled';
+        terminalStatus = await closeRunRow(db, run.id, 'cancelled');
+        return terminalStatus;
       }
 
       const status = await executeRun(
@@ -2354,19 +2515,18 @@ export async function startVerification(
         cancellation,
         slot
       );
-      terminalStatus = status;
-      finishVerificationRun(db, run.id, status);
-      return status;
+      // Issue #4494: the status the row was actually closed with. A verdict whose write failed
+      // is not one, so the task and the notification below hear `error`, as the row says.
+      terminalStatus = await closeRunRow(db, run.id, status);
+      return terminalStatus;
     } catch (error) {
       logger.error('verification-run-crashed', {
         runId: run.id,
         error: error instanceof Error ? error.message : String(error),
       });
-      try {
-        finishVerificationRun(db, run.id, 'error');
-      } catch {
-        // The row is gone (worktree deleted mid-run); nothing left to close.
-      }
+      // A row that is gone (worktree deleted mid-run) is left alone; one that cannot be written
+      // is retried, bounded, and then closed by the next run (Issue #4494).
+      terminalStatus = await closeRunRow(db, run.id, 'error');
       return 'error';
     } finally {
       if (trackedTask) {

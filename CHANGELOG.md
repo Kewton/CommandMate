@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.55.1] - 2026-11-22
+
+> **Highlight**: `/model`・`/effort` を画面や CLI から送ったときに、モデルや effort が勝手に選ばれる・既定が書き換わる問題を直した。応答の遅い codex では CommandMate の送り直した Enter が picker を選んでいた（#4555）。Claude Code 2.1.329 以降では選択画面の案内の文言が変わり、`/model` を番号つきの質問と読んで既定を保存していた（#4556）。どちらも本物の Claude Code 2.1.330 と、描画を遅らせた codex で、余分な Enter が 0 回・設定ファイルが変わらないことを確かめた。
+
+### Changed
+
+- **chore(orchestrate): 契約の gates に `lint-sh` を必ず入れる** (#4527): `contract.mjs generate --worktree` は、その worktree の `.commandmate/verify.yaml` が `lint-sh` を宣言していれば、生成する契約の `verify.gates` に必ず `lint-sh` を入れる（`lint` の直後。既定・書き出した gates・refactor の 2 ゲートのどれでも、足す向きだけ）。
+
+### Fixed
+
+- **fix(detection): Claude Code 2.1.329 以降で `/model`・`/effort` の選択画面が操作できず、`/model` が既定のモデルを書き換えていた** (#4556): Claude Code 2.1.329 で選択画面の案内の文言が `s to use this session only · Enter to save` に変わり、CommandMate は `/effort` を入力待ちと読んで ◀▶・確定・「このセッションだけ」のボタンを出さず、`/model` を番号つきの質問と読んでいた（番号のボタンや Enter で答えると既定のモデルを保存し、Auto-Yes が有効なセッションでは Auto-Yes が答えて既定を書き換えることもあった）。新しい文言を選択画面として判定するようにし、「このセッションだけ（s）」のボタンが戻った。Auto-Yes はこの画面に答えない。2.1.286 以前の画面の判定は変わらない。古い版での回避策: ターミナルのタブで矢印を押してから `s` を押す（このセッションだけに効く）、Auto-Yes が有効なセッションで `/model` を開かない、既に既定が書き換わっていたら `/model`・`/effort` で戻す。
+
+- **fix(send): 応答の遅い codex に `/model` を送ると、モデルと effort が勝手に選ばれる問題を直した** (#4555): 長く動いて描画の遅れた codex のセッションに、画面や CLI から `/model` を送ると、CommandMate が Enter を送り直し、その Enter が picker の強調中のモデルと effort を選んでいた（`• Model changed to … high` と出て、codex の既定の設定も書き換わりうる）。単独の slash コマンド（1 行で `/` と空白でない文字から始まる。`/model gpt-…` のような引数つきも含む）では Enter を送り直さず、最長 5 秒、画面が変わるのを待つ。それでも確かめられなければ「届いたか分からない」として返し、自動では送り直さない。codex に限らず、同じ送信の経路を通る claude・gemini・opencode なども対象。普通の本文の送信は今までと同じ。回避策（この版より前）: 遅いセッションでは `/model` をターミナルで直接打つか、codex のセッションを再起動する。picker が勝手に選ばれた場合は `~/.codex/config.toml` の `model`・`model_reasoning_effort` を確かめる。また Claude Code 2.1.329 以降に `/effort` を送ると、picker は開いているのに「届いたか分からない」（HTTP 500・CLI exit 99）と返っていたのを直した（claude の picker は入力欄の `❯ /effort` を残したまま、その下に開くため）。送信後の待ちの間に入力欄より下に picker の案内行（`Enter to save` など）が出たら送信済みと数える。案内行が無ければ今までどおり「届いたか分からない」と返す。既知の制限: 送る前から picker が開いていると、打った文字は picker に入り、送信済みと報告される。
+
+- **fix(verify): run を閉じる書き込みが 2 回とも失敗しても `running` の行を残さない** (#4494): `startVerification` の後ろの処理は結果の書き込み（`finishVerificationRun`）が投げると `error` で 1 回だけ書き直し、それも投げると行が `running` のままサーバーの再起動まで残り、同じ worktree の次の verify が `already in progress` で入れなかった。閉じる書き込みを `closeRunRow()` にまとめ、失敗したら `error` で上限つきに書き直す（`RUN_CLOSE_MAX_ATTEMPTS`=5 回・間隔 `RUN_CLOSE_RETRY_DELAY_MS`=200ms）。上限を過ぎても閉じられない行はプロセスの中に覚えておき、次の verify を待たずに `unref()` した timer が `RUN_LATE_CLOSE_DELAYS_MS`（5 秒・30 秒・以後 60 秒ごと、計 12 回・約 11.5 分）の間隔で `error` に閉じ直し、それも尽きたら次の `startVerification` が open な run を探す前に閉じる（DB のスキーマは不変）。**書けなかった結果は結果として扱わない** — 書き直しは常に `error` で、task の遷移と失敗の通知も行と同じ `error` を受け取る（以前は行が `error` なのに task は `verify_passed` で `succeeded` に進み得た）。行が消えている（worktree を途中で削除した）ときは再試行せずに終わり、その run の task の遷移と失敗の通知は失われた結果ではなく `error` を受け取る（`finishVerificationRun` は `VerificationRunNotFoundError` を投げるようになった。文面は不変）。設定が読めない run を同期に閉じる書き込みも同じ経路にし、失敗で例外を投げて行を残さない。書き込みが成功する普通の run の結果・exit・記録・通知は不変。二重 fork した孫（`setsid` の子が孫を作ってすぐ exit）がゲートの stdout を握る形も #4463 の猶予で `timeout` になり run が終わることを陽性対照として固定した。
+
 ## [0.55.0] - 2026-11-22
 
 > **Highlight**: 送信が「届いたか分からない」ときに、失敗として［再試行］を出し二重に送ってしまう経路を画面とサーバーの両方で塞いだ（#4503・#4417・#4498）。Antigravity は、思考の見出しの `Generating` を生成中と読んで送信が断られ続ける判定を位置で読むように直し（#4504）、壊れた hooks.json を上書きしないようにした（#4505）。どちらも本物の agy 1 台で、ツールのターンの後の send・ask と、完了の hook の到着を人が確かめた。

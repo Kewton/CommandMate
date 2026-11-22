@@ -369,6 +369,29 @@ function readClaudeAutoDefaultNudgeRows(
 }
 
 /**
+ * [Issue #4556] The 2.1.329+ footer half shared by `/model` and `/effort`:
+ *   /model : "s to use this session only · Enter to save · Esc to cancel"
+ *   /effort: "←/→ to adjust · s to use this session only · Enter to save · Esc to cancel"
+ * (measured on 2.1.330; the hints are drawn from keybindings since 2.1.329, the
+ * same change that dropped "Enter to set as default" / "Enter to confirm · s for
+ * this session only").
+ *
+ * Matched as a PAIR, in either order: `Enter to save` alone is ordinary enough
+ * that a genuine question panel could carry it, and the session-scope hint alone
+ * says nothing about what `Enter` does. Only the pickers put both side by side.
+ * The `s` is guarded by a lookbehind for a letter, so `us to use …` is not the
+ * hint. That guard also REJECTS a raw ANSI spelling (`\x1b[38;5;246ms to use …`:
+ * the SGR's final `m` sits right before the `s`). The pattern is meant for
+ * ANSI-stripped text: every caller (the normalized frame in detect.ts, the
+ * stripped scan window in prompt-detect-multiple-choice.ts, `tailLines()` in
+ * selection-shape.ts) strips ANSI first, which is why the raw captures match.
+ *
+ * Linear, no nested quantifiers — ReDoS safe.
+ */
+export const CLAUDE_SAVE_PICKER_FOOTER_PATTERN =
+  /(?<![A-Za-z])s\s+to\s+use\s+this\s+session\s+only\s+·\s+Enter\s+to\s+save\b|\bEnter\s+to\s+save\s+·\s+s\s+to\s+use\s+this\s+session\s+only\b/;
+
+/**
  * [Issue #1495] Footer signature of Claude Code's `/model` local-settings overlay.
  * Verified against a real Claude Code v2.1.218 capture, the footer reads:
  *   "Enter to set as default · s to use this session only · Esc to cancel"
@@ -382,9 +405,20 @@ function readClaudeAutoDefaultNudgeRows(
  * approvals use "Esc to cancel · Tab to amend", AskUserQuestion uses
  * "Enter to select · … to navigate"), so it is a safe exclusion signal.
  *
+ * [Issue #4556] Claude Code 2.1.329 rewrote the picker key hints, and the
+ * `/model` footer became
+ *   "s to use this session only · Enter to save · Esc to cancel"
+ * (measured on 2.1.330, `tests/fixtures/claude-picker-footer-4556/`). `Enter`
+ * still saves the pick as the default for new sessions, so the guard must keep
+ * holding. The new branch is {@link CLAUDE_SAVE_PICKER_FOOTER_PATTERN}: the PAIR
+ * of the session-scope hint and `Enter to save`, never `Enter to save` alone.
+ *
  * Linear pattern, no nested quantifiers — ReDoS safe (S4-001).
  */
-export const CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN = /Enter\s+to\s+set\s+as\s+default\b/i;
+export const CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN = new RegExp(
+  String.raw`Enter\s+to\s+set\s+as\s+default\b|${CLAUDE_SAVE_PICKER_FOOTER_PATTERN.source}`,
+  'i',
+);
 
 /**
  * Claude CLI selection list footer pattern
@@ -412,8 +446,15 @@ export const CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN = /Enter\s+to\s+set\s+as\s+defa
  * as a Claude selection list (NavigationButtons + ESC hatch, hasActivePrompt=false)
  * once detectPrompt() no longer reports it as a prompt (see
  * CLAUDE_MODEL_OVERLAY_FOOTER_PATTERN).
+ *
+ * [Issue #4556] 2.1.329+ `/model` and `/effort` both read
+ * "… s to use this session only · Enter to save · Esc to cancel"; the last two
+ * branches are {@link CLAUDE_SAVE_PICKER_FOOTER_PATTERN} (the pair, either order).
  */
-export const CLAUDE_SELECTION_LIST_FOOTER = /Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+(?:Esc|s\s+for\s+this\s+session\s+only)|set\s+as\s+default)/;
+export const CLAUDE_SELECTION_LIST_FOOTER = new RegExp(
+  String.raw`Enter\s+to\s+(?:select\s+.*to\s+navigate|confirm\s+·\s+(?:Esc|s\s+for\s+this\s+session\s+only)|set\s+as\s+default)` +
+    `|${CLAUDE_SAVE_PICKER_FOOTER_PATTERN.source}`,
+);
 
 /**
  * Error patterns that indicate a Claude session failed to start properly

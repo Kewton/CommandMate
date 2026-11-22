@@ -164,6 +164,7 @@ import {
   reportSubmittedBodyInComposer,
   resolveSubmitEnterCount,
   settleAwaitedPromptReport,
+  settleLoneSlashCommand,
   shouldAwaitTypedBody,
 } from './submit-verified-sender-report';
 
@@ -844,6 +845,8 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
   const attempts = Math.max(1, verifyAttempts);
   // Issue #4035: one wait for the agent's report per send, however many reads.
   let promptReportDeadline: number | null = null;
+  // Issue #4555: one wait for a lone slash command's screen per send.
+  let slashSettleDeadline: number | null = null;
   for (let attempt = 0; attempt <= attempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, verifyDelayMs));
 
@@ -876,6 +879,9 @@ async function sendUnderInputLock(params: SubmitVerifiedSendParams, ticket: Inst
       });
       ({ state, rule, output } = settleAwaitedPromptReport({ watched, sessionName, cliToolId, attempt, rule, output, target }));
     }
+
+    // Issue #4555: no Enter is resent for a lone slash command (watched without a key).
+    ({ state, rule, output, slashSettleDeadline } = await settleLoneSlashCommand({ state, rule, output, slashSettleDeadline, sessionName, message, cliToolId, composer, enteredAt, ticket, target }));
 
     if (state === 'submitted') {
       rememberScreenOnlySubmit({ sessionName, cliToolId, enteredAt, message, ticket, target });

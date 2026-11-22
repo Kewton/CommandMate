@@ -81,6 +81,23 @@ export const PROMPT_REPORT_WAIT_MS = 5000;
 export const PROMPT_REPORT_POLL_MS = 100;
 
 /**
+ * How long after its Enter a lone slash command whose composer still shows it
+ * is watched, without another key, before the send is given up as unconfirmed
+ * (Issue #4555). The one bound of that wait.
+ *
+ * A slash command opens a picker or a dialog (codex `/model`: two steps, each
+ * taking Enter on its highlighted row), and a slow pane can keep drawing the
+ * frame from before the Enter: a resent Enter then picks a row the user never
+ * chose (`• Model changed to … high`, the effort saved as the default). codex
+ * 0.171.0 opened its `/model` picker within 220 ms on a fresh session; this
+ * leaves room for a session whose drawing lags by seconds.
+ */
+export const SLASH_COMMAND_SETTLE_WAIT_MS = 5000;
+
+/** How often the pane is read during that wait. */
+export const SLASH_COMMAND_SETTLE_POLL_MS = 200;
+
+/**
  * What the `prompt-unreported` failure says about the body (Issue #4048): the
  * agent's report never came, but that is no proof the body did not go — an
  * environment where only the http `UserPromptSubmit` hook fails still submits
