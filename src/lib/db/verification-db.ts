@@ -359,7 +359,24 @@ export function createVerificationRun(
   return mapRunRow(row);
 }
 
-/** Close a run with its final verdict, stamping `finished_at`. */
+/**
+ * The run a write was meant for no longer exists (its worktree was deleted mid-run).
+ *
+ * A class of its own so a caller that retries a failed close (Issue #4494) can tell "the row is
+ * gone, there is nothing left to close" from a write that failed and may succeed later.
+ */
+export class VerificationRunNotFoundError extends Error {
+  constructor(readonly runId: number) {
+    super(`Verification run ${runId} not found`);
+    this.name = 'VerificationRunNotFoundError';
+  }
+}
+
+/**
+ * Close a run with its final verdict, stamping `finished_at`.
+ *
+ * @throws VerificationRunNotFoundError when no row has this id
+ */
 export function finishVerificationRun(
   db: Database.Database,
   runId: number,
@@ -370,7 +387,7 @@ export function finishVerificationRun(
     .run(status, Date.now(), runId);
 
   if (info.changes === 0) {
-    throw new Error(`Verification run ${runId} not found`);
+    throw new VerificationRunNotFoundError(runId);
   }
 }
 
