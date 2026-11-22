@@ -6,7 +6,7 @@
 
 import { resolveComposerSpec } from './composer-spec';
 import type { ComposerSpec } from '../../types/cli-tool-contracts';
-import { stripAnsi, detectThinking } from '../detection/cli-patterns';
+import { stripAnsi, detectThinking, CLAUDE_SELECTION_LIST_FOOTER } from '../detection/cli-patterns';
 import { readOpenCodeComposerBox } from '../detection/tools/opencode/composer-own-text';
 import {
   isOpenCodeThinkingBelowComposer,
@@ -459,6 +459,27 @@ function markerRowIndex(windowLines: string[], windowStart: number): number {
   return -1;
 }
 
+/**
+ * Whether claude's picker footer ({@link CLAUDE_SELECTION_LIST_FOOTER}) is drawn
+ * on a row BELOW the composer row the marker reader takes (Issue #4555 R6).
+ *
+ * Claude Code 2.1.329+ draws the `/effort` picker under `❯ /effort`, which stays
+ * on screen: rule D reads that row as the body still typed. The footer is drawn
+ * only once the command's Enter opened the picker, so the slash-command wait
+ * reads it as that Enter taken. Only the rows under the composer row count — a
+ * footer quoted in the conversation above it is not a picker (the rule of
+ * #2847, `selectionFooterRows` in `detection/tools/claude/detect.ts`). The row is
+ * the one {@link readComposer} reads, so this cannot disagree with rule D about
+ * where the composer is. Claude only; false for every other tool.
+ */
+export function claudePickerFooterBelowComposer(output: string, cliToolId: CLIToolType): boolean {
+  if (cliToolId !== 'claude') return false;
+  const lines = withoutTrailingBlankRows(stripAnsi(output).split('\n'));
+  const windowLines = lines.slice(-VERIFY_WINDOW_LINES);
+  const row = markerRowIndex(windowLines, lines.length - windowLines.length);
+  return row >= 0 && CLAUDE_SELECTION_LIST_FOOTER.test(lines.slice(row + 1).join('\n'));
+}
+
 export function readSubmitComposer(
   output: string,
   cliToolId: CLIToolType,
@@ -598,7 +619,9 @@ export function classifySubmit(
  * Which of {@link classifySubmit}'s rules decided a frame (Issue #4035). B is
  * split into its two readings — no composer on screen (`B-absent`) and an empty
  * one (`B-empty`) — and F into the window's (`F`) and the codex composer above
- * it (`F-outside`), because the sender trusts them differently.
+ * it (`F-outside`), because the sender trusts them differently. `S-panel` is
+ * never given by {@link classifySubmitWithRule}: it is the slash-command wait's
+ * own reading ({@link claudePickerFooterBelowComposer}, Issue #4555 R6).
  */
 export type SubmitRule =
   | 'A'
@@ -610,7 +633,8 @@ export type SubmitRule =
   | 'E'
   | 'F'
   | 'F-outside'
-  | 'F-obscured';
+  | 'F-obscured'
+  | 'S-panel';
 
 /** {@link classifySubmit}'s verdict and the rule that gave it (Issue #4035). */
 export interface SubmitVerdict {

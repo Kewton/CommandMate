@@ -1,0 +1,60 @@
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude[0m [1mCode[0m [38;5;246mv2.1.330[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mOpus[39m [38;5;246m5.5[39m [38;5;246m·[39m [38;5;246mAPI[39m [38;5;246mUsage[39m [38;5;246mBilling[39m
+[38;5;174m ▝▝[39m   [38;5;174m▝▝[39m   [38;5;246m/private/tmp/cmprobe/work[39m
+
+
+[38;5;246m[48;5;237m❯[39m [38;5;231m/effort[39m
+[38;5;246m[49m  ⎿  [39mCancelled
+
+[38;5;246m[48;5;237m❯ [38;5;231m/model[39m
+
+[38;5;153m[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [1m[38;5;153mSelect model[0m
+  [38;5;246mYour pick is the[39m [38;5;246mdefault[39m [38;5;246mfor[39m [38;5;246mnew sessions. For other models, use --model.[39m
+
+  [38;5;153m❯[39m [38;5;246m1. [38;5;114mDefault (recommended)[39m [38;5;114m✔[39m  [38;5;246mUse the default model (currently Opus 5.5) · $4/$20 per Mtok[39m
+    [38;5;246m2. [39mOpus                     [38;5;246mOpus 5.5[39m [38;5;246m· Best[39m [38;5;246mfor everyday,[39m [38;5;246mcomplex tasks · $4/$20 per[39m [38;5;246mMtok[39m
+    [38;5;246m3. [39mFable                    [38;5;174mFable 5.2[39m [38;5;246m· Most capable for your[39m [38;5;246mhardest and longest-running tasks · $8/$40 per Mtok[39m
+    [38;5;246m4. [39mSonnet                   [38;5;246mSonnet 5.5 · Efficient[39m [38;5;246mfor routine tasks ·[39m [38;5;246m$2/$10 per Mtok[39m
+    [38;5;246m5. [39mHaiku                    [38;5;246mHaiku 5.5 · Fastest for quick answers · $0.10/$0.50 per Mtok ($0.50/$2.50 for prompts over 100k)[39m
+
+  [38;5;174m◐[38;5;246m Medium effort (default) ←/→ to adjust[39m
+
+  [3m[38;5;246ms to use this session only · Enter to save · Esc to cancel[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -77,6 +77,14 @@ export const REFACTOR_DEFAULT_GATES = ['lint', 'typecheck'];
  * typecheck's 24s at load 30-41, so it goes into the default instead of a new gate.
  */
 export const SERVER_BUILD_GATE = 'build-server';
+/**
+ * Issue #4527: a worktree whose verify.yaml declares `lint-sh` gets it in every
+ * contract generated for it. #4433's contract wrote `gates: [lint, typecheck,
+ * build-server, unit-related]`, verify run 3534 passed every gate it declared,
+ * and the same commit still failed the precheck and CI's shellcheck (SC1003 at
+ * scripts/uat/run-server.sh:126) — a written-out list runs exactly as written.
+ */
+export const LINT_SH_GATE = 'lint-sh';
 export const UNIT_RELATED_GATE = {
   id: 'unit-related',
   command: 'node scripts/run-related-unit-tests.mjs --base origin/develop',
@@ -504,6 +512,18 @@ export function normalizeConfig(raw, options = {}) {
 
   const defaultGates = kindName === 'refactor' ? REFACTOR_DEFAULT_GATES : DEFAULT_GATES;
   const gates = raw.gates === undefined ? [...defaultGates] : stringList(raw.gates, 'gates', problems);
+  // Add-only (#4527): the gates the config wrote keep their order, and a gate the worktree
+  // cannot resolve is never added (POST /tasks answers it with 400) — but one verify.yaml
+  // declares is never left out of a contract generated for that worktree. Only an explicit
+  // `options.worktree` is read here. `writeContract` defaults it to process.cwd(), so the
+  // file-writing path does add lint-sh from the cwd's verify.yaml; `--stdout` has no worktree
+  // and does not (the difference is pinned in contract-lint-sh-4527.test.ts and written in
+  // docs/orchestrate/contract.md 2-4). The runbook always passes `--worktree`.
+  // Before the checks below, so the added gate counts toward MAX_GATE_IDS and is validated.
+  if (options.worktree !== undefined && !gates.includes(LINT_SH_GATE) && declaresGate(options.worktree, LINT_SH_GATE)) {
+    const after = gates.indexOf('lint');
+    gates.splice(after === -1 ? gates.length : after + 1, 0, LINT_SH_GATE);
+  }
   if (raw.gates !== undefined && gates.length === 0) problems.push('gates: at least one gate is required');
   if (gates.length > MAX_GATE_IDS) problems.push(`gates: at most ${MAX_GATE_IDS} (got ${gates.length})`);
   gates.forEach((id, index) => {
