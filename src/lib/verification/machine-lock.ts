@@ -1111,7 +1111,12 @@ function breakStale(
   myToken: string,
   obs: Observer,
   onRecover?: (stage: MachineLockRecoverStage) => void
-): 'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' {
+): 'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' | 'changed' {
+  // #4559: the judgement is read again right before the move. A recoverer that stopped after judging
+  // the holder dead — past its ticket's deadline + 60 s, inside P0's 10 minutes — finds the next
+  // holder's live record there and does not move it (I3: only the record judged is moved).
+  const current = obs.owner('lock-owner', lockPath);
+  if (current.state !== 'record' || current.owner.token !== owner.token) return current.state === 'unknown' ? 'unknown' : 'changed';
   const gone = `${lockPath}.gone-${myToken}-${++goneSerial}`;
   onRecover?.('before-move');
   const aside = obs.rename('rename-aside', lockPath, gone);

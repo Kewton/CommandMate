@@ -1039,6 +1039,21 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
 }
 
 /**
+ * #4559: recover a holder judged gone only while the record is still the one judged. Read again right
+ * before recoverLock moves it: a recoverer that stopped after its judgement — past its ticket's
+ * deadline + 60 s, inside P0's 10 minutes — finds the next holder's live record there and leaves it
+ * ('changed'; I3: only the record judged is moved, never moved first and put back). recoverLock itself
+ * keeps its contract (it moves, then checks the token, and puts back).
+ *
+ * @returns {'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' | 'changed'}
+ */
+function recoverJudged(lockPath, dead, myToken, warn, onRecover, obs) {
+  const current = obs.owner('lock-owner', lockPath);
+  if (current.state !== 'record' || current.owner.token !== dead.token) return current.state === 'unknown' ? 'unknown' : 'changed';
+  return recoverLock(lockPath, dead, myToken, warn, onRecover, obs);
+}
+
+/**
  * Take the machine-wide lock `name` in ticket order, waiting up to `timeoutMs`.
  *
  * @param {string} name
@@ -1368,7 +1383,7 @@ export function acquireMachineLockSync(name, options) {
                 broken.add(holder.token);
                 // Persist what the dead holder was doing before its lock is gone (merge-pr: an unconfirmed write).
                 options.onStaleHolder?.(holder);
-                recoverLock(lockPath, holder, token, warn, hooks.onRecover, obs);
+                recoverJudged(lockPath, holder, token, warn, hooks.onRecover, obs);
                 continue;
               }
               if (state.state === 'unknown') unknown = { point: state.point, path: lockPath, code: state.code };
@@ -1508,7 +1523,7 @@ export function releaseAsHead(lockPath, tokens, options = {}) {
     }
     // Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name, the token checked —
     // a successor that took the lock while this stopped past its ticket is put back.
-    const r = recoverLock(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
+    const r = recoverJudged(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
     if (r !== 'recovered') return { result: 'kept' };
     for (const t of tokens) cleanupOwnGone(ctx, t);
     return { result: 'released' };
@@ -1563,7 +1578,7 @@ export function recoverIfDead(lockPath, options = {}) {
     if (holder.state === 'unknown') return done('kept', { point: holder.point, path: lockPath, code: holder.code });
     if (holder.state !== 'gone') return done('kept');
     ctx.onRecover?.('recover-only-judged');
-    const r = recoverLock(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
+    const r = recoverJudged(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
     return done(r === 'recovered' ? 'removed' : r === 'restore-failed' ? 'restore-failed' : r === 'gone' ? 'absent' : 'kept');
   });
 }

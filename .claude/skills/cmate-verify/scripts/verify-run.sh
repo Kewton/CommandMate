@@ -1698,6 +1698,21 @@ lock_recover() { # <lock-path> <dead-token> <dead-pid>
   if [ "$LMO_RESULT" = absent ]; then rm -rf "$lrc_gone" 2>/dev/null || true; LRC_RESULT=restored; fi
 }
 
+# #4559: lock_recover only while the record is still the one judged (I3). One read of the owner at
+# <point> right before the move; another token, no record, or an unknown leaves the lock where it is
+# (LRC_RESULT=changed / unknown) — never moved first and put back. lock_recover itself keeps its
+# contract (move, check the token, put back), which its put-back seams and D6's caller rely on.
+lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
+  lock_obs_owner "$4" "$1"
+  case "$LOB_CLASS" in
+    record) ;;
+    unknown) LRC_RESULT=unknown; return 0;;
+    *) LRC_RESULT=changed; return 0;;
+  esac
+  if [ "$LOB_TOKEN" != "$2" ]; then LRC_RESULT=changed; return 0; fi
+  lock_recover "$1" "$2" "$3"
+}
+
 # The line a recovery prints (a caller with its own wording — run-lock's — redefines it after the load).
 lock_note_recovered() { # <lock-path> <dead-pid>
   echo "verify-run: broke a stale lock at $1 (recorded holder pid $2 on this host no longer exists)" >&2
@@ -2108,7 +2123,11 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
               case "$la_state" in
                 gone)
                   la_broken=$la_token
-                  lock_recover "$LOCK_PATH" "$la_token" "$la_pid"
+                  # #4559: the judgement is read again right before the move (lock_recover_judged): a
+                  # recoverer that stopped here past its ticket's deadline + 60 s finds the next holder's
+                  # live record and leaves it. Test seam: pause:recover-judged.
+                  lock_test_pause recover-judged
+                  lock_recover_judged "$LOCK_PATH" "$la_token" "$la_pid" lock-owner
                   continue;;
                 unknown:*)
                   lock_note_mismatch "$LOCK_PATH" "$la_state"
@@ -2458,7 +2477,7 @@ lock_release_as_head() { # <lock-path> <queue-dir> <budget-seconds> <token>…
             # Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name and the token
             # checked — a successor that took the lock while this stopped past its ticket is put back.
             lock_test_pause release-head-judged
-            lock_recover "$lrah_lock" "$LOB_TOKEN" "$LOB_PID"
+            lock_recover_judged "$lrah_lock" "$LOB_TOKEN" "$LOB_PID" release-owner
             if [ "$LRC_RESULT" = recovered ]; then LRAH_RESULT=released; else LRAH_RESULT=kept; fi;;
           *)
             LRAH_RESULT=deferred
