@@ -15,6 +15,7 @@ developブランチをオーケストレーターとして、複数Issueの並�
 **実測・根拠は docs/orchestrate/ へ。本体には規則を 1 行だけ書く。** 根拠は「根拠: docs/orchestrate/<file>.md#<見出し>」の行で指し、
 run のたびには読まない手順（exit code ごとの対処・担当の切り替え・monitor）は、本体に「いつ・どの文書を読むか」を書いて docs/orchestrate/ に置く。
 本体のバイト数の上限は `scripts/check-orchestrate-size.mjs` が持つ（CI の `orchestrate-size`）。超えたら、実測・根拠を docs/orchestrate/ へ移す。
+入口（索引）: docs/orchestrate/README.md
 下は、本文に散らばった必須・禁止の規則を 1 行ずつ集めたもの。括弧は元の見出しで、規則は元の場所にも残っている。
 
 - オーケストレーターはコードに触れない。制御と判断のみ（概要）

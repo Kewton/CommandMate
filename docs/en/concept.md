@@ -88,7 +88,7 @@ gates. Ride the system, and you arrive at the same result whether or not you hav
 
 ## From Implementation to Product Features
 
-All seven implementation items map to features that actually exist.
+All seven implementation items map to features that actually exist. The three rows after them are what keeps those features usable over a long stretch and from anywhere; they exist too.
 
 | Implementation | Product feature |
 |---|---|
@@ -99,6 +99,9 @@ All seven implementation items map to features that actually exist.
 | **Independent verification** | `.commandmate/verify.yaml`, `commandmate verify` / `wait --verify`, exit 0 / 20 / 21 ([design](../design/verification-config.md), Japanese) |
 | **Evidence** | work-evidence and scope gates, `commandmate verify history` / `task show`, `commandmate report metrics` |
 | **PR workflow** | Skills `cmate-orchestrate` / `cmate-acceptance-test`, `/create-pr` |
+| **State across restarts** | `commandmate mem` (kinds `now` / `waiting` / `decision` / `next` / `external` / `note`, a closing condition in `--close-when`; writable on a branch whose mem mode is `on`; the default is `off`), `commandmate brief` (prints nothing while the mode is `off`, exit 50), and a promote that applies a decision only when approved on the screen (`screen_only`; agent instruction files such as `CLAUDE.md` / `AGENTS.md` / `.claude/` are never a destination) |
+| **Role boundaries** | `commandmate roles` (`list` / `show` / `add` / `edit` / `rm` / `default` / `defaults`), `send --role` (the setting is saved to the instance; a session that is not running starts with that role and gets the message; one running as another role, or with no record of its start, gets nothing typed and it exits 32) |
+| **One screen, and the phone** | Switching between the terminal and the chat, file links in the chat's replies, the File Tree, the file / image / video viewers, Notes, `commandmate remote` (Tailscale / Cloudflare Quick Tunnel; a public tunnel starts only after you approve it, `--yes` when not interactive) |
 
 Three notes.
 
@@ -128,9 +131,25 @@ whether you ride the system.
 
 On top of that, CommandMate is built so you can **keep hold of the reins without sitting at your
 PC**. When an agent starts waiting for input it reaches you through a badge, a toast, the tab
-title and a push notification, and you can answer straight from your phone's browser. Not having
+title and a push notification (push works once `commandmate init` has set it up), and you can answer straight from your phone's browser. Not having
 a large block of time does not turn waiting into a stop. This is not the centre of the value —
-it is the condition that lets the centre hold.
+it is the condition that lets the centre hold. Three things hold that condition up.
+
+- **You check it on one screen** — switching between the terminal and the chat, opening a file from
+  a path in the chat's reply, the File Tree, the image and video viewers and Notes are all on the same
+  screen. You judge from the real files, not from the agent's summary, without going back and forth
+  between an editor and a terminal. At phone width the screen has five tabs too — Terminal, History, Files,
+  Tools and Info — so answering, approving, checking files and Notes work from your phone's browser, and a
+  short time away from the desk does not stop your judgement.
+- **A restart picks up where it left off** — instead of stretching one long chat by compacting it, the
+  state goes into typed `mem` items (writable on a branch whose mem mode is `on`; the default is `off`; a closing condition goes in `--close-when` and is evaluated when the
+  item is read). After a restart, `commandmate brief` hands it back in one piece (`brief` too prints nothing while the mode is `off`; it is put in front of a send automatically only when the mode is `derived` or `on` and `injectOnStart` is turned on in the mem settings on the screen; it is off by default), so a session can be
+  restarted freely and its context kept fresh. A decision (also written only on a branch in mode `on`) reaches a document only through an approval on
+  the screen, and never goes into an agent instruction file such as `CLAUDE.md` or `AGENTS.md`.
+- **A role is fixed when the session starts** — roles are defined with `commandmate roles`, and a
+  session runs as the role it started with. `send --role` is a condition, "send only to a session that
+  started as this role". The setting is saved to the instance; a session that is not running starts with that role and gets the
+  message, and one running as another role, or with no record of its start, gets nothing typed and it stops with exit 32 (the setting stays saved).
 
 ---
 
