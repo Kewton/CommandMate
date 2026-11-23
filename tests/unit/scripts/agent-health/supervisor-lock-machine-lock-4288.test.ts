@@ -1260,7 +1260,8 @@ const tmpDirs: string[] = [];
 const children: ChildProcess[] = [];
 const killPids: number[] = [];
 afterEach(() => {
-  for (const pid of killPids.splice(0)) {
+  const killed = killPids.splice(0);
+  for (const pid of killed) {
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
@@ -1275,6 +1276,20 @@ afterEach(() => {
     }
   }
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  // F4's zombie parent (`sleep 600`, not a child of this process): confirm it stopped, on a pass and on a failure.
+  for (const pid of killed) {
+    let gone = false;
+    for (let i = 0; i < 200 && !gone; i++) {
+      try {
+        process.kill(pid, 0);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      } catch (error) {
+        gone = (error as NodeJS.ErrnoException).code === 'ESRCH';
+        if (!gone) break;
+      }
+    }
+    if (!gone) throw new Error(`the zombie parent ${pid} did not stop`);
+  }
 });
 
 function mkTmp(prefix: string): string {
@@ -1900,7 +1915,8 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
   /** A pid kill -0 answers alive for although it ended: a child of a process that never waits for it. */
   const zombiePid = (aux: string): number => {
     const f = path.join(aux, 'zpid');
-    spawnSync('bash', ['-c', `( sh -c 'exit 0' & echo $! > '${f}'; echo $BASHPID > '${f}.parent'; exec sleep 600 ) </dev/null >/dev/null 2>&1 &`]);
+    // The parent's pid is the outer shell's `$!` (the subshell that execs sleep): /bin/bash 3.2 has no $BASHPID.
+    spawnSync('bash', ['-c', `( sh -c 'exit 0' & echo $! > '${f}'; exec sleep 600 ) </dev/null >/dev/null 2>&1 & echo $! > '${f}.parent'`]);
     for (let i = 0; i < 300; i++) {
       if (fs.existsSync(`${f}.parent`)) {
         // an empty (half-written) file reads as 0, and kill(0) is the whole process group — only a real pid goes in
