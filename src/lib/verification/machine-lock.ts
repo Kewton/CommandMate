@@ -1111,12 +1111,7 @@ function breakStale(
   myToken: string,
   obs: Observer,
   onRecover?: (stage: MachineLockRecoverStage) => void
-): 'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' | 'changed' {
-  // #4559: the judgement is read again right before the move. A recoverer that stopped after judging
-  // the holder dead — past its ticket's deadline + 60 s, inside P0's 10 minutes — finds the next
-  // holder's live record there and does not move it (I3: only the record judged is moved).
-  const current = obs.owner('lock-owner', lockPath);
-  if (current.state !== 'record' || current.owner.token !== owner.token) return current.state === 'unknown' ? 'unknown' : 'changed';
+): 'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' {
   const gone = `${lockPath}.gone-${myToken}-${++goneSerial}`;
   onRecover?.('before-move');
   const aside = obs.rename('rename-aside', lockPath, gone);
@@ -1374,9 +1369,20 @@ export async function acquireMachineLock(
             if (holder && !broken.has(holder.token)) {
               const state = holderState(holder, probes);
               if (state.state === 'gone') {
-                broken.add(holder.token);
-                breakStale(lockPath, holder, token, obs, hooks.onRecover);
-                continue;
+                // #4559: the judgement is read again right before the move. A recoverer that stopped
+                // after judging the holder dead finds the next holder's live record there and does not
+                // move it (I3: only the record judged is moved). This narrows the window; a stop after
+                // this read and before breakStale's rename is not closed here (#4559 stays open for it).
+                // A read that failed marks nothing broken — the next poll judges again — and is named
+                // once, like the other unknowns.
+                const again = obs.owner('lock-owner', lockPath);
+                if (again.state !== 'unknown') {
+                  broken.add(holder.token);
+                  if (again.state === 'record' && again.owner.token === holder.token) breakStale(lockPath, holder, token, obs, hooks.onRecover);
+                  continue;
+                }
+                unknown = { point: 'lock-owner', path: join(lockPath, OWNER_FILE), code: again.code };
+                ctx.warnOnce('machine-lock-unknown', { point: unknown.point, path: unknown.path, errno: unknown.code });
               }
               if (state.state === 'unknown') unknown = { point: state.point, path: lockPath, code: state.code };
             }

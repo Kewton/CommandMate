@@ -1716,7 +1716,16 @@ lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
   lock_obs_owner "$4" "$1"
   case "$LOB_CLASS" in
     record) ;;
-    unknown) LRC_RESULT=unknown; return 0;;
+    unknown)
+      # Nothing moved; named like the other unknowns, and the caller judges again (not broken).
+      lock_note_unknown "$4" "$1/owner" "$LOB_CODE"
+      lock_warn_once "machine-lock-unknown point=$4 path=$1/owner errno=$LOB_CODE"
+      LRC_RESULT=reread-unknown
+      return 0;;
+    missing)
+      # Gone meanwhile: absent, as lock_recover's own ENOENT answers (D6's result is unchanged).
+      if [ "$(lock_ownerless_empty "$1")" = absent ]; then LRC_RESULT=absent; else LRC_RESULT=changed; fi
+      return 0;;
     *) LRC_RESULT=changed; return 0;;
   esac
   if [ "$LOB_TOKEN" != "$2" ]; then LRC_RESULT=changed; return 0; fi
@@ -2136,13 +2145,17 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
               la_state=$(lock_record_state)
               case "$la_state" in
                 gone)
-                  la_broken=$la_token
                   # #4559: the judgement is read again right before the move (lock_recover_judged): a
-                  # recoverer that stopped here past its ticket's deadline + 60 s finds the next holder's
-                  # live record and leaves it. Test seam: pause:recover-judged.
+                  # recoverer that stopped here finds the next holder's live record and leaves it. This
+                  # narrows the window; a stop after the re-read and before the mv is not closed here
+                  # (#4559 stays open). A re-read that failed marks nothing broken: judged again next
+                  # poll. Test seam: pause:recover-judged.
                   lock_test_pause recover-judged
                   lock_recover_judged "$LOCK_PATH" "$la_token" "$la_pid" lock-owner
-                  continue;;
+                  if [ "$LRC_RESULT" != reread-unknown ]; then
+                    la_broken=$la_token
+                    continue
+                  fi;;
                 unknown:*)
                   lock_note_mismatch "$LOCK_PATH" "$la_state"
                   la_u=${la_state#unknown:}

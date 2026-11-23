@@ -1040,17 +1040,23 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
 
 /**
  * #4559: recover a holder judged gone only while the record is still the one judged. Read again right
- * before recoverLock moves it: a recoverer that stopped after its judgement — past its ticket's
- * deadline + 60 s, inside P0's 10 minutes — finds the next holder's live record there and leaves it
- * ('changed'; I3: only the record judged is moved, never moved first and put back). recoverLock itself
- * keeps its contract (it moves, then checks the token, and puts back).
+ * before recoverLock moves it: a recoverer that stopped after its judgement finds the next holder's
+ * live record there and leaves it ('changed'; I3: only the record judged is moved). This narrows the
+ * window; a stop after this read and before recoverLock's rename is not closed here (#4559 stays open
+ * for it). recoverLock itself keeps its contract (it moves, then checks the token, and puts back).
+ * A read that failed moves nothing and is 'reread-unknown' with its point, path and errno: the caller
+ * does not take the holder as broken and judges again. A lock gone meanwhile is 'gone', as recoverLock's
+ * own ENOENT is. `beforeMove` runs only when the move is tried (merge-pr's onStaleHolder).
  *
- * @returns {'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' | 'changed'}
+ * @returns {{ result: 'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' | 'changed' | 'reread-unknown', unknown?: { point: string, path: string, code: string } }}
  */
-function recoverJudged(lockPath, dead, myToken, warn, onRecover, obs) {
-  const current = obs.owner('lock-owner', lockPath);
-  if (current.state !== 'record' || current.owner.token !== dead.token) return current.state === 'unknown' ? 'unknown' : 'changed';
-  return recoverLock(lockPath, dead, myToken, warn, onRecover, obs);
+function recoverJudged(ctx, dead, beforeMove = undefined) {
+  const current = ctx.obs.owner('lock-owner', ctx.lockPath);
+  if (current.state === 'unknown') return { result: 'reread-unknown', unknown: { point: 'lock-owner', path: path.join(ctx.lockPath, 'owner'), code: current.code } };
+  if (current.state === 'missing') return { result: ownerlessEmptyLock(ctx).state === 'absent' ? 'gone' : 'changed' };
+  if (current.state !== 'record' || current.owner.token !== dead.token) return { result: 'changed' };
+  beforeMove?.();
+  return { result: recoverLock(ctx.lockPath, dead, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs) };
 }
 
 /**
@@ -1380,11 +1386,16 @@ export function acquireMachineLockSync(name, options) {
             if (holder && !broken.has(holder.token)) {
               const state = holderState(holder, ctx);
               if (state.state === 'gone') {
-                broken.add(holder.token);
                 // Persist what the dead holder was doing before its lock is gone (merge-pr: an unconfirmed write).
-                options.onStaleHolder?.(holder);
-                recoverJudged(lockPath, holder, token, warn, hooks.onRecover, obs);
-                continue;
+                const j = recoverJudged(ctx, holder, () => options.onStaleHolder?.(holder));
+                if (j.result !== 'reread-unknown') {
+                  broken.add(holder.token);
+                  continue;
+                }
+                // #4559: a re-read that failed marks nothing broken — the next poll judges again — and is
+                // named once, like the other unknowns.
+                if (!unknown) unknown = j.unknown;
+                warnOnce(`machine-lock-unknown point=${j.unknown.point} path=${j.unknown.path} errno=${j.unknown.code}`);
               }
               if (state.state === 'unknown') unknown = { point: state.point, path: lockPath, code: state.code };
             }
@@ -1523,8 +1534,10 @@ export function releaseAsHead(lockPath, tokens, options = {}) {
     }
     // Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name, the token checked —
     // a successor that took the lock while this stopped past its ticket is put back.
-    const r = recoverJudged(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
-    if (r !== 'recovered') return { result: 'kept' };
+    const j = recoverJudged(ctx, read.owner);
+    // A re-read that failed is named (bash's lock_recover_judged says the same); the result stays 'kept'.
+    if (j.result === 'reread-unknown') ctx.warnOnce(`machine-lock-unknown point=${j.unknown.point} path=${j.unknown.path} errno=${j.unknown.code}`);
+    if (j.result !== 'recovered') return { result: 'kept' };
     for (const t of tokens) cleanupOwnGone(ctx, t);
     return { result: 'released' };
   });
@@ -1578,7 +1591,10 @@ export function recoverIfDead(lockPath, options = {}) {
     if (holder.state === 'unknown') return done('kept', { point: holder.point, path: lockPath, code: holder.code });
     if (holder.state !== 'gone') return done('kept');
     ctx.onRecover?.('recover-only-judged');
-    const r = recoverJudged(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
+    const j = recoverJudged(ctx, read.owner);
+    // #4559: a re-read that failed is the unknown result (kept, named), not folded into a plain 'kept'.
+    if (j.result === 'reread-unknown') return done('kept', j.unknown);
+    const r = j.result;
     return done(r === 'recovered' ? 'removed' : r === 'restore-failed' ? 'restore-failed' : r === 'gone' ? 'absent' : 'kept');
   });
 }
