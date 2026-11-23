@@ -4,7 +4,9 @@
  * result carries its kind (`target-changed`) and state (`not-sent` /
  * `indeterminate`). The same runs fix the public answers as they are today —
  * status, code, the fields of the body, `lastSend.reason`, the timer's text:
- * this step changes none of them (they wait for the human's answer, step 2).
+ * step 1 changed none of them. Step 2 (the human's answer C1–C8): the public
+ * rows now pin the new answers (409 `SEND_TARGET_CHANGED`, `lastSend.reason`
+ * `target-changed`, the timer's `[target_changed]`); the relay rows are as before.
  *
  * The entries: the launch (`send-session-start.ts`), copilot's `/model`, the
  * body, OpenCode's dispatch, the relay delivery (`relay-delivery.ts`
@@ -250,27 +252,26 @@ const lastSend = (tool: CLIToolType, instanceId: string) => getLastSendAttempt({
 // T16
 // ---------------------------------------------------------------------------
 
-describe('T16: each entry’s internal result carries the kind and the state; its public answer is today’s', () => {
+describe('T16: each entry’s internal result carries the kind and the state; its public answer is step 2’s', () => {
   it('[T16] the module that reports the outcomes exists', () => {
     expect(outcomeModule, 'send-fence-outcome (setSendFenceOutcomeObserver)').not.toBeNull();
   });
 
-  it('[T16 start] the launch (send-session-start): target-changed, not-sent; 500 with no code, session-start-failed; no start-failure notice', async () => {
+  it('[T16 start] the launch (send-session-start): target-changed, not-sent; 409 SEND_TARGET_CHANGED, recorded target-changed; no start-failure notice', async () => {
     addRoster('claude-s', 'claude');
     onFirst((o) => o.line.startsWith('new-session'), () => dropRoster('claude-s'));
     const { status, json } = await post('send', { content: 'body start', cliToolId: 'claude', instanceId: 'claude-s' });
-    // Today's answer, byte for byte in its fields.
-    expect(status).toBe(500);
-    expect(Object.keys(json).sort()).toEqual(['error', 'sendOutcome']);
-    expect(json.error).toBe('Failed to start Claude Code session: send target changed: target-gone');
+    expect(status).toBe(409);
+    expect(json.code).toBe('SEND_TARGET_CHANGED');
+    expect(json.reason).toBe('target-gone');
     expect(json.sendOutcome).toBe('not_sent');
-    expect(lastSend('claude', 'claude-s')).toMatchObject({ state: 'not-sent', reason: 'session-start-failed' });
+    expect(lastSend('claude', 'claude-s')).toMatchObject({ state: 'not-sent', reason: 'target-changed' });
     expect(reportSessionStartFailure).not.toHaveBeenCalled();
     // The internal result.
     expect(outcomesOf('start')).toEqual([{ kind: 'target-changed', state: 'not-sent', reason: 'target-gone' }]);
   }, 60_000);
 
-  it('[T16 model] copilot’s /model: target-changed, not-sent; today’s 500 and model-switch-failed', async () => {
+  it('[T16 model] copilot’s /model: target-changed, not-sent; 409 SEND_TARGET_CHANGED, recorded target-changed', async () => {
     const instanceId = 'copilot-m';
     addRoster(instanceId, 'copilot');
     const S = nameOf('copilot', instanceId);
@@ -279,42 +280,42 @@ describe('T16: each entry’s internal result carries the kind and the state; it
     // After every read the route makes before its ticket, the copilot instance runs claude.
     onFirst((o) => o.line.startsWith('capture-pane'), () => setRosterTool(instanceId, 'claude'));
     const { status, json } = await post('send', { content: 'body model', cliToolId: 'copilot', instanceId, model: 'gpt-5.6-terra' });
-    expect(status).toBe(500);
-    expect(Object.keys(json).sort()).toEqual(['error', 'sendOutcome']);
-    expect(String(json.error)).toMatch(/^Failed to switch model to gpt-5\.6-terra: /);
+    expect(status).toBe(409);
+    expect(json.code).toBe('SEND_TARGET_CHANGED');
+    expect(json.reason).toBe('tool-changed');
     expect(json.sendOutcome).toBe('not_sent');
-    expect(lastSend('copilot', instanceId)).toMatchObject({ state: 'not-sent', reason: 'model-switch-failed' });
+    expect(lastSend('copilot', instanceId)).toMatchObject({ state: 'not-sent', reason: 'target-changed' });
     expect(changes().filter((l) => l.includes('/model'))).toEqual([]);
     expect(outcomesOf('model')).toEqual([{ kind: 'target-changed', state: 'not-sent', reason: 'tool-changed' }]);
   }, 60_000);
 
-  it('[T16 deliver] the body, refused before it went in (after the clear): target-changed, not-sent; today’s 500, send-error', async () => {
+  it('[T16 deliver] the body, refused before it went in (after the clear): target-changed, not-sent; 409, not_sent', async () => {
     addRoster('claude-b', 'claude');
     addPane(nameOf('claude', 'claude-b'), 'claude', 'echo PREFILLED');
     onFirst(isKeys(/C-u/), () => setRosterTool('claude-b', 'codex'));
     const { status, json } = await post('send', { content: 'body deliver', cliToolId: 'claude', instanceId: 'claude-b' });
-    expect(status).toBe(500);
-    expect(Object.keys(json).sort()).toEqual(['error', 'sendOutcome']);
-    expect(String(json.error)).toMatch(/^Failed to send message to .*send target changed: tool-changed/);
+    expect(status).toBe(409);
+    expect(json.code).toBe('SEND_TARGET_CHANGED');
+    expect(json.reason).toBe('tool-changed');
     expect(json.sendOutcome).toBe('not_sent');
-    expect(lastSend('claude', 'claude-b')).toMatchObject({ state: 'not-sent', reason: 'send-error' });
+    expect(lastSend('claude', 'claude-b')).toMatchObject({ state: 'not-sent', reason: 'target-changed' });
     expect(changes().some((l) => l.includes('body deliver'))).toBe(false);
     expect(outcomesOf('deliver')).toEqual([{ kind: 'target-changed', state: 'not-sent', reason: 'tool-changed' }]);
   }, 60_000);
 
-  it('[T16 deliver] the body, refused after it went in (at the Enter): target-changed, indeterminate; today’s 500, unknown', async () => {
+  it('[T16 deliver] the body, refused after it went in (at the Enter): target-changed, indeterminate; 409, unknown', async () => {
     addRoster('claude-e', 'claude');
     addPane(nameOf('claude', 'claude-e'), 'claude');
     onFirst(isKeys(/-l -- body entered/), () => setRosterTool('claude-e', 'codex'));
     const { status, json } = await post('send', { content: 'body entered', cliToolId: 'claude', instanceId: 'claude-e' });
-    expect(status).toBe(500);
-    expect(Object.keys(json).sort()).toEqual(['error', 'sendOutcome']);
+    expect(status).toBe(409);
+    expect(json.code).toBe('SEND_TARGET_CHANGED');
     expect(json.sendOutcome).toBe('unknown');
-    expect(lastSend('claude', 'claude-e')).toMatchObject({ state: 'indeterminate', reason: 'send-error' });
+    expect(lastSend('claude', 'claude-e')).toMatchObject({ state: 'indeterminate', reason: 'target-changed' });
     expect(outcomesOf('deliver')).toEqual([{ kind: 'target-changed', state: 'indeterminate', reason: 'tool-changed' }]);
   }, 60_000);
 
-  it('[T16 dispatch] OpenCode’s prompt_async, refused before the POST: target-changed, not-sent; no POST; today’s 500, send-error', async () => {
+  it('[T16 dispatch] OpenCode’s prompt_async, refused before the POST: target-changed, not-sent; no POST; 409, not_sent', async () => {
     const instanceId = 'opencode-d';
     addRoster(instanceId, 'opencode');
     const S = nameOf('opencode', instanceId);
@@ -332,10 +333,10 @@ describe('T16: each entry’s internal result carries the kind and the state; it
     });
     onFirst((o) => o.line.startsWith('capture-pane'), () => dropRoster(instanceId));
     const { status, json } = await post('send', { content: 'body dispatch', cliToolId: 'opencode', instanceId });
-    expect(status).toBe(500);
-    expect(Object.keys(json).sort()).toEqual(['error', 'sendOutcome']);
+    expect(status).toBe(409);
+    expect(json.code).toBe('SEND_TARGET_CHANGED');
     expect(json.sendOutcome).toBe('not_sent');
-    expect(lastSend('opencode', instanceId)).toMatchObject({ state: 'not-sent', reason: 'send-error' });
+    expect(lastSend('opencode', instanceId)).toMatchObject({ state: 'not-sent', reason: 'target-changed' });
     expect(posts).toBe(0);
     expect(outcomesOf('deliver')).toEqual([{ kind: 'target-changed', state: 'not-sent', reason: 'target-gone' }]);
   }, 60_000);
@@ -378,18 +379,19 @@ describe('T16: each entry’s internal result carries the kind and the state; it
     expect(outcomesOf('relay')).toEqual([{ kind: 'target-changed', state: 'indeterminate', reason: 'tool-changed', settled: 'uncertain' }]);
   }, 60_000);
 
-  it('[T16 terminal] /terminal: target-changed, not-sent; today’s 500 and its fixed text, nothing else in the body', async () => {
+  it('[T16 terminal] /terminal: target-changed, not-sent; 409 SEND_TARGET_CHANGED (C2)', async () => {
     addRoster('codex-t', 'codex');
     addPane(nameOf('codex', 'codex-t'), 'codex');
     onFirst((o) => o.line.startsWith('capture-pane'), () => setRosterTool('codex-t', 'claude'));
     const { status, json } = await post('terminal', { cliToolId: 'codex', command: 'echo refused', instanceId: 'codex-t' });
-    expect(status).toBe(500);
-    expect(json).toEqual({ error: 'Failed to send command to terminal' });
+    expect(status).toBe(409);
+    expect(json.code).toBe('SEND_TARGET_CHANGED');
+    expect(json.sendOutcome).toBe('not_sent');
     expect(changes()).toEqual([]);
     expect(outcomesOf('terminal')).toEqual([{ kind: 'target-changed', state: 'not-sent', reason: 'tool-changed' }]);
   }, 60_000);
 
-  it('[T16 timer] the timer: target-changed, not-sent; its row failed with today’s text `[send] <the error>`', async () => {
+  it('[T16 timer] the timer: target-changed, not-sent; its row failed with `[target_changed] <the error>` (C6)', async () => {
     const S = nameOf('claude');
     addPane(S, 'claude');
     const sending = (): boolean => (db.prepare(`SELECT COUNT(*) AS n FROM timer_messages WHERE status = 'sending'`).get() as { n: number }).n > 0;
@@ -411,7 +413,7 @@ describe('T16: each entry’s internal result carries the kind and the state; it
     }
     expect(changes()).toEqual([]);
     const row = getTimerById(db, timer.id);
-    expect(row?.error).toBe(`[send] ${(sent.error() as Error).message}`);
+    expect(row?.error).toBe(`[target_changed] ${(sent.error() as Error).message}`);
     expect(outcomesOf('timer')).toEqual([{ kind: 'target-changed', state: 'not-sent', reason: 'target-gone' }]);
   }, 60_000);
 });
