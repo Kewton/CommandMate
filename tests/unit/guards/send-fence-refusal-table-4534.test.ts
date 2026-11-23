@@ -545,8 +545,8 @@ describe('the nudge rows, by their answers (claude-auto-default-nudge sendNudgeK
 
   it('[refusal-table] the launch path (claude.ts answerClaudeAutoDefaultNudgeUntil): the start failure’s 500 with the reason, never 503 SESSION_STARTING, recorded session-start-failed', async () => {
     const { answer, after } = await nudgeRow({ entry: 'send', tool: 'claude', launch: true, screen: 'nudge-launch' });
-    // PR-A's answer (design §6): the start step's generic 500 `Failed to start … session: <the refusal>`,
-    // which carries no code today (the start step's own answer, unchanged).
+    // PR-A answered the start step's generic 500 `Failed to start … session: <the refusal>` with no code;
+    // PR-B (#4534, C1) answers 409 SEND_TARGET_CHANGED and records `target-changed` (the name above is PR-A's).
     // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
     expect(answer.status).toBe(409);
     expect(answer.code).toBe('SEND_TARGET_CHANGED');

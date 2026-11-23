@@ -86,6 +86,12 @@ import { getOpencodeLiveness, getOpencodePrimarySession } from '@/lib/hooks/sour
 import { resetRelayDeliveryState } from '@/lib/relay/relay-delivery';
 import { stopAllTimers } from '@/lib/timer-manager';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
+import { createRelay, getRelayById } from '@/lib/db/relay-db';
+import { handleApiError, ApiError, type ApiErrorPayload } from '@/cli/utils/api-client-errors';
+import { postMessage } from '@/cli/commands/message-dispatch';
+import type { ApiClient } from '@/cli/utils/api-client';
+import { answerSessionStartFailure } from '@/app/api/worktrees/[id]/send/send-session-start';
+import { SendTargetChangedError } from '@/lib/session/terminal-fence';
 import { resetSessionLaunchFlightsForTest } from '@/lib/session/session-launch-flight';
 import { clearCachedClaudePath } from '@/lib/session/claude-session';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
@@ -226,16 +232,34 @@ const lastSend = (tool: CLIToolType, instanceId: string) => getLastSendAttempt({
 type Reason = 'worktree-gone' | 'target-gone' | 'tool-changed' | 'dispatch-changed' | 'unreadable';
 type Outcome = 'not_sent' | 'unknown';
 
-/** The sentence the server answers with (Q2: `unreadable` never says the target changed). */
-function expectedSentence(reason: Reason, outcome: Outcome): string {
-  const head = reason === 'unreadable'
-    ? `Send stopped: the target could not be confirmed while the message was being sent (${reason}).`
-    : `Send stopped: the target changed while the message was being sent (send target changed: ${reason}).`;
-  const tail = outcome === 'not_sent'
-    ? ' The message was not delivered; read the roster again, then send it again.'
-    : ' The message may already have reached the session; look at the pane before sending it again.';
-  return head + tail;
-}
+/**
+ * The sentence the server answers with, written out per reason and outcome (not
+ * built the way the server builds it). Q2: `unreadable` never says the target
+ * changed; a changed target quotes the refusal (`send target changed: <reason>`).
+ */
+const SENTENCES: Record<Reason, Record<Outcome, string>> = {
+  'worktree-gone': {
+    not_sent: 'Send stopped: the target changed while the message was being sent (send target changed: worktree-gone). The message was not delivered; read the roster again, then send it again.',
+    unknown: 'Send stopped: the target changed while the message was being sent (send target changed: worktree-gone). The message may already have reached the session; look at the pane before sending it again.',
+  },
+  'target-gone': {
+    not_sent: 'Send stopped: the target changed while the message was being sent (send target changed: target-gone). The message was not delivered; read the roster again, then send it again.',
+    unknown: 'Send stopped: the target changed while the message was being sent (send target changed: target-gone). The message may already have reached the session; look at the pane before sending it again.',
+  },
+  'tool-changed': {
+    not_sent: 'Send stopped: the target changed while the message was being sent (send target changed: tool-changed). The message was not delivered; read the roster again, then send it again.',
+    unknown: 'Send stopped: the target changed while the message was being sent (send target changed: tool-changed). The message may already have reached the session; look at the pane before sending it again.',
+  },
+  'dispatch-changed': {
+    not_sent: 'Send stopped: the target changed while the message was being sent (send target changed: dispatch-changed). The message was not delivered; read the roster again, then send it again.',
+    unknown: 'Send stopped: the target changed while the message was being sent (send target changed: dispatch-changed). The message may already have reached the session; look at the pane before sending it again.',
+  },
+  unreadable: {
+    not_sent: 'Send stopped: the target could not be confirmed while the message was being sent (unreadable). The message was not delivered; read the roster again, then send it again.',
+    unknown: 'Send stopped: the target could not be confirmed while the message was being sent (unreadable). The message may already have reached the session; look at the pane before sending it again.',
+  },
+};
+const expectedSentence = (reason: Reason, outcome: Outcome): string => SENTENCES[reason][outcome];
 
 const other = (tool: CLIToolType): CLIToolType => (tool === 'claude' ? 'codex' : 'claude');
 
@@ -270,10 +294,10 @@ const ANSWER_KEYS = ['code', 'current', 'error', 'reason', 'requestId', 'sendOut
 
 function expectTargetChanged(
   answer: { status: number; json: Record<string, unknown> },
-  row: { reason: Reason; outcome: Outcome; tool: CLIToolType; instanceId: string }
+  row: { reason: Reason; outcome: Outcome; tool: CLIToolType; instanceId: string; extraKeys?: string[] }
 ): void {
   expect(answer.status).toBe(409);
-  expect(Object.keys(answer.json).sort()).toEqual(ANSWER_KEYS);
+  expect(Object.keys(answer.json).sort()).toEqual([...ANSWER_KEYS, ...(row.extraKeys ?? [])].sort());
   expect(answer.json.code).toBe('SEND_TARGET_CHANGED');
   expect(answer.json.reason).toBe(row.reason);
   expect(answer.json.sendOutcome).toBe(row.outcome);
@@ -403,6 +427,194 @@ describe('T17 order 1: a driver’s wrap that drops the refusal’s type and cau
       spy.mockRestore();
     }
   }, 60_000);
+});
+
+
+// ---------------------------------------------------------------------------
+// r2: the rows the reviews asked for
+// ---------------------------------------------------------------------------
+
+/** Wrap what `method` of `tool` throws in a bare `Error` (words only: no type, no cause), as the drivers' catches do. */
+function wrapWordsOnly(tool: CLIToolType, method: string, prefix: string): () => void {
+  const cliTool = CLIToolManager.getInstance().getTool(tool) as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const original = cliTool[method].bind(cliTool);
+  const spy = vi.spyOn(cliTool, method as never).mockImplementation(((...args: unknown[]) =>
+    original(...args).catch((error: unknown) => {
+      throw new Error(`${prefix}${error instanceof Error ? error.message : String(error)}`);
+    })) as never);
+  return () => spy.mockRestore();
+}
+
+describe('T17 r2 (P2-1): a launch refused under a driver’s wrap that drops the type and cause', () => {
+  it('[T17 start-wrapped] codex.ts:364’s shape around the launch: still 409, not_sent, and no start-failure notice', async () => {
+    const instanceId = 'claude-sw';
+    addRoster(instanceId, 'claude');
+    onFirst((o) => o.line.startsWith('new-session'), () => perturb('tool-changed', instanceId, 'claude'));
+    // Below base.ts's catch (startSessionOnce): the error base.ts reads is the wrap.
+    const restore = wrapWordsOnly('claude', 'launchSession', 'Failed to start Claude session: ');
+    try {
+      const answer = await post('send', { content: 'body sw', cliToolId: 'claude', instanceId });
+      expectTargetChanged(answer, { reason: 'tool-changed', outcome: 'not_sent', tool: 'claude', instanceId });
+      expect(reportSessionStartFailure).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  }, 60_000);
+});
+
+/** A bound relay to `instanceId` of WT (the send's target), from the worker worktree. */
+function boundRelayTo(instanceId: string): string {
+  return createRelay(db, {
+    from: { worktreeId: WT_WORKER, instanceId: 'claude' },
+    to: { worktreeId: WT, instanceId },
+    hops: 1,
+    expiresAt: NOW + 86_400_000,
+    now: NOW,
+    bindMode: 'bound',
+  }).id;
+}
+
+/** The CLI's end of the server's answer: the exit code, and whether the bound relay was withdrawn. */
+async function cliEndOf(answer: { status: number; json: Record<string, unknown> }, relayId: string | undefined): Promise<{ exit: number; withdrew: boolean }> {
+  const result = handleApiError(null, answer.status, answer.json as ApiErrorPayload);
+  const error = new ApiError(result.message, result.exitCode, answer.status, answer.json as ApiErrorPayload);
+  const posts: string[] = [];
+  const client = {
+    post: vi.fn(async (path: string) => {
+      posts.push(path);
+      if (path.endsWith('/send')) throw error;
+      return {};
+    }),
+    get: vi.fn(async () => {
+      throw new Error('not asked');
+    }),
+  } as unknown as ApiClient;
+  const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  try {
+    await postMessage(client, WT, { content: 'x' }, {
+      relay: relayId ? { id: relayId, bound: true } : undefined,
+      promptWaitingFallback: 'waiting',
+      target: { target: null, agent: 'claude', instanceId: 'claude' },
+    }).catch(() => undefined);
+  } finally {
+    quiet.mockRestore();
+  }
+  return { exit: result.exitCode, withdrew: relayId !== undefined && posts.includes(`/api/relays/${relayId}/cancel`) };
+}
+
+describe('T17 r2 (P2-2): a bound relay and an ask, answered 409 — relayId, the binding’s sendOutcome, the CLI’s exit', () => {
+  it('[T17 relay-bound] refused before the body: relayId, not_sent (the binding agrees), the relay failed; CLI exit 34 and the relay withdrawn', async () => {
+    const instanceId = 'claude-rb';
+    addRoster(instanceId, 'claude');
+    addPane(nameOf('claude', instanceId), 'claude', 'echo PREFILLED');
+    const relayId = boundRelayTo(instanceId);
+    onFirst(isKeys(/C-u/), () => perturb('tool-changed', instanceId, 'claude'));
+    const answer = await post('send', { content: 'body rb', cliToolId: 'claude', instanceId, relayId });
+    expectTargetChanged(answer, { reason: 'tool-changed', outcome: 'not_sent', tool: 'claude', instanceId, extraKeys: ['relayId'] });
+    expect(answer.json.relayId).toBe(relayId);
+    expect(getRelayById(db, relayId)?.sendState).toBe('failed');
+    expect(await cliEndOf(answer, relayId)).toEqual({ exit: 34, withdrew: true });
+  }, 60_000);
+
+  it('[T17 relay-bound] refused after the body went in: relayId, unknown (the binding agrees), the relay not failed; CLI exit 99 and the relay kept', async () => {
+    const instanceId = 'claude-rbe';
+    addRoster(instanceId, 'claude');
+    addPane(nameOf('claude', instanceId), 'claude');
+    const relayId = boundRelayTo(instanceId);
+    onFirst(isKeys(/-l -- body rbe/), () => perturb('tool-changed', instanceId, 'claude'));
+    const answer = await post('send', { content: 'body rbe', cliToolId: 'claude', instanceId, relayId });
+    expectTargetChanged(answer, { reason: 'tool-changed', outcome: 'unknown', tool: 'claude', instanceId, extraKeys: ['relayId'] });
+    expect(getRelayById(db, relayId)?.sendState).not.toBe('failed');
+    expect(await cliEndOf(answer, relayId)).toEqual({ exit: 99, withdrew: false });
+  }, 60_000);
+
+  it.each([
+    ['C-u', 'not_sent', 'not_sent', 34],
+    ['the body', 'unknown', 'send_unknown', 99],
+  ] as const)('[T17 ask] refused at %s: the ask’s sendState agrees with sendOutcome %s; CLI exit as the outcome says', async (at, outcome, sendState, exit) => {
+    const instanceId = 'claude-ask';
+    addRoster(instanceId, 'claude');
+    addPane(nameOf('claude', instanceId), 'claude', at === 'C-u' ? 'echo PREFILLED' : '');
+    // The ask is attributed only on a claude whose version reads as new enough.
+    const execAnswer = world.execAnswer;
+    world.execAnswer = (line) => (/\s--version$/.test(line) ? '99.0.0 (Claude Code)' : execAnswer(line));
+    // The ask's body goes in with its envelope (typed or pasted): the first change that carries it.
+    const bodyWent = (o: Out): boolean => o.cls === 'change' && (o.line.includes('body ask') || o.line.startsWith('paste-buffer'));
+    onFirst(at === 'C-u' ? isKeys(/C-u/) : bodyWent, () => perturb('tool-changed', instanceId, 'claude'));
+    const answer = await post('send', { content: 'body ask', cliToolId: 'claude', instanceId, ask: { id: outcome === 'not_sent' ? '11111111-1111-4111-8111-111111111111' : '22222222-2222-4222-8222-222222222222', protocol: 1 } });
+    expectTargetChanged(answer, { reason: 'tool-changed', outcome, tool: 'claude', instanceId, extraKeys: ['ask'] });
+    expect((answer.json.ask as { id: string; sendState: string }).sendState).toBe(sendState);
+    expect((await cliEndOf(answer, undefined)).exit).toBe(exit);
+  }, 60_000);
+});
+
+describe('T17 r2 (a P3-3 / b P3-5): OpenCode, the target changes after a dispatch went out', () => {
+  it.each([
+    ['no answer (the POST throws: it may have arrived)', 'throw', 'unknown', 'indeterminate'],
+    ['refused (400: nothing was created)', 'reject', 'not_sent', 'not-sent'],
+  ] as const)('[T17 dispatch-after] the POST got %s, then the keyboard fallback is refused → 409 %s', async (_name, post400, outcome, state) => {
+    const instanceId = 'opencode-da';
+    addRoster(instanceId, 'opencode');
+    const S = nameOf('opencode', instanceId);
+    addPane(S, 'opencode');
+    world.frame = (s) => (s === S ? buildOpencodeComposerFrame() : null);
+    vi.mocked(getAssignedOpencodePort).mockReturnValue(4835);
+    vi.mocked(getOpencodeLiveness).mockReturnValue({ state: 'live', lastHeartbeatAt: 1 } as never);
+    vi.mocked(getOpencodePrimarySession).mockReturnValue('ses_da');
+    let posts = 0;
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts += 1;
+        perturb('tool-changed', instanceId, 'opencode');
+        if (post400 === 'throw') throw new TypeError('fetch failed');
+        return { ok: false, status: 400, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({}) };
+      }
+      return { ok: true, status: 200, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ info: { id: 'msg', role: 'user' }, parts: [] }) };
+    }) as unknown as typeof fetch;
+    const answer = await post('send', { content: 'body da', cliToolId: 'opencode', instanceId });
+    expect(posts).toBe(1);
+    expectTargetChanged(answer, { reason: 'tool-changed', outcome, tool: 'opencode', instanceId });
+    expect(lastSend('opencode', instanceId)).toMatchObject({ state, reason: 'target-changed' });
+  }, 60_000);
+});
+
+describe('T17 r2 (a P3-1): the launch records the fence’s state, not always not-sent', () => {
+  const cliTool = { id: 'claude', name: 'Claude Code', getSessionName: () => 'mcbd-claude-x' } as never;
+  const fenceOf = (state: 'not-sent' | 'indeterminate') => ({
+    kind: 'target-changed' as const,
+    state,
+    order: 1 as const,
+    refusal: new SendTargetChangedError('tool-changed', 'send-1-9'),
+  });
+
+  it.each([
+    ['not-sent', 'not_sent'],
+    ['indeterminate', 'unknown'],
+  ] as const)('[T17 start-state] a refusal of state %s: recorded so, and the answer says %s', async (state, outcome) => {
+    const notSent: string[] = [];
+    const attempts: Array<[string, string]> = [];
+    const response = await answerSessionStartFailure(
+      new SendTargetChangedError('tool-changed', 'send-1-9'),
+      {
+        cliTool,
+        worktreeId: WT,
+        instanceId: 'claude',
+        recordNotSent: (reason) => void notSent.push(reason),
+        recordAttempt: (s: string, reason: string) => void attempts.push([s, reason]),
+      } as never,
+      fenceOf(state),
+    );
+    const json = (await response.json()) as Record<string, unknown>;
+    expect(response.status).toBe(409);
+    expect(json.sendOutcome).toBe(outcome);
+    if (state === 'not-sent') {
+      expect(notSent).toEqual(['target-changed']);
+      expect(attempts).toEqual([]);
+    } else {
+      expect(notSent).toEqual([]);
+      expect(attempts).toEqual([['indeterminate', 'target-changed']]);
+    }
+  });
 });
 
 describe('T17 controls: the answers C8 keeps', () => {
