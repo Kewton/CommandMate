@@ -1700,8 +1700,10 @@ lock_recover() { # <lock-path> <dead-token> <dead-pid>
 
 # #4559: lock_recover only while the record is still the one judged (I3). One read of the owner at
 # <point> right before the move; another token, no record, or an unknown leaves the lock where it is
-# (LRC_RESULT=changed / unknown) — never moved first and put back. lock_recover itself keeps its
-# contract (move, check the token, put back), which its put-back seams and D6's caller rely on.
+# (LRC_RESULT=changed / unknown) — the re-read is the judgement, never "moved first and put back".
+# lock_recover itself keeps its contract (move, check the token, put back): the put-back is only the
+# guard of the window between this read and its mv. Callers: lock_acquire_path, lock_release_as_head,
+# lock_recover_only (D6).
 lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
   lock_obs_owner "$4" "$1"
   case "$LOB_CLASS" in
@@ -1710,6 +1712,9 @@ lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
     *) LRC_RESULT=changed; return 0;;
   esac
   if [ "$LOB_TOKEN" != "$2" ]; then LRC_RESULT=changed; return 0; fi
+  # Test seam: the window the re-read cannot close (between it and the mv). A record put in here is
+  # moved, its token checked, and put back by lock_recover — the put-back is kept for this window only.
+  lock_test_pause recover-rechecked
   lock_recover "$1" "$2" "$3"
 }
 
@@ -2543,7 +2548,7 @@ lock_recover_only() { # <lock-path> <queue-dir> <budget-seconds>
       case "$lro_state" in
         gone)
           lock_test_pause recover-only-judged
-          lock_recover "$1" "$LOB_TOKEN" "$LOB_PID"
+          lock_recover_judged "$1" "$LOB_TOKEN" "$LOB_PID" lock-owner
           case "$LRC_RESULT" in
             recovered) LRO_RESULT=removed;;
             restore-failed) LRO_RESULT=restore-failed;;

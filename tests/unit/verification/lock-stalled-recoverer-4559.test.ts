@@ -11,6 +11,8 @@
  * record again before the move and leaves U's lock where it is.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { acquireMachineLock, machineLockPath } from '@/lib/verification/machine-lock';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import {
@@ -19,6 +21,7 @@ import {
   deadPid,
   freshRoot,
   goneDirs,
+  HOST,
   ownerToken,
   startPausedBash,
   takeAsSuccessor,
@@ -130,6 +133,59 @@ describe('#4559 sync JS D6 (recoverIfDead, the copy of bash lock_recover_only)',
     expect(lockSync.recoverIfDead(lockPath, { timeoutMs: 0 }).result).toBe('removed');
     expect(ownerToken(lockPath)).toBeNull();
   });
+});
+
+describe('#4559 bash D6 (verify-run.sh lock_recover_only → lock_recover)', () => {
+  const guard = 'lock_recover_only "$LK" "${LK%.lock}.queue" 0; echo "$LRO_RESULT"';
+
+  it('positive: U took the lock while the guard stopped after recover-only-judged — kept, one holder', async () => {
+    const root = freshRoot('4559-bash-d6');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const n = startPausedBash(root, guard, ['recover-only-judged', 'recover-moved'], { LK: lockPath });
+    const seen = { u: null as Successor | null, u2: false, stages: [] as string[] };
+    expect(await until(() => n.reached('recover-only-judged'))).toBe(true);
+    seen.u = takeAsSuccessor(lockPath);
+    n.go('recover-only-judged');
+    let exited = false;
+    void n.exited.then(() => (exited = true));
+    expect(await until(() => exited || n.reached('recover-moved'))).toBe(true);
+    if (n.reached('recover-moved')) {
+      seen.stages.push('moved');
+      seen.u2 = bareTake(lockPath, 'U2');
+      n.go('recover-moved');
+    }
+    await n.exited;
+    expect(n.out().trim()).toBe('kept');
+    expectOneHolder(lockPath, seen);
+    expect(seen.u?.release()).toBe('released');
+  }, 30000);
+
+  // F64-guard-restore-failed's original injection point (machine-lock-owner-atomic-4288.test.ts moved its
+  // successor to pause:recover-rechecked): after the judgement, before the re-read, the owner rewritten in
+  // place to a live T2 and the restore mkdir failing. After #4559 the record is not moved at all.
+  it('F64\'s original point: a live T2 written after recover-only-judged (restore-mkdir=EACCES) — kept in place, nothing moved aside', async () => {
+    const root = freshRoot('4559-bash-d6-f64');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const n = startPausedBash(root, guard, ['recover-only-judged'], { LK: lockPath, CM_VERIFY_TEST_OBS_FAULT: 'restore-mkdir=EACCES' });
+    expect(await until(() => n.reached('recover-only-judged'))).toBe(true);
+    const tmp = path.join(lockPath, '.t2');
+    fs.writeFileSync(tmp, JSON.stringify({ pid: process.pid, host: HOST, token: 'T2', acquiredAt: Date.now(), v: 1 }));
+    fs.renameSync(tmp, path.join(lockPath, 'owner'));
+    n.go('recover-only-judged');
+    await n.exited;
+    expect({ result: n.out().trim(), owner: ownerToken(lockPath), gone: goneDirs(lockPath) }).toEqual({ result: 'kept', owner: 'T2', gone: [] });
+  }, 30000);
+
+  it('negative control: no stop — the dead holder\'s lock is removed, as before', async () => {
+    const root = freshRoot('4559-bash-d6-ok');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const n = startPausedBash(root, guard, [], { LK: lockPath });
+    await n.exited;
+    expect([n.out().trim(), ownerToken(lockPath)]).toEqual(['removed', null]);
+  }, 30000);
 });
 
 describe('#4559 TS: a recoverer stopped after its judgement', () => {
