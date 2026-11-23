@@ -85,6 +85,8 @@ export const JSON_OWNER_CODEC = { parse: (text) => JSON.parse(text), format: (re
 
 /** How long releaseAsHead / recoverIfDead wait to become the head by default (D5). */
 export const HEAD_BUDGET_MS = 10_000;
+/** #4558: a release reads the owner this many times in one call before it answers 'deferred'. */
+const RELEASE_READ_TRIES = 3;
 
 export function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
@@ -1245,7 +1247,12 @@ export function acquireMachineLockSync(name, options) {
                 // this process is a member of it by definition.
                 release: () => {
                   if (released) return 'none';
-                  const current = obs.owner('release-owner', lockPath);
+                  // #4558: a read that failed is read again (RELEASE_READ_TRIES in this call), and a
+                  // release that did not finish — 'deferred' on an unreadable owner, a delete that threw —
+                  // is not marked done: the next call tries again instead of answering 'none' over a
+                  // record of this live process that no head would recover.
+                  let current = obs.owner('release-owner', lockPath);
+                  for (let i = 1; i < RELEASE_READ_TRIES && current.state === 'unknown'; i++) current = obs.owner('release-owner', lockPath);
                   const mine = current.state === 'record' && (current.owner.token === token || (handed !== null && current.owner.token === handed));
                   const ownGroup = mine && current.owner.pid === process.pid && current.owner.pgid === process.pid;
                   if (mine && validPgid(current.owner.pgid) && !ownGroup) {
@@ -1265,12 +1272,14 @@ export function acquireMachineLockSync(name, options) {
                     warn(`machine-lock-release-needs-head ${lockPath} (recorded pid ${current.owner.pid} is not this process; release as the head)`);
                     return 'needs-head';
                   }
-                  released = true;
                   if (mine) {
                     // A delete that fails (EACCES / EIO / EBUSY) is named once and thrown, as before: the
                     // <lock> and its owner stay, and no 'deferred' is answered from here (#4288 PR1a-f impl-4).
                     const code = rmQuiet(lockPath, { recursive: true });
-                    if (code === null) return 'released';
+                    if (code === null) {
+                      released = true;
+                      return 'released';
+                    }
                     warn(`machine-lock-release-failed ${lockPath} (${code}; the record is still this acquisition's)`);
                     throw Object.assign(new Error(`${code}: cannot remove ${lockPath}`), { code });
                   }
@@ -1278,6 +1287,7 @@ export function acquireMachineLockSync(name, options) {
                     warn(`machine-lock-release-deferred ${lockPath} point=release-owner errno=${current.code}`);
                     return 'deferred';
                   }
+                  released = true;
                   cleanupOwnGone(ctx, token);
                   if (handed !== null) cleanupOwnGone(ctx, handed);
                   return 'kept';

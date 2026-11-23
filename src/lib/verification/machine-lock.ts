@@ -249,6 +249,15 @@ const OWNER_VERSION = 1;
 const START_RECHECK_MS = 10_000;
 const TEMP_MAX_AGE_MS = 3_600_000;
 const LINK_TRIES_PER_POLL = 32;
+/** #4558: a release reads the owner this many times in one call before it counts the read as failed. */
+const RELEASE_READ_TRIES = 3;
+/**
+ * #4558: a release that could not finish (the owner unreadable, or the delete failed) is tried again
+ * this often, up to RELEASE_RETRY_LIMIT times (10 minutes — P0's bound). The holder is this live process,
+ * so no head would ever recover the lock: without the retry it stayed held until the server stopped.
+ */
+const RELEASE_RETRY_MS = 5_000;
+const RELEASE_RETRY_LIMIT = 120;
 
 /** `<root>/<name>.queue`: the tickets of the waiters for `<name>.lock`. */
 export function machineLockQueuePath(name: string, root: string): string {
@@ -1282,7 +1291,45 @@ export async function acquireMachineLock(
             if (claim(lockPath, owner, obs, hooks.onOwnerStage)) {
               retire();
               collectGarbage(queueDir, now());
+              // #4558: `released` is set only once the release is finished. A read of the owner that
+              // failed (EIO …) or a delete that failed leaves the record of this live process, which no
+              // head recovers; it is tried again (RELEASE_READ_TRIES reads now, then every
+              // RELEASE_RETRY_MS) instead of being taken as done.
               let released = false;
+              let retries = 0;
+              let retry: ReturnType<typeof setTimeout> | null = null;
+              const attempt = (): boolean => {
+                let current = obs.owner('release-owner', lockPath);
+                for (let i = 1; i < RELEASE_READ_TRIES && current.state === 'unknown'; i++) current = obs.owner('release-owner', lockPath);
+                if (current.state === 'unknown') {
+                  if (retries === 0) logger.warn('machine-lock-release-deferred', { lockPath, point: 'release-owner', errno: current.code });
+                  return false;
+                }
+                if (current.state !== 'record' || current.owner.token !== token) {
+                  cleanupOwnGone(ctx, token);
+                  return true;
+                }
+                const code = rmQuiet(lockPath, { recursive: true });
+                if (code === null) return true;
+                if (retries === 0) logger.warn('machine-lock-release-failed', { lockPath, error: code });
+                return false;
+              };
+              const run = (): void => {
+                retry = null;
+                if (released) return;
+                if (attempt()) {
+                  released = true;
+                  return;
+                }
+                if (retries >= RELEASE_RETRY_LIMIT) {
+                  released = true;
+                  logger.warn('machine-lock-release-abandoned', { lockPath, tries: retries + 1 });
+                  return;
+                }
+                retries += 1;
+                retry = setTimeout(run, RELEASE_RETRY_MS);
+                retry.unref?.();
+              };
               return {
                 acquired: true,
                 waitedMs: now() - startedAt,
@@ -1293,20 +1340,9 @@ export async function acquireMachineLock(
                     // Once, and only while the record is still ours: a second call, or a call after the
                     // lock was broken and re-taken while we ran, must not move a live holder's lock
                     // (#4277, Codex review 2 finding 1). An owner that cannot be read is not known to
-                    // be ours, so it stays too (#4288).
-                    if (released) return;
-                    released = true;
-                    const current = obs.owner('release-owner', lockPath);
-                    if (current.state === 'unknown') {
-                      logger.warn('machine-lock-release-deferred', { lockPath, point: 'release-owner', errno: current.code });
-                      return;
-                    }
-                    if (current.state !== 'record' || current.owner.token !== token) {
-                      cleanupOwnGone(ctx, token);
-                      return;
-                    }
-                    const code = rmQuiet(lockPath, { recursive: true });
-                    if (code !== null) logger.warn('machine-lock-release-failed', { lockPath, error: code });
+                    // be ours, so it stays too (#4288) — and is read again later (#4558).
+                    if (released || retry !== null) return;
+                    run();
                   },
                 },
               };
