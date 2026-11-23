@@ -1,11 +1,12 @@
 # 送信の結果を sent／not_sent（証明つき）／unknown の 3 値にする（Issue #4535）設計
 
 - 段: 段 1（設計 1 枚。この文書だけ）。src・tests は書かない。段 2 で、試験を先に書き（直す前の赤を確かめる）、その後に実装する
-- 版: **第 2 版**（2026-11-24）。第 1 版は `ce6a3cd62`
+- 版: **第 2.1 版**（2026-11-24）。第 1 版は `ce6a3cd62`、第 2 版は `a7ec9997a`
 - 基準: develop `d4f4624cd`。行番号はこの版のもの。Issue の行番号（`192f9dca1`）は §1.2 で今の位置に直した
 - 正: Issue #4535 の本文（R1〜R5・不変条件 I1〜I5・受入条件・範囲の外）と、2026-11-21 のコメント 3 つ（親の決定、#4503 PR-B1 の資産、S9 受け入れの R1〔新しいタスクのダイアログ〕・K1・K2）。この文書は本文の意味を狭めない
 - 境: #4534 の設計 `send-fence-4534.md`（第 3 版）と v2 `send-fence-4534-v2.md` §3.2〜3.4・§8.2。#4534 PR-B（`b5d0ac4f1`）で入った 409 `SEND_TARGET_CHANGED`・exit 34（`not_sent` のときだけ）・`sendOutcome`
 - 材料: s9 の `review-4518-4492-codex-r2.md`（A4・N2）・`review-4518-v3-codex.md`（3・5）・`review-4466-exact-diff-codex.md`（3・4・5）・`worker-return-4518-stage1.txt`・`accept-result-claude-2.md`
+- 第 2.1 版の材料: s11 の `review-4535-design-v2-opus.md`（第 2 版の再確認。解消 32・未解消 0・P3 7、以下 **V**）・`brief-4535-s1.md`（段 1 の指示）
 - 第 2 版の材料: s11 の `review-4535-design-opus.md`（P1 1・P2 7・P3 10、以下 **A**）・`review-4535-design-opus2.md`（P1 1・P2 7・P3 6、以下 **B**）・`reinstruct-4535-design-r1.md`（処分）
 - 書き方: 「事実」は file:line で確かめたこと。「見立て」は推し量り。この文書の試験の番号は `T1`〜。S9 受け入れの R1 は、Issue 本文の R1（OpenCode）と区別して **N1** と書く
 
@@ -38,6 +39,19 @@
 | B P3-6 Q5 の実測・Q6 の陽性の対照 | 採る | Q5・Q6・§5.3 |
 
 採らないもの: 無し。
+
+### 第 2.1 版の変更点
+
+| 指摘 | 処分 | 節 |
+|---|---|---|
+| V P3-1 N4 で照会が `failed` のとき relay・note・Auto-Yes が残るのに、stderr は「送り直してよい」と言う | 案つきで Q13（人に追加で聞く）。それまでの設計の既定は「残す」（第 2 版のまま）。T8 の 2 本目は Q13 の答えで決める | §3.1・T8・Q13 |
+| V P3-2 `RELAY_BIND_CONFLICT` は `sendOutcome` より先に `code` で決める | 採る | §2.2 優先 |
+| V P3-3 C12 で期待が変わる既存の試験・変えてはいけない試験 | 採る | §5.3 |
+| V P3-4 読み戻しの梯子で 404 と別の答えが混じるとき | 採る。4 回とも 404 のときだけ `not_sent`、混ざれば `unknown` | §2.3・T4 |
+| V P3-5 N7 の `cause.code` の読む所・`AggregateError` | 採る。`ApiError.cause` → `TypeError.cause` の 2 段、`AggregateError` は中の全部が `ECONNREFUSED` のときだけ。分からなければ `unknown` | §2.2 N7 |
+| V P3-6 C2 の前提が崩れたときの落ち方 | 採る | C2 |
+| V P3-7 T13 の変異の「全部赤」は relayId の無い入力に限る | 採る | T13 |
+| 段 1（brief-4535-s1） | 公開の値に触らない足場と内部の分類を先に入れる（§8） | §8 |
 
 ---
 
@@ -123,7 +137,7 @@
 | N4 | 409・`code: RELAY_BIND_CONFLICT` | **`unknown`**。結び付いた relay を照会し、`sent`→`sent`、`failed`→`not_sent`、それ以外→`unknown`。どの場合も relay・note・Auto-Yes に触らない | `conflict`（note を閉じ、Auto-Yes を取り下げる） |
 | N5 | 非 2xx・JSON・`code` が §2.4 の旧サーバー互換の一覧（`sendOutcome` 無し） | `not_sent`（Q2） | 4xx なら `not_sent`、5xx なら照会 |
 | N6 | 401・403・JSON・`code: AUTH_REQUIRED`／`IP_DENIED`（C12 の後の middleware） | `not_sent` | 401 は `not_sent`（4xx）、403 の空本文も同じ |
-| N7 | 応答なし・例外の `cause.code === 'ECONNREFUSED'`（接続が張れていない） | `not_sent`（1 バイトも届いていない） | 状態の無い失敗（照会） |
+| N7 | 応答なし・接続の拒否（接続が張れていない） | `not_sent`（1 バイトも届いていない）。読む所: CLI は `fetch` の例外を `ApiError` の `cause` に包む（`api-client.ts:396–397`）ので、`ApiError.cause`（`TypeError: fetch failed`）→ その `cause.code === 'ECONNREFUSED'` と 2 段たどる。Node の `autoSelectFamily` で IPv4・IPv6 の両方が拒否されると `AggregateError`（`code` の付き方が版で違う）になるので、`errors` の**全部**が `ECONNREFUSED` のときだけ `not_sent`。期限（`DeadlineExceededError`、`:390–393`）とそれ以外の形は `unknown` | 状態の無い失敗（照会） |
 | N8 | 非 2xx・JSON・`ask.sendState: 'not_sent'`（F-a、`ask` の付いた送信） | `not_sent` | 読まない |
 | U1 | 非 2xx・JSON・`sendOutcome: 'unknown'` または `'sent'`（失敗の答えの `sent` は「打った」）、または `ask.sendState: 'send_unknown'`／`'sent'` | `unknown`（直の再送はしない） | 同じ（ask は読まない） |
 | U2 | 非 2xx で N・U1 に当たらない（素の頁、`code` の無い JSON、知らない `code`、404/405、前段が返した 3xx） | `unknown` | 4xx は `not_sent`、5xx は照会 |
@@ -131,7 +145,7 @@
 
 - 結び付いた relay の照会（`GET /api/relays/:id`、`message-dispatch.ts:138–145`）は今のまま、U2・U3・S4・N4 で使う。`failed` を書くのは当該の試行の `settle` だけ（`relay-bind.ts:381–384`）で、relay は CLI ごとに新しく 1 試行しか結び付かないので、照会の `failed` は当該の試行のもの（Q3）
 - redirect: CLI は今どおり追う（`fetch` の既定）。最後の答えを上の表で読む。308 の後の 201 ChatMessage は S1（`sent`）、303 で GET に化けた後の頁は S4／U2（`unknown`）
-- 優先: N・U の判定は `sendOutcome` を先に、`code` を後に見る。同じ答えに `sendOutcome` と `ask.sendState` があり食い違えば、弱い方（`unknown` が勝つ）
+- 優先: **`code: RELAY_BIND_CONFLICT` は最初に `code` で決める**（N4: `relayOwned = false` と照会。A2 の後の答えは `sendOutcome: 'unknown'` を持つが、それで U1 に入れない。事実は照会で上書きする）。それ以外の N・U の判定は `sendOutcome` を先に、`code` を後に見る。同じ答えに `sendOutcome` と `ask.sendState` があり食い違えば、弱い方（`unknown` が勝つ）
 
 ### 2.3 OpenCode の dispatch の 3 値（送信器の中）
 
@@ -140,6 +154,7 @@
 | 204 → 読み戻し `found` | `delivered` | 同じ |
 | 204 → 読み戻しが梯子の**最後まで** 404 | `not_sent`（OpenCode 自身が「その ID の message は無い」と言い続けた。最悪 350 ms） | 最初の 404 で即 `not_sent` |
 | 204 → 404 の後に `found` | `delivered` | 404 で即 `not_sent` → キーボード（二重送信） |
+| 204 → 404 と別の答え（5xx・読めない答え）が混じり、`found` が無い（404・500・404・404 など） | `unknown`（4 回とも 404 のときだけ `missing`） | 1 回目の 404 で即 `not_sent` |
 | 204 → `mismatch`・梯子の尽き（404 以外の読めない答え） | `unknown` | 同じ（ただし fallback する） |
 | 4xx・`200 text/html`（SPA の殻） | `not_sent` | 同じ |
 | 5xx・3xx | **`unknown`**（Q5） | `not_sent` |
@@ -168,7 +183,7 @@
 | 400 `INVALID_PATH` | 有り | `route.ts:399–400`・`:508–509`（2 回目はセッションの起動の後）、`send-image-path.ts:45–67` |
 | 409 brief の選び直し | **無し**（本文は `{ error: result.code, reason, boundary }`） | `route.ts:568–574`（`ask.notTyped`）。`code: 'brief_choice'` を足すかは Q10 |
 
-**N5（旧サーバーとの互換。Q2）**: CLI が `sendOutcome` の無い答えを `not_sent` と読む `code` の一覧: `ASK_ID_CONFLICT`・`RELAY_BIND_INVALID`・`RELAY_BIND_FAILED`・`model_refused`・`INVALID_PATH`・`PROMPT_WAITING`・`FOREIGN_SESSION_ERROR_CODE` の値・ロールの code（`ROLE_*`）・`roster_changed`。**`RELAY_BIND_CONFLICT` は入れない**。`code` の無い 400・404 は読まない。
+**N5（旧サーバーとの互換。Q2）**: CLI が `sendOutcome` の無い答えを `not_sent` と読む `code` の一覧: `ASK_ID_CONFLICT`・`RELAY_BIND_INVALID`・`RELAY_BIND_FAILED`・`model_refused`・`INVALID_PATH`・`PROMPT_WAITING`・`session_owned_by_other_server`（`FOREIGN_SESSION_ERROR_CODE` の値）・ロールの code（`ROLE_` で始まるもの）・`ROSTER_CHANGED`（409 の値は大文字、`api-client-errors.ts:94`）。**`RELAY_BIND_CONFLICT` は入れない**。`code` の無い 400・404 は読まない。
 
 ### 2.5 #4534 の 409 `SEND_TARGET_CHANGED` との整合
 
@@ -193,6 +208,7 @@
 | relay の取り下げ（`cancelRelayQuietly`） | `fact === 'not_sent' && relayOwned` | `null`（結び付かない relay）・`not_sent` |
 | note の close（`closeSendNote`） | `fact === 'not_sent' && relayOwned` | `knownNotSent`（`conflict` も真） |
 | Auto-Yes の取り下げ（`withdrawArmedAutoYes`） | `fact === 'not_sent' && relayOwned`（N4 では届いているかもしれない依頼の Auto-Yes なので触らない。relay の無い送信は `relayOwned` を true と読む） | `knownNotSent` |
+| N4 で照会が `failed` | 既定は第 2 版のまま触らない（`relayOwned = false`）。ただし stderr の「送り直してよい」と、残った relay・note・Auto-Yes が食い違う（Q13） | `conflict`（note を閉じ Auto-Yes を取り下げる） |
 | 契約の task の failed（`failTask`） | 今のまま（失敗なら必ず。task は「この CLI の失敗」）。N4 で届いていた場合の task は Q11 | 同じ |
 | 結び付かない relay（旧サーバー、`bound: false`） | `fact === 'not_sent'` のときだけ取り下げ（今は失敗なら必ず） | 必ず |
 
@@ -244,7 +260,7 @@
 | # | 所 | 今 | 案 | 変えない案との比べ |
 |---|---|---|---|---|
 | C1 | CLI `send`・`ask` の **2xx の形の検査**（S3・S4） | 空の 2xx: `Message sent.`・exit 0。非 JSON の 2xx: exit 99（状態の無い失敗）。形の違う JSON: exit 0 | 3 つとも `unknown`: stderr に `Error: the server's answer did not say whether the message was sent` と unknown の注意、**exit 99**、relay・note はそのまま | 変えない案: 空の 2xx を exit 0 のまま。今の `/send` は空の 2xx を返さない（201 か 200 `ask`）ので、空の 2xx は前段か壊れたサーバー。exit 0 は「送れた」の約束で、監督のエージェントが成果を待ち続ける。案を勧める |
-| C2 | CLI の `/send` の POST の redirect | 追う（301/302/303 は GET、307/308 は同じ本文で POST） | **今のまま追う**。最後の答えを §2.2 で読む（308 の後の 201 は `sent`、GET に化けた後の頁は `unknown`） | 第 1 版の案（`redirect: 'manual'`）は、`/send` が 3xx を返さず前段の 3xx はハンドラーへ渡していないので二重送信を防がない一方、http→https を 308 で返す前段の後ろへ `--url`／`CM_URL` で送る利用者を毎回 exit 99 にする（exit 0→99 の 3 か所目）。採らない。前段が「ハンドラーへ渡してから 3xx を返す」形は無い、を前提として書く |
+| C2 | CLI の `/send` の POST の redirect | 追う（301/302/303 は GET、307/308 は同じ本文で POST） | **今のまま追う**。最後の答えを §2.2 で読む（308 の後の 201 は `sent`、GET に化けた後の頁は `unknown`） | 第 1 版の案（`redirect: 'manual'`）は、`/send` が 3xx を返さず前段の 3xx はハンドラーへ渡していないので二重送信を防がない一方、http→https を 308 で返す前段の後ろへ `--url`／`CM_URL` で送る利用者を毎回 exit 99 にする（exit 0→99 の 3 か所目）。採らない。前段が「ハンドラーへ渡してから 3xx を返す」形は無い、を前提として書く。前提が崩れた場合: 結び付いた relay の送信は 2 通目が `RELAY_BIND_CONFLICT`（N4、`unknown`）に落ちて安全。結び付きの無い送信は §2.1 の「前段の再試行」と同じ範囲の外 |
 | C3 | CLI の **exit**（`not_sent`／`unknown`） | `handleApiError` の値: 400・401・403→2、404→99、409→99／31／33／34、429→1、5xx→99、切断・時間切れ・`fetch failed`→1 | **変えない**。3 値は stderr（`sendOutcome=<値>` の語を含む注意）と後始末に出す。`unknown` の exit は 1・2・99 のどれかに散る | 代わりの案: `unknown` に専用の exit。exit は今、状態コードの写しで、監督のスクリプトはそれで分けている。後の組で `unknown` と exit 2 が重なるのは、C4・C12 の後は**前段が返した素の 400・401・403 だけ**（stderr の「pane を見よ」と exit 2「入力の誤り」が同時に出る）。この重なりを受け入れて勧めは「変えない」（Q4） |
 | C4 | `POST /api/worktrees/:id/send` の実行前の拒否（§2.4 の規則） | `sendOutcome` 無し | 規則で `sendOutcome: 'not_sent'` を足す（status・code・文は今のまま）。`RELAY_BIND_CONFLICT` には `sendOutcome: 'unknown'` | 足さない案: I1 を入れると CLI はこれらを `unknown` と読み、relay・note・Auto-Yes を残す（I5 に反する。例: 稼働中の claude への `send --model X` の 400 で「pane を見よ」と Auto-Yes の残り）。**今の CLI（B の前）の stderr も変わる**: `describeFailedSendOutcome` が足した `not_sent` を読み、404・400・`model_refused` などに `Note: the message was not sent … it is safe to send it again.` を出す（正しい文）。`RELAY_BIND_CONFLICT` の `unknown` には今の CLI が「pane を見よ」を出す（これも正しい） |
 | C5 | CLI の stderr | `sendOutcome` の無い失敗には再送の注意を出さない（`relay-bind-cli-3957.test.ts:309・338` が固定） | `unknown` と読んだ失敗には unknown の注意を出す（N7 を除く） | **既存の試験 2 本の期待が変わる**（§5.3）。変えない案: 注意を出さず、後始末だけ変える。利用者が「送り直してよいか」を知る手が無くなるので、案を勧める |
@@ -279,17 +295,17 @@
 | T1 | R1 | `tests/unit/cli-tools/opencode-unknown-no-fallback-4535.test.ts` `R1: the first dispatch drops before the answer — no second HTTP, no keys`。**pane に空の入力欄が出ているフレーム**を前提にする（出ていないと直す前でもキーは 0。`send-readiness-4040.test.ts:400–407`） | `keys` が 1 回以上 |
 | T2 | R1（添付） | 同 `R1: an image dispatch unknown — the path fallback is not dispatched`（同じ前提） | `dispatch` が 2 回 |
 | T3 | R1（読み戻し） | 同 `R1: a read-back mismatch — nothing typed, indeterminate`（同じ前提） | `submitMock` が 1 回 |
-| T4 | R1 の対照と 404 | 同 `control: a refused POST (4xx) still falls back to the keyboard`・`control: a read-back 404 to the end of the ladder still falls back`（陰性）・`a read-back 404 then found is delivered — no keys`（陽性） | 最後の 1 本: 1 回目の 404 でキーボードに打つ |
+| T4 | R1 の対照と 404 | 同 `control: a refused POST (4xx) still falls back to the keyboard`・`control: a read-back 404 to the end of the ladder still falls back`（陰性）・`a read-back 404 then found is delivered — no keys`（陽性）・`a read-back mixing 404 and 500 is unknown — no keys`（陽性） | 最後の 1 本: 1 回目の 404 でキーボードに打つ |
 | T5 | R1'（Q5） | 同 `a 5xx answer is unknown — no keys` | `keys` が 1 回以上 |
 | T6 | 変異 | T1・T3 は `sendMessageAfterDispatch` の `unknown` の止めを外すと赤、T2 は `sendMessageWithImage` の path の fallback の止めを外すと赤。**2 つを別々に**外して段 2 の記録に残す | — |
 | T7 | R2 | `tests/unit/cli/commands/send-outcome-4535.test.ts` `R2: RELAY_BIND_CONFLICT — the note stays open, the relay is not withdrawn, Auto-Yes stays, the relay is looked up` | note の close の POST が 1 回、Auto-Yes の取り下げが 1 回 |
 | T7b | `relayOwned`（陽性） | 同 `control: RELAY_BIND_INVALID — the relay is withdrawn and the note closed` | 緑のまま（I5） |
-| T8 | R2（照会の陽性） | 同 `RELAY_BIND_CONFLICT and the lookup says sent — exit 0, nothing resent`・`… says failed — not_sent, still no withdraw` | 1 本目: 今は exit 99。2 本目: 今は note が閉じる |
+| T8 | R2（照会の陽性） | 同 `RELAY_BIND_CONFLICT and the lookup says sent — exit 0, nothing resent`・`… says failed — not_sent`（relay・note・Auto-Yes を残すか取り下げるかは Q13 の答えで期待を決める） | 1 本目: 今は exit 99。2 本目: 今は note が閉じる |
 | T9 | R3・R4 | `tests/unit/cli/commands/send-outcome-http-4535.test.ts`（本物の `fetch`・`http.createServer`）`R3/R4: <case> is unknown — no withdraw, no close, no resend`（case: 素の 408 の HTML・`code` の無い JSON の 400・非 JSON の 200・空の 204・空の 200・形の違う JSON の 200・303 → 頁・404 の HTML・405）。各々ハンドラーの POST 1、cancel 0、close 0、stderr に unknown の注意 | 408・400・404・405 で cancel と close が 1。空の 2xx で exit 0 |
 | T10 | 実の `--note --reply-to` | `tests/integration/send-note-unknown-4535.test.ts` `the message lands, a 408 page comes back — the waiting note stays open`。一時 HOME・一時 DB で本物の route と mem を通し、前段の小さな中継（`http.createServer` で `/send` を上流へ渡し、上流の 201 を捨てて `408 text/html` を返す）を挟む。切断の版は陰性の対照（今も緑。照会が `sent` を読む） | `message-dispatch.ts:136` の `statusCode < 500 → not_sent` で relay の取り下げと note の close |
 | T11 | I4 | `tests/unit/lib/relay/relay-bind-settle-4535.test.ts` `a failed settle keeps sent as sent and not_sent as not_sent; relaySettled is false`・`the weaker of the body's and the binding's outcome wins` | `not_sent` が `unknown` になる |
 | T12 | 陽性対照（I5） | `send-outcome-4535.test.ts` `control: 409 PROMPT_WAITING with not_sent — withdrawn and closed`・`control: 409 SEND_TARGET_CHANGED not_sent — exit 34, withdrawn`・`control: model_refused 400 with not_sent — Auto-Yes withdrawn, "safe to send again"` | 緑のまま |
-| T13 | C4（I10） | `tests/unit/app/api/worktrees/send-preflight-outcome-4535.test.ts` `no refusal before the send service answers without sendOutcome`: `sendUserMessage` を「呼ばれたら試験を落とす」偽物にし、拒否を起こす入力を並べる（worktree 無し・壊れた本文・`ask` の衝突・`RELAY_BIND_INVALID`・`model_refused` の早い検査と遅い検査・`INVALID_PATH` の 2 か所）。どの答えにも `sendOutcome: 'not_sent'`。`RELAY_BIND_CONFLICT` は `unknown`。**変異**: 包みの規則を外すと全部赤（一覧ではなく規則を守る）。brief の 409 は `sendUserMessage` の偽物が `brief_choice` を返す形で別に 1 本 | `sendOutcome` が undefined |
+| T13 | C4（I10） | `tests/unit/app/api/worktrees/send-preflight-outcome-4535.test.ts` `no refusal before the send service answers without sendOutcome`: `sendUserMessage` を「呼ばれたら試験を落とす」偽物にし、拒否を起こす入力を並べる（worktree 無し・壊れた本文・`ask` の衝突・`RELAY_BIND_INVALID`・`model_refused` の早い検査と遅い検査・`INVALID_PATH` の 2 か所）。どの答えにも `sendOutcome: 'not_sent'`。`RELAY_BIND_CONFLICT` は `unknown`。入力は**すべて `relayId` 無し**で並べる。**変異**: 包みの規則を外すと全部赤（一覧ではなく規則を守る）。結び付いた relay の予約の後の拒否（`model_refused` の遅い検査・2 回目の `INVALID_PATH`）は、規則を外しても `finish` の `!boundaryWritten → not_sent` で緑のままなので、結び付いた版は T11（`finish` の側）に置く。brief の 409 は `sendUserMessage` の偽物が `brief_choice` を返す形で別に 1 本 | `sendOutcome` が undefined |
 | T14 | N5（旧サーバー） | `send-outcome-4535.test.ts` `an older server's typed refusal (model_refused, no sendOutcome) is not_sent` と対の陰性 `a 400 with no code ({ error } only) is unknown` | 1 本目は今も緑、2 本目は今は `not_sent` で赤。旧規則（4xx なら `not_sent`）に戻す変異で 2 本目が赤 |
 | T15 | N1 | `tests/unit/lib/new-task/send-new-task-outcome-4535.test.ts` `500 sendOutcome unknown is kind unknown`・`a send that times out is kind unknown`・`control: the Auto-Yes request failing is still auto_yes_failed`、`tests/unit/components/new-task/NewTaskDialog-unknown-4535.test.tsx` `a second press after unknown asks first and sends once` | kind が `failed`、2 回目の押下で POST |
 | T16 | C10・C12 | `tests/unit/hooks/usePendingMessages-unknown-4535.test.tsx` `a proxy 4xx without sendOutcome is unknown`・`control: 401 AUTH_REQUIRED is not unknown`、`tests/unit/middleware-send-codes-4535.test.ts` `401 and 403 on /api carry a code` | false、code が無い |
@@ -308,6 +324,8 @@
 | `relay-bind-cli-3957.test.ts:196` `409 RELAY_BIND_CONFLICT: another attempt owns it — NOT withdrawn` | 取り下げない | 同じ（名前の「another attempt」は写しのことと注を足すだけ。期待は変わらない） |
 | `relay-bind-cli-3957.test.ts:309・338` `negative control: an error with no sendOutcome … adds neither note` | 注意 0 | unknown の注意 1（C5） |
 | `tests/unit/hooks/usePendingMessages-unknown-4503.test.tsx` の 4xx の対照（段 2 で行を特定） | 4xx は not unknown | C10 のとおり |
+| `tests/unit/lib/security/auth-challenge-3090.test.ts:154・168`（`/api/*` の 401 を `{ error: 'Unauthorized' }` の `toEqual` で固定） | `code` 無し | `code: 'AUTH_REQUIRED'` が付く（C12） |
+| `auth-challenge-3090.test.ts:161`（画面の道 `/sessions` に `accept: application/json`）・`tests/integration/api-fs-browse.test.ts:107`（route 自身の 401、`src/app/api/fs/browse/route.ts:54`） | `{ error: 'Unauthorized' }` | **変えない**（C12 は middleware の `/api/*` だけ。変わったら規則の範囲の誤り） |
 
 ---
 
@@ -353,3 +371,21 @@ C4 は A2 で、`RELAY_BIND_CONFLICT` に `not_sent` を付けない形でしか
 | Q10 | brief の選び直しの 409（`route.ts:568–574`、code 欄が無い）に `code: 'brief_choice'` を足すか | 足す（C4 の規則で `not_sent` は付くが、旧サーバー互換の N5 と画面の分岐に code が要る）。画面だけの答えなので影響は小さい |
 | Q11 | N4（`RELAY_BIND_CONFLICT`）で照会が `sent` 以外のとき、契約の task を `failed` にするか（写しが届いていれば task は動いている） | 今のまま `failed` にし、stderr に「写しが届いているかもしれない」を出す。task の状態を照会で直すのは #4466 の範囲 |
 | Q12 | C12（middleware の 401・403 に code）を入れるか | 入れる。status は変えず、`/api/*` の JSON に `code` を足すだけ |
+| Q13 | N4（`RELAY_BIND_CONFLICT`）で照会が `failed` のとき、relay・note・Auto-Yes をどうするか。`failed` の relay の `state` は `pending` のまま（`settleRelaySendState` は `send_state` だけを変える、`relay-bind-db.ts:429–440`）で、閉じるのは CLI の `cancelRelay` だけ。(a) 残す（第 2 版）: stderr は「送り直してよい」なのに、古い relay と note が 24 時間残り、Auto-Yes も残る（#4116 が避けた「届かなかった送信の Auto-Yes が他の仕事に答える」）。(b) 照会が `failed` なら `relayOwned` を true に戻し、取り下げ・close・Auto-Yes の取り下げをする: `failed` を書くのは結び付いた唯一の試行の `settle` だけ（Q3）で、その試行は何も打っていない。ただし「写しが予約した後に何も打たずに終わった」の読みは照会 1 回に依る | (b)。Q3 と同じ論で照会の `failed` は「この依頼は届いていない」の証明になり、`not_sent` の扱い（I5）と揃う。二重送信・取り消しの誤りはどちらでも起きない |
+
+---
+
+## 8. 段 1（公開の値に触らない足場と内部の分類）
+
+人の答え（Q1〜Q13）の前に、公開の値（exit・HTTP の status・code・本文の欄・stdout/stderr の文・画面の文・`lastSend.reason`）に触らない部分だけを入れる（#4534 PR-B の段 1 と同じ形）。
+
+| もの | 所 | 中身 |
+|---|---|---|
+| 送信の答えの分類 | `src/lib/send-outcome/classify-send-answer.ts` | §2.2 の S・N・U の行を純粋な関数 `classifySendAnswer(answer)` にする。入力は「この要求の応答」を表す値（`{ kind: 'response', status, contentType, bodyText }` か `{ kind: 'error', error }`）。出力は `{ fact, row, relayOwned, consultRelay }`（`row` は表の行の名前、`consultRelay` は照会を勧める行）。照会の結果は `applyRelayLookup(classified, sendState)` で足す（`sent`→`sent`・`failed`→`not_sent`、証明つきの行と `relayOwned` は変えない）。照会そのもの・後始末・exit・文は持たない。試験 `tests/unit/lib/send-outcome/classify-send-answer-4535.test.ts` |
+| OpenCode の dispatch の分類 | `src/lib/send-outcome/opencode-dispatch-outcome.ts` | §2.3 の表: `prompt_async` の答え（status・content-type・応答なし）→ `accepted`／`not_sent`／`unknown`、読み戻しの梯子の答えの列と梯子の長さ → `delivered`／`not_sent`／`unknown`（`classifyOpencodePromptAnswer`・`classifyOpencodeReadbacks`）。試験 `tests/unit/lib/send-outcome/opencode-dispatch-outcome-4535.test.ts` |
+| 試験の偽のサーバー | `tests/helpers/send-outcome-server-4535.ts` | 本物の `http.createServer`（ポート 0、`127.0.0.1`）で、`/send` の答え（空の 2xx・非 JSON・HTML の 408・307/308・切断）を返す。ハンドラーに届いた POST を数える。閉じたポート（ECONNREFUSED）を作る補助。補助自身の試験 `tests/unit/helpers/send-outcome-server-4535.test.ts` は本物の `fetch` で答えた形がそのまま届くことを確かめる |
+
+- どの module も**どこからも呼ばない**（段 2 で CLI・route・画面・OpenCode の送信器に配線する。配線は人の答えの後）。だから公開の値は 1 つも変わらない
+- 試験は表ごとに置き、分類の各行を外す変異（たとえば `RELAY_BIND_CONFLICT` を `not_sent` に倒す、`sendOutcome` の無い 4xx を `not_sent` に倒す、404 の梯子を 1 回目で決める）で赤になることを確かめる
+- Q13 は未決なので、分類は N4 の `failed` の照会について「事実は `not_sent`、`relayOwned` は false（第 2 版の既定）」を返し、段 2 で答えに合わせる
+
