@@ -1355,9 +1355,16 @@ lock_ticket_retirable() { # <file> <now-ms>
   # One read of the ticket; a ticket that cannot be read is never retired (it blocks like a live one).
   # Nor is one whose fields cannot be extracted (#4288 Codex re-review P1): an extraction that
   # failed is not an empty field.
+  # #4560: LTR_TOKEN is the token of the read judged (set before any answer). A caller that retires
+  # the ticket calls this in its own shell (not in $( ), stdout to /dev/null) and passes LTR_TOKEN to
+  # lock_mark_done — never a token read again, which could be a ticket put there after the judgement.
+  # LTR_WHY is the answer printed (gone | pid-reused | expired), empty when not retirable.
+  LTR_TOKEN=""
+  LTR_WHY=""
   ltr_text=$(cat -- "$1" 2>/dev/null) || return 1
   ltr_token=$(lock_json_text_field "$ltr_text" token) || return 1
   [ -n "$ltr_token" ] || return 1
+  LTR_TOKEN=$ltr_token
   ltr_host=$(lock_json_text_field "$ltr_text" host) || return 1
   ltr_pid=$(lock_json_text_field "$ltr_text" pid) || return 1
   ltr_pgid=$(lock_json_text_field "$ltr_text" pgid) || return 1
@@ -1366,18 +1373,19 @@ lock_ticket_retirable() { # <file> <now-ms>
   ltr_created=$(lock_json_text_field "$ltr_text" createdAt) || return 1
   ltr_deadline=$(lock_json_text_field "$ltr_text" deadline) || return 1
   if [ "$ltr_host" = "$LOCK_HOST" ]; then
-    if lock_record_gone "$ltr_pid" "$ltr_host" "$ltr_pgid"; then echo gone; return 0; fi
+    if lock_record_gone "$ltr_pid" "$ltr_host" "$ltr_pgid"; then LTR_WHY=gone; echo gone; return 0; fi
     if [ -n "$ltr_pid" ] && [ "$ltr_pid" != "$LOCK_SELF_PID" ] && [ -n "$ltr_created" ]; then
       ltr_start=$(lock_pid_start_ms "$ltr_pid") || ltr_start=""
       if [ -n "$ltr_start" ] && [ "$ltr_start" -gt $(( ltr_created + LOCK_PID_REUSE_SLACK_MS )) ]; then
+        LTR_WHY=pid-reused
         echo pid-reused
         return 0
       fi
     fi
-    if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_SAME_HOST_GRACE_MS )) ]; then echo expired; return 0; fi
+    if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_SAME_HOST_GRACE_MS )) ]; then LTR_WHY=expired; echo expired; return 0; fi
     return 1
   fi
-  if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_OTHER_HOST_GRACE_MS )) ]; then echo expired; return 0; fi
+  if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_OTHER_HOST_GRACE_MS )) ]; then LTR_WHY=expired; echo expired; return 0; fi
   return 1
 }
 
@@ -2025,9 +2033,10 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
         for la_entry in $la_names; do
           [ "$la_entry" \< "$la_mine" ] || break
           [ "$(lock_json_field "$la_queue/$la_entry" done)" = "true" ] && continue
-          if la_why=$(lock_ticket_retirable "$la_queue/$la_entry" "$la_now"); then
-            if lock_mark_done "$la_queue/$la_entry" "$(lock_json_field "$la_queue/$la_entry" token)"; then
-              echo "verify-run: machine-lock-ticket-retired $la_queue/$la_entry ($la_why)" >&2
+          # #4560: judged and retired from the same read (LTR_TOKEN), not a token read again.
+          if lock_ticket_retirable "$la_queue/$la_entry" "$la_now" >/dev/null; then
+            if lock_mark_done "$la_queue/$la_entry" "$LTR_TOKEN"; then
+              echo "verify-run: machine-lock-ticket-retired $la_queue/$la_entry ($LTR_WHY)" >&2
             fi
             continue
           fi
@@ -2374,9 +2383,10 @@ lock_wait_head() { # <queue-dir> <budget-seconds>
         for lwh_entry in $lwh_names; do
           [ "$lwh_entry" \< "$lwh_mine" ] || break
           [ "$(lock_json_field "$lwh_queue/$lwh_entry" done)" = "true" ] && continue
-          if lwh_why=$(lock_ticket_retirable "$lwh_queue/$lwh_entry" "$lwh_now"); then
-            if lock_mark_done "$lwh_queue/$lwh_entry" "$(lock_json_field "$lwh_queue/$lwh_entry" token)"; then
-              echo "verify-run: machine-lock-ticket-retired $lwh_queue/$lwh_entry ($lwh_why)" >&2
+          # #4560: judged and retired from the same read (LTR_TOKEN), not a token read again.
+          if lock_ticket_retirable "$lwh_queue/$lwh_entry" "$lwh_now" >/dev/null; then
+            if lock_mark_done "$lwh_queue/$lwh_entry" "$LTR_TOKEN"; then
+              echo "verify-run: machine-lock-ticket-retired $lwh_queue/$lwh_entry ($LTR_WHY)" >&2
             fi
             continue
           fi
