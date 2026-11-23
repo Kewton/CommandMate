@@ -81,8 +81,15 @@ function publicDocs(): string[] {
     .readdirSync(DOCS_DIR)
     .filter((f) => f.endsWith(".md"))
     .map((f) => path.join(DOCS_DIR, f));
+  // The role canon (#4548): a subdirectory the scan above does not reach.
+  const rolesDir = path.join(DOCS_DIR, "roles");
+  const roles = fs
+    .readdirSync(rolesDir)
+    .filter((f) => f.endsWith(".md"))
+    .map((f) => path.join(rolesDir, f));
   return [
     ...docs,
+    ...roles,
     path.join(REPO_ROOT, "AGENTS.md"),
     path.join(REPO_ROOT, "CLAUDE.md"),
   ];
@@ -134,6 +141,13 @@ describe("findPrivateValues (controls)", () => {
 describe("docs/orchestrate after the memory move (#4403)", () => {
   it("carries no private values in docs/orchestrate, AGENTS.md or CLAUDE.md", () => {
     expect(findPrivateValues(publicDocs())).toEqual([]);
+  });
+
+  it("scans the role canon in docs/orchestrate/roles as well (#4548)", () => {
+    const scanned = publicDocs().map((f) => path.relative(REPO_ROOT, f));
+    for (const name of ["project-manager", "dev-leader", "judge", "enabler"]) {
+      expect(scanned).toContain(`docs/orchestrate/roles/${name}.md`);
+    }
   });
 
   const SECTIONS: ReadonlyArray<[string, string]> = [
