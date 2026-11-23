@@ -547,16 +547,18 @@ describe('the nudge rows, by their answers (claude-auto-default-nudge sendNudgeK
     const { answer, after } = await nudgeRow({ entry: 'send', tool: 'claude', launch: true, screen: 'nudge-launch' });
     // PR-A's answer (design §6): the start step's generic 500 `Failed to start … session: <the refusal>`,
     // which carries no code today (the start step's own answer, unchanged).
-    expect(answer.status).toBe(500);
-    expect(answer.code).toBeUndefined();
+    // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+    expect(answer.status).toBe(409);
+    expect(answer.code).toBe('SEND_TARGET_CHANGED');
     expect(answer.texts.join(' ')).toMatch(REASON);
-    expect(answer.lastSendReason).toBe('session-start-failed');
+    expect(answer.lastSendReason).toBe('target-changed');
     expect(after).toEqual([]);
   }, 600_000);
 
   it('[refusal-table] the send path (claude-session sendMessageToClaude): refused at once — no 10 s of reads — with the reason in the answer', async () => {
     const { answer, after, ms } = await nudgeRow({ entry: 'send', tool: 'claude', launch: false, screen: 'nudge-send' });
-    expect(answer.status).toBe(500);
+    // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+    expect(answer.status).toBe(409);
     expect(answer.texts.join(' ')).toMatch(REASON);
     expect(ms).toBeLessThan(5_000);
     expect(after).toEqual([]);
