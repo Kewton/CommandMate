@@ -22,7 +22,7 @@ CommandMate puts the coding agents you already use in one place on your own mach
 | 3 — Manage | A PM agent plans, assigns and checks the work; you talk to the PM and approve | Owner: you set the direction and approve |
 | Next — Learn | Not built yet. The direction: use the record of past work to improve how the work is done | — |
 
-**Anywhere:** at every level you can answer and approve from your phone's browser, so the work does not stop when you leave the desk.
+**Anywhere:** at every level you can answer and approve from your phone's browser, so the work does not stop when you leave the desk. At phone width, in the browser or the installed app (PWA), the worktree screen has five tabs — Terminal, History, Files, Tools and Info — so answering, approving, checking files and Notes all work from the phone.
 
 Most people need only Level 2. Stop at the level that fits you; nothing here asks you to climb.
 
@@ -49,7 +49,7 @@ If you want Level 3 on your own repository — a PM you talk to, a development l
 Read https://kewton.github.io/CommandMate/team-setup.md and set up a CommandMate team for my repository with me. Explain each step before you run it, and ask me before you install anything, change files in my repository, create an instance or a role, change a permission, run `commandmate sync`, use a GitHub repository, turn on Auto Yes, or merge.
 ```
 
-The agent asks which agent CLIs you have, which checks your repository runs and which GitHub Milestone to start with; you answer and approve. The guide starts by installing CommandMate if it is not there yet, has a team for a single agent CLI too, and keeps Antigravity out of every role an agent drives. Decisions an agent records wait for you on CommandMate's screen. Once CommandMate is installed, the same guide is `commandmate docs --section team-setup`.
+The agent asks which agent CLIs you have, which checks your repository runs and which GitHub Milestone to start with; you answer and approve. The guide starts by installing CommandMate if it is not there yet, has a team for a single agent CLI too, and keeps Antigravity out of every role an agent drives. Decisions an agent records (only on a branch whose mem mode is `on`; the default is `off`) wait for you on CommandMate's screen. Once CommandMate is installed, the same guide is `commandmate docs --section team-setup`.
 
 ---
 
@@ -58,6 +58,7 @@ The agent asks which agent CLIs you have, which checks your repository runs and 
 - The agents can work for hours. You can't sit at the desk for hours to answer them.
 - From the outside, an idle agent and one waiting on you look the same.
 - The agent's summary of what it did is not evidence of what it did.
+- Checking the real files means going back and forth between the editor, the terminal and the file browser, and that is where your focus breaks.
 
 ---
 
@@ -65,7 +66,9 @@ The agent asks which agent CLIs you have, which checks your repository runs and 
 
 ### Level 1 — Parallel
 
-Run Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command Code or local models side by side. Each task gets its own session in its own Git worktree — a separate working copy of your repository — so two agents never edit the same files. CommandMate tells you which agent is waiting on you, as a badge or a push notification, and you answer it like a chat.
+Run Claude Code, Codex, Gemini CLI, Copilot, OpenCode (1.x and V2), Antigravity, Command Code or local models side by side. Each task gets its own session in its own Git worktree — a separate working copy of your repository — so two agents never edit the same files. CommandMate tells you which agent is waiting on you, as a badge or a push notification (push works once `commandmate init` has set it up), and you answer it like a chat.
+
+It all stays on one screen: switch a session between the terminal and a chat view, open a file straight from a path in the agent's reply, look through the file tree, images and videos, and keep reusable instructions in Worktree Notes. You check the real files, not a summary, without leaving CommandMate.
 
 Your role: the operator. You read each agent's question and answer it.
 
@@ -87,9 +90,11 @@ Your role: the owner. You set the direction, answer the PM, and approve.
 
 To set this up, follow Stages 4 to 6 of the [setup guide](https://kewton.github.io/CommandMate/setup.md): a PM, a development lead and a worker, with the role templates in [Team Roles](./docs/en/user-guide/team-roles.md). Approval stays with you, and by default you merge. A recorded example is [commandmate-team-demo](https://github.com/Kewton/commandmate-team-demo).
 
+The team from [Set up a team with one prompt](#set-up-a-team-with-one-prompt) has five roles — PM, development lead, workers, reviewer and judge — defined with `commandmate roles` and fixed when each session starts; a `send --role` that does not match sends nothing and exits 32. It works one GitHub Milestone at a time, and the judge reports GO or NO-GO per issue on the integrated result. The reviewer is one of the roles team-setup creates from the start; still, review by another agent is a step you add, not something CommandMate runs for you automatically — use another vendor's agent for it when you have one.
+
 ### Next — Learn
 
-Not built yet, and only a direction: use the record each piece of work leaves behind to improve how the next one is done.
+Not built yet, and only a direction: an agent tidies the notes kept in `mem` outside the work and offers them as a proposal for you to approve on the screen (being designed in #4248), and agents look back at the verification history and the pattern of STOPs and change how they do the next piece of work. `mem`, `brief` and `verify history` themselves already exist (`mem` and `brief` follow the branch's mem mode: writing needs `on`, `brief` prints nothing in `off`, and the default is `off`).
 
 More on each level on the [website](https://kewton.github.io/CommandMate/), and the long form in [How CommandMate works](./docs/en/user-guide/how-it-works.md).
 
@@ -129,7 +134,7 @@ For you or for your agent, by level.
 | Command | What it does |
 |---------|--------------|
 | `commandmate status` | Is the server up, and is push configured |
-| `commandmate remote` | Pair your phone with a QR code |
+| `commandmate remote` | Pair your phone with a QR code. A public tunnel (Cloudflare) starts only after you approve it (`--yes` when not interactive) |
 | `commandmate ls` | Every worktree and the state of its session |
 | `commandmate send <id> "Implement Issue #101" --instance codex` | Send a message to one agent's session |
 | `commandmate capture <id>` | Read the session's current output |
@@ -142,6 +147,8 @@ For you or for your agent, by level.
 |---------|--------------|
 | `commandmate send <id> --contract .commandmate/tasks/issue-101.yaml --instance codex` | Hand over a task contract |
 | `commandmate wait <id> --instance codex --verify` | Wait for the agent, then run your checks and report pass or fail |
+| `commandmate mem now "Waiting on CI for PR #12"` | Record what a session is doing now, so a restart picks it up (from inside the session). Writes only on a branch whose mem mode is `on` (the default is `off`; the mode is set on the screen) |
+| `commandmate mem add --kind waiting --text "Review of PR #12" --close-when "pr:#12?state=merged"` | A typed item that closes once its condition is met. Writes only on a branch whose mem mode is `on` (the default is `off`) |
 
 **Level 3 — Manage**
 
@@ -149,6 +156,8 @@ For you or for your agent, by level.
 |---------|--------------|
 | `commandmate skill list` | The official Catalog Skills you can install per worktree, including the one a PM agent runs on |
 | `commandmate docs --section agent-operations` | The full command guide, for your agent to read |
+| `commandmate roles list` | The roles a session can be started with |
+| `commandmate send <id> "Review PR #12" --instance claude-2 --role reviewer` | `claude-2` stands for an instance ID already in that worktree's roster. Saves `reviewer` as that instance's role first. A session that is not running starts with it and gets the message; a running one that started with another role, or with no record of its start, gets nothing (exit 32, the setting stays saved) |
 
 Every command and flag is in the [CLI Operations Guide](./docs/en/user-guide/cli-operations-guide.md); `commandmate --help` lists the options.
 
