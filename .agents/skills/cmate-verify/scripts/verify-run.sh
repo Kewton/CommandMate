@@ -654,6 +654,8 @@ LOCK_ACQUIRED_AT=0
 LOCK_UNKNOWN=""
 LOCK_GONE_PENDING=""
 LOCK_WARNED=""
+# The re-read unknowns this acquisition named (#4559): emptied by lock_acquire_path (set -u safe for D5 / D6).
+LOCK_REREAD_NAMED=""
 LOCK_TAB=$(printf '\t')
 # How long a gate's child waits for the signal that its group is on the owner record (§2.4).
 HANDOFF_WAIT_SEC=30
@@ -1739,11 +1741,14 @@ lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
   lock_recover "$1" "$2" "$3"
 }
 
-# Nothing moved; named once like the other unknowns (LOCK_UNKNOWN for the timeout's line, which then does
-# not repeat it), and the caller judges again.
+# Nothing moved; named once like the other unknowns (LOCK_UNKNOWN for the timeout's line), and the caller
+# judges again. LOCK_REREAD_NAMED is this acquisition's own mark (lock_acquire_path empties it): the
+# timeout's line skips only an observation this acquisition already named here, never one named by an
+# earlier acquisition of the same process (LOCK_WARNED is the process's warn-once and is not reset).
 lock_reread_unknown() { # <point> <path> <errno>
   lock_note_unknown "$1" "$2" "$3"
   lock_warn_once "machine-lock-unknown point=$1 path=$2 errno=$3"
+  LOCK_REREAD_NAMED="$LOCK_REREAD_NAMED|point=$1 path=$2 errno=$3|"
   LRC_RESULT=reread-unknown
 }
 
@@ -2018,6 +2023,7 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
   la_deadline=$(( la_start_ms + la_budget * 1000 ))
   la_tmp="$la_queue/.t-$LOCK_TOKEN"
   la_broken=""
+  LOCK_REREAD_NAMED=""
   la_emptied=0
   while :; do
     LOCK_UNKNOWN=""
@@ -2204,9 +2210,10 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
     fi
     if [ "$(lock_now_ms)" -ge "$la_deadline" ]; then
       lock_retire_own_ticket
-      # A re-read's unknown named in its poll (#4559, lock_reread_unknown) is not named a second time.
-      case "$LOCK_WARNED" in
-        *"|machine-lock-unknown $LOCK_UNKNOWN|"*) ;;
+      # A re-read's unknown named in a poll of this acquisition (#4559, lock_reread_unknown) is not named
+      # a second time.
+      case "$LOCK_REREAD_NAMED" in
+        *"|$LOCK_UNKNOWN|"*) ;;
         *) if [ -n "$LOCK_UNKNOWN" ]; then
           echo "verify-run: machine-lock-unknown $LOCK_UNKNOWN (not taken: unknown is never read as free)" >&2
         fi;;

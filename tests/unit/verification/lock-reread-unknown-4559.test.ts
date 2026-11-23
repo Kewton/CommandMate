@@ -376,3 +376,34 @@ describe('#4559 r4 item 2 (b): the re-read finds no owner and the listing fails 
     expect(n.out().trim()).toBe('kept|');
   }, 30000);
 });
+
+/**
+ * Review r5 (lead-to-worker-4558-r5): the timeout's line is skipped only for a re-read's unknown named in
+ * the same acquisition. LOCK_WARNED is the process's warn-once and is never reset between acquisitions, so
+ * a second acquisition in the same bash whose judgement read fails with the same point, path and errno
+ * still names it at the end of its wait.
+ */
+describe('#4559 r5: two acquisitions of the same lock in one bash', () => {
+  it('the first names its re-read\'s unknown once; the second, timing out on the judgement\'s read, still prints its line', async () => {
+    const root = freshRoot('r5-twice');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const arm = `${root}/arm`;
+    const body = `${ONE_EIO}
+lock_acquire x 2; echo "rc1=$?"; lock_release "$LOCK_PATH" "$LOCK_TOKEN"
+mkdir -p "$LK"; printf '{"pid":%s,"host":"%s","token":"L","acquiredAt":0,"v":1}\\n' "$$" "$LOCK_HOST" > "$LK/owner"
+echo "--- second" >&2
+CM_VERIFY_TEST_OBS_FAULT="lock-owner=EIO"
+lock_acquire x 0; echo "rc2=$?"`;
+    const n = startPausedBash(root, body, ['recover-judged'], { ARM: arm, LK: lockPath });
+    expect(await until(() => n.reached('recover-judged'))).toBe(true);
+    fs.writeFileSync(arm, '');
+    n.go('recover-judged');
+    await n.exited;
+    const [first, second] = n.err().split('--- second');
+    expect(n.out().trim().split('\n')).toEqual(['rc1=0', 'rc2=1']);
+    // Within one acquisition the same observation is named once (f555e2071's "once" is kept).
+    expect(named(first.split('\n')).length).toBe(1);
+    expect(second.split('\n').filter((l) => l.includes(`machine-lock-unknown point=lock-owner path=${lockPath}/owner errno=EIO (not taken: unknown is never read as free)`))).toHaveLength(1);
+  }, 30000);
+});
