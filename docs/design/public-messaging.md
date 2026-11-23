@@ -85,6 +85,38 @@ llms.txt の一致を見ている）。
 | ~80% of my instructions sent from a phone (my estimate) | 作者の感覚値。必ず「estimate」と書く |
 | 689 PRs merged in September 2026, across my repositories | GitHub search `author:Kewton is:pr is:merged merged:2026-09-01..2026-09-30` |
 
+### リポジトリ規模と Milestone 実測（as observed）
+
+CommandMate 本体のリポジトリを CommandMate 自身で開発したときの規模と運用の記録（Issue #4568）。製品の性能の主張ではない。
+上の表や hero の数字とは別物で、hero には置かない。数字ごとに **測った版・日付が違う**ので、版や日付と切り離して書かない。
+
+| 数字 | 値 | 測った対象 | 出典 |
+|---|---|---|---|
+| `src/` の TypeScript / TSX | 1,788 ファイル ・ 468,652 行 | `v0.55.0` タグ（commit `337be86e5`）。空行・コメントも数えた物理行。develop の作業ツリーの値ではない | `v0.55.0` タグに対する `git ls-tree` ・ `git show` ・ `wc -l`（コマンドは表の下） |
+| テスト | 3,223 ファイル ・ 59,177 試験 | `v0.54.0` の #4488 の変更前に測った数（#4488 のガードを足した後は +1 ファイル ・ +2 試験）。`tests/unit` + `tests/integration` を `workspace/` の無い状態で `vitest list` した数。`v0.55.0` の数ではなく、E2E（Playwright）は含まない | `CHANGELOG.md` の `## [0.54.0]` にある #4488 の項 |
+| PR の CI | Lint（ESLint と `shellcheck` の `lint:sh`）・ Type Check ・ Unit Tests（4 shard）・ Integration Tests ・ E2E Tests（Playwright、2 shard）・ Build ・ Security Audit。ほかにサイズ・制御文字・token・route export・旧 tmux のガードのジョブがある | `v0.55.0` タグと develop（`19ef66dd6`）で同じ内容 | `.github/workflows/ci-pr.yml` のジョブ `lint` ・ `type-check` ・ `test-unit`（`matrix.shard: [1, 2, 3, 4]`）と `test-unit-result` ・ `test-integration` ・ `test-e2e`（`matrix.shard: [1, 2]`）と `test-e2e-result` ・ `build` ・ `security-audit` |
+
+| Milestone | closed / open の Issue | Milestone を閉じた日 | リリース（版の日付） | 出典 |
+|---|---|---|---|---|
+| Sprint 7（#2） | closed 9 ・ open 1 | 2026-11-19 | `v0.53.0`（2026-11-19） | GitHub Milestones API、`CHANGELOG.md` の `## [0.53.0]` |
+| Sprint 8（#3） | closed 15 ・ open 0。受け入れは 46 項目中 44 が合格、不合格 0 | 2026-11-20 | `v0.54.0`（2026-11-21） | GitHub Milestones API、`CHANGELOG.md` の `## [0.54.0]` の Highlight（受け入れの数） |
+| Sprint 9（#4） | closed 9 ・ open 0 | 2026-11-22 | `v0.55.0`（2026-11-22） | GitHub Milestones API、`CHANGELOG.md` の `## [0.55.0]` |
+
+- コードの規模は次のコマンドで再現できる（作業ツリーではなくタグの中身を読む）:
+
+  ```bash
+  git ls-tree -r --name-only v0.55.0 -- src | grep -E '\.(ts|tsx)$' | wc -l      # 1788
+  git ls-tree -r --name-only v0.55.0 -- src | grep -E '\.(ts|tsx)$' \
+    | while read -r f; do git show "v0.55.0:$f"; done | wc -l                    # 468652
+  ```
+
+- Milestone の数は `gh api 'repos/Kewton/CommandMate/milestones?state=all'` の `closed_issues` ・ `open_issues` ・ `closed_at`（UTC の日付）を
+  2026-11-23 に取得した値。Issue があとで Milestone に足し引きされると変わるので、取得日を添えて書く
+- Milestone を閉じた日とリリースの日は別の事実である。Sprint 8 は Milestone を 2026-11-20 に閉じ、`v0.54.0` は 2026-11-21 に出した
+- 範囲は Sprint 7〜9 だけ。Sprint 10 以降はここに無いので書かない（§5「未計測の数字」）
+- 表を載せるときは、表の直下に `as observed`（ja: `as observed（実測した範囲）`）と、上の「測った対象」（版 ・ 計測条件）を添える。
+  表だけを切り出して使わない。1 つのリポジトリでの記録なので、ほかのリポジトリでの速さ ・ 規模の主張に広げない
+
 ---
 
 ## 2. 対応エージェントの数え方
@@ -136,6 +168,12 @@ llms.txt の一致を見ている）。
 | `wait --verify` | `commandmate wait --verify` オプション | `src/cli/commands/wait.ts` |
 | plan → dispatch → merge → uat | 4 つの runner が別々の起動で動き、どれも次の phase を勝手に始めない。mutation は `--approve` を付けた起動だけ | `cmate-orchestrate` Skill の `SKILL.md` |
 | 別のエージェントへレビューに出す | `commandmate ask`、`cmate-delegate` Skill | `src/cli/commands/ask.ts` ・ 公式 Catalog の `cmate-delegate` |
+| `commandmate mem`（型付きのメモ。`now` ・ `add` ・ `--close-when`） | kind は `now` ・ `waiting` ・ `decision` ・ `next` ・ `external` ・ `note` の 6 つ。`--close-when` は書くときに構文と kind の組を確かめて保存し、閉じるかどうかは `mem list` ・ `mem check` ・ brief ・ 画面のプレビューが呼ばれたときにその場で評価する（タイマーも常駐も無い）。mem の mode（`off` ・ `derived` ・ `on`）が `on` のブランチで書ける | `src/cli/commands/mem.ts` の `createMemCommand`（`now <text>` ・ `add` の `--close-when`）・ `src/types/mem.ts` の `MEM_KINDS` ・ `MEM_MODES` ・ `src/lib/mem/service.ts` の `memWriteNow` ・ `memAddItem` ・ `src/lib/mem/close-when.ts` の `parseCloseWhen` ・ `finalizeCloseWhen` ・ `src/lib/mem/evaluate.ts` の `evaluateMemConditions` |
+| `brief` で再起動の後に続きを渡す | `commandmate brief` が派生した状態と mem の項目をバイト数の上限内でまとめる。mode が `derived` のときは派生した状態だけを出し、手で書いた項目は出さない（`off` は何も出さず exit 50）。send への自動の注入は、mode が `derived` か `on` で、**かつ** 機能 `injectOnStart` が有効なときだけ（既定は無効。画面の mem の設定で切り替える）で、会話の境目（起動 ・ 自動再起動 ・ reset ・ resume ・ 明示）の後の最初の send の前に一度だけ brief を置く。それ以外では何も足さず、send の本文はそのまま送る | `src/cli/commands/brief.ts` の `createBriefCommand`（`--budget` ・ `--session-start`）・ `src/lib/mem/present.ts` の `presentMemItem` ・ `src/lib/brief/sources.ts` の `BRIEF_DERIVED_SOURCES` ・ `src/lib/session/brief-provider.ts` の `BriefBoundaryKind` ・ `getBriefProvider` ・ `src/lib/session/session-brief.ts`（`target.mode === 'off'` と `target.features.injectOnStart` が偽なら注入を skip）・ `src/types/mem.ts` の `MEM_FEATURE_KEYS` ・ `src/lib/db/mem-db.ts` の `NO_FEATURES`（`injectOnStart: false`）・ `src/lib/mem/settings-service.ts`（`PUT …/mem-settings/branches` の `injectOnStart`） |
+| 決定の反映は画面からだけ承認する（`screen_only`）。エージェントの指示ファイルへは書かない | promote の preview ・ approve などは画面からのリクエストでなければ 403 `screen_only` で断る。行き先の `path:` は `CLAUDE.md` ・ `AGENTS.md` ・ `.claude/` などエージェントの指示ファイル（大文字小文字を区別しない）と `.md` でないファイルを断る | `src/lib/promote/service.ts` の `promotePreview` ・ `promoteApprove`（`isScreenRequest` が偽なら `promoteError('screen_only')`）・ `src/lib/promote/destination.ts` の `checkDocPath` と、そこから再 export する `AGENT_INSTRUCTION_PATHS`（定義は `src/lib/promote/promote-to-rule.ts`） |
+| ロールを決めて起動する（`commandmate roles` ・ `send --role`、exit 32） | ロールは起動時に固定。`send --role` は条件で、合わない ・ 起動の記録が無いときは何も打たずに exit 32（設定は保存済み）。使用中のロールの削除などは exit 31 | `src/cli/commands/roles.ts` の `createRolesCommand`（`list` ・ `show` ・ `add` ・ `edit` ・ `rm` ・ `default` ・ `defaults`）・ `src/cli/commands/send.ts` の `--role` ・ `--no-role` ・ `src/cli/commands/send-validation.ts`（`role` ・ `expectedRole` を送信本文に載せる）・ `src/cli/types/index.ts` の `RoleExitCode.NOT_SENT`（32）・ `RoleExitCode.CONFLICT`（31）・ `src/cli/utils/role-failure.ts`（`ROLE_CONDITION_UNMET` などを 32 に対応づける） |
+| 1 画面で完結する UI（ターミナルとチャットの切替 ・ チャットのファイルリンク ・ File Tree ・ 画像 / 動画ビューア ・ Notes） | 表示面は `terminal` / `chat` の 2 つ（既定は `terminal`）。チャットの返答の中のパスはファイルを開くリンクになる。ファイルツリー、ファイル ・ 画像 ・ 動画のビューア、Notes などのサブタブを同じ画面に持つ | `src/types/ui-state.ts` の `SurfaceMode` ・ `DEFAULT_SURFACE_MODE` ・ `src/components/worktree/ChatSurface.tsx` の `ChatSurface` ・ `src/lib/chat/chat-file-link-scope.ts` の `ChatFileLinkProvider` ・ `src/components/worktree/FileTreeView.tsx` の `FileTreeView` ・ `FileViewer.tsx` の `FileViewer` ・ `ImageViewer.tsx` の `ImageViewer` ・ `VideoViewer.tsx` の `VideoViewer` ・ `NotesAndLogsPane.tsx` の `NotesAndLogsPane`（`SubTab` の `notes`） |
+| `commandmate remote`（`--provider tailscale` / `cloudflare` と `--auth all` / `remote-only`） | provider は自動で選ぶか `--provider` で指定する。公開の tunnel（Cloudflare Quick Tunnel）は承認（非対話なら `--yes`）が要る。`--auth` は認証の範囲で、既定は `all`。`remote-only` はローカルの listener を認証なしにするので、loopback 以外に bind するサーバーでは断る | `src/cli/commands/remote.ts` の `createRemoteCommand`（`--provider` ・ `--auth` ・ `--yes`）・ `REMOTE_PROVIDER_ALIASES` ・ `PUBLIC_TUNNEL_PROVIDERS` ・ `REMOTE_AUTH_SCOPES` ・ `DEFAULT_REMOTE_AUTH_SCOPE` ・ `parseAuthScope` ・ `src/lib/remote/tailscale.ts` の `tailscaleProvider` ・ `src/lib/remote/cloudflare.ts` の `cloudflareProvider` |
 
 ---
 
@@ -312,3 +350,17 @@ Level は「機能の高度さ」ではなく「**人間が AI 開発組織に�
 | 数字を書かない（成功率 ・ 改善率 ・ 件数など） | §5「未計測の数字」 |
 | エージェントやモデルを比べない（「エージェント X は成功率 N%」のような例示も書かない） | §5「モデルの安さ・賢さの序列」 |
 | `loop` ・ `self-managing` ・ `runs 24/7` ・ `no supervision` を使わない | §5 ・ §7（常駐ではなく、承認は人に来る） |
+
+#### 実装済みと未実装の境目（Issue #4568）
+
+Next — Learn は「記録から次の作業を良くする」方向である。その材料になる機能のうち、次は**実装済み**で、§4 に根拠がある。
+公開面でこれらを Next — Learn の一部として「まだ作っていない」と書かない。逆に、これらがあることを Learn が出来ている証拠としても書かない。
+
+- `commandmate mem`（型付きのメモと `--close-when` の評価）・ `commandmate brief`（再起動の後の引き継ぎ）・ 決定の反映を画面からだけ承認する promote（`screen_only`）
+- `commandmate verify history` ・ `commandmate report metrics`（記録を読むだけ）
+
+**未実装**なのは次の 2 つで、Next — Learn と書くときは上の 5 つの上限をそのまま守る。
+
+- dreaming（Issue #4248、設計 [docs/design/mem-dreaming-4248.md](./mem-dreaming-4248.md)）: 作業の外でエージェントが mem をまとめ直し、
+  人が画面で承認する提案として出す。設計だけがあり、`src/` に実装は無い（2026-11-23、develop `19ef66dd6` で確認。Issue #4248 は open）
+- 検証の履歴や STOP の傾向から、エージェントが自分で振り返って次の作業を変えること。方向だけで、§4 に根拠のある実装は無い
