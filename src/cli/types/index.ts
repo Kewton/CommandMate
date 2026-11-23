@@ -730,6 +730,20 @@ export const ToolPolicyExitCode = {
 } as const;
 export type ToolPolicyExitCode = typeof ToolPolicyExitCode[keyof typeof ToolPolicyExitCode];
 
+/**
+ * What a `send` / `ask` stopped by the send's fence ends in (Issue #4534: the
+ * server's 409 `SEND_TARGET_CHANGED`). 34 because 30-33 are taken
+ * ({@link InterruptExitCode} / {@link RoleExitCode} / {@link ToolPolicyExitCode})
+ * and 40 / 41 are the strict `respond`'s. Only with `sendOutcome: not_sent`:
+ * one that may have arrived (`unknown`), or that says neither, stays
+ * {@link ExitCode.UNEXPECTED_ERROR} — a loop that resends on 34 never sends twice.
+ */
+export const SendTargetExitCode = {
+  /** The target (the worktree, the instance's tool, OpenCode's dispatch target) changed or could not be confirmed mid-send; the message was not delivered. Read the roster again, then send it again. */
+  CHANGED: 34,
+} as const;
+export type SendTargetExitCode = typeof SendTargetExitCode[keyof typeof SendTargetExitCode];
+
 /** Shared by every `roles` subcommand (Issue #4116). */
 export interface RolesOptions {
   json?: boolean;

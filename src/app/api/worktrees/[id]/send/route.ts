@@ -315,6 +315,17 @@ async function handleSend(
       });
       relay.attempt = 'not-sent';
     };
+    // Issue #4534 (PR-B r2): an attempt the fence says may have gone in (the start
+    // step's refusal with the body or a dispatch started): not ordered by the
+    // observed generation, as the send service's own `indeterminate` records are not.
+    const recordAttempt = (state: SendAttemptState, reason: SendAttemptReason): void => {
+      if (state === 'not-sent') {
+        recordNotSent(reason);
+        return;
+      }
+      recordSendAttempt(sendAttemptInstance, { state, reason, content: trimmedContent });
+      relay.attempt = state;
+    };
 
     // Issue #4437 (design §1.3): the tool policy, before the session's ownership,
     // the role's save (a refusal leaves no setting) and any start or key — after
@@ -468,6 +479,7 @@ async function handleSend(
         instanceId,
         model: body.model,
         recordNotSent,
+        recordAttempt,
       }));
       if (!started.ok) return started.response;
     } else {
@@ -573,6 +585,8 @@ async function handleSend(
       }
       return answerSendFailure(result, {
         cliTool,
+        db,
+        cliToolId,
         worktreeId: id,
         instanceId,
         model: body.model,

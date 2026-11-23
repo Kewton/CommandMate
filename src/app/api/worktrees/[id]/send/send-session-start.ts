@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server';
 import type Database from 'better-sqlite3';
 import { saveInitialBranch, getInitialBranch } from '@/lib/db';
 import type { CLIToolType, ICLITool } from '@/lib/cli-tools/types';
-import type { SendAttemptReason } from '@/lib/session/send-attempt-types';
+import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import {
   buildSessionExitedToShellMessage,
   isSessionStartTimeoutError,
@@ -29,6 +29,12 @@ import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import type { ClaudeTool } from '@/lib/cli-tools/claude';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
+import {
+  classifyOwnSendFenceOutcome,
+  reportSendFenceOutcome,
+  type SendFenceOutcome,
+} from '@/lib/session/send-fence-outcome';
+import { answerSendTargetChanged } from './send-target-changed-answer';
 import { CLAUDE_MODEL_EXAMPLES, MODEL_REFUSED_CODE, type SendStep } from './send-request';
 
 const logger = createLogger('api/send');
@@ -84,13 +90,26 @@ export interface StartSessionForSendInput {
   model: string | undefined;
   /** Records this request's attempt as not sent (Issue #3759 / #4011). */
   recordNotSent: (reason: SendAttemptReason) => void;
+  /**
+   * Issue #4534 (PR-B r2): records this request's attempt in the state the fence
+   * gave (`indeterminate` when the body or a dispatch had started). Omitted, an
+   * `indeterminate` refusal records nothing rather than a `not-sent` it cannot prove.
+   */
+  recordAttempt?: (state: SendAttemptState, reason: SendAttemptReason) => void;
 }
+
+/**
+ * {@link startSessionForSend}'s step. `fence` (Issue #4534 PR-B, internal): the
+ * classified refusal of the send's fence when the start threw one; the route
+ * answers `response` only.
+ */
+export type StartSessionStep = SendStep<void> & { fence?: SendFenceOutcome };
 
 /**
  * Start the CLI tool session a send needs (it is not running). ok once it is
  * started and broadcast; otherwise the handler's answer.
  */
-export async function startSessionForSend(input: StartSessionForSendInput): Promise<SendStep<void>> {
+export async function startSessionForSend(input: StartSessionForSendInput): Promise<StartSessionStep> {
   const { db, cliTool, cliToolId, worktreeId: id, worktreePath, instanceId, model } = input;
   try {
     if (cliToolId === 'antigravity' && model) {
@@ -121,7 +140,10 @@ export async function startSessionForSend(input: StartSessionForSendInput): Prom
       }
     }
   } catch (error: unknown) {
-    return { ok: false, response: answerSessionStartFailure(error, input) };
+    // Issue #4534 (PR-B): classified under the send's ticket, before it closes.
+    const fence = classifyOwnSendFenceOutcome(error);
+    const response = answerSessionStartFailure(error, input, fence);
+    return fence !== null ? { ok: false, response, fence } : { ok: false, response };
   }
 
   // Issue #1120: push the running transition so sidebar status dots flip
@@ -136,9 +158,23 @@ export async function startSessionForSend(input: StartSessionForSendInput): Prom
  */
 export function answerSessionStartFailure(
   error: unknown,
-  input: Pick<StartSessionForSendInput, 'cliTool' | 'worktreeId' | 'instanceId' | 'recordNotSent'>,
+  input: Pick<StartSessionForSendInput, 'cliTool' | 'worktreeId' | 'instanceId' | 'recordNotSent'> &
+    Partial<Pick<StartSessionForSendInput, 'db' | 'cliToolId' | 'recordAttempt'>>,
+  fence: SendFenceOutcome | null = classifyOwnSendFenceOutcome(error),
 ): NextResponse | Promise<NextResponse> {
   const { cliTool, worktreeId: id, instanceId, recordNotSent } = input;
+  // Issue #4534 (PR-B, design v2 §3.2): the fence's refusal is classified first
+  // (orders 1–3), before the role's and the start's own answers. The target
+  // changed: 409 SEND_TARGET_CHANGED (C1), recorded in the fence's state (r2: the
+  // route opens the ticket right before the start, so it is `not-sent` today; an
+  // `indeterminate` one is never recorded `not-sent`). A misuse: today's answer,
+  // reason `fence-misuse` (C8).
+  reportSendFenceOutcome('start', fence);
+  if (fence?.kind === 'target-changed') {
+    if (fence.state === 'not-sent') recordNotSent('target-changed');
+    else input.recordAttempt?.(fence.state, 'target-changed');
+    return answerSendTargetChanged(fence, { db: input.db, worktreeId: id, instanceId, cliToolId: input.cliToolId ?? cliTool.id });
+  }
   // Review P3-2: this start asked for a model, and joined a launch of the
   // session that is starting with another. Nothing was typed; answered as
   // a `--model` to a running session is (#989 / #2771).
@@ -160,7 +196,11 @@ export function answerSessionStartFailure(
     );
   }
   logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
-  recordNotSent(isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed');
+  recordNotSent(
+    fence?.kind === 'fence-misuse'
+      ? 'fence-misuse'
+      : isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed'
+  );
   // Issue #1637: a session that is still initializing is not a server
   // fault. The tmux session and the CLI process exist and are coming up,
   // so the honest answer is "temporarily unavailable, retry" — 503 with a

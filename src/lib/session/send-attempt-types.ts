@@ -78,6 +78,16 @@ export type SendAttemptReason =
    * origin with no API-key / enterprise use declared (Google Antigravity terms §6, #4437).
    */
   | 'tool-policy-denied'
+  /**
+   * `not-sent` or `indeterminate`: the send's target (the worktree, the
+   * instance's tool, OpenCode's dispatch target) changed — or could not be
+   * confirmed — while it was being sent, so the fence stopped it before the
+   * next change (#4534). `not-sent` only when neither the body nor a dispatch
+   * had started; otherwise the message may be on the pane.
+   */
+  | 'target-changed'
+  /** The send's fence was used wrongly (a bug of CommandMate, not of the target); the state is the failure's own (#4534). */
+  | 'fence-misuse'
   /** `indeterminate`: the body was typed, did not land intact, and was taken back out best-effort (#2464/#3366). */
   | 'body-not-landed'
   /** `indeterminate`: an autocompletion replaced the body; the line was cleared best-effort (#1501). */

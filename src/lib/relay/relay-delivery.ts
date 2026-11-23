@@ -39,7 +39,12 @@
  */
 
 import { randomUUID } from 'crypto';
-import { runWithSendTicket } from '@/lib/session/terminal-fence';
+import { runWithSendTicket, type SendTicketHandle } from '@/lib/session/terminal-fence';
+import {
+  classifySendFenceOutcome,
+  reportSendFenceOutcome,
+  type SendFenceOutcome,
+} from '@/lib/session/send-fence-outcome';
 import { relaySendTicketInit } from '@/lib/session/send-target-names';
 import type Database from 'better-sqlite3';
 import { getDbInstance } from '@/lib/db/db-instance';
@@ -669,6 +674,8 @@ async function attemptDelivery(
   try {
     let attempt: ObservedAttempt = null;
     let result: Awaited<ReturnType<typeof sendUserMessage>>;
+    // Issue #4534 (PR-B): the send's ticket, for a throw's classification.
+    let ticket: SendTicketHandle | null = null;
     try {
       result = await runWithSendTicket(ticketInit, () => sendUserMessage(db, {
         worktreeId: requester.worktreeId,
@@ -684,8 +691,12 @@ async function attemptDelivery(
         onAttempt: (observed) => {
           attempt = observed;
         },
-      }));
+      }), (opened) => {
+        ticket = opened;
+      });
     } catch (error) {
+      // Issue #4534 (PR-B): classified by the send's own ticket; held as today.
+      reportSendFenceOutcome('relay', classifySendFenceOutcome(error, ticket), 'uncertain');
       const reason = reasonForThrow(attempt);
       logger.warn('relay-delivery-uncertain', {
         relayId,
@@ -705,8 +716,10 @@ async function attemptDelivery(
         requester,
         kind,
         result.stage,
-        attempt as ObservedAttempt
+        attempt as ObservedAttempt,
+        'fence' in result ? result.fence : undefined
       );
+      reportSendFenceOutcome('relay', 'fence' in result ? result.fence : undefined, settled.outcome);
       requeued = settled.requeued;
       // Issue #4105: A's dialog refused it and the payload is queued again
       // under the same id. A requeue that failed leaves it `attempting` (a
@@ -946,6 +959,11 @@ function stillCarriesPayload(
 /**
  * A send that returned `ok: false`: held as `uncertain`, or queued again when
  * it is known not to have gone out (Issue #4064).
+ *
+ * Issue #4534 (PR-B, design v2 §3.2): a refusal of the send's fence (`fence`)
+ * is settled by its state — `not-sent` as a refusal is (the payload goes back,
+ * nothing withdrawn), `indeterminate` held as uncertain. The attempt the send
+ * recorded carries that state already, so the settlement is today's.
  */
 function settleUnsentResult(
   db: Database.Database,
@@ -954,25 +972,34 @@ function settleUnsentResult(
   requester: ResolvedRelaySession,
   kind: 'reply' | 'prompt' | 'expired',
   stage: string | undefined,
-  observed: ObservedAttempt
+  observed: ObservedAttempt,
+  fence?: SendFenceOutcome
 ): { outcome: RelayDeliveryOutcome; requeued: boolean } {
   const relayId = ref.relayId;
   // Every failure `sendUserMessage` returns reports its attempt first; one
   // without (a caller's stub) is read as before (#4064 keeps that).
-  const notSent = observed === null || observed.state === 'not-sent';
+  const notSent = isNotSent(observed, fence);
   if (!notSent) {
+    // A fence's `indeterminate` with no reported attempt (a caller's stub) is held as `send-error`.
+    const reason = observed?.reason ?? 'send-error';
     logger.info('relay-delivery-uncertain', {
       relayId,
       kind,
       stage,
-      reason: observed.reason,
+      reason,
     });
-    if (holdUncertain(db, ref, observed.reason)) noteRelayHeld(db, relay, requester, ref, kind, observed.reason);
+    if (holdUncertain(db, ref, reason)) noteRelayHeld(db, relay, requester, ref, kind, reason);
     return { outcome: 'uncertain', requeued: false };
   }
   logger.info('relay-delivery-refused', { relayId, kind, stage });
   const requeued = requeue(db, ref);
   return { outcome: stage === 'prompt_waiting' ? 'held' : 'failed', requeued };
+}
+
+/** Whether an unsent result is known not to have gone out: the fence's state first, else the attempt's. */
+function isNotSent(observed: ObservedAttempt, fence: SendFenceOutcome | undefined): boolean {
+  if (fence !== undefined) return fence.state === 'not-sent' && (observed === null || observed.state === 'not-sent');
+  return observed === null || observed.state === 'not-sent';
 }
 
 /** Record a delivered attempt's result, by kind (Issue #4082). */

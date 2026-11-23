@@ -52,6 +52,7 @@ import type { SendAttemptState } from '@/lib/session/send-attempt-types';
 import { relayObservationSource, relayServerBootId } from '@/lib/relay/relay-boot';
 import type { RelayObsState } from '@/lib/relay/types';
 import { createLogger } from '@/lib/logger';
+import { RelayReservationLostError } from '@/lib/session/send-fence-outcome';
 import { getOrInitGlobal } from '../global-state';
 
 const logger = createLogger('relay-bind');
@@ -264,7 +265,8 @@ export class RelaySendBinding {
     }
     if (!written) {
       this.refused = true;
-      throw new Error(`relay ${this.target.relayId} is no longer reserved for this send`);
+      // Issue #4534 (PR-B): typed, so the classification reads it as this request's (message unchanged).
+      throw new RelayReservationLostError(`relay ${this.target.relayId} is no longer reserved for this send`);
     }
     this.boundaryWritten = true;
     observedTools.set(this.target.relayId, { attemptId: this.attemptId, cliToolId: this.target.cliToolId });
