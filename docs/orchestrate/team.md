@@ -48,19 +48,15 @@ worktree `mycodebranchdesk` で動かす、このリポジトリの開発体制�
 これを **claude-3 の予約**（`scripts/agent-health/claude3-reserve.ts`、Issue #4243。設計は [docs/design/claude3-dispatch-exclusion-4243.md](../design/claude3-dispatch-exclusion-4243.md)）で守る。
 PM も dispatch も、予約を持っている間だけ `claude-3` に送る。片方が持っている間、もう片方は送らない（dispatch は待たずに `skipped-busy` を記録して終わり、PM のコマンドは exit 3 で止まる）。
 
-コマンドはすべて main のチェックアウト（`mycodebranchdesk`）で `npx tsx scripts/agent-health/claude3-reserve.ts <サブコマンド>` として実行する。
+手順の細部（番号は同じ）: [agent-health-dispatch.md](agent-health-dispatch.md)
 
-1. **予約**: `reserve --label "<対象の Issue>"`。標準出力の 1 行が token。token は引き継ぎメモ（`workspace/mem`）にも書く。
-   `claude-3` が処理中・プロンプト待ちなら exit 4、別の持ち主（前の PM の run・自動依頼の run）がいれば exit 3 で、どちらも予約しない
-   **開発リーダー自身が守る場合**（PM を通さず直接 `/orchestrate` を頼まれた run など）: `claude-3` の中から `reserve --self --label "<対象の Issue>"`。状態確認を省き（自分が処理中のため）、持ち主は `leader`。`whoami` が `mycodebranchdesk` の `claude-3`（cliTool は claude）でなければ exit 2。dispatch は予約中として `skipped-busy` で見送る。解除は `release --token <token>`（`send` は exit 3）。token を失ったら `status` で読み、残った leader の予約は PM が `release --force --from <token>` で外す（`takeover` は使えない）。exit 3 は `status` で持ち主を見て、dispatch なら終わるのを待って取り直す
-2. **送信**: ブリーフも途中の返事も `send --token <token> "<本文>"` で送る（PM の予約の token でだけ送れる。自動依頼の token では exit 3）（中身は `commandmate send mycodebranchdesk "<本文>" --instance claude-3`）。素の `commandmate send … --instance claude-3` は使わない
-3. **解除**: 開発リーダーの `DONE:` を読んだら `release --token <token>`。長くかかるときは `renew --token <token> [--hours 1-24]`。期限（既定 8 時間）を過ぎても予約は外れない。期限は「要確認」の表示だけ
-4. **PM の再起動後**: `status` で自分の予約の token を見て `takeover --from <token> --reason restart`。新しい token に替わり、古い token の操作は以後すべて exit 3
-5. **自動依頼の run が外せなかったとき**: run の最後の `finish --token` が完了の印（予約の置き場所の `finished-<token>.json`）を残したのに解除が通らなかった場合だけ、`claude-3` が手すきなら `takeover --from <token> --reason dispatch-finished` で引き継げる。リリース判断レポート（HTML）は run の途中でも手で作れるので証拠にしない。印が無ければ exit 3 で、人が `release --force --from <token>` で判断する
-6. **導入時**: PM のセッションと Schedule（dispatch）の環境の両方で `status` を実行し、出た `dir=` の絶対パスが同じことを確かめる（置き場所は `~/.commandmate/agent-health/claude3.reservation` に固定）
-
-dispatch 側は、対象があれば `/clear` の前に予約を取り、依頼を送った後も run の終わりまで持つ。run の最後に `claude-3` 自身が条件ファイルの指示どおり `finish --token` を実行する（完了の印を残してから解除）（[agent-health.md](../user-guide/agent-health.md)「自動依頼」）。
-PM が素の `commandmate send` を打つことを仕組みで止めるのは未対応（追跡）。リポジトリの共有の設定（`.claude/settings.json` のフック）を足すと clone した利用者を含む全 Claude セッションに効くため採らない。`claude-3` へは `npx tsx scripts/agent-health/claude3-reserve.ts send` だけで送る（手順 2）。
+1. **予約**: `reserve` の token を mem にも書く
+2. **送信**: `send --token` だけで送る（素の send は使わない）
+3. **解除**: `DONE:` を読んだら `release`
+4. **PM の再起動後**: `status` で token を見て `takeover`
+5. **自動依頼の run が外せなかったとき**: 完了の印があれば `takeover`、無ければ人
+6. **導入時**: 両方の `status` の `dir=` を比べる
+PM が素の `commandmate send` を打つことを仕組みで止めるのは未対応（追跡）。`claude-3` へは `npx tsx scripts/agent-health/claude3-reserve.ts send` だけで送る（手順 2）。
 
 手で着手する Issue に `agent-health` / `catalog-drift` / `metrics` のラベルが付いていれば、着手のときに `gh issue edit <N> --add-label auto-dispatched` を付けてコメントを残す。付けないと、翌朝の自動依頼（`src/lib/agent-health/dispatch.ts`）が同じ Issue を `claude-3` に送り、ブランチ・PR が重なる。自分で起票する Issue には、自動の修正に回したいもの以外これらのラベルを付けない。
 
@@ -69,12 +65,11 @@ PM が素の `commandmate send` を打つことを仕組みで止めるのは未
 UAT はジャッジ（`claude-2`）が行い、結果はジャッジ → PM → 開発リーダーの順で返す。不合格の修正ループ（`/uat-fix-loop`）は開発リーダーが回す。
 修正ループ内の再UAT（`/uat-fix-loop` の Step 5 の `/uat`）と全 Issue の回帰確認も同じで、開発リーダーが自分で `/uat` を回さず、PM 経由でジャッジに頼み結果を待つ。
 開発リーダー以外の人が 1 人で `/orchestrate` を回す場合（今の運用）は、`orchestrate.md` の Phase 7 の手順のままでよい。
-UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1b を含む develop を取り込んでから起こす（`scripts/uat/run-server.sh` は各 worktree のチェックアウトのものを使うので、取り込む前の worktree は旧い run-lock のまま取り合い、混在の間は旧い `up` が新しい `up` のロックを pid だけで死んだと読んで取ることがある。設計は `docs/design/run-lock-machine-lock-4288.md` と `docs/design/lock-reservation-rest-4288.md` §1.9）。
+UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1b を含む develop を取り込んでから起こす（経緯: [history.md](history.md)）。
 
 ## 6. 直しとレビューを収束させる規則
 
-直し→レビューの往復が収束しない問題（mem の G-PR2 で Codex 9 回、G-PR3 で 5 回、#4288 PR1a で 4 回）への手当て。人の承認: 2026-11-11。数字の出典は PM の台帳（`workspace/mem/pm-2026-11-09-remaining.md`）。
-根にあったのは、指摘の多くが直しで変えていない行（最初からあった穴）にあり、レビュー 1 回で一部ずつしか見つからなかったこと、設計・実装が枝ごとの場合分けで組み合わせの数だけ漏れが出たこと、呼び手の無い API の使われない組み合わせを直し続けたこと、P2 の処分が「広げて直す」だけだったこと、同じ種類の 2 回目で止まらなかったこと。
+経緯: [history.md](history.md)
 
 1. **1 回目のレビューで網羅させる。** 高リスクの変更の最初の 5-2b と PM の Claude レビューで、レビュアーにすべての return・throw・書き込みの表と、入力・状態の組み合わせの表を作らせる。なぜ: 穴を 1 回ずつ見つける往復を 1 回に縮めるため
 2. **高リスクは最初から不変条件で書く。** 送信の経路と relay・ロック・データ（migration・DB の書き込み）・公開の API と CLI の契約・**ゲートと検証の定義の変更**は、設計と最初の契約から「不変条件＋全組み合わせの表の試験＋先に赤」で書く。なぜ: 枝ごとの場合分けは組み合わせの数だけ確かめ漏れを生む。この規則（1・2・6 の不変条件・全組み合わせの表・同じ種類の 2 回目で止める）の適用範囲は、この 5 つ（送信の経路と relay・ロック・データ（migration・DB の書き込み）・公開の API と CLI の契約・ゲートと検証の定義）の変更に限る。それ以外は下の 10 の速い道でよい
@@ -90,7 +85,7 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
    - 上限以外の Codex の不調（接続など）の代わりも Claude 5（`--instance claude-5`）。Antigravity には頼まない
    - `codex-2` は `codex` と同じアカウントの上限を共有するので、上限の対策にならない（stream disconnected のような個別の不調で `codex-2` へ振り替えるのは従来どおり）
 8. **見通しは実績の率で幅を出す。** 「次のレビューで指摘が出なければ」という条件つきの最短を予測として伝えない。残りの往復の見込み（台帳と整合性レビューの記録から）× 1 往復の時間（verify の待ち＋実行＋レビュー）で幅を出し、最短と見込みを分けて書く。分かっている制約（夜の計測・期限・1 人のリーダーを通る直列・CI の不安定）は最初から入れる。見通しを変えたら、何が外れたかを 1 行添える。なぜ: 条件が外れるたびに終わりが延び、後ろ倒しに見えた
-9. **「使っていない」「同じ条件だ」「生きている」を、外れうる観測から推測して許可に使う設計は、同じ種類の 2 回目で形を変える。** Sprint 7 で 3 本が同じ形で止まった: #4430（生成物の片付け。lstart・server の行・名前・親の死から不使用を推測）、#4432 案 A（合格の使い回し。並列の設定・途中の作業ツリー・未申告の入力が同じと推測）、#4459（busy 待ち。秒数・欄の変化から run の生存を推測）。観測を足して塞ぐのをやめ、(a) 推測を人の確認に置き換える（#4430 → 人の確認で消すコマンド）、(b) 推測が外れても安全側に倒れる範囲にだけ使う（観測は「残す」「待つ」側にだけ効かせる）、(c) 生存・同一を示す専用の印を作る（#4463 の心拍、#4433 の env-clean の listeners: 兄弟・祖先から持ち主を推すのをやめ、起動した側〈今は `commandmate start --daemon`〉が残す記録と process group・leader の起動時刻で確かめたものだけ免除）、のどれかに設計を替える。外れたら合格になる・消える・打ち切る向きの推測は、ゲートと受入条件を弱めることになる
+9. **「使っていない」「同じ条件だ」「生きている」を、外れうる観測から推測して許可に使う設計は、同じ種類の 2 回目で形を変える。** 観測を足して塞ぐのをやめ、(a) 推測を人の確認に置き換える（#4430 → 人の確認で消すコマンド）、(b) 推測が外れても安全側に倒れる範囲にだけ使う（観測は「残す」「待つ」側にだけ効かせる）、(c) 生存・同一を示す専用の印を作る（#4463 の心拍、#4433 の env-clean の listeners: 兄弟・祖先から持ち主を推すのをやめ、起動した側〈今は `commandmate start --daemon`〉が残す記録と process group・leader の起動時刻で確かめたものだけ免除）、のどれかに設計を替える。外れたら合格になる・消える・打ち切る向きの推測は、ゲートと受入条件を弱めることになる
 10. **易しい bug の速い道**（人の承認 2026-11-21）。対象は易・局所（1〜2 ファイル）で、2 の 5 つ（送信の経路と relay・ロック・データ（migration・DB の書き込み）・公開の API と CLI の契約・ゲートと検証の定義）に触れないもの。流れは設計の段を省き、Command Code のワーカー → レビュー 1 本 → verify（ゲートは 1 つも変えない）→ CI 全件 success → `--last`。受け入れはリリース前のまとめで拾う。迷ったら通常の流れ（高リスクの規則）に戻す。速い道にした Issue は返しに「速い道」と書く
 
 ## 7. WIP の上限とレーンの組み方
@@ -105,7 +100,7 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
   - (1) **ワーカーの task の返しの行**: 契約の goal と同じ形 `DONE: #<N> <sha> verify exit <n>` / `WAIT: <理由>` / `STOP: <理由>`。行全体がこの形で、DONE の `<sha>` は今の HEAD を名指す。見張り（`orchestrate-monitor`）が拾うのはこの形だけ
   - (2) **イネーブラー・CI・レビューの返し**: 返しのファイルの `DONE:` 行（例 `DONE: changes-required P1=1 P2=1 P3=6`）。形は依頼文で決める。(1) の形ではないので、見張りの返しの行としては拾わない。返しのファイルか、依頼文で決めた形で待つ
 - 見張りが起きるのは 3 つ: (a) 返しの行、(b) 許可のプロンプト（画面が確認待ちで止まった）、(c) 新しいコミット。(b)(c) では終わらせず、人に返すか次の手を決める。`IMPL_COMPLETED` は**形の外の終わり方**で、見張りは `SHAPE_OUTSIDE` として知らせ、合格には数えない（#4532 より前に送った task のための古い合図で、待ちを終わらせる形ではない）
-- 見張りは、セッションが動いていれば（`NOT_RUNNING` でなければ）担当（CLI）を問わず毎ポーリング `capture --pane` を読み、終わり方を pane の**全行**で判定する。許可のプロンプトも、その担当の既存の目印を pane にも当てて拾う（目印を持たない担当、たとえば codex は、サーバーの `isPromptWaiting` に任せる）。`capture --json` は状態・`promptData` などに併せて使うだけで、終わり方の判定には `content` / `realtimeSnippet` を使わない（どちらも窓で、Command Code は上から描くので余白になり、codex は下端の入力欄だけが入る。`--pane --tail N` の末尾 N 行も同じ理由で使わない）。行は照合の前に 1 つの正規化を通す（ANSI・右の差分のパネル `<文字><空白 2 つ以上>│ …`・前後の空白を落とす。行頭の返しの目印（集合は `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv`）は 1 つだけ剥がすので 1 行だけの返事も拾い、入力欄の `❯ DONE: …` は拾わない）。`--pane` の読み取りに失敗したら、失敗が続く間に 1 回だけ `WARN` を出す（読めたら張り直す）。画面が長く変わらなければ STALL として知らせる。依頼文の締めに「止まるときも `STOP: <理由>` と書く」を必ず入れる
+- 読み方の細部: [workers.md](workers.md#3-2-完了の見張りが-pane-を読む細部)。画面が長く変わらなければ STALL として知らせる。依頼文の締めに「止まるときも `STOP: <理由>` と書く」を必ず入れる
 - 見張りの除外の規則を自作しない（雛形どおりに書いた本物の `DONE:` 行まで除いてしまう）。(1) の形は goal が決め、見張りはその形で絞る。(2) の形は依頼文で決める。見張りを張ったら、`DONE:` が既にある画面で一度鳴ることを確かめる
 - CI は `bucket` が全部終わるまでを待ち、10 分以上 queued ならランナーが online かも見る。動いている依頼と見張りの一覧をいつでも出せるようにしておく
 
@@ -117,20 +112,9 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 2. **機械で決まるケースはスクリプトにする（B）。** API・CLI・tick のように合否が exit code と出力で決まるケースは、受け入れでは流して結果を見る。ここに書くのは書き方だけで、スクリプトは別の PR（今回は作らない）。（未着手。Sprint 9 以降の候補）
 3. **E2E との重複の整理は、入れる前に人へ伺う（C）。** CI の E2E が同じ入口で確かめたケースは結果の確認にとどめ、ジャッジを E2E が見ていないところ（本物のエージェント・統合した版・スマホの幅・複数の Issue の組み合わせ）に絞る案。受入条件の確かめ方が変わるので、PM が人の了承を取り、記録が残るまで入れない。（2026-11-20 時点で人の了承が無いので入れていない）
 4. **隔離の環境（ビルド・試験用のリポジトリとデータ）は使い回せる形にする（D）。** 本ごとに作り直さず、同じ版のビルドと試験用データを使い回す。使い回し方の実装は別の PR。（未着手。Sprint 9 以降の候補）
-5. **計画の段階の決まり: 同じ画面・同じファイルを書く Issue は 1 人のワーカーに 1 本の PR（Issue ごとにコミット）としてまとめる。** 別のワーカーに分けて直列にすると待ちが積み重なる（段 5 で `/sessions` の 3 本を直列にして約 19 時間かかった）。計画の表の「書くファイル」で重なりを見て決める（orchestrate.md 1-4・plan-check.md）
+5. **計画の段階の決まり: 同じ画面・同じファイルを書く Issue は 1 人のワーカーに 1 本の PR（Issue ごとにコミット）としてまとめる。** 別のワーカーに分けて直列にすると待ちが積み重なる。計画の表の「書くファイル」で重なりを見て決める（orchestrate.md 1-4・plan-check.md）
 
-実績（数字は根拠の列の返し（追跡されない置き場所で、main のチェックアウトにしか無い）から。推測で埋めない）:
-
-| 受け入れ | 日時（JST） | 並行の本 | ケース（分母） | 所要 | 根拠 |
-|---|---|---|---|---|---|
-| 段 5 後半の計画（実測ではない） | — | 1 人 | 40 余り（計画） | 約 5.5 時間 | ビルドと準備 30 分・画面 2 時間・API と RG 1 時間・tick 45 分・本物のエージェント 45 分・片付けと報告 30 分。ジャッジ 1 人が 40 余りのケースを順に通す**計画値** |
-| 段 5（1 人で順に） | 2026-11-15 08:05〜08:37 | 1（`claude-2`） | 23（9+3+4+3+4。分母は各 Issue の計画した数） | 約 32 分 | `workspace/orchestration/runs/2026-11-15/judge-return-s5.md` |
-| 段 5b（3 本） | 2026-11-17 14:51〜15:21 | 3（T1〜T3） | 46（6+6+6+7+6+9+6） | 約 30 分 | `workspace/orchestration/runs/2026-11-16/judge-return-s5b.md` |
-| 段 6 受け入れ 2（2 本） | 2026-11-18 00:27〜01:05（A 本 00:27〜00:52・B 本 00:27〜01:05） | 2（A・B） | 28（8+9+9+2。ほかに通し E2E-1 1） | 約 38 分 | `workspace/orchestration/runs/2026-11-17/judge-return-s6-agy.md` |
-| Sprint 7（2 本） | 2026-11-19 10:27〜12:39 | 2 | 38 ケース（分母 36） | 本 1 約 27 分・本 2 約 2 時間 10 分（うち RG-7 の verify 約 105 分） | `workspace/orchestration/runs/2026-11-19/judge-return-s7.md` |
-| Sprint 8（2 本） | 2026-11-20 17:14〜20:01（本 1 17:14:50〜18:10:21・本 2 17:15:30〜19:58） | 2（本 1 20 ケース・本 2 26 ケース） | 46（合格 44・不合格 0） | 約 2 時間 47 分 | `workspace/orchestration/runs/2026-11-19/s8/judge-return-s8.md` |
-
-同じ範囲で 1 人と並行を同時に測ったものは無い。比べられるのは Sprint 8 の計画の見込み（1 人 約 8.5 時間 → 並行 約 5 時間）と実測（約 2 時間 47 分）、Sprint 8 の 2 本の差（本 1 約 56 分・本 2 約 2 時間 43 分）で、長いほうの本が全体の所要を決める。次から本の分けは、重い実行（verify・unit の全体・長い待ち）を 1 本に寄せず、見込みの時間がそろうように分ける。
+実績: [history.md](history.md)。次から本の分けは、重い実行（verify・unit の全体・長い待ち）を 1 本に寄せず、見込みの時間がそろうように分ける。
 
 ### 受け入れ・リリースの間のマージ（続ける。止めるのは main への PR からマージバックまで）
 
@@ -138,12 +122,12 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 
 ## 10. 開発リーダー 2 人で回す決まり（段 7、PM の採用: 2026-11-17）
 
-根拠: `workspace/orchestration/runs/2026-11-17/leader2-onboarding.md` §2 と `pm-reply-leader2-rules.md`。
+細部: [multi-lead.md](multi-lead.md)
 
-1. **持ち分の表。** PM が計画で、Issue ごとに「書くファイル（glob）」と「境界の持ち主」の列を持つ表を書く。既定の分け方は、画面＝`src/app` の画面・`src/components`・`src/hooks`／CLI・サーバー＝`src/cli`・`src/app/api`・`src/lib`。持ち分の外を書く必要が計画の後に分かったら、書かずに STOP で返す
-2. **境界のファイルは Issue ごとに 1 人の持ち主を決める。** 共有の型（`src/types/**`・`src/cli/types/api-responses.ts`）・API の呼び口（`src/lib/api-client*.ts`）・DB の migration（版の番号は計画で割り当てる）・試験の基盤（`tests/setup.ts`・`tests/helpers/**`・`vitest.config.ts`）・文言（`locales/{ja,en}/*.json`）・文書（`docs/module-reference.md`・`docs/user-guide/cli-operations-guide.md`・`.env.example`）。持ち主でないリーダーのワーカーは書かない。changelog は Issue ごとの断片なので持ち分の対象にしない。API を変える Issue と、それを呼ぶ画面の Issue は同じリーダーの同じ PR にするか、API を先にマージする直列にする。もう 1 人のリーダーの未マージのブランチの上でブランチを切らない（土台のマージの後に develop から切る）
+1. **持ち分の表。** PM が計画で、Issue ごとに「書くファイル（glob）」と「境界の持ち主」の列を持つ表を書く。持ち分の外を書く必要が計画の後に分かったら、書かずに STOP で返す
+2. **境界のファイルは Issue ごとに 1 人の持ち主を決める。** 一覧は [multi-lead.md](multi-lead.md#境界のファイル)。持ち主でないリーダーのワーカーは書かない。changelog は Issue ごとの断片なので持ち分の対象にしない。API を変える Issue と、それを呼ぶ画面の Issue は同じリーダーの同じ PR にするか、API を先にマージする直列にする。もう 1 人のリーダーの未マージのブランチの上でブランチを切らない（土台のマージの後に develop から切る）
 3. **マージの順と積み直しの持ち主。** マージは各リーダーが自分の PR を自分で流す（ロックの先着順に任せ、待ち合わせのシェルを自作しない）。**積み直し（develop の取り込み・衝突の解消・precheck・merge-pr の exit 4 の再実行）の持ち主は、後からマージする PR のリーダー**。衝突の解消で相手の持ち分のファイルの意味を変える必要があれば、解消せずに止めて PM に返す。統合破壊は後からマージした側が直す。マージのたびに develop の push CI の結論を見て、赤なら 2 人とも次のマージを止める。「CI が通れば」の許可の run では全 PR に `--last` を付ける。列（`--queue`）には条件がそろった PR だけを 1 回に 2〜3 本まで入れる
-4. **単体テストの mutex（`cpu.heavy`）の取り合い。** mutex はマシンで 1 本のまま、リーダーで分けない。重いゲートを走らせる人を減らす（リーダーは同じ tree・同じ環境の合格を再利用し、重ねて流さない）。2 人合わせて同時のワーカーは 5〜6 本以下。verify の待ちは 1 本あたり 30〜45 分を見込みに入れる（#4467 の後、手元の `unit-related` は src・tests 以外の変更でもテスト全体に切り替わらず `mode=related reason=non-source:<ファイル>` で流れる。全体は CI の `Unit Tests` が見る。ci-merge.md の「テスト全体と unit-related の分け方」）。同じ worktree の古いコミットの run を列に残さない。列の順を変える手段は無いので、急ぐレーンがあるときは PM が両リーダーに新しい verify を控えてもらう。exit 99（待ち切り）はテストの不合格にせず、`--mutex-retries` で並び直す。ゲートのコマンドを worktree で直に流すのは調べるためだけ（直の実行は verify の mutex・work-evidence・scope・env-clean を通らない）。マシンで 1 度に 1 本、PM へ 1 行知らせてから流す。**合否の裁定は verify の run で行い、直の実行の結果を裁定に使わない**（ci-merge.md の mutex の節）
+4. **単体テストの mutex（`cpu.heavy`）の取り合い。** mutex はマシンで 1 本のまま、リーダーで分けない。重いゲートを走らせる人を減らす（リーダーは同じ tree・同じ環境の合格を再利用し、重ねて流さない）。2 人合わせて同時のワーカーは 5〜6 本以下。要旨: 直の実行は調べるためだけで 1 度に 1 本、PM へ 1 行。手順は [verify-queue.md](verify-queue.md)。**合否の裁定は verify の run で行い、直の実行の結果を裁定に使わない**（ci-merge.md の mutex の節）
 5. **受け入れの間のマージ。** §9 のとおり（止めるのは main への PR からマージバックまで。それ以外は develop へのマージを続ける）。2 人の成果は統合した develop の 1 つの HEAD で 1 回の受け入れにまとめる。差し戻しは Issue の持ち主のリーダーへ PM が振り分ける
 6. **同じ種類の指摘の一覧（`workspace/orchestration/same-kind-findings.md`）を、リーダーは依頼文を書く前に読む。** 片方のリーダーで 1 回目が出た種類は、もう片方の依頼文にも最初から不変条件として書く（2 人で数えを共有する）。2 回目は直しを送らず STOP で PM に返す
 
@@ -151,16 +135,13 @@ UAT を起こす worktree は、run-lock を machine-lock に載せた #4288 PR1
 
 mem は許可・決定・作業の状態・次の一手・人への質問の置き場（CLAUDE.md「記憶の書き場所」、コマンドは docs/user-guide/cli-operations-guide.md の mem の節）。次の 3 つを守る。
 
-1. **ジャッジ（審判）のセッションは、起動した人（PM・リーダー）が起動の後に `/effort high` を送る。** 推論の強さの決定（mem の決定 4c98e7a4、人 11-18）: codex は high 既定・高リスクのレビューだけ xhigh。審判 high、開発リーダー・イネーブラー medium。`/effort` で稼働中でも変えられる。並行の本の新しいセッション（§9）の審判にも同じく送る。開発リーダー・イネーブラーの medium も、起動した人が起動の後に `/effort medium` を送る。**codex は例外（決定 c31c6c68、人 11-18）**: codex（gpt-6.2-sol）には `/effort` が無い（送ると `Unrecognized command '/effort'` が出て、入力欄に文字が残り、次の依頼がその後ろに打たれる）。effort は人が codex の画面の `/model` で選ぶしかないので、codex は high のまま使い、xhigh へは切り替えない。高リスクのレビューは codex（high）に、新しい文脈の Claude opus のレビューを 1 本足して補う。次の起動の既定は `~/.codex/config.toml` の `model = "gpt-6.2-sol"`・`model_reasoning_effort = "high"`
+1. **ジャッジ（審判）のセッションは、起動した人（PM・リーダー）が起動の後に `/effort high` を送る。** 推論の強さの決定（mem の決定 4c98e7a4、人 11-18）: codex は high 既定・高リスクのレビューだけ xhigh。審判 high、開発リーダー・イネーブラー medium。`/effort` で稼働中でも変えられる。並行の本の新しいセッション（§9）の審判にも同じく送る。開発リーダー・イネーブラーの medium も、起動した人が起動の後に `/effort medium` を送る。**codex は例外（決定 c31c6c68、人 11-18）**: effort は人が codex の画面の `/model` で選ぶしかないので、codex は high のまま使い、xhigh へは切り替えない。高リスクのレビューは codex（high）に、新しい文脈の Claude opus のレビューを 1 本足して補う。罠: codex に `/effort` を送ると `Unrecognized command` で、残った文字の後ろに次の依頼が打たれる。経緯: [history.md](history.md)
 2. **mem の決定には行き先を付ける。** `commandmate mem add --kind decision … --promote-to issue:#N`（または `pr:#N`、リポジトリからの相対の `path:<docs の .md ファイル>`）。決定の行き先は該当する Issue、docs に残す規則なら path。path は `.md` のファイルを名指す（ディレクトリは画面から記録できない）。行き先の無い `open` の決定は `mem check --suggest` が `decision_no_destination` と出す（対象は自分の項目だけ）。書き込みは人が画面で承認したときだけ（CLI に書く口は無い）
 3. **path（docs）を行き先にした決定は、その docs の PR で反映する。** 反映の記録は画面の流れで行う（人が差分を承認 → `recorded` → 正本へ反映したことを確かめて `promoted`）。`mem close` で閉じられるのは決定を書いた instance か人（画面）だけで、ほかの instance（PM が他人の決定を閉じる場合を含む）は exit 55（`not_owner`）。`recorded` になった後は `mem close` も断られる。docs の PR のマージ後、PM が人へ画面での記録を頼む。反映していない決定を閉じない
 
 ## 12. 反映済みの決定
 
-- 決定 4c98e7a4: 推論の強さ（審判 high など）を §11 の 1 に反映した（#4460）。行き先は `path:docs/orchestrate/team.md`
-- 決定 89aee71f: `merge-pr` は `--last` が無いと `Build`・`Unit Tests` だけを待つ（それぞれ例外の条件のとき）。E2E を含む全チェックの合格が条件のマージには `--last` を付ける。中身は ci-merge.md の「6-2 「CI が通れば」の許可と全チェックの合格」に反映した（#4460）。この決定の行き先は `path:docs/orchestrate/`（ディレクトリ）で画面から記録できないため、人が行き先を `.md` のファイルに直すか、PM が人へ伝えて閉じ方を決める
-
-- 決定 c31c6c68: codex は high のまま、高リスクのレビューは Claude opus を 1 本足す（§11 の 1 に反映。develop へ直接、人 11-19 の許可）
+[history.md](history.md) に移した。
 
 ## 13. Sprint・Milestone・ロードマップ（人の決定 2026-11-18、mem c1bb26d2）
 
@@ -173,9 +154,5 @@ mem は許可・決定・作業の状態・次の一手・人への質問の置�
 
 ## Antigravity の扱い
 
-2026-11-16 から、私たちの運用では AI（PM・ジャッジ・リーダー・ワーカー・イネーブラー）から Antigravity（agy）を使わない。理由: Google Antigravity 追加利用規約 6 条と公式 FAQ（https://antigravity.google/terms ・ https://antigravity.google/docs/faq ）が、個人向けプランで第三者のソフトウェア・エージェントを通して Antigravity を使うことを制限している。私たちのサインインは個人向けプラン。
-
-- `send`・`ask`・`respond`・relay・`/orchestrate` の宛先に antigravity を選ばない。Schedule・日次サマリー・agent-health の対象にしない。antigravity の instance に Auto-Yes を入れない。`agy --version` などの読み取りも AI からは実行しない
-- agy の動きの試験は偽の agy（隔離のサーバー）で行う。本物が要る場面は人が端末で手で行い、結果を渡す
-- 製品側の既定の拒否と利用上の注意は、それぞれの Issue で進める
+方針は [antigravity.md](antigravity.md) の冒頭。
 
