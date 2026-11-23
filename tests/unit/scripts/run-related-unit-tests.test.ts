@@ -531,6 +531,8 @@ describe('main: non-source changes stay related (Issue #4467)', () => {
     const { ran, logs, seen } = await runMain(['src/lib/a.ts']);
     expect(seen.options).toMatchObject({ changed: 'base123', passWithNoTests: true });
     expect(seen.options).not.toHaveProperty('related');
+    // As before #4577 (no --dir in the --changed argv): the changed form passes no dir.
+    expect(seen.options).not.toHaveProperty('dir');
     expect(seen.filters).toEqual(['tests/unit']);
     expect(ran).toEqual([...RELATED, ...TEXTSCAN].sort());
     expect(logs[0]).toBe('run-related-unit-tests: mode=related changed=1 textscan=2');
