@@ -314,6 +314,7 @@ function runLoop(opts: {
     cmShim,
     [
       '#!/bin/sh',
+      'case " $* " in *" capture "*" --pane "*) exit 0 ;; esac',
       `printf '%s\\n' "$*" >> "${captureLog}"`,
       `n=$(cat "${counter}" 2>/dev/null || echo 0)`,
       'n=$((n + 1))',
@@ -515,7 +516,7 @@ describe('hooks-git.sh warns once per worker, not once per poll (Issue #1614)', 
     const tmuxShim = path.join(dir, 'tmux');
     writeFileSync(
       cmShim,
-      `#!/bin/sh\nprintf '%s\\n' "$*" >> "${captureLog}"\ncat "${path.join(FIXTURES, 'live-idle.json')}"\n`,
+      `#!/bin/sh\ncase " $* " in *" capture "*" --pane "*) exit 0 ;; esac\nprintf '%s\\n' "$*" >> "${captureLog}"\ncat "${path.join(FIXTURES, 'live-idle.json')}"\n`,
     );
     writeFileSync(tmuxShim, '#!/bin/sh\nexit 0\n');
     chmodSync(cmShim, 0o755);

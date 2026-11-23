@@ -12,7 +12,9 @@
 #   2. own retry backoff      -> GENERATING  (alive; intervening only queues input)
 #   3. prompt (waiting/marker)-> PROMPT      (before GENERATING: an approval prompt
 #                                             keeps the `esc to interrupt` footer,
-#                                             so the reverse order never approves)
+#                                             so the reverse order never approves;
+#                                             the marker is put on --json and, with
+#                                             --pane-json, on the pane — #4532)
 #   4. generation anchor      -> GENERATING  (NOT isGenerating, NOT `Xm Ys`)
 #   5. rate-limit banner      -> RATE_LIMIT  (last: see below; then send "a", no sleep)
 #   6. otherwise              -> IDLE
@@ -25,9 +27,13 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/monitor-lib.sh"
 
 JSON_FILE=""
+PANE_JSON=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) shift; JSON_FILE=${1:-};;
+    # The `capture --pane` transcript as a frame (ml_pane_as_capture, #4532
+    # review P2-A). Optional: without it the classification is exactly as before.
+    --pane-json) shift; PANE_JSON=${1:-};;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
   shift
@@ -78,9 +84,27 @@ fi
 # For agy the text marker is what separates a dialog from generation: an open
 # agy dialog prints `esc to cancel` on its status row, the same word agy's
 # generation anchor reads, so this branch must stay ahead of the next one.
+#
+# The same marker is also put on the pane (--pane-json, #4532 review P2-A): a
+# dialog the pane shows while `--json`'s window is blank padding (#4434's frame)
+# is a prompt all the same. Only the marker this CLI already has is used, and
+# only for claude / command-code / antigravity: a CLI with no marker set of its
+# own (codex's `› 1.`) stays with the server's isPromptWaiting.
 prompt_waiting=$(ml_json_scalar "$JSON_FILE" isPromptWaiting)
 session_status=$(ml_json_scalar "$JSON_FILE" sessionStatus)
 if [ "$prompt_waiting" = "true" ] || [ "$session_status" = "waiting" ] || "$has_prompt_marker" "$JSON_FILE"; then
+  echo PROMPT
+  exit 0
+fi
+# Only for a CLI whose marker set is its own (#4532 review r4 P3-G): the `*)`
+# arm above puts Claude's markers on everything else, and on a codex pane they
+# read the transcript above the composer — a quoted Claude dialog in a codex
+# reply became PROMPT. Those CLIs stay with the server's isPromptWaiting above.
+case "$cli_tool" in
+  claude|command-code|antigravity) pane_marker=1 ;;
+  *) pane_marker=0 ;;
+esac
+if [ "$pane_marker" = "1" ] && [ -n "$PANE_JSON" ] && [ -f "$PANE_JSON" ] && "$has_prompt_marker" "$PANE_JSON"; then
   echo PROMPT
   exit 0
 fi

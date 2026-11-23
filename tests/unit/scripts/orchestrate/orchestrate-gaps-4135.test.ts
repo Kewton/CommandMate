@@ -276,7 +276,9 @@ describe('3: the goal limit counts what the parser counts', () => {
   it('keeps the goal text of a contract the same but for the final newline', () => {
     const goal = buildContract(normalizeConfig(base)).goal;
     expect(goal.endsWith('\n')).toBe(false);
-    expect(goal.endsWith('すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。')).toBe(true);
+    // #4532: the goal ends with the return line, not with a bare IMPL_COMPLETED.
+    expect(goal.endsWith('`STOP: <理由>` のどれかにする（`IMPL_COMPLETED` だけの行は終わりの形にしない。待つ側は `IMPL_COMPLETED` を「形の外の終わり方」として検出して知らせる）。')).toBe(true);
+    expect(goal).not.toContain('最後に `IMPL_COMPLETED` とだけ出力する');
     expect(parseTaskContract(contractYaml(normalizeConfig(base)), 'contract').goal).toBe(goal);
   });
 });

@@ -47,11 +47,13 @@ Command Code は、前のターンの `hook_stop` が、生成中のターンよ
 `wait` はそれを完了と読むので、作業の途中で検証に進み、exit 20 か 21 になる。
 
 そのため `wait-verify.mjs` は `command-code` の担当（`command-code-2` や alias も、サーバーが返す `cliToolId` で判定する）で、
-画面に `IMPL_COMPLETED`（または今の HEAD を名指す `IMPL_COMPLETED head=<sha>`）が出るまで裁定しない。
+返しの行（`DONE: #<N> <sha> verify exit <n>`。`<sha>` は今の HEAD を名指す）が出るまで裁定しない。
+`IMPL_COMPLETED` の行も引き続き合図として読む（#4532 より前に送った task がまだそれを待っている）が、**返しの行が終わりの形**で、
+`IMPL_COMPLETED` は「形の外の終わり方」である（見張りは `SHAPE_OUTSIDE` として知らせる。合格にはしない）。
 合図が `--signal-timeout` の間に出なければ exit 3（Auto-Yes は切らない）。Claude の担当は合図を待たない。
 
-再指示の後（`--after-reinstruct`）は、task が同じなので、前の試行の `IMPL_COMPLETED` が最新の返信に残っている。そのため合図は再指示の送信より後に
-書かれたものだけを数える（送る直前の時刻を `--signal-since` で渡す。無ければ呼び出しの開始から）。画面の `IMPL_COMPLETED head=<sha>` も、
+再指示の後（`--after-reinstruct`）は、task が同じなので、前の試行の合図が最新の返信に残っている。そのため合図は再指示の送信より後に
+書かれたものだけを数える（送る直前の時刻を `--signal-since` で渡す。無ければ呼び出しの開始から）。画面の `DONE:` / `IMPL_COMPLETED head=<sha>` も、
 その HEAD が送信より後のコミットでなければ数えない。HEAD が前の試行と同じなら、新しい合図が返信に出るまで裁定しない。
 送信時刻は記録の要約に `signal-since=<時刻>` として残る。再指示をせずに検証だけをやり直すとき（mutex 待ちの exit 99 の後など）は
 `--reverify --task <id>` で呼ぶ。境界は前の呼び出しのものを引き継ぐので、既に出ている合図で裁定に進む（新しい合図は来ない）。
@@ -59,6 +61,24 @@ Command Code は、前のターンの `hook_stop` が、生成中のターンよ
 
 `wait-verify.mjs` を通さずに待ったときの手順は、担当によらず docs/orchestrate/antigravity.md#3-3-完了の合図を手で確かめる と同じ（`INSTANCE=command-code` で使う）。
 再指示の後は `SENT_AT` に再指示の送信時刻を入れ、task の作成ではなくその時刻を境界にする。
+
+### 見張りが拾う3つの終わり方（#4532）
+
+`orchestrate-monitor` のループは、状態（`state` / `promptData`）を `capture --json` から読み、終わり方は `capture --pane` の**全行**から読んで、**1 回だけ** report する（エピソードであって毎ポーリングの洪水にしない）:
+
+| 画面の終わり方 | 出力 |
+|---|---|
+| `DONE: #<N> <sha> verify exit <n>`（行全体） | `monitor[w1]: return line DONE — …` |
+| `WAIT: <理由>`（行全体） | `monitor[w1]: return line WAIT — the worker is waiting; …` |
+| `STOP: <理由>`（行全体） | `monitor[w1]: return line STOP — the worker stopped; …` |
+| `IMPL_COMPLETED[ head=<sha>]`（行全体） | `monitor[w1]: SHAPE_OUTSIDE ending — IMPL_COMPLETED … (not a return line; not completion)` |
+| どれも無い（生成中・入力待ち） | 何も出さない（従来のストリームと 1 バイトも変わらない） |
+
+行頭の完全一致で読む。依頼文（goal）自体が 3 つの形を名指しして画面に残るので、部分一致だと「指示を終わりと読む」— だから行全体で判定する。
+Command Code は 200x1000 の pane の上から描く（top-anchored）ので、`realtimeSnippet`（下の 100 行）は transcript が pane を埋めるまで余白になる（#4245）。そのため終わり方は `capture --json` の `content` / `realtimeSnippet` ではなく、`capture --pane` の全行から読む（末尾 30 行の窓では、枠の行が下に続くと合図が窓の外へ押し出される）。見張りは担当を問わず（セッションが動いていれば）毎ポーリングで `--pane` を引き、終わり方はその全行だけで判定する（codex も下端の入力欄で `realtimeSnippet` が埋まり、上の方の合図が窓に入らない。#3946）。許可のダイアログも、`ml_cc_has_prompt_marker` と同じ目印（下の 30 行の窓）を pane にも当てて `PROMPT` にする（#4434 の枠のように `content` が空で `isPromptWaiting` が false でも拾う）。`--pane` の読み取りに失敗したら、失敗が続く間に 1 回だけ `WARN capture --pane failed` を出す（読めたら張り直し、次の失敗でまた出す）。
+
+行は照合の前に 1 つの正規化を通す（見張りの `monitor-lib.sh` の `ml_pane_line` と、`wait-verify.mjs` の `normalizePaneLine`。同じ表の行で答えが一致することを試験で固定している）: ANSI と NBSP を落とし、右の差分のパネル（`<文字><空白 2 つ以上>│ <パネル>`。claude 2.1.330 の「N files edited」）を `│` から行末まで落とし、前後の空白を落とす。行頭の返しの目印は 1 つだけ、直後の空白 1 つと一緒に剥がすので、1 行だけの返事（`<目印> DONE: …`）も拾う。目印の集合（担当 × プラットフォーム）は `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv` の 1 か所にあり、見張りも `wait-verify.mjs` もそこからだけ読む。ほかの文字（入力欄の `❯`・echo の `›`・`│` など）は剥がさない（入力欄に打っただけの `❯ DONE: …` は終わりと読まない）。
+
 
 ## 3-4 止まったときの対処
 
