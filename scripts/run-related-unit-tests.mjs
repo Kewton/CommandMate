@@ -3,7 +3,9 @@
  * Runs unit tests related to changed files in the working tree / branch.
  *
  * Used by `/orchestrate` verify gate `unit-related` (Issue #2639).
- * Runs only tests affected by the diff plus tests that scan repository files.
+ * Runs only tests affected by the diff plus tests that scan repository files:
+ * their union once, split into at most 4 groups by recorded duration (LPT) and
+ * run at the same time, each group a serial `vitest run <files>` (Issue #4577).
  * Changes outside src/ and tests/ do not switch to the whole unit suite
  * (Issue #4467): CI's Unit Tests runs it for every PR.
  * Excludes metadata files (.commandmate/tasks/, dev-reports/, changelog.d/,
@@ -14,7 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync, spawn, spawnSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 
 /**
@@ -164,116 +166,11 @@ export function traceableFiles(files, root) {
   return files.filter((file) => TRACEABLE_PATTERN.test(file) && fs.existsSync(path.join(root, file)));
 }
 
-/**
- * Default runner for child processes.
- */
-export function defaultRun(command, args, options = {}) {
-  const res = spawnSync(command, args, { stdio: 'inherit', ...options });
-  if (res.error) {
-    throw res.error;
-  }
-  return res.status ?? 1;
-}
-
-/**
- * Entry point for run-related-unit-tests.
- *
- * @param {string[]} argv
- * @param {{
- *   run?: typeof defaultRun,
- *   log?: typeof console.log,
- *   root?: string,
- *   collectChangedFiles?: typeof collectChangedFiles,
- *   findTextScanTests?: typeof findTextScanTests,
- * }} [deps]
- * @returns {number} exit code
- */
-export function main(argv, deps = {}) {
-  const {
-    run = defaultRun,
-    log = console.log,
-    root = process.cwd(),
-  } = deps;
-  const collect = deps.collectChangedFiles ?? deps.collectFiles ?? collectChangedFiles;
-  const findScan = deps.findTextScanTests ?? deps.findScan ?? findTextScanTests;
-
-  let base = null;
-  if (Array.isArray(argv) && argv.length === 2 && argv[0] === '--base' && argv[1]) {
-    base = argv[1];
-  } else {
-    console.error('Usage: node scripts/run-related-unit-tests.mjs --base <ref>');
-    return 2;
-  }
-
-  let changed;
-  try {
-    changed = collect({ cwd: root, base });
-  } catch (error) {
-    console.error(error.message || String(error));
-    return 2;
-  }
-
-  const { mode, reason, considered } = classifyChanges(changed.files);
-
-  if (mode === 'none') {
-    log('run-related-unit-tests: mode=none');
-    return 0;
-  }
-
-  const textScanTests = findScan({ root });
-  const vitestBin = path.join(root, 'node_modules', '.bin', 'vitest');
-  const env = { ...process.env, NODE_ENV: 'test' };
-
-  let code1 = 0;
-  let exit1Str;
-  if (mode === 'full') {
-    // A change outside src/ and tests/ (#4467): the whole unit suite is CI's job.
-    // Run the tests the traceable files reach, plus every text-scan test.
-    const traced = traceableFiles(considered, root);
-    log(
-      `run-related-unit-tests: mode=related reason=non-source:${reason} changed=${considered.length} traced=${traced.length} textscan=${textScanTests.length}`
-    );
-    exit1Str = 'skipped';
-    if (traced.length > 0) {
-      code1 = run(
-        vitestBin,
-        ['related', '--run', '--dir', 'tests/unit', ...traced, '--passWithNoTests'],
-        { cwd: root, env }
-      );
-      exit1Str = String(code1);
-    }
-  } else {
-    // mode === 'related'
-    log(`run-related-unit-tests: mode=related changed=${considered.length} textscan=${textScanTests.length}`);
-    code1 = run(
-      vitestBin,
-      ['run', 'tests/unit', '--changed', changed.mergeBase, '--passWithNoTests'],
-      { cwd: root, env }
-    );
-    exit1Str = String(code1);
-  }
-
-  let code2 = 0;
-  let exit2Str = 'skipped';
-  if (textScanTests.length > 0) {
-    code2 = run(vitestBin, ['run', ...textScanTests], { cwd: root, env });
-    exit2Str = String(code2);
-  }
-
-  log(`run-related-unit-tests: related exit=${exit1Str} textscan exit=${exit2Str}`);
-
-  const success = code1 === 0 && (exit2Str === 'skipped' || code2 === 0);
-  return success ? 0 : 1;
-}
-
 /*
  * Issue #4577: the union of the related set and the text-scan set, run once,
  * split into at most MAX_GROUPS groups by LPT over vitest's recorded file
  * durations. Each group is a plain `vitest run <files>` (serial under the gate's
  * CI=true), all groups at once, each in its own short TMPDIR.
- *
- * Not the CLI entry yet: main() stays the entry until the tests that pin its
- * two runs and its `related exit=… textscan exit=…` line are re-decided.
  */
 
 /** Groups run at once. CI runs its unit tests as 4 shards too. */
@@ -523,7 +420,7 @@ function defaultTmpBase() {
 }
 
 /**
- * Entry point of the sharded gate (Issue #4577).
+ * Entry point for run-related-unit-tests (sharded since Issue #4577).
  *
  * exit 0: every group exited 0 and ran exactly the files it was given.
  * exit 1: any group non-zero, signalled, unspawnable, or ran a different set.
@@ -545,7 +442,7 @@ function defaultTmpBase() {
  * }} [deps]
  * @returns {Promise<number>} exit code
  */
-export async function mainSharded(argv, deps = {}) {
+export async function main(argv, deps = {}) {
   const log = deps.log ?? console.log;
   const out = deps.out ?? ((/** @type {string} */ text) => process.stdout.write(text));
   const root = deps.root ?? process.cwd();
@@ -679,6 +576,11 @@ export async function mainSharded(argv, deps = {}) {
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-  const exitCode = main(process.argv.slice(2));
-  process.exit(exitCode);
+  main(process.argv.slice(2)).then(
+    (exitCode) => process.exit(exitCode),
+    (error) => {
+      console.error(error);
+      process.exit(2);
+    }
+  );
 }

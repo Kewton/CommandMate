@@ -20,7 +20,7 @@ import os from 'os';
 import path from 'path';
 import {
   SHARD_TMP_PREFIX,
-  mainSharded,
+  main as mainSharded,
   readDurationCache,
   splitLpt,
   unionSets,
