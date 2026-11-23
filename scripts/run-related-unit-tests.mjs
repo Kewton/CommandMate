@@ -251,8 +251,10 @@ export function readDurationCache({ root }) {
 
 /**
  * Longest-processing-time-first: each file, heaviest first, goes to the group
- * with the smallest load so far. A file without a record weighs the median of
- * the recorded files in the set (1 if none is recorded).
+ * with the smallest load so far; between equal loads, to the one with fewer
+ * files. A file without a record weighs the median of the recorded files in the
+ * set (1 if none is recorded). No group is left empty: an empty group has load 0
+ * and 0 files, so it is always a minimum while it exists (weights are >= 0).
  *
  * @param {string[]} files
  * @param {Map<string, number>} durations
@@ -279,7 +281,12 @@ export function splitLpt(files, durations, maxGroups = MAX_GROUPS) {
   for (const { f, w } of weighted) {
     let best = 0;
     for (let i = 1; i < n; i++) {
-      if (expectedMs[i] < expectedMs[best]) best = i;
+      if (
+        expectedMs[i] < expectedMs[best] ||
+        (expectedMs[i] === expectedMs[best] && groups[i].length < groups[best].length)
+      ) {
+        best = i;
+      }
     }
     groups[best].push(f);
     expectedMs[best] += w;
@@ -343,10 +350,17 @@ export async function collectRelatedSet({ root, mode, mergeBase, traced, loadVit
 /**
  * Runs one group, its stdout and stderr into `logPath`.
  *
- * @param {{ cmd: string, args: string[], cwd: string, env: Record<string, string | undefined>, logPath: string }} call
+ * @param {{
+ *   cmd: string,
+ *   args: string[],
+ *   cwd: string,
+ *   env: Record<string, string | undefined>,
+ *   logPath: string,
+ *   onChild?: (child: import('child_process').ChildProcess | null) => void,
+ * }} call
  * @returns {Promise<{ code: number | null, signal: string | null, error?: Error }>}
  */
-export function runGroupProcess({ cmd, args, cwd, env, logPath }) {
+export function runGroupProcess({ cmd, args, cwd, env, logPath, onChild }) {
   return new Promise((resolve) => {
     let fd;
     try {
@@ -365,10 +379,14 @@ export function runGroupProcess({ cmd, args, cwd, env, logPath }) {
       } catch {
         // already closed
       }
+      if (onChild) onChild(null);
       resolve(r);
     };
     try {
-      const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd] });
+      // Its own process group: on a signal the gate stops the group's vitest
+      // together with its pool workers (a worker outlives a vitest killed alone).
+      const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd], detached: true });
+      if (onChild) onChild(child);
       child.on('error', (error) => done({ code: null, signal: null, error }));
       child.on('close', (code, signal) => done({ code, signal }));
     } catch (error) {
@@ -439,6 +457,8 @@ function defaultTmpBase() {
  *   collectSet?: typeof collectRelatedSet,
  *   runGroup?: typeof runGroupProcess,
  *   readCache?: typeof readDurationCache,
+ *   split?: typeof splitLpt,
+ *   mkdtemp?: (prefix: string) => string,
  * }} [deps]
  * @returns {Promise<number>} exit code
  */
@@ -446,7 +466,9 @@ export async function main(argv, deps = {}) {
   const log = deps.log ?? console.log;
   const out = deps.out ?? ((/** @type {string} */ text) => process.stdout.write(text));
   const root = deps.root ?? process.cwd();
-  const baseEnv = deps.baseEnv ?? process.env;
+  // A copy taken now: createVitest (collectRelatedSet) writes NODE_ENV, MODE,
+  // PROD, ... into this process's env, and the groups must not inherit that.
+  const baseEnv = { ...(deps.baseEnv ?? process.env) };
   const maxGroups = deps.maxGroups ?? MAX_GROUPS;
   const tmpBase = deps.tmpBase ?? defaultTmpBase();
   const collect = deps.collectChangedFiles ?? collectChangedFiles;
@@ -454,6 +476,8 @@ export async function main(argv, deps = {}) {
   const collectSet = deps.collectSet ?? collectRelatedSet;
   const runGroup = deps.runGroup ?? runGroupProcess;
   const readCache = deps.readCache ?? readDurationCache;
+  const split = deps.split ?? splitLpt;
+  const mkdtemp = deps.mkdtemp ?? ((/** @type {string} */ prefix) => fs.mkdtempSync(prefix));
 
   if (!(Array.isArray(argv) && argv.length === 2 && argv[0] === '--base' && argv[1])) {
     console.error('Usage: node scripts/run-related-unit-tests.mjs --base <ref>');
@@ -502,26 +526,95 @@ export async function main(argv, deps = {}) {
   }
 
   const cache = readCache({ root });
-  const split = splitLpt(union.files, cache.durations, maxGroups);
-  const n = split.groups.length;
+  const plan = split(union.files, cache.durations, maxGroups);
+  const n = plan.groups.length;
   log(
-    `${LOG_PREFIX} split=lpt groups=${n} cache=${cache.status} known=${split.known}/${union.files.length} default-weight=${Math.round(split.defaultWeight)}ms`
+    `${LOG_PREFIX} split=lpt groups=${n} cache=${cache.status} known=${plan.known}/${union.files.length} default-weight=${Math.round(plan.defaultWeight)}ms`
   );
 
   const vitestBin = path.join(root, 'node_modules', '.bin', 'vitest');
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-related-shards-'));
   /** @type {string[]} */
-  const groupTmps = [];
+  const tempDirs = [];
+  /** @type {Set<import('child_process').ChildProcess>} */
+  const children = new Set();
+  const cleanup = () => {
+    for (const dir of tempDirs) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best effort
+      }
+    }
+  };
+  // A gate that times out or is cancelled sends SIGTERM (then SIGKILL). Node's
+  // default SIGTERM skips `finally`: stop the groups, remove the temp dirs, then
+  // die of the same signal.
+  /** @param {NodeJS.Signals} signal */
+  const onSignal = (signal) => {
+    for (const child of children) {
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGTERM');
+        else child.kill('SIGTERM');
+      } catch {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          // already gone
+        }
+      }
+    }
+    cleanup();
+    process.removeListener('SIGTERM', onSignal);
+    process.removeListener('SIGINT', onSignal);
+    process.kill(process.pid, signal);
+  };
+  process.on('SIGTERM', onSignal);
+  process.on('SIGINT', onSignal);
   try {
-    const runs = split.groups.map(async (files, i) => {
-      const tmp = fs.mkdtempSync(tmpBase);
-      groupTmps.push(tmp);
-      const reportPath = path.join(workDir, `group-${i + 1}.json`);
-      const logPath = path.join(workDir, `group-${i + 1}.log`);
+    // Every temp dir exists before any group starts: a failure here starts none.
+    let workDir;
+    /** @type {(string | null)[]} */
+    const groupTmps = [];
+    try {
+      workDir = mkdtemp(path.join(os.tmpdir(), 'cm-related-shards-'));
+      tempDirs.push(workDir);
+      for (const files of plan.groups) {
+        if (files.length === 0) {
+          groupTmps.push(null);
+          continue;
+        }
+        const tmp = mkdtemp(tmpBase);
+        tempDirs.push(tmp);
+        groupTmps.push(tmp);
+      }
+    } catch (error) {
+      console.error(`${LOG_PREFIX} could not create the temp dirs: ${/** @type {Error} */ (error).message || String(error)}`);
+      return 2;
+    }
+    const work = /** @type {string} */ (workDir);
+
+    const runs = plan.groups.map(async (files, i) => {
+      const reportPath = path.join(work, `group-${i + 1}.json`);
+      const logPath = path.join(work, `group-${i + 1}.log`);
+      const tmp = groupTmps[i];
+      if (tmp === null) {
+        // An empty group would be `vitest run` with no files: the whole suite.
+        return { files, reportPath, logPath, outcome: null, seconds: 0 };
+      }
       const args = ['run', ...files, '--passWithNoTests', '--reporter=default', '--reporter=json', `--outputFile.json=${reportPath}`];
       const env = { ...baseEnv, NODE_ENV: 'test', TMPDIR: tmp };
       const started = Date.now();
-      const outcome = await runGroup({ cmd: vitestBin, args, cwd: root, env, logPath });
+      /** @type {import('child_process').ChildProcess | null} */
+      let mine = null;
+      const onChild = (/** @type {import('child_process').ChildProcess | null} */ child) => {
+        if (child) {
+          mine = child;
+          children.add(child);
+        } else if (mine) {
+          children.delete(mine);
+        }
+      };
+      const outcome = await runGroup({ cmd: vitestBin, args, cwd: root, env, logPath, onChild });
       return { files, reportPath, logPath, outcome, seconds: (Date.now() - started) / 1000 };
     });
     const results = await Promise.all(runs);
@@ -532,6 +625,10 @@ export async function main(argv, deps = {}) {
     /** @type {string[]} */
     const groupLines = [];
     results.forEach((r, i) => {
+      if (r.outcome === null) {
+        groupLines.push(`${LOG_PREFIX} group ${i + 1}/${n} files=0 skipped`);
+        return;
+      }
       let text = '';
       try {
         text = fs.readFileSync(r.logPath, 'utf-8');
@@ -550,7 +647,7 @@ export async function main(argv, deps = {}) {
       const exitStr = error ? `spawn-error(${error.message})` : signal ? `signal(${signal})` : String(code);
       const ok = !error && !signal && code === 0 && report !== null && missing.length === 0 && extra.length === 0;
       if (!ok) failedAny = true;
-      const expectedStr = cache.status === 'ok' && split.known > 0 ? `${(split.expectedMs[i] / 1000).toFixed(1)}s` : '-';
+      const expectedStr = cache.status === 'ok' && plan.known > 0 ? `${(plan.expectedMs[i] / 1000).toFixed(1)}s` : '-';
       let line = `${LOG_PREFIX} group ${i + 1}/${n} files=${r.files.length} expected=${expectedStr} actual=${r.seconds.toFixed(1)}s ran=${report ? ran.length : 'no-report'} exit=${exitStr}`;
       if (missing.length > 0) line += ` missing=${missing.length}(${missing.slice(0, 3).join(',')})`;
       if (extra.length > 0) line += ` extra=${extra.length}(${extra.slice(0, 3).join(',')})`;
@@ -564,23 +661,33 @@ export async function main(argv, deps = {}) {
     log(`${LOG_PREFIX} result exit=${code} groups=${n} union=${union.files.length}`);
     return code;
   } finally {
-    for (const dir of [...groupTmps, workDir]) {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best effort
-      }
-    }
+    process.removeListener('SIGTERM', onSignal);
+    process.removeListener('SIGINT', onSignal);
+    cleanup();
   }
+}
+
+/**
+ * Ends the process once stdout and stderr have handed everything to the OS. A
+ * bare process.exit right after large writes to a pipe drops what is past the
+ * pipe's 64 KB on macOS (stdout to a pipe is asynchronous there).
+ *
+ * @param {number} code
+ */
+function exitAfterFlush(code) {
+  process.exitCode = code;
+  process.stdout.write('', () => {
+    process.stderr.write('', () => process.exit(code));
+  });
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   main(process.argv.slice(2)).then(
-    (exitCode) => process.exit(exitCode),
+    (exitCode) => exitAfterFlush(exitCode),
     (error) => {
       console.error(error);
-      process.exit(2);
+      exitAfterFlush(2);
     }
   );
 }
