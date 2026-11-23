@@ -22,7 +22,8 @@ import {
 } from '@/lib/agent-roles/launch-errors';
 import type Database from 'better-sqlite3';
 import type { SendFenceOutcome } from '@/lib/session/send-fence-outcome';
-import { answerSendTargetChanged, answerSessionStartTimeout } from './send-session-start';
+import { answerSessionStartTimeout } from './send-session-start';
+import { answerSendTargetChanged } from './send-target-changed-answer';
 
 /** How the error of a failed send starts, whoever wrote it. */
 const SEND_FAILURE_PREFIX = 'Failed to send message to ';

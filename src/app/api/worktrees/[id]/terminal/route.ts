@@ -49,7 +49,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runWithSendTicket, type SendTicketHandle } from '@/lib/session/terminal-fence';
 import { classifySendFenceOutcome, reportSendFenceOutcome } from '@/lib/session/send-fence-outcome';
-import { answerSendTargetChanged } from '../send/send-session-start';
+import { answerSendTargetChanged } from '../send/send-target-changed-answer';
 import { routeSendTicketInit } from '@/lib/session/send-target-names';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
