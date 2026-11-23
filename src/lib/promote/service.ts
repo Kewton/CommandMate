@@ -446,7 +446,12 @@ export async function promotePreview(
 
   const rawDestination = body.destination ?? record.promoteTo;
   const checkedDestination = validatePromoteTo(rawDestination, worktree.path);
-  if (!checkedDestination.ok || checkedDestination.value === null) return promoteError('invalid_destination', { field: 'destination' });
+  if (!checkedDestination.ok) {
+    // Issue #4354: the write's own refusal (an agent's instruction file, `.git`, not a `.md`) keeps its reason.
+    const reason = checkedDestination.error.reason;
+    return promoteError('invalid_destination', { field: 'destination', ...(reason ? { reason } : {}) });
+  }
+  if (checkedDestination.value === null) return promoteError('invalid_destination', { field: 'destination' });
   const parsed = parsePromoteTo(checkedDestination.value);
   if (!parsed) return promoteError('invalid_destination', { field: 'destination' });
   // Fixed before any await: the preview is bound to this lifetime (A §16 I17).

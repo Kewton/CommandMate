@@ -170,6 +170,17 @@ function toCliError(error: unknown): MemCliError {
   return new MemCliError(ExitCode.UNEXPECTED_ERROR, { ok: false, code: 'internal_error', message: 'Unexpected error' });
 }
 
+/**
+ * Issue #4354: what to do about a refused promote destination (`invalid_promote_to`), by its reason.
+ * Printed under the error line (the JSON carries the reason as it is).
+ */
+export const PROMOTE_TO_REFUSAL_HINTS: Readonly<Record<string, string>> = {
+  agent_instructions:
+    "An agent's instruction file (CLAUDE.md, AGENTS.md, .claude/ and the like) cannot be a destination: a decision an agent wrote is data, not an instruction. Choose a document under docs/ (path:docs/<name>.md) or issue:#N, and reflect it into the instruction file by hand.",
+  git_dir: 'A path under .git cannot be a destination. Choose a document under docs/ (path:docs/<name>.md) or issue:#N.',
+  not_markdown: 'A document destination must be a .md file (path:docs/<name>.md), or use issue:#N / pr:#N.',
+};
+
 function report(error: MemCliError, json: boolean | undefined): never {
   const body: Record<string, unknown> = { ...error.body, exitCode: error.exitCode };
   if (json) {
@@ -179,6 +190,8 @@ function report(error: MemCliError, json: boolean | undefined): never {
       .filter(Boolean)
       .join(' ');
     console.error(`Error: ${String(body.code)}: ${String(body.message ?? '')}${detail ? ` (${detail})` : ''}`);
+    const hint = body.code === 'invalid_promote_to' && typeof body.reason === 'string' ? PROMOTE_TO_REFUSAL_HINTS[body.reason] : undefined;
+    if (hint) console.error(hint);
     if (body.code === 'version_conflict' && typeof body.currentVersion === 'number') {
       console.error(`Current version: ${body.currentVersion}`);
     }
@@ -188,7 +201,15 @@ function report(error: MemCliError, json: boolean | undefined): never {
 
 function itemLine(item: MemItemView, condition?: MemConditionView): string {
   const text = item.withheld ? `(withheld: ${item.withheld.rule})` : (item.text ?? '');
-  const flags = [item.stale ? 'stale' : null, item.frozen ? 'frozen' : null].filter(Boolean).join(',');
+  const flags = [
+    item.stale ? 'stale' : null,
+    item.frozen ? 'frozen' : null,
+    // Issue #4354: the time of its `at` has passed (read, not closed); a destination that cannot be used.
+    item.expired ? 'expired' : null,
+    item.promoteToRefusal ? `promote-to-refused:${item.promoteToRefusal}` : null,
+  ]
+    .filter(Boolean)
+    .join(',');
   return `[${item.kind}] ${item.id} v${item.version} ${item.state}${flags ? ` (${flags})` : ''}${conditionText(condition)}: ${text}`;
 }
 

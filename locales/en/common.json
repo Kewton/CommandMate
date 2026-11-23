@@ -562,6 +562,11 @@
       },
       "destination": "Destination",
       "noDestination": "No destination (promote_to)",
+      "destinationRefused": {
+        "agent_instructions": "This destination cannot be used: an agent's instruction file (CLAUDE.md, AGENTS.md, .claude/ and the like) cannot be a destination. Choose a document under docs/ or an Issue, and reflect it into the instruction file by hand",
+        "git_dir": "This destination cannot be used: a path under .git cannot be a destination. Choose a document under docs/ or an Issue",
+        "not_markdown": "This destination cannot be used: a document destination must be a .md file. Choose a .md under docs/ or an Issue"
+      },
       "effect": {
         "label": "Effect",
         "spec": "Changes the specification (recorded, waiting for reflection, once written)",
