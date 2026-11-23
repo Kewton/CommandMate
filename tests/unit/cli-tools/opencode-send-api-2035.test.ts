@@ -75,7 +75,8 @@ vi.mock('@/lib/hooks/sources/opencode/subscription', async (importOriginal) => {
   };
 });
 
-import { OpenCodeTool, formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
+import { OPENCODE_SEND_READBACK_DELAYS_MS, OpenCodeTool, formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
+import { classifySendFailure } from '@/lib/session/send-attempt-state';
 import { sendOpencodePrompt } from '@/lib/hooks/sources/opencode/client';
 import { observeInputStart } from '@/lib/session/instance-input-lock';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
@@ -257,6 +258,9 @@ describe('Issue #2035: sending over the opencode server', () => {
 
       await tool.sendMessage(WORKTREE, SLASH_BODY);
 
+      // Issue #4535: only a ladder of nothing but 404s says the message does not exist.
+      const reads = vi.mocked(globalThis.fetch).mock.calls.filter(([, init]) => init?.method !== 'POST');
+      expect(reads).toHaveLength(OPENCODE_SEND_READBACK_DELAYS_MS.length);
       expect(submitMock).toHaveBeenCalledWith(
         expect.objectContaining({ sessionName: SESSION_NAME, message: SLASH_BODY })
       );
@@ -282,9 +286,11 @@ describe('Issue #2035: sending over the opencode server', () => {
         return readbackFound([{ type: 'text', text: 'something else' }]);
       }) as unknown as typeof fetch;
 
-      await tool.sendMessage(WORKTREE, SLASH_BODY);
+      // Issue #4535 (R1): a message exists under the id — nothing is typed after it.
+      const error = await tool.sendMessage(WORKTREE, SLASH_BODY).then(() => undefined, (e: unknown) => e);
 
-      expect(submitMock).toHaveBeenCalledTimes(1);
+      expect(submitMock).toHaveBeenCalledTimes(0);
+      expect(classifySendFailure(error).state).toBe('indeterminate');
     });
 
     it('refuses a read-back that is not the user\'s message', async () => {
@@ -302,9 +308,11 @@ describe('Issue #2035: sending over the opencode server', () => {
         };
       }) as unknown as typeof fetch;
 
-      await tool.sendMessage(WORKTREE, SLASH_BODY);
+      // Issue #4535 (R1): a read-back the ladder cannot settle is unknown — nothing is typed after it.
+      const error = await tool.sendMessage(WORKTREE, SLASH_BODY).then(() => undefined, (e: unknown) => e);
 
-      expect(submitMock).toHaveBeenCalledTimes(1);
+      expect(submitMock).toHaveBeenCalledTimes(0);
+      expect(classifySendFailure(error).state).toBe('indeterminate');
     });
   });
 

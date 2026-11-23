@@ -420,7 +420,8 @@ describe('opencode v1: the keyboard fallback (Issue #4040)', () => {
     dispatch.mockResolvedValueOnce('unknown').mockResolvedValueOnce('not_sent');
     framesInTurn(buildOpencodeConnectProviderFrame());
     const error = await settle(tool.sendMessageWithImage('wt-1', 'look', '/tmp/x.png'));
-    expect(dispatch).toHaveBeenCalledTimes(2);
+    // Issue #4535 (R1): the path fallback is not dispatched after an unknown image dispatch.
+    expect(dispatch).toHaveBeenCalledTimes(1);
     expect(keys).toEqual([]);
     expect(classifySendFailure(error).state).toBe('indeterminate');
   });
