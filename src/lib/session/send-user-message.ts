@@ -46,7 +46,12 @@
  */
 
 import type Database from 'better-sqlite3';
-import { readOwnFenceRefusal } from '@/lib/session/terminal-fence';
+import {
+  classifyOwnSendFenceOutcome,
+  fenceAttemptReason,
+  reportSendFenceOutcome,
+  type SendFenceOutcome,
+} from '@/lib/session/send-fence-outcome';
 import {
   createMessage,
   updateLastUserMessage,
@@ -85,7 +90,6 @@ import { extractComposerText, SUPPORTED_COMPOSER_TOOLS } from '@/lib/detection/c
 import { STATUS_CAPTURE_LINES } from '@/config/status-capture-config';
 import {
   instanceInputGenerationMark,
-  isInputBoundaryRefusal,
   observeInputStart,
   withInstanceInputLock,
   type InputBoundaryHooks,
@@ -250,12 +254,19 @@ export type SendUserMessageResult =
    * that is only `SESSION_STARTING`: the agent's session was just launched and
    * its input prompt has not appeared yet, which the send route answers with the
    * same 503 a slow claude start gets. Absent for every other failure.
+   *
+   * `fence` (Issue #4534 PR-B): the classified refusal of the send's fence
+   * (design v2 §3.2), present only when there was one. The send route answers
+   * kind `target-changed` with its 409 `SEND_TARGET_CHANGED`; the relay delivery
+   * settles by its state, the timer puts `[target_changed]` at the head of its
+   * reason; the attempt (`lastSend`) already carries its reason (`fenceAttemptReason`).
    */
   | {
       ok: false;
       stage: 'model' | 'send' | 'prompt_waiting' | 'foreign_session';
       error: string;
       code?: typeof SESSION_STARTING_CODE;
+      fence?: SendFenceOutcome;
     }
   /**
    * Issue #4227 (S-B, design §3.2): a `full` / `decline` send stopped before any key — the
@@ -273,6 +284,31 @@ export type SendUserMessageResult =
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+type SendFailure = { state: SendAttemptState; reason: SendAttemptReason };
+
+/**
+ * Issue #4534 (PR-B, design v2 §3.2・§3.4): the attempt of a classified refusal
+ * (orders 1–3). One reason per attempt — `target-changed` > `relay-reservation-lost`
+ * (#3992) > `fence-misuse` — and the fence's state: `not-sent` only with the
+ * proof (the request's own refusal, neither the body nor a dispatch started).
+ * A misuse proves nothing about the pane, so its state is the one the entry
+ * read without the fence (`todayState`), made `indeterminate` when the fence
+ * says the body or a dispatch may have gone. Null for order 4.
+ */
+function fenceFailure(fence: SendFenceOutcome | null, todayState: () => SendAttemptState): SendFailure | null {
+  if (fence === null) return null;
+  if (fence.kind !== 'fence-misuse') return { state: fence.state, reason: fenceAttemptReason(fence.kind) };
+  return { state: fence.state === 'indeterminate' ? 'indeterminate' : todayState(), reason: 'fence-misuse' };
+}
+
+/** What escaped the delivery (the lock, the brief's claim): a classified refusal, else today's classification. */
+function lockedDeliveryFailure(error: unknown): { error: unknown; failure: SendFailure; fence?: SendFenceOutcome } {
+  const fence = classifyOwnSendFenceOutcome(error);
+  reportSendFenceOutcome('deliver', fence);
+  const failure = fenceFailure(fence, () => classifySendFailure(error).state) ?? classifySendFailure(error);
+  return fence !== null ? { error, failure, fence } : { error, failure };
 }
 
 /**
@@ -535,6 +571,16 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
       logger.info('copilot-model-command-sent', { model: copilotModel });
     } catch (error) {
       logger.error('failed-to-send-model-command:', { error: getErrorMessage(error) });
+      // Issue #4534 (PR-B, orders 1–3): the fence's refusal, classified first —
+      // before the re-check's codes. The route answers `target-changed` with its
+      // 409 (`fence` on the result); the attempt carries the fence's reason.
+      const fence = classifyOwnSendFenceOutcome(error);
+      reportSendFenceOutcome('model', fence);
+      const fenced = fenceFailure(fence, () => 'not-sent');
+      if (fence !== null && fenced !== null) {
+        settle(fenced.state, fenced.reason);
+        return { ok: false, stage: 'model', error: getErrorMessage(error), fence };
+      }
       // Issue #3952: the re-check right before `/model` refused it. Read by
       // code, not wording: the switch's other errors quote the pane's bottom row.
       const code = (error as { code?: unknown } | null)?.code;
@@ -648,7 +694,7 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
   // the moment the sender started typing the body (Issue #3953; null for a
   // path that does not report it).
   async function deliver(): Promise<
-    | { error: unknown; failure: { state: SendAttemptState; reason: SendAttemptReason } }
+    | { error: unknown; failure: SendFailure; fence?: SendFenceOutcome }
     | { sent: true; inputStartedAt: Date | null }
   > {
     try {
@@ -673,23 +719,21 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
-      // Issue #4534 (order 1): this request's own ticket refused — whatever the
-      // error says after the tools' wraps. Typed only if input had started.
-      const fenced = readOwnFenceRefusal();
-      if (fenced !== null) {
-        const mayHaveGone = fenced.bodyStarted || fenced.dispatchUnknown;
-        return { error, failure: { state: mayHaveGone ? 'indeterminate' : 'not-sent', reason: 'send-error' } };
-      }
+      // Issue #4534 (PR-B, design v2 §3.2): one classification. Order 1 — this
+      // request's own ticket refused, whatever the error says after the tools'
+      // wraps; order 2 — a typed refusal of this request on the cause chain;
+      // order 3 — any other boundary refusal (#3957: the relay's reservation was
+      // gone, #3992: `relay-reservation-lost`). The role's refusals (#4115) are
+      // not order 3: they keep their own classification below. Not-sent only if
+      // neither the body nor a dispatch had started.
+      const fence = classifyOwnSendFenceOutcome(error);
+      reportSendFenceOutcome('deliver', fence);
+      const fenced = fenceFailure(fence, () => classifySendFailure(error).state);
+      if (fence !== null && fenced !== null) return { error, failure: fenced, fence };
       // Issue #4115: the role this send was conditional on, or the role a driver's
       // relaunch resolved, refused it before the first key.
       if (isRoleConditionUnmet(error) || readRoleLaunchRefusal(error) !== null) {
         return { error, failure: classifySendFailure(error) };
-      }
-      // Issue #3957: the relay's boundary hook refused before the first key —
-      // nothing was typed because the reservation the body was going in under
-      // was gone. Issue #3992: its own reason, not `input-lock-lost`.
-      if (isInputBoundaryRefusal(error)) {
-        return { error, failure: { state: 'not-sent', reason: 'relay-reservation-lost' } };
       }
       // Issue #3759: not-sent only when the error says the body was never typed.
       let failure = classifySendFailure(error);
@@ -786,10 +830,7 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
     ? await withInstanceInputLock(sessionName, (ticket) => {
         inputGeneration = ticket.generation;
         return deliverWithBrief();
-      }).catch((error: unknown) => ({
-        error,
-        failure: classifySendFailure(error),
-      }))
+      }).catch(lockedDeliveryFailure)
     : await deliverWithBrief();
   // Issue #4274: the provider hears how its text ended, outside the lock.
   await sendBrief.afterLock();
@@ -803,16 +844,18 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
   if (briefReport) params.onBrief?.(briefReport);
   if (!('sent' in delivery)) {
     const { error, failure } = delivery;
+    // Issue #4534 (PR-B): the classified refusal rides on the result, internal only.
+    const fenced = delivery.fence !== undefined ? { fence: delivery.fence } : {};
     settle(failure.state, failure.reason);
     // Issue #3945: a dialog found by the re-check under the lock is the prompt
     // guard's refusal, found late — answered as that refusal (relay holds it).
     if (failure.reason === 'prompt-waiting') {
-      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent) };
+      return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent), ...fenced };
     }
     if (isSessionStartTimeoutError(error)) {
-      return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE };
+      return { ok: false, stage: 'send', error: error.message, code: SESSION_STARTING_CODE, ...fenced };
     }
-    return { ok: false, stage: 'send', error: getErrorMessage(error) };
+    return { ok: false, stage: 'send', error: getErrorMessage(error), ...fenced };
   }
   settle('sent', 'submitted');
 

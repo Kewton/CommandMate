@@ -856,9 +856,12 @@ export class InputBoundaryRefusedError extends Error {
   readonly code = INPUT_BOUNDARY_REFUSED_CODE;
 
   constructor(cause: unknown) {
+    // Issue #4534 (PR-B): the hook's error is kept as `cause`, so the refusal's
+    // type (a relay reservation lost, the fence's own) survives the wraps.
     super(
       `Input boundary could not be recorded (${cause instanceof Error ? cause.message : String(cause)}); ` +
-        'nothing was typed (Issue #3957)'
+        'nothing was typed (Issue #3957)',
+      { cause }
     );
     this.name = 'InputBoundaryRefusedError';
   }
