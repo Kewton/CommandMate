@@ -1251,7 +1251,7 @@ describe("Issue #4288 PR1c: aligned with PR1a-f's upstream 3rd round (I3's grace
 //
 // Each row of the §2 table is driven through lib.sh itself (bash under `set -u`, a private PRODUCT_BASE made with
 // fs.mkdtempSync under os.tmpdir(), removed in afterEach): the form is written in the base, the observation made real
-// (a live `sleep`, a pid that is gone, pid 1 for EPERM) or injected (CM_VERIFY_TEST_OBS_FAULT), and the answer read back
+// (a live `sleep`, a pid that is gone) or injected (CM_VERIFY_TEST_OBS_FAULT; EPERM of pid 1 too, see KILL0_EPERM), and the answer read back
 // from PRODUCT_LOCK_RESULT / PRODUCT_LOCK_KIND / PRODUCT_LOCK_ERROR / the files (the whole base but the queue is compared
 // as the table says; no row is skipped).
 
@@ -1376,6 +1376,15 @@ const WRAP_LIST_RACE = `${orig('lock_obs_list')}lock_obs_list() { if [ "$1" = lo
  * (other-eperm × gone) fail now and then, so those rows pin the clock inside this one function: the verdict they
  * assert is independent of how long `ps` took. Everything else still reads the real clock.
  */
+/**
+ * EPERM of kill -0, made the same on every host: the record names pid 1 and the lock section's observation seam answers
+ * EPERM for the point `pid` on exactly that target (`pid@@1`), before any kill is sent. Whether a real kill -0 of pid 1
+ * is refused depends on the host (macOS as a user: EPERM; a Linux container, or root: allowed — the CI's
+ * `expected 'rec' to be 'eperm'`), so it is not relied on. Only this observation fails; the lstart / etime of pid 1
+ * (machine_lock_pid_identity) are still read for real.
+ */
+const KILL0_EPERM = 'pid@@1=EPERM';
+
 const PIN_CLOCK = `${orig('lock_now_ms')}eval "orig2_$(declare -f machine_lock_pid_identity)"\nmachine_lock_pid_identity() { local t rc; t=$(orig_lock_now_ms); lock_now_ms() { echo "$t"; }; orig2_machine_lock_pid_identity "$@"; rc=$?; lock_now_ms() { orig_lock_now_ms; }; return $rc; }\n`;
 
 // ---- the end state of the base: everything under it except the queue (dirs as '', files as their text)
@@ -1482,12 +1491,12 @@ function makeFixture(form: Form, obs: Obs, base: string, caller: Caller): Fixtur
       return { env, before: text };
     }
     case 'other-eperm': {
-      // pid 1 belongs to another user: kill -0 answers EPERM.
+      // pid 1 as a process of another user: kill -0 answers EPERM (injected, KILL0_EPERM).
       const text =
         obs === 'alive'
           ? put(recordText({ pid: 1, startedAt: isoNow(), lstart: lstartOf(1) }))
           : put(recordText({ pid: 1, startedAt: '2015-01-01T00:00:00Z', lstart: 'Thu Jan  1 00:00:00 2015' }));
-      if (obs === 'unknown') env.CM_VERIFY_TEST_OBS_FAULT = 'etime=EIO';
+      env.CM_VERIFY_TEST_OBS_FAULT = obs === 'unknown' ? `${KILL0_EPERM} etime=EIO` : KILL0_EPERM;
       return { env, before: text, bashPre: PIN_CLOCK };
     }
     case 'other-host': {
@@ -1953,7 +1962,7 @@ describe('Issue #4288 PR1c failure outcomes (design §3): every outcome of the t
 
   type SpecFn = (base: string, caller: ReachableCaller, aux: string) => Fixture;
   const SPECS: Record<Failure, SpecFn | undefined> = {
-    'F1-kill0-eperm': (base) => ({ env: {}, before: writeLock(base, recordText({ pid: 1, startedAt: isoNow() })) }),
+    'F1-kill0-eperm': (base) => ({ env: { CM_VERIFY_TEST_OBS_FAULT: KILL0_EPERM }, before: writeLock(base, recordText({ pid: 1, startedAt: isoNow() })) }),
     'F2-kill0-other': (base, caller): Fixture =>
       callerIsRelease(caller)
         ? { env: {}, takeFirst: true, afterAcquire: 'export CM_VERIFY_TEST_OBS_FAULT=pid=EIO' }
