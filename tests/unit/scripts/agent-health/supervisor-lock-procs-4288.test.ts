@@ -361,8 +361,9 @@ describe('Issue #4288 PR1c AC-3: supervisor.lock held by separate processes (two
         await finish(b);
 
         const v = judge(events(run));
-        expect({ moved, afterR, bTook }).toEqual({ moved: false, afterR: { owner: ta, gone: 0 }, bTook: false });
+        // The overlap first: a red names the two tokens that held together (A:<token> + B:<token>).
         expectNoBreak(v);
+        expect({ moved, afterR, bTook }).toEqual({ moved: false, afterR: { owner: ta, gone: 0 }, bTook: false });
         expect(v.acquired.R).toBeUndefined();
         if (s.role === 'guard') expect(events(run).filter((l) => l.startsWith('R guard'))).toEqual([`R guard kept ${ta}`]);
         expectSettled(run);
