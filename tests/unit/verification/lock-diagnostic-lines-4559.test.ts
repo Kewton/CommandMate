@@ -11,6 +11,13 @@
  * changed). Every cell is typed and listed, and a cell left out fails below. The faults are put on the
  * owner read by its place: the re-read (lock_recover_judged / the read after the judgement) or the
  * judgement's read; all under os.tmpdir().
+ *
+ * The end of the wait is decided by the number of polls, not by time (r7): the clock (bash lock_now_ms,
+ * redefined after the load; sync JS hooks.now) advances 1000 ms at each judgement's read, and the polls do
+ * not sleep (LOCK_POLL_SEC=0; sync `sleep` a no-op). A budget of B seconds is then exactly B polls (0: one).
+ *
+ * "After D5 or D6" is D6 only: D5's re-read reads at `release-owner` (lock_release_as_head /
+ * releaseAsHead), never the same observation as an acquisition's `lock-owner`, so D6 alone covers it.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -32,13 +39,14 @@ interface Lines {
 const ACQUISITIONS: readonly Acquisition[] = ['first', 'second-in-process', 'after-d6'];
 const EVENTS: readonly Event[] = ['none', 'R', 'T', 'RT-same', 'RT-different'];
 
-/** What each event is made of: the faults and the budget. */
+/** What each event is made of: the faults and the budget (seconds = polls, with the clock above). */
 const SETUP: Record<Event, { reread: 'none' | 'once' | 'always'; judge: 'none' | 'always-eio' | 'after-first-eacces'; budgetSec: number }> = {
   none: { reread: 'none', judge: 'none', budgetSec: 0 },
   R: { reread: 'once', judge: 'none', budgetSec: 2 },
   T: { reread: 'none', judge: 'always-eio', budgetSec: 0 },
   'RT-same': { reread: 'always', judge: 'none', budgetSec: 0 },
-  'RT-different': { reread: 'once', judge: 'after-first-eacces', budgetSec: 3 },
+  // Exactly two polls: the first re-read fails (EIO), the second judgement's read fails (EACCES).
+  'RT-different': { reread: 'once', judge: 'after-first-eacces', budgetSec: 2 },
 };
 
 /** The invariant per cell — the same for every acquisition. */
@@ -72,7 +80,10 @@ const count = (lines: string[], errno: string) => lines.filter((l) => l.includes
 const BASH_FAULTS = `
 eval "orig_$(declare -f lock_obs_owner)"
 eval "orig_$(declare -f lock_recover_judged)"
-IN_REREAD=0; R_N=0; J_N=0; REREAD=none; JUDGE=none
+IN_REREAD=0; R_N=0; J_N=0; CLOCK_N=0; REREAD=none; JUDGE=none
+LOCK_POLL_SEC=0
+# The clock: 1000 ms more at each judgement's read (CLOCK_N never goes back, also across the stages).
+lock_now_ms() { echo $(( 1800000000000 + CLOCK_N * 1000 )); }
 lock_recover_judged() { IN_REREAD=1; orig_lock_recover_judged "$@"; IN_REREAD=0; }
 lock_obs_owner() {
   ow_code=""
@@ -81,7 +92,7 @@ lock_obs_owner() {
       R_N=$(( R_N + 1 ))
       case "$REREAD" in once) [ "$R_N" = 1 ] && ow_code=EIO;; always) ow_code=EIO;; esac
     else
-      J_N=$(( J_N + 1 ))
+      J_N=$(( J_N + 1 )); CLOCK_N=$(( CLOCK_N + 1 ))
       case "$JUDGE" in always-eio) ow_code=EIO;; after-first-eacces) [ "$J_N" -gt 1 ] && ow_code=EACCES;; esac
     fi
   fi
@@ -121,13 +132,15 @@ lock_acquire x ${s.budgetSec}; echo "rc=$?"`;
     timeout: 30000,
     env: { ...process.env, CM_VERIFY_LOCK_ROOT: root, LK: lockPath, DEAD: String(deadPid()) },
   });
-  const cell = (r.stderr ?? '').split('--- cell')[1] ?? '';
-  return { rc: (r.stdout ?? '').trim().split('\n').pop(), lines: cell.split('\n') };
+  const [before, cell] = (r.stderr ?? '').split('--- cell');
+  return { rc: (r.stdout ?? '').trim().split('\n').pop(), before: (before ?? '').split('\n'), lines: (cell ?? '').split('\n') };
 }
 
 describe.each(CELLS)('bash: $acquisition × $event', ({ acquisition, event, lines }) => {
   it(`R / T lines: EIO ${lines.eio}, EACCES ${lines.eacces}`, () => {
     const got = bashCell(acquisition, event);
+    // The premise of the later acquisitions: the stage before named the same observation once.
+    expect({ before: count(got.before, 'EIO') }).toEqual({ before: acquisition === 'first' ? 0 : 1 });
     expect({ rc: got.rc, eio: count(got.lines, 'EIO'), eacces: count(got.lines, 'EACCES') }).toEqual({ rc: TAKEN[event] ? 'rc=0' : 'rc=1', ...lines });
   }, 30000);
 });
@@ -141,6 +154,8 @@ function syncFaults(event: Event | 'prime') {
   let r = 0;
   let j = 0;
   return {
+    // The clock: 1000 ms more at each judgement's read.
+    now: (): number => 1_800_000_000_000 + j * 1000,
     pidAlive: (pid: number): boolean => {
       if (pid === dead) {
         nextIsReread = true;
@@ -172,26 +187,32 @@ function syncCell(acquisition: Acquisition, event: Event) {
   const root = freshRoot(`r6-sync-${acquisition}-${event}`);
   const lockPath = machineLockPath('x', root);
   writeDeadHolder(lockPath);
+  const before: string[] = [];
+  const noSleep = (): void => {};
   if (acquisition === 'second-in-process') {
     const p = syncFaults('prime');
-    const first = lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 1500, pollMs: 20, hooks: p });
+    const first = lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 2000, pollMs: 0, sleep: noSleep, warn: (l: string) => before.push(l), hooks: p });
     if (first.acquired) first.release();
   }
   if (acquisition === 'after-d6') {
     const p = syncFaults('prime');
-    lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks: { fault: p.fault, onRecover: (stage: string) => (stage === 'recover-only-judged' ? p.pidAlive(deadPid()) : undefined) } });
+    const d6 = lockSync.recoverIfDead(lockPath, { timeoutMs: 0, warn: (l: string) => before.push(l), hooks: { fault: p.fault, onRecover: (stage: string) => (stage === 'recover-only-judged' ? p.pidAlive(deadPid()) : undefined) } });
+    // The sync JS's D6 names its re-read's unknown in its result (kept + unknown), not in a warn line.
+    if (d6.unknown) before.push(`machine-lock-unknown point=${d6.unknown.point} path=${d6.unknown.path} errno=${d6.unknown.code}`);
   }
   writeDeadHolder(lockPath);
   const f = syncFaults(event);
   const warnings: string[] = [];
-  const n = lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: SETUP[event].budgetSec * 1000, pollMs: 20, warn: (l: string) => warnings.push(l), hooks: f });
+  const n = lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: SETUP[event].budgetSec * 1000, pollMs: 0, sleep: noSleep, warn: (l: string) => warnings.push(l), hooks: f });
   if (n.acquired) n.release();
-  return { acquired: n.acquired, lines: warnings };
+  return { acquired: n.acquired, before, lines: warnings };
 }
 
 describe.each(CELLS)('sync JS (control): $acquisition × $event', ({ acquisition, event, lines }) => {
   it(`R / T lines: EIO ${lines.eio}, EACCES ${lines.eacces}`, () => {
     const got = syncCell(acquisition, event);
+    // The premise of the later acquisitions: the stage before named the same observation once.
+    expect({ before: count(got.before, 'EIO') }).toEqual({ before: acquisition === 'first' ? 0 : 1 });
     expect({ acquired: got.acquired, eio: count(got.lines, 'EIO'), eacces: count(got.lines, 'EACCES') }).toEqual({ acquired: TAKEN[event], ...lines });
   }, 30000);
 });
