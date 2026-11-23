@@ -11,19 +11,90 @@ import { execFileSync } from 'child_process';
 import {
   collectChangedFiles,
   classifyChanges,
+  collectRelatedSet,
   findTextScanTests,
   main,
 } from '../../../scripts/run-related-unit-tests.mjs';
 import { removeTempDir } from '@tests/helpers/temp-dir';
 
-/**
- * The options object `main()` hands its `run` dependency at every call site.
- * The parameter itself arrives as `unknown`: the script's JSDoc types it from a
- * `= {}` default, so a narrower annotation on the double is not assignable.
- */
-interface RunOptions {
+/** One group launch as `main()` hands it to its `runGroup` dependency (Issue #4577). */
+interface GroupCall {
+  cmd: string;
+  args: string[];
   cwd: string;
-  env: NodeJS.ProcessEnv;
+  env: Record<string, string | undefined>;
+  logPath: string;
+}
+
+/** The files a group was handed: everything after `run` up to the first flag. */
+function handedFiles(args: string[]): string[] {
+  const out: string[] = [];
+  for (const a of args.slice(1)) {
+    if (a.startsWith('--')) break;
+    out.push(a);
+  }
+  return out;
+}
+
+/**
+ * A `runGroup` double: records the call, writes the json report vitest would
+ * write for the files it was handed, and fails the group (exit 1, the file's
+ * test marked failed) when it holds any file in `failing`.
+ */
+function groupDouble(root: string, calls: GroupCall[], failing: string[] = []) {
+  return async (call: GroupCall) => {
+    calls.push(call);
+    const files = handedFiles(call.args);
+    const flag = call.args.find((a) => a.startsWith('--outputFile.json='));
+    if (flag) {
+      const testResults = files.map((f) => ({
+        name: path.join(root, f),
+        status: failing.includes(f) ? 'failed' : 'passed',
+        assertionResults: [{ fullName: `case of ${f}`, status: failing.includes(f) ? 'failed' : 'passed' }],
+      }));
+      fs.writeFileSync(flag.slice('--outputFile.json='.length), JSON.stringify({ testResults }));
+    }
+    fs.writeFileSync(call.logPath, '');
+    return { code: files.some((f) => failing.includes(f)) ? 1 : 0, signal: null };
+  };
+}
+
+/**
+ * The vitest Node API as `collectRelatedSet` drives it, faked: records the
+ * options and filters it was given and answers with `answer` (paths under root).
+ */
+function fakeVitest(root: string, answer: string[]) {
+  const seen: { options: Record<string, unknown> | null; filters: string[] | null; loaded: number } = {
+    options: null,
+    filters: null,
+    loaded: 0,
+  };
+  const loadVitest = async () => {
+    seen.loaded++;
+    return {
+      createVitest: async (_mode: string, options: Record<string, unknown>) => {
+        seen.options = options;
+        return {
+          getRelevantTestSpecifications: async (filters: string[]) => {
+            seen.filters = filters;
+            return answer.map((f) => ({ moduleId: path.join(root, f) }));
+          },
+          close: async () => undefined,
+        };
+      },
+    };
+  };
+  const collectSet = (o: { root: string; mode: 'related' | 'full'; mergeBase: string; traced: string[] }) =>
+    collectRelatedSet({ ...o, loadVitest });
+  return { seen, collectSet };
+}
+
+/** Each test's group TMPDIRs go under os.tmpdir() (main removes them). */
+const TMP_BASE = path.join(os.tmpdir(), 'cm-4577-main-');
+
+/** `[cmd, ...args]` of every group, the report flags dropped. */
+function argvOf(calls: GroupCall[]): string[][] {
+  return calls.map((c) => [c.cmd, ...c.args.filter((a) => !a.startsWith('--reporter') && !a.startsWith('--outputFile'))]);
 }
 
 describe('classifyChanges', () => {
@@ -227,108 +298,95 @@ describe('findTextScanTests', () => {
 });
 
 describe('main', () => {
-  it('returns 2 and does not call run when --base is missing', () => {
+  it('returns 2 and does not call run when --base is missing', async () => {
     let runCalled = false;
-    const run = () => {
+    const runGroup = async () => {
       runCalled = true;
-      return 0;
+      return { code: 0, signal: null };
     };
 
-    const exitCode = main([], { run, root: '/dummy' });
+    const exitCode = await main([], { runGroup, root: '/dummy', tmpBase: TMP_BASE });
     expect(exitCode).toBe(2);
     expect(runCalled).toBe(false);
   });
 
-  it('handles related mode: exit 1 on failure, runs both, logs outputs and passes --changed, mergeBase, --passWithNoTests', () => {
-    const calls: { cmd: string; args: string[]; opts: RunOptions }[] = [];
-    let callCount = 0;
-    const run = (cmd: string, args: string[], opts: unknown) => {
-      calls.push({ cmd, args, opts: opts as RunOptions });
-      callCount++;
-      // 1st call fails (1), 2nd call succeeds (0)
-      return callCount === 1 ? 1 : 0;
-    };
-
+  it('handles related mode: exit 1 on failure, runs both, logs outputs and passes --changed, mergeBase, --passWithNoTests', async () => {
+    // #4577: 2 回の起動は 1 回の和集合 × LPT 4 組に替わった（名前は #4577 の前のまま）
+    const calls: GroupCall[] = [];
     const logs: string[] = [];
-    const log = (msg: string) => logs.push(msg);
+    const vitest = fakeVitest('/dummy', ['tests/unit/feature.test.ts']);
 
-    const collectChangedFilesMock = () => ({
-      mergeBase: 'deadbeef123',
-      files: ['src/feature.ts'],
-    });
-
-    const findTextScanTestsMock = () => ['tests/unit/scan.test.ts'];
-
-    const exitCode = main(['--base', 'origin/develop'], {
-      run,
-      log,
+    const exitCode = await main(['--base', 'origin/develop'], {
+      runGroup: groupDouble('/dummy', calls, ['tests/unit/feature.test.ts']),
+      log: (msg: string) => logs.push(msg),
+      out: () => undefined,
       root: '/dummy',
-      collectChangedFiles: collectChangedFilesMock,
-      findTextScanTests: findTextScanTestsMock,
+      tmpBase: TMP_BASE,
+      collectChangedFiles: () => ({ mergeBase: 'deadbeef123', files: ['src/feature.ts'] }),
+      findTextScanTests: () => ['tests/unit/scan.test.ts'],
+      collectSet: vitest.collectSet,
     });
 
+    // A failure in the related set fails the gate.
     expect(exitCode).toBe(1);
-    expect(calls).toHaveLength(2);
 
-    // 1st call verification
-    expect(calls[0].cmd).toBe(path.join('/dummy', 'node_modules', '.bin', 'vitest'));
-    expect(calls[0].args).toEqual([
-      'run',
-      'tests/unit',
-      '--changed',
-      'deadbeef123',
-      '--passWithNoTests',
+    // The related set is what `vitest run tests/unit --changed <mergeBase>` selects.
+    expect(vitest.seen.options).toMatchObject({ changed: 'deadbeef123', passWithNoTests: true });
+    expect(vitest.seen.options).not.toHaveProperty('related');
+    expect(vitest.seen.filters).toEqual(['tests/unit']);
+
+    // Both the related test and the text-scan test run, through vitest, with --passWithNoTests.
+    expect(calls.flatMap((c) => handedFiles(c.args)).sort()).toEqual([
+      'tests/unit/feature.test.ts',
+      'tests/unit/scan.test.ts',
     ]);
-    expect(calls[0].opts.env.NODE_ENV).toBe('test');
-
-    // 2nd call verification
-    expect(calls[1].cmd).toBe(path.join('/dummy', 'node_modules', '.bin', 'vitest'));
-    expect(calls[1].args).toEqual(['run', 'tests/unit/scan.test.ts']);
-    expect(calls[1].opts.env.NODE_ENV).toBe('test');
+    for (const c of calls) {
+      expect(c.cmd).toBe(path.join('/dummy', 'node_modules', '.bin', 'vitest'));
+      expect(c.args[0]).toBe('run');
+      expect(c.args).toContain('--passWithNoTests');
+      expect(c.env.NODE_ENV).toBe('test');
+    }
 
     expect(logs).toContain('run-related-unit-tests: mode=related changed=1 textscan=1');
-    expect(logs).toContain('run-related-unit-tests: related exit=1 textscan exit=0');
+    expect(logs).toContain('run-related-unit-tests: set related=1 textscan=1 overlap=0 union=2');
+    expect(logs).toContain('run-related-unit-tests: failed tests/unit/feature.test.ts > case of tests/unit/feature.test.ts');
+    expect(logs).toContain('run-related-unit-tests: result exit=1 groups=2 union=2');
   });
 
-  it('handles a former full change (vitest.config.ts) as related: no npm run test:unit, text-scan tests only (Issue #4467)', () => {
-    const calls: { cmd: string; args: string[]; opts: RunOptions }[] = [];
-    const run = (cmd: string, args: string[], opts: unknown) => {
-      calls.push({ cmd, args, opts: opts as RunOptions });
-      return 0;
-    };
-
+  it('handles a former full change (vitest.config.ts) as related: no npm run test:unit, text-scan tests only (Issue #4467)', async () => {
+    const calls: GroupCall[] = [];
     const logs: string[] = [];
-    const log = (msg: string) => logs.push(msg);
+    const vitest = fakeVitest('/dummy', ['tests/unit/never.test.ts']);
 
-    const collectChangedFilesMock = () => ({
-      mergeBase: 'sha1',
-      files: ['vitest.config.ts'],
-    });
-
-    const exitCode = main(['--base', 'origin/develop'], {
-      run,
-      log,
+    const exitCode = await main(['--base', 'origin/develop'], {
+      runGroup: groupDouble('/dummy', calls),
+      log: (msg: string) => logs.push(msg),
+      out: () => undefined,
       root: '/dummy',
-      collectChangedFiles: collectChangedFilesMock,
+      tmpBase: TMP_BASE,
+      collectChangedFiles: () => ({ mergeBase: 'sha1', files: ['vitest.config.ts'] }),
       findTextScanTests: () => ['tests/unit/scan.test.ts'],
+      collectSet: vitest.collectSet,
     });
 
     expect(exitCode).toBe(0);
-    expect(calls.map((c) => [c.cmd, ...c.args])).toEqual([
-      [path.join('/dummy', 'node_modules', '.bin', 'vitest'), 'run', 'tests/unit/scan.test.ts'],
+    // Nothing traceable: the related set is not even asked for, and only vitest runs (no npm).
+    expect(vitest.seen.loaded).toBe(0);
+    expect(argvOf(calls)).toEqual([
+      [path.join('/dummy', 'node_modules', '.bin', 'vitest'), 'run', 'tests/unit/scan.test.ts', '--passWithNoTests'],
     ]);
     expect(logs).toContain(
       'run-related-unit-tests: mode=related reason=non-source:vitest.config.ts changed=1 traced=0 textscan=1'
     );
-    expect(logs).toContain('run-related-unit-tests: related exit=skipped textscan exit=0');
+    expect(logs).toContain('run-related-unit-tests: set related=0 textscan=1 overlap=0 union=1');
     expect(logs.some((l) => l.includes('mode=full') || l.includes('full exit='))).toBe(false);
   });
 
-  it('handles none mode: run is not called and returns 0', () => {
+  it('handles none mode: run is not called and returns 0', async () => {
     let runCalled = false;
-    const run = () => {
+    const runGroup = async () => {
       runCalled = true;
-      return 0;
+      return { code: 0, signal: null };
     };
 
     const logs: string[] = [];
@@ -339,10 +397,11 @@ describe('main', () => {
       files: ['CHANGELOG.md'],
     });
 
-    const exitCode = main(['--base', 'origin/develop'], {
-      run,
+    const exitCode = await main(['--base', 'origin/develop'], {
+      runGroup,
       log,
       root: '/dummy',
+      tmpBase: TMP_BASE,
       collectChangedFiles: collectChangedFilesMock,
     });
 
@@ -354,12 +413,15 @@ describe('main', () => {
 
 /**
  * Issue #4467: a change outside src/ and tests/ no longer switches the local
- * gate to the whole unit suite (CI's Unit Tests runs it). Pins the argv `run`
- * receives for the four shapes of change the contract names.
+ * gate to the whole unit suite (CI's Unit Tests runs it). Pins what `main()`
+ * asks vitest for and what it runs for the four shapes of change the contract
+ * names. Since #4577 the related set and the text-scan tests run as one union.
  */
 describe('main: non-source changes stay related (Issue #4467)', () => {
   let tmpRoot: string;
   const TEXTSCAN = ['tests/unit/docs/a.test.ts', 'tests/unit/guards/b.test.ts'];
+  /** What the fake vitest answers for the related set. */
+  const RELATED = ['tests/unit/lib/a.test.ts'];
 
   beforeEach(() => {
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-test-related-4467-'));
@@ -375,64 +437,69 @@ describe('main: non-source changes stay related (Issue #4467)', () => {
     fs.writeFileSync(full, '');
   }
 
-  function runMain(files: string[], codes: number[] = []) {
-    const calls: string[][] = [];
+  async function runMain(files: string[], failing: string[] = []) {
+    const calls: GroupCall[] = [];
     const logs: string[] = [];
-    const exitCode = main(['--base', 'origin/develop'], {
-      run: (cmd: string, args: string[]) => {
-        calls.push([cmd, ...args]);
-        return codes[calls.length - 1] ?? 0;
-      },
+    const vitest = fakeVitest(tmpRoot, RELATED);
+    const exitCode = await main(['--base', 'origin/develop'], {
+      runGroup: groupDouble(tmpRoot, calls, failing),
       log: (msg: string) => logs.push(msg),
+      out: () => undefined,
       root: tmpRoot,
+      tmpBase: TMP_BASE,
       collectChangedFiles: () => ({ mergeBase: 'base123', files }),
       findTextScanTests: () => TEXTSCAN,
+      collectSet: vitest.collectSet,
     });
-    return { exitCode, calls, logs };
+    const ran = calls.flatMap((c) => handedFiles(c.args)).sort();
+    return { exitCode, calls, logs, ran, seen: vitest.seen };
   }
 
-  const vitest = () => path.join(tmpRoot, 'node_modules', '.bin', 'vitest');
+  /** The log lines main() writes before any group runs. */
+  const head = (logs: string[]) => logs.slice(0, 3);
 
-  it('(1) non-source only (docs, README): runs only the text-scan tests', () => {
-    const { exitCode, calls, logs } = runMain(['README.md', 'docs/guide.md']);
+  it('(1) non-source only (docs, README): runs only the text-scan tests', async () => {
+    const { exitCode, ran, logs, seen } = await runMain(['README.md', 'docs/guide.md']);
     expect(exitCode).toBe(0);
-    expect(calls).toEqual([[vitest(), 'run', ...TEXTSCAN]]);
-    expect(logs).toEqual([
+    expect(seen.loaded).toBe(0);
+    expect(ran).toEqual(TEXTSCAN);
+    expect(head(logs)).toEqual([
       'run-related-unit-tests: mode=related reason=non-source:README.md changed=2 traced=0 textscan=2',
-      'run-related-unit-tests: related exit=skipped textscan exit=0',
+      'run-related-unit-tests: set related=0 textscan=2 overlap=0 union=2',
+      'run-related-unit-tests: split=lpt groups=2 cache=missing known=0/2 default-weight=1ms',
     ]);
+    expect(logs[logs.length - 1]).toBe('run-related-unit-tests: result exit=0 groups=2 union=2');
   });
 
-  it('(2) non-source + src: vitest related on the existing traceable files, then the text-scan tests', () => {
+  it('(2) non-source + src: vitest related on the existing traceable files, then the text-scan tests', async () => {
+    // #4577: 2 回の起動は 1 回の和集合 × LPT 4 組に替わった（名前は #4577 の前のまま）
     touch('src/lib/a.ts');
     // src/lib/gone.ts is a deletion: it does not exist, so it is not handed to vitest related.
-    const { exitCode, calls, logs } = runMain(['docs/guide.md', 'src/lib/a.ts', 'src/lib/gone.ts']);
+    const { exitCode, ran, logs, seen } = await runMain(['docs/guide.md', 'src/lib/a.ts', 'src/lib/gone.ts']);
     expect(exitCode).toBe(0);
-    expect(calls).toEqual([
-      [vitest(), 'related', '--run', '--dir', 'tests/unit', 'src/lib/a.ts', '--passWithNoTests'],
-      [vitest(), 'run', ...TEXTSCAN],
-    ]);
-    expect(logs).toEqual([
+    expect(seen.options).toMatchObject({ related: [path.join(tmpRoot, 'src/lib/a.ts')], dir: 'tests/unit' });
+    expect(seen.options).not.toHaveProperty('changed');
+    expect(seen.filters).toEqual([]);
+    expect(ran).toEqual([...RELATED, ...TEXTSCAN].sort());
+    expect(head(logs).slice(0, 2)).toEqual([
       'run-related-unit-tests: mode=related reason=non-source:docs/guide.md changed=3 traced=1 textscan=2',
-      'run-related-unit-tests: related exit=0 textscan exit=0',
+      'run-related-unit-tests: set related=1 textscan=2 overlap=0 union=3',
     ]);
   });
 
-  it('(3) scripts .mjs only: the script is traced by vitest related, and the text-scan tests run', () => {
+  it('(3) scripts .mjs only: the script is traced by vitest related, and the text-scan tests run', async () => {
     touch('scripts/foo.mjs');
-    const { exitCode, calls, logs } = runMain(['scripts/foo.mjs']);
+    const { exitCode, ran, logs, seen } = await runMain(['scripts/foo.mjs']);
     expect(exitCode).toBe(0);
-    expect(calls).toEqual([
-      [vitest(), 'related', '--run', '--dir', 'tests/unit', 'scripts/foo.mjs', '--passWithNoTests'],
-      [vitest(), 'run', ...TEXTSCAN],
-    ]);
+    expect(seen.options).toMatchObject({ related: [path.join(tmpRoot, 'scripts/foo.mjs')], dir: 'tests/unit' });
+    expect(ran).toEqual([...RELATED, ...TEXTSCAN].sort());
     expect(logs[0]).toBe(
       'run-related-unit-tests: mode=related reason=non-source:scripts/foo.mjs changed=1 traced=1 textscan=2'
     );
   });
 
-  it('(4) none: metadata only runs nothing', () => {
-    const { exitCode, calls, logs } = runMain([
+  it('(4) none: metadata only runs nothing', async () => {
+    const { exitCode, calls, logs, seen } = await runMain([
       '.commandmate/tasks/issue-1.yaml',
       'dev-reports/x.md',
       'changelog.d/1.md',
@@ -441,25 +508,33 @@ describe('main: non-source changes stay related (Issue #4467)', () => {
     ]);
     expect(exitCode).toBe(0);
     expect(calls).toEqual([]);
+    expect(seen.loaded).toBe(0);
     expect(logs).toEqual(['run-related-unit-tests: mode=none']);
   });
 
-  it('fails when either the related run or the text-scan run fails', () => {
+  it('fails when either the related run or the text-scan run fails', async () => {
+    // #4577: 2 回の起動は 1 回の和集合 × LPT 4 組に替わった（名前は #4577 の前のまま）
     touch('scripts/foo.mjs');
-    expect(runMain(['scripts/foo.mjs'], [1, 0]).exitCode).toBe(1);
-    expect(runMain(['scripts/foo.mjs'], [0, 1]).exitCode).toBe(1);
-    const { exitCode, logs } = runMain(['README.md'], [1]);
+    expect((await runMain(['scripts/foo.mjs'], [RELATED[0]])).exitCode).toBe(1);
+    expect((await runMain(['scripts/foo.mjs'], [TEXTSCAN[1]])).exitCode).toBe(1);
+    expect((await runMain(['scripts/foo.mjs'])).exitCode).toBe(0);
+    const { exitCode, logs } = await runMain(['README.md'], [TEXTSCAN[0]]);
     expect(exitCode).toBe(1);
-    expect(logs).toContain('run-related-unit-tests: related exit=skipped textscan exit=1');
+    expect(logs).toContain(`run-related-unit-tests: failed ${TEXTSCAN[0]} > case of ${TEXTSCAN[0]}`);
+    expect(logs[logs.length - 1]).toBe('run-related-unit-tests: result exit=1 groups=2 union=2');
   });
 
-  it('negative control: src/tests only keeps the --changed run (unchanged argv)', () => {
+  it('negative control: src/tests only keeps the --changed run (unchanged argv)', async () => {
+    // #4577: 2 回の起動は 1 回の和集合 × LPT 4 組に替わった（名前は #4577 の前のまま）
+    // The --changed selection is unchanged: vitest is asked for `changed: <mergeBase>` under tests/unit.
     touch('src/lib/a.ts');
-    const { calls, logs } = runMain(['src/lib/a.ts']);
-    expect(calls).toEqual([
-      [vitest(), 'run', 'tests/unit', '--changed', 'base123', '--passWithNoTests'],
-      [vitest(), 'run', ...TEXTSCAN],
-    ]);
+    const { ran, logs, seen } = await runMain(['src/lib/a.ts']);
+    expect(seen.options).toMatchObject({ changed: 'base123', passWithNoTests: true });
+    expect(seen.options).not.toHaveProperty('related');
+    // As before #4577 (no --dir in the --changed argv): the changed form passes no dir.
+    expect(seen.options).not.toHaveProperty('dir');
+    expect(seen.filters).toEqual(['tests/unit']);
+    expect(ran).toEqual([...RELATED, ...TEXTSCAN].sort());
     expect(logs[0]).toBe('run-related-unit-tests: mode=related changed=1 textscan=2');
   });
 });
