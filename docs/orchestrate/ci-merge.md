@@ -141,7 +141,7 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **ゲートの `status: running` は「実行中」とは限らない**: `cpu.heavy` を待っている間も `running` と出る。始まったかは
   `log_tail` の `[mutex] waited=` の行（ロックを取ると出る）か、`vitest` のプロセスがその worktree で動いているかで確かめる
   （2026-11-18、PM が `running` を開始と読み違え、A1 の順の調整を誤った）
-- **1 コミットに verify は 1 本**: ワーカーの verify が走っている同じコミットに、リーダーの `wait-verify` や再試行を重ねない。
+- **1 コミットに verify は 1 本**: 契約の verify（ワーカーの完了の後に `wait --verify`・`wait-verify` の中で走るもの。ワーカーは `commandmate verify` を流さない。契約の雛形 scripts/orchestrate/templates/goal.md の「確認に使うコマンドは `npx vitest run <関係するテスト> tests/unit/guards tests/unit/docs`、`npm run lint`、`npx tsc --noEmit` だけにする」）が走っている同じコミットに、リーダーの手の `wait-verify` や再試行を重ねない。
   古いコミットの run が列に残ると、同じ worktree の新しい verify は 409 で断られる。run の取消し（`POST /api/worktrees/<id>/verify/runs/<run>/cancel`）は
   エージェントからは自動の許可の判定で断られることがある。そのときは迂回せず、PM が人へ取消しを頼む（承認は run ごと）。
   **同じ worktree の古い head の verify run は、PM が取り消してよい**（人の決定、mem c31afe28）。古い head の run は新しいコミットの裁定にならず、列と mutex を塞ぐだけだから。
