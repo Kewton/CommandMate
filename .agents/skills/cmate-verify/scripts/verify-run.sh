@@ -654,6 +654,8 @@ LOCK_ACQUIRED_AT=0
 LOCK_UNKNOWN=""
 LOCK_GONE_PENDING=""
 LOCK_WARNED=""
+# The re-read unknowns this acquisition named (#4559): emptied by lock_acquire_path (set -u safe for D5 / D6).
+LOCK_REREAD_NAMED=""
 LOCK_TAB=$(printf '\t')
 # How long a gate's child waits for the signal that its group is on the owner record (§2.4).
 HANDOFF_WAIT_SEC=30
@@ -1355,9 +1357,16 @@ lock_ticket_retirable() { # <file> <now-ms>
   # One read of the ticket; a ticket that cannot be read is never retired (it blocks like a live one).
   # Nor is one whose fields cannot be extracted (#4288 Codex re-review P1): an extraction that
   # failed is not an empty field.
+  # #4560: LTR_TOKEN is the token of the read judged (set before any answer). A caller that retires
+  # the ticket calls this in its own shell (not in $( ), stdout to /dev/null) and passes LTR_TOKEN to
+  # lock_mark_done — never a token read again, which could be a ticket put there after the judgement.
+  # LTR_WHY is the answer printed (gone | pid-reused | expired), empty when not retirable.
+  LTR_TOKEN=""
+  LTR_WHY=""
   ltr_text=$(cat -- "$1" 2>/dev/null) || return 1
   ltr_token=$(lock_json_text_field "$ltr_text" token) || return 1
   [ -n "$ltr_token" ] || return 1
+  LTR_TOKEN=$ltr_token
   ltr_host=$(lock_json_text_field "$ltr_text" host) || return 1
   ltr_pid=$(lock_json_text_field "$ltr_text" pid) || return 1
   ltr_pgid=$(lock_json_text_field "$ltr_text" pgid) || return 1
@@ -1366,18 +1375,19 @@ lock_ticket_retirable() { # <file> <now-ms>
   ltr_created=$(lock_json_text_field "$ltr_text" createdAt) || return 1
   ltr_deadline=$(lock_json_text_field "$ltr_text" deadline) || return 1
   if [ "$ltr_host" = "$LOCK_HOST" ]; then
-    if lock_record_gone "$ltr_pid" "$ltr_host" "$ltr_pgid"; then echo gone; return 0; fi
+    if lock_record_gone "$ltr_pid" "$ltr_host" "$ltr_pgid"; then LTR_WHY=gone; echo gone; return 0; fi
     if [ -n "$ltr_pid" ] && [ "$ltr_pid" != "$LOCK_SELF_PID" ] && [ -n "$ltr_created" ]; then
       ltr_start=$(lock_pid_start_ms "$ltr_pid") || ltr_start=""
       if [ -n "$ltr_start" ] && [ "$ltr_start" -gt $(( ltr_created + LOCK_PID_REUSE_SLACK_MS )) ]; then
+        LTR_WHY=pid-reused
         echo pid-reused
         return 0
       fi
     fi
-    if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_SAME_HOST_GRACE_MS )) ]; then echo expired; return 0; fi
+    if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_SAME_HOST_GRACE_MS )) ]; then LTR_WHY=expired; echo expired; return 0; fi
     return 1
   fi
-  if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_OTHER_HOST_GRACE_MS )) ]; then echo expired; return 0; fi
+  if [ -n "$ltr_deadline" ] && [ "$2" -gt $(( ltr_deadline + LOCK_OTHER_HOST_GRACE_MS )) ]; then LTR_WHY=expired; echo expired; return 0; fi
   return 1
 }
 
@@ -1698,6 +1708,67 @@ lock_recover() { # <lock-path> <dead-token> <dead-pid>
   if [ "$LMO_RESULT" = absent ]; then rm -rf "$lrc_gone" 2>/dev/null || true; LRC_RESULT=restored; fi
 }
 
+# #4559: lock_recover only while the record is still the one judged (I3). One read of the owner at
+# <point> right before the move. LRC_RESULT without a move: changed (another token, or an owner-less
+# <lock> that is there), absent (the <lock> is gone, as lock_recover's own ENOENT), reread-unknown (the
+# re-read, or the check for absent, could not observe: named once, and the caller judges again — not
+# broken). This narrows the window; a stop after this read and before the mv is not closed here (#4559).
+# lock_recover itself keeps its contract (move, check the token, put back): the put-back is only the
+# guard of the window between this read and its mv. Callers: lock_acquire_path, lock_release_as_head,
+# lock_recover_only (D6).
+lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point> [<in>: acquire from lock_acquire_path]
+  lock_obs_owner "$4" "$1"
+  case "$LOB_CLASS" in
+    record) ;;
+    unknown) lock_reread_unknown "$4" "$1/owner" "$LOB_CODE" "${5:-}"; return 0;;
+    missing)
+      lrj_e=$(lock_ownerless_empty "$1")
+      case "$lrj_e" in
+        absent) LRC_RESULT=absent;;
+        unknown:*)
+          lrj_u=${lrj_e#unknown:}
+          lrj_r=${lrj_u#*:}
+          lock_reread_unknown "${lrj_u%%:*}" "${lrj_r%:*}" "${lrj_r##*:}" "${5:-}";;
+        *) LRC_RESULT=changed;;
+      esac
+      return 0;;
+    *) LRC_RESULT=changed; return 0;;
+  esac
+  if [ "$LOB_TOKEN" != "$2" ]; then LRC_RESULT=changed; return 0; fi
+  # Test seam: the window the re-read cannot close (between it and the mv). A record put in here is
+  # moved, its token checked, and put back by lock_recover — the put-back is kept for this window only.
+  lock_test_pause recover-rechecked
+  lock_recover "$1" "$2" "$3"
+}
+
+# Nothing moved; named like the other unknowns (LOCK_UNKNOWN for the timeout's line), and the caller
+# judges again. The invariant (#4559 r6): in each acquisition of one process, the re-read's unknown and
+# the end of the wait are one line together for the same observation (point, path, errno), one line each
+# for different ones, none when they do not occur. So inside an acquisition (<in> = acquire) the line is
+# decided by LOCK_REREAD_NAMED — this acquisition's mark, emptied by lock_acquire_path, added to only when
+# the line is printed, never twice — and not by LOCK_WARNED, the process's warn-once that an earlier
+# acquisition or D5 / D6 filled. The line is still recorded in LOCK_WARNED, so D5 / D6 (no <in>) keep
+# their warn-once as before.
+lock_reread_unknown() { # <point> <path> <errno> [<in>]
+  lock_note_unknown "$1" "$2" "$3"
+  lrn_obs="point=$1 path=$2 errno=$3"
+  if [ "${4:-}" = acquire ]; then
+    case "$LOCK_REREAD_NAMED" in
+      *"|$lrn_obs|"*) ;;
+      *)
+        echo "verify-run: machine-lock-unknown $lrn_obs" >&2
+        LOCK_REREAD_NAMED="$LOCK_REREAD_NAMED|$lrn_obs|"
+        case "$LOCK_WARNED" in
+          *"|machine-lock-unknown $lrn_obs|"*) ;;
+          *) LOCK_WARNED="$LOCK_WARNED|machine-lock-unknown $lrn_obs|";;
+        esac;;
+    esac
+  else
+    lock_warn_once "machine-lock-unknown $lrn_obs"
+  fi
+  LRC_RESULT=reread-unknown
+}
+
 # The line a recovery prints (a caller with its own wording — run-lock's — redefines it after the load).
 lock_note_recovered() { # <lock-path> <dead-pid>
   echo "verify-run: broke a stale lock at $1 (recorded holder pid $2 on this host no longer exists)" >&2
@@ -1969,6 +2040,7 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
   la_deadline=$(( la_start_ms + la_budget * 1000 ))
   la_tmp="$la_queue/.t-$LOCK_TOKEN"
   la_broken=""
+  LOCK_REREAD_NAMED=""
   la_emptied=0
   while :; do
     LOCK_UNKNOWN=""
@@ -2005,9 +2077,10 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
         for la_entry in $la_names; do
           [ "$la_entry" \< "$la_mine" ] || break
           [ "$(lock_json_field "$la_queue/$la_entry" done)" = "true" ] && continue
-          if la_why=$(lock_ticket_retirable "$la_queue/$la_entry" "$la_now"); then
-            if lock_mark_done "$la_queue/$la_entry" "$(lock_json_field "$la_queue/$la_entry" token)"; then
-              echo "verify-run: machine-lock-ticket-retired $la_queue/$la_entry ($la_why)" >&2
+          # #4560: judged and retired from the same read (LTR_TOKEN), not a token read again.
+          if lock_ticket_retirable "$la_queue/$la_entry" "$la_now" >/dev/null; then
+            if lock_mark_done "$la_queue/$la_entry" "$LTR_TOKEN"; then
+              echo "verify-run: machine-lock-ticket-retired $la_queue/$la_entry ($LTR_WHY)" >&2
             fi
             continue
           fi
@@ -2107,9 +2180,17 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
               la_state=$(lock_record_state)
               case "$la_state" in
                 gone)
-                  la_broken=$la_token
-                  lock_recover "$LOCK_PATH" "$la_token" "$la_pid"
-                  continue;;
+                  # #4559: the judgement is read again right before the move (lock_recover_judged): a
+                  # recoverer that stopped here finds the next holder's live record and leaves it. This
+                  # narrows the window; a stop after the re-read and before the mv is not closed here
+                  # (#4559 stays open). A re-read that failed marks nothing broken: judged again next
+                  # poll. Test seam: pause:recover-judged.
+                  lock_test_pause recover-judged
+                  lock_recover_judged "$LOCK_PATH" "$la_token" "$la_pid" lock-owner acquire
+                  if [ "$LRC_RESULT" != reread-unknown ]; then
+                    la_broken=$la_token
+                    continue
+                  fi;;
                 unknown:*)
                   lock_note_mismatch "$LOCK_PATH" "$la_state"
                   la_u=${la_state#unknown:}
@@ -2146,9 +2227,14 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
     fi
     if [ "$(lock_now_ms)" -ge "$la_deadline" ]; then
       lock_retire_own_ticket
-      if [ -n "$LOCK_UNKNOWN" ]; then
-        echo "verify-run: machine-lock-unknown $LOCK_UNKNOWN (not taken: unknown is never read as free)" >&2
-      fi
+      # A re-read's unknown named in a poll of this acquisition (#4559, lock_reread_unknown) is not named
+      # a second time.
+      case "$LOCK_REREAD_NAMED" in
+        *"|$LOCK_UNKNOWN|"*) ;;
+        *) if [ -n "$LOCK_UNKNOWN" ]; then
+          echo "verify-run: machine-lock-unknown $LOCK_UNKNOWN (not taken: unknown is never read as free)" >&2
+        fi;;
+      esac
       LOCK_WAITED=$(( $(date +%s) - la_start ))
       return 1
     fi
@@ -2350,9 +2436,10 @@ lock_wait_head() { # <queue-dir> <budget-seconds>
         for lwh_entry in $lwh_names; do
           [ "$lwh_entry" \< "$lwh_mine" ] || break
           [ "$(lock_json_field "$lwh_queue/$lwh_entry" done)" = "true" ] && continue
-          if lwh_why=$(lock_ticket_retirable "$lwh_queue/$lwh_entry" "$lwh_now"); then
-            if lock_mark_done "$lwh_queue/$lwh_entry" "$(lock_json_field "$lwh_queue/$lwh_entry" token)"; then
-              echo "verify-run: machine-lock-ticket-retired $lwh_queue/$lwh_entry ($lwh_why)" >&2
+          # #4560: judged and retired from the same read (LTR_TOKEN), not a token read again.
+          if lock_ticket_retirable "$lwh_queue/$lwh_entry" "$lwh_now" >/dev/null; then
+            if lock_mark_done "$lwh_queue/$lwh_entry" "$LTR_TOKEN"; then
+              echo "verify-run: machine-lock-ticket-retired $lwh_queue/$lwh_entry ($LTR_WHY)" >&2
             fi
             continue
           fi
@@ -2458,7 +2545,7 @@ lock_release_as_head() { # <lock-path> <queue-dir> <budget-seconds> <token>…
             # Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name and the token
             # checked — a successor that took the lock while this stopped past its ticket is put back.
             lock_test_pause release-head-judged
-            lock_recover "$lrah_lock" "$LOB_TOKEN" "$LOB_PID"
+            lock_recover_judged "$lrah_lock" "$LOB_TOKEN" "$LOB_PID" release-owner
             if [ "$LRC_RESULT" = recovered ]; then LRAH_RESULT=released; else LRAH_RESULT=kept; fi;;
           *)
             LRAH_RESULT=deferred
@@ -2524,7 +2611,7 @@ lock_recover_only() { # <lock-path> <queue-dir> <budget-seconds>
       case "$lro_state" in
         gone)
           lock_test_pause recover-only-judged
-          lock_recover "$1" "$LOB_TOKEN" "$LOB_PID"
+          lock_recover_judged "$1" "$LOB_TOKEN" "$LOB_PID" lock-owner
           case "$LRC_RESULT" in
             recovered) LRO_RESULT=removed;;
             restore-failed) LRO_RESULT=restore-failed;;
