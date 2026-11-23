@@ -129,9 +129,10 @@ function runCli(
   env: Env,
   args: string[] = ['--base', 'HEAD'],
   onStart: (pid: number) => void = () => undefined,
+  detached = false,
 ): Promise<CliResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [SCRIPT, ...args], { cwd: root, env: env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [SCRIPT, ...args], { cwd: root, env: env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], detached });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => (stdout += d));
@@ -738,6 +739,103 @@ describe('the gate script as a child process (stdout piped)', () => {
  * The related set from vitest's Node API is the set the CLI picks: a small git
  * project, one committed src change (changed form) and one traced file (related form).
  */
+/**
+ * Stopped the way the gate stops it (src/lib/verification/gate-runner.ts): the
+ * script is the leader of its own process group, and the gate signals the GROUP
+ * — SIGTERM, then SIGKILL after 5 s (SIGKILL_GRACE_MS). Nothing of the groups'
+ * vitest may outlive that: the group signal must reach every vitest and worker.
+ */
+describe('the gate script stopped through its process group, as the gate does', () => {
+  let root: string;
+  let privateTmp: string;
+  let marks: string;
+  let seen: Array<{ tmpdir: string; pid: number; ppid: number }> = [];
+  beforeEach(() => {
+    privateTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4577-grp-tmp-'));
+    marks = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4577-grp-marks-'));
+    seen = [];
+    const files: Record<string, string> = {};
+    for (const n of ['a', 'b', 'c', 'd']) {
+      files[`tests/unit/${n}.test.ts`] =
+        "import { it } from 'vitest';\nimport fs from 'fs';\n" + SCAN_MARK +
+        `it('waits ${n}', async () => {\n` +
+        `  fs.writeFileSync(process.env.MARK_DIR + '/${n}.json', JSON.stringify({ tmpdir: process.env.TMPDIR, pid: process.pid, ppid: process.ppid }));\n` +
+        '  await new Promise((r) => setTimeout(r, 120_000));\n}, 200_000);\n';
+    }
+    root = makeProbe('cm-4577-grp-', files);
+    commitAll(root, 'probe');
+    fs.writeFileSync(path.join(root, 'README.md'), 'changed\n');
+  });
+  afterEach(() => {
+    // Whatever a red run leaves behind is this test's own: stop it, remove it.
+    for (const m of seen) {
+      for (const target of [-m.ppid, m.ppid, m.pid]) {
+        try {
+          process.kill(target, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+      fs.rmSync(m.tmpdir, { recursive: true, force: true });
+    }
+    removeTempDir(root);
+    removeTempDir(privateTmp);
+    removeTempDir(marks);
+  });
+
+  /** Processes whose command line names the probe project (each group's vitest). */
+  function probeProcesses(): number {
+    const out = execFileSync('ps', ['-axo', 'command'], { encoding: 'utf-8', timeout: 30_000 });
+    const real = fs.realpathSync(root);
+    return out.split('\n').filter((l) => l.includes(real) || l.includes(root)).length;
+  }
+
+  async function startAndWait(): Promise<{ pid: number; done: Promise<CliResult> }> {
+    let pid = 0;
+    const done = runCli(root, { ...childEnv(), CI: 'true', TMPDIR: privateTmp, MARK_DIR: marks }, ['--base', 'HEAD'], (p) => (pid = p), true);
+    expect(await waitFor(() => fs.readdirSync(marks).length === 4, 90_000)).toBe(true);
+    seen = fs.readdirSync(marks).map((f) => JSON.parse(fs.readFileSync(path.join(marks, f), 'utf-8')) as { tmpdir: string; pid: number; ppid: number });
+    expect(probeProcesses()).toBe(4);
+    return { pid, done };
+  }
+
+  const gone = () => seen.every((m) => !alive(m.pid) && !alive(m.ppid)) && probeProcesses() === 0;
+
+  it(
+    'group SIGTERM, then group SIGKILL after 5 s: no vitest, no worker, no TMPDIR is left',
+    async () => {
+      const { pid, done } = await startAndWait();
+      process.kill(-pid, 'SIGTERM');
+      await new Promise((r) => setTimeout(r, 5_000));
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        // the whole group already ended
+      }
+      await done;
+      expect(await waitFor(gone, 10_000)).toBe(true);
+      for (const m of seen) expect(fs.existsSync(m.tmpdir)).toBe(false);
+      expect(fs.readdirSync(privateTmp)).toEqual([]);
+    },
+    REAL_VITEST_TIMEOUT_MS,
+  );
+
+  it(
+    'group SIGKILL with no SIGTERM first: no vitest, no worker is left (the TMPDIRs cannot be removed)',
+    async () => {
+      const { pid, done } = await startAndWait();
+      process.kill(-pid, 'SIGKILL');
+      const r = await done;
+      expect(r.signal).toBe('SIGKILL');
+      expect(await waitFor(gone, 10_000)).toBe(true);
+      // SIGKILL runs no handler: the 4 group TMPDIRs and the work dir stay (removed by afterEach).
+      expect(seen.filter((m) => fs.existsSync(m.tmpdir))).toHaveLength(4);
+      expect(fs.readdirSync(privateTmp).filter((d) => d.startsWith('cm-related-shards-'))).toHaveLength(1);
+    },
+    REAL_VITEST_TIMEOUT_MS,
+  );
+});
+
 describe('collectRelatedSet with the real vitest picks what the CLI picks', () => {
   let root: string;
   afterEach(() => {
