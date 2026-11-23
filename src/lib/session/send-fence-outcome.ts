@@ -16,9 +16,11 @@
  * pane — neither `bodyStarted` nor `dispatchUnknown` on the request's own
  * ticket; otherwise `indeterminate`. Never "not sent" for what is not known.
  *
- * Internal only (step 1): the outcome rides on the entries' own results and
- * is reported to {@link setSendFenceOutcomeObserver}; no route, CLI or
- * `lastSend` field carries it, and no public value changes here.
+ * The outcome rides on the entries' own results and is reported to
+ * {@link setSendFenceOutcomeObserver}. Step 2 (the human's answer C1–C8): the
+ * routes answer a refusal of kind `target-changed` with 409
+ * `SEND_TARGET_CHANGED` ({@link sendTargetChangedBody}), and the attempt's
+ * reason follows {@link fenceAttemptReason}.
  *
  * Classifying never swallows: it returns data and leaves the error as it is.
  *
@@ -31,6 +33,7 @@ import {
   currentSendRequestId,
   FenceMisuseError,
   readOwnSendTicket,
+  SEND_TARGET_CHANGED_CODE,
   SendTargetChangedError,
   type OwnSendTicket,
 } from '@/lib/session/terminal-fence';
@@ -125,6 +128,80 @@ export function classifySendFenceOutcome(error: unknown, own: OwnSendTicket | nu
   const boundary = genericBoundaryRefusal(error);
   if (boundary !== null) return { kind: 'reservation-lost', state, order: 3, refusal: boundary };
   return null;
+}
+
+/**
+ * The attempt's reason for a classified refusal (v2 §3.4): one reason per
+ * attempt, in the order target changed > reservation lost > misuse.
+ */
+export function fenceAttemptReason(kind: SendFenceOutcomeKind): 'target-changed' | 'relay-reservation-lost' | 'fence-misuse' {
+  if (kind === 'target-changed') return 'target-changed';
+  if (kind === 'reservation-lost') return 'relay-reservation-lost';
+  return 'fence-misuse';
+}
+
+/** What the answer says about resending: `not_sent` only with the proof (the state). */
+export function fenceSendOutcome(outcome: SendFenceOutcome): 'not_sent' | 'unknown' {
+  return outcome.state === 'not-sent' ? 'not_sent' : 'unknown';
+}
+
+/**
+ * The 409's sentence (Q2): `unreadable` says the target could not be confirmed
+ * (never that it changed); none says nothing was typed (a launch, a clear or
+ * `/model` may have gone before the refusal). `unknown` says to look first.
+ */
+export function describeSendTargetChanged(reason: string, sendOutcome: 'not_sent' | 'unknown'): string {
+  const head = reason === 'unreadable'
+    ? `Send stopped: the target could not be confirmed while the message was being sent (${reason}).`
+    : `Send stopped: the target changed while the message was being sent (${reason}).`;
+  const tail = sendOutcome === 'not_sent'
+    ? ' The message was not delivered; read the roster again, then send it again.'
+    : ' The message may already have reached the session; look at the pane before sending it again.';
+  return head + tail;
+}
+
+/** Where the send was going (the entry's resolved triple). */
+export interface SendTargetTriple {
+  worktreeId: string;
+  instanceId: string;
+  cliToolId: string;
+}
+
+/** What the target resolves to now, when that can be said. */
+export interface CurrentSendTarget {
+  cliToolId: string;
+  resolvedBy: string;
+}
+
+/**
+ * The body of the 409 `SEND_TARGET_CHANGED` (C1・C2) for a classified refusal of
+ * kind `target-changed`.
+ */
+export function sendTargetChangedBody(
+  outcome: SendFenceOutcome,
+  target: SendTargetTriple,
+  current: CurrentSendTarget | null
+): {
+  error: string;
+  code: typeof SEND_TARGET_CHANGED_CODE;
+  reason: string;
+  target: SendTargetTriple;
+  current: CurrentSendTarget | null;
+  requestId: string | null;
+  sendOutcome: 'not_sent' | 'unknown';
+} {
+  const refusal = outcome.refusal as { reason?: unknown; requestId?: unknown } | null;
+  const reason = typeof refusal?.reason === 'string' ? refusal.reason : 'unreadable';
+  const sendOutcome = fenceSendOutcome(outcome);
+  return {
+    error: describeSendTargetChanged(reason, sendOutcome),
+    code: SEND_TARGET_CHANGED_CODE,
+    reason,
+    target,
+    current,
+    requestId: typeof refusal?.requestId === 'string' ? refusal.requestId : null,
+    sendOutcome,
+  };
 }
 
 /** {@link classifySendFenceOutcome} with this context's open ticket (inside the entry's `run`). */

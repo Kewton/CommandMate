@@ -32,8 +32,11 @@ import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
 import {
   classifyOwnSendFenceOutcome,
   reportSendFenceOutcome,
+  sendTargetChangedBody,
+  type CurrentSendTarget,
   type SendFenceOutcome,
 } from '@/lib/session/send-fence-outcome';
+import { resolveSessionTarget } from '@/lib/session/resolve-session-target';
 import { CLAUDE_MODEL_EXAMPLES, MODEL_REFUSED_CODE, type SendStep } from './send-request';
 
 const logger = createLogger('api/send');
@@ -145,21 +148,66 @@ export async function startSessionForSend(input: StartSessionForSendInput): Prom
   return { ok: true, value: undefined };
 }
 
+/** Where a send refused by its fence was going: the route's resolved triple, and what resolves now. */
+export interface SendTargetChangedInput {
+  db?: Database.Database;
+  worktreeId: string;
+  instanceId: string | undefined;
+  cliToolId: CLIToolType;
+}
+
+/**
+ * What the instance resolves to now (C1 `current`): null when the worktree or
+ * the roster row is gone, when the check could not read, or when this read
+ * fails too.
+ */
+export function currentSendTarget(input: SendTargetChangedInput, reason: string): CurrentSendTarget | null {
+  if (input.db === undefined || reason === 'worktree-gone' || reason === 'target-gone' || reason === 'unreadable') return null;
+  try {
+    const now = resolveSessionTarget(input.db, input.worktreeId, { instanceId: input.instanceId ?? input.cliToolId });
+    return { cliToolId: now.cliToolId, resolvedBy: now.resolvedBy };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Issue #4534 (C1・C2): the 409 `SEND_TARGET_CHANGED` for a refusal of the
+ * request's own fence (kind `target-changed`). `sendOutcome` is the fence's
+ * proof: `not_sent` only when nothing of the body nor a dispatch had started.
+ */
+export function answerSendTargetChanged(fence: SendFenceOutcome, input: SendTargetChangedInput): NextResponse {
+  const reason = (fence.refusal as { reason?: unknown } | null)?.reason;
+  const body = sendTargetChangedBody(
+    fence,
+    { worktreeId: input.worktreeId, instanceId: input.instanceId ?? input.cliToolId, cliToolId: input.cliToolId },
+    currentSendTarget(input, typeof reason === 'string' ? reason : 'unreadable')
+  );
+  logger.info('send-target-changed', { worktreeId: input.worktreeId, reason: body.reason, requestId: body.requestId, sendOutcome: body.sendOutcome });
+  return NextResponse.json(body, { status: 409 });
+}
+
 /**
  * The answer for a session start that threw (Issue #4055: the start's `catch`).
  * A timeout's answer is returned unawaited, as the handler returned it.
  */
 export function answerSessionStartFailure(
   error: unknown,
-  input: Pick<StartSessionForSendInput, 'cliTool' | 'worktreeId' | 'instanceId' | 'recordNotSent'>,
+  input: Pick<StartSessionForSendInput, 'cliTool' | 'worktreeId' | 'instanceId' | 'recordNotSent'> &
+    Partial<Pick<StartSessionForSendInput, 'db' | 'cliToolId'>>,
   fence: SendFenceOutcome | null = classifyOwnSendFenceOutcome(error),
 ): NextResponse | Promise<NextResponse> {
   const { cliTool, worktreeId: id, instanceId, recordNotSent } = input;
   // Issue #4534 (PR-B, design v2 §3.2): the fence's refusal is classified first
-  // (orders 1–3). Step 1 keeps every answer below as it is (the public values
-  // wait for step 2). The route opens the ticket right before the start, so no
-  // body or dispatch can have started under it: a refusal here is `not-sent`.
+  // (orders 1–3), before the role's and the start's own answers. The route
+  // opens the ticket right before the start, so no body or dispatch can have
+  // started under it: a refusal here is recorded `not-sent`. The target changed:
+  // 409 SEND_TARGET_CHANGED (C1). A misuse: today's answer, reason `fence-misuse` (C8).
   reportSendFenceOutcome('start', fence);
+  if (fence?.kind === 'target-changed') {
+    recordNotSent('target-changed');
+    return answerSendTargetChanged(fence, { db: input.db, worktreeId: id, instanceId, cliToolId: input.cliToolId ?? cliTool.id });
+  }
   // Review P3-2: this start asked for a model, and joined a launch of the
   // session that is starting with another. Nothing was typed; answered as
   // a `--model` to a running session is (#989 / #2771).
@@ -181,7 +229,11 @@ export function answerSessionStartFailure(
     );
   }
   logger.error('failed-to-start-session:', { error: error instanceof Error ? error.message : String(error) });
-  recordNotSent(isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed');
+  recordNotSent(
+    fence?.kind === 'fence-misuse'
+      ? 'fence-misuse'
+      : isSessionStartTimeoutError(error) ? 'session-starting' : 'session-start-failed'
+  );
   // Issue #1637: a session that is still initializing is not a server
   // fault. The tmux session and the CLI process exist and are coming up,
   // so the honest answer is "temporarily unavailable, retry" — 503 with a

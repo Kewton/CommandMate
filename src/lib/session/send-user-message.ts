@@ -48,6 +48,7 @@
 import type Database from 'better-sqlite3';
 import {
   classifyOwnSendFenceOutcome,
+  fenceAttemptReason,
   reportSendFenceOutcome,
   type SendFenceOutcome,
 } from '@/lib/session/send-fence-outcome';
@@ -287,33 +288,25 @@ function getErrorMessage(error: unknown): string {
 type SendFailure = { state: SendAttemptState; reason: SendAttemptReason };
 
 /**
- * Issue #4534 (PR-B step 1): a failure the entry classified today, with the
- * fence's state over it — `indeterminate` when the fence says the body or a
- * dispatch may have gone; today's state otherwise. Never turns an unknown into
- * "not sent"; the reason is today's (the public values wait for step 2).
+ * Issue #4534 (PR-B, design v2 §3.2・§3.4): the attempt of a classified refusal
+ * (orders 1–3). One reason per attempt — `target-changed` > `relay-reservation-lost`
+ * (#3992) > `fence-misuse` — and the fence's state: `not-sent` only with the
+ * proof (the request's own refusal, neither the body nor a dispatch started).
+ * A misuse proves nothing about the pane, so its state is the one the entry
+ * read without the fence (`todayState`), made `indeterminate` when the fence
+ * says the body or a dispatch may have gone. Null for order 4.
  */
-function withFenceState(today: SendFailure, fence: SendFenceOutcome | null): SendFailure {
-  return fence !== null && fence.state === 'indeterminate' ? { state: 'indeterminate', reason: today.reason } : today;
-}
-
-/**
- * The body's (or dispatch's) failure for a classified refusal (orders 1–3), as
- * today's reasons: the fence's own is `send-error`, a lost reservation
- * `relay-reservation-lost` (#3992), a misuse today's classification. Null for
- * order 4.
- */
-function fenceDeliveryFailure(error: unknown, fence: SendFenceOutcome | null): SendFailure | null {
+function fenceFailure(fence: SendFenceOutcome | null, todayState: () => SendAttemptState): SendFailure | null {
   if (fence === null) return null;
-  if (fence.kind === 'target-changed') return { state: fence.state, reason: 'send-error' };
-  if (fence.kind === 'reservation-lost') return { state: fence.state, reason: 'relay-reservation-lost' };
-  return withFenceState(classifySendFailure(error), fence);
+  if (fence.kind !== 'fence-misuse') return { state: fence.state, reason: fenceAttemptReason(fence.kind) };
+  return { state: fence.state === 'indeterminate' ? 'indeterminate' : todayState(), reason: 'fence-misuse' };
 }
 
-/** What escaped the delivery (the lock, the brief's claim): today's classification, the fence's state over it. */
+/** What escaped the delivery (the lock, the brief's claim): a classified refusal, else today's classification. */
 function lockedDeliveryFailure(error: unknown): { error: unknown; failure: SendFailure; fence?: SendFenceOutcome } {
   const fence = classifyOwnSendFenceOutcome(error);
   reportSendFenceOutcome('deliver', fence);
-  const failure = withFenceState(classifySendFailure(error), fence);
+  const failure = fenceFailure(fence, () => classifySendFailure(error).state) ?? classifySendFailure(error);
   return fence !== null ? { error, failure, fence } : { error, failure };
 }
 
@@ -577,21 +570,25 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
       logger.info('copilot-model-command-sent', { model: copilotModel });
     } catch (error) {
       logger.error('failed-to-send-model-command:', { error: getErrorMessage(error) });
-      // Issue #4534 (PR-B, order 1–3): the fence's refusal, classified first. The
-      // answer and the reason stay today's (step 2); its state is the fence's.
+      // Issue #4534 (PR-B, orders 1–3): the fence's refusal, classified first —
+      // before the re-check's codes. The route answers `target-changed` with its
+      // 409 (`fence` on the result); the attempt carries the fence's reason.
       const fence = classifyOwnSendFenceOutcome(error);
       reportSendFenceOutcome('model', fence);
-      const fenced = fence !== null ? { fence } : {};
+      const fenced = fenceFailure(fence, () => 'not-sent');
+      if (fence !== null && fenced !== null) {
+        settle(fenced.state, fenced.reason);
+        return { ok: false, stage: 'model', error: getErrorMessage(error), fence };
+      }
       // Issue #3952: the re-check right before `/model` refused it. Read by
       // code, not wording: the switch's other errors quote the pane's bottom row.
       const code = (error as { code?: unknown } | null)?.code;
       if (code === INPUT_RECHECK_PROMPT_WAITING_CODE) {
-        settle(withFenceState({ state: 'not-sent', reason: 'prompt-waiting' }, fence).state, 'prompt-waiting');
-        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent), ...fenced };
+        settle('not-sent', 'prompt-waiting');
+        return { ok: false, stage: 'prompt_waiting', error: promptWaitingMessage(worktreeId, undefined, instanceId, respondAgent) };
       }
-      const reason: SendAttemptReason = code === INPUT_RECHECK_FAILED_CODE ? 'recheck-failed' : 'model-switch-failed';
-      settle(fence?.state ?? 'not-sent', reason);
-      return { ok: false, stage: 'model', error: getErrorMessage(error), ...fenced };
+      settle('not-sent', code === INPUT_RECHECK_FAILED_CODE ? 'recheck-failed' : 'model-switch-failed');
+      return { ok: false, stage: 'model', error: getErrorMessage(error) };
     }
 
     // Issue #2630: copilot is idle now, and if the previous turn ended during the
@@ -730,7 +727,7 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
       // neither the body nor a dispatch had started.
       const fence = classifyOwnSendFenceOutcome(error);
       reportSendFenceOutcome('deliver', fence);
-      const fenced = fenceDeliveryFailure(error, fence);
+      const fenced = fenceFailure(fence, () => classifySendFailure(error).state);
       if (fence !== null && fenced !== null) return { error, failure: fenced, fence };
       // Issue #4115: the role this send was conditional on, or the role a driver's
       // relaunch resolved, refused it before the first key.

@@ -49,6 +49,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runWithSendTicket, type SendTicketHandle } from '@/lib/session/terminal-fence';
 import { classifySendFenceOutcome, reportSendFenceOutcome } from '@/lib/session/send-fence-outcome';
+import { answerSendTargetChanged } from '../send/send-session-start';
 import { routeSendTicketInit } from '@/lib/session/send-target-names';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
@@ -263,9 +264,13 @@ export async function POST(
       );
     } catch (error) {
       // Issue #4534 (PR-B, design v2 §3.2): the fence's refusal, classified first
-      // by this request's own ticket. The answers below are today's (step 2
-      // decides the public ones).
-      reportSendFenceOutcome('terminal', classifySendFenceOutcome(error, ticket));
+      // by this request's own ticket. The target changed: the send route's 409
+      // SEND_TARGET_CHANGED (C2). Anything else is answered as before.
+      const fence = classifySendFenceOutcome(error, ticket);
+      reportSendFenceOutcome('terminal', fence);
+      if (fence?.kind === 'target-changed') {
+        return answerSendTargetChanged(fence, { db, worktreeId: id, instanceId, cliToolId: target.cliToolId });
+      }
       if (classifySendFailure(error).reason === 'prompt-waiting') {
         logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });
         return NextResponse.json(

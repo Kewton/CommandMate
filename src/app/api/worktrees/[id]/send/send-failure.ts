@@ -20,7 +20,9 @@ import {
   ROLE_CONDITION_UNMET_CODE,
   ROLE_LAUNCH_REFUSED_CODE,
 } from '@/lib/agent-roles/launch-errors';
-import { answerSessionStartTimeout } from './send-session-start';
+import type Database from 'better-sqlite3';
+import type { SendFenceOutcome } from '@/lib/session/send-fence-outcome';
+import { answerSendTargetChanged, answerSessionStartTimeout } from './send-session-start';
 
 /** How the error of a failed send starts, whoever wrote it. */
 const SEND_FAILURE_PREFIX = 'Failed to send message to ';
@@ -35,11 +37,17 @@ export interface FailedSendResult {
   stage: string;
   error: string;
   code?: string;
+  /** Issue #4534: the classified refusal of the send's fence, when there was one. */
+  fence?: SendFenceOutcome;
 }
 
 /** What {@link answerSendFailure} answers from (Issue #4055). */
 export interface SendFailureInput {
   cliTool: ICLITool;
+  /** Issue #4534: read for the 409's `current` (what the instance resolves to now). */
+  db?: Database.Database;
+  /** The tool the route resolved (the 409's `target`); `cliTool.id` when omitted. */
+  cliToolId?: CLIToolType;
   worktreeId: string;
   instanceId: string | undefined;
   /** `body.model`, named in a failed model switch's message. */
@@ -67,6 +75,12 @@ export function answerSendFailure(
   input: SendFailureInput,
 ): NextResponse | Promise<NextResponse> {
   const { cliTool, worktreeId: id, instanceId, sendAttemptInstance, ownAttempt, sendStartedAt, trimmedContent } = input;
+  // Issue #4534 (C1): this request's own fence refused (the launch has its own
+  // answer in send-session-start): 409 SEND_TARGET_CHANGED, before every other
+  // reading of the failure (design v2 §3.2: orders 1–2 come first).
+  if (result.fence?.kind === 'target-changed') {
+    return answerSendTargetChanged(result.fence, { db: input.db, worktreeId: id, instanceId, cliToolId: input.cliToolId ?? cliTool.id });
+  }
   // Issue #2865: checked in route.ts (handleSend) as well; this is the send service's own
   // refusal (the session changed hands in between, or the row vanished).
   if (result.stage === 'foreign_session') {

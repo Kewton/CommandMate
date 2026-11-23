@@ -293,3 +293,17 @@ fenceConfirm(): void                 // R9。確かめるだけ
 - **直したもの**: `claude-auto-default-nudge.ts` の `sendNudgeKey`（握りつぶし。起動の経路で 60 秒待った後に 503 `SESSION_STARTING` と `session-starting` の記録になり、送信前の経路では理由が消えていた）と `session-key-sender.ts` の `stopSession`（潜在。今の呼び手は札の無い kill の route と取り下げの包みの中だけ）。PR-A の答えは、起動の段の 500 `Failed to start … session: send target changed: <理由>`（code は付かない。§6 の「500 `SESSION_START_FAILED`」は、起動の段の汎用の 500 で code を持たないのが実際）
 - **直さないもの**（除く表に理由。P3）: `opencode-v2.ts` の lazy resume（門が無い）、`tmux.ts` の `new-window` の catch が束の誤用を飲む作り、`send-user-message.ts` の `.catch(classifySendFailure)` が順 1 を読まない形、`prompt-answer-sender.ts` の `withKeysSent` が札の 1 つの refusal に `keysSent` を書き足す形、相乗りの launch の失敗の受け取り
 
+
+## 9. PR-B の公開の契約（人の答え 11-23「全部推奨で」）
+
+PR-B は 2 段に分けた。段 1 は内部の分類（`src/lib/session/send-fence-outcome.ts` の `classifySendFenceOutcome`。v2 §3.2 の順 1〜4 を 1 つの関数にし、全入口がそれを通る）で、公開の値を変えない。段 2 が人の答え（開発リーダーの案の C1〜C8 と Q2・Q3 の (a)）の公開の値を載せる。v2 §3.3 からの変更は次の 2 つ（v2 は記録として残し、書き換えない）。
+
+| # | v2 §3.3 | 段 2（人の答え） |
+|---|---|---|
+| Q3 | exit 34 を `not_sent` と `unknown` の両方に出し、区別は `sendOutcome` だけ | **exit 34 は 409 `SEND_TARGET_CHANGED` で `sendOutcome: not_sent` のときだけ**。`unknown`・欠け・不正な値は今どおり 99（証明が無い。exit だけで送り直すループが二重に送らない） |
+| Q2 | `unreadable` の扱いは未決 | 同じ 409・`reason: "unreadable"`。文は「宛先を確かめられなかったので止めた」で、変わったとは言わない。ほかの reason は「送信の途中で宛先が変わったので止めた」。どの文も「何も入力していない」とは言わない（起動・消去・`/model` の後の拒否がある）。`unknown` は「届いたかもしれない。先に pane を見る」 |
+
+- 文（`describeSendTargetChanged`）: `Send stopped: the target changed while the message was being sent (<reason>).`（`unreadable` は `the target could not be confirmed`）に、`not_sent` なら ` The message was not delivered; read the roster again, then send it again.`、`unknown` なら ` The message may already have reached the session; look at the pane before sending it again.`
+- `current` は今の名簿での解決（`tool-changed`・`dispatch-changed`）。`worktree-gone`・`target-gone`・`unreadable` と読めないときは `null`
+- 試行の reason は 1 つ: `target-changed` > `relay-reservation-lost` > `fence-misuse` > 今の reason（v2 §3.4）。`fence-misuse` の state は柵が証明しないので、柵が `indeterminate` と言うときだけ `indeterminate` にし、ほかは今の state
+- 変異（段 2）: 分類の順 1 を外しても、PR-A の INV-catch でドライバが拒否を型のまま投げ直すので順 2 が拾い、T17 の 23 本は緑のままだった。順 1 だけが拾う形（ツールの包みが文だけを写す。`copilot.ts:1084` の形）を T17 に足し、順 1 を外すとその行が赤になることを確かめた。順 1・2 の両方を外すと T17 の 23 本が赤

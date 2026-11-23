@@ -3,7 +3,7 @@
  * api-client.ts re-exports every exported name here; import from there.
  */
 
-import { ExitCode, RoleExitCode } from '../types';
+import { ExitCode, RoleExitCode, SendTargetExitCode } from '../types';
 
 /**
  * Error result from API operations
@@ -94,6 +94,25 @@ export function foreignSessionMessage(payload?: ApiErrorPayload): string {
 export const ROSTER_CHANGED_ERROR_CODE = 'ROSTER_CHANGED';
 
 /**
+ * The `code` of the send route's 409 for a send its fence stopped (Issue #4534).
+ * Spelled out for the reason {@link FOREIGN_SESSION_ERROR_CODE} is: the server's
+ * constant lives beside the fence (`src/lib/session/terminal-fence.ts`).
+ */
+export const SEND_TARGET_CHANGED_ERROR_CODE = 'SEND_TARGET_CHANGED';
+
+/**
+ * Issue #4534 (Q3 (a)): exit 34 only when the server says nothing was delivered
+ * (`sendOutcome: not_sent`). `unknown`, a missing or an unknown value is no
+ * proof, and stays the unexpected error it is today.
+ */
+function sendTargetChangedResult(payload: ApiErrorPayload): ApiErrorResult {
+  return {
+    message: serverErrorDetail(payload) ?? 'The send was stopped because its target changed or could not be confirmed.',
+    exitCode: payload.sendOutcome === 'not_sent' ? SendTargetExitCode.CHANGED : ExitCode.UNEXPECTED_ERROR,
+  };
+}
+
+/**
  * Classify API errors into user-friendly messages and exit codes.
  * [IA3-09] Covers: ECONNREFUSED, 400, 401/403, 404, 429, 500, timeout
  *
@@ -161,6 +180,8 @@ export function handleApiError(
             exitCode: ExitCode.UNEXPECTED_ERROR,
           };
         }
+        // Issue #4534: the send's fence stopped it (exit 34 only for not_sent).
+        if (payload?.code === SEND_TARGET_CHANGED_ERROR_CODE) return sendTargetChangedResult(payload);
         // Issue #4149: exit 31, what the `instances` help gives for `roster_changed`.
         if (payload?.code === ROSTER_CHANGED_ERROR_CODE) {
           return {
@@ -255,6 +276,15 @@ export interface ApiErrorPayload {
    * src/lib/relay/relay-bind.ts RelaySendOutcome (and ChatMessage.sendOutcome).
    */
   sendOutcome?: 'sent' | 'not_sent' | 'unknown';
+  /**
+   * Issue #4534: sent with the 409 `SEND_TARGET_CHANGED` — why the fence stopped
+   * the send (`worktree-gone` / `target-gone` / `tool-changed` / `dispatch-changed`
+   * / `unreadable`), the request it was, where it was going and what resolves now.
+   */
+  reason?: string;
+  requestId?: string | null;
+  target?: { worktreeId: string; instanceId: string; cliToolId: string };
+  current?: { cliToolId: string; resolvedBy: string } | null;
   /**
    * Issue #4116: the role routes answer `{ success: false, error: <code>, message }`,
    * so there `error` is the stable code and `message` the sentence.

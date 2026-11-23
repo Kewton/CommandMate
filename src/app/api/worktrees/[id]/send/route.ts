@@ -573,6 +573,8 @@ async function handleSend(
       }
       return answerSendFailure(result, {
         cliTool,
+        db,
+        cliToolId,
         worktreeId: id,
         instanceId,
         model: body.model,
