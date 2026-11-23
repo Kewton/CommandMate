@@ -888,3 +888,231 @@ describe('collectRelatedSet with the real vitest picks what the CLI picks', () =
     REAL_VITEST_TIMEOUT_MS,
   );
 });
+
+/**
+ * #4577 段 2: a new worktree's first run has an empty vitest cache of its own,
+ * so the split also reads the caches of the OTHER worktrees of the repository
+ * (`git worktree list --porcelain`), read-only. Order per file: own cache ->
+ * other worktrees (newest results.json first) -> median weight -> equal weight.
+ *
+ * Invariants (PM 11-24):
+ *   P1 a broken / unreadable / missing peer cache or a failing `git worktree
+ *      list` falls back to today's weights, never throws, never passes a failure
+ *   P2 the summary names where the durations came from and how many
+ *   P3 the records shape only the split: the set and the exit stay the same
+ *   P4 read only: the peers' results.json keep their bytes and mtime
+ */
+describe('mainSharded: durations from the other worktrees (#4577 段 2, P1-P4)', () => {
+  let parent: string;
+  let main: string;
+  let wtA: string;
+  let wtB: string;
+  const FILES = Array.from({ length: 7 }, (_, i) => `tests/unit/f${i + 1}.test.ts`);
+  const PEER = Object.fromEntries(FILES.map((f, i) => [f, i === 6 ? 50_000 : (i + 1) * 1000]));
+
+  function addWorktree(name: string): string {
+    const p = path.join(parent, name);
+    git(main, 'worktree', 'add', '-q', '-b', `b-${name}`, p);
+    return p;
+  }
+
+  function resultsPath(root: string): string {
+    return path.join(root, 'node_modules', '.vite', 'vitest', 'da39a3ee5e6b4b0d3255bfef95601890afd80709', 'results.json');
+  }
+
+  function setMtime(root: string, sec: number): void {
+    fs.utimesSync(resultsPath(root), sec, sec);
+  }
+
+  /** Every file under `dir` with its bytes and mtime: what "read only" must keep. */
+  function snapshot(dir: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    const walk = (d: string) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else out[path.relative(dir, p)] = `${fs.readFileSync(p, 'utf-8')}@${fs.statSync(p).mtimeMs}`;
+      }
+    };
+    walk(dir);
+    return out;
+  }
+
+  function handedGroups(h: ReturnType<typeof harness>): string[][] {
+    return h.calls.map((c) => groupFiles(c.args).slice().sort());
+  }
+
+  const durationsLine = (logs: string[]) => logs.find((l) => l.startsWith('run-related-unit-tests: durations='));
+
+  beforeEach(() => {
+    parent = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4577-peer-'));
+    main = path.join(parent, 'main');
+    fs.mkdirSync(main);
+    fs.writeFileSync(path.join(main, '.gitignore'), 'node_modules/\n');
+    fs.writeFileSync(path.join(main, 'README.md'), 'probe\n');
+    commitAll(main, 'base');
+    wtA = addWorktree('wt-a');
+    wtB = addWorktree('wt-b');
+  });
+  afterEach(() => {
+    removeTempDir(parent);
+  });
+
+  it('positive control: own cache empty, only another worktree has a record -> split by that record, peer counted', async () => {
+    writeCache(main, cacheBody(PEER));
+    const h = harness(wtB, { related: FILES });
+    expect(await h.run()).toBe(0);
+    const want = splitLpt(FILES, new Map(Object.entries(PEER)), 4).groups.map((g) => g.slice().sort());
+    expect(handedGroups(h)).toEqual(want);
+    expect(h.logs).toContain('run-related-unit-tests: split=lpt groups=4 cache=missing known=7/7 default-weight=4000ms');
+    expect(durationsLine(h.logs)).toBe('run-related-unit-tests: durations=own:0 peer:7(main:7) default:0 peers=2');
+  });
+
+  it('own record wins over another worktree for the same file', async () => {
+    writeCache(main, cacheBody(PEER));
+    // Own: f7 is light here, f1 heavy.
+    writeCache(wtB, cacheBody({ [FILES[0]]: 90_000, [FILES[6]]: 1 }));
+    const h = harness(wtB, { related: FILES });
+    expect(await h.run()).toBe(0);
+    const merged = new Map(Object.entries(PEER));
+    merged.set(FILES[0], 90_000);
+    merged.set(FILES[6], 1);
+    expect(handedGroups(h)).toEqual(splitLpt(FILES, merged, 4).groups.map((g) => g.slice().sort()));
+    expect(durationsLine(h.logs)).toBe('run-related-unit-tests: durations=own:2 peer:5(main:5) default:0 peers=2');
+  });
+
+  it('several other worktrees: the newest results.json wins per file, each counted by name', async () => {
+    writeCache(main, cacheBody({ [FILES[0]]: 1, [FILES[1]]: 2 }));
+    writeCache(wtA, cacheBody({ [FILES[0]]: 70_000, [FILES[2]]: 3 }));
+    setMtime(main, 1_000_000);
+    setMtime(wtA, 2_000_000);
+    const h = harness(wtB, { related: FILES });
+    expect(await h.run()).toBe(0);
+    const merged = new Map<string, number>([
+      [FILES[0], 70_000],
+      [FILES[2], 3],
+      [FILES[1], 2],
+    ]);
+    expect(handedGroups(h)).toEqual(splitLpt(FILES, merged, 4).groups.map((g) => g.slice().sort()));
+    expect(durationsLine(h.logs)).toBe('run-related-unit-tests: durations=own:0 peer:3(wt-a:2,main:1) default:4 peers=2');
+  });
+
+  it.each<[string, () => void]>([
+    ['not JSON', () => writeCache(main, '{"version": "4.1.2", "results": [[":tests/unit/f1.te')],
+    ['wrong shape', () => writeCache(main, JSON.stringify({ version: '4.1.2', results: 'nope' }))],
+    ['unreadable (a directory where results.json should be)', () => fs.mkdirSync(resultsPath(main), { recursive: true })],
+  ])('P1: a broken peer cache (%s) is skipped; the other peers still count; set and exit unchanged', async (_label, breakIt) => {
+    breakIt();
+    writeCache(wtA, cacheBody({ [FILES[0]]: 5000 }));
+    const h = harness(wtB, { related: FILES, outcome: (i) => ({ code: i === 1 ? 1 : 0, signal: null }) });
+    expect(await h.run()).toBe(1);
+    const handed = h.calls.flatMap((c) => groupFiles(c.args));
+    expect(handed.slice().sort()).toEqual(FILES);
+    expect(new Set(handed).size).toBe(handed.length);
+    expect(durationsLine(h.logs)).toBe('run-related-unit-tests: durations=own:0 peer:1(wt-a:1) default:6 peers=2');
+  });
+
+  it('P1: `git worktree list` failing -> today\'s weights, no throw, the set and exit unchanged', async () => {
+    writeCache(main, cacheBody(PEER));
+    const h = harness(wtB, {
+      related: FILES,
+      outcome: (i) => ({ code: i === 3 ? 1 : 0, signal: null }),
+      extra: {
+        readPeers: undefined,
+        listWorktrees: () => {
+          throw new Error('git: not a git repository');
+        },
+      },
+    });
+    expect(await h.run()).toBe(1);
+    expect(handedGroups(h)).toEqual(splitLpt(FILES, new Map(), 4).groups.map((g) => g.slice().sort()));
+    expect(h.logs).toContain('run-related-unit-tests: split=lpt groups=4 cache=missing known=0/7 default-weight=1ms');
+    expect(durationsLine(h.logs)).toBe('run-related-unit-tests: durations=own:0 peer:0 default:7 peers=unavailable');
+  });
+
+  it('P1: a root outside any git repository reads no peers and keeps today\'s split', async () => {
+    const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-4577-lone-'));
+    try {
+      const h = harness(lone, { related: FILES });
+      expect(await h.run()).toBe(0);
+      expect(handedGroups(h)).toEqual(splitLpt(FILES, new Map(), 4).groups.map((g) => g.slice().sort()));
+      expect(durationsLine(h.logs)).toBe('run-related-unit-tests: durations=own:0 peer:0 default:7 peers=unavailable');
+    } finally {
+      removeTempDir(lone);
+    }
+  });
+
+  it('P4: read only: the other worktrees\' caches keep their bytes and mtime, and nothing is added there', async () => {
+    writeCache(main, cacheBody(PEER));
+    writeCache(wtA, cacheBody({ [FILES[0]]: 5000 }));
+    setMtime(main, 1_500_000);
+    const before = [snapshot(path.join(main, 'node_modules')), snapshot(path.join(wtA, 'node_modules'))];
+    const h = harness(wtB, { related: FILES });
+    expect(await h.run()).toBe(0);
+    expect([snapshot(path.join(main, 'node_modules')), snapshot(path.join(wtA, 'node_modules'))]).toEqual(before);
+  });
+
+  it('negative control: no record anywhere -> the same split and summary as before', async () => {
+    const h = harness(wtB, { related: FILES });
+    expect(await h.run()).toBe(0);
+    expect(handedGroups(h)).toEqual(splitLpt(FILES, new Map(), 4).groups.map((g) => g.slice().sort()));
+    expect(h.logs).toContain('run-related-unit-tests: split=lpt groups=4 cache=missing known=0/7 default-weight=1ms');
+    expect(durationsLine(h.logs)).toBe('run-related-unit-tests: durations=own:0 peer:0 default:7 peers=2');
+  });
+
+  it(
+    'real vitest, 2 worktrees: the first worktree\'s cache splits the second one\'s first run; same failure, same exit (P3)',
+    async () => {
+      const PASSING = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((n) => `tests/unit/${n}.test.ts`);
+      const FAILING = 'tests/unit/fail.test.ts';
+      const files: Record<string, string> = {};
+      for (const f of PASSING) files[f] = `import { it, expect } from 'vitest';\nit('ok ${path.basename(f)}', () => { expect(1).toBe(1); });\n`;
+      files[FAILING] = "import { it, expect } from 'vitest';\nit('known failing 4577', () => { expect(1).toBe(2); });\n";
+      const first = makeProbe('cm-4577-real-wt1-', files);
+      const second = path.join(parent, 'real-wt2');
+      try {
+        commitAll(first, 'probe');
+        git(first, 'worktree', 'add', '-q', '-b', 'b-real-wt2', second);
+        fs.mkdirSync(path.join(second, 'node_modules', '.bin'), { recursive: true });
+        fs.symlinkSync(path.join(REPO, 'node_modules', 'vitest'), path.join(second, 'node_modules', 'vitest'));
+        fs.symlinkSync(path.join(REPO, 'node_modules', 'vitest', 'vitest.mjs'), path.join(second, 'node_modules', '.bin', 'vitest'));
+
+        const all = [...PASSING, FAILING];
+        const runReal = async (root: string, maxGroups: number) => {
+          const logs: string[] = [];
+          const code = await mainSharded(['--base', 'origin/develop'], {
+            root,
+            log: (m: string) => logs.push(m),
+            out: () => undefined,
+            baseEnv: childEnv(),
+            maxGroups,
+            tmpBase: path.join(root, 'g'),
+            collectChangedFiles: () => ({ mergeBase: 'mb', files: ['src/x.ts'] }),
+            findTextScanTests: () => [],
+            collectSet: async () => all,
+          });
+          return { code, logs };
+        };
+        // One group: vitest's own results.json then holds every file (4 groups
+        // writing it at once would leave only the last group's files).
+        const one = await runReal(first, 1);
+        expect(one.code).toBe(1);
+        expect(readDurationCache({ root: first }).durations.size).toBe(8);
+
+        const r = await runReal(second, 4);
+        expect(r.code).toBe(1);
+        expect(r.logs).toContain(`run-related-unit-tests: failed ${FAILING} > known failing 4577`);
+        expect(r.logs.some((l) => l.startsWith('run-related-unit-tests: split=lpt groups=4 cache=missing known=8/8 '))).toBe(true);
+        expect(durationsLine(r.logs)).toBe(`run-related-unit-tests: durations=own:0 peer:8(${path.basename(first)}:8) default:0 peers=1`);
+      } finally {
+        try {
+          git(first, 'worktree', 'remove', '--force', second);
+        } catch {
+          // the parent's afterEach removes it anyway
+        }
+        removeTempDir(first);
+      }
+    },
+    REAL_VITEST_TIMEOUT_MS,
+  );
+});
