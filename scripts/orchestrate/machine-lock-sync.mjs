@@ -1046,16 +1046,20 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
  * for it). recoverLock itself keeps its contract (it moves, then checks the token, and puts back).
  * A read that failed moves nothing and is 'reread-unknown' with its point, path and errno: the caller
  * does not take the holder as broken and judges again. A lock gone meanwhile is 'gone', as recoverLock's
- * own ENOENT is. `beforeMove` runs only when the move is tried (merge-pr's onStaleHolder).
+ * own ENOENT is; when that check itself cannot observe (the owner read or the listing of an owner-less
+ * <lock> fails), it is 'reread-unknown' too.
  *
  * @returns {{ result: 'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' | 'changed' | 'reread-unknown', unknown?: { point: string, path: string, code: string } }}
  */
-function recoverJudged(ctx, dead, beforeMove = undefined) {
+function recoverJudged(ctx, dead) {
   const current = ctx.obs.owner('lock-owner', ctx.lockPath);
   if (current.state === 'unknown') return { result: 'reread-unknown', unknown: { point: 'lock-owner', path: path.join(ctx.lockPath, 'owner'), code: current.code } };
-  if (current.state === 'missing') return { result: ownerlessEmptyLock(ctx).state === 'absent' ? 'gone' : 'changed' };
+  if (current.state === 'missing') {
+    const e = ownerlessEmptyLock(ctx);
+    if (e.state === 'unknown') return { result: 'reread-unknown', unknown: e.unknown };
+    return { result: e.state === 'absent' ? 'gone' : 'changed' };
+  }
   if (current.state !== 'record' || current.owner.token !== dead.token) return { result: 'changed' };
-  beforeMove?.();
   return { result: recoverLock(ctx.lockPath, dead, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs) };
 }
 
@@ -1171,6 +1175,8 @@ export function acquireMachineLockSync(name, options) {
   let unknown = null;
   let waiting = false;
   const broken = new Set();
+  // #4559: the tokens onStaleHolder was called for — once each, apart from `broken` (the recovery tried).
+  const staleNoted = new Set();
   const mineFile = () => path.join(queueDir, ticketName(mine));
   const retire = () => {
     if (mine !== null) markDone(mineFile(), token, warn);
@@ -1188,7 +1194,8 @@ export function acquireMachineLockSync(name, options) {
   };
   const gaveUp = () => {
     if (!unknown) return {};
-    warn(`machine-lock-unknown point=${unknown.point} path=${unknown.path} errno=${unknown.code}`);
+    // Through warnOnce: a re-read's unknown named in its poll (#4559) is not named a second time.
+    warnOnce(`machine-lock-unknown point=${unknown.point} path=${unknown.path} errno=${unknown.code}`);
     return { unknown };
   };
   // An empty owner taken out goes on to the mkdir in the same poll — a few times at most.
@@ -1387,7 +1394,13 @@ export function acquireMachineLockSync(name, options) {
               const state = holderState(holder, ctx);
               if (state.state === 'gone') {
                 // Persist what the dead holder was doing before its lock is gone (merge-pr: an unconfirmed write).
-                const j = recoverJudged(ctx, holder, () => options.onStaleHolder?.(holder));
+                // Before the re-read, as on develop and 95d507189; once per token (`staleNoted`, not `broken`):
+                // a re-read that failed judges the same holder again on the next poll.
+                if (!staleNoted.has(holder.token)) {
+                  staleNoted.add(holder.token);
+                  options.onStaleHolder?.(holder);
+                }
+                const j = recoverJudged(ctx, holder);
                 if (j.result !== 'reread-unknown') {
                   broken.add(holder.token);
                   continue;

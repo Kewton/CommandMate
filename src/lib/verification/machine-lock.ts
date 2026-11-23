@@ -1233,7 +1233,8 @@ export async function acquireMachineLock(
   };
   const gaveUp = (): { unknown?: MachineLockUnknown } => {
     if (!unknown) return {};
-    logger.warn('machine-lock-unknown', { point: unknown.point, path: unknown.path, errno: unknown.code });
+    // Through warnOnce: a re-read's unknown named in its poll (#4559) is not named a second time.
+    ctx.warnOnce('machine-lock-unknown', { point: unknown.point, path: unknown.path, errno: unknown.code });
     return { unknown };
   };
 

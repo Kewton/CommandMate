@@ -1707,8 +1707,10 @@ lock_recover() { # <lock-path> <dead-token> <dead-pid>
 }
 
 # #4559: lock_recover only while the record is still the one judged (I3). One read of the owner at
-# <point> right before the move; another token, no record, or an unknown leaves the lock where it is
-# (LRC_RESULT=changed / unknown) — the re-read is the judgement, never "moved first and put back".
+# <point> right before the move. LRC_RESULT without a move: changed (another token, or an owner-less
+# <lock> that is there), absent (the <lock> is gone, as lock_recover's own ENOENT), reread-unknown (the
+# re-read, or the check for absent, could not observe: named once, and the caller judges again — not
+# broken). This narrows the window; a stop after this read and before the mv is not closed here (#4559).
 # lock_recover itself keeps its contract (move, check the token, put back): the put-back is only the
 # guard of the window between this read and its mv. Callers: lock_acquire_path, lock_release_as_head,
 # lock_recover_only (D6).
@@ -1716,15 +1718,17 @@ lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
   lock_obs_owner "$4" "$1"
   case "$LOB_CLASS" in
     record) ;;
-    unknown)
-      # Nothing moved; named like the other unknowns, and the caller judges again (not broken).
-      lock_note_unknown "$4" "$1/owner" "$LOB_CODE"
-      lock_warn_once "machine-lock-unknown point=$4 path=$1/owner errno=$LOB_CODE"
-      LRC_RESULT=reread-unknown
-      return 0;;
+    unknown) lock_reread_unknown "$4" "$1/owner" "$LOB_CODE"; return 0;;
     missing)
-      # Gone meanwhile: absent, as lock_recover's own ENOENT answers (D6's result is unchanged).
-      if [ "$(lock_ownerless_empty "$1")" = absent ]; then LRC_RESULT=absent; else LRC_RESULT=changed; fi
+      lrj_e=$(lock_ownerless_empty "$1")
+      case "$lrj_e" in
+        absent) LRC_RESULT=absent;;
+        unknown:*)
+          lrj_u=${lrj_e#unknown:}
+          lrj_r=${lrj_u#*:}
+          lock_reread_unknown "${lrj_u%%:*}" "${lrj_r%:*}" "${lrj_r##*:}";;
+        *) LRC_RESULT=changed;;
+      esac
       return 0;;
     *) LRC_RESULT=changed; return 0;;
   esac
@@ -1733,6 +1737,14 @@ lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
   # moved, its token checked, and put back by lock_recover — the put-back is kept for this window only.
   lock_test_pause recover-rechecked
   lock_recover "$1" "$2" "$3"
+}
+
+# Nothing moved; named once like the other unknowns (LOCK_UNKNOWN for the timeout's line, which then does
+# not repeat it), and the caller judges again.
+lock_reread_unknown() { # <point> <path> <errno>
+  lock_note_unknown "$1" "$2" "$3"
+  lock_warn_once "machine-lock-unknown point=$1 path=$2 errno=$3"
+  LRC_RESULT=reread-unknown
 }
 
 # The line a recovery prints (a caller with its own wording — run-lock's — redefines it after the load).
@@ -2192,9 +2204,13 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
     fi
     if [ "$(lock_now_ms)" -ge "$la_deadline" ]; then
       lock_retire_own_ticket
-      if [ -n "$LOCK_UNKNOWN" ]; then
-        echo "verify-run: machine-lock-unknown $LOCK_UNKNOWN (not taken: unknown is never read as free)" >&2
-      fi
+      # A re-read's unknown named in its poll (#4559, lock_reread_unknown) is not named a second time.
+      case "$LOCK_WARNED" in
+        *"|machine-lock-unknown $LOCK_UNKNOWN|"*) ;;
+        *) if [ -n "$LOCK_UNKNOWN" ]; then
+          echo "verify-run: machine-lock-unknown $LOCK_UNKNOWN (not taken: unknown is never read as free)" >&2
+        fi;;
+      esac
       LOCK_WAITED=$(( $(date +%s) - la_start ))
       return 1
     fi

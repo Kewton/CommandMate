@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 /** The JS seams: the judgement of D (pidAlive) arms one EIO on the next `lock-owner` read — the re-read. */
-function oneRereadFault(armOn: 'pid' | 'none') {
+function oneRereadFault(armOn: 'pid' | 'every' | 'none') {
   const dead = deadPid();
   const s = { armed: false, fired: 0 };
   return {
@@ -38,7 +38,7 @@ function oneRereadFault(armOn: 'pid' | 'none') {
     arm: () => (s.armed = true),
     pidAlive: (pid: number): boolean => {
       if (pid === dead) {
-        if (armOn === 'pid' && s.fired === 0) s.armed = true;
+        if ((armOn === 'pid' && s.fired === 0) || armOn === 'every') s.armed = true;
         return false;
       }
       try {
@@ -187,4 +187,192 @@ describe('#4559 r3 item 2: a lock gone by the re-read keeps develop\'s absent', 
     const r = lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks: { onRecover: (stage: string) => (stage === 'recover-only-judged' ? fs.rmSync(lockPath, { recursive: true }) : undefined) } });
     expect(r.result).toBe('absent');
   });
+});
+
+/**
+ * Review r4 (lead-to-worker-4558-r4). 1: merge-pr's onStaleHolder is called before the re-read, as on
+ * develop and 95d507189 — once per token, also when the re-read fails on every poll. 2 (a): a re-read
+ * unknown still there when the wait runs out is named once, not again by the timeout's line. 2 (b): the
+ * check for "gone" after a re-read that finds no owner (the listing of the owner-less <lock>) failing is
+ * a named unknown, not a plain kept.
+ */
+describe('#4559 r4 item 1: onStaleHolder (merge-pr) before the re-read, once per token', () => {
+  const take = (lockPath: string, f: ReturnType<typeof oneRereadFault>, timeoutMs: number, pidAlive = f.pidAlive) => {
+    const calls: string[] = [];
+    const warnings: string[] = [];
+    const n = lockSync.acquireMachineLockSync('x', {
+      lockPath,
+      timeoutMs,
+      pollMs: 20,
+      warn: (l: string) => warnings.push(l),
+      onStaleHolder: (owner: { token: string }) => calls.push(owner.token),
+      hooks: { pidAlive, fault: f.fault },
+    });
+    return { n, calls, warnings };
+  };
+
+  it('ordinary recovery: called once with the dead holder, and the lock is taken', () => {
+    const root = freshRoot('r4-stale');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const r = take(lockPath, oneRereadFault('none'), 0);
+    expect({ acquired: r.n.acquired, calls: r.calls }).toEqual({ acquired: true, calls: ['D'] });
+    r.n.release();
+  });
+
+  it('one EIO on the re-read: called once (not again on the next poll), and the lock is taken', () => {
+    const root = freshRoot('r4-stale-eio');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const f = oneRereadFault('pid');
+    const r = take(lockPath, f, 1500);
+    expect({ acquired: r.n.acquired, fired: f.s.fired, calls: r.calls }).toEqual({ acquired: true, fired: 1, calls: ['D'] });
+    r.n.release();
+  });
+
+  it('the re-read fails on every poll: called once, not taken, the lock unchanged, named once', () => {
+    const root = freshRoot('r4-stale-every');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const f = oneRereadFault('every');
+    const r = take(lockPath, f, 300);
+    expect(f.s.fired).toBeGreaterThan(1);
+    expect({ acquired: r.n.acquired, calls: r.calls, owner: ownerToken(lockPath), named: named(r.warnings).length }).toEqual({ acquired: false, calls: ['D'], owner: 'D', named: 1 });
+  });
+
+  it('the holder replaced after the judgement (develop calls it too): called once, nothing moved', () => {
+    const root = freshRoot('r4-stale-swap');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const f = oneRereadFault('none');
+    let swapped = false;
+    const pidAlive = (pid: number): boolean => {
+      const answer = f.pidAlive(pid);
+      if (pid === deadPid() && !swapped) {
+        swapped = true;
+        fs.writeFileSync(`${lockPath}/owner`, JSON.stringify({ pid: process.pid, host: 'h', token: 'S', acquiredAt: Date.now(), v: 1 }));
+      }
+      return answer;
+    };
+    const r = take(lockPath, f, 0, pidAlive);
+    expect({ acquired: r.n.acquired, calls: r.calls, owner: ownerToken(lockPath) }).toEqual({ acquired: false, calls: ['D'], owner: 'S' });
+  });
+});
+
+describe('#4559 r4 item 2 (a): the re-read\'s unknown at the end of the wait is named once', () => {
+  it('sync JS (budget 0): not taken, the lock unchanged, one line', () => {
+    const root = freshRoot('r4-once-sync');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const f = oneRereadFault('pid');
+    const warnings: string[] = [];
+    const n = lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 0, warn: (l: string) => warnings.push(l), hooks: { pidAlive: f.pidAlive, fault: f.fault } });
+    expect({ acquired: n.acquired, point: n.unknown?.point, owner: ownerToken(lockPath), named: named(warnings).length }).toEqual({ acquired: false, point: 'lock-owner', owner: 'D', named: 1 });
+  });
+
+  it('TS (budget 0): not taken, the lock unchanged, one line', async () => {
+    const root = freshRoot('r4-once-ts');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const f = oneRereadFault('pid');
+    const n = await acquireMachineLock('x', { root, timeoutMs: 0, __testHooks: { pidAlive: f.pidAlive, fault: f.fault } });
+    expect({ acquired: n.acquired, owner: ownerToken(lockPath), named: named(LOGS).length }).toEqual({ acquired: false, owner: 'D', named: 1 });
+  });
+
+  it('bash (budget 0): not taken, the lock unchanged, one line', async () => {
+    const root = freshRoot('r4-once-bash');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const arm = `${root}/arm`;
+    const n = startPausedBash(root, `${ONE_EIO}\nlock_acquire x 0; echo "rc=$?"`, ['recover-judged'], { ARM: arm });
+    expect(await until(() => n.reached('recover-judged'))).toBe(true);
+    fs.writeFileSync(arm, '');
+    n.go('recover-judged');
+    await n.exited;
+    expect({ out: n.out().trim(), owner: ownerToken(lockPath), named: named(n.err().split('\n')).length }).toEqual({ out: 'rc=1', owner: 'D', named: 1 });
+  }, 30000);
+
+  it('negative control (bash): another unknown at the end of the wait keeps its line', async () => {
+    const root = freshRoot('r4-once-bash-other');
+    writeDeadHolder(machineLockPath('x', root));
+    const n = startPausedBash(root, 'lock_acquire x 0; echo "rc=$?"', [], { CM_VERIFY_TEST_OBS_FAULT: 'lock-owner=EIO' });
+    await n.exited;
+    expect(n.err()).toContain('machine-lock-unknown point=lock-owner');
+    expect(n.err()).toContain('(not taken: unknown is never read as free)');
+  }, 30000);
+});
+
+/** bash: lock_obs_list wrapped so that, once $ARM exists, the next lock-list listing fails with EIO once. */
+const ONE_LIST_EIO = `
+eval "orig_$(declare -f lock_obs_list)"
+lock_obs_list() {
+  if [ "$1" = lock-list ] && [ -e "$ARM" ] && [ ! -e "$ARM.fired" ]; then
+    : > "$ARM.fired"
+    ol_saved=\${CM_VERIFY_TEST_OBS_FAULT:-}
+    CM_VERIFY_TEST_OBS_FAULT="lock-list=EIO"
+    orig_lock_obs_list "$@"
+    CM_VERIFY_TEST_OBS_FAULT=$ol_saved
+    return 0
+  fi
+  orig_lock_obs_list "$@"
+}
+`;
+
+describe('#4559 r4 item 2 (b): the re-read finds no owner and the listing fails — a named unknown', () => {
+  const gutted = (root: string) => {
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    return { lockPath, gut: () => fs.rmSync(`${lockPath}/owner`) };
+  };
+
+  it('sync JS recoverIfDead: kept with the lock-list unknown', () => {
+    const root = freshRoot('r4-list-sync');
+    const { lockPath, gut } = gutted(root);
+    let armed = false;
+    const r = lockSync.recoverIfDead(lockPath, {
+      timeoutMs: 0,
+      hooks: {
+        onRecover: (stage: string) => {
+          if (stage === 'recover-only-judged') {
+            gut();
+            armed = true;
+          }
+        },
+        fault: (point: string) => (point === 'lock-list' && armed ? ((armed = false), 'EIO') : null),
+      },
+    });
+    expect({ result: r.result, point: r.unknown?.point, code: r.unknown?.code, dir: fs.existsSync(lockPath) }).toEqual({ result: 'kept', point: 'lock-list', code: 'EIO', dir: true });
+  });
+
+  it('sync JS recoverIfDead, negative control: the listing answers — kept, nothing named (the owner-less <lock> stays)', () => {
+    const root = freshRoot('r4-list-sync-ok');
+    const { lockPath, gut } = gutted(root);
+    const r = lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks: { onRecover: (stage: string) => (stage === 'recover-only-judged' ? gut() : undefined) } });
+    expect({ result: r.result, unknown: r.unknown ?? null, dir: fs.existsSync(lockPath) }).toEqual({ result: 'kept', unknown: null, dir: true });
+  });
+
+  it('bash D6: kept with LRO_UNKNOWN naming lock-list, one line', async () => {
+    const root = freshRoot('r4-list-bash');
+    const { lockPath, gut } = gutted(root);
+    const arm = `${root}/arm`;
+    const n = startPausedBash(root, `${ONE_LIST_EIO}\nlock_recover_only "$LK" "\${LK%.lock}.queue" 0; echo "$LRO_RESULT|$LRO_UNKNOWN"`, ['recover-only-judged'], { ARM: arm, LK: lockPath });
+    expect(await until(() => n.reached('recover-only-judged'))).toBe(true);
+    gut();
+    fs.writeFileSync(arm, '');
+    n.go('recover-only-judged');
+    await n.exited;
+    expect(n.out().trim()).toBe(`kept|point=lock-list path=${lockPath} errno=EIO`);
+    expect(n.err().split('\n').filter((l) => l.includes('machine-lock-unknown point=lock-list'))).toHaveLength(1);
+  }, 30000);
+
+  it('bash D6, negative control: the listing answers — kept, nothing named', async () => {
+    const root = freshRoot('r4-list-bash-ok');
+    const { lockPath, gut } = gutted(root);
+    const n = startPausedBash(root, 'lock_recover_only "$LK" "${LK%.lock}.queue" 0; echo "$LRO_RESULT|$LRO_UNKNOWN"', ['recover-only-judged'], { LK: lockPath });
+    expect(await until(() => n.reached('recover-only-judged'))).toBe(true);
+    gut();
+    n.go('recover-only-judged');
+    await n.exited;
+    expect(n.out().trim()).toBe('kept|');
+  }, 30000);
 });
