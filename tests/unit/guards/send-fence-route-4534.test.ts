@@ -87,6 +87,7 @@ import { resetRelayDeliveryState } from '@/lib/relay/relay-delivery';
 import { stopAllTimers } from '@/lib/timer-manager';
 import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { createRelay, getRelayById } from '@/lib/db/relay-db';
+import { setAskVersionProbeForTest } from '@/lib/ask/ask-correlation';
 import { handleApiError, ApiError, type ApiErrorPayload } from '@/cli/utils/api-client-errors';
 import { postMessage } from '@/cli/commands/message-dispatch';
 import type { ApiClient } from '@/cli/utils/api-client';
@@ -535,16 +536,20 @@ describe('T17 r2 (P2-2): a bound relay and an ask, answered 409 — relayId, the
     const instanceId = 'claude-ask';
     addRoster(instanceId, 'claude');
     addPane(nameOf('claude', instanceId), 'claude', at === 'C-u' ? 'echo PREFILLED' : '');
-    // The ask is attributed only on a claude whose version reads as new enough.
-    const execAnswer = world.execAnswer;
-    world.execAnswer = (line) => (/\s--version$/.test(line) ? '99.0.0 (Claude Code)' : execAnswer(line));
+    // The ask is attributed only on a claude whose version reads as new enough: fixed by the
+    // version probe's test seam, never by a real `claude` on PATH (CI has none).
+    setAskVersionProbeForTest(async (tool) => (tool === 'claude' ? '99.0.0 (Claude Code)' : null));
     // The ask's body goes in with its envelope (typed or pasted): the first change that carries it.
     const bodyWent = (o: Out): boolean => o.cls === 'change' && (o.line.includes('body ask') || o.line.startsWith('paste-buffer'));
     onFirst(at === 'C-u' ? isKeys(/C-u/) : bodyWent, () => perturb('tool-changed', instanceId, 'claude'));
-    const answer = await post('send', { content: 'body ask', cliToolId: 'claude', instanceId, ask: { id: outcome === 'not_sent' ? '11111111-1111-4111-8111-111111111111' : '22222222-2222-4222-8222-222222222222', protocol: 1 } });
-    expectTargetChanged(answer, { reason: 'tool-changed', outcome, tool: 'claude', instanceId, extraKeys: ['ask'] });
-    expect((answer.json.ask as { id: string; sendState: string }).sendState).toBe(sendState);
-    expect((await cliEndOf(answer, undefined)).exit).toBe(exit);
+    try {
+      const answer = await post('send', { content: 'body ask', cliToolId: 'claude', instanceId, ask: { id: outcome === 'not_sent' ? '11111111-1111-4111-8111-111111111111' : '22222222-2222-4222-8222-222222222222', protocol: 1 } });
+      expectTargetChanged(answer, { reason: 'tool-changed', outcome, tool: 'claude', instanceId, extraKeys: ['ask'] });
+      expect((answer.json.ask as { id: string; sendState: string }).sendState).toBe(sendState);
+      expect((await cliEndOf(answer, undefined)).exit).toBe(exit);
+    } finally {
+      setAskVersionProbeForTest(null);
+    }
   }, 60_000);
 });
 
