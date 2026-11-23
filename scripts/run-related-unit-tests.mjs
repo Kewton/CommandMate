@@ -383,9 +383,10 @@ export function runGroupProcess({ cmd, args, cwd, env, logPath, onChild }) {
       resolve(r);
     };
     try {
-      // Its own process group: on a signal the gate stops the group's vitest
-      // together with its pool workers (a worker outlives a vitest killed alone).
-      const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd], detached: true });
+      // Not detached: the group's vitest and its pool workers stay in this
+      // script's process group, which is the group the gate signals (SIGTERM,
+      // then SIGKILL after 5 s), so the gate stops them directly (#4577 r3).
+      const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', fd, fd] });
       if (onChild) onChild(child);
       child.on('error', (error) => done({ code: null, signal: null, error }));
       child.on('close', (code, signal) => done({ code, signal }));
@@ -546,21 +547,30 @@ export async function main(argv, deps = {}) {
       }
     }
   };
-  // A gate that times out or is cancelled sends SIGTERM (then SIGKILL). Node's
-  // default SIGTERM skips `finally`: stop the groups, remove the temp dirs, then
-  // die of the same signal.
+  // A gate that times out or is cancelled sends SIGTERM to the process group
+  // (then SIGKILL). Node's default SIGTERM skips `finally`: pass it on to the
+  // groups (they got it too when the whole group was signalled; this covers a
+  // signal sent to this process alone), remove the temp dirs, then die of it.
   /** @param {NodeJS.Signals} signal */
   const onSignal = (signal) => {
+    // The workers too: a vitest killed alone can leave its pool worker behind
+    // (seen 1 run in 5). Listed before anything is signalled, while the
+    // workers are still the children of the groups' vitest.
+    const pids = descendantPids(
+      [...children].map((c) => c.pid).filter((p) => typeof p === 'number')
+    );
     for (const child of children) {
       try {
-        if (child.pid) process.kill(-child.pid, 'SIGTERM');
-        else child.kill('SIGTERM');
+        child.kill('SIGTERM');
       } catch {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // already gone
-        }
+        // already gone
+      }
+    }
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // already gone
       }
     }
     cleanup();
@@ -665,6 +675,43 @@ export async function main(argv, deps = {}) {
     process.removeListener('SIGINT', onSignal);
     cleanup();
   }
+}
+
+/**
+ * Every descendant of `roots` (not the roots), from one `ps` snapshot. Empty
+ * when `ps` cannot be run: the gate signals the whole process group anyway.
+ *
+ * @param {number[]} roots
+ * @returns {number[]}
+ */
+export function descendantPids(roots) {
+  /** @type {Map<number, number[]>} */
+  const kids = new Map();
+  try {
+    const out = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf-8', timeout: 5000 });
+    for (const line of out.split('\n')) {
+      const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+      if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+      const list = kids.get(ppid) ?? [];
+      list.push(pid);
+      kids.set(ppid, list);
+    }
+  } catch {
+    return [];
+  }
+  /** @type {number[]} */
+  const found = [];
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const next = /** @type {number} */ (queue.shift());
+    for (const kid of kids.get(next) ?? []) {
+      if (!found.includes(kid) && !roots.includes(kid)) {
+        found.push(kid);
+        queue.push(kid);
+      }
+    }
+  }
+  return found;
 }
 
 /**
