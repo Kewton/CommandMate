@@ -85,6 +85,7 @@ Command Code は 200x1000 の pane の上から描く（top-anchored）ので、
 - 確認の画面で止まっている（`capture --pane` で見る）: 権限の既定が `ask` に変わった可能性がある。上の「3-1 権限の既定を確かめる」を読み、利用者に直してもらう
 - exit 21（作業証跡ゼロ）: docs/orchestrate/exit-codes.md#3-4-21-の対応 の手順で切り分ける
 - ワーカー起因の不合格が 2 回続いたら、本体 3-5 の手順で Claude（opus）へ格上げする。sonnet は、Command Code が起動・送信で詰まったときの代わりだけ（理由を lead-return に書く）
+- 格上げの条件と同じ種類の指摘の 2 回目の両方に当たるとき: [roles/dev-leader.md](roles/dev-leader.md#難易度とワーカー)
 
 ## 付録 同梱バンドルから仕様を読むとき
 

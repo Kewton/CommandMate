@@ -227,6 +227,10 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 
 `Closes #N` による自動クローズは base が既定ブランチ（main）の PR でしか効かない。develop 向けの PR では `closingIssuesReferences` が空になり、マージしても Issue は閉じない（異常ではない）。`merge-pr.mjs` を通さずにマージしたときは、`gh pr view <PR> --json state -q .state` が `MERGED` であることを確かめてから `gh issue close <N> --reason completed` で閉じる。マージの成否を見ずに同じループで close しない（`gh pr merge` が失敗しても後のコマンドは走る）。
 
+## 6-2 道具を変えた PR のマージの後
+
+見張り・契約・待ちの道具（`.claude/skills/orchestrate-monitor/**`・`scripts/orchestrate/**`）を変える PR がマージされたら、PM が primary checkout を `git pull --ff-only origin develop` する（#4574。primary が古い版のまま見張りが動き、リーダーが止まった）。
+
 ## 6-2 取り込み後の重い段
 
 （本体 6-2 の「マージする HEAD の precheck」の説明。）マージする HEAD の precheck（`precheck.mjs`）は、`npx tsc --noEmit` で実際の統合破壊を出し、

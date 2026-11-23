@@ -139,13 +139,16 @@ function citingFiles(): string[] {
 
 /**
  * Rule strings that must live in one document only (the owner). PR-1 registers
- * only strings that are in one place today. `5〜6 本` joins in PR-3, after the
- * number is made one.
+ * only strings that are in one place today. PR-3 made the cap on concurrent
+ * workers one number (`マシンで 5 本`) and registers that string. The old
+ * `5〜6 本` is not registered: contract.md uses it for concurrent CI runs, a
+ * different count.
  */
 export const ONE_PLACE: ReadonlyArray<{ text: string; owner: string; why: string }> = [
   { text: '30〜45 分', owner: 'docs/orchestrate/verify-queue.md', why: '重い検証 1 本の待ちの見込み（§10-4）' },
   { text: 'wip.total', owner: 'docs/orchestrate/team.md', why: 'WIP の上限の置き場（§7）' },
   { text: '目安は 3 レーン', owner: 'docs/orchestrate/team.md', why: 'レーンの目安（§7）' },
+  { text: 'マシンで 5 本', owner: 'docs/orchestrate/verify-queue.md', why: '同時のワーカーの上限（§10-4、T1）' },
 ];
 
 /** `<text>: <files>` for each registered string that is not in exactly its owner. */
