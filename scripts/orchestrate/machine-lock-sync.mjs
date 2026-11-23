@@ -85,6 +85,8 @@ export const JSON_OWNER_CODEC = { parse: (text) => JSON.parse(text), format: (re
 
 /** How long releaseAsHead / recoverIfDead wait to become the head by default (D5). */
 export const HEAD_BUDGET_MS = 10_000;
+/** #4558: a release reads the owner this many times in one call before it answers 'deferred'. */
+const RELEASE_READ_TRIES = 3;
 
 export function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
@@ -1037,6 +1039,31 @@ export function recoverLock(lockPath, dead, myToken, warn = () => {}, onRecover 
 }
 
 /**
+ * #4559: recover a holder judged gone only while the record is still the one judged. Read again right
+ * before recoverLock moves it: a recoverer that stopped after its judgement finds the next holder's
+ * live record there and leaves it ('changed'; I3: only the record judged is moved). This narrows the
+ * window; a stop after this read and before recoverLock's rename is not closed here (#4559 stays open
+ * for it). recoverLock itself keeps its contract (it moves, then checks the token, and puts back).
+ * A read that failed moves nothing and is 'reread-unknown' with its point, path and errno: the caller
+ * does not take the holder as broken and judges again. A lock gone meanwhile is 'gone', as recoverLock's
+ * own ENOENT is; when that check itself cannot observe (the owner read or the listing of an owner-less
+ * <lock> fails), it is 'reread-unknown' too.
+ *
+ * @returns {{ result: 'recovered' | 'restored' | 'restore-failed' | 'gone' | 'unknown' | 'changed' | 'reread-unknown', unknown?: { point: string, path: string, code: string } }}
+ */
+function recoverJudged(ctx, dead) {
+  const current = ctx.obs.owner('lock-owner', ctx.lockPath);
+  if (current.state === 'unknown') return { result: 'reread-unknown', unknown: { point: 'lock-owner', path: path.join(ctx.lockPath, 'owner'), code: current.code } };
+  if (current.state === 'missing') {
+    const e = ownerlessEmptyLock(ctx);
+    if (e.state === 'unknown') return { result: 'reread-unknown', unknown: e.unknown };
+    return { result: e.state === 'absent' ? 'gone' : 'changed' };
+  }
+  if (current.state !== 'record' || current.owner.token !== dead.token) return { result: 'changed' };
+  return { result: recoverLock(ctx.lockPath, dead, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs) };
+}
+
+/**
  * Take the machine-wide lock `name` in ticket order, waiting up to `timeoutMs`.
  *
  * @param {string} name
@@ -1148,6 +1175,8 @@ export function acquireMachineLockSync(name, options) {
   let unknown = null;
   let waiting = false;
   const broken = new Set();
+  // #4559: the tokens onStaleHolder was called for — once each, apart from `broken` (the recovery tried).
+  const staleNoted = new Set();
   const mineFile = () => path.join(queueDir, ticketName(mine));
   const retire = () => {
     if (mine !== null) markDone(mineFile(), token, warn);
@@ -1165,7 +1194,8 @@ export function acquireMachineLockSync(name, options) {
   };
   const gaveUp = () => {
     if (!unknown) return {};
-    warn(`machine-lock-unknown point=${unknown.point} path=${unknown.path} errno=${unknown.code}`);
+    // Through warnOnce: a re-read's unknown named in its poll (#4559) is not named a second time.
+    warnOnce(`machine-lock-unknown point=${unknown.point} path=${unknown.path} errno=${unknown.code}`);
     return { unknown };
   };
   // An empty owner taken out goes on to the mkdir in the same poll — a few times at most.
@@ -1245,7 +1275,12 @@ export function acquireMachineLockSync(name, options) {
                 // this process is a member of it by definition.
                 release: () => {
                   if (released) return 'none';
-                  const current = obs.owner('release-owner', lockPath);
+                  // #4558: a read that failed is read again (RELEASE_READ_TRIES in this call), and a
+                  // release that did not finish — 'deferred' on an unreadable owner, a delete that threw —
+                  // is not marked done: the next call tries again instead of answering 'none' over a
+                  // record of this live process that no head would recover.
+                  let current = obs.owner('release-owner', lockPath);
+                  for (let i = 1; i < RELEASE_READ_TRIES && current.state === 'unknown'; i++) current = obs.owner('release-owner', lockPath);
                   const mine = current.state === 'record' && (current.owner.token === token || (handed !== null && current.owner.token === handed));
                   const ownGroup = mine && current.owner.pid === process.pid && current.owner.pgid === process.pid;
                   if (mine && validPgid(current.owner.pgid) && !ownGroup) {
@@ -1265,12 +1300,14 @@ export function acquireMachineLockSync(name, options) {
                     warn(`machine-lock-release-needs-head ${lockPath} (recorded pid ${current.owner.pid} is not this process; release as the head)`);
                     return 'needs-head';
                   }
-                  released = true;
                   if (mine) {
                     // A delete that fails (EACCES / EIO / EBUSY) is named once and thrown, as before: the
                     // <lock> and its owner stay, and no 'deferred' is answered from here (#4288 PR1a-f impl-4).
                     const code = rmQuiet(lockPath, { recursive: true });
-                    if (code === null) return 'released';
+                    if (code === null) {
+                      released = true;
+                      return 'released';
+                    }
                     warn(`machine-lock-release-failed ${lockPath} (${code}; the record is still this acquisition's)`);
                     throw Object.assign(new Error(`${code}: cannot remove ${lockPath}`), { code });
                   }
@@ -1278,6 +1315,7 @@ export function acquireMachineLockSync(name, options) {
                     warn(`machine-lock-release-deferred ${lockPath} point=release-owner errno=${current.code}`);
                     return 'deferred';
                   }
+                  released = true;
                   cleanupOwnGone(ctx, token);
                   if (handed !== null) cleanupOwnGone(ctx, handed);
                   return 'kept';
@@ -1355,11 +1393,22 @@ export function acquireMachineLockSync(name, options) {
             if (holder && !broken.has(holder.token)) {
               const state = holderState(holder, ctx);
               if (state.state === 'gone') {
-                broken.add(holder.token);
                 // Persist what the dead holder was doing before its lock is gone (merge-pr: an unconfirmed write).
-                options.onStaleHolder?.(holder);
-                recoverLock(lockPath, holder, token, warn, hooks.onRecover, obs);
-                continue;
+                // Before the re-read, as on develop and 95d507189; once per token (`staleNoted`, not `broken`):
+                // a re-read that failed judges the same holder again on the next poll.
+                if (!staleNoted.has(holder.token)) {
+                  staleNoted.add(holder.token);
+                  options.onStaleHolder?.(holder);
+                }
+                const j = recoverJudged(ctx, holder);
+                if (j.result !== 'reread-unknown') {
+                  broken.add(holder.token);
+                  continue;
+                }
+                // #4559: a re-read that failed marks nothing broken — the next poll judges again — and is
+                // named once, like the other unknowns.
+                if (!unknown) unknown = j.unknown;
+                warnOnce(`machine-lock-unknown point=${j.unknown.point} path=${j.unknown.path} errno=${j.unknown.code}`);
               }
               if (state.state === 'unknown') unknown = { point: state.point, path: lockPath, code: state.code };
             }
@@ -1498,8 +1547,10 @@ export function releaseAsHead(lockPath, tokens, options = {}) {
     }
     // Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name, the token checked —
     // a successor that took the lock while this stopped past its ticket is put back.
-    const r = recoverLock(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
-    if (r !== 'recovered') return { result: 'kept' };
+    const j = recoverJudged(ctx, read.owner);
+    // A re-read that failed is named (bash's lock_recover_judged says the same); the result stays 'kept'.
+    if (j.result === 'reread-unknown') ctx.warnOnce(`machine-lock-unknown point=${j.unknown.point} path=${j.unknown.path} errno=${j.unknown.code}`);
+    if (j.result !== 'recovered') return { result: 'kept' };
     for (const t of tokens) cleanupOwnGone(ctx, t);
     return { result: 'released' };
   });
@@ -1553,7 +1604,10 @@ export function recoverIfDead(lockPath, options = {}) {
     if (holder.state === 'unknown') return done('kept', { point: holder.point, path: lockPath, code: holder.code });
     if (holder.state !== 'gone') return done('kept');
     ctx.onRecover?.('recover-only-judged');
-    const r = recoverLock(lockPath, read.owner, ctx.myToken, ctx.warn, ctx.onRecover, ctx.obs);
+    const j = recoverJudged(ctx, read.owner);
+    // #4559: a re-read that failed is the unknown result (kept, named), not folded into a plain 'kept'.
+    if (j.result === 'reread-unknown') return done('kept', j.unknown);
+    const r = j.result;
     return done(r === 'recovered' ? 'removed' : r === 'restore-failed' ? 'restore-failed' : r === 'gone' ? 'absent' : 'kept');
   });
 }

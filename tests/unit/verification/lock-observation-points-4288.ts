@@ -122,14 +122,14 @@ export const RAW_CALL_ALLOWANCES: RawCallAllowance[] = [
   { impl: 'bash', fn: 'lock_restore_from_gone', primitive: 'rmdir', count: 1, why: '戻す owner が ENOENT のとき、この戻しが作った空の <lock> を戻す。失敗は空のまま残すだけ' },
   { impl: 'bash', fn: 'lock_rmdir_errno', primitive: 'rmdir', count: 1, why: '失敗の errno を返す rmdir（観測の関数と同じく分類する）。lock_reclaim_gone が途中で止まった戻しの空の <lock> を戻すのに使い、失敗したら退避を消さずに残して点・パス・errno を報告する（Codex 再レビュー P2）' },
   { impl: 'bash', fn: 'lock_settle_gone', primitive: 'rmdir', count: 1, why: 'owner の無い（ENOENT）退避の片付け。空でなければ失敗して残るだけ' },
-  { impl: 'bash', fn: 'lock_acquire_path', primitive: 'json field', count: 7, why: '自分の札の確かめ（読めなければ札を失ったとして列の最後へ）・前の札の done（読めなければ生きた札として扱う）・取り下げる札の token（lock_mark_done が確かめ直す）・待ちの表示。どれも読みの失敗が取る向きに働かない' },
+  { impl: 'bash', fn: 'lock_acquire_path', primitive: 'json field', count: 6, why: '自分の札の確かめ（読めなければ札を失ったとして列の最後へ）・前の札の done（読めなければ生きた札として扱う）・待ちの表示。どれも読みの失敗が取る向きに働かない。取り下げる札の token は読み直さず、判定の読み（lock_ticket_retirable の LTR_TOKEN）を lock_mark_done に渡す（#4560）' },
   { impl: 'bash', fn: 'run_gate_attempt', primitive: 'test -d/-e/-f/-r/-x', count: 1, why: 'mutex の無いゲートの timeout の印。ロックの判断ではない' },
   { impl: 'bash', fn: 'lock_child_wait', primitive: 'test -d/-e/-f/-r/-x', count: 2, why: '子が合図（go）を見る。偽に倒れると exec しない向き。stat の失敗の扱いは追跡（PM review P3-3）' },
   // #4288 PR1a: the operations scripts/lib/machine-lock.sh loads (lock_acquire's body moved to lock_acquire_path,
   // lock_handoff_wait's to lock_child_wait — the same calls, counted under the new names above).
   { impl: 'bash', fn: 'lock_obs_create', primitive: 'cat', count: 2, why: '観測の関数そのもの（標準入力の記録を 1 回だけ読み、書いた tmp を同じ取り方で読み直して比べる。#4288 PR1a-f I1）' },
   { impl: 'bash', fn: 'lock_wait_head', primitive: 'mkdir', count: 1, why: '.queue の mkdir -p（置き場を作るだけ。失敗は次の一覧の観測に出る）' },
-  { impl: 'bash', fn: 'lock_wait_head', primitive: 'json field', count: 4, why: 'lock_acquire_path と同じ札の確かめ（自分の札・前の札の done・取り下げる札の token）。読みの失敗は先頭にならない向き' },
+  { impl: 'bash', fn: 'lock_wait_head', primitive: 'json field', count: 3, why: 'lock_acquire_path と同じ札の確かめ（自分の札・前の札の done）。読みの失敗は先頭にならない向き。取り下げる札の token は判定の読み（LTR_TOKEN）を渡す（#4560）' },
   { impl: 'bash', fn: 'run_gate_handoff', primitive: 'test -d/-e/-f/-r/-x', count: 5, why: '見張りの ack・合図の取り下げ・ack の有無・timeout の印。ロックは G の排水（3 値）で守る。stat の失敗で報告がずれうる点は追跡（PM review P3-3）' },
   ...(['ts', 'sync'] as const).flatMap((impl) => [
     ...['process.kill', 'readdirSync', 'lstatSync', 'readFileSync', 'mkdirSync', 'renameSync', 'rmdirSync'].map((primitive) => ({ impl, fn: 'makeObserver', primitive, count: 1, why: OBSERVER })),
