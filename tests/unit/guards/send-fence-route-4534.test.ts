@@ -85,6 +85,7 @@ import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
 import { getOpencodeLiveness, getOpencodePrimarySession } from '@/lib/hooks/sources/opencode/subscription';
 import { resetRelayDeliveryState } from '@/lib/relay/relay-delivery';
 import { stopAllTimers } from '@/lib/timer-manager';
+import { CLIToolManager } from '@/lib/cli-tools/manager';
 import { resetSessionLaunchFlightsForTest } from '@/lib/session/session-launch-flight';
 import { clearCachedClaudePath } from '@/lib/session/claude-session';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
@@ -377,6 +378,30 @@ describe('T17: 409 SEND_TARGET_CHANGED, entry × reason × state', () => {
     onFirst(isKeys(/-l -- echo typed/), () => perturb('tool-changed', instanceId, 'codex'));
     const answer = await post('terminal', { cliToolId: 'codex', command: 'echo typed', instanceId });
     expectTargetChanged(answer, { reason: 'tool-changed', outcome: 'unknown', tool: 'codex', instanceId });
+  }, 60_000);
+});
+
+describe('T17 order 1: a driver’s wrap that drops the refusal’s type and cause (the copilot.ts:1084 shape)', () => {
+  it('[T17 order-1] the error says only a message; the request’s own ticket refused → still 409, not_sent', async () => {
+    const instanceId = 'claude-w';
+    addRoster(instanceId, 'claude');
+    addPane(nameOf('claude', instanceId), 'claude', 'echo PREFILLED');
+    onFirst(isKeys(/C-u/), () => perturb('tool-changed', instanceId, 'claude'));
+    const claude = CLIToolManager.getInstance().getTool('claude') as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    const original = claude.sendMessage.bind(claude);
+    const spy = vi.spyOn(claude, 'sendMessage').mockImplementation((...args: unknown[]) =>
+      original(...args).catch((error: unknown) => {
+        // Only the words survive: no type, no `cause`.
+        throw new Error(`Failed to send message to Claude: ${error instanceof Error ? error.message : String(error)}`);
+      }),
+    );
+    try {
+      const answer = await post('send', { content: 'body wrapped', cliToolId: 'claude', instanceId });
+      expectTargetChanged(answer, { reason: 'tool-changed', outcome: 'not_sent', tool: 'claude', instanceId });
+      expect(lastSend('claude', instanceId)).toMatchObject({ state: 'not-sent', reason: 'target-changed' });
+    } finally {
+      spy.mockRestore();
+    }
   }, 60_000);
 });
 
