@@ -9,6 +9,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import {
   sendKeys,
@@ -189,6 +190,7 @@ export class GeminiTool extends BaseCLITool {
 
       logger.info('started-gemini-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Gemini session: ${errorMessage}`);
     }
@@ -268,6 +270,7 @@ export class GeminiTool extends BaseCLITool {
           }
         }
       } catch (error: unknown) {
+        rethrowFenceRefusal(error);
         // Capture may fail during initialization - continue polling
         logger.debug('gemini-ready-capture-failed', { sessionName, error: getErrorMessage(error) });
       }
@@ -350,6 +353,7 @@ export class GeminiTool extends BaseCLITool {
 
       logger.info('sent-message-to-gemini-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to Gemini: ${errorMessage}`, { cause: error });

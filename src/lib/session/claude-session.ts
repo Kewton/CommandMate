@@ -67,6 +67,7 @@ import {
 } from '@/lib/cli-tools/launch-answer-skips';
 import { settleSessionLaunch } from '@/lib/session/session-launch-flight';
 import { typeLaunchLines } from '@/lib/cli-tools/launch-keys';
+import { enterSendLayer, fenceGate, isFenceRefusal, rethrowFenceRefusal } from '@/lib/session/terminal-fence';
 
 const logger = createLogger('claude-session');
 
@@ -428,7 +429,8 @@ async function answerTrustDialog(
       state.pollsSinceAnswer = 0;
       state.answers++;
       logger.info('trust-dialog-detected', { keys: 'Enter', attempt: state.answers });
-    } catch {
+    } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       // Left unhandled so a later poll answers the dialog again
       noteTrustKeySkipped(sessionName, state, 'Enter', 'send-failed', answerLife);
     }
@@ -452,7 +454,8 @@ async function answerTrustDialog(
     state.pollsSinceMove = 0;
     state.moves++;
     logger.info('trust-dialog-cursor-move', { key: keys[0], attempt: state.moves });
-  } catch {
+  } catch (error: unknown) {
+    rethrowFenceRefusal(error);
     // Left unhandled so a later poll moves the cursor again
     noteTrustKeySkipped(sessionName, state, keys[0], 'send-failed', answerLife);
   }
@@ -916,6 +919,8 @@ export async function startClaudeSession(
   }
 
   const sessionName = getSessionName(worktreeId, instanceId);
+  // Issue #4534: the detector — a send-only layer.
+  enterSendLayer('startClaudeSession', sessionName);
 
   // Check if session already exists
   const exists = await hasSession(sessionName);
@@ -1015,6 +1020,7 @@ export async function startClaudeSession(
     // input in order, so the `unset` runs first without it, and a pause inside
     // the turn would only hold sends off longer. The init polls below stay
     // outside the lock.
+    fenceGate('env');
     await execAsync('tmux set-environment -g -u CLAUDECODE 2>/dev/null || true');
     await typeLaunchLines(sessionName, ['unset CLAUDECODE', withLaunchScreenCleared(launchCommand)]);
 
@@ -1138,6 +1144,7 @@ export async function startClaudeSession(
 
     logger.info('started-claude-session');
   } catch (error: unknown) {
+    rethrowFenceRefusal(error);
     // MF-S2-002: Clear cached path on all failures (harmless for non-path failures)
     clearCachedClaudePath();
     // SEC-SF-002: Log detailed error server-side, throw generic message to client
@@ -1148,7 +1155,8 @@ export async function startClaudeSession(
     // safe to hand to the caller, and they are the whole reason the caller can
     // tell "still starting" from "broken" instead of being told to read a log
     // it may not have.
-    if (isSafeSessionStartError(error)) {
+    // Issue #4534: the fence's refusal goes up as itself.
+    if (isSafeSessionStartError(error) || isFenceRefusal(error)) {
       throw error;
     }
     throw new Error('Failed to start Claude session');

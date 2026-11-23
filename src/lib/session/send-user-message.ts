@@ -46,6 +46,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import { readOwnFenceRefusal } from '@/lib/session/terminal-fence';
 import {
   createMessage,
   updateLastUserMessage,
@@ -672,6 +673,13 @@ export async function sendUserMessage<P extends SendUserMessageRequest>(
       return { sent: true, inputStartedAt };
     } catch (error) {
       logger.error('failed-to-send-message-to:', { error: getErrorMessage(error) });
+      // Issue #4534 (order 1): this request's own ticket refused — whatever the
+      // error says after the tools' wraps. Typed only if input had started.
+      const fenced = readOwnFenceRefusal();
+      if (fenced !== null) {
+        const mayHaveGone = fenced.bodyStarted || fenced.dispatchUnknown;
+        return { error, failure: { state: mayHaveGone ? 'indeterminate' : 'not-sent', reason: 'send-error' } };
+      }
       // Issue #4115: the role this send was conditional on, or the role a driver's
       // relaunch resolved, refused it before the first key.
       if (isRoleConditionUnmet(error) || readRoleLaunchRefusal(error) !== null) {

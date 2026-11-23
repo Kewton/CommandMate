@@ -17,6 +17,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { enterSendLayer, rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import {
   sendKeys,
@@ -552,6 +553,7 @@ export class CopilotTool extends BaseCLITool {
         version: resolved.version,
       });
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Copilot session: ${errorMessage}`);
     }
@@ -702,7 +704,8 @@ export class CopilotTool extends BaseCLITool {
         if (!trustDialogHandled && (await this.answerFolderTrustDialog(sessionName, output, readMark, answerSkips))) {
           trustDialogHandled = true;
         }
-      } catch {
+      } catch (error: unknown) {
+        rethrowFenceRefusal(error);
         // Capture may fail during initialization - continue polling
       }
       await new Promise((resolve) => setTimeout(resolve, COPILOT_POLL_INTERVAL_MS));
@@ -808,7 +811,8 @@ export class CopilotTool extends BaseCLITool {
           logger.info('copilot-prompt-wait-dialog', { until, reads: dialog.reads, bottomRow: describeBottomRow(output) });
           return { ready: false, output, dialog: true };
         }
-      } catch {
+      } catch (error: unknown) {
+        rethrowFenceRefusal(error);
         // Capture may fail - continue polling. Not a dialog read: the run restarts.
         dialog.reset();
       }
@@ -1009,6 +1013,7 @@ export class CopilotTool extends BaseCLITool {
 
       logger.info('sent-message-to-copilot-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to Copilot: ${errorMessage}`, { cause: error });
@@ -1069,6 +1074,8 @@ export class CopilotTool extends BaseCLITool {
    */
   async sendModelCommand(worktreeId: string, modelName: string, instanceId?: string): Promise<void> {
     const sessionName = this.getSessionName(worktreeId, instanceId);
+    // Issue #4534: the detector — a send-only layer.
+    enterSendLayer('sendModelCommand', sessionName);
 
     await this.requireSession('Copilot', worktreeId, instanceId, { relaunch: false });
 
@@ -1077,6 +1084,7 @@ export class CopilotTool extends BaseCLITool {
       // turn like the selection-list branch — from the idle read to the answer.
       await withInstanceInputLock(sessionName, (ticket) => this.switchModelUnderInputLock(sessionName, modelName, ticket));
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #3952: the re-check's `code` is kept, so the caller records a
       // dialog or an unreadable pane as such rather than as a refused model.

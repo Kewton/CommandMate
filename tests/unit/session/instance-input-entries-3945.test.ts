@@ -83,6 +83,7 @@ import { capturePane, sendKeys, sendSpecialKeys } from '@/lib/tmux/tmux';
 import { sendUserMessage } from '@/lib/session/send-user-message';
 import { sendMessageWithSubmitVerification } from '@/lib/cli-tools/submit-verified-sender';
 import { POST as terminalPost } from '@/app/api/worktrees/[id]/terminal/route';
+import { runWithSendTicket, type SendTicketInit } from '@/lib/session/terminal-fence';
 import { clearSendAttempts, getLastSendAttempt } from '@/lib/session/send-attempt-state';
 import {
   INSTANCE_INPUT_LOCK_WAIT_MS,
@@ -114,6 +115,8 @@ const codexTool = {
 };
 
 const db = {} as never;
+/** Issue #4534: a direct call of the send service next to the terminal route, under its own ticket as an entry would run it. */
+const ticketed = (): SendTicketInit => ({ target: { worktreeId: 'wt-1', instanceId: 'codex', cliToolId: 'codex' }, resolvedBy: null, kind: 'resolved', confirm: () => null, names: [SESSION] });
 
 function terminalRequest(command: string): Promise<Response> {
   const req = new NextRequest('http://localhost:3000/api/worktrees/wt-1/terminal', {
@@ -176,7 +179,7 @@ describe('entry points share one input lock per instance (Issue #3945)', () => {
     holdTyping = { text: 'from terminal' };
     const first = terminalRequest('from terminal');
     await settle();
-    const second = sendUserMessage(db, { worktreeId: 'wt-1', content: 'from send', cliToolId: 'codex' });
+    const second = runWithSendTicket(ticketed(), () => sendUserMessage(db, { worktreeId: 'wt-1', content: 'from send', cliToolId: 'codex' }));
     await settle();
     expect(keys).toEqual(['type:from terminal']);
 
@@ -269,7 +272,7 @@ describe('entry points share one input lock per instance (Issue #3945)', () => {
         '  Press enter to confirm or esc to cancel',
       ].join('\n');
     });
-    const viaSend = sendUserMessage(db, { worktreeId: 'wt-1', content: 'x', cliToolId: 'codex' });
+    const viaSend = runWithSendTicket(ticketed(), () => sendUserMessage(db, { worktreeId: 'wt-1', content: 'x', cliToolId: 'codex' }));
     const viaTerminal = terminalRequest('y');
     await settle();
     release();

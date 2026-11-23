@@ -36,6 +36,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import { COMMAND_CODE_NAVIGATION_KEY_VALUES } from '@/types/terminal-keys';
@@ -308,7 +309,9 @@ export class CommandCodeTool extends BaseCLITool {
 
       logger.info('started-command-code-session');
     } catch (error: unknown) {
+      // Issue #4534 (INV-catch-after): the start is over, refused or not.
       this.composerPendingSince.delete(sessionName);
+      rethrowFenceRefusal(error);
       throw new Error(`Failed to start Command Code session: ${getErrorMessage(error)}`);
     }
   }
@@ -435,6 +438,7 @@ export class CommandCodeTool extends BaseCLITool {
 
       logger.info('sent-message-to-command-code-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       // Issue #3006: passed through unwrapped so its `code` reaches the route.
       if (isSessionStartTimeoutError(error)) throw error;
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
