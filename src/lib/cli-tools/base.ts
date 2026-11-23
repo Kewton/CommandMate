@@ -25,7 +25,8 @@ import { resolveGracefulExitSpec } from './graceful-exit';
 import { resolveLivenessSpec } from './liveness-spec';
 import { probeSessionLiveness } from './session-liveness';
 import { reportSessionStartFailure, reportStaleHookUrl } from './start-availability';
-import { asRetraction, enterSendLayer, isFenceRefusal, readOwnFenceRefusal } from '../session/terminal-fence';
+import { asRetraction, enterSendLayer, isFenceRefusal } from '../session/terminal-fence';
+import { classifyOwnSendFenceOutcome } from '../session/send-fence-outcome';
 import { missingToolError } from './install-hints';
 import { stripAnsi } from '../detection/ansi';
 import { getServerPort } from '../env';
@@ -370,8 +371,9 @@ export abstract class BaseCLITool implements ICLITool {
       // successful start of the same session does not inherit it.
       this.takeAdoptionMark(worktreeId, instanceId);
       // Issue #4534: the fence's refusal is not a start that failed — no notice.
-      // Read on the send's own ticket too: a driver's catch may have wrapped it.
-      if (!isFenceRefusal(error) && readOwnFenceRefusal() === null) {
+      // Read on the send's own ticket too (PR-B: the one classification, its
+      // orders 1–2): a driver's catch may have wrapped it.
+      if (!isFenceRefusal(error) && classifyOwnSendFenceOutcome(error)?.kind !== 'target-changed') {
         reportSessionStartFailure(
           {
             worktreeId,
