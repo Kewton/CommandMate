@@ -28,6 +28,17 @@ import { buildTmuxTeardownArgv } from '@/lib/agent-health/tmux-command';
 
 const read = (f: string): string => readFileSync(join(REPO_ROOT, f), 'utf-8');
 
+/**
+ * The tests that read the ledger walk every file of `src` (about 1,800); the
+ * first one cold. vitest's local default is 5 s (`vitest.config.ts`: 20 s only
+ * under CI=true), and a whole local run (the precheck's tests stage) is the load
+ * `vitest.config.ts` names: before the files' answers were kept ({@link changesOf})
+ * the test took 1.4–2.8 s alone and 7 s and more under that load, and timed out.
+ * Alone now (2026-11-23): the first about 1.5 s, the next ones under 0.1 s. The
+ * CI budget, on these tests only (R2 and r7b (c) read a few files).
+ */
+const FULL_TREE_TIMEOUT_MS = 20_000;
+
 /** The program's own name in an argv or a shell line. */
 const isTmuxProgram = (text: string): boolean => text === 'tmux' || text.endsWith('/tmux');
 /** Global flags of tmux that take an argument (`tmux -L <socket> <command> …`). */
@@ -192,6 +203,30 @@ const GATED_BY: Readonly<Record<string, { file: string; site: string; gate: stri
   },
 };
 
+/**
+ * One file's changes, kept for the process by its path and text (Issue #4534, the
+ * 5-second timeout): the tests below read today's tree plus a file or two, and
+ * parsed every file of `src` again in each (1.4–2.8 s a test alone, 7 s and more
+ * under the load of a whole run). The answer is a function of the path and the
+ * text only, so a file a test changed or added is read anew.
+ */
+const changesMemo = new Map<string, Map<string, Array<{ row: string; line: number }>>>();
+function changesOf(f: string, text: string): Array<{ row: string; line: number }> {
+  let byFile = changesMemo.get(text);
+  if (byFile === undefined) {
+    byFile = new Map();
+    changesMemo.set(text, byFile);
+  }
+  let changes = byFile.get(f);
+  if (changes === undefined) {
+    changes = [];
+    for (const w of tmuxCommandWords(f, text)) if (classifyTmuxCommand(w.command) === 'change') changes.push({ row: `${f}#${w.site}`, line: w.line });
+    for (const l of scanLiterals(f, text, (literal) => literal.includes('/prompt_async'))) changes.push({ row: `${l.file}#${l.site}`, line: l.line });
+    byFile.set(f, changes);
+  }
+  return changes;
+}
+
 /** `file#site` → the lines of its changes (tmux commands the reads list does not name, and `prompt_async`). */
 function ledgerRows(files: ReadonlyMap<string, string>): Map<string, number[]> {
   const rows = new Map<string, number[]>();
@@ -200,8 +235,7 @@ function ledgerRows(files: ReadonlyMap<string, string>): Map<string, number[]> {
   };
   for (const [f, text] of files) {
     if (f === TMUX_MODULE) continue;
-    for (const w of tmuxCommandWords(f, text)) if (classifyTmuxCommand(w.command) === 'change') add(`${f}#${w.site}`, w.line);
-    for (const l of scanLiterals(f, text, (literal) => literal.includes('/prompt_async'))) add(`${l.file}#${l.site}`, l.line);
+    for (const c of changesOf(f, text)) add(c.row, c.line);
   }
   return rows;
 }
@@ -308,7 +342,7 @@ describe('G-台帳: terminal changes outside tmux.ts that are not keys, and prom
     const files = new Map(srcFiles().map((f) => [f, read(f)] as const));
     expect(ledgerViolations(files)).toEqual([]);
     expect([...ledgerRows(files).keys()].sort()).toEqual(Object.keys(LEDGER).sort());
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('positive controls: a new raw change (argv and shell line) / a gated row without its gate → red', () => {
     const files = new Map(srcFiles().map((f) => [f, read(f)] as const));
@@ -320,7 +354,7 @@ describe('G-台帳: terminal changes outside tmux.ts that are not keys, and prom
       'a terminal change no ledger row holds: src/lib/zz-raw.ts#a (line 2)',
       'a terminal change no ledger row holds: src/lib/zz-raw.ts#b (line 3)',
     ]);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 });
 
 describe('R2 (static): no await between a gate and the process call it guards', () => {
@@ -381,13 +415,13 @@ describe('r7b: a terminal change is every tmux command the reads list does not n
         "export function shellLine(): void { exec('tmux frobnicate-window -t x'); }\n",
     );
     expect(rowsOf(files)).toHaveLength(3);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[r7b] (b) the reads and the buffer commands are not changes', () => {
     const lines = [...READ_COMMANDS, ...BUFFER_COMMANDS].map((c, i) => `export function r${i}(): void { execFile('tmux', ['${sampleOf(c)}', '-t', 'x']); }`);
     const files = withFile(["import { execFile } from 'child_process';", ...lines, ''].join('\n'));
     expect(rowsOf(files)).toEqual([]);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[r7b] (c) the reads list is the closed list of design §5 (one added here, or there, is red)', () => {
     const design = read('docs/design/send-fence-4534.md');

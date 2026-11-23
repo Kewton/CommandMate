@@ -23,6 +23,18 @@ import { REPO_ROOT } from './route-tmux-reach';
 import { srcFiles } from './pane-key-writers-scan';
 import { computeSendClosure, NOT_A_SEND } from './send-fence-closure';
 
+/**
+ * A test here walks the whole of `src` (about 1,800 files) — the first one cold,
+ * parsing every file the walk asks about. vitest's local default is 5 s
+ * (`vitest.config.ts`: 20 s only under CI=true), and a whole local run (the
+ * precheck's tests stage) is the load `vitest.config.ts` names: before the walk
+ * kept its answers (`send-fence-closure.ts`) a test took about 3 s alone and
+ * 7–14 s under that load, and timed out. Alone now (2026-11-23): the first test
+ * about 2 s, the next ones about 0.4 s, `[fence-i]` about 1.3 s (its names
+ * `ping`/`pong` are new questions). The CI budget, on these tests only.
+ */
+const FULL_TREE_TIMEOUT_MS = 20_000;
+
 function tree(extra: Record<string, string> = {}): Map<string, string> {
   const files = new Map<string, string>();
   for (const f of srcFiles()) files.set(f, readFileSync(join(REPO_ROOT, f), 'utf-8'));
@@ -57,21 +69,21 @@ describe('G-閉包: the functions a send reaches the layers through are a closed
     ]);
     expect(found.members.size).toBeGreaterThan(20);
     for (const row of NOT_A_SEND) expect(existsSync(join(REPO_ROOT, row.site.split('#')[0]))).toBe(true);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-a] a new function outside an entry calls sendMessageToSession → R-root', () => {
     const found = computeSendClosure(withTree({
       'src/lib/zz-rogue-a.ts': "import { sendMessageToSession } from '@/lib/session-key-sender';\nexport async function answerWithTheSender(): Promise<void> {\n  await sendMessageToSession('wt', 'm');\n}\n",
     }));
     expect(found.violations).toEqual(['R-root: src/lib/zz-rogue-a.ts#answerWithTheSender is reached by nothing and opens no ticket']);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-b] a new function outside an entry calls startSessionForSend → R-root', () => {
     const found = computeSendClosure(withTree({
       'src/lib/zz-rogue-b.ts': "import { startSessionForSend } from '@/app/api/worktrees/[id]/send/send-session-start';\nexport async function warmUp(input: never): Promise<void> {\n  await startSessionForSend(input);\n}\n",
     }));
     expect(found.violations).toEqual(['R-root: src/lib/zz-rogue-b.ts#warmUp is reached by nothing and opens no ticket']);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-c] a NEW middle function wraps a marked layer and is called from setInterval outside an entry → R-root', () => {
     const found = computeSendClosure(withTree({
@@ -81,7 +93,7 @@ describe('G-閉包: the functions a send reaches the layers through are a closed
     expect(found.members.has('src/lib/zz-wrap.ts#typeOneLine')).toBe(true);
     expect(found.members.has('src/lib/zz-rogue-c.ts#Nudger.nudge')).toBe(true);
     expect(found.violations).toEqual(['R-root: src/lib/zz-rogue-c.ts#startNudging is reached by nothing and opens no ticket']);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-module] from module scope, through a named re-export, an aliased re-export and export default → R-module', () => {
     const found = computeSendClosure(withTree({
@@ -96,7 +108,7 @@ describe('G-閉包: the functions a send reaches the layers through are a closed
       'R-module: src/lib/zz-default.ts#<module> reaches the send layers from module scope',
       'R-module: src/lib/zz-top.ts#<module> reaches the send layers from module scope',
     ]);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-run] an entry calls into the set outside the function it runs under its ticket → R-run', () => {
     const file = 'src/lib/timer-manager.ts';
@@ -107,14 +119,14 @@ describe('G-閉包: the functions a send reaches the layers through are a closed
     const found = computeSendClosure(withTree({ [file]: mutated }));
     expect(found.violations).toHaveLength(1);
     expect(found.violations[0]).toMatch(/^R-run: src\/lib\/timer-manager\.ts#executeTimer calls sendUserMessage outside its ticket/);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-literal] a string-literal member call tool()[\'sendMessage\'](…) outside an entry → R-root', () => {
     const found = computeSendClosure(withTree({
       'src/lib/zz-literal.ts': "import { CLIToolManager } from '@/lib/cli-tools/manager';\nexport async function poke(): Promise<void> {\n  await CLIToolManager.getInstance().getTool('claude')['sendMessage']('wt', 'm');\n}\n",
     }));
     expect(found.violations).toEqual(['R-root: src/lib/zz-literal.ts#poke is reached by nothing and opens no ticket']);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 });
 
 /**
@@ -138,21 +150,21 @@ describe('G-閉包: the forms the first check did not read', () => {
       'src/lib/zz-rogue-f.ts': "import { sendMessageToSession } from './zz-star2';\nexport async function viaStars(): Promise<void> {\n  await sendMessageToSession('wt', 'm');\n}\n",
     }));
     expect(found.violations).toEqual(['R-module: src/lib/zz-star1.ts#<re-export> reaches the send layers from re-export']);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-g] in an entry, taken as a value and called outside its ticket → R-run', () => {
     const found = computeSendClosure(inTimerEntry(
       "    const early = sendUserMessage;\n    await early(db, { worktreeId: timer.worktreeId, content: 'early', cliToolId: timer.cliToolId as CLIToolType });",
     ));
     expect(found.violations).toEqual([expect.stringMatching(/^R-run: src\/lib\/timer-manager\.ts#executeTimer references sendUserMessage outside its ticket/)]);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-h] in an entry, called inside another AsyncLocalStorage’s .run(…) → R-run', () => {
     const found = computeSendClosure(inTimerEntry(
       "    const other = new AsyncLocalStorage<number>();\n    await other.run(1, () => sendUserMessage(db, { worktreeId: timer.worktreeId, content: 'early', cliToolId: timer.cliToolId as CLIToolType }));",
     ));
     expect(found.violations).toEqual([expect.stringMatching(/^R-run: src\/lib\/timer-manager\.ts#executeTimer calls sendUserMessage outside its ticket/)]);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-i] a loop of two functions that call each other, one of them a marked layer’s caller, with no root → R-root', () => {
     const found = computeSendClosure(withTree({
@@ -162,7 +174,7 @@ describe('G-閉包: the forms the first check did not read', () => {
       'R-root: src/lib/zz-loop.ts#ping reaches no entry through its callers',
       'R-root: src/lib/zz-loop.ts#pong reaches no entry through its callers',
     ]);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-j] a real tool call added to a function on the same-name exclusions → no longer excused', () => {
     const file = 'src/lib/handoff/page-owner.ts';
@@ -174,7 +186,7 @@ describe('G-閉包: the forms the first check did not read', () => {
     }));
     expect(found.violations.filter((v) => v.includes('page-owner') || v.includes('src/components/') || v.includes('src/hooks/'))).not.toEqual([]);
     expect(found.members.has('src/lib/handoff/page-owner.ts#sendMessageForHandoffPage')).toBe(true);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 
   it('[fence-k] an entry written as a class method, calling into the set outside its ticket → R-run', () => {
     const found = computeSendClosure(withTree({
@@ -184,5 +196,5 @@ describe('G-閉包: the forms the first check did not read', () => {
       'R-run: src/lib/zz-entry-k.ts#Sender.send calls sendUserMessage outside its ticket (line 5)',
       'R-run: src/lib/zz-entry-k.ts#Sender.send runs nothing of the set under its ticket',
     ]);
-  });
+  }, FULL_TREE_TIMEOUT_MS);
 });
