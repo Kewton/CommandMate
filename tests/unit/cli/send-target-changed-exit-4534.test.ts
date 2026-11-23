@@ -28,8 +28,8 @@ import * as cliTypes from '@/cli/types';
 import { toolPolicyDenialFromResponse } from '@/cli/utils/tool-policy-failure';
 
 const WT = 'wt-cli-4534';
-const NOT_SENT_TEXT = 'Send stopped: the target changed while the message was being sent (tool-changed). The message was not delivered; read the roster again, then send it again.';
-const UNKNOWN_TEXT = 'Send stopped: the target changed while the message was being sent (tool-changed). The message may already have reached the session; look at the pane before sending it again.';
+const NOT_SENT_TEXT = 'Send stopped: the target changed while the message was being sent (send target changed: tool-changed). The message was not delivered; read the roster again, then send it again.';
+const UNKNOWN_TEXT = 'Send stopped: the target changed while the message was being sent (send target changed: tool-changed). The message may already have reached the session; look at the pane before sending it again.';
 
 function targetChanged(sendOutcome: unknown, error = NOT_SENT_TEXT): ApiErrorPayload {
   const payload: Record<string, unknown> = {

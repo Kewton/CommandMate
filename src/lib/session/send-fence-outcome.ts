@@ -149,11 +149,13 @@ export function fenceSendOutcome(outcome: SendFenceOutcome): 'not_sent' | 'unkno
  * The 409's sentence (Q2): `unreadable` says the target could not be confirmed
  * (never that it changed); none says nothing was typed (a launch, a clear or
  * `/model` may have gone before the refusal). `unknown` says to look first.
+ * A changed target quotes the refusal itself (`send target changed: <reason>`),
+ * which is what keeps the reason in the answer (R12, as PR-A's answers did).
  */
 export function describeSendTargetChanged(reason: string, sendOutcome: 'not_sent' | 'unknown'): string {
   const head = reason === 'unreadable'
     ? `Send stopped: the target could not be confirmed while the message was being sent (${reason}).`
-    : `Send stopped: the target changed while the message was being sent (${reason}).`;
+    : `Send stopped: the target changed while the message was being sent (send target changed: ${reason}).`;
   const tail = sendOutcome === 'not_sent'
     ? ' The message was not delivered; read the roster again, then send it again.'
     : ' The message may already have reached the session; look at the pane before sending it again.';

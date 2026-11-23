@@ -230,7 +230,7 @@ type Outcome = 'not_sent' | 'unknown';
 function expectedSentence(reason: Reason, outcome: Outcome): string {
   const head = reason === 'unreadable'
     ? `Send stopped: the target could not be confirmed while the message was being sent (${reason}).`
-    : `Send stopped: the target changed while the message was being sent (${reason}).`;
+    : `Send stopped: the target changed while the message was being sent (send target changed: ${reason}).`;
   const tail = outcome === 'not_sent'
     ? ' The message was not delivered; read the roster again, then send it again.'
     : ' The message may already have reached the session; look at the pane before sending it again.';
