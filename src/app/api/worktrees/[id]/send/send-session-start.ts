@@ -29,6 +29,11 @@ import { createLogger } from '@/lib/logger';
 import { AntigravityTool } from '@/lib/cli-tools/antigravity';
 import type { ClaudeTool } from '@/lib/cli-tools/claude';
 import { broadcastSessionStatus } from '@/lib/realtime/terminal-broadcast';
+import {
+  classifyOwnSendFenceOutcome,
+  reportSendFenceOutcome,
+  type SendFenceOutcome,
+} from '@/lib/session/send-fence-outcome';
 import { CLAUDE_MODEL_EXAMPLES, MODEL_REFUSED_CODE, type SendStep } from './send-request';
 
 const logger = createLogger('api/send');
@@ -87,10 +92,17 @@ export interface StartSessionForSendInput {
 }
 
 /**
+ * {@link startSessionForSend}'s step. `fence` (Issue #4534 PR-B, internal): the
+ * classified refusal of the send's fence when the start threw one; the route
+ * answers `response` only.
+ */
+export type StartSessionStep = SendStep<void> & { fence?: SendFenceOutcome };
+
+/**
  * Start the CLI tool session a send needs (it is not running). ok once it is
  * started and broadcast; otherwise the handler's answer.
  */
-export async function startSessionForSend(input: StartSessionForSendInput): Promise<SendStep<void>> {
+export async function startSessionForSend(input: StartSessionForSendInput): Promise<StartSessionStep> {
   const { db, cliTool, cliToolId, worktreeId: id, worktreePath, instanceId, model } = input;
   try {
     if (cliToolId === 'antigravity' && model) {
@@ -121,7 +133,10 @@ export async function startSessionForSend(input: StartSessionForSendInput): Prom
       }
     }
   } catch (error: unknown) {
-    return { ok: false, response: answerSessionStartFailure(error, input) };
+    // Issue #4534 (PR-B): classified under the send's ticket, before it closes.
+    const fence = classifyOwnSendFenceOutcome(error);
+    const response = answerSessionStartFailure(error, input, fence);
+    return fence !== null ? { ok: false, response, fence } : { ok: false, response };
   }
 
   // Issue #1120: push the running transition so sidebar status dots flip
@@ -137,8 +152,14 @@ export async function startSessionForSend(input: StartSessionForSendInput): Prom
 export function answerSessionStartFailure(
   error: unknown,
   input: Pick<StartSessionForSendInput, 'cliTool' | 'worktreeId' | 'instanceId' | 'recordNotSent'>,
+  fence: SendFenceOutcome | null = classifyOwnSendFenceOutcome(error),
 ): NextResponse | Promise<NextResponse> {
   const { cliTool, worktreeId: id, instanceId, recordNotSent } = input;
+  // Issue #4534 (PR-B, design v2 §3.2): the fence's refusal is classified first
+  // (orders 1–3). Step 1 keeps every answer below as it is (the public values
+  // wait for step 2). The route opens the ticket right before the start, so no
+  // body or dispatch can have started under it: a refusal here is `not-sent`.
+  reportSendFenceOutcome('start', fence);
   // Review P3-2: this start asked for a model, and joined a launch of the
   // session that is starting with another. Nothing was typed; answered as
   // a `--model` to a running session is (#989 / #2771).

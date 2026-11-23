@@ -25,7 +25,8 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
 import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-constants';
 import { sendUserMessage } from '@/lib/session/send-user-message';
-import { runWithSendTicket } from '@/lib/session/terminal-fence';
+import { runWithSendTicket, type SendTicketHandle } from '@/lib/session/terminal-fence';
+import { classifySendFenceOutcome, reportSendFenceOutcome } from '@/lib/session/send-fence-outcome';
 import { timerSendTicketInit } from '@/lib/session/send-target-names';
 import type { CLIToolType } from './cli-tools/types';
 import { getOrInitGlobal } from './global-state';
@@ -77,6 +78,8 @@ function getState(): TimerManagerState {
 async function executeTimer(timerId: string): Promise<void> {
   const state = getState();
   const db = getDbInstance();
+  // [Issue #4534] PR-B: the send's ticket, once it is open.
+  let ticket: SendTicketHandle | null = null;
 
   try {
     const timer = getTimerById(db, timerId);
@@ -141,6 +144,7 @@ async function executeTimer(timerId: string): Promise<void> {
     // record the user message in chat_messages and start response polling —
     // otherwise they never appear in Message History.
     // [Issue #4534] Under the timer's send ticket: its own row still `sending`.
+    // PR-B: its handle kept for a throw's classification below.
     const result = await runWithSendTicket(
       timerSendTicketInit(db, { id: timerId, worktreeId: timer.worktreeId, instanceId, cliToolId: timer.cliToolId as CLIToolType }),
       () => sendUserMessage(db, {
@@ -148,10 +152,15 @@ async function executeTimer(timerId: string): Promise<void> {
         content: timer.message,
         cliToolId: timer.cliToolId as CLIToolType,
         instanceId,
-      })
+      }),
+      (opened) => {
+        ticket = opened;
+      }
     );
 
     if (!result.ok) {
+      // [Issue #4534] PR-B: the fence's refusal, classified (internal); the text below is today's.
+      reportSendFenceOutcome('timer', 'fence' in result ? result.fence : undefined);
       // [Issue #1107] Persist the failure reason so the detail modal can show
       // it (previously logged server-side only).
       const reason = `[${result.stage}] ${result.error}`;
@@ -164,6 +173,7 @@ async function executeTimer(timerId: string): Promise<void> {
 
     logger.info('timer:sent', { timerId, worktreeId: timer.worktreeId });
   } catch (error) {
+    reportSendFenceOutcome('timer', classifySendFenceOutcome(error, ticket));
     const msg = error instanceof Error ? error.message : String(error);
     try {
       // [Issue #1107] Persist the thrown error message as the failure reason.
