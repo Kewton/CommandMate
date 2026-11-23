@@ -599,7 +599,7 @@ describe('T17 r2 (a P3-1): the launch records the fence’s state, not always no
         cliTool,
         worktreeId: WT,
         instanceId: 'claude',
-        recordNotSent: (reason) => void notSent.push(reason),
+        recordNotSent: (reason: string) => void notSent.push(reason),
         recordAttempt: (s: string, reason: string) => void attempts.push([s, reason]),
       } as never,
       fenceOf(state),

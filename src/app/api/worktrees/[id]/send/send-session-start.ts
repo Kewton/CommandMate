@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server';
 import type Database from 'better-sqlite3';
 import { saveInitialBranch, getInitialBranch } from '@/lib/db';
 import type { CLIToolType, ICLITool } from '@/lib/cli-tools/types';
-import type { SendAttemptReason } from '@/lib/session/send-attempt-types';
+import type { SendAttemptReason, SendAttemptState } from '@/lib/session/send-attempt-types';
 import {
   buildSessionExitedToShellMessage,
   isSessionStartTimeoutError,
@@ -92,6 +92,12 @@ export interface StartSessionForSendInput {
   model: string | undefined;
   /** Records this request's attempt as not sent (Issue #3759 / #4011). */
   recordNotSent: (reason: SendAttemptReason) => void;
+  /**
+   * Issue #4534 (PR-B r2): records this request's attempt in the state the fence
+   * gave (`indeterminate` when the body or a dispatch had started). Omitted, an
+   * `indeterminate` refusal records nothing rather than a `not-sent` it cannot prove.
+   */
+  recordAttempt?: (state: SendAttemptState, reason: SendAttemptReason) => void;
 }
 
 /**
@@ -194,18 +200,20 @@ export function answerSendTargetChanged(fence: SendFenceOutcome, input: SendTarg
 export function answerSessionStartFailure(
   error: unknown,
   input: Pick<StartSessionForSendInput, 'cliTool' | 'worktreeId' | 'instanceId' | 'recordNotSent'> &
-    Partial<Pick<StartSessionForSendInput, 'db' | 'cliToolId'>>,
+    Partial<Pick<StartSessionForSendInput, 'db' | 'cliToolId' | 'recordAttempt'>>,
   fence: SendFenceOutcome | null = classifyOwnSendFenceOutcome(error),
 ): NextResponse | Promise<NextResponse> {
   const { cliTool, worktreeId: id, instanceId, recordNotSent } = input;
   // Issue #4534 (PR-B, design v2 §3.2): the fence's refusal is classified first
-  // (orders 1–3), before the role's and the start's own answers. The route
-  // opens the ticket right before the start, so no body or dispatch can have
-  // started under it: a refusal here is recorded `not-sent`. The target changed:
-  // 409 SEND_TARGET_CHANGED (C1). A misuse: today's answer, reason `fence-misuse` (C8).
+  // (orders 1–3), before the role's and the start's own answers. The target
+  // changed: 409 SEND_TARGET_CHANGED (C1), recorded in the fence's state (r2: the
+  // route opens the ticket right before the start, so it is `not-sent` today; an
+  // `indeterminate` one is never recorded `not-sent`). A misuse: today's answer,
+  // reason `fence-misuse` (C8).
   reportSendFenceOutcome('start', fence);
   if (fence?.kind === 'target-changed') {
-    recordNotSent('target-changed');
+    if (fence.state === 'not-sent') recordNotSent('target-changed');
+    else input.recordAttempt?.(fence.state, 'target-changed');
     return answerSendTargetChanged(fence, { db: input.db, worktreeId: id, instanceId, cliToolId: input.cliToolId ?? cliTool.id });
   }
   // Review P3-2: this start asked for a model, and joined a launch of the

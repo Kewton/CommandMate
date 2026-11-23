@@ -254,11 +254,12 @@ export type SendUserMessageResult =
    * that is only `SESSION_STARTING`: the agent's session was just launched and
    * its input prompt has not appeared yet, which the send route answers with the
    * same 503 a slow claude start gets. Absent for every other failure.
-   */
-  /**
-   * `fence` (Issue #4534 PR-B, internal): the classified refusal of the send's
-   * fence (design v2 §3.2), present only when there was one. Read by the relay
-   * delivery and the timer; no route answer, CLI output or `lastSend` carries it.
+   *
+   * `fence` (Issue #4534 PR-B): the classified refusal of the send's fence
+   * (design v2 §3.2), present only when there was one. The send route answers
+   * kind `target-changed` with its 409 `SEND_TARGET_CHANGED`; the relay delivery
+   * settles by its state, the timer puts `[target_changed]` at the head of its
+   * reason; the attempt (`lastSend`) already carries its reason (`fenceAttemptReason`).
    */
   | {
       ok: false;
