@@ -10,6 +10,16 @@
  * reference in the body and in docs/orchestrate/ itself to an existing file
  * and an existing heading, with the anchor built by GitHub's heading rule.
  *
+ * Every document under docs/orchestrate/ must be reachable from the body:
+ * named by the body directly, or named by the index docs/orchestrate/README.md
+ * when the body names that index. Changed in #4546 PR-2 (it used to require
+ * the body to name every document directly): PR-1 added the one body line that
+ * names the index, and orchestrate-cards-4546 (G1c) pins that the index names
+ * every document. The body has 18 bytes left under its 108,000-byte cap
+ * (orchestrate-size-3481, #4276), so it cannot name each new document itself.
+ * No document is excluded, and the index route counts only while the body
+ * names the index.
+ *
  * It also pins the shape of the body's 「必ず守ること」 section: each collected
  * rule names the heading it came from, and that heading exists in the body.
  *
@@ -82,6 +92,31 @@ export function brokenReferences(refs: readonly Reference[], docsDir: string): s
   return broken;
 }
 
+/** A markdown link from the index to a document next to it: `[text](<file>.md)` with an optional `#anchor`. */
+const SIBLING_LINK = /\]\(([A-Za-z0-9._-]+\.md)(?:#[^)\s]*)?\)/g;
+
+/** The index the body may name, through which every other document is reachable. */
+export const INDEX = 'README.md';
+
+/**
+ * The documents in `docFiles` reachable from `bodyText`: named by it directly, or
+ * named by `indexText` when the body names the index ({@link INDEX}).
+ * @returns the documents not reached, in `docFiles` order
+ */
+export function unreachableDocuments(
+  docFiles: readonly string[],
+  bodyText: string,
+  indexText: string,
+): string[] {
+  const named = new Set(references(BODY, bodyText).map((ref) => ref.file));
+  if (named.has(INDEX)) {
+    for (const ref of references(`${DOCS_DIR}/${INDEX}`, indexText)) named.add(ref.file);
+    // The index sits in docs/orchestrate/ and links its neighbours relatively: `[x](history.md#…)`.
+    for (const m of indexText.matchAll(SIBLING_LINK)) named.add(m[1]);
+  }
+  return docFiles.filter((name) => !named.has(name));
+}
+
 const read = (rel: string): string => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
 const body = read(BODY);
 const docFiles = fs.readdirSync(path.join(REPO_ROOT, DOCS_DIR)).filter((name) => name.endsWith('.md')).sort();
@@ -101,8 +136,8 @@ describe('orchestrate.md → docs/orchestrate/ references resolve (#3481)', () =
   });
 
   it('every document under docs/orchestrate/ is reachable from the body', () => {
-    const named = new Set(references(BODY, body).map((ref) => ref.file));
-    expect(docFiles.filter((name) => !named.has(name))).toEqual([]);
+    const index = docFiles.includes(INDEX) ? read(`${DOCS_DIR}/${INDEX}`) : '';
+    expect(unreachableDocuments(docFiles, body, index)).toEqual([]);
   });
 });
 
@@ -153,6 +188,25 @@ describe('controls', () => {
   it('positive: a heading that only appears inside fenced code does not count', () => {
     const dir = docsWith({ 'a.md': '```bash\n## 分析要求\n```\n' });
     expect(brokenReferences(references('body', 'docs/orchestrate/a.md#分析要求 を読む'), dir)).toHaveLength(1);
+  });
+
+  it('N1: without the body line naming the index, a document named only by the index is unreachable', () => {
+    const docs = ['README.md', 'a.md', 'b.md'];
+    const index = '- [a.md](a.md)\n- [b.md](b.md#見出し)\n';
+    expect(unreachableDocuments(docs, 'docs/orchestrate/a.md を読む\n', index)).toEqual(['README.md', 'b.md']);
+  });
+
+  it('N2: a document neither the body nor the index names is unreachable', () => {
+    const docs = ['README.md', 'a.md', 'b.md', 'orphan.md'];
+    const body = '入口（索引）: docs/orchestrate/README.md\n';
+    const index = '- [a.md](a.md)\n- docs/orchestrate/b.md\n';
+    expect(unreachableDocuments(docs, body, index)).toEqual(['orphan.md']);
+  });
+
+  it('negative: every document named by the body or by the index the body names is reachable', () => {
+    const docs = ['README.md', 'a.md', 'b.md'];
+    const body = '入口（索引）: docs/orchestrate/README.md\ndocs/orchestrate/a.md を読む\n';
+    expect(unreachableDocuments(docs, body, '- [b.md](b.md#見出し)\n')).toEqual([]);
   });
 
   it('negative: an existing heading resolves, and the anchor stops at the space before を読む', () => {

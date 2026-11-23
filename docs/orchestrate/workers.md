@@ -329,3 +329,9 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 ## 4-3 隣の Issue のファイルに及んだ差分
 
 ワーカーの差分が隣の Issue のファイルに及んでいて、それが同じ修正の別の面（PC とスマホ、など）なら、revert して分け直さずに 1 本の PR にまとめる。PR で両方の Issue を Closes にし、もう一方の Issue は「#N にまとめた」とコメントして閉じ、後ろの波を縮める。まとめる前に、まとめた先が実際にマウント・配線されていることを `git grep` で確かめる。依存の分析は、Issue 本文が挙げたファイルではなく実際の差分（`git show --name-only`）を正とする。
+
+## 3-2 完了の見張りが pane を読む細部
+
+元の場所: [team.md](team.md) §8（#4546 で移した。文は元のまま）
+
+見張りは、セッションが動いていれば（`NOT_RUNNING` でなければ）担当（CLI）を問わず毎ポーリング `capture --pane` を読み、終わり方を pane の**全行**で判定する。許可のプロンプトも、その担当の既存の目印を pane にも当てて拾う（目印を持たない担当、たとえば codex は、サーバーの `isPromptWaiting` に任せる）。`capture --json` は状態・`promptData` などに併せて使うだけで、終わり方の判定には `content` / `realtimeSnippet` を使わない（どちらも窓で、Command Code は上から描くので余白になり、codex は下端の入力欄だけが入る。`--pane --tail N` の末尾 N 行も同じ理由で使わない）。行は照合の前に 1 つの正規化を通す（ANSI・右の差分のパネル `<文字><空白 2 つ以上>│ …`・前後の空白を落とす。行頭の返しの目印（集合は `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv`）は 1 つだけ剥がすので 1 行だけの返事も拾い、入力欄の `❯ DONE: …` は拾わない）。`--pane` の読み取りに失敗したら、失敗が続く間に 1 回だけ `WARN` を出す（読めたら張り直す）。

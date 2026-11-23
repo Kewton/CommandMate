@@ -1,5 +1,17 @@
 # Antigravity 担当の運用メモ
 
+## 私たちの運用での扱い（AI から使わない）
+
+元の場所: [team.md](team.md) の「Antigravity の扱い」（#4546 で移した。文は元のまま）
+
+2026-11-16 から、私たちの運用では AI（PM・ジャッジ・リーダー・ワーカー・イネーブラー）から Antigravity（agy）を使わない。理由: Google Antigravity 追加利用規約 6 条と公式 FAQ（https://antigravity.google/terms ・ https://antigravity.google/docs/faq ）が、個人向けプランで第三者のソフトウェア・エージェントを通して Antigravity を使うことを制限している。私たちのサインインは個人向けプラン。
+
+- `send`・`ask`・`respond`・relay・`/orchestrate` の宛先に antigravity を選ばない。Schedule・日次サマリー・agent-health の対象にしない。antigravity の instance に Auto-Yes を入れない。`agy --version` などの読み取りも AI からは実行しない
+- agy の動きの試験は偽の agy（隔離のサーバー）で行う。本物が要る場面は人が端末で手で行い、結果を渡す
+- 製品側の既定の拒否と利用上の注意は、それぞれの Issue で進める
+
+## このメモについて
+
 Antigravity 担当のワーカーに固有の運用メモと、手で確かめるときの手順を移した（#3481）。いつ読むかは本体の各節に書いてある。
 
 **今は使わない（#4238）。** 難易度「易」の担当は Command Code に変わった（docs/orchestrate/command-code.md）。ここの実測は記録として残す。
