@@ -6,6 +6,8 @@
  * Runs only tests affected by the diff plus tests that scan repository files:
  * their union once, split into at most 4 groups by recorded duration (LPT) and
  * run at the same time, each group a serial `vitest run <files>` (Issue #4577).
+ * The durations come from vitest's results cache of this worktree, then of the
+ * other worktrees of the repository (read only: a new worktree has none).
  * Changes outside src/ and tests/ do not switch to the whole unit suite
  * (Issue #4467): CI's Unit Tests runs it for every PR.
  * Excludes metadata files (.commandmate/tasks/, dev-reports/, changelog.d/,
@@ -206,7 +208,7 @@ export function unionSets(related, textscan) {
  * the split falls back to equal weights; it never changes which files run.
  *
  * @param {{ root: string }} options
- * @returns {{ status: 'ok' | 'missing' | 'corrupt', durations: Map<string, number> }}
+ * @returns {{ status: 'ok' | 'missing' | 'corrupt', durations: Map<string, number>, mtimeMs: number }} mtimeMs: the newest results.json read (0 when none)
  */
 export function readDurationCache({ root }) {
   /** @type {Map<string, number>} */
@@ -223,10 +225,12 @@ export function readDurationCache({ root }) {
     files = [];
   }
   if (files.length === 0) {
-    return { status: 'missing', durations };
+    return { status: 'missing', durations, mtimeMs: 0 };
   }
+  let mtimeMs = 0;
   try {
     for (const file of files) {
+      mtimeMs = Math.max(mtimeMs, fs.statSync(file).mtimeMs);
       const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
       if (!parsed || typeof parsed.version !== 'string' || !Array.isArray(parsed.results)) {
         throw new Error('unexpected shape');
@@ -244,9 +248,107 @@ export function readDurationCache({ root }) {
       }
     }
   } catch {
-    return { status: 'corrupt', durations: new Map() };
+    return { status: 'corrupt', durations: new Map(), mtimeMs: 0 };
   }
-  return { status: 'ok', durations };
+  return { status: 'ok', durations, mtimeMs };
+}
+
+/**
+ * The other worktrees of the repository `root` belongs to, from
+ * `git worktree list --porcelain` (the main checkout included, `root` itself
+ * excluded). Throws when git cannot list them.
+ *
+ * @param {{ root: string }} options
+ * @returns {string[]} absolute paths
+ */
+export function listOtherWorktrees({ root }) {
+  const outText = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+    cwd: root,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 30_000,
+  });
+  const real = (/** @type {string} */ p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const self = real(root);
+  return outText
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length))
+    .filter((p) => p && real(p) !== self);
+}
+
+/**
+ * Reads vitest's results cache of every other worktree, READ ONLY (#4577 段 2):
+ * a new worktree's first run has no cache of its own. Never throws: a worktree
+ * whose cache is missing or broken is skipped, and a failing `git worktree list`
+ * means no peers (the split falls back to today's weights).
+ *
+ * @param {{ root: string, listWorktrees?: typeof listOtherWorktrees, readCache?: typeof readDurationCache }} options
+ * @returns {{ status: 'ok' | 'unavailable', count: number, peers: { name: string, durations: Map<string, number>, mtimeMs: number }[] }}
+ *   peers: the readable caches, newest results.json first; count: the other worktrees found
+ */
+export function readPeerDurationCaches({ root, listWorktrees = listOtherWorktrees, readCache = readDurationCache }) {
+  let others;
+  try {
+    others = listWorktrees({ root });
+  } catch {
+    return { status: 'unavailable', count: 0, peers: [] };
+  }
+  /** @type {{ name: string, durations: Map<string, number>, mtimeMs: number }[]} */
+  const peers = [];
+  for (const other of others) {
+    try {
+      const c = readCache({ root: other });
+      if (c.status === 'ok' && c.durations.size > 0) {
+        peers.push({ name: path.basename(other), durations: c.durations, mtimeMs: c.mtimeMs ?? 0 });
+      }
+    } catch {
+      // skipped: only the split could change
+    }
+  }
+  peers.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { status: 'ok', count: others.length, peers };
+}
+
+/**
+ * The duration of each file of `files`: the own cache first, then the other
+ * worktrees in the order given (newest first). Files found nowhere are left
+ * out (splitLpt weighs them by the median, or equally).
+ *
+ * @param {string[]} files
+ * @param {Map<string, number>} own
+ * @param {{ name: string, durations: Map<string, number> }[]} peers
+ * @returns {{ durations: Map<string, number>, own: number, peer: number, byPeer: [string, number][], none: number }}
+ */
+export function mergeDurations(files, own, peers) {
+  /** @type {Map<string, number>} */
+  const durations = new Map();
+  /** @type {Map<string, number>} */
+  const byPeer = new Map();
+  let ownCount = 0;
+  let peerCount = 0;
+  for (const f of files) {
+    if (own.has(f)) {
+      durations.set(f, /** @type {number} */ (own.get(f)));
+      ownCount++;
+      continue;
+    }
+    const hit = peers.find((p) => p.durations.has(f));
+    if (hit) {
+      durations.set(f, /** @type {number} */ (hit.durations.get(f)));
+      byPeer.set(hit.name, (byPeer.get(hit.name) ?? 0) + 1);
+      peerCount++;
+    }
+  }
+  const order = peers.map((p) => p.name);
+  const list = /** @type {[string, number][]} */ ([...byPeer.entries()]).sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
+  return { durations, own: ownCount, peer: peerCount, byPeer: list, none: files.length - ownCount - peerCount };
 }
 
 /**
@@ -458,6 +560,8 @@ function defaultTmpBase() {
  *   collectSet?: typeof collectRelatedSet,
  *   runGroup?: typeof runGroupProcess,
  *   readCache?: typeof readDurationCache,
+ *   readPeers?: typeof readPeerDurationCaches,
+ *   listWorktrees?: typeof listOtherWorktrees,
  *   split?: typeof splitLpt,
  *   mkdtemp?: (prefix: string) => string,
  * }} [deps]
@@ -477,6 +581,8 @@ export async function main(argv, deps = {}) {
   const collectSet = deps.collectSet ?? collectRelatedSet;
   const runGroup = deps.runGroup ?? runGroupProcess;
   const readCache = deps.readCache ?? readDurationCache;
+  const readPeers = deps.readPeers ?? readPeerDurationCaches;
+  const listWorktrees = deps.listWorktrees ?? listOtherWorktrees;
   const split = deps.split ?? splitLpt;
   const mkdtemp = deps.mkdtemp ?? ((/** @type {string} */ prefix) => fs.mkdtempSync(prefix));
 
@@ -527,10 +633,23 @@ export async function main(argv, deps = {}) {
   }
 
   const cache = readCache({ root });
-  const plan = split(union.files, cache.durations, maxGroups);
+  // #4577 段 2: the other worktrees' caches, read only. Only the split can change.
+  /** @type {ReturnType<typeof readPeerDurationCaches>} */
+  let peers;
+  try {
+    peers = readPeers({ root, listWorktrees });
+  } catch {
+    peers = { status: 'unavailable', count: 0, peers: [] };
+  }
+  const merged = mergeDurations(union.files, cache.durations, peers.peers);
+  const plan = split(union.files, merged.durations, maxGroups);
   const n = plan.groups.length;
   log(
     `${LOG_PREFIX} split=lpt groups=${n} cache=${cache.status} known=${plan.known}/${union.files.length} default-weight=${Math.round(plan.defaultWeight)}ms`
+  );
+  const peerDetail = merged.byPeer.length > 0 ? `(${merged.byPeer.map(([name, c]) => `${name}:${c}`).join(',')})` : '';
+  log(
+    `${LOG_PREFIX} durations=own:${merged.own} peer:${merged.peer}${peerDetail} default:${merged.none} peers=${peers.status === 'ok' ? peers.count : peers.status}`
   );
 
   const vitestBin = path.join(root, 'node_modules', '.bin', 'vitest');
@@ -657,7 +776,7 @@ export async function main(argv, deps = {}) {
       const exitStr = error ? `spawn-error(${error.message})` : signal ? `signal(${signal})` : String(code);
       const ok = !error && !signal && code === 0 && report !== null && missing.length === 0 && extra.length === 0;
       if (!ok) failedAny = true;
-      const expectedStr = cache.status === 'ok' && plan.known > 0 ? `${(plan.expectedMs[i] / 1000).toFixed(1)}s` : '-';
+      const expectedStr = plan.known > 0 ? `${(plan.expectedMs[i] / 1000).toFixed(1)}s` : '-';
       let line = `${LOG_PREFIX} group ${i + 1}/${n} files=${r.files.length} expected=${expectedStr} actual=${r.seconds.toFixed(1)}s ran=${report ? ran.length : 'no-report'} exit=${exitStr}`;
       if (missing.length > 0) line += ` missing=${missing.length}(${missing.slice(0, 3).join(',')})`;
       if (extra.length > 0) line += ` extra=${extra.length}(${extra.slice(0, 3).join(',')})`;
