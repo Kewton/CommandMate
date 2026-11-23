@@ -20,6 +20,7 @@ import {
   type MemKind,
   type MemState,
 } from '@/types/mem';
+import { storedPromoteToRefusal } from '@/lib/promote/promote-to-rule';
 import { readStoredCloseWhen } from './close-when';
 import { findSecretRule, MEM_SECRET_RULES, MEM_SECRET_RULES_VERSION, type MemSecretRule } from './secret-scan';
 import { memItemStaleness } from './staleness';
@@ -82,8 +83,19 @@ export function findWithheld(
 
 const iso = (epoch: number | null): string | null => (epoch === null ? null : new Date(epoch).toISOString());
 
+/**
+ * Issue #4354 (design §3.2): a decision not closed whose `at` (marked as an expiry or not) has
+ * passed at `now` — the same comparison as the evaluation's `decideAt`. Reading only: the item is
+ * neither closed nor written here; the evaluation's write side is the one place that closes.
+ */
+export function isExpiredDecision(kind: MemKind, state: MemState, closeWhen: MemCloseWhen | null, now: number): boolean {
+  return kind === 'decision' && state !== 'closed' && closeWhen?.type === 'at' && now >= closeWhen.epochMs;
+}
+
 export function presentMemItem(record: MemRecord, options: PresentOptions = {}): MemItemView {
   const closeWhen: MemCloseWhen | null = readStoredCloseWhen(record.closeWhen);
+  const now = options.now ?? Date.now();
+  const promoteToRefusal = record.kind === 'decision' ? storedPromoteToRefusal(record.promoteTo) : null;
   const full: MemItemView = {
     id: record.id,
     kind: record.kind,
@@ -103,12 +115,11 @@ export function presentMemItem(record: MemRecord, options: PresentOptions = {}):
     updatedAt: iso(record.updatedAt) as string,
     closedAt: iso(record.closedAt),
     closeReason: record.closeReason,
-    stale:
-      memItemStaleness(
-        { kind: record.kind, state: record.state, closeWhen, updatedAt: record.updatedAt },
-        options.now ?? Date.now()
-      ) === 'stale',
+    stale: memItemStaleness({ kind: record.kind, state: record.state, closeWhen, updatedAt: record.updatedAt }, now) === 'stale',
     frozen: options.frozen ?? false,
+    // Issue #4354: added only when they hold, so every other item keeps its shape.
+    ...(isExpiredDecision(record.kind, record.state, closeWhen, now) ? { expired: true as const } : {}),
+    ...(promoteToRefusal ? { promoteToRefusal } : {}),
   };
 
   const hit = findWithheld(record, options.rules, options.rulesVersion);

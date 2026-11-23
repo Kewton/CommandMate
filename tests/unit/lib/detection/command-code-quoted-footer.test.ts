@@ -362,6 +362,9 @@ const PRE_FIX_VERDICTS: Record<string, string> = {
   'long-body-2464/command-code-idle.capture': 'ready input_prompt',
   'long-body-2464/command-code-pasted-60L.capture': 'ready input_prompt',
 
+  // Synthetic (#4532): Command Code・返しの行で終わったターンの画面。`✻ Worked for 2s` の下の入力欄 `❯ Ask your question...` で待つ（元の turn-done-1490 と同じ待ち）。
+  'orchestrate-monitor-4532/command-code-top-anchored-synthetic.txt': 'ready input_prompt',
+
   // tui-frame-footer-2776
   'tui-frame-footer-2776/command-code-1.58.0-idle-after-turn.txt': 'ready input_prompt',
   'tui-frame-footer-2776/command-code-1.58.0-idle-quoted-footers.txt': 'ready input_prompt',

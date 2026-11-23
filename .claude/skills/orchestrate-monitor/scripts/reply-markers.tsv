@@ -1,0 +1,31 @@
+# reply-markers.tsv — the ONE list of reply markers (Issue #4532, invariant M1).
+#
+# A CLI draws a marker glyph at the head of the FIRST row of an assistant reply.
+# A one-line reply therefore reads `<marker> DONE: …` / `<marker> IMPL_COMPLETED`,
+# and the row normalization strips ONE of these markers (and the one blank after
+# it) before a reader matches the row. Every reader takes the set from this file
+# and from nowhere else:
+#   bash  .claude/skills/orchestrate-monitor/scripts/monitor-lib.sh  (ML_REPLY_MARKERS)
+#   JS    scripts/orchestrate/wait-verify.mjs  (readReplyMarkers / normalizePaneLine;
+#         launch-worker.mjs reads it through returnLineOf)
+# tests/unit/skills/orchestrate-monitor/reply-markers-4532.test.ts fails when a
+# marker glyph is written into those files directly (M2), and
+# monitor-ending-generated-4532.test.ts generates its cells from these rows (M3).
+#
+# Format: one marker per line, four TAB-separated fields; `#` lines are comments.
+#   tool      the CLI tool id (src/lib/cli-tools/types.ts CLI_TOOL_IDS)
+#   platform  `macos`, `other` (every platform but macOS) or `any`
+#   marker    the glyph, exactly as drawn
+#   source    where it was measured
+#
+# Not listed, because no reply row of theirs is measured: antigravity and
+# copilot draw `●` on tool and notice rows (tests/fixtures/antigravity-live-2364,
+# tests/fixtures/copilot-folder-trust-1080.ts), but no assistant reply row in the
+# repository shows the marker a one-line reply would carry. A marker added here is
+# picked up by every reader and every generated test at once.
+#
+# tool	platform	marker	source
+claude	macos	⏺	claude 2.1.330 bundle: `x()==="macos"?"⏺":"●"`; live: tests/fixtures/claude-live-2247
+claude	other	●	claude 2.1.330 bundle: the same constant on Linux, WSL2 and every non-macOS platform (review-4532-opus P2-1)
+codex	any	•	live: tests/fixtures/codex-live-2310/saturated-idle-tail.txt (`• A worktree is …`)
+command-code	any	⠶	src/lib/detection/tools/command-code/patterns.ts COMMAND_CODE_RESPONSE_MARKER_PATTERN; live: tests/fixtures/command-code-live-2250

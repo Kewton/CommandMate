@@ -80,7 +80,7 @@ function runLoop(fixture: string, polls: number, extraArgs: string[] = []): RunR
   // polls the loop really made instead of trusting the loop's own stdout.
   writeFileSync(
     cmShim,
-    `#!/bin/sh\nprintf '%s\\n' "$*" >> "${captureLog}"\ncat "${path.join(FIXTURES, fixture)}"\n`,
+    `#!/bin/sh\ncase " $* " in *" capture "*" --pane "*) exit 0 ;; esac\nprintf '%s\\n' "$*" >> "${captureLog}"\ncat "${path.join(FIXTURES, fixture)}"\n`,
   );
   chmodSync(tmuxShim, 0o755);
   chmodSync(cmShim, 0o755);

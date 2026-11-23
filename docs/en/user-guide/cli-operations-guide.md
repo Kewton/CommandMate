@@ -2908,7 +2908,9 @@ commandmate mem decisions <itemId> [--worktree <id> | --repository <id>] [--effe
 - `--close-when`: `manual` · `replaced` (now only) · `issue:[host/owner/repo]#N` · `pr:[host/owner/repo]#N[?state=merged|closed]` · `branch:<name>?merged=<ref>[&scope=local|remote]` · `branch:<name>?deleted` · `relay:<id>` · `worktree:<id>` · `session:task:<id>` · `session:verify:<run id>` · `session:schedule:<execution log id>` · `at:<ISO 8601 with an offset>`. `session:` takes only the three runs CommandMate records the end of (no tmux session name, no PID). `branch:…?deleted` also stores the tip at the time of writing (empty when the ref does not exist)
 - Only the instance that wrote an item (its same incarnation) and a person (on the screen) may `update` / `close` it. An instance removed and made again under the same id is another incarnation and cannot change the earlier items (exit 55)
 - `add` with `--key` answers the first item to a retry with the same key and content (`replayed: true`); different content is exit 54
-- `purge` deletes nothing without `--confirm` and shows the counts. Recorded / promoted decisions are left out unless `--include-decisions`. Refused from inside an agent session (exit 55)
+- `purge` deletes nothing without `--confirm` and shows the counts. Recorded / promoted decisions are left out unless `--include-decisions`. **A decision closed within the last 24 hours is never purged, whatever the options (`--include-decisions` too), and is not counted** (the window in which a person can see the grants that ended and the decisions withdrawn; it can be purged once 24 hours have passed. Issue #4354). Refused from inside an agent session (exit 55)
+- The warning counts (`mem list`'s `warnings`, `check --suggest`'s `open_count`) count a decision only while `open` or `recorded`; a `promoted` (reflected) one is not counted (Issue #4354)
+- Marks on a `mem list` line: `expired` — the time of a decision's `at` has passed (a comparison of times on reading; nothing is closed). `promote-to-refused:<reason>` — the stored destination cannot be used (see "Checks on the free fields"; `--json` carries `expired: true` and `promoteToRefusal`. Issue #4354)
 
 ### Evaluating the close conditions (Issue #4222)
 
@@ -2954,7 +2956,7 @@ Conditions are **evaluated when read** (`mem list`, `mem check`, the brief); not
 
 ### Checks on the free fields
 
-Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checked on the server for its length limit, secret-like strings (tokens, keys, `password=`, …) and control characters. `path:` in `evidence` and `promote_to` takes repository-relative paths only, and refuses absolute paths, `..` leaving the repository, a symlink on the way and files like `.env`. A refusal shows only `code`, `field` and `rule` in the error, `--json` and the log — **never the refused text itself**.
+Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checked on the server for its length limit, secret-like strings (tokens, keys, `password=`, …) and control characters. `path:` in `evidence` and `promote_to` takes repository-relative paths only, and refuses absolute paths, `..` leaving the repository, a symlink on the way and files like `.env`. A `promote_to` `path:` also goes through **the one check** the approval's diff and the write use: an agent's instruction file (the list under the decision screen below, case-insensitive) and a file that is not a `.md` are refused when written (`mem add`, the screen's add, a handoff proposal) with `invalid_promote_to` (exit 2, `reason` `agent_instructions` / `not_markdown`), and the CLI adds one sentence on what to do (a path under `.git` is refused when written as before, with `sensitive_path`, exit 2). The write does not look at the disk (whether the parent directory exists, whether an existing entry is a regular file, at most 1 MiB), so for example `path:docs/decisions/x.md` with no parent directory is accepted when written and refused by the approval's diff with `invalid_destination` (a known gap). A row stored before this is kept and listed with its reason (`promoteToRefusal`), and the decision screen shows that reason under its destination; its diff is refused as before (Issue #4354). A refusal shows only `code`, `field` and `rule` in the error, `--json` and the log — **never the refused text itself**.
 
 ### Exit codes
 
@@ -2962,7 +2964,7 @@ Every free field (`text`, `quote`, `evidence`, `promote_to`, `reason`) is checke
 |:----:|---------|
 | 0 | Done (also a `--key` retry answering the existing item) |
 | 1 | The server cannot be reached |
-| 2 | Invalid input (`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required`, …); nothing stored |
+| 2 | Invalid input (`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_promote_to` / `invalid_key` / `target_required`, …); nothing stored |
 | 50 | `disabled`: the branch's mode is `off` or `derived`; nothing stored (`check` asks nothing either) |
 | 51 | `version_conflict`: `--if-version` is not the current version; the stored item is returned |
 | 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
