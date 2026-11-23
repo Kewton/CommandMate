@@ -123,6 +123,20 @@ function superviseInBackground(extra: Record<string, string>): ChildProcess {
   return child;
 }
 
+/**
+ * The pid is gone from the process table (reaped), not only dead: the machine lock reads a zombie as a holder that
+ * is still there (kill -0 succeeds), which the old per-owner check did not (Issue #4288 PR1c, design F4). A child of
+ * this test is reaped by the event loop, so the wait gives it the turn before a synchronous spawn blocks it.
+ */
+function reaped(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 async function waitFor(predicate: () => boolean, what: string, ms = 60_000): Promise<void> {
   const until = Date.now() + ms;
   while (Date.now() < until) {
@@ -283,7 +297,7 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       const oldRunId = firstLedgers[0].runId;
 
       process.kill(first.pid!, 'SIGKILL');
-      await waitFor(() => !alive(first.pid!), 'the first supervisor to die');
+      await waitFor(() => reaped(first.pid!), 'the first supervisor to die');
       fs.rmSync(path.join(base, 'paused-reclaim'));
 
       const third = supervise({ CM_PRODUCT_STAGE_CMD: 'exit 0' });
@@ -311,7 +325,7 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
         return ledger !== undefined && resource(ledger, 'runner')?.state === 'acquired';
       }, 'the runner to be acquired');
       process.kill(sup.pid!, 'SIGKILL');
-      await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
+      await waitFor(() => reaped(sup.pid!), 'the supervisor to die');
 
       const [ledger] = ledgers();
       const server = serverPid(ledger);
@@ -348,7 +362,7 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       const sup = superviseInBackground({ CM_PRODUCT_STAGE_CMD: 'exit 0', CM_PRODUCT_TEST_PAUSE_AT: 'cleanup' });
       await waitFor(() => fs.existsSync(path.join(base, 'paused-cleanup')), 'the supervisor to reach cleanup');
       process.kill(sup.pid!, 'SIGKILL');
-      await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
+      await waitFor(() => reaped(sup.pid!), 'the supervisor to die');
       const [left] = ledgers();
       const oldRunId = left.runId;
       const server = serverPid(left);
@@ -371,7 +385,7 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       const sup = superviseInBackground({ CM_PRODUCT_TEST_PAUSE_AT: 'up' });
       await waitFor(() => fs.existsSync(path.join(base, 'paused-up')), 'the server to be up, not yet acquired');
       process.kill(sup.pid!, 'SIGKILL');
-      await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
+      await waitFor(() => reaped(sup.pid!), 'the supervisor to die');
       const [ledger] = ledgers();
       expect(resource(ledger, 'server')!.state).toBe('planned');
       expect(resource(ledger, 'tmux')!.state).toBe('planned');
@@ -510,7 +524,7 @@ describe.skipIf(!HAS_TOOLS)('supervisor.sh (Issue #3312)', () => {
       const sup = superviseInBackground({ CM_PRODUCT_TEST_PAUSE_AT: 'up' });
       await waitFor(() => fs.existsSync(path.join(base, 'paused-up')), 'the server to be up');
       process.kill(sup.pid!, 'SIGKILL');
-      await waitFor(() => !alive(sup.pid!), 'the supervisor to die');
+      await waitFor(() => reaped(sup.pid!), 'the supervisor to die');
       const [left] = ledgers();
       const oldRunId = left.runId;
       const server = serverPid(left);
@@ -619,7 +633,13 @@ describe.skipIf(!HAS_TOOLS)('the supervisor lock (Issue #3312, review of PR #340
       encoding: 'utf8',
       env: { ...process.env, LC_ALL: 'C' },
     }).stdout.trim();
-    fs.writeFileSync(path.join(lockDir(), 'owner'), `pid=${process.pid}\nlstart=${lstart}\nlabel=alive\ntoken=t\n`);
+    // A new writer's record (v=1, PR1a-f I9) with started_at= (UTC, whatever the TZ of the reader): the
+    // lstart texts need not match for it to read as alive (Issue #4288 PR1c).
+    const startedAt = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString().replace('.000Z', 'Z');
+    fs.writeFileSync(
+      path.join(lockDir(), 'owner'),
+      `pid=${process.pid}\nhost=${os.hostname()}\ntoken=t\nstarted_at=${startedAt}\nv=1\nlabel=alive\nlstart=${lstart}\n`
+    );
     const res = lib('product_lock_acquire test && echo HELD');
     expect(res.stdout).not.toContain('HELD');
     expect(res.stderr).toBe('');
@@ -644,10 +664,11 @@ describe.skipIf(!HAS_TOOLS)('the supervisor lock (Issue #3312, review of PR #340
 });
 
 describe.skipIf(!HAS_TOOLS)('deadline-guard.sh and a supervisor starting at the same time (Issue #3312)', () => {
-  it('does not remove a fresh lock made between its stale check and its takeover', () => {
-    // The stale lock: a dead owner. While the guard checks that pid, a `ps`
-    // stub on PATH swaps in a fresh lock owned by a live process (this test),
-    // as a supervisor starting at that moment would make it.
+  it('does not remove a fresh lock made between its stale check and its takeover', async () => {
+    // The stale lock: a dead owner. While the guard has judged it dead and is about to recover it
+    // (CM_VERIFY_TEST_HANDOFF=pause:recover-only-judged), this test swaps in a fresh lock owned by a
+    // live process, as a supervisor starting at that moment would make it (Issue #4288 PR1c: the
+    // interrupt is the lock section's pause, not a `ps` stub — the dead pid is judged by kill -0).
     const lock = path.join(base, 'supervisor.lock');
     const next = path.join(base, 'supervisor.lock.next');
     fs.mkdirSync(lock, { recursive: true });
@@ -659,27 +680,22 @@ describe.skipIf(!HAS_TOOLS)('deadline-guard.sh and a supervisor starting at the 
     }).stdout.trim();
     fs.writeFileSync(path.join(next, 'owner'), `pid=${process.pid}\nlstart=${lstart}\nlabel=fresh\ntoken=new\n`);
 
-    const stubBin = path.join(root, 'stub-bin');
-    fs.mkdirSync(stubBin);
-    fs.writeFileSync(
-      path.join(stubBin, 'ps'),
-      `#!/bin/sh
-case " $* " in
-  *" 999999 "*)
-    if [ -d '${next}' ]; then rm -rf '${lock}' && mv '${next}' '${lock}'; fi ;;
-esac
-exec /bin/ps "$@"
-`,
-      { mode: 0o755 }
-    );
-
-    const res = spawnSync('bash', [GUARD], {
+    const pauseDir = path.join(root, 'pause');
+    fs.mkdirSync(pauseDir);
+    const child = spawn('bash', [GUARD], {
       cwd: REPO_ROOT,
-      env: { ...env(), PATH: `${stubBin}:${env().PATH}` },
-      encoding: 'utf8',
-      timeout: 60_000,
+      env: { ...env(), CM_VERIFY_TEST_HANDOFF: 'pause:recover-only-judged', CM_VERIFY_TEST_HANDOFF_DIR: pauseDir },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    expect(res.status, res.stderr).toBe(0);
+    let stderr = '';
+    child.stderr?.on('data', (d) => (stderr += d));
+    const closed = new Promise<number | null>((resolve) => child.on('close', resolve));
+    await waitFor(() => fs.existsSync(path.join(pauseDir, 'recover-only-judged.reached')), 'the guard to have judged the lock');
+    fs.rmSync(lock, { recursive: true, force: true });
+    fs.renameSync(next, lock);
+    fs.writeFileSync(path.join(pauseDir, 'recover-only-judged.go'), '');
+    const status = await closed;
+    expect(status, stderr).toBe(0);
     expect(fs.existsSync(next), 'the swap happened during the stale check').toBe(false);
     expect(fs.readFileSync(path.join(lock, 'owner'), 'utf8')).toContain('token=new');
   });
