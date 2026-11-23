@@ -77,19 +77,50 @@ const split = (node: string): [string, string] => {
   return [node.slice(0, i), node.slice(i + 1)];
 };
 
-/** As `resolveRepoSpecifier`, and for a file that exists only in `files` (a control's added file). */
-function resolveIn(files: ReadonlyMap<string, string>, specifier: string, fromFile: string): string | null {
-  const onDisk = resolveRepoSpecifier(specifier, join(REPO_ROOT, fromFile));
-  if (onDisk !== null) return onDisk;
+/*
+ * What one file's text answers for one name is kept for the process (Issue #4534,
+ * the 5-second timeout): every control is today's tree plus a few files, so the
+ * walk asked the same file the same question once per test and parsed it again
+ * each time (about 3 s a test alone, 7–14 s under the load of a whole run). The
+ * answer is a function of the file's path and text, the name, and — for a free
+ * function — where the specifiers resolve. The disk does not change during a
+ * run (the controls are in memory); an answer that read the tree's own added
+ * files (a specifier the disk does not resolve) is NOT kept, so it is computed
+ * again for each tree. The rules, the files read and the answers are unchanged.
+ */
+const memo = new Map<string, { exportStar: boolean; answers: Map<string, unknown> }>();
+const memoOf = (text: string): { exportStar: boolean; answers: Map<string, unknown> } => {
+  let entry = memo.get(text);
+  if (entry === undefined) {
+    entry = { exportStar: /\bexport\s*\*/.test(text), answers: new Map() };
+    memo.set(text, entry);
+  }
+  return entry;
+};
+const onDisk = new Map<string, string | null>();
+
+/**
+ * As `resolveRepoSpecifier`, and for a file that exists only in `files` (a control's added file).
+ * `readTree` is told when the answer could depend on `files` (the disk did not resolve a repo specifier).
+ */
+function resolveIn(files: ReadonlyMap<string, string>, specifier: string, fromFile: string, readTree: () => void = () => {}): string | null {
+  const diskKey = `${fromFile}\u0000${specifier}`;
+  let disk = onDisk.get(diskKey);
+  if (disk === undefined) {
+    disk = resolveRepoSpecifier(specifier, join(REPO_ROOT, fromFile));
+    onDisk.set(diskKey, disk);
+  }
+  if (disk !== null) return disk;
   const base = specifier.startsWith('@/') ? `src/${specifier.slice(2)}` : specifier.startsWith('.') ? normalize(join(dirname(fromFile), specifier)) : null;
   if (base === null) return null;
+  readTree();
   for (const candidate of [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`]) if (files.has(candidate)) return join(REPO_ROOT, candidate);
   return null;
 }
 
-function importsFrom(files: ReadonlyMap<string, string>, text: string, file: string, target: string): boolean {
+function importsFrom(files: ReadonlyMap<string, string>, text: string, file: string, target: string, readTree: () => void): boolean {
   const specifiers = [...text.matchAll(/(?:from\s+|import\(\s*)['"]([^'"]+)['"]/g)].map((m) => m[1]);
-  return specifiers.some((specifier) => resolveIn(files, specifier, file) === target);
+  return specifiers.some((specifier) => resolveIn(files, specifier, file, readTree) === target);
 }
 
 /** Every reference to the free function `name` defined in `definingFile`, as `file#site`. */
@@ -98,22 +129,48 @@ export function freeReferences(files: ReadonlyMap<string, string>, definingFile:
   const found: string[] = [];
   for (const [file, text] of files) {
     // (f): `export *` re-exports the name without spelling it.
-    if (!text.includes(name) && !/\bexport\s*\*/.test(text)) continue;
-    const sites = scanReferences(file, text, [name], {
-      fromDefiningModule: (specifier) => resolveIn(files, specifier, file) === target,
-    });
-    for (const site of sites) {
-      if (file === definingFile || importsFrom(files, text, file, target)) found.push(key(file, site.site));
+    if (!text.includes(name) && !memoOf(text).exportStar) continue;
+    const answers = memoOf(text).answers;
+    const question = `free\u0000${file}\u0000${definingFile}\u0000${name}`;
+    const kept = answers.get(question) as string[] | undefined;
+    if (kept !== undefined) {
+      found.push(...kept);
+      continue;
     }
+    let treeRead = false;
+    const readTree = (): void => {
+      treeRead = true;
+    };
+    const sites = scanReferences(file, text, [name], {
+      fromDefiningModule: (specifier) => resolveIn(files, specifier, file, readTree) === target,
+    });
+    const here: string[] = [];
+    for (const site of sites) {
+      if (file === definingFile || importsFrom(files, text, file, target, readTree)) here.push(key(file, site.site));
+    }
+    if (!treeRead) answers.set(question, here);
+    found.push(...here);
   }
   return found;
+}
+
+/** Every `x.name(…)` in one file, as its site and receiver (a function of the path and the text only). */
+function memberCallsOf(file: string, text: string, name: string): Array<{ site: string; receiver: string }> {
+  const answers = memoOf(text).answers;
+  const question = `member\u0000${file}\u0000${name}`;
+  let calls = answers.get(question) as Array<{ site: string; receiver: string }> | undefined;
+  if (calls === undefined) {
+    calls = scanMemberCalls(file, text, name).map((call) => ({ site: call.site, receiver: call.receiver }));
+    answers.set(question, calls);
+  }
+  return calls;
 }
 
 function memberReferences(files: ReadonlyMap<string, string>, name: string): string[] {
   const found: string[] = [];
   for (const [file, text] of files) {
     if (!text.includes(name)) continue;
-    for (const call of scanMemberCalls(file, text, name)) {
+    for (const call of memberCallsOf(file, text, name)) {
       const site = key(file, call.site);
       const excused = NOT_A_SEND.some((row) => row.site === site && row.member === name && row.receiver === call.receiver);
       if (!excused) found.push(site);
