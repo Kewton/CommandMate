@@ -1716,11 +1716,11 @@ lock_recover() { # <lock-path> <dead-token> <dead-pid>
 # lock_recover itself keeps its contract (move, check the token, put back): the put-back is only the
 # guard of the window between this read and its mv. Callers: lock_acquire_path, lock_release_as_head,
 # lock_recover_only (D6).
-lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
+lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point> [<in>: acquire from lock_acquire_path]
   lock_obs_owner "$4" "$1"
   case "$LOB_CLASS" in
     record) ;;
-    unknown) lock_reread_unknown "$4" "$1/owner" "$LOB_CODE"; return 0;;
+    unknown) lock_reread_unknown "$4" "$1/owner" "$LOB_CODE" "${5:-}"; return 0;;
     missing)
       lrj_e=$(lock_ownerless_empty "$1")
       case "$lrj_e" in
@@ -1728,7 +1728,7 @@ lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
         unknown:*)
           lrj_u=${lrj_e#unknown:}
           lrj_r=${lrj_u#*:}
-          lock_reread_unknown "${lrj_u%%:*}" "${lrj_r%:*}" "${lrj_r##*:}";;
+          lock_reread_unknown "${lrj_u%%:*}" "${lrj_r%:*}" "${lrj_r##*:}" "${5:-}";;
         *) LRC_RESULT=changed;;
       esac
       return 0;;
@@ -1741,14 +1741,31 @@ lock_recover_judged() { # <lock-path> <dead-token> <dead-pid> <point>
   lock_recover "$1" "$2" "$3"
 }
 
-# Nothing moved; named once like the other unknowns (LOCK_UNKNOWN for the timeout's line), and the caller
-# judges again. LOCK_REREAD_NAMED is this acquisition's own mark (lock_acquire_path empties it): the
-# timeout's line skips only an observation this acquisition already named here, never one named by an
-# earlier acquisition of the same process (LOCK_WARNED is the process's warn-once and is not reset).
-lock_reread_unknown() { # <point> <path> <errno>
+# Nothing moved; named like the other unknowns (LOCK_UNKNOWN for the timeout's line), and the caller
+# judges again. The invariant (#4559 r6): in each acquisition of one process, the re-read's unknown and
+# the end of the wait are one line together for the same observation (point, path, errno), one line each
+# for different ones, none when they do not occur. So inside an acquisition (<in> = acquire) the line is
+# decided by LOCK_REREAD_NAMED — this acquisition's mark, emptied by lock_acquire_path, added to only when
+# the line is printed, never twice — and not by LOCK_WARNED, the process's warn-once that an earlier
+# acquisition or D5 / D6 filled. The line is still recorded in LOCK_WARNED, so D5 / D6 (no <in>) keep
+# their warn-once as before.
+lock_reread_unknown() { # <point> <path> <errno> [<in>]
   lock_note_unknown "$1" "$2" "$3"
-  lock_warn_once "machine-lock-unknown point=$1 path=$2 errno=$3"
-  LOCK_REREAD_NAMED="$LOCK_REREAD_NAMED|point=$1 path=$2 errno=$3|"
+  lrn_obs="point=$1 path=$2 errno=$3"
+  if [ "${4:-}" = acquire ]; then
+    case "$LOCK_REREAD_NAMED" in
+      *"|$lrn_obs|"*) ;;
+      *)
+        echo "verify-run: machine-lock-unknown $lrn_obs" >&2
+        LOCK_REREAD_NAMED="$LOCK_REREAD_NAMED|$lrn_obs|"
+        case "$LOCK_WARNED" in
+          *"|machine-lock-unknown $lrn_obs|"*) ;;
+          *) LOCK_WARNED="$LOCK_WARNED|machine-lock-unknown $lrn_obs|";;
+        esac;;
+    esac
+  else
+    lock_warn_once "machine-lock-unknown $lrn_obs"
+  fi
   LRC_RESULT=reread-unknown
 }
 
@@ -2169,7 +2186,7 @@ lock_acquire_path() { # <lock-path> <queue-dir> <budget-seconds>
                   # (#4559 stays open). A re-read that failed marks nothing broken: judged again next
                   # poll. Test seam: pause:recover-judged.
                   lock_test_pause recover-judged
-                  lock_recover_judged "$LOCK_PATH" "$la_token" "$la_pid" lock-owner
+                  lock_recover_judged "$LOCK_PATH" "$la_token" "$la_pid" lock-owner acquire
                   if [ "$LRC_RESULT" != reread-unknown ]; then
                     la_broken=$la_token
                     continue
