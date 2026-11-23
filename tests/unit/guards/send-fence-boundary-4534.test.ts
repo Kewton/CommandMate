@@ -343,7 +343,8 @@ describe('the entry’s own check: a mismatch refuses before any change', () => 
     onFirst((o) => o.line.startsWith('capture-pane'), () => setRosterTool('codex-tr', 'claude'));
     const sent = captureToolError('codex', 'sendMessage');
     const { status } = await postTerminal({ cliToolId: 'codex', command: 'echo refused', instanceId: 'codex-tr' }).finally(() => sent.restore());
-    expect(status).toBe(500);
+    // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+    expect(status).toBe(409);
     expect(changes()).toEqual([]);
     expect(refusedFor(sent.error(), 'tool-changed')).toBe(true);
   }, 60_000);
@@ -410,7 +411,8 @@ describe('T1 (F1, R9): the target changes around the body', () => {
     const sent = captureToolError(tool, 'sendMessage');
     try {
       const { status } = await postSend({ content: 'body t1', cliToolId: tool, instanceId });
-      expect(status).toBe(500);
+      // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+      expect(status).toBe(409);
       expect(changes()).toEqual([]);
       expect(refusedFor(sent.error(), 'target-gone')).toBe(true);
     } finally {
@@ -533,7 +535,8 @@ describe('T3 (F3): the launch the send starts', () => {
     onFirst((o) => o.line.startsWith('has-session') || /which /.test(o.line), () => dropRoster(instanceId));
     const start = captureToolError(tool, 'startSession');
     const { status, json } = await postSend({ content: 'body t3', cliToolId: tool, instanceId }).finally(() => start.restore());
-    expect(status).toBe(500);
+    // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+    expect(status).toBe(409);
     expect(changes()).toEqual([]);
     expect(refusedFor(start.error(), 'target-gone')).toBe(true);
     expect(String(json.error)).toContain('send target changed: target-gone');
@@ -549,7 +552,8 @@ describe('T3 (F3): the launch the send starts', () => {
     const start = captureToolError(tool, 'startSession');
     try {
       const { status, json } = await postSend({ content: 'body t3b', cliToolId: tool, instanceId });
-      expect(status).toBe(500);
+      // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+      expect(status).toBe(409);
       expect(changeCommands()).toEqual(['new-session', 'set-option', 'new-window', 'set-window-option', 'resize-window']);
       expect(String(json.error)).toContain('send target changed: target-gone');
       expect(reportSessionStartFailure).not.toHaveBeenCalled();
@@ -571,7 +575,8 @@ describe('T4 (I2, R7): the roster moves after a change that went out', () => {
     onFirst(isKeys(/CM_PORT|claude/), () => setRosterTool('claude-t4', 'codex'));
     const start = captureToolError('claude', 'startSession');
     const { status } = await postSend({ content: 'body t4', cliToolId: 'claude', instanceId: 'claude-t4' }).finally(() => start.restore());
-    expect(status).toBe(500);
+    // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+    expect(status).toBe(409);
     expect(refusedFor(start.error(), 'tool-changed')).toBe(true);
     const keys = changes().filter((l) => l.startsWith('send-keys'));
     expect(keys.length).toBeGreaterThan(0);
@@ -587,7 +592,8 @@ describe('T4 (I2, R7): the roster moves after a change that went out', () => {
     onFirst(isKeys(/C-u|BSpace/), () => dropRoster('codex-t4'));
     const sent = captureToolError('codex', 'sendMessage');
     const { status } = await postSend({ content: 'body t4c', cliToolId: 'codex', instanceId: 'codex-t4' }).finally(() => sent.restore());
-    expect(status).toBe(500);
+    // PR-B (#4534): PR-A の途中の答え 500 は 409 SEND_TARGET_CHANGED に（設計 改 3 §6）
+    expect(status).toBe(409);
     expect(refusedFor(sent.error(), 'target-gone')).toBe(true);
     expect(changes().some((l) => /C-u|BSpace/.test(l))).toBe(true);
     expect(changes().some((l) => l.includes('body t4c') || /Enter$/.test(l))).toBe(false);

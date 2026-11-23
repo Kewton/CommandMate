@@ -88,7 +88,9 @@ export class FenceMisuseError extends Error {
   readonly delivery = 'not-started' as const;
   constructor(
     readonly reason: FenceMisuseReason,
-    what: string
+    what: string,
+    /** The request whose ticket was open when it was misused; null with none (PR-B: classification order 2). */
+    readonly requestId: string | null = null
   ) {
     super(`send fence ${reason}: ${what}`);
     this.name = 'FenceMisuseError';
@@ -276,9 +278,13 @@ export function fenceBatchStep(batch: FenceBatch): void {
     observe('create', 'bare', null);
     return;
   }
-  if (!FenceBatchToken.isToken(batch)) throw new FenceMisuseError('not-a-batch', 'a step with something no creation opened');
-  if (!FenceBatchToken.isActive(batch)) throw new FenceMisuseError('batch-ended', 'a step after its creation ended');
-  if (FenceBatchToken.ticketOf(batch) !== ticket) throw new FenceMisuseError('batch-of-another-send', 'a step under another ticket');
+  if (!FenceBatchToken.isToken(batch)) {
+    throw new FenceMisuseError('not-a-batch', 'a step with something no creation opened', ticket.requestId);
+  }
+  if (!FenceBatchToken.isActive(batch)) throw new FenceMisuseError('batch-ended', 'a step after its creation ended', ticket.requestId);
+  if (FenceBatchToken.ticketOf(batch) !== ticket) {
+    throw new FenceMisuseError('batch-of-another-send', 'a step under another ticket', ticket.requestId);
+  }
   observe('create', 'batch', ticket);
 }
 
@@ -360,15 +366,41 @@ export function readOwnFenceRefusal(): OwnFenceRefusal | null {
   return { refusal: ticket.refusal, bodyStarted: ticket.bodyStarted, dispatchUnknown: ticket.dispatchUnknown };
 }
 
+/**
+ * What a request's own ticket says, refused or not (PR-B: the classification
+ * reads it — order 1 the refusal, order 2 the request id — and the flags give
+ * the state).
+ */
+export interface OwnSendTicket {
+  readonly requestId: string;
+  readonly refusal: SendTargetChangedError | null;
+  readonly bodyStarted: boolean;
+  readonly dispatchUnknown: boolean;
+}
+
+/** The open ticket of this context as {@link OwnSendTicket}; null when there is none (or it is closed). */
+export function readOwnSendTicket(): OwnSendTicket | null {
+  const ticket = liveTicket();
+  if (ticket === null) return null;
+  return {
+    requestId: ticket.requestId,
+    refusal: ticket.refusal,
+    bodyStarted: ticket.bodyStarted,
+    dispatchUnknown: ticket.dispatchUnknown,
+  };
+}
+
+/** The request id of the open ticket in this context; null with none (a refusal made here names it). */
+export function currentSendRequestId(): string | null {
+  return liveTicket()?.requestId ?? null;
+}
+
 /** An open ticket, as its entry holds it. */
-export interface SendTicketHandle {
+export interface SendTicketHandle extends OwnSendTicket {
   /** Run `fn` under the ticket; `fn`'s own value (its promise) comes back as is (R6). */
   run<T>(fn: () => T): T;
   /** Close it (idempotent). A closed ticket is the same as none. */
   close(): void;
-  readonly refusal: SendTargetChangedError | null;
-  readonly bodyStarted: boolean;
-  readonly dispatchUnknown: boolean;
 }
 
 function countName(name: string, delta: 1 | -1): void {
@@ -403,6 +435,7 @@ export function openSendTicket(init: SendTicketInit): SendTicketHandle {
   };
   for (const name of names) countName(name, 1);
   return {
+    requestId: ticket.requestId,
     run: (fn) => state.tickets.run(ticket, fn),
     close: () => {
       if (ticket.closed) return;
@@ -424,9 +457,16 @@ export function openSendTicket(init: SendTicketInit): SendTicketHandle {
 /**
  * An entry with one call: open, run `fn` under it, close when `fn` settles.
  * `fn`'s own promise comes back — no `await`, no `finally` in between (R6).
+ * `onOpen` (PR-B) hands the entry its handle, so the entry's own `catch` can
+ * classify by it after the ticket closed.
  */
-export function runWithSendTicket<T>(init: SendTicketInit, fn: () => Promise<T>): Promise<T> {
+export function runWithSendTicket<T>(
+  init: SendTicketInit,
+  fn: () => Promise<T>,
+  onOpen?: (ticket: SendTicketHandle) => void
+): Promise<T> {
   const handle = openSendTicket(init);
+  onOpen?.(handle);
   let promise: Promise<T>;
   try {
     promise = handle.run(fn);

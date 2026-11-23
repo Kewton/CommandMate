@@ -242,7 +242,11 @@ not caught.
 Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
 (nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
 hold or the start was refused because of its role (nothing typed); 33 refused by the
-tool policy (antigravity, above; nothing typed, do not send it again).
+tool policy (antigravity, above; nothing typed, do not send it again); 34 the target
+(the instance's tool, the worktree, OpenCode's dispatch target) changed or could not be
+confirmed while sending and the message was not delivered (sendOutcome=not_sent): read
+the roster again, then send it again. Stopped that way after part of it may have gone in
+(sendOutcome=unknown) is 99: check the pane before resending.
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {

@@ -22,7 +22,7 @@ CommandMate は、いつも使っているコーディングエージェント�
 | 3 — Manage | PM 役のエージェントが計画・割り当て・確認をまとめる。あなたは PM と話して承認する | Owner: 方向を決めて承認する |
 | Next — Learn | まだ作っていない。方向だけ: 過去の作業の記録から、仕事の進め方を良くしていく | — |
 
-**Anywhere:** どの Level でも、スマホのブラウザから応答・承認できる。机を離れても仕事が止まらない。
+**Anywhere:** どの Level でも、スマホのブラウザから応答・承認できる。机を離れても仕事が止まらない。スマホ幅のブラウザやインストールしたアプリ（PWA）でも、worktree の画面にはターミナル・履歴・ファイル・ツール・情報の 5 つのタブがあり、応答・承認・ファイルの確認・Notes はスマホからもできる。
 
 多くの人は Level 2 で十分です。自分に合う Level で止めてかまいません。上を目指す必要はありません。
 
@@ -41,6 +41,16 @@ as observed（実測した範囲）: 2026-10-02 に記録した 1 回の run。�
 
 オープンソース（MIT） · あなたのマシンで動く · macOS / Linux / Windows（WSL2） · アプリのインストールは不要
 
+### 1 つのプロンプトでチームを組む
+
+自分のリポジトリで Level 3 を使いたい — 話し相手の PM、開発リーダー、それぞれ自分の worktree で働くワーカー、レビュアー、審判を置きたい — なら、いつも使っているエージェント CLI（Claude Code、Codex、Command Code）に次を貼ってください:
+
+```text
+https://kewton.github.io/CommandMate/team-setup.md を読んで、私のリポジトリ用の CommandMate のチームを私と一緒に設定してください。各手順は実行する前に説明し、何かをインストールする前、リポジトリのファイルを変える前、インスタンスやロールを作る前、権限を変える前、`commandmate sync` を実行する前、GitHub リポジトリを使う前、Auto Yes を有効にする前、マージする前には私に確認してください。
+```
+
+エージェントは、手元にあるエージェント CLI、リポジトリが走らせるチェック、最初に取りかかる GitHub Milestone を尋ねます。あなたは答えて承認します。ガイドは CommandMate が未導入ならそのインストールから始まり、エージェント CLI が 1 つだけのときのチームもあり、Antigravity はエージェントが動かすどのロールにも入れません。エージェントが記録した決定（記録できるのは mem の mode が `on` のブランチだけで、既定は `off`）は、CommandMate の画面であなたを待ちます。CommandMate を入れたあとは、同じガイドを `commandmate docs --section team-setup` で読めます（ガイドは英語）。
+
 ---
 
 ## 困りごと
@@ -48,6 +58,7 @@ as observed（実測した範囲）: 2026-10-02 に記録した 1 回の run。�
 - エージェントは何時間でも働ける。あなたは何時間も机に張り付いて応えられない。
 - 外から見ると、手が空いたエージェントと、あなたを待っているエージェントの区別がつかない。
 - エージェントの「やりました」は、やった証拠ではない。
+- 実物を確かめるにはエディタ・ターミナル・ファイルを行き来することになり、そこで集中が切れる。
 
 ---
 
@@ -55,7 +66,9 @@ as observed（実測した範囲）: 2026-10-02 に記録した 1 回の run。�
 
 ### Level 1 — Parallel
 
-Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode（1.x と V2） ・ Antigravity ・ Command Code ・ ローカルモデルを並べて動かす。タスクごとに、Git worktree（リポジトリの作業用コピー）とセッションを 1 つずつ割り当てるので、2 つのエージェントが同じファイルを同時に書き換えることはない。どのエージェントがあなたを待っているかはバッジやプッシュ通知で届き、チャットのように応答できる。
+Claude Code ・ Codex ・ Gemini CLI ・ Copilot ・ OpenCode（1.x と V2） ・ Antigravity ・ Command Code ・ ローカルモデルを並べて動かす。タスクごとに、Git worktree（リポジトリの作業用コピー）とセッションを 1 つずつ割り当てるので、2 つのエージェントが同じファイルを同時に書き換えることはない。どのエージェントがあなたを待っているかはバッジやプッシュ通知（push は `commandmate init` で設定したとき）で届き、チャットのように応答できる。
+
+確認は 1 つの画面で完結する。セッションをターミナルとチャット表示で切り替え、エージェントの返答に出たパスからそのままファイルを開き、ファイルツリー・画像・動画を見て、使い回す指示は Worktree Notes に置ける。CommandMate を離れずに、要約ではなく実物を確かめられる。
 
 あなたの役割: Operator。各エージェントの質問を読み、応える。
 
@@ -77,9 +90,11 @@ Issues → Task contracts → Worktrees → Agents × N → Checks → PR
 
 設定するには、[セットアップガイド](https://kewton.github.io/CommandMate/setup.md)の Stage 4〜6 に沿って進めます。PM・開発リーダー・ワーカーを置き、役割のテンプレートは[チームの役割](../user-guide/team-roles.md)にあります。承認はあなたのままで、既定はあなたがマージします。記録された例は [commandmate-team-demo](https://github.com/Kewton/commandmate-team-demo) です。
 
+[1 つのプロンプトでチームを組む](#1-つのプロンプトでチームを組む) のチームは 5 つのロール — PM・開発リーダー・ワーカー・レビュアー・審判 — を持つ。ロールは `commandmate roles` で定義し、各セッションの起動時に決まる。`send --role` が合わなければ何も送らずに exit 32 で止まる。仕事は GitHub Milestone 1 つずつ進め、統合した結果を審判が Issue ごとに GO / NO-GO で報告する。レビュアーは team-setup が最初から作るロールの 1 つだが、別のエージェントによるレビューはあなたが足す 1 ステップで、CommandMate が自動で走らせるものではない。別のベンダーのエージェントがあればそちらを使う。
+
 ### Next — Learn
 
-まだ作っていない。方向だけを示す: 1 つひとつの作業が残す記録を使って、次の作業の進め方を良くしていく。
+まだ作っていない。方向だけを示す: 作業の外でエージェントが `mem` のメモをまとめ直し、あなたが画面で承認する提案として出すこと（#4248 で設計中）と、検証の履歴や STOP の傾向から、エージェントが自分で振り返って次の作業を変えること。`mem`・`brief`・`verify history` そのものは実装済み（`mem` と `brief` はブランチの mem の mode に従う: 書くには `on`、`brief` は `off` では何も出さず、既定は `off`）。
 
 各レベルの詳細は [公式サイト](https://kewton.github.io/CommandMate/) に、長い版は [CommandMate のしくみ](../user-guide/how-it-works.md) にあります。
 
@@ -119,7 +134,7 @@ commandmate start --daemon
 | コマンド | すること |
 |---------|---------|
 | `commandmate status` | サーバーが動いているか、プッシュ通知が設定済みか |
-| `commandmate remote` | QR コードでスマホとペアリングする |
+| `commandmate remote` | QR コードでスマホとペアリングする。公開の tunnel（Cloudflare）は承認してから始まる（非対話の環境では `--yes`） |
 | `commandmate ls` | すべての worktree と、そのセッションの状態 |
 | `commandmate send <id> "Issue #101 を実装して" --instance codex` | 1 つのエージェントのセッションにメッセージを送る |
 | `commandmate capture <id>` | セッションの現在の出力を読む |
@@ -132,6 +147,8 @@ commandmate start --daemon
 |---------|---------|
 | `commandmate send <id> --contract .commandmate/tasks/issue-101.yaml --instance codex` | タスク定義を渡す |
 | `commandmate wait <id> --instance codex --verify` | エージェントを待ち、あなたのチェックを実行して合否を返す |
+| `commandmate mem now "PR #12 の CI 待ち"` | セッションがいま何をしているかを残し、再起動の後に引き継ぐ（セッションの中から）。書けるのは mem の mode が `on` のブランチだけ（既定は `off`。mode は画面で切り替える） |
+| `commandmate mem add --kind waiting --text "PR #12 のレビュー" --close-when "pr:#12?state=merged"` | 条件を満たすと閉じる、型付きの項目。書けるのは mem の mode が `on` のブランチだけ（既定は `off`） |
 
 **Level 3 — Manage**
 
@@ -139,6 +156,8 @@ commandmate start --daemon
 |---------|---------|
 | `commandmate skill list` | worktree ごとに導入できる公式 Catalog の Skill（PM 役のエージェントが使う Skill を含む） |
 | `commandmate docs --section agent-operations` | エージェントに読ませるコマンドガイド全文 |
+| `commandmate roles list` | セッションを起動するときに選べるロール |
+| `commandmate send <id> "PR #12 をレビューして" --instance claude-2 --role reviewer` | `claude-2` は、その worktree の roster にすでにあるインスタンス ID の例。まずそのインスタンスのロールを `reviewer` として保存する。動いていなければそのロールで起動して送り、別のロールで動いている・起動の記録が無いときは何も送らない（exit 32。設定は保存済み） |
 
 すべてのコマンドとフラグは [CLI 操作ガイド](../user-guide/cli-operations-guide.md) に、オプション一覧は `commandmate --help` にあります。
 
