@@ -143,7 +143,7 @@ function citingFiles(): string[] {
  * number is made one.
  */
 export const ONE_PLACE: ReadonlyArray<{ text: string; owner: string; why: string }> = [
-  { text: '30〜45 分', owner: 'docs/orchestrate/team.md', why: '重い検証 1 本の待ちの見込み（§10-4）' },
+  { text: '30〜45 分', owner: 'docs/orchestrate/verify-queue.md', why: '重い検証 1 本の待ちの見込み（§10-4）' },
   { text: 'wip.total', owner: 'docs/orchestrate/team.md', why: 'WIP の上限の置き場（§7）' },
   { text: '目安は 3 レーン', owner: 'docs/orchestrate/team.md', why: 'レーンの目安（§7）' },
 ];
