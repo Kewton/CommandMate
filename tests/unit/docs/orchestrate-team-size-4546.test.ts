@@ -9,8 +9,8 @@
  * stays at 24 KB or less, checked the way CLAUDE.md's size is (count the bytes,
  * fail past the cap, and say in the failure how to fix it).
  *
- * 28,000 B は途中の値で、#4546 の受入（人の決定: team.md 24,000 B 以下）ではない。
- * PR-3 で 24,000 B へ下げる（PR-2 は文を書き換えずに移すだけで、移した後は 27,984 B）。
+ * PR-2 は途中の値 28,000 B を置き（移した後は 27,984 B）、PR-4 が受入の 24,000 B へ下げた（PR-4 は規則の
+ * 本文を一字一句のまま運用文書へ移し、team.md には元の行の先頭と指し先を残した。orchestrate-moved-verbatim-4546）。
  *
  * The cap is inclusive, so the boundary is pinned at the limit and one byte over.
  *
@@ -24,11 +24,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 export const TEAM_MD_RELATIVE_PATH = 'docs/orchestrate/team.md';
-/**
- * 28,000 bytes: an interim cap for #4546 PR-2, not the acceptance. The person's
- * decision is 24 KB (24,000 bytes), which PR-3 sets.
- */
-export const TEAM_MD_SIZE_LIMIT_BYTES = 28000;
+/** 24,000 bytes: the person's decision for #4546 (team.md at 24 KB or less). */
+export const TEAM_MD_SIZE_LIMIT_BYTES = 24000;
 
 export const HOW_TO_FIX =
   'team.md に規則以外（日付つきの実測・経緯・参照の細部）が溜まっている。' +
@@ -69,20 +66,20 @@ describe('team.md size cap: controls (#4546)', () => {
     return root;
   };
 
-  it('is 28000 bytes (interim; PR-3 lowers it to 24000)', () => {
-    expect(TEAM_MD_SIZE_LIMIT_BYTES).toBe(28000);
+  it('is 24000 bytes (the acceptance of #4546)', () => {
+    expect(TEAM_MD_SIZE_LIMIT_BYTES).toBe(24000);
   });
 
   it('negative: a file exactly at the limit passes (the cap is inclusive)', () => {
     const result = checkTeamMdSize(rootWithBytes(TEAM_MD_SIZE_LIMIT_BYTES));
-    expect(result).toMatchObject({ size: 28000, ok: true });
+    expect(result).toMatchObject({ size: 24000, ok: true });
     expect(sizeProblem(result)).toBe('');
   });
 
   it('positive: one byte over the limit fails, and the failure says how to fix it', () => {
     const result = checkTeamMdSize(rootWithBytes(TEAM_MD_SIZE_LIMIT_BYTES + 1));
-    expect(result).toMatchObject({ size: 28001, ok: false });
-    expect(sizeProblem(result)).toContain('28001 B');
+    expect(result).toMatchObject({ size: 24001, ok: false });
+    expect(sizeProblem(result)).toContain('24001 B');
     expect(sizeProblem(result)).toContain('history.md');
   });
 
@@ -90,8 +87,8 @@ describe('team.md size cap: controls (#4546)', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-orchestrate-team-size-'));
     const file = path.join(root, TEAM_MD_RELATIVE_PATH);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, 'あ'.repeat(9334)); // 9,334 characters, 28,002 bytes
-    expect(checkTeamMdSize(root)).toMatchObject({ size: 28002, ok: false });
+    fs.writeFileSync(file, 'あ'.repeat(8001)); // 8,001 characters, 24,003 bytes
+    expect(checkTeamMdSize(root)).toMatchObject({ size: 24003, ok: false });
   });
 
   it('throws when team.md is missing instead of passing', () => {
