@@ -472,6 +472,9 @@ describe('Issue #2035: sending over the opencode server', () => {
       expect(await verdictsOf(SLASH_BODY)).toEqual(['unknown']);
       expect(submitMock).not.toHaveBeenCalled();
       expect(classifySendFailure(sendError).state).toBe('indeterminate');
+      // r4 (U2): the send threw the stop's error — not a resolve that typed nothing.
+      expect(sendError).toMatchObject({ code: OPENCODE_DISPATCH_UNKNOWN_CODE });
+      expect(classifySendFailure(sendError)).toEqual({ state: 'indeterminate', reason: 'dispatch-unknown' });
     });
 
     it.each([
