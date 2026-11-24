@@ -6,8 +6,6 @@
 import { ExitCode } from '../types';
 import { ApiClient, ApiError } from '../utils/api-client';
 import { followUpCommand } from '../utils/follow-up-command';
-import { isToolPolicyDenied } from '../utils/tool-policy-failure';
-import type { FailedSendOutcome } from './message-dispatch';
 import type { CommandTarget } from './command-target';
 import { MEM_EXIT_BY_CODE, type MemErrorCode, type MemWriteResponse } from '../../types/mem';
 import type { SessionIdentity } from './whoami';
@@ -23,20 +21,6 @@ export function promptWaitingFallback(worktreeId: string, target: CommandTarget)
     // Issue #3982: the prompt is the resolved target's, not the worktree default's.
     `Answer it first: \`${followUpCommand('respond', worktreeId, target, '<answer>')}\`.`
   );
-}
-
-/**
- * Whether a failed send is known to have typed nothing: the server's word, or a 4xx
- * refused before an attempt. Not known otherwise (no answer, a 5xx saying nothing).
- */
-export function knownNotSent(error: unknown, outcome: FailedSendOutcome | null): boolean {
-  // Issue #4437: refused by the tool policy before anything was typed.
-  if (isToolPolicyDenied(error)) return true;
-  if (outcome !== null) return outcome !== 'unknown';
-  if (!(error instanceof ApiError)) return false;
-  const reported = error.payload?.sendOutcome;
-  if (reported !== undefined) return reported === 'not_sent';
-  return error.statusCode !== undefined && error.statusCode < 500;
 }
 
 /**

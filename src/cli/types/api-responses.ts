@@ -1787,8 +1787,17 @@ export interface ChatMessage {
    * Also on the error bodies after the reservation. Issue #4011: a send with
    * no bound relay carries it on its error bodies only (`not_sent` / `unknown`,
    * once the failure was recorded as its attempt; no 400), never on its 201.
+   * Issue #4535: the CLI reads it, with the rest of the answer, through
+   * `src/lib/send-outcome/classify-send-answer.ts` (a 2xx is a send only as a
+   * ChatMessage: a string `id` and `role: 'user'`).
    */
   sendOutcome?: 'sent' | 'not_sent' | 'unknown';
+  /**
+   * Issue #4535 (design C6): `false` when the server could not record the bound
+   * relay's outcome; absent when it did. `sendOutcome` still says what the send
+   * did, so the CLI reads nothing more from it (also on the error bodies).
+   */
+  relaySettled?: false;
   /**
    * Issue #4274: present when a session brief was put in front of the message
    * (`attached`), when the send named `--no-brief` / `--with-brief`, or when the

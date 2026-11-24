@@ -10,9 +10,9 @@
  * a dropped socket) is `unknown`: the message may be in, so nothing is withdrawn
  * and nothing is resent.
  *
- * Pure: no I/O, no exit codes, no wording. Stage 1 of the Issue — nothing calls
- * this yet; the CLI, the route and the screen are wired to it once the public
- * contract (design §4) is decided.
+ * Pure: no I/O, no exit codes, no wording. The CLI's `postMessage`
+ * (`src/cli/commands/message-dispatch.ts`) reads `/send` with it. No `@/` import:
+ * the CLI build has no path aliases.
  */
 
 /** The three outcomes of a send (design §2.1). */
@@ -230,8 +230,12 @@ export type RelayLookupState = 'awaiting' | 'input_started' | 'sent' | 'unknown'
 /**
  * Settle an `unknown` answer with the bound relay's own record (design §2.2):
  * `sent` is sent, `failed` is not sent (only this attempt's settle writes it),
- * anything else stays unknown. Answers with proof are left as they are, and the
- * relay's owner is not changed (N4 stays not ours — design Q13 is open).
+ * anything else stays unknown. Answers with proof are left as they are.
+ *
+ * Design Q13 (b): `failed` also makes the relay this send's again, N4 included.
+ * The one attempt bound to it typed nothing, so its relay, note and Auto-Yes are
+ * cleaned up like any `not_sent`'s. `sent` and anything else leave the owner as
+ * it was (N4 stays not ours: a copy may have arrived).
  */
 export function applyRelayLookup(
   classified: SendAnswerClassification,
@@ -239,6 +243,6 @@ export function applyRelayLookup(
 ): SendAnswerClassification {
   if (!classified.consultRelay || classified.fact !== 'unknown') return classified;
   if (sendState === 'sent') return { ...classified, fact: 'sent' };
-  if (sendState === 'failed') return { ...classified, fact: 'not_sent' };
+  if (sendState === 'failed') return { ...classified, fact: 'not_sent', relayOwned: true };
   return classified;
 }

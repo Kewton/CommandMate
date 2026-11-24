@@ -636,11 +636,24 @@ its request** (a new CLI with a new server).
   send failed, is never delivered. Confirmation (prompt) notices follow the same rule: only a dialog still
   open when the send is confirmed is reported. A reply that is ready while a prompt notice is being
   delivered goes out after the notice
-- The send API answers `sendOutcome` (`sent` / `not_sent` / `unknown`). The CLI withdraws the relay only
-  on `not_sent` (nothing reached the session). A 409 reservation conflict does not withdraw it. When the
-  answer is lost, the CLI asks `GET /api/relays/:id` and **does not resend** the message; when that does
-  not tell either, the relay is left open and stderr names the relay id and
-  `commandmate relays --id <relay-id>`
+- The send API answers `sendOutcome` (`sent` / `not_sent` / `unknown`). The CLI (`send` / `ask`) reads the
+  send from **that request's answer only** as `sent`, `not_sent` (proven to have typed nothing) or `unknown`
+  (neither can be said) (Issue #4535). It reads `not_sent` from a JSON answer with `sendOutcome: "not_sent"`
+  or a `code` the route answers only before the send (`model_refused`, `RELAY_BIND_INVALID` and so on, for
+  older servers), from an `ask` `sendState: "not_sent"`, and from a refused connection (`ECONNREFUSED`). A
+  bare page from a front (an HTML 408 or 404, …), a JSON 4xx with no `code`, and an empty, non-JSON or
+  differently shaped 2xx are `unknown` (those 2xx say
+  `Error: the server's answer did not say whether the message was sent` and exit 99; other exit codes are
+  unchanged)
+- The relay is withdrawn, the `--note` item closed and the Auto-Yes grant this send armed withdrawn only on
+  `not_sent` with a relay that is this send's. On `unknown` the message is **not resent**, the relay is left
+  open, and stderr names the relay id, `commandmate relays --id <relay-id>` and to check the pane before
+  resending (a send without a relay gets the same note). A bound relay is looked up with
+  `GET /api/relays/:id`: `sent` is taken as sent (exit 0), `failed` as `not_sent` and cleaned up
+- A 409 `RELAY_BIND_CONFLICT` (already reserved) means a copy of the same request (a front's retry, say)
+  reserved the relay first; it is not this send's relay. Nothing is undone and the relay is looked up:
+  `sent` is exit 0, `failed` is cleaned up with "safe to send it again", and anything else says that copy
+  may have arrived
 - An overlap is noted only when it is proven. The delivered body is the `[from <alias> / <worktree>]`
   line, one note line
   (`[CommandMate relay] Note: this reply may have been processed in the same turn as another request (overlap=later).`),

@@ -12,8 +12,8 @@ import { ExitCode } from '../types';
 import { readPackageVersion } from './package-info';
 import { isUatIsolationEnabled, UAT_ISOLATION_ENV_VAR } from '../../config/uat-isolation';
 import { loadClientEnv, resolveServerEndpoint } from './server-url';
-import { ApiError, handleApiError } from './api-client-errors';
-import type { ApiErrorPayload } from './api-client-errors';
+import { ApiError, contentTypeOf, handleApiError } from './api-client-errors';
+import type { ApiErrorPayload, PostInit, WireAnswer } from './api-client-errors';
 import { DeadlineExceededError } from './api-client-deadline';
 import { ToolPolicyDeniedError, clientWarning, isToolPolicyRoute, toolPolicyDenialFromResponse } from './tool-policy-failure';
 
@@ -23,7 +23,7 @@ export {
   foreignSessionMessage,
   handleApiError,
 } from './api-client-errors';
-export type { ApiErrorContext, ApiErrorPayload, ApiErrorResult } from './api-client-errors';
+export type { ApiErrorContext, ApiErrorPayload, ApiErrorResult, PostInit, WireAnswer } from './api-client-errors';
 export {
   DeadlineExceededError,
   isDeadlineExceeded,
@@ -322,10 +322,11 @@ export class ApiClient {
    * Issue #4437: the body goes through the stamp the command set
    * ({@link setPostBodyStamp}): `send` / `ask` / `respond` put who is sending on
    * every request that types into a session, the strict respond's included.
+   * Issue #4535: `init.onAnswer` is told a 2xx as it came, before it is parsed (a failure carries it as `answer`).
    */
-  async post<T>(path: string, body?: unknown): Promise<T> {
+  async post<T>(path: string, body?: unknown, init?: PostInit): Promise<T> {
     const stamped = postBodyStamp ? postBodyStamp(path, body) : body;
-    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, stamped, this.startDeadline());
+    return sendWithBody<T>(this.baseUrl, 'POST', this.getHeaders(), path, stamped, this.startDeadline(), init?.onAnswer);
   }
 
   /**
@@ -359,7 +360,8 @@ async function sendWithBody<T>(
   headers: Record<string, string>,
   path: string,
   body?: unknown,
-  deadline?: RequestDeadline | null
+  deadline?: RequestDeadline | null,
+  onAnswer?: (answer: WireAnswer) => void
 ): Promise<T> {
   try {
     const response = await bounded(deadline, fetch(`${baseUrl}${path}`, {
@@ -372,17 +374,19 @@ async function sendWithBody<T>(
     if (!response.ok) {
       // Issue #1637: read the body first — handleApiError needs it to surface
       // the server's reason for a 5xx instead of "check the logs".
-      const payload = await bounded(deadline, readErrorPayload(response));
+      let answer: WireAnswer | undefined; // Issue #4535: kept on the error, for what `/send` proves
+      const payload = await bounded(deadline, readErrorPayload(response, (read) => { answer = read; }));
       // Issue #4437: the tool policy's 409 on the routes this CLI sends and opens relays
       // through is exit 33, not an HTTP failure (`tool-policy-failure.ts`).
       const denial = isToolPolicyRoute(path) ? toolPolicyDenialFromResponse(response.status, payload, body) : null;
       if (denial) throw denial;
       const errResult = handleApiError(null, response.status, payload, { serverUrl: baseUrl });
-      throw new ApiError(errResult.message, errResult.exitCode, response.status, payload);
+      throw new ApiError(errResult.message, errResult.exitCode, response.status, payload, undefined, answer);
     }
 
     // Handle 204 No Content
     const text = await bounded(deadline, response.text());
+    onAnswer?.({ status: response.status, contentType: contentTypeOf(response), bodyText: text ?? '' });
     if (!text) return undefined as T;
     return JSON.parse(text) as T;
   } catch (error) {
@@ -407,9 +411,10 @@ async function sendWithBody<T>(
  * from here. Never throws: a body that is absent, truncated or not JSON simply
  * yields undefined and the status-based classification stands.
  */
-async function readErrorPayload(response: Response): Promise<ApiErrorPayload | undefined> {
+async function readErrorPayload(response: Response, keep?: (answer: WireAnswer) => void): Promise<ApiErrorPayload | undefined> {
+  let text = '';
   try {
-    const text = await response.text();
+    text = (await response.text()) ?? '';
     if (!text) return undefined;
     const parsed: unknown = JSON.parse(text);
     if (parsed === null || typeof parsed !== 'object') return undefined;
@@ -419,6 +424,9 @@ async function readErrorPayload(response: Response): Promise<ApiErrorPayload | u
       : undefined;
   } catch {
     return undefined;
+  } finally {
+    // Issue #4535: the answer as it came (an unreadable body is an empty one).
+    keep?.({ status: response.status, contentType: contentTypeOf(response), bodyText: text });
   }
 }
 
