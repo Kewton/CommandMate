@@ -17,6 +17,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSendCommand } from '../../../../src/cli/commands/send';
+import { describeFailedSendOutcome } from '../../../../src/cli/commands/message-dispatch';
+import { ApiError } from '../../../../src/cli/utils/api-client';
 
 const WT = 'wt1';
 const ME = 'me-wt';
@@ -254,5 +256,42 @@ describe('N5 (Issue #4535 T14): an older server\'s refusal proves not_sent only 
     expectNothingUndone(server);
     expect(said()).toMatch(PANE_CHECK);
     expect(said()).not.toContain(SAFE_AGAIN);
+  });
+});
+
+/**
+ * Review P3 (#4535 B): `describeFailedSendOutcome` is the resend line `postMessage`
+ * prints (`resendNoteFor`, with no relay notice before it), not a second reading of
+ * `payload.sendOutcome`. So its callers' tests guard the line a failed send prints:
+ * an answer that proves nothing says to look at the pane, whatever its body says.
+ */
+describe('describeFailedSendOutcome (Issue #4535): the resend line a failed send prints, read once', () => {
+  const page = (status: number, bodyText: string, contentType: string | null = 'text/html'): ApiError =>
+    new ApiError('failed', 99, status, undefined, undefined, { status, contentType, bodyText });
+
+  it('a body reading sendOutcome not_sent that is not served as JSON is not "safe to send again"', () => {
+    const error = new ApiError('failed', 99, 500, { error: 'x', sendOutcome: 'not_sent' } as never, undefined, {
+      status: 500,
+      contentType: 'text/html',
+      bodyText: JSON.stringify({ error: 'x', sendOutcome: 'not_sent' }),
+    });
+    const line = describeFailedSendOutcome(error, WT);
+    expect(line).not.toContain(SAFE_AGAIN);
+    expect(line).toMatch(PANE_CHECK);
+  });
+
+  it.each([
+    ['a 408 page from a front', page(408, '<html>Request Timeout</html>')],
+    ['a dropped connection', new TypeError('fetch failed', { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) })],
+  ])('%s says to check the pane first (it proved nothing)', (_name, error) => {
+    expect(describeFailedSendOutcome(error, WT)).toMatch(PANE_CHECK);
+  });
+
+  it('control: a typed not_sent served as JSON is "safe to send again"; a refused connection says nothing more', () => {
+    const body = { error: 'x', sendOutcome: 'not_sent' };
+    const typed = new ApiError('failed', 99, 500, body as never, undefined, { status: 500, contentType: 'application/json', bodyText: JSON.stringify(body) });
+    expect(describeFailedSendOutcome(typed, WT)).toContain(SAFE_AGAIN);
+    const refused = new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+    expect(describeFailedSendOutcome(refused, WT)).toBeNull();
   });
 });

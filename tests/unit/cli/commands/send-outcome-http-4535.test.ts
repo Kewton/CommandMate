@@ -169,3 +169,111 @@ describe('N7 (Issue #4535 T18): a connection that was never made is not_sent', (
     expect(said()).not.toContain('sendOutcome=unknown');
   });
 });
+
+/**
+ * Review P2 (#4535 B): the content-type check reaches the CLI. A body that parses as
+ * JSON but is not served as JSON proves nothing (design §2.2), so a front's page that
+ * happens to read `{"code":"model_refused"}` must not undo anything, and a 409
+ * `SEND_TARGET_CHANGED` it carries is not the proven not_sent that exit 34 says (INV-F4).
+ * Red when the error keeps no answer, or `contentTypeOf` always says JSON.
+ */
+describe('content-type (Issue #4535 T9): a JSON body not served as JSON proves nothing', () => {
+  const asPage = (status: number, body: unknown): SendOutcomeRoute => ({
+    kind: 'reply',
+    status,
+    contentType: 'text/html',
+    body: JSON.stringify(body),
+  });
+  const MODEL_REFUSED = { error: 'model refused', code: 'model_refused' };
+  const TARGET_CHANGED = { error: 'the target changed', code: 'SEND_TARGET_CHANGED', reason: 'target-gone', sendOutcome: 'not_sent' };
+
+  it('a 400 text/html reading {"code":"model_refused"} is unknown — no withdraw, no close', async () => {
+    const server = await serve(around(asPage(400, MODEL_REFUSED)));
+    await sendTo(server);
+    expect(server.posts(SEND)).toHaveLength(1);
+    expect(server.requests(CANCEL)).toHaveLength(0);
+    expect(server.requests(NOTE_CLOSE)).toHaveLength(0);
+    expect(said()).toMatch(PANE_CHECK);
+    expect(said()).not.toContain('it is safe to send it again');
+  });
+
+  it('control: the same 400 served as JSON is not_sent — withdrawn and closed', async () => {
+    const server = await serve(around({ kind: 'json', status: 400, body: MODEL_REFUSED }));
+    await sendTo(server);
+    expect(server.requests(CANCEL)).toHaveLength(1);
+    expect(server.requests(NOTE_CLOSE)).toHaveLength(1);
+  });
+
+  it('a 409 SEND_TARGET_CHANGED whose sendOutcome is not served as JSON is exit 99 — nothing withdrawn', async () => {
+    const server = await serve(around(asPage(409, TARGET_CHANGED)));
+    expect(await sendTo(server)).toBe(99);
+    expect(server.posts(SEND)).toHaveLength(1);
+    expect(server.requests(CANCEL)).toHaveLength(0);
+    expect(server.requests(NOTE_CLOSE)).toHaveLength(0);
+    expect(said()).toMatch(PANE_CHECK);
+  });
+
+  it('control: the same 409 served as JSON is exit 34 — withdrawn and closed', async () => {
+    const server = await serve(around({ kind: 'json', status: 409, body: TARGET_CHANGED }));
+    expect(await sendTo(server)).toBe(34);
+    expect(server.requests(CANCEL)).toHaveLength(1);
+    expect(server.requests(NOTE_CLOSE)).toHaveLength(1);
+  });
+});
+
+const AUTO_YES = `/api/worktrees/${WT}/auto-yes`;
+const GRANT = { enabled: true, expiresAt: 1_900_000_000_000, cliToolId: 'codex', instanceId: 'codex', grantId: 'grant-1' };
+const OFF = { enabled: false, expiresAt: null };
+
+/** `around(send)` with an Auto-Yes route that is on after an arming POST and off after a disarming one. */
+async function serveWithAutoYes(send: SendOutcomeRoute): Promise<SendOutcomeServer> {
+  const box: { server?: SendOutcomeServer } = {};
+  const routes = around(send);
+  Object.defineProperty(routes, AUTO_YES, {
+    enumerable: true,
+    get: (): SendOutcomeRoute => {
+      const last = box.server?.posts(AUTO_YES).at(-1);
+      const armed = last !== undefined && (JSON.parse(last) as { enabled?: unknown }).enabled === true;
+      return { kind: 'json', status: 200, body: armed ? GRANT : OFF };
+    },
+  });
+  box.server = await serve(routes);
+  return box.server;
+}
+
+/** The POSTs that turned Auto-Yes off. */
+const disarms = (server: SendOutcomeServer): string[] =>
+  server.posts(AUTO_YES).filter((body) => (JSON.parse(body) as { enabled?: unknown }).enabled === false);
+
+/** `sendTo` with `--auto-yes`: a grant this send arms before the message. */
+async function sendArmedTo(server: SendOutcomeServer): Promise<number | undefined> {
+  process.env.CM_PORT = new URL(server.url).port;
+  await createSendCommand()
+    .parseAsync(['node', 'send', WT, 'hello', '--instance', 'codex', '--reply-to', 'self', '--note', 'waiting for it', '--auto-yes'])
+    .catch(() => undefined);
+  return exitCode;
+}
+
+/** Review P3 (#4535 B): a 2xx that is not a message (S4) leaves the grant this send armed on too. */
+describe('S4 (Issue #4535 T9): Auto-Yes stays after a 2xx that is not a message', () => {
+  it.each<[string, SendOutcomeRoute]>([
+    ['a non-JSON 200', { kind: 'reply', status: 200, contentType: 'text/plain', body: 'ok' }],
+    ['an empty 204', { kind: 'reply', status: 204 }],
+    ['an empty 200', { kind: 'reply', status: 200 }],
+    ['a JSON 200 of another shape', { kind: 'json', status: 200, body: { ok: true } }],
+  ])('S4: %s — exit 99, the armed grant is not withdrawn', async (_label, answer) => {
+    const server = await serveWithAutoYes(answer);
+    expect(await sendArmedTo(server)).toBe(99);
+    expect(server.posts(AUTO_YES).length).toBeGreaterThan(0);
+    expect(disarms(server)).toHaveLength(0);
+    expect(server.requests(CANCEL)).toHaveLength(0);
+    expect(server.requests(NOTE_CLOSE)).toHaveLength(0);
+  });
+
+  it('control: a JSON 400 model_refused with not_sent — the armed grant is withdrawn', async () => {
+    const server = await serveWithAutoYes({ kind: 'json', status: 400, body: { error: 'model refused', code: 'model_refused', sendOutcome: 'not_sent' } });
+    await sendArmedTo(server);
+    expect(disarms(server)).toHaveLength(1);
+    expect(server.requests(CANCEL)).toHaveLength(1);
+  });
+});
