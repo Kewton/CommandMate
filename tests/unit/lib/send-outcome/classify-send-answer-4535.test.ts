@@ -242,7 +242,6 @@ describe('applyRelayLookup — the bound relay\'s sendState after an unknown ans
 
   it.each([
     ['sent', 'sent'],
-    ['failed', 'not_sent'],
     ['awaiting', 'unknown'],
     ['input_started', 'unknown'],
     ['unknown', 'unknown'],
@@ -250,6 +249,11 @@ describe('applyRelayLookup — the bound relay\'s sendState after an unknown ans
   ] as const)('%s → %s, and N4 never becomes the relay\'s owner (Q13 default)', (sendState, fact) => {
     expect(applyRelayLookup(conflict, sendState)).toMatchObject({ fact, row: 'N4', relayOwned: false });
     expect(applyRelayLookup(dropped, sendState)).toMatchObject({ fact, relayOwned: true });
+  });
+
+  it('failed → not_sent, and N4 becomes the relay\'s owner again (Q13 (b): the one bound attempt typed nothing)', () => {
+    expect(applyRelayLookup(conflict, 'failed')).toMatchObject({ fact: 'not_sent', row: 'N4', relayOwned: true });
+    expect(applyRelayLookup(dropped, 'failed')).toMatchObject({ fact: 'not_sent', relayOwned: true });
   });
 
   it('a classification with proof is not overridden by the lookup', () => {

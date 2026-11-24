@@ -174,11 +174,23 @@ describe('bind negotiation (Issue #3957)', () => {
 
 describe('what a failed send does to a bound relay', () => {
   it('negative control — a legacy relay is withdrawn on any failure, as before', async () => {
+    // Issue #4535 (design §3.1, §5.3): a 500 that says nothing of the message is unknown —
+    // the message may be in, so an older server's relay is no longer withdrawn on it.
     const calls = mockRoutes([
       RELAY_LEGACY_SERVER,
       sendRoute({ status: 500, data: { error: 'boom' } }),
       CANCEL,
     ]);
+    await runUntilExit(() => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude']));
+    expect(cancelled(calls)).toBe(false);
+  });
+
+  it.each([
+    ['a typed not_sent (N1)', { error: 'refused', sendOutcome: 'not_sent' }, 500],
+    ['an older server\'s pre-send code (N5, no sendOutcome)', { error: 'model refused', code: 'model_refused' }, 400],
+  ])('positive control (Issue #4535) — a legacy relay is still withdrawn on %s', async (_label, data, status) => {
+    // An older server's relay is not left open 24h for a message that never went in.
+    const calls = mockRoutes([RELAY_LEGACY_SERVER, sendRoute({ status, data }), CANCEL]);
     await runUntilExit(() => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude']));
     expect(cancelled(calls)).toBe(true);
   });
@@ -193,6 +205,8 @@ describe('what a failed send does to a bound relay', () => {
     expect(cancelled(calls)).toBe(true);
   });
 
+  // Issue #4535 (design N4): "another attempt" is another copy of this very request
+  // (a front's retry) that reserved the relay first; it may have arrived.
   it('409 RELAY_BIND_CONFLICT: another attempt owns it — NOT withdrawn', async () => {
     const calls = mockRoutes([
       RELAY_BOUND,
@@ -307,10 +321,12 @@ describe('what the failed send tells the sender about resending (Issue #3992)', 
   });
 
   it('negative control: an error with no sendOutcome (no bound relay) adds neither note', async () => {
+    // Issue #4535 (design C5): an answer that proves nothing is unknown, so it says
+    // "check the pane before resending" once (here in the relay's notice), never "send it again".
     mockRoutes([RELAY_LEGACY_SERVER, sendRoute({ status: 500, data: { error: 'boom' } }), CANCEL]);
     await runUntilExit(() => runSend(['wt-b', 'x', '--reply-to', 'wt-a@claude']));
     expect(stderr()).not.toContain(NOT_SENT_NOTE);
-    expect(stderr()).not.toContain(UNKNOWN_NOTE);
+    expect(mockConsoleError.mock.calls.map((c) => String(c[0])).filter((line) => line.includes(UNKNOWN_NOTE))).toHaveLength(1);
   });
 });
 
@@ -336,10 +352,11 @@ describe('a plain send tells the sender about resending too (Issue #4011)', () =
   });
 
   it('negative control: no sendOutcome (an older server) adds neither note', async () => {
+    // Issue #4535 (design C5): unknown, so one "check the pane before resending" note.
     mockRoutes([sendRoute({ status: 500, data: { error: 'boom' } })]);
     await runUntilExit(() => runSend(['wt-b', 'x']));
     expect(stderr()).not.toContain(NOT_SENT_NOTE);
-    expect(stderr()).not.toContain(UNKNOWN_NOTE);
+    expect(mockConsoleError.mock.calls.map((c) => String(c[0])).filter((line) => line.includes(UNKNOWN_NOTE))).toHaveLength(1);
   });
 });
 
