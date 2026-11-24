@@ -256,6 +256,20 @@ describe('T11: the answer\'s sendOutcome is the weaker of the body\'s and the bi
     expect(status).toBe(409);
     expect(body).toMatchObject({ code: 'SEND_TARGET_CHANGED', relayId: relay.id, sendOutcome: 'unknown' });
     expect(getRelayById(db, relay.id)?.sendState).toBe('unknown');
+
+    // The same fence answer when the service handed over no attempt: the binding alone
+    // says `not_sent` (nothing recorded, no boundary), the body says `unknown` — the
+    // body's wins. With the binding's outcome taking over the body's, this is `not_sent`.
+    const silent = boundRelay();
+    sendUserMessage.mockImplementationOnce(async () => ({
+      ok: false,
+      stage: 'send',
+      error: 'send target changed: dispatch-changed',
+      fence,
+    }));
+    const silentAnswer = await post({ relayId: silent.id });
+    expect(silentAnswer.status).toBe(409);
+    expect(silentAnswer.body).toMatchObject({ code: 'SEND_TARGET_CHANGED', relayId: silent.id, sendOutcome: 'unknown' });
   });
 
   it('negative control: the binding\'s unknown wins over a body that says not_sent', async () => {
