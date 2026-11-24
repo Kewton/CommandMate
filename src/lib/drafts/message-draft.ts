@@ -110,29 +110,41 @@ export function readRetargetHolds(worktreeId: string): RetargetHold[] {
   }
 }
 
-function writeRetargetHolds(worktreeId: string, holds: RetargetHold[]): void {
+function writeRetargetHolds(worktreeId: string, holds: RetargetHold[]): boolean {
   try {
     if (holds.length === 0) window.localStorage.removeItem(getRetargetHoldKey(worktreeId));
     else window.localStorage.setItem(getRetargetHoldKey(worktreeId), JSON.stringify(holds.slice(-RETARGET_HOLD_LIMIT)));
+    return true;
   } catch {
     /* localStorage unavailable */
+    return false;
   }
 }
 
-/** Issue #4535: remember a handed-back text and its original target (a hold of the same text is replaced). */
-export function holdRetargetedText(worktreeId: string, hold: RetargetHold): void {
-  if (!hold.text) return;
-  writeRetargetHolds(worktreeId, [...readRetargetHolds(worktreeId).filter((h) => h.text !== hold.text), hold]);
+/**
+ * Issue #4535: remember a handed-back text and its original target (a hold of the same text is
+ * replaced). Returns whether the hold was kept — false when `localStorage` cannot take it; then the
+ * caller must not hand the text back (review H4: fail-closed, a composer without the hold would
+ * send it to a changed To on one press).
+ */
+export function holdRetargetedText(worktreeId: string, hold: RetargetHold): boolean {
+  if (!hold.text) return false;
+  if (!writeRetargetHolds(worktreeId, [...readRetargetHolds(worktreeId).filter((h) => h.text !== hold.text), hold])) {
+    return false;
+  }
+  return readRetargetHolds(worktreeId).some(
+    (h) => h.text === hold.text && h.instanceId === hold.instanceId && h.cliToolId === hold.cliToolId,
+  );
 }
 
-/** Issue #4535: the holds a draft about to be sent carries — those whose text it contains. */
+/** Issue #4535: the holds a draft about to be sent carries — those whose text is the draft (whole). */
 export function findRetargetHolds(worktreeId: string, draft: string): RetargetHold[] {
-  return readRetargetHolds(worktreeId).filter((hold) => draft.includes(hold.text));
+  return readRetargetHolds(worktreeId).filter((hold) => hold.text === draft);
 }
 
 /** Issue #4535: a draft was sent — the holds it carried go (it reached the target it was sent to). */
 export function releaseRetargetHolds(worktreeId: string, draft: string): void {
   const holds = readRetargetHolds(worktreeId);
-  const left = holds.filter((hold) => !draft.includes(hold.text));
+  const left = holds.filter((hold) => hold.text !== draft);
   if (left.length !== holds.length) writeRetargetHolds(worktreeId, left);
 }

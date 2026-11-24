@@ -198,6 +198,13 @@ export interface PendingMessage {
    */
   returnedToComposer?: boolean;
   /**
+   * Issue #4535 r5 (review H2): an attempt of this message was stopped by the send fence (409
+   * `SEND_TARGET_CHANGED` `not_sent`) — the target it was going to. Its text goes back to a composer
+   * on `discard()` only through {@link UsePendingMessagesOptions.onTargetChangedDiscard} (with the
+   * hold of that target). Kept across a retry: the row still names the same target.
+   */
+  targetChanged?: SendTargetChangedRefusal;
+  /**
    * Issue #4503: the clock ran out while this attempt's request is still in flight (with
    * `holdInFlightOnTimeout`). Paired with `status: 'sending'`: the row waits for the answer.
    */
@@ -287,6 +294,12 @@ export interface UsePendingMessagesOptions {
    * text, `firstAttempt`); then `discard()` does not hand it back again. `unknown`: never handed back.
    */
   onTargetChanged?: (content: string, refusal: SendTargetChangedRefusal, info: { firstAttempt: boolean }) => boolean;
+  /**
+   * Issue #4535 r5 (review H2): a fence-refused row not handed back yet is discarded — whether its
+   * text may go back to the composer (true once the hold of its original target is written). Omitted
+   * or false: `discard()` does not hand it back.
+   */
+  onTargetChangedDiscard?: (content: string, refusal: SendTargetChangedRefusal) => boolean;
   /**
    * Issue #4503: whether a rejection leaves the send's outcome unknown (pass
    * {@link isSendOutcomeUnknown}). Such a row lands on `unknown`: never parked, never resent on its
@@ -432,6 +445,7 @@ export function usePendingMessages({
   onRoleRefused,
   readTargetChanged,
   onTargetChanged,
+  onTargetChangedDiscard,
   isOutcomeUnknown,
   holdInFlightOnTimeout = false,
   onAttachmentNotReturned,
@@ -465,6 +479,8 @@ export function usePendingMessages({
   readTargetChangedRef.current = readTargetChanged;
   const onTargetChangedRef = useRef(onTargetChanged);
   onTargetChangedRef.current = onTargetChanged;
+  const onTargetChangedDiscardRef = useRef(onTargetChangedDiscard);
+  onTargetChangedDiscardRef.current = onTargetChangedDiscard;
   const isOutcomeUnknownRef = useRef(isOutcomeUnknown);
   isOutcomeUnknownRef.current = isOutcomeUnknown;
   const holdInFlightOnTimeoutRef = useRef(holdInFlightOnTimeout);
@@ -732,6 +748,7 @@ export function usePendingMessages({
                       queued: false,
                       awaitingResponse: false,
                       returnedToComposer: cur.returnedToComposer || handedBack,
+                      targetChanged,
                     }
                   : cur,
               ),
@@ -820,7 +837,15 @@ export function usePendingMessages({
       // Issue #4503: nor is an unknown one's — back in the composer, one Enter would send it again
       // without the confirmation its row asks for.
       if (target?.status === 'unknown') return undefined;
-      return target?.returnedToComposer ? undefined : target?.content;
+      if (!target || target.returnedToComposer) return undefined;
+      // Issue #4535 r5 (review H2): a text the fence stopped goes back only with the hold of the
+      // target it was going to (the composer's To may have changed since).
+      if (target.targetChanged) {
+        return onTargetChangedDiscardRef.current?.(target.content, target.targetChanged) === true
+          ? target.content
+          : undefined;
+      }
+      return target.content;
     },
     [clearTimer],
   );

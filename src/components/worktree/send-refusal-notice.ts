@@ -57,6 +57,7 @@ export const SEND_TARGET_CHANGED_REASON_KEYS: Readonly<Record<SendTargetChangedR
 export const SEND_TARGET_CHANGED_KEYS = {
   notSent: `${KEY_PREFIX}.notSent`,
   textReturned: `${KEY_PREFIX}.textReturned`,
+  textNotReturned: `${KEY_PREFIX}.textNotReturned`,
   unknown: `${KEY_PREFIX}.unknown`,
   retargetConfirm: `${KEY_PREFIX}.retargetConfirm`,
   retargetConfirmYes: `${KEY_PREFIX}.retargetConfirmYes`,

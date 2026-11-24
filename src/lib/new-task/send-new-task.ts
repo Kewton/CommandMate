@@ -64,14 +64,15 @@ export type NewTaskFailureKind =
   | 'invalid'
   /**
    * A non-503 5xx that says `sendOutcome: 'not_sent'`, any other status, a request refused before it left.
-   * (Issue #4535: a 5xx without it, no reply and a timeout of the send are `unknown`.)
+   * (Issue #4535: a 5xx or a 4xx without it — but the middleware's 401 / 403 — no reply and a
+   * timeout of the send are `unknown`.)
    */
   | 'failed';
 
 /**
  * Issue #4535 (C9): the outcome of a send that did not say "sent" and did not say "not sent" either —
- * `sendOutcome: 'unknown'` (or `'sent'` on a failed answer: typed, then failed), a 5xx that does not
- * say `not_sent`, or the send request itself running out of time / losing its connection. The text
+ * `sendOutcome: 'unknown'` (or `'sent'` on a failed answer: typed, then failed), a 5xx or a 4xx that
+ * does not say `not_sent` (r5 H3: but the middleware's 401 / 403), a redirected answer, or the send request itself running out of time / losing its connection. The text
  * may already be in the agent's session, so the dialog never sends it again on a plain press. Kept apart from
  * {@link NewTaskFailureKind}, which names the ways a send did not go out.
  */
@@ -140,6 +141,10 @@ interface ErrorBody {
 
 /** Read `{ error, code, sendOutcome }` off an error body; anything else reads as empty. */
 async function readErrorBody(response: Response): Promise<ErrorBody> {
+  // Issue #4535 r5 (H3, design §2.2): only a JSON answer says anything — the same guard as the
+  // screen's `fetchApi` (`detectNonJsonBody`: a stub without headers is read as before).
+  const contentType = response.headers ? response.headers.get('content-type') ?? '' : 'application/json';
+  if (!contentType.includes('application/json')) return { error: null, code: null, sendOutcome: null, body: null };
   try {
     const body: unknown = await response.json();
     if (body && typeof body === 'object') {
@@ -157,6 +162,12 @@ async function readErrorBody(response: Response): Promise<ErrorBody> {
   return { error: null, code: null, sendOutcome: null, body: null };
 }
 
+/**
+ * Issue #4535 r5 (H3, design §2.2 N6, C12): the middleware's typed refusals before any route (401 /
+ * 403) — nothing reached the send route. Spelled here as in `isSendOutcomeUnknown`.
+ */
+const REFUSED_BEFORE_ROUTE_CODES: ReadonlySet<string> = new Set(['AUTH_REQUIRED', 'IP_DENIED']);
+
 /** Classify the send route's answer. */
 export async function interpretSendResponse(
   response: Response,
@@ -173,11 +184,18 @@ export async function interpretSendResponse(
   // failed answer's `sent` too (typed, then failed), and a fence refusal that does not say `not_sent`.
   // A 5xx that does not say `not_sent` (a proxy's page, a bare 500) is not the route's proof of a
   // refusal before any key either (design §3.4, INV-S10).
+  // Issue #4535 r5 (H3, design §2.2 U2・§3.4, C10): a 4xx that does not say `not_sent` is not the
+  // route's either (its own refusals say it) — a proxy's page, a JSON without `code`, an unknown
+  // `code` — except the middleware's typed 401 `AUTH_REQUIRED` / 403 `IP_DENIED` (N6). So is the
+  // login page a redirect led to (the composer's `detectAuthRedirect` 401). As the composer reads
+  // them (`isSendOutcomeUnknown`).
   if (
+    response.redirected ||
     sendOutcome === 'unknown' ||
     sendOutcome === 'sent' ||
     (fence !== null && fence.sendOutcome !== 'not_sent') ||
-    (status >= 500 && status < 600 && sendOutcome !== 'not_sent')
+    (status >= 500 && status < 600 && sendOutcome !== 'not_sent') ||
+    (status >= 400 && status < 500 && sendOutcome !== 'not_sent' && !(code !== null && REFUSED_BEFORE_ROUTE_CODES.has(code)))
   ) {
     kind = 'unknown';
   } else if (status === 409) {

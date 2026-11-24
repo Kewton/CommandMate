@@ -55,6 +55,7 @@ import {
   getSplitDraftKey,
   subscribeDraftAppend,
   findRetargetHolds,
+  holdRetargetedText,
   releaseRetargetHolds,
   type DraftScope,
   type RetargetHold,
@@ -505,6 +506,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // (`retargetAsk`), and the person's yes for this To (`retargetConfirmedRef`, this mount only).
   const [retargetAsk, setRetargetAsk] = useState<{ original: RetargetHold; current: { instanceId: string; cliToolId: string } } | null>(null);
   const retargetConfirmedRef = useRef<string | null>(null);
+  // Issue #4535 r5 (review H1): the holds this composer wrote itself on its awaited road — the text
+  // never left the draft. Kept for this mount too, so the question does not hang on `localStorage`.
+  const localRetargetHoldsRef = useRef<Array<RetargetHold & { worktreeId: string }>>([]);
+  // Issue #4535 r5 (review H1・P3-6): why the fence answered `unknown` on the awaited road — shown
+  // with the unknown notice of that draft.
+  const [unknownReason, setUnknownReason] = useState<{ key: string; text: string; reason: string } | null>(null);
   useEffect(() => {
     previewKeyRef.current = previewKey;
     return () => {
@@ -563,15 +570,49 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    */
   const holdsRetargetedSend = useCallback((text: string): boolean => {
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
-    const original = findRetargetHolds(worktreeId, text).find((hold) => !isSameSendTarget(hold, current));
+    const holds = [
+      ...findRetargetHolds(worktreeId, text),
+      ...localRetargetHoldsRef.current.filter((hold) => hold.worktreeId === worktreeId && hold.text === text),
+    ];
+    const original = holds.find((hold) => !isSameSendTarget(hold, current));
     if (!original) return false;
     if (retargetConfirmedRef.current === `${previewKeyRef.current}\u0000${text}`) return false;
     setRetargetAsk({ original, current });
     return true;
   }, [worktreeId, instanceId, cliToolId]);
+  /** Issue #4535: a sent text's holds go — the stored ones and this composer's own. */
+  const releaseHolds = useCallback((text: string) => {
+    releaseRetargetHolds(worktreeId, text);
+    localRetargetHoldsRef.current = localRetargetHoldsRef.current.filter(
+      (hold) => !(hold.worktreeId === worktreeId && hold.text === text),
+    );
+  }, [worktreeId]);
+  /**
+   * Issue #4535 r5 (review H1, 段 2 §3.2・INV-V2): the awaited road's answer from the send fence. The
+   * text stays in the draft (it never left it); for `not_sent` with its original target named (not
+   * `worktree-gone`) it is held as the optimistic road's handed-back text is, so a changed To asks
+   * before sending it. For anything else (`unknown`), the reason goes with the unknown notice.
+   */
+  const noteFenceRefusal = useCallback((err: unknown, key: string, text: string) => {
+    const refusal = readSendTargetChanged(err);
+    if (refusal === null) return;
+    if (refusal.sendOutcome !== 'not_sent') {
+      setUnknownReason({ key, text, reason: t(sendTargetChangedReasonKey(refusal.reason)) });
+      return;
+    }
+    const original = refusal.target;
+    if (original === null || refusal.reason === 'worktree-gone') return;
+    const hold = { text, instanceId: original.instanceId, cliToolId: original.cliToolId };
+    holdRetargetedText(original.worktreeId, hold);
+    localRetargetHoldsRef.current = [
+      ...localRetargetHoldsRef.current.filter((h) => !(h.worktreeId === original.worktreeId && h.text === text)),
+      { ...hold, worktreeId: original.worktreeId },
+    ];
+  }, [t]);
   const markSendUnknown = useCallback((key: string, text: string, target: string) => {
     const mark = { text, target };
     writeSendUnknownMark(key, mark);
+    setUnknownReason(null);
     if (draftKeyRef.current === key) setUnknownMark(mark);
     setError(null);
     setConfirmingResend(false);
@@ -873,7 +914,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (onOptimisticSend) {
       setError(null);
       onOptimisticSend(trimmed, options);
-      releaseRetargetHolds(worktreeId, trimmed);
+      releaseHolds(trimmed);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
@@ -894,7 +935,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
-      releaseRetargetHolds(worktreeId, trimmed);
+      releaseHolds(trimmed);
       clearSentDraft(sentKey, sentImagePath);
       // Issue #806: when the session is busy, the CLI queues this message behind
       // the running task. Surface a toast so the (successful) send doesn't look
@@ -915,13 +956,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // its next send asks first (never an error that invites a plain Enter).
       if (isSendOutcomeUnknown(err)) {
         markSendUnknown(draftKey, trimmed, previewKey);
+        noteFenceRefusal(err, draftKey, trimmed);
         return;
       }
+      noteFenceRefusal(err, draftKey, trimmed);
       setError(describeSendError(err));
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, markSendUnknown, previewKey]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, markSendUnknown, noteFenceRefusal, releaseHolds, previewKey]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -964,7 +1007,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
-      releaseRetargetHolds(worktreeId, trimmed);
+      releaseHolds(trimmed);
       // Issue #4419: a switch meanwhile already closed the question (the previewKey change).
       if (clearSentDraft(sentKey, sentImagePath)) setBriefAsk(null);
       if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
@@ -998,15 +1041,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         // draft stays and its next send (Enter, the button, the choice) asks first.
         setBriefAsk(null);
         markSendUnknown(draftKey, trimmed, previewKey);
+        noteFenceRefusal(err, draftKey, trimmed);
       } else {
         setBriefAsk(null);
+        noteFenceRefusal(err, draftKey, trimmed);
         setError(describeSendError(err));
       }
     } finally {
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, markSendUnknown, previewKey]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, markSendUnknown, noteFenceRefusal, releaseHolds, previewKey]);
 
   /** Issue #4503: the person confirmed sending the same draft again — a new send. */
   const confirmResend = useCallback(() => {
@@ -1268,6 +1313,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         >
           <span className="font-medium">{t('conversation.sendUnknown.status')}</span>{' '}
           {t('conversation.sendUnknown.guidance')}
+          {/* Issue #4535 r5: the send fence said why (its `unknown`). */}
+          {unknownReason !== null && unknownReason.key === draftKey && unknownReason.text === unknownMark?.text && (
+            <span data-testid="message-input-send-unknown-reason" className="block">
+              {unknownReason.reason}
+            </span>
+          )}
           {confirmingResend && (
             <div data-testid="message-input-resend-confirm" role="alert" className="mt-1 flex flex-wrap items-center gap-2">
               <span>{t('conversation.sendUnknown.resendConfirm')}</span>

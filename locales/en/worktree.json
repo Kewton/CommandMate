@@ -86,6 +86,7 @@
       },
       "notSent": "{reason}. Nothing was sent (it was going to {target}).",
       "textReturned": "The text is back in the composer; while its target is not the original one, you are asked before it is sent.",
+      "textNotReturned": "The text could not be put back in the composer: the check of its target could not be saved.",
       "unknown": "{reason}. It is not known whether it arrived. Check the screen of {target} before sending it again.",
       "retargetConfirm": "This text was stopped on its way to {original}. The target is now {current}. Send it to {current}?",
       "retargetConfirmYes": "Send",

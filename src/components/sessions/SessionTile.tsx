@@ -597,6 +597,7 @@ function SessionTileCard({
     onRoleRefused: roleRefusalNotice.onRoleRefused,
     readTargetChanged: roleRefusalNotice.readTargetChanged,
     onTargetChanged: roleRefusalNotice.onTargetChanged,
+    onTargetChangedDiscard: roleRefusalNotice.onTargetChangedDiscard,
     // Issue #4503: the worktree screen's wiring (`useOptimisticPaneMessages`) — an unknown outcome
     // is not a failure, and a clock that runs out in flight waits for the answer.
     isOutcomeUnknown: isSendOutcomeUnknown,

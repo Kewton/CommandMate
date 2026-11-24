@@ -87,7 +87,8 @@ export function useOptimisticPaneMessages({
   // composer (the same insert as `onNotSent`). Shared with the `/sessions` tile.
   // Issue #4535: the send fence's 409 `SEND_TARGET_CHANGED` goes the same road (the same insert,
   // with a hold the composer reads while its To is not the original target).
-  const { readRoleRefusal, onRoleRefused, readTargetChanged, onTargetChanged } = useSendRefusalNotice(onNotSent);
+  const { readRoleRefusal, onRoleRefused, readTargetChanged, onTargetChanged, onTargetChangedDiscard } =
+    useSendRefusalNotice(onNotSent);
   const onAttachmentNotReturned = useAttachmentNotReturnedNotice();
   return usePendingMessages({
     worktreeId,
@@ -101,6 +102,7 @@ export function useOptimisticPaneMessages({
     onRoleRefused,
     readTargetChanged,
     onTargetChanged,
+    onTargetChangedDiscard,
     // Issue #4503: an unknown outcome is not a failure (no direct retry, no automatic resend), and
     // a clock that runs out while the request is in flight waits for the answer.
     isOutcomeUnknown: isSendOutcomeUnknown,
