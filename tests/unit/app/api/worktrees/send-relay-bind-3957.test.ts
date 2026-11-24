@@ -624,7 +624,7 @@ describe('POST /send without relayId: sendOutcome on the failure (Issue #4011)',
     expect(body).not.toHaveProperty('sendOutcome');
   });
 
-  it('negative control: a 400 before the send service carries no sendOutcome', async () => {
+  it('a 400 before the send service says not_sent (Issue #4535 C4: one rule in the wrapper)', async () => {
     const { status, body } = await post({ content: '' });
     expect(status).toBe(400);
     // Issue #4535 (C4, the human's decision 2026-11-24 16:08): a refusal before the
