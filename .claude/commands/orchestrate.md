@@ -572,7 +572,6 @@ PR の前の確認（6-1-1 の `scripts/orchestrate/precheck.mjs`）を `--kind 
 ### 2-4-4. 新しい仕組みの設計の事前レビュー
 
 5-2b の整合性レビューはマージの前の段で、設計の穴を実装の後に見つける。そこで、最終の契約をワーカーに送る**前**に、設計の要点を Codex に 1 回見せる。
-4 週間の試行（2026-11-06 まで）の後、**実装の前に重大な設計の誤りを見つける安全策**として常設した。5-2b の再レビューを減らす効果は示せていない。
 
 根拠: docs/orchestrate/contract.md#2-4-4-事前レビューを足した理由
 
@@ -899,6 +898,7 @@ commandmatedev capture "$WT" --instance "$AGENT" --pane --tail 30
 ### 3-5. Command Code から Claude（opus）への格上げ
 
 Command Code 担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。**格上げ先は opus**（2026-11-19 改定。sonnet は飛ばす）。
+STOP が先になる条件: docs/orchestrate/roles/dev-leader.md「難易度とワーカー」
 ユーザーには確認しない（2026-09-17 合意）。切り替えたことは 8-2 と 8-3 に必ず書く。
 
 切り替えるときは docs/orchestrate/switching.md#3-5-command-code-から-claudeopusへの格上げ の手順 1〜4 で進める（手順 1 で Command Code のセッションだけを止める）。
@@ -908,6 +908,7 @@ Command Code 担当の Issue が、ワーカー起因の不合格を 2 回再指
 ### 3-5b. sonnet から opus への格上げ
 
 Claude（sonnet）担当の Issue が、ワーカー起因の不合格を 2 回再指示しても合格しなかったとき（3-4 の 3 回目）に行う。
+STOP が先になる条件: docs/orchestrate/roles/dev-leader.md「難易度とワーカー」
 ユーザーには確認しない。格上げしたことは 8-2 と 8-3 に必ず書く。**モデルは起動時に固定されるので、セッションを作り直す以外に上げる方法は無い。**
 
 格上げするときは docs/orchestrate/switching.md#3-5b-sonnet-から-opus-への格上げ を読み、その手順 1〜5（Claude のセッションだけを止める・opus を明示して書く・opus 用の契約を作る・送ってモデルを確かめてから待つ・以降は 3-4 に従う）で進める。
