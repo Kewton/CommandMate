@@ -1,6 +1,8 @@
 /**
  * OpenCode's dispatch and read-back → accepted / delivered / not_sent / unknown
- * (Issue #4535, design §2.3). Not wired into the sender yet (stage 1).
+ * (Issue #4535, design §2.3). The sender reads its POST through
+ * `sendOpencodePrompt` (`client.ts`) and its read-backs in `verifyPostedMessage`
+ * (`opencode.ts`).
  *
  * @vitest-environment node
  */
@@ -36,6 +38,9 @@ describe('classifyOpencodePromptAnswer — the prompt_async POST', () => {
     ['503', 503, null],
     ['307', 307, null],
     ['302', 302, 'text/html'],
+    // r3 (P1-1): the SPA shell is `200 text/html` only; another HTML 2xx may have taken the message.
+    ['a 201 text/html', 201, 'text/html'],
+    ['a 202 text/html', 202, 'text/html; charset=utf-8'],
   ])('%s is unknown — never a keyboard fallback (Q5)', (_name, status, contentType) => {
     expect(classifyOpencodePromptAnswer({ kind: 'response', status, contentType })).toBe('unknown');
   });

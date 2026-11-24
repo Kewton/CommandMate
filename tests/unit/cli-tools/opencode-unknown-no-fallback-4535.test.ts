@@ -17,6 +17,10 @@
  * second dispatch (the path fallback). The controls (`control:`) and the fence
  * row are green on both sides.
  *
+ * r3 (the review's fixes): the `201`・`202 text/html` rows typed the body (the
+ * SPA-shell exception covered every 2xx), and the image's stop came after the
+ * path fallback's relaunch (a launch key; a pane gone made it a plain failure).
+ *
  * Nothing here reaches a real opencode, tmux or the developer's home: HOME is a
  * fresh `os.tmpdir()` directory, removed after the file.
  *
@@ -25,7 +29,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -94,6 +98,7 @@ import { resetSessionLaunchFlightsForTest } from '@/lib/session/session-launch-f
 import { isOpenCodeComposerReady } from '@/lib/detection/tools/opencode/readiness';
 import { registerIsolatedAgentHooksDir } from '@tests/helpers/agent-hooks-dir';
 import { buildOpencodeComposerFrame } from '@tests/fixtures/opencode-launch-boot-11821';
+import { startSendOutcomeServer, type SendOutcomeServer } from '@tests/helpers/send-outcome-server-4535';
 
 registerIsolatedAgentHooksDir('opencode-unknown-4535');
 
@@ -106,12 +111,18 @@ let wtPath = '';
 let db: Database.Database;
 const previousHome = process.env.HOME;
 const originalFetch = globalThis.fetch;
+/** An attachment the send route accepts (inside the worktree's `.commandmate/attachments/`). */
+const IMAGE = '.commandmate/attachments/x-4535.png';
+/** The ladder's length, written out rather than read from the sender: a shorter ladder must turn this red. */
+const LADDER_READS = 4;
 
 beforeAll(() => {
   // Nothing here may reach the developer's own home (~/.local/share/opencode …).
   home = mkdtempSync(join(tmpdir(), 'opencode-unknown-4535-home-'));
   wtPath = mkdtempSync(join(tmpdir(), 'opencode-unknown-4535-wt-'));
   process.env.HOME = home;
+  mkdirSync(join(wtPath, '.commandmate', 'attachments'), { recursive: true });
+  writeFileSync(join(wtPath, IMAGE), 'not really a png');
 });
 afterAll(() => {
   process.env.HOME = previousHome;
@@ -251,7 +262,7 @@ function expectStoppedUnknown(answer: { status: number; json: Record<string, unk
   expect(server.posts(), 'a second HTTP dispatch after an unknown one').toBe(1);
   expect(answer.status).toBe(500);
   expect(answer.json.sendOutcome).toBe('unknown');
-  expect(lastSend(instanceId)).toMatchObject({ state: 'indeterminate' });
+  expect(lastSend(instanceId)).toMatchObject({ state: 'indeterminate', reason: 'dispatch-unknown' });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +319,7 @@ describe('Issue #4535 R1: an unknown OpenCode dispatch is followed by nothing', 
     const server = liveOpencode('opencode-t4b', () => ACCEPTED, [MISSING]);
     await send('opencode-t4b', 'body t4 discarded');
     expect(server.posts()).toBe(1);
+    expect(server.gets(), 'only a ladder of four 404s is not_sent').toBe(LADDER_READS);
     expect(typed('body t4 discarded').length).toBeGreaterThan(0);
   }, 60_000);
 
@@ -324,14 +336,15 @@ describe('Issue #4535 R1: an unknown OpenCode dispatch is followed by nothing', 
     const server = liveOpencode('opencode-t4d', () => ACCEPTED, [MISSING, json(500), MISSING, MISSING]);
     const answer = await send('opencode-t4d', 'body t4 mixed');
     expectStoppedUnknown(answer, server, 'body t4 mixed', 'opencode-t4d');
-    expect(server.gets()).toBe(OPENCODE_SEND_READBACK_DELAYS_MS.length);
+    expect(server.gets()).toBe(LADDER_READS);
+    expect(OPENCODE_SEND_READBACK_DELAYS_MS).toHaveLength(LADDER_READS);
   }, 60_000);
 
   it.each([
     ['500', 500],
     ['503', 503],
     ['302 (a redirect, not an answer of the route)', 302],
-  ])('a 5xx answer is unknown — no keys (%s)', async (_label, status) => {
+  ])('a 5xx or 3xx answer is unknown — no keys (%s)', async (_label, status) => {
     const id = `opencode-t5-${status}`;
     const server = liveOpencode(id, () => ({ ...json(status), headers: new Headers({ 'content-type': 'application/json', location: 'http://127.0.0.1:1/' }) }));
     const answer = await send(id, `body t5 ${status}`);
@@ -340,10 +353,39 @@ describe('Issue #4535 R1: an unknown OpenCode dispatch is followed by nothing', 
   }, 60_000);
 
   it.each([
+    ['201', 201],
+    ['202', 202],
+  ])('r3 (P1-1): a %s text/html answer is unknown — only 200 text/html is the SPA shell; no keys, one POST', async (_label, status) => {
+    const id = `opencode-html-${status}`;
+    const server = liveOpencode(id, () => ({ ok: true, status, headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }), json: async () => ({}) }));
+    const answer = await send(id, `body html ${status}`);
+    expectStoppedUnknown(answer, server, `body html ${status}`, id);
+    expect(server.gets()).toBe(0);
+  }, 60_000);
+
+  it('r3 (P3-5): a real fetch meets a real 302 — unknown, and the redirect is not followed', async () => {
+    let real: SendOutcomeServer | null = null;
+    try {
+      real = await startSendOutcomeServer({
+        [`/session/${SESSION}/prompt_async`]: { kind: 'redirect', status: 302, location: '/elsewhere' },
+        '/elsewhere': { kind: 'reply', status: 204 },
+      });
+      const port = Number(new URL(real.url).port);
+      globalThis.fetch = originalFetch;
+      await expect(sendOpencodePrompt(port, SESSION, 'msg_x', [{ type: 'text', text: 'x' }])).resolves.toBe('unknown');
+      expect(real.posts(`/session/${SESSION}/prompt_async`)).toHaveLength(1);
+      expect(real.requests('/elsewhere'), 'the 302 was followed').toEqual([]);
+    } finally {
+      await real?.close();
+    }
+  });
+
+  it.each([
     ['500 is unknown', 500, 'application/json', 'unknown'],
     ['302 is unknown', 302, 'text/html', 'unknown'],
     ['400 is rejected (not_sent)', 400, 'application/json', 'rejected'],
     ['200 text/html (the SPA shell) is rejected', 200, 'text/html', 'rejected'],
+    ['202 text/html is unknown', 202, 'text/html', 'unknown'],
   ])('Q5: sendOpencodePrompt — %s', async (_label, status, type, verdict) => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: status < 300, status, headers: new Headers({ 'content-type': type }) }) as unknown as typeof fetch;
     await expect(sendOpencodePrompt(PORT, SESSION, 'msg_x', [{ type: 'text', text: 'x' }])).resolves.toBe(verdict);
@@ -387,5 +429,62 @@ describe('Issue #4535 INV-S1・INV-F2: what not_sent and the fence still do', ()
     expect(lastSend('opencode-f2')).toMatchObject({ state: 'indeterminate', reason: 'target-changed' });
     expect(server.posts()).toBe(1);
     expect(typed('body f2 fence')).toEqual([]);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// r3 (codex P2-1・opus P3-1): the image's stop comes before the path fallback's
+// relaunch — no launch key, no body key, one POST, `dispatch-unknown`.
+// ---------------------------------------------------------------------------
+
+describe('Issue #4535 r3: an unknown image dispatch stops before the path fallback', () => {
+  const sendImage = (instanceId: string, content: string) =>
+    postSend({ content, cliToolId: 'opencode', instanceId, imagePath: IMAGE });
+  /** Every tmux change (a `send-keys` of the launch line or of the body, a new session …). */
+  const tmuxChanges = (): string[] => world.out.filter((o) => o.cls === 'change' && o.via !== 'fetch').map((o) => o.line.slice(0, 120));
+
+  it('the tool exits while the image POST is out (no answer): no launch key, no body key, one POST, dispatch-unknown', async () => {
+    const server = liveOpencode('opencode-r3-relaunch', noAnswer);
+    const S = resolveSessionName('opencode', WT, 'opencode-r3-relaunch');
+    // The TUI is gone by the time the fallback would look: a relaunch would type the launch line.
+    onFirst((o) => o.via === 'fetch' && o.line.startsWith('POST'), () => {
+      const pane = world.panes.get(S);
+      if (pane) pane.tool = 'shell';
+      world.frame = (s) => (s === S ? 'user@host repo % ' : null);
+    });
+    const answer = await sendImage('opencode-r3-relaunch', 'body r3 relaunch');
+    expect(tmuxChanges(), 'a key was typed after the unknown image dispatch').toEqual([]);
+    expect(server.posts(), 'a second HTTP dispatch after an unknown one').toBe(1);
+    expect(answer.status).toBe(500);
+    expect(answer.json.sendOutcome).toBe('unknown');
+    expect(lastSend('opencode-r3-relaunch')).toMatchObject({ state: 'indeterminate', reason: 'dispatch-unknown' });
+  }, 60_000);
+
+  it('fence (INV-F2, the image): the roster row and the pane go while the image POST is out — 409 SEND_TARGET_CHANGED', async () => {
+    const server = liveOpencode('opencode-r3-fence', noAnswer);
+    const S = resolveSessionName('opencode', WT, 'opencode-r3-fence');
+    onFirst((o) => o.via === 'fetch' && o.line.startsWith('POST'), () => {
+      dropRoster('opencode-r3-fence');
+      world.panes.delete(S);
+    });
+    const answer = await sendImage('opencode-r3-fence', 'body r3 fence');
+    expect(answer.status).toBe(409);
+    expect(answer.json.code).toBe('SEND_TARGET_CHANGED');
+    expect(answer.json.reason).toBe('target-gone');
+    expect(answer.json.sendOutcome).toBe('unknown');
+    expect(lastSend('opencode-r3-fence')).toMatchObject({ state: 'indeterminate', reason: 'target-changed' });
+    expect(server.posts()).toBe(1);
+    expect(tmuxChanges()).toEqual([]);
+  }, 60_000);
+
+  it('control: an image dispatch refused (4xx) over the route — the path fallback still posts its dispatch', async () => {
+    const path = join(wtPath, IMAGE);
+    const server = liveOpencode('opencode-r3-control', (n) => (n === 0 ? json(400, { name: 'BadRequest' }) : ACCEPTED), [
+      found(`body r3 control\n\n[添付画像: ${path}]`),
+    ]);
+    const answer = await sendImage('opencode-r3-control', 'body r3 control');
+    expect(server.posts()).toBe(2);
+    expect(answer.status).toBe(201);
+    expect(lastSend('opencode-r3-control')).toMatchObject({ state: 'sent' });
   }, 60_000);
 });

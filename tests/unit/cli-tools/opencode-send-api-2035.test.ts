@@ -77,6 +77,7 @@ vi.mock('@/lib/hooks/sources/opencode/subscription', async (importOriginal) => {
 
 import { OPENCODE_SEND_READBACK_DELAYS_MS, OpenCodeTool, formatImagePathFallbackMessage } from '@/lib/cli-tools/opencode';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { OPENCODE_DISPATCH_UNKNOWN_CODE } from '@/lib/session/send-attempt-types';
 import { sendOpencodePrompt } from '@/lib/hooks/sources/opencode/client';
 import { observeInputStart } from '@/lib/session/instance-input-lock';
 import { getAssignedOpencodePort } from '@/lib/hooks/sources/opencode/ports';
@@ -261,6 +262,8 @@ describe('Issue #2035: sending over the opencode server', () => {
       // Issue #4535: only a ladder of nothing but 404s says the message does not exist.
       const reads = vi.mocked(globalThis.fetch).mock.calls.filter(([, init]) => init?.method !== 'POST');
       expect(reads).toHaveLength(OPENCODE_SEND_READBACK_DELAYS_MS.length);
+      // Written out too: a ladder shortened to fewer reads must turn this red.
+      expect(reads).toHaveLength(4);
       expect(submitMock).toHaveBeenCalledWith(
         expect.objectContaining({ sessionName: SESSION_NAME, message: SLASH_BODY })
       );
@@ -291,6 +294,9 @@ describe('Issue #2035: sending over the opencode server', () => {
 
       expect(submitMock).toHaveBeenCalledTimes(0);
       expect(classifySendFailure(error).state).toBe('indeterminate');
+      // r3 (P2-3): the send threw the stop's error — not a resolve that typed nothing.
+      expect(error).toMatchObject({ code: OPENCODE_DISPATCH_UNKNOWN_CODE });
+      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'dispatch-unknown' });
     });
 
     it('refuses a read-back that is not the user\'s message', async () => {
@@ -313,6 +319,9 @@ describe('Issue #2035: sending over the opencode server', () => {
 
       expect(submitMock).toHaveBeenCalledTimes(0);
       expect(classifySendFailure(error).state).toBe('indeterminate');
+      // r3 (P2-3): the send threw the stop's error — not a resolve that typed nothing.
+      expect(error).toMatchObject({ code: OPENCODE_DISPATCH_UNKNOWN_CODE });
+      expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'dispatch-unknown' });
     });
   });
 
@@ -477,6 +486,9 @@ describe('Issue #2035: sending over the opencode server', () => {
       // Issue #4535 (R1): nothing typed after it, and the send is indeterminate.
       expect(submitMock).not.toHaveBeenCalled();
       expect(classifySendFailure(sendError).state).toBe('indeterminate');
+      // r3 (P2-3): the send threw the stop's error — not a resolve that typed nothing.
+      expect(sendError).toMatchObject({ code: OPENCODE_DISPATCH_UNKNOWN_CODE });
+      expect(classifySendFailure(sendError)).toEqual({ state: 'indeterminate', reason: 'dispatch-unknown' });
     });
 
     it.each([
@@ -501,6 +513,9 @@ describe('Issue #2035: sending over the opencode server', () => {
       // Issue #4535 (R1): nothing typed after it, and the send is indeterminate.
       expect(submitMock).not.toHaveBeenCalled();
       expect(classifySendFailure(sendError).state).toBe('indeterminate');
+      // r3 (P2-3): the send threw the stop's error — not a resolve that typed nothing.
+      expect(sendError).toMatchObject({ code: OPENCODE_DISPATCH_UNKNOWN_CODE });
+      expect(classifySendFailure(sendError)).toEqual({ state: 'indeterminate', reason: 'dispatch-unknown' });
     });
 
     it('control: a 204 is accepted and, once read back, no verdict is given', async () => {
