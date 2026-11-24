@@ -214,6 +214,11 @@ export class RelaySendBinding {
   private dispatch: DispatchState = 'none';
   /** A later HTTP dispatch noted after one ended `unknown`, not (yet) failed. */
   private retryDispatchOpen = false;
+  /**
+   * Issue #4535 (C6): whether {@link onDispatchFailed}'s hold (`unknown`) reached the
+   * ledger. False when its write threw or moved nothing; {@link finishSettled} says it.
+   */
+  private dispatchHoldSettled = true;
 
   constructor(
     private readonly db: Database.Database,
@@ -301,13 +306,23 @@ export class RelaySendBinding {
       return;
     }
     this.dispatch = 'unknown';
-    settleRelaySendState(this.db, {
-      relayId: this.target.relayId,
-      attemptId: this.attemptId,
-      from: ['input_started'],
-      to: 'unknown',
-      holdReason: RELAY_HOLD_REASONS.dispatchUnknown,
-    });
+    // Issue #4535 (C6・INV-S4): the hold is bookkeeping; a write that fails changes no
+    // fact (`unknown` stays), and the end of the send says the ledger was not written.
+    try {
+      this.dispatchHoldSettled = settleRelaySendState(this.db, {
+        relayId: this.target.relayId,
+        attemptId: this.attemptId,
+        from: ['input_started'],
+        to: 'unknown',
+        holdReason: RELAY_HOLD_REASONS.dispatchUnknown,
+      });
+    } catch (error) {
+      this.dispatchHoldSettled = false;
+      logger.warn('relay-bind-settle-failed', {
+        relayId: this.target.relayId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**
@@ -332,7 +347,8 @@ export class RelaySendBinding {
     // Issue #4498: only a sent attempt is judged (and takes the entry); drop the rest.
     if (result.kind !== 'sent') observedTools.delete(this.target.relayId);
     const { outcome, write } = this.decide(result);
-    if (write === null) return { outcome, settled: true };
+    // No write of its own: the dispatch's hold, written when it failed, says it.
+    if (write === null) return { outcome, settled: this.dispatchHoldSettled };
     try {
       return { outcome, settled: settleRelaySendState(this.db, write) };
     } catch (error) {
