@@ -48,7 +48,7 @@
 | B P2-3 C2 の比べ直し（3xx は前段の転送で、再 POST は最初の 1 通） | 採る。C2 を「redirect は今どおり追い、最後の答えを §2.2 で読む」に変えた。exit 0→99 の 3 か所目は作らない。I6 を「ハンドラーに届く POST」に直した | §2.2 R 行・§3.1・C2・I6・T17 |
 | A P2-3・B P2-4 ask の `sendState` の語・失敗の答えの `ask.sendState` | 採る。語を `reserved | sent | not_sent | send_unknown` に直し、失敗の答えの `ask.sendState` も証明の源にした | §2.2 S3・N8 |
 | B P2-5 新しいタスクのダイアログの時間切れ・切断 | 採る。`transportFailure` の送信の部分も `unknown` | §3.4・T15 |
-| A P2-7・B P2-6 OpenCode の読み戻しの最初の 404 | 採る。梯子を最後まで回して 404 が続いたら `missing`（最悪 350 ms） | §2.3・§3.2・T4 |
+| A P2-7・B P2-6 OpenCode の読み戻しの最初の 404 | 採る。梯子を最後まで回して 404 が続いたら `missing`（最悪 350 ms。第 3.1 版で「4 回、間の待ちは合わせて 350 ms、各回の上限 5 s」に直した） | §2.3・§3.2・T4 |
 | B P2-7 C3・Q4 の exit（unknown は 1・2・99） | 採る。C3 と Q4 を書き直した | C3・Q4 |
 | A P2-6 C8 の影響（timer・relay の配送・画面） | 採る。C8 に足し、timer の `indeterminate`→`failed` を別の Issue として §6 に書いた | C8・§6 |
 | A P2-4・P2-5 試験の形（T9・T17 の `mockRoutes`、T10） | 採る。本物の `fetch` と `http.createServer`、T10 は着いた後に 408 の HTML | §5.2 |
@@ -184,7 +184,7 @@
 | 204 → `mismatch`・梯子の尽き（404 以外の読めない答え） | `unknown` | 同じ（ただし fallback する） |
 | 4xx・`200 text/html`（SPA の殻。status 200 のときだけ） | `not_sent` | 同じ（ただし今は 201・202 などの HTML 2xx も `not_sent`） |
 | 5xx・3xx | **`unknown`**（Q5） | `not_sent` |
-| 204 以外の非 HTML の 2xx・200 以外の HTML 2xx（201・202 など）・応答なし・dispatch の後の例外 | `unknown` | 同じ（HTML の 201・202 は `not_sent`） |
+| 204 以外の非 HTML の 2xx・200・204 以外の HTML 2xx（201・202 など。204 は読み戻しの行に入る）・応答なし・dispatch の後の例外 | `unknown` | 同じ（HTML の 201・202 は `not_sent`） |
 
 ### 2.4 route の実行前の拒否（C4 の規則と N5 の一覧）
 
