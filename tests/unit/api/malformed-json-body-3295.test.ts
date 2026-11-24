@@ -94,6 +94,16 @@ const ROUTES: Array<[string, Handler]> = [
   ['clear-composer', clearComposerPOST as Handler],
 ];
 
+/**
+ * The 400 each route answers for a body it cannot read. Issue #4535 (C4, the human's
+ * decision 2026-11-24 16:08): `send` adds `sendOutcome: 'not_sent'` (nothing was typed).
+ */
+function invalidBodyOf(route: string): Record<string, unknown> {
+  return route === 'send'
+    ? { error: 'Invalid request body', sendOutcome: 'not_sent' }
+    : { error: 'Invalid request body' };
+}
+
 function call(handler: Handler, route: string, body: string) {
   const request = new NextRequest(`http://localhost:3000/api/worktrees/${WORKTREE_ID}/${route}`, {
     method: 'POST',
@@ -128,7 +138,7 @@ describe('malformed JSON body → 400 Invalid request body (#3295)', () => {
     const response = await call(handler, route, 'this is not valid JSON');
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'Invalid request body' });
+    expect(await response.json()).toEqual(invalidBodyOf(route));
     expect(mockLogger.error).not.toHaveBeenCalled();
   });
 
@@ -136,7 +146,7 @@ describe('malformed JSON body → 400 Invalid request body (#3295)', () => {
     const response = await call(handler, route, '');
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'Invalid request body' });
+    expect(await response.json()).toEqual(invalidBodyOf(route));
   });
 
   for (const body of ['null', '[]', '1', '"text"']) {
@@ -144,7 +154,7 @@ describe('malformed JSON body → 400 Invalid request body (#3295)', () => {
       const response = await call(handler, route, body);
 
       expect(response.status).toBe(400);
-      expect(await response.json()).toEqual({ error: 'Invalid request body' });
+      expect(await response.json()).toEqual(invalidBodyOf(route));
       expect(mockLogger.error).not.toHaveBeenCalled();
     });
   }
