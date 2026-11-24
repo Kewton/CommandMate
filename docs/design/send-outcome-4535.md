@@ -1,7 +1,7 @@
 # 送信の結果を sent／not_sent（証明つき）／unknown の 3 値にする（Issue #4535）設計
 
 - 段: 段 2（PR を 4 本、直列。各 PR は試験を先に書き、直す前の赤を確かめてから実装する）。段 1（設計と、公開の値に触らない足場・内部の分類）は済み
-- 版: **第 3 版**（2026-11-24）。第 1 版は `ce6a3cd62`、第 2 版は `a7ec9997a`、第 2.1 版は `493957140`
+- 版: **第 3.1 版**（2026-11-24）。第 1 版は `ce6a3cd62`、第 2 版は `a7ec9997a`、第 2.1 版は `493957140`、第 3 版は `10a1a0dc0`
 - **人の決定**（Issue #4535 コメント 7116505317、2026-11-24 08:01）: 公開の契約 C1〜C12 は設計どおり。Q1〜Q13 は推奨どおり、**Q13 は (b) 片付け**
 - 基準: develop `d4f4624cd`。行番号はこの版のもの。Issue の行番号（`192f9dca1`）は §1.2 で今の位置に直した
 - 正: Issue #4535 の本文（R1〜R5・不変条件 I1〜I5・受入条件・範囲の外）と、2026-11-21 のコメント 3 つ（親の決定、#4503 PR-B1 の資産、S9 受け入れの R1〔新しいタスクのダイアログ〕・K1・K2）。この文書は本文の意味を狭めない
@@ -10,6 +10,16 @@
 - 第 2.1 版の材料: s11 の `review-4535-design-v2-opus.md`（第 2 版の再確認。解消 32・未解消 0・P3 7、以下 **V**）・`brief-4535-s1.md`（段 1 の指示）
 - 第 2 版の材料: s11 の `review-4535-design-opus.md`（P1 1・P2 7・P3 10、以下 **A**）・`review-4535-design-opus2.md`（P1 1・P2 7・P3 6、以下 **B**）・`reinstruct-4535-design-r1.md`（処分）
 - 書き方: 「事実」は file:line で確かめたこと。「見立て」は推し量り。この文書の試験の番号は `T1`〜。S9 受け入れの R1 は、Issue 本文の R1（OpenCode）と区別して **N1** と書く
+
+## 第 3.1 版の変更点（A1 のレビュー 2 本の直し）
+
+材料: s11 の `review-4535-a1-codex.md`・`review-4535-a1-opus.md`、処分 `lead-disposition-4535-a1-review.md`。
+
+| 指摘 | 直した所 |
+|---|---|
+| SPA の殻の例外が 200 以外の HTML 2xx にも効いていた（codex P1-1） | §2.3 の表: 例外は **status 200 かつ `text/html`** だけ。`201`・`202` などの HTML 2xx は `unknown` |
+| 添付の止めが path の fallback の `requireSession({ relaunch: true })` の後だった（codex P2-1・opus P3-1） | §3.2: 添付の止めは `sendMessageWithImage` の中、添付の dispatch が `unknown` と分かった直後、path の fallback と `requireSession` の前。起動のキーも打たない。名簿の行とペインが消えていても、止めの柵の確かめが 409 `SEND_TARGET_CHANGED` を返す |
+| 「最悪 350 ms」は待ちの合計で、所要時間の上限ではない（codex P2-2・opus P3-4） | §2.3・§3.2 を「4 回の読み戻し（間の待ちは合わせて 350 ms、各回の上限 5 s）」に。動きは変えない |
 
 ## 第 3 版の変更点（人の決定を入れる）
 
@@ -168,13 +178,13 @@
 | 結果 | 判定 | 今 |
 |---|---|---|
 | 204 → 読み戻し `found` | `delivered` | 同じ |
-| 204 → 読み戻しが梯子の**最後まで** 404 | `not_sent`（OpenCode 自身が「その ID の message は無い」と言い続けた。最悪 350 ms） | 最初の 404 で即 `not_sent` |
+| 204 → 読み戻しが梯子の**最後まで** 404 | `not_sent`（OpenCode 自身が「その ID の message は無い」と言い続けた。4 回の読み戻し（間の待ちは合わせて 350 ms、各回の上限 5 s）） | 最初の 404 で即 `not_sent` |
 | 204 → 404 の後に `found` | `delivered` | 404 で即 `not_sent` → キーボード（二重送信） |
 | 204 → 404 と別の答え（5xx・読めない答え）が混じり、`found` が無い（404・500・404・404 など） | `unknown`（4 回とも 404 のときだけ `missing`） | 1 回目の 404 で即 `not_sent` |
 | 204 → `mismatch`・梯子の尽き（404 以外の読めない答え） | `unknown` | 同じ（ただし fallback する） |
-| 4xx・`200 text/html`（SPA の殻） | `not_sent` | 同じ |
+| 4xx・`200 text/html`（SPA の殻。status 200 のときだけ） | `not_sent` | 同じ（ただし今は 201・202 などの HTML 2xx も `not_sent`） |
 | 5xx・3xx | **`unknown`**（Q5） | `not_sent` |
-| 204 以外の非 HTML の 2xx・応答なし・dispatch の後の例外 | `unknown` | 同じ |
+| 204 以外の非 HTML の 2xx・200 以外の HTML 2xx（201・202 など）・応答なし・dispatch の後の例外 | `unknown` | 同じ（HTML の 201・202 は `not_sent`） |
 
 ### 2.4 route の実行前の拒否（C4 の規則と N5 の一覧）
 
@@ -235,8 +245,8 @@
 
 ### 3.2 送信器（OpenCode）
 
-- `trySendViaServer` が `unknown` を返したら、`sendMessageAfterDispatch` はキーボードに進まず、`keepUnknownDispatch` と同じ形の誤り（`indeterminate`、reason は C7）で終える。添付の送信は、添付の dispatch が `unknown` なら path の fallback（2 回目の HTTP を含む）を呼ばない。守りは 2 つ（`sendMessageAfterDispatch` の止めと `sendMessageWithImage` の止め）で、試験は別々に変異させる（T6）
-- 読み戻しの 404 は梯子（`[0, 50, 100, 200]`）を最後まで回し、全部 404 なら `missing`（§2.3）。途中で `found` なら `delivered`
+- `trySendViaServer` が `unknown` を返したら、`sendMessageAfterDispatch` はキーボードに進まず、`keepUnknownDispatch` と同じ形の誤り（`indeterminate`、reason は C7）で終える。添付の送信は、添付の dispatch が `unknown` なら path の fallback（2 回目の HTTP を含む）を呼ばない。守りは 2 つ（`sendMessageAfterDispatch` の止めと `sendMessageWithImage` の止め）で、試験は別々に変異させる（T6）。`sendMessageWithImage` の止めは添付の dispatch の直後、path の fallback（`sendMessageAfterDispatch`）とその `requireSession({ relaunch: true })` の前に置く（第 3.1 版。起動のキーも打たず、ペインが消えていても柵の 409 を失わない）
+- 読み戻しの 404 は梯子（`[0, 50, 100, 200]`）を最後まで回し、全部 404 なら `missing`（§2.3）。途中で `found` なら `delivered`。4 回の読み戻しで、間の待ちは合わせて 350 ms、各回の GET は `OPENCODE_REQUEST_TIMEOUT_MS`（5 s）が上限（遅いサーバーでは約 20 s まで延びうる）
 - `not_sent`・`skipped` の後のキーボード（F-d）は今のまま。2 回目の HTTP（添付 → path）も、1 回目が `not_sent` のときだけ許す。その前に #4534 の柵が宛先を照合し直す（`fenceConfirmDispatch`、今のまま）
 - 5xx・3xx を `unknown` にする（§2.3、Q5）
 - `RelaySendBinding.onDispatchFailed`（`relay-bind.ts:277–301`）は今のまま。fallback を止めるので、`settle` の「後の dispatch が届いた」枝（`:326–342`）は通らなくなる。枝は消さない（binding はどの送信器にも共通）

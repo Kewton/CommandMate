@@ -605,7 +605,8 @@ export async function sendOpencodePrompt(
     // Issue #4535 (design §2.3): one table for what the answer proves. Issue
     // #3992: another 2xx may still have created the message (a JSON 200 / 201),
     // so it stays unknown — except the web UI's SPA shell an unknown route
-    // answers (`200 text/html`, #1931), which never took the message. A 4xx is
+    // answers (`200 text/html`, #1931, that status only: an HTML 201 / 202 is
+    // unknown), which never took the message. A 4xx is
     // the route refusing it. A 5xx may have come after the message was created,
     // and a 3xx (`redirect: 'manual'`) is not an answer of the route at all, so
     // both are unknown too (Q5).

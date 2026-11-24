@@ -275,8 +275,10 @@ interface DispatchTrace {
  * The three retries are for the race that measurement did not produce, and they
  * are cheap because the alternative is expensive in one direction only: a
  * `missing` verdict sends the body again over the keyboard, so calling a message
- * missing while it is still being written would deliver it twice. Total worst
- * case 350 ms, inside the HTTP request the operator's send is waiting on.
+ * missing while it is still being written would deliver it twice. Four
+ * read-backs: the waits between them add up to 350 ms, and each read has its
+ * own `OPENCODE_REQUEST_TIMEOUT_MS` (5 s) — all inside the HTTP request the
+ * operator's send is waiting on.
  * Issue #4535: a `404` is retried too — only a ladder of nothing but `404`s is
  * `missing`.
  */
@@ -705,7 +707,7 @@ export class OpenCodeTool extends BaseCLITool {
    * which case nothing is posted and the refusal propagates past the catch
    * below. When the POST does not end delivered, the caller is told whether
    * nothing exists (`not_sent`: a POST the server refused — a 4xx or the SPA
-   * shell, Issue #3992 — or a read-back that was `404` to the end of the ladder)
+   * shell `200 text/html`, Issue #3992 — or a read-back that was `404` to the end of the ladder)
    * or it cannot be said (`unknown`: a POST that got no answer, an unexpected
    * 2xx, a 5xx or a 3xx, a body that read back different, a ladder that did not
    * settle), BEFORE any fallback runs. Only `not_sent` and `skipped` fall back
@@ -873,7 +875,8 @@ export class OpenCodeTool extends BaseCLITool {
    * keyboard type the body again — so only a ladder of nothing but `404`s is
    * `missing`; a `found` on a later read is a delivery, and a ladder that mixes
    * `404` with other answers is `unknown` ({@link classifyOpencodeReadbacks}).
-   * Worst case 350 ms, as before for the other answers.
+   * Four read-backs ({@link OPENCODE_SEND_READBACK_DELAYS_MS}): the waits
+   * between them add up to 350 ms, and each read is bounded at 5 s on its own.
    *
    * @returns `found` once the body was found; `missing` when every read of the
    *   ladder was a `404`; `mismatch` when a message exists under the id with
@@ -951,19 +954,16 @@ export class OpenCodeTool extends BaseCLITool {
     // re-attaches, so the server path is available again by the time it is
     // tried. `sendMessageWithImage` reaches this through its own fallback.
     //
-    // Issue #4040: when that fallback follows an `unknown` image dispatch, a
-    // refusal here (`SESSION_STARTING`, a pane that is gone) typed nothing but
-    // does not make the send as a whole safe to resend either.
+    // Issue #4535 (r3): an `unknown` image dispatch never reaches this —
+    // `sendMessageWithImage` stops before the path fallback, so no relaunch
+    // types a launch line after it. `keepUnknownDispatch` stays for the trace's
+    // contract (Issue #4040).
     try {
       await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
     } catch (error: unknown) {
       rethrowFenceRefusal(error);
       throw this.keepUnknownDispatch(error, trace, sessionName) ?? error;
     }
-
-    // Issue #4535 (R1, the image's stop): an image dispatch of this send ended
-    // `unknown`, so the path fallback posts no second dispatch and types nothing.
-    if (trace.unknown) throw this.dispatchUnknownError(sessionName);
 
     if (await this.trySendViaServer(opencodeTarget(worktreeId, instanceId), message, undefined, trace)) {
       // Issue #405: the transcript grew, so the cached capture is stale — the
@@ -1188,6 +1188,13 @@ export class OpenCodeTool extends BaseCLITool {
       invalidateCache(sessionName);
       return;
     }
+
+    // Issue #4535 (R1, the image's stop; r3): the image dispatch ended
+    // `unknown`, so the path fallback does not run at all — no relaunch (a launch line
+    // is a key too), no second dispatch, no body typed. Before the fallback's
+    // `requireSession`, so a pane that went with the roster row while the POST
+    // was out is still the fence's 409 rather than a plain failure.
+    if (trace.unknown) throw this.dispatchUnknownError(sessionName);
 
     logger.info('opencode-image-degraded-to-path', { worktreeId, instanceId: instanceId ?? this.id });
     await this.sendMessageAfterDispatch(

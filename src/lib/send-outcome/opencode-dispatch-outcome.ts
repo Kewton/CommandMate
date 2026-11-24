@@ -5,12 +5,15 @@
  * The sender posts `prompt_async` with a message id it chose, then reads that
  * id back. `not_sent` — which lets the keyboard fallback type the body — only
  * when the loopback server said it did not take the prompt (a 4xx, or the web
- * UI's SPA shell), or when every read of the ladder said the message does not
- * exist. Everything else (5xx, 3xx, an unexpected 2xx, no answer, a read-back
+ * UI's SPA shell — `200 text/html`, that status only), or when every read of the ladder said the message does not
+ * exist. Everything else (5xx, 3xx, an unexpected 2xx — an HTML 201 or 202
+ * included — no answer, a read-back
  * that mixes 404 with other answers, a message under the id with other text) is
  * `unknown`: the message may be in, so nothing else is typed or posted.
  *
- * Pure. Stage 1 of the Issue — the sender (`opencode.ts`) is not wired to it yet.
+ * Pure. `sendOpencodePrompt` (`client.ts`) reads its POST's answer through
+ * {@link classifyOpencodePromptAnswer}, and the sender's `verifyPostedMessage`
+ * (`opencode.ts`) its read-backs through {@link classifyOpencodeReadbacks}.
  */
 
 /** The `prompt_async` POST's answer. */
@@ -37,8 +40,11 @@ export function classifyOpencodePromptAnswer(answer: OpencodePromptAnswer): Open
   if (answer.kind === 'no-answer') return 'unknown';
   const { status } = answer;
   if (status === 204) return 'accepted';
-  // #1931: an unknown route answers with the web UI's shell, which never took the prompt.
-  if (status >= 200 && status < 300) return mediaType(answer.contentType) === 'text/html' ? 'not_sent' : 'unknown';
+  // #1931: an unknown route answers with the web UI's shell — `200 text/html` —
+  // which never took the prompt. Only that status: another HTML 2xx (a 201, a
+  // 202) may have taken it, so it stays unknown with every other 2xx.
+  if (status === 200 && mediaType(answer.contentType) === 'text/html') return 'not_sent';
+  if (status >= 200 && status < 300) return 'unknown';
   if (status >= 400 && status < 500) return 'not_sent';
   // 5xx: the server may have created the message before it failed. 3xx: not an answer of the route.
   return 'unknown';
