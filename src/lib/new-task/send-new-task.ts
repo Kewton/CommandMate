@@ -62,14 +62,17 @@ export type NewTaskFailureKind =
   | 'model_rejected'
   /** Any other 400. */
   | 'invalid'
-  /** 5xx, no reply, a timeout. */
+  /**
+   * A non-503 5xx that says `sendOutcome: 'not_sent'`, any other status, a request refused before it left.
+   * (Issue #4535: a 5xx without it, no reply and a timeout of the send are `unknown`.)
+   */
   | 'failed';
 
 /**
  * Issue #4535 (C9): the outcome of a send that did not say "sent" and did not say "not sent" either —
- * `sendOutcome: 'unknown'` (or `'sent'` on a failed answer: typed, then failed), or the send request
- * itself running out of time / losing its connection before any answer. The text may already be in
- * the agent's session, so the dialog never sends it again on a plain press. Kept apart from
+ * `sendOutcome: 'unknown'` (or `'sent'` on a failed answer: typed, then failed), a 5xx that does not
+ * say `not_sent`, or the send request itself running out of time / losing its connection. The text
+ * may already be in the agent's session, so the dialog never sends it again on a plain press. Kept apart from
  * {@link NewTaskFailureKind}, which names the ways a send did not go out.
  */
 export type NewTaskOutcomeKind = NewTaskFailureKind | 'unknown';
@@ -168,7 +171,14 @@ export async function interpretSendResponse(
   let kind: NewTaskOutcomeKind;
   // Issue #4535 (C9, design §2.2 U1): the answer says the text may already be in the session — a
   // failed answer's `sent` too (typed, then failed), and a fence refusal that does not say `not_sent`.
-  if (sendOutcome === 'unknown' || sendOutcome === 'sent' || (fence !== null && fence.sendOutcome !== 'not_sent')) {
+  // A 5xx that does not say `not_sent` (a proxy's page, a bare 500) is not the route's proof of a
+  // refusal before any key either (design §3.4, INV-S10).
+  if (
+    sendOutcome === 'unknown' ||
+    sendOutcome === 'sent' ||
+    (fence !== null && fence.sendOutcome !== 'not_sent') ||
+    (status >= 500 && status < 600 && sendOutcome !== 'not_sent')
+  ) {
     kind = 'unknown';
   } else if (status === 409) {
     kind = code === SEND_RESPONSE_CODES.promptWaiting ? 'prompt_waiting' : 'conflict';
@@ -210,15 +220,16 @@ function transportFailure(error: unknown): NewTaskSendResult {
 }
 
 /**
- * Issue #4535 (C9, design §3.4): the send request (`/send`) failed before any answer arrived. Its
- * running out of time (`timeout`, the transport's or {@link withinDeadline}'s) or being cut off
- * (`aborted`) says nothing about whether the server typed it: `unknown`. Refused before it left
- * (`offline`), a `network` failure and anything else stay `failed` as before.
+ * Issue #4535 (C9, design §3.4, INV-S10): the send request (`/send`) did not finish. Its running out
+ * of time (`timeout`, the transport's or {@link withinDeadline}'s — before the headers or while the
+ * body is still being read), being cut off (`aborted`) or losing its connection (`network`) says
+ * nothing about whether the server typed it: `unknown`. Only a refusal before it left (`offline`)
+ * and anything that is not the client's `ApiError` stay `failed` as before.
  */
 function sendTransportFailure(error: unknown): NewTaskSendResult {
   const failure = transportFailure(error);
   if (failure.ok) return failure;
-  const unanswered = error instanceof ApiError && (error.kind === 'timeout' || error.kind === 'aborted');
+  const unanswered = error instanceof ApiError && error.kind !== 'offline';
   return unanswered ? { ...failure, kind: 'unknown' } : failure;
 }
 
@@ -305,9 +316,6 @@ export async function sendNewTask(
   const model = input.model?.trim() || undefined;
   // With no session the server launches the agent inside this request (Issue #3194).
   const sendTimeoutMs = getSendTimeoutMs();
-  // Issue #4535: whether the route's answer (its headers) arrived. A deadline that runs out while an
-  // error body is still being read is the reading's, and stays `failed` as before (#3511 / #4034).
-  let answered = false;
   try {
     return withArmed(
       await withinDeadline(async () => {
@@ -322,11 +330,10 @@ export async function sendNewTask(
           }),
           timeoutMs: sendTimeoutMs,
         });
-        answered = true;
         return interpretSendResponse(response, { modelRequested: model !== undefined });
       }, sendTimeoutMs),
     );
   } catch (error) {
-    return withArmed(answered ? transportFailure(error) : sendTransportFailure(error));
+    return withArmed(sendTransportFailure(error));
   }
 }

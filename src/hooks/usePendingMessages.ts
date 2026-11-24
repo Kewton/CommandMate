@@ -79,11 +79,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, OptimisticSendState, RetryPendingOptions, SendRoleRefusalReason } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { SendTargetChangedRefusal } from '@/components/worktree/send-refusal-notice';
-import {
-  SESSION_STARTING_CODE,
-  SESSION_START_FAILED_CODE,
-  SESSION_START_UNAVAILABLE_CODE,
-} from '@/lib/session/session-start-error';
 
 /** Default: mark an unconfirmed 'sending' message as errored after this long. */
 export const DEFAULT_PENDING_TIMEOUT_MS = 30_000;
@@ -103,12 +98,12 @@ export const DEFAULT_PENDING_TIMEOUT_MS = 30_000;
  */
 export const DEFAULT_RESEND_GRACE_MS = 250;
 
-/** Issue #4503: the codes of a 5xx the server answers before any key is typed (the session start). */
-const SEND_REFUSED_BEFORE_INPUT_CODES: ReadonlySet<string> = new Set([
-  SESSION_STARTING_CODE,
-  SESSION_START_FAILED_CODE,
-  SESSION_START_UNAVAILABLE_CODE,
-]);
+/**
+ * Issue #4535 (C12): the codes of the middleware's typed refusals before the route (401 / 403) —
+ * nothing reached the send route, so they are not unknown. Spelled here rather than imported:
+ * the middleware's home is server-only.
+ */
+const REFUSED_BEFORE_ROUTE_CODES: ReadonlySet<string> = new Set(['AUTH_REQUIRED', 'IP_DENIED']);
 
 /**
  * Issue #4503: whether a send's rejection leaves its outcome unknown — the screen must not offer a
@@ -119,11 +114,13 @@ const SEND_REFUSED_BEFORE_INPUT_CODES: ReadonlySet<string> = new Set([
  * - `data.sendOutcome === 'unknown'` (the route's answer, `route.ts` `unboundSendOutcome`) → unknown
  * - `data.sendOutcome === 'not_sent'` → not unknown (nothing was typed: retrying is safe)
  * - `kind` `network` / `timeout` / `aborted` (the request may have reached the server) → unknown
- * - an HTTP 5xx without `sendOutcome` (500 included — PM's D4; a proxy's or tunnel's 502 / 504) → unknown
- * - a 5xx whose `code` says the server refused before any key (`SEND_REFUSED_BEFORE_INPUT_CODES`:
- *   the session start's 503s) → not unknown, as before. The route also adds `sendOutcome:
- *   'not_sent'` to these (`recordNotSent` / the sender's `settle`); the code covers an answer without it.
- * - a 4xx, `kind: 'offline'` (refused before it was sent), anything that is not an `ApiError` → not unknown
+ * - an HTTP 5xx without `sendOutcome` (500 included — PM's D4; a proxy's or tunnel's 502 / 504) → unknown.
+ *   Issue #4535 (human decision on C10): the session start's 503s too — the route says `not_sent` on
+ *   its own refusals (`recordNotSent` / the sender's `settle`), so one without it is not the route's
+ * - Issue #4535 (C10): an HTTP 4xx without `sendOutcome` → unknown (a proxy's or tunnel's page: the
+ *   route's own refusals say `not_sent`), except the middleware's typed 401 `AUTH_REQUIRED` / 403
+ *   `IP_DENIED` (C12, {@link REFUSED_BEFORE_ROUTE_CODES}) → not unknown
+ * - `kind: 'offline'` (refused before it was sent), anything that is not an `ApiError` → not unknown
  */
 export function isSendOutcomeUnknown(error: unknown): boolean {
   if (error === null || typeof error !== 'object') return false;
@@ -135,9 +132,10 @@ export function isSendOutcomeUnknown(error: unknown): boolean {
   // `sent` on a failed answer still means the text was typed: never a direct retry.
   if (outcome === 'unknown' || outcome === 'sent') return true;
   if (kind === 'network' || kind === 'timeout' || kind === 'aborted') return true;
+  if (kind !== 'http') return false;
   const code = data !== null && typeof data === 'object' ? (data as { code?: unknown }).code : undefined;
-  if (typeof code === 'string' && SEND_REFUSED_BEFORE_INPUT_CODES.has(code)) return false;
-  return kind === 'http' && status >= 500 && status < 600;
+  if (status >= 400 && status < 500) return !(typeof code === 'string' && REFUSED_BEFORE_ROUTE_CODES.has(code));
+  return status >= 500 && status < 600;
 }
 
 export interface OptimisticSendOptions {
