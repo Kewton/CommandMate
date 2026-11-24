@@ -52,7 +52,7 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     autoYesPosts: [],
     order: [],
     sends: 0,
-    sendAnswer: { status: 201, body: { id: 1 } },
+    sendAnswer: { status: 201, body: { id: 'msg-1', role: 'user' } },
     liveAfterArming: true,
     patches: 0,
     rosterRead: null,

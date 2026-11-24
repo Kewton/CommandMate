@@ -102,7 +102,7 @@ const TASK_CREATED: RouteResponse = {
 
 const SEND_OK: RouteResponse = {
   status: 201,
-  data: { id: 1, role: 'user', content: COMPOSED_MESSAGE, worktreeId: 'wt1' },
+  data: { id: 'msg-1', role: 'user', content: COMPOSED_MESSAGE, worktreeId: 'wt1' },
 };
 
 async function runSend(argv: string[]) {

@@ -35,7 +35,7 @@ async function runSend(argv: string[]): Promise<void> {
 
 describe('[#2771] send --model for a Claude target', () => {
   it('sends the model when --instance resolves to claude', async () => {
-    mockFetchSequence([resolveTarget('claude', 'claude'), { data: { id: 1 }, status: 201 }]);
+    mockFetchSequence([resolveTarget('claude', 'claude'), { data: { id: 'msg-1', role: 'user' }, status: 201 }]);
 
     await runSend(['wt1', 'hello', '--instance', 'claude', '--model', 'sonnet']);
 
@@ -50,7 +50,7 @@ describe('[#2771] send --model for a Claude target', () => {
   });
 
   it('accepts --agent claude without --instance', async () => {
-    mockFetchSequence([{ data: { id: 1 }, status: 201 }]);
+    mockFetchSequence([{ data: { id: 'msg-1', role: 'user' }, status: 201 }]);
 
     await runSend(['wt1', 'hello', '--agent', 'claude', '--model', 'opus[1m]']);
 
@@ -66,7 +66,7 @@ describe('[#2771] send --model for a Claude target', () => {
   ])('rejects %s with exit 2', async (_name, model) => {
     // `process.exit` is mocked, so the command keeps running after the error —
     // what is asserted is the verdict, as in instance-cli-tool-resolution.test.ts.
-    mockFetchSequence([resolveTarget('claude', 'claude'), { data: { id: 1 }, status: 201 }]);
+    mockFetchSequence([resolveTarget('claude', 'claude'), { data: { id: 'msg-1', role: 'user' }, status: 201 }]);
 
     await runSend(['wt1', 'hello', '--instance', 'claude', `--model=${model}`]);
 
@@ -75,7 +75,7 @@ describe('[#2771] send --model for a Claude target', () => {
   });
 
   it('refuses --model when the target is not named (the CLI cannot know the default tool)', async () => {
-    mockFetchSequence([{ data: { id: 1 }, status: 201 }]);
+    mockFetchSequence([{ data: { id: 'msg-1', role: 'user' }, status: 201 }]);
 
     await runSend(['wt1', 'hello', '--model', 'sonnet']);
 
@@ -96,7 +96,7 @@ describe('[#2771] Auto-Yes ordering', () => {
     mockFetchSequence([
       resolveTarget('claude', 'claude'),
       { data: { enabled: true } },
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
     ]);
 
     await runSend(['wt1', 'hello', '--instance', 'claude', '--model', 'sonnet', '--auto-yes']);
@@ -108,7 +108,7 @@ describe('[#2771] Auto-Yes ordering', () => {
   it('copilot: still deferred until after the send (Issue #576, unchanged)', async () => {
     mockFetchSequence([
       resolveTarget('copilot', 'copilot'),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
       { data: { enabled: true } },
     ]);
 

@@ -379,6 +379,7 @@ describe('ask: --timeout covers the round trip, not the reading of the reply (Is
       '/api/asks/capabilities': { protocol: 1, tools: { claude: true } },
       'POST /send': (_url, init) => ({
         id: 'm1',
+        role: 'user',
         timestamp: new Date().toISOString(),
         ask: { id: JSON.parse(String(init?.body)).ask.id, state: 'pending', reason: null, sendState: 'sent' },
       }),
@@ -400,7 +401,7 @@ describe('ask: --timeout covers the round trip, not the reading of the reply (Is
 
   it('negative: a /send that returns past the deadline is 124 that says the message was sent, with no poll', async () => {
     mockServer({
-      'POST /send': { delayMs: 3_000, data: { id: 'm1', timestamp: new Date().toISOString() } },
+      'POST /send': { delayMs: 3_000, data: { id: 'm1', role: 'user', timestamp: new Date().toISOString() } },
       '/current-output': frame,
     });
     const run = await start('ask', ['wt1', 'hello', '--instance', 'claude', '--timeout', '2']);
@@ -418,7 +419,7 @@ describe('ask: --timeout covers the round trip, not the reading of the reply (Is
   it('negative: with --async, a /send that returns past the deadline keeps its relay (exit 0, no cancel)', async () => {
     mockServer({
       'POST /api/relays': RELAY_CREATED,
-      'POST /send': { delayMs: 3_000, data: { id: 'm1', timestamp: new Date().toISOString() } },
+      'POST /send': { delayMs: 3_000, data: { id: 'm1', role: 'user', timestamp: new Date().toISOString() } },
       '/current-output': frame,
     });
     const run = await start('ask', [

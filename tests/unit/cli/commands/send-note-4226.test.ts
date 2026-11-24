@@ -38,7 +38,7 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     memPosts: [],
     memAnswer: { status: 201, body: { ok: true, item: { id: 'item-1' }, replayed: false, warnings: [] } },
     sends: [],
-    sendAnswer: { status: 201, body: { id: 1 } },
+    sendAnswer: { status: 201, body: { id: 'msg-1', role: 'user' } },
     autoYesPosts: [],
     autoYesBefore: false,
     relayCancels: 0,

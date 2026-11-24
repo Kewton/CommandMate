@@ -232,7 +232,7 @@ describe('[#3723] commandmate send --auto-yes reads the arming response', () => 
     const fn = vi.fn(async (input: unknown) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith('/auto-yes')) return jsonResponse(200, autoYesBody);
-      if (url.pathname.endsWith('/send')) return jsonResponse(201, { id: 1 });
+      if (url.pathname.endsWith('/send')) return jsonResponse(201, { id: 'msg-1', role: 'user' });
       throw new Error(`unexpected request: ${url.pathname}`);
     });
     global.fetch = fn as unknown as typeof fetch;
@@ -302,7 +302,7 @@ describe('[#3723] send --contract --auto-yes warns before the task runs', () => 
       if (url.pathname.endsWith('/auto-yes')) {
         return jsonResponse(200, { enabled: true, expiresAt: 1, contractPolicy: serverPolicy });
       }
-      if (url.pathname.endsWith('/send')) return jsonResponse(201, { id: 1 });
+      if (url.pathname.endsWith('/send')) return jsonResponse(201, { id: 'msg-1', role: 'user' });
       throw new Error(`unexpected request: ${method} ${url.pathname}`);
     }) as unknown as typeof fetch;
     return paths;
