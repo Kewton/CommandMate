@@ -339,11 +339,14 @@ describe('[#4535 T19b r5] the discard, a hold that cannot be written, and the ho
     expect(toastText()).not.toContain('本文を入力欄に戻せませんでした');
   });
 
-  it('a hold matches the draft whole, not a part of it', () => {
+  // Issue #4535 r6 (INV-V2 rewritten, PM's disposition): any draft that holds the text matches — the
+  // safe side (an extra question is accepted, a send to a changed To is not).
+  it('a hold matches any draft that holds its text (INV-V2 r6)', () => {
     holdRetargetedText(WT, { text: 'ok', instanceId: 'codex-2', cliToolId: 'codex' });
     expect(findRetargetHolds(WT, 'ok')).toHaveLength(1);
-    expect(findRetargetHolds(WT, 'ok, then look at the diff')).toEqual([]);
-    expect(findRetargetHolds(WT, 'not ok')).toEqual([]);
+    expect(findRetargetHolds(WT, 'ok, then look at the diff')).toHaveLength(1);
+    expect(findRetargetHolds(WT, 'not ok')).toHaveLength(1);
+    expect(findRetargetHolds(WT, 'fine')).toEqual([]);
   });
 
   it('conversation.sendTargetChanged.textNotReturned is in ja and en', () => {

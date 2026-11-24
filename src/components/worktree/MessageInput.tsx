@@ -54,6 +54,7 @@ import {
   getInstanceDraftKey,
   getSplitDraftKey,
   subscribeDraftAppend,
+  draftHoldsRetargetedText,
   findRetargetHolds,
   holdRetargetedText,
   releaseRetargetHolds,
@@ -572,7 +573,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
     const holds = [
       ...findRetargetHolds(worktreeId, text),
-      ...localRetargetHoldsRef.current.filter((hold) => hold.worktreeId === worktreeId && hold.text === text),
+      ...localRetargetHoldsRef.current.filter(
+        (hold) => hold.worktreeId === worktreeId && draftHoldsRetargetedText(text, hold.text),
+      ),
     ];
     const original = holds.find((hold) => !isSameSendTarget(hold, current));
     if (!original) return false;
@@ -584,7 +587,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const releaseHolds = useCallback((text: string) => {
     releaseRetargetHolds(worktreeId, text);
     localRetargetHoldsRef.current = localRetargetHoldsRef.current.filter(
-      (hold) => !(hold.worktreeId === worktreeId && hold.text === text),
+      (hold) => !(hold.worktreeId === worktreeId && draftHoldsRetargetedText(text, hold.text)),
     );
   }, [worktreeId]);
   /**

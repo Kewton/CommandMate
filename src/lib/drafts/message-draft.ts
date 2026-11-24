@@ -137,14 +137,33 @@ export function holdRetargetedText(worktreeId: string, hold: RetargetHold): bool
   );
 }
 
-/** Issue #4535: the holds a draft about to be sent carries — those whose text is the draft (whole). */
+/** Issue #4535 r6: one shape for comparing texts — every run of spaces and newlines is one space. */
+function normalizeSpace(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Issue #4535 r6 (INV-V2): whether a draft holds a handed-back text, in any shape the composer or the
+ * person gives it — another text before it (the composer appends a text that comes back to what is
+ * there), after it, between its paragraphs, other spaces and newlines, two texts back one after the
+ * other. Each paragraph of the text (split at blank lines) must be in the draft, both compared with
+ * their spaces made one shape. A paragraph the person deleted no longer holds it. Safe side: a draft
+ * that only happens to contain the text asks too (an extra question, never a send to a changed To).
+ */
+export function draftHoldsRetargetedText(draft: string, text: string): boolean {
+  const body = normalizeSpace(draft);
+  const paragraphs = text.split(/\n\s*\n/).map(normalizeSpace).filter((paragraph) => paragraph !== '');
+  return paragraphs.length > 0 && paragraphs.every((paragraph) => body.includes(paragraph));
+}
+
+/** Issue #4535: the holds a draft about to be sent carries ({@link draftHoldsRetargetedText}). */
 export function findRetargetHolds(worktreeId: string, draft: string): RetargetHold[] {
-  return readRetargetHolds(worktreeId).filter((hold) => hold.text === draft);
+  return readRetargetHolds(worktreeId).filter((hold) => draftHoldsRetargetedText(draft, hold.text));
 }
 
 /** Issue #4535: a draft was sent — the holds it carried go (it reached the target it was sent to). */
 export function releaseRetargetHolds(worktreeId: string, draft: string): void {
   const holds = readRetargetHolds(worktreeId);
-  const left = holds.filter((hold) => hold.text !== draft);
+  const left = holds.filter((hold) => !draftHoldsRetargetedText(draft, hold.text));
   if (left.length !== holds.length) writeRetargetHolds(worktreeId, left);
 }
