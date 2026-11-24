@@ -16,10 +16,21 @@
  *   and heading, or (c) a line of ALLOWED_NEW, each with its reason.
  * - V4: the `<file>#<anchor>` of each pointer is an existing heading of that file
  *   (GitHub's rule, from orchestrate-doc-links-3481).
+ * - V5: no original line is lost: each line of ORIGINAL_LINE_HASHES is a line of
+ *   team.md today, or a pointer line of team.md keeps its head and a registered text
+ *   is the rest (original line = head + MOVED text). V3 alone passes when a line is
+ *   only deleted.
  *
  * The original lines are held as hashes (ORIGINAL_LINE_HASHES): CI checks out one
  * commit, so `git show dbc5e96f2:…` is not available there. The table and the texts
  * were generated from `git show dbc5e96f2:docs/orchestrate/team.md`, not typed.
+ *
+ * To change team.md on purpose after this move (a new rule, a reworded line), rebuild
+ * ORIGINAL_LINE_HASHES from today's develop team.md with this one line, and paste its
+ * output into the set:
+ *   git show origin/develop:docs/orchestrate/team.md | node -e "const c=require('crypto');const l=require('fs').readFileSync(0,'utf8').split('\n');console.log([...new Set(l)].map((x)=>\"  '\"+c.createHash('sha256').update(x).digest('hex').slice(0,16)+\"',\").sort().join('\n'))"
+ * After the rebuild, MOVED and ALLOWED_NEW may be empty (the lines are originals
+ * again; the test that pins MOVED's 14 items is changed with it).
  *
  * The controls run on a temporary directory; the real files are only read.
  *
@@ -144,6 +155,20 @@ export function brokenPointers(team: string, read: (rel: string) => string | und
   return problems;
 }
 
+/** V5: `original <hash>: …` for each original line that is neither in team.md nor a head + moved text of a pointer. */
+export function lostOriginals(team: string, registry: Registry): string[] {
+  const kept = new Set<string>();
+  for (const line of team.split('\n')) {
+    kept.add(lineHash(line));
+    const p = POINTER.exec(line);
+    if (p === null) continue;
+    for (const m of registry.moved) if (pointerFor(m, p[2], p[3])) kept.add(lineHash(p[1] + m.text));
+  }
+  return [...registry.originals]
+    .filter((h) => !kept.has(h))
+    .map((h) => `original ${h}: not in team.md, and no pointer keeps it as head + a moved text`);
+}
+
 /** A reader of repository-relative paths under `root`; undefined when the file is missing. */
 export function readerAt(root: string): (rel: string) => string | undefined {
   return (rel) => {
@@ -153,7 +178,7 @@ export function readerAt(root: string): (rel: string) => string | undefined {
 }
 
 /** All four checks for the repository (or a copy of it) under `root`. */
-export function checkMoved(root: string, registry: Registry): Record<'v1' | 'v2' | 'v3' | 'v4', string[]> {
+export function checkMoved(root: string, registry: Registry): Record<'v1' | 'v2' | 'v3' | 'v4' | 'v5', string[]> {
   const read = readerAt(root);
   const team = read(TEAM_RELATIVE_PATH);
   if (team === undefined) throw new Error(`${TEAM_RELATIVE_PATH} not found under ${root}`);
@@ -162,12 +187,17 @@ export function checkMoved(root: string, registry: Registry): Record<'v1' | 'v2'
     v2: stillInTeam(team, registry),
     v3: unknownTeamLines(team, registry),
     v4: brokenPointers(team, read),
+    v5: lostOriginals(team, registry),
   };
 }
 
 // ---------------------------------------------------------------------------
 // The registry (generated from `git show dbc5e96f2:docs/orchestrate/team.md`)
 // ---------------------------------------------------------------------------
+
+/** T18, verbatim from e3476c112's team.md. */
+export const T18_LINE =
+  "ロールの正本（`docs/orchestrate/roles/*.md`）の正はこのリポジトリ。ロールの本文を変えた後と、セッションを起動する前に `node scripts/orchestrate/roles-sync.mjs check` を流す。`differs` のときは黙って `roles edit --file` で巻き戻さず、PM へ返す（PM が人へ）。";
 
 /**
  * New lines of team.md, each with why it is allowed. Only T18 (the person's
@@ -176,8 +206,7 @@ export function checkMoved(root: string, registry: Registry): Record<'v1' | 'v2'
  */
 export const ALLOWED_NEW: ReadonlyArray<{ line: string; why: string }> = [
   {
-    line:
-      "ロールの正本（`docs/orchestrate/roles/*.md`）の正はこのリポジトリ。ロールの本文を変えた後と、セッションを起動する前に `node scripts/orchestrate/roles-sync.mjs check` を流す。`differs` のときは黙って `roles edit --file` で巻き戻さず、PM へ返す（PM が人へ）。",
+    line: T18_LINE,
     why: 'T18: ロールの正本の正・roles-sync check の時期・differs で巻き戻さず PM へ（e3476c112 の team.md の行を一字一句。§1 の claude-3 の行の後）',
   },
 ];
@@ -432,7 +461,7 @@ describe('moved verbatim: controls (#4546)', () => {
     if (dest !== undefined) fs.writeFileSync(path.join(root, 'docs/orchestrate/a.md'), dest);
     return root;
   };
-  const none = { v1: [], v2: [], v3: [], v4: [] };
+  const none = { v1: [], v2: [], v3: [], v4: [], v5: [] };
 
   it('positive: the original team.md with nothing registered passes', () => {
     const registry = { ...FIXTURE_REGISTRY, moved: [] };
@@ -501,6 +530,26 @@ describe('moved verbatim: controls (#4546)', () => {
     expect(result.v4).toHaveLength(2);
   });
 
+  it('negative (V5): an original line only deleted from team.md is reported (V3 does not see it)', () => {
+    const result = checkMoved(rootWith(FIXTURE_TEAM.replace('- 残す項目\n', ''), FIXTURE_DEST), FIXTURE_REGISTRY);
+    expect(result.v5).toEqual([
+      `original ${lineHash('- 残す項目')}: not in team.md, and no pointer keeps it as head + a moved text`,
+    ]);
+    expect([result.v1, result.v2, result.v3, result.v4]).toEqual([[], [], [], []]);
+  });
+
+  it('negative (V5): §6 の 9 deleted from a copy of the real team.md is reported', () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-orchestrate-moved-verbatim-'));
+    fs.mkdirSync(path.join(root, 'docs/orchestrate'), { recursive: true });
+    const real = fs.readFileSync(path.join(REPO_ROOT, TEAM_RELATIVE_PATH), 'utf8');
+    const nine = real.split('\n').find((l) => l.startsWith('9. **'));
+    expect(nine).toBeDefined();
+    fs.writeFileSync(path.join(root, TEAM_RELATIVE_PATH), real.replace(`${nine}\n`, ''));
+    expect(checkMoved(root, REGISTRY).v5).toEqual([
+      `original ${lineHash(nine as string)}: not in team.md, and no pointer keeps it as head + a moved text`,
+    ]);
+  });
+
   it('throws when team.md is missing instead of passing', () => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'cm-orchestrate-moved-verbatim-'));
     expect(() => checkMoved(root as string, FIXTURE_REGISTRY)).toThrow(/not found/);
@@ -517,7 +566,7 @@ describe('moved verbatim: this repository (#4546)', () => {
   it('has the registry (anti-vacuity)', () => {
     expect(MOVED).toHaveLength(14);
     expect(ORIGINAL_LINE_HASHES.size).toBeGreaterThanOrEqual(100);
-    expect(ALLOWED_NEW).toHaveLength(1);
+    for (const a of ALLOWED_NEW) expect(a.line).toBe(T18_LINE);
     for (const a of ALLOWED_NEW) expect(ORIGINAL_LINE_HASHES.has(lineHash(a.line))).toBe(false);
   });
 
@@ -535,5 +584,9 @@ describe('moved verbatim: this repository (#4546)', () => {
 
   it('V4: every pointer of team.md names an existing heading', () => {
     expect(result.v4).toEqual([]);
+  });
+
+  it('V5: no original line of team.md is lost (kept, or head + moved text behind a pointer)', () => {
+    expect(result.v5).toEqual([]);
   });
 });

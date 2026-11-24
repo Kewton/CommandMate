@@ -202,6 +202,10 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - 関門は変えない。develop へのマージは今までどおり CI の全チェックの合格（`--last`）が条件で、止める区間でも main への PR の CI・承認は弱めない
 - 止める区間の間は、develop へのマージも main への PR の追加も、PM の合図まで待つ（祖先関係を壊さないため）
 
+元の場所: team.md §9 の「受け入れ・リリースの間のマージ」（#4546 で移した。文は元のまま）
+
+判定する版を決めるのは PM。**受け入れ・リリースの間も develop へのマージは続ける**（人の決定、mem c31afe28）。止めるのは、**main への PR を作ってから、マージバック（main の変更を develop へ戻すマージ）が済むまで**だけで、PM が「停止」「再開」を全リーダーへ 1 行で知らせる。止めている間もレビュー・直し・verify は続けてよい。判定する版（commit）は固定し、その後に develop へ入ったものは次の受け入れの対象になる。関門は変えない（根拠は ci-merge.md の 6-2-1）。
+
 ## 6-2 「CI が通れば」の許可と全チェックの合格
 
 `--last` なしの `merge-pr.mjs` は、全 `unit` の検証と `--build` の precheck がある PR の `Build` も `Unit Tests` も待たない（取り込み後に重い段を CI に任せた HEAD の `Unit Tests` は待つ。下の「6-2 取り込み後の重い段」）。設計どおりだが、利用者の許可の「CI が通れば」とは食い違う。
@@ -357,6 +361,12 @@ node scripts/orchestrate/merge-train.mjs --run-dir "workspace/orchestration/runs
 
 CI のジョブ名は「何を検査するはずだったか」で、落ちた理由ではない。赤いジョブは、失敗したステップの名前と、その後のステップが `skipped` かを読む。`Install dependencies` のタイムアウトやレジストリの 503 で落ちたなら、本体（ESLint・tsc・テスト）は実行されておらず、コードの問題ではない。
 `gh api repos/Kewton/CommandMate/actions/runs/<run_id>/jobs` の `steps[].conclusion` で読む。run が進行中でも、終わったジョブのログは `gh api repos/Kewton/CommandMate/actions/jobs/<job_id>/logs` で取れる。同じジョブ名でも試行ごとに理由が変わるので、落ちるたびにログを読む。
+
+## 6-3 マージの流れを定期的に見る
+
+元の場所: team.md §7 の 2 つ目の項目（#4546 で移した。文は元のまま）
+
+作る速さがマージの速さを超えると、開いた PR が溜まり、CI 1 回が長くなって、さらにマージが遅れる。PM は返しを待つだけでなく、定期的に「直近 1 時間のマージ数・開いた PR 数・ランナーの online 数・queued の最古」を見る。online 0 か queued 10 分超なら、ランナーの健康を先に確かめる（docs/orchestrate/ci-merge.md の「6-3 CI が queued のまま進まないとき」）
 
 ## 6-3 CI が queued のまま進まないとき
 
