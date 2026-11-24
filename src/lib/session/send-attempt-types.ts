@@ -106,6 +106,13 @@ export type SendAttemptReason =
    * still in the composer before typing its own (#4035).
    */
   | 'found-in-composer'
+  /**
+   * `indeterminate`: opencode's server dispatch of the send ended `unknown`
+   * (no answer, a 5xx / 3xx / unexpected 2xx, a read-back that did not
+   * settle), so the sender typed nothing and posted nothing again — the
+   * message may be there (#4535).
+   */
+  | 'dispatch-unknown'
   /** `indeterminate`: any other failure; where it stopped is not known. */
   | 'send-error';
 
@@ -149,3 +156,11 @@ export const INPUT_RECHECK_FAILED_CODE = 'INPUT_RECHECK_FAILED';
  * Read by `classifySendFailure` by code, never by wording.
  */
 export const AGENT_NOT_IN_FOREGROUND_CODE = 'AGENT_NOT_IN_FOREGROUND';
+
+/**
+ * `code` on the error OpenCode's sender throws when it stops after a server
+ * dispatch whose outcome is unknown (Issue #4535): nothing was typed and
+ * nothing posted again, but the message may be there. `classifySendFailure`
+ * reads the send as `indeterminate` (`dispatch-unknown`), never as safe to resend.
+ */
+export const OPENCODE_DISPATCH_UNKNOWN_CODE = 'OPENCODE_DISPATCH_UNKNOWN';

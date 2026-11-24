@@ -44,6 +44,7 @@
 import { randomBytes } from 'crypto';
 import { pathToFileURL } from 'url';
 import { createLogger } from '@/lib/logger';
+import { classifyOpencodePromptAnswer } from '@/lib/send-outcome/opencode-dispatch-outcome';
 import type {
   OpencodeAgentChoice,
   OpencodeModelChoice,
@@ -540,12 +541,13 @@ export function promptSelectionBody(
  *
  *  - `accepted`: the server answered `204` (accepted, not yet delivered — read
  *    it back);
- *  - `rejected`: the server refused it — a non-2xx status, or the `200
- *    text/html` SPA shell of a route it does not know (#1931) — so nothing was
- *    sent;
- *  - `unknown`: no answer (a timeout, a broken connection), or a 2xx other than
- *    `204` that is not that shell — the server may still have created the
- *    message.
+ *  - `rejected`: the server refused it — a 4xx, or the `200 text/html` SPA
+ *    shell of a route it does not know (#1931) — so nothing was sent;
+ *  - `unknown`: no answer (a timeout, a broken connection), a 2xx other than
+ *    `204` that is not that shell, a 5xx or a 3xx (Issue #4535, Q5) — the
+ *    server may still have created the message.
+ *
+ * The table is `classifyOpencodePromptAnswer` (`lib/send-outcome`).
  */
 export type OpencodePromptDispatch = 'accepted' | 'rejected' | 'unknown';
 
@@ -600,12 +602,23 @@ export async function sendOpencodePrompt(
       }),
       signal: AbortSignal.timeout(OPENCODE_REQUEST_TIMEOUT_MS),
     });
-    if (response.status === 204) return 'accepted';
-    // Issue #3992: another 2xx may still have created the message (a JSON 200 /
-    // 201), so it stays unknown — except the web UI's SPA shell an unknown route
-    // answers (`200 text/html`, #1931), which never took the message.
-    if (response.status >= 200 && response.status < 300 && !hasContentType(response, 'text/html')) {
-      logger.warn('opencode-prompt-unexpected-success', { port, sessionId, status: response.status });
+    // Issue #4535 (design §2.3): one table for what the answer proves. Issue
+    // #3992: another 2xx may still have created the message (a JSON 200 / 201),
+    // so it stays unknown — except the web UI's SPA shell an unknown route
+    // answers (`200 text/html`, #1931, that status only: an HTML 201 / 202 is
+    // unknown), which never took the message. A 4xx is
+    // the route refusing it. A 5xx may have come after the message was created,
+    // and a 3xx (`redirect: 'manual'`) is not an answer of the route at all, so
+    // both are unknown too (Q5).
+    const verdict = classifyOpencodePromptAnswer({
+      kind: 'response',
+      status: response.status,
+      contentType: response.headers?.get?.('content-type') ?? null,
+    });
+    if (verdict === 'accepted') return 'accepted';
+    if (verdict === 'unknown') {
+      const event = response.status < 300 ? 'opencode-prompt-unexpected-success' : 'opencode-prompt-unknown-answer';
+      logger.warn(event, { port, sessionId, status: response.status });
       return 'unknown';
     }
     logger.warn('opencode-prompt-rejected', { port, sessionId, status: response.status });

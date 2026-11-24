@@ -69,6 +69,7 @@ import {
 } from '@/lib/agent-roles/launch-errors';
 import {
   AGENT_NOT_IN_FOREGROUND_CODE,
+  OPENCODE_DISPATCH_UNKNOWN_CODE,
   PASTE_NOT_STARTED_CODE,
   PLAN_REVIEW_SEND_REFUSED_CODE,
 } from './send-attempt-types';
@@ -324,6 +325,10 @@ export function classifySendFailure(error: unknown): { state: SendAttemptState; 
   ) {
     return { state: 'indeterminate', reason: 'send-error' };
   }
+  // Issue #4535 (C7): opencode's sender stopped after a server dispatch whose
+  // outcome is unknown — nothing typed, nothing posted again, but the message
+  // may be there. By code, never by wording.
+  if (carriesCode(error, OPENCODE_DISPATCH_UNKNOWN_CODE)) return { state: 'indeterminate', reason: 'dispatch-unknown' };
   // #4115: refused before any key, whichever layer wrapped the message on the way out.
   if (isRoleConditionUnmet(error)) return { state: 'not-sent', reason: 'role-condition-failed' };
   if (readRoleLaunchRefusal(error) !== null || carriesCode(error, SESSION_LAUNCH_ROLE_MISMATCH_CODE)) {
