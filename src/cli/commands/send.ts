@@ -249,7 +249,8 @@ the roster again, then send it again. Stopped that way after part of it may have
 (sendOutcome=unknown) is 99: check the pane before resending.
 
 Whether a failed send went in (Issue #4535) is read from its own answer only: not sent
-on a typed sendOutcome=not_sent, a code the server answers before sending, or a refused
+on a typed sendOutcome=not_sent, a code the server answers before sending, an auth, IP
+or tool-policy refusal (401 AUTH_REQUIRED, 403 IP_DENIED, exit 33), or a refused
 connection. Anything else (a proxy's page, a 4xx with no code, a lost answer) is unknown:
 the relay, the --note item and the Auto-Yes grant stay, nothing is resent, and stderr
 says to check the pane first. A 2xx that is not a message (empty, not JSON, another

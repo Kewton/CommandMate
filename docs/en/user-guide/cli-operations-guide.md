@@ -646,7 +646,9 @@ its request** (a new CLI with a new server).
   a front (an HTML 408 or 404, …), a JSON 4xx with no `code`, a body that parses as JSON but is not served
   with a JSON `content-type`, and an empty, non-JSON or differently shaped 2xx are `unknown` (those 2xx say
   `Error: the server's answer did not say whether the message was sent` and exit 99; other exit codes are
-  unchanged)
+  unchanged). The one exception is a tool-policy refusal (Issue #4437), read from the body without looking
+  at the `content-type`: a 409 whose `code` is `TOOL_POLICY_DENIED` or `RELAY_TOOL_POLICY_DENIED` is
+  `not_sent` (exit 33) even when it is not served as JSON
 - These 2xx exit 99 too: the answer to an `ask` resent with the same id (the first send's `sendState`) when it
   is not `sent` (`Error: the server's answer said the message was not sent` when it is `not_sent`), and a sent
   answer whose `ask.sendState` is not `sent` (when two readings of one answer disagree, the weaker one,

@@ -770,7 +770,9 @@ relay 配送（`ask --async` / `send --reply-to`）は、relay を**その依頼
   `ask` の `sendState: "not_sent"`、接続そのものの拒否（`ECONNREFUSED`。IPv4・IPv6 の両方を試したときは
   全部が拒否のときだけ）です。前段が返した素の頁（HTML の 408・404 など）、`code` の無い JSON の 4xx、
   JSON として読めても `content-type` が JSON でない本文、空・非 JSON・形の違う 2xx は `unknown` です（2xx の
-  これらは `Error: the server's answer did not say whether the message was sent` と exit 99。ほかの exit は従来どおり）
+  これらは `Error: the server's answer did not say whether the message was sent` と exit 99。ほかの exit は従来どおり）。
+  ただしツールの利用方針の拒否（Issue #4437）だけは `content-type` を見ずに本文から読むので、JSON でない
+  `content-type` の 409 でも `code` が `TOOL_POLICY_DENIED`・`RELAY_TOOL_POLICY_DENIED` なら `not_sent`（exit 33）です
 - 2xx でも次は exit 99 です: `ask` の同じ ID の再送への答え（前の送信の `sendState`）が `sent` でないもの
   （`not_sent` なら `Error: the server's answer said the message was not sent`）、送れた答えの `ask.sendState`
   が `sent` でないもの（同じ答えの 2 つの読みが食い違えば弱い方、`unknown` を採ります）
