@@ -311,13 +311,13 @@ describe('[#3511] NewTaskDialog — sending', () => {
   const failures: Array<[string, Answer, string, string | null]> = [
     [
       '409 prompt waiting',
-      { status: 409, body: { error: 'A prompt is waiting; answer it with respond', code: SEND_RESPONSE_CODES.promptWaiting } },
+      { status: 409, body: { error: 'A prompt is waiting; answer it with respond', code: SEND_RESPONSE_CODES.promptWaiting, sendOutcome: 'not_sent' } },
       'prompt_waiting',
       'A prompt is waiting; answer it with respond',
     ],
     [
       '400 model refused',
-      { status: 400, body: { error: 'Invalid model name: Model name contains invalid characters' } },
+      { status: 400, body: { error: 'Invalid model name: Model name contains invalid characters', sendOutcome: 'not_sent' } },
       'model_rejected',
       'Invalid model name: Model name contains invalid characters',
     ],
@@ -425,7 +425,7 @@ describe('[#3511] NewTaskDialog — cannot be closed while a send is in flight',
 
 describe('[#3511] NewTaskDialog — Auto-Yes shown as the server holds it', () => {
   it('after an arm whose send failed, shows it on and does not arm again on resend', async () => {
-    server.send = { status: 409, body: { error: 'prompt up', code: SEND_RESPONSE_CODES.promptWaiting } };
+    server.send = { status: 409, body: { error: 'prompt up', code: SEND_RESPONSE_CODES.promptWaiting, sendOutcome: 'not_sent' } };
     renderShell({ worktreeId: 'wt-a-main', instanceId: 'codex-2' });
     const textarea = await openDialog();
     fireEvent.change(screen.getByTestId('new-task-auto-yes'), { target: { value: '3600000' } });

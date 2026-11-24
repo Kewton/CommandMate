@@ -204,7 +204,7 @@ describe('[#3511] New task reads the real send / auto-yes routes', () => {
 
   it('reads 409 PROMPT_WAITING as prompt_waiting, with the server sentence', async () => {
     codex.running = true;
-    sendUserMessage.mockResolvedValue({ ok: false, stage: 'prompt_waiting', error: 'Answer it with respond first' });
+    sendUserMessage.mockImplementation(async (_db: unknown, opts?: { onAttempt?: (a: { state: string; reason: string }) => void }) => { opts?.onAttempt?.({ state: 'not-sent', reason: 'prompt-waiting' }); return { ok: false, stage: 'prompt_waiting', error: 'Answer it with respond first' }; });
 
     const response = await postSend({ content: 'hi', cliToolId: 'codex', instanceId: 'codex' });
     expect(response.status).toBe(409);
@@ -306,7 +306,7 @@ describe('[#3511] New task reads the real send / auto-yes routes', () => {
 
     it('reports the armed Auto-Yes even when the send after it fails', async () => {
       codex.running = true;
-      sendUserMessage.mockResolvedValue({ ok: false, stage: 'prompt_waiting', error: 'prompt up' });
+      sendUserMessage.mockImplementation(async (_db: unknown, opts?: { onAttempt?: (a: { state: string; reason: string }) => void }) => { opts?.onAttempt?.({ state: 'not-sent', reason: 'prompt-waiting' }); return { ok: false, stage: 'prompt_waiting', error: 'prompt up' }; });
       const result = await sendNewTask(
         { target: { worktreeId: WORKTREE_ID, instanceId: 'codex' }, cliToolId: 'codex', content: 'go', autoYesDuration: 3600000 },
         routeRequest,
