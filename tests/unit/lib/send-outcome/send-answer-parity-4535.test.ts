@@ -26,8 +26,12 @@
  * - U2's redirect (a 3xx from a front proxy): both `fetch`es follow it and read the final answer,
  *   which is one of the other rows (the `/login` page after the auth redirect is one).
  *
- * Rows that disagree today are listed as `it.todo` at the end and are not asserted either way:
- * which side is right goes back to the human (PM's r4 ruling). Neither reader was changed.
+ * Rows on which the two readers disagree (the human's decision on #4535, 2026-11-24 21:47):
+ * - Intended (D1, D5): each reader's own answer is pinned, with the reason, in the last but one
+ *   `describe`. They are not bugs.
+ * - To fix in S12 (D2–D4, https://github.com/Kewton/CommandMate/issues/4603): the 2xx that are not
+ *   a ChatMessage. Listed as `it.todo` in the last `describe`, not asserted either way.
+ * Neither reader was changed.
  *
  * @vitest-environment node
  */
@@ -146,25 +150,65 @@ const TRANSPORT_ROWS: TransportRow[] = [
   },
 ];
 
-/** Rows of §2.2 the screen can receive on which the two readers disagree today (not asserted). */
-const DIVERGENT_ROWS: WireAnswer[] = [
-  // N5: the CLI reads an older server's pre-send codes as not_sent (Q2); the screen's C10 reads every
-  // 4xx without `sendOutcome` (but 401/403 of C12) as unknown, and every 5xx without it too.
-  json('N5', '409 PROMPT_WAITING without sendOutcome', 409, { error: 'x', code: 'PROMPT_WAITING' }),
-  json('N5', '400 model_refused without sendOutcome', 400, { error: 'x', code: 'model_refused' }),
-  json('N5', '409 ROLE_CONDITION_UNMET without sendOutcome', 409, { error: 'x', code: 'ROLE_CONDITION_UNMET' }),
-  json('N5', '503 ROSTER_CHANGED without sendOutcome', 503, { error: 'x', code: 'ROSTER_CHANGED' }),
-  // S4: a 2xx not served as JSON — the CLI says unknown; the screen's `detectNonJsonBody` throws an
-  // `ApiError` with that 2xx status, which `isSendOutcomeUnknown` reads as not unknown.
-  page('S4', '200 bare HTML page (not a redirect)', 200, HTML_TYPE, '<html>proxy</html>'),
-  page('S4', '201 text/plain', 201, 'text/plain', 'created'),
-  // S4: a JSON-typed 2xx with an empty body — `fetchApi` returns `response.json()` unawaited, so the
-  // screen's send rejects with the raw `SyntaxError` (not an `ApiError`): not unknown.
-  page('S4', '201 application/json with an empty body', 201, JSON_TYPE, ''),
-  // S4: a JSON 2xx that is not a ChatMessage — the screen's send resolves on it (taken as sent).
-  json('S4', '201 JSON that is not a ChatMessage ({})', 201, {}),
-  // N6 on the wrong status: the CLI needs 401/403 to match the code; the screen reads the code alone.
-  json('N6', '403 AUTH_REQUIRED (code on the other status)', 403, { error: 'x', code: 'AUTH_REQUIRED' }),
+/** A row on which the CLI and the screen are meant to disagree, with each reader's answer. */
+interface IntendedDivergence {
+  id: string;
+  answer: WireAnswer;
+  cli: SendFact;
+  screen: SendFact;
+}
+
+/**
+ * D1 (N5): an older server's pre-send codes without `sendOutcome`. The CLI reads them as not_sent
+ * (Q2: for a CLI talking to a server older than PR-A2). The screen talks only to the server of its
+ * own origin, and that server (after PR-A2) puts `sendOutcome: 'not_sent'` on these refusals (N1),
+ * so this shape never reaches the screen; its C10 reads any 4xx without `sendOutcome` (but C12's
+ * 401/403) and any 5xx without it as unknown.
+ *
+ * D5 (N6 on the other status): the CLI needs the code on its own status (401 `AUTH_REQUIRED`,
+ * 403 `IP_DENIED`); the screen reads the code alone. The middleware never answers this pair.
+ */
+const INTENDED_DIVERGENCES: IntendedDivergence[] = [
+  ...[
+    json('N5', '409 PROMPT_WAITING without sendOutcome', 409, { error: 'x', code: 'PROMPT_WAITING' }),
+    json('N5', '400 model_refused without sendOutcome', 400, { error: 'x', code: 'model_refused' }),
+    json('N5', '409 ROLE_CONDITION_UNMET without sendOutcome', 409, { error: 'x', code: 'ROLE_CONDITION_UNMET' }),
+    json('N5', '503 ROSTER_CHANGED without sendOutcome', 503, { error: 'x', code: 'ROSTER_CHANGED' }),
+  ].map((answer): IntendedDivergence => ({ id: 'D1', answer, cli: 'not_sent', screen: 'unknown' })),
+  {
+    id: 'D5',
+    answer: json('N6', '403 AUTH_REQUIRED (code on the other status)', 403, { error: 'x', code: 'AUTH_REQUIRED' }),
+    cli: 'unknown',
+    screen: 'not_sent',
+  },
+];
+
+/**
+ * D2–D4 (S4, the 2xx that are not a ChatMessage): the CLI says unknown, the screen does not. To fix
+ * in S12, https://github.com/Kewton/CommandMate/issues/4603 (`src/lib/api-client.ts`'s 2xx branch).
+ * Not asserted either way until then.
+ */
+const S12_DIVERGENT_ROWS: { id: string; answer: WireAnswer; why: string }[] = [
+  {
+    id: 'D2',
+    answer: page('S4', '200 bare HTML page (not a redirect)', 200, HTML_TYPE, '<html>proxy</html>'),
+    why: "`detectNonJsonBody`'s ApiError keeps the 2xx status, read as not unknown",
+  },
+  {
+    id: 'D2',
+    answer: page('S4', '201 text/plain', 201, 'text/plain', 'created'),
+    why: "`detectNonJsonBody`'s ApiError keeps the 2xx status, read as not unknown",
+  },
+  {
+    id: 'D3',
+    answer: page('S4', '201 application/json with an empty body', 201, JSON_TYPE, ''),
+    why: '`fetchApi` returns `response.json()` unawaited: a raw SyntaxError, read as not unknown',
+  },
+  {
+    id: 'D4',
+    answer: json('S4', '201 JSON that is not a ChatMessage ({})', 201, {}),
+    why: "the screen's send resolves on it (taken as sent)",
+  },
 ];
 
 type ScreenRead = (error: unknown) => boolean;
@@ -291,8 +335,20 @@ describe('[#4535 INV-S3] the CLI and the screen read one /send answer to the sam
   });
 });
 
-describe('[#4535 INV-S3] rows that disagree today — which side is right is the human\'s call', () => {
-  for (const answer of DIVERGENT_ROWS) {
-    it.todo(`${answer.row} ${answer.name}`);
+describe('[#4535 INV-S3] intended differences (D1, D5): each reader keeps its own answer', () => {
+  it.each(INTENDED_DIVERGENCES.map((d) => [`${d.id} ${d.answer.row} ${d.answer.name}`, d] as const))(
+    '%s',
+    async (_name, d) => {
+      expect(readCli(d.answer)).toBe(d.cli);
+      const error = await screenErrorFor(d.answer);
+      expect(error, 'the screen rejects on this answer').toBeInstanceOf(ApiError);
+      expect(screenFact(isSendOutcomeUnknown, error)).toBe(d.screen);
+    }
+  );
+});
+
+describe('[#4535 INV-S3] 2xx that are not a ChatMessage (D2–D4) — to fix in S12, #4603', () => {
+  for (const d of S12_DIVERGENT_ROWS) {
+    it.todo(`${d.id} ${d.answer.row} ${d.answer.name}: ${d.why} (S12, https://github.com/Kewton/CommandMate/issues/4603)`);
   }
 });
