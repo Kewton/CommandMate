@@ -23,9 +23,10 @@
  *     dispatch is known not to have sent (the keyboard's own input start then
  *     replaces the boundary) or cannot be told (the relay is held as
  *     `dispatch_unknown`).
- *  4. **Settle** ({@link RelaySendBinding.finish}) — `sent`, `failed` or
+ *  4. **Settle** ({@link RelaySendBinding.finishSettled}) — `sent`, `failed` or
  *     `unknown`, again under the token and the expected state, and the
- *     `sendOutcome` the route hands back to the CLI.
+ *     `sendOutcome` the route hands back to the CLI. A settle that fails does
+ *     not change it; the route then says `relaySettled: false` (Issue #4535).
  *
  * Nothing here awaits inside a DB transaction, and nothing here delivers: the
  * delivery reads what this module wrote (`relay-delivery`).
@@ -41,6 +42,7 @@ import {
   reserveRelayBind,
   settleRelaySendState,
   type RelayBindRefusal,
+  type SettleRelaySendStateInput,
 } from '@/lib/db/relay-db';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type {
@@ -131,6 +133,15 @@ export type RelaySendResult =
    * write failed after the transport succeeded).
    */
   | { kind: 'failed'; attempt: SendAttemptState | null };
+
+/**
+ * Issue #4535 (I4): how a bound send ended, and whether the relay's ledger now
+ * says so. `settled: false` (the write threw or moved nothing) never changes `outcome`.
+ */
+export interface RelaySendSettlement {
+  outcome: RelaySendOutcome;
+  settled: boolean;
+}
 
 /** {@link reserveRelaySend}'s answer. */
 export type ReserveRelaySendResult =
@@ -302,26 +313,39 @@ export class RelaySendBinding {
   /**
    * Record how the send ended and say what the CLI may do with the relay.
    *
-   * `not_sent` only when nothing can have reached the worker: the send stopped
-   * before the boundary, the boundary hook refused, or the send service said
-   * `not-sent`. A failure after the boundary that the service could not place
-   * is `unknown` (held, never cancelled by the CLI).
+   * `not_sent` only when nothing can have reached the worker: the boundary hook
+   * refused, the send service said `not-sent`, or the send stopped before the
+   * boundary with no attempt recorded. A failure the service could not place —
+   * after the boundary, or recorded `indeterminate` before it — is `unknown`
+   * (held, never cancelled by the CLI).
    */
   finish(result: RelaySendResult): RelaySendOutcome {
+    return this.finishSettled(result).outcome;
+  }
+
+  /**
+   * Issue #4535 (I4): {@link finish} with whether the ledger now says it. The
+   * outcome is the attempt's fact and does not depend on the write: a settle that
+   * throws or moves no row (the relay was closed meanwhile) is `settled: false`.
+   */
+  finishSettled(result: RelaySendResult): RelaySendSettlement {
     // Issue #4498: only a sent attempt is judged (and takes the entry); drop the rest.
     if (result.kind !== 'sent') observedTools.delete(this.target.relayId);
+    const { outcome, write } = this.decide(result);
+    if (write === null) return { outcome, settled: true };
     try {
-      return this.settle(result);
+      return { outcome, settled: settleRelaySendState(this.db, write) };
     } catch (error) {
       logger.warn('relay-bind-settle-failed', {
         relayId: this.target.relayId,
         error: error instanceof Error ? error.message : String(error),
       });
-      return result.kind === 'sent' ? 'sent' : 'unknown';
+      return { outcome, settled: false };
     }
   }
 
-  private settle(result: RelaySendResult): RelaySendOutcome {
+  /** The outcome of `result`, and the ledger write that records it (null for none). */
+  private decide(result: RelaySendResult): { outcome: RelaySendOutcome; write: SettleRelaySendStateInput | null } {
     const base = { relayId: this.target.relayId, attemptId: this.attemptId };
     if (this.dispatch === 'unknown') {
       // A later HTTP dispatch that delivered: the message is in, and the first
@@ -330,65 +354,70 @@ export class RelaySendBinding {
         // The same generation check as the ordinary `sent` below: a relaunch
         // keeps the relay held, and says why, rather than reading as cleared.
         const relaunched = this.observationInvalid || result.generationAfter !== this.generationBefore;
-        settleRelaySendState(this.db, {
-          ...base,
-          from: ['unknown'],
-          to: 'sent',
-          inputMessageId: result.messageId,
-          ...(relaunched
-            ? { holdReason: RELAY_HOLD_REASONS.generationChanged, invalidateObservation: true }
-            : { clearHoldReason: true }),
-        });
-        return 'sent';
+        return {
+          outcome: 'sent',
+          write: {
+            ...base,
+            from: ['unknown'],
+            to: 'sent',
+            inputMessageId: result.messageId,
+            ...(relaunched
+              ? { holdReason: RELAY_HOLD_REASONS.generationChanged, invalidateObservation: true }
+              : { clearHoldReason: true }),
+          },
+        };
       }
-      return 'unknown';
+      // Already held `unknown` when the dispatch failed (`onDispatchFailed`).
+      return { outcome: 'unknown', write: null };
     }
 
     if (result.kind === 'sent') {
       if (!this.boundaryWritten) {
         // A sender that reported neither an input start nor a dispatch. The
         // reply cannot be bounded, so the relay is held rather than guessed.
-        settleRelaySendState(this.db, {
-          ...base,
-          from: ['awaiting'],
-          to: 'unknown',
-          holdReason: RELAY_HOLD_REASONS.noInputBoundary,
-        });
-        return 'unknown';
+        return {
+          outcome: 'unknown',
+          write: { ...base, from: ['awaiting'], to: 'unknown', holdReason: RELAY_HOLD_REASONS.noInputBoundary },
+        };
       }
       const relaunched = this.observationInvalid || result.generationAfter !== this.generationBefore;
-      settleRelaySendState(this.db, {
-        ...base,
-        from: ['input_started'],
-        to: 'sent',
-        inputMessageId: result.messageId,
-        holdReason: relaunched ? RELAY_HOLD_REASONS.generationChanged : null,
-        invalidateObservation: relaunched,
-      });
-      return 'sent';
+      return {
+        outcome: 'sent',
+        write: {
+          ...base,
+          from: ['input_started'],
+          to: 'sent',
+          inputMessageId: result.messageId,
+          holdReason: relaunched ? RELAY_HOLD_REASONS.generationChanged : null,
+          invalidateObservation: relaunched,
+        },
+      };
     }
 
     // The history write failed after the transport confirmed the submit.
     if (result.attempt === 'sent') {
-      settleRelaySendState(this.db, {
+      return {
+        outcome: 'unknown',
+        write: { ...base, from: ['awaiting', 'input_started'], to: 'unknown', holdReason: RELAY_HOLD_REASONS.sendUnknown },
+      };
+    }
+    // Issue #4535 (P2-2): `failed` only for an attempt that can say nothing was typed —
+    // the boundary hook refused, the service recorded `not-sent`, or nothing was
+    // recorded before the boundary. One recorded `indeterminate` (a dispatch or a
+    // body the fence saw start) is `unknown` even before the boundary.
+    const nothingTyped =
+      this.refused || result.attempt === 'not-sent' || (!this.boundaryWritten && result.attempt === null);
+    if (nothingTyped) {
+      return { outcome: 'not_sent', write: { ...base, from: ['awaiting', 'input_started'], to: 'failed' } };
+    }
+    return {
+      outcome: 'unknown',
+      write: {
         ...base,
-        from: ['awaiting', 'input_started'],
+        from: this.boundaryWritten ? ['input_started'] : ['awaiting', 'input_started'],
         to: 'unknown',
         holdReason: RELAY_HOLD_REASONS.sendUnknown,
-      });
-      return 'unknown';
-    }
-    const nothingTyped = !this.boundaryWritten || this.refused || result.attempt === 'not-sent';
-    if (nothingTyped) {
-      settleRelaySendState(this.db, { ...base, from: ['awaiting', 'input_started'], to: 'failed' });
-      return 'not_sent';
-    }
-    settleRelaySendState(this.db, {
-      ...base,
-      from: ['input_started'],
-      to: 'unknown',
-      holdReason: RELAY_HOLD_REASONS.sendUnknown,
-    });
-    return 'unknown';
+      },
+    };
   }
 }
