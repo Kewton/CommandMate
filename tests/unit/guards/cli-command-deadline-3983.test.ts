@@ -82,6 +82,7 @@ const SERVER = {
     const ask = (JSON.parse(String(init?.body ?? '{}')) as { ask?: { id: string } }).ask;
     return {
       id: 'm1',
+      role: 'user',
       timestamp: '2026-10-30T00:00:00.000Z',
       ...(ask ? { ask: { id: ask.id, state: 'pending', reason: null, sendState: 'sent' } } : {}),
     };

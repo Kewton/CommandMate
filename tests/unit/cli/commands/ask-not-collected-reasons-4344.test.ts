@@ -152,7 +152,7 @@ describe('P2 2: claude off for its version is not "a tool with no ask attributio
   it('the server turning the ask down for the default tool is read the same way (by the send\'s cliToolId)', async () => {
     mockServer({
       '/api/asks/capabilities': { protocol: 1, tools: { ...ALL_TOOLS, claude: false }, versions: CLAUDE_TOO_OLD },
-      'POST /send': () => ({ id: 'm1', cliToolId: 'claude', ask: { id: null, state: 'unavailable', reason: 'tool_unsupported' } }),
+      'POST /send': () => ({ id: 'm1', role: 'user', cliToolId: 'claude', ask: { id: null, state: 'unavailable', reason: 'tool_unsupported' } }),
       '/current-output': frame,
     });
 
