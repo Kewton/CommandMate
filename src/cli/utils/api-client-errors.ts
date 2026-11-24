@@ -276,6 +276,8 @@ export interface ApiErrorPayload {
    * src/lib/relay/relay-bind.ts RelaySendOutcome (and ChatMessage.sendOutcome).
    */
   sendOutcome?: 'sent' | 'not_sent' | 'unknown';
+  /** Issue #4535 (design C6): the bound relay's outcome could not be recorded (see ChatMessage.relaySettled). */
+  relaySettled?: false;
   /**
    * Issue #4534: sent with the 409 `SEND_TARGET_CHANGED` — why the fence stopped
    * the send (`worktree-gone` / `target-gone` / `tool-changed` / `dispatch-changed`
@@ -302,6 +304,32 @@ export interface ApiErrorPayload {
 }
 
 /**
+ * This request's answer as it came off the wire (Issue #4535): what the send's
+ * three outcomes are read from (`src/lib/send-outcome/classify-send-answer.ts`).
+ * The parsed `payload` alone cannot tell a JSON body from an HTML page that
+ * happens to parse, nor an empty body from a missing one.
+ */
+export interface WireAnswer {
+  status: number;
+  /** The `content-type` header, or null without one. */
+  contentType: string | null;
+  /** The body as text (empty for none, or when it could not be read). */
+  bodyText: string;
+}
+
+/** Issue #4535: what `ApiClient.post` may be told besides the body. */
+export interface PostInit {
+  /** Told a 2xx as it came off the wire (status, `content-type`, body text), before it is parsed. */
+  onAnswer?: (answer: WireAnswer) => void;
+}
+
+/** The response's `content-type`, or null without one (or without headers at all). */
+export function contentTypeOf(response: Response): string | null {
+  const headers = (response as { headers?: Headers }).headers;
+  return typeof headers?.get === 'function' ? headers.get('content-type') : null;
+}
+
+/**
  * API Error with exit code for CLI process.exit()
  */
 export class ApiError extends Error {
@@ -317,8 +345,12 @@ export class ApiError extends Error {
      * from "the connection broke" by its `cause.code`.
      */
     public readonly transportError?: unknown,
+    /** Issue #4535: the failed response as it came, when one came. */
+    public readonly answer?: WireAnswer,
   ) {
-    super(message);
+    // Issue #4535: `cause` too, so "never connected" is read the standard way
+    // (this error → `fetch failed` → the socket's `ECONNREFUSED`).
+    super(message, transportError !== undefined ? { cause: transportError } : undefined);
     this.name = 'ApiError';
   }
 

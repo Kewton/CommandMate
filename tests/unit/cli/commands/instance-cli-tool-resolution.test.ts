@@ -61,7 +61,7 @@ describe('send --instance resolves the roster CLI tool (Issue #1629)', () => {
   it('sends the roster instance\'s cliToolId when only --instance is given', async () => {
     mockFetchSequence([
       resolveTarget({ cliToolId: 'codex', instanceId: 'codex' }),
-      { data: { id: 1, role: 'user', content: 'hello' }, status: 201 },
+      { data: { id: 'msg-1', role: 'user', content: 'hello' }, status: 201 },
     ]);
 
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
@@ -81,7 +81,7 @@ describe('send --instance resolves the roster CLI tool (Issue #1629)', () => {
     mockFetchSequence([
       resolveTarget({ cliToolId: 'codex', instanceId: 'codex' }),
       { data: { task: { id: 'task-1' }, message: 'do the thing' }, status: 201 },
-      { data: { id: 1, role: 'user', content: 'do the thing' }, status: 201 },
+      { data: { id: 'msg-1', role: 'user', content: 'do the thing' }, status: 201 },
       { data: {}, status: 200 },
     ]);
 
@@ -104,7 +104,7 @@ describe('send --instance resolves the roster CLI tool (Issue #1629)', () => {
     mockFetchSequence([
       resolveTarget({ cliToolId: 'codex', instanceId: 'codex-2' }),
       { data: {}, status: 200 },
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
     ]);
 
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
@@ -150,7 +150,7 @@ describe('send --instance resolves the roster CLI tool (Issue #1629)', () => {
   it('sends the tool the server resolved for an instance the roster does not know', async () => {
     mockFetchSequence([
       resolveTarget({ cliToolId: 'claude', instanceId: 'codex-9', resolvedBy: 'worktree-default' }),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
     ]);
 
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
@@ -175,7 +175,7 @@ describe('send --instance resolves the roster CLI tool (Issue #1629)', () => {
   it('accepts --model once the instance resolves to a model-capable agent', async () => {
     mockFetchSequence([
       resolveTarget({ cliToolId: 'copilot', instanceId: 'copilot-2' }),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
     ]);
 
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
@@ -209,7 +209,7 @@ describe('send --instance resolves the roster CLI tool (Issue #1629)', () => {
   });
 
   it('resolves nothing when --instance is omitted', async () => {
-    mockFetchSequence([{ data: { id: 1 }, status: 201 }]);
+    mockFetchSequence([{ data: { id: 'msg-1', role: 'user' }, status: 201 }]);
 
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     await createSendCommand().parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'codex']);

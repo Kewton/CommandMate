@@ -108,7 +108,7 @@ describe('help text positions --agent as the ad-hoc supplement (Issue #1638)', (
 
 describe('--agent still behaves exactly as before (Issue #1638 changed no behaviour)', () => {
   it('send --agent still puts the tool on the wire', async () => {
-    mockFetchSequence([{ data: { id: 1, role: 'user', content: 'hello' }, status: 201 }]);
+    mockFetchSequence([{ data: { id: 'msg-1', role: 'user', content: 'hello' }, status: 201 }]);
 
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     await createSendCommand().parseAsync(['node', 'send', 'wt1', 'hello', '--agent', 'codex']);

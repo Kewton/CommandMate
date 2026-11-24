@@ -177,7 +177,7 @@ function startServer(sessions: Record<string, ScriptedSession>): void {
       return Promise.resolve(json({ ...target, conflict: target.conflict ?? null }));
     }
     if (url.pathname.endsWith('/send')) {
-      return Promise.resolve(json({ id: 1 }, 201));
+      return Promise.resolve(json({ id: 'msg-1', role: 'user' }, 201));
     }
     if (url.pathname.endsWith('/current-output')) {
       // `wait` sends no `?cliTool`, so this is the route's own resolution.

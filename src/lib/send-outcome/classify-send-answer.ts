@@ -10,9 +10,9 @@
  * a dropped socket) is `unknown`: the message may be in, so nothing is withdrawn
  * and nothing is resent.
  *
- * Pure: no I/O, no exit codes, no wording. Stage 1 of the Issue — nothing calls
- * this yet; the CLI, the route and the screen are wired to it once the public
- * contract (design §4) is decided.
+ * Pure: no I/O, no exit codes, no wording. The CLI's `postMessage`
+ * (`src/cli/commands/message-dispatch.ts`) reads `/send` with it. No `@/` import:
+ * the CLI build has no path aliases.
  */
 
 /** The three outcomes of a send (design §2.1). */
@@ -196,7 +196,8 @@ function classifyRefusal(status: number, body: JsonRecord | null): SendAnswerCla
  *
  * Follows the `cause` chain (the CLI's error → `fetch failed` → the socket's).
  * An `AggregateError` (IPv4 and IPv6 both tried) counts only when every error
- * in it was refused. Anything not recognised is not a refusal.
+ * in it was refused, whatever `code` it carries itself (Node copies the first
+ * error's). Anything not recognised is not a refusal.
  */
 export function isConnectionRefused(error: unknown): boolean {
   const seen = new Set<unknown>();
@@ -205,10 +206,12 @@ export function isConnectionRefused(error: unknown): boolean {
     if (seen.has(current)) return false;
     seen.add(current);
     const node = current as { code?: unknown; errors?: unknown; cause?: unknown };
-    if (node.code === 'ECONNREFUSED') return true;
+    // Node's own AggregateError copies `code` from its first error, so its `errors`
+    // decide, before the `code` on top (review P2, #4535 B).
     if (Array.isArray(node.errors)) {
       return node.errors.length > 0 && node.errors.every((inner) => isConnectionRefused(inner));
     }
+    if (node.code === 'ECONNREFUSED') return true;
     current = node.cause;
   }
   return false;
@@ -230,8 +233,12 @@ export type RelayLookupState = 'awaiting' | 'input_started' | 'sent' | 'unknown'
 /**
  * Settle an `unknown` answer with the bound relay's own record (design §2.2):
  * `sent` is sent, `failed` is not sent (only this attempt's settle writes it),
- * anything else stays unknown. Answers with proof are left as they are, and the
- * relay's owner is not changed (N4 stays not ours — design Q13 is open).
+ * anything else stays unknown. Answers with proof are left as they are.
+ *
+ * Design Q13 (b): `failed` also makes the relay this send's again, N4 included.
+ * The one attempt bound to it typed nothing, so its relay, note and Auto-Yes are
+ * cleaned up like any `not_sent`'s. `sent` and anything else leave the owner as
+ * it was (N4 stays not ours: a copy may have arrived).
  */
 export function applyRelayLookup(
   classified: SendAnswerClassification,
@@ -239,6 +246,6 @@ export function applyRelayLookup(
 ): SendAnswerClassification {
   if (!classified.consultRelay || classified.fact !== 'unknown') return classified;
   if (sendState === 'sent') return { ...classified, fact: 'sent' };
-  if (sendState === 'failed') return { ...classified, fact: 'not_sent' };
+  if (sendState === 'failed') return { ...classified, fact: 'not_sent', relayOwned: true };
   return classified;
 }

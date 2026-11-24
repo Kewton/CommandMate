@@ -762,10 +762,26 @@ relay 配送（`ask --async` / `send --reply-to`）は、relay を**その依頼
   保留し、成立した時点で**境界以降の最も早い候補**を採ります。入力ロックの待ち中に終わった別の依頼の返答や、
   送信に失敗した依頼に返答が届くことはありません。確認待ち（prompt）の通知も同じ条件で、送信の成立時に
   まだ開いている確認だけを伝えます。確認の通知を送っている最中に返答ができたら、通知の後に届けます
-- 送信 API は応答に `sendOutcome`（`sent` / `not_sent` / `unknown`）を返します。CLI が relay を取り消すのは
-  `not_sent`（何も届いていない）のときだけです。409 の予約競合では取り消しません。応答が途絶えたときは
-  `GET /api/relays/:id` で状態を照会し、本文は**自動で再送しません**。分からないときは relay を開いたまま、
-  標準エラーに relay の ID と `commandmate relays --id <relay-id>` を出します
+- 送信 API は応答に `sendOutcome`（`sent` / `not_sent` / `unknown`）を返します。CLI（`send` / `ask`）は
+  **その要求の応答だけ**から、送信を `sent`・`not_sent`（何も入力していないと証明できた）・`unknown`
+  （どちらとも言えない）に読みます（Issue #4535）。`not_sent` と読むのは、JSON の応答が `sendOutcome: "not_sent"`
+  か送信の前にだけ返す `code`（`model_refused`・`RELAY_BIND_INVALID` など、古いサーバー向け）を持つとき、
+  認証・IP 制限の拒否（401 `AUTH_REQUIRED`・403 `IP_DENIED`）、ツールの利用方針の拒否（exit 33）、
+  `ask` の `sendState: "not_sent"`、接続そのものの拒否（`ECONNREFUSED`。IPv4・IPv6 の両方を試したときは
+  全部が拒否のときだけ）です。前段が返した素の頁（HTML の 408・404 など）、`code` の無い JSON の 4xx、
+  JSON として読めても `content-type` が JSON でない本文、空・非 JSON・形の違う 2xx は `unknown` です（2xx の
+  これらは `Error: the server's answer did not say whether the message was sent` と exit 99。ほかの exit は従来どおり）
+- 2xx でも次は exit 99 です: `ask` の同じ ID の再送への答え（前の送信の `sendState`）が `sent` でないもの
+  （`not_sent` なら `Error: the server's answer said the message was not sent`）、送れた答えの `ask.sendState`
+  が `sent` でないもの（同じ答えの 2 つの読みが食い違えば弱い方、`unknown` を採ります）
+- relay の取り消し・`--note` の記録を閉じること・この送信が付けた Auto-Yes の取り下げは、`not_sent` で、
+  relay がこの送信のものであるときだけです。`unknown` では本文を**自動で再送せず**、relay を開いたまま、
+  標準エラーに relay の ID と `commandmate relays --id <relay-id>`、pane を確かめてから送り直す旨を出します
+  （relay の無い送信も同じ注意を出します）。結び付いた relay は `GET /api/relays/:id` で状態を照会し、
+  `sent` なら送れたものとして exit 0、`failed` なら `not_sent` として片付けます
+- 409 `RELAY_BIND_CONFLICT`（予約済み）は、同じ依頼の写し（前段の再試行など）が先に relay を予約したもので、
+  この送信の relay ではありません。何も片付けずに relay を照会し、`sent` なら exit 0、`failed` なら片付けて
+  「送り直してよい」と出し、それ以外は「写しが届いているかもしれない」と出します
 - 重なりは証明できたものだけを注記します。返答の本文は `[from <alias> / <worktree>]` の行、注記の 1 行
   （`[CommandMate relay] 注意: この返答は、別の依頼と同じターンで処理された可能性があります（overlap=later）。`）、
   返答の原文の順です。`overlap` は `later`（入力の時点で別のターンが開いていた）・`earlier`（入力から返答までに

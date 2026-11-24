@@ -103,7 +103,7 @@ describe('ask: the successful round trip', () => {
   it('sends, waits, and prints only the reply body on stdout', async () => {
     mockFetchSequence([
       resolveTarget('codex', 'codex-2'),
-      { data: { id: 1, role: 'user', content: '1+1は？' }, status: 201 },
+      { data: { id: 'msg-1', role: 'user', content: '1+1は？' }, status: 201 },
       { data: completedFrame },
       { data: [chatRow()] },
     ]);
@@ -123,7 +123,7 @@ describe('ask: the successful round trip', () => {
   it('sends the resolved tool and instance, never the raw selector', async () => {
     mockFetchSequence([
       resolveTarget('codex', 'codex-2'),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
       { data: completedFrame },
       { data: [chatRow()] },
     ]);
@@ -163,7 +163,7 @@ describe('ask: the successful round trip', () => {
     });
     mockFetchSequence([
       resolveTarget('codex', 'codex'),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
       { data: completedFrame },
       { data: [stale] },
     ]);
@@ -192,7 +192,7 @@ describe('ask: the successful round trip', () => {
     });
     mockFetchSequence([
       resolveTarget('codex', 'codex'),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
       { data: completedFrame },
       { data: [promptRow] },
     ]);
@@ -213,7 +213,7 @@ describe('ask: falling back to the pane', () => {
   it('reads the squeezed pane when the ledger has nothing, and reports source', async () => {
     mockFetchSequence([
       resolveTarget('copilot', 'copilot'),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
       { data: { ...completedFrame, cliToolId: 'copilot' } },
       { data: [] },
       { data: { output: 'copilot said this\n' } },
@@ -240,7 +240,7 @@ describe('ask: falling back to the pane', () => {
   it('reports source=history when the ledger answered', async () => {
     mockFetchSequence([
       resolveTarget('codex', 'codex'),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
       { data: completedFrame },
       { data: [chatRow()] },
     ]);
@@ -271,7 +271,7 @@ describe('ask: exit codes are wait\'s exit codes', () => {
     };
     mockFetchSequence([
       resolveTarget('codex', 'codex'),
-      { data: { id: 1 }, status: 201 },
+      { data: { id: 'msg-1', role: 'user' }, status: 201 },
       { data: promptFrame },
     ]);
     installAskLedger();

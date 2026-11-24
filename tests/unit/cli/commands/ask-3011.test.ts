@@ -45,7 +45,7 @@ function startServer(upstreamFault: { id: string; matchedText: string } | null):
     if (url.pathname === '/api/capabilities') {
       return Promise.resolve(json({ serverVersion: '0.0.0-test', capabilities: [] }));
     }
-    if (url.pathname.endsWith('/send')) return Promise.resolve(json({ id: 1 }, 201));
+    if (url.pathname.endsWith('/send')) return Promise.resolve(json({ id: 'msg-1', role: 'user' }, 201));
     if (url.pathname.endsWith('/current-output')) {
       return Promise.resolve(json({
         isRunning: true,

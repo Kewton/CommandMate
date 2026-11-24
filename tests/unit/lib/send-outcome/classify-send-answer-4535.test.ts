@@ -242,7 +242,6 @@ describe('applyRelayLookup — the bound relay\'s sendState after an unknown ans
 
   it.each([
     ['sent', 'sent'],
-    ['failed', 'not_sent'],
     ['awaiting', 'unknown'],
     ['input_started', 'unknown'],
     ['unknown', 'unknown'],
@@ -250,6 +249,11 @@ describe('applyRelayLookup — the bound relay\'s sendState after an unknown ans
   ] as const)('%s → %s, and N4 never becomes the relay\'s owner (Q13 default)', (sendState, fact) => {
     expect(applyRelayLookup(conflict, sendState)).toMatchObject({ fact, row: 'N4', relayOwned: false });
     expect(applyRelayLookup(dropped, sendState)).toMatchObject({ fact, relayOwned: true });
+  });
+
+  it('failed → not_sent, and N4 becomes the relay\'s owner again (Q13 (b): the one bound attempt typed nothing)', () => {
+    expect(applyRelayLookup(conflict, 'failed')).toMatchObject({ fact: 'not_sent', row: 'N4', relayOwned: true });
+    expect(applyRelayLookup(dropped, 'failed')).toMatchObject({ fact: 'not_sent', relayOwned: true });
   });
 
   it('a classification with proof is not overridden by the lookup', () => {
@@ -269,5 +273,42 @@ describe('isConnectionRefused', () => {
   it('a code on a plain object is read too', () => {
     expect(isConnectionRefused({ code: 'ECONNREFUSED' })).toBe(true);
     expect(isConnectionRefused(undefined)).toBe(false);
+  });
+});
+
+/**
+ * Review P2 (#4535 B): Node's own `AggregateError` (`autoSelectFamily`, IPv4 and IPv6
+ * both tried) carries `code` copied from its first error. Measured on Node v24.1.0:
+ * `AggregateError ECONNREFUSED [ 'ECONNREFUSED', 'ECONNREFUSED' ]`. So the shape here is
+ * the real one — `code: 'ECONNREFUSED'` on top — and only its `errors` may decide.
+ */
+describe('isConnectionRefused — an AggregateError as Node makes it (code copied from errors[0])', () => {
+  const nodeAggregate = (...codes: string[]): AggregateError =>
+    Object.assign(
+      new AggregateError(codes.map((code) => Object.assign(new Error(`connect ${code}`), { code }))),
+      { code: codes[0] ?? 'ECONNREFUSED' }
+    );
+  const viaFetch = (cause: unknown): Error => wrapped(new TypeError('fetch failed', { cause }));
+
+  it('N7: every error refused (the code on top too) is not_sent', () => {
+    expect(classifySendAnswer({ kind: 'error', error: viaFetch(nodeAggregate('ECONNREFUSED', 'ECONNREFUSED')) })).toMatchObject({
+      fact: 'not_sent',
+      row: 'N7',
+    });
+  });
+
+  it.each([
+    ['a refusal, then a timeout', ['ECONNREFUSED', 'ETIMEDOUT']],
+    ['a refusal, then an unreachable host', ['ECONNREFUSED', 'EHOSTUNREACH']],
+    ['a refusal, then a reset', ['ECONNREFUSED', 'ECONNRESET']],
+  ])('U3: %s is unknown although the code on top says ECONNREFUSED', (_name, codes) => {
+    expect(classifySendAnswer({ kind: 'error', error: viaFetch(nodeAggregate(...codes)) })).toMatchObject({
+      fact: 'unknown',
+      row: 'U3',
+    });
+  });
+
+  it('U3: no errors at all, with ECONNREFUSED on top, is unknown', () => {
+    expect(isConnectionRefused(viaFetch(nodeAggregate()))).toBe(false);
   });
 });

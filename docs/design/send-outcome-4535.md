@@ -395,7 +395,7 @@ C4 は A2 で、`RELAY_BIND_CONFLICT` に `not_sent` を付けない形でしか
 | Q8 | K2: 再読み込みで `unknown` の行が消えるのを、この Issue で直すか | 直さない。サーバーに「画面の送信の記録」を持たせる別の Issue に切る。**決定: 推奨どおり** |
 | Q9 | §3.4 のダイアログの文と、確認の後の再送を許すか | 確認の後に許す（PR-B2 の `confirmedResend` と同じ形）。**決定: 推奨どおり** |
 | Q10 | brief の選び直しの 409（`route.ts:568–574`、code 欄が無い）に `code: 'brief_choice'` を足すか | 足す（C4 の規則で `not_sent` は付くが、旧サーバー互換の N5 と画面の分岐に code が要る）。画面だけの答えなので影響は小さい。**決定: 推奨どおり** |
-| Q11 | N4（`RELAY_BIND_CONFLICT`）で照会が `sent` 以外のとき、契約の task を `failed` にするか（写しが届いていれば task は動いている） | 今のまま `failed` にし、stderr に「写しが届いているかもしれない」を出す。task の状態を照会で直すのは #4466 の範囲。**決定: 推奨どおり** |
+| Q11 | N4（`RELAY_BIND_CONFLICT`）で照会が `sent` 以外のとき、契約の task を `failed` にするか（写しが届いていれば task は動いている） | 今のまま `failed` にし、照会が `sent`・`failed` 以外のときだけ stderr に「写しが届いているかもしれない」を出す（照会の `sent` は exit 0、`failed` は Q13 (b) の片付けと「送り直してよい」）。task の状態を照会で直すのは #4466 の範囲。**決定: 推奨どおり** |
 | Q12 | C12（middleware の 401・403 に code）を入れるか | 入れる。status は変えず、`/api/*` の JSON に `code` を足すだけ。**決定: 推奨どおり** |
 | Q13 | N4（`RELAY_BIND_CONFLICT`）で照会が `failed` のとき、relay・note・Auto-Yes をどうするか。`failed` の relay の `state` は `pending` のまま（`settleRelaySendState` は `send_state` だけを変える、`relay-bind-db.ts:429–440`）で、閉じるのは CLI の `cancelRelay` だけ。(a) 残す（第 2 版）: stderr は「送り直してよい」なのに、古い relay と note が 24 時間残り、Auto-Yes も残る（#4116 が避けた「届かなかった送信の Auto-Yes が他の仕事に答える」）。(b) 照会が `failed` なら `relayOwned` を true に戻し、取り下げ・close・Auto-Yes の取り下げをする: `failed` を書くのは結び付いた唯一の試行の `settle` だけ（Q3）で、その試行は何も打っていない。ただし「写しが予約した後に何も打たずに終わった」の読みは照会 1 回に依る | (b)。Q3 と同じ論で照会の `failed` は「この依頼は届いていない」の証明になり、`not_sent` の扱い（I5）と揃う。二重送信・取り消しの誤りはどちらでも起きない。**決定: (b)**（PR-B で `applyRelayLookup` と T8 を直す） |
 

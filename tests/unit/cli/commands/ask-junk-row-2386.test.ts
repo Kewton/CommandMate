@@ -142,7 +142,7 @@ function mockRoutes(routes: Routes): void {
         }),
       );
     }
-    if (url.includes('/send')) return Promise.resolve(json({ id: 1 }, 201));
+    if (url.includes('/send')) return Promise.resolve(json({ id: 'msg-1', role: 'user' }, 201));
     if (url.includes('/messages')) return Promise.resolve(json(routes.messages()));
     if (url.includes('/capture')) return Promise.resolve(json({ output: routes.pane ?? '' }));
     return Promise.resolve(json(completedFrame(routes.cliToolId)));
