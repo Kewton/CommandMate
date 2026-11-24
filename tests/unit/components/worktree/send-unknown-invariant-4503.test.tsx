@@ -218,6 +218,9 @@ const UNKNOWN_ANSWERS: Array<[string, SendAnswer]> = [
   ['500 with no sendOutcome (review 2: D4 as written)', () => json(500, { error: 'Internal failure' })],
   ['502 with no sendOutcome (a proxy / tunnel)', () => json(502, { error: 'Bad Gateway' })],
   ['504 with no sendOutcome (a proxy / tunnel)', () => json(504, {})],
+  // Issue #4535 (human decision on C10): the route says `not_sent` on its own session-start refusals,
+  // so a 503 SESSION_STARTING without it is not the route's proof that nothing was typed.
+  ['503 SESSION_STARTING (refused before any key; no sendOutcome)', () => json(503, { error: 'starting', code: 'SESSION_STARTING' })],
   ['the fetch rejected (network)', () => Promise.reject(new TypeError('Failed to fetch'))],
 ];
 
@@ -337,7 +340,6 @@ describe('[#4503 U-0] (positive control) a send that really was not sent can be 
   it.each<[string, SendAnswer]>([
     ['400', () => json(400, { error: 'content is required', sendOutcome: 'not_sent' })],
     ['500 sendOutcome:not_sent', () => json(500, { error: 'session start failed', sendOutcome: 'not_sent' })],
-    ['503 SESSION_STARTING (refused before any key; no sendOutcome)', () => json(503, { error: 'starting', code: 'SESSION_STARTING' })],
   ])('%s: the row fails and ［再試行］ sends it again directly', async (_name, answer) => {
     installFetch(answer, created);
     await renderAndSend();
