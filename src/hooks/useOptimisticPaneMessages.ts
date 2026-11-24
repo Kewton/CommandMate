@@ -16,6 +16,7 @@ import { isHandoffPageOperationRefused, sendMessageForHandoffPage } from '@/lib/
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import type { ChatMessage } from '@/types/models';
 import { useSendRefusalNotice } from '@/hooks/useSendRefusalNotice';
+import { returnRetargetedText, type RetargetedText } from '@/lib/drafts/message-draft';
 
 export interface UseOptimisticPaneMessagesArgs {
   worktreeId: string;
@@ -28,6 +29,13 @@ export interface UseOptimisticPaneMessagesArgs {
    * composer to keep (no bubble is left).
    */
   onNotSent?: (content: string) => void;
+  /**
+   * Issue #4535 r7 (INV-V2a): the draft of the composer this pane sends from (the PC split's, the
+   * phone's docked one) — a send the fence stopped (409 `SEND_TARGET_CHANGED` `not_sent`) hands its
+   * text back into it with its tag ({@link returnRetargetedText}), never through `onNotSent`.
+   * Omitted: a fence's text is not handed back.
+   */
+  retargetDraftKey?: string;
 }
 
 /**
@@ -49,6 +57,7 @@ export function useOptimisticPaneMessages({
   serverMessages,
   onSent,
   onNotSent,
+  retargetDraftKey,
 }: UseOptimisticPaneMessagesArgs): UsePendingMessagesResult {
   // Issue #4345 1c: the worktree page's registration holder (PC split, phone). Each send — a resend
   // included — is owned by the registration held when it leaves; its 401 reaches the gateway before
@@ -85,10 +94,14 @@ export function useOptimisticPaneMessages({
   // Issue #4385: a send the server refused because of its role (409 `roleRefusal`, nothing typed)
   // says why right away (the app's toast) and on its failed row; a new send's text goes back to the
   // composer (the same insert as `onNotSent`). Shared with the `/sessions` tile.
-  // Issue #4535: the send fence's 409 `SEND_TARGET_CHANGED` goes the same road (the same insert,
-  // with a hold the composer reads while its To is not the original target).
+  // Issue #4535 r7: the send fence's 409 `SEND_TARGET_CHANGED` hands its text back into this pane's
+  // composer's draft with its tag (INV-V2a) — the composer asks while its To is not the original.
+  const returnRetargeted = useCallback(
+    (returned: RetargetedText) => retargetDraftKey !== undefined && returnRetargetedText(retargetDraftKey, returned),
+    [retargetDraftKey],
+  );
   const { readRoleRefusal, onRoleRefused, readTargetChanged, onTargetChanged, onTargetChangedDiscard } =
-    useSendRefusalNotice(onNotSent);
+    useSendRefusalNotice(onNotSent, returnRetargeted);
   const onAttachmentNotReturned = useAttachmentNotReturnedNotice();
   return usePendingMessages({
     worktreeId,

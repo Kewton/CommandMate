@@ -201,7 +201,7 @@ export interface PendingMessage {
    * Issue #4535 r5 (review H2): an attempt of this message was stopped by the send fence (409
    * `SEND_TARGET_CHANGED` `not_sent`) — the target it was going to. Its text goes back to a composer
    * on `discard()` only through {@link UsePendingMessagesOptions.onTargetChangedDiscard} (with the
-   * hold of that target). Kept across a retry: the row still names the same target.
+   * tag of that target). Kept across a retry: the row still names the same target.
    */
   targetChanged?: SendTargetChangedRefusal;
   /**
@@ -295,9 +295,9 @@ export interface UsePendingMessagesOptions {
    */
   onTargetChanged?: (content: string, refusal: SendTargetChangedRefusal, info: { firstAttempt: boolean }) => boolean;
   /**
-   * Issue #4535 r5 (review H2): a fence-refused row not handed back yet is discarded — whether its
-   * text may go back to the composer (true once the hold of its original target is written). Omitted
-   * or false: `discard()` does not hand it back.
+   * Issue #4535 r5 (review H2), r7 (INV-V2a): a fence-refused row not handed back yet is discarded —
+   * hands its text back to the composer with the tag of its original target (returns whether it
+   * did). `discard()` never returns such a text: it goes back by this road or not at all.
    */
   onTargetChangedDiscard?: (content: string, refusal: SendTargetChangedRefusal) => boolean;
   /**
@@ -838,12 +838,12 @@ export function usePendingMessages({
       // without the confirmation its row asks for.
       if (target?.status === 'unknown') return undefined;
       if (!target || target.returnedToComposer) return undefined;
-      // Issue #4535 r5 (review H2): a text the fence stopped goes back only with the hold of the
-      // target it was going to (the composer's To may have changed since).
+      // Issue #4535 r5 (review H2), r7 (INV-V2a): a text the fence stopped goes back only with the tag
+      // of the target it was going to (the composer's To may have changed since) — handed back by
+      // that road itself, never returned here as a bare string for a plain insert.
       if (target.targetChanged) {
-        return onTargetChangedDiscardRef.current?.(target.content, target.targetChanged) === true
-          ? target.content
-          : undefined;
+        onTargetChangedDiscardRef.current?.(target.content, target.targetChanged);
+        return undefined;
       }
       return target.content;
     },

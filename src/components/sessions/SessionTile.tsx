@@ -142,7 +142,12 @@ import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import { SESSION_TILE_COMPOSER_HEIGHT_SCOPE } from '@/config/composer-height';
 import { worktreeApi } from '@/lib/api-client';
 import { buildSessionRowHref } from '@/lib/sidebar-utils';
-import { appendToStoredDraft, getInstanceDraftKey } from '@/lib/drafts/message-draft';
+import {
+  appendToStoredDraft,
+  getInstanceDraftKey,
+  returnRetargetedText,
+  type RetargetedText,
+} from '@/lib/drafts/message-draft';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -569,10 +574,16 @@ function SessionTileCard({
   // Issue #4535 (段 2 §3.2, S2-Q5 (b)): a send the fence stopped (409 `SEND_TARGET_CHANGED`
   // `not_sent`) hands its text to the composer on screen instead — its original instance may be
   // gone from the roster, so its draft would be out of sight — and the composer asks before sending
-  // it while its To is not the original target.
+  // it while its To is not the original target. r7 (INV-V2a): into the shown instance's draft, with
+  // its tag (never through the plain insert).
+  const returnRetargeted = useCallback(
+    (returned: RetargetedText) =>
+      returnRetargetedText(getInstanceDraftKey(worktree.id, shownInstanceRef.current), returned),
+    [worktree.id],
+  );
   const roleRefusalNotice = useSendRefusalNotice(
     useCallback((content: string) => insertIntoComposer(content, refusedTargetRef.current), [insertIntoComposer]),
-    insertIntoShownComposer,
+    returnRetargeted,
   );
   const readRoleRefusal = useCallback(
     (error: unknown) => {

@@ -98,6 +98,7 @@ import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
+import { getSplitDraftKey } from '@/lib/drafts/message-draft';
 import { useHistoryPaneState } from '@/hooks/useHistoryPaneState';
 import { useComposerMaxHeight } from '@/hooks/useComposerHeight';
 import {
@@ -584,6 +585,9 @@ export const TerminalSplitPaneContent = memo(function TerminalSplitPaneContent({
     onSent: refreshSplitMessages,
     // Issue #4345 1c 再指示 2: a send not sent (the page's gate refused it) goes back to the composer.
     onNotSent: onHistoryInsertToMessage,
+    // Issue #4535 r7 (INV-V2a): a send the fence stopped goes back into THIS split's composer's draft
+    // with its tag (the same split `onHistoryInsertToMessage` inserts into).
+    retargetDraftKey: getSplitDraftKey(worktreeId, splitIndex),
   });
 
   // Issue #744: History visible/width. MVP keeps this common across splits
