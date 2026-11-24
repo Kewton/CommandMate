@@ -9,6 +9,13 @@ import React, { memo, useState, useCallback, FormEvent, useRef, useEffect, useLa
 import { useTranslations } from 'next-intl';
 import { handleApiError, isBriefBoundaryChanged, type SendBriefChoice } from '@/lib/api-client';
 import { readSendRoleRefusal, sendRoleRefusalMessageKey } from '@/components/worktree/role-refusal-notice';
+import {
+  SEND_TARGET_CHANGED_KEYS,
+  describeSendTarget,
+  isSameSendTarget,
+  readSendTargetChanged,
+  sendTargetChangedReasonKey,
+} from '@/components/worktree/send-refusal-notice';
 import { fetchStartPreview, isCommandBody, START_PREVIEW_TIMEOUT_MS } from '@/lib/handoff/screen-client';
 import {
   beginHandoffPageOperation,
@@ -47,7 +54,10 @@ import {
   getInstanceDraftKey,
   getSplitDraftKey,
   subscribeDraftAppend,
+  findRetargetHolds,
+  releaseRetargetHolds,
   type DraftScope,
+  type RetargetHold,
 } from '@/lib/drafts/message-draft';
 
 export interface MessageInputProps {
@@ -490,12 +500,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     resendConfirmedRef.current = value;
     setResendConfirmed(value);
   }, []);
+  // Issue #4535 (段 2 §3.2, S2-Q5 (b)): the draft holds a text the send fence handed back, and this
+  // composer's To is not the target it was going to — the question before it is sent here
+  // (`retargetAsk`), and the person's yes for this To (`retargetConfirmedRef`, this mount only).
+  const [retargetAsk, setRetargetAsk] = useState<{ original: RetargetHold; current: { instanceId: string; cliToolId: string } } | null>(null);
+  const retargetConfirmedRef = useRef<string | null>(null);
   useEffect(() => {
     previewKeyRef.current = previewKey;
     return () => {
       // Issue #4503: the mark stays with the draft; a question or a confirmation was for this target.
       setConfirmingResend(false);
       setResendConfirmedBoth(false);
+      // Issue #4535: so was the yes to sending a handed-back text here.
+      setRetargetAsk(null);
+      retargetConfirmedRef.current = null;
       // The target changes (or the composer goes): a send waiting on the old target's preview is void.
       sendAttemptRef.current += 1;
       briefCheckingRef.current = false;
@@ -537,6 +555,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setConfirmingResend(true);
     return true;
   }, [setResendConfirmedBoth]);
+  /**
+   * Issue #4535 (段 2 §3.2, INV-V2): whether this send of `text` must wait for the person's yes — it
+   * holds a text the send fence handed back, and this composer's To (instance and tool) is not the
+   * target that text was going to. Asks (naming both) and returns true. The To back on the original
+   * target sends at once. The holds go once the text is sent ({@link releaseRetargetHolds}).
+   */
+  const holdsRetargetedSend = useCallback((text: string): boolean => {
+    const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
+    const original = findRetargetHolds(worktreeId, text).find((hold) => !isSameSendTarget(hold, current));
+    if (!original) return false;
+    if (retargetConfirmedRef.current === `${previewKeyRef.current}\u0000${text}`) return false;
+    setRetargetAsk({ original, current });
+    return true;
+  }, [worktreeId, instanceId, cliToolId]);
   const markSendUnknown = useCallback((key: string, text: string, target: string) => {
     const mark = { text, target };
     writeSendUnknownMark(key, mark);
@@ -732,7 +764,16 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    */
   const describeSendError = useCallback((err: unknown): string => {
     const roleRefusal = readSendRoleRefusal(err);
-    return roleRefusal !== null ? t(sendRoleRefusalMessageKey(roleRefusal)) : handleApiError(err);
+    if (roleRefusal !== null) return t(sendRoleRefusalMessageKey(roleRefusal));
+    // Issue #4535 (段 2 §3.2): the send fence stopped it — why, and the target it was going to.
+    const targetChanged = readSendTargetChanged(err);
+    if (targetChanged !== null && targetChanged.sendOutcome === 'not_sent') {
+      return t(SEND_TARGET_CHANGED_KEYS.notSent, {
+        reason: t(sendTargetChangedReasonKey(targetChanged.reason)),
+        target: targetChanged.target?.instanceId ?? '?',
+      });
+    }
+    return handleApiError(err);
   }, [t]);
 
   /**
@@ -754,6 +795,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // Issue #4503: the same draft as a send whose outcome is unknown — ask before anything is sent
     // (Enter and the button both come through here; the brief choice is reached only from here).
     if (holdsUnconfirmedResend(message.trim())) return;
+    // Issue #4535: a text the send fence handed back, and the To is not its target — ask first.
+    if (holdsRetargetedSend(message.trim())) return;
     // Issue #4345 1c 再指示 1: a send of a worktree page starts only while the page's registration
     // (fixed now) may start — not once a 401 was taken (the registry's expiry). Nothing is sent and
     // the draft stays; checked again after the preview's await below. Outside a page: as before.
@@ -830,6 +873,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (onOptimisticSend) {
       setError(null);
       onOptimisticSend(trimmed, options);
+      releaseRetargetHolds(worktreeId, trimmed);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
@@ -850,6 +894,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
+      releaseRetargetHolds(worktreeId, trimmed);
       clearSentDraft(sentKey, sentImagePath);
       // Issue #806: when the session is busy, the CLI queues this message behind
       // the running task. Surface a toast so the (successful) send doesn't look
@@ -876,7 +921,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, markSendUnknown, previewKey]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, markSendUnknown, previewKey]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -896,7 +941,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return;
     }
     // Issue #4503: see the plain send (the question first; nothing is sent).
-    if (holdsUnconfirmedResend(trimmed)) {
+    if (holdsUnconfirmedResend(trimmed) || holdsRetargetedSend(trimmed)) {
       setBriefAsk(null);
       return;
     }
@@ -919,6 +964,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
+      releaseRetargetHolds(worktreeId, trimmed);
       // Issue #4419: a switch meanwhile already closed the question (the previewKey change).
       if (clearSentDraft(sentKey, sentImagePath)) setBriefAsk(null);
       if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
@@ -960,7 +1006,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, markSendUnknown, previewKey]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, markSendUnknown, previewKey]);
 
   /** Issue #4503: the person confirmed sending the same draft again — a new send. */
   const confirmResend = useCallback(() => {
@@ -970,6 +1016,16 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   }, [submitMessage, setResendConfirmedBoth]);
   const cancelResend = useCallback(() => {
     setConfirmingResend(false);
+  }, []);
+  /** Issue #4535: the person said yes — send the handed-back text to this To (a new send). */
+  const confirmRetarget = useCallback(() => {
+    setRetargetAsk(null);
+    retargetConfirmedRef.current = `${previewKeyRef.current}\u0000${messageRef.current.trim()}`;
+    void submitMessage();
+  }, [submitMessage]);
+  /** Issue #4535: no — nothing is sent, the draft stays. */
+  const cancelRetarget = useCallback(() => {
+    setRetargetAsk(null);
   }, []);
   // Issue #4503: the notice belongs to the draft on screen, while it still is that send's text and
   // target (an edit hides it; the mark goes at the next send), until the person confirmed.
@@ -1233,6 +1289,38 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Issue #4535: a text the send fence handed back, and this To is not its target — ask first. */}
+      {retargetAsk && (
+        <div
+          data-testid="message-input-retarget-confirm"
+          role="alert"
+          className="flex flex-wrap items-center gap-2 rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs leading-5 text-foreground"
+        >
+          <span>
+            {t(SEND_TARGET_CHANGED_KEYS.retargetConfirm, {
+              original: describeSendTarget(retargetAsk.original),
+              current: describeSendTarget(retargetAsk.current),
+            })}
+          </span>
+          <button
+            type="button"
+            data-testid="message-input-retarget-confirm-yes"
+            onClick={confirmRetarget}
+            className="inline rounded-sm font-medium text-warning-foreground underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+          >
+            {t(SEND_TARGET_CHANGED_KEYS.retargetConfirmYes)}
+          </button>
+          <button
+            type="button"
+            data-testid="message-input-retarget-confirm-no"
+            onClick={cancelRetarget}
+            className="inline rounded-sm text-muted-foreground underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-manipulation"
+          >
+            {t(SEND_TARGET_CHANGED_KEYS.retargetConfirmNo)}
+          </button>
         </div>
       )}
 

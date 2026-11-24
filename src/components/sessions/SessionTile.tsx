@@ -129,7 +129,7 @@ import {
   type OptimisticSendOptions,
   type PendingConnectivity,
 } from '@/hooks/usePendingMessages';
-import { useRoleRefusalNotice } from '@/hooks/useRoleRefusalNotice';
+import { useSendRefusalNotice } from '@/hooks/useSendRefusalNotice';
 import { useAttachmentNotReturnedNotice } from '@/hooks/useOptimisticPaneMessages';
 import { usePendingConnectivity } from '@/hooks/usePendingConnectivity';
 import { useSessionTileAutoYes } from '@/hooks/useSessionTileAutoYes';
@@ -566,8 +566,13 @@ function SessionTileCard({
   // synchronous step, so the target read here is that send's).
   const refusedTargetRef = useRef<string | undefined>(undefined);
   const attachmentNotReturnedNotice = useAttachmentNotReturnedNotice();
-  const roleRefusalNotice = useRoleRefusalNotice(
+  // Issue #4535 (段 2 §3.2, S2-Q5 (b)): a send the fence stopped (409 `SEND_TARGET_CHANGED`
+  // `not_sent`) hands its text to the composer on screen instead — its original instance may be
+  // gone from the roster, so its draft would be out of sight — and the composer asks before sending
+  // it while its To is not the original target.
+  const roleRefusalNotice = useSendRefusalNotice(
     useCallback((content: string) => insertIntoComposer(content, refusedTargetRef.current), [insertIntoComposer]),
+    insertIntoShownComposer,
   );
   const readRoleRefusal = useCallback(
     (error: unknown) => {
@@ -590,6 +595,8 @@ function SessionTileCard({
     connectivity,
     readRoleRefusal,
     onRoleRefused: roleRefusalNotice.onRoleRefused,
+    readTargetChanged: roleRefusalNotice.readTargetChanged,
+    onTargetChanged: roleRefusalNotice.onTargetChanged,
     // Issue #4503: the worktree screen's wiring (`useOptimisticPaneMessages`) — an unknown outcome
     // is not a failure, and a clock that runs out in flight waits for the answer.
     isOutcomeUnknown: isSendOutcomeUnknown,

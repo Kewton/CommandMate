@@ -7,6 +7,8 @@
  *   `commandmate:draft-message:<worktreeId>:instance:<instanceId>` — the draft follows the
  *   instance the tile shows, so what is typed for one instance of a worktree never shows in
  *   another instance's composer (the tile switches instances in place).
+ * - **Retarget holds** (Issue #4535): `commandmate:draft-message:<worktreeId>:retarget-hold` —
+ *   texts the send fence handed back, with the target they were going to (see {@link RetargetHold}).
  *
  * @module lib/drafts/message-draft
  */
@@ -66,4 +68,71 @@ export function appendToStoredDraft(key: string, text: string): void {
     /* localStorage unavailable */
   }
   draftAppendListeners.get(key)?.forEach((listener) => listener(text));
+}
+
+/**
+ * Issue #4535 (段 2 §3.2, S2-Q5 (b)): a text the send fence (#4534, 409 `SEND_TARGET_CHANGED`
+ * `not_sent`) handed back to the composer on screen, with the target it was going to. While a
+ * composer's To is not that target (its instance or its tool), the composer asks before sending a
+ * draft that holds this text: one press must not send it to the target that replaced the original.
+ */
+export interface RetargetHold {
+  text: string;
+  instanceId: string;
+  cliToolId: string;
+}
+
+/** At most this many holds are kept per worktree (the oldest goes first). */
+const RETARGET_HOLD_LIMIT = 20;
+
+/** Issue #4535: where a worktree's {@link RetargetHold}s are kept (every composer of it reads them). */
+export function getRetargetHoldKey(worktreeId: string): string {
+  return `${DRAFT_STORAGE_KEY_PREFIX}${worktreeId}:retarget-hold`;
+}
+
+/** Issue #4535: the worktree's holds. Best effort — `localStorage` may be unavailable or hold junk. */
+export function readRetargetHolds(worktreeId: string): RetargetHold[] {
+  try {
+    const raw = window.localStorage.getItem(getRetargetHoldKey(worktreeId));
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (hold): hold is RetargetHold =>
+        typeof hold === 'object' &&
+        hold !== null &&
+        typeof (hold as RetargetHold).text === 'string' &&
+        (hold as RetargetHold).text !== '' &&
+        typeof (hold as RetargetHold).instanceId === 'string' &&
+        typeof (hold as RetargetHold).cliToolId === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeRetargetHolds(worktreeId: string, holds: RetargetHold[]): void {
+  try {
+    if (holds.length === 0) window.localStorage.removeItem(getRetargetHoldKey(worktreeId));
+    else window.localStorage.setItem(getRetargetHoldKey(worktreeId), JSON.stringify(holds.slice(-RETARGET_HOLD_LIMIT)));
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+
+/** Issue #4535: remember a handed-back text and its original target (a hold of the same text is replaced). */
+export function holdRetargetedText(worktreeId: string, hold: RetargetHold): void {
+  if (!hold.text) return;
+  writeRetargetHolds(worktreeId, [...readRetargetHolds(worktreeId).filter((h) => h.text !== hold.text), hold]);
+}
+
+/** Issue #4535: the holds a draft about to be sent carries — those whose text it contains. */
+export function findRetargetHolds(worktreeId: string, draft: string): RetargetHold[] {
+  return readRetargetHolds(worktreeId).filter((hold) => draft.includes(hold.text));
+}
+
+/** Issue #4535: a draft was sent — the holds it carried go (it reached the target it was sent to). */
+export function releaseRetargetHolds(worktreeId: string, draft: string): void {
+  const holds = readRetargetHolds(worktreeId);
+  const left = holds.filter((hold) => !draft.includes(hold.text));
+  if (left.length !== holds.length) writeRetargetHolds(worktreeId, left);
 }

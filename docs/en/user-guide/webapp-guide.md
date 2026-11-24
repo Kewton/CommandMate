@@ -173,6 +173,11 @@ Send messages to Claude Code to give instructions.
 2. Type your message in the input field at the bottom
 3. Click the **"Send"** button (or press Enter)
 
+### A Send Whose Arrival Is Not Known, or That Stopped Because the Target Changed
+
+- **When it is not known whether it arrived** (the server answered that it cannot tell, or the send ran out of time), the screen says so and, instead of a plain retry, offers a way to check the destination's screen. If it did arrive, sending again puts the same text in twice, so it is sent again only after you confirm (the New task dialog too: pressing **Send** again asks "The same request is sent again. It may arrive twice." first)
+- **When the send stopped because its target changed on the way** (the instance left the roster, its tool was replaced, and so on), a toast gives the reason and the original target. When the text is known not to have been sent, it goes back into the composer on screen, once. While that composer's target is not the original one, Enter or **Send** first asks, naming the original and the current target (cancel and nothing is sent). When the worktree is gone, the text does not go back. When it is not known whether it arrived, the text does not go back, and you are asked to check the original target's screen
+
 ### Responding to Claude's Confirmations
 
 When Claude asks for yes/no or multiple-choice confirmations:

@@ -397,6 +397,13 @@
       "model_rejected": "The model was not accepted. Clear it or change it, then send again.",
       "invalid": "The request was not accepted.",
       "failed": "Sending failed. Check the connection and send again."
+    },
+    "unknown": {
+      "status": "It is not known whether it arrived. Check the destination's screen before sending it again.",
+      "openTarget": "Open the destination",
+      "resendConfirm": "The same request is sent again. It may arrive twice.",
+      "resendConfirmYes": "Send",
+      "resendConfirmNo": "Cancel"
     }
   },
   "agentRoles": {

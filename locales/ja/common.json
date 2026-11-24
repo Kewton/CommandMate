@@ -397,6 +397,13 @@
       "model_rejected": "モデル指定が受け付けられませんでした。消すか変えてから送り直してください。",
       "invalid": "依頼が受け付けられませんでした。",
       "failed": "送信に失敗しました。接続を確かめて送り直してください。"
+    },
+    "unknown": {
+      "status": "届いたかどうか分かりません。送り直す前に、送り先の画面で確かめてください。",
+      "openTarget": "送り先を開く",
+      "resendConfirm": "同じ依頼をもう一度送ります。二重に届くことがあります。",
+      "resendConfirmYes": "送る",
+      "resendConfirmNo": "やめる"
     }
   },
   "agentRoles": {

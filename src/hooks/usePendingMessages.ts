@@ -78,6 +78,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, OptimisticSendState, RetryPendingOptions, SendRoleRefusalReason } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
+import type { SendTargetChangedRefusal } from '@/components/worktree/send-refusal-notice';
 import {
   SESSION_STARTING_CODE,
   SESSION_START_FAILED_CODE,
@@ -277,6 +278,18 @@ export interface UsePendingMessagesOptions {
    */
   onRoleRefused?: (content: string, reason: SendRoleRefusalReason, info: { firstAttempt: boolean }) => boolean;
   /**
+   * Issue #4535 (段 2 §3): the send fence's refusal (#4534, 409 `SEND_TARGET_CHANGED`), or null.
+   * `not_sent` (nothing typed) fails the row at once, as a role refusal does, without a role
+   * reason; `unknown` goes on to {@link isOutcomeUnknown} as before. Omitted: not read.
+   */
+  readTargetChanged?: (error: unknown) => SendTargetChangedRefusal | null;
+  /**
+   * Issue #4535: the fence stopped a send — for the screen to say why right away (both outcomes).
+   * For `not_sent`, returns whether it handed the text back to the composer (only a new send's
+   * text, `firstAttempt`); then `discard()` does not hand it back again. `unknown`: never handed back.
+   */
+  onTargetChanged?: (content: string, refusal: SendTargetChangedRefusal, info: { firstAttempt: boolean }) => boolean;
+  /**
    * Issue #4503: whether a rejection leaves the send's outcome unknown (pass
    * {@link isSendOutcomeUnknown}). Such a row lands on `unknown`: never parked, never resent on its
    * own, and `retry()` sends it only when confirmed. Omitted: every such rejection is a failure.
@@ -419,6 +432,8 @@ export function usePendingMessages({
   onNotSent,
   readRoleRefusal,
   onRoleRefused,
+  readTargetChanged,
+  onTargetChanged,
   isOutcomeUnknown,
   holdInFlightOnTimeout = false,
   onAttachmentNotReturned,
@@ -448,6 +463,10 @@ export function usePendingMessages({
   readRoleRefusalRef.current = readRoleRefusal;
   const onRoleRefusedRef = useRef(onRoleRefused);
   onRoleRefusedRef.current = onRoleRefused;
+  const readTargetChangedRef = useRef(readTargetChanged);
+  readTargetChangedRef.current = readTargetChanged;
+  const onTargetChangedRef = useRef(onTargetChanged);
+  onTargetChangedRef.current = onTargetChanged;
   const isOutcomeUnknownRef = useRef(isOutcomeUnknown);
   isOutcomeUnknownRef.current = isOutcomeUnknown;
   const holdInFlightOnTimeoutRef = useRef(holdInFlightOnTimeout);
@@ -692,6 +711,36 @@ export function usePendingMessages({
             ),
           );
           return;
+        }
+        // Issue #4535 (段 2 §3): the send fence stopped it (409 `SEND_TARGET_CHANGED`). The reason
+        // is said either way. `not_sent`: the road of the role refusal above — the row fails now
+        // with its text handed back once (a new send's only); `unknown`: never handed back, the
+        // row goes on to the unknown outcome below.
+        const targetChanged = readTargetChangedRef.current?.(error) ?? null;
+        if (targetChanged !== null) {
+          const firstAttempt = previous === undefined;
+          if (targetChanged.sendOutcome === 'not_sent') {
+            const sameAttempt = (cur: PendingMessage) =>
+              cur.tempId === p.tempId && (cur.status === 'sending' || cur.status === 'error');
+            clearTimer(p.tempId);
+            const handedBack = onTargetChangedRef.current?.(p.content, targetChanged, { firstAttempt }) === true;
+            if (handedBack) noteAttachmentNotReturned(p);
+            setPending((prev) =>
+              prev.map((cur) =>
+                sameAttempt(cur)
+                  ? {
+                      ...cur,
+                      status: 'error',
+                      queued: false,
+                      awaitingResponse: false,
+                      returnedToComposer: cur.returnedToComposer || handedBack,
+                    }
+                  : cur,
+              ),
+            );
+            return;
+          }
+          onTargetChangedRef.current?.(p.content, targetChanged, { firstAttempt });
         }
         // Issue #4503: nobody knows whether it arrived — not a failure, and nothing to retry.
         if (isOutcomeUnknownRef.current?.(error)) {

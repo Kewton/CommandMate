@@ -15,7 +15,7 @@ import {
 import { isHandoffPageOperationRefused, sendMessageForHandoffPage } from '@/lib/handoff/page-owner';
 import { useHandoffPageOwner } from '@/hooks/useHandoffPageOwner';
 import type { ChatMessage } from '@/types/models';
-import { useRoleRefusalNotice } from '@/hooks/useRoleRefusalNotice';
+import { useSendRefusalNotice } from '@/hooks/useSendRefusalNotice';
 
 export interface UseOptimisticPaneMessagesArgs {
   worktreeId: string;
@@ -85,7 +85,9 @@ export function useOptimisticPaneMessages({
   // Issue #4385: a send the server refused because of its role (409 `roleRefusal`, nothing typed)
   // says why right away (the app's toast) and on its failed row; a new send's text goes back to the
   // composer (the same insert as `onNotSent`). Shared with the `/sessions` tile.
-  const { readRoleRefusal, onRoleRefused } = useRoleRefusalNotice(onNotSent);
+  // Issue #4535: the send fence's 409 `SEND_TARGET_CHANGED` goes the same road (the same insert,
+  // with a hold the composer reads while its To is not the original target).
+  const { readRoleRefusal, onRoleRefused, readTargetChanged, onTargetChanged } = useSendRefusalNotice(onNotSent);
   const onAttachmentNotReturned = useAttachmentNotReturnedNotice();
   return usePendingMessages({
     worktreeId,
@@ -97,6 +99,8 @@ export function useOptimisticPaneMessages({
     onNotSent,
     readRoleRefusal,
     onRoleRefused,
+    readTargetChanged,
+    onTargetChanged,
     // Issue #4503: an unknown outcome is not a failure (no direct retry, no automatic resend), and
     // a clock that runs out while the request is in flight waits for the answer.
     isOutcomeUnknown: isSendOutcomeUnknown,

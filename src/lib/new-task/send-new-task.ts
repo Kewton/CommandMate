@@ -29,6 +29,10 @@ import type { AutoYesDuration } from '@/config/auto-yes-config';
 import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NewTaskTarget } from './recent-targets';
+import {
+  readSendTargetChangedBody,
+  type SendTargetChangedReason,
+} from '@/components/worktree/send-refusal-notice';
 
 /**
  * The `code` values the send route answers with. Spelled here rather than
@@ -61,6 +65,22 @@ export type NewTaskFailureKind =
   /** 5xx, no reply, a timeout. */
   | 'failed';
 
+/**
+ * Issue #4535 (C9): the outcome of a send that did not say "sent" and did not say "not sent" either —
+ * `sendOutcome: 'unknown'` (or `'sent'` on a failed answer: typed, then failed), or the send request
+ * itself running out of time / losing its connection before any answer. The text may already be in
+ * the agent's session, so the dialog never sends it again on a plain press. Kept apart from
+ * {@link NewTaskFailureKind}, which names the ways a send did not go out.
+ */
+export type NewTaskOutcomeKind = NewTaskFailureKind | 'unknown';
+
+/** Issue #4535 (段 2 §3.2): the send fence (#4534) stopped it — why, and the target it was going to. */
+export interface NewTaskTargetChanged {
+  reason: SendTargetChangedReason;
+  /** The original target's instance, when the answer names it. */
+  target: string | null;
+}
+
 /** Auto-Yes as this call left it armed on the server. */
 export interface ArmedAutoYes {
   enabled: true;
@@ -69,7 +89,14 @@ export interface ArmedAutoYes {
 
 export type NewTaskSendResult = (
   | { ok: true }
-  | { ok: false; kind: NewTaskFailureKind; status: number; detail: string | null }
+  | {
+      ok: false;
+      kind: NewTaskOutcomeKind;
+      status: number;
+      detail: string | null;
+      /** Issue #4535: present only for the send fence's 409 `SEND_TARGET_CHANGED`. */
+      targetChanged?: NewTaskTargetChanged;
+    }
 ) & {
   /** Present only when this call armed Auto-Yes — whether or not the send then went out. */
   armedAutoYes?: ArmedAutoYes;
@@ -99,21 +126,32 @@ async function readArmedState(response: Response): Promise<ArmedAutoYes | null> 
   return null;
 }
 
-/** Read `{ error, code }` off an error body; anything else reads as empty. */
-async function readErrorBody(response: Response): Promise<{ error: string | null; code: string | null }> {
+interface ErrorBody {
+  error: string | null;
+  code: string | null;
+  /** Issue #4535: the route's `sendOutcome` (`sent` / `not_sent` / `unknown`), when it says one. */
+  sendOutcome: string | null;
+  /** Issue #4535: the body itself, for the readers of a typed refusal. */
+  body: unknown;
+}
+
+/** Read `{ error, code, sendOutcome }` off an error body; anything else reads as empty. */
+async function readErrorBody(response: Response): Promise<ErrorBody> {
   try {
     const body: unknown = await response.json();
     if (body && typeof body === 'object') {
-      const { error, code } = body as Record<string, unknown>;
+      const { error, code, sendOutcome } = body as Record<string, unknown>;
       return {
         error: typeof error === 'string' && error !== '' ? error : null,
         code: typeof code === 'string' ? code : null,
+        sendOutcome: typeof sendOutcome === 'string' ? sendOutcome : null,
+        body,
       };
     }
   } catch {
     // An HTML page (an expired login) or an empty body.
   }
-  return { error: null, code: null };
+  return { error: null, code: null, sendOutcome: null, body: null };
 }
 
 /** Classify the send route's answer. */
@@ -124,9 +162,15 @@ export async function interpretSendResponse(
   // A 200 that arrived through a redirect is the login page, not the route.
   if (response.ok && !response.redirected) return { ok: true };
   const { status } = response;
-  const { error, code } = await readErrorBody(response);
-  let kind: NewTaskFailureKind;
-  if (status === 409) {
+  const { error, code, sendOutcome, body } = await readErrorBody(response);
+  const fence = readSendTargetChangedBody(status, body);
+  const targetChanged = fence ? { targetChanged: { reason: fence.reason, target: fence.target?.instanceId ?? null } } : {};
+  let kind: NewTaskOutcomeKind;
+  // Issue #4535 (C9, design §2.2 U1): the answer says the text may already be in the session — a
+  // failed answer's `sent` too (typed, then failed), and a fence refusal that does not say `not_sent`.
+  if (sendOutcome === 'unknown' || sendOutcome === 'sent' || (fence !== null && fence.sendOutcome !== 'not_sent')) {
+    kind = 'unknown';
+  } else if (status === 409) {
     kind = code === SEND_RESPONSE_CODES.promptWaiting ? 'prompt_waiting' : 'conflict';
   } else if (status === 503) {
     kind = code === SEND_RESPONSE_CODES.sessionStarting ? 'starting' : 'start_failed';
@@ -137,7 +181,7 @@ export async function interpretSendResponse(
   } else {
     kind = 'failed';
   }
-  return { ok: false, kind, status: response.ok ? 0 : status, detail: error };
+  return { ok: false, kind, status: response.ok ? 0 : status, detail: error, ...targetChanged };
 }
 
 export interface SendNewTaskInput {
@@ -163,6 +207,19 @@ type Request = (url: string, options?: ApiRequestOptions) => Promise<Response>;
 function transportFailure(error: unknown): NewTaskSendResult {
   const detail = error instanceof ApiError || error instanceof Error ? error.message : null;
   return { ok: false, kind: 'failed', status: 0, detail };
+}
+
+/**
+ * Issue #4535 (C9, design §3.4): the send request (`/send`) failed before any answer arrived. Its
+ * running out of time (`timeout`, the transport's or {@link withinDeadline}'s) or being cut off
+ * (`aborted`) says nothing about whether the server typed it: `unknown`. Refused before it left
+ * (`offline`), a `network` failure and anything else stay `failed` as before.
+ */
+function sendTransportFailure(error: unknown): NewTaskSendResult {
+  const failure = transportFailure(error);
+  if (failure.ok) return failure;
+  const unanswered = error instanceof ApiError && (error.kind === 'timeout' || error.kind === 'aborted');
+  return unanswered ? { ...failure, kind: 'unknown' } : failure;
 }
 
 /**
@@ -248,6 +305,9 @@ export async function sendNewTask(
   const model = input.model?.trim() || undefined;
   // With no session the server launches the agent inside this request (Issue #3194).
   const sendTimeoutMs = getSendTimeoutMs();
+  // Issue #4535: whether the route's answer (its headers) arrived. A deadline that runs out while an
+  // error body is still being read is the reading's, and stays `failed` as before (#3511 / #4034).
+  let answered = false;
   try {
     return withArmed(
       await withinDeadline(async () => {
@@ -262,10 +322,11 @@ export async function sendNewTask(
           }),
           timeoutMs: sendTimeoutMs,
         });
+        answered = true;
         return interpretSendResponse(response, { modelRequested: model !== undefined });
       }, sendTimeoutMs),
     );
   } catch (error) {
-    return withArmed(transportFailure(error));
+    return withArmed(answered ? transportFailure(error) : sendTransportFailure(error));
   }
 }
