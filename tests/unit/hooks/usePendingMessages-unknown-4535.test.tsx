@@ -5,6 +5,7 @@
  * - 401 `AUTH_REQUIRED` / 403 `IP_DENIED` (C12, the middleware's answers before the route) → not unknown
  * - a 4xx that says `sendOutcome: 'not_sent'` → not unknown
  * - a 409 that says `sendOutcome: 'unknown'` (the fence, #4534) → unknown
+ * - a 4xx with no `sendOutcome` (a proxy's or tunnel's page, C10) → unknown
  *
  * @vitest-environment jsdom
  */
@@ -24,6 +25,12 @@ describe('[#4535 T16] isSendOutcomeUnknown and the typed refusals before the rou
     ['409 SEND_TARGET_CHANGED not_sent', new ApiError('x', 409, { error: 'x', code: 'SEND_TARGET_CHANGED', sendOutcome: 'not_sent' })],
   ])('control: %s is not unknown', (_name, error) => {
     expect(isSendOutcomeUnknown(error)).toBe(false);
+  });
+
+  it('a proxy 4xx without sendOutcome is unknown', () => {
+    expect(isSendOutcomeUnknown(new ApiError('Bad Request', 400, {}))).toBe(true);
+    expect(isSendOutcomeUnknown(new ApiError('Unauthorized', 401, { error: 'Unauthorized' }))).toBe(true);
+    expect(isSendOutcomeUnknown(new ApiError('HTTP error 413', 413, {}))).toBe(true);
   });
 
   it('a 409 SEND_TARGET_CHANGED unknown is unknown', () => {

@@ -11,9 +11,10 @@
  * Every case counts the POSTs to `/send`: a reading never sends anything (INV-F1).
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { interpretSendResponse, sendNewTask, type SendNewTaskInput } from '@/lib/new-task/send-new-task';
 import { ApiError, type ApiRequestOptions } from '@/lib/api-client';
+import { getSendTimeoutMs } from '@/config/api-timeout-config';
 import { jsonResponse } from './new-task-fixtures';
 
 function input(autoYesDuration: SendNewTaskInput['autoYesDuration'] = null): SendNewTaskInput {
@@ -37,6 +38,22 @@ function transport(send: () => Promise<Response>, autoYes?: () => Promise<Respon
 
 const sendPosts = (request: ReturnType<typeof transport>) =>
   request.mock.calls.filter(([url]) => url.endsWith('/send')).length;
+
+/** Headers arrive with `status`; the body never does. */
+function stalledBody(status: number): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    redirected: false,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: () => new Promise(() => {}),
+    text: () => new Promise(() => {}),
+  } as unknown as Response;
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('[#4535 T15] the dialog reads sendOutcome', () => {
   it('500 sendOutcome unknown is kind unknown', async () => {
@@ -92,6 +109,57 @@ describe('[#4535 T15] the dialog reads sendOutcome', () => {
     };
     const result = await interpretSendResponse(jsonResponse(body, 409), { modelRequested: false });
     expect(result).toMatchObject({ ok: false, kind: 'conflict', targetChanged: { reason: 'target-gone', target: 'codex-2' } });
+  });
+});
+
+describe('[#4535 T15 r2] the dialog reads a cut-off send, a 5xx with no sendOutcome and a stalled body as unknown', () => {
+  it('a send whose connection is lost (network) is kind unknown', async () => {
+    const request = transport(async () => {
+      throw new ApiError('Failed to fetch', 0, undefined, 'network');
+    });
+    expect(await sendNewTask(input(), request)).toMatchObject({ ok: false, kind: 'unknown', status: 0 });
+    expect(sendPosts(request)).toBe(1);
+  });
+
+  it.each([
+    ['500', 500, { error: 'tmux went away' }],
+    ['502 (a proxy page)', 502, {}],
+    ['504 (a proxy page)', 504, {}],
+    ['503 SESSION_STARTING', 503, { error: 'starting', code: 'SESSION_STARTING' }],
+    ['503 SESSION_START_FAILED', 503, { error: 'exited', code: 'SESSION_START_FAILED' }],
+  ])('a %s with no sendOutcome is kind unknown', async (_name, status, body) => {
+    expect(await interpretSendResponse(jsonResponse(body, status), { modelRequested: false })).toMatchObject({
+      ok: false,
+      kind: 'unknown',
+      status,
+    });
+    const request = transport(async () => jsonResponse(body, status));
+    expect(await sendNewTask(input(), request)).toMatchObject({ ok: false, kind: 'unknown' });
+    expect(sendPosts(request)).toBe(1);
+  });
+
+  it('a send whose answer body stalls past the send timeout is kind unknown', async () => {
+    vi.useFakeTimers();
+    const request = transport(async () => stalledBody(500));
+    const promise = sendNewTask(input(), request);
+    await vi.advanceTimersByTimeAsync(getSendTimeoutMs());
+    expect(await promise).toMatchObject({ ok: false, kind: 'unknown', status: 0 });
+    expect(sendPosts(request)).toBe(1);
+  });
+
+  it('control: 503 SESSION_STARTING not_sent is still starting', async () => {
+    const body = { error: 'starting', code: 'SESSION_STARTING', sendOutcome: 'not_sent' };
+    expect(await interpretSendResponse(jsonResponse(body, 503), { modelRequested: false })).toMatchObject({
+      ok: false,
+      kind: 'starting',
+    });
+  });
+
+  it('control: a 400 with no sendOutcome keeps its kind (the dialog reads 4xx as before)', async () => {
+    expect(await interpretSendResponse(jsonResponse({ error: 'content is required' }, 400), { modelRequested: false })).toMatchObject({
+      ok: false,
+      kind: 'invalid',
+    });
   });
 });
 
