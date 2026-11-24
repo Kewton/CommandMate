@@ -432,11 +432,13 @@ describe('opencode v1: the keyboard fallback (Issue #4040)', () => {
     const requireSession = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(starting);
     (tool as unknown as Record<string, unknown>).requireSession = requireSession;
     const error = await settle(tool.sendMessageWithImage('wt-1', 'look', '/tmp/x.png'));
-    expect(requireSession).toHaveBeenCalledTimes(2);
+    // Issue #4535 (r3, the human's decision 14:08): the image's stop comes before the path
+    // fallback's requireSession — no relaunch, and the stop's reason is dispatch-unknown.
+    expect(requireSession).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(keys).toEqual([]);
     expect(classifySendFailure(starting)).toEqual({ state: 'not-sent', reason: 'session-starting' });
-    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'send-error' });
+    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'dispatch-unknown' });
   });
 
   it('review-1 control: no unknown dispatch, SESSION_STARTING at the start — still session-starting', async () => {
