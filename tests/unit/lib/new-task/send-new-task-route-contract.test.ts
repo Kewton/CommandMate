@@ -266,7 +266,8 @@ describe('[#3511] New task reads the real send / auto-yes routes', () => {
     const response = await postSend({ content: 'hi', cliToolId: 'codex', instanceId: 'codex' });
     expect(response.status).toBe(500);
     const result = await interpretSendResponse(response, { modelRequested: false });
-    expect(result).toMatchObject({ ok: false, kind: 'failed', status: 500 });
+    // Issue #4535 (C9, INV-S10): a 500 that does not say `not_sent` is unknown.
+    expect(result).toMatchObject({ ok: false, kind: 'unknown', status: 500 });
     expect(result.ok === false && result.detail).toContain('tmux went away');
   });
 

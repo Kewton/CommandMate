@@ -324,10 +324,12 @@ describe('[#3511] NewTaskDialog — sending', () => {
     [
       '503 still starting',
       { status: 503, body: { error: 'Codex CLI is still starting', code: SEND_RESPONSE_CODES.sessionStarting } },
-      'starting',
+      // Issue #4535 (C10 human decision): a session-start 503 without `not_sent` is unknown.
+      'unknown',
       'Codex CLI is still starting',
     ],
-    ['500 failure', { status: 500, body: { error: 'Failed to send message' } }, 'failed', 'Failed to send message'],
+    // Issue #4535 (C9, INV-S10): a 500 that does not say `not_sent` is unknown.
+    ['500 failure', { status: 500, body: { error: 'Failed to send message' } }, 'unknown', 'Failed to send message'],
   ];
 
   it.each(failures)('keeps the dialog and the request open on %s, and says why', async (_name, answer, kind, detail) => {
@@ -342,7 +344,7 @@ describe('[#3511] NewTaskDialog — sending', () => {
 
     const error = await screen.findByTestId('new-task-error');
     expect(error).toHaveAttribute('data-kind', kind);
-    expect(error).toHaveTextContent(`common.newTask.errors.${kind}`);
+    expect(error).toHaveTextContent(kind === 'unknown' ? 'common.newTask.unknown.status' : `common.newTask.errors.${kind}`);
     expect(screen.getByTestId('new-task-error-detail')).toHaveTextContent(detail ?? '');
     expect(screen.getByTestId('new-task-message')).toHaveValue('keep me');
     expect(nav.push).not.toHaveBeenCalled();
@@ -361,7 +363,8 @@ describe('[#3511] NewTaskDialog — sending', () => {
     fireEvent.click(screen.getByTestId('new-task-send'));
 
     const error = await screen.findByTestId('new-task-error');
-    expect(error).toHaveAttribute('data-kind', 'failed');
+    // Issue #4535 (C9, INV-S10): a send that lost its connection is unknown.
+    expect(error).toHaveAttribute('data-kind', 'unknown');
     expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument();
   });
 });
