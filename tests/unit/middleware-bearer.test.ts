@@ -128,8 +128,9 @@ describe('middleware Bearer token support', () => {
     const { middleware } = await import('../../src/middleware');
     const req = createMockRequest({ pathname: '/api/worktrees' });
     await middleware(req as never);
+    // Issue #4535 (C12, the human's decision 2026-11-24 16:08): `/api/*` adds a stable code.
     expect(mockNextResponseJson).toHaveBeenCalledWith(
-      { error: 'Unauthorized' },
+      { error: 'Unauthorized', code: 'AUTH_REQUIRED' },
       { status: 401 }
     );
     expect(mockNextResponseRedirect).not.toHaveBeenCalled();
@@ -141,8 +142,9 @@ describe('middleware Bearer token support', () => {
     await middleware(req as never);
     // With Authorization header present but invalid token,
     // should return 401 JSON (not redirect)
+    // Issue #4535 (C12, the human's decision 2026-11-24 16:08): `/api/*` adds a stable code.
     expect(mockNextResponseJson).toHaveBeenCalledWith(
-      { error: 'Unauthorized' },
+      { error: 'Unauthorized', code: 'AUTH_REQUIRED' },
       { status: 401 }
     );
   });

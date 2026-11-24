@@ -20,8 +20,13 @@
  * Issue #4011: a send with no bound relay answers `sendOutcome` too, on a
  * failure recorded as this request's attempt — by the send service, or by this
  * route before it (another server's session, a start still coming up or
- * failed: `not_sent`) — so the CLI can say whether it may be sent again. A 400
- * (the body, `--model`) records none and is answered as before; so is its 201.
+ * failed: `not_sent`) — so the CLI can say whether it may be sent again. Its 201
+ * is answered as before.
+ *
+ * Issue #4535 (C4): a refusal that records no attempt (the body, `--model`, the
+ * image path, a relay or ask reservation) is `not_sent` too when the send service
+ * was not entered — one rule in the wrapper (`send-preflight-outcome.ts`), no
+ * attempt recorded. `RELAY_BIND_CONFLICT` is `unknown`.
  *
  * Issue #4344: a body naming `ask` (a synchronous `commandmate ask`) on a tool the
  * server attributes asks for reserves the ask id before anything is typed, types
@@ -80,6 +85,7 @@ import {
 } from './send-session-start';
 import { resolveSendImagePath } from './send-image-path';
 import { answerSendFailure } from './send-failure';
+import { preflightSendOutcome, weakerSendOutcome, type PreflightSendState } from './send-preflight-outcome';
 import { findToolPolicyDenial, toolPolicyDeniedResponse } from './send-tool-policy';
 import {
   checkRunningRole,
@@ -98,6 +104,9 @@ import type { AskSendAnswer } from '@/types/ask-correlation';
 import type { StoredRoleState } from '@/types/agent-roles';
 
 const logger = createLogger('api/send');
+
+/** Issue #4535 (Q10): the `code` of the 409 for the screen's brief choice (nothing typed). */
+const BRIEF_CHOICE_CODE = 'brief_choice';
 
 // Issue #4055: the request's validation (`send-request.ts`), the relay and turn
 // reading (`send-relay.ts`), the session start (`send-session-start.ts`), the
@@ -127,29 +136,58 @@ export async function POST(
   const { binding } = relay;
   if (!binding) {
     // Issue #4011: whether it may be sent again does not depend on a relay.
-    // Only a failure recorded as this request's attempt says it; a 400 that
-    // records none (validation, `--model`) is answered as before.
-    if (relay.sent || relay.attempt === null) return response;
-    return withBody(response, { sendOutcome: unboundSendOutcome(relay.attempt) });
+    // A failure recorded as this request's attempt says it from the record.
+    if (relay.sent) return response;
+    if (relay.attempt !== null) {
+      const recorded = unboundSendOutcome(relay.attempt);
+      return withBody(response, {}, (body) => ({ sendOutcome: weakerSendOutcome(body.sendOutcome, recorded) }));
+    }
+    // Issue #4535 (C4): one rule for every refusal made before anything could be typed.
+    const preflight = preflightSendOutcome(await readAnswer(response), preflightState(relay, ask));
+    return preflight ? withBody(response, { sendOutcome: preflight }) : response;
   }
 
   // Issue #3957: every answer after the reservation settles the relay and says
   // what the CLI may do with it — withdraw it only on `not_sent`.
-  const sendOutcome = binding.finish(
+  // Issue #4535 (I4・C6): a settle that failed changes no fact; the answer says the
+  // ledger was not written (`relaySettled: false`, only then), and its `sendOutcome`
+  // is the weaker of the body's own (or the C4 rule's) and the binding's.
+  const answer = await readAnswer(response);
+  const bodyOutcome = answer.body.sendOutcome ?? preflightSendOutcome(answer, preflightState(relay, ask)) ?? undefined;
+  const settledAs = binding.finishSettled(
     relay.sent
       ? { kind: 'sent', ...relay.sent }
       : { kind: 'failed', attempt: relay.attempt }
   );
-  if (sendOutcome === 'sent') evaluateRelayAfterSend(binding.relayId);
-  if (!relay.withdraw) return withBody(response, { relayId: binding.relayId, sendOutcome });
+  const sendOutcome = weakerSendOutcome(bodyOutcome, settledAs.outcome);
+  if (settledAs.outcome === 'sent' && settledAs.settled) evaluateRelayAfterSend(binding.relayId);
+  const bound = { relayId: binding.relayId, sendOutcome, ...(settledAs.settled ? {} : { relaySettled: false }) };
+  if (!relay.withdraw) return withBody(response, bound);
   // Issue #4498: the answer says whether the withdrawal took (`relayWithdrawn`), and
   // never claims "was withdrawn" for one that could not be confirmed.
   const relayWithdrawn = withdrawRefusedRelay(binding.relayId);
-  return withBody(response, { relayId: binding.relayId, sendOutcome, relayWithdrawn }, (body) =>
+  return withBody(response, { ...bound, relayWithdrawn }, (body) =>
     !relayWithdrawn && body.error === RELAY_TOOL_POLICY_WITHDRAWN_MESSAGE
       ? { error: RELAY_TOOL_POLICY_WITHDRAW_UNCONFIRMED_MESSAGE }
       : {}
   );
+}
+
+/** Issue #4535 (C4): what the request did before its answer, for {@link preflightSendOutcome}. */
+function preflightState(relay: RouteRelayState, ask: RouteAskState): PreflightSendState {
+  return { attemptRecorded: relay.attempt !== null, serviceEntered: ask.delivering, stoppedBeforeKeys: ask.notTyped };
+}
+
+/** The answer's status and JSON body, read from a copy (the answer itself is kept as is). */
+async function readAnswer(response: Response): Promise<{ status: number; body: Record<string, unknown> }> {
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = await response.clone().json();
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+  } catch {
+    // Every answer of this route is JSON; an unreadable one is read as an empty body.
+  }
+  return { status: response.status, body };
 }
 
 /**
@@ -567,8 +605,10 @@ async function handleSend(
       // failure: the screen asks again with a new preview (the body and the image stay).
       if (result.stage === 'brief_choice') {
         ask.notTyped = true;
+        // Issue #4535 (Q10): a stable `code` beside `error`, which keeps its value
+        // (the screen reads `error`); `sendOutcome: 'not_sent'` comes from the wrapper's rule.
         return NextResponse.json(
-          { error: result.code, reason: result.reason, boundary: result.boundary },
+          { error: result.code, code: BRIEF_CHOICE_CODE, reason: result.reason, boundary: result.boundary },
           { status: 409 }
         );
       }

@@ -185,7 +185,15 @@ describe('[#4227 S-B] POST /send: the choice reaches the service, its abort is 4
     });
     const response = await post({ content: 'hello', brief: 'decline', briefBoundary: 'b-1' });
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({ error: 'boundary_changed', reason: 'superseded', boundary: { id: 'b-1', state: 'superseded' } });
+    // Issue #4535 (Q10・C4, the human's decision 2026-11-24 16:08): the same body plus a
+    // stable `code` and `sendOutcome: 'not_sent'` (nothing was typed); `error` keeps its value.
+    expect(await response.json()).toEqual({
+      error: 'boundary_changed',
+      code: 'brief_choice',
+      reason: 'superseded',
+      boundary: { id: 'b-1', state: 'superseded' },
+      sendOutcome: 'not_sent',
+    });
   });
 
   it('negative: a send failure is not 409 boundary_changed', async () => {
@@ -239,7 +247,8 @@ describe('[#4227 pr3f] POST /send: a strict choice the screen never sends is 400
     upsertWorktree(db, worktreeOf('command-code'));
     const response = await post({ content: '/model', ...choice });
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: STRICT_BRIEF_NOT_FOR_COMMAND });
+    // Issue #4535 (C4, the human's decision 2026-11-24 16:08): plus `sendOutcome: 'not_sent'`.
+    expect(await response.json()).toEqual({ error: STRICT_BRIEF_NOT_FOR_COMMAND, sendOutcome: 'not_sent' });
     expect(sendUserMessage).not.toHaveBeenCalled();
   });
 
@@ -250,7 +259,8 @@ describe('[#4227 pr3f] POST /send: a strict choice the screen never sends is 400
     upsertWorktree(db, worktreeOf('antigravity'));
     const response = await post({ content: 'hello', ...choice });
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: STRICT_BRIEF_NOT_FOR_TOOL });
+    // Issue #4535 (C4, the human's decision 2026-11-24 16:08): plus `sendOutcome: 'not_sent'`.
+    expect(await response.json()).toEqual({ error: STRICT_BRIEF_NOT_FOR_TOOL, sendOutcome: 'not_sent' });
     expect(sendUserMessage).not.toHaveBeenCalled();
   });
 
