@@ -238,6 +238,71 @@ describe('T11: a failed settle does not change the fact (I4)', () => {
   });
 });
 
+describe('T11: a dispatch that ended unknown settles the relay when it fails, not at the end (C6)', () => {
+  /** As `noteDispatchFailed` calls it: a throw from the hook is logged and swallowed there. */
+  function dispatchFailed(binding: SettlingBinding | { onDispatchFailed?: (verdict: 'unknown') => void }): void {
+    const hooks = 'hooks' in binding ? binding.hooks() : binding;
+    try {
+      hooks.onDispatchFailed?.('unknown');
+    } catch {
+      // swallowed by the caller (instance-input-lock noteDispatchFailed)
+    }
+  }
+
+  it('a dispatch unknown whose ledger write failed is not settled; relaySettled is false and sendOutcome stays unknown', async () => {
+    // The write moved nothing: the relay was closed between the dispatch and its failure.
+    const closedRelay = boundRelay();
+    const closedBinding = reserve(closedRelay.id);
+    closedBinding.hooks().beforeInput(new Date(), 'dispatch');
+    cancelRelay(db, closedRelay.id);
+    dispatchFailed(closedBinding);
+    expect(finishSettled(closedBinding, { kind: 'failed', attempt: 'indeterminate' })).toEqual({ outcome: 'unknown', settled: false });
+
+    // The write threw.
+    const thrownRelay = boundRelay();
+    const thrownBinding = reserve(thrownRelay.id);
+    thrownBinding.hooks().beforeInput(new Date(), 'dispatch');
+    settleThrows();
+    dispatchFailed(thrownBinding);
+    expect(finishSettled(thrownBinding, { kind: 'failed', attempt: 'indeterminate' })).toEqual({ outcome: 'unknown', settled: false });
+    expect(getRelayById(db, thrownRelay.id)?.sendState).toBe('input_started');
+
+    // The route: the same fact, `relaySettled: false` beside it.
+    const routeRelay = boundRelay();
+    sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+      params.inputBoundary?.beforeInput(new Date(), 'dispatch');
+      settleThrows();
+      if (params.inputBoundary) dispatchFailed(params.inputBoundary);
+      params.onAttempt?.({ state: 'indeterminate', reason: 'dispatch-unknown' });
+      return { ok: false, stage: 'send', error: 'the dispatch answer was lost' };
+    });
+    const { status, body } = await post({ relayId: routeRelay.id });
+    expect(status).toBe(500);
+    expect(body).toMatchObject({ relayId: routeRelay.id, sendOutcome: 'unknown', relaySettled: false });
+  });
+
+  it('negative control: a dispatch unknown whose ledger write took is settled, with no relaySettled', async () => {
+    const relay = boundRelay();
+    const binding = reserve(relay.id);
+    binding.hooks().beforeInput(new Date(), 'dispatch');
+    dispatchFailed(binding);
+    expect(getRelayById(db, relay.id)).toMatchObject({ sendState: 'unknown', holdReason: 'dispatch_unknown' });
+    expect(finishSettled(binding, { kind: 'failed', attempt: 'indeterminate' })).toEqual({ outcome: 'unknown', settled: true });
+
+    const routeRelay = boundRelay();
+    sendUserMessage.mockImplementationOnce(async (_db: unknown, params: SendParams) => {
+      params.inputBoundary?.beforeInput(new Date(), 'dispatch');
+      if (params.inputBoundary) dispatchFailed(params.inputBoundary);
+      params.onAttempt?.({ state: 'indeterminate', reason: 'dispatch-unknown' });
+      return { ok: false, stage: 'send', error: 'the dispatch answer was lost' };
+    });
+    const { status, body } = await post({ relayId: routeRelay.id });
+    expect(status).toBe(500);
+    expect(body).toMatchObject({ relayId: routeRelay.id, sendOutcome: 'unknown' });
+    expect(body).not.toHaveProperty('relaySettled');
+  });
+});
+
 describe('T11: the answer\'s sendOutcome is the weaker of the body\'s and the binding\'s', () => {
   it('the weaker of the body\'s and the binding\'s outcome wins', async () => {
     // The fence says the body may have gone in (`unknown`); the binding saw no boundary.
