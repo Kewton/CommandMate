@@ -270,7 +270,7 @@ describe('[#4503 review 3 P2-1] the worktree page (phone): the flags reach the h
   });
 
   it('(positive control) a 400 still fails', async () => {
-    installFetch(() => Promise.resolve(jsonResponse({ error: 'content is required' }, 400)));
+    installFetch(() => Promise.resolve(jsonResponse({ error: 'content is required', sendOutcome: 'not_sent' }, 400)));
     await sendFromPage();
     await waitFor(() => expect(row()).toHaveAttribute('data-optimistic', 'error'));
   });

@@ -168,7 +168,7 @@ describe('[#4503 U-0] the /sessions tile and a send whose outcome is unknown', (
   });
 
   it('(positive control) a 400 fails and ［再試行］ sends it again directly', async () => {
-    installFetch(() => json(400, { error: 'content is required' }), created);
+    installFetch(() => json(400, { error: 'content is required', sendOutcome: 'not_sent' }), created);
     await sendFromTile();
     await waitFor(() => expect(tile().getByTestId('chat-pending-retry')).toBeInTheDocument());
     expect(tile().queryByTestId('chat-optimistic-unknown')).toBeNull();

@@ -335,7 +335,7 @@ describe('[#4503 U-0 / review 2 P2-2] a 201 whose echo does not come', () => {
 
 describe('[#4503 U-0] (positive control) a send that really was not sent can be sent again', () => {
   it.each<[string, SendAnswer]>([
-    ['400', () => json(400, { error: 'content is required' })],
+    ['400', () => json(400, { error: 'content is required', sendOutcome: 'not_sent' })],
     ['500 sendOutcome:not_sent', () => json(500, { error: 'session start failed', sendOutcome: 'not_sent' })],
     ['503 SESSION_STARTING (refused before any key; no sendOutcome)', () => json(503, { error: 'starting', code: 'SESSION_STARTING' })],
   ])('%s: the row fails and ［再試行］ sends it again directly', async (_name, answer) => {

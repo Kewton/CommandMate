@@ -103,7 +103,7 @@ describe('[#4345 1c] (negative controls) the composer’s failure is shown as be
     global.fetch = vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url.includes('/start-preview')) return json(200, NOT_SHOWN);
-      if (url.endsWith('/send')) return json(401, { error: 'Unauthorized' });
+      if (url.endsWith('/send')) return json(401, { error: 'Unauthorized', code: 'AUTH_REQUIRED' });
       return json(200, {});
     }) as unknown as typeof fetch;
     const page = standInPage();
