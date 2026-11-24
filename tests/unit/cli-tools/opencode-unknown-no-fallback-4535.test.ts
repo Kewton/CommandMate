@@ -279,6 +279,18 @@ describe('Issue #4535 R1: an unknown OpenCode dispatch is followed by nothing', 
     expect(classifySendFailure(error).state).toBe('indeterminate');
   }, 60_000);
 
+  it('C7: the stop after an unknown dispatch is recorded as lastSend.reason dispatch-unknown', async () => {
+    const server = liveOpencode('opencode-c7', noAnswer);
+    const answer = await send('opencode-c7', 'body c7 reason');
+    expectStoppedUnknown(answer, server, 'body c7 reason', 'opencode-c7');
+    expect(lastSend('opencode-c7')).toMatchObject({ state: 'indeterminate', reason: 'dispatch-unknown' });
+    // The image path's stop is read the same way.
+    const image = liveOpencode('opencode-c7-image', noAnswer);
+    const error = await thrownBy(opencodeTool().sendMessageWithImage(WT, 'body c7 look', '/tmp/x-4535.png', 'opencode-c7-image'));
+    expect(image.posts()).toBe(1);
+    expect(classifySendFailure(error)).toEqual({ state: 'indeterminate', reason: 'dispatch-unknown' });
+  }, 60_000);
+
   it('R1: a read-back mismatch — nothing typed, indeterminate', async () => {
     const server = liveOpencode('opencode-t3', () => ACCEPTED, [found('something else')]);
     const answer = await send('opencode-t3', 'body t3 mismatch');
