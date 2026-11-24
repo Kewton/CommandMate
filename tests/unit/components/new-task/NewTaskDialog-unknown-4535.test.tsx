@@ -193,3 +193,75 @@ describe('[#4535 T15] NewTaskDialog — an unknown outcome is not sent again wit
     await waitFor(() => expect(sendCalls()).toHaveLength(2));
   });
 });
+
+/**
+ * Issue #4535 r5 (review opus2 P1-1・P2-1, opus P3-1): the unknown record outlives a later failure of
+ * another kind, follows the destination back, and the person's yes is good for one press only.
+ */
+describe('[#4535 T15 r5] NewTaskDialog — the unknown record is kept per request and destination', () => {
+  const unknown500 = { status: 500, body: { error: 'submit could not be confirmed', sendOutcome: 'unknown' } };
+  const promptWaiting = { status: 409, body: { error: 'prompt up', code: 'PROMPT_WAITING', sendOutcome: 'not_sent' } };
+  const message = () => screen.getByTestId('new-task-message');
+
+  it('A/X unknown → X′ fails as PROMPT_WAITING → back to X: the press POSTs nothing and asks', async () => {
+    server.answers = [unknown500, promptWaiting];
+    renderShell();
+    await openAndType('X');
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await waitFor(() => expect(screen.getByTestId('new-task-error')).toHaveAttribute('data-kind', 'unknown'));
+
+    // Another request (X′) to the same destination fails another way.
+    fireEvent.change(message(), { target: { value: 'X prime' } });
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await waitFor(() => expect(screen.getByTestId('new-task-error')).toHaveAttribute('data-kind', 'prompt_waiting'));
+    expect(sendCalls()).toHaveLength(2);
+
+    // X again: its outcome is still unknown — nothing is sent, the question is up.
+    fireEvent.change(message(), { target: { value: 'X' } });
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    expect(await screen.findByTestId('new-task-resend-confirm')).toBeInTheDocument();
+    expect(sendCalls()).toHaveLength(2);
+    fireEvent.click(screen.getByTestId('new-task-resend-confirm-no'));
+    expect(sendCalls()).toHaveLength(2);
+  });
+
+  it('the destination switched away and back: the question shows again (no dead press)', async () => {
+    server.answers = [unknown500];
+    renderShell();
+    await openAndType('X');
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await waitFor(() => expect(screen.getByTestId('new-task-error')).toHaveAttribute('data-kind', 'unknown'));
+
+    fireEvent.change(screen.getByTestId('new-task-agent'), { target: { value: 'claude' } });
+    fireEvent.change(screen.getByTestId('new-task-agent'), { target: { value: 'codex-2' } });
+    // Back on the destination of the unknown send: the notice is back.
+    expect(screen.getByTestId('new-task-error')).toHaveAttribute('data-kind', 'unknown');
+
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    expect(await screen.findByTestId('new-task-resend-confirm')).toBeInTheDocument();
+    expect(sendCalls()).toHaveLength(1);
+  });
+
+  it('a yes spent on a press that sent nothing (the text was empty) does not let the next press through', async () => {
+    server.answers = [unknown500];
+    renderShell();
+    await openAndType('X');
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    await waitFor(() => expect(screen.getByTestId('new-task-error')).toHaveAttribute('data-kind', 'unknown'));
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    expect(await screen.findByTestId('new-task-resend-confirm')).toBeInTheDocument();
+
+    // The text emptied, then yes: nothing can be sent (an early return).
+    fireEvent.change(message(), { target: { value: '' } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-task-resend-confirm-yes'));
+    });
+    expect(sendCalls()).toHaveLength(1);
+
+    // The same text again: the press asks again.
+    fireEvent.change(message(), { target: { value: 'X' } });
+    fireEvent.click(screen.getByTestId('new-task-send'));
+    expect(await screen.findByTestId('new-task-resend-confirm')).toBeInTheDocument();
+    expect(sendCalls()).toHaveLength(1);
+  });
+});

@@ -308,3 +308,54 @@ describe.each([PC, PHONE])('[#4535 T19b] $name: the text back, and no one-press 
     expect(window.localStorage.getItem(`commandmate:draft-message:${WT}:retarget-hold`)).toBeNull();
   });
 });
+
+/**
+ * Issue #4535 r5 (review H1): the phone's terminal view registers no optimistic send, so the docked
+ * composer awaits the send (`MessageInput`'s awaited road) and the text never left the composer. The
+ * fence's 409 `not_sent` there holds the text with its original target too: after the To changed,
+ * Enter once POSTs nothing and asks; cancelled POSTs nothing.
+ */
+describe('[#4535 T19b r5] phone terminal view (the awaited send): no one-press send to a changed To', () => {
+  async function awaitThenRefuse(original: Target, current: Target, reason: string) {
+    let reject: (error: unknown) => void = () => undefined;
+    sendMessageMock.mockImplementationOnce(() => new Promise((_resolve, r) => (reject = r)));
+    sendMessageMock.mockResolvedValue({ id: 'srv-2' });
+    const view = render(<PhoneHarness target={original} />);
+    await waitFor(() => expect(textarea()).toBeInTheDocument());
+    expect(screen.queryByTestId('mobile-chat-surface')).toBeNull();
+    fireEvent.change(textarea(), { target: { value: TEXT } });
+    pressEnter();
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    // Awaited: the text stays in the composer while it is on its way.
+    expect(textarea().value).toBe(TEXT);
+    view.rerender(<PhoneHarness target={current} />);
+    await flush();
+    await act(async () => reject(fence(reason, original)));
+    await flush(30);
+  }
+
+  it.each(CHANGES)('%s: Enter once POSTs nothing and asks; cancelled POSTs nothing', async (reason, original, current) => {
+    await awaitThenRefuse(original, current, reason);
+    expect(textarea().value).toBe(TEXT);
+
+    pressEnter();
+    await flush();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    const confirm = await screen.findByTestId('message-input-retarget-confirm');
+    expect(confirm.textContent).toContain(original.id);
+    expect(confirm.textContent).toContain(current.id);
+
+    fireEvent.click(screen.getByTestId('message-input-retarget-confirm-no'));
+    await flush();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(textarea().value).toBe(TEXT);
+  });
+
+  it('(negative control) the To still the original target: Enter sends at once', async () => {
+    const same: Target = { id: 'codex-2', tool: 'codex' };
+    await awaitThenRefuse(same, same, 'dispatch-changed');
+    pressEnter();
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('message-input-retarget-confirm')).toBeNull();
+  });
+});

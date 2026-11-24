@@ -51,6 +51,20 @@ function stalledBody(status: number): Response {
   } as unknown as Response;
 }
 
+/** A page a proxy answers with (not JSON). */
+function htmlResponse(status: number): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    redirected: false,
+    headers: new Headers({ 'content-type': 'text/html' }),
+    json: async () => {
+      throw new SyntaxError('Unexpected token <');
+    },
+    text: async () => '<html>gateway</html>',
+  } as unknown as Response;
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -155,11 +169,38 @@ describe('[#4535 T15 r2] the dialog reads a cut-off send, a 5xx with no sendOutc
     });
   });
 
-  it('control: a 400 with no sendOutcome keeps its kind (the dialog reads 4xx as before)', async () => {
+  // Issue #4535 r5 (H3): the dialog reads 4xx by design §2.2 U2 and C10 too — a 4xx without
+  // `sendOutcome` is not the route's (its own refusals say `not_sent`), so it is unknown.
+  it('a 400 with no sendOutcome is unknown (design §2.2 U2, C10)', async () => {
     expect(await interpretSendResponse(jsonResponse({ error: 'content is required' }, 400), { modelRequested: false })).toMatchObject({
+      ok: false,
+      kind: 'unknown',
+    });
+  });
+
+  it.each([
+    ['a proxy\'s 404 page', 404, null],
+    ['a 408 with no code', 408, { error: 'timeout' }],
+    ['a 409 with an unknown code', 409, { error: 'x', code: 'SOMETHING_NEW' }],
+  ])('%s is unknown (U2)', async (_name, status, body) => {
+    const response = body === null ? htmlResponse(status) : jsonResponse(body, status);
+    expect(await interpretSendResponse(response, { modelRequested: false })).toMatchObject({ ok: false, kind: 'unknown' });
+  });
+
+  it('control: a 400 with sendOutcome not_sent keeps its kind (N1)', async () => {
+    const body = { error: 'content is required', sendOutcome: 'not_sent' };
+    expect(await interpretSendResponse(jsonResponse(body, 400), { modelRequested: false })).toMatchObject({
       ok: false,
       kind: 'invalid',
     });
+  });
+
+  it.each([
+    [401, 'AUTH_REQUIRED'],
+    [403, 'IP_DENIED'],
+  ])('control: the middleware\'s %i %s is not unknown (N6)', async (status, code) => {
+    const result = await interpretSendResponse(jsonResponse({ error: 'x', code }, status), { modelRequested: false });
+    expect(result).toMatchObject({ ok: false, kind: 'failed', status });
   });
 });
 

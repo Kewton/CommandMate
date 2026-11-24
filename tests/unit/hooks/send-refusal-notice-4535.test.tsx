@@ -41,6 +41,7 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
 import { ApiError } from '@/lib/api-client';
 import { useOptimisticPaneMessages } from '@/hooks/useOptimisticPaneMessages';
 import { ToastProvider } from '@/components/common/Toast';
+import { findRetargetHolds, holdRetargetedText } from '@/lib/drafts/message-draft';
 
 const WT = 'wt-4535';
 const TEXT = 'please look at the diff';
@@ -231,6 +232,123 @@ describe('[#4535 T19] the sentences are in ja and en', () => {
       const unreadable = resolveKey(dict, 'conversation.sendTargetChanged.reason.unreadable') as string;
       expect(unknown).not.toMatch(/送っていません|not sent/i);
       expect(unreadable).not.toMatch(/替わりました|changed/i);
+    }
+  });
+});
+
+/**
+ * Issue #4535 r5 (review H2・H4・P3 exact match): the text a fence refusal did not hand back goes to
+ * the composer on a discard only with its hold (never without its original target), and a hold that
+ * cannot be written keeps the text out of the composer (fail-closed).
+ */
+describe('[#4535 T19b r5] the discard, a hold that cannot be written, and the hold\'s match', () => {
+  function fenceWithoutTarget() {
+    return new ApiError('The send target changed', 409, {
+      error: 'The send target changed',
+      code: 'SEND_TARGET_CHANGED',
+      reason: 'target-gone',
+      target: null,
+      current: null,
+      requestId: 'r-1',
+      sendOutcome: 'not_sent',
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('H2: a retry\'s 409 not_sent, then the discard: the text goes back with the hold of its original target', async () => {
+    const answers: Array<(e: unknown) => void> = [];
+    sendMessageMock.mockImplementation(() => new Promise((_resolve, reject) => answers.push(reject)));
+    const { result, onNotSent } = renderPane();
+    act(() => result.current.sendOptimistic(TEXT, { cliToolId: 'codex', instanceId: 'codex-2' }));
+    await act(async () =>
+      answers[0](new ApiError('prompt waiting', 409, { error: 'prompt waiting', code: 'PROMPT_WAITING', sendOutcome: 'not_sent' })),
+    );
+    await flush();
+    act(() => result.current.retry(result.current.pending[0].tempId));
+    await act(async () => answers[1](fence('target-gone', 'not_sent')));
+    await flush();
+    expect(onNotSent).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(HOLD_KEY)).toBeNull();
+    let discarded: string | undefined;
+    act(() => {
+      discarded = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(discarded).toBe(TEXT);
+    expect(JSON.parse(window.localStorage.getItem(HOLD_KEY) ?? '[]')).toEqual([
+      { text: TEXT, instanceId: 'codex-2', cliToolId: 'codex' },
+    ]);
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('H2: a 409 not_sent that does not name its target — not handed back, and not on the discard either', async () => {
+    sendMessageMock.mockRejectedValue(fenceWithoutTarget());
+    const { result, onNotSent } = renderPane();
+    act(() => result.current.sendOptimistic(TEXT, { cliToolId: 'codex', instanceId: 'codex-2' }));
+    await flush();
+    await waitFor(() => expect(result.current.messages[0].optimisticState).toBe('error'));
+    expect(onNotSent).not.toHaveBeenCalled();
+    let discarded: string | undefined = 'x';
+    act(() => {
+      discarded = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(discarded).toBeUndefined();
+    expect(window.localStorage.getItem(HOLD_KEY)).toBeNull();
+  });
+
+  it('H2: worktree-gone — the discard does not hand the text back', async () => {
+    sendMessageMock.mockRejectedValue(fence('worktree-gone', 'not_sent'));
+    const { result } = renderPane();
+    act(() => result.current.sendOptimistic(TEXT, { cliToolId: 'codex', instanceId: 'codex-2' }));
+    await flush();
+    await waitFor(() => expect(result.current.messages[0].optimisticState).toBe('error'));
+    let discarded: string | undefined = 'x';
+    act(() => {
+      discarded = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(discarded).toBeUndefined();
+  });
+
+  it('H4: the hold cannot be written (localStorage throws) — the text is not handed back, and the toast says so', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    sendMessageMock.mockRejectedValue(fence('target-gone', 'not_sent'));
+    const { result, onNotSent } = renderPane();
+    act(() => result.current.sendOptimistic(TEXT, { cliToolId: 'codex', instanceId: 'codex-2' }));
+    await flush();
+    await waitFor(() => expect(toastText()).toContain('送っていません'));
+    expect(onNotSent).not.toHaveBeenCalled();
+    expect(toastText()).toContain('本文を入力欄に戻せませんでした');
+    // Nor on the discard: the hold still cannot be written.
+    let discarded: string | undefined = 'x';
+    act(() => {
+      discarded = result.current.discard(result.current.pending[0].tempId);
+    });
+    expect(discarded).toBeUndefined();
+  });
+
+  it('(negative control) the hold written: the text is handed back as before', async () => {
+    sendMessageMock.mockRejectedValue(fence('target-gone', 'not_sent'));
+    const { result, onNotSent } = renderPane();
+    act(() => result.current.sendOptimistic(TEXT, { cliToolId: 'codex', instanceId: 'codex-2' }));
+    await flush();
+    await waitFor(() => expect(onNotSent).toHaveBeenCalledWith(TEXT));
+    expect(toastText()).not.toContain('本文を入力欄に戻せませんでした');
+  });
+
+  it('a hold matches the draft whole, not a part of it', () => {
+    holdRetargetedText(WT, { text: 'ok', instanceId: 'codex-2', cliToolId: 'codex' });
+    expect(findRetargetHolds(WT, 'ok')).toHaveLength(1);
+    expect(findRetargetHolds(WT, 'ok, then look at the diff')).toEqual([]);
+    expect(findRetargetHolds(WT, 'not ok')).toEqual([]);
+  });
+
+  it('conversation.sendTargetChanged.textNotReturned is in ja and en', () => {
+    for (const locale of ['ja', 'en']) {
+      expect(resolveKey(load(locale), 'conversation.sendTargetChanged.textNotReturned')).toBeTypeOf('string');
     }
   });
 });

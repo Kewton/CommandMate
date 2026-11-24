@@ -33,6 +33,10 @@
  *   a ChatMessage. Listed as `it.todo` in the last `describe`, not asserted either way.
  * Neither reader was changed.
  *
+ * Issue #4535 r5 (review H3): the New task dialog is a third reader — `interpretSendResponse` on the
+ * same `Response`, and `sendNewTask` on the same transport failure. It reads every row as the screen's
+ * composer does (the intended differences included), so as the CLI on the table.
+ *
  * @vitest-environment node
  */
 
@@ -40,6 +44,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classifySendAnswer, type SendFact } from '@/lib/send-outcome/classify-send-answer';
 import { isSendOutcomeUnknown } from '@/hooks/usePendingMessages';
 import { ApiError, worktreeApi } from '@/lib/api-client';
+import { interpretSendResponse, sendNewTask, type NewTaskSendResult } from '@/lib/new-task/send-new-task';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 const HTML_TYPE = 'text/html; charset=utf-8';
@@ -351,4 +356,66 @@ describe('[#4535 INV-S3] 2xx that are not a ChatMessage (D2–D4) — to fix in 
   for (const d of S12_DIVERGENT_ROWS) {
     it.todo(`${d.id} ${d.answer.row} ${d.answer.name}: ${d.why} (S12, https://github.com/Kewton/CommandMate/issues/4603)`);
   }
+});
+
+/** The dialog's fact: `unknown` ⇔ kind `unknown`; any other failure is "not sent"; ok is sent. */
+function dialogFact(result: NewTaskSendResult): SendFact {
+  if (result.ok) return 'sent';
+  return result.kind === 'unknown' ? 'unknown' : 'not_sent';
+}
+
+type DialogRead = (response: Response) => Promise<NewTaskSendResult>;
+
+const readDialog: DialogRead = (response) => interpretSendResponse(response, { modelRequested: false });
+
+async function dialogTransportFact(error: unknown): Promise<SendFact> {
+  const result = await sendNewTask(
+    { target: { worktreeId: 'wt-1', instanceId: 'claude' }, cliToolId: 'claude', content: 'hello', autoYesDuration: null },
+    async () => {
+      throw error;
+    },
+  );
+  return dialogFact(result);
+}
+
+async function dialogDisagreements(read: DialogRead): Promise<string[]> {
+  const found: string[] = [];
+  for (const answer of WIRE_ROWS) {
+    if (dialogFact(await read(toResponse(answer))) !== readCli(answer)) found.push(`${answer.row} ${answer.name}`);
+  }
+  return found;
+}
+
+describe('[#4535 INV-S3 r5] the New task dialog reads the same answers to the same fact', () => {
+  it.each(WIRE_ROWS.map((answer) => [`${answer.row} ${answer.name}`, answer] as const))('%s', async (_name, answer) => {
+    expect(dialogFact(await readDialog(toResponse(answer)))).toBe(readCli(answer));
+  });
+
+  it.each(TRANSPORT_ROWS.map((row) => [`${row.row} ${row.name}`, row] as const))('%s', async (_name, row) => {
+    expect(await dialogTransportFact(row.screenError)).toBe(screenFact(isSendOutcomeUnknown, row.screenError));
+  });
+
+  it.each(INTENDED_DIVERGENCES.map((d) => [`${d.id} ${d.answer.row} ${d.answer.name}`, d] as const))(
+    '%s: as the composer',
+    async (_name, d) => {
+      expect(dialogFact(await readDialog(toResponse(d.answer)))).toBe(d.screen);
+    },
+  );
+
+  it('positive control: the dialog back on "a 4xx without sendOutcome keeps its kind" disagrees', async () => {
+    const before: DialogRead = async (response) => {
+      const status = response.status;
+      const text = await response.clone().text();
+      const result = await readDialog(response);
+      if (status >= 400 && status < 500 && !text.includes('sendOutcome') && !result.ok) {
+        return { ...result, kind: 'failed' };
+      }
+      return result;
+    };
+    expect(await dialogDisagreements(before)).toEqual(expect.arrayContaining([
+      'U2 404 bare HTML page',
+      'U2 400 JSON without code ({ error } only)',
+      'U2 409 JSON with an unknown code',
+    ]));
+  });
 });
