@@ -219,21 +219,17 @@ const UNREADABLE_SUCCESS_MESSAGE = "the server's answer did not say whether the 
 const NOT_SENT_SUCCESS_MESSAGE = "the server's answer said the message was not sent";
 
 /**
- * What to tell the sender about resending a failed send, from the server's
- * `sendOutcome` on the error (Issue #3992). Issue #4011: the route puts it on
- * every failure recorded as the send's attempt, bound relay or not. Null when
- * the error carries none (a 400, an older server) or says `sent`. `postMessage`
- * itself words what its reading of the whole answer proves (Issue #4535).
+ * What to tell the sender about resending a failed send (Issue #3992): the line
+ * `postMessage` prints for it when no relay notice came first, read once from the
+ * error alone (`classifySendAnswer`, no relay lookup; Issue #4535). Null when it
+ * says nothing more (a proven not_sent with no word of it to repeat, or a refused
+ * connection, whose own line says the server is not running).
  *
  * @param target - The resolved target, so the `capture` reads the pane the
  *   message went to (Issue #3982); omitted, the hint names no target
  */
 export function describeFailedSendOutcome(error: unknown, worktreeId: string, target?: CommandTarget): string | null {
-  if (!(error instanceof ApiError)) return null;
-  const outcome: unknown = error.payload?.sendOutcome;
-  if (outcome === 'not_sent') return NOT_SENT_NOTE;
-  if (outcome === 'unknown') return unknownNote(worktreeId, target);
-  return null;
+  return resendNoteFor(error, classifyFailure(error), worktreeId, target, false);
 }
 
 /**
@@ -395,7 +391,7 @@ function resendNoteFor(
   error: unknown,
   reading: SendReading,
   worktreeId: string,
-  target: CommandTarget,
+  target: CommandTarget | undefined,
   relayNoticePrinted: boolean
 ): string | null {
   if (reading.fact === 'unknown') {
@@ -405,9 +401,11 @@ function resendNoteFor(
   }
   if (reading.row === 'N7') return null;
   const saidNotSent = error instanceof ApiError && error.payload?.sendOutcome === 'not_sent';
-  // An answer that proved nothing, settled `failed` by the bound relay's own record.
-  const relaySaidFailed = reading.row === 'N4' || !reading.row.startsWith('N');
-  return saidNotSent || relaySaidFailed ? NOT_SENT_NOTE : null;
+  // A not_sent proven by a record rather than by this answer's own word: the bound
+  // relay's `failed` (N4 by Q13 (b), or a U row the lookup settled), or the ask
+  // ledger an idempotent replay carried (S3, `ask.sendState: 'not_sent'`).
+  const recordSaidNotSent = reading.row === 'N4' || !reading.row.startsWith('N');
+  return saidNotSent || recordSaidNotSent ? NOT_SENT_NOTE : null;
 }
 
 /**

@@ -196,7 +196,8 @@ function classifyRefusal(status: number, body: JsonRecord | null): SendAnswerCla
  *
  * Follows the `cause` chain (the CLI's error → `fetch failed` → the socket's).
  * An `AggregateError` (IPv4 and IPv6 both tried) counts only when every error
- * in it was refused. Anything not recognised is not a refusal.
+ * in it was refused, whatever `code` it carries itself (Node copies the first
+ * error's). Anything not recognised is not a refusal.
  */
 export function isConnectionRefused(error: unknown): boolean {
   const seen = new Set<unknown>();
@@ -205,10 +206,12 @@ export function isConnectionRefused(error: unknown): boolean {
     if (seen.has(current)) return false;
     seen.add(current);
     const node = current as { code?: unknown; errors?: unknown; cause?: unknown };
-    if (node.code === 'ECONNREFUSED') return true;
+    // Node's own AggregateError copies `code` from its first error, so its `errors`
+    // decide, before the `code` on top (review P2, #4535 B).
     if (Array.isArray(node.errors)) {
       return node.errors.length > 0 && node.errors.every((inner) => isConnectionRefused(inner));
     }
+    if (node.code === 'ECONNREFUSED') return true;
     current = node.cause;
   }
   return false;

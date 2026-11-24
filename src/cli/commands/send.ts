@@ -253,8 +253,10 @@ on a typed sendOutcome=not_sent, a code the server answers before sending, or a 
 connection. Anything else (a proxy's page, a 4xx with no code, a lost answer) is unknown:
 the relay, the --note item and the Auto-Yes grant stay, nothing is resent, and stderr
 says to check the pane first. A 2xx that is not a message (empty, not JSON, another
-shape) is exit 99 for the same reason. A 409 RELAY_BIND_CONFLICT is a copy of this
-request holding the relay: the relay is looked up, and only its "failed" undoes them.
+shape) is exit 99 for the same reason. With a bound relay (--reply-to), an unknown is
+looked up in the relay's own record: "sent" is exit 0, "failed" undoes them and says it
+is safe to send again. A 409 RELAY_BIND_CONFLICT is a copy of this request holding the
+relay: the relay is looked up, and only its "failed" undoes them.
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {

@@ -187,8 +187,8 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   the header. When the send's outcome is unknown the relay is left open, nothing
   is resent, and 'commandmate relays --id <relay-id>' shows why it is held.
   Issue #4535: "not sent" is read only from the send's own answer (a typed
-  sendOutcome=not_sent, a code the route answers before sending, a refused
-  connection). A bare page from a proxy, a 4xx with no code, or a 2xx that is
+  sendOutcome=not_sent, a code the route answers before sending, an auth, IP or
+  tool-policy refusal, a refused connection). A bare page from a proxy, a 4xx with no code, or a 2xx that is
   not a message is unknown: the relay, the --note item and the Auto-Yes grant
   stay, stderr says to check the pane first, and such a 2xx exits 99. A 409
   RELAY_BIND_CONFLICT is a copy of the same request holding the relay: nothing
