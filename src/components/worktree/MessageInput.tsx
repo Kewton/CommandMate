@@ -485,8 +485,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4607 r3 (INV-V2c''): the To a send goes to — the instance and the tool. `previewKey` has no
   // tool when there is an instance (the roster read again can change the same instance's tool); a yes
   // to sending a handed-back text is for this key only.
+  // Issue #4607 r4 (INV-V2c'''): the checks compare this render's key — the same render the POST's
+  // options are built from — never a copy a passive effect writes later (a press between the commit
+  // of a To change and its passive effects saw the old To there and sent to the new one).
   const sendTargetKey = `${worktreeId}\u0000${instanceId || cliToolId || 'claude'}\u0000${cliToolId || 'claude'}`;
-  const sendTargetKeyRef = useRef(sendTargetKey);
   const mountedRef = useRef(true);
   const sendAttemptRef = useRef(0);
   const briefCheckingRef = useRef(false);
@@ -554,11 +556,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     };
   }, [previewKey, setResendConfirmedBoth]);
   useEffect(() => {
-    sendTargetKeyRef.current = sendTargetKey;
     return () => {
       // Issue #4535: the yes to sending a handed-back text here was for this To — Issue #4607 r3: the
       // instance and the tool (the same instance's tool changes without `previewKey`; the brief's
-      // clean-up above stays on `previewKey`).
+      // clean-up above stays on `previewKey`). r4: a tidy-up only — each answer holds its To, and the
+      // checks compare it with the render's `sendTargetKey`.
       setRetargetAsk(null);
       retargetConfirmedRef.current = null;
       retargetUnreadableYesRef.current = null;
@@ -616,15 +618,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const changed = tags.find((tag) => !isSameSendTarget(tag.original, current));
     if (!stored.known) {
       if (unreadableYes) return false;
-      setRetargetAsk({ original: changed?.original ?? null, current, confirmation: null, target: sendTargetKeyRef.current });
+      setRetargetAsk({ original: changed?.original ?? null, current, confirmation: null, target: sendTargetKey });
       return true;
     }
     if (!changed) return false;
-    const confirmation = `${sendTargetKeyRef.current}\u0000${tags.map((tag) => tag.id).join('\u0000')}`;
+    const confirmation = `${sendTargetKey}\u0000${tags.map((tag) => tag.id).join('\u0000')}`;
     if (retargetConfirmedRef.current === confirmation) return false;
-    setRetargetAsk({ original: changed.original, current, confirmation, target: sendTargetKeyRef.current });
+    setRetargetAsk({ original: changed.original, current, confirmation, target: sendTargetKey });
     return true;
-  }, [instanceId, cliToolId, currentRetargetTags]);
+  }, [instanceId, cliToolId, currentRetargetTags, sendTargetKey]);
   /**
    * Issue #4535 r7 (INV-V2b): this composer sent the draft `key` — the tags it held when it sent
    * (`ids`) go, from the store and, while it still shows that draft, from its state. Nothing else
@@ -933,7 +935,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // Issue #4607 r3: and it holds only while the To is the one it answered.
     const yesTarget = retargetUnreadableYesRef.current;
     retargetUnreadableYesRef.current = null;
-    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKeyRef.current;
+    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKey;
     if (isComposing || (!message.trim() && !attachedImage) || sending) {
       return;
     }
@@ -1081,7 +1083,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -1094,7 +1096,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // r3: for the To it answered only (the To may have changed while the brief was up).
     const yesTarget = retargetUnreadableYesRef.current;
     retargetUnreadableYesRef.current = null;
-    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKeyRef.current;
+    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKey;
     const asked = briefAsk;
     if (!asked || briefSending) return;
     // Issue #4345 1c 再指示 1: see the plain send (nothing is sent, the draft and the question stay).
@@ -1175,7 +1177,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
 
   /** Issue #4503: the person confirmed sending the same draft again — a new send. */
   const confirmResend = useCallback(() => {
@@ -1193,14 +1195,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const confirmRetarget = useCallback(() => {
     const asked = retargetAsk;
     setRetargetAsk(null);
-    if (asked && asked.target !== sendTargetKeyRef.current) {
+    if (asked && asked.target !== sendTargetKey) {
       holdsRetargetedSend(false);
       return;
     }
     if (asked?.confirmation) retargetConfirmedRef.current = asked.confirmation;
     else if (asked) retargetUnreadableYesRef.current = asked.target;
     void submitMessage();
-  }, [submitMessage, retargetAsk, holdsRetargetedSend]);
+  }, [submitMessage, retargetAsk, holdsRetargetedSend, sendTargetKey]);
   /** Issue #4535: no — nothing is sent, the draft stays. */
   const cancelRetarget = useCallback(() => {
     setRetargetAsk(null);
