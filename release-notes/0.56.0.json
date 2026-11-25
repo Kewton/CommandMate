@@ -1,0 +1,49 @@
+{
+  "version": "0.56.0",
+  "date": "2026-11-26",
+  "highlight": {
+    "ja": "送信の安全を高めました。届いたか分からない送信は送り直さず、途中で宛先が替わった送信は止めて知らせ、画面からも確認なしに替わった宛先へ送らないようにしました。ブラウザーの保存が失敗する場合など、一部の道はまだこの確かめを保証しません。",
+    "en": "Sending is safer: a send whose delivery is unclear is not resent, a send whose destination changed midway is stopped and reported, and the screen no longer sends to a changed destination without asking. Some paths, such as when browser storage fails, are not yet covered."
+  },
+  "added": [
+    {
+      "ja": "Claude の /claude-approvals・/ship・/steward・/whiteboard と Codex の /rc をスラッシュコマンドの一覧に追加しました。",
+      "en": "Added Claude's /claude-approvals, /ship, /steward and /whiteboard and Codex's /rc to the slash command list."
+    },
+    {
+      "ja": "mem の決定に期限切れの印が付き、直近 24 時間に閉じた決定は掃除で消えないようになりました。",
+      "en": "Decisions in mem now show when they have expired, and decisions closed in the last 24 hours are no longer removed by a purge."
+    }
+  ],
+  "improved": [],
+  "fixed": [
+    {
+      "ja": "送信の途中で宛先が替わったとき、替わった先への入力を止めて知らせるようにしました。",
+      "en": "If the destination changes in the middle of a send, input to the new destination now stops and you are told."
+    },
+    {
+      "ja": "OpenCode へ届いたか分からない送信のあとに、同じ依頼を二重に送ることがある問題を直しました。",
+      "en": "Fixed a send to OpenCode whose delivery was unclear sometimes delivering the same request twice."
+    },
+    {
+      "ja": "届いたか分からない送信を未送信と読み、relay・メモ・Auto-Yes の設定を片付けてしまう問題を直しました。",
+      "en": "Fixed a send whose delivery was unclear being read as not sent, which cleared its relay, note and Auto-Yes settings."
+    },
+    {
+      "ja": "宛先が替わって止まった本文を、ほかの入力欄や別のタブから確認なしに 1 押しで替わった宛先へ送る問題を直しました。",
+      "en": "Fixed text stopped by a destination change being sent to the new destination with one press and no confirmation from another input box or tab."
+    },
+    {
+      "ja": "日次の確認（agent-health）で、動いている監督役のロックを別の監督役が外すことがある問題を直しました。",
+      "en": "Fixed the daily agent-health check sometimes letting a second supervisor take a lock that a running supervisor still held."
+    },
+    {
+      "ja": "ロックの解放で読み取りが一度失敗すると、次の重い検証が待ち切りになる問題を直しました。",
+      "en": "Fixed a single failed read during lock release leaving the next heavy verification waiting until it gave up."
+    },
+    {
+      "ja": "検証の待ち行列で、次に待つ検証のロックや順番札を誤って外すことがある問題を直しました（まれな条件では残ります）。",
+      "en": "Fixed verification queuing sometimes removing the lock or queue ticket of the next waiting run (a rare case remains)."
+    }
+  ]
+}
