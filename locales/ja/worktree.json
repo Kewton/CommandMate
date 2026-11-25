@@ -22,7 +22,9 @@
     "showSlashCommands": "スラッシュコマンドを表示",
     "attachImage": "画像を添付",
     "sendMessage": "メッセージを送信",
-    "resizeHandle": "入力欄の高さを変更します。上下の矢印キーで調整し、ダブルクリックで自動の高さに戻します。"
+    "resizeHandle": "入力欄の高さを変更します。上下の矢印キーで調整し、ダブルクリックで自動の高さに戻します。",
+    "previousDraftNotSaved": "前の下書きを保存できませんでした",
+    "draftUnreadable": "下書きを読めませんでした"
   },
   "interrupt": {
     "stopProcessing": "処理を中断"
@@ -91,7 +93,8 @@
       "retargetConfirm": "この本文は {original} へ送る途中で止まったものです。宛先が {current} になっています。{current} へ送りますか？",
       "retargetConfirmYes": "送る",
       "retargetConfirmNo": "やめる",
-      "retargetConfirmUnreadable": "この本文が別の宛先へ送る途中で止まったものかどうか、確かめられませんでした（宛先の確認を読めません）。{current} へ送りますか？"
+      "retargetConfirmUnreadable": "この本文が別の宛先へ送る途中で止まったものかどうか、確かめられませんでした（宛先の確認を読めません）。{current} へ送りますか？",
+      "retargetUnstored": "宛先の確認を保存できません。ほかのタブ・再読み込みの後は確認なしに送られることがあります"
     },
     "retrySending": "メッセージを再送信",
     "discard": "破棄",

@@ -12,7 +12,6 @@ import { readSendRoleRefusal, sendRoleRefusalMessageKey } from '@/components/wor
 import {
   SEND_TARGET_CHANGED_KEYS,
   describeSendTarget,
-  isSameSendTarget,
   readSendTargetChanged,
   sendTargetChangedReasonKey,
 } from '@/components/worktree/send-refusal-notice';
@@ -49,22 +48,26 @@ import { getSlashCommandTrigger } from '@/lib/slash-command-format';
 import type { ShowToast } from '@/types/markdown-editor';
 import { AntigravityUsageNotice } from '@/components/worktree/antigravity-usage-notice';
 import { useAntigravityUsageNotice } from '@/hooks/useAntigravityUsageNotice';
+import { useToast } from '@/components/common/Toast';
 import {
   DRAFT_STORAGE_KEY_PREFIX,
   getInstanceDraftKey,
   getSplitDraftKey,
   subscribeDraftAppend,
+  decideRetarget,
   getRetargetTagKey,
   mergeRetargetTags,
   newRetargetTag,
-  readRetargetTagState,
+  readRetargetStore,
   readRetargetTags,
+  readRetargetUnstorable,
   releaseRetargetTags,
   subscribeRetargetedText,
-  writeRetargetTags,
+  writeRetarget,
   type DraftScope,
   type RetargetTag,
   type RetargetTarget,
+  type RetargetWriteResult,
 } from '@/lib/drafts/message-draft';
 
 export interface MessageInputProps {
@@ -232,6 +235,24 @@ const START_PREVIEW_REFRESH_MS = 10_000;
 
 /** Issue #4607: the question before a send when the draft's stored tags cannot be read (`{current}`). */
 const RETARGET_CONFIRM_UNREADABLE_KEY = 'conversation.sendTargetChanged.retargetConfirmUnreadable';
+/** Issue #4604: the toast when not even the "unknown" of a draft's tags could be stored. */
+const RETARGET_UNSTORED_KEY = 'conversation.sendTargetChanged.retargetUnstored';
+/** Issue #4604: the toast when the previous draft's waiting save could not be written at a switch. */
+const PREVIOUS_DRAFT_NOT_SAVED_KEY = 'composer.previousDraftNotSaved';
+/** Issue #4604: the notice when the draft could not be read (the composer is left empty). */
+const DRAFT_UNREADABLE_KEY = 'composer.draftUnreadable';
+
+/**
+ * Issue #4604: a send's check passed — the generations of "unknown" its question saw (the yes covers
+ * only those; null when it was not asked). `null` itself: the check asked (nothing is sent).
+ */
+type RetargetPass = { seen: string[] | null } | null;
+
+/** Issue #4604: a one-send yes to a draft whose tags are not known — its To and what its question saw. */
+interface RetargetUnknownYes {
+  target: string;
+  seen: string[];
+}
 
 /** The preview read, cut at `ms` (a read that does not settle in time is a read that failed). */
 function withinPreviewLimit<T>(read: Promise<T | null>, ms: number): Promise<T | null> {
@@ -319,15 +340,30 @@ function appendDraftText(draft: string, text: string): string {
   return draft.trim() === '' ? text : `${draft}\n\n${text}`;
 }
 
-/** Write a draft (an empty one removes the key). Best effort — `localStorage` may be unavailable. */
-function writeDraft(key: string, message: string): void {
+/** Issue #4604: whether every tag `held` is in the store of `key` already (as a list or in its "unknown"). */
+function heldTagsAreStored(key: string, held: readonly RetargetTag[]): boolean {
+  const stored = readRetargetStore(key);
+  if (stored.kind !== 'list' && stored.kind !== 'unknown') return false;
+  const ids = new Set(stored.tags.map((tag) => tag.id));
+  return held.every((tag) => ids.has(tag.id));
+}
+
+/**
+ * Write a draft (an empty one removes the key). Best effort — `localStorage` may be unavailable.
+ * Issue #4604: returns whether it was written (a switch says so when the previous draft was not).
+ */
+function writeDraft(key: string, message: string): boolean {
   try {
     if (message) {
       window.localStorage.setItem(key, message);
     } else {
       window.localStorage.removeItem(key);
     }
-  } catch { /* localStorage unavailable */ }
+    return true;
+  } catch {
+    /* localStorage unavailable */
+    return false;
+  }
 }
 
 /**
@@ -371,7 +407,6 @@ function writeSendUnknownMark(draftKey: string, mark: SendUnknownMark | null): v
 export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false }: MessageInputProps) {
   const t = useTranslations('worktree');
   const tc = useTranslations('common');
-  const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
@@ -398,6 +433,30 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4419: the draft on screen now — an awaited send checks it after the wait, so a send's
   // success never clears the draft of an instance the tile switched to meanwhile.
   const draftKeyRef = useRef(draftKey);
+  // Issue #4604 (設計書 §3.4.1, W-1): the text and the key of the draft it is — one state, so a render
+  // never pairs one draft's text with another's key (between the commit of a key change and the
+  // restore, the text is still the previous draft's: it is not this render's, it is not shown, it is
+  // not sent). `message` is this render's draft text.
+  const [draft, setDraft] = useState<{ key: string; text: string }>(() => ({ key: draftKey, text: '' }));
+  const message = draft.key === draftKey ? draft.text : '';
+  /** Set this render's draft text (a function gets the text now, '' while the draft is another's). */
+  const setMessage = useCallback(
+    (next: string | ((prev: string) => string)) =>
+      setDraft((prev) => {
+        const base = prev.key === draftKey ? prev.text : '';
+        return { key: draftKey, text: typeof next === 'function' ? next(base) : next };
+      }),
+    [draftKey],
+  );
+  // Issue #4604: the key the restore read last (a re-run of it for the same key adds nothing typed).
+  const restoredKeyRef = useRef<string | null>(null);
+  const [draftUnreadableKey, setDraftUnreadableKey] = useState<string | null>(null);
+  // Issue #4604: the composer's toasts about its store — the caller's surface, else the app's.
+  const { showToast: appToast } = useToast();
+  const notify = showToast ?? appToast;
+  const notifyRetargetWrite = useCallback((result: RetargetWriteResult) => {
+    if (result === 'unstored') notify(t(RETARGET_UNSTORED_KEY), 'warning');
+  }, [notify, t]);
 
   // Hooks for slash command functionality
   // Issue #4: Pass cliToolId to filter commands by CLI tool
@@ -523,14 +582,16 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4607: `original` null — the draft's stored tags could not be read (no target to name);
   // `confirmation` null — the yes is for one send only (`retargetUnreadableYesRef`).
   // Issue #4607 r3: `target` — the To asked about (`sendTargetKey`); the one-send yes holds that To.
+  // Issue #4604 (案 A'): `seen` — the generations of "unknown" the question saw; its yes covers those.
   const [retargetAsk, setRetargetAsk] = useState<{
     original: RetargetTarget | null;
     current: RetargetTarget;
     confirmation: string | null;
     target: string;
+    seen: string[];
   } | null>(null);
   const retargetConfirmedRef = useRef<string | null>(null);
-  const retargetUnreadableYesRef = useRef<string | null>(null);
+  const retargetUnreadableYesRef = useRef<RetargetUnknownYes | null>(null);
   // Issue #4535 r7 (INV-V2a〜V2c, 設計書 §3.4.1): the tags of the texts the fence handed back into this
   // composer's draft (`key`). Held here — the state is what decides — and next to the draft
   // (`<draftKey>:retarget`), so they move with it (a reload, the tile's instance switch). Only this
@@ -597,10 +658,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setConfirmingResend(true);
     return true;
   }, [setResendConfirmedBoth]);
-  /** Issue #4535 r7: this composer's tags now (none while they are another draft's). */
-  const currentRetargetTags = useCallback((): RetargetTag[] => {
+  /**
+   * Issue #4535 r7: this composer's tags for the draft `key` (none while they are another draft's).
+   * Issue #4604 (W-1): `key` is the key of the text being sent (`draft.key`), never a passive copy.
+   */
+  const currentRetargetTags = useCallback((key: string): RetargetTag[] => {
     const held = retargetTagsRef.current;
-    return held.key === draftKeyRef.current ? held.tags : [];
+    return held.key === key ? held.tags : [];
   }, []);
   /**
    * Issue #4535 r7 (INV-V2c): whether this send must wait for the person's yes — this composer holds a
@@ -611,30 +675,33 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * composer of the same draft, another tab), read at each send. A store that cannot be read asks
    * every time: its yes holds for that one send only (`unreadableYes`, taken by the send's entry).
    */
-  const holdsRetargetedSend = useCallback((unreadableYes: boolean): boolean => {
+  // Issue #4604 (設計書 §3.4.1): the draft `key` is the key of the text sent (`draft.key`); its store is
+  // read in its five shapes and this page's unstorable mark is looked at too ("unknown" asks every
+  // time). Returns what the passing check saw (`RetargetPass`), or null when it asked. The one-send
+  // yes holds only while every "unknown" generation now is one its question saw (案 A').
+  const holdsRetargetedSend = useCallback((unreadableYes: RetargetUnknownYes | null, key: string): RetargetPass => {
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
-    const stored = readRetargetTagState(draftKeyRef.current);
-    const tags = mergeRetargetTags(currentRetargetTags(), stored.tags);
-    const changed = tags.find((tag) => !isSameSendTarget(tag.original, current));
-    if (!stored.known) {
-      if (unreadableYes) return false;
-      setRetargetAsk({ original: changed?.original ?? null, current, confirmation: null, target: sendTargetKey });
-      return true;
+    const decision = decideRetarget(readRetargetStore(key), currentRetargetTags(key), readRetargetUnstorable(key), current);
+    if (!decision.ask) return { seen: null };
+    if (decision.unknown) {
+      if (unreadableYes && decision.seen.every((generation) => unreadableYes.seen.includes(generation))) return { seen: decision.seen };
+      setRetargetAsk({ original: decision.original, current, confirmation: null, target: sendTargetKey, seen: decision.seen });
+      return null;
     }
-    if (!changed) return false;
-    const confirmation = `${sendTargetKey}\u0000${tags.map((tag) => tag.id).join('\u0000')}`;
-    if (retargetConfirmedRef.current === confirmation) return false;
-    setRetargetAsk({ original: changed.original, current, confirmation, target: sendTargetKey });
-    return true;
+    const confirmation = `${sendTargetKey}\u0000${decision.ids.join('\u0000')}`;
+    if (retargetConfirmedRef.current === confirmation) return { seen: [] };
+    setRetargetAsk({ original: decision.original, current, confirmation, target: sendTargetKey, seen: [] });
+    return null;
   }, [instanceId, cliToolId, currentRetargetTags, sendTargetKey]);
   /**
    * Issue #4535 r7 (INV-V2b): this composer sent the draft `key` — the tags it held when it sent
    * (`ids`) go, from the store and, while it still shows that draft, from its state. Nothing else
    * lets a tag go.
    */
-  const releaseSentTags = useCallback((key: string, ids: readonly string[]) => {
-    if (ids.length === 0) return;
-    releaseRetargetTags(key, ids);
+  // Issue #4604 (N-7・N-11): with the generations its question saw (`seen`); called with no ids too.
+  const releaseSentTags = useCallback((key: string, ids: readonly string[], seen: readonly string[] | null) => {
+    if (ids.length === 0 && (seen === null || seen.length === 0)) return;
+    releaseRetargetTags(key, ids, seen);
     const held = retargetTagsRef.current;
     if (held.key === key) {
       const gone = new Set(ids);
@@ -645,8 +712,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const keepRetargetTag = useCallback((key: string, tag: RetargetTag) => {
     const held = retargetTagsRef.current;
     if (held.key === key) retargetTagsRef.current = { key, tags: mergeRetargetTags(held.tags, [tag]) };
-    writeRetargetTags(key, mergeRetargetTags(readRetargetTags(key), [tag]));
-  }, []);
+    // Issue #4604 (a P2-2・V2-A): through the one road — what cannot be kept as a list is kept "unknown".
+    notifyRetargetWrite(writeRetarget(key, { kind: 'add', tags: [tag] }));
+  }, [notifyRetargetWrite]);
   /**
    * Issue #4535 r5 (review H1, 段 2 §3.2), r7 (INV-V2a): the awaited road's answer from the send fence.
    * The text stays in the draft (it never left it); for `not_sent` with its original target named
@@ -725,31 +793,44 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #728: also runs the legacy-key migration for splitIndex=0 (split scope only).
   useEffect(() => {
     draftKeyRef.current = draftKey;
-    // Issue #4419: the tile switched instance with a save still waiting — write it under the key it
-    // was typed for. Instance scope only: the worktree screen's split scope drops it as before, and
-    // an unmount writes nothing on either.
     const pendingSave = pendingDraftSaveRef.current;
     pendingDraftSaveRef.current = null;
-    if (draftScope === 'instance' && pendingSave && pendingSave.key !== draftKey) {
-      writeDraft(pendingSave.key, pendingSave.message);
+    // Issue #4535 r7: the draft's tags come with it. The ones held for the draft shown before stay
+    // stored with that draft (written back, should another tab have taken them from the store).
+    // Issue #4604 (INV-S1): the marks first, then the text — through the one road (an unreadable
+    // store, or one that cannot take them, is left "unknown").
+    const heldTags = retargetTagsRef.current;
+    if (heldTags.key !== draftKey && heldTags.key !== '' && heldTags.tags.length > 0) {
+      notifyRetargetWrite(writeRetarget(heldTags.key, { kind: 'writeBack', tags: heldTags.tags }));
     }
+    // Issue #4419: the tile switched instance with a save still waiting — write it under the key it
+    // was typed for. Instance scope only: the worktree screen's split scope drops it as before, and
+    // an unmount writes nothing on either. Issue #4604: a write that fails says so (the text is gone).
+    if (draftScope === 'instance' && pendingSave && pendingSave.key !== draftKey) {
+      if (!writeDraft(pendingSave.key, pendingSave.message)) notify(t(PREVIOUS_DRAFT_NOT_SAVED_KEY), 'warning');
+    }
+    let saved: string | null = null;
+    let unreadable = false;
     try {
       if (draftScope === 'split' && splitIndex === 0) {
         migrateLegacyDraftKey(worktreeId);
       }
-      const saved = window.localStorage.getItem(draftKey);
-      if (saved) {
-        setMessage(saved);
-      } else {
-        setMessage('');
-      }
-    } catch { /* localStorage unavailable */ }
-    // Issue #4535 r7: the draft's tags come with it. The ones held for the draft shown before stay
-    // stored with that draft (written back, should another tab have taken them from the store).
-    const heldTags = retargetTagsRef.current;
-    if (heldTags.key !== draftKey && heldTags.key !== '' && heldTags.tags.length > 0) {
-      writeRetargetTags(heldTags.key, mergeRetargetTags(readRetargetTags(heldTags.key), heldTags.tags));
+      saved = window.localStorage.getItem(draftKey);
+    } catch {
+      /* localStorage unavailable */
+      unreadable = true;
     }
+    // Issue #4604 (4 回目・5 回目, N-6): the text is this key's — what is stored (nothing when it cannot
+    // be read: the previous draft's text is never left under this key), and after it what was typed
+    // for this key between the commit of the switch and this effect.
+    const switched = restoredKeyRef.current !== draftKey;
+    restoredKeyRef.current = draftKey;
+    setDraft((prev) => {
+      const typed = switched && prev.key === draftKey ? prev.text : '';
+      const base = saved ?? '';
+      return { key: draftKey, text: typed ? appendDraftText(base, typed) : base };
+    });
+    setDraftUnreadableKey(unreadable ? draftKey : null);
     retargetTagsRef.current = {
       key: draftKey,
       tags: heldTags.key === draftKey ? mergeRetargetTags(heldTags.tags, readRetargetTags(draftKey)) : readRetargetTags(draftKey),
@@ -762,6 +843,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
       draftSaveTimerRef.current = null;
     };
+  // `notify` / `notifyRetargetWrite` are read at the switch only (a new toast surface is not a switch).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey, draftScope, worktreeId, splitIndex, setResendConfirmedBoth]);
 
   // Issue #4419: text the `/sessions` tile put back into this key's stored draft (a 409 for an
@@ -777,7 +860,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         if (pendingSave && pendingSave.key === draftKey) {
           pendingDraftSaveRef.current = { key: draftKey, message: appendDraftText(pendingSave.message, text) };
         }
-        setMessage((prev) => appendDraftText(prev, text));
+        // Issue #4604: into this key's text only (a text of another key is not touched).
+        setDraft((prev) => (prev.key === draftKey ? { key: draftKey, text: appendDraftText(prev.text, text) } : prev));
       }),
     [draftKey],
   );
@@ -794,7 +878,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         if (pendingSave && pendingSave.key === draftKey) {
           pendingDraftSaveRef.current = { key: draftKey, message: appendDraftText(pendingSave.message, text) };
         }
-        setMessage((prev) => appendDraftText(prev, text));
+        // Issue #4604: into this key's text only (a text of another key is not touched).
+        setDraft((prev) => (prev.key === draftKey ? { key: draftKey, text: appendDraftText(prev.text, text) } : prev));
       }),
     [draftKey],
   );
@@ -808,46 +893,48 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (event.key !== tagKey && event.key !== null) return;
       const held = retargetTagsRef.current;
       if (held.key !== draftKey || held.tags.length === 0) return;
-      const stored = readRetargetTags(draftKey);
-      const storedIds = new Set(stored.map((tag) => tag.id));
-      if (held.tags.every((tag) => storedIds.has(tag.id))) return;
-      writeRetargetTags(draftKey, mergeRetargetTags(stored, held.tags));
+      // Issue #4604 (N-2・N-10): through the one road — junk or a store that throws is left "unknown".
+      if (heldTagsAreStored(draftKey, held.tags)) return;
+      notifyRetargetWrite(writeRetarget(draftKey, { kind: 'writeBack', tags: held.tags }));
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [draftKey]);
+  }, [draftKey, notifyRetargetWrite]);
 
   // Debounced save of draft message to localStorage (per-split key, Issue #728; per-instance key
   // for the tile, Issue #4419)
+  // Issue #4604 (N-6): the save is the draft's own pair — its key and its text — never this render's
+  // key with another draft's text.
   useEffect(() => {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
-    pendingDraftSaveRef.current = { key: draftKey, message };
+    pendingDraftSaveRef.current = { key: draft.key, message: draft.text };
     draftSaveTimerRef.current = setTimeout(() => {
       // Issue #4419: the ref, not this render's `message` — an append may have updated it since.
       const pendingSave = pendingDraftSaveRef.current;
       pendingDraftSaveRef.current = null;
-      if (pendingSave) writeDraft(pendingSave.key, pendingSave.message);
       // Issue #4535 r7 (INV-V2b): the tags this composer holds are stored with the draft (written back
-      // should another tab have taken them).
+      // should another tab have taken them). Issue #4604 (INV-S1): the marks first, then the text.
       const held = retargetTagsRef.current;
-      if (pendingSave && held.key === pendingSave.key && held.tags.length > 0) {
-        const stored = readRetargetTags(held.key);
-        const storedIds = new Set(stored.map((tag) => tag.id));
-        if (!held.tags.every((tag) => storedIds.has(tag.id))) writeRetargetTags(held.key, mergeRetargetTags(stored, held.tags));
+      if (pendingSave && held.key === pendingSave.key && held.tags.length > 0 && !heldTagsAreStored(held.key, held.tags)) {
+        notifyRetargetWrite(writeRetarget(held.key, { kind: 'writeBack', tags: held.tags }));
       }
+      if (pendingSave) writeDraft(pendingSave.key, pendingSave.message);
     }, 500);
-  }, [message, draftKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
 
   /** The draft was sent: forget it (and any save still waiting, so it is not written back). */
-  const clearStoredDraft = useCallback(() => {
+  // Issue #4604 (INV-S1): returns whether the stored text went (its marks go only after it).
+  const clearStoredDraft = useCallback((): boolean => {
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
     draftSaveTimerRef.current = null;
     pendingDraftSaveRef.current = null;
-    try { window.localStorage.removeItem(draftKey); } catch { /* ignore */ }
+    const removed = writeDraft(draftKey, '');
     // Issue #4503: the draft went — so does its mark (nothing is left to send again).
     writeSendUnknownMark(draftKey, null);
     setUnknownMark(null);
     setResendConfirmedBoth(false);
+    return removed;
   }, [draftKey, setResendConfirmedBoth]);
 
   /**
@@ -856,20 +943,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * draft's stored copy (and the sent image, if still attached) goes — the draft on screen, its
    * state and its waiting save are another instance's. Returns whether the sent draft is still the one on screen.
    */
-  const clearSentDraft = useCallback((sentKey: string, sentImagePath: string | null): boolean => {
+  // Issue #4604 (INV-S1): `removed` — whether the sent draft's stored text went (its marks go after it).
+  const clearSentDraft = useCallback((sentKey: string, sentImagePath: string | null): { onScreen: boolean; removed: boolean } => {
     if (draftKeyRef.current !== sentKey) {
-      try { window.localStorage.removeItem(sentKey); } catch { /* ignore */ }
+      const removed = writeDraft(sentKey, '');
       writeSendUnknownMark(sentKey, null);
       // The attachment is not per instance: the image that went with the send is still attached
       // and would go again with the next Send — take it off (the text on screen stays).
       if (sentImagePath !== null && attachedImagePathRef.current === sentImagePath) resetAfterSend();
-      return false;
+      return { onScreen: false, removed };
     }
-    setMessage('');
+    setDraft((prev) => (prev.key === sentKey ? { key: sentKey, text: '' } : prev));
     setIsFreeInputMode(false);
     resetAfterSend();
-    clearStoredDraft();
-    return true;
+    return { onScreen: true, removed: clearStoredDraft() };
   }, [resetAfterSend, clearStoredDraft]);
 
   /**
@@ -905,7 +992,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return prev + '\n\n' + pendingInsertText;
     });
     onInsertConsumed?.();
-  }, [pendingInsertText, onInsertConsumed]);
+  }, [pendingInsertText, onInsertConsumed, setMessage]);
 
   /**
    * Issue #4385: the sentence of a failed (awaited) send. A 409 the server refused because of the
@@ -935,10 +1022,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // Issue #4607 r3: and it holds only while the To is the one it answered.
     const yesTarget = retargetUnreadableYesRef.current;
     retargetUnreadableYesRef.current = null;
-    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKey;
+    const unreadableYes = yesTarget !== null && yesTarget.target === sendTargetKey ? yesTarget : null;
     if (isComposing || (!message.trim() && !attachedImage) || sending) {
       return;
     }
+    // Issue #4604 (W-1, INV-K1): the text and its key are one state; while it is another draft's
+    // (between the commit of a key change and the restore), nothing is sent from this render.
+    if (draft.key !== draftKey) return;
     // Issue #4227 G-PR6: a send already waiting on its preview takes no second press (Enter or button).
     if (briefCheckingRef.current) return;
     // Issue #3999: the door both the button and a PC's Enter come through.
@@ -952,10 +1042,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // (Enter and the button both come through here; the brief choice is reached only from here).
     if (holdsUnconfirmedResend(message.trim())) return;
     // Issue #4535: a text the send fence handed back, and the To is not its target — ask first.
-    if (holdsRetargetedSend(unreadableYes)) return;
+    const retargetPass = holdsRetargetedSend(unreadableYes, draft.key);
+    if (retargetPass === null) return;
     // Issue #4535 r7 (INV-V2b): the tags this send takes away once it is sent (a tag that comes later
-    // stays).
-    const sentTagIds = currentRetargetTags().map((tag) => tag.id);
+    // stays). Issue #4604 (N-7): and the "unknown" generations its question saw.
+    const sentTagIds = currentRetargetTags(draft.key).map((tag) => tag.id);
+    const sentSeen = retargetPass.seen;
     // Issue #4345 1c 再指示 1: a send of a worktree page starts only while the page's registration
     // (fixed now) may start — not once a 401 was taken (the registry's expiry). Nothing is sent and
     // the draft stays; checked again after the preview's await below. Outside a page: as before.
@@ -1019,7 +1111,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         return;
       }
       if (read.value.show) {
-        retargetUnreadableYesRef.current = unreadableYes ? yesTarget : null;
+        retargetUnreadableYesRef.current = unreadableYes;
         setBriefAsk({ preview: read.value, notice: null });
         return;
       }
@@ -1033,11 +1125,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (onOptimisticSend) {
       setError(null);
       onOptimisticSend(trimmed, options);
-      releaseSentTags(draftKey, sentTagIds);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
-      clearStoredDraft();
+      // Issue #4604 (INV-S1): the text goes first; its marks only once it went.
+      if (clearStoredDraft()) releaseSentTags(draftKey, sentTagIds, sentSeen);
       if (isProcessing) {
         showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       }
@@ -1054,8 +1146,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
-      releaseSentTags(sentKey, sentTagIds);
-      clearSentDraft(sentKey, sentImagePath);
+      // Issue #4604 (INV-S1): the text goes first; its marks only once it went.
+      if (clearSentDraft(sentKey, sentImagePath).removed) releaseSentTags(sentKey, sentTagIds, sentSeen);
       // Issue #806: when the session is busy, the CLI queues this message behind
       // the running task. Surface a toast so the (successful) send doesn't look
       // like a no-op. Idle sessions are unchanged (no toast).
@@ -1083,7 +1175,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
+  }, [isComposing, message, draft.key, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey, setMessage]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -1096,24 +1188,32 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // r3: for the To it answered only (the To may have changed while the brief was up).
     const yesTarget = retargetUnreadableYesRef.current;
     retargetUnreadableYesRef.current = null;
-    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKey;
+    const unreadableYes = yesTarget !== null && yesTarget.target === sendTargetKey ? yesTarget : null;
     const asked = briefAsk;
     if (!asked || briefSending) return;
     // Issue #4345 1c 再指示 1: see the plain send (nothing is sent, the draft and the question stay).
     const operation = beginHandoffPageOperation(handoffOwner);
     if (!operation.mayStart()) return;
+    // Issue #4604 (W-1): see the plain send (another draft's text is not this render's).
+    if (draft.key !== draftKey) return;
     const trimmed = message.trim();
     if (!trimmed && !attachedImage) {
       setBriefAsk(null);
       return;
     }
     // Issue #4503: see the plain send (the question first; nothing is sent).
-    if (holdsUnconfirmedResend(trimmed) || holdsRetargetedSend(unreadableYes)) {
+    if (holdsUnconfirmedResend(trimmed)) {
+      setBriefAsk(null);
+      return;
+    }
+    const retargetPass = holdsRetargetedSend(unreadableYes, draft.key);
+    if (retargetPass === null) {
       setBriefAsk(null);
       return;
     }
     // Issue #4535 r7: see the plain send.
-    const sentTagIds = currentRetargetTags().map((tag) => tag.id);
+    const sentTagIds = currentRetargetTags(draft.key).map((tag) => tag.id);
+    const sentSeen = retargetPass.seen;
     const effectiveCliTool: CLIToolType = cliToolId || 'claude';
     const choiceOptions: SendBriefChoice =
       choice === 'decline'
@@ -1133,9 +1233,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
       const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
-      releaseSentTags(sentKey, sentTagIds);
       // Issue #4419: a switch meanwhile already closed the question (the previewKey change).
-      if (clearSentDraft(sentKey, sentImagePath)) setBriefAsk(null);
+      // Issue #4604 (INV-S1): the text goes first; its marks only once it went.
+      const cleared = clearSentDraft(sentKey, sentImagePath);
+      if (cleared.removed) releaseSentTags(sentKey, sentTagIds, sentSeen);
+      if (cleared.onScreen) setBriefAsk(null);
       if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
       else if (isProcessing) showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       onMessageSent?.(effectiveCliTool, created);
@@ -1177,7 +1279,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
+  }, [briefAsk, briefSending, message, draft.key, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
 
   /** Issue #4503: the person confirmed sending the same draft again — a new send. */
   const confirmResend = useCallback(() => {
@@ -1196,13 +1298,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const asked = retargetAsk;
     setRetargetAsk(null);
     if (asked && asked.target !== sendTargetKey) {
-      holdsRetargetedSend(false);
+      holdsRetargetedSend(null, draft.key);
       return;
     }
     if (asked?.confirmation) retargetConfirmedRef.current = asked.confirmation;
-    else if (asked) retargetUnreadableYesRef.current = asked.target;
+    else if (asked) retargetUnreadableYesRef.current = { target: asked.target, seen: asked.seen };
     void submitMessage();
-  }, [submitMessage, retargetAsk, holdsRetargetedSend, sendTargetKey]);
+  }, [submitMessage, retargetAsk, holdsRetargetedSend, sendTargetKey, draft.key]);
   /** Issue #4535: no — nothing is sent, the draft stays. */
   const cancelRetarget = useCallback(() => {
     setRetargetAsk(null);
@@ -1264,7 +1366,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setMessage(`${getSlashCommandTrigger(command, cliToolId)} `);
     setShowCommandSelector(false);
     textareaRef.current?.focus();
-  }, [cliToolId]);
+  }, [cliToolId, setMessage]);
 
   /**
    * Handle slash command selector cancel
@@ -1293,7 +1395,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setTimeout(() => {
       textareaRef.current?.focus();
     }, 50);
-  }, []);
+  }, [setMessage]);
 
   /**
    * Handle message input change
@@ -1336,7 +1438,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } else {
       setShowCommandSelector(false);
     }
-  }, [isFreeInputMode, cliToolId]);
+  }, [isFreeInputMode, cliToolId, setMessage]);
 
   /**
    * Handle keyboard shortcuts
@@ -1478,6 +1580,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             </div>
           )}
         </div>
+      )}
+
+      {/* Issue #4604: the draft could not be read — the composer is left empty (no other draft's text). */}
+      {draftUnreadableKey === draftKey && (
+        <p data-testid="message-input-draft-unreadable" className="mb-1 text-xs text-muted-foreground">
+          {t(DRAFT_UNREADABLE_KEY)}
+        </p>
       )}
 
       {/* Issue #4535: a text the send fence handed back, and this To is not its target — ask first. */}

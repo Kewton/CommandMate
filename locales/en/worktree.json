@@ -22,7 +22,9 @@
     "showSlashCommands": "Show slash commands",
     "attachImage": "Attach image",
     "sendMessage": "Send message",
-    "resizeHandle": "Resize the message box. Use the up and down arrow keys to adjust; double-click to return to automatic height."
+    "resizeHandle": "Resize the message box. Use the up and down arrow keys to adjust; double-click to return to automatic height.",
+    "previousDraftNotSaved": "The previous draft could not be saved",
+    "draftUnreadable": "The draft could not be read"
   },
   "interrupt": {
     "stopProcessing": "Stop processing"
@@ -91,7 +93,8 @@
       "retargetConfirm": "This text was stopped on its way to {original}. The target is now {current}. Send it to {current}?",
       "retargetConfirmYes": "Send",
       "retargetConfirmNo": "Cancel",
-      "retargetConfirmUnreadable": "Could not check whether this text was stopped on its way to another target (the target check cannot be read). Send it to {current}?"
+      "retargetConfirmUnreadable": "Could not check whether this text was stopped on its way to another target (the target check cannot be read). Send it to {current}?",
+      "retargetUnstored": "The target check could not be saved. Another tab, or this page after a reload, may send without asking"
     },
     "retrySending": "Retry sending message",
     "discard": "Discard",
