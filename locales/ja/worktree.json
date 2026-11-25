@@ -90,7 +90,8 @@
       "unknown": "{reason}。届いたかどうか分かりません。送り直す前に、元の宛先（{target}）の画面を確かめてください。",
       "retargetConfirm": "この本文は {original} へ送る途中で止まったものです。宛先が {current} になっています。{current} へ送りますか？",
       "retargetConfirmYes": "送る",
-      "retargetConfirmNo": "やめる"
+      "retargetConfirmNo": "やめる",
+      "retargetConfirmUnreadable": "この本文が別の宛先へ送る途中で止まったものかどうか、確かめられませんでした（宛先の確認を読めません）。{current} へ送りますか？"
     },
     "retrySending": "メッセージを再送信",
     "discard": "破棄",

@@ -57,6 +57,7 @@ import {
   getRetargetTagKey,
   mergeRetargetTags,
   newRetargetTag,
+  readRetargetTagState,
   readRetargetTags,
   releaseRetargetTags,
   subscribeRetargetedText,
@@ -228,6 +229,9 @@ export interface MessageInputProps {
  * applies to the focus read only.
  */
 const START_PREVIEW_REFRESH_MS = 10_000;
+
+/** Issue #4607: the question before a send when the draft's stored tags cannot be read (`{current}`). */
+const RETARGET_CONFIRM_UNREADABLE_KEY = 'conversation.sendTargetChanged.retargetConfirmUnreadable';
 
 /** The preview read, cut at `ms` (a read that does not settle in time is a read that failed). */
 function withinPreviewLimit<T>(read: Promise<T | null>, ms: number): Promise<T | null> {
@@ -509,8 +513,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4535 (段 2 §3.2, S2-Q5 (b)): this composer holds a text the send fence handed back, and its
   // To is not the target it was going to — the question before it is sent here (`retargetAsk`), and
   // the person's yes for this To and these tags (`retargetConfirmedRef`, this mount only).
-  const [retargetAsk, setRetargetAsk] = useState<{ original: RetargetTarget; current: RetargetTarget } | null>(null);
+  // Issue #4607: `original` null — the draft's stored tags could not be read (no target to name);
+  // `confirmation` null — the yes is for one send only (`retargetUnreadableYesRef`).
+  const [retargetAsk, setRetargetAsk] = useState<{
+    original: RetargetTarget | null;
+    current: RetargetTarget;
+    confirmation: string | null;
+  } | null>(null);
   const retargetConfirmedRef = useRef<string | null>(null);
+  const retargetUnreadableYesRef = useRef(false);
   // Issue #4535 r7 (INV-V2a〜V2c, 設計書 §3.4.1): the tags of the texts the fence handed back into this
   // composer's draft (`key`). Held here — the state is what decides — and next to the draft
   // (`<draftKey>:retarget`), so they move with it (a reload, the tile's instance switch). Only this
@@ -528,6 +539,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // Issue #4535: so was the yes to sending a handed-back text here.
       setRetargetAsk(null);
       retargetConfirmedRef.current = null;
+      retargetUnreadableYesRef.current = false;
       // The target changes (or the composer goes): a send waiting on the old target's preview is void.
       sendAttemptRef.current += 1;
       briefCheckingRef.current = false;
@@ -579,15 +591,24 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * tag whose original target (instance and tool) is not its To. Asks (naming both) and returns true.
    * The draft's text is not looked at: any shape of it, any part deleted, asks the same. A yes holds
    * for this To and these tags; a new tag asks again.
+   * Issue #4607 (INV-V2c'): the tags are this composer's ∪ the ones stored next to the draft (another
+   * composer of the same draft, another tab), read at each send. A store that cannot be read asks
+   * every time: its yes holds for that one send only.
    */
   const holdsRetargetedSend = useCallback((): boolean => {
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
-    const tags = currentRetargetTags();
+    const stored = readRetargetTagState(draftKeyRef.current);
+    const tags = mergeRetargetTags(currentRetargetTags(), stored.tags);
     const changed = tags.find((tag) => !isSameSendTarget(tag.original, current));
+    if (!stored.known) {
+      if (retargetUnreadableYesRef.current) return false;
+      setRetargetAsk({ original: changed?.original ?? null, current, confirmation: null });
+      return true;
+    }
     if (!changed) return false;
     const confirmation = `${previewKeyRef.current}\u0000${tags.map((tag) => tag.id).join('\u0000')}`;
     if (retargetConfirmedRef.current === confirmation) return false;
-    setRetargetAsk({ original: changed.original, current });
+    setRetargetAsk({ original: changed.original, current, confirmation });
     return true;
   }, [instanceId, cliToolId, currentRetargetTags]);
   /**
@@ -910,6 +931,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (holdsUnconfirmedResend(message.trim())) return;
     // Issue #4535: a text the send fence handed back, and the To is not its target — ask first.
     if (holdsRetargetedSend()) return;
+    // Issue #4607: a yes to a store that cannot be read is spent by this send (kept for its brief choice).
+    const unreadableYes = retargetUnreadableYesRef.current;
+    retargetUnreadableYesRef.current = false;
     // Issue #4535 r7 (INV-V2b): the tags this send takes away once it is sent (a tag that comes later
     // stays).
     const sentTagIds = currentRetargetTags().map((tag) => tag.id);
@@ -976,6 +1000,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         return;
       }
       if (read.value.show) {
+        retargetUnreadableYesRef.current = unreadableYes;
         setBriefAsk({ preview: read.value, notice: null });
         return;
       }
@@ -1055,6 +1080,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (!operation.mayStart()) return;
     const trimmed = message.trim();
     if (!trimmed && !attachedImage) {
+      retargetUnreadableYesRef.current = false;
       setBriefAsk(null);
       return;
     }
@@ -1063,6 +1089,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefAsk(null);
       return;
     }
+    // Issue #4607: see the plain send (the yes is spent by this send).
+    retargetUnreadableYesRef.current = false;
     // Issue #4535 r7: see the plain send.
     const sentTagIds = currentRetargetTags().map((tag) => tag.id);
     const effectiveCliTool: CLIToolType = cliToolId || 'claude';
@@ -1140,11 +1168,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setConfirmingResend(false);
   }, []);
   /** Issue #4535: the person said yes — send the handed-back text to this To (a new send). */
+  // Issue #4607: the yes to a store that cannot be read holds for this one send only.
   const confirmRetarget = useCallback(() => {
+    const asked = retargetAsk;
     setRetargetAsk(null);
-    retargetConfirmedRef.current = `${previewKeyRef.current}\u0000${currentRetargetTags().map((tag) => tag.id).join('\u0000')}`;
+    if (asked?.confirmation) retargetConfirmedRef.current = asked.confirmation;
+    else if (asked) retargetUnreadableYesRef.current = true;
     void submitMessage();
-  }, [submitMessage, currentRetargetTags]);
+  }, [submitMessage, retargetAsk]);
   /** Issue #4535: no — nothing is sent, the draft stays. */
   const cancelRetarget = useCallback(() => {
     setRetargetAsk(null);
@@ -1157,6 +1188,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const closeBriefAsk = useCallback(() => {
     if (briefSending) return;
     // Nothing is sent; the draft (text and image) stays in the composer.
+    // Issue #4607: nor is a yes to a store that cannot be read kept for a later send.
+    retargetUnreadableYesRef.current = false;
     setBriefAsk(null);
   }, [briefSending]);
 
@@ -1428,10 +1461,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           className="flex flex-wrap items-center gap-2 rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs leading-5 text-foreground"
         >
           <span>
-            {t(SEND_TARGET_CHANGED_KEYS.retargetConfirm, {
-              original: describeSendTarget(retargetAsk.original),
-              current: describeSendTarget(retargetAsk.current),
-            })}
+            {retargetAsk.original
+              ? t(SEND_TARGET_CHANGED_KEYS.retargetConfirm, {
+                  original: describeSendTarget(retargetAsk.original),
+                  current: describeSendTarget(retargetAsk.current),
+                })
+              : t(RETARGET_CONFIRM_UNREADABLE_KEY, { current: describeSendTarget(retargetAsk.current) })}
           </span>
           <button
             type="button"
