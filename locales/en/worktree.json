@@ -90,7 +90,8 @@
       "unknown": "{reason}. It is not known whether it arrived. Check the screen of {target} before sending it again.",
       "retargetConfirm": "This text was stopped on its way to {original}. The target is now {current}. Send it to {current}?",
       "retargetConfirmYes": "Send",
-      "retargetConfirmNo": "Cancel"
+      "retargetConfirmNo": "Cancel",
+      "retargetConfirmUnreadable": "Could not check whether this text was stopped on its way to another target (the target check cannot be read). Send it to {current}?"
     },
     "retrySending": "Retry sending message",
     "discard": "Discard",

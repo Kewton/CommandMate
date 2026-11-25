@@ -128,6 +128,30 @@ export function readRetargetTags(draftKey: string): RetargetTag[] {
   }
 }
 
+/** Issue #4607: a draft's stored tags, and whether the store could be read at all. */
+export interface RetargetTagState {
+  tags: RetargetTag[];
+  /** False when the store could not be read (it threw, or holds what is not a list of tags). */
+  known: boolean;
+}
+
+/**
+ * Issue #4607 (INV-V2c'): the stored tags for the send's check. Unlike {@link readRetargetTags}
+ * (junk reads as no tags), a store that throws or holds junk — broken JSON, not an array, an element
+ * of another shape — is `known: false`, so the send asks. No key is no tags, known.
+ */
+export function readRetargetTagState(draftKey: string): RetargetTagState {
+  try {
+    const raw = window.localStorage.getItem(getRetargetTagKey(draftKey));
+    if (raw === null) return { tags: [], known: true };
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every(isRetargetTag)) return { tags: [], known: false };
+    return { tags: parsed, known: true };
+  } catch {
+    return { tags: [], known: false };
+  }
+}
+
 /** `a` with the tags of `b` it does not have yet (by id), in order. */
 export function mergeRetargetTags(a: readonly RetargetTag[], b: readonly RetargetTag[]): RetargetTag[] {
   const ids = new Set(a.map((tag) => tag.id));

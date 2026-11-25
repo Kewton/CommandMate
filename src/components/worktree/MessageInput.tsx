@@ -57,6 +57,7 @@ import {
   getRetargetTagKey,
   mergeRetargetTags,
   newRetargetTag,
+  readRetargetTagState,
   readRetargetTags,
   releaseRetargetTags,
   subscribeRetargetedText,
@@ -228,6 +229,9 @@ export interface MessageInputProps {
  * applies to the focus read only.
  */
 const START_PREVIEW_REFRESH_MS = 10_000;
+
+/** Issue #4607: the question before a send when the draft's stored tags cannot be read (`{current}`). */
+const RETARGET_CONFIRM_UNREADABLE_KEY = 'conversation.sendTargetChanged.retargetConfirmUnreadable';
 
 /** The preview read, cut at `ms` (a read that does not settle in time is a read that failed). */
 function withinPreviewLimit<T>(read: Promise<T | null>, ms: number): Promise<T | null> {
@@ -478,6 +482,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const previewSeqRef = useRef(0);
   const previewAdoptedSeqRef = useRef(0);
   const previewKeyRef = useRef(previewKey);
+  // Issue #4607 r3 (INV-V2c''): the To a send goes to — the instance and the tool. `previewKey` has no
+  // tool when there is an instance (the roster read again can change the same instance's tool); a yes
+  // to sending a handed-back text is for this key only.
+  // Issue #4607 r4 (INV-V2c'''): the checks compare this render's key — the same render the POST's
+  // options are built from — never a copy a passive effect writes later (a press between the commit
+  // of a To change and its passive effects saw the old To there and sent to the new one).
+  const sendTargetKey = `${worktreeId}\u0000${instanceId || cliToolId || 'claude'}\u0000${cliToolId || 'claude'}`;
   const mountedRef = useRef(true);
   const sendAttemptRef = useRef(0);
   const briefCheckingRef = useRef(false);
@@ -509,8 +520,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4535 (段 2 §3.2, S2-Q5 (b)): this composer holds a text the send fence handed back, and its
   // To is not the target it was going to — the question before it is sent here (`retargetAsk`), and
   // the person's yes for this To and these tags (`retargetConfirmedRef`, this mount only).
-  const [retargetAsk, setRetargetAsk] = useState<{ original: RetargetTarget; current: RetargetTarget } | null>(null);
+  // Issue #4607: `original` null — the draft's stored tags could not be read (no target to name);
+  // `confirmation` null — the yes is for one send only (`retargetUnreadableYesRef`).
+  // Issue #4607 r3: `target` — the To asked about (`sendTargetKey`); the one-send yes holds that To.
+  const [retargetAsk, setRetargetAsk] = useState<{
+    original: RetargetTarget | null;
+    current: RetargetTarget;
+    confirmation: string | null;
+    target: string;
+  } | null>(null);
   const retargetConfirmedRef = useRef<string | null>(null);
+  const retargetUnreadableYesRef = useRef<string | null>(null);
   // Issue #4535 r7 (INV-V2a〜V2c, 設計書 §3.4.1): the tags of the texts the fence handed back into this
   // composer's draft (`key`). Held here — the state is what decides — and next to the draft
   // (`<draftKey>:retarget`), so they move with it (a reload, the tile's instance switch). Only this
@@ -525,9 +545,6 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // Issue #4503: the mark stays with the draft; a question or a confirmation was for this target.
       setConfirmingResend(false);
       setResendConfirmedBoth(false);
-      // Issue #4535: so was the yes to sending a handed-back text here.
-      setRetargetAsk(null);
-      retargetConfirmedRef.current = null;
       // The target changes (or the composer goes): a send waiting on the old target's preview is void.
       sendAttemptRef.current += 1;
       briefCheckingRef.current = false;
@@ -538,6 +555,17 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefAsk(null);
     };
   }, [previewKey, setResendConfirmedBoth]);
+  useEffect(() => {
+    return () => {
+      // Issue #4535: the yes to sending a handed-back text here was for this To — Issue #4607 r3: the
+      // instance and the tool (the same instance's tool changes without `previewKey`; the brief's
+      // clean-up above stays on `previewKey`). r4: a tidy-up only — each answer holds its To, and the
+      // checks compare it with the render's `sendTargetKey`.
+      setRetargetAsk(null);
+      retargetConfirmedRef.current = null;
+      retargetUnreadableYesRef.current = null;
+    };
+  }, [sendTargetKey]);
   useEffect(() => {
     messageRef.current = message;
   }, [message]);
@@ -579,17 +607,26 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * tag whose original target (instance and tool) is not its To. Asks (naming both) and returns true.
    * The draft's text is not looked at: any shape of it, any part deleted, asks the same. A yes holds
    * for this To and these tags; a new tag asks again.
+   * Issue #4607 (INV-V2c'): the tags are this composer's ∪ the ones stored next to the draft (another
+   * composer of the same draft, another tab), read at each send. A store that cannot be read asks
+   * every time: its yes holds for that one send only (`unreadableYes`, taken by the send's entry).
    */
-  const holdsRetargetedSend = useCallback((): boolean => {
+  const holdsRetargetedSend = useCallback((unreadableYes: boolean): boolean => {
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
-    const tags = currentRetargetTags();
+    const stored = readRetargetTagState(draftKeyRef.current);
+    const tags = mergeRetargetTags(currentRetargetTags(), stored.tags);
     const changed = tags.find((tag) => !isSameSendTarget(tag.original, current));
+    if (!stored.known) {
+      if (unreadableYes) return false;
+      setRetargetAsk({ original: changed?.original ?? null, current, confirmation: null, target: sendTargetKey });
+      return true;
+    }
     if (!changed) return false;
-    const confirmation = `${previewKeyRef.current}\u0000${tags.map((tag) => tag.id).join('\u0000')}`;
+    const confirmation = `${sendTargetKey}\u0000${tags.map((tag) => tag.id).join('\u0000')}`;
     if (retargetConfirmedRef.current === confirmation) return false;
-    setRetargetAsk({ original: changed.original, current });
+    setRetargetAsk({ original: changed.original, current, confirmation, target: sendTargetKey });
     return true;
-  }, [instanceId, cliToolId, currentRetargetTags]);
+  }, [instanceId, cliToolId, currentRetargetTags, sendTargetKey]);
   /**
    * Issue #4535 r7 (INV-V2b): this composer sent the draft `key` — the tags it held when it sent
    * (`ids`) go, from the store and, while it still shows that draft, from its state. Nothing else
@@ -893,6 +930,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * Handle message submission
    */
   const submitMessage = useCallback(async () => {
+    // Issue #4607 r2: a yes to a store that cannot be read is taken by this send's entry — whatever
+    // stops it before the POST, it is not left for a later send (kept only for its brief choice).
+    // Issue #4607 r3: and it holds only while the To is the one it answered.
+    const yesTarget = retargetUnreadableYesRef.current;
+    retargetUnreadableYesRef.current = null;
+    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKey;
     if (isComposing || (!message.trim() && !attachedImage) || sending) {
       return;
     }
@@ -909,7 +952,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // (Enter and the button both come through here; the brief choice is reached only from here).
     if (holdsUnconfirmedResend(message.trim())) return;
     // Issue #4535: a text the send fence handed back, and the To is not its target — ask first.
-    if (holdsRetargetedSend()) return;
+    if (holdsRetargetedSend(unreadableYes)) return;
     // Issue #4535 r7 (INV-V2b): the tags this send takes away once it is sent (a tag that comes later
     // stays).
     const sentTagIds = currentRetargetTags().map((tag) => tag.id);
@@ -976,6 +1019,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
         return;
       }
       if (read.value.show) {
+        retargetUnreadableYesRef.current = unreadableYes ? yesTarget : null;
         setBriefAsk({ preview: read.value, notice: null });
         return;
       }
@@ -1039,7 +1083,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey]);
+  }, [isComposing, message, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -1048,6 +1092,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * again with a fresh preview and the draft as it was. Never sent again on its own.
    */
   const sendWithBriefChoice = useCallback(async (choice: StartBriefChoice) => {
+    // Issue #4607 r2: see the plain send (the yes carried to this choice is taken here, held or not).
+    // r3: for the To it answered only (the To may have changed while the brief was up).
+    const yesTarget = retargetUnreadableYesRef.current;
+    retargetUnreadableYesRef.current = null;
+    const unreadableYes = yesTarget !== null && yesTarget === sendTargetKey;
     const asked = briefAsk;
     if (!asked || briefSending) return;
     // Issue #4345 1c 再指示 1: see the plain send (nothing is sent, the draft and the question stay).
@@ -1059,7 +1108,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return;
     }
     // Issue #4503: see the plain send (the question first; nothing is sent).
-    if (holdsUnconfirmedResend(trimmed) || holdsRetargetedSend()) {
+    if (holdsUnconfirmedResend(trimmed) || holdsRetargetedSend(unreadableYes)) {
       setBriefAsk(null);
       return;
     }
@@ -1128,7 +1177,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey]);
+  }, [briefAsk, briefSending, message, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
 
   /** Issue #4503: the person confirmed sending the same draft again — a new send. */
   const confirmResend = useCallback(() => {
@@ -1140,11 +1189,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setConfirmingResend(false);
   }, []);
   /** Issue #4535: the person said yes — send the handed-back text to this To (a new send). */
+  // Issue #4607: the yes to a store that cannot be read holds for this one send only.
+  // Issue #4607 r3 (INV-V2c''): the yes is to the To the question named — if the To is another now,
+  // nothing is sent and the question is asked again for this To.
   const confirmRetarget = useCallback(() => {
+    const asked = retargetAsk;
     setRetargetAsk(null);
-    retargetConfirmedRef.current = `${previewKeyRef.current}\u0000${currentRetargetTags().map((tag) => tag.id).join('\u0000')}`;
+    if (asked && asked.target !== sendTargetKey) {
+      holdsRetargetedSend(false);
+      return;
+    }
+    if (asked?.confirmation) retargetConfirmedRef.current = asked.confirmation;
+    else if (asked) retargetUnreadableYesRef.current = asked.target;
     void submitMessage();
-  }, [submitMessage, currentRetargetTags]);
+  }, [submitMessage, retargetAsk, holdsRetargetedSend, sendTargetKey]);
   /** Issue #4535: no — nothing is sent, the draft stays. */
   const cancelRetarget = useCallback(() => {
     setRetargetAsk(null);
@@ -1157,6 +1215,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const closeBriefAsk = useCallback(() => {
     if (briefSending) return;
     // Nothing is sent; the draft (text and image) stays in the composer.
+    // Issue #4607: nor is a yes to a store that cannot be read kept for a later send.
+    retargetUnreadableYesRef.current = null;
     setBriefAsk(null);
   }, [briefSending]);
 
@@ -1428,10 +1488,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
           className="flex flex-wrap items-center gap-2 rounded border border-warning-border bg-warning-subtle px-2 py-1 text-xs leading-5 text-foreground"
         >
           <span>
-            {t(SEND_TARGET_CHANGED_KEYS.retargetConfirm, {
-              original: describeSendTarget(retargetAsk.original),
-              current: describeSendTarget(retargetAsk.current),
-            })}
+            {retargetAsk.original
+              ? t(SEND_TARGET_CHANGED_KEYS.retargetConfirm, {
+                  original: describeSendTarget(retargetAsk.original),
+                  current: describeSendTarget(retargetAsk.current),
+                })
+              : t(RETARGET_CONFIRM_UNREADABLE_KEY, { current: describeSendTarget(retargetAsk.current) })}
           </span>
           <button
             type="button"
