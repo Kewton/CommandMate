@@ -140,6 +140,9 @@ async function flush(ms = 10) {
   });
 }
 
+/** Issue #4606: the tile rendered by the entry and the To it shows (to read its roster again). */
+let shown: { view: ReturnType<typeof render>; target: Target } | null = null;
+
 function Tile({ target }: { target: Target }) {
   return (
     <ToastProvider>
@@ -191,6 +194,7 @@ const TILE: Entry = {
     const current: Target = toChanged ? { id: 'claude', tool: 'claude' } : original;
     const texts = shape === 'two' ? [TEXT, TEXT2] : [TEXT];
     const view = render(<Tile target={original} />);
+    shown = { view, target: current };
     await sendAll(texts);
     view.rerender(<Tile target={current} />);
     await flush();
@@ -207,6 +211,7 @@ const DISCARD: Entry = {
     const current: Target = toChanged ? { id: 'agent-1', tool: 'claude' } : original;
     const texts = shape === 'two' ? [TEXT, TEXT2] : [TEXT];
     const view = render(<Tile target={original} />);
+    shown = { view, target: current };
     await sendAll(texts);
     for (let i = 0; i < texts.length; i += 1) await answer(i, 409, PROMPT_WAITING);
     await waitFor(() => expect(screen.getAllByTestId('chat-pending-retry')).toHaveLength(texts.length));
@@ -276,10 +281,23 @@ describe.each([TILE, DISCARD])('[#4535 r6 INV-V2] $name: every shape of the draf
     expect(posts.length).toBeLessThanOrEqual(1);
   });
 
-  it.each<Shape>(['only', 'before'])('(positive control) %s: the To still the original target — Enter sends at once', async (shape) => {
+  // Issue #4606 (O-1, 設計書 §3.6 S-1; 人の決定 #4606 comment 7178016428): the To still the original
+  // target — the tile holds it until its roster is read again (Enter: POST 0, no question); once read
+  // again with the pair still on it, Enter sends to it at once with no question. The roster is read
+  // twice: a read that still has the pair may be one from before the 409 (S-1).
+  it.each<Shape>(['only', 'before'])('(positive control) %s: the To still the original target — held until the roster is read again, then Enter sends at once', async (shape) => {
     await arrange(entry, shape, false);
     pressEnter();
+    await flush(50);
+    expect(posts).toHaveLength(0);
+    expect(composer().queryByTestId('message-input-retarget-confirm')).toBeNull();
+    for (let read = 0; read < 2; read += 1) {
+      shown!.view.rerender(<Tile target={shown!.target} />);
+      await flush();
+    }
+    pressEnter();
     await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ cliToolId: shown!.target.tool, instanceId: shown!.target.id });
     expect(composer().queryByTestId('message-input-retarget-confirm')).toBeNull();
   });
 });
