@@ -593,15 +593,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * for this To and these tags; a new tag asks again.
    * Issue #4607 (INV-V2c'): the tags are this composer's ∪ the ones stored next to the draft (another
    * composer of the same draft, another tab), read at each send. A store that cannot be read asks
-   * every time: its yes holds for that one send only.
+   * every time: its yes holds for that one send only (`unreadableYes`, taken by the send's entry).
    */
-  const holdsRetargetedSend = useCallback((): boolean => {
+  const holdsRetargetedSend = useCallback((unreadableYes: boolean): boolean => {
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
     const stored = readRetargetTagState(draftKeyRef.current);
     const tags = mergeRetargetTags(currentRetargetTags(), stored.tags);
     const changed = tags.find((tag) => !isSameSendTarget(tag.original, current));
     if (!stored.known) {
-      if (retargetUnreadableYesRef.current) return false;
+      if (unreadableYes) return false;
       setRetargetAsk({ original: changed?.original ?? null, current, confirmation: null });
       return true;
     }
@@ -914,6 +914,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * Handle message submission
    */
   const submitMessage = useCallback(async () => {
+    // Issue #4607 r2: a yes to a store that cannot be read is taken by this send's entry — whatever
+    // stops it before the POST, it is not left for a later send (kept only for its brief choice).
+    const unreadableYes = retargetUnreadableYesRef.current;
+    retargetUnreadableYesRef.current = false;
     if (isComposing || (!message.trim() && !attachedImage) || sending) {
       return;
     }
@@ -930,10 +934,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // (Enter and the button both come through here; the brief choice is reached only from here).
     if (holdsUnconfirmedResend(message.trim())) return;
     // Issue #4535: a text the send fence handed back, and the To is not its target — ask first.
-    if (holdsRetargetedSend()) return;
-    // Issue #4607: a yes to a store that cannot be read is spent by this send (kept for its brief choice).
-    const unreadableYes = retargetUnreadableYesRef.current;
-    retargetUnreadableYesRef.current = false;
+    if (holdsRetargetedSend(unreadableYes)) return;
     // Issue #4535 r7 (INV-V2b): the tags this send takes away once it is sent (a tag that comes later
     // stays).
     const sentTagIds = currentRetargetTags().map((tag) => tag.id);
@@ -1073,6 +1074,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * again with a fresh preview and the draft as it was. Never sent again on its own.
    */
   const sendWithBriefChoice = useCallback(async (choice: StartBriefChoice) => {
+    // Issue #4607 r2: see the plain send (the yes carried to this choice is taken here, held or not).
+    const unreadableYes = retargetUnreadableYesRef.current;
+    retargetUnreadableYesRef.current = false;
     const asked = briefAsk;
     if (!asked || briefSending) return;
     // Issue #4345 1c 再指示 1: see the plain send (nothing is sent, the draft and the question stay).
@@ -1080,17 +1084,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (!operation.mayStart()) return;
     const trimmed = message.trim();
     if (!trimmed && !attachedImage) {
-      retargetUnreadableYesRef.current = false;
       setBriefAsk(null);
       return;
     }
     // Issue #4503: see the plain send (the question first; nothing is sent).
-    if (holdsUnconfirmedResend(trimmed) || holdsRetargetedSend()) {
+    if (holdsUnconfirmedResend(trimmed) || holdsRetargetedSend(unreadableYes)) {
       setBriefAsk(null);
       return;
     }
-    // Issue #4607: see the plain send (the yes is spent by this send).
-    retargetUnreadableYesRef.current = false;
     // Issue #4535 r7: see the plain send.
     const sentTagIds = currentRetargetTags().map((tag) => tag.id);
     const effectiveCliTool: CLIToolType = cliToolId || 'claude';
