@@ -13,6 +13,11 @@
  *   the next send asks again (the yes holds for that one send only — through the brief choice too).
  * - T6 (positive control): the store readable with no tag, or a tag for this very To → no question,
  *   POST once.
+ * - r2 (reviews a P2-1, b P2-1〜P2-4・P3-3): the one-send yes to an unreadable store is never left for
+ *   a later send — a stop before the POST (#4503's hold, the brief choice's hold), the brief closed
+ *   (Escape, its close button), the To changed under the brief; the brief choice reads the store
+ *   again; a yes is for the tags that were asked about (a tag that came later asks); the mobile
+ *   [send] button asks the same.
  *
  * @vitest-environment jsdom
  */
@@ -58,7 +63,8 @@ vi.mock('@/hooks/useSlashCommands', () => ({
   })),
 }));
 
-vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
+const mobile = vi.hoisted(() => ({ value: false }));
+vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => mobile.value }));
 
 const WT = 'wt-4607-stored';
 const TEXT = 'hello agent';
@@ -108,6 +114,7 @@ function created() {
 }
 
 beforeEach(() => {
+  mobile.value = false;
   window.localStorage.clear();
   sendMessageMock.mockReset();
   sendMessageMock.mockImplementation(async () => created());
@@ -277,6 +284,204 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
       expect(sendMessageMock).toHaveBeenCalledTimes(1);
       expectSentToCurrent(sendMessageMock.mock.calls[0]);
       expect(screen.queryByTestId('message-input-retarget-confirm')).toBeNull();
+    });
+  });
+  describe('r2 the one-send yes is never left for a later send', () => {
+    const OTHER: Target = { id: 'codex-3', tool: 'codex' };
+    const sendUnknownKey = `${key}:send-unknown`;
+    const previewKey = `${WT}\u0000${CURRENT.id}`;
+
+    /** `getItem` of any draft's tag key throws while `state.unreadable`; every other key as usual. */
+    function switchableTagStore() {
+      const state = { unreadable: true };
+      const real = Storage.prototype.getItem;
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, k: string) {
+        if (state.unreadable && k.endsWith(':retarget')) throw new DOMException('denied', 'SecurityError');
+        return real.call(this, k);
+      });
+      return state;
+    }
+
+    async function askedThenYes() {
+      typeMessage(TEXT);
+      await settle();
+      pressEnter();
+      await screen.findByTestId('message-input-retarget-confirm');
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+    }
+
+    async function expectAsksWithoutPost(posts = 0) {
+      await settle();
+      expect(sendMessageMock).toHaveBeenCalledTimes(posts);
+      expect(screen.getByTestId('message-input-retarget-confirm')).toBeInTheDocument();
+    }
+
+    it('A: a yes held by #4503 before the POST is not spent on another text — Enter POSTs nothing and asks', async () => {
+      switchableTagStore();
+      renderComposer();
+      typeMessage(TEXT);
+      await settle();
+      pressEnter();
+      await screen.findByTestId('message-input-retarget-confirm');
+      // Meanwhile another composer of the same draft marked the same text's send as unknown here.
+      window.localStorage.setItem(sendUnknownKey, JSON.stringify({ text: TEXT, target: previewKey }));
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+      await settle();
+      expect(sendMessageMock).not.toHaveBeenCalled();
+
+      typeMessage('another text');
+      await settle();
+      pressEnter();
+      await expectAsksWithoutPost();
+    });
+
+    it('B: a yes carried to the brief, held at its choice by a new tag, is not spent later — Enter POSTs nothing and asks', async () => {
+      const store = switchableTagStore();
+      fetchStartPreviewMock.mockResolvedValue(SHOWN);
+      renderComposer();
+      await askedThenYes();
+      await screen.findByTestId('session-start-brief-decline');
+      // The store reads again, with a tag whose original target is not this To.
+      store.unreadable = false;
+      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-b', ORIGINAL)]));
+      fireEvent.click(screen.getByTestId('session-start-brief-decline'));
+      await expectAsksWithoutPost();
+      expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull();
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-no'));
+      // The store cannot be read again (the tag gone with it).
+      store.unreadable = true;
+      window.localStorage.removeItem(tagKey);
+      fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
+      await settle();
+
+      pressEnter();
+      await expectAsksWithoutPost();
+      expect(getTextarea().value).toBe(TEXT);
+    });
+
+    it.each([
+      ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })],
+      ['its close button', () => fireEvent.click(screen.getByRole('button', { name: '閉じる' }))],
+    ])('b P2-1: a yes to an unreadable store, the brief closed by %s — the next Enter POSTs nothing and asks', async (_n, close) => {
+      switchableTagStore();
+      fetchStartPreviewMock.mockResolvedValue(SHOWN);
+      renderComposer();
+      await askedThenYes();
+      await screen.findByTestId('session-start-brief-dialog');
+      act(() => close());
+      await waitFor(() => expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull());
+      fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
+
+      pressEnter();
+      await expectAsksWithoutPost();
+    });
+
+    it('b P2-2: another tab stores a tag (original ≠ To) while the brief is up — its choice POSTs nothing and asks', async () => {
+      fetchStartPreviewMock.mockResolvedValue(SHOWN);
+      renderComposer();
+      typeMessage(TEXT);
+      await settle();
+      pressEnter();
+      await screen.findByTestId('session-start-brief-decline');
+      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('other-tab-1', ORIGINAL)]));
+      fireEvent.click(screen.getByTestId('session-start-brief-decline'));
+      await expectAsksWithoutPost();
+      expect(screen.getByTestId('message-input-retarget-confirm').textContent).toContain(ORIGINAL.id);
+    });
+
+    it('b P2-3: a tag stored while the question is up — yes asks again (for the new tag); the next yes POSTs once', async () => {
+      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-a', ORIGINAL)]));
+      renderComposer();
+      typeMessage(TEXT);
+      await settle();
+      pressEnter();
+      await screen.findByTestId('message-input-retarget-confirm');
+      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-a', ORIGINAL), tagOf('t-b', OTHER)]));
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+      await expectAsksWithoutPost();
+
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+      expectSentToCurrent(sendMessageMock.mock.calls[0]);
+    });
+
+    it('b P2-3: a tag stored after a yes was sent — the next Enter POSTs nothing and asks', async () => {
+      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-a', ORIGINAL)]));
+      renderComposer();
+      await askedThenYes();
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(getTextarea().value).toBe(''));
+      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-a', ORIGINAL), tagOf('t-b', OTHER)]));
+
+      typeMessage(TEXT);
+      await settle();
+      pressEnter();
+      await expectAsksWithoutPost(1);
+    });
+
+    it('b P2-4: a yes to an unreadable store, then the To changes under the brief — Enter POSTs nothing and asks', async () => {
+      switchableTagStore();
+      fetchStartPreviewMock.mockResolvedValue(SHOWN);
+      const NEXT: Target = { id: 'claude-3', tool: 'claude' };
+      const view = renderComposer();
+      await askedThenYes();
+      await screen.findByTestId('session-start-brief-dialog');
+      view.rerender(
+        <MessageInput worktreeId={WT} cliToolId={NEXT.tool} instanceId={NEXT.id} isSessionRunning onMessageSent={vi.fn()} {...props} />,
+      );
+      await waitFor(() => expect(screen.queryByTestId('session-start-brief-dialog')).toBeNull());
+      fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
+
+      typeMessage(TEXT);
+      await settle();
+      pressEnter();
+      await expectAsksWithoutPost();
+      expect(screen.getByTestId('message-input-retarget-confirm').textContent).toContain(NEXT.id);
+    });
+
+    describe('b P3-3 the mobile [send] button', () => {
+      function pressSend() {
+        fireEvent.click(screen.getByTestId('send-message-button'));
+      }
+
+      it.each([
+        ['T4 another tab stored a tag (original ≠ To)', () => window.localStorage.setItem(tagKey, JSON.stringify([tagOf('other-tab-1', ORIGINAL)]))],
+        ['T5 the stored tags cannot be read', () => switchableTagStore()],
+      ])('%s: the button once POSTs nothing and asks; cancelled POSTs nothing', async (_n, arrange) => {
+        mobile.value = true;
+        arrange();
+        renderComposer();
+        typeMessage(TEXT);
+        await settle();
+        pressSend();
+        await expectAsksWithoutPost();
+        fireEvent.click(screen.getByTestId('message-input-retarget-confirm-no'));
+        await settle();
+        expect(sendMessageMock).not.toHaveBeenCalled();
+        expect(getTextarea().value).toBe(TEXT);
+      });
+
+      it('positive control: after a yes to a tag, the same tag (nothing new stored) — the next send asks nothing, POSTs once', async () => {
+        mobile.value = true;
+        window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-a', ORIGINAL)]));
+        renderComposer();
+        typeMessage(TEXT);
+        await settle();
+        pressSend();
+        await screen.findByTestId('message-input-retarget-confirm');
+        fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+        await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(getTextarea().value).toBe(''));
+
+        typeMessage(TEXT);
+        await settle();
+        pressSend();
+        await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
+        await settle();
+        expect(sendMessageMock).toHaveBeenCalledTimes(2);
+        expectSentToCurrent(sendMessageMock.mock.calls[1]);
+        expect(screen.queryByTestId('message-input-retarget-confirm')).toBeNull();
+      });
     });
   });
 });
