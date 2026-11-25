@@ -267,3 +267,57 @@ describe('[#4607 T3] (positive control) tile 2 sends at once', () => {
     expect(posts[before]).toEqual(expect.objectContaining({ content: TEXT, cliToolId: 'codex', instanceId: 'codex-2' }));
   });
 });
+
+/**
+ * Issue #4607 r3 (INV-V2c''): tile 2 asks (the stored tag's original `codex-2 (codex)`, the To
+ * `codex-2 (claude)`); the roster is read again and the same instance's tool changes once more
+ * (`gemini`) — the instance (and so the tile's draft and brief key) stays. Whether the question is
+ * up, or the yes was given and the brief is up: one press POSTs nothing and asks again naming
+ * `codex-2 (gemini)`; cancelled POSTs nothing; yes POSTs once there.
+ */
+describe('[#4607 r3] tile 2: the same instance\'s tool changes again after the question', () => {
+  const AFTER: Roster = { 'codex-2': 'claude', claude: 'claude' };
+  const AGAIN: Roster = { 'codex-2': 'gemini', claude: 'claude' };
+
+  it.each([['the question up'], ['the yes given, the brief up']])('%s: one press POSTs nothing and asks again naming the To now', async (scene) => {
+    await arrange('tool-changed', AFTER);
+    const before = posts.length;
+    const band = () => scope('B').queryByTestId('message-input-retarget-confirm');
+    if (scene !== 'the question up') previewShown = true;
+    fireEvent.keyDown(ta('B'), { key: 'Enter', code: 'Enter' });
+    await flush(100);
+    expect(posts.length - before).toBe(0);
+    expect(band()?.textContent).toContain('codex-2 (claude)');
+    if (scene !== 'the question up') {
+      fireEvent.click(scope('B').getByTestId('message-input-retarget-confirm-yes'));
+      await screen.findByTestId('session-start-brief-decline');
+    }
+
+    roster = AGAIN;
+    view.rerender(tree());
+    await flush(50);
+    previewShown = false;
+    expect(band()?.textContent ?? '').not.toContain('codex-2 (claude)');
+    const decline = screen.queryByTestId('session-start-brief-decline');
+    if (band()) fireEvent.click(scope('B').getByTestId('message-input-retarget-confirm-yes'));
+    else if (decline) fireEvent.click(decline);
+    await flush(100);
+    expect(posts.length - before).toBe(0);
+    if (!band()) fireEvent.keyDown(ta('B'), { key: 'Enter', code: 'Enter' });
+    await flush(100);
+    expect(posts.length - before).toBe(0);
+    expect(band()?.textContent).toContain('codex-2 (gemini)');
+
+    fireEvent.click(scope('B').getByTestId('message-input-retarget-confirm-no'));
+    await flush(50);
+    expect(posts.length - before).toBe(0);
+    expect(ta('B').value).toBe(TEXT);
+    fireEvent.keyDown(ta('B'), { key: 'Enter', code: 'Enter' });
+    await flush(100);
+    fireEvent.click(scope('B').getByTestId('message-input-retarget-confirm-yes'));
+    await waitFor(() => expect(posts.length - before).toBe(1));
+    await flush(50);
+    expect(posts.length - before).toBe(1);
+    expect(posts[before]).toEqual(expect.objectContaining({ content: TEXT, cliToolId: 'gemini', instanceId: 'codex-2' }));
+  });
+});

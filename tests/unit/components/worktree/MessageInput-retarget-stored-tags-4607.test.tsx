@@ -485,3 +485,168 @@ describe.each(SHAPES)('[#4607] $name', ({ props, key }) => {
     });
   });
 });
+
+/**
+ * Issue #4607 r3 (INV-V2c'', 設計書 §3.4.1): a yes is for the To (instance and tool) it answered. The
+ * To changes — the instance only, the tool only (the roster read again after a 409 `tool-changed`;
+ * `previewKey` stays), or both — while the question is up, or after a yes (a stop before the POST, the
+ * brief up, the preview being read): one press POSTs nothing and asks again, naming the To now.
+ * Cancelled POSTs nothing; yes to the new question POSTs once, to the To now. The store readable (a
+ * tag whose original is neither To) or not (`getItem` throws).
+ *
+ * The tile (instance draft) runs only the tool-only change: its draft key is the instance's, so an
+ * instance change moves it to another draft (no handed-back text there — a different case).
+ */
+describe('[#4607 r3] a yes holds only for the To it answered', () => {
+  const FROM: Target = CURRENT;
+  type Change = 'instance' | 'tool' | 'both';
+  const NEXT: Record<Change, Target> = {
+    instance: { id: 'claude-3', tool: 'claude' },
+    tool: { id: 'claude-2', tool: 'codex' },
+    both: { id: 'claude-3', tool: 'codex' },
+  };
+  type Scene = 'band' | 'stopped' | 'brief' | 'reading';
+  type Store = 'readable' | 'unreadable';
+  const describe_ = (t: Target) => `${t.id} (${t.tool})`;
+
+  const CASES: Array<[string, Shape, Change, Scene, Store]> = [];
+  for (const shape of SHAPES) {
+    const changes: Change[] = shape.props.draftScope === 'instance' ? ['tool'] : ['instance', 'tool', 'both'];
+    for (const change of changes) {
+      for (const scene of ['band', 'stopped', 'brief', 'reading'] as Scene[]) {
+        for (const store of ['readable', 'unreadable'] as Store[]) {
+          CASES.push([`${shape.name} / ${change} / ${scene} / ${store}`, shape, change, scene, store]);
+        }
+      }
+    }
+  }
+
+  function setup(shape: Shape, store: Store) {
+    const tagKey = getRetargetTagKey(shape.key);
+    if (store === 'readable') {
+      window.localStorage.setItem(tagKey, JSON.stringify([tagOf('t-r3', ORIGINAL)]));
+    } else {
+      const real = Storage.prototype.getItem;
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, k: string) {
+        if (k === tagKey) throw new DOMException('denied', 'SecurityError');
+        return real.call(this, k);
+      });
+    }
+    const el = (to: Target) => (
+      <MessageInput worktreeId={WT} cliToolId={to.tool} instanceId={to.id} isSessionRunning onMessageSent={vi.fn()} {...shape.props} />
+    );
+    const view = render(el(FROM));
+    return { switchTo: (to: Target) => view.rerender(el(to)) };
+  }
+
+  const band = () => screen.queryByTestId('message-input-retarget-confirm');
+
+  async function askedFirst() {
+    typeMessage(TEXT);
+    await settle();
+    pressEnter();
+    await settle();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(band()?.textContent).toContain(describe_(FROM));
+  }
+
+  it.each(CASES)('%s: one press POSTs nothing and asks again naming the To now; cancel 0, yes POSTs once there', async (_n, shape, change, scene, store) => {
+    const next = NEXT[change];
+    const { switchTo } = setup(shape, store);
+    if (scene === 'stopped') fetchStartPreviewMock.mockResolvedValue(null);
+    if (scene === 'brief') fetchStartPreviewMock.mockResolvedValue(SHOWN);
+    let release: (v: unknown) => void = () => undefined;
+    if (scene === 'reading') fetchStartPreviewMock.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    await askedFirst();
+
+    if (scene === 'band') {
+      // The question is up for the To before; the To changes.
+      act(() => switchTo(next));
+      await settle();
+      expect(band()?.textContent ?? '').not.toContain(describe_(FROM));
+      if (band()) fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+    } else {
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+      await settle();
+      if (scene === 'brief') await screen.findByTestId('session-start-brief-decline');
+      act(() => switchTo(next));
+      await settle();
+      if (scene === 'reading') {
+        await act(async () => release(SHOWN));
+        await settle();
+      }
+      fetchStartPreviewMock.mockReset();
+      fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
+      const decline = screen.queryByTestId('session-start-brief-decline');
+      if (decline) fireEvent.click(decline);
+      else pressEnter();
+    }
+    await settle();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    if (!band()) pressEnter();
+    await settle();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(band()?.textContent).toContain(describe_(next));
+    expect(band()?.textContent).not.toContain(describe_(FROM));
+
+    fireEvent.click(screen.getByTestId('message-input-retarget-confirm-no'));
+    await settle();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(getTextarea().value).toBe(TEXT);
+
+    pressEnter();
+    await settle();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+    await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    const call = sendMessageMock.mock.calls[0];
+    expect(call[1]).toBe(TEXT);
+    expect(call[2]).toEqual(expect.objectContaining({ cliToolId: next.tool, instanceId: next.id }));
+  });
+
+  describe.each(SHAPES)('(positive control) the To unchanged — $name', (shape) => {
+    it.each(['readable', 'unreadable'] as Store[])('%s: yes, then the brief choice POSTs once, to this To, with the choice', async (store) => {
+      setup(shape, store);
+      fetchStartPreviewMock.mockResolvedValue(SHOWN);
+      await askedFirst();
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+      fireEvent.click(await screen.findByTestId('session-start-brief-decline'));
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+      await settle();
+      expect(sendMessageMock).toHaveBeenCalledTimes(1);
+      const call = sendMessageMock.mock.calls[0];
+      expect(call[0]).toBe(WT);
+      expect(call[1]).toBe(TEXT);
+      expect(call[2]).toEqual(expect.objectContaining({ cliToolId: FROM.tool, instanceId: FROM.id, brief: 'decline' }));
+      expect(band()).toBeNull();
+    });
+
+    it('readable: a yes to a tag kept in the store (V2b) holds for the same To and tag — the next send asks nothing, POST 2', async () => {
+      const { switchTo } = setup(shape, 'unreadable');
+      vi.restoreAllMocks();
+      switchTo(FROM);
+      typeMessage(TEXT);
+      await settle();
+      // Stored after the draft was read: in the store only (this composer's send does not let it go).
+      window.localStorage.setItem(getRetargetTagKey(shape.key), JSON.stringify([tagOf('t-kept', ORIGINAL)]));
+      pressEnter();
+      await settle();
+      expect(band()?.textContent).toContain(describe_(FROM));
+      fireEvent.click(screen.getByTestId('message-input-retarget-confirm-yes'));
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(getTextarea().value).toBe(''));
+      expect(JSON.parse(window.localStorage.getItem(getRetargetTagKey(shape.key)) ?? '[]')).toEqual([tagOf('t-kept', ORIGINAL)]);
+
+      typeMessage(TEXT);
+      await settle();
+      pressEnter();
+      await waitFor(() => expect(sendMessageMock).toHaveBeenCalledTimes(2));
+      await settle();
+      expect(sendMessageMock).toHaveBeenCalledTimes(2);
+      expect(sendMessageMock.mock.calls[1][2]).toEqual(expect.objectContaining({ cliToolId: FROM.tool, instanceId: FROM.id }));
+      expect(band()).toBeNull();
+    });
+  });
+});
