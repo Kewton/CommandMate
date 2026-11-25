@@ -75,6 +75,23 @@
       "artifactFailed": "ロールのファイルを用意できなかったため、セッションを起動せず、本文は送信していません。ロールの設定を確かめてから送り直してください。",
       "other": "ロールの条件を満たさないため、本文は送信していません。ロールの設定を確かめ、必要ならセッションを停止して起動し直してください。"
     },
+    "sendTargetChanged": {
+      "reason": {
+        "worktreeGone": "worktree が無くなりました",
+        "targetGone": "送り先の instance が名簿から外れました",
+        "toolChanged": "送り先のツールが替わりました",
+        "dispatchChanged": "送り先の起動の仕方が替わりました",
+        "unreadable": "送り先を確かめられませんでした",
+        "other": "送り先が送信の途中で替わりました"
+      },
+      "notSent": "{reason}。本文は送っていません（元の宛先: {target}）。",
+      "textReturned": "本文を入力欄に戻しました。宛先が元の宛先と違うあいだは、送る前に確かめます。",
+      "textNotReturned": "宛先の確認を残せなかったため、本文を入力欄に戻せませんでした。",
+      "unknown": "{reason}。届いたかどうか分かりません。送り直す前に、元の宛先（{target}）の画面を確かめてください。",
+      "retargetConfirm": "この本文は {original} へ送る途中で止まったものです。宛先が {current} になっています。{current} へ送りますか？",
+      "retargetConfirmYes": "送る",
+      "retargetConfirmNo": "やめる"
+    },
     "retrySending": "メッセージを再送信",
     "discard": "破棄",
     "discardMessage": "メッセージを破棄",

@@ -12,6 +12,7 @@ import {
 import { sameTarget, type NewTaskTarget } from '@/lib/new-task/recent-targets';
 import { describeTargetState } from '@/lib/new-task/new-task-targets';
 import type { NewTaskSendResult } from '@/lib/new-task/send-new-task';
+import { SEND_TARGET_CHANGED_KEYS, sendTargetChangedReasonKey } from '@/components/worktree/send-refusal-notice';
 import type { Worktree } from '@/types/models';
 import type { AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import { AutoYesAnswerModeOptions } from '@/components/worktree/AutoYesAnswerModeOptions';
@@ -338,21 +339,88 @@ export function AutoYesField({
   );
 }
 
-export function FailureNotice({ failure, agentLabel }: { failure: Failure | null; agentLabel: string }) {
+/** Issue #4535: what the failure notice offers after a send whose outcome is unknown. */
+export interface UnknownSendActions {
+  onOpenTarget: () => void;
+  /** The person pressed send again: the question is up. */
+  confirming: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+export function FailureNotice({
+  failure,
+  agentLabel,
+  unknown,
+}: {
+  failure: Failure | null;
+  agentLabel: string;
+  unknown?: UnknownSendActions;
+}) {
   const t = useTranslations('common');
+  const tw = useTranslations('worktree');
   if (!failure) return null;
+  const isUnknown = failure.kind === 'unknown';
+  const targetChanged = failure.targetChanged;
+  const reason = targetChanged ? tw(sendTargetChangedReasonKey(targetChanged.reason)) : null;
   return (
     <div
       role="alert"
       data-testid="new-task-error"
       data-kind={failure.kind}
-      className="rounded-lg border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
+      className={
+        isUnknown
+          ? 'rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-sm text-foreground'
+          : 'rounded-lg border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-foreground'
+      }
     >
-      <p>{t(`newTask.errors.${failure.kind}`, { agent: agentLabel })}</p>
+      {/* Issue #4535 (C9): may have arrived — never a plain "try again". */}
+      <p>{isUnknown ? t('newTask.unknown.status') : t(`newTask.errors.${failure.kind}`, { agent: agentLabel })}</p>
+      {/* Issue #4535 (段 2 §3.2): the send fence stopped it — why, and the target it was going to. */}
+      {targetChanged && reason !== null && (
+        <p className="mt-1 text-xs" data-testid="new-task-error-reason">
+          {isUnknown
+            ? reason
+            : tw(SEND_TARGET_CHANGED_KEYS.notSent, { reason, target: targetChanged.target ?? agentLabel })}
+        </p>
+      )}
       {failure.detail && (
         <p className="mt-1 break-words text-xs text-muted-foreground" data-testid="new-task-error-detail">
           {failure.detail}
         </p>
+      )}
+      {isUnknown && unknown && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <button
+            type="button"
+            data-testid="new-task-open-target"
+            onClick={unknown.onOpenTarget}
+            className="rounded-sm font-medium underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t('newTask.unknown.openTarget')}
+          </button>
+          {unknown.confirming && (
+            <span data-testid="new-task-resend-confirm" role="alert" className="flex flex-wrap items-center gap-2">
+              <span>{t('newTask.unknown.resendConfirm')}</span>
+              <button
+                type="button"
+                data-testid="new-task-resend-confirm-yes"
+                onClick={unknown.onConfirm}
+                className="rounded-sm font-medium underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {t('newTask.unknown.resendConfirmYes')}
+              </button>
+              <button
+                type="button"
+                data-testid="new-task-resend-confirm-no"
+                onClick={unknown.onCancel}
+                className="rounded-sm text-muted-foreground underline underline-offset-2 hover:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {t('newTask.unknown.resendConfirmNo')}
+              </button>
+            </span>
+          )}
+        </div>
       )}
     </div>
   );

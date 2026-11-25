@@ -17,6 +17,10 @@
  *   unarmed one stays off unless a duration is picked.
  * - Every refusal (409 prompt waiting, 400 model, 503 still starting, any
  *   failure) keeps the dialog and the request open and says why.
+ * - Issue #4535 (C9): a send whose outcome is unknown (the answer says so, or the
+ *   send ran out of time) is never sent again on a plain press: the dialog says
+ *   it may have arrived, offers the destination's screen, and sends the same
+ *   request again only after the person confirmed it.
  * - Sent: the dialog closes, the branch screen opens with the instance
  *   selected (`?instance=`, the path the sessions list uses, Issue #2656), and
  *   a toast names the destination and goes back when clicked.
@@ -82,6 +86,22 @@ type ListState =
 
 type Failure = Extract<NewTaskSendResult, { ok: false }>;
 
+/** Issue #4535: a request whose outcome is unknown, its destination, and the notice that said so. */
+interface UnknownSendRecord {
+  content: string;
+  worktreeId: string;
+  instanceId: string;
+  failure: Failure;
+}
+
+function sameUnknownSend(record: UnknownSendRecord, content: string, target: NewTaskTarget): boolean {
+  return record.content === content && record.worktreeId === target.worktreeId && record.instanceId === target.instanceId;
+}
+
+function findUnknownSend(records: UnknownSendRecord[], content: string, target: NewTaskTarget): UnknownSendRecord | undefined {
+  return records.find((record) => sameUnknownSend(record, content, target));
+}
+
 export function NewTaskDialog() {
   const { requestedTarget, screenTarget, closeNewTask, setCloseLocked } = useNewTask();
   const router = useRouter();
@@ -100,6 +120,13 @@ export function NewTaskDialog() {
   const [autoYesAnswerMode, setAutoYesAnswerMode] = useState<AutoYesAnswerMode>(DEFAULT_AUTO_YES_ANSWER_MODE);
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
+  // Issue #4535: the requests whose outcome is unknown (text and destination, with the notice that
+  // said so). Sending one of them there again asks first; the person's yes is good for one press.
+  // r5 (review opus2 P1-1): one per request and destination, kept through any later failure — a send
+  // of another kind failing does not tell whether the unknown one arrived.
+  const [unknownSends, setUnknownSends] = useState<UnknownSendRecord[]>([]);
+  const [confirmingResend, setConfirmingResend] = useState(false);
+  const resendConfirmedRef = useRef(false);
   const [isMac, setIsMac] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mountedRef = useRef(true);
@@ -216,10 +243,17 @@ export function NewTaskDialog() {
     [recents, worktrees, repositoryOptions],
   );
 
+  // r5 (review opus2 P2-1): read by `selectTarget` — back on the destination of an unknown send with
+  // its text, its notice is back (the question it asks lives there).
+  const contentRef = useRef(content);
+  contentRef.current = content;
+  const unknownSendsRef = useRef(unknownSends);
+  unknownSendsRef.current = unknownSends;
   const selectTarget = useCallback((target: NewTaskTarget) => {
     setWorktreeId(target.worktreeId);
     setInstanceId(target.instanceId);
-    setFailure(null);
+    setFailure(findUnknownSend(unknownSendsRef.current, contentRef.current.trim(), target)?.failure ?? null);
+    setConfirmingResend(false);
   }, []);
 
   const handleRepositoryChange = useCallback(
@@ -247,8 +281,22 @@ export function NewTaskDialog() {
   const canSend = !!targetState && content.trim() !== '' && !sending;
 
   const handleSubmit = useCallback(async () => {
+    // Issue #4535 r5 (review P3): the person's yes is spent by this press, whatever it does.
+    const confirmed = resendConfirmedRef.current;
+    resendConfirmedRef.current = false;
     if (!canSend || !worktree || !targetState) return;
     const target: NewTaskTarget = { worktreeId: worktree.id, instanceId: targetState.instance.id };
+    const request = content.trim();
+    // Issue #4535 (C9, INV-S10): the same request to the same destination as a send whose outcome is
+    // unknown — ask first; nothing is sent until the person says yes. Its notice comes back with the
+    // question (another failure may be on screen since).
+    const unknownRecord = findUnknownSend(unknownSends, request, target);
+    if (unknownRecord && !confirmed) {
+      setFailure(unknownRecord.failure);
+      setConfirmingResend(true);
+      return;
+    }
+    setConfirmingResend(false);
     sendingRef.current = true;
     setCloseLocked(true);
     setSending(true);
@@ -256,7 +304,7 @@ export function NewTaskDialog() {
     const result = await sendNewTask({
       target,
       cliToolId: targetState.instance.cliTool,
-      content: content.trim(),
+      content: request,
       model: modelAvailability?.selectable ? model : undefined,
       autoYesDuration: armedAutoYes ? null : autoYesChoice,
       autoYesAnswerMode,
@@ -279,6 +327,10 @@ export function NewTaskDialog() {
       setAutoYesAnswerMode(DEFAULT_AUTO_YES_ANSWER_MODE);
     }
     if (!result.ok) {
+      if (result.kind === 'unknown') {
+        const record: UnknownSendRecord = { content: request, ...target, failure: result };
+        setUnknownSends((prev) => [...prev.filter((r) => !sameUnknownSend(r, request, target)), record]);
+      }
       setFailure(result);
       setSending(false);
       return;
@@ -297,6 +349,7 @@ export function NewTaskDialog() {
     worktree,
     targetState,
     content,
+    unknownSends,
     modelAvailability,
     model,
     armedAutoYes,
@@ -308,6 +361,26 @@ export function NewTaskDialog() {
     showToast,
     t,
   ]);
+
+  /** Issue #4535: yes — the same request is sent again, once. */
+  const confirmResend = useCallback(() => {
+    resendConfirmedRef.current = true;
+    setConfirmingResend(false);
+    void handleSubmit();
+  }, [handleSubmit]);
+  const cancelResend = useCallback(() => setConfirmingResend(false), []);
+  /** Issue #4535: look at the destination before deciding (the dialog closes, nothing is sent). */
+  // The destination of the unknown send on screen: the one of the request and destination now, else
+  // the latest.
+  const shownUnknown =
+    (worktree && targetState
+      ? findUnknownSend(unknownSends, content.trim(), { worktreeId: worktree.id, instanceId: targetState.instance.id })
+      : undefined) ?? unknownSends[unknownSends.length - 1];
+  const openUnknownTarget = useCallback(() => {
+    if (!shownUnknown || sendingRef.current) return;
+    closeNewTask();
+    router.push(buildSessionRowHref({ worktreeId: shownUnknown.worktreeId, instanceId: shownUnknown.instanceId }));
+  }, [shownUnknown, closeNewTask, router]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -395,7 +468,16 @@ export function NewTaskDialog() {
           </>
         )}
 
-        <FailureNotice failure={failure} agentLabel={agentLabel} />
+        <FailureNotice
+          failure={failure}
+          agentLabel={agentLabel}
+          unknown={{
+            onOpenTarget: openUnknownTarget,
+            confirming: confirmingResend,
+            onConfirm: confirmResend,
+            onCancel: cancelResend,
+          }}
+        />
 
         <div className="flex items-center justify-end gap-2">
           <span className="mr-auto hidden items-center gap-1 text-xs text-muted-foreground sm:flex">

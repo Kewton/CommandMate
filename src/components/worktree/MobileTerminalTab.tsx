@@ -125,6 +125,7 @@ import { useTerminalPanePolling } from '@/hooks/useTerminalPanePolling';
 import { useSplitMessages } from '@/hooks/useSplitMessages';
 import { type OptimisticSendOptions } from '@/hooks/usePendingMessages';
 import { useOptimisticPaneMessages, useDiscardPending } from '@/hooks/useOptimisticPaneMessages';
+import { getSplitDraftKey } from '@/lib/drafts/message-draft';
 import {
   useChatComposerInsert,
   useChatOptimisticSend,
@@ -500,6 +501,9 @@ const MobileChatSurface = memo(function MobileChatSurface({
     onSent: refresh,
     // Issue #4345 1c 再指示 2: a send not sent (the page's gate refused it) goes back to the composer.
     onNotSent: (content) => insertToComposerRef.current?.(content),
+    // Issue #4535 r7 (INV-V2a): a send the fence stopped goes back into the docked composer's draft
+    // (the phone's one composer keeps split 0's) with its tag — the screen's insert carries text only.
+    retargetDraftKey: getSplitDraftKey(worktreeId, 0),
   });
 
   // Publish the send for the docked composer. Released on unmount, i.e. the

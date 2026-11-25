@@ -29,6 +29,10 @@ import type { AutoYesDuration } from '@/config/auto-yes-config';
 import { DEFAULT_AUTO_YES_ANSWER_MODE, type AutoYesAnswerMode } from '@/types/auto-yes-answer-mode';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 import type { NewTaskTarget } from './recent-targets';
+import {
+  readSendTargetChangedBody,
+  type SendTargetChangedReason,
+} from '@/components/worktree/send-refusal-notice';
 
 /**
  * The `code` values the send route answers with. Spelled here rather than
@@ -58,8 +62,28 @@ export type NewTaskFailureKind =
   | 'model_rejected'
   /** Any other 400. */
   | 'invalid'
-  /** 5xx, no reply, a timeout. */
+  /**
+   * A non-503 5xx that says `sendOutcome: 'not_sent'`, any other status, a request refused before it left.
+   * (Issue #4535: a 5xx or a 4xx without it — but the middleware's 401 / 403 — no reply and a
+   * timeout of the send are `unknown`.)
+   */
   | 'failed';
+
+/**
+ * Issue #4535 (C9): the outcome of a send that did not say "sent" and did not say "not sent" either —
+ * `sendOutcome: 'unknown'` (or `'sent'` on a failed answer: typed, then failed), a 5xx or a 4xx that
+ * does not say `not_sent` (r5 H3: but the middleware's 401 / 403), a redirected answer, or the send request itself running out of time / losing its connection. The text
+ * may already be in the agent's session, so the dialog never sends it again on a plain press. Kept apart from
+ * {@link NewTaskFailureKind}, which names the ways a send did not go out.
+ */
+export type NewTaskOutcomeKind = NewTaskFailureKind | 'unknown';
+
+/** Issue #4535 (段 2 §3.2): the send fence (#4534) stopped it — why, and the target it was going to. */
+export interface NewTaskTargetChanged {
+  reason: SendTargetChangedReason;
+  /** The original target's instance, when the answer names it. */
+  target: string | null;
+}
 
 /** Auto-Yes as this call left it armed on the server. */
 export interface ArmedAutoYes {
@@ -69,7 +93,14 @@ export interface ArmedAutoYes {
 
 export type NewTaskSendResult = (
   | { ok: true }
-  | { ok: false; kind: NewTaskFailureKind; status: number; detail: string | null }
+  | {
+      ok: false;
+      kind: NewTaskOutcomeKind;
+      status: number;
+      detail: string | null;
+      /** Issue #4535: present only for the send fence's 409 `SEND_TARGET_CHANGED`. */
+      targetChanged?: NewTaskTargetChanged;
+    }
 ) & {
   /** Present only when this call armed Auto-Yes — whether or not the send then went out. */
   armedAutoYes?: ArmedAutoYes;
@@ -99,22 +130,43 @@ async function readArmedState(response: Response): Promise<ArmedAutoYes | null> 
   return null;
 }
 
-/** Read `{ error, code }` off an error body; anything else reads as empty. */
-async function readErrorBody(response: Response): Promise<{ error: string | null; code: string | null }> {
+interface ErrorBody {
+  error: string | null;
+  code: string | null;
+  /** Issue #4535: the route's `sendOutcome` (`sent` / `not_sent` / `unknown`), when it says one. */
+  sendOutcome: string | null;
+  /** Issue #4535: the body itself, for the readers of a typed refusal. */
+  body: unknown;
+}
+
+/** Read `{ error, code, sendOutcome }` off an error body; anything else reads as empty. */
+async function readErrorBody(response: Response): Promise<ErrorBody> {
+  // Issue #4535 r5 (H3, design §2.2): only a JSON answer says anything — the same guard as the
+  // screen's `fetchApi` (`detectNonJsonBody`: a stub without headers is read as before).
+  const contentType = response.headers ? response.headers.get('content-type') ?? '' : 'application/json';
+  if (!contentType.includes('application/json')) return { error: null, code: null, sendOutcome: null, body: null };
   try {
     const body: unknown = await response.json();
     if (body && typeof body === 'object') {
-      const { error, code } = body as Record<string, unknown>;
+      const { error, code, sendOutcome } = body as Record<string, unknown>;
       return {
         error: typeof error === 'string' && error !== '' ? error : null,
         code: typeof code === 'string' ? code : null,
+        sendOutcome: typeof sendOutcome === 'string' ? sendOutcome : null,
+        body,
       };
     }
   } catch {
     // An HTML page (an expired login) or an empty body.
   }
-  return { error: null, code: null };
+  return { error: null, code: null, sendOutcome: null, body: null };
 }
+
+/**
+ * Issue #4535 r5 (H3, design §2.2 N6, C12): the middleware's typed refusals before any route (401 /
+ * 403) — nothing reached the send route. Spelled here as in `isSendOutcomeUnknown`.
+ */
+const REFUSED_BEFORE_ROUTE_CODES: ReadonlySet<string> = new Set(['AUTH_REQUIRED', 'IP_DENIED']);
 
 /** Classify the send route's answer. */
 export async function interpretSendResponse(
@@ -124,9 +176,29 @@ export async function interpretSendResponse(
   // A 200 that arrived through a redirect is the login page, not the route.
   if (response.ok && !response.redirected) return { ok: true };
   const { status } = response;
-  const { error, code } = await readErrorBody(response);
-  let kind: NewTaskFailureKind;
-  if (status === 409) {
+  const { error, code, sendOutcome, body } = await readErrorBody(response);
+  const fence = readSendTargetChangedBody(status, body);
+  const targetChanged = fence ? { targetChanged: { reason: fence.reason, target: fence.target?.instanceId ?? null } } : {};
+  let kind: NewTaskOutcomeKind;
+  // Issue #4535 (C9, design §2.2 U1): the answer says the text may already be in the session — a
+  // failed answer's `sent` too (typed, then failed), and a fence refusal that does not say `not_sent`.
+  // A 5xx that does not say `not_sent` (a proxy's page, a bare 500) is not the route's proof of a
+  // refusal before any key either (design §3.4, INV-S10).
+  // Issue #4535 r5 (H3, design §2.2 U2・§3.4, C10): a 4xx that does not say `not_sent` is not the
+  // route's either (its own refusals say it) — a proxy's page, a JSON without `code`, an unknown
+  // `code` — except the middleware's typed 401 `AUTH_REQUIRED` / 403 `IP_DENIED` (N6). So is the
+  // login page a redirect led to (the composer's `detectAuthRedirect` 401). As the composer reads
+  // them (`isSendOutcomeUnknown`).
+  if (
+    response.redirected ||
+    sendOutcome === 'unknown' ||
+    sendOutcome === 'sent' ||
+    (fence !== null && fence.sendOutcome !== 'not_sent') ||
+    (status >= 500 && status < 600 && sendOutcome !== 'not_sent') ||
+    (status >= 400 && status < 500 && sendOutcome !== 'not_sent' && !(code !== null && REFUSED_BEFORE_ROUTE_CODES.has(code)))
+  ) {
+    kind = 'unknown';
+  } else if (status === 409) {
     kind = code === SEND_RESPONSE_CODES.promptWaiting ? 'prompt_waiting' : 'conflict';
   } else if (status === 503) {
     kind = code === SEND_RESPONSE_CODES.sessionStarting ? 'starting' : 'start_failed';
@@ -137,7 +209,7 @@ export async function interpretSendResponse(
   } else {
     kind = 'failed';
   }
-  return { ok: false, kind, status: response.ok ? 0 : status, detail: error };
+  return { ok: false, kind, status: response.ok ? 0 : status, detail: error, ...targetChanged };
 }
 
 export interface SendNewTaskInput {
@@ -163,6 +235,20 @@ type Request = (url: string, options?: ApiRequestOptions) => Promise<Response>;
 function transportFailure(error: unknown): NewTaskSendResult {
   const detail = error instanceof ApiError || error instanceof Error ? error.message : null;
   return { ok: false, kind: 'failed', status: 0, detail };
+}
+
+/**
+ * Issue #4535 (C9, design §3.4, INV-S10): the send request (`/send`) did not finish. Its running out
+ * of time (`timeout`, the transport's or {@link withinDeadline}'s — before the headers or while the
+ * body is still being read), being cut off (`aborted`) or losing its connection (`network`) says
+ * nothing about whether the server typed it: `unknown`. Only a refusal before it left (`offline`)
+ * and anything that is not the client's `ApiError` stay `failed` as before.
+ */
+function sendTransportFailure(error: unknown): NewTaskSendResult {
+  const failure = transportFailure(error);
+  if (failure.ok) return failure;
+  const unanswered = error instanceof ApiError && error.kind !== 'offline';
+  return unanswered ? { ...failure, kind: 'unknown' } : failure;
 }
 
 /**
@@ -266,6 +352,6 @@ export async function sendNewTask(
       }, sendTimeoutMs),
     );
   } catch (error) {
-    return withArmed(transportFailure(error));
+    return withArmed(sendTransportFailure(error));
   }
 }

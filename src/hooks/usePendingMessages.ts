@@ -78,11 +78,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, OptimisticSendState, RetryPendingOptions, SendRoleRefusalReason } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
-import {
-  SESSION_STARTING_CODE,
-  SESSION_START_FAILED_CODE,
-  SESSION_START_UNAVAILABLE_CODE,
-} from '@/lib/session/session-start-error';
+import type { SendTargetChangedRefusal } from '@/components/worktree/send-refusal-notice';
 
 /** Default: mark an unconfirmed 'sending' message as errored after this long. */
 export const DEFAULT_PENDING_TIMEOUT_MS = 30_000;
@@ -102,12 +98,12 @@ export const DEFAULT_PENDING_TIMEOUT_MS = 30_000;
  */
 export const DEFAULT_RESEND_GRACE_MS = 250;
 
-/** Issue #4503: the codes of a 5xx the server answers before any key is typed (the session start). */
-const SEND_REFUSED_BEFORE_INPUT_CODES: ReadonlySet<string> = new Set([
-  SESSION_STARTING_CODE,
-  SESSION_START_FAILED_CODE,
-  SESSION_START_UNAVAILABLE_CODE,
-]);
+/**
+ * Issue #4535 (C12): the codes of the middleware's typed refusals before the route (401 / 403) —
+ * nothing reached the send route, so they are not unknown. Spelled here rather than imported:
+ * the middleware's home is server-only.
+ */
+const REFUSED_BEFORE_ROUTE_CODES: ReadonlySet<string> = new Set(['AUTH_REQUIRED', 'IP_DENIED']);
 
 /**
  * Issue #4503: whether a send's rejection leaves its outcome unknown — the screen must not offer a
@@ -118,11 +114,13 @@ const SEND_REFUSED_BEFORE_INPUT_CODES: ReadonlySet<string> = new Set([
  * - `data.sendOutcome === 'unknown'` (the route's answer, `route.ts` `unboundSendOutcome`) → unknown
  * - `data.sendOutcome === 'not_sent'` → not unknown (nothing was typed: retrying is safe)
  * - `kind` `network` / `timeout` / `aborted` (the request may have reached the server) → unknown
- * - an HTTP 5xx without `sendOutcome` (500 included — PM's D4; a proxy's or tunnel's 502 / 504) → unknown
- * - a 5xx whose `code` says the server refused before any key (`SEND_REFUSED_BEFORE_INPUT_CODES`:
- *   the session start's 503s) → not unknown, as before. The route also adds `sendOutcome:
- *   'not_sent'` to these (`recordNotSent` / the sender's `settle`); the code covers an answer without it.
- * - a 4xx, `kind: 'offline'` (refused before it was sent), anything that is not an `ApiError` → not unknown
+ * - an HTTP 5xx without `sendOutcome` (500 included — PM's D4; a proxy's or tunnel's 502 / 504) → unknown.
+ *   Issue #4535 (human decision on C10): the session start's 503s too — the route says `not_sent` on
+ *   its own refusals (`recordNotSent` / the sender's `settle`), so one without it is not the route's
+ * - Issue #4535 (C10): an HTTP 4xx without `sendOutcome` → unknown (a proxy's or tunnel's page: the
+ *   route's own refusals say `not_sent`), except the middleware's typed 401 `AUTH_REQUIRED` / 403
+ *   `IP_DENIED` (C12, {@link REFUSED_BEFORE_ROUTE_CODES}) → not unknown
+ * - `kind: 'offline'` (refused before it was sent), anything that is not an `ApiError` → not unknown
  */
 export function isSendOutcomeUnknown(error: unknown): boolean {
   if (error === null || typeof error !== 'object') return false;
@@ -134,9 +132,10 @@ export function isSendOutcomeUnknown(error: unknown): boolean {
   // `sent` on a failed answer still means the text was typed: never a direct retry.
   if (outcome === 'unknown' || outcome === 'sent') return true;
   if (kind === 'network' || kind === 'timeout' || kind === 'aborted') return true;
+  if (kind !== 'http') return false;
   const code = data !== null && typeof data === 'object' ? (data as { code?: unknown }).code : undefined;
-  if (typeof code === 'string' && SEND_REFUSED_BEFORE_INPUT_CODES.has(code)) return false;
-  return kind === 'http' && status >= 500 && status < 600;
+  if (status >= 400 && status < 500) return !(typeof code === 'string' && REFUSED_BEFORE_ROUTE_CODES.has(code));
+  return status >= 500 && status < 600;
 }
 
 export interface OptimisticSendOptions {
@@ -198,6 +197,13 @@ export interface PendingMessage {
    * `discard()` does not hand it back a second time.
    */
   returnedToComposer?: boolean;
+  /**
+   * Issue #4535 r5 (review H2): an attempt of this message was stopped by the send fence (409
+   * `SEND_TARGET_CHANGED` `not_sent`) — the target it was going to. Its text goes back to a composer
+   * on `discard()` only through {@link UsePendingMessagesOptions.onTargetChangedDiscard} (with the
+   * tag of that target). Kept across a retry: the row still names the same target.
+   */
+  targetChanged?: SendTargetChangedRefusal;
   /**
    * Issue #4503: the clock ran out while this attempt's request is still in flight (with
    * `holdInFlightOnTimeout`). Paired with `status: 'sending'`: the row waits for the answer.
@@ -276,6 +282,24 @@ export interface UsePendingMessagesOptions {
    * composer (then `discard()` does not hand it back again).
    */
   onRoleRefused?: (content: string, reason: SendRoleRefusalReason, info: { firstAttempt: boolean }) => boolean;
+  /**
+   * Issue #4535 (段 2 §3): the send fence's refusal (#4534, 409 `SEND_TARGET_CHANGED`), or null.
+   * `not_sent` (nothing typed) fails the row at once, as a role refusal does, without a role
+   * reason; `unknown` goes on to {@link isOutcomeUnknown} as before. Omitted: not read.
+   */
+  readTargetChanged?: (error: unknown) => SendTargetChangedRefusal | null;
+  /**
+   * Issue #4535: the fence stopped a send — for the screen to say why right away (both outcomes).
+   * For `not_sent`, returns whether it handed the text back to the composer (only a new send's
+   * text, `firstAttempt`); then `discard()` does not hand it back again. `unknown`: never handed back.
+   */
+  onTargetChanged?: (content: string, refusal: SendTargetChangedRefusal, info: { firstAttempt: boolean }) => boolean;
+  /**
+   * Issue #4535 r5 (review H2), r7 (INV-V2a): a fence-refused row not handed back yet is discarded —
+   * hands its text back to the composer with the tag of its original target (returns whether it
+   * did). `discard()` never returns such a text: it goes back by this road or not at all.
+   */
+  onTargetChangedDiscard?: (content: string, refusal: SendTargetChangedRefusal) => boolean;
   /**
    * Issue #4503: whether a rejection leaves the send's outcome unknown (pass
    * {@link isSendOutcomeUnknown}). Such a row lands on `unknown`: never parked, never resent on its
@@ -419,6 +443,9 @@ export function usePendingMessages({
   onNotSent,
   readRoleRefusal,
   onRoleRefused,
+  readTargetChanged,
+  onTargetChanged,
+  onTargetChangedDiscard,
   isOutcomeUnknown,
   holdInFlightOnTimeout = false,
   onAttachmentNotReturned,
@@ -448,6 +475,12 @@ export function usePendingMessages({
   readRoleRefusalRef.current = readRoleRefusal;
   const onRoleRefusedRef = useRef(onRoleRefused);
   onRoleRefusedRef.current = onRoleRefused;
+  const readTargetChangedRef = useRef(readTargetChanged);
+  readTargetChangedRef.current = readTargetChanged;
+  const onTargetChangedRef = useRef(onTargetChanged);
+  onTargetChangedRef.current = onTargetChanged;
+  const onTargetChangedDiscardRef = useRef(onTargetChangedDiscard);
+  onTargetChangedDiscardRef.current = onTargetChangedDiscard;
   const isOutcomeUnknownRef = useRef(isOutcomeUnknown);
   isOutcomeUnknownRef.current = isOutcomeUnknown;
   const holdInFlightOnTimeoutRef = useRef(holdInFlightOnTimeout);
@@ -693,6 +726,37 @@ export function usePendingMessages({
           );
           return;
         }
+        // Issue #4535 (段 2 §3): the send fence stopped it (409 `SEND_TARGET_CHANGED`). The reason
+        // is said either way. `not_sent`: the road of the role refusal above — the row fails now
+        // with its text handed back once (a new send's only); `unknown`: never handed back, the
+        // row goes on to the unknown outcome below.
+        const targetChanged = readTargetChangedRef.current?.(error) ?? null;
+        if (targetChanged !== null) {
+          const firstAttempt = previous === undefined;
+          if (targetChanged.sendOutcome === 'not_sent') {
+            const sameAttempt = (cur: PendingMessage) =>
+              cur.tempId === p.tempId && (cur.status === 'sending' || cur.status === 'error');
+            clearTimer(p.tempId);
+            const handedBack = onTargetChangedRef.current?.(p.content, targetChanged, { firstAttempt }) === true;
+            if (handedBack) noteAttachmentNotReturned(p);
+            setPending((prev) =>
+              prev.map((cur) =>
+                sameAttempt(cur)
+                  ? {
+                      ...cur,
+                      status: 'error',
+                      queued: false,
+                      awaitingResponse: false,
+                      returnedToComposer: cur.returnedToComposer || handedBack,
+                      targetChanged,
+                    }
+                  : cur,
+              ),
+            );
+            return;
+          }
+          onTargetChangedRef.current?.(p.content, targetChanged, { firstAttempt });
+        }
         // Issue #4503: nobody knows whether it arrived — not a failure, and nothing to retry.
         if (isOutcomeUnknownRef.current?.(error)) {
           settleUnknown(p.tempId);
@@ -773,7 +837,15 @@ export function usePendingMessages({
       // Issue #4503: nor is an unknown one's — back in the composer, one Enter would send it again
       // without the confirmation its row asks for.
       if (target?.status === 'unknown') return undefined;
-      return target?.returnedToComposer ? undefined : target?.content;
+      if (!target || target.returnedToComposer) return undefined;
+      // Issue #4535 r5 (review H2), r7 (INV-V2a): a text the fence stopped goes back only with the tag
+      // of the target it was going to (the composer's To may have changed since) — handed back by
+      // that road itself, never returned here as a bare string for a plain insert.
+      if (target.targetChanged) {
+        onTargetChangedDiscardRef.current?.(target.content, target.targetChanged);
+        return undefined;
+      }
+      return target.content;
     },
     [clearTimer],
   );
