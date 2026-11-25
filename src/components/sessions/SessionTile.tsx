@@ -104,7 +104,7 @@
  * @module components/sessions/SessionTile
  */
 
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { History, MessageSquare, TerminalSquare } from 'lucide-react';
@@ -145,9 +145,12 @@ import { buildSessionRowHref } from '@/lib/sidebar-utils';
 import {
   appendToStoredDraft,
   getInstanceDraftKey,
+  moveDraft,
   returnRetargetedText,
   type RetargetedText,
 } from '@/lib/drafts/message-draft';
+import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import type { SendTargetChangedRefusal } from '@/components/worktree/send-refusal-notice';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -428,6 +431,42 @@ export function selectTileInstances(
   return narrowed.length > 0 ? narrowed : [...instances];
 }
 
+/** `useLayoutEffect` warns on the server; see `useIsMobile` for the same pattern. */
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+/**
+ * Issue #4606 (O-1): a target the send fence just said changed (409 `SEND_TARGET_CHANGED`
+ * `not_sent`), held by the tile until its roster is read again — `seenAt` is the `worktree` object of
+ * the render that last counted (the 409's first), `extra` how many other objects still had the pair.
+ */
+interface StaleTargetHold {
+  instanceId: string;
+  cliToolId: string;
+  seenAt: Worktree;
+  extra: number;
+}
+
+/**
+ * Issue #4606 (S-1, N-3): the holds left for the render of `worktree`, decided in the render (never by
+ * `refresh()` settling: a read that fails or is overtaken sets no roster). A hold goes in a render of
+ * another `worktree` object whose roster no longer has the pair; one whose roster still has it (a read
+ * from before the 409 landing late) keeps it, and a second such object lets it go (the server's roster
+ * is then the truth — the fence answers again if the target still changed).
+ */
+export function nextStaleTargetHolds(holds: readonly StaleTargetHold[], worktree: Worktree, roster: readonly AgentInstance[]): StaleTargetHold[] {
+  const kept: StaleTargetHold[] = [];
+  for (const hold of holds) {
+    if (hold.seenAt === worktree) {
+      kept.push(hold);
+      continue;
+    }
+    const onRoster = roster.some((instance) => instance.id === hold.instanceId && instance.cliTool === hold.cliToolId);
+    if (!onRoster || hold.extra >= 1) continue;
+    kept.push({ ...hold, seenAt: worktree, extra: hold.extra + 1 });
+  }
+  return kept;
+}
+
 function SessionTileCard({
   worktree,
   enabled,
@@ -467,6 +506,35 @@ function SessionTileCard({
   // The id `/send`, the poller and the Auto-Yes map resolve an omitted instance
   // to: the primary is named by its tool.
   const resolvedInstanceId = instanceId ?? cliToolId;
+
+  // Issue #4606 (O-1, 設計書 §3.6): the targets the fence just said changed, held until the roster is
+  // read again; while the To is one of them nothing is sent from this tile. Decided in the render, so
+  // the To, the roster and the hold change in the same render (no window).
+  const worktreesCache = useOptionalWorktreesCacheContext();
+  const worktreesCacheRef = useRef(worktreesCache);
+  worktreesCacheRef.current = worktreesCache;
+  const worktreeRef = useRef(worktree);
+  worktreeRef.current = worktree;
+  const [staleHolds, setStaleHolds] = useState<StaleTargetHold[]>([]);
+  const fullRoster = useMemo(() => resolveInstances(worktree), [worktree]);
+  const keptHolds = staleHolds.length === 0 ? staleHolds : nextStaleTargetHolds(staleHolds, worktree, fullRoster);
+  if (keptHolds !== staleHolds && (keptHolds.length !== staleHolds.length || keptHolds.some((hold, i) => hold !== staleHolds[i]))) {
+    setStaleHolds(keptHolds);
+  }
+  const sendHeld = keptHolds.some((hold) => hold.instanceId === resolvedInstanceId && hold.cliToolId === cliToolId);
+  const holdStaleTarget = useCallback((refusal: SendTargetChangedRefusal) => {
+    const target = refusal.target;
+    // The roster's reasons only (the instance went, its tool changed): a roster read again settles them.
+    if (refusal.sendOutcome !== 'not_sent' || target === null) return;
+    if (refusal.reason !== 'target-gone' && refusal.reason !== 'tool-changed') return;
+    setStaleHolds((prev) =>
+      prev.some((hold) => hold.instanceId === target.instanceId && hold.cliToolId === target.cliToolId)
+        ? prev
+        : [...prev, { instanceId: target.instanceId, cliToolId: target.cliToolId, seenAt: worktreeRef.current, extra: 0 }],
+    );
+    // Read the roster again now (no provider — the tile alone: the next roster lets the hold go).
+    void worktreesCacheRef.current?.refresh().catch(() => undefined);
+  }, []);
 
   // Issue #2510: which surface, and — for the terminal — whether History is
   // stacked under it. The History toggle is the TILE scope, never the worktree
@@ -549,6 +617,18 @@ function SessionTileCard({
   const [composerInsert, setComposerInsert] = useState<{ text: string; target: string } | null>(null);
   const shownInstanceRef = useRef(resolvedInstanceId);
   shownInstanceRef.current = resolvedInstanceId;
+  // Issue #4606 (Q2, 設計書 §3.6): the instance shown left the roster and the tile fell back to another —
+  // its draft (text and tags) moves to the fallback's draft (the marks first, the text after what is
+  // there; the composers showing it hear it). Before the composer's restore (a layout effect runs
+  // before the passive ones), so the fallback's draft is read with it. A switch by the person moves
+  // nothing (the instance is still on the roster).
+  const previousShownRef = useRef(resolvedInstanceId);
+  useIsomorphicLayoutEffect(() => {
+    const previous = previousShownRef.current;
+    previousShownRef.current = resolvedInstanceId;
+    if (previous === resolvedInstanceId || fullRoster.some((instance) => instance.id === previous)) return;
+    moveDraft(getInstanceDraftKey(worktree.id, previous), getInstanceDraftKey(worktree.id, resolvedInstanceId));
+  }, [resolvedInstanceId, fullRoster, worktree.id]);
   const insertIntoComposer = useCallback(
     (text: string, target: string = shownInstanceRef.current) => {
       if (target === shownInstanceRef.current) {
@@ -585,6 +665,15 @@ function SessionTileCard({
     useCallback((content: string) => insertIntoComposer(content, refusedTargetRef.current), [insertIntoComposer]),
     returnRetargeted,
   );
+  // Issue #4606: the optimistic road's fence answer holds its original target too.
+  const readTargetChangedAndHold = useCallback(
+    (error: unknown) => {
+      const refusal = roleRefusalNotice.readTargetChanged(error);
+      if (refusal !== null) holdStaleTarget(refusal);
+      return refusal;
+    },
+    [roleRefusalNotice, holdStaleTarget],
+  );
   const readRoleRefusal = useCallback(
     (error: unknown) => {
       refusedTargetRef.current =
@@ -606,7 +695,7 @@ function SessionTileCard({
     connectivity,
     readRoleRefusal,
     onRoleRefused: roleRefusalNotice.onRoleRefused,
-    readTargetChanged: roleRefusalNotice.readTargetChanged,
+    readTargetChanged: readTargetChangedAndHold,
     onTargetChanged: roleRefusalNotice.onTargetChanged,
     onTargetChangedDiscard: roleRefusalNotice.onTargetChangedDiscard,
     // Issue #4503: the worktree screen's wiring (`useOptimisticPaneMessages`) — an unknown outcome
@@ -1009,6 +1098,9 @@ function SessionTileCard({
             maxHeight={composerMaxHeight}
             // Issue #3999: no send into this tile's plan review.
             planReviewActive={planReviewActive}
+            // Issue #4606: the fence's answer holds the target until the roster is read again.
+            onSendTargetChanged={holdStaleTarget}
+            sendBlockedReason={sendHeld ? tWorktree('composer.sendTargetRefreshing') : null}
             autoYesSlot={
               <AutoYesToggle
                 enabled={autoYes.enabled}

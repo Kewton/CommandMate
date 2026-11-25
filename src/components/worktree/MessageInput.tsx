@@ -14,6 +14,7 @@ import {
   describeSendTarget,
   readSendTargetChanged,
   sendTargetChangedReasonKey,
+  type SendTargetChangedRefusal,
 } from '@/components/worktree/send-refusal-notice';
 import { fetchStartPreview, isCommandBody, START_PREVIEW_TIMEOUT_MS } from '@/lib/handoff/screen-client';
 import {
@@ -215,6 +216,18 @@ export interface MessageInputProps {
    * sends as usual.
    */
   planReviewActive?: boolean;
+  /**
+   * Issue #4606: the awaited road's answer from the send fence (409 `SEND_TARGET_CHANGED` `not_sent`
+   * naming its original target) — the `/sessions` tile holds that target until its roster is read
+   * again. Callers without one (the worktree screen: its To follows at once) pass nothing.
+   */
+  onSendTargetChanged?: (refusal: SendTargetChangedRefusal) => void;
+  /**
+   * Issue #4606: while set, nothing is sent from this composer (Enter, [send], the brief's choice) and
+   * the sentence is shown above it; the draft stays. The tile sets it while its To is a target the
+   * fence just said changed, until its roster is read again.
+   */
+  sendBlockedReason?: string | null;
 }
 
 /**
@@ -404,7 +417,7 @@ function writeSendUnknownMark(draftKey: string, mark: SendUnknownMark | null): v
   } catch { /* localStorage unavailable */ }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false, onSendTargetChanged, sendBlockedReason = null }: MessageInputProps) {
   const t = useTranslations('worktree');
   const tc = useTranslations('common');
   const [sending, setSending] = useState(false);
@@ -725,6 +738,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const noteFenceRefusal = useCallback((err: unknown, key: string, text: string) => {
     const refusal = readSendTargetChanged(err);
     if (refusal === null) return;
+    // Issue #4606: the tile holds the original target until its roster is read again.
+    if (refusal.sendOutcome === 'not_sent' && refusal.target !== null) onSendTargetChanged?.(refusal);
     if (refusal.sendOutcome !== 'not_sent') {
       setUnknownReason({ key, text, reason: t(sendTargetChangedReasonKey(refusal.reason)) });
       return;
@@ -732,7 +747,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const original = refusal.target;
     if (original === null || refusal.reason === 'worktree-gone') return;
     keepRetargetTag(key, newRetargetTag({ instanceId: original.instanceId, cliToolId: original.cliToolId }));
-  }, [t, keepRetargetTag]);
+  }, [t, keepRetargetTag, onSendTargetChanged]);
   const markSendUnknown = useCallback((key: string, text: string, target: string) => {
     const mark = { text, target };
     writeSendUnknownMark(key, mark);
@@ -1029,6 +1044,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // Issue #4604 (W-1, INV-K1): the text and its key are one state; while it is another draft's
     // (between the commit of a key change and the restore), nothing is sent from this render.
     if (draft.key !== draftKey) return;
+    // Issue #4606: the To is a target the fence just said changed — nothing is sent until the roster
+    // is read again (the sentence is shown; the draft stays).
+    if (sendBlockedReason) return;
     // Issue #4227 G-PR6: a send already waiting on its preview takes no second press (Enter or button).
     if (briefCheckingRef.current) return;
     // Issue #3999: the door both the button and a PC's Enter come through.
@@ -1175,7 +1193,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, draft.key, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey, setMessage]);
+  }, [isComposing, message, draft.key, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey, setMessage, sendBlockedReason]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -1196,6 +1214,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (!operation.mayStart()) return;
     // Issue #4604 (W-1): see the plain send (another draft's text is not this render's).
     if (draft.key !== draftKey) return;
+    // Issue #4606: see the plain send (the question stays; nothing is sent).
+    if (sendBlockedReason) return;
     const trimmed = message.trim();
     if (!trimmed && !attachedImage) {
       setBriefAsk(null);
@@ -1279,7 +1299,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [briefAsk, briefSending, message, draft.key, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
+  }, [sendBlockedReason, briefAsk, briefSending, message, draft.key, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
 
   /** Issue #4503: the person confirmed sending the same draft again — a new send. */
   const confirmResend = useCallback(() => {
@@ -1580,6 +1600,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
             </div>
           )}
         </div>
+      )}
+
+      {/* Issue #4606: the To is a target the fence just said changed — the roster is read again first. */}
+      {sendBlockedReason && (
+        <p data-testid="message-input-send-blocked" role="status" className="mb-1 text-xs text-muted-foreground">
+          {sendBlockedReason}
+        </p>
       )}
 
       {/* Issue #4604: the draft could not be read — the composer is left empty (no other draft's text). */}
