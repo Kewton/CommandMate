@@ -15,10 +15,14 @@
  *   - an `abort` step after the owner link (the post-list unreadable, a defence failed, an exception): the
  *     actor links `end` into its own generation and starts over (design §4.1)
  *   - reach counts: `GCLIVE` = "the gc removed a non-maximum generation that had no `end`" (not a live
- *     holder's generation); `HOREL` = "a release of a generation that holds child records"; `RELISTK` = "the
- *     re-list read h<k+1> with k ≥ 1"; `DEADREC` = "a recoverer ended a generation with owner records";
+ *     holder's generation); `HOREL` = "a release of a generation that holds child records"; `LSTATH2` = "the
+ *     re-list lstat'd h2 or later (it had judged h1)"; `DEADREC` = "a recoverer ended a generation with owner records";
  *     `HOLDERDIE` = "a holder died while holding"; `ABORT` = "an actor gave up after its owner link"
  *   - the liveness check S4 and its mutants
+ *   - the mutants are one table (MUTANT_TABLE). Every branch on a mutant goes through `pick`, which throws
+ *     when called at a step the mutant's row does not declare, and marks the successor's label with `*`
+ *     when the mutant's side was taken — so a mutant's red must come through its declared step. T1's rows
+ *     and titles, and the design's §7.2・§7.3, are made from the table
  *
  * Steps (one atomic step each; every actor can be delayed at any point for any length and any number of
  * times — the interleaving is exhaustive — can die at any point, and any actor at a0/done can run the gc):
@@ -57,18 +61,19 @@
  * reuse and other hosts (P1), the ticket queue, `fields`, creating `.gen`, parsing the 12-digit names (C5),
  * the by-path realpath name (C7), the multiple defence of §4.1 step 6, the ownerless grace (zero here: the
  * safe side), the child's signal timeout, and a holder that stays alive and never releases (S4 starts from
- * states whose other actors have finished; a stuck live holder is out of its range). A non-holder's release (D5・D6・needs-head) uses only the recovery core
- * (V3-1), so the recoverer's steps j0〜j2 stand for it.
+ * states whose other actors have finished; a stuck live holder is out of its range). A non-holder's release
+ * (D5・D6・needs-head) uses only the recovery core (V3-1), so the recoverer's steps j0〜j2 stand for it.
+ *
+ * What machines do not close (people read them, design §7.5): what each reach count means against the
+ * code that counts it, and a mutant row's "変える所" text against the code at its declared step.
  */
 
-export const SAFETY_MUTANTS = ['gc-max', 'no-postcheck', 'tomb-separate', 'no-relist', 'relist-h1-only', 'release-live-child'] as const;
-export const LIVENESS_MUTANTS = ['c4-stuck', 'no-tomb', 'abort-no-end'] as const;
-export type Mutant = (typeof SAFETY_MUTANTS)[number] | (typeof LIVENESS_MUTANTS)[number];
-const ALL_MUTANTS: readonly string[] = [...SAFETY_MUTANTS, ...LIVENESS_MUTANTS];
+/** The names of the design's §5, in its order. */
+export const NAMES = ['L1', 'L2', 'L3', 'L4', 'L5', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'S1', 'S2', 'S3', 'S4', 'S5'] as const;
 
 /**
- * The design's names (§5) that the model does not check, and the implementation test that does. The rest
- * of §5 (whose "確かめる所" says T1) is named in T1's describe / it titles; T7 compares both with §5.
+ * The design's names (§5) that the model does not check, and the implementation test that does. The
+ * names T1 checks are the generated §7.3 (`t1Checks`); T7 compares both with §5.
  */
 export const NOT_IN_MODEL: Readonly<Record<string, string>> = {
   C2: 'T2: readdir returns the maximum present for the whole scan (APFS)',
@@ -79,7 +84,7 @@ export const NOT_IN_MODEL: Readonly<Record<string, string>> = {
   S5: 'T5: the old writers see the generation holder as the beacon holder',
 };
 
-export const REACH_KEYS = ['REC', 'WD', 'GCLIVE', 'TOMBWIN', 'WRITERWIN', 'HOREL', 'LOOSE', 'RELISTK', 'DEADREC', 'HOLDERDIE', 'ABORT'] as const;
+export const REACH_KEYS = ['REC', 'WD', 'GCLIVE', 'TOMBWIN', 'WRITERWIN', 'HOREL', 'LOOSE', 'LSTATH2', 'DEADREC', 'HOLDERDIE', 'ABORT'] as const;
 export type ReachKey = (typeof REACH_KEYS)[number];
 export type Reach = Record<ReachKey, number>;
 
@@ -105,6 +110,131 @@ export interface SafetyResult {
   violation: string | null;
   trace: string[];
   reach: Reach;
+}
+
+/** The combinations T1 runs (design §7.1). */
+export const COMBOS = {
+  '(i)': { actors: 2, rounds: 2, deaths: 1, gc: true, cap: 3, handoff: true },
+  '(ii)': { actors: 2, rounds: 3, deaths: 0, gc: true, cap: 4, handoff: false },
+  '(iii)': { actors: 2, rounds: 1, deaths: 1, gc: true, cap: 3, handoff: true, abort: true },
+} as const satisfies Record<string, ModelConfig>;
+export type ComboName = keyof typeof COMBOS;
+
+/** The steps a mutant may branch at: the program counters, the gc's choice (`gc-list`) and the abort step. */
+export type StepName = 'a1' | 'a3' | 'h' | 'j0' | 'jk' | 'jr' | 'gc-list' | 'abort';
+
+export interface MutantRow {
+  name: string;
+  /** the invariants it must break */
+  property: 'S1・S2' | 'S4';
+  combo: ComboName;
+  /** where `pick` may be called for it; anywhere else throws */
+  steps: readonly StepName[];
+  /** the lemmas / conditions of §5 it breaks */
+  breaks: readonly string[];
+  /** reach counts its red run must have walked (besides its own `*` step) */
+  reach: readonly ReachKey[];
+  /** what it changes (people read this against the code at `steps`, design §7.5) */
+  change: string;
+  /** an optional control: the same mutant with these settings is green */
+  control?: { config: Partial<ModelConfig>; text: string };
+  /** the red run: safety — the states walked to the first violation and that violation; liveness — the states of its (green) safety walk */
+  expect: { kind: 'safety'; states: number; first: string } | { kind: 'liveness'; safeStates: number };
+}
+
+/** The mutants: the one table T1's rows and titles and the design's §7.2・§7.3 are made from. */
+export const MUTANT_TABLE = [
+  {
+    name: 'gc-max', property: 'S1・S2', combo: '(i)', steps: ['gc-list'], breaks: ['L1', 'C1'], reach: ['GCLIVE'],
+    change: '片付けが最大の世代も選ぶ',
+    expect: { kind: 'safety', states: 5_596, first: 'live holder 1 displaced' },
+  },
+  {
+    name: 'no-postcheck', property: 'S1・S2', combo: '(ii)', steps: ['a3'], breaks: ['L3'], reach: [],
+    change: '取得の後の一覧を外す（`owner` を `link` したらすぐ保有者）',
+    expect: { kind: 'safety', states: 100_958, first: 'live holder 1 displaced' },
+  },
+  {
+    name: 'tomb-separate', property: 'S1・S2', combo: '(i)', steps: ['j0'], breaks: ['L4'], reach: [],
+    change: '墓を `owner` と別の名前にする（主の無い世代に墓を奪い合わずに `end` を書く）',
+    expect: { kind: 'safety', states: 34_622, first: 'live holder 1 displaced' },
+  },
+  {
+    name: 'no-relist', property: 'S1・S2', combo: '(i)', steps: ['jk'], breaks: ['L5', 'C3'], reach: ['DEADREC'],
+    change: '全員死の後の読み直しを外す',
+    expect: { kind: 'safety', states: 21_124, first: 'live holder 1 displaced' },
+  },
+  {
+    name: 'relist-h1-only', property: 'S1・S2', combo: '(i)', steps: ['jr'], breaks: ['C3'], reach: ['LSTATH2'],
+    change: '読み直しがいつも `h1` を見る（判定した最後の `h<k>` の次ではなく）',
+    control: { config: { handoffs: 1 }, text: '引渡しを 1 回までにすると緑' },
+    expect: { kind: 'safety', states: 21_158, first: 'live holder 1 displaced' },
+  },
+  {
+    name: 'release-live-child', property: 'S1・S2', combo: '(i)', steps: ['h'], breaks: [], reach: ['HOREL'],
+    change: '子が走っている間に解放する（§4.2）',
+    expect: { kind: 'safety', states: 18_552, first: 'live holder 1 displaced' },
+  },
+  {
+    name: 'c4-stuck', property: 'S4', combo: '(i)', steps: ['a1', 'j0', 'jr'], breaks: ['C4'], reach: [],
+    change: '消えた世代を永遠に待つ',
+    expect: { kind: 'liveness', safeStates: 4_344_145 },
+  },
+  {
+    name: 'no-tomb', property: 'S4', combo: '(i)', steps: ['j0'], breaks: [], reach: [],
+    change: '主の無い世代に墓を置かず、そこで待ち続ける（§4.4）',
+    expect: { kind: 'liveness', safeStates: 1_833_021 },
+  },
+  {
+    name: 'abort-no-end', property: 'S4', combo: '(iii)', steps: ['abort'], breaks: [], reach: ['ABORT'],
+    change: '`owner` を `link` した後に諦めるとき、自分の世代に `end` を書かない（§4.1）',
+    expect: { kind: 'liveness', safeStates: 281_609 },
+  },
+] as const satisfies readonly MutantRow[];
+
+export type Mutant = (typeof MUTANT_TABLE)[number]['name'];
+const MUTANT_BY_NAME: ReadonlyMap<string, MutantRow> = new Map(MUTANT_TABLE.map((r) => [r.name, r as MutantRow]));
+const ALL_MUTANTS: readonly string[] = MUTANT_TABLE.map((r) => r.name);
+
+/** The names T1 checks by the walk itself, without a mutant (design §7.3). */
+export const WALK_CHECKS: Readonly<Record<string, string>> = {
+  L2: '交互の順の網羅（判定の後に任意に止まる）で S1・S2 の違反 0',
+  C4: '緩めた C4 を既定にした網羅（到達の数 LOOSE）',
+  S1: '(i)・(ii)・(iii) と始まりを変えた探索の網羅で違反 0',
+  S2: '(i)・(ii)・(iii) と始まりを変えた探索の網羅で違反 0',
+  S3: '停止の長さ・回数に上限の無い交互の順の網羅',
+  S4: '(i)・(iii) で、他の者が全員終わった全ての状態から残る 1 者が保有者になる',
+};
+
+/** Each name T1 checks and how (the generated §7.3): the walk's check, then the mutants that break it. */
+export function t1Checks(): Array<{ name: string; how: string }> {
+  return NAMES.flatMap((name) => {
+    const red = MUTANT_TABLE.filter((r) => (r.breaks as readonly string[]).includes(name) || r.property.split('・').includes(name)).map((r) => `\`${r.name}\``);
+    const parts = [WALK_CHECKS[name], red.length > 0 ? `${red.join('・')} が赤（§7.2）` : undefined].filter((x): x is string => x !== undefined);
+    return parts.length === 0 ? [] : [{ name, how: parts.join('。') }];
+  });
+}
+
+const fmt = (n: number): string => n.toLocaleString('en-US');
+
+/** The design's §7.2 table, made from MUTANT_TABLE. */
+export function renderMutantTable(): string {
+  const rows = MUTANT_TABLE.map((r) => {
+    const row = r as MutantRow;
+    const red = row.expect.kind === 'safety'
+      ? `${fmt(row.expect.states)} 状態で最初の違反 \`${row.expect.first}\`。S1 だけ・S2 だけを見ても赤`
+      : `S4 で輪（安全は ${fmt(row.expect.safeStates)} 状態で違反 0）`;
+    const control = row.control ? `。対照: ${row.control.text}` : '';
+    const reach = row.reach.length > 0 ? row.reach.join('・') : '—';
+    const breaks = row.breaks.length > 0 ? row.breaks.join('・') : '—';
+    return `| \`${row.name}\` | ${row.property} | ${row.combo} | ${row.steps.join('・')} | ${breaks} | ${reach} | ${row.change} | ${red}${control} |`;
+  });
+  return ['| 壊した版 | 見る性質 | 組 | 変える歩 | 崩す名前 | 届く到達の数 | 変える所 | 赤 |', '|---|---|---|---|---|---|---|---|', ...rows].join('\n');
+}
+
+/** The design's §7.3 table, made from MUTANT_TABLE and WALK_CHECKS. */
+export function renderT1Checks(): string {
+  return ['| 名 | T1 での確かめ |', '|---|---|', ...t1Checks().map((c) => `| ${c.name} | ${c.how} |`)].join('\n');
 }
 
 // program counters
@@ -270,9 +400,24 @@ class StateTable {
 
 class Model {
   readonly L: Layout;
-  readonly reach: Reach = { REC: 0, WD: 0, GCLIVE: 0, TOMBWIN: 0, WRITERWIN: 0, HOREL: 0, LOOSE: 0, RELISTK: 0, DEADREC: 0, HOLDERDIE: 0, ABORT: 0 };
+  readonly reach: Reach = { REC: 0, WD: 0, GCLIVE: 0, TOMBWIN: 0, WRITERWIN: 0, HOREL: 0, LOOSE: 0, LSTATH2: 0, DEADREC: 0, HOLDERDIE: 0, ABORT: 0 };
   // the solo liveness runs count here, so that `reach` is the walk's alone
   private readonly soloReach: Reach = { ...this.reach };
+  private cur: StepName | string = '';
+  private hit = false;
+
+  /**
+   * The one branch on a mutant: `mutated` when the configured mutant is `name`, else `normal`. Throws when
+   * called at a step `name`'s row does not declare (whether or not `name` is the configured mutant), and
+   * marks the successor (`*` on its label) when the mutant's side differs from the normal one.
+   */
+  pick<T>(name: Mutant, mutated: T, normal: T): T {
+    const row = MUTANT_BY_NAME.get(name) as MutantRow;
+    if (!(row.steps as readonly string[]).includes(this.cur)) throw new Error(`model: ${name} branches at ${this.cur}, but its row declares ${row.steps.join('・')}`);
+    if (this.L.cfg.mutant !== name) return normal;
+    if (mutated !== normal) this.hit = true;
+    return mutated;
+  }
   constructor(cfg: ModelConfig) {
     this.L = layoutOf(cfg);
   }
@@ -331,7 +476,6 @@ class Model {
     const { cfg } = this.L;
     const out: Array<[string, State]> = [];
     const R = solo >= 0 ? this.soloReach : this.reach;
-    const mut = cfg.mutant;
     for (let i = 0; i < cfg.actors; i++) {
       if (solo >= 0 && i !== solo) continue;
       if (!this.groupAlive(s, i)) continue;
@@ -349,10 +493,12 @@ class Model {
       }
       if (cfg.gc && (pc === PC.a0 || pc === PC.done)) {
         const mm = this.maxGen(s);
+        this.cur = 'gc-list';
         for (let k = 1; k <= this.L.slots; k++) {
-          if (s[k] === 0 || !(mut === 'gc-max' ? k <= mm : k < mm)) continue;
+          this.hit = false;
+          if (s[k] === 0 || !this.pick('gc-max', k <= mm, k < mm)) continue;
           const z = s.slice(); z[at(F_GN)] = k; z[at(F_RET)] = pc + 1; z[at(F_PC)] = PC.g1;
-          out.push([`${i}:gc-list(${k})`, z]);
+          out.push([`${i}:gc-list(${k})${this.hit ? '*' : ''}`, z]);
         }
       }
       childExits();
@@ -360,6 +506,9 @@ class Model {
       const n = s.slice();
       const label = `${i}:${PC_NAME[pc]}`;
       let pushed = true;
+      this.cur = PC_NAME[pc];
+      this.hit = false;
+      const star = (): string => (this.hit ? '*' : '');
       const M = s[at(F_M)], mine = s[at(F_MINE)], T = s[at(F_T)];
       const set = (f: number, v: number): void => { n[at(f)] = v; };
       const ended = (g: number): boolean => ((g - 1) & 1) === 1;
@@ -374,7 +523,7 @@ class Model {
         case PC.a1:
           if (M === 0) set(F_PC, PC.a2);
           else if (n[M] === 0) {
-            if (mut === 'c4-stuck') { /* waits for the vanished generation forever */ }
+            if (this.pick('c4-stuck', true, false)) { /* waits for the vanished generation forever */ }
             else if (cfg.c4 === 'loose') { R.LOOSE++; set(F_T, M); set(F_PC, PC.j0); }
             else set(F_PC, PC.a0);
           } else { set(F_PC, ended(n[M]) ? PC.a2 : PC.j0); set(F_T, M); }
@@ -397,7 +546,7 @@ class Model {
           const g = n[mine];
           if (g !== 0 && ownerOf(g) === O_TOMB) R.TOMBWIN++;
           if (g === 0 || ownerOf(g) !== O_NONE) set(F_PC, PC.a0);
-          else { n[mine] = withOwner(g, ownerCode(i, 0)); set(F_PC, mut === 'no-postcheck' ? PC.hh : PC.a4); }
+          else { n[mine] = withOwner(g, ownerCode(i, 0)); set(F_PC, this.pick('no-postcheck', PC.hh, PC.a4)); }
           break;
         }
         case PC.a4:
@@ -408,11 +557,16 @@ class Model {
           } else { set(F_HOLDER, 1); set(F_PC, PC.h); }
           if (cfg.abort && solo < 0) {
             // give up after the owner link: end my own generation (it may be the maximum) and start over
+            const hitMain = this.hit;
+            this.cur = 'abort';
+            this.hit = false;
             const z = s.slice();
             R.ABORT++;
-            if (z[mine] !== 0 && !ended(z[mine]) && mut !== 'abort-no-end') z[mine] = withEnd(z[mine]);
+            if (z[mine] !== 0 && !ended(z[mine]) && !this.pick('abort-no-end', true, false)) z[mine] = withEnd(z[mine]);
             z[at(F_PC)] = PC.a0;
-            out.push([`${i}:abort`, z]);
+            out.push([`${i}:abort${star()}`, z]);
+            this.cur = PC_NAME[pc];
+            this.hit = hitMain;
           }
           break;
         case PC.hh:
@@ -421,7 +575,7 @@ class Model {
         case PC.h: {
           pushed = false;
           const running = this.childRunning(s, i);
-          if (!running || mut === 'release-live-child') { set(F_PC, PC.r0); out.push([`${i}:h->release`, n]); }
+          if (!running || this.pick('release-live-child', true, false)) { set(F_PC, PC.r0); out.push([`${i}:h->release${star()}`, n]); }
           const g = s[mine];
           if (cfg.handoff && g !== 0 && ownerOf(g) >= 2) {
             const k = ownerK(ownerOf(g));
@@ -444,27 +598,27 @@ class Model {
           break;
         case PC.j0: {
           const g = n[T];
-          if (g === 0 && mut === 'c4-stuck') break;
+          if (g === 0 && this.pick('c4-stuck', true, false)) break;
           if (g === 0 || ended(g)) { set(F_PC, PC.a0); break; }
           const o = ownerOf(g);
-          if (o === O_NONE && mut === 'no-tomb') break; // waits on the ownerless generation forever
-          if (o === O_NONE) set(F_PC, mut === 'tomb-separate' ? PC.j2 : PC.j1);
+          if (o === O_NONE && this.pick('no-tomb', true, false)) break; // waits on the ownerless generation forever
+          if (o === O_NONE) set(F_PC, this.pick('tomb-separate', PC.j2, PC.j1));
           else if (o === O_TOMB) set(F_PC, PC.j2);
           else { set(F_SNAP, o); set(F_PC, PC.jk); }
           break;
         }
         case PC.jk:
-          set(F_PC, this.recordsAlive(n, s[at(F_SNAP)]) ? PC.a0 : mut === 'no-relist' ? PC.j2 : PC.jr);
+          set(F_PC, this.recordsAlive(n, s[at(F_SNAP)]) ? PC.a0 : this.pick('no-relist', PC.j2, PC.jr));
           break;
         case PC.jr: {
           const g = n[T];
-          if (g === 0 && mut === 'c4-stuck') break;
+          if (g === 0 && this.pick('c4-stuck', true, false)) break;
           const snap = s[at(F_SNAP)];
-          if (ownerK(snap) >= 1) R.RELISTK++;
+          if (ownerK(snap) >= 1) R.LSTATH2++; // the lstat goes to h<k+1> with k ≥ 1
           let unchanged = g !== 0 && !ended(g) && ownerOf(g) >= 2 && ownerActor(ownerOf(g)) === ownerActor(snap);
           // lstat h<k+1> after the k judged records (records only grow, so "absent" = the same set);
           // relist-h1-only always lstats h1
-          if (unchanged) unchanged = mut === 'relist-h1-only' ? (ownerK(ownerOf(g)) >= 1) === (ownerK(snap) >= 1) : ownerK(ownerOf(g)) === ownerK(snap);
+          if (unchanged) unchanged = this.pick('relist-h1-only', (ownerK(ownerOf(g)) >= 1) === (ownerK(snap) >= 1), ownerK(ownerOf(g)) === ownerK(snap));
           set(F_PC, unchanged ? PC.j2 : PC.a0);
           break;
         }
@@ -484,7 +638,7 @@ class Model {
         default:
           throw new Error(`model: unknown pc ${pc}`);
       }
-      if (pushed) out.push([label, n]);
+      if (pushed) out.push([`${label}${star()}`, n]);
       if (solo < 0 && s[this.L.deathsAt] < cfg.deaths) {
         const d = s.slice();
         if (s[at(F_HOLDER)] === 1) R.HOLDERDIE++;
@@ -559,7 +713,8 @@ export interface LivenessResult {
   reach: Reach;
   /** start states checked: every other actor done or dead, the remaining actor alive, not holding, rounds left */
   starts: number;
-  failure: { actor: number; kind: 'cycle' | 'stuck'; trace: string[] } | null;
+  /** `prefix`: the walk from the initial state to the start state (only with `trace`); `trace`: the solo run */
+  failure: { actor: number; kind: 'cycle' | 'stuck'; trace: string[]; prefix: string[] } | null;
 }
 
 /**
@@ -568,7 +723,7 @@ export interface LivenessResult {
  * cycle and no dead end before it holds. The solo runs may create one generation beyond the cap (the
  * cap bounds the search, not the protocol).
  */
-export function exploreLiveness(cfg: ModelConfig): LivenessResult {
+export function exploreLiveness(cfg: ModelConfig, opts: { trace?: boolean } = {}): LivenessResult {
   const m = new Model(cfg);
   const { actors, rounds } = m.L.cfg;
   const start = m.initial();
@@ -582,6 +737,12 @@ export function exploreLiveness(cfg: ModelConfig): LivenessResult {
     table.setFlag(k, (table.flag(k) & ~(3 << (1 + 2 * x))) | (v << (1 + 2 * x)));
   };
   const stack: number[] = [first];
+  const parent = opts.trace ? new Map<number, [number, string]>() : null;
+  const prefixOf = (id: number): string[] => {
+    const out: string[] = [];
+    if (parent) for (let k = id, p = parent.get(k); p; k = p[0], p = parent.get(k)) out.unshift(p[1]);
+    return out;
+  };
   let states = 0, starts = 0, violation: string | null = null;
   const finished = (s: State, j: number): boolean => s[m.at(j, F_PC)] === PC.done || !m.groupAlive(s, j);
   const solve = (s: State, x: number, path: string[]): { kind: 'cycle' | 'stuck'; trace: string[] } | null => {
@@ -602,7 +763,8 @@ export function exploreLiveness(cfg: ModelConfig): LivenessResult {
     return null;
   };
   while (stack.length > 0) {
-    const s = table.state(stack.pop() as number, m.L.size);
+    const id = stack.pop() as number;
+    const s = table.state(id, m.L.size);
     states++;
     violation ??= m.violation(s);
     for (let x = 0; x < actors; x++) {
@@ -615,12 +777,13 @@ export function exploreLiveness(cfg: ModelConfig): LivenessResult {
       if (!others) continue;
       starts++;
       const bad = solve(s, x, []);
-      if (bad) return { states, starts, violation, reach: m.reach, failure: { actor: x, ...bad } };
+      if (bad) return { states, starts, violation, reach: m.reach, failure: { actor: x, ...bad, prefix: prefixOf(id) } };
     }
-    for (const [, n] of m.steps(s, m.L.cfg.cap)) {
+    for (const [label, n] of m.steps(s, m.L.cfg.cap)) {
       const { id: k } = table.entry(n);
       if ((table.flag(k) & 1) === 1) continue;
       table.setFlag(k, table.flag(k) | 1);
+      if (parent) parent.set(k, [id, label]);
       stack.push(k);
     }
   }
