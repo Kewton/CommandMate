@@ -463,7 +463,12 @@
       "plugin-authoring": "mod を書くときに Claude が使うリファレンスを読み込み",
       "slides": "指示から Claude Slides のプレゼンテーションを作成",
       "daybreak": "Daybreak のオン・オフを切り替え",
-      "presets": "再利用できるプロンプトやスラッシュコマンドを実行・保存"
+      "presets": "再利用できるプロンプトやスラッシュコマンドを実行・保存",
+      "claude-approvals": "Claude Approvals のポリシーファイルや分類器を編集・説明・調整",
+      "ship": "/ship が扱える範囲で作業をコミット・push し、ブランチに PR が無ければ GitHub に作ってから変更をレビュー",
+      "steward": "開いている GitHub の PR をこのセッションで見張り、レビューの指摘と失敗したチェックの修正を push（/ship が最初に行うレビューはしない）",
+      "whiteboard": "依頼文から Claude Whiteboards のアーティファクトとして新しいホワイトボードを作る（例: /whiteboard 決済の流れのサービス図）",
+      "rc": "ローカルのバックグラウンドサーバーのリモート操作を管理"
     }
   },
   "session": {

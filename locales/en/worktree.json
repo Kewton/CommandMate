@@ -463,7 +463,12 @@
       "plugin-authoring": "Load the reference Claude uses to write a mod",
       "slides": "Make a new Claude Slides presentation from your brief",
       "daybreak": "Turn Daybreak on or off",
-      "presets": "Run or save reusable prompts and slash commands"
+      "presets": "Run or save reusable prompts and slash commands",
+      "claude-approvals": "Edit, explain, or tune a Claude Approvals policy file or classifier",
+      "ship": "Commit and push your work where /ship can, open a GitHub pull request for your branch if it has none, then review the change",
+      "steward": "Watch your open GitHub pull request in this session and push fixes for review feedback and failing checks, without the review that /ship runs first",
+      "whiteboard": "Make a new whiteboard from your brief as a Claude Whiteboards artifact, for example /whiteboard a service map of the checkout flow",
+      "rc": "manage remote control for the local background server"
     }
   },
   "session": {

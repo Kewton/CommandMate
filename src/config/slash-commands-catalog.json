@@ -3948,6 +3948,56 @@
       ],
       "isStandard": true,
       "source": "standard"
+    },
+    {
+      "name": "claude-approvals",
+      "descriptionKey": "slashCommands.descriptions.claude-approvals",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "ship",
+      "descriptionKey": "slashCommands.descriptions.ship",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "steward",
+      "descriptionKey": "slashCommands.descriptions.steward",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "whiteboard",
+      "descriptionKey": "slashCommands.descriptions.whiteboard",
+      "category": "standard-util",
+      "cliTools": [
+        "claude"
+      ],
+      "isStandard": true,
+      "source": "standard"
+    },
+    {
+      "name": "rc",
+      "descriptionKey": "slashCommands.descriptions.rc",
+      "category": "standard-util",
+      "cliTools": [
+        "codex"
+      ],
+      "isStandard": true,
+      "source": "standard"
     }
   ]
 }
