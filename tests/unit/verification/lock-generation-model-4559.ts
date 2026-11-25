@@ -72,16 +72,29 @@
 export const NAMES = ['L1', 'L2', 'L3', 'L4', 'L5', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'S1', 'S2', 'S3', 'S4', 'S5'] as const;
 
 /**
- * The design's names (§5) that the model does not check, and the implementation test that does. The
- * names T1 checks are the generated §7.3 (`t1Checks`); T7 compares both with §5.
+ * The design's names (§5) that T1 does not check, each with its "確かめる所" cell of §5 exactly (T7
+ * compares). L2・S3 lean on the model's walk, but no T1 check is bound to them (HUMAN_READ, §7.5).
  */
 export const NOT_IN_MODEL: Readonly<Record<string, string>> = {
-  C2: 'T2: readdir returns the maximum present for the whole scan (APFS)',
-  C5: 'T3: the 12-digit generation names, the same format in the three implementations',
-  C6: 'T2: `.gen` is never removed; an unreadable `.gen` takes nothing',
-  C7: 'T2・T3: the by-path name from the realpath of the parent',
-  C8: 'T2: tmp names carry the token and are never reused',
-  S5: 'T5: the old writers see the generation holder as the beacon holder',
+  L2: '模型の網羅（§7.5。人が読む）',
+  C2: 'T2（APFS。証明ではない）',
+  C5: 'T3',
+  C6: 'T2',
+  C7: 'T2・T3',
+  C8: 'T2',
+  S3: '模型の網羅（§7.5。人が読む）・T2',
+  S5: 'T5',
+};
+
+/** The names of NOT_IN_MODEL that the walk covers but no T1 check is bound to (§7.5 holds this list exactly). */
+export const HUMAN_READ = ['L2', 'S3'] as const;
+
+/** The rest of §5's "確かめる所" cell for a name T1 checks, after `T1（§7.3）`. */
+export const T1_ALSO: Readonly<Record<string, string>> = {
+  C3: '・T2',
+  S1: '・T2・T4',
+  S2: '・T2・T4',
+  S4: '・T6（EIO）',
 };
 
 export const REACH_KEYS = ['REC', 'WD', 'GCLIVE', 'TOMBWIN', 'WRITERWIN', 'HOREL', 'LOOSE', 'LSTATH2', 'DEADREC', 'HOLDERDIE', 'ABORT'] as const;
@@ -132,7 +145,7 @@ export interface MutantRow {
   steps: readonly StepName[];
   /** the lemmas / conditions of §5 it breaks */
   breaks: readonly string[];
-  /** reach counts its red run must have walked (besides its own `*` step) */
+  /** reach counts its combination's walk (up to the red) must have walked — the whole walk, not the red path; the red path is the `*` check's */
   reach: readonly ReachKey[];
   /** what it changes (people read this against the code at `steps`, design §7.5) */
   change: string;
@@ -196,23 +209,99 @@ export type Mutant = (typeof MUTANT_TABLE)[number]['name'];
 const MUTANT_BY_NAME: ReadonlyMap<string, MutantRow> = new Map(MUTANT_TABLE.map((r) => [r.name, r as MutantRow]));
 const ALL_MUTANTS: readonly string[] = MUTANT_TABLE.map((r) => r.name);
 
-/** The names T1 checks by the walk itself, without a mutant (design §7.3). */
-export const WALK_CHECKS: Readonly<Record<string, string>> = {
-  L2: '交互の順の網羅（判定の後に任意に止まる）で S1・S2 の違反 0',
-  C4: '緩めた C4 を既定にした網羅（到達の数 LOOSE）',
-  S1: '(i)・(ii)・(iii) と始まりを変えた探索の網羅で違反 0',
-  S2: '(i)・(ii)・(iii) と始まりを変えた探索の網羅で違反 0',
-  S3: '停止の長さ・回数に上限の無い交互の順の網羅',
-  S4: '(i)・(iii) で、他の者が全員終わった全ての状態から残る 1 者が保有者になる',
+/** The walks T1 runs (its combination rows are made from this table). */
+export interface WalkRun {
+  id: string;
+  combo: ComboName;
+  /** the walk also checks S4 from every state whose other actors have finished */
+  liveness: boolean;
+  /** a floor a few percent under the measured state count (and under the liveness starts) */
+  floor: number;
+  startsFloor?: number;
+  seed?: Seed;
+  /** the reach counts it must walk; omitted = every count the combination can walk by construction */
+  reach?: readonly ReachKey[];
+}
+
+export const WALK_RUNS: readonly WalkRun[] = [
+  { id: 'walk-i', combo: '(i)', liveness: true, floor: 4_300_000, startsFloor: 1_600_000 },
+  { id: 'walk-ii', combo: '(ii)', liveness: false, floor: 2_350_000 },
+  { id: 'walk-iii', combo: '(iii)', liveness: true, floor: 1_050_000, startsFloor: 340_000 },
+  {
+    id: 'seeded-ii', combo: '(ii)', liveness: false, floor: 1_050_000, reach: ['HOREL', 'LSTATH2', 'DEADREC'],
+    seed: { gens: { 1: { owner: { actor: 0, handoffs: 1 } } }, actors: { 0: { pc: 'h', holder: 1, mine: 1, c1: 1 } } },
+  },
+];
+
+/** The invariants a walk checks on every state (and S4 when it is a liveness walk). */
+export const runChecks = (run: WalkRun): string[] => (run.liveness ? ['S1', 'S2', 'S4'] : ['S1', 'S2']);
+
+/** The reach counts a walk must walk. */
+export function runReach(run: WalkRun): ReachKey[] {
+  if (run.reach) return [...run.reach];
+  const cfg: ModelConfig = COMBOS[run.combo];
+  return REACH_KEYS.filter((k) => {
+    if (!cfg.handoff && (k === 'HOREL' || k === 'LSTATH2')) return false;
+    if (cfg.deaths === 0 && !cfg.handoff && k === 'DEADREC') return false;
+    if (cfg.deaths === 0 && k === 'HOLDERDIE') return false;
+    if (!cfg.abort && k === 'ABORT') return false;
+    return true;
+  });
+}
+
+/**
+ * The names T1 checks by a walk, without a mutant: each is a key to the walks (WALK_RUNS) whose own check
+ * is that name. A name no walk checks cannot be listed (the module throws when loaded).
+ */
+export const WALK_CHECKS: Readonly<Record<string, readonly string[]>> = {
+  S1: ['walk-i', 'walk-ii', 'walk-iii', 'seeded-ii'],
+  S2: ['walk-i', 'walk-ii', 'walk-iii', 'seeded-ii'],
+  S4: ['walk-i', 'walk-iii'],
 };
 
-/** Each name T1 checks and how (the generated §7.3): the walk's check, then the mutants that break it. */
+const CHECK_TEXT: Readonly<Record<string, string>> = { S1: '違反 0', S2: '違反 0', S4: '他の者が全員終わった全ての状態から残る 1 者が保有者になる' };
+
+/** Each name T1 checks and how (the generated §7.3): the walks keyed to it, then the mutants that break it. */
 export function t1Checks(): Array<{ name: string; how: string }> {
   return NAMES.flatMap((name) => {
+    const runs = WALK_CHECKS[name];
+    const walk = runs ? `${runs.map((id) => `\`${id}\``).join('・')} で${CHECK_TEXT[name]}` : undefined;
     const red = MUTANT_TABLE.filter((r) => (r.breaks as readonly string[]).includes(name) || r.property.split('・').includes(name)).map((r) => `\`${r.name}\``);
-    const parts = [WALK_CHECKS[name], red.length > 0 ? `${red.join('・')} が赤（§7.2）` : undefined].filter((x): x is string => x !== undefined);
+    const parts = [walk, red.length > 0 ? `${red.join('・')} が赤（§7.2）` : undefined].filter((x): x is string => x !== undefined);
     return parts.length === 0 ? [] : [{ name, how: parts.join('。') }];
   });
+}
+
+/** §5's "確かめる所" cell of a name, made from the tables. */
+export function checkedBy(name: string): string {
+  return t1Checks().some((c) => c.name === name) ? `T1（§7.3）${T1_ALSO[name] ?? ''}` : (NOT_IN_MODEL[name] ?? '');
+}
+
+/** The line of §7.5 that holds HUMAN_READ. */
+export const humanReadLine = (): string => `- 模型の網羅に頼るが T1 の確かめに結べない名前（§5 では「模型の網羅（§7.5。人が読む）」）: ${HUMAN_READ.join('・')}`;
+
+/** The tables must hold together; a name keyed to no walk check, or listed twice, throws when the module loads. */
+function validateTables(): void {
+  const names: readonly string[] = NAMES;
+  const runs = new Map(WALK_RUNS.map((r) => [r.id, r]));
+  for (const [name, ids] of Object.entries(WALK_CHECKS)) {
+    if (!names.includes(name)) throw new Error(`model: WALK_CHECKS names ${name}, not a name of §5`);
+    if (ids.length === 0) throw new Error(`model: WALK_CHECKS ${name} keys no walk`);
+    for (const id of ids) {
+      const run = runs.get(id);
+      if (!run) throw new Error(`model: WALK_CHECKS ${name} keys ${id}, not a walk of WALK_RUNS`);
+      if (!runChecks(run).includes(name)) throw new Error(`model: WALK_CHECKS ${name} keys ${id}, whose check is ${runChecks(run).join('・')}`);
+    }
+  }
+  for (const r of MUTANT_TABLE) for (const n of r.breaks) if (!names.includes(n)) throw new Error(`model: ${r.name} breaks ${n}, not a name of §5`);
+  const t1 = t1Checks().map((c) => c.name);
+  for (const name of names) {
+    const inT1 = t1.includes(name), out = name in NOT_IN_MODEL;
+    if (inT1 === out) throw new Error(`model: ${name} must be checked by T1 or listed in NOT_IN_MODEL (exactly one)`);
+  }
+  for (const n of Object.keys(NOT_IN_MODEL)) if (!names.includes(n)) throw new Error(`model: NOT_IN_MODEL names ${n}, not a name of §5`);
+  for (const n of Object.keys(T1_ALSO)) if (!t1.includes(n)) throw new Error(`model: T1_ALSO names ${n}, which T1 does not check`);
+  for (const n of HUMAN_READ) if (!(n in NOT_IN_MODEL)) throw new Error(`model: HUMAN_READ names ${n}, not in NOT_IN_MODEL`);
 }
 
 const fmt = (n: number): string => n.toLocaleString('en-US');
@@ -229,7 +318,7 @@ export function renderMutantTable(): string {
     const breaks = row.breaks.length > 0 ? row.breaks.join('・') : '—';
     return `| \`${row.name}\` | ${row.property} | ${row.combo} | ${row.steps.join('・')} | ${breaks} | ${reach} | ${row.change} | ${red}${control} |`;
   });
-  return ['| 壊した版 | 見る性質 | 組 | 変える歩 | 崩す名前 | 届く到達の数 | 変える所 | 赤 |', '|---|---|---|---|---|---|---|---|', ...rows].join('\n');
+  return ['| 壊した版 | 見る性質 | 組 | 変える歩 | 崩す名前 | 歩きが届く到達の数 | 変える所 | 赤 |', '|---|---|---|---|---|---|---|---|', ...rows].join('\n');
 }
 
 /** The design's §7.3 table, made from MUTANT_TABLE and WALK_CHECKS. */
@@ -789,3 +878,5 @@ export function exploreLiveness(cfg: ModelConfig, opts: { trace?: boolean } = {}
   }
   return { states, starts, violation, reach: m.reach, failure: null };
 }
+
+validateTables();

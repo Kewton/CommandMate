@@ -8,8 +8,11 @@
  *      parsed rows are compared with the named windows / the model's names. The table is what GFM draws:
  *      from its first line to the first blank line, so a line without a `|` right after it is a row too;
  *      a second table (or a stray `|` line) in the section is a problem
- *   3. §2 holds the two guarantee sentences below, character for character
- *   4. self-test: copies with the rows the reviews found (and a model copy whose table lies) are red
+ *   3. §2 is the section below, character for character (the guarantee sentences and nothing that contradicts them)
+ *   4. §5's "確かめる所" cells are made from the model (T1（§7.3）… / NOT_IN_MODEL); §7.5 holds HUMAN_READ
+ *   5. HTML comments are taken out of the document first (a table or a sentence hidden in one is not drawn),
+ *      and each heading the checks use appears exactly once
+ *   6. self-test: copies with the rows the reviews found (and a model copy whose table lies) are red
  * The pairing with table F of docs/design/machine-lock-owner-atomic-4288.md is added by PR-2 (§9).
  *
  * @vitest-environment node
@@ -18,17 +21,24 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { NAMES, NOT_IN_MODEL, renderMutantTable, renderT1Checks, t1Checks } from './lock-generation-model-4559';
+import { NAMES, NOT_IN_MODEL, checkedBy, humanReadLine, renderMutantTable, renderT1Checks, t1Checks } from './lock-generation-model-4559';
 
 const REPO = path.resolve(__dirname, '../../..');
 const DESIGN = path.join(REPO, 'docs/design/machine-lock-generation-4559.md');
 const MODEL = path.join(__dirname, 'lock-generation-model-4559.ts');
 
-/** The guarantee sentences of §2, character for character. */
-const GUARANTEE = [
+/** §2, character for character (after its heading, up to the next heading). */
+const GUARANTEE_SECTION = [
+  '',
   '- **新版どうしの安全（S1・S2）は P0 に依らず、前提 P1（壁時計の前提・pid の再利用の判定 D7 を含む）と、C2（取得の後の一覧の readdir が最大を返す）・C5（世代の名前の書式）・C6（`.gen` を消さない運用）・C7（パスで名付けたロックの `.gen` の名前が 1 つ）に依る**。停止の長さ・回数に上限を置かない。これは前提を緩めて保証を守る形ではなく、保証が P0 を使わなくなる形',
+  '- C2 が崩れると取得の後の一覧が最大を見落として L3 が崩れ、C5〜C7 が崩れると世代の番号が振り直されるか鎖が 2 本になって L1 が崩れる。どれも S1 に効くので、実装の一覧の書き方・`.gen` の置き場を変えるときはこの文に照らす',
+  '- **P0 の定義の文は変えない**。P0 は活性（札の期限・持ち主の無い世代の猶予）と、混在の間の限界にだけ残る',
   '- **混在の間の窓は、旧い版の書き手・回収者を相手にする `mixed` の行（§6.5）だけ**。新版どうしには無い。混在は長く続く（無期限もありうる）前提で、「新版どうしは閉じた」と「旧い版との間は `mixed` の行」の 2 つの文で受け入れる。混在の終わりを待たずに成り立つ',
-];
+  '- 他ホストの記録は今どおり死と判定しない（待つ）',
+  '',
+  '---',
+  '',
+].join('\n');
 
 /** The named windows while old writers remain (design §6.5). A row is added by the PR that names it. */
 const MIXED_ROWS: Array<{ id: string; state: 'open' | 'closed' | 'later-PR' }> = [
@@ -45,10 +55,16 @@ const MIXED_ROWS: Array<{ id: string; state: 'open' | 'closed' | 'later-PR' }> =
 const MIXED_HEADER = ['行', '相手の版（旧い書き手）', 'Issue', '状態', '形'];
 const NAMES_HEADER = ['名', '文', '確かめる所'];
 
+/** The document as drawn: HTML comments taken out (what is hidden in one is not shown). */
+const drawn = (doc: string): string => doc.replace(/<!--[\s\S]*?-->/g, '');
+
+/** The headings of the document that start with `heading` (a check's heading must appear once). */
+const headingsLike = (doc: string, heading: string): number => drawn(doc).split('\n').filter((l) => l.startsWith(`${heading} `) || l === heading).length;
+
 /** The lines of the section whose heading starts with `heading`, up to the next heading of the same or a higher level. */
 function section(doc: string, heading: string): string[] {
   const level = heading.match(/^#+/)?.[0].length ?? 0;
-  const lines = doc.split('\n');
+  const lines = drawn(doc).split('\n');
   const start = lines.findIndex((l) => l.startsWith(`${heading} `) || l === heading);
   if (start < 0) return [];
   const rest = lines.slice(start + 1);
@@ -58,6 +74,11 @@ function section(doc: string, heading: string): string[] {
   });
   return end < 0 ? rest : rest.slice(0, end);
 }
+
+const headingProblems = (doc: string, heading: string): string[] => {
+  const n = headingsLike(doc, heading);
+  return n === 1 ? [] : [`${heading}: ${n} headings (one expected)`];
+};
 
 /** The tables of a section as GFM draws them: from a line starting with `|` (after spaces) to the first blank line. */
 function tables(lines: string[]): string[][] {
@@ -79,7 +100,7 @@ const writeRow = (cells: string[]): string => `| ${cells.join(' | ')} |`;
 /** The one table of a section, its round trip, and its parsed rows. */
 function oneTable(doc: string, heading: string): { table: string[]; problems: string[]; header: string[]; rows: string[][] } {
   const found = tables(section(doc, heading));
-  const problems: string[] = [];
+  const problems: string[] = headingProblems(doc, heading);
   if (found.length !== 1) problems.push(`${heading}: ${found.length} tables (one expected)`);
   const table = found[0] ?? [];
   const header = table.length > 0 ? cellsOf(table[0]) : [];
@@ -109,17 +130,15 @@ function namesProblems(doc: string): string[] {
   if (JSON.stringify(names) !== JSON.stringify(NAMES)) problems.push(`§5: names ${names.join(' ')} are not the model's ${NAMES.join(' ')}`);
   const t1 = new Set(t1Checks().map((c) => c.name));
   for (const [name, , where] of rows) {
-    const saysT1 = (where ?? '').includes('T1');
-    if (saysT1 !== t1.has(name)) problems.push(`§5 ${name}: says ${saysT1 ? '' : 'not '}T1, the model's §7.3 ${t1.has(name) ? 'has' : 'has not'} it`);
-    if (saysT1 && !(where ?? '').startsWith('T1（§7.3）')) problems.push(`§5 ${name}: the T1 column is not "T1（§7.3）…"`);
-    if (!saysT1 && !(name in NOT_IN_MODEL)) problems.push(`§5 ${name}: neither T1 nor NOT_IN_MODEL`);
+    if (!t1.has(name) && !(name in NOT_IN_MODEL)) problems.push(`§5 ${name}: neither T1 nor NOT_IN_MODEL`);
+    else if (where !== checkedBy(name)) problems.push(`§5 ${name}: "確かめる所" is "${where}", the model makes "${checkedBy(name)}"`);
   }
   return problems;
 }
 
 function madeProblems(doc: string, heading: string, made: string): string[] {
   const found = tables(section(doc, heading));
-  const problems: string[] = [];
+  const problems: string[] = headingProblems(doc, heading);
   if (found.length !== 1) problems.push(`${heading}: ${found.length} tables (one expected)`);
   if ((found[0] ?? []).join('\n') !== made) problems.push(`${heading}: the table is not the one made from the model`);
   return problems;
@@ -128,8 +147,15 @@ const mutantProblems = (doc: string, made = renderMutantTable()): string[] => ma
 const t1ChecksProblems = (doc: string, made = renderT1Checks()): string[] => madeProblems(doc, '### 7.3', made);
 
 function guaranteeProblems(doc: string): string[] {
-  const lines = section(doc, '## 2.');
-  return GUARANTEE.filter((g) => !lines.includes(g)).map((g) => `§2 does not hold: ${g.slice(0, 40)}…`);
+  const problems = headingProblems(doc, '## 2.');
+  if (section(doc, '## 2.').join('\n') !== GUARANTEE_SECTION) problems.push('§2 is not the guarantee section, character for character');
+  return problems;
+}
+
+function humanReadProblems(doc: string): string[] {
+  const problems = headingProblems(doc, '### 7.5');
+  if (!section(doc, '### 7.5').includes(humanReadLine())) problems.push(`§7.5 does not hold: ${humanReadLine()}`);
+  return problems;
 }
 
 describe('T7: the design document and the model say the same thing (#4559)', () => {
@@ -147,12 +173,16 @@ describe('T7: the design document and the model say the same thing (#4559)', () 
     expect(mixedProblems(doc())).toEqual([]);
   });
 
-  it('§5 writes back to itself, names the model\'s names in order, and says T1（§7.3） exactly for the names of §7.3', () => {
+  it('§5 writes back to itself, names the model\'s names in order, and its "確かめる所" cells are the ones made from the model', () => {
     expect(namesProblems(doc())).toEqual([]);
   });
 
-  it('§2 holds the guarantee sentences, character for character', () => {
+  it('§2 is the guarantee section, character for character', () => {
     expect(guaranteeProblems(doc())).toEqual([]);
+  });
+
+  it('§7.5 holds the names T1 cannot bind (HUMAN_READ), character for character', () => {
+    expect(humanReadProblems(doc())).toEqual([]);
   });
 });
 
@@ -199,6 +229,8 @@ describe('T7 self-test: a broken copy is red', () => {
     ['a row with a leading space', () => afterLine(LAST_MIXED, ' | P-6 | 旧い版 | #4559 | open | 形 |')],
     ['a row right after a blank line', () => afterLine(LAST_MIXED, '\n| P-6 | 旧い版 | #4559 | open | 形 |')],
     ['a line without `|` right after the table', () => afterLine(LAST_MIXED, 'P-6 旧い版 #4559 open')],
+    ['the table hidden in an HTML comment and a different claim shown', () => { const t = original(); const sec = section(t, '### 6.5'); const table = tables(sec)[0].join('\n'); return copy(t.replace(table, `<!--\n${table}\n\n-->\n- P-1〜P-5 は全部 closed`)); }],
+    ['a second "### 6.5" heading with an old table before the real one', () => { const t = original(); const at = t.indexOf('### 6.5 '); const old = tables(section(t, '### 6.5'))[0].join('\n').replace('| P-2 | ', '| P-2 | ').replace(/(\| P-2 \|[^\n]*\| #4559 \| )open/, '$1closed'); return copy(`${t.slice(0, at)}### 6.5 控え（前の版）\n\n${old}\n\n${t.slice(at)}`); }],
   ])('§6.5 with %s → red', (_what, make) => {
     expect(mixedProblems(make())).not.toEqual([]);
   });
@@ -214,6 +246,7 @@ describe('T7 self-test: a broken copy is red', () => {
     ['a line without `|` right after the table', () => afterLine(LAST_MUTANT, '`no-withdraw-end` S4')],
     ['a row removed (no-relist)', () => { const t = original(); return copy(t.replace(`${lineStarting(t, '| `no-relist` |')}\n`, '')); }],
     ['no-postcheck\'s combination rewritten (ii) → (i)', () => replaced('| `no-postcheck` | S1・S2 | (ii) |', '| `no-postcheck` | S1・S2 | (i) |')],
+    ['the table hidden in an HTML comment', () => { const t = original(); const table = tables(section(t, '### 7.2'))[0].join('\n'); return copy(t.replace(table, `<!--\n${table}\n\n-->\n- \`no-relist\`・\`tomb-separate\` は今は緑`)); }],
   ])('§7.2 with %s → red', (_what, make) => {
     expect(mutantProblems(make())).not.toEqual([]);
   });
@@ -228,6 +261,8 @@ describe('T7 self-test: a broken copy is red', () => {
     ['a name rewritten (L3 → L6)', () => replaced('| L3 |', '| L6 |')],
     ['a new lemma that says T1 (the names T1 checks come from the model)', () => afterLine(LAST_NAME, '| L6 | 新しい補題 | T1（§7.3） |')],
     ['a name moved off T1 (L4 → T2 only)', () => { const t = original(); const row = lineStarting(t, '| L4 |'); return copy(t.replace(row, row.replace(/\| T1（§7\.3）[^|]*\|$/, '| T2 |'))); }],
+    ['C5\'s cell rewritten T3 → T2', () => { const t = original(); const row = lineStarting(t, '| C5 |'); return copy(t.replace(row, row.replace(/\| T3 \|$/, '| T2 |'))); }],
+    ['L6 added to §5 and §7.3 (the model does not have it)', () => { const t = afterLine(LAST_NAME, '| L6 | **墓は猶予の後にだけ置く** | T1（§7.3） |'); return copy(t.replace('| S1 | `walk-i`', '| L6 | `walk-i`・`walk-ii` で違反 0 |\n| S1 | `walk-i`')); }],
     ['a line without `|` right after the table', () => afterLine(LAST_NAME, 'C10 新しい条件')],
   ])('§5 with %s → red', (_what, make) => {
     expect(namesProblems(make())).not.toEqual([]);
@@ -237,8 +272,15 @@ describe('T7 self-test: a broken copy is red', () => {
     ['negated', () => replaced('に依る**。停止の長さ', 'にも依らない**。停止の長さ')],
     ['a premise dropped', () => replaced('・C5（世代の名前の書式）', '')],
     ['the mixed sentence changed', () => replaced('`mixed` の行（§6.5）だけ**', '`mixed` の行（§6.5）にもある**')],
+    ['hidden in an HTML comment and the negation shown', () => { const t = original(); const line = GUARANTEE_SECTION.split('\n')[1]; return copy(t.replace(line, `<!--\n${line}\n-->\n- **新版どうしの安全は P0 に依る**（停止が 10 分を超えると崩れる）`)); }],
+    ['followed by a sentence that takes it back', () => replaced('- 他ホストの記録は今どおり死と判定しない（待つ）', '- 他ホストの記録は今どおり死と判定しない（待つ）\n- ただし、上の 1 つ目の文は取り消す。新版どうしの安全も P0 に依る')],
+    ['under a second "## 2." heading', () => { const t = original(); const at = t.indexOf('## 2. '); return copy(`${t.slice(0, at)}## 2. 保証（前の版）\n\n- 新版どうしの安全も P0 に依る\n\n${t.slice(at)}`); }],
   ])('§2 with the guarantee %s → red', (_what, make) => {
     expect(guaranteeProblems(make())).not.toEqual([]);
+  });
+
+  it('§7.5 with the HUMAN_READ line changed → red', () => {
+    expect(humanReadProblems(replaced(humanReadLine(), humanReadLine().replace('L2・S3', 'L2')))).not.toEqual([]);
   });
 
   it('a model copy whose table moves tomb-separate to another step makes a §7.2 the design does not hold → red', async () => {

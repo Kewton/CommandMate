@@ -27,9 +27,11 @@ import {
   MUTANT_TABLE,
   NAMES,
   NOT_IN_MODEL,
-  REACH_KEYS,
+  WALK_RUNS,
   exploreLiveness,
   exploreSafety,
+  runChecks,
+  runReach,
   t1Checks,
   type ModelConfig,
   type MutantRow,
@@ -39,52 +41,32 @@ import {
 const BIG = 120_000;
 const SMALL = 30_000;
 
-/** The reach counts a combination cannot walk by construction (no handoff, no death, no abort). */
-const reachable = (cfg: ModelConfig): ReachKey[] =>
-  REACH_KEYS.filter((k) => {
-    if (!cfg.handoff && (k === 'HOREL' || k === 'LSTATH2')) return false;
-    if (cfg.deaths === 0 && !cfg.handoff && k === 'DEADREC') return false;
-    if (cfg.deaths === 0 && k === 'HOLDERDIE') return false;
-    if (!cfg.abort && k === 'ABORT') return false;
-    return true;
-  });
 const reachedAll = (reach: Record<ReachKey, number>, keys: readonly ReachKey[]): Array<[ReachKey, boolean]> => keys.map((k) => [k, reach[k] > 0]);
 const yes = (keys: readonly ReachKey[]): Array<[ReachKey, boolean]> => keys.map((k) => [k, true]);
 
-describe('T1: design A has no two-holder state in any interleaving', () => {
-  it('combination (i): zero S1・S2 violations, more than 4,300,000 states, every reachable count at least 1, and S4 from every state whose other actors have finished', { timeout: BIG }, () => {
-    // one walk checks S1・S2 on every state and S4 from every start (the liveness walk is the safety walk)
-    const r = exploreLiveness(COMBOS['(i)']);
-    expect(r.violation).toBeNull();
-    expect(r.states).toBeGreaterThan(4_300_000);
-    expect(reachedAll(r.reach, reachable(COMBOS['(i)']))).toEqual(yes(reachable(COMBOS['(i)'])));
-    expect(r.failure).toBeNull();
-    expect(r.starts).toBeGreaterThan(1_600_000);
-  });
+/** The walks with the strings their titles show (made from the model's WALK_RUNS). */
+const WALKS = WALK_RUNS.map((run) => ({
+  run,
+  id: run.id,
+  combo: run.combo,
+  checks: runChecks(run).join('・'),
+  floor: run.floor.toLocaleString('en-US'),
+  reach: runReach(run).join('・'),
+}));
 
-  it('combination (ii): zero S1・S2 violations, more than 2,350,000 states, every reachable count at least 1', { timeout: BIG }, () => {
-    const r = exploreSafety(COMBOS['(ii)']);
+describe('T1: design A has no two-holder state in any interleaving (the walks of WALK_RUNS)', () => {
+  it.each(WALKS)('$id (combination $combo): checks $checks, more than $floor states, reaches $reach', { timeout: BIG }, ({ run }) => {
+    // a liveness walk is the safety walk too: one walk checks S1・S2 on every state and S4 from every start
+    const cfg: ModelConfig = COMBOS[run.combo];
+    const r = run.liveness ? exploreLiveness(cfg) : exploreSafety(cfg, run.seed ? { seed: run.seed } : {});
     expect(r.violation).toBeNull();
-    expect(r.states).toBeGreaterThan(2_350_000);
-    expect(reachedAll(r.reach, reachable(COMBOS['(ii)']))).toEqual(yes(reachable(COMBOS['(ii)'])));
-  });
-
-  it('combination (iii) with the abort step: zero S1・S2 violations, more than 1,050,000 states, every count at least 1, and S4', { timeout: BIG }, () => {
-    const r = exploreLiveness(COMBOS['(iii)']);
-    expect(r.violation).toBeNull();
-    expect(r.states).toBeGreaterThan(1_050_000);
-    expect(reachedAll(r.reach, REACH_KEYS)).toEqual(yes(REACH_KEYS));
-    expect(r.failure).toBeNull();
-    expect(r.starts).toBeGreaterThan(340_000);
-  });
-
-  it('seeded with (ii)\'s parameters from a holder whose h1 child runs: zero violations; HOREL, LSTATH2 and DEADREC reached', { timeout: BIG }, () => {
-    const r = exploreSafety(COMBOS['(ii)'], {
-      seed: { gens: { 1: { owner: { actor: 0, handoffs: 1 } } }, actors: { 0: { pc: 'h', holder: 1, mine: 1, c1: 1 } } },
-    });
-    expect(r.violation).toBeNull();
-    expect(r.states).toBeGreaterThan(1_050_000);
-    expect(reachedAll(r.reach, ['HOREL', 'LSTATH2', 'DEADREC'])).toEqual(yes(['HOREL', 'LSTATH2', 'DEADREC']));
+    expect(r.states).toBeGreaterThan(run.floor);
+    expect(reachedAll(r.reach, runReach(run))).toEqual(yes(runReach(run)));
+    if (run.liveness) {
+      const l = r as ReturnType<typeof exploreLiveness>;
+      expect(l.failure).toBeNull();
+      expect(l.starts).toBeGreaterThan(run.startsFloor ?? 0);
+    }
   });
 });
 
@@ -160,13 +142,15 @@ describe('T1 self-test: a mutant that branches away from its declared step throw
     fs.rmSync(dir, { recursive: true, force: true });
   });
   type ModelModule = typeof import('./lock-generation-model-4559');
+  let copies = 0;
   const changedCopy = async (edits: Array<[string, string]>): Promise<ModelModule> => {
     let text = fs.readFileSync(MODEL, 'utf8');
     for (const [from, to] of edits) {
       if (!text.includes(from)) throw new Error(`the model has no ${from}`);
       text = text.replace(from, to);
     }
-    const file = path.join(dir, 'model-copy.ts');
+    copies++;
+    const file = path.join(dir, `model-copy-${copies}.ts`); // a new name for each copy: imports are cached by path
     fs.writeFileSync(file, text);
     return (await import(file)) as ModelModule;
   };
@@ -185,6 +169,18 @@ describe('T1 self-test: a mutant that branches away from its declared step throw
       ["this.pick('no-relist', PC.j2, PC.jr)", "this.pick('no-relist', PC.j2, this.pick('tomb-separate', PC.j2, PC.jr))"],
     ]);
     expect(() => m.exploreSafety({ ...m.COMBOS['(i)'], mutant: 'tomb-separate' })).toThrow(/tomb-separate branches at jk/);
+  });
+
+  it('a name added with nothing to check it (L6 in NAMES and WALK_CHECKS): the model throws when loaded', { timeout: SMALL }, async () => {
+    await expect(changedCopy([
+      ["'S3', 'S4', 'S5'] as const;", "'S3', 'S4', 'S5', 'L6'] as const;"],
+      ["  S4: ['walk-i', 'walk-iii'],\n};", "  S4: ['walk-i', 'walk-iii'],\n  L6: ['walk-i'],\n};"],
+    ])).rejects.toThrow(/WALK_CHECKS L6 keys walk-i, whose check is S1・S2・S4/);
+    await expect(changedCopy([
+      ["'S3', 'S4', 'S5'] as const;", "'S3', 'S4', 'S5', 'L6'] as const;"],
+      ["  S4: ['walk-i', 'walk-iii'],\n};", "  S4: ['walk-i', 'walk-iii'],\n  L6: [],\n};"],
+    ])).rejects.toThrow(/WALK_CHECKS L6 keys no walk/);
+    await expect(changedCopy([["'S3', 'S4', 'S5'] as const;", "'S3', 'S4', 'S5', 'L6'] as const;"]])).rejects.toThrow(/L6 must be checked by T1 or listed in NOT_IN_MODEL/);
   });
 
   it('a mutant whose change is taken out (blunt) is green and walks no `*` step under the very calls its row must fail', { timeout: BIG }, async () => {
@@ -210,5 +206,60 @@ describe('T1: the model refuses a bad configuration', () => {
   it.each(bad)('%s → throws', { timeout: SMALL }, (_name, cfg) => {
     expect(() => exploreSafety(cfg as ModelConfig)).toThrow(TypeError);
     expect(() => exploreLiveness(cfg as ModelConfig)).toThrow(TypeError);
+  });
+});
+
+/**
+ * The model reads the configured mutant only in `checkConfig` and `pick`, and names a mutant only in its
+ * table row and in `pick('<name>', …)` calls: a branch that bypasses `pick` is red here.
+ */
+function bypasses(source: string): string[] {
+  const lines = source.split('\n');
+  const blockOf = (start: RegExp): [number, number] => {
+    const from = lines.findIndex((l) => start.test(l));
+    if (from < 0) return [-1, -1];
+    let depth = 0;
+    for (let i = from; i < lines.length; i++) {
+      for (const ch of lines[i]) {
+        if (ch === '{') depth++;
+        if (ch === '}') depth--;
+      }
+      if (depth === 0 && i > from) return [from, i];
+    }
+    return [from, lines.length - 1];
+  };
+  const allowed = [blockOf(/^function checkConfig\(/), blockOf(/^ {2}pick<T>\(/)];
+  const inAllowed = (i: number): boolean => allowed.some(([a, b]) => i >= a && i <= b);
+  const names = MUTANT_TABLE.map((r) => r.name);
+  const found: string[] = [];
+  lines.forEach((line, i) => {
+    const code = line.replace(/\/\/.*$/, '');
+    if (/^\s*\*/.test(code) || /^\s*\/\*\*/.test(code)) return; // doc comments
+    if (/\.mutant\b/.test(code) && !inAllowed(i)) found.push(`${i + 1}: reads .mutant: ${line.trim()}`);
+    for (const n of names) {
+      for (const m of code.matchAll(new RegExp(`'${n}'`, 'g'))) {
+        const before = code.slice(0, m.index);
+        if (/name: $/.test(before) || /this\.pick\($/.test(before)) continue;
+        found.push(`${i + 1}: names '${n}' outside its row and pick: ${line.trim()}`);
+      }
+    }
+  });
+  return found;
+}
+
+describe('T1: no branch on a mutant bypasses pick', () => {
+  const MODEL_SOURCE = path.join(__dirname, 'lock-generation-model-4559.ts');
+  it('the model reads the mutant only in checkConfig and pick, and names mutants only in the table and pick calls', { timeout: SMALL }, () => {
+    expect(bypasses(fs.readFileSync(MODEL_SOURCE, 'utf8'))).toEqual([]);
+  });
+
+  it.each([
+    ['a branch on cfg.mutant', "set(F_PC, this.recordsAlive(n, s[at(F_SNAP)]) ? PC.a0 : this.pick('no-relist', PC.j2, PC.jr));", "set(F_PC, this.recordsAlive(n, s[at(F_SNAP)]) ? PC.a0 : cfg.mutant === 'tomb-separate' ? PC.j2 : this.pick('no-relist', PC.j2, PC.jr));"],
+    ['a branch on this.L.cfg.mutant', "if (o === O_NONE) set(F_PC, this.pick('tomb-separate', PC.j2, PC.j1));", "if (o === O_NONE) set(F_PC, this.L.cfg.mutant === 'no-tomb' ? PC.j2 : this.pick('tomb-separate', PC.j2, PC.j1));"],
+    ['a mutant name kept in a variable', "    const R = solo >= 0 ? this.soloReach : this.reach;", "    const R = solo >= 0 ? this.soloReach : this.reach;\n    const other = 'gc-max';"],
+  ])('self-test: a copy with %s is red', { timeout: SMALL }, (_what, from, to) => {
+    const source = fs.readFileSync(MODEL_SOURCE, 'utf8');
+    expect(source.includes(from)).toBe(true);
+    expect(bypasses(source.replace(from, to))).not.toEqual([]);
   });
 });
