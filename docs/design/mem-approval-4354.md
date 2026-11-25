@@ -417,6 +417,20 @@ Issue の直し方 2（行き先の必須化）と追記 2（期限つきの決�
 - 高リスク（データ・mem の契約）なので、各 PR のレビューは系統を分けて 2 本
 - `docs/module-reference.md` は直接書かず、断片で渡す
 
+### 7.1 PR1a の実装の記録（2026-11-22）
+
+- 件数: `decisionCountsOf(mode, items, now)` の `now` を渡したときだけ、§4.1 の 6 つの欄を足して返す（overload）。`now` の無い呼び方は #4355 の 4 つの欄だけを返す（既存の試験が `counts` を `toEqual` で固定しているため）。route・CLI・画面の `counts` の配線は PR2（件数の API と表示）で行う
+- 許可の判定は `close_when` の `{ type: 'at', expires: true }` を読むだけ。印を作るのは PR1c なので、PR1a の間は `grants`・`expiredGrants`・`endedGrants` は実データでは 0
+- 隠された（withheld）項目は行き先が見えないので `pending` に数える（行き先なしと言わない、I4）
+- `expired` は印の有無を問わず、`closed` でない decision の `at` が `now` 以上で付く（`decideAt` と同じ比較）。付くときだけ欄を出す
+- purge は `closed_at >= now - 24h` の decision を常に除く（`MEM_PURGE_RECENT_DECISION_MS`）
+- 既知の残り（レビュー P2-1、PM の裁定 (b)）: 書くとき（`validatePromoteTo`）はディスクに依らない規則だけを見て、ディスクの状態は見ない
+  - 書くときに見ないもの: 親のディレクトリが無い・既存のものが通常のファイルでない（ディレクトリなど）・1 MiB 超
+  - 今の振る舞い: 書くときは通り（exit 0）、preview（`checkDocPath`）で `invalid_destination` になる。画面に理由の文は出ない（`promoteToRefusal` はディスクに依らない規則だけで付くため）
+  - (a) の案: 書くときに親が無いのを exit 2 で断る。公開の CLI の契約の変更なので、人の了承の後にする。試験 `promote-to-one-rule-4354.test.ts` の「既知の残り（#4354 P2-1）」の行が今の振る舞いを固定しており、(a) を入れると赤になる
+- `.git`: 書くときも preview も、正規化（`findSensitivePathSegment`、大文字小文字を問わない）が先に `sensitive_path` で断る。規則の `git_dir` は二重の守りで、入力からは返らない。届くのは、DB に直接 `.git` の下の行き先が書かれた行の `promoteToRefusal` だけ
+- 追加の範囲（Issue のコメント 2026-11-21）: `promote_to` の `path:` は `checkPromoteToPath`（`src/lib/mem/validate.ts`）1 つを、書くとき（`validatePromoteTo`）と preview・承認・書き込みの直前（`checkDocPath`）が通す。ディスクに依らない規則（`.git`・指示ファイル・`.md`）は `src/lib/promote/promote-to-rule.ts` の `promoteToPathRule`。保存済みの行は `presentMemItem` が `promoteToRefusal` で理由を示す
+
 ---
 
 ## 8. 人の決定（11-19、mem 91b25c73）

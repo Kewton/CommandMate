@@ -186,6 +186,13 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   another request carries one '[CommandMate relay] ... (overlap=...)' line under
   the header. When the send's outcome is unknown the relay is left open, nothing
   is resent, and 'commandmate relays --id <relay-id>' shows why it is held.
+  Issue #4535: "not sent" is read only from the send's own answer (a typed
+  sendOutcome=not_sent, a code the route answers before sending, an auth, IP or
+  tool-policy refusal, a refused connection). A bare page from a proxy, a 4xx with no code, or a 2xx that is
+  not a message is unknown: the relay, the --note item and the Auto-Yes grant
+  stay, stderr says to check the pane first, and such a 2xx exits 99. A 409
+  RELAY_BIND_CONFLICT is a copy of the same request holding the relay: nothing
+  is undone unless the relay itself says the send failed.
 
 ### commandmate whoami [--json]
   Which worktree / instance is THIS session? Reads CM_WORKTREE_ID / CM_INSTANCE_ID /
@@ -222,6 +229,10 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
                         the tool policy (no usage declaration); nothing was typed.
                         stderr line 1 'Error [TOOL_POLICY_DENIED]: ...'; --json has
                         "sent": false and "refusal". Do not ask again: tell a person
+    34  SEND TARGET CHANGED  the target changed (or could not be confirmed) mid-send and
+                        the message was not delivered (409 SEND_TARGET_CHANGED with
+                        sendOutcome=not_sent only). Read the roster again, then ask again.
+                        sendOutcome=unknown is 99: check the pane before asking again
     2   a relay refusal (reason on stderr), a bad argument, or the target is on a prompt
   The reply is read by the ask's own id (Issue #4344): printed only when the
   server ties it to this ask (attribution.state "matched"; claude and codex).
@@ -760,6 +771,9 @@ These commands enable coding agents (Claude Code, Codex, etc.) to orchestrate ot
   33  TOOL POLICY DENIED - Refused by the tool policy (antigravity without a usage declaration, Issue #4437);
                          nothing typed, no relay opened (send, ask, respond, --reply-to / --async).
                          Sending again gives the same answer: do not resend, ask a person
+  34  SEND TARGET CHANGED - The target changed (or could not be confirmed) mid-send and the message was not
+                         delivered (send, ask: 409 SEND_TARGET_CHANGED with sendOutcome=not_sent only).
+                         Read the roster again, then send again. sendOutcome=unknown is 99: check the pane first
   99  UNEXPECTED_ERROR - Unexpected error / resource not found / no verdict
   124 TIMEOUT          - Wait or verification timeout exceeded
 

@@ -151,7 +151,7 @@ describe('middleware sends unauthenticated requests to the same-origin /login (I
     expect(response.status).toBe(401);
     expect(response.headers.get('location')).toBeNull();
     expect(response.headers.get('refresh')).toBeNull();
-    expect(await response.json()).toEqual({ error: 'Unauthorized' });
+    expect(await response.json()).toEqual({ error: 'Unauthorized', code: 'AUTH_REQUIRED' });
   });
 
   it('answers 401 JSON to an Accept: application/json request on a screen path', async () => {
@@ -165,7 +165,7 @@ describe('middleware sends unauthenticated requests to the same-origin /login (I
     const response = await callMiddleware('/api/worktrees', { authorization: 'Bearer wrong' });
 
     expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ error: 'Unauthorized' });
+    expect(await response.json()).toEqual({ error: 'Unauthorized', code: 'AUTH_REQUIRED' });
   });
 
   it('does not loosen anything: the valid cookie passes, a wrong one does not', async () => {

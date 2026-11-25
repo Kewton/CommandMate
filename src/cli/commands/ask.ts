@@ -535,6 +535,10 @@ Exit codes (wait's, unchanged; --async always exits 0 once the relay exists):
        name it (id=...). id=context-limit: the conversation is over the model's
        limit; \`instances <id> kill <instance>\` and ask again in a fresh session
   21   nothing was running to ask
+  34   the send was stopped because its target changed (or could not be
+       confirmed) and the message was not delivered (sendOutcome=not_sent).
+       Read the roster again, then ask again. sendOutcome=unknown is 99:
+       check the pane before asking again
   124  timed out. Look with \`capture <id> --instance <id> --pane --tail 80\`.
        When the send itself returned past the deadline, the message WAS sent
        (stderr says so); do not send it again

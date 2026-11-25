@@ -2578,9 +2578,12 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
     deadRecord(impl, caller, r);
     const succ = recordFor(impl, caller, { pid: process.pid, token: 'T2', v: true });
     const successor = () => replaceFile(path.join(lock, 'owner'), succ);
+    // #4559: the successor comes in after the re-read of the judgement and before the move (bash
+    // pause:recover-rechecked; TS / sync before-move) — the window the re-read cannot close, which the
+    // put-back guards. One put in before the re-read is not moved at all (lock-stalled-recoverer-4559).
     const out =
       impl === 'bash'
-        ? await H.driveBashPaused('guard-head', r, { 'recover-only-judged': successor }, { fault: 'restore-mkdir=EACCES' })
+        ? await H.driveBashPaused('guard-head', r, { 'recover-rechecked': successor }, { fault: 'restore-mkdir=EACCES' })
         : await H.drive(impl, 'guard-head', r, { fault: 'restore-mkdir=EACCES', hooks: { onRecover: (s: string) => (s === 'before-move' ? successor() : undefined) } });
     return {
       code: out.code,

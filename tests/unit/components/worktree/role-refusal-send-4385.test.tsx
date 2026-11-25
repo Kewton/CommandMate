@@ -125,7 +125,7 @@ describe('[#4385 A4] (negative controls) other failures are shown as before', ()
   });
 
   it('a 409 without roleRefusal (another conflict) carries no role reason', async () => {
-    installFetch(() => new Response(JSON.stringify({ error: 'conflict', code: 'FOREIGN_SESSION' }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
+    installFetch(() => new Response(JSON.stringify({ error: 'conflict', code: 'FOREIGN_SESSION', sendOutcome: 'not_sent' }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
     renderPane();
     await sendBody();
     expect(screen.queryByTestId('optimistic-error-reason')).toBeNull();

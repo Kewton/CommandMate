@@ -180,7 +180,7 @@ describe('[#4503] U5 (a) the plain awaited send', () => {
   });
 
   it.each([
-    ['400', () => new ApiError('content is required', 400, { error: 'content is required' })],
+    ['400', () => new ApiError('content is required', 400, { error: 'content is required', sendOutcome: 'not_sent' })],
     ['500 sendOutcome:not_sent', () => new ApiError('session start failed', 500, { error: 'session start failed', sendOutcome: 'not_sent' })],
   ])('(positive control) %s: its error shows and Enter sends again directly', async (_name, make) => {
     sendMessageMock.mockRejectedValueOnce(make()).mockResolvedValue({ id: 's2', role: 'user', content: 'x', timestamp: new Date() });

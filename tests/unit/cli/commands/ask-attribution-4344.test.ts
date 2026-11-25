@@ -215,7 +215,7 @@ describe('PR3 (1)(2): a tool or server that cannot attribute does not collect (I
   it('a send answer with no `ask` (the field was not read) is server_unsupported, not a ledger read', async () => {
     mockServer({
       '/api/asks/capabilities': { protocol: 1, tools: PR2_TOOLS },
-      'POST /send': { id: 'm1' },
+      'POST /send': { id: 'm1', role: 'user' },
       '/current-output': frame,
     });
 
@@ -269,7 +269,7 @@ describe('PR3 (1)(2): a tool or server that cannot attribute does not collect (I
   it('the server turning a command body down (slash_command) reads no ledger', async () => {
     mockServer({
       '/api/asks/capabilities': { protocol: 1, tools: PR2_TOOLS },
-      'POST /send': { id: 'm1', ask: { id: null, state: 'unavailable', reason: 'slash_command' } },
+      'POST /send': { id: 'm1', role: 'user', ask: { id: null, state: 'unavailable', reason: 'slash_command' } },
       '/current-output': frame,
     });
 

@@ -35,6 +35,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { BaseCLITool } from './base';
+import { fenceGate, rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import {
@@ -280,6 +281,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
         await this.createLaunchPane(sessionName, worktreePath);
       }
 
+      fenceGate('geometry');
       try {
         await execFileAsync('tmux', [
           'resize-window', '-t', exactTarget(sessionName),
@@ -310,6 +312,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
       await attachOpencodeV2EventStream(target);
       logger.info('started-opencode-v2-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       throw new Error(`Failed to start OpenCode V2 session: ${getErrorMessage(error)}`);
     }
   }
@@ -397,6 +400,7 @@ export class OpenCodeV2Tool extends BaseCLITool {
       invalidateCache(sessionName);
       logger.info('sent-message-to-opencode-v2-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to OpenCode V2: ${getErrorMessage(error)}`, { cause: error });
     }

@@ -4,6 +4,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { rethrowFenceRefusal } from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import {
   sendKeys,
@@ -358,6 +359,7 @@ export class CodexTool extends BaseCLITool {
 
       logger.info('started-codex-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Codex session: ${errorMessage}`);
     }
@@ -748,7 +750,8 @@ export class CodexTool extends BaseCLITool {
           continue;
         }
 
-      } catch {
+      } catch (error: unknown) {
+        rethrowFenceRefusal(error);
         // Capture may fail during initialization - continue polling
       }
       await new Promise((resolve) => setTimeout(resolve, CODEX_POLL_INTERVAL_MS));
@@ -982,7 +985,8 @@ export class CodexTool extends BaseCLITool {
           // prompt below stale dialog scrollback IS accepted.
           return;
         }
-      } catch {
+      } catch (error: unknown) {
+        rethrowFenceRefusal(error);
         // Capture may fail - continue polling
       }
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -1048,6 +1052,7 @@ export class CodexTool extends BaseCLITool {
 
       logger.info('sent-message-to-codex-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to Codex: ${errorMessage}`, { cause: error });

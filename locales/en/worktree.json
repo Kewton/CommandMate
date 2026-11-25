@@ -75,6 +75,24 @@
       "artifactFailed": "The role's file could not be prepared, so the session was not started and nothing was sent. Check the role settings and send again.",
       "other": "Nothing was sent because the session's role condition did not hold. Check the role settings and, if needed, stop the session and start it again."
     },
+    "sendTargetChanged": {
+      "reason": {
+        "worktreeGone": "The worktree is gone",
+        "targetGone": "The instance it was going to left the roster",
+        "toolChanged": "The tool of the instance it was going to was replaced",
+        "dispatchChanged": "The way the instance it was going to is started was replaced",
+        "unreadable": "The target could not be confirmed",
+        "other": "The target was replaced while sending"
+      },
+      "notSent": "{reason}. Nothing was sent (it was going to {target}).",
+      "textReturned": "The text is back in the composer; while its target is not the original one, you are asked before it is sent.",
+      "textNotReturned": "The text could not be put back in the composer: the check of its target could not be saved.",
+      "unknown": "{reason}. It is not known whether it arrived. Check the screen of {target} before sending it again.",
+      "retargetConfirm": "This text was stopped on its way to {original}. The target is now {current}. Send it to {current}?",
+      "retargetConfirmYes": "Send",
+      "retargetConfirmNo": "Cancel",
+      "retargetConfirmUnreadable": "Could not check whether this text was stopped on its way to another target (the target check cannot be read). Send it to {current}?"
+    },
     "retrySending": "Retry sending message",
     "discard": "Discard",
     "discardMessage": "Discard message",
@@ -445,7 +463,12 @@
       "plugin-authoring": "Load the reference Claude uses to write a mod",
       "slides": "Make a new Claude Slides presentation from your brief",
       "daybreak": "Turn Daybreak on or off",
-      "presets": "Run or save reusable prompts and slash commands"
+      "presets": "Run or save reusable prompts and slash commands",
+      "claude-approvals": "Edit, explain, or tune a Claude Approvals policy file or classifier",
+      "ship": "Commit and push your work where /ship can, open a GitHub pull request for your branch if it has none, then review the change",
+      "steward": "Watch your open GitHub pull request in this session and push fixes for review feedback and failing checks, without the review that /ship runs first",
+      "whiteboard": "Make a new whiteboard from your brief as a Claude Whiteboards artifact, for example /whiteboard a service map of the checkout flow",
+      "rc": "manage remote control for the local background server"
     }
   },
   "session": {

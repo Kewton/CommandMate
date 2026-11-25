@@ -34,7 +34,7 @@ describe('createSendCommand', () => {
 
 describe('send command action', () => {
   it('sends message with content key', async () => {
-    mockFetchResponse({ id: 1, role: 'user', content: 'hello', worktreeId: 'wt1' }, 201);
+    mockFetchResponse({ id: 'msg-1', role: 'user', content: 'hello', worktreeId: 'wt1' }, 201);
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     const cmd = createSendCommand();
     await cmd.parseAsync(['node', 'send', 'wt1', 'hello world']);
@@ -50,7 +50,7 @@ describe('send command action', () => {
   });
 
   it('sends with --agent flag (cliToolId)', async () => {
-    mockFetchResponse({ id: 1, role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
+    mockFetchResponse({ id: 'msg-1', role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     const cmd = createSendCommand();
     await cmd.parseAsync(['node', 'send', 'wt1', 'test', '--agent', 'codex']);
@@ -68,7 +68,7 @@ describe('send command action', () => {
     // the grant's own route refuses a tool the policy restricts (#4436), writing nothing.
     const mockFn = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') })
-      .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') });
+      .mockResolvedValueOnce({ ok: true, status: 201, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve({ id: 'msg-1', role: 'user' }), text: () => Promise.resolve('{"id":"msg-1","role":"user"}') });
     global.fetch = mockFn;
 
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
@@ -115,7 +115,7 @@ describe('send command action', () => {
   });
 
   it('sends with --model flag for copilot', async () => {
-    mockFetchResponse({ id: 1, role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
+    mockFetchResponse({ id: 'msg-1', role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     const cmd = createSendCommand();
     await cmd.parseAsync(['node', 'send', 'wt1', 'test', '--agent', 'copilot', '--model', 'gpt-5-mini']);
@@ -174,7 +174,7 @@ describe('send command action', () => {
 
   // Issue #989: antigravity --model support
   it('sends with --model flag for antigravity', async () => {
-    mockFetchResponse({ id: 1, role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
+    mockFetchResponse({ id: 'msg-1', role: 'user', content: 'test', worktreeId: 'wt1' }, 201);
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     const cmd = createSendCommand();
     await cmd.parseAsync(['node', 'send', 'wt1', 'test', '--agent', 'antigravity', '--model', 'Gemini 3.1 Pro (High)']);
@@ -200,7 +200,7 @@ describe('send command action', () => {
   it('sends auto-yes after message when --model and --auto-yes combined', async () => {
     // With --model, auto-yes should be enabled AFTER the send (not before)
     const mockFn = vi.fn()
-      .mockResolvedValueOnce({ ok: true, status: 201, json: () => Promise.resolve({ id: 1 }), text: () => Promise.resolve('{"id":1}') })
+      .mockResolvedValueOnce({ ok: true, status: 201, headers: new Headers({ 'content-type': 'application/json' }), json: () => Promise.resolve({ id: 'msg-1', role: 'user' }), text: () => Promise.resolve('{"id":"msg-1","role":"user"}') })
       .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve({}), text: () => Promise.resolve('{}') });
     global.fetch = mockFn;
 
@@ -236,7 +236,7 @@ describe('send command action', () => {
     const RESOLVED_CODEX = {
       data: { cliToolId: 'codex', instanceId: 'codex', resolvedBy: 'primary', conflict: null },
     };
-    const SENT = { data: { id: 1 }, status: 201 };
+    const SENT = { data: { id: 'msg-1', role: 'user' }, status: 201 };
     const EXISTING_ROSTER = {
       data: { id: 'wt1', agentInstances: [{ id: 'codex', cliTool: 'codex', alias: 'Codex', order: 0 }] },
     };
@@ -322,7 +322,7 @@ describe('send command action', () => {
     });
 
     it('rejects --register without --instance', async () => {
-      mockFetchResponse({ id: 1 }, 201);
+      mockFetchResponse({ id: 'msg-1', role: 'user' }, 201);
       const { createSendCommand } = await import('../../../../src/cli/commands/send');
       const cmd = createSendCommand();
       await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--register']);
@@ -331,7 +331,7 @@ describe('send command action', () => {
     });
 
     it('rejects --register with a non-primary --instance and no --agent', async () => {
-      mockFetchResponse({ id: 1 }, 201);
+      mockFetchResponse({ id: 'msg-1', role: 'user' }, 201);
       const { createSendCommand } = await import('../../../../src/cli/commands/send');
       const cmd = createSendCommand();
       await cmd.parseAsync(['node', 'send', 'wt1', 'hello', '--instance', 'codex-2', '--register']);
@@ -393,7 +393,7 @@ describe('send refuses when the session is waiting on a prompt (Issue #1708)', (
 // gets past a record that stuck, so it has to reach the server.
 describe('send --ignore-structured-prompt (Issue #1737)', () => {
   it('asks the server to waive the structured half of the guard', async () => {
-    mockFetchResponse({ id: 1, role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
+    mockFetchResponse({ id: 'msg-1', role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     await createSendCommand().parseAsync([
       'node', 'send', 'wt1', 'nudge', '--ignore-structured-prompt',
@@ -410,7 +410,7 @@ describe('send --ignore-structured-prompt (Issue #1737)', () => {
   it('sends the ordinary body without it', async () => {
     // Opt-in, and the field is absent rather than false: an older daemon must
     // see exactly the body it always did.
-    mockFetchResponse({ id: 1, role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
+    mockFetchResponse({ id: 'msg-1', role: 'user', content: 'nudge', worktreeId: 'wt1' }, 201);
     const { createSendCommand } = await import('../../../../src/cli/commands/send');
     await createSendCommand().parseAsync(['node', 'send', 'wt1', 'nudge']);
 

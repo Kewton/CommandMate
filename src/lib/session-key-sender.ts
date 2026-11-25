@@ -24,6 +24,7 @@ import { invalidateCache } from './tmux/tmux-capture-cache';
 import { getErrorMessage } from './errors';
 import { TUI_EXIT_WAIT_MS } from '@/config/cli-tool-timing-config';
 import { createLogger } from '@/lib/logger';
+import { rethrowFenceRefusal } from '@/lib/session/terminal-fence';
 
 const logger = createLogger('session-key-sender');
 
@@ -171,6 +172,8 @@ export async function stopSession(sessionName: string): Promise<boolean> {
 
     return killed;
   } catch (error: unknown) {
+    // Issue #4534 (INV-catch): a refused stop is not a stop that failed quietly.
+    rethrowFenceRefusal(error);
     logger.error('session:stop-failed', { error: getErrorMessage(error) });
     return false;
   }

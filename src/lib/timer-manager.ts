@@ -25,6 +25,9 @@ import { getDbInstance } from '@/lib/db/db-instance';
 import { createLogger } from '@/lib/logger';
 import { TIMER_CLEANUP_RETENTION_DAYS, TIMER_STATUS } from '@/config/timer-constants';
 import { sendUserMessage } from '@/lib/session/send-user-message';
+import { runWithSendTicket, type SendTicketHandle } from '@/lib/session/terminal-fence';
+import { classifySendFenceOutcome, reportSendFenceOutcome } from '@/lib/session/send-fence-outcome';
+import { timerSendTicketInit } from '@/lib/session/send-target-names';
 import type { CLIToolType } from './cli-tools/types';
 import { getOrInitGlobal } from './global-state';
 import { decideToolPolicy, TOOL_POLICY_DENIED_MESSAGE, USAGE_DECLARATION_ENV } from './tool-policy/policy';
@@ -75,6 +78,8 @@ function getState(): TimerManagerState {
 async function executeTimer(timerId: string): Promise<void> {
   const state = getState();
   const db = getDbInstance();
+  // [Issue #4534] PR-B: the send's ticket, once it is open.
+  let ticket: SendTicketHandle | null = null;
 
   try {
     const timer = getTimerById(db, timerId);
@@ -138,17 +143,29 @@ async function executeTimer(timerId: string): Promise<void> {
     // rather than the low-level cliTool.sendMessage, so timer-fired messages also
     // record the user message in chat_messages and start response polling —
     // otherwise they never appear in Message History.
-    const result = await sendUserMessage(db, {
-      worktreeId: timer.worktreeId,
-      content: timer.message,
-      cliToolId: timer.cliToolId as CLIToolType,
-      instanceId,
-    });
+    // [Issue #4534] Under the timer's send ticket: its own row still `sending`.
+    // PR-B: its handle kept for a throw's classification below.
+    const result = await runWithSendTicket(
+      timerSendTicketInit(db, { id: timerId, worktreeId: timer.worktreeId, instanceId, cliToolId: timer.cliToolId as CLIToolType }),
+      () => sendUserMessage(db, {
+        worktreeId: timer.worktreeId,
+        content: timer.message,
+        cliToolId: timer.cliToolId as CLIToolType,
+        instanceId,
+      }),
+      (opened) => {
+        ticket = opened;
+      }
+    );
 
     if (!result.ok) {
+      // [Issue #4534] PR-B: the fence's refusal, classified. The target changed:
+      // the reason says so in its head (C6) instead of the stage.
+      const fence = 'fence' in result ? result.fence : undefined;
+      reportSendFenceOutcome('timer', fence);
       // [Issue #1107] Persist the failure reason so the detail modal can show
       // it (previously logged server-side only).
-      const reason = `[${result.stage}] ${result.error}`;
+      const reason = `[${fence?.kind === 'target-changed' ? 'target_changed' : result.stage}] ${result.error}`;
       updateTimerStatus(db, timerId, 'failed', undefined, reason);
       logger.error('timer:send-failed', { timerId, stage: result.stage, error: result.error });
       return;
@@ -158,7 +175,11 @@ async function executeTimer(timerId: string): Promise<void> {
 
     logger.info('timer:sent', { timerId, worktreeId: timer.worktreeId });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const fence = classifySendFenceOutcome(error, ticket);
+    reportSendFenceOutcome('timer', fence);
+    const thrown = error instanceof Error ? error.message : String(error);
+    // [Issue #4534] C6: a refusal of the timer's own fence says so in its head.
+    const msg = fence?.kind === 'target-changed' ? `[target_changed] ${thrown}` : thrown;
     try {
       // [Issue #1107] Persist the thrown error message as the failure reason.
       updateTimerStatus(db, timerId, 'failed', undefined, msg);

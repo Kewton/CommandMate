@@ -85,6 +85,38 @@ llms.txt の一致を見ている）。
 | ~80% of my instructions sent from a phone (my estimate) | 作者の感覚値。必ず「estimate」と書く |
 | 689 PRs merged in September 2026, across my repositories | GitHub search `author:Kewton is:pr is:merged merged:2026-09-01..2026-09-30` |
 
+### リポジトリ規模と Milestone 実測（as observed）
+
+CommandMate 本体のリポジトリを CommandMate 自身で開発したときの規模と運用の記録（Issue #4568）。製品の性能の主張ではない。
+上の表や hero の数字とは別物で、hero には置かない。数字ごとに **測った版・日付が違う**ので、版や日付と切り離して書かない。
+
+| 数字 | 値 | 測った対象 | 出典 |
+|---|---|---|---|
+| `src/` の TypeScript / TSX | 1,788 ファイル ・ 468,652 行 | `v0.55.0` タグ（commit `337be86e5`）。空行・コメントも数えた物理行。develop の作業ツリーの値ではない | `v0.55.0` タグに対する `git ls-tree` ・ `git show` ・ `wc -l`（コマンドは表の下） |
+| テスト | 3,223 ファイル ・ 59,177 試験 | `v0.54.0` の #4488 の変更前に測った数（#4488 のガードを足した後は +1 ファイル ・ +2 試験）。`tests/unit` + `tests/integration` を `workspace/` の無い状態で `vitest list` した数。`v0.55.0` の数ではなく、E2E（Playwright）は含まない | `CHANGELOG.md` の `## [0.54.0]` にある #4488 の項 |
+| PR の CI | Lint（ESLint と `shellcheck` の `lint:sh`）・ Type Check ・ Unit Tests（4 shard）・ Integration Tests ・ E2E Tests（Playwright、2 shard）・ Build ・ Security Audit。ほかにサイズ・制御文字・token・route export・旧 tmux のガードのジョブがある | `v0.55.0` タグと develop（`19ef66dd6`）で同じ内容 | `.github/workflows/ci-pr.yml` のジョブ `lint` ・ `type-check` ・ `test-unit`（`matrix.shard: [1, 2, 3, 4]`）と `test-unit-result` ・ `test-integration` ・ `test-e2e`（`matrix.shard: [1, 2]`）と `test-e2e-result` ・ `build` ・ `security-audit` |
+
+| Milestone | closed / open の Issue | Milestone を閉じた日 | リリース（版の日付） | 出典 |
+|---|---|---|---|---|
+| Sprint 7（#2） | closed 9 ・ open 1 | 2026-11-19 | `v0.53.0`（2026-11-19） | GitHub Milestones API、`CHANGELOG.md` の `## [0.53.0]` |
+| Sprint 8（#3） | closed 15 ・ open 0。受け入れは 46 項目中 44 が合格、不合格 0 | 2026-11-20 | `v0.54.0`（2026-11-21） | GitHub Milestones API、`CHANGELOG.md` の `## [0.54.0]` の Highlight（受け入れの数） |
+| Sprint 9（#4） | closed 9 ・ open 0 | 2026-11-22 | `v0.55.0`（2026-11-22） | GitHub Milestones API、`CHANGELOG.md` の `## [0.55.0]` |
+
+- コードの規模は次のコマンドで再現できる（作業ツリーではなくタグの中身を読む）:
+
+  ```bash
+  git ls-tree -r --name-only v0.55.0 -- src | grep -E '\.(ts|tsx)$' | wc -l      # 1788
+  git ls-tree -r --name-only v0.55.0 -- src | grep -E '\.(ts|tsx)$' \
+    | while read -r f; do git show "v0.55.0:$f"; done | wc -l                    # 468652
+  ```
+
+- Milestone の数は `gh api 'repos/Kewton/CommandMate/milestones?state=all'` の `closed_issues` ・ `open_issues` ・ `closed_at`（UTC の日付）を
+  2026-11-23 に取得した値。Issue があとで Milestone に足し引きされると変わるので、取得日を添えて書く
+- Milestone を閉じた日とリリースの日は別の事実である。Sprint 8 は Milestone を 2026-11-20 に閉じ、`v0.54.0` は 2026-11-21 に出した
+- 範囲は Sprint 7〜9 だけ。Sprint 10 以降はここに無いので書かない（§5「未計測の数字」）
+- 表を載せるときは、表の直下に `as observed`（ja: `as observed（実測した範囲）`）と、上の「測った対象」（版 ・ 計測条件）を添える。
+  表だけを切り出して使わない。1 つのリポジトリでの記録なので、ほかのリポジトリでの速さ ・ 規模の主張に広げない
+
 ---
 
 ## 2. 対応エージェントの数え方
@@ -131,11 +163,39 @@ llms.txt の一致を見ている）。
 | `verify history` | `commandmate verify history` サブコマンド | `src/cli/commands/verify.ts` |
 | `report metrics` | `commandmate report metrics` サブコマンド | `src/cli/commands/report.ts` |
 | worktree 1 つと契約 1 つ | worktree ごとの独立セッション + 契約ファイル | `src/lib/session/` ・ `.commandmate/tasks/` |
-| 入力待ちが届く（バッジ / トースト / タブタイトル / 通知） | App Badge ・ Toast ・ `document.title` ・ Web Push | `src/hooks/useAttentionBadge.ts` ・ `src/lib/pwa/attention-badge.ts` ・ `src/components/common/Toast.tsx` ・ `src/lib/push/waiting-push-notifier.ts` |
+| 入力待ちが届く（バッジ / トースト / タブタイトル / 通知） | App Badge ・ Toast ・ `document.title` ・ Web Push。Web Push は VAPID の鍵（`CM_VAPID_PUBLIC_KEY` ・ `CM_VAPID_PRIVATE_KEY`）ができるまで無効で、鍵は `commandmate init` が作る（加えてブラウザ側の購読が要る） | `src/hooks/useAttentionBadge.ts` ・ `src/lib/pwa/attention-badge.ts` ・ `src/components/common/Toast.tsx` ・ `src/lib/push/waiting-push-notifier.ts` ・ `src/cli/commands/init.ts`（VAPID の鍵の生成） |
 | 8 種のエージェント | `CLI_TOOL_IDS`（9 件。opencode と opencode-v2 を 1 種と数える。§2） | `src/lib/cli-tools/types.ts` の `CLI_TOOL_IDS` |
 | `wait --verify` | `commandmate wait --verify` オプション | `src/cli/commands/wait.ts` |
 | plan → dispatch → merge → uat | 4 つの runner が別々の起動で動き、どれも次の phase を勝手に始めない。mutation は `--approve` を付けた起動だけ | `cmate-orchestrate` Skill の `SKILL.md` |
 | 別のエージェントへレビューに出す | `commandmate ask`、`cmate-delegate` Skill | `src/cli/commands/ask.ts` ・ 公式 Catalog の `cmate-delegate` |
+| `commandmate mem`（型付きのメモ。`now` ・ `add` ・ `--close-when`） | kind は `now` ・ `waiting` ・ `decision` ・ `next` ・ `external` ・ `note` の 6 つ。`--close-when` は書くときに構文と kind の組を確かめて保存し、閉じるかどうかは `mem list` ・ `mem check` ・ brief ・ 画面のプレビューが呼ばれたときにその場で評価する（タイマーも常駐も無い）。mem の mode（`off` ・ `derived` ・ `on`）が `on` のブランチで書ける。mode の既定は `off` で、`off` ・ `derived` では exit 50 で何も保存しない。mode は画面でだけ変える | `src/cli/commands/mem.ts` の `createMemCommand`（`now <text>` ・ `add` の `--close-when`）・ `src/types/mem.ts` の `MEM_KINDS` ・ `MEM_MODES` ・ `src/lib/mem/service.ts` の `memWriteNow` ・ `memAddItem` ・ `src/lib/mem/close-when.ts` の `parseCloseWhen` ・ `finalizeCloseWhen` ・ `src/lib/mem/evaluate.ts` の `evaluateMemConditions` ・ `src/lib/db/mem-db.ts`（設定が無いときの fallback は mode `off`） |
+| `brief` で再起動の後に続きを渡す | `commandmate brief` が派生した状態と mem の項目をバイト数の上限内でまとめる。mode が `derived` のときは派生した状態だけを出し、手で書いた項目は出さない（`off` は何も出さず exit 50）。send への自動の注入は、mode が `derived` か `on` で、**かつ** 機能 `injectOnStart` が有効なときだけ（既定は無効。画面の mem の設定で切り替える）で、会話の境目（起動 ・ 自動再起動 ・ reset ・ resume ・ 明示）の後の最初の send の前に一度だけ brief を置く。それ以外では何も足さず、send の本文はそのまま送る | `src/cli/commands/brief.ts` の `createBriefCommand`（`--budget` ・ `--session-start`）・ `src/lib/mem/present.ts` の `presentMemItem` ・ `src/lib/brief/sources.ts` の `BRIEF_DERIVED_SOURCES` ・ `src/lib/session/brief-provider.ts` の `BriefBoundaryKind` ・ `getBriefProvider` ・ `src/lib/session/session-brief.ts`（`target.mode === 'off'` と `target.features.injectOnStart` が偽なら注入を skip）・ `src/types/mem.ts` の `MEM_FEATURE_KEYS` ・ `src/lib/db/mem-db.ts` の `NO_FEATURES`（`injectOnStart: false`）・ `src/lib/mem/settings-service.ts`（`PUT …/mem-settings/branches` の `injectOnStart`） |
+| 決定の反映は画面からだけ承認する（`screen_only`）。エージェントの指示ファイルへは書かない | promote の preview ・ approve などは画面からのリクエストでなければ 403 `screen_only` で断る。行き先の `path:` は `CLAUDE.md` ・ `AGENTS.md` ・ `.claude/` などエージェントの指示ファイル（大文字小文字を区別しない）と `.md` でないファイルを断る。反映する決定（`mem add --kind decision`）は mem の mode が `on` のブランチでしか書けない（既定は `off`） | `src/lib/promote/service.ts` の `promotePreview` ・ `promoteApprove`（`isScreenRequest` が偽なら `promoteError('screen_only')`）・ `src/lib/promote/destination.ts` の `checkDocPath` と、そこから再 export する `AGENT_INSTRUCTION_PATHS`（定義は `src/lib/promote/promote-to-rule.ts`） |
+| ロールを決めて起動する（`commandmate roles` ・ `send --role`、exit 32） | ロールは起動時に固定。`send --role` は条件で、合わない ・ 起動の記録が無いときは何も打たずに exit 32（設定は保存済み）。使用中のロールの削除などは exit 31 | `src/cli/commands/roles.ts` の `createRolesCommand`（`list` ・ `show` ・ `add` ・ `edit` ・ `rm` ・ `default` ・ `defaults`）・ `src/cli/commands/send.ts` の `--role` ・ `--no-role` ・ `src/cli/commands/send-validation.ts`（`role` ・ `expectedRole` を送信本文に載せる）・ `src/cli/types/index.ts` の `RoleExitCode.NOT_SENT`（32）・ `RoleExitCode.CONFLICT`（31）・ `src/cli/utils/role-failure.ts`（`ROLE_CONDITION_UNMET` などを 32 に対応づける） |
+| 1 画面で完結する UI（ターミナルとチャットの切替 ・ チャットのファイルリンク ・ File Tree ・ 画像 / 動画ビューア ・ Notes） | 表示面は `terminal` / `chat` の 2 つ（既定は `terminal`）。チャットの返答の中のパスはファイルを開くリンクになる。ファイルツリー、ファイル ・ 画像 ・ 動画のビューア、Notes などのサブタブを同じ画面に持つ | `src/types/ui-state.ts` の `SurfaceMode` ・ `DEFAULT_SURFACE_MODE` ・ `src/components/worktree/ChatSurface.tsx` の `ChatSurface` ・ `src/lib/chat/chat-file-link-scope.ts` の `ChatFileLinkProvider` ・ `src/components/worktree/FileTreeView.tsx` の `FileTreeView` ・ `FileViewer.tsx` の `FileViewer` ・ `ImageViewer.tsx` の `ImageViewer` ・ `VideoViewer.tsx` の `VideoViewer` ・ `NotesAndLogsPane.tsx` の `NotesAndLogsPane`（`SubTab` の `notes`） |
+| `commandmate remote`（`--provider tailscale` / `cloudflare` と `--auth all` / `remote-only`） | provider は自動で選ぶか `--provider` で指定する。公開の tunnel（Cloudflare Quick Tunnel）は承認（非対話なら `--yes`）が要る。`--auth` は認証の範囲で、既定は `all`。`remote-only` はローカルの listener を認証なしにするので、loopback 以外に bind するサーバーでは断る | `src/cli/commands/remote.ts` の `createRemoteCommand`（`--provider` ・ `--auth` ・ `--yes`）・ `REMOTE_PROVIDER_ALIASES` ・ `PUBLIC_TUNNEL_PROVIDERS` ・ `REMOTE_AUTH_SCOPES` ・ `DEFAULT_REMOTE_AUTH_SCOPE` ・ `parseAuthScope` ・ `src/lib/remote/tailscale.ts` の `tailscaleProvider` ・ `src/lib/remote/cloudflare.ts` の `cloudflareProvider` |
+| Auto Yes（画面のトグルと `commandmate auto-yes`） | 既定は無効で、有効にするのは人（画面では確認のダイアログを通す）。有効な時間は 1〜24 時間（§1）で、時間切れか停止パターンの一致で自動で無効になる。Antigravity には `CM_ANTIGRAVITY_USAGE` の宣言が無いと有効にできない | `src/lib/auto-yes-state.ts` の `setAutoYesEnabled` ・ `disableAutoYes` ・ `src/components/worktree/AutoYesConfirmDialog.tsx` ・ `src/cli/commands/auto-yes.ts` ・ `src/config/auto-yes-duration.ts` ・ `src/lib/tool-policy/policy.ts` の `TOOL_POLICY_TABLE`（`auto-yes` の許可が空） |
+
+### 既定で無効・承認の要る機能（公開面で有効にする条件を書く）
+
+公開面に次の機能を書くときは、有効にする条件を**同じ表の行 ・ 同じ箇条 ・ 同じ段落**に書く（隣の行や次の段落に頼らない）。
+書けないなら書かない。ここに無い既定で無効な機能を公開面に足すときは、先にこの表に行を足す。
+[`tests/unit/docs/public-docs-default-off-conditions-4569.test.ts`](../../tests/unit/docs/public-docs-default-off-conditions-4569.test.ts) の登録表はこの表と同じ ID ・ 同じ扱いで、食い違うと落ちる。
+
+| ID | 機能 | 既定と、有効にする条件 | 公開面の扱い | 根拠 |
+|---|---|---|---|---|
+| F1 | mem に書く（`mem now` ・ `mem add`、kind `decision` を含む） | mode の既定は `off`。書けるのは mode が `on` のブランチだけで、`off` ・ `derived` では exit 50 で何も保存しない。mode は画面でだけ変える | 条件を書く | `src/lib/db/mem-db.ts` の fallback ・ `src/cli/commands/mem.ts` の help ・ `src/lib/mem/service.ts` |
+| F2 | `commandmate brief`（コマンド） | mode が `off`（既定）なら何も出さず exit 50。`derived` は派生した状態だけを出す | 条件を書く | `src/cli/commands/brief.ts` の help |
+| F3 | brief の自動の注入（send の前） | mode が `derived` か `on`、**かつ** `injectOnStart` が有効なときだけ（既定は無効。画面の mem の設定） | 条件を書く | `src/lib/session/session-brief.ts` ・ `src/lib/db/mem-db.ts` の `NO_FEATURES` |
+| F4 | 決定の反映（promote） | 画面からのリクエストだけを受ける（`screen_only`）。反映する決定は F1 と同じく mode が `on` のブランチでしか書けない | 条件を書く（mode が `on`） | 上の表の promote の行 |
+| F5 | Auto Yes | 既定は無効。人が有効にする（画面は確認のダイアログ、時間は 1〜24 時間） | 条件を書く（既定で無効 ・ opt-in ・ 有効にする前の確認のどれか） | 上の表の Auto Yes の行 |
+| F6 | `commandmate remote` の公開の tunnel（Cloudflare Quick Tunnel） | 公開の provider は承認が要り、非対話では `--yes` が無いと断る。Tailscale は承認なし | 条件を書く（承認） | `src/cli/commands/remote.ts` の `PUBLIC_TUNNEL_PROVIDERS` ・ `--yes` |
+| F7 | `remote --auth remote-only` | 既定は `all`。`remote-only` はローカルの listener を認証なしにする | 条件を書く（認証なしになること） | 上の表の remote の行 |
+| F8 | push 通知（Web Push） | `commandmate init` が VAPID の鍵を作るまで無効。加えてブラウザ側の購読が要る | 条件を書く（`commandmate init` か、有効にしたとき） | 上の表の「入力待ちが届く」の行 |
+| F9 | ロール（`commandmate roles` ・ `send --role`） | 既定ではロール無しで起動する。ロールは起動時に固定で、`send --role` が合わなければ exit 32 | 求めない（既定で無効な機能ではなく、ロールを付けたときの振る舞い。上の表のロールの行に従って書く） | 上の表のロールの行 |
+| F10 | Antigravity をエージェント ・ 自動から使う | `CM_ANTIGRAVITY_USAGE` が無い ・ 個人向けの宣言なら、send ・ ask ・ respond ・ relay は人の起動だけ、Schedules ・ Auto Yes は全部断る。サーバーは起動時にだけ読む | 条件を書く（`CM_ANTIGRAVITY_USAGE` か、個人向けのプランでは断ること）。README の Antigravity の注意節は、それ自体が条件の説明なので対象外 | `src/lib/tool-policy/policy.ts` の `TOOL_POLICY_TABLE` ・ `src/lib/tool-policy/declaration.ts` |
+| F11 | スケジュール実行（Schedules） | `CMATE.md` に書いた分だけ動く（書かなければ何も動かない） | 求めない（「あなたが決めた時刻」「`CMATE.md` に書く」で、書いた人が有効にすることが読める） | `src/lib/schedule-manager.ts` |
+| F12 | 確認つきの CLI（`skill install` ・ `update`） | 対話では確認を出し、非対話では `--yes` が無いと断る | 求めない（対話では確認が出て、非対話では CLI が `--yes` を案内する） | `src/cli/commands/skill.ts` ・ `src/cli/commands/update.ts` |
 
 ---
 
@@ -312,3 +372,17 @@ Level は「機能の高度さ」ではなく「**人間が AI 開発組織に�
 | 数字を書かない（成功率 ・ 改善率 ・ 件数など） | §5「未計測の数字」 |
 | エージェントやモデルを比べない（「エージェント X は成功率 N%」のような例示も書かない） | §5「モデルの安さ・賢さの序列」 |
 | `loop` ・ `self-managing` ・ `runs 24/7` ・ `no supervision` を使わない | §5 ・ §7（常駐ではなく、承認は人に来る） |
+
+#### 実装済みと未実装の境目（Issue #4568）
+
+Next — Learn は「記録から次の作業を良くする」方向である。その材料になる機能のうち、次は**実装済み**で、§4 に根拠がある。
+公開面でこれらを Next — Learn の一部として「まだ作っていない」と書かない。逆に、これらがあることを Learn が出来ている証拠としても書かない。
+
+- `commandmate mem`（型付きのメモと `--close-when` の評価）・ `commandmate brief`（再起動の後の引き継ぎ）・ 決定の反映を画面からだけ承認する promote（`screen_only`）
+- `commandmate verify history` ・ `commandmate report metrics`（記録を読むだけ）
+
+**未実装**なのは次の 2 つで、Next — Learn と書くときは上の 5 つの上限をそのまま守る。
+
+- dreaming（Issue #4248、設計 [docs/design/mem-dreaming-4248.md](./mem-dreaming-4248.md)）: 作業の外でエージェントが mem をまとめ直し、
+  人が画面で承認する提案として出す。設計だけがあり、`src/` に実装は無い（2026-11-23、develop `19ef66dd6` で確認。Issue #4248 は open）
+- 検証の履歴や STOP の傾向から、エージェントが自分で振り返って次の作業を変えること。方向だけで、§4 に根拠のある実装は無い

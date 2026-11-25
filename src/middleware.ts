@@ -75,6 +75,19 @@ function isIngressAuthExempt(request: NextRequest): boolean {
 }
 
 /**
+ * Issue #4535 (C12): the `code` of the middleware's refusals on `/api/*`. The
+ * middleware does not know the route, so it says no `sendOutcome`; the CLI and
+ * the screen read these codes as "the request never reached a handler".
+ */
+const AUTH_REQUIRED_CODE = 'AUTH_REQUIRED';
+const IP_DENIED_CODE = 'IP_DENIED';
+
+/** Issue #4535 (C12): the paths the codes above are answered on. */
+function isApiPath(pathname: string): boolean {
+  return pathname === '/api' || pathname.startsWith('/api/');
+}
+
+/**
  * Check if the token has expired.
  * Uses the same expireAt logic as auth.ts (via shared computeExpireAt).
  */
@@ -127,6 +140,11 @@ export async function middleware(request: NextRequest) {
       // [S4-004] Log injection prevention: normalizeIp() + substring(0, 45)
       const safeIp = clientIp ? normalizeIp(clientIp).substring(0, 45) : 'unknown';
       console.warn(`[IP-RESTRICTION] Denied: ${safeIp}`);
+      // Issue #4535 (C12): on `/api/*` a JSON body with a stable code, so the CLI and
+      // the screen read "never reached a handler". Other paths keep the empty 403.
+      if (isApiPath(request.nextUrl.pathname)) {
+        return NextResponse.json({ error: 'Forbidden', code: IP_DENIED_CODE }, { status: 403 });
+      }
       return new NextResponse(null, { status: 403 });
     }
   }
@@ -201,7 +219,11 @@ export async function middleware(request: NextRequest) {
   // CLI requests (with Authorization header) and browser API requests
   // (`/api/*`, `Accept: application/json`) get 401 JSON [Issue #3090]
   if (authHeader || isApiShapedRequest(pathname, request.headers.get('accept'))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Issue #4535 (C12): `/api/*` only — a screen path answered as JSON keeps its body.
+    return NextResponse.json(
+      isApiPath(pathname) ? { error: 'Unauthorized', code: AUTH_REQUIRED_CODE } : { error: 'Unauthorized' },
+      { status: 401 }
+    );
   }
 
   // Screen requests are sent to the same-origin /login by the browser itself.

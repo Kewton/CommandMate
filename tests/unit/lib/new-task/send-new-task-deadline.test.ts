@@ -88,7 +88,8 @@ describe('[#3511] sendNewTask — a body that never finishes', () => {
     const promise = sendNewTask(input(null), request);
     expect(await settleAfter(promise, getSendTimeoutMs() - 1)).toBe(false);
     expect(await settleAfter(promise, 1)).toBe(true);
-    expect(await promise).toMatchObject({ ok: false, kind: 'failed', detail: `Request timed out after ${getSendTimeoutMs()}ms` });
+    // Issue #4535 (C9, INV-S10): running out of time while the body is read is unknown.
+    expect(await promise).toMatchObject({ ok: false, kind: 'unknown', detail: `Request timed out after ${getSendTimeoutMs()}ms` });
   });
 
   it('answers at once and leaves no timer behind when the bodies arrive (negative control)', async () => {

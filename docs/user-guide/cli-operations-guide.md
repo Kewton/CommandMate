@@ -429,6 +429,16 @@ fail-open で、「人間が答えた」を示すイベントが届かない事�
 - Gemini は送信前に入力欄が 15 秒出なければ、何も打たずに `not-sent`（`prompt-not-ready`）で返ります（Issue #3981。以前は待ちを諦めて打っていました）。
 - ロックは 1 つのサーバープロセスの中だけのものです。同じ tmux を 2 つのサーバーが使う場合は調停されません。
 
+### 送信の途中で宛先が変わったとき（Issue #4534）
+
+`send`・`ask` の 1 回の送信の間に宛先（worktree の行・instance の tool・OpenCode の dispatch 先）が変わった、または宛先を確かめる読みが失敗したときは、その先のキー・貼り付け・起動・`prompt_async` を打たずに止め、API は 409 `SEND_TARGET_CHANGED` を返します（ターミナル送信 `POST /api/worktrees/:id/terminal` も同じ）。本文は `{ error, code, reason, target, current, requestId, sendOutcome }` です。`reason` は `worktree-gone` / `target-gone` / `tool-changed` / `dispatch-changed` / `unreadable`（確かめる読みが失敗した。宛先が変わったとは限らない）、`target` は送ろうとした宛先、`current` は今の名簿での解決（分からなければ `null`）。止める前に起動・入力欄の消去・`/model` が済んでいることがあるので、文は「何も入力していない」とは言いません。
+
+- `sendOutcome: not_sent`（本文の入力が始まっておらず、結果の分からない dispatch も残っていないときに止めた。dispatch の前か、最初の POST が 4xx で確実に断られた後）: **exit 34**。名簿を読み直してから送り直せます
+- `sendOutcome: unknown`（本文の入力が始まった後か、結果の分からない dispatch が残っているときに止めた）: exit 99 のまま。本文が届いているかもしれないので、先に `commandmate capture <worktree-id> --pane` で確かめます。結び付けた relay は取り下げません
+- stdout には何も足しません。stderr には今の再送の注意の行の後に `Error: <サーバーの文>` が 1 行出ます
+- `lastSend.reason` は `target-changed`。timer の失敗の理由は `[target_changed] …` で始まります。起動の途中で止めたときは、起動失敗の通知を出しません
+- relay の予約の喪失（500・`code` 無し）・`PROMPT_WAITING`・`roster_changed`（exit 31）・`TOOL_POLICY_DENIED`（exit 33）の答えは変わりません
+
 ### worktree ID の調べ方
 
 ```bash
@@ -752,10 +762,28 @@ relay 配送（`ask --async` / `send --reply-to`）は、relay を**その依頼
   保留し、成立した時点で**境界以降の最も早い候補**を採ります。入力ロックの待ち中に終わった別の依頼の返答や、
   送信に失敗した依頼に返答が届くことはありません。確認待ち（prompt）の通知も同じ条件で、送信の成立時に
   まだ開いている確認だけを伝えます。確認の通知を送っている最中に返答ができたら、通知の後に届けます
-- 送信 API は応答に `sendOutcome`（`sent` / `not_sent` / `unknown`）を返します。CLI が relay を取り消すのは
-  `not_sent`（何も届いていない）のときだけです。409 の予約競合では取り消しません。応答が途絶えたときは
-  `GET /api/relays/:id` で状態を照会し、本文は**自動で再送しません**。分からないときは relay を開いたまま、
-  標準エラーに relay の ID と `commandmate relays --id <relay-id>` を出します
+- 送信 API は応答に `sendOutcome`（`sent` / `not_sent` / `unknown`）を返します。CLI（`send` / `ask`）は
+  **その要求の応答だけ**から、送信を `sent`・`not_sent`（何も入力していないと証明できた）・`unknown`
+  （どちらとも言えない）に読みます（Issue #4535）。`not_sent` と読むのは、JSON の応答が `sendOutcome: "not_sent"`
+  か送信の前にだけ返す `code`（`model_refused`・`RELAY_BIND_INVALID` など、古いサーバー向け）を持つとき、
+  認証・IP 制限の拒否（401 `AUTH_REQUIRED`・403 `IP_DENIED`）、ツールの利用方針の拒否（exit 33）、
+  `ask` の `sendState: "not_sent"`、接続そのものの拒否（`ECONNREFUSED`。IPv4・IPv6 の両方を試したときは
+  全部が拒否のときだけ）です。前段が返した素の頁（HTML の 408・404 など）、`code` の無い JSON の 4xx、
+  JSON として読めても `content-type` が JSON でない本文、空・非 JSON・形の違う 2xx は `unknown` です（2xx の
+  これらは `Error: the server's answer did not say whether the message was sent` と exit 99。ほかの exit は従来どおり）。
+  ただしツールの利用方針の拒否（Issue #4437）だけは `content-type` を見ずに本文から読むので、JSON でない
+  `content-type` の 409 でも `code` が `TOOL_POLICY_DENIED`・`RELAY_TOOL_POLICY_DENIED` なら `not_sent`（exit 33）です
+- 2xx でも次は exit 99 です: `ask` の同じ ID の再送への答え（前の送信の `sendState`）が `sent` でないもの
+  （`not_sent` なら `Error: the server's answer said the message was not sent`）、送れた答えの `ask.sendState`
+  が `sent` でないもの（同じ答えの 2 つの読みが食い違えば弱い方、`unknown` を採ります）
+- relay の取り消し・`--note` の記録を閉じること・この送信が付けた Auto-Yes の取り下げは、`not_sent` で、
+  relay がこの送信のものであるときだけです。`unknown` では本文を**自動で再送せず**、relay を開いたまま、
+  標準エラーに relay の ID と `commandmate relays --id <relay-id>`、pane を確かめてから送り直す旨を出します
+  （relay の無い送信も同じ注意を出します）。結び付いた relay は `GET /api/relays/:id` で状態を照会し、
+  `sent` なら送れたものとして exit 0、`failed` なら `not_sent` として片付けます
+- 409 `RELAY_BIND_CONFLICT`（予約済み）は、同じ依頼の写し（前段の再試行など）が先に relay を予約したもので、
+  この送信の relay ではありません。何も片付けずに relay を照会し、`sent` なら exit 0、`failed` なら片付けて
+  「送り直してよい」と出し、それ以外は「写しが届いているかもしれない」と出します
 - 重なりは証明できたものだけを注記します。返答の本文は `[from <alias> / <worktree>]` の行、注記の 1 行
   （`[CommandMate relay] 注意: この返答は、別の依頼と同じターンで処理された可能性があります（overlap=later）。`）、
   返答の原文の順です。`overlap` は `later`（入力の時点で別のターンが開いていた）・`earlier`（入力から返答までに
@@ -1202,7 +1230,7 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 
 ### 終了コード
 
-`wait` の終了コードに、`ask` 固有の 11・32・33 が加わります。
+`wait` の終了コードに、`ask` 固有の 11・32・33・34 が加わります。
 
 | コード | 意味 | 次のアクション |
 |:------:|------|---------------|
@@ -1214,6 +1242,7 @@ ID を付けた依頼は必ず複数行になるため、`claude` のペイン�
 | 21 | 動いているセッションが無い | `instances <id>` で roster を確認 |
 | 32 | **ROLE NOT_SENT**: ロールの条件を満たさず、本文を入力していない | ロールの設定を見直す |
 | 33 | **TOOL POLICY DENIED**: antigravity への送信・relay（`--async`）を柵が断った。何も打っていない（[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。`--json` は `sent: false` と `refusal` | 再送しない。人に申告の要否を伺う。`auto-yes --enable` の拒否（stderr の 1 行目は `TOOL_POLICY_DENIED`。何も有効になっていない）も 33 |
+| 34 | **SEND TARGET CHANGED**: 送信の途中で宛先が変わった（または確かめられなかった）ので止め、本文は届いていない（`sendOutcome: not_sent`。[送信の途中で宛先が変わったとき](#送信の途中で宛先が変わったときissue-4534)） | 名簿を読み直して送り直す。`sendOutcome: unknown` は 99（先に pane を確かめる） |
 | 99 | 予期しないエラー | — |
 | 124 | タイムアウト。送信が期限を過ぎて返った場合は**送信済み**（stderr に出る） | `capture <id> --instance <id> --pane --tail 80` で見る。**再送しない** |
 
@@ -1323,16 +1352,18 @@ kind は `promptData.type` や `sessionStatusReason`（`antigravity_selection_li
 | `autoYes.enabled` / `pollerActive` | Auto-Yes の有効状態 / サーバの poller が動いているか |
 | `autoYes.pollerRecord` | poller（または permission hook）が最後に「答えなかった」と記録したもの。`screenCorrelation` はこの画面との対応で、記録は画面を名指ししないため `unknown` / `type-mismatch` / `no-prompt-on-screen` のどれか |
 | `autoYes.contractEvaluation` | 契約の方針を**いま**この画面に当てた結果（`policy-withholds` + 理由 / `base-withholds` + 理由 / `policy-permits` / `no-base-answer` / `not-evaluated`）。`base-withholds`（Issue #3822）は契約より前の基本の判定で見送ったことを表し、契約の有無によらない（今は `allow-once-unidentified` だけ。契約を見直しても答えは戻らない）。理由の語は `AutoYesSuppressionReason` と同じ（[理由語の表](#autoyeslastsuppression-ポリシー抑止の観測issue-1684)） |
-| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`prompt-unreported` の本文は提出済みのことがある（`SessionStart` だけ届き http の `UserPromptSubmit` が届かない環境など）ので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる。投げる直前に画面を 1 回読み直し、生成中なら `sent` にする（Issue #4048）。Enter の後に待つ間にセッションが作り直されたときは `not-sent`（`session-replaced`）ではなく `indeterminate`（旧プロセスが受け取った可能性がある。Issue #4048）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる（claude だけ・その本文の送信の記録だけ。claude 以外は warn のログだけで `lastSend` は変えない。Issue #4048）。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、エージェントが終わりペインがシェルに戻っていたため何も打たなかった `agent-not-in-foreground`（Issue #4300。`commandmate instances <worktree-id> kill <instance-id>` でそのインスタンスのセッションを止めてから送り直す）、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、antigravity への送信をツールの利用方針が断った `tool-policy-denied`（Issue #4437。CLI は exit 33）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
+| `lastSend` | このインスタンスへの直近の send の結末（Issue #3759）。`{ at, state, reason }`。`state` は `not-sent`（本文のキーを 1 つも打つ前に失敗。例: `prompt-not-ready`）/ `sent`（送信を確かめた）/ `indeterminate`（一部を打った後に失敗、または結果を確かめられない。composer に本文が残っていれば `reason: composer-residue`。新しい claude セッションの最初の送信で、Enter の後の入力欄に本文が見えないのに claude が `UserPromptSubmit` を報告しなかったときは `prompt-unreported`（Issue #4035）。`prompt-unreported` の本文は提出済みのことがある（`SessionStart` だけ届き http の `UserPromptSubmit` が届かない環境など）ので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる。投げる直前に画面を 1 回読み直し、生成中なら `sent` にする（Issue #4048）。Enter の後に待つ間にセッションが作り直されたときは `not-sent`（`session-replaced`）ではなく `indeterminate`（旧プロセスが受け取った可能性がある。Issue #4048）。`sent` と答えた本文を次の send が入力欄で見つけたときは、その記録が `found-in-composer` に変わる（claude だけ・その本文の送信の記録だけ。claude 以外は warn のログだけで `lastSend` は変えない。Issue #4048）。変わるのはその送信の間だけで、恒久の記録は warn のログ `pre-send-found-submitted-body`）。opencode の HTTP 配送が届いたか分からず、キー入力も 2 回目の HTTP の送信もせずに止めたときは `dispatch-unknown`（Issue #4535。本文は届いていることがあるので、再送の前に `commandmate capture <worktree-id> --pane` で確かめる）。サーバ起動後に記録が無ければ null、古いサーバでは項目自体が無い 。`not-sent` の理由には、`prompt-not-ready` のほか、入力ロック（Issue #3945）に由来する `input-lock-timeout`（待ちの上限を超えた）/ `session-replaced`（待つ間にセッションが作り直された）/ `input-lock-lost`（入力の途中でロックの権利を失った）と、直前の再読込に失敗した `recheck-failed`、エージェントが終わりペインがシェルに戻っていたため何も打たなかった `agent-not-in-foreground`（Issue #4300。`commandmate instances <worktree-id> kill <instance-id>` でそのインスタンスのセッションを止めてから送り直す）、`--reply-to` / `ask --async` の結び付いた relay の予約が本文の直前に失われた（取り消し・期限切れ・別の送信に取られた）`relay-reservation-lost`（Issue #3992）、antigravity への送信をツールの利用方針が断った `tool-policy-denied`（Issue #4437。CLI は exit 33）、送信の途中で宛先が変わった（または確かめられなかった）ため止めた `target-changed`（Issue #4534。本文の入力が始まっておらず結果の分からない dispatch も残っていなければ `not-sent`、そうでなければ `indeterminate`。CLI は `not-sent` のとき exit 34）、送信の柵の使い方の誤り（CommandMate の不具合。宛先のせいではない）`fence-misuse`（Issue #4534。state はその失敗のもの）、長い本文を 1 回の貼り付けで送るときに tmux のバッファへ読み込めなかった（`load-buffer` の失敗。貼り付けの `paste-buffer` は走っていない）`paste-not-started`（Issue #4031。relay の有無によらず `not-sent`、送信 API の `sendOutcome` も `not_sent`。`paste-buffer` の失敗は従来どおり `indeterminate`（`send-error`）・`unknown`）がある（いずれも本文のキーは 1 つも打っていない）。未送信バーの Clear（`POST /api/worktrees/:id/clear-composer`）は、同じ入力ロックを待ち切れない・セッションが作り直された場合に 409 `INSTANCE_INPUT_BUSY` を返す（少し待って再試行）。クリアできなかったときは HTTP 200 のまま `cleared: false` を返す |
 
 **`lastSend` は「最後に終わった送信」ではありません（Issue #4065）。** 送信が並んだときは、入力ロックを渡された順（世代）で決めます。読む側の要求自身の結末とは限りません（自分の結末は `send` のエラーと送信 API の `sendOutcome` で見ます）。
 - ロックを渡された送信の記録（ロックの後・本文の前に断られた `not-sent` も含む）は、同じインスタンスで後からロックを渡された送信の記録が既にあれば残しません。
 - ロックを渡される前に断られた `not-sent`（別サーバーのセッション・起動待ち・起動の失敗・prompt guard・copilot の `/model` の失敗・ロックの待ち切れなど）は、その要求が始まった後にロックを渡された送信の記録が既にあれば残しません。単独の拒否は今までどおり記録されます。
 - 旧い送信が Enter の後に遅れて失敗したときは、それより後にロックを渡された送信の記録が無ければ旧い送信の結末を残します（セッションの作り直しの後でも同じ）。
-- **終わった順のままの経路**: copilot の選択リストのコマンドと `/model`、opencode の HTTP 配送（`unknown` の後のキー入力への切り替えを含む）はロックの順を持たないので、終わった順で記録します（ロックの順も進めません）。
+- **終わった順のままの経路**: copilot の選択リストのコマンドと `/model`、opencode の HTTP 配送（未送信と確かめた後のキー入力への切り替えを含む）はロックの順を持たないので、終わった順で記録します（ロックの順も進めません）。
 - 順序の情報はサーバーのプロセスの中だけにあり、再起動で記録と一緒に消えます。worktree の ID が移ったときは移さずに捨てます。追跡は 1024 インスタンスまでで、追い出されたインスタンスは記録と順序を一緒に失います。公開する項目は `{ at, state, reason }` のままで、`at` は順序には使いません。
 
-**`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。送信 API の失敗の応答には、relay と結び付かない送信でも、その送信の結末が `lastSend` に記録された失敗なら `sendOutcome`（`not-sent` なら `not_sent`、それ以外は `unknown`）が付き（別サーバーのセッションの 409、起動中の 503 `SESSION_STARTING`、起動の失敗も `not_sent`。記録の残らない 400 の拒否には付きません）、CLI は標準エラーに「送り直してよい」か「先に `commandmate capture <worktree-id> --pane` で確かめる」かを 1 行出します（Issue #4011）。
+**opencode の HTTP 配送が届いたか分からないとき（Issue #4535）。** opencode のサーバーへの送信（`prompt_async`）が応答なし・5xx・3xx・204 以外の 2xx（`200 text/html` を除く）で終わったとき、または読み戻しで同じ ID に別の本文があった・読み戻しが決まらなかったときは、本文は届いているかもしれないので、キー入力への切り替えも 2 回目の HTTP の送信（添付画像を送れなかったときのパスの文の送信）もしません。その送信は失敗し、`lastSend` は `indeterminate`（`reason` は `dispatch-unknown`）、送信 API は 500・`sendOutcome: "unknown"` を返します（CLI は exit 99）。送り直す前に `commandmate capture <worktree-id> --pane` で届いていないかを確かめてください。キー入力に切り替えるのは、opencode が受け付けなかった（4xx、Web UI の殻の `200 text/html`。201・202 などほかの HTML の 2xx は届いたか分からない扱い）か、4 回の読み戻し（間の待ちは合わせて 350 ms、各回の上限 5 s）がすべて「その ID の message は無い」（404）と答えたときだけです。送信の途中で宛先が替わったときは、今までどおり 409 `SEND_TARGET_CHANGED` です。答えの `reason` は柵が断った理由（`target-gone` など）、`lastSend.reason` は `target-changed` です。`sendOutcome` は、本文の入力がまだ始まっておらず、結果の分からない dispatch も残っていないとき（dispatch の前に断ったときや、最初の POST が 4xx で確実に断られ、本文を打つ前に柵が止めたとき）は `"not_sent"`、本文の入力が始まった後や、結果の分からない dispatch（応答の無い POST など）が残っているときは `"unknown"` です。
+
+**`lastSend` が何であっても、CommandMate は自動で再送しません。** 再送するのは利用者か監督のエージェントです。`not-sent` は自分で送り直してください（入力欄が戻ってから）。**`indeterminate` のときは再送しないでください。** 先に `commandmate capture <worktree-id> --pane` で画面を見て、本文が入力欄に残っていないか・既に送られていないかを確かめます（確かめずに送ると二重に届くことがあります）。`send` が `prompt not ready` などで失敗したときのエラーにも、同じ状態（`[send state: not-sent (prompt-not-ready): …]`）が書かれます。送信 API の失敗の応答には、relay と結び付かない送信でも、その送信の結末が `lastSend` に記録された失敗なら `sendOutcome`（`not-sent` なら `not_sent`、それ以外は `unknown`）が付き（別サーバーのセッションの 409、起動中の 503 `SESSION_STARTING`、起動の失敗も `not_sent`。記録の残らない拒否は Issue #4535 から下の規則で付きます）、CLI は標準エラーに「送り直してよい」か「先に `commandmate capture <worktree-id> --pane` で確かめる」かを 1 行出します（Issue #4011）。**記録の残らない拒否と後始末の失敗（Issue #4535）。** 送信の service に入る前に route が断った答え（worktree 無しの 404、本文の読み・検査の 400、409 `ASK_ID_CONFLICT`、400 `RELAY_BIND_INVALID`・500 `RELAY_BIND_FAILED`、400 `model_refused`、400 `INVALID_PATH`、route の中の予期しない 500 など。試行は記録しないので `lastSend` は変わりません）には、拒否ごとではなく 1 つの規則で `sendOutcome: "not_sent"` が付きます（status・`code`・文は今のまま）。409 `RELAY_BIND_CONFLICT`（結び付けた relay を別の試行が持っている）は `"unknown"` です（その写しが届いているかもしれないので、relay・note・Auto-Yes に触らず確かめる）。brief の選び直しの 409 は `code: "brief_choice"` と `sendOutcome: "not_sent"` が付きます（`error` の値は今のまま）。結び付けた relay の台帳を書けなかった（後始末の失敗）ときは、`sendOutcome` は送信の事実のまま変わらず、答えに `relaySettled: false` が付きます（書けたときは付きません）。台帳を `failed` にするのは何も打っていないと言える試行だけで、本文の入力の前でも `indeterminate` と記録された試行の relay は `unknown` で残ります。認証を通らなかった `/api/*` の 401 は `{ error: "Unauthorized", code: "AUTH_REQUIRED" }`、IP の制限の 403 は `{ error: "Forbidden", code: "IP_DENIED" }` です（どちらも route に届いていないので本文は送られていません。`/api/*` 以外の画面の道は今のまま）。
 
 **記録が無いこと（`pollerRecord: null`）は「Auto-Yes が答えられる」という意味ではありません。** poller がその画面に届いていない場合も記録は残りません（Issue #3746）。
 `policy-permits` も「契約が止めない」だけで、poller の他の判定（ツール固有のダイアログ読み取り等）は含みません。
@@ -3770,7 +3801,9 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 - `--close-when`：`manual` ・ `replaced`（now だけ）・ `issue:[host/owner/repo]#N` ・ `pr:[host/owner/repo]#N[?state=merged|closed]` ・ `branch:<name>?merged=<ref>[&scope=local|remote]` ・ `branch:<name>?deleted` ・ `relay:<id>` ・ `worktree:<id>` ・ `session:task:<id>` ・ `session:verify:<run id>` ・ `session:schedule:<実行ログ id>` ・ `at:<オフセット付き ISO 8601>`。`session:` は CommandMate が終わりを記録している 3 種類だけ（tmux のセッション名・PID は受けない）。`branch:…?deleted` も書いた時点の tip を保存する（ref が無ければ空）
 - `update` / `close` ができるのは作成した instance（同じ世代）と人（画面）だけ。instance を消して同じ ID で作り直すと別の世代になり、前の項目は変えられない（exit 55）
 - `--key` を付けた `add` は、同じ key・同じ内容の再送で最初の項目を返す（`replayed: true`）。中身が違えば exit 54
-- `purge` は `--confirm` が無いと何も消さず、消える件数だけを出す。`recorded` / `promoted` の決定は `--include-decisions` が無いと対象にしない。Agent のセッションの中からは断る（exit 55）
+- `purge` は `--confirm` が無いと何も消さず、消える件数だけを出す。`recorded` / `promoted` の決定は `--include-decisions` が無いと対象にしない。**直近 24 時間に閉じた決定は、どの指定（`--include-decisions` を含む）でも消さず、件数にも入れない**（終わった許可・取り下げた決定を人が見られる窓。24 時間を過ぎると消せる。Issue #4354）。Agent のセッションの中からは断る（exit 55）
+- 件数の警告（`mem list` の `warnings`・`check --suggest` の `open_count`）の decision は、`open` と `recorded` だけを数える。`promoted`（反映済み）は数えない（Issue #4354）
+- `mem list` の行の印：`expired` は decision の `at` の時刻を過ぎた（読むだけの時刻の比較で、閉じはしない）。`promote-to-refused:<理由>` は保存済みの行き先が使えない（下の「自由入力の欄の検査」。`--json` は `expired: true`・`promoteToRefusal`。Issue #4354）
 
 ### 閉じる条件の評価（Issue #4222）
 
@@ -3816,7 +3849,7 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 
 ### 自由入力の欄の検査
 
-すべての自由入力の欄（`text`・`quote`・`evidence`・`promote_to`・`reason`）はサーバで、長さの上限・秘密らしい文字列（トークン・鍵・`password=` など）・制御文字を検査する。`evidence` と `promote_to` の `path:` は repository からの相対パスだけで、絶対パス・`..` で外へ出るもの・symlink を通るもの・`.env` などを断る。断ったときのエラー・`--json`・ログには `code`・`field`・`rule` だけが出て、**断った文字列そのものは出さない**。
+すべての自由入力の欄（`text`・`quote`・`evidence`・`promote_to`・`reason`）はサーバで、長さの上限・秘密らしい文字列（トークン・鍵・`password=` など）・制御文字を検査する。`evidence` と `promote_to` の `path:` は repository からの相対パスだけで、絶対パス・`..` で外へ出るもの・symlink を通るもの・`.env` などを断る。`promote_to` の `path:` は、さらに承認の差分・書き込みと**同じ 1 つの検査**を通る：エージェントの指示ファイル（下の「決定を正本へ記録する」の一覧。大文字小文字は区別しない）と、拡張子が `.md` でないものを、書くとき（`mem add`・画面の追加・handoff の提案）に `invalid_promote_to`（exit 2、`reason` が `agent_instructions` / `not_markdown`）で断り、CLI は直し方の 1 文を添える（`.git` の下は従来どおり書くときに `sensitive_path` で断る。exit 2）。ただし書くときはディスクの状態（親のディレクトリが在るか・既存のものが通常のファイルか・1 MiB 以下か）を見ないので、たとえば親の無い `path:docs/decisions/x.md` は書くときに通り、承認の差分で `invalid_destination` になる（既知の残り）。これより前に保存された行は壊さずに残し、一覧に出したまま `promoteToRefusal` で理由を示し、決定の画面は行き先の下に理由と直し方の 1 文を出す（承認の差分は従来どおり断る。Issue #4354）。断ったときのエラー・`--json`・ログには `code`・`field`・`rule` だけが出て、**断った文字列そのものは出さない**。
 
 ### 終了コード
 
@@ -3824,7 +3857,7 @@ mem add の --close-when は kind が waiting / next / external のとき必須�
 |:------:|------|
 | 0 | 成功（`--key` の再送で既存を返したときも） |
 | 1 | サーバーに届かない |
-| 2 | 入力の不正（`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_key` / `target_required` など）。何も保存していない |
+| 2 | 入力の不正（`invalid_close_when` / `control_char` / `secret_like` / `too_long` / `absolute_path` / `outside_repository` / `symlink` / `sensitive_path` / `invalid_evidence` / `invalid_promote_to` / `invalid_key` / `target_required` など）。何も保存していない |
 | 50 | `disabled`：そのブランチの mode が `off` か `derived`。何も保存していない（`check` は照会もしない） |
 | 51 | `version_conflict`：`--if-version` が今の版と違う。今保存されている項目を返す |
 | 52 | `not_registered` / `item_not_found` / `instance_not_found` / `branch_unresolved` |
@@ -4759,6 +4792,7 @@ commandmate ls --token your-token
 | 31 | ROLE CONFLICT | ロールや名簿の競合（`name_conflict` / `name_changed` / `version_conflict` / `role_in_use` / `instance_exists` / `roster_changed`）。何も変更・送信していない。ロールを付けない `instances add` / `remove` / `alias` でも出る。例外: `remove --kill` はセッションが停止済みのことがある |
 | 32 | ROLE NOT_SENT | ロールの条件を満たさない、またはロールのために起動を拒否。本文は入力していない（`send` / `ask`） |
 | 33 | TOOL POLICY DENIED | 方針（ツールの利用方針）による拒否。何も打っていない（`send` / `ask` / `respond` と relay の作成。`TOOL_POLICY_DENIED` / `RELAY_TOOL_POLICY_DENIED`。[Antigravity への送信の柵](#antigravity-への送信の柵issue-4437)）。送り直しても同じ。`send` の（`--auto-yes` を伴う場合も含めて）`--register` の instance の登録・`--role` のロールの保存・`--contract` のタスクも書かれない（書き込みの要求そのものが断られる。Issue #4449）。ただし `--reply-to` を併用し、送信の途中で宛先が変わると、タスク（またはロールの設定・名簿の登録）が書かれた後で relay が断られることがある（タスクは `failed`。何も打っていない。既知の制限で、Issue #4466 で直します）。`auto-yes --enable` の拒否（Auto-Yes は有効にならない。[`commandmate auto-yes`](#commandmate-auto-yes)）も 33 |
+| 34 | SEND TARGET CHANGED | `send` / `ask` の途中で宛先が変わった（または確かめられなかった）ので止め、本文は届いていない（409 `SEND_TARGET_CHANGED` で `sendOutcome: not_sent` のときだけ。`unknown` は 99）。名簿を読み直して送り直せる（[送信の途中で宛先が変わったとき](#送信の途中で宛先が変わったときissue-4534)） |
 | 50〜57 | MEM | `mem` の拒否（50 disabled / 51 version_conflict / 52 対象不明 / 53 ambiguous / 54 duplicate_key / 55 not_owner・state_forbids / 56 limit_exceeded）と、`mem check --suggest` の促しあり（57）。[commandmate mem](#commandmate-mem) の終了コード。`send --note` を mem が断ったときも 50〜56 で終わる |
 | 99 | UNEXPECTED_ERROR | 予期しないエラー / リソース未検出 |
 | 124 | TIMEOUT | waitのタイムアウト |

@@ -78,6 +78,16 @@ export type SendAttemptReason =
    * origin with no API-key / enterprise use declared (Google Antigravity terms §6, #4437).
    */
   | 'tool-policy-denied'
+  /**
+   * `not-sent` or `indeterminate`: the send's target (the worktree, the
+   * instance's tool, OpenCode's dispatch target) changed — or could not be
+   * confirmed — while it was being sent, so the fence stopped it before the
+   * next change (#4534). `not-sent` only when neither the body nor a dispatch
+   * had started; otherwise the message may be on the pane.
+   */
+  | 'target-changed'
+  /** The send's fence was used wrongly (a bug of CommandMate, not of the target); the state is the failure's own (#4534). */
+  | 'fence-misuse'
   /** `indeterminate`: the body was typed, did not land intact, and was taken back out best-effort (#2464/#3366). */
   | 'body-not-landed'
   /** `indeterminate`: an autocompletion replaced the body; the line was cleared best-effort (#1501). */
@@ -96,6 +106,13 @@ export type SendAttemptReason =
    * still in the composer before typing its own (#4035).
    */
   | 'found-in-composer'
+  /**
+   * `indeterminate`: opencode's server dispatch of the send ended `unknown`
+   * (no answer, a 5xx / 3xx / unexpected 2xx, a read-back that did not
+   * settle), so the sender typed nothing and posted nothing again — the
+   * message may be there (#4535).
+   */
+  | 'dispatch-unknown'
   /** `indeterminate`: any other failure; where it stopped is not known. */
   | 'send-error';
 
@@ -139,3 +156,11 @@ export const INPUT_RECHECK_FAILED_CODE = 'INPUT_RECHECK_FAILED';
  * Read by `classifySendFailure` by code, never by wording.
  */
 export const AGENT_NOT_IN_FOREGROUND_CODE = 'AGENT_NOT_IN_FOREGROUND';
+
+/**
+ * `code` on the error OpenCode's sender throws when it stops after a server
+ * dispatch whose outcome is unknown (Issue #4535): nothing was typed and
+ * nothing posted again, but the message may be there. `classifySendFailure`
+ * reads the send as `indeterminate` (`dispatch-unknown`), never as safe to resend.
+ */
+export const OPENCODE_DISPATCH_UNKNOWN_CODE = 'OPENCODE_DISPATCH_UNKNOWN';

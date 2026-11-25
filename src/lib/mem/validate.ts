@@ -12,6 +12,7 @@
 import { lstatSync } from 'fs';
 import path from 'path';
 import { findSensitivePathSegment } from '@/lib/security/sensitive-file-guard';
+import { promoteToPathRule, type PromoteToPathRefusal } from '@/lib/promote/promote-to-rule';
 import type { MemErrorCode, MemKind } from '@/types/mem';
 import { findSecretRule, type MemSecretRule, MEM_SECRET_RULES } from './secret-scan';
 
@@ -34,6 +35,8 @@ export interface MemFieldError {
   field: string;
   rule?: string;
   limit?: number;
+  /** Issue #4354: why a promote destination is refused (`invalid_promote_to`). */
+  reason?: PromoteToPathRefusal;
 }
 
 export type MemFieldResult<T> = { ok: true; value: T } | { ok: false; error: MemFieldError };
@@ -215,6 +218,22 @@ export function normalizeRepoPath(
   return { ok: true, value: normalized };
 }
 
+/**
+ * The one check of a `promote_to` document path (Issue #4354 I-B1): every entrance that takes
+ * one — `mem add` (CLI・API), the screen's add, a handoff proposal ({@link validatePromoteTo}),
+ * the preview, the approval and right before the write (`checkDocPath`) — goes through it.
+ * The path is normalized ({@link normalizeRepoPath}: relative, inside, no sensitive name, no
+ * symlink on the way), then judged by the disk-free rule (`promoteToPathRule`): no `.git`, no
+ * agent's instruction file, a `.md`. The rule's refusal is `invalid_promote_to` with its reason.
+ */
+export function checkPromoteToPath(raw: string, root: string | null): MemFieldResult<string> {
+  const checked = normalizeRepoPath(raw, root, 'promoteTo', false);
+  if (!checked.ok) return checked;
+  const reason = promoteToPathRule(checked.value);
+  if (reason) return fail('invalid_promote_to', 'promoteTo', { reason });
+  return checked;
+}
+
 const TARGET = '(?:[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?';
 const ISSUE_REF = new RegExp(`^(?:issue|pr):${TARGET}#[1-9][0-9]{0,9}$`);
 const EVIDENCE_SIMPLE = [
@@ -242,7 +261,7 @@ function validateStructured(
     const lineMatch = /^(.*?)(:[1-9][0-9]{0,6})?$/.exec(rest);
     const relative = lineMatch?.[1] ?? rest;
     const line = field === 'evidence' ? (lineMatch?.[2] ?? '') : '';
-    const checked = normalizeRepoPath(field === 'evidence' ? relative : rest, root, field, field === 'evidence');
+    const checked = field === 'evidence' ? normalizeRepoPath(relative, root, field, true) : checkPromoteToPath(rest, root);
     if (!checked.ok) return checked;
     return { ok: true, value: `path:${checked.value}${line}` };
   }

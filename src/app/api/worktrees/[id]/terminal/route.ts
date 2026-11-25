@@ -47,6 +47,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { runWithSendTicket, type SendTicketHandle } from '@/lib/session/terminal-fence';
+import { classifySendFenceOutcome, reportSendFenceOutcome } from '@/lib/session/send-fence-outcome';
+import { answerSendTargetChanged } from '../send/send-target-changed-answer';
+import { routeSendTicketInit } from '@/lib/session/send-target-names';
 import { readJsonObjectBody } from '@/lib/api/read-json-body';
 import { isCliToolType, isValidInstanceId, type CLIToolType } from '@/lib/cli-tools/types';
 import {
@@ -242,9 +246,31 @@ export async function POST(
     // Issue #3945: the send waits its turn for the instance's composer (the
     // input lock in the shared sender) and re-reads the pane once it has it. A
     // dialog found then is the refusal above, found late — the same 409.
+    // Issue #4534 (PR-B): the ticket's handle, for the classification below.
+    let ticket: SendTicketHandle | null = null;
     try {
-      await cliTool.sendMessage(id, command, instanceId);
+      // Issue #4534: under this request's send ticket. The name is the one the
+      // route already holds — the tool's own (`cliTool.getSessionName`).
+      await runWithSendTicket(
+        routeSendTicketInit(
+          db,
+          { worktreeId: id, instanceId, cliToolId: target.cliToolId, resolvedBy: target.resolvedBy },
+          [sessionName]
+        ),
+        () => cliTool.sendMessage(id, command, instanceId),
+        (opened) => {
+          ticket = opened;
+        }
+      );
     } catch (error) {
+      // Issue #4534 (PR-B, design v2 §3.2): the fence's refusal, classified first
+      // by this request's own ticket. The target changed: the send route's 409
+      // SEND_TARGET_CHANGED (C2). Anything else is answered as before.
+      const fence = classifySendFenceOutcome(error, ticket);
+      reportSendFenceOutcome('terminal', fence);
+      if (fence?.kind === 'target-changed') {
+        return answerSendTargetChanged(fence, { db, worktreeId: id, instanceId, cliToolId: target.cliToolId });
+      }
       if (classifySendFailure(error).reason === 'prompt-waiting') {
         logger.info('terminal-send-refused-prompt-waiting-under-lock', { worktreeId: id, cliToolId: target.cliToolId });
         return NextResponse.json(

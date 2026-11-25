@@ -45,6 +45,14 @@
  */
 
 import { BaseCLITool } from './base';
+import {
+  enterSendLayer,
+  fenceConfirm,
+  fenceConfirmDispatch,
+  fenceGate,
+  isFenceRefusal,
+  rethrowFenceRefusal,
+} from '../session/terminal-fence';
 import type { CLIToolType } from './types';
 import type { NavigationKeySpec } from '@/types/cli-tool-contracts';
 import {
@@ -76,6 +84,11 @@ import {
   readBeforeDeadline,
 } from './prompt-wait-dialog';
 import { classifySendFailure } from '@/lib/session/send-attempt-state';
+import { OPENCODE_DISPATCH_UNKNOWN_CODE } from '@/lib/session/send-attempt-types';
+import {
+  classifyOpencodeReadbacks,
+  type OpencodeReadbackAnswer,
+} from '@/lib/send-outcome/opencode-dispatch-outcome';
 import { invalidateCache } from '../tmux/tmux-capture-cache';
 import { ensureOpencodeConfig } from './opencode-config';
 import {
@@ -262,8 +275,12 @@ interface DispatchTrace {
  * The three retries are for the race that measurement did not produce, and they
  * are cheap because the alternative is expensive in one direction only: a
  * `missing` verdict sends the body again over the keyboard, so calling a message
- * missing while it is still being written would deliver it twice. Total worst
- * case 350 ms, inside the HTTP request the operator's send is waiting on.
+ * missing while it is still being written would deliver it twice. Four
+ * read-backs: the waits between them add up to 350 ms, and each read has its
+ * own `OPENCODE_REQUEST_TIMEOUT_MS` (5 s) — all inside the HTTP request the
+ * operator's send is waiting on.
+ * Issue #4535: a `404` is retried too — only a ladder of nothing but `404`s is
+ * `missing`.
  */
 export const OPENCODE_SEND_READBACK_DELAYS_MS: readonly number[] = [0, 50, 100, 200];
 
@@ -445,6 +462,7 @@ export class OpenCodeTool extends BaseCLITool {
       // boundary this depends on (sidebar at >=121 columns, hidden at <=120) and
       // moved the number to `OPENCODE_PANE_WIDTH` / `CM_OPENCODE_PANE_WIDTH`.
       // [SEC-001] Uses execFile (not exec) to prevent shell meta-character injection via sessionName
+      fenceGate('geometry');
       try {
         await execFileAsync('tmux', [
           // Issue #1156: exact-match target so resize never leaks to a prefix-colliding instance
@@ -532,6 +550,7 @@ export class OpenCodeTool extends BaseCLITool {
 
       logger.info('started-opencode-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start OpenCode session: ${errorMessage}`);
     }
@@ -668,16 +687,17 @@ export class OpenCodeTool extends BaseCLITool {
    * front and read back afterwards — the same shape as #2034's idle watch, one
    * request instead of a subscription.
    *
-   * ## What a `missing` verdict costs, and why `unknown` is treated like it
+   * ## What a `missing` verdict costs, and why `unknown` is not treated like it
    *
-   * `missing` is a `404` on the id: nothing exists, so typing the body is free
-   * of duplication. `unknown` — the server stopped answering between the POST
-   * and the read-back — cannot say that, and is still treated as a failure,
-   * following #2034: the operator's message must not be silently dropped, and
-   * a pane whose server just died is one where the keystroke route is the only
-   * one left. The residual risk is one duplicate message inside that window,
-   * and it is logged as `opencode-send-unverified` so it is visible rather than
-   * inferred.
+   * `missing` is a `404` on the id for the whole read-back ladder: nothing
+   * exists, so typing the body is free of duplication. `unknown` — the server
+   * stopped answering between the POST and the read-back, answered a 5xx, or
+   * holds other text under the id — cannot say that. Until Issue #4535 it was
+   * treated like `missing` and the body was typed (or, for an image, posted
+   * again as the path text): one duplicate message whenever the first one had
+   * landed. Now the send ends there, `indeterminate`, with nothing typed and
+   * nothing posted again ({@link dispatchUnknownError}); the operator looks at
+   * the pane before resending. Still logged as `opencode-send-unverified`.
    *
    * ## Issue #3957: the dispatch boundary
    *
@@ -686,10 +706,12 @@ export class OpenCodeTool extends BaseCLITool {
    * relay-bound send records as its lower bound — and which can refuse, in
    * which case nothing is posted and the refusal propagates past the catch
    * below. When the POST does not end delivered, the caller is told whether
-   * nothing exists (`not_sent`: a POST the server refused — Issue #3992 — or a
-   * `404` on the read-back) or it cannot be said (`unknown`: a POST that got no
-   * answer or an unexpected 2xx, a body that read back different, an exhausted
-   * ladder), BEFORE the keyboard fallback runs.
+   * nothing exists (`not_sent`: a POST the server refused — a 4xx or the SPA
+   * shell `200 text/html`, Issue #3992 — or a read-back that was `404` to the end of the ladder)
+   * or it cannot be said (`unknown`: a POST that got no answer, an unexpected
+   * 2xx, a 5xx or a 3xx, a body that read back different, a ladder that did not
+   * settle), BEFORE any fallback runs. Only `not_sent` and `skipped` fall back
+   * (Issue #4535).
    *
    * @param target - The instance
    * @param message - The body, sent verbatim
@@ -720,6 +742,8 @@ export class OpenCodeTool extends BaseCLITool {
     message: string,
     imagePath?: string
   ): Promise<'delivered' | 'skipped' | 'not_sent' | 'unknown'> {
+    // Issue #4534: the detector — a send-only layer.
+    enterSendLayer('dispatchViaServer', this.getSessionName(target.worktreeId, target.instanceId));
     const instanceId = target.instanceId ?? target.cliToolId;
     let dispatched = false;
     try {
@@ -775,6 +799,15 @@ export class OpenCodeTool extends BaseCLITool {
       // §20.5). Null when nothing is configured, and the request body is then
       // byte-identical to the pre-#2048 one.
       const selection = opencodePromptSelection(getOpencodeLaunchSettings(target));
+      // Issue #4534 (design v2 §2.8): the dispatch still goes where the send's
+      // ticket is served — read again in this step, before the boundary is told.
+      fenceConfirmDispatch(
+        { worktreeId: target.worktreeId, instanceId, cliToolId: target.cliToolId },
+        () =>
+          getAssignedOpencodePort(target) === port &&
+          getOpencodeLiveness(target).state === 'live' &&
+          getOpencodePrimarySession(target) === sessionId
+      );
       // Issue #3957: the boundary, right before the POST. A refusal throws and
       // nothing is posted.
       noteDispatchStart();
@@ -782,6 +815,8 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #3992: a POST the server refused (a non-2xx, an unknown route's
       // `200 text/html`) sent nothing. One that got no answer, or an unexpected
       // 2xx, may still have created the message, so it stays unknown.
+      // Issue #4534: the POST's gate, right before it.
+      fenceGate('dispatch');
       const dispatch = await sendOpencodePrompt(port, sessionId, messageId, parts, selection);
       if (dispatch === 'rejected') return 'not_sent';
       if (dispatch === 'unknown') return 'unknown';
@@ -811,7 +846,8 @@ export class OpenCodeTool extends BaseCLITool {
     } catch (error: unknown) {
       // Issue #3957: the relay refused the boundary — nothing was posted, and
       // nothing may be typed either.
-      if (isInputBoundaryRefusal(error)) throw error;
+      // Issue #4534: so did the fence (nothing posted, nothing typed after it).
+      if (isInputBoundaryRefusal(error) || isFenceRefusal(error)) throw error;
       // Nothing above is allowed to take the send down: the keystroke route is
       // still there and is what runs when this answers false.
       logger.warn('opencode-send-api-failed', {
@@ -834,9 +870,17 @@ export class OpenCodeTool extends BaseCLITool {
    * — so the check is that the sent body is *among* the text parts, not that it
    * is the only one.
    *
-   * @returns `found` once the body was found; `missing` on a `404`; `mismatch`
-   *   when a message exists under the id with other text; `unknown` after the
-   *   ladder (Issue #3957 tells the last three apart)
+   * Issue #4535 (design §2.3): a `404` no longer settles it at once. A message
+   * still being written reads `404` too, and `missing` is what lets the
+   * keyboard type the body again — so only a ladder of nothing but `404`s is
+   * `missing`; a `found` on a later read is a delivery, and a ladder that mixes
+   * `404` with other answers is `unknown` ({@link classifyOpencodeReadbacks}).
+   * Four read-backs ({@link OPENCODE_SEND_READBACK_DELAYS_MS}): the waits
+   * between them add up to 350 ms, and each read is bounded at 5 s on its own.
+   *
+   * @returns `found` once the body was found; `missing` when every read of the
+   *   ladder was a `404`; `mismatch` when a message exists under the id with
+   *   other text; `unknown` otherwise (Issue #3957 tells the last three apart)
    */
   private async verifyPostedMessage(
     port: number,
@@ -844,16 +888,16 @@ export class OpenCodeTool extends BaseCLITool {
     messageId: string,
     message: string
   ): Promise<'found' | 'missing' | 'mismatch' | 'unknown'> {
+    const reads: OpencodeReadbackAnswer[] = [];
     for (const waitMs of OPENCODE_SEND_READBACK_DELAYS_MS) {
       if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
       const readback = await readOpencodeUserMessage(port, sessionId, messageId);
       if (readback.kind === 'found') return readback.texts.includes(message) ? 'found' : 'mismatch';
-      // A `404` is the server saying the message does not exist, which does not
-      // become truer by asking again — the measured cause is a part the server
-      // could not resolve, and it discards the whole message when that happens.
-      if (readback.kind === 'missing') return 'missing';
+      reads.push({ kind: readback.kind === 'missing' ? 'missing' : 'unknown' });
     }
-    return 'unknown';
+    return classifyOpencodeReadbacks(reads, OPENCODE_SEND_READBACK_DELAYS_MS.length) === 'not_sent'
+      ? 'missing'
+      : 'unknown';
   }
 
   /**
@@ -871,9 +915,12 @@ export class OpenCodeTool extends BaseCLITool {
    *
    * Issue #4040: that keyboard path now waits for an empty input box first
    * (`waitForPrompt`, and again under the input lock) and refuses as
-   * `not-sent` / `prompt-not-ready` when none comes up — unless the server
-   * dispatch before it ended `unknown`, in which case the refusal stays
-   * `indeterminate`. A `delivered` send neither waits nor types.
+   * `not-sent` / `prompt-not-ready` when none comes up. A `delivered` send
+   * neither waits nor types.
+   *
+   * Issue #4535: a dispatch that ended `unknown` is not followed by the
+   * keyboard at all — the message may already be there — and the send ends
+   * `indeterminate` ({@link dispatchUnknownError}).
    *
    * @param worktreeId - Worktree ID
    * @param message - Message to send
@@ -907,12 +954,14 @@ export class OpenCodeTool extends BaseCLITool {
     // re-attaches, so the server path is available again by the time it is
     // tried. `sendMessageWithImage` reaches this through its own fallback.
     //
-    // Issue #4040: when that fallback follows an `unknown` image dispatch, a
-    // refusal here (`SESSION_STARTING`, a pane that is gone) typed nothing but
-    // does not make the send as a whole safe to resend either.
+    // Issue #4535 (r3): an `unknown` image dispatch never reaches this —
+    // `sendMessageWithImage` stops before the path fallback, so no relaunch
+    // types a launch line after it. `keepUnknownDispatch` stays for the trace's
+    // contract (Issue #4040).
     try {
       await this.requireSession('OpenCode', worktreeId, instanceId, { relaunch: true });
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       throw this.keepUnknownDispatch(error, trace, sessionName) ?? error;
     }
 
@@ -922,6 +971,10 @@ export class OpenCodeTool extends BaseCLITool {
       invalidateCache(sessionName);
       return;
     }
+
+    // Issue #4535 (R1, the keyboard's stop): the dispatch may have delivered the
+    // message, so the keyboard does not type it again.
+    if (trace.unknown) throw this.dispatchUnknownError(sessionName);
 
     try {
       // Issue #4040: the keyboard fallback types only into an input box that is
@@ -945,6 +998,7 @@ export class OpenCodeTool extends BaseCLITool {
 
       logger.info('sent-message-to-opencode-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #4040: the keyboard typed nothing (no ready input box — or any
       // other refusal before the first key: a dialog, the lock), but the server
@@ -955,6 +1009,31 @@ export class OpenCodeTool extends BaseCLITool {
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to OpenCode: ${errorMessage}`, { cause: error });
     }
+  }
+
+  /**
+   * How a send ends once a server dispatch of it ended `unknown` (Issue #4535):
+   * nothing is typed and nothing posted again, and the send is `indeterminate`
+   * — the message may be there, so it must not read as safe to resend.
+   *
+   * The send's fence is asked first (#4534, INV-F2): a target that changed
+   * while the dispatch was out is the fence's refusal (409
+   * `SEND_TARGET_CHANGED`, `unknown` since a dispatch had started) — the answer
+   * the keyboard's own confirmation gave before this Issue — never re-read as
+   * this error. The confirmation changes nothing.
+   *
+   * @throws {SendTargetChangedError} The send's ticket refuses
+   */
+  private dispatchUnknownError(sessionName: string): Error {
+    fenceConfirm();
+    logger.warn('opencode-send-stopped-after-unknown-dispatch', { sessionName });
+    return Object.assign(
+      new Error(
+        'Failed to send message to OpenCode: the server dispatch may have delivered the message, ' +
+          'so nothing was typed and nothing was posted again (Issue #4535)'
+      ),
+      { code: OPENCODE_DISPATCH_UNKNOWN_CODE }
+    );
   }
 
   /**
@@ -1081,6 +1160,11 @@ export class OpenCodeTool extends BaseCLITool {
    * `sendMessage` gives the text one honest attempt at the API before the
    * keyboard, at the cost of one cheap re-check.
    *
+   * Issue #4535: only when the image dispatch proved nothing was posted
+   * (`not_sent`) or was never tried (`skipped`). After an `unknown` one the
+   * fallback posts no second dispatch and types nothing: the image message may
+   * be there already.
+   *
    * @param worktreeId - Worktree ID
    * @param message - Message text; may be empty
    * @param imagePath - Absolute path to the image file
@@ -1104,6 +1188,13 @@ export class OpenCodeTool extends BaseCLITool {
       invalidateCache(sessionName);
       return;
     }
+
+    // Issue #4535 (R1, the image's stop; r3): the image dispatch ended
+    // `unknown`, so the path fallback does not run at all — no relaunch (a launch line
+    // is a key too), no second dispatch, no body typed. Before the fallback's
+    // `requireSession`, so a pane that went with the roster row while the POST
+    // was out is still the fence's 409 rather than a plain failure.
+    if (trace.unknown) throw this.dispatchUnknownError(sessionName);
 
     logger.info('opencode-image-degraded-to-path', { worktreeId, instanceId: instanceId ?? this.id });
     await this.sendMessageAfterDispatch(

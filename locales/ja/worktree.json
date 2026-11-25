@@ -75,6 +75,24 @@
       "artifactFailed": "ロールのファイルを用意できなかったため、セッションを起動せず、本文は送信していません。ロールの設定を確かめてから送り直してください。",
       "other": "ロールの条件を満たさないため、本文は送信していません。ロールの設定を確かめ、必要ならセッションを停止して起動し直してください。"
     },
+    "sendTargetChanged": {
+      "reason": {
+        "worktreeGone": "worktree が無くなりました",
+        "targetGone": "送り先の instance が名簿から外れました",
+        "toolChanged": "送り先のツールが替わりました",
+        "dispatchChanged": "送り先の起動の仕方が替わりました",
+        "unreadable": "送り先を確かめられませんでした",
+        "other": "送り先が送信の途中で替わりました"
+      },
+      "notSent": "{reason}。本文は送っていません（元の宛先: {target}）。",
+      "textReturned": "本文を入力欄に戻しました。宛先が元の宛先と違うあいだは、送る前に確かめます。",
+      "textNotReturned": "宛先の確認を残せなかったため、本文を入力欄に戻せませんでした。",
+      "unknown": "{reason}。届いたかどうか分かりません。送り直す前に、元の宛先（{target}）の画面を確かめてください。",
+      "retargetConfirm": "この本文は {original} へ送る途中で止まったものです。宛先が {current} になっています。{current} へ送りますか？",
+      "retargetConfirmYes": "送る",
+      "retargetConfirmNo": "やめる",
+      "retargetConfirmUnreadable": "この本文が別の宛先へ送る途中で止まったものかどうか、確かめられませんでした（宛先の確認を読めません）。{current} へ送りますか？"
+    },
     "retrySending": "メッセージを再送信",
     "discard": "破棄",
     "discardMessage": "メッセージを破棄",
@@ -445,7 +463,12 @@
       "plugin-authoring": "mod を書くときに Claude が使うリファレンスを読み込み",
       "slides": "指示から Claude Slides のプレゼンテーションを作成",
       "daybreak": "Daybreak のオン・オフを切り替え",
-      "presets": "再利用できるプロンプトやスラッシュコマンドを実行・保存"
+      "presets": "再利用できるプロンプトやスラッシュコマンドを実行・保存",
+      "claude-approvals": "Claude Approvals のポリシーファイルや分類器を編集・説明・調整",
+      "ship": "/ship が扱える範囲で作業をコミット・push し、ブランチに PR が無ければ GitHub に作ってから変更をレビュー",
+      "steward": "開いている GitHub の PR をこのセッションで見張り、レビューの指摘と失敗したチェックの修正を push（/ship が最初に行うレビューはしない）",
+      "whiteboard": "依頼文から Claude Whiteboards のアーティファクトとして新しいホワイトボードを作る（例: /whiteboard 決済の流れのサービス図）",
+      "rc": "ローカルのバックグラウンドサーバーのリモート操作を管理"
     }
   },
   "session": {

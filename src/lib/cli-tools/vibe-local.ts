@@ -9,6 +9,7 @@
  */
 
 import { BaseCLITool } from './base';
+import { rethrowFenceRefusal } from '../session/terminal-fence';
 import { OLLAMA_MODEL_PATTERN, isValidVibeLocalContextWindow, type CLIToolType } from './types';
 import {
   capturePane,
@@ -168,6 +169,7 @@ export class VibeLocalTool extends BaseCLITool {
 
       logger.info('started-vibe-local-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       throw new Error(`Failed to start Vibe Local session: ${errorMessage}`);
     }
@@ -217,6 +219,7 @@ export class VibeLocalTool extends BaseCLITool {
 
       logger.info('sent-message-to-vibe-local-session');
     } catch (error: unknown) {
+      rethrowFenceRefusal(error);
       const errorMessage = getErrorMessage(error);
       // Issue #4031: the cause keeps a failed `load-buffer`'s code (`classifySendFailure`).
       throw new Error(`Failed to send message to Vibe Local: ${errorMessage}`, { cause: error });

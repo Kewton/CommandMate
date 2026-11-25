@@ -67,9 +67,10 @@ describe('[#4034] sendNewTask keeps its own deadline over the transport', () => 
     const promise = sendNewTask(input(null));
     await vi.advanceTimersByTimeAsync(timeout);
 
+    // Issue #4535 (C9, INV-S10): running out of time while the body is read is unknown.
     await expect(promise).resolves.toEqual({
       ok: false,
-      kind: 'failed',
+      kind: 'unknown',
       status: 0,
       detail: `Request timed out after ${timeout}ms`,
     });

@@ -23,6 +23,7 @@ import {
 } from './relays';
 import {
   postMessage,
+  undoesFailedSend,
   registerRelayForMessage,
   resolveRelayEndpoints,
   type RelayEndpoints,
@@ -93,7 +94,6 @@ import {
 import { createContractTaskWithRole, pinCommandTarget } from './send-contract';
 import {
   closeSendNote,
-  knownNotSent,
   promptWaitingFallback,
   reportTaskStatus,
   writeSendNote,
@@ -242,7 +242,23 @@ not caught.
 Exit codes: 2 usage, or an unknown or ambiguous role, or a tool roles do not apply to
 (nothing sent); 31 a roster conflict (nothing sent); 32 the role condition does not
 hold or the start was refused because of its role (nothing typed); 33 refused by the
-tool policy (antigravity, above; nothing typed, do not send it again).
+tool policy (antigravity, above; nothing typed, do not send it again); 34 the target
+(the instance's tool, the worktree, OpenCode's dispatch target) changed or could not be
+confirmed while sending and the message was not delivered (sendOutcome=not_sent): read
+the roster again, then send it again. Stopped that way after part of it may have gone in
+(sendOutcome=unknown) is 99: check the pane before resending.
+
+Whether a failed send went in (Issue #4535) is read from its own answer only: not sent
+on a typed sendOutcome=not_sent, a code the server answers before sending, an auth or IP
+refusal (401 AUTH_REQUIRED, 403 IP_DENIED; exit 2), a tool-policy refusal (409;
+exit 33), or a refused connection. Anything else (a proxy's page, a 4xx with no code, a
+lost answer) is unknown: the relay, the --note item and the Auto-Yes grant stay, nothing
+is resent, and stderr says to check the pane first. A 2xx that is not a message (empty,
+not JSON, another shape) is exit 99 for the same reason. With a bound relay
+(--reply-to), an unknown is looked up in the relay's own record: "sent" is exit 0,
+"failed" undoes them and says it is safe to send again. A 409 RELAY_BIND_CONFLICT is a
+copy of this request holding the relay: the relay is looked up, and only its "failed"
+undoes them.
 `)
     .action(async (worktreeId: string, message: string | undefined, options: SendOptions) => {
       try {
@@ -478,11 +494,13 @@ tool policy (antigravity, above; nothing typed, do not send it again).
         // and records where the body went in.
         const sent = await postMessage(client, worktreeId, sendBody, {
           relay,
-          onFailure: async (error, outcome) => {
+          onFailure: async (error, reading) => {
             await failTask();
-            await withdrawAutoYes(knownNotSent(error, outcome));
+            // Issue #4535: undone only when nothing went in and the relay is this send's.
+            const undo = undoesFailedSend(reading);
+            await withdrawAutoYes(undo);
             // Issue #4226: not sent for certain, so nothing is waited on. Unknown: the relay closes it.
-            if (noteItemId && noteAuthor && knownNotSent(error, outcome)) await closeSendNote(client, noteAuthor, noteItemId);
+            if (noteItemId && noteAuthor && undo) await closeSendNote(client, noteAuthor, noteItemId);
             // Issue #4437: refused before the role was saved or anything typed, and a bound
             // relay was withdrawn by the server. Out now, so the refusal's reason is the
             // first error line and no "safe to send it again" follows it.

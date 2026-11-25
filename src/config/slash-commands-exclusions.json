@@ -84,6 +84,15 @@
       "kind": "phantom",
       "reason": "Re-measured on 1.18.22 (Issue #2036) and it is worse than absent, so this stays. Typing the full /compact in the palette matches only the /review description text — and pressing Enter then SUBSTITUTES /review into the composer, i.e. offering /compact here would hand the operator a different command. Controls on the same session: /status matched its own row and executed; /zzzznotacommand matched nothing. /compact is also absent from `GET /command`, though that endpoint carries markdown commands and Skills only and so cannot by itself rule a TUI built-in in or out.",
       "issue": 2036
+    },
+    {
+      "name": "motion",
+      "cliTools": [
+        "claude"
+      ],
+      "kind": "out-of-scope",
+      "reason": "Real upstream, but https://code.claude.com/docs/en/commands.md (read 2026-11-25 against claude 2.1.332) says /motion is \"Available in local sessions in the Desktop app and in Anthropic-hosted cloud sessions, not in the terminal or IDE extensions\". CommandMate runs claude in a terminal (tmux), so a palette entry would send a command that never reaches a handler. Human decision for the 0.56.0 release; removing this row needs a human to re-decide.",
+      "issue": 4535
     }
   ]
 }

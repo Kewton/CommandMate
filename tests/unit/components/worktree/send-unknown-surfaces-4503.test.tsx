@@ -233,7 +233,7 @@ describe.each([PC, PHONE])('[#4503 review 3 P2-1] $name: the flags reach the hoo
   });
 
   it('(positive control) a 400 still fails', async () => {
-    sendMessageMock.mockRejectedValue(new ApiError('content is required', 400, { error: 'content is required' }));
+    sendMessageMock.mockRejectedValue(new ApiError('content is required', 400, { error: 'content is required', sendOutcome: 'not_sent' }));
     await surface.renderAndSend();
     await waitFor(() => expect(row()).toHaveAttribute('data-optimistic', 'error'));
   });

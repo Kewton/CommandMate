@@ -112,6 +112,8 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/codex-update-dialog-3020/update-dialog-01571.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/long-body-2464/codex-idle.capture', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/long-body-2464/codex-pasted-content.capture', 'ready/input_prompt', 'ready/input_prompt'],
+  // Synthetic (#4532): codex・返しの行で終わったターンの画面。入力欄 `› Ask Codex to do anything` で次の依頼を待つ（元の saturated-idle-tail と同じ待ち）。
+  ['fixtures/orchestrate-monitor-4532/codex-split-canvas-synthetic.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/startup-screen-3293/codex-0.160.0-boot-idle.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/startup-screen-3293/codex-0.160.0-boot-typed.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/startup-screen-3293/codex-0.160.0-dialog-trust.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],

@@ -397,6 +397,13 @@
       "model_rejected": "モデル指定が受け付けられませんでした。消すか変えてから送り直してください。",
       "invalid": "依頼が受け付けられませんでした。",
       "failed": "送信に失敗しました。接続を確かめて送り直してください。"
+    },
+    "unknown": {
+      "status": "届いたかどうか分かりません。送り直す前に、送り先の画面で確かめてください。",
+      "openTarget": "送り先を開く",
+      "resendConfirm": "同じ依頼をもう一度送ります。二重に届くことがあります。",
+      "resendConfirmYes": "送る",
+      "resendConfirmNo": "やめる"
     }
   },
   "agentRoles": {
@@ -562,6 +569,11 @@
       },
       "destination": "行き先",
       "noDestination": "行き先（promote_to）がありません",
+      "destinationRefused": {
+        "agent_instructions": "この行き先は使えません：CLAUDE.md・AGENTS.md・.claude/ などエージェントの指示ファイルは行き先にできません。docs/ の文書か Issue を行き先にし、指示ファイルへは人が手で反映してください",
+        "git_dir": "この行き先は使えません：.git の下は行き先にできません。docs/ の文書か Issue を行き先にしてください",
+        "not_markdown": "この行き先は使えません：文書の行き先は .md のファイルだけです。docs/ の .md か Issue を行き先にしてください"
+      },
       "effect": {
         "label": "効果",
         "spec": "仕様を変える決定（書けたら記録済み・反映待ち）",

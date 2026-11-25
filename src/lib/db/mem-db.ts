@@ -604,10 +604,18 @@ const scopeClause = (scope: MemScope, alias = ''): { sql: string; params: unknow
   return { sql: `${alias}repository_id IN (${marks}) AND ${alias}branch = ?`, params: [...ids, scope.branch] };
 };
 
+/**
+ * The open items of `kind` on the branch: the count of the warning and the limit (§8.3).
+ *
+ * Issue #4354 (design `mem-approval-4354.md` §3.3・§3.4): a `promoted` decision is reflected and
+ * waits for nobody, so a decision counts only while `open` or `recorded`. Other kinds count every
+ * state but `closed`, as before.
+ */
 export function countOpenItems(db: Database.Database, scope: MemScope, kind: MemKind): number {
   const where = scopeClause(scope);
+  const states = kind === 'decision' ? "state IN ('open','recorded')" : "state != 'closed'";
   return (
-    db.prepare(`SELECT COUNT(*) AS n FROM mem_items WHERE ${where.sql} AND kind = ? AND state != 'closed'`).get(...where.params, kind) as {
+    db.prepare(`SELECT COUNT(*) AS n FROM mem_items WHERE ${where.sql} AND kind = ? AND ${states}`).get(...where.params, kind) as {
       n: number;
     }
   ).n;
@@ -1054,7 +1062,16 @@ export interface MemPurgeFilter {
   kind?: MemKind;
   before?: number;
   includeDecisions?: boolean;
+  /** The clock of the recent-decision guard below (Issue #4354); `Date.now()` when absent. */
+  now?: number;
 }
+
+/**
+ * Issue #4354 (design `mem-approval-4354.md` §4.1, N4): a decision closed within this window is
+ * kept by every purge, `--include-decisions` too, and left out of the dry run's counts: the
+ * counts of the grants that ended and the decisions withdrawn read these rows for as long.
+ */
+export const MEM_PURGE_RECENT_DECISION_MS = 24 * 60 * 60 * 1000;
 
 /**
  * `mem purge` (§8.3): counts without `confirm`, deletes with it. `mem_items` only.
@@ -1085,6 +1102,9 @@ export function purgeMem(
     params.push(filter.before);
   }
   if (!filter.includeDecisions) clauses.push("NOT (kind = 'decision' AND state IN ('recorded','promoted'))");
+  // Issue #4354 (N4): whatever the filter, a decision closed within the last 24 hours stays.
+  clauses.push("NOT (kind = 'decision' AND state = 'closed' AND closed_at >= ?)");
+  params.push((filter.now ?? Date.now()) - MEM_PURGE_RECENT_DECISION_MS);
   const sql = clauses.join(' AND ');
   return db.transaction(() => {
     if (alive && !alive()) return null;

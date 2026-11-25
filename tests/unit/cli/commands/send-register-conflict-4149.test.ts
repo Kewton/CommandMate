@@ -75,7 +75,7 @@ function fakeServer(overrides: Partial<Server> = {}): Server {
     if (url.endsWith('/send') && method === 'POST') {
       state.sends.push(JSON.parse(String(init?.body)));
       state.order.push('send');
-      return state.sendStatus === 201 ? respond(201, { id: 1 }) : respond(state.sendStatus, { error: 'refused' });
+      return state.sendStatus === 201 ? respond(201, { id: 'msg-1', role: 'user' }) : respond(state.sendStatus, { error: 'refused' });
     }
     if (url.endsWith(`/api/worktrees/${WT}`) && method === 'PATCH') {
       state.patches.push(JSON.parse(String(init?.body)));

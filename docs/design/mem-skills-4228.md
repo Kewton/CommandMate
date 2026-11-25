@@ -56,7 +56,7 @@
 - `close_when` の文法（`mem --help`）：`manual | replaced (now only) | issue:[host/owner/repo]#N | pr:[…]#N[?state=merged|closed] | branch:<name>?merged=<ref>[&scope=local|remote] | branch:<name>?deleted | relay:<id> | worktree:<id> | session:task:<id> | session:verify:<run id> | session:schedule:<execution log id> | at:<ISO 8601 with offset>`。省略時：`now` は `replaced`、`note` は `manual`、`decision` は「promote まで」
 - kind × 条件の型の許可表は A §2.3（`waiting` に `manual` は不可、`decision` に `relay`・`worktree`・`session` は不可、`note` は `manual` と `at` だけ）
 - 条件は**読むとき**（`list`・`check`・brief）に評価され、常駐で評価しない。`unknown`（オフライン・404・権限・時間切れ・照会の上限）は何も閉じない。promote の前に成立した decision は `unreflected` として開いたまま（`mem --help`）
-- 件数の上限（A §8.1）：`waiting`・`next`・`external` は警告 10・上限 30、`note` は 20・50、`decision` は警告 20・上限なし。上限超えは exit 56
+- 件数の上限（A §8.1）：`waiting`・`next`・`external` は警告 10・上限 30、`note` は 20・50、`decision` は警告 20・上限なし（`open`・`recorded` だけを数え、`promoted` は数えない。#4354）。上限超えは exit 56
 - `mem` に promote・approve・confirm のサブコマンドは**無い**（`mem --help` の Commands。E のガード `tests/unit/guards/mem-promote-screen-only-4225.test.ts` が `src/cli/**` に書き込みの口が無いことを固定）
 
 ### 1.2 exit code（`MemExitCode`、`src/cli/types/index.ts:895-913`／`mem --help` の Exit codes）

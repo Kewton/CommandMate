@@ -40,6 +40,14 @@ import { parseFragment } from '../../../../scripts/changelog-fragments.mjs';
 
 const SCRIPT = path.resolve(__dirname, '../../../../scripts/orchestrate/contract.mjs');
 
+/**
+ * The last line of a generated goal (#4532): the turn ends with a return line,
+ * not with a bare `IMPL_COMPLETED`. The orchestrator waits on `DONE:` and treats
+ * `IMPL_COMPLETED` as a shape-outside ending, which it reports rather than
+ * accepting — so the goal must end with this instruction, pinned verbatim.
+ */
+const RETURN_LINE_TAIL = '手番の最後の行は `DONE: #3477 <sha> verify exit <n>`・`WAIT: <理由>`・`STOP: <理由>` のどれかにする（`IMPL_COMPLETED` だけの行は終わりの形にしない。待つ側は `IMPL_COMPLETED` を「形の外の終わり方」として検出して知らせる）。';
+
 const base = {
   issue: 3477,
   title: 'orchestrate のスクリプトをリポジトリに入れる',
@@ -187,10 +195,13 @@ describe('goal', () => {
     expect(buildContract(normalizeConfig({ ...base, agent: 'command-code', model: '-' })).goal).not.toContain(SONNET_RULE);
   });
 
-  it('ends with IMPL_COMPLETED and forbids the full suite', () => {
+  it('ends with the return line and forbids the full suite', () => {
     const goal = buildContract(normalizeConfig(base)).goal;
     expect(goal).toContain('テスト全体（`npm run test:unit`）は実行しないこと。全体は検証ゲートか CI が実行する。');
-    expect(goal.trimEnd().endsWith('すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。')).toBe(true);
+    expect(goal.trimEnd().endsWith(RETURN_LINE_TAIL)).toBe(true);
+    expect(goal).toContain('`DONE: #3477 <sha> verify exit <n>`');
+    // The old ending is gone: IMPL_COMPLETED is not a terminal shape (#4532).
+    expect(goal).not.toContain('最後に `IMPL_COMPLETED` とだけ出力する');
   });
 
   it(`fails generation above ${MAX_GOAL_LENGTH} characters`, () => {
@@ -593,11 +604,12 @@ describe('refactor scope: a file, not a directory (#3477 review 6)', () => {
 describe('the easy tier is Command Code, not Antigravity (Issue #4238)', () => {
   const commandCode = { ...base, agent: 'command-code', model: undefined };
 
-  it('generates a contract for agent: command-code, with no model and the completion signal in the goal', () => {
+  it('generates a contract for agent: command-code, with no model and the return line in the goal', () => {
     const config = normalizeConfig(commandCode);
     expect(config).toMatchObject({ agent: 'command-code', model: null });
     const { goal } = buildContract(config);
-    expect(goal.trimEnd().endsWith('すべて終わったら、最後に `IMPL_COMPLETED` とだけ出力する。')).toBe(true);
+    expect(goal.trimEnd().endsWith(RETURN_LINE_TAIL)).toBe(true);
+    expect(goal).not.toContain('最後に `IMPL_COMPLETED` とだけ出力する');
     expect(goal).not.toContain(SONNET_RULE);
     expect(parseTaskContract(contractYaml(config), 'generated').goal.trimEnd()).toBe(goal.trimEnd());
   });

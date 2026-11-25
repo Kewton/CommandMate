@@ -173,7 +173,7 @@ function mockServer(scenario: Scenario): void {
         }),
       );
     }
-    if (url.includes('/send')) return Promise.resolve(json({ id: 1 }, 201));
+    if (url.includes('/send')) return Promise.resolve(json({ id: 'msg-1', role: 'user' }, 201));
     if (url.includes('/messages')) return Promise.resolve(json(scenario.messages()));
     if (url.includes('/capture')) return Promise.resolve(json({ output: scenario.pane ?? '' }));
     return Promise.resolve(json(frame(scenario.cliToolId, scenario.done(), scenario.turn())));

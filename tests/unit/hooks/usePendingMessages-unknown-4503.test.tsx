@@ -48,7 +48,7 @@ const network = () => new ApiError('Failed to fetch', 0, undefined, 'network');
 const timeout = () => new ApiError('Request timed out after 600000ms', 0, undefined, 'timeout');
 const aborted = () => new ApiError('Request aborted', 0, undefined, 'aborted');
 const offline = () => new ApiError('No network connection', 0, undefined, 'offline');
-const bad400 = () => new ApiError('content is required', 400, { error: 'content is required' });
+const bad400 = () => new ApiError('content is required', 400, { error: 'content is required', sendOutcome: 'not_sent' });
 const conflict409 = () => new ApiError('prompt waiting', 409, { error: 'prompt waiting', sendOutcome: 'not_sent' });
 const roleRefused = () =>
   new ApiError('refused', 409, { error: 'refused', code: 'ROLE_LAUNCH_REFUSED', roleRefusal: 'not-applied', sendOutcome: 'not_sent' });
@@ -103,6 +103,11 @@ describe('[#4503] isSendOutcomeUnknown: what the route answered', () => {
     ['fetch rejected (network)', network()],
     ['client timeout', timeout()],
     ['aborted', aborted()],
+    // Issue #4535 (human decision on C10): a session start's 503 with no sendOutcome is unknown too
+    // (the route says `not_sent` on its own refusals).
+    ['503 SESSION_STARTING with no sendOutcome', new ApiError('starting', 503, { error: 'starting', code: 'SESSION_STARTING' })],
+    ['503 SESSION_START_FAILED with no sendOutcome', new ApiError('exited', 503, { error: 'exited', code: 'SESSION_START_FAILED' })],
+    ['503 SESSION_START_UNAVAILABLE with no sendOutcome', new ApiError('missing', 503, { error: 'missing', code: 'SESSION_START_UNAVAILABLE' })],
   ])('%s → unknown', (_name, error) => {
     expect(isSendOutcomeUnknown(error)).toBe(true);
   });
@@ -113,10 +118,6 @@ describe('[#4503] isSendOutcomeUnknown: what the route answered', () => {
     ['409 not_sent', conflict409()],
     ['409 role refusal', roleRefused()],
     ['offline (never sent)', offline()],
-    // Review 1 P2-1: a 5xx whose code says the server refused before any key (the session start).
-    ['503 SESSION_STARTING with no sendOutcome', new ApiError('starting', 503, { error: 'starting', code: 'SESSION_STARTING' })],
-    ['503 SESSION_START_FAILED with no sendOutcome', new ApiError('exited', 503, { error: 'exited', code: 'SESSION_START_FAILED' })],
-    ['503 SESSION_START_UNAVAILABLE with no sendOutcome', new ApiError('missing', 503, { error: 'missing', code: 'SESSION_START_UNAVAILABLE' })],
     ['not an ApiError', new TypeError('Failed to fetch')],
     ['null', null],
   ])('%s → not unknown', (_name, error) => {

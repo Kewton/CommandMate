@@ -289,7 +289,8 @@ describe('Issue #4437: POST /send — the tool policy', () => {
       async (origin) => {
         const { status, body } = await post({ cliToolId: 'claude', origin });
         expect(status).toBe(400);
-        expect(body).toEqual({ error: 'origin must be a string' });
+        // Issue #4535 (C4, the human's decision 2026-11-24 16:08): plus `sendOutcome: 'not_sent'`.
+        expect(body).toEqual({ error: 'origin must be a string', sendOutcome: 'not_sent' });
         expect(getLastSendAttempt({ worktreeId: WT, cliToolId: 'claude', instanceId: 'claude' })).toBeNull();
         expect(sendUserMessage).not.toHaveBeenCalled();
       },

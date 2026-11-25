@@ -141,7 +141,7 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - **ゲートの `status: running` は「実行中」とは限らない**: `cpu.heavy` を待っている間も `running` と出る。始まったかは
   `log_tail` の `[mutex] waited=` の行（ロックを取ると出る）か、`vitest` のプロセスがその worktree で動いているかで確かめる
   （2026-11-18、PM が `running` を開始と読み違え、A1 の順の調整を誤った）
-- **1 コミットに verify は 1 本**: ワーカーの verify が走っている同じコミットに、リーダーの `wait-verify` や再試行を重ねない。
+- **1 コミットに verify は 1 本**: 契約の verify（ワーカーの完了の後に `wait --verify`・`wait-verify` の中で走るもの。ワーカーは `commandmate verify` を流さない。契約の雛形 scripts/orchestrate/templates/goal.md の「確認に使うコマンドは `npx vitest run <関係するテスト> tests/unit/guards tests/unit/docs`、`npm run lint`、`npx tsc --noEmit` だけにする」）が走っている同じコミットに、リーダーの手の `wait-verify` や再試行を重ねない。
   古いコミットの run が列に残ると、同じ worktree の新しい verify は 409 で断られる。run の取消し（`POST /api/worktrees/<id>/verify/runs/<run>/cancel`）は
   エージェントからは自動の許可の判定で断られることがある。そのときは迂回せず、PM が人へ取消しを頼む（承認は run ごと）。
   **同じ worktree の古い head の verify run は、PM が取り消してよい**（人の決定、mem c31afe28）。古い head の run は新しいコミットの裁定にならず、列と mutex を塞ぐだけだから。
@@ -202,6 +202,10 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 - 関門は変えない。develop へのマージは今までどおり CI の全チェックの合格（`--last`）が条件で、止める区間でも main への PR の CI・承認は弱めない
 - 止める区間の間は、develop へのマージも main への PR の追加も、PM の合図まで待つ（祖先関係を壊さないため）
 
+元の場所: team.md §9 の「受け入れ・リリースの間のマージ」（#4546 で移した。文は元のまま）
+
+判定する版を決めるのは PM。**受け入れ・リリースの間も develop へのマージは続ける**（人の決定、mem c31afe28）。止めるのは、**main への PR を作ってから、マージバック（main の変更を develop へ戻すマージ）が済むまで**だけで、PM が「停止」「再開」を全リーダーへ 1 行で知らせる。止めている間もレビュー・直し・verify は続けてよい。判定する版（commit）は固定し、その後に develop へ入ったものは次の受け入れの対象になる。関門は変えない（根拠は ci-merge.md の 6-2-1）。
+
 ## 6-2 「CI が通れば」の許可と全チェックの合格
 
 `--last` なしの `merge-pr.mjs` は、全 `unit` の検証と `--build` の precheck がある PR の `Build` も `Unit Tests` も待たない（取り込み後に重い段を CI に任せた HEAD の `Unit Tests` は待つ。下の「6-2 取り込み後の重い段」）。設計どおりだが、利用者の許可の「CI が通れば」とは食い違う。
@@ -226,6 +230,10 @@ CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外
 ## 6-2 develop 向け PR と Issue のクローズ
 
 `Closes #N` による自動クローズは base が既定ブランチ（main）の PR でしか効かない。develop 向けの PR では `closingIssuesReferences` が空になり、マージしても Issue は閉じない（異常ではない）。`merge-pr.mjs` を通さずにマージしたときは、`gh pr view <PR> --json state -q .state` が `MERGED` であることを確かめてから `gh issue close <N> --reason completed` で閉じる。マージの成否を見ずに同じループで close しない（`gh pr merge` が失敗しても後のコマンドは走る）。
+
+## 6-2 道具を変えた PR のマージの後
+
+見張り・契約・待ちの道具（`.claude/skills/orchestrate-monitor/**`・`scripts/orchestrate/**`）を変える PR がマージされたら、PM が primary checkout を `git pull --ff-only origin develop` する（#4574。primary が古い版のまま見張りが動き、リーダーが止まった）。
 
 ## 6-2 取り込み後の重い段
 
@@ -353,6 +361,12 @@ node scripts/orchestrate/merge-train.mjs --run-dir "workspace/orchestration/runs
 
 CI のジョブ名は「何を検査するはずだったか」で、落ちた理由ではない。赤いジョブは、失敗したステップの名前と、その後のステップが `skipped` かを読む。`Install dependencies` のタイムアウトやレジストリの 503 で落ちたなら、本体（ESLint・tsc・テスト）は実行されておらず、コードの問題ではない。
 `gh api repos/Kewton/CommandMate/actions/runs/<run_id>/jobs` の `steps[].conclusion` で読む。run が進行中でも、終わったジョブのログは `gh api repos/Kewton/CommandMate/actions/jobs/<job_id>/logs` で取れる。同じジョブ名でも試行ごとに理由が変わるので、落ちるたびにログを読む。
+
+## 6-3 マージの流れを定期的に見る
+
+元の場所: team.md §7 の 2 つ目の項目（#4546 で移した。文は元のまま）
+
+作る速さがマージの速さを超えると、開いた PR が溜まり、CI 1 回が長くなって、さらにマージが遅れる。PM は返しを待つだけでなく、定期的に「直近 1 時間のマージ数・開いた PR 数・ランナーの online 数・queued の最古」を見る。online 0 か queued 10 分超なら、ランナーの健康を先に確かめる（docs/orchestrate/ci-merge.md の「6-3 CI が queued のまま進まないとき」）
 
 ## 6-3 CI が queued のまま進まないとき
 

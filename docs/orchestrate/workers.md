@@ -184,13 +184,14 @@ exit 10 にもならない）。
 
 - **完了の確定**（下の 2 つの手順と同じことをスクリプトが行う）: Command Code と Antigravity の instance（`command-code-2` / `antigravity-2` などの追加 instance と、その alias も。
   サーバーが解決した担当ツール `cliToolId` で決める、#3883）と `--require-signal` を付けた担当は、
-  行全体が `IMPL_COMPLETED` の行が出るまで 30 秒ごとに待ち、**合図を見るまで検証を始めない**（`wait --verify` ではなく `wait` → 合図 → `verify --task` に分ける。
-  作業の途中のターン終了で検証を走らせない、#3883）。合図は**この task のもの**だけを数える: この task の返事（`reply "$WT" --instance <id> --since <task の作成時刻> --json`）が
+  **返しの行**（`DONE: #<N> <sha> verify exit <n>`。行全体がこの形で、`<sha>` が今の HEAD を名指す。`WAIT:` / `STOP:` は待ちを終わらせない）が出るまで 30 秒ごとに待ち、**合図を見るまで検証を始めない**（`wait --verify` ではなく `wait` → 合図 → `verify --task` に分ける。
+  作業の途中のターン終了で検証を走らせない、#3883）。`IMPL_COMPLETED` の行も引き続き合図として読む（#4532 より前に送った task がまだそれを待っている）が、**返しの行が終わりの形**で、
+  `IMPL_COMPLETED` は「形の外の終わり方」— 見張り（`orchestrate-monitor`）は `SHAPE_OUTSIDE` として知らせ、合格には数えない。合図は**この task のもの**だけを数える: この task の返事（`reply "$WT" --instance <id> --since <task の作成時刻> --json`）が
   読めるときはその返事の中の行で決める（画面に前の task の合図が残っていても、返事に無ければまだ）。返事がまだ無い（`reply: null`）か読めないときは、
   画面の裸の `IMPL_COMPLETED` は数えない（前の task の行が残ったまま、この task の途中のターン終了が来ることがある）。画面で数えるのは、
-  今の HEAD を名指す `IMPL_COMPLETED head=<sha>` で、その HEAD のコミットが task の作成より後のものだけ。どれも無ければ `--signal-timeout` まで未確定のまま待つ。
+  今の HEAD を名指す `DONE: #<N> <sha> verify exit <n>` か `IMPL_COMPLETED head=<sha>` で、その HEAD のコミットが task の作成より後のものだけ。どれも無ければ `--signal-timeout` まで未確定のまま待つ。
   task が台帳に無い（作成時刻が分からない）ときだけ、画面の行を今までどおり数えて `signal-task=unknown` と残す。`IMPL_COMPLETED head=<sha>` の形なら、その HEAD が今の HEAD のときだけ数え、
-  合図を見た後に HEAD が動いたら検証をやり直す。次に、**この呼び出しの検証の開始時刻**（ログの `Verifying: <WT> (run <id>)` の run を `verify show <id> --json` で読む。
+  合図を見た後に HEAD が動いたら検証をやり直す。画面は `capture --pane` で**全行**を読む（`--json` の `content` / `realtimeSnippet` の末尾の窓や `--tail` では、枠の行が下に続くと合図が押し出される。`wait-verify.mjs` も同じ読み、#4315。見張り `orchestrate-monitor` も担当を問わず毎ポーリング `--pane` の全行で終わり方を判定し、許可のプロンプトも pane から拾う、#4532。どの読み手も行を同じ正規化に通すので、右に claude の差分のパネルが開いた行 `DONE: … exit 0   │ …` も拾う。行頭の返しの目印（集合は `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv`）は 1 つだけ剥がすので、1 行だけの返事 `<目印> DONE: …` も拾う）。次に、**この呼び出しの検証の開始時刻**（ログの `Verifying: <WT> (run <id>)` の run を `verify show <id> --json` で読む。
   worktree の最新の run（`verify history --limit 1`）は使わない。その間に別の run が始まっていることがある、#3883）と
   最後のターン終了（`capture --json` の `lastStopEventAt`）と最後のコミットの時刻と作業ツリーを比べる。検証の開始の後にコミットがあるか、
   最後のターン終了より前に始まって作業ツリーに変更があれば、検証は途中の状態を見ているので `verify "$WT" --task "$TASK_ID"` でやり直し、
@@ -328,3 +329,21 @@ build-cli,build-server,lint,lint-sh,build,typecheck,integration,unit
 ## 4-3 隣の Issue のファイルに及んだ差分
 
 ワーカーの差分が隣の Issue のファイルに及んでいて、それが同じ修正の別の面（PC とスマホ、など）なら、revert して分け直さずに 1 本の PR にまとめる。PR で両方の Issue を Closes にし、もう一方の Issue は「#N にまとめた」とコメントして閉じ、後ろの波を縮める。まとめる前に、まとめた先が実際にマウント・配線されていることを `git grep` で確かめる。依存の分析は、Issue 本文が挙げたファイルではなく実際の差分（`git show --name-only`）を正とする。
+
+## 3-2 返しの形と見張りが起きるとき
+
+元の場所: team.md §8（#4546 で移した。文は元のまま）
+
+- 依頼（ワーカー・イネーブラー・CI・レビュー）を送ったら、同じ手番で期限の無い完了の見張りを張り、返しが出たら終わる待ちにする。期限で切れる見張りを張り直す運用にしない。返しは 2 種類ある:
+  - (1) **ワーカーの task の返しの行**: 契約の goal と同じ形 `DONE: #<N> <sha> verify exit <n>` / `WAIT: <理由>` / `STOP: <理由>`。行全体がこの形で、DONE の `<sha>` は今の HEAD を名指す。見張り（`orchestrate-monitor`）が拾うのはこの形だけ
+  - (2) **イネーブラー・CI・レビューの返し**: 返しのファイルの `DONE:` 行（例 `DONE: changes-required P1=1 P2=1 P3=6`）。形は依頼文で決める。(1) の形ではないので、見張りの返しの行としては拾わない。返しのファイルか、依頼文で決めた形で待つ
+- 見張りが起きるのは 3 つ: (a) 返しの行、(b) 許可のプロンプト（画面が確認待ちで止まった）、(c) 新しいコミット。(b)(c) では終わらせず、人に返すか次の手を決める。`IMPL_COMPLETED` は**形の外の終わり方**で、見張りは `SHAPE_OUTSIDE` として知らせ、合格には数えない（#4532 より前に送った task のための古い合図で、待ちを終わらせる形ではない）
+- 読み方の細部: [workers.md](workers.md#3-2-完了の見張りが-pane-を読む細部)。画面が長く変わらなければ STALL として知らせる。依頼文の締めに「止まるときも `STOP: <理由>` と書く」を必ず入れる
+- 見張りの除外の規則を自作しない（雛形どおりに書いた本物の `DONE:` 行まで除いてしまう）。(1) の形は goal が決め、見張りはその形で絞る。(2) の形は依頼文で決める。見張りを張ったら、`DONE:` が既にある画面で一度鳴ることを確かめる
+- CI は `bucket` が全部終わるまでを待ち、10 分以上 queued ならランナーが online かも見る。動いている依頼と見張りの一覧をいつでも出せるようにしておく
+
+## 3-2 完了の見張りが pane を読む細部
+
+元の場所: [team.md](team.md) §8（#4546 で移した。文は元のまま）
+
+見張りは、セッションが動いていれば（`NOT_RUNNING` でなければ）担当（CLI）を問わず毎ポーリング `capture --pane` を読み、終わり方を pane の**全行**で判定する。許可のプロンプトも、その担当の既存の目印を pane にも当てて拾う（目印を持たない担当、たとえば codex は、サーバーの `isPromptWaiting` に任せる）。`capture --json` は状態・`promptData` などに併せて使うだけで、終わり方の判定には `content` / `realtimeSnippet` を使わない（どちらも窓で、Command Code は上から描くので余白になり、codex は下端の入力欄だけが入る。`--pane --tail N` の末尾 N 行も同じ理由で使わない）。行は照合の前に 1 つの正規化を通す（ANSI・右の差分のパネル `<文字><空白 2 つ以上>│ …`・前後の空白を落とす。行頭の返しの目印（集合は `.claude/skills/orchestrate-monitor/scripts/reply-markers.tsv`）は 1 つだけ剥がすので 1 行だけの返事も拾い、入力欄の `❯ DONE: …` は拾わない）。`--pane` の読み取りに失敗したら、失敗が続く間に 1 回だけ `WARN` を出す（読めたら張り直す）。
