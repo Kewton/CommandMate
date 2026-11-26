@@ -261,11 +261,14 @@ export function makeObserver(hooks = {}) {
       // The pgid's number check is a step of this observation too (#4288 Codex re-review P1).
       return pgidFieldOk(owner) ? { state: 'record', owner } : { state: 'unknown', point, code: 'EINVAL' };
     },
-    /** mkdir: created / exists (EEXIST) / unknown */
-    mkdir(point, dir) {
+    /**
+     * mkdir: created / exists (EEXIST) / unknown. `recursive` (#4559 r7, the machine-lock root): `mkdir -p`, `exists`
+     * when nothing had to be made.
+     */
+    mkdir(point, dir, recursive = false) {
       try {
-        attempt(point, dir, () => fs.mkdirSync(dir));
-        return { state: 'created' };
+        const made = attempt(point, dir, () => fs.mkdirSync(dir, recursive ? { recursive: true } : undefined));
+        return recursive && made === undefined ? { state: 'exists' } : { state: 'created' };
       } catch (err) {
         return errCode(err) === 'EEXIST' ? { state: 'exists' } : { state: 'unknown', point, code: errCode(err) };
       }
@@ -1192,7 +1195,8 @@ export function resolveGenDir(lockPath, env = process.env, obs = makeObserver())
   // #4559 r6 (D2, #4559 comment 7186934798): the base name always in lower case — never the entry's spelling, no
   // check of the filesystem. A case-insensitive FS: X.lock and x.lock are one lock, one chain even before it is
   // there. A case-sensitive FS: two locks that differ in case only share one chain (they wait for each other).
-  const base = path.basename(lockPath).toLowerCase();
+  // #4559 r7 (review a2 P3-5): ASCII's A–Z only, as bash (PR-3) folds it — never the locale's or Unicode's case.
+  const base = asciiLower(path.basename(lockPath));
   if (base.endsWith('.lock')) {
     const realRoot = obs.realpath('gen-realpath', root);
     if (realRoot.state !== 'resolved') return { unknown: { point: 'gen-realpath', path: root, code: realRoot.state === 'absent' ? 'ENOENT' : realRoot.code } };
@@ -1201,17 +1205,29 @@ export function resolveGenDir(lockPath, env = process.env, obs = makeObserver())
   return { genDir: path.join(root, 'by-path', `${byPathHash(`${parent.path}/${base}`)}.gen`) };
 }
 
+/** #4559 r7 (a2 P3-5): the lower case of ASCII's A–Z only (other characters as spelled). */
+const asciiLower = (text) => text.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+
 /**
- * resolveGenDir's directory; throws (with the errno) when the realpath cannot be observed. The machine-lock root
- * is made first, as the acquisition makes it (#4559 r6, C7-I2): the place a lock's chain is, before anyone took it.
+ * #4559 r7 (PM's disposition 4): the machine-lock root made (`mkdir -p`) before the chain is chosen — observed at its
+ * own point `gen-root-mkdir`, so a root that cannot be made is named as that (never as `gen-realpath` ENOENT).
+ *
+ * @returns {{ ok: true } | { unknown: { point: string, path: string, code: string } }}
  */
-export function genDirOf(lockPath, env = process.env) {
-  try {
-    fs.mkdirSync(machineLockRootOf(env), { recursive: true });
-  } catch {
-    // seen by the realpath below
-  }
-  const r = resolveGenDir(lockPath, env);
+function makeRoot(env, obs) {
+  const root = machineLockRootOf(env);
+  const made = obs.mkdir('gen-root-mkdir', root, true);
+  return made.state === 'unknown' ? { unknown: { point: 'gen-root-mkdir', path: root, code: made.code } } : { ok: true };
+}
+
+/**
+ * resolveGenDir's directory; throws (with the point and the errno) when the root cannot be made or a realpath
+ * cannot be observed. The machine-lock root is made first, as the acquisition makes it (#4559 r6, C7-I2): the place a
+ * lock's chain is, before anyone took it. `obs` (#4559 r7): the observer (a test's fault seam).
+ */
+export function genDirOf(lockPath, env = process.env, obs = makeObserver()) {
+  const root = makeRoot(env, obs);
+  const r = root.unknown ? root : resolveGenDir(lockPath, env, obs);
   if (r.unknown) throw Object.assign(new Error(`machine-lock-unknown point=${r.unknown.point} path=${r.unknown.path} errno=${r.unknown.code}`), { code: r.unknown.code });
   return r.genDir;
 }
@@ -1387,8 +1403,17 @@ const holderOfRecords = (records, fields) => ({ ...records[0], ...records[record
 /** holderOfRecords for a display (held by): the fields when they can be read. */
 const shownHolder = (g, n, records) => holderOfRecords(records, readGenFields(g, n).fields ?? {});
 
-/** holderState of a generation's record, observed at the generation's own points (holder-pid / holder-group). */
+/**
+ * holderState of a generation's record, observed at the generation's own points (holder-pid / holder-group).
+ * `g.self` (#4559 r7, §4.2: D5's caller): a record of the calling process is its own, judged by D12's rule — gone,
+ * but for a group of another pgid (a hand-off to this pid and another group), whose members are judged.
+ */
 function genHolderState(g, record) {
+  if (g.self && record.pid === process.pid) {
+    if (!validPgid(record.pgid) || record.pgid === process.pid) return { state: 'gone' };
+    const group = g.obs.group('holder-group', record.pgid);
+    return group.state === 'unknown' ? { state: 'unknown', point: 'holder-group', code: group.code } : { state: group.state === 'gone' ? 'gone' : 'alive' };
+  }
   const obs = { pid: (_point, pid) => g.obs.pid('holder-pid', pid), group: (_point, pgid) => g.obs.group('holder-group', pgid) };
   const state = holderState(record, { host: g.host, obs });
   return state.state === 'unknown' && state.point === 'group' ? { ...state, point: 'holder-group' } : state;
@@ -1473,7 +1498,9 @@ function takeGeneration(g, owner) {
     if (listing.unknown) return { unknown: listing.unknown };
     if (listing.absent) {
       g.seam('gen-parent-mkdir');
-      fs.mkdirSync(path.dirname(g.genDir), { recursive: true });
+      // #4559 r7 (a2 P3-6): the parent of .gen (the root, or by-path/ in it) — observed, never thrown out of the take
+      const parent = g.obs.mkdir('gen-parent-mkdir', path.dirname(g.genDir));
+      if (parent.state === 'unknown') return { unknown: { point: 'gen-parent-mkdir', path: path.dirname(g.genDir), code: parent.code } };
       g.seam('gen-dir-mkdir');
       const made = g.obs.mkdir('gen-dir-mkdir', g.genDir);
       if (made.state === 'unknown') return { unknown: { point: 'gen-dir-mkdir', path: g.genDir, code: made.code } };
@@ -1560,11 +1587,12 @@ function genEnded(g, n) {
  * holder only (null when there is none or the chain cannot be chosen) — never the <lock>'s record.
  *
  * @param {string} lockPath
- * @param {{ ownerCodec?: { parse: (text: string) => any, format: (record: Record<string, unknown>) => string }, genOnly?: boolean }} [options]
+ * @param {{ ownerCodec?: { parse: (text: string) => any, format: (record: Record<string, unknown>) => string }, genOnly?: boolean, hooks?: { fault?: (point: string, target: string, count: number) => string | null | undefined } }} [options]
  */
 export function readHolder(lockPath, options = {}) {
   const codec = options.ownerCodec ?? JSON_OWNER_CODEC;
-  const obs = makeObserver({ codec });
+  // #4559 r7 §1: `hooks.fault` (a test's seam), as the other public functions have it
+  const obs = makeObserver({ codec, fault: options.hooks?.fault });
   const chosen = resolveGenDir(lockPath, process.env, obs);
   if (chosen.unknown) return options.genOnly ? null : readOwner(lockPath, codec);
   const g = { genDir: chosen.genDir, obs, codec };
@@ -1699,16 +1727,10 @@ export function* machineLockAcquisition(name, options) {
   const g = { ...ctx, codec, now, genDir: null, genTmp: null, seam: makeSeam(hooks), onStaleHolder: options.onStaleHolder, staleNoted, own: null };
   const chooseGenDir = () => {
     if (g.genDir !== null) return true;
-    if (!hooks.genDir) {
-      // #4559 r6 (C7-I2): the machine-lock root is made first (the by-path chains live in it, run-lock's lock is
-      // outside it); a root that cannot be made is seen by its realpath below — unknown or absent, no chain.
-      try {
-        fs.mkdirSync(machineLockRootOf(process.env), { recursive: true });
-      } catch {
-        // observed below
-      }
-    }
-    const chosen = hooks.genDir ? { genDir: hooks.genDir } : resolveGenDir(lockPath, process.env, obs);
+    // #4559 r6 (C7-I2): the machine-lock root is made first (the by-path chains live in it, run-lock's lock is
+    // outside it); #4559 r7: a root that cannot be made is named by its own point (gen-root-mkdir), no chain.
+    const rootMade = hooks.genDir ? { ok: true } : makeRoot(process.env, obs);
+    const chosen = hooks.genDir ? { genDir: hooks.genDir } : rootMade.unknown ? rootMade : resolveGenDir(lockPath, process.env, obs);
     if (chosen.unknown) {
       unknown = chosen.unknown;
       warnOnce(`machine-lock-unknown point=${unknown.point} path=${unknown.path} errno=${unknown.code}`, { event: 'machine-lock-unknown', point: unknown.point, path: unknown.path, errno: unknown.code });
@@ -1929,8 +1951,12 @@ export function* machineLockAcquisition(name, options) {
     let handoffs = 0;
     let fieldsSerial = 0;
     const ours = (t) => t === token || handed.includes(t);
+    /**
+     * The holding's `end` (released). true once it is there; false (named) when its link kept answering ENOENT on a
+     * generation not over — an answer of the observation, not a throw (#4559 r7, a2 P3-6): the next release tries again.
+     */
     const finishEnd = () => {
-      if (endDone) return;
+      if (endDone) return true;
       g.seam('release-end');
       for (let tries = 1; ; tries++) {
         const r = writeEnd(g, n, 'released');
@@ -1944,11 +1970,12 @@ export function* machineLockAcquisition(name, options) {
           if (over.unknown) throw Object.assign(new Error(`${over.unknown.code}: cannot tell whether ${genPath(g, n)} is over`), { code: over.unknown.code });
           if (!over.ended) {
             if (tries < LINK_TRIES_PER_POLL) continue;
-            throw Object.assign(new Error(`EAGAIN: cannot end ${genPath(g, n)}`), { code: 'EAGAIN' });
+            warn(`machine-lock-release-deferred ${lockPath} point=end-link errno=EAGAIN`, { event: 'machine-lock-release-deferred', lockPath, point: 'end-link', errno: 'EAGAIN' });
+            return false;
           }
         }
         endDone = true;
-        return;
+        return true;
       }
     };
     /**
@@ -1997,7 +2024,7 @@ export function* machineLockAcquisition(name, options) {
       release: () => {
         if (released) return 'none';
         if (beaconDone) {
-          finishEnd();
+          if (!finishEnd()) return 'deferred';
           released = true;
           return 'released';
         }
@@ -2055,7 +2082,7 @@ export function* machineLockAcquisition(name, options) {
           const code = rmQuiet(lockPath, { recursive: true });
           if (code === null) {
             beaconDone = true;
-            finishEnd();
+            if (!finishEnd()) return 'deferred';
             released = true;
             return 'released';
           }
@@ -2066,7 +2093,7 @@ export function* machineLockAcquisition(name, options) {
         beaconDone = true;
         cleanupOwnGone(ctx, token);
         for (const t of handed) cleanupOwnGone(ctx, t);
-        finishEnd();
+        if (!finishEnd()) return 'deferred';
         released = true;
         return 'kept';
       },
@@ -2172,13 +2199,14 @@ const headGen = (ctx, codec, hooks, now) => ({ ...ctx, codec, now, genDir: ctx.g
 
 /**
  * #4559 r6 (§4.2, review a P2-3): whether the holding of one of `tokens` — the largest generation without `end`
- * that holds a record of them — still has a hand-off alive: `live` when any of its hand-off records
- * (`owner.h<k>`, the <lock> shows the last one only) is alive, `unknown` when one cannot be observed, `dead` when
- * all are gone; `none` when no such holding (or no chain) is there. The first record (the acquirer, the caller's
- * own process in D5's use) is the recovery's to judge (endDeadGen), as before. Reads only.
+ * that holds a record of them — still has a record alive: `live` when any of its records is alive, `unknown` when
+ * one cannot be observed, `dead` when all are gone; `none` when no such holding is there. #4559 r7 (§4.2, a2 P2-2 =
+ * b2 P2-1): every record, the first owner too — judged as the recovery judges them (genHolderState; in D5 a record
+ * of the caller's own process by D12's rule), so the <lock>'s judgement and the `end`'s are one. Reads only; the
+ * chain is known (the caller holds back when it is not, C7-I3).
  */
 function genHoldingState(ctx, tokens, codec, hooks, now) {
-  if (!ctx.genDir) return { state: 'none' };
+  if (!ctx.genDir) return { state: 'unknown', unknown: ctx.genUnknown };
   const g = headGen(ctx, codec, hooks, now);
   const listing = listGens(g, 'gen-list');
   if (listing.unknown) return { state: 'unknown', unknown: listing.unknown };
@@ -2189,18 +2217,19 @@ function genHoldingState(ctx, tokens, codec, hooks, now) {
   const read = readGenRecords(g, listing.max);
   if (read.state === 'unknown') return { state: 'unknown', unknown: read.unknown };
   if (read.state !== 'records' || !read.records.some((r) => tokens.includes(r.token))) return { state: 'none' };
-  for (const record of read.records.slice(1)) {
-    if (isTomb(record)) continue;
-    const holder = genHolderState(g, record);
-    if (holder.state === 'alive') return { state: 'live', pid: record.pid };
-    if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, listing.max), code: holder.code } };
+  for (const record of read.records) {
+    if (!isTomb(record)) {
+      const holder = genHolderState(g, record);
+      if (holder.state === 'alive') return { state: 'live', pid: record.pid };
+      if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, listing.max), code: holder.code } };
+    }
   }
   return { state: 'dead' };
 }
 
 function endDeadGen(ctx, tokens, codec, hooks, now) {
   // The chain could not be chosen (gen-realpath unknown): nothing is ended (the next head does it).
-  if (!ctx.genDir) return {};
+  if (!ctx.genDir) return ctx.genUnknown ? { unknown: ctx.genUnknown } : {};
   const g = headGen(ctx, codec, hooks, now);
   const listing = listGens(g, 'gen-list');
   if (listing.unknown || listing.max === 0) return listing.unknown ? { unknown: listing.unknown } : {};
@@ -2247,7 +2276,13 @@ function asHead(lockPath, options, whenHead) {
   const root = path.dirname(lockPath);
   const queueDir = queueDirOfPath(lockPath);
   const token = crypto.randomUUID();
-  const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token, startOf: env.startOf, genDir: hooks.genDir ?? (resolveGenDir(lockPath, process.env, obs).genDir ?? null), codec, hooks, now };
+  // #4559 r7 (C7-I3, a2 P2-1 = b2 P2-2): the chain as the acquisition chooses it (the root made first, then the
+  // realpaths) — when it cannot be chosen, its unknown is kept (`genUnknown`) and the head holds back on it.
+  const chosen = hooks.genDir ? { genDir: hooks.genDir } : (() => {
+    const made = makeRoot(process.env, obs);
+    return made.unknown ? made : resolveGenDir(lockPath, process.env, obs);
+  })();
+  const ctx = { root, lockPath, host, obs, warn, warnOnce, onRecover: hooks.onRecover, myToken: token, startOf: env.startOf, genDir: chosen.genDir ?? null, genUnknown: chosen.unknown ?? null, codec, hooks, now };
   const startedAt = now();
   const deadline = startedAt + Math.max(0, timeoutMs);
   const ticket = { pid: process.pid, host, token, createdAt: startedAt, deadline };
@@ -2311,6 +2346,10 @@ function asHead(lockPath, options, whenHead) {
  */
 export function releaseAsHead(lockPath, tokens, options = {}) {
   return asHead(lockPath, options, (ctx) => {
+    // #4559 r7 (§4.2): the caller's own records are judged by D12's rule (its own), in the <lock>'s judgement and the end's
+    ctx.self = true;
+    // #4559 r7 (C7-I3, a2 P2-1 = b2 P2-2): the chain unknown in this poll — no judgement that depends on it: nothing moved
+    if (ctx.genUnknown) return deferredUnknown(ctx, ctx.genUnknown);
     ctx.onRecover?.('release-head-read');
     const read = ctx.obs.owner('release-owner', lockPath);
     if (read.state === 'unknown') {
@@ -2343,9 +2382,18 @@ export function releaseAsHead(lockPath, tokens, options = {}) {
     if (j.result === 'reread-unknown') ctx.warnOnce(`machine-lock-unknown point=${j.unknown.point} path=${j.unknown.path} errno=${j.unknown.code}`);
     if (j.result !== 'recovered') return { result: 'kept' };
     for (const t of tokens) cleanupOwnGone(ctx, t);
-    endDeadGen(ctx, tokens, ctx.codec, ctx.hooks, ctx.now);
+    // #4559 r7 (§4.2): `released` only with the holding's `end` — an `end` that could not be written is named,
+    // deferred (the <lock> is gone, §6.1's order; the next call, or the next head, ends the generation).
+    const ended = endDeadGen(ctx, tokens, ctx.codec, ctx.hooks, ctx.now);
+    if (ended.unknown) return deferredUnknown(ctx, ended.unknown);
     return { result: 'released' };
   });
+}
+
+/** #4559 r7: D5's answer when an observation it depends on failed — `deferred`, named (warned and answered). */
+function deferredUnknown(ctx, unknown) {
+  ctx.warn(`machine-lock-release-deferred ${ctx.lockPath} point=${unknown.point} errno=${unknown.code}`);
+  return { result: 'deferred', unknown };
 }
 
 /**
@@ -2363,6 +2411,8 @@ export function releaseAsHead(lockPath, tokens, options = {}) {
 export function recoverIfDead(lockPath, options = {}) {
   const now = options.hooks?.now ?? (() => Date.now());
   return asHead(lockPath, options, (ctx) => {
+    // #4559 r7 (C7-I3): the chain unknown in this poll — nothing is judged on it, the <lock> is kept (named)
+    if (ctx.genUnknown) return { result: 'kept', unknown: ctx.genUnknown };
     // #4559 (§4.3): a dead holding's generation is ended first (the guard's recovery, never a take).
     endDeadGen(ctx, null, ctx.codec, ctx.hooks, ctx.now);
     const settled = settleGone(ctx);
@@ -2397,6 +2447,15 @@ export function recoverIfDead(lockPath, options = {}) {
     const holder = holderState(read.owner, ctx);
     if (holder.state === 'unknown') return done('kept', { point: holder.point, path: lockPath, code: holder.code });
     if (holder.state !== 'gone') return done('kept');
+    // #4559 r7 (§4.2 / §6.1, a2 P2-1): a <lock> that names a generation (`g`) shows its last hand-off only — it is
+    // recovered only once that generation is over (its `end` there: every record judged dead by the recovery, the
+    // first owner and every hand-off; or gone below the largest, L1). Not over, or unknown: kept.
+    const named = recordGen(read.owner);
+    if (named !== null) {
+      const over = genEnded(headGen(ctx, ctx.codec, ctx.hooks, ctx.now), named);
+      if (over.unknown) return done('kept', over.unknown);
+      if (!over.ended) return done('kept');
+    }
     ctx.onRecover?.('recover-only-judged');
     const j = recoverJudged(ctx, read.owner);
     // #4559: a re-read that failed is the unknown result (kept, named), not folded into a plain 'kept'.
