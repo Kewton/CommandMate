@@ -21,7 +21,7 @@ name: CI
 #   E2E Tests                             12    6.2m    16.2m    30
 #   E2E Tests (shard N/2)                  -       -        -    30
 #   E2E Tests (aggregate)                  -       -        -    10
-#   Unit Tests (shard N/4)                 -       -        -    20
+#   Unit Tests (shard N/4)                 -       -        -    30
 #   Unit Tests (aggregate)                 -       -        -    10
 #   Build                                 12    2.3m     2.5m    10
 #   Integration Tests                     12    2.1m     2.4m    10
@@ -565,7 +565,8 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     # [Issue #2638] 1 shard の見込みは 4〜5 分。実測前の暫定値（実測後に `max x 2, floor 10` で見直す）
-    timeout-minutes: 20
+    # [Issue #4624] 実測 17.7〜19.8 分で 20 分の時間切れが 2 回。人の決定で 30（E2E と同じ）
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
