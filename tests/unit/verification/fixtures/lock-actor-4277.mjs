@@ -14,6 +14,9 @@
  * setOwnerFields after the take), `nowAheadMs` (a clock this far ahead: others' tickets are past their
  * deadline, as the stalled recoverer's of #4559's report). The events carry the generation and the token, and `released` the
  * release's answer. The pauses are the core's own (CM_VERIFY_TEST_HANDOFF=pause:<stage>#<n>).
+ * #4559 PR-2 r6: `fields` may be the object to write (merge-pr's phase), `ownerFields` the record's own fields
+ * (merge-pr's `phase: 'idle'`), `seams` logs every seam the core reaches (`seam` events: stage and count), and
+ * `ready` names a file written once the take (and the fields) are done.
  */
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -27,12 +30,17 @@ const emit = (event, extra = {}) =>
 if (mode === 'gen') {
   const o = JSON.parse(process.argv[10] ?? '{}');
   emit('start');
-  const hooks = { ...(o.nowAheadMs ? { now: () => Date.now() + o.nowAheadMs, startOf: () => 0 } : {}), ...(o.genDir ? { genDir: o.genDir } : {}) };
-  const held = acquireMachineLockSync(name, { root, timeoutMs: Number(timeoutMs), pollMs: Number(pollMs), hooks });
+  const hooks = {
+    ...(o.nowAheadMs ? { now: () => Date.now() + o.nowAheadMs, startOf: () => 0 } : {}),
+    ...(o.genDir ? { genDir: o.genDir } : {}),
+    ...(o.seams ? { onGenStage: (stage, n) => emit('seam', { stage, n }) } : {}),
+  };
+  const held = acquireMachineLockSync(name, { root, timeoutMs: Number(timeoutMs), pollMs: Number(pollMs), hooks, ...(o.ownerFields ? { ownerFields: o.ownerFields } : {}) });
   emit(held.acquired ? 'acquired' : 'not-acquired', { gen: held.gen ?? null, token: held.token ?? null, heldBy: held.heldBy ?? null });
   if (!held.acquired) process.exit(3);
-  if (o.fields) emit('fields', { ok: held.setOwnerFields({ phase: 'write' }) });
+  if (o.fields) emit('fields', { ok: held.setOwnerFields(typeof o.fields === 'object' ? o.fields : { phase: 'write' }) });
   if (o.handOff) emit('handoff', held.handOff(process.pid, process.pid));
+  if (o.ready) fs.writeFileSync(o.ready, String(process.pid));
   sleepSync(Number(holdMs));
   emit('releasing', { gen: held.gen });
   emit('released', { gen: held.gen, result: held.release() });

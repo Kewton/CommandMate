@@ -180,7 +180,11 @@ const [core, root, genDir, events] = process.argv.slice(1);
 const m = await import(core);
 const hooks = {
   genDir,
-  fault: (p, _t, c) => (p === 'gen-owner-link' && c === 1 ? 'EIO' : undefined),
+  fault: (p, _t, c) => {
+    if (p !== 'gen-owner-link' || c !== 1) return undefined;
+    fs.appendFileSync(events, 'fault ' + p + '\\n');
+    return 'EIO';
+  },
   onGenStage: (s) => fs.appendFileSync(events, s + '\\n'),
 };
 const r = m.acquireMachineLockSync('x', { root, timeoutMs: 600, pollMs: 10, hooks });
@@ -207,8 +211,12 @@ async function killedWriter(corePath: string, stop: string) {
   const reached = fs.existsSync(reachedFile);
   child.kill('SIGKILL');
   await exited;
-  const calls = fs.readFileSync(events, 'utf8').split('\n').filter((l) => l === stop).length;
-  return { root, genDir, reached, calls };
+  const lines = fs.readFileSync(events, 'utf8').split('\n');
+  const calls = lines.filter((l) => l === stop).length;
+  // b P3-1: what the writer reached before the stop — its own mkdir of g1 and the injected publish failure —
+  // so a copy that cannot even be loaded is not read as "never reached the seam".
+  const before = { genMkdir: lines.filter((l) => l === 'gen-mkdir').length, faults: lines.filter((l) => l === 'fault gen-owner-link').length, g1: fs.existsSync(path.join(genDir, lockSync.genName(1))) };
+  return { root, genDir, reached, calls, before };
 }
 
 const g1 = (genDir: string) => {
@@ -263,8 +271,25 @@ describe('#4559 §4.4: the writer\'s own tomb after its owner publish failed, ki
       fs.writeFileSync(file, broken);
       const w = await killedWriter(file, 'tomb-linked');
       try {
+        expect(w.before, 'the copy ran up to the publish failure (g1 made, the fault fired once)').toEqual({ genMkdir: 1, faults: 1, g1: true });
         expect({ reached: w.reached, calls: w.calls }).toEqual({ reached: false, calls: 0 });
         expect(g1(w.genDir)).toEqual({ owner: null, end: null });
+      } finally {
+        fs.rmSync(w.root, { recursive: true, force: true });
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+  it('self-test (b P3-1): a copy that cannot be loaded reaches nothing before the stop either — the row above would be red on it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gen-own-tomb-unloadable-'));
+    try {
+      const file = path.join(dir, 'machine-lock-sync-unloadable.mjs');
+      fs.writeFileSync(file, "throw new Error('not a core');\n");
+      const w = await killedWriter(file, 'tomb-linked');
+      try {
+        expect(w.before).toEqual({ genMkdir: 0, faults: 0, g1: false });
+        expect(w.before).not.toEqual({ genMkdir: 1, faults: 1, g1: true });
       } finally {
         fs.rmSync(w.root, { recursive: true, force: true });
       }

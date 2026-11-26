@@ -106,7 +106,10 @@ const ROWS_4559: ObservationPoint[] = [
   { point: 'ownerless-gen-mtime', impls: JS, observes: '持ち主の無い世代の mtime（墓の猶予）', unknown: '古いと読まない: 墓を置かない（取らない）' },
   { point: 'tomb-tmp', impls: JS, observes: '墓の記録の tmp の排他作成と書き込み', unknown: '墓を置かない（取らない）' },
   { point: 'tomb-link', impls: JS, observes: 'link tmp → g<M>/owner（墓。書き手の公開と同じ名前）', unknown: '墓を置かない（取らない）' },
-  { point: 'beacon-gen-end', impls: JS, observes: '目印の記録が名指す前の世代の end と世代の lstat（§6.1）', unknown: '前の世代が終わったと読まない: 目印を外さない（取らない）' },
+  { point: 'beacon-gen-end', impls: JS, observes: '目印の記録が名指す前の世代の end と世代の lstat（§6.1）。解放の end の link が ENOENT のときの自分の世代も（#4559 r6）', unknown: '前の世代が終わったと読まない: 目印を外さない（取らない）。解放は終わったと読まない（名指して繰り返す）' },
+  // #4559 r6 (review a P1-1 / P1-3): the write of a generation's tmp, and the read of its fields.
+  { point: 'gen-tmp-write', impls: JS, observes: '世代の記録の tmp の書き込み（owner・end・墓・引渡し）', unknown: 'その記録を足さない（tmp は残す。次の試行は別の名前 C8）' },
+  { point: 'gen-fields-read', impls: JS, observes: '世代の fields の読み（merge-pr のフェーズ。回収の callback と held by）', unknown: '回収しない（未確認の書き込みを idle と読まない）。次の周で読み直す' },
   { point: 'handoff-gen-tmp', impls: JS, observes: '引渡しの記録 owner.h<k> の tmp の排他作成と書き込み', unknown: 'ゲートを始めない（stage=tmp。目印を書き直さない）' },
   { point: 'handoff-gen-link', impls: JS, observes: 'link tmp → g<N>/owner.h<k>', unknown: 'ゲートを始めない（stage=tmp。目印を書き直さない）' },
 ];
@@ -175,7 +178,8 @@ export const RAW_CALL_ALLOWANCES: RawCallAllowance[] = [
   { impl: 'bash', fn: 'lock_wait_head', primitive: 'json field', count: 3, why: 'lock_acquire_path と同じ札の確かめ（自分の札・前の札の done）。読みの失敗は先頭にならない向き。取り下げる札の token は判定の読み（LTR_TOKEN）を渡す（#4560）' },
   { impl: 'bash', fn: 'run_gate_handoff', primitive: 'test -d/-e/-f/-r/-x', count: 5, why: '見張りの ack・合図の取り下げ・ack の有無・timeout の印。ロックは G の排水（3 値）で守る。stat の失敗で報告がずれうる点は追跡（PM review P3-3）' },
   ...(['ts', 'sync'] as const).flatMap((impl) => [
-    ...['process.kill', 'readdirSync', 'lstatSync', 'readFileSync', 'mkdirSync', 'renameSync', 'rmdirSync'].map((primitive) => ({ impl, fn: 'makeObserver', primitive, count: 1, why: OBSERVER })),
+    // #4559 r6: readFileSync twice — the record's read and the text of a generation's fields (obs.text).
+    ...['process.kill', 'readdirSync', 'lstatSync', 'readFileSync', 'mkdirSync', 'renameSync', 'rmdirSync'].map((primitive) => ({ impl, fn: 'makeObserver', primitive, count: primitive === 'readFileSync' ? 2 : 1, why: OBSERVER })),
     { impl, fn: 'readJson', primitive: 'readFileSync', count: 1, why: '札の読み。読めない札は null で、生きている札と同じく塞ぎ、外さない' },
     { impl, fn: 'readOwner', primitive: 'readOwner', count: 1, why: '定義の行' },
     { impl, fn: 'ticketNumbers', primitive: 'readdirSync', count: 1, why: 'obs の無い呼び出し（ゴミ集め・export の listQueue）だけ。失敗は空で、何も消さない。取得は obs の list-queue を通る' },
@@ -200,13 +204,12 @@ export const RAW_CALL_ALLOWANCES: RawCallAllowance[] = [
     { impl, fn: 'listQueue', primitive: 'readJson', count: 1, why: 'export の listQueue（表示・ゴミ集め用）。取得の判断は readQueue を通る' },
     { impl, fn: 'pidAlive', primitive: 'process.kill', count: 1, why: 'export の旧 API（EPERM は生きている）。取得は使わず、holderGone に渡されたときだけ alive／gone に写して 3 値の判定に通す' },
     { impl, fn: 'groupAlive', primitive: 'process.kill', count: 1, why: '同上' },
-    { impl, fn: 'machineLockAcquisition', primitive: 'mkdirSync', count: 1, why: 'root の mkdir -p（置き場を作るだけ）' },
+    { impl, fn: 'machineLockAcquisition', primitive: 'mkdirSync', count: 2, why: 'root の mkdir -p（置き場を作るだけ）と、マシンのロックの root の mkdir -p（#4559 r6 C7-I2: 鎖を選ぶ前。失敗は gen-realpath の観測に出る）' },
     { impl, fn: 'machineLockAcquisition', primitive: 'readOwner', count: 2, why: '待ちの表示（heldBy）と setOwnerFields（自分の記録への書き足し。token が自分でなければ書かない）' },
     { impl, fn: 'machineLockAcquisition', primitive: 'renameSync', count: 2, why: 'setOwnerFields の書き込み（行為）: 世代の fields（持ち主だけが書く）と目印の写し' },
     { impl, fn: 'asHead', primitive: 'readJson', count: 1, why: '自分の札の確かめ（releaseAsHead・recoverIfDead）。読めなければ札を失ったとして並び直す（先頭にならない）' },
     // #4559 PR-2 (lead-tests §1 #5, reason (b)): the generation chain's raw calls.
     { impl, fn: 'testPause', primitive: 'existsSync', count: 1, why: 'テストの一時停止の口（CM_VERIFY_TEST_HANDOFF_DIR の .go）。本番では止まらない' },
-    { impl, fn: 'readGenFields', primitive: 'readFileSync', count: 1, why: '世代の fields（merge-pr のフェーズ）の読み。ロックの安全に使わない（読めなければ空）' },
     { impl, fn: 'takeGeneration', primitive: 'mkdirSync', count: 1, why: '.gen の親（by-path）の mkdir -p（置き場を作るだけ。.gen 自体は gen-dir-mkdir の観測）' },
     { impl, fn: 'readHolder', primitive: 'readOwner', count: 2, why: '外の読み手（merge-pr・merge-train の held by）の表示。鎖を選べない（gen-realpath が不明）か、世代に保有者が無いときの目印の記録。判断に使わない' },
   ]),

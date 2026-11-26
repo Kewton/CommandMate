@@ -351,7 +351,7 @@ T3 が核のソースを走査して関数・操作・数がこの表と一致�
 | `takeGeneration` | `obs.mkdir` | 2 | gen-dir-mkdir・gen-mkdir | .gen (C6); mkdir g<M+1> | a2 |
 | `machineLockAcquisition` | `rmQuiet` | 2 | —・beacon-release | an own tmp of setOwnerFields / handOff; the <lock> at the release (§6.1: before end) | r0 |
 | `machineLockAcquisition` | `fs.linkSync` | 1 | — | the ticket's link | — |
-| `machineLockAcquisition` | `fs.mkdirSync` | 1 | — | the root | — |
+| `machineLockAcquisition` | `fs.mkdirSync` | 2 | — | the root; the machine-lock root before the chain is chosen (C7-I2) | — |
 | `machineLockAcquisition` | `fs.renameSync` | 2 | fields-rename・— | g<N>/fields; the beacon's copy of the fields | — |
 | `machineLockAcquisition` | `obs.rename` | 1 | — | the beacon's D4 hand-off (after owner.h<k>, §4.6) | — |
 | `asHead` | `fs.linkSync` | 1 | — | the ticket's link | — |

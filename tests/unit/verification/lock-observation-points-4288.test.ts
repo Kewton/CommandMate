@@ -310,6 +310,10 @@ const GEN_SCENARIOS: Record<string, Scenario> = {
   'gen-dir-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-tmp-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  // #4559 r6: the write of every generation tmp fails (the owner's, then the own tomb's): nothing taken.
+  'gen-tmp-write': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  // #4559 r6 (review a P1-1): the dead holding's fields cannot be read: not recovered (its write is not read as idle).
+  'gen-fields-read': { code: 'EIO', setup: (name) => deadGen(name), ...genNotTaken(false) },
   'gen-owner-tmp': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-owner-link': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-postlist': { code: 'EIO', setup: () => {}, ...genNotTaken() },

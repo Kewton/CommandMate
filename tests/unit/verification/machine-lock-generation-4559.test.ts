@@ -18,8 +18,11 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
+import { main as mergePrMain, mergeLockName, readUnresolved } from '../../../scripts/orchestrate/merge-pr.mjs';
 import {
   CORE,
   HOST,
@@ -31,6 +34,7 @@ import {
   lockOf,
   readGens,
   s1Violations,
+  s2AtWrite,
   s2Violations,
   startActor,
   until,
@@ -178,7 +182,8 @@ describe('#4559 T2: A stopped at each seam, B at the same seam (the crossing ord
     await a.exited;
     await b.exited;
     expect(s1Violations(allEvents(a, b))).toEqual([]);
-    expect(s2Violations(lockOf(root).genDir)).toEqual([]);
+    // S2 at the time of each `end` (b P2-3), not who is alive now (both have exited).
+    expect(s2AtWrite(lockOf(root).genDir, [a, b])).toEqual([]);
     expectSettled(root);
   }, 20000);
 });
@@ -190,8 +195,7 @@ describe('#4559 T2: A killed at each seam — the next head takes the lock (S4) 
     prepare(root, setup);
     const a = await bringTo(root, seam, setup);
     expect(await until(() => a.reached(`${seam}#1`))).toBe(true);
-    const killedAt = Date.now();
-    a.child.kill('SIGKILL');
+    const killedAt = a.kill();
     await a.exited;
     // 11 minutes ahead: the owner-less generation's grace (§4.4) and A's ticket are past.
     const b = startActor(root, 'B', { timeoutMs: 2000, nowAheadMs: 11 * 60_000 });
@@ -200,7 +204,8 @@ describe('#4559 T2: A killed at each seam — the next head takes the lock (S4) 
     expect(events.filter((e) => e.who === 'B').map((e) => e.event)).toEqual(['start', 'acquired', 'releasing', 'released']);
     // A, killed, holds nothing: its span ends at its death (before B started).
     expect(s1Violations(events, { A: killedAt })).toEqual([]);
-    expect(s2Violations(lockOf(root).genDir)).toEqual([]);
+    // S2 at the time of each `end` (b P2-3): A's life ends at its kill, B's at its release.
+    expect(s2AtWrite(lockOf(root).genDir, [a, b])).toEqual([]);
     expectSettled(root);
   }, 20000);
 });
@@ -211,7 +216,8 @@ export function genPoints(source: string): string[] {
   const end = source.indexOf('export function acquireMachineLockSync');
   const part = source.slice(start, end);
   const names = new Set<string>();
-  for (const m of part.matchAll(/\bobs\.(?:pid|group|list|lstat|record|realpath|mkdir|rename|rmdir|put|link|unlink)\('([a-z0-9-]+)'/g)) names.add(m[1]);
+  // b P3-4: `obs.owner(` (a <lock>'s or a generation's owner) and `obs.text(` (a generation's fields) are reads too.
+  for (const m of part.matchAll(/\bobs\.(?:pid|group|list|lstat|record|owner|text|realpath|mkdir|rename|rmdir|put|link|unlink)\('([a-z0-9-]+)'/g)) names.add(m[1]);
   for (const m of part.matchAll(/\b(?:put|link): '([a-z0-9-]+)'/g)) names.add(m[1]);
   for (const m of part.matchAll(/\blistGens\(g, '([a-z0-9-]+)'\)/g)) names.add(m[1]);
   // The <lock>'s points of #4288 (bash's too) are the observation table's older rows, injected there.
@@ -238,6 +244,7 @@ const POINT_SETUP: Record<string, Setup> = {
   'holder-pid': 'dead-holder',
   'holder-group': 'dead-group-holder',
   'holder-relist': 'dead-holder',
+  'gen-fields-read': 'dead-holder',
   'end-tmp': 'dead-holder',
   'end-link': 'dead-holder',
   'ownerless-gen-mtime': 'ownerless-old',
@@ -470,4 +477,443 @@ describe('#4559 P1 (#4559 comment 7183455133): the chain is chosen from the real
     expect([...core.matchAll(/options\.genDir/g)].length).toBe(0);
     expect([...core.matchAll(/hooks\.genDir/g)].length).toBeGreaterThanOrEqual(1);
   });
+});
+
+// =====================================================================================================
+// #4559 PR-2 r6: the review's findings, each a test first (red on 4ff5d12e2's core), then the fix.
+// =====================================================================================================
+
+/** Run `fn` with CM_VERIFY_LOCK_ROOT set to `root` (the core reads the machine-lock root from process.env). */
+function withRoot<T>(root: string, fn: () => T): T {
+  const was = process.env.CM_VERIFY_LOCK_ROOT;
+  process.env.CM_VERIFY_LOCK_ROOT = root;
+  try {
+    return fn();
+  } finally {
+    process.env.CM_VERIFY_LOCK_ROOT = was;
+  }
+}
+
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/** The same directory spelled with its last component's case swapped. */
+const swapCase = (p: string): string => {
+  const base = path.basename(p);
+  return path.join(path.dirname(p), base === base.toUpperCase() ? base.toLowerCase() : base.toUpperCase());
+};
+
+/** Whether os.tmpdir() is on a filesystem that does not tell case apart (APFS's default): checked, never assumed. */
+const CASE_INSENSITIVE = (() => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gen-Case-'));
+  try {
+    return swapCase(d) !== d && fs.existsSync(swapCase(d));
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+})();
+
+/** The `.gen` directories under `root` (a name's chain) and under `root/by-path` (a path's). */
+const chainsOf = (root: string): { named: string[]; byPath: string[] } => {
+  const named = fs.existsSync(root) ? fs.readdirSync(root).filter((e) => e.endsWith('.gen')).sort() : [];
+  const bp = path.join(root, 'by-path');
+  const byPath = fs.existsSync(bp) ? fs.readdirSync(bp).filter((e) => e.endsWith('.gen')).sort() : [];
+  return { named, byPath };
+};
+
+describe('#4559 r6 C7-I1: one lock, one chain — the realpath compares the directory itself, not the spelling', () => {
+  // On a filesystem that tells case apart the two spellings are two directories (two locks): nothing to compare.
+  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) A by name, B by a lockPath whose root is spelled in another case: B takes nothing, no second chain; after A, B takes on A\'s chain', () => {
+    const base = freshRoot('i1');
+    const locks = path.join(base, 'Locks');
+    fs.mkdirSync(locks);
+    const other = swapCase(locks);
+    withRoot(locks, () => {
+      const a = lockSync.acquireMachineLockSync('x', { root: locks, timeoutMs: 0 });
+      expect(a.acquired).toBe(true);
+      const b = lockSync.acquireMachineLockSync('x', { lockPath: path.join(other, 'x.lock'), timeoutMs: 200, pollMs: 10 });
+      expect(b.acquired).toBe(false);
+      expect(chainsOf(locks), 'only A\'s chain: no by-path made by B').toEqual({ named: ['x.gen'], byPath: [] });
+      expect([...readGens(path.join(locks, 'x.gen')).keys()]).toEqual([a.gen]);
+      expect(a.release()).toBe('released');
+      const b2 = lockSync.acquireMachineLockSync('x', { lockPath: path.join(other, 'x.lock'), timeoutMs: 500, pollMs: 10 });
+      expect(b2.acquired).toBe(true);
+      expect([...readGens(path.join(locks, 'x.gen')).keys()]).toContain(b2.gen);
+      expect(chainsOf(locks).byPath).toEqual([]);
+      expect(b2.release()).toBe('released');
+    });
+  });
+
+  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) two writers whose CM_VERIFY_LOCK_ROOT differ in case only: one chain', () => {
+    const base = freshRoot('i1-env');
+    const locks = path.join(base, 'Locks');
+    fs.mkdirSync(locks);
+    const a = withRoot(locks, () => lockSync.acquireMachineLockSync('x', { root: locks, timeoutMs: 0 }));
+    expect(a.acquired).toBe(true);
+    const b = withRoot(swapCase(locks), () => lockSync.acquireMachineLockSync('x', { root: locks, timeoutMs: 200, pollMs: 10 }));
+    expect(b.acquired).toBe(false);
+    expect(chainsOf(locks)).toEqual({ named: ['x.gen'], byPath: [] });
+    expect([...readGens(path.join(locks, 'x.gen')).keys()]).toEqual([a.gen]);
+    expect(withRoot(locks, () => a.release())).toBe('released');
+  });
+
+  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) a lock outside the root, its parent spelled other/x.lock and OTHER/x.lock: exactly one by-path chain', () => {
+    const base = freshRoot('i1-other');
+    const locks = path.join(base, 'locks');
+    fs.mkdirSync(locks);
+    const dir = path.join(base, 'other');
+    fs.mkdirSync(dir);
+    withRoot(locks, () => {
+      const a = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'x.lock'), timeoutMs: 0 });
+      expect(a.acquired).toBe(true);
+      const b = lockSync.acquireMachineLockSync('x', { lockPath: path.join(swapCase(dir), 'x.lock'), timeoutMs: 200, pollMs: 10 });
+      expect(b.acquired).toBe(false);
+      expect(chainsOf(locks).byPath).toHaveLength(1);
+      expect(a.release()).toBe('released');
+    });
+  });
+});
+
+describe('#4559 r6 C7-I2: a root whose realpath is not resolved (unknown or absent) chooses no chain in that poll', () => {
+  it.each(['ENOENT', 'EIO'])('the root\'s realpath (the 2nd gen-realpath) fails once with %s: no chain that poll, named, taken on the root\'s chain the next', (code) => {
+    const root = freshRoot(`i2-${code}`);
+    const warnings: string[] = [];
+    let fired = 0;
+    const r = withRoot(root, () =>
+      lockSync.acquireMachineLockSync('x', {
+        root,
+        timeoutMs: 1000,
+        pollMs: 10,
+        warn: (l: string) => warnings.push(l),
+        hooks: { fault: (p: string, t: string, c: number) => (p === 'gen-realpath' && c === 2 ? (fired++, expect(t).toBe(root), code) : undefined) },
+      })
+    );
+    expect(fired, 'the root\'s realpath is reached').toBe(1);
+    expect(r.acquired).toBe(true);
+    expect(warnings.join('\n')).toContain(`machine-lock-unknown point=gen-realpath path=${root} errno=${code}`);
+    expect(chainsOf(root), 'no by-path chosen while the root could not be seen').toEqual({ named: ['x.gen'], byPath: [] });
+    expect([...readGens(path.join(root, 'x.gen')).keys()]).toEqual([r.gen]);
+    expect(withRoot(root, () => r.release())).toBe('released');
+  });
+
+  it.skipIf(process.getuid?.() === 0)('on the real filesystem: a CM_VERIFY_LOCK_ROOT that does not exist (and cannot be made) — not taken, named, no chain made', () => {
+    const base = freshRoot('i2-fs');
+    const ro = path.join(base, 'ro');
+    fs.mkdirSync(ro);
+    const envRoot = path.join(ro, 'locks');
+    const dir = path.join(base, 'here');
+    fs.mkdirSync(dir);
+    fs.chmodSync(ro, 0o555);
+    const warnings: string[] = [];
+    try {
+      let r: ReturnType<typeof lockSync.acquireMachineLockSync> | null = null;
+      let thrown: unknown = null;
+      try {
+        r = withRoot(envRoot, () => lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'x.lock'), timeoutMs: 100, pollMs: 10, warn: (l: string) => warnings.push(l) }));
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, 'an observation that failed is not thrown').toBeNull();
+      expect(r?.acquired).toBe(false);
+      expect(warnings.join('\n')).toContain(`machine-lock-unknown point=gen-realpath path=${envRoot} errno=ENOENT`);
+      expect(fs.existsSync(envRoot)).toBe(false);
+      expect(fs.readdirSync(dir).filter((e) => e.endsWith('.gen'))).toEqual([]);
+    } finally {
+      fs.chmodSync(ro, 0o755);
+    }
+  });
+});
+
+describe('#4559 r6 C7-I3: with the chain unknown, the heads that do not take end nothing and make nothing', () => {
+  it.each([
+    ['releaseAsHead', 1, 'EIO'],
+    ['releaseAsHead', 2, 'ENOENT'],
+    ['recoverIfDead', 1, 'EIO'],
+    ['recoverIfDead', 2, 'ENOENT'],
+  ])('%s with gen-realpath #%s failing (%s): the dead holding\'s generation gets no end, no .gen is made', (fn, at, code) => {
+    const root = freshRoot('i3');
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' } });
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: deadPid(), host: HOST, token: 'T', acquiredAt: 0, v: 1, g: 1 }));
+    let fired = 0;
+    const hooks = { fault: (p: string, _t: string, c: number) => (p === 'gen-realpath' && c === at ? (fired++, code) : undefined) };
+    withRoot(root, () => (fn === 'releaseAsHead' ? lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, hooks }) : lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks })));
+    expect(fired).toBe(1);
+    expect(readGens(genDir).get(1)?.end ?? null).toBeNull();
+    expect(chainsOf(root)).toEqual({ named: ['x.gen'], byPath: [] });
+    expect(fs.readdirSync(genDir)).toEqual([lockSync.genName(1)]);
+  });
+});
+
+describe('#4559 r6 a P1-1: the holder handed to the recovery and to held-by carries the fields last', () => {
+  it('merge-pr\'s holder killed after phase(merge): the next merge-pr keeps its write as unconfirmed (the stop of the next runs)', async () => {
+    const base = freshRoot('p11');
+    const lockRoot = path.join(base, 'locks');
+    fs.mkdirSync(lockRoot);
+    const runDir = path.join(base, 'runs');
+    const wt = path.join(base, 'wt');
+    fs.mkdirSync(wt);
+    const LOCK = mergeLockName('Kewton/CommandMate', 'develop');
+    const ready = path.join(base, 'ready');
+    // A: merge-pr's acquisition (ownerFields phase idle), then phase('merge') (setOwnerFields), then killed.
+    const a = startActor(lockRoot, 'A', {
+      name: LOCK,
+      realChain: true,
+      holdMs: 60_000,
+      timeoutMs: 3000,
+      ownerFields: { phase: 'idle', repo: 'Kewton/CommandMate', base: 'develop' },
+      fields: { phase: 'merge', entry: '5000', issue: 5000, pr: 5001 },
+      ready,
+    });
+    expect(await until(() => fs.existsSync(ready))).toBe(true);
+    expect(a.events().find((e) => e.event === 'fields')).toMatchObject({ ok: true });
+    // held by, while A lives: the phase the fields say
+    const holder = withRoot(lockRoot, () => lockSync.readHolder(lockSync.lockPathOf(lockRoot, LOCK)));
+    expect(holder).toMatchObject({ phase: 'merge', pr: 5001 });
+    a.kill();
+    await a.exited;
+    const logs: string[] = [];
+    withRoot(lockRoot, () => {
+      try {
+        mergePrMain(['--run-dir', runDir, '--issues', '4245-5001', '--issue', '4245', '--worktree', wt, '--merge-lock-timeout', '5'], {
+          run: () => {
+            throw new Error('the merge itself is not this test\'s');
+          },
+          sleep: () => {},
+          lockRoot,
+          findTestsNaming: () => [],
+          log: (l: string) => logs.push(l),
+          error: (l: string) => logs.push(l),
+        });
+      } catch {
+        // mergeOne's first git call throws: the lock part has run
+      }
+    });
+    expect(logs.join('\n')).toContain('recovered the merge lock of a dead holder #5000 (pr=#5001) phase=merge — its write is unconfirmed');
+    expect(readUnresolved(lockRoot, LOCK).map((u: { owner: { phase: string; pr: number } }) => [u.owner.phase, u.owner.pr])).toEqual([['merge', 5001]]);
+  }, 20000);
+
+  it('the fields read failing once (EIO): no recovery that poll (the write is not dropped as idle), recovered with the fields the next', () => {
+    const root = freshRoot('p11-eio');
+    const { genDir } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'D', phase: 'idle' } });
+    fs.writeFileSync(path.join(genDir, lockSync.genName(1), 'fields'), JSON.stringify({ phase: 'merge', pr: 5001 }));
+    const seen: { phase?: string }[] = [];
+    let fired = 0;
+    const r = withRoot(root, () =>
+      lockSync.acquireMachineLockSync('x', {
+        root,
+        timeoutMs: 1000,
+        pollMs: 10,
+        onStaleHolder: (o: { phase?: string }) => seen.push(o),
+        hooks: { fault: (p: string, _t: string, c: number) => (p === 'gen-fields-read' && c === 1 ? (fired++, 'EIO') : undefined) },
+      })
+    );
+    expect(fired, 'the fields read is an observation point (gen-fields-read)').toBe(1);
+    expect(r.acquired).toBe(true);
+    expect(seen.map((o) => o.phase)).toEqual(['merge']);
+    expect(withRoot(root, () => r.release())).toBe('released');
+  });
+});
+
+describe('#4559 r6 a P1-3 (S4): the release\'s end is written even when its tmp failed once', () => {
+  it('(a) a tmp of the end left by a failed write (EEXIST on the same name) does not keep the end from being written', () => {
+    const root = freshRoot('p13a');
+    const { genDir } = lockOf(root);
+    let token = '';
+    const r = lockSync.acquireMachineLockSync('x', {
+      root,
+      timeoutMs: 500,
+      hooks: {
+        genDir,
+        // the tmp a write that failed after its open leaves (the name 4ff5d12e2 reuses on every try)
+        onGenStage: (s: string) => {
+          if (s === 'beacon-release') fs.writeFileSync(path.join(`${genDir}.tmp`, `${token}.${lockSync.genName(1)}.end-released`), 'rel');
+        },
+      },
+    });
+    token = r.token as string;
+    let answer: string | null = null;
+    for (let i = 0; i < 3 && answer !== 'released'; i++) {
+      try {
+        answer = r.release();
+      } catch {
+        answer = null;
+      }
+    }
+    expect(answer).toBe('released');
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0]).toBe('released');
+  });
+
+  it('(a) the end tmp\'s write fails once (EIO, gen-tmp-write): the release throws, the next try writes the end', () => {
+    const root = freshRoot('p13a-eio');
+    const { genDir } = lockOf(root);
+    let fired = 0;
+    let releasing = false;
+    const r = lockSync.acquireMachineLockSync('x', {
+      root,
+      timeoutMs: 500,
+      hooks: {
+        genDir,
+        onGenStage: (s: string) => {
+          if (s === 'beacon-release') releasing = true;
+        },
+        fault: (p: string) => (p === 'gen-tmp-write' && releasing && fired === 0 ? (fired++, 'EIO') : undefined),
+      },
+    });
+    expect(r.acquired).toBe(true);
+    expect(() => r.release()).toThrow(/EIO/);
+    expect(fired).toBe(1);
+    expect(r.release()).toBe('released');
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0]).toBe('released');
+  });
+
+  it('(b) stopped at end-tmp while another head cleans the tmp by its age: released only once the end is there', () => {
+    const root = freshRoot('p13b');
+    const { genDir } = lockOf(root);
+    let cleaned: boolean | null = null;
+    const r = lockSync.acquireMachineLockSync('x', {
+      root,
+      timeoutMs: 500,
+      hooks: {
+        genDir,
+        onGenStage: (s: string) => {
+          if (s !== 'end-tmp' || cleaned !== null) return;
+          // B, 11 minutes ahead: A's tmp is past C8's age; B lists, cleans it, and finds A's generation live (busy)
+          const b = lockSync.acquireMachineLockSync('x', { root, timeoutMs: 0, hooks: { genDir, now: () => Date.now() + 11 * 60_000, startOf: () => 0 } });
+          cleaned = !b.acquired && fs.readdirSync(`${genDir}.tmp`).length === 0;
+        },
+      },
+    });
+    expect(r.release()).toBe('released');
+    expect(cleaned, 'B removed A\'s tmp while A stopped').toBe(true);
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0]).toBe('released');
+  });
+});
+
+describe('#4559 r6 a P2-1 (§4.1): every way out after the owner is published ends the own generation (withdrawn)', () => {
+  it.each(['gen-owner-linked', 'gen-postlist'])('a hook that throws at %s: the acquisition throws, its generation is ended withdrawn', (stage) => {
+    const root = freshRoot(`p21-${stage}`);
+    const { genDir } = lockOf(root);
+    expect(() =>
+      lockSync.acquireMachineLockSync('x', {
+        root,
+        timeoutMs: 500,
+        hooks: {
+          genDir,
+          onGenStage: (s: string) => {
+            if (s === stage) throw new Error(`thrown at ${s}`);
+          },
+        },
+      })
+    ).toThrow(`thrown at ${stage}`);
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0]).toBe('withdrawn');
+  });
+
+  /** A live holder of the <lock> of an older version (no g): the acquisition takes its generation and waits (yields). */
+  const liveBeacon = (lockPath: string) => {
+    fs.mkdirSync(lockPath, { recursive: true });
+    fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: process.pid, host: HOST, token: 'L', acquiredAt: 0, v: 1 }));
+  };
+
+  it('the sleep outside the steps throws while the generation is held and the <lock> waited for: withdrawn, the ticket done', () => {
+    const root = freshRoot('p21-sleep');
+    const { genDir, lockPath, queue } = lockOf(root);
+    liveBeacon(lockPath);
+    expect(() =>
+      lockSync.acquireMachineLockSync('x', {
+        root,
+        timeoutMs: 1000,
+        pollMs: 10,
+        sleep: () => {
+          throw new Error('the sleep threw');
+        },
+        hooks: { genDir },
+      })
+    ).toThrow('the sleep threw');
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0]).toBe('withdrawn');
+    const tickets = fs.readdirSync(queue).filter((e) => lockSync.TICKET_PATTERN.test(e));
+    expect(tickets.map((t) => JSON.parse(fs.readFileSync(path.join(queue, t), 'utf8')).done)).toEqual([true]);
+  });
+
+  it('the generator closed with return() at its wait: withdrawn', () => {
+    const root = freshRoot('p21-return');
+    const { genDir, lockPath } = lockOf(root);
+    liveBeacon(lockPath);
+    const steps = lockSync.machineLockAcquisition('x', { root, timeoutMs: 1000, pollMs: 10, hooks: { genDir } });
+    const first = steps.next();
+    expect(first.done).toBe(false);
+    expect(readGens(genDir).get(1)?.end ?? null, 'the generation is held while it waits').toBeNull();
+    steps.return(undefined as never);
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0]).toBe('withdrawn');
+  });
+});
+
+describe('#4559 r6 a P2-3 (§4.6 / §4.2): a second hand-off, and a release that judges every handed group', () => {
+  it('A → B → C: owner.h2 is added; C alone ends — B\'s live group keeps the holding and the <lock>; both gone — released', async () => {
+    const root = freshRoot('p23');
+    const { genDir, lockPath } = lockOf(root);
+    const kids = [0, 1].map(() => spawn('sleep', ['30'], { detached: true, stdio: 'ignore' }));
+    const exits = kids.map((k) => new Promise<void>((resolve) => k.on('exit', () => resolve())));
+    try {
+      const [b, c] = kids.map((k) => k.pid as number);
+      const r = withRoot(root, () => lockSync.acquireMachineLockSync('x', { root, timeoutMs: 0, hooks: { genDir } }));
+      expect(r.acquired).toBe(true);
+      const h1 = r.handOff(b, b);
+      expect(h1).toMatchObject({ ok: true });
+      const h2 = r.handOff(c, c);
+      expect(h2).toMatchObject({ ok: true });
+      const g = readGens(genDir).get(r.gen as number);
+      expect(g?.records.map((x) => x.pid)).toEqual([process.pid, b, c]);
+      const tokens = [r.token as string, (h1 as { token: string }).token, (h2 as { token: string }).token];
+      expect(JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8')).token).toBe(tokens[2]);
+      // C ends; B lives
+      kids[1].kill('SIGKILL');
+      await exits[1];
+      const first = r.release();
+      expect(first).not.toBe('released');
+      // D5 as UAT's down does it: the holder (A, this process) is stopped first — read dead here — and B, C decide.
+      const aStopped = { genDir, pidAlive: (pid: number) => pid !== process.pid && isAlive(pid) };
+      const asHead = withRoot(root, () => lockSync.releaseAsHead(lockPath, tokens, { timeoutMs: 0, hooks: aStopped }));
+      expect(asHead.result, 'B\'s group is alive: the holding is kept').toBe('deferred');
+      expect(readGens(genDir).get(r.gen as number)?.end ?? null).toBeNull();
+      expect(fs.existsSync(path.join(lockPath, 'owner')), 'the <lock> stays for the older readers while B lives').toBe(true);
+      // B ends too
+      kids[0].kill('SIGKILL');
+      await exits[0];
+      const done = withRoot(root, () => lockSync.releaseAsHead(lockPath, tokens, { timeoutMs: 0, hooks: aStopped }));
+      expect(done.result).toBe('released');
+      expect(readGens(genDir).get(r.gen as number)?.end?.split(' ')[0]).toBe('dead');
+      expect(fs.existsSync(lockPath)).toBe(false);
+    } finally {
+      for (const k of kids) k.kill('SIGKILL');
+    }
+  }, 20000);
+});
+
+describe('#4559 r6 b P2-3: S2 is judged at the time each end was written', () => {
+  it('self-test: a copy of the core whose judgement reads every holder dead ends A\'s live generation — the oracle after both exited (s2Violations) is green, s2AtWrite is red', async () => {
+    const root = freshRoot('s2-self');
+    const { genDir } = lockOf(root);
+    const core = fs.readFileSync(CORE, 'utf8');
+    const line = '        const holder = genHolderState(g, record);';
+    expect(core.split(line).length - 1, 'the judgement\'s line, once').toBe(1);
+    const broken = path.join(root, 'machine-lock-sync-all-dead.mjs');
+    fs.writeFileSync(broken, core.replace(line, "        const holder = { state: 'gone' };"));
+    const a = startActor(root, 'A', { holdMs: 1500, timeoutMs: 2000 });
+    expect(await until(() => a.events().some((e) => e.event === 'acquired'))).toBe(true);
+    const b = startActor(root, 'B', { module: broken, timeoutMs: 300, nowAheadMs: 70_000 });
+    await a.exited;
+    await b.exited;
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0], 'B ended A\'s generation').toBe('dead');
+    expect(s2Violations(genDir), 'the oracle of who is alive now: everyone has exited').toEqual([]);
+    expect(s2AtWrite(genDir, [a, b]), 'the oracle at the write').toEqual([1]);
+  }, 20000);
 });

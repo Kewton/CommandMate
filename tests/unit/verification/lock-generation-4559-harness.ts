@@ -124,6 +124,30 @@ export function s2Violations(genDir: string, isAlive: (pid: number) => boolean =
   return bad;
 }
 
+/**
+ * #4559 r6 (review b P2-3): S2's oracle at the time of the write — a generation whose `end` was written by
+ * someone other than its records' tokens, at a time (the `end` file's mtime: the tmp it was linked from, written
+ * just before) inside the life of an actor whose record it holds (`span`: from its start to its `releasing`, its
+ * kill or its exit). Unlike s2Violations it does not depend on who is alive when it is called: a call after every
+ * actor has exited still sees an `end` written over a live holder. Answers the generations that break it.
+ */
+export function s2AtWrite(genDir: string, actors: Pick<Actor, 'span'>[]): number[] {
+  const bad: number[] = [];
+  for (const [n, g] of readGens(genDir)) {
+    if (!g.end) continue;
+    const writer = g.end.split(' ')[1];
+    if (g.records.map((r) => r.token).includes(writer)) continue;
+    const at = fs.statSync(path.join(genDir, lockSync.genName(n), 'end')).mtimeMs;
+    const live = g.records.some((r) => {
+      if (r.tomb) return false;
+      const holder = actors.map((a) => a.span()).find((sp) => sp.pid === r.pid);
+      return holder !== undefined && at >= holder.from && at < holder.to;
+    });
+    if (live) bad.push(n);
+  }
+  return bad;
+}
+
 export interface ActorEvent {
   event: string;
   t: number;
@@ -167,44 +191,91 @@ export interface Actor {
   reached: (stage: string) => boolean;
   go: (stage: string) => void;
   events: () => ActorEvent[];
+  /** #4559 r6: the test kills it now (the end of its life for S2's oracle, before the parent sees the exit). */
+  kill: () => number;
+  /** #4559 r6: when it was alive and could hold: from its start to its `releasing`, its kill or its exit. */
+  span: () => { pid: number | undefined; from: number; to: number };
+  /** #4559 r6: how many times it reached `stage` (the `seam` events; with `seams: true`). */
+  seamCount: (stage: string) => number;
 }
 
 /**
  * An actor of the current core (or `module`, an older copy written out by legacyModule) in its own process:
  * takes `x` of `root`, holds `holdMs`, releases. `pauses` are `<stage>#<n>` names.
  */
-export function startActor(root: string, who: string, o: { pauses?: string[]; holdMs?: number; timeoutMs?: number; pollMs?: number; module?: string; handOff?: boolean; fields?: boolean; nowAheadMs?: number } = {}): Actor {
+export interface ActorOptions {
+  pauses?: string[];
+  holdMs?: number;
+  timeoutMs?: number;
+  pollMs?: number;
+  module?: string;
+  handOff?: boolean;
+  /** true: setOwnerFields({ phase: 'write' }); an object: that object */
+  fields?: boolean | Record<string, unknown>;
+  nowAheadMs?: number;
+  /** #4559 r6: the record's own fields (merge-pr's `phase: 'idle'`) */
+  ownerFields?: Record<string, unknown>;
+  /** #4559 r6: log every seam reached (`seam` events) */
+  seams?: boolean;
+  /** #4559 r6: the lock's name (default `x`), and no hooks.genDir (the real entry chooses the chain) */
+  name?: string;
+  realChain?: boolean;
+  /** #4559 r6: a file the actor writes once its take (and fields / hand-off) are done */
+  ready?: string;
+}
+
+export function startActor(root: string, who: string, o: ActorOptions = {}): Actor {
   const dir = fs.mkdtempSync(path.join(root, `actor-${who}-`));
   const events = path.join(dir, 'events.jsonl');
   const { genDir } = lockOf(root);
+  const spec = { genDir: o.realChain ? undefined : genDir, handOff: o.handOff, fields: o.fields, nowAheadMs: o.nowAheadMs, ownerFields: o.ownerFields, seams: o.seams, ready: o.ready };
+  const startedAt = Date.now();
   const child = spawn(
     process.execPath,
-    [ACTOR, o.module ?? CORE, root, 'x', String(o.pollMs ?? 10), String(o.holdMs ?? 0), String(o.timeoutMs ?? 5000), events, 'gen', JSON.stringify({ genDir, handOff: o.handOff, fields: o.fields, nowAheadMs: o.nowAheadMs })],
+    [ACTOR, o.module ?? CORE, root, o.name ?? 'x', String(o.pollMs ?? 10), String(o.holdMs ?? 0), String(o.timeoutMs ?? 5000), events, 'gen', JSON.stringify(spec)],
     {
       env: { ...process.env, CM_VERIFY_LOCK_ROOT: root, CM_VERIFY_TEST_HANDOFF: (o.pauses ?? []).map((p) => `pause:${p}`).join(','), CM_VERIFY_TEST_HANDOFF_DIR: dir },
       stdio: ['ignore', 'ignore', 'pipe'],
     }
   );
   children.push(child);
-  const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+  let exitedAt: number | null = null;
+  let killedAt: number | null = null;
+  const exited = new Promise<number | null>((resolve) =>
+    child.on('exit', (code) => {
+      exitedAt = Date.now();
+      resolve(code);
+    })
+  );
+  const readEvents = (): ActorEvent[] => {
+    let text = '';
+    try {
+      text = fs.readFileSync(events, 'utf8');
+    } catch {
+      return [];
+    }
+    return text
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => ({ ...(JSON.parse(l) as ActorEvent), who }));
+  };
   return {
     who,
     child,
     exited,
     reached: (stage) => fs.existsSync(path.join(dir, `${stage}.reached`)),
     go: (stage) => fs.writeFileSync(path.join(dir, `${stage}.go`), ''),
-    events: () => {
-      let text = '';
-      try {
-        text = fs.readFileSync(events, 'utf8');
-      } catch {
-        return [];
-      }
-      return text
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => ({ ...(JSON.parse(l) as ActorEvent), who }));
+    events: readEvents,
+    kill: () => {
+      killedAt = Date.now();
+      child.kill('SIGKILL');
+      return killedAt;
     },
+    span: () => {
+      const releasing = readEvents().find((e) => e.event === 'releasing');
+      return { pid: child.pid, from: startedAt, to: releasing?.t ?? killedAt ?? exitedAt ?? Number.MAX_SAFE_INTEGER };
+    },
+    seamCount: (stage) => readEvents().filter((e) => e.event === 'seam' && (e as ActorEvent & { stage?: string }).stage === stage).length,
   };
 }
 
@@ -238,6 +309,21 @@ export function legacyModule(root: string): string {
 export async function loadLegacy(root: string): Promise<typeof lockSync> {
   const file = legacyModule(root);
   return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as typeof lockSync;
+}
+
+/**
+ * #4559 r6 (review a P2-6): the develop copy of machine-lock.ts before #4559, written out as `.ts` under `root`
+ * (its sha256 checked against pin.json) and loaded — the TS entry of the older version.
+ */
+export async function loadLegacyTs(root: string): Promise<typeof import('../../../src/lib/verification/machine-lock')> {
+  const pin = JSON.parse(fs.readFileSync(path.join(LEGACY_DIR, 'pin.json'), 'utf8')) as { files: Record<string, { sha256: string }> };
+  const text = fs.readFileSync(path.join(LEGACY_DIR, 'machine-lock.ts.txt'));
+  const sum = crypto.createHash('sha256').update(text).digest('hex');
+  if (sum !== pin.files['machine-lock.ts.txt'].sha256) throw new Error(`legacy copy changed: ${sum}`);
+  const dir = fs.mkdtempSync(path.join(root, 'legacy-ts-'));
+  const file = path.join(dir, 'machine-lock.ts');
+  fs.writeFileSync(file, text);
+  return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as typeof import('../../../src/lib/verification/machine-lock');
 }
 
 /**
@@ -303,7 +389,7 @@ export const OPS: OpRow[] = [
   { fn: 'takeGeneration', op: 'obs.mkdir', count: 2, seam: 'gen-dir-mkdir・gen-mkdir', what: '.gen (C6); mkdir g<M+1>', step: 'a2' },
   { fn: 'machineLockAcquisition', op: 'rmQuiet', count: 2, seam: '—・beacon-release', what: 'an own tmp of setOwnerFields / handOff; the <lock> at the release (§6.1: before end)', step: 'r0' },
   { fn: 'machineLockAcquisition', op: 'fs.linkSync', count: 1, seam: '—', what: 'the ticket\'s link', step: '—' },
-  { fn: 'machineLockAcquisition', op: 'fs.mkdirSync', count: 1, seam: '—', what: 'the root', step: '—' },
+  { fn: 'machineLockAcquisition', op: 'fs.mkdirSync', count: 2, seam: '—', what: 'the root; the machine-lock root before the chain is chosen (C7-I2)', step: '—' },
   { fn: 'machineLockAcquisition', op: 'fs.renameSync', count: 2, seam: 'fields-rename・—', what: 'g<N>/fields; the beacon\'s copy of the fields', step: '—' },
   { fn: 'machineLockAcquisition', op: 'obs.rename', count: 1, seam: '—', what: 'the beacon\'s D4 hand-off (after owner.h<k>, §4.6)', step: '—' },
   { fn: 'asHead', op: 'fs.linkSync', count: 1, seam: '—', what: 'the ticket\'s link', step: '—' },
