@@ -354,7 +354,8 @@ describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2, codex P2): a clean-up dele
 describe('impl-3 (pm-return-4288-pr1af-impl-2 item 2): the clean-up delete has one place in each JS implementation', () => {
   it.each([
     ['sync', 'scripts/orchestrate/machine-lock-sync.mjs'],
-    ['ts', 'src/lib/verification/machine-lock.ts'],
+    // #4559 PR-2 (案 F, the (d) rows): TS's clean-up delete is the core's byte copy's.
+    ['ts', 'src/lib/verification/machine-lock-sync-core.generated.ts'],
   ] as const)('%s: every raw rmSync is rmQuiet\'s (one call)', (impl, file) => {
     const found = [...scanRawCalls(impl, fs.readFileSync(path.join(REPO, file), 'utf8'))].filter(([k]) => k.endsWith('|rmSync'));
     expect(found).toEqual([['rmQuiet|rmSync', 1]]);

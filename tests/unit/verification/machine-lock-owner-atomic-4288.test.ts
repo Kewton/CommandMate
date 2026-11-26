@@ -760,10 +760,25 @@ interface Limit {
   readonly kind: 'mixed' | 'premise';
   /** What ends it (§6.1), or why it stays. */
   readonly until: string;
-  /** Whom it falls on (I9): `no-v` — only a writer / record without v= (an older copy); `any` — new writers too (a premise). */
-  readonly writer: 'no-v' | 'any';
-  /** Which premise is broken (the design's "前提 P0"): P0 a stop past the grace (10 min) inside the lock's steps, P1 the wall clock. */
-  readonly outside: 'P0' | 'P1' | 'P0+P1';
+  /**
+   * Whom it falls on (I9): `no-v` — only a writer / record without v= (an older copy); `no-g` — only a writer
+   * that does not know the generation chain (#4559: today's develop copies, v=1 without g, are older too);
+   * `any` — new writers too (a premise).
+   */
+  readonly writer: 'no-v' | 'no-g' | 'any';
+  /**
+   * Which premise is broken (the design's "前提 P0"): P0 a stop past the grace (10 min) inside the lock's
+   * steps, P1 the wall clock; `none` (#4559, a `mixed` row only) — inside both: a window with an older version
+   * that opens with a stop of any length, or with none (docs/design/machine-lock-generation-4559.md §6.5).
+   */
+  readonly outside: 'P0' | 'P1' | 'P0+P1' | 'none';
+  /** #4559: a `mixed` row's row of docs/design/machine-lock-generation-4559.md §6.5 (the window it is). */
+  readonly row65?: string;
+  /**
+   * #4559 r7 (review a2 P3-2, PM's disposition 3): a row whose older writer does two operations, split per operation —
+   * each operation's §6.5 row (`row65` is the first's).
+   */
+  readonly row65ByOp?: Readonly<Record<string, string>>;
 }
 type FLeft =
   | 'nothing-made'
@@ -805,7 +820,9 @@ const UNTIL_OLD_RUNLOCK = '§6.1 1 and 3: PR1b / PR1c merged (no older lib.sh / 
 const UNTIL_OLD_VERIFY = '§6.1 2 and 3: the skills port of verify-run.sh published (asked of a human) and the older worktree copies updated; then (a) no process started before that runs an older copy (ps) and (b) 7 days without a record lacking v=';
 
 const UNTIL_RESTART = '§6.1 (c): after the deploy, every process that may have loaded an older copy (agent sessions and their shells, daily / supervisor / resident shells, the server, interactive shells) restarted once (T_RESTART); the ps narrowing (a) and the 7 days (b) are only the best-effort aid';
-const STAYS_P0 = 'stays a premise (P0: no writer stops past the grace inside the lock\'s steps; a lock on mkdir / link / rename alone has no fencing)';
+/** #4559: what ends a window with the versions that do not know the generation chain (docs/design/machine-lock-generation-4559.md §6). */
+const UNTIL_PR3 = '#4559 §6: the older writers of §6.4 gone from the machine (PR-3 for this repository\'s bash, the published cmate-verify and npm versions updated, the older checkouts and servers restarted); the open rows of §6.5 stay while any remains';
+const UNTIL_M3 = '#4559 §6.3: the M3 block (a later PR) on the names it covers';
 const STAYS_P1 = 'stays a premise (P1: the wall clock does not change by more than 2 s from the writer\'s start to the end of the reader\'s observation)';
 
 const FAILURE_TABLE = {
@@ -900,7 +917,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older run-lock / supervisor.lock writer (no ticket) stopped after its mkdir, before owner.tmp.<pid> (no pid anywhere), past the 10 min grace; the head reclaims the empty <lock> and takes it; resumed, the writer writes its tmp in the successor\'s <lock> and mv -f replaces the owner (codex round 2 P1)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0', row65: 'OLD-W-MV' },
   },
   'F50-pr1a-writer-ticket-expired': {
     impls: ALL,
@@ -909,7 +926,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a PR1a writer (`: >`, then cat >> by name, rm -f owner by name on failure) alive, its ticket retired at deadline + 60 s, stopped on an empty owner past 10 min; the head reclaims the empty owner and takes it; resumed, it appends to the successor\'s owner (unparsable, nobody removes it) or removes it by name (PM Claude round 2 P2-A)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'OLD-W-APPEND' },
   },
   'F51-pre-pid-stop': {
     impls: ALL,
@@ -918,7 +935,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a copy older than PR1a (`printf > owner`, an older cmate-verify) stopped after opening the owner, before its pid is written, past 10 min; the head reclaims the empty owner; resumed, its write lands in the removed inode and it may believe it holds',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'OLD-W-INODE' },
   },
   'F52-old-tmp-pid-reused': { impls: GRACED, point: null, direction: 'keep', results: AG_GH('acquired', 'removed'), left: 'reclaimed', note: 'the pid is alive but started after the tmp mtime + 2 s (from etime): not the writer, the rule takes it out (PM Claude P3-1; round 2 kept it old-taker for ever)' },
   'F53-old-tmp-pid-etime': { impls: GRACED, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'the old tmp pid alive and its ps -o etime= fails or is malformed, or the clock stepped back while it was read / the read took 1 s or more (ECLOCK, as F65)' },
@@ -930,7 +947,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older writer whose wall clock stepped back > 2 s between its start and its tmp write, then stopped between the tmp and its mv past 10 min: F52 reads it as reused and takes the tmp out; resumed, its mv -f fails and its rm -rf "$dir" may remove the successor\'s <lock> (outside P1, while older copies remain)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0+P1' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0+P1', row65: 'OLD-W-RMRF' },
   },
   'F56-owner-pid-not-self': { impls: GRACED, point: 'owner-pid', direction: 'keep', results: ACQ('refused:unk'), left: 'nothing-made', note: "round 4, I1-b: LOCK_OWNER_PID / ownerPid not the caller's own pid: refused before the ticket and the mkdir (machine-lock-owner-pid-not-self); another pid is recorded by the hand-off (D4) only" },
   'F57-undo-paused-after-rename': {
@@ -948,7 +965,7 @@ const FAILURE_TABLE = {
     results: ACQ('refused:unk'),
     left: 'two-holders-possible',
     note: 'the link back of .undo-<token> answers EEXIST: an older writer (`: >`, `printf >`) made an owner in the moment the owner was moved: not put back, .undo-<token> kept, machine-lock-undo-restore-failed for a human. A new writer links only into the <lock> it made (in a successor\'s <lock> its tmp is gone: ENOENT, F11)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'OLD-W-UNDO-CREATE' },
   },
   'F59-undo-rename-enoent': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'the owner is no longer there: own tmp removed, no rmdir (the <lock> there is not shown to be ours)' },
   'F60-undo-rename-other': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'another errno: the owner is not removed; own tmp only; named as unknown' },
@@ -988,7 +1005,10 @@ const FAILURE_TABLE = {
     results: ACQ('refused:unk'),
     left: 'two-holders-possible',
     note: "outside P0 (codex round 4 P2): a new writer C stopped at K1 past 10 min, A recovered and published, A's parent died (F61's order) and B took, C resumed and made its tmp inside B's <lock>, A's undo moved B's owner to .undo-<A> and C linked into the emptied name; A's link back is EEXIST — B and C hold. The put-back's empty <lock> (F67) is the same shape. Named, not fixed",
-    limit: { kind: 'premise', until: STAYS_P0, writer: 'any', outside: 'P0' },
+    // #4559 PR-2 (lead-tests §1 #4, reason (c)): between new versions this is closed — the publish and the tomb
+    // take the same `owner` name of a generation exclusively (L4); what stays is the shape on the <lock> where an
+    // older version's put-back overlaps (§6.5 OLD-PUTBACK-OVERLAP, #4559 comment 7186934798: closed by PR-3).
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'P0', row65: 'OLD-PUTBACK-OVERLAP' },
   },
   'F70-clock-back-offset-by-reader-stop': {
     impls: BASH,
@@ -1006,7 +1026,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: "outside P0, mixed (codex round 4 P2): an older copy's functions loaded into a generic shell (bash -s, an interactive shell) or node, stopped past 10 min mid-steps (before writing too): the ps narrowing of §6.1 (a) does not see its command, and it writes nothing (b) could see; resumed, it mv -f's / deletes by name the successor's owner (as F49-F51)",
-    limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0' },
+    limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0', row65: 'OLD-W-MV', row65ByOp: { 'mv -f': 'OLD-W-MV', 'deletes by name': 'OLD-W-APPEND' } },
   },
   'F72-old-tmp-slow-observation': {
     impls: GRACED,
@@ -1015,6 +1035,72 @@ const FAILURE_TABLE = {
     results: AG_GH('refused:unk', 'kept'),
     left: 'unchanged',
     note: 'impl-6: the pid of an older tmp is alive and the observation of its start (ps -o etime= between two clock reads) took 1 s or more (a loaded machine): ECLOCK, so unknown — the conservative side, the tmp kept and named (etime ECLOCK), never read as reused (F52, F55 pin the fast side)',
+  },
+  // #4559 PR-2 (lead-tests §1 #2, reason (b): rows added): the windows with an older version (a writer or a
+  // recoverer that does not know the generation chain) that stay while the versions are mixed — the `mixed` rows
+  // of docs/design/machine-lock-generation-4559.md §6.5, one each (the M3 rows come with the M3 PR).
+  'F73-mixed-prev-beacon-taken': {
+    impls: JS,
+    point: null,
+    direction: 'limit',
+    results: ACQ('acquired'),
+    left: 'two-holders-possible',
+    note: "#4559 §6.5 P-2: the new holder judged the <lock> of an earlier generation over and its record dead; between that and the rename an older recoverer took it out and an older writer took the <lock> — the new one moves the older writer's lock (today's recovery, the re-read narrows it)",
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'none', row65: 'P-2' },
+  },
+  'F74-mixed-old-holder-recovered': {
+    impls: JS,
+    point: null,
+    direction: 'limit',
+    results: ACQ('acquired'),
+    left: 'two-holders-possible',
+    note: "#4559 §6.5 P-4: an older version's holder (no g) judged dead is recovered by the new one with today's steps; #4559's own form (judged → a long stop → moved) stays there, as on develop",
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'none', row65: 'P-4' },
+  },
+  'F75-mixed-old-recoverer-moves-beacon': {
+    impls: JS,
+    point: null,
+    direction: 'limit',
+    results: ACQ('acquired'),
+    left: 'two-holders-possible',
+    note: "#4559 §6.5 P-5: an older recoverer that stopped after its judgement moves the new holder's live <lock>; an older writer W mkdirs meanwhile — W and the generation's holder hold. Not closed by M1; closed by M3 on the names it covers",
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'none', row65: 'P-5' },
+  },
+  'F76-mixed-stale-nest': {
+    impls: JS,
+    point: null,
+    direction: 'limit',
+    results: ACQ('acquired'),
+    left: 'two-holders-possible',
+    note: '#4559 §6.5 STALE-NEST: an older run-lock.sh / lib.sh put-back of .stale.* ([ -e "$dir" ] || mv "$aside" "$dir") checks, the new holder mkdirs the <lock> meanwhile, and the aside is moved into it (nested)',
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'none', row65: 'STALE-NEST' },
+  },
+  'F77-mixed-pid-only-reader': {
+    impls: ['sync'],
+    point: null,
+    direction: 'limit',
+    results: { 'hand-off': 'handed' },
+    left: 'live-holder-removed',
+    note: "#4559 §6.5 P-1-PIDONLY: a reader that judges the <lock>'s pid alone (≤0.6.0 verify-run.sh, ≤v0.50.0 TS, run-lock.sh before PR1b) reads the handing-off parent dead and recovers while the child of the hand-off lives — the same window as develop",
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'none', row65: 'P-1-PIDONLY' },
+  },
+  'F78-mixed-ticket-done': {
+    impls: JS,
+    point: null,
+    direction: 'limit',
+    results: ACQ('acquired'),
+    left: 'two-holders-possible',
+    note: "#4559 §6.5 TICKET-DONE (#4560): an older writer waits by the tickets; the done check → mv -f (lock_mark_done) mixes up tickets — harmless between new versions (the generation decides), a mix-up with an older one",
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'none', row65: 'TICKET-DONE' },
+  },
+  'F79-mixed-pre-block-writer': {
+    impls: JS,
+    point: null,
+    direction: 'limit',
+    results: ACQ('acquired'),
+    left: 'two-holders-possible',
+    note: '#4559 §6.5 P-3: after the mixed period ends and the beacon is gone, a copy older than the block (SJ before 0.7.0, run-lock.sh before PR1b, lib.sh before PR1c, a generic shell) mkdirs <name>.lock and takes',
+    limit: { kind: 'mixed', until: UNTIL_M3, writer: 'no-g', outside: 'none', row65: 'P-3' },
   },
 } as const satisfies Record<string, FailureRow>;
 type Failure = keyof typeof FAILURE_TABLE;
@@ -1196,13 +1282,15 @@ describe('Issue #4288 PR1a-f tables (design §2.5): shape', () => {
     for (const e of UNREACHABLE) expect(UNREACHABLE_REASONS[(e.cell as Unreachable).unreachable].length).toBeGreaterThan(0);
   });
 
-  it('K has 5 points × 3 implementations = 15 rows, F has 72 rows: 335 implementation × caller cases, 42 unreachable, 293 reached; 650 rows in all', () => {
+  // #4559 PR-2 (lead-tests §1 #2, reason (b)): the 7 `mixed` rows of the generation chain's §6.5 added (F73-F79):
+  // 72 → 79 rows, 335 → 360 cases, 42 → 48 unreachable (TS's AG), 293 → 312 reached, 650 → 669 in all.
+  it('K has 5 points × 3 implementations = 15 rows, F has 79 rows: 360 implementation × caller cases, 48 unreachable, 312 reached; 669 rows in all', () => {
     expect(KILL_ROWS).toHaveLength(15);
-    expect(FAILURES).toHaveLength(72);
-    expect(F_ALL_CASES).toHaveLength(335);
-    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(42);
-    expect(F_CASES).toHaveLength(293);
-    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(650);
+    expect(FAILURES).toHaveLength(79);
+    expect(F_ALL_CASES).toHaveLength(360);
+    expect(F_ALL_CASES.filter((c) => c.unreachable !== null)).toHaveLength(48);
+    expect(F_CASES).toHaveLength(312);
+    expect(ROWS.length + KILL_ROWS.length + F_CASES.length).toBe(669);
   });
 
   it('every form and every observation of it is defined', () => {
@@ -1376,14 +1464,24 @@ describe('Issue #4288 PR1a-f tables keep the invariants (a) (design §1)', () =>
       'F51-pre-pid-stop:mixed',
       'F55-old-tmp-clock-back:mixed',
       'F58-undo-restore-exists:mixed',
-      'F69-new-k1-writer-into-emptied-name:premise',
+      // #4559 PR-2 (lead-tests §1 #4, reason (c)): closed between new versions (L4); the shape with an older put-back is mixed
+      'F69-new-k1-writer-into-emptied-name:mixed',
       'F70-clock-back-offset-by-reader-stop:premise',
       'F71-old-writer-in-generic-shell:mixed',
+      // #4559 PR-2 (lead-tests §1 #2): the windows of §6.5
+      'F73-mixed-prev-beacon-taken:mixed',
+      'F74-mixed-old-holder-recovered:mixed',
+      'F75-mixed-old-recoverer-moves-beacon:mixed',
+      'F76-mixed-stale-nest:mixed',
+      'F77-mixed-pid-only-reader:mixed',
+      'F78-mixed-ticket-done:mixed',
+      'F79-mixed-pre-block-writer:mixed',
     ]);
     for (const f of limits) {
       expect(f.limit?.until.length).toBeGreaterThan(0);
-      // I9: a mixed limit falls only on a writer without v=; a premise on any writer
-      expect(f.limit?.writer).toBe(f.limit?.kind === 'mixed' ? 'no-v' : 'any');
+      // I9 / #4559 (lead-tests §1 #3, reason (c)): a mixed limit falls only on a writer that does not know the
+      // generation chain (no v=, or no g); a premise on any writer
+      expect(f.limit?.kind === 'mixed' ? ['no-v', 'no-g'] : ['any']).toContain(f.limit?.writer);
       expect(['two-holders-possible', 'live-holder-removed']).toContain(f.left);
     }
     for (const f of F_ROWS.filter((r) => r.direction !== 'limit')) {
@@ -1462,7 +1560,8 @@ describe('Issue #4288 PR1a-f round 4 (design §3.1, I1-b, I2-b, I9, P1): no name
     const f = FAILURE_TABLE['F66-owner-without-v'];
     expect([f.direction, f.left]).toEqual(['keep', 'unchanged']);
     expect(f.note).toContain('machine-lock-legacy-writer');
-    for (const l of F_ROWS.filter((r) => r.limit?.kind === 'mixed')) expect([l.id, l.limit?.writer]).toEqual([l.id, 'no-v']);
+    // #4559 PR-2 (#4559 comment 7183455133, reason (c)): as :1386 — a writer without v=, or without g (does not know the chain)
+    for (const l of F_ROWS.filter((r) => r.limit?.kind === 'mixed')) expect([l.id, ['no-v', 'no-g'].includes(l.limit?.writer as string)]).toEqual([l.id, true]);
   });
 });
 
@@ -1636,9 +1735,11 @@ const reservedKeyOf = (impl: Impl, keys: readonly string[]): string | null => {
 describe('Issue #4288 PR1a-f the stop premise P0 (design "前提 P0", §7.4): the guarantee under P0, outside it named, I1-c closed', () => {
   it('every limit row says which premise it is outside of; the mixed ones are a special case of P0', () => {
     const limits = F_ROWS.filter((f) => f.direction === 'limit');
-    expect(limits).toHaveLength(9);
-    for (const f of limits) expect([f.id, ['P0', 'P1', 'P0+P1'].includes(f.limit?.outside as string)]).toEqual([f.id, true]);
-    for (const f of limits.filter((r) => r.limit?.kind === 'mixed')) expect([f.id, f.limit?.outside.startsWith('P0')]).toEqual([f.id, true]);
+    expect(limits).toHaveLength(16);
+    // #4559 PR-2 (lead-tests §1 #3, reason (c)): a premise row is outside P0 / P1; a mixed row (a writer that does not
+    // know the generation chain) may be inside both — the windows of §6.5 open with a stop of any length, or none.
+    for (const f of limits) expect([f.id, (f.limit?.kind === 'mixed' ? ['P0', 'P1', 'P0+P1', 'none'] : ['P0', 'P1', 'P0+P1']).includes(f.limit?.outside as string)]).toEqual([f.id, true]);
+    for (const f of limits.filter((r) => r.limit?.kind === 'mixed')) expect([f.id, f.limit?.outside === 'none' || f.limit?.outside.startsWith('P0')]).toEqual([f.id, true]);
     expect(Object.fromEntries(limits.map((f) => [f.id, f.limit?.outside]))).toEqual({
       'F42-clock-back': 'P1',
       'F49-old-k1-resumed': 'P0',
@@ -1649,11 +1750,19 @@ describe('Issue #4288 PR1a-f the stop premise P0 (design "前提 P0", §7.4): th
       'F69-new-k1-writer-into-emptied-name': 'P0',
       'F70-clock-back-offset-by-reader-stop': 'P1',
       'F71-old-writer-in-generic-shell': 'P0',
+      'F73-mixed-prev-beacon-taken': 'none',
+      'F74-mixed-old-holder-recovered': 'none',
+      'F75-mixed-old-recoverer-moves-beacon': 'none',
+      'F76-mixed-stale-nest': 'none',
+      'F77-mixed-pid-only-reader': 'none',
+      'F78-mixed-ticket-done': 'none',
+      'F79-mixed-pre-block-writer': 'none',
     });
   });
 
   it('codex round 4\'s three crossings are outside rows, one each, not fixed (F69 new writers too, F70 the clock, F71 ended by the restart)', () => {
-    expect(FAILURE_TABLE['F69-new-k1-writer-into-emptied-name'].limit).toMatchObject({ kind: 'premise', writer: 'any', outside: 'P0' });
+    // #4559 PR-2 (lead-tests §1 #4, reason (c)): new versions closed (L4); the older put-back's shape is mixed (§6.5 P-5)
+    expect(FAILURE_TABLE['F69-new-k1-writer-into-emptied-name'].limit).toMatchObject({ kind: 'mixed', writer: 'no-g', outside: 'P0', row65: 'OLD-PUTBACK-OVERLAP' });
     expect(FAILURE_TABLE['F70-clock-back-offset-by-reader-stop'].limit).toMatchObject({ kind: 'premise', writer: 'any', outside: 'P1' });
     expect([...FAILURE_TABLE['F70-clock-back-offset-by-reader-stop'].impls]).toEqual(['bash']);
     expect(FAILURE_TABLE['F71-old-writer-in-generic-shell'].limit).toMatchObject({ kind: 'mixed', writer: 'no-v', outside: 'P0' });
@@ -1998,14 +2107,32 @@ async function waitEsrch(pid: number): Promise<number> {
   }
 }
 
+/**
+ * #4559 (lead-plan §2 / pm-ask-4559-pr2-expect §3 #3, the frame the human approved): since the generation
+ * chain, what a killed acquisition leaves is also its generation (`<lock>`'s `.gen`, design §3) — copied
+ * with the <lock>, each `g<M>` aged as the <lock> is (the owner-less generation's grace runs from its
+ * mtime, §4.4).
+ */
+function copyGens(from: string, to: string, ageMs: number): void {
+  const src = lockSync.genDirOf(lockOfRoot(from));
+  if (!fs.existsSync(src)) return;
+  const dst = lockSync.genDirOf(lockOfRoot(to));
+  fs.rmSync(dst, { recursive: true, force: true });
+  fs.cpSync(src, dst, { recursive: true });
+  for (const n of fs.readdirSync(dst)) agedAll(path.join(dst, n), ageMs);
+  H.age(dst, ageMs);
+}
+
 /** Who takes out what the killed acquisition left (§2.6), on a copy of it aged past the grace. */
 async function takenBy(impl: Impl, who: 'acquire-head-grace' | 'acquire-head-nograce', from: string): Promise<string> {
   const r = fs.mkdtempSync(path.join(root, `by-${who}-`));
   fs.cpSync(lockOfRoot(from), lockOfRoot(r), { recursive: true });
   agedAll(lockOfRoot(r), H.OLD_MS);
+  copyGens(from, r, H.OLD_MS);
   const young = fs.mkdtempSync(path.join(root, `young-${who}-`));
   fs.cpSync(lockOfRoot(from), lockOfRoot(young), { recursive: true });
   agedAll(lockOfRoot(young), 0);
+  copyGens(from, young, 0);
   const old = await H.drive(impl, who, r);
   const fresh = await H.drive(impl, who, young);
   if (old.code === 'acquired' && fresh.code === 'acquired') return 'recover-when-pid-gone';
@@ -2662,6 +2789,15 @@ const F_DRIVERS: Partial<Record<Failure, FDriver>> = {
 const F_NOT_DRIVEN: Partial<Record<Failure, string>> = {
   'F69-new-k1-writer-into-emptied-name': 'outside P0: two writers stopped past 10 min interleaved with a third — named, not fixed',
   'F71-old-writer-in-generic-shell': 'outside P0, mixed: an older copy in a generic shell — ended by the restart of §6.1 (c), nothing to drive in this repository',
+  // #4559 PR-2: the windows with an older version are driven where the versions meet (machine-lock-generation-4559 T4,
+  // machine-lock-generation-mixed-4559 T5, lock-stalled-recoverer-4559); here they are rows of the table.
+  'F73-mixed-prev-beacon-taken': 'mixed (§6.5 P-2): an older recoverer and writer between the new judgement and its rename — T4 / T5',
+  'F74-mixed-old-holder-recovered': 'mixed (§6.5 P-4): lock-stalled-recoverer-4559 (U the develop copy) and T4',
+  'F75-mixed-old-recoverer-moves-beacon': 'mixed (§6.5 P-5): an older recoverer stopped after its judgement — named, closed by M3 only',
+  'F76-mixed-stale-nest': 'mixed (§6.5 STALE-NEST): an older run-lock.sh / lib.sh put-back — PR-3 (bash)',
+  'F77-mixed-pid-only-reader': 'mixed (§6.5 P-1-PIDONLY): a reader older than #4288 — the same window as develop',
+  'F78-mixed-ticket-done': 'mixed (§6.5 TICKET-DONE, #4560): the tickets of an older writer — T5',
+  'F79-mixed-pre-block-writer': 'mixed (§6.5 P-3, later PR): after the beacon is gone — the M3 PR',
 };
 
 describe.each(IMPLS)('Issue #4288 PR1a-f failure directions F: %s (design §3, to implement)', (impl) => {

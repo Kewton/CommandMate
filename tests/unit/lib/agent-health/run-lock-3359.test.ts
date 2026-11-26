@@ -127,6 +127,34 @@ describe('acquireRunLock', () => {
   });
 });
 
+describe('#4559 PR-2 r6 (review a P2-4): the readers read the holder from the generation chain first', () => {
+  // A holds its generation and has let its <lock> go (its release stopped right before the generation's end):
+  // the beacon says nothing, the generation names the holder.
+  function holdingWithoutBeacon() {
+    const held = acquireRunLock({ label: 'daily-check', env });
+    expect(held.ok).toBe(true);
+    fs.rmSync(lockDir, { recursive: true, force: true });
+    return held;
+  }
+
+  it('a caller refused while the holder\'s <lock> is gone names it from its generation (label, start)', () => {
+    const held = holdingWithoutBeacon();
+    const refused = acquireRunLock({ label: 'agent-health', env, token: 'later' });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toMatch(new RegExp(`pid ${process.pid}, daily-check, \\d{4}-`));
+    if (held.ok) held.release();
+  });
+
+  it('D8: a child whose CM_RUN_LOCK_TOKEN names the live holder of the generation inherits it (the <lock> gone)', () => {
+    const held = holdingWithoutBeacon();
+    const child = acquireRunLock({ label: 'agent-health', env: { ...env, CM_RUN_LOCK_TOKEN: held.ok ? held.token : 'x' } });
+    expect(child.ok && child.how).toBe('inherited');
+    // A wrong token is refused (negative control).
+    expect(acquireRunLock({ label: 'agent-health', env: { ...env, CM_RUN_LOCK_TOKEN: 'nope' } }).ok).toBe(false);
+    if (held.ok) held.release();
+  });
+});
+
 describe('parseRunLockOwner', () => {
   it('needs a pid and a token', () => {
     expect(parseRunLockOwner(null)).toBeNull();

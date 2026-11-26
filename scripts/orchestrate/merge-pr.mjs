@@ -94,7 +94,7 @@ import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, gatePrecheck, inItem, latestByStage, readRecords, unmetStage } from './run-log.mjs';
 import { verifyEnvState } from './env-manifest.mjs';
 import { itemProblem } from './execution-key.mjs';
-import { acquireMachineLockSync, describeOwner, lockPathOf, readOwner } from './machine-lock-sync.mjs';
+import { acquireMachineLockSync, describeOwner, lockPathOf, readHolder } from './machine-lock-sync.mjs';
 import {
   BUILD_STEPS,
   TO_CI,
@@ -890,7 +890,7 @@ function takeMergeLock(o, deps, recovered) {
 }
 
 function heldByLine(root, name, lock) {
-  const owner = readOwner(lockPathOf(root, name));
+  const owner = readHolder(lockPathOf(root, name));
   if (!owner) return lock.heldBy ?? 'nobody readable';
   return `${describeOwner(owner)}${owner.pgid ? ` (pgid ${owner.pgid})` : ''}, phase ${owner.phase ?? '-'}${owner.pr ? ` pr=#${owner.pr}` : ''}`;
 }
