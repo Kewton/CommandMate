@@ -130,6 +130,8 @@ let answers: Array<() => Response | Promise<Response>> = [];
 /** The roster `/api/worktrees` answers with; `rosterAnswer` (once) instead, when set. */
 let serverRoster: Roster = {};
 let rosterAnswer: (() => Response | Promise<Response>) | null = null;
+/** r4: the answers of the next roster fetches, in order (after `rosterAnswer`). */
+let rosterQueue: Array<() => Response | Promise<Response>> = [];
 function deferred<T>() {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => { resolve = r; });
@@ -154,7 +156,7 @@ function installFetch() {
     }
     if (url.includes('/start-preview')) return json(200, previewShown ? SHOWN : NOT_SHOWN);
     if (url === '/api/worktrees') {
-      const answer = rosterAnswer;
+      const answer = rosterAnswer ?? rosterQueue.shift() ?? null;
       rosterAnswer = null;
       if (answer) return answer();
       return json(200, { worktrees: [worktree(serverRoster)], repositories: [] });
@@ -215,6 +217,7 @@ beforeEach(() => {
   answers = [];
   serverRoster = {};
   rosterAnswer = null;
+  rosterQueue = [];
   previewShown = false;
   provider.value = null;
   resetRevealedStartingTerminals();
@@ -530,5 +533,232 @@ describe('[#4606 r3 P1-6] the move to the fallback after the composer\'s waiting
     expect(window.localStorage.getItem(KX)).toBe('旧本文');
     // Its marks went in to Y before the text failed (marks first): Y asks before it sends anything of it.
     expect(window.localStorage.getItem(getRetargetTagKey(KY))).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- r4
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const toX = (post: Record<string, unknown>) => post.instanceId === 'codex-2';
+const rosterReply = () => json(200, { worktrees: [worktree(serverRoster)], repositories: [] });
+
+// r4 Q-1 (INV-P2): the gate reads the hold when it is called — from the tile's ref, never a render's
+// copy. The 409 is handled (the tile's ref has the hold) and, before the tile renders again (the same
+// `act`: the composer's `sendBlockedReason` is still the old value), a send is pressed.
+describe('[#4606 r4 Q-1] a send pressed after the hold is in the tile, before the composer renders it', () => {
+  async function firstInFlight() {
+    roster = { 'codex-2': 'codex', claude: 'claude' };
+    current = worktree(roster);
+    shownId = 'codex-2';
+    view = render(tree());
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    // The first send is refused for another reason (not sent); its [retry] is answered by the fence —
+    // a retry hands no text back, so the composer's draft does not change when the hold comes.
+    fireEvent.change(ta(), { target: { value: 'first' } });
+    await flush(30);
+    answers.push(() => json(409, { error: 'prompt waiting', code: 'PROMPT_WAITING', sendOutcome: 'not_sent' }));
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(posts).toHaveLength(1));
+    await flush(80);
+    const first = deferred<Response>();
+    answers.push(() => first.promise);
+    fireEvent.click(screen.getByTestId('chat-pending-retry'));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    fireEvent.change(ta(), { target: { value: 'second' } });
+    await flush(30);
+    return first;
+  }
+
+  it("the awaited road (the brief's choice): nothing is POSTed to the held target", async () => {
+    const first = await firstInFlight();
+    previewShown = true;
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    const decline = await screen.findByTestId('session-start-brief-decline');
+    previewShown = false;
+    await act(async () => {
+      first.resolve(json(409, fenceBody('tool-changed', 'codex-2', 'codex')));
+      await sleep(30);
+      // Not rendered yet: the composer still has no hold on screen.
+      expect(notice()).toBeNull();
+      fireEvent.click(decline);
+      await sleep(30);
+    });
+    await flush(80);
+    expect(posts.slice(2).filter(toX)).toEqual([]);
+  });
+
+  it('the optimistic road (Enter): nothing is POSTed, and the text stays in the composer', async () => {
+    const first = await firstInFlight();
+    // A command waits for no preview: the press reaches the gate at once, inside this act.
+    fireEvent.change(ta(), { target: { value: '!ls -la' } });
+    await flush(30);
+    await act(async () => {
+      first.resolve(json(409, fenceBody('tool-changed', 'codex-2', 'codex')));
+      await sleep(30);
+      expect(notice()).toBeNull();
+      fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+      await sleep(50);
+    });
+    await flush(80);
+    expect(posts.slice(2).filter(toX)).toEqual([]);
+    expect(ta().value).toBe('!ls -la');
+  });
+});
+
+// r4 (review a P1-3): two 409s for the same pair. The first takes the hold and begins fetch A; A is
+// adopted (with the pair still on it) and, before it is rendered, the second 409 lands (fetch B begins).
+// The hold counts from the latest refusal: A's render keeps it; B's lets it go.
+describe('[#4606 r4 P1-3] two 409s for the same pair overlap a roster fetch', () => {
+  function CachedTile() {
+    const cache = useWorktreesCache({ enabled: false });
+    provider.value = cache;
+    const wt = cache.worktrees.find((w) => w.id === WT);
+    return wt ? (
+      <ToastProvider>
+        <SessionTile worktree={wt} enabled instanceIds={['codex-2']} />
+      </ToastProvider>
+    ) : null;
+  }
+
+  it('A (begun before the second refusal) keeps the hold — a [retry] POSTs nothing; after B, it sends', async () => {
+    serverRoster = { 'codex-2': 'codex', claude: 'claude' };
+    render(<CachedTile />);
+    await act(async () => {
+      await provider.value!.refresh();
+    });
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    const p1 = deferred<Response>();
+    const p2 = deferred<Response>();
+    answers.push(() => p1.promise, () => p2.promise);
+    fireEvent.change(ta(), { target: { value: 'one' } });
+    await flush(30);
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(posts).toHaveLength(1));
+    fireEvent.change(ta(), { target: { value: 'two' } });
+    await flush(30);
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(posts).toHaveLength(2));
+    const fetchA = deferred<Response>();
+    const fetchB = deferred<Response>();
+    rosterQueue.push(() => fetchA.promise, () => fetchB.promise);
+    await act(async () => {
+      p1.resolve(json(409, fenceBody('target-gone', 'codex-2', 'codex')));
+      await sleep(30);
+    });
+    await flush(30);
+    expect(notice()).not.toBeNull();
+    await act(async () => {
+      fetchA.resolve(rosterReply());
+      await sleep(30);
+      p2.resolve(json(409, fenceBody('target-gone', 'codex-2', 'codex')));
+      await sleep(30);
+    });
+    await flush(30);
+    const before = posts.length;
+    fireEvent.click(screen.getAllByTestId('chat-pending-retry')[0]);
+    await flush(80);
+    expect(posts.slice(before).filter(toX)).toEqual([]);
+    // (positive control) B — begun after the second refusal — lets it go.
+    await act(async () => {
+      fetchB.resolve(rosterReply());
+      await sleep(30);
+    });
+    await flush(30);
+    expect(notice()).toBeNull();
+    const afterB = posts.length;
+    fireEvent.click(screen.getAllByTestId('chat-pending-retry')[0]);
+    await flush(80);
+    expect(posts.length).toBe(afterB + 1);
+  });
+});
+
+// r4 (review a P1-4a): a row the gate stopped is not a failed send — it says it was not sent and can be
+// retried after the roster is read (its [retry] and [discard] stay). A real failure keeps its words.
+// And a send of the same text from another screen does not take the stopped row as delivered.
+describe('[#4606 r4 P1-4a] the row the gate stopped', () => {
+  const HELD = '送っていません（宛先が替わりました）。名簿の読み直しの後に再試行できます';
+  const FAILED = '送信に失敗しました';
+
+  it('says "not sent" (not "failed"), and keeps [retry] and [discard]; the failed row before it keeps "failed" (control)', async () => {
+    await arrange('target-gone', 'optimistic');
+    // (control) the fence's 409: a failed row, as before.
+    expect(screen.getByTestId('chat-optimistic-error')).toHaveTextContent(FAILED);
+    fireEvent.click(screen.getByTestId('chat-pending-retry'));
+    await flush(80);
+    expect(posts).toHaveLength(1);
+    expect(screen.queryByTestId('chat-optimistic-error')).toBeNull();
+    expect(screen.getByTestId('chat-optimistic-held')).toHaveTextContent(HELD);
+    expect(screen.getByTestId('chat-pending-retry')).toBeInTheDocument();
+    expect(screen.getByTestId('chat-pending-discard')).toBeInTheDocument();
+  });
+
+  it('the same text sent from another screen (a user message in the history) does not take the stopped row', async () => {
+    await arrange('target-gone', 'optimistic');
+    fireEvent.click(screen.getByTestId('chat-pending-retry'));
+    await flush(80);
+    expect(screen.getAllByTestId('chat-pending-retry')).toHaveLength(1);
+    useSplitMessagesMock.mockReturnValue({
+      messages: [{ id: 'srv-other', worktreeId: WT, role: 'user', content: TEXT, timestamp: new Date(), messageType: 'normal', archived: false, cliToolId: 'codex', instanceId: 'codex-2' }],
+      isLoading: false,
+      refresh: vi.fn(),
+    });
+    view.rerender(tree());
+    await flush(50);
+    expect(screen.getAllByTestId('chat-pending-retry')).toHaveLength(1);
+  });
+});
+
+// r4 (review a P1-6): the composer's waiting save of X cannot be written at the switch — X's stored
+// text is the old one; it is not moved to Y (it would bring the old version back), and it is told.
+describe('[#4606 r4 P1-6] X\'s waiting save fails at the switch', () => {
+  const KX = getInstanceDraftKey(WT, 'codex-2');
+  const KY = getInstanceDraftKey(WT, 'claude');
+  afterEach(() => vi.restoreAllMocks());
+
+  async function showXWithSaved(text: string) {
+    roster = { 'codex-2': 'codex', claude: 'claude' };
+    current = worktree(roster);
+    shownId = 'codex-2';
+    view = render(tree());
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    fireEvent.change(ta(), { target: { value: text } });
+    await flush(600);
+    expect(window.localStorage.getItem(KX)).toBe(text);
+  }
+
+  it('rewritten, and X\'s `setItem` throws: Y does not get the old text; a toast says it was not moved', async () => {
+    await showXWithSaved('旧本文');
+    fireEvent.change(ta(), { target: { value: '新本文' } });
+    await flush(50);
+    const realSet = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === KX) throw new DOMException('full', 'QuotaExceededError');
+      return realSet.call(this, key, value);
+    });
+    shownId = null;
+    await readRoster({ claude: 'claude' });
+    await flush(600);
+    expect(ta().value).not.toContain('旧本文');
+    expect(window.localStorage.getItem(KY) ?? '').not.toContain('旧本文');
+    expect(screen.getByText('下書きを移せませんでした。元のインスタンスの下書きに残っています。')).toBeInTheDocument();
+  });
+
+  it('cleared, and X\'s first `removeItem` throws: the old text does not come back in Y', async () => {
+    await showXWithSaved('旧本文');
+    fireEvent.change(ta(), { target: { value: '' } });
+    await flush(50);
+    const realRemove = Storage.prototype.removeItem;
+    let thrown = false;
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === KX && !thrown) {
+        thrown = true;
+        throw new DOMException('denied', 'SecurityError');
+      }
+      return realRemove.call(this, key);
+    });
+    shownId = null;
+    await readRoster({ claude: 'claude' });
+    await flush(600);
+    expect(ta().value).not.toContain('旧本文');
+    expect(window.localStorage.getItem(KY) ?? '').not.toContain('旧本文');
   });
 });

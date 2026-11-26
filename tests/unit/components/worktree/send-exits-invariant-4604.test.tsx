@@ -769,3 +769,62 @@ describe('[#4606 T-P] the choke point: whatever the exit, no POST reaches `/send
     expect(oracle.violations).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------- r4 (review a P1-4a): the stopped row's words
+
+import { ChatMessageBubble } from '@/components/worktree/ChatMessageBubble';
+import { ConversationPairCard } from '@/components/worktree/ConversationPairCard';
+import type { ChatMessage } from '@/types/models';
+
+/**
+ * A row the gate stopped (`held`) says it was not sent and can be retried after the roster is read —
+ * with its [retry] and [discard] — in the chat bubble and in the history card. A failed row keeps its
+ * words and its buttons (the control).
+ */
+describe('[#4606 r4 P1-4a] the words of a row the gate stopped, in both surfaces', () => {
+  const HELD_WORDS = '送っていません（宛先が替わりました）。名簿の読み直しの後に再試行できます';
+  const FAILED_WORDS = '送信に失敗しました';
+  const row = (state: string): ChatMessage => ({
+    id: 'pending-0', worktreeId: WT, role: 'user', content: 'hello agent', timestamp: new Date(Date.UTC(2026, 10, 26, 10, 0, 0)),
+    messageType: 'normal', archived: false, cliToolId: 'codex', instanceId: 'codex-2',
+    optimisticState: state as unknown as ChatMessage['optimisticState'],
+  });
+
+  it.each([
+    ['held', 'chat-optimistic-held', HELD_WORDS],
+    ['error', 'chat-optimistic-error', FAILED_WORDS],
+  ])('the chat bubble, %s: its words, [retry] and [discard]', (state, testId, words) => {
+    const onRetryPending = vi.fn();
+    const onDiscardPending = vi.fn();
+    render(<ChatMessageBubble message={row(state)} showHeader={false} onFilePathClick={() => undefined} onRetryPending={onRetryPending} onDiscardPending={onDiscardPending} />);
+    expect(screen.getByTestId(testId)).toHaveTextContent(words);
+    if (state === 'held') expect(screen.queryByTestId('chat-optimistic-error')).toBeNull();
+    fireEvent.click(screen.getByTestId('chat-pending-retry'));
+    expect(onRetryPending).toHaveBeenCalledWith('pending-0');
+    fireEvent.click(screen.getByTestId('chat-pending-discard'));
+    expect(onDiscardPending).toHaveBeenCalledWith('pending-0');
+  });
+
+  it.each([
+    ['held', 'optimistic-held', HELD_WORDS],
+    ['error', 'optimistic-error', FAILED_WORDS],
+  ])('the history card, %s: its words, [retry] and [discard]', (state, testId, words) => {
+    const onRetryPending = vi.fn();
+    const onDiscardPending = vi.fn();
+    const message = row(state);
+    render(
+      <ConversationPairCard
+        pair={{ id: message.id, userMessage: message, assistantMessages: [], status: 'pending' }}
+        onFilePathClick={() => undefined}
+        onRetryPending={onRetryPending}
+        onDiscardPending={onDiscardPending}
+      />,
+    );
+    expect(screen.getByTestId(testId)).toHaveTextContent(words);
+    if (state === 'held') expect(screen.queryByTestId('optimistic-error')).toBeNull();
+    fireEvent.click(screen.getByTestId('pending-retry'));
+    expect(onRetryPending).toHaveBeenCalledWith('pending-0');
+    fireEvent.click(screen.getByTestId('pending-discard'));
+    expect(onDiscardPending).toHaveBeenCalledWith('pending-0');
+  });
+});
