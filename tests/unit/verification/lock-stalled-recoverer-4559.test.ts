@@ -10,7 +10,7 @@
  * #4277's tests keep in view) took the free path in that window: two holders. After it, N reads the
  * record again before the move and leaves U's lock where it is.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { acquireMachineLock, machineLockPath } from '@/lib/verification/machine-lock';
@@ -28,8 +28,24 @@ import {
   until,
   writeDeadHolder,
 } from './lock-holder-identity-4558-harness';
+import { loadLegacy, loadLegacyTs } from './lock-generation-4559-harness';
 
 afterEach(() => cleanRoots());
+
+/**
+ * #4559 PR-2 (lead-tests §1 #1, reason (a)): with the generation chain the new version's successor cannot
+ * take while the stopped recoverer N holds its generation — that order no longer happens between new
+ * versions (machine-lock-generation-4559.test.ts T4 keeps it closed). The rows below keep their meaning
+ * (a successor took while N stopped; N must not move it) with U the develop copy before #4559
+ * (tests/fixtures/machine-lock-legacy/), which sees only the <lock>: the window that stays is design §6.5's
+ * `mixed` row P-4.
+ */
+let legacy: typeof lockSync;
+beforeAll(async () => {
+  legacy = await loadLegacy(freshRoot('4559-legacy'));
+});
+const takeAsLegacySuccessor = (lockPath: string): Successor =>
+  legacy.acquireMachineLockSync('x', { lockPath, timeoutMs: 2000, pollMs: 10, hooks: { now: () => Date.now() + 65_000, startOf: () => 0 } });
 
 const alive = (pid: number): boolean => {
   try {
@@ -46,7 +62,7 @@ type Successor = ReturnType<typeof takeAsSuccessor>;
  * The seams of the JS recoverer: the probe that ends its judgement of D runs U's acquisition once
  * (`stall`), and the window right after its move lets U2's bare mkdir in.
  */
-function recovererHooks(lockPath: string, stall: boolean) {
+function recovererHooks(lockPath: string, stall: boolean, successor: (lockPath: string) => Successor = takeAsSuccessor) {
   const dead = deadPid();
   const seen = { u: null as Successor | null, u2: false, stages: [] as string[] };
   let pending = stall;
@@ -56,7 +72,7 @@ function recovererHooks(lockPath: string, stall: boolean) {
       if (pid === dead) {
         if (pending) {
           pending = false;
-          seen.u = takeAsSuccessor(lockPath);
+          seen.u = successor(lockPath);
         }
         return false;
       }
@@ -85,7 +101,7 @@ describe('#4559 sync JS: a recoverer stopped after its judgement', () => {
     const root = freshRoot('4559-sync');
     const lockPath = machineLockPath('x', root);
     writeDeadHolder(lockPath);
-    const h = recovererHooks(lockPath, true);
+    const h = recovererHooks(lockPath, true, takeAsLegacySuccessor);
     const n = lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 20, hooks: { pidAlive: h.pidAlive, onRecover: h.onRecover } });
     expect(n.acquired).toBe(false);
     expectOneHolder(lockPath, h.seen);
@@ -193,7 +209,7 @@ describe('#4559 TS: a recoverer stopped after its judgement', () => {
     const root = freshRoot('4559-ts');
     const lockPath = machineLockPath('x', root);
     writeDeadHolder(lockPath);
-    const h = recovererHooks(lockPath, true);
+    const h = recovererHooks(lockPath, true, takeAsLegacySuccessor);
     const n = await acquireMachineLock('x', { root, timeoutMs: 300, pollIntervalMs: 20, __testHooks: { pidAlive: h.pidAlive, onRecover: h.onRecover } });
     expect(n.acquired).toBe(false);
     expectOneHolder(lockPath, h.seen);
@@ -244,4 +260,100 @@ describe('#4559 bash (verify-run.sh lock_acquire_path → lock_recover)', () => 
     expect(n.out().trim().split('\n')).toEqual(['rc=0', 'mine']);
     expect(n.err()).toContain('broke a stale lock');
   }, 30000);
+});
+
+// ------------------------------------------------------------------ #4559 PR-2 r6 (review a P2-6, the acceptance's pair)
+
+/**
+ * The report's order on the real entries of one version, before (the develop copy, 690caa46a) and after the fix:
+ * the recoverer N stops right after its re-read (`before-move`); U — the same version, its clock 65 s ahead, so N's
+ * ticket is retired — takes; N resumes and renames; in the window after the move (`moved`) an older runner V (a bare
+ * mkdir) takes. Before: U and V hold (two). After: N holds its generation, so U does not take — one.
+ */
+type Take = { acquired: boolean; token?: string };
+function reportHooks(lockPath: string, takeU: () => Take) {
+  const seen = { u: null as Take | null, v: false, stages: [] as string[] };
+  return {
+    seen,
+    onRecover: (stage: string): void => {
+      seen.stages.push(stage);
+      if (stage === 'before-move' && seen.u === null) seen.u = takeU();
+      if (stage === 'moved' && seen.stages.filter((x) => x === 'moved').length === 1) seen.v = bareTake(lockPath, 'V');
+    },
+  };
+}
+const holders = (n: Take, seen: { u: Take | null; v: boolean }): number => [n.acquired, seen.u?.acquired === true, seen.v].filter(Boolean).length;
+const uOf = (m: typeof lockSync, lockPath: string) => (): Take => m.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 10, hooks: { now: () => Date.now() + 65_000, startOf: () => 0 } });
+/** #4559 r7 (a2 P3-4 = b2 P3-3): U of the new version, counting the seams it reached (the chain's listing). */
+const uCounted = (lockPath: string, seams: Map<string, number>) => (): Take =>
+  lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 10, hooks: { now: () => Date.now() + 65_000, startOf: () => 0, onGenStage: (st: string) => void seams.set(st, (seams.get(st) ?? 0) + 1) } });
+const stageCounts = (stages: string[]): Record<string, number> => stages.reduce<Record<string, number>>((m, st) => ({ ...m, [st]: (m[st] ?? 0) + 1 }), {});
+
+async function withLockRoot<T>(root: string, fn: () => Promise<T> | T): Promise<T> {
+  const was = process.env.CM_VERIFY_LOCK_ROOT;
+  process.env.CM_VERIFY_LOCK_ROOT = root;
+  try {
+    return await fn();
+  } finally {
+    process.env.CM_VERIFY_LOCK_ROOT = was;
+  }
+}
+
+describe('#4559 r6 the acceptance pair, sync JS: the same stops on the develop copy and on the generation chain', () => {
+  it('before (690caa46a): N stopped after its re-read — U takes, N moves U\'s lock, V takes: two holders', () => {
+    const root = freshRoot('4559-pair-sync-old');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const h = reportHooks(lockPath, uOf(legacy, lockPath));
+    const n = legacy.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 20, hooks: { onRecover: h.onRecover } });
+    expect(h.seen.stages.slice(0, 2)).toEqual(['before-move', 'moved']);
+    expect({ u: h.seen.u?.acquired, v: h.seen.v, n: n.acquired }).toEqual({ u: true, v: true, n: false });
+    expect(holders(n, h.seen)).toBe(2);
+  });
+
+  it('after: the same stops — U does not take (N holds its generation), V\'s bare mkdir is the one holder', async () => {
+    const root = freshRoot('4559-pair-sync-new');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const uSeams = new Map<string, number>();
+    const h = reportHooks(lockPath, uCounted(lockPath, uSeams));
+    const n = await withLockRoot(root, () => lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 20, hooks: { onRecover: h.onRecover } }));
+    expect(h.seen.stages.slice(0, 2)).toEqual(['before-move', 'moved']);
+    // a2 P3-4 = b2 P3-3 (#4559 comment 7185752051): who took — V (the older runner) alone — and how often each stage was reached
+    expect({ u: h.seen.u?.acquired, v: h.seen.v, n: n.acquired }).toEqual({ u: false, v: true, n: false });
+    expect(stageCounts(h.seen.stages)).toEqual({ 'before-move': 1, moved: 1 });
+    expect(uSeams.get('gen-list') ?? 0, 'U listed the chain (and saw N\'s generation)').toBeGreaterThanOrEqual(1);
+    expect(uSeams.get('gen-mkdir') ?? 0, 'U made no generation while N held its own').toBe(0);
+    expect(holders(n, h.seen)).toBe(1);
+  });
+});
+
+describe('#4559 r6 the acceptance pair, TS (the async entry): the same stops on the develop copy and on the generation chain', () => {
+  it('before (690caa46a\'s machine-lock.ts): two holders', async () => {
+    const root = freshRoot('4559-pair-ts-old');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const oldTs = await loadLegacyTs(root);
+    const h = reportHooks(lockPath, uOf(legacy, lockPath));
+    const n = await oldTs.acquireMachineLock('x', { root, timeoutMs: 300, pollIntervalMs: 20, __testHooks: { onRecover: h.onRecover } as never });
+    expect(h.seen.stages.slice(0, 2)).toEqual(['before-move', 'moved']);
+    expect({ u: h.seen.u?.acquired, v: h.seen.v, n: n.acquired }).toEqual({ u: true, v: true, n: false });
+    expect(holders(n, h.seen)).toBe(2);
+  });
+
+  it('after (machine-lock.ts on the core\'s copy): one holder', async () => {
+    const root = freshRoot('4559-pair-ts-new');
+    const lockPath = machineLockPath('x', root);
+    writeDeadHolder(lockPath);
+    const uSeams = new Map<string, number>();
+    const h = reportHooks(lockPath, uCounted(lockPath, uSeams));
+    const n = await withLockRoot(root, () => acquireMachineLock('x', { root, timeoutMs: 300, pollIntervalMs: 20, __testHooks: { onRecover: h.onRecover } as never }));
+    expect(h.seen.stages.slice(0, 2)).toEqual(['before-move', 'moved']);
+    // a2 P3-4 = b2 P3-3: who took, and how often each stage was reached
+    expect({ u: h.seen.u?.acquired, v: h.seen.v, n: n.acquired }).toEqual({ u: false, v: true, n: false });
+    expect(stageCounts(h.seen.stages)).toEqual({ 'before-move': 1, moved: 1 });
+    expect(uSeams.get('gen-list') ?? 0, 'U listed the chain (and saw N\'s generation)').toBeGreaterThanOrEqual(1);
+    expect(uSeams.get('gen-mkdir') ?? 0, 'U made no generation while N held its own').toBe(0);
+    expect(holders(n, h.seen)).toBe(1);
+  });
 });
