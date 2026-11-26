@@ -639,11 +639,25 @@ function SessionTileCard({
   // moved text. A text that cannot be moved stays under its key, and a toast says so.
   const previousShownRef = useRef(resolvedInstanceId);
   const { showToast: showTileToast } = useToast();
+  // r4 (P1-6): the drafts whose waiting save the composer could not write at this switch — their stored
+  // text is an older one, so they are not moved (they stay under their key, and it is said).
+  const unsavedDraftsRef = useRef(new Set<string>());
+  const notePreviousDraftSaved = useCallback((key: string, written: boolean) => {
+    if (written) unsavedDraftsRef.current.delete(key);
+    else unsavedDraftsRef.current.add(key);
+  }, []);
   useEffect(() => {
     const previous = previousShownRef.current;
     previousShownRef.current = resolvedInstanceId;
+    const unsaved = unsavedDraftsRef.current;
+    unsavedDraftsRef.current = new Set();
     if (previous === resolvedInstanceId || fullRoster.some((instance) => instance.id === previous)) return;
-    const moved = moveDraft(getInstanceDraftKey(worktree.id, previous), getInstanceDraftKey(worktree.id, resolvedInstanceId));
+    const from = getInstanceDraftKey(worktree.id, previous);
+    if (unsaved.has(from)) {
+      showTileToast(tWorktree('composer.draftNotMoved'), 'warning');
+      return;
+    }
+    const moved = moveDraft(from, getInstanceDraftKey(worktree.id, resolvedInstanceId));
     if (moved === 'failed') showTileToast(tWorktree('composer.draftNotMoved'), 'warning');
   // `showTileToast` / `tWorktree` are read when it moves only (a new toast surface is not a move).
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1121,6 +1135,7 @@ function SessionTileCard({
             onSendTargetChanged={holdStaleTarget}
             sendBlockedReason={sendHeld ? tWorktree('composer.sendTargetRefreshing') : null}
             isSendHeld={isSendHeld}
+            onPreviousDraftSaved={notePreviousDraftSaved}
             autoYesSlot={
               <AutoYesToggle
                 enabled={autoYes.enabled}

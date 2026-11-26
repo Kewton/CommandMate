@@ -235,6 +235,11 @@ export interface MessageInputProps {
    * last render stops the send too). Callers without a hold (the worktree screen) pass nothing.
    */
   isSendHeld?: (to: { instanceId: string; cliToolId: string }) => boolean;
+  /**
+   * Issue #4606 r4 (P1-6): the previous draft's waiting save, written at a switch (instance scope) —
+   * its key and whether it went in. The tile moves a draft only once its latest text is stored.
+   */
+  onPreviousDraftSaved?: (key: string, written: boolean) => void;
 }
 
 /**
@@ -429,7 +434,7 @@ function writeSendUnknownMark(draftKey: string, mark: SendUnknownMark | null): v
   } catch { /* localStorage unavailable */ }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false, onSendTargetChanged, sendBlockedReason = null, isSendHeld }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false, onSendTargetChanged, sendBlockedReason = null, isSendHeld, onPreviousDraftSaved }: MessageInputProps) {
   const t = useTranslations('worktree');
   const tc = useTranslations('common');
   const [sending, setSending] = useState(false);
@@ -878,7 +883,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // was typed for. Instance scope only: the worktree screen's split scope drops it as before, and
     // an unmount writes nothing on either. Issue #4604: a write that fails says so (the text is gone).
     if (draftScope === 'instance' && pendingSave && pendingSave.key !== draftKey) {
-      if (!writeDraft(pendingSave.key, pendingSave.message)) notify(t(PREVIOUS_DRAFT_NOT_SAVED_KEY), 'warning');
+      const written = writeDraft(pendingSave.key, pendingSave.message);
+      if (!written) notify(t(PREVIOUS_DRAFT_NOT_SAVED_KEY), 'warning');
+      // r4 (P1-6): the tile hears it before its own effect moves that draft (a child's effects run first).
+      onPreviousDraftSaved?.(pendingSave.key, written);
     }
     let saved: string | null = null;
     let unreadable = false;
