@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync, spawn } from 'child_process';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 
 /**
@@ -256,6 +257,38 @@ export function readDurationCache({ root }) {
 }
 
 /**
+ * What vitest's results cache of `root` holds now, as one hash of every
+ * results.json (path and bytes); null when there is none (#4594). The store
+ * records it when written: a different one later means vitest wrote its cache
+ * after the store, whatever the file times say (their resolution and order
+ * differ between file systems).
+ *
+ * @param {{ root: string }} options
+ * @returns {string | null}
+ */
+export function vitestCacheSignature({ root }) {
+  const base = path.join(root, 'node_modules', '.vite', 'vitest');
+  try {
+    const files = fs
+      .readdirSync(base, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(e.name, 'results.json'))
+      .filter((f) => fs.existsSync(path.join(base, f)))
+      .sort();
+    if (files.length === 0) return null;
+    const hash = createHash('sha256');
+    for (const f of files) {
+      hash.update(`${f}\0`);
+      hash.update(fs.readFileSync(path.join(base, f)));
+      hash.update('\0');
+    }
+    return hash.digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Where this script keeps every file's duration (#4594), apart from vitest's
  * own results cache: the groups write that one at the same time and only the
  * last group's files survive there.
@@ -269,7 +302,8 @@ const DURATION_STORE_VERSION = 1;
  * broken store only means the split uses the other records.
  *
  * @param {{ root: string }} options
- * @returns {{ status: 'ok' | 'missing' | 'corrupt', durations: Map<string, number>, mtimeMs: number, error?: string }}
+ * @returns {{ status: 'ok' | 'missing' | 'corrupt', durations: Map<string, number>, mtimeMs: number, vitestCache: string | null, error?: string }}
+ *   vitestCache: the signature of vitest's results cache when the store was written
  */
 export function readDurationStore({ root }) {
   /** @type {Map<string, number>} */
@@ -283,10 +317,11 @@ export function readDurationStore({ root }) {
   } catch (error) {
     const code = /** @type {NodeJS.ErrnoException} */ (error).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
-      return { status: 'missing', durations, mtimeMs: 0 };
+      return { status: 'missing', durations, mtimeMs: 0, vitestCache: null };
     }
-    return { status: 'corrupt', durations, mtimeMs: 0, error: /** @type {Error} */ (error).message };
+    return { status: 'corrupt', durations, mtimeMs: 0, vitestCache: null, error: /** @type {Error} */ (error).message };
   }
+  let vitestCache = null;
   try {
     const parsed = JSON.parse(text);
     if (!parsed || parsed.version !== DURATION_STORE_VERSION || !parsed.durations || typeof parsed.durations !== 'object' || Array.isArray(parsed.durations)) {
@@ -298,10 +333,11 @@ export function readDurationStore({ root }) {
       }
       durations.set(rel, duration);
     }
+    if (typeof parsed.vitestCache === 'string') vitestCache = parsed.vitestCache;
   } catch (error) {
-    return { status: 'corrupt', durations: new Map(), mtimeMs: 0, error: /** @type {Error} */ (error).message };
+    return { status: 'corrupt', durations: new Map(), mtimeMs: 0, vitestCache: null, error: /** @type {Error} */ (error).message };
   }
-  return { status: 'ok', durations, mtimeMs };
+  return { status: 'ok', durations, mtimeMs, vitestCache };
 }
 
 /**
@@ -324,7 +360,9 @@ export function writeDurationStore({ root, durations }) {
     for (const [rel, d] of durations) all[rel] = d;
     const sorted = Object.fromEntries(Object.keys(all).sort().map((k) => [k, all[k]]));
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(tmp, `${JSON.stringify({ version: DURATION_STORE_VERSION, durations: sorted })}\n`);
+    // What vitest's cache holds now, after the groups wrote it: a later change is newer than the store.
+    const vitestCache = vitestCacheSignature({ root });
+    fs.writeFileSync(tmp, `${JSON.stringify({ version: DURATION_STORE_VERSION, vitestCache, durations: sorted })}\n`);
     fs.renameSync(tmp, file);
     return { status: 'written', count: Object.keys(sorted).length };
   } catch (error) {
@@ -339,16 +377,18 @@ export function writeDurationStore({ root, durations }) {
 
 /**
  * This worktree's durations (#4594): the own store first, then vitest's
- * results cache for the files the store does not hold. Only a results.json
- * written after the store (vitest run by hand after the gate) is newer than it:
- * then its files take its values, as between worktrees the newest record wins.
+ * results cache for the files the store does not hold. A results.json changed
+ * since the store was written (vitest run by hand after the gate) is newer than
+ * the store: then its files take its values. Newer means a signature other than
+ * the one the store recorded, never the file times.
  *
- * @param {{ durations: Map<string, number>, mtimeMs: number }} store
- * @param {{ durations: Map<string, number>, mtimeMs: number }} cache
+ * @param {{ durations: Map<string, number>, vitestCache: string | null }} store
+ * @param {{ durations: Map<string, number>, signature: string | null }} cache
  * @returns {Map<string, number>}
  */
 export function ownDurations(store, cache) {
-  const [older, newer] = cache.mtimeMs > store.mtimeMs ? [store, cache] : [cache, store];
+  const cacheIsNewer = cache.signature !== null && cache.signature !== store.vitestCache;
+  const [older, newer] = cacheIsNewer ? [store, cache] : [cache, store];
   const out = new Map(older.durations);
   for (const [rel, d] of newer.durations) out.set(rel, d);
   return out;
@@ -364,7 +404,7 @@ export function ownDurations(store, cache) {
 export function readWorktreeDurations({ root }) {
   const store = readDurationStore({ root });
   const cache = readDurationCache({ root });
-  const durations = ownDurations(store, cache);
+  const durations = ownDurations(store, { durations: cache.durations, signature: vitestCacheSignature({ root }) });
   if (durations.size === 0) {
     return { status: cache.status, durations, mtimeMs: 0 };
   }
@@ -770,7 +810,11 @@ export async function main(argv, deps = {}) {
   } catch {
     peers = { status: 'unavailable', count: 0, peers: [] };
   }
-  const merged = mergeDurations(union.files, ownDurations(store, cache), peers.peers);
+  const merged = mergeDurations(
+    union.files,
+    ownDurations(store, { durations: cache.durations, signature: vitestCacheSignature({ root }) }),
+    peers.peers
+  );
   const plan = split(union.files, merged.durations, maxGroups);
   const n = plan.groups.length;
   log(

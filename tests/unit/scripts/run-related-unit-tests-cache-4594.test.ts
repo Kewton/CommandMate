@@ -15,6 +15,10 @@
  *      exit code, and says so in one line (C4)
  *   N4 the existing log lines keep their fields and order (C5)
  *   N5 vitest's own results.json is never written by the script (C6)
+ *   N6 a results.json changed after the store was written wins file by file, and
+ *      an unchanged one never does, whatever the file times say: their
+ *      resolution, equal times, write order (C7, C8). CI's ext4 gave the store and
+ *      a results.json rewritten right after it the same mtime.
  *
  * Every group is a fake (no vitest child): it writes the json report vitest
  * would, with per-file startTime / endTime, and, when asked, vitest's results
@@ -116,6 +120,8 @@ function harness(root: string, opts: {
   files: string[];
   truth: Map<string, number>;
   vitestCache?: boolean;
+  /** What a group writes into vitest's cache for a file (default: its true duration). */
+  cacheValue?: (file: string) => number;
   failed?: string[];
   outcome?: (i: number) => { code: number | null; signal: string | null };
   extra?: Record<string, unknown>;
@@ -144,7 +150,7 @@ function harness(root: string, opts: {
         writeReport(call.args, root, files, opts.truth, opts.failed ?? []);
         if (opts.vitestCache) {
           const mine = new Map(atStart);
-          for (const f of files) mine.set(f, opts.truth.get(f) ?? 0);
+          for (const f of files) mine.set(f, opts.cacheValue ? opts.cacheValue(f) : (opts.truth.get(f) ?? 0));
           writeVitestCache(root, mine);
         }
         return opts.outcome ? opts.outcome(i) : { code: (opts.failed ?? []).some((f) => files.includes(f)) ? 1 : 0, signal: null };
@@ -248,6 +254,43 @@ describe('#4594 the own duration store', () => {
     } finally {
       removeTempDir(peer);
     }
+  });
+
+  const storeMtime = () => fs.statSync(path.join(root, STORE_REL)).mtimeMs / 1000;
+
+  it.each<[string, 'same' | 'older' | 'second']>([
+    ['the same mtime as the store', 'same'],
+    ['an mtime 1 s older than the store', 'older'],
+    ['both on a 1-second clock (the same whole second)', 'second'],
+  ])('C7 (N6): results.json rewritten after the store, with %s -> its values win', async (_label, mode) => {
+    expect(await harness(root, { files: FILES, truth: TRUTH, vitestCache: true }).run()).toBe(0);
+    const NEW = new Map(FILES.map((f, i) => [f, i < 10 ? 60_000 + i : 7]));
+    writeVitestCache(root, NEW);
+    let store = storeMtime();
+    if (mode === 'second') {
+      store = Math.floor(store);
+      fs.utimesSync(path.join(root, STORE_REL), store, store);
+    }
+    const t = mode === 'older' ? store - 1 : store;
+    fs.utimesSync(vitestCachePath(root), t, t);
+    const h = harness(root, { files: FILES, truth: TRUTH });
+    expect(await h.run()).toBe(0);
+    expect(h.handed()).toEqual(splitLpt(FILES, NEW, 4).groups.map((g) => g.slice().sort()));
+  });
+
+  it.each<[string, () => void]>([
+    ['left as the groups wrote it', () => undefined],
+    ['touched 10 s after the store, bytes unchanged', () => {
+      const t = storeMtime() + 10;
+      fs.utimesSync(vitestCachePath(root), t, t);
+    }],
+  ])('C8 (N6, positive control): results.json %s -> the store wins', async (_label, touch) => {
+    // vitest's own measure differs from the report's span: 1ms for every file here.
+    expect(await harness(root, { files: FILES, truth: TRUTH, vitestCache: true, cacheValue: () => 1 }).run()).toBe(0);
+    touch();
+    const h = harness(root, { files: FILES, truth: TRUTH });
+    expect(await h.run()).toBe(0);
+    expect(h.handed()).toEqual(splitLpt(FILES, TRUTH, 4).groups.map((g) => g.slice().sort()));
   });
 
   it('C6: vitest\'s results.json is not written by the script (bytes and mtime kept, nothing added under .vite)', async () => {
