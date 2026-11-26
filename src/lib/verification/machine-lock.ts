@@ -288,7 +288,7 @@ interface MachineLockSyncCore {
   genDirOf: (lockPath: string, env?: Record<string, string | undefined>) => string;
   byPathHash: (text: string) => string;
   recordGen: (record: unknown) => number | null;
-  readHolder: (lockPath: string, options?: { ownerCodec?: CoreCodec }) => CoreRecord | null;
+  readHolder: (lockPath: string, options?: { ownerCodec?: CoreCodec; genOnly?: boolean }) => CoreRecord | null;
   machineLockAcquisition: (name: string, options: CoreAcquireOptions) => Generator<number, CoreLock, void>;
   acquireMachineLockSync: (name: string, options: CoreAcquireOptions) => CoreLock;
   releaseAsHead: (lockPath: string, tokens: string[], options?: CoreHeadOptions) => CoreHeadResult;
@@ -384,7 +384,13 @@ export async function acquireMachineLock(
   });
   let step = steps.next();
   while (!step.done) {
-    await sleep(step.value);
+    try {
+      await sleep(step.value);
+    } catch (error) {
+      // #4559 r6 (§4.1): a wait that threw closes the steps — their `finally` ends a generation taken and the ticket.
+      steps.return(undefined as never);
+      throw error;
+    }
     step = steps.next();
   }
   const lock = step.value;
