@@ -10,7 +10,7 @@
  * #4277's tests keep in view) took the free path in that window: two holders. After it, N reads the
  * record again before the move and leaves U's lock where it is.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { acquireMachineLock, machineLockPath } from '@/lib/verification/machine-lock';
@@ -28,8 +28,24 @@ import {
   until,
   writeDeadHolder,
 } from './lock-holder-identity-4558-harness';
+import { loadLegacy } from './lock-generation-4559-harness';
 
 afterEach(() => cleanRoots());
+
+/**
+ * #4559 PR-2 (lead-tests §1 #1, reason (a)): with the generation chain the new version's successor cannot
+ * take while the stopped recoverer N holds its generation — that order no longer happens between new
+ * versions (machine-lock-generation-4559.test.ts T4 keeps it closed). The rows below keep their meaning
+ * (a successor took while N stopped; N must not move it) with U the develop copy before #4559
+ * (tests/fixtures/machine-lock-legacy/), which sees only the <lock>: the window that stays is design §6.5's
+ * `mixed` row P-4.
+ */
+let legacy: typeof lockSync;
+beforeAll(async () => {
+  legacy = await loadLegacy(freshRoot('4559-legacy'));
+});
+const takeAsLegacySuccessor = (lockPath: string): Successor =>
+  legacy.acquireMachineLockSync('x', { lockPath, timeoutMs: 2000, pollMs: 10, hooks: { now: () => Date.now() + 65_000, startOf: () => 0 } });
 
 const alive = (pid: number): boolean => {
   try {
@@ -46,7 +62,7 @@ type Successor = ReturnType<typeof takeAsSuccessor>;
  * The seams of the JS recoverer: the probe that ends its judgement of D runs U's acquisition once
  * (`stall`), and the window right after its move lets U2's bare mkdir in.
  */
-function recovererHooks(lockPath: string, stall: boolean) {
+function recovererHooks(lockPath: string, stall: boolean, successor: (lockPath: string) => Successor = takeAsSuccessor) {
   const dead = deadPid();
   const seen = { u: null as Successor | null, u2: false, stages: [] as string[] };
   let pending = stall;
@@ -56,7 +72,7 @@ function recovererHooks(lockPath: string, stall: boolean) {
       if (pid === dead) {
         if (pending) {
           pending = false;
-          seen.u = takeAsSuccessor(lockPath);
+          seen.u = successor(lockPath);
         }
         return false;
       }
@@ -85,7 +101,7 @@ describe('#4559 sync JS: a recoverer stopped after its judgement', () => {
     const root = freshRoot('4559-sync');
     const lockPath = machineLockPath('x', root);
     writeDeadHolder(lockPath);
-    const h = recovererHooks(lockPath, true);
+    const h = recovererHooks(lockPath, true, takeAsLegacySuccessor);
     const n = lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 20, hooks: { pidAlive: h.pidAlive, onRecover: h.onRecover } });
     expect(n.acquired).toBe(false);
     expectOneHolder(lockPath, h.seen);
@@ -193,7 +209,7 @@ describe('#4559 TS: a recoverer stopped after its judgement', () => {
     const root = freshRoot('4559-ts');
     const lockPath = machineLockPath('x', root);
     writeDeadHolder(lockPath);
-    const h = recovererHooks(lockPath, true);
+    const h = recovererHooks(lockPath, true, takeAsLegacySuccessor);
     const n = await acquireMachineLock('x', { root, timeoutMs: 300, pollIntervalMs: 20, __testHooks: { pidAlive: h.pidAlive, onRecover: h.onRecover } });
     expect(n.acquired).toBe(false);
     expectOneHolder(lockPath, h.seen);

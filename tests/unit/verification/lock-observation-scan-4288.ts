@@ -114,6 +114,12 @@ export function scanObservationPoints(impl: Impl, source: string): Set<string> {
         /\bgoneCandidates\(ctx, '([a-z][a-z0-9-]*)'/g,
         /\battempt\('([a-z][a-z0-9-]*)'/g,
         /\brefuse\('([a-z][a-z0-9-]*)'/g,
+        // #4559 PR-2 (lead-tests §1 #6): the generation's observers — a record file (`obs.record`), a
+        // generation's tmp (`obs.put`), the listing of `.gen` (`listGens`), and the points of the GEN_WRITES
+        // table (each use's tmp and link, literal there).
+        /\bobs\.(?:record|put|realpath)\('([a-z][a-z0-9-]*)'/g,
+        /\blistGens\(g, '([a-z][a-z0-9-]*)'\)/g,
+        /\b(?:put|link): '([a-z][a-z0-9-]*)'/g,
       ];
   for (const { line } of linesWithFunction(impl, source)) {
     for (const re of patterns) for (const m of line.matchAll(re)) points.add(m[1]);

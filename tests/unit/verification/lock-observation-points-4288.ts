@@ -20,7 +20,7 @@ export interface ObservationPoint {
 
 const ALL: Impl[] = ['bash', 'ts', 'sync'];
 
-export const OBSERVATION_POINTS: ObservationPoint[] = [
+const ROWS_4288: ObservationPoint[] = [
   { point: 'pid', impls: ALL, observes: 'kill -0 <pid>（保有者・札の pid）', unknown: '死んだと読まない: 回収しない（取らない）' },
   { point: 'group', impls: ALL, observes: 'kill -0 -<pgid>（記録のグループ）', unknown: '空と読まない: 回収しない・bash は解放しない' },
   { point: 'list-queue', impls: ALL, observes: '<name>.queue の一覧', unknown: '札が無いと読まない: その周回は先頭にならない（取らない）' },
@@ -72,6 +72,49 @@ export const OBSERVATION_POINTS: ObservationPoint[] = [
   { point: 'handoff-go', impls: ['bash'], observes: '子の取り下げの mkdir go', unknown: '合図と読まない: exec しない' },
   { point: 'handoff-ack', impls: ['bash'], observes: '子の mkdir ack（受け取りの印）', unknown: 'exec しない（stage=ack）' },
   { point: 'handoff-watch', impls: ['bash'], observes: '見張りの kill -0 -G（ack の前）', unknown: 'G が空と読まない: 見張りを続ける（signal は送らない）' },
+];
+
+const JS: Impl[] = ['ts', 'sync'];
+
+/**
+ * #4559 PR-2 (lead-tests §1 #5, reason (b): rows added): the generation chain's points
+ * (docs/design/machine-lock-generation-4559.md §3–§4) in the sync JS core — and so in TS, which runs the
+ * core's byte copy (the human's answer, #4559 comment 7180525760: the ts column is the copy's points, the
+ * same as the sync column). bash's rows come with PR-3.
+ */
+const ROWS_4559: ObservationPoint[] = [
+  { point: 'gen-realpath', impls: JS, observes: 'ロックの親と root の realpath（鎖の選び。C7）', unknown: '鎖を選ばない: 取らない。次の周で読み直す（字面のパスへ落とさない）' },
+  { point: 'gen-list', impls: JS, observes: '<name>.gen の一覧（最大の世代）', unknown: '世代が無いと読まない: その周回は世代を作らない（取らない）' },
+  { point: 'gen-dir-mkdir', impls: JS, observes: 'mkdir <name>.gen（無いときだけ）', unknown: '取らない（点・パス・errno を名指す）' },
+  { point: 'gen-end-read', impls: JS, observes: '最大の世代の end の lstat', unknown: '終わったと読まない: 回収も次の世代の mkdir もしない' },
+  { point: 'gen-mkdir', impls: JS, observes: 'mkdir g<M+1>', unknown: '取らない（作られたなら持ち主の無い世代: 猶予の後に墓）' },
+  { point: 'gen-tmp-mkdir', impls: JS, observes: 'mkdir <name>.gen.tmp（tmp の置き場）', unknown: '記録を足さない（取らない・終わりを書かない）' },
+  { point: 'gen-owner-tmp', impls: JS, observes: '世代の owner の tmp の排他作成と書き込み', unknown: '取らない。自分の世代に墓と end（withdrawn）を書く' },
+  { point: 'gen-owner-link', impls: JS, observes: 'link tmp → g<N>/owner（公開。墓と同じ名前を奪い合う L4）', unknown: '取らない。自分の世代に墓と end（withdrawn）を書く' },
+  { point: 'gen-tmp-unlink', impls: JS, observes: '自分の tmp の unlink', unknown: '残す（古さで片付く C8）' },
+  { point: 'gen-postlist', impls: JS, observes: '取得の後の <name>.gen の一覧（C2・L3）', unknown: '最大と読まない: 取らない。自分の世代に end（withdrawn）' },
+  { point: 'gen-verify-end', impls: JS, observes: '自分の世代の end の lstat（§4.1 の 6）', unknown: '取らない。自分の世代に end（withdrawn）' },
+  { point: 'gen-verify-owner', impls: JS, observes: '自分の世代の owner の読み直し（§4.1 の 6）', unknown: '取らない。自分の世代に end（withdrawn）' },
+  { point: 'gen-tmp-list', impls: JS, observes: '<name>.gen.tmp の一覧（他者の古い tmp の片付け）', unknown: '片付けない（消さない）' },
+  { point: 'gen-tmp-lstat', impls: JS, observes: '他者の tmp の lstat（古さ）', unknown: '片付けない（消さない）' },
+  { point: 'holder-read', impls: JS, observes: '最大の世代の記録 owner・owner.h<k> の読み', unknown: '死んだと読まない: end を書かない（取らない）' },
+  { point: 'holder-pid', impls: JS, observes: '世代の記録の kill -0 <pid>', unknown: '死んだと読まない: end を書かない（取らない）' },
+  { point: 'holder-group', impls: JS, observes: '世代の記録の kill -0 -<pgid>', unknown: '空と読まない: end を書かない（取らない）' },
+  { point: 'holder-relist', impls: JS, observes: '全員死の後の owner.h<k+1> の lstat（C3）', unknown: '増えていないと読まない: end を書かない' },
+  { point: 'end-tmp', impls: JS, observes: 'end の tmp の排他作成と書き込み', unknown: 'end を書かない（回収しない・解放は名指して繰り返す）' },
+  { point: 'end-link', impls: JS, observes: 'link tmp → g<N>/end（EEXIST は既に終わった）', unknown: 'end を書かない（回収しない・解放は名指して繰り返す）' },
+  { point: 'ownerless-gen-mtime', impls: JS, observes: '持ち主の無い世代の mtime（墓の猶予）', unknown: '古いと読まない: 墓を置かない（取らない）' },
+  { point: 'tomb-tmp', impls: JS, observes: '墓の記録の tmp の排他作成と書き込み', unknown: '墓を置かない（取らない）' },
+  { point: 'tomb-link', impls: JS, observes: 'link tmp → g<M>/owner（墓。書き手の公開と同じ名前）', unknown: '墓を置かない（取らない）' },
+  { point: 'beacon-gen-end', impls: JS, observes: '目印の記録が名指す前の世代の end と世代の lstat（§6.1）', unknown: '前の世代が終わったと読まない: 目印を外さない（取らない）' },
+  { point: 'handoff-gen-tmp', impls: JS, observes: '引渡しの記録 owner.h<k> の tmp の排他作成と書き込み', unknown: 'ゲートを始めない（stage=tmp。目印を書き直さない）' },
+  { point: 'handoff-gen-link', impls: JS, observes: 'link tmp → g<N>/owner.h<k>', unknown: 'ゲートを始めない（stage=tmp。目印を書き直さない）' },
+];
+
+export const OBSERVATION_POINTS: ObservationPoint[] = [
+  // The human's answer (#4559 comment 7180525760): TS runs the core's byte copy, so the ts column is the sync column.
+  ...ROWS_4288.map((p) => (p.impls.includes('sync') && !p.impls.includes('ts') ? { ...p, impls: [...p.impls, 'ts'] as Impl[] } : p)),
+  ...ROWS_4559,
 ];
 
 export interface RawCallAllowance {
@@ -150,15 +193,21 @@ export const RAW_CALL_ALLOWANCES: RawCallAllowance[] = [
     { impl, fn: 'collectGarbage', primitive: 'readJson', count: 1, why: '使用済みの札の片付け。読めなければ消さない' },
     { impl, fn: 'collectGarbage', primitive: 'statSync', count: 1, why: '古い一時ファイルの判定。失敗は消さない' },
     { impl, fn: 'rmdirQuiet', primitive: 'rmdirSync', count: 1, why: '空のディレクトリだけを消す rmdir。失敗は残す向き（片付け・戻しの後始末だけ。reclaimGone は errno を持つ obs.rmdir を使う）' },
-    { impl, fn: impl === 'ts' ? 'acquireMachineLock' : 'acquireMachineLockSync', primitive: 'readJson', count: 1, why: '自分の札の確かめ。読めなければ札を失ったとして列の最後に並び直す（取らない）' },
+    // #4559 PR-2: the acquisition's body is the core's generator machineLockAcquisition (acquireMachineLockSync
+    // and TS's acquireMachineLock only wait between its polls), and TS reads the core's byte copy: the ts
+    // rows are the sync rows (#4559 comment 7180525760).
+    { impl, fn: 'machineLockAcquisition', primitive: 'readJson', count: 1, why: '自分の札の確かめ。読めなければ札を失ったとして列の最後に並び直す（取らない）' },
+    { impl, fn: 'listQueue', primitive: 'readJson', count: 1, why: 'export の listQueue（表示・ゴミ集め用）。取得の判断は readQueue を通る' },
+    { impl, fn: 'pidAlive', primitive: 'process.kill', count: 1, why: 'export の旧 API（EPERM は生きている）。取得は使わず、holderGone に渡されたときだけ alive／gone に写して 3 値の判定に通す' },
+    { impl, fn: 'groupAlive', primitive: 'process.kill', count: 1, why: '同上' },
+    { impl, fn: 'machineLockAcquisition', primitive: 'mkdirSync', count: 1, why: 'root の mkdir -p（置き場を作るだけ）' },
+    { impl, fn: 'machineLockAcquisition', primitive: 'readOwner', count: 2, why: '待ちの表示（heldBy）と setOwnerFields（自分の記録への書き足し。token が自分でなければ書かない）' },
+    { impl, fn: 'machineLockAcquisition', primitive: 'renameSync', count: 2, why: 'setOwnerFields の書き込み（行為）: 世代の fields（持ち主だけが書く）と目印の写し' },
+    { impl, fn: 'asHead', primitive: 'readJson', count: 1, why: '自分の札の確かめ（releaseAsHead・recoverIfDead）。読めなければ札を失ったとして並び直す（先頭にならない）' },
+    // #4559 PR-2 (lead-tests §1 #5, reason (b)): the generation chain's raw calls.
+    { impl, fn: 'testPause', primitive: 'existsSync', count: 1, why: 'テストの一時停止の口（CM_VERIFY_TEST_HANDOFF_DIR の .go）。本番では止まらない' },
+    { impl, fn: 'readGenFields', primitive: 'readFileSync', count: 1, why: '世代の fields（merge-pr のフェーズ）の読み。ロックの安全に使わない（読めなければ空）' },
+    { impl, fn: 'takeGeneration', primitive: 'mkdirSync', count: 1, why: '.gen の親（by-path）の mkdir -p（置き場を作るだけ。.gen 自体は gen-dir-mkdir の観測）' },
+    { impl, fn: 'readHolder', primitive: 'readOwner', count: 2, why: '外の読み手（merge-pr・merge-train の held by）の表示。鎖を選べない（gen-realpath が不明）か、世代に保有者が無いときの目印の記録。判断に使わない' },
   ]),
-  { impl: 'sync', fn: 'listQueue', primitive: 'readJson', count: 1, why: 'export の listQueue（表示・ゴミ集め用）。取得の判断は readQueue を通る' },
-  { impl: 'ts', fn: 'acquireMachineLock', primitive: 'mkdirSync', count: 1, why: 'root の mkdir -p（置き場を作るだけ）' },
-  { impl: 'ts', fn: 'acquireMachineLock', primitive: 'readOwner', count: 1, why: '待ちの表示（heldBy）。判断に使わない' },
-  { impl: 'sync', fn: 'pidAlive', primitive: 'process.kill', count: 1, why: 'export の旧 API（EPERM は生きている）。取得は使わず、holderGone に渡されたときだけ alive／gone に写して 3 値の判定に通す' },
-  { impl: 'sync', fn: 'groupAlive', primitive: 'process.kill', count: 1, why: '同上' },
-  { impl: 'sync', fn: 'acquireMachineLockSync', primitive: 'mkdirSync', count: 1, why: 'root の mkdir -p（置き場を作るだけ）' },
-  { impl: 'sync', fn: 'acquireMachineLockSync', primitive: 'readOwner', count: 2, why: '待ちの表示（heldBy）と setOwnerFields（自分の記録への書き足し。token が自分でなければ書かない）' },
-  { impl: 'sync', fn: 'acquireMachineLockSync', primitive: 'renameSync', count: 1, why: 'setOwnerFields の書き込み（行為）' },
-  { impl: 'sync', fn: 'asHead', primitive: 'readJson', count: 1, why: '自分の札の確かめ（releaseAsHead・recoverIfDead）。読めなければ札を失ったとして並び直す（先頭にならない）' },
 ];

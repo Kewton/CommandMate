@@ -13,7 +13,9 @@
  *   5. HTML comments are taken out of the document first (a table or a sentence hidden in one is not drawn),
  *      and each heading the checks use appears exactly once
  *   6. self-test: copies with the rows the reviews found (and a model copy whose table lies) are red
- * The pairing with table F of docs/design/machine-lock-owner-atomic-4288.md is added by PR-2 (§9).
+ *   7. (PR-2) the pairing with table F (docs/design/machine-lock-owner-atomic-4288.md §3, its rows in
+ *      machine-lock-owner-atomic-4288.test.ts): every `mixed` row of table F names one §6.5 row; the rows named
+ *      are exactly §6.5's open and later-PR rows but M3-ERASE (the M3 PR); a closed row is named by none
  *
  * @vitest-environment node
  */
@@ -292,5 +294,57 @@ describe('T7 self-test: a broken copy is red', () => {
     fs.writeFileSync(file, text);
     const m = (await import(file)) as typeof import('./lock-generation-model-4559');
     expect(mutantProblems(original(), m.renderMutantTable())).not.toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------- 7: table F ↔ §6.5 (PR-2)
+
+const TABLE_F = path.join(__dirname, 'machine-lock-owner-atomic-4288.test.ts');
+
+/** Table F's `mixed` limits as written in its source: each `kind: 'mixed'` limit, and the §6.5 row it names (or null). */
+export function tableFMixed(source: string): Array<{ id: string; row65: string | null }> {
+  const out: Array<{ id: string; row65: string | null }> = [];
+  let id = '';
+  for (const line of source.split('\n')) {
+    const row = /^ {2}'(F\d+-[a-z0-9-]+)': \{/.exec(line);
+    if (row) id = row[1];
+    if (/^ {4}limit: \{ kind: 'mixed'/.test(line)) out.push({ id, row65: /row65: '([^']+)'/.exec(line)?.[1] ?? null });
+  }
+  return out;
+}
+
+/** The §6.5 rows table F has to name: open and later-PR, but the M3 PR's (M3-ERASE). */
+const namedBy = (rows: string[][]): string[] =>
+  rows.filter((r) => (r[3] === 'open' || r[3] === 'later-PR') && r[0] !== 'M3-ERASE').map((r) => r[0]).sort();
+
+function tableFProblems(doc: string, source: string): string[] {
+  const { rows } = oneTable(doc, '### 6.5');
+  const mixed = tableFMixed(source);
+  const problems: string[] = [];
+  if (mixed.length < 7) problems.push(`table F: only ${mixed.length} mixed rows read`);
+  for (const m of mixed) if (m.row65 === null) problems.push(`table F ${m.id}: a mixed row naming no §6.5 row`);
+  const ids = rows.map((r) => r[0]);
+  for (const m of mixed) if (m.row65 !== null && !ids.includes(m.row65)) problems.push(`table F ${m.id}: names ${m.row65}, not a row of §6.5`);
+  const named = [...new Set(mixed.map((m) => m.row65).filter((r): r is string => r !== null))].sort();
+  if (JSON.stringify(named) !== JSON.stringify(namedBy(rows))) problems.push(`table F names ${JSON.stringify(named)}, §6.5's open rows are ${JSON.stringify(namedBy(rows))}`);
+  for (const r of rows.filter((x) => x[3] === 'closed')) if (mixed.some((m) => m.row65 === r[0])) problems.push(`table F names the closed row ${r[0]}`);
+  return problems;
+}
+
+describe('#4559 T7 (PR-2): table F\'s mixed rows and §6.5, both ways', () => {
+  it('every mixed row of table F names a §6.5 row, and the open rows of §6.5 are exactly the ones named', () => {
+    expect(tableFMixed(fs.readFileSync(TABLE_F, 'utf8')).length).toBeGreaterThanOrEqual(7);
+    expect(tableFProblems(fs.readFileSync(DESIGN, 'utf8'), fs.readFileSync(TABLE_F, 'utf8'))).toEqual([]);
+  });
+
+  it.each([
+    ['a §6.5 row removed', (d: string, f: string) => [d.replace(/^\| STALE-NEST \|.*\n/m, ''), f]],
+    ['a mixed row of table F without its §6.5 row', (d: string, f: string) => [d, f.replace("row65: 'TICKET-DONE' ", '')]],
+    ['a table F row naming a row §6.5 lacks', (d: string, f: string) => [d, f.replace("row65: 'P-3' ", "row65: 'P-9' ")]],
+    ['a table F row naming the closed P-1', (d: string, f: string) => [d, f.replace("row65: 'P-1-PIDONLY' ", "row65: 'P-1' ")]],
+    ['an open §6.5 row nobody names', (d: string, f: string) => [d.replace('| P-4 | 目印の旧い版の保有者', '| P-6 | 新しい窓 |'), f]],
+  ] as const)('self-test: %s → red', (_what, make) => {
+    const [doc, source] = make(fs.readFileSync(DESIGN, 'utf8'), fs.readFileSync(TABLE_F, 'utf8'));
+    expect(tableFProblems(doc, source)).not.toEqual([]);
   });
 });
