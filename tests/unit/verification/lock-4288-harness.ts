@@ -89,6 +89,9 @@ export function faultFn(spec?: string): ((point: string, target: string) => stri
   return (point, target) => items.find((i) => i.point === point && (i.exact ? target === i.sub : !i.sub || target.includes(i.sub)))?.code;
 }
 
+/** The calls of the fault seam per point in the last JS take (TS / sync; bash's injection is by env). */
+export const lastFaultCalls = new Map<string, number>();
+
 export async function take(impl: Impl, root: string, name: string, given: TakeOptions = {}): Promise<TakeResult> {
   const o: TakeOptions = { ...takeDefaults, ...given };
   const budgetSec = o.budgetSec ?? 0;
@@ -118,7 +121,15 @@ export async function take(impl: Impl, root: string, name: string, given: TakeOp
       log: r.stderr ?? '',
     };
   }
-  const fault = faultFn(o.fault);
+  const counted = faultFn(o.fault);
+  lastFaultCalls.clear();
+  // #4559 PR-2 (P3, #4559 comment 7183455133): how many times each point's seam was called in this take.
+  const fault = counted
+    ? (point: string, target: string) => {
+        lastFaultCalls.set(point, (lastFaultCalls.get(point) ?? 0) + 1);
+        return counted(point, target);
+      }
+    : undefined;
   if (impl === 'ts') {
     try {
       const r = await acquireMachineLock(name, { root, timeoutMs: budgetSec * 1000, pollIntervalMs: 20, __testHooks: fault ? { fault } : {} });
@@ -226,6 +237,21 @@ export const goneEntries = (root: string, name: string): string[] =>
 /** Restore permissions under `root` and remove it. */
 export function removeRoot(root: string): void {
   spawnSync('chmod', ['-R', 'u+rwx', root]);
+  // #4559: a lock of this root that is not directly under the machine-lock root keeps its generations in
+  // <machine-lock root>/by-path/<hash>.gen (design §3, C7) — they are this root's too, and go with it (a
+  // row that makes the same root again starts from nothing, as before the generation chain).
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    names = [];
+  }
+  // A lock's name is there as its <lock> or its queue (a take that stopped before the <lock> left the queue).
+  const locks = new Set(names.filter((n) => n.endsWith('.lock') || n.endsWith('.queue')).map((n) => n.replace(/\.queue$/, '.lock')));
+  for (const name of locks) {
+    const genDir = lockSync.genDirOf(path.join(root, name));
+    if (!genDir.startsWith(`${root}${path.sep}`)) for (const d of [genDir, `${genDir}.tmp`]) fs.rmSync(d, { recursive: true, force: true });
+  }
   fs.rmSync(root, { recursive: true, force: true });
 }
 

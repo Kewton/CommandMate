@@ -34,6 +34,7 @@ import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 import { acquireMachineLock } from '@/lib/verification/machine-lock';
 import { REPO, VERIFY_RUN, deadPid, killStarted, liveGroup, mutatedSync, removeRoot, waitSync } from './lock-4288-harness';
 import { guardTmpDirCount } from './tmp-leak-guard-4288';
+import { loadLegacy } from './lock-generation-4559-harness';
 
 // Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
 guardTmpDirCount(["lock-release-inv-4288-"]);
@@ -109,7 +110,10 @@ describe('1. codex-2 P2-1: a recorded pid read alive that dies before the delete
    * recovers the dead record and takes the lock under its own token. The release must not then remove
    * B's lock.
    */
+  // #4559 PR-2 (#4559 comment 7183455133, reason (a)): B is the develop copy before #4559 (the new version's B cannot
+  // take while the holder's generation lives); it sees only the <lock>, and the meaning is the same.
   async function syncRace(mod: typeof lockSync) {
+    const succ = await loadLegacy(root);
     const lock = lockIn();
     const dead = deadPid();
     let releasing = false;
@@ -121,7 +125,7 @@ describe('1. codex-2 P2-1: a recorded pid read alive that dies before the delete
       hooks: {
         pidAlive: (pid: number) => {
           if (releasing && pid === dead) {
-            successor ??= lockSync.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, token: 'T2' });
+            successor ??= succ.acquireMachineLockSync('x', { lockPath: lock, timeoutMs: 0, token: 'T2' });
             return true;
           }
           return lockSync.pidAlive(pid);

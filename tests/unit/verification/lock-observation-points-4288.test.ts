@@ -34,6 +34,7 @@ import {
   goneEntries,
   isRoot,
   killStarted,
+  lastFaultCalls,
   lockOf,
   mutatedBash,
   mutatedSync,
@@ -45,13 +46,17 @@ import {
   type TakeResult,
 } from './lock-4288-harness';
 import { guardTmpDirCount } from './tmp-leak-guard-4288';
+import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
+import { writeGen } from './lock-generation-4559-harness';
 
 // Every temp directory this file makes is removed (counted before and after: pr1af-impl-9).
 guardTmpDirCount(["lock-obs-4288-"]);
 
 const SOURCES: Record<Impl, string> = {
   bash: '.claude/skills/cmate-verify/scripts/verify-run.sh',
-  ts: 'src/lib/verification/machine-lock.ts',
+  // #4559 PR-2 (the human's answer, #4559 comment 7180525760): TS's observations are the core's byte copy,
+  // which machine-lock.ts imports (machine-lock-sync-core-copy-4559.test.ts pins it to the core).
+  ts: 'src/lib/verification/machine-lock-sync-core.generated.ts',
   sync: 'scripts/orchestrate/machine-lock-sync.mjs',
 };
 const DESIGN = path.join(REPO, 'docs/design/verify-lock-holder-group-4288.md');
@@ -97,6 +102,9 @@ describe('the observation-point table (§2.8)', () => {
       expect(found.get('new_probe|kill -0')).toBe(1);
       expect(found.get('new_probe|glob .gone-*')).toBe(1);
       expect(RAW_CALL_ALLOWANCES.some((a) => a.fn === 'new_probe')).toBe(false);
+      // #4559 (the human's answer, #4559 comment 7180525760): the ts source read has an observer — the seed
+      // is not found in an empty target.
+      expect([...read(SOURCES.ts).matchAll(/^export function makeObserver\(/gm)].length).toBeGreaterThanOrEqual(1);
       const ts = `${read(SOURCES.ts)}\nfunction newProbe(dir: string): boolean {\n  return readdirSync(dir).length === 0;\n}\n`;
       expect(scanRawCalls('ts', ts).get('newProbe|readdirSync')).toBe(1);
     });
@@ -141,6 +149,8 @@ describe('the observation-point table (§2.8)', () => {
     });
 
     it.each(IMPLS.filter((i) => i !== 'bash').flatMap((impl) => TS_FORMS.map(([name, line]) => [impl, name, line] as const)))('%s: %s in a new function (%s) is found and fails the comparison', (impl, name, line) => {
+      // #4559 (#4559 comment 7180525760): the source read has an observer (not an empty target).
+      expect([...read(SOURCES[impl]).matchAll(/^export function makeObserver\(/gm)].length).toBeGreaterThanOrEqual(1);
       const source = `${read(SOURCES[impl])}\nasync function newDecision(lockPath) {\n  ${line}\n}\n`;
       const found = scanRawCalls(impl, source);
       expect(found.get(`newDecision|${name}`)).toBe(1);
@@ -267,7 +277,115 @@ const notTaken = (r: TakeResult, impl: Impl) => {
   expect(r.acquired, `${impl} took the lock`).toBe(false);
 };
 
+// #4559 PR-2 (T6, design §8.1: the generation's points added to this table of injections). The lock's
+// generations are where the core puts them (genDirOf: by-path for a lock outside the machine-lock root).
+const genOf = (name: string) => lockSync.genDirOf(lockOf(root, name));
+const genState = (name: string) => {
+  const g = path.join(genOf(name), lockSync.genName(1));
+  return { owner: fs.existsSync(path.join(g, 'owner')), end: fs.existsSync(path.join(g, 'end')) };
+};
+const OLD_GEN_MS = 20 * 60_000;
+const deadGen = (name: string, extra: Record<string, unknown> = {}) => writeGen(genOf(name), 1, { owner: { pid: deadPid(), token: 'D', ...extra } });
+const oldGenTmp = (name: string) => {
+  fs.mkdirSync(`${genOf(name)}.tmp`, { recursive: true });
+  const tmp = path.join(`${genOf(name)}.tmp`, 'W.g000000000009.owner');
+  fs.writeFileSync(tmp, '{}');
+  const t = new Date(Date.now() - OLD_GEN_MS);
+  fs.utimesSync(tmp, t, t);
+  return tmp;
+};
+/** Not taken, nothing ended (the injection kept the poll from the generation's step), and named. */
+const genNotTaken = (end: boolean | null = null): Pick<Scenario, 'injected' | 'control' | 'reported'> => ({
+  reported: true,
+  injected: (r, name, impl) => {
+    notTaken(r, impl);
+    expect(fs.existsSync(lockOf(root, name))).toBe(false);
+    if (end !== null) expect(genState(name).end, 'the judged generation is not ended').toBe(end);
+  },
+  control: (r) => expect(r.acquired).toBe(true),
+});
+const GEN_SCENARIOS: Record<string, Scenario> = {
+  'gen-realpath': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  // #4559 r7 (PM's disposition 4, a2 P3-6): the root's mkdir -p and the parent of .gen, observed
+  'gen-root-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-parent-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-list': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-dir-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-tmp-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  // #4559 r6: the write of every generation tmp fails (the owner's, then the own tomb's): nothing taken.
+  'gen-tmp-write': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  // #4559 r6 (review a P1-1): the dead holding's fields cannot be read: not recovered (its write is not read as idle).
+  'gen-fields-read': { code: 'EIO', setup: (name) => deadGen(name), ...genNotTaken(false) },
+  'gen-owner-tmp': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-owner-link': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-postlist': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-verify-end': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-verify-owner': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-end-read': { code: 'EIO', setup: (name) => writeGen(genOf(name), 1, { owner: { pid: deadPid(), token: 'Z' }, end: 'released Z' }), ...genNotTaken() },
+  'holder-read': { code: 'EIO', setup: (name) => deadGen(name), ...genNotTaken(false) },
+  'holder-pid': { code: 'EPERM', setup: (name) => deadGen(name), ...genNotTaken(false) },
+  'holder-group': { code: 'EPERM', setup: (name) => deadGen(name, { pgid: deadPid() }), ...genNotTaken(false) },
+  'holder-relist': { code: 'EIO', setup: (name) => deadGen(name), ...genNotTaken(false) },
+  'end-tmp': { code: 'EIO', setup: (name) => deadGen(name), ...genNotTaken(false) },
+  'end-link': { code: 'EIO', setup: (name) => deadGen(name), ...genNotTaken(false) },
+  'ownerless-gen-mtime': { code: 'EIO', setup: (name) => writeGen(genOf(name), 1, { owner: null, mtimeAgoMs: OLD_GEN_MS }), ...genNotTaken(false) },
+  'tomb-tmp': { code: 'EIO', setup: (name) => writeGen(genOf(name), 1, { owner: null, mtimeAgoMs: OLD_GEN_MS }), ...genNotTaken(false) },
+  'tomb-link': { code: 'EIO', setup: (name) => writeGen(genOf(name), 1, { owner: null, mtimeAgoMs: OLD_GEN_MS }), ...genNotTaken(false) },
+  'beacon-gen-end': {
+    code: 'EIO',
+    reported: true,
+    setup: (name) => {
+      writeGen(genOf(name), 1, { owner: { pid: deadPid(), token: 'D' }, end: 'dead R' });
+      writeOwner(lockOf(root, name), { ...deadOwner('D'), v: 1, g: 1 });
+    },
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(readOwnerToken(lockOf(root, name))).toBe('D');
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
+  // The clean-up's points: a failure leaves the old tmp, and the take goes on.
+  'gen-tmp-list': {
+    code: 'EIO',
+    setup: (name) => void oldGenTmp(name),
+    injected: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(fs.readdirSync(`${genOf(name)}.tmp`)).toContain('W.g000000000009.owner');
+    },
+    control: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(fs.readdirSync(`${genOf(name)}.tmp`)).not.toContain('W.g000000000009.owner');
+    },
+  },
+  'gen-tmp-lstat': {
+    code: 'EIO',
+    setup: (name) => void oldGenTmp(name),
+    injected: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(fs.readdirSync(`${genOf(name)}.tmp`)).toContain('W.g000000000009.owner');
+    },
+    control: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(fs.readdirSync(`${genOf(name)}.tmp`)).not.toContain('W.g000000000009.owner');
+    },
+  },
+  'gen-tmp-unlink': {
+    code: 'EIO',
+    setup: () => {},
+    injected: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(fs.readdirSync(`${genOf(name)}.tmp`).length, 'the own tmp is left (C8: by age only)').toBeGreaterThan(0);
+    },
+    control: (r, name) => {
+      expect(r.acquired).toBe(true);
+      expect(fs.readdirSync(`${genOf(name)}.tmp`)).toEqual([]);
+    },
+  },
+};
+
 const SCENARIOS: Record<string, Scenario> = {
+  ...GEN_SCENARIOS,
   pid: {
     code: 'EPERM',
     reported: true,
@@ -718,9 +836,37 @@ const SCENARIOS: Record<string, Scenario> = {
   },
 };
 
-const READER_ROWS = OBSERVATION_POINTS.filter((p) => !p.point.startsWith('handoff-')).flatMap((p) => p.impls.map((impl) => ({ point: p.point, impl, unknown: p.unknown })));
+/**
+ * #4559 PR-2: TS's column is the sync JS's (the copy), but these points are reached only with options TS's
+ * acquireMachineLock does not take (`ownerlessGraceMs`, D3 / I3: run-lock's and supervisor.lock's) — their
+ * rows stay the sync JS's and bash's. Counted: the list is exactly these.
+ */
+const TS_NOT_REACHED = ['owner-tmp-pid', 'ownerless-mtime', 'ownerless-rmdir', 'ownerless-tmp-lstat', 'ownerless-tmp-unlink'];
+const READER_ROWS = OBSERVATION_POINTS.filter((p) => !p.point.startsWith('handoff-')).flatMap((p) =>
+  p.impls.filter((impl) => !(impl === 'ts' && TS_NOT_REACHED.includes(p.point))).map((impl) => ({ point: p.point, impl, unknown: p.unknown })),
+);
 
 describe('every reader row: an injected failure is unknown, and unknown takes, deletes and releases nothing', () => {
+  it('TS_NOT_REACHED names points of both columns whose scenarios need ownerlessGraceMs', () => {
+    expect(TS_NOT_REACHED.every((p) => OBSERVATION_POINTS.find((o) => o.point === p)?.impls.includes('ts'))).toBe(true);
+    expect(TS_NOT_REACHED.length).toBe(5);
+  });
+
+  // #4559 PR-2 (P3, #4559 comment 7183455133): the 5 points are not reached by the published TS (0 calls) and are by
+  // the sync JS that passes the grace, from the same setup (1 or more).
+  it.each(TS_NOT_REACHED)('%s: 0 calls from TS, 1 or more from the sync JS with the grace (the same setup)', async (point) => {
+    const s = SCENARIOS[point];
+    const name = `obs-nr-${point}`;
+    s.setup(name);
+    await take('ts', root, name, { fault: `${point}=${s.code}` });
+    expect(lastFaultCalls.get(point) ?? 0).toBe(0);
+    removeRoot(root);
+    fs.mkdirSync(root);
+    s.setup(name);
+    await take('sync', root, name, { fault: `${point}=${s.code}` });
+    expect(lastFaultCalls.get(point) ?? 0).toBeGreaterThanOrEqual(1);
+  }, 30000);
+
   it('has a scenario for every reader point of the table', () => {
     expect(Object.keys(SCENARIOS).sort()).toEqual([...new Set(READER_ROWS.map((r) => r.point))].sort());
   });
@@ -730,6 +876,8 @@ describe('every reader row: an injected failure is unknown, and unknown takes, d
     const name = `obs-${point}`;
     s.setup(name);
     const injected = await take(impl, root, name, { fault: `${point}=${s.code}${s.alsoFault ? ` ${s.alsoFault}` : ''}`, between: s.between?.(name) });
+    // #4559 PR-2 (P3, #4559 comment 7183455133): the row ran through TS's seam of this point (not green by not reaching it)
+    if (impl === 'ts') expect(lastFaultCalls.get(point) ?? 0, `ts reached ${point}`).toBeGreaterThanOrEqual(1);
     s.injected(injected, name, impl);
     if (s.reported) {
       // fail-closed does not wedge: the wait ended at its budget, naming what it could not observe.

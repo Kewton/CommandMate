@@ -49,6 +49,7 @@ import YAML from 'yaml';
 import { SECTION_ORDER } from '../changelog-fragments.mjs';
 import { ITEM_PATTERN } from './execution-key.mjs';
 import { classifyChanges } from '../run-related-unit-tests.mjs';
+import { staleCheckoutWarning } from './wait-verify.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const TEMPLATE_DIR = path.join(HERE, 'templates');
@@ -971,4 +972,10 @@ function main(argv) {
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) {
+  // First on stderr when this checkout is behind origin/develop (#4574 N-V): the
+  // goal is filled from templates/ here, so an old checkout writes an old goal.
+  const stale = staleCheckoutWarning(HERE, { tool: 'contract.mjs' });
+  if (stale) console.error(stale);
+  process.exit(main(process.argv.slice(2)));
+}
