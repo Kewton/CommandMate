@@ -415,19 +415,23 @@ export interface RetargetDecision {
  * Issue #4604 (設計書 §3.2「聞く」): whether a send of the draft whose store reads `stored` (and whose
  * composer holds `held`) to `current` asks — a store it cannot read, an "unknown", this page's mark
  * (`unstorable`), or a tag whose original target is not `current`.
+ * r3 (P1-2): `heldUnknown` — the "unknown" generation the composer restored the text under and still
+ * holds (another tab's send may have let it go from the store): it asks, as a held tag does.
  */
 export function decideRetarget(
   stored: RetargetStoreRead,
   held: readonly RetargetTag[],
   unstorable: string | null,
   current: RetargetTarget,
+  heldUnknown: string | null = null,
 ): RetargetDecision {
   const tags = mergeRetargetTags(held, tagsOf(stored));
   const changed = tags.find((tag) => tag.original.instanceId !== current.instanceId || tag.original.cliToolId !== current.cliToolId);
   const seen: string[] = [];
   if (stored.kind === 'unknown') seen.push(stored.generation);
-  if (unstorable !== null) seen.push(unstorable);
-  const unknown = stored.kind === 'throws' || stored.kind === 'junk' || stored.kind === 'unknown' || unstorable !== null;
+  if (unstorable !== null && !seen.includes(unstorable)) seen.push(unstorable);
+  if (heldUnknown !== null && !seen.includes(heldUnknown)) seen.push(heldUnknown);
+  const unknown = stored.kind === 'throws' || stored.kind === 'junk' || stored.kind === 'unknown' || unstorable !== null || heldUnknown !== null;
   return { ask: unknown || changed !== undefined, unknown, original: changed?.original ?? null, ids: tags.map((tag) => tag.id), seen };
 }
 

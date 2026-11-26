@@ -617,6 +617,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // (`<draftKey>:retarget`), so they move with it (a reload, the tile's instance switch). Only this
   // composer's own send lets them go; another composer, another tab, time or count never does.
   const retargetTagsRef = useRef<{ key: string; tags: RetargetTag[] }>({ key: '', tags: [] });
+  // Issue #4604 r3 (P1-2, the extension of `retargetTagsRef` the PM allowed): the "unknown" generation
+  // this composer restored its draft's text under — held as its tags are, so another tab's send that let
+  // it go from the store does not let this composer send the text unasked (written back on `storage`).
+  const retargetUnknownRef = useRef<{ key: string; generation: string } | null>(null);
+  const heldUnknownOf = useCallback((key: string): string | null => {
+    const held = retargetUnknownRef.current;
+    return held !== null && held.key === key ? held.generation : null;
+  }, []);
   // Issue #4535 r5 (review H1・P3-6): why the fence answered `unknown` on the awaited road — shown
   // with the unknown notice of that draft.
   const [unknownReason, setUnknownReason] = useState<{ key: string; text: string; reason: string } | null>(null);
@@ -702,7 +710,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // (案 A', r3 P1-1: `retargetYesCovers`).
   const holdsRetargetedSend = useCallback((unreadableYes: RetargetUnknownYes | null, key: string): RetargetPass => {
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
-    const decision = decideRetarget(readRetargetStore(key), currentRetargetTags(key), readRetargetUnstorable(key), current);
+    const decision = decideRetarget(readRetargetStore(key), currentRetargetTags(key), readRetargetUnstorable(key), current, heldUnknownOf(key));
     if (!decision.ask) return { seen: null };
     if (decision.unknown) {
       if (unreadableYes && retargetYesCovers(unreadableYes, decision)) return { seen: decision.seen };
@@ -713,7 +721,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (retargetConfirmedRef.current === confirmation) return { seen: [] };
     setRetargetAsk({ original: decision.original, current, confirmation, target: sendTargetKey, seen: [], ids: decision.ids });
     return null;
-  }, [instanceId, cliToolId, currentRetargetTags, sendTargetKey]);
+  }, [instanceId, cliToolId, currentRetargetTags, heldUnknownOf, sendTargetKey]);
   // Issue #4606 r3c: the hold the tile says now — read by the gate at the moment a POST leaves (a hold
   // that came up while a send waited stops it; it only ever stops, never lets a send through).
   const sendBlockedReasonRef = useRef(sendBlockedReason);
@@ -754,6 +762,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   const releaseSentTags = useCallback((key: string, ids: readonly string[], seen: readonly string[] | null) => {
     if (ids.length === 0 && (seen === null || seen.length === 0)) return;
     releaseRetargetTags(key, ids, seen);
+    // r3 (P1-2): the held "unknown" goes with the generations this send's question saw.
+    const heldUnknown = retargetUnknownRef.current;
+    if (heldUnknown !== null && heldUnknown.key === key && seen !== null && seen.includes(heldUnknown.generation)) {
+      retargetUnknownRef.current = null;
+    }
     const held = retargetTagsRef.current;
     if (held.key === key) {
       const gone = new Set(ids);
@@ -889,6 +902,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       key: draftKey,
       tags: heldTags.key === draftKey ? mergeRetargetTags(heldTags.tags, readRetargetTags(draftKey)) : readRetargetTags(draftKey),
     };
+    // r3 (P1-2): the text restored under an "unknown" — this composer holds its generation.
+    const storedMarks = readRetargetStore(draftKey);
+    const heldUnknown = retargetUnknownRef.current;
+    retargetUnknownRef.current =
+      storedMarks.kind === 'unknown'
+        ? { key: draftKey, generation: storedMarks.generation }
+        : heldUnknown !== null && heldUnknown.key === draftKey
+          ? heldUnknown
+          : null;
     // Issue #4503: the draft's mark comes back with it (a question or a confirmation does not).
     setUnknownMark(readSendUnknownMark(draftKey));
     setConfirmingResend(false);
@@ -946,6 +968,25 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const onStorage = (event: StorageEvent) => {
       if (event.key !== tagKey && event.key !== null) return;
       const held = retargetTagsRef.current;
+      // r3 (P1-2): this composer holds the text's "unknown" and the store no longer says "unknown" (the
+      // key went, or a list replaced it): written back as an "unknown" — through the one road, as a move
+      // of an "unknown" into this key is (設計 §3.2's moveIn row: a new generation over what is there).
+      // A store still saying "unknown" (any generation) is left alone: it asks already, and two tabs never
+      // write back and forth.
+      const heldUnknown = retargetUnknownRef.current;
+      if (heldUnknown !== null && heldUnknown.key === draftKey) {
+        const stored = readRetargetStore(draftKey);
+        if (stored.kind === 'absent' || stored.kind === 'list') {
+          notifyRetargetWrite(writeRetarget(draftKey, {
+            kind: 'moveIn',
+            from: { kind: 'unknown', generation: heldUnknown.generation, tags: held.key === draftKey ? held.tags : [] },
+            fromUnstorable: null,
+          }));
+          const after = readRetargetStore(draftKey);
+          if (after.kind === 'unknown') retargetUnknownRef.current = { key: draftKey, generation: after.generation };
+          return;
+        }
+      }
       if (held.key !== draftKey || held.tags.length === 0) return;
       // Issue #4604 (N-2・N-10): through the one road — junk or a store that throws is left "unknown".
       if (heldTagsAreStored(draftKey, held.tags)) return;

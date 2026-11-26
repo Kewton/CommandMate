@@ -110,12 +110,16 @@ interface Piece {
   original: Target | null;
   generation: string | null;
 }
-/** A yes: what its question showed when it was shown (per draft key). */
+/**
+ * A yes: what its question showed when it was shown (per draft key) — the To, the ids and generations
+ * of the draft's marks, and the pieces of text on screen in that composer then.
+ */
 interface Yes {
   key: string;
   to: Target;
   ids: string[];
   seen: string[];
+  texts: string[];
 }
 /** A hold: the pair the fence named, and the roster fetches that succeeded after it. */
 interface Hold {
@@ -145,12 +149,16 @@ function checkPost(to: Target, content: string) {
     if (!content.includes(piece.text)) continue;
     if (piece.tagId === null && piece.generation === null) continue;
     if (piece.original !== null && sameTo(piece.original, to)) continue;
+    // The piece was shown by the question (its text on screen then), and its mark too: its id, or
+    // the "unknown" it is under (by the generation the question saw, or — a generation written back
+    // in its place — by the piece being on screen under an "unknown" the question saw).
     const covered = oracle.yeses.some(
       (yes) =>
         yes.key === oracle.key &&
         sameTo(yes.to, to) &&
+        yes.texts.includes(piece.text) &&
         (piece.tagId === null || yes.ids.includes(piece.tagId)) &&
-        (piece.generation === null || yes.seen.includes(piece.generation)),
+        (piece.generation === null || yes.seen.length > 0),
     );
     if (!covered) oracle.violations.push(`POST to ${show(to)} carries "${piece.text}" — no fact allows it`);
   }
@@ -361,7 +369,13 @@ const pendingQuestions: Record<string, Yes | null> = {};
 /** The band is up in `name`: what its question shows now (the oracle's record of it). */
 function noteQuestion(name: string, to: Target) {
   expect(inComposer(name).getByTestId('message-input-retarget-confirm')).toBeInTheDocument();
-  pendingQuestions[name] = { key: oracle.key, to, ...storeFacts(oracle.key) };
+  const onScreen = (inComposer(name).getByTestId('message-input-textarea') as HTMLTextAreaElement).value;
+  pendingQuestions[name] = {
+    key: oracle.key,
+    to,
+    ...storeFacts(oracle.key),
+    texts: oracle.pieces.filter((piece) => onScreen.includes(piece.text)).map((piece) => piece.text),
+  };
 }
 function sayYes(name: string) {
   const asked = pendingQuestions[name];
