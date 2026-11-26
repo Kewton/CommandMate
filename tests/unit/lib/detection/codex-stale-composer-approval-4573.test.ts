@@ -180,3 +180,143 @@ describe('#4573 the status-bar patterns cli-patterns.ts copies', () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The range table (s12/review-4573-pr1-range.md §1, 20 rows A–Q). Each row is
+// a screen built from the judge's frame (`U`), real fixtures and #3205's tc104,
+// and the verdict the BOTTOM of that screen calls for: a dialog below a stale
+// composer → waiting / prompt; only text typed into the live composer → ready.
+// N / N2 only pin "no prompt": their `running` comes from the input box being
+// cut at a typed blank line (`findCodexInputBox`), outside this rule's range,
+// and is the same as before #4573. Q is a known miss (see its row).
+// ---------------------------------------------------------------------------
+
+type RangeExpect = { status?: 'waiting' | 'ready' | 'running'; prompt: boolean };
+
+const RANGE_TC104 = fixture('codex-multiline-composer-3205/tc104-raw-pane.txt');
+const RANGE_U_ROWS = UNPADDED.split('\n');
+const RANGE_HIST = RANGE_U_ROWS.slice(0, 12).join('\n');
+const RANGE_DIALOG_TAIL = [
+  '› 1. Yes, proceed (y)',
+  "  2. Yes, and don't ask again for commands that start with `git push` (p)",
+  '  3. No, and tell Codex what to do differently (esc)',
+  '',
+  '  Press enter to confirm or esc to cancel',
+].join('\n');
+const RANGE_PAD = '\n'.repeat(900);
+const RANGE_BAR = '  gpt-5.6-sol default · ~/accrepo-feature-a';
+const RANGE_SGR_COMPOSER = `${ESC}[1m›${ESC}[0m `;
+const WAITING_PROMPT: RangeExpect = { status: 'waiting', prompt: true };
+const READY: RangeExpect = { status: 'ready', prompt: false };
+
+function rangeSlashPopupTyped(): string {
+  const r = fixture('codex-dialogs-0155/composer-typed-slash.txt').split('\n');
+  r.splice(11, 0, '  gpt-5 default · ~/repo', '  › 1. Yes, proceed (y)', '    2. No (esc)');
+  return r.join('\n');
+}
+
+const RANGE_TABLE: [string, string, RangeExpect][] = [
+  ['A: the judge frame itself', `${UNPADDED}${RANGE_PAD}`, WAITING_PROMPT],
+  [
+    'B: A without the banner',
+    `${RANGE_HIST}\n\n  Would you like to run the following command?\n\n  $ git push origin feature/x\n\n${RANGE_DIALOG_TAIL}${RANGE_PAD}`,
+    WAITING_PROMPT,
+  ],
+  [
+    'C: B without the blank row after the bar',
+    `${RANGE_HIST}\n  Would you like to run the following command?\n\n  $ git push origin feature/x\n\n${RANGE_DIALOG_TAIL}${RANGE_PAD}`,
+    WAITING_PROMPT,
+  ],
+  [
+    'D: banner, short dialog under • Running',
+    `${RANGE_U_ROWS.slice(0, 17).join('\n')}\n\n• Running git push origin feature/x\n\n${RANGE_DIALOG_TAIL}${RANGE_PAD}`,
+    WAITING_PROMPT,
+  ],
+  [
+    'E: a blank row between the stale composer and its bar',
+    UNPADDED.replace(`\n${RANGE_BAR}`, `\n\n${RANGE_BAR}`) + RANGE_PAD,
+    WAITING_PROMPT,
+  ],
+  [
+    'F: tc104 with a bar-looking row typed above › 1.',
+    RANGE_TC104.replace('  › 1. Yes, proceed (y)', '  gpt-5 default · ~/repo\n  › 1. Yes, proceed (y)'),
+    READY,
+  ],
+  [
+    'G: history, then the dialog with no blank rows',
+    `${RANGE_HIST}\n  Would you like to run the following command?\n${RANGE_DIALOG_TAIL}${RANGE_PAD}`,
+    WAITING_PROMPT,
+  ],
+  [
+    'H: history, a blank row, then the dialog',
+    `${RANGE_HIST}\n\n  Would you like to run the following command?\n${RANGE_DIALOG_TAIL}${RANGE_PAD}`,
+    WAITING_PROMPT,
+  ],
+  [
+    'I: answered, back to a plain idle composer and a new bar',
+    `${UNPADDED}\n\n› Ask Codex to do anything\n\n${RANGE_BAR}${RANGE_PAD}`,
+    READY,
+  ],
+  ['J1: U, then the real 0157 idle', `${UNPADDED}\n${fixture('codex-dialogs-0157/idle.txt')}`, READY],
+  [
+    'J2: U, then the real 0157 running',
+    `${UNPADDED}\n${fixture('codex-dialogs-0157/running.txt')}`,
+    { status: 'running', prompt: false },
+  ],
+  [
+    'J3: U, then the real 0157 quoted approval',
+    `${UNPADDED}\n${fixture('codex-dialogs-0157/quoted-approval-idle.txt')}`,
+    READY,
+  ],
+  ['K: tc104 as captured', RANGE_TC104, READY],
+  [
+    'L: a two-row stale composer, then its bar and the dialog (G)',
+    `${RANGE_U_ROWS.slice(0, 10).join('\n')}\n${RANGE_SGR_COMPOSER}hello\n  world\n${RANGE_BAR}\n  Would you like to run the following command?\n${RANGE_DIALOG_TAIL}${RANGE_PAD}`,
+    WAITING_PROMPT,
+  ],
+  [
+    'L2: a two-row stale composer, then the rest of U (A)',
+    `${RANGE_U_ROWS.slice(0, 10).join('\n')}\n${RANGE_SGR_COMPOSER}hello\n  world\n${RANGE_U_ROWS.slice(11).join('\n')}${RANGE_PAD}`,
+    WAITING_PROMPT,
+  ],
+  [
+    'M: tc104 with two typed bar + › 1. stages',
+    RANGE_TC104.replace(
+      '  › 1. Yes, proceed (y)',
+      '  gpt-5 default · ~/repo\n  › 1. Yes, proceed (y)\n  gpt-5 default · ~/other\n  › 1. again (y)',
+    ),
+    READY,
+  ],
+  [
+    'N: tc104 with a typed blank row around a bar-looking row (no prompt only)',
+    RANGE_TC104.replace('  › 1. Yes, proceed (y)', '\n  gpt-5 default · ~/repo\n\n  › 1. Yes, proceed (y)'),
+    { prompt: false },
+  ],
+  [
+    'N2: tc104 whose last typed stage is bar-looking (no prompt only)',
+    RANGE_TC104.replace('  Would you like to run the following command?', '  gpt-5 default · ~/repo\n'),
+    { prompt: false },
+  ],
+  ['P: 0155 slash popup with a typed bar and › 1. above it', rangeSlashPopupTyped(), READY],
+  [
+    // Known miss: an option row ending in the bar's shape (`· ~/path`) makes
+    // the bottom-most bar sit below `› 1.`, the same shape as F. codex's real
+    // options all end in a key hint (`(y)` / `(p)` / `(esc)`), so this is not
+    // drawn; missing it is the pre-#4573 verdict, never a false prompt.
+    'Q: options ending in the bar shape (known miss: no prompt)',
+    `${RANGE_HIST}\n  Would you like to run the following command?\n› 1. Yes, proceed (y)\n  2. Yes, allow writes · ~/accrepo-feature-a\n  3. No (esc)\n\n  Press enter to confirm or esc to cancel${RANGE_PAD}`,
+    { prompt: false },
+  ],
+];
+
+describe('#4573 range table (review-4573-pr1-range §1)', () => {
+  it('has the 20 rows A–Q', () => {
+    expect(RANGE_TABLE).toHaveLength(20);
+  });
+
+  it.each(RANGE_TABLE)('%s', (_label, frame, want) => {
+    const r = detectSessionStatus(frame, 'codex');
+    if (want.status !== undefined) expect(r.status).toBe(want.status);
+    expect(r.hasActivePrompt).toBe(want.prompt);
+  });
+});
