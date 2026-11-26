@@ -20,7 +20,8 @@
  *
  * A caller started by a holder (daily.sh runs run.ts) inherits the lock: the
  * holder exports its token as `CM_RUN_LOCK_TOKEN`, and a live holder with
- * that token counts as this caller's own (D8). daily.sh exports its T1
+ * that token counts as this caller's own (D8) — the generation's holder
+ * (#4559, the core's readHolder) or the <lock>'s (an older daily.sh). daily.sh exports its T1
  * (`<T0>-g<G>`, the token that names the child's process group), so the
  * inheritor is a member of the group the record names.
  *
@@ -39,6 +40,7 @@ import {
   acquireMachineLockSync,
   holderState,
   makeObserver,
+  readHolder,
 } from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 
 export const RUN_LOCK_DIR_ENV = 'CM_RUN_LOCK_DIR';
@@ -131,6 +133,16 @@ export function readRunLockOwner(dir: string): RunLockOwner | null {
   }
 }
 
+/**
+ * #4559 PR-2 r6 (design §9, review a P2-4): the holder as the core's reader reads it — the generation's holding
+ * (its records, the fields last) first, else the <lock>'s owner (an older version's holder) — in this module's
+ * shape. null when nobody can be read.
+ */
+export function readRunLockHolder(dir: string): RunLockOwner | null {
+  const held = readHolder(dir, { ownerCodec: KV_CODEC });
+  return held ? parseRunLockOwner(KV_CODEC.format(held as Record<string, unknown>)) : null;
+}
+
 /** D1: the codec of machine-lock-sync.mjs for the key=value owner. A bad `pid=` is not a pid; a bad `pgid=` is not a number (unknown). */
 const KV_CODEC = {
   parse(text: string): Record<string, unknown> {
@@ -189,6 +201,11 @@ interface Hooks {
  */
 function isInherited(dir: string, token: string, obs: Observer): boolean {
   const host = os.hostname();
+  // #4559 PR-2 r6 (review a P2-4): the generation's holding first (the core's reader) — a live holder of that
+  // token, its <lock> gone or not yet copied. The <lock> and its moved-aside records stay below (an older
+  // daily.sh takes the <lock> only, §6.1 D8).
+  const held = readHolder(dir, { ownerCodec: KV_CODEC, genOnly: true });
+  if (held && held.token === token && holderState(held, { host, obs }).state === 'alive') return true;
   const read = obs.owner('inherit-owner', dir);
   if (read.state === 'record') return read.owner.token === token && holderState(read.owner, { host, obs }).state === 'alive';
   if (read.state !== 'missing') return false;
@@ -306,7 +323,7 @@ export function acquireRunLock(options: AcquireRunLockOptions): RunLockResult {
       const seen = obs.pid('pid', Number(ahead[1]));
       if (seen.state === 'unknown') unknown = `cannot tell: point=${seen.point} path=${ahead[1]} errno=${seen.code}`;
     }
-    return fail(`別の実行がロックを持っている: ${describeHolder(dir, readRunLockOwner(dir), handle.heldBy, unknown, asidesBefore)}`);
+    return fail(`別の実行がロックを持っている: ${describeHolder(dir, readRunLockHolder(dir), handle.heldBy, unknown, asidesBefore)}`);
   }
   return {
     ok: true,
