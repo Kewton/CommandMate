@@ -110,7 +110,10 @@ describe('[#4604] T-c: the send\'s check reads the key of the text it sends, not
     const code = stripComments(src);
     expect(code).toMatch(/useState<\{ key: string; text: string \}>/);
     expect(code).toMatch(/holdsRetargetedSend\([^)]*draft\.key\)/);
-    expect(code).toMatch(/currentRetargetTags\(draft\.key\)/);
+    // r3c: the ids a send lets go are read by the gate under the key it is given — the text's key.
+    expect(code).toMatch(/currentRetargetTags\(key\)/);
+    expect(code).toMatch(/checkGate\(draft\.key,/);
+    expect(code).toMatch(/postThroughGate\(draft\.key,/);
     // A send whose text is another draft's (the key changed, the restore has not run) sends nothing.
     expect(code.match(/if \(draft\.key !== draftKey\) return;/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
