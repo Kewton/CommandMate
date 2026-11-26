@@ -973,3 +973,34 @@ ml_count_violations() {
   ml__pat=$2
   grep -vE '^[[:space:]]*#' "$ml__file" | grep -cE "$ml__pat"
 }
+
+# ml_stale_checkout_warning <dir> <tool-name>: one WARN line when the checkout
+# that holds <dir> is behind the LOCAL origin/develop ref, nothing otherwise
+# (Issue #4574, invariant N-V). The orchestrate tools are run from the
+# operator's primary checkout by relative path, and that checkout only moves
+# when someone pulls it: S11 ran a monitor and generated contracts from a
+# checkout three commits behind, without the fix they depended on (#4532).
+# "Behind" is `HEAD..origin/develop` being non-empty — origin/develop is not an
+# ancestor of HEAD, i.e. HEAD lacks a commit it has. A branch AHEAD of it is not
+# stale. Never fetches (N-F): it compares with whatever the last fetch left.
+# Silent, and never failing, when there is no git, no repository, no
+# origin/develop ref, or the git call fails — the caller's exit code does not
+# change. The same rule and the same words as staleCheckoutWarning in
+# scripts/orchestrate/wait-verify.mjs (contract.mjs and wait-verify.mjs).
+# Not checked under vitest (VITEST set): a test run must not depend on how far
+# the developer's own origin/develop has moved; the 4574 tests unset it.
+ml_stale_checkout_warning() {
+  [ -z "${VITEST:-}" ] || return 0
+  msw__dir=$1
+  msw__tool=$2
+  msw__behind=$(git -C "$msw__dir" rev-list --count HEAD..refs/remotes/origin/develop 2>/dev/null) || return 0
+  case "$msw__behind" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  [ "$msw__behind" -gt 0 ] || return 0
+  msw__head=$(git -C "$msw__dir" rev-parse --short HEAD 2>/dev/null) || msw__head=HEAD
+  msw__origin=$(git -C "$msw__dir" rev-parse --short refs/remotes/origin/develop 2>/dev/null) || msw__origin=origin/develop
+  printf '%s: WARN this checkout is behind origin/develop by %s commit(s) (HEAD %s, origin/develop %s) — the tools run here may be stale; update it (git pull --ff-only origin develop). Compared with the local ref; nothing was fetched\n' \
+    "$msw__tool" "$msw__behind" "$msw__head" "$msw__origin"
+  return 0
+}

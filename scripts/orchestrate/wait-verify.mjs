@@ -286,6 +286,44 @@ export function defaultRun(command, args, { cwd, timeoutMs } = {}) {
   return { status: result.status ?? 1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
+/**
+ * One WARN line when the checkout holding `dir` is behind the LOCAL
+ * origin/develop ref, or null (Issue #4574, invariant N-V). The orchestrate
+ * tools run from the operator's primary checkout, which moves only when someone
+ * pulls it; S11 generated contracts and ran the monitor from one three commits
+ * behind the fix they relied on (#4532). "Behind" is `HEAD..origin/develop`
+ * being non-empty (origin/develop is not an ancestor of HEAD); a branch ahead
+ * of it is not stale. Never fetches, never throws (N-F): no git, no repository,
+ * no ref or a failing call is null, so the caller's exit code does not change.
+ * The same rule and words as ml_stale_checkout_warning in
+ * .claude/skills/orchestrate-monitor/scripts/monitor-lib.sh. Null under vitest
+ * (`env.VITEST`): a test run must not depend on how far the developer's own
+ * origin/develop has moved.
+ *
+ * @param {string} dir
+ * @param {{ tool: string, run?: typeof defaultRun, env?: NodeJS.ProcessEnv }} options
+ * @returns {string | null}
+ */
+export function staleCheckoutWarning(dir, { tool, run = defaultRun, env = process.env }) {
+  if (env.VITEST) return null;
+  try {
+    const behind = run('git', ['-C', dir, 'rev-list', '--count', 'HEAD..refs/remotes/origin/develop']);
+    const count = behind.status === 0 && /^\d+$/.test(behind.stdout.trim()) ? Number(behind.stdout.trim()) : 0;
+    if (count === 0) return null;
+    const short = (rev, fallback) => {
+      const r = run('git', ['-C', dir, 'rev-parse', '--short', rev]);
+      return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : fallback;
+    };
+    return (
+      `${tool}: WARN this checkout is behind origin/develop by ${count} commit(s) ` +
+      `(HEAD ${short('HEAD', 'HEAD')}, origin/develop ${short('refs/remotes/origin/develop', 'origin/develop')}) — ` +
+      'the tools run here may be stale; update it (git pull --ff-only origin develop). Compared with the local ref; nothing was fetched'
+    );
+  } catch {
+    return null;
+  }
+}
+
 function defaultSleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -1586,4 +1624,9 @@ export function main(argv, deps = {}) {
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) {
+  // First on stderr when this checkout is behind origin/develop (#4574 N-V).
+  const stale = staleCheckoutWarning(path.dirname(fileURLToPath(import.meta.url)), { tool: 'wait-verify.mjs' });
+  if (stale) console.error(stale);
+  process.exit(main(process.argv.slice(2)));
+}
