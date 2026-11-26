@@ -10,7 +10,8 @@
  * `tests/fixtures/claude-transcript-3102/pasted-user-record.jsonl` keeps). The
  * #4344 controls use a paste with nothing outside it, so they never saw this.
  *
- * Root cause (stage 1, `src` unchanged):
+ * Root cause (found in stage 1; fixed in stage 2 in `envelope.ts`, which now
+ * skips the leading blank lines before reading a brief / the envelope):
  * - `src/lib/hooks/sources/claude/transcript.ts` `createClaudeTurn` takes the paste
  *   wrapper off (`claudePastedContentPrompt`) but leaves the leading `"\n\n"`;
  * - `src/lib/ask/envelope.ts` `stripAskEnvelope` reads the envelope only on the
@@ -24,8 +25,10 @@
  *   (`src/cli/utils/reply-ledger.ts`) reads as another sender's message:
  *   `overlapped: true` is a misjudgment, not a real overlap.
  *
- * The `it.fails` cases are the red ones: #4582 段 2 で it に戻す. The other
- * cases are controls that are green today and must stay green after the fix.
+ * The first three cases were `it.fails` in stage 1 (red before the fix) and are
+ * plain `it` since stage 2. The stage-1 case that pinned today's behaviour is
+ * inverted. The other cases are controls, green before and after the fix; the
+ * `realPaste` controls run them on the very shape the fix opens.
  *
  * Fake Claude Code only: a transcript written into a `mkdtemp` home, an
  * in-memory database. No tmux, no server, no real agent.
@@ -190,24 +193,21 @@ afterEach(async () => {
 });
 
 describe('#4582 red: a finished reply recorded as Claude Code records a paste is tied to the ask', () => {
-  // #4582 段 2 で it に戻す
-  it.fails('fresh session (claude-6 shape): matched, the reply is the review', async () => {
+  it('fresh session (claude-6 shape): matched, the reply is the review', async () => {
     sentAsk(A, BODY);
     await writeTranscript([...freshSession(), prompt('p1', realPaste(`${formatAskEnvelope(A)}\n${BODY}`), 200), reply('r1', REVIEW, 358_000)]);
     await capture();
     expect(await readAskAttribution(db, A)).toMatchObject({ state: 'matched', reply: REVIEW });
   });
 
-  // #4582 段 2 で it に戻す
-  it.fails('session with earlier relayed turns (claude-5 shape): matched, the reply is the review', async () => {
+  it('session with earlier relayed turns (claude-5 shape): matched, the reply is the review', async () => {
     sentAsk(A, BODY);
     await writeTranscript([...busySession(), prompt('p1', realPaste(`${formatAskEnvelope(A)}\n${BODY}`), 200), reply('r1', REVIEW, 150_000)]);
     await capture();
     expect(await readAskAttribution(db, A)).toMatchObject({ state: 'matched', reply: REVIEW });
   });
 
-  // #4582 段 2 で it に戻す
-  it.fails('no second user row: the /send row is adopted, so `ask` does not report overlapped', async () => {
+  it('no second user row: the /send row is adopted, so `ask` does not report overlapped', async () => {
     sentAsk(A, BODY);
     await writeTranscript([...freshSession(), prompt('p1', realPaste(`${formatAskEnvelope(A)}\n${BODY}`), 200), reply('r1', REVIEW, 358_000)]);
     await capture();
@@ -216,16 +216,15 @@ describe('#4582 red: a finished reply recorded as Claude Code records a paste is
   });
 });
 
-describe('#4582 what today does with that shape (pins the cause; green before the fix)', () => {
-  it('the ask stays pending with no native input seen (the CLI reads unmatched/grace_expired)', async () => {
+describe('#4582 that shape after the fix (stage 1 pinned it pending), and the control without it', () => {
+  it('the fix: the ask is matched and the reader writes no second user row (was: pending, unmatched/grace_expired)', async () => {
     sentAsk(A, BODY);
     await writeTranscript([...freshSession(), prompt('p1', realPaste(`${formatAskEnvelope(A)}\n${BODY}`), 200), reply('r1', REVIEW, 358_000)]);
     await capture();
-    expect(await readAskAttribution(db, A)).toMatchObject({ state: 'pending', reply: null, nativeInputSeen: false });
-    // The reader's own row keeps the envelope behind the two newlines (S11's History rows, len 4850 vs 4795).
-    const extra = getMessages(db, WT, { limit: 200 }).find((m) => m.requestId === 'claude-prompt:p1');
-    expect(extra?.content.startsWith(`\n\n${formatAskEnvelope(A)}\n`)).toBe(true);
-    expect(overlapped(BODY)).toBe(true);
+    expect(await readAskAttribution(db, A)).toMatchObject({ state: 'matched', reply: REVIEW });
+    // No row keeps the envelope behind the two newlines (S11's History rows, len 4850 vs 4795).
+    expect(getMessages(db, WT, { limit: 200 }).some((m) => m.content.includes(formatAskEnvelope(A)))).toBe(false);
+    expect(overlapped(BODY)).toBe(false);
   });
 
   it('control: the same turn without the two newlines outside the paste is matched and not overlapped', async () => {
@@ -242,6 +241,17 @@ describe('#4582 negative control: another ask\'s answer is never this ask\'s rep
     sentAsk(A, BODY);
     sentAsk(B, 'another question', 100);
     await writeTranscript([...freshSession(), prompt('p1', barePaste(`${formatAskEnvelope(B)}\nanother question`), 200), reply('r1', 'the answer to B', 5_000)]);
+    await capture();
+    const a = await readAskAttribution(db, A);
+    expect(a?.state).not.toBe('matched');
+    expect(a?.reply).toBeNull();
+    expect(await readAskAttribution(db, B)).toMatchObject({ state: 'matched', reply: 'the answer to B' });
+  });
+
+  it('the same with the paste recorded as Claude Code records it (two newlines outside): A gets no reply, and never B\'s', async () => {
+    sentAsk(A, BODY);
+    sentAsk(B, 'another question', 100);
+    await writeTranscript([...freshSession(), prompt('p1', realPaste(`${formatAskEnvelope(B)}\nanother question`), 200), reply('r1', 'the answer to B', 5_000)]);
     await capture();
     const a = await readAskAttribution(db, A);
     expect(a?.state).not.toBe('matched');
@@ -266,9 +276,27 @@ describe('#4582 control: a real overlap is still reported', () => {
     expect(overlapped(BODY)).toBe(true);
   });
 
+  it('the same with the paste recorded as Claude Code records it: overlapped on the other sender\'s row alone', async () => {
+    sentAsk(A, BODY);
+    sendRow('[from claude-8] 割り込みの一言', 30_000);
+    await writeTranscript([...freshSession(), prompt('p1', realPaste(`${formatAskEnvelope(A)}\n${BODY}`), 200), reply('r1', REVIEW, 358_000)]);
+    await capture();
+    // The reader's copy of the ask is not a second row (before the fix it was, and made `overlapped` true on its own).
+    expect(getMessages(db, WT, { limit: 200 }).some((m) => m.content.includes(formatAskEnvelope(A)))).toBe(false);
+    expect(overlapped(BODY)).toBe(true);
+  });
+
   it('a message sent after the turn ended is not an overlap', async () => {
     sentAsk(A, BODY);
     await writeTranscript([...freshSession(), prompt('p1', barePaste(`${formatAskEnvelope(A)}\n${BODY}`), 200), reply('r1', REVIEW, 358_000)]);
+    await capture();
+    sendRow('[from claude-8] 次の依頼', 400_000);
+    expect(overlapped(BODY, T0, T0 + 360_000)).toBe(false);
+  });
+
+  it('the same with the paste recorded as Claude Code records it: a message after the turn is not an overlap', async () => {
+    sentAsk(A, BODY);
+    await writeTranscript([...freshSession(), prompt('p1', realPaste(`${formatAskEnvelope(A)}\n${BODY}`), 200), reply('r1', REVIEW, 358_000)]);
     await capture();
     sendRow('[from claude-8] 次の依頼', 400_000);
     expect(overlapped(BODY, T0, T0 + 360_000)).toBe(false);
