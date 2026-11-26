@@ -511,8 +511,12 @@ function SessionTileCard({
   }
   const sendHeld = keptHolds.some((hold) => hold.instanceId === resolvedInstanceId && hold.cliToolId === cliToolId);
   // Issue #4604＋#4606 r3c: the holds now, for the tile's one gate (`sendThroughStaleTargetGate`).
+  // r4d (INV-P2): the ref is the first value — a 409 adds to it (or raises its count), the roster's
+  // decision takes from it; a render only lets holds go, never puts its list from state over it.
   const staleHoldsRef = useRef(keptHolds);
-  staleHoldsRef.current = keptHolds;
+  if (staleHoldsRef.current.length > 0) {
+    staleHoldsRef.current = nextStaleTargetHolds(staleHoldsRef.current, worktree);
+  }
   // r4 (INV-P2): whether a To is held, read when it is asked (the tile's record, at once after a 409) —
   // the tile's gate and the composer's gate (its awaited send, the brief's choice) ask the same.
   const isSendHeld = useCallback(
