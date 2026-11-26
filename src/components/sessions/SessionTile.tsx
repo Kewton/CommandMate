@@ -104,7 +104,7 @@
  * @module components/sessions/SessionTile
  */
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { History, MessageSquare, TerminalSquare } from 'lucide-react';
@@ -131,6 +131,7 @@ import {
   type PendingConnectivity,
 } from '@/hooks/usePendingMessages';
 import { useSendRefusalNotice } from '@/hooks/useSendRefusalNotice';
+import { useToast } from '@/components/common/Toast';
 import { useAttachmentNotReturnedNotice } from '@/hooks/useOptimisticPaneMessages';
 import { usePendingConnectivity } from '@/hooks/usePendingConnectivity';
 import { useSessionTileAutoYes } from '@/hooks/useSessionTileAutoYes';
@@ -433,9 +434,6 @@ export function selectTileInstances(
   return narrowed.length > 0 ? narrowed : [...instances];
 }
 
-/** `useLayoutEffect` warns on the server; see `useIsMobile` for the same pattern. */
-const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
-
 /**
  * Issue #4606 (O-1): a target the send fence just said changed (409 `SEND_TARGET_CHANGED`
  * `not_sent`), held by the tile until its roster is read again — r3 (P1-3, INV-P): `fetchSeq` is the
@@ -621,15 +619,22 @@ function SessionTileCard({
   shownInstanceRef.current = resolvedInstanceId;
   // Issue #4606 (Q2, 設計書 §3.6): the instance shown left the roster and the tile fell back to another —
   // its draft (text and tags) moves to the fallback's draft (the marks first, the text after what is
-  // there; the composers showing it hear it). Before the composer's restore (a layout effect runs
-  // before the passive ones), so the fallback's draft is read with it. A switch by the person moves
-  // nothing (the instance is still on the roster).
+  // there; the composers showing it hear it). A switch by the person moves nothing (the instance is
+  // still on the roster).
+  // r3 (P1-6): after the composer's waiting save — a passive effect of the tile runs after its child's
+  // (the composer's restore writes the previous draft's waiting save, then its marks are written back),
+  // so the latest text and marks are what moves; the fallback's composer, already restored, hears the
+  // moved text. A text that cannot be moved stays under its key, and a toast says so.
   const previousShownRef = useRef(resolvedInstanceId);
-  useIsomorphicLayoutEffect(() => {
+  const { showToast: showTileToast } = useToast();
+  useEffect(() => {
     const previous = previousShownRef.current;
     previousShownRef.current = resolvedInstanceId;
     if (previous === resolvedInstanceId || fullRoster.some((instance) => instance.id === previous)) return;
-    moveDraft(getInstanceDraftKey(worktree.id, previous), getInstanceDraftKey(worktree.id, resolvedInstanceId));
+    const moved = moveDraft(getInstanceDraftKey(worktree.id, previous), getInstanceDraftKey(worktree.id, resolvedInstanceId));
+    if (moved === 'failed') showTileToast(tWorktree('composer.draftNotMoved'), 'warning');
+  // `showTileToast` / `tWorktree` are read when it moves only (a new toast surface is not a move).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedInstanceId, fullRoster, worktree.id]);
   const insertIntoComposer = useCallback(
     (text: string, target: string = shownInstanceRef.current) => {

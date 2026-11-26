@@ -25,6 +25,7 @@
     "resizeHandle": "入力欄の高さを変更します。上下の矢印キーで調整し、ダブルクリックで自動の高さに戻します。",
     "previousDraftNotSaved": "前の下書きを保存できませんでした",
     "draftUnreadable": "下書きを読めませんでした",
+    "draftNotMoved": "下書きを移せませんでした。元のインスタンスの下書きに残っています。",
     "sendTargetRefreshing": "宛先が替わりました。名簿を読み直しています"
   },
   "interrupt": {

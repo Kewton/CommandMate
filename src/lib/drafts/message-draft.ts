@@ -444,28 +444,33 @@ export function retargetYesCovers(
   return decision.ids.every((id) => yes.ids.includes(id)) && decision.seen.every((generation) => yes.seen.includes(generation));
 }
 
+/** Issue #4606 r3 (P1-6): what {@link moveDraft} did — moved, nothing to move, or could not move it. */
+export type MoveDraftResult = 'moved' | 'nothing' | 'failed';
+
 /**
  * Issue #4604 (Q2, 設計書 §3.6): move the draft `from` into `to` (the tile's instance went from the
  * roster and it fell back to another). Its marks first (`moveIn`: an "unknown" moves as one), then its
  * text — appended to `to`'s, never over it — and the composers showing `to` hear it; then `from`'s text
- * goes (`moveOut`: its marks stay). Nothing moves when `to` can take no mark. Returns whether it moved.
+ * goes (`moveOut`: its marks stay). Nothing moves when `to` can take no mark.
+ * r3 (P1-6): `'failed'` when there was a text and it could not be moved (it stays under `from`) — the
+ * caller says so; `'nothing'` when there was no text to move.
  */
-export function moveDraft(from: string, to: string): boolean {
-  if (from === to) return false;
+export function moveDraft(from: string, to: string): MoveDraftResult {
+  if (from === to) return 'nothing';
   let text: string;
   try {
     text = window.localStorage.getItem(from) ?? '';
   } catch {
-    return false;
+    return 'failed';
   }
-  if (text.trim() === '') return false;
+  if (text.trim() === '') return 'nothing';
   const result = writeRetarget(to, { kind: 'moveIn', from: readRetargetStore(from), fromUnstorable: readRetargetUnstorable(from) });
-  if (result === 'unstored') return false;
+  if (result === 'unstored') return 'failed';
   try {
     const current = window.localStorage.getItem(to) ?? '';
     window.localStorage.setItem(to, current.trim() === '' ? text : `${current}\n\n${text}`);
   } catch {
-    return false;
+    return 'failed';
   }
   draftAppendListeners.get(to)?.forEach((listener) => listener(text));
   try {
@@ -473,7 +478,7 @@ export function moveDraft(from: string, to: string): boolean {
   } catch {
     /* the text stays under `from` too: its marks stayed with it */
   }
-  return true;
+  return 'moved';
 }
 
 type RetargetedTextListener = (returned: RetargetedText) => void;
