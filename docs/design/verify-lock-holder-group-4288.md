@@ -283,6 +283,8 @@ drain_group G:
 
 観測点の表（`tests/unit/verification/lock-observation-points-4288.ts` と同じ。`lock-observation-points-4288.test.ts` がこの表・コードから集めた観測点・生の呼び出しの許可の一覧を突き合わせ、行ごとに失敗を注入する）:
 
+#4559 PR-2 から、TS の観測は同期 JS の核のバイトの写し（`src/lib/verification/machine-lock-sync-core.generated.ts`、`machine-lock.ts` が import する）なので、TS の列は同期 JS の列と同じ集まりになる（#4559 コメント 7180525760）。世代の鎖の観測点（`gen-list` 以下、設計 [machine-lock-generation-4559.md](./machine-lock-generation-4559.md) §3〜§4）を表の最後に足した。bash の世代の行は PR-3。
+
 | 観測点 | 実装 | 観測 | 不明のとき |
 |---|---|---|---|
 | `pid` | bash・TS・同期 JS | `kill -0 <pid>`（保有者・札の pid） | 死んだと読まない: 回収しない（取らない） |
@@ -314,23 +316,49 @@ drain_group G:
 | `owner-undo-rename` | bash・TS・同期 JS | 戻しの `rename <lock>/owner → <lock>/.undo-<token>` | owner を消さない。自分の tmp だけ消し、`<lock>` を `rmdir` しない |
 | `owner-undo-lstat` | bash・TS・同期 JS | 戻しの inode の確かめ（`.undo-<token>` と tmp の lstat。bash は `[ ! -L ] && [ -ef ]`） | 自分のものと読まない: `link` で `<lock>/owner` に戻す |
 | `owner-undo-link` | bash・TS・同期 JS | 戻しの `link .undo-<token> → <lock>/owner` | `.undo-<token>` を残して名指す（`machine-lock-undo-restore-failed`） |
-| `ownerless-tmp-lstat` | bash・同期 JS | owner の無い `<lock>` の一時ファイルの lstat（種類と年齢。PR1a-f の I3） | 片付けない: その周回は `mkdir` しない（取らない） |
-| `owner-tmp-pid` | bash・同期 JS | 旧版の `owner.tmp.<pid>` の pid の `kill -0` | 書き手でないと読まない: 片付けない・その周回は `mkdir` しない |
-| `ownerless-tmp-unlink` | bash・同期 JS | 片付けの一時ファイルの unlink（ENOENT はもう無い） | `rmdir` も `mkdir` もしない（取らない） |
+| `ownerless-tmp-lstat` | bash・TS・同期 JS | owner の無い `<lock>` の一時ファイルの lstat（種類と年齢。PR1a-f の I3） | 片付けない: その周回は `mkdir` しない（取らない） |
+| `owner-tmp-pid` | bash・TS・同期 JS | 旧版の `owner.tmp.<pid>` の pid の `kill -0` | 書き手でないと読まない: 片付けない・その周回は `mkdir` しない |
+| `ownerless-tmp-unlink` | bash・TS・同期 JS | 片付けの一時ファイルの unlink（ENOENT はもう無い） | `rmdir` も `mkdir` もしない（取らない） |
 | `empty-owner-move` | bash・TS・同期 JS | 0 バイトの owner の `<lock>` を自分の退避名へ `rename`（PR1a-f の I4） | 回収しない（取らない） |
-| `owner-pid` | bash・同期 JS | 最初の取得の `LOCK_OWNER_PID`／`ownerPid` が自分か（PR1a-f の I1-b） | 札も `mkdir` もせずに断る（取らない） |
-| `owner-fields` | bash・同期 JS | 呼び手の欄（`LOCK_OWNER_EXTRA`／`ownerFields`）に予約の鍵が無いか（PR1a-f の I1-c） | 札も `mkdir` もせずに断る（取らない） |
-| `ownerless-mtime` | bash・同期 JS | owner の無い空の `<lock>` の mtime（`ownerlessGraceMs` の年齢。D3） | 古いと読まない: `<lock>` を消さない・その周回は `mkdir` しない（取らない） |
-| `ownerless-rmdir` | bash・同期 JS | 猶予を過ぎた owner の無い空の `<lock>` の `rmdir` | その周回は `mkdir` しない（取らない）。点・パス・errno を出す |
+| `owner-pid` | bash・TS・同期 JS | 最初の取得の `LOCK_OWNER_PID`／`ownerPid` が自分か（PR1a-f の I1-b） | 札も `mkdir` もせずに断る（取らない） |
+| `owner-fields` | bash・TS・同期 JS | 呼び手の欄（`LOCK_OWNER_EXTRA`／`ownerFields`）に予約の鍵が無いか（PR1a-f の I1-c） | 札も `mkdir` もせずに断る（取らない） |
+| `ownerless-mtime` | bash・TS・同期 JS | owner の無い空の `<lock>` の mtime（`ownerlessGraceMs` の年齢。D3） | 古いと読まない: `<lock>` を消さない・その周回は `mkdir` しない（取らない） |
+| `ownerless-rmdir` | bash・TS・同期 JS | 猶予を過ぎた owner の無い空の `<lock>` の `rmdir` | その周回は `mkdir` しない（取らない）。点・パス・errno を出す |
 | `handoff-group` | bash | `ps -o pgid=`（ゲートのグループ G の確かめ） | ゲートを始めない（stage=group） |
-| `handoff-token` | bash・同期 JS | 公開の前の owner の読み（T0 か） | ゲートを始めない・解放しない（stage=token） |
-| `handoff-publish` | bash・同期 JS | `mv .owner-T1 → owner`（公開） | ゲートを始めない（stage=mv） |
-| `handoff-verify` | bash・同期 JS | 公開の後の owner の読み直し（T1・G か） | ゲートを始めない（stage=verify） |
+| `handoff-token` | bash・TS・同期 JS | 公開の前の owner の読み（T0 か） | ゲートを始めない・解放しない（stage=token） |
+| `handoff-publish` | bash・TS・同期 JS | `mv .owner-T1 → owner`（公開） | ゲートを始めない（stage=mv） |
+| `handoff-verify` | bash・TS・同期 JS | 公開の後の owner の読み直し（T1・G か） | ゲートを始めない（stage=verify） |
 | `handoff-signal` | bash | 本体の `mkdir go`（合図） | ゲートを始めない（stage=signal） |
 | `handoff-self` | bash | 子の `kill -0 <本体>` | 本体が生きていると読まない: 取り下げて exec しない |
 | `handoff-go` | bash | 子の取り下げの `mkdir go` | 合図と読まない: exec しない |
 | `handoff-ack` | bash | 子の `mkdir ack`（受け取りの印） | exec しない（stage=ack） |
 | `handoff-watch` | bash | 見張りの `kill -0 -G`（`ack` の前） | G が空と読まない: 見張りを続ける（signal は送らない） |
+| `gen-realpath` | TS・同期 JS | ロックの親と root の realpath（鎖の選び。C7） | 鎖を選ばない: 取らない。次の周で読み直す（字面のパスへ落とさない） |
+| `gen-list` | TS・同期 JS | <name>.gen の一覧（最大の世代） | 世代が無いと読まない: その周回は世代を作らない（取らない） |
+| `gen-dir-mkdir` | TS・同期 JS | mkdir <name>.gen（無いときだけ） | 取らない（点・パス・errno を名指す） |
+| `gen-end-read` | TS・同期 JS | 最大の世代の end の lstat | 終わったと読まない: 回収も次の世代の mkdir もしない |
+| `gen-mkdir` | TS・同期 JS | mkdir g<M+1> | 取らない（作られたなら持ち主の無い世代: 猶予の後に墓） |
+| `gen-tmp-mkdir` | TS・同期 JS | mkdir <name>.gen.tmp（tmp の置き場） | 記録を足さない（取らない・終わりを書かない） |
+| `gen-owner-tmp` | TS・同期 JS | 世代の owner の tmp の排他作成と書き込み | 取らない。自分の世代に墓と end（withdrawn）を書く |
+| `gen-owner-link` | TS・同期 JS | link tmp → g<N>/owner（公開。墓と同じ名前を奪い合う L4） | 取らない。自分の世代に墓と end（withdrawn）を書く |
+| `gen-tmp-unlink` | TS・同期 JS | 自分の tmp の unlink | 残す（古さで片付く C8） |
+| `gen-postlist` | TS・同期 JS | 取得の後の <name>.gen の一覧（C2・L3） | 最大と読まない: 取らない。自分の世代に end（withdrawn） |
+| `gen-verify-end` | TS・同期 JS | 自分の世代の end の lstat（§4.1 の 6） | 取らない。自分の世代に end（withdrawn） |
+| `gen-verify-owner` | TS・同期 JS | 自分の世代の owner の読み直し（§4.1 の 6） | 取らない。自分の世代に end（withdrawn） |
+| `gen-tmp-list` | TS・同期 JS | <name>.gen.tmp の一覧（他者の古い tmp の片付け） | 片付けない（消さない） |
+| `gen-tmp-lstat` | TS・同期 JS | 他者の tmp の lstat（古さ） | 片付けない（消さない） |
+| `holder-read` | TS・同期 JS | 最大の世代の記録 owner・owner.h<k> の読み | 死んだと読まない: end を書かない（取らない） |
+| `holder-pid` | TS・同期 JS | 世代の記録の kill -0 <pid> | 死んだと読まない: end を書かない（取らない） |
+| `holder-group` | TS・同期 JS | 世代の記録の kill -0 -<pgid> | 空と読まない: end を書かない（取らない） |
+| `holder-relist` | TS・同期 JS | 全員死の後の owner.h<k+1> の lstat（C3） | 増えていないと読まない: end を書かない |
+| `end-tmp` | TS・同期 JS | end の tmp の排他作成と書き込み | end を書かない（回収しない・解放は名指して繰り返す） |
+| `end-link` | TS・同期 JS | link tmp → g<N>/end（EEXIST は既に終わった） | end を書かない（回収しない・解放は名指して繰り返す） |
+| `ownerless-gen-mtime` | TS・同期 JS | 持ち主の無い世代の mtime（墓の猶予） | 古いと読まない: 墓を置かない（取らない） |
+| `tomb-tmp` | TS・同期 JS | 墓の記録の tmp の排他作成と書き込み | 墓を置かない（取らない） |
+| `tomb-link` | TS・同期 JS | link tmp → g<M>/owner（墓。書き手の公開と同じ名前） | 墓を置かない（取らない） |
+| `beacon-gen-end` | TS・同期 JS | 目印の記録が名指す前の世代の end と世代の lstat（§6.1） | 前の世代が終わったと読まない: 目印を外さない（取らない） |
+| `handoff-gen-tmp` | TS・同期 JS | 引渡しの記録 owner.h<k> の tmp の排他作成と書き込み | ゲートを始めない（stage=tmp。目印を書き直さない） |
+| `handoff-gen-link` | TS・同期 JS | link tmp → g<N>/owner.h<k> | ゲートを始めない（stage=tmp。目印を書き直さない） |
 
 - **網羅の検査**（D2・E の入口の網羅の検査と同じ形）: `tests/unit/verification/lock-observation-scan-4288.ts` が 3 実装のソースから (1) 名前の付いた観測点（`lock_obs_* <点>`・`lock_rmdir_errno <点>`・`obs.*('<点>'`〔`obs.rmdir` を含む〕・`goneCandidates(ctx, '<点>')`・`lock_gone_candidates <点>`）と (2) 観測の**生の呼び出し**（bash の `kill -0`・`mkdir`・`mv`・`ls`・`cat`・`ps -o`・`.gone-*` の glob・`lock_owner_field`、TS・同期 JS の `process.kill(`・`readdirSync(`・`lstatSync(`・`readFileSync(`・`mkdirSync(`・`renameSync(`・`readOwner(`）を、それを含む関数ごとに数える。(1) は上の表と一致、(2) は「観測の関数そのもの」か理由つきの許可（札の書き込み・置き場の `mkdir -p`・待ちの表示など、判断に使わないか既に fail-closed のもの）の一覧と件数まで一致しなければ落ちる。自己テストで、新しい関数の `kill -0`・glob・`readdirSync`、許可した関数の 2 つ目の呼び出し、表に無い観測点（`rmdir` の点の名前の変更と、新しい関数の `obs.rmdir`／`lock_rmdir_errno` を含む）のそれぞれを足したソースで検査が落ちることを確かめる。
 - **行ごとの注入**: 読み手の 18 点 × 3 実装（54 行）は、行ごとに「注入あり → 取らない・消さない・解放しない（待ちは予算で終わり、点・パス・errno を出す）」と「同じ状態で注入なし → 逆の結果」の対で固定する（注入が結果を変えたことの対照）。書き手の 9 点は `verify-run-holder-group-4288.test.ts` で `FAIL exit=125`・`stage=…`・副作用 0 を固定する。実物の失敗（root の `chmod 0333`）でも 3 実装が取らないこと、直しを外した形（bash の glob で未展開を「無い」と読む読み手、同期 JS の一覧の失敗を空とする読み手、第 4 版の `kill -0` の成功だけを見るグループの判定）が同じ失敗の下で取る・解放することを陽性の対照にする。

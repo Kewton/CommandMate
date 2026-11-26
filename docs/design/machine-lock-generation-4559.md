@@ -47,7 +47,9 @@
 <root>/<name>.lock/                 旧い版のための目印（混在の間だけ。§6）。M3 の後は塞ぎのファイル（§6.3）
 ```
 
-- パスで名付けたロック（run-lock `$TMPDIR/commandmate-run.lock`・supervisor.lock）の `.gen` は `$TMPDIR` の外、`~/.commandmate/locks/by-path/<hash>.gen` に置く（`$TMPDIR` の掃除で `.gen` が消えると L1 が崩れるため）。hash の元は C7
+- パスで名付けたロック（run-lock `$TMPDIR/commandmate-run.lock`・supervisor.lock）の `.gen` は `$TMPDIR` の外、`<root>/by-path/<hash>.gen` に置く（root は名前で取るロックと同じ。`CM_VERIFY_LOCK_ROOT`、無ければ `~/.commandmate/locks`。`$TMPDIR` の掃除で `.gen` が消えると L1 が崩れるため）。hash の元は C7
+- **どちらの置き場かはロックのパスだけで決まる**（PR-2 の実装で決めた）: ロックの親ディレクトリの realpath が root の realpath と同じで、名前が `<name>.lock` なら `<root>/<name>.gen`、それ以外は `<root>/by-path/<hash>.gen`。呼び手が名前（root と name）で取るか、パス（`lockPath`）で取るかに依らない。同じロックを名前で取る者とパスで取る者が別々の鎖を持つと L1 が崩れる（C7）ため
+- **C7 の前提（#4559 コメント 7183455133）**: S1・S2 の証明は、同じロックの書き手がみな同じ鎖を見ることを前提にする。そのため親と root の realpath は観測（`gen-realpath`）で、失敗は不明として名指し、鎖を選ばずに取らず、次の周で読み直す（字面のパスへ落とさない）。鎖の置き場の明示（`hooks.genDir`）は試験の口だけで、呼び手・TS からは渡らない
 - 世代のディレクトリの中は「足すだけ」。書き換えるのは `fields` だけ
 - 記録には世代の番号を持たせる: JSON（SJ・TS・VR のゲート）は `"g":<N>`、kv（ML・supervisor・run-lock）は `g=<N>` の 1 行。`g` は予約の欄に足し、呼び手が書けないようにする
 - supervisor.lock の世代の記録にも `lstart=`・`started_at=` を書く（D7 を世代の回収で使うため）
@@ -90,6 +92,10 @@
 - 作成の途中で止まった・死んだ書き手の世代（`owner` が無い）は、猶予の後に墓の記録を `g<M>/owner` へ `link` で作る。**書き手の公開と同じ名前を奪い合う**（L4）。勝った方だけが進む。墓が勝てば `end`（dead）
 - 墓の記録は `tomb=1` の印を持ち、判定は常に死とする（回収者の pid を書いても生死に使わない。回収者が墓と `end` の間で止まっても、次の回収者が墓を死と読んで `end` を書ける）
 - 猶予は `g<M>` の mtime から測る（P0 は活性だけに効く。墓は L4 の排他で、猶予の長さは安全に効かない）。模型は猶予ゼロ（安全の側）で、壊した版 `no-tomb`（墓を置かずに待ち続ける）が S4 で赤
+- **生きた書き手の自分の墓（PR-2 の実装で足した。PM の処分で採った）**: `mkdir g<N>` の後に自分の `owner` の公開が**不明**（tmp の作成か `link` が EIO など、`unknown`）で終わった書き手は、`g<N>` を猶予の間持ち主の無いまま残さず、自分の墓を同じ `owner` の名前へ `link` してから `end`（withdrawn）を書く（継ぎ目 `gen-owner-failed`）。公開の `link` が `absent`（ENOENT: tmp か世代が片付けで消えた）のときは墓へ進まず次の周へ戻るので、`g<N>` が残っていれば持ち主の無い世代として猶予の待ちが残りうる（活性だけ。C8 の片付けは 10 分より古い tmp だけを消す）
+  - **これは活性の手当て**: これが無いと、1 回の EIO で次の保有者が猶予（10 分）待つ（S4 の「EIO 1 回は次の周で回復」に反する）
+  - **S1・S2 は排他の `link` が守る**: `g<N>` を作ったのは `mkdir` の排他でこの書き手だけなので、`owner` の名前を奪い合う相手は猶予の後の回収者の墓だけ（L4）。自分の `owner` が実は公開されていれば墓は EEXIST で、自分の世代として `end` を書く
+  - **T1 の範囲の外で、T2 の 2 行が守る**: 模型は公開の失敗を表さない（§7.4）ので T1 は変えない。T2（`machine-lock-generation-seams-4559.test.ts`）が、公開の EIO の後に (i) 墓の前（`gen-owner-failed`）で殺すと持ち主の無い世代が残り、後継は猶予の内は取らず猶予の後に取ること、(ii) 墓の後・`end` の前（`tomb-linked`）で殺すと後継が猶予の内に `end`（dead）を付けて取ることを、継ぎ目の呼び出しの回数（1 回）とともに確かめ、自分の墓を書かない核の写しで (ii) の継ぎ目に届かない（0 回）ことを確かめる
 
 ### 4.5 片付け
 - 一覧のたびに最大を読み直し、**`k < 最大` の世代だけ**を `rm -rf` する（`end` は見ない）。最大は決して消さない（C1）
@@ -124,7 +130,7 @@
 | C4 | 世代が消えていた（ENOENT）とき、「`end` が無い」と読んで判定の側へ進んでよい（緩めた形）。誤読は「`end` が無い」側にしか倒れず、その後の操作は作り直された最大でない世代に効くだけ（S3 の範囲）。文字どおりの「消えていたら最初から」は求めない | T1（§7.3） |
 | C5 | 世代の名前は `^g[0-9]{12}$` だけ。それ以外は数えない。bash は `10#` で読む。作る書式は 3 実装で同じ | T3 |
 | C6 | `.gen` は作った後は消さない（運用の前提）。取得の後の一覧で `.gen` が無い・読めないときは取らない（不明）。bash の `lock_obs_list` は ENOENT を空として返すので、世代の一覧はこの口を使わずに ENOENT を区別する | T2 |
-| C7 | パスで名付けたロックの `by-path/<hash>.gen` の hash は、ロックのパスの**親ディレクトリを realpath で解いた**文字列＋ベース名から作る（`/var/folders/…` と `/private/var/folders/…` を同じにする）。3 実装で同じ書き方 | T2・T3 |
+| C7 | パスで名付けたロックの `by-path/<hash>.gen` の hash は、ロックのパスの**親ディレクトリを realpath で解いた**文字列＋ベース名から作る（`/var/folders/…` と `/private/var/folders/…` を同じにする）。3 実装で同じ書き方。同じパスのロックの書き手は同じ root を見る（名前で取るロックの root と同じ前提。PR-3 の bash も同じ root を読む） | T2・T3 |
 | C8 | `<name>.gen.tmp/` の tmp の名前は書き手の token と用途を含み（`<token>.<owner\|end\|tomb\|h<k>\|fields>`）、二度と使わない。他者の tmp の片付けは古さ（10 分）だけで選ぶ。消された書き手は `link` が ENOENT になって最初からやり直すだけ（活性） | T2 |
 | S1 | **保有者は常に高々 1**: どの時点でも、「取得を返して解放していない生きたプロセスと、その引渡し先のグループ」は高々 1 組（引渡しのグループを 1 人と数える）。停止の長さ・回数に依らない | T1（§7.3）・T2・T4 |
 | S2 | **生きた保有者を退かさない**: 生きた保有者の世代に、他者が `end` を付けない（P1 の外の D7 の誤りだけを除く） | T1（§7.3）・T2・T4 |
@@ -275,12 +281,12 @@
 
 ### 8.1 T1〜T7
 - **T1 模型の網羅**（PR-1）: §7。S1・S2 の違反 0、到達の数が各 1 以上（組で届かない数は手で作った初期状態から始める探索で埋める）、状態の数が実測より数 % 下の下限を超える、壊した版は模型の表（§7.2）の全部を流し、記録した数・最初の違反・`*` の歩（`pick` が強制する変える歩）・届く到達の数・対照を確かめる（行と題は表から作る）、活性 S4 とその壊した版、引数の検査、変える歩を移した模型の写しが投げること。組の行と題は模型の `WALK_RUNS` から作る。§5 の名前は T1 の確かめ（§7.3。`WALK_CHECKS` の鍵か壊した版）と模型の `NOT_IN_MODEL` に分け、どちらにも結べない名前は模型が読み込みで投げる。模型のソースで壊した版を読むのは `checkConfig` と `pick` だけ、壊した版の名前を書くのは表の行と `pick` の呼び出しだけ、を走査で確かめる（迂回する分岐を足した写しは赤）。各 `it` に明示の timeout
-- **T2 実装の行列**（PR-2・PR-3）: 直積はやめ、「各継ぎ目 × 各差し込み（止まる・SIGKILL・EIO 1 回）に少なくとも 1 行」の被覆（T3 が保証）。継ぎ目の案: 取得 `gen-list`・`gen-end-read`・`gen-mkdir`・`owner-tmp-opened`・`owner-tmp-written`・`owner-linked`・`owner-tmp-removed`・`gen-postlist`・`gen-withdraw-end`／回収 `holder-read`・`holder-judged`・`holder-relist`・`end-tmp`・`end-linked`／墓 `ownerless-judged`・`tomb-linked`・`tomb-end`／引渡し `handoff-tmp`・`handoff-linked`／解放 `beacon-release`・`release-end`／片付け `gc-list`・`gc-judged`・`gc-rm`／目印 `beacon-mkdir`・`beacon-published`・`beacon-prev-judged`。交差の順（A 止まる → B 止まる → A 再開 → B 再開）を作るため、SJ の核に `lock_test_pause` と同じ形のファイルの止める口（env で既定は無効、回数つき `pause:<stage>#<n>`）を足し、JS の行為者は別のプロセスで動かす（前例 `tests/unit/verification/fixtures/lock-actor-4277.mjs`）。継ぎ目の名前は 1 か所 1 名。TS は SJ の核を import するので行列から外し、「TS に独自のファイルの操作が無い」ことを走査で固定する。オラクルは行為者の出来事の記録から数え、「取得を返した時点で生きた保有は自分だけ」「生きた保有者の世代に `end` が付かない」を別々に比べる。生死は引渡しの後はグループで数える。`/var`・`/private/var` の 2 通りで同じ `by-path` の名前になる行（C7）、APFS の readdir の行（C2）、合図の無い子が始まらない行（L5）
-- **T3 継ぎ目の網羅のガード**（PR-2 の JS・PR-3 の bash）: 前例の生の操作の走査（`lock-observation-scan-4288.ts`）を広げる。名前を変える生の操作（`mkdir`・`link`・`rename`／`mv`・`rm -rf`・`rmdir`・`unlink`）が、表の 1 行（判定・操作・前の継ぎ目・模型の歩）に必ず対応し、操作の直前に継ぎ目が在ることをソースの並びで確かめる。核の外で `end` を作る呼び出しは赤。生の呼び出しを許す関数の一覧を閉じる。自己の確かめ（継ぎ目の無い `rm -rf` を足した写しは赤）。世代の名前の書式（C5）と by-path の hash の書き方（C7）を 3 実装で比べる
+- **T2 実装の行列**（PR-2・PR-3）: 直積はやめ、「各継ぎ目 × 各差し込み（止まる・SIGKILL・EIO 1 回）に少なくとも 1 行」の被覆（T3 が保証）。継ぎ目の案: 取得 `gen-list`・`gen-end-read`・`gen-mkdir`・`owner-tmp-opened`・`owner-tmp-written`・`owner-linked`・`owner-tmp-removed`・`gen-postlist`・`gen-withdraw-end`／回収 `holder-read`・`holder-judged`・`holder-relist`・`end-tmp`・`end-linked`／墓 `ownerless-judged`・`tomb-linked`・`tomb-end`／引渡し `handoff-tmp`・`handoff-linked`／解放 `beacon-release`・`release-end`／片付け `gc-list`・`gc-judged`・`gc-rm`／目印 `beacon-mkdir`・`beacon-published`・`beacon-prev-judged`。交差の順（A 止まる → B 止まる → A 再開 → B 再開）を作るため、SJ の核に `lock_test_pause` と同じ形のファイルの止める口（env で既定は無効、回数つき `pause:<stage>#<n>`）を足し、JS の行為者は別のプロセスで動かす（前例 `tests/unit/verification/fixtures/lock-actor-4277.mjs`）。継ぎ目の名前は 1 か所 1 名。TS は SJ の核を import するので行列から外し、「TS に独自のファイルの操作が無い」ことを走査で固定する。**PR-2 で決まった継ぎ目の名前**（核のソースの `seam('<段>')` と `GEN_WRITES` の表が正。T2 がソースから集めて行と突き合わせる）: 取得 `gen-list`・`gen-parent-mkdir`・`gen-dir-mkdir`・`gen-end-read`・`gen-mkdir`・`gen-tmp-mkdir`・`gen-owner-tmp`・`gen-owner-linked`・`gen-owner-failed`・`gen-postlist`・`gen-withdraw-end`／回収 `holder-read`・`holder-judged`・`holder-relist`・`end-tmp`・`end-linked`／墓 `ownerless-judged`・`tomb-tmp`・`tomb-linked`・`tomb-end`／引渡し `gen-handoff-tmp`・`handoff-linked`／`fields` `fields-rename`／解放 `beacon-release`・`release-end`／片付け `gc-judged`・`gc-rm`・`gc-tmp-rm`／目印 `beacon-prev-judged`。目印の取得の段は #4288 の `owner-lock-made`・`owner-tmp-opened`・`owner-tmp-written`・`owner-linked`・`owner-tmp-removed` のまま（`hooks.onOwnerStage`。名前を変えると既存の試験の止め所が動くので、案の `beacon-mkdir`・`beacon-published` は作らない）。止める口は bash の `lock_test_pause` と同じ env（`CM_VERIFY_TEST_HANDOFF=pause:<段>#<n>`・`CM_VERIFY_TEST_HANDOFF_DIR`。新しい env は足さない）オラクルは行為者の出来事の記録から数え、「取得を返した時点で生きた保有は自分だけ」「生きた保有者の世代に `end` が付かない」を別々に比べる。生死は引渡しの後はグループで数える。`/var`・`/private/var` の 2 通りで同じ `by-path` の名前になる行（C7）、APFS の readdir の行（C2）、合図の無い子が始まらない行（L5）
+- **T3 継ぎ目の網羅のガード**（PR-2 の JS・PR-3 の bash）: 前例の生の操作の走査（`lock-observation-scan-4288.ts`）を広げる。名前を変える生の操作（`mkdir`・`link`・`rename`／`mv`・`rm -rf`・`rmdir`・`unlink`）が、表の 1 行（判定・操作・前の継ぎ目・模型の歩）に必ず対応し、操作の直前に継ぎ目が在ることをソースの並びで確かめる。核の外で `end` を作る呼び出しは赤。生の呼び出しを許す関数の一覧を閉じる。自己の確かめ（継ぎ目の無い `rm -rf` を足した写しは赤）。世代の名前の書式（C5）と by-path の hash の書き方（C7）を 3 実装で比べる。**TS は SJ の核をバイトのまま写した生成物（`src/lib/verification/machine-lock-sync-core.generated.ts`）を import する。写しは一致の試験（`machine-lock-sync-core-copy-4559.test.ts`）で固定し、走査は一致を前提に写しを除く**（#4559 コメント 7177395611 の案 F）。表は §8.3
 - **T4 名前のある回帰**: #4559 の元の再現・読み直しの後の停止・戻しの ENOENT の後の `rm -rf` は、develop で赤・案 A で緑の行（旧い書き手が混ざる行は `mixed` として赤のまま）。身を引く操作の再試行などは「同じ停止の順を世代の手順に掛けて S1・S2」を確かめる行。各行に行為者の版（新・旧）を書く
-- **T5 混在の間**: 旧い版の写しを `tests/fixtures/machine-lock-legacy/<版>/` に commit する（CI の checkout は depth 1 の見込みで `git show` できない。`2288ff855`〔≤0.6.0〕・`85352db6f`〔0.7.0〕・`cfffb31c9`〔0.8.0〕・`44dcf038f`〔npm TS v0.51.0〜v0.55.1〕・v0.50.0 以前の npm TS〔sha は PR-3 で pin〕・`ffcb54d05`〔旧 run-lock〕・`5507b811e`〔旧 lib.sh〕・develop の今）。lint などから外す設定と出所の pin を同じ PR で。`g=` の codec の行、戻しの後も `g` が残る行、M3 の塞ぎを旧 run-lock・旧 lib.sh が消す行、版の印を置く・取り消すの各点で死ぬ行。目印と旧い書き手 1 者の小さな模型で `mixed` の行が赤のまま（名指した窓）であることを固定する
+- **T5 混在の間**: 旧い版の写しを `tests/fixtures/machine-lock-legacy/<版>/` に commit する（CI の checkout は depth 1 の見込みで `git show` できない。`2288ff855`〔≤0.6.0〕・`85352db6f`〔0.7.0〕・`cfffb31c9`〔0.8.0〕・`44dcf038f`〔npm TS v0.51.0〜v0.55.1〕・v0.50.0 以前の npm TS〔sha は PR-3 で pin〕・`ffcb54d05`〔旧 run-lock〕・`5507b811e`〔旧 lib.sh〕・develop の今）。写しは拡張子を替えて置き（`machine-lock-sync.mjs.txt` など。lint・tsconfig の設定には触れない）、試験の時に一時のディレクトリへ `.mjs` として書き出す。出所の pin（sha と sha256）を同じ所の `pin.json` に置き、試験で sha256 を確かめる（PM の決定、lead-plan §8）。PR-2 は develop 690caa46a の `machine-lock-sync.mjs`・`machine-lock.ts` だけ、ほかの版は PR-3。`g=` の codec の行、戻しの後も `g` が残る行、M3 の塞ぎを旧 run-lock・旧 lib.sh が消す行、版の印を置く・取り消すの各点で死ぬ行。目印と旧い書き手 1 者の小さな模型で `mixed` の行が赤のまま（名指した窓）であることを固定する
 - **T6 一時の失敗**: 新しいファイルにせず、既存の `lock-observation-points-4288.test.ts` の差し込みの表に世代の点を足す。SJ・TS の `hooks.fault` に回数を持たせる。EIO 1 回は次の周で回復して名指し、続くときは取らない・消さない
-- **T7 文書のガード**（PR-1）: 照合はどれも完全一致で、行の形の場合分けをしない。§7.2・§7.3 は模型から作った表と 1 字も違わないこと。§6.5（`mixed`）・§5 は設計書が正の表で、解析して書き戻した表が節の表と 1 字も違わないこと（往復。表の範囲は GFM のとおり始まりから最初の空行まで、節の中の表は 1 つ）と、行が名指した窓・模型の名前と一致すること。§2 は節の全文を T7 に持って完全一致。§5 の「確かめる所」は模型から作った文と完全一致。§7.5 は `HUMAN_READ` の行を持つ。照合の前に HTML の注釈を除き（注釈に隠した表・文は描かれない）、使う見出しは 1 つだけ。自己の確かめ: 行・Issue 番号を消した写し、Issue が `—`・小文字の ID・backtick の ID・先頭が空白・空行の直後・`|` の無い直後の行・2 つ目の表・`| C10 |`・名前の書き替え・新しい補題に `T1（§7.3）`・組の書き替え・§7.3 の行の書き替え・保証の文の否定・前提を消す、表の変える歩を書き替えた模型の写し、注釈に隠した §6.5・§7.2 の表と §2 の文、同じ見出しの 2 つ目、§2 に打ち消す文、C5 の T3→T2、§5・§7.3 に足した L6、§7.5 の名前の書き替え、どれも赤。表 F（4288 の文書）との対は PR-2 で足す
+- **T7 文書のガード**（PR-1）: 照合はどれも完全一致で、行の形の場合分けをしない。§7.2・§7.3 は模型から作った表と 1 字も違わないこと。§6.5（`mixed`）・§5 は設計書が正の表で、解析して書き戻した表が節の表と 1 字も違わないこと（往復。表の範囲は GFM のとおり始まりから最初の空行まで、節の中の表は 1 つ）と、行が名指した窓・模型の名前と一致すること。§2 は節の全文を T7 に持って完全一致。§5 の「確かめる所」は模型から作った文と完全一致。§7.5 は `HUMAN_READ` の行を持つ。照合の前に HTML の注釈を除き（注釈に隠した表・文は描かれない）、使う見出しは 1 つだけ。自己の確かめ: 行・Issue 番号を消した写し、Issue が `—`・小文字の ID・backtick の ID・先頭が空白・空行の直後・`|` の無い直後の行・2 つ目の表・`| C10 |`・名前の書き替え・新しい補題に `T1（§7.3）`・組の書き替え・§7.3 の行の書き替え・保証の文の否定・前提を消す、表の変える歩を書き替えた模型の写し、注釈に隠した §6.5・§7.2 の表と §2 の文、同じ見出しの 2 つ目、§2 に打ち消す文、C5 の T3→T2、§5・§7.3 に足した L6、§7.5 の名前の書き替え、どれも赤。表 F（4288 の文書）との対は PR-2 で足した: 表 F の `mixed` の行（雛形 `machine-lock-owner-atomic-4288.test.ts` の `limit.row65`）がどれも §6.5 の行を 1 つ名指し、名指された行の集まりが §6.5 の `open`・`later-PR` の行（M3 の PR の `M3-ERASE` を除く）と一致し、`closed` の行は名指されない（往復。自己の確かめ: 行を消した §6.5・名指しの無い行・§6.5 に無い行の名指し・`closed` の名指し・誰も名指さない `open` の行）
 - すべて `tests/unit/verification/` に置き、既存の unit のゲートに乗せる（新しいゲートは要らない）。共通の台は `tests/unit/verification/lock-generation-4559-harness.ts`（PR-2）
 
 ### 8.2 時間の予算
@@ -288,11 +294,67 @@ CI は `fileParallelism: false`・負荷が高いので、1 ファイルの単�
 
 | ファイル | PR | 予算（開発機の単独の走り） | 実測 |
 |---|---|---|---|
-| `machine-lock-generation-model-4559.test.ts`（T1） | PR-1 | 90 秒・最大 RSS 1.5 GB | 約 20 秒・約 0.9 GB（2026-11-26。状態は 5 ビットずつ詰めた表に持つ） |
-| `machine-lock-generation-doc-4559.test.ts`（T7） | PR-1 | 5 秒 | 1 秒未満 |
-| `machine-lock-generation-4559.test.ts`（T2・T4・T6 の JS） | PR-2 | 60 秒（超えるならファイルを分ける） | — |
-| `machine-lock-generation-seams-4559.test.ts`（T3） | PR-2・PR-3 | 30 秒 | — |
-| `machine-lock-generation-mixed-4559.test.ts`（T5） | PR-3 | 60 秒（bash の別プロセスの行は 1 マス 1〜2 秒の見込み） | — |
+| `machine-lock-generation-model-4559.test.ts`（T1） | PR-1 | 90 秒・最大 RSS 1.5 GB | 約 20 秒・約 0.9 GB（2026-11-26。状態は 5 ビットずつ詰めた表に持つ）。PR-2 の後の再走り 19.1 秒・900 MB（34 行、模型は変えていない） |
+| `machine-lock-generation-doc-4559.test.ts`（T7） | PR-1 | 5 秒 | 1 秒未満（PR-2 の表 F との対を足して 50 行・0.7 秒） |
+| `machine-lock-generation-4559.test.ts`（T2・T4・T6 の JS） | PR-2 | 60 秒（超えるならファイルを分ける） | 13.3 秒・192 MB（98 行。2026-11-26、PR-2 の作業木） |
+| `machine-lock-generation-seams-4559.test.ts`（T3） | PR-2・PR-3 | 30 秒 | 0.7 秒・177 MB（自分の墓の 3 行を足す前の 8 行。2026-11-26） |
+| `machine-lock-generation-mixed-4559.test.ts`（T5） | PR-2（新 JS × 今の bash・旧い JS の写し × 新 JS）・PR-3（bash の新版） | 60 秒（bash の別プロセスの行は 1 マス 1〜2 秒の見込み） | PR-2 の 4 行で 2.5 秒・187 MB（2026-11-26） |
+
+### 8.3 名前を変える操作と直前の継ぎ目（T3 の表。`tests/unit/verification/lock-generation-4559-harness.ts` の `OPS` から作る。手で直さない）
+T3 が核のソースを走査して関数・操作・数がこの表と一致し、継ぎ目の列が `—` でない操作の直前の行に `seam('<段>')` が在ることを確かめる。`—` は #4288 の目印の手順（旧い版のために残す、§6）と観測の関数そのもの。
+
+| 関数 | 操作 | 数 | 直前の継ぎ目 | 何を | 模型の歩 |
+|---|---|---|---|---|---|
+| `makeObserver` | `fs.mkdirSync` | 1 | — | the observer of mkdir (every obs.mkdir) | — |
+| `makeObserver` | `fs.renameSync` | 1 | — | the observer of rename | — |
+| `makeObserver` | `fs.linkSync` | 1 | — | the observer of link | — |
+| `makeObserver` | `fs.unlinkSync` | 1 | — | the observer of unlink | — |
+| `makeObserver` | `fs.rmdirSync` | 1 | — | the observer of rmdir | — |
+| `rmQuiet` | `fs.rmSync` | 1 | — | the one clean-up delete | — |
+| `markDone` | `fs.renameSync` | 1 | — | a ticket marked used (§4.7) | — |
+| `markDone` | `rmQuiet` | 1 | — | its tmp | — |
+| `takeTicket` | `fs.mkdirSync` | 1 | — | the queue directory | — |
+| `takeTicket` | `rmQuiet` | 1 | — | the ticket tmp | — |
+| `collectGarbage` | `rmQuiet` | 2 | — | used tickets, old ticket tmps | — |
+| `claim` | `obs.mkdir` | 1 | — | the <lock> (beacon, §6.1) | — |
+| `publishOwner` | `obs.unlink` | 1 | — | the beacon owner's own tmp | — |
+| `publishOwner` | `obs.rmdir` | 1 | — | the own empty <lock> | — |
+| `publishOwner` | `obs.link` | 1 | — | the beacon owner | — |
+| `undoPublish` | `obs.unlink` | 3 | — | the undo (I2-b) | — |
+| `undoPublish` | `obs.rename` | 1 | — | the undo (I2-b) | — |
+| `undoPublish` | `obs.rmdir` | 1 | — | the undo (I2-b) | — |
+| `undoPublish` | `obs.link` | 1 | — | the undo (I2-b) | — |
+| `expireOwnerless` | `obs.unlink` | 1 | — | an owner-less <lock>'s tmps (I3) | — |
+| `expireOwnerless` | `obs.rmdir` | 1 | — | an owner-less <lock> (D3) | — |
+| `reclaimEmptyOwner` | `obs.rename` | 1 | — | an empty owner aside (I4) | — |
+| `reclaimEmptyOwner` | `rmQuiet` | 1 | — | the own aside | — |
+| `rmdirQuiet` | `fs.rmdirSync` | 1 | — | an empty directory | — |
+| `moveOwnerIn` | `obs.link` | 1 | — | the put-back (§2.7) | — |
+| `moveOwnerIn` | `rmQuiet` | 1 | — | the aside after the put-back | — |
+| `moveOwnerIn` | `rmdirQuiet` | 1 | — | the put-back's own <lock> | — |
+| `restoreFromGone` | `obs.mkdir` | 1 | — | the put-back's <lock> | — |
+| `restoreFromGone` | `rmdirQuiet` | 1 | — | the put-back's own <lock> | — |
+| `reclaimGone` | `obs.rmdir` | 1 | — | a half put-back | — |
+| `reclaimGone` | `obs.rename` | 1 | — | an aside to the own name | — |
+| `reclaimGone` | `rmQuiet` | 1 | — | the own aside judged gone | — |
+| `settleGone` | `rmdirQuiet` | 1 | — | an empty aside | — |
+| `recoverLock` | `obs.rename` | 1 | — | an older holder's <lock> aside (P-4) | — |
+| `recoverLock` | `rmQuiet` | 2 | — | the own aside | — |
+| `recoverLock` | `obs.mkdir` | 1 | — | the put-back's <lock> | — |
+| `recoverLock` | `obs.link` | 1 | — | the put-back | — |
+| `recoverLock` | `rmdirQuiet` | 1 | — | the put-back's own <lock> | — |
+| `collectGens` | `rmQuiet` | 2 | gc-rm・gc-tmp-rm | rm -rf g<k> (k < the largest listed, C1); an old tmp (C8) | g1 |
+| `linkIntoGen` | `obs.mkdir` | 1 | gen-tmp-mkdir | the tmp directory | — |
+| `linkIntoGen` | `obs.link` | 1 | <use>-tmp | owner / owner.h<k> / tomb / end into g<N> (L4) | a3・h・j1・j2・r0・a4 |
+| `linkIntoGen` | `obs.unlink` | 1 | <use>-linked | the own tmp | — |
+| `takeGeneration` | `fs.mkdirSync` | 1 | gen-parent-mkdir | the parent of .gen (by-path) | — |
+| `takeGeneration` | `obs.mkdir` | 2 | gen-dir-mkdir・gen-mkdir | .gen (C6); mkdir g<M+1> | a2 |
+| `machineLockAcquisition` | `rmQuiet` | 2 | —・beacon-release | an own tmp of setOwnerFields / handOff; the <lock> at the release (§6.1: before end) | r0 |
+| `machineLockAcquisition` | `fs.linkSync` | 1 | — | the ticket's link | — |
+| `machineLockAcquisition` | `fs.mkdirSync` | 1 | — | the root | — |
+| `machineLockAcquisition` | `fs.renameSync` | 2 | fields-rename・— | g<N>/fields; the beacon's copy of the fields | — |
+| `machineLockAcquisition` | `obs.rename` | 1 | — | the beacon's D4 hand-off (after owner.h<k>, §4.6) | — |
+| `asHead` | `fs.linkSync` | 1 | — | the ticket's link | — |
 
 ---
 
@@ -302,6 +364,7 @@ CI は `fileParallelism: false`・負荷が高いので、1 ファイルの単�
 - **PR-2**: SJ の核（世代の手順を export。今の回収は目印の旧い版の保有者のためだけに残す）＋TS の import（重複する手順を消す。TS の配布物に SJ の核が bundle されることを確かめる）＋目印＋`fields` の写し＋D8 の継承＋T2・T4・T6 の JS の行＋T3 の JS の部分＋T5 の「新 JS × 今の bash」の組。`docs/design/machine-lock-owner-atomic-4288.md` の保証の文・I8・表 F を書き直し、T7 に表 F との対を足す。`changelog.d/4559.md` を閉じた版の説明へ替える
 - **PR-3**: bash（`verify-run.sh` と `.agents` の鏡）＋sync-map の pin 3 つ（cmate-verify の `SKILL.md`・`scripts/tests/run-tests.sh`・`scripts/verify-run.sh`）＋SKILL.md のロックの規約の表＋`scripts/lib/machine-lock.sh`（`lock_release_held` を世代の解放の順に、needs-head を世代の回収に寄せる）＋`scripts/uat/run-lock.sh`＋T2 の bash の行＋T3 の bash の部分＋T5
 - 外の読み手（merge-pr・merge-train・`lib.sh` の `product_lock_kind`・`src/lib/agent-health/run-lock.ts`）は核の「今の保有者を読む」口へ移す（PR-2・PR-3 の該当する方）
+- PR-2 の TS は SJ の核をバイトのまま写した生成物を import する（案 F）。写しは一致の試験で固定し、T3 の走査は一致を前提に写しを除く。`run-lock.ts` は配布物に入らないので SJ を直に import したまま
 - M2／M3 の切替の手順（§6.3）は PR-3 の後の別 PR。常駐 worktree の更新が済んでから。counterpart（skills 側）の移植は別（PM・人）
 - 既存の試験の期待を変えてよいのは、人の決定（2026-11-25）の一覧の 6 件だけで、PR-2・PR-3 で変える。PR-1 はどれも変えない
 
