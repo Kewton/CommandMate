@@ -526,11 +526,17 @@ function SessionTileCard({
     if (refusal.sendOutcome !== 'not_sent' || target === null) return;
     if (refusal.reason !== 'target-gone' && refusal.reason !== 'tool-changed') return;
     const hold = { instanceId: target.instanceId, cliToolId: target.cliToolId, fetchSeq: currentWorktreeFetchSeq() };
-    const held = (list: readonly StaleTargetHold[]) =>
-      list.some((h) => h.instanceId === target.instanceId && h.cliToolId === target.cliToolId);
+    // r4 (P1-3): a hold of the same pair already there counts from this latest refusal — a fetch begun
+    // before it (even one adopted and not yet rendered) does not let it go.
+    const withHold = (list: StaleTargetHold[]): StaleTargetHold[] => {
+      const same = list.find((h) => h.instanceId === target.instanceId && h.cliToolId === target.cliToolId);
+      if (!same) return [...list, hold];
+      if (same.fetchSeq >= hold.fetchSeq) return list;
+      return list.map((h) => (h === same ? hold : h));
+    };
     // r3c: the gate sees it at once (before the render that shows it).
-    if (!held(staleHoldsRef.current)) staleHoldsRef.current = [...staleHoldsRef.current, hold];
-    setStaleHolds((prev) => (held(prev) ? prev : [...prev, hold]));
+    staleHoldsRef.current = withHold(staleHoldsRef.current);
+    setStaleHolds((prev) => withHold(prev));
     // Read the roster again now (no provider — the tile alone: the next roster lets the hold go).
     void worktreesCacheRef.current?.refresh().catch(() => undefined);
   }, []);
