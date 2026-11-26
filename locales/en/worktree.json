@@ -61,6 +61,7 @@
     "assistant": "Assistant",
     "sending": "Sending…",
     "failedToSend": "Failed to send",
+    "sendHeld": "Not sent (the target changed). It can be retried after the roster is read again",
     "sendUnknown": {
       "status": "Not sure whether this arrived",
       "guidance": "Part or all of it may have arrived. Check the terminal, then send it again only if needed",

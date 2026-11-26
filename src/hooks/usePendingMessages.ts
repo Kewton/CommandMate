@@ -201,6 +201,11 @@ export interface PendingMessage {
    */
   heldNotSent?: boolean;
   /**
+   * Issue #4606 r4: this row's latest attempt was not sent by the caller's gate (`SEND_HELD_BY_GATE`):
+   * drawn as `held` ("not sent", with [retry] / [discard]), not as a failure. Cleared by `retry()`.
+   */
+  gateHeld?: boolean;
+  /**
    * Issue #4385: the last attempt was refused by the server because of the role (409
    * `roleRefusal`, nothing typed) — the reason the failed row shows. Cleared by `retry()`.
    */
@@ -439,7 +444,8 @@ function toChatMessage(p: PendingMessage, worktreeId: string): ChatMessage {
     // Issue #4345 1c-2: a parked message whose automatic resend was refused (`heldNotSent`) is
     // drawn as 'error' so the bubble offers retry / discard (both the PC card and the mobile bubble
     // show them for 'error' only). Nothing resends it on its own; retry is the person's.
-    optimisticState: p.heldNotSent ? 'error' : p.status,
+    // Issue #4606 r4: a row a send gate held back says so (not a failure); its buttons are the failed row's.
+    optimisticState: p.gateHeld ? 'held' : p.heldNotSent ? 'error' : p.status,
     ...(p.status === 'error' && p.roleRefusal ? { optimisticRoleRefusal: p.roleRefusal } : {}),
     ...(p.status === 'sending' && p.awaitingResponse && !p.heldNotSent ? { optimisticAwaitingResponse: true } : {}),
   };
@@ -680,7 +686,7 @@ export function usePendingMessages({
           setPending((prev) =>
             prev.map((cur) =>
               cur.tempId === p.tempId
-                ? { ...cur, status: 'sending', queued: true, heldNotSent: true, accepted: false, awaitingResponse: false }
+                ? { ...cur, status: 'sending', queued: true, heldNotSent: true, gateHeld: true, accepted: false, awaitingResponse: false }
                 : cur,
             ),
           );
@@ -842,6 +848,7 @@ export function usePendingMessages({
         accepted: false,
         autoResendAttempted: false,
         heldNotSent: false,
+        gateHeld: false,
         roleRefusal: undefined,
         awaitingResponse: false,
       };
