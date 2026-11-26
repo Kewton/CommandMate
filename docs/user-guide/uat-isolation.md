@@ -13,12 +13,14 @@ UAT や日次の実機確認で CommandMate のサーバーと CLI を動かす�
 | 対象 | `CM_UAT_ISOLATION=1` のときの動き |
 |------|----------------------------------|
 | codex の `hooks.json` と relay | 書かない。本番が書いたものが、このビルドが空のファイルに書く内容とバイト単位で同じ（CommandMate の hook だけ）なら、そのまま使う（送り先は起動時の環境変数 `CM_HOOK_URL` で UAT のサーバーになる）。違えば**起動を拒否する**（セッションの開始が `CM_UAT_ISOLATION=1: refusing to start codex …` で失敗する）。利用者が独自に足した hook が混ざっている場合も拒否する（本番へ直接送る hook もありうるため。拒否の文がその理由を言う）。素の codex も共有の `hooks.json` を読むので、「hook なしで起動」すると本番の信頼済みの hook が動いてしまうため。`CM_AGENT_HOOKS_INJECT=0` との組み合わせも同じ理由で拒否する |
+| 私的な・空の `CODEX_HOME`（`hooks.json` が無い） | codex の**起動を拒否する**（上の行の「無い」に当たる。#3360 の設計どおりで、共有の `CODEX_HOME` に書かず、素の codex は本番の hook を走らせるため。`buildCodexLaunchPlan` の `fallback()`）。codex を起こすには `own-home`（末尾の節）か、下の「codex をサーバーを通さずに測る」の手順を使う |
 | codex の hook の信頼 | 信頼を与えない（与えると codex が `config.toml` に書く）。確認の画面が出たら「信頼せずに続ける」で答え、そのセッションは hook なしになる |
 | antigravity の `~/.gemini/config/hooks.json` | 書かない。CommandMate の hook だけで同じ内容が既にあれば使い、無い・違う・独自の hook が混ざっていれば**起動を拒否する**（agy は共有のファイルを必ず読むため。codex と同じ理由） |
 | copilot の `~/.copilot/settings.json` | 書かない（`.cmate-backup` もロックのファイルも作らない）。このビルドが空のファイルに書く内容とバイト単位で同じ（CommandMate の hook だけ）なら、そのまま使う（相関キーとポートは起動時の環境変数で渡るので、送り先は UAT のサーバーになる）。無い・違う・独自の hook（や他のキー）が混ざっている、または copilot の `config.json` に `hooks` がある（copilot が起動時に `settings.json` へ移して上書きする）・読めない場合は**起動を拒否する**（素の copilot も共有のファイルを必ず読むため。codex と同じ理由）。拒否は tmux のセッションを作る前に判定する。`CM_AGENT_HOOKS_INJECT=0` との組み合わせも拒否する（Issue #3391） |
 | claude | `--setting-sources project,local` を付けて起動する。利用者の `settings.json`（hook とプラグインを含む）は読まれず、CommandMate の `--settings` とリポジトリの `.claude/settings*.json` は読まれる。Schedule と日次まとめの `claude -p` にも同じ制限を付ける |
 | Schedule・日次まとめの `codex exec`・`agy -p` | **実行を拒否する**（実行結果は failed、エラーは `CM_UAT_ISOLATION=1: refusing to start a headless codex run …`）。どちらも共有の `hooks.json` を必ず読み、非対話の実行には送り先（`CM_HOOK_URL`）も相関キーも渡らないので、hook は relay の既定（`CM_PORT`、無ければ 3000 = 本番）へ送る。実行ごとに hook を止める口も送り先を変える口も無い |
 | CLI（`ApiClient` を使うコマンド） | `.env` を一切読まない。`CM_PORT` が無ければ 3000 に送らず exit 2 で止まる |
+| このサーバーから流した verify のゲートの子 | `CM_UAT_ISOLATION`・`CM_UAT_DEDICATED_USER` を渡さない（`NODE_ENV` と同じく CI の形に揃える。#4573）。ゲートの試験は隔離の外の動きで判定される。`CM_PORT` などほかの変数はそのまま渡る |
 
 ## 手順
 
