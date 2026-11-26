@@ -6,8 +6,10 @@
  * Runs only tests affected by the diff plus tests that scan repository files:
  * their union once, split into at most 4 groups by recorded duration (LPT) and
  * run at the same time, each group a serial `vitest run <files>` (Issue #4577).
- * The durations come from vitest's results cache of this worktree, then of the
- * other worktrees of the repository (read only: a new worktree has none).
+ * The durations come from this script's own store (every group's json report,
+ * written after the run: #4594) and vitest's results cache of this worktree,
+ * then of the other worktrees of the repository (read only: a new worktree has
+ * none). vitest's results.json alone keeps only the group that ended last.
  * Changes outside src/ and tests/ do not switch to the whole unit suite
  * (Issue #4467): CI's Unit Tests runs it for every PR.
  * Excludes metadata files (.commandmate/tasks/, dev-reports/, changelog.d/,
@@ -254,6 +256,122 @@ export function readDurationCache({ root }) {
 }
 
 /**
+ * Where this script keeps every file's duration (#4594), apart from vitest's
+ * own results cache: the groups write that one at the same time and only the
+ * last group's files survive there.
+ */
+export const DURATION_STORE = path.join('node_modules', '.cache', 'cm-related', 'durations.json');
+
+const DURATION_STORE_VERSION = 1;
+
+/**
+ * Reads this script's own duration store (#4594). Never throws: a missing or
+ * broken store only means the split uses the other records.
+ *
+ * @param {{ root: string }} options
+ * @returns {{ status: 'ok' | 'missing' | 'corrupt', durations: Map<string, number>, mtimeMs: number, error?: string }}
+ */
+export function readDurationStore({ root }) {
+  /** @type {Map<string, number>} */
+  const durations = new Map();
+  const file = path.join(root, DURATION_STORE);
+  let text;
+  let mtimeMs = 0;
+  try {
+    mtimeMs = fs.statSync(file).mtimeMs;
+    text = fs.readFileSync(file, 'utf-8');
+  } catch (error) {
+    const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { status: 'missing', durations, mtimeMs: 0 };
+    }
+    return { status: 'corrupt', durations, mtimeMs: 0, error: /** @type {Error} */ (error).message };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || parsed.version !== DURATION_STORE_VERSION || !parsed.durations || typeof parsed.durations !== 'object' || Array.isArray(parsed.durations)) {
+      throw new Error('unexpected shape');
+    }
+    for (const [rel, duration] of Object.entries(parsed.durations)) {
+      if (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0) {
+        throw new Error(`unexpected duration for ${rel}`);
+      }
+      durations.set(rel, duration);
+    }
+  } catch (error) {
+    return { status: 'corrupt', durations: new Map(), mtimeMs: 0, error: /** @type {Error} */ (error).message };
+  }
+  return { status: 'ok', durations, mtimeMs };
+}
+
+/**
+ * Writes `durations` into the own store (#4594), over what it already holds:
+ * a file of this run takes this run's value, a file not run keeps its record.
+ * A temp file then a rename, so a reader never sees half a file. Never throws:
+ * a store that cannot be written only means the next split knows less.
+ *
+ * @param {{ root: string, durations: Map<string, number> }} options
+ * @returns {{ status: 'written', count: number } | { status: 'failed', error: string }}
+ */
+export function writeDurationStore({ root, durations }) {
+  const file = path.join(root, DURATION_STORE);
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    const prev = readDurationStore({ root });
+    /** @type {Record<string, number>} */
+    const all = {};
+    for (const [rel, d] of prev.durations) all[rel] = d;
+    for (const [rel, d] of durations) all[rel] = d;
+    const sorted = Object.fromEntries(Object.keys(all).sort().map((k) => [k, all[k]]));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, `${JSON.stringify({ version: DURATION_STORE_VERSION, durations: sorted })}\n`);
+    fs.renameSync(tmp, file);
+    return { status: 'written', count: Object.keys(sorted).length };
+  } catch (error) {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      // best effort
+    }
+    return { status: 'failed', error: /** @type {Error} */ (error).message || String(error) };
+  }
+}
+
+/**
+ * This worktree's durations (#4594): the own store first, then vitest's
+ * results cache for the files the store does not hold. Only a results.json
+ * written after the store (vitest run by hand after the gate) is newer than it:
+ * then its files take its values, as between worktrees the newest record wins.
+ *
+ * @param {{ durations: Map<string, number>, mtimeMs: number }} store
+ * @param {{ durations: Map<string, number>, mtimeMs: number }} cache
+ * @returns {Map<string, number>}
+ */
+export function ownDurations(store, cache) {
+  const [older, newer] = cache.mtimeMs > store.mtimeMs ? [store, cache] : [cache, store];
+  const out = new Map(older.durations);
+  for (const [rel, d] of newer.durations) out.set(rel, d);
+  return out;
+}
+
+/**
+ * A worktree's durations as another worktree reads them (#4594): its own store
+ * first, then its vitest results cache. Same result shape as readDurationCache.
+ *
+ * @param {{ root: string }} options
+ * @returns {{ status: 'ok' | 'missing' | 'corrupt', durations: Map<string, number>, mtimeMs: number }}
+ */
+export function readWorktreeDurations({ root }) {
+  const store = readDurationStore({ root });
+  const cache = readDurationCache({ root });
+  const durations = ownDurations(store, cache);
+  if (durations.size === 0) {
+    return { status: cache.status, durations, mtimeMs: 0 };
+  }
+  return { status: 'ok', durations, mtimeMs: Math.max(store.mtimeMs, cache.mtimeMs) };
+}
+
+/**
  * The other worktrees of the repository `root` belongs to, from
  * `git worktree list --porcelain` (the main checkout included, `root` itself
  * excluded). Throws when git cannot list them.
@@ -293,7 +411,7 @@ export function listOtherWorktrees({ root }) {
  * @returns {{ status: 'ok' | 'unavailable', count: number, peers: { name: string, durations: Map<string, number>, mtimeMs: number }[] }}
  *   peers: the readable caches, newest results.json first; count: the other worktrees found
  */
-export function readPeerDurationCaches({ root, listWorktrees = listOtherWorktrees, readCache = readDurationCache }) {
+export function readPeerDurationCaches({ root, listWorktrees = listOtherWorktrees, readCache = readWorktreeDurations }) {
   let others;
   try {
     others = listWorktrees({ root });
@@ -503,7 +621,7 @@ export function runGroupProcess({ cmd, args, cwd, env, logPath, onChild }) {
  *
  * @param {string} reportPath
  * @param {string} root
- * @returns {{ ran: string[], failed: string[] } | null} null when unreadable
+ * @returns {{ ran: string[], failed: string[], durations: Map<string, number> } | null} null when unreadable
  */
 function readGroupReport(reportPath, root) {
   try {
@@ -511,9 +629,14 @@ function readGroupReport(reportPath, root) {
     if (!json || !Array.isArray(json.testResults)) return null;
     const ran = [];
     const failed = [];
+    /** @type {Map<string, number>} */
+    const durations = new Map();
     for (const file of json.testResults) {
       const rel = toRootRelative(root, String(file.name));
       ran.push(rel);
+      // #4594: vitest's json report gives each file startTime / endTime (ms).
+      const ms = Number(file.endTime) - Number(file.startTime);
+      if (Number.isFinite(ms) && ms >= 0) durations.set(rel, ms);
       const failedCases = (Array.isArray(file.assertionResults) ? file.assertionResults : []).filter(
         (/** @type {{ status: string }} */ a) => a.status === 'failed'
       );
@@ -525,7 +648,7 @@ function readGroupReport(reportPath, root) {
         failed.push(`${rel} > (file failed${first ? `: ${first}` : ''})`);
       }
     }
-    return { ran, failed };
+    return { ran, failed, durations };
   } catch {
     return null;
   }
@@ -561,6 +684,8 @@ function defaultTmpBase() {
  *   runGroup?: typeof runGroupProcess,
  *   readCache?: typeof readDurationCache,
  *   readPeers?: typeof readPeerDurationCaches,
+ *   readStore?: typeof readDurationStore,
+ *   writeStore?: typeof writeDurationStore,
  *   listWorktrees?: typeof listOtherWorktrees,
  *   split?: typeof splitLpt,
  *   mkdtemp?: (prefix: string) => string,
@@ -582,6 +707,8 @@ export async function main(argv, deps = {}) {
   const runGroup = deps.runGroup ?? runGroupProcess;
   const readCache = deps.readCache ?? readDurationCache;
   const readPeers = deps.readPeers ?? readPeerDurationCaches;
+  const readStore = deps.readStore ?? readDurationStore;
+  const writeStore = deps.writeStore ?? writeDurationStore;
   const listWorktrees = deps.listWorktrees ?? listOtherWorktrees;
   const split = deps.split ?? splitLpt;
   const mkdtemp = deps.mkdtemp ?? ((/** @type {string} */ prefix) => fs.mkdtempSync(prefix));
@@ -633,6 +760,8 @@ export async function main(argv, deps = {}) {
   }
 
   const cache = readCache({ root });
+  // #4594: the own store holds every file of the last runs; vitest's cache only the last group's.
+  const store = readStore({ root });
   // #4577 段 2: the other worktrees' caches, read only. Only the split can change.
   /** @type {ReturnType<typeof readPeerDurationCaches>} */
   let peers;
@@ -641,7 +770,7 @@ export async function main(argv, deps = {}) {
   } catch {
     peers = { status: 'unavailable', count: 0, peers: [] };
   }
-  const merged = mergeDurations(union.files, cache.durations, peers.peers);
+  const merged = mergeDurations(union.files, ownDurations(store, cache), peers.peers);
   const plan = split(union.files, merged.durations, maxGroups);
   const n = plan.groups.length;
   log(
@@ -751,6 +880,8 @@ export async function main(argv, deps = {}) {
     let failedAny = false;
     /** @type {string[]} */
     const failedTests = [];
+    /** @type {Map<string, number>} */
+    const ranDurations = new Map();
     /** @type {string[]} */
     const groupLines = [];
     results.forEach((r, i) => {
@@ -782,10 +913,19 @@ export async function main(argv, deps = {}) {
       if (extra.length > 0) line += ` extra=${extra.length}(${extra.slice(0, 3).join(',')})`;
       groupLines.push(line);
       if (report) failedTests.push(...report.failed);
+      if (report) for (const [rel, d] of report.durations) ranDurations.set(rel, d);
     });
 
     for (const line of groupLines) log(line);
     for (const name of failedTests) log(`${LOG_PREFIX} failed ${name}`);
+    // #4594: every group's durations in one place. Only the next split can change.
+    if (store.status === 'corrupt') {
+      log(`${LOG_PREFIX} durations-store unreadable (${store.error ?? 'corrupt'}): rewritten from this run`);
+    }
+    if (ranDurations.size > 0) {
+      const written = writeStore({ root, durations: ranDurations });
+      if (written.status === 'failed') log(`${LOG_PREFIX} durations-store not written: ${written.error}`);
+    }
     const code = failedAny ? 1 : 0;
     log(`${LOG_PREFIX} result exit=${code} groups=${n} union=${union.files.length}`);
     return code;
