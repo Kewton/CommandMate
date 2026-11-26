@@ -99,6 +99,7 @@
 import { createLogger } from '@/lib/logger';
 import { findNumberedOptionBlock } from '../dialog-block';
 import { stripAnsi } from '../../ansi';
+import { findCodexInputBox } from '../../composer-text';
 
 const logger = createLogger('codex-dialog-rules');
 
@@ -467,6 +468,8 @@ const CODEX_NUMBERED_GLYPH_ROW_PATTERN = /^\s*›\s*\d{1,2}[.)]\s/;
  * (`tests/unit/guards/import-cycles-baseline-3482.test.ts`).
  * `codex-stale-composer-approval-4573.test.ts` pins both copies to the
  * originals' source and flags, so a change to either fails there.
+ * The patterns are the same; the rows they are tried on are not — see
+ * {@link isStaleComposerRow} for that range.
  */
 export const CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS: readonly RegExp[] = [
   /^\s*\S.*·\s*~?\/\S*\s*$/,
@@ -488,14 +491,31 @@ export const CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS: readonly RegExp[] = [
  * tc104 has `› 1. Yes, proceed (y)` TYPED INTO the composer's continuation
  * rows, below the composer and above the bar, and that composer is the live
  * one.
+ *
+ * Where the bar is looked for: ONLY the first non-blank row after the
+ * composer's input box ends. The box is the one `live-region.ts`'s
+ * `findCodexComposerEndRow` reads — `composer-text.ts`'s
+ * {@link findCodexInputBox} when it starts at `composerRow`, otherwise the
+ * composer row alone (a stale composer is too far up for that bottom-up
+ * search, so it is one row and its bar is the row right under it). A row that
+ * merely looks like a bar inside the box (`  gpt-5 default · ~/repo` typed
+ * above a typed `› 1.`, review P2-1) is the user's text, not the bar.
+ * This range differs from `findCodexFooterBoundary`'s, which takes the bottom-
+ * most bar within the last 10 content rows: that one locates the CURRENT
+ * screen's footer; this one asks whether the bar right under THIS composer
+ * closes its screen, wherever in the capture the composer sits.
  */
-function isStaleComposerRow(rawRows: readonly string[], composerRow: number): boolean {
-  const below = rawRows.slice(composerRow + 1).map(row => stripAnsi(row));
-  const bar = below.findIndex(row =>
-    CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS.some(pattern => pattern.test(row)),
-  );
-  if (bar < 0) return false;
-  return below.slice(bar + 1).some(row => CODEX_NUMBERED_GLYPH_ROW_PATTERN.test(row));
+function isStaleComposerRow(rawRows: string[], composerRow: number): boolean {
+  const box = findCodexInputBox(rawRows);
+  const boxEnd = box !== null && box.firstRow === composerRow ? box.lastRow : composerRow;
+  let bar = boxEnd + 1;
+  while (bar < rawRows.length && stripAnsi(rawRows[bar]).trim() === '') bar++;
+  if (bar >= rawRows.length) return false;
+  const barText = stripAnsi(rawRows[bar]);
+  if (!CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS.some(pattern => pattern.test(barText))) return false;
+  return rawRows
+    .slice(bar + 1)
+    .some(row => CODEX_NUMBERED_GLYPH_ROW_PATTERN.test(stripAnsi(row)));
 }
 
 /**
