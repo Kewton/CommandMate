@@ -335,6 +335,8 @@ drain_group G:
 | `handoff-watch` | bash | 見張りの `kill -0 -G`（`ack` の前） | G が空と読まない: 見張りを続ける（signal は送らない） |
 | `gen-realpath` | TS・同期 JS | ロックの親と root の realpath（鎖の選び。C7） | 鎖を選ばない: 取らない。次の周で読み直す（字面のパスへ落とさない） |
 | `gen-list` | TS・同期 JS | <name>.gen の一覧（最大の世代） | 世代が無いと読まない: その周回は世代を作らない（取らない） |
+| `gen-root-mkdir` | TS・同期 JS | マシンのロックの root の mkdir -p（鎖を選ぶ前。#4559 r7、PM の処分 4） | 鎖を選ばない: 取らない・D5 は deferred・D6 は kept。自分の点で名指す（gen-realpath ENOENT と名指さない） |
+| `gen-parent-mkdir` | TS・同期 JS | mkdir <root>/by-path（.gen の親。名前の鎖では root で EEXIST。#4559 r7 a2 P3-6） | 取らない（点・パス・errno を名指す。取得の外へ投げない） |
 | `gen-dir-mkdir` | TS・同期 JS | mkdir <name>.gen（無いときだけ） | 取らない（点・パス・errno を名指す） |
 | `gen-end-read` | TS・同期 JS | 最大の世代の end の lstat | 終わったと読まない: 回収も次の世代の mkdir もしない |
 | `gen-mkdir` | TS・同期 JS | mkdir g<M+1> | 取らない（作られたなら持ち主の無い世代: 猶予の後に墓） |
