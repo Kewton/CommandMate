@@ -29,9 +29,9 @@
  * Rows on which the two readers disagree (the human's decision on #4535, 2026-11-24 21:47):
  * - Intended (D1, D5): each reader's own answer is pinned, with the reason, in the last but one
  *   `describe`. They are not bugs.
- * - To fix in S12 (D2–D4, https://github.com/Kewton/CommandMate/issues/4603): the 2xx that are not
- *   a ChatMessage. Listed as `it.todo` in the last `describe`, not asserted either way.
- * Neither reader was changed.
+ * - Fixed in S12 (D2–D4, https://github.com/Kewton/CommandMate/issues/4603): the 2xx that are not
+ *   a ChatMessage. The screen's send now reads them as the CLI does (unknown); asserted in the last
+ *   `describe` but one. Only the screen's `worktreeApi.sendMessage` changed (#4603); the CLI did not.
  *
  * Issue #4535 r5 (review H3): the New task dialog is a third reader — `interpretSendResponse` on the
  * same `Response`, and `sendNewTask` on the same transport failure. It reads every row as the screen's
@@ -189,9 +189,10 @@ const INTENDED_DIVERGENCES: IntendedDivergence[] = [
 ];
 
 /**
- * D2–D4 (S4, the 2xx that are not a ChatMessage): the CLI says unknown, the screen does not. To fix
- * in S12, https://github.com/Kewton/CommandMate/issues/4603 (`src/lib/api-client.ts`'s 2xx branch).
- * Not asserted either way until then.
+ * D2–D4 (S4, the 2xx that are not a ChatMessage): the CLI says unknown. Fixed in S12,
+ * https://github.com/Kewton/CommandMate/issues/4603: the screen's send rejects on them with an
+ * `ApiError` carrying `sendOutcome: 'unknown'`, so the screen says unknown too. `why` is how the
+ * screen read each row before #4603.
  */
 const S12_DIVERGENT_ROWS: { id: string; answer: WireAnswer; why: string }[] = [
   {
@@ -353,9 +354,15 @@ describe('[#4535 INV-S3] intended differences (D1, D5): each reader keeps its ow
 });
 
 describe('[#4535 INV-S3] 2xx that are not a ChatMessage (D2–D4) — to fix in S12, #4603', () => {
-  for (const d of S12_DIVERGENT_ROWS) {
-    it.todo(`${d.id} ${d.answer.row} ${d.answer.name}: ${d.why} (S12, https://github.com/Kewton/CommandMate/issues/4603)`);
-  }
+  it.each(S12_DIVERGENT_ROWS.map((d) => [`${d.id} ${d.answer.row} ${d.answer.name}`, d] as const))(
+    '%s: the screen reads unknown, as the CLI (#4603)',
+    async (_name, d) => {
+      expect(readCli(d.answer)).toBe('unknown');
+      const error = await screenErrorFor(d.answer);
+      expect(error, `the screen rejects on this answer (before #4603: ${d.why})`).toBeInstanceOf(ApiError);
+      expect(screenFact(isSendOutcomeUnknown, error)).toBe('unknown');
+    }
+  );
 });
 
 /** The dialog's fact: `unknown` ⇔ kind `unknown`; any other failure is "not sent"; ok is sent. */
