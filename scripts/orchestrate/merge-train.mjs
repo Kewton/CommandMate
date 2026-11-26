@@ -40,7 +40,7 @@ import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, findLatest, inItem, readRecords } from './run-log.mjs';
-import { acquireMachineLockSync, describeOwner, lockPathOf, readOwner } from './machine-lock-sync.mjs';
+import { acquireMachineLockSync, describeOwner, lockPathOf, readHolder } from './machine-lock-sync.mjs';
 import { machineLockRoot, main as runPrecheckMain, optionsFromNote } from './precheck.mjs';
 import {
   DEFAULT_CI_TIMEOUT_SEC,
@@ -857,7 +857,7 @@ export function main(argv, deps = {}) {
     warn: (line) => log(`train lock: ${line}`),
   });
   if (!lock.acquired) {
-    const owner = readOwner(lockPathOf(root, lockName));
+    const owner = readHolder(lockPathOf(root, lockName));
     trainLine('fail', 'lock-timeout', null, `waited=${Math.round((lock.waitedMs ?? 0) / 1000)}s`);
     return early(124, `train lock ${lockName} held by ${owner ? `${describeOwner(owner)}${owner.pgid ? ` (pgid ${owner.pgid})` : ''}` : lock.heldBy ?? 'nobody readable'} (--lock-timeout ${o.lockTimeout})`);
   }

@@ -152,6 +152,9 @@ const KV_CODEC = {
       // I9: the writer's version (`v=1` from PR1a-f on); a record without it is an older copy's (named once by the reader).
       ...(/^[0-9]+$/.test(fields.get('v') ?? '') ? { v: Number(fields.get('v')) } : {}),
       ...(fields.has('pgid') ? { pgid: /^[0-9]+$/.test(fields.get('pgid') ?? '') ? Number(fields.get('pgid')) : Number.NaN } : {}),
+      // #4559 (§3): the generation the record belongs to (`g=`), and a tomb's mark (`tomb=1`, §4.4).
+      ...(/^[0-9]+$/.test(fields.get('g') ?? '') ? { g: Number(fields.get('g')) } : {}),
+      ...(fields.get('tomb') === '1' ? { tomb: 1 } : {}),
     };
   },
   format(record: Record<string, unknown>): string {
@@ -162,6 +165,8 @@ const KV_CODEC = {
     if (typeof record.label === 'string') lines.push(`label=${record.label}`);
     if (typeof record.runDir === 'string' && record.runDir) lines.push(`run_dir=${record.runDir}`);
     if (typeof record.pgid === 'number') lines.push(`pgid=${record.pgid}`);
+    if (typeof record.g === 'number') lines.push(`g=${record.g}`);
+    if (record.tomb === 1) lines.push('tomb=1');
     return `${lines.join('\n')}\n`;
   },
 };
