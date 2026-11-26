@@ -164,7 +164,7 @@
 | S1 | 2xx・JSON・ChatMessage の形（`id` が文字列、`role: 'user'`）で、`sendOutcome` が無いか `sent` | `sent` | `sent`（形を見ない） |
 | S2 | 2xx・JSON・ChatMessage の形・`sendOutcome: 'unknown'` | 送信の事実は **`sent`**（exit 0、再送しない）。relay の観測が `unknown`（返答の下限を言えない: `noInputBoundary`、`relay-bind.ts:352–361`）。今どおり relay を残し `printRelayUnconfirmedNotice` を出す | 同じ（`message-dispatch.ts:193`）。A1 の後は OpenCode の unknown の後の fallback がこれを作らなくなる |
 | S3 | 200・JSON・`ask.sendState`（F-a。冪等の答え） | `sent`→`sent`、`not_sent`→`not_sent`、`reserved`・`send_unknown`・その他→`unknown` | 形を見ずに成功 |
-| S4 | 2xx で上に当たらない（空・非 JSON・JSON だが形が違う） | `unknown` | 空は `sent`、非 JSON は状態の無い失敗 |
+| S4 | 2xx で上に当たらない（空・非 JSON・JSON だが形が違う） | `unknown`。画面も unknown（#4603: `worktreeApi.sendMessage` は S1・S2 の形〔`id` が空でない文字列、`role: 'user'`〕のときだけ解決し、ほかの 2xx〔一致の試験の D2〜D4〕は `sendOutcome: 'unknown'` の `ApiError` にする。送信以外の `fetchApi` の読みは変えない） | 空は `sent`、非 JSON は状態の無い失敗 |
 | N1 | 非 2xx・JSON・`sendOutcome: 'not_sent'` | `not_sent` | 同じ |
 | N2 | 409・`code: SEND_TARGET_CHANGED`・`sendOutcome: 'not_sent'`（#4534） | `not_sent`（exit 34） | 同じ |
 | N3 | 409・`code: TOOL_POLICY_DENIED`（`sendOutcome: 'not_sent'` 付き、#4437） | `not_sent`（exit 33） | 同じ |
