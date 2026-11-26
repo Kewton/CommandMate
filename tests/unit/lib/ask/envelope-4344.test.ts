@@ -50,6 +50,23 @@ describe('M2 negative controls: text without an envelope at its place is untouch
   });
 });
 
+describe('#4582: Claude Code records a multi-line send as a paste with two newlines outside it', () => {
+  it('skips the leading blank lines and takes the envelope off', () => {
+    expect(stripAskEnvelope(`\n\n${formatAskEnvelope(ASK)}\nbody`)).toEqual({ askId: ASK, text: '\n\nbody' });
+  });
+
+  it('skips the leading blank lines before a brief and takes the envelope after it off', () => {
+    expect(stripAskEnvelope(`\n\n${BRIEF}\n\n${formatAskEnvelope(ASK)}\nbody`)).toEqual({
+      askId: ASK,
+      text: `\n\n${BRIEF}\n\nbody`,
+    });
+  });
+
+  it('only the leading blank lines are skipped: an envelope after text is still not taken off', () => {
+    expect(stripAskEnvelope(`\n\ntext\n${formatAskEnvelope(ASK)}`)).toBeNull();
+  });
+});
+
 describe('M4: command bodies carry no envelope', () => {
   it.each(['/compact', '/model opus', '!ls', '#memo'])('%s is a command body', (body) => {
     expect(isAskCommandBody(body)).toBe(true);
