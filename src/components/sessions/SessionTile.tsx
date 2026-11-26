@@ -513,6 +513,13 @@ function SessionTileCard({
   // Issue #4604＋#4606 r3c: the holds now, for the tile's one gate (`sendThroughStaleTargetGate`).
   const staleHoldsRef = useRef(keptHolds);
   staleHoldsRef.current = keptHolds;
+  // r4 (INV-P2): whether a To is held, read when it is asked (the tile's record, at once after a 409) —
+  // the tile's gate and the composer's gate (its awaited send, the brief's choice) ask the same.
+  const isSendHeld = useCallback(
+    (to: { instanceId: string; cliToolId: string }) =>
+      staleHoldsRef.current.some((hold) => hold.instanceId === to.instanceId && hold.cliToolId === to.cliToolId),
+    [],
+  );
   const holdStaleTarget = useCallback((refusal: SendTargetChangedRefusal) => {
     const target = refusal.target;
     // The roster's reasons only (the instance went, its tool changed): a roster read again settles them.
@@ -594,8 +601,7 @@ function SessionTileCard({
   // answers "not sent" (`SEND_HELD_BY_GATE`) and the row stays, waiting, for a retry after the fetch.
   const sendThroughStaleTargetGate = useCallback(
     async (content: string, options: OptimisticSendOptions) => {
-      const to = options.instanceId ?? options.cliToolId;
-      if (staleHoldsRef.current.some((hold) => hold.instanceId === to && hold.cliToolId === options.cliToolId)) {
+      if (isSendHeld({ instanceId: options.instanceId ?? options.cliToolId, cliToolId: options.cliToolId })) {
         return SEND_HELD_BY_GATE;
       }
       try {
@@ -607,7 +613,7 @@ function SessionTileCard({
         throw error;
       }
     },
-    [worktree.id],
+    [worktree.id, isSendHeld],
   );
   // Text headed for the composer: a discarded send (so it can be edited and
   // sent again), a send refused because of its role (Issue #4385) or a previous
@@ -1108,6 +1114,7 @@ function SessionTileCard({
             // Issue #4606: the fence's answer holds the target until the roster is read again.
             onSendTargetChanged={holdStaleTarget}
             sendBlockedReason={sendHeld ? tWorktree('composer.sendTargetRefreshing') : null}
+            isSendHeld={isSendHeld}
             autoYesSlot={
               <AutoYesToggle
                 enabled={autoYes.enabled}

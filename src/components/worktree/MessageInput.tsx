@@ -229,6 +229,12 @@ export interface MessageInputProps {
    * fence just said changed, until its roster is read again.
    */
   sendBlockedReason?: string | null;
+  /**
+   * Issue #4606 r4 (INV-P2): whether the tile holds this To now — read by the composer's one gate at the
+   * moment a POST leaves (from the tile's own record, never a render's copy: a hold that came after the
+   * last render stops the send too). Callers without a hold (the worktree screen) pass nothing.
+   */
+  isSendHeld?: (to: { instanceId: string; cliToolId: string }) => boolean;
 }
 
 /**
@@ -423,7 +429,7 @@ function writeSendUnknownMark(draftKey: string, mark: SendUnknownMark | null): v
   } catch { /* localStorage unavailable */ }
 }
 
-export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false, onSendTargetChanged, sendBlockedReason = null }: MessageInputProps) {
+export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSent, cliToolId, instanceId, isSessionRunning = false, isSessionStarting = false, pendingInsertText, onInsertConsumed, splitIndex = 0, draftScope = 'split', onFocus, isProcessing = false, showToast, autoYesSlot, agentModeSlot, directInputSlot, onOptimisticSend, heightScope, maxHeight, planReviewActive = false, onSendTargetChanged, sendBlockedReason = null, isSendHeld }: MessageInputProps) {
   const t = useTranslations('worktree');
   const tc = useTranslations('common');
   const [sending, setSending] = useState(false);
@@ -722,10 +728,6 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setRetargetAsk({ original: decision.original, current, confirmation, target: sendTargetKey, seen: [], ids: decision.ids });
     return null;
   }, [instanceId, cliToolId, currentRetargetTags, heldUnknownOf, sendTargetKey]);
-  // Issue #4606 r3c: the hold the tile says now — read by the gate at the moment a POST leaves (a hold
-  // that came up while a send waited stops it; it only ever stops, never lets a send through).
-  const sendBlockedReasonRef = useRef(sendBlockedReason);
-  sendBlockedReasonRef.current = sendBlockedReason;
   /**
    * Issue #4604＋#4606 r3c (INV-P): the composer's one gate, at the moment its POST leaves or is handed
    * to the optimistic layer — every road through it (Enter, [send], the form, the band's [yes], #4503's
@@ -733,13 +735,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
    * the marks of the draft `key` are checked again now (one born while the preview was read asks). Its
    * answer: what the passing check saw and the ids this send lets go, or null — not sent (the draft
    * stays; a question may be up).
+   * r4 (INV-P2): the hold is read when the gate is called, from the tile (`isSendHeld`) — the To is this
+   * closure's, the one the POST's options are built from.
    */
   const checkGate = useCallback((key: string, unreadableYes: RetargetUnknownYes | null): { seen: string[] | null; ids: string[] } | null => {
-    if (sendBlockedReasonRef.current) return null;
+    if (isSendHeld?.({ instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' })) return null;
     const pass = holdsRetargetedSend(unreadableYes, key);
     if (pass === null) return null;
     return { seen: pass.seen, ids: currentRetargetTags(key).map((tag) => tag.id) };
-  }, [holdsRetargetedSend, currentRetargetTags]);
+  }, [isSendHeld, instanceId, cliToolId, holdsRetargetedSend, currentRetargetTags]);
   /** r3c: the composer's one `POST /send` — only through {@link checkGate}; `sent: false` when it did not go. */
   const postThroughGate = useCallback(async (
     key: string,
