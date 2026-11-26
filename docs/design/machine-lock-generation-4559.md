@@ -50,7 +50,7 @@
 - パスで名付けたロック（run-lock `$TMPDIR/commandmate-run.lock`・supervisor.lock）の `.gen` は `$TMPDIR` の外、`<root>/by-path/<hash>.gen` に置く（root は名前で取るロックと同じ。`CM_VERIFY_LOCK_ROOT`、無ければ `~/.commandmate/locks`。`$TMPDIR` の掃除で `.gen` が消えると L1 が崩れるため）。hash の元は C7
 - **どちらの置き場かはロックのパスだけで決まる**（PR-2 の実装で決めた）: ロックの親ディレクトリの realpath が root の realpath と同じで、名前が `<name>.lock` なら `<root>/<name>.gen`、それ以外は `<root>/by-path/<hash>.gen`。呼び手が名前（root と name）で取るか、パス（`lockPath`）で取るかに依らない。同じロックを名前で取る者とパスで取る者が別々の鎖を持つと L1 が崩れる（C7）ため
 - **比べるのはディレクトリの実体（PR-2 の直し r6、C7-I1）**: 親と root の realpath は native の realpath（`fs.realpathSync.native`。ディレクトリ自身の綴りを返す）で観測し、その path を比べる（by-path の hash の元の親も同じ path）。大小を区別しないファイルシステム（APFS の既定）で、root を別の大小で綴った lockPath・大小だけ違う `CM_VERIFY_LOCK_ROOT`・親を大小違いで綴った by-path のロックが、同じ実体なら同じ鎖になる（JS の realpath は呼び手の綴りを返すので、文字列の等号が別の鎖を選んでいた）
-- **ロックの名前（base 名）も実体の綴りで（PR-2 の直し r6、D2。人の決定 #4559 コメント 7185752051 の案 (i)）**: ロックが在れば（`gen-base-lstat`）親のディレクトリを読み（`gen-base-list`）、ロックと同じ実体（dev と ino）の項目の綴りを base 名にする。FS が大小を区別するかは判定しない: 区別しない FS では `X.lock` と `x.lock` は 1 つの項目で鎖が 1 本、区別する FS では 2 つの項目で別のロック・別の鎖のまま。ロックが無ければ与えられた名前のまま（読む綴りが無い）。親の読みが失敗した・同じ実体の項目が見つからない周は、C7-I2 と同じく不明として鎖を選ばない。残る形: 大小を区別しない FS で、ロックがまだ無い間に別の綴りの 2 者が同時に鎖を選ぶと、名前の鎖・by-path が 2 本になりうる（目印の `mkdir` が S1 を守る。混在の後の M3 では目印が無いので、そこで名指す）
+- **ロックの名前（base 名）は常に小文字に寄せる（PR-2 の直し r6、D2。人の決定 #4559 コメント 7186934798）**: 名前の鎖の決め（`<name>.lock` か）と by-path の hash の元では、ロックの base 名を小文字にして使う。実体の綴りは読まず、FS が大小を区別するかも判定しない。大小を区別しない FS では `X.lock` と `x.lock` は 1 つのロックで、ロックがまだ無い間に 2 者が同時に鎖を選んでも鎖は 1 本（前の案 (i)〔親を読んで実体の綴りを取る〕に残っていた、ロックの無い間の 2 本の鎖は閉じた）。代わりに、大小を区別する FS で大小だけ違う 2 つの別のロック（同じ親）は 1 本の鎖を共にし、互いに待ち合う（安全の側。活性だけの費用として名指す）
 - **root の realpath が resolved でなければ選ばない（PR-2 の直し r6、C7-I2）**: 親と同じく、root の realpath が不明（EIO など）でも無い（ENOENT）でも、名前の鎖も by-path も選ばない（その周は取らず、`gen-realpath` と root のパスを名指し、次の周で読み直す）。取得は観測の前に root を `mkdir -p` で作る（by-path の鎖は root の中に置く。run-lock のロックは root の外なので、root の無い機械でも取れるように）。だから root が無いのは、作れない（親の権限など）か、観測の間に消された・綴りが違うときだけ
 - 試験の口 `hooks.genDir` は試験だけが渡す（C7-I4。本物の入口の run-lock・TS・merge-pr・merge-train が渡さないことを T2 の走査で固定する）。鎖が不明のとき（C7-I3）は、鎖に依る判断（世代の取得・`end`・世代の保有者の読み）を進めない。保有者でない者の解放・回収（D5・D6）は世代に何も書かず作らない
 - **C7 の前提（#4559 コメント 7183455133）**: S1・S2 の証明は、同じロックの書き手がみな同じ鎖を見ることを前提にする。そのため親と root の realpath は観測（`gen-realpath`）で、失敗は不明として名指し、鎖を選ばずに取らず、次の周で読み直す（字面のパスへ落とさない）。鎖の置き場の明示（`hooks.genDir`）は試験の口だけで、呼び手・TS からは渡らない
@@ -190,7 +190,7 @@
 - 常駐 `../commandmate-agent-health`（PR1b・PR1c より前）、PR1c より前の worktree、PR1b より前の `run-lock.sh`、PR1c より前の `lib.sh`
 
 ### 6.5 `mixed` の行（旧い版との間に残る窓）
-状態: `open` は混在の間ずっと残る、`closed` は案 A で閉じた、`later-PR` は後の PR（M3）で狭める。行は PR ごとに足す（T7 が解析する）。
+状態: `open` は混在の間ずっと残る、`closed` は案 A で閉じた、`later-PR` は後の PR（PR-3 の bash の世代化、または M3）で閉じる・狭める。行は PR ごとに足す（T7 が解析する）。
 
 | 行 | 相手の版（旧い書き手） | Issue | 状態 | 形 |
 |---|---|---|---|---|
@@ -203,6 +203,12 @@
 | STALE-NEST | `run_lock_take_stale`・`product_lock_take_stale` を持つ旧い `run-lock.sh`・`lib.sh` | #4559 | open | 旧い `.stale.*` の戻し（`[ -e "$dir" ] \|\| mv "$aside" "$dir"`）の確かめと mv の間に新版が目印を `mkdir` すると、退避が目印の中に入れ子になる |
 | M3-ERASE | PR1b より前の `run-lock.sh`（`ffcb54d05`）・PR1c より前の `lib.sh`（`5507b811e`） | #4559 | later-PR | M3 の塞ぎ（ファイル）を 1 分より古ければ消して取る（止まり無しで 2 者）。M3 を `~/.commandmate/locks` の名前に限って道ごと消す。M3 の PR で行として固定する |
 | TICKET-DONE | 札の規約で待つ旧い版の書き手（develop の今の 3 実装） | #4560 | open | 札の done の照合 → `mv -f`（`lock_mark_done`）。新版どうしでは安全を世代が決めるので害にならず、旧い版との間でだけ札の取り違えとして残る |
+| OLD-W-MV | 止まった旧い書き手（ticket の無い PR1b より前の `run-lock.sh`・supervisor.lock の書き手・汎用シェルに読み込んだ旧い写し） | #4559 | later-PR | 止まった旧い書き手が戻り、後継の目印の owner を名前で `mv -f` して置き換える（表 F の F49・F71）。PR-3（bash の世代化）で閉じる |
+| OLD-W-APPEND | 止まった PR1a の書き手（`: >` の後に `cat >>`、失敗で `rm -f owner`） | #4559 | later-PR | 札を外された旧い書き手が戻り、後継の目印の owner に名前で追記する・名前で消す（F50）。PR-3（bash の世代化）で閉じる |
+| OLD-W-INODE | PR1a より前の写し（`printf > owner`、旧い cmate-verify） | #4559 | later-PR | owner を開いた後に止まった旧い書き手が戻り、消された inode へ書いて持ったと信じる（F51）。PR-3（bash の世代化）で閉じる |
+| OLD-W-RMRF | 時計が戻った旧い書き手（PR1b より前の `run-lock.sh` など） | #4559 | later-PR | tmp を古いと読まれて外された旧い書き手が戻り、後始末の `rm -rf "$dir"` で後継の目印を名前で消す（F55）。PR-3（bash の世代化）で閉じる |
+| OLD-W-UNDO-CREATE | owner を名前で作る旧い書き手（`: >`・`printf >`） | #4559 | later-PR | 目印の公開の取り消し（undo）で owner が退いた瞬間に、旧い書き手が名前で owner を作り、戻しの link が EEXIST になる（F58）。PR-3（bash の世代化）で閉じる |
+| OLD-PUTBACK-OVERLAP | 目印の戻しを持つ旧い版（#4288 の 3 実装の旧い写し） | #4559 | later-PR | 新版どうしは L4 で閉じた F69 の形が、目印の上で旧い版の戻しと重なる所に残る（空いた名前への公開と戻しの EEXIST で 2 者。F69）。PR-3（bash の世代化）で閉じる |
 
 ---
 
