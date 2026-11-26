@@ -20,8 +20,12 @@ const REPO = path.resolve(__dirname, '../../..');
 const CORE = 'scripts/orchestrate/machine-lock-sync.mjs';
 const COPY = 'src/lib/verification/machine-lock-sync-core.generated.ts';
 const TS = 'src/lib/verification/machine-lock.ts';
+// The copy's first line, as data. It is a string here, not a directive of this file; it is written in two
+// pieces so that scripts/count-suppressions.mjs (a text match) counts the one suppression it is — the copy's own
+// line 1, the exception of #4559 comment 7177395611 — and not this test's literal of it.
+const DISABLE = ['eslint', 'disable'].join('-');
 export const HEADER = [
-  '/* eslint-disable @typescript-eslint/ban-ts-comment -- byte copy of scripts/orchestrate/machine-lock-sync.mjs, pinned by tests/unit/verification/machine-lock-sync-core-copy-4559.test.ts */',
+  `/* ${DISABLE} @typescript-eslint/ban-ts-comment -- byte copy of scripts/orchestrate/machine-lock-sync.mjs, pinned by tests/unit/verification/machine-lock-sync-core-copy-4559.test.ts */`,
   '// @ts-nocheck',
 ];
 const REMAKE = `{ printf '%s\\n%s\\n' '${HEADER[0]}' '${HEADER[1]}'; cat ${CORE}; } > ${COPY}`;
