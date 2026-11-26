@@ -195,6 +195,17 @@ describe('[#4604+#4606 r4] every `/send` from a tile or a composer goes through 
     expect(body).not.toMatch(/sendBlockedReasonRef/);
   });
 
+  it('[#4606 r4e] the tile\'s record of holds is the first value: every write to `staleHoldsRef.current` starts from it, never a render\'s list', () => {
+    const tile = stripComments(readFileSync(join(ROOT, 'src/components/sessions/SessionTile.tsx'), 'utf8'));
+    // The right-hand side of each `staleHoldsRef.current =` (not `==`), up to the end of its statement.
+    const writes = [...tile.matchAll(/\bstaleHoldsRef\.current\s*=(?!=)([^;]*);/g)].map((m) => m[1].trim());
+    expect(writes.length).toBeGreaterThan(0);
+    for (const rhs of writes) {
+      expect(rhs, rhs).toMatch(/^(?:withHold|nextStaleTargetHolds)\(\s*staleHoldsRef\.current\b/);
+      expect(rhs, rhs).not.toMatch(/\b(?:keptHolds|staleHolds)\b/);
+    }
+  });
+
   it('elsewhere in `src/`: the call positions are the pinned ones, by file and count', () => {
     expect(Object.fromEntries(callSites())).toEqual(PINNED);
   });

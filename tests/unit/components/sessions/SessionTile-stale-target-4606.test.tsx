@@ -29,6 +29,7 @@
  * @vitest-environment jsdom
  */
 import React from 'react';
+import { flushSync } from 'react-dom';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
@@ -601,6 +602,59 @@ describe('[#4606 r4 Q-1] a send pressed after the hold is in the tile, before th
     await flush(80);
     expect(posts.slice(2).filter(toX)).toEqual([]);
     expect(ta().value).toBe('!ls -la');
+  });
+});
+
+// r4d/r4e (INV-P2): the tile's record of holds is the first value — a render that does not take the 409's
+// state update must not put its copy back over it. Kept as a control: green before the fix too (React
+// 19.2.7 renders the Default-lane 409 update with any urgent render, so the window is not open now).
+describe('[#4606 r4d] a render that has not taken the 409 does not undo the hold', () => {
+  it('an urgent render of the tile between the 409 and Enter: nothing is POSTed to X; after the roster is read, it sends (control)', async () => {
+    const pendingRefresh = deferred<void>();
+    const refresh = vi.fn(() => pendingRefresh.promise);
+    provider.value = { refresh };
+    roster = { 'codex-2': 'codex', claude: 'claude' };
+    current = worktree(roster);
+    shownId = 'codex-2';
+    view = render(tree());
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    // As in Q-1: the first send is refused for another reason, its [retry] is answered by the fence (a
+    // retry hands no text back), and the text to press next is a command (no preview to wait for).
+    fireEvent.change(ta(), { target: { value: 'first' } });
+    await flush(30);
+    answers.push(() => json(409, { error: 'prompt waiting', code: 'PROMPT_WAITING', sendOutcome: 'not_sent' }));
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(posts).toHaveLength(1));
+    await flush(80);
+    const retried = deferred<Response>();
+    answers.push(() => retried.promise);
+    fireEvent.click(screen.getByTestId('chat-pending-retry'));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    fireEvent.change(ta(), { target: { value: '!ls -la' } });
+    await flush(30);
+    const urgent = screen.getByTestId(`session-tile-surface-terminal-${WT}`);
+    // Outside `act`: the 409 is handled in microtasks (the hold goes into the tile's ref); the tile asks
+    // for the roster, which stays pending.
+    retried.resolve(json(409, fenceBody('tool-changed', 'codex-2', 'codex')));
+    for (let i = 0; i < 500 && refresh.mock.calls.length === 0; i++) await Promise.resolve();
+    expect(refresh).toHaveBeenCalled();
+    // An urgent update of the tile's own state, rendered now, then Enter — both outside `act`.
+    flushSync(() => {
+      urgent.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    ta().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+    await flush(80);
+    expect(posts.slice(2).filter(toX)).toEqual([]);
+    // (control) the roster is read again: the hold goes, and Enter sends.
+    await act(async () => {
+      pendingRefresh.resolve();
+    });
+    await readRoster({ 'codex-2': 'codex', claude: 'claude' });
+    await flush(30);
+    fireEvent.change(ta(), { target: { value: '!ls -la' } });
+    await flush(30);
+    expect(await enterOnce()).toBe(1);
+    expect(posts.slice(2).filter(toX)).toHaveLength(1);
   });
 });
 
