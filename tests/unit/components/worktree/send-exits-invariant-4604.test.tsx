@@ -358,6 +358,9 @@ function Composer({ name, to, blocked }: { name: string; to: Target; blocked: bo
         isSessionRunning
         onMessageSent={vi.fn()}
         sendBlockedReason={blocked ? HELD_REASON : null}
+        // r4 (INV-P2): as the tile does — the hold's own record, read when the gate is called (the bench
+        // sets it the moment the hold comes, before it renders the composer with the sentence).
+        isSendHeld={() => oracle.composerHeld}
       />
     </div>
   );
