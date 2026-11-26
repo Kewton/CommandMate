@@ -307,9 +307,6 @@ const genNotTaken = (end: boolean | null = null): Pick<Scenario, 'injected' | 'c
 const GEN_SCENARIOS: Record<string, Scenario> = {
   'gen-realpath': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-list': { code: 'EIO', setup: () => {}, ...genNotTaken() },
-
-    control: (r) => expect(r.acquired).toBe(true),
-  },
   'gen-dir-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-tmp-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
