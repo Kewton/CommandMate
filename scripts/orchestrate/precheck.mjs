@@ -383,8 +383,52 @@ export function estimateRelatedTests(worktree, sources) {
 }
 
 /**
+ * The content of a test call's first argument when it is a string literal
+ * (`'…'`, `"…"`, `` `…` ``), or null when the call has no readable name.
+ * Hand-read rather than matched, so an escaped quote does not end the literal
+ * early and an unterminated one yields null (a line compared whole).
+ */
+function firstStringLiteral(text) {
+  const opening = /^\s*(['"`])/.exec(text);
+  if (!opening) return null;
+  const quote = opening[1];
+  let out = '';
+  for (let i = opening[0].length; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\') {
+      out += ch + (text[i + 1] ?? '');
+      i++;
+    } else if (ch === quote) {
+      return out;
+    } else {
+      out += ch;
+    }
+  }
+  return null;
+}
+
+/**
+ * What countRemovedTests compares: the call chain (TEST_CALL's prefix, with
+ * every `.skip` / `.only` / `.todo` / `.each(…)` modifier) plus the first
+ * argument's string literal — so the function's shape after the name is not
+ * part of the key (Issue #4590). A line without a readable name keeps the
+ * whole trimmed line as its key.
+ */
+function testKey(text) {
+  const call = TEST_CALL.exec(text);
+  if (!call) return text.trim();
+  const name = firstStringLiteral(text.slice(call[0].length));
+  return name === null ? text.trim() : `${call[0].trim()}\u0000${name}`;
+}
+
+/**
  * `it(` / `test(` / `describe(` lines the diff removes and does not add back
- * verbatim elsewhere (a moved test cancels out; a renamed one counts).
+ * under the same call chain and name elsewhere (a moved test cancels out; a
+ * renamed one counts). The key is the call chain plus the first argument's
+ * string literal, so changing only the function's shape (`() =>` →
+ * `async () =>`, `function () {` → `async function () {`) no longer reads as
+ * a removed test (Issue #4590). A line whose name cannot be read is compared
+ * as the whole line.
  */
 export function countRemovedTests(diffText) {
   const added = new Map();
@@ -392,18 +436,21 @@ export function countRemovedTests(diffText) {
   for (const line of diffText.split('\n')) {
     if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
     if (line.startsWith('+') && TEST_CALL.test(line.slice(1))) {
-      const key = line.slice(1).trim();
+      const key = testKey(line.slice(1));
       added.set(key, (added.get(key) ?? 0) + 1);
     } else if (line.startsWith('-') && TEST_CALL.test(line.slice(1))) {
-      removed.push(line.slice(1).trim());
+      const text = line.slice(1);
+      removed.push({ key: testKey(text), line: text.trim() });
     }
   }
-  return removed.filter((key) => {
-    const left = added.get(key) ?? 0;
-    if (left === 0) return true;
-    added.set(key, left - 1);
-    return false;
-  });
+  return removed
+    .filter(({ key }) => {
+      const left = added.get(key) ?? 0;
+      if (left === 0) return true;
+      added.set(key, left - 1);
+      return false;
+    })
+    .map(({ line }) => line);
 }
 
 /**
