@@ -306,6 +306,9 @@ const genNotTaken = (end: boolean | null = null): Pick<Scenario, 'injected' | 'c
 });
 const GEN_SCENARIOS: Record<string, Scenario> = {
   'gen-realpath': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  // #4559 r7 (PM's disposition 4, a2 P3-6): the root's mkdir -p and the parent of .gen, observed
+  'gen-root-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-parent-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-list': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-dir-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },

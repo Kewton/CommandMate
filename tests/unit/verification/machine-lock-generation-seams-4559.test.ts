@@ -351,7 +351,9 @@ export function gateBreaks(rows: TableRow[]): string[] {
       if ((run.hits.get(r.point) ?? 0) < 1) bad.push(`${at} ${value}: not reached`);
     }
     if (nonBlocking(r.fn, r.point)) {
-      const same = { outcome: r.unknown.outcome, changes: r.unknown.changes };
+      // the same answer (the unknown may be named in it) and the same changes on disk
+      const bare = (o: string): string => o.replace(new RegExp(` \\(${r.point} [A-Z]+\\)$`), '');
+      const same = { outcome: bare(r.unknown.outcome), changes: r.unknown.changes };
       if (JSON.stringify(same) !== JSON.stringify({ outcome: r.resolved.outcome, changes: r.resolved.changes })) bad.push(`${at} unknown: named a clean-up, but answers ${r.unknown.outcome} (${r.unknown.changes.join(', ')}) for ${r.resolved.outcome}`);
     } else {
       for (const b of heldBack(r, r.unknown)) bad.push(`${at} unknown: ${b}`);
@@ -410,16 +412,20 @@ describe('#4559 r7 §1: the gate — the public functions × their observation p
     expect(docGateTable(read(DOC))).toBe(renderTable(rows));
   });
 
-  it('self-test (i): a copy whose releaseAsHead takes the <lock> off while the chain is unknown is red at that row', async () => {
+  it('self-test (i): a copy whose releaseAsHead takes the <lock> off while the chain is unknown (5c6ade92d\'s form) is red at that row', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-i-'));
     try {
       const core = read(CORE);
       const line = "    if (ctx.genUnknown) return deferredUnknown(ctx, ctx.genUnknown);\n";
+      const none = "  if (!ctx.genDir) return { state: 'unknown', unknown: ctx.genUnknown };\n";
       expect(core.split(line).length - 1, 'the chain\'s unknown in releaseAsHead, once').toBe(1);
-      const m = await loadCopy(dir, core.replace(line, ''));
+      expect(core.split(none).length - 1, 'the holding of an unknown chain, once').toBe(1);
+      // 5c6ade92d: no hold-back, and the holding of an unknown chain read as none (the <lock>'s record alone decides)
+      const m = await loadCopy(dir, core.replace(line, '').replace(none, "  if (!ctx.genDir) return { state: 'none' };\n"));
       const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
-      expect(breaks.filter((b) => b.startsWith('releaseAsHead live-handoff gen-realpath unknown: advanced'))).toHaveLength(1);
-      expect(breaks.filter((b) => b.startsWith('releaseAsHead live-handoff gen-realpath absent: advanced'))).toHaveLength(1);
+      for (const value of ['unknown', 'absent']) {
+        expect(breaks.filter((b) => b.startsWith(`releaseAsHead live-handoff gen-realpath ${value}: past the point: lock HC gone`)), value).toHaveLength(1);
+      }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -440,7 +446,7 @@ describe('#4559 r7 §1: the gate — the public functions × their observation p
       expect(core.split(line).length - 1, 'the holding\'s unknown holder, once').toBe(1);
       const m = await loadCopy(dir, core.replace(line, ''));
       const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
-      expect(breaks.filter((b) => b.startsWith('releaseAsHead first-alive holder-pid unknown: advanced'))).toHaveLength(1);
+      expect(breaks.filter((b) => b.startsWith('releaseAsHead first-alive holder-pid unknown: past the point: lock HB gone'))).toHaveLength(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

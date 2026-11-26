@@ -85,6 +85,8 @@ const JS: Impl[] = ['ts', 'sync'];
 const ROWS_4559: ObservationPoint[] = [
   { point: 'gen-realpath', impls: JS, observes: 'ロックの親と root の realpath（鎖の選び。C7）', unknown: '鎖を選ばない: 取らない。次の周で読み直す（字面のパスへ落とさない）' },
   { point: 'gen-list', impls: JS, observes: '<name>.gen の一覧（最大の世代）', unknown: '世代が無いと読まない: その周回は世代を作らない（取らない）' },
+  { point: 'gen-root-mkdir', impls: JS, observes: 'マシンのロックの root の mkdir -p（鎖を選ぶ前。#4559 r7、PM の処分 4）', unknown: '鎖を選ばない: 取らない・D5 は deferred・D6 は kept。自分の点で名指す（gen-realpath ENOENT と名指さない）' },
+  { point: 'gen-parent-mkdir', impls: JS, observes: 'mkdir <root>/by-path（.gen の親。名前の鎖では root で EEXIST。#4559 r7 a2 P3-6）', unknown: '取らない（点・パス・errno を名指す。取得の外へ投げない）' },
   { point: 'gen-dir-mkdir', impls: JS, observes: 'mkdir <name>.gen（無いときだけ）', unknown: '取らない（点・パス・errno を名指す）' },
   { point: 'gen-end-read', impls: JS, observes: '最大の世代の end の lstat', unknown: '終わったと読まない: 回収も次の世代の mkdir もしない' },
   { point: 'gen-mkdir', impls: JS, observes: 'mkdir g<M+1>', unknown: '取らない（作られたなら持ち主の無い世代: 猶予の後に墓）' },
@@ -204,14 +206,12 @@ export const RAW_CALL_ALLOWANCES: RawCallAllowance[] = [
     { impl, fn: 'listQueue', primitive: 'readJson', count: 1, why: 'export の listQueue（表示・ゴミ集め用）。取得の判断は readQueue を通る' },
     { impl, fn: 'pidAlive', primitive: 'process.kill', count: 1, why: 'export の旧 API（EPERM は生きている）。取得は使わず、holderGone に渡されたときだけ alive／gone に写して 3 値の判定に通す' },
     { impl, fn: 'groupAlive', primitive: 'process.kill', count: 1, why: '同上' },
-    { impl, fn: 'machineLockAcquisition', primitive: 'mkdirSync', count: 2, why: 'root の mkdir -p（置き場を作るだけ）と、マシンのロックの root の mkdir -p（#4559 r6 C7-I2: 鎖を選ぶ前。失敗は gen-realpath の観測に出る）' },
+    { impl, fn: 'machineLockAcquisition', primitive: 'mkdirSync', count: 1, why: 'root の mkdir -p（置き場を作るだけ。#4559 r7: マシンのロックの root は gen-root-mkdir の観測）' },
     { impl, fn: 'machineLockAcquisition', primitive: 'readOwner', count: 2, why: '待ちの表示（heldBy）と setOwnerFields（自分の記録への書き足し。token が自分でなければ書かない）' },
     { impl, fn: 'machineLockAcquisition', primitive: 'renameSync', count: 2, why: 'setOwnerFields の書き込み（行為）: 世代の fields（持ち主だけが書く）と目印の写し' },
     { impl, fn: 'asHead', primitive: 'readJson', count: 1, why: '自分の札の確かめ（releaseAsHead・recoverIfDead）。読めなければ札を失ったとして並び直す（先頭にならない）' },
     // #4559 PR-2 (lead-tests §1 #5, reason (b)): the generation chain's raw calls.
     { impl, fn: 'testPause', primitive: 'existsSync', count: 1, why: 'テストの一時停止の口（CM_VERIFY_TEST_HANDOFF_DIR の .go）。本番では止まらない' },
-    { impl, fn: 'genDirOf', primitive: 'mkdirSync', count: 1, why: 'マシンのロックの root の mkdir -p（#4559 r6: 取得と同じく、置き場を作るだけ。失敗は gen-realpath の観測に出る）' },
-    { impl, fn: 'takeGeneration', primitive: 'mkdirSync', count: 1, why: '.gen の親（by-path）の mkdir -p（置き場を作るだけ。.gen 自体は gen-dir-mkdir の観測）' },
     { impl, fn: 'readHolder', primitive: 'readOwner', count: 2, why: '外の読み手（merge-pr・merge-train の held by）の表示。鎖を選べない（gen-realpath が不明）か、世代に保有者が無いときの目印の記録。判断に使わない' },
   ]),
 ];

@@ -386,16 +386,15 @@ export const OPS: OpRow[] = [
   { fn: 'recoverLock', op: 'obs.mkdir', count: 1, seam: '—', what: 'the put-back\'s <lock>', step: '—' },
   { fn: 'recoverLock', op: 'obs.link', count: 1, seam: '—', what: 'the put-back', step: '—' },
   { fn: 'recoverLock', op: 'rmdirQuiet', count: 1, seam: '—', what: 'the put-back\'s own <lock>', step: '—' },
-  { fn: 'genDirOf', op: 'fs.mkdirSync', count: 1, seam: '—', what: 'the machine-lock root, as the acquisition makes it (C7-I2)', step: '—' },
+  { fn: 'makeRoot', op: 'obs.mkdir', count: 1, seam: '—', what: 'the machine-lock root (mkdir -p) before the chain is chosen, observed at gen-root-mkdir (C7-I2, r7)', step: '—' },
   { fn: 'collectGens', op: 'rmQuiet', count: 2, seam: 'gc-rm・gc-tmp-rm', what: 'rm -rf g<k> (k < the largest listed, C1); an old tmp (C8)', step: 'g1' },
   { fn: 'linkIntoGen', op: 'obs.mkdir', count: 1, seam: 'gen-tmp-mkdir', what: 'the tmp directory', step: '—' },
   { fn: 'linkIntoGen', op: 'obs.link', count: 1, seam: '<use>-tmp', what: 'owner / owner.h<k> / tomb / end into g<N> (L4)', step: 'a3・h・j1・j2・r0・a4' },
   { fn: 'linkIntoGen', op: 'obs.unlink', count: 1, seam: '<use>-linked', what: 'the own tmp', step: '—' },
-  { fn: 'takeGeneration', op: 'fs.mkdirSync', count: 1, seam: 'gen-parent-mkdir', what: 'the parent of .gen (by-path)', step: '—' },
-  { fn: 'takeGeneration', op: 'obs.mkdir', count: 2, seam: 'gen-dir-mkdir・gen-mkdir', what: '.gen (C6); mkdir g<M+1>', step: 'a2' },
+  { fn: 'takeGeneration', op: 'obs.mkdir', count: 3, seam: 'gen-parent-mkdir・gen-dir-mkdir・gen-mkdir', what: 'the parent of .gen (by-path/, observed: r7); .gen (C6); mkdir g<M+1>', step: 'a2' },
   { fn: 'machineLockAcquisition', op: 'rmQuiet', count: 2, seam: '—・beacon-release', what: 'an own tmp of setOwnerFields / handOff; the <lock> at the release (§6.1: before end)', step: 'r0' },
   { fn: 'machineLockAcquisition', op: 'fs.linkSync', count: 1, seam: '—', what: 'the ticket\'s link', step: '—' },
-  { fn: 'machineLockAcquisition', op: 'fs.mkdirSync', count: 2, seam: '—', what: 'the root; the machine-lock root before the chain is chosen (C7-I2)', step: '—' },
+  { fn: 'machineLockAcquisition', op: 'fs.mkdirSync', count: 1, seam: '—', what: 'the root of the lock', step: '—' },
   { fn: 'machineLockAcquisition', op: 'fs.renameSync', count: 2, seam: 'fields-rename・—', what: 'g<N>/fields; the beacon\'s copy of the fields', step: '—' },
   { fn: 'machineLockAcquisition', op: 'obs.rename', count: 1, seam: '—', what: 'the beacon\'s D4 hand-off (after owner.h<k>, §4.6)', step: '—' },
   { fn: 'asHead', op: 'fs.linkSync', count: 1, seam: '—', what: 'the ticket\'s link', step: '—' },
@@ -528,7 +527,7 @@ function chainState(root: string): ChainState {
   }
   return { gens, lock, byPath };
 }
-/** The changes from `pre` to `now`, as names (`g1 end dead`, `new gen`, `new gen open`, `lock T→none` …). */
+/** The changes from `pre` to `now`, as names (`g1 end dead`, `new gen`, `new gen open`, `lock T gone`, `lock new put` …). */
 function chainChanges(pre: ChainState, now: ChainState): string[] {
   const out = new Set<string>();
   for (const [n, g] of now.gens) {
@@ -542,7 +541,9 @@ function chainChanges(pre: ChainState, now: ChainState): string[] {
     if (g.records !== was.records) out.add(`g${n} records +${g.records - was.records}`);
   }
   for (const n of pre.gens.keys()) if (!now.gens.has(n)) out.add(`g${n} gone`);
-  if (now.lock !== pre.lock) out.add(`lock ${pre.lock}→${now.lock}`);
+  // the <lock>'s owner as two facts: the one there before is gone, another is put (an own claim undone is no change)
+  if (now.lock !== pre.lock && pre.lock !== 'none') out.add(`lock ${pre.lock} gone`);
+  if (now.lock !== pre.lock && now.lock !== 'none') out.add(`lock ${now.lock} put`);
   if (now.byPath > pre.byPath) out.add('new by-path chain');
   return [...out].sort();
 }
@@ -740,6 +741,7 @@ export const NON_BLOCKING: Record<string, string> = {
   '* gen-tmp-unlink': 'the own tmp after its link (C8): left to the clean-up by its age',
   '* owner-unlink': 'the <lock>\'s owner tmp after its link (#4288): left to the clean-up',
   '* release-list': 'the own moved-aside records of the <lock> (#4288 §2.7): a listing that fails leaves them',
+  'recoverIfDead list-root': 'the <lock>\'s moved-aside records (#4288 §2.7), settled before the owner is read: a listing that fails is named in the answer, and an owner read dead is recovered as before (#4288 PR1a D6) — the chain is judged apart (§4.2)',
   'handle.setOwnerFields gen-fields-read': 'the fields so far: a read that fails writes the new ones alone (merge-pr\'s phase now is what a recovery needs; the fields are not the lock\'s safety, §3)',
 };
 export const nonBlocking = (fn: string, point: string): string | undefined => NON_BLOCKING[`${fn} ${point}`] ?? NON_BLOCKING[`* ${point}`];
