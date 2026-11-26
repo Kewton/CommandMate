@@ -98,6 +98,7 @@
 
 import { createLogger } from '@/lib/logger';
 import { findNumberedOptionBlock } from '../dialog-block';
+import { stripAnsi } from '../../ansi';
 
 const logger = createLogger('codex-dialog-rules');
 
@@ -458,6 +459,46 @@ export function readCodexDialogFrame(
 const CODEX_NUMBERED_GLYPH_ROW_PATTERN = /^\s*›\s*\d{1,2}[.)]\s/;
 
 /**
+ * codex's status bar, the two shapes `findCodexFooterBoundary` accepts:
+ * `CODEX_STATUS_BAR_PATTERN` and `CODEX_TRAILED_STATUS_BAR_PATTERN` of
+ * `./patterns`, written out here rather than imported (Issue #4573):
+ * `patterns.ts` imports {@link readCodexGlyphRowKind} from this module, so an
+ * import back would be a module-scope cycle
+ * (`tests/unit/guards/import-cycles-baseline-3482.test.ts`).
+ * `codex-stale-composer-approval-4573.test.ts` pins both copies to the
+ * originals' source and flags, so a change to either fails there.
+ */
+export const CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS: readonly RegExp[] = [
+  /^\s*\S.*·\s*~?\/\S*\s*$/,
+  /^\s*\S[^·]*·\s*~?\/\S*(?:\s*·[^\n]*|[^\S\n]{2,}\S[^\n]*)$/,
+];
+
+/**
+ * Is the composer at raw row `composerRow` a STALE one (Issue #4573)?
+ *
+ * True when, below that row, codex's status bar closes the screen it belonged
+ * to and a `›`-numbered option row follows the bar. That is the shape tmux
+ * hands over after codex clears the screen (`\e[2J`): the old idle screen —
+ * composer drawn with SGR, then its status bar — stays in the history, and the
+ * dialog drawn below it is plain text, which {@link readCodexGlyphRowKind}
+ * cannot classify, so {@link findCodexBottomGlyphRow} returns the history's
+ * composer.
+ *
+ * The status bar is the condition, not just "a numbered row below": #3205's
+ * tc104 has `› 1. Yes, proceed (y)` TYPED INTO the composer's continuation
+ * rows, below the composer and above the bar, and that composer is the live
+ * one.
+ */
+function isStaleComposerRow(rawRows: readonly string[], composerRow: number): boolean {
+  const below = rawRows.slice(composerRow + 1).map(row => stripAnsi(row));
+  const bar = below.findIndex(row =>
+    CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS.some(pattern => pattern.test(row)),
+  );
+  if (bar < 0) return false;
+  return below.slice(bar + 1).some(row => CODEX_NUMBERED_GLYPH_ROW_PATTERN.test(row));
+}
+
+/**
  * Is the bottom of this codex pane the composer (Issue #2841)?
  *
  * codex draws exactly one thing between the conversation and its status bar:
@@ -475,7 +516,9 @@ const CODEX_NUMBERED_GLYPH_ROW_PATTERN = /^\s*›\s*\d{1,2}[.)]\s/;
  * Two readings, in order:
  *
  *  1. **raw** — the bottom-most `›` row of the RAW capture
- *     ({@link findCodexBottomGlyphRow}) is `composer` → true; `option` → false;
+ *     ({@link findCodexBottomGlyphRow}) is `composer` → true, unless a status
+ *     bar and then a `›`-numbered row sit below it (a stale composer, Issue
+ *     #4573: {@link isStaleComposerRow}) → false; `option` → false;
  *     `transcript-echo` → false (not shown to be the composer).
  *  2. **stripped** (no attributes: Auto-Yes and `prompt-answer-sender` hand the
  *     layer a `stripAnsi`'d capture) — the last non-blank row of the content
@@ -498,7 +541,11 @@ export function isCodexComposerAtBottom(
   contentEnd: number,
 ): boolean {
   const glyphRow = findCodexBottomGlyphRow(raw);
-  if (glyphRow !== null) return glyphRow.kind === 'composer';
+  if (glyphRow !== null) {
+    if (glyphRow.kind !== 'composer') return false;
+    // Issue #4573: a composer left in the history above a plain dialog.
+    return !isStaleComposerRow(raw.split('\n'), glyphRow.row);
+  }
 
   const end = Math.min(contentEnd, contentLines.length);
   let last = end - 1;
