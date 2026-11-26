@@ -147,7 +147,7 @@ describe('#4573 controls (same verdict before and after the fix)', () => {
 
   // Review P2-1: a status-bar-looking row TYPED INTO the composer's
   // continuation rows (above the typed `› 1.`) is not the bar that closes the
-  // composer. Only the first non-blank row after the input box counts.
+  // composer: the bottom-most bar (the live composer's real one) is.
   it('#3205 tc104 with a bar-looking row typed above › 1.: the composer stays the bottom → ready', () => {
     const tc104 = fixture('codex-multiline-composer-3205/tc104-raw-pane.txt');
     const typedBar = '  gpt-5 default · ~/repo';

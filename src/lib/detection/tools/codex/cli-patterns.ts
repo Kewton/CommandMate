@@ -99,7 +99,6 @@
 import { createLogger } from '@/lib/logger';
 import { findNumberedOptionBlock } from '../dialog-block';
 import { stripAnsi } from '../../ansi';
-import { findCodexInputBox } from '../../composer-text';
 
 const logger = createLogger('codex-dialog-rules');
 
@@ -492,30 +491,33 @@ export const CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS: readonly RegExp[] = [
  * rows, below the composer and above the bar, and that composer is the live
  * one.
  *
- * Where the bar is looked for: ONLY the first non-blank row after the
- * composer's input box ends. The box is the one `live-region.ts`'s
- * `findCodexComposerEndRow` reads — `composer-text.ts`'s
- * {@link findCodexInputBox} when it starts at `composerRow`, otherwise the
- * composer row alone (a stale composer is too far up for that bottom-up
- * search, so it is one row and its bar is the row right under it). A row that
- * merely looks like a bar inside the box (`  gpt-5 default · ~/repo` typed
- * above a typed `› 1.`, review P2-1) is the user's text, not the bar.
- * This range differs from `findCodexFooterBoundary`'s, which takes the bottom-
- * most bar within the last 10 content rows: that one locates the CURRENT
- * screen's footer; this one asks whether the bar right under THIS composer
- * closes its screen, wherever in the capture the composer sits.
+ * Which bar: the BOTTOM-MOST row below the composer that has the bar's shape
+ * is taken as that composer's own bar. Then the composer is stale when both:
+ *   (a) a `›`-numbered option row sits below that bar, and
+ *   (b) no row below that bar carries SGR — the screen under it is the plain
+ *       text tmux hands over, not a screen codex is drawing with attributes.
+ * The input box's end is not used: a bar-looking row TYPED INTO the composer
+ * (`  gpt-5 default · ~/repo` above a typed `› 1.`, review P2-1) sits above
+ * the live composer's real bar, which is the bottom-most one, and the real bar
+ * has no `› N.` under it. (b) keeps a screen with no visible real bar (an open
+ * slash popup, drawn with SGR) from reading a typed bar-looking row as the bar.
+ * This range differs from `findCodexFooterBoundary`'s: that one takes the
+ * bottom-most bar within the last 10 content rows; this one takes the
+ * bottom-most bar among ALL the rows below the composer.
  */
 function isStaleComposerRow(rawRows: string[], composerRow: number): boolean {
-  const box = findCodexInputBox(rawRows);
-  const boxEnd = box !== null && box.firstRow === composerRow ? box.lastRow : composerRow;
-  let bar = boxEnd + 1;
-  while (bar < rawRows.length && stripAnsi(rawRows[bar]).trim() === '') bar++;
-  if (bar >= rawRows.length) return false;
-  const barText = stripAnsi(rawRows[bar]);
-  if (!CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS.some(pattern => pattern.test(barText))) return false;
-  return rawRows
-    .slice(bar + 1)
-    .some(row => CODEX_NUMBERED_GLYPH_ROW_PATTERN.test(stripAnsi(row)));
+  let bar = -1;
+  for (let i = rawRows.length - 1; i > composerRow; i--) {
+    const text = stripAnsi(rawRows[i]);
+    if (CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS.some(pattern => pattern.test(text))) {
+      bar = i;
+      break;
+    }
+  }
+  if (bar < 0) return false;
+  const below = rawRows.slice(bar + 1);
+  if (below.some(row => row.includes('\x1b'))) return false;
+  return below.some(row => CODEX_NUMBERED_GLYPH_ROW_PATTERN.test(stripAnsi(row)));
 }
 
 /**
