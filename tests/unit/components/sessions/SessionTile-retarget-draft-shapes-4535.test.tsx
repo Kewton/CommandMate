@@ -19,7 +19,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 beforeAll(() => installRadixJsdomPolyfills());
@@ -57,6 +57,7 @@ vi.mock('@/hooks/useSplitMessages', () => ({ useSplitMessages: useSplitMessagesM
 import { SessionTile } from '@/components/sessions/SessionTile';
 import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
+import { useWorktreesCache } from '@/hooks/useWorktreesCache';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -112,6 +113,8 @@ function installFetch() {
       return json(201, { id: `srv-${posts.length}`, role: 'user', content: 'x', timestamp: new Date().toISOString() });
     }
     if (url.includes('/start-preview')) return json(200, { ok: true, show: false, attended: false });
+    // Issue #4606 r3b: the roster the cache's own `refresh()` reads.
+    if (url === '/api/worktrees' && shown) return json(200, { worktrees: [worktree(shown.target)], repositories: [] });
     return json(200, {});
   }));
 }
@@ -143,12 +146,23 @@ async function flush(ms = 10) {
 /** Issue #4606: the tile rendered by the entry and the To it shows (to read its roster again). */
 let shown: { view: ReturnType<typeof render>; target: Target } | null = null;
 
-function Tile({ target }: { target: Target }) {
+function Tile({ target, fetched }: { target: Target; fetched?: Worktree }) {
   return (
     <ToastProvider>
-      <SessionTile worktree={worktree(target)} enabled />
+      <SessionTile worktree={fetched ?? worktree(target)} enabled />
     </ToastProvider>
   );
+}
+
+/** Issue #4606 r3b: a roster fetch through the cache's own `refresh()` that succeeds — the object it adopted. */
+async function fetchRoster(): Promise<Worktree> {
+  const hook = renderHook(() => useWorktreesCache({ enabled: false }));
+  await act(async () => {
+    await hook.result.current.refresh();
+  });
+  const fetched = hook.result.current.worktrees.find((wt) => wt.id === WT);
+  hook.unmount();
+  return fetched!;
 }
 
 type Shape = 'only' | 'before' | 'after' | 'between' | 'whitespace' | 'two' | 'part deleted';
@@ -215,11 +229,13 @@ const DISCARD: Entry = {
     await sendAll(texts);
     for (let i = 0; i < texts.length; i += 1) await answer(i, 409, PROMPT_WAITING);
     await waitFor(() => expect(screen.getAllByTestId('chat-pending-retry')).toHaveLength(texts.length));
+    // Issue #4606 r3b (人の承認 #4606 comment 7183455385): every [retry] is pressed first, then the
+    // retries are answered by the fence — a [retry] pressed after the first answer would meet the hold.
     for (let i = 0; i < texts.length; i += 1) {
       fireEvent.click(screen.getAllByTestId('chat-pending-retry')[0]);
       await waitFor(() => expect(posts).toHaveLength(texts.length + i + 1));
-      await answer(texts.length + i, 409, fenceBody('tool-changed', original));
     }
+    for (let i = 0; i < texts.length; i += 1) await answer(texts.length + i, 409, fenceBody('tool-changed', original));
     expect(textarea().value).toBe('');
     view.rerender(<Tile target={current} />);
     await flush();
@@ -283,18 +299,17 @@ describe.each([TILE, DISCARD])('[#4535 r6 INV-V2] $name: every shape of the draf
 
   // Issue #4606 (O-1, 設計書 §3.6 S-1; 人の決定 #4606 comment 7178016428): the To still the original
   // target — the tile holds it until its roster is read again (Enter: POST 0, no question); once read
-  // again with the pair still on it, Enter sends to it at once with no question. The roster is read
-  // twice: a read that still has the pair may be one from before the 409 (S-1).
+  // again with the pair still on it, Enter sends to it at once with no question. r3b: the roster read
+  // again is a fetch that succeeded after the hold (the cache's own `refresh()`), not a re-render.
   it.each<Shape>(['only', 'before'])('(positive control) %s: the To still the original target — held until the roster is read again, then Enter sends at once', async (shape) => {
     await arrange(entry, shape, false);
     pressEnter();
     await flush(50);
     expect(posts).toHaveLength(0);
     expect(composer().queryByTestId('message-input-retarget-confirm')).toBeNull();
-    for (let read = 0; read < 2; read += 1) {
-      shown!.view.rerender(<Tile target={shown!.target} />);
-      await flush();
-    }
+    const fetched = await fetchRoster();
+    shown!.view.rerender(<Tile target={shown!.target} fetched={fetched} />);
+    await flush();
     pressEnter();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toMatchObject({ cliToolId: shown!.target.tool, instanceId: shown!.target.id });

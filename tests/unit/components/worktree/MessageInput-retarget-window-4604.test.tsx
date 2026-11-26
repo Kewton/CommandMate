@@ -12,10 +12,15 @@
  *   Enter, [send], the form's submit, #4503's resend [yes]: nothing is sent to the new instance (its
  *   draft is another; develop sent the previous instance's text from the brief in one press).
  *
- * T-b (one oracle, 案 A'): every POST holds when (i) the text's tag names the POST's To (a readable
- * list), or (ii) the POST's To is the To of the question the person last said yes to (the "unknown" and
- * the page's mark have no target: only (ii)). A press point missing at `layout` (where everything is
- * still on screen) fails the row; a row that POSTs nothing leaves no brief either (r4 check P3-2).
+ * T-b (one oracle, 案 A' — r3: INV-P's form): every POST holds when each mark of the draft at the POST
+ * (its ids, its "unknown" generations, the page's mark) is allowed — (i) a tag names the POST's To (a
+ * readable list), or (ii) a yes, for this draft's key, to a question whose To is the POST's To and which
+ * showed that id or generation when it was shown (the "unknown" and the page's mark have no target:
+ * only (ii)). The oracle keeps, per key, each yes with what its question showed — never "the To of the
+ * last yes": a mark born after the question (a new generation, a new tag in the same generation — review
+ * b P-a・P-b・P-c, the rows at the end) is not covered. A press point missing at `layout` (where
+ * everything is still on screen) fails the row; a row that POSTs nothing leaves no brief either (r4
+ * check P3-2).
  *
  * @vitest-environment jsdom
  */
@@ -24,7 +29,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen, act, cleanup } from '@testing-library/react';
 import { MessageInput } from '@/components/worktree/MessageInput';
 import { mockCommandGroups, getTextarea, typeMessage, pressEnter } from '@tests/helpers/message-input-test-utils';
-import { getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey, readRetargetUnstorable, writeRetarget } from '@/lib/drafts/message-draft';
+import { getInstanceDraftKey, getRetargetTagKey, getSplitDraftKey, newRetargetTag, readRetargetUnstorable, returnRetargetedText, writeRetarget } from '@/lib/drafts/message-draft';
 import { releasePageMarks } from '@tests/helpers/draft-store-fault-4604';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -124,15 +129,71 @@ function bandTo(): Target | null {
   return named[0];
 }
 
-/** T-b: the To the question the person last answered yes to named, and each POST with it. */
+/** The marks of the draft `key` now: the ids of its tags, its "unknown" generation, the page's mark. */
+function marksOf(key: string): { ids: string[]; seen: string[]; originals: Record<string, Target> } {
+  const ids: string[] = [];
+  const seen: string[] = [];
+  const originals: Record<string, Target> = {};
+  const raw = window.localStorage.getItem(getRetargetTagKey(key));
+  if (raw !== null) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      const tags = Array.isArray(parsed) ? parsed : (parsed as { tags?: unknown[] } | null)?.tags ?? [];
+      if (!Array.isArray(parsed) && parsed && typeof (parsed as { unknown?: unknown }).unknown === 'string') {
+        seen.push((parsed as { unknown: string }).unknown);
+      }
+      for (const tag of tags as Array<{ id: string; original: { instanceId: string; cliToolId: string } }>) {
+        ids.push(tag.id);
+        originals[tag.id] = { id: tag.original.instanceId, tool: tag.original.cliToolId as CLIToolType };
+      }
+    } catch {
+      seen.push('junk');
+    }
+  }
+  const mark = readRetargetUnstorable(key);
+  if (mark !== null) seen.push(mark);
+  return { ids, seen, originals };
+}
+
+interface Yes {
+  key: string;
+  to: Target;
+  ids: string[];
+  seen: string[];
+}
+/** T-b (INV-P): per draft key, each yes with what its question showed; each POST with the marks at it. */
 const oracle = {
-  lastYes: null as Target | null,
-  posts: [] as Array<{ to: Target; lastYes: Target | null }>,
+  key: '',
+  question: null as Yes | null,
+  yeses: [] as Yes[],
+  posts: [] as Array<{ to: Target; ok: boolean; why: string }>,
 };
 
+/** The band is up: what its question shows now. */
+function noteQuestion() {
+  const to = bandTo();
+  if (to) oracle.question = { key: oracle.key, to, ...marksOf(oracle.key) };
+}
+
 function clickYes(el: HTMLElement) {
-  oracle.lastYes = bandTo();
+  if (!oracle.question) noteQuestion();
+  if (oracle.question) oracle.yeses.push(oracle.question);
+  oracle.question = null;
   el.click();
+}
+
+/** Each mark of the draft at the POST is allowed by a fact (its tag names the To, or a yes covered it). */
+function judgePost(to: Target): { ok: boolean; why: string } {
+  const marks = marksOf(oracle.key);
+  const yeses = oracle.yeses.filter((yes) => yes.key === oracle.key && sameTo(yes.to, to));
+  for (const id of marks.ids) {
+    if (sameTo(marks.originals[id], to)) continue;
+    if (!yeses.some((yes) => yes.ids.includes(id))) return { ok: false, why: `tag ${id} not covered for ${describeTo(to)}` };
+  }
+  for (const generation of marks.seen) {
+    if (!yeses.some((yes) => yes.seen.includes(generation))) return { ok: false, why: `generation ${generation} not covered for ${describeTo(to)}` };
+  }
+  return { ok: true, why: '' };
 }
 
 const PRESS_TESTID: Partial<Record<Press, string>> = {
@@ -191,25 +252,24 @@ function sendOnce(shape: Shape) {
   else pressEnter();
 }
 
-function expectPostsHoldTheInvariant(store: Store) {
-  for (const post of oracle.posts) {
-    // (i) is for a readable list only: neither the "unknown" nor the page's mark names a target. A draft
-    // with no tag (W-1) is a plain text: it may go where it is sent — but never from another draft.
-    const tagged = store === 'untagged';
-    const answered = post.lastYes !== null && sameTo(post.to, post.lastYes);
-    expect({ post: post.to, lastYes: post.lastYes, ok: tagged || answered }).toEqual({ post: post.to, lastYes: post.lastYes, ok: true });
-  }
+// (i) is for a readable list only: neither the "unknown" nor the page's mark names a target. A draft with
+// no tag (W-1) is a plain text: it may go where it is sent — but never from another draft.
+function expectPostsHoldTheInvariant(_store?: Store) {
+  for (const post of oracle.posts) expect(post).toEqual({ to: post.to, ok: true, why: '' });
 }
 
 beforeEach(() => {
   pressMissing = null;
   mobile.value = false;
   window.localStorage.clear();
-  oracle.lastYes = null;
+  oracle.key = '';
+  oracle.question = null;
+  oracle.yeses = [];
   oracle.posts = [];
   sendMessageMock.mockReset();
   sendMessageMock.mockImplementation(async (_wt: string, content: string, options: { cliToolId: CLIToolType; instanceId?: string }) => {
-    oracle.posts.push({ to: { id: options.instanceId ?? options.cliToolId, tool: options.cliToolId }, lastYes: oracle.lastYes });
+    const to = { id: options.instanceId ?? options.cliToolId, tool: options.cliToolId };
+    oracle.posts.push({ to, ...judgePost(to) });
     return { id: `s-${oracle.posts.length}`, role: 'user', content, timestamp: new Date() };
   });
   fetchStartPreviewMock.mockReset();
@@ -250,6 +310,7 @@ describe('[#4604] a press between the commit of a To change and its passive effe
 
   it.each(CASES)('%s', async (_name, shape, kind, change, store, timing) => {
     mobile.value = shape.mobile;
+    oracle.key = shape.key;
     const tagKey = getRetargetTagKey(shape.key);
     if (store === 'unknown') {
       window.localStorage.setItem(tagKey, JSON.stringify({ unknown: 'g-w', tags: [] }));
@@ -274,6 +335,7 @@ describe('[#4604] a press between the commit of a To change and its passive effe
       expect(screen.getByTestId('message-input-resend-confirm-yes')).toBeInTheDocument();
     } else if (store !== 'untagged') {
       expect(bandTo()).toEqual(CURRENT);
+      noteQuestion();
     }
     if (holdsYesAtBrief) {
       if (store !== 'untagged') clickYes(screen.getByTestId('message-input-retarget-confirm-yes'));
@@ -313,6 +375,7 @@ describe('[#4604] a press between the commit of a To change and its passive effe
     // Answer what is left once: the band (to the To now), then the brief.
     const yes = screen.queryByTestId('message-input-retarget-confirm-yes');
     if (yes) {
+      noteQuestion();
       act(() => clickYes(yes));
       await settle(20);
     }
@@ -331,5 +394,87 @@ describe('[#4604] a press between the commit of a To change and its passive effe
     expectPostsHoldTheInvariant(store);
     for (const call of sendMessageMock.mock.calls) expect(call[1]).toBe(TEXT);
     expect(getTextarea()).toBeInTheDocument();
+  });
+});
+
+/**
+ * r3 (review b P-a・P-b・P-c): a mark born after the question — a text handed back into the same
+ * generation (or the same list), a new generation written by another tab — is not covered by its yes.
+ * The list shapes are the control (their yes holds the ids already: develop's #4607).
+ */
+describe('[#4604 r3] a mark born after the question is not covered by its yes (INV-P)', () => {
+  const KEY = getSplitDraftKey(WT, 1);
+  const SPLIT = SHAPES[0];
+
+  async function askOnce(store: 'unknown' | 'list', preview: typeof SHOWN | typeof NOT_SHOWN) {
+    oracle.key = KEY;
+    window.localStorage.setItem(
+      getRetargetTagKey(KEY),
+      store === 'unknown'
+        ? JSON.stringify({ unknown: 'g1', tags: [] })
+        : JSON.stringify([{ id: 't1', original: { instanceId: ORIGINAL.id, cliToolId: ORIGINAL.tool } }]),
+    );
+    fetchStartPreviewMock.mockResolvedValue(preview);
+    render(<Harness to={CURRENT} shape={SPLIT} pressOnCommit={null} />);
+    typeMessage(TEXT);
+    await settle();
+    act(() => pressEnter());
+    await settle();
+    expect(bandTo()).toEqual(CURRENT);
+    noteQuestion();
+  }
+  function handBackR2() {
+    act(() => {
+      returnRetargetedText(KEY, { text: 'r2', tag: newRetargetTag({ instanceId: ORIGINAL.id, cliToolId: ORIGINAL.tool }) });
+    });
+  }
+
+  it.each(['unknown', 'list'] as const)('P-a %s: a text handed back while the question is up; the band\'s [yes] POSTs nothing it did not show', async (store) => {
+    await askOnce(store, NOT_SHOWN);
+    handBackR2();
+    await settle();
+    expect(getTextarea().value).toContain('r2');
+    act(() => clickYes(screen.getByTestId('message-input-retarget-confirm-yes')));
+    await settle(50);
+    expectPostsHoldTheInvariant();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    // Asked again, now showing the new mark.
+    expect(bandTo()).toEqual(CURRENT);
+  });
+
+  it.each(['unknown', 'list'] as const)('P-b %s: yes, the brief up, a text handed back; the brief\'s choice POSTs nothing', async (store) => {
+    await askOnce(store, SHOWN);
+    act(() => clickYes(screen.getByTestId('message-input-retarget-confirm-yes')));
+    await screen.findByTestId('session-start-brief-decline');
+    fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
+    handBackR2();
+    await settle();
+    act(() => screen.getByTestId('session-start-brief-decline').click());
+    await settle(50);
+    expectPostsHoldTheInvariant();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('P-c: yes for g1, the brief up, another tab writes a new generation g2; the brief\'s choice POSTs nothing', async () => {
+    await askOnce('unknown', SHOWN);
+    act(() => clickYes(screen.getByTestId('message-input-retarget-confirm-yes')));
+    await screen.findByTestId('session-start-brief-decline');
+    fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
+    window.localStorage.setItem(getRetargetTagKey(KEY), JSON.stringify({ unknown: 'g2', tags: [] }));
+    act(() => screen.getByTestId('session-start-brief-decline').click());
+    await settle(50);
+    expectPostsHoldTheInvariant();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('(positive control) the same g1 through the brief, nothing new: one POST', async () => {
+    await askOnce('unknown', SHOWN);
+    act(() => clickYes(screen.getByTestId('message-input-retarget-confirm-yes')));
+    await screen.findByTestId('session-start-brief-decline');
+    fetchStartPreviewMock.mockResolvedValue(NOT_SHOWN);
+    act(() => screen.getByTestId('session-start-brief-decline').click());
+    await settle(50);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expectPostsHoldTheInvariant();
   });
 });

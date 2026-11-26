@@ -24,7 +24,9 @@
  * The model's limits (what this does not check): length 4 only with the race moves, nothing longer;
  * the To never changes or comes back (every tag's original differs from the To — the worst case; one
  * sequence below brings the To back, outside the model); the person's "no" is the move that does
- * nothing; no reload, no page closing between two writes (observed below, not required), no store
+ * nothing; in the search the question and the yes are one move (`press`: no move falls between them —
+ * r3: the two-move rows below put a text handed back or nothing between them, through the
+ * implementation's `retargetYesCovers`; the search's numbers are unchanged); no reload, no page closing between two writes (observed below, not required), no store
  * recovering for other keys; reading the text failing (the composer is left empty) is not here
  * (`MessageInput-draft-keyed-4604`); `appendToStoredDraft`, #4503's mark and #4606's stop are outside
  * it; the model was written from the design's words — this test is the implementation's road on it.
@@ -35,7 +37,9 @@ import {
   getRetargetTagKey,
   nextRetarget,
   readRetargetStore,
+  retargetYesCovers,
   writeRetarget,
+  type RetargetDecision,
   type RetargetOp,
   type RetargetTag,
   type RetargetWriteResult,
@@ -775,4 +779,74 @@ describe.runIf(FULL)('[#4604 T-g FULL] length 3 and the narrowed length 4 (CM_RE
     expect(withMut({ N7R: true }, () => runPath('S2_unk → a409s(A,wAll) → pressAwait(A,rThrow) → complete(A,none)'))).toBe('INV-G');
     expect(runPath('S2_unk → a409s(A,wAll) → pressAwait(A,rThrow) → complete(A,none)')).toBeNull();
   }, 600_000);
+});
+
+/**
+ * r3 (review b P1-1・P2-1, 案 A'): the question and the yes as two moves. Between them a text is handed
+ * back into the same generation (or the same list) — the question never showed it. The yes passes only
+ * while the implementation's `retargetYesCovers` says what its question showed covers the decision now;
+ * a yes that passes covers only the texts its question showed (the ghost bookkeeping), and a send then
+ * carrying an uncovered text is INV-V2c4. `SEEN_ONLY` is 4a2b973dc's check for the "unknown" (the
+ * generations alone): red on the first row.
+ */
+describe('[#4604 r3 T-g] the question and the yes in two moves (outside the search)', () => {
+  type Covers = (yes: { ids: readonly string[]; seen: readonly string[] }, decision: RetargetDecision) => boolean;
+  const SEEN_ONLY: Covers = (yes, decision) =>
+    decision.unknown ? decision.seen.every((g) => yes.seen.includes(g)) : decision.ids.every((id) => yes.ids.includes(id));
+  const IMPLEMENTATION: Covers = (yes, decision) => retargetYesCovers(yes, decision);
+
+  function decisionOf(s: State, cn: CompName): RetargetDecision {
+    const c = s.comps[cn];
+    const mark = s.map[c.page][c.key!];
+    return decideRetarget(readRetargetStore(DRAFT[c.key!], { storage: storageOf(s, 'none') }), tagsFor(refIdsOf(c)), mark === null ? null : genStr(mark), TO);
+  }
+  /** The question: what it shows (the decision's ids and generations). */
+  function ask(s: State, cn: CompName) {
+    const d = decisionOf(s, cn);
+    expect(d.ask).toBe(true);
+    return { d, visible: [...d.ids, ...d.seen.map((g) => 'g' + genNum(g))] };
+  }
+  /** The yes: sent when `covers` says so (then it covers what the question showed), else asked again. */
+  function yes(s: State, cn: CompName, asked: ReturnType<typeof ask>, covers: Covers, tr: string): 'sent' | 'asked again' {
+    const c = s.comps[cn];
+    const now = decisionOf(s, cn);
+    if (now.ask && !covers({ ids: asked.d.ids, seen: asked.d.seen }, now)) return 'asked again';
+    for (const h of handedTexts(s)) if (inter(s.handed[h].rep, asked.visible)) s.handed[h].covered = true;
+    const unc = c.body.filter((h) => s.handed[h] && !coveredOf(s, h));
+    if (unc.length && !excludedBy4(s, c.page, unc)) fail('INV-V2c4', `${tr}: ${cn} POSTs uncovered [${unc}] on a yes whose question did not show them`);
+    c.pend = { key: c.key!, ids: [...refIdsOf(c)], seen: asked.d.seen.map(genNum), body: [...c.body] };
+    complete(s, cn, 'none', tr);
+    checkG(s, tr);
+    return 'sent';
+  }
+  function run(seed: string, between: boolean, covers: Covers): string {
+    const s = seeds()[seed];
+    const tr = `${seed} → ask(A)${between ? ' → ret(P1,none)' : ''} → yes(A)`;
+    try {
+      checkG(s, 'seed');
+      const asked = ask(s, 'A');
+      if (between) {
+        expect(OPS.ret(s, 'P1', 'none', tr)).toBe(true);
+        checkG(s, tr);
+      }
+      return yes(s, 'A', asked, covers, tr);
+    } catch (e) {
+      if (e instanceof Violation) return e.kind;
+      throw e;
+    }
+  }
+
+  it.each(['S2_unk', 'S1_list', 'S3_junk', 'S4_map'])('%s: a text handed back between the question and the yes — the yes asks again (nothing sent)', (seed) => {
+    expect(run(seed, true, IMPLEMENTATION)).toBe('asked again');
+  });
+
+  it.each(['S2_unk', 'S1_list', 'S3_junk', 'S4_map'])('(positive control) %s: nothing between them — the yes sends', (seed) => {
+    expect(run(seed, false, IMPLEMENTATION)).toBe('sent');
+  });
+
+  it("(broken version) the generations alone (4a2b973dc's \"unknown\" yes) sends the uncovered text: INV-V2c4", () => {
+    expect(run('S2_unk', true, SEEN_ONLY)).toBe('INV-V2c4');
+    // The list was already guarded by its ids (#4607's confirmation).
+    expect(run('S1_list', true, SEEN_ONLY)).toBe('asked again');
+  });
 });

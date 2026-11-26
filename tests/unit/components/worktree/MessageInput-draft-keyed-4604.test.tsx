@@ -251,3 +251,20 @@ describe('[#4604 N-6] a character typed between the commit and the restore', () 
     expect(rawStore().get(KEY_A)).toBe(PLAIN);
   });
 });
+
+// r3 (review b PS-1): the restore adds what was typed only at a switch (`switched`): under StrictMode
+// the mount's effects run twice on the same key, and the stored text is not doubled.
+describe('[#4604 r3 PS-1] a StrictMode mount restores the stored text once', () => {
+  it('the composer shows the stored text, not it twice; the store keeps it as it was', async () => {
+    window.localStorage.setItem(KEY_A, 'abc');
+    render(
+      <React.StrictMode>
+        <MessageInput worktreeId={WT} cliToolId="claude" instanceId={A} draftScope="instance" isSessionRunning onMessageSent={vi.fn()} />
+      </React.StrictMode>,
+    );
+    await settle();
+    expect(getTextarea().value).toBe('abc');
+    await settle(600);
+    expect(window.localStorage.getItem(KEY_A)).toBe('abc');
+  });
+});

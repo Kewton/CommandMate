@@ -7,13 +7,18 @@
  * says it is reading the roster again (the text stays). The roster is asked for again (the provider's
  * `refresh()`, when there is one).
  *
- * When the hold goes (S-1, N-3 — decided in the render, never by `refresh()` settling):
- * - in a render of another `worktree` object (the roster read again) in which the held pair is not on
- *   the roster any more (target-gone, tool-changed): the tile shows the roster as it is;
- * - a render of another object that still has the pair (a roster read before the 409 landing late)
- *   keeps the hold; a second such render lets it go (the server's roster is then the truth — the
- *   fence answers the same 409 if it still applies).
+ * When the hold goes (S-1, N-3 — r3, INV-P: only after a roster fetch that succeeded after the hold):
+ * - in a render of a `worktree` object a roster fetch begun after the hold adopted (the cache's own
+ *   `refresh()`, run here through `useWorktreesCache` against the fetch below): the tile shows the
+ *   roster as it is — without the pair (target-gone, tool-changed), or with it (then it sends; the
+ *   fence answers the same 409 if it still applies);
+ * - another object that is not such a fetch keeps it: a fetch begun before the 409 that lands after
+ *   it, the status notifications that copy the object (`applyWaitingEdge`, 1 or 2 — 4a2b973dc counted
+ *   objects and let the hold go on the second, review a P1-3), a failed fetch;
  * - `refresh()` resolving with no new roster (it failed, or was overtaken) keeps the hold (INV-T2).
+ * r3 also: the brief up when the hold comes (review b PB-1); a 409 for another reason (`worktree-gone`)
+ * holds nothing (review b P3-2 MD); Q2's move runs after the composer's waiting save (review a P1-6),
+ * and a move that cannot be written says so.
  *
  * F11: the optimistic road (the plain send); F12: the awaited road (the brief's choice); F13: no
  * provider (the tile alone) — `refresh` is not called, the hold works and the next roster lets it go.
@@ -25,7 +30,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { installRadixJsdomPolyfills } from '@tests/helpers/radix-jsdom';
 
 beforeAll(() => installRadixJsdomPolyfills());
@@ -73,7 +78,8 @@ vi.mock('@/components/providers/WorktreesCacheProvider', async (importOriginal) 
 import { SessionTile } from '@/components/sessions/SessionTile';
 import { ToastProvider } from '@/components/common/Toast';
 import { resetRevealedStartingTerminals } from '@/hooks/useSessionStartingGate';
-import { getInstanceDraftKey } from '@/lib/drafts/message-draft';
+import { getInstanceDraftKey, getRetargetTagKey } from '@/lib/drafts/message-draft';
+import { applyWaitingEdge, useWorktreesCache } from '@/hooks/useWorktreesCache';
 import type { Worktree } from '@/types/models';
 import type { CLIToolType } from '@/lib/cli-tools/types';
 
@@ -89,6 +95,11 @@ function worktree(roster: Roster): Worktree {
     repositoryPath: '/path/to/repo',
     repositoryName: 'MyRepo',
     agentInstances: Object.entries(roster).map(([id, cliTool], order) => ({ id, cliTool, alias: '', order })),
+    // r3: the statuses a status notification (`applyWaitingEdge`) updates.
+    isWaitingForResponse: false,
+    sessionStatusByInstance: Object.fromEntries(
+      Object.keys(roster).map((id) => [id, { isRunning: true, isWaitingForResponse: false, isProcessing: false }]),
+    ),
   } as Worktree;
 }
 
@@ -115,7 +126,15 @@ const fenceBody = (reason: string, instanceId: string, cliToolId: string) => ({
 
 const posts: Array<Record<string, unknown>> = [];
 /** The answers the next POSTs get, in order (then 201). */
-let answers: Array<() => Response> = [];
+let answers: Array<() => Response | Promise<Response>> = [];
+/** The roster `/api/worktrees` answers with; `rosterAnswer` (once) instead, when set. */
+let serverRoster: Roster = {};
+let rosterAnswer: (() => Response | Promise<Response>) | null = null;
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
 const NOT_SHOWN = { ok: true, show: false, attended: false };
 const SHOWN = {
   ok: true, show: true, attended: true, injectOnStart: true, mode: 'on',
@@ -134,6 +153,12 @@ function installFetch() {
       return json(201, { id: `srv-${posts.length}`, role: 'user', content: 'x', timestamp: new Date().toISOString() });
     }
     if (url.includes('/start-preview')) return json(200, previewShown ? SHOWN : NOT_SHOWN);
+    if (url === '/api/worktrees') {
+      const answer = rosterAnswer;
+      rosterAnswer = null;
+      if (answer) return answer();
+      return json(200, { worktrees: [worktree(serverRoster)], repositories: [] });
+    }
     return json(200, {});
   }));
 }
@@ -156,10 +181,31 @@ const tree = () => (
 const scope = () => within(screen.getByTestId(`session-tile-composer-${WT}`));
 const ta = () => scope().getByTestId('message-input-textarea') as HTMLTextAreaElement;
 const notice = () => scope().queryByTestId('message-input-send-blocked');
-/** The roster is read again: a new `worktree` object (as the page's poll or `refresh()` gives one). */
-function readRoster(next: Roster) {
+/** A roster fetch through the cache's own `refresh()` (begun now): the object it adopted, if it did. */
+function startRosterFetch(next: Roster) {
+  serverRoster = next;
+  const hook = renderHook(() => useWorktreesCache({ enabled: false }));
+  let done!: Promise<void>;
+  act(() => {
+    done = hook.result.current.refresh();
+  });
+  return {
+    async settle(): Promise<Worktree | undefined> {
+      await act(async () => {
+        await done;
+      });
+      const fetched = hook.result.current.worktrees.find((wt) => wt.id === WT);
+      hook.unmount();
+      return fetched;
+    },
+  };
+}
+/** The roster is read again: a fetch begun now succeeds, and the tile renders the object it adopted. */
+async function readRoster(next: Roster) {
   roster = next;
-  current = worktree(roster);
+  const fetched = await startRosterFetch(next).settle();
+  expect(fetched).toBeDefined();
+  current = fetched!;
   view.rerender(tree());
 }
 
@@ -167,6 +213,8 @@ beforeEach(() => {
   window.localStorage.clear();
   posts.length = 0;
   answers = [];
+  serverRoster = {};
+  rosterAnswer = null;
   previewShown = false;
   provider.value = null;
   resetRevealedStartingTerminals();
@@ -230,7 +278,7 @@ describe.each<['optimistic' | 'awaited', string]>([
 
   it('target-gone: the roster read again without the instance — the tile shows the roster, nothing goes to the gone id', async () => {
     await arrange('target-gone', road);
-    readRoster({ claude: 'claude' });
+    await readRoster({ claude: 'claude' });
     await flush(30);
     expect(notice()).toBeNull();
     for (const post of posts.slice(1)) expect(post.instanceId).not.toBe('codex-2');
@@ -238,7 +286,7 @@ describe.each<['optimistic' | 'awaited', string]>([
 
   it('tool-changed: the roster read again with the new tool — the hold goes, the To is the new pair (and the tag asks)', async () => {
     await arrange('tool-changed', road);
-    readRoster({ 'codex-2': 'claude', claude: 'claude' });
+    await readRoster({ 'codex-2': 'claude', claude: 'claude' });
     await flush(30);
     expect(notice()).toBeNull();
     expect(await enterOnce()).toBe(0);
@@ -247,16 +295,104 @@ describe.each<['optimistic' | 'awaited', string]>([
 });
 
 describe('[#4606 S-1・N-3] when the hold goes', () => {
-  it('S-1: a roster read before the 409 that lands late (another object, the pair still on it) keeps the hold; a second one lets it go', async () => {
-    await arrange('tool-changed', 'optimistic');
-    readRoster({ 'codex-2': 'codex', claude: 'claude' });
+  it('S-1: a roster fetch begun before the 409 that lands after it keeps the hold; one begun after it lets it go', async () => {
+    roster = { 'codex-2': 'codex', claude: 'claude' };
+    current = worktree(roster);
+    shownId = 'codex-2';
+    view = render(tree());
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    const early = deferred<Response>();
+    rosterAnswer = () => early.promise;
+    const before409 = startRosterFetch(roster);
+    fireEvent.change(ta(), { target: { value: TEXT } });
+    await flush(30);
+    answers.push(() => json(409, fenceBody('tool-changed', 'codex-2', 'codex')));
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(posts).toHaveLength(1));
+    await flush(80);
+    await waitFor(() => expect(ta().value).toBe(TEXT));
+    expect(notice()).not.toBeNull();
+    early.resolve(json(200, { worktrees: [worktree(roster)], repositories: [] }));
+    const late = await before409.settle();
+    expect(late).toBeDefined();
+    current = late!;
+    view.rerender(tree());
     await flush(30);
     expect(notice()).not.toBeNull();
     expect(await enterOnce()).toBe(0);
-    readRoster({ 'codex-2': 'codex', claude: 'claude' });
+    await readRoster({ 'codex-2': 'codex', claude: 'claude' });
     await flush(30);
     expect(notice()).toBeNull();
     // The server's roster says codex-2 is codex: the text's tag names it — it sends (the fence answers if not).
+    expect(await enterOnce()).toBe(1);
+  });
+
+  it.each([1, 2])('P1-3: %i status notification(s) (`applyWaitingEdge`: new objects, the same roster) keep the hold', async (edges) => {
+    await arrange('target-gone', 'optimistic');
+    const waiting = [true, false];
+    for (let i = 0; i < edges; i += 1) {
+      const next = applyWaitingEdge(current, { waiting: waiting[i], instance: 'claude' });
+      expect(next).not.toBe(current);
+      expect(next.agentInstances).toBe(current.agentInstances);
+      current = next;
+      view.rerender(tree());
+      await flush(30);
+    }
+    expect(notice()).not.toBeNull();
+    expect(await enterOnce()).toBe(0);
+  });
+
+  it('a roster fetch that fails keeps the hold', async () => {
+    await arrange('target-gone', 'optimistic');
+    rosterAnswer = () => json(500, { error: 'down' });
+    await startRosterFetch({ claude: 'claude' }).settle();
+    view.rerender(tree());
+    await flush(30);
+    expect(notice()).not.toBeNull();
+    expect(await enterOnce()).toBe(0);
+  });
+
+  it('PB-1: the brief is up for a second text when the first send\'s 409 lands — the brief\'s choice POSTs nothing to the held target', async () => {
+    roster = { 'codex-2': 'codex', claude: 'claude' };
+    current = worktree(roster);
+    shownId = 'codex-2';
+    view = render(tree());
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    fireEvent.change(ta(), { target: { value: 'first' } });
+    await flush(30);
+    const first = deferred<Response>();
+    answers.push(() => first.promise);
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(posts).toHaveLength(1));
+    fireEvent.change(ta(), { target: { value: 'second' } });
+    await flush(30);
+    previewShown = true;
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await screen.findByTestId('session-start-brief-decline');
+    previewShown = false;
+    await act(async () => first.resolve(json(409, fenceBody('tool-changed', 'codex-2', 'codex'))));
+    await flush(80);
+    expect(notice()).not.toBeNull();
+    fireEvent.click(screen.getByTestId('session-start-brief-decline'));
+    await flush(80);
+    expect(posts).toHaveLength(1);
+  });
+
+  it('(negative control, MD) a 409 for another reason (`worktree-gone`) holds nothing', async () => {
+    roster = { 'codex-2': 'codex', claude: 'claude' };
+    current = worktree(roster);
+    shownId = 'codex-2';
+    view = render(tree());
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    fireEvent.change(ta(), { target: { value: TEXT } });
+    await flush(30);
+    answers.push(() => json(409, fenceBody('worktree-gone', 'codex-2', 'codex')));
+    fireEvent.keyDown(ta(), { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(posts).toHaveLength(1));
+    await flush(80);
+    expect(notice()).toBeNull();
+    fireEvent.change(ta(), { target: { value: 'again' } });
+    await flush(30);
     expect(await enterOnce()).toBe(1);
   });
 
@@ -276,7 +412,7 @@ describe('[#4606 S-1・N-3] when the hold goes', () => {
   it('F13: no provider (the tile alone) — nothing to refresh, the hold works, and the next roster lets it go', async () => {
     await arrange('target-gone', 'optimistic');
     expect(await enterOnce()).toBe(0);
-    readRoster({ claude: 'claude' });
+    await readRoster({ claude: 'claude' });
     await flush(30);
     expect(notice()).toBeNull();
   });
@@ -312,7 +448,7 @@ describe('[#4606 Q2] the shown instance leaves the roster and the tile falls bac
     await arrange('target-gone', 'optimistic');
     await flush(600);
     shownId = null;
-    readRoster({ claude: 'claude' });
+    await readRoster({ claude: 'claude' });
     await flush(50);
     expect(ta().value).toBe(`already for claude\n\n${TEXT}`);
     expect(window.localStorage.getItem(getInstanceDraftKey(WT, 'codex-2'))).toBeNull();
@@ -333,5 +469,66 @@ describe('[#4606 Q2] the shown instance leaves the roster and the tile falls bac
     await flush(30);
     expect(ta().value).toBe('');
     expect(window.localStorage.getItem(getInstanceDraftKey(WT, 'codex-2'))).toBe(TEXT);
+  });
+});
+
+// r3 (review a P1-6, c5's table): the move to the fallback runs after the composer's waiting save — the
+// latest text (and its marks) is what moves; a move that cannot be written says so.
+describe('[#4606 r3 P1-6] the move to the fallback after the composer\'s waiting save', () => {
+  const KX = getInstanceDraftKey(WT, 'codex-2');
+  const KY = getInstanceDraftKey(WT, 'claude');
+  afterEach(() => vi.restoreAllMocks());
+
+  async function showXWithSaved(text: string) {
+    roster = { 'codex-2': 'codex', claude: 'claude' };
+    current = worktree(roster);
+    shownId = 'codex-2';
+    view = render(tree());
+    await waitFor(() => expect(ta()).toBeInTheDocument());
+    fireEvent.change(ta(), { target: { value: text } });
+    await flush(600);
+    expect(window.localStorage.getItem(KX)).toBe(text);
+  }
+
+  it.each([
+    ['rewritten', '新本文'],
+    ['cleared', ''],
+  ] as const)('%s within the 500 ms of the save, then X leaves the roster: Y shows the latest, the old text does not come back', async (_how, latest) => {
+    await showXWithSaved('旧本文');
+    fireEvent.change(ta(), { target: { value: latest } });
+    await flush(50);
+    shownId = null;
+    await readRoster({ claude: 'claude' });
+    await flush(600);
+    expect(ta().value).toBe(latest);
+    expect(window.localStorage.getItem(KX)).toBeNull();
+    expect(window.localStorage.getItem(KY) ?? '').toBe(latest);
+  });
+
+  it('(control) rewritten, 600 ms, then X leaves: Y gets the rewritten text', async () => {
+    await showXWithSaved('旧本文');
+    fireEvent.change(ta(), { target: { value: '新本文' } });
+    await flush(600);
+    shownId = null;
+    await readRoster({ claude: 'claude' });
+    await flush(600);
+    expect(ta().value).toBe('新本文');
+    expect(window.localStorage.getItem(KX)).toBeNull();
+  });
+
+  it('the move cannot write Y\'s text: a toast says so, and X keeps its text and marks', async () => {
+    await showXWithSaved('旧本文');
+    const realSet = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === KY) throw new DOMException('full', 'QuotaExceededError');
+      return realSet.call(this, key, value);
+    });
+    shownId = null;
+    await readRoster({ claude: 'claude' });
+    await flush(600);
+    expect(screen.getByText('下書きを移せませんでした。元のインスタンスの下書きに残っています。')).toBeInTheDocument();
+    expect(window.localStorage.getItem(KX)).toBe('旧本文');
+    // Its marks went in to Y before the text failed (marks first): Y asks before it sends anything of it.
+    expect(window.localStorage.getItem(getRetargetTagKey(KY))).not.toBeNull();
   });
 });
