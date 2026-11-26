@@ -163,6 +163,14 @@ CLASSIFY="$SCRIPT_DIR/classify-state.sh"
 VERIFY="$SCRIPT_DIR/verify-completion.sh"
 . "$SCRIPT_DIR/monitor-lib.sh"
 
+# The first thing on stderr when this checkout is behind origin/develop (Issue
+# #4574 N-V): the monitor is run by relative path from the operator's checkout,
+# and an old one ran without the fix it was trusted for. Never fetches.
+stale_note=$(ml_stale_checkout_warning "$SCRIPT_DIR" monitor.sh)
+if [ -n "$stale_note" ]; then
+  echo "$stale_note" >&2
+fi
+
 STATE_DIR=$(mktemp -d -t cm-monitor.XXXXXX)
 cleanup() { rm -rf "$STATE_DIR"; }
 trap cleanup EXIT INT TERM
@@ -355,6 +363,11 @@ if [ ${#HOOKS_FILES[@]} -gt 0 ]; then
     fi
     . "$hooks_file"
   done
+else
+  # Issue #4574 N-E: without hooks the counters are the stubs above, so the
+  # verdict cannot tell a worker that finished from one that never started.
+  # Said once, at start, on stderr: the stdout stream stays as it was.
+  echo "monitor: WARN no --hooks: commits/uncommitted are stubs (0) and there is no task status, so COMPLETE is unreachable and an idle worker is NOT_STARTED unless an ending is on its pane — pass --hooks $SCRIPT_DIR/hooks-git.sh (and hooks-task.sh) or use 'commandmate wait'" >&2
 fi
 
 echo "monitor: watching $n_ids worker(s), interval=${INTERVAL}s, idle-threshold=${IDLE_THRESHOLD}, max-resends=${MAX_RESENDS}"
@@ -774,7 +787,20 @@ while [ "$done_count" -lt "$n_ids" ]; do
         ;;
       NOT_STARTED)
         if [ "$(read_state "$lbl" streak)" -ge "$IDLE_THRESHOLD" ]; then
-          echo "monitor[$lbl]: NOT_STARTED — idle with no work; check the composer / Enter"
+          # Issue #4574 N-E: while this poll's pane shows an ending (a return
+          # line, or the shape-outside IMPL_COMPLETED), the worker answered —
+          # "no work; check the composer" is the wrong thing to tell the
+          # operator, and S11 read it for 20 minutes over a DONE and a WAIT.
+          # Said once per ending instead; the verdict is unchanged (it is still
+          # not COMPLETE), only the line that names it.
+          if [ "$ending" != "none" ]; then
+            if [ "$ending" != "$(cat "$STATE_DIR/$lbl.endedsaid" 2>/dev/null)" ]; then
+              printf '%s' "$ending" > "$STATE_DIR/$lbl.endedsaid"
+              echo "monitor[$lbl]: ENDED (${ending%%[: ]*}) — idle with an ending on the pane, not NOT_STARTED; the ending is a report, not a verdict: read it and check the work"
+            fi
+          else
+            echo "monitor[$lbl]: NOT_STARTED — idle with no work; check the composer / Enter"
+          fi
         fi
         ;;
     esac

@@ -275,7 +275,9 @@ describe('monitor.sh reports only unexpected exits (Issue #1728, proposal E)', (
     const run = runBounded(['--max-polls', '3']);
 
     expect(run.stdout).toContain('monitor: reached --max-polls (3)');
-    expect(run.stderr).toBe('');
+    // This run has no --hooks: its stderr is the start-up warning for that
+    // (Issue #4574 N-E, human decision A) and nothing else.
+    expect(run.stderr.split('\n').filter(Boolean)).toEqual([expect.stringMatching(/^monitor: WARN no --hooks:/)]);
     expect(run.status).toBe(0);
   }, HARD_TIMEOUT_MS);
 
