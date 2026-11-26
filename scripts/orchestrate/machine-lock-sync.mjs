@@ -335,10 +335,11 @@ export function makeObserver(hooks = {}) {
       }
     },
     /**
-     * #4559: the exclusive create of a generation's tmp (`<name>.gen.tmp/<token>.<gN>.<use>`) with `text`
-     * written in whole and closed: created / exists (EEXIST: nothing opened) / unknown with `opened`. One
-     * point for the open, the write and the close (the generation's own points, apart from the <lock>'s
-     * owner-create / owner-write …, so an injection there keeps meaning the <lock>'s publish).
+     * #4559: the exclusive create of a generation's tmp (`<name>.gen.tmp/<token>.<gN>.<use>.<k>`) with `text`
+     * written in whole and closed: created / exists (EEXIST: nothing opened) / unknown with `opened`. The open
+     * is `point` (the use's own: gen-owner-tmp, end-tmp …), the write `gen-tmp-write` (#4559 r6: a write that
+     * fails after the open leaves the tmp, and the next try writes a tmp of another name — C8), the close the
+     * open's point (the generation's own points, apart from the <lock>'s owner-create / owner-write …).
      */
     put(point, tmp, text) {
       let fd;
@@ -350,7 +351,7 @@ export function makeObserver(hooks = {}) {
       try {
         const buf = Buffer.from(text);
         for (let off = 0; off < buf.length; ) {
-          const wrote = fs.writeSync(fd, buf, off, buf.length - off);
+          const wrote = attempt('gen-tmp-write', tmp, () => fs.writeSync(fd, buf, off, buf.length - off));
           if (!(wrote > 0)) throw Object.assign(new Error(`short write: ${off} of ${buf.length} bytes`), { code: 'EIO' });
           off += wrote;
         }
@@ -360,7 +361,7 @@ export function makeObserver(hooks = {}) {
         } catch {
           // the write's errno is the one named
         }
-        return { state: 'unknown', point, code: errCode(err), opened: true };
+        return { state: 'unknown', point: 'gen-tmp-write', code: errCode(err), opened: true };
       }
       try {
         fs.closeSync(fd);
@@ -369,12 +370,24 @@ export function makeObserver(hooks = {}) {
       }
       return { state: 'created' };
     },
-    /** realpath (#4559 C7): resolved with the path / absent (ENOENT) / unknown — never the string given back */
+    /**
+     * realpath (#4559 C7): resolved with the path / absent (ENOENT) / unknown — never the string given back.
+     * The native realpath (#4559 r6, C7-I1): the directory's own spelling, so two spellings of one directory on a
+     * filesystem that does not tell case apart answer one path (the JS realpath gives the caller's spelling back).
+     */
     realpath(point, p) {
       try {
-        return { state: 'resolved', path: attempt(point, p, () => fs.realpathSync(p)) };
+        return { state: 'resolved', path: attempt(point, p, () => fs.realpathSync.native(p)) };
       } catch (err) {
         return errCode(err) === 'ENOENT' ? { state: 'absent' } : { state: 'unknown', point, code: errCode(err) };
+      }
+    },
+    /** #4559 r6: the text of a file (a generation's `fields`): text / missing (ENOENT) / unknown */
+    text(point, file) {
+      try {
+        return { state: 'text', text: attempt(point, file, () => fs.readFileSync(file, 'utf8')) };
+      } catch (err) {
+        return errCode(err) === 'ENOENT' ? { state: 'missing' } : { state: 'unknown', point, code: errCode(err) };
       }
     },
     /** unlink of a file name: removed / absent (ENOENT) / unknown */
@@ -1162,8 +1175,11 @@ export function machineLockRootOf(env = process.env) {
  * name, so `/var/…` and `/private/var/…` are one name. The choice depends on the path only, never on how
  * the caller named the lock: one lock, one chain (S1 and S2 are proved for the writers of one lock that all
  * see one chain). Both realpaths are observations (`gen-realpath`): a failure is unknown — no chain is
- * chosen from the string of the path (#4559 comment 7183455133). A machine-lock root that does not exist
- * (ENOENT) is not the parent of a lock that does.
+ * chosen from the string of the path (#4559 comment 7183455133). The root's realpath not resolved — unknown
+ * or absent (ENOENT) alike — chooses no chain either (#4559 r6, C7-I2): a root that cannot be seen is not
+ * shown to be another directory than the lock's parent. The two realpaths are compared as the native
+ * realpath answers them (the directory's own spelling, C7-I1); the acquisition makes the root first, so an
+ * absent root is a root removed or misspelled meanwhile.
  *
  * @returns {{ genDir: string } | { unknown: { point: string, path: string, code: string } }}
  */
@@ -1171,17 +1187,54 @@ export function resolveGenDir(lockPath, env = process.env, obs = makeObserver())
   const root = machineLockRootOf(env);
   const parent = obs.realpath('gen-realpath', path.dirname(lockPath));
   if (parent.state !== 'resolved') return { unknown: { point: 'gen-realpath', path: path.dirname(lockPath), code: parent.state === 'absent' ? 'ENOENT' : parent.code } };
-  const base = path.basename(lockPath);
+  const named = entrySpelling(obs, parent.path, path.basename(lockPath));
+  if (named.unknown) return { unknown: named.unknown };
+  const base = named.base;
   if (base.endsWith('.lock')) {
     const realRoot = obs.realpath('gen-realpath', root);
-    if (realRoot.state === 'unknown') return { unknown: { point: 'gen-realpath', path: root, code: realRoot.code } };
-    if (realRoot.state === 'resolved' && parent.path === realRoot.path) return { genDir: path.join(root, `${base.slice(0, -'.lock'.length)}.gen`) };
+    if (realRoot.state !== 'resolved') return { unknown: { point: 'gen-realpath', path: root, code: realRoot.state === 'absent' ? 'ENOENT' : realRoot.code } };
+    if (parent.path === realRoot.path) return { genDir: path.join(root, `${base.slice(0, -'.lock'.length)}.gen`) };
   }
   return { genDir: path.join(root, 'by-path', `${byPathHash(`${parent.path}/${base}`)}.gen`) };
 }
 
-/** resolveGenDir's directory; throws (with the errno) when the realpath cannot be observed. */
+/**
+ * #4559 r6 (D2, #4559 comment 7185752051, plan (i)): the base name of the lock as its parent's entry spells it.
+ * The lock there (`gen-base-lstat`): the parent is read (`gen-base-list`) and the entry that is the same directory
+ * (dev and ino) gives the spelling — on a filesystem that does not tell case apart `X.lock` and `x.lock` are one
+ * entry, on one that does they are two entries and stay two locks (no check of the filesystem). The lock not
+ * there: the name as given (nothing to read the spelling from). A read that fails is unknown: no chain (C7-I2).
+ *
+ * @returns {{ base: string } | { unknown: { point: string, path: string, code: string } }}
+ */
+function entrySpelling(obs, dir, base) {
+  const file = path.join(dir, base);
+  const st = obs.lstat('gen-base-lstat', file);
+  if (st.state === 'absent') return { base };
+  if (st.state === 'unknown') return { unknown: { point: 'gen-base-lstat', path: file, code: st.code } };
+  const listed = obs.list('gen-base-list', dir);
+  if (listed.state !== 'listed') return { unknown: { point: 'gen-base-list', path: dir, code: listed.state === 'absent' ? 'ENOENT' : listed.code } };
+  if (listed.names.includes(base)) return { base };
+  for (const name of listed.names) {
+    if (name.toLowerCase() !== base.toLowerCase()) continue;
+    const other = obs.lstat('gen-base-lstat', path.join(dir, name));
+    if (other.state === 'unknown') return { unknown: { point: 'gen-base-lstat', path: path.join(dir, name), code: other.code } };
+    if (other.state !== 'absent' && other.dev === st.dev && other.ino === st.ino) return { base: name };
+  }
+  // The lock is there and no entry of the listing is it (removed and made again meanwhile …): read again next poll.
+  return { unknown: { point: 'gen-base-list', path: dir, code: 'ESTALE' } };
+}
+
+/**
+ * resolveGenDir's directory; throws (with the errno) when the realpath cannot be observed. The machine-lock root
+ * is made first, as the acquisition makes it (#4559 r6, C7-I2): the place a lock's chain is, before anyone took it.
+ */
 export function genDirOf(lockPath, env = process.env) {
+  try {
+    fs.mkdirSync(machineLockRootOf(env), { recursive: true });
+  } catch {
+    // seen by the realpath below
+  }
   const r = resolveGenDir(lockPath, env);
   if (r.unknown) throw Object.assign(new Error(`machine-lock-unknown point=${r.unknown.point} path=${r.unknown.path} errno=${r.unknown.code}`), { code: r.unknown.code });
   return r.genDir;
@@ -1223,6 +1276,8 @@ function makeSeam(hooks) {
 }
 
 const genPath = (g, n) => path.join(g.genDir, genName(n));
+/** #4559 r6 (C8, S4): each try of a generation's record has a tmp of its own (`.<k>`), so a tmp left by a failed write is never met again. */
+let genTmpSerial = 0;
 const isTomb = (record) => record?.tomb === 1 || record?.tomb === '1' || record?.tomb === true;
 /** The generation a <lock>'s record names (`"g":N` / `g=N`), or null (an older version's record). */
 export const recordGen = (record) => {
@@ -1279,7 +1334,7 @@ const GEN_WRITES = {
 
 /**
  * Add `name` to generation n (`owner`, `owner.h<k>`, `end`): a tmp of this acquisition's own
- * (`<token>.<gN>.<use>`, never reused) linked into the generation, the tmp removed. The answer is the
+ * (`<token>.<gN>.<use>.<k>`, one per try, never reused) linked into the generation, the tmp removed. The answer is the
  * link's: linked / exists (EEXIST: another record won the name) / absent (the generation is gone) /
  * unknown (the tmp or the link failed).
  */
@@ -1288,12 +1343,12 @@ function linkIntoGen(g, n, w, suffix, name, text) {
   g.seam('gen-tmp-mkdir');
   const made = g.obs.mkdir('gen-tmp-mkdir', g.genTmp);
   if (made.state === 'unknown') return { state: 'unknown', unknown: { point: 'gen-tmp-mkdir', path: g.genTmp, code: made.code } };
-  const tmp = path.join(g.genTmp, `${g.myToken}.${genName(n)}.${w.use}${suffix}`);
+  const tmp = path.join(g.genTmp, `${g.myToken}.${genName(n)}.${w.use}${suffix}.${++genTmpSerial}`);
   const put = g.obs.put(w.put, tmp, text);
   if (put.state !== 'created') {
     // A tmp left half written (opened, then the write failed) is another writer's old tmp to the next
     // clean-up (C8: by age only): nothing is removed by its name here.
-    return { state: 'unknown', unknown: { point: w.put, path: tmp, code: put.state === 'exists' ? 'EEXIST' : put.code } };
+    return { state: 'unknown', unknown: { point: put.state === 'exists' ? w.put : put.point, path: tmp, code: put.state === 'exists' ? 'EEXIST' : put.code } };
   }
   g.seam(w.seamTmp);
   const linked = g.obs.link(w.link, tmp, target);
@@ -1328,18 +1383,33 @@ function readGenRecords(g, n) {
   }
 }
 
-/** A generation's `fields` (merge-pr's phase …), parsed; {} when there are none or they cannot be read. */
+/**
+ * A generation's `fields` (merge-pr's phase …): `{ fields }` — {} when there are none — or `{ unknown }` when
+ * they cannot be read or parsed (#4559 r6, review a P1-1: never {} then — a dead holder's unconfirmed write
+ * would be read as idle; the recovery judges again at the next poll).
+ */
 function readGenFields(g, n) {
+  const file = path.join(genPath(g, n), 'fields');
+  const read = g.obs.text('gen-fields-read', file);
+  if (read.state === 'missing') return { fields: {} };
+  if (read.state === 'unknown') return { unknown: { point: 'gen-fields-read', path: file, code: read.code } };
   try {
-    const parsed = g.codec.parse(fs.readFileSync(path.join(genPath(g, n), 'fields'), 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    const parsed = g.codec.parse(read.text);
+    if (parsed && typeof parsed === 'object') return { fields: parsed };
   } catch {
-    return {};
+    // corrupt: named as EINVAL below
   }
+  return { unknown: { point: 'gen-fields-read', path: file, code: 'EINVAL' } };
 }
 
-/** The holder a generation's records name: the last record (the hand-off's), with the fields of the holding. */
-const holderOfRecords = (g, n, records) => ({ ...records[0], ...readGenFields(g, n), ...records[records.length - 1] });
+/**
+ * The holder a generation's records name (#4559 r6, review a P1-1): the first record, then the last (the
+ * hand-off's pid, token and group), then the holding's `fields` — the fields last, so the phase written while it
+ * held wins over the record's own `phase: 'idle'` (the reserved keys never are fields: RESERVED_OWNER_FIELDS).
+ */
+const holderOfRecords = (records, fields) => ({ ...records[0], ...records[records.length - 1], ...fields });
+/** holderOfRecords for a display (held by): the fields when they can be read. */
+const shownHolder = (g, n, records) => holderOfRecords(records, readGenFields(g, n).fields ?? {});
 
 /** holderState of a generation's record, observed at the generation's own points (holder-pid / holder-group). */
 function genHolderState(g, record) {
@@ -1386,12 +1456,15 @@ function judgeGen(g, m) {
       for (const record of records) {
         if (isTomb(record)) continue;
         const holder = genHolderState(g, record);
-        if (holder.state === 'alive') return { state: 'busy', holder: holderOfRecords(g, m, records) };
-        if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, m), code: holder.code }, holder: holderOfRecords(g, m, records) };
+        if (holder.state === 'alive') return { state: 'busy', holder: shownHolder(g, m, records) };
+        if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, m), code: holder.code }, holder: shownHolder(g, m, records) };
       }
     }
+    // The fields of the holding judged dead, read before anything is done (a P1-1): unreadable — judged again.
+    const fields = readGenFields(g, m);
+    if (fields.unknown) return { state: 'unknown', unknown: fields.unknown };
     g.seam('holder-judged');
-    const last = holderOfRecords(g, m, records);
+    const last = holderOfRecords(records, fields.fields);
     if (!isTomb(records[0]) && !g.staleNoted.has(records[0].token)) {
       g.staleNoted.add(records[0].token);
       g.onStaleHolder?.(last);
@@ -1449,6 +1522,9 @@ function takeGeneration(g, owner) {
     const made = g.obs.mkdir('gen-mkdir', genPath(g, n));
     if (made.state === 'exists') continue;
     if (made.state === 'unknown') return { unknown: { point: 'gen-mkdir', path: genPath(g, n), code: made.code } };
+    // #4559 r6 (§4.1, review a P2-1): g<n> is this writer's from its mkdir (exclusive) — a throw or a close of the
+    // steps from here on ends it (withdrawn) through `g.own`, until the own end below or the answer.
+    g.own = n;
     const published = linkIntoGen(g, n, GEN_WRITES.owner, '', 'owner', g.codec.format({ ...owner, g: n }));
     if (published.state === 'unknown') {
       // #4559 (§4.4, decided in PR-2): this writer made g<n> (mkdir is exclusive) and is alive — it does not
@@ -1457,19 +1533,25 @@ function takeGeneration(g, owner) {
       g.seam('gen-owner-failed');
       const tomb = linkIntoGen(g, n, GEN_WRITES.tomb, '', 'owner', g.codec.format({ pid: process.pid, host: g.host, token: owner.token, acquiredAt: g.now(), v: OWNER_VERSION, g: n, tomb: 1 }));
       if (tomb.state === 'linked' || tomb.state === 'exists') writeEnd(g, n, 'withdrawn');
+      g.own = null;
       return { unknown: published.unknown };
     }
-    if (published.state !== 'linked') continue; // a tomb won the name (L4) or the generation was removed
+    if (published.state !== 'linked') {
+      g.own = null;
+      continue; // a tomb won the name (L4) or the generation was removed
+    }
     g.seam('gen-postlist');
     const after = listGens(g, 'gen-postlist');
     if (after.unknown || after.absent) {
       // C6: not shown to be the largest — not taken; the own generation is ended so nobody waits on it.
       writeEnd(g, n, 'withdrawn');
+      g.own = null;
       return { unknown: after.unknown ?? { point: 'gen-postlist', path: g.genDir, code: 'ENOENT' } };
     }
     if (after.max > n) {
       g.seam('gen-withdraw-end');
       writeEnd(g, n, 'withdrawn');
+      g.own = null;
       continue;
     }
     const endNow = g.obs.lstat('gen-verify-end', path.join(genPath(g, n), 'end'));
@@ -1478,6 +1560,7 @@ function takeGeneration(g, owner) {
     // §4.1 6: not shown to be this one's own live generation — ended (withdrawn) before going on; an `end`
     // already there meets EEXIST.
     writeEnd(g, n, 'withdrawn');
+    g.own = null;
     const code = endNow.state === 'unknown' ? endNow.code : back.state === 'unknown' ? back.code : 'ESTALE';
     return { unknown: { point: endNow.state === 'unknown' ? 'gen-verify-end' : 'gen-verify-owner', path: genPath(g, n), code } };
   }
@@ -1495,25 +1578,29 @@ function genEnded(g, n) {
 }
 
 /**
- * The holder of the lock at `lockPath` now (§9, the outer readers merge-pr / merge-train): the largest
- * generation without `end` — its last record with the holding's `fields` — else the <lock>'s owner (an
- * older version's holder). null when nobody can be read.
+ * The holder of the lock at `lockPath` now (§9, the outer readers merge-pr / merge-train / run-lock): the
+ * largest generation without `end` — its records with the holding's `fields` last — else the <lock>'s owner (an
+ * older version's holder). null when nobody can be read. `genOnly` (run-lock's D8, #4559 r6): the generation's
+ * holder only (null when there is none or the chain cannot be chosen) — never the <lock>'s record.
+ *
+ * @param {string} lockPath
+ * @param {{ ownerCodec?: { parse: (text: string) => any, format: (record: Record<string, unknown>) => string }, genOnly?: boolean }} [options]
  */
 export function readHolder(lockPath, options = {}) {
   const codec = options.ownerCodec ?? JSON_OWNER_CODEC;
   const obs = makeObserver({ codec });
   const chosen = resolveGenDir(lockPath, process.env, obs);
-  if (chosen.unknown) return readOwner(lockPath, codec);
+  if (chosen.unknown) return options.genOnly ? null : readOwner(lockPath, codec);
   const g = { genDir: chosen.genDir, obs, codec };
   const listing = listGens(g, 'gen-list');
   if (!listing.unknown && listing.max > 0) {
     const end = g.obs.lstat('gen-end-read', path.join(genPath(g, listing.max), 'end'));
     if (end.state === 'absent') {
       const read = readGenRecords(g, listing.max);
-      if (read.state === 'records' && !read.records.every(isTomb)) return holderOfRecords(g, listing.max, read.records);
+      if (read.state === 'records' && !read.records.every(isTomb)) return shownHolder(g, listing.max, read.records);
     }
   }
-  return readOwner(lockPath, codec);
+  return options.genOnly ? null : readOwner(lockPath, codec);
 }
 
 /**
@@ -1633,9 +1720,18 @@ export function* machineLockAcquisition(name, options) {
   fs.mkdirSync(root, { recursive: true });
   const staleNoted = new Set();
   // The generation directory (C7): chosen from the realpaths in the first poll that can observe them.
-  const g = { ...ctx, codec, now, genDir: null, genTmp: null, seam: makeSeam(hooks), onStaleHolder: options.onStaleHolder, staleNoted };
+  const g = { ...ctx, codec, now, genDir: null, genTmp: null, seam: makeSeam(hooks), onStaleHolder: options.onStaleHolder, staleNoted, own: null };
   const chooseGenDir = () => {
     if (g.genDir !== null) return true;
+    if (!hooks.genDir) {
+      // #4559 r6 (C7-I2): the machine-lock root is made first (the by-path chains live in it, run-lock's lock is
+      // outside it); a root that cannot be made is seen by its realpath below — unknown or absent, no chain.
+      try {
+        fs.mkdirSync(machineLockRootOf(process.env), { recursive: true });
+      } catch {
+        // observed below
+      }
+    }
     const chosen = hooks.genDir ? { genDir: hooks.genDir } : resolveGenDir(lockPath, process.env, obs);
     if (chosen.unknown) {
       unknown = chosen.unknown;
@@ -1668,10 +1764,13 @@ export function* machineLockAcquisition(name, options) {
     if (mine !== null) markDone(mineFile(), token, warn);
     mine = null;
   };
-  // §4.1: every way out after the generation was taken and before the answer ends it.
+  // §4.1: every way out after the generation was taken and before the answer ends it — and, from its mkdir on
+  // (`g.own`, #4559 r6 review a P2-1), a throw or a close of the steps before takeGeneration answered.
   const giveUpGen = (kind) => {
-    if (gen !== null) writeEnd(g, gen, kind);
+    const n = gen ?? g.own;
     gen = null;
+    g.own = null;
+    if (n !== null) writeEnd(g, n, kind);
   };
   const heldBy = () => {
     const current = readOwner(lockPath, codec);
@@ -1692,12 +1791,17 @@ export function* machineLockAcquisition(name, options) {
   };
   // An empty owner taken out goes on to the mkdir in the same poll — a few times at most.
   let emptied = 0;
+  // #4559 r6 (§4.1, review a P2-1): set once an answer is returned; any other way out — a throw (a hook, an
+  // observation's caller), the waiter's sleep that threw (acquireMachineLockSync closes the steps), a return()
+  // of the generator — ends the generation (withdrawn) and the ticket in the `finally`.
+  let answered = false;
 
   try {
     for (;;) {
       if (options.shouldAbandon?.()) {
         giveUpGen('withdrawn');
         retire();
+        answered = true;
         return { acquired: false, waitedMs: now() - startedAt, heldBy: heldBy(), abandoned: true, ...noLock() };
       }
       if (mine !== null) {
@@ -1735,7 +1839,10 @@ export function* machineLockAcquisition(name, options) {
           // The section's own keys last (I1-c: the caller's fields cannot name another pid or token).
           owner = { ...(options.ownerFields ?? {}), pid: process.pid, host, token, acquiredAt: now(), ...(pgid ? { pgid } : {}), v: OWNER_VERSION };
           const taken = takeGeneration(g, owner);
-          if (taken.held !== undefined) gen = taken.held;
+          if (taken.held !== undefined) {
+            gen = taken.held;
+            g.own = null;
+          }
           else if (taken.unknown) {
             unknown = taken.unknown;
             genHolder = taken.holder ?? null;
@@ -1758,6 +1865,7 @@ export function* machineLockAcquisition(name, options) {
             if (expired.state !== 'unknown' && claim(lockPath, beacon, obs, warn, codec, onOwnerStage)) {
               retire();
               collectGarbage(queueDir, now(), warn);
+              answered = true;
               return holding(gen);
             }
             if (expired.state === 'unknown') unknown = expired.unknown;
@@ -1817,6 +1925,7 @@ export function* machineLockAcquisition(name, options) {
         // §6.1: the beacon's wait ran out — the own generation is ended (released) before busy is answered.
         giveUpGen('released');
         retire();
+        answered = true;
         return { acquired: false, waitedMs: t - startedAt, heldBy: heldBy(), ...gaveUp(), ...noLock() };
       }
       if (!waiting) {
@@ -1825,10 +1934,11 @@ export function* machineLockAcquisition(name, options) {
       }
       yield Math.min(pollMs, deadline - t);
     }
-  } catch (err) {
-    giveUpGen('withdrawn');
-    retire();
-    throw err;
+  } finally {
+    if (!answered) {
+      giveUpGen('withdrawn');
+      retire();
+    }
   }
 
   /** The handle of a holding: generation `n` (the <lock>'s owner is its record with `g`). */
@@ -1837,18 +1947,33 @@ export function* machineLockAcquisition(name, options) {
     // #4559: the <lock> is let go before `end` (§6.1), each once; a release that did not finish tries again.
     let beaconDone = false;
     let endDone = false;
-    // D4: the token a handover published (T1 = <T0>-g<pgid>), from the moment it is tried.
-    let handed = null;
+    // D4: the tokens the handovers published (T1 = <T0>-g<pgid>), each from the moment it is tried (#4559 r6:
+    // a holding hands off more than once, §4.6 — every one of them is this handle's).
+    const handed = [];
     let handoffs = 0;
     let fieldsSerial = 0;
+    const ours = (t) => t === token || handed.includes(t);
     const finishEnd = () => {
       if (endDone) return;
       g.seam('release-end');
-      const r = writeEnd(g, n, 'released');
-      if (r.state === 'unknown') {
-        throw Object.assign(new Error(`${r.unknown.code}: cannot end ${genPath(g, n)}`), { code: r.unknown.code });
+      for (let tries = 1; ; tries++) {
+        const r = writeEnd(g, n, 'released');
+        if (r.state === 'unknown') {
+          throw Object.assign(new Error(`${r.unknown.code}: cannot end ${genPath(g, n)}`), { code: r.unknown.code });
+        }
+        if (r.state === 'absent') {
+          // #4559 r6 (S4, review a P1-3): ENOENT is the tmp (cleaned by its age meanwhile, C8) or the generation.
+          // Over only when the generation is (its end there, or gone below the largest: L1); else a new tmp.
+          const over = genEnded(g, n);
+          if (over.unknown) throw Object.assign(new Error(`${over.unknown.code}: cannot tell whether ${genPath(g, n)} is over`), { code: over.unknown.code });
+          if (!over.ended) {
+            if (tries < LINK_TRIES_PER_POLL) continue;
+            throw Object.assign(new Error(`EAGAIN: cannot end ${genPath(g, n)}`), { code: 'EAGAIN' });
+          }
+        }
+        endDone = true;
+        return;
       }
-      endDone = true;
     };
     /**
      * D12 on the records of the holding, once (§4.2): the <lock>'s record when it is this acquisition's,
@@ -1906,7 +2031,7 @@ export function* machineLockAcquisition(name, options) {
         // record of this live process that no head would recover.
         let current = obs.owner('release-owner', lockPath);
         for (let i = 1; i < RELEASE_READ_TRIES && current.state === 'unknown'; i++) current = obs.owner('release-owner', lockPath);
-        const mine = current.state === 'record' && (current.owner.token === token || (handed !== null && current.owner.token === handed));
+        const mine = current.state === 'record' && ours(current.owner.token);
         const ownGroup = mine && current.owner.pid === process.pid && current.owner.pgid === process.pid;
         if (mine && validPgid(current.owner.pgid) && !ownGroup) {
           const group = obs.group('group', current.owner.pgid);
@@ -1929,17 +2054,18 @@ export function* machineLockAcquisition(name, options) {
           warn(`machine-lock-release-deferred ${lockPath} point=release-owner errno=${current.code}`, { event: 'machine-lock-release-deferred', lockPath, point: 'release-owner', errno: current.code });
           return 'deferred';
         }
-        // The same judgement, once, of the generation's last record when the <lock> does not show it (a
-        // hand-off whose copy to the <lock> failed, or a <lock> that is not this acquisition's): a child that
-        // may live keeps the holding (§4.2: no `end` while it can).
+        // The same judgement, once, of every record of the generation the <lock> does not show (#4559 r6, §4.2:
+        // every hand-off — the first one's group lives on after the second's ended; a hand-off whose copy to the
+        // <lock> failed; a <lock> that is not this acquisition's): a child that may live keeps the holding (no
+        // `end` while it can).
         const read = readGenRecords(g, n);
         if (read.state === 'unknown') {
           warn(`machine-lock-release-deferred ${lockPath} point=${read.unknown.point} errno=${read.unknown.code}`, { event: 'machine-lock-release-deferred', lockPath, point: read.unknown.point, errno: read.unknown.code });
           return 'deferred';
         }
-        const last = read.state === 'records' ? read.records[read.records.length - 1] : null;
-        if (last && !(mine && last.token === current.owner.token)) {
-          const d = judgeRecord(last);
+        for (const record of read.state === 'records' ? read.records : []) {
+          if (mine && record.token === current.owner.token) continue;
+          const d = judgeRecord(record);
           if (d.result !== 'released') {
             warn(d.line, d.data);
             if (d.result === 'needs-head') released = true;
@@ -1963,7 +2089,7 @@ export function* machineLockAcquisition(name, options) {
         // The <lock> holds another record (or none): it is left; the holding is still this one's to end.
         beaconDone = true;
         cleanupOwnGone(ctx, token);
-        if (handed !== null) cleanupOwnGone(ctx, handed);
+        for (const t of handed) cleanupOwnGone(ctx, t);
         finishEnd();
         released = true;
         return 'kept';
@@ -1975,7 +2101,7 @@ export function* machineLockAcquisition(name, options) {
       // to the caller, the own tmp removed. #4559 (§3, §6.1): the generation's `fields` first (tmp →
       // rename: only the holder writes it), then the <lock>'s copy for the older readers.
       setOwnerFields: (fields) => {
-        if (released || handed !== null) return false;
+        if (released || handed.length > 0) return false;
         const key = Object.keys(fields ?? {}).find((k) => RESERVED_OWNER_FIELDS.includes(k));
         if (key !== undefined) {
           warn(`machine-lock-owner-field-reserved ${lockPath} key=${key}`);
@@ -1983,7 +2109,8 @@ export function* machineLockAcquisition(name, options) {
         }
         const current = readOwner(lockPath, codec);
         if (!current || current.token !== token) return false;
-        const merged = { ...readGenFields(g, n), ...fields };
+        // The fields so far (a read that failed: the new ones alone — the phase written now is what a recovery needs).
+        const merged = { ...(readGenFields(g, n).fields ?? {}), ...fields };
         const gtmp = path.join(g.genTmp, `${token}.${genName(n)}.fields-${++fieldsSerial}`);
         try {
           fs.writeFileSync(gtmp, codec.format(merged));
@@ -2009,12 +2136,14 @@ export function* machineLockAcquisition(name, options) {
       // the moment it is tried, so a release after a failure in the middle still knows it.
       // #4559 (§4.6, §6.1): (1) `owner.h<k>` linked into the generation, (2) the <lock> rewritten by
       // today's D4, (3) the caller's signal. A failure at (1) writes nothing to the <lock> (stage tmp).
+      // #4559 r6 (review a P2-3): a holding hands off again (k = 2, 3 …): the <lock> then holds the previous
+      // hand-off's token, this handle's too.
       handOff: (pid, pgid) => {
         const t1 = `${token}-g${pgid}`;
         if (released || !Number.isInteger(pid) || !validPgid(pgid)) return { ok: false, stage: 'token', token: t1 };
-        handed = t1;
+        if (!handed.includes(t1)) handed.push(t1);
         const read = obs.owner('handoff-token', lockPath);
-        if (read.state !== 'record' || read.owner.token !== token) return { ok: false, stage: 'token', token: t1 };
+        if (read.state !== 'record' || !ours(read.owner.token)) return { ok: false, stage: 'token', token: t1 };
         const record = { ...read.owner, pid, token: t1, pgid, g: n };
         const linked = linkIntoGen(g, n, GEN_WRITES.handoff, String(handoffs + 1), `owner.h${handoffs + 1}`, codec.format(record));
         if (linked.state !== 'linked') return { ok: false, stage: 'tmp', token: t1 };
@@ -2048,7 +2177,13 @@ export function acquireMachineLockSync(name, options) {
   for (;;) {
     const step = steps.next();
     if (step.done) return step.value;
-    sleep(step.value);
+    try {
+      sleep(step.value);
+    } catch (err) {
+      // #4559 r6 (§4.1): the steps are closed — their `finally` ends a generation taken and the ticket.
+      steps.return(undefined);
+      throw err;
+    }
   }
 }
 
@@ -2057,10 +2192,40 @@ export function acquireMachineLockSync(name, options) {
  * the holding of one of `tokens` (any, when `tokens` is null) and its records are all dead — the same
  * judgement as the recovery (judgeGen). Nothing else.
  */
+const headGen = (ctx, codec, hooks, now) => ({ ...ctx, codec, now, genDir: ctx.genDir, genTmp: `${ctx.genDir}.tmp`, seam: makeSeam(hooks), staleNoted: new Set() });
+
+/**
+ * #4559 r6 (§4.2, review a P2-3): whether the holding of one of `tokens` — the largest generation without `end`
+ * that holds a record of them — still has a hand-off alive: `live` when any of its hand-off records
+ * (`owner.h<k>`, the <lock> shows the last one only) is alive, `unknown` when one cannot be observed, `dead` when
+ * all are gone; `none` when no such holding (or no chain) is there. The first record (the acquirer, the caller's
+ * own process in D5's use) is the recovery's to judge (endDeadGen), as before. Reads only.
+ */
+function genHoldingState(ctx, tokens, codec, hooks, now) {
+  if (!ctx.genDir) return { state: 'none' };
+  const g = headGen(ctx, codec, hooks, now);
+  const listing = listGens(g, 'gen-list');
+  if (listing.unknown) return { state: 'unknown', unknown: listing.unknown };
+  if (listing.max === 0) return { state: 'none' };
+  const end = g.obs.lstat('gen-end-read', path.join(genPath(g, listing.max), 'end'));
+  if (end.state === 'unknown') return { state: 'unknown', unknown: { point: 'gen-end-read', path: genPath(g, listing.max), code: end.code } };
+  if (end.state !== 'absent') return { state: 'none' };
+  const read = readGenRecords(g, listing.max);
+  if (read.state === 'unknown') return { state: 'unknown', unknown: read.unknown };
+  if (read.state !== 'records' || !read.records.some((r) => tokens.includes(r.token))) return { state: 'none' };
+  for (const record of read.records.slice(1)) {
+    if (isTomb(record)) continue;
+    const holder = genHolderState(g, record);
+    if (holder.state === 'alive') return { state: 'live', pid: record.pid };
+    if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, listing.max), code: holder.code } };
+  }
+  return { state: 'dead' };
+}
+
 function endDeadGen(ctx, tokens, codec, hooks, now) {
   // The chain could not be chosen (gen-realpath unknown): nothing is ended (the next head does it).
   if (!ctx.genDir) return {};
-  const g = { ...ctx, codec, now, genDir: ctx.genDir, genTmp: `${ctx.genDir}.tmp`, seam: makeSeam(hooks), staleNoted: new Set() };
+  const g = headGen(ctx, codec, hooks, now);
   const listing = listGens(g, 'gen-list');
   if (listing.unknown || listing.max === 0) return listing.unknown ? { unknown: listing.unknown } : {};
   const end = g.obs.lstat('gen-end-read', path.join(genPath(g, listing.max), 'end'));
@@ -2187,6 +2352,13 @@ export function releaseAsHead(lockPath, tokens, options = {}) {
     if (holder.state !== 'gone') {
       ctx.warn(`machine-lock-release-deferred ${lockPath} (holder pid ${read.owner.pid}${validPgid(read.owner.pgid) ? ` pgid ${read.owner.pgid}` : ''} is ${holder.state})`);
       return { result: 'deferred', ...(holder.state === 'unknown' ? { unknown: { point: holder.point, path: lockPath, code: holder.code } } : {}) };
+    }
+    // #4559 r6 (§4.2, review a P2-3): the <lock> shows the last hand-off only; the holding's every record decides.
+    // A member alive (an earlier hand-off's group) or one that cannot be observed keeps the <lock> and the generation.
+    const holding = genHoldingState(ctx, tokens, ctx.codec, ctx.hooks, ctx.now);
+    if (holding.state === 'live' || holding.state === 'unknown') {
+      ctx.warn(`machine-lock-release-deferred ${lockPath} (a record of the holding is ${holding.state === 'live' ? `alive: pid ${holding.pid}` : `unknown: ${holding.unknown.point} ${holding.unknown.code}`})`);
+      return { result: 'deferred', ...(holding.state === 'unknown' ? { unknown: holding.unknown } : {}) };
     }
     // Not by its name (#4288 PR1a-f §3.1, F62): moved to this caller's own name, the token checked —
     // a successor that took the lock while this stopped past its ticket is put back.
