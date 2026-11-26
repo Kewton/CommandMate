@@ -262,7 +262,8 @@ describe('#4559 §4.4: the writer\'s own tomb after its owner publish failed, ki
   it('self-test: a copy of the core without the own tomb never reaches (ii)\'s seam (0 calls) and leaves the generation owner-less', async () => {
     const core = read(CORE);
     const start = core.indexOf("      g.seam('gen-owner-failed');");
-    const stop = core.indexOf('      return { unknown: published.unknown };', start);
+    // the own tomb and its end are cut; `g.own = null` (r6: the writer lets g<n> go, §4.1) stays with the return
+    const stop = core.indexOf('      g.own = null;\n      return { unknown: published.unknown };', start);
     expect([start > 0, stop > start]).toEqual([true, true]);
     const broken = `${core.slice(0, start)}${core.slice(stop)}`;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gen-own-tomb-copy-'));

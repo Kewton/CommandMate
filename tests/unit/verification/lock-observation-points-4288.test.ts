@@ -307,6 +307,18 @@ const genNotTaken = (end: boolean | null = null): Pick<Scenario, 'injected' | 'c
 const GEN_SCENARIOS: Record<string, Scenario> = {
   'gen-realpath': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-list': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  // #4559 r6 (D2): the lock's lstat, and — the lock there (a dead holder's <lock>) — its parent's listing.
+  'gen-base-lstat': { code: 'EIO', setup: () => {}, ...genNotTaken() },
+  'gen-base-list': {
+    code: 'EIO',
+    reported: true,
+    setup: (name) => writeOwner(lockOf(root, name), deadOwner('dead')),
+    injected: (r, name, impl) => {
+      notTaken(r, impl);
+      expect(readOwnerToken(lockOf(root, name))).toBe('dead');
+    },
+    control: (r) => expect(r.acquired).toBe(true),
+  },
   'gen-dir-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },
   'gen-tmp-mkdir': { code: 'EIO', setup: () => {}, ...genNotTaken() },

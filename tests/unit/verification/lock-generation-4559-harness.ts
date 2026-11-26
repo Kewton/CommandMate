@@ -381,6 +381,7 @@ export const OPS: OpRow[] = [
   { fn: 'recoverLock', op: 'obs.mkdir', count: 1, seam: '—', what: 'the put-back\'s <lock>', step: '—' },
   { fn: 'recoverLock', op: 'obs.link', count: 1, seam: '—', what: 'the put-back', step: '—' },
   { fn: 'recoverLock', op: 'rmdirQuiet', count: 1, seam: '—', what: 'the put-back\'s own <lock>', step: '—' },
+  { fn: 'genDirOf', op: 'fs.mkdirSync', count: 1, seam: '—', what: 'the machine-lock root, as the acquisition makes it (C7-I2)', step: '—' },
   { fn: 'collectGens', op: 'rmQuiet', count: 2, seam: 'gc-rm・gc-tmp-rm', what: 'rm -rf g<k> (k < the largest listed, C1); an old tmp (C8)', step: 'g1' },
   { fn: 'linkIntoGen', op: 'obs.mkdir', count: 1, seam: 'gen-tmp-mkdir', what: 'the tmp directory', step: '—' },
   { fn: 'linkIntoGen', op: 'obs.link', count: 1, seam: '<use>-tmp', what: 'owner / owner.h<k> / tomb / end into g<N> (L4)', step: 'a3・h・j1・j2・r0・a4' },

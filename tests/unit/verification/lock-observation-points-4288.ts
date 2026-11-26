@@ -108,6 +108,9 @@ const ROWS_4559: ObservationPoint[] = [
   { point: 'tomb-link', impls: JS, observes: 'link tmp → g<M>/owner（墓。書き手の公開と同じ名前）', unknown: '墓を置かない（取らない）' },
   { point: 'beacon-gen-end', impls: JS, observes: '目印の記録が名指す前の世代の end と世代の lstat（§6.1）。解放の end の link が ENOENT のときの自分の世代も（#4559 r6）', unknown: '前の世代が終わったと読まない: 目印を外さない（取らない）。解放は終わったと読まない（名指して繰り返す）' },
   // #4559 r6 (review a P1-1 / P1-3): the write of a generation's tmp, and the read of its fields.
+  // #4559 r6 (D2, plan (i)): the lock's own spelling read from its parent.
+  { point: 'gen-base-lstat', impls: JS, observes: 'ロックの lstat（在れば親を読み、同じ実体の項目の綴りを取る。D2）', unknown: '鎖を選ばない: 取らない。次の周で読み直す' },
+  { point: 'gen-base-list', impls: JS, observes: 'ロックの親の一覧（ロックの実体の綴り。D2）', unknown: '鎖を選ばない: 取らない。次の周で読み直す' },
   { point: 'gen-tmp-write', impls: JS, observes: '世代の記録の tmp の書き込み（owner・end・墓・引渡し）', unknown: 'その記録を足さない（tmp は残す。次の試行は別の名前 C8）' },
   { point: 'gen-fields-read', impls: JS, observes: '世代の fields の読み（merge-pr のフェーズ。回収の callback と held by）', unknown: '回収しない（未確認の書き込みを idle と読まない）。次の周で読み直す' },
   { point: 'handoff-gen-tmp', impls: JS, observes: '引渡しの記録 owner.h<k> の tmp の排他作成と書き込み', unknown: 'ゲートを始めない（stage=tmp。目印を書き直さない）' },
@@ -210,6 +213,7 @@ export const RAW_CALL_ALLOWANCES: RawCallAllowance[] = [
     { impl, fn: 'asHead', primitive: 'readJson', count: 1, why: '自分の札の確かめ（releaseAsHead・recoverIfDead）。読めなければ札を失ったとして並び直す（先頭にならない）' },
     // #4559 PR-2 (lead-tests §1 #5, reason (b)): the generation chain's raw calls.
     { impl, fn: 'testPause', primitive: 'existsSync', count: 1, why: 'テストの一時停止の口（CM_VERIFY_TEST_HANDOFF_DIR の .go）。本番では止まらない' },
+    { impl, fn: 'genDirOf', primitive: 'mkdirSync', count: 1, why: 'マシンのロックの root の mkdir -p（#4559 r6: 取得と同じく、置き場を作るだけ。失敗は gen-realpath の観測に出る）' },
     { impl, fn: 'takeGeneration', primitive: 'mkdirSync', count: 1, why: '.gen の親（by-path）の mkdir -p（置き場を作るだけ。.gen 自体は gen-dir-mkdir の観測）' },
     { impl, fn: 'readHolder', primitive: 'readOwner', count: 2, why: '外の読み手（merge-pr・merge-train の held by）の表示。鎖を選べない（gen-realpath が不明）か、世代に保有者が無いときの目印の記録。判断に使わない' },
   ]),

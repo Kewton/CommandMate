@@ -53,7 +53,7 @@ export function coreSeams(source: string): string[] {
   return [...names].sort();
 }
 
-type Setup = 'fresh' | 'dead-group-holder' | 'ended' | 'two-ended' | 'old-tmp' | 'dead-holder' | 'ownerless-old' | 'prev-beacon' | 'handoff' | 'fields' | 'larger-later' | 'publish-fails';
+type Setup = 'dead-beacon' | 'fresh' | 'dead-group-holder' | 'ended' | 'two-ended' | 'old-tmp' | 'dead-holder' | 'ownerless-old' | 'prev-beacon' | 'handoff' | 'fields' | 'larger-later' | 'publish-fails';
 
 /** Where each seam is reached (the state a row starts from). Every seam of the core is a key here. */
 const SEAM_SETUP: Record<string, Setup> = {
@@ -108,6 +108,11 @@ function prepare(root: string, setup: Setup): void {
   if (setup === 'dead-holder') writeGen(genDir, 1, { owner: { pid: dead, token: 'D' } });
   if (setup === 'dead-group-holder') writeGen(genDir, 1, { owner: { pid: dead, token: 'D', pgid: dead } });
   if (setup === 'ownerless-old') writeGen(genDir, 1, { owner: null, mtimeAgoMs: OLD_MS });
+  // #4559 r6 (D2): a <lock> there (an older version's dead holder, no g) — its parent is read for its spelling.
+  if (setup === 'dead-beacon') {
+    fs.mkdirSync(lockPath, { recursive: true });
+    fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: dead, host: HOST, token: 'D', acquiredAt: 0, v: 1 }));
+  }
   if (setup === 'prev-beacon') {
     writeGen(genDir, 1, { owner: { pid: dead, token: 'D' }, end: `dead R` });
     fs.mkdirSync(lockPath, { recursive: true });
@@ -150,7 +155,7 @@ function actorOptions(setup: Setup): { handOff?: boolean; fields?: boolean } {
  */
 async function bringTo(root: string, seam: string, setup: Setup, extraPauses: string[] = []) {
   const pre = setup === 'larger-later' ? ['gen-postlist#1'] : [];
-  const a = startActor(root, 'A', { pauses: [...pre, `${seam}#1`, ...extraPauses], timeoutMs: 800, ...actorOptions(setup) });
+  const a = startActor(root, 'A', { pauses: [...pre, `${seam}#1`, ...extraPauses], timeoutMs: 800, seams: true, ...actorOptions(setup) });
   if (setup === 'larger-later') {
     expect(await until(() => a.reached('gen-postlist#1'))).toBe(true);
     writeGen(lockOf(root).genDir, 2, { owner: { pid: deadPid(), token: 'L' } });
@@ -161,6 +166,57 @@ async function bringTo(root: string, seam: string, setup: Setup, extraPauses: st
 
 const STOP_SEAMS = Object.keys(SEAM_SETUP).filter((s) => SEAM_SETUP[s] !== 'publish-fails');
 
+/**
+ * b P2-2: for each stop row, the times A and B reached the seam and who took (`AB`: A, then B; `-`: nobody).
+ * Measured, then fixed here; a row whose crossing changes is red. Where B reaches 0, why is in UNCROSSED.
+ */
+const CROSS: Record<string, { a: number; b: number; took: string }> = {
+  'beacon-prev-judged': { a: 1, b: 0, took: 'B' },
+  'beacon-release': { a: 1, b: 1, took: 'AB' },
+  'end-linked': { a: 2, b: 1, took: 'AB' },
+  'end-tmp': { a: 2, b: 2, took: 'AB' },
+  'fields-rename': { a: 1, b: 1, took: 'AB' },
+  'gc-judged': { a: 1, b: 2, took: 'AB' },
+  'gc-rm': { a: 1, b: 2, took: 'AB' },
+  'gc-tmp-rm': { a: 1, b: 1, took: 'AB' },
+  'gen-dir-mkdir': { a: 1, b: 1, took: 'AB' },
+  'gen-end-read': { a: 1, b: 2, took: 'AB' },
+  'gen-handoff-tmp': { a: 1, b: 1, took: 'AB' },
+  'gen-list': { a: 2, b: 1, took: 'AB' },
+  'gen-mkdir': { a: 1, b: 2, took: 'AB' },
+  'gen-owner-linked': { a: 1, b: 1, took: 'AB' },
+  'gen-owner-tmp': { a: 1, b: 1, took: 'AB' },
+  'gen-parent-mkdir': { a: 1, b: 1, took: 'AB' },
+  'gen-postlist': { a: 1, b: 1, took: 'AB' },
+  'gen-tmp-mkdir': { a: 2, b: 2, took: 'AB' },
+  'gen-withdraw-end': { a: 1, b: 0, took: 'AB' },
+  'handoff-linked': { a: 1, b: 1, took: 'AB' },
+  'holder-judged': { a: 1, b: 1, took: 'AB' },
+  'holder-read': { a: 1, b: 1, took: 'AB' },
+  'holder-relist': { a: 1, b: 1, took: 'AB' },
+  'ownerless-judged': { a: 1, b: 1, took: 'AB' },
+  'release-end': { a: 1, b: 1, took: 'AB' },
+  'tomb-end': { a: 1, b: 0, took: 'AB' },
+  'tomb-linked': { a: 1, b: 0, took: 'AB' },
+  'tomb-tmp': { a: 1, b: 1, took: 'AB' },
+};
+
+/** The rows where B never reaches the seam, and why (named, not dropped: b P2-2). */
+const UNCROSSED: Record<string, string> = {
+  'beacon-prev-judged': 'the earlier generation\'s <lock> is A\'s to judge; once A recovered it there is none for B (A, its ticket retired by B, waits behind B and gives up: B takes)',
+  'gen-withdraw-end': 'only A meets a larger generation (written at A\'s gen-postlist by the test)',
+  'tomb-linked': 'the owner-less generation is A\'s to tomb; after A, B finds it ended',
+  'tomb-end': 'the owner-less generation is A\'s to tomb; after A, B finds it ended',
+};
+
+describe('#4559 T2: the crossing table', () => {
+  it('names every stop row, and every row where B reaches 0 is named with its reason', () => {
+    expect(Object.keys(CROSS).sort()).toEqual([...STOP_SEAMS].sort());
+    expect(Object.keys(CROSS).filter((s) => CROSS[s].b === 0).sort()).toEqual(Object.keys(UNCROSSED).sort());
+    expect(Object.values(CROSS).every((r) => r.a >= 1 && r.took !== '-')).toBe(true);
+  });
+});
+
 describe('#4559 T2: A stopped at each seam, B at the same seam (the crossing order)', () => {
   it.each(STOP_SEAMS)('stop at %s: S1 and S2 hold, and all settles', async (seam) => {
     const setup = SEAM_SETUP[seam];
@@ -169,10 +225,12 @@ describe('#4559 T2: A stopped at each seam, B at the same seam (the crossing ord
     const a = await bringTo(root, seam, setup);
     expect(await until(() => a.reached(`${seam}#1`)), `A reaches ${seam}`).toBe(true);
     // B's clock is 70 s ahead: A's ticket is past its deadline + 60 s, so B is the head while A stops.
-    const b = startActor(root, 'B', { pauses: [`${seam}#1`], timeoutMs: 400, nowAheadMs: 70_000 });
+    // B has the same options as A (hand-off, fields), so the seams of a holding are within its reach too (b P2-2).
+    // B waits out A's stop (5 s): a seam B meets only as a holder is reached after A lets go.
+    const b = startActor(root, 'B', { pauses: [`${seam}#1`], timeoutMs: 5000, nowAheadMs: 70_000, seams: true, ...actorOptions(setup) });
     let bExited = false;
     void b.exited.then(() => (bExited = true));
-    await until(() => bExited || b.reached(`${seam}#1`), 3000);
+    await until(() => bExited || b.reached(`${seam}#1`), 1000);
     expect(s2Violations(lockOf(root).genDir), 'S2 while A and B stop').toEqual([]);
     a.go(`${seam}#1`);
     let aExited = false;
@@ -182,6 +240,11 @@ describe('#4559 T2: A stopped at each seam, B at the same seam (the crossing ord
     await a.exited;
     await b.exited;
     expect(s1Violations(allEvents(a, b))).toEqual([]);
+    // b P2-2 (the rule of #4559 comment 7185752051): how many times each actor reached the seam, and who took.
+    const took = (x: typeof a) => x.events().some((e) => e.event === 'acquired');
+    const observed = { a: a.seamCount(seam), b: b.seamCount(seam), took: [a, b].filter(took).map((x) => x.who).join('') || '-' };
+    if (process.env.CM_T2_RECORD) fs.appendFileSync(process.env.CM_T2_RECORD, `${JSON.stringify({ seam, ...observed })}\n`);
+    expect(observed).toEqual(CROSS[seam]);
     // S2 at the time of each `end` (b P2-3), not who is alive now (both have exited).
     expect(s2AtWrite(lockOf(root).genDir, [a, b])).toEqual([]);
     expectSettled(root);
@@ -252,6 +315,8 @@ const POINT_SETUP: Record<string, Setup> = {
   'tomb-link': 'ownerless-old',
   'beacon-gen-end': 'prev-beacon',
   'gen-realpath': 'fresh',
+  'gen-base-lstat': 'fresh',
+  'gen-base-list': 'dead-beacon',
   'handoff-gen-tmp': 'handoff',
   'handoff-gen-link': 'handoff',
 };
@@ -266,7 +331,7 @@ function takeWith(root: string, setup: Setup, fault: (point: string, target: str
     pollMs: 10,
     warn: (l: string) => warnings.push(l),
     // the generation directory as a test seam (hooks.genDir), but for gen-realpath, whose observation it skips
-    hooks: { fault, now: () => Date.now() + 11 * 60_000, startOf: () => 0, ...(point === 'gen-realpath' ? {} : { genDir }) },
+    hooks: { fault, now: () => Date.now() + 11 * 60_000, startOf: () => 0, ...(point === 'gen-realpath' || point.startsWith('gen-base-') ? {} : { genDir }) },
   });
   let handed: unknown = null;
   if (r.acquired && setup === 'handoff') handed = r.handOff(process.pid, process.pid);
@@ -577,6 +642,79 @@ describe('#4559 r6 C7-I1: one lock, one chain — the realpath compares the dire
       expect(chainsOf(locks).byPath).toHaveLength(1);
       expect(a.release()).toBe('released');
     });
+  });
+});
+
+describe('#4559 r6 C7-I1 / D2 (#4559 comment 7185752051, plan (i)): the base name is the entry\'s own spelling, read from the parent', () => {
+  // Plan (i): the parent directory is read and the existing entry's own spelling taken (no check of the FS).
+  // A case-insensitive FS: X.lock and x.lock are one lock — one chain. A case-sensitive FS: two locks — two chains.
+  // Each row runs on its FS only; the other side is skipped by name.
+  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) other/x.lock held, other/X.lock waits: one by-path chain, B takes nothing and then takes on it', () => {
+    const base = freshRoot('d2-ci');
+    const locks = path.join(base, 'locks');
+    fs.mkdirSync(locks);
+    const dir = path.join(base, 'other');
+    fs.mkdirSync(dir);
+    withRoot(locks, () => {
+      const a = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'x.lock'), timeoutMs: 0 });
+      expect(a.acquired).toBe(true);
+      const b = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'X.lock'), timeoutMs: 200, pollMs: 10 });
+      expect(b.acquired).toBe(false);
+      expect(chainsOf(locks).byPath).toHaveLength(1);
+      expect(a.release()).toBe('released');
+    });
+  });
+
+  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) the named lock x held, <root>/X.lock waits: no by-path, one chain <root>/x.gen', () => {
+    const locks = freshRoot('d2-ci-named');
+    withRoot(locks, () => {
+      const a = lockSync.acquireMachineLockSync('x', { root: locks, timeoutMs: 0 });
+      expect(a.acquired).toBe(true);
+      const b = lockSync.acquireMachineLockSync('X', { lockPath: path.join(locks, 'X.lock'), timeoutMs: 200, pollMs: 10 });
+      expect(b.acquired).toBe(false);
+      expect(chainsOf(locks)).toEqual({ named: ['x.gen'], byPath: [] });
+      expect(a.release()).toBe('released');
+    });
+  });
+
+  it.skipIf(CASE_INSENSITIVE)('(case-sensitive FS only) other/x.lock and other/X.lock are two locks: both take, each on its own chain', () => {
+    const base = freshRoot('d2-cs');
+    const locks = path.join(base, 'locks');
+    fs.mkdirSync(locks);
+    const dir = path.join(base, 'other');
+    fs.mkdirSync(dir);
+    withRoot(locks, () => {
+      const a = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'x.lock'), timeoutMs: 0 });
+      const b = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'X.lock'), timeoutMs: 200, pollMs: 10 });
+      expect([a.acquired, b.acquired]).toEqual([true, true]);
+      expect(chainsOf(locks).byPath).toHaveLength(2);
+      expect([a.release(), b.release()]).toEqual(['released', 'released']);
+    });
+  });
+
+  it('the parent\'s listing fails once (EIO, gen-base-list) while the lock is there: no chain that poll, named, taken the next', () => {
+    const base = freshRoot('d2-eio');
+    const locks = path.join(base, 'locks');
+    fs.mkdirSync(locks);
+    const dir = path.join(base, 'other');
+    fs.mkdirSync(path.join(dir, 'x.lock'), { recursive: true });
+    const warnings: string[] = [];
+    let fired = 0;
+    const r = withRoot(locks, () =>
+      lockSync.acquireMachineLockSync('x', {
+        lockPath: path.join(dir, 'x.lock'),
+        timeoutMs: 1000,
+        pollMs: 10,
+        ownerlessGraceMs: 0,
+        warn: (l: string) => warnings.push(l),
+        hooks: { fault: (p: string, _t: string, c: number) => (p === 'gen-base-list' && c === 1 ? (fired++, 'EIO') : undefined) },
+      })
+    );
+    expect(fired, 'the parent is read (gen-base-list reached once with the fault)').toBe(1);
+    expect(warnings.join('\n')).toContain(`machine-lock-unknown point=gen-base-list path=${fs.realpathSync.native(dir)} errno=EIO`);
+    expect(r.acquired).toBe(true);
+    expect(chainsOf(locks).byPath).toHaveLength(1);
+    expect(withRoot(locks, () => r.release())).toBe('released');
   });
 });
 

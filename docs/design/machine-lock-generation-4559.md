@@ -343,6 +343,7 @@ T3 が核のソースを走査して関数・操作・数がこの表と一致�
 | `recoverLock` | `obs.mkdir` | 1 | — | the put-back's <lock> | — |
 | `recoverLock` | `obs.link` | 1 | — | the put-back | — |
 | `recoverLock` | `rmdirQuiet` | 1 | — | the put-back's own <lock> | — |
+| `genDirOf` | `fs.mkdirSync` | 1 | — | the machine-lock root, as the acquisition makes it (C7-I2) | — |
 | `collectGens` | `rmQuiet` | 2 | gc-rm・gc-tmp-rm | rm -rf g<k> (k < the largest listed, C1); an old tmp (C8) | g1 |
 | `linkIntoGen` | `obs.mkdir` | 1 | gen-tmp-mkdir | the tmp directory | — |
 | `linkIntoGen` | `obs.link` | 1 | <use>-tmp | owner / owner.h<k> / tomb / end into g<N> (L4) | a3・h・j1・j2・r0・a4 |
