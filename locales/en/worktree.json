@@ -22,7 +22,11 @@
     "showSlashCommands": "Show slash commands",
     "attachImage": "Attach image",
     "sendMessage": "Send message",
-    "resizeHandle": "Resize the message box. Use the up and down arrow keys to adjust; double-click to return to automatic height."
+    "resizeHandle": "Resize the message box. Use the up and down arrow keys to adjust; double-click to return to automatic height.",
+    "previousDraftNotSaved": "The previous draft could not be saved",
+    "draftUnreadable": "The draft could not be read",
+    "draftNotMoved": "The draft could not be moved. It stays in the previous instance's draft.",
+    "sendTargetRefreshing": "The target changed. Reading the roster again"
   },
   "interrupt": {
     "stopProcessing": "Stop processing"
@@ -57,6 +61,7 @@
     "assistant": "Assistant",
     "sending": "Sending…",
     "failedToSend": "Failed to send",
+    "sendHeld": "Not sent (the target changed). It can be retried after the roster is read again",
     "sendUnknown": {
       "status": "Not sure whether this arrived",
       "guidance": "Part or all of it may have arrived. Check the terminal, then send it again only if needed",
@@ -91,7 +96,8 @@
       "retargetConfirm": "This text was stopped on its way to {original}. The target is now {current}. Send it to {current}?",
       "retargetConfirmYes": "Send",
       "retargetConfirmNo": "Cancel",
-      "retargetConfirmUnreadable": "Could not check whether this text was stopped on its way to another target (the target check cannot be read). Send it to {current}?"
+      "retargetConfirmUnreadable": "Could not check whether this text was stopped on its way to another target (the target check cannot be read). Send it to {current}?",
+      "retargetUnstored": "The target check could not be saved. Another tab, or this page after a reload, may send without asking"
     },
     "retrySending": "Retry sending message",
     "discard": "Discard",

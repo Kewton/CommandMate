@@ -403,6 +403,16 @@ const UserMessageSection = memo(function UserMessageSection({
             <span>{t('conversation.failedToSend')}</span>
           </span>
         )}
+        {/* Issue #4606 r4: a send gate held it back (the tile's To is held) — not sent, not failed. */}
+        {sendState === 'held' && (
+          <span
+            data-testid="optimistic-held"
+            className="flex items-center gap-1 text-xs text-muted-foreground"
+          >
+            <CircleHelp size={12} aria-hidden="true" />
+            <span>{t('conversation.sendHeld')}</span>
+          </span>
+        )}
         {/* Issue #1121: on a failed send, retry/discard replace the hover toolbar
             and stay always-visible so recovery actions are reachable on touch too. */}
         {sendState === 'unknown' ? (
@@ -447,7 +457,7 @@ const UserMessageSection = memo(function UserMessageSection({
               </button>
             )}
           </div>
-        ) : awaitingResponse ? null : sendState === 'error' ? (
+        ) : awaitingResponse ? null : sendState === 'error' || sendState === 'held' ? (
           <div className="ml-auto flex items-center gap-1">
             {onRetryPending && (
               <button

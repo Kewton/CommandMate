@@ -119,6 +119,30 @@ export function applyWaitingEdge(
 }
 
 /**
+ * Issue #4606 r3 (P1-3, INV-P): which roster fetch each adopted worktree object came from. Every fetch
+ * of `/api/worktrees` takes the next number when it starts; the objects it adopts (its reply, as
+ * `setWorktrees` gets them) are stamped with it. A copy made later (a waiting edge, a running edge) is
+ * another object and carries no stamp. Module-wide: the numbers of every cache on the page are one
+ * order. Read only — nothing the hook returns, and no refresh, changes because of it.
+ */
+let worktreeFetchSeq = 0;
+const worktreeFetchedBy = new WeakMap<Worktree, number>();
+
+/** Issue #4606 r3: the number of the last roster fetch begun (a hold taken now waits for a later one). */
+export function currentWorktreeFetchSeq(): number {
+  return worktreeFetchSeq;
+}
+
+/**
+ * Issue #4606 r3: whether `worktree` is an object a roster fetch begun after `seq` adopted (it succeeded:
+ * a failed, refused or overtaken fetch adopts nothing).
+ */
+export function isWorktreeFetchedAfter(worktree: Worktree, seq: number): boolean {
+  const fetched = worktreeFetchedBy.get(worktree);
+  return fetched !== undefined && fetched > seq;
+}
+
+/**
  * Return value of useWorktreesCache hook.
  */
 export interface UseWorktreesCacheReturn {
@@ -209,6 +233,8 @@ export function useWorktreesCache(
     // Issue #4190: only the latest request is adopted, so a reply held up
     // before hidden cannot overwrite what the read on coming back returned.
     const requestSeq = ++refreshSeqRef.current;
+    // Issue #4606 r3: this fetch's place in the page's order of roster fetches.
+    const fetchSeq = ++worktreeFetchSeq;
     try {
       setError(null);
       // Issue #2643: retrying an empty cache after a failure is a load, not a
@@ -241,6 +267,10 @@ export function useWorktreesCache(
       if (requestSeq !== refreshSeqRef.current) return;
       const wts = applySavedWorktreeStatuses<Worktree>(data.worktrees ?? [], statusGeneration);
       const repos = data.repositories ?? [];
+      // Issue #4606 r3: the objects this fetch adopts are its (read by `isWorktreeFetchedAfter`).
+      for (const wt of wts) {
+        if (wt !== null && typeof wt === 'object') worktreeFetchedBy.set(wt, fetchSeq);
+      }
       // Mark polling state updates as low-priority transitions so urgent
       // user interactions (clicks, keypresses) are never blocked by a
       // poll-induced list reorder landing mid-click.

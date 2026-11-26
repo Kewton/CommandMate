@@ -104,7 +104,7 @@
  * @module components/sessions/SessionTile
  */
 
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { History, MessageSquare, TerminalSquare } from 'lucide-react';
@@ -126,10 +126,12 @@ import { useSplitMessages } from '@/hooks/useSplitMessages';
 import {
   usePendingMessages,
   isSendOutcomeUnknown,
+  SEND_HELD_BY_GATE,
   type OptimisticSendOptions,
   type PendingConnectivity,
 } from '@/hooks/usePendingMessages';
 import { useSendRefusalNotice } from '@/hooks/useSendRefusalNotice';
+import { useToast } from '@/components/common/Toast';
 import { useAttachmentNotReturnedNotice } from '@/hooks/useOptimisticPaneMessages';
 import { usePendingConnectivity } from '@/hooks/usePendingConnectivity';
 import { useSessionTileAutoYes } from '@/hooks/useSessionTileAutoYes';
@@ -145,9 +147,12 @@ import { buildSessionRowHref } from '@/lib/sidebar-utils';
 import {
   appendToStoredDraft,
   getInstanceDraftKey,
+  moveDraft,
   returnRetargetedText,
   type RetargetedText,
 } from '@/lib/drafts/message-draft';
+import { useOptionalWorktreesCacheContext } from '@/components/providers/WorktreesCacheProvider';
+import type { SendTargetChangedRefusal } from '@/components/worktree/send-refusal-notice';
 import { deriveCliStatus, isUnclassifiedCliStatus } from '@/types/sidebar';
 import {
   UNCLASSIFIED_STATUS_DOT_CLASS,
@@ -168,6 +173,7 @@ import {
   getTerminalDisplayCompaction,
 } from '@/config/terminal-display-compaction';
 import type { AgentInstance } from '@/lib/cli-tools/types';
+import { currentWorktreeFetchSeq, isWorktreeFetchedAfter } from '@/hooks/useWorktreesCache';
 import type { ChatMessage, Worktree } from '@/types/models';
 import type { SurfaceMode } from '@/types/ui-state';
 
@@ -428,6 +434,29 @@ export function selectTileInstances(
   return narrowed.length > 0 ? narrowed : [...instances];
 }
 
+/**
+ * Issue #4606 (O-1): a target the send fence just said changed (409 `SEND_TARGET_CHANGED`
+ * `not_sent`), held by the tile until its roster is read again — r3 (P1-3, INV-P): `fetchSeq` is the
+ * number of the last roster fetch begun when it was taken; only a fetch begun after it counts.
+ */
+interface StaleTargetHold {
+  instanceId: string;
+  cliToolId: string;
+  fetchSeq: number;
+}
+
+/**
+ * Issue #4606 (S-1, N-3), r3 (P1-3): the holds left for the render of `worktree`, decided in the render
+ * (never by `refresh()` settling). A hold goes only in a render of an object a roster fetch begun after
+ * the hold adopted — it succeeded (`isWorktreeFetchedAfter`); the tile then shows the roster as it is
+ * (the fence answers again if the target still changed). Another object — a fetch begun before the
+ * 409 landing late, a copy a status notification made, the same object again — keeps it: a count of
+ * objects is not a fetch.
+ */
+export function nextStaleTargetHolds(holds: readonly StaleTargetHold[], worktree: Worktree): StaleTargetHold[] {
+  return holds.filter((hold) => !isWorktreeFetchedAfter(worktree, hold.fetchSeq));
+}
+
 function SessionTileCard({
   worktree,
   enabled,
@@ -467,6 +496,54 @@ function SessionTileCard({
   // The id `/send`, the poller and the Auto-Yes map resolve an omitted instance
   // to: the primary is named by its tool.
   const resolvedInstanceId = instanceId ?? cliToolId;
+
+  // Issue #4606 (O-1, 設計書 §3.6): the targets the fence just said changed, held until the roster is
+  // read again; while the To is one of them nothing is sent from this tile. Decided in the render, so
+  // the To, the roster and the hold change in the same render (no window).
+  const worktreesCache = useOptionalWorktreesCacheContext();
+  const worktreesCacheRef = useRef(worktreesCache);
+  worktreesCacheRef.current = worktreesCache;
+  const [staleHolds, setStaleHolds] = useState<StaleTargetHold[]>([]);
+  const fullRoster = useMemo(() => resolveInstances(worktree), [worktree]);
+  const keptHolds = staleHolds.length === 0 ? staleHolds : nextStaleTargetHolds(staleHolds, worktree);
+  if (keptHolds.length !== staleHolds.length) {
+    setStaleHolds(keptHolds);
+  }
+  const sendHeld = keptHolds.some((hold) => hold.instanceId === resolvedInstanceId && hold.cliToolId === cliToolId);
+  // Issue #4604＋#4606 r3c: the holds now, for the tile's one gate (`sendThroughStaleTargetGate`).
+  // r4d (INV-P2): the ref is the first value — a 409 adds to it (or raises its count), the roster's
+  // decision takes from it; a render only lets holds go, never puts its list from state over it.
+  const staleHoldsRef = useRef(keptHolds);
+  if (staleHoldsRef.current.length > 0) {
+    staleHoldsRef.current = nextStaleTargetHolds(staleHoldsRef.current, worktree);
+  }
+  // r4 (INV-P2): whether a To is held, read when it is asked (the tile's record, at once after a 409) —
+  // the tile's gate and the composer's gate (its awaited send, the brief's choice) ask the same.
+  const isSendHeld = useCallback(
+    (to: { instanceId: string; cliToolId: string }) =>
+      staleHoldsRef.current.some((hold) => hold.instanceId === to.instanceId && hold.cliToolId === to.cliToolId),
+    [],
+  );
+  const holdStaleTarget = useCallback((refusal: SendTargetChangedRefusal) => {
+    const target = refusal.target;
+    // The roster's reasons only (the instance went, its tool changed): a roster read again settles them.
+    if (refusal.sendOutcome !== 'not_sent' || target === null) return;
+    if (refusal.reason !== 'target-gone' && refusal.reason !== 'tool-changed') return;
+    const hold = { instanceId: target.instanceId, cliToolId: target.cliToolId, fetchSeq: currentWorktreeFetchSeq() };
+    // r4 (P1-3): a hold of the same pair already there counts from this latest refusal — a fetch begun
+    // before it (even one adopted and not yet rendered) does not let it go.
+    const withHold = (list: StaleTargetHold[]): StaleTargetHold[] => {
+      const same = list.find((h) => h.instanceId === target.instanceId && h.cliToolId === target.cliToolId);
+      if (!same) return [...list, hold];
+      if (same.fetchSeq >= hold.fetchSeq) return list;
+      return list.map((h) => (h === same ? hold : h));
+    };
+    // r3c: the gate sees it at once (before the render that shows it).
+    staleHoldsRef.current = withHold(staleHoldsRef.current);
+    setStaleHolds((prev) => withHold(prev));
+    // Read the roster again now (no provider — the tile alone: the next roster lets the hold go).
+    void worktreesCacheRef.current?.refresh().catch(() => undefined);
+  }, []);
 
   // Issue #2510: which surface, and — for the terminal — whether History is
   // stacked under it. The History toggle is the TILE scope, never the worktree
@@ -528,8 +605,15 @@ function SessionTileCard({
   // text handed back by a late answer (a 409 role refusal after the tile switched
   // instance) goes to that instance's draft, not to the one on screen.
   const sendTargetsRef = useRef(new WeakMap<object, string>());
-  const sendMessageFn = useCallback(
+  // Issue #4604＋#4606 r3c (INV-P): the tile's one gate — every `POST /send` of the tile's pending layer
+  // (a new send, the history's [retry], the automatic resend of a parked row) leaves only here. While
+  // the To is a held pair (until a roster fetch that succeeded after the hold) nothing leaves: it
+  // answers "not sent" (`SEND_HELD_BY_GATE`) and the row stays, waiting, for a retry after the fetch.
+  const sendThroughStaleTargetGate = useCallback(
     async (content: string, options: OptimisticSendOptions) => {
+      if (isSendHeld({ instanceId: options.instanceId ?? options.cliToolId, cliToolId: options.cliToolId })) {
+        return SEND_HELD_BY_GATE;
+      }
       try {
         return await worktreeApi.sendMessage(worktree.id, content, options);
       } catch (error) {
@@ -539,7 +623,7 @@ function SessionTileCard({
         throw error;
       }
     },
-    [worktree.id],
+    [worktree.id, isSendHeld],
   );
   // Text headed for the composer: a discarded send (so it can be edited and
   // sent again), a send refused because of its role (Issue #4385) or a previous
@@ -549,6 +633,39 @@ function SessionTileCard({
   const [composerInsert, setComposerInsert] = useState<{ text: string; target: string } | null>(null);
   const shownInstanceRef = useRef(resolvedInstanceId);
   shownInstanceRef.current = resolvedInstanceId;
+  // Issue #4606 (Q2, 設計書 §3.6): the instance shown left the roster and the tile fell back to another —
+  // its draft (text and tags) moves to the fallback's draft (the marks first, the text after what is
+  // there; the composers showing it hear it). A switch by the person moves nothing (the instance is
+  // still on the roster).
+  // r3 (P1-6): after the composer's waiting save — a passive effect of the tile runs after its child's
+  // (the composer's restore writes the previous draft's waiting save, then its marks are written back),
+  // so the latest text and marks are what moves; the fallback's composer, already restored, hears the
+  // moved text. A text that cannot be moved stays under its key, and a toast says so.
+  const previousShownRef = useRef(resolvedInstanceId);
+  const { showToast: showTileToast } = useToast();
+  // r4 (P1-6): the drafts whose waiting save the composer could not write at this switch — their stored
+  // text is an older one, so they are not moved (they stay under their key, and it is said).
+  const unsavedDraftsRef = useRef(new Set<string>());
+  const notePreviousDraftSaved = useCallback((key: string, written: boolean) => {
+    if (written) unsavedDraftsRef.current.delete(key);
+    else unsavedDraftsRef.current.add(key);
+  }, []);
+  useEffect(() => {
+    const previous = previousShownRef.current;
+    previousShownRef.current = resolvedInstanceId;
+    const unsaved = unsavedDraftsRef.current;
+    unsavedDraftsRef.current = new Set();
+    if (previous === resolvedInstanceId || fullRoster.some((instance) => instance.id === previous)) return;
+    const from = getInstanceDraftKey(worktree.id, previous);
+    if (unsaved.has(from)) {
+      showTileToast(tWorktree('composer.draftNotMoved'), 'warning');
+      return;
+    }
+    const moved = moveDraft(from, getInstanceDraftKey(worktree.id, resolvedInstanceId));
+    if (moved === 'failed') showTileToast(tWorktree('composer.draftNotMoved'), 'warning');
+  // `showTileToast` / `tWorktree` are read when it moves only (a new toast surface is not a move).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedInstanceId, fullRoster, worktree.id]);
   const insertIntoComposer = useCallback(
     (text: string, target: string = shownInstanceRef.current) => {
       if (target === shownInstanceRef.current) {
@@ -585,6 +702,15 @@ function SessionTileCard({
     useCallback((content: string) => insertIntoComposer(content, refusedTargetRef.current), [insertIntoComposer]),
     returnRetargeted,
   );
+  // Issue #4606: the optimistic road's fence answer holds its original target too.
+  const readTargetChangedAndHold = useCallback(
+    (error: unknown) => {
+      const refusal = roleRefusalNotice.readTargetChanged(error);
+      if (refusal !== null) holdStaleTarget(refusal);
+      return refusal;
+    },
+    [roleRefusalNotice, holdStaleTarget],
+  );
   const readRoleRefusal = useCallback(
     (error: unknown) => {
       refusedTargetRef.current =
@@ -601,12 +727,12 @@ function SessionTileCard({
   } = usePendingMessages({
     worktreeId: worktree.id,
     serverMessages,
-    sendFn: sendMessageFn,
+    sendFn: sendThroughStaleTargetGate,
     onSent: refreshMessages,
     connectivity,
     readRoleRefusal,
     onRoleRefused: roleRefusalNotice.onRoleRefused,
-    readTargetChanged: roleRefusalNotice.readTargetChanged,
+    readTargetChanged: readTargetChangedAndHold,
     onTargetChanged: roleRefusalNotice.onTargetChanged,
     onTargetChangedDiscard: roleRefusalNotice.onTargetChangedDiscard,
     // Issue #4503: the worktree screen's wiring (`useOptimisticPaneMessages`) — an unknown outcome
@@ -1009,6 +1135,11 @@ function SessionTileCard({
             maxHeight={composerMaxHeight}
             // Issue #3999: no send into this tile's plan review.
             planReviewActive={planReviewActive}
+            // Issue #4606: the fence's answer holds the target until the roster is read again.
+            onSendTargetChanged={holdStaleTarget}
+            sendBlockedReason={sendHeld ? tWorktree('composer.sendTargetRefreshing') : null}
+            isSendHeld={isSendHeld}
+            onPreviousDraftSaved={notePreviousDraftSaved}
             autoYesSlot={
               <AutoYesToggle
                 enabled={autoYes.enabled}
