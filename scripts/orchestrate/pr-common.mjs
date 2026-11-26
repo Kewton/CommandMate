@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { itemOf, latestByStage, unmetStage, verifiedAt } from './run-log.mjs';
+import { gatePrecheck, itemOf, latestByStage, unmetStage, verifiedAt } from './run-log.mjs';
 import { IGNORED_DIRTY, dirtyPaths } from './dirty-tree.mjs';
 import { itemProblem, workItemName } from './execution-key.mjs';
 import { FOLLOWS_HEAD, verifyEnvState } from './env-manifest.mjs';
@@ -389,6 +389,10 @@ export function workHeadOf(run, worktree, head, context) {
  */
 export function missingRecords(records, issue, heads, item, env) {
   const stages = latestByStage(records, issue, item);
+  // The precheck is precheck.mjs's own record, never a line added by hand (#4589).
+  const precheck = gatePrecheck(records, { issue, item });
+  if (precheck) stages.precheck = precheck;
+  else delete stages.precheck;
   const where = env ? { runDir: env.runDir, worktree: env.worktree, home: env.home } : null;
   const precheckNow =
     where && stages.precheck?.head === heads.head && stages.precheck.result === 'ok' &&

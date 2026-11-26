@@ -39,7 +39,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendRecord, findLatest, inItem, readRecords } from './run-log.mjs';
+import { appendRecord, gatePrecheck, inItem, readRecords } from './run-log.mjs';
 import { acquireMachineLockSync, describeOwner, lockPathOf, readOwner } from './machine-lock-sync.mjs';
 import { machineLockRoot, main as runPrecheckMain, optionsFromNote } from './precheck.mjs';
 import {
@@ -525,8 +525,8 @@ export function classifyEntries(o, deps) {
     }
     // C4, C5
     const precheck =
-      findLatest(records, { issue, item, stage: 'precheck', head: workHead, result: 'ok' }) ??
-      findLatest(records, { issue, item, stage: 'precheck', head, result: 'ok' });
+      gatePrecheck(records, { issue, item, head: workHead, result: 'ok' }) ??
+      gatePrecheck(records, { issue, item, head, result: 'ok' });
     const optsToken = String(precheck?.note ?? '').split(/\s+/).find((word) => word.startsWith('opts='));
     if (!precheck || !optsToken) {
       drop('precheck-options-unknown');

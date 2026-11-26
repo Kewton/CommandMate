@@ -125,6 +125,17 @@ export const TIMING_FIELDS = { queueSec: '--queue-sec', mutexSec: '--mutex-sec',
 // records already written with 7 digits are still read as they are.
 const FULL_SHA = /^[0-9a-f]{40}$/;
 
+/**
+ * The mark of a precheck record written by the `append` command line, not by
+ * precheck.mjs (#4589). Only the command line sets it, and only on a precheck:
+ * a gate reads precheck.mjs's own record (its env= and options), never a line
+ * added by hand. Every other stage written by hand is read as before.
+ */
+export const HAND_WRITER = 'hand';
+
+/** Whether `record` is a precheck written by hand (HAND_WRITER). A record without the mark is the tool's. */
+export const isHandPrecheck = (record) => record?.stage === 'precheck' && record.writer === HAND_WRITER;
+
 /** Validate one record and give it a fixed shape (absent fields are null, not missing). */
 export function makeRecord(input, now = new Date()) {
   const problems = [];
@@ -164,6 +175,7 @@ export function makeRecord(input, now = new Date()) {
   const badItem = itemProblem(item);
   if (badItem) problems.push(badItem.replace('--item', 'item'));
   const key = optionalString(input.key);
+  const writer = input.writer === HAND_WRITER ? HAND_WRITER : null;
   if (problems.length > 0) throw new Error(problems.join('\n'));
   return {
     issue,
@@ -175,6 +187,8 @@ export function makeRecord(input, now = new Date()) {
     // Only for a work item of its own (#3883); a record without one is the Issue's.
     ...(item !== null ? { item } : {}),
     ...(key !== null ? { key } : {}),
+    // Only on a precheck written by the `append` command line (#4589); a record without it is the tool's.
+    ...(writer !== null ? { writer } : {}),
     taskId: optionalString(input.taskId),
     contract: optionalString(input.contract),
     agent: optionalString(input.agent),
@@ -320,6 +334,18 @@ export function findLatest(records, criteria) {
     if (Object.entries(fields).every(([key, value]) => value === undefined || record[key] === value)) return record;
   }
   return null;
+}
+
+/**
+ * The precheck record a gate reads (#4589): the latest precheck matching
+ * `criteria` (as findLatest reads them, `stage` aside) that precheck.mjs wrote
+ * itself — a line added by hand (isHandPrecheck) is passed over, so its missing
+ * env= and options are never taken for the tool's. Only a hand line: null, as
+ * when there is no record. merge-pr, publish (pr-common.mjs missingRecords) and
+ * the train all read the precheck by this one rule.
+ */
+export function gatePrecheck(records, criteria) {
+  return findLatest((records ?? []).filter((record) => !isHandPrecheck(record)), { ...criteria, stage: 'precheck' });
 }
 
 /** The latest record of each stage for one Issue (any HEAD), or for one of its work items (`item`, inItem). */
@@ -780,7 +806,9 @@ export function main(argv, now = new Date(), deps = {}) {
         }
         return 2;
       }
-      const { file, record } = appendRecord(options.runDir, options.issues, options, now);
+      // A precheck written here is a hand line, never precheck.mjs's own record (#4589).
+      const input = options.stage === 'precheck' ? { ...options, writer: HAND_WRITER } : options;
+      const { file, record } = appendRecord(options.runDir, options.issues, input, now);
       console.log(`recorded #${record.issue}${record.item ? `/${record.item}` : ''} ${record.stage}=${record.result} -> ${file}`);
       return 0;
     }
