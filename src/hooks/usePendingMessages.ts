@@ -149,6 +149,20 @@ export type SendFn = (
   options: OptimisticSendOptions,
 ) => Promise<unknown>;
 
+/**
+ * Issue #4604＋#4606 r3c: what a {@link SendFn} resolves to when its gate did not send (the caller's
+ * hold of the To — no `POST /send` left). Not an error and not an outcome: the row stays, waiting —
+ * parked as not sent (`heldNotSent`: drawn with its [retry] / [discard], never resent on its own) —
+ * and goes when the person retries after the gate opens. Never returned by a caller with no gate.
+ */
+export interface SendHeldByGate {
+  readonly sendNotSent: 'held';
+}
+export const SEND_HELD_BY_GATE: SendHeldByGate = Object.freeze({ sendNotSent: 'held' as const });
+export function isSendHeldByGate(value: unknown): value is SendHeldByGate {
+  return typeof value === 'object' && value !== null && (value as { sendNotSent?: unknown }).sendNotSent === 'held';
+}
+
 export interface PendingMessage {
   /** Client-generated temporary id (also used as the bubble's message id). */
   tempId: string;
@@ -657,7 +671,21 @@ export function usePendingMessages({
       attemptsInFlight.add(p);
       inFlightRef.current.set(p.tempId, attemptsInFlight);
       try {
-        await sendFnRef.current(p.content, p.options);
+        const result = await sendFnRef.current(p.content, p.options);
+        // Issue #4604＋#4606 r3c: the caller's gate did not send it — the row stays, waiting (not
+        // removed, not failed, not unknown): parked as not sent, until the person retries.
+        if (isSendHeldByGate(result)) {
+          if (attemptsRef.current.get(p.tempId) !== p) return;
+          clearTimer(p.tempId);
+          setPending((prev) =>
+            prev.map((cur) =>
+              cur.tempId === p.tempId
+                ? { ...cur, status: 'sending', queued: true, heldNotSent: true, accepted: false, awaitingResponse: false }
+                : cur,
+            ),
+          );
+          return;
+        }
         // Issue #4417: an answer to an attempt that is no longer the row's latest (retried,
         // discarded, confirmed) changes nothing on the row. The refetch still runs: its echo is
         // what confirms the row if this older attempt is the one that arrived.

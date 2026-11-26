@@ -126,6 +126,7 @@ import { useSplitMessages } from '@/hooks/useSplitMessages';
 import {
   usePendingMessages,
   isSendOutcomeUnknown,
+  SEND_HELD_BY_GATE,
   type OptimisticSendOptions,
   type PendingConnectivity,
 } from '@/hooks/usePendingMessages';
@@ -171,6 +172,7 @@ import {
   getTerminalDisplayCompaction,
 } from '@/config/terminal-display-compaction';
 import type { AgentInstance } from '@/lib/cli-tools/types';
+import { currentWorktreeFetchSeq, isWorktreeFetchedAfter } from '@/hooks/useWorktreesCache';
 import type { ChatMessage, Worktree } from '@/types/models';
 import type { SurfaceMode } from '@/types/ui-state';
 
@@ -436,35 +438,25 @@ const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffec
 
 /**
  * Issue #4606 (O-1): a target the send fence just said changed (409 `SEND_TARGET_CHANGED`
- * `not_sent`), held by the tile until its roster is read again — `seenAt` is the `worktree` object of
- * the render that last counted (the 409's first), `extra` how many other objects still had the pair.
+ * `not_sent`), held by the tile until its roster is read again — r3 (P1-3, INV-P): `fetchSeq` is the
+ * number of the last roster fetch begun when it was taken; only a fetch begun after it counts.
  */
 interface StaleTargetHold {
   instanceId: string;
   cliToolId: string;
-  seenAt: Worktree;
-  extra: number;
+  fetchSeq: number;
 }
 
 /**
- * Issue #4606 (S-1, N-3): the holds left for the render of `worktree`, decided in the render (never by
- * `refresh()` settling: a read that fails or is overtaken sets no roster). A hold goes in a render of
- * another `worktree` object whose roster no longer has the pair; one whose roster still has it (a read
- * from before the 409 landing late) keeps it, and a second such object lets it go (the server's roster
- * is then the truth — the fence answers again if the target still changed).
+ * Issue #4606 (S-1, N-3), r3 (P1-3): the holds left for the render of `worktree`, decided in the render
+ * (never by `refresh()` settling). A hold goes only in a render of an object a roster fetch begun after
+ * the hold adopted — it succeeded (`isWorktreeFetchedAfter`); the tile then shows the roster as it is
+ * (the fence answers again if the target still changed). Another object — a fetch begun before the
+ * 409 landing late, a copy a status notification made, the same object again — keeps it: a count of
+ * objects is not a fetch.
  */
-export function nextStaleTargetHolds(holds: readonly StaleTargetHold[], worktree: Worktree, roster: readonly AgentInstance[]): StaleTargetHold[] {
-  const kept: StaleTargetHold[] = [];
-  for (const hold of holds) {
-    if (hold.seenAt === worktree) {
-      kept.push(hold);
-      continue;
-    }
-    const onRoster = roster.some((instance) => instance.id === hold.instanceId && instance.cliTool === hold.cliToolId);
-    if (!onRoster || hold.extra >= 1) continue;
-    kept.push({ ...hold, seenAt: worktree, extra: hold.extra + 1 });
-  }
-  return kept;
+export function nextStaleTargetHolds(holds: readonly StaleTargetHold[], worktree: Worktree): StaleTargetHold[] {
+  return holds.filter((hold) => !isWorktreeFetchedAfter(worktree, hold.fetchSeq));
 }
 
 function SessionTileCard({
@@ -513,25 +505,27 @@ function SessionTileCard({
   const worktreesCache = useOptionalWorktreesCacheContext();
   const worktreesCacheRef = useRef(worktreesCache);
   worktreesCacheRef.current = worktreesCache;
-  const worktreeRef = useRef(worktree);
-  worktreeRef.current = worktree;
   const [staleHolds, setStaleHolds] = useState<StaleTargetHold[]>([]);
   const fullRoster = useMemo(() => resolveInstances(worktree), [worktree]);
-  const keptHolds = staleHolds.length === 0 ? staleHolds : nextStaleTargetHolds(staleHolds, worktree, fullRoster);
-  if (keptHolds !== staleHolds && (keptHolds.length !== staleHolds.length || keptHolds.some((hold, i) => hold !== staleHolds[i]))) {
+  const keptHolds = staleHolds.length === 0 ? staleHolds : nextStaleTargetHolds(staleHolds, worktree);
+  if (keptHolds.length !== staleHolds.length) {
     setStaleHolds(keptHolds);
   }
   const sendHeld = keptHolds.some((hold) => hold.instanceId === resolvedInstanceId && hold.cliToolId === cliToolId);
+  // Issue #4604＋#4606 r3c: the holds now, for the tile's one gate (`sendThroughStaleTargetGate`).
+  const staleHoldsRef = useRef(keptHolds);
+  staleHoldsRef.current = keptHolds;
   const holdStaleTarget = useCallback((refusal: SendTargetChangedRefusal) => {
     const target = refusal.target;
     // The roster's reasons only (the instance went, its tool changed): a roster read again settles them.
     if (refusal.sendOutcome !== 'not_sent' || target === null) return;
     if (refusal.reason !== 'target-gone' && refusal.reason !== 'tool-changed') return;
-    setStaleHolds((prev) =>
-      prev.some((hold) => hold.instanceId === target.instanceId && hold.cliToolId === target.cliToolId)
-        ? prev
-        : [...prev, { instanceId: target.instanceId, cliToolId: target.cliToolId, seenAt: worktreeRef.current, extra: 0 }],
-    );
+    const hold = { instanceId: target.instanceId, cliToolId: target.cliToolId, fetchSeq: currentWorktreeFetchSeq() };
+    const held = (list: readonly StaleTargetHold[]) =>
+      list.some((h) => h.instanceId === target.instanceId && h.cliToolId === target.cliToolId);
+    // r3c: the gate sees it at once (before the render that shows it).
+    if (!held(staleHoldsRef.current)) staleHoldsRef.current = [...staleHoldsRef.current, hold];
+    setStaleHolds((prev) => (held(prev) ? prev : [...prev, hold]));
     // Read the roster again now (no provider — the tile alone: the next roster lets the hold go).
     void worktreesCacheRef.current?.refresh().catch(() => undefined);
   }, []);
@@ -596,8 +590,16 @@ function SessionTileCard({
   // text handed back by a late answer (a 409 role refusal after the tile switched
   // instance) goes to that instance's draft, not to the one on screen.
   const sendTargetsRef = useRef(new WeakMap<object, string>());
-  const sendMessageFn = useCallback(
+  // Issue #4604＋#4606 r3c (INV-P): the tile's one gate — every `POST /send` of the tile's pending layer
+  // (a new send, the history's [retry], the automatic resend of a parked row) leaves only here. While
+  // the To is a held pair (until a roster fetch that succeeded after the hold) nothing leaves: it
+  // answers "not sent" (`SEND_HELD_BY_GATE`) and the row stays, waiting, for a retry after the fetch.
+  const sendThroughStaleTargetGate = useCallback(
     async (content: string, options: OptimisticSendOptions) => {
+      const to = options.instanceId ?? options.cliToolId;
+      if (staleHoldsRef.current.some((hold) => hold.instanceId === to && hold.cliToolId === options.cliToolId)) {
+        return SEND_HELD_BY_GATE;
+      }
       try {
         return await worktreeApi.sendMessage(worktree.id, content, options);
       } catch (error) {
@@ -690,7 +692,7 @@ function SessionTileCard({
   } = usePendingMessages({
     worktreeId: worktree.id,
     serverMessages,
-    sendFn: sendMessageFn,
+    sendFn: sendThroughStaleTargetGate,
     onSent: refreshMessages,
     connectivity,
     readRoleRefusal,

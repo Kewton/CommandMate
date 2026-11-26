@@ -714,6 +714,37 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     setRetargetAsk({ original: decision.original, current, confirmation, target: sendTargetKey, seen: [], ids: decision.ids });
     return null;
   }, [instanceId, cliToolId, currentRetargetTags, sendTargetKey]);
+  // Issue #4606 r3c: the hold the tile says now — read by the gate at the moment a POST leaves (a hold
+  // that came up while a send waited stops it; it only ever stops, never lets a send through).
+  const sendBlockedReasonRef = useRef(sendBlockedReason);
+  sendBlockedReasonRef.current = sendBlockedReason;
+  /**
+   * Issue #4604＋#4606 r3c (INV-P): the composer's one gate, at the moment its POST leaves or is handed
+   * to the optimistic layer — every road through it (Enter, [send], the form, the band's [yes], #4503's
+   * [resend], the brief's choice, after the preview's wait). Nothing is sent while the tile holds the To;
+   * the marks of the draft `key` are checked again now (one born while the preview was read asks). Its
+   * answer: what the passing check saw and the ids this send lets go, or null — not sent (the draft
+   * stays; a question may be up).
+   */
+  const checkGate = useCallback((key: string, unreadableYes: RetargetUnknownYes | null): { seen: string[] | null; ids: string[] } | null => {
+    if (sendBlockedReasonRef.current) return null;
+    const pass = holdsRetargetedSend(unreadableYes, key);
+    if (pass === null) return null;
+    return { seen: pass.seen, ids: currentRetargetTags(key).map((tag) => tag.id) };
+  }, [holdsRetargetedSend, currentRetargetTags]);
+  /** r3c: the composer's one `POST /send` — only through {@link checkGate}; `sent: false` when it did not go. */
+  const postThroughGate = useCallback(async (
+    key: string,
+    unreadableYes: RetargetUnknownYes | null,
+    text: string,
+    options: Parameters<typeof sendMessageForHandoffPage>[3],
+    operation: Parameters<typeof sendMessageForHandoffPage>[4],
+  ): Promise<{ sent: false } | { sent: true; created: Awaited<ReturnType<typeof sendMessageForHandoffPage>>; gate: { seen: string[] | null; ids: string[] } }> => {
+    const gate = checkGate(key, unreadableYes);
+    if (gate === null) return { sent: false };
+    const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, text, options, operation);
+    return { sent: true, created, gate };
+  }, [checkGate, handoffOwner, worktreeId]);
   /**
    * Issue #4535 r7 (INV-V2b): this composer sent the draft `key` — the tags it held when it sent
    * (`ids`) go, from the store and, while it still shows that draft, from its state. Nothing else
@@ -1068,12 +1099,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // (Enter and the button both come through here; the brief choice is reached only from here).
     if (holdsUnconfirmedResend(message.trim())) return;
     // Issue #4535: a text the send fence handed back, and the To is not its target — ask first.
-    const retargetPass = holdsRetargetedSend(unreadableYes, draft.key);
-    if (retargetPass === null) return;
-    // Issue #4535 r7 (INV-V2b): the tags this send takes away once it is sent (a tag that comes later
-    // stays). Issue #4604 (N-7): and the "unknown" generations its question saw.
-    const sentTagIds = currentRetargetTags(draft.key).map((tag) => tag.id);
-    const sentSeen = retargetPass.seen;
+    if (holdsRetargetedSend(unreadableYes, draft.key) === null) return;
     // Issue #4345 1c 再指示 1: a send of a worktree page starts only while the page's registration
     // (fixed now) may start — not once a 401 was taken (the registry's expiry). Nothing is sent and
     // the draft stays; checked again after the preview's await below. Outside a page: as before.
@@ -1149,13 +1175,18 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // on the pending bubble, so the composer never sets its own error/sending
     // state here.
     if (onOptimisticSend) {
+      // Issue #4604＋#4606 r3c: the gate, as the send is handed over (the hold and the marks now).
+      // Issue #4535 r7 (INV-V2b): the tags this send takes away once it is sent (a tag that comes later
+      // stays). Issue #4604 (N-7): and the "unknown" generations its question saw.
+      const gate = checkGate(draft.key, unreadableYes);
+      if (gate === null) return;
       setError(null);
       onOptimisticSend(trimmed, options);
       setMessage('');
       setIsFreeInputMode(false);
       resetAfterSend();
       // Issue #4604 (INV-S1): the text goes first; its marks only once it went.
-      if (clearStoredDraft()) releaseSentTags(draftKey, sentTagIds, sentSeen);
+      if (clearStoredDraft()) releaseSentTags(draftKey, gate.ids, gate.seen);
       if (isProcessing) {
         showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
       }
@@ -1171,9 +1202,12 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // with the press's token — the gate reads the registration the press fixed.
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
-      const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
+      // Issue #4604＋#4606 r3c: through the one gate (not sent: the draft stays, nothing else happens).
+      const posted = await postThroughGate(draft.key, unreadableYes, trimmed, options, operation);
+      if (!posted.sent) return;
+      const { created } = posted;
       // Issue #4604 (INV-S1): the text goes first; its marks only once it went.
-      if (clearSentDraft(sentKey, sentImagePath).removed) releaseSentTags(sentKey, sentTagIds, sentSeen);
+      if (clearSentDraft(sentKey, sentImagePath).removed) releaseSentTags(sentKey, posted.gate.ids, posted.gate.seen);
       // Issue #806: when the session is busy, the CLI queues this message behind
       // the running task. Surface a toast so the (successful) send doesn't look
       // like a no-op. Idle sessions are unchanged (no toast).
@@ -1201,7 +1235,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     } finally {
       setSending(false);
     }
-  }, [isComposing, message, draft.key, attachedImage, sending, worktreeId, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey, setMessage, sendBlockedReason]);
+  }, [isComposing, message, draft.key, attachedImage, sending, cliToolId, instanceId, onMessageSent, resetAfterSend, clearStoredDraft, clearSentDraft, draftKey, isProcessing, showToast, onOptimisticSend, planReviewActive, readStartPreview, afterSendStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, checkGate, postThroughGate, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey, setMessage, sendBlockedReason]);
 
   /**
    * Issue #4227 G-PR3 (G-3, design §3.2・§3.2.1): send the draft with the person's choice for the
@@ -1234,14 +1268,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefAsk(null);
       return;
     }
-    const retargetPass = holdsRetargetedSend(unreadableYes, draft.key);
-    if (retargetPass === null) {
+    if (holdsRetargetedSend(unreadableYes, draft.key) === null) {
       setBriefAsk(null);
       return;
     }
-    // Issue #4535 r7: see the plain send.
-    const sentTagIds = currentRetargetTags(draft.key).map((tag) => tag.id);
-    const sentSeen = retargetPass.seen;
     const effectiveCliTool: CLIToolType = cliToolId || 'claude';
     const choiceOptions: SendBriefChoice =
       choice === 'decline'
@@ -1260,11 +1290,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // Issue #4345 1c: see the plain send.
       const sentKey = draftKey;
       const sentImagePath = attachedImage?.path ?? null;
-      const created = await sendMessageForHandoffPage(handoffOwner, worktreeId, trimmed, options, operation);
+      // Issue #4604＋#4606 r3c: through the one gate (see the plain send; the question stays).
+      const posted = await postThroughGate(draft.key, unreadableYes, trimmed, options, operation);
+      if (!posted.sent) return;
+      const { created } = posted;
       // Issue #4419: a switch meanwhile already closed the question (the previewKey change).
       // Issue #4604 (INV-S1): the text goes first; its marks only once it went.
       const cleared = clearSentDraft(sentKey, sentImagePath);
-      if (cleared.removed) releaseSentTags(sentKey, sentTagIds, sentSeen);
+      if (cleared.removed) releaseSentTags(sentKey, posted.gate.ids, posted.gate.seen);
       if (cleared.onScreen) setBriefAsk(null);
       if (created?.brief?.state === 'consumed') showToast?.(tc('mem.startBrief.consumed'), 'info');
       else if (isProcessing) showToast?.(QUEUED_BUSY_TOAST_MESSAGE, 'warning');
@@ -1307,7 +1340,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       setBriefSending(false);
       setSending(false);
     }
-  }, [sendBlockedReason, briefAsk, briefSending, message, draft.key, attachedImage, cliToolId, instanceId, worktreeId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, currentRetargetTags, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
+  }, [sendBlockedReason, briefAsk, briefSending, message, draft.key, attachedImage, cliToolId, instanceId, clearSentDraft, draftKey, showToast, tc, isProcessing, onMessageSent, refreshStartPreview, readStartPreview, handoffOwner, describeSendError, holdsUnconfirmedResend, holdsRetargetedSend, postThroughGate, markSendUnknown, noteFenceRefusal, releaseSentTags, previewKey, sendTargetKey]);
 
   /** Issue #4503: the person confirmed sending the same draft again — a new send. */
   const confirmResend = useCallback(() => {
