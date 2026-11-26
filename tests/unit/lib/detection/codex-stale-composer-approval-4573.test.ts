@@ -24,6 +24,9 @@
  *     dialog TYPED INTO the composer, no status bar in between) stays the
  *     composer, and the same history with the dialog's real SGR on `› 1.` is
  *     `waiting` before and after the fix;
+ *   - (review P2-1) tc104 with a status-bar-looking row typed into the
+ *     composer above `› 1.` stays the composer / `ready` — red before the
+ *     bar search was limited to the first row after the input box;
  *   - the status-bar patterns `cli-patterns.ts` writes out for the rule are the
  *     same as `patterns.ts`'s (they are copied, not imported, because
  *     `patterns.ts` imports `cli-patterns.ts` — an import would be a cycle).
@@ -140,6 +143,19 @@ describe('#4573 controls (same verdict before and after the fix)', () => {
     const tc104 = fixture('codex-multiline-composer-3205/tc104-raw-pane.txt');
     expect(tc104).toContain('  › 1. Yes, proceed (y)');
     expect(composerAtBottom(tc104)).toBe(true);
+  });
+
+  // Review P2-1: a status-bar-looking row TYPED INTO the composer's
+  // continuation rows (above the typed `› 1.`) is not the bar that closes the
+  // composer. Only the first non-blank row after the input box counts.
+  it('#3205 tc104 with a bar-looking row typed above › 1.: the composer stays the bottom → ready', () => {
+    const tc104 = fixture('codex-multiline-composer-3205/tc104-raw-pane.txt');
+    const typedBar = '  gpt-5 default · ~/repo';
+    const frame = tc104.replace('  › 1. Yes, proceed (y)', `${typedBar}\n  › 1. Yes, proceed (y)`);
+    expect(frame).not.toBe(tc104);
+    expect(CODEX_STATUS_BAR_PATTERN.test(typedBar)).toBe(true);
+    expect(composerAtBottom(frame)).toBe(true);
+    expect(verdictOf(frame)).toBe('ready/input_prompt');
   });
 
   it('0157 quoted approval: the composer stays the bottom', () => {
