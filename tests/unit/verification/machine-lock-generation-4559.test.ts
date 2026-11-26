@@ -53,7 +53,7 @@ export function coreSeams(source: string): string[] {
   return [...names].sort();
 }
 
-type Setup = 'dead-beacon' | 'fresh' | 'dead-group-holder' | 'ended' | 'two-ended' | 'old-tmp' | 'dead-holder' | 'ownerless-old' | 'prev-beacon' | 'handoff' | 'fields' | 'larger-later' | 'publish-fails';
+type Setup = 'fresh' | 'dead-group-holder' | 'ended' | 'two-ended' | 'old-tmp' | 'dead-holder' | 'ownerless-old' | 'prev-beacon' | 'handoff' | 'fields' | 'larger-later' | 'publish-fails';
 
 /** Where each seam is reached (the state a row starts from). Every seam of the core is a key here. */
 const SEAM_SETUP: Record<string, Setup> = {
@@ -108,11 +108,6 @@ function prepare(root: string, setup: Setup): void {
   if (setup === 'dead-holder') writeGen(genDir, 1, { owner: { pid: dead, token: 'D' } });
   if (setup === 'dead-group-holder') writeGen(genDir, 1, { owner: { pid: dead, token: 'D', pgid: dead } });
   if (setup === 'ownerless-old') writeGen(genDir, 1, { owner: null, mtimeAgoMs: OLD_MS });
-  // #4559 r6 (D2): a <lock> there (an older version's dead holder, no g) — its parent is read for its spelling.
-  if (setup === 'dead-beacon') {
-    fs.mkdirSync(lockPath, { recursive: true });
-    fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: dead, host: HOST, token: 'D', acquiredAt: 0, v: 1 }));
-  }
   if (setup === 'prev-beacon') {
     writeGen(genDir, 1, { owner: { pid: dead, token: 'D' }, end: `dead R` });
     fs.mkdirSync(lockPath, { recursive: true });
@@ -315,8 +310,6 @@ const POINT_SETUP: Record<string, Setup> = {
   'tomb-link': 'ownerless-old',
   'beacon-gen-end': 'prev-beacon',
   'gen-realpath': 'fresh',
-  'gen-base-lstat': 'fresh',
-  'gen-base-list': 'dead-beacon',
   'handoff-gen-tmp': 'handoff',
   'handoff-gen-link': 'handoff',
 };
@@ -331,7 +324,7 @@ function takeWith(root: string, setup: Setup, fault: (point: string, target: str
     pollMs: 10,
     warn: (l: string) => warnings.push(l),
     // the generation directory as a test seam (hooks.genDir), but for gen-realpath, whose observation it skips
-    hooks: { fault, now: () => Date.now() + 11 * 60_000, startOf: () => 0, ...(point === 'gen-realpath' || point.startsWith('gen-base-') ? {} : { genDir }) },
+    hooks: { fault, now: () => Date.now() + 11 * 60_000, startOf: () => 0, ...(point === 'gen-realpath' ? {} : { genDir }) },
   });
   let handed: unknown = null;
   if (r.acquired && setup === 'handoff') handed = r.handOff(process.pid, process.pid);
@@ -645,39 +638,41 @@ describe('#4559 r6 C7-I1: one lock, one chain — the realpath compares the dire
   });
 });
 
-describe('#4559 r6 C7-I1 / D2 (#4559 comment 7185752051, plan (i)): the base name is the entry\'s own spelling, read from the parent', () => {
-  // Plan (i): the parent directory is read and the existing entry's own spelling taken (no check of the FS).
-  // A case-insensitive FS: X.lock and x.lock are one lock — one chain. A case-sensitive FS: two locks — two chains.
-  // Each row runs on its FS only; the other side is skipped by name.
-  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) other/x.lock held, other/X.lock waits: one by-path chain, B takes nothing and then takes on it', () => {
+describe('#4559 r6 C7-I1 / D2 (#4559 comment 7186934798): the base name is always folded to lower case', () => {
+  // The human's answer: by-path's hash and the named chain take the base name in lower case — never the entry's
+  // spelling, no check of the FS. A case-insensitive FS: X.lock and x.lock are one lock, one chain even before it
+  // exists. A case-sensitive FS: two locks that differ in case only share one chain and wait for each other (named).
+  it('genDirOf: X.lock and x.lock (neither there) are one chain, by path and by name', () => {
+    const base = freshRoot('d2-fold');
+    const env = { CM_VERIFY_LOCK_ROOT: path.join(base, 'locks') } as unknown as NodeJS.ProcessEnv;
+    const dir = path.join(base, 'other');
+    fs.mkdirSync(dir);
+    expect(lockSync.genDirOf(path.join(dir, 'X.lock'), env)).toBe(lockSync.genDirOf(path.join(dir, 'x.lock'), env));
+    const locks = path.join(base, 'locks');
+    expect(lockSync.genDirOf(lockSync.lockPathOf(locks, 'X'), env)).toBe(path.join(locks, 'x.gen'));
+  });
+
+  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) A on other/X.lock stops after publishing its generation, before the <lock> is there; B on other/x.lock chooses the same chain and takes nothing', async () => {
     const base = freshRoot('d2-ci');
     const locks = path.join(base, 'locks');
     fs.mkdirSync(locks);
     const dir = path.join(base, 'other');
     fs.mkdirSync(dir);
-    withRoot(locks, () => {
-      const a = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'x.lock'), timeoutMs: 0 });
-      expect(a.acquired).toBe(true);
-      const b = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'X.lock'), timeoutMs: 200, pollMs: 10 });
-      expect(b.acquired).toBe(false);
-      expect(chainsOf(locks).byPath).toHaveLength(1);
-      expect(a.release()).toBe('released');
-    });
-  });
+    const a = startActor(dir, 'A', { name: 'X', realChain: true, envRoot: locks, pauses: ['gen-owner-linked#1'], seams: true, timeoutMs: 5000 });
+    expect(await until(() => a.reached('gen-owner-linked#1'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'X.lock')), 'the <lock> is not there yet').toBe(false);
+    const bStages: string[] = [];
+    const b = withRoot(locks, () =>
+      lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'x.lock'), timeoutMs: 300, pollMs: 10, hooks: { now: () => Date.now() + 70_000, startOf: () => 0, onGenStage: (s: string) => bStages.push(s) } })
+    );
+    a.go('gen-owner-linked#1');
+    expect(await a.exited).toBe(0);
+    // reached and taken, per actor (#4559 comment 7185752051): A at the seam once and took; B listed the chain and took nothing
+    expect({ a: a.seamCount('gen-owner-linked'), aTook: a.events().some((e) => e.event === 'acquired'), bListed: bStages.filter((s) => s === 'gen-list').length > 0, bTook: b.acquired }).toEqual({ a: 1, aTook: true, bListed: true, bTook: false });
+    expect(chainsOf(locks).byPath, 'one chain for the two spellings').toHaveLength(1);
+  }, 20000);
 
-  it.skipIf(!CASE_INSENSITIVE)('(case-insensitive FS only) the named lock x held, <root>/X.lock waits: no by-path, one chain <root>/x.gen', () => {
-    const locks = freshRoot('d2-ci-named');
-    withRoot(locks, () => {
-      const a = lockSync.acquireMachineLockSync('x', { root: locks, timeoutMs: 0 });
-      expect(a.acquired).toBe(true);
-      const b = lockSync.acquireMachineLockSync('X', { lockPath: path.join(locks, 'X.lock'), timeoutMs: 200, pollMs: 10 });
-      expect(b.acquired).toBe(false);
-      expect(chainsOf(locks)).toEqual({ named: ['x.gen'], byPath: [] });
-      expect(a.release()).toBe('released');
-    });
-  });
-
-  it.skipIf(CASE_INSENSITIVE)('(case-sensitive FS only) other/x.lock and other/X.lock are two locks: both take, each on its own chain', () => {
+  it.skipIf(CASE_INSENSITIVE)('(case-sensitive FS only) other/x.lock and other/X.lock are two locks that share one chain: while A holds one, B waits on the other (named, the decision\'s cost)', () => {
     const base = freshRoot('d2-cs');
     const locks = path.join(base, 'locks');
     fs.mkdirSync(locks);
@@ -686,35 +681,10 @@ describe('#4559 r6 C7-I1 / D2 (#4559 comment 7185752051, plan (i)): the base nam
     withRoot(locks, () => {
       const a = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'x.lock'), timeoutMs: 0 });
       const b = lockSync.acquireMachineLockSync('x', { lockPath: path.join(dir, 'X.lock'), timeoutMs: 200, pollMs: 10 });
-      expect([a.acquired, b.acquired]).toEqual([true, true]);
-      expect(chainsOf(locks).byPath).toHaveLength(2);
-      expect([a.release(), b.release()]).toEqual(['released', 'released']);
+      expect([a.acquired, b.acquired]).toEqual([true, false]);
+      expect(chainsOf(locks).byPath).toHaveLength(1);
+      expect(a.release()).toBe('released');
     });
-  });
-
-  it('the parent\'s listing fails once (EIO, gen-base-list) while the lock is there: no chain that poll, named, taken the next', () => {
-    const base = freshRoot('d2-eio');
-    const locks = path.join(base, 'locks');
-    fs.mkdirSync(locks);
-    const dir = path.join(base, 'other');
-    fs.mkdirSync(path.join(dir, 'x.lock'), { recursive: true });
-    const warnings: string[] = [];
-    let fired = 0;
-    const r = withRoot(locks, () =>
-      lockSync.acquireMachineLockSync('x', {
-        lockPath: path.join(dir, 'x.lock'),
-        timeoutMs: 1000,
-        pollMs: 10,
-        ownerlessGraceMs: 0,
-        warn: (l: string) => warnings.push(l),
-        hooks: { fault: (p: string, _t: string, c: number) => (p === 'gen-base-list' && c === 1 ? (fired++, 'EIO') : undefined) },
-      })
-    );
-    expect(fired, 'the parent is read (gen-base-list reached once with the fault)').toBe(1);
-    expect(warnings.join('\n')).toContain(`machine-lock-unknown point=gen-base-list path=${fs.realpathSync.native(dir)} errno=EIO`);
-    expect(r.acquired).toBe(true);
-    expect(chainsOf(locks).byPath).toHaveLength(1);
-    expect(withRoot(locks, () => r.release())).toBe('released');
   });
 });
 

@@ -220,6 +220,8 @@ export interface ActorOptions {
   /** #4559 r6: the lock's name (default `x`), and no hooks.genDir (the real entry chooses the chain) */
   name?: string;
   realChain?: boolean;
+  /** #4559 r6: CM_VERIFY_LOCK_ROOT for the actor when it is not `root` (a lock outside the machine-lock root: by-path) */
+  envRoot?: string;
   /** #4559 r6: a file the actor writes once its take (and fields / hand-off) are done */
   ready?: string;
 }
@@ -234,7 +236,7 @@ export function startActor(root: string, who: string, o: ActorOptions = {}): Act
     process.execPath,
     [ACTOR, o.module ?? CORE, root, o.name ?? 'x', String(o.pollMs ?? 10), String(o.holdMs ?? 0), String(o.timeoutMs ?? 5000), events, 'gen', JSON.stringify(spec)],
     {
-      env: { ...process.env, CM_VERIFY_LOCK_ROOT: root, CM_VERIFY_TEST_HANDOFF: (o.pauses ?? []).map((p) => `pause:${p}`).join(','), CM_VERIFY_TEST_HANDOFF_DIR: dir },
+      env: { ...process.env, CM_VERIFY_LOCK_ROOT: o.envRoot ?? root, CM_VERIFY_TEST_HANDOFF: (o.pauses ?? []).map((p) => `pause:${p}`).join(','), CM_VERIFY_TEST_HANDOFF_DIR: dir },
       stdio: ['ignore', 'ignore', 'pipe'],
     }
   );

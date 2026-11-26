@@ -912,7 +912,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older run-lock / supervisor.lock writer (no ticket) stopped after its mkdir, before owner.tmp.<pid> (no pid anywhere), past the 10 min grace; the head reclaims the empty <lock> and takes it; resumed, the writer writes its tmp in the successor\'s <lock> and mv -f replaces the owner (codex round 2 P1)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0', row65: 'P-2' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0', row65: 'OLD-W-MV' },
   },
   'F50-pr1a-writer-ticket-expired': {
     impls: ALL,
@@ -921,7 +921,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a PR1a writer (`: >`, then cat >> by name, rm -f owner by name on failure) alive, its ticket retired at deadline + 60 s, stopped on an empty owner past 10 min; the head reclaims the empty owner and takes it; resumed, it appends to the successor\'s owner (unparsable, nobody removes it) or removes it by name (PM Claude round 2 P2-A)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'P-2' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'OLD-W-APPEND' },
   },
   'F51-pre-pid-stop': {
     impls: ALL,
@@ -930,7 +930,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'a copy older than PR1a (`printf > owner`, an older cmate-verify) stopped after opening the owner, before its pid is written, past 10 min; the head reclaims the empty owner; resumed, its write lands in the removed inode and it may believe it holds',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'P-2' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'OLD-W-INODE' },
   },
   'F52-old-tmp-pid-reused': { impls: GRACED, point: null, direction: 'keep', results: AG_GH('acquired', 'removed'), left: 'reclaimed', note: 'the pid is alive but started after the tmp mtime + 2 s (from etime): not the writer, the rule takes it out (PM Claude P3-1; round 2 kept it old-taker for ever)' },
   'F53-old-tmp-pid-etime': { impls: GRACED, point: 'etime', direction: 'keep', results: AG_GH('refused:unk', 'kept'), left: 'unchanged', note: 'the old tmp pid alive and its ps -o etime= fails or is malformed, or the clock stepped back while it was read / the read took 1 s or more (ECLOCK, as F65)' },
@@ -942,7 +942,7 @@ const FAILURE_TABLE = {
     results: AG_GH('acquired', 'removed'),
     left: 'two-holders-possible',
     note: 'an older writer whose wall clock stepped back > 2 s between its start and its tmp write, then stopped between the tmp and its mv past 10 min: F52 reads it as reused and takes the tmp out; resumed, its mv -f fails and its rm -rf "$dir" may remove the successor\'s <lock> (outside P1, while older copies remain)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0+P1', row65: 'P-2' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_RUNLOCK, writer: 'no-v', outside: 'P0+P1', row65: 'OLD-W-RMRF' },
   },
   'F56-owner-pid-not-self': { impls: GRACED, point: 'owner-pid', direction: 'keep', results: ACQ('refused:unk'), left: 'nothing-made', note: "round 4, I1-b: LOCK_OWNER_PID / ownerPid not the caller's own pid: refused before the ticket and the mkdir (machine-lock-owner-pid-not-self); another pid is recorded by the hand-off (D4) only" },
   'F57-undo-paused-after-rename': {
@@ -960,7 +960,7 @@ const FAILURE_TABLE = {
     results: ACQ('refused:unk'),
     left: 'two-holders-possible',
     note: 'the link back of .undo-<token> answers EEXIST: an older writer (`: >`, `printf >`) made an owner in the moment the owner was moved: not put back, .undo-<token> kept, machine-lock-undo-restore-failed for a human. A new writer links only into the <lock> it made (in a successor\'s <lock> its tmp is gone: ENOENT, F11)',
-    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'P-5' },
+    limit: { kind: 'mixed', until: UNTIL_OLD_VERIFY, writer: 'no-v', outside: 'P0', row65: 'OLD-W-UNDO-CREATE' },
   },
   'F59-undo-rename-enoent': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'the owner is no longer there: own tmp removed, no rmdir (the <lock> there is not shown to be ours)' },
   'F60-undo-rename-other': { impls: ALL, point: 'owner-undo-rename', direction: 'own-only', results: ACQ('refused:unk'), left: 'unchanged', note: 'another errno: the owner is not removed; own tmp only; named as unknown' },
@@ -1002,8 +1002,8 @@ const FAILURE_TABLE = {
     note: "outside P0 (codex round 4 P2): a new writer C stopped at K1 past 10 min, A recovered and published, A's parent died (F61's order) and B took, C resumed and made its tmp inside B's <lock>, A's undo moved B's owner to .undo-<A> and C linked into the emptied name; A's link back is EEXIST — B and C hold. The put-back's empty <lock> (F67) is the same shape. Named, not fixed",
     // #4559 PR-2 (lead-tests §1 #4, reason (c)): between new versions this is closed — the publish and the tomb
     // take the same `owner` name of a generation exclusively (L4); what stays is the shape on the <lock> where an
-    // older version's put-back overlaps (§6.5 P-5).
-    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'P0', row65: 'P-5' },
+    // older version's put-back overlaps (§6.5 OLD-PUTBACK-OVERLAP, #4559 comment 7186934798: closed by PR-3).
+    limit: { kind: 'mixed', until: UNTIL_PR3, writer: 'no-g', outside: 'P0', row65: 'OLD-PUTBACK-OVERLAP' },
   },
   'F70-clock-back-offset-by-reader-stop': {
     impls: BASH,
@@ -1021,7 +1021,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: "outside P0, mixed (codex round 4 P2): an older copy's functions loaded into a generic shell (bash -s, an interactive shell) or node, stopped past 10 min mid-steps (before writing too): the ps narrowing of §6.1 (a) does not see its command, and it writes nothing (b) could see; resumed, it mv -f's / deletes by name the successor's owner (as F49-F51)",
-    limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0', row65: 'P-2' },
+    limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0', row65: 'OLD-W-MV' },
   },
   'F72-old-tmp-slow-observation': {
     impls: GRACED,
@@ -1757,7 +1757,7 @@ describe('Issue #4288 PR1a-f the stop premise P0 (design "前提 P0", §7.4): th
 
   it('codex round 4\'s three crossings are outside rows, one each, not fixed (F69 new writers too, F70 the clock, F71 ended by the restart)', () => {
     // #4559 PR-2 (lead-tests §1 #4, reason (c)): new versions closed (L4); the older put-back's shape is mixed (§6.5 P-5)
-    expect(FAILURE_TABLE['F69-new-k1-writer-into-emptied-name'].limit).toMatchObject({ kind: 'mixed', writer: 'no-g', outside: 'P0', row65: 'P-5' });
+    expect(FAILURE_TABLE['F69-new-k1-writer-into-emptied-name'].limit).toMatchObject({ kind: 'mixed', writer: 'no-g', outside: 'P0', row65: 'OLD-PUTBACK-OVERLAP' });
     expect(FAILURE_TABLE['F70-clock-back-offset-by-reader-stop'].limit).toMatchObject({ kind: 'premise', writer: 'any', outside: 'P1' });
     expect([...FAILURE_TABLE['F70-clock-back-offset-by-reader-stop'].impls]).toEqual(['bash']);
     expect(FAILURE_TABLE['F71-old-writer-in-generic-shell'].limit).toMatchObject({ kind: 'mixed', writer: 'no-v', outside: 'P0' });

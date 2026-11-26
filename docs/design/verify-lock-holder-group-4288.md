@@ -357,8 +357,6 @@ drain_group G:
 | `tomb-tmp` | TS・同期 JS | 墓の記録の tmp の排他作成と書き込み | 墓を置かない（取らない） |
 | `tomb-link` | TS・同期 JS | link tmp → g<M>/owner（墓。書き手の公開と同じ名前） | 墓を置かない（取らない） |
 | `beacon-gen-end` | TS・同期 JS | 目印の記録が名指す前の世代の end と世代の lstat（§6.1）。解放の end の link が ENOENT のときの自分の世代も（#4559 r6） | 前の世代が終わったと読まない: 目印を外さない（取らない）。解放は終わったと読まない（名指して繰り返す） |
-| `gen-base-lstat` | TS・同期 JS | ロックの lstat（在れば親を読み、同じ実体の項目の綴りを取る。D2） | 鎖を選ばない: 取らない。次の周で読み直す |
-| `gen-base-list` | TS・同期 JS | ロックの親の一覧（ロックの実体の綴り。D2） | 鎖を選ばない: 取らない。次の周で読み直す |
 | `gen-tmp-write` | TS・同期 JS | 世代の記録の tmp の書き込み（owner・end・墓・引渡し） | その記録を足さない（tmp は残す。次の試行は別の名前 C8） |
 | `gen-fields-read` | TS・同期 JS | 世代の fields の読み（merge-pr のフェーズ。回収の callback と held by） | 回収しない（未確認の書き込みを idle と読まない）。次の周で読み直す |
 | `handoff-gen-tmp` | TS・同期 JS | 引渡しの記録 owner.h<k> の tmp の排他作成と書き込み | ゲートを始めない（stage=tmp。目印を書き直さない） |
