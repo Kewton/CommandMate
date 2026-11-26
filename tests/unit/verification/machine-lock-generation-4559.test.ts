@@ -164,51 +164,65 @@ const STOP_SEAMS = Object.keys(SEAM_SETUP).filter((s) => SEAM_SETUP[s] !== 'publ
 /**
  * b P2-2: for each stop row, the times A and B reached the seam and who took (`AB`: A, then B; `-`: nobody).
  * Measured, then fixed here; a row whose crossing changes is red. Where B reaches 0, why is in UNCROSSED.
+ * #4559 r7 (b2 P2-3): `crossed` — B stopped at the seam while A still stopped there (A stops → B stops → A resumes),
+ * from the order recorded as it happened. A crossing row whose B came after A is red.
  */
-const CROSS: Record<string, { a: number; b: number; took: string }> = {
-  'beacon-prev-judged': { a: 1, b: 0, took: 'B' },
-  'beacon-release': { a: 1, b: 1, took: 'AB' },
-  'end-linked': { a: 2, b: 1, took: 'AB' },
-  'end-tmp': { a: 2, b: 2, took: 'AB' },
-  'fields-rename': { a: 1, b: 1, took: 'AB' },
-  'gc-judged': { a: 1, b: 2, took: 'AB' },
-  'gc-rm': { a: 1, b: 2, took: 'AB' },
-  'gc-tmp-rm': { a: 1, b: 1, took: 'AB' },
-  'gen-dir-mkdir': { a: 1, b: 1, took: 'AB' },
-  'gen-end-read': { a: 1, b: 2, took: 'AB' },
-  'gen-handoff-tmp': { a: 1, b: 1, took: 'AB' },
-  'gen-list': { a: 2, b: 1, took: 'AB' },
-  'gen-mkdir': { a: 1, b: 2, took: 'AB' },
-  'gen-owner-linked': { a: 1, b: 1, took: 'AB' },
-  'gen-owner-tmp': { a: 1, b: 1, took: 'AB' },
-  'gen-parent-mkdir': { a: 1, b: 1, took: 'AB' },
-  'gen-postlist': { a: 1, b: 1, took: 'AB' },
-  'gen-tmp-mkdir': { a: 2, b: 2, took: 'AB' },
-  'gen-withdraw-end': { a: 1, b: 0, took: 'AB' },
-  'handoff-linked': { a: 1, b: 1, took: 'AB' },
-  'holder-judged': { a: 1, b: 1, took: 'AB' },
-  'holder-read': { a: 1, b: 1, took: 'AB' },
-  'holder-relist': { a: 1, b: 1, took: 'AB' },
-  'ownerless-judged': { a: 1, b: 1, took: 'AB' },
-  'release-end': { a: 1, b: 1, took: 'AB' },
-  'tomb-end': { a: 1, b: 0, took: 'AB' },
-  'tomb-linked': { a: 1, b: 0, took: 'AB' },
-  'tomb-tmp': { a: 1, b: 1, took: 'AB' },
+const CROSS: Record<string, { a: number; b: number; took: string; crossed: boolean }> = {
+  'beacon-prev-judged': { a: 1, b: 0, took: 'B', crossed: false },
+  'beacon-release': { a: 1, b: 1, took: 'AB', crossed: false },
+  'end-linked': { a: 2, b: 1, took: 'AB', crossed: true },
+  'end-tmp': { a: 2, b: 2, took: 'AB', crossed: true },
+  'fields-rename': { a: 1, b: 1, took: 'AB', crossed: false },
+  'gc-judged': { a: 1, b: 2, took: 'AB', crossed: true },
+  'gc-rm': { a: 1, b: 2, took: 'AB', crossed: true },
+  'gc-tmp-rm': { a: 1, b: 1, took: 'AB', crossed: true },
+  'gen-dir-mkdir': { a: 1, b: 1, took: 'AB', crossed: true },
+  'gen-end-read': { a: 1, b: 2, took: 'AB', crossed: true },
+  'gen-handoff-tmp': { a: 1, b: 1, took: 'AB', crossed: false },
+  'gen-list': { a: 2, b: 1, took: 'AB', crossed: true },
+  'gen-mkdir': { a: 1, b: 2, took: 'AB', crossed: true },
+  'gen-owner-linked': { a: 1, b: 1, took: 'AB', crossed: false },
+  'gen-owner-tmp': { a: 1, b: 1, took: 'AB', crossed: false },
+  'gen-parent-mkdir': { a: 1, b: 1, took: 'AB', crossed: true },
+  'gen-postlist': { a: 1, b: 1, took: 'AB', crossed: false },
+  'gen-tmp-mkdir': { a: 2, b: 2, took: 'AB', crossed: false },
+  'gen-withdraw-end': { a: 1, b: 0, took: 'AB', crossed: false },
+  'handoff-linked': { a: 1, b: 1, took: 'AB', crossed: false },
+  'holder-judged': { a: 1, b: 1, took: 'AB', crossed: true },
+  'holder-read': { a: 1, b: 1, took: 'AB', crossed: true },
+  'holder-relist': { a: 1, b: 1, took: 'AB', crossed: true },
+  'ownerless-judged': { a: 1, b: 1, took: 'AB', crossed: true },
+  'release-end': { a: 1, b: 1, took: 'AB', crossed: false },
+  'tomb-end': { a: 1, b: 0, took: 'AB', crossed: false },
+  'tomb-linked': { a: 1, b: 0, took: 'AB', crossed: false },
+  'tomb-tmp': { a: 1, b: 1, took: 'AB', crossed: true },
 };
 
-/** The rows where B never reaches the seam, and why (named, not dropped: b P2-2). */
+/** The rows where B never reaches the seam, or reaches it only after A (not crossed), and why (named, not dropped: b P2-2, b2 P2-3). */
 const UNCROSSED: Record<string, string> = {
   'beacon-prev-judged': 'the earlier generation\'s <lock> is A\'s to judge; once A recovered it there is none for B (A, its ticket retired by B, waits behind B and gives up: B takes)',
   'gen-withdraw-end': 'only A meets a larger generation (written at A\'s gen-postlist by the test)',
   'tomb-linked': 'the owner-less generation is A\'s to tomb; after A, B finds it ended',
   'tomb-end': 'the owner-less generation is A\'s to tomb; after A, B finds it ended',
+  // #4559 r7 (b2 P2-3): B reaches these only after A lets go — measured with the order recorded as it happened
+  'gen-tmp-mkdir': 'A made its g<N> and stops before its owner is linked: B reads an owner-less generation inside its grace (young) and waits; the seam is B\'s after A',
+  'gen-owner-tmp': 'A made its g<N> and stops before its owner is linked: B reads an owner-less generation inside its grace (young) and waits; the seam is B\'s after A',
+  'gen-owner-linked': 'A\'s owner is linked and A lives: B waits for the live holder (S1); the seam is B\'s after A',
+  'gen-postlist': 'A\'s owner is linked and A lives: B waits for the live holder (S1); the seam is B\'s after A',
+  'gen-handoff-tmp': 'a seam of a holding: B reaches it only as the next holder, after A (S1)',
+  'handoff-linked': 'a seam of a holding: B reaches it only as the next holder, after A (S1)',
+  'fields-rename': 'a seam of a holding: B reaches it only as the next holder, after A (S1)',
+  'beacon-release': 'a seam of a holding: B reaches it only as the next holder, after A (S1)',
+  'release-end': 'a seam of a holding: B reaches it only as the next holder, after A (S1)',
 };
 
 describe('#4559 T2: the crossing table', () => {
   it('names every stop row, and every row where B reaches 0 is named with its reason', () => {
     expect(Object.keys(CROSS).sort()).toEqual([...STOP_SEAMS].sort());
-    expect(Object.keys(CROSS).filter((s) => CROSS[s].b === 0).sort()).toEqual(Object.keys(UNCROSSED).sort());
+    expect(Object.keys(CROSS).filter((s) => CROSS[s].b === 0).every((s) => s in UNCROSSED)).toBe(true);
     expect(Object.values(CROSS).every((r) => r.a >= 1 && r.took !== '-')).toBe(true);
+    // b2 P2-3: the rows not crossed are exactly the ones B does not reach while A stops, each named with its reason
+    expect(Object.keys(CROSS).filter((s) => !CROSS[s].crossed).sort()).toEqual(Object.keys(UNCROSSED).sort());
   });
 });
 
@@ -225,11 +239,17 @@ describe('#4559 T2: A stopped at each seam, B at the same seam (the crossing ord
     const b = startActor(root, 'B', { pauses: [`${seam}#1`], timeoutMs: 5000, nowAheadMs: 70_000, seams: true, ...actorOptions(setup) });
     let bExited = false;
     void b.exited.then(() => (bExited = true));
-    await until(() => bExited || b.reached(`${seam}#1`), 1000);
-    expect(s2Violations(lockOf(root).genDir), 'S2 while A and B stop').toEqual([]);
-    a.go(`${seam}#1`);
     let aExited = false;
     void a.exited.then(() => (aExited = true));
+    // b2 P2-3 (#4559 comment 7185752051): the order is recorded as it happens — a crossing row waits for B to stop
+    // while A still stops (long enough under load), and a run where B came after A is red, not green.
+    const order: string[] = ['A stopped'];
+    await until(() => bExited || b.reached(`${seam}#1`), CROSS[seam]?.crossed ? 8000 : 1000);
+    if (b.reached(`${seam}#1`)) order.push('B stopped');
+    if (aExited || !a.reached(`${seam}#1`)) order.push('A not stopped');
+    expect(s2Violations(lockOf(root).genDir), 'S2 while A and B stop').toEqual([]);
+    order.push('A resumed');
+    a.go(`${seam}#1`);
     await until(() => aExited || bExited, 3000);
     b.go(`${seam}#1`);
     await a.exited;
@@ -237,7 +257,8 @@ describe('#4559 T2: A stopped at each seam, B at the same seam (the crossing ord
     expect(s1Violations(allEvents(a, b))).toEqual([]);
     // b P2-2 (the rule of #4559 comment 7185752051): how many times each actor reached the seam, and who took.
     const took = (x: typeof a) => x.events().some((e) => e.event === 'acquired');
-    const observed = { a: a.seamCount(seam), b: b.seamCount(seam), took: [a, b].filter(took).map((x) => x.who).join('') || '-' };
+    const crossed = order.join(' → ') === 'A stopped → B stopped → A resumed';
+    const observed = { a: a.seamCount(seam), b: b.seamCount(seam), took: [a, b].filter(took).map((x) => x.who).join('') || '-', crossed };
     if (process.env.CM_T2_RECORD) fs.appendFileSync(process.env.CM_T2_RECORD, `${JSON.stringify({ seam, ...observed })}\n`);
     expect(observed).toEqual(CROSS[seam]);
     // S2 at the time of each `end` (b P2-3), not who is alive now (both have exited).
@@ -310,6 +331,9 @@ const POINT_SETUP: Record<string, Setup> = {
   'tomb-link': 'ownerless-old',
   'beacon-gen-end': 'prev-beacon',
   'gen-realpath': 'fresh',
+  // #4559 r7 (a2 P3-6, PM's disposition 4): the root's mkdir and the parent of .gen (by-path/) are observed
+  'gen-root-mkdir': 'fresh',
+  'gen-parent-mkdir': 'fresh',
   'handoff-gen-tmp': 'handoff',
   'handoff-gen-link': 'handoff',
 };
@@ -324,7 +348,7 @@ function takeWith(root: string, setup: Setup, fault: (point: string, target: str
     pollMs: 10,
     warn: (l: string) => warnings.push(l),
     // the generation directory as a test seam (hooks.genDir), but for gen-realpath, whose observation it skips
-    hooks: { fault, now: () => Date.now() + 11 * 60_000, startOf: () => 0, ...(point === 'gen-realpath' ? {} : { genDir }) },
+    hooks: { fault, now: () => Date.now() + 11 * 60_000, startOf: () => 0, ...(point === 'gen-realpath' || point === 'gen-root-mkdir' ? {} : { genDir }) },
   });
   let handed: unknown = null;
   if (r.acquired && setup === 'handoff') handed = r.handOff(process.pid, process.pid);
@@ -354,12 +378,15 @@ describe('#4559 T6: an EIO at each of the generation\'s observation points', () 
     expect(s2Violations(lockOf(root).genDir)).toEqual([]);
   });
 
-  it.each(['gen-realpath', 'gen-list', 'gen-mkdir', 'gen-postlist', 'holder-read', 'holder-pid', 'end-link', 'tomb-link', 'gen-end-read'])('%s: an EIO that goes on — not taken, and the holder\'s generation not ended', (point) => {
+  it.each(['gen-realpath', 'gen-root-mkdir', 'gen-parent-mkdir', 'gen-list', 'gen-mkdir', 'gen-postlist', 'holder-read', 'holder-pid', 'end-link', 'tomb-link', 'gen-end-read'])('%s: an EIO that goes on — not taken, and the holder\'s generation not ended', (point) => {
     const setup = POINT_SETUP[point];
     const root = freshRoot(`eio-on-${point}`);
     prepare(root, setup);
     const before = readGens(lockOf(root).genDir);
-    const { r } = takeWith(root, setup, (p) => (p === point ? 'EIO' : undefined), 200, point);
+    let fired = 0;
+    const { r } = takeWith(root, setup, (p) => (p === point ? (fired++, 'EIO') : undefined), 200, point);
+    // b2 P3-2 (the rule of #4559 comment 7185752051): the point is reached — not held back by another one
+    expect(fired, `the point ${point} is reached`).toBeGreaterThanOrEqual(1);
     expect(r.acquired).toBe(false);
     expect(fs.existsSync(lockOf(root).lockPath)).toBe(false);
     for (const [n, g] of before) expect(readGens(lockOf(root).genDir).get(n)?.end ?? null).toBe(g.end);
@@ -552,15 +579,6 @@ function withRoot<T>(root: string, fn: () => T): T {
   }
 }
 
-const isAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-};
-
 /** The same directory spelled with its last component's case swapped. */
 const swapCase = (p: string): string => {
   const base = path.basename(p);
@@ -729,7 +747,9 @@ describe('#4559 r6 C7-I2: a root whose realpath is not resolved (unknown or abse
       }
       expect(thrown, 'an observation that failed is not thrown').toBeNull();
       expect(r?.acquired).toBe(false);
-      expect(warnings.join('\n')).toContain(`machine-lock-unknown point=gen-realpath path=${envRoot} errno=ENOENT`);
+      // #4559 r7 (PM's disposition 4): the mkdir that failed is named by its own point, not as gen-realpath ENOENT
+      expect(warnings.join('\n')).toContain(`machine-lock-unknown point=gen-root-mkdir path=${envRoot} errno=EACCES`);
+      expect(warnings.join('\n')).not.toContain('point=gen-realpath');
       expect(fs.existsSync(envRoot)).toBe(false);
       expect(fs.readdirSync(dir).filter((e) => e.endsWith('.gen'))).toEqual([]);
     } finally {
@@ -752,11 +772,82 @@ describe('#4559 r6 C7-I3: with the chain unknown, the heads that do not take end
     fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: deadPid(), host: HOST, token: 'T', acquiredAt: 0, v: 1, g: 1 }));
     let fired = 0;
     const hooks = { fault: (p: string, _t: string, c: number) => (p === 'gen-realpath' && c === at ? (fired++, code) : undefined) };
-    withRoot(root, () => (fn === 'releaseAsHead' ? lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, hooks }) : lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks })));
+    const r = withRoot(root, () => (fn === 'releaseAsHead' ? lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, hooks }) : lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks })));
     expect(fired).toBe(1);
     expect(readGens(genDir).get(1)?.end ?? null).toBeNull();
     expect(chainsOf(root)).toEqual({ named: ['x.gen'], byPath: [] });
     expect(fs.readdirSync(genDir)).toEqual([lockSync.genName(1)]);
+    // #4559 r7 (a2 P2-1 = b2 P2-2): the poll whose chain is unknown answers so, named — and the <lock> stays as it was
+    expect({ result: r.result, point: r.unknown?.point, code: r.unknown?.code }).toEqual({ result: fn === 'releaseAsHead' ? 'deferred' : 'kept', point: 'gen-realpath', code });
+    expect(JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8')).token).toBe('T');
+  });
+
+  it.each(['releaseAsHead', 'recoverIfDead'])('%s, a2\'s order (A → B → C, C dead, B alive) with gen-realpath failing (EIO): the <lock> stays while B\'s group lives', async (fn) => {
+    const root = freshRoot('i3-abc');
+    const { genDir, lockPath } = lockOf(root);
+    const b = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+    try {
+      const bPid = b.pid as number;
+      writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' }, handoffs: [{ pid: bPid, pgid: bPid, token: 'HB' }, { pid: deadPid(), token: 'HC' }] });
+      fs.mkdirSync(lockPath);
+      fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: deadPid(), host: HOST, token: 'HC', acquiredAt: 0, v: 1, g: 1 }));
+      let fired = 0;
+      const hooks = { fault: (p: string) => (p === 'gen-realpath' ? (fired++, 'EIO') : undefined) };
+      const r = withRoot(root, () => (fn === 'releaseAsHead' ? lockSync.releaseAsHead(lockPath, ['T', 'HB', 'HC'], { timeoutMs: 0, hooks }) : lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks })));
+      expect(fired).toBeGreaterThanOrEqual(1);
+      expect({ result: r.result, point: r.unknown?.point }).toEqual({ result: fn === 'releaseAsHead' ? 'deferred' : 'kept', point: 'gen-realpath' });
+      expect(JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8')).token).toBe('HC');
+      expect(readGens(genDir).get(1)?.end ?? null).toBeNull();
+      // the chain seen again (no fault): B is alive — still kept, by the holding's every record (§4.2, D6 too)
+      const again = withRoot(root, () => (fn === 'releaseAsHead' ? lockSync.releaseAsHead(lockPath, ['T', 'HB', 'HC'], { timeoutMs: 0 }) : lockSync.recoverIfDead(lockPath, { timeoutMs: 0 })));
+      expect(again.result).toBe(fn === 'releaseAsHead' ? 'deferred' : 'kept');
+      expect(fs.existsSync(path.join(lockPath, 'owner'))).toBe(true);
+      expect(readGens(genDir).get(1)?.end ?? null).toBeNull();
+    } finally {
+      b.kill('SIGKILL');
+    }
+  });
+});
+
+describe('#4559 r7 (a2 P2-2 = b2 P2-1, §4.2): releaseAsHead judges every record of the holding, the first owner too', () => {
+  it('the first owner alive (another process), its hand-off (the <lock>\'s record) dead: deferred, the <lock> and the generation stay', () => {
+    const root = freshRoot('p42-first');
+    const { genDir, lockPath } = lockOf(root);
+    const a = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+    try {
+      const aPid = a.pid as number;
+      writeGen(genDir, 1, { owner: { pid: aPid, token: 'T' }, handoffs: [{ pid: deadPid(), token: 'HB' }] });
+      fs.mkdirSync(lockPath);
+      fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: deadPid(), host: HOST, token: 'HB', acquiredAt: 0, v: 1, g: 1 }));
+      const warnings: string[] = [];
+      let pids = 0;
+      const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T', 'HB'], { timeoutMs: 0, warn: (l: string) => warnings.push(l), hooks: { fault: (p: string) => (p === 'holder-pid' ? (pids++, undefined) : undefined) } }));
+      expect(r.result).toBe('deferred');
+      expect(pids, 'the first owner and the hand-off are judged').toBeGreaterThanOrEqual(1);
+      expect(warnings.join('\n')).toContain(`alive: pid ${aPid}`);
+      expect(JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8')).token).toBe('HB');
+      expect(readGens(genDir).get(1)?.end ?? null).toBeNull();
+      const d6 = withRoot(root, () => lockSync.recoverIfDead(lockPath, { timeoutMs: 0 }));
+      expect(d6.result).toBe('kept');
+      expect(fs.existsSync(path.join(lockPath, 'owner'))).toBe(true);
+    } finally {
+      a.kill('SIGKILL');
+    }
+  });
+
+  it('the caller itself is the first owner (D12\'s rule: its own record), its hand-off dead: released, and the end with it', () => {
+    const root = freshRoot('p42-self');
+    const { genDir, lockPath } = lockOf(root);
+    const dead = deadPid();
+    const r = withRoot(root, () => lockSync.acquireMachineLockSync('x', { root, timeoutMs: 0 }));
+    expect(r.acquired).toBe(true);
+    expect(r.handOff(dead, dead)).toMatchObject({ ok: true });
+    expect(withRoot(root, () => r.release())).toBe('needs-head');
+    const asHead = withRoot(root, () => lockSync.releaseAsHead(lockPath, [r.token as string, `${r.token}-g${dead}`], { timeoutMs: 0 }));
+    expect(asHead.result).toBe('released');
+    expect(fs.existsSync(lockPath)).toBe(false);
+    // the <lock>'s judgement and the end's are one (§4.2): released only with its end
+    expect(readGens(genDir).get(r.gen as number)?.end?.split(' ')[0]).toBe('dead');
   });
 });
 
@@ -987,16 +1078,17 @@ describe('#4559 r6 a P2-3 (§4.6 / §4.2): a second hand-off, and a release that
       await exits[1];
       const first = r.release();
       expect(first).not.toBe('released');
-      // D5 as UAT's down does it: the holder (A, this process) is stopped first — read dead here — and B, C decide.
-      const aStopped = { genDir, pidAlive: (pid: number) => pid !== process.pid && isAlive(pid) };
-      const asHead = withRoot(root, () => lockSync.releaseAsHead(lockPath, tokens, { timeoutMs: 0, hooks: aStopped }));
+      // D5 by the holder itself after its needs-head (#4559 r7, §4.2): every record of the holding is judged — the first
+      // owner (A, this process) by D12's rule (its own record), B and C by their pid and group. No hook reads A dead.
+      const aSelf = { genDir };
+      const asHead = withRoot(root, () => lockSync.releaseAsHead(lockPath, tokens, { timeoutMs: 0, hooks: aSelf }));
       expect(asHead.result, 'B\'s group is alive: the holding is kept').toBe('deferred');
       expect(readGens(genDir).get(r.gen as number)?.end ?? null).toBeNull();
       expect(fs.existsSync(path.join(lockPath, 'owner')), 'the <lock> stays for the older readers while B lives').toBe(true);
       // B ends too
       kids[0].kill('SIGKILL');
       await exits[0];
-      const done = withRoot(root, () => lockSync.releaseAsHead(lockPath, tokens, { timeoutMs: 0, hooks: aStopped }));
+      const done = withRoot(root, () => lockSync.releaseAsHead(lockPath, tokens, { timeoutMs: 0, hooks: aSelf }));
       expect(done.result).toBe('released');
       expect(readGens(genDir).get(r.gen as number)?.end?.split(' ')[0]).toBe('dead');
       expect(fs.existsSync(lockPath)).toBe(false);
@@ -1024,4 +1116,66 @@ describe('#4559 r6 b P2-3: S2 is judged at the time each end was written', () =>
     expect(s2Violations(genDir), 'the oracle of who is alive now: everyone has exited').toEqual([]);
     expect(s2AtWrite(genDir, [a, b]), 'the oracle at the write').toEqual([1]);
   }, 20000);
+});
+
+describe('#4559 r7 (a2 P3-5, PM\'s disposition 3): the base name is folded in ASCII only (A–Z → a–z)', () => {
+  it('X.lock folds to x.gen; a base name with letters outside ASCII keeps them as spelled (named and by path)', () => {
+    const root = freshRoot('ascii');
+    const other = path.join(root, 'other');
+    fs.mkdirSync(other);
+    withRoot(root, () => {
+      expect(path.basename(lockSync.genDirOf(path.join(root, 'X.lock')))).toBe('x.gen');
+      expect(path.basename(lockSync.genDirOf(path.join(root, 'ÄB.lock')))).toBe('Äb.gen');
+      expect(lockSync.genDirOf(path.join(other, 'ÄB.lock'))).toBe(path.join(root, 'by-path', `${lockSync.byPathHash(`${fs.realpathSync.native(other)}/Äb.lock`)}.gen`));
+      expect(lockSync.genDirOf(path.join(other, 'ÄB.lock'))).not.toBe(lockSync.genDirOf(path.join(other, 'äb.lock')));
+    });
+  });
+});
+
+describe('#4559 r7 (a2 P3-6): the release\'s end that cannot be linked (ENOENT every try) is an answer, not a throw', () => {
+  it('end-link absent at every try: deferred (named, EAGAIN) — the next release writes the end', () => {
+    const root = freshRoot('eagain');
+    const { genDir, lockPath } = lockOf(root);
+    let releasing = false;
+    let links = 0;
+    const warnings: string[] = [];
+    const r = lockSync.acquireMachineLockSync('x', {
+      root,
+      timeoutMs: 500,
+      warn: (l: string) => warnings.push(l),
+      hooks: {
+        genDir,
+        onGenStage: (st: string) => {
+          if (st === 'beacon-release') releasing = true;
+        },
+        fault: (p: string) => (p === 'end-link' && releasing && links < 100 ? (links++, 'ENOENT') : undefined),
+      },
+    });
+    expect(r.acquired).toBe(true);
+    let first: string | null = null;
+    expect(() => (first = r.release())).not.toThrow();
+    expect(first).toBe('deferred');
+    expect(links, 'every try of the poll reached end-link').toBe(32);
+    expect(warnings.join('\n')).toContain(`machine-lock-release-deferred ${lockPath} point=end-link errno=EAGAIN`);
+    expect(fs.existsSync(lockPath), 'the <lock> went first (§6.1)').toBe(false);
+    expect(readGens(genDir).get(1)?.end ?? null).toBeNull();
+    links = 100;
+    expect(r.release()).toBe('released');
+    expect(readGens(genDir).get(1)?.end?.split(' ')[0]).toBe('released');
+  });
+});
+
+describe('#4559 r7 (b2 P3-1): S2 at the write counts another\'s end written between the holder\'s releasing and its own end', () => {
+  it('self-test on a record of events: an end by B after A\'s `releasing`, while A lives, is a break of S2', () => {
+    const root = freshRoot('s2-releasing');
+    const { genDir } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: 4242, token: 'A' }, end: 'dead B' });
+    const at = fs.statSync(path.join(genDir, lockSync.genName(1), 'end')).mtimeMs;
+    // A started before, said `releasing` before B's end, and exited after it
+    const a = { span: () => ({ pid: 4242, from: at - 1000, to: at - 10, life: at + 1000 }) };
+    expect(s2AtWrite(genDir, [a])).toEqual([1]);
+    // the same end after A exited is no break
+    const gone = { span: () => ({ pid: 4242, from: at - 1000, to: at - 500, life: at - 100 }) };
+    expect(s2AtWrite(genDir, [gone])).toEqual([]);
+  });
 });

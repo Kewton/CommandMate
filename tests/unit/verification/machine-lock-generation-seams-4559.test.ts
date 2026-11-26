@@ -12,14 +12,30 @@
  * and machine-lock.ts has no file operation of its own — given that the copy is the core (the copy test;
  * here its premise is checked again, so a changed copy turns this red rather than silently passing).
  */
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
-import { OPS, renderOps, type OpRow } from './lock-generation-4559-harness';
+import {
+  CHAIN_CHOICE_POINTS,
+  NON_BLOCKING,
+  OPS,
+  TABLE_SCENARIOS,
+  buildTable,
+  chainPoints,
+  cleanAll,
+  coreProcedures,
+  heldBack,
+  nonBlocking,
+  renderOps,
+  renderTable,
+  type OpRow,
+  type TableRow,
+} from './lock-generation-4559-harness';
+import { OBSERVATION_POINTS } from './lock-observation-points-4288';
 
 const REPO = path.resolve(__dirname, '../../..');
 const CORE = 'scripts/orchestrate/machine-lock-sync.mjs';
@@ -298,4 +314,135 @@ describe('#4559 §4.4: the writer\'s own tomb after its owner publish failed, ki
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 20000);
+});
+
+// ------------------------------------------------------------------ #4559 r7 §1: the gate (PM's disposition 1)
+
+/**
+ * The gate of the public functions (r7 §1): the table of the core's public functions × the observation points each
+ * reaches × resolved / absent / unknown is made by machine (lock-generation-4559-harness.ts `buildTable`: the
+ * functions from the core's source, the points from the runs), and every row is checked here — an unknown (and an
+ * absent of the chain's choice) holds back the decision that depends on it (C7-I3): no `end`, no <lock> moved, no
+ * generation made, not `released` / taken / removed, past what was on disk when the point was first reached; the
+ * point reached; the answer named. A function or a point added to the core without its row is red; so is the
+ * design's §8.4 when it is not the table, byte for byte.
+ */
+const OLDER_POINTS = new Set(OBSERVATION_POINTS.filter((p) => p.impls.includes('bash')).map((p) => p.point));
+
+/** The table of the design's §8.4 (from its heading to the first blank line after the table starts). */
+export function docGateTable(doc: string): string | null {
+  const at = doc.indexOf('\n### 8.4 ');
+  if (at < 0) return null;
+  const rest = doc.slice(at + 1);
+  const start = rest.indexOf('\n| 関数 | 場面 |');
+  if (start < 0) return null;
+  const body = rest.slice(start + 1);
+  const end = body.indexOf('\n\n');
+  return end < 0 ? body.trimEnd() : body.slice(0, end);
+}
+
+/** What the gate finds wrong in a table: each row's breaks, named `<function> <scenario> <point> <value>: …`. */
+export function gateBreaks(rows: TableRow[]): string[] {
+  const bad: string[] = [];
+  for (const r of rows) {
+    const at = `${r.fn} ${r.scenario} ${r.point}`;
+    if (r.reached < 1) bad.push(`${at}: not reached in its resolved run`);
+    for (const [value, run] of [['absent', r.absent], ['unknown', r.unknown]] as const) {
+      if ((run.hits.get(r.point) ?? 0) < 1) bad.push(`${at} ${value}: not reached`);
+    }
+    if (nonBlocking(r.fn, r.point)) {
+      const same = { outcome: r.unknown.outcome, changes: r.unknown.changes };
+      if (JSON.stringify(same) !== JSON.stringify({ outcome: r.resolved.outcome, changes: r.resolved.changes })) bad.push(`${at} unknown: named a clean-up, but answers ${r.unknown.outcome} (${r.unknown.changes.join(', ')}) for ${r.resolved.outcome}`);
+    } else {
+      for (const b of heldBack(r, r.unknown)) bad.push(`${at} unknown: ${b}`);
+      if (!/\((?:[a-z0-9-]+) [A-Z]+\)|^throws [A-Z]+|^not ok|^false$|^null$|^holder /.test(r.unknown.outcome) && !['kept', 'deferred', 'not acquired', 'needs-head'].includes(r.unknown.outcome)) {
+        bad.push(`${at} unknown: the answer ${r.unknown.outcome} names nothing`);
+      }
+    }
+    if (CHAIN_CHOICE_POINTS.includes(r.point)) for (const b of heldBack(r, r.absent)) bad.push(`${at} absent: ${b}`);
+  }
+  return bad;
+}
+
+async function loadCopy(dir: string, source: string): Promise<typeof lockSync> {
+  const file = path.join(dir, `machine-lock-sync-${Math.random().toString(36).slice(2)}.mjs`);
+  fs.writeFileSync(file, source);
+  return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as typeof lockSync;
+}
+const only = (fns: string[]) => Object.fromEntries(fns.map((f) => [f, TABLE_SCENARIOS[f]]));
+
+describe('#4559 r7 §1: the gate — the public functions × their observation points × resolved / absent / unknown', () => {
+  let rows: TableRow[] = [];
+  beforeAll(() => {
+    rows = buildTable(lockSync);
+  }, 60000);
+  afterAll(() => cleanAll());
+
+  it('the public functions are read from the core, and each has its scenarios (none without)', () => {
+    const procs = coreProcedures(read(CORE));
+    expect(procs.length).toBeGreaterThanOrEqual(10);
+    expect(procs).toEqual(Object.keys(TABLE_SCENARIOS).sort());
+    expect(new Set(rows.map((r) => r.fn))).toEqual(new Set(procs));
+  });
+
+  it('every observation point of the chain is a row of some function (none without), and the rows are counted', () => {
+    const points = chainPoints(read(CORE), OLDER_POINTS);
+    expect(points.length).toBeGreaterThanOrEqual(25);
+    const covered = new Set(rows.map((r) => r.point));
+    expect([...points, ...CHAIN_CHOICE_POINTS].filter((p) => !covered.has(p))).toEqual([]);
+    expect(rows.length).toBeGreaterThanOrEqual(200);
+    for (const s of Object.values(TABLE_SCENARIOS)) expect(Object.keys(s).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('every row holds: an unknown (and an absent of the chain\'s choice) does not advance the decision; a named clean-up answers as resolved', () => {
+    expect(gateBreaks(rows)).toEqual([]);
+  });
+
+  it('NON_BLOCKING names rows of the table only, each with its reason', () => {
+    for (const [key, why] of Object.entries(NON_BLOCKING)) {
+      const [fn, point] = key.split(' ');
+      expect(rows.some((r) => (fn === '*' || r.fn === fn) && r.point === point), key).toBe(true);
+      expect(why.length).toBeGreaterThan(20);
+    }
+  });
+
+  it('the design\'s §8.4 is the table rendered, byte for byte', () => {
+    expect(docGateTable(read(DOC))).toBe(renderTable(rows));
+  });
+
+  it('self-test (i): a copy whose releaseAsHead takes the <lock> off while the chain is unknown is red at that row', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-i-'));
+    try {
+      const core = read(CORE);
+      const line = "    if (ctx.genUnknown) return deferredUnknown(ctx, ctx.genUnknown);\n";
+      expect(core.split(line).length - 1, 'the chain\'s unknown in releaseAsHead, once').toBe(1);
+      const m = await loadCopy(dir, core.replace(line, ''));
+      const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
+      expect(breaks.filter((b) => b.startsWith('releaseAsHead live-handoff gen-realpath unknown: advanced'))).toHaveLength(1);
+      expect(breaks.filter((b) => b.startsWith('releaseAsHead live-handoff gen-realpath absent: advanced'))).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it('self-test (ii): a copy with a public function added outside the table is red', () => {
+    const procs = coreProcedures(`${read(CORE)}\nexport function peekHolder(lockPath) {\n  return readHolder(lockPath);\n}\n`);
+    expect(procs).toContain('peekHolder');
+    expect(procs).not.toEqual(Object.keys(TABLE_SCENARIOS).sort());
+    expect(() => coreProcedures('export function x() {}\n')).toThrow(/marker/);
+  });
+
+  it('self-test (iii): a copy that reads a holder it cannot observe as not alive (unknown as resolved) is red at that row', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-iii-'));
+    try {
+      const core = read(CORE);
+      const line = "      if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, listing.max), code: holder.code } };\n";
+      expect(core.split(line).length - 1, 'the holding\'s unknown holder, once').toBe(1);
+      const m = await loadCopy(dir, core.replace(line, ''));
+      const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
+      expect(breaks.filter((b) => b.startsWith('releaseAsHead first-alive holder-pid unknown: advanced'))).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
 });

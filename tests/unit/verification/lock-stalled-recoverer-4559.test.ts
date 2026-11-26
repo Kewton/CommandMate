@@ -284,6 +284,10 @@ function reportHooks(lockPath: string, takeU: () => Take) {
 }
 const holders = (n: Take, seen: { u: Take | null; v: boolean }): number => [n.acquired, seen.u?.acquired === true, seen.v].filter(Boolean).length;
 const uOf = (m: typeof lockSync, lockPath: string) => (): Take => m.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 10, hooks: { now: () => Date.now() + 65_000, startOf: () => 0 } });
+/** #4559 r7 (a2 P3-4 = b2 P3-3): U of the new version, counting the seams it reached (the chain's listing). */
+const uCounted = (lockPath: string, seams: Map<string, number>) => (): Take =>
+  lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 10, hooks: { now: () => Date.now() + 65_000, startOf: () => 0, onGenStage: (st: string) => void seams.set(st, (seams.get(st) ?? 0) + 1) } });
+const stageCounts = (stages: string[]): Record<string, number> => stages.reduce<Record<string, number>>((m, st) => ({ ...m, [st]: (m[st] ?? 0) + 1 }), {});
 
 async function withLockRoot<T>(root: string, fn: () => Promise<T> | T): Promise<T> {
   const was = process.env.CM_VERIFY_LOCK_ROOT;
@@ -311,10 +315,15 @@ describe('#4559 r6 the acceptance pair, sync JS: the same stops on the develop c
     const root = freshRoot('4559-pair-sync-new');
     const lockPath = machineLockPath('x', root);
     writeDeadHolder(lockPath);
-    const h = reportHooks(lockPath, uOf(lockSync, lockPath));
+    const uSeams = new Map<string, number>();
+    const h = reportHooks(lockPath, uCounted(lockPath, uSeams));
     const n = await withLockRoot(root, () => lockSync.acquireMachineLockSync('x', { lockPath, timeoutMs: 300, pollMs: 20, hooks: { onRecover: h.onRecover } }));
     expect(h.seen.stages.slice(0, 2)).toEqual(['before-move', 'moved']);
-    expect(h.seen.u?.acquired).toBe(false);
+    // a2 P3-4 = b2 P3-3 (#4559 comment 7185752051): who took — V (the older runner) alone — and how often each stage was reached
+    expect({ u: h.seen.u?.acquired, v: h.seen.v, n: n.acquired }).toEqual({ u: false, v: true, n: false });
+    expect(stageCounts(h.seen.stages)).toEqual({ 'before-move': 1, moved: 1 });
+    expect(uSeams.get('gen-list') ?? 0, 'U listed the chain (and saw N\'s generation)').toBeGreaterThanOrEqual(1);
+    expect(uSeams.get('gen-mkdir') ?? 0, 'U made no generation while N held its own').toBe(0);
     expect(holders(n, h.seen)).toBe(1);
   });
 });
@@ -336,10 +345,15 @@ describe('#4559 r6 the acceptance pair, TS (the async entry): the same stops on 
     const root = freshRoot('4559-pair-ts-new');
     const lockPath = machineLockPath('x', root);
     writeDeadHolder(lockPath);
-    const h = reportHooks(lockPath, uOf(lockSync, lockPath));
+    const uSeams = new Map<string, number>();
+    const h = reportHooks(lockPath, uCounted(lockPath, uSeams));
     const n = await withLockRoot(root, () => acquireMachineLock('x', { root, timeoutMs: 300, pollIntervalMs: 20, __testHooks: { onRecover: h.onRecover } as never }));
     expect(h.seen.stages.slice(0, 2)).toEqual(['before-move', 'moved']);
-    expect(h.seen.u?.acquired).toBe(false);
+    // a2 P3-4 = b2 P3-3: who took, and how often each stage was reached
+    expect({ u: h.seen.u?.acquired, v: h.seen.v, n: n.acquired }).toEqual({ u: false, v: true, n: false });
+    expect(stageCounts(h.seen.stages)).toEqual({ 'before-move': 1, moved: 1 });
+    expect(uSeams.get('gen-list') ?? 0, 'U listed the chain (and saw N\'s generation)').toBeGreaterThanOrEqual(1);
+    expect(uSeams.get('gen-mkdir') ?? 0, 'U made no generation while N held its own').toBe(0);
     expect(holders(n, h.seen)).toBe(1);
   });
 });

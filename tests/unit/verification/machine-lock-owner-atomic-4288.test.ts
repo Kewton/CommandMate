@@ -774,6 +774,11 @@ interface Limit {
   readonly outside: 'P0' | 'P1' | 'P0+P1' | 'none';
   /** #4559: a `mixed` row's row of docs/design/machine-lock-generation-4559.md §6.5 (the window it is). */
   readonly row65?: string;
+  /**
+   * #4559 r7 (review a2 P3-2, PM's disposition 3): a row whose older writer does two operations, split per operation —
+   * each operation's §6.5 row (`row65` is the first's).
+   */
+  readonly row65ByOp?: Readonly<Record<string, string>>;
 }
 type FLeft =
   | 'nothing-made'
@@ -1021,7 +1026,7 @@ const FAILURE_TABLE = {
     results: HEADS('acquired', 'removed'),
     left: 'two-holders-possible',
     note: "outside P0, mixed (codex round 4 P2): an older copy's functions loaded into a generic shell (bash -s, an interactive shell) or node, stopped past 10 min mid-steps (before writing too): the ps narrowing of §6.1 (a) does not see its command, and it writes nothing (b) could see; resumed, it mv -f's / deletes by name the successor's owner (as F49-F51)",
-    limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0', row65: 'OLD-W-MV' },
+    limit: { kind: 'mixed', until: UNTIL_RESTART, writer: 'no-v', outside: 'P0', row65: 'OLD-W-MV', row65ByOp: { 'mv -f': 'OLD-W-MV', 'deletes by name': 'OLD-W-APPEND' } },
   },
   'F72-old-tmp-slow-observation': {
     impls: GRACED,

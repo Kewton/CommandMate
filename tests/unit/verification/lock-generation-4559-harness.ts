@@ -127,9 +127,11 @@ export function s2Violations(genDir: string, isAlive: (pid: number) => boolean =
 /**
  * #4559 r6 (review b P2-3): S2's oracle at the time of the write — a generation whose `end` was written by
  * someone other than its records' tokens, at a time (the `end` file's mtime: the tmp it was linked from, written
- * just before) inside the life of an actor whose record it holds (`span`: from its start to its `releasing`, its
- * kill or its exit). Unlike s2Violations it does not depend on who is alive when it is called: a call after every
- * actor has exited still sees an `end` written over a live holder. Answers the generations that break it.
+ * just before) inside the life of an actor whose record it holds (`span`: from its start to its kill or its exit —
+ * #4559 r7, review b2 P3-1: not cut at its `releasing`, for between its `releasing` and its own `end` the holder
+ * lives and its generation has no `end`). Unlike s2Violations it does not depend on who is alive when it is called: a
+ * call after every actor has exited still sees an `end` written over a live holder. Answers the generations that
+ * break it.
  */
 export function s2AtWrite(genDir: string, actors: Pick<Actor, 'span'>[]): number[] {
   const bad: number[] = [];
@@ -141,7 +143,7 @@ export function s2AtWrite(genDir: string, actors: Pick<Actor, 'span'>[]): number
     const live = g.records.some((r) => {
       if (r.tomb) return false;
       const holder = actors.map((a) => a.span()).find((sp) => sp.pid === r.pid);
-      return holder !== undefined && at >= holder.from && at < holder.to;
+      return holder !== undefined && at >= holder.from && at < (holder.life ?? holder.to);
     });
     if (live) bad.push(n);
   }
@@ -194,7 +196,8 @@ export interface Actor {
   /** #4559 r6: the test kills it now (the end of its life for S2's oracle, before the parent sees the exit). */
   kill: () => number;
   /** #4559 r6: when it was alive and could hold: from its start to its `releasing`, its kill or its exit. */
-  span: () => { pid: number | undefined; from: number; to: number };
+  /** `to`: its `releasing`, kill or exit (S1's span); `life`: its kill or exit (S2's, b2 P3-1) */
+  span: () => { pid: number | undefined; from: number; to: number; life?: number };
   /** #4559 r6: how many times it reached `stage` (the `seam` events; with `seams: true`). */
   seamCount: (stage: string) => number;
 }
@@ -275,7 +278,7 @@ export function startActor(root: string, who: string, o: ActorOptions = {}): Act
     },
     span: () => {
       const releasing = readEvents().find((e) => e.event === 'releasing');
-      return { pid: child.pid, from: startedAt, to: releasing?.t ?? killedAt ?? exitedAt ?? Number.MAX_SAFE_INTEGER };
+      return { pid: child.pid, from: startedAt, to: releasing?.t ?? killedAt ?? exitedAt ?? Number.MAX_SAFE_INTEGER, life: killedAt ?? exitedAt ?? Number.MAX_SAFE_INTEGER };
     },
     seamCount: (stage) => readEvents().filter((e) => e.event === 'seam' && (e as ActorEvent & { stage?: string }).stage === stage).length,
   };
@@ -404,3 +407,405 @@ export function renderOps(): string {
   return [...head, ...OPS.map((r) => `| \`${r.fn}\` | \`${r.op}\` | ${r.count} | ${r.seam} | ${r.what.replace(/\|/g, '\\|')} | ${r.step} |`)].join('\n');
 }
 
+
+// ------------------------------------------------------------------ #4559 r7 §1: the gate of the public functions
+
+/**
+ * #4559 r7 §1 (PM's disposition 1): the table of the core's public functions × the observation points each one
+ * reaches × the three values of an observation (resolved / absent / unknown), made by machine — never by hand:
+ *
+ * - the functions are read from the core's source (`coreProcedures`): every exported function whose calls reach a
+ *   function of the generation chain that observes, and the methods of a holding's handle (`handle.<name>`)
+ * - the points of a row are the ones its run reached (the `hooks.fault` seam is told every observation), in a
+ *   scenario of TABLE_SCENARIOS (a function without one is a red row of the gate)
+ * - each point is run again with it answering ENOENT (absent) and EIO (unknown) at every reach
+ *
+ * The table is the one source: the gate (machine-lock-generation-seams-4559.test.ts) checks every row, and the
+ * design's §8.4 is the table rendered, byte for byte.
+ */
+
+type FaultFn = (point: string, target: string, count?: number) => string | undefined;
+type Core = typeof lockSync;
+export interface TableOutcome {
+  outcome: string;
+  /** the chain-dependent decision the function exists for was made (taken, released, removed, chosen …) */
+  advanced: boolean;
+}
+export interface TableScenario {
+  prepare: (root: string, live: number) => void;
+  /** `arm` turns the fault seam on (a handle's method: after its acquisition). */
+  run: (m: Core, root: string, fault: FaultFn, arm: () => void, live: number) => TableOutcome;
+}
+
+/** The core's source without its comments (a name in a comment is not a call). */
+const stripComments = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|\s)\/\/.*$/gm, '$1');
+
+const OBSERVE_RE = /\bobs\.(?:pid|group|list|lstat|record|owner|text|realpath|mkdir|rename|rmdir|put|link|unlink|create)\(/;
+
+/**
+ * The public functions of the core (r7 §1), from its source: the exported functions whose calls reach a function
+ * of the generation chain (after the `// The generation chain (#4559` line) that observes, and the methods of the
+ * handle `holding(n)` answers (`handle.<name>`). Throws when a part it reads is not found (never an empty list).
+ */
+export function coreProcedures(source: string): string[] {
+  const marker = source.split('\n').findIndex((l) => l.includes('// The generation chain (#4559'));
+  if (marker < 0) throw new Error('the generation chain\'s marker line is not in the core');
+  const lines = stripComments(source).split('\n');
+  const decls: { name: string; exported: boolean; fn: boolean; start: number; body: string }[] = [];
+  lines.forEach((l, i) => {
+    const m = /^(export )?(?:function\*? ([A-Za-z_$][\w$]*)\(|const ([A-Za-z_$][\w$]*) = )/.exec(l);
+    if (m) decls.push({ name: m[2] ?? m[3], exported: Boolean(m[1]), fn: Boolean(m[2]), start: i, body: '' });
+  });
+  decls.forEach((d, i) => (d.body = lines.slice(d.start, i + 1 < decls.length ? decls[i + 1].start : lines.length).join('\n')));
+  const names = new Set(decls.map((d) => d.name));
+  const by = new Map(decls.map((d) => [d.name, d]));
+  const calls = new Map(decls.map((d) => [d.name, [...d.body.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)].map((m) => m[1]).filter((n) => names.has(n) && n !== d.name)]));
+  const chain = new Set(decls.filter((d) => d.start > marker && OBSERVE_RE.test(d.body)).map((d) => d.name));
+  if (chain.size === 0) throw new Error('no observing function of the generation chain was found');
+  const reaches = (name: string): boolean => {
+    const seen = new Set<string>();
+    const stack = [name];
+    while (stack.length > 0) {
+      const n = stack.pop() as string;
+      if (seen.has(n)) continue;
+      seen.add(n);
+      if (chain.has(n)) return true;
+      stack.push(...(calls.get(n) ?? []));
+    }
+    return false;
+  };
+  const exported = decls.filter((d) => d.exported && d.fn && reaches(d.name)).map((d) => d.name);
+  const acq = by.get('machineLockAcquisition');
+  const at = acq?.body.indexOf('function holding(') ?? -1;
+  if (!acq || at < 0) throw new Error('the handle of a holding (function holding) is not in the core');
+  const handle = [...acq.body.slice(at).matchAll(/^ {6}([A-Za-z_$][\w$]*): (?:\(|function)/gm)].map((m) => `handle.${m[1]}`);
+  if (handle.length === 0) throw new Error('the handle of a holding has no method');
+  return [...exported, ...handle].sort();
+}
+
+/**
+ * The observation points of the generation chain the core names (literal): `obs.<op>('<point>'`, the GEN_WRITES
+ * table's put / link and listGens' — the points of the chain's own functions (after its marker line), apart from
+ * the <lock>'s older points (#4288's), which are the observation table's rows.
+ */
+export function chainPoints(source: string, older: Set<string>): string[] {
+  const start = source.indexOf('// The generation chain (#4559');
+  if (start < 0) throw new Error('the generation chain\'s marker line is not in the core');
+  const part = source.slice(start);
+  const names = new Set<string>();
+  for (const m of part.matchAll(/\bobs\.(?:pid|group|list|lstat|record|owner|text|realpath|mkdir|rename|rmdir|put|link|unlink)\('([a-z0-9-]+)'/g)) names.add(m[1]);
+  for (const m of part.matchAll(/\b(?:put|link): '([a-z0-9-]+)'/g)) names.add(m[1]);
+  for (const m of part.matchAll(/\blistGens\(g, '([a-z0-9-]+)'\)/g)) names.add(m[1]);
+  return [...names].filter((n) => !older.has(n)).sort();
+}
+
+/** What is on disk for the chain of `x` in `root`: the generations (records, end) and the <lock>'s owner token. */
+interface ChainState {
+  gens: Map<number, { records: number; end: string | null }>;
+  lock: string;
+  byPath: number;
+}
+const KNOWN_TOKEN = /^[A-Z][A-Z0-9]*$/;
+function chainState(root: string): ChainState {
+  const { lockPath, genDir } = lockOf(root);
+  const gens = new Map([...readGens(genDir)].map(([n, g]) => [n, { records: g.records.length, end: g.end === null ? null : g.end.split(' ')[0] }]));
+  let lock = 'none';
+  if (fs.existsSync(lockPath)) {
+    try {
+      const token = String(JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8')).token);
+      lock = KNOWN_TOKEN.test(token) ? token : 'new';
+    } catch {
+      // an empty <lock> (a claim before its owner, an undo's): nobody holds it
+      lock = 'none';
+    }
+  }
+  let byPath = 0;
+  try {
+    byPath = fs.readdirSync(path.join(root, 'by-path')).filter((e) => e.endsWith('.gen')).length;
+  } catch {
+    byPath = 0;
+  }
+  return { gens, lock, byPath };
+}
+/** The changes from `pre` to `now`, as names (`g1 end dead`, `new gen`, `new gen open`, `lock T→none` …). */
+function chainChanges(pre: ChainState, now: ChainState): string[] {
+  const out = new Set<string>();
+  for (const [n, g] of now.gens) {
+    const was = pre.gens.get(n);
+    if (!was) {
+      out.add('new gen');
+      if (g.end === null) out.add('new gen open');
+      continue;
+    }
+    if (g.end !== was.end) out.add(`g${n} end ${g.end}`);
+    if (g.records !== was.records) out.add(`g${n} records +${g.records - was.records}`);
+  }
+  for (const n of pre.gens.keys()) if (!now.gens.has(n)) out.add(`g${n} gone`);
+  if (now.lock !== pre.lock) out.add(`lock ${pre.lock}→${now.lock}`);
+  if (now.byPath > pre.byPath) out.add('new by-path chain');
+  return [...out].sort();
+}
+
+export interface CellRun extends TableOutcome {
+  hits: Map<string, number>;
+  /** the changes on disk at the first reach of each point (before its operation) */
+  firstChanges: Map<string, string[]>;
+  changes: string[];
+}
+
+/** One run of a scenario with `plan` (null: every observation resolved as the filesystem answers). */
+export function runCell(m: Core, scenario: TableScenario, live: number, plan: { point: string; code: string } | null): CellRun {
+  const root = freshRoot('r7-table');
+  scenario.prepare(root, live);
+  let armed = false;
+  let pre: ChainState = chainState(root);
+  const hits = new Map<string, number>();
+  const firstChanges = new Map<string, string[]>();
+  const fault: FaultFn = (point) => {
+    if (!armed) return undefined;
+    hits.set(point, (hits.get(point) ?? 0) + 1);
+    if (!firstChanges.has(point)) firstChanges.set(point, chainChanges(pre, chainState(root)));
+    return plan !== null && plan.point === point ? plan.code : undefined;
+  };
+  const arm = (): void => {
+    pre = chainState(root);
+    armed = true;
+  };
+  const was = process.env.CM_VERIFY_LOCK_ROOT;
+  process.env.CM_VERIFY_LOCK_ROOT = root;
+  let out: TableOutcome;
+  try {
+    out = scenario.run(m, root, fault, arm, live);
+  } catch (err) {
+    out = { outcome: `throws ${(err as NodeJS.ErrnoException).code ?? 'an error'}`, advanced: false };
+  } finally {
+    armed = false;
+    process.env.CM_VERIFY_LOCK_ROOT = was;
+  }
+  return { ...out, hits, firstChanges, changes: chainChanges(pre, chainState(root)) };
+}
+
+const AHEAD = 11 * 60_000;
+const aheadHooks = (fault: FaultFn) => ({ fault, now: () => Date.now() + AHEAD, startOf: () => 0 });
+const unknownOf = (u?: { point: string; code: string }): string => (u ? ` (${u.point} ${u.code})` : '');
+const takeOutcome = (r: { acquired: boolean; unknown?: { point: string; code: string } }): TableOutcome => ({
+  outcome: r.acquired ? 'acquired' : `not acquired${unknownOf(r.unknown)}`,
+  advanced: r.acquired,
+});
+function writeBeacon(lockPath: string, record: Record<string, unknown>): void {
+  fs.mkdirSync(lockPath, { recursive: true });
+  fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ host: HOST, acquiredAt: 0, v: 1, ...record }));
+}
+const PREPARE: Record<string, (root: string, live: number) => void> = {
+  fresh: () => {},
+  'dead-holder': (root) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'D' } });
+    writeBeacon(lockPath, { pid: deadPid(), token: 'D', g: 1 });
+  },
+  'ownerless-old': (root) => void writeGen(lockOf(root).genDir, 1, { owner: null, mtimeAgoMs: 20 * 60_000 }),
+  'dead-group-holder': (root) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), pgid: deadPid(), token: 'D' } });
+    writeBeacon(lockPath, { pid: deadPid(), pgid: deadPid(), token: 'D', g: 1 });
+  },
+  'ended-old-tmp': (root) => {
+    const { genDir } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'Y' }, end: 'released Y' });
+    writeGen(genDir, 2, { owner: { pid: deadPid(), token: 'Z' }, end: 'released Z' });
+    fs.mkdirSync(`${genDir}.tmp`, { recursive: true });
+    const tmp = path.join(`${genDir}.tmp`, 'W.g000000000009.owner.1');
+    fs.writeFileSync(tmp, '{}');
+    const t = new Date(Date.now() - 20 * 60_000);
+    fs.utimesSync(tmp, t, t);
+  },
+  // a holding whose records are all dead, its <lock> showing it (g=1)
+  'dead-holding': (root) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' } });
+    writeBeacon(lockPath, { pid: deadPid(), token: 'T', g: 1 });
+  },
+  // a2 P2-1: A → B → C; C (the <lock>'s record) dead, B's group alive
+  'live-handoff': (root, live) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' }, handoffs: [{ pid: live, pgid: live, token: 'HB' }, { pid: deadPid(), token: 'HC' }] });
+    writeBeacon(lockPath, { pid: deadPid(), token: 'HC', g: 1 });
+  },
+  // a2 P2-2 / b2 P2-1: the first owner alive (another process), its hand-off dead (the <lock>'s record)
+  'first-alive': (root, live) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: live, token: 'T' }, handoffs: [{ pid: deadPid(), token: 'HB' }] });
+    writeBeacon(lockPath, { pid: deadPid(), token: 'HB', g: 1 });
+  },
+  'by-path': (root) => fs.mkdirSync(path.join(root, 'other'), { recursive: true }),
+};
+const scenario = (prepare: string, run: TableScenario['run']): TableScenario => ({ prepare: PREPARE[prepare], run });
+const take = (m: Core, root: string, fault: FaultFn) => m.acquireMachineLockSync('x', { root, timeoutMs: 0, pollMs: 10, hooks: aheadHooks(fault) });
+/** A holding taken with the seam off, then `arm`ed for the handle's method. */
+const held = (m: Core, root: string, fault: FaultFn, arm: () => void) => {
+  const r = take(m, root, fault);
+  if (!r.acquired) throw Object.assign(new Error('the scenario\'s take failed'), { code: 'SCENARIO' });
+  arm();
+  return r;
+};
+const asHeadOutcome = (r: { result: string; unknown?: { point: string; code: string } }, advancing: string): TableOutcome => ({
+  outcome: `${r.result}${unknownOf(r.unknown)}`,
+  advanced: r.result === advancing,
+});
+const genDirOutcome = (root: string, dir: string): TableOutcome => ({ outcome: `chain ${path.relative(root, dir).replace(/by-path\/[0-9a-f]{32}/, 'by-path/<hash>')}`, advanced: true });
+
+/** The scenarios of each public function (r7 §1): keyed `<function>` → `<scenario>`. */
+export const TABLE_SCENARIOS: Record<string, Record<string, TableScenario>> = {
+  acquireMachineLockSync: {
+    fresh: scenario('fresh', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
+    'dead-holder': scenario('dead-holder', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
+    'ownerless-old': scenario('ownerless-old', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
+    'dead-group-holder': scenario('dead-group-holder', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
+    'ended-old-tmp': scenario('ended-old-tmp', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
+  },
+  machineLockAcquisition: {
+    'dead-holder': scenario('dead-holder', (m, root, fault, arm) => {
+      arm();
+      const steps = m.machineLockAcquisition('x', { root, timeoutMs: 0, pollMs: 10, hooks: aheadHooks(fault) });
+      for (;;) {
+        const step = steps.next();
+        if (step.done) return takeOutcome(step.value);
+      }
+    }),
+  },
+  'handle.release': {
+    own: scenario('fresh', (m, root, fault, arm) => {
+      const r = held(m, root, fault, arm);
+      const result = r.release();
+      return { outcome: result, advanced: result === 'released' };
+    }),
+  },
+  'handle.handOff': {
+    own: scenario('fresh', (m, root, fault, arm) => {
+      const r = held(m, root, fault, arm);
+      const h = r.handOff(process.pid, process.pid);
+      return { outcome: h.ok ? 'ok' : `not ok (${h.stage})`, advanced: h.ok };
+    }),
+  },
+  'handle.setOwnerFields': {
+    own: scenario('fresh', (m, root, fault, arm) => {
+      const r = held(m, root, fault, arm);
+      const ok = r.setOwnerFields({ phase: 'merge' });
+      return { outcome: String(ok), advanced: ok };
+    }),
+  },
+  releaseAsHead: {
+    'dead-holding': scenario('dead-holding', (m, root, fault, arm) => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, ['T'], { timeoutMs: 0, hooks: { fault } }), 'released'))),
+    'live-handoff': scenario('live-handoff', (m, root, fault, arm) => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, ['T', 'HB', 'HC'], { timeoutMs: 0, hooks: { fault } }), 'released'))),
+    'first-alive': scenario('first-alive', (m, root, fault, arm) => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, ['T', 'HB'], { timeoutMs: 0, hooks: { fault } }), 'released'))),
+  },
+  recoverIfDead: {
+    'dead-holding': scenario('dead-holding', (m, root, fault, arm) => (arm(), asHeadOutcome(m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, hooks: { fault } }), 'removed'))),
+    'live-handoff': scenario('live-handoff', (m, root, fault, arm) => (arm(), asHeadOutcome(m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, hooks: { fault } }), 'removed'))),
+  },
+  readHolder: {
+    'dead-holder': scenario('dead-holder', (m, root, fault, arm) => {
+      arm();
+      const h = m.readHolder(lockOf(root).lockPath, { hooks: { fault } } as never) as { token?: string; g?: number } | null;
+      return { outcome: h ? `holder ${h.token}${h.g ? ` g=${h.g}` : ''}` : 'null', advanced: false };
+    }),
+  },
+  resolveGenDir: {
+    named: scenario('fresh', (m, root, fault, arm) => {
+      arm();
+      const r = m.resolveGenDir(lockOf(root).lockPath, process.env, m.makeObserver({ fault }));
+      return 'genDir' in r && r.genDir ? genDirOutcome(root, r.genDir) : { outcome: `unknown${unknownOf((r as { unknown: { point: string; code: string } }).unknown)}`, advanced: false };
+    }),
+    'by-path': scenario('by-path', (m, root, fault, arm) => {
+      arm();
+      const r = m.resolveGenDir(path.join(root, 'other', 'x.lock'), process.env, m.makeObserver({ fault }));
+      return 'genDir' in r && r.genDir ? genDirOutcome(root, r.genDir) : { outcome: `unknown${unknownOf((r as { unknown: { point: string; code: string } }).unknown)}`, advanced: false };
+    }),
+  },
+  genDirOf: {
+    named: scenario('fresh', (m, root, fault, arm) => (arm(), genDirOutcome(root, (m.genDirOf as (p: string, e: NodeJS.ProcessEnv, o: unknown) => string)(lockOf(root).lockPath, process.env, m.makeObserver({ fault }))))),
+    'by-path': scenario('by-path', (m, root, fault, arm) => (arm(), genDirOutcome(root, (m.genDirOf as (p: string, e: NodeJS.ProcessEnv, o: unknown) => string)(path.join(root, 'other', 'x.lock'), process.env, m.makeObserver({ fault }))))),
+  },
+};
+
+/**
+ * The rows whose unknown does not hold the decision back, and why — keyed `<function> <point>` (`*`: every
+ * function). Each is checked by the gate: its unknown run answers and changes what its resolved run does (a clean-up
+ * that no judgement reads). Every other row holds back (heldBack).
+ */
+export const NON_BLOCKING: Record<string, string> = {
+  '* gen-tmp-list': 'the clean-up of the old tmps (C8): a listing that fails leaves them to the next clean-up',
+  '* gen-tmp-lstat': 'the clean-up of the old tmps (C8): an entry that cannot be read is left',
+  '* gen-tmp-unlink': 'the own tmp after its link (C8): left to the clean-up by its age',
+  '* owner-unlink': 'the <lock>\'s owner tmp after its link (#4288): left to the clean-up',
+  '* release-list': 'the own moved-aside records of the <lock> (#4288 §2.7): a listing that fails leaves them',
+  'handle.setOwnerFields gen-fields-read': 'the fields so far: a read that fails writes the new ones alone (merge-pr\'s phase now is what a recovery needs; the fields are not the lock\'s safety, §3)',
+};
+export const nonBlocking = (fn: string, point: string): string | undefined => NON_BLOCKING[`${fn} ${point}`] ?? NON_BLOCKING[`* ${point}`];
+
+/** The points of the chain's choice (§3, C7-I2): there `absent` holds the decision back as `unknown` does. */
+export const CHAIN_CHOICE_POINTS = ['gen-realpath', 'gen-root-mkdir'];
+
+export interface TableRow {
+  fn: string;
+  scenario: string;
+  point: string;
+  reached: number;
+  resolved: CellRun;
+  absent: CellRun;
+  unknown: CellRun;
+}
+
+/** The table (r7 §1): every scenario run resolved, and again with each point it reached absent and unknown. */
+export function buildTable(m: Core, scenarios = TABLE_SCENARIOS): TableRow[] {
+  const sleeper = spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });
+  const live = sleeper.pid as number;
+  try {
+    const rows: TableRow[] = [];
+    for (const fn of Object.keys(scenarios).sort()) {
+      for (const name of Object.keys(scenarios[fn]).sort()) {
+        const s = scenarios[fn][name];
+        const resolved = runCell(m, s, live, null);
+        for (const point of [...resolved.hits.keys()].sort()) {
+          rows.push({
+            fn,
+            scenario: name,
+            point,
+            reached: resolved.hits.get(point) as number,
+            resolved,
+            absent: runCell(m, s, live, { point, code: 'ENOENT' }),
+            unknown: runCell(m, s, live, { point, code: 'EIO' }),
+          });
+        }
+      }
+    }
+    return rows;
+  } finally {
+    sleeper.kill('SIGKILL');
+  }
+}
+
+/**
+ * The rule of the gate for a run with `point` failing (C7-I3: an unknown does not advance a decision that depends
+ * on it): nothing is decided past what was on disk when `point` was first reached in the resolved run — no `end`, no
+ * <lock> moved, no generation made (or left open) that was not by then, the answer not the one the function exists
+ * for; and the point reached. Answers what breaks it (empty: holds).
+ */
+export function heldBack(row: TableRow, run: CellRun): string[] {
+  const bad: string[] = [];
+  const allowed = new Set(row.resolved.firstChanges.get(row.point) ?? []);
+  if (run.advanced) bad.push(`advanced: ${run.outcome}`);
+  if ((run.hits.get(row.point) ?? 0) < 1) bad.push('the point was not reached');
+  for (const c of run.changes) if (!allowed.has(c)) bad.push(`past the point: ${c}`);
+  return bad;
+}
+
+/** A cell of the rendered table: the answer and what changed on disk. */
+const cell = (r: CellRun): string => `${r.outcome}${r.changes.length > 0 ? `; ${r.changes.join(', ')}` : ''}`.replace(/\|/g, '\\|');
+
+/** The table as the design's §8.4 holds it. */
+export function renderTable(rows: TableRow[]): string {
+  const head = ['| 関数 | 場面 | 観測点 | 届いた回数 | resolved | absent | unknown |', '|---|---|---|---|---|---|---|'];
+  return [...head, ...rows.map((r) => `| \`${r.fn}\` | ${r.scenario} | \`${r.point}\` | ${r.reached} | ${cell(r.resolved)} | ${cell(r.absent)} | ${cell(r.unknown)} |`)].join('\n');
+}

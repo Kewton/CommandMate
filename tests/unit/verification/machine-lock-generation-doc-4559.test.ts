@@ -316,9 +316,20 @@ export function tableFMixed(source: string): Array<{ id: string; row65: string |
   for (const line of source.split('\n')) {
     const row = /^ {2}'(F\d+-[a-z0-9-]+)': \{/.exec(line);
     if (row) id = row[1];
-    if (/^ {4}limit: \{ kind: 'mixed'/.test(line)) out.push({ id, row65: /row65: '([^']+)'/.exec(line)?.[1] ?? null });
+    if (/^ {4}limit: \{ kind: 'mixed'/.test(line)) {
+      out.push({ id, row65: /row65: '([^']+)'/.exec(line)?.[1] ?? null });
+      // #4559 r7 (a2 P3-2): a row split per operation names each operation's row too
+      for (const [, , row] of byOp(line)) out.push({ id, row65: row });
+    }
   }
   return out;
+}
+
+/** The `row65ByOp: { '<op>': '<row>', … }` of a limit line: [op, the whole pair, row] per operation (none: []). */
+function byOp(line: string): Array<[string, string, string]> {
+  const m = /row65ByOp: \{([^}]*)\}/.exec(line);
+  if (!m) return [];
+  return [...m[1].matchAll(/'([^']+)': '([^']+)'/g)].map((x) => [x[1], x[0], x[2]]);
 }
 
 /** The §6.5 rows table F has to name: open and later-PR, but the M3 PR's (M3-ERASE). */
@@ -351,6 +362,9 @@ const ROW65: Record<string, { row65: string; writer: string }> = {
   'F58-undo-restore-exists': { row65: 'OLD-W-UNDO-CREATE', writer: 'no-v' },
   'F69-new-k1-writer-into-emptied-name': { row65: 'OLD-PUTBACK-OVERLAP', writer: 'no-g' },
   'F71-old-writer-in-generic-shell': { row65: 'OLD-W-MV', writer: 'no-v' },
+  // #4559 r7 (review a2 P3-2, PM's disposition 3): F71's older writer does two operations — one row each
+  'F71-old-writer-in-generic-shell (mv -f)': { row65: 'OLD-W-MV', writer: 'no-v' },
+  'F71-old-writer-in-generic-shell (deletes by name)': { row65: 'OLD-W-APPEND', writer: 'no-v' },
   'F73-mixed-prev-beacon-taken': { row65: 'P-2', writer: 'no-g' },
   'F74-mixed-old-holder-recovered': { row65: 'P-4', writer: 'no-g' },
   'F75-mixed-old-recoverer-moves-beacon': { row65: 'P-5', writer: 'no-g' },
@@ -367,7 +381,11 @@ function tableFRows(source: string): Record<string, { row65: string | null; writ
   for (const line of source.split('\n')) {
     const row = /^ {2}'(F\d+-[a-z0-9-]+)': \{/.exec(line);
     if (row) id = row[1];
-    if (/^ {4}limit: \{ kind: 'mixed'/.test(line)) out[id] = { row65: /row65: '([^']+)'/.exec(line)?.[1] ?? null, writer: /writer: '([^']+)'/.exec(line)?.[1] ?? null };
+    if (/^ {4}limit: \{ kind: 'mixed'/.test(line)) {
+      const writer = /writer: '([^']+)'/.exec(line)?.[1] ?? null;
+      out[id] = { row65: /row65: '([^']+)'/.exec(line)?.[1] ?? null, writer };
+      for (const [op, , row] of byOp(line)) out[`${id} (${op})`] = { row65: row, writer };
+    }
   }
   return out;
 }
@@ -375,7 +393,9 @@ function tableFRows(source: string): Record<string, { row65: string | null; writ
 describe('#4559 r6 T7: table F\'s mixed rows, each pinned to its §6.5 row and writer', () => {
   it('every mixed row of table F is the table above, row for row (14 rows read)', () => {
     const rows = tableFRows(fs.readFileSync(TABLE_F, 'utf8'));
-    expect(Object.keys(rows)).toHaveLength(14);
+    expect(Object.keys(rows).filter((k) => !k.includes(' ('))).toHaveLength(14);
+    // #4559 r7: F71 split per operation (mv -f, deletes by name) — two rows more
+    expect(Object.keys(rows).filter((k) => k.includes(' ('))).toEqual(['F71-old-writer-in-generic-shell (mv -f)', 'F71-old-writer-in-generic-shell (deletes by name)']);
     expect(rows).toEqual(ROW65);
   });
 
@@ -406,5 +426,45 @@ describe('#4559 T7 (PR-2): table F\'s mixed rows and §6.5, both ways', () => {
   ] as const)('self-test: %s → red', (_what, make) => {
     const [doc, source] = make(fs.readFileSync(DESIGN, 'utf8'), fs.readFileSync(TABLE_F, 'utf8'));
     expect(tableFProblems(doc, source)).not.toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------- #4559 r7: §6.5's OLD-W-* and the changelog
+
+const CHANGELOG = path.join(REPO, 'changelog.d/4559.md');
+const OLD_W_UNTIL = '新版の bash（PR-3）が入り、旧い写し（cmate-verify・汎用シェル）が無くなるまで残る';
+
+/** The row names the changelog's window sentence lists (`混在の間に残る窓は … （<names>）だけ`). */
+export function changelogWindows(text: string): string[] {
+  const m = /混在の間に残る窓は[^（]*（([^）]*(?:（[^）]*）[^）]*)*)）だけ/.exec(text);
+  if (!m) return [];
+  return [...m[1].matchAll(/\b((?:P|OLD|STALE|TICKET|M3)-[A-Z0-9-]*[A-Z0-9])\b/g)].map((x) => x[1]).sort();
+}
+
+describe('#4559 r7 (review a2 P3-2, PM\'s disposition 3): §6.5\'s OLD-W-* rows and the changelog name the same windows', () => {
+  it('each OLD-W-* row stays until the new bash (PR-3) is in and the older copies are gone — not "closed by PR-3"', () => {
+    const { rows } = oneTable(fs.readFileSync(DESIGN, 'utf8'), '### 6.5');
+    const oldW = rows.filter((r) => r[0].startsWith('OLD-W-'));
+    expect(oldW.map((r) => r[0])).toEqual(['OLD-W-MV', 'OLD-W-APPEND', 'OLD-W-INODE', 'OLD-W-RMRF', 'OLD-W-UNDO-CREATE']);
+    for (const r of oldW) {
+      expect(r[4], r[0]).toContain(OLD_W_UNTIL);
+      expect(r[4], r[0]).not.toContain('PR-3（bash の世代化）で閉じる');
+    }
+  });
+
+  it('the changelog\'s windows are §6.5\'s open and later-PR rows (but the M3 PR\'s), name for name', () => {
+    const { rows } = oneTable(fs.readFileSync(DESIGN, 'utf8'), '### 6.5');
+    const named = changelogWindows(fs.readFileSync(CHANGELOG, 'utf8'));
+    expect(named.length).toBeGreaterThanOrEqual(12);
+    expect(named).toEqual(namedBy(rows));
+    expect(fs.readFileSync(CHANGELOG, 'utf8')).toContain(OLD_W_UNTIL);
+  });
+
+  it('self-test: a window dropped from the changelog, or one added, is red', () => {
+    const { rows } = oneTable(fs.readFileSync(DESIGN, 'utf8'), '### 6.5');
+    const text = fs.readFileSync(CHANGELOG, 'utf8');
+    expect(changelogWindows(text.replace('STALE-NEST・', ''))).not.toEqual(namedBy(rows));
+    expect(changelogWindows(text.replace('STALE-NEST', 'STALE-NEST・P-9'))).not.toEqual(namedBy(rows));
+    expect(changelogWindows('nothing here')).toEqual([]);
   });
 });
