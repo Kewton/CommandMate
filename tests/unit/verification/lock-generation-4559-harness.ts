@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
 import * as lockSync from '../../../scripts/orchestrate/machine-lock-sync.mjs';
 
 export const REPO = path.resolve(__dirname, '../../..');
@@ -407,23 +408,33 @@ export function renderOps(): string {
 }
 
 
-// ------------------------------------------------------------------ #4559 r7 §1: the gate of the public functions
+
+// ------------------------------------------------------------------ #4559 r7 §1 / r8 (2): the gate of the public functions
 
 /**
- * #4559 r7 §1 (PM's disposition 1): the table of the core's public functions × the observation points each one
- * reaches × the three values of an observation (resolved / absent / unknown), made by machine — never by hand:
+ * #4559 r7 §1 (PM's disposition 1), made machine-decided in r8 (2) (review a3 P2-2 = b3 P2-1): the table of the
+ * core's public functions × the observation points each one reaches × the reach of that point (1, 2, … in one run)
+ * × the three values of an observation (resolved / absent / unknown) — never by hand:
  *
- * - the functions are read from the core's source (`coreProcedures`): every exported function whose calls reach a
- *   function of the generation chain that observes, and the methods of a holding's handle (`handle.<name>`)
- * - the points of a row are the ones its run reached (the `hooks.fault` seam is told every observation), in a
- *   scenario of TABLE_SCENARIOS (a function without one is a red row of the gate)
- * - each point is run again with it answering ENOENT (absent) and EIO (unknown) at every reach
+ * - the functions are read from the core's source (`coreExports` / `coreProcedures`, a parse of the source): every
+ *   export in every form the language has — `export function`, `export async function`, `export function*`,
+ *   `export const X = (…) =>`, `export const X = function`, `export default`, `export { … }` (an export of any other
+ *   form throws: red) — that is a function whose calls reach an observation of the generation chain, and the methods
+ *   of a holding's handle (`handle.<name>`)
+ * - the points each function can reach are read from the same parse (`procedurePoints`): the observations of the
+ *   chain's own functions (after its marker line) that its calls reach. A point of that set without a row of that
+ *   function is red. The points of the #4288 functions before the marker are the observation table's
+ *   (lock-observation-points-4288: every point × implementation injected); the gate checks each is a row of it
+ * - a scenario of TABLE_SCENARIOS only prepares a run of its function so that the run reaches the points: the disk,
+ *   and a fault that steers it into a branch (`base`). The rows are the points its resolved run reached, each reach k
+ *   (1 … reached) run again with that reach alone answering ENOENT (absent) and EIO (unknown)
  *
  * The table is the one source: the gate (machine-lock-generation-seams-4559.test.ts) checks every row, and the
  * design's §8.4 is the table rendered, byte for byte.
  */
 
 type FaultFn = (point: string, target: string, count?: number) => string | undefined;
+type WarnFn = (line: string, data?: Record<string, unknown>) => void;
 type Core = typeof lockSync;
 export interface TableOutcome {
   outcome: string;
@@ -432,56 +443,266 @@ export interface TableOutcome {
 }
 export interface TableScenario {
   prepare: (root: string, live: number) => void;
-  /** `arm` turns the fault seam on (a handle's method: after its acquisition). */
-  run: (m: Core, root: string, fault: FaultFn, arm: () => void, live: number) => TableOutcome;
+  /** `arm` turns the fault seam on (a handle's method: after its acquisition); `warn` collects the lines named. */
+  run: (m: Core, root: string, fault: FaultFn, arm: () => void, live: number, warn: WarnFn) => TableOutcome;
+  /** r8 (2): the preparation by a fault — these reaches answer `code` in every run of the scenario (a branch reached) */
+  base?: { point: string; reach: number; code: string }[];
 }
 
-/** The core's source without its comments (a name in a comment is not a call). */
-const stripComments = (source: string): string =>
-  source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|\s)\/\/.*$/gm, '$1');
+// ---------------------------------------------------------------- the parse of the core (r8 (2))
 
-const OBSERVE_RE = /\bobs\.(?:pid|group|list|lstat|record|owner|text|realpath|mkdir|rename|rmdir|put|link|unlink|create)\(/;
+const MARKER = '// The generation chain (#4559';
+const OBS_OPS = new Set(['pid', 'group', 'list', 'lstat', 'record', 'owner', 'text', 'realpath', 'mkdir', 'rename', 'rmdir', 'put', 'link', 'unlink', 'create']);
+
+interface Unit {
+  name: string;
+  fn: ts.FunctionLikeDeclaration;
+  parent: Unit | null;
+  kind: 'decl' | 'handle' | 'observer';
+  post: boolean;
+  params: (string | null)[];
+  points: Set<string>;
+  paramPoints: Set<number>;
+  refs: Set<Unit>;
+  calls: { callee: Unit; args: (string | { param: number } | null)[] }[];
+  unresolved: string[];
+}
+export interface CoreExport {
+  name: string;
+  /** the local name it exports (null: an anonymous default) */
+  local: string | null;
+  /** a function, as read from the source (an initializer that is not one is a value) */
+  fn: boolean;
+}
+export interface CoreParse {
+  exports: CoreExport[];
+  /** the public functions (r7 §1): exported functions that reach the chain's observations, and the handle's methods */
+  procedures: string[];
+  /** the points each public function can reach (the chain's own functions' observations its calls reach) */
+  points: Map<string, Set<string>>;
+  /** the points the #4288 functions before the marker observe (the observation table's rows) */
+  olderPoints: Set<string>;
+  /** the observations whose point is not a literal, a parameter or GEN_WRITES' (`<function>: <argument>`) */
+  unresolved: string[];
+}
+
+const unwrapExpr = (e: ts.Expression | undefined): ts.Expression | undefined => {
+  let x = e;
+  while (x && ts.isParenthesizedExpression(x)) x = x.expression;
+  return x;
+};
+const fnOf = (e: ts.Expression | undefined): ts.FunctionLikeDeclaration | null => {
+  const x = unwrapExpr(e);
+  return x && (ts.isArrowFunction(x) || ts.isFunctionExpression(x)) ? x : null;
+};
+const hasMod = (node: ts.Node, kind: ts.SyntaxKind): boolean => (ts.canHaveModifiers(node) ? (ts.getModifiers(node) ?? []).some((m) => m.kind === kind) : false);
+const isObs = (e: ts.Expression): boolean => (ts.isIdentifier(e) && e.text === 'obs') || (ts.isPropertyAccessExpression(e) && e.name.text === 'obs');
+const isHooks = (e: ts.Expression): boolean => (ts.isIdentifier(e) && e.text === 'hooks') || (ts.isPropertyAccessExpression(e) && e.name.text === 'hooks');
 
 /**
- * The public functions of the core (r7 §1), from its source: the exported functions whose calls reach a function
- * of the generation chain (after the `// The generation chain (#4559` line) that observes, and the methods of the
- * handle `holding(n)` answers (`handle.<name>`). Throws when a part it reads is not found (never an empty list).
+ * The parse of the core (r8 (2)): its exports, its public functions and the points each can reach. Throws when a
+ * part it reads is not there or has a form it cannot read (never an empty answer).
  */
-export function coreProcedures(source: string): string[] {
-  const marker = source.split('\n').findIndex((l) => l.includes('// The generation chain (#4559'));
-  if (marker < 0) throw new Error('the generation chain\'s marker line is not in the core');
-  const lines = stripComments(source).split('\n');
-  const decls: { name: string; exported: boolean; fn: boolean; start: number; body: string }[] = [];
-  lines.forEach((l, i) => {
-    const m = /^(export )?(?:function\*? ([A-Za-z_$][\w$]*)\(|const ([A-Za-z_$][\w$]*) = )/.exec(l);
-    if (m) decls.push({ name: m[2] ?? m[3], exported: Boolean(m[1]), fn: Boolean(m[2]), start: i, body: '' });
-  });
-  decls.forEach((d, i) => (d.body = lines.slice(d.start, i + 1 < decls.length ? decls[i + 1].start : lines.length).join('\n')));
-  const names = new Set(decls.map((d) => d.name));
-  const by = new Map(decls.map((d) => [d.name, d]));
-  const calls = new Map(decls.map((d) => [d.name, [...d.body.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)].map((m) => m[1]).filter((n) => names.has(n) && n !== d.name)]));
-  const chain = new Set(decls.filter((d) => d.start > marker && OBSERVE_RE.test(d.body)).map((d) => d.name));
-  if (chain.size === 0) throw new Error('no observing function of the generation chain was found');
-  const reaches = (name: string): boolean => {
-    const seen = new Set<string>();
-    const stack = [name];
-    while (stack.length > 0) {
-      const n = stack.pop() as string;
-      if (seen.has(n)) continue;
-      seen.add(n);
-      if (chain.has(n)) return true;
-      stack.push(...(calls.get(n) ?? []));
-    }
-    return false;
+export function parseCore(source: string): CoreParse {
+  const markerAt = source.indexOf(MARKER);
+  if (markerAt < 0) throw new Error('the generation chain\'s marker line is not in the core');
+  const sf = ts.createSourceFile('core.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const units: Unit[] = [];
+  const fnNodes = new Map<ts.Node, Unit>();
+  const add = (name: string, fn: ts.FunctionLikeDeclaration, parent: Unit | null, kind: Unit['kind']): Unit => {
+    const u: Unit = {
+      name,
+      fn,
+      parent,
+      kind,
+      post: fn.getStart(sf) > markerAt,
+      params: fn.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : null)),
+      points: new Set(),
+      paramPoints: new Set(),
+      refs: new Set(),
+      calls: [],
+      unresolved: [],
+    };
+    units.push(u);
+    fnNodes.set(fn, u);
+    return u;
   };
-  const exported = decls.filter((d) => d.exported && d.fn && reaches(d.name)).map((d) => d.name);
-  const acq = by.get('machineLockAcquisition');
-  const at = acq?.body.indexOf('function holding(') ?? -1;
-  if (!acq || at < 0) throw new Error('the handle of a holding (function holding) is not in the core');
-  const handle = [...acq.body.slice(at).matchAll(/^ {6}([A-Za-z_$][\w$]*): (?:\(|function)/gm)].map((m) => `handle.${m[1]}`);
-  if (handle.length === 0) throw new Error('the handle of a holding has no method');
-  return [...exported, ...handle].sort();
+  const visit = (node: ts.Node, parent: Unit | null): void => {
+    let u: Unit | null = null;
+    if (ts.isFunctionDeclaration(node) && node.body) u = add(node.name?.text ?? 'default', node, parent, 'decl');
+    else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && fnOf(node.initializer)) u = add(node.name.text, fnOf(node.initializer) as ts.FunctionLikeDeclaration, parent, 'decl');
+    else if (ts.isExportAssignment(node) && fnOf(node.expression)) u = add('default', fnOf(node.expression) as ts.FunctionLikeDeclaration, parent, 'decl');
+    else if (parent?.name === 'holding' && ts.isPropertyAssignment(node) && fnOf(node.initializer) && ts.isObjectLiteralExpression(node.parent) && ts.isReturnStatement(node.parent.parent)) {
+      u = add(`handle.${node.name.getText(sf)}`, fnOf(node.initializer) as ts.FunctionLikeDeclaration, parent, 'handle');
+    } else if (parent?.name === 'makeObserver' && ts.isObjectLiteralExpression(node.parent) && ts.isReturnStatement(node.parent.parent)) {
+      if (ts.isMethodDeclaration(node)) u = add(`obs.${node.name.getText(sf)}`, node, parent, 'observer');
+      else if (ts.isPropertyAssignment(node) && fnOf(node.initializer)) u = add(`obs.${node.name.getText(sf)}`, fnOf(node.initializer) as ts.FunctionLikeDeclaration, parent, 'observer');
+    }
+    if (u) {
+      ts.forEachChild(u.fn, (c) => visit(c, u));
+      return;
+    }
+    ts.forEachChild(node, (c) => visit(c, parent));
+  };
+  visit(sf, null);
+  // the scopes: a function declared in a function (or at the top) is seen there and below
+  const scopes = new Map<Unit | null, Map<string, Unit>>();
+  for (const u of units) {
+    if (u.kind !== 'decl') continue;
+    const s = scopes.get(u.parent) ?? new Map<string, Unit>();
+    scopes.set(u.parent, s);
+    if (s.has(u.name)) throw new Error(`two functions named ${u.name} in one scope: the parse cannot tell them apart`);
+    s.set(u.name, u);
+  }
+  const resolve = (from: Unit, name: string): Unit | null => {
+    for (let s: Unit | null = from; ; s = s.parent) {
+      const hit = scopes.get(s)?.get(name);
+      if (hit) return hit;
+      if (s === null) return null;
+    }
+  };
+  // GEN_WRITES: each use's put and link points
+  const genWrites = new Map<string, string[]>();
+  for (const st of sf.statements) {
+    if (!ts.isVariableStatement(st)) continue;
+    for (const d of st.declarationList.declarations) {
+      if (!ts.isIdentifier(d.name) || d.name.text !== 'GEN_WRITES' || !d.initializer || !ts.isObjectLiteralExpression(d.initializer)) continue;
+      for (const p of d.initializer.properties) {
+        if (!ts.isPropertyAssignment(p) || !ts.isObjectLiteralExpression(p.initializer)) throw new Error('a row of GEN_WRITES the parse cannot read');
+        const vals: string[] = [];
+        for (const q of p.initializer.properties) {
+          if (ts.isPropertyAssignment(q) && ['put', 'link'].includes(q.name.getText(sf)) && ts.isStringLiteral(q.initializer)) vals.push(q.initializer.text);
+        }
+        if (vals.length !== 2) throw new Error(`GEN_WRITES.${p.name.getText(sf)} has no put / link the parse can read`);
+        genWrites.set(p.name.getText(sf), vals);
+      }
+    }
+  }
+  if (genWrites.size === 0) throw new Error('GEN_WRITES is not in the core');
+  // the observer's own points under one operation (put → gen-tmp-write, create → owner-write …)
+  const opPoints = new Map<string, string[]>();
+  const observerUnits = units.filter((u) => u.kind === 'observer');
+  if (observerUnits.length === 0) throw new Error('the observer\'s operations (makeObserver) are not in the core');
+  for (const u of observerUnits) {
+    const found: string[] = [];
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'attempt' && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) found.push(node.arguments[0].text);
+      ts.forEachChild(node, walk);
+    };
+    walk(u.fn);
+    opPoints.set(u.name.slice('obs.'.length), found);
+  }
+  // each unit's own body (the functions in it are units of their own)
+  for (const u of units) {
+    if (u.kind === 'observer' || u.name === 'makeObserver') continue;
+    const argOf = (a: ts.Expression): string | { param: number } | null => (ts.isStringLiteral(a) ? a.text : ts.isIdentifier(a) && u.params.includes(a.text) ? { param: u.params.indexOf(a.text) } : null);
+    const walk = (node: ts.Node): void => {
+      if (node !== u.fn && fnNodes.has(node)) return;
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+        const callee = node.expression;
+        const op = callee.name.text;
+        const observes = (OBS_OPS.has(op) && isObs(callee.expression)) || (op === 'fault' && isHooks(callee.expression));
+        if (observes) {
+          const arg = node.arguments[0];
+          const a = arg ? argOf(arg) : null;
+          if (typeof a === 'string') u.points.add(a);
+          else if (a) u.paramPoints.add(a.param);
+          else u.unresolved.push(`${u.name}: ${arg ? arg.getText(sf) : '(none)'}`);
+          for (const p of opPoints.get(op) ?? []) u.points.add(p);
+        }
+      }
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const callee = resolve(u, node.expression.text);
+        if (callee) u.calls.push({ callee, args: node.arguments.map(argOf) });
+      }
+      if (ts.isIdentifier(node)) {
+        const p = node.parent;
+        const isName = (ts.isPropertyAccessExpression(p) && p.name === node) || (ts.isPropertyAssignment(p) && p.name === node) || ((ts.isVariableDeclaration(p) || ts.isFunctionDeclaration(p) || ts.isParameter(p) || ts.isBindingElement(p) || ts.isMethodDeclaration(p)) && p.name === node);
+        const ref = isName ? null : resolve(u, node.text);
+        if (ref && ref !== u) u.refs.add(ref);
+      }
+      if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'GEN_WRITES') {
+        const vals = genWrites.get(node.name.text);
+        if (!vals) throw new Error(`GEN_WRITES.${node.name.text} is not a row of GEN_WRITES`);
+        for (const v of vals) u.points.add(v);
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(u.fn);
+  }
+  // a point given as an argument is the caller's (to a fixed point: a parameter passed on is the caller's parameter)
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const u of units) {
+      for (const { callee, args } of u.calls) {
+        for (const i of callee.paramPoints) {
+          const a = args[i];
+          if (typeof a === 'string' && !u.points.has(a)) {
+            u.points.add(a);
+            changed = true;
+          } else if (a && typeof a !== 'string' && !u.paramPoints.has(a.param)) {
+            u.paramPoints.add(a.param);
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+  const reachOf = (start: Unit): Set<string> => {
+    const seen = new Set<Unit>();
+    const out = new Set<string>();
+    const stack = [start];
+    while (stack.length > 0) {
+      const v = stack.pop() as Unit;
+      if (seen.has(v)) continue;
+      seen.add(v);
+      if (v.post) for (const p of v.points) out.add(p);
+      stack.push(...v.refs);
+    }
+    return out;
+  };
+  // the exports, in every form (a form not read here throws)
+  const top = scopes.get(null) ?? new Map<string, Unit>();
+  const exports: CoreExport[] = [];
+  for (const st of sf.statements) {
+    const exported = hasMod(st, ts.SyntaxKind.ExportKeyword);
+    const isDefault = hasMod(st, ts.SyntaxKind.DefaultKeyword);
+    if (ts.isFunctionDeclaration(st) && exported) exports.push({ name: isDefault ? 'default' : (st.name?.text ?? 'default'), local: st.name?.text ?? 'default', fn: true });
+    else if (ts.isVariableStatement(st) && exported) {
+      for (const d of st.declarationList.declarations) {
+        if (!ts.isIdentifier(d.name)) throw new Error(`an export the gate cannot read: ${st.getText(sf).split('\n')[0]}`);
+        exports.push({ name: d.name.text, local: d.name.text, fn: fnOf(d.initializer) !== null });
+      }
+    } else if (ts.isExportDeclaration(st)) {
+      if (st.moduleSpecifier || !st.exportClause || !ts.isNamedExports(st.exportClause)) throw new Error(`an export the gate cannot read: ${st.getText(sf).split('\n')[0]}`);
+      for (const el of st.exportClause.elements) {
+        const local = (el.propertyName ?? el.name).getText(sf);
+        exports.push({ name: el.name.getText(sf), local, fn: top.has(local) });
+      }
+    } else if (ts.isExportAssignment(st)) {
+      const e = unwrapExpr(st.expression);
+      const local = e && ts.isIdentifier(e) ? e.text : fnOf(e) ? 'default' : null;
+      exports.push({ name: 'default', local, fn: local !== null && top.has(local) });
+    } else if (exported) throw new Error(`an export the gate cannot read: ${st.getText(sf).split('\n')[0]}`);
+  }
+  const points = new Map<string, Set<string>>();
+  for (const e of exports) {
+    const u = e.fn && e.local ? top.get(e.local) : undefined;
+    if (!u) continue;
+    const reach = reachOf(u);
+    if (reach.size > 0) points.set(e.name, reach);
+  }
+  const handle = units.filter((u) => u.kind === 'handle');
+  if (handle.length === 0) throw new Error('the handle of a holding (function holding) is not in the core');
+  for (const u of handle) points.set(u.name, reachOf(u));
+  const olderPoints = new Set<string>();
+  for (const u of units) if (!u.post && u.kind === 'decl') for (const p of u.points) olderPoints.add(p);
+  if (points.size === 0) throw new Error('no public function reaches an observation of the chain');
+  return { exports, procedures: [...points.keys()].sort(), points, olderPoints, unresolved: units.flatMap((u) => u.unresolved) };
 }
+
+/** The public functions of the core (r7 §1, r8 (2)): read from its parse (`parseCore`). */
+export const coreProcedures = (source: string): string[] => parseCore(source).procedures;
 
 /**
  * The observation points of the generation chain the core names (literal): `obs.<op>('<point>'`, the GEN_WRITES
@@ -489,7 +710,7 @@ export function coreProcedures(source: string): string[] {
  * the <lock>'s older points (#4288's), which are the observation table's rows.
  */
 export function chainPoints(source: string, older: Set<string>): string[] {
-  const start = source.indexOf('// The generation chain (#4559');
+  const start = source.indexOf(MARKER);
   if (start < 0) throw new Error('the generation chain\'s marker line is not in the core');
   const part = source.slice(start);
   const names = new Set<string>();
@@ -498,6 +719,8 @@ export function chainPoints(source: string, older: Set<string>): string[] {
   for (const m of part.matchAll(/\blistGens\(g, '([a-z0-9-]+)'\)/g)) names.add(m[1]);
   return [...names].filter((n) => !older.has(n)).sort();
 }
+
+// ---------------------------------------------------------------- the runs
 
 /** What is on disk for the chain of `x` in `root`: the generations (records, end) and the <lock>'s owner token. */
 interface ChainState {
@@ -550,41 +773,57 @@ function chainChanges(pre: ChainState, now: ChainState): string[] {
 
 export interface CellRun extends TableOutcome {
   hits: Map<string, number>;
-  /** the changes on disk at the first reach of each point (before its operation) */
-  firstChanges: Map<string, string[]>;
+  /** r8 (2): the reach `plan` names was reached (its fault answered) */
+  fired: boolean;
+  /** the changes on disk at each reach `<point>#<k>` (before its operation) — the resolved run's only */
+  changesAt: Map<string, string[]>;
   changes: string[];
+  /** r8 (4): the lines the run named (warn's line and data) and the message of what it threw */
+  warns: string[];
+  error: string | null;
 }
 
-/** One run of a scenario with `plan` (null: every observation resolved as the filesystem answers). */
-export function runCell(m: Core, scenario: TableScenario, live: number, plan: { point: string; code: string } | null): CellRun {
-  const root = freshRoot('r7-table');
+/** One run of a scenario with `plan` (null: every observation resolved as the filesystem answers, past `base`). */
+export function runCell(m: Core, scenario: TableScenario, live: number, plan: { point: string; k: number; code: string } | null): CellRun {
+  const root = freshRoot('r8-table');
   scenario.prepare(root, live);
   let armed = false;
+  let fired = false;
   let pre: ChainState = chainState(root);
   const hits = new Map<string, number>();
-  const firstChanges = new Map<string, string[]>();
+  const changesAt = new Map<string, string[]>();
+  const warns: string[] = [];
   const fault: FaultFn = (point) => {
     if (!armed) return undefined;
-    hits.set(point, (hits.get(point) ?? 0) + 1);
-    if (!firstChanges.has(point)) firstChanges.set(point, chainChanges(pre, chainState(root)));
-    return plan !== null && plan.point === point ? plan.code : undefined;
+    const k = (hits.get(point) ?? 0) + 1;
+    hits.set(point, k);
+    if (plan === null) changesAt.set(`${point}#${k}`, chainChanges(pre, chainState(root)));
+    const base = scenario.base?.find((b) => b.point === point && b.reach === k);
+    if (plan !== null && plan.point === point && plan.k === k) {
+      fired = true;
+      return plan.code;
+    }
+    return base?.code;
   };
   const arm = (): void => {
     pre = chainState(root);
     armed = true;
   };
+  const warn: WarnFn = (line, data) => void warns.push(data ? `${line} ${JSON.stringify(data)}` : line);
   const was = process.env.CM_VERIFY_LOCK_ROOT;
   process.env.CM_VERIFY_LOCK_ROOT = root;
   let out: TableOutcome;
+  let error: string | null = null;
   try {
-    out = scenario.run(m, root, fault, arm, live);
+    out = scenario.run(m, root, fault, arm, live, warn);
   } catch (err) {
+    error = (err as Error).message ?? String(err);
     out = { outcome: `throws ${(err as NodeJS.ErrnoException).code ?? 'an error'}`, advanced: false };
   } finally {
     armed = false;
     process.env.CM_VERIFY_LOCK_ROOT = was;
   }
-  return { ...out, hits, firstChanges, changes: chainChanges(pre, chainState(root)) };
+  return { ...out, hits, fired, changesAt, changes: chainChanges(pre, chainState(root)), warns, error };
 }
 
 const AHEAD = 11 * 60_000;
@@ -598,6 +837,7 @@ function writeBeacon(lockPath: string, record: Record<string, unknown>): void {
   fs.mkdirSync(lockPath, { recursive: true });
   fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ host: HOST, acquiredAt: 0, v: 1, ...record }));
 }
+const OLD = 20 * 60_000;
 const PREPARE: Record<string, (root: string, live: number) => void> = {
   fresh: () => {},
   'dead-holder': (root) => {
@@ -605,7 +845,7 @@ const PREPARE: Record<string, (root: string, live: number) => void> = {
     writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'D' } });
     writeBeacon(lockPath, { pid: deadPid(), token: 'D', g: 1 });
   },
-  'ownerless-old': (root) => void writeGen(lockOf(root).genDir, 1, { owner: null, mtimeAgoMs: 20 * 60_000 }),
+  'ownerless-old': (root) => void writeGen(lockOf(root).genDir, 1, { owner: null, mtimeAgoMs: OLD }),
   'dead-group-holder': (root) => {
     const { genDir, lockPath } = lockOf(root);
     writeGen(genDir, 1, { owner: { pid: deadPid(), pgid: deadPid(), token: 'D' } });
@@ -618,7 +858,7 @@ const PREPARE: Record<string, (root: string, live: number) => void> = {
     fs.mkdirSync(`${genDir}.tmp`, { recursive: true });
     const tmp = path.join(`${genDir}.tmp`, 'W.g000000000009.owner.1');
     fs.writeFileSync(tmp, '{}');
-    const t = new Date(Date.now() - 20 * 60_000);
+    const t = new Date(Date.now() - OLD);
     fs.utimesSync(tmp, t, t);
   },
   // a holding whose records are all dead, its <lock> showing it (g=1)
@@ -626,6 +866,18 @@ const PREPARE: Record<string, (root: string, live: number) => void> = {
     const { genDir, lockPath } = lockOf(root);
     writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' } });
     writeBeacon(lockPath, { pid: deadPid(), token: 'T', g: 1 });
+  },
+  // r8 (2): the same, its generation made long ago (an owner read as missing is past the grace: the tomb's branch)
+  'dead-holding-old': (root) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' }, mtimeAgoMs: OLD });
+    writeBeacon(lockPath, { pid: deadPid(), token: 'T', g: 1 });
+  },
+  // r8 (2): a holding whose records name a dead group (the generation's holder-group)
+  'dead-group-holding': (root) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), pgid: deadPid(), token: 'T' } });
+    writeBeacon(lockPath, { pid: deadPid(), pgid: deadPid(), token: 'T', g: 1 });
   },
   // a2 P2-1: A → B → C; C (the <lock>'s record) dead, B's group alive
   'live-handoff': (root, live) => {
@@ -640,13 +892,27 @@ const PREPARE: Record<string, (root: string, live: number) => void> = {
     writeBeacon(lockPath, { pid: deadPid(), token: 'HB', g: 1 });
   },
   'by-path': (root) => fs.mkdirSync(path.join(root, 'other'), { recursive: true }),
+  // r8 (4): a generation's holder (D) and a <lock> of another record (L, an older version's): which one a read names
+  'gen-and-lock': (root) => {
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'D' } });
+    writeBeacon(lockPath, { pid: deadPid(), token: 'L' });
+  },
 };
-const scenario = (prepare: string, run: TableScenario['run']): TableScenario => ({ prepare: PREPARE[prepare], run });
-const take = (m: Core, root: string, fault: FaultFn) => m.acquireMachineLockSync('x', { root, timeoutMs: 0, pollMs: 10, hooks: aheadHooks(fault) });
+const scenario = (prepare: string, run: TableScenario['run'], base?: TableScenario['base']): TableScenario => ({ prepare: PREPARE[prepare], run, ...(base ? { base } : {}) });
+const take = (m: Core, root: string, fault: FaultFn, warn: WarnFn) => m.acquireMachineLockSync('x', { root, timeoutMs: 0, pollMs: 10, warn, hooks: aheadHooks(fault) });
+const steps = (m: Core, root: string, fault: FaultFn, warn: WarnFn) => {
+  const it = m.machineLockAcquisition('x', { root, timeoutMs: 0, pollMs: 10, warn, hooks: aheadHooks(fault) });
+  for (;;) {
+    const step = it.next();
+    if (step.done) return step.value;
+  }
+};
 /** A holding taken with the seam off, then `arm`ed for the handle's method. */
-const held = (m: Core, root: string, fault: FaultFn, arm: () => void) => {
-  const r = take(m, root, fault);
+const held = (m: Core, root: string, fault: FaultFn, arm: () => void, warn: WarnFn, before?: (r: ReturnType<Core['acquireMachineLockSync']>) => void) => {
+  const r = take(m, root, fault, warn);
   if (!r.acquired) throw Object.assign(new Error('the scenario\'s take failed'), { code: 'SCENARIO' });
+  before?.(r);
   arm();
   return r;
 };
@@ -655,62 +921,92 @@ const asHeadOutcome = (r: { result: string; unknown?: { point: string; code: str
   advanced: r.result === advancing,
 });
 const genDirOutcome = (root: string, dir: string): TableOutcome => ({ outcome: `chain ${path.relative(root, dir).replace(/by-path\/[0-9a-f]{32}/, 'by-path/<hash>')}`, advanced: true });
+const releaseOutcome = (result: string): TableOutcome => ({ outcome: result, advanced: result === 'released' });
+const holderText = (h: { token?: string; g?: number } | null): string => (h ? `${h.token}${h.g ? ` g=${h.g}` : ''}` : 'null');
+/**
+ * r8 (4) (b3 P3-1): readHolder's decision is the generation's holder (D) — never named from a chain it could not read:
+ * genOnly answers null then, the other read the <lock>'s owner (L).
+ */
+const readHolderRun = (genOnly: boolean) => (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => {
+  arm();
+  const read = m.readHolder as (p: string, o: unknown) => { token?: string; g?: number } | null;
+  const h = read(lockOf(root).lockPath, { genOnly, warn, hooks: { fault } });
+  return { outcome: `holder ${holderText(h)}`, advanced: h?.token === 'D' };
+};
+const D5 = (tokens: string[]) => (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, tokens, { timeoutMs: 0, warn, hooks: { fault } }), 'released'));
+const D6 = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), asHeadOutcome(m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, warn, hooks: { fault } }), 'removed'));
+const TAKE = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), takeOutcome(take(m, root, fault, warn)));
+const STEPS = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), takeOutcome(steps(m, root, fault, warn)));
+/** r8 (2): the end's link answering ENOENT once (its tmp cleaned by age meanwhile): the branch that asks whether the generation is over. */
+const END_CLEANED = [{ point: 'end-link', reach: 1, code: 'ENOENT' }];
+/** r8 (2): the judgement's read of the owner answering ENOENT (gone between two reads of one poll): the owner-less branch. */
+const OWNER_VANISHED = (reach: number) => [{ point: 'holder-read', reach, code: 'ENOENT' }];
 
-/** The scenarios of each public function (r7 §1): keyed `<function>` → `<scenario>`. */
+/** The scenarios of each public function (r7 §1, r8 (2)): keyed `<function>` → `<scenario>` — the preparations only. */
 export const TABLE_SCENARIOS: Record<string, Record<string, TableScenario>> = {
   acquireMachineLockSync: {
-    fresh: scenario('fresh', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
-    'dead-holder': scenario('dead-holder', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
-    'ownerless-old': scenario('ownerless-old', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
-    'dead-group-holder': scenario('dead-group-holder', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
-    'ended-old-tmp': scenario('ended-old-tmp', (m, root, fault, arm) => (arm(), takeOutcome(take(m, root, fault)))),
+    fresh: scenario('fresh', TAKE),
+    'dead-holder': scenario('dead-holder', TAKE),
+    'dead-holder end-cleaned': scenario('dead-holder', TAKE, END_CLEANED),
+    'ownerless-old': scenario('ownerless-old', TAKE),
+    'dead-group-holder': scenario('dead-group-holder', TAKE),
+    'ended-old-tmp': scenario('ended-old-tmp', TAKE),
   },
   machineLockAcquisition: {
-    'dead-holder': scenario('dead-holder', (m, root, fault, arm) => {
-      arm();
-      const steps = m.machineLockAcquisition('x', { root, timeoutMs: 0, pollMs: 10, hooks: aheadHooks(fault) });
-      for (;;) {
-        const step = steps.next();
-        if (step.done) return takeOutcome(step.value);
-      }
-    }),
+    fresh: scenario('fresh', STEPS),
+    'dead-holder': scenario('dead-holder', STEPS),
+    'dead-holder end-cleaned': scenario('dead-holder', STEPS, END_CLEANED),
+    'ownerless-old': scenario('ownerless-old', STEPS),
+    'dead-group-holder': scenario('dead-group-holder', STEPS),
+    'ended-old-tmp': scenario('ended-old-tmp', STEPS),
   },
   'handle.release': {
-    own: scenario('fresh', (m, root, fault, arm) => {
-      const r = held(m, root, fault, arm);
-      const result = r.release();
-      return { outcome: result, advanced: result === 'released' };
-    }),
+    own: scenario('fresh', (m, root, fault, arm, _live, warn) => releaseOutcome(held(m, root, fault, arm, warn).release())),
+    'own end-cleaned': scenario('fresh', (m, root, fault, arm, _live, warn) => releaseOutcome(held(m, root, fault, arm, warn).release()), END_CLEANED),
+    // r8 (2) (b3 P2-1): handed to a live group (the <lock>'s record: its group judged)
+    'handed-live': scenario('fresh', (m, root, fault, arm, live, warn) => releaseOutcome(held(m, root, fault, arm, warn, (r) => void r.handOff(live, live)).release())),
+    // handed to a dead pid and group (the pid judged: needs-head)
+    'handed-dead': scenario('fresh', (m, root, fault, arm, _live, warn) => releaseOutcome(held(m, root, fault, arm, warn, (r) => void r.handOff(deadPid(), deadPid())).release())),
+    // handed to this pid in a live group (b3 P2-1), then back to this process's own group: the generation's record the
+    // <lock> does not show is judged by its group (§4.2)
+    'handed-back': scenario('fresh', (m, root, fault, arm, live, warn) =>
+      releaseOutcome(
+        held(m, root, fault, arm, warn, (r) => {
+          r.handOff(process.pid, live);
+          r.handOff(process.pid, process.pid);
+        }).release(),
+      ),
+    ),
   },
   'handle.handOff': {
-    own: scenario('fresh', (m, root, fault, arm) => {
-      const r = held(m, root, fault, arm);
-      const h = r.handOff(process.pid, process.pid);
+    own: scenario('fresh', (m, root, fault, arm, _live, warn) => {
+      const h = held(m, root, fault, arm, warn).handOff(process.pid, process.pid);
       return { outcome: h.ok ? 'ok' : `not ok (${h.stage})`, advanced: h.ok };
     }),
   },
   'handle.setOwnerFields': {
-    own: scenario('fresh', (m, root, fault, arm) => {
-      const r = held(m, root, fault, arm);
-      const ok = r.setOwnerFields({ phase: 'merge' });
+    own: scenario('fresh', (m, root, fault, arm, _live, warn) => {
+      const ok = held(m, root, fault, arm, warn).setOwnerFields({ phase: 'merge' });
       return { outcome: String(ok), advanced: ok };
     }),
   },
   releaseAsHead: {
-    'dead-holding': scenario('dead-holding', (m, root, fault, arm) => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, ['T'], { timeoutMs: 0, hooks: { fault } }), 'released'))),
-    'live-handoff': scenario('live-handoff', (m, root, fault, arm) => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, ['T', 'HB', 'HC'], { timeoutMs: 0, hooks: { fault } }), 'released'))),
-    'first-alive': scenario('first-alive', (m, root, fault, arm) => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, ['T', 'HB'], { timeoutMs: 0, hooks: { fault } }), 'released'))),
+    'dead-holding': scenario('dead-holding', D5(['T'])),
+    'dead-holding end-cleaned': scenario('dead-holding', D5(['T']), END_CLEANED),
+    'dead-holding owner-vanished': scenario('dead-holding-old', D5(['T']), OWNER_VANISHED(5)),
+    'dead-group-holding': scenario('dead-group-holding', D5(['T'])),
+    'live-handoff': scenario('live-handoff', D5(['T', 'HB', 'HC'])),
+    'first-alive': scenario('first-alive', D5(['T', 'HB'])),
   },
   recoverIfDead: {
-    'dead-holding': scenario('dead-holding', (m, root, fault, arm) => (arm(), asHeadOutcome(m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, hooks: { fault } }), 'removed'))),
-    'live-handoff': scenario('live-handoff', (m, root, fault, arm) => (arm(), asHeadOutcome(m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, hooks: { fault } }), 'removed'))),
+    'dead-holding': scenario('dead-holding', D6),
+    'dead-group-holding': scenario('dead-group-holding', D6),
+    'ownerless-old': scenario('ownerless-old', D6),
+    'live-handoff': scenario('live-handoff', D6),
   },
   readHolder: {
-    'dead-holder': scenario('dead-holder', (m, root, fault, arm) => {
-      arm();
-      const h = m.readHolder(lockOf(root).lockPath, { hooks: { fault } } as never) as { token?: string; g?: number } | null;
-      return { outcome: h ? `holder ${h.token}${h.g ? ` g=${h.g}` : ''}` : 'null', advanced: false };
-    }),
+    'gen-and-lock': scenario('gen-and-lock', readHolderRun(false)),
+    'gen-and-lock genOnly': scenario('gen-and-lock', readHolderRun(true)),
   },
   resolveGenDir: {
     named: scenario('fresh', (m, root, fault, arm) => {
@@ -733,7 +1029,7 @@ export const TABLE_SCENARIOS: Record<string, Record<string, TableScenario>> = {
 /**
  * The rows whose unknown does not hold the decision back, and why — keyed `<function> <point>` (`*`: every
  * function). Each is checked by the gate: its unknown run answers and changes what its resolved run does (a clean-up
- * that no judgement reads). Every other row holds back (heldBack).
+ * that no judgement reads). Every other row holds back (heldBack) or reads the point again (readAgain).
  */
 export const NON_BLOCKING: Record<string, string> = {
   '* gen-tmp-list': 'the clean-up of the old tmps (C8): a listing that fails leaves them to the next clean-up',
@@ -753,13 +1049,15 @@ export interface TableRow {
   fn: string;
   scenario: string;
   point: string;
+  /** r8 (2): which reach of the point (1 … reached) alone answers absent / unknown */
+  k: number;
   reached: number;
   resolved: CellRun;
   absent: CellRun;
   unknown: CellRun;
 }
 
-/** The table (r7 §1): every scenario run resolved, and again with each point it reached absent and unknown. */
+/** The table (r7 §1, r8 (2)): every scenario run resolved, and again with each reach of each point it reached absent and unknown. */
 export function buildTable(m: Core, scenarios = TABLE_SCENARIOS): TableRow[] {
   const sleeper = spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });
   const live = sleeper.pid as number;
@@ -770,15 +1068,19 @@ export function buildTable(m: Core, scenarios = TABLE_SCENARIOS): TableRow[] {
         const s = scenarios[fn][name];
         const resolved = runCell(m, s, live, null);
         for (const point of [...resolved.hits.keys()].sort()) {
-          rows.push({
-            fn,
-            scenario: name,
-            point,
-            reached: resolved.hits.get(point) as number,
-            resolved,
-            absent: runCell(m, s, live, { point, code: 'ENOENT' }),
-            unknown: runCell(m, s, live, { point, code: 'EIO' }),
-          });
+          const reached = resolved.hits.get(point) as number;
+          for (let k = 1; k <= reached; k++) {
+            rows.push({
+              fn,
+              scenario: name,
+              point,
+              k,
+              reached,
+              resolved,
+              absent: runCell(m, s, live, { point, k, code: 'ENOENT' }),
+              unknown: runCell(m, s, live, { point, k, code: 'EIO' }),
+            });
+          }
         }
       }
     }
@@ -789,25 +1091,47 @@ export function buildTable(m: Core, scenarios = TABLE_SCENARIOS): TableRow[] {
 }
 
 /**
- * The rule of the gate for a run with `point` failing (C7-I3: an unknown does not advance a decision that depends
- * on it): nothing is decided past what was on disk when `point` was first reached in the resolved run — no `end`, no
- * <lock> moved, no generation made (or left open) that was not by then, the answer not the one the function exists
- * for; and the point reached. Answers what breaks it (empty: holds).
+ * The rule of the gate for a run with reach k of `point` failing (C7-I3: an unknown does not advance a decision that
+ * depends on it): nothing is decided past what was on disk at that reach in the resolved run — no `end`, no <lock>
+ * moved, no generation made (or left open) that was not by then, the answer not the one the function exists for; and
+ * the reach was reached (its fault answered). Answers what breaks it (empty: holds).
  */
 export function heldBack(row: TableRow, run: CellRun): string[] {
   const bad: string[] = [];
-  const allowed = new Set(row.resolved.firstChanges.get(row.point) ?? []);
+  const allowed = new Set(row.resolved.changesAt.get(`${row.point}#${row.k}`) ?? []);
   if (run.advanced) bad.push(`advanced: ${run.outcome}`);
-  if ((run.hits.get(row.point) ?? 0) < 1) bad.push('the point was not reached');
+  if (!run.fired) bad.push(`reach ${row.k} was not reached`);
   for (const c of run.changes) if (!allowed.has(c)) bad.push(`past the point: ${c}`);
   return bad;
 }
+
+/**
+ * r8 (2): a reach that failed and was read again — the point reached more often than in the resolved run, and the run
+ * then answered and changed what the resolved run did (#4558's re-read of the release's owner): the decision rests on
+ * the later reach, which the row of k + 1 fails in turn.
+ */
+export const readAgain = (row: TableRow, run: CellRun): boolean =>
+  run.fired && (run.hits.get(row.point) ?? 0) > row.reached && run.outcome === row.resolved.outcome && JSON.stringify(run.changes) === JSON.stringify(row.resolved.changes);
+
+const pointRe = (point: string): RegExp => new RegExp(`(?<![a-z0-9-])${point.replace(/[-]/g, '\\-')}(?![a-z0-9-])`);
+/**
+ * r8 (4) (a3 P3-2 = b3 P3-1): the answer of a run that failed at `point` (`code`) names it — the answer, a line it
+ * warned (its text or data) or what it threw carries the point's name and the errno. A bare `kept` / `deferred` /
+ * `not acquired` / `null` names nothing.
+ */
+export function namesPoint(run: CellRun, point: string, code: string): boolean {
+  const text = [run.outcome, ...run.warns, run.error ?? ''].join('\n');
+  return pointRe(point).test(text) && new RegExp(`\\b${code}\\b`).test(text);
+}
+
+/** r8 (1) (§4.2): an answer `released` comes with an `end` on disk (the holding's, written in that run). */
+export const releasedWithoutEnd = (run: CellRun): boolean => /^released\b/.test(run.outcome) && !run.changes.some((c) => /^g\d+ end /.test(c));
 
 /** A cell of the rendered table: the answer and what changed on disk. */
 const cell = (r: CellRun): string => `${r.outcome}${r.changes.length > 0 ? `; ${r.changes.join(', ')}` : ''}`.replace(/\|/g, '\\|');
 
 /** The table as the design's §8.4 holds it. */
 export function renderTable(rows: TableRow[]): string {
-  const head = ['| 関数 | 場面 | 観測点 | 届いた回数 | resolved | absent | unknown |', '|---|---|---|---|---|---|---|'];
-  return [...head, ...rows.map((r) => `| \`${r.fn}\` | ${r.scenario} | \`${r.point}\` | ${r.reached} | ${cell(r.resolved)} | ${cell(r.absent)} | ${cell(r.unknown)} |`)].join('\n');
+  const head = ['| 関数 | 場面 | 観測点 | 回 | 届いた回数 | resolved | absent | unknown |', '|---|---|---|---|---|---|---|---|'];
+  return [...head, ...rows.map((r) => `| \`${r.fn}\` | ${r.scenario} | \`${r.point}\` | ${r.k} | ${r.reached} | ${cell(r.resolved)} | ${cell(r.absent)} | ${cell(r.unknown)} |`)].join('\n');
 }

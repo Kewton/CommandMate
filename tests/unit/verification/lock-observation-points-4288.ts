@@ -108,7 +108,7 @@ const ROWS_4559: ObservationPoint[] = [
   { point: 'ownerless-gen-mtime', impls: JS, observes: '持ち主の無い世代の mtime（墓の猶予）', unknown: '古いと読まない: 墓を置かない（取らない）' },
   { point: 'tomb-tmp', impls: JS, observes: '墓の記録の tmp の排他作成と書き込み', unknown: '墓を置かない（取らない）' },
   { point: 'tomb-link', impls: JS, observes: 'link tmp → g<M>/owner（墓。書き手の公開と同じ名前）', unknown: '墓を置かない（取らない）' },
-  { point: 'beacon-gen-end', impls: JS, observes: '目印の記録が名指す前の世代の end と世代の lstat（§6.1）。解放の end の link が ENOENT のときの自分の世代も（#4559 r6）', unknown: '前の世代が終わったと読まない: 目印を外さない（取らない）。解放は終わったと読まない（名指して繰り返す）' },
+  { point: 'beacon-gen-end', impls: JS, observes: '目印の記録が名指す前の世代の end と世代の lstat（§6.1）。解放の end の link が ENOENT のときの自分の世代も（#4559 r6）。回収の end の link が ENOENT のとき・D5 が released を返す前の保有の世代も（#4559 r8）', unknown: '前の世代が終わったと読まない: 目印を外さない（取らない）。解放・回収は終わったと読まない（名指して繰り返す。D5 は deferred）' },
   // #4559 r6 (review a P1-1 / P1-3): the write of a generation's tmp, and the read of its fields.
   { point: 'gen-tmp-write', impls: JS, observes: '世代の記録の tmp の書き込み（owner・end・墓・引渡し）', unknown: 'その記録を足さない（tmp は残す。次の試行は別の名前 C8）' },
   { point: 'gen-fields-read', impls: JS, observes: '世代の fields の読み（merge-pr のフェーズ。回収の callback と held by）', unknown: '回収しない（未確認の書き込みを idle と読まない）。次の周で読み直す' },
@@ -121,6 +121,9 @@ export const OBSERVATION_POINTS: ObservationPoint[] = [
   ...ROWS_4288.map((p) => (p.impls.includes('sync') && !p.impls.includes('ts') ? { ...p, impls: [...p.impls, 'ts'] as Impl[] } : p)),
   ...ROWS_4559,
 ];
+
+/** #4559 r8 (4): the generation chain's points (the rows above of #4559) — the gate asks each answer there to name its point. */
+export const CHAIN_OBSERVATION_POINTS: string[] = ROWS_4559.map((p) => p.point);
 
 export interface RawCallAllowance {
   impl: Impl;

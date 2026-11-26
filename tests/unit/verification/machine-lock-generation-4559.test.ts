@@ -1179,3 +1179,149 @@ describe('#4559 r7 (b2 P3-1): S2 at the write counts another\'s end written betw
     expect(s2AtWrite(genDir, [gone])).toEqual([]);
   });
 });
+
+// =====================================================================================================
+// #4559 PR-2 r8: a3 / b3's findings, each a test first (red on 711f50192's core), then the fix.
+// =====================================================================================================
+
+/** A holding whose records are all dead (T), its <lock> showing it (g=1); `old`: its generation made long ago. */
+function deadHolding(tag: string, old = false): { root: string; lockPath: string; genDir: string } {
+  const root = freshRoot(tag);
+  const { genDir, lockPath } = lockOf(root);
+  writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' }, ...(old ? { mtimeAgoMs: 20 * 60_000 } : {}) });
+  fs.mkdirSync(lockPath);
+  fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: deadPid(), host: HOST, token: 'T', acquiredAt: 0, v: 1, g: 1 }));
+  return { root, lockPath, genDir };
+}
+/** A fault seam that answers `code` at the `at`-th reach of `point` (each reach of every point counted). */
+function faultAt(point: string, at: number | ((n: number) => boolean), code: string): { fault: (p: string) => string | undefined; reached: Map<string, number> } {
+  const reached = new Map<string, number>();
+  return {
+    reached,
+    fault: (p: string) => {
+      const n = (reached.get(p) ?? 0) + 1;
+      reached.set(p, n);
+      return p === point && (typeof at === 'number' ? n === at : at(n)) ? code : undefined;
+    },
+  };
+}
+const endOf = (genDir: string, n = 1): string | null => readGens(genDir).get(n)?.end?.split(' ')[0] ?? null;
+
+describe('#4559 r8 (1) (a3 P2-1 = b3 P2-2, §4.2): releaseAsHead answers released only once the holding\'s end is there', () => {
+  it('(a) the re-read of the holding\'s records after the <lock> went fails (holder-read, the 3rd reach only, EIO): deferred, named — no end; the next call ends it', () => {
+    const { root, lockPath, genDir } = deadHolding('r8-a');
+    const warnings: string[] = [];
+    const f = faultAt('holder-read', 3, 'EIO');
+    const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, warn: (l: string) => warnings.push(l), hooks: { fault: f.fault } }));
+    expect(f.reached.get('holder-read'), 'the holding read (owner, owner.h1), then the re-read failed at its owner').toBe(3);
+    expect(r).toMatchObject({ result: 'deferred', unknown: { point: 'holder-read', code: 'EIO' } });
+    expect(warnings.join('\n')).toContain(`machine-lock-release-deferred ${lockPath} point=holder-read errno=EIO`);
+    expect(fs.existsSync(lockPath), 'the <lock> went first (§6.1)').toBe(false);
+    expect(endOf(genDir), 'no end: the generation stays the holding until it is ended').toBeNull();
+    const next = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0 }));
+    expect(next.result).toBe('missing');
+    expect(endOf(genDir)).toBe('dead');
+  });
+
+  it('(b) the judgement before the end answers young (the owner read as missing in the judgement: holder-read, the 5th reach, ENOENT): deferred, named — no end', () => {
+    const { root, lockPath, genDir } = deadHolding('r8-b-young');
+    const warnings: string[] = [];
+    const f = faultAt('holder-read', 5, 'ENOENT');
+    const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, warn: (l: string) => warnings.push(l), hooks: { fault: f.fault } }));
+    expect(f.reached.get('holder-read')).toBe(5);
+    expect(r.result).toBe('deferred');
+    expect(r.unknown?.point).toBe('beacon-gen-end');
+    expect(warnings.join('\n')).toContain(`machine-lock-release-deferred ${lockPath} point=beacon-gen-end errno=EAGAIN`);
+    expect(endOf(genDir)).toBeNull();
+  });
+
+  it('(b) the judgement before the end answers busy (the holder read alive there — a pid in use again): deferred, named — no end', () => {
+    const { root, lockPath, genDir } = deadHolding('r8-b-busy');
+    let judging = false;
+    let alive = 0;
+    // the <lock>'s and the holding's judgements read T dead; the end's judgement (from its seam holder-read on) reads it alive
+    const hooks = {
+      onGenStage: (st: string) => {
+        if (st === 'holder-read') judging = true;
+      },
+      pidAlive: () => (judging ? (alive++, true) : false),
+    };
+    const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, hooks }));
+    expect(judging, 'the end\'s judgement was reached').toBe(true);
+    expect(alive, 'T read alive there, once').toBe(1);
+    expect(r.result).toBe('deferred');
+    expect(r.unknown?.point).toBe('beacon-gen-end');
+    expect(endOf(genDir)).toBeNull();
+  });
+
+  it('(c) the end\'s link answers ENOENT once (its tmp cleaned meanwhile, the generation not over): tried again — released with the end', () => {
+    const { root, lockPath, genDir } = deadHolding('r8-c-once');
+    const f = faultAt('end-link', 1, 'ENOENT');
+    const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, hooks: { fault: f.fault } }));
+    expect(f.reached.get('end-link'), 'the end linked at the second try').toBe(2);
+    expect(r.result).toBe('released');
+    expect(endOf(genDir)).toBe('dead');
+  });
+
+  it('(c) the end\'s link answers ENOENT at every try of the poll: deferred, named — no end', () => {
+    const { root, lockPath, genDir } = deadHolding('r8-c-every');
+    const warnings: string[] = [];
+    const f = faultAt('end-link', () => true, 'ENOENT');
+    const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T'], { timeoutMs: 0, warn: (l: string) => warnings.push(l), hooks: { fault: f.fault } }));
+    expect(f.reached.get('end-link'), 'every try of the poll').toBe(32);
+    expect(r.result).toBe('deferred');
+    expect(warnings.join('\n')).toContain(`machine-lock-release-deferred ${lockPath} point=beacon-gen-end errno=EAGAIN`);
+    expect(endOf(genDir)).toBeNull();
+  });
+});
+
+describe('#4559 r8 (3) (a3 P3-1): D5\'s rule for the caller\'s own record needs its host too', () => {
+  it('a record of this pid on another host (a shared root) is not the caller\'s: deferred — no end on its generation, the <lock> stays', () => {
+    const root = freshRoot('r8-host');
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: process.pid, host: 'other-host', token: 'T' }, handoffs: [{ pid: deadPid(), token: 'HB' }] });
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: deadPid(), host: HOST, token: 'HB', acquiredAt: 0, v: 1, g: 1 }));
+    const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T', 'HB'], { timeoutMs: 0 }));
+    expect(r.result).toBe('deferred');
+    expect(endOf(genDir)).toBeNull();
+    expect(JSON.parse(fs.readFileSync(path.join(lockPath, 'owner'), 'utf8')).token).toBe('HB');
+  });
+
+  it('the same record on this host is the caller\'s own (D12\'s rule): released, with the end', () => {
+    const root = freshRoot('r8-host-same');
+    const { genDir, lockPath } = lockOf(root);
+    writeGen(genDir, 1, { owner: { pid: process.pid, token: 'T' }, handoffs: [{ pid: deadPid(), token: 'HB' }] });
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ pid: deadPid(), host: HOST, token: 'HB', acquiredAt: 0, v: 1, g: 1 }));
+    const r = withRoot(root, () => lockSync.releaseAsHead(lockPath, ['T', 'HB'], { timeoutMs: 0 }));
+    expect(r.result).toBe('released');
+    expect(endOf(genDir)).toBe('dead');
+  });
+});
+
+describe('#4559 r8 (4) (a3 P3-2 = b3 P3-1): the answers name the point that kept them', () => {
+  it('D6: the end of a dead holding that cannot be written (end-link EIO) — kept, named (never a bare kept)', () => {
+    const { root, lockPath, genDir } = deadHolding('r8-d6');
+    const f = faultAt('end-link', 1, 'EIO');
+    const r = withRoot(root, () => lockSync.recoverIfDead(lockPath, { timeoutMs: 0, hooks: { fault: f.fault } }));
+    expect(f.reached.get('end-link')).toBe(1);
+    expect(r).toMatchObject({ result: 'kept', unknown: { point: 'end-link', code: 'EIO' } });
+    expect(endOf(genDir)).toBeNull();
+    expect(fs.existsSync(path.join(lockPath, 'owner'))).toBe(true);
+  });
+
+  it('readHolder: a chain it cannot read names no generation\'s holder (genOnly null) and names the point in a warning', () => {
+    const { root, lockPath } = deadHolding('r8-read');
+    for (const point of ['gen-realpath', 'gen-list', 'gen-end-read', 'holder-read']) {
+      const warnings: string[] = [];
+      const f = faultAt(point, 1, 'EIO');
+      const read = lockSync.readHolder as (p: string, o: unknown) => { token?: string } | null;
+      const h = withRoot(root, () => read(lockPath, { genOnly: true, warn: (l: string) => warnings.push(l), hooks: { fault: f.fault } }));
+      expect(f.reached.get(point), point).toBe(1);
+      expect(h, point).toBeNull();
+      expect(warnings.join('\n'), point).toMatch(new RegExp(`point=${point} .*errno=EIO`));
+    }
+    expect(withRoot(root, () => lockSync.readHolder(lockPath, { genOnly: true }))?.token).toBe('T');
+  });
+});

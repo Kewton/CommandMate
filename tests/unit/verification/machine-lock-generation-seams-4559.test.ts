@@ -29,13 +29,17 @@ import {
   cleanAll,
   coreProcedures,
   heldBack,
+  namesPoint,
   nonBlocking,
+  parseCore,
+  readAgain,
+  releasedWithoutEnd,
   renderOps,
   renderTable,
   type OpRow,
   type TableRow,
 } from './lock-generation-4559-harness';
-import { OBSERVATION_POINTS } from './lock-observation-points-4288';
+import { CHAIN_OBSERVATION_POINTS, OBSERVATION_POINTS } from './lock-observation-points-4288';
 
 const REPO = path.resolve(__dirname, '../../..');
 const CORE = 'scripts/orchestrate/machine-lock-sync.mjs';
@@ -316,18 +320,31 @@ describe('#4559 §4.4: the writer\'s own tomb after its owner publish failed, ki
   }, 20000);
 });
 
-// ------------------------------------------------------------------ #4559 r7 §1: the gate (PM's disposition 1)
+
+// ------------------------------------------------------------------ #4559 r7 §1 / r8 (2): the gate (PM's disposition 1)
 
 /**
- * The gate of the public functions (r7 §1): the table of the core's public functions × the observation points each
- * reaches × resolved / absent / unknown is made by machine (lock-generation-4559-harness.ts `buildTable`: the
- * functions from the core's source, the points from the runs), and every row is checked here — an unknown (and an
- * absent of the chain's choice) holds back the decision that depends on it (C7-I3): no `end`, no <lock> moved, no
- * generation made, not `released` / taken / removed, past what was on disk when the point was first reached; the
- * point reached; the answer named. A function or a point added to the core without its row is red; so is the
- * design's §8.4 when it is not the table, byte for byte.
+ * The gate of the public functions (r7 §1, made machine-decided in r8 (2)): the table of the core's public functions ×
+ * the observation points each reaches × the reach of the point × resolved / absent / unknown is made by machine
+ * (lock-generation-4559-harness.ts `buildTable`: the functions and the points each can reach from a parse of the
+ * core's source, the rows from the runs), and every row is checked here — an unknown at any reach (and an absent of
+ * the chain's choice) holds back the decision that depends on it (C7-I3): no `end`, no <lock> moved, no generation
+ * made, not `released` / taken / removed, past what was on disk at that reach; the reach reached; the answer naming
+ * the point (r8 (4)). A failed reach read again (the point once more, then the resolved run's answer) is the next
+ * row's to fail. An answer `released` comes with its `end` (r8 (1), §4.2), in every column. A function, an export
+ * form, a point or a reach added to the core without its row is red; so is the design's §8.4 when it is not the
+ * table, byte for byte.
  */
+/** The <lock>'s points (#4288: the rows of the observation table that bash makes too). */
 const OLDER_POINTS = new Set(OBSERVATION_POINTS.filter((p) => p.impls.includes('bash')).map((p) => p.point));
+/**
+ * r8 (4): the points whose answer must name them — the generation chain's rows of the observation table (#4559). The
+ * <lock>'s points (#4288's rows, and its test seam handoff-tmp) answer as #4288 does (`kept`, `not acquired`,
+ * `not ok (<stage>)`, a `deferred` named by the pid or the group), checked by lock-observation-points-4288 at every
+ * point × implementation and not changed by this PR (no output outside its range); the gate holds them back as every
+ * row.
+ */
+const NAMED_POINTS = new Set(CHAIN_OBSERVATION_POINTS);
 
 /** The table of the design's §8.4 (from its heading to the first blank line after the table starts). */
 export function docGateTable(doc: string): string | null {
@@ -341,29 +358,29 @@ export function docGateTable(doc: string): string | null {
   return end < 0 ? body.trimEnd() : body.slice(0, end);
 }
 
-/** What the gate finds wrong in a table: each row's breaks, named `<function> <scenario> <point> <value>: …`. */
+/** What the gate finds wrong in a table: each row's breaks, named `<function> <scenario> <point>#<reach> <value>: …`. */
 export function gateBreaks(rows: TableRow[]): string[] {
-  const bad: string[] = [];
+  const bad = new Set<string>();
   for (const r of rows) {
-    const at = `${r.fn} ${r.scenario} ${r.point}`;
-    if (r.reached < 1) bad.push(`${at}: not reached in its resolved run`);
-    for (const [value, run] of [['absent', r.absent], ['unknown', r.unknown]] as const) {
-      if ((run.hits.get(r.point) ?? 0) < 1) bad.push(`${at} ${value}: not reached`);
+    const at = `${r.fn} ${r.scenario} ${r.point}#${r.k}`;
+    if (r.reached < 1 || r.k < 1 || r.k > r.reached) bad.add(`${at}: not a reach of its resolved run (${r.reached})`);
+    for (const [value, run] of [['resolved', r.resolved], ['absent', r.absent], ['unknown', r.unknown]] as const) {
+      if (value !== 'resolved' && !run.fired) bad.add(`${at} ${value}: reach ${r.k} not reached`);
+      // the absent of beacon-gen-end is the generation gone (L1: over — removed below the largest): released, no end of its own
+      if (releasedWithoutEnd(run) && !(value === 'absent' && r.point === 'beacon-gen-end')) bad.add(`${value === 'resolved' ? `${r.fn} ${r.scenario}` : at} ${value}: released without an end (${run.changes.join(', ')})`);
     }
     if (nonBlocking(r.fn, r.point)) {
       // the same answer (the unknown may be named in it) and the same changes on disk
       const bare = (o: string): string => o.replace(new RegExp(` \\(${r.point} [A-Z]+\\)$`), '');
       const same = { outcome: bare(r.unknown.outcome), changes: r.unknown.changes };
-      if (JSON.stringify(same) !== JSON.stringify({ outcome: r.resolved.outcome, changes: r.resolved.changes })) bad.push(`${at} unknown: named a clean-up, but answers ${r.unknown.outcome} (${r.unknown.changes.join(', ')}) for ${r.resolved.outcome}`);
-    } else {
-      for (const b of heldBack(r, r.unknown)) bad.push(`${at} unknown: ${b}`);
-      if (!/\((?:[a-z0-9-]+) [A-Z]+\)|^throws [A-Z]+|^not ok|^false$|^null$|^holder /.test(r.unknown.outcome) && !['kept', 'deferred', 'not acquired', 'needs-head'].includes(r.unknown.outcome)) {
-        bad.push(`${at} unknown: the answer ${r.unknown.outcome} names nothing`);
-      }
+      if (JSON.stringify(same) !== JSON.stringify({ outcome: r.resolved.outcome, changes: r.resolved.changes })) bad.add(`${at} unknown: named a clean-up, but answers ${r.unknown.outcome} (${r.unknown.changes.join(', ')}) for ${r.resolved.outcome}`);
+    } else if (!readAgain(r, r.unknown)) {
+      for (const b of heldBack(r, r.unknown)) bad.add(`${at} unknown: ${b}`);
+      if (NAMED_POINTS.has(r.point) && !namesPoint(r.unknown, r.point, 'EIO')) bad.add(`${at} unknown: the answer ${r.unknown.outcome} names nothing`);
     }
-    if (CHAIN_CHOICE_POINTS.includes(r.point)) for (const b of heldBack(r, r.absent)) bad.push(`${at} absent: ${b}`);
+    if (CHAIN_CHOICE_POINTS.includes(r.point)) for (const b of heldBack(r, r.absent)) bad.add(`${at} absent: ${b}`);
   }
-  return bad;
+  return [...bad];
 }
 
 async function loadCopy(dir: string, source: string): Promise<typeof lockSync> {
@@ -372,13 +389,32 @@ async function loadCopy(dir: string, source: string): Promise<typeof lockSync> {
   return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as typeof lockSync;
 }
 const only = (fns: string[]) => Object.fromEntries(fns.map((f) => [f, TABLE_SCENARIOS[f]]));
+/** A copy of the core with `from` (there once) replaced by `to`, loaded from a temporary directory. */
+async function brokenCopy(dir: string, edits: [string, string][]): Promise<typeof lockSync> {
+  let core = read(CORE);
+  for (const [from, to] of edits) {
+    expect(core.split(from).length - 1, `the line to break is in the core once: ${from.trim().slice(0, 80)}`).toBe(1);
+    core = core.replace(from, to);
+  }
+  return loadCopy(dir, core);
+}
 
-describe('#4559 r7 §1: the gate — the public functions × their observation points × resolved / absent / unknown', () => {
+describe('#4559 r7 §1 / r8 (2): the gate — the public functions × their points × each reach × resolved / absent / unknown', () => {
   let rows: TableRow[] = [];
   beforeAll(() => {
     rows = buildTable(lockSync);
-  }, 60000);
+  }, 120000);
   afterAll(() => cleanAll());
+
+  it('r8 (2): the exports are read in every form, and they are the module\'s — every name, each a function or not as it is', () => {
+    const parsed = parseCore(read(CORE));
+    const mod = lockSync as unknown as Record<string, unknown>;
+    expect(parsed.exports.map((e) => e.name).sort()).toEqual(Object.keys(mod).sort());
+    for (const e of parsed.exports) expect(e.fn, e.name).toBe(typeof mod[e.name] === 'function');
+    expect(parsed.exports.length).toBeGreaterThanOrEqual(40);
+    // the observations whose point is not a literal or a parameter: GEN_WRITES' (each use's row) only
+    expect(parsed.unresolved).toEqual(['linkIntoGen: w.put', 'linkIntoGen: w.link']);
+  });
 
   it('the public functions are read from the core, and each has its scenarios (none without)', () => {
     const procs = coreProcedures(read(CORE));
@@ -387,20 +423,42 @@ describe('#4559 r7 §1: the gate — the public functions × their observation p
     expect(new Set(rows.map((r) => r.fn))).toEqual(new Set(procs));
   });
 
-  it('every observation point of the chain is a row of some function (none without), and the rows are counted', () => {
+  it('r8 (2): each function has a row at every point its calls can reach (by the parse); the #4288 functions\' points are the observation table\'s', () => {
+    const parsed = parseCore(read(CORE));
+    const missing: Record<string, string[]> = {};
+    let counted = 0;
+    for (const fn of parsed.procedures) {
+      const can = [...(parsed.points.get(fn) ?? [])];
+      counted += can.length;
+      const gap = can.filter((p) => !rows.some((r) => r.fn === fn && r.point === p)).sort();
+      if (gap.length > 0) missing[fn] = gap;
+    }
+    expect(missing).toEqual({});
+    expect(counted).toBeGreaterThanOrEqual(120);
+    const table = new Set(OBSERVATION_POINTS.filter((p) => p.impls.includes('sync')).map((p) => p.point));
+    expect(parsed.olderPoints.size).toBeGreaterThanOrEqual(20);
+    expect([...parsed.olderPoints].filter((p) => !table.has(p)).sort()).toEqual([]);
+  });
+
+  it('every observation point of the chain is a row of some function (none without); each point\'s rows are its reaches 1 … reached', () => {
     const points = chainPoints(read(CORE), OLDER_POINTS);
     expect(points.length).toBeGreaterThanOrEqual(25);
     const covered = new Set(rows.map((r) => r.point));
     expect([...points, ...CHAIN_CHOICE_POINTS].filter((p) => !covered.has(p))).toEqual([]);
-    expect(rows.length).toBeGreaterThanOrEqual(200);
+    const reaches = new Map<string, number[]>();
+    for (const r of rows) reaches.set(`${r.fn} ${r.scenario} ${r.point} ${r.reached}`, [...(reaches.get(`${r.fn} ${r.scenario} ${r.point} ${r.reached}`) ?? []), r.k]);
+    for (const [key, ks] of reaches) expect(ks, key).toEqual(Array.from({ length: Number(key.split(' ').pop()) }, (_, i) => i + 1));
+    expect(rows.filter((r) => r.k >= 2).length, 'rows of a second reach or later').toBeGreaterThanOrEqual(100);
+    expect(rows.length).toBeGreaterThanOrEqual(400);
     for (const s of Object.values(TABLE_SCENARIOS)) expect(Object.keys(s).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('every row holds: an unknown (and an absent of the chain\'s choice) does not advance the decision; a named clean-up answers as resolved', () => {
+  it('every row holds: an unknown at any reach (and an absent of the chain\'s choice) does not advance the decision and names its point; released has its end; a named clean-up answers as resolved', () => {
     expect(gateBreaks(rows)).toEqual([]);
   });
 
   it('NON_BLOCKING names rows of the table only, each with its reason', () => {
+    expect(Object.keys(NON_BLOCKING)).toHaveLength(7);
     for (const [key, why] of Object.entries(NON_BLOCKING)) {
       const [fn, point] = key.split(' ');
       expect(rows.some((r) => (fn === '*' || r.fn === fn) && r.point === point), key).toBe(true);
@@ -415,38 +473,129 @@ describe('#4559 r7 §1: the gate — the public functions × their observation p
   it('self-test (i): a copy whose releaseAsHead takes the <lock> off while the chain is unknown (5c6ade92d\'s form) is red at that row', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-i-'));
     try {
-      const core = read(CORE);
-      const line = "    if (ctx.genUnknown) return deferredUnknown(ctx, ctx.genUnknown);\n";
-      const none = "  if (!ctx.genDir) return { state: 'unknown', unknown: ctx.genUnknown };\n";
-      expect(core.split(line).length - 1, 'the chain\'s unknown in releaseAsHead, once').toBe(1);
-      expect(core.split(none).length - 1, 'the holding of an unknown chain, once').toBe(1);
       // 5c6ade92d: no hold-back, and the holding of an unknown chain read as none (the <lock>'s record alone decides)
-      const m = await loadCopy(dir, core.replace(line, '').replace(none, "  if (!ctx.genDir) return { state: 'none' };\n"));
+      const m = await brokenCopy(dir, [
+        ["    if (ctx.genUnknown) return deferredUnknown(ctx, ctx.genUnknown);\n", ''],
+        ["  if (!ctx.genDir) return { state: 'unknown', unknown: ctx.genUnknown };\n", "  if (!ctx.genDir) return { state: 'none' };\n"],
+      ]);
       const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
       for (const value of ['unknown', 'absent']) {
-        expect(breaks.filter((b) => b.startsWith(`releaseAsHead live-handoff gen-realpath ${value}: past the point: lock HC gone`)), value).toHaveLength(1);
+        expect(breaks.filter((b) => b.startsWith(`releaseAsHead live-handoff gen-realpath#1 ${value}: past the point: lock HC gone`)), value).toHaveLength(1);
       }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 60000);
 
-  it('self-test (ii): a copy with a public function added outside the table is red', () => {
-    const procs = coreProcedures(`${read(CORE)}\nexport function peekHolder(lockPath) {\n  return readHolder(lockPath);\n}\n`);
-    expect(procs).toContain('peekHolder');
-    expect(procs).not.toEqual(Object.keys(TABLE_SCENARIOS).sort());
+  it('self-test (ii): a copy with a public function added outside the table is red — in every form of export; a form the parse cannot read throws', () => {
+    const forms: [string, string][] = [
+      ['peekHolder', 'export function peekHolder(lockPath) {\n  return readHolder(lockPath);\n}\n'],
+      // b3 P2-1: the arrow and the async forms the r7 reader did not read
+      ['peekArrow', 'export const peekArrow = (lockPath) => readHolder(lockPath);\n'],
+      ['peekFn', 'export const peekFn = function (lockPath) {\n  return readHolder(lockPath);\n};\n'],
+      ['peekAsync', 'export async function peekAsync(lockPath) {\n  return readHolder(lockPath);\n}\n'],
+      ['peekLocal', 'function peekLocal(lockPath) {\n  return readHolder(lockPath);\n}\nexport { peekLocal };\n'],
+      ['peekAs', 'export { recoverIfDead as peekAs };\n'],
+      ['default', 'export default function (lockPath) {\n  return releaseAsHead(lockPath, []);\n}\n'],
+    ];
+    for (const [name, text] of forms) {
+      const procs = coreProcedures(`${read(CORE)}\n${text}`);
+      expect(procs, name).toContain(name);
+      expect(procs, name).not.toEqual(Object.keys(TABLE_SCENARIOS).sort());
+    }
+    // a value export is not a function: never a public function
+    expect(coreProcedures(`${read(CORE)}\nexport const PEEK_MS = 5;\n`)).toEqual(Object.keys(TABLE_SCENARIOS).sort());
+    for (const text of ["export * from './other.mjs';\n", 'export class Peek {}\n', 'export const { peekA } = { peekA: readHolder };\n']) {
+      expect(() => coreProcedures(`${read(CORE)}\n${text}`), text).toThrow(/cannot read/);
+    }
     expect(() => coreProcedures('export function x() {}\n')).toThrow(/marker/);
   });
 
   it('self-test (iii): a copy that reads a holder it cannot observe as not alive (unknown as resolved) is red at that row', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-iii-'));
     try {
-      const core = read(CORE);
-      const line = "      if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, listing.max), code: holder.code } };\n";
-      expect(core.split(line).length - 1, 'the holding\'s unknown holder, once').toBe(1);
-      const m = await loadCopy(dir, core.replace(line, ''));
+      const m = await brokenCopy(dir, [["      if (holder.state === 'unknown') return { state: 'unknown', unknown: { point: holder.point, path: genPath(g, listing.max), code: holder.code } };\n", '']]);
       const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
-      expect(breaks.filter((b) => b.startsWith('releaseAsHead first-alive holder-pid unknown: past the point: lock HB gone'))).toHaveLength(1);
+      expect(breaks.filter((b) => b.startsWith('releaseAsHead first-alive holder-pid#1 unknown: past the point: lock HB gone'))).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it('self-test (iv) r8 (2): a copy that reads the second reach\'s unknown as resolved is red at the second reach\'s rows — the first reach\'s row of the same point stays green', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-iv-'));
+    try {
+      // the observer asks the fault seam (the reach is counted) but drops its answer at the second reach of a point
+      const m = await brokenCopy(dir, [['    const code = hooks.fault?.(point, String(target), count);\n', '    const asked = hooks.fault?.(point, String(target), count);\n    const code = count === 2 ? undefined : asked;\n']]);
+      const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
+      expect(breaks.filter((b) => b.startsWith('releaseAsHead dead-holding holder-read#2 unknown: advanced: released'))).toHaveLength(1);
+      expect(breaks.filter((b) => b.startsWith('releaseAsHead dead-holding holder-read#1 unknown'))).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+});
+
+/** r8 (1): the edits that take each of the three ways of 711f50192 back into a copy of the core. */
+const NO_FINAL_CHECK: [string, string] = ['    if (n !== null) {\n      const g = headGen(ctx, ctx.codec, ctx.hooks, ctx.now);\n', '    if (n !== null && n < 0) {\n      const g = headGen(ctx, ctx.codec, ctx.hooks, ctx.now);\n'];
+const REREAD_DROPPED: [string, string] = ["    if (read.state === 'unknown') return { unknown: read.unknown };\n    if (read.state === 'corrupt') return { unknown: { point: 'holder-read', path: read.file, code: 'EINVAL' } };\n", ''];
+const LINK_ENOENT_ENDED: [string, string] = ["  return end.state === 'absent' ? genEnded(g, n) : { ended: true };\n", '  return { ended: true };\n'];
+
+describe('#4559 r8 (2): the gate counts — 711f50192\'s three ways to `released` without an end are red at their rows', () => {
+  afterAll(() => cleanAll());
+  const ways: { name: string; edits: [string, string][]; red: string }[] = [
+    // (a) the re-read of the holding's records failing at its 3rd reach, dropped as {}
+    { name: '(a) the re-read\'s unknown dropped', edits: [NO_FINAL_CHECK, REREAD_DROPPED], red: 'releaseAsHead dead-holding holder-read#3 unknown: advanced: released' },
+    // (b) the judgement before the end answering young (the owner read as missing at its 5th reach)
+    { name: '(b) young / busy / again read as ended', edits: [NO_FINAL_CHECK], red: 'releaseAsHead dead-holding holder-read#5 absent: released without an end (lock T gone)' },
+    // (c) the end's link answering ENOENT, read as ended without genEnded
+    { name: '(c) the end-link\'s ENOENT read as ended', edits: [NO_FINAL_CHECK, LINK_ENOENT_ENDED], red: 'releaseAsHead dead-holding end-link#1 absent: released without an end (lock T gone)' },
+  ];
+  for (const way of ways) {
+    it(`self-test (v) ${way.name}: red at ${way.red.split(':')[0]}`, async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-v-'));
+      try {
+        const m = await brokenCopy(dir, way.edits);
+        const breaks = gateBreaks(buildTable(m, only(['releaseAsHead'])));
+        expect(breaks.filter((b) => b === way.red)).toHaveLength(1);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }, 60000);
+  }
+  it('self-test (v) the copy without the final check alone is red at the end-cleaned scenario\'s resolved run too (the end\'s tmp cleaned once)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-v-'));
+    try {
+      const m = await brokenCopy(dir, [NO_FINAL_CHECK, LINK_ENOENT_ENDED]);
+      expect(gateBreaks(buildTable(m, only(['releaseAsHead'])))).toContain('releaseAsHead dead-holding end-cleaned resolved: released without an end (lock T gone)');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+});
+
+describe('#4559 r8 (4): the named answers and the readHolder rows can be red (b3 P3-1: never green whatever is done)', () => {
+  afterAll(() => cleanAll());
+  it('self-test (vi): readHolder answering the generation\'s holder over fields it could not read is red; so is one that names nothing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-vi-'));
+    try {
+      const advancing = gateBreaks(buildTable(await brokenCopy(dir, [['  if (fields.unknown) return { unknown: fields.unknown };\n', '']]), only(['readHolder'])));
+      for (const s of ['gen-and-lock', 'gen-and-lock genOnly']) expect(advancing, s).toContain(`readHolder ${s} gen-fields-read#1 unknown: advanced: holder D g=1`);
+      const silent = gateBreaks(buildTable(await brokenCopy(dir, [['  const named = (u) => warn(`machine-lock-unknown point=', '  const named = (u) => void u && warn(`machine-lock-unknown point=']]), only(['readHolder'])));
+      for (const point of ['gen-realpath#1', 'gen-list#1', 'gen-end-read#1', 'holder-read#1', 'holder-read#2']) {
+        expect(silent.filter((b) => b.startsWith(`readHolder gen-and-lock genOnly ${point} unknown: the answer holder null names nothing`)), point).toHaveLength(1);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  it('self-test (vii) (b3 P2-1 (a)): a release that reads a hand-off\'s group it cannot observe as empty is red at the hand-off scenario\'s row', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-gate-vii-'));
+    try {
+      const m = await brokenCopy(dir, [["        if (group.state !== 'gone') return { result: 'deferred', line:", "        if (group.state === 'alive') return { result: 'deferred', line:"]]);
+      const breaks = gateBreaks(buildTable(m, only(['handle.release'])));
+      expect(breaks.filter((b) => b.startsWith('handle.release handed-back group#1 unknown: advanced: released'))).toHaveLength(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
