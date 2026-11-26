@@ -441,10 +441,31 @@ export interface TableOutcome {
   /** the chain-dependent decision the function exists for was made (taken, released, removed, chosen …) */
   advanced: boolean;
 }
+/**
+ * #4559 r9: the life of the holders a scenario names, decided by the test's seam (`hooks.pidAlive` / `hooks.groupAlive`)
+ * and never by a real `kill -0` of a pid that has exited — that pid (or pgid) taken again by another process under a
+ * heavy run read the holder alive, and a row's answer changed from run to run. `dead` is the pid (and pgid) the
+ * scenario's dead records name: read dead (`deadReadAs: 'dead'`, the table) or alive (`'alive'`, the control that the
+ * seam decides); `live` (the table's sleeper) is read alive. Any other pid / group (this process's own) is the real one.
+ */
+export interface Life {
+  dead: number;
+  pidAlive: (pid: number) => boolean;
+  groupAlive: (pgid: number) => boolean;
+}
+export function lifeOf(live: number, dead: number, deadReadAs: 'dead' | 'alive' = 'dead'): Life {
+  if (live === dead) throw new Error(`the live pid and the dead pid are one (${live})`);
+  const judge = (id: number, real: (n: number) => boolean): boolean => (id === dead ? deadReadAs === 'alive' : id === live ? true : real(id));
+  return { dead, pidAlive: (pid) => judge(pid, lockSync.pidAlive), groupAlive: (pgid) => judge(pgid, lockSync.groupAlive) };
+}
+/** The seam of a Life, as the core's hooks take it. */
+const lifeHooks = (life: Life) => ({ pidAlive: life.pidAlive, groupAlive: life.groupAlive });
+
 export interface TableScenario {
-  prepare: (root: string, live: number) => void;
-  /** `arm` turns the fault seam on (a handle's method: after its acquisition); `warn` collects the lines named. */
-  run: (m: Core, root: string, fault: FaultFn, arm: () => void, live: number, warn: WarnFn) => TableOutcome;
+  /** r9: `dead` is the pid (and pgid) the dead records name — its life is the run's Life, not a real kill -0 */
+  prepare: (root: string, live: number, dead: number) => void;
+  /** `arm` turns the fault seam on (a handle's method: after its acquisition); `warn` collects the lines named; `life` (r9) the holders' life. */
+  run: (m: Core, root: string, fault: FaultFn, arm: () => void, live: number, warn: WarnFn, life: Life) => TableOutcome;
   /** r8 (2): the preparation by a fault — these reaches answer `code` in every run of the scenario (a branch reached) */
   base?: { point: string; reach: number; code: string }[];
 }
@@ -784,9 +805,9 @@ export interface CellRun extends TableOutcome {
 }
 
 /** One run of a scenario with `plan` (null: every observation resolved as the filesystem answers, past `base`). */
-export function runCell(m: Core, scenario: TableScenario, live: number, plan: { point: string; k: number; code: string } | null): CellRun {
+export function runCell(m: Core, scenario: TableScenario, live: number, plan: { point: string; k: number; code: string } | null, life: Life = lifeOf(live, deadPid())): CellRun {
   const root = freshRoot('r8-table');
-  scenario.prepare(root, live);
+  scenario.prepare(root, live, life.dead);
   let armed = false;
   let fired = false;
   let pre: ChainState = chainState(root);
@@ -815,7 +836,7 @@ export function runCell(m: Core, scenario: TableScenario, live: number, plan: { 
   let out: TableOutcome;
   let error: string | null = null;
   try {
-    out = scenario.run(m, root, fault, arm, live, warn);
+    out = scenario.run(m, root, fault, arm, live, warn, life);
   } catch (err) {
     error = (err as Error).message ?? String(err);
     out = { outcome: `throws ${(err as NodeJS.ErrnoException).code ?? 'an error'}`, advanced: false };
@@ -827,7 +848,7 @@ export function runCell(m: Core, scenario: TableScenario, live: number, plan: { 
 }
 
 const AHEAD = 11 * 60_000;
-const aheadHooks = (fault: FaultFn) => ({ fault, now: () => Date.now() + AHEAD, startOf: () => 0 });
+const aheadHooks = (fault: FaultFn, life: Life) => ({ fault, now: () => Date.now() + AHEAD, startOf: () => 0, ...lifeHooks(life) });
 const unknownOf = (u?: { point: string; code: string }): string => (u ? ` (${u.point} ${u.code})` : '');
 const takeOutcome = (r: { acquired: boolean; unknown?: { point: string; code: string } }): TableOutcome => ({
   outcome: r.acquired ? 'acquired' : `not acquired${unknownOf(r.unknown)}`,
@@ -838,23 +859,23 @@ function writeBeacon(lockPath: string, record: Record<string, unknown>): void {
   fs.writeFileSync(path.join(lockPath, 'owner'), JSON.stringify({ host: HOST, acquiredAt: 0, v: 1, ...record }));
 }
 const OLD = 20 * 60_000;
-const PREPARE: Record<string, (root: string, live: number) => void> = {
+const PREPARE: Record<string, TableScenario['prepare']> = {
   fresh: () => {},
-  'dead-holder': (root) => {
+  'dead-holder': (root, _live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'D' } });
-    writeBeacon(lockPath, { pid: deadPid(), token: 'D', g: 1 });
+    writeGen(genDir, 1, { owner: { pid: dead, token: 'D' } });
+    writeBeacon(lockPath, { pid: dead, token: 'D', g: 1 });
   },
   'ownerless-old': (root) => void writeGen(lockOf(root).genDir, 1, { owner: null, mtimeAgoMs: OLD }),
-  'dead-group-holder': (root) => {
+  'dead-group-holder': (root, _live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), pgid: deadPid(), token: 'D' } });
-    writeBeacon(lockPath, { pid: deadPid(), pgid: deadPid(), token: 'D', g: 1 });
+    writeGen(genDir, 1, { owner: { pid: dead, pgid: dead, token: 'D' } });
+    writeBeacon(lockPath, { pid: dead, pgid: dead, token: 'D', g: 1 });
   },
-  'ended-old-tmp': (root) => {
+  'ended-old-tmp': (root, _live, dead) => {
     const { genDir } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'Y' }, end: 'released Y' });
-    writeGen(genDir, 2, { owner: { pid: deadPid(), token: 'Z' }, end: 'released Z' });
+    writeGen(genDir, 1, { owner: { pid: dead, token: 'Y' }, end: 'released Y' });
+    writeGen(genDir, 2, { owner: { pid: dead, token: 'Z' }, end: 'released Z' });
     fs.mkdirSync(`${genDir}.tmp`, { recursive: true });
     const tmp = path.join(`${genDir}.tmp`, 'W.g000000000009.owner.1');
     fs.writeFileSync(tmp, '{}');
@@ -862,55 +883,55 @@ const PREPARE: Record<string, (root: string, live: number) => void> = {
     fs.utimesSync(tmp, t, t);
   },
   // a holding whose records are all dead, its <lock> showing it (g=1)
-  'dead-holding': (root) => {
+  'dead-holding': (root, _live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' } });
-    writeBeacon(lockPath, { pid: deadPid(), token: 'T', g: 1 });
+    writeGen(genDir, 1, { owner: { pid: dead, token: 'T' } });
+    writeBeacon(lockPath, { pid: dead, token: 'T', g: 1 });
   },
   // r8 (2): the same, its generation made long ago (an owner read as missing is past the grace: the tomb's branch)
-  'dead-holding-old': (root) => {
+  'dead-holding-old': (root, _live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' }, mtimeAgoMs: OLD });
-    writeBeacon(lockPath, { pid: deadPid(), token: 'T', g: 1 });
+    writeGen(genDir, 1, { owner: { pid: dead, token: 'T' }, mtimeAgoMs: OLD });
+    writeBeacon(lockPath, { pid: dead, token: 'T', g: 1 });
   },
   // r8 (2): a holding whose records name a dead group (the generation's holder-group)
-  'dead-group-holding': (root) => {
+  'dead-group-holding': (root, _live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), pgid: deadPid(), token: 'T' } });
-    writeBeacon(lockPath, { pid: deadPid(), pgid: deadPid(), token: 'T', g: 1 });
+    writeGen(genDir, 1, { owner: { pid: dead, pgid: dead, token: 'T' } });
+    writeBeacon(lockPath, { pid: dead, pgid: dead, token: 'T', g: 1 });
   },
   // a2 P2-1: A → B → C; C (the <lock>'s record) dead, B's group alive
-  'live-handoff': (root, live) => {
+  'live-handoff': (root, live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'T' }, handoffs: [{ pid: live, pgid: live, token: 'HB' }, { pid: deadPid(), token: 'HC' }] });
-    writeBeacon(lockPath, { pid: deadPid(), token: 'HC', g: 1 });
+    writeGen(genDir, 1, { owner: { pid: dead, token: 'T' }, handoffs: [{ pid: live, pgid: live, token: 'HB' }, { pid: dead, token: 'HC' }] });
+    writeBeacon(lockPath, { pid: dead, token: 'HC', g: 1 });
   },
   // a2 P2-2 / b2 P2-1: the first owner alive (another process), its hand-off dead (the <lock>'s record)
-  'first-alive': (root, live) => {
+  'first-alive': (root, live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: live, token: 'T' }, handoffs: [{ pid: deadPid(), token: 'HB' }] });
-    writeBeacon(lockPath, { pid: deadPid(), token: 'HB', g: 1 });
+    writeGen(genDir, 1, { owner: { pid: live, token: 'T' }, handoffs: [{ pid: dead, token: 'HB' }] });
+    writeBeacon(lockPath, { pid: dead, token: 'HB', g: 1 });
   },
   'by-path': (root) => fs.mkdirSync(path.join(root, 'other'), { recursive: true }),
   // r8 (4): a generation's holder (D) and a <lock> of another record (L, an older version's): which one a read names
-  'gen-and-lock': (root) => {
+  'gen-and-lock': (root, _live, dead) => {
     const { genDir, lockPath } = lockOf(root);
-    writeGen(genDir, 1, { owner: { pid: deadPid(), token: 'D' } });
-    writeBeacon(lockPath, { pid: deadPid(), token: 'L' });
+    writeGen(genDir, 1, { owner: { pid: dead, token: 'D' } });
+    writeBeacon(lockPath, { pid: dead, token: 'L' });
   },
 };
 const scenario = (prepare: string, run: TableScenario['run'], base?: TableScenario['base']): TableScenario => ({ prepare: PREPARE[prepare], run, ...(base ? { base } : {}) });
-const take = (m: Core, root: string, fault: FaultFn, warn: WarnFn) => m.acquireMachineLockSync('x', { root, timeoutMs: 0, pollMs: 10, warn, hooks: aheadHooks(fault) });
-const steps = (m: Core, root: string, fault: FaultFn, warn: WarnFn) => {
-  const it = m.machineLockAcquisition('x', { root, timeoutMs: 0, pollMs: 10, warn, hooks: aheadHooks(fault) });
+const take = (m: Core, root: string, fault: FaultFn, warn: WarnFn, life: Life) => m.acquireMachineLockSync('x', { root, timeoutMs: 0, pollMs: 10, warn, hooks: aheadHooks(fault, life) });
+const steps = (m: Core, root: string, fault: FaultFn, warn: WarnFn, life: Life) => {
+  const it = m.machineLockAcquisition('x', { root, timeoutMs: 0, pollMs: 10, warn, hooks: aheadHooks(fault, life) });
   for (;;) {
     const step = it.next();
     if (step.done) return step.value;
   }
 };
 /** A holding taken with the seam off, then `arm`ed for the handle's method. */
-const held = (m: Core, root: string, fault: FaultFn, arm: () => void, warn: WarnFn, before?: (r: ReturnType<Core['acquireMachineLockSync']>) => void) => {
-  const r = take(m, root, fault, warn);
+const held = (m: Core, root: string, fault: FaultFn, arm: () => void, warn: WarnFn, life: Life, before?: (r: ReturnType<Core['acquireMachineLockSync']>) => void) => {
+  const r = take(m, root, fault, warn, life);
   if (!r.acquired) throw Object.assign(new Error('the scenario\'s take failed'), { code: 'SCENARIO' });
   before?.(r);
   arm();
@@ -933,10 +954,10 @@ const readHolderRun = (genOnly: boolean) => (m: Core, root: string, fault: Fault
   const h = read(lockOf(root).lockPath, { genOnly, warn, hooks: { fault } });
   return { outcome: `holder ${holderText(h)}`, advanced: h?.token === 'D' };
 };
-const D5 = (tokens: string[]) => (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, tokens, { timeoutMs: 0, warn, hooks: { fault } }), 'released'));
-const D6 = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), asHeadOutcome(m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, warn, hooks: { fault } }), 'removed'));
-const TAKE = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), takeOutcome(take(m, root, fault, warn)));
-const STEPS = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn): TableOutcome => (arm(), takeOutcome(steps(m, root, fault, warn)));
+const D5 = (tokens: string[]) => (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn, life: Life): TableOutcome => (arm(), asHeadOutcome(m.releaseAsHead(lockOf(root).lockPath, tokens, { timeoutMs: 0, warn, hooks: { fault, ...lifeHooks(life) } }), 'released'));
+const D6 = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn, life: Life): TableOutcome => (arm(), asHeadOutcome(m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, warn, hooks: { fault, ...lifeHooks(life) } }), 'removed'));
+const TAKE = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn, life: Life): TableOutcome => (arm(), takeOutcome(take(m, root, fault, warn, life)));
+const STEPS = (m: Core, root: string, fault: FaultFn, arm: () => void, _live: number, warn: WarnFn, life: Life): TableOutcome => (arm(), takeOutcome(steps(m, root, fault, warn, life)));
 /** r8 (2): the end's link answering ENOENT once (its tmp cleaned by age meanwhile): the branch that asks whether the generation is over. */
 const END_CLEANED = [{ point: 'end-link', reach: 1, code: 'ENOENT' }];
 /** r8 (2): the judgement's read of the owner answering ENOENT (gone between two reads of one poll): the owner-less branch. */
@@ -961,17 +982,17 @@ export const TABLE_SCENARIOS: Record<string, Record<string, TableScenario>> = {
     'ended-old-tmp': scenario('ended-old-tmp', STEPS),
   },
   'handle.release': {
-    own: scenario('fresh', (m, root, fault, arm, _live, warn) => releaseOutcome(held(m, root, fault, arm, warn).release())),
-    'own end-cleaned': scenario('fresh', (m, root, fault, arm, _live, warn) => releaseOutcome(held(m, root, fault, arm, warn).release()), END_CLEANED),
+    own: scenario('fresh', (m, root, fault, arm, _live, warn, life) => releaseOutcome(held(m, root, fault, arm, warn, life).release())),
+    'own end-cleaned': scenario('fresh', (m, root, fault, arm, _live, warn, life) => releaseOutcome(held(m, root, fault, arm, warn, life).release()), END_CLEANED),
     // r8 (2) (b3 P2-1): handed to a live group (the <lock>'s record: its group judged)
-    'handed-live': scenario('fresh', (m, root, fault, arm, live, warn) => releaseOutcome(held(m, root, fault, arm, warn, (r) => void r.handOff(live, live)).release())),
+    'handed-live': scenario('fresh', (m, root, fault, arm, live, warn, life) => releaseOutcome(held(m, root, fault, arm, warn, life, (r) => void r.handOff(live, live)).release())),
     // handed to a dead pid and group (the pid judged: needs-head)
-    'handed-dead': scenario('fresh', (m, root, fault, arm, _live, warn) => releaseOutcome(held(m, root, fault, arm, warn, (r) => void r.handOff(deadPid(), deadPid())).release())),
+    'handed-dead': scenario('fresh', (m, root, fault, arm, _live, warn, life) => releaseOutcome(held(m, root, fault, arm, warn, life, (r) => void r.handOff(life.dead, life.dead)).release())),
     // handed to this pid in a live group (b3 P2-1), then back to this process's own group: the generation's record the
     // <lock> does not show is judged by its group (§4.2)
-    'handed-back': scenario('fresh', (m, root, fault, arm, live, warn) =>
+    'handed-back': scenario('fresh', (m, root, fault, arm, live, warn, life) =>
       releaseOutcome(
-        held(m, root, fault, arm, warn, (r) => {
+        held(m, root, fault, arm, warn, life, (r) => {
           r.handOff(process.pid, live);
           r.handOff(process.pid, process.pid);
         }).release(),
@@ -979,14 +1000,14 @@ export const TABLE_SCENARIOS: Record<string, Record<string, TableScenario>> = {
     ),
   },
   'handle.handOff': {
-    own: scenario('fresh', (m, root, fault, arm, _live, warn) => {
-      const h = held(m, root, fault, arm, warn).handOff(process.pid, process.pid);
+    own: scenario('fresh', (m, root, fault, arm, _live, warn, life) => {
+      const h = held(m, root, fault, arm, warn, life).handOff(process.pid, process.pid);
       return { outcome: h.ok ? 'ok' : `not ok (${h.stage})`, advanced: h.ok };
     }),
   },
   'handle.setOwnerFields': {
-    own: scenario('fresh', (m, root, fault, arm, _live, warn) => {
-      const ok = held(m, root, fault, arm, warn).setOwnerFields({ phase: 'merge' });
+    own: scenario('fresh', (m, root, fault, arm, _live, warn, life) => {
+      const ok = held(m, root, fault, arm, warn, life).setOwnerFields({ phase: 'merge' });
       return { outcome: String(ok), advanced: ok };
     }),
   },
@@ -1057,16 +1078,29 @@ export interface TableRow {
   unknown: CellRun;
 }
 
+/**
+ * r9: the table's live holder — a sleeper of this test, killed by the caller. Never the pid the dead records name (that
+ * pid's number taken again by the sleeper would make one pid both): spawned again until it is another.
+ */
+export function tableSleeper(): { sleeper: ChildProcess; live: number } {
+  for (let i = 0; i < 5; i++) {
+    const sleeper = spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });
+    if (sleeper.pid !== deadPid()) return { sleeper, live: sleeper.pid as number };
+    sleeper.kill('SIGKILL');
+  }
+  throw new Error('the sleeper took the dead pid five times');
+}
+
 /** The table (r7 §1, r8 (2)): every scenario run resolved, and again with each reach of each point it reached absent and unknown. */
 export function buildTable(m: Core, scenarios = TABLE_SCENARIOS): TableRow[] {
-  const sleeper = spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });
-  const live = sleeper.pid as number;
+  const { sleeper, live } = tableSleeper();
+  const life = lifeOf(live, deadPid());
   try {
     const rows: TableRow[] = [];
     for (const fn of Object.keys(scenarios).sort()) {
       for (const name of Object.keys(scenarios[fn]).sort()) {
         const s = scenarios[fn][name];
-        const resolved = runCell(m, s, live, null);
+        const resolved = runCell(m, s, live, null, life);
         for (const point of [...resolved.hits.keys()].sort()) {
           const reached = resolved.hits.get(point) as number;
           for (let k = 1; k <= reached; k++) {
@@ -1077,8 +1111,8 @@ export function buildTable(m: Core, scenarios = TABLE_SCENARIOS): TableRow[] {
               k,
               reached,
               resolved,
-              absent: runCell(m, s, live, { point, k, code: 'ENOENT' }),
-              unknown: runCell(m, s, live, { point, k, code: 'EIO' }),
+              absent: runCell(m, s, live, { point, k, code: 'ENOENT' }, life),
+              unknown: runCell(m, s, live, { point, k, code: 'EIO' }, life),
             });
           }
         }

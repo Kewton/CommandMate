@@ -28,7 +28,10 @@ import {
   chainPoints,
   cleanAll,
   coreProcedures,
+  deadPid,
   heldBack,
+  lifeOf,
+  lockOf,
   namesPoint,
   nonBlocking,
   parseCore,
@@ -36,7 +39,10 @@ import {
   releasedWithoutEnd,
   renderOps,
   renderTable,
+  runCell,
+  tableSleeper,
   type OpRow,
+  type TableScenario,
   type TableRow,
 } from './lock-generation-4559-harness';
 import { CHAIN_OBSERVATION_POINTS, OBSERVATION_POINTS } from './lock-observation-points-4288';
@@ -600,4 +606,90 @@ describe('#4559 r8 (4): the named answers and the readHolder rows can be red (b3
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 60000);
+});
+
+describe('#4559 r9: the gate\'s holders live and die by the test\'s seam (hooks.pidAlive / groupAlive), never by a real kill -0', () => {
+  /** Two sleepers of this test: the table's live holder, and a live process whose pid the dead records name (a pid taken again). */
+  let live = 0;
+  let reused = 0;
+  const sleepers: { kill: (s: NodeJS.Signals) => boolean }[] = [];
+  beforeAll(() => {
+    const a = tableSleeper();
+    sleepers.push(a.sleeper);
+    live = a.live;
+    const b = spawn('sleep', ['300'], { detached: true, stdio: 'ignore' });
+    sleepers.push(b);
+    reused = b.pid as number;
+  });
+  afterAll(() => {
+    for (const s of sleepers) s.kill('SIGKILL');
+    cleanAll();
+  });
+  const all = (): [string, string, TableScenario][] => Object.entries(TABLE_SCENARIOS).flatMap(([fn, ss]) => Object.entries(ss).map(([name, s]) => [fn, name, s] as [string, string, TableScenario]));
+  const facts = (r: { outcome: string; changes: string[] }): string => `${r.outcome}; ${r.changes.join(', ')}`;
+  /** The scenarios whose dead records decide the answer: read dead, the function does what it exists for. */
+  const DECIDED_BY_THE_DEAD: [string, string][] = [
+    ['acquireMachineLockSync', 'dead-holder'],
+    ['acquireMachineLockSync', 'dead-group-holder'],
+    ['machineLockAcquisition', 'dead-holder'],
+    ['machineLockAcquisition', 'dead-group-holder'],
+    ['releaseAsHead', 'dead-holding'],
+    ['releaseAsHead', 'dead-group-holding'],
+    ['recoverIfDead', 'dead-holding'],
+    ['recoverIfDead', 'dead-group-holding'],
+  ];
+
+  it('every scenario answers the same, and changes the same, when the pid its dead records name is a live process read dead by the seam', () => {
+    expect(live).not.toBe(reused);
+    expect(lockSync.pidAlive(reused), 'the reused pid is a live process').toBe(true);
+    let compared = 0;
+    for (const [fn, name, s] of all()) {
+      const exited = runCell(lockSync, s, live, null, lifeOf(live, deadPid()));
+      const taken = runCell(lockSync, s, live, null, lifeOf(live, reused));
+      expect(facts(taken), `${fn} ${name}`).toBe(facts(exited));
+      expect([...taken.hits.entries()].sort(), `${fn} ${name}: the reaches`).toEqual([...exited.hits.entries()].sort());
+      compared++;
+    }
+    expect(compared).toBe(all().length);
+    expect(compared).toBeGreaterThanOrEqual(25);
+  });
+
+  it('precheck\'s red row (recoverIfDead dead-group-holding end-tmp#1 unknown) is reached and named with the dead pid a live process', () => {
+    const s = TABLE_SCENARIOS.recoverIfDead['dead-group-holding'];
+    const run = runCell(lockSync, s, live, { point: 'end-tmp', k: 1, code: 'EIO' }, lifeOf(live, reused));
+    expect(run.fired).toBe(true);
+    expect(namesPoint(run, 'end-tmp', 'EIO'), run.outcome).toBe(true);
+    expect(run.changes.some((c) => /^g\d+ end /.test(c)), run.changes.join(', ')).toBe(false);
+  });
+
+  it('the seam decides: the same scenarios with the dead records read alive do not do what the function exists for, and write no end', () => {
+    let decided = 0;
+    for (const [fn, name] of DECIDED_BY_THE_DEAD) {
+      const s = TABLE_SCENARIOS[fn][name];
+      const dead = runCell(lockSync, s, live, null, lifeOf(live, reused));
+      const alive = runCell(lockSync, s, live, null, lifeOf(live, reused, 'alive'));
+      expect(dead.advanced, `${fn} ${name} read dead: ${dead.outcome}`).toBe(true);
+      expect(alive.advanced, `${fn} ${name} read alive: ${alive.outcome}`).toBe(false);
+      expect(alive.changes.filter((c) => /^g1 end |^lock [A-Z]+ gone$/.test(c)), `${fn} ${name} read alive`).toEqual([]);
+      decided++;
+    }
+    expect(decided).toBe(DECIDED_BY_THE_DEAD.length);
+  });
+
+  it('control: without the seam, a real kill -0 of the reused pid keeps the holding — what the table read under a heavy run before r9', () => {
+    const s = TABLE_SCENARIOS.recoverIfDead['dead-group-holding'];
+    const unseamed: TableScenario = {
+      prepare: s.prepare,
+      run: (m, root, fault, arm, _live, warn) => {
+        arm();
+        const r = m.recoverIfDead(lockOf(root).lockPath, { timeoutMs: 0, warn, hooks: { fault } });
+        return { outcome: r.result, advanced: r.result === 'removed' };
+      },
+    };
+    const real = runCell(lockSync, unseamed, live, null, lifeOf(live, reused));
+    const seamed = runCell(lockSync, s, live, null, lifeOf(live, reused));
+    expect(seamed.outcome).toBe('removed');
+    expect(real.outcome).not.toBe('removed');
+    expect(real.hits.get('end-tmp') ?? 0, 'the real read does not reach end-tmp').toBe(0);
+  });
 });
