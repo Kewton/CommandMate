@@ -111,6 +111,8 @@ function bothRead(line: string): { shell: string; js: string } {
 }
 
 const ENDING_REPORT = /return line (DONE|WAIT|STOP)|SHAPE_OUTSIDE ending/;
+/** The NOT_STARTED status line itself (the ENDED line says "not NOT_STARTED" in its text). */
+const STATUS_NOT_STARTED = /\]: NOT_STARTED — /;
 
 describe('E1 (N-E): an ending on the pane is never followed by NOT_STARTED without --hooks', () => {
   for (const [issue, file] of Object.entries(PANES)) {
@@ -120,7 +122,9 @@ describe('E1 (N-E): an ending on the pane is never followed by NOT_STARTED witho
       const reported = lines.findIndex((line) => ENDING_REPORT.test(line));
 
       expect(reported, run.stdout).toBeGreaterThanOrEqual(0);
-      expect(lines.slice(reported).filter((line) => /NOT_STARTED/.test(line)), run.stdout).toEqual([]);
+      expect(lines.slice(reported).filter((line) => STATUS_NOT_STARTED.test(line)), run.stdout).toEqual([]);
+      // The status line names the ending instead, once per ending.
+      expect(lines.filter((line) => /\]: ENDED \(/.test(line)), run.stdout).toHaveLength(1);
       // Nothing claims completion from the ending (#4532: a report, not a verdict).
       expect(run.stdout).not.toMatch(/all 1 worker\(s\) complete/);
       expect(run.stdout).toContain(`monitor: reached --max-polls (${POLLS})`);

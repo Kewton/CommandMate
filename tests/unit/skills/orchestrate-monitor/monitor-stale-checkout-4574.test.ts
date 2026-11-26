@@ -68,6 +68,7 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync(REAL_GIT, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
     cwd,
     encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...childEnv(), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
   }).trim();
 }
@@ -289,12 +290,12 @@ describe('N-V: the rule the two readers share (behind / same / ahead / no ref)',
     const run = () => {
       throw new Error('spawn git ENOENT');
     };
-    expect(waitVerify.staleCheckoutWarning(os.tmpdir(), { tool: 'contract.mjs', run, env: {} })).toBeNull();
+    expect(waitVerify.staleCheckoutWarning(os.tmpdir(), { tool: 'contract.mjs', run, env: {} as NodeJS.ProcessEnv })).toBeNull();
   });
 
   it('under vitest (VITEST set) both stay silent, even behind', () => {
     const behind = fakeCheckout('behind');
     expect(shellNote(behind, { VITEST: 'true' })).toEqual({ stdout: '', status: 0 });
-    expect(waitVerify.staleCheckoutWarning(behind, { tool: 'monitor.sh', env: { VITEST: 'true' } })).toBeNull();
+    expect(waitVerify.staleCheckoutWarning(behind, { tool: 'monitor.sh', env: childEnv({ VITEST: 'true' }) })).toBeNull();
   }, 2 * HARD_TIMEOUT_MS);
 });
