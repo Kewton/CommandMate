@@ -804,7 +804,9 @@ describe('[#4604 r3 T-g] the question and the yes in two moves (outside the sear
   function ask(s: State, cn: CompName) {
     const d = decisionOf(s, cn);
     expect(d.ask).toBe(true);
-    return { d, visible: [...d.ids, ...d.seen.map((g) => 'g' + genNum(g))] };
+    // A store that reads as junk shows itself (the model's `J`): its yes is for that one send.
+    const junk = readRetargetStore(DRAFT[s.comps[cn].key!], { storage: storageOf(s, 'none') }).kind === 'junk';
+    return { d, visible: [...d.ids, ...d.seen.map((g) => 'g' + genNum(g)), ...(junk ? ['J'] : [])] };
   }
   /** The yes: sent when `covers` says so (then it covers what the question showed), else asked again. */
   function yes(s: State, cn: CompName, asked: ReturnType<typeof ask>, covers: Covers, tr: string): 'sent' | 'asked again' {

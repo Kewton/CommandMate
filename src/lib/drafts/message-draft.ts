@@ -432,6 +432,19 @@ export function decideRetarget(
 }
 
 /**
+ * Issue #4604 r3 (P1-1, 案 A'): whether a yes — the ids and the "unknown" generations its question
+ * showed — covers `decision` now: every id and every generation the check sees now was shown by that
+ * question. A mark born after the question (a text handed back into the same generation, a new
+ * generation) is not covered: the send asks again.
+ */
+export function retargetYesCovers(
+  yes: { ids: readonly string[]; seen: readonly string[] },
+  decision: Pick<RetargetDecision, 'ids' | 'seen'>,
+): boolean {
+  return decision.ids.every((id) => yes.ids.includes(id)) && decision.seen.every((generation) => yes.seen.includes(generation));
+}
+
+/**
  * Issue #4604 (Q2, 設計書 §3.6): move the draft `from` into `to` (the tile's instance went from the
  * roster and it fell back to another). Its marks first (`moveIn`: an "unknown" moves as one), then its
  * text — appended to `to`'s, never over it — and the composers showing `to` hear it; then `from`'s text

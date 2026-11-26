@@ -63,6 +63,7 @@ import {
   readRetargetTags,
   readRetargetUnstorable,
   releaseRetargetTags,
+  retargetYesCovers,
   subscribeRetargetedText,
   writeRetarget,
   type DraftScope,
@@ -261,10 +262,15 @@ const DRAFT_UNREADABLE_KEY = 'composer.draftUnreadable';
  */
 type RetargetPass = { seen: string[] | null } | null;
 
-/** Issue #4604: a one-send yes to a draft whose tags are not known — its To and what its question saw. */
+/**
+ * Issue #4604: a one-send yes to a draft whose tags are not known — its To and what its question saw.
+ * r3 (P1-1): the ids of the marks too — a text handed back after the question, into the same
+ * generation, is not covered (the list's `confirmation` holds its ids the same way).
+ */
 interface RetargetUnknownYes {
   target: string;
   seen: string[];
+  ids: string[];
 }
 
 /** The preview read, cut at `ms` (a read that does not settle in time is a read that failed). */
@@ -602,6 +608,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     confirmation: string | null;
     target: string;
     seen: string[];
+    ids: string[];
   } | null>(null);
   const retargetConfirmedRef = useRef<string | null>(null);
   const retargetUnreadableYesRef = useRef<RetargetUnknownYes | null>(null);
@@ -691,19 +698,20 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4604 (設計書 §3.4.1): the draft `key` is the key of the text sent (`draft.key`); its store is
   // read in its five shapes and this page's unstorable mark is looked at too ("unknown" asks every
   // time). Returns what the passing check saw (`RetargetPass`), or null when it asked. The one-send
-  // yes holds only while every "unknown" generation now is one its question saw (案 A').
+  // yes holds only while every "unknown" generation and every mark's id now is one its question saw
+  // (案 A', r3 P1-1: `retargetYesCovers`).
   const holdsRetargetedSend = useCallback((unreadableYes: RetargetUnknownYes | null, key: string): RetargetPass => {
     const current = { instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' };
     const decision = decideRetarget(readRetargetStore(key), currentRetargetTags(key), readRetargetUnstorable(key), current);
     if (!decision.ask) return { seen: null };
     if (decision.unknown) {
-      if (unreadableYes && decision.seen.every((generation) => unreadableYes.seen.includes(generation))) return { seen: decision.seen };
-      setRetargetAsk({ original: decision.original, current, confirmation: null, target: sendTargetKey, seen: decision.seen });
+      if (unreadableYes && retargetYesCovers(unreadableYes, decision)) return { seen: decision.seen };
+      setRetargetAsk({ original: decision.original, current, confirmation: null, target: sendTargetKey, seen: decision.seen, ids: decision.ids });
       return null;
     }
     const confirmation = `${sendTargetKey}\u0000${decision.ids.join('\u0000')}`;
     if (retargetConfirmedRef.current === confirmation) return { seen: [] };
-    setRetargetAsk({ original: decision.original, current, confirmation, target: sendTargetKey, seen: [] });
+    setRetargetAsk({ original: decision.original, current, confirmation, target: sendTargetKey, seen: [], ids: decision.ids });
     return null;
   }, [instanceId, cliToolId, currentRetargetTags, sendTargetKey]);
   /**
@@ -1322,7 +1330,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return;
     }
     if (asked?.confirmation) retargetConfirmedRef.current = asked.confirmation;
-    else if (asked) retargetUnreadableYesRef.current = { target: asked.target, seen: asked.seen };
+    else if (asked) retargetUnreadableYesRef.current = { target: asked.target, seen: asked.seen, ids: asked.ids };
     void submitMessage();
   }, [submitMessage, retargetAsk, holdsRetargetedSend, sendTargetKey, draft.key]);
   /** Issue #4535: no — nothing is sent, the draft stays. */
