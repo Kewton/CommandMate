@@ -1187,42 +1187,16 @@ export function resolveGenDir(lockPath, env = process.env, obs = makeObserver())
   const root = machineLockRootOf(env);
   const parent = obs.realpath('gen-realpath', path.dirname(lockPath));
   if (parent.state !== 'resolved') return { unknown: { point: 'gen-realpath', path: path.dirname(lockPath), code: parent.state === 'absent' ? 'ENOENT' : parent.code } };
-  const named = entrySpelling(obs, parent.path, path.basename(lockPath));
-  if (named.unknown) return { unknown: named.unknown };
-  const base = named.base;
+  // #4559 r6 (D2, #4559 comment 7186934798): the base name always in lower case — never the entry's spelling, no
+  // check of the filesystem. A case-insensitive FS: X.lock and x.lock are one lock, one chain even before it is
+  // there. A case-sensitive FS: two locks that differ in case only share one chain (they wait for each other).
+  const base = path.basename(lockPath).toLowerCase();
   if (base.endsWith('.lock')) {
     const realRoot = obs.realpath('gen-realpath', root);
     if (realRoot.state !== 'resolved') return { unknown: { point: 'gen-realpath', path: root, code: realRoot.state === 'absent' ? 'ENOENT' : realRoot.code } };
     if (parent.path === realRoot.path) return { genDir: path.join(root, `${base.slice(0, -'.lock'.length)}.gen`) };
   }
   return { genDir: path.join(root, 'by-path', `${byPathHash(`${parent.path}/${base}`)}.gen`) };
-}
-
-/**
- * #4559 r6 (D2, #4559 comment 7185752051, plan (i)): the base name of the lock as its parent's entry spells it.
- * The lock there (`gen-base-lstat`): the parent is read (`gen-base-list`) and the entry that is the same directory
- * (dev and ino) gives the spelling — on a filesystem that does not tell case apart `X.lock` and `x.lock` are one
- * entry, on one that does they are two entries and stay two locks (no check of the filesystem). The lock not
- * there: the name as given (nothing to read the spelling from). A read that fails is unknown: no chain (C7-I2).
- *
- * @returns {{ base: string } | { unknown: { point: string, path: string, code: string } }}
- */
-function entrySpelling(obs, dir, base) {
-  const file = path.join(dir, base);
-  const st = obs.lstat('gen-base-lstat', file);
-  if (st.state === 'absent') return { base };
-  if (st.state === 'unknown') return { unknown: { point: 'gen-base-lstat', path: file, code: st.code } };
-  const listed = obs.list('gen-base-list', dir);
-  if (listed.state !== 'listed') return { unknown: { point: 'gen-base-list', path: dir, code: listed.state === 'absent' ? 'ENOENT' : listed.code } };
-  if (listed.names.includes(base)) return { base };
-  for (const name of listed.names) {
-    if (name.toLowerCase() !== base.toLowerCase()) continue;
-    const other = obs.lstat('gen-base-lstat', path.join(dir, name));
-    if (other.state === 'unknown') return { unknown: { point: 'gen-base-lstat', path: path.join(dir, name), code: other.code } };
-    if (other.state !== 'absent' && other.dev === st.dev && other.ino === st.ino) return { base: name };
-  }
-  // The lock is there and no entry of the listing is it (removed and made again meanwhile …): read again next poll.
-  return { unknown: { point: 'gen-base-list', path: dir, code: 'ESTALE' } };
 }
 
 /**
