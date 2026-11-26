@@ -384,9 +384,10 @@ export function estimateRelatedTests(worktree, sources) {
 
 /**
  * The content of a test call's first argument when it is a string literal
- * (`'…'`, `"…"`, `` `…` ``), or null when the call has no readable name.
- * Hand-read rather than matched, so an escaped quote does not end the literal
- * early and an unterminated one yields null (a line compared whole).
+ * standing as that whole argument (`'…'`, `"…"`, `` `…` ``), or null when it
+ * is not — `'a' + B`, a call, or a template with `${…}` is compared as the
+ * whole line. Hand-read rather than matched, so an escaped quote does not end
+ * the literal early and an unterminated one yields null.
  */
 function firstStringLiteral(text) {
   const opening = /^\s*(['"`])/.exec(text);
@@ -399,7 +400,11 @@ function firstStringLiteral(text) {
       out += ch + (text[i + 1] ?? '');
       i++;
     } else if (ch === quote) {
-      return out;
+      // Only a literal that is the first argument on its own names the test:
+      // the next token after it must be the argument separator or the call's end.
+      const rest = text.slice(i + 1).trimStart();
+      if (!rest.startsWith(',') && !rest.startsWith(')')) return null;
+      return quote === '`' && out.includes('${') ? null : out;
     } else {
       out += ch;
     }

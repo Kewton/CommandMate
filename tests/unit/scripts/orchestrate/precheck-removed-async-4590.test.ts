@@ -86,3 +86,35 @@ describe('countRemovedTests: a test kept while only its function shape changes (
     ).toEqual(["it.each([1, 2])('case %i', (n) => {"]);
   });
 });
+
+describe('countRemovedTests: only a literal standing as the whole first argument names a test (#4590 review)', () => {
+  it('R9 (positive): counts a concatenated first argument (not a literal on its own)', () => {
+    expect(
+      countRemovedTests(diff("-  it('loads ' + FILE_A, () => {", "+  it('loads ' + FILE_B, () => {"))
+    ).toEqual(["it('loads ' + FILE_A, () => {"]);
+  });
+
+  it('R10 (positive): counts a template literal with ${…} in the name', () => {
+    expect(
+      countRemovedTests(
+        diff(
+          '-  it(`a ${x ? `b` : `c`} one`, () => {',
+          '+  it(`a ${x ? `b` : `c`} two`, () => {'
+        )
+      )
+    ).toEqual(['it(`a ${x ? `b` : `c`} one`, () => {']);
+  });
+
+  it('R11: reads an escaped quote as part of the name, not as the end of the literal', () => {
+    expect(countRemovedTests(diff("-  it('it\\'s ok', () => {", "+  it('it\\'s ok', async () => {"))).toEqual([]);
+    expect(countRemovedTests(diff("-  it('it\\'s ok', () => {", "+  it('it\\'s bad', () => {"))).toEqual([
+      "it('it\\'s ok', () => {",
+    ]);
+  });
+
+  it('R12: compares a template literal with ${…} as the whole line (N3 side)', () => {
+    expect(countRemovedTests(diff('-  it(`case ${n}`, () => {', '+  it(`case ${n}`, async () => {'))).toEqual([
+      'it(`case ${n}`, () => {',
+    ]);
+  });
+});
