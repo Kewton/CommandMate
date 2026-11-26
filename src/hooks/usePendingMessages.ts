@@ -390,7 +390,9 @@ function computeReconciliation(
   const reconciledTempIds = new Set<string>();
   const consumedServerIds = new Set<string>();
   // Issue #4503: an `unknown` row's echo proves it was delivered after all.
-  const sending = pending.filter((p) => p.status === 'sending' || p.status === 'unknown');
+  // Issue #4606 r4: a row a send gate held back sent nothing on its latest attempt (and its earlier one
+  // was answered as not sent): a user message of the same text is another send, never its echo.
+  const sending = pending.filter((p) => !p.gateHeld && (p.status === 'sending' || p.status === 'unknown'));
   if (sending.length === 0) return { reconciledTempIds, consumedServerIds };
 
   const serverUser = serverMessages
