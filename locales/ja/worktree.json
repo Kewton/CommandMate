@@ -97,7 +97,8 @@
       "retargetConfirmYes": "送る",
       "retargetConfirmNo": "やめる",
       "retargetConfirmUnreadable": "この本文が別の宛先へ送る途中で止まったものかどうか、確かめられませんでした（宛先の確認を読めません）。{current} へ送りますか？",
-      "retargetUnstored": "宛先の確認を保存できません。ほかのタブ・再読み込みの後は確認なしに送られることがあります"
+      "retargetUnstored": "宛先の確認を保存できません。ほかのタブ・再読み込みの後は確認なしに送られることがあります",
+      "retargetPartiallyStored": "宛先の確認を保存に書けませんでした。このタブとほかのタブは、送る前にもう一度確かめます"
     },
     "retrySending": "メッセージを再送信",
     "discard": "破棄",

@@ -59,6 +59,7 @@ import {
   getRetargetTagKey,
   mergeRetargetTags,
   newRetargetTag,
+  parseRetargetStore,
   readRetargetStore,
   readRetargetTags,
   readRetargetUnstorable,
@@ -67,6 +68,7 @@ import {
   subscribeRetargetedText,
   writeRetarget,
   type DraftScope,
+  type RetargetOp,
   type RetargetTag,
   type RetargetTarget,
   type RetargetWriteResult,
@@ -262,6 +264,11 @@ const START_PREVIEW_REFRESH_MS = 10_000;
 const RETARGET_CONFIRM_UNREADABLE_KEY = 'conversation.sendTargetChanged.retargetConfirmUnreadable';
 /** Issue #4604: the toast when not even the "unknown" of a draft's tags could be stored. */
 const RETARGET_UNSTORED_KEY = 'conversation.sendTargetChanged.retargetUnstored';
+/**
+ * Issue #4604 accept r1 (F2): the toast when the tags could not be written as a list and only the short
+ * "unknown" went in — every composer, this tab's and another's, asks before sending it.
+ */
+const RETARGET_PARTIALLY_STORED_KEY = 'conversation.sendTargetChanged.retargetPartiallyStored';
 /** Issue #4604: the toast when the previous draft's waiting save could not be written at a switch. */
 const PREVIOUS_DRAFT_NOT_SAVED_KEY = 'composer.previousDraftNotSaved';
 /** Issue #4604: the notice when the draft could not be read (the composer is left empty). */
@@ -368,6 +375,25 @@ function migrateLegacyDraftKey(worktreeId: string): void {
 /** Issue #4419: text added to a draft — the whole draft when it is empty, else after a blank line. */
 function appendDraftText(draft: string, text: string): string {
   return draft.trim() === '' ? text : `${draft}\n\n${text}`;
+}
+
+/**
+ * Issue #4604 accept r1c (案 i): the tags a composer holds, and which of them it took in from another
+ * tab's write (`adopted`, their ids) — those ask in it, but its own send does not let them go from the
+ * store and it does not write them back; only the ones it received itself (its 409, its handed-back text,
+ * its restore) are its to let go and to write back.
+ */
+interface HeldRetargetTags {
+  key: string;
+  tags: RetargetTag[];
+  adopted: string[];
+}
+
+/** Issue #4604 accept r1c: the held tags this composer received itself (not the ones it took in). */
+function ownRetargetTags(held: HeldRetargetTags): RetargetTag[] {
+  if (held.adopted.length === 0) return held.tags;
+  const adopted = new Set(held.adopted);
+  return held.tags.filter((tag) => !adopted.has(tag.id));
 }
 
 /** Issue #4604: whether every tag `held` is in the store of `key` already (as a list or in its "unknown"). */
@@ -484,9 +510,23 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4604: the composer's toasts about its store — the caller's surface, else the app's.
   const { showToast: appToast } = useToast();
   const notify = showToast ?? appToast;
-  const notifyRetargetWrite = useCallback((result: RetargetWriteResult) => {
+  // Issue #4604 accept r1 (F2): `shortUnknown` — only the short "unknown" went in (its own sentence).
+  const notifyRetargetWrite = useCallback((result: RetargetWriteResult, shortUnknown = false) => {
     if (result === 'unstored') notify(t(RETARGET_UNSTORED_KEY), 'warning');
+    else if (shortUnknown) notify(t(RETARGET_PARTIALLY_STORED_KEY), 'warning');
   }, [notify, t]);
+  // Issue #4604 accept r1 (F2): for the handed-back text's listener (its subscription stays on `draftKey`).
+  const notifyRetargetWriteRef = useRef(notifyRetargetWrite);
+  notifyRetargetWriteRef.current = notifyRetargetWrite;
+  /** Issue #4604 accept r1 (F2): a write through the one road, told as {@link notifyRetargetWrite} says. */
+  const writeRetargetTold = useCallback((key: string, op: RetargetOp) => {
+    let shortUnknown = false;
+    const onShortUnknown = () => {
+      shortUnknown = true;
+    };
+    const result = writeRetarget(key, op, { onShortUnknown });
+    notifyRetargetWrite(result, shortUnknown);
+  }, [notifyRetargetWrite]);
 
   // Hooks for slash command functionality
   // Issue #4: Pass cliToolId to filter commands by CLI tool
@@ -627,11 +667,15 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // composer's draft (`key`). Held here — the state is what decides — and next to the draft
   // (`<draftKey>:retarget`), so they move with it (a reload, the tile's instance switch). Only this
   // composer's own send lets them go; another composer, another tab, time or count never does.
-  const retargetTagsRef = useRef<{ key: string; tags: RetargetTag[] }>({ key: '', tags: [] });
+  // Issue #4604 accept r1c (案 i): each tag's origin — received here, or taken in (`adopted`) from another
+  // tab's write; only the received ones are this composer's to let go (its send) and to write back.
+  const retargetTagsRef = useRef<HeldRetargetTags>({ key: '', tags: [], adopted: [] });
   // Issue #4604 r3 (P1-2, the extension of `retargetTagsRef` the PM allowed): the "unknown" generation
   // this composer restored its draft's text under — held as its tags are, so another tab's send that let
   // it go from the store does not let this composer send the text unasked (written back on `storage`).
-  const retargetUnknownRef = useRef<{ key: string; generation: string } | null>(null);
+  // r1c (案 i): `adopted` — taken in from another tab's write (it asks here; its own send does not let it
+  // go from the store, and it is not written back).
+  const retargetUnknownRef = useRef<{ key: string; generation: string; adopted: boolean } | null>(null);
   const heldUnknownOf = useCallback((key: string): string | null => {
     const held = retargetUnknownRef.current;
     return held !== null && held.key === key ? held.generation : null;
@@ -747,8 +791,10 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     if (isSendHeld?.({ instanceId: instanceId || cliToolId || 'claude', cliToolId: cliToolId || 'claude' })) return null;
     const pass = holdsRetargetedSend(unreadableYes, key);
     if (pass === null) return null;
-    return { seen: pass.seen, ids: currentRetargetTags(key).map((tag) => tag.id) };
-  }, [isSendHeld, instanceId, cliToolId, holdsRetargetedSend, currentRetargetTags]);
+    // r1c (案 i): the ids this send lets go are the ones this composer received (not the ones it took in).
+    const held = retargetTagsRef.current;
+    return { seen: pass.seen, ids: held.key === key ? ownRetargetTags(held).map((tag) => tag.id) : [] };
+  }, [isSendHeld, instanceId, cliToolId, holdsRetargetedSend]);
   /** r3c: the composer's one `POST /send` — only through {@link checkGate}; `sent: false` when it did not go. */
   const postThroughGate = useCallback(async (
     key: string,
@@ -770,25 +816,63 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4604 (N-7・N-11): with the generations its question saw (`seen`); called with no ids too.
   const releaseSentTags = useCallback((key: string, ids: readonly string[], seen: readonly string[] | null) => {
     if (ids.length === 0 && (seen === null || seen.length === 0)) return;
-    releaseRetargetTags(key, ids, seen);
-    // r3 (P1-2): the held "unknown" goes with the generations this send's question saw.
+    // r1c (案 i): an "unknown" this composer took in from another tab is not let go from the store by its
+    // send (its question saw it, so it goes from this composer's state below).
     const heldUnknown = retargetUnknownRef.current;
-    if (heldUnknown !== null && heldUnknown.key === key && seen !== null && seen.includes(heldUnknown.generation)) {
+    const mineUnknown = heldUnknown !== null && heldUnknown.key === key ? heldUnknown : null;
+    const storeSeen = seen !== null && mineUnknown !== null && mineUnknown.adopted ? seen.filter((generation) => generation !== mineUnknown.generation) : seen;
+    if (ids.length > 0 || (storeSeen !== null && storeSeen.length > 0)) releaseRetargetTags(key, ids, storeSeen);
+    // r3 (P1-2): the held "unknown" goes with the generations this send's question saw.
+    if (mineUnknown !== null && seen !== null && seen.includes(mineUnknown.generation)) {
       retargetUnknownRef.current = null;
     }
     const held = retargetTagsRef.current;
     if (held.key === key) {
+      // `ids` are the received ones only: the tags taken in stay (they ask again only for another To).
       const gone = new Set(ids);
-      retargetTagsRef.current = { key, tags: held.tags.filter((tag) => !gone.has(tag.id)) };
+      retargetTagsRef.current = { key, tags: held.tags.filter((tag) => !gone.has(tag.id)), adopted: held.adopted };
     }
   }, []);
   /** Issue #4535 r7: a tag for this composer's draft `key` — kept in its state (if shown) and stored. */
   const keepRetargetTag = useCallback((key: string, tag: RetargetTag) => {
     const held = retargetTagsRef.current;
-    if (held.key === key) retargetTagsRef.current = { key, tags: mergeRetargetTags(held.tags, [tag]) };
+    if (held.key === key) retargetTagsRef.current = { key, tags: mergeRetargetTags(held.tags, [tag]), adopted: held.adopted.filter((id) => id !== tag.id) };
     // Issue #4604 (a P2-2・V2-A): through the one road — what cannot be kept as a list is kept "unknown".
-    notifyRetargetWrite(writeRetarget(key, { kind: 'add', tags: [tag] }));
-  }, [notifyRetargetWrite]);
+    writeRetargetTold(key, { kind: 'add', tags: [tag] });
+  }, [writeRetargetTold]);
+  /**
+   * Issue #4604 accept r1d (案 A, INV-S1 の広げ): this composer is about to write its text under `key` (the
+   * debounced save, the tile's switch with a save waiting) — the marks it took in for that draft that the
+   * store does not hold go in first, with the ones it holds, through the one road, and become its own (its
+   * send lets them go). While the store holds the text, it holds the text's marks: whoever opens it asks.
+   * Marks it took in that the store holds already stay taken in (the store asks for them).
+   */
+  const writeTakenInBeforeText = useCallback((key: string) => {
+    const held = retargetTagsRef.current;
+    if (held.key === key && held.adopted.length > 0) {
+      const stored = readRetargetStore(key);
+      const storedIds = new Set(stored.kind === 'list' || stored.kind === 'unknown' ? stored.tags.map((tag) => tag.id) : []);
+      const missing = new Set(held.adopted.filter((id) => !storedIds.has(id)));
+      if (missing.size > 0) {
+        writeRetargetTold(key, { kind: 'writeBack', tags: held.tags });
+        retargetTagsRef.current = { key, tags: held.tags, adopted: held.adopted.filter((id) => !missing.has(id)) };
+      }
+    }
+    const heldUnknown = retargetUnknownRef.current;
+    if (heldUnknown !== null && heldUnknown.key === key && heldUnknown.adopted) {
+      const stored = readRetargetStore(key);
+      if (stored.kind === 'absent' || stored.kind === 'list') {
+        const now = retargetTagsRef.current;
+        writeRetargetTold(key, {
+          kind: 'moveIn',
+          from: { kind: 'unknown', generation: heldUnknown.generation, tags: now.key === key ? now.tags : [] },
+          fromUnstorable: null,
+        });
+        const after = readRetargetStore(key);
+        retargetUnknownRef.current = after.kind === 'unknown' ? { key, generation: after.generation, adopted: false } : heldUnknown;
+      }
+    }
+  }, [writeRetargetTold]);
   /**
    * Issue #4535 r5 (review H1, 段 2 §3.2), r7 (INV-V2a): the awaited road's answer from the send fence.
    * The text stays in the draft (it never left it); for `not_sent` with its original target named
@@ -875,9 +959,14 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // stored with that draft (written back, should another tab have taken them from the store).
     // Issue #4604 (INV-S1): the marks first, then the text — through the one road (an unreadable
     // store, or one that cannot take them, is left "unknown").
+    // r1c (案 i): only the tags this composer received (the ones it took in are not written back) —
+    // r1d (案 A, INV-S1 の広げ): unless the previous draft's waiting save writes its text now: then the
+    // marks it took in that the store lacks go first, and are its own.
+    if (draftScope === 'instance' && pendingSave && pendingSave.key !== draftKey) writeTakenInBeforeText(pendingSave.key);
     const heldTags = retargetTagsRef.current;
-    if (heldTags.key !== draftKey && heldTags.key !== '' && heldTags.tags.length > 0) {
-      notifyRetargetWrite(writeRetarget(heldTags.key, { kind: 'writeBack', tags: heldTags.tags }));
+    const heldOwn = ownRetargetTags(heldTags);
+    if (heldTags.key !== draftKey && heldTags.key !== '' && heldOwn.length > 0) {
+      writeRetargetTold(heldTags.key, { kind: 'writeBack', tags: heldOwn });
     }
     // Issue #4419: the tile switched instance with a save still waiting — write it under the key it
     // was typed for. Instance scope only: the worktree screen's split scope drops it as before, and
@@ -910,16 +999,19 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       return { key: draftKey, text: typed ? appendDraftText(base, typed) : base };
     });
     setDraftUnreadableKey(unreadable ? draftKey : null);
-    retargetTagsRef.current = {
-      key: draftKey,
-      tags: heldTags.key === draftKey ? mergeRetargetTags(heldTags.tags, readRetargetTags(draftKey)) : readRetargetTags(draftKey),
-    };
+    // r1c (案 i): what the restore reads is received here (a tag it had taken in and reads now is too).
+    const restoredTags = readRetargetTags(draftKey);
+    const restoredIds = new Set(restoredTags.map((tag) => tag.id));
+    retargetTagsRef.current =
+      heldTags.key === draftKey
+        ? { key: draftKey, tags: mergeRetargetTags(heldTags.tags, restoredTags), adopted: heldTags.adopted.filter((id) => !restoredIds.has(id)) }
+        : { key: draftKey, tags: restoredTags, adopted: [] };
     // r3 (P1-2): the text restored under an "unknown" — this composer holds its generation.
     const storedMarks = readRetargetStore(draftKey);
     const heldUnknown = retargetUnknownRef.current;
     retargetUnknownRef.current =
       storedMarks.kind === 'unknown'
-        ? { key: draftKey, generation: storedMarks.generation }
+        ? { key: draftKey, generation: storedMarks.generation, adopted: false }
         : heldUnknown !== null && heldUnknown.key === draftKey
           ? heldUnknown
           : null;
@@ -931,7 +1023,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
       draftSaveTimerRef.current = null;
     };
-  // `notify` / `notifyRetargetWrite` are read at the switch only (a new toast surface is not a switch).
+  // `notify` / `writeRetargetTold` are read at the switch only (a new toast surface is not a switch).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey, draftScope, worktreeId, splitIndex, setResendConfirmedBoth]);
 
@@ -959,9 +1051,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // already has both (`returnRetargetedText`).
   useEffect(
     () =>
-      subscribeRetargetedText(draftKey, ({ text, tag }) => {
+      subscribeRetargetedText(draftKey, ({ text, tag }, info) => {
+        // Issue #4604 accept r1 (F2): its tag went in only as the short "unknown" — said once.
+        if (info.takeShortUnknown()) notifyRetargetWriteRef.current('unknown-stored', true);
         const held = retargetTagsRef.current;
-        if (held.key === draftKey) retargetTagsRef.current = { key: draftKey, tags: mergeRetargetTags(held.tags, [tag]) };
+        if (held.key === draftKey) retargetTagsRef.current = { key: draftKey, tags: mergeRetargetTags(held.tags, [tag]), adopted: held.adopted.filter((id) => id !== tag.id) };
         const pendingSave = pendingDraftSaveRef.current;
         if (pendingSave && pendingSave.key === draftKey) {
           pendingDraftSaveRef.current = { key: draftKey, message: appendDraftText(pendingSave.message, text) };
@@ -979,34 +1073,54 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const tagKey = getRetargetTagKey(draftKey);
     const onStorage = (event: StorageEvent) => {
       if (event.key !== tagKey && event.key !== null) return;
+      // Issue #4604 accept r1c (F1, 案 i): another tab wrote marks for this draft — they are taken in (from
+      // the value the event carries, never a fresh read: a release right after the write leaves nothing to
+      // read). They ask here; this composer's own send does not let them go, and it does not write them back.
+      if (event.key === tagKey) {
+        const incoming = parseRetargetStore(event.newValue);
+        const before = retargetTagsRef.current;
+        if ((incoming.kind === 'list' || incoming.kind === 'unknown') && before.key === draftKey) {
+          const heldIds = new Set(before.tags.map((tag) => tag.id));
+          const taken = incoming.tags.filter((tag) => !heldIds.has(tag.id));
+          if (taken.length > 0) {
+            retargetTagsRef.current = { key: draftKey, tags: [...before.tags, ...taken], adopted: [...before.adopted, ...taken.map((tag) => tag.id)] };
+          }
+        }
+        const unknownBefore = retargetUnknownRef.current;
+        if (incoming.kind === 'unknown' && (unknownBefore === null || unknownBefore.key !== draftKey)) {
+          retargetUnknownRef.current = { key: draftKey, generation: incoming.generation, adopted: true };
+        }
+      }
       const held = retargetTagsRef.current;
+      const own = held.key === draftKey ? ownRetargetTags(held) : [];
       // r3 (P1-2): this composer holds the text's "unknown" and the store no longer says "unknown" (the
       // key went, or a list replaced it): written back as an "unknown" — through the one road, as a move
       // of an "unknown" into this key is (設計 §3.2's moveIn row: a new generation over what is there).
       // A store still saying "unknown" (any generation) is left alone: it asks already, and two tabs never
       // write back and forth.
+      // r1c (案 i): only an "unknown" this composer received is written back.
       const heldUnknown = retargetUnknownRef.current;
-      if (heldUnknown !== null && heldUnknown.key === draftKey) {
+      if (heldUnknown !== null && heldUnknown.key === draftKey && !heldUnknown.adopted) {
         const stored = readRetargetStore(draftKey);
         if (stored.kind === 'absent' || stored.kind === 'list') {
-          notifyRetargetWrite(writeRetarget(draftKey, {
+          writeRetargetTold(draftKey, {
             kind: 'moveIn',
-            from: { kind: 'unknown', generation: heldUnknown.generation, tags: held.key === draftKey ? held.tags : [] },
+            from: { kind: 'unknown', generation: heldUnknown.generation, tags: own },
             fromUnstorable: null,
-          }));
+          });
           const after = readRetargetStore(draftKey);
-          if (after.kind === 'unknown') retargetUnknownRef.current = { key: draftKey, generation: after.generation };
+          if (after.kind === 'unknown') retargetUnknownRef.current = { key: draftKey, generation: after.generation, adopted: false };
           return;
         }
       }
-      if (held.key !== draftKey || held.tags.length === 0) return;
+      if (own.length === 0) return;
       // Issue #4604 (N-2・N-10): through the one road — junk or a store that throws is left "unknown".
-      if (heldTagsAreStored(draftKey, held.tags)) return;
-      notifyRetargetWrite(writeRetarget(draftKey, { kind: 'writeBack', tags: held.tags }));
+      if (heldTagsAreStored(draftKey, own)) return;
+      writeRetargetTold(draftKey, { kind: 'writeBack', tags: own });
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [draftKey, notifyRetargetWrite]);
+  }, [draftKey, writeRetargetTold]);
 
   // Debounced save of draft message to localStorage (per-split key, Issue #728; per-instance key
   // for the tile, Issue #4419)
@@ -1021,9 +1135,13 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       pendingDraftSaveRef.current = null;
       // Issue #4535 r7 (INV-V2b): the tags this composer holds are stored with the draft (written back
       // should another tab have taken them). Issue #4604 (INV-S1): the marks first, then the text.
+      // r1c (案 i): the received ones only (the ones taken in are not written back) — r1d (案 A, INV-S1 の
+      // 広げ): this save writes the text, so the ones taken in that the store lacks go first, as its own.
+      if (pendingSave) writeTakenInBeforeText(pendingSave.key);
       const held = retargetTagsRef.current;
-      if (pendingSave && held.key === pendingSave.key && held.tags.length > 0 && !heldTagsAreStored(held.key, held.tags)) {
-        notifyRetargetWrite(writeRetarget(held.key, { kind: 'writeBack', tags: held.tags }));
+      const own = ownRetargetTags(held);
+      if (pendingSave && held.key === pendingSave.key && own.length > 0 && !heldTagsAreStored(held.key, own)) {
+        writeRetargetTold(held.key, { kind: 'writeBack', tags: own });
       }
       if (pendingSave) writeDraft(pendingSave.key, pendingSave.message);
     }, 500);

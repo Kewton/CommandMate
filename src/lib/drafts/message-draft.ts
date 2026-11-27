@@ -243,6 +243,12 @@ export interface RetargetEnv {
    * could be stored, hands nothing back ({@link returnRetargetedText}): there is no text to mark.
    */
   markPage?: boolean;
+  /**
+   * Issue #4604 accept r1 (F2): called when the value could not be written and only the short "unknown"
+   * went in (step 4) — the tags asked for are not in the store as asked (every reader asks, but the
+   * person is told: `retargetPartiallyStored`). The return value stays `'unknown-stored'`.
+   */
+  onShortUnknown?: () => void;
 }
 
 /** Issue #4604: this page's unstorable mark for `draftKey` (its generation), if any. */
@@ -258,6 +264,14 @@ export function readRetargetStore(draftKey: string, env: RetargetEnv = {}): Reta
   } catch {
     return { kind: 'throws' };
   }
+  return parseRetargetStore(raw);
+}
+
+/**
+ * Issue #4604 accept r1c (F1): a raw `<draftKey>:retarget` value in the shapes {@link readRetargetStore}
+ * reads (a `StorageEvent`'s `newValue`: null is `absent`).
+ */
+export function parseRetargetStore(raw: string | null): RetargetStoreRead {
   if (raw === null) return { kind: 'absent' };
   let parsed: unknown;
   try {
@@ -390,6 +404,7 @@ export function writeRetarget(draftKey: string, op: RetargetOp, env: RetargetEnv
   }
   try {
     storage.setItem(tagKey, encodeRetargetValue({ kind: 'unknown', generation: newGeneration(), tags: [] }));
+    env.onShortUnknown?.();
     return 'unknown-stored';
   } catch {
     if (env.markPage !== false) unstorable.set(draftKey, newGeneration());
@@ -485,7 +500,12 @@ export function moveDraft(from: string, to: string): MoveDraftResult {
   return 'moved';
 }
 
-type RetargetedTextListener = (returned: RetargetedText) => void;
+/**
+ * Issue #4604 accept r1 (F2): `takeShortUnknown()` — true, once for all the composers hearing it, when the
+ * tag went into the store only as the short "unknown" (the one that takes it says so with
+ * `retargetPartiallyStored`, so two composers of the draft do not both say it).
+ */
+type RetargetedTextListener = (returned: RetargetedText, info: { takeShortUnknown: () => boolean }) => void;
 const retargetedTextListeners = new Map<string, Set<RetargetedTextListener>>();
 
 /**
@@ -521,7 +541,11 @@ export function returnRetargetedText(draftKey: string, returned: RetargetedText)
   // Issue #4604: through the one road — a tag that went in only as "unknown" still asks everywhere;
   // one that could not be stored at all hands nothing back (H4), so there is nothing for this page to
   // mark either (`markPage: false`: the text is nowhere).
-  if (writeRetarget(draftKey, { kind: 'add', tags: [tag] }, { markPage: false }) === 'unstored') return false;
+  let shortUnknown = false;
+  const onShortUnknown = () => {
+    shortUnknown = true;
+  };
+  if (writeRetarget(draftKey, { kind: 'add', tags: [tag] }, { markPage: false, onShortUnknown }) === 'unstored') return false;
   const listeners = retargetedTextListeners.get(draftKey);
   try {
     const current = window.localStorage.getItem(draftKey) ?? '';
@@ -531,6 +555,13 @@ export function returnRetargetedText(draftKey: string, returned: RetargetedText)
     // the tag stays (no roll-back) — it asks once more at most.
     if (!listeners || listeners.size === 0) return false;
   }
-  listeners?.forEach((listener) => listener({ text, tag }));
+  const info = {
+    takeShortUnknown: () => {
+      const told = shortUnknown;
+      shortUnknown = false;
+      return told;
+    },
+  };
+  listeners?.forEach((listener) => listener({ text, tag }, info));
   return true;
 }
