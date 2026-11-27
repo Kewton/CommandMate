@@ -552,6 +552,55 @@ export async function fetchApiResponse(
 }
 
 /**
+ * Issue #4603 (design `send-outcome-4535.md` §2.2 D2–D4): whether a 2xx body of `POST /send` is the
+ * answer the CLI reads as `sent` (S1 / S2) — the predicate of `isChatMessage` in
+ * `src/lib/send-outcome/classify-send-answer.ts`: a non-empty string `id` and `role === 'user'`.
+ */
+function isSentAnswer(body: unknown): boolean {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return false;
+  const { id, role } = body as { id?: unknown; role?: unknown };
+  return typeof id === 'string' && id.length > 0 && role === 'user';
+}
+
+/**
+ * Issue #4603 r3: whether the send's 2xx was served as JSON — the CLI's `isJsonType`
+ * (`classify-send-answer.ts`): the media type (before `;`, trimmed, lower-cased) is
+ * `application/json` or ends in `+json`. The send's own rule; every other caller keeps
+ * {@link detectNonJsonBody}.
+ */
+function isSendJsonType(contentType: string | null): boolean {
+  if (contentType === null) return false;
+  const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  return mediaType === 'application/json' || mediaType.endsWith('+json');
+}
+
+/**
+ * Issue #4603: the send's reading of a 2xx (after the auth-redirect guard and the non-2xx branch of
+ * {@link fetchApi}, which it shares). A 2xx that is not the route's ChatMessage — a body that is
+ * not JSON (D2), JSON that cannot be read (D3), or JSON of another shape (D4) — says nothing about
+ * whether the text went in, so it is an `ApiError` carrying `sendOutcome: 'unknown'` (the screen's
+ * `isSendOutcomeUnknown` reads it as the CLI reads the same answer), never a resolved send nor a
+ * failure that may be retried directly. Used by {@link worktreeApi.sendMessage} only: every other
+ * caller reads a 2xx as before.
+ */
+async function readSendAnswer<T>(response: Response): Promise<T> {
+  const unknownAnswer = () =>
+    new ApiError('Unexpected send answer', response.status, { sendOutcome: 'unknown' }, 'http');
+  if (!isSendJsonType(response.headers?.get('content-type') ?? null)) throw unknownAnswer();
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    // A transport failure while the body is read (cut: `network`, stalled: `timeout`, the caller's
+    // abort: `aborted`) is already an ApiError (`withBodyDeadline`): passed on as it was before #4603.
+    if (error instanceof ApiError) throw error;
+    throw unknownAnswer();
+  }
+  if (!isSentAnswer(body)) throw unknownAnswer();
+  return body as T;
+}
+
+/**
  * Base fetch wrapper with error handling.
  *
  * Issue #2499: the request itself now goes through {@link fetchApiResponse}, so
@@ -559,8 +608,16 @@ export async function fetchApiResponse(
  * offline fail-fast and the reachability reporting without changing a line. The
  * body handling below — the `Content-Type` header, the two response guards, the
  * error-body parse — is unchanged.
+ *
+ * Issue #4603: `readOk` replaces the 2xx reading (the non-JSON guard and the
+ * unawaited `response.json()`) for the one caller that passes it (the send,
+ * {@link readSendAnswer}); without it the 2xx is read exactly as before.
  */
-async function fetchApi<T>(url: string, options?: ApiRequestOptions): Promise<T> {
+async function fetchApi<T>(
+  url: string,
+  options?: ApiRequestOptions,
+  readOk?: (response: Response) => Promise<T>,
+): Promise<T> {
   try {
     const headers = new Headers(options?.headers);
     headers.set('Content-Type', 'application/json');
@@ -586,6 +643,10 @@ async function fetchApi<T>(url: string, options?: ApiRequestOptions): Promise<T>
         response.status,
         errorBody
       );
+    }
+
+    if (readOk) {
+      return await readOk(response);
     }
 
     const formatError = detectNonJsonBody(response);
@@ -747,6 +808,7 @@ export const worktreeApi = {
    * @param options - Optional settings (cliToolId, instanceId, imagePath; Issue #4227: the G-3 choice)
    * @returns The created message, with its `timestamp` revived to a `Date` (and `/send`'s `brief`
    *   report when it gave one, Issue #4227)
+   * @throws ApiError with `data.sendOutcome: 'unknown'` on a 2xx that is not that message (Issue #4603)
    */
   async sendMessage(
     id: string,
@@ -778,7 +840,7 @@ export const worktreeApi = {
       timeoutMs: getSendTimeoutMs(),
       ...(request?.onResponse ? { onResponse: request.onResponse } : {}),
       ...(request?.beforeFetch ? { beforeFetch: request.beforeFetch } : {}),
-    });
+    }, readSendAnswer);
     return reviveMessageTimestamp(created) as ChatMessage & { brief?: SendBriefReport };
   },
 
