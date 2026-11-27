@@ -475,22 +475,74 @@ export function readPeerDurationCaches({ root, listWorktrees = listOtherWorktree
 }
 
 /**
+ * The durations baseline kept in the repository (#4594, 受入 3): the files of
+ * 5 s or more, measured once by hand (`--write-baseline --source`). A worktree
+ * with no record at all (a fresh clone) weighed every file 1, so LPT dealt the
+ * files out by path and the heavy ones piled up in 2 groups (917 s).
+ */
+export const BASELINE_FILE = path.join('scripts', 'related-durations-baseline.json');
+
+const BASELINE_VERSION = 1;
+
+/** The baseline keeps only the files at least this long: the light ones split fine by the median. */
+export const BASELINE_MIN_MS = 5000;
+
+/**
+ * Reads the repository's durations baseline (#4594). Never throws: a missing,
+ * broken or other-version file is an empty baseline, and the split is then the
+ * split without one.
+ *
+ * @param {{ root: string }} options
+ * @returns {{ status: 'ok' | 'missing' | 'corrupt', durations: Map<string, number>, error?: string }}
+ */
+export function readBaselineDurations({ root }) {
+  /** @type {Map<string, number>} */
+  const durations = new Map();
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, BASELINE_FILE), 'utf-8');
+  } catch (error) {
+    const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { status: 'missing', durations };
+    return { status: 'corrupt', durations, error: /** @type {Error} */ (error).message };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || parsed.version !== BASELINE_VERSION || !parsed.durations || typeof parsed.durations !== 'object' || Array.isArray(parsed.durations)) {
+      throw new Error('unexpected shape');
+    }
+    for (const [rel, duration] of Object.entries(parsed.durations)) {
+      if (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0) {
+        throw new Error(`unexpected duration for ${rel}`);
+      }
+      durations.set(rel, duration);
+    }
+  } catch (error) {
+    return { status: 'corrupt', durations: new Map(), error: /** @type {Error} */ (error).message };
+  }
+  return { status: 'ok', durations };
+}
+
+/**
  * The duration of each file of `files`: the own cache first, then the other
- * worktrees in the order given (newest first). Files found nowhere are left
- * out (splitLpt weighs them by the median, or equally).
+ * worktrees in the order given (newest first), then the repository's baseline
+ * (#4594). Files found nowhere are left out (splitLpt weighs them by the
+ * median, or equally).
  *
  * @param {string[]} files
  * @param {Map<string, number>} own
  * @param {{ name: string, durations: Map<string, number> }[]} peers
- * @returns {{ durations: Map<string, number>, own: number, peer: number, byPeer: [string, number][], none: number }}
+ * @param {Map<string, number>} [baseline]
+ * @returns {{ durations: Map<string, number>, own: number, peer: number, byPeer: [string, number][], none: number, baseline: number }}
  */
-export function mergeDurations(files, own, peers) {
+export function mergeDurations(files, own, peers, baseline = new Map()) {
   /** @type {Map<string, number>} */
   const durations = new Map();
   /** @type {Map<string, number>} */
   const byPeer = new Map();
   let ownCount = 0;
   let peerCount = 0;
+  let baselineCount = 0;
   for (const f of files) {
     if (own.has(f)) {
       durations.set(f, /** @type {number} */ (own.get(f)));
@@ -502,11 +554,23 @@ export function mergeDurations(files, own, peers) {
       durations.set(f, /** @type {number} */ (hit.durations.get(f)));
       byPeer.set(hit.name, (byPeer.get(hit.name) ?? 0) + 1);
       peerCount++;
+      continue;
+    }
+    if (baseline.has(f)) {
+      durations.set(f, /** @type {number} */ (baseline.get(f)));
+      baselineCount++;
     }
   }
   const order = peers.map((p) => p.name);
   const list = /** @type {[string, number][]} */ ([...byPeer.entries()]).sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
-  return { durations, own: ownCount, peer: peerCount, byPeer: list, none: files.length - ownCount - peerCount };
+  return {
+    durations,
+    own: ownCount,
+    peer: peerCount,
+    byPeer: list,
+    none: files.length - ownCount - peerCount - baselineCount,
+    baseline: baselineCount,
+  };
 }
 
 /**
@@ -704,11 +768,64 @@ function defaultTmpBase() {
 }
 
 /**
+ * `--write-baseline --source <text>` (#4594): writes this worktree's own records
+ * (the own store, then vitest's cache) of BASELINE_MIN_MS or more into the
+ * repository's baseline, rounded, in path order. Updated by hand only: whoever
+ * updates it says where the measure came from. Runs no test.
+ *
+ * exit 0 written; exit 1 no own record long enough, or the file could not be
+ * written (the existing baseline is kept); exit 2 no `--source`.
+ *
+ * @param {string[]} argv the arguments after `--write-baseline`
+ * @param {{ root: string, log: (msg: string) => void, now: () => Date, readCache: typeof readDurationCache, readStore: typeof readDurationStore }} deps
+ * @returns {number}
+ */
+function writeBaseline(argv, { root, log, now, readCache, readStore }) {
+  if (!(argv.length === 2 && argv[0] === '--source' && argv[1].trim())) {
+    console.error('Usage: node scripts/run-related-unit-tests.mjs --write-baseline --source "<where the measure came from>"');
+    return 2;
+  }
+  const cache = readCache({ root });
+  const own = ownDurations(readStore({ root }), { durations: cache.durations, signature: vitestCacheSignature({ root }) });
+  const keys = [...own.keys()].filter((rel) => /** @type {number} */ (own.get(rel)) >= BASELINE_MIN_MS).sort();
+  if (keys.length === 0) {
+    console.error(`${LOG_PREFIX} write-baseline: no own record of ${BASELINE_MIN_MS} ms or more; ${BASELINE_FILE} not written`);
+    return 1;
+  }
+  const d = now();
+  const measuredAt = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const body = {
+    version: BASELINE_VERSION,
+    measuredAt,
+    source: argv[1],
+    durations: Object.fromEntries(keys.map((rel) => [rel, Math.round(/** @type {number} */ (own.get(rel)))])),
+  };
+  const file = path.join(root, BASELINE_FILE);
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(tmp, `${JSON.stringify(body, null, 2)}\n`);
+    fs.renameSync(tmp, file);
+  } catch (error) {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      // best effort
+    }
+    console.error(`${LOG_PREFIX} write-baseline: ${BASELINE_FILE} not written: ${/** @type {Error} */ (error).message || String(error)}`);
+    return 1;
+  }
+  log(`${LOG_PREFIX} write-baseline files=${keys.length} measuredAt=${measuredAt} -> ${BASELINE_FILE}`);
+  return 0;
+}
+
+/**
  * Entry point for run-related-unit-tests (sharded since Issue #4577).
  *
  * exit 0: every group exited 0 and ran exactly the files it was given.
  * exit 1: any group non-zero, signalled, unspawnable, or ran a different set.
  * exit 2: usage error, or the changed files / the related set could not be collected.
+ * `--write-baseline --source <text>` writes the durations baseline instead (see writeBaseline).
  *
  * @param {string[]} argv
  * @param {{
@@ -725,6 +842,8 @@ function defaultTmpBase() {
  *   readCache?: typeof readDurationCache,
  *   readPeers?: typeof readPeerDurationCaches,
  *   readStore?: typeof readDurationStore,
+ *   readBaseline?: typeof readBaselineDurations,
+ *   now?: () => Date,
  *   writeStore?: typeof writeDurationStore,
  *   listWorktrees?: typeof listOtherWorktrees,
  *   split?: typeof splitLpt,
@@ -749,9 +868,14 @@ export async function main(argv, deps = {}) {
   const readPeers = deps.readPeers ?? readPeerDurationCaches;
   const readStore = deps.readStore ?? readDurationStore;
   const writeStore = deps.writeStore ?? writeDurationStore;
+  const readBaseline = deps.readBaseline ?? readBaselineDurations;
   const listWorktrees = deps.listWorktrees ?? listOtherWorktrees;
   const split = deps.split ?? splitLpt;
   const mkdtemp = deps.mkdtemp ?? ((/** @type {string} */ prefix) => fs.mkdtempSync(prefix));
+
+  if (Array.isArray(argv) && argv[0] === '--write-baseline') {
+    return writeBaseline(argv.slice(1), { root, log, now: deps.now ?? (() => new Date()), readCache, readStore });
+  }
 
   if (!(Array.isArray(argv) && argv.length === 2 && argv[0] === '--base' && argv[1])) {
     console.error('Usage: node scripts/run-related-unit-tests.mjs --base <ref>');
@@ -810,10 +934,19 @@ export async function main(argv, deps = {}) {
   } catch {
     peers = { status: 'unavailable', count: 0, peers: [] };
   }
+  // #4594 受入 3: the repository's baseline, after own and peers, before the median.
+  /** @type {ReturnType<typeof readBaselineDurations>} */
+  let baseline;
+  try {
+    baseline = readBaseline({ root });
+  } catch {
+    baseline = { status: 'corrupt', durations: new Map() };
+  }
   const merged = mergeDurations(
     union.files,
     ownDurations(store, { durations: cache.durations, signature: vitestCacheSignature({ root }) }),
-    peers.peers
+    peers.peers,
+    baseline.durations
   );
   const plan = split(union.files, merged.durations, maxGroups);
   const n = plan.groups.length;
@@ -821,8 +954,11 @@ export async function main(argv, deps = {}) {
     `${LOG_PREFIX} split=lpt groups=${n} cache=${cache.status} known=${plan.known}/${union.files.length} default-weight=${Math.round(plan.defaultWeight)}ms`
   );
   const peerDetail = merged.byPeer.length > 0 ? `(${merged.byPeer.map(([name, c]) => `${name}:${c}`).join(',')})` : '';
+  // #4594: the baseline count last; no baseline file, no field (the line as it was).
+  const baselineDetail =
+    baseline.status === 'missing' ? '' : ` baseline:${merged.baseline}${baseline.status === 'ok' ? '' : `(${baseline.status})`}`;
   log(
-    `${LOG_PREFIX} durations=own:${merged.own} peer:${merged.peer}${peerDetail} default:${merged.none} peers=${peers.status === 'ok' ? peers.count : peers.status}`
+    `${LOG_PREFIX} durations=own:${merged.own} peer:${merged.peer}${peerDetail} default:${merged.none} peers=${peers.status === 'ok' ? peers.count : peers.status}${baselineDetail}`
   );
 
   const vitestBin = path.join(root, 'node_modules', '.bin', 'vitest');
