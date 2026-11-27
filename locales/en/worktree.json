@@ -97,7 +97,8 @@
       "retargetConfirmYes": "Send",
       "retargetConfirmNo": "Cancel",
       "retargetConfirmUnreadable": "Could not check whether this text was stopped on its way to another target (the target check cannot be read). Send it to {current}?",
-      "retargetUnstored": "The target check could not be saved. Another tab, or this page after a reload, may send without asking"
+      "retargetUnstored": "The target check could not be saved. Another tab, or this page after a reload, may send without asking",
+      "retargetPartiallyStored": "The target check could not be saved in full. This tab and other tabs will ask again before sending"
     },
     "retrySending": "Retry sending message",
     "discard": "Discard",
