@@ -34,9 +34,14 @@ PR-3（画面・CLI の可視化の設計）は別。
 - **鍵なし（I3）**: 番号が取れない worktree（detached を含む）と開いた PR は `keyless[]` の行で出す（パス・ブランチ・PR 番号）。情報で、exit を変えない。
 - 除外: 主の checkout（`git rev-parse --git-common-dir` の親）と、ブランチが `base`・`main`・`master` か `flow.yaml` の `exclude` にある worktree は、鍵なしにも出さない。
 
-### 2.4 観測できない鍵（既知の限界）
+### 2.4 一覧に無い鍵（`gh issue view` で状態を決める）
 
-`gh issue list --milestone` は、読んだ Milestone の一覧に属する Issue しか返さない。証拠の鍵がどの読んだ一覧にも無い場合（Milestone なし・後の Sprint に居る等）、その鍵が OPEN か CLOSED かを言える許可された読みはこの PR には無い。この PR はそれを **OPEN かつ Milestone なし** として読む（指定どおり `gh` を増やさないための限界）。したがって、閉じた Issue に残った worktree／ブランチは M1 として出うる。M1 の判定に要る Issue の Milestone は、current・前・後の Sprint の一覧と closed な Milestone の一覧（`open_issues` が 1 以上のものだけ）から決め、どれにも無ければ「Milestone なし」とする。
+M1 の判定に要る Issue の Milestone は、current・前・後の Sprint の一覧と closed な Milestone の一覧（`open_issues` が 1 以上のものだけ）から決める。`gh issue list --milestone` は読んだ Milestone に属する Issue しか返さないので、証拠の鍵（worktree・ブランチ・PR 本文・題・`--plan`）がどの一覧にも無い場合（Milestone なし・後の Sprint に居る・closed の Issue に worktree が残っている等）は、その鍵を **1 つに 1 回だけ** `gh issue view <N> --repo <o/r> --json number,state,milestone,labels`（数字の鍵の順、同じ番号は 2 回呼ばない）で読み、状態と Milestone を決める（#4642 r1）。
+
+- CLOSED → 行を出さない（「CLOSED は M1 にしない」と同じ）
+- OPEN → 答えの `milestone`（無ければ Milestone なし）で M1・M1b を決める。ラベルは M3 の受け入れ待ちにも使う
+- 失敗・時間切れ・読めない JSON・形の違い → その鍵は判定できない（`unknown[]` に名指し、全体は exit 61）
+- 一覧に属するはずの鍵が一覧に無い（両者が食い違う）も、view を信じずに判定できない（`shape`）
 
 ## 3 分ける種類（`rows[]` の `kind`。`severity` は `drift` か `info`）
 

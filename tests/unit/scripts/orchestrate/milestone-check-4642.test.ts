@@ -91,6 +91,8 @@ interface World {
   revList?: Record<string, number | 'fail' | 'timeout'>;
   timeline?: Record<number, Array<{ event: string; createdAt: string; milestone?: string }> | 'fail'>;
   roadmapComments?: string[] | 'fail';
+  /** `gh issue view <N> --json number,state,milestone,labels` per hidden key (r1). */
+  issueViews?: Record<number, { state: 'OPEN' | 'CLOSED'; milestone?: string | null; labels?: string[] } | 'fail' | 'timeout' | 'unparsable'>;
   /** A read that fails wholesale (status / error / raw stdout). */
   fail?: Partial<Record<ReadName, Answer>>;
   /** Override one exact `cmd args` answer. */
@@ -218,6 +220,16 @@ function fakeSpawn(w: World, calls: Call[], hooks: { before?: (c: Call) => void 
         return ok(issueJson(w.issues.filter((i) => i.milestone === title)));
       }
       if (args[0] === 'issue' && args[1] === 'view') {
+        const fields = args[args.indexOf('--json') + 1];
+        const n = Number(args[2]);
+        if (fields === 'number,state,milestone,labels') {
+          const v = w.issueViews?.[n];
+          if (v === undefined) return ok(JSON.stringify({ number: n, state: 'OPEN', milestone: null, labels: [] }));
+          if (v === 'fail') return { status: 1, stdout: '', stderr: 'boom' };
+          if (v === 'timeout') return { status: null, error: { code: 'ETIMEDOUT' } };
+          if (v === 'unparsable') return ok('{"state":');
+          return ok(JSON.stringify({ number: n, state: v.state, milestone: v.milestone ? { title: v.milestone } : null, labels: (v.labels ?? []).map((name) => ({ name })) }));
+        }
         const f = fail('roadmap');
         if (f) return f;
         const comments = w.roadmapComments === undefined ? [] : w.roadmapComments;
@@ -319,12 +331,10 @@ interface Triple {
  * The independent expectation of T1. It restates the rules of docs/design §2 and never calls
  * the implementation.
  *
- * Note (documented limitation, design §2.4): a key that appears in none of the read lists is
- * not observable (no allowed read says whether it is open), so the tool reads it as OPEN with
- * no milestone. `observable` applies that same rule to the expectation.
+ * A key no read list holds is read with `gh issue view` (design §2.4), so `state` is observable
+ * on every axis: a CLOSED hidden key produces no row.
  */
 function expectedTriples(state: State, milestone: MilestoneAxis, evidence: Evidence): Triple[] {
-  const observable: State = milestone === 'none' ? 'OPEN' : state;
   const rows: Triple[] = [];
   // Work already on disk (a branch with or without commits, an open PR) is "started"; a plan
   // lane is an assignment, evidence for M1 and the 未着手/残留 split of M2 (design §2.2・§3.2).
@@ -334,7 +344,7 @@ function expectedTriples(state: State, milestone: MilestoneAxis, evidence: Evide
   const mergedWorktree = evidence === 'merged-worktree';
   const isCurrent = milestone === 'current';
   const planGiven = assigned;
-  if (observable === 'OPEN') {
+  if (state === 'OPEN') {
     if (!isCurrent) {
       if (hasWork) rows.push({ kind: 'M1', severity: 'drift', issue: 500 });
       else if (mergedWorktree) rows.push({ kind: 'M1b', severity: 'info', issue: 500 });
@@ -346,7 +356,7 @@ function expectedTriples(state: State, milestone: MilestoneAxis, evidence: Evide
     if (evidence === 'merged-pr-closes') rows.push({ kind: 'M3-closing-forgotten', severity: 'drift', issue: 500 });
     if (milestone === 'prev') rows.push({ kind: 'M4-previous-sprint', severity: 'drift', issue: 500 });
   }
-  const prevOpen = observable === 'OPEN' && milestone === 'prev' ? 1 : 0;
+  const prevOpen = state === 'OPEN' && milestone === 'prev' ? 1 : 0;
   if (prevOpen === 0) rows.push({ kind: 'M5-empty-previous', severity: 'info', issue: null });
   if (milestone === 'closed') rows.push({ kind: 'M5-closed-leftover', severity: 'drift', issue: null });
   return rows.sort(compareTriples);
@@ -396,6 +406,7 @@ function t1World(state: State, milestone: MilestoneAxis, evidence: Evidence): Wo
     prs.push({ number: 902, head: target, state: 'merged', body: 'Closes #500' });
   }
   return world(root, {
+    issueViews: { 500: { state, milestone: null } },
     milestones: [
       { title: 'Sprint 13', state: 'open', open: inCurrent && state === 'OPEN' ? 1 : 0 },
       { title: 'Sprint 12', state: 'open', open: inPrev && state === 'OPEN' ? 1 : 0 },
@@ -621,6 +632,7 @@ describe('T3 the allowed calls (isAllowedMilestoneCall)', () => {
       ['gh', ['pr', 'list', '--repo', REPO, '--state', 'merged', '--base', BASE, '--search', 'merged:>=2026-11-13', '--json', 'number,headRefName,title,body,mergedAt', '--limit', '300']],
       ['gh', ['api', '--paginate', `repos/${REPO}/issues/4604/timeline?per_page=100`]],
       ['gh', ['issue', 'view', '4461', '--repo', REPO, '--json', 'comments']],
+      ['gh', ['issue', 'view', '12', '--repo', REPO, '--json', 'number,state,milestone,labels']],
       ['gh', ['api', `repos/${REPO}/milestones?state=all&per_page=100`]],
     ];
     for (const [cmd, args] of allowed) {
@@ -632,6 +644,9 @@ describe('T3 the allowed calls (isAllowedMilestoneCall)', () => {
     const { isAllowedMilestoneCall } = await tool();
     const refused: Array<[string, string[]]> = [
       ['gh', ['issue', 'edit', '1', '--milestone', 'x']],
+      ['gh', ['issue', 'view', '12', '--repo', REPO, '--json', 'body']],
+      ['gh', ['issue', 'view', 'abc', '--repo', REPO, '--json', 'number,state,milestone,labels']],
+      ['gh', ['issue', 'edit', '12', '--repo', REPO, '--json', 'number,state,milestone,labels']],
       ['gh', ['api', '-X', 'PATCH', `repos/${REPO}/milestones/1`]],
       ['gh', ['api', `repos/${REPO}/issues`, '-f', 'title=x']],
       ['gh', ['label', 'create', 'x']],
@@ -737,6 +752,69 @@ describe('T4 the keys', () => {
     const r = await runCli(w, ['check', '--json', '--no-history']);
     expect(r.json.keyless).toEqual([]);
     expect((r.json.rows as Triple[]).map((x) => x.issue)).not.toContain(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T4b: evidence keys no list held are read with gh issue view (#4642 r1)
+// ---------------------------------------------------------------------------
+
+type IssueView = NonNullable<World['issueViews']>[number];
+/** A world whose only evidence is a worktree on Issue 990, which no read list holds. */
+function hiddenKeyWorld(view: IssueView) {
+  const root = repoWith(DEFAULT_YAML);
+  const w = world(root, {
+    issues: [{ number: 11, state: 'OPEN', title: 'wip', milestone: 'Sprint 13' }],
+    worktrees: [{ path: wtPath(root, 'commandmate-issue-990-a'), branch: 'feature/990-a' }],
+    revList: { 'feature/990-a': 2 },
+    issueViews: { 990: view },
+    roadmapComments: [],
+  });
+  return w;
+}
+
+describe('T4b hidden keys: gh issue view decides state and Milestone (#4642 r1)', () => {
+  it('a CLOSED hidden key with a leftover worktree is no row (and no M1)', async () => {
+    const r = await runCli(hiddenKeyWorld({ state: 'CLOSED', milestone: null }), ['check', '--json', '--no-history']);
+    expect((r.json.rows as Triple[]).filter((x) => x.issue === 990)).toEqual([]);
+    expect(r.code).toBe(0);
+    expect(r.json.complete).toBe(true);
+  });
+
+  it('an OPEN hidden key with no Milestone is M1', async () => {
+    const r = await runCli(hiddenKeyWorld({ state: 'OPEN', milestone: null }), ['check', '--json', '--no-history']);
+    expect((r.json.rows as Triple[]).filter((x) => x.issue === 990).map((x) => [x.kind, x.severity])).toEqual([['M1', 'drift']]);
+    expect(r.code).toBe(62);
+  });
+
+  it('an OPEN hidden key in the current Milestone is not M1 (the summary counts it)', async () => {
+    const r = await runCli(hiddenKeyWorld({ state: 'OPEN', milestone: 'Sprint 13' }), ['check', '--json', '--no-history']);
+    expect((r.json.rows as Triple[]).filter((x) => x.issue === 990 && x.kind === 'M1')).toEqual([]);
+  });
+
+  it.each(['fail', 'timeout', 'unparsable'] as const)('a view that is %s: exit 61, complete false, the key named', async (mode) => {
+    const r = await runCli(hiddenKeyWorld(mode), ['check', '--json', '--no-history']);
+    expect(r.code).toBe(61);
+    expect(r.json.complete).toBe(false);
+    expect(r.json.unknown.some((u: string) => u.includes('gh issue view #990'))).toBe(true);
+  });
+
+  it('one view per hidden key, and no view for a key a read list already holds', async () => {
+    const root = repoWith(DEFAULT_YAML);
+    const w = world(root, {
+      issues: [{ number: 11, state: 'OPEN', title: 'listed', milestone: 'Sprint 13' }],
+      worktrees: [
+        { path: wtPath(root, 'commandmate-issue-11-a'), branch: 'feature/11-a' },
+        { path: wtPath(root, 'commandmate-issue-990-a'), branch: 'feature/990-a' },
+        { path: wtPath(root, 'commandmate-issue-991-a'), branch: 'feature/991-a' },
+      ],
+      revList: { 'feature/11-a': 1, 'feature/990-a': 1, 'feature/991-a': 1 },
+      issueViews: { 990: { state: 'OPEN' }, 991: { state: 'OPEN' } },
+      roadmapComments: [],
+    });
+    const r = await runCli(w, ['check', '--json', '--no-history']);
+    const views = r.calls.filter((c) => c.cmd === 'gh' && c.args[0] === 'issue' && c.args[1] === 'view' && c.args.includes('number,state,milestone,labels'));
+    expect(views.map((c) => c.args[2])).toEqual(['990', '991']);
   });
 });
 
@@ -970,6 +1048,18 @@ describe('T7 today’s drift (Sprint 12/13 fixture)', () => {
     expect(m1).toEqual([4621, 4631, 4632, 4640]);
   });
 
+  it('M6 (two pages): a `--paginate` answer of two concatenated arrays reads as one list', async () => {
+    const w = t7World();
+    w.roadmapComments = ['2026-11-27T15:30:00Z'];
+    const page1 = JSON.stringify([{ event: 'labeled', createdAt: null }]);
+    const page2 = JSON.stringify([{ event: 'milestoned', createdAt: '2026-11-27T15:34:00Z', milestone: { title: 'Sprint 13' } }]);
+    w.override = { [`gh api --paginate repos/${REPO}/issues/4604/timeline?per_page=100`]: { status: 0, stdout: `${page1}${page2}` } };
+    const r = await runCli(w, ['check', '--json']);
+    expect(r.json.unknown.some((u: string) => u.includes('timeline'))).toBe(false);
+    const m6 = (r.json.rows as Array<Triple & { detail: string }>).find((x) => x.kind === 'M6-unrecorded-move' && x.issue === 4604);
+    expect(m6?.detail).toContain('milestoned');
+  });
+
   it('M6: a move before #4461’s last comment is not reported; a comment after it makes it M6', async () => {
     const before = await runCli(t7World(), ['check', '--json']);
     expect((before.json.rows as Triple[]).some((x) => x.kind === 'M6-unrecorded-move')).toBe(false);
@@ -1012,6 +1102,38 @@ describe('T8 the deadline', () => {
     expect(r.code).toBe(61);
     expect(r.json.complete).toBe(false);
     expect(r.json.unknown.some((u: string) => u.includes('gh'))).toBe(true);
+  });
+
+  it('many calls at 5 s each stop at the deadline: no call starts after it (r1)', async () => {
+    // 30 issues in the current Sprint, so the timeline loop alone asks GitHub 30 times; a fake
+    // clock charges 5 s per gh call. Once the 120 s deadline passes, no call is started.
+    const root = repoWith(DEFAULT_YAML);
+    const issues: IssueRow[] = Array.from({ length: 30 }, (_, i) => ({ number: 5000 + i, state: 'OPEN', title: `t ${i}`, milestone: 'Sprint 13' }));
+    const timeline: World['timeline'] = {};
+    for (const issue of issues) timeline[issue.number] = [];
+    const w = world(root, { milestones: [{ title: 'Sprint 13', state: 'open', open: 30 }], issues, timeline, roadmapComments: [] });
+    let now = 0;
+    const calls: Call[] = [];
+    const { main } = await tool();
+    const out: string[] = [];
+    const code = main(['check', '--json'], {
+      spawnSync: (cmd: string, args: string[], options: { cwd?: string; timeout?: number }) => {
+        calls.push({ cmd, args: [...args], cwd: options?.cwd, timeout: options?.timeout });
+        if (cmd === 'gh') now += 5_000;
+        return fakeSpawn(w, [])(cmd, args, options);
+      },
+      monoNow: () => now,
+      wallNow: () => WALL_NOW,
+      cwd: root,
+      env: {},
+      stdout: (l: string) => out.push(l),
+      stderr: () => undefined,
+    });
+    expect(code).toBe(61);
+    const startedAfterDeadline = calls.filter((c) => c.timeout !== undefined && c.timeout < 1);
+    expect(startedAfterDeadline).toEqual([]);
+    // The calls stop at the deadline: well under the 30 the loop would ask for.
+    expect(calls.filter((c) => c.args.includes('--paginate')).length).toBeLessThan(30);
   });
 
   it('a call started with no time left is not started', async () => {

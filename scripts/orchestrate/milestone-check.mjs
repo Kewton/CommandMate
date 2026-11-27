@@ -127,8 +127,11 @@ export function isAllowedMilestoneCall(cmd, args) {
         && fields === 'number,state,title,labels,closedAt' && limitFlag === '--limit' && limit === String(ISSUE_LIMIT);
     }
     if (args.length === 7 && args[0] === 'issue' && args[1] === 'view') {
+      // Two exact field sets are read: a roadmap's comments, and one hidden key's state /
+      // Milestone / labels (#4642 r1). Anything else (e.g. `--json body`) is refused.
       const [, , issue, repoFlag, repo, jsonFlag, fields] = args;
-      return /^\d+$/.test(issue) && repoFlag === '--repo' && REPO_NAME.test(repo) && jsonFlag === '--json' && fields === 'comments';
+      const ok = /^\d+$/.test(issue) && repoFlag === '--repo' && REPO_NAME.test(repo) && jsonFlag === '--json';
+      return ok && (fields === 'comments' || fields === 'number,state,milestone,labels');
     }
     if (args.length === 12 && args[0] === 'pr' && args[1] === 'list') {
       const [, , repoFlag, repo, stateFlag, state, baseFlag, base, limitFlag, limit, jsonFlag, fields] = args;
@@ -324,26 +327,111 @@ export function parsePrRows(text, { merged }) {
   return rows;
 }
 
-/** `gh api …/timeline` rows, or null. @param {string} text */
-export function parseTimeline(text) {
+/**
+ * `gh issue view --json number,state,milestone,labels` for one Issue, or null when the JSON or
+ * its shape is wrong (#4642 r1). `milestone` is GitHub's object (`{ title }`) or null.
+ * @param {string} text
+ * @returns {{ state: 'OPEN' | 'CLOSED', milestone: string | null, labels: string[] } | null}
+ */
+export function parseIssueView(text) {
   let data;
   try {
     data = JSON.parse(text);
   } catch {
     return null;
   }
-  if (!Array.isArray(data)) return null;
+  if (!isMapping(data) || (data.state !== 'OPEN' && data.state !== 'CLOSED') || !Array.isArray(data.labels)) return null;
+  const labels = [];
+  for (const label of data.labels) {
+    if (typeof label === 'string') labels.push(label);
+    else if (isMapping(label) && typeof label.name === 'string') labels.push(label.name);
+    else return null;
+  }
+  let milestone = null;
+  if (data.milestone !== null && data.milestone !== undefined) {
+    if (!isMapping(data.milestone) || !isMilestoneTitle(data.milestone.title)) return null;
+    milestone = data.milestone.title;
+  }
+  return { state: data.state, milestone, labels };
+}
+
+/**
+ * `gh api --paginate` prints one JSON array per page back to back (`[…][…]`), so a page count
+ * over one is not one JSON document: the arrays are read in order and joined. Any part that is
+ * not an array is `null` (the read cannot be judged). A single array (one page) reads the same.
+ * @param {string} text
+ * @returns {unknown[] | null}
+ */
+export function parseJsonSequence(text) {
+  const source = String(text).trim();
+  if (source === '') return null;
+  const items = [];
+  let index = 0;
+  while (index < source.length) {
+    while (index < source.length && /\s/.test(source[index])) index++;
+    if (index >= source.length) break;
+    if (source[index] !== '[') return null;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let i = index; i < source.length; i++) {
+      const ch = source[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === '[' || ch === '{') depth++;
+      else if (ch === ']' || ch === '}') {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) return null;
+    let part;
+    try {
+      part = JSON.parse(source.slice(index, end + 1));
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(part)) return null;
+    items.push(...part);
+    index = end + 1;
+  }
+  return items;
+}
+
+/**
+ * `gh api …/timeline` rows, or null when the JSON or a row's shape is wrong. Each row keeps the
+ * milestone events only: other event kinds (`labeled`, `commented`, `cross-referenced`, …) need
+ * not carry `createdAt` at all — GitHub omits it on several of them — so a row whose `event` is
+ * not one of the two the check reads is skipped rather than failing the whole page (#4642, the
+ * real run of 2026-11-27), and a readable move without a `createdAt` is kept with `null`.
+ * `--paginate` returns one array per page, joined by parseJsonSequence.
+ * @param {string} text
+ */
+export function parseTimeline(text) {
+  const data = parseJsonSequence(text);
+  if (data === null) return null;
   const rows = [];
   for (const item of data) {
     if (!isMapping(item)) return null;
     const { event, createdAt, milestone } = item;
-    if (typeof event !== 'string' || typeof createdAt !== 'string') return null;
+    if (typeof event !== 'string') return null;
+    if (event !== 'milestoned' && event !== 'demilestoned') continue;
+    if (createdAt !== null && createdAt !== undefined && typeof createdAt !== 'string') return null;
     let title = null;
     if (milestone !== null && milestone !== undefined) {
       if (!isMapping(milestone) || typeof milestone.title !== 'string') return null;
       title = milestone.title;
     }
-    rows.push({ event, createdAt, milestone: title });
+    rows.push({ event, createdAt: typeof createdAt === 'string' ? createdAt : null, milestone: title });
   }
   return rows;
 }
@@ -721,6 +809,26 @@ function runMain(argv, deps, stdout, stderr) {
     for (const issue of closingIssuesOf(pr)) mergedClosing.set(issue, [...(mergedClosing.get(issue) ?? []), pr.number]);
   }
 
+  // Evidence keys no read list held (#4642 r1): one `gh issue view` each, in key order, once per
+  // number. A CLOSED one is not a row; an OPEN one is judged by the Milestone the view names.
+  // (`gh issue view` is a single-Issue read, so it is the one source for a key no list covers.)
+  const hiddenKeys = uniqSorted([...worktreeKinds.keys(), ...openPrOf.keys(), ...mergedClosing.keys(), ...(planKeys === null ? [] : [...planKeys])])
+    .filter((key) => !issueMap.has(key));
+  for (const key of hiddenKeys) {
+    const name = `gh issue view #${key}`;
+    const answer = gh(['issue', 'view', String(key), '--repo', repo, '--json', 'number,state,milestone,labels']);
+    if (answer.status !== 'ok') {
+      unknown.push(`${name} (${reasonOf(answer)})`);
+      continue;
+    }
+    const view = parseIssueView(answer.stdout);
+    if (view === null) {
+      unknown.push(`${name} (shape)`);
+      continue;
+    }
+    issueMap.set(key, { number: key, state: view.state, title: `issue ${key}`, labels: view.labels, milestone: view.milestone });
+  }
+
   // M6: moves that the roadmap Issue's last comment does not cover (design §3.6).
   /** @type {Array<{ issue: number, event: string, milestone: string | null, createdAt: string }>} */
   const moves = [];
@@ -755,8 +863,9 @@ function runMain(argv, deps, stdout, stderr) {
         }
         for (const event of events) {
           if (event.event !== 'milestoned' && event.event !== 'demilestoned') continue;
-          if (past !== '' && event.createdAt <= past) continue;
-          moves.push({ issue: issue.number, event: event.event, milestone: event.milestone, createdAt: event.createdAt });
+          // A move with no timestamp cannot be shown to be before the record, so it is reported.
+          if (past !== '' && event.createdAt !== null && event.createdAt <= past) continue;
+          moves.push({ issue: issue.number, event: event.event, milestone: event.milestone, createdAt: event.createdAt ?? '(no time)' });
         }
       }
     }
