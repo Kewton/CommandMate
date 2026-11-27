@@ -315,8 +315,8 @@ describe('[#4604 accept r1 T-F3] the write-backs put the mark back into the stor
  *   event goes to the other one; a write-back answered by a write-back is delivered too, up to a bound).
  *   U4-1 with a list tag and with the short "unknown": the second tab asks; after both tabs said yes
  *   once, their sends end asking (finite) and the store ends empty.
- * - O4: a page that hears no event (bfcache, frozen) — today's behaviour, pinned as a candidate for the
- *   known limit (人の判断待ち; not a safe-side expectation).
+ * - O4: a page that hears no event (bfcache, frozen) — today's behaviour, pinned as a known limit
+ *   (人の決定 2026-11-27、#4604 コメント 7212549796; not a safe-side expectation).
  * ---------------------------------------------------------------------------------------------
  */
 
@@ -454,7 +454,7 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
   /** r1d: `bTypesFirst` — B types (its save runs) before its first Enter, as a person who edits it does. */
   /**
    * r1d: `pinEveryRound` — instead of the asking ending, pin that each of three rounds asks in both tabs
-   * (and each send still goes once, after its yes): today's behaviour of a known-limit candidate.
+   * (and each send still goes once, after its yes): today's behaviour of a known limit.
    */
   async function u41(full: boolean, bTypesFirst = false, pinEveryRound = false) {
     window.localStorage.setItem(KEY, TEXT);
@@ -517,16 +517,16 @@ describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): 
     await u41(false, true);
   }, BRIDGE_TIMEOUT_MS);
 
-  // 既知の限界の候補（人の判断待ち、#4604 受け入れ r1d）: 保存の空きが足りず短い「分からない」しか書けない
+  // 既知の限界（人の決定 2026-11-27、#4604 コメント 7212549796、#4616 で扱う、#4604 受け入れ r1d）: 保存の空きが足りず短い「分からない」しか書けない
   // 時、2 つのタブで打っては送ると毎回確かめる（安全側）。Each tab's save makes the "unknown" it took in its
   // own (a new generation), the other tab takes that in, and a yes to an "unknown" is for one send — so
   // while both tabs type before they send, every send asks. Pinned as today's behaviour (not an end).
-  it('INV-S1 の広げ — the short "unknown", B types before its first send: while both tabs type then send, every send asks (known-limit candidate, 人の判断待ち)', async () => {
+  it('INV-S1 の広げ — the short "unknown", B types before its first send: while both tabs type then send, every send asks (known limit, 人の決定 2026-11-27、#4604 コメント 7212549796, #4616 で扱う)', async () => {
     await u41(true, true, true);
   }, BRIDGE_TIMEOUT_MS);
 });
 
-describe('[#4604 accept r1c] O4 — a page that hears no event (known limit candidate, 人の判断待ち)', () => {
+describe('[#4604 accept r1c] O4 — a page that hears no event (known limit, 人の決定 2026-11-27、#4604 コメント 7212549796)', () => {
   it('today: the store took the tag and let it go with no event reaching this page — its Enter sends (POST 1, no question)', async () => {
     window.localStorage.setItem(KEY, TEXT);
     const view = render(<One tool="codex" />);
