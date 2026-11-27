@@ -34,7 +34,7 @@ type Tool = typeof import('../../../../scripts/orchestrate/milestone-check.mjs')
 let cached: Tool | undefined;
 /** The tool, imported lazily: a missing module (the test-first commit) makes every test red. */
 async function tool(): Promise<Tool> {
-  if (cached === undefined) cached = await import(MODULE);
+  if (cached === undefined) cached = (await import(MODULE)) as Tool;
   return cached;
 }
 
@@ -414,7 +414,7 @@ function t1World(state: State, milestone: MilestoneAxis, evidence: Evidence): Wo
 async function t1Row(state: State, milestone: MilestoneAxis, evidence: Evidence) {
   const w = t1World(state, milestone, evidence);
   const argv = ['check', '--json', '--no-history'];
-  if (w.plan !== null) {
+  if (typeof w.plan === 'string') {
     const file = path.join(w.root, 'plan.yaml');
     fs.writeFileSync(file, w.plan);
     argv.push('--plan', file);
@@ -508,7 +508,7 @@ const READS: ReadDef[] = [
     apply: (w, mode) => {
       w.worktrees = [{ path: wtPath(w.root, 'commandmate-issue-11-a'), branch: 'feature/11-a' }];
       w.issues = [{ number: 11, state: 'OPEN', title: 'wip', milestone: 'Sprint 13' }];
-      w.revList = { 'feature/11-a': mode };
+      w.revList = { 'feature/11-a': mode === 'fail' ? 'fail' : 'timeout' };
     },
   },
   {
@@ -691,10 +691,10 @@ describe('T4 the keys', () => {
     const { prKeys, closingIssuesOf } = await tool();
     expect(closingIssuesOf({ body: 'Closes #4604\nFixes #4606' })).toEqual([4604, 4606]);
     expect(closingIssuesOf({ body: 'Refs #4594' })).toEqual([]);
-    expect(prKeys({ number: 1, headRefName: 'feature/1-a', title: 'x', body: 'Closes #4604\nRefs #4594' })).toEqual([4594, 4604]);
-    expect(prKeys({ number: 2, headRefName: 'hotfix', title: 'thing (#1234)', body: '' })).toEqual([1234]);
-    expect(prKeys({ number: 3, headRefName: 'feature/77-a', title: 'no ref', body: '' })).toEqual([77]);
-    expect(prKeys({ number: 4, headRefName: 'hotfix', title: 'no ref', body: 'nothing' })).toEqual([]);
+    expect(prKeys({ headRefName: 'feature/1-a', title: 'x', body: 'Closes #4604\nRefs #4594' })).toEqual([4594, 4604]);
+    expect(prKeys({ headRefName: 'hotfix', title: 'thing (#1234)', body: '' })).toEqual([1234]);
+    expect(prKeys({ headRefName: 'feature/77-a', title: 'no ref', body: '' })).toEqual([77]);
+    expect(prKeys({ headRefName: 'hotfix', title: 'no ref', body: 'nothing' })).toEqual([]);
   });
 
   it('takes the leading number of a plan item id', async () => {
