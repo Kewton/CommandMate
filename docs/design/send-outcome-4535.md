@@ -177,6 +177,8 @@
 | U2 | 非 2xx で N・U1 に当たらない（素の頁、`code` の無い JSON、知らない `code`、404/405、前段が返した 3xx） | `unknown` | 4xx は `not_sent`、5xx は照会 |
 | U3 | 応答なし（N7 以外の切断・時間切れ・JSON の破損） | `unknown` | 同じ（結び付いた relay は照会） |
 
+- 画面の送信（#4603 r3）: 2xx が JSON かどうかは CLI の `isJsonType` と同じ規則（`;` の前を trim・小文字にした media type が `application/json` か `+json` で終わる）で読む（`api-client.ts` の `isSendJsonType`。送信以外の呼び手は `detectNonJsonBody` のまま）。本文を読む途中の通信の失敗（切れる・止まる）は #4603 の前と同じ `ApiError`（`network`・`timeout`、status 0）のまま U3 に入る
+- D6（意図した違い、#4603）: `ask` だけの 2xx（S3）は画面 unknown・CLI sent（#4603、案 a。画面は ChatMessage のときだけ解決し、画面は ask を送らない）
 - 結び付いた relay の照会（`GET /api/relays/:id`、`message-dispatch.ts:138–145`）は今のまま、U2・U3・S4・N4 で使う。`failed` を書くのは当該の試行の `settle` だけ（`relay-bind.ts:381–384`）で、relay は CLI ごとに新しく 1 試行しか結び付かないので、照会の `failed` は当該の試行のもの（Q3）
 - redirect: CLI は今どおり追う（`fetch` の既定）。最後の答えを上の表で読む。308 の後の 201 ChatMessage は S1（`sent`）、303 で GET に化けた後の頁は S4／U2（`unknown`）
 - 優先: **`code: RELAY_BIND_CONFLICT` は最初に `code` で決める**（N4: `relayOwned = false` と照会。A2 の後の答えは `sendOutcome: 'unknown'` を持つが、それで U1 に入れない。事実は照会で上書きする）。それ以外の N・U の判定は `sendOutcome` を先に、`code` を後に見る。同じ答えに `sendOutcome` と `ask.sendState` があり食い違えば、弱い方（`unknown` が勝つ）
