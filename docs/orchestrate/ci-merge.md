@@ -105,6 +105,8 @@ self-hosted のランナーはローカルのゲートと同じマシンの資�
 （verify.yaml の `integration` か CI の `Integration`）は、ローカルで何を再利用しても省かない。`unit-related` で裁定した PR は
 CI の `Unit Tests` が `pass` になってからマージする（6-2 の例外。今までどおり）。
 
+**組の分けの下敷き**（#4594）: unit-related の組の分けは、記録が無いと `scripts/related-durations-baseline.json`（5 s 以上の下敷き）で見積もる。更新は手で `node scripts/run-related-unit-tests.mjs --write-baseline --source "<出どころ>"` を流し、**更新するときは審判か PM が測りの出どころを書く**（自動では書き換えない）。
+
 ## 6-1-1 重い検証の資源制御と待ちの記録
 
 （#3884 H-10・H-11・G6-5）重いテストは、どの入口から走っても同じ `cpu.heavy`（マシンで 1 本）に入れる。`mutex` を外す・
