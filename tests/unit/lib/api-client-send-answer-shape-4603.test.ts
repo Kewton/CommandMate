@@ -9,6 +9,11 @@
  * - T4: a 2xx the CLI reads as `sent` (S1 a ChatMessage, S2 a ChatMessage with
  *   `sendOutcome: 'unknown'`) still resolves on the send, with the row as the server gave it (its
  *   `timestamp` revived, its `brief` kept).
+ * - r2 T5: the send's predicate is the CLI's (`id` a non-empty string and `role === 'user'`): a 2xx
+ *   JSON without `role`, with another `role`, or with a bad `id` rejects as unknown.
+ * - r2 T6: the error on D2–D4 is `ApiError('Unexpected send answer', <the 2xx>, { sendOutcome:
+ *   'unknown' }, 'http')` — not the outer catch's status-0 wrap of a raw `SyntaxError` — and a
+ *   ChatMessage served as `text/plain` is rejected by the content-type guard (as the CLI reads it).
  *
  * @vitest-environment node
  */
@@ -16,6 +21,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, worktreeApi } from '@/lib/api-client';
 import { isSendOutcomeUnknown } from '@/hooks/usePendingMessages';
+import { classifySendAnswer } from '@/lib/send-outcome/classify-send-answer';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 
@@ -102,5 +108,55 @@ describe('[#4603 T4] the send still resolves on the 2xx the CLI reads as sent', 
     const created = await worktreeApi.sendMessage('wt-1', 'hello', { cliToolId: 'claude' });
     expect(created).toEqual({ ...body, timestamp: new Date(timestamp) });
     expect(created.timestamp).toBeInstanceOf(Date);
+  });
+});
+
+/** What the send threw (fails the test when it resolved). */
+async function sendError(answer: Answer): Promise<unknown> {
+  stubFetch(answer);
+  const result = await outcome(() => worktreeApi.sendMessage('wt-1', 'hello', { cliToolId: 'claude' }));
+  expect('thrown' in result, 'the send rejects on this answer').toBe(true);
+  return (result as { thrown: unknown }).thrown;
+}
+
+describe('[#4603 r2 T5] the send rejects on a 2xx JSON that is not the CLI\'s ChatMessage (id and role)', () => {
+  const timestamp = '2026-11-27T00:00:00.000Z';
+  it.each<[string, unknown]>([
+    ['{ id } only (no role)', { id: 'm' }],
+    ['role missing, with the rest of a row', { id: 'm', worktreeId: 'wt-1', content: 'hello', timestamp }],
+    ["role: 'assistant'", { id: 'm', role: 'assistant', content: 'hello', timestamp }],
+    ["id: ''", { id: '', role: 'user', content: 'hello', timestamp }],
+    ['id that is a number', { id: 1, role: 'user', content: 'hello', timestamp }],
+    ['an array', [{ id: 'm', role: 'user' }]],
+    ['null', null],
+  ])('%s: ApiError, read as unknown', async (_name, body) => {
+    const error = await sendError({ id: 'S4', status: 201, contentType: JSON_TYPE, body: JSON.stringify(body) });
+    expect(error).toBeInstanceOf(ApiError);
+    expect(isSendOutcomeUnknown(error)).toBe(true);
+    expect(error).toMatchObject({ status: 201, data: { sendOutcome: 'unknown' } });
+  });
+});
+
+describe('[#4603 r2 T6] the error the send throws on D2–D4 keeps the 2xx status and says unknown', () => {
+  it.each([
+    ['D2 non-JSON 2xx', { id: 'D2', status: 201, contentType: 'text/plain', body: 'created' }],
+    ['D2 HTML 200', NOT_A_MESSAGE[0]],
+    ['D3 empty application/json 2xx', { id: 'D3', status: 201, contentType: JSON_TYPE, body: '' }],
+    ['D3 application/json that does not parse', { id: 'D3', status: 201, contentType: JSON_TYPE, body: '{"id":' }],
+    ['D4 {}', { id: 'D4', status: 201, contentType: JSON_TYPE, body: '{}' }],
+    // A ChatMessage that parses, served as another type: only the content-type guard rejects it.
+    ['D2 a ChatMessage served as text/plain', {
+      id: 'D2', status: 201, contentType: 'text/plain', body: JSON.stringify({ id: 'm', role: 'user', content: 'hello' }),
+    }],
+  ] as Array<[string, Answer]>)('%s: ApiError(Unexpected send answer, <its 2xx>, { sendOutcome: unknown }, http)', async (_name, answer) => {
+    const error = await sendError(answer);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ message: 'Unexpected send answer', status: answer.status, kind: 'http' });
+    expect((error as ApiError).data).toEqual({ sendOutcome: 'unknown' });
+    expect(isSendOutcomeUnknown(error)).toBe(true);
+    // The CLI reads the same answer as unknown too (design §2.2 S4).
+    expect(classifySendAnswer({
+      kind: 'response', status: answer.status, contentType: answer.contentType, bodyText: answer.body,
+    }).fact).toBe('unknown');
   });
 });
