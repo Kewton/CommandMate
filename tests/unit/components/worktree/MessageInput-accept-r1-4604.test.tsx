@@ -301,3 +301,213 @@ describe('[#4604 accept r1 T-F3] the write-backs put the mark back into the stor
     expect(JSON.parse(rawStore().get(TAG_KEY) ?? 'null')).toEqual([tag('t-held')]);
   });
 });
+
+/*
+ * ---------------------------------------------------------------------------------------------
+ * Issue #4604 accept r1c (PM の処分: F1 は案 i). A composer takes in the marks another tab wrote (the
+ * `storage` event); the marks it took in ask in it, but its own send does not let them go from the store
+ * — only the marks it received itself (its 409, its handed-back text, its restore) go. Rows:
+ *
+ * - P1: a composer that asked only because of the marks it took in sends after its yes — the store keeps
+ *   them (the review's `storeAfterARelease`).
+ * - Two tabs, both real composers: the store's writes reach the other tab only, as a `StorageEvent`
+ *   (a bridge: the `storage` listeners are held per composer, a write is the acting composer's, and its
+ *   event goes to the other one; a write-back answered by a write-back is delivered too, up to a bound).
+ *   U4-1 with a list tag and with the short "unknown": the second tab asks; after both tabs said yes
+ *   once, their sends end asking (finite) and the store ends empty.
+ * - O4: a page that hears no event (bfcache, frozen) — today's behaviour, pinned as a candidate for the
+ *   known limit (人の判断待ち; not a safe-side expectation).
+ * ---------------------------------------------------------------------------------------------
+ */
+
+describe('[#4604 accept r1c] P1 — the marks a composer took in are not let go by its own send', () => {
+  it('a composer with a new text takes in another tab\'s tag, asks, says yes and sends: the store keeps the tag', async () => {
+    window.localStorage.setItem(KEY, 'a new text');
+    render(<One tool="claude" name="a" />);
+    await settle();
+    otherTabWrites(TAG_KEY, JSON.stringify([tag('t-a')]));
+    await settle();
+    enter('a');
+    await settle(30);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(band('a')).not.toBeNull();
+    yes('a');
+    await settle(30);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(rawStore().get(TAG_KEY) ?? 'null')).toEqual([tag('t-a')]);
+  });
+});
+
+describe('[#4604 accept r1c] two tabs (real composers, a storage-event bridge): U4-1 asks, and the asking ends', () => {
+  type Tab = 'a' | 'b';
+  let slots: Array<{ tab: Tab; listener: EventListener | null }>;
+  let actor: Tab | null;
+  let queue: Array<{ writer: Tab | null; oldValue: string | null; newValue: string | null }>;
+  let fullStore: boolean;
+  let delivered: number;
+  const DELIVERY_BOUND = 40;
+
+  beforeEach(() => {
+    slots = [{ tab: 'a', listener: null }, { tab: 'b', listener: null }];
+    actor = null;
+    queue = [];
+    fullStore = false;
+    delivered = 0;
+    const realAdd = window.addEventListener.bind(window);
+    const realRemove = window.removeEventListener.bind(window);
+    // The composers' `storage` listeners of the draft's marks (the one that reads `retargetTagsRef`; other
+    // hooks' `storage` listeners stay on the window), by slot: React runs every passive clean-up before
+    // every set-up, so a listener added fills the first empty slot in tree order (a: first, b: second).
+    const isMarksListener = (type: string, listener: EventListener) => type === 'storage' && String(listener).includes('retargetTagsRef');
+    vi.spyOn(window, 'addEventListener').mockImplementation(((type: string, listener: EventListener, options?: boolean | AddEventListenerOptions) => {
+      if (!isMarksListener(type, listener)) return realAdd(type, listener, options);
+      const slot = slots.find((s) => s.listener === null);
+      if (!slot) throw new Error('a third storage listener');
+      slot.listener = listener;
+    }) as typeof window.addEventListener);
+    vi.spyOn(window, 'removeEventListener').mockImplementation(((type: string, listener: EventListener, options?: boolean | EventListenerOptions) => {
+      if (!isMarksListener(type, listener)) return realRemove(type, listener, options);
+      const slot = slots.find((s) => s.listener === listener);
+      if (slot) slot.listener = null;
+    }) as typeof window.removeEventListener);
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    const realRemoveItem = Storage.prototype.removeItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === TAG_KEY) {
+        // U1-1: the store is full — a long `:retarget` value throws, the short "unknown" fits.
+        if (fullStore && value.length > 60) throw new DOMException('full', 'QuotaExceededError');
+        const oldValue = realGet.call(this, key);
+        realSet.call(this, key, value);
+        queue.push({ writer: actor, oldValue, newValue: value });
+        return;
+      }
+      realSet.call(this, key, value);
+    });
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === TAG_KEY) {
+        const oldValue = realGet.call(this, key);
+        realRemoveItem.call(this, key);
+        if (oldValue !== null) queue.push({ writer: actor, oldValue, newValue: null });
+        return;
+      }
+      realRemoveItem.call(this, key);
+    });
+  });
+
+  /** The other tab hears each write (a write it answers with is delivered in turn). */
+  async function deliver() {
+    while (queue.length > 0) {
+      const write = queue.shift()!;
+      for (const slot of slots) {
+        if (slot.tab === write.writer || slot.listener === null) continue;
+        delivered += 1;
+        if (delivered > DELIVERY_BOUND) throw new Error('the two tabs write back and forth without end');
+        actor = slot.tab;
+        const listener = slot.listener;
+        act(() => {
+          listener(new StorageEvent('storage', { key: TAG_KEY, oldValue: write.oldValue, newValue: write.newValue, storageArea: window.localStorage }));
+        });
+        actor = null;
+      }
+      await settle();
+    }
+  }
+  /** `tab` acts (its writes are its own), then the other tab hears them. */
+  async function as(tab: Tab, fn: () => void, ms = 30) {
+    actor = tab;
+    fn();
+    await settle(ms);
+    actor = null;
+    await deliver();
+  }
+  function Tabs({ tool }: { tool: CLIToolType }) {
+    return (
+      <>
+        <One tool={tool} name="a" />
+        <One tool={tool} name="b" />
+      </>
+    );
+  }
+  /** Each tab, in turn, types a new text and presses Enter (a yes when asked); whether each asked. */
+  async function round(): Promise<Record<Tab, boolean>> {
+    const asked: Record<Tab, boolean> = { a: false, b: false };
+    for (const tab of ['a', 'b'] as const) {
+      await as(tab, () => {
+        fireEvent.change(ta(tab), { target: { value: `new text ${tab} ${sendMessageMock.mock.calls.length}` } });
+      }, 600);
+      const before = sendMessageMock.mock.calls.length;
+      await as(tab, () => enter(tab));
+      if (band(tab)) {
+        asked[tab] = true;
+        expect(sendMessageMock.mock.calls.length).toBe(before);
+        await as(tab, () => yes(tab));
+      }
+      expect(sendMessageMock.mock.calls.length).toBe(before + 1);
+    }
+    return asked;
+  }
+
+  async function u41(full: boolean) {
+    window.localStorage.setItem(KEY, TEXT);
+    sendMessageMock.mockRejectedValueOnce(fence());
+    const view = render(<Tabs tool="codex" />);
+    await settle();
+    expect(slots.every((s) => s.listener !== null)).toBe(true);
+    expect(ta('b').value).toBe(TEXT);
+    // Tab A's awaited send to X is stopped by the fence (the store full or not).
+    fullStore = full;
+    await as('a', () => enter('a'));
+    fullStore = false;
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    // Both tabs read the roster again: X's tool changed.
+    view.rerender(<Tabs tool="claude" />);
+    await settle();
+    // Tab A asks, says yes and sends.
+    await as('a', () => enter('a'));
+    expect(band('a')).not.toBeNull();
+    await as('a', () => yes('a'));
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock.mock.calls[1][2]).toMatchObject({ cliToolId: 'claude', instanceId: I });
+    // Tab B still shows the same text: its Enter asks (POST 0).
+    expect(ta('b').value).toBe(TEXT);
+    await as('b', () => enter('b'));
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(band('b')).not.toBeNull();
+    await as('b', () => yes('b'));
+    expect(sendMessageMock).toHaveBeenCalledTimes(3);
+    // The asking ends: within three rounds of new texts, a round where neither tab asks; the store ends empty.
+    let last: Record<Tab, boolean> = { a: true, b: true };
+    for (let i = 0; i < 3 && (last.a || last.b); i += 1) last = await round();
+    expect(last).toEqual({ a: false, b: false });
+    expect(rawStore().get(TAG_KEY)).toBeNull();
+  }
+
+  it('a list tag (the store works)', async () => {
+    await u41(false);
+  });
+
+  it('the short "unknown" (U1-1: a long :retarget value throws at the 409)', async () => {
+    await u41(true);
+  });
+});
+
+describe('[#4604 accept r1c] O4 — a page that hears no event (known limit candidate, 人の判断待ち)', () => {
+  it('today: the store took the tag and let it go with no event reaching this page — its Enter sends (POST 1, no question)', async () => {
+    window.localStorage.setItem(KEY, TEXT);
+    const view = render(<One tool="codex" />);
+    await settle();
+    // Another tab's 409 and its send after a yes, while this page was frozen (no `StorageEvent`).
+    rawStore().set(TAG_KEY, JSON.stringify([tag('t-a')]));
+    view.rerender(<One tool="claude" />);
+    await settle();
+    rawStore().remove(KEY);
+    rawStore().remove(TAG_KEY);
+    enter('b');
+    await settle(30);
+    // Pinned as today's behaviour (not the safe side): the design's §3.4.1 does not decide this road yet.
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock.mock.calls[0][2]).toMatchObject({ cliToolId: 'claude', instanceId: I });
+    expect(band('b')).toBeNull();
+  });
+});

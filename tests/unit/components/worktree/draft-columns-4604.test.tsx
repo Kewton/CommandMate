@@ -17,6 +17,13 @@
  * it — for the To that yes named. At the end ("消さない判定"): every word the sequence put in is in a
  * composer, in the store, in a POST, or a toast said something could not be kept.
  *
+ * Issue #4604 accept r1c (PM の処分, 案 i): a yes covers the words of the composer that gave it only — X's,
+ * Y's and another tab's yes are each their own (#4604 comment 7185751687: another tab's yes is not this
+ * tab's). More words, in their own seeds: `otherTab409` (another tab's send of i1's stored text is stopped
+ * by the fence: it writes the tag into the store, with its `StorageEvent`; the stored text's words are
+ * handed back, going to i1's To now) · `otherTabValue` (another tab writes a value back — a tag, or a new
+ * "unknown" — with its event) · `yYes` (Y opens i1's draft, presses Enter, says yes when asked, and goes).
+ *
  * Seeds 1〜300, lengths 8〜20 (a small PRNG; a failing seed prints its sequence). Fixed columns F1・F2・F5・
  * F20・F21 (shape 3, V2-A)・F22 (V2-B, both shapes) in v4's form.
  *
@@ -37,8 +44,12 @@ import {
   getInstanceDraftKey,
   getRetargetTagKey,
   newRetargetTag,
+  newRetargetGeneration,
   readRetargetTagState,
   returnRetargetedText,
+  writeRetarget,
+  type RetargetOp,
+  type RetargetStorage,
 } from '@/lib/drafts/message-draft';
 import { installStoreFaults, isRetargetKey, otherTabWrites, rawStore, releasePageMarks, type StoreFaultRule } from '@tests/helpers/draft-store-fault-4604';
 import type { CLIToolType } from '@/lib/cli-tools/types';
@@ -109,12 +120,23 @@ interface Target {
 }
 const same = (a: Target, b: Target) => a.instanceId === b.instanceId && a.cliToolId === b.cliToolId;
 
+/** Who posts or says yes: the composers X and Y of this page, or another tab. */
+type Poster = 'X' | 'Y' | 'otherTab';
+
 /** The oracle's ledger. */
 class Ledger {
   /** A handed-back word, and the target it was going to. */
   returned = new Map<string, Target>();
-  /** A word a yes covered, and the To that yes named. */
-  covered = new Map<string, Target>();
+  /** A word a yes covered, and the To that yes named — per composer (r1c: a yes is its composer's only). */
+  coveredBy = new Map<Poster, Map<string, Target>>();
+  cover(who: Poster, word: string, to: Target) {
+    let words = this.coveredBy.get(who);
+    if (!words) {
+      words = new Map();
+      this.coveredBy.set(who, words);
+    }
+    words.set(word, to);
+  }
   /** Every word put in. */
   words = new Set<string>();
   /** Words typed whose debounced save has not run yet, and the ones an unmount dropped (#4419: an
@@ -123,14 +145,14 @@ class Ledger {
   dropped = new Set<string>();
   posts: Array<{ content: string; to: Target }> = [];
   violations: string[] = [];
-  judge(content: string, to: Target) {
+  judge(content: string, to: Target, who: Poster) {
     this.posts.push({ content, to });
     for (const w of content.split(/\s+/)) {
       const original = this.returned.get(w);
       if (!original || same(original, to)) continue;
-      const yes = this.covered.get(w);
+      const yes = this.coveredBy.get(who)?.get(w);
       if (yes && same(yes, to)) continue;
-      this.violations.push(`POST of ${w} (to ${to.instanceId}/${to.cliToolId}, going to ${original.instanceId}/${original.cliToolId}) without a yes`);
+      this.violations.push(`${who}'s POST of ${w} (to ${to.instanceId}/${to.cliToolId}, going to ${original.instanceId}/${original.cliToolId}) without a yes`);
     }
   }
 }
@@ -145,6 +167,8 @@ let duringAwait: (() => void) | null = null;
 /** Whether Y asked at its last send. */
 let yAsked = false;
 let seq = 0;
+/** The composer whose POST the mock judges now (Y while Y is acting). */
+let poster: Poster = 'X';
 
 async function flush() {
   for (let i = 0; i < 5; i++) {
@@ -166,6 +190,7 @@ beforeEach(() => {
   ledger = new Ledger();
   refuseNext = false;
   duringAwait = null;
+  poster = 'X';
   world = { xInstance: I1, tools: { [I1]: 'codex', [I2]: 'codex' }, mounted: true, yMounted: false };
   sendMessageMock.mockReset();
   sendMessageMock.mockImplementation(async (_wt: string, content: string, options: { cliToolId: string; instanceId?: string }) => {
@@ -180,7 +205,7 @@ beforeEach(() => {
         target: { worktreeId: WT, instanceId: to.instanceId, cliToolId: to.cliToolId }, current: null, requestId: 'r', sendOutcome: 'not_sent',
       });
     }
-    ledger.judge(content, to);
+    ledger.judge(content, to, poster);
     return { id: `s-${ledger.posts.length}`, role: 'user', content, timestamp: new Date() };
   });
   fetchStartPreviewMock.mockReset();
@@ -196,8 +221,23 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-type Word = 'return' | 'type' | 'switch' | 'otherSend' | 'otherTab' | 'reload' | 'wait' | 'fault' | 'enter' | 'yes' | 'no' | 'rosterRefresh' | '409';
+type Word = 'return' | 'type' | 'switch' | 'otherSend' | 'otherTab' | 'reload' | 'wait' | 'fault' | 'enter' | 'yes' | 'no' | 'rosterRefresh' | '409' | 'otherTab409' | 'otherTabValue' | 'yYes';
 const WORDS: Word[] = ['return', 'type', 'switch', 'otherSend', 'otherTab', 'reload', 'wait', 'fault', 'enter', 'yes', 'no', 'rosterRefresh', '409'];
+/** r1c: the words of another tab's 409, its value-carrying writes and Y's yes — in their own seeds. */
+const WORDS_R1C: Word[] = [...WORDS, 'otherTab409', 'otherTabValue', 'yYes'];
+
+/**
+ * r1c: another tab's write through the one road — it reads the store as it is (no fault of this page),
+ * and each write it makes reaches this page as a `StorageEvent` (`otherTabWrites`).
+ */
+function otherTabRoad(draftKey: string, op: RetargetOp): void {
+  const storage: RetargetStorage = {
+    getItem: (key) => rawStore().get(key),
+    setItem: (key, value) => otherTabWrites(key, value),
+    removeItem: (key) => otherTabWrites(key, null),
+  };
+  writeRetarget(draftKey, op, { storage, unstorable: new Map() });
+}
 
 async function step(word: Word, arg = 0) {
   switch (word) {
@@ -231,8 +271,10 @@ async function step(word: Word, arg = 0) {
       world = { ...world, yMounted: true };
       rerender();
       await flush();
+      poster = 'Y';
       fireEvent.keyDown(ta('Y'), { key: 'Enter', code: 'Enter' });
       await flush();
+      poster = 'X';
       yAsked = q('Y', 'message-input-retarget-confirm') !== null;
       world = { ...world, yMounted: false };
       rerender();
@@ -240,7 +282,7 @@ async function step(word: Word, arg = 0) {
     case 'otherTab': {
       // Another tab sent i1's draft after its person said yes (to i1's To now): what it saw is covered.
       const text = rawStore().get(K1) ?? '';
-      for (const w of text.split(/\s+/)) if (ledger.returned.has(w)) ledger.covered.set(w, { instanceId: I1, cliToolId: world.tools[I1] });
+      for (const w of text.split(/\s+/)) if (ledger.returned.has(w)) ledger.cover('otherTab', w, { instanceId: I1, cliToolId: world.tools[I1] });
       for (const w of text.split(/\s+/)) if (w) ledger.posts.push({ content: w, to: { instanceId: I1, cliToolId: world.tools[I1] } });
       act(() => {
         otherTabWrites(K1, null);
@@ -274,7 +316,7 @@ async function step(word: Word, arg = 0) {
     case 'yes': {
       const yes = q('X', 'message-input-retarget-confirm-yes');
       if (!yes) break;
-      for (const w of ta('X').value.split(/\s+/)) if (ledger.returned.has(w)) ledger.covered.set(w, xTo());
+      for (const w of ta('X').value.split(/\s+/)) if (ledger.returned.has(w)) ledger.cover('X', w, xTo());
       fireEvent.click(yes);
       break;
     }
@@ -292,6 +334,47 @@ async function step(word: Word, arg = 0) {
       refuseNext = true;
       const to = xTo();
       for (const w of ta('X').value.split(/\s+/)) if (w && !ledger.returned.has(w)) ledger.returned.set(w, to);
+      break;
+    }
+    case 'otherTab409': {
+      // Another tab sent i1's stored text and the fence stopped it: its tag goes into the store (through
+      // the one road, in that tab), with the event this page hears; the words are handed back there.
+      const original = { instanceId: I1, cliToolId: world.tools[I1] };
+      for (const w of (rawStore().get(K1) ?? '').split(/\s+/)) if (w && !ledger.returned.has(w)) ledger.returned.set(w, original);
+      act(() => {
+        otherTabRoad(K1, { kind: 'add', tags: [newRetargetTag(original)] });
+      });
+      break;
+    }
+    case 'otherTabValue':
+      // Another tab writes a value back (a tag it holds, or a new "unknown"), with its event.
+      act(() => {
+        otherTabRoad(
+          K1,
+          arg % 2 === 0
+            ? { kind: 'writeBack', tags: [newRetargetTag({ instanceId: I1, cliToolId: world.tools[I1] })] }
+            : { kind: 'moveIn', from: { kind: 'unknown', generation: newRetargetGeneration(), tags: [] }, fromUnstorable: null },
+        );
+      });
+      break;
+    case 'yYes': {
+      // Y opens i1's draft, presses Enter, says yes when asked (for its words, to its To), and goes.
+      world = { ...world, yMounted: true };
+      rerender();
+      await flush();
+      poster = 'Y';
+      fireEvent.keyDown(ta('Y'), { key: 'Enter', code: 'Enter' });
+      await flush();
+      const yes = q('Y', 'message-input-retarget-confirm-yes');
+      if (yes) {
+        const yTo = { instanceId: I1, cliToolId: world.tools[I1] };
+        for (const w of ta('Y').value.split(/\s+/)) if (ledger.returned.has(w)) ledger.cover('Y', w, yTo);
+        fireEvent.click(yes);
+        await flush();
+      }
+      poster = 'X';
+      world = { ...world, yMounted: false };
+      rerender();
       break;
     }
   }
@@ -321,10 +404,10 @@ function prng(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-function sequenceOf(seed: number): Array<[Word, number]> {
+function sequenceOf(seed: number, words: readonly Word[] = WORDS): Array<[Word, number]> {
   const r = prng(seed);
   const length = 8 + Math.floor(r() * 13);
-  return Array.from({ length }, () => [WORDS[Math.floor(r() * WORDS.length)], Math.floor(r() * 4)] as [Word, number]);
+  return Array.from({ length }, () => [words[Math.floor(r() * words.length)], Math.floor(r() * 4)] as [Word, number]);
 }
 
 describe('[#4604] seeded sequences (seeds 1〜300, lengths 8〜20)', () => {
@@ -337,6 +420,17 @@ describe('[#4604] seeded sequences (seeds 1〜300, lengths 8〜20)', () => {
       sequence: words.map(([w, a]) => (w === 'fault' ? `fault:${a % 4}` : w)).join(' '),
       violations: [],
     });
+    await expectNothingLost();
+  });
+});
+
+describe('[#4604 accept r1c] seeded sequences with another tab\'s 409, its value-carrying writes and Y\'s yes (seeds 1〜300)', () => {
+  const SEEDS = Array.from({ length: 300 }, (_, i) => i + 1);
+  it.each(SEEDS)('seed %i', async (seed) => {
+    const words = sequenceOf(seed, WORDS_R1C);
+    for (const [word, arg] of words) await step(word, arg);
+    const shown = words.map(([w, a]) => (w === 'fault' ? `fault:${a % 4}` : w)).join(' ');
+    expect({ seed, sequence: shown, violations: ledger.violations }).toEqual({ seed, sequence: shown, violations: [] });
     await expectNothingLost();
   });
 });
@@ -423,6 +517,21 @@ describe('[#4604] fixed columns', () => {
     await step('enter');
     expect(ledger.violations).toEqual([]);
     expect(q('X', 'message-input-retarget-confirm')).not.toBeNull();
+  });
+
+  it('U4-1 (r1c): X shows i1\'s text, another tab\'s 409 tags it, the tool changes, that tab sends after its yes — X asks', async () => {
+    await step('type');
+    await step('wait');
+    await step('otherTab409');
+    await step('rosterRefresh');
+    await step('otherTab');
+    expect(ta('X').value).toMatch(/^w\d+$/);
+    await step('enter');
+    expect(ledger.violations).toEqual([]);
+    expect(q('X', 'message-input-retarget-confirm')).not.toBeNull();
+    await step('yes');
+    expect(ledger.violations).toEqual([]);
+    expect(ledger.posts.at(-1)?.to).toEqual(xTo());
   });
 
   it('F22 (V2-B): X\'s awaited 409 — Y (same draft, this page) and another tab (it reads the store) both ask', async () => {
