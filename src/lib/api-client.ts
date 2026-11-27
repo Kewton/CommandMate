@@ -563,6 +563,18 @@ function isSentAnswer(body: unknown): boolean {
 }
 
 /**
+ * Issue #4603 r3: whether the send's 2xx was served as JSON — the CLI's `isJsonType`
+ * (`classify-send-answer.ts`): the media type (before `;`, trimmed, lower-cased) is
+ * `application/json` or ends in `+json`. The send's own rule; every other caller keeps
+ * {@link detectNonJsonBody}.
+ */
+function isSendJsonType(contentType: string | null): boolean {
+  if (contentType === null) return false;
+  const mediaType = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  return mediaType === 'application/json' || mediaType.endsWith('+json');
+}
+
+/**
  * Issue #4603: the send's reading of a 2xx (after the auth-redirect guard and the non-2xx branch of
  * {@link fetchApi}, which it shares). A 2xx that is not the route's ChatMessage — a body that is
  * not JSON (D2), JSON that cannot be read (D3), or JSON of another shape (D4) — says nothing about
@@ -574,11 +586,14 @@ function isSentAnswer(body: unknown): boolean {
 async function readSendAnswer<T>(response: Response): Promise<T> {
   const unknownAnswer = () =>
     new ApiError('Unexpected send answer', response.status, { sendOutcome: 'unknown' }, 'http');
-  if (detectNonJsonBody(response)) throw unknownAnswer();
+  if (!isSendJsonType(response.headers?.get('content-type') ?? null)) throw unknownAnswer();
   let body: unknown;
   try {
     body = await response.json();
-  } catch {
+  } catch (error) {
+    // A transport failure while the body is read (cut: `network`, stalled: `timeout`, the caller's
+    // abort: `aborted`) is already an ApiError (`withBodyDeadline`): passed on as it was before #4603.
+    if (error instanceof ApiError) throw error;
     throw unknownAnswer();
   }
   if (!isSentAnswer(body)) throw unknownAnswer();
