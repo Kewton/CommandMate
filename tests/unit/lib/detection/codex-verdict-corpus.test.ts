@@ -78,6 +78,9 @@ const CORPUS: ReadonlyArray<readonly [string, string, string]> = [
   ['fixtures/codex-dialogs-0157/quoted-approval-idle.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-dialogs-0157/running.txt', 'running/thinking_indicator', 'running/thinking_indicator'],
   ['fixtures/codex-dialogs-0157/trust.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
+  // Synthetic (#4573): S10 審判の偽の codex の画面。履歴の idle の入力欄＋status bar の下に、素の文字の許可の画面。
+  ['fixtures/codex-dialogs-4573/stale-composer-approval-padded.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
+  ['fixtures/codex-dialogs-4573/stale-composer-approval.txt', 'waiting/prompt_detected/prompt', 'waiting/prompt_detected/prompt'],
   ['fixtures/codex-idle-composer-0155/idle-after-turn.txt', 'ready/input_prompt', 'ready/input_prompt'],
   ['fixtures/codex-live-2310/dialog-experimental-toggles.txt', 'waiting/codex_selection_list', 'ready/input_prompt'],
   ['fixtures/codex-live-2310/dialog-keymap-editor.txt', 'waiting/codex_selection_list', 'ready/input_prompt'],

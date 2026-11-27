@@ -98,6 +98,7 @@
 
 import { createLogger } from '@/lib/logger';
 import { findNumberedOptionBlock } from '../dialog-block';
+import { stripAnsi } from '../../ansi';
 
 const logger = createLogger('codex-dialog-rules');
 
@@ -458,6 +459,68 @@ export function readCodexDialogFrame(
 const CODEX_NUMBERED_GLYPH_ROW_PATTERN = /^\s*›\s*\d{1,2}[.)]\s/;
 
 /**
+ * codex's status bar, the two shapes `findCodexFooterBoundary` accepts:
+ * `CODEX_STATUS_BAR_PATTERN` and `CODEX_TRAILED_STATUS_BAR_PATTERN` of
+ * `./patterns`, written out here rather than imported (Issue #4573):
+ * `patterns.ts` imports {@link readCodexGlyphRowKind} from this module, so an
+ * import back would be a module-scope cycle
+ * (`tests/unit/guards/import-cycles-baseline-3482.test.ts`).
+ * `codex-stale-composer-approval-4573.test.ts` pins both copies to the
+ * originals' source and flags, so a change to either fails there.
+ * The patterns are the same; the rows they are tried on are not — see
+ * {@link isStaleComposerRow} for that range.
+ */
+export const CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS: readonly RegExp[] = [
+  /^\s*\S.*·\s*~?\/\S*\s*$/,
+  /^\s*\S[^·]*·\s*~?\/\S*(?:\s*·[^\n]*|[^\S\n]{2,}\S[^\n]*)$/,
+];
+
+/**
+ * Is the composer at raw row `composerRow` a STALE one (Issue #4573)?
+ *
+ * True when, below that row, codex's status bar closes the screen it belonged
+ * to and a `›`-numbered option row follows the bar. That is the shape tmux
+ * hands over after codex clears the screen (`\e[2J`): the old idle screen —
+ * composer drawn with SGR, then its status bar — stays in the history, and the
+ * dialog drawn below it is plain text, which {@link readCodexGlyphRowKind}
+ * cannot classify, so {@link findCodexBottomGlyphRow} returns the history's
+ * composer.
+ *
+ * The status bar is the condition, not just "a numbered row below": #3205's
+ * tc104 has `› 1. Yes, proceed (y)` TYPED INTO the composer's continuation
+ * rows, below the composer and above the bar, and that composer is the live
+ * one.
+ *
+ * Which bar: the BOTTOM-MOST row below the composer that has the bar's shape
+ * is taken as that composer's own bar. Then the composer is stale when both:
+ *   (a) a `›`-numbered option row sits below that bar, and
+ *   (b) no row below that bar carries SGR — the screen under it is the plain
+ *       text tmux hands over, not a screen codex is drawing with attributes.
+ * The input box's end is not used: a bar-looking row TYPED INTO the composer
+ * (`  gpt-5 default · ~/repo` above a typed `› 1.`, review P2-1) sits above
+ * the live composer's real bar, which is the bottom-most one, and the real bar
+ * has no `› N.` under it. (b) keeps a screen with no visible real bar (an open
+ * slash popup, drawn with SGR) from reading a typed bar-looking row as the bar.
+ * This range differs from `findCodexFooterBoundary`'s: that one takes the
+ * bottom-most bar within the last 10 content rows; this one takes the
+ * bottom-most bar among ALL the rows below the composer.
+ */
+function isStaleComposerRow(rawRows: string[], composerRow: number): boolean {
+  let bar = -1;
+  for (let i = rawRows.length - 1; i > composerRow; i--) {
+    const text = stripAnsi(rawRows[i]);
+    if (CODEX_COMPOSER_CLOSING_STATUS_BAR_PATTERNS.some(pattern => pattern.test(text))) {
+      bar = i;
+      break;
+    }
+  }
+  if (bar < 0) return false;
+  const below = rawRows.slice(bar + 1);
+  if (below.some(row => row.includes('\x1b'))) return false;
+  return below.some(row => CODEX_NUMBERED_GLYPH_ROW_PATTERN.test(stripAnsi(row)));
+}
+
+/**
  * Is the bottom of this codex pane the composer (Issue #2841)?
  *
  * codex draws exactly one thing between the conversation and its status bar:
@@ -475,7 +538,9 @@ const CODEX_NUMBERED_GLYPH_ROW_PATTERN = /^\s*›\s*\d{1,2}[.)]\s/;
  * Two readings, in order:
  *
  *  1. **raw** — the bottom-most `›` row of the RAW capture
- *     ({@link findCodexBottomGlyphRow}) is `composer` → true; `option` → false;
+ *     ({@link findCodexBottomGlyphRow}) is `composer` → true, unless a status
+ *     bar and then a `›`-numbered row sit below it (a stale composer, Issue
+ *     #4573: {@link isStaleComposerRow}) → false; `option` → false;
  *     `transcript-echo` → false (not shown to be the composer).
  *  2. **stripped** (no attributes: Auto-Yes and `prompt-answer-sender` hand the
  *     layer a `stripAnsi`'d capture) — the last non-blank row of the content
@@ -498,7 +563,11 @@ export function isCodexComposerAtBottom(
   contentEnd: number,
 ): boolean {
   const glyphRow = findCodexBottomGlyphRow(raw);
-  if (glyphRow !== null) return glyphRow.kind === 'composer';
+  if (glyphRow !== null) {
+    if (glyphRow.kind !== 'composer') return false;
+    // Issue #4573: a composer left in the history above a plain dialog.
+    return !isStaleComposerRow(raw.split('\n'), glyphRow.row);
+  }
 
   const end = Math.min(contentEnd, contentLines.length);
   let last = end - 1;
