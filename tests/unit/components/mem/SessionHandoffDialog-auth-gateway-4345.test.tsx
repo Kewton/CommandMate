@@ -142,7 +142,7 @@ beforeEach(() => {
     const rest = match ? match[2] : url;
     if (rest.startsWith('/mem/mode')) return json(200, ATTENDED);
     if (rest.startsWith('/kill-session')) return answer('kill', () => json(200, { success: true, message: 'ok' }));
-    if (rest === '/send') return answer('send', () => json(201, { id: 'm1' }));
+    if (rest === '/send') return answer('send', () => json(201, { id: 'm1', role: 'user' }));
     if (rest === '/mem/handoff/requests' && method === 'POST') return answer('create', () => json(201, { ...view(), text: 'the request text' }));
     const step = /^\/mem\/handoff\/requests\/r1(\/.*)?$/.exec(rest);
     if (step) {

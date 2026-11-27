@@ -78,6 +78,7 @@ import {
   dropHandoffUnit,
   endHandoffCancel,
   endHandoffStop,
+  currentHandoffHold,
   handoffStoreSnapshot,
   handoffTextSendable,
   handoffUnitsLock,
@@ -215,6 +216,12 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
   const textSending = opening?.textSending ?? false;
   const writing = opening?.writing ?? false;
   /**
+   * Issue #4632: the request's text got a 2xx that does not say whether it arrived. Read through the
+   * store's hold (`currentHandoffHold`), written through `patchHandoffOpening` (`sendText`), so only
+   * close-rule holds the flag; the person still decides where it is kept.
+   */
+  const textOutcomeUnknown = currentHandoffHold().textOutcomeUnknown;
+  /**
    * Issue #4317 PR2: the host beside the shell keeps this instance (and its DOM) over route and
    * width changes, so what is local here — the notice — is per opening: set afresh when
    * another opening is shown, kept while the same one is (and while none is). The person's choices
@@ -222,9 +229,14 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
    * this instance's state does not outlive that.
    */
   const [localFor, setLocalFor] = useState<HandoffOpeningToken | null>(token);
+  /** Issue #4632: the unknown send's confirmation row is asked for (a press on "send again"). */
+  const [confirmResend, setConfirmResend] = useState(false);
   if (token !== null && token !== localFor) {
     setLocalFor(token);
-    if (localFor !== null) setNotice(null);
+    if (localFor !== null) {
+      setNotice(null);
+      setConfirmResend(false);
+    }
   }
   /**
    * The worktree the dialog was opened for (pr2d). The page keeps the dialog over a switch of
@@ -310,11 +322,23 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
         // now (an expiry taken meanwhile, this send's own 401 included) — a record, not a new send.
         // 再指示 2: with the capability the allowed send handed over.
         const recordOwner = operation ? (operation.record() ?? registration) : registration;
+        // Issue #4632: a 2xx that does not say whether the text arrived is kept as an unknown, not
+        // as a failure: the server records `send-failed` (its `sendState`), and the opening remembers
+        // that a second send must be confirmed first.
+        const outcomeUnknown = !sent.ok && sent.outcome === 'unknown';
         const marked = sent.ok
           ? await handoffApi.sent(of.worktreeId, requestIdToSend, recordOwner)
           : await handoffApi.sendFailed(of.worktreeId, requestIdToSend, recordOwner);
         if (marked.ok && marked.body?.request) patchHandoffOpening(of.token, { view: marked.body });
-        if (isLiveHandoffOpening(of.token)) setNotice(sent.ok ? null : { tone: 'alert', text: t('mem.handoff.sendFailed') });
+        if (sent.ok) patchHandoffOpening(of.token, { textOutcomeUnknown: false });
+        else if (outcomeUnknown) patchHandoffOpening(of.token, { textOutcomeUnknown: true });
+        if (isLiveHandoffOpening(of.token)) {
+          setNotice(
+            sent.ok
+              ? null
+              : { tone: 'alert', text: t(outcomeUnknown ? 'mem.handoff.sendUnknown' : 'mem.handoff.sendFailed') }
+          );
+        }
       } finally {
         patchHandoffOpening(of.token, { textSending: false });
       }
@@ -817,9 +841,43 @@ export function SessionHandoffDialog({ isOpen, worktreeId, target, onClose, onSt
             </div>
             {request.state === 'awaiting_agent' && (request.sendState === 'failed' || (request.sendState === 'unsent' && !textSending)) && (
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={resendText} disabled={busy || cancelling || text === null || !actionable} data-testid="handoff-resend-text">
+                <Button
+                  size="sm"
+                  /* Issue #4632: an unknown 2xx asks before a second send; a plain failure sends at once. */
+                  onClick={() => {
+                    if (textOutcomeUnknown) {
+                      setConfirmResend(true);
+                      return;
+                    }
+                    resendText();
+                  }}
+                  disabled={busy || cancelling || text === null || !actionable}
+                  data-testid="handoff-resend-text"
+                >
                   {t('mem.handoff.resendText')}
                 </Button>
+              </div>
+            )}
+            {request.state === 'awaiting_agent' && textOutcomeUnknown && confirmResend && (
+              <div className="space-y-1 rounded border border-warning-border bg-warning-subtle p-2" data-testid="handoff-resend-unknown-confirm">
+                <p className="text-xs text-foreground">{t('mem.handoff.resendUnknownConfirm')}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setConfirmResend(false);
+                      if (token) patchHandoffOpening(token, { textOutcomeUnknown: false });
+                      resendText();
+                    }}
+                    disabled={busy || cancelling || text === null || !actionable}
+                    data-testid="handoff-resend-unknown-yes"
+                  >
+                    {t('mem.handoff.resendUnknownYes')}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmResend(false)} data-testid="handoff-resend-unknown-no">
+                    {t('mem.handoff.resendUnknownNo')}
+                  </Button>
+                </div>
               </div>
             )}
             {request.state === 'awaiting_agent' && request.agentTimedOut && (

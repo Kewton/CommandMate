@@ -63,6 +63,13 @@ export interface HandoffHold {
   unknown: boolean;
   /** The request's cancel has been sent and not answered. */
   cancelling?: boolean;
+  /**
+   * Issue #4632: the request's text got a 2xx that says nothing about whether it arrived. Read here
+   * (`currentHandoffHold`) and written by `patchHandoffOpening`, so the flag lives only in this
+   * store; where it is kept (the page's memory, or per request id in browser storage) is still the
+   * person's decision (the store's shape can change without the dialog).
+   */
+  textOutcomeUnknown?: boolean;
 }
 
 /**
@@ -180,6 +187,13 @@ export interface HandoffOpening {
   readonly textSending: boolean;
   /** Issue #4345 1b 再指示 1: an extend or a rebase of this opening is answered (the same reason). */
   readonly writing: boolean;
+  /**
+   * Issue #4632: the request's text got a 2xx that does not say whether it arrived (the CLI's table
+   * read `unknown`). Kept on the opening (a remount keeps it); read through `currentHandoffHold`
+   * and written through `patchHandoffOpening` only. Where it is stored, and for how long, is the
+   * person's decision (the page's memory today; per request id later would change this store only).
+   */
+  readonly textOutcomeUnknown: boolean;
 }
 
 /**
@@ -307,7 +321,7 @@ export function endHandoffCancel(worktreeId: string): void {
 }
 
 function freshOpening(worktreeId: string, target: HandoffOpeningTarget): HandoffOpening {
-  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false, choices: {}, textSending: false, writing: false };
+  return { token: {} as HandoffOpeningToken, worktreeId, target: { ...target }, closed: false, created: 'no', view: null, text: null, plainOnly: null, plainStopped: false, choices: {}, textSending: false, writing: false, textOutcomeUnknown: false };
 }
 
 /**
@@ -332,7 +346,7 @@ export function liveHandoffOpeningFor(instanceId: string): HandoffOpening | null
 /** Writes what the opening `token` learnt (nothing once another opening started). */
 export function patchHandoffOpening(
   token: HandoffOpeningToken,
-  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped' | 'choices' | 'textSending' | 'writing'>>
+  patch: Partial<Pick<HandoffOpening, 'created' | 'view' | 'text' | 'plainOnly' | 'plainStopped' | 'choices' | 'textSending' | 'writing' | 'textOutcomeUnknown'>>
 ): void {
   if (state.opening?.token !== token) return;
   commit({ ...state, opening: { ...state.opening, ...patch } });
@@ -366,11 +380,17 @@ export function noteHandoffHidden(token: HandoffOpeningToken): void {
   markClosed(token);
 }
 
-/** What the open dialog holds now: the units of the worktree it was opened for. */
+/** What the open dialog holds now: the units of the worktree it was opened for, and the text's unknown outcome. */
 export function currentHandoffHold(): HandoffHold {
   const opening = state.opening;
   const units = opening ? handoffUnitsOf(opening.worktreeId) : NO_UNITS;
-  return { stopping: units.stopping, sending: units.inflight !== null, unknown: units.pending !== null, cancelling: units.cancelling };
+  return {
+    stopping: units.stopping,
+    sending: units.inflight !== null,
+    unknown: units.pending !== null,
+    cancelling: units.cancelling,
+    textOutcomeUnknown: opening?.textOutcomeUnknown ?? false,
+  };
 }
 
 /** The write lock the dialog's units hold over mem items (any worktree's): sending, else unknown. */
