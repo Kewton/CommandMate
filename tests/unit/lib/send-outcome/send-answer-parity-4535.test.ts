@@ -14,9 +14,12 @@
  * on one of them is a disagreement too).
  *
  * Rows of §2.2 left out of the table, and why:
- * - S1 / S2 / S3 (2xx with a ChatMessage or an `ask`): the screen resolves on them, so there is no
- *   rejection for `isSendOutcomeUnknown` to read (sent on both sides). S4's 2xx are in the table
- *   where the screen rejects with an `ApiError` (the `/login` page), the rest are divergent rows.
+ * - S1 / S2 (2xx with a ChatMessage): the screen resolves on them, so there is no rejection for
+ *   `isSendOutcomeUnknown` to read (sent on both sides). S3 (an `ask` only): after #4603 the screen
+ *   reads it as unknown (D6, an intended difference below: the screen never sends an `ask`). S4's
+ *   2xx are in the table where the screen rejects with an `ApiError` (the `/login` page), the rest
+ *   are the D2–D4 rows. The whole 2xx table, row by row, is in
+ *   `tests/unit/lib/api-client-send-answer-shape-4603.test.ts` (INV-Q1').
  * - N8 and the `ask.sendState` half of U1: the screen never sends an `ask` (only the CLI's `ask`
  *   does), so its answers never carry one.
  * - N7 (a refused connection: `ApiError.cause` → `fetch failed` → `ECONNREFUSED`): a browser's
@@ -27,8 +30,9 @@
  *   which is one of the other rows (the `/login` page after the auth redirect is one).
  *
  * Rows on which the two readers disagree (the human's decision on #4535, 2026-11-24 21:47):
- * - Intended (D1, D5): each reader's own answer is pinned, with the reason, in the last but one
- *   `describe`. They are not bugs.
+ * - Intended (D1, D5): each reader's own answer is pinned, with the reason, in the
+ *   `intended differences` `describe`. They are not bugs. D6 (#4603, an `ask`-only 2xx) has its own
+ *   `describe` next to it.
  * - Fixed in S12 (D2–D4, https://github.com/Kewton/CommandMate/issues/4603): the 2xx that are not
  *   a ChatMessage. The screen's send now reads them as the CLI does (unknown); asserted in the last
  *   `describe` but one. Only the screen's `worktreeApi.sendMessage` changed (#4603); the CLI did not.
@@ -187,6 +191,18 @@ const INTENDED_DIVERGENCES: IntendedDivergence[] = [
     screen: 'not_sent',
   },
 ];
+
+/**
+ * D6 (S3, #4603): a 2xx that carries an `ask` only, no ChatMessage. The CLI reads its `sendState`
+ * (`sent` → sent); the screen resolves on a ChatMessage only (the human's decision a on #4603), so it
+ * says unknown — the safer side. The screen never sends an `ask`, so its answers never carry one.
+ */
+const D6_DIVERGENCE: IntendedDivergence = {
+  id: 'D6',
+  answer: json('S3', "201 ask only (sendState 'sent'), no ChatMessage", 201, { ask: { sendState: 'sent' } }),
+  cli: 'sent',
+  screen: 'unknown',
+};
 
 /**
  * D2–D4 (S4, the 2xx that are not a ChatMessage): the CLI says unknown. Fixed in S12,
@@ -351,6 +367,17 @@ describe('[#4535 INV-S3] intended differences (D1, D5): each reader keeps its ow
       expect(screenFact(isSendOutcomeUnknown, error)).toBe(d.screen);
     }
   );
+});
+
+describe('[#4603] intended difference (D6): an ask-only 2xx is unknown on the screen, sent on the CLI', () => {
+  it(`${D6_DIVERGENCE.id} ${D6_DIVERGENCE.answer.row} ${D6_DIVERGENCE.answer.name}`, async () => {
+    const d = D6_DIVERGENCE;
+    expect(readCli(d.answer)).toBe(d.cli);
+    const error = await screenErrorFor(d.answer);
+    expect(error, 'the screen rejects on this answer').toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ message: 'Unexpected send answer', status: 201, kind: 'http', data: { sendOutcome: 'unknown' } });
+    expect(screenFact(isSendOutcomeUnknown, error)).toBe(d.screen);
+  });
 });
 
 describe('[#4535 INV-S3] 2xx that are not a ChatMessage (D2–D4) — to fix in S12, #4603', () => {
