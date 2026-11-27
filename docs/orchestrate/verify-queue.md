@@ -25,7 +25,8 @@ S12 の手当て 4（人の承認 2026-11-27）。ゲートの中身・合格の
 
 - 往復の途中（レビューの指摘の直し・再指示）は、リーダーの再現（関わる試験と変異を、待ちの 1 行の後に 1 ファイルずつ）だけで進める。途中のワーカーの返しは返しの行で受け、`wait --verify`・`wait-verify.mjs`・precheck を流さない
 - 正式な verify と precheck は、レビューの処分が閉じた後の HEAD で 1 回。裁定はこの run で行う（リーダーの再現・直の実行を裁定に使わない）
-- 重い走りを内側で始める道具（`wait-verify.mjs`・`precheck.mjs`・`merge-pr.mjs`）が自分で待つのは #4631 で道具にする。それまでは手で待ちの 1 行を頭に付け、順番表に始めた時刻で 1 行書く
+- 重い走りを内側で始める道具（`wait-verify.mjs`・`precheck.mjs`・`merge-pr.mjs`・`merge-train.mjs`）は、始める前に `scripts/orchestrate/heavy-runs.mjs` で自分で待つ（#4631）
+- 手で重い走り（直の vitest・build）を始めるときは、頭に `node scripts/orchestrate/heavy-runs.mjs wait &&` を付け、順番表に始めた時刻で 1 行書く
 
 ## PM の保留の指示
 
