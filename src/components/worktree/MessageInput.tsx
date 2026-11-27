@@ -67,6 +67,7 @@ import {
   subscribeRetargetedText,
   writeRetarget,
   type DraftScope,
+  type RetargetOp,
   type RetargetTag,
   type RetargetTarget,
   type RetargetWriteResult,
@@ -262,6 +263,11 @@ const START_PREVIEW_REFRESH_MS = 10_000;
 const RETARGET_CONFIRM_UNREADABLE_KEY = 'conversation.sendTargetChanged.retargetConfirmUnreadable';
 /** Issue #4604: the toast when not even the "unknown" of a draft's tags could be stored. */
 const RETARGET_UNSTORED_KEY = 'conversation.sendTargetChanged.retargetUnstored';
+/**
+ * Issue #4604 accept r1 (F2): the toast when the tags could not be written as a list and only the short
+ * "unknown" went in — every composer, this tab's and another's, asks before sending it.
+ */
+const RETARGET_PARTIALLY_STORED_KEY = 'conversation.sendTargetChanged.retargetPartiallyStored';
 /** Issue #4604: the toast when the previous draft's waiting save could not be written at a switch. */
 const PREVIOUS_DRAFT_NOT_SAVED_KEY = 'composer.previousDraftNotSaved';
 /** Issue #4604: the notice when the draft could not be read (the composer is left empty). */
@@ -484,9 +490,23 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // Issue #4604: the composer's toasts about its store — the caller's surface, else the app's.
   const { showToast: appToast } = useToast();
   const notify = showToast ?? appToast;
-  const notifyRetargetWrite = useCallback((result: RetargetWriteResult) => {
+  // Issue #4604 accept r1 (F2): `shortUnknown` — only the short "unknown" went in (its own sentence).
+  const notifyRetargetWrite = useCallback((result: RetargetWriteResult, shortUnknown = false) => {
     if (result === 'unstored') notify(t(RETARGET_UNSTORED_KEY), 'warning');
+    else if (shortUnknown) notify(t(RETARGET_PARTIALLY_STORED_KEY), 'warning');
   }, [notify, t]);
+  // Issue #4604 accept r1 (F2): for the handed-back text's listener (its subscription stays on `draftKey`).
+  const notifyRetargetWriteRef = useRef(notifyRetargetWrite);
+  notifyRetargetWriteRef.current = notifyRetargetWrite;
+  /** Issue #4604 accept r1 (F2): a write through the one road, told as {@link notifyRetargetWrite} says. */
+  const writeRetargetTold = useCallback((key: string, op: RetargetOp) => {
+    let shortUnknown = false;
+    const onShortUnknown = () => {
+      shortUnknown = true;
+    };
+    const result = writeRetarget(key, op, { onShortUnknown });
+    notifyRetargetWrite(result, shortUnknown);
+  }, [notifyRetargetWrite]);
 
   // Hooks for slash command functionality
   // Issue #4: Pass cliToolId to filter commands by CLI tool
@@ -787,8 +807,8 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     const held = retargetTagsRef.current;
     if (held.key === key) retargetTagsRef.current = { key, tags: mergeRetargetTags(held.tags, [tag]) };
     // Issue #4604 (a P2-2・V2-A): through the one road — what cannot be kept as a list is kept "unknown".
-    notifyRetargetWrite(writeRetarget(key, { kind: 'add', tags: [tag] }));
-  }, [notifyRetargetWrite]);
+    writeRetargetTold(key, { kind: 'add', tags: [tag] });
+  }, [writeRetargetTold]);
   /**
    * Issue #4535 r5 (review H1, 段 2 §3.2), r7 (INV-V2a): the awaited road's answer from the send fence.
    * The text stays in the draft (it never left it); for `not_sent` with its original target named
@@ -877,7 +897,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
     // store, or one that cannot take them, is left "unknown").
     const heldTags = retargetTagsRef.current;
     if (heldTags.key !== draftKey && heldTags.key !== '' && heldTags.tags.length > 0) {
-      notifyRetargetWrite(writeRetarget(heldTags.key, { kind: 'writeBack', tags: heldTags.tags }));
+      writeRetargetTold(heldTags.key, { kind: 'writeBack', tags: heldTags.tags });
     }
     // Issue #4419: the tile switched instance with a save still waiting — write it under the key it
     // was typed for. Instance scope only: the worktree screen's split scope drops it as before, and
@@ -931,7 +951,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
       draftSaveTimerRef.current = null;
     };
-  // `notify` / `notifyRetargetWrite` are read at the switch only (a new toast surface is not a switch).
+  // `notify` / `writeRetargetTold` are read at the switch only (a new toast surface is not a switch).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey, draftScope, worktreeId, splitIndex, setResendConfirmedBoth]);
 
@@ -959,7 +979,9 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
   // already has both (`returnRetargetedText`).
   useEffect(
     () =>
-      subscribeRetargetedText(draftKey, ({ text, tag }) => {
+      subscribeRetargetedText(draftKey, ({ text, tag }, info) => {
+        // Issue #4604 accept r1 (F2): its tag went in only as the short "unknown" — said once.
+        if (info.takeShortUnknown()) notifyRetargetWriteRef.current('unknown-stored', true);
         const held = retargetTagsRef.current;
         if (held.key === draftKey) retargetTagsRef.current = { key: draftKey, tags: mergeRetargetTags(held.tags, [tag]) };
         const pendingSave = pendingDraftSaveRef.current;
@@ -989,11 +1011,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (heldUnknown !== null && heldUnknown.key === draftKey) {
         const stored = readRetargetStore(draftKey);
         if (stored.kind === 'absent' || stored.kind === 'list') {
-          notifyRetargetWrite(writeRetarget(draftKey, {
+          writeRetargetTold(draftKey, {
             kind: 'moveIn',
             from: { kind: 'unknown', generation: heldUnknown.generation, tags: held.key === draftKey ? held.tags : [] },
             fromUnstorable: null,
-          }));
+          });
           const after = readRetargetStore(draftKey);
           if (after.kind === 'unknown') retargetUnknownRef.current = { key: draftKey, generation: after.generation };
           return;
@@ -1002,11 +1024,11 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       if (held.key !== draftKey || held.tags.length === 0) return;
       // Issue #4604 (N-2・N-10): through the one road — junk or a store that throws is left "unknown".
       if (heldTagsAreStored(draftKey, held.tags)) return;
-      notifyRetargetWrite(writeRetarget(draftKey, { kind: 'writeBack', tags: held.tags }));
+      writeRetargetTold(draftKey, { kind: 'writeBack', tags: held.tags });
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [draftKey, notifyRetargetWrite]);
+  }, [draftKey, writeRetargetTold]);
 
   // Debounced save of draft message to localStorage (per-split key, Issue #728; per-instance key
   // for the tile, Issue #4419)
@@ -1023,7 +1045,7 @@ export const MessageInput = memo(function MessageInput({ worktreeId, onMessageSe
       // should another tab have taken them). Issue #4604 (INV-S1): the marks first, then the text.
       const held = retargetTagsRef.current;
       if (pendingSave && held.key === pendingSave.key && held.tags.length > 0 && !heldTagsAreStored(held.key, held.tags)) {
-        notifyRetargetWrite(writeRetarget(held.key, { kind: 'writeBack', tags: held.tags }));
+        writeRetargetTold(held.key, { kind: 'writeBack', tags: held.tags });
       }
       if (pendingSave) writeDraft(pendingSave.key, pendingSave.message);
     }, 500);
